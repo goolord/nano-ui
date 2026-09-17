@@ -13,13 +13,15 @@ import Control.Exception (bracket)
 import Control.Monad (unless, void, when)
 import Data.Bits ((.|.))
 import Data.ByteString (ByteString)
+import Data.ByteString qualified as BS
+import Data.Maybe (isJust, isNothing)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import System.Environment (lookupEnv)
 import Text.Read (readMaybe)
 import Data.Primitive.SmallArray (SmallArray)
 import Data.Text (Text)
 import Data.Text.Foreign qualified as TextForeign
-import Foreign.C.String (CString, withCString)
+import Foreign.C.String (withCString)
 import Foreign.Marshal.Alloc (alloca)
 import Foreign.Ptr (Ptr, nullPtr)
 import Foreign.Storable (peek)
@@ -28,18 +30,12 @@ import NanoUI.Context (Context (..), setDrawSnapScale)
 import NanoUI.Testing (clearMeasureCache, markDirty, setHost, setWakeLoop)
 import NanoUI.Sdl.Display
   ( defaultFontSize
-  , defaultUiScale
-  , destroyTexture
-  , initBenchHints
   , initRefreshEvent
-  , initSdlHints
   , pushRefreshEvent
   , queryMouseWindowPos
   , queryWindowDisplayScale
   , queryWindowLogicalSize
   , queryWindowRefreshHz
-  , setRenderScale
-  , setRenderVSync
   )
 import NanoUI.Sdl.Clipboard (withSdlClipboard)
 import NanoUI.Sdl.Cursor (SdlCursors (..), destroyCursors, initCursors)
@@ -75,13 +71,24 @@ import NanoUI.Sdl.Debug (SdlDebugSampler, newSdlDebugSampler)
 import NanoUI.Sdl.Dialog.Types (DialogState (..), clearDialogState, newDialogState)
 import NanoUI.Sdl.Image (ImageAtlas, destroyImageAtlas, newImageAtlas)
 import NanoUI.Sdl.Render (RenderBatch, destroyRenderBatch, newRenderBatch)
-import SDL3.Sys.Bindgen.Render (SDL_Renderer)
+import SDL3.Sys.Bindgen.Hints (sDL_HINT_ASSERT, sDL_HINT_RENDER_VSYNC, sDL_HINT_VIDEO_DRIVER)
+import SDL3.Sys.Bindgen.Render (SDL_Renderer, SDL_Texture)
 import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
 import SDL3.Sys.Bindgen.Video (SDL_Window, SDL_WindowFlags (..))
-import SDL3.Sys.Bindgen.Init (SDL_InitFlags (..))
+import SDL3.Sys.Bindgen.Init (SDL_InitFlags (..), sDL_INIT_VIDEO)
+import SDL3.Sys.Hints (setHint)
 import SDL3.Sys.Init (initSafe, quitSafe)
 import SDL3.Sys.Keyboard (startTextInputSafe, stopTextInputSafe)
-import SDL3.Sys.Render (createWindowAndRendererSafe, destroyRendererSafe)
+import SDL3.Sys.Render
+  ( createWindowAndRendererSafe
+  , destroyRendererSafe
+  , destroyTexture
+  , getRendererName
+  , renderReadPixels
+  , setRenderScale
+  , setRenderVSync
+  )
+import SDL3.Sys.Surface (destroySurface, saveBMP)
 import SDL3.Sys.Video (destroyWindowSafe)
 
 -- | Initial RGBA asset uploaded before the first frame.
@@ -174,6 +181,7 @@ scaleEpsilon = 0.001
 data SdlEnv = SdlEnv
   { sdlWindow :: Ptr SDL_Window
   , sdlRenderer :: Ptr SDL_Renderer
+  , sdlRendererName :: !Text
   , sdlBatch :: RenderBatch
   , sdlFontSourceRef :: !(IORef FontSource)
   , sdlMonoFontSource :: !FontSource
@@ -189,7 +197,7 @@ data SdlEnv = SdlEnv
   , sdlImages :: ImageAtlas
   , sdlCursors :: SdlCursors
   , sdlDebug :: SdlDebugSampler
-  , sdlRetain :: IORef (Ptr (), Int, Int, Float)
+  , sdlRetain :: IORef (Ptr SDL_Texture, Int, Int, Float)
   , sdlLastPresented :: IORef Bool
   , sdlVsync :: !Bool
   , sdlRefreshPeriod :: !Double
@@ -211,7 +219,7 @@ syncDisplay ctx env inp = do
   when scaleChanged $ do
     -- Presents leave the renderer at 1:1 pixels; re-assert it only when the
     -- display scale moves.
-    unlessM (setRenderScale (sdlRenderer env) defaultUiScale) $
+    unlessM (setRenderScale (sdlRenderer env) 1 1) $
       fail "SDL_SetRenderScale failed"
     writeIORef (sdlScaleRef env) scale
     setDrawSnapScale ctx scale
@@ -314,7 +322,28 @@ withSdlBench ctx =
 withSdlWindow :: Context -> WindowConfig -> (Context -> SdlEnv -> IO a) -> IO a
 withSdlWindow ctx cfg act =
   withTtf $ do
-    if wcBench cfg then initBenchHints else initSdlHints (wcVsync cfg)
+    let hint name value =
+          BS.useAsCString name $ \cname ->
+            BS.useAsCString value $ \cvalue ->
+              void $ setHint (PtrConst.unsafeFromPtr cname) (PtrConst.unsafeFromPtr cvalue)
+    if wcBench cfg
+      then do
+        hint sDL_HINT_ASSERT "always_ignore"
+        hint sDL_HINT_RENDER_VSYNC "0"
+      else do
+        hint sDL_HINT_RENDER_VSYNC (if wcVsync cfg then "1" else "0")
+        -- SDL3 only auto-picks Wayland when the compositor has the fifo-v1 /
+        -- commit-timing-v1 protocols. Without them (sway, wlroots, many
+        -- others) it selects X11/XWayland, giving a scale-1 window on a
+        -- scale-2 (or fractional) output that the compositor upscales, so
+        -- text looks blurred. Native Wayland with
+        -- SDL_WINDOW_HIGH_PIXEL_DENSITY rasterizes at the real output scale.
+        -- An explicit SDL_VIDEO_DRIVER wins, and pure X11 sessions are left
+        -- alone.
+        wayland <- lookupEnv "WAYLAND_DISPLAY"
+        driver <- lookupEnv "SDL_VIDEO_DRIVER"
+        when (isJust wayland && isNothing driver) $
+          hint sDL_HINT_VIDEO_DRIVER "wayland"
     fontSource <- resolveNanoUIFont (wcUiFont cfg)
     monoSource <- resolveNanoUIFont (wcMonoFont cfg)
     bracket
@@ -324,7 +353,7 @@ withSdlWindow ctx cfg act =
 
 startSdlWindow :: Context -> WindowConfig -> FontSource -> FontSource -> IO (Context, SdlEnv)
 startSdlWindow ctx cfg fontSource monoSource = do
-  unlessM (initSafe (SDL_InitFlags 32)) $
+  unlessM (initSafe (SDL_InitFlags (fromIntegral sDL_INIT_VIDEO))) $
     fail "SDL_Init(SDL_INIT_VIDEO) failed"
   unlessM initRefreshEvent $
     fail "SDL_RegisterEvents failed for refresh wake"
@@ -354,6 +383,8 @@ startSdlWindow ctx cfg fontSource monoSource = do
           scale <- queryWindowDisplayScale win
           setDrawSnapScale ctx scale
           refreshHz <- queryWindowRefreshHz win
+          rendererName <- getRendererName ren >>= \name ->
+            if PtrConst.unsafeToPtr name == nullPtr then pure "unknown" else TextForeign.peekCString (PtrConst.unsafeToPtr name)
           font <- openFontSourceWithFallback fontSource embeddedFontSource (fontSize * scale)
           monoFont <- openFontSourceWithFallback monoSource embeddedFontSource (fontSize * scale)
           scaleRef <- newIORef scale
@@ -398,10 +429,10 @@ startSdlWindow ctx cfg fontSource monoSource = do
                 if refreshHz > 0
                   then 1 / fromIntegral refreshHz
                   else 1 / 60
-          unlessM (setRenderScale ren defaultUiScale) $
+          unlessM (setRenderScale ren 1 1) $
             fail "SDL_SetRenderScale failed"
           unless bench $ do
-            void $ setRenderVSync ren (wcVsync cfg)
+            void $ setRenderVSync ren (if wcVsync cfg then 1 else 0)
             void $ startTextInputSafe win
           dialogState <- newDialogState
           lastPresented <- newIORef False
@@ -410,6 +441,7 @@ startSdlWindow ctx cfg fontSource monoSource = do
             SdlEnv
               { sdlWindow = win
               , sdlRenderer = ren
+              , sdlRendererName = rendererName
               , sdlBatch = batch
               , sdlFontSourceRef = fontSourceRef
               , sdlMonoFontSource = monoSource
@@ -443,7 +475,7 @@ stopSdlWindow :: Bool -> SdlEnv -> IO ()
 stopSdlWindow bench env = do
   clearDialogState (sdlDialogState env)
   (tex, _, _, _) <- readIORef (sdlRetain env)
-  destroyTexture tex
+  unless (tex == nullPtr) $ destroyTexture tex
   destroyRenderBatch (sdlBatch env)
   destroyCursors (sdlCursors env)
   destroyImageAtlas (sdlImages env)
@@ -454,7 +486,7 @@ stopSdlWindow bench env = do
   monoFont <- readIORef (sdlMonoFontRef env)
   closeFont monoFont
   unless bench $ void $ stopTextInputSafe (sdlWindow env)
-  void $ setRenderScale (sdlRenderer env) defaultUiScale
+  void $ setRenderScale (sdlRenderer env) 1 1
   destroyRendererSafe (sdlRenderer env)
   destroyWindowSafe (sdlWindow env)
   quitSafe
@@ -464,10 +496,12 @@ unlessM p act = do
   ok <- p
   unless ok act
 
-foreign import ccall unsafe "nano_ui_save_screenshot"
-  c_nano_ui_save_screenshot :: Ptr SDL_Renderer -> CString -> IO Bool
-
 saveScreenshot :: SdlEnv -> FilePath -> IO Bool
-saveScreenshot env path =
-  withCString path $ \cpath ->
-    c_nano_ui_save_screenshot (sdlRenderer env) cpath
+saveScreenshot env path = do
+  surface <- renderReadPixels (sdlRenderer env) (PtrConst.unsafeFromPtr nullPtr)
+  if surface == nullPtr
+    then pure False
+    else withCString path $ \cpath -> do
+      ok <- saveBMP surface (PtrConst.unsafeFromPtr cpath)
+      destroySurface surface
+      pure ok

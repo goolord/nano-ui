@@ -11,20 +11,20 @@ import Control.Exception (mask_)
 import Control.Monad (when)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Word (Word8)
-import Foreign.C.Types (CInt (..))
 import Foreign.ForeignPtr (ForeignPtr, withForeignPtr)
-import Foreign.Marshal.Alloc (alloca)
 import Foreign.Ptr (Ptr, castPtr, nullPtr)
-import Foreign.Storable (peek, poke)
-import NanoUI.Sdl.Display (destroyTexture)
 import NanoUI.Testing (Context, atlasSnapshot, atlasTextureId)
-import SDL3.Sys.Bindgen.Render (SDL_Renderer)
+import SDL3.Sys.Bindgen.Blendmode (sDL_BLENDMODE_BLEND)
+import SDL3.Sys.Bindgen.Pixels (data SDL_PIXELFORMAT_RGBA32)
+import SDL3.Sys.Bindgen.Render (SDL_Renderer, SDL_Texture, data SDL_TEXTUREACCESS_STATIC)
+import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
+import SDL3.Sys.Render (createTextureSafe, destroyTexture, setTextureBlendMode, updateTextureSafe)
 
 -- A texture and its metadata have one lifetime; publish them together.
 newtype ImageAtlas = ImageAtlas (IORef (Maybe AtlasTexture))
 
 data AtlasTexture = AtlasTexture
-  { atTexture :: !(Ptr ())
+  { atTexture :: !(Ptr SDL_Texture)
   , atGeneration :: !Int
   }
 
@@ -50,32 +50,21 @@ syncImageAtlas ren atlas@(ImageAtlas ref) ctx = do
 uploadAtlas ::
   Ptr SDL_Renderer -> ImageAtlas -> Int -> Int -> ForeignPtr Word8 -> Int -> IO ()
 uploadAtlas ren (ImageAtlas ref) w h pixels gen = mask_ $
-  withForeignPtr pixels $ \ptr ->
-    alloca $ \out -> do
-      poke out nullPtr
-      ok <-
-        createRgbaTexture
-          ren
-          (castPtr ptr)
-          (fromIntegral w)
-          (fromIntegral h)
-          out
-      when ok $ do
-        tex <- peek out
-        old <- readIORef ref
-        writeIORef ref (Just (AtlasTexture tex gen))
-        mapM_ (destroyTexture . atTexture) old
+  withForeignPtr pixels $ \ptr -> do
+    tex <- createTextureSafe ren SDL_PIXELFORMAT_RGBA32 SDL_TEXTUREACCESS_STATIC (fromIntegral w) (fromIntegral h)
+    ok <-
+      if tex == nullPtr
+        then pure False
+        else do
+          _ <- setTextureBlendMode tex (fromIntegral sDL_BLENDMODE_BLEND)
+          uploaded <- updateTextureSafe tex (PtrConst.unsafeFromPtr nullPtr) (PtrConst.unsafeFromPtr (castPtr ptr)) (fromIntegral (w * 4))
+          if uploaded then pure True else destroyTexture tex >> pure False
+    when ok $ do
+      old <- readIORef ref
+      writeIORef ref (Just (AtlasTexture tex gen))
+      mapM_ (destroyTexture . atTexture) old
 
-lookupImage :: ImageAtlas -> Int -> IO (Maybe (Ptr ()))
+lookupImage :: ImageAtlas -> Int -> IO (Maybe (Ptr SDL_Texture))
 lookupImage (ImageAtlas ref) tid
   | tid == atlasTextureId = fmap atTexture <$> readIORef ref
   | otherwise = pure Nothing
-
-foreign import ccall safe "nano_ui_create_rgba_texture"
-  createRgbaTexture ::
-    Ptr SDL_Renderer
-    -> Ptr ()
-    -> CInt
-    -> CInt
-    -> Ptr (Ptr ())
-    -> IO Bool

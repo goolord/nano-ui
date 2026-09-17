@@ -47,17 +47,7 @@ import NanoUI.Sdl.Debug
   , readSdlDebug
   )
 import NanoUI.Sdl.Cursor (syncPointerCursor)
-import NanoUI.Sdl.Display
-  ( destroyTexture
-  , queryMouseWindowPos
-  , queryRendererName
-  , queryWindowLogicalSize
-  , retainBegin
-  , retainBlit
-  , retainCreate
-  , setRenderScale
-  , windowTargetMatchesSize
-  )
+import NanoUI.Sdl.Display (queryMouseWindowPos, queryWindowLogicalSize)
 import NanoUI.Sdl.Font
   ( fontSourceLabel
   , glyphAtlasTexture
@@ -67,9 +57,25 @@ import NanoUI.Sdl.Font
 import NanoUI.Sdl.NanoUIFont (NanoUIFont)
 import NanoUI.Sdl.Render (flushRenderBatch, renderDrawDataPass, snapDamage)
 import NanoUI.Sdl.Window (SdlEnv (..))
+import Foreign.Marshal.Alloc (alloca)
 import Foreign.Ptr (Ptr, nullPtr)
+import Foreign.Storable (peek)
 import qualified NanoUI.Sdl.Image as SdlImage
-import SDL3.Sys.Render (renderPresentSafe)
+import SDL3.Sys.Bindgen.Blendmode (sDL_BLENDMODE_NONE)
+import SDL3.Sys.Bindgen.Pixels (data SDL_PIXELFORMAT_RGBA32)
+import SDL3.Sys.Bindgen.Render (SDL_Texture, data SDL_TEXTUREACCESS_TARGET)
+import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
+import SDL3.Sys.Render
+  ( createTexture
+  , destroyTexture
+  , getRenderOutputSize
+  , renderPresentSafe
+  , renderTexture
+  , setRenderClipRect
+  , setRenderScale
+  , setRenderTarget
+  , setTextureBlendMode
+  )
 
 newSdlContext :: IO Context
 newSdlContext = newPixelContext
@@ -104,7 +110,7 @@ drawFrameWith ctx env inp forceFull evaluateUi = do
 
 -- | Choose the render target and whether to repaint everything. Must run
 -- before the frame so paint can cull to damage for retained partial updates.
-prepareRetain :: Context -> SdlEnv -> Input -> Bool -> IO (Ptr (), Bool)
+prepareRetain :: Context -> SdlEnv -> Input -> Bool -> IO (Ptr SDL_Texture, Bool)
 prepareRetain ctx env inp forceFull = do
   -- Glyph-atlas maintenance before any quad is recorded: if the atlas ran
   -- out of space during the previous frame, reset it now (re-warming the
@@ -117,10 +123,18 @@ prepareRetain ctx env inp forceFull = do
       ph = max 1 (round (lh * scale))
   -- Continuous sessions repaint every pixel, so retaining and copying a
   -- second framebuffer only adds a target switch and a full-window blit.
-  -- A null target selects the window backbuffer directly.
+  -- A null target selects the window backbuffer directly. Direct drawing is
+  -- equivalent to the retained blit only at the same pixel dimensions;
+  -- content scale and window pixel density can differ.
   direct <-
     if sdlContinuous env
-      then windowTargetMatchesSize (sdlRenderer env) pw ph
+      then
+        alloca $ \wp ->
+          alloca $ \hp -> do
+            ok <- getRenderOutputSize (sdlRenderer env) wp hp
+            ow <- peek wp
+            oh <- peek hp
+            pure (ok && fromIntegral ow == pw && fromIntegral oh == ph)
       else pure False
   (tex, retainNew) <-
     if direct
@@ -148,7 +162,7 @@ drawReduceEff unlift update modelRef view ctx env inp forceFull =
     writeIORef modelRef m'
     pure (drawData, dirtyAfterUi)
 
-finishDraw :: Context -> SdlEnv -> Input -> Ptr () -> Bool -> Double -> Double -> DrawData -> Bool -> IO (Bool, Input)
+finishDraw :: Context -> SdlEnv -> Input -> Ptr SDL_Texture -> Bool -> Double -> Double -> DrawData -> Bool -> IO (Bool, Input)
 finishDraw ctx env inp tex presentFull t0 t1 drawData dirtyAfterUi = do
   let uiMs = (t1 - t0) * 1000
   scale <- readIORef (sdlScaleRef env)
@@ -180,8 +194,10 @@ finishDraw ctx env inp tex presentFull t0 t1 drawData dirtyAfterUi = do
       noteSkip (sdlDebug env)
       pure (atlasReset || dirtyAfterUi, inp)
     else do
-      okBegin <- retainBegin (sdlRenderer env) tex scale
-      unless okBegin $ fail "SDL_SetRenderTarget/Scale failed"
+      -- A null texture draws full-repaint sessions straight to the window.
+      okBegin <- setRenderTarget (sdlRenderer env) tex
+      okScale <- setRenderScale (sdlRenderer env) scale scale
+      unless (okBegin && okScale) $ fail "SDL_SetRenderTarget/Scale failed"
       theme <- readIORef (ctxTheme ctx)
       glyphTex <- glyphAtlasTexture (sdlGlyphAtlas env)
       -- Persistent batch created once per session (sdlBatch): no C
@@ -207,8 +223,13 @@ finishDraw ctx env inp tex presentFull t0 t1 drawData dirtyAfterUi = do
       -- Retained sessions do this as part of their final texture copy.
       okBlit <-
         if tex == nullPtr
-          then setRenderScale (sdlRenderer env) 1
-          else retainBlit (sdlRenderer env) tex
+          then setRenderScale (sdlRenderer env) 1 1
+          else do
+            okTarget <- setRenderTarget (sdlRenderer env) nullPtr
+            okClip <- setRenderClipRect (sdlRenderer env) (PtrConst.unsafeFromPtr nullPtr)
+            void $ setRenderScale (sdlRenderer env) 1 1
+            okCopy <- renderTexture (sdlRenderer env) tex (PtrConst.unsafeFromPtr nullPtr) (PtrConst.unsafeFromPtr nullPtr)
+            pure (okTarget && okClip && okCopy)
       unless okBlit $ fail "SDL window presentation preparation failed"
       void $ renderPresentSafe (sdlRenderer env)
       t3 <- getMonotonicTime
@@ -219,7 +240,7 @@ finishDraw ctx env inp tex presentFull t0 t1 drawData dirtyAfterUi = do
       writeIORef (sdlLastPresented env) True
       pure (dirtyAfterUi, inp)
 
-ensureRetain :: SdlEnv -> Int -> Int -> Float -> IO (Ptr (), Bool)
+ensureRetain :: SdlEnv -> Int -> Int -> Float -> IO (Ptr SDL_Texture, Bool)
 ensureRetain env w h scale = do
   (tex, ow, oh, oldScale) <- readIORef (sdlRetain env)
   let scaleChanged = abs (oldScale - scale) > 0.001
@@ -230,10 +251,11 @@ ensureRetain env w h scale = do
       pure (tex, scaleChanged)
     else mask_ $ do
       -- Allocate before replacing: failure leaves the owned texture valid.
-      tex' <- retainCreate (sdlRenderer env) w h
+      tex' <- createTexture (sdlRenderer env) SDL_PIXELFORMAT_RGBA32 SDL_TEXTUREACCESS_TARGET (fromIntegral w) (fromIntegral h)
       when (tex' == nullPtr) $ fail "SDL_CreateTexture(retain) failed"
+      void $ setTextureBlendMode tex' (fromIntegral sDL_BLENDMODE_NONE)
       writeIORef (sdlRetain env) (tex', w, h, scale)
-      destroyTexture tex
+      unless (tex == nullPtr) $ destroyTexture tex
       pure (tex', True)
 
 askSdlEnv :: Ui :> es => Eff es (Maybe SdlEnv)
@@ -262,8 +284,7 @@ readSdlDebugEnv :: SdlEnv -> IO SdlDebugSnapshot
 readSdlDebugEnv env = do
   scale <- readIORef (sdlScaleRef env)
   fontSource <- readIORef (sdlFontSourceRef env)
-  name <- queryRendererName (sdlRenderer env)
   size <- queryWindowLogicalSize (sdlWindow env)
   pos <- queryMouseWindowPos
   let refreshHz = round (1 / sdlRefreshPeriod env)
-  readSdlDebug (sdlDebug env) size pos (fontSourceLabel fontSource) scale name (sdlVsync env) refreshHz
+  readSdlDebug (sdlDebug env) size pos (fontSourceLabel fontSource) scale (sdlRendererName env) (sdlVsync env) refreshHz

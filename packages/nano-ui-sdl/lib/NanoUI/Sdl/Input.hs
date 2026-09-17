@@ -12,6 +12,7 @@ module NanoUI.Sdl.Input
   ) where
 
 import Data.Bits ((.&.))
+import Data.IORef (readIORef)
 import qualified Data.Text as T
 import Data.Text (Text)
 import qualified Data.Text.Foreign as TF
@@ -34,7 +35,7 @@ import NanoUI
   , v2Add
   )
 import NanoUI.Input (MouseButton (..), appendDropEvent, applyMouseButton)
-import NanoUI.Sdl.Display (readRefreshEventType)
+import NanoUI.Sdl.Display (refreshEventType)
 import SDL3.Sys.Bindgen.Events
   ( SDL_Event (..)
   , SDL_KeyboardEvent
@@ -82,31 +83,32 @@ data SdlEvent
 -- | Drain every pending event, oldest first.
 pollEvents :: IO [SdlEvent]
 pollEvents =
-  alloca $ \(p :: Ptr SDL_Event) ->
+  alloca $ \(p :: Ptr SDL_Event) -> do
+    refreshTy <- readIORef refreshEventType
     let drain acc = do
           got <- pollEventSafe p
           if got
-            then decodeEvent p >>= \ev -> drain (maybe acc (: acc) ev)
+            then decodeEvent refreshTy p >>= \ev -> drain (maybe acc (: acc) ev)
             else pure (reverse acc)
-     in drain []
+    drain []
 
 waitEvent :: IO (Maybe SdlEvent)
 waitEvent =
   alloca $ \p -> do
     got <- waitEventSafe p
-    if got then decodeEvent p else pure Nothing
+    if got then readIORef refreshEventType >>= \ty -> decodeEvent ty p else pure Nothing
 
 waitEventTimeout :: Int -> IO (Maybe SdlEvent)
 waitEventTimeout ms =
   alloca $ \p -> do
     got <- waitEventTimeoutSafe p (fromIntegral ms)
-    if got then decodeEvent p else pure Nothing
+    if got then readIORef refreshEventType >>= \ty -> decodeEvent ty p else pure Nothing
 
--- | Translate one SDL event; 'Nothing' for events the UI ignores.
-decodeEvent :: Ptr SDL_Event -> IO (Maybe SdlEvent)
-decodeEvent p = do
+-- | Translate one SDL event, given the refresh event type; 'Nothing' for
+-- events the UI ignores.
+decodeEvent :: Word32 -> Ptr SDL_Event -> IO (Maybe SdlEvent)
+decodeEvent refreshTy p = do
   Uint32 w <- peek p.type'
-  refreshTy <- readRefreshEventType
   if refreshTy /= 0 && w == refreshTy
     then pure (Just EvRefresh)
     else case w of

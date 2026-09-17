@@ -104,7 +104,6 @@ library
     if flag(sdl)
         c-sources:        cbits/nano_ui_ttf.c
                           cbits/nano_ui_display.c
-                          cbits/nano_ui_image.c
                           cbits/nano_ui_batch.c
                           cbits/nano_ui_text_atlas.c
         include-dirs:     cbits

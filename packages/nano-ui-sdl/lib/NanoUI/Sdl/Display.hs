@@ -1,55 +1,40 @@
+{-# LANGUAGE OverloadedRecordDot #-}
+
 module NanoUI.Sdl.Display
-  ( defaultUiScale
-  , defaultFontSize
-  , initSdlHints
-  , initBenchHints
+  ( defaultFontSize
   , queryWindowDisplayScale
   , queryWindowRefreshHz
   , queryWindowLogicalSize
   , queryMouseWindowPos
-  , setRenderScale
-  , setRenderVSync
-  , queryRendererName
   , installResizeWatch
+  , refreshEventType
   , initRefreshEvent
   , pushRefreshEvent
-  , readRefreshEventType
-  , retainCreate
-  , windowTargetMatchesSize
-  , retainBegin
-  , retainBlit
-  , destroyTexture
   ) where
 
 import Control.Monad (unless, void)
-import Data.Text (Text)
-import qualified Data.Text as T
-import Foreign.C.String (peekCString)
-import Foreign.C.Types (CChar, CFloat (..), CInt (..), CSize (..))
-import Foreign.Marshal.Alloc (alloca, allocaBytes)
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Foreign.C.Types (CInt (..))
+import Foreign.Marshal.Alloc (alloca, callocBytes)
 import Foreign.Ptr (FunPtr, Ptr, freeHaskellFunPtr)
-import Foreign.Storable (peek)
+import Foreign.Storable (peek, poke, sizeOf)
 import Data.Word (Word32)
 import NanoUI (Size (..), V2 (..))
-import SDL3.Sys.Bindgen.Render (SDL_Renderer)
+import SDL3.Sys.Bindgen.Events (SDL_Event)
+import SDL3.Sys.Bindgen.Stdinc (Uint32 (..))
 import SDL3.Sys.Bindgen.Video (SDL_Window)
-
-defaultUiScale :: Float
-defaultUiScale = 1
+import SDL3.Sys.Events (pushEvent, registerEvents)
+import SDL3.Sys.Mouse (getMouseState)
+import SDL3.Sys.Video (getWindowDisplayScale, getWindowSize)
+import System.IO.Unsafe (unsafePerformIO)
 
 defaultFontSize :: Float
 defaultFontSize = 16
 
-initSdlHints :: Bool -> IO ()
-initSdlHints vsync = sdlInitHintsC vsync
-
-initBenchHints :: IO ()
-initBenchHints = sdlInitBenchHintsC
-
 queryWindowDisplayScale :: Ptr SDL_Window -> IO Float
 queryWindowDisplayScale win = do
-  s <- windowDisplayScaleC win
-  pure (if s > 0 then realToFrac s else defaultUiScale)
+  s <- getWindowDisplayScale win
+  pure (if s > 0 then s else 1)
 
 -- | Vertical refresh rate of the window's current display mode, in Hz
 -- (0 when unavailable).
@@ -59,16 +44,19 @@ queryWindowRefreshHz win = do
   pure (max 0 (fromIntegral hz))
 
 -- | Window size in window (logical) coordinates; 0x0 when SDL cannot say.
+-- SDL_GetWindowSize already returns the window-coordinate size, not pixels.
+-- Dividing by the display scale would shrink the logical size on DPI-scaled
+-- displays, making the retained framebuffer too small.
 queryWindowLogicalSize :: Ptr SDL_Window -> IO Size
 queryWindowLogicalSize win =
   alloca $ \wp ->
     alloca $ \hp -> do
-      ok <- windowLogicalSizeC win wp hp
+      ok <- getWindowSize win wp hp
       if ok
         then do
           w <- peek wp
           h <- peek hp
-          pure (Size (realToFrac w) (realToFrac h))
+          pure (Size (fromIntegral w) (fromIntegral h))
         else pure (Size 0 0)
 
 -- | Pointer position relative to the window with mouse focus, in window
@@ -79,23 +67,10 @@ queryMouseWindowPos :: IO V2
 queryMouseWindowPos =
   alloca $ \xp ->
     alloca $ \yp -> do
-      mouseWindowPosC xp yp
+      void (getMouseState xp yp)
       x <- peek xp
       y <- peek yp
       pure (V2 (realToFrac x) (realToFrac y))
-
--- Renderer stays at 1:1 pixels; layout uses logical coordinates.
-setRenderScale :: Ptr SDL_Renderer -> Float -> IO Bool
-setRenderScale ren scale = setRenderScaleC ren (realToFrac scale)
-
-setRenderVSync :: Ptr SDL_Renderer -> Bool -> IO Bool
-setRenderVSync ren vsync = setRenderVSyncC ren vsync
-
-queryRendererName :: Ptr SDL_Renderer -> IO Text
-queryRendererName ren =
-  allocaBytes 64 $ \buf -> do
-    ok <- rendererNameC ren buf 64
-    if ok then T.pack <$> peekCString buf else pure "unknown"
 
 -- Windows runs a modal loop while the user drags the border, so the app
 -- event watch does not run. SDL still delivers resize events to this watch.
@@ -108,32 +83,36 @@ installResizeWatch act = do
     removeResizeWatchC
     freeHaskellFunPtr fp
 
-foreign import ccall unsafe "nano_ui_sdl_init_hints"
-  sdlInitHintsC :: Bool -> IO ()
+-- | The user event type that wakes the event loop, registered once per
+-- process by 'initRefreshEvent'; 0 until then.
+{-# NOINLINE refreshEventType #-}
+refreshEventType :: IORef Word32
+refreshEventType = unsafePerformIO (newIORef 0)
 
-foreign import ccall unsafe "nano_ui_sdl_init_bench_hints"
-  sdlInitBenchHintsC :: IO ()
+-- | The event 'pushRefreshEvent' sends, filled in once by 'initRefreshEvent'.
+-- The core wakes the loop on every 'markDirty', so a push must not allocate.
+{-# NOINLINE refreshEvent #-}
+refreshEvent :: Ptr SDL_Event
+refreshEvent = unsafePerformIO (callocBytes (sizeOf (undefined :: SDL_Event)))
 
-foreign import ccall unsafe "nano_ui_set_render_vsync"
-  setRenderVSyncC :: Ptr SDL_Renderer -> Bool -> IO Bool
+initRefreshEvent :: IO Bool
+initRefreshEvent = do
+  registered <- readIORef refreshEventType
+  if registered /= 0
+    then pure True
+    else do
+      ty <- registerEvents 1
+      poke refreshEvent.type' (Uint32 ty)
+      writeIORef refreshEventType ty
+      pure (ty /= 0)
 
-foreign import ccall unsafe "nano_ui_window_display_scale"
-  windowDisplayScaleC :: Ptr SDL_Window -> IO CFloat
+pushRefreshEvent :: IO ()
+pushRefreshEvent = do
+  ty <- readIORef refreshEventType
+  unless (ty == 0) $ void (pushEvent refreshEvent)
 
 foreign import ccall unsafe "nano_ui_window_refresh_rate"
   windowRefreshRateC :: Ptr SDL_Window -> IO CInt
-
-foreign import ccall unsafe "nano_ui_window_logical_size"
-  windowLogicalSizeC :: Ptr SDL_Window -> Ptr CFloat -> Ptr CFloat -> IO Bool
-
-foreign import ccall unsafe "nano_ui_mouse_window_pos"
-  mouseWindowPosC :: Ptr CFloat -> Ptr CFloat -> IO ()
-
-foreign import ccall unsafe "nano_ui_set_render_scale"
-  setRenderScaleC :: Ptr SDL_Renderer -> CFloat -> IO Bool
-
-foreign import ccall unsafe "nano_ui_renderer_name"
-  rendererNameC :: Ptr SDL_Renderer -> Ptr CChar -> CSize -> IO Bool
 
 foreign import ccall "wrapper"
   mkResizeCb :: IO () -> IO (FunPtr (IO ()))
@@ -143,52 +122,3 @@ foreign import ccall safe "nano_ui_install_resize_watch"
 
 foreign import ccall safe "nano_ui_remove_resize_watch"
   removeResizeWatchC :: IO ()
-
-foreign import ccall safe "nano_ui_register_refresh_event"
-  registerRefreshEventC :: IO Bool
-
-foreign import ccall unsafe "nano_ui_refresh_event_type"
-  refreshEventTypeC :: IO Word32
-
-foreign import ccall unsafe "nano_ui_push_refresh_event"
-  pushRefreshEventC :: IO Bool
-
-initRefreshEvent :: IO Bool
-initRefreshEvent = registerRefreshEventC
-
-readRefreshEventType :: IO Word32
-readRefreshEventType = refreshEventTypeC
-
-pushRefreshEvent :: IO ()
-pushRefreshEvent = void pushRefreshEventC
-
-foreign import ccall unsafe "nano_ui_retain_create"
-  retainCreateC :: Ptr SDL_Renderer -> CInt -> CInt -> IO (Ptr ())
-
-foreign import ccall unsafe "nano_ui_window_target_matches_size"
-  windowTargetMatchesSizeC :: Ptr SDL_Renderer -> CInt -> CInt -> IO Bool
-
-foreign import ccall unsafe "nano_ui_retain_begin"
-  retainBeginC :: Ptr SDL_Renderer -> Ptr () -> CFloat -> IO Bool
-
-foreign import ccall unsafe "nano_ui_retain_blit"
-  retainBlitC :: Ptr SDL_Renderer -> Ptr () -> IO Bool
-
--- | Destroy an SDL texture (retain target or image atlas); NULL is a no-op.
-foreign import ccall unsafe "nano_ui_destroy_texture"
-  destroyTexture :: Ptr () -> IO ()
-
-retainCreate :: Ptr SDL_Renderer -> Int -> Int -> IO (Ptr ())
-retainCreate ren w h = retainCreateC ren (fromIntegral w) (fromIntegral h)
-
--- | Direct drawing is equivalent to the retained blit only at the same
--- pixel dimensions; content scale and window pixel density can differ.
-windowTargetMatchesSize :: Ptr SDL_Renderer -> Int -> Int -> IO Bool
-windowTargetMatchesSize ren w h =
-  windowTargetMatchesSizeC ren (fromIntegral w) (fromIntegral h)
-
-retainBegin :: Ptr SDL_Renderer -> Ptr () -> Float -> IO Bool
-retainBegin ren tex scale = retainBeginC ren tex (realToFrac scale)
-
-retainBlit :: Ptr SDL_Renderer -> Ptr () -> IO Bool
-retainBlit = retainBlitC

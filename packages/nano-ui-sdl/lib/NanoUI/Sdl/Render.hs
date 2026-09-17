@@ -16,7 +16,9 @@ import Data.Primitive.PrimArray (indexPrimArray, sizeofPrimArray)
 import Data.Word (Word8)
 import Foreign.C.Types (CFloat (..), CInt (..))
 import Foreign.ForeignPtr (withForeignPtr)
+import Foreign.Marshal.Alloc (free, malloc)
 import Foreign.Ptr (Ptr, nullPtr)
+import Foreign.Storable (poke)
 import NanoUI (Color (..), Rect (..), rectIntersect)
 import NanoUI.Testing
   ( Damage (..)
@@ -26,17 +28,14 @@ import NanoUI.Testing
   , damageIsEmpty
   , glyphAtlasTextureId
   )
-import SDL3.Sys.Bindgen.Render (SDL_Renderer)
+import SDL3.Sys.Bindgen.Rect (SDL_Rect (..))
+import SDL3.Sys.Bindgen.Render (SDL_Renderer, SDL_Texture)
+import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
 import SDL3.Sys.Render
   ( renderClearSafe
+  , setRenderClipRect
   , setRenderDrawColorSafe
   )
-
-foreign import ccall unsafe "nano_ui_set_clip_rect"
-  c_set_clip_rect :: Ptr SDL_Renderer -> CInt -> CInt -> CInt -> CInt -> IO ()
-
-foreign import ccall unsafe "nano_ui_clear_clip_rect"
-  c_clear_clip_rect :: Ptr SDL_Renderer -> IO ()
 
 data ClipState
   = ClipNone
@@ -68,18 +67,20 @@ applyClipState batch ref ren next = do
   when (prev /= next) $ do
     flushRenderBatch batch
     writeIORef ref next
-    case next of
-      ClipNone -> c_clear_clip_rect ren
-      ClipKey px py pw ph ->
-        c_set_clip_rect ren (fromIntegral px) (fromIntegral py) (fromIntegral pw) (fromIntegral ph)
+    void $ case next of
+      ClipNone -> setRenderClipRect ren (PtrConst.unsafeFromPtr nullPtr)
+      ClipKey px py pw ph -> do
+        let rect = rbClipRect batch
+        poke rect (SDL_Rect (fromIntegral px) (fromIntegral py) (fromIntegral pw) (fromIntegral ph))
+        setRenderClipRect ren (PtrConst.unsafeFromPtr rect)
 
 -- | Draw every command in layer-slice order, clipped to its own rect and to
 -- the damage. A full repaint with a clear colour clears the target first.
-renderDrawDataPass :: RenderBatch -> Ptr SDL_Renderer -> Maybe Color -> DrawData -> ImageAtlas -> Ptr () -> Damage -> IO ()
+renderDrawDataPass :: RenderBatch -> Ptr SDL_Renderer -> Maybe Color -> DrawData -> ImageAtlas -> Ptr SDL_Texture -> Damage -> IO ()
 renderDrawDataPass batch ren mClear drawData images glyphTex damage =
   when (not (damageIsEmpty damage)) $ do
     clipRef <- newIORef ClipNone
-    c_clear_clip_rect ren
+    void $ setRenderClipRect ren (PtrConst.unsafeFromPtr nullPtr)
     case (mClear, damage) of
       (Just clearColor, DamageFull) -> do
         let (cr, cg, cb, ca) = unpackColor clearColor
@@ -121,7 +122,7 @@ drawCmd ::
   Int ->
   Ptr Word8 ->
   ImageAtlas ->
-  Ptr () ->
+  Ptr SDL_Texture ->
   Maybe Rect ->
   IORef ClipState ->
   DrawCmd ->
@@ -160,7 +161,11 @@ unpackColor (Color w) =
   , fromIntegral (w .&. 0xFF)
   )
 
-newtype RenderBatch = RenderBatch (Ptr ())
+-- | The C batch and a clip rect it passes to SDL, both owned for the session.
+data RenderBatch = RenderBatch
+  { rbBatch :: !(Ptr ())
+  , rbClipRect :: !(Ptr SDL_Rect)
+  }
 
 -- | Create a persistent render batch. Reusing one batch across frames avoids
 -- a C calloc/free pair per presented frame; flush after each render pass.
@@ -169,13 +174,15 @@ newRenderBatch ren = do
   p <- batchCreate ren
   if p == nullPtr
     then fail "nano_ui_batch_create failed"
-    else pure (RenderBatch p)
+    else RenderBatch p <$> malloc
 
 destroyRenderBatch :: RenderBatch -> IO ()
-destroyRenderBatch (RenderBatch p) = batchDestroy p
+destroyRenderBatch batch = do
+  batchDestroy (rbBatch batch)
+  free (rbClipRect batch)
 
 flushRenderBatch :: RenderBatch -> IO ()
-flushRenderBatch (RenderBatch p) = batchFlush p
+flushRenderBatch batch = batchFlush (rbBatch batch)
 
 batchDrawRange ::
   RenderBatch ->
@@ -184,12 +191,12 @@ batchDrawRange ::
   Ptr Word8 ->
   Int ->
   Int ->
-  Ptr () ->
+  Ptr SDL_Texture ->
   Maybe Rect ->
   IO ()
-batchDrawRange (RenderBatch p) verts vc indices start n tex mDmg =
+batchDrawRange batch verts vc indices start n tex mDmg =
   batchDrawRangeC
-    p
+    (rbBatch batch)
     verts
     (ci vc)
     indices
@@ -227,7 +234,7 @@ foreign import ccall unsafe "nano_ui_batch_draw_range"
     Ptr Word8 ->
     CInt ->
     CInt ->
-    Ptr () ->
+    Ptr SDL_Texture ->
     CInt ->
     CFloat ->
     CFloat ->

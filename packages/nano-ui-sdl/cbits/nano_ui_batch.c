@@ -174,14 +174,3 @@ void nano_ui_batch_draw_range(
     batch->pending_start = index_start;
     batch->pending_n = index_n;
 }
-
-void nano_ui_set_clip_rect(SDL_Renderer *renderer, int x, int y, int w, int h)
-{
-    SDL_Rect r = {x, y, w, h};
-    SDL_SetRenderClipRect(renderer, &r);
-}
-
-void nano_ui_clear_clip_rect(SDL_Renderer *renderer)
-{
-    SDL_SetRenderClipRect(renderer, NULL);
-}

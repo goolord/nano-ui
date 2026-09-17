@@ -36,10 +36,10 @@ import NanoUI.Sdl.Input
   , waitEvent
   , waitEventTimeout
   )
-import NanoUI.Sdl.Display (installResizeWatch, setRenderVSync)
+import NanoUI.Sdl.Display (installResizeWatch)
 import NanoUI.Sdl.Window (SdlEnv (..), SdlOptions (..), syncDisplay, withSdl)
 import SDL3.Sys.Bindgen.Blendmode (sDL_BLENDMODE_BLEND)
-import SDL3.Sys.Render (setRenderDrawBlendModeSafe)
+import SDL3.Sys.Render (setRenderDrawBlendModeSafe, setRenderVSync)
 
 animateTimeout :: Int
 animateTimeout = 16
@@ -92,7 +92,7 @@ runSdlSession options ctx setup shouldQuit drawFn =
                     else do
                       paused <- readIORef vsyncPaused
                       when (sdlVsync env && not paused) $ do
-                        void $ setRenderVSync (sdlRenderer env) False
+                        void $ setRenderVSync (sdlRenderer env) 0
                         writeIORef vsyncPaused True
                       (_, s) <- drawFn ctx' env inpSynced True
                       writeIORef prev s
@@ -154,7 +154,7 @@ runSdlSession options ctx setup shouldQuit drawFn =
             , sdSyncDisplay   = \c inp -> do
                 paused <- readIORef vsyncPaused
                 when paused $ do
-                  void $ setRenderVSync (sdlRenderer env) True
+                  void $ setRenderVSync (sdlRenderer env) 1
                   writeIORef vsyncPaused False
                 (c', inp') <- syncDisplay c env inp
                 writeIORef ctxRef c'

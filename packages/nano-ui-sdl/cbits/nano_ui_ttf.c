@@ -252,13 +252,6 @@ bool nano_ui_ttf_render_glyph_surface(
     return true;
 }
 
-void nano_ui_destroy_texture(SDL_Texture *texture)
-{
-    if (texture) {
-        SDL_DestroyTexture(texture);
-    }
-}
-
 int nano_ui_ttf_get_kerning(TTF_Font *font, Uint32 prev_cp, Uint32 cp)
 {
     if (!font) {

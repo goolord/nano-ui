@@ -87,7 +87,7 @@ import NanoUI.Testing
   , withMonoFontMetrics
   , wrapMeasureCache
   )
-import SDL3.Sys.Bindgen.Render (SDL_Renderer)
+import SDL3.Sys.Bindgen.Render (SDL_Renderer, SDL_Texture)
 import qualified Data.IntMap.Strict as IM
 import qualified Data.Text.Foreign as TF
 
@@ -1034,7 +1034,7 @@ buildGlyphFontMetrics ga sf scale = do
   prepareText ""
 
 -- | Return the SDL_Texture backing the glyph atlas, for passing to the renderer.
-glyphAtlasTexture :: GlyphAtlas -> IO (Ptr ())
+glyphAtlasTexture :: GlyphAtlas -> IO (Ptr SDL_Texture)
 glyphAtlasTexture ga = textAtlasTexture (gaAtlas ga)
 
 -- ---------------------------------------------------------------------------
@@ -1254,7 +1254,7 @@ foreign import ccall unsafe "nano_ui_text_atlas_reset"
   textAtlasReset :: Ptr () -> IO ()
 
 foreign import ccall unsafe "nano_ui_text_atlas_texture"
-  textAtlasTexture :: Ptr () -> IO (Ptr ())
+  textAtlasTexture :: Ptr () -> IO (Ptr SDL_Texture)
 
 foreign import ccall unsafe "nano_ui_text_atlas_size"
   textAtlasSize :: Ptr () -> Ptr CFloat -> Ptr CFloat -> IO Bool
