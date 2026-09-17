@@ -11,7 +11,7 @@ module NanoUI.Frame.TextArea
   ) where
 
 import Control.Monad (forM_, unless, when)
-import Data.IORef (readIORef)
+import Data.IORef (readIORef, writeIORef)
 import qualified Data.IntMap.Strict as IM
 import Data.Maybe (catMaybes, isJust)
 import Data.Text (Text)
@@ -90,6 +90,9 @@ loadHitState ctx hit = do
   loadTextAreaStateAt ctx (tahNodeIdx hit) fm (tahWidgetX hit) (tahWidgetY hit) (tahWidgetW hit) (tahWidgetH hit)
 
 -- | Record the text viewport and clamp the stored scroll to the content.
+-- This paint already reflects both, so the write marks nothing dirty: a
+-- window resize would otherwise request a second frame that has nothing to
+-- repaint.
 syncTextAreaViewport :: Context -> NodeIdx -> FontMetrics -> Float -> Float -> Float -> Float -> IO ()
 syncTextAreaViewport ctx idx fm x y w h = do
   wid <- getWidgetId (ctxNodeArena ctx) idx
@@ -108,7 +111,7 @@ syncTextAreaViewport ctx idx fm x y w h = do
         | sx' /= sx || sy' /= sy = IM.insert (slotKey slotTextAreaScroll key) (sx', sy') pts0
         | otherwise = pts0
   unless (sx' == sx && sy' == sy && IM.lookup viewportKey (storePoint store) == Just (clipW, clipH)) $
-    setStore ctx (store {storePoint = pts1})
+    writeIORef (ctxStore ctx) $! store {storePoint = pts1}
 
 -- | Snap a text-area scroll offset to the device pixel grid, the same grid
 -- 'pushText' snaps to, so line pens and hit-testing stay in lockstep (and in
