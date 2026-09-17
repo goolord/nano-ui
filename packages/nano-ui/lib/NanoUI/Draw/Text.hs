@@ -13,7 +13,8 @@ import Data.IORef (readIORef)
 import qualified Data.Text as T
 import Data.Primitive.SmallArray (SmallArray, indexSmallArray, sizeofSmallArray)
 import Data.Primitive.PrimArray (indexPrimArray, sizeofPrimArray)
-import Data.Word (Word32)
+import Data.Word (Word32, Word8)
+import Foreign.Ptr (Ptr)
 import NanoUI.Draw.Arena
 import NanoUI.Draw.Shapes
 import NanoUI.Draw.Types (DrawArena (..), DrawOp (..), TextFont (..), glyphAtlasTextureId, indexSize, vertexSize)
@@ -107,23 +108,52 @@ pushShapedQuads da fm slant px py (ShapedGlyphs quads) col = do
                     !v0 = at (o + 5)
                     !u1 = at (o + 6)
                     !v1 = at (o + 7)
-                    !vb = (base + q * 4) * vertexSize
-                    !ib = (baseIdx + q * 6) * indexSize
-                if slant == 0
-                  then pokeQuadSIMD vp vb ip ib gx gy gw gh u0 v0 u1 v1 r g b a (fromIntegral (base + q * 4))
-                  else do
-                    let !gy1 = gy + gh
-                        !topDx = slant * (baselineY - gy)
-                        !botDx = slant * (baselineY - gy1)
-                        !i0 = fromIntegral (base + q * 4) :: Word32
-                    pokeVertexSIMD vp vb (gx + topDx) gy r g b a u0 v0
-                    pokeVertexSIMD vp (vb + 32) (gx + gw + topDx) gy r g b a u1 v0
-                    pokeVertexSIMD vp (vb + 64) (gx + gw + botDx) gy1 r g b a u1 v1
-                    pokeVertexSIMD vp (vb + 96) (gx + botDx) gy1 r g b a u0 v1
-                    pokeQuadIndices ip ib i0 (i0 + 1) (i0 + 2) (i0 + 3)
+                pokeGlyphQuad vp ip base baseIdx slant baselineY r g b a q gx gy gw gh u0 v0 u1 v1
                 go (q + 1)
       go 0
       commit (count * 4) (count * 6)
+
+-- | Glyph quad @q@ of a text reservation whose vertices start at @base@ and
+-- indices at @baseIdx@. A non-zero @slant@ shears the quad around
+-- @baselineY@. INLINE: it runs per glyph and takes more arguments than GHC
+-- unboxes for a call.
+{-# INLINE pokeGlyphQuad #-}
+pokeGlyphQuad ::
+  Ptr Word8 ->
+  Ptr Word8 ->
+  Int ->
+  Int ->
+  Float ->
+  Float ->
+  Float ->
+  Float ->
+  Float ->
+  Float ->
+  Int ->
+  Float ->
+  Float ->
+  Float ->
+  Float ->
+  Float ->
+  Float ->
+  Float ->
+  Float ->
+  IO ()
+pokeGlyphQuad vp ip base baseIdx slant baselineY r g b a q gx gy gw gh u0 v0 u1 v1 = do
+  let !vb = (base + q * 4) * vertexSize
+      !ib = (baseIdx + q * 6) * indexSize
+      !i0 = fromIntegral (base + q * 4) :: Word32
+  if slant == 0
+    then pokeQuadSIMD vp vb ip ib gx gy gw gh u0 v0 u1 v1 r g b a i0
+    else do
+      let !gy1 = gy + gh
+          !topDx = slant * (baselineY - gy)
+          !botDx = slant * (baselineY - gy1)
+      pokeVertexSIMD vp vb (gx + topDx) gy r g b a u0 v0
+      pokeVertexSIMD vp (vb + 32) (gx + gw + topDx) gy r g b a u1 v0
+      pokeVertexSIMD vp (vb + 64) (gx + gw + botDx) gy1 r g b a u1 v1
+      pokeVertexSIMD vp (vb + 96) (gx + botDx) gy1 r g b a u0 v1
+      pokeQuadIndices ip ib i0 (i0 + 1) (i0 + 2) (i0 + 3)
 
 -- | Glyph quads for one line from pen @(px, py)@, used as given: synthetic bold
 -- relies on its sub-pixel pass offsets. Every quad shares one arena
@@ -139,38 +169,6 @@ pushGlyphQuads da fm slant px py txt col = do
     withVertsReserve da (cap * 4) (cap * 6) $ \vp ip base baseIdx commit -> do
       let !(r, g, b, a) = unpackColorF col
           !baselineY = py + fmAscent fm
-          upright !q !gx !gy !gw !gh !u0 !v0 !u1 !v1 =
-            pokeQuadSIMD
-              vp
-              ((base + q * 4) * vertexSize)
-              ip
-              ((baseIdx + q * 6) * indexSize)
-              gx
-              gy
-              gw
-              gh
-              u0
-              v0
-              u1
-              v1
-              r
-              g
-              b
-              a
-              (fromIntegral (base + q * 4))
-          glyphQuad !q !gx !gy !gw !gh !u0 !v0 !u1 !v1
-            | slant == 0 = upright q gx gy gw gh u0 v0 u1 v1
-            | otherwise = do
-                let !vb = (base + q * 4) * vertexSize
-                    !gy1 = gy + gh
-                    !topDx = slant * (baselineY - gy)
-                    !botDx = slant * (baselineY - gy1)
-                    !i0 = fromIntegral (base + q * 4) :: Word32
-                pokeVertexSIMD vp vb (gx + topDx) gy r g b a u0 v0
-                pokeVertexSIMD vp (vb + 32) (gx + gw + topDx) gy r g b a u1 v0
-                pokeVertexSIMD vp (vb + 64) (gx + gw + botDx) gy1 r g b a u1 v1
-                pokeVertexSIMD vp (vb + 96) (gx + botDx) gy1 r g b a u0 v1
-                pokeQuadIndices ip ((baseIdx + q * 6) * indexSize) i0 (i0 + 1) (i0 + 2) (i0 + 3)
           walk !q !ox !prev !t =
             case T.uncons t of
               Nothing -> pure q
@@ -180,11 +178,11 @@ pushGlyphQuads da fm slant px py txt col = do
                 drawGlyph fm c >>= \case
                   Nothing
                     | adv > 0 && c /= ' ' -> do
-                        upright q (onGrid scale ox) (onGrid scale py) adv (fmLineHeight fm) whitePixelU whitePixelV whitePixelU whitePixelV
+                        pokeGlyphQuad vp ip base baseIdx 0 baselineY r g b a q (onGrid scale ox) (onGrid scale py) adv (fmLineHeight fm) whitePixelU whitePixelV whitePixelU whitePixelV
                         next (q + 1)
                     | otherwise -> next q
                   Just gq -> do
-                    glyphQuad q (ox + gqX gq) (py + gqY gq) (gqW gq) (gqH gq) (gqU0 gq) (gqV0 gq) (gqU1 gq) (gqV1 gq)
+                    pokeGlyphQuad vp ip base baseIdx slant baselineY r g b a q (ox + gqX gq) (py + gqY gq) (gqW gq) (gqH gq) (gqU0 gq) (gqV0 gq) (gqU1 gq) (gqV1 gq)
                     next (q + 1)
       !k <- walk 0 px Nothing txt
       commit (k * 4) (k * 6)
