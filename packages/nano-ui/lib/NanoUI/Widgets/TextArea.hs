@@ -339,7 +339,12 @@ textAreaWith' f value = do
               , storeFloat = IM.delete contentCacheKey (storeFloat st)
               }
         pure (newText, changed)
-      else pure (current, False)
+      else do
+        -- A command run on the unfocused area ('applyTextAreaCommand') still
+        -- pulses this frame's respChanged, once.
+        when menuPulse $
+          uiIO $ getStore ctx >>= \st -> setStore ctx st {storeInt = IM.delete changedSlotKey (storeInt st)}
+        pure (current, menuPulse)
   resp <- addWidget wid NodeTextArea "" 0 layout
   pure (setChanged stateChanged resp, newText)
 
@@ -427,10 +432,15 @@ applyTextAreaCommand ctx wid cmd = do
   s1 <- withEditor s0 <$> runCommandIO ctx multiLineMode cmd (textAreaEditor s0 {history = sealHistory (history s0)})
   let newText = TB.toText (buffer s1)
       saved = saveTextAreaState key newText s1 store
+  -- A changed text also drops the content size measured for the old one.
   setStore ctx $
     if newText == text
       then saved
-      else saved {storeInt = IM.insert (slotKey slotTextAreaChanged key) 1 (storeInt saved)}
+      else
+        saved
+          { storeInt = IM.insert (slotKey slotTextAreaChanged key) 1 (storeInt saved)
+          , storeFloat = IM.delete (slotKey slotTextAreaContentFont key) (storeFloat saved)
+          }
   -- Store damage is keyed on slots, not the widget: damage the widget so a
   -- selection-only command (Select All) repaints this frame.
   damageWidget ctx wid DamageSelf

@@ -166,12 +166,21 @@ parseElements = fmap fst . content
             Nothing -> Left "unterminated tag"
             _ -> do
               let (key, afterKey) = T.span (\c -> c /= '=' && not (isSpace c) && c /= '>' && c /= '/') s
-                  afterEq = T.stripStart (T.drop 1 (T.stripStart afterKey))
-              case T.uncons afterEq of
-                Just (q, r) | q == '"' || q == '\'' ->
-                  let (value, r') = T.break (== q) r
-                   in attributes (T.drop 1 r') ((localName key, decodeEntities value) : acc)
-                _ -> attributes afterKey acc
+              case T.uncons (T.stripStart afterKey) of
+                Just ('=', r0) -> case T.uncons (T.stripStart r0) of
+                  Just (q, r) | q == '"' || q == '\'' ->
+                    let (value, r') = T.break (== q) r
+                     in attributes (T.drop 1 r') ((localName key, decodeEntities value) : acc)
+                  _ ->
+                    -- An unquoted value runs to a space or the tag's end.
+                    let (value0, r1) = T.span (\c -> not (isSpace c) && c /= '>') (T.stripStart r0)
+                        (value, r') = case T.unsnoc value0 of
+                          Just (v, '/') | ">" `T.isPrefixOf` r1 -> (v, T.cons '/' r1)
+                          _ -> (value0, r1)
+                     in attributes r' ((localName key, decodeEntities value) : acc)
+                -- An attribute without a value.
+                _ | T.null key -> Left "malformed attribute"
+                  | otherwise -> attributes afterKey acc
     localName n = T.takeWhileEnd (/= ':') n
 
 decodeEntities :: Text -> Text

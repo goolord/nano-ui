@@ -12,6 +12,7 @@ module NanoUI.Frame.TextArea.Content
   ) where
 
 import Data.Dynamic (fromDynamic, toDyn)
+import Data.IORef (readIORef)
 import qualified Data.IntMap.Strict as IM
 import Data.Sequence (Seq)
 import qualified Data.Sequence as Seq
@@ -78,15 +79,16 @@ textAreaContentMetrics ctx idx = do
     then pure (cachedW, IM.findWithDefault 0 cacheKeyH (storeFloat store))
     else do
       fm <- resolveTextAreaFont ctx idx
+      gen <- readIORef (ctxMetricGen ctx)
       buf <- ensureTextAreaBuffer ctx key (IM.findWithDefault "" key (storeText store))
       let lns = TB.bufferLines buf
           lineH = onGrid (fmSnapScale fm) (fmLineHeight fm)
           contentH = fromIntegral (max 1 (Seq.length lns)) * lineH
           (seenHead, seenTail) = TB.changedLines buf
           previous = case IM.lookup widthsKey (storeDyn store) >>= fromDynamic of
-            Just lw@(LineWidths font _ _ _) | font == size -> lw
-            _ -> LineWidths size Seq.empty (-1) 0
-          LineWidths _ measured widest widestW = previous
+            Just lw@(LineWidths font fontGen _ _ _) | font == size && fontGen == gen -> lw
+            _ -> LineWidths size gen Seq.empty (-1) 0
+          LineWidths _ _ measured widest widestW = previous
           -- Keep the widths of the lines no edit touched since the last
           -- measurement and measure the rest.
           keepHead = min seenHead (Seq.length measured)
@@ -114,15 +116,15 @@ textAreaContentMetrics ctx idx = do
                   IM.insert cacheKeyH contentH $
                     IM.insert cacheKeyW contentW (storeFloat store')
             , storeDyn =
-                IM.insert widthsKey (toDyn (LineWidths size widths widest' contentW)) $
+                IM.insert widthsKey (toDyn (LineWidths size gen widths widest' contentW)) $
                   IM.insert (slotKey slotTextAreaBuffer key) (toDyn (TB.markLinesSeen buf)) (storeDyn store')
             }
         )
       pure (contentW, contentH)
 
--- | Measured widths of a text area's lines, the font size they were measured
--- at, and the widest line with its width.
-data LineWidths = LineWidths !Float !(Seq Float) !Int !Float
+-- | Measured widths of a text area's lines, the font size and metric
+-- generation they were measured at, and the widest line with its width.
+data LineWidths = LineWidths !Float !Int !(Seq Float) !Int !Float
 
 -- | Node font, field rect and content extent @(width, height)@ of a text area.
 -- Zoom changes the node font, so scroll and hit math resolve it here rather
