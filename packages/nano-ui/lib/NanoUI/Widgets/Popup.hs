@@ -7,6 +7,7 @@ module NanoUI.Widgets.Popup
   , defaultPopupConfig
   , popup
   , popupWith
+  , floatingOverlay
   , tooltipWidget
   , tooltipAt
   , tooltip
@@ -25,9 +26,9 @@ import NanoUI.Context
   , registerPopupConfig
   , seedFloatingPanel
   )
-import NanoUI.Id (enterScope, scopeTag)
+import NanoUI.Id (WidgetId, enterScope, scopeTag)
 import NanoUI.Input (inputMousePos)
-import NanoUI.Layout.Arena (NodeType (..), addNode)
+import NanoUI.Layout.Arena (NodeIdx, NodeType (..), addNode)
 import NanoUI.Monad
   ( Ui
   , askContext
@@ -101,49 +102,64 @@ popupWith ::
   Eff es a ->
   Eff es (Response, Maybe a)
 popupWith open cfg f child = do
-  let layout = f (tight defaultLayout)
+  ctx <- askContext
+  let
+    layout = f (tight defaultLayout)
+    addPopupNode wid parent = do
+      registerPopupConfig ctx wid (cfgAnchor cfg) (cfgPlacement cfg) (cfgOffset cfg)
+      addNode
+        (ctxNodeArena ctx)
+        NodePopup
+        parent
+        (layoutDirection layout)
+        (layoutWidth layout)
+        (layoutHeight layout)
+        (Padding 6 6 6 6)
+        4
+        0
+        0
+        1e9
+        1e9
+        0
+        AlignStart
+        AlignTop
+    seedFromPrev wid = getPrevRect ctx wid >>= mapM_ (seedFloatingPanel ctx wid)
+  floatingOverlay open (cfgDismissable cfg) addPopupNode seedFromPrev ((,) False <$> child)
+
+-- | The floating panel behind popups, modals and windows, shown while @open@
+-- with its body in its own id scope. @addPanel@ and @enter@ are those of
+-- 'floatingPanel', given the panel's id. The body returns whether it closed
+-- the panel along with its result. The 'Response' reports a dismissal (the
+-- body's close, Escape, or a click outside when @dismissable@) as a click. A
+-- closed panel still consumes its id scope, so the ids of later siblings do
+-- not shift when it opens.
+floatingOverlay ::
+  Ui :> es =>
+  Bool ->
+  Bool ->
+  (WidgetId -> Int -> IO NodeIdx) ->
+  (WidgetId -> IO ()) ->
+  Eff es (Bool, a) ->
+  Eff es (Response, Maybe a)
+floatingOverlay open dismissable addPanel enter body = do
   wid <- nextId
   ctx <- askContext
   if not open
     then do
-      -- A closed popup still consumes its id scope, so the ids of later
-      -- siblings do not shift when it opens.
       uiIO (modifyIORef' (ctxIdContext ctx) (fst . enterScope scopeTag))
       pure (emptyModalResp wid, Nothing)
     else do
       inp <- askInput
-      let
-        addPopupNode parent = do
-          registerPopupConfig ctx wid (cfgAnchor cfg) (cfgPlacement cfg) (cfgOffset cfg)
-          addNode
-            (ctxNodeArena ctx)
-            NodePopup
-            parent
-            (layoutDirection layout)
-            (layoutWidth layout)
-            (layoutHeight layout)
-            (Padding 6 6 6 6)
-            4
-            0
-            0
-            1e9
-            1e9
-            0
-            AlignStart
-            AlignTop
-        seedFromPrev = getPrevRect ctx wid >>= mapM_ (seedFloatingPanel ctx wid)
-      body <- floatingPanel True wid addPopupNode seedFromPrev child
-      mrect <- uiIO (getPrevRect ctx wid)
-      let
-        panel = fromMaybe (Rect 0 0 0 0) mrect
-        inPanel = rectHit panel (inputMousePos inp)
-      dismissed <-
-        if cfgDismissable cfg && rectNonEmpty panel
+      (closed, r) <- floatingPanel True wid (addPanel wid) (enter wid) body
+      panel <- fromMaybe (Rect 0 0 0 0) <$> uiIO (getPrevRect ctx wid)
+      outside <-
+        if dismissable && rectNonEmpty panel
           then useDismissable panel
           else pure False
+      let dismissed = closed || outside
       pure
-        ( mkResponse wid panel inPanel False dismissed dismissed
-        , Just body
+        ( mkResponse wid panel (rectHit panel (inputMousePos inp)) False dismissed dismissed
+        , Just r
         )
 
 -- | Attach a rich tooltip widget to any target response, displayed on hover.

@@ -276,6 +276,7 @@ testSpecs =
   , TestSpec "modal-close-damage" False runModalCloseDamageTest
   , TestSpec "modal-fractional-scale-no-scroll" False runModalFractionalScaleNoScrollTest
   , TestSpec "window-overlay" False runWindowOverlayTest
+  , TestSpec "overlay-sibling-state" False runOverlaySiblingStateTest
   , TestSpec "overlay-click-through" False runOverlayClickThroughTest
   , TestSpec "overlay-panel-live" False runOverlayPanelLiveTest
   , TestSpec "window-drag" False runWindowDragTest

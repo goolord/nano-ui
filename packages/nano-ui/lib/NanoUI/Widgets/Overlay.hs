@@ -8,7 +8,6 @@ where
 
 import Control.Monad (void, when)
 import Data.IntMap.Strict qualified as IM
-import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Effectful (Eff, type (:>))
@@ -23,15 +22,13 @@ import NanoUI.Context
   )
 import NanoUI.Id (WidgetId)
 import NanoUI.Input
-  ( inputMousePos
-  , inputWindowSize
+  ( inputWindowSize
   )
 import NanoUI.Layout.Arena (NodeType (..), addNode)
 import NanoUI.Monad
   ( Ui
   , askContext
   , askInput
-  , nextId
   , uiIO
   , withKey
   )
@@ -49,7 +46,7 @@ import NanoUI.Style
   , windowMargin
   , windowPad
   )
-import NanoUI.Types (Rect (..), Size (..), rectHit, rectNonEmpty)
+import NanoUI.Types (Rect (..), Size (..), rectNonEmpty)
 import NanoUI.Widgets.Chrome
   ( closeButton
   , floatMinFor
@@ -58,7 +55,7 @@ import NanoUI.Widgets.Chrome
   , titleBarLayoutFor
   , titleLabelLayoutFor
   )
-import NanoUI.Widgets.Behavior (useDismissable)
+import NanoUI.Widgets.Popup (floatingOverlay)
 import NanoUI.Widgets.Layout
   ( flex
   , labelEx
@@ -68,9 +65,6 @@ import NanoUI.Widgets.Layout
   )
 import NanoUI.Widgets.Node
   ( Response (..)
-  , emptyModalResp
-  , floatingPanel
-  , mkResponse
   , respClicked
   )
 
@@ -89,84 +83,67 @@ overlay ::
   Ui :> es =>
   OverlayKind -> Bool -> Text -> Eff es a -> Eff es (Response, Maybe a)
 overlay kind open title child = do
-  wid <- nextId
-  if not open
-    then pure (emptyModalResp wid, Nothing)
-    else do
-      ctx <- askContext
-      inp <- askInput
-      let
-        Size winW winH = inputWindowSize inp
-        margin = windowMargin
-        availW = max 1 (winW - 2 * margin)
-        availH = max 1 (winH - 2 * margin)
-        isModal = kind == ModalOverlay
-        -- Modals share the window's side padding. The body's scrollbar sits
-        -- out in it just inside the panel's edge, that padding from the
-        -- content.
-        padding = if isModal then windowPad {padB = 12} else windowPad
-        barH = if isModal then modalTitleBarH else titleBarChromeHFor
-        -- Window body breathing room: one side-pad between the chrome and
-        -- the body, matching the window's left/right padding. Modals keep
-        -- their own larger gap.
-        bodyGap = if isModal then 8 else 10
-        minWidth =
-          floatMinFor
-            (if isModal then 260 else 280)
-            availW
-        minHeight =
-          if isModal
-            then 0
-            else
-              min availH (padT padding + titleBarChromeHFor + bodyGap + padB padding)
-        addOverlayNode parent =
-          addNode
-            (ctxNodeArena ctx)
-            (if isModal then NodeModal else NodeWindow)
-            parent
-            Column
-            Fit
-            Fit
-            padding
-            bodyGap
-            minWidth
-            minHeight
-            availW
-            availH
-            0
-            AlignStart
-            AlignTop
-        enter = do
-          when isModal (beginModal ctx)
-          seedFloatingPanel ctx wid
-            =<< floatingSeedRect ctx wid isModal minWidth minHeight margin winW winH
-        titleLabel = void (labelEx (titleLabelLayoutFor barH) title)
-      (closeResp, body) <- floatingPanel False wid addOverlayNode enter $ do
-        close <-
-          row' (titleBarLayoutFor barH) $ do
-            when (not (T.null title)) $
-              case kind of
-                ModalOverlay -> titleLabel
-                WindowOverlay -> withKey title titleLabel
-            flex
-            withKey ("close" :: Text) closeButton
-        when (isModal && not (T.null title)) separator
-        r <- scrollWith (tight . grow) child
-        when isModal (uiIO (endModal ctx))
-        pure (close, r)
-      mrect <- uiIO (getPrevRect ctx wid)
-      let
-        panel = fromMaybe (Rect 0 0 0 0) mrect
-        inPanel = rectHit panel (inputMousePos inp)
-      outside <-
-        if isModal && rectNonEmpty panel
-          then useDismissable panel
-          else pure False
-      let dismissed = outside || respClicked closeResp
-      pure
-        ( mkResponse wid panel inPanel False dismissed dismissed
-        , Just body
-        )
+  ctx <- askContext
+  inp <- askInput
+  let
+    Size winW winH = inputWindowSize inp
+    margin = windowMargin
+    availW = max 1 (winW - 2 * margin)
+    availH = max 1 (winH - 2 * margin)
+    isModal = kind == ModalOverlay
+    -- Modals share the window's side padding. The body's scrollbar sits
+    -- out in it just inside the panel's edge, that padding from the
+    -- content.
+    padding = if isModal then windowPad {padB = 12} else windowPad
+    barH = if isModal then modalTitleBarH else titleBarChromeHFor
+    -- Window body breathing room: one side-pad between the chrome and
+    -- the body, matching the window's left/right padding. Modals keep
+    -- their own larger gap.
+    bodyGap = if isModal then 8 else 10
+    minWidth =
+      floatMinFor
+        (if isModal then 260 else 280)
+        availW
+    minHeight =
+      if isModal
+        then 0
+        else
+          min availH (padT padding + titleBarChromeHFor + bodyGap + padB padding)
+    addOverlayNode _ parent =
+      addNode
+        (ctxNodeArena ctx)
+        (if isModal then NodeModal else NodeWindow)
+        parent
+        Column
+        Fit
+        Fit
+        padding
+        bodyGap
+        minWidth
+        minHeight
+        availW
+        availH
+        0
+        AlignStart
+        AlignTop
+    enter wid = do
+      when isModal (beginModal ctx)
+      seedFloatingPanel ctx wid
+        =<< floatingSeedRect ctx wid isModal minWidth minHeight margin winW winH
+    titleLabel = void (labelEx (titleLabelLayoutFor barH) title)
+  floatingOverlay open isModal addOverlayNode enter $ do
+    close <-
+      row' (titleBarLayoutFor barH) $ do
+        when (not (T.null title)) $
+          case kind of
+            ModalOverlay -> titleLabel
+            WindowOverlay -> withKey title titleLabel
+        flex
+        withKey ("close" :: Text) closeButton
+    when (isModal && not (T.null title)) separator
+    r <- scrollWith (tight . grow) child
+    when isModal (uiIO (endModal ctx))
+    pure (respClicked close, r)
 
 floatingSeedRect ::
   Context

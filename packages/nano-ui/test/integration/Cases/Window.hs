@@ -2,6 +2,7 @@ module Cases.Window
   ( runFitHeaderNoShrinkTest
   , runOverlayClickThroughTest
   , runOverlayPanelLiveTest
+  , runOverlaySiblingStateTest
   , runSeparatorSpanTest
   , runWindowCloseDamageTest
   , runWindowDragTest
@@ -91,6 +92,24 @@ runOverlayPanelLiveTest _ failed = do
   checkStatic (void (window True "Debug" (label "fps 0")))
   checkStatic (void (modal True "About" (label "body")))
   checkDirtyWake (void (modal True "About" (label "body")))
+
+-- Opening a modal or window must not shift the ids, and so the stored state,
+-- of the widgets after it.
+runOverlaySiblingStateTest :: Context -> IORef Int -> IO ()
+runOverlaySiblingStateTest _ failed = do
+  let inp = withInput 640 400
+      ui overlay open edit = do
+        _ <- overlay open "About" (label "body")
+        (txt, setTxt) <- useText "start"
+        when edit (setTxt "edited")
+        textInput txt
+  forM_ [modal, window] $ \overlay -> do
+    ctx <- newContext
+    _ <- runFrame ctx inp (ui overlay False True)
+    closed <- warmup2 ctx inp (ui overlay False False)
+    assertEq failed closed "edited"
+    opened <- warmup2 ctx inp (ui overlay True False)
+    assertEq failed opened "edited"
 
 runFitHeaderNoShrinkTest :: Context -> IORef Int -> IO ()
 runFitHeaderNoShrinkTest ctx failed = do
