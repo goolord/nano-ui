@@ -6,9 +6,8 @@ module NanoUI.Sdl.Session
   ) where
 
 import Control.Exception (bracket)
-import Control.Monad (void)
+import Control.Monad (void, when)
 import Data.IORef (newIORef, readIORef, writeIORef)
-import Data.Maybe (maybeToList)
 import NanoUI (Input (..), emptyInput)
 import NanoUI.Debug (debugRefreshSec)
 import NanoUI.Input (clearEphemeral)
@@ -37,7 +36,7 @@ import NanoUI.Sdl.Input
   , waitEvent
   , waitEventTimeout
   )
-import NanoUI.Sdl.Display (installResizeWatch)
+import NanoUI.Sdl.Display (installResizeWatch, setRenderVSync)
 import NanoUI.Sdl.Window (SdlEnv (..), SdlOptions (..), syncDisplay, withSdl)
 import SDL3.Sys.Bindgen.Blendmode (sDL_BLENDMODE_BLEND)
 import SDL3.Sys.Render (setRenderDrawBlendModeSafe)
@@ -65,6 +64,14 @@ runSdlSession options ctx setup shouldQuit drawFn =
     drawing <- newDrawingLock
     startupDone <- newIORef False
     startupCatchup <- newIORef False
+    -- The resize watch presents with vsync off: Windows' modal size loop
+    -- cannot take the next drag step while a present waits for vblank. The
+    -- main loop turns vsync back on before its own frames.
+    vsyncPaused <- newIORef False
+    -- Window size the resize watch presented since the main loop last
+    -- decided whether to draw. That frame already covers the size change and
+    -- expose events the loop is about to see.
+    resizePresented <- newIORef Nothing
     let onResize = do
           void $
             tryWithDrawingLock drawing $ do
@@ -83,8 +90,18 @@ runSdlSession options ctx setup shouldQuit drawFn =
                   if inputWindowSize inpSynced == inputWindowSize inp && scale1 == scale0
                     then writeIORef prev inpSynced
                     else do
+                      paused <- readIORef vsyncPaused
+                      when (sdlVsync env && not paused) $ do
+                        void $ setRenderVSync (sdlRenderer env) False
+                        writeIORef vsyncPaused True
                       (_, s) <- drawFn ctx' env inpSynced True
                       writeIORef prev s
+                      writeIORef resizePresented (Just (inputWindowSize s))
+    -- A refresh wake (a finished file dialog) may postdate the watch's frame,
+    -- so it voids that frame's cover.
+    let noteWake evs = do
+          when (EvRefresh `elem` evs) $ writeIORef resizePresented Nothing
+          pure evs
     let drainUntilQuiet c inp = do
           pending <- pollEvents
           (c', inp') <- syncDisplay c env (foldl' applyEvent inp pending)
@@ -121,14 +138,24 @@ runSdlSession options ctx setup shouldQuit drawFn =
     writeIORef prev synced1
     let drv =
           SessionDriver
-            { sdPollEvents    = pollEvents
-            , sdWaitEvents    = \t ->
-                maybeToList <$> if t < 0 then waitEvent else waitEventTimeout t
+            { sdPollEvents    = pollEvents >>= noteWake
+            , sdWaitEvents    = \t -> do
+                -- Take the rest of the queue with the event that ended the
+                -- wait, so one pass sees a whole burst (a resize queues
+                -- several window events at once).
+                woke <- if t < 0 then waitEvent else waitEventTimeout t
+                case woke of
+                  Nothing -> pure []
+                  Just ev -> noteWake . (ev :) =<< pollEvents
             , sdApplyEvent    = applyEvent
             , sdIsButtonEdge  = isButtonEdge
             , sdIsHardQuit    = isHardQuit
             , sdIsSessionQuit = (== EvQuit)
             , sdSyncDisplay   = \c inp -> do
+                paused <- readIORef vsyncPaused
+                when paused $ do
+                  void $ setRenderVSync (sdlRenderer env) True
+                  writeIORef vsyncPaused False
                 (c', inp') <- syncDisplay c env inp
                 writeIORef ctxRef c'
                 writeIORef prev inp'
@@ -165,8 +192,16 @@ runSdlSession options ctx setup shouldQuit drawFn =
             , sdShouldDraw    = \c prevInp inpSynced wasAnim -> do
                 debugActive <- isDebugActive (sdlDebug env)
                 wantDebug <- takeDebugLive (sdlDebug env) debugActive
-                shouldRedrawFrame c prevInp inpSynced wasAnim (sdlContinuous env) wantDebug
+                presented <- readIORef resizePresented
+                writeIORef resizePresented Nothing
+                let (prevInp', inpSynced') = case presented of
+                      Just size
+                        | size == inputWindowSize inpSynced ->
+                            (prevInp {inputWindowSize = size}, inpSynced {inputWindowRedraw = False})
+                      _ -> (prevInp, inpSynced)
+                shouldRedrawFrame c prevInp' inpSynced' wasAnim (sdlContinuous env) wantDebug
             , sdDraw          = \c inpSynced forceFull -> do
+                writeIORef resizePresented Nothing
                 ms <- tryWithDrawingLock drawing (drawFn c env inpSynced (forceFull || sdlContinuous env))
                 case ms of
                   Just (dirtyOut, s) -> do
