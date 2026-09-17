@@ -394,7 +394,7 @@ drawSearchMagnifier da (Rect x y w h) col = do
       startOff = r0 * 0.7071
       endOff = r0 * 0.7071 + s * 0.22
   pushRoundedStroke da (Rect (cx - r0) (cy - r0) (2 * r0) (2 * r0)) r0 t col
-  pushLine da (cx + startOff) (cy + startOff) (cx + endOff) (cy + endOff) t col
+  pushLine da (cx + startOff) (cy + startOff) (cx + endOff) (cy + endOff) (t * 0.8) col
 
 -- | Combo box field: the search field's full-rect editable box, but styled
 -- like a dropdown: no magnifier or clear chrome, and a select chevron in the
@@ -495,7 +495,7 @@ drawRadio da fm style x y h value accent well =
 drawCloseIcon :: DrawArena -> Bool -> Float -> Float -> Float -> Float -> Color -> IO ()
 drawCloseIcon da trailing x y w h col = do
   let arm = min w h * 0.21
-      t = max 1.75 (min w h * 0.085)
+      t = max 1.3 (min w h * 0.064)
       cx = if trailing then x + w - arm - t / 2 else x + w / 2
       cy = y + h / 2
   pushLine da (cx - arm) (cy - arm) (cx + arm) (cy + arm) t col
@@ -517,7 +517,7 @@ drawTreeChevron da fm x y w h depth expanded col = do
       mx = cx + cw / 2
       my = cy + ch / 2
       s = min 4.5 (min cw ch * 0.28)
-      t = max 1.4 (s * 0.22)
+      t = max 1.0 (s * 0.16)
   if expanded
     then do
       pushLine da (mx - s) (my - s * 0.45) mx (my + s * 0.7) t col
