@@ -1,53 +1,35 @@
 module Main (main) where
 
 import Cases
-import Cases.Atlas (runAtlasGrowthTest)
+import Cases.Animation
+import Cases.Atlas
+import Cases.Cache
+import Cases.Combo
+import Cases.ContextMenu
+import Cases.CustomWidget
+import Cases.Damage
+import Cases.Demo
 import Cases.Grid
-  ( runFontCompositionTest
-  , runGridColumnsWithFontColorTest
-  , runNestedGridTest
-  , runStaleFontColorTest
-  )
-import Cases.HostDraw (runExternalTextTest, runSquareGeometryTest)
+import Cases.HostDraw
+import Cases.Keyboard
+import Cases.Modal
+import Cases.NoThunks
+import Cases.NumericInput
 import Cases.PointerRelease
-  ( runReleaseElsewhereTest
-  , runReleaseReturnsTest
-  , runOverlapPressTest
-  , runRightReleaseElsewhereTest
-  )
-import Cases.Runner (runDrawingLockTest, runSessionLoopTest)
-import Cases.SIMD (runSimdWritesTest)
-import Cases.RichText (runRichTextLinkTest, runRichTextWrapTest)
-import Cases.Shaping (runBidiRunsTest, runShapedCaretTest)
-import Cases.Svg (runSvgIconTest, runSvgRasterTest)
-import Cases.Styling
-  ( runDisabledFocusOrderTest
-  , runDisabledLookTest
-  , runDisabledPointerTest
-  , runStyledDamageTest
-  , runStyledNestingTest
-  , runStyledPaintTest
-  )
+import Cases.RichText
+import Cases.Runner
+import Cases.SIMD
+import Cases.Scroll
+import Cases.Select
+import Cases.Shaping
 import Cases.State
-  ( runCollectionApiTest
-  , runControlledInputsTest
-  , runControlledStateTest
-  , runHookStateTest
-  )
+import Cases.Styling
+import Cases.Svg
 import Cases.Table
-  ( runPageWheelAboveTableTest
-  , runTableCellPadTest
-  , runTableColResizeDemoReproTest
-  , runTableFillWidthTest
-  , runTableFirstColWidthTest
-  , runTableHBarReachTest
-  , runTableReorderTest
-  , runTableResizeOverflowTest
-  , runTableScrollRevealTest
-  , runTableSharedScrollMetricsTest
-  , runTableSortTest
-  , runTableWrapRowStretchTest
-  )
+import Cases.Tabs
+import Cases.TextInput
+import Cases.Tooltip
+import Cases.Window
 import Data.IORef (IORef)
 import NanoUI.Testing (Context, newContext, newPixelContext)
 import NanoUI.Testing.Runner (runTests)

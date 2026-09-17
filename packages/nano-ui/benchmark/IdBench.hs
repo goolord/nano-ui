@@ -34,24 +34,18 @@ measureFrameAlloc ui = do
 
 main :: IO ()
 main = do
-  forM_
-    [ ("burst4096", idBurst)
-    , ("scopedWidgets", scopedWidgets)
-    ]
-    $ \(name, ui) -> do
-      alloc <- measureFrameAlloc ui
-      when (alloc > 0) $
-        putStrLn
-          ("FAIL: " ++ name ++ " allocated " ++ show alloc ++ " bytes during runFrame")
-      when (alloc > 0) exitFailure
+  let scenes = [("burst4096", idBurst), ("scopedWidgets", scopedWidgets)]
+  forM_ scenes $ \(name, ui) -> do
+    alloc <- measureFrameAlloc ui
+    when (alloc > 0) $ do
+      putStrLn ("FAIL: " ++ name ++ " allocated " ++ show alloc ++ " bytes during runFrame")
+      exitFailure
   defaultMain
     [ bgroup
         "id/nextId"
-        [ bench "burst4096" $ whnfIO $ do
+        [ bench name $ whnfIO $ do
             ctx <- newContext
-            void (runFrame ctx benchInput idBurst)
-        , bench "scopedWidgets" $ whnfIO $ do
-            ctx <- newContext
-            void (runFrame ctx benchInput scopedWidgets)
+            void (runFrame ctx benchInput ui)
+        | (name, ui) <- scenes
         ]
     ]
