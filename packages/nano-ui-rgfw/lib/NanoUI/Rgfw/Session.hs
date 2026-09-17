@@ -191,7 +191,7 @@ runRgfwAppReduceCustom opts getThemeAndScale updateModel initialModel view = inB
       cursorRef <- newIORef UiCursorDefault
 
       ctx0 <- newRgfwContext initTheme
-      let ctx = withClipboard ctx0 (fmap T.pack <$> R.readClipboardText) (R.writeClipboardText . T.unpack)
+      let ctx = withClipboard ctx0 R.readClipboardText R.writeClipboardText
       debugSampler <- newRgfwDebugSampler
       setHost ctx (RgfwDebugHost debugSampler)
       let font = getCozetteFont

@@ -17,16 +17,18 @@ module RGFW
   , module RGFW.Raw
   ) where
 
+import Data.ByteString.Unsafe (unsafePackCStringLen)
 import Data.Char (chr)
-import Data.List (dropWhileEnd)
+import Data.Text (Text)
+import qualified Data.Text as T
+import Data.Text.Encoding (decodeUtf8Lenient)
+import qualified Data.Text.Foreign as TF
 import Data.Word (Word8, Word32)
 import Foreign.C.String (withCString)
 import Foreign.C.Types (CFloat (..), CInt (..), CSize (..), CUChar (..), CUInt (..))
 import Foreign.Marshal.Alloc (alloca, allocaBytes)
 import Foreign.Ptr (Ptr, nullPtr)
 import Foreign.Storable (peek)
-import GHC.Foreign (peekCStringLen, withCStringLen)
-import GHC.IO.Encoding (utf8)
 import RGFW.Raw
 
 newtype Window = Window (Ptr RGFW_window)
@@ -147,9 +149,10 @@ setMouseDefault (Window win) = do
   CUChar res <- c_rgfw_window_set_mouse_default win
   pure (res /= 0)
 
--- | The system clipboard's text, if it holds any (UTF-8). Needs an open
--- window; on X11 it waits for the selection owner to convert the data.
-readClipboardText :: IO (Maybe String)
+-- | The system clipboard's text, if it holds any. Needs an open window; on
+-- X11 it waits for the selection owner to convert the data. Invalid UTF-8
+-- decodes to replacement characters.
+readClipboardText :: IO (Maybe Text)
 readClipboardText =
   alloca $ \lenPtr -> do
     ptr <- c_rgfw_read_clipboard_text lenPtr
@@ -157,13 +160,12 @@ readClipboardText =
     if ptr == nullPtr || len == 0
       then pure Nothing
       else do
-        -- The length counts RGFW's NUL terminator when it includes one.
-        txt <- dropWhileEnd (== '\0') <$> peekCStringLen utf8 (ptr, fromIntegral len)
-        pure (if null txt then Nothing else Just txt)
+        txt <- decodeUtf8Lenient <$> unsafePackCStringLen (ptr, fromIntegral len)
+        pure (if T.null txt then Nothing else Just txt)
 
 -- | Replace the system clipboard with text (UTF-8); 'False' if refused.
-writeClipboardText :: String -> IO Bool
+writeClipboardText :: Text -> IO Bool
 writeClipboardText txt =
-  withCStringLen utf8 txt $ \(ptr, len) -> do
+  TF.withCStringLen txt $ \(ptr, len) -> do
     CUChar ok <- c_rgfw_write_clipboard_text ptr (fromIntegral len)
     pure (ok /= 0)

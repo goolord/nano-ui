@@ -33,7 +33,9 @@ library
     install-includes: RGFW.h
     c-sources:        cbits/RGFW.c
     build-depends:
-        base ^>=4.22.0.0
+        base ^>=4.22.0.0,
+        bytestring ^>=0.12,
+        text ^>=2.1
     hs-source-dirs:   lib
     if os(windows)
         extra-libraries: gdi32 user32 shell32

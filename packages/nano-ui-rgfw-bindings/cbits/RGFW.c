@@ -86,15 +86,19 @@ uint8_t rgfw_window_set_mouse_default(RGFW_window* win) {
 }
 
 /* Clipboard text, owned by RGFW and valid until the next read. NULL with
-   *len 0 when the clipboard holds no text; *len counts the NUL terminator
-   when RGFW includes one. */
+   *len 0 when the clipboard holds no text; *len leaves out RGFW's NUL
+   terminator. */
 const char* rgfw_read_clipboard_text(size_t* len) {
     const RGFW_dataTransfer* data = RGFW_readClipboardString();
     if (data == NULL || data->data == NULL) {
         *len = 0;
         return NULL;
     }
-    *len = data->length;
+    size_t n = data->length;
+    while (n > 0 && data->data[n - 1] == '\0') {
+        n--;
+    }
+    *len = n;
     return data->data;
 }
 

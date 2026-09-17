@@ -103,7 +103,7 @@ data RGFW_event
 foreign import ccall "RGFW_window_close"
   c_RGFW_window_close :: Ptr RGFW_window -> IO ()
 
-foreign import ccall "RGFW_window_checkEvent"
+foreign import ccall unsafe "RGFW_window_checkEvent"
   c_RGFW_window_checkEvent :: Ptr RGFW_window -> Ptr RGFW_event -> IO CUChar
 
 foreign import ccall "RGFW_waitForEvent"
@@ -116,55 +116,55 @@ foreign import ccall "RGFW_window_swapBuffers_OpenGL"
   c_RGFW_window_swapBuffers_OpenGL :: Ptr RGFW_window -> IO ()
 
 -- Accessors (cbits/RGFW.c)
-foreign import ccall "rgfw_event_type"
+foreign import ccall unsafe "rgfw_event_type"
   c_rgfw_event_type :: Ptr RGFW_event -> IO CUChar
 
-foreign import ccall "rgfw_event_mouse_x"
+foreign import ccall unsafe "rgfw_event_mouse_x"
   c_rgfw_event_mouse_x :: Ptr RGFW_event -> IO CInt
 
-foreign import ccall "rgfw_event_mouse_y"
+foreign import ccall unsafe "rgfw_event_mouse_y"
   c_rgfw_event_mouse_y :: Ptr RGFW_event -> IO CInt
 
-foreign import ccall "rgfw_event_button_value"
+foreign import ccall unsafe "rgfw_event_button_value"
   c_rgfw_event_button_value :: Ptr RGFW_event -> IO CUChar
 
-foreign import ccall "rgfw_event_delta_x"
+foreign import ccall unsafe "rgfw_event_delta_x"
   c_rgfw_event_delta_x :: Ptr RGFW_event -> IO CFloat
 
-foreign import ccall "rgfw_event_delta_y"
+foreign import ccall unsafe "rgfw_event_delta_y"
   c_rgfw_event_delta_y :: Ptr RGFW_event -> IO CFloat
 
-foreign import ccall "rgfw_event_key_value"
+foreign import ccall unsafe "rgfw_event_key_value"
   c_rgfw_event_key_value :: Ptr RGFW_event -> IO CUInt
 
-foreign import ccall "rgfw_event_key_mod"
+foreign import ccall unsafe "rgfw_event_key_mod"
   c_rgfw_event_key_mod :: Ptr RGFW_event -> IO CUChar
 
-foreign import ccall "rgfw_event_keyChar_value"
+foreign import ccall unsafe "rgfw_event_keyChar_value"
   c_rgfw_event_keyChar_value :: Ptr RGFW_event -> IO CUInt
 
-foreign import ccall "rgfw_event_update_w"
+foreign import ccall unsafe "rgfw_event_update_w"
   c_rgfw_event_update_w :: Ptr RGFW_event -> IO CInt
 
-foreign import ccall "rgfw_event_update_h"
+foreign import ccall unsafe "rgfw_event_update_h"
   c_rgfw_event_update_h :: Ptr RGFW_event -> IO CInt
 
-foreign import ccall "rgfw_event_size"
+foreign import ccall unsafe "rgfw_event_size"
   c_rgfw_event_size :: IO CSize
 
-foreign import ccall "rgfw_window_w"
+foreign import ccall unsafe "rgfw_window_w"
   c_rgfw_window_w :: Ptr RGFW_window -> IO CInt
 
-foreign import ccall "rgfw_window_h"
+foreign import ccall unsafe "rgfw_window_h"
   c_rgfw_window_h :: Ptr RGFW_window -> IO CInt
 
-foreign import ccall "rgfw_window_scale"
+foreign import ccall unsafe "rgfw_window_scale"
   c_rgfw_window_scale :: Ptr RGFW_window -> IO CFloat
 
-foreign import ccall "rgfw_event_scale_x"
+foreign import ccall unsafe "rgfw_event_scale_x"
   c_rgfw_event_scale_x :: Ptr RGFW_event -> IO CFloat
 
-foreign import ccall "rgfw_event_scale_y"
+foreign import ccall unsafe "rgfw_event_scale_y"
   c_rgfw_event_scale_y :: Ptr RGFW_event -> IO CFloat
 
 -- Clipboard (cbits/RGFW.c)
