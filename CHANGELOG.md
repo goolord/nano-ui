@@ -43,12 +43,6 @@
   while its pieces, fonts and colours stay the same.
 - `DrawTextStyled` draws text in a `TextFont` (size, variant, weight, style
   and decoration) from custom widgets.
-- Shaped text in the SDL backend. Lines are laid out by SDL_ttf and
-  HarfBuzz with ligatures, contextual forms and marks, and drawn glyph by
-  glyph from the atlas. Arabic, Hebrew, Devanagari, CJK and other scripts
-  the UI font lacks are drawn from installed fallback fonts (Noto, DejaVu,
-  and the Windows and macOS system fonts), found the first time a text
-  needs them.
 - Mixed-direction lines: `NanoUI.Bidi` splits a line into left-to-right and
   right-to-left runs in visual order (the implicit rules of UAX #9: strong
   types, numbers, neutrals and reordering; no explicit embeddings or
@@ -60,7 +54,6 @@
 - Theme slots `themeOnAccent`, `themeSelection`, `themeFocusRing`,
   `themeLink`, `themeShadow` and `themeDisabledFade`, which replace colours
   that were fixed in the painters.
-
 - Scroll tuning: `setScrollTuning` sets how far a wheel notch scrolls
   (`scrollWheelStep`) and how long a scroll takes to settle
   (`scrollSmoothTime`, `0` for no glide). `setScrollStep` gives one scroller
@@ -70,12 +63,15 @@
   once or gliding (`ScrollInstant` / `ScrollSmooth`).
 - `getScrollMetrics` reports a scroller's viewport, offset and reachable
   range, which is what a virtualized list needs to pick the rows it builds.
+- `expectText` in `NanoUI.Testing.Harness` fails with a message unless a
+  collected span contains the given text.
+- `Slot` (in `NanoUI.Store` and `NanoUI.Context`) names each kind of
+  per-widget store entry, and `modifyStore` in `NanoUI.Context` updates the
+  store in one read and write.
 
 ### Changed
 
-- `panelStyled` and `panelStyledWith` are gone; use
-  `styled (panelStyle (background bg . borderColor border))` around a panel.
-  `callout` tints the theme's panel colour instead of a fixed dark grey.
+- `callout` tints the theme's panel colour instead of a fixed dark grey.
 - `uiTheme` returns the theme of the enclosing `styled` scope.
 - Undo history keeps its edits' texts as `ShortText` copies, which never
   hold on to the larger text a slice came from. A session of typing,
@@ -84,11 +80,6 @@
 - SVG documents are read by hexml instead of a hand-written XML scanner. A
   DOCTYPE, which hexml rejects, is skipped. Attribute values must be quoted,
   as XML requires.
-- Fallback fonts for other scripts are shared across font sizes and opened
-  only when a text needs a character they cover. Each coverage font is
-  opened once a session as a probe, and each size draws from a copy that
-  shares the probe's file. Resolving 40 sizes that draw CJK, Arabic and
-  Devanagari opens 59 file descriptors instead of 959.
 - Rasterizing an SVG allocates far less: a 16px stroked icon with round
   joins allocates 42 KB instead of 1.1 MB, and at 128px 437 KB (mostly its
   pixel buffers) instead of 7.2 MB, taking 0.37 ms instead of 4 ms. Contours
@@ -97,21 +88,15 @@
   unchanged. `nano-ui-profile svg` measures it.
 - Draw ops are a `SmallArray DrawOp` from `primitive` instead of a boxed
   `Vector`: `DrawingBuild`, `CustomDrawBuild`, `runCanvas`, `drawing`,
-  `drawingVersioned`, `emitDrawOps`, and in nano-ui-diagrams `diagramOps`,
-  `diagramTextOps`, `diagramFrame` and `labelFitScale`. Build them with
+  `drawingVersioned` and `emitDrawOps`. Build them with
   `smallArrayFromList`; the arrays are `Foldable`, `Eq` and a `Semigroup`.
 - `inputKeys` and `inputDrops` are `SmallArray`s. `appendDropEvent` adds a
   drop the way `appendInputKey` adds a key.
-- `CategoryY` holds its labels and values apart, as
-  `CategoryY (SmallArray Text) (PrimArray Double)`. `bar` and `barVec` build
-  it as before.
 - Tree rows, table column metrics and sizes, the SVG rasterizer's buffers,
-  polygon triangulation and stroking, and the Cozette glyph table use
-  `primitive` arrays. Stroking a 10,000-point line allocates 2.0 MB instead
-  of 4.7 MB and takes about 0.34 ms instead of 0.59 ms; a 50-row tree frame
-  allocates 213 KB instead of 275 KB. Plot series stay unboxed vectors, since
-  they come from users and a visible range will be sliced out of them.
-  nano-ui-sdl and nano-ui-rgfw no longer depend on `vector`.
+  and polygon triangulation and stroking use `primitive` arrays. Stroking a
+  10,000-point line allocates 2.0 MB instead of 4.7 MB and takes about
+  0.34 ms instead of 0.59 ms; a 50-row tree frame allocates 213 KB instead of
+  275 KB.
 - A custom widget with a measure hook and a fit height is measured again at
   the width layout gives it, as wrapped labels are, so its height can follow
   its width.
@@ -120,18 +105,77 @@
 - `RunQuad`, `fmRun` and `drawRun` are replaced by `fmShape` and
   `drawShaped`. A backend without shaping sets `fmShape = const Nothing` and
   keeps per-character advances and kerning.
-- In the SDL backend, bold and italic are drawn by the core's synthetic
-  weight and slant over the regular face, since SDL_ttf's style flags do not
-  match the glyph images shaped text draws. Text measurement uses the shaped
-  width, so layout and drawing agree.
-- `MenuAction` is gone; `takeTextEditLastAction` now reports the
-  `TextCommand` a text field's menu ran.
+- `takeTextEditLastAction` reports the `TextCommand` a text field's menu
+  ran.
 - Text areas keep their document as a finger tree of lines and repaint only
   the lines in view, so a keystroke in a 100,000-line document costs about
   1.4 ms on the headless profiler instead of about 26 ms.
-
 - A wheel notch scrolls three text lines instead of one, matching what
   desktops send a notch as. `setScrollTuning` puts it back.
+- `adoptStoreInt`, `adoptStoreFloat` and `adoptStoreText` return the value
+  they adopted.
+- `runClick` in `NanoUI.Testing.Harness` returns the release frame's result.
+- `NanoUI.Layout.Solve.positionWindowNode` is now `placeWindowNode`.
+- `SessionDriver` takes the session's debug sampler (`sdDebug`), whether to
+  redraw continuously (`sdContinuous`), a pacing wait (`sdPacingMs`) and
+  whether presents wait for the display (`sdPresentPaces`). The event loop
+  decides the wait itself, counts clicks with fixed thresholds, samples
+  debug timing, and syncs the cursor after every pass, so `sdWaitTimeout`,
+  `sdSkip`, `sdNoteLoop`, `sdClickDistance` and `sdClickTime` are gone.
+  `sdShouldDraw` also takes whether the debug readout is due.
+- `NanoUI.Debug` refreshes snapshots through `refreshDebugSnapshot` and
+  `debugRefreshDue` instead of `makeCoreDebugSnapshot`, `presentRate` and
+  `takeDebugLive`.
+- Lines are drawn as one anti-aliased strip with round caps instead of a
+  capsule per segment.
+- Tables encode each row once and sort row indices with a merge sort, combo
+  boxes filter their options only while focused, pane grid dividers and
+  overlays are keyed drawings, and unchanged animations are not rewritten
+  to the store, cutting per-frame work for those widgets.
+
+### Fixed
+
+- Where two widgets overlap, a press goes to the one hover highlights (the
+  earlier sibling, which paints on top).
+- Opening a modal or floating window no longer shifts the ids, and so the
+  state, of the widgets declared after it.
+- Ctrl+Alt (AltGr) characters type text in text areas, as they already did
+  in single-line fields.
+- `runTextCommand` focuses the field it runs on, so a command from an app
+  menu (Select All, say) shows its selection and the next keystroke goes to
+  the field.
+- `useDrag2D` does not start a drag during a menu's pointer gesture.
+- `drawingVersioned 0` is treated as unversioned, as `drawing` is.
+
+### Removed
+
+- `panelStyled` and `panelStyledWith`; use
+  `styled (panelStyle (background bg . borderColor border))` around a panel.
+- `MenuAction`; text field menus run `TextCommand`s.
+- `labelContentInset`, `panelPaintPad`, `resolveLayoutGap`,
+  `resolveLayoutPadding` and `tableCellInset` from `NanoUI`.
+- The `slot*` tag constants in `NanoUI.Store` and `NanoUI.Context`; use
+  `slotKey` with a `Slot` constructor.
+- `stopAnimation`, and store and state accessors from `NanoUI.Context` that
+  only internal code used, among them `deleteWidgetStore`, `setStoreBool`,
+  `writeStoreText`, `getPrevRects`, `setPrevRectsAndClips`,
+  `setOpenSelectDrop`, `setWindowDrag` and `setTextFieldClickCell`.
+- `withLayout` from `NanoUI.Monad` (`withIdFrame` is exported instead).
+- `stopAnimation` and `textDisplayWidth` from `NanoUI.Testing`.
+- `runClickPair` and `runClickRelease` from `NanoUI.Testing.Harness`; use
+  `runClick`.
+- The text area's `TextAreaEvent`, `handleTextAreaEvent`,
+  `computeTextAreaLayout`, `processTextArea`, `textAreaInputCommands`,
+  `TextAreaLayout`, `VisualLine` and `Modifiers` exports, and the
+  `NanoUI.Widgets.TextBuffer` edit functions (`insertChar`, `insertText`,
+  `deleteRange`, `replaceRange` and others). Drive text areas with
+  `TextCommand`s. `NanoUI.Widgets.TextEditor` exports `inputTextCommands`
+  in place of `ctrlCharCommand` and `isShortcutChar`.
+- Internal layout arena column constants and setters from
+  `NanoUI.Layout.Arena`, `TextAreaGeom`, `textAreaGeom` and
+  `textAreaBarLanes` from `NanoUI.Frame.TextEdit` (which exports
+  `textAreaBarLane` and `textAreaLineHeight`), and `resizeFromEdge` and `windowResizeEdgeAt`
+  from `NanoUI.Frame.Window`.
 
 ## 0.1.0.0
 
