@@ -348,7 +348,7 @@ paintTextNode env idx rect = do
     let deco = textNodeTextDecoration si
         weight = if isNative then WeightNormal else textNodeFontWeight si
         style = if isNative then FontStyleNormal else textNodeFontStyle si
-        plain = not isNative && deco == DecorationNone
+        plain = weight == WeightNormal && style == FontStyleNormal && deco == DecorationNone
     forM_ spans $ \(Rect tx ty _ _, line, spanFg, _) ->
       unless (T.null line) $
         if plain

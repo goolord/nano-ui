@@ -136,6 +136,7 @@ test-suite nano-ui-font-effects-test
         base ^>=4.22.0.0,
         nano-ui,
         nano-ui-sdl,
+        primitive ^>=0.9,
         text ^>=2.1
     if !flag(sdl)
         buildable: False

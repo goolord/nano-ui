@@ -20,7 +20,7 @@ module NanoUI.Frame.TextInput
   , collapseTextInputSelection
   ) where
 
-import Control.Monad (unless, when)
+import Control.Monad (forM_, unless, when)
 import qualified Data.IntMap.Strict as IM
 import Data.Maybe (mapMaybe)
 import Data.Text (Text)
@@ -44,7 +44,7 @@ import NanoUI.Context
   , nodeTheme
   )
 import NanoUI.Draw (DrawArena, pushRect)
-import NanoUI.Font (FontMetrics (..), centeredTextY, lineWidthIO, prepareFontMetrics, textIndexAtX, widgetContentInset)
+import NanoUI.Font (FontMetrics (..), caretXIO, centeredTextY, lineWidthIO, prepareFontMetrics, selectionSpans, textIndexAtX, widgetContentInset)
 import NanoUI.Frame.Chrome (textInputFocused, textInputValue)
 import NanoUI.Frame.Hit (findNodeByWidgetId)
 import NanoUI.Frame.Node (nodeFontMetrics)
@@ -192,8 +192,7 @@ computeTextInputScroll fm viewportW value cursor oldScroll isFocused
   | not isFocused = pure 0
   | viewportW <= 0 = pure 0
   | otherwise = do
-      let prefix = T.take cursor value
-      caretRelX <- lineWidthIO fm prefix
+      caretRelX <- caretXIO fm value cursor
       totalTextW <- lineWidthIO fm value
       let maxScroll = max 0 (totalTextW + 1 - viewportW)
           s0
@@ -238,16 +237,16 @@ drawTextInputSelection da ctx idx x y w h mScrollX = do
       (Rect _ boxY _ boxH, Rect clipX _ _ _) <- nodeTextFieldGeom ctx idx x y w h
       fm <- nodeFontMetrics ctx idx
       let lineH = fmLineHeight fm
-      wLo <- lineWidthIO fm (T.take selLo value)
-      wHi <- lineWidthIO fm (T.take selHi value)
+      prepared <- prepareFontMetrics fm value
       scrollX <- maybe (syncTextInputScroll ctx idx x y w h) pure mScrollX
-      drawTextSelectionLine
-        da
-        (clipX + wLo - scrollX)
-        (centeredTextY fm boxY boxH lineH)
-        (wHi - wLo)
-        lineH
-        (themeSelection theme)
+      forM_ (selectionSpans prepared value selLo selHi) $ \(wLo, wHi) ->
+        drawTextSelectionLine
+          da
+          (clipX + wLo - scrollX)
+          (centeredTextY fm boxY boxH lineH)
+          (wHi - wLo)
+          lineH
+          (themeSelection theme)
 
 drawTextInputCaret :: DrawArena -> Context -> NodeIdx -> Float -> Float -> Float -> Float -> Style -> IO ()
 drawTextInputCaret da ctx idx x y w h style = do
@@ -262,9 +261,8 @@ drawTextInputCaret da ctx idx x y w h style = do
       lbl <- getText (ctxNodeArena ctx) idx
       fm <- nodeFontMetrics ctx idx
       let fieldTxt = textInputFieldText lbl value focus
-          prefix = T.take cursor fieldTxt
           lineH = fmLineHeight fm
-      pw <- lineWidthIO fm prefix
+      pw <- caretXIO fm fieldTxt cursor
       (Rect _ boxY _ boxH, Rect clipX _ _ _) <- nodeTextFieldGeom ctx idx x y w h
       scrollX <- syncTextInputScroll ctx idx x y w h
       let (caretX, caretY, caretH) =

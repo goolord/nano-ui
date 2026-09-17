@@ -17,8 +17,9 @@ import Data.Char (isDigit)
 import Data.Foldable (for_)
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.List (maximumBy, minimumBy)
-import Data.Maybe (fromMaybe, isJust, isNothing, listToMaybe)
+import Data.Maybe (fromMaybe, isJust, listToMaybe)
 import Data.Ord (comparing)
+import Data.Primitive.PrimArray (sizeofPrimArray)
 import Data.Primitive.SmallArray (SmallArray)
 import NanoUI
 import NanoUI.Backend.Sdl
@@ -70,16 +71,16 @@ selftest continuous imgs ui = do
     runNorm <- lineWidthIO fmNorm16 "Slanted synthetic italic font style."
     runItal <- lineWidthIO fmItal16 "Slanted synthetic italic font style."
     when (abs (runNorm - wNorm) > 0.01) $
-      fail $ printf "selftest: shaped width mismatch for normal sentence: measure=%.2f, fmRun=%.2f" wNorm runNorm
+      fail $ printf "selftest: shaped width mismatch for normal sentence: measure=%.2f, shaped=%.2f" wNorm runNorm
     when (abs (runItal - wItal) > 0.01) $
-      fail $ printf "selftest: shaped width mismatch for italic sentence: measure=%.2f, fmRun=%.2f" wItal runItal
+      fail $ printf "selftest: shaped width mismatch for italic sentence: measure=%.2f, shaped=%.2f" wItal runItal
     putStrLn $ printf "MEASURE string: norm=%.1f, ital=%.1f" wNorm wItal
     let bracketTo :: String -> IO ()
         bracketTo tag = do
           (w, _) <- ctxResolveMeasure ctx 20.0 WeightNormal FontStyleNormal FontRegular "To"
           putStrLn $ printf "  [bracket %s] width(To)@20 = %.1f" tag w
     bracketTo "start"
-    -- The shaped run path (fmRun / pushText) must match SDL3_ttf measurement;
+    -- The shaped path (fmShape / pushText) must match SDL3_ttf measurement;
     -- catches regressions where per-glyph fallback ignored GPOS kerning for
     -- pairs like To, AV, and fi.
     (fmNorm20, _) <- ctxResolveFont ctx 20.0 WeightNormal FontStyleNormal FontRegular
@@ -89,7 +90,7 @@ selftest continuous imgs ui = do
           (wab, _) <- ctxResolveMeasure ctx 20.0 WeightNormal st FontRegular (T.pack pair)
           runW <- lineWidthIO fm (T.pack pair)
           when (abs (runW - wab) > 0.01) $
-            fail $ printf "selftest: %s shaped width mismatch for '%s': measure=%.2f, fmRun=%.2f" tag pair wab runW
+            fail $ printf "selftest: %s shaped width mismatch for '%s': measure=%.2f, shaped=%.2f" tag pair wab runW
     checkRun "norm" fmNorm20 FontStyleNormal "To"
     checkRun "ital" fmItal20 FontStyleItalic "To"
     checkRun "norm" fmNorm20 FontStyleNormal "AV"
@@ -128,24 +129,20 @@ selftest continuous imgs ui = do
     dumpFontLayout env 40.0 WeightNormal FontStyleNormal FontRegular "r the ovt"
     void $ saveFontRenderText env 20.0 WeightNormal FontStyleItalic FontRegular sentence
       (cacheDir </> "sdl_native_italic.bmp")
-    -- Regression (oversized shaped runs): a run wider than the 2048px glyph
-    -- atlas can never be inserted as a whole-run surface. The old fallback
-    -- reset the atlas mid-frame (quads already recorded sampled the wiped
-    -- texture, so earlier text vanished) and drew the run from the
-    -- atlas-origin UVs, which hit the white patch. Oversized runs must fall
-    -- back to per-glyph drawing (fmRun = Nothing); short runs keep their
-    -- shaped run quad.
+    -- Shaped text draws glyph by glyph, so a line wider than the 2048px glyph
+    -- atlas still gets quads and a width, and a short line gets one quad a
+    -- glyph.
     (fmBig, _) <- ctxResolveFont ctx 64.0 WeightNormal FontStyleNormal FontRegular
     let bigTxt = T.replicate 400 "f"
-    bigRun <- drawRun fmBig bigTxt
+    bigGlyphs <- drawShaped fmBig bigTxt
     bigWidth <- lineWidthIO fmBig bigTxt
-    shortRun <- drawRun fmBig "fits"
-    when (isJust bigRun) $
-      fail "selftest: oversized shaped run got a whole-run atlas quad"
+    shortGlyphs <- drawShaped fmBig "fits"
+    when (maybe True (\(ShapedGlyphs q) -> sizeofPrimArray q < 400 * 8) bigGlyphs) $
+      fail "selftest: a line wider than the atlas lost its glyphs"
     when (bigWidth <= 0) $
-      fail "selftest: per-glyph fallback lost the oversized run width"
-    when (isNothing shortRun) $
-      fail "selftest: short shaped run lost its whole-run atlas quad"
+      fail "selftest: a line wider than the atlas lost its width"
+    when (maybe True (\(ShapedGlyphs q) -> sizeofPrimArray q /= 4 * 8) shortGlyphs) $
+      fail "selftest: a short shaped line did not draw one quad a glyph"
     let idle =
           emptyInput
             { inputWindowSize = Size 1280 800

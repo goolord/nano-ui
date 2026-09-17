@@ -32,6 +32,20 @@
   at the display's scale, into the image atlas.
 - `spinner`, an indeterminate loading indicator that repaints only its own
   rect while it turns.
+- Shaped text in the SDL backend. Lines are laid out by SDL_ttf and
+  HarfBuzz with ligatures, contextual forms and marks, and drawn glyph by
+  glyph from the atlas. Arabic, Hebrew, Devanagari, CJK and other scripts
+  the UI font lacks are drawn from installed fallback fonts (Noto, DejaVu,
+  and the Windows and macOS system fonts), found the first time a text
+  needs them.
+- Mixed-direction lines: `NanoUI.Bidi` splits a line into left-to-right and
+  right-to-left runs in visual order (the implicit rules of UAX #9: strong
+  types, numbers, neutrals and reordering; no explicit embeddings or
+  isolates). Carets, clicks and selections in text fields follow the shaped
+  layout, so a selection across Arabic and Latin text covers a span per
+  run.
+- `ShapedText` and `ShapedGlyphs` let a host backend hand shaped layouts to
+  the core through `fmShape` and `drawShaped`.
 - Theme slots `themeOnAccent`, `themeSelection`, `themeFocusRing`,
   `themeLink`, `themeShadow` and `themeDisabledFade`, which replace colours
   that were fixed in the painters.
@@ -52,6 +66,13 @@
   `styled (panelStyle (background bg . borderColor border))` around a panel.
   `callout` tints the theme's panel colour instead of a fixed dark grey.
 - `uiTheme` returns the theme of the enclosing `styled` scope.
+- `RunQuad`, `fmRun` and `drawRun` are replaced by `fmShape` and
+  `drawShaped`. A backend without shaping sets `fmShape = const Nothing` and
+  keeps per-character advances and kerning.
+- In the SDL backend, bold and italic are drawn by the core's synthetic
+  weight and slant over the regular face, since SDL_ttf's style flags do not
+  match the glyph images shaped text draws. Text measurement uses the shaped
+  width, so layout and drawing agree.
 - `MenuAction` is gone; `takeTextEditLastAction` now reports the
   `TextCommand` a text field's menu ran.
 - Text areas keep their document as a finger tree of lines and repaint only

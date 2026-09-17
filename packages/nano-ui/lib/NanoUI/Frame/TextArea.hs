@@ -29,7 +29,7 @@ import NanoUI.Context
   , nodeTheme
   )
 import NanoUI.Draw (DrawArena, getDrawSnapScale, pushText, withClip)
-import NanoUI.Font (FontMetrics, lineWidthIO, prepareFontMetrics, textIndexAtX, widgetContentInset)
+import NanoUI.Font (FontMetrics, caretXIO, prepareFontMetrics, selectionSpans, textIndexAtX, widgetContentInset)
 import NanoUI.Frame.Chrome (paintScrollBarLayout, textInputFocused)
 import NanoUI.Frame.Hit (findNodeByWidgetId)
 import NanoUI.Frame.TextArea.Content
@@ -144,11 +144,10 @@ drawTextAreaSelectionLines da firstRow lastRow state geom fm theme = do
           startCol = clampCol (if row == loRow then TB.cursorCol lo else 0)
           endCol = clampCol (if row == hiRow then TB.cursorCol hi else T.length line)
       when (startCol < endCol) $ do
-        wLo <- lineWidthIO fm (T.take startCol line)
-        wHi <- lineWidthIO fm (T.take endCol line)
+        prepared <- prepareFontMetrics fm line
         let ly = contentTop + fromIntegral row * lineH - scrollYf
-            selX = rectX' field + ix + wLo - scrollXf
-        drawTextSelectionLine da selX ly (wHi - wLo) (max 4 lineH) selBg
+        forM_ (selectionSpans prepared line startCol endCol) $ \(wLo, wHi) ->
+          drawTextSelectionLine da (rectX' field + ix + wLo - scrollXf) ly (wHi - wLo) (max 4 lineH) selBg
   where
     rectX' (Rect rx _ _ _) = rx
     rectY' (Rect _ ry _ _) = ry
@@ -197,7 +196,7 @@ drawTextAreaContentWith da ctx fm idx x y w h style = do
     when focus $ do
       let TB.Cursor row col = TB.getCursor buf
           currentLine = TB.lineAt row buf
-      pw <- lineWidthIO fm (T.take col currentLine)
+      pw <- caretXIO fm currentLine col
       let (caretX, caretY, caretH) = selectionCaretGeom contentX (contentTop + fromIntegral row * lineH - scrollYf) pw lineH
       drawTextCaret da caretX caretY caretH fg
   let base = themePanel theme

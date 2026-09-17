@@ -1,5 +1,6 @@
 #include <SDL3/SDL.h>
 #include <SDL3_ttf/SDL_ttf.h>
+#include <SDL3_ttf/SDL_textengine.h>
 #include <stddef.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -20,10 +21,10 @@ TTF_Font *nano_ui_ttf_open_font(const char *path, float ptsize)
 {
     TTF_Font *font = TTF_OpenFont(path, ptsize);
     /* Kerning is on by default; pin it so shaping survives defaults changing. */
+    /* Direction and script stay unset: shaping detects them per run, so
+     * right-to-left and complex scripts shape as themselves. */
     if (font) {
         TTF_SetFontKerning(font, true);
-        TTF_SetFontDirection(font, TTF_DIRECTION_LTR);
-        TTF_SetFontScript(font, TTF_StringToTag("Latn"));
         /* Light grid-fitting snaps stems to whole pixels the way terminals
          * (alacritty/kitty) rasterize, giving crisp edges instead of soft,
          * grey antialiased outlines. NORMAL keeps fractional outlines. */
@@ -57,8 +58,6 @@ TTF_Font *nano_ui_ttf_open_font_memory(const void *data, size_t size, float ptsi
     SDL_DestroyProperties(props);
     if (font) {
         TTF_SetFontKerning(font, true);
-        TTF_SetFontDirection(font, TTF_DIRECTION_LTR);
-        TTF_SetFontScript(font, TTF_StringToTag("Latn"));
         TTF_SetFontHinting(font, TTF_HINTING_LIGHT);
     }
     return font;
@@ -68,13 +67,6 @@ void nano_ui_ttf_close_font(TTF_Font *font)
 {
     if (font) {
         TTF_CloseFont(font);
-    }
-}
-
-void nano_ui_ttf_set_font_style(TTF_Font *font, int style)
-{
-    if (font) {
-        TTF_SetFontStyle(font, (TTF_FontStyleFlags)style);
     }
 }
 
@@ -100,30 +92,6 @@ float nano_ui_ttf_space_advance(TTF_Font *font)
         return (float)advance;
     }
     return 0.f;
-}
-
-bool nano_ui_ttf_string_size(
-    TTF_Font *font,
-    const char *text,
-    size_t len,
-    float *out_w,
-    float *out_h)
-{
-    int w = 0;
-    int h = 0;
-    if (len == 0) {
-        text = "";
-    }
-    if (!TTF_GetStringSize(font, text, len, &w, &h)) {
-        return false;
-    }
-    if (out_w) {
-        *out_w = (float)w;
-    }
-    if (out_h) {
-        *out_h = (float)h;
-    }
-    return true;
 }
 
 bool nano_ui_ttf_glyph_metrics(
@@ -259,35 +227,6 @@ bool nano_ui_ttf_render_glyph_surface(
     }
 
     SDL_Surface *converted = glyph_image_to_rgba(raw, image_type);
-    SDL_DestroySurface(raw);
-    if (!converted) {
-        return false;
-    }
-
-    *out_surface = converted;
-    return true;
-}
-
-bool nano_ui_ttf_render_text_surface(
-    TTF_Font *font,
-    const char *text,
-    size_t len,
-    SDL_Surface **out_surface)
-{
-    if (!font || !text || !out_surface) {
-        return false;
-    }
-    if (len == 0) {
-        text = "";
-    }
-
-    SDL_Color white = {255, 255, 255, 255};
-    SDL_Surface *raw = TTF_RenderText_Blended(font, text, len, white);
-    if (!raw) {
-        return false;
-    }
-
-    SDL_Surface *converted = glyph_image_to_rgba(raw, TTF_IMAGE_ALPHA);
     SDL_DestroySurface(raw);
     if (!converted) {
         return false;
@@ -530,4 +469,217 @@ void nano_ui_ttf_dump_layout(TTF_Font *font, const char *text)
     if (TTF_GetStringSize(font, text, 0, &sw2, &sh2)) {
         printf("  TTF_GetStringSize: %dx%d\n", sw2, sh2);
     }
+}
+
+
+/* ------------------------------------------------------------------------ */
+/* Shaping                                                                  */
+/* ------------------------------------------------------------------------ */
+
+/* One shaped line, copied out of SDL_ttf's text layout: per glyph
+ * (text offset, glyph index, dst x y w h, src x y w h) and its font; per
+ * cluster (byte offset, byte length, x, width, flags). Coordinates are
+ * pixels from the top left of the line. */
+typedef struct NanoUIShaped {
+    int w;
+    int h;
+    int num_glyphs;
+    int *glyphs;
+    TTF_Font **glyph_fonts;
+    int num_clusters;
+    int *clusters;
+    /* Bytes of the caller's text; anything after is the sentinel. */
+    int text_len;
+} NanoUIShaped;
+
+static bool SDLCALL nano_ui_capture_text(void *userdata, TTF_Text *text)
+{
+    NanoUIShaped *out = (NanoUIShaped *)userdata;
+    TTF_TextData *d = text->internal;
+    int copies = 0;
+    for (int i = 0; i < d->num_ops; i++) {
+        if (d->ops[i].cmd == TTF_DRAW_COMMAND_COPY) {
+            copies++;
+        }
+    }
+    out->w = d->w;
+    out->h = d->h;
+    out->glyphs = (int *)SDL_calloc(copies > 0 ? copies : 1, 10 * sizeof(int));
+    out->glyph_fonts = (TTF_Font **)SDL_calloc(copies > 0 ? copies : 1, sizeof(TTF_Font *));
+    out->clusters = (int *)SDL_calloc(d->num_clusters > 0 ? d->num_clusters : 1, 5 * sizeof(int));
+    if (!out->glyphs || !out->glyph_fonts || !out->clusters) {
+        return false;
+    }
+    /* The sentinel ends a left-to-right line and starts a right-to-left
+     * one, which then shifts back by its advance. */
+    int shift = 0;
+    for (int i = 0; i < d->num_clusters; i++) {
+        TTF_SubString *c = &d->clusters[i];
+        if (c->offset >= out->text_len && c->length > 0) {
+            int advance = 0;
+            TTF_GetGlyphMetrics(d->font, '|', NULL, NULL, NULL, NULL, &advance);
+            out->w = d->w - advance;
+            if ((c->flags & TTF_SUBSTRING_DIRECTION_MASK) == TTF_DIRECTION_RTL) {
+                shift = advance;
+            }
+        }
+    }
+    int g = 0;
+    for (int i = 0; i < d->num_ops; i++) {
+        TTF_DrawOperation *op = &d->ops[i];
+        if (op->cmd != TTF_DRAW_COMMAND_COPY || op->copy.text_offset >= out->text_len) {
+            continue;
+        }
+        int *slot = out->glyphs + g * 10;
+        slot[0] = op->copy.text_offset;
+        slot[1] = (int)op->copy.glyph_index;
+        slot[2] = op->copy.dst.x - shift;
+        /* SDL_ttf places a fallback font's glyphs from that font's own
+         * ascent; align them to the line's font's baseline instead. */
+        slot[3] = op->copy.dst.y - (TTF_GetFontAscent(op->copy.glyph_font) - TTF_GetFontAscent(d->font));
+        slot[4] = op->copy.dst.w;
+        slot[5] = op->copy.dst.h;
+        slot[6] = op->copy.src.x;
+        slot[7] = op->copy.src.y;
+        slot[8] = op->copy.src.w;
+        slot[9] = op->copy.src.h;
+        out->glyph_fonts[g] = op->copy.glyph_font;
+        g++;
+    }
+    out->num_glyphs = g;
+    int k = 0;
+    for (int i = 0; i < d->num_clusters; i++) {
+        TTF_SubString *c = &d->clusters[i];
+        if (c->offset >= out->text_len) {
+            continue;
+        }
+        int *slot = out->clusters + k * 5;
+        slot[0] = c->offset;
+        slot[1] = c->length;
+        slot[2] = c->rect.x - shift;
+        slot[3] = c->rect.w;
+        slot[4] = (int)c->flags;
+        k++;
+    }
+    out->num_clusters = k;
+    d->engine_text = out;
+    return true;
+}
+
+static void SDLCALL nano_ui_release_text(void *userdata, TTF_Text *text)
+{
+    (void)userdata;
+    (void)text;
+}
+
+/* Shape one line with the font and its fallbacks, in a direction (0 lets
+ * SDL_ttf pick, TTF_DIRECTION_LTR or TTF_DIRECTION_RTL). The caller frees
+ * the result with nano_ui_ttf_shaped_free.
+ *
+ * The line is shaped with a '|' after it, whose glyph and cluster are then
+ * dropped. SDL_ttf 3.2 cuts a fallback span that ends the text one character
+ * past its last cluster, losing a vowel sign merged into that cluster, and
+ * trims the width of trailing spaces. */
+bool nano_ui_ttf_shape(TTF_Font *font, const char *text, size_t len, int direction, NanoUIShaped *out)
+{
+    SDL_zerop(out);
+    if (!font || !text || len == 0) {
+        return font != NULL;
+    }
+    TTF_TextEngine engine;
+    SDL_INIT_INTERFACE(&engine);
+    engine.userdata = out;
+    engine.CreateText = nano_ui_capture_text;
+    engine.DestroyText = nano_ui_release_text;
+    out->text_len = (int)len;
+    bool sentinel = TTF_FontHasGlyph(font, '|');
+    char *padded = SDL_malloc(len + 1);
+    if (!padded) {
+        return false;
+    }
+    SDL_memcpy(padded, text, len);
+    padded[len] = '|';
+    TTF_Text *t = TTF_CreateText(&engine, font, padded, sentinel ? len + 1 : len);
+    SDL_free(padded);
+    if (!t) {
+        return false;
+    }
+    if (direction != 0) {
+        TTF_SetTextDirection(t, (TTF_Direction)direction);
+    }
+    /* Laying the text out hands it to the engine, which copies it. */
+    int w = 0, h = 0;
+    bool ok = TTF_GetTextSize(t, &w, &h);
+    if (ok && out->glyphs == NULL) {
+        ok = TTF_UpdateText(t) && out->glyphs != NULL;
+    }
+    TTF_DestroyText(t);
+    return ok;
+}
+
+void nano_ui_ttf_shaped_free(NanoUIShaped *shaped)
+{
+    if (shaped) {
+        SDL_free(shaped->glyphs);
+        SDL_free(shaped->glyph_fonts);
+        SDL_free(shaped->clusters);
+        SDL_zerop(shaped);
+    }
+}
+
+size_t nano_ui_ttf_shaped_size(void)
+{
+    return sizeof(NanoUIShaped);
+}
+
+/* Fields of a shaped line: 0 width, 1 height, 2 glyph count, 3 cluster count. */
+int nano_ui_ttf_shaped_int(const NanoUIShaped *shaped, int field)
+{
+    switch (field) {
+    case 0: return shaped->w;
+    case 1: return shaped->h;
+    case 2: return shaped->num_glyphs;
+    case 3: return shaped->num_clusters;
+    default: return 0;
+    }
+}
+
+/* 0 glyphs, 1 glyph fonts, 2 clusters. */
+void *nano_ui_ttf_shaped_ptr(const NanoUIShaped *shaped, int field)
+{
+    switch (field) {
+    case 0: return shaped->glyphs;
+    case 1: return (void *)shaped->glyph_fonts;
+    case 2: return shaped->clusters;
+    default: return NULL;
+    }
+}
+
+bool nano_ui_ttf_render_glyph_index_surface(TTF_Font *font, Uint32 glyph_index, SDL_Surface **out_surface)
+{
+    if (!font || !out_surface) {
+        return false;
+    }
+    TTF_ImageType image_type = TTF_IMAGE_INVALID;
+    SDL_Surface *raw = TTF_GetGlyphImageForIndex(font, glyph_index, &image_type);
+    if (!raw) {
+        return false;
+    }
+    SDL_Surface *converted = glyph_image_to_rgba(raw, image_type);
+    SDL_DestroySurface(raw);
+    if (!converted) {
+        return false;
+    }
+    *out_surface = converted;
+    return true;
+}
+
+bool nano_ui_ttf_has_glyph(TTF_Font *font, Uint32 ch)
+{
+    return font && TTF_FontHasGlyph(font, ch);
+}
+
+bool nano_ui_ttf_add_fallback(TTF_Font *font, TTF_Font *fallback)
+{
+    return font && fallback && TTF_AddFallbackFont(font, fallback);
 }

@@ -485,7 +485,7 @@ cozetteMetrics =
     , fmSnapScale = 1.0
     , fmAdvance = \_ -> cozetteCharAdvance
     , fmKerning = \_ _ -> 0
-    , fmRun = \_ -> Nothing
+    , fmShape = \_ -> Nothing
     , fmGlyph = \_ -> Nothing
     , fmBackend = Nothing
     }

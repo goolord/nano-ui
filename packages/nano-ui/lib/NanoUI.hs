@@ -647,10 +647,11 @@ module NanoUI
   , measureTextIO
   , lineWidthIO
   , lineWidth
-  , drawRun
+  , drawShaped
   , drawGlyph
   , GlyphQuad (..)
-  , RunQuad (..)
+  , ShapedText (..)
+  , ShapedGlyphs (..)
   , scaleFontMetrics
   , monospaceMetrics
   , uiFontMetrics
@@ -716,10 +717,11 @@ import NanoUI.Font
   ( FontBackend (..)
   , FontMetrics (..)
   , GlyphQuad (..)
-  , RunQuad (..)
+  , ShapedText (..)
+  , ShapedGlyphs (..)
   , ScrollBarSlot (..)
   , drawGlyph
-  , drawRun
+  , drawShaped
   , labelContentInset
   , lineWidth
   , lineWidthIO

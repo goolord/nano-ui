@@ -128,6 +128,8 @@ module NanoUI.Testing
   , textDisplayWidth
   , lineWidth
   , textIndexAtX
+  , caretX
+  , selectionSpans
   , textNodeFontWeight
   , textNodeFontStyle
   , textNodeTextDecoration
@@ -209,7 +211,7 @@ import NanoUI.Draw
   , vertexSize
   )
 import NanoUI.Damage (floatingPanelRects)
-import NanoUI.Font (lineWidth, sliderTrackBounds, textDisplayWidth, textIndexAtX)
+import NanoUI.Font (caretX, lineWidth, selectionSpans, sliderTrackBounds, textDisplayWidth, textIndexAtX)
 import NanoUI.Widgets.ColorPicker
   ( colorPickerSvSquare
   , widgetStoreBaseColor

@@ -13,6 +13,7 @@ import Data.IORef (readIORef)
 import qualified Data.Text as T
 import Data.Vector (Vector)
 import qualified Data.Vector as V
+import Data.Primitive.PrimArray (indexPrimArray, sizeofPrimArray)
 import Data.Word (Word32)
 import NanoUI.Draw.Arena
 import NanoUI.Draw.Shapes
@@ -20,9 +21,9 @@ import NanoUI.Draw.Types (DrawArena (..), DrawOp (..), glyphAtlasTextureId, inde
 import NanoUI.Font
   ( FontMetrics (..)
   , GlyphQuad (..)
-  , RunQuad (..)
+  , ShapedGlyphs (..)
   , drawGlyph
-  , drawRun
+  , drawShaped
   , kernedAdvance
   , lineWidth
   , prepareFontMetrics
@@ -79,12 +80,51 @@ pushPreparedTextQuads :: DrawArena -> FontMetrics -> Float -> Float -> T.Text ->
 pushPreparedTextQuads da fm x y txt col = do
   let !px = onGrid (fmSnapScale fm) x
       !py = onGrid (fmSnapScale fm) y
-  -- The host's whole-run quad when it has one, otherwise upright glyph quads.
-  drawRun fm txt >>= \case
-    Just rq -> do
-      setTexture da glyphAtlasTextureId
-      pushQuad da (Rect (px + rqX rq) (py + rqY rq) (rqW rq) (rqH rq)) (rqU0 rq) (rqV0 rq) (rqU1 rq) (rqV1 rq) col
+  -- The host's shaped glyphs when it shapes, otherwise glyphs by character.
+  drawShaped fm txt >>= \case
+    Just glyphs -> pushShapedQuads da fm 0 px py glyphs col
     Nothing -> pushGlyphQuads da fm 0 px py txt col
+
+-- | A shaped line's glyph quads from pen @(px, py)@, sheared by @slant@
+-- around the baseline like 'pushGlyphQuads'.
+pushShapedQuads :: DrawArena -> FontMetrics -> Float -> Float -> Float -> ShapedGlyphs -> Color -> IO ()
+pushShapedQuads da fm slant px py (ShapedGlyphs quads) col = do
+  let !count = sizeofPrimArray quads `div` 8
+  when (count > 0) $ do
+    setTexture da glyphAtlasTextureId
+    withVertsReserve da (count * 4) (count * 6) $ \vp ip base baseIdx commit -> do
+      let !(r, g, b, a) = unpackColorF col
+          !baselineY = py + fmAscent fm
+          at k = indexPrimArray quads k
+          go !q
+            | q >= count = pure ()
+            | otherwise = do
+                let !o = q * 8
+                    !gx = px + at o
+                    !gy = py + at (o + 1)
+                    !gw = at (o + 2)
+                    !gh = at (o + 3)
+                    !u0 = at (o + 4)
+                    !v0 = at (o + 5)
+                    !u1 = at (o + 6)
+                    !v1 = at (o + 7)
+                    !vb = (base + q * 4) * vertexSize
+                    !ib = (baseIdx + q * 6) * indexSize
+                if slant == 0
+                  then pokeQuadSIMD vp vb ip ib gx gy gw gh u0 v0 u1 v1 r g b a (fromIntegral (base + q * 4))
+                  else do
+                    let !gy1 = gy + gh
+                        !topDx = slant * (baselineY - gy)
+                        !botDx = slant * (baselineY - gy1)
+                        !i0 = fromIntegral (base + q * 4) :: Word32
+                    pokeVertexSIMD vp vb (gx + topDx) gy r g b a u0 v0
+                    pokeVertexSIMD vp (vb + 32) (gx + gw + topDx) gy r g b a u1 v0
+                    pokeVertexSIMD vp (vb + 64) (gx + gw + botDx) gy1 r g b a u1 v1
+                    pokeVertexSIMD vp (vb + 96) (gx + botDx) gy1 r g b a u0 v1
+                    pokeQuadIndices ip ib i0 (i0 + 1) (i0 + 2) (i0 + 3)
+                go (q + 1)
+      go 0
+      commit (count * 4) (count * 6)
 
 -- | Glyph quads for one line from pen @(px, py)@, used as given: synthetic bold
 -- relies on its sub-pixel pass offsets. Every quad shares one arena
@@ -171,10 +211,12 @@ pushPreparedTextStyledQuads da fm weight fstyle deco x y txt col
             WeightBold -> [0, 1]
             WeightExtraBold -> [0, 1, 1.5]
             WeightBlack -> [0, 1, 1.5, 2]
+      shaped <- drawShaped fm txt
       if slant == 0 && weight == WeightNormal
         then pushPreparedTextQuads da fm px py txt col
-        else forM_ passes $ \k ->
-          pushGlyphQuads da fm slant (px + k * bOff) py txt col
+        else forM_ passes $ \k -> case shaped of
+          Just glyphs -> pushShapedQuads da fm slant (px + k * bOff) py glyphs col
+          Nothing -> pushGlyphQuads da fm slant (px + k * bOff) py txt col
       when (deco /= DecorationNone) $ do
         let !textW = lineWidth fm txt
             !thick = max 1.0 (0.06 * lh)

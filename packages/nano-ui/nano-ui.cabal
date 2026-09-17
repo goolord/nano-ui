@@ -87,6 +87,7 @@ library
         NanoUI.Frame.TextEdit
         NanoUI.Frame.Window
         NanoUI.Runner
+        NanoUI.Bidi
         NanoUI.SIMD
         NanoUI.Svg
     other-modules:
@@ -218,6 +219,7 @@ test-suite nano-ui-test
         Cases.Cache
         Cases.Runner
         Cases.SIMD
+        Cases.Shaping
         Cases.Styling
         Cases.Svg
         Cases.State
@@ -241,6 +243,7 @@ test-suite nano-ui-test
         effectful ^>=2.6,
         nano-ui,
         nothunks,
+        primitive ^>=0.9,
         text ^>=2.1,
         vector ^>=0.13
     hs-source-dirs:   test/integration

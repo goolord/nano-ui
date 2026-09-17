@@ -4,6 +4,7 @@
 -- normalised-filename heuristic.
 module NanoUI.Sdl.Font.Search
   ( searchFonts
+  , searchFontFamilies
   , listFontFamilies
   ) where
 
@@ -26,12 +27,25 @@ searchFonts :: [String] -> IO (Maybe FilePath)
 searchFonts names = case concatMap families names of
   [] -> pure Nothing
   candidates -> do
-    files <- allFontFiles
+    files <- fontStems
     pure (listToMaybe (mapMaybe (`bestMatch` files) candidates))
   where
     families name =
       let norm = normalize name
        in if null norm then [] else maybe [norm] (concatMap families) (expandGeneric norm)
+
+-- | The file for each family that is installed, in the order asked, reading
+-- the font directories once.
+searchFontFamilies :: [String] -> IO [FilePath]
+searchFontFamilies names = do
+  files <- fontStems
+  pure (nubOrdered (mapMaybe (\name -> bestMatch (normalize name) files) names))
+  where
+    nubOrdered = go Set.empty
+    go _ [] = []
+    go seen (x : xs)
+      | Set.member x seen = go seen xs
+      | otherwise = x : go (Set.insert x seen) xs
 
 -- | Human-readable names for every installed font family, deduped and sorted.
 -- Each name is a usable 'searchFonts' token: the same normalization is applied
@@ -72,6 +86,11 @@ allFontFiles :: IO [FilePath]
 allFontFiles = do
   roots <- defaultFontDirs
   concat <$> mapM (fmap (sort . filter isFontFile) . filesBelow) roots
+
+-- | Every font file with its normalised name, normalised once for all the
+-- families matched against it.
+fontStems :: IO [(String, FilePath)]
+fontStems = map (\path -> (normalize (takeBaseName path), path)) <$> allFontFiles
 
 filesBelow :: FilePath -> IO [FilePath]
 filesBelow root =
@@ -119,20 +138,16 @@ isFontFile path =
 -- Family matching
 
 -- | Pick the highest-scoring file for @norm@ (a normalised family name).
-bestMatch :: String -> [FilePath] -> Maybe FilePath
+bestMatch :: String -> [(String, FilePath)] -> Maybe FilePath
 bestMatch norm files =
-  case [(score, path) | path <- files, Just score <- [scoreFile norm path]] of
+  case [(score, path) | (stem, path) <- files, Just score <- [maximum (Nothing : map (`matchScore` stem) candidates)]] of
     [] -> Nothing
     scored ->
       -- minimumBy keeps the first tie; descending scores prefer the best face.
       let (_, best) = minimumBy (comparing (Down . fst)) scored
        in Just best
-
-scoreFile :: String -> FilePath -> Maybe Int
-scoreFile norm path =
-  let stem = normalize (takeBaseName path)
-      candidates = norm : familyAliases norm
-   in maximum (Nothing : map (`matchScore` stem) candidates)
+  where
+    candidates = norm : familyAliases norm
 
 matchScore :: String -> String -> Maybe Int
 matchScore "" _ = Nothing

@@ -16,6 +16,7 @@ import Cases.PointerRelease
   )
 import Cases.Runner (runDrawingLockTest, runSessionLoopTest)
 import Cases.SIMD (runSimdWritesTest)
+import Cases.Shaping (runBidiRunsTest, runShapedCaretTest)
 import Cases.Svg (runSvgIconTest, runSvgRasterTest)
 import Cases.Styling
   ( runDisabledFocusOrderTest
@@ -105,6 +106,8 @@ testSpecs =
   , TestSpec "draw-external-text" False runExternalTextTest
   , TestSpec "drawing" False runDrawingTest
   , TestSpec "image" False runImageTest
+  , TestSpec "bidi-runs" False runBidiRunsTest
+  , TestSpec "shaped-carets" False runShapedCaretTest
   , TestSpec "svg-raster" False runSvgRasterTest
   , TestSpec "svg-icon" False runSvgIconTest
   , TestSpec "empty-frame" False runEmptyFrameTest

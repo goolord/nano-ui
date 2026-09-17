@@ -2,7 +2,8 @@
 
 module NanoUI.Font
   ( GlyphQuad (..)
-  , RunQuad (..)
+  , ShapedText (..)
+  , ShapedGlyphs (..)
   , FontMetrics (..)
   , FontBackend (..)
   , CustomMeasureFn
@@ -10,8 +11,11 @@ module NanoUI.Font
   , prepareFontMetricsMany
   , measureTextIO
   , lineWidthIO
-  , drawRun
+  , drawShaped
   , drawGlyph
+  , caretX
+  , caretXIO
+  , selectionSpans
   , monospaceMetrics
   , scaleFontMetrics
   , measureText
@@ -66,6 +70,7 @@ module NanoUI.Font
   ) where
 
 import qualified Data.Map.Strict as Map
+import Data.Primitive.PrimArray (PrimArray, imapPrimArray, indexPrimArray, mapPrimArray, sizeofPrimArray)
 import Data.Text (Text)
 import qualified Data.Text as T
 import NanoUI.Types (Rect (..), onGrid)
@@ -83,17 +88,24 @@ data GlyphQuad = GlyphQuad
   }
   deriving (Eq, Show)
 
-data RunQuad = RunQuad
-  { rqX :: {-# UNPACK #-} !Float
-  , rqY :: {-# UNPACK #-} !Float
-  , rqW :: {-# UNPACK #-} !Float
-  , rqH :: {-# UNPACK #-} !Float
-  , rqU0 :: {-# UNPACK #-} !Float
-  , rqV0 :: {-# UNPACK #-} !Float
-  , rqU1 :: {-# UNPACK #-} !Float
-  , rqV1 :: {-# UNPACK #-} !Float
-  , rqAdvance :: {-# UNPACK #-} !Float
+-- | A line of text as the host's shaper laid it out: glyphs chosen and placed
+-- with the font's kerning, ligatures and contextual forms, in fallback fonts
+-- where the font lacks a character, and right-to-left runs reordered.
+data ShapedText = ShapedText
+  { stAdvance :: {-# UNPACK #-} !Float
+  , stInkEnd :: {-# UNPACK #-} !Float
+  -- ^ The right edge of the rightmost glyph's ink.
+  , stCarets :: !(PrimArray Float)
+  -- ^ Where the caret sits before each character, and after the last: one
+  -- more entry than the text has characters. A right-to-left run's carets
+  -- decrease, and the characters of a cluster share its width.
   }
+  deriving (Eq, Show)
+
+-- | The glyph quads that draw a shaped line: eight numbers a glyph (x, y,
+-- width and height from the pen, then the atlas UVs u0 v0 u1 v1), in logical
+-- pixels. Valid until the host's glyph atlas next resets.
+newtype ShapedGlyphs = ShapedGlyphs (PrimArray Float)
   deriving (Eq, Show)
 
 data FontMetrics = FontMetrics
@@ -105,7 +117,9 @@ data FontMetrics = FontMetrics
   , fmSnapScale :: {-# UNPACK #-} !Float
   , fmAdvance :: Char -> Float
   , fmKerning :: Char -> Char -> Float
-  , fmRun :: Text -> Maybe RunQuad
+  , fmShape :: Text -> Maybe ShapedText
+  -- ^ The shaped layout of a text the snapshot was prepared for, when the
+  -- host shapes. Other texts fall back to 'fmAdvance' and 'fmKerning'.
   , fmGlyph :: Char -> Maybe GlyphQuad
   -- | Optional effectful backend. Pure callbacks above are immutable metric
   -- snapshots; they must never perform font loading or atlas mutation.
@@ -116,7 +130,7 @@ data FontMetrics = FontMetrics
 -- snapshot for pure layout. Rasterisation is separate and occurs during draw.
 data FontBackend = FontBackend
   { fbPrepare :: Text -> IO FontMetrics
-  , fbDrawRun :: Text -> IO (Maybe RunQuad)
+  , fbDrawShaped :: Text -> IO (Maybe ShapedGlyphs)
   , fbDrawGlyph :: Char -> IO (Maybe GlyphQuad)
   }
 
@@ -136,11 +150,11 @@ prepareFontMetricsMany fm texts = case fmBackend fm of
   Nothing -> pure fm
   Just _ -> do
     combined <- prepareFontMetrics fm (T.intercalate "\n" texts)
-    runs <- mapM (\t -> do
+    shapes <- mapM (\t -> do
       prepared <- prepareFontMetrics fm t
-      pure (t, fmRun prepared t)) texts
-    let !byText = Map.fromList runs
-    pure combined {fmRun = \t -> Map.findWithDefault Nothing t byText}
+      pure (t, fmShape prepared t)) texts
+    let !byText = Map.fromList shapes
+    pure combined {fmShape = \t -> Map.findWithDefault Nothing t byText}
 
 {-# INLINE lineWidthIO #-}
 lineWidthIO :: FontMetrics -> Text -> IO Float
@@ -154,11 +168,13 @@ measureTextIO fm txt = do
   prepared <- prepareFontMetrics fm txt
   pure $! measureText prepared txt
 
-{-# INLINE drawRun #-}
-drawRun :: FontMetrics -> Text -> IO (Maybe RunQuad)
-drawRun fm txt = case fmBackend fm of
-  Nothing -> pure (fmRun fm txt)
-  Just backend -> fbDrawRun backend txt
+-- | The glyph quads of a shaped line, placing glyphs in the host's atlas as
+-- needed; 'Nothing' when the host does not shape.
+{-# INLINE drawShaped #-}
+drawShaped :: FontMetrics -> Text -> IO (Maybe ShapedGlyphs)
+drawShaped fm txt = case fmBackend fm of
+  Nothing -> pure Nothing
+  Just backend -> fbDrawShaped backend txt
 
 {-# INLINE drawGlyph #-}
 drawGlyph :: FontMetrics -> Char -> IO (Maybe GlyphQuad)
@@ -174,7 +190,7 @@ monospaceMetrics cell =
     , fmSnapScale = 1.0
     , fmAdvance = \_ -> cell
     , fmKerning = \_ _ -> 0
-    , fmRun = \_ -> Nothing
+    , fmShape = \_ -> Nothing
     , fmGlyph = \_ -> Nothing
     , fmBackend = Nothing
     }
@@ -190,7 +206,7 @@ scaleFontMetrics s fm
         , fmSnapScale = fmSnapScale fm
         , fmAdvance = \c -> fmAdvance fm c * s
         , fmKerning = \a b -> fmKerning fm a b * s
-        , fmRun = \t -> fmap scaleRun (fmRun fm t)
+        , fmShape = \t -> fmap scaleShape (fmShape fm t)
         , fmGlyph = \c -> case fmGlyph fm c of
             Nothing -> Nothing
             Just gq ->
@@ -206,22 +222,22 @@ scaleFontMetrics s fm
   where
     scaleBackend backend = FontBackend
       { fbPrepare = \t -> scaleFontMetrics s <$> fbPrepare backend t
-      , fbDrawRun = \t -> fmap (fmap scaleRun) (fbDrawRun backend t)
+      , fbDrawShaped = \t -> fmap (fmap scaleGlyphs) (fbDrawShaped backend t)
       , fbDrawGlyph = \c -> fmap (fmap scaleGlyph) (fbDrawGlyph backend c)
       }
     scaleGlyph gq = gq
       { gqX = gqX gq * s, gqY = gqY gq * s
       , gqW = gqW gq * s, gqH = gqH gq * s
       }
-    scaleRun rq =
-      rq
-        { rqX = rqX rq * s
-        , rqY = rqY rq * s
-        , rqW = rqW rq * s
-        , rqH = rqH rq * s
-        , rqAdvance = rqAdvance rq * s
-        -- UVs stay in normalised atlas space; do not scale them.
+    scaleShape st =
+      st
+        { stAdvance = stAdvance st * s
+        , stInkEnd = stInkEnd st * s
+        , stCarets = mapPrimArray (* s) (stCarets st)
         }
+    -- UVs stay in normalised atlas space; only positions and sizes scale.
+    scaleGlyphs (ShapedGlyphs quads) =
+      ShapedGlyphs (imapPrimArray (\i v -> if i `mod` 8 < 4 then v * s else v) quads)
 
 -- Layout gap/pad are authored in pixel steps (see defaultLayout).
 {-# INLINE resolveLayoutGap #-}
@@ -331,8 +347,8 @@ textInkEnd fm txt =
   case T.unsnoc txt of
     Nothing -> 0
     Just (prefix, c) ->
-      case fmRun fm txt of
-        Just rq -> rqX rq + rqW rq
+      case fmShape fm txt of
+        Just st -> stInkEnd st
         Nothing ->
           let pen = lineWidth fm prefix
            in case fmGlyph fm c of
@@ -507,11 +523,24 @@ kernedAdvance fm prev c = case prev of
   Nothing -> fmAdvance fm c
   Just p -> fmAdvance fm c + fmKerning fm p c
 
--- Caret and click index using the same advances and kerning as pushText,
--- so the caret lands exactly where the glyph to its left was drawn.
+-- | The character index whose caret is nearest @x@: from the shaped carets
+-- when the text was prepared by a shaping host, which handles clusters and
+-- right-to-left runs, and otherwise from the same advances and kerning as
+-- 'NanoUI.Draw.pushText', so the caret lands where the glyph to its left was
+-- drawn.
 textIndexAtX :: FontMetrics -> Text -> Float -> Int
 textIndexAtX fm txt x
-  | T.null txt || x <= 0 = 0
+  | T.null txt = 0
+  | Just st <- fmShape fm txt =
+      let carets = stCarets st
+          n = sizeofPrimArray carets
+          nearest !best !bestD !i
+            | i >= n = best
+            | otherwise =
+                let d = abs (indexPrimArray carets i - x)
+                 in if d < bestD then nearest i d (i + 1) else nearest best bestD (i + 1)
+       in nearest 0 (1 / 0) 0
+  | x <= 0 = 0
   | otherwise = go 0 0.0 Nothing txt
   where
     go !i !acc prev t =
@@ -522,12 +551,48 @@ textIndexAtX fm txt x
               mid = acc + adv * 0.5
            in if x < mid then i else go (i + 1) (acc + adv) (Just c) rest
 
+-- | Where the caret before character @i@ of @txt@ sits: a shaped caret when
+-- the snapshot was prepared for @txt@, else the width of the characters
+-- before it.
+caretX :: FontMetrics -> Text -> Int -> Float
+caretX fm txt i = case fmShape fm txt of
+  Just st ->
+    let carets = stCarets st
+     in if sizeofPrimArray carets == 0 then 0 else indexPrimArray carets (max 0 (min (sizeofPrimArray carets - 1) i))
+  Nothing -> lineWidth fm (T.take i txt)
+
+caretXIO :: FontMetrics -> Text -> Int -> IO Float
+caretXIO fm txt i = do
+  prepared <- prepareFontMetrics fm txt
+  pure $! caretX prepared txt i
+
+-- | The horizontal extents covering characters @lo@ to @hi@: one span for
+-- left-to-right text, and a span per direction run where a selection crosses
+-- right-to-left text.
+selectionSpans :: FontMetrics -> Text -> Int -> Int -> [(Float, Float)]
+selectionSpans fm txt lo hi
+  | hi <= lo = []
+  | Just st <- fmShape fm txt =
+      let carets = stCarets st
+          n = sizeofPrimArray carets - 1
+          charSpan i =
+            let a = indexPrimArray carets i
+                b = indexPrimArray carets (i + 1)
+             in (min a b, max a b)
+          merge [] = []
+          merge [one] = [one]
+          merge ((a0, a1) : (b0, b1) : rest)
+            | b0 <= a1 + 0.5 && b1 >= a0 - 0.5 = merge ((min a0 b0, max a1 b1) : rest)
+            | otherwise = (a0, a1) : merge ((b0, b1) : rest)
+       in merge [charSpan i | i <- [max 0 lo .. min n hi - 1]]
+  | otherwise = [(caretX fm txt lo, caretX fm txt hi)]
+
 lineWidth :: FontMetrics -> Text -> Float
 lineWidth fm line
   | T.null line = 0
   | otherwise =
-      case fmRun fm line of
-        Just rq -> rqAdvance rq
+      case fmShape fm line of
+        Just st -> stAdvance st
         Nothing ->
           let !spaceAdv = fmAdvance fm ' '
               !xAdv = fmAdvance fm 'x'
