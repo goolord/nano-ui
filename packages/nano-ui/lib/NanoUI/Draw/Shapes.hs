@@ -357,28 +357,24 @@ pushSquareStroke da x y w h t col = do
   edge x (y + t) t innerH
   edge (x + w - t) (y + t) t innerH
 
+-- | A line @thickness@ wide with round caps: a coverage-AA strip with a
+-- round cap on each end. An axis-aligned line is a plain rect spanning its
+-- caps.
 {-# INLINE pushLine #-}
 pushLine :: DrawArena -> Float -> Float -> Float -> Float -> Float -> Color -> IO ()
 pushLine da x1 y1 x2 y2 thickness col = do
   square <- readIORef (daSquareGeometry da)
+  let !r = thickness / 2
+      cap cx cy = pushRoundedRect da (Rect (cx - r) (cy - r) thickness thickness) r col
   if square
     then pushStroke da x1 y1 x2 y2 thickness col
-    else pushLineCapsules da x1 y1 x2 y2 thickness col
-
-pushLineCapsules :: DrawArena -> Float -> Float -> Float -> Float -> Float -> Color -> IO ()
-pushLineCapsules da x1 y1 x2 y2 thickness col =
-  case strokeAxes x1 y1 x2 y2 of
-    Nothing -> pure ()
-    Just (dx, dy, len) -> do
-      setTexture da glyphAtlasTextureId
-      let r = thickness / 2
-          step = max 0.3 (r * 0.4)
-          n = max (1 :: Int) (ceiling (len / step))
-      loopIO 0 n $ \i -> do
-        let u = fromIntegral i / fromIntegral n
-            cx = x1 + dx * u
-            cy = y1 + dy * u
-        pushRoundedRect da (Rect (cx - r) (cy - r) thickness thickness) r col
+    else
+      if x1 == x2 || y1 == y2
+        then pushRect da (Rect (min x1 x2 - r) (min y1 y2 - r) (abs (x2 - x1) + thickness) (abs (y2 - y1) + thickness)) col
+        else when (thickness > 0) $ do
+          pushStrokeAA da x1 y1 x2 y2 thickness col
+          cap x1 y1
+          cap x2 y2
 
 -- Coverage-AA strip for a straight segment. Same weight as pushCornerArcStroke,
 -- without round caps that blob at rounded-rect corners.
@@ -411,7 +407,7 @@ strokeAxes x0 y0 x1 y1 =
       len = sqrt (dx * dx + dy * dy)
    in if len < 0.001 then Nothing else Just (dx, dy, len)
 
--- One quad per segment. Plots and diagrams use this; pushLine stamps capsules.
+-- One quad per segment. Plots and diagrams use this; pushLine adds round caps.
 pushStroke :: DrawArena -> Float -> Float -> Float -> Float -> Float -> Color -> IO ()
 pushStroke da x1 y1 x2 y2 thickness col
   | thickness <= 0 = pure ()
