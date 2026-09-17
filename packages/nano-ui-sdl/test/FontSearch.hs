@@ -29,8 +29,11 @@ main = bracket temporaryRoot removePathForcibly $ \root ->
       regular = fonts </> "NanoSearchFixture-Regular.ttf"
       bold = fonts </> "NanoSearchFixture-Bold.ttf"
       fallback = fonts </> "NanoFallbackFixture.otf"
+      boldOnly = fonts </> "NanoBoldOnlyFixture-Bold.ttf"
+    -- The font directories are walked once per process, so every fixture
+    -- exists before the first search.
     createDirectoryIfMissing True fonts
-    mapM_ (`writeFile` "") [regular, bold, fallback]
+    mapM_ (`writeFile` "") [regular, bold, fallback, boldOnly]
     expect "regular face" (Just regular) =<< searchFonts ["Nano Search Fixture"]
     expect "ordered fallback" (Just fallback)
       =<< searchFonts
@@ -42,8 +45,7 @@ main = bracket temporaryRoot removePathForcibly $ \root ->
       "deduplicated family"
       ["Nano Search Fixture"]
       (filter (== "Nano Search Fixture") families)
-    removeFile regular
-    expect "non-regular fallback" (Just bold) =<< searchFonts ["NanoSearchFixture"]
+    expect "non-regular fallback" (Just boldOnly) =<< searchFonts ["NanoBoldOnlyFixture"]
     putStrLn "font search: ok"
 
 expect :: (Eq a, Show a) => String -> a -> a -> IO ()

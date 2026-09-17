@@ -9,6 +9,8 @@ module NanoUI.Sdl.Font.Search
   ) where
 
 import Control.Exception (IOException, catch)
+import Data.Containers.ListUtils (nubOrd)
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Char (isDigit, isLower, isSpace, isUpper, toLower)
 import Data.List (isInfixOf, minimumBy, sort, stripPrefix)
 import Data.Maybe (fromMaybe, listToMaybe, mapMaybe)
@@ -19,6 +21,7 @@ import System.Directory.Recursive (getFilesRecursive)
 import System.Environment (lookupEnv)
 import System.FilePath (takeBaseName, takeExtension, (</>))
 import System.Info (os)
+import System.IO.Unsafe (unsafePerformIO)
 
 -- | Try each family name in order, returning the first font file that
 -- matches.  Generic families like @monospace@ are expanded to a list of
@@ -39,13 +42,7 @@ searchFonts names = case concatMap families names of
 searchFontFamilies :: [String] -> IO [FilePath]
 searchFontFamilies names = do
   files <- fontStems
-  pure (nubOrdered (mapMaybe (\name -> bestMatch (normalize name) files) names))
-  where
-    nubOrdered = go Set.empty
-    go _ [] = []
-    go seen (x : xs)
-      | Set.member x seen = go seen xs
-      | otherwise = x : go (Set.insert x seen) xs
+  pure (nubOrd (mapMaybe (\name -> bestMatch (normalize name) files) names))
 
 -- | Human-readable names for every installed font family, deduped and sorted.
 -- Each name is a usable 'searchFonts' token: the same normalization is applied
@@ -55,8 +52,8 @@ searchFontFamilies names = do
 -- result themselves.
 listFontFamilies :: IO [String]
 listFontFamilies = do
-  files <- allFontFiles
-  pure (Set.toAscList (Set.fromList (map (prettyFamily . takeBaseName) files)))
+  files <- fontStems
+  pure (Set.toAscList (Set.fromList (map (prettyFamily . takeBaseName . snd) files)))
 
 -- | Filename stem -> display family. Everything from the first @-@ is treated
 -- as style (\"Regular\", \"Bold Italic\", ...); camel case is split so
@@ -79,18 +76,25 @@ prettyFamily = separateCamel . stripStyle
 -- ---------------------------------------------------------------------------
 -- Directory traversal
 
--- | Every font file under every standard font directory for this platform.
--- User directories come first so that user-installed fonts win over system
--- ones; missing or unreadable roots are skipped.
-allFontFiles :: IO [FilePath]
-allFontFiles = do
-  roots <- defaultFontDirs
-  concat <$> mapM (fmap (sort . filter isFontFile) . filesBelow) roots
-
--- | Every font file with its normalised name, normalised once for all the
--- families matched against it.
+-- | Every font file under every standard font directory for this platform,
+-- with its normalised name, normalised once for all the families matched
+-- against it. User directories come first so that user-installed fonts win
+-- over system ones; missing or unreadable roots are skipped. The directories
+-- are walked once per process.
 fontStems :: IO [(String, FilePath)]
-fontStems = map (\path -> (normalize (takeBaseName path), path)) <$> allFontFiles
+fontStems =
+  readIORef fontStemsRef >>= \case
+    Just stems -> pure stems
+    Nothing -> do
+      roots <- defaultFontDirs
+      files <- concat <$> mapM (fmap (sort . filter isFontFile) . filesBelow) roots
+      let stems = map (\path -> (normalize (takeBaseName path), path)) files
+      writeIORef fontStemsRef (Just stems)
+      pure stems
+
+{-# NOINLINE fontStemsRef #-}
+fontStemsRef :: IORef (Maybe [(String, FilePath)])
+fontStemsRef = unsafePerformIO (newIORef Nothing)
 
 filesBelow :: FilePath -> IO [FilePath]
 filesBelow root =
