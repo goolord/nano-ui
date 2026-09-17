@@ -38,7 +38,25 @@ import NanoUI.Input (MouseButton (..), appendDropEvent, applyMouseButton)
 import NanoUI.Sdl.Display (refreshEventType)
 import SDL3.Sys.Bindgen.Events
   ( SDL_Event (..)
+  , SDL_EventType (..)
   , SDL_KeyboardEvent
+  , data SDL_EVENT_DROP_BEGIN
+  , data SDL_EVENT_DROP_COMPLETE
+  , data SDL_EVENT_DROP_FILE
+  , data SDL_EVENT_DROP_POSITION
+  , data SDL_EVENT_DROP_TEXT
+  , data SDL_EVENT_KEY_DOWN
+  , data SDL_EVENT_MOUSE_BUTTON_DOWN
+  , data SDL_EVENT_MOUSE_BUTTON_UP
+  , data SDL_EVENT_MOUSE_MOTION
+  , data SDL_EVENT_MOUSE_WHEEL
+  , data SDL_EVENT_QUIT
+  , data SDL_EVENT_TEXT_INPUT
+  , data SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED
+  , data SDL_EVENT_WINDOW_EXPOSED
+  , data SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED
+  , data SDL_EVENT_WINDOW_RESIZED
+  , data SDL_EVENT_WINDOW_RESTORED
   )
 import SDL3.Sys.Events (pollEventSafe, waitEventSafe, waitEventTimeoutSafe)
 import SDL3.Sys.Bindgen.Keycode
@@ -61,7 +79,7 @@ import SDL3.Sys.Bindgen.Keycode
   )
 import SDL3.Sys.Bindgen.Mouse (sDL_BUTTON_LEFT, sDL_BUTTON_RIGHT)
 import SDL3.Sys.Bindgen.Stdinc (Sint32 (..), Uint32 (..))
-import SDL3.Sys.Keyboard (getModStateSafe)
+import SDL3.Sys.Keyboard (getModState)
 
 data SdlEvent
   = EvQuit
@@ -70,7 +88,7 @@ data SdlEvent
   | EvKey Key Modifiers
   | EvText Text Modifiers
   | EvMouseMotion V2 Modifiers
-  | EvMousePress V2 Modifiers Int
+  | EvMousePress V2 Modifiers
   | EvMouseRelease V2 Modifiers
   | EvMouseRightPress V2 Modifiers
   | EvMouseRightRelease V2 Modifiers
@@ -111,29 +129,28 @@ decodeEvent refreshTy p = do
   Uint32 w <- peek p.type'
   if refreshTy /= 0 && w == refreshTy
     then pure (Just EvRefresh)
-    else case w of
-      256 -> pure (Just EvQuit)
-      518 -> Just <$> windowResized p
+    else case SDL_EventType (fromIntegral w) of
+      SDL_EVENT_QUIT -> pure (Just EvQuit)
+      SDL_EVENT_WINDOW_RESIZED -> Just <$> windowResized p
       -- Pixel size changes are ignored here; syncDisplay re-queries logical size.
-      519 -> pure (Just EvDisplayScale)
-      532 -> pure (Just EvDisplayScale)
-      -- SDL_EVENT_WINDOW_EXPOSED (0x204) / RESTORED (0x20B): the window
-      -- manager damaged our window surface (occlusion, compositor effects,
-      -- restore). The backbuffer contents are gone; the next present must
-      -- be full or stale regions flash.
-      516 -> pure (Just EvWindowRedraw)
-      523 -> pure (Just EvWindowRedraw)
-      768 -> keyDown p
-      771 -> textInput p
-      1024 -> Just <$> mouseMotion p
-      1025 -> mouseButton p True
-      1026 -> mouseButton p False
-      1027 -> Just <$> mouseWheel p
-      4096 -> Just <$> dropEvent p DropFile
-      4097 -> Just <$> dropEvent p DropText
-      4098 -> Just <$> dropEvent p DropBegin
-      4099 -> Just <$> dropEvent p DropComplete
-      4100 -> Just <$> dropEvent p DropPosition
+      SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED -> pure (Just EvDisplayScale)
+      SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED -> pure (Just EvDisplayScale)
+      -- The window manager damaged our window surface (occlusion, compositor
+      -- effects, restore). The backbuffer contents are gone; the next present
+      -- must be full or stale regions flash.
+      SDL_EVENT_WINDOW_EXPOSED -> pure (Just EvWindowRedraw)
+      SDL_EVENT_WINDOW_RESTORED -> pure (Just EvWindowRedraw)
+      SDL_EVENT_KEY_DOWN -> keyDown p
+      SDL_EVENT_TEXT_INPUT -> textInput p
+      SDL_EVENT_MOUSE_MOTION -> Just <$> mouseMotion p
+      SDL_EVENT_MOUSE_BUTTON_DOWN -> mouseButton p True
+      SDL_EVENT_MOUSE_BUTTON_UP -> mouseButton p False
+      SDL_EVENT_MOUSE_WHEEL -> Just <$> mouseWheel p
+      SDL_EVENT_DROP_FILE -> Just <$> dropEvent p DropFile
+      SDL_EVENT_DROP_TEXT -> Just <$> dropEvent p DropText
+      SDL_EVENT_DROP_BEGIN -> Just <$> dropEvent p DropBegin
+      SDL_EVENT_DROP_COMPLETE -> Just <$> dropEvent p DropComplete
+      SDL_EVENT_DROP_POSITION -> Just <$> dropEvent p DropPosition
       _ -> pure Nothing
 
 keyDown :: Ptr SDL_Event -> IO (Maybe SdlEvent)
@@ -181,10 +198,9 @@ mouseButton p down = do
       y = getField @"y" be :: CFloat
       pos = V2 (realToFrac x) (realToFrac y)
       btn = getField @"button" be
-      clicks = fromIntegral (getField @"clicks" be) :: Int
   pure $
     if btn == fromIntegral sDL_BUTTON_LEFT
-      then Just (if down then EvMousePress pos mods (max 1 clicks) else EvMouseRelease pos mods)
+      then Just (if down then EvMousePress pos mods else EvMouseRelease pos mods)
       else
         if btn == fromIntegral sDL_BUTTON_RIGHT
           then Just (if down then EvMouseRightPress pos mods else EvMouseRightRelease pos mods)
@@ -224,7 +240,7 @@ dropEvent p ty = do
   pure (EvDrop (DropEvent ty pos payload))
 
 peekModifiers :: IO Modifiers
-peekModifiers = modFromKeymod <$> getModStateSafe
+peekModifiers = modFromKeymod <$> getModState
 
 modFromKeymod :: SDL_Keymod -> Modifiers
 modFromKeymod km =
@@ -278,12 +294,8 @@ applyEvent inp ev =
       inp {inputChars = inputChars inp <> txt, inputModifiers = mods}
     EvMouseMotion pos mods ->
       inp {inputMousePos = pos, inputModifiers = mods}
-    EvMousePress pos mods clicks ->
-      (applyMouseButton MouseLeft True inp)
-        { inputMousePos = pos
-        , inputModifiers = mods
-        , inputMouseClicks = max 1 clicks
-        }
+    EvMousePress pos mods ->
+      (applyMouseButton MouseLeft True inp) {inputMousePos = pos, inputModifiers = mods}
     EvMouseRelease pos mods ->
       (applyMouseButton MouseLeft False inp) {inputMousePos = pos, inputModifiers = mods}
     EvMouseRightPress pos mods ->
@@ -298,7 +310,7 @@ applyEvent inp ev =
 isButtonEdge :: SdlEvent -> Bool
 isButtonEdge ev =
   case ev of
-    EvMousePress {} -> True
+    EvMousePress _ _ -> True
     EvMouseRelease _ _ -> True
     EvMouseRightPress _ _ -> True
     EvMouseRightRelease _ _ -> True
