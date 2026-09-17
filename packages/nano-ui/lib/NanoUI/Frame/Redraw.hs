@@ -32,7 +32,6 @@ import NanoUI.Input (Input (..), inputInteracted, inputMousePos, inputPointerHel
 import NanoUI.Layout.Arena
   ( NodeType (..)
   , findNodeM
-  , foldNodeRevM
   , getNodeType
   , getOptions
   , getWidgetId
@@ -149,16 +148,14 @@ probeHotId ctx mouse = do
       mOverlay <- overlayMenuOwnerAt ctx mouse
       case mOverlay of
         Just wid -> pure wid
-        Nothing -> foldNodeRevM (ctxNodeArena ctx) updateHot (WidgetId 0)
+        -- Earlier siblings paint over later ones, so the first hit wins.
+        Nothing -> maybe (pure (WidgetId 0)) (getWidgetId na) =<< findNodeM na hits
   where
-    updateHot acc idx = do
-      nt <- getNodeType (ctxNodeArena ctx) idx
+    na = ctxNodeArena ctx
+    hits idx = do
+      nt <- getNodeType na idx
       if not (isWidgetNode nt)
-        then pure acc
+        then pure False
         else do
           visible <- nodePointVisible ctx idx mouse
-          if not visible
-            then pure acc
-            else do
-              allow <- overlayHitAllowed ctx idx mouse
-              if allow then getWidgetId (ctxNodeArena ctx) idx else pure acc
+          if visible then overlayHitAllowed ctx idx mouse else pure False
