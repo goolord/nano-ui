@@ -262,19 +262,15 @@ colorPickerParseHex :: Text -> Maybe (Word8, Word8, Word8, Maybe Word8)
 colorPickerParseHex txt =
   let bare = T.dropWhile (== '#') (T.strip txt)
       pair i = parseHexPair (T.take 2 (T.drop i bare))
-   in case T.length bare of
-        6 -> do
+      n = T.length bare
+   in if n /= 6 && n /= 8
+        then Nothing
+        else do
           r <- pair 0
           g <- pair 2
           b <- pair 4
-          pure (r, g, b, Nothing)
-        8 -> do
-          r <- pair 0
-          g <- pair 2
-          b <- pair 4
-          a <- pair 6
-          pure (r, g, b, Just a)
-        _ -> Nothing
+          a <- if n == 8 then Just <$> pair 6 else pure Nothing
+          pure (r, g, b, a)
 
 colorFromHex :: Text -> Maybe Color
 colorFromHex txt = do
@@ -302,37 +298,29 @@ packTextNodeStyleFull fvar weight fstyle deco stripe =
     .|. ((fromEnum fstyle .&. 0x03) `shiftL` 12)
     .|. ((fromEnum deco .&. 0x03) `shiftL` 14)
 
+-- | The enum packed in the style bits at @shift@ under @mask@, or @fallback@
+-- when they hold no constructor.
+{-# INLINE decodeStyleEnum #-}
+decodeStyleEnum :: forall a. (Bounded a, Enum a) => Int -> Int -> a -> Int -> a
+decodeStyleEnum shift mask fallback si =
+  let v = (si `shiftR` shift) .&. mask
+   in if v >= fromEnum (minBound :: a) && v <= fromEnum (maxBound :: a) then toEnum v else fallback
+
 {-# INLINE textNodeFontVariant #-}
 textNodeFontVariant :: Int -> FontVariant
-textNodeFontVariant si =
-  let v = si .&. 0x0F
-   in if v >= fromEnum (minBound :: FontVariant) && v <= fromEnum (maxBound :: FontVariant)
-        then toEnum v
-        else FontRegular
+textNodeFontVariant = decodeStyleEnum 0 0x0F FontRegular
 
 {-# INLINE textNodeFontWeight #-}
 textNodeFontWeight :: Int -> FontWeight
-textNodeFontWeight si =
-  let w = (si `shiftR` 8) .&. 0x0F
-   in if w >= fromEnum (minBound :: FontWeight) && w <= fromEnum (maxBound :: FontWeight)
-        then toEnum w
-        else WeightNormal
+textNodeFontWeight = decodeStyleEnum 8 0x0F WeightNormal
 
 {-# INLINE textNodeFontStyle #-}
 textNodeFontStyle :: Int -> FontStyle
-textNodeFontStyle si =
-  let s = (si `shiftR` 12) .&. 0x03
-   in if s >= fromEnum (minBound :: FontStyle) && s <= fromEnum (maxBound :: FontStyle)
-        then toEnum s
-        else FontStyleNormal
+textNodeFontStyle = decodeStyleEnum 12 0x03 FontStyleNormal
 
 {-# INLINE textNodeTextDecoration #-}
 textNodeTextDecoration :: Int -> TextDecoration
-textNodeTextDecoration si =
-  let d = (si `shiftR` 14) .&. 0x03
-   in if d >= fromEnum (minBound :: TextDecoration) && d <= fromEnum (maxBound :: TextDecoration)
-        then toEnum d
-        else DecorationNone
+textNodeTextDecoration = decodeStyleEnum 14 0x03 DecorationNone
 
 {-# INLINE textNodeStripe #-}
 textNodeStripe :: Int -> Int
