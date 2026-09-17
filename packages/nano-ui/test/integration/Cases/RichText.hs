@@ -12,7 +12,7 @@ import NanoUI
 import NanoUI.Context (Context (..))
 import NanoUI.Testing (UiCursorKind (..), cursorKindIs, runFrame)
 import NanoUI.Testing.Assert (assert, assertEq, withInput)
-import NanoUI.Testing.Harness (clickPair, warmup2)
+import NanoUI.Testing.Harness (clickPair, drawQuads, warmup2)
 
 -- | A paragraph wraps at its column's width, taking a line's height per line,
 -- and mixed pieces share a line.
@@ -38,11 +38,11 @@ runRichTextWrapTest ctx failed = do
 runRichTextLinkTest :: Context -> IORef Int -> IO ()
 runRichTextLinkTest ctx failed = do
   let inp0 = withInput 400 400
-      ui = column (richText' ["Go to ", hyperlink "docs-target" "docs", " now"])
+      ui = column (richText' ["Go to ", hyperlink "docs-target" "the docs", " now"])
       fm = ctxFontMetrics ctx
   (resp, _) <- warmup2 ctx inp0 ui
   prefixW <- sum <$> mapM (lineWidthIO fm) ["Go", " ", "to", " "]
-  linkW <- lineWidthIO fm "docs"
+  linkW <- sum <$> mapM (lineWidthIO fm) ["the", " ", "docs"]
   let Rect rx ry _ rh = respRect resp
       onLink = V2 (rx + prefixW + linkW / 2) (ry + rh / 2)
       onText = V2 (rx + 2) (ry + rh / 2)
@@ -56,6 +56,12 @@ runRichTextLinkTest ctx failed = do
   assertEq failed (Just "docs-target") linkClick
   pointer <- cursorKindIs ctx inp0 {inputMousePos = onLink} UiCursorPointer
   assert failed pointer
+  -- The hovered link is underlined once, across its words and the space
+  -- between them.
+  (_, _, dd, _) <- runFrame ctx inp0 {inputMousePos = onLink} ui
+  quads <- drawQuads dd
+  let underlines = [r | (r@(Rect _ _ w h), _) <- quads, h < 3, abs (w - linkW) < 0.5]
+  assertEq failed 1 (length underlines)
   textClick <- clickAt onText
   assertEq failed Nothing textClick
   plainCursor <- cursorKindIs ctx inp0 {inputMousePos = onText} UiCursorPointer

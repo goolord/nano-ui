@@ -18,6 +18,7 @@ import Control.Monad (unless)
 import Data.Hashable (hashWithSalt)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
 import Data.IntMap.Strict qualified as IM
+import Data.List (dropWhileEnd, groupBy)
 import Data.Maybe (fromMaybe, isJust)
 import Data.Primitive.SmallArray (SmallArray, indexSmallArray, smallArrayFromList)
 import Data.String (IsString (..))
@@ -208,16 +209,48 @@ richTextWith' f pieces = do
                  ] of
               run : _ -> Just run
               [] -> Nothing
+      -- Words are drawn one by one, so a decoration is drawn once across a
+      -- piece's words on a line and the spaces between them.
       draw _cdc (Rect x0 y0 w _) =
-        V.fromList
-          [ DrawTextStyled (x0 + x) (y0 + lineTop line + lineAscent line - runAscent run) font txt (runColor run)
-          | line <- linesAt w
-          , (x, Token txt runIdx Word _) <- lineTokens line
-          , let run = indexSmallArray runs runIdx
-                font
-                  | Just runIdx == hoveredRun = (runFont run) {textFontDecoration = underlined (textFontDecoration (runFont run))}
-                  | otherwise = runFont run
-          ]
+        V.fromList $
+          concat
+            [ [ DrawTextStyled (x0 + x) (lineY line run) ((runFont run) {textFontDecoration = DecorationNone}) txt (runColor run)
+              | (x, Token txt runIdx Word _) <- lineTokens line
+              , let run = indexSmallArray runs runIdx
+              ]
+                ++ concat
+                  [ [FillRect (Rect (x0 + x1) (y + offset) (x2 - x1) thick) (runColor run) | offset <- decorationOffsets deco run]
+                  | group <- groupBy (\(_, a) (_, b) -> tokenRun a == tokenRun b) (lineTokens line)
+                  , let trimmed = dropWhileEnd isSpaceToken (dropWhile isSpaceToken group)
+                  , (x1, first) : _ <- [trimmed]
+                  , let runIdx = tokenRun first
+                        run = indexSmallArray runs runIdx
+                        deco = decorationOf runIdx
+                        (lastX, lastTok) = last trimmed
+                        x2 = lastX + tokenWidth lastTok
+                        y = lineY line run
+                        thick = max 1 (0.06 * runLineHeight run)
+                  , deco /= DecorationNone
+                  ]
+            | line <- linesAt w
+            ]
+        where
+          lineY line run = y0 + lineTop line + lineAscent line - runAscent run
+          isSpaceToken (_, tok) = tokenKind tok == Space
+      decorationOf runIdx
+        | Just runIdx == hoveredRun = underlined (textFontDecoration (runFont (indexSmallArray runs runIdx)))
+        | otherwise = textFontDecoration (runFont (indexSmallArray runs runIdx))
+      -- Where underline and strikethrough sit below a line box's top, as
+      -- styled labels draw them.
+      decorationOffsets deco run =
+        let lh = runLineHeight run
+            under = runAscent run + max 1 (0.1 * lh)
+            strike = runAscent run * 0.65
+         in case deco of
+              DecorationUnderline -> [under]
+              DecorationStrikethrough -> [strike]
+              DecorationUnderlineStrike -> [under, strike]
+              DecorationNone -> []
       drawKey = key `hashWithSalt` maybe (-1) id hoveredRun
   uiIO $ do
     unless (paraWidth para0 == rw && isJust cached && fmap paraKey cached == Just key) $
