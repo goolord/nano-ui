@@ -30,9 +30,10 @@ import NanoUI.Context
   , isDisabled
   , markDirty
   , markEscapeConsumed
-  , setTextEditLastAction
   , setTextInputMenu
   , widgetTheme
+  , InteractionState (..)
+  , modifyInteraction
   )
 import NanoUI.Draw (pushRect, pushText)
 import NanoUI.Font
@@ -286,7 +287,7 @@ collectTextEditMenuSpans ctx inp = do
 applyTextFieldMenuAction :: Context -> WidgetId -> Int -> IO ()
 applyTextFieldMenuAction ctx wid item =
   forM_ (take 1 (drop item textEditMenuCommands)) $ \cmd -> do
-    setTextEditLastAction ctx (Just (wid, cmd))
+    modifyInteraction ctx (\s -> s {isTextEditLastAction = Just (wid, cmd)})
     applyTextFieldCommand ctx wid cmd
     -- The menu edits a field that may not be under the pointer; focus it so
     -- the selection highlight and caret become visible.

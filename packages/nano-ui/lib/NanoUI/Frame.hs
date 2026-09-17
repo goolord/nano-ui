@@ -36,12 +36,8 @@ import NanoUI.Context
   , clearDirty
   , decodeMessages
   , drainMessages
-  , getLastWindowSize
   , getLiveAnimations
-  , getPrevFloatingRects
-  , getPrevNodeTexts
   , getPrevRect
-  , getPrevRects
   , getStore
   , isDirty
   , lookupPopupConfig
@@ -49,13 +45,18 @@ import NanoUI.Context
   , pruneDrawOpCache
   , resetDrawingScopeCache
   , setMenuPointerGesture
-  , setSelectDropPress
   , stepScrollGlides
   , takeDamage
   , tickAnimations
   , lookupCustomMeasure
   , hasCustomLayoutInputs
   , ensureMetricCaches
+  , InteractionState (..)
+  , getsOverlay
+  , OverlayState (..)
+  , getsDamage
+  , DamageState (..)
+  , modifyInteraction
   )
 import NanoUI.Context (beginFrameModal)
 import NanoUI.Damage (FrameSnapshot (..), updatePrevRects, writeDamage)
@@ -194,10 +195,10 @@ runFrameEff unlift ctx inp ui = do
   oldHotRect <- getPrevRect ctx oldHot
   oldActiveRect <- getPrevRect ctx oldActive
   oldFocusRect <- getPrevRect ctx oldFocus
-  oldFloatingRects <- getPrevFloatingRects ctx
-  oldRects <- getPrevRects ctx
-  oldTexts <- getPrevNodeTexts ctx
-  oldSize <- getLastWindowSize ctx
+  oldFloatingRects <- getsOverlay ctx osPrevFloatingRects
+  oldRects <- getsDamage ctx dsPrevRects
+  oldTexts <- getsDamage ctx dsPrevNodeTexts
+  oldSize <- getsDamage ctx dsLastWindowSize
   oldStore <- getStore ctx
   wasDirty <- isDirty ctx
   clearDirty ctx
@@ -217,7 +218,7 @@ runFrameEff unlift ctx inp ui = do
   resetDrawArena (ctxDrawArena ctx)
   resetUiBuildScopes ctx
   unless (inputMouseDown inp) $
-    setSelectDropPress ctx False
+    modifyInteraction ctx (\s -> s {isSelectDropPress = False})
   when (not (inputMouseDown inp) && not (inputMouseReleased inp)) $
     setMenuPointerGesture ctx False
   beginFrameModal ctx

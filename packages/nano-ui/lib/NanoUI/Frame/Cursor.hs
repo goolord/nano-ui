@@ -17,13 +17,14 @@ import NanoUI.Context
   , getFocusId
   , getHotId
   , getScrollDrag
-  , getSelectDropPress
   , getStore
   , intKey
   , isDisabled
   , isSelectOpen
   , lookupCustomCursor
   , widgetTheme
+  , getsInteraction
+  , InteractionState (..)
   )
 import NanoUI.Font (FontMetrics, sliderHandleSlack, sliderTrackBounds)
 import NanoUI.Frame.Hit (findNodeByWidgetId, nodePointVisible, scrollHitRect)
@@ -91,7 +92,7 @@ selectDropdownCursorKind :: Context -> Input -> IO (Maybe UiCursorKind)
 selectDropdownCursorKind ctx inp = do
   let mouse = inputMousePos inp
       na = ctxNodeArena ctx
-  dropPress <- getSelectDropPress ctx
+  dropPress <- getsInteraction ctx isSelectDropPress
   store <- getStore ctx
   mSel <-
     findNodeM na $ \idx -> do

@@ -16,16 +16,12 @@ import NanoUI.Context
   , Context (..)
   , DamageRequest (..)
   , WidgetStore (..)
-  , getDamageRequests
   , getHotId
   , getLiveAnimations
   , getAnimRest
   , pruneAnimRest
   , getAnimRectless
   , getPrevRect
-  , getPrevClips
-  , getPrevNodeTexts
-  , getPrevRects
   , getStore
   , getWindowDrag
   , getWindowResize
@@ -33,10 +29,6 @@ import NanoUI.Context
   , markDirty
   , modalDamageFlip
   , setAnimRectless
-  , setDamageAndWindowSize
-  , setPrevFloatingPanels
-  , setPrevNodeTexts
-  , setPrevRectsAndClips
   , takeAnimSettled
   , lookupCustomDamageSlop
   , lookupCustomDrawing
@@ -45,6 +37,11 @@ import NanoUI.Context
   , drawingOpsStale
   , CustomDrawingEntry (..)
   , DrawingEntry (..)
+  , DamageState (..)
+  , OverlayState (..)
+  , getsDamage
+  , modifyDamage
+  , modifyOverlay
   )
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input
@@ -142,9 +139,9 @@ updatePrevRects :: Context -> IO ()
 updatePrevRects ctx = do
   live <- getLiveAnimations ctx
   prevRectless <- getAnimRectless ctx
-  oldRects <- getPrevRects ctx
-  oldClips <- getPrevClips ctx
-  oldTexts <- getPrevNodeTexts ctx
+  oldRects <- getsDamage ctx dsPrevRects
+  oldClips <- getsDamage ctx dsPrevClips
+  oldTexts <- getsDamage ctx dsPrevNodeTexts
   let na = ctxNodeArena ctx
       bump rects = do
         rest <- getAnimRest ctx
@@ -161,8 +158,7 @@ updatePrevRects ctx = do
   count <- arenaCount na
   if count <= 0
     then do
-      setPrevRectsAndClips ctx IM.empty IM.empty
-      setPrevNodeTexts ctx IM.empty
+      modifyDamage ctx (\ds -> ds {dsPrevRects = IM.empty, dsPrevClips = IM.empty, dsPrevNodeTexts = IM.empty})
       bump IM.empty
     else do
       -- Walk the arena from base maps, touching only entries whose value
@@ -175,8 +171,7 @@ updatePrevRects ctx = do
                 if dropped || foundOld /= IM.size olds
                   then go IM.empty 0 IM.empty IM.empty IM.empty 0 False
                   else do
-                    setPrevRectsAndClips ctx m cm
-                    setPrevNodeTexts ctx tm
+                    modifyDamage ctx (\ds -> ds {dsPrevRects = m, dsPrevClips = cm, dsPrevNodeTexts = tm})
                     bump m
             | otherwise = do
                 wid <- getWidgetId na i
@@ -282,15 +277,15 @@ writeDamage :: Context -> Input -> Bool -> FrameSnapshot -> IO ()
 writeDamage ctx inp overlayOpen snap = do
   newStore <- getStore ctx
   panels <- floatingPanelsInOrder ctx
-  newRects <- getPrevRects ctx
-  newTexts <- getPrevNodeTexts ctx
+  newRects <- getsDamage ctx dsPrevRects
+  newTexts <- getsDamage ctx dsPrevNodeTexts
   modalFlip <- modalDamageFlip ctx
   liveAnims <- getLiveAnimations ctx
   settled <- takeAnimSettled ctx
   rectless <- getAnimRectless ctx
   winDragActive <- isJust <$> getWindowDrag ctx
   winResizeActive <- isJust <$> getWindowResize ctx
-  requests <- getDamageRequests ctx
+  requests <- getsDamage ctx dsRequests
   redrawn <- refreshCustomDrawings ctx
   let oldRects = fsRects snap
       oldStore = fsStore snap
@@ -327,8 +322,8 @@ writeDamage ctx inp overlayOpen snap = do
     if needsFullDamage snap delta
       then pure DamageFull
       else clipDamage ctx snap delta
-  setDamageAndWindowSize ctx dmg (inputWindowSize inp)
-  setPrevFloatingPanels ctx newFloatingRects (map fst panels)
+  modifyDamage ctx (\ds -> ds {dsDamage = dmg, dsLastWindowSize = inputWindowSize inp, dsRequests = []})
+  modifyOverlay ctx (\os -> os {osPrevFloatingRects = newFloatingRects, osPrevFloatingOrder = map fst panels})
   when modalFlip (markDirty ctx)
   when (fdFloatingChanged delta && not (IM.null (fsFloatingRects snap) && not (IM.null newFloatingRects))) $
     markDirty ctx

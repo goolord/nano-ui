@@ -39,10 +39,11 @@ import Data.Text (Text)
 import Effectful (Eff, type (:>))
 import NanoUI.Context
   ( Context (..)
-  , getCurrentFloatingId
   , isDisabled
   , pointerBlockedByOverlay
-  , setCurrentFloatingId
+  , OverlayState (..)
+  , getsOverlay
+  , modifyOverlay
   )
 import NanoUI.Id (WidgetId (..), enterScope, hashWidgetId, scopeTag)
 import NanoUI.Input
@@ -244,14 +245,14 @@ floatingPanel ::
 floatingPanel scoped wid addPanel enter body = do
   ctx <- askContext
   let arena = ctxNodeArena ctx
-  prevFloat <- uiIO (getCurrentFloatingId ctx)
+  prevFloat <- uiIO (getsOverlay ctx osCurrentFloatingId)
   idx <- uiIO $ do
     stack <- readIORef (ctxContainerStack ctx)
     idx <- addPanel =<< rootAttachParent arena (parentIdx stack)
     setWidgetId arena idx wid
     pure idx
-  r <- withContainerNode scoped idx (uiIO (enter >> setCurrentFloatingId ctx (Just wid)) >> body)
-  uiIO (setCurrentFloatingId ctx prevFloat)
+  r <- withContainerNode scoped idx (uiIO (enter >> modifyOverlay ctx (\os -> os {osCurrentFloatingId = Just wid})) >> body)
+  uiIO (modifyOverlay ctx (\os -> os {osCurrentFloatingId = prevFloat}))
   pure r
 
 addSizingLeafNode ::

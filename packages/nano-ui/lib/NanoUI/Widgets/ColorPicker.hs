@@ -34,13 +34,14 @@ import Effectful (Eff, type (:>))
 import NanoUI.Context
   ( Context (..)
   , WidgetStore (..)
-  , getLastPointerBlocked
   , getMenuPointerGesture
   , getStore
   , intKey
   , recordStoreInt
   , registerFocusable
   , setStore
+  , getsOverlay
+  , OverlayState (..)
   )
 import NanoUI.Draw
   ( DrawArena
@@ -555,7 +556,7 @@ colorPickerCanvas parts initial svResp hueResp alphaResp = do
   ctx <- askContext
   inp <- askInput
   active <- uiIO (readIORef (ctxActiveId ctx))
-  blocked <- uiIO (getLastPointerBlocked ctx)
+  blocked <- uiIO (getsOverlay ctx osLastPointerBlocked)
   gesture <- uiIO (getMenuPointerGesture ctx)
   store0 <- uiIO (getStore ctx)
   hueHeld0 <- keyedDragHeld ("hue" :: Text)

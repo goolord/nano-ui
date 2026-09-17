@@ -12,32 +12,23 @@ module NanoUI.Context.Overlay
   , endModal
   , beginFrameModal
   , modalDamageFlip
-  , getCurrentFloatingId
-  , setCurrentFloatingId
-  , getLastPointerBlocked
-  , getPrevFloatingRects
-  , setPrevFloatingPanels
-  , getFloatingAncestor
-  , setFloatingAncestor
   ) where
 
 import Control.Monad (when)
 import Data.IORef (readIORef)
-import Data.IntMap.Strict (IntMap)
 import Data.IntMap.Strict qualified as IM
 
 import NanoUI.Context.Core
   ( getMenuPointerGesture
-  , getOpenSelectDrop
   , getTextInputMenu
   , getsOverlay
   , modifyOverlay
   , setMenuPointerGesture
+  , getsInteraction
   )
-import NanoUI.Context.Types (Context (..), OverlayState (..), TextInputMenu (..), intKey)
+import NanoUI.Context.Types (Context (..), OverlayState (..), TextInputMenu (..), intKey, InteractionState (..))
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input (Input, Key (KeyEscape), inputKeys, inputKeysElem, inputMousePos, inputMousePressed)
-import NanoUI.Layout.Arena (NodeType)
 import NanoUI.Types (Rect, V2, rectContains, rectHit, rectNonEmpty)
 
 textInputEditActive :: Context -> IO Bool
@@ -80,7 +71,7 @@ pointerBlockedByOverlay ctx mouse = do
                 case mTop of
                   Nothing -> pure False
                   Just top -> do
-                    mCur <- getCurrentFloatingId ctx
+                    mCur <- getsOverlay ctx osCurrentFloatingId
                     pure (mCur /= Just top)
   modifyOverlay ctx (\os -> os {osLastPointerBlocked = blocked})
   pure blocked
@@ -101,7 +92,7 @@ overlayMenuBlocksPointer ctx mouse = do
   if textMenu
     then pure True
     else do
-      mDrop <- getOpenSelectDrop ctx
+      mDrop <- getsInteraction ctx isOpenSelectDrop
       pure
         ( case mDrop of
             Just (_, r) -> rectContains r mouse
@@ -164,32 +155,3 @@ beginFrameModal ctx =
 
 modalDamageFlip :: Context -> IO Bool
 modalDamageFlip ctx = getsOverlay ctx (\os -> osModalWasActive os /= osModalActive os)
-
-{-# INLINE getCurrentFloatingId #-}
-getCurrentFloatingId :: Context -> IO (Maybe WidgetId)
-getCurrentFloatingId ctx = getsOverlay ctx osCurrentFloatingId
-
-{-# INLINE setCurrentFloatingId #-}
-setCurrentFloatingId :: Context -> Maybe WidgetId -> IO ()
-setCurrentFloatingId ctx m = modifyOverlay ctx (\os -> os {osCurrentFloatingId = m})
-
-{-# INLINE getLastPointerBlocked #-}
-getLastPointerBlocked :: Context -> IO Bool
-getLastPointerBlocked ctx = getsOverlay ctx osLastPointerBlocked
-
-{-# INLINE getPrevFloatingRects #-}
-getPrevFloatingRects :: Context -> IO (IntMap Rect)
-getPrevFloatingRects ctx = getsOverlay ctx osPrevFloatingRects
-
-{-# INLINE setPrevFloatingPanels #-}
-setPrevFloatingPanels :: Context -> IntMap Rect -> [Int] -> IO ()
-setPrevFloatingPanels ctx rects order =
-  modifyOverlay ctx (\os -> os {osPrevFloatingRects = rects, osPrevFloatingOrder = order})
-
-{-# INLINE getFloatingAncestor #-}
-getFloatingAncestor :: Context -> IO (Maybe (IntMap (Maybe NodeType)))
-getFloatingAncestor ctx = getsOverlay ctx osFloatingAncestor
-
-{-# INLINE setFloatingAncestor #-}
-setFloatingAncestor :: Context -> Maybe (IntMap (Maybe NodeType)) -> IO ()
-setFloatingAncestor ctx m = modifyOverlay ctx (\os -> os {osFloatingAncestor = m})

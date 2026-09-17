@@ -15,12 +15,13 @@ import Effectful (Eff, type (:>))
 import NanoUI.Context
   ( Context (..)
   , adoptStoreFloat
-  , getLastPointerBlocked
   , getStore
   , intKey
   , recordStoreFloat
   , registerFocusable
   , writeStoreFloat
+  , getsOverlay
+  , OverlayState (..)
   )
 import NanoUI.Font (sliderHandleSlack, sliderTrackBounds)
 import NanoUI.Frame.Hit (scrollHitRect)
@@ -70,7 +71,7 @@ sliderWith' f minV maxV value = do
     frac = if maxV > minV then (current - minV) / (maxV - minV) else 0
   resp <- addWidget wid NodeSlider "" frac (f (fillW defaultLayout))
   active <- uiIO (readIORef (ctxActiveId ctx))
-  blocked <- uiIO (getLastPointerBlocked ctx)
+  blocked <- uiIO (getsOverlay ctx osLastPointerBlocked)
   mrect <- uiIO (scrollHitRect ctx wid)
   let
     isActive = active == wid

@@ -30,16 +30,16 @@ import NanoUI.Context
   , TextInputDrag (..)
   , WidgetStore (..)
   , getStore
-  , getTextFieldClickCell
-  , getTextInputDrag
   , intKey
   , markDirty
   , setStore
-  , setTextFieldClickCell
   , setTextInputDrag
   , Slot (..)
   , slotKey
   , nodeTheme
+  , InteractionState (..)
+  , getsInteraction
+  , modifyInteraction
   )
 import NanoUI.Draw (DrawArena, pushRect)
 import NanoUI.Font (FontMetrics (..), caretXIO, centeredTextY, lineWidthIO, prepareFontMetrics, selectionSpans, textIndexAtX, widgetContentInset)
@@ -315,7 +315,7 @@ finalizeTextInputMouse ctx inp wid = do
               uncurry (updateTextInputSelection ctx wid) (textSelectionForClick value idx clicks)
               setTextInputDrag ctx (Just (TextInputDrag wid idx 0 0 False clicks))
         else do
-          mDrag <- getTextInputDrag ctx
+          mDrag <- getsInteraction ctx isTextInputDrag
           case mDrag of
             Just drag
               | textInputDragWidget drag == wid
@@ -347,12 +347,12 @@ normalizeTextFieldClicks ctx wid flat row col multiline rawClicks = do
           , textFieldClickMultiline = multiline
           }
   if rawClicks <= 1
-    then setTextFieldClickCell ctx (Just cell) >> pure rawClicks
+    then modifyInteraction ctx (\s -> s {isTextFieldClickCell = Just cell}) >> pure rawClicks
     else do
-      mPrev <- getTextFieldClickCell ctx
+      mPrev <- getsInteraction ctx isTextFieldClickCell
       if maybe False (sameCell cell) mPrev
         then pure rawClicks
-        else setTextFieldClickCell ctx (Just cell) >> pure 1
+        else modifyInteraction ctx (\s -> s {isTextFieldClickCell = Just cell}) >> pure 1
   where
     sameCell a b =
       textFieldClickWidget a == textFieldClickWidget b

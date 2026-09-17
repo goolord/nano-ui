@@ -29,10 +29,10 @@ import NanoUI.Context
   , intKey
   , markDirty
   , setStore
-  , setWindowDrag
-  , setWindowResize
   , slotKey
   , Slot (..)
+  , InteractionState (..)
+  , modifyInteraction
   )
 import NanoUI.Font (ScrollBarSlot (..))
 import NanoUI.Frame.Hit (findNodeByWidgetId, nodeInSubtree, topmostOverlayAtMouse)
@@ -136,7 +136,7 @@ updateWindowDrag ctx inp = do
               markDirty ctx
               pure True
           | otherwise -> do
-              setWindowDrag ctx Nothing
+              modifyInteraction ctx (\s -> s {isWindowDrag = Nothing})
               pure False
         Nothing
           | inputMousePressed inp -> tryStartWindowDrag ctx (inputMousePos inp)
@@ -290,7 +290,7 @@ updateWindowResize ctx inp winW winH = do
           markDirty ctx
           pure True
       | otherwise -> do
-          setWindowResize ctx Nothing
+          modifyInteraction ctx (\s -> s {isWindowResize = Nothing})
           pure False
     Nothing
       | inputMousePressed inp -> tryStartWindowResize ctx (inputMousePos inp)
@@ -345,22 +345,25 @@ tryStartWindowResize ctx mouse@(V2 mx my) = do
     Just (idx, Rect x y w h, edge) -> do
       wid <- getWidgetId (ctxNodeArena ctx) idx
       (minW, minH, maxW, maxH) <- getMinMax (ctxNodeArena ctx) idx
-      setWindowResize ctx $
-        Just
-          WindowResizeDrag
-            { wrdWidget = wid
-            , wrdEdge = edge
-            , wrdGrabX = mx
-            , wrdGrabY = my
-            , wrdStartX = x
-            , wrdStartY = y
-            , wrdStartW = w
-            , wrdStartH = h
-            , wrdMinW = minW
-            , wrdMinH = minH
-            , wrdMaxW = maxW
-            , wrdMaxH = maxH
-            }
+      modifyInteraction ctx $ \s ->
+        s
+          { isWindowResize =
+              Just
+                WindowResizeDrag
+                  { wrdWidget = wid
+                  , wrdEdge = edge
+                  , wrdGrabX = mx
+                  , wrdGrabY = my
+                  , wrdStartX = x
+                  , wrdStartY = y
+                  , wrdStartW = w
+                  , wrdStartH = h
+                  , wrdMinW = minW
+                  , wrdMinH = minH
+                  , wrdMaxW = maxW
+                  , wrdMaxH = maxH
+                  }
+          }
       markDirty ctx
       pure True
 
@@ -405,7 +408,7 @@ tryStartWindowDrag ctx mouse@(V2 mx my) = do
             else do
               wid <- getWidgetId (ctxNodeArena ctx) idx
               (wx, wy, _, _) <- getRect (ctxNodeArena ctx) idx
-              setWindowDrag ctx (Just (wid, mx - wx, my - wy))
+              modifyInteraction ctx (\s -> s {isWindowDrag = Just (wid, mx - wx, my - wy)})
               markDirty ctx
               pure True
         _ -> pure False

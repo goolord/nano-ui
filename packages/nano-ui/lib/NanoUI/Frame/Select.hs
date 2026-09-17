@@ -36,12 +36,12 @@ import NanoUI.Context
   , isSelectOpen
   , markDirty
   , markEscapeConsumed
-  , setOpenSelectDrop
-  , setSelectDropPress
   , setSelectOpen
   , setStore
   , widgetTheme
   , isDisabled
+  , InteractionState (..)
+  , modifyInteraction
   )
 import NanoUI.Draw (pushRect, pushRoundedRect, pushText, withClip)
 import NanoUI.Font (FontMetrics, centeredTextY, menuItemPadX, menuItemRowH, menuOuterPad, widgetContentInset)
@@ -158,7 +158,7 @@ overlayMenuOwnerAt ctx mouse = do
 cacheOpenSelectDrop :: Context -> IO ()
 cacheOpenSelectDrop ctx = do
   dropdowns <- openDropdowns ctx
-  setOpenSelectDrop ctx ((\dd -> (ddWidget dd, ddRect dd)) <$> listToMaybe dropdowns)
+  modifyInteraction ctx (\s -> s {isOpenSelectDrop = (\dd -> (ddWidget dd, ddRect dd)) <$> listToMaybe dropdowns})
 
 markSelectDropPress :: Context -> Input -> IO ()
 markSelectDropPress ctx inp =
@@ -168,7 +168,7 @@ markSelectDropPress ctx inp =
       let mouse = inputMousePos inp
       dropdowns <- openDropdowns ctx
       when (any (\dd -> rectContains (ddAnchor dd) mouse || rectContains (ddRect dd) mouse) dropdowns) $
-        setSelectDropPress ctx True
+        modifyInteraction ctx (\s -> s {isSelectDropPress = True})
 
 closeSelectOnOutsideClick :: Context -> Input -> IO ()
 closeSelectOnOutsideClick ctx inp =

@@ -13,7 +13,6 @@ module NanoUI.Store
   , closeSelects
   , ptrEq
   , eqByPtr
-  , deleteWidgetState
   )
 where
 
@@ -24,7 +23,7 @@ import Data.Text (Text)
 import Data.Word (Word64)
 import qualified Data.IntMap.Strict as IM
 import GHC.Exts (isTrue#, reallyUnsafePtrEquality#)
-import NanoUI.Id (WidgetId (..), hashWidgetId, mix64)
+import NanoUI.Id (mix64)
 
 -- | Physical-equality shortcut. Pointer equality implies value equality for
 -- immutable values, so callers may use 'True' to skip a structural comparison
@@ -124,8 +123,7 @@ bumpMirror st = st {storeMirrorGen = storeMirrorGen st + 1}
 slotKey :: Slot -> Int -> Int
 slotKey s k = fromIntegral (mix64 (fromIntegral k) (slotTag s))
 
--- | Every built-in slot. 'deleteWidgetState' clears all of them, so a new slot
--- only needs a constructor here to be cleaned up with its widget.
+-- | Every built-in slot.
 data Slot
   = SlotCursor
   | SlotAnchor
@@ -231,7 +229,7 @@ data Slot
   | -- | When a numeric field's held stepper arrow next repeats, in monotonic
     -- seconds.
     SlotNumericRepeat
-  deriving (Enum, Bounded)
+  deriving (Enum)
 
 -- | Tag for a built-in slot: the constructor index mixed with a salt, so tags
 -- are well spread.
@@ -264,22 +262,3 @@ setSelectOpen st k False
 {-# INLINE closeSelects #-}
 closeSelects :: WidgetStore -> WidgetStore
 closeSelects st = st {storeOpenSelect = 0}
-
--- | Remove all stored state across all slots for the given widget id.
-deleteWidgetState :: WidgetId -> WidgetStore -> WidgetStore
-deleteWidgetState wid store =
-  let !k0 = fromIntegral (hashWidgetId wid)
-      !keys = k0 : [slotKey s k0 | s <- [minBound .. maxBound]]
-      delKeys :: IntMap a -> IntMap a
-      delKeys m = foldl' (flip IM.delete) m keys
-   in store
-        { storeInt = delKeys (storeInt store)
-        , storeFloat = delKeys (storeFloat store)
-        , storeDouble = delKeys (storeDouble store)
-        , storePoint = delKeys (storePoint store)
-        , storeText = delKeys (storeText store)
-        , storeIntSet = delKeys (storeIntSet store)
-        , storeFloatList = delKeys (storeFloatList store)
-        , storeIntList = delKeys (storeIntList store)
-        , storeDyn = delKeys (storeDyn store)
-        }

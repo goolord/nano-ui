@@ -24,17 +24,18 @@ import NanoUI.Context
   , cacheScrollMetrics
   , clampScrollOffset
   , getMenuPointerGesture
-  , getOpenSelectDrop
   , getScrollDrag
   , getScrollOffset
   , getScrollOffset2D
   , getScrollOffsetIn
   , resolveScrollStep
   , scrollTargetOffset
-  , setScrollDrag
   , setScrollOffset
   , setScrollOffset2D
   , nodeTheme
+  , InteractionState (..)
+  , getsInteraction
+  , modifyInteraction
   )
 import NanoUI.Frame.Hit (topmostModalAtMouse, topmostOverlayAtMouse)
 import NanoUI.Frame.Node (scrollViewportAt)
@@ -180,7 +181,7 @@ updateScrollWheel ctx inp = do
     -- An open dropdown (select menu or combo suggestions) owns the wheel:
     -- the combo widget scrolls its own window, and the scroller underneath
     -- the floating list must not move with it.
-    mDrop <- getOpenSelectDrop ctx
+    mDrop <- getsInteraction ctx isOpenSelectDrop
     let overDrop = maybe False (\(_, r) -> rectContains r (inputMousePos inp)) mDrop
     when (not overDrop) $ do
       mNode <- findScrollNodeUnderMouse ctx (inputMousePos inp)
@@ -417,7 +418,7 @@ scrollBarsFor ctx idx wid = do
 
 updateScrollDrag :: Context -> Input -> IO ()
 updateScrollDrag ctx inp
-  | inputMouseReleased inp = setScrollDrag ctx Nothing
+  | inputMouseReleased inp = modifyInteraction ctx (\s -> s {isScrollDrag = Nothing})
   | otherwise = do
       gesture <- getMenuPointerGesture ctx
       mDrag <- getScrollDrag ctx
@@ -448,8 +449,8 @@ tryStartScrollDrag ctx inp = do
               along (V2 mx my) = if dir == DirColumn then my else mx
               Rect tx ty tw th = thumb
           if rectContains thumb mouse
-            then setScrollDrag ctx (Just (wid, dir, along mouse - along (V2 tx ty)))
+            then modifyInteraction ctx (\s -> s {isScrollDrag = Just (wid, dir, along mouse - along (V2 tx ty))})
             else do
               let half = along (V2 tw th) / 2
               setOffset (scrollOffsetFromThumb dir layout half mouse)
-              setScrollDrag ctx (Just (wid, dir, half))
+              modifyInteraction ctx (\s -> s {isScrollDrag = Just (wid, dir, half)})

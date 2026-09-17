@@ -20,13 +20,14 @@ import NanoUI.Context
   , TextInputDrag (..)
   , WidgetStore (..)
   , getStore
-  , getTextInputDrag
   , intKey
   , markDirty
   , setStore
   , setTextInputDrag
   , slotKey
   , nodeTheme
+  , getsInteraction
+  , InteractionState (..)
   )
 import NanoUI.Draw (DrawArena, getDrawSnapScale, pushText, withClip)
 import NanoUI.Font (FontMetrics, caretXIO, prepareFontMetrics, selectionSpans, textIndexAtX, widgetContentInset)
@@ -296,7 +297,7 @@ finalizeTextAreaMouse ctx inp wid = do
           applyTextAreaClick ctx wid hit row col clicks
           setTextInputDrag ctx (Just (TextInputDrag wid 0 row col True clicks))
         else do
-          mDrag <- getTextInputDrag ctx
+          mDrag <- getsInteraction ctx isTextInputDrag
           case mDrag of
             Just drag
               | textInputDragWidget drag == wid

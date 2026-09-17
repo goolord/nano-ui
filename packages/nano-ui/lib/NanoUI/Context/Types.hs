@@ -68,7 +68,7 @@ import NanoUI.Font (CustomMeasureFn, FontMetrics)
 import NanoUI.Frame.SpanArena (SpanArena)
 import NanoUI.Id (IdContext, WidgetId, hashWidgetId)
 import NanoUI.Input (UiCursorKind)
-import NanoUI.Layout.Arena (DirTag, LayoutCache, NodeArena, NodeType)
+import NanoUI.Layout.Arena (DirTag, LayoutCache, NodeArena)
 import NanoUI.Store (WidgetStore)
 import NanoUI.Style (FontStyle, FontVariant, FontWeight, Layout, Theme)
 import NanoUI.Widgets.TextCommand (TextCommand)
@@ -223,7 +223,6 @@ data OverlayState = OverlayState
   , osTopmostCache :: !(Maybe (V2, Maybe WidgetId))
   , osCurrentFloatingId :: !(Maybe WidgetId)
   , osLastPointerBlocked :: {-# UNPACK #-} !Bool
-  , osFloatingAncestor :: !(Maybe (IntMap (Maybe NodeType)))
   }
 
 initialOverlayState :: OverlayState
@@ -237,7 +236,6 @@ initialOverlayState = OverlayState
   , osTopmostCache = Nothing
   , osCurrentFloatingId = Nothing
   , osLastPointerBlocked = False
-  , osFloatingAncestor = Nothing
   }
 
 data AnimationState = AnimationState

@@ -9,56 +9,34 @@ module NanoUI.Context.Core
   , modifyDamage
   -- Interaction
   , getScrollDrag
-  , setScrollDrag
-  , getTextInputDrag
   , setTextInputDrag
-  , getTextFieldClickCell
-  , setTextFieldClickCell
   , getTextInputMenu
   , setTextInputMenu
-  , setTextEditLastAction
   , takeTextEditLastAction
-  , getSelectDropPress
-  , setSelectDropPress
-  , setOpenSelectDrop
-  , getOpenSelectDrop
   , getMenuPointerGesture
   , setMenuPointerGesture
   , getWindowDrag
-  , setWindowDrag
   , getWindowResize
-  , setWindowResize
   -- Damage
   , markDirty
   , clearDirty
   , isDirty
   , setWakeLoop
   , takeDamage
-  , getLastWindowSize
-  , setDamageAndWindowSize
   , requestDamage
   , damageWidget
   , damageKey
   , damageRect
   , damagePeers
   , damageFull
-  , getDamageRequests
   , getPrevRect
   , getPrevClipRect
-  , getPrevRects
-  , getPrevClips
-  , setPrevRectsAndClips
-  , getPrevNodeTexts
-  , setPrevNodeTexts
   -- Store
   , getStore
   , setStore
-  , deleteWidgetStore
   , getStoreBool
-  , setStoreBool
   , writeStoreInt
   , writeStoreFloat
-  , writeStoreText
   , writeStoreBool
   , adoptStoreInt
   , adoptStoreFloat
@@ -93,7 +71,6 @@ import NanoUI.Context.Types
   , DamageState (..)
   , InteractionState (..)
   , OverlayState
-  , TextFieldClickCell
   , TextInputDrag
   , TextInputMenu
   , ThemeScopes (..)
@@ -105,14 +82,13 @@ import NanoUI.Layout.Arena (DirTag, NodeIdx, getArenaScope, getNodeScope, getSco
 import NanoUI.Store
   ( WidgetStore (..)
   , boolInt
-  , deleteWidgetState
   , intBool
   , ptrEq
   , slotKey
   , Slot (..)
   )
 import NanoUI.Style (Theme)
-import NanoUI.Types (Damage, DamageBounds (..), Rect, Size, defaultDamageSlop, rectH, rectW)
+import NanoUI.Types (Damage, DamageBounds (..), Rect, defaultDamageSlop, rectH, rectW)
 import NanoUI.Widgets.TextCommand (TextCommand)
 
 -- =============================================================================
@@ -151,25 +127,9 @@ modifyDamage ctx = modifyIORef' (ctxDamageState ctx)
 getScrollDrag :: Context -> IO (Maybe (WidgetId, DirTag, Float))
 getScrollDrag ctx = getsInteraction ctx isScrollDrag
 
-{-# INLINE setScrollDrag #-}
-setScrollDrag :: Context -> Maybe (WidgetId, DirTag, Float) -> IO ()
-setScrollDrag ctx v = modifyInteraction ctx (\s -> s {isScrollDrag = v})
-
-{-# INLINE getTextInputDrag #-}
-getTextInputDrag :: Context -> IO (Maybe TextInputDrag)
-getTextInputDrag ctx = getsInteraction ctx isTextInputDrag
-
 {-# INLINE setTextInputDrag #-}
 setTextInputDrag :: Context -> Maybe TextInputDrag -> IO ()
 setTextInputDrag ctx v = modifyInteraction ctx (\s -> s {isTextInputDrag = v})
-
-{-# INLINE getTextFieldClickCell #-}
-getTextFieldClickCell :: Context -> IO (Maybe TextFieldClickCell)
-getTextFieldClickCell ctx = getsInteraction ctx isTextFieldClickCell
-
-{-# INLINE setTextFieldClickCell #-}
-setTextFieldClickCell :: Context -> Maybe TextFieldClickCell -> IO ()
-setTextFieldClickCell ctx v = modifyInteraction ctx (\s -> s {isTextFieldClickCell = v})
 
 {-# INLINE getTextInputMenu #-}
 getTextInputMenu :: Context -> IO (Maybe TextInputMenu)
@@ -179,31 +139,11 @@ getTextInputMenu ctx = getsInteraction ctx isTextInputMenu
 setTextInputMenu :: Context -> Maybe TextInputMenu -> IO ()
 setTextInputMenu ctx v = modifyInteraction ctx (\s -> s {isTextInputMenu = v})
 
-{-# INLINE setTextEditLastAction #-}
-setTextEditLastAction :: Context -> Maybe (WidgetId, TextCommand) -> IO ()
-setTextEditLastAction ctx v = modifyInteraction ctx (\s -> s {isTextEditLastAction = v})
-
 takeTextEditLastAction :: Context -> IO (Maybe (WidgetId, TextCommand))
 takeTextEditLastAction ctx = do
   act <- getsInteraction ctx isTextEditLastAction
-  setTextEditLastAction ctx Nothing
+  modifyInteraction ctx (\s -> s {isTextEditLastAction = Nothing})
   pure act
-
-{-# INLINE getSelectDropPress #-}
-getSelectDropPress :: Context -> IO Bool
-getSelectDropPress ctx = getsInteraction ctx isSelectDropPress
-
-{-# INLINE setSelectDropPress #-}
-setSelectDropPress :: Context -> Bool -> IO ()
-setSelectDropPress ctx v = modifyInteraction ctx (\s -> s {isSelectDropPress = v})
-
-{-# INLINE getOpenSelectDrop #-}
-getOpenSelectDrop :: Context -> IO (Maybe (WidgetId, Rect))
-getOpenSelectDrop ctx = getsInteraction ctx isOpenSelectDrop
-
-{-# INLINE setOpenSelectDrop #-}
-setOpenSelectDrop :: Context -> Maybe (WidgetId, Rect) -> IO ()
-setOpenSelectDrop ctx v = modifyInteraction ctx (\s -> s {isOpenSelectDrop = v})
 
 {-# INLINE getMenuPointerGesture #-}
 getMenuPointerGesture :: Context -> IO Bool
@@ -217,17 +157,9 @@ setMenuPointerGesture ctx v = modifyInteraction ctx (\s -> s {isMenuPointerGestu
 getWindowDrag :: Context -> IO (Maybe (WidgetId, Float, Float))
 getWindowDrag ctx = getsInteraction ctx isWindowDrag
 
-{-# INLINE setWindowDrag #-}
-setWindowDrag :: Context -> Maybe (WidgetId, Float, Float) -> IO ()
-setWindowDrag ctx v = modifyInteraction ctx (\s -> s {isWindowDrag = v})
-
 {-# INLINE getWindowResize #-}
 getWindowResize :: Context -> IO (Maybe WindowResizeDrag)
 getWindowResize ctx = getsInteraction ctx isWindowResize
-
-{-# INLINE setWindowResize #-}
-setWindowResize :: Context -> Maybe WindowResizeDrag -> IO ()
-setWindowResize ctx v = modifyInteraction ctx (\s -> s {isWindowResize = v})
 
 -- =============================================================================
 -- Damage
@@ -266,10 +198,6 @@ damagePeers ctx wids bounds =
 damageFull :: Context -> IO ()
 damageFull ctx = requestDamage ctx ReqFull
 
-{-# INLINE getDamageRequests #-}
-getDamageRequests :: Context -> IO [DamageRequest]
-getDamageRequests ctx = getsDamage ctx dsRequests
-
 {-# INLINE markDirty #-}
 markDirty :: Context -> IO ()
 markDirty ctx = do
@@ -291,36 +219,6 @@ setWakeLoop ctx wake = writeIORef (ctxWakeLoop ctx) (Just wake)
 {-# INLINE takeDamage #-}
 takeDamage :: Context -> IO Damage
 takeDamage ctx = getsDamage ctx dsDamage
-
-{-# INLINE getLastWindowSize #-}
-getLastWindowSize :: Context -> IO Size
-getLastWindowSize ctx = getsDamage ctx dsLastWindowSize
-
-{-# INLINE setDamageAndWindowSize #-}
-setDamageAndWindowSize :: Context -> Damage -> Size -> IO ()
-setDamageAndWindowSize ctx dmg sz =
-  modifyDamage ctx (\ds -> ds {dsDamage = dmg, dsLastWindowSize = sz, dsRequests = []})
-
-{-# INLINE getPrevRects #-}
-getPrevRects :: Context -> IO (IntMap Rect)
-getPrevRects ctx = getsDamage ctx dsPrevRects
-
-{-# INLINE getPrevClips #-}
-getPrevClips :: Context -> IO (IntMap Rect)
-getPrevClips ctx = getsDamage ctx dsPrevClips
-
-{-# INLINE setPrevRectsAndClips #-}
-setPrevRectsAndClips :: Context -> IntMap Rect -> IntMap Rect -> IO ()
-setPrevRectsAndClips ctx rects clips =
-  modifyDamage ctx (\ds -> ds {dsPrevRects = rects, dsPrevClips = clips})
-
-{-# INLINE getPrevNodeTexts #-}
-getPrevNodeTexts :: Context -> IO (IntMap Text)
-getPrevNodeTexts ctx = getsDamage ctx dsPrevNodeTexts
-
-{-# INLINE setPrevNodeTexts #-}
-setPrevNodeTexts :: Context -> IntMap Text -> IO ()
-setPrevNodeTexts ctx texts = modifyDamage ctx (\ds -> ds {dsPrevNodeTexts = texts})
 
 {-# INLINE getPrevRect #-}
 getPrevRect :: Context -> WidgetId -> IO (Maybe Rect)
@@ -365,11 +263,6 @@ setStore ctx store = do
     $ do
       forM_ changedKeys $ \k -> damageKey ctx k (DamageInflated defaultDamageSlop)
       markDirty ctx
-
-deleteWidgetStore :: Context -> WidgetId -> IO ()
-deleteWidgetStore ctx wid = do
-  st <- getStore ctx
-  setStore ctx (deleteWidgetState wid st)
 
 diffKeysBy :: (a -> a -> Bool) -> IntMap a -> IntMap a -> [Int]
 diffKeysBy eq old new
@@ -416,9 +309,6 @@ writeStoreInt = writeSlot storeInt (\m st -> st {storeInt = m})
 
 writeStoreFloat :: Context -> WidgetId -> Int -> Float -> IO ()
 writeStoreFloat = writeSlot storeFloat (\m st -> st {storeFloat = m})
-
-writeStoreText :: Context -> WidgetId -> Int -> Text -> IO ()
-writeStoreText = writeSlot storeText (\m st -> st {storeText = m})
 
 {-# INLINE writeStoreBool #-}
 writeStoreBool :: Context -> WidgetId -> Bool -> IO ()
@@ -488,11 +378,6 @@ recordStoreText = recordSlot storeText (\m st -> st {storeText = m})
 getStoreBool :: Context -> WidgetId -> Bool -> IO Bool
 getStoreBool ctx wid def =
   intBool . IM.findWithDefault (boolInt def) (intKey wid) . storeInt <$> getStore ctx
-
--- | Same as 'writeStoreBool': an equal write is a no-op.
-{-# INLINE setStoreBool #-}
-setStoreBool :: Context -> WidgetId -> Bool -> IO ()
-setStoreBool = writeStoreBool
 
 -- | Whether @wid@ was declared inside a disabled scope. A widget asks before
 -- its node exists, while the scope it is declared in is still the arena's.

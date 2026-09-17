@@ -29,33 +29,20 @@ module NanoUI.Context
   , getsDamage
   , modifyDamage
   , getScrollDrag
-  , setScrollDrag
-  , getTextInputDrag
   , setTextInputDrag
-  , getTextFieldClickCell
-  , setTextFieldClickCell
   , getTextInputMenu
   , setTextInputMenu
-  , setTextEditLastAction
   , takeTextEditLastAction
-  , getSelectDropPress
-  , setSelectDropPress
-  , setOpenSelectDrop
-  , getOpenSelectDrop
   , getMenuPointerGesture
   , setMenuPointerGesture
   , getWindowDrag
-  , setWindowDrag
   , getWindowResize
-  , setWindowResize
   , intKey
   , markDirty
   , clearDirty
   , isDirty
   , setWakeLoop
   , takeDamage
-  , getLastWindowSize
-  , setDamageAndWindowSize
   , DamageRequest (..)
   , requestDamage
   , damageWidget
@@ -63,7 +50,6 @@ module NanoUI.Context
   , damageRect
   , damagePeers
   , damageFull
-  , getDamageRequests
   , registerPopupConfig
   , lookupPopupConfig
   , registerDrawing
@@ -90,12 +76,9 @@ module NanoUI.Context
   , resetDrawingScopeCache
   , getStore
   , setStore
-  , deleteWidgetStore
   , getStoreBool
-  , setStoreBool
   , writeStoreInt
   , writeStoreFloat
-  , writeStoreText
   , writeStoreBool
   , adoptStoreInt
   , adoptStoreFloat
@@ -152,11 +135,6 @@ module NanoUI.Context
   , stepScrollGlides
   , getPrevRect
   , getPrevClipRect
-  , getPrevRects
-  , getPrevClips
-  , setPrevRectsAndClips
-  , getPrevNodeTexts
-  , setPrevNodeTexts
   , atlasTextureId
   , registerImage
   , registerImages
@@ -205,13 +183,6 @@ module NanoUI.Context
   , endModal
   , beginFrameModal
   , modalDamageFlip
-  , getCurrentFloatingId
-  , setCurrentFloatingId
-  , getLastPointerBlocked
-  , getPrevFloatingRects
-  , setPrevFloatingPanels
-  , getFloatingAncestor
-  , setFloatingAncestor
   -- Animation
   , anyAnimating
   , getLiveAnimations
