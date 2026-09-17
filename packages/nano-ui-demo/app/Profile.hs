@@ -1,7 +1,8 @@
 module Main (main) where
 
-import Control.Monad (replicateM_, void, forM_, unless, when)
+import Control.Monad (forM, forM_, replicateM_, unless, void, when)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
+import Data.Primitive.SmallArray (SmallArray, indexSmallArray, sizeofSmallArray, smallArrayFromList)
 import GHC.Clock (getMonotonicTimeNSec)
 import GHC.Stats (RTSStats (..), getRTSStats)
 import System.IO (hSetBuffering, stdout, BufferMode(LineBuffering))
@@ -38,14 +39,11 @@ import DemoData
   , colPeople
   , demoPeople
   , demoTree
-  , registerDemoImages
+  , demoSwatches
   , sineCosineChart
   , weeklyBars
   )
-import SdlDemo
-  ( demoImages
-  , demoUi
-  )
+import SdlDemo (demoUi)
 
 iterations :: Int
 iterations = 40
@@ -60,18 +58,18 @@ profileInput =
 
 -- | Mean wall time and allocation per run after a short warmup. The clock
 -- stops before the second GC, which only brings the allocation counter current.
-measureBench :: String -> Int -> IO () -> IO ()
-measureBench name iters action = do
+measureBench :: String -> IO () -> IO ()
+measureBench name action = do
   replicateM_ 5 action
   performGC
   s0 <- getRTSStats
   t0 <- getMonotonicTimeNSec
-  replicateM_ iters action
+  replicateM_ iterations action
   t1 <- getMonotonicTimeNSec
   performGC
   s1 <- getRTSStats
   let perIter :: Double -> Double
-      perIter total = total / fromIntegral iters
+      perIter total = total / fromIntegral iterations
   printf "%-32s : %8.3f ms/frame  |  %8.1f KB alloc/frame\n" name
     (perIter (fromIntegral (t1 - t0) / 1e6))
     (perIter (fromIntegral (allocated_bytes s1 - allocated_bytes s0) / 1024))
@@ -84,171 +82,136 @@ main = do
   putStrLn "================================================================================"
   putStrLn ""
   ctx0 <- newPixelContext
-  ok <- registerDemoImages ctx0 demoImages
-  if not ok
-    then fail "registerImage failed"
-    else withSdlBench ctx0 $ \ctx sdlEnv -> do
-      (ctx', inp) <- syncDisplay ctx sdlEnv profileInput
-      (_, inpAct) <- syncDisplay ctx sdlEnv profileInput {inputMouseDown = True}
+  withSdlBench ctx0 $ \ctx sdlEnv -> do
+    (ctx', inp) <- syncDisplay ctx sdlEnv profileInput
+    (_, inpAct) <- syncDisplay ctx sdlEnv profileInput {inputMouseDown = True}
+    let drawDemo frameInp = void (sdlDrawFrame ctx' demoUi sdlEnv frameInp False)
+        runFrames = mapM_ (\(name, ui) -> measureBench name (void (runFrame ctx' inp ui)))
 
-      putStrLn "--- 1. FULL DEMO UI (Controls Tab, Idle vs Active Mouse) ---"
-      measureBench "Full DemoUi (Idle, SDL Present)" iterations $
-        void (sdlDrawFrame ctx' demoUi sdlEnv inp False)
+    putStrLn "--- 1. FULL DEMO UI (Controls Tab, Idle vs Active Mouse) ---"
+    measureBench "Full DemoUi (Idle, SDL Present)" (drawDemo inp)
+    measureBench "Full DemoUi (Active, SDL Present)" (drawDemo inpAct)
+    measureBench "Full DemoUi (runFrame only, No SDL)" $
+      void (runFrame ctx' inp demoUi)
 
-      measureBench "Full DemoUi (Active, SDL Present)" iterations $
-        void (sdlDrawFrame ctx' demoUi sdlEnv inpAct False)
+    (_, _, dd, _) <- runFrame ctx' inp demoUi
+    printf "  -> Vertices: %d, Indices: %d, DrawCmds: %d\n\n"
+      (drawVertexCount dd) (drawIndexCount dd) (drawCmdCount dd)
 
-      measureBench "Full DemoUi (runFrame only, No SDL)" iterations $
-        void (runFrame ctx' inp demoUi)
+    putStrLn "--- 1b. DEMO UI WITH DEBUG WINDOW OPEN ---"
+    spansLatest <- collectTextSpans ctx'
+    case findExact "Debug" spansLatest of
+      Nothing -> putStrLn "  Debug button not found\n"
+      Just _ -> do
+        alreadyOpen <- debugPanelOpen ctx'
+        -- Live stats can move the toolbar between workloads, so find the
+        -- button again before clicking it.
+        unless alreadyOpen $ do
+          currentSpans <- collectTextSpans ctx'
+          case findExact "Debug" currentSpans of
+            Nothing -> fail "Debug button missing during profiling"
+            Just pos -> Harness.clickPos drawDemo inp pos
+        opened <- debugPanelOpen ctx'
+        unless opened (fail "Debug Open workload did not open the debug window")
+        measureBench "Full DemoUi (Debug Open, SDL Present)" (drawDemo inp)
+        measureBench "Full DemoUi (Debug Open, runFrame)" $
+          void (runFrame ctx' inp demoUi)
+        (_, _, ddDbg, _) <- runFrame ctx' inp demoUi
+        printf "  -> Debug Vertices: %d, Indices: %d, DrawCmds: %d\n\n"
+          (drawVertexCount ddDbg) (drawIndexCount ddDbg) (drawCmdCount ddDbg)
 
-      -- Inspect draw data
-      (_, _, dd, _) <- runFrame ctx' inp demoUi
-      printf "  -> Vertices: %d, Indices: %d, DrawCmds: %d\n\n"
-        (drawVertexCount dd) (drawIndexCount dd) (drawCmdCount dd)
+        putStrLn "--- 5. FLOATING WINDOW STEADY-STATE ---"
+        measureBench "Debug Open, ForceFull replay" $
+          void (sdlDrawFrame ctx' demoUi sdlEnv inp True)
+        churnCtx <- newPixelContext
+        churnCounter <- newIORef (0 :: Int)
+        void (runFrame churnCtx inp (churnWindowUi 0))
+        (f0, c0, e0) <- countDamageKinds churnCtx iterations (churnFrame churnCtx inp churnCounter)
+        printf "  -> Churn damage over %d frames: Full=%d Clip=%d Empty=%d\n"
+          iterations f0 c0 e0
+        measureBench "Win content churn (text 1..9ch)" $
+          churnFrame churnCtx inp churnCounter
+        sweepCounter <- newIORef (0 :: Int)
+        measureBench "Debug Open, hover sweep" $
+          hoverSweepFrame ctx' demoUi sdlEnv inp sweepCounter
+        putStrLn "--- 5b. IDLE CADENCE (debug gating) ---"
+        cadRef <- newDebugSampler
+        let cadence = do
+              active <- isDebugActive cadRef
+              due <- debugRefreshDue cadRef
+              pure (show active, if active && due then 0 :: Int else if active then 250 else -1)
+        (active0, wait0) <- cadence
+        printf "  plain window, no stats query : active=%-5s waitTimeout=%-3d (blocks until the next event)\n" active0 wait0
+        snapRef <- newIORef emptyCoreDebugSnapshot
+        _ <- refreshDebugSnapshot cadRef snapRef pure
+        (active1, wait1) <- cadence
+        printf "  stats window queried         : active=%-5s waitTimeout=%-3d (4 Hz HUD refresh sustained)\n" active1 wait1
+        putStrLn ""
+        -- The floating debug window can occlude the toolbar after it grows.
+        -- Its title-bar close button is the unlabelled NodeButton in this UI.
+        let arena = ctxNodeArena ctx'
+        closeNode <- findNodeRevM arena $ \i -> do
+          nt <- getNodeType arena i
+          if nt == NodeButton then T.null <$> getText arena i else pure False
+        case closeNode of
+          Nothing -> fail "Debug close button missing during profiling"
+          Just i -> do
+            (x, y, w, h) <- getRect arena i
+            Harness.clickPos drawDemo inp (Harness.spanCenter (Rect x y w h))
+        stillOpen <- debugPanelOpen ctx'
+        when stillOpen (fail "Debug window did not close after profiling")
 
-      putStrLn "--- 1b. DEMO UI WITH DEBUG WINDOW OPEN ---"
-      spansLatest <- collectTextSpans ctx'
-      case findExact "Debug" spansLatest of
-        Nothing -> putStrLn "  Debug button not found\n"
-        Just _ -> do
-          let clickDbg = do
-                -- Live stats can move the toolbar between workloads. Resolve
-                -- its current position and send the complete click lifecycle.
-                currentSpans <- collectTextSpans ctx'
-                case findExact "Debug" currentSpans of
-                  Nothing -> fail "Debug button missing during profiling"
-                  Just pos -> Harness.clickPos
-                    (\frameInp -> void (sdlDrawFrame ctx' demoUi sdlEnv frameInp False)) inp pos
-          alreadyOpen <- debugPanelOpen ctx'
-          unless alreadyOpen clickDbg
-          opened <- debugPanelOpen ctx'
-          unless opened (fail "Debug Open workload did not open the debug window")
-          measureBench "Full DemoUi (Debug Open, SDL Present)" iterations $
-            void (sdlDrawFrame ctx' demoUi sdlEnv inp False)
-          measureBench "Full DemoUi (Debug Open, runFrame)" iterations $
-            void (runFrame ctx' inp demoUi)
-          (_, _, ddDbg, _) <- runFrame ctx' inp demoUi
-          printf "  -> Debug Vertices: %d, Indices: %d, DrawCmds: %d\n\n"
-            (drawVertexCount ddDbg) (drawIndexCount ddDbg) (drawCmdCount ddDbg)
+    putStrLn "--- 2. DEMO TABS IN ISOLATION (Full runFrame + draw) ---"
+    runFrames
+      [ ("Tab: Controls", tabControlsUi)
+      , ("Tab: List (Tree + Items)", tabListUi)
+      , ("Tab: Table (14 rows x 5 cols)", tabTableUi)
+      ]
+    measureBench "Tab: Table (SDL Present)" $
+      void (sdlDrawFrame ctx' tabTableUi sdlEnv inp False)
+    (_, _, ddTable, _) <- runFrame ctx' inp tabTableUi
+    printf "  -> Table DrawCmds: %d (Vertices: %d, Indices: %d)\n"
+      (drawCmdCount ddTable) (drawVertexCount ddTable) (drawIndexCount ddTable)
+    runFrames
+      [ ("Tab: Plots (4 Charts + Diagram)", tabPlotsUi)
+      , ("Tab: Diagnostics", tabDiagnosticsUi)
+      ]
+    putStrLn ""
 
-          putStrLn "--- 5. FLOATING WINDOW STEADY-STATE ---"
-          measureBench "Debug Open, ForceFull replay" iterations $
-            void (sdlDrawFrame ctx' demoUi sdlEnv inp True)
-          churnCtx <- newPixelContext
-          churnCounter <- newIORef (0 :: Int)
-          void (runFrame churnCtx inp (churnWindowUi 0))
-          (f0, c0, e0) <- countDamageKinds churnCtx iterations (churnFrame churnCtx inp churnCounter)
-          printf "  -> Churn damage over %d frames: Full=%d Clip=%d Empty=%d\n"
-            iterations f0 c0 e0
-          measureBench "Win content churn (text 1..9ch)" iterations $
-            churnFrame churnCtx inp churnCounter
-          sweepCounter <- newIORef (0 :: Int)
-          measureBench "Debug Open, hover sweep" iterations $
-            hoverSweepFrame ctx' demoUi sdlEnv inp sweepCounter
-          putStrLn "--- 5b. IDLE CADENCE (debug gating) ---"
-          cadRef <- newDebugSampler
-          active0 <- isDebugActive cadRef
-          due0 <- debugRefreshDue cadRef
-          let wait0 = if active0 && due0 then 0 :: Int else if active0 then 250 else -1
-          printf "  plain window, no stats query : active=%-5s waitTimeout=%-3d (blocks until the next event)\n" (show active0) wait0
-          snapRef <- newIORef emptyCoreDebugSnapshot
-          _ <- refreshDebugSnapshot cadRef snapRef pure
-          active1 <- isDebugActive cadRef
-          due1 <- debugRefreshDue cadRef
-          let wait1 = if active1 && due1 then 0 :: Int else if active1 then 250 else -1
-          printf "  stats window queried         : active=%-5s waitTimeout=%-3d (4 Hz HUD refresh sustained)\n" (show active1) wait1
-          putStrLn ""
-          -- The floating debug window can occlude the toolbar after it grows.
-          -- Its title-bar close button is the unlabelled NodeButton in this UI.
-          let arena = ctxNodeArena ctx'
-          closeNode <- findNodeRevM arena $ \i -> do
-            nt <- getNodeType arena i
-            if nt == NodeButton then T.null <$> getText arena i else pure False
-          case closeNode of
-            Nothing -> fail "Debug close button missing during profiling"
-            Just i -> do
-              (x, y, w, h) <- getRect arena i
-              Harness.clickPos
-                (\frameInp -> void (sdlDrawFrame ctx' demoUi sdlEnv frameInp False))
-                inp (V2 (x + w / 2) (y + h / 2))
-          stillOpen <- debugPanelOpen ctx'
-          when stillOpen (fail "Debug window did not close after profiling")
+    (images, _, _, _) <- runFrame ctx' inp $
+      fmap smallArrayFromList $ forM demoSwatches $ \(_, pixels) -> do
+        iid <- freshImageId
+        ok <- registerImageRgba iid 32 32 pixels
+        unless ok (uiIO (fail "registerImageRgba failed"))
+        pure iid
 
-      putStrLn "--- 2. DEMO TABS IN ISOLATION (Full runFrame + draw) ---"
-      measureBench "Tab: Controls" iterations $
-        void (runFrame ctx' inp tabControlsUi)
+    putStrLn "--- 3. WIDGET MICROBENCHMARKS (100 widgets in container, runFrame) ---"
+    runFrames
+      [ ("100x Button", benchButtons)
+      , ("100x Checkbox", benchCheckboxes)
+      , ("100x Slider", benchSliders)
+      , ("100x Radio Button", benchRadios)
+      , ("100x Select (Dropdown)", benchSelects)
+      , ("100x TextInput", benchTextInputs)
+      , ("20x TextArea", benchTextAreas)
+      , ("20x ColorPicker", benchColorPickers)
+      , ("100x Label (Plain Text)", benchLabels)
+      , ("100x Box (Solid Rects)", benchBoxes)
+      , ("100x Images (Atlas Quads)", benchImages images)
+      , ("50x Nested Rows & Cols", benchContainers)
+      ]
+    putStrLn ""
 
-      measureBench "Tab: List (Tree + Items)" iterations $
-        void (runFrame ctx' inp tabListUi)
-
-      measureBench "Tab: Table (14 rows x 5 cols)" iterations $
-        void (runFrame ctx' inp tabTableUi)
-      measureBench "Tab: Table (SDL Present)" iterations $
-        void (sdlDrawFrame ctx' tabTableUi sdlEnv inp False)
-      (_, _, ddTable, _) <- runFrame ctx' inp tabTableUi
-      printf "  -> Table DrawCmds: %d (Vertices: %d, Indices: %d)\n"
-        (drawCmdCount ddTable) (drawVertexCount ddTable) (drawIndexCount ddTable)
-
-      measureBench "Tab: Plots (4 Charts + Diagram)" iterations $
-        void (runFrame ctx' inp tabPlotsUi)
-
-      measureBench "Tab: Diagnostics" iterations $
-        void (runFrame ctx' inp tabDiagnosticsUi)
-      putStrLn ""
-
-      putStrLn "--- 3. WIDGET MICROBENCHMARKS (100 widgets in container, runFrame) ---"
-      measureBench "100x Button" iterations $
-        void (runFrame ctx' inp benchButtons)
-
-      measureBench "100x Checkbox" iterations $
-        void (runFrame ctx' inp benchCheckboxes)
-
-      measureBench "100x Slider" iterations $
-        void (runFrame ctx' inp benchSliders)
-
-      measureBench "100x Radio Button" iterations $
-        void (runFrame ctx' inp benchRadios)
-
-      measureBench "100x Select (Dropdown)" iterations $
-        void (runFrame ctx' inp benchSelects)
-
-      measureBench "100x TextInput" iterations $
-        void (runFrame ctx' inp benchTextInputs)
-
-      measureBench "20x TextArea" iterations $
-        void (runFrame ctx' inp benchTextAreas)
-
-      measureBench "20x ColorPicker" iterations $
-        void (runFrame ctx' inp benchColorPickers)
-
-      measureBench "100x Label (Plain Text)" iterations $
-        void (runFrame ctx' inp benchLabels)
-
-      measureBench "100x Box (Solid Rects)" iterations $
-        void (runFrame ctx' inp benchBoxes)
-
-      measureBench "100x Images (Atlas Quads)" iterations $
-        void (runFrame ctx' inp benchImages)
-
-      measureBench "50x Nested Rows & Cols" iterations $
-        void (runFrame ctx' inp benchContainers)
-      putStrLn ""
-
-      putStrLn "--- 4. SCALING BENCHMARKS ---"
-      measureBench "Table: 50 rows x 5 cols" iterations $
-        void (runFrame ctx' inp benchLargeTable)
-
-      measureBench "Table: 200 rows x 5 cols" iterations $
-        void (runFrame ctx' inp benchHugeTable)
-
-      measureBench "Tree: 50 items (unfolded)" iterations $
-        void (runFrame ctx' inp benchLargeTree)
-
-      measureBench "Plot: Line chart (500 pts)" iterations $
-        void (runFrame ctx' inp benchLargeChart)
-      putStrLn ""
-      putStrLn "================================================================================"
-      putStrLn "Profiling complete."
+    putStrLn "--- 4. SCALING BENCHMARKS ---"
+    runFrames
+      [ ("Table: 50 rows x 5 cols", benchTable "bigTable" (tablePeople 50))
+      , ("Table: 200 rows x 5 cols", benchTable "hugeTable" (tablePeople 200))
+      , ("Tree: 50 items (unfolded)", benchLargeTree)
+      , ("Plot: Line chart (500 pts)", benchLargeChart)
+      ]
+    putStrLn ""
+    putStrLn "================================================================================"
+    putStrLn "Profiling complete."
 
 churnWindowUi :: Int -> NanoUI ()
 churnWindowUi k = do
@@ -412,10 +375,10 @@ benchBoxes = gridWith 10 (tight . gap 2 . fillW) $
   forM_ [1 .. 100 :: Int] $ \i ->
     box (fixedWH 20 20) (colorRGBA (fromIntegral (i * 2)) 120 200 255)
 
-benchImages :: NanoUI ()
-benchImages = gridWith 10 (tight . gap 2 . fillW) $
+benchImages :: SmallArray ImageId -> NanoUI ()
+benchImages images = gridWith 10 (tight . gap 2 . fillW) $
   forM_ [1 .. 100 :: Int] $ \i ->
-    image (fixedWH 24 24) (ImageId (1 + i `mod` 3))
+    image (fixedWH 24 24) (indexSmallArray images (i `mod` sizeofSmallArray images))
 
 benchContainers :: NanoUI ()
 benchContainers = columnWith (tight . gap 2 . fillW) $
@@ -429,15 +392,12 @@ benchContainers = columnWith (tight . gap 2 . fillW) $
 -- Scaling Benchmarks
 --------------------------------------------------------------------------------
 
-benchLargeTable :: NanoUI ()
-benchLargeTable =
-  let rows = [DemoPerson (T.pack ("Name " <> show i)) (T.pack ("Dept " <> show (i `mod` 5))) (20 + i) "City" "Role" | i <- [1 .. 50 :: Int]]
-   in void $ tableWith (fixedH 400 . gap 8) "bigTable" colPeople rows (SortCol 0 SortAsc)
+-- | A sortable table. Build the rows outside the frame.
+benchTable :: T.Text -> [DemoPerson] -> NanoUI ()
+benchTable key rows = void $ tableWith (fixedH 400 . gap 8) key colPeople rows (SortCol 0 SortAsc)
 
-benchHugeTable :: NanoUI ()
-benchHugeTable =
-  let rows = [DemoPerson (T.pack ("Name " <> show i)) (T.pack ("Dept " <> show (i `mod` 5))) (20 + i) "City" "Role" | i <- [1 .. 200 :: Int]]
-   in void $ tableWith (fixedH 400 . gap 8) "hugeTable" colPeople rows (SortCol 0 SortAsc)
+tablePeople :: Int -> [DemoPerson]
+tablePeople n = [DemoPerson (T.pack ("Name " <> show i)) (T.pack ("Dept " <> show (i `mod` 5))) (20 + i) "City" "Role" | i <- [1 .. n]]
 
 benchLargeTree :: NanoUI ()
 benchLargeTree =

@@ -33,7 +33,7 @@
 --   * List:         tree, searchField
 --   * Table:        tableWith (needs useTableSort)
 --   * Panes:        paneGrid
---   * Plots:        plot, barChart, areaChart, diagram (data at the bottom)
+--   * Plots:        plot, barChart, areaChart, diagram
 --   * Diagnostics:  debug readouts from the SDL backend
 --
 -- The entry point is 'main' (§1) with a small CLI; the argument plumbing is the
@@ -42,7 +42,6 @@
 
 module SdlDemo
     ( main
-    , demoImages
     , demoUi
     ) where
 
@@ -83,12 +82,12 @@ import System.Console.GetOpt
   , usageInfo
   )
 import System.Environment (getArgs, lookupEnv)
+import Text.Read (readMaybe)
 import Text.Printf (printf)
 import qualified Codec.Picture as JP
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Internal as BSI
 import qualified Data.Text as T
-import qualified Data.Text.Read as T.Read
 import Data.Primitive.SmallArray (indexSmallArray, sizeofSmallArray)
 import qualified Data.Vector.Storable as VS
 import qualified SdlSelftest
@@ -98,6 +97,7 @@ import DemoData
   ( DemoPerson (..)
   , colPeople
   , demoPeople
+  , demoSwatches
   , demoTree
   , sineCosineChart
   , weeklyBars
@@ -107,52 +107,36 @@ import DemoData
 -- §1  App entry (main)
 ------------------------------------------------------------------------------
 
--- | Run @cabal run -fsdl nano-ui-sdl-demo@ for the windowed app, or
--- @cabal run -fsdl nano-ui-sdl-demo -- --selftest@ for the headless UI test
+-- | Run @cabal run nano-ui-sdl-demo@ for the windowed app, or
+-- @cabal run nano-ui-sdl-demo -- --selftest@ for the headless UI test
 -- (defined in "SdlSelftest").
 main :: IO ()
 main = do
   args <- getArgs
   if "--selftest" `elem` args
-    then SdlSelftest.selftest ("--continuous" `elem` args) demoImages demoUi
+    then SdlSelftest.selftest ("--continuous" `elem` args) demoUi
     else do
       let (cfgUpdates, _, _) = getOpt Permute options args
           cfg = foldl' (flip id) defaultDemoConfig cfgUpdates
       if cfgHelp cfg
         then putStr (usageInfo "Usage: nano-ui-sdl-demo [OPTIONS]" options)
         else do
-          let winSize = case (cfgWidth cfg, cfgHeight cfg) of
-                (Just w, Just h) -> Size w h
-                (Just w, Nothing) -> Size w 800
-                (Nothing, Just h) -> Size 1280 h
-                (Nothing, Nothing) -> Size 1280 800
           runSdlApp
             defaultSdlOptions
               { sdlAppShouldQuit = \inp -> inputKeysElem KeyEscape (inputKeys inp)
-              , sdlAppImages = demoImages
               , sdlAppTheme = Just defaultTheme
               , sdlAppVsync = cfgVsync cfg
               , sdlAppContinuous = cfgContinuous cfg
               , sdlWindowFullscreen = cfgFullscreen cfg
               , sdlWindowBorderless = cfgBorderless cfg
               , sdlWindowAlwaysOnTop = cfgAlwaysOnTop cfg
-              , sdlWindowSize = winSize
+              , sdlWindowSize = Size (fromMaybe 1280 (cfgWidth cfg)) (fromMaybe 800 (cfgHeight cfg))
               }
             demoUi
 
 ------------------------------------------------------------------------------
 -- §2  Assets & shared look
 ------------------------------------------------------------------------------
-
--- | Three 32x32 images registered with the SDL context (see the Graphics tab
--- and the SdlSelftest image check). Pixel data is at the very bottom.
-demoImages :: SmallArray RgbaImage
-demoImages =
-  smallArrayFromList
-    [ RgbaImage (ImageId 1) 32 32 swatchPixels
-    , RgbaImage (ImageId 2) 32 32 checkerPixels
-    , RgbaImage (ImageId 3) 32 32 stripePixels
-    ]
 
 -- | An animated GIF loading in the background: each frame's width, height and
 -- RGBA pixels once decoded, or why the file could not be used.
@@ -300,6 +284,7 @@ demoUi = do
   (lick, setLick) <- useState (Nothing :: Maybe (Either String (SmallArray ImageId))) -- GIF frames, once loaded
   (lickLoad, setLickLoad) <- useState (Nothing :: Maybe GifLoad) -- the GIF while it decodes
   (icons, setIcons) <- useState (Nothing :: Maybe [Either String Svg]) -- SVG icons, read on first show
+  (swatches, setSwatches) <- useState (Nothing :: Maybe [(ImageId, T.Text)]) -- generated images, registered on first show
   (folderDlg, setFolderDlg) <- useState (Nothing :: Maybe FileDialogId)
   (openPath, setOpenPath) <- useText ""
   (savePath, setSavePath) <- useText ""
@@ -314,7 +299,7 @@ demoUi = do
   (searchText, setSearchText) <- useText "" -- live searchField text
   (searchQuery, setSearchQuery) <- useText "" -- committed searchField value
   (peopleMatches, setPeopleMatches) <- useState demoPeople -- filtered rows
-  (treeSel, setTreeSel) <- useText "0" -- tree selection index
+  (treeSel, setTreeSel) <- useInt 0 -- tree selection index
   -- Table tab.
   (tableSortVal, setTableSort) <- useTableSort (SortCol 0 SortAsc)
   -- Panes tab.
@@ -347,12 +332,7 @@ demoUi = do
             labelWith (tight . alignMid . fontMuted) "SDL3 / Widget cookbook"
           when (sizeW (inputWindowSize rawInp) >= 960) flex
           -- Live frame stats + the shared header buttons.
-          snap <- askSdlDebug
-          let c = dbgCore snap
-              fpsText =
-                if dbgPresentFps c > 0
-                  then T.pack (printf "%4.0f FPS / %5.2f ms" (dbgPresentFps c) (dbgFrameMs c))
-                  else ""
+          fpsText <- dtFps <$> (debugText =<< askSdlDebug)
           unless (T.null fpsText) $
             labelWith (tight . alignMid . fontMono . fontMuted) fpsText
           rowWith (tight . gap gapMicro . alignMid) $ do
@@ -395,7 +375,7 @@ demoUi = do
               kv "Count" (T.pack (show (round count :: Int)))
               kv "Mask" (T.pack (printf "0x%04X" (round mask :: Int)))
               separator
-              kv "Tree" treeSel
+              kv "Tree" (T.pack (show treeSel))
               kv "Table sort" (tableColumnLabel tableSortVal)
               kv "Table order" (tableSortDirText tableSortVal)
               kv "Clicked" (orDash click)
@@ -522,11 +502,21 @@ demoUi = do
             Graphics -> do
               heading "Graphics"
               separator
-              -- Images registered from demoImages.
-              rowWith (tight . gap gapInline . fillW) $ do
-                thumb (ImageId 1) "Swatch"
-                thumb (ImageId 2) "Checker"
-                thumb (ImageId 3) "Stripe"
+              -- Generated RGBA images, registered under fresh ids the first
+              -- time this tab shows.
+              case swatches of
+                Nothing -> do
+                  registered <- forM demoSwatches $ \(caption, pixels) -> do
+                    iid <- freshImageId
+                    ok <- registerImageRgba iid 32 32 pixels
+                    pure [(iid, caption) | ok]
+                  setSwatches (Just (concat registered))
+                Just registered ->
+                  rowWith (tight . gap gapInline . fillW) $
+                    for_ registered $ \(iid, caption) ->
+                      columnWith (tight . gap gapMicro) $ do
+                        image (fixedWH 88 88) iid
+                        muted caption
               separator
               -- SVG icons read from disk the first time this tab shows. A
               -- one-colour icon takes the text colour (or a fontColor), and
@@ -622,13 +612,8 @@ demoUi = do
             List -> do
               heading "Tree"
               -- tree: pass a selection index, get the clicked one back.
-              let sel0 =
-                    case T.Read.decimal treeSel of
-                      Right (n, _) -> n
-                      Left _ -> 0
-              scroll2DWith (fixedH 300 . fillW) $ do
-                sel <- tree "demo" demoTree sel0
-                setTreeSel (T.pack (show sel))
+              scroll2DWith (fixedH 300 . fillW) $
+                setTreeSel =<< tree "demo" demoTree treeSel
               separator
               heading "Searchable list"
               muted "Type to filter. The debounced search commits on a pause; the filtered list is cached and only recomputed when the committed query changes."
@@ -713,26 +698,15 @@ demoUi = do
             ------------------------------------------- Diagnostics ---------
             Diagnostics -> do
               heading "Diagnostics"
-              snap <- askSdlDebug
-              let c = dbgCore snap
-                  haskellMs = dbgUiMs c + dbgRenderMs c
-              kv "Present FPS" (T.pack (printf "%.1f fps" (dbgPresentFps c)))
-              kv "Display" (T.pack (printf "%d Hz" (dbgRefreshHz snap)))
-              kv "Loop FPS" (T.pack (printf "%.1f fps" (dbgLoopFps c)))
-              kv "Frame Time" (T.pack (printf "%.2f ms" (dbgFrameMs c)))
-              kv "Haskell Time" (T.pack (printf "%.2f ms (UI: %.2f, Render: %.2f)" haskellMs (dbgUiMs c) (dbgRenderMs c)))
-              kv "SDL Present" (T.pack (printf "%.2f ms" (dbgPresentMs c)))
-              kv "Draw Calls" (T.pack (printf "%d" (dbgCmds c)))
-              kv "Vertices / Indices" (T.pack (printf "%d / %d" (dbgVerts c) (dbgIndices c)))
-              kv "Renderer" (dbgRenderer snap <> if dbgVsync snap then " (vsync on)" else " (vsync off)")
+              mapM_ (uncurry kv) . dtSummary =<< debugText =<< askSdlDebug
               kv "Last drop event" (orDash dropRaw)
           setActiveTab newTab
 
   -------------------------------------------------------------- overlays ---
   -- Debug window: a plain draggable window opened by the toolbar toggle.
   when debugOpen $ do
-    snap <- askSdlDebug
-    (win, _) <- window True "Debug" (debugBody snap)
+    rows <- debugText =<< askSdlDebug
+    (win, _) <- window True "Debug" (debugBody rows)
     when (respClicked win) (setDebug False)
   -- About modal: modal gives (response, _); clicking anywhere or pressing Esc
   -- sets respClicked on the response, which closes it.
@@ -761,13 +735,6 @@ demoField caption widget =
 orDash :: T.Text -> T.Text
 orDash s = if T.null s then "-" else s
 
--- | Image tile in the Graphics tab: the caption is muted under the sprite.
-thumb :: ImageId -> T.Text -> NanoUI ()
-thumb iid caption =
-  columnWith (tight . gap gapMicro) $ do
-    image (fixedWH 88 88) iid
-    muted caption
-
 ------------------------------------------------------------------------------
 -- §5  Typography demo data
 ------------------------------------------------------------------------------
@@ -776,59 +743,41 @@ thumb iid caption =
 -- style combinators on plain labels.
 typeScale :: NanoUI ()
 typeScale =
-  columnWith (tight . gap gapMicro . fillW) $ do
-    rowWith (tight . gap gapInline . alignMid . fillW) $ do
-      labelWith (tight . alignMid . fixedW 60 . fontMono . fontMuted) "32px"
-      labelWith (alignMid . fontSize 32 . fontBold) "Display Headline"
-    rowWith (tight . gap gapInline . alignMid . fillW) $ do
-      labelWith (tight . alignMid . fixedW 60 . fontMono . fontMuted) "24px"
-      labelWith (alignMid . fontSize 24 . fontSemiBold) "Page Section Title"
-    rowWith (tight . gap gapInline . alignMid . fillW) $ do
-      labelWith (tight . alignMid . fixedW 60 . fontMono . fontMuted) "18px"
-      labelWith (alignMid . fontSize 18 . fontMedium) "Card Subtitle & Highlights"
-    rowWith (tight . gap gapInline . alignMid . fillW) $ do
-      labelWith (tight . alignMid . fixedW 60 . fontMono . fontMuted) "16px"
-      labelWith (alignMid . fontSize 16) "Standard body text (16px base line height)"
-    rowWith (tight . gap gapInline . alignMid . fillW) $ do
-      labelWith (tight . alignMid . fixedW 60 . fontMono . fontMuted) "12px"
-      labelWith (alignMid . fontSize 12 . fontMuted) "Auxiliary caption, footnote, or timestamp"
+  columnWith (tight . gap gapMicro . fillW) $
+    for_
+      [ ("32px", fontSize 32 . fontBold, "Display Headline")
+      , ("24px", fontSize 24 . fontSemiBold, "Page Section Title")
+      , ("18px", fontSize 18 . fontMedium, "Card Subtitle & Highlights")
+      , ("16px", fontSize 16, "Standard body text (16px base line height)")
+      , ("12px", fontSize 12 . fontMuted, "Auxiliary caption, footnote, or timestamp")
+      ]
+      $ \(size, style, sample) ->
+        rowWith (tight . gap gapInline . alignMid . fillW) $ do
+          labelWith (tight . alignMid . fixedW 60 . fontMono . fontMuted) size
+          labelWith (alignMid . style) sample
 
 weightsStyles :: NanoUI ()
 weightsStyles =
-  columnWith (tight . gap gapMicro . fillW) $ do
-    rowWith (tight . gap gapInline . fillW) $ do
-      labelWith (tight . fixedW 96 . fontMono . fontMuted) "Light"
-      labelWith fontLight "Sphinx of black quartz, judge my vow."
-    rowWith (tight . gap gapInline . fillW) $ do
-      labelWith (tight . fixedW 96 . fontMono . fontMuted) "Normal"
-      label "Sphinx of black quartz, judge my vow."
-    rowWith (tight . gap gapInline . fillW) $ do
-      labelWith (tight . fixedW 96 . fontMono . fontMuted) "Medium"
-      labelWith fontMedium "Sphinx of black quartz, judge my vow."
-    rowWith (tight . gap gapInline . fillW) $ do
-      labelWith (tight . fixedW 96 . fontMono . fontMuted) "SemiBold"
-      labelWith fontSemiBold "Sphinx of black quartz, judge my vow."
-    rowWith (tight . gap gapInline . fillW) $ do
-      labelWith (tight . fixedW 96 . fontMono . fontMuted) "Bold"
-      labelWith fontBold "Sphinx of black quartz, judge my vow."
-    rowWith (tight . gap gapInline . fillW) $ do
-      labelWith (tight . fixedW 96 . fontMono . fontMuted) "ExtraBold"
-      labelWith fontExtraBold "Sphinx of black quartz, judge my vow."
-    rowWith (tight . gap gapInline . fillW) $ do
-      labelWith (tight . fixedW 96 . fontMono . fontMuted) "Black"
-      labelWith fontBlack "Sphinx of black quartz, judge my vow."
-    rowWith (tight . gap gapInline . fillW) $ do
-      labelWith (tight . fixedW 96 . fontMono . fontMuted) "Italic"
-      labelWith fontItalic "Slanted synthetic italic font style."
-    rowWith (tight . gap gapInline . fillW) $ do
-      labelWith (tight . fixedW 96 . fontMono . fontMuted) "Underline"
-      labelWith fontUnderline "Underlined emphasis and interactive links."
-    rowWith (tight . gap gapInline . fillW) $ do
-      labelWith (tight . fixedW 96 . fontMono . fontMuted) "Strike"
-      labelWith fontStrike "Completed tasks and deprecated pricing."
-    rowWith (tight . gap gapInline . fillW) $ do
-      labelWith (tight . fixedW 96 . fontMono . fontMuted) "Both"
-      labelWith (fontUnderline . fontStrike) "Both underline and strikethrough lines."
+  columnWith (tight . gap gapMicro . fillW) $
+    for_
+      [ ("Light", fontLight, sphinx)
+      , ("Normal", id, sphinx)
+      , ("Medium", fontMedium, sphinx)
+      , ("SemiBold", fontSemiBold, sphinx)
+      , ("Bold", fontBold, sphinx)
+      , ("ExtraBold", fontExtraBold, sphinx)
+      , ("Black", fontBlack, sphinx)
+      , ("Italic", fontItalic, "Slanted synthetic italic font style.")
+      , ("Underline", fontUnderline, "Underlined emphasis and interactive links.")
+      , ("Strike", fontStrike, "Completed tasks and deprecated pricing.")
+      , ("Both", fontUnderline . fontStrike, "Both underline and strikethrough lines.")
+      ]
+      $ \(name, style, sample) ->
+        rowWith (tight . gap gapInline . fillW) $ do
+          labelWith (tight . fixedW 96 . fontMono . fontMuted) name
+          labelWith style sample
+ where
+  sphinx = "Sphinx of black quartz, judge my vow."
 
 -- | Mixed styles and links in one wrapped paragraph.
 richTextSample :: NanoUI ()
@@ -848,12 +797,15 @@ richTextSample = do
 colorHighlights :: NanoUI ()
 colorHighlights =
   columnWith (tight . gap gapMicro . fillW) $ do
-    rowWith (tight . gap gapInline . fillW) $ do
-      labelWith (fontBold . fontColor (colorRGBA 224 108 117 255)) "Crimson Red"
-      labelWith (fontBold . fontColor (colorRGBA 152 195 121 255)) "Emerald Green"
-      labelWith (fontBold . fontColor (colorRGBA 229 192 123 255)) "Amber Gold"
-      labelWith (fontBold . fontColor (colorRGBA 86 182 194 255)) "Glacier Cyan"
-      labelWith (fontBold . fontColor (colorRGBA 198 120 221 255)) "Orchid Violet"
+    rowWith (tight . gap gapInline . fillW) $
+      for_
+        [ (colorRGBA 224 108 117 255, "Crimson Red")
+        , (colorRGBA 152 195 121 255, "Emerald Green")
+        , (colorRGBA 229 192 123 255, "Amber Gold")
+        , (colorRGBA 86 182 194 255, "Glacier Cyan")
+        , (colorRGBA 198 120 221 255, "Orchid Violet")
+        ]
+        $ \(color, name) -> labelWith (fontBold . fontColor color) name
     rowWith (tight . gap gapInline . fillW . alignMid) $ do
       muted "Sale example:"
       labelWith (fontStrike . fontMuted) "$129.00"
@@ -1014,34 +966,76 @@ drawingSample ps =
 
 type DebugRows = SmallArray (T.Text, T.Text)
 
--- The backend samples at 4 Hz. Share the formatted rows between samples
--- instead of running printf for every field on every continuous frame.
-data DemoDebugRows = DemoDebugRows !SdlDebugSnapshot !(DebugRows, DebugRows, DebugRows, DebugRows)
+-- | A debug sample formatted for the toolbar, the Diagnostics tab and the
+-- Debug window.
+data DebugText = DebugText
+  { dtFps :: !T.Text
+  , dtSummary :: !DebugRows
+  , dtFrame :: !DebugRows
+  , dtDraw :: !DebugRows
+  , dtDisplay :: !DebugRows
+  , dtRuntime :: !DebugRows
+  }
 
-debugBody :: SdlDebugSnapshot -> NanoUI ()
-debugBody s = do
+-- The backend samples at 4 Hz. Share the formatted text between samples
+-- instead of running printf for every field on every continuous frame.
+data CachedDebugText = CachedDebugText !SdlDebugSnapshot !DebugText
+
+debugText :: SdlDebugSnapshot -> NanoUI DebugText
+debugText s = do
   ctx <- askContext
-  (frames, draws, display, runtime) <- uiIO $ do
+  uiIO $ do
     cached <- askHostIO ctx
     case cached of
-      Just (DemoDebugRows previous rows) | previous == s -> pure rows
+      Just (CachedDebugText previous text) | previous == s -> pure text
       _ -> do
-        let rows = (frameRows s, drawRows s, displayRows s, smallArrayFromList (formatCoreRtsRows (dbgCore s)))
-        setHost ctx (DemoDebugRows s rows)
-        pure rows
+        let c = dbgCore s
+            text =
+              DebugText
+                { dtFps =
+                    if dbgPresentFps c > 0
+                      then T.pack (printf "%4.0f FPS / %5.2f ms" (dbgPresentFps c) (dbgFrameMs c))
+                      else ""
+                , dtSummary = summaryRows s
+                , dtFrame = frameRows s
+                , dtDraw = drawRows s
+                , dtDisplay = displayRows s
+                , dtRuntime = smallArrayFromList (formatCoreRtsRows c)
+                }
+        setHost ctx (CachedDebugText s text)
+        pure text
+
+debugBody :: DebugText -> NanoUI ()
+debugBody text =
   columnWith (tight . gap 4 . minW 300 . fillW) $ do
-    debugSection "Frame" frames
+    debugSection "Frame" (dtFrame text)
     separator
-    debugSection "Draw" draws
+    debugSection "Draw" (dtDraw text)
     separator
-    debugSection "Display" display
+    debugSection "Display" (dtDisplay text)
     separator
-    debugSection "Runtime" runtime
+    debugSection "Runtime" (dtRuntime text)
 
 debugSection :: T.Text -> DebugRows -> NanoUI ()
 debugSection title rows = do
   heading title
   mapM_ (\(k, v) -> kvMono k v) rows
+
+summaryRows :: SdlDebugSnapshot -> DebugRows
+summaryRows s =
+  let c = dbgCore s
+      haskellMs = dbgUiMs c + dbgRenderMs c
+   in smallArrayFromList
+        [ ("Present FPS", T.pack (printf "%.1f fps" (dbgPresentFps c)))
+        , ("Display", T.pack (printf "%d Hz" (dbgRefreshHz s)))
+        , ("Loop FPS", T.pack (printf "%.1f fps" (dbgLoopFps c)))
+        , ("Frame Time", T.pack (printf "%.2f ms" (dbgFrameMs c)))
+        , ("Haskell Time", T.pack (printf "%.2f ms (UI: %.2f, Render: %.2f)" haskellMs (dbgUiMs c) (dbgRenderMs c)))
+        , ("SDL Present", T.pack (printf "%.2f ms" (dbgPresentMs c)))
+        , ("Draw Calls", T.pack (show (dbgCmds c)))
+        , ("Vertices / Indices", T.pack (printf "%d / %d" (dbgVerts c) (dbgIndices c)))
+        , ("Renderer", dbgRenderer s <> if dbgVsync s then " (vsync on)" else " (vsync off)")
+        ]
 
 frameRows :: SdlDebugSnapshot -> DebugRows
 frameRows s =
@@ -1082,49 +1076,7 @@ displayRows s =
         ]
 
 ------------------------------------------------------------------------------
--- §10  Image pixels (RGBA, row-major, 32x32)
-------------------------------------------------------------------------------
-
-swatchPixels, checkerPixels, stripePixels :: BS.ByteString
-swatchPixels =
-  BS.pack
-    [ chan
-    | y <- [0 .. 31] :: [Int]
-    , x <- [0 .. 31] :: [Int]
-    , chan <-
-        [ fromIntegral (x * 255 `div` 31)
-        , fromIntegral (y * 255 `div` 31)
-        , 180
-        , 255
-        ]
-    ]
-
-checkerPixels =
-  BS.pack
-    [ chan
-    | y <- [0 .. 31] :: [Int]
-    , x <- [0 .. 31] :: [Int]
-    , let on = (x `div` 8 + y `div` 8) `mod` 2 == 0
-    , chan <-
-        if on
-          then [240, 200, 80, 255]
-          else [40, 50, 70, 255]
-    ]
-
-stripePixels =
-  BS.pack
-    [ chan
-    | _y <- [0 .. 31] :: [Int]
-    , x <- [0 .. 31] :: [Int]
-    , let on = (x `div` 4) `mod` 2 == 0
-    , chan <-
-        if on
-          then [80, 160, 220, 255]
-          else [30, 40, 60, 255]
-    ]
-
-------------------------------------------------------------------------------
--- §11  CLI plumbing
+-- §10  CLI plumbing
 ------------------------------------------------------------------------------
 
 data DemoConfig = DemoConfig
@@ -1151,21 +1103,14 @@ defaultDemoConfig =
     , cfgHelp = False
     }
 
-readMaybeFloat :: String -> Maybe Float
-readMaybeFloat s = case reads s of
-  [(x, "")] -> Just x
-  _ -> Nothing
-
 options :: [OptDescr (DemoConfig -> DemoConfig)]
 options =
   [ Option ['v'] ["vsync"] (ReqArg (\s cfg -> cfg { cfgVsync = s `elem` ["true", "True", "1"] }) "BOOL") "Enable or disable vsync (true/false, default: true)"
-  , Option ['c'] ["continuous"] (NoArg (\cfg -> cfg { cfgContinuous = True, cfgVsync = False })) "Continuous unthrottled rendering (disables vsync)"
-  , Option ['b'] ["benchmark"] (NoArg (\cfg -> cfg { cfgContinuous = True, cfgVsync = False })) "Benchmark mode: continuous rendering with vsync disabled"
-  , Option ['f'] ["fps"] (NoArg (\cfg -> cfg { cfgContinuous = True, cfgVsync = False })) "Show uncapped FPS (continuous, vsync false)"
+  , Option ['c', 'b', 'f'] ["continuous", "benchmark", "fps"] (NoArg (\cfg -> cfg { cfgContinuous = True, cfgVsync = False })) "Continuous unthrottled rendering, to show uncapped FPS (disables vsync)"
   , Option ['F'] ["fullscreen"] (NoArg (\cfg -> cfg { cfgFullscreen = True })) "Launch window in fullscreen mode"
   , Option [] ["borderless"] (NoArg (\cfg -> cfg { cfgBorderless = True })) "Launch borderless window"
   , Option ['t'] ["always-on-top"] (NoArg (\cfg -> cfg { cfgAlwaysOnTop = True })) "Keep window always on top"
-  , Option ['W'] ["width"] (ReqArg (\s cfg -> cfg { cfgWidth = readMaybeFloat s }) "PX") "Initial window width in pixels (default: 1280)"
-  , Option ['H'] ["height"] (ReqArg (\s cfg -> cfg { cfgHeight = readMaybeFloat s }) "PX") "Initial window height in pixels (default: 800)"
+  , Option ['W'] ["width"] (ReqArg (\s cfg -> cfg { cfgWidth = readMaybe s }) "PX") "Initial window width in pixels (default: 1280)"
+  , Option ['H'] ["height"] (ReqArg (\s cfg -> cfg { cfgHeight = readMaybe s }) "PX") "Initial window height in pixels (default: 800)"
   , Option ['h', '?'] ["help"] (NoArg (\cfg -> cfg { cfgHelp = True })) "Show help and command-line options"
   ]

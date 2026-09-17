@@ -1,7 +1,7 @@
 -- | Demo data shared by the SDL demo, profile harness, and self-test.
 --
 -- Everything here is plain data: people records, the showcase tree, chart
--- datasets, and the image-registration fold used to seed an SDL context.
+-- datasets, and generated images.
 module DemoData
   ( DemoPerson (..)
   , demoPeople
@@ -9,15 +9,12 @@ module DemoData
   , demoTree
   , sineCosineChart
   , weeklyBars
-  , registerDemoImages
+  , demoSwatches
   ) where
 
-import Data.Foldable (toList)
-import Data.Primitive.SmallArray (SmallArray)
 import NanoUI
-import NanoUI.Backend.Sdl (RgbaImage (..))
 import NanoUI.Diagrams
-import NanoUI.Testing (Context, registerImages)
+import qualified Data.ByteString as BS
 import qualified Data.Text as T
 
 data DemoPerson = DemoPerson
@@ -97,10 +94,42 @@ weeklyBars =
   , ("Fri", 3)
   ]
 
--- | Register every image in the array, stopping at the first failure.
-registerDemoImages :: Context -> SmallArray RgbaImage -> IO Bool
-registerDemoImages ctx images =
-  registerImages ctx
-    [ (rgbaImageId img, rgbaImageWidth img, rgbaImageHeight img, rgbaImagePixels img)
-    | img <- toList images
-    ]
+-- | Captioned 32x32 RGBA images, rows top to bottom.
+demoSwatches :: [(T.Text, BS.ByteString)]
+demoSwatches =
+  [ ( "Swatch"
+    , BS.pack
+        [ chan
+        | y <- [0 .. 31] :: [Int]
+        , x <- [0 .. 31] :: [Int]
+        , chan <-
+            [ fromIntegral (x * 255 `div` 31)
+            , fromIntegral (y * 255 `div` 31)
+            , 180
+            , 255
+            ]
+        ]
+    )
+  , ( "Checker"
+    , BS.pack
+        [ chan
+        | y <- [0 .. 31] :: [Int]
+        , x <- [0 .. 31] :: [Int]
+        , chan <-
+            if (x `div` 8 + y `div` 8) `mod` 2 == 0
+              then [240, 200, 80, 255]
+              else [40, 50, 70, 255]
+        ]
+    )
+  , ( "Stripe"
+    , BS.pack
+        [ chan
+        | _y <- [0 .. 31] :: [Int]
+        , x <- [0 .. 31] :: [Int]
+        , chan <-
+            if (x `div` 4) `mod` 2 == 0
+              then [80, 160, 220, 255]
+              else [30, 40, 60, 255]
+        ]
+    )
+  ]

@@ -20,7 +20,6 @@ import Data.List (maximumBy, minimumBy)
 import Data.Maybe (fromMaybe, isJust, listToMaybe)
 import Data.Ord (comparing)
 import Data.Primitive.PrimArray (sizeofPrimArray)
-import Data.Primitive.SmallArray (SmallArray)
 import NanoUI
 import NanoUI.Backend.Sdl
 import NanoUI.Context (ctxResolveFont, ctxResolveMeasure)
@@ -40,17 +39,14 @@ import NanoUI.Testing.Harness
   , spanLabel
   )
 import NanoUI.Testing.Harness qualified as Harness
-import DemoData (registerDemoImages)
 import Text.Printf (printf)
 import qualified Data.Text as T
 
 -- | Draw the given UI on a hidden SDL window and drive it through the main
 -- widget interactions, failing loudly on any regression.
-selftest :: Bool -> SmallArray RgbaImage -> NanoUI () -> IO ()
-selftest continuous imgs ui = do
+selftest :: Bool -> NanoUI () -> IO ()
+selftest continuous ui = do
   ctx0 <- newPixelContext
-  ok <- registerDemoImages ctx0 imgs
-  unless ok $ fail "selftest: registerImage failed"
   let opts =
         defaultSdlOptions
           { sdlWindowHidden = True

@@ -111,6 +111,7 @@ executable nano-ui-sdl-profile
         nano-ui-demo:demo-common,
         nano-ui-diagrams ^>=0.1,
         nano-ui-sdl ^>=0.1,
+        primitive ^>=0.9,
         text ^>=2.1
 
 executable nano-ui-sdl-notepad
