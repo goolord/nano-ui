@@ -11,18 +11,20 @@ import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Primitive.SmallArray (SmallArray, indexSmallArray, mapSmallArray', sizeofSmallArray, smallArrayFromList)
 import Effectful (Eff, type (:>))
+import qualified Data.IntMap.Strict as IM
 import qualified Data.IntSet as IS
-import NanoUI.Context (Context (..), adoptStoreInt, getFocusId, intKey, recordStoreInt, registerFocusable, writeStoreInt)
+import NanoUI.Context (Context (..), adoptStoreInt, getFocusId, getStore, intKey, recordStoreInt, registerFocusable, setStore, writeStoreInt)
 import NanoUI.Font (treeChevronRect)
 import NanoUI.Frame.Hit (scrollHitRect)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input (inputMousePos)
 import NanoUI.Layout.Arena (NodeType (..))
+import NanoUI.Store (WidgetStore (..))
 import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO, withKey)
 import NanoUI.Style (defaultLayout, fillW, gap, tight)
 import NanoUI.Types (Rect (..), clamp, rectContains)
 import NanoUI.WidgetText (treeEncodeStyle)
-import NanoUI.Widgets.Behavior (KeyNav (..), ensureIntSet, putIntSet, useKeyNav)
+import NanoUI.Widgets.Behavior (KeyNav (..), useKeyNav)
 import NanoUI.Widgets.Combinators (selectableItem)
 import NanoUI.Widgets.Layout (columnWith)
 import NanoUI.Widgets.Node (Response (..), setChanged, tagContainer)
@@ -145,7 +147,13 @@ tree' key inputItems index =
         total = forestSize items
         clamped = if total <= 0 then 0 else clamp 0 (total - 1) index
     selected <- uiIO $ adoptStoreInt ctx groupId groupKey clamped
-    expandedSet <- ensureIntSet groupKey (parentIndices items)
+    st <- uiIO (getStore ctx)
+    expandedSet <- case IM.lookup groupKey (storeIntSet st) of
+      Just expanded -> pure expanded
+      Nothing -> do
+        let initial = parentIndices items
+        uiIO $ setStore ctx (st {storeIntSet = IM.insert groupKey initial (storeIntSet st)})
+        pure initial
     let rows = visibleRows expandedSet items
     columnWith (tight . gap 0 . fillW) $ do
       tagContainer groupId
@@ -161,6 +169,8 @@ tree' key inputItems index =
       uiIO $ do
         writeStoreInt ctx groupId groupKey keySel
         recordStoreInt ctx groupKey keySel
-      when (keyExp /= expandedSet) $ putIntSet groupKey keyExp
+      when (keyExp /= expandedSet) $ uiIO $ do
+        st' <- getStore ctx
+        setStore ctx (st' {storeIntSet = IM.insert groupKey keyExp (storeIntSet st')})
       maybe (pure ()) (\wid -> uiIO $ writeIORef (ctxFocusId ctx) wid) mFocus
       pure (setChanged (keySel /= selected) (fold resps), keySel)
