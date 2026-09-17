@@ -17,19 +17,21 @@ import NanoUI
   ( Input (..)
   , NanoUI
   , Size (..)
+  , V2 (..)
   , themeWindow
   )
 import Effectful (Eff, IOE, type (:>))
 import NanoUI.Testing
   ( Context
   , Damage (..)
-  , DrawData
+  , DrawData (..)
   , Ui
   , askHost
   , ctxPaintFull
   , ctxTheme
   , damageFull
   , damageIsEmpty
+  , drawCmdCount
   , markDirty
   , runEff
   , runFrameEff
@@ -37,14 +39,13 @@ import NanoUI.Testing
   , takeDamage
   , uiIO
   )
+import NanoUI.Debug (CoreDebugSnapshot (..), noteDebugPresent, noteDebugSkip, refreshDebugSnapshot)
 import NanoUI.Sdl.Debug
-  ( SdlDebugSnapshot
+  ( SdlDebugSampler (..)
+  , SdlDebugSnapshot (..)
   , emptySdlDebug
-  , notePresent
-  , noteSkip
-  , readSdlDebug
+  , traceFrame
   )
-import NanoUI.Sdl.Cursor (syncPointerCursor)
 import NanoUI.Sdl.Display (queryMouseWindowPos, queryWindowLogicalSize)
 import NanoUI.Sdl.Font
   ( fontSourceLabel
@@ -151,7 +152,6 @@ finishDraw :: Context -> SdlEnv -> Input -> Ptr SDL_Texture -> Bool -> Double ->
 finishDraw ctx env inp tex presentFull t0 t1 drawData dirtyAfterUi = do
   let uiMs = (t1 - t0) * 1000
   scale <- readIORef (sdlScaleRef env)
-  syncPointerCursor (sdlCursors env) ctx inp
   dmg0 <- takeDamage ctx
   let Size lw lh = inputWindowSize inp
   -- Frame damage from writeDamage is authoritative: a live animation whose
@@ -176,7 +176,7 @@ finishDraw ctx env inp tex presentFull t0 t1 drawData dirtyAfterUi = do
       when atlasReset $ do
         damageFull ctx
         markDirty ctx
-      noteSkip (sdlDebug env)
+      noteDebugSkip (sdsSampler (sdlDebug env))
       pure (atlasReset || dirtyAfterUi, inp)
     else do
       -- A null texture draws full-repaint sessions straight to the window.
@@ -221,7 +221,8 @@ finishDraw ctx env inp tex presentFull t0 t1 drawData dirtyAfterUi = do
       let renderMs = (t2 - t1) * 1000
           presentMs = (t3 - t2) * 1000
           frameMs = (t3 - t0) * 1000
-      notePresent (sdlDebug env) uiMs renderMs presentMs frameMs drawData
+      noteDebugPresent (sdsSampler (sdlDebug env)) uiMs renderMs presentMs frameMs
+        (drawVertexCount drawData) (drawIndexCount drawData) (drawCmdCount drawData)
       writeIORef (sdlLastPresented env) True
       pure (dirtyAfterUi, inp)
 
@@ -248,7 +249,25 @@ askSdlDebug = do
   menv <- askHost @SdlEnv
   case menv of
     Nothing -> pure emptySdlDebug
-    Just env -> uiIO (readSdlDebugEnv env)
+    Just env -> uiIO $ do
+      let sampler = sdlDebug env
+      -- The display is queried only when the snapshot refreshes.
+      refreshDebugSnapshot (sdsSampler sampler) (sdsSnapshot sampler) $ \core -> do
+        scale <- readIORef (sdlScaleRef env)
+        fontSource <- sdlFontCacheSource (sdlFontCache env)
+        Size ww wh <- queryWindowLogicalSize (sdlWindow env)
+        V2 mx my <- queryMouseWindowPos
+        let snap =
+              SdlDebugSnapshot
+                { dbgCore = core {dbgWinW = ww, dbgWinH = wh, dbgMouseX = mx, dbgMouseY = my}
+                , dbgScale = scale
+                , dbgFontPath = fontSourceLabel fontSource
+                , dbgRenderer = sdlRendererName env
+                , dbgVsync = sdlVsync env
+                , dbgRefreshHz = round (1 / sdlRefreshPeriod env)
+                }
+        when (sdsTrace sampler) (traceFrame snap)
+        pure snap
 
 -- | Request a UI font family. The SDL display thread resolves and applies it
 -- before the next frame (see 'NanoUI.Sdl.Window.syncDisplay'), rebuilding the
@@ -261,12 +280,3 @@ setSdlUiFont font = do
     Just env -> uiIO $ do
       cur <- readIORef (sdlFontRequestRef env)
       when (cur /= font) $ writeIORef (sdlFontRequestRef env) font
-
-readSdlDebugEnv :: SdlEnv -> IO SdlDebugSnapshot
-readSdlDebugEnv env = do
-  scale <- readIORef (sdlScaleRef env)
-  fontSource <- sdlFontCacheSource (sdlFontCache env)
-  size <- queryWindowLogicalSize (sdlWindow env)
-  pos <- queryMouseWindowPos
-  let refreshHz = round (1 / sdlRefreshPeriod env)
-  readSdlDebug (sdlDebug env) size pos (fontSourceLabel fontSource) scale (sdlRendererName env) (sdlVsync env) refreshHz

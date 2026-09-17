@@ -41,16 +41,16 @@ import NanoUI.Context
   )
 import NanoUI.Input (MouseButton (..), applyMouseButton)
 import NanoUI.Testing
-  ( UiCursorKind (..)
-  , anyAnimating
+  ( DrawData (..)
+  , UiCursorKind (..)
   , clearDirty
   , collectRasterSpans
-  , isDirty
+  , drawCmdCount
   , runEff
   , runFrameReduceEff
-  , textFieldActive
   , uiCursorKind
   )
+import NanoUI.Debug (noteDebugPresent)
 import NanoUI.Runner
   ( SessionDriver (..)
   , runSessionLoop
@@ -60,10 +60,9 @@ import NanoUI.Layout.Arena (arenaCount)
 import NanoUI.Rgfw.Context (applyRgfwTheme, newRgfwContext)
 import NanoUI.Rgfw.Debug
   ( RgfwDebugHost (..)
+  , RgfwDebugSampler (..)
   , RgfwFrameStats (..)
   , newRgfwDebugSampler
-  , noteLoop
-  , notePresent
   )
 import NanoUI.Rgfw.Font.Cozette (getCozetteFont)
 import NanoUI.Rgfw.Gl (freeGlRenderer, newGlRenderer, renderArenaGl)
@@ -228,8 +227,6 @@ runRgfwAppReduceCustom opts getThemeAndScale updateModel initialModel view = inB
               writeIORef modelRef newModel
               tUiEnd <- getMonotonicTime
               let !uiMs = (tUiEnd - tUiStart) * 1000.0
-              -- The core loop syncs the cursor only on skipped frames.
-              syncCursor c curInp
 
               tRenderStart <- getMonotonicTime
               curMonScale <- readIORef monScaleRef
@@ -247,7 +244,9 @@ runRgfwAppReduceCustom opts getThemeAndScale updateModel initialModel view = inB
                   !frameMs = (tSwapEnd - tUiStart) * 1000.0
 
               nodes <- arenaCount (ctxNodeArena c)
-              notePresent debugSampler uiMs renderMs swapMs frameMs drawData
+              noteDebugPresent (rdsSampler debugSampler) uiMs renderMs swapMs frameMs
+                (drawVertexCount drawData) (drawIndexCount drawData) (drawCmdCount drawData)
+              writeIORef (rdsFrame debugSampler)
                 RgfwFrameStats
                   { fsNodes = nodes
                   , fsPhysW = pw
@@ -291,29 +290,18 @@ runRgfwAppReduceCustom opts getThemeAndScale updateModel initialModel view = inB
                     let !lw = max 1 (round (fromIntegral pw / newScale) :: Int)
                         !lh = max 1 (round (fromIntegral ph / newScale) :: Int)
                     pure (c, inp { inputWindowSize = Size (fromIntegral lw) (fromIntegral lh) })
-                , sdWaitTimeout   = \c wasAnim -> do
-                    animating <- anyAnimating c
-                    editing <- textFieldActive c
-                    dirtyWait <- isDirty c
-                    -- Presents are unthrottled (swap interval 0, no vsync), so
-                    -- a live in-view animation is paced at the refresh period
-                    -- instead of spinning at 0 ms; idle blocks until the first
-                    -- event so the loop goes fully quiet.
-                    pure $
-                      if dirtyWait
-                        then 0
-                        else if wasAnim || animating || editing
-                          then animateTimeout
-                          else (-1)
-                , sdShouldDraw    = \c prevInp inpSynced wasAnim ->
-                    shouldRedrawFrame c prevInp inpSynced wasAnim False False
+                , sdDebug         = rdsSampler debugSampler
+                , sdContinuous    = False
+                  -- Presents are unthrottled (swap interval 0, no vsync), so a
+                  -- live in-view animation is paced at the refresh period
+                  -- instead of spinning.
+                , sdPacingMs      = animateTimeout
+                , sdPresentPaces  = pure False
+                , sdShouldDraw    = \c prevInp inpSynced wasAnim debugDue ->
+                    shouldRedrawFrame c prevInp inpSynced wasAnim False debugDue
                 , sdDraw          = \c curInp _ -> drawOne c curInp
-                , sdSkip          = \_ _ -> pure ()
                 , sdOnCursor      = syncCursor
-                , sdNoteLoop      = noteLoop debugSampler
                 , sdShouldQuit    = \_ -> False
-                , sdClickDistance = 5.0
-                , sdClickTime     = 0.4
                 , sdAlignSec      = refreshSec
                 }
         -- Present the opening frame before entering the loop so the window has

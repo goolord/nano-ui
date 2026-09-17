@@ -25,10 +25,19 @@ import GHC.Clock (getMonotonicTime)
 import NanoUI.Context
   ( Context
   , anyAnimating
+  , isDirty
   , overlayConsumesQuit
   , textInputEditActive
   )
-import NanoUI.Frame.Redraw (needsRedraw)
+import NanoUI.Debug
+  ( DebugSamplerRef
+  , debugRefreshDue
+  , debugRefreshSec
+  , isDebugActive
+  , noteDebugLoop
+  , noteDebugSkip
+  )
+import NanoUI.Frame.Redraw (needsRedraw, textFieldActive)
 import NanoUI.Input
   ( Input (..)
   , clearEphemeral
@@ -74,9 +83,10 @@ data ClickTrack = ClickTrack
   , ctCount :: !Int
   }
 
--- | Stamp multi-click counts into an 'Input' record with custom distance and time thresholds.
-stampClicksWith :: Float -> Double -> IORef ClickTrack -> Input -> IO Input
-stampClicksWith !distLimit !timeLimit ref inp
+-- | Stamp multi-click counts into an 'Input' record: presses within 5 pixels
+-- and 0.4 seconds of the previous one count up to a triple click.
+stampClicks :: IORef ClickTrack -> Input -> IO Input
+stampClicks ref inp
   | not (inputMousePressed inp) = pure inp
   | otherwise = do
       now <- getMonotonicTime
@@ -88,8 +98,8 @@ stampClicksWith !distLimit !timeLimit ref inp
           dx = x - px
           dy = y - py
           distSq = dx * dx + dy * dy
-          close = distSq <= distLimit * distLimit
-          quick = (now - t) <= timeLimit
+          close = distSq <= 25
+          quick = (now - t) <= 0.4
           n' = if close && quick then min 3 (n + 1) else 1
       writeIORef ref ClickTrack {ctTime = now, ctPos = inputMousePos inp, ctCount = n'}
       pure (inp {inputMouseClicks = n'})
@@ -150,30 +160,36 @@ data SessionDriver ev = SessionDriver
     -- ^ Predicate for window close requests.
   , sdSyncDisplay   :: Context -> Input -> IO (Context, Input)
     -- ^ Backend-specific display synchronization (window dimensions, DPI scale).
-  , sdWaitTimeout   :: Context -> Bool -> IO Int
-    -- ^ Compute event wait timeout in milliseconds (-1 = block, 0 = immediate/non-blocking, >0 = tick timeout).
+  , sdDebug         :: DebugSamplerRef
+    -- ^ The session's debug sampler: loop timing, skips, and the 4 Hz
+    -- readout refresh.
+  , sdContinuous    :: !Bool
+    -- ^ Redraw every pass without waiting for events.
+  , sdPacingMs      :: !Int
+    -- ^ Event wait in milliseconds while something animates or a text field
+    -- is being edited.
+  , sdPresentPaces  :: IO Bool
+    -- ^ Whether the last present waited for the display (vsync), so a running
+    -- animation can loop without waiting and still be frame-locked.
   , sdAlignSec      :: Double
     -- ^ Frame pacing period in seconds for the timed-out wait path. Frame
     -- starts are wound onto a uniform grid of this period so animation
     -- cadence matches the host, instead of drifting with the event waiter's
     -- timer granularity.
-  , sdShouldDraw    :: Context -> Input -> Input -> Bool -> IO Bool
-    -- ^ Decision predicate: (ctx, prevInp, curInp, wasAnimating) -> should this frame be rendered?
+  , sdShouldDraw    :: Context -> Input -> Input -> Bool -> Bool -> IO Bool
+    -- ^ Decision predicate: (ctx, prevInp, curInp, wasAnimating, debugDue) ->
+    -- should this frame be rendered? Usually 'shouldRedrawFrame'.
   , sdDraw          :: Context -> Input -> Bool -> IO (Bool, Input)
     -- ^ Render frame: (ctx, curInp, forceFull) -> (dirtyAfterRender, syncedInput).
-  , sdSkip          :: Context -> Input -> IO ()
-    -- ^ Called when a frame is skipped.
   , sdOnCursor      :: Context -> Input -> IO ()
-    -- ^ Sync the host cursor icon.
-  , sdNoteLoop      :: Float -> IO ()
-    -- ^ Record the frame delta-time in the debug sampler.
+    -- ^ Sync the host cursor icon after every pass.
   , sdShouldQuit    :: Input -> Bool
     -- ^ Application-level quit predicate.
-  , sdClickDistance :: !Float
-    -- ^ Distance threshold for multi-click detection in pixels.
-  , sdClickTime     :: !Double
-    -- ^ Time threshold for multi-click detection in seconds.
   }
+
+-- | Event wait while only the debug readout needs frames: its refresh period.
+debugHudTimeout :: Int
+debugHudTimeout = round (debugRefreshSec * 1000)
 
 -- | Run an event-driven session loop until a termination event or user quit condition.
 runSessionLoop ::
@@ -199,13 +215,27 @@ runSessionLoop drv ctx0 inp0 = do
                 pure events
 
       loop ctx inp queued lastT pendingDirty wasAnim = do
-        pending <- if null queued
-          then do
-            timeout <- if pendingDirty
-              then pure 0
-              else sdWaitTimeout drv ctx wasAnim
-            waitForEvents timeout lastT
-          else pure queued
+        (pending, debugDue) <-
+          if not (null queued)
+            then pure (queued, False)
+            else if pendingDirty
+              then (,False) <$> waitForEvents 0 lastT
+              else do
+                debugActive <- isDebugActive (sdDebug drv)
+                refreshDue <- debugRefreshDue (sdDebug drv)
+                animating <- anyAnimating ctx
+                editing <- textFieldActive ctx
+                dirty <- isDirty ctx
+                presentPaces <- sdPresentPaces drv
+                let dueNow = debugActive && refreshDue
+                    timeout
+                      | sdContinuous drv || dueNow || dirty || (animating && presentPaces) = 0
+                      | wasAnim || animating || editing = sdPacingMs drv
+                      | debugActive = debugHudTimeout
+                      | otherwise = -1
+                events <- waitForEvents timeout lastT
+                -- A readout wait that timed out ends on its refresh.
+                pure (events, dueNow || (timeout == debugHudTimeout && debugActive && null events))
 
         let (group, rest) = splitFrame (sdIsButtonEdge drv) pending
         editActive <- textInputEditActive ctx
@@ -216,9 +246,9 @@ runSessionLoop drv ctx0 inp0 = do
           else do
             now <- getMonotonicTime
             let !dt = min maxFrameDt (realToFrac (now - lastT))
-            sdNoteLoop drv dt
+            noteDebugLoop (sdDebug drv) dt
             let inpFolded = foldl' (sdApplyEvent drv) (clearEphemeral inp {inputDeltaTime = dt}) group
-            inpStamped <- stampClicksWith (sdClickDistance drv) (sdClickTime drv) clickTracker inpFolded
+            inpStamped <- stampClicks clickTracker inpFolded
             (ctx', inpSynced) <- sdSyncDisplay drv ctx inpStamped
             -- Hard quit (e.g. Ctrl+C) is ignored while a text editor is active.
             editActiveSynced <- textInputEditActive ctx'
@@ -227,7 +257,7 @@ runSessionLoop drv ctx0 inp0 = do
               else do
                 shouldDraw <- if pendingDirty
                   then pure True
-                  else sdShouldDraw drv ctx' inp inpSynced wasAnim
+                  else sdShouldDraw drv ctx' inp inpSynced wasAnim debugDue
                 -- Force a full present only on the settle frame where an
                 -- animation just finished (wasAnim && not animNow). Passing
                 -- wasAnim alone kept every frame of a running animation at
@@ -236,9 +266,9 @@ runSessionLoop drv ctx0 inp0 = do
                 (dirtyOut, synced) <- if shouldDraw
                   then sdDraw drv ctx' inpSynced (wasAnim && not animNow)
                   else do
-                    sdSkip drv ctx' inpSynced
-                    sdOnCursor drv ctx' inpSynced
+                    noteDebugSkip (sdDebug drv)
                     pure (pendingDirty, inpSynced)
+                sdOnCursor drv ctx' synced
                 animAfter <- anyAnimating ctx'
                 -- Open modals/overlays consume Escape/Quit before the app sees it.
                 overlayQuit <- overlayConsumesQuit ctx' synced

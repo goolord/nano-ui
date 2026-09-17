@@ -3,21 +3,18 @@
 module NanoUI.Rgfw.Debug
   ( RgfwDebugSnapshot (..)
   , RgfwFrameStats (..)
-  , RgfwDebugSampler
+  , RgfwDebugSampler (..)
   , RgfwDebugHost (..)
   , newRgfwDebugSampler
-  , noteLoop
-  , notePresent
   , emptyRgfwDebug
   , askRgfwDebug
   , debugWindowBody
   ) where
 
-import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef, writeIORef)
+import Data.IORef (IORef, newIORef, readIORef)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Effectful (Eff, (:>))
-import GHC.Clock (getMonotonicTime)
 import Text.Printf (printf)
 
 import NanoUI
@@ -31,28 +28,23 @@ import NanoUI
   , separator
   , uiIO
   )
+import NanoUI.Context (askHostIO, setHost)
 import NanoUI.Monad
-  ( askHost
+  ( askContext
+  , askHost
   , askInput
   )
 import NanoUI.Debug
   ( CoreDebugSnapshot (..)
-  , DebugSampler (..)
   , DebugSamplerRef
-  , debugRefreshSec
   , emptyCoreDebugSnapshot
   , formatCoreRtsRows
   , formatDrawRows
   , formatFpsRows
-  , makeCoreDebugSnapshot
   , newDebugSampler
-  , noteDebugLoop
-  , noteDebugPresent
-  , presentRate
-  , readRtsSnapshot
+  , refreshDebugSnapshot
   )
 import NanoUI.Rgfw.Font.Cozette (CozetteScalePath (..), cozetteScalePath)
-import NanoUI.Testing (DrawData (..), drawCmdCount)
 
 -- | RGFW-specific facts about the last presented frame.
 data RgfwFrameStats = RgfwFrameStats
@@ -94,47 +86,6 @@ emptyRgfwDebug =
     , dbgFrame = RgfwFrameStats {fsNodes = 0, fsPhysW = 0, fsPhysH = 0, fsScale = 1, fsMonScale = 1}
     }
 
-noteLoop :: RgfwDebugSampler -> Float -> IO ()
-noteLoop = noteDebugLoop . rdsSampler
-
--- | Record a presented frame: UI, render, swap and total milliseconds, the
--- draw buffer it presented, and the RGFW frame stats.
-notePresent :: RgfwDebugSampler -> Double -> Double -> Double -> Double -> DrawData -> RgfwFrameStats -> IO ()
-notePresent s uiMs renderMs swapMs frameMs dd stats = do
-  noteDebugPresent
-    (rdsSampler s)
-    uiMs
-    renderMs
-    swapMs
-    frameMs
-    (drawVertexCount dd)
-    (drawIndexCount dd)
-    (drawCmdCount dd)
-  writeIORef (rdsFrame s) stats
-
--- | The snapshot, refreshed at most every 'debugRefreshSec'.
-readRgfwDebug :: RgfwDebugSampler -> Size -> V2 -> IO RgfwDebugSnapshot
-readRgfwDebug s (Size lw lh) (V2 mx my) = do
-  now <- getMonotonicTime
-  sampler <- readIORef (rdsSampler s)
-  if smLastDebugT sampler > 0 && now - smLastDebugT sampler < debugRefreshSec
-    then readIORef (rdsSnapshot s)
-    else do
-      rts <- readRtsSnapshot
-      (rate, sampled) <-
-        atomicModifyIORef' (rdsSampler s) $ \cur ->
-          let (rated, rate) = presentRate now cur
-              cur' = rated {smLastDebugT = now}
-           in (cur', (rate, cur'))
-      frame <- readIORef (rdsFrame s)
-      let snap =
-            RgfwDebugSnapshot
-              { dbgCore = (makeCoreDebugSnapshot sampled lw lh mx my rts) {dbgPresentFps = rate}
-              , dbgFrame = frame
-              }
-      writeIORef (rdsSnapshot s) snap
-      pure snap
-
 askRgfwDebug :: Ui :> es => Eff es RgfwDebugSnapshot
 askRgfwDebug = do
   inp <- askInput
@@ -142,13 +93,17 @@ askRgfwDebug = do
   case mhost of
     Nothing -> pure emptyRgfwDebug
     Just (RgfwDebugHost s) ->
-      uiIO (readRgfwDebug s (inputWindowSize inp) (inputMousePos inp))
+      uiIO $ refreshDebugSnapshot (rdsSampler s) (rdsSnapshot s) $ \core -> do
+        let Size lw lh = inputWindowSize inp
+            V2 mx my = inputMousePos inp
+        frame <- readIORef (rdsFrame s)
+        pure RgfwDebugSnapshot {dbgCore = core {dbgWinW = lw, dbgWinH = lh, dbgMouseX = mx, dbgMouseY = my}, dbgFrame = frame}
 
 -- | Arena nodes plus the draw buffer sizes.
-layoutRows :: RgfwDebugSnapshot -> [(Text, Text)]
+layoutRows :: RgfwDebugSnapshot -> Rows
 layoutRows s = ("nodes", T.pack (show (fsNodes (dbgFrame s)))) : formatDrawRows (dbgCore s)
 
-displayRows :: RgfwDebugSnapshot -> [(Text, Text)]
+displayRows :: RgfwDebugSnapshot -> Rows
 displayRows s =
   [ ("logical win", T.pack (printf "%.0fx%.0f" (dbgWinW c) (dbgWinH c)))
   , ("physical win", T.pack (printf "%dx%d" (fsPhysW f) (fsPhysH f)))
@@ -167,16 +122,31 @@ displayRows s =
       ScaleBoxFrom2x -> "box-averaged 2x EPX"
       ScaleBoxFrom4x -> "box-averaged 4x EPX"
 
+-- | The readout's formatted rows with the snapshot they show. The snapshot
+-- refreshes at 4 Hz, so rows are formatted once per refresh, not every frame.
+data RgfwDebugRows = RgfwDebugRows !RgfwDebugSnapshot !(Rows, Rows, Rows, Rows)
+
+type Rows = [(Text, Text)]
+
 debugWindowBody :: Ui :> es => RgfwDebugSnapshot -> Eff es ()
 debugWindowBody snap = do
+  ctx <- askContext
+  (fps, layout, display, rts) <- uiIO $ do
+    cached <- askHostIO ctx
+    case cached of
+      Just (RgfwDebugRows shown rows) | shown == snap -> pure rows
+      _ -> do
+        let rows = (formatFpsRows (dbgCore snap), layoutRows snap, displayRows snap, formatCoreRtsRows (dbgCore snap))
+        setHost ctx (RgfwDebugRows snap rows)
+        pure rows
   heading "Frame"
-  kvBlock (formatFpsRows (dbgCore snap))
+  kvBlock fps
   separator
   heading "Layout & Draw"
-  kvBlock (layoutRows snap)
+  kvBlock layout
   separator
   heading "Display & Scale"
-  kvBlock (displayRows snap)
+  kvBlock display
   separator
   heading "RTS Runtime"
-  kvBlock (formatCoreRtsRows (dbgCore snap))
+  kvBlock rts

@@ -9,8 +9,9 @@ import Control.Exception
   )
 import Data.IORef (IORef, atomicModifyIORef', modifyIORef', newIORef, readIORef)
 import NanoUI (Input (..), V2 (..), emptyInput)
+import NanoUI.Debug (newDebugSampler)
 import NanoUI.Runner
-import NanoUI.Testing (Context)
+import NanoUI.Testing (Context, clearDirty)
 import NanoUI.Testing.Assert (assertEq)
 
 -- Exercise queued edges, a dirty follow-up frame, skipped input, and blocking
@@ -20,6 +21,7 @@ runSessionLoopTest ctx failed = do
   logRef <- newIORef []
   waits <- newIORef [(-1, [1, 2]), (0, []), (-1, []), (-1, [3 :: Int])]
   draws <- newIORef (0 :: Int)
+  debug <- newDebugSampler
   let
     note message = modifyIORef' logRef (<> [message])
     driver =
@@ -39,22 +41,23 @@ runSessionLoopTest ctx failed = do
         , sdIsHardQuit = const False
         , sdIsSessionQuit = (== 3)
         , sdSyncDisplay = \c inp -> pure (c, inp)
-        , sdWaitTimeout = \_ _ -> pure (-1)
+        , sdDebug = debug
+        , sdContinuous = False
+        , sdPacingMs = 16
+        , sdPresentPaces = pure False
         , sdAlignSec = 0
-        , sdShouldDraw = \_ previous current _ -> do
+        , sdShouldDraw = \_ previous current _ _ -> do
             note ("decide " <> show (inputMousePos previous, inputMousePos current))
             pure (inputMousePos current == V2 1 0)
         , sdDraw = \_ inp _ -> do
             n <- atomicModifyIORef' draws (\n -> (n + 1, n + 1))
             note "draw"
             pure (n <= 2, inp {inputMousePos = V2 10 0})
-        , sdSkip = \_ _ -> note "skip"
         , sdOnCursor = \_ _ -> note "cursor"
-        , sdNoteLoop = const (pure ())
         , sdShouldQuit = const False
-        , sdClickDistance = 4
-        , sdClickTime = 0.5
         }
+  -- A new context starts dirty, which would make the first wait immediate.
+  clearDirty ctx
   runSessionLoop driver ctx emptyInput
   actual <- readIORef logRef
   assertEq
@@ -62,13 +65,15 @@ runSessionLoopTest ctx failed = do
     [ "wait -1"
     , "decide " <> show (V2 0 0, V2 1 0)
     , "draw"
+    , "cursor"
     , "draw"
+    , "cursor"
     , "poll"
     , "wait 0"
     , "draw"
+    , "cursor"
     , "wait -1"
     , "decide " <> show (V2 10 0, V2 10 0)
-    , "skip"
     , "cursor"
     , "wait -1"
     ]

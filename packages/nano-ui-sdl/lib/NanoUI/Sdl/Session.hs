@@ -9,7 +9,7 @@ import Control.Exception (bracket)
 import Control.Monad (void, when)
 import Data.IORef (newIORef, readIORef, writeIORef)
 import NanoUI (Input (..), emptyInput)
-import NanoUI.Debug (debugRefreshSec)
+import NanoUI.Sdl.Debug (SdlDebugSampler (..))
 import NanoUI.Input (clearEphemeral)
 import NanoUI.Runner
   ( SessionDriver (..)
@@ -20,12 +20,8 @@ import NanoUI.Runner
   )
 import NanoUI.Testing
   ( Context
-  , anyAnimating
   , clearDirty
-  , isDirty
-  , textFieldActive
   )
-import NanoUI.Sdl.Debug (isDebugActive, noteLoop, noteSkip, takeDebugLive)
 import NanoUI.Sdl.Cursor (syncPointerCursor)
 import NanoUI.Sdl.Input
   ( SdlEvent (..)
@@ -40,12 +36,6 @@ import NanoUI.Sdl.Display (installResizeWatch)
 import NanoUI.Sdl.Window (SdlEnv (..), SdlOptions (..), syncDisplay, withSdl)
 import SDL3.Sys.Bindgen.Blendmode (sDL_BLENDMODE_BLEND)
 import SDL3.Sys.Render (setRenderDrawBlendModeSafe, setRenderVSync)
-
-animateTimeout :: Int
-animateTimeout = 16
-
-debugHudTimeout :: Int
-debugHudTimeout = max animateTimeout (round (debugRefreshSec * 1000))
 
 
 runSdlSession ::
@@ -160,38 +150,19 @@ runSdlSession options ctx setup shouldQuit drawFn =
                 writeIORef ctxRef c'
                 writeIORef prev inp'
                 pure (c', inp')
-            , sdWaitTimeout   = \c wasAnim -> do
-                debugActive <- isDebugActive (sdlDebug env)
-                wantDebug <- takeDebugLive (sdlDebug env) debugActive
-                animating <- anyAnimating c
-                editing <- textFieldActive c
-                dirtyWait <- isDirty c
-                -- When the last frame presented with vsync on, a 0 timeout is
-                -- safe and smooth: the vsync present throttles the loop,
-                -- keeping animations frame-locked. With vsync off the present
-                -- returns immediately, so a live in-view animation would spin
-                -- at max speed (whole-screen flicker); pace those at
-                -- animateTimeout instead. When frames skip (empty damage,
-                -- e.g. an animation that scrolled out of view), a 0 timeout
-                -- would busy-spin, so pace those at animateTimeout too.
-                lastPresented <- readIORef (sdlLastPresented env)
-                -- Wait ~2 ms short of the frame period, leaving the slack for
-                -- alignFrameStart: SDL_WaitEventTimeout overruns by ~1 ms, and
-                -- if it returns past the boundary the frame is simply late
-                -- (the spin can only wind forward), costing fps. Waiting short
-                -- keeps the stamp on the exact display-cadence grid.
-                let periodMs = sdlRefreshPeriod env * 1000
-                    refreshMs = max 1 (floor periodMs - 2)
-                if sdlContinuous env || wantDebug || dirtyWait || (animating && lastPresented && sdlVsync env)
-                  then pure 0
-                  else if wasAnim || animating || editing
-                    then pure (if sdlVsync env then animateTimeout else refreshMs)
-                    else if debugActive
-                      then pure debugHudTimeout
-                      else pure (-1)
-            , sdShouldDraw    = \c prevInp inpSynced wasAnim -> do
-                debugActive <- isDebugActive (sdlDebug env)
-                wantDebug <- takeDebugLive (sdlDebug env) debugActive
+            , sdDebug         = sdsSampler (sdlDebug env)
+            , sdContinuous    = sdlContinuous env
+              -- With vsync on, presents throttle the loop. With vsync off a
+              -- live animation would spin at max speed, so wait ~2 ms short
+              -- of the frame period, leaving the slack for alignFrameStart:
+              -- SDL_WaitEventTimeout overruns by ~1 ms, and a wait that
+              -- returns past the boundary makes the frame late.
+            , sdPacingMs      = if sdlVsync env then 16 else max 1 (floor (sdlRefreshPeriod env * 1000) - 2)
+              -- A frame that skipped (empty damage, e.g. an animation scrolled
+              -- out of view) did not wait for vblank, so it must not loop
+              -- without waiting.
+            , sdPresentPaces  = if sdlVsync env then readIORef (sdlLastPresented env) else pure False
+            , sdShouldDraw    = \c prevInp inpSynced wasAnim wantDebug -> do
                 presented <- readIORef resizePresented
                 writeIORef resizePresented Nothing
                 let (prevInp', inpSynced') = case presented of
@@ -208,13 +179,9 @@ runSdlSession options ctx setup shouldQuit drawFn =
                     writeIORef prev s
                     pure (dirtyOut, s)
                   Nothing -> pure (False, inpSynced)
-            , sdSkip          = \_ _ -> noteSkip (sdlDebug env)
-            , sdOnCursor      = \c inpSynced -> syncPointerCursor (sdlCursors env) c inpSynced
-            , sdNoteLoop      = noteLoop (sdlDebug env)
+            , sdOnCursor      = syncPointerCursor (sdlCursors env)
             , sdAlignSec      = sdlRefreshPeriod env
             , sdShouldQuit    = shouldQuit
-            , sdClickDistance = 5.0
-            , sdClickTime     = 0.4
             }
     bracket (installResizeWatch onResize) id $ \_ ->
       runSessionLoop drv ctx2 synced1

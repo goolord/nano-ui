@@ -11,16 +11,15 @@ module NanoUI.Debug
   , noteDebugLoop
   , noteDebugSkip
   , isDebugActive
-  , takeDebugLive
+  , debugRefreshDue
   , noteDebugPresent
-  , presentRate
-  , makeCoreDebugSnapshot
+  , refreshDebugSnapshot
   , formatFpsRows
   , formatDrawRows
   , formatCoreRtsRows
   ) where
 
-import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef)
+import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef, writeIORef)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Word (Word32, Word64)
@@ -155,7 +154,6 @@ data DebugSampler = DebugSampler
   , smVerts        :: {-# UNPACK #-} !Int
   , smIndices      :: {-# UNPACK #-} !Int
   , smCmds         :: {-# UNPACK #-} !Int
-  , smWantFrame    :: {-# UNPACK #-} !Bool
   , smRatePresents :: {-# UNPACK #-} !Word64
   , smRateT        :: {-# UNPACK #-} !Double
   }
@@ -181,7 +179,6 @@ newDebugSampler = do
       , smVerts = 0
       , smIndices = 0
       , smCmds = 0
-      , smWantFrame = False
       , smRatePresents = 0
       , smRateT = now
       }
@@ -202,25 +199,25 @@ noteDebugSkip ref =
   atomicModifyIORef' ref $ \s -> (s {smSkips = smSkips s + 1}, ())
 
 -- | Debug HUD cadence is driven by actual snapshot consumption: a snapshot
--- query (readSdlDebug) refreshes 'smLastQueryT', so the 4 Hz refresh loop only
--- sustains while a stats window is being built.  Mere window presence must NOT
--- count as activity, or the event loop wakes every 'debugHudTimeout' even when
--- only a plain floating window is open.
+-- query ('refreshDebugSnapshot') refreshes 'smLastQueryT', so the 4 Hz refresh
+-- loop only sustains while a stats window is being built. Mere window presence
+-- must not count as activity, or the event loop wakes every refresh period
+-- even when only a plain floating window is open.
 isDebugActive :: DebugSamplerRef -> IO Bool
 isDebugActive ref = do
   now <- getMonotonicTime
   s <- readIORef ref
   pure (now - smLastQueryT s < 1.0)
 
-takeDebugLive :: DebugSamplerRef -> Bool -> IO Bool
-takeDebugLive _ False = pure False
-takeDebugLive ref True = do
+-- | Whether the published snapshot is older than 'debugRefreshSec'.
+debugRefreshDue :: DebugSamplerRef -> IO Bool
+debugRefreshDue ref = do
   now <- getMonotonicTime
-  atomicModifyIORef' ref $ \s ->
-    let elapsed = now - smLastDebugT s
-        due = smLastDebugT s <= 0 || elapsed >= debugRefreshSec
-        want = smWantFrame s || due
-     in (s {smWantFrame = False}, want)
+  s <- readIORef ref
+  pure (snapshotDue now s)
+
+snapshotDue :: Double -> DebugSampler -> Bool
+snapshotDue now s = smLastDebugT s <= 0 || now - smLastDebugT s >= debugRefreshSec
 
 noteDebugPresent :: DebugSamplerRef -> Double -> Double -> Double -> Double -> Int -> Int -> Int -> IO ()
 noteDebugPresent ref uiMs renderMs presentMs frameMs verts indices cmds = do
@@ -250,20 +247,35 @@ noteDebugPresent ref uiMs renderMs presentMs frameMs verts indices cmds = do
         , ()
         )
 
--- | Actual presents per second over the window since the previous snapshot
--- refresh. Unlike the per-present EMA this stays truthful when presents are
--- sparse (idle app: ~4/s with the HUD open, not the theoretical fps of one
--- fast frame).
-presentRate :: Double -> DebugSampler -> (DebugSampler, Double)
-presentRate now s =
-  let elapsed = now - smRateT s
-      rate
-        | elapsed > 1e-3 = fromIntegral (smPresents s - smRatePresents s) / elapsed
-        | otherwise = 0
-   in (s {smRatePresents = smPresents s, smRateT = now}, rate)
+-- | The published snapshot, rebuilt at most every 'debugRefreshSec' and cached
+-- in between. A due query samples the core stats and hands them to @build@,
+-- which adds the backend's fields: window size and mouse position are left 0
+-- for it to fill. Every query marks the readout active ('isDebugActive').
+refreshDebugSnapshot :: DebugSamplerRef -> IORef s -> (CoreDebugSnapshot -> IO s) -> IO s
+refreshDebugSnapshot ref cache build = do
+  now <- getMonotonicTime
+  due <- atomicModifyIORef' ref $ \cur -> (cur {smLastQueryT = now}, snapshotDue now cur)
+  if not due
+    then readIORef cache
+    else do
+      rts <- readRtsSnapshot
+      core <- atomicModifyIORef' ref $ \cur ->
+        -- Actual presents per second since the previous refresh. Unlike the
+        -- per-present EMA this stays truthful when presents are sparse (idle
+        -- app: ~4/s with the HUD open, not the theoretical fps of one fast
+        -- frame).
+        let elapsed = now - smRateT cur
+            rate
+              | elapsed > 1e-3 = fromIntegral (smPresents cur - smRatePresents cur) / elapsed
+              | otherwise = 0
+            cur' = cur {smLastDebugT = now, smRatePresents = smPresents cur, smRateT = now}
+         in (cur', (coreDebugSnapshot cur' rts) {dbgPresentFps = rate})
+      snap <- build core
+      writeIORef cache snap
+      pure snap
 
-makeCoreDebugSnapshot :: DebugSampler -> Float -> Float -> Float -> Float -> RtsStatsSnapshot -> CoreDebugSnapshot
-makeCoreDebugSnapshot s winW winH mouseX mouseY rts =
+coreDebugSnapshot :: DebugSampler -> RtsStatsSnapshot -> CoreDebugSnapshot
+coreDebugSnapshot s rts =
   CoreDebugSnapshot
     { dbgPresentFps = smPresentEma s
     , dbgLoopFps = smLoopEma s
@@ -276,10 +288,10 @@ makeCoreDebugSnapshot s winW winH mouseX mouseY rts =
     , dbgVerts = smVerts s
     , dbgIndices = smIndices s
     , dbgCmds = smCmds s
-    , dbgWinW = winW
-    , dbgWinH = winH
-    , dbgMouseX = mouseX
-    , dbgMouseY = mouseY
+    , dbgWinW = 0
+    , dbgWinH = 0
+    , dbgMouseX = 0
+    , dbgMouseY = 0
     , dbgRts = rts
     }
 

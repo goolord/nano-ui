@@ -12,14 +12,11 @@ import qualified Data.Text as T
 import NanoUI
 import NanoUI.Backend.Sdl
   ( SdlEnv (..)
-  , isDebugActive
-  , newSdlDebugSampler
-  , readSdlDebug
   , sdlDrawFrame
   , syncDisplay
-  , takeDebugLive
   , withSdlBench
   )
+import NanoUI.Debug (debugRefreshDue, emptyCoreDebugSnapshot, isDebugActive, newDebugSampler, refreshDebugSnapshot)
 import NanoUI.Diagrams
 import NanoUI.Context (ctxNodeArena)
 import NanoUI.Layout.Arena (NodeType (NodeButton), findNodeRevM, getNodeType, getRect, getText)
@@ -149,15 +146,16 @@ main = do
           measureBench "Debug Open, hover sweep" iterations $
             hoverSweepFrame ctx' demoUi sdlEnv inp sweepCounter
           putStrLn "--- 5b. IDLE CADENCE (debug gating) ---"
-          cadRef <- newSdlDebugSampler
+          cadRef <- newDebugSampler
           active0 <- isDebugActive cadRef
-          want0 <- takeDebugLive cadRef active0
-          let wait0 = if want0 then 0 :: Int else if active0 then 250 else -1
+          due0 <- debugRefreshDue cadRef
+          let wait0 = if active0 && due0 then 0 :: Int else if active0 then 250 else -1
           printf "  plain window, no stats query : active=%-5s waitTimeout=%-3d (blocks until the next event)\n" (show active0) wait0
-          _ <- readSdlDebug cadRef (Size 1280 800) (V2 640 400) "profile" 1 "sdl" True 0
+          snapRef <- newIORef emptyCoreDebugSnapshot
+          _ <- refreshDebugSnapshot cadRef snapRef pure
           active1 <- isDebugActive cadRef
-          want1 <- takeDebugLive cadRef active1
-          let wait1 = if want1 then 0 :: Int else if active1 then 250 else -1
+          due1 <- debugRefreshDue cadRef
+          let wait1 = if active1 && due1 then 0 :: Int else if active1 then 250 else -1
           printf "  stats window queried         : active=%-5s waitTimeout=%-3d (4 Hz HUD refresh sustained)\n" (show active1) wait1
           putStrLn ""
           -- The floating debug window can occlude the toolbar after it grows.

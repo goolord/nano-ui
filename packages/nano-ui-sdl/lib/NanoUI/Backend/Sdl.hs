@@ -6,10 +6,6 @@ module NanoUI.Backend.Sdl
   , SdlOptions (..)
   , askSdlDebug
   , setSdlUiFont
-  , isDebugActive
-  , newSdlDebugSampler
-  , readSdlDebug
-  , takeDebugLive
   , defaultSdlOptions
   , FileFilter (..)
   , FileDialogOptions (..)
@@ -44,13 +40,7 @@ import Data.Typeable (Typeable)
 import NanoUI (NanoUI)
 import NanoUI.Sdl.Runner (askSdlDebug, drawReduceEff, sdlDrawFrame, setSdlUiFont)
 import NanoUI.Sdl.Session (runSdlSession)
-import NanoUI.Sdl.Debug
-  ( SdlDebugSnapshot (..)
-  , isDebugActive
-  , newSdlDebugSampler
-  , readSdlDebug
-  , takeDebugLive
-  )
+import NanoUI.Sdl.Debug (SdlDebugSnapshot (..))
 import NanoUI.Sdl.Window (RgbaImage (..), SdlEnv (..), SdlOptions (..), defaultSdlOptions, saveScreenshot, syncDisplay, withSdl, withSdlBench)
 import NanoUI.Sdl.Dialog
   ( FileDialogId (..)
