@@ -77,6 +77,12 @@
   `styled (panelStyle (background bg . borderColor border))` around a panel.
   `callout` tints the theme's panel colour instead of a fixed dark grey.
 - `uiTheme` returns the theme of the enclosing `styled` scope.
+- Rasterizing an SVG allocates far less: a 16px stroked icon with round
+  joins allocates 42 KB instead of 1.1 MB, and at 128px 437 KB (mostly its
+  pixel buffers) instead of 7.2 MB, taking 0.37 ms instead of 4 ms. Contours
+  and stroke outlines are flat arrays, and coverage sweeps edges sorted by
+  row instead of filtering every edge on every sample row. Output is
+  unchanged. `nano-ui-profile svg` measures it.
 - Draw ops are a `SmallArray DrawOp` from `primitive` instead of a boxed
   `Vector`: `DrawingBuild`, `CustomDrawBuild`, `runCanvas`, `drawing`,
   `drawingVersioned`, `emitDrawOps`, and in nano-ui-diagrams `diagramOps`,

@@ -1,11 +1,13 @@
 module Main (main) where
 
+import Control.Exception (evaluate)
 import Control.Monad (forM_, replicateM_, void)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Primitive.SmallArray (SmallArray)
 import NanoUI
+import NanoUI.Svg (rasterizeSvg)
 import NanoUI.Testing (newContext, runFrame)
 import System.Environment (getArgs)
 import System.IO.Unsafe (unsafePerformIO)
@@ -74,6 +76,15 @@ textAreaScene ref = column $ do
   txt <- textAreaWith grow =<< uiIO (readIORef ref)
   uiIO (writeIORef ref txt)
 
+clockIcon :: Text
+clockIcon =
+  "<svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'>\
+  \<circle cx='12' cy='12' r='10'/><path d='M12 6v6l4 2'/></svg>"
+
+starIcon :: Text
+starIcon =
+  "<svg viewBox='0 0 24 24'><path fill='#e0a030' d='M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z'/></svg>"
+
 longDocument :: Text
 longDocument = T.intercalate "\n" [T.pack ("line " ++ show i ++ " of a long document") | i <- [1 .. 100000 :: Int]]
 
@@ -82,6 +93,19 @@ main = do
   args <- getArgs
   ctx <- newContext
   case args of
+    ("svg" : _) -> do
+      -- A stroked icon with round caps and joins and a filled one, at a small
+      -- and a large size; a varying size keeps each raster from being shared.
+      let parsed = mapM parseSvg [clockIcon, starIcon]
+      case parsed of
+        Left err -> fail err
+        Right docs ->
+          forM_ [1 .. 500 :: Int] $ \i ->
+            forM_ docs $ \doc -> do
+              let white = colorRGBA 255 255 255 255
+              void (evaluate (rasterizeSvg (16 + i `mod` 2) 16 white doc))
+              void (evaluate (rasterizeSvg (128 + i `mod` 2) 128 white doc))
+      putStrLn "profiled 1000 rasterizations of two icons at 16 and 128 px"
     ("textarea" : _) -> do
       ref <- newIORef longDocument
       let inp = emptyInput {inputWindowSize = Size 800 600}
