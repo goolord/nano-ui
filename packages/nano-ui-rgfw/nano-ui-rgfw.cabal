@@ -28,6 +28,12 @@ common warnings
         -Wextra
         -Wcompat
         -Widentities
+        -Wincomplete-record-updates
+        -Wincomplete-uni-patterns
+        -Wmissing-export-lists
+        -Wmissing-home-modules
+        -Wpartial-fields
+        -Wredundant-constraints
         -Wunused-packages
 
 library

@@ -1,6 +1,13 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module RgfwDemoCommon where
+module RgfwDemoCommon
+  ( Model (..)
+  , appView
+  , initialModel
+  , main
+  , physScaleFor
+  , themeForChoice
+  ) where
 
 import Control.Monad (void, when)
 import Data.Text (Text)
