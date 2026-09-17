@@ -25,11 +25,10 @@ import GHC.Clock (getMonotonicTime)
 import NanoUI.Context
   ( Context
   , anyAnimating
-  , isDirty
   , overlayConsumesQuit
   , textInputEditActive
   )
-import NanoUI.Frame.Redraw (needsRedraw, textFieldActive)
+import NanoUI.Frame.Redraw (needsRedraw)
 import NanoUI.Input
   ( Input (..)
   , clearEphemeral
@@ -123,18 +122,17 @@ shouldRedrawFrame ctx prevInp curInp wasAnim continuous wantDebug = do
   if continuous || wantDebug
     then pure True
     else do
+      -- 'needsRedraw' already covers a dirty context, running animations and
+      -- an active text field, so an animation that just ended is the only
+      -- animation case left: it needs one final frame.
       need <- needsRedraw ctx prevInp curInp
-      dirty <- isDirty ctx
-      anim <- anyAnimating ctx
-      editing <- textFieldActive ctx
-      let forceFinal = wasAnim && not anim
-          pointerEdge =
+      let pointerEdge =
             inputMousePressed curInp
               || inputMouseReleased curInp
               || inputMouseRightPressed curInp
               || inputMouseRightReleased curInp
           scrollEdge = inputScroll curInp /= V2 0 0
-      pure (need || anim || forceFinal || dirty || editing || pointerEdge || scrollEdge)
+      pure (need || wasAnim || pointerEdge || scrollEdge)
 
 -- | Universal backend session driver configuration.
 data SessionDriver ev = SessionDriver
