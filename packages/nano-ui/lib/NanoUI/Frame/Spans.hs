@@ -42,7 +42,7 @@ import NanoUI.Frame.Chrome (displayText, textInputFocused, textInputValue, widge
 import NanoUI.Frame.Node (readScrollNode, resolveFontFor, scrollNodeViewport)
 import NanoUI.Frame.Scroll.Geometry (padContentClip, tagClippedSpans)
 import NanoUI.Frame.Select (collectSelectDropdownSpans, tagSelectClippedSpans)
-import NanoUI.Frame.SpanArena (SpanArena, pushSpan, resetSpanArena, spanArenaToList, spanArenaToListOccluded, withSpanArenaSnap)
+import NanoUI.Frame.SpanArena (SpanArena, pushSpan, resetSpanArena, spanArenaToList, spanArenaToListOccluded)
 import NanoUI.Frame.TextEdit.Menu (collectTextEditMenuSpans)
 import NanoUI.Frame.TextInput (syncTextInputScroll, tagTextInputClippedSpans, textInputFieldRect)
 import NanoUI.Input (Input)
@@ -96,9 +96,8 @@ collectTextSpans ctx = do
   count <- arenaCount (ctxNodeArena ctx)
   let arena = ctxSpanBase ctx
   resetSpanArena arena
-  withSpanArenaSnap arena $
-    when (count > 0) $
-      collectClippedSpans ctx 0 (Rect 0 0 1e9 1e9) arena
+  when (count > 0) $
+    collectClippedSpans ctx 0 (Rect 0 0 1e9 1e9) arena
   panels <- floatingPanelRects ctx
   spanArenaToListOccluded panels arena
 
@@ -107,14 +106,13 @@ collectOverlayTextSpans ctx inp = do
   let arena = ctxSpanOverlay ctx
       push (r, t, fg, bg, c) = pushSpan arena r t fg bg c
   resetSpanArena arena
-  withSpanArenaSnap arena $ do
-    collectFloatingSpansInto ctx NodeWindow arena
-    collectFloatingSpansInto ctx NodeModal arena
-    collectFloatingSpansInto ctx NodePopup arena
-    drops <- collectSelectDropdownSpans ctx inp
-    menu <- collectTextEditMenuSpans ctx inp
-    mapM_ push drops
-    mapM_ push menu
+  collectFloatingSpansInto ctx NodeWindow arena
+  collectFloatingSpansInto ctx NodeModal arena
+  collectFloatingSpansInto ctx NodePopup arena
+  drops <- collectSelectDropdownSpans ctx inp
+  menu <- collectTextEditMenuSpans ctx inp
+  mapM_ push drops
+  mapM_ push menu
   spanArenaToList arena
 
 collectRasterSpans :: Context -> Input -> IO ([(Rect, T.Text, Color, Color, Rect)], [(Rect, T.Text, Color, Color, Rect)])
