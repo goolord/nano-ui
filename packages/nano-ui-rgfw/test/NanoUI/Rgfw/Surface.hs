@@ -1,5 +1,5 @@
--- | Software pixel surface: a BGRA buffer with a clip stack. Used by the
--- software rasterizer ('NanoUI.Rgfw.Render') in tests and the profiler.
+-- | Software pixel surface: a BGRA buffer with a clip stack, for the
+-- reference rasterizer ('NanoUI.Rgfw.Render') the tests check frames with.
 module NanoUI.Rgfw.Surface
   ( RgfwSurface (..)
   , newOffscreenRgfwSurface
@@ -9,8 +9,6 @@ module NanoUI.Rgfw.Surface
   , popClip
   , fillRect
   , drawTextScaled
-  , toPhysRect
-  , physClip
   , packColor
   ) where
 
@@ -30,8 +28,8 @@ import Data.Word (Word32, Word64)
 import Foreign.Marshal.Alloc (free, mallocBytes)
 import Foreign.Ptr (Ptr, castPtr, plusPtr)
 import Foreign.Storable (pokeElemOff)
-import NanoUI (Color (..), Rect (..))
-import NanoUI.Rgfw.Font.Cozette (CozetteFont, renderTextScaledToBuffer)
+import NanoUI (Color (..))
+import NanoUI.Rgfw.Font.Cozette (CozetteFont, foldPenPositions, renderGlyphScaledToBuffer)
 
 data ClipRect = ClipRect
   { crX0 :: {-# UNPACK #-} !Int
@@ -190,41 +188,9 @@ fillRect surf x y w h color = do
                 rowLoop (cy + 1)
       rowLoop y0
 
-{-# INLINE toPhysRect #-}
-toPhysRect :: Float -> Float -> Float -> Float -> Float -> (Int, Int, Int, Int)
-toPhysRect !scale !rx !ry !rw !rh =
-  let !x0 = round (rx * scale)
-      !y0 = round (ry * scale)
-      !x1 = round ((rx + rw) * scale)
-      !y1 = round ((ry + rh) * scale)
-   in (x0, y0, max 0 (x1 - x0), max 0 (y1 - y0))
-
--- | A logical clip rect scaled to physical pixels and intersected with a
--- w x h target, as @(x0, y0, x1, y1)@ with exclusive ends; 'Nothing' if empty.
-{-# INLINE physClip #-}
-physClip :: Float -> Int -> Int -> Rect -> Maybe (Int, Int, Int, Int)
-physClip !scale !w !h (Rect x y rw rh) =
-  let (!px, !py, !pw, !ph) = toPhysRect scale x y rw rh
-      !x0 = max 0 px
-      !y0 = max 0 py
-      !x1 = min w (px + pw)
-      !y1 = min h (py + ph)
-   in if x0 >= x1 || y0 >= y1 then Nothing else Just (x0, y0, x1, y1)
-
 {-# INLINE drawTextScaled #-}
 drawTextScaled :: RgfwSurface -> CozetteFont -> Float -> Float -> Float -> Text -> Word32 -> IO ()
 drawTextScaled surf font !scale !logX !logY txt color = do
   clip <- currentClip surf
-  renderTextScaledToBuffer
-    (sBuffer surf)
-    (sWidth surf)
-    (crX0 clip)
-    (crY0 clip)
-    (crX1 clip)
-    (crY1 clip)
-    scale
-    logX
-    logY
-    color
-    font
-    txt
+  foldPenPositions font scale logX logY () (\() penX penY gid ->
+    renderGlyphScaledToBuffer (sBuffer surf) (sWidth surf) (crX0 clip) (crY0 clip) (crX1 clip) (crY1 clip) scale penX penY color font gid) txt

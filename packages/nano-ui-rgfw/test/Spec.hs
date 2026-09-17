@@ -55,7 +55,7 @@ import NanoUI.Rgfw.Font.Cozette
   , renderGlyphScaledToBuffer
   )
 import NanoUI.Rgfw.Context (newRgfwContext)
-import NanoUI.Rgfw.Gl (GlyphAtlas (..), atlasCell, bakeGlyphAtlas, glyphAtlasFor, writeSpanQuads)
+import NanoUI.Rgfw.Gl (GlyphAtlas (..), atlasCell, bakeGlyphAtlas, glyphAtlasFor, toPhysRect, writeSpanQuads)
 import NanoUI.Rgfw.Render (renderArena)
 import NanoUI.Rgfw.Session (applyRgfwEvent, decodeRgfwEvents)
 import RGFW (Event (..))
@@ -68,7 +68,6 @@ import NanoUI.Rgfw.Surface
   , sBuffer
   , sWidth
   , sHeight
-  , toPhysRect
   )
 import qualified RGFW.Raw as R
 

@@ -1,22 +1,24 @@
 {-# LANGUAGE BangPatterns #-}
-{-# LANGUAGE OverloadedStrings #-}
 
+-- | Frame loop of the RGFW demo on the OpenGL path, in a hidden window, for
+-- profiling (+RTS -p).
 module Main (main) where
 
+import Control.Exception (bracket)
 import Control.Monad (replicateM_)
 import Effectful (runEff)
 import NanoUI
   ( Input (..)
   , Size (..)
-  , V2 (..)
   , Theme (..)
+  , V2 (..)
   , emptyInput
   )
 import NanoUI.Testing (collectRasterSpans, runFrameEff)
 import NanoUI.Rgfw.Context (newRgfwContext)
 import NanoUI.Rgfw.Font.Cozette (getCozetteFont)
-import NanoUI.Rgfw.Render (renderArena)
-import NanoUI.Rgfw.Surface (clearScreen, freeRgfwSurface, newOffscreenRgfwSurface, packColor)
+import NanoUI.Rgfw.Gl (freeGlRenderer, newGlRenderer, renderArenaGl)
+import qualified RGFW as R
 import RgfwDemoCommon (appView, currentTheme, dpiScale, initialModel, physScaleFor, themeForChoice)
 
 iterations :: Int
@@ -32,27 +34,23 @@ main = do
       !scale = if userScale > 0.0 then userScale else 1.0
       !logW = max 1 (round (fromIntegral physW / scale) :: Int)
       !logH = max 1 (round (fromIntegral physH / scale) :: Int)
-
-  surf <- newOffscreenRgfwSurface physW physH
-  ctx <- newRgfwContext theme
-  let font = getCozetteFont
       inp =
         emptyInput
           { inputWindowSize = Size (fromIntegral logW) (fromIntegral logH)
           , inputMousePos = V2 400 300
           }
-
-  let runSingleFrame = do
-        (_, _, draw, _) <- runFrameEff runEff ctx inp (appView m)
-        (baseSpans, overlaySpans) <- collectRasterSpans ctx inp
-        clearScreen surf (packColor (themeWindow theme))
-        renderArena surf font scale draw baseSpans overlaySpans
-
-  -- Warmup
-  runSingleFrame
-
-  -- Profile loop
-  replicateM_ iterations runSingleFrame
-
-  freeRgfwSurface surf
-  putStrLn ("profiled " ++ show iterations ++ " RGFW demo frames")
+  bracket
+    (R.createWindowGL "nano-ui-rgfw-profile" 0 0 physW physH R.rgfw_windowHide 3 2)
+    (mapM_ R.closeWindow) $ \case
+      Nothing -> fail "Failed to create a hidden RGFW window with an OpenGL 3.2 context."
+      Just win -> bracket newGlRenderer freeGlRenderer $ \renderer -> do
+        ctx <- newRgfwContext theme
+        let runSingleFrame = do
+              (_, _, draw, _) <- runFrameEff runEff ctx inp (appView m)
+              (baseSpans, overlaySpans) <- collectRasterSpans ctx inp
+              renderArenaGl renderer getCozetteFont scale physW physH (themeWindow theme) draw baseSpans overlaySpans
+              R.swapBuffersGL win
+        -- Warmup
+        runSingleFrame
+        replicateM_ iterations runSingleFrame
+        putStrLn ("profiled " ++ show iterations ++ " RGFW demo frames")

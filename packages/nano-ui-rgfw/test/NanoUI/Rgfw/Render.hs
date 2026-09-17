@@ -12,15 +12,14 @@ import Foreign.Storable (peekByteOff, peekElemOff, pokeElemOff)
 import NanoUI (Color (..), Rect (..))
 import NanoUI.Rgfw.Context (TextSpan, paintInLayerOrder)
 import NanoUI.Rgfw.Font.Cozette (CozetteFont)
+import NanoUI.Rgfw.Gl (physClip, toPhysRect)
 import NanoUI.Rgfw.Surface
   ( RgfwSurface (..)
   , drawTextScaled
   , fillRect
   , packColor
-  , physClip
   , popClip
   , pushClip
-  , toPhysRect
   )
 import NanoUI.Testing
   ( DrawCmd (..)

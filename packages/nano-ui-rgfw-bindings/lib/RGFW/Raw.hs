@@ -68,6 +68,7 @@ module RGFW.Raw
   , rgfw_modScrollLock
   -- Window flags
   , rgfw_windowCenter
+  , rgfw_windowHide
   -- Mouse cursors
   , c_rgfw_window_set_mouse_standard
   , c_rgfw_window_set_mouse_default
@@ -229,8 +230,9 @@ rgfw_modSuper      = 32
 rgfw_modScrollLock = 64
 
 -- Window flags
-rgfw_windowCenter :: Word32
+rgfw_windowCenter, rgfw_windowHide :: Word32
 rgfw_windowCenter = 64
+rgfw_windowHide   = 512
 
 -- Mouse cursors
 foreign import ccall "rgfw_window_set_mouse_standard"

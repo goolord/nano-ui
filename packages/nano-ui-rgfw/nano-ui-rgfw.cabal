@@ -39,9 +39,7 @@ library
         NanoUI.Rgfw.Debug
         NanoUI.Rgfw.Font.Cozette
         NanoUI.Rgfw.Gl
-        NanoUI.Rgfw.Render
         NanoUI.Rgfw.Session
-        NanoUI.Rgfw.Surface
     c-sources:        cbits/nano_ui_gl.c
     build-depends:
         base ^>=4.22.0.0,
@@ -76,6 +74,7 @@ executable nano-ui-rgfw-profile
         effectful-core ^>=2.6,
         nano-ui,
         nano-ui-rgfw,
+        nano-ui-rgfw-bindings,
         text ^>=2.1
     hs-source-dirs:   examples
 
@@ -84,10 +83,14 @@ test-suite nano-ui-rgfw-test
     import:           warnings
     type:             exitcode-stdio-1.0
     main-is:          Spec.hs
+    other-modules:
+        NanoUI.Rgfw.Render
+        NanoUI.Rgfw.Surface
     build-depends:
         base ^>=4.22.0.0,
         nano-ui,
         nano-ui-rgfw,
         nano-ui-rgfw-bindings,
-        primitive ^>=0.9
+        primitive ^>=0.9,
+        text ^>=2.1
     hs-source-dirs:   test

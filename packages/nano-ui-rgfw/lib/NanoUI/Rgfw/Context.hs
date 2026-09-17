@@ -18,8 +18,7 @@ import NanoUI.Rgfw.Font.Cozette (cozetteMetrics)
 import NanoUI.Testing (Layer (..), newPixelContext)
 
 -- | Pixel context configured for the RGFW renderers: Cozette metrics, square
--- geometry (every primitive reaches 'NanoUI.Rgfw.Render.renderArena' as a flat
--- quad or triangle), text left to the span stamper, and the core theme derived
+-- geometry (every primitive reaches the renderer as a flat quad or triangle), text left to the span stamper, and the core theme derived
 -- made square. Sessions, tests and profiles share it so they render the same
 -- frame.
 newRgfwContext :: Theme -> IO Context

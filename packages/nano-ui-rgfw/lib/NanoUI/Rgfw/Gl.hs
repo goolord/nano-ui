@@ -3,13 +3,12 @@
 -- Geometry goes to the GPU straight from the core's shared 'DrawData'
 -- buffers, one scissored draw per command. Text comes from the collected
 -- spans: every glyph is a quad sampled from an atlas that the Cozette
--- software blitter bakes at the current scale, so glyph pixels match the
--- software rasterizer ('NanoUI.Rgfw.Render') exactly.
+-- software blitter bakes at the current scale, so glyph pixels match what the
+-- blitter stamps.
 --
 -- The frame must come from a context built by
 -- 'NanoUI.Rgfw.Context.newRgfwContext' (external text: the buffer holds no
--- text quads). Draw order is 'NanoUI.Rgfw.Context.paintInLayerOrder', as in
--- 'NanoUI.Rgfw.Render.renderArena'.
+-- text quads). Draw order is 'NanoUI.Rgfw.Context.paintInLayerOrder'.
 module NanoUI.Rgfw.Gl
   ( GlRenderer
   , newGlRenderer
@@ -20,6 +19,8 @@ module NanoUI.Rgfw.Gl
   , atlasCell
   , bakeGlyphAtlas
   , writeSpanQuads
+  , toPhysRect
+  , physClip
   ) where
 
 import Control.Exception (bracket)
@@ -41,7 +42,6 @@ import NanoUI.Rgfw.Font.Cozette
   , foldPenPositions
   , renderGlyphScaledToBuffer
   )
-import NanoUI.Rgfw.Surface (physClip)
 import NanoUI.Testing
   ( DrawCmd (..)
   , DrawData (..)
@@ -137,6 +137,27 @@ drawCmd h !scale !fbW !fbH cmd
         Just (x0, y0, x1, y1) ->
           c_drawGeometry h (fromIntegral x0) (fromIntegral y0) (fromIntegral x1) (fromIntegral y1)
             (cmdIndexOffset cmd) (cmdIndexCount cmd)
+
+{-# INLINE toPhysRect #-}
+toPhysRect :: Float -> Float -> Float -> Float -> Float -> (Int, Int, Int, Int)
+toPhysRect !scale !rx !ry !rw !rh =
+  let !x0 = round (rx * scale)
+      !y0 = round (ry * scale)
+      !x1 = round ((rx + rw) * scale)
+      !y1 = round ((ry + rh) * scale)
+   in (x0, y0, max 0 (x1 - x0), max 0 (y1 - y0))
+
+-- | A logical clip rect scaled to physical pixels and intersected with a
+-- w x h target, as @(x0, y0, x1, y1)@ with exclusive ends; 'Nothing' if empty.
+{-# INLINE physClip #-}
+physClip :: Float -> Int -> Int -> Rect -> Maybe (Int, Int, Int, Int)
+physClip !scale !w !h (Rect x y rw rh) =
+  let (!px, !py, !pw, !ph) = toPhysRect scale x y rw rh
+      !x0 = max 0 px
+      !y0 = max 0 py
+      !x1 = min w (px + pw)
+      !y1 = min h (py + ph)
+   in if x0 >= x1 || y0 >= y1 then Nothing else Just (x0, y0, x1, y1)
 
 -- | Cell grid of one glyph bake. Every glyph owns a 'gaCellW' x 'gaCellH'
 -- cell: the footprint 'renderGlyphScaledToBuffer' stamps at 'gaScale'.

@@ -17,7 +17,6 @@ module NanoUI.Rgfw.Font.Cozette
   , cozetteGlyphBit2x
   , cozetteGlyphBit4x
   , renderGlyphScaledToBuffer
-  , renderTextScaledToBuffer
   , foldPenPositions
   ) where
 
@@ -458,27 +457,6 @@ foldPenPositions font !scale !logX !logY z step = go (0 :: Int) (0 :: Int) z
             then pure acc
             else step acc (pen logX col cozetteCharAdvance) (pen logY line cozetteLineHeight) gid
         go (col + 1) line acc' rest
-
--- | Stamp a text run laid out from logical (logX, logY) at a scale; clip and
--- buffer as for 'renderGlyphScaledToBuffer'.
-{-# NOINLINE renderTextScaledToBuffer #-}
-renderTextScaledToBuffer ::
-  Ptr Word32 ->
-  Int ->
-  Int ->
-  Int ->
-  Int ->
-  Int ->
-  Float ->
-  Float ->
-  Float ->
-  Word32 ->
-  CozetteFont ->
-  Text ->
-  IO ()
-renderTextScaledToBuffer !dst !stride !clipX0 !clipY0 !clipX1 !clipY1 !scale !logX !logY !color !font =
-  foldPenPositions font scale logX logY () $ \() penX penY gid ->
-    renderGlyphScaledToBuffer dst stride clipX0 clipY0 clipX1 clipY1 scale penX penY color font gid
 
 cozetteMetrics :: FontMetrics
 cozetteMetrics =
