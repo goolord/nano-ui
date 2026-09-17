@@ -11,13 +11,13 @@ $env:PKG_CONFIG_PATH = "C:\msys64\ucrt64\lib\pkgconfig"
 $env:PATH = "C:\msys64\ucrt64\bin;$env:PATH"
 
 Write-Host "Building nano-ui-sdl-profile (profiling, -O2)..."
-cabal build -fsdl --enable-profiling --enable-library-profiling --enable-executable-profiling --ghc-options=-O2 nano-ui-sdl-profile
+cabal build --enable-profiling --enable-library-profiling --enable-executable-profiling --ghc-options=-O2 nano-ui-sdl-profile
 
 Write-Host "JSON profile for speedscope..."
-cabal exec -fsdl --enable-profiling nano-ui-sdl-profile -- +RTS -pj -poprofile-sdl-json -RTS
+cabal exec --enable-profiling nano-ui-sdl-profile -- +RTS -pj -poprofile-sdl-json -RTS
 
 Write-Host "Text profile..."
-cabal exec -fsdl --enable-profiling nano-ui-sdl-profile -- +RTS -P -poprofile-sdl-time -RTS
+cabal exec --enable-profiling nano-ui-sdl-profile -- +RTS -P -poprofile-sdl-time -RTS
 
 Write-Host "Summary:"
 python summarize_prof.py profile-sdl-json.prof

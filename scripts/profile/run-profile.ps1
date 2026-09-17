@@ -12,6 +12,6 @@ Write-Host "Text profile for hp2ps / reading..."
 cabal exec --enable-profiling nano-ui-profile -- +RTS -P -poprofile-time -RTS
 
 Write-Host "Summary:"
-python summarize_prof.py
+python summarize_prof.py profile-json.prof
 Write-Host ""
 Write-Host "Open profile-json.prof in https://www.speedscope.app/"

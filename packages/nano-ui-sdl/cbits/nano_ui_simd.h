@@ -7,12 +7,6 @@
 #if defined(__AVX2__)
 #include <immintrin.h>
 #define NANO_UI_HAS_AVX2 1
-#elif defined(__SSE4_1__) || defined(__SSE2__) || defined(_M_X64) || (defined(_M_IX86_FP) && _M_IX86_FP >= 2)
-#include <smmintrin.h>
-#define NANO_UI_HAS_SSE 1
-#elif defined(__ARM_NEON) || defined(__ARM_NEON__)
-#include <arm_neon.h>
-#define NANO_UI_HAS_NEON 1
 #endif
 
 // Returns true if quad AABB [qx0, qy0, qx1, qy1] intersects [dx0, dy0, dx1, dy1]

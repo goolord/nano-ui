@@ -66,8 +66,8 @@ library
         NanoUI.Backend.Sdl
         NanoUI.Sdl.Input
         NanoUI.Sdl.NanoUIFont
-        NanoUI.Sdl.Session
     other-modules:
+        NanoUI.Sdl.Session
         NanoUI.Sdl.Runner
         NanoUI.Sdl.Clipboard
         NanoUI.Sdl.Cursor
@@ -137,23 +137,6 @@ test-suite nano-ui-font-effects-test
         nano-ui-sdl,
         primitive ^>=0.9,
         text ^>=2.1
-    if !flag(sdl)
-        buildable: False
-
-executable nano-ui-sdl-scrollprobe
-    import:           extensions
-    import:           rts-options
-    import:           warnings
-    main-is:          SdlScrollProbe.hs
-    build-depends:
-        base ^>=4.22.0.0,
-        nano-ui,
-        nano-ui-sdl,
-        directory ^>=1.3,
-        filepath ^>=1.5
-    hs-source-dirs:   examples
-    if os(windows)
-        ghc-options: -optl-mconsole
     if !flag(sdl)
         buildable: False
 

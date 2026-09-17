@@ -470,8 +470,6 @@ viewDiagnosticsTab m = do
         label (T.pack (show (currentTheme m)))
         label "Interaction Clicks:"
         label (T.pack (show (totalClicks m)))
-        label "Compiler Toolchain:"
-        label "Zig C Compiler (zig cc)"
         label "Layout Paradigm:"
         label "Native Multi-Column 2D Grid"
 
