@@ -109,18 +109,16 @@ syncWidgetLabels ctx = do
         case IM.lookup key (storeInt store) of
           Just v -> setNodeValue na idx (if intBool v then 1 else 0)
           Nothing -> pure ()
-      NodeRadio -> do
-        parent <- getParent na idx
-        optIdx <- getStyleIdx na idx
-        groupWid <- getWidgetId na parent
-        let selected = IM.findWithDefault optIdx (intKey groupWid) (storeInt store)
-            val = selected == optIdx
-        setNodeValue na idx (if val then 1 else 0)
-      NodeTree -> do
-        parent <- getParent na idx
-        si <- getStyleIdx na idx
-        groupWid <- getWidgetId na parent
-        let (nodeIdx, _, _, _) = treeDecodeStyle si
-            selected = IM.findWithDefault nodeIdx (intKey groupWid) (storeInt store)
-        setNodeValue na idx (if selected == nodeIdx then 1 else 0)
+      _
+        -- A radio's option index is its style; a tree row packs its node
+        -- index there. Either is selected when its group's stored value names it.
+        | nt == NodeRadio || nt == NodeTree -> do
+            parent <- getParent na idx
+            si <- getStyleIdx na idx
+            groupWid <- getWidgetId na parent
+            let own
+                  | nt == NodeTree, (nodeIdx, _, _, _) <- treeDecodeStyle si = nodeIdx
+                  | otherwise = si
+                selected = IM.findWithDefault own (intKey groupWid) (storeInt store)
+            setNodeValue na idx (if selected == own then 1 else 0)
       _ -> pure ()
