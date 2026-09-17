@@ -25,8 +25,8 @@ import NanoUI.Context
   , intKey
   , markDirty
   , markEscapeConsumed
+  , modifyStore
   , recordStoreText
-  , setStore
   )
 import NanoUI.Font (FontMetrics, menuItemRowH)
 import NanoUI.Frame.Hit (findNodeByWidgetId)
@@ -283,8 +283,12 @@ comboBox' placeholder options value = do
   let wid = rawRespId resp
       key = intKey wid
       keys = inputKeys inp
-      displayed = comboFiltered options text
   isFocus <- keyboardFocused wid
+  -- The dropdown only shows while the field is focused, so an unfocused
+  -- combo steps with no rows. The matches stay lazy: the option window below
+  -- forces only its rows, and the count is forced only on frames that store it.
+  let matches = comboFiltered options text
+      displayed = if isFocus then matches else []
   store <- uiIO (getStore ctx)
   let cs0 =
         ComboState
@@ -326,38 +330,37 @@ comboBox' placeholder options value = do
       finalText = csLive cs1
   when (isFocus || stepRedraw step) $
     uiIO $ do
-      st <- getStore ctx
       let len = T.length finalText
-          ints =
-            IM.insert (slotKey SlotComboHighlight key) (csHighlight cs1) $
-              IM.insert (slotKey SlotComboScroll key) (csWindow cs1) $
-                IM.insert (slotKey SlotComboCount key) (length displayed) $
-                  IM.insert (slotKey SlotComboFocus key) (boolInt (csFocused cs1)) $
-                    IM.insert (slotKey SlotComboDrag key) (csDrag cs1) (storeInt st)
-      setStore
-        ctx
-        st
-          { storeInt =
-              if stepPicked step
-                then IM.insert (slotKey SlotCursor key) len (IM.insert (slotKey SlotAnchor key) len ints)
-                else ints
-          , storeFloat =
-              IM.insert (slotKey SlotComboScrollX key) (csScrollX cs1) $
-                IM.insert (slotKey SlotComboContentW key) (csContentW cs1) $
-                  IM.insert (slotKey SlotComboDragOff key) (csDragOff cs1) (storeFloat st)
-          , storeText =
-              IM.insert (slotKey SlotComboLive key) finalText $
-                IM.insert (slotKey SlotComboCommitted key) (csCommitted cs1) $
-                  IM.insert key finalText (storeText st)
-          }
+      modifyStore ctx $ \st ->
+        let ints =
+              IM.insert (slotKey SlotComboHighlight key) (csHighlight cs1) $
+                IM.insert (slotKey SlotComboScroll key) (csWindow cs1) $
+                  IM.insert (slotKey SlotComboCount key) (length matches) $
+                    IM.insert (slotKey SlotComboFocus key) (boolInt (csFocused cs1)) $
+                      IM.insert (slotKey SlotComboDrag key) (csDrag cs1) (storeInt st)
+         in st
+              { storeInt =
+                  if stepPicked step
+                    then IM.insert (slotKey SlotCursor key) len (IM.insert (slotKey SlotAnchor key) len ints)
+                    else ints
+              , storeFloat =
+                  IM.insert (slotKey SlotComboScrollX key) (csScrollX cs1) $
+                    IM.insert (slotKey SlotComboContentW key) (csContentW cs1) $
+                      IM.insert (slotKey SlotComboDragOff key) (csDragOff cs1) (storeFloat st)
+              , storeText =
+                  IM.insert (slotKey SlotComboLive key) finalText $
+                    IM.insert (slotKey SlotComboCommitted key) (csCommitted cs1) $
+                      IM.insert key finalText (storeText st)
+              }
       when (stepDismissed step) $ do
         writeIORef (ctxFocusId ctx) (WidgetId 0)
         markEscapeConsumed ctx
       when (stepRedraw step) $ markDirty ctx
   -- The dropdown overlay reads its rows from the node's option list: the
-  -- visible window of the filtered list.
-  uiIO $
+  -- visible window of the filtered list. Unfocused combos set it too, since a
+  -- click that focuses the field this frame shows the dropdown this frame.
+  uiIO $ do
     findNodeByWidgetId ctx wid
-      >>= mapM_ (\idx -> setOptions (ctxNodeArena ctx) idx (take comboBoxMaxVisible (drop (csWindow cs1) displayed)))
-  uiIO $ recordStoreText ctx key finalText
+      >>= mapM_ (\idx -> setOptions (ctxNodeArena ctx) idx (take comboBoxMaxVisible (drop (csWindow cs1) matches)))
+    recordStoreText ctx key finalText
   pure (setChanged (isJust (stepCommit step)) resp, finalText)
