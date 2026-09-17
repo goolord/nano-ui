@@ -13,7 +13,6 @@ import Data.Text (Text)
 import NanoUI
   ( alignMid
   , card
-  , colorRGBA
   , columnWith
   , danger
   , fillW
