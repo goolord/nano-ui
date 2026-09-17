@@ -67,13 +67,11 @@ import NanoUI.Frame.Chrome
   , paintScrollBarLayout
   , strokeStyledRect
   )
-import NanoUI.Frame.Node (resolveFontFor, resolveTextFont, scrollViewportAt)
+import NanoUI.Frame.Node (ScrollNode (..), readScrollNode, resolveFontFor, resolveTextFont, scrollNodeViewport)
 import NanoUI.Frame.Paint.Types (PaintEnv (..), buildPaintEnv)
 import NanoUI.Frame.Paint.Widgets (paintTextAreaNode, paintTextInputNode, paintWidget)
 import NanoUI.Frame.Scroll.Geometry
   ( borderContentClip
-  , decodeScrollConfig
-  , isScrollStyle2D
   , padContentClip
   , scrollBare
   , scrollBarLayout
@@ -90,23 +88,18 @@ import NanoUI.Layout.Arena
   , arenaCount
   , foldNodesM
   , forChildNodes_
-  , getDirection
   , getHeightSizing
   , getNodeFontColor
   , getNodeFontSize
   , getNodeScope
   , getNodeType
-  , getNodeValue
-  , getPadding
   , getRect
-  , getScrollContentW
   , getStyleIdx
   , getText
   , getWidgetId
   , getWidthSizing
   , isFloatingNode
   )
-import NanoUI.Layout.Solve (scrollBarSlotOf)
 import NanoUI.Style
   ( FontStyle (..)
   , FontWeight (..)
@@ -263,7 +256,7 @@ paintScrollContainerNode env idx rect@(Rect x y w h) = do
       arena = peNodeArena env
       da = peDrawArena env
       tm = peTheme env
-  si <- getStyleIdx arena idx
+  sn <- readScrollNode arena idx
   -- A bare scroller paints nothing at all: it only lends its clip and
   -- offset, so whatever sits behind it (window, panel) keeps showing
   -- through. Grow×grow scrollers (page-level) keep no well so they blend
@@ -274,7 +267,7 @@ paintScrollContainerNode env idx rect@(Rect x y w h) = do
   -- scroll position. Paint the full rect with the window color instead:
   -- invisible on a cleared backdrop, and clip replay then always
   -- repaints the whole viewport.
-  unless (scrollBare (decodeScrollConfig si)) $ do
+  unless (scrollBare (snConfig sn)) $ do
     inFloating <- maybe False isFloatingNode <$> floatingAncestor ctx idx
     (wTag, _) <- getWidthSizing arena idx
     (hTag, _) <- getHeightSizing arena idx
@@ -284,29 +277,21 @@ paintScrollContainerNode env idx rect@(Rect x y w h) = do
         let well = (if inFloating then themeFloatingWindow tm else themeInput tm) {styleCornerRadius = 0}
         fillStyledRect da well rect
         strokeStyledRect da well x y w h
-  inner <- scrollViewportAt ctx idx x y w h
-  withClip da inner $ walkChildrenWithOccluders env idx
-  paintScrollChrome env idx rect
+  withClip da (scrollNodeViewport sn x y w h) $ walkChildrenWithOccluders env idx
+  paintScrollChrome env idx sn rect
 
 -- | Scrollbars of a scroll container whose chrome is active, drawn one layer
 -- above the content so they stay on top of it.
-paintScrollChrome :: PaintEnv -> NodeIdx -> Rect -> IO ()
-paintScrollChrome env idx (Rect x y w h) = do
+paintScrollChrome :: PaintEnv -> NodeIdx -> ScrollNode -> Rect -> IO ()
+paintScrollChrome env idx (ScrollNode slot cfg native2D dir pad contentMain contentW) (Rect x y w h) = do
   let ctx = peContext env
-      na = peNodeArena env
       da = peDrawArena env
       theme = peTheme env
-  si <- getStyleIdx na idx
-  pad <- getPadding na idx
-  slot <- scrollBarSlotOf na idx
-  wid <- getWidgetId na idx
-  contentMain <- getNodeValue na idx
-  let cfg = decodeScrollConfig si
       Rect _ _ innerW innerH = padContentClip x y w h pad
+  wid <- getWidgetId (peNodeArena env) idx
   bars <-
-    if isScrollStyle2D si
-      then do
-        contentW <- getScrollContentW na idx
+    if native2D
+      then
         if scrollChromeActive cfg DirColumn contentMain innerH || scrollChromeActive cfg DirRow contentW innerW
           then do
             V2 offX offY <- getScrollOffset2D ctx wid
@@ -314,7 +299,6 @@ paintScrollChrome env idx (Rect x y w h) = do
             pure (catMaybes [mV, mH])
           else pure []
       else do
-        dir <- getDirection na idx
         let innerMain = case dir of
               DirColumn -> innerH
               DirRow -> innerW

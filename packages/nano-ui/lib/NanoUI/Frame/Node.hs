@@ -1,24 +1,30 @@
 -- | Per-node queries shared by the paint, span, scroll and hit passes: the
--- font a node renders and measures in, and a scroll node's content viewport.
+-- font a node renders and measures in, and a scroll node's fields and content
+-- viewport.
 module NanoUI.Frame.Node
   ( resolveFontFor
   , resolveTextFont
   , nodeFontMetrics
-  , scrollViewportAt
+  , ScrollNode (..)
+  , readScrollNode
+  , scrollNodeViewport
   ) where
 
 import Data.Text (Text)
 import NanoUI.Context (Context (..))
 import NanoUI.Draw.Types (TextFont (..))
-import NanoUI.Font (FontMetrics, isDefaultNodeFont, measureTextIO)
+import NanoUI.Font (FontMetrics, ScrollBarSlot, isDefaultNodeFont, measureTextIO)
 import NanoUI.Frame.Scroll.Geometry
-  ( decodeScrollConfig
-  , isScrollStyle2D
+  ( ScrollConfig
+  , decodeScrollConfig
+  , scrollConfigNative2D
   , scrollContentClip
   , scrollViewportClip2D
   )
 import NanoUI.Layout.Arena
-  ( NodeIdx
+  ( DirTag
+  , NodeArena
+  , NodeIdx
   , NodeType (..)
   , getDirection
   , getNodeFontSize
@@ -29,7 +35,7 @@ import NanoUI.Layout.Arena
   , getStyleIdx
   )
 import NanoUI.Layout.Solve (scrollBarSlotOf)
-import NanoUI.Style (FontVariant (..))
+import NanoUI.Style (FontVariant (..), Padding)
 import NanoUI.Types (Rect)
 import NanoUI.WidgetText (textNodeFontStyle, textNodeFontVariant, textNodeFontWeight)
 
@@ -78,20 +84,35 @@ nodeFontMetrics ctx idx = do
   (fm, _, _) <- resolveFontFor ctx nt size si
   pure fm
 
--- | Content viewport of scroll node @idx@ placed at @x y w h@: its padding box
--- minus the live scrollbar gutters.
-scrollViewportAt :: Context -> NodeIdx -> Float -> Float -> Float -> Float -> IO Rect
-scrollViewportAt ctx idx x y w h = do
-  let na = ctxNodeArena ctx
+-- | What the scroll passes read off a scroll container: its bar slot, scroll
+-- config, whether it scrolls natively in 2D, direction, padding, the content
+-- extent along its main axis (the content height for 2D) and, for 2D, the
+-- content width.
+data ScrollNode = ScrollNode
+  { snSlot :: !ScrollBarSlot
+  , snConfig :: !ScrollConfig
+  , sn2D :: !Bool
+  , snDir :: !DirTag
+  , snPad :: {-# UNPACK #-} !Padding
+  , snContentMain :: {-# UNPACK #-} !Float
+  , snContentW :: {-# UNPACK #-} !Float
+  }
+
+{-# INLINE readScrollNode #-}
+readScrollNode :: NodeArena -> NodeIdx -> IO ScrollNode
+readScrollNode na idx = do
   si <- getStyleIdx na idx
-  pad <- getPadding na idx
   slot <- scrollBarSlotOf na idx
+  dir <- getDirection na idx
+  pad <- getPadding na idx
   contentMain <- getNodeValue na idx
+  contentW <- getScrollContentW na idx
   let cfg = decodeScrollConfig si
-  if isScrollStyle2D si
-    then do
-      contentW <- getScrollContentW na idx
-      pure (scrollViewportClip2D slot cfg x y w h pad contentW contentMain)
-    else do
-      dir <- getDirection na idx
-      pure (scrollContentClip slot cfg dir x y w h pad contentMain)
+  pure $! ScrollNode slot cfg (si /= 0 && scrollConfigNative2D cfg) dir pad contentMain contentW
+
+-- | Content viewport of a scroll node placed at @x y w h@: its padding box
+-- minus the live scrollbar gutters.
+scrollNodeViewport :: ScrollNode -> Float -> Float -> Float -> Float -> Rect
+scrollNodeViewport (ScrollNode slot cfg native2D dir pad contentMain contentW) x y w h
+  | native2D = scrollViewportClip2D slot cfg x y w h pad contentW contentMain
+  | otherwise = scrollContentClip slot cfg dir x y w h pad contentMain

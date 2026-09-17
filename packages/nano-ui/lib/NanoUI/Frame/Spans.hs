@@ -39,7 +39,7 @@ import NanoUI.Font
   , wrapTextLinesIO
   )
 import NanoUI.Frame.Chrome (displayText, textInputFocused, textInputValue, widgetVisualStyle)
-import NanoUI.Frame.Node (resolveFontFor, scrollViewportAt)
+import NanoUI.Frame.Node (readScrollNode, resolveFontFor, scrollNodeViewport)
 import NanoUI.Frame.Scroll.Geometry (padContentClip, tagClippedSpans)
 import NanoUI.Frame.Select (collectSelectDropdownSpans, tagSelectClippedSpans)
 import NanoUI.Frame.SpanArena (SpanArena, pushSpan, resetSpanArena, spanArenaToList, spanArenaToListOccluded, withSpanArenaSnap)
@@ -138,7 +138,7 @@ collectClippedSpans' ctx idx nt clip arena = do
       then
         getClipRect (ctxNodeArena ctx) idx >>= \case
           Just live -> pure (rectIntersect clip live)
-          Nothing -> rectIntersect clip <$> scrollViewportAt ctx idx x y w h
+          Nothing -> (\sn -> rectIntersect clip (scrollNodeViewport sn x y w h)) <$> readScrollNode (ctxNodeArena ctx) idx
       else pure (if nt == NodePanel then rectIntersect clip (Rect x y w h) else Just clip)
   case mClipChildren of
     Nothing -> pure ()
@@ -468,6 +468,6 @@ collectFloatingSpansInto ctx wanted arena =
       (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
       clip <-
         if isScrollNode nt
-          then scrollViewportAt ctx idx x y w h
+          then (\sn -> scrollNodeViewport sn x y w h) <$> readScrollNode (ctxNodeArena ctx) idx
           else padContentClip x y w h <$> getPadding (ctxNodeArena ctx) idx
       walkChildSpans ctx idx clip arena
