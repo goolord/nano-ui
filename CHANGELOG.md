@@ -17,6 +17,13 @@
 - `disabledWhen` disables the widgets inside it: they keep their layout and
   state, take no pointer or keyboard input, leave the focus order, and draw
   with `disabledTheme`.
+- Undo and redo in every text field: Ctrl+Z, Ctrl+Shift+Z and Ctrl+Y, and
+  Undo and Redo rows in the right-click menu. Typing is undone a word at a
+  time and a run of deletes at once. Steps keep the edits, not copies of the
+  document.
+- `TextCommand` and `TextMotion`: what text fields do, as values. Keys and
+  the context menu run them, and `runTextCommand` runs them on a field by its
+  id, with `textCanUndo` and `textCanRedo` for enabling menu items.
 - `spinner`, an indeterminate loading indicator that repaints only its own
   rect while it turns.
 - Theme slots `themeOnAccent`, `themeSelection`, `themeFocusRing`,
@@ -39,6 +46,11 @@
   `styled (panelStyle (background bg . borderColor border))` around a panel.
   `callout` tints the theme's panel colour instead of a fixed dark grey.
 - `uiTheme` returns the theme of the enclosing `styled` scope.
+- `MenuAction` is gone; `takeTextEditLastAction` now reports the
+  `TextCommand` a text field's menu ran.
+- Text areas keep their document as a finger tree of lines and repaint only
+  the lines in view, so a keystroke in a 100,000-line document costs about
+  1.4 ms on the headless profiler instead of about 26 ms.
 
 - A wheel notch scrolls three text lines instead of one, matching what
   desktops send a notch as. `setScrollTuning` puts it back.

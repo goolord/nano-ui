@@ -1,7 +1,9 @@
 module Main (main) where
 
 import Control.Monad (forM_, replicateM_, void)
-import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
+import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
+import Data.Text (Text)
+import Data.Text qualified as T
 import Data.Vector (Vector)
 import NanoUI
 import NanoUI.Testing (newContext, runFrame)
@@ -65,20 +67,42 @@ canvasScene key =
         , widgetDraw = countedCanvasOps
         }
 
+-- | A focused text area over a long document, typing into its middle: the
+-- editor path, whose per-frame cost must not grow with the document.
+textAreaScene :: IORef Text -> NanoUI ()
+textAreaScene ref = column $ do
+  txt <- textAreaWith grow =<< uiIO (readIORef ref)
+  uiIO (writeIORef ref txt)
+
+longDocument :: Text
+longDocument = T.intercalate "\n" [T.pack ("line " ++ show i ++ " of a long document") | i <- [1 .. 100000 :: Int]]
+
 main :: IO ()
 main = do
   args <- getArgs
   ctx <- newContext
-  let inp =
-        emptyInput
-          { inputWindowSize = Size 800 600
-          , inputMousePos = V2 400 300
-          , inputMouseDown = True
-          }
-      (name, ui) = case args of
-        ("canvas" : _) -> ("canvas", canvasScene 0)
-        ("canvas-keyed" : _) -> ("canvas-keyed", canvasScene 1)
-        _ -> ("widgets", widgetScene)
-  replicateM_ iterations (void (runFrame ctx inp ui))
-  builds <- readIORef buildCount
-  putStrLn ("profiled " ++ show iterations ++ " " ++ name ++ " frames, op builds: " ++ show builds)
+  case args of
+    ("textarea" : _) -> do
+      ref <- newIORef longDocument
+      let inp = emptyInput {inputWindowSize = Size 800 600}
+          frame i = void (runFrame ctx i (textAreaScene ref))
+      frame inp
+      frame inp {inputKeys = inputKeysFromList [KeyTab]}
+      replicateM_ 50 (frame inp {inputKeys = inputKeysFromList (replicate 100 KeyDown)})
+      forM_ (take 1000 (cycle "typing into the middle ")) $ \c ->
+        frame inp {inputChars = T.singleton c}
+      putStrLn "profiled 1000 textarea keystroke frames"
+    _ -> do
+      let inp =
+            emptyInput
+              { inputWindowSize = Size 800 600
+              , inputMousePos = V2 400 300
+              , inputMouseDown = True
+              }
+          (name, ui) = case args of
+            ("canvas" : _) -> ("canvas", canvasScene 0)
+            ("canvas-keyed" : _) -> ("canvas-keyed", canvasScene 1)
+            _ -> ("widgets", widgetScene)
+      replicateM_ iterations (void (runFrame ctx inp ui))
+      builds <- readIORef buildCount
+      putStrLn ("profiled " ++ show iterations ++ " " ++ name ++ " frames, op builds: " ++ show builds)

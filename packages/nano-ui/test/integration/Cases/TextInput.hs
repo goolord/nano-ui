@@ -14,6 +14,8 @@ module Cases.TextInput
   , runTextInputScrollTest
   , runTextInputWordKeysTest
   , runTextInputBatchTest
+  , runTextUndoTest
+  , runTextAreaWidthTrackingTest
   , runTextAreaScrollWheelTest
   , runTextAreaZoomScrollTest
   , runTextAreaScrollDragTest
@@ -39,6 +41,7 @@ import NanoUI.Frame.TextEdit
   , TextAreaHit (..)
   , TextAreaScrollBarLayouts (..)
   , resolveTextAreaFont
+  , textAreaContentMetrics
   , textAreaBarLanes
   , textAreaGeom
   , textAreaHScrollBarLayout
@@ -62,14 +65,12 @@ import NanoUI.Testing.Harness
   , warmup2
   )
 import NanoUI.Widgets.TextArea
-  ( applyTextAreaMenuAction
-  , buffer
+  ( buffer
   , loadTextAreaState
   , selectionAnchor
   )
 import NanoUI.Widgets.TextBuffer
-  ( Cursor (..)
-  , fromText
+  ( fromText
   , getCursor
   , toLines
   , toText
@@ -1027,12 +1028,12 @@ runTextAreaMenuPulseTest ctx failed = do
       let
         field = tahFieldRect hit
         mid = V2 (rectX field + rectW field / 2) (rectY field + rectH field / 2)
-      -- Focus the editor so applyTextAreaMenuAction's focus write leaves it there.
+      -- Focus the editor, as a menu pick would.
       let
         (focusPress, focusRelease) = clickPair inp0 mid
       _ <- runFrame ctx focusPress ui >> runFrame ctx focusRelease ui
       -- Selection-only actions must NOT pulse: no text delta.
-      applyTextAreaMenuAction ctx (respId resp0) MenuSelectAll
+      _ <- runFrame ctx inp0 (runTextCommand (respId resp0) SelectAll)
       ((respSel, valSel), _, _, _) <- runFrame ctx inp0 ui
       assert failed (not (respChanged respSel))
       assertEq failed valSel "abc"
@@ -1047,7 +1048,7 @@ runTextAreaMenuPulseTest ctx failed = do
       overlays <- collectOverlayTextSpans ctx menuOpen
       case [r | (r, txt, _, _, _) <- overlays, txt == "Cut"] of
         (Rect px py pw ph : _) -> do
-          -- The Cut dispatches through applyTextAreaMenuAction on the press
+          -- The Cut runs through the field's command path on the press
           -- frame; the very next frame (release) must deliver the pulse and
           -- the emptied text, then go quiet again.
           let
@@ -1097,3 +1098,96 @@ runTextAreaRemountScrollTest ctx failed = do
       -- The scroll offset must also damage the editor, or nothing repaints.
       dmg <- takeDamage ctx
       assert failed (not (damageIsEmpty dmg))
+
+-- | Ctrl+Z and Ctrl+Shift+Z undo and redo typing in a field; commands run from
+-- outside the frame edit it and pulse 'respChanged'; replacing the value the
+-- field is passed clears its history.
+runTextUndoTest :: Context -> IORef Int -> IO ()
+runTextUndoTest ctx failed = do
+  ref <- newIORef ""
+  commands <- newIORef []
+  let
+    inp = withInput 320 120
+    -- Commands queued by the test run after the field, as an app's menu
+    -- would; the field's undo state is read the same way.
+    ui = column $ do
+      (resp, _) <- held ref textInput'
+      pending <- uiIO (readIORef commands)
+      uiIO (writeIORef commands [])
+      mapM_ (runTextCommand (respId resp)) pending
+      (,) resp <$> textCanUndo (respId resp)
+    ctrl = Modifiers False True False
+    ctrlShift = Modifiers True True False
+    frame i = (\(a, _, _, _) -> a) <$> runFrame ctx i ui
+  _ <- warmup2 ctx inp ui
+  _ <- frame (inp {inputKeys = inputKeysFromList [KeyTab]})
+  mapM_ (\c -> frame inp {inputChars = T.singleton c}) ("red fox" :: String)
+  assertEq failed "red fox" =<< readIORef ref
+  (_, canUndo) <- frame inp
+  assert failed canUndo
+  _ <- frame inp {inputChars = "z", inputModifiers = ctrl}
+  assertEq failed "red " =<< readIORef ref
+  _ <- frame inp {inputChars = "z", inputModifiers = ctrl}
+  assertEq failed "" =<< readIORef ref
+  _ <- frame inp {inputChars = "z", inputModifiers = ctrlShift}
+  assertEq failed "red " =<< readIORef ref
+  _ <- frame inp {inputChars = "y", inputModifiers = ctrl}
+  assertEq failed "red fox" =<< readIORef ref
+  -- A command from outside the field's frame edits it and pulses it once.
+  writeIORef commands [InsertText "!"]
+  _ <- frame inp
+  (pulsed, _) <- frame inp
+  assert failed (respChanged pulsed)
+  assertEq failed "red fox!" =<< readIORef ref
+  (quiet, _) <- frame inp
+  assert failed (not (respChanged quiet))
+  writeIORef commands [Undo]
+  _ <- frame inp
+  _ <- frame inp
+  assertEq failed "red fox" =<< readIORef ref
+  -- The caller replacing the value drops the history recorded against the
+  -- old text.
+  writeIORef ref "something else"
+  _ <- frame inp
+  (_, stillUndoable) <- frame inp
+  assert failed (not stillUndoable)
+
+-- | The content width a text area keeps up to date line by line matches a
+-- fresh measurement after edits that widen, move and shorten its widest line.
+runTextAreaWidthTrackingTest :: Context -> IORef Int -> IO ()
+runTextAreaWidthTrackingTest ctx failed = do
+  ref <- newIORef (T.intercalate "\n" (replicate 200 "short line" ++ ["the widest line of them all"] ++ replicate 200 "short line"))
+  let
+    inp = withInput 400 300
+    ui = column (held ref (textAreaWith' grow))
+    frame i = (\(a, _, _, _) -> a) <$> runFrame ctx i ui
+    ctrl = Modifiers False True False
+    check = do
+      (resp, _) <- frame inp
+      mHit <- textAreaHitForWidget ctx (respId resp)
+      case mHit of
+        Nothing -> assert failed False
+        Just hit -> do
+          (tracked, _) <- textAreaContentMetrics ctx (tahNodeIdx hit)
+          text <- readIORef ref
+          fm <- resolveTextAreaFont ctx (tahNodeIdx hit)
+          widths <- mapM (lineWidthIO fm) (T.splitOn "\n" text)
+          assertEq failed (maximum widths) tracked
+  _ <- warmup2 ctx inp ui
+  _ <- frame inp {inputKeys = inputKeysFromList [KeyTab]}
+  check
+  -- Widen a short line past the widest.
+  mapM_ (\_ -> frame inp {inputKeys = inputKeysFromList [KeyDown]}) [1 .. 10 :: Int]
+  mapM_ (\c -> frame inp {inputChars = T.singleton c}) (replicate 40 'x')
+  check
+  -- Shorten it again, so the old widest line wins.
+  mapM_ (\_ -> frame inp {inputKeys = inputKeysFromList [KeyBackspace]}) [1 .. 40 :: Int]
+  check
+  -- Delete the widest line itself.
+  mapM_ (\_ -> frame inp {inputKeys = inputKeysFromList [KeyDown]}) [1 .. 190 :: Int]
+  _ <- frame inp {inputKeys = inputKeysFromList [KeyHome, KeyEnd], inputModifiers = Modifiers True False False}
+  _ <- frame inp {inputKeys = inputKeysFromList [KeyBackspace]}
+  check
+  -- Undo brings it back.
+  _ <- frame inp {inputChars = "z", inputModifiers = ctrl}
+  check

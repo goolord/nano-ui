@@ -141,6 +141,8 @@ testSpecs =
   , TestSpec "styled-paint" False runStyledPaintTest
   , TestSpec "styled-nesting" False runStyledNestingTest
   , TestSpec "styled-damage" False runStyledDamageTest
+  , TestSpec "text-undo" False runTextUndoTest
+  , TestSpec "text-area-width-tracking" False runTextAreaWidthTrackingTest
   , TestSpec "keyboard-modal-eligibility" False runKeyboardModalEligibilityTest
   , TestSpec "keyboard-focus-ring" False runKeyboardFocusRingTest
   , TestSpec "keyboard-button" False runKeyboardButtonTest

@@ -72,6 +72,7 @@ import NanoUI.Input (UiCursorKind)
 import NanoUI.Layout.Arena (DirTag, LayoutCache, NodeArena, NodeType)
 import NanoUI.Store (WidgetStore)
 import NanoUI.Style (FontStyle, FontVariant, FontWeight, Layout, Theme)
+import NanoUI.Widgets.TextCommand (TextCommand)
 import NanoUI.Types
   ( Color
   , Damage (..)
@@ -449,7 +450,7 @@ data InteractionState = InteractionState
   , isTextInputDrag :: !(Maybe TextInputDrag)
   , isTextFieldClickCell :: !(Maybe TextFieldClickCell)
   , isTextInputMenu :: !(Maybe TextInputMenu)
-  , isTextEditLastAction :: !(Maybe (WidgetId, Int))
+  , isTextEditLastAction :: !(Maybe (WidgetId, TextCommand))
   , isSelectDropPress :: {-# UNPACK #-} !Bool
   , isOpenSelectDrop :: !(Maybe (WidgetId, Rect))
   , isMenuPointerGesture :: {-# UNPACK #-} !Bool

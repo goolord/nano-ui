@@ -74,6 +74,9 @@ library
         NanoUI.Testing.Harness
         NanoUI.Testing.Runner
         NanoUI.Widgets.TextBuffer
+        NanoUI.Widgets.TextCommand
+        NanoUI.Widgets.TextEditor
+        NanoUI.Widgets.TextField
         NanoUI.Widgets.TextArea
         NanoUI.Widgets.Combo
         NanoUI.Widgets.Custom
@@ -163,7 +166,6 @@ library
         hashtables ^>=1.4,
         primitive ^>=0.9,
         text ^>=2.1,
-        text-zipper >=0.11 && <0.14,
         unordered-containers ^>=0.2,
         vector ^>=0.13
     hs-source-dirs:   lib
@@ -251,6 +253,7 @@ executable nano-ui-profile
     build-depends:
         base ^>=4.22.0.0,
         nano-ui,
+        text ^>=2.1,
         vector ^>=0.13
 
 -- Compile-time verification of optimization invariants (inspection-testing).

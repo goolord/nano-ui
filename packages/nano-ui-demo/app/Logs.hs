@@ -206,7 +206,7 @@ logsApp stateRef = do
   -- Check menu action from right-click context menu (e.g. Select All or Copy)
   mMenuAction <- uiIO $ takeTextEditLastAction ctx
   case mMenuAction of
-    Just (_, item) | item == fromEnum MenuSelectAll -> do
+    Just (_, SelectAll) -> do
       -- Select All chosen from context menu
       setAllSelected True
       uiIO $ markDirty ctx >> damageFull ctx
@@ -278,7 +278,7 @@ logsApp stateRef = do
     -- the clipboard with a single row.
     when (allSelected && cPressed) $ copyAllLogs
     case mMenuAction of
-      Just (_, item) | item == fromEnum MenuCopy && allSelected -> copyAllLogs
+      Just (_, Copy) | allSelected -> copyAllLogs
       _ -> pure ()
 
     -- Status Bar

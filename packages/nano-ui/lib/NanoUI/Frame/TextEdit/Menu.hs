@@ -46,7 +46,7 @@ import NanoUI.Font
   , widgetContentInset
   )
 import NanoUI.Frame.Chrome (overlayMenuStyle, paintMenuAccent, paintMenuPanel)
-import NanoUI.Frame.Hit (findNodeByWidgetId, nodeClippedHit, overlayHitAllowed, widgetOverlayAllowed)
+import NanoUI.Frame.Hit (nodeClippedHit, overlayHitAllowed, widgetOverlayAllowed)
 import NanoUI.Frame.TextArea.Content (isMouseOnTextAreaScrollBarAt)
 import NanoUI.Id (WidgetId)
 import NanoUI.Input
@@ -60,26 +60,30 @@ import NanoUI.Input
   , inputMouseRightPressed
   , inputWindowSize
   )
-import NanoUI.Layout.Arena (NodeType (NodeTextArea, NodeTextInput), findNodeRevM, getNodeType, getRect, getStyleIdx, getWidgetId)
+import NanoUI.Layout.Arena (NodeType (NodeTextArea, NodeTextInput), findNodeRevM, getNodeType, getRect, getWidgetId)
 import NanoUI.Style (Style (..), themeSeparator)
 import NanoUI.Types (Color (..), Rect (..), Size (..), V2 (..), lerpColor, rectContains)
-import NanoUI.WidgetText (textInputPasswordMode)
-import NanoUI.Widgets.TextArea (applyTextAreaMenuAction)
-import NanoUI.Widgets.TextCommon (MenuAction (..), menuActionEnabled)
-import NanoUI.Widgets.TextInput (applyTextInputMenuAction, isSelectableTextInput)
+import NanoUI.Widgets.TextEditor (EditorMode (..), TextCommand (..), canRedo, canUndo)
+import NanoUI.Widgets.TextField (applyTextFieldCommand, textFieldHistory, textFieldMode)
 
 data TextEditMenuRow
   = TextEditMenuSep
   | TextEditMenuItem Int T.Text
 
+-- | The menu's commands, in row order; a row's index is its item number.
+textEditMenuCommands :: [TextCommand]
+textEditMenuCommands = [Undo, Redo, Cut, Copy, Paste, SelectAll]
+
 textEditMenuRows :: [TextEditMenuRow]
 textEditMenuRows =
-  [ TextEditMenuItem 0 "Cut"
-  , TextEditMenuItem 1 "Copy"
+  [ TextEditMenuItem 0 "Undo"
+  , TextEditMenuItem 1 "Redo"
   , TextEditMenuSep
-  , TextEditMenuItem 2 "Paste"
+  , TextEditMenuItem 2 "Cut"
+  , TextEditMenuItem 3 "Copy"
+  , TextEditMenuItem 4 "Paste"
   , TextEditMenuSep
-  , TextEditMenuItem 3 "Select All"
+  , TextEditMenuItem 5 "Select All"
   ]
 
 -- Use the same row metrics as generic popup menus.
@@ -281,25 +285,30 @@ collectTextEditMenuSpans ctx inp = do
               pure [(Rect labelX (centeredTextY fm ry rh th) tw th, lbl, textEditMenuItemFg style enabled, bg, menuRect)]
 
 applyTextFieldMenuAction :: Context -> WidgetId -> Int -> IO ()
-applyTextFieldMenuAction ctx wid item = do
-  setTextEditLastAction ctx (Just (wid, item))
-  mIdx <- findNodeByWidgetId ctx wid
-  forM_ mIdx $ \idx ->
-    getNodeType (ctxNodeArena ctx) idx >>= \case
-      NodeTextInput -> applyTextInputMenuAction ctx wid (toEnum item)
-      NodeTextArea -> applyTextAreaMenuAction ctx wid (toEnum item)
-      _ -> pure ()
+applyTextFieldMenuAction ctx wid item =
+  forM_ (take 1 (drop item textEditMenuCommands)) $ \cmd -> do
+    setTextEditLastAction ctx (Just (wid, cmd))
+    applyTextFieldCommand ctx wid cmd
+    -- The menu edits a field that may not be under the pointer; focus it so
+    -- the selection highlight and caret become visible.
+    writeIORef (ctxFocusId ctx) wid
+    setTextInputMenu ctx Nothing
+    markDirty ctx
 
 textFieldMenuActionEnabled :: Context -> WidgetId -> Int -> IO Bool
 textFieldMenuActionEnabled ctx wid item = do
   store <- getStore ctx
+  mMode <- textFieldMode ctx wid
+  history <- textFieldHistory ctx wid
   let hasText = not (T.null (IM.findWithDefault "" (intKey wid) (storeText store)))
-  isSelectable <- isSelectableTextInput ctx wid
-  mIdx <- findNodeByWidgetId ctx wid
-  isPassword <- maybe (pure False) (fmap textInputPasswordMode . getStyleIdx (ctxNodeArena ctx)) mIdx
-  if isPassword && (item == fromEnum MenuCopy || item == fromEnum MenuCut)
-    then pure False -- a password never reaches the clipboard
-    else
-      if isSelectable
-        then pure (hasText && (item == fromEnum MenuCopy || item == fromEnum MenuSelectAll))
-        else menuActionEnabled hasText <$> ctxClipboardGet ctx <*> pure (toEnum item)
+  case (mMode, drop item textEditMenuCommands) of
+    (Just mode, cmd : _) -> case cmd of
+      Undo -> pure (modeEditable mode && canUndo history)
+      Redo -> pure (modeEditable mode && canRedo history)
+      Cut -> pure (modeEditable mode && modeCopyable mode && hasText)
+      Copy -> pure (modeCopyable mode && hasText)
+      Paste
+        | modeEditable mode -> maybe False (not . T.null) <$> ctxClipboardGet ctx
+        | otherwise -> pure False
+      _ -> pure hasText
+    _ -> pure False

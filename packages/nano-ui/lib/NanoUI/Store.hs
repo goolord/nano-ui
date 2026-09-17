@@ -36,6 +36,9 @@ module NanoUI.Store
   , slotTextAreaContentFont
   , slotTextAreaBuffer
   , slotTextAreaChanged
+  , slotTextHistory
+  , slotTextMode
+  , slotTextAreaWidths
   , slotTextInputScroll
   , slotSearchCommitted
   , slotSearchAge
@@ -212,6 +215,9 @@ data Slot
   | SlotTextAreaContentFont
   | SlotTextAreaBuffer
   | SlotTextAreaChanged
+  | SlotTextHistory
+  | SlotTextMode
+  | SlotTextAreaWidths
   | SlotTextInputScroll
   | SlotSearchCommitted
   | SlotSearchAge
@@ -365,6 +371,20 @@ slotTextAreaBuffer = slotTag SlotTextAreaBuffer
 -- still gets a 'respChanged' pulse for edits that carry no keys or chars.
 slotTextAreaChanged :: Word64
 slotTextAreaChanged = slotTag SlotTextAreaChanged
+
+-- | A text field's undo history, in 'storeDyn'.
+slotTextHistory :: Word64
+slotTextHistory = slotTag SlotTextHistory
+
+-- | Which kind of text field a widget id is: 1 single-line, 2 multi-line.
+-- Commands sent to the id between frames read it.
+slotTextMode :: Word64
+slotTextMode = slotTag SlotTextMode
+
+-- | A text area's measured line widths, in 'storeDyn', kept in step with its
+-- lines so an edit remeasures only the lines it changed.
+slotTextAreaWidths :: Word64
+slotTextAreaWidths = slotTag SlotTextAreaWidths
 
 slotTextInputScroll :: Word64
 slotTextInputScroll = slotTag SlotTextInputScroll

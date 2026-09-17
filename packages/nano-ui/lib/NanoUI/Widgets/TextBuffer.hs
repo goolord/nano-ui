@@ -1,9 +1,15 @@
 {-# LANGUAGE BangPatterns #-}
 
+-- | A text document as a finger tree of lines with a cursor. Every change is
+-- a 'TextEdit': replace the text at a position with other text. An edit
+-- touches only the lines it spans, so edits, cursor moves and line lookups
+-- cost O(log lines) plus the size of the lines involved, however long the
+-- document is.
 module NanoUI.Widgets.TextBuffer
   ( -- * Types
     TextBuffer (..)
   , Cursor (..)
+  , TextEdit (..)
 
     -- * Construction & Conversion
   , empty
@@ -16,6 +22,9 @@ module NanoUI.Widgets.TextBuffer
   , getCursor
   , getLineCount
   , withCursor
+  , clampCursor
+  , changedLines
+  , markLinesSeen
 
     -- * Navigation
   , moveLeft
@@ -24,6 +33,7 @@ module NanoUI.Widgets.TextBuffer
   , moveDown
   , moveToBOL
   , moveToEOL
+  , moveToTop
   , moveToBottom
   , moveWordLeft
   , moveWordRight
@@ -31,9 +41,17 @@ module NanoUI.Widgets.TextBuffer
     -- * Selection
   , selectionRange
   , selectedText
+  , textRange
   , deleteRange
   , replaceRange
   , documentEnd
+
+    -- * Edits
+  , applyEdit
+  , invertEdit
+  , editEnd
+  , replaceEdit
+  , insertableText
 
     -- * Editing Operations
   , insertChar
@@ -48,10 +66,17 @@ module NanoUI.Widgets.TextBuffer
   )
 where
 
+import Control.Monad (when)
+import Control.Monad.ST (runST)
+import Data.Char (isPrint, isSpace)
+import Data.Foldable (toList)
+import Data.Maybe (fromMaybe)
+import Data.Sequence (Seq)
+import Data.Sequence qualified as Seq
+import Data.Text (Text)
 import Data.Text qualified as T
-import Data.Text.Zipper qualified as TZ
-import Data.Text.Zipper.Generic.Words qualified as TZW
-import NanoUI.Font (tabSentinelChar)
+import Data.Text.Array qualified as A
+import Data.Text.Internal (Text (..))
 
 -- | Zero-indexed logical (row, column) position in the buffer. Fields are
 -- row then column, so the derived 'Ord' is document order.
@@ -61,99 +86,114 @@ data Cursor = Cursor
   }
   deriving (Eq, Ord, Show)
 
--- | Document state backed by a 2D text zipper.
+-- | Lines (never empty, and without their newlines) and the cursor.
 data TextBuffer = TextBuffer
-  { unTextBuffer :: TZ.TextZipper T.Text
+  { bufferLines :: !(Seq Text)
+  , bufferCursor :: {-# UNPACK #-} !Cursor
   , preferredCol :: {-# UNPACK #-} !Int
+  -- ^ The column vertical motion aims for, kept while moving through
+  -- shorter lines.
+  , bufferSeenHead :: {-# UNPACK #-} !Int
+  , bufferSeenTail :: {-# UNPACK #-} !Int
+  -- ^ Lines at the start and the end that no edit has touched since
+  -- 'markLinesSeen', so what was derived from them (their measured widths)
+  -- still holds. See 'changedLines'.
   }
-  deriving Show
+  deriving (Eq, Show)
 
--- | Construct an empty TextBuffer containing a single blank line.
+-- | Replace 'editRemoved' at 'editAt' with 'editInserted'. Both texts may
+-- span lines. An edit carries what it removes, so it can be inverted without
+-- looking at the document.
+data TextEdit = TextEdit
+  { editAt :: {-# UNPACK #-} !Cursor
+  , editRemoved :: !Text
+  , editInserted :: !Text
+  }
+  deriving (Eq, Show)
+
+-- | A TextBuffer containing a single blank line.
 empty :: TextBuffer
-empty = fromText ""
+empty = TextBuffer (Seq.singleton T.empty) (Cursor 0 0) 0 0 0
 
 -- | Construct a TextBuffer from raw Text. Cursor is always (0, 0).
-fromText :: T.Text -> TextBuffer
-fromText t =
-  let
-    validLines = case T.splitOn "\n" (encodeTabs t) of
-      [] -> [""]
-      lns -> lns
-    z = TZ.gotoBOF (TZ.textZipper validLines Nothing)
-   in
-    TextBuffer z 0
+fromText :: Text -> TextBuffer
+fromText t = TextBuffer (Seq.fromList (T.splitOn "\n" t)) (Cursor 0 0) 0 0 0
 
--- | Flatten all lines into a single newline-separated Text block. The tab
--- stand-in is never a newline, so one decode pass after the join suffices.
-toText :: TextBuffer -> T.Text
-toText = decodeTabs . T.intercalate "\n" . TZ.getText . unTextBuffer
+-- | All lines joined with newlines, copied once into a new text.
+toText :: TextBuffer -> Text
+toText buf =
+  let lns = bufferLines buf
+      !total = foldl' (\acc (Text _ _ len) -> acc + len + 1) (-1) lns
+   in if total <= 0
+        then T.empty
+        else runST $ do
+          dest <- A.new total
+          let copyLine (Text arr start len) next !off = do
+                A.copyI len dest off arr start
+                when (off + len < total) $ A.unsafeWrite dest (off + len) 10
+                next (off + len + 1)
+          foldr copyLine (\_ -> pure ()) lns 0
+          frozen <- A.unsafeFreeze dest
+          pure (Text frozen 0 total)
 
--- | Extract all lines for measurement and rendering loops.
-toLines :: TextBuffer -> [T.Text]
-toLines = map decodeTabs . TZ.getText . unTextBuffer
+toLines :: TextBuffer -> [Text]
+toLines = toList . bufferLines
 
--- | Total row lookup. Decode only the requested line, without measuring
--- or decoding the entire document first.
-lineAt :: Int -> TextBuffer -> T.Text
-lineAt row buf
-  | row < 0 = ""
-  | otherwise = case drop row (TZ.getText (unTextBuffer buf)) of
-      txt : _ -> decodeTabs txt
-      [] -> ""
+-- | The text of a row, or empty outside the document.
+lineAt :: Int -> TextBuffer -> Text
+lineAt row buf = fromMaybe T.empty (Seq.lookup row (bufferLines buf))
 
--- | Query current cursor coordinates.
 getCursor :: TextBuffer -> Cursor
-getCursor (TextBuffer z _) =
-  let
-    (r, c) = TZ.cursorPosition z
-   in
-    Cursor {cursorRow = r, cursorCol = c}
+getCursor = bufferCursor
 
--- | Return the total line count.
 getLineCount :: TextBuffer -> Int
-getLineCount = length . TZ.getText . unTextBuffer
+getLineCount = Seq.length . bufferLines
 
--- | Move to an absolute cursor position without changing document text.
+-- | How many lines at the start and at the end are the ones there at the last
+-- 'markLinesSeen'; the lines between may have changed. Whatever was derived
+-- per line from the marked document can be kept for those lines and
+-- rederived for the rest.
+changedLines :: TextBuffer -> (Int, Int)
+changedLines buf = (bufferSeenHead buf, bufferSeenTail buf)
+
+-- | Record that every line has been seen, for 'changedLines'.
+markLinesSeen :: TextBuffer -> TextBuffer
+markLinesSeen buf = let n = getLineCount buf in buf {bufferSeenHead = n, bufferSeenTail = n}
+
+-- | The nearest position inside the document.
+clampCursor :: TextBuffer -> Cursor -> Cursor
+clampCursor buf (Cursor row col) =
+  let !r = max 0 (min (getLineCount buf - 1) row)
+      !c = max 0 (min (T.length (lineAt r buf)) col)
+   in Cursor r c
+
+-- | Move to a position, clamped into the document, without changing text.
 withCursor :: Cursor -> TextBuffer -> TextBuffer
-withCursor (Cursor row col) buf =
-  -- 'moveCursorClosest' clamps like the old manual clamp, but skips the
-  -- 'toLines' pass (it only materialises the zipper's lines once).
-  let
-    z = TZ.moveCursorClosest (row, col) (unTextBuffer buf)
-   in
-    TextBuffer z (zipperCol z)
-
-zipperCol :: TZ.TextZipper T.Text -> Int
-zipperCol = snd . TZ.cursorPosition
-
-withZipper ::
-  (TZ.TextZipper T.Text -> TZ.TextZipper T.Text) -> TextBuffer -> TextBuffer
-withZipper f (TextBuffer z _) =
-  let
-    z' = f z
-   in
-    TextBuffer z' (zipperCol z')
-
--- | text-zipper drops non-printables, including Tab. Store Tab as a printable
--- stand-in inside the zipper and map it back at the public Text boundary.
-tabSentinel :: Char
-tabSentinel = tabSentinelChar
-
-encodeTabs :: T.Text -> T.Text
-encodeTabs = T.replace "\t" (T.singleton tabSentinel)
-
-decodeTabs :: T.Text -> T.Text
-decodeTabs = T.replace (T.singleton tabSentinel) "\t"
+withCursor cur buf =
+  let c = clampCursor buf cur
+   in buf {bufferCursor = c, preferredCol = cursorCol c}
 
 --------------------------------------------------------------------------------
 -- Navigation
 --------------------------------------------------------------------------------
 
 moveLeft :: TextBuffer -> TextBuffer
-moveLeft = withZipper TZ.moveLeft
+moveLeft buf = withCursor (positionLeft buf (getCursor buf)) buf
 
 moveRight :: TextBuffer -> TextBuffer
-moveRight = withZipper TZ.moveRight
+moveRight buf = withCursor (positionRight buf (getCursor buf)) buf
+
+positionLeft :: TextBuffer -> Cursor -> Cursor
+positionLeft buf (Cursor row col)
+  | col > 0 = Cursor row (col - 1)
+  | row > 0 = Cursor (row - 1) (T.length (lineAt (row - 1) buf))
+  | otherwise = Cursor 0 0
+
+positionRight :: TextBuffer -> Cursor -> Cursor
+positionRight buf (Cursor row col)
+  | col < T.length (lineAt row buf) = Cursor row (col + 1)
+  | row + 1 < getLineCount buf = Cursor (row + 1) 0
+  | otherwise = Cursor row col
 
 moveUp :: TextBuffer -> TextBuffer
 moveUp = moveByRow (-1)
@@ -162,115 +202,178 @@ moveDown :: TextBuffer -> TextBuffer
 moveDown = moveByRow 1
 
 moveByRow :: Int -> TextBuffer -> TextBuffer
-moveByRow d (TextBuffer z goal) =
-  let
-    (row, _) = TZ.cursorPosition z
-    z' = TZ.moveCursorClosest (row + d, goal) z
-   in
-    TextBuffer z' goal
+moveByRow d buf =
+  let Cursor row _ = getCursor buf
+      goal = preferredCol buf
+   in buf {bufferCursor = clampCursor buf (Cursor (row + d) goal)}
 
 moveToBOL :: TextBuffer -> TextBuffer
-moveToBOL = withZipper TZ.gotoBOL
+moveToBOL buf = withCursor (Cursor (cursorRow (getCursor buf)) 0) buf
 
 moveToEOL :: TextBuffer -> TextBuffer
-moveToEOL = withZipper TZ.gotoEOL
+moveToEOL buf =
+  let row = cursorRow (getCursor buf)
+   in withCursor (Cursor row (T.length (lineAt row buf))) buf
+
+moveToTop :: TextBuffer -> TextBuffer
+moveToTop = withCursor (Cursor 0 0)
 
 moveToBottom :: TextBuffer -> TextBuffer
-moveToBottom = withZipper TZ.gotoEOF
+moveToBottom buf = withCursor (documentEnd buf) buf
 
+-- | Back over spaces (line breaks count), then over the word before them.
 moveWordLeft :: TextBuffer -> TextBuffer
-moveWordLeft = withZipper TZW.moveWordLeft
+moveWordLeft buf = withCursor (wordLeft buf (getCursor buf)) buf
 
+-- | Forward over spaces (line breaks count), then over the word after them.
 moveWordRight :: TextBuffer -> TextBuffer
-moveWordRight = withZipper TZW.moveWordRight
+moveWordRight buf = withCursor (wordRight buf (getCursor buf)) buf
+
+wordLeft :: TextBuffer -> Cursor -> Cursor
+wordLeft buf (Cursor row col) =
+  let before = T.take col (lineAt row buf)
+      spaces = T.length (T.takeWhileEnd isSpace before)
+      inWord = col - spaces
+   in if inWord == 0 && row > 0
+        -- Only spaces back to the line start: the line break is one more.
+        then wordLeft buf (Cursor (row - 1) (T.length (lineAt (row - 1) buf)))
+        else Cursor row (inWord - T.length (T.takeWhileEnd (not . isSpace) (T.take inWord before)))
+
+wordRight :: TextBuffer -> Cursor -> Cursor
+wordRight buf (Cursor row col) =
+  let after = T.drop col (lineAt row buf)
+      spaces = T.length (T.takeWhile isSpace after)
+      rest = T.drop spaces after
+   in if T.null rest && row + 1 < getLineCount buf
+        then wordRight buf (Cursor (row + 1) 0)
+        else Cursor row (col + spaces + T.length (T.takeWhile (not . isSpace) rest))
+
+--------------------------------------------------------------------------------
+-- Edits
+--------------------------------------------------------------------------------
+
+-- | Apply an edit and leave the cursor after the inserted text. The removed
+-- text decides how far the edit reaches, so an edit recorded against this
+-- document (or undone from one) is applied without reading the text it
+-- removes.
+applyEdit :: TextEdit -> TextBuffer -> TextBuffer
+applyEdit (TextEdit at removed inserted) buf =
+  let Cursor row col = clampCursor buf at
+      Cursor endRow endCol = advance (Cursor row col) removed
+      lns = bufferLines buf
+      first = lineAt row buf
+      lastLine = lineAt endRow buf
+      prefix = T.take col first
+      suffix = T.drop endCol lastLine
+      newLines = case T.splitOn "\n" inserted of
+        firstPiece : rest@(_ : _) ->
+          Seq.fromList ((prefix <> firstPiece) : init rest ++ [last rest <> suffix])
+        _ -> Seq.singleton (prefix <> inserted <> suffix)
+      spliced = Seq.take row lns <> newLines <> Seq.drop (min (Seq.length lns) (endRow + 1)) lns
+      end = advance (Cursor row col) inserted
+      untouchedTail = Seq.length spliced - (row + Seq.length newLines)
+   in TextBuffer spliced end (cursorCol end) (min row (bufferSeenHead buf)) (min untouchedTail (bufferSeenTail buf))
+
+-- | The position after walking over @txt@ from @cur@.
+advance :: Cursor -> Text -> Cursor
+advance (Cursor row col) txt =
+  case T.count "\n" txt of
+    0 -> Cursor row (col + T.length txt)
+    breaks -> Cursor (row + breaks) (T.length (T.takeWhileEnd (/= '\n') txt))
+
+-- | The edit that takes the document back.
+invertEdit :: TextEdit -> TextEdit
+invertEdit (TextEdit at removed inserted) = TextEdit at inserted removed
+
+-- | Where the cursor sits after an edit.
+editEnd :: TextEdit -> Cursor
+editEnd e = advance (editAt e) (editInserted e)
+
+-- | The edit replacing the text between two positions.
+replaceEdit :: Text -> Cursor -> Cursor -> TextBuffer -> TextEdit
+replaceEdit inserted a b buf =
+  let (lo, hi) = selectionRange (clampCursor buf a) (clampCursor buf b)
+   in TextEdit lo (textRange lo hi buf) inserted
+
+-- | Text as it can enter the document: printable characters, tabs and line
+-- breaks, with Windows line ends folded.
+insertableText :: Text -> Text
+insertableText = T.filter (\c -> isPrint c || c == '\t' || c == '\n') . T.replace "\r\n" "\n"
 
 --------------------------------------------------------------------------------
 -- Editing
 --------------------------------------------------------------------------------
 
 insertChar :: Char -> TextBuffer -> TextBuffer
-insertChar '\n' = breakLine
-insertChar '\t' = withZipper (TZ.insertChar tabSentinel)
-insertChar c = withZipper (TZ.insertChar c)
+insertChar c = insertText (T.singleton c)
 
-insertText :: T.Text -> TextBuffer -> TextBuffer
-insertText txt buf
+-- | Insert at the cursor, dropping characters that cannot be in a document.
+insertText :: Text -> TextBuffer -> TextBuffer
+insertText raw buf
   | T.null txt = buf
-  | otherwise = withZipper (TZ.insertMany (encodeTabs txt)) buf
+  | otherwise = applyEdit (TextEdit (getCursor buf) T.empty txt) buf
+  where
+    txt = insertableText raw
 
 breakLine :: TextBuffer -> TextBuffer
-breakLine = withZipper TZ.breakLine
+breakLine = insertText "\n"
+
+-- | Delete between the cursor and where a motion from it lands.
+deleteTo :: (TextBuffer -> Cursor -> Cursor) -> TextBuffer -> TextBuffer
+deleteTo motion buf =
+  let cur = getCursor buf
+      target = motion buf cur
+   in if target == cur then buf else applyEdit (replaceEdit T.empty cur target buf) buf
 
 deletePrevChar :: TextBuffer -> TextBuffer
-deletePrevChar = withZipper TZ.deletePrevChar
+deletePrevChar = deleteTo positionLeft
 
 deleteChar :: TextBuffer -> TextBuffer
-deleteChar = withZipper TZ.deleteChar
+deleteChar = deleteTo positionRight
 
 deletePrevWord :: TextBuffer -> TextBuffer
-deletePrevWord = withZipper TZW.deletePrevWord
+deletePrevWord = deleteTo wordLeft
 
 deleteNextWord :: TextBuffer -> TextBuffer
-deleteNextWord = withZipper TZW.deleteWord
+deleteNextWord = deleteTo wordRight
 
+-- | Delete to the end of the line, or the line break itself on an empty line.
 killToEOL :: TextBuffer -> TextBuffer
-killToEOL = withZipper TZ.killToEOL
+killToEOL = deleteTo $ \buf (Cursor row _) ->
+  let len = T.length (lineAt row buf)
+   in if len == 0 && row + 1 < getLineCount buf then Cursor (row + 1) 0 else Cursor row len
 
 killToBOL :: TextBuffer -> TextBuffer
-killToBOL = withZipper TZ.killToBOL
+killToBOL = deleteTo (\_ (Cursor row _) -> Cursor row 0)
+
+--------------------------------------------------------------------------------
+-- Selection
+--------------------------------------------------------------------------------
 
 selectionRange :: Cursor -> Cursor -> (Cursor, Cursor)
 selectionRange a b = (min a b, max a b)
 
-selectedText :: Cursor -> Cursor -> TextBuffer -> T.Text
+selectedText :: Cursor -> Cursor -> TextBuffer -> Text
 selectedText a b buf =
-  let
-    (lo, hi) = selectionRange a b
-    text = toText buf
-    loOff = cursorOffset buf lo
-    hiOff = cursorOffset buf hi
-   in
-    T.take (hiOff - loOff) (T.drop loOff text)
+  let (lo, hi) = selectionRange (clampCursor buf a) (clampCursor buf b)
+   in textRange lo hi buf
 
-cursorOffset :: TextBuffer -> Cursor -> Int
-cursorOffset buf (Cursor row col) =
-  let
-    -- Tab decoding swaps one character for one, so the encoded lines have
-    -- the same lengths and need no 'toLines' pass.
-    lineTexts = TZ.getText (unTextBuffer buf)
-   in
-    sum (map ((+ 1) . T.length) (take row lineTexts)) + col
+-- | The text between two positions in document order, reading only the lines
+-- between them.
+textRange :: Cursor -> Cursor -> TextBuffer -> Text
+textRange (Cursor loRow loCol) (Cursor hiRow hiCol) buf
+  | loRow == hiRow = T.take (hiCol - loCol) (T.drop loCol (lineAt loRow buf))
+  | otherwise =
+      let middle = toList (Seq.take (hiRow - loRow - 1) (Seq.drop (loRow + 1) (bufferLines buf)))
+       in T.intercalate "\n" (T.drop loCol (lineAt loRow buf) : middle ++ [T.take hiCol (lineAt hiRow buf)])
 
 deleteRange :: Cursor -> Cursor -> TextBuffer -> TextBuffer
 deleteRange = replaceRange T.empty
 
-replaceRange :: T.Text -> Cursor -> Cursor -> TextBuffer -> TextBuffer
-replaceRange insert a b buf =
-  let
-    text = toText buf
-    (lo, hi) = selectionRange a b
-    loOff = cursorOffset buf lo
-    hiOff = cursorOffset buf hi
-    newText = T.take loOff text <> insert <> T.drop hiOff text
-    newBuf = fromText newText
-    endOff = loOff + T.length insert
-   in
-    withCursor (offsetToCursor newBuf endOff) newBuf
-
-offsetToCursor :: TextBuffer -> Int -> Cursor
-offsetToCursor buf off =
-  let
-    lineTexts = TZ.getText (unTextBuffer buf)
-    go _ [] _ = Cursor 0 0
-    go r (ln : rest) acc =
-      let
-        len = T.length ln
-       in
-        if off <= acc + len
-          then Cursor r (off - acc)
-          else go (r + 1) rest (acc + len + 1)
-   in
-    go 0 lineTexts 0
+replaceRange :: Text -> Cursor -> Cursor -> TextBuffer -> TextBuffer
+replaceRange inserted a b buf = applyEdit (replaceEdit inserted a b buf) buf
 
 documentEnd :: TextBuffer -> Cursor
-documentEnd = getCursor . moveToBottom
+documentEnd buf =
+  let row = getLineCount buf - 1
+   in Cursor row (T.length (lineAt row buf))

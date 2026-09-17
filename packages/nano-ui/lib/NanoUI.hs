@@ -152,7 +152,6 @@ module NanoUI
   , contextMenu
   , contextMenuArea
   , useContextMenu
-  , MenuAction (..)
 
     -- * Inputs
   , checkbox
@@ -214,6 +213,31 @@ module NanoUI
   , colorToHex
   , colorToHexA
   , colorFromHex
+
+    -- * Text editing
+    -- | Text fields change their text only through 'TextCommand's. Keys run
+    -- them (Backspace is @'Delete' 'CharLeft'@, Ctrl+Z is 'Undo'), the
+    -- right-click menu runs them, and an app can run them on a field by its
+    -- id:
+    --
+    -- @
+    -- (resp, body') <- 'textArea'' body
+    -- canUndo <- 'textCanUndo' ('respId' resp)
+    -- 'whenM' ('menuItem' \"Undo\") ('runTextCommand' ('respId' resp) 'Undo')
+    -- 'whenM' ('menuItem' \"Insert date\") ('runTextCommand' ('respId' resp) ('InsertText' today))
+    -- @
+    --
+    -- Every command that changes text is recorded for undo. Typing joins one
+    -- undo step per word and deleting one per run; the steps keep the edits
+    -- themselves, not copies of the document, so a long history of a large
+    -- document stays small. Replacing the value a field is passed clears its
+    -- history.
+  , TextCommand (..)
+  , TextMotion (..)
+  , Cursor (..)
+  , runTextCommand
+  , textCanUndo
+  , textCanRedo
 
     -- * Tabs, trees, and tables
   , Tab (..)
@@ -920,4 +944,6 @@ import NanoUI.Widgets.Tabs
   , tabsConfigured
   , tabsConfigured'
   )
-import NanoUI.Widgets.TextCommon (MenuAction (..))
+import NanoUI.Widgets.TextBuffer (Cursor (..))
+import NanoUI.Widgets.TextCommand (TextCommand (..), TextMotion (..))
+import NanoUI.Widgets.TextField (runTextCommand, textCanRedo, textCanUndo)

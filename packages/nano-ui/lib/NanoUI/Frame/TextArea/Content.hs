@@ -1,3 +1,5 @@
+{-# LANGUAGE BangPatterns #-}
+
 -- | Store-backed text-area content shared by painting, scrolling and hit
 -- testing: the node font, the cached document buffer and the cached content
 -- extent. Free of the editor widget modules so scroll code stays light.
@@ -11,6 +13,8 @@ module NanoUI.Frame.TextArea.Content
 
 import Data.Dynamic (fromDynamic, toDyn)
 import qualified Data.IntMap.Strict as IM
+import Data.Sequence (Seq)
+import qualified Data.Sequence as Seq
 import Data.Text (Text)
 import NanoUI.Context (Context (..), WidgetStore (..), getStore, intKey, setStore, slotKey)
 import NanoUI.Font (FontMetrics (..), lineWidthIO)
@@ -22,6 +26,7 @@ import NanoUI.Store
   , slotTextAreaContentH
   , slotTextAreaContentW
   , slotTextAreaScroll
+  , slotTextAreaWidths
   )
 import NanoUI.Style (FontStyle (..), FontVariant (..), FontWeight (..))
 import NanoUI.Types (Rect (..), V2, onGrid)
@@ -66,6 +71,7 @@ textAreaContentMetrics ctx idx = do
       cacheKeyF = slotKey slotTextAreaContentFont key
       cacheKeyW = slotKey slotTextAreaContentW key
       cacheKeyH = slotKey slotTextAreaContentH key
+      widthsKey = slotKey slotTextAreaWidths key
       cachedFont = IM.findWithDefault (-1) cacheKeyF (storeFloat store)
       cachedW = IM.findWithDefault (-1) cacheKeyW (storeFloat store)
   if cachedFont == size && cachedW >= 0
@@ -73,10 +79,32 @@ textAreaContentMetrics ctx idx = do
     else do
       fm <- resolveTextAreaFont ctx idx
       buf <- ensureTextAreaBuffer ctx key (IM.findWithDefault "" key (storeText store))
-      let lineTexts = TB.toLines buf
+      let lns = TB.bufferLines buf
           lineH = onGrid (fmSnapScale fm) (fmLineHeight fm)
-          contentH = fromIntegral (max 1 (length lineTexts)) * lineH
-      contentW <- maximum . (0 :) <$> mapM (lineWidthIO fm) lineTexts
+          contentH = fromIntegral (max 1 (Seq.length lns)) * lineH
+          (seenHead, seenTail) = TB.changedLines buf
+          previous = case IM.lookup widthsKey (storeDyn store) >>= fromDynamic of
+            Just lw@(LineWidths font _ _ _) | font == size -> lw
+            _ -> LineWidths size Seq.empty (-1) 0
+          LineWidths _ measured widest widestW = previous
+          -- Keep the widths of the lines no edit touched since the last
+          -- measurement and measure the rest.
+          keepHead = min seenHead (Seq.length measured)
+          keepTail = min seenTail (Seq.length measured - keepHead)
+          changed = Seq.take (Seq.length lns - keepHead - keepTail) (Seq.drop keepHead lns)
+      fresh <- traverse (lineWidthIO fm) changed
+      let widths = Seq.take keepHead measured <> fresh <> Seq.drop (Seq.length measured - keepTail) measured
+          shift = Seq.length lns - Seq.length measured
+          freshWidest = Seq.foldlWithIndex (\best i w -> if w > snd best then (keepHead + i, w) else best) (-1, 0) fresh
+          -- The widest line so far still counts when it was kept; only when
+          -- an edit touched it do the widths need a full pass.
+          -- A changed line at least as wide as the old widest also still wins.
+          (widest', contentW)
+            | widest >= 0 && widest < keepHead = pick (widest, widestW) freshWidest
+            | widest >= 0 && widest >= Seq.length measured - keepTail = pick (widest + shift, widestW) freshWidest
+            | widest >= 0 && snd freshWidest >= widestW = freshWidest
+            | otherwise = Seq.foldlWithIndex (\best i w -> if w > snd best then (i, w) else best) (-1, 0) widths
+          pick a b = if snd b > snd a then b else a
       store' <- getStore ctx
       setStore
         ctx
@@ -85,9 +113,16 @@ textAreaContentMetrics ctx idx = do
                 IM.insert cacheKeyF size $
                   IM.insert cacheKeyH contentH $
                     IM.insert cacheKeyW contentW (storeFloat store')
+            , storeDyn =
+                IM.insert widthsKey (toDyn (LineWidths size widths widest' contentW)) $
+                  IM.insert (slotKey slotTextAreaBuffer key) (toDyn (TB.markLinesSeen buf)) (storeDyn store')
             }
         )
       pure (contentW, contentH)
+
+-- | Measured widths of a text area's lines, the font size they were measured
+-- at, and the widest line with its width.
+data LineWidths = LineWidths !Float !(Seq Float) !Int !Float
 
 -- | Node font, field rect and content extent @(width, height)@ of a text area.
 -- Zoom changes the node font, so scroll and hit math resolve it here rather

@@ -7,6 +7,7 @@ import NanoUI.Frame.TextEdit (textWordBounds)
 import NanoUI.Input (Key (..))
 import NanoUI.Widgets.TextArea as TA
 import NanoUI.Widgets.TextBuffer as TB
+import NanoUI.Widgets.TextEditor as TE
 import Test.Hspec
 
 main :: IO ()
@@ -106,7 +107,97 @@ spec = do
       TB.toText (TB.killToEOL (TB.moveRight (TB.fromText "hello"))) `shouldBe` "h"
       TB.toText (TB.killToBOL (TB.moveToEOL (TB.fromText "hello"))) `shouldBe` ""
 
+  describe "NanoUI.Widgets.TextBuffer edits" $ do
+    it "applies an edit across lines and inverts it back" $ do
+      let
+        b0 = TB.fromText "αβ\n猫犬\nend"
+        e = TB.replaceEdit "🙂\nλ\nμ" (TB.Cursor 0 1) (TB.Cursor 2 1) b0
+        b1 = TB.applyEdit e b0
+      TB.editRemoved e `shouldBe` "β\n猫犬\ne"
+      TB.toText b1 `shouldBe` "α🙂\nλ\nμnd"
+      TB.getCursor b1 `shouldBe` TB.Cursor 2 1
+      TB.editEnd e `shouldBe` TB.Cursor 2 1
+      TB.toText (TB.applyEdit (TB.invertEdit e) b1) `shouldBe` "αβ\n猫犬\nend"
+
+    it "edits the middle of a long document locally" $ do
+      let
+        doc = T.intercalate "\n" [T.pack (show i) | i <- [1 .. 20000 :: Int]]
+        b0 = TB.fromText doc
+        edited = foldl' (\b i -> TB.insertText "x\n" (TB.withCursor (TB.Cursor (5000 + i) 0) b)) b0 [1 .. 500 :: Int]
+      TB.getLineCount edited `shouldBe` 20500
+      TB.lineAt 5002 edited `shouldBe` "x"
+
+  describe "NanoUI.Widgets.TextEditor" $ do
+    let
+      run mode = foldl' (flip (TE.runCommand mode))
+      typeText mode t ed = run mode ed [TE.InsertText (T.singleton c) | c <- T.unpack t]
+      single = TE.editorFromBuffer TB.empty
+      text = TB.toText . TE.editorBuffer
+
+    it "undoes typing a word at a time and redoes it" $ do
+      let
+        typed = typeText TE.singleLineMode "hello world" single
+        once = TE.runCommand TE.singleLineMode TE.Undo typed
+        twice = TE.runCommand TE.singleLineMode TE.Undo once
+      text typed `shouldBe` "hello world"
+      text once `shouldBe` "hello "
+      text twice `shouldBe` ""
+      text (run TE.singleLineMode twice [TE.Redo, TE.Redo]) `shouldBe` "hello world"
+      TB.getCursor (TE.editorBuffer once) `shouldBe` TB.Cursor 0 6
+
+    it "joins a run of deletes into one step and restores the selection it replaced" $ do
+      let
+        typed = typeText TE.singleLineMode "abcdef" single
+        deleted = run TE.singleLineMode typed (replicate 3 (TE.Delete TE.CharLeft))
+        selected = TE.runCommand TE.singleLineMode (TE.Select (TB.Cursor 0 1) (TB.Cursor 0 3)) deleted
+        replaced = TE.runCommand TE.singleLineMode (TE.InsertText "Z") selected
+        undone = TE.runCommand TE.singleLineMode TE.Undo replaced
+      text deleted `shouldBe` "abc"
+      text (TE.runCommand TE.singleLineMode TE.Undo deleted) `shouldBe` "abcdef"
+      text replaced `shouldBe` "aZ"
+      text undone `shouldBe` "abc"
+      TE.editorSelection undone `shouldBe` (TB.Cursor 0 1, TB.Cursor 0 3)
+
+    it "drops redo after a new edit and ignores no-op commands" $ do
+      let
+        typed = typeText TE.singleLineMode "ab" single
+        undone = TE.runCommand TE.singleLineMode TE.Undo typed
+        retyped = TE.runCommand TE.singleLineMode (TE.InsertText "c") undone
+      TE.canRedo (TE.editorHistory undone) `shouldBe` True
+      TE.canRedo (TE.editorHistory retyped) `shouldBe` False
+      TE.historyDepth (TE.editorHistory (TE.runCommand TE.singleLineMode (TE.Delete TE.CharLeft) single)) `shouldBe` 0
+      text (TE.runCommand TE.singleLineMode (TE.ReplaceAll "c") retyped) `shouldBe` "c"
+      TE.historyDepth (TE.editorHistory (TE.runCommand TE.singleLineMode (TE.ReplaceAll "c") retyped))
+        `shouldBe` TE.historyDepth (TE.editorHistory retyped)
+
+    it "keeps line breaks out of single-line fields and bounds history depth" $ do
+      text (TE.runCommand TE.singleLineMode (TE.InsertText "a\nb") single) `shouldBe` "ab"
+      text (TE.runCommand TE.multiLineMode (TE.InsertText "a\r\nb") single) `shouldBe` "a\nb"
+      let
+        edits = run TE.multiLineMode single (concat (replicate 1000 [TE.InsertText "\n"]))
+      TE.historyDepth (TE.editorHistory edits) `shouldSatisfy` (<= 550)
+      text (run TE.multiLineMode edits (replicate 2000 TE.Undo)) `shouldSatisfy` (\t -> T.length t >= 450)
+
+    it "undoes a large paste in one step without copying the document per keystroke" $ do
+      let
+        doc = T.intercalate "\n" (replicate 50000 "some line of text")
+        pasted = TE.runCommand TE.multiLineMode (TE.InsertText doc) single
+        typed = typeText TE.multiLineMode "tail" pasted
+        back = run TE.multiLineMode typed [TE.Undo, TE.Undo]
+      text back `shouldBe` ""
+      text (run TE.multiLineMode back [TE.Redo, TE.Redo]) `shouldBe` doc <> "tail"
+
   describe "NanoUI.Widgets.TextArea" $ do
+    it "Ctrl+Z undoes and Ctrl+Shift+Z redoes" $ do
+      let
+        s0 = TA.initTextAreaState ""
+        typed = foldl' (\s c -> TA.handleTextAreaEvent (TA.TAChar c) noMods s) s0 ("one two" :: String)
+        undone = TA.handleTextAreaEvent (TA.TAChar 'z') ctrlMods typed
+        redone = TA.handleTextAreaEvent (TA.TAChar 'z') (TA.Modifiers True True False) undone
+      TB.toText (TA.buffer undone) `shouldBe` "one "
+      TB.toText (TA.buffer redone) `shouldBe` "one two"
+
+
     it
       "typing and Enter replace a backwards multiline selection and collapse its anchor" $ do
       let

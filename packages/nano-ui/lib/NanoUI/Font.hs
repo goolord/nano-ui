@@ -49,7 +49,6 @@ module NanoUI.Font
   , treeChevronRect
   , resolveLayoutGap
   , resolveLayoutPadding
-  , tabSentinelChar
   , scrollBarWidth
   , scrollBarSlimWidth
   , scrollBarSideGap
@@ -71,9 +70,6 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import NanoUI.Types (Rect (..), onGrid)
 import NanoUI.Style (AlignX (..), FontStyle (..), FontVariant (..), FontWeight (..), Padding (..))
-
-tabSentinelChar :: Char
-tabSentinelChar = '\x2409'
 
 data GlyphQuad = GlyphQuad
   { gqX :: {-# UNPACK #-} !Float

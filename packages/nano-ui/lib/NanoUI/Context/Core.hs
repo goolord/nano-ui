@@ -113,6 +113,7 @@ import NanoUI.Store
   )
 import NanoUI.Style (Theme)
 import NanoUI.Types (Damage, DamageBounds (..), Rect, Size, defaultDamageSlop, rectH, rectW)
+import NanoUI.Widgets.TextCommand (TextCommand)
 
 -- =============================================================================
 -- State records
@@ -179,10 +180,10 @@ setTextInputMenu :: Context -> Maybe TextInputMenu -> IO ()
 setTextInputMenu ctx v = modifyInteraction ctx (\s -> s {isTextInputMenu = v})
 
 {-# INLINE setTextEditLastAction #-}
-setTextEditLastAction :: Context -> Maybe (WidgetId, Int) -> IO ()
+setTextEditLastAction :: Context -> Maybe (WidgetId, TextCommand) -> IO ()
 setTextEditLastAction ctx v = modifyInteraction ctx (\s -> s {isTextEditLastAction = v})
 
-takeTextEditLastAction :: Context -> IO (Maybe (WidgetId, Int))
+takeTextEditLastAction :: Context -> IO (Maybe (WidgetId, TextCommand))
 takeTextEditLastAction ctx = do
   act <- getsInteraction ctx isTextEditLastAction
   setTextEditLastAction ctx Nothing

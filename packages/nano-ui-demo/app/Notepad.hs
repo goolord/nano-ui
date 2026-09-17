@@ -19,7 +19,7 @@ import Data.Text.IO qualified as TIO
 import DemoApp (useFileDialog)
 import NanoUI
 import NanoUI.Backend.Sdl
-import NanoUI.Monad (askContext, askInput)
+import NanoUI.Monad (askInput)
 import NanoUI.Testing (collectOverlayTextSpans, collectTextSpans)
 import NanoUI.Testing.Harness
   ( clickPos
@@ -28,7 +28,6 @@ import NanoUI.Testing.Harness
   , hasText
   , requireSpan
   )
-import NanoUI.Widgets.TextArea (applyTextAreaMenuAction)
 import System.Environment (getArgs)
 import System.Exit (exitSuccess)
 
@@ -230,10 +229,9 @@ notepadUi = do
               setStatusMsg ("Saved " <> docPath)
             else setStatusMsg ("Could not save " <> docPath)
 
-    editAction itemIndex = do
+    editAction cmd = do
       setOpenMenu ""
-      ctx <- askContext
-      uiIO (applyTextAreaMenuAction ctx editorId itemIndex)
+      runTextCommand editorId cmd
 
     fileMenu = do
       whenM (menuItem "New") (setOpenMenu "" >> newDocument)
@@ -246,11 +244,20 @@ notepadUi = do
       whenM (menuItemShortcut "Exit" "Esc") (setOpenMenu "" >> uiIO exitSuccess)
 
     editMenu = do
-      whenM (menuItemShortcut "Cut" "Ctrl+X") (editAction MenuCut)
-      whenM (menuItemShortcut "Copy" "Ctrl+C") (editAction MenuCopy)
-      whenM (menuItemShortcut "Paste" "Ctrl+V") (editAction MenuPaste)
+      canUndo <- textCanUndo editorId
+      canRedo <- textCanRedo editorId
+      if canUndo
+        then whenM (menuItemShortcut "Undo" "Ctrl+Z") (editAction Undo)
+        else menuItemDisabled "Undo"
+      if canRedo
+        then whenM (menuItemShortcut "Redo" "Ctrl+Shift+Z") (editAction Redo)
+        else menuItemDisabled "Redo"
       menuSeparator
-      whenM (menuItemShortcut "Select All" "Ctrl+A") (editAction MenuSelectAll)
+      whenM (menuItemShortcut "Cut" "Ctrl+X") (editAction Cut)
+      whenM (menuItemShortcut "Copy" "Ctrl+C") (editAction Copy)
+      whenM (menuItemShortcut "Paste" "Ctrl+V") (editAction Paste)
+      menuSeparator
+      whenM (menuItemShortcut "Select All" "Ctrl+A") (editAction SelectAll)
 
     viewMenu = do
       whenM

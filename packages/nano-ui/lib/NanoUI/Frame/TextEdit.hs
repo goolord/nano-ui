@@ -18,6 +18,7 @@ module NanoUI.Frame.TextEdit
   , TextAreaHit (..)
   , TextAreaScrollBarLayouts (..)
   , resolveTextAreaFont
+  , textAreaContentMetrics
   , textAreaBarLanes
   , textAreaGeom
   , textAreaHitForWidget
@@ -31,7 +32,7 @@ import Data.IORef (readIORef)
 import NanoUI.Context (Context (..), setTextInputDrag)
 import NanoUI.Frame.Hit (findNodeByWidgetId)
 import NanoUI.Frame.TextArea
-import NanoUI.Frame.TextArea.Content (resolveTextAreaFont)
+import NanoUI.Frame.TextArea.Content (resolveTextAreaFont, textAreaContentMetrics)
 import NanoUI.Frame.TextArea.Geometry
 import NanoUI.Frame.TextEdit.Menu (applyTextFieldMenuAction, textEditMenuRectAt, textEditMenuWidth)
 import NanoUI.Frame.TextInput

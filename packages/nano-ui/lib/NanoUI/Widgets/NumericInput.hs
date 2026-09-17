@@ -31,7 +31,8 @@ import NanoUI.Types (Rect (..), rectContains)
 import NanoUI.WidgetText (numericStepperRects, textInputFlagNumeric)
 import NanoUI.Widgets.Behavior (keyboardFocused)
 import NanoUI.Widgets.Node (Response, addWidgetStyled, respHovered, respRect, setChanged, setSubmitted)
-import NanoUI.Widgets.TextInput (TextInputState (..), loadTextInputState, processTextInput, saveTextInputState)
+import NanoUI.Widgets.TextEditor (singleLineMode)
+import NanoUI.Widgets.TextInput (TextInputState (..), editTextInput, editorTextState, loadTextInputState, saveTextEditor, saveTextInputState)
 import Numeric (showFFloat, showHex)
 
 -- | How a numeric field reads, shows, and steps its value.
@@ -107,10 +108,11 @@ numericInputConfigured' cfg value = do
     loaded = loadTextInputState store key text0
     s0 = loaded {tisCursor = min len0 (tisCursor loaded), tisAnchor = min len0 (tisAnchor loaded)}
     lastValue = IM.findWithDefault given key (storeDouble store)
-  typed <- if isFocus then uiIO (processTextInput ctx True inp s0) else pure s0
+  mEdited <- if isFocus then uiIO (editTextInput ctx singleLineMode inp store key s0) else pure Nothing
   resp <- addWidgetStyled wid NodeTextInput "" 0 (nicLayout cfg) textInputFlagNumeric Nothing
   let
     -- An edit that would leave text no number can start with is dropped.
+    typed = maybe s0 editorTextState mEdited
     s1 = if acceptsNumberText cfg (tisText typed) then typed else s0
     current
       | isFocus = maybe lastValue (clampNumber cfg) (parseNumber cfg (tisText s1))
@@ -172,7 +174,12 @@ numericInputConfigured' cfg value = do
         || repeatAt1 /= repeatAt0
   when dirty $
     uiIO $ do
-      st <- saveTextInputState key s2 <$> getStore ctx
+      -- An accepted edit keeps its undo history; a rejected one or a step
+      -- rewrites the text without it.
+      let save = case mEdited of
+            Just ed | editorTextState ed == s2 -> saveTextEditor key ed
+            _ -> saveTextInputState key s2
+      st <- save <$> getStore ctx
       setStore
         ctx
         st
