@@ -55,8 +55,10 @@ import NanoUI.Frame.Spans (forWidgetTextPlacements_, selectableTextGeometry, wid
 import NanoUI.Frame.TextArea (drawTextAreaContentWith)
 import NanoUI.Frame.TextArea.Content (resolveTextAreaFont)
 import NanoUI.Frame.TextInput
-  ( drawTextInputCaret
+  ( FieldEdit
+  , drawTextInputCaret
   , drawTextInputSelection
+  , readFieldEdit
   , syncTextInputScroll
   , textInputFieldRect
   , textInputFieldTextClip
@@ -126,8 +128,9 @@ paintTextInputNode env idx rect@(Rect x y w h) = do
               paintStyledRect da style field
               spans <- widgetTextSpans ctx NodeTextInput idx x y w h
               case spans of
-                (Rect fx fy _ _, txt, ffg, _) : _ ->
-                  paintClippedFieldText ctx da fm style idx x y w h (textInputFieldTextClip fm field) fx fy txt ffg
+                (Rect fx fy _ _, txt, ffg, _) : _ -> do
+                  mEdit <- readFieldEdit ctx idx x y w h =<< syncTextInputScroll ctx idx x y w h
+                  paintClippedFieldText ctx da fm style idx mEdit (textInputFieldTextClip fm field) fx fy txt ffg
                 [] -> pure ()
 
 -- | Multi-line text area.
@@ -281,31 +284,28 @@ drawSortTriangle da cx cy down col =
     then pushFilledTriangle da (cx - 5) (cy - 3.5) (cx + 5) (cy - 3.5) cx (cy + 3.5) col
     else pushFilledTriangle da (cx - 5) (cy + 3.5) (cx + 5) (cy + 3.5) cx (cy - 3.5) col
 
--- | Draw a single-line field's text, selection, and caret inside @clip@.
--- @penX/penY@ locate @txt@ (absolute); the node rect @x y w h@ positions the
--- field box that selection / caret geometry is resolved against.
+-- | Draw a single-line field's text, and its selection and caret while it is
+-- being edited, inside @clip@. @penX/penY@ locate @txt@ (absolute).
+{-# INLINE paintClippedFieldText #-}
 paintClippedFieldText ::
   Context ->
   DrawArena ->
   FontMetrics ->
   Style ->
   NodeIdx ->
-  Float ->
-  Float ->
-  Float ->
-  Float ->
+  Maybe FieldEdit ->
   Rect ->
   Float ->
   Float ->
   T.Text ->
   Color ->
   IO ()
-paintClippedFieldText ctx da fm style idx x y w h clip penX penY txt fg =
+paintClippedFieldText ctx da fm style idx mEdit clip penX penY txt fg =
   withClip da clip $ do
-    drawTextInputSelection da ctx idx x y w h Nothing
+    mapM_ (drawTextInputSelection da ctx idx) mEdit
     unless (T.null txt) $
       pushText da fm penX penY txt fg
-    drawTextInputCaret da ctx idx x y w h style
+    mapM_ (\edit -> drawTextInputCaret da edit (styleFg style)) mEdit
 
 -- | A caption-less field's value, or @placeholder@ (dimmed) while empty and
 -- unfocused, scrolled to keep the caret in @clip@.
@@ -323,7 +323,8 @@ paintFieldValue ctx da fm style idx focus (Rect x y w h) clip@(Rect clipX _ _ _)
           ( centeredTextY fm y h th
           , if T.null value && not focus then lerpColor baseFg (styleBg style) 0.5 else baseFg
           )
-  paintClippedFieldText ctx da fm style idx x y w h clip (clipX - scrollX) ty display fg
+  mEdit <- readFieldEdit ctx idx x y w h scrollX
+  paintClippedFieldText ctx da fm style idx mEdit clip (clipX - scrollX) ty display fg
 
 -- | Numeric field: the box, its value clipped left of the stepper, and the
 -- stepper's up and down arrows beside a rule.
@@ -377,8 +378,9 @@ paintSelectableText env style idx rect@(Rect x y w h) = do
   (fm, _, _) <- resolveFontFor ctx NodeTextInput fontSize si
   value <- textInputValue ctx idx
   let (penX, ty, _) = selectableTextGeometry fm x y h
+  mEdit <- readFieldEdit ctx idx x y w h 0
   withClip da rect $ do
-    drawTextInputSelection da ctx idx x y w h (Just 0)
+    mapM_ (drawTextInputSelection da ctx idx) mEdit
     unless (T.null value) $
       pushText da fm penX ty value (fromMaybe (styleFg style) mFontColor)
 
