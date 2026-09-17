@@ -77,6 +77,9 @@
   `styled (panelStyle (background bg . borderColor border))` around a panel.
   `callout` tints the theme's panel colour instead of a fixed dark grey.
 - `uiTheme` returns the theme of the enclosing `styled` scope.
+- SVG documents are read by hexml instead of a hand-written XML scanner. A
+  DOCTYPE, which hexml rejects, is skipped. Attribute values must be quoted,
+  as XML requires.
 - Fallback fonts for other scripts are shared across font sizes and opened
   only when a text needs a character they cover. Each coverage font is
   opened once a session as a probe, and each size draws from a copy that

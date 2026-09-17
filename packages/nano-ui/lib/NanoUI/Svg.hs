@@ -30,7 +30,9 @@ import Data.Char (isAlpha, isDigit, isSpace, toLower)
 import Data.Maybe (fromMaybe, mapMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
+import Data.Text.Encoding qualified as TE
 import Data.Text.Read qualified as TR
+import Text.XML.Hexml qualified as Hexml
 import Data.Primitive.PrimArray (MutablePrimArray, PrimArray, copyMutablePrimArray, indexPrimArray, newPrimArray, readPrimArray, setPrimArray, sizeofPrimArray, unsafeFreezePrimArray, writePrimArray)
 import Data.Primitive.SmallArray (SmallArray, indexSmallArray, sizeofSmallArray, smallArrayFromList)
 import Data.Word (Word8)
@@ -126,62 +128,40 @@ apply (Matrix a b c d e f) (P x y) = P (a * x + c * y + e) (b * x + d * y + f)
 
 data Element = Element !Text ![(Text, Text)] ![Element]
 
--- | The elements of a document, ignoring text, comments, processing
--- instructions and doctype declarations.
+-- | The elements of a document, by hexml. Text, comments and processing
+-- instructions are not elements; a DOCTYPE, which hexml rejects, is blanked
+-- out first.
 parseElements :: Text -> Either String [Element]
-parseElements = fmap fst . content
+parseElements src =
+  case Hexml.parse (withoutDoctype (TE.encodeUtf8 src)) of
+    Left err -> Left (T.unpack (TE.decodeUtf8Lenient err))
+    Right doc -> Right (map element (Hexml.children doc))
   where
-    content t0 =
-      let t = T.dropWhile (/= '<') t0
-       in case T.uncons t of
-            Nothing -> Right ([], T.empty)
-            Just _
-              | "</" `T.isPrefixOf` t -> Right ([], t)
-              | "<!--" `T.isPrefixOf` t -> content (snd (T.breakOn "-->" t) `dropPrefix` "-->")
-              | "<![CDATA[" `T.isPrefixOf` t -> content (snd (T.breakOn "]]>" t) `dropPrefix` "]]>")
-              | "<?" `T.isPrefixOf` t -> content (snd (T.breakOn "?>" t) `dropPrefix` "?>")
-              | "<!" `T.isPrefixOf` t -> content (T.drop 1 (T.dropWhile (/= '>') t))
-              | otherwise -> do
-                  (el, rest) <- element (T.drop 1 t)
-                  (more, rest') <- content rest
-                  pure (el : more, rest')
-    dropPrefix t p = fromMaybe T.empty (T.stripPrefix p t)
-    element t = do
-      let (name, afterName) = T.span (\c -> not (isSpace c) && c /= '>' && c /= '/') t
-      when (T.null name) (Left "empty element name")
-      (attrs, rest) <- attributes afterName []
-      case T.uncons rest of
-        Just ('/', r) -> Right (Element (localName name) attrs [], T.drop 1 (T.dropWhile (/= '>') r))
-        Just ('>', r) -> do
-          (children, afterChildren) <- content r
-          let closing = T.drop 1 (T.dropWhile (/= '>') afterChildren)
-          if "</" `T.isPrefixOf` afterChildren
-            then Right (Element (localName name) attrs children, closing)
-            else Left ("unclosed element " <> T.unpack name)
-        _ -> Left ("malformed element " <> T.unpack name)
-    attributes t acc =
-      let s = T.stripStart t
-       in case T.uncons s of
-            Just (c, _) | c == '>' || c == '/' -> Right (reverse acc, s)
-            Nothing -> Left "unterminated tag"
-            _ -> do
-              let (key, afterKey) = T.span (\c -> c /= '=' && not (isSpace c) && c /= '>' && c /= '/') s
-              case T.uncons (T.stripStart afterKey) of
-                Just ('=', r0) -> case T.uncons (T.stripStart r0) of
-                  Just (q, r) | q == '"' || q == '\'' ->
-                    let (value, r') = T.break (== q) r
-                     in attributes (T.drop 1 r') ((localName key, decodeEntities value) : acc)
-                  _ ->
-                    -- An unquoted value runs to a space or the tag's end.
-                    let (value0, r1) = T.span (\c -> not (isSpace c) && c /= '>') (T.stripStart r0)
-                        (value, r') = case T.unsnoc value0 of
-                          Just (v, '/') | ">" `T.isPrefixOf` r1 -> (v, T.cons '/' r1)
-                          _ -> (value0, r1)
-                     in attributes r' ((localName key, decodeEntities value) : acc)
-                -- An attribute without a value.
-                _ | T.null key -> Left "malformed attribute"
-                  | otherwise -> attributes afterKey acc
+    element node =
+      Element
+        (localName (TE.decodeUtf8Lenient (Hexml.name node)))
+        [ (localName (TE.decodeUtf8Lenient (Hexml.attributeName a)), decodeEntities (TE.decodeUtf8Lenient (Hexml.attributeValue a)))
+        | a <- Hexml.attributes node
+        ]
+        (map element (Hexml.children node))
     localName n = T.takeWhileEnd (/= ':') n
+
+-- | The document with its DOCTYPE, internal subset included, replaced by
+-- spaces, so positions in parse errors still match the source.
+withoutDoctype :: ByteString -> ByteString
+withoutDoctype bytes =
+  case BS.breakSubstring "<!DOCTYPE" bytes of
+    (_, rest) | BS.null rest -> bytes
+    (before, rest) ->
+      let close !depth !k
+            | k >= BS.length rest = k
+            | otherwise = case BS.index rest k of
+                91 -> close (depth + 1 :: Int) (k + 1)
+                93 -> close (depth - 1) (k + 1)
+                62 | depth <= 0 -> k + 1
+                _ -> close depth (k + 1)
+          end = close 0 0
+       in before <> BS.replicate end 32 <> BS.drop end rest
 
 decodeEntities :: Text -> Text
 decodeEntities =
