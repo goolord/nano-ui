@@ -24,7 +24,8 @@ import NanoUI
   )
 import NanoUI.Monad (askContext, askInput)
 import NanoUI.Form.Backend
-  ( isFormSubmitted
+  ( FormUI (..)
+  , isFormSubmitted
   , markFormSubmitted
   , resetFormState
   , withFormPrefix
@@ -38,7 +39,6 @@ import NanoUI.Form.Types
   , FormView (..)
   , defaultFormConfig
   )
-import NanoUI.Form.Backend (FormUI (..))
 
 -- | Evaluate a formlet and return its view and result. The view retains its
 -- prefix even when rendered after other forms or inside another form's view.

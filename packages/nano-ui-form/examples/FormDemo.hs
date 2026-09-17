@@ -1,5 +1,5 @@
--- | The registration form showcase, shared by the SDL example and the test
--- suite's layout check.
+-- | A registration form with validated fields and a view of the value it
+-- decodes to.
 module FormDemo (formDemoUi) where
 
 import Control.Monad (forM_, when)
@@ -55,11 +55,11 @@ import NanoUI.Form
   , withFieldErrors
   )
 
--- | User plan tiers demonstrating enum dropdowns.
+-- | Account tiers, picked with an enum select.
 data AccountTier = Starter | Developer | Professional | Enterprise
   deriving (Eq, Show, Bounded, Enum)
 
--- | Registration record demonstrating multiple typed inputs.
+-- | The value the form decodes to.
 data Registration = Registration
   { regUsername   :: !Text
   , regEmail      :: !Text
@@ -71,7 +71,7 @@ data Registration = Registration
   , regBio        :: !Text
   } deriving (Eq, Show)
 
--- | Registration form definition composed using applicative formlets.
+-- | One validated field for each 'Registration' field.
 registrationForm :: Form Text Registration
 registrationForm =
   Registration
@@ -95,7 +95,7 @@ registrationForm =
     <*> inputColor "Accent Color" (colorRGBA 99 102 241 255)
     <*> inputCheckbox "Subscribe to release announcements and updates" True
     <*> withFieldErrors
-          (inputTextArea "Developer Bio" "Building high-performance GUI applications in Haskell with nano-ui and ditto."
+          (inputTextArea "Developer Bio" "Writes GUI applications in Haskell with nano-ui and ditto."
             `prove` maxLength 160 (const "Bio must be 160 characters or fewer"))
 
 formatRegistration :: Registration -> Text
@@ -121,16 +121,15 @@ formDemoUi = do
       toolbar $ do
         columnWith (tight . gap 2) $ do
           heading "nano-ui-form"
-          muted "Type-safe, composable immediate-mode forms powered by ditto & rendered via SDL3"
+          muted "Forms built with ditto, drawn with nano-ui"
         flex
         muted "Press ESC to exit"
       separator
       rowWith (tight . gap 20 . fillW) $ do
-        -- Left Column: Interactive Formlet
         columnWith (tight . gap 12 . fillW) $ do
           card $ do
             heading "User Profile & Registration"
-            muted "All inputs validate live using composable applicative proofs."
+            muted "Fields validate as you type."
             separator
             runFormView renderedView
             separator
@@ -145,11 +144,10 @@ formDemoUi = do
                 resetForm "user_reg"
                 setSubmitted "Form has been reset to defaults."
 
-        -- Right Column: Live Telemetry & Inspector
         columnWith (tight . gap 12 . minW 340 . maxW 380) $ do
           card $ do
-            heading "Live Form Inspector"
-            muted "Real-time decode and proof telemetry:"
+            heading "Decoded value"
+            muted "The registration the form decodes to, or its errors."
             separator
             case res of
               Ditto.Ok (Ditto.Proved _ reg) -> do

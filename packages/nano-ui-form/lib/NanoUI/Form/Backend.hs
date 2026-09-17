@@ -4,20 +4,21 @@
 module NanoUI.Form.Backend
   ( FormInput (..)
   , formInputToText
-  , FormStateStore (..)
-  , emptyFormStateStore
   , FormUI (..)
   , liftNanoUI
-  , getFormStore
-  , setFormStore
   , getActiveFormPrefix
-  , setActiveFormPrefix
   , withFormPrefix
   , withFormWidgets
   , updateFieldInput
   , markFormSubmitted
   , isFormSubmitted
   , resetFormState
+    -- * Stored form state, for tests
+  , FormStateStore (..)
+  , emptyFormStateStore
+  , getFormStore
+  , setFormStore
+  , setActiveFormPrefix
   ) where
 
 import Control.Monad (when, (<$!>))
