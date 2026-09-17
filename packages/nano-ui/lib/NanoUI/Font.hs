@@ -197,16 +197,7 @@ scaleFontMetrics s fm
         , fmAdvance = \c -> fmAdvance fm c * s
         , fmKerning = \a b -> fmKerning fm a b * s
         , fmShape = \t -> fmap scaleShape (fmShape fm t)
-        , fmGlyph = \c -> case fmGlyph fm c of
-            Nothing -> Nothing
-            Just gq ->
-              Just
-                gq
-                  { gqX = gqX gq * s
-                  , gqY = gqY gq * s
-                  , gqW = gqW gq * s
-                  , gqH = gqH gq * s
-                   }
+        , fmGlyph = fmap scaleGlyph . fmGlyph fm
         , fmBackend = fmap scaleBackend (fmBackend fm)
         }
   where
