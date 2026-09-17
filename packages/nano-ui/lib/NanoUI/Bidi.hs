@@ -65,14 +65,12 @@ classify c
   | n >= 0x064B && n <= 0x065F || n == 0x0670 || n >= 0x06D6 && n <= 0x06ED = NSM
   | n <= 0x06FF = AL
   | n <= 0x07BF = if n >= 0x0730 && n <= 0x074A || n >= 0x07A6 && n <= 0x07B0 then NSM else AL
-  | n <= 0x07FF = R
   | n <= 0x085F = R
   | n <= 0x08FF = if n >= 0x08D3 then NSM else AL
   | n >= 0x200E && n <= 0x200F = if n == 0x200E then L else R
   | n >= 0xFB1D && n <= 0xFB4F = R
   | n >= 0xFB50 && n <= 0xFDFF = AL
   | n >= 0xFE70 && n <= 0xFEFF = AL
-  | n >= 0x0300 && n <= 0x036F = NSM
   | n >= 0x2000 && n <= 0x206F = if n <= 0x200A || n == 0x2028 || n == 0x2029 then WS else ON
   | n >= 0x10800 && n <= 0x10FFF = R
   | n >= 0x1E800 && n <= 0x1EFFF = AL

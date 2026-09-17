@@ -143,16 +143,9 @@ pokeStripAt vp ip base baseIdx vi ii x0 y0 x1 y1 bw r g b a = do
 
 {-# INLINE pushRoundedRect #-}
 pushRoundedRect :: DrawArena -> Rect -> Float -> Color -> IO ()
-pushRoundedRect da rect@(Rect x y w h) radius col
-  | w <= 0 || h <= 0 = pure ()
-  | radius <= 0.5 = pushRect da rect col
-  | otherwise = do
-      square <- readIORef (daSquareGeometry da)
-      if square
-        then pushRect da rect col
-        else do
-          s <- readIORef (daSnapScale da)
-          pushRoundedRectRaw da (Rect (onGrid s x) (onGrid s y) w h) radius col
+pushRoundedRect da (Rect x y w h) radius col = do
+  s <- readIORef (daSnapScale da)
+  pushRoundedRectRaw da (Rect (onGrid s x) (onGrid s y) w h) radius col
 
 -- | Unsnapped variant used when the rect is already anchored to the snapped
 -- device pixel grid, e.g. a mark that must stay concentric with a border that
@@ -346,17 +339,10 @@ pushRoundedStroke da (Rect x y w h) radius bw col
             when doLR $ do
               pokeStripAt vp ip base baseIdx viLR iiLR leftX (py + rad) leftX (py + rad + midH) ibw r g b a
               pokeStripAt vp ip base baseIdx (viLR + 8) (iiLR + 18) rightX (py + rad) rightX (py + rad + midH) ibw r g b a
-            if midW <= 0 && midH <= 0
-              then do
-                pokeArc viC iiC (px + w * 0.5) (py + h * 0.5) 0
-                pokeArc (viC + arcV) (iiC + arcI) (px + w * 0.5) (py + h * 0.5) 1
-                pokeArc (viC + 2 * arcV) (iiC + 2 * arcI) (px + w * 0.5) (py + h * 0.5) 2
-                pokeArc (viC + 3 * arcV) (iiC + 3 * arcI) (px + w * 0.5) (py + h * 0.5) 3
-              else do
-                pokeArc viC iiC (px + rad) (py + rad) 0
-                pokeArc (viC + arcV) (iiC + arcI) (px + w - rad) (py + rad) 1
-                pokeArc (viC + 2 * arcV) (iiC + 2 * arcI) (px + w - rad) (py + h - rad) 2
-                pokeArc (viC + 3 * arcV) (iiC + 3 * arcI) (px + rad) (py + h - rad) 3
+            pokeArc viC iiC (px + rad) (py + rad) 0
+            pokeArc (viC + arcV) (iiC + arcI) (px + w - rad) (py + rad) 1
+            pokeArc (viC + 2 * arcV) (iiC + 2 * arcI) (px + w - rad) (py + h - rad) 2
+            pokeArc (viC + 3 * arcV) (iiC + 3 * arcI) (px + rad) (py + h - rad) 3
 
 -- | Border of four flat rects inside @(x, y, w, h)@, @t@ thick. The origin is
 -- already snapped by the caller; the texture is already selected.

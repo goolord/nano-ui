@@ -1381,15 +1381,13 @@ columnGapSumScratch na True n gap = do
 distributeScratch :: NodeArena -> Int -> Float -> Float -> Bool -> IO ()
 distributeScratch na n avail gapSum horizontal = do
   FlexScratch {fsIdx = idxArr, fsW = wArr, fsH = hArr, fsOutW = outW, fsOutH = outH} <- readIORef (naScratch na)
-  let off = 0
-      end = n
-  total <- sumScratchAxis wArr hArr horizontal off end 0
+  total <- sumScratchAxis wArr hArr horizontal 0 n 0
   let slack = avail - (total + gapSum)
   if slack > 0.001
     then do
-      growTotal <- sumFactors growFactor na idxArr horizontal off end
+      growTotal <- sumFactors growFactor na idxArr horizontal n
       if growTotal <= 0
-        then copyScratchRange wArr hArr outW outH off end
+        then copyScratchRange wArr hArr outW outH 0 n
         else do
           -- Grow children share the free space by factor, but no child is
           -- squeezed below its content size (a min-content floor, like CSS
@@ -1404,17 +1402,17 @@ distributeScratch na n avail gapSum horizontal = do
           -- throughout; no arithmetic on markers.
           let mainArr = if horizontal then outW else outH
               crossArr = if horizontal then outH else outW
-          markGrowFlags na idxArr wArr hArr mainArr crossArr horizontal off end
-          (free, gfSum) <- settleGrow mainArr crossArr avail gapSum off end (n + 1)
-          applyGrowShares wArr hArr mainArr crossArr horizontal free gfSum off end
+          markGrowFlags na idxArr wArr hArr mainArr crossArr horizontal 0 n
+          (free, gfSum) <- settleGrow mainArr crossArr avail gapSum n (n + 1)
+          applyGrowShares wArr hArr mainArr crossArr horizontal free gfSum 0 n
     else
       if slack < -0.001
         then do
-          shrinkTotal <- sumFactors shrinkFactor na idxArr horizontal off end
+          shrinkTotal <- sumFactors shrinkFactor na idxArr horizontal n
           if shrinkTotal <= 0
-            then copyScratchRange wArr hArr outW outH off end
-            else applyShrink na idxArr wArr hArr outW outH horizontal (negate slack) shrinkTotal off end
-        else copyScratchRange wArr hArr outW outH off end
+            then copyScratchRange wArr hArr outW outH 0 n
+            else applyShrink na idxArr wArr hArr outW outH horizontal (negate slack) shrinkTotal 0 n
+        else copyScratchRange wArr hArr outW outH 0 n
 
 -- | @out[i] = (w[i], h[i])@ for the range.
 copyScratchRange :: MutablePrimArray RealWorld Float -> MutablePrimArray RealWorld Float -> MutablePrimArray RealWorld Float -> MutablePrimArray RealWorld Float -> Int -> Int -> IO ()
@@ -1442,13 +1440,13 @@ getAxisSizing :: NodeArena -> NodeIdx -> Bool -> IO (SizingTag, Float)
 getAxisSizing na idx horizontal =
   if horizontal then getWidthSizing na idx else getHeightSizing na idx
 
--- | Sum a sizing-derived flex factor over the scratch children in @[i, end)@.
+-- | Sum a sizing-derived flex factor over the first @n@ scratch children.
 {-# INLINE sumFactors #-}
-sumFactors :: (SizingTag -> Float -> Float) -> NodeArena -> MutablePrimArray RealWorld Int -> Bool -> Int -> Int -> IO Float
-sumFactors factor na idxArr horizontal start end = go start 0
+sumFactors :: (SizingTag -> Float -> Float) -> NodeArena -> MutablePrimArray RealWorld Int -> Bool -> Int -> IO Float
+sumFactors factor na idxArr horizontal n = go 0 0
   where
     go !i !acc
-      | i >= end = pure acc
+      | i >= n = pure acc
       | otherwise = do
           ci <- readPrimArray idxArr i
           (tag, val) <- getAxisSizing na ci horizontal
@@ -1472,7 +1470,6 @@ shrinkFactor tag val =
     SizingPercent -> 1
     -- Fit stays content-sized. A pinned header must not squash when a Grow
     -- sibling (page scroll) is taller than the window.
-    SizingFit -> 0
     _ -> 0
 
 markGrowFlags :: NodeArena -> MutablePrimArray RealWorld Int -> MutablePrimArray RealWorld Float -> MutablePrimArray RealWorld Float -> MutablePrimArray RealWorld Float -> MutablePrimArray RealWorld Float -> Bool -> Int -> Int -> IO ()
@@ -1521,14 +1518,14 @@ lockGrow mainArr crossArr !free !gfSum !i !end !acc
 
 -- Each lock shrinks the share pool, possibly locking more children; the
 -- locked set only grows, so this fixpoints within n sweeps.
-settleGrow :: MutablePrimArray RealWorld Float -> MutablePrimArray RealWorld Float -> Float -> Float -> Int -> Int -> Int -> IO (Float, Float)
-settleGrow mainArr crossArr avail gapSum off end !passes = do
-  (occupied, gfSum) <- scanGrow mainArr crossArr off end 0 0
+settleGrow :: MutablePrimArray RealWorld Float -> MutablePrimArray RealWorld Float -> Float -> Float -> Int -> Int -> IO (Float, Float)
+settleGrow mainArr crossArr avail gapSum n !passes = do
+  (occupied, gfSum) <- scanGrow mainArr crossArr 0 n 0 0
   let free = avail - gapSum - occupied
-  locked <- lockGrow mainArr crossArr free gfSum off end 0
+  locked <- lockGrow mainArr crossArr free gfSum 0 n 0
   if locked == 0 || passes <= 1
     then pure (free, gfSum)
-    else settleGrow mainArr crossArr avail gapSum off end (passes - 1)
+    else settleGrow mainArr crossArr avail gapSum n (passes - 1)
 
 -- Hand shares to unlocked grow children and restore real cross sizes where
 -- the factors clobbered them.
