@@ -161,19 +161,28 @@ collectFloatingOccluders ctx = do
 
 -- | Clip + occluder short-circuit, then lower the node. NOINLINE so the
 -- recursive container walk never exposes the dispatch below to the simplifier.
+--
+-- The clip test widens the node by 'paintOverhang': a clip frame starts from a
+-- blank backdrop, so a node whose focus ring reaches into the clip must repaint
+-- even when its own rect stays outside.
 {-# NOINLINE paintNodeWithEnv #-}
 paintNodeWithEnv :: PaintEnv -> NodeIdx -> IO ()
 paintNodeWithEnv env idx = do
   (x, y, w, h) <- getRect (peNodeArena env) idx
   (cx, cy, cw, ch) <- readIORef (daCurrentClip (peDrawArena env))
-  let !l = max x cx
-      !t = max y cy
-      !r = min (x + w) (cx + cw)
-      !b = min (y + h) (cy + ch)
-  unless (r <= l || b <= t) $
+  let !l = max (x - paintOverhang) cx
+      !t = max (y - paintOverhang) cy
+      !r = min (x + w + paintOverhang) (cx + cw)
+      !b = min (y + h + paintOverhang) (cy + ch)
+  unless (w <= 0 || h <= 0 || r <= l || b <= t) $
     unless (peHasOccluders env && any (rectFullyInside (Rect l t (r - l) (b - t))) (peOccluders env)) $ do
       nt <- getNodeType (peNodeArena env) idx
       lowerNodeVisible env idx nt (Rect x y w h)
+
+-- | How far a node may paint outside its rect: the focus ring sits 2px out
+-- with a 1.5px stroke.
+paintOverhang :: Float
+paintOverhang = 4
 
 -- | Explicit per-node-type dispatch. Kept NOINLINE and thin so the recursive
 -- loop never sees the branch bodies.

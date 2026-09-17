@@ -86,8 +86,8 @@ renderDrawDataPass batch ren mClear drawData images glyphTex damage =
         void $ setRenderDrawColorSafe ren cr cg cb ca
         void $ renderClearSafe ren
       (Just _clearColor, DamageClip r) ->
-        -- Retain texture already holds backdrop pixels. Clearing with window
-        -- color here leaves halos on partial clips (hover slop, text slop).
+        -- The draw list starts a clip frame with its own window backdrop,
+        -- so the clip needs no clear here.
         applyClipState batch clipRef ren (toClipKey r)
       (Nothing, DamageClip r) -> applyClipState batch clipRef ren (toClipKey r)
       (Nothing, DamageFull) -> pure ()

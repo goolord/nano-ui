@@ -57,11 +57,11 @@ import NanoUI.Context
 import NanoUI.Context (beginFrameModal)
 import NanoUI.Damage (FrameSnapshot (..), updatePrevRects, writeDamage)
 import NanoUI.Draw
-  ( DrawArena
-  , DrawData
+  ( DrawData
   , Layer (..)
   , beginLayer
   , finishDraw
+  , pushRect
   , resetDrawArena
   , setClip
   )
@@ -139,7 +139,8 @@ import NanoUI.Layout.Arena
 import NanoUI.Layout.Solve (placeModals, placePopups, placeWindows, solveLayout)
 import NanoUI.Monad (NanoUI, Ui, runUi)
 import NanoUI.Store (mirrorStoresChanged)
-import NanoUI.Types (Damage (..), Size (..), rectInflate)
+import NanoUI.Style (Theme (..))
+import NanoUI.Types (Damage (..), Size (..), rectInflate, rectNonEmpty)
 
 runFrame :: Context -> Input -> NanoUI a -> IO (a, [FrameMsg], DrawData, Bool)
 runFrame = runFrameEff runEff
@@ -298,13 +299,13 @@ runFrameEff unlift ctx inp ui = do
       }
   -- Clip frames only repaint the damaged region: the retain texture already
   -- holds every other pixel, and the runner scissors the present to the same
-  -- damage. Inflate by one logical pixel to cover the runner's outward pixel
-  -- snap. Full-present frames (fresh retain, forced full, continuous) paint
-  -- everything.
+  -- damage. The region repaints from the window backdrop, inflated by one
+  -- logical pixel to cover the runner's outward pixel snap. Full-present
+  -- frames (fresh retain, forced full, continuous) paint everything.
   paintFull <- readIORef (ctxPaintFull ctx)
-  unless paintFull $
-    caseDamage (ctxDrawArena ctx) =<< takeDamage ctx
   beginLayer (ctxDrawArena ctx) LayerBackground
+  unless paintFull $
+    paintDamageClip ctx =<< takeDamage ctx
   lowerShapes ctx
   beginLayer (ctxDrawArena ctx) LayerOverlay
   drawWindowOverlays ctx
@@ -324,9 +325,19 @@ resetUiBuild ctx = do
   resetNodeArena (ctxNodeArena ctx)
   resetUiBuildScopes ctx
 
-caseDamage :: DrawArena -> Damage -> IO ()
-caseDamage _ DamageFull = pure ()
-caseDamage da (DamageClip r) = setClip da (rectInflate 1 r)
+-- | Start a clip frame from the window backdrop, as a full frame starts from a
+-- window-coloured clear. Widgets with a transparent fill, such as an idle
+-- menu-bar title, draw nothing over the pixels they covered, so without the
+-- backdrop a hover that just ended would stay in the retain texture.
+paintDamageClip :: Context -> Damage -> IO ()
+paintDamageClip _ DamageFull = pure ()
+paintDamageClip ctx (DamageClip r) = do
+  let da = ctxDrawArena ctx
+      clip = rectInflate 1 r
+  setClip da clip
+  when (rectNonEmpty r) $ do
+    theme <- readIORef (ctxTheme ctx)
+    pushRect da clip (themeWindow theme)
 
 resetUiBuildScopes :: Context -> IO ()
 resetUiBuildScopes ctx = do

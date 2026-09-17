@@ -108,6 +108,8 @@ testSpecs =
   , TestSpec "damage-state-change" False runStateChangeDamageTest
   , TestSpec "damage-orphan-anim-settles" False runOrphanAnimationDamageSettlesTest
   , TestSpec "versioned-drawing-damage" False runVersionedDrawingDamageTest
+  , TestSpec "clip-frame-backdrop" False runClipFrameBackdropTest
+  , TestSpec "textarea-select-all-damage" False runTextAreaSelectAllDamageTest
   , TestSpec "panel-body-swap-damage" False runPanelBodySwapDamageTest
   , TestSpec "refresh-forces-redraw" False runRefreshRedrawTest
   -- Animation

@@ -35,6 +35,7 @@ import qualified Data.IntMap.Strict as IM
 import Effectful (Eff, type (:>))
 import NanoUI.Context
   ( Context (..)
+  , damageWidget
   , getStore
   , intKey
   , markDirty
@@ -73,7 +74,7 @@ import NanoUI.Store
   , slotSeen
   )
 import NanoUI.Style (FontStyle (..), FontVariant (..), FontWeight (..), Layout (..), Sizing (..), defaultLayout)
-import NanoUI.Types (clamp)
+import NanoUI.Types (DamageBounds (..), clamp)
 import NanoUI.Widgets.Behavior (keyboardFocused)
 import NanoUI.Widgets.Node (Response, addWidget, setChanged)
 import qualified NanoUI.Widgets.TextBuffer as TB
@@ -355,9 +356,13 @@ textAreaWith' f value = do
                 || menuPulse
                 || (hadInput && newText /= current)
         -- Saving writes the new text and its buffer together; drop only the
-        -- content size measured for the old text, and the menu pulse.
+        -- content size measured for the old text, and the menu pulse. The
+        -- store damage is keyed on slots, not the widget, so damage the widget
+        -- itself: a selection-only change (Ctrl+A) would otherwise repaint
+        -- nothing until the next frame.
         when changed $
           uiIO $ do
+            damageWidget ctx wid DamageSelf
             st <- saveTextAreaState key newText newState <$> getStore ctx
             setStore ctx st
               { storeText = IM.insert seenKey newText (storeText st)
@@ -473,6 +478,7 @@ applyTextAreaMenuAction ctx wid action = do
   -- Menu actions are how a caller edits a field that may not be under the
   -- pointer; focus it so the selection highlight and caret become visible.
   writeIORef (ctxFocusId ctx) wid
+  damageWidget ctx wid DamageSelf
   setTextInputMenu ctx Nothing
   markDirty ctx
 

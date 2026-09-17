@@ -5,13 +5,15 @@ module Cases.Damage
   , runStateChangeDamageTest
   , runOrphanAnimationDamageSettlesTest
   , runVersionedDrawingDamageTest
+  , runClipFrameBackdropTest
+  , runTextAreaSelectAllDamageTest
   ) where
 
-import Data.IORef (IORef)
+import Data.IORef (IORef, readIORef, writeIORef)
 import NanoUI
 import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, withInput)
-import NanoUI.Testing.Harness (warmup2)
+import NanoUI.Testing.Harness (centerOf, drawQuads, runClick, warmup2, withInputOff)
 
 -- | A new version on a versioned drawing repaints its rect. Paint rebuilds the
 -- ops once the version moves, and nothing else damages them, so a clip frame
@@ -23,8 +25,6 @@ runVersionedDrawingDamageTest ctx failed = do
         _ <- label "Other"
         drawingVersioned version (fixedWH 80 40) $ \r ->
           runCanvas (drawRect r (colorRGBA 255 0 0 255))
-      covers (Rect cx cy cw ch) (Rect x y w h) =
-        cx <= x && cy <= y && cx + cw >= x + w && cy + ch >= y + h
   resp <- warmup2 ctx inp (ui 1)
   _ <- takeDamage ctx
   _ <- runFrame ctx inp (ui 2)
@@ -32,6 +32,11 @@ runVersionedDrawingDamageTest ctx failed = do
   case dmg of
     DamageClip clip -> assert failed (covers clip (respRect resp))
     DamageFull -> assert failed False
+
+-- | Whether the first rect contains the second.
+covers :: Rect -> Rect -> Bool
+covers (Rect cx cy cw ch) (Rect x y w h) =
+  cx <= x && cy <= y && cx + cw >= x + w && cy + ch >= y + h
 
 runDamageBoundsResolutionTest :: Context -> IORef Int -> IO ()
 runDamageBoundsResolutionTest _ failed = do
@@ -175,3 +180,51 @@ runOrphanAnimationDamageSettlesTest ctx failed = do
   _ <- runFrame ctx2 winInp (label "bare")
   dmgFresh2 <- takeDamage ctx2
   assert failed (dmgFresh2 /= DamageFull)
+
+-- | A clip frame repaints its region from the window backdrop, as a full frame
+-- repaints from the cleared window. An idle menu-bar title has no fill, so
+-- without the backdrop the hover highlight it just lost would stay in the
+-- retain texture.
+runClipFrameBackdropTest :: Context -> IORef Int -> IO ()
+runClipFrameBackdropTest ctx failed = do
+  writeIORef (ctxPaintFull ctx) False
+  let inp0 = withInputOff 400 300
+      ui = rowWith (tight . fillW . fixedH 28) $ do
+        file <- menuButton' "File" False
+        _ <- menuButton' "Edit" False
+        pure file
+  file <- warmup2 ctx inp0 ui
+  _ <- runFrame ctx inp0 {inputMousePos = centerOf file} ui
+  (_, _, draw, _) <- runFrame ctx inp0 ui
+  dmg <- takeDamage ctx
+  theme <- readIORef (ctxTheme ctx)
+  quads <- drawQuads draw
+  case dmg of
+    DamageClip clip -> do
+      assert failed (covers clip (respRect file))
+      case quads of
+        (r, c) : _ -> do
+          assert failed (covers r clip)
+          assertEq failed c (themeWindow theme)
+        [] -> assert failed False
+    DamageFull -> assert failed False
+
+-- | Ctrl+A repaints the text area on the frame that selects, rather than
+-- leaving the highlight to a follow-up frame.
+runTextAreaSelectAllDamageTest :: Context -> IORef Int -> IO ()
+runTextAreaSelectAllDamageTest ctx failed = do
+  -- Frame time lets the hover fade from the click finish; a live fade would
+  -- damage the area anyway.
+  let inp0 = (withInputOff 800 600) {inputDeltaTime = 0.5}
+      ui = column $ do
+        _ <- label "Notes"
+        fst <$> textAreaWith' (fixedWH 200 80) "hello world"
+  area <- warmup2 ctx inp0 ui
+  runClick ctx inp0 ui (centerOf area)
+  _ <- warmup2 ctx inp0 ui
+  _ <- takeDamage ctx
+  _ <- runFrame ctx inp0 {inputChars = "a", inputModifiers = Modifiers False True False} ui
+  dmg <- takeDamage ctx
+  case dmg of
+    DamageClip clip -> assert failed (covers clip (respRect area))
+    DamageFull -> assert failed False
