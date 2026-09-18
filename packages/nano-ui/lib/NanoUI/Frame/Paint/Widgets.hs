@@ -20,6 +20,7 @@ import qualified Data.Text as T
 import NanoUI.Context (Context (..), getStore)
 import NanoUI.Draw
   ( DrawArena (..)
+  , pushCircle
   , pushFilledTriangle
   , pushLine
   , pushRoundedRect
@@ -470,9 +471,10 @@ drawCheckboxMark da bx by box markCol = do
       y1 = by + box * 0.72
       x2 = bx + box * 0.78
       y2 = by + box * 0.28
-      capR = t / 2
-      cap cx cy =
-        pushRoundedRect da (Rect (cx - capR) (cy - capR) t t) capR markCol
+      -- Caps snap their centres, as the strokes snap their ends; snapping a
+      -- cap's corner lands it up to a pixel off the stroke at a fractional
+      -- scale.
+      cap cx cy = pushCircle da cx cy (t / 2) markCol
   pushStrokeAA da x0 y0 x1 y1 t markCol
   pushStrokeAA da x1 y1 x2 y2 t markCol
   cap x0 y0

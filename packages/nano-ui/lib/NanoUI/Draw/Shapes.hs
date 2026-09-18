@@ -392,7 +392,7 @@ pushLine :: DrawArena -> Float -> Float -> Float -> Float -> Float -> Color -> I
 pushLine da x1 y1 x2 y2 thickness col = do
   square <- readIORef (daSquareGeometry da)
   let !r = thickness / 2
-      cap cx cy = pushRoundedRect da (Rect (cx - r) (cy - r) thickness thickness) r col
+      cap cx cy = pushCircle da cx cy r col
   if square
     then pushStroke da x1 y1 x2 y2 thickness col
     else
