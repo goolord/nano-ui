@@ -116,13 +116,22 @@ clamp01 x = clamp 0 1 x
 -- | Round a logical coordinate onto the device-pixel grid implied by draw
 -- scale @s@ (device px = logical * s). Every layer that positions pixels --
 -- the layout solve, text pens, scroll offsets, paint and glyph rasterization --
--- must route its coordinates through this single function, with ties rounding
--- to even (@round@), so geometry can never dephase from text. An identity when
--- @s <= 0@ (no scaling).
+-- must route its coordinates through this single function, so geometry can
+-- never dephase from text. Ties round up, not to even: at a fractional scale
+-- (125%: a 20px row is 25 device px) a column of rows can all sit on half
+-- pixels, and ties-to-even would alternate them between rounding down and up,
+-- leaving uneven gaps. An identity when @s <= 0@ (no scaling).
 {-# INLINE onGrid #-}
 onGrid :: Float -> Float -> Float
 onGrid s v
-  | s > 0 = fromIntegral (round (v * s) :: Int) / s
+  | s > 0 =
+      -- Compare the exact fractional part rather than @floor (r + 0.5)@: that
+      -- addition itself rounds, lifting the float just below 0.5 to 1 and odd
+      -- integers past 2^23 up by one.
+      let r = v * s
+          f = floor r :: Int
+          k = if r - fromIntegral f >= 0.5 then f + 1 else f
+       in fromIntegral k / s
   | otherwise = v
 
 rgbToHsv :: Color -> (Float, Float, Float)
