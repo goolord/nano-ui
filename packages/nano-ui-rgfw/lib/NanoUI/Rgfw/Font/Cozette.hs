@@ -44,7 +44,7 @@ import qualified Data.Text as T
 import Data.Word (Word16, Word32, Word8)
 import Foreign.Ptr (Ptr)
 import Foreign.Storable (peekElemOff, pokeElemOff)
-import NanoUI (FontMetrics (..))
+import NanoUI (FontMetrics (..), roundHalfUp)
 
 -- 6x13 Cozette metrics
 cozetteCharAdvance :: Float
@@ -447,7 +447,9 @@ boxCoverage !srcW !srcH row !x0 !x1 !y0 !y1
 foldPenPositions :: CozetteFont -> Float -> Float -> Float -> a -> (a -> Int -> Int -> Word32 -> IO a) -> Text -> IO a
 foldPenPositions font !scale !logX !logY z step = go (0 :: Int) (0 :: Int) z
   where
-    pen origin i advance = round ((origin + fromIntegral i * advance) * scale)
+    -- Ties up like nano-ui's onGrid, so pens stay in phase with snapped
+    -- geometry at fractional scales (125%: a 6px advance is 7.5 device px).
+    pen origin i advance = roundHalfUp ((origin + fromIntegral i * advance) * scale)
     go !col !line !acc t = case T.uncons t of
       Nothing -> pure acc
       Just ('\r', rest) -> go 0 line acc rest

@@ -638,6 +638,8 @@ module NanoUI
   , rectUnion
   , v2Add
   , v2Sub
+  , onGrid
+  , roundHalfUp
 
     -- * Input
   , Input (..)
@@ -945,11 +947,13 @@ import NanoUI.Types
   , defaultDamageSlop
   , haloDamageSlop
   , lerpColor
+  , onGrid
   , rectContains
   , rectInflate
   , rectIntersect
   , rectUnion
   , resolveDamageRect
+  , roundHalfUp
   , sliderDamageSlop
   , v2Add
   , v2Sub

@@ -34,7 +34,7 @@ import Foreign.ForeignPtr (withForeignPtr)
 import Foreign.Marshal.Alloc (callocBytes, free, reallocBytes)
 import Foreign.Ptr (Ptr, nullPtr)
 import Foreign.Storable (pokeByteOff)
-import NanoUI (Color (..), Rect (..))
+import NanoUI (Color (..), Rect (..), roundHalfUp)
 import NanoUI.Rgfw.Context (TextSpan, paintInLayerOrder)
 import NanoUI.Rgfw.Font.Cozette
   ( CozetteFont (..)
@@ -141,10 +141,10 @@ drawCmd h !scale !fbW !fbH cmd
 {-# INLINE toPhysRect #-}
 toPhysRect :: Float -> Float -> Float -> Float -> Float -> (Int, Int, Int, Int)
 toPhysRect !scale !rx !ry !rw !rh =
-  let !x0 = round (rx * scale)
-      !y0 = round (ry * scale)
-      !x1 = round ((rx + rw) * scale)
-      !y1 = round ((ry + rh) * scale)
+  let !x0 = roundHalfUp (rx * scale)
+      !y0 = roundHalfUp (ry * scale)
+      !x1 = roundHalfUp ((rx + rw) * scale)
+      !y1 = roundHalfUp ((ry + rh) * scale)
    in (x0, y0, max 0 (x1 - x0), max 0 (y1 - y0))
 
 -- | A logical clip rect scaled to physical pixels and intersected with a

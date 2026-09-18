@@ -9,7 +9,7 @@ import Data.Word (Word8, Word32)
 import Foreign.ForeignPtr (withForeignPtr)
 import Foreign.Ptr (Ptr)
 import Foreign.Storable (peekByteOff, peekElemOff, pokeElemOff)
-import NanoUI (Color (..), Rect (..))
+import NanoUI (Color (..), Rect (..), roundHalfUp)
 import NanoUI.Rgfw.Context (TextSpan, paintInLayerOrder)
 import NanoUI.Rgfw.Font.Cozette (CozetteFont)
 import NanoUI.Rgfw.Gl (physClip, toPhysRect)
@@ -299,7 +299,7 @@ clipRect (cx0, cy0, cx1, cy1) x y w h =
    in if x0 >= x1 || y0 >= y1 then Nothing else Just (x0, y0, x1 - x0, y1 - y0)
 
 physPt :: Float -> Float -> Float -> (Int, Int)
-physPt !s !x !y = (round (x * s), round (y * s))
+physPt !s !x !y = (roundHalfUp (x * s), roundHalfUp (y * s))
 
 rgbaA :: RGBA -> Float
 rgbaA (_, _, _, a) = a
