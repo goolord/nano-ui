@@ -27,7 +27,7 @@ import Foreign.C.String (withCString)
 import Foreign.Marshal.Alloc (alloca)
 import Foreign.Ptr (Ptr, nullPtr)
 import Foreign.Storable (peek)
-import NanoUI (ImageId, Input (..), Size (..), Theme)
+import NanoUI (ImageId, Input (..), Size (..), Theme, V2 (..))
 import NanoUI.Context (Context (..), setDrawSnapScale)
 import NanoUI.Testing (clearMeasureCache, markDirty, setHost, setWakeLoop)
 import NanoUI.Sdl.Display
@@ -38,6 +38,7 @@ import NanoUI.Sdl.Display
   , queryWindowPixelDensity
   , queryWindowLogicalSize
   , queryWindowRefreshHz
+  , zoomWindow
   )
 import NanoUI.Sdl.Clipboard (withSdlClipboard)
 import NanoUI.Sdl.Cursor (SdlCursors (..), destroyCursors, initCursors)
@@ -83,7 +84,7 @@ import SDL3.Sys.Render
   , setRenderVSync
   )
 import SDL3.Sys.Surface (destroySurface, saveBMP)
-import SDL3.Sys.Video (destroyWindowSafe)
+import SDL3.Sys.Video (destroyWindowSafe, getWindowDisplayScale)
 
 -- | Initial RGBA asset uploaded before the first frame.
 data RgbaImage = RgbaImage
@@ -125,6 +126,11 @@ data SdlOptions = SdlOptions
   -- ^ Predicate on user input to trigger application exit (default: @const False@).\
   , sdlAppImages :: !(SmallArray RgbaImage)
   -- ^ Initial RGBA textures registered before the first frame.
+  , sdlAppUiScale :: !Float
+  -- ^ Zoom of the whole UI, on top of the window's pixel density (default:
+  -- 1). Zero or less follows the display's content scale, which on Windows
+  -- is the desktop's scaling setting. 'NanoUI.Backend.Sdl.setSdlUiScale'
+  -- changes it at runtime.
   }
 
 defaultSdlOptions :: SdlOptions
@@ -145,6 +151,7 @@ defaultSdlOptions =
     , sdlAppTheme = Nothing
     , sdlAppShouldQuit = const False
     , sdlAppImages = mempty
+    , sdlAppUiScale = 1
     }
 
 -- | SDL_WINDOW_HIGH_PIXEL_DENSITY (0x2000): without it the window's surface
@@ -184,6 +191,9 @@ data SdlEnv = SdlEnv
   , sdlForcedScale :: !(Maybe Float)
   -- ^ NANO_FORCE_SCALE override of the pixel density, read at startup.
   , sdlScaleRef :: IORef Float
+  -- ^ Backbuffer pixels per layout unit: the pixel density times the zoom.
+  , sdlUiScaleRef :: !(IORef Float)
+  -- ^ The requested UI scale; see 'sdlAppUiScale'.
   , sdlGlyphAtlas :: GlyphAtlas
   , sdlImages :: ImageAtlas
   , sdlCursors :: SdlCursors
@@ -218,10 +228,23 @@ noRetain = Retain nullPtr 0 0 0 0 0
 defaultWindowSize :: Size
 defaultWindowSize = Size 1280 800
 
--- Layout in logical coordinates; draw/text rasterize at native pixel density.
+-- | The zoom a UI scale setting asks for: the setting itself, or for zero or
+-- less the display's content scale beyond the pixel density.
+resolveZoom :: Ptr SDL_Window -> Float -> IO Float
+resolveZoom win setting
+  | setting > 0 = pure setting
+  | otherwise = do
+      display <- getWindowDisplayScale win
+      density <- queryWindowPixelDensity win
+      pure (if display > 0 then max 0.25 (display / density) else 1)
+
+-- Layout in logical coordinates (window coordinates over the zoom);
+-- draw/text rasterize at native pixel density.
 syncDisplay :: Context -> SdlEnv -> Input -> IO (Context, Input)
 syncDisplay ctx env inp = do
-  scale <- maybe (queryWindowPixelDensity (sdlWindow env)) pure (sdlForcedScale env)
+  density <- maybe (queryWindowPixelDensity (sdlWindow env)) pure (sdlForcedScale env)
+  zoom <- resolveZoom (sdlWindow env) =<< readIORef (sdlUiScaleRef env)
+  let scale = density * zoom
   oldScale <- readIORef (sdlScaleRef env)
   let scaleChanged = abs (scale - oldScale) > scaleEpsilon
   when scaleChanged $ do
@@ -248,14 +271,16 @@ syncDisplay ctx env inp = do
     clearMeasureCache ctx
     markDirty ctx
   queried <- queryWindowLogicalSize (sdlWindow env)
-  let winSize =
-        case queried of
+  let unzoom (Size sw sh) = Size (sw / zoom) (sh / zoom)
+      winSize =
+        case unzoom queried of
           Size 0 0 ->
             case inputWindowSize inp of
               Size 0 0 -> defaultWindowSize
               s -> s
           s -> s
-  mouse <- queryMouseWindowPos
+  V2 mx my <- queryMouseWindowPos
+  let mouse = V2 (mx / zoom) (my / zoom)
   ctxMeasured <- readIORef (sdlCachedCtx env)
   pure (ctxMeasured, inp {inputWindowSize = winSize, inputMousePos = mouse})
 
@@ -271,6 +296,7 @@ data WindowConfig = WindowConfig
   , wcUiFont :: !NanoUIFont
   , wcMonoFont :: !NanoUIFont
   , wcFontSize :: !Float
+  , wcUiScale :: !Float
   }
 
 withSdl :: SdlOptions -> Context -> (Context -> SdlEnv -> IO a) -> IO a
@@ -287,6 +313,7 @@ withSdl opts ctx =
       , wcUiFont = sdlAppFont opts
       , wcMonoFont = sdlAppMonoFont opts
       , wcFontSize = sdlAppFontSize opts
+      , wcUiScale = sdlAppUiScale opts
       }
 
 withSdlBench :: Context -> (Context -> SdlEnv -> IO a) -> IO a
@@ -303,6 +330,7 @@ withSdlBench ctx =
       , wcUiFont = DefaultFont
       , wcMonoFont = DefaultFont
       , wcFontSize = defaultFontSize
+      , wcUiScale = 1
       }
 
 withSdlWindow :: Context -> WindowConfig -> (Context -> SdlEnv -> IO a) -> IO a
@@ -365,12 +393,18 @@ startSdlWindow ctx cfg fontSource monoSource = do
           unless ok $ fail "SDL_CreateWindowAndRenderer failed"
           win <- peek winPtr
           ren <- peek renPtr
-          scale <- queryWindowPixelDensity win
+          density <- queryWindowPixelDensity win
+          zoom <- resolveZoom win (wcUiScale cfg)
+          -- The requested size is logical, so the window grows with the zoom.
+          when (abs (zoom - 1) > scaleEpsilon) $
+            zoomWindow win (wcSize cfg) zoom
+          let scale = density * zoom
           setDrawSnapScale ctx scale
           refreshHz <- queryWindowRefreshHz win
           rendererName <- getRendererName ren >>= \name ->
             if PtrConst.unsafeToPtr name == nullPtr then pure "unknown" else TextForeign.peekCString (PtrConst.unsafeToPtr name)
           scaleRef <- newIORef scale
+          uiScaleRef <- newIORef (wcUiScale cfg)
           fontRequestRef <- newIORef (wcUiFont cfg)
           fontAppliedRef <- newIORef (wcUiFont cfg)
           glyphAtlas <- newGlyphAtlas ren
@@ -410,6 +444,7 @@ startSdlWindow ctx cfg fontSource monoSource = do
               , sdlFontAppliedRef = fontAppliedRef
               , sdlForcedScale = forcedScale
               , sdlScaleRef = scaleRef
+              , sdlUiScaleRef = uiScaleRef
               , sdlGlyphAtlas = glyphAtlas
               , sdlImages = images
               , sdlCursors = cursors

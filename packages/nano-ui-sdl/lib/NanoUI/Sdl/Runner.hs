@@ -6,6 +6,7 @@ module NanoUI.Sdl.Runner
   , drawReduceEff
   , askSdlDebug
   , setSdlUiFont
+  , setSdlUiScale
   ) where
 
 import Control.Exception (finally, mask_)
@@ -46,7 +47,7 @@ import NanoUI.Sdl.Debug
   , emptySdlDebug
   , traceFrame
   )
-import NanoUI.Sdl.Display (queryMouseWindowPos, queryWindowLogicalSize)
+import NanoUI.Sdl.Display (pushRefreshEvent, queryMouseWindowPos, queryWindowLogicalSize)
 import NanoUI.Sdl.Font
   ( fontSourceLabel
   , glyphAtlasTexture
@@ -299,3 +300,18 @@ setSdlUiFont font = do
     Just env -> uiIO $ do
       cur <- readIORef (sdlFontRequestRef env)
       when (cur /= font) $ writeIORef (sdlFontRequestRef env) font
+
+-- | Set the UI scale (see 'NanoUI.Sdl.Window.sdlAppUiScale'): a zoom on top
+-- of the pixel density, or zero or less to follow the display. The display
+-- thread applies it before the next frame, which this wakes. A no-op on
+-- non-SDL hosts.
+setSdlUiScale :: Ui :> es => Float -> Eff es ()
+setSdlUiScale s = do
+  menv <- askHost @SdlEnv
+  case menv of
+    Nothing -> pure ()
+    Just env -> uiIO $ do
+      cur <- readIORef (sdlUiScaleRef env)
+      when (cur /= s) $ do
+        writeIORef (sdlUiScaleRef env) s
+        pushRefreshEvent
