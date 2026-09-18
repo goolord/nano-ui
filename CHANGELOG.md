@@ -142,6 +142,10 @@
 
 ### Fixed
 
+- Circles sharing a centre are concentric whatever their radii. A circle's
+  centre snaps to the pixel grid, not its bounding box's corner, which
+  rounded differently per radius and put a small disc drawn over a larger
+  one up to a pixel off-centre.
 - Disabled context-menu rows (`menuItemDisabled`) take the same height,
   minimum width and label inset as enabled rows, instead of a bare label
   flush against the panel edge.

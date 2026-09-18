@@ -88,6 +88,7 @@ testSpecs =
   -- Drawing
   , TestSpec "draw-square-geometry" False runSquareGeometryTest
   , TestSpec "draw-external-text" False runExternalTextTest
+  , TestSpec "draw-concentric-circles" False runConcentricCirclesTest
   , TestSpec "drawing" False runDrawingTest
   , TestSpec "image" False runImageTest
   , TestSpec "rich-text-wrap" False runRichTextWrapTest

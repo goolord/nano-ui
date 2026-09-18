@@ -9,6 +9,9 @@ module NanoUI.Draw.Shapes
   , pushRoundedRect
   , pushRoundedRectRaw
   , pushRoundedStroke
+  , pushRoundedStrokeRaw
+  , pushCircle
+  , pushCircleStroke
   , pushLine
   , pushStrokeAA
   , pushStroke
@@ -246,14 +249,38 @@ pushRoundedRectRaw da (Rect x y w h) radius col
             pokeCorner (vi3 + 2 * cornerV) (ii3 + 2 * cornerI) (x + w - rad) (y + h - rad) 2
             pokeCorner (vi3 + 3 * cornerV) (ii3 + 3 * cornerI) (x + rad) (y + h - rad) 3
 
-{-# NOINLINE pushRoundedStroke #-}
+-- | A filled circle. The centre snaps to the device pixel grid, not the
+-- bounding box's origin: snapping the origin rounds @cx - radius@, so two
+-- circles sharing a centre but not a radius would land up to a pixel apart.
+{-# INLINE pushCircle #-}
+pushCircle :: DrawArena -> Float -> Float -> Float -> Color -> IO ()
+pushCircle da cx cy radius col = do
+  s <- readIORef (daSnapScale da)
+  pushRoundedRectRaw da (circleBox (onGrid s cx) (onGrid s cy) radius) radius col
+
+-- | A circle's outline, its centre snapped as 'pushCircle' snaps it.
+{-# INLINE pushCircleStroke #-}
+pushCircleStroke :: DrawArena -> Float -> Float -> Float -> Float -> Color -> IO ()
+pushCircleStroke da cx cy radius bw col = do
+  s <- readIORef (daSnapScale da)
+  pushRoundedStrokeRaw da (circleBox (onGrid s cx) (onGrid s cy) radius) radius bw col
+
+circleBox :: Float -> Float -> Float -> Rect
+circleBox cx cy radius = Rect (cx - radius) (cy - radius) (2 * radius) (2 * radius)
+
+{-# INLINE pushRoundedStroke #-}
 pushRoundedStroke :: DrawArena -> Rect -> Float -> Float -> Color -> IO ()
-pushRoundedStroke da (Rect x y w h) radius bw col
+pushRoundedStroke da (Rect x y w h) radius bw col = do
+  s <- readIORef (daSnapScale da)
+  pushRoundedStrokeRaw da (Rect (onGrid s x) (onGrid s y) w h) radius bw col
+
+-- | 'pushRoundedStroke' without snapping the origin, for a rect already
+-- anchored to the grid; see 'pushRoundedRectRaw'.
+{-# NOINLINE pushRoundedStrokeRaw #-}
+pushRoundedStrokeRaw :: DrawArena -> Rect -> Float -> Float -> Color -> IO ()
+pushRoundedStrokeRaw da (Rect px py w h) radius bw col
   | w <= 0 || h <= 0 || bw <= 0 = pure ()
   | otherwise = do
-      s <- readIORef (daSnapScale da)
-      let !px = onGrid s x
-          !py = onGrid s y
       setTexture da glyphAtlasTextureId
       square <- readIORef (daSquareGeometry da)
       let !rad = min (max 0 radius) (min (w * 0.5) (h * 0.5))

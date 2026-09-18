@@ -237,12 +237,10 @@ emitDrawOps da fm resolve ops = go 0
     emitOne (FillRect r c) = pushRect da r c
     emitOne (FillRoundedRect r radius c) = pushRoundedRect da r radius c
     emitOne (FillTriangle x0 y0 x1 y1 x2 y2 c) = pushFilledTriangle da x0 y0 x1 y1 x2 y2 c
-    emitOne (FillCircle cx cy radius c) =
-      pushRoundedRect da (Rect (cx - radius) (cy - radius) (2 * radius) (2 * radius)) radius c
+    emitOne (FillCircle cx cy radius c) = pushCircle da cx cy radius c
     emitOne (Stroke x0 y0 x1 y1 t c) = pushStroke da x0 y0 x1 y1 t c
     emitOne (StrokeRoundedRect r radius bw c) = pushRoundedStroke da r radius bw c
-    emitOne (StrokeCircle cx cy radius bw c) =
-      pushRoundedStroke da (Rect (cx - radius) (cy - radius) (2 * radius) (2 * radius)) radius bw c
+    emitOne (StrokeCircle cx cy radius bw c) = pushCircleStroke da cx cy radius bw c
     emitOne (StrokeLineAA x0 y0 x1 y1 bw c) = pushStrokeAA da x0 y0 x1 y1 bw c
     emitOne (FillQuadGradient r c0 c1 c2 c3) = pushQuadGradient da r c0 c1 c2 c3
     emitOne (DrawImageRect r tex u0 v0 u1 v1 c) = pushImage da r tex u0 v0 u1 v1 c
