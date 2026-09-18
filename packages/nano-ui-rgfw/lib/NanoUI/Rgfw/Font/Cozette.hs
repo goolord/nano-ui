@@ -447,12 +447,7 @@ boxCoverage !srcW !srcH row !x0 !x1 !y0 !y1
 foldPenPositions :: CozetteFont -> Float -> Float -> Float -> a -> (a -> Int -> Int -> Word32 -> IO a) -> Text -> IO a
 foldPenPositions font !scale !logX !logY z step = go (0 :: Int) (0 :: Int) z
   where
-    -- Ties round up, matching nano-ui's onGrid, so pens stay in phase with
-    -- snapped geometry at fractional scales (125%: a 6px advance is 7.5 px).
-    pen origin i advance =
-      let !r = (origin + fromIntegral i * advance) * scale
-          !f = floor r :: Int
-       in if r - fromIntegral f >= 0.5 then f + 1 else f
+    pen origin i advance = round ((origin + fromIntegral i * advance) * scale)
     go !col !line !acc t = case T.uncons t of
       Nothing -> pure acc
       Just ('\r', rest) -> go 0 line acc rest
