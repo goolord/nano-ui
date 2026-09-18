@@ -508,6 +508,7 @@ module NanoUI
   , alignCenter
   , alignTop
   , alignBottom
+  , alignBaseline
   , tight
   , percent
   , gridMinColW
@@ -861,6 +862,7 @@ import NanoUI.Style
   , tinted
   , windowColor
   , windowStyle
+  , alignBaseline
   , alignBottom
   , alignCenter
   , alignEnd

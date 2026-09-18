@@ -239,7 +239,7 @@ drawImageUV r (ImageId tid) u0 v0 u1 v1 c = emitOp (DrawImageRect r tid u0 v0 u1
 drawText :: V2 -> AlignX -> AlignY -> Text -> Color -> CanvasM ()
 drawText (V2 x y) alignX alignY txt col =
   let ax = case alignX of AlignStart -> 0; AlignCenter -> 0.5; AlignEnd -> 1
-      ay = case alignY of AlignTop -> 1; AlignMiddle -> 0.5; AlignBottom -> 0
+      ay = case alignY of AlignTop -> 1; AlignMiddle -> 0.5; AlignBottom -> 0; AlignBaseline -> -1
    in emitOp (DrawText x y ax ay txt col)
 
 -- -----------------------------------------------------------------------------

@@ -85,6 +85,7 @@ testSpecs =
   , TestSpec "grid-nested" False runNestedGridTest
   , TestSpec "stale-font-color" False runStaleFontColorTest
   , TestSpec "font-composition" True runFontCompositionTest
+  , TestSpec "align-baseline" True runAlignBaselineTest
   -- Drawing
   , TestSpec "draw-square-geometry" False runSquareGeometryTest
   , TestSpec "draw-external-text" False runExternalTextTest

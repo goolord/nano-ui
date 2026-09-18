@@ -3,6 +3,7 @@ module Cases.Grid
   , runNestedGridTest
   , runStaleFontColorTest
   , runFontCompositionTest
+  , runAlignBaselineTest
   ) where
 
 import Control.Monad (void)
@@ -113,4 +114,33 @@ runFontCompositionTest ctx failed = do
       assertEq failed (textNodeFontWeight b) WeightBold
       assertEq failed (textNodeFontStyle i) FontStyleItalic
       assertEq failed (textNodeTextDecoration u) DecorationUnderline
+    _ -> assert failed False
+
+-- | Labels of different sizes, a button and a padded column holding a label all
+-- share one baseline on a baseline-aligned row: the button by its label and the
+-- column by its first child, not its larger last one. The row is tall enough
+-- to hold them, so what follows starts below all of them. The test font's
+-- ascent is 0.8 of its line height.
+runAlignBaselineTest :: Context -> IORef Int -> IO ()
+runAlignBaselineTest ctx failed = do
+  let ui = column $ do
+        rowWith (tight . gap 8) $ do
+          void $ labelWith (tight . alignBaseline . fontSize 32) "Big"
+          void $ labelWith (tight . alignBaseline) "small"
+          void $ buttonWith alignBaseline "Go"
+          columnWith (tight . alignBaseline . padXY 0 5) $ do
+            void $ label "nested"
+            void $ labelWith (tight . fontSize 24) "second"
+        void $ label "after"
+  _ <- runFrame ctx (withInput 400 200) ui
+  spans <- collectTextSpans ctx
+  case mapM (`spanOf` spans) ["Big", "small", "Go", "nested", "second", "after"] of
+    Just [(big, _), (small, _), (go, _), (nested, _), (second, _), (after, _)] -> do
+      let baseline r = rectY r + 0.8 * rectH r
+          near r = abs (baseline r - baseline big) < 0.5
+      assert failed (near small)
+      assert failed (near go)
+      assert failed (near nested)
+      assert failed (rectY small > rectY big)
+      assert failed (rectY after >= maximum [rectY r + rectH r | r <- [big, small, go, second]])
     _ -> assert failed False

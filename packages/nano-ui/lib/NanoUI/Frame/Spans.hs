@@ -67,10 +67,11 @@ import NanoUI.Layout.Arena
   , getWidthSizing
   , isFloatingNode
   , isScrollNode
+  , hasCenteredLabel
   , isWidgetNode
   , parentIsRow
   )
-import NanoUI.Layout.Solve (findAncestorMaxW)
+import NanoUI.Layout.Solve (findAncestorMaxW, textWrapCap)
 import NanoUI.Style (AlignX (..), FontVariant (..), Style (..), Theme (..), themeAccent, themeMuted, themePanel)
 import NanoUI.Types (Color (..), Rect (..), lerpColor, onGrid, rectIntersect)
 import NanoUI.Widgets.ColorPicker (ColorPickerPart (..), colorPickerPartOf, colorPickerPartRect, colorPickerPreviewGeom)
@@ -225,10 +226,7 @@ collectNodeTextSpans ctx idx = do
                     measureW = fmap fst . measure
                     lineH = fmLineHeight fm
                     contentW = max 0 (w - 2 * ix)
-                    wrapCap
-                      | effMaxW < 1e8 = max 0 effMaxW
-                      | wTag == SizingGrow && w > 0 = w
-                      | otherwise = effMaxW
+                    wrapCap = textWrapCap effMaxW wTag w
                 tw <- measureW raw
                 if T.any (== '\n') raw || (not isRowChild && wrapCap < 1e8 && wrapCap + 0.5 < tw)
                   then do
@@ -306,13 +304,7 @@ widgetTextSpans ctx nt idx x y w h = do
 -- dimensions, but not the absolute node origin. Text
 -- fields / areas / colour pickers / sliders are data-dependent and stay out.
 cacheableWidgetLabel :: NodeType -> Bool
-cacheableWidgetLabel = \case
-  NodeButton -> True
-  NodeSelect -> True
-  NodeTree -> True
-  NodeCheckbox -> True
-  NodeRadio -> True
-  _ -> False
+cacheableWidgetLabel = hasCenteredLabel
 
 widgetTextPlacements ::
   Context -> NodeType -> NodeIdx -> Float -> Float -> Float -> Float -> IO [(T.Text, Float, Float, Float, Float)]

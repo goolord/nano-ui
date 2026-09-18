@@ -8,6 +8,7 @@ module NanoUI.Layout.Arena
   , NodeType (..)
   , NodeArenaArrays (..)
   , isWidgetNode
+  , hasCenteredLabel
   , isContainerNode
   , isScrollNode
   , isFloatingNode
@@ -188,6 +189,18 @@ isWidgetNode nt =
     NodeColorPicker -> True
     NodeTree -> True
     NodeDrawing -> True
+    _ -> False
+
+-- | Widgets that paint one line of label text vertically centered in their box
+-- ('computeWidgetLabel'), which is also their baseline.
+hasCenteredLabel :: NodeType -> Bool
+hasCenteredLabel nt =
+  case nt of
+    NodeButton -> True
+    NodeSelect -> True
+    NodeTree -> True
+    NodeCheckbox -> True
+    NodeRadio -> True
     _ -> False
 
 isContainerNode :: NodeType -> Bool

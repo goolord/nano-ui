@@ -107,6 +107,7 @@ module NanoUI.Style
   , alignCenter
   , alignTop
   , alignBottom
+  , alignBaseline
   ) where
 
 import Data.Bits ((.&.), (.|.))
@@ -127,7 +128,10 @@ data Direction = Row | Column
 data AlignX = AlignStart | AlignCenter | AlignEnd
   deriving (Eq, Show, Enum, Bounded)
 
-data AlignY = AlignTop | AlignMiddle | AlignBottom
+-- | 'AlignBaseline' lines a row's text children up on their first baseline, and
+-- sits any other child on it by its bottom edge. Outside a row it is
+-- 'AlignTop'.
+data AlignY = AlignTop | AlignMiddle | AlignBottom | AlignBaseline
   deriving (Eq, Show, Enum, Bounded)
 
 data Padding = Padding
@@ -378,6 +382,12 @@ alignTop l = l {layoutAlignY = AlignTop}
 
 alignBottom :: Layout -> Layout
 alignBottom l = l {layoutAlignY = AlignBottom}
+
+-- | Sit on the row's shared text baseline, so labels of different sizes read
+-- as one line of type. 'alignBottom' lines up their boxes instead, and a larger
+-- font's deeper descent lifts its baseline above the smaller one's.
+alignBaseline :: Layout -> Layout
+alignBaseline l = l {layoutAlignY = AlignBaseline}
 
 data Style = Style
   { styleBg :: {-# UNPACK #-} !Color
