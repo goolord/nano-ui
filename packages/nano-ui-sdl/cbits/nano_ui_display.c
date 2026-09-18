@@ -48,8 +48,12 @@ static bool nano_ui_resize_watch(void *userdata, SDL_Event *event)
     if (!g_resize_cb || !event) {
         return true;
     }
+    /* Not SDL_EVENT_WINDOW_RESIZED: SDL sends it just before the pixel size
+     * change, which is what tells the renderer to resize its swap chain. A
+     * frame drawn on RESIZED goes to the old-size backbuffer, shown cropped
+     * or with a bare strip, and the size then counts as drawn, so the window
+     * trails the drag by a step. */
     if (event->type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED
-        || event->type == SDL_EVENT_WINDOW_RESIZED
         || event->type == SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED) {
         g_resize_cb();
     }

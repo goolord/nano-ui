@@ -35,6 +35,13 @@
   the window fits, so a resize drag no longer creates a new render target
   for every pixel the border moves.
 
+### Fixed
+
+- A resize drag no longer trails the border by a step. Each step was drawn
+  on `SDL_EVENT_WINDOW_RESIZED`, before the renderer had resized its swap
+  chain, so it went to the old-size backbuffer and showed cropped or with a
+  bare strip; frames are now drawn on the pixel size change that follows.
+
 ### Removed
 
 - `newSdlContext`; the runners create their own context.

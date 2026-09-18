@@ -6,6 +6,7 @@ module NanoUI.Sdl.Display
   , queryWindowRefreshHz
   , queryWindowLogicalSize
   , queryMouseWindowPos
+  , zoomWindow
   , installResizeWatch
   , refreshEventType
   , initRefreshEvent
@@ -25,7 +26,8 @@ import SDL3.Sys.Bindgen.Stdinc (Uint32 (..))
 import SDL3.Sys.Bindgen.Video (SDL_Window)
 import SDL3.Sys.Events (pushEvent, registerEvents)
 import SDL3.Sys.Mouse (getMouseState)
-import SDL3.Sys.Video (getWindowPixelDensity, getWindowSize)
+import SDL3.Sys.Bindgen.Rect (SDL_Rect (..))
+import SDL3.Sys.Video (getDisplayForWindow, getDisplayUsableBounds, getWindowPixelDensity, getWindowSize, setWindowPosition, setWindowSize)
 import System.IO.Unsafe (unsafePerformIO)
 
 defaultFontSize :: Float
@@ -129,3 +131,20 @@ foreign import ccall safe "nano_ui_install_resize_watch"
 
 foreign import ccall safe "nano_ui_remove_resize_watch"
   removeResizeWatchC :: IO ()
+
+-- | Grow a window just opened at a logical size by the UI zoom, as far as
+-- the usable area of its display allows, and centre it again.
+zoomWindow :: Ptr SDL_Window -> Size -> Float -> IO ()
+zoomWindow win (Size w h) zoom = do
+  display <- getDisplayForWindow win
+  usable <- alloca $ \rp -> do
+    ok <- getDisplayUsableBounds display rp
+    if ok then Just <$> peek rp else pure Nothing
+  let fit want avail = case avail of
+        Just a | a > 0 -> min want (fromIntegral a)
+        _ -> want
+      zw = fit (w * zoom) ((.w) <$> usable)
+      zh = fit (h * zoom) ((.h) <$> usable)
+      centred = 0x2FFF0000 -- SDL_WINDOWPOS_CENTERED
+  void $ setWindowSize win (round zw) (round zh)
+  void $ setWindowPosition win centred centred
