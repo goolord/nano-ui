@@ -17,6 +17,7 @@ module Cases.Scroll
   , runScrollMetricsTest
   , runScrollIntoViewTest
   , runScrollGlideClampTest
+  , runScroll2DGrowMinWidthTest
   ) where
 
 import Control.Monad (forM, forM_, replicateM, replicateM_, void, when)
@@ -720,3 +721,29 @@ runScrollGlideClampTest ctx failed = do
         Just m -> do
           assertGt failed (v2Y (scrollRange m)) 0
           assert failed (off <= v2Y (scrollRange m) + 0.5)
+
+-- A grow cell with its own minimum width counts as that minimum in a 2D
+-- scroller, not as its widest label: the row fits once the window clears the
+-- cell's minimum and the fixed cells beside it. Without a minimum, a grow
+-- wrapper's content still counts, so wide content keeps its sideways scroll.
+runScroll2DGrowMinWidthTest :: Context -> IORef Int -> IO ()
+runScroll2DGrowMinWidthTest ctx failed = do
+  let longName = T.replicate 12 (T.pack "long name ")
+      rows cell =
+        scrollArea2D (fillW . fixedH 120) $
+          columnWith (fillW . tight) $
+            replicateM_ 3 $
+              rowWith (fillW . gap 10 . tight) $ do
+                void cell
+                rowWith (fixedW 80 . tight) (label (T.pack "size"))
+      minCell = columnWith (grow . minW 100 . tight) (label longName)
+      rangeX inp ui = do
+        (wid, ()) <- warmup2 ctx inp ui
+        maybe (-1) (v2X . scrollRange) <$> getScrollMetrics ctx wid
+  -- The row's least width is 100 + 10 + 80 = 190: fits at 400, not at 150.
+  wide <- rangeX (withInput 400 200) (rows minCell)
+  assertEq failed wide 0
+  narrow <- rangeX (withInput 150 200) (rows minCell)
+  assertGt failed narrow 0
+  wrapped <- rangeX (withInput 400 200) (rows (columnWith (grow . tight) (rowWith (fixedW 600 . tight) (label (T.pack "wide")))))
+  assertGt failed wrapped 0

@@ -607,10 +607,24 @@ measureContainer env@SolveEnv {seArena = na, seArrays = a} idx = do
           n <- loadChildrenScratch na idx (flowChildSize env False innerMaxW innerAvailH)
           foldChromeColumnScratch na n gap
         else foldChildDimsFromParent na idx dir gap
+  -- A grow container with its own minimum width, whose width is assigned from
+  -- above, reports that minimum rather than its content: it shrinks that far
+  -- in a row that is short of space, so that is the least it needs. As with
+  -- CSS's min-width on a flex item, the explicit minimum replaces the
+  -- content-based one. Otherwise a 2D scroller, which lays its content out at
+  -- the width it reports, scrolls sideways for a long label in a cell that
+  -- would have fit. Without a minimum the content still counts, so a grow
+  -- wrapper around a wide table keeps its sideways scroll.
+  minAssigned <-
+    if wTag == SizingGrow && minW > 0 && not (isFloatingNode nt)
+      then growParent na idx
+      else pure False
   let w =
         case wTag of
           SizingFixed -> clamp minW maxW wVal
-          _ -> clamp minW maxW (contentW + padX)
+          _
+            | minAssigned -> clamp minW maxW 0
+            | otherwise -> clamp minW maxW (contentW + padX)
       h =
         case hTag of
           SizingFixed -> clamp minH maxH hVal

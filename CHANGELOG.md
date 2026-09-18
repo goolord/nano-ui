@@ -153,6 +153,9 @@
   the field.
 - `useDrag2D` does not start a drag during a menu's pointer gesture.
 - `drawingVersioned 0` is treated as unversioned, as `drawing` is.
+- A grow container with a `minW` counts as that minimum, not as its content,
+  in the width of the scroller around it. A long label in such a cell no
+  longer makes a 2D scroller scroll sideways while the row would fit.
 
 ### Removed
 

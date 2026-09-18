@@ -222,6 +222,7 @@ testSpecs =
   , TestSpec "scroll-button-click" False runScrollButtonClickTest
   , TestSpec "scroll-scrolled-out" False runScrolledOutImmunityTest
   , TestSpec "scroll-lockstep-probe" False runScrollLockstepProbeTest
+  , TestSpec "scroll-2d-grow-min-width" False runScroll2DGrowMinWidthTest
   , TestSpec "page-scroll-backdrop-coverage" False runPageScrollBackdropCoverageTest
   , TestSpec "scroll-2d-pad-fill-overflow" True run2DPadFillOverflowTest
   , TestSpec "scroll-2d-pad-overflow-scrolls" True run2DPadOverflowScrollsTest
