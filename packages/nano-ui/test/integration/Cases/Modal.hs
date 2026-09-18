@@ -4,6 +4,7 @@ module Cases.Modal
   , runModalOverlayTest
   , runModalFitsTextTest
   , runModalFractionalScaleNoScrollTest
+  , runModalFillLabelFitsTest
   ) where
 
 import Control.Monad (forM_, when)
@@ -169,3 +170,39 @@ runModalFitsTextTest ctx failed = do
       whole = [r | (r, t, _, _, _) <- spans, t == sentence]
   assertEq failed (length whole) 1
   forM_ whole $ \(Rect _ _ tw _) -> assertGt failed (dw + 0.5) tw
+
+-- A modal fits a body with a filling label set in a smaller font than the
+-- base, with its last row in view (regression: placing the modal measured
+-- every label in the base font, so the smaller label, sized for its own font,
+-- wrapped onto a second line the modal had not measured; the modal scrolled
+-- and clipped its buttons).
+runModalFillLabelFitsTest :: Context -> IORef Int -> IO ()
+runModalFillLabelFitsTest _ failed = forM_ [12, 17] $ \base -> do
+  ctx <- (`withFontMetrics` monospaceMetrics base) <$> newContext
+  -- Wide enough for the label on one line in its own font, but not in the
+  -- base font.
+  let inp = withInput 2000 800
+      body =
+        columnWith (gap 14 . minW 560 . \l -> l {layoutPadding = Padding 0 0 0 0}) $ do
+          labelWith (tight . fillW) "How cabal should log in to Hackage for uploads:"
+          _ <- radio ["cabal's config file (no login found in it)", "A username and password", "An API token"] (0 :: Int)
+          labelWith (tight . fillW . fontSize 14) "Kept in memory for this session only. The password goes to cabal on its standard input."
+          separator
+          rowWith (fillW . gap 8 . alignMid . tight) $ do
+            flex
+            _ <- button "Cancel"
+            button' "Use this login"
+      ui = modal True "Hackage login" body
+  (dlg, mOk) <- warmup2 ctx inp ui
+  spans0 <- collectOverlayTextSpans ctx inp
+  let wheel = inp {inputMousePos = centerOf dlg, inputScroll = V2 0 3}
+  _ <- runFrame ctx wheel ui
+  spans1 <- collectOverlayTextSpans ctx wheel
+  assert failed (not (null (spanYOf "An API token" spans0)))
+  assertEq failed (spanYOf "An API token" spans1) (spanYOf "An API token" spans0)
+  case mOk of
+    Nothing -> assert failed False
+    Just ok -> do
+      let Rect _ dy _ dh = respRect dlg
+          Rect _ by _ bh = respRect ok
+      assertGt failed (dy + dh + 0.5) (by + bh)

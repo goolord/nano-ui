@@ -3,6 +3,7 @@
 module NanoUI.Layout.Solve
   ( solveLayout
   , FontResolver
+  , Measurers (..)
   , placeModals
   , placeWindows
   , placePopups
@@ -174,13 +175,21 @@ data SolveEnv = SolveEnv
   , seLookupMeasure :: !(WidgetId -> IO (Maybe CustomMeasureFn))
   }
 
--- | Env for placing floating nodes after the solve: every text node uses the
--- default font, and there is no custom measurement.
-floatingEnv :: NodeArena -> FontMetrics -> IO SolveEnv
-floatingEnv na fm = do
+-- | How text and custom widgets are measured. The solve and the placement of
+-- floating nodes after it measure with the same, so a label placed in a modal
+-- wraps exactly as the solve measured it for the modal's size.
+data Measurers = Measurers
+  { msFm :: !FontMetrics
+  , msMonoFm :: !FontMetrics
+  , msMeasure :: !(Text -> IO (Float, Float))
+  , msResolveFont :: !FontResolver
+  , msLookupMeasure :: !(WidgetId -> IO (Maybe CustomMeasureFn))
+  }
+
+solveEnv :: NodeArena -> Measurers -> IO SolveEnv
+solveEnv na Measurers {msFm, msMonoFm, msMeasure, msResolveFont, msLookupMeasure} = do
   a <- arenaArrays na
-  let measure = measureTextIO fm
-  pure (SolveEnv na a fm fm measure (\_ _ _ _ -> pure (fm, measure)) (const (pure Nothing)))
+  pure (SolveEnv na a msFm msMonoFm msMeasure msResolveFont msLookupMeasure)
 
 -- | Strict accumulator for flow-child folds: a child count and two running
 -- sums or extents. The strict fields keep the folds unboxed.
@@ -253,25 +262,15 @@ measureTextNodeAt env idx txt outerW shouldWrap = do
 wrapsNarrower :: Bool -> Float -> Float -> Bool
 wrapsNarrower allowed wrapW lineW = allowed && wrapW + 0.5 < lineW && wrapW > 0
 
-solveLayout ::
-  NodeArena ->
-  FontMetrics ->
-  FontMetrics ->
-  (Text -> IO (Float, Float)) ->
-  FontResolver ->
-  (WidgetId -> IO (Maybe CustomMeasureFn)) ->
-  Float ->
-  Float ->
-  IO ()
-solveLayout na fm monoFm measure resolveFont lookupMeasure rootW rootH =
+solveLayout :: NodeArena -> Measurers -> Float -> Float -> IO ()
+solveLayout na ms rootW rootH =
   withArenaArraysSnap na $ do
-    a <- arenaArrays na
     count <- arenaCount na
     when (count > 0) $ do
-      let env = SolveEnv na a fm monoFm measure resolveFont lookupMeasure
+      env <- solveEnv na ms
       measurePass env count
       positionNodeA env 0 0 0 0 rootW rootH
-      quantizeResultsA a count (fmSnapScale fm)
+      quantizeResultsA (seArrays env) count (fmSnapScale (msFm ms))
 
 quantizeResultsA :: NodeArenaArrays -> Int -> Float -> IO ()
 quantizeResultsA a count s
@@ -1598,9 +1597,9 @@ alignY AlignTop cy _ _ = cy
 alignY AlignMiddle cy ch ih = cy + (ch - ih) / 2
 alignY AlignBottom cy ch ih = cy + ch - ih
 
-placeModals :: NodeArena -> FontMetrics -> Float -> Float -> IO ()
-placeModals na fm winW winH = do
-  env <- floatingEnv na fm
+placeModals :: NodeArena -> Measurers -> Float -> Float -> IO ()
+placeModals na ms winW winH = do
+  env <- solveEnv na ms
   let margin = windowMargin
   forNodes_ na $ \idx -> do
     nt <- getNodeType na idx
@@ -1616,13 +1615,13 @@ placeModals na fm winW winH = do
 
 placeWindows ::
   NodeArena ->
-  FontMetrics ->
+  Measurers ->
   Float ->
   Float ->
   (WidgetId -> IO (Maybe (Float, Float))) ->
   (WidgetId -> IO (Maybe (Float, Float))) ->
   IO ()
-placeWindows na fm winW winH lookupPos lookupSize = do
+placeWindows na ms winW winH lookupPos lookupSize = do
   let margin = windowMargin
   forNodes_ na $ \idx -> do
     nt <- getNodeType na idx
@@ -1631,13 +1630,13 @@ placeWindows na fm winW winH lookupPos lookupSize = do
       (_, _, iw, ih) <- getRect na idx
       (w0, h0) <- fromMaybe (min iw winW, min ih winH) <$> lookupSize wid
       mpos <- lookupPos wid
-      placeWindowNode na fm winW winH idx w0 h0 $ \w -> fromMaybe (winW - w - margin, margin) mpos
+      placeWindowNode na ms winW winH idx w0 h0 $ \w -> fromMaybe (winW - w - margin, margin) mpos
 
 -- | Lay out window @idx@ at size @w0 h0@, clamped to its min and max size and
 -- the screen, with its origin, given that size, clamped on screen. Fit sizing
 -- caps at intrinsic size; floating windows use an explicit frame size.
-placeWindowNode :: NodeArena -> FontMetrics -> Float -> Float -> NodeIdx -> Float -> Float -> (Float -> (Float, Float)) -> IO ()
-placeWindowNode na fm winW winH idx w0 h0 originFor = do
+placeWindowNode :: NodeArena -> Measurers -> Float -> Float -> NodeIdx -> Float -> Float -> (Float -> (Float, Float)) -> IO ()
+placeWindowNode na ms winW winH idx w0 h0 originFor = do
   (minW, minH, maxW, maxH) <- getMinMax na idx
   let w = clamp minW (min maxW winW) w0
       h = clamp minH (min maxH winH) h0
@@ -1645,7 +1644,7 @@ placeWindowNode na fm winW winH idx w0 h0 originFor = do
       x = clamp 0 (max 0 (winW - w)) x0
       y = clamp 0 (max 0 (winH - h)) y0
   setRect na idx x y w h
-  env <- floatingEnv na fm
+  env <- solveEnv na ms
   (pad, gap, dir) <- containerFlow (seArrays env) idx
   positionChildren env 0 idx dir gap pad x y w h
 
@@ -1736,13 +1735,13 @@ computePopupPosition winW winH margin iw ih anchor placement offset =
 
 placePopups ::
   NodeArena ->
-  FontMetrics ->
+  Measurers ->
   Float ->
   Float ->
   (WidgetId -> IO (Maybe (PopupAnchor, PopupPlacement, Float))) ->
   IO ()
-placePopups na fm winW winH lookupAnchor = do
-  env <- floatingEnv na fm
+placePopups na ms winW winH lookupAnchor = do
+  env <- solveEnv na ms
   let margin = windowMargin
   forNodes_ na $ \idx -> do
     nt <- getNodeType na idx

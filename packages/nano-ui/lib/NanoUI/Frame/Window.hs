@@ -3,7 +3,8 @@
 -- | Floating window input: dragging by the title bar, edge and inner-east
 -- resizing, the resize cursor, and persisting window placement.
 module NanoUI.Frame.Window
-  ( lookupWindowPos
+  ( contextMeasurers
+  , lookupWindowPos
   , lookupWindowSize
   , persistWindowPositions
   , updateWindowDrag
@@ -31,6 +32,7 @@ import NanoUI.Context
   , Slot (..)
   , InteractionState (..)
   , modifyInteraction
+  , lookupCustomMeasure
   )
 import NanoUI.Font (ScrollBarSlot (..))
 import NanoUI.Frame.Hit (findNodeByWidgetId, nodeInSubtree, topmostOverlayAtMouse)
@@ -55,7 +57,7 @@ import NanoUI.Layout.Arena
   , getRect
   , getWidgetId
   )
-import NanoUI.Layout.Solve (placeWindowNode, scrollBarSlotOf)
+import NanoUI.Layout.Solve (Measurers (..), placeWindowNode, scrollBarSlotOf)
 import NanoUI.Style (Padding (..))
 import NanoUI.Types (DamageBounds (..), Rect (..), V2 (..), haloDamageSlop, rectContains, rectInflate)
 
@@ -297,7 +299,7 @@ relayoutWindow ctx winW winH wid nw nh = do
     Just idx -> do
       mpos <- lookupWindowPos ctx wid
       (x, y, _, _) <- getRect (ctxNodeArena ctx) idx
-      placeWindowNode (ctxNodeArena ctx) (ctxFontMetrics ctx) winW winH idx nw nh (const (fromMaybe (x, y) mpos))
+      placeWindowNode (ctxNodeArena ctx) (contextMeasurers ctx) winW winH idx nw nh (const (fromMaybe (x, y) mpos))
 
 -- | Resize edge under @mouse@ for the topmost window whose halo holds it,
 -- unless the halo is blocked or the pointer is on the title bar or one of its
@@ -430,3 +432,17 @@ windowTitleHasInteractive ctx idx mouse = do
     Just wid -> do
       mNode <- findNodeByWidgetId ctx wid
       maybe (pure False) (\wi -> nodeInSubtree ctx wi idx) mNode
+
+-- | How the context measures text and custom widgets, for the solve and for
+-- placing floating nodes after it.
+contextMeasurers :: Context -> Measurers
+contextMeasurers ctx =
+  Measurers
+    { msFm = ctxFontMetrics ctx
+    , msMonoFm = ctxMonoFontMetrics ctx
+    , msMeasure = ctxMeasureText ctx
+    , msResolveFont = \sz weight style var -> do
+        (fm, _) <- ctxResolveFont ctx sz weight style var
+        pure (fm, ctxResolveMeasure ctx sz weight style var)
+    , msLookupMeasure = lookupCustomMeasure ctx
+    }

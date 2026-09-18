@@ -48,7 +48,6 @@ import NanoUI.Context
   , stepScrollGlides
   , takeDamage
   , tickAnimations
-  , lookupCustomMeasure
   , hasCustomLayoutInputs
   , ensureMetricCaches
   , InteractionState (..)
@@ -124,7 +123,8 @@ import NanoUI.Frame.TextEdit.Menu
   , openTextEditMenu
   )
 import NanoUI.Frame.Window
-  ( lookupWindowPos
+  ( contextMeasurers
+  , lookupWindowPos
   , lookupWindowSize
   , persistWindowPositions
   , updateWindowDrag
@@ -254,7 +254,7 @@ runFrameEff unlift ctx inp ui = do
   when (movedResize || movedWindow) $
     placeWindows
       (ctxNodeArena ctx)
-      (ctxFontMetrics ctx)
+      (contextMeasurers ctx)
       w
       h
       (lookupWindowPos ctx)
@@ -360,29 +360,19 @@ resetUiBuildScopes ctx = do
 
 solvePlaceWindows :: Context -> Float -> Float -> IO ()
 solvePlaceWindows ctx w h = do
-  let fontResolver sz weight style var = do
-        (fm, _) <- ctxResolveFont ctx sz weight style var
-        pure (fm, ctxResolveMeasure ctx sz weight style var)
-  solveLayout
-    (ctxNodeArena ctx)
-    (ctxFontMetrics ctx)
-    (ctxMonoFontMetrics ctx)
-    (ctxMeasureText ctx)
-    fontResolver
-    (lookupCustomMeasure ctx)
-    w
-    h
-  placeModals (ctxNodeArena ctx) (ctxFontMetrics ctx) w h
+  let ms = contextMeasurers ctx
+  solveLayout (ctxNodeArena ctx) ms w h
+  placeModals (ctxNodeArena ctx) ms w h
   placeWindows
     (ctxNodeArena ctx)
-    (ctxFontMetrics ctx)
+    ms
     w
     h
     (lookupWindowPos ctx)
     (lookupWindowSize ctx)
   placePopups
     (ctxNodeArena ctx)
-    (ctxFontMetrics ctx)
+    ms
     w
     h
     (lookupPopupConfig ctx)
