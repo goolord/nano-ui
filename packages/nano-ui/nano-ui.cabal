@@ -1,6 +1,6 @@
 cabal-version:      3.4
 name:               nano-ui
-version:            0.1.0.0
+version:            0.1.0.1
 synopsis:           Immediate-mode GUI toolkit for Haskell
 description:
     Widgets, layout, and input handling for immediate-mode interfaces. A view
