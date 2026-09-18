@@ -156,6 +156,10 @@
 - A grow container with a `minW` counts as that minimum, not as its content,
   in the width of the scroller around it. A long label in such a cell no
   longer makes a 2D scroller scroll sideways while the row would fit.
+- Modals, windows and popups lay out their contents with the fonts and
+  custom measurements the solve used. A label in a font size other than the
+  base no longer wraps onto a line the modal did not make room for, which
+  made the modal scroll and clip its last row.
 
 ### Removed
 
