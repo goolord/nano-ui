@@ -142,6 +142,9 @@
 
 ### Fixed
 
+- Disabled context-menu rows (`menuItemDisabled`) take the same height,
+  minimum width and label inset as enabled rows, instead of a bare label
+  flush against the panel edge.
 - Where two widgets overlap, a press goes to the one hover highlights (the
   earlier sibling, which paints on top).
 - Opening a modal or floating window no longer shifts the ids, and so the

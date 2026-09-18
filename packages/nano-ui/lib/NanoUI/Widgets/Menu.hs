@@ -21,12 +21,12 @@ import Control.Monad (void, when)
 import Data.IntMap.Strict qualified as IM
 import Data.Text (Text)
 import Effectful (Eff, type (:>))
-import NanoUI.Context (getStore, intKey, modifyStore)
-import NanoUI.Font (menuItemPadX, menuItemRowH, menuMinW, menuOuterPad, menuSepH)
+import NanoUI.Context (Context (..), getStore, intKey, modifyStore)
+import NanoUI.Font (menuItemPadX, menuItemRowH, menuMinW, menuOuterPad, menuSepH, widgetContentInset)
 import NanoUI.Input (inputMousePos, inputMouseReleased)
 import NanoUI.Monad (Ui, askContext, askDefaultLayout, askInput, nextId, uiIO)
 import NanoUI.Store (WidgetStore (..), slotKey, Slot (..))
-import NanoUI.Style (Layout (..), defaultLayout, fillW, fixedH, fontMuted, gap, minW, padXY, tight)
+import NanoUI.Style (Layout (..), Padding (..), defaultLayout, fillW, fixedH, fontMuted, gap, minW, padXY, tight)
 import NanoUI.Types (PopupAnchor (..), PopupPlacement (..), V2 (..))
 import NanoUI.WidgetText (buttonFlagMenu, buttonFlagMenuBar)
 import NanoUI.Widgets.Combinators (buttonStyled)
@@ -121,13 +121,23 @@ data MenuItem = MenuItem
 
 -- | Render a menu row, returning its full 'Response'. A disabled row is a
 -- muted label, not a disabled button: hover tracking does not know a button's
--- enabled flag and would still highlight it. Its response never reports
--- interaction.
+-- enabled flag and would still highlight it. Text nodes ignore padding, so the
+-- label sits in a container that reproduces an enabled row's geometry: the
+-- 'menuItemRowH' height and 'menuMinW' width, the label inset 'menuItemPadX'
+-- plus the button's content inset, and the same total horizontal gutter the
+-- solver reserves for menu buttons. Its response never reports interaction.
 menuItemWith :: Ui :> es => MenuItem -> Eff es Response
 menuItemWith (MenuItem lbl hint enabled)
   | enabled = buttonStyled text 0 menuRowLayout buttonFlagMenu
   | otherwise = do
-      resp <- labelEx (tight . fillW . fontMuted $ defaultLayout) text
+      ctx <- askContext
+      let (ix, _) = widgetContentInset (ctxFontMetrics ctx)
+          padLeft = menuItemPadX + ix
+          padRight = max 0 (2 * (menuOuterPad + menuItemPadX) - padLeft)
+          rowLayout = (minW menuMinW defaultLayout) {layoutPadding = Padding padLeft padRight 0 0}
+      (_, resp) <-
+        containerResponse NodeContainer rowLayout $
+          labelEx (fixedH menuItemRowH . tight . fontMuted $ defaultLayout) text
       pure
         resp
           { rawRespHovered = False

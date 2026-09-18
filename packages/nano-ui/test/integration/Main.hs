@@ -278,6 +278,7 @@ testSpecs =
   -- Context menus and tooltips
   , TestSpec "context-menu-open" False runContextMenuOpenTest
   , TestSpec "context-menu-scroll-pos" False runContextMenuScrollPosTest
+  , TestSpec "context-menu-disabled-row" False runContextMenuDisabledRowTest
   , TestSpec "release-elsewhere" False runReleaseElsewhereTest
   , TestSpec "right-release-elsewhere" False runRightReleaseElsewhereTest
   , TestSpec "release-returns" False runReleaseReturnsTest

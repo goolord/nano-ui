@@ -1,6 +1,7 @@
 module Cases.ContextMenu
   ( runContextMenuOpenTest
   , runContextMenuScrollPosTest
+  , runContextMenuDisabledRowTest
   ) where
 
 import Control.Monad (void)
@@ -106,3 +107,28 @@ runContextMenuScrollPosTest ctx failed = do
           _ <- runFrame ctx inp0 ui
           spansAfter <- collectOverlayTextSpans ctx inp0
           assert failed (not (any (\(_, txt, _, _, _) -> "Scroll Cut" `T.isInfixOf` txt) spansAfter))
+
+-- | A disabled row lines up with the enabled rows around it: its label starts
+-- at the same x and it takes the same row height.
+runContextMenuDisabledRowTest :: Context -> IORef Int -> IO ()
+runContextMenuDisabledRowTest ctx failed = do
+  let inp0 = withInput 640 480
+      ui = column $ do
+        btn <- button' "Target Button"
+        _ <- contextMenu btn $ do
+          _ <- menuItem "Row Cut"
+          menuItemDisabled "Row Paste"
+          menuItem "Row Undo"
+        pure (btn, ())
+  (btnWarm, _) <- warmup2 ctx inp0 ui
+  let (inpRightDown, inpRightUp) = rightClickPair inp0 (centerOf btnWarm)
+  _ <- runFrame ctx inpRightDown ui
+  _ <- runFrame ctx inpRightUp ui
+  _ <- runFrame ctx inp0 ui
+  spans <- collectOverlayTextSpans ctx inp0
+  let find t = [r | (r, txt, _, _, _) <- spans, txt == t]
+  case (find "Row Cut", find "Row Paste", find "Row Undo") of
+    ([cut], [paste], [undo]) -> do
+      assert failed (abs (rectX paste - rectX cut) < 0.5)
+      assert failed (abs ((rectY paste - rectY cut) - (rectY undo - rectY paste)) < 0.5)
+    _ -> assert failed False
