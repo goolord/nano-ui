@@ -107,7 +107,7 @@ resetDrawArena da = do
 
 -- | Device pixel scale used to snap primitive origins/endpoints to whole
 -- device pixels. A non-positive value disables snapping. The SDL backend keeps
--- this in sync with the display scale. Headless contexts and the RGFW backend
+-- this in sync with the window pixel density. Headless contexts and the RGFW backend
 -- leave it disabled.
 {-# INLINE setDrawSnapScale #-}
 setDrawSnapScale :: DrawArena -> Float -> IO ()

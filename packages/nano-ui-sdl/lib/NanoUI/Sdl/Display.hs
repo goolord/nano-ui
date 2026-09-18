@@ -2,7 +2,7 @@
 
 module NanoUI.Sdl.Display
   ( defaultFontSize
-  , queryWindowDisplayScale
+  , queryWindowPixelDensity
   , queryWindowRefreshHz
   , queryWindowLogicalSize
   , queryMouseWindowPos
@@ -25,15 +25,22 @@ import SDL3.Sys.Bindgen.Stdinc (Uint32 (..))
 import SDL3.Sys.Bindgen.Video (SDL_Window)
 import SDL3.Sys.Events (pushEvent, registerEvents)
 import SDL3.Sys.Mouse (getMouseState)
-import SDL3.Sys.Video (getWindowDisplayScale, getWindowSize)
+import SDL3.Sys.Video (getWindowPixelDensity, getWindowSize)
 import System.IO.Unsafe (unsafePerformIO)
 
 defaultFontSize :: Float
 defaultFontSize = 16
 
-queryWindowDisplayScale :: Ptr SDL_Window -> IO Float
-queryWindowDisplayScale win = do
-  s <- getWindowDisplayScale win
+-- | Backbuffer pixels per window coordinate: the factor the retained
+-- framebuffer, glyph rasterization and snapping need. This is not
+-- 'SDL_GetWindowDisplayScale', which also folds in the desktop's content
+-- scale. On Windows window coordinates are already pixels, so at 125%
+-- scaling the display scale is 1.25 while the density is 1; sizing the
+-- framebuffer by the display scale rendered 1.56x the window's pixels and
+-- squeezed them back down on every present.
+queryWindowPixelDensity :: Ptr SDL_Window -> IO Float
+queryWindowPixelDensity win = do
+  s <- getWindowPixelDensity win
   pure (if s > 0 then s else 1)
 
 -- | Vertical refresh rate of the window's current display mode, in Hz

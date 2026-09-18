@@ -102,7 +102,7 @@ data FontMetrics = FontMetrics
   { fmLineHeight :: {-# UNPACK #-} !Float
   , fmAscent :: {-# UNPACK #-} !Float
   -- | Device pixels per logical unit used to snap glyph quads to the pixel
-  -- grid. The SDL backend sets this to the display scale so text lands on
+  -- grid. The SDL backend sets this to the window pixel density so text lands on
   -- whole device pixels.
   , fmSnapScale :: {-# UNPACK #-} !Float
   , fmAdvance :: Char -> Float

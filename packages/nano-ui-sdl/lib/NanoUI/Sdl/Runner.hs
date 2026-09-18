@@ -56,13 +56,15 @@ import NanoUI.Sdl.Font
   )
 import NanoUI.Sdl.NanoUIFont (NanoUIFont)
 import NanoUI.Sdl.Render (flushRenderBatch, renderDrawDataPass, snapDamage)
-import NanoUI.Sdl.Window (SdlEnv (..))
+import NanoUI.Sdl.Window (Retain (..), SdlEnv (..))
 import Foreign.Marshal.Alloc (alloca)
+import Foreign.Marshal.Utils (with)
 import Foreign.Ptr (Ptr, nullPtr)
 import Foreign.Storable (peek)
 import qualified NanoUI.Sdl.Image as SdlImage
 import SDL3.Sys.Bindgen.Blendmode (sDL_BLENDMODE_NONE)
 import SDL3.Sys.Bindgen.Pixels (data SDL_PIXELFORMAT_RGBA32)
+import SDL3.Sys.Bindgen.Rect (SDL_FRect (..))
 import SDL3.Sys.Bindgen.Render (SDL_Texture, data SDL_TEXTUREACCESS_TARGET)
 import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
 import SDL3.Sys.Render
@@ -213,7 +215,11 @@ finishDraw ctx env inp tex presentFull t0 t1 drawData dirtyAfterUi = do
             okTarget <- setRenderTarget (sdlRenderer env) nullPtr
             okClip <- setRenderClipRect (sdlRenderer env) (PtrConst.unsafeFromPtr nullPtr)
             void $ setRenderScale (sdlRenderer env) 1 1
-            okCopy <- renderTexture (sdlRenderer env) tex (PtrConst.unsafeFromPtr nullPtr) (PtrConst.unsafeFromPtr nullPtr)
+            -- The texture is larger than the window: copy only the used area.
+            r <- readIORef (sdlRetain env)
+            let src = SDL_FRect 0 0 (fromIntegral (retainW r)) (fromIntegral (retainH r))
+            okCopy <- with src $ \srcP ->
+              renderTexture (sdlRenderer env) tex (PtrConst.unsafeFromPtr srcP) (PtrConst.unsafeFromPtr nullPtr)
             pure (okTarget && okClip && okCopy)
       unless okBlit $ fail "SDL window presentation preparation failed"
       void $ renderPresentSafe (sdlRenderer env)
@@ -226,23 +232,36 @@ finishDraw ctx env inp tex presentFull t0 t1 drawData dirtyAfterUi = do
       writeIORef (sdlLastPresented env) True
       pure (dirtyAfterUi, inp)
 
+-- | Pixels a retained texture is rounded up to, in each dimension.
+retainBlock :: Int
+retainBlock = 256
+
 ensureRetain :: SdlEnv -> Int -> Int -> Float -> IO (Ptr SDL_Texture, Bool)
 ensureRetain env w h scale = do
-  (tex, ow, oh, oldScale) <- readIORef (sdlRetain env)
-  let scaleChanged = abs (oldScale - scale) > 0.001
-  if tex /= nullPtr && ow == w && oh == h
+  r <- readIORef (sdlRetain env)
+  let tex = retainTexture r
+      fits = w <= retainCapW r && h <= retainCapH r
+      -- Give memory back once the window is well inside the texture, but not
+      -- for a shrink of a block or so, which a drag back out would undo.
+      roomy = retainCapW r - w > 2 * retainBlock || retainCapH r - h > 2 * retainBlock
+      -- A new used size or density holds none of the frame to be drawn.
+      stale = w /= retainW r || h /= retainH r || abs (retainScale r - scale) > 0.001
+  if tex /= nullPtr && fits && not roomy
     then do
-      when scaleChanged $ writeIORef (sdlRetain env) (tex, w, h, scale)
-      -- Same pixel size after a DPI change still holds the old present.
-      pure (tex, scaleChanged)
+      when stale $ writeIORef (sdlRetain env) r {retainW = w, retainH = h, retainScale = scale}
+      pure (tex, stale)
     else mask_ $ do
+      let cw = roundUp w
+          ch = roundUp h
       -- Allocate before replacing: failure leaves the owned texture valid.
-      tex' <- createTexture (sdlRenderer env) SDL_PIXELFORMAT_RGBA32 SDL_TEXTUREACCESS_TARGET (fromIntegral w) (fromIntegral h)
+      tex' <- createTexture (sdlRenderer env) SDL_PIXELFORMAT_RGBA32 SDL_TEXTUREACCESS_TARGET (fromIntegral cw) (fromIntegral ch)
       when (tex' == nullPtr) $ fail "SDL_CreateTexture(retain) failed"
       void $ setTextureBlendMode tex' (fromIntegral sDL_BLENDMODE_NONE)
-      writeIORef (sdlRetain env) (tex', w, h, scale)
+      writeIORef (sdlRetain env) (Retain tex' cw ch w h scale)
       unless (tex == nullPtr) $ destroyTexture tex
       pure (tex', True)
+  where
+    roundUp n = max retainBlock (((n + retainBlock - 1) `div` retainBlock) * retainBlock)
 
 askSdlDebug :: Ui :> es => Eff es SdlDebugSnapshot
 askSdlDebug = do

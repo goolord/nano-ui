@@ -1272,12 +1272,12 @@ data SdlFontCache = SdlFontCache
   , sfcGlyphAtlas     :: !GlyphAtlas
   , sfcBasePt         :: !Float
   , sfcScaleRef       :: !(IORef Float)
-  -- ^ The display scale, owned by the window and read here.
+  -- ^ The window pixel density, owned by the window and read here.
   , sfcBaseEntries    :: !(IORef (CachedFontEntry, CachedFontEntry))
   , sfcDynamicCache   :: !(IORef (BoundedCache FontCacheKey CachedFontEntry))
   }
 
--- | Open the base sans and mono fonts at the display scale, and re-warm them
+-- | Open the base sans and mono fonts at the pixel density, and re-warm them
 -- into the glyph atlas after every atlas reset.
 newSdlFontCache ::
   FontSource -> -- ^ primary font source
@@ -1286,7 +1286,7 @@ newSdlFontCache ::
   FontSource -> -- ^ mono fallback font source
   GlyphAtlas ->
   Float ->      -- ^ base font size (pt)
-  IORef Float -> -- ^ display scale
+  IORef Float -> -- ^ pixel density
   IO SdlFontCache
 newSdlFontCache primary fallback mono monoFb ga basePt scaleRef = do
   scale <- readIORef scaleRef
@@ -1317,7 +1317,7 @@ newSdlFontCache primary fallback mono monoFb ga basePt scaleRef = do
       }
 
 -- | A font from a source (or its fallback) at a point size, rasterised at
--- the display scale, with its glyph metrics.
+-- the pixel density, with its glyph metrics.
 openCachedFont :: GlyphAtlas -> Float -> FontSource -> FontSource -> Float -> IO CachedFontEntry
 openCachedFont ga scale primary fallback pt = do
   font <- openFontSourceWithFallback primary fallback (pt * scale)
@@ -1344,7 +1344,7 @@ destroySdlFontCache cache = do
   (sans, mono) <- readIORef (sfcBaseEntries cache)
   closeCachedFonts (sfcGlyphAtlas cache) (cfeFont sans : cfeFont mono : map cfeFont (HM.elems (bcEntries dynamic)))
 
--- | Reopen the base fonts from @source@ at the current display scale, close
+-- | Reopen the base fonts from @source@ at the current pixel density, close
 -- every dynamic size, and reset the glyph atlas, which re-warms the new base
 -- fonts.
 reloadSdlFontCache :: SdlFontCache -> FontSource -> IO ()

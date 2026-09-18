@@ -24,6 +24,16 @@
 - A shaped line is shaped once and shared by measuring, preparing and
   drawing, and the font directories are walked once per process.
 - No longer depends on `vector`.
+- The framebuffer, glyph rasterization and snapping follow the window's
+  pixel density (`SDL_GetWindowPixelDensity`) instead of its display scale.
+  On Windows window coordinates are already pixels, so at 125% scaling every
+  frame drew 1.56 times the window's pixels and shrank them back when
+  presenting. Frames now draw at the window's size and text is no longer
+  resampled. Sizes are unchanged; geometry snaps to whole pixels rather
+  than to the 1.25x grid, so edges can move by up to half a pixel.
+- The retained framebuffer is allocated in 256 pixel blocks and reused while
+  the window fits, so a resize drag no longer creates a new render target
+  for every pixel the border moves.
 
 ### Removed
 

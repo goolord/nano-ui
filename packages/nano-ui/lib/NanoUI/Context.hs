@@ -518,7 +518,7 @@ setHost ctx val = do
   writeIORef (ctxHost ctx) (Map.insert k (toDyn val) m)
 
 -- | Set the device pixel scale used to snap geometry origins/endpoints to
--- whole pixels. The SDL backend calls this when the display scale is synced.
+-- whole pixels. The SDL backend calls this when the window pixel density is synced.
 {-# INLINE setDrawSnapScale #-}
 setDrawSnapScale :: Context -> Float -> IO ()
 setDrawSnapScale ctx s = Draw.setDrawSnapScale (ctxDrawArena ctx) s

@@ -1,6 +1,8 @@
 module NanoUI.Sdl.Window
   ( RgbaImage (..)
   , SdlEnv (..)
+  , Retain (..)
+  , noRetain
   , SdlOptions (..)
   , defaultSdlOptions
   , withSdl
@@ -33,7 +35,7 @@ import NanoUI.Sdl.Display
   , initRefreshEvent
   , pushRefreshEvent
   , queryMouseWindowPos
-  , queryWindowDisplayScale
+  , queryWindowPixelDensity
   , queryWindowLogicalSize
   , queryWindowRefreshHz
   )
@@ -147,10 +149,12 @@ defaultSdlOptions =
 
 -- | SDL_WINDOW_HIGH_PIXEL_DENSITY (0x2000): without it the window's surface
 -- gets scale 1.0 even on a 2x / HiDPI output, so the compositor upscales the
--- whole window (blurry "looks upscaled"). With it, SDL_GetWindowDisplayScale
--- returns the real output scale, the window keeps its logical size, and the
--- pixel buffer (and therefore the retain texture, glyph atlas, and fonts)
--- rasterizes at the native pixel density.
+-- whole window (blurry "looks upscaled"). With it, SDL_GetWindowPixelDensity
+-- returns the real output scale where window coordinates are points (macOS,
+-- Wayland), the window keeps its logical size, and the pixel buffer (and
+-- therefore the retain texture, glyph atlas, and fonts) rasterizes at the
+-- native pixel density. On Windows window coordinates are already pixels, so
+-- the density stays 1 whatever the desktop scaling.
 windowFlags :: SdlOptions -> SDL_WindowFlags
 windowFlags opts =
   SDL_WindowFlags $
@@ -178,13 +182,13 @@ data SdlEnv = SdlEnv
   , sdlFontRequestRef :: !(IORef NanoUIFont)
   , sdlFontAppliedRef :: !(IORef NanoUIFont)
   , sdlForcedScale :: !(Maybe Float)
-  -- ^ NANO_FORCE_SCALE override of the display scale, read at startup.
+  -- ^ NANO_FORCE_SCALE override of the pixel density, read at startup.
   , sdlScaleRef :: IORef Float
   , sdlGlyphAtlas :: GlyphAtlas
   , sdlImages :: ImageAtlas
   , sdlCursors :: SdlCursors
   , sdlDebug :: SdlDebugSampler
-  , sdlRetain :: IORef (Ptr SDL_Texture, Int, Int, Float)
+  , sdlRetain :: IORef Retain
   , sdlLastPresented :: IORef Bool
   , sdlVsync :: !Bool
   , sdlRefreshPeriod :: !Double
@@ -194,18 +198,35 @@ data SdlEnv = SdlEnv
   , sdlDialogState :: !DialogState
   }
 
+-- | The retained framebuffer. The texture is allocated in blocks larger than
+-- the window, so a resize drag reuses it instead of creating a render target
+-- per pixel of movement; only the top-left used area is drawn and presented.
+data Retain = Retain
+  { retainTexture :: !(Ptr SDL_Texture)
+  , retainCapW :: !Int
+  , retainCapH :: !Int
+  -- ^ The texture's allocated size in pixels.
+  , retainW :: !Int
+  , retainH :: !Int
+  -- ^ The pixel size the last frame used.
+  , retainScale :: !Float
+  }
+
+noRetain :: Retain
+noRetain = Retain nullPtr 0 0 0 0 0
+
 defaultWindowSize :: Size
 defaultWindowSize = Size 1280 800
 
 -- Layout in logical coordinates; draw/text rasterize at native pixel density.
 syncDisplay :: Context -> SdlEnv -> Input -> IO (Context, Input)
 syncDisplay ctx env inp = do
-  scale <- maybe (queryWindowDisplayScale (sdlWindow env)) pure (sdlForcedScale env)
+  scale <- maybe (queryWindowPixelDensity (sdlWindow env)) pure (sdlForcedScale env)
   oldScale <- readIORef (sdlScaleRef env)
   let scaleChanged = abs (scale - oldScale) > scaleEpsilon
   when scaleChanged $ do
     -- Presents leave the renderer at 1:1 pixels; re-assert it only when the
-    -- display scale moves.
+    -- pixel density moves.
     ok <- setRenderScale (sdlRenderer env) 1 1
     unless ok $ fail "SDL_SetRenderScale failed"
     writeIORef (sdlScaleRef env) scale
@@ -324,7 +345,7 @@ startSdlWindow ctx cfg fontSource monoSource = do
   unless refreshOk $ fail "SDL_RegisterEvents failed for refresh wake"
   let Size w h = wcSize cfg
       bench = wcBench cfg
-  -- NANO_FORCE_SCALE: debug override of the display scale.
+  -- NANO_FORCE_SCALE: debug override of the pixel density.
   forcedEnv <- lookupEnv "NANO_FORCE_SCALE"
   let forcedScale = case forcedEnv >>= readMaybe of
         Just s | s > 0 -> Just s
@@ -344,7 +365,7 @@ startSdlWindow ctx cfg fontSource monoSource = do
           unless ok $ fail "SDL_CreateWindowAndRenderer failed"
           win <- peek winPtr
           ren <- peek renPtr
-          scale <- queryWindowDisplayScale win
+          scale <- queryWindowPixelDensity win
           setDrawSnapScale ctx scale
           refreshHz <- queryWindowRefreshHz win
           rendererName <- getRendererName ren >>= \name ->
@@ -356,7 +377,7 @@ startSdlWindow ctx cfg fontSource monoSource = do
           images <- newImageAtlas
           cursors <- initCursors
           debug <- newSdlDebugSampler
-          retain <- newIORef (nullPtr, 0, 0, 0)
+          retain <- newIORef noRetain
           fontCache <-
             newSdlFontCache
               fontSource
@@ -410,7 +431,7 @@ startSdlWindow ctx cfg fontSource monoSource = do
 stopSdlWindow :: Bool -> SdlEnv -> IO ()
 stopSdlWindow bench env = do
   clearDialogState (sdlDialogState env)
-  (tex, _, _, _) <- readIORef (sdlRetain env)
+  tex <- retainTexture <$> readIORef (sdlRetain env)
   unless (tex == nullPtr) $ destroyTexture tex
   destroyRenderBatch (sdlBatch env)
   destroyCursors (sdlCursors env)
