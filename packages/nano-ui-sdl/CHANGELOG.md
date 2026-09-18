@@ -52,6 +52,10 @@
   `queryFontPairKerning`, `debugFontPair` and `dumpFontLayout`.
 - `NanoUI.Sdl.Session` is no longer an exposed module.
 
+## 0.1.0.1 -- 2026-09-18
+
+* 
+
 ## 0.1.0.0
 
 First release.

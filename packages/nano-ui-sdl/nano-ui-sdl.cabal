@@ -1,6 +1,6 @@
 cabal-version:      3.4
 name:               nano-ui-sdl
-version:            0.1.0.0
+version:            0.1.0.1
 synopsis:           SDL3 window backend for nano-ui
 description:
     Runs nano-ui views in an SDL3 window with TrueType text and native file
