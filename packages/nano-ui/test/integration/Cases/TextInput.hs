@@ -17,6 +17,7 @@ module Cases.TextInput
   , runTextInputBatchTest
   , runTextUndoTest
   , runTextAreaWidthTrackingTest
+  , runTextAreaDocumentTest
   , runTextAreaScrollWheelTest
   , runTextAreaZoomScrollTest
   , runTextAreaScrollDragTest
@@ -32,7 +33,7 @@ module Cases.TextInput
   )
 where
 
-import Control.Monad (forM_, replicateM, replicateM_, when)
+import Control.Monad (forM_, replicateM, replicateM_, void, when)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
 import Data.Text qualified as T
@@ -629,7 +630,7 @@ runTextAreaScrollWheelTest ctx failed = do
       store <- getStore ctx
       let
         key = intKey (respId resp)
-        st = loadTextAreaState store key longText
+        st = loadTextAreaState store key
       assertEq failed (toText (buffer st)) longText
     _ -> assert failed False
 
@@ -713,7 +714,7 @@ runTextAreaScrollDragTest ctx failed = do
           store <- getStore ctx
           let
             key = intKey (respId resp)
-            st = loadTextAreaState store key longText
+            st = loadTextAreaState store key
           assertEq failed (toText (buffer st)) longText
           assert failed (selectionAnchor st == getCursor (buffer st))
     _ -> assert failed False
@@ -816,7 +817,7 @@ runTextAreaHScrollWheelTest ctx failed = do
       store <- getStore ctx
       let
         key = intKey (respId resp)
-        Cursor _ col = getCursor (buffer (loadTextAreaState store key longLine))
+        Cursor _ col = getCursor (buffer (loadTextAreaState store key))
       assert failed (abs (fromIntegral col - (offX2 + clickX) / fmAdvance fm '0') <= 1)
       let
         wheelLeft = inp0 {inputMousePos = pos, inputScroll = V2 (-10) 0}
@@ -884,7 +885,7 @@ runTextAreaHScrollDragTest ctx failed = do
           store <- getStore ctx
           let
             key = intKey (respId resp)
-            st = loadTextAreaState store key longLine
+            st = loadTextAreaState store key
           assertEq failed (toText (buffer st)) longLine
           assert failed (selectionAnchor st == getCursor (buffer st))
     _ -> assert failed False
@@ -952,7 +953,7 @@ runTextAreaScrollCursorLeavesViewportTest ctx failed = do
       -- Verify cursor is at top (line 0, col 0) and scroll is 0
       store0 <- getStore ctx
       let
-        st0 = loadTextAreaState store0 key longText
+        st0 = loadTextAreaState store0 key
         Cursor r0 c0 = getCursor (buffer st0)
       assertEq failed (r0, c0) (0, 0)
       off0 <- getScrollOffset ctx (respId resp)
@@ -973,7 +974,7 @@ runTextAreaScrollCursorLeavesViewportTest ctx failed = do
       -- Verify caret in buffer is still at (0, 0) even though viewport scrolled down
       store1 <- getStore ctx
       let
-        st1 = loadTextAreaState store1 key longText
+        st1 = loadTextAreaState store1 key
         Cursor r1 c1 = getCursor (buffer st1)
       assertEq failed (r1, c1) (0, 0)
 
@@ -986,7 +987,7 @@ runTextAreaScrollCursorLeavesViewportTest ctx failed = do
       assertEq failed offAfterKey 0
       store2 <- getStore ctx
       let
-        st2 = loadTextAreaState store2 key longText
+        st2 = loadTextAreaState store2 key
         Cursor r2 c2 = getCursor (buffer st2)
       assertEq failed (r2, c2) (0, 1)
     _ -> assert failed False
@@ -1167,6 +1168,60 @@ runTextUndoTest ctx failed = do
   _ <- frame inp
   (_, stillUndoable) <- frame inp
   assert failed (not stillUndoable)
+
+-- | A text area over a 'TextDocument' hands back the document it was passed
+-- while nothing edits it (a cursor move included), a new one when typing
+-- does, and passes undo and replacement through like the 'Text' one.
+runTextAreaDocumentTest :: Context -> IORef Int -> IO ()
+runTextAreaDocumentTest ctx failed = do
+  let original = T.intercalate "\n" ["line " <> T.pack (show i) | i <- [0 .. 999 :: Int]]
+  ref <- newIORef (textDocument original)
+  let
+    inp = withInput 320 220
+    ui = column $ do
+      (resp, doc) <- held ref textAreaDocument'
+      (,) (resp, doc) <$> textCanUndo (respId resp)
+    ctrl = Modifiers False True False
+    frame i = do
+      before <- readIORef ref
+      ((resp, after), undoable) <- (\(a, _, _, _) -> a) <$> runFrame ctx i ui
+      pure (before, resp, after, undoable)
+  _ <- warmup2 ctx inp ui
+  _ <- runFrame ctx (tabInp inp) ui
+  (idleIn, idleResp, idleOut, _) <- frame inp
+  assert failed (sameDocument idleIn idleOut)
+  assert failed (not (respChanged idleResp))
+  (moveIn, moveResp, moveOut, _) <- frame (keyInp KeyDown inp)
+  assert failed (respChanged moveResp)
+  assert failed (sameDocument moveIn moveOut)
+  (typedIn, typedResp, typedOut, undoable) <- frame inp {inputChars = "x"}
+  assert failed (respChanged typedResp)
+  assert failed (not (sameDocument typedIn typedOut))
+  assertEq failed (documentLine 1 typedOut) "xline 1"
+  assertEq failed (documentLineCount typedOut) 1000
+  assert failed undoable
+  (againIn, _, againOut, _) <- frame inp
+  assert failed (sameDocument againIn againOut)
+  _ <- frame inp {inputChars = "z", inputModifiers = ctrl}
+  undone <- readIORef ref
+  assertEq failed (documentText undone) original
+  -- Replacing the document drops the history recorded against the old one.
+  writeIORef ref (textDocument "fresh")
+  _ <- frame inp
+  (_, _, fresh, stillUndoable) <- frame inp
+  assertEq failed fresh (textDocument "fresh")
+  assert failed (not stillUndoable)
+  -- A caller that builds an equal document every frame lets the loop sleep.
+  copyCtx <- newContext
+  source <- newIORef original
+  let
+    -- Split inside the frame, so each frame passes a new copy.
+    copies = column (void (textAreaDocument =<< uiIO (textDocument <$> readIORef source)))
+    idle = inp {inputDeltaTime = 1}
+  _ <- warmup2 copyCtx inp copies
+  _ <- runFrame copyCtx idle copies
+  _ <- runFrame copyCtx idle copies
+  assert failed . not =<< needsRedraw copyCtx idle idle
 
 -- | The content width a text area keeps up to date line by line matches a
 -- fresh measurement after edits that widen, move and shorten its widest line.

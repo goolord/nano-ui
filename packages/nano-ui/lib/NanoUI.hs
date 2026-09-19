@@ -218,6 +218,18 @@ module NanoUI
   , textArea'
   , textAreaWith
   , textAreaWith'
+  , textAreaDocument
+  , textAreaDocument'
+  , textAreaDocumentWith
+  , textAreaDocumentWith'
+  , TextDocument
+  , textDocument
+  , emptyDocument
+  , documentText
+  , documentLines
+  , documentLine
+  , documentLineCount
+  , sameDocument
   , colorPicker
   , colorPicker'
   , colorPickerRGBA
@@ -1175,9 +1187,28 @@ import NanoUI.Widgets.Tabs
   , tabsConfigured
   , tabsConfigured'
   )
-import NanoUI.Widgets.TextArea (textArea, textArea', textAreaWith, textAreaWith')
+import NanoUI.Widgets.TextArea
+  ( textArea
+  , textArea'
+  , textAreaDocument
+  , textAreaDocument'
+  , textAreaDocumentWith
+  , textAreaDocumentWith'
+  , textAreaWith
+  , textAreaWith'
+  )
 import NanoUI.Widgets.TextBuffer (Cursor (..))
 import NanoUI.Widgets.TextCommand (TextCommand (..), TextMotion (..))
+import NanoUI.Widgets.TextDocument
+  ( TextDocument
+  , documentLine
+  , documentLineCount
+  , documentLines
+  , documentText
+  , emptyDocument
+  , sameDocument
+  , textDocument
+  )
 import NanoUI.Widgets.TextField (runTextCommand, textCanRedo, textCanUndo)
 import NanoUI.Widgets.TextInput
   ( SearchFieldConfig (..)

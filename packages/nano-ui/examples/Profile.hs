@@ -71,8 +71,15 @@ canvasScene key =
 
 -- | A focused text area over a long document, typing into its middle: the
 -- editor path, whose per-frame cost must not grow with the document.
-textAreaScene :: IORef Text -> NanoUI ()
+textAreaScene :: IORef TextDocument -> NanoUI ()
 textAreaScene ref = column $ do
+  doc <- textAreaDocumentWith grow =<< uiIO (readIORef ref)
+  uiIO (writeIORef ref doc)
+
+-- | 'textAreaScene' over 'Text', which joins the document on every frame
+-- that edits it.
+textAreaTextScene :: IORef Text -> NanoUI ()
+textAreaTextScene ref = column $ do
   txt <- textAreaWith grow =<< uiIO (readIORef ref)
   uiIO (writeIORef ref txt)
 
@@ -92,6 +99,16 @@ main :: IO ()
 main = do
   args <- getArgs
   ctx <- newContext
+  let
+    -- Focus the text area, move 5,000 lines down and type 1,000 characters.
+    typeIntoMiddle scene = do
+      let inp = emptyInput {inputWindowSize = Size 800 600}
+          frame i = void (runFrame ctx i scene)
+      frame inp
+      frame inp {inputKeys = inputKeysFromList [KeyTab]}
+      replicateM_ 50 (frame inp {inputKeys = inputKeysFromList (replicate 100 KeyDown)})
+      forM_ (take 1000 (cycle "typing into the middle ")) $ \c ->
+        frame inp {inputChars = T.singleton c}
   case args of
     ("svg" : _) -> do
       -- A stroked icon with round caps and joins and a filled one, at a small
@@ -107,15 +124,13 @@ main = do
               void (evaluate (rasterizeSvg (128 + i `mod` 2) 128 white doc))
       putStrLn "profiled 1000 rasterizations of two icons at 16 and 128 px"
     ("textarea" : _) -> do
-      ref <- newIORef longDocument
-      let inp = emptyInput {inputWindowSize = Size 800 600}
-          frame i = void (runFrame ctx i (textAreaScene ref))
-      frame inp
-      frame inp {inputKeys = inputKeysFromList [KeyTab]}
-      replicateM_ 50 (frame inp {inputKeys = inputKeysFromList (replicate 100 KeyDown)})
-      forM_ (take 1000 (cycle "typing into the middle ")) $ \c ->
-        frame inp {inputChars = T.singleton c}
+      ref <- newIORef (textDocument longDocument)
+      typeIntoMiddle (textAreaScene ref)
       putStrLn "profiled 1000 textarea keystroke frames"
+    ("textarea-text" : _) -> do
+      ref <- newIORef longDocument
+      typeIntoMiddle (textAreaTextScene ref)
+      putStrLn "profiled 1000 textarea-text keystroke frames"
     _ -> do
       let inp =
             emptyInput

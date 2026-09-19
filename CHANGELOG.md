@@ -78,9 +78,25 @@
   the time covered, how many passes it made, how many drew, and why. An idle
   window prints nothing, so what prints steadily is what keeps the process
   awake.
+- `textAreaDocument` (with `textAreaDocument'`, `textAreaDocumentWith` and
+  `textAreaDocumentWith'`): a text area over a `TextDocument`, the text as
+  its lines, instead of over `Text`. An edit replaces only the lines it
+  touches and a frame without edits returns the document it was passed, so
+  the text is never joined or compared in full while typing. Build one with
+  `textDocument` and read it with `documentText`, `documentLines`,
+  `documentLine` and `documentLineCount`. `==` skips the lines two documents
+  share, so storing the edited document with `useState` reads no text
+  before the edit. Typing 1,000 characters into a
+  100,000-line document takes 0.14 s instead of 1.5 s through `textArea`,
+  and allocates 248 MB instead of 7.1 GB.
 
 ### Changed
 
+- `textArea` keeps the document it last returned with its text, so a frame
+  that edits nothing (a cursor move, a scroll) neither joins the document
+  nor compares it with the text it was passed.
+- `loadTextAreaState` and `saveTextAreaState` no longer take the text; the
+  text area's lines are its state.
 - `callout` tints the theme's panel colour instead of a fixed dark grey.
 - `uiTheme` returns the theme of the enclosing `styled` scope.
 - Undo history keeps its edits' texts as `ShortText` copies, which never

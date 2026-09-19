@@ -75,6 +75,7 @@ library
         NanoUI.Testing.Harness
         NanoUI.Testing.Runner
         NanoUI.Widgets.TextBuffer
+        NanoUI.Widgets.TextDocument
         NanoUI.Widgets.TextCommand
         NanoUI.Widgets.TextEditor
         NanoUI.Widgets.TextField

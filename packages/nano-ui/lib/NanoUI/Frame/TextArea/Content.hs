@@ -5,7 +5,7 @@
 -- extent. Free of the editor widget modules so scroll code stays light.
 module NanoUI.Frame.TextArea.Content
   ( resolveTextAreaFont
-  , ensureTextAreaBuffer
+  , textAreaBuffer
   , textAreaContentMetrics
   , textAreaContentGeom
   , isMouseOnTextAreaScrollBarAt
@@ -13,10 +13,10 @@ module NanoUI.Frame.TextArea.Content
 
 import Data.Dynamic (fromDynamic, toDyn)
 import Data.IORef (readIORef)
+import Data.Maybe (fromMaybe)
 import qualified Data.IntMap.Strict as IM
 import Data.Sequence (Seq)
 import qualified Data.Sequence as Seq
-import Data.Text (Text)
 import NanoUI.Context (Context (..), WidgetStore (..), getStore, intKey, setStore, slotKey)
 import NanoUI.Font (FontMetrics (..), lineWidthIO)
 import NanoUI.Frame.TextArea.Geometry (isMouseOnTextAreaScrollBar)
@@ -39,20 +39,12 @@ resolveTextAreaFont ctx idx = do
     then pure (ctxFontMetrics ctx)
     else fst <$> ctxResolveFont ctx size WeightNormal FontStyleNormal FontRegular
 
--- | Return the text area's 'TB.TextBuffer', building it from the flat text only
--- when the cache is cold. Rebuilding splits the whole document into lines, so
--- caching it keeps loads and paint O(1) here. The cache is written together
--- with the flat text by 'saveTextAreaState', so a present entry is always the
--- buffer for the stored text.
-ensureTextAreaBuffer :: Context -> Int -> Text -> IO TB.TextBuffer
-ensureTextAreaBuffer ctx key text = do
-  store <- getStore ctx
-  case IM.lookup (slotKey SlotTextAreaBuffer key) (storeDyn store) >>= fromDynamic of
-    Just buf -> pure buf
-    Nothing -> do
-      let buf = TB.fromText text
-      setStore ctx store {storeDyn = IM.insert (slotKey SlotTextAreaBuffer key) (toDyn buf) (storeDyn store)}
-      pure buf
+-- | The text area's 'TB.TextBuffer'. The widget stores one over the lines of
+-- every document it adopts, so it is only missing for a text area never
+-- declared, which holds an empty document.
+textAreaBuffer :: WidgetStore -> Int -> TB.TextBuffer
+textAreaBuffer store key =
+  fromMaybe TB.empty (IM.lookup (slotKey SlotTextAreaBuffer key) (storeDyn store) >>= fromDynamic)
 
 -- | Content extent of a text area, @(contentWidth, contentHeight)@. Measuring
 -- the width scans every character of the document, so the result is cached per
@@ -75,8 +67,8 @@ textAreaContentMetrics ctx idx = do
     else do
       fm <- resolveTextAreaFont ctx idx
       gen <- readIORef (ctxMetricGen ctx)
-      buf <- ensureTextAreaBuffer ctx key (IM.findWithDefault "" key (storeText store))
-      let lns = TB.bufferLines buf
+      let buf = textAreaBuffer store key
+          lns = TB.bufferLines buf
           lineH = onGrid (fmSnapScale fm) (fmLineHeight fm)
           contentH = fromIntegral (max 1 (Seq.length lns)) * lineH
           (seenHead, seenTail) = TB.changedLines buf

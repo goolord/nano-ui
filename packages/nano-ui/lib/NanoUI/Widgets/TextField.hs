@@ -7,20 +7,24 @@ module NanoUI.Widgets.TextField
   , applyTextFieldCommand
   , textFieldMode
   , textFieldHistory
+  , textFieldHasText
   ) where
 
 import Data.Dynamic (fromDynamic)
 import Data.IORef (writeIORef)
 import Data.IntMap.Strict qualified as IM
 import Data.Text (Text)
+import Data.Text qualified as T
 import Effectful (Eff, type (:>))
 import NanoUI.Context (Context (..), WidgetStore (..), getStore, intKey, setTextInputMenu)
 import NanoUI.Frame.Hit (findNodeByWidgetId)
+import NanoUI.Frame.TextArea.Content (textAreaBuffer)
 import NanoUI.Id (WidgetId)
 import NanoUI.Layout.Arena (NodeType (..), getNodeType, getStyleIdx)
 import NanoUI.Monad (Ui, askContext, uiIO)
 import NanoUI.Store (slotKey, Slot (..))
 import NanoUI.Widgets.TextArea (applyTextAreaCommand)
+import NanoUI.Widgets.TextBuffer qualified as TB
 import NanoUI.Widgets.TextEditor
   ( EditHistory
   , EditorMode (..)
@@ -85,13 +89,29 @@ textFieldMode ctx wid =
       store <- getStore ctx
       pure (IM.lookup (slotKey SlotTextMode (intKey wid)) (storeInt store) >>= editorModeFromCode)
 
--- | The undo history of the field with this id, empty when it has none.
+-- | The undo history of the field with this id, empty when it has none. A
+-- text input's is recorded with its text; a text area drops its history
+-- when its document is replaced, so it keeps the history alone.
 textFieldHistory :: Context -> WidgetId -> IO EditHistory
 textFieldHistory ctx wid = do
   store <- getStore ctx
   let key = intKey wid
       stored = IM.lookup (slotKey SlotTextHistory key) (storeDyn store)
       text = IM.findWithDefault "" key (storeText store)
-  pure $ case stored >>= fromDynamic of
-    Just (recorded, h) | recorded == (text :: Text) -> h
+  pure $ case stored of
+    Just dyn
+      | Just h <- fromDynamic dyn -> h
+      | Just (recorded, h) <- fromDynamic dyn, recorded == (text :: Text) -> h
     _ -> emptyHistory
+
+-- | Whether the field with this id holds any text.
+textFieldHasText :: Context -> WidgetId -> IO Bool
+textFieldHasText ctx wid = do
+  store <- getStore ctx
+  mode <- textFieldMode ctx wid
+  let key = intKey wid
+  pure $ case mode of
+    Just m | modeMultiLine m ->
+      let buf = textAreaBuffer store key
+       in TB.getLineCount buf > 1 || not (T.null (TB.lineAt 0 buf))
+    _ -> not (T.null (IM.findWithDefault "" key (storeText store)))

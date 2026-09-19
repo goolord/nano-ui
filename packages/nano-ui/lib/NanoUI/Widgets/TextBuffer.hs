@@ -14,7 +14,10 @@ module NanoUI.Widgets.TextBuffer
     -- * Construction & Conversion
   , empty
   , fromText
+  , fromLines
   , toText
+  , splitLines
+  , joinLines
   , toLines
   , lineAt
 
@@ -103,13 +106,28 @@ empty = TextBuffer (Seq.singleton T.empty) (Cursor 0 0) 0 0 0
 
 -- | Construct a TextBuffer from raw Text. Cursor is always (0, 0).
 fromText :: Text -> TextBuffer
-fromText t = TextBuffer (Seq.fromList (T.splitOn "\n" t)) (Cursor 0 0) 0 0 0
+fromText = fromLines . splitLines
+
+-- | A buffer over lines already split, at (0, 0), with every line unseen.
+-- The lines are as 'splitLines' makes them: at least one, none holding a
+-- newline.
+fromLines :: Seq Text -> TextBuffer
+fromLines lns
+  | Seq.null lns = empty
+  | otherwise = TextBuffer lns (Cursor 0 0) 0 0 0
+
+-- | The lines of a text, without their newlines. There is always at least one.
+splitLines :: Text -> Seq Text
+splitLines = Seq.fromList . T.splitOn "\n"
 
 -- | All lines joined with newlines, copied once into a new text.
 toText :: TextBuffer -> Text
-toText buf =
-  let lns = bufferLines buf
-      !total = foldl' (\acc (Text _ _ len) -> acc + len + 1) (-1) lns
+toText = joinLines . bufferLines
+
+-- | Lines joined with newlines, copied once into a new text.
+joinLines :: Seq Text -> Text
+joinLines lns =
+  let !total = foldl' (\acc (Text _ _ len) -> acc + len + 1) (-1) lns
    in if total <= 0
         then T.empty
         else runST $ do

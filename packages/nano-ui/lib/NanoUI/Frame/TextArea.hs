@@ -34,8 +34,7 @@ import NanoUI.Font (FontMetrics, caretXIO, prepareFontMetrics, selectionSpans, t
 import NanoUI.Frame.Chrome (paintScrollBarLayout, textInputFocused)
 import NanoUI.Frame.Hit (findNodeByWidgetId)
 import NanoUI.Frame.TextArea.Content
-  ( ensureTextAreaBuffer
-  , isMouseOnTextAreaScrollBarAt
+  ( isMouseOnTextAreaScrollBarAt
   , resolveTextAreaFont
   , textAreaContentMetrics
   )
@@ -77,10 +76,8 @@ loadTextAreaStateAt ctx idx fm x y w h = do
   wid <- getWidgetId (ctxNodeArena ctx) idx
   let key = intKey wid
   store <- getStore ctx
-  let initial = IM.findWithDefault "" key (storeText store)
-  buf <- ensureTextAreaBuffer ctx key initial
   let Rect _ _ vpW vpH = textAreaFieldClip fm (Rect x y w h)
-      state0 = TA.loadTextAreaStateWithBuffer store key buf
+      state0 = TA.loadTextAreaState store key
   pure (TA.setTextAreaViewport (realToFrac vpW, realToFrac vpH) (realToFrac (textAreaLineHeight fm)) state0)
 
 loadHitState :: Context -> TextAreaHit -> IO TA.TextAreaState
@@ -247,10 +244,7 @@ updateTextAreaSelection :: Context -> WidgetId -> TextAreaHit -> TB.Cursor -> TB
 updateTextAreaSelection ctx wid hit anchor cursor = do
   state0 <- loadHitState ctx hit
   store <- getStore ctx
-  -- A selection change keeps the stored text, so the document is not rejoined.
-  let key = intKey wid
-      text = IM.findWithDefault "" key (storeText store)
-  setStore ctx (TA.saveTextAreaState key text (TA.setTextAreaSelection anchor cursor state0) store)
+  setStore ctx (TA.saveTextAreaState (intKey wid) (TA.setTextAreaSelection anchor cursor state0) store)
   markDirty ctx
 
 applyTextAreaClick :: Context -> WidgetId -> TextAreaHit -> Int -> Int -> Int -> IO ()
@@ -319,8 +313,7 @@ collapseTextAreaSelection :: Context -> WidgetId -> IO ()
 collapseTextAreaSelection ctx wid = do
   store <- getStore ctx
   let key = intKey wid
-      text = IM.findWithDefault "" key (storeText store)
       row = IM.findWithDefault 0 (slotKey SlotTextAreaRow key) (storeInt store)
       col = IM.findWithDefault 0 (slotKey SlotTextAreaCol key) (storeInt store)
-      state = loadTextAreaState store key text
-  setStore ctx (saveTextAreaState key text state {selectionAnchor = TB.Cursor row col} store)
+      state = loadTextAreaState store key
+  setStore ctx (saveTextAreaState key state {selectionAnchor = TB.Cursor row col} store)

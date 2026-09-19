@@ -162,9 +162,17 @@ data Slot
     SlotTextAreaContentW
   | SlotTextAreaContentH
   | SlotTextAreaContentFont
-  | -- | Cached 'TextBuffer' for the text area, keyed by its flat 'Text'. Loads and
-    -- paint reuse it so the document is not re-split into lines every call.
+  | -- | The text area's 'TextBuffer' (in 'storeDyn'): its lines, which are the
+    -- lines of 'SlotTextAreaDocument', and which lines changed since they
+    -- were measured. Loads and paint read it.
     SlotTextAreaBuffer
+  | -- | The text area's current 'TextDocument' (in 'storeDyn'). Its value last
+    -- passed or returned is under 'SlotSeen', in 'storeDyn'.
+    SlotTextAreaDocument
+  | -- | For a text area over 'Text' (in 'storeDyn'): the text last passed or
+    -- returned and the document it is the text of, so a frame that edits
+    -- nothing neither splits nor joins the text.
+    SlotTextAreaText
   | -- | Set (value 1) to signal that the text area's text changed through a path
     -- that does not flow through 'Input' (e.g. a context-menu cut/paste). The
     -- text area widget reads and clears this on its next frame, so the caller

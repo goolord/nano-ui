@@ -140,6 +140,7 @@ testSpecs =
   , TestSpec "styled-damage" False runStyledDamageTest
   , TestSpec "text-undo" False runTextUndoTest
   , TestSpec "text-area-width-tracking" False runTextAreaWidthTrackingTest
+  , TestSpec "text-area-document" False runTextAreaDocumentTest
   , TestSpec "keyboard-modal-eligibility" False runKeyboardModalEligibilityTest
   , TestSpec "keyboard-focus-ring" False runKeyboardFocusRingTest
   , TestSpec "keyboard-button" False runKeyboardButtonTest

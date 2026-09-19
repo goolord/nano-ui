@@ -18,15 +18,11 @@ module NanoUI.Frame.TextEdit.Menu
 
 import Control.Monad (forM, forM_, unless, when)
 import Data.IORef (writeIORef)
-import qualified Data.IntMap.Strict as IM
 import qualified Data.Text as T
 import NanoUI.Context
   ( Context (..)
   , TextInputMenu (..)
-  , WidgetStore (..)
-  , getStore
   , getTextInputMenu
-  , intKey
   , isDisabled
   , markDirty
   , markEscapeConsumed
@@ -64,7 +60,7 @@ import NanoUI.Layout.Arena (NodeType (NodeTextArea, NodeTextInput), findNodeRevM
 import NanoUI.Style (Style (..), themeSeparator)
 import NanoUI.Types (Color (..), Rect (..), Size (..), V2 (..), lerpColor, rectContains)
 import NanoUI.Widgets.TextEditor (EditorMode (..), TextCommand (..), canRedo, canUndo)
-import NanoUI.Widgets.TextField (applyTextFieldCommand, textFieldHistory, textFieldMode)
+import NanoUI.Widgets.TextField (applyTextFieldCommand, textFieldHasText, textFieldHistory, textFieldMode)
 
 data TextEditMenuRow
   = TextEditMenuSep
@@ -292,10 +288,9 @@ applyTextFieldMenuAction ctx wid item =
 
 textFieldMenuActionEnabled :: Context -> WidgetId -> Int -> IO Bool
 textFieldMenuActionEnabled ctx wid item = do
-  store <- getStore ctx
   mMode <- textFieldMode ctx wid
   history <- textFieldHistory ctx wid
-  let hasText = not (T.null (IM.findWithDefault "" (intKey wid) (storeText store)))
+  hasText <- textFieldHasText ctx wid
   case (mMode, drop item textEditMenuCommands) of
     (Just mode, cmd : _) -> case cmd of
       Undo -> pure (modeEditable mode && canUndo history)
