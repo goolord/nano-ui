@@ -72,6 +72,7 @@ library demo-common
         DemoApp
         DemoData
         SdlDemo
+        SdlRecord
         SdlSelftest
     other-modules:    Paths_nano_ui_demo
     autogen-modules:  Paths_nano_ui_demo
@@ -79,6 +80,7 @@ library demo-common
         bytestring ^>=0.12,
         diagrams-lib >=1.6 && <1.7,
         effectful-core ^>=2.6,
+        filepath ^>=1.5,
         JuicyPixels ^>=3.3,
         nano-ui ^>=0.1,
         nano-ui-diagrams ^>=0.1,

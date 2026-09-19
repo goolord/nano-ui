@@ -45,6 +45,13 @@ cabal run nano-ui-sdl-logs -- --selftest
 
 The RGFW backend has its own demo, `cabal run nano-ui-rgfw-demo`.
 
+`scripts/record-demo.sh [OUT]` re-records the README's tour of the SDL demo
+into `OUT/demo.mp4`. It drives the demo in a hidden window (`--record DIR`,
+in `SdlRecord`), so rerun it after changing a widget the tour visits. It
+needs ffmpeg. The video is not committed: drop it into a GitHub issue or PR
+comment box and put the `user-attachments` URL GitHub gives back in
+`README.md`.
+
 ### Flags
 
 `cabal.project` turns on these flags:

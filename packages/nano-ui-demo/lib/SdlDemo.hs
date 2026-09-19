@@ -90,6 +90,7 @@ import qualified Data.ByteString.Internal as BSI
 import qualified Data.Text as T
 import Data.Primitive.SmallArray (indexSmallArray, sizeofSmallArray)
 import qualified Data.Vector.Storable as VS
+import qualified SdlRecord
 import qualified SdlSelftest
 
 import DemoApp (useFileDialog)
@@ -109,13 +110,15 @@ import DemoData
 
 -- | Run @cabal run nano-ui-sdl-demo@ for the windowed app, or
 -- @cabal run nano-ui-sdl-demo -- --selftest@ for the headless UI test
--- (defined in "SdlSelftest").
+-- (defined in "SdlSelftest"). @--record DIR@ records the README video's
+-- frames (see "SdlRecord").
 main :: IO ()
 main = do
   args <- getArgs
-  if "--selftest" `elem` args
-    then SdlSelftest.selftest ("--continuous" `elem` args) demoUi
-    else do
+  case dropWhile (/= "--record") args of
+    _ : dir : _ -> SdlRecord.record dir demoUi
+    _ | "--selftest" `elem` args -> SdlSelftest.selftest ("--continuous" `elem` args) demoUi
+    _ -> do
       let (cfgUpdates, _, _) = getOpt Permute options args
           cfg = foldl' (flip id) defaultDemoConfig cfgUpdates
       if cfgHelp cfg

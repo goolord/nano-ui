@@ -9,6 +9,8 @@ and no callbacks to register. Widget state lives in a store keyed by each
 widget's position among its siblings (or by a key you give it with `withKey`),
 or in a model you pass through the view.
 
+https://github.com/user-attachments/assets/5994a348-3bc5-4a2c-80fa-c8db2be94397
+
 ```haskell
 {-# LANGUAGE OverloadedStrings #-}
 
