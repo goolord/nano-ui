@@ -11,6 +11,7 @@ module NanoUI.Context.Animation
   , startAnimationEase
   , startAnimationEaseDelay
   , startSpring
+  , keepAnimationAlive
   , setAnimationValue
   , tickAnimations
   , getAnimationValue
@@ -22,6 +23,7 @@ import Control.Monad (unless, when)
 import Data.IORef (modifyIORef', readIORef, writeIORef)
 import Data.IntMap.Strict (IntMap)
 import Data.IntMap.Strict qualified as IM
+import Data.IntSet qualified as IS
 
 import NanoUI.Animation
   ( Animation (..)
@@ -139,25 +141,62 @@ startSpring ctx wid params target = do
               }
           markDirtyIfOrphan ctx key
 
+-- | How long a 'keepAnimationAlive' animation would run by itself: in effect
+-- forever. The lease below ends it.
+keepAliveSec :: Float
+keepAliveSec = 1e9
+
+-- | Hold the frame loop open for a widget until a frame goes by without this
+-- call. The animation it runs never ends by itself, so it is leased: the
+-- widget renews it every frame it is built, and 'tickAnimations' drops it on
+-- the first frame it is not. Without the lease a spinner shown once would
+-- keep the loop running at the display rate for the life of the process.
+keepAnimationAlive :: Context -> WidgetId -> IO ()
+keepAnimationAlive ctx wid = do
+  startAnimation ctx wid 0 1 keepAliveSec
+  let key = intKey wid
+  as <- readIORef (ctxAnimationState ctx)
+  unless (IS.member key (asKeepTouched as)) $
+    writeIORef (ctxAnimationState ctx) $! as {asKeepTouched = IS.insert key (asKeepTouched as)}
+
 {-# INLINE setAnimationValue #-}
 setAnimationValue :: Context -> WidgetId -> Float -> IO ()
 setAnimationValue ctx wid val = settleKey ctx (intKey wid) val
 
 tickAnimations :: Context -> Float -> IO ()
 tickAnimations ctx dt =
-  modifyIORef' (ctxAnimationState ctx) $ \as ->
-    if IM.null (asAnimations as)
-      then as {asAnyAnimating = False, asAnimSettled = False}
-      else
-        let stepped = IM.map (stepAnim dt) (asAnimations as)
-            (live, done) = IM.partition animInProgress stepped
-            rest' = IM.foldlWithKey' writeRest (asAnimRest as) done
-         in as
-              { asAnimations = live
-              , asAnimRest = rest'
-              , asAnyAnimating = not (IM.null live)
-              , asAnimSettled = not (IM.null done)
-              }
+  modifyIORef' (ctxAnimationState ctx) $ \as0 ->
+    let as = lapseKeepAlive as0
+     in if IM.null (asAnimations as)
+          then as {asAnyAnimating = False, asAnimSettled = False}
+          else
+            let stepped = IM.map (stepAnim dt) (asAnimations as)
+                (live, done) = IM.partition animInProgress stepped
+                rest' = IM.foldlWithKey' writeRest (asAnimRest as) done
+             in as
+                  { asAnimations = live
+                  , asAnimRest = rest'
+                  , asAnyAnimating = not (IM.null live)
+                  , asAnimSettled = not (IM.null done)
+                  }
+
+-- | End the perpetual animations whose widget did not renew its lease this
+-- frame, and start the next frame's lease. A lapsed key leaves no resting
+-- value and does not count as settled: the widget is gone, and the rect it
+-- leaves behind is damaged like any other removed node.
+lapseKeepAlive :: AnimationState -> AnimationState
+lapseKeepAlive as
+  | IS.null (asKeepAlive as) && IS.null (asKeepTouched as) = as
+  | otherwise =
+      let lapsed = asKeepAlive as `IS.difference` asKeepTouched as
+          perpetual a = case a of
+            EaseAnim _ _ dur _ _ _ _ -> dur >= keepAliveSec
+            SpringAnim {} -> False
+          anims
+            | IS.null lapsed = asAnimations as
+            | otherwise =
+                IM.filterWithKey (\k a -> not (IS.member k lapsed && perpetual a)) (asAnimations as)
+       in as {asAnimations = anims, asKeepAlive = asKeepTouched as, asKeepTouched = IS.empty}
 
 markDirtyIfOrphan :: Context -> Int -> IO ()
 markDirtyIfOrphan ctx key = do

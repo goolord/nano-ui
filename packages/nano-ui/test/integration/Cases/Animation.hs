@@ -8,15 +8,18 @@ module Cases.Animation
   , runAnimationStaggerTest
   , runCompositeAnimationIsolationTest
   , runSpinnerTest
+  , runKeepAnimatingLapseTest
+  , runWakeAfterTest
   ) where
 
 import Control.Concurrent (threadDelay)
 import Control.Monad (forM_, replicateM, replicateM_, void)
 import Data.IORef (IORef)
 import Data.Text qualified as T
+import GHC.Clock (getMonotonicTime)
 import NanoUI
 import NanoUI.Testing
-import NanoUI.Testing.Assert (assert)
+import NanoUI.Testing.Assert (assert, assertEq)
 import NanoUI.Testing.Harness (clickPair, drawQuads, withDelta)
 
 -- A started animation requests redraws, settles on its target, and then
@@ -206,3 +209,41 @@ runSpinnerTest ctx failed = do
   quads1 <- drawQuads draw1
   let arc qs = [q | (q, c) <- qs, c == themeAccent theme]
   assert failed (arc quads0 /= arc quads1)
+
+-- 'keepAnimating' holds the loop open only while it keeps being called. A
+-- spinner that is no longer built must let the loop sleep: its animation
+-- never ends by itself, so a view that showed one while loading would
+-- otherwise run frames at the display rate for the life of the process.
+runKeepAnimatingLapseTest :: Context -> IORef Int -> IO ()
+runKeepAnimatingLapseTest ctx failed = do
+  let inp = withDelta 400 300 0.016
+      loading = column (label "Loading" >> spinner)
+      loaded = column (label "Loaded")
+  _ <- runFrame ctx inp loading
+  _ <- runFrame ctx inp loading
+  assert failed =<< anyAnimating ctx
+  -- The first frame without the spinner ends its animation.
+  _ <- runFrame ctx inp loaded
+  assert failed . not =<< anyAnimating ctx
+  _ <- runFrame ctx inp loaded
+  _ <- takeDamage ctx
+  assert failed . not =<< needsRedraw ctx inp inp
+  -- Shown again, it runs again.
+  _ <- runFrame ctx inp loading
+  assert failed =<< anyAnimating ctx
+
+-- 'wakeAfter' schedules one frame: the earliest request of a frame wins, and
+-- a frame that does not ask again leaves nothing pending.
+runWakeAfterTest :: Context -> IORef Int -> IO ()
+runWakeAfterTest ctx failed = do
+  let inp = withDelta 200 100 0.016
+  t0 <- getMonotonicTime
+  _ <- runFrame ctx inp (label "tick" >> wakeAfter 5)
+  at0 <- getWakeAt ctx
+  assert failed (at0 > t0 + 4.5 && at0 < t0 + 6)
+  t1 <- getMonotonicTime
+  _ <- runFrame ctx inp (wakeAfter 5 >> wakeAfter 1 >> wakeAfter 3 >> label "tick")
+  at1 <- getWakeAt ctx
+  assert failed (at1 > t1 + 0.5 && at1 < t1 + 2)
+  _ <- runFrame ctx inp (label "tick")
+  assertEq failed 0 =<< getWakeAt ctx

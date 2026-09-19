@@ -47,7 +47,6 @@ needsRedraw ctx prev inp = do
   mDrag <- getScrollDrag ctx
   mWinDrag <- getWindowDrag ctx
   overlay <- overlayMenuOpen ctx
-  edit <- textFieldActive ctx
   let moved = inputMousePos prev /= inputMousePos inp
   if dirty
     || anim
@@ -57,7 +56,6 @@ needsRedraw ctx prev inp = do
     || isJust mDrag
     || isJust mWinDrag
     || (overlay && moved)
-    || edit
     then pure True
     else
       -- Idle: hover can only change when the pointer moved since the frame
@@ -116,8 +114,8 @@ overlayMenuOpen ctx = do
                 then pure False
                 else not . null <$> getOptions (ctxNodeArena ctx) idx
 
--- Focused text field or its context menu. Keep the loop live so typed bytes
--- are not stuck behind SDL_WaitEvent.
+-- Focused text field or its context menu. Typing reaches it as input events,
+-- which wake the loop by themselves, so focus alone keeps nothing running.
 textFieldActive :: Context -> IO Bool
 textFieldActive ctx = do
   menu <- getTextInputMenu ctx

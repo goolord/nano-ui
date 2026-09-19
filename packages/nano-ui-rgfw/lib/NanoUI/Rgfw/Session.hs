@@ -45,14 +45,15 @@ import NanoUI.Input (MouseButton (..), applyMouseButton)
 import NanoUI.Testing
   ( DrawData (..)
   , UiCursorKind (..)
-  , clearDirty
   , collectRasterSpans
+  , damageIsEmpty
   , drawCmdCount
   , runEff
   , runFrameReduceEff
+  , takeDamage
   , uiCursorKind
   )
-import NanoUI.Debug (noteDebugPresent)
+import NanoUI.Debug (noteDebugPresent, noteDebugSkip)
 import NanoUI.Runner
   ( SessionDriver (..)
   , runSessionLoop
@@ -221,7 +222,11 @@ runRgfwAppReduceCustom opts getThemeAndScale updateModel initialModel view = inB
       bracket newGlRenderer freeGlRenderer $ \renderer -> R.withEventBuffer $ \evPtr -> do
         let !animateTimeout = max 1 (floor (refreshSec * 1000) - 2) :: Int
 
-        let drawOne c curInp = do
+        -- A frame whose damage is empty would swap in the picture already on
+        -- screen, so it skips the render and the swap: an animation scrolled
+        -- out of view costs its UI pass and nothing on the GPU. The opening
+        -- frame and an animation's settle frame are forced.
+        let drawOne force c curInp = do
               tUiStart <- getMonotonicTime
               curModel <- readIORef modelRef
               let (frameTheme, _) = getThemeAndScale curModel
@@ -234,33 +239,36 @@ runRgfwAppReduceCustom opts getThemeAndScale updateModel initialModel view = inB
               writeIORef modelRef newModel
               tUiEnd <- getMonotonicTime
               let !uiMs = (tUiEnd - tUiStart) * 1000.0
+              damage <- takeDamage c
+              if damageIsEmpty damage && not force
+                then noteDebugSkip (rdsSampler debugSampler)
+                else do
+                  tRenderStart <- getMonotonicTime
+                  curMonScale <- readIORef monScaleRef
+                  curScale <- readIORef scaleRef
+                  (pw, ph) <- readIORef winSizeRef
+                  (baseSpans, overlaySpans) <- collectRasterSpans c curInp
+                  renderArenaGl renderer font curScale pw ph (themeWindow frameTheme) drawData baseSpans overlaySpans
+                  tRenderEnd <- getMonotonicTime
+                  let !renderMs = (tRenderEnd - tRenderStart) * 1000.0
 
-              tRenderStart <- getMonotonicTime
-              curMonScale <- readIORef monScaleRef
-              curScale <- readIORef scaleRef
-              (pw, ph) <- readIORef winSizeRef
-              (baseSpans, overlaySpans) <- collectRasterSpans c curInp
-              renderArenaGl renderer font curScale pw ph (themeWindow frameTheme) drawData baseSpans overlaySpans
-              tRenderEnd <- getMonotonicTime
-              let !renderMs = (tRenderEnd - tRenderStart) * 1000.0
+                  tSwapStart <- getMonotonicTime
+                  R.swapBuffersGL win
+                  tSwapEnd <- getMonotonicTime
+                  let !swapMs = (tSwapEnd - tSwapStart) * 1000.0
+                      !frameMs = (tSwapEnd - tUiStart) * 1000.0
 
-              tSwapStart <- getMonotonicTime
-              R.swapBuffersGL win
-              tSwapEnd <- getMonotonicTime
-              let !swapMs = (tSwapEnd - tSwapStart) * 1000.0
-                  !frameMs = (tSwapEnd - tUiStart) * 1000.0
-
-              nodes <- arenaCount (ctxNodeArena c)
-              noteDebugPresent (rdsSampler debugSampler) uiMs renderMs swapMs frameMs
-                (drawVertexCount drawData) (drawIndexCount drawData) (drawCmdCount drawData)
-              writeIORef (rdsFrame debugSampler)
-                RgfwFrameStats
-                  { fsNodes = nodes
-                  , fsPhysW = pw
-                  , fsPhysH = ph
-                  , fsScale = curScale
-                  , fsMonScale = curMonScale
-                  }
+                  nodes <- arenaCount (ctxNodeArena c)
+                  noteDebugPresent (rdsSampler debugSampler) uiMs renderMs swapMs frameMs
+                    (drawVertexCount drawData) (drawIndexCount drawData) (drawCmdCount drawData)
+                  writeIORef (rdsFrame debugSampler)
+                    RgfwFrameStats
+                      { fsNodes = nodes
+                      , fsPhysW = pw
+                      , fsPhysH = ph
+                      , fsScale = curScale
+                      , fsMonScale = curMonScale
+                      }
               -- A reduced message that switched themes changed the model, so
               -- the core marks the frame dirty and the next one applies it.
               pure (dirtyAfterUi, curInp)
@@ -295,17 +303,19 @@ runRgfwAppReduceCustom opts getThemeAndScale updateModel initialModel view = inB
                   -- instead of spinning.
                 , sdPacingMs      = animateTimeout
                 , sdPresentPaces  = pure False
-                , sdShouldDraw    = \c prevInp inpSynced wasAnim debugDue ->
-                    shouldRedrawFrame c prevInp inpSynced wasAnim False debugDue
-                , sdDraw          = \c curInp _ -> drawOne c curInp
+                , sdShouldDraw    = \c prevInp inpSynced wasAnim refreshDue ->
+                    shouldRedrawFrame c prevInp inpSynced wasAnim False refreshDue
+                , sdDraw          = \c curInp forceFull -> drawOne forceFull c curInp
                 , sdOnCursor      = syncCursor
                 , sdShouldQuit    = \_ -> False
                 , sdAlignSec      = refreshSec
                 }
         -- Present the opening frame before entering the loop so the window has
-        -- content immediately; once idle the loop blocks with no redraws.
-        (_, inpStart) <- drawOne ctx initInp
-        clearDirty ctx
+        -- content immediately; once idle the loop blocks with no redraws. The
+        -- context stays as that frame left it: if it asked for another by
+        -- marking the context dirty, the loop draws it at once instead of
+        -- blocking until some input happens along.
+        (_, inpStart) <- drawOne True ctx initInp
         runSessionLoop drv ctx inpStart
 
 -- | An RGFW event translated for the input fold.

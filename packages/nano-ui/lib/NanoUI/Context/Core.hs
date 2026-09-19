@@ -22,6 +22,10 @@ module NanoUI.Context.Core
   , clearDirty
   , isDirty
   , setWakeLoop
+  , requestWakeAt
+  , requestWakeAfter
+  , getWakeAt
+  , clearWakeAt
   , takeDamage
   , requestDamage
   , damageWidget
@@ -65,6 +69,7 @@ import Data.Primitive.SmallArray (copySmallMutableArray, newSmallArray, readSmal
 import Data.IntMap.Strict (IntMap)
 import Data.IntMap.Strict qualified as IM
 import Data.Text (Text)
+import GHC.Clock (getMonotonicTime)
 
 import NanoUI.Context.Types
   ( Context (..)
@@ -216,6 +221,31 @@ isDirty ctx = getsDamage ctx dsDirty
 {-# INLINE setWakeLoop #-}
 setWakeLoop :: Context -> IO () -> IO ()
 setWakeLoop ctx wake = writeIORef (ctxWakeLoop ctx) (Just wake)
+
+-- | Ask for a frame at a monotonic time ('getMonotonicTime') even if no input
+-- arrives. The earliest request wins. Each frame starts with none pending, so
+-- a widget that still needs a later frame asks again as it is built; one that
+-- is gone stops asking, and the loop sleeps. Call it from the UI thread: a
+-- background thread wakes the loop through 'ctxWakeLoop' instead.
+requestWakeAt :: Context -> Double -> IO ()
+requestWakeAt ctx t = do
+  cur <- readIORef (ctxWakeAt ctx)
+  when (t > 0 && (cur <= 0 || t < cur)) $ writeIORef (ctxWakeAt ctx) t
+
+-- | 'requestWakeAt', in seconds from now.
+requestWakeAfter :: Context -> Double -> IO ()
+requestWakeAfter ctx sec = do
+  now <- getMonotonicTime
+  requestWakeAt ctx (now + max 0 sec)
+
+-- | The pending wake time, or 0 when nothing asked for one.
+{-# INLINE getWakeAt #-}
+getWakeAt :: Context -> IO Double
+getWakeAt ctx = readIORef (ctxWakeAt ctx)
+
+{-# INLINE clearWakeAt #-}
+clearWakeAt :: Context -> IO ()
+clearWakeAt ctx = writeIORef (ctxWakeAt ctx) 0
 
 {-# INLINE takeDamage #-}
 takeDamage :: Context -> IO Damage

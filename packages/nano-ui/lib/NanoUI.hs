@@ -470,6 +470,7 @@ module NanoUI
   , animateToA
   , pulse
   , keepAnimating
+  , wakeAfter
   , Animatable (..)
   , Ease (..)
   , applyEase
@@ -959,7 +960,7 @@ import NanoUI.Types
   , v2Sub
   )
 import NanoUI.WidgetText (colorFromHex, colorToHex, colorToHexA)
-import NanoUI.Widgets.Animate (Transition (..), animate, animateTo, animateToA, keepAnimating, pulse)
+import NanoUI.Widgets.Animate (Transition (..), animate, animateTo, animateToA, keepAnimating, pulse, wakeAfter)
 import NanoUI.Widgets.Button (button, button', buttonWith, buttonWith')
 import NanoUI.Widgets.Checkbox (checkbox, checkbox')
 import NanoUI.Widgets.ColorPicker (colorPicker, colorPicker', colorPickerRGBA, colorPickerRGBA')

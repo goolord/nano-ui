@@ -16,6 +16,10 @@ module NanoUI.Runner
 import Control.Concurrent (threadDelay)
 import Control.Exception (finally, mask)
 import Control.Monad (when)
+import Data.Maybe (isJust)
+import Numeric (showFFloat)
+import System.Environment (lookupEnv)
+import System.IO (BufferMode (LineBuffering), hFlush, hPutStrLn, hSetBuffering, stderr)
 import Data.IORef
   ( IORef
   , atomicModifyIORef'
@@ -27,6 +31,8 @@ import GHC.Clock (getMonotonicTime)
 import NanoUI.Context
   ( Context
   , anyAnimating
+  , clearWakeAt
+  , getWakeAt
   , isDirty
   , overlayConsumesQuit
   , textInputEditActive
@@ -39,7 +45,7 @@ import NanoUI.Debug
   , noteDebugLoop
   , noteDebugSkip
   )
-import NanoUI.Frame.Redraw (needsRedraw, textFieldActive)
+import NanoUI.Frame.Redraw (needsRedraw)
 import NanoUI.Input
   ( Input (..)
   , clearEphemeral
@@ -128,15 +134,15 @@ shouldRedrawFrame ::
   Input ->       -- ^ Current input
   Bool ->        -- ^ Was animating on previous frame?
   Bool ->        -- ^ Continuous redraw requested?
-  Bool ->        -- ^ Debug live refresh requested?
+  Bool ->        -- ^ A frame is due without input: a timed wake or a debug readout refresh?
   IO Bool
-shouldRedrawFrame ctx prevInp curInp wasAnim continuous wantDebug = do
-  if continuous || wantDebug
+shouldRedrawFrame ctx prevInp curInp wasAnim continuous refreshDue = do
+  if continuous || refreshDue
     then pure True
     else do
-      -- 'needsRedraw' already covers a dirty context, running animations and
-      -- an active text field, so an animation that just ended is the only
-      -- animation case left: it needs one final frame.
+      -- 'needsRedraw' already covers a dirty context and running animations,
+      -- so an animation that just ended is the only animation case left: it
+      -- needs one final frame.
       need <- needsRedraw ctx prevInp curInp
       let pointerEdge =
             inputMousePressed curInp
@@ -168,8 +174,7 @@ data SessionDriver ev = SessionDriver
   , sdContinuous    :: !Bool
     -- ^ Redraw every pass without waiting for events.
   , sdPacingMs      :: !Int
-    -- ^ Event wait in milliseconds while something animates or a text field
-    -- is being edited.
+    -- ^ Event wait in milliseconds while something animates.
   , sdPresentPaces  :: IO Bool
     -- ^ Whether the last present waited for the display (vsync), so a running
     -- animation can loop without waiting and still be frame-locked.
@@ -179,7 +184,7 @@ data SessionDriver ev = SessionDriver
     -- cadence matches the host, instead of drifting with the event waiter's
     -- timer granularity.
   , sdShouldDraw    :: Context -> Input -> Input -> Bool -> Bool -> IO Bool
-    -- ^ Decision predicate: (ctx, prevInp, curInp, wasAnimating, debugDue) ->
+    -- ^ Decision predicate: (ctx, prevInp, curInp, wasAnimating, refreshDue) ->
     -- should this frame be rendered? Usually 'shouldRedrawFrame'.
   , sdDraw          :: Context -> Input -> Bool -> IO (Bool, Input)
     -- ^ Render frame: (ctx, curInp, forceFull) -> (dirtyAfterRender, syncedInput).
@@ -188,6 +193,54 @@ data SessionDriver ev = SessionDriver
   , sdShouldQuit    :: Input -> Bool
     -- ^ Application-level quit predicate.
   }
+
+-- | NANO_LOOP_TRACE: on the first pass a second or more after the last line,
+-- print to stderr the time covered, how many passes the loop made in it, how
+-- many of them drew, and why. A busy loop prints a line a second. An idle
+-- window prints nothing, and the line after a quiet spell covers all of it,
+-- so whatever prints steadily is what keeps the process awake. The
+-- reasons are @D@ a dirty context, @A@ an animation, @R@ a window redraw
+-- request, and @T@ a timed wake or a debug readout refresh; a pass with none
+-- of them was caused by input.
+data LoopTrace = LoopTrace
+  { ltOn :: !Bool
+  , ltState :: !(IORef (Double, Int, Int, Int, [String]))
+  }
+
+newLoopTrace :: Double -> IO LoopTrace
+newLoopTrace now = do
+  on <- isJust <$> lookupEnv "NANO_LOOP_TRACE"
+  -- stderr is unbuffered by default, which writes a line a character at a
+  -- time: enough system calls to show up in the measurement being taken.
+  when on (hSetBuffering stderr LineBuffering)
+  LoopTrace on <$> newIORef (now, 0, 0, 0, [])
+
+traceLoopPass :: LoopTrace -> Int -> Bool -> String -> IO ()
+traceLoopPass lt nEvents drew why = when (ltOn lt) $ do
+  now <- getMonotonicTime
+  (t0, passes, draws, events, whys) <- readIORef (ltState lt)
+  let passes' = passes + 1
+      draws' = if drew then draws + 1 else draws
+      events' = events + nEvents
+      whys' = if passes < 24 then (if null why then "-" else why) : whys else whys
+  if now - t0 >= 1
+    then do
+      hPutStrLn stderr $
+        "LOOP " ++ showFFloat (Just 1) (now - t0) "s passes=" ++ show passes' ++ " draws=" ++ show draws'
+          ++ " events=" ++ show events' ++ " why=" ++ unwords (reverse whys')
+      hFlush stderr
+      writeIORef (ltState lt) (now, 0, 0, 0, [])
+    else writeIORef (ltState lt) (t0, passes', draws', events', whys')
+
+-- | Added to the wait for a timed wake, so the wait ends at or after the time
+-- asked for. An OS wait can return a millisecond or two early, and a backend
+-- that counts its timeout in whole milliseconds turns the fraction then left
+-- into a wait of zero: without the pad the loop spins through that last
+-- millisecond, dozens of empty passes for every wake. The frame comes this
+-- much late instead, which nothing scheduled to the millisecond can notice;
+-- animation is paced separately.
+wakePadMs :: Int
+wakePadMs = 2
 
 -- | Event wait while only the debug readout needs frames: its refresh period.
 debugHudTimeout :: Int
@@ -202,8 +255,12 @@ runSessionLoop ::
 runSessionLoop drv ctx0 inp0 = do
   clickTracker <- newIORef ClickTrack {ctTime = 0, ctPos = V2 (-999) (-999), ctCount = 0}
   startT <- getMonotonicTime
+  trace <- newLoopTrace startT
 
-  let waitForEvents timeout lastT
+  let -- A paced wait is one a running animation times out of, so the frame it
+      -- ends on is wound onto the pacing grid. Any other wait ends whenever
+      -- its event or deadline arrives.
+      waitForEvents timeout paced lastT
         | timeout < 0 = sdWaitEvents drv (-1)
         | otherwise = do
             polled <- sdPollEvents drv
@@ -211,33 +268,52 @@ runSessionLoop drv ctx0 inp0 = do
               then pure polled
               else do
                 events <- sdWaitEvents drv timeout
-                -- Only a timed-out paced wait needs frame alignment.
-                when (timeout > 0 && null events) $
+                when (paced && timeout > 0 && null events) $
                   alignFrameStart (sdAlignSec drv) lastT
                 pure events
 
       loop ctx inp queued lastT pendingDirty wasAnim = do
-        (pending, debugDue) <-
+        (pending, refreshDue) <-
           if not (null queued)
             then pure (queued, False)
             else if pendingDirty
-              then (,False) <$> waitForEvents 0 lastT
+              then (,False) <$> waitForEvents 0 False lastT
               else do
                 debugActive <- isDebugActive (sdDebug drv)
-                refreshDue <- debugRefreshDue (sdDebug drv)
+                debugDue <- debugRefreshDue (sdDebug drv)
                 animating <- anyAnimating ctx
-                editing <- textFieldActive ctx
                 dirty <- isDirty ctx
                 presentPaces <- sdPresentPaces drv
-                let dueNow = debugActive && refreshDue
+                wakeAt <- getWakeAt ctx
+                waitT <- if wakeAt > 0 then getMonotonicTime else pure 0
+                let dueNow = debugActive && debugDue
+                    paced = wasAnim || animating
+                    -- Nothing moves by itself: sleep until input, or until
+                    -- the earliest frame something asked for.
+                    wakeMs
+                      | wakeAt <= 0 = -1
+                      | wakeAt <= waitT = 0
+                      | otherwise = ceiling ((wakeAt - waitT) * 1000) + wakePadMs :: Int
+                    idleMs
+                      | not debugActive = wakeMs
+                      | wakeMs < 0 = debugHudTimeout
+                      | otherwise = min debugHudTimeout wakeMs
                     timeout
                       | sdContinuous drv || dueNow || dirty || (animating && presentPaces) = 0
-                      | wasAnim || animating || editing = sdPacingMs drv
-                      | debugActive = debugHudTimeout
-                      | otherwise = -1
-                events <- waitForEvents timeout lastT
+                      | paced = sdPacingMs drv
+                      | otherwise = idleMs
+                events <- waitForEvents timeout paced lastT
+                wakeDue <-
+                  if wakeAt > 0
+                    then (>= wakeAt) <$> getMonotonicTime
+                    else pure False
+                -- The frame this wake is for asks again if it needs another.
+                -- Clearing it here keeps a frame that cannot run (the drawing
+                -- lock is held) from turning the deadline into a spin.
+                when wakeDue (clearWakeAt ctx)
                 -- A readout wait that timed out ends on its refresh.
-                pure (events, dueNow || (timeout == debugHudTimeout && debugActive && null events))
+                let hudDue = timeout == debugHudTimeout && debugActive && null events
+                pure (events, dueNow || wakeDue || hudDue)
 
         let (group, rest) = splitFrame (sdIsButtonEdge drv) pending
         editActive <- textInputEditActive ctx
@@ -259,7 +335,7 @@ runSessionLoop drv ctx0 inp0 = do
               else do
                 shouldDraw <- if pendingDirty
                   then pure True
-                  else sdShouldDraw drv ctx' inp inpSynced wasAnim debugDue
+                  else sdShouldDraw drv ctx' inp inpSynced wasAnim refreshDue
                 -- Force a full present only on the settle frame where an
                 -- animation just finished (wasAnim && not animNow), so running
                 -- animations keep clip damage.
@@ -271,6 +347,11 @@ runSessionLoop drv ctx0 inp0 = do
                     pure (pendingDirty, inpSynced)
                 sdOnCursor drv ctx' synced
                 animAfter <- anyAnimating ctx'
+                traceLoopPass trace (length group) shouldDraw $
+                  (if pendingDirty then "D" else "")
+                    ++ (if wasAnim || animAfter then "A" else "")
+                    ++ (if inputWindowRedraw inpSynced then "R" else "")
+                    ++ (if refreshDue then "T" else "")
                 -- Open modals/overlays consume Escape/Quit before the app sees it.
                 overlayQuit <- overlayConsumesQuit ctx' synced
                 if sdShouldQuit drv synced && not overlayQuit

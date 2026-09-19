@@ -57,6 +57,9 @@ module NanoUI.Testing
   , clearMeasureCache
   , isDirty
   , setWakeLoop
+  , requestWakeAt
+  , requestWakeAfter
+  , getWakeAt
   , DamageRequest (..)
   , requestDamage
   , damageWidget
@@ -171,6 +174,9 @@ import NanoUI.Context
   , setAnimationValue
   , setHost
   , setWakeLoop
+  , requestWakeAt
+  , requestWakeAfter
+  , getWakeAt
   , startAnimation
   , startAnimationEase
   , startAnimationEaseDelay

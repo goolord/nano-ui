@@ -29,7 +29,7 @@ import Foreign.Ptr (Ptr, nullPtr)
 import Foreign.Storable (peek)
 import NanoUI (ImageId, Input (..), Size (..), Theme, V2 (..))
 import NanoUI.Context (Context (..), setDrawSnapScale)
-import NanoUI.Testing (clearMeasureCache, markDirty, setHost, setWakeLoop)
+import NanoUI.Testing (clearMeasureCache, damageFull, markDirty, setHost, setWakeLoop)
 import NanoUI.Sdl.Display
   ( defaultFontSize
   , initRefreshEvent
@@ -269,6 +269,8 @@ syncDisplay ctx env inp = do
     reloadSdlFontCache (sdlFontCache env) source
     writeIORef (sdlCachedCtx env) . withSdlClipboard =<< withSdlFontCache (sdlFontCache env) ctx
     clearMeasureCache ctx
+    -- Glyphs change under rects and texts that may not: repaint everything.
+    damageFull ctx
     markDirty ctx
   queried <- queryWindowLogicalSize (sdlWindow env)
   let unzoom (Size sw sh) = Size (sw / zoom) (sh / zoom)

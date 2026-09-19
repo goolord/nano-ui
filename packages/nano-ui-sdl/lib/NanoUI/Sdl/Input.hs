@@ -37,7 +37,7 @@ import NanoUI
   , v2Add
   )
 import NanoUI.Input (MouseButton (..), appendDropEvent, applyMouseButton)
-import NanoUI.Sdl.Display (refreshEventType)
+import NanoUI.Sdl.Display (refreshEventType, takeRefreshEvent)
 import SDL3.Sys.Bindgen.Events
   ( SDL_Event (..)
   , SDL_EventType (..)
@@ -130,7 +130,7 @@ decodeEvent :: Word32 -> Ptr SDL_Event -> IO (Maybe SdlEvent)
 decodeEvent refreshTy p = do
   Uint32 w <- peek p.type'
   if refreshTy /= 0 && w == refreshTy
-    then pure (Just EvRefresh)
+    then Just EvRefresh <$ takeRefreshEvent
     else case SDL_EventType (fromIntegral w) of
       SDL_EVENT_QUIT -> pure (Just EvQuit)
       SDL_EVENT_WINDOW_RESIZED -> Just <$> windowResized p
@@ -306,7 +306,9 @@ applyEvent inp ev =
       (applyMouseButton MouseRight False inp) {inputMousePos = pos, inputModifiers = mods}
     EvScroll delta -> inp {inputScroll = v2Add (inputScroll inp) delta}
     EvDrop dropEv -> inp {inputDrops = appendDropEvent dropEv (inputDrops inp)}
-    EvRefresh -> inp {inputWindowRedraw = True}
+    -- A wake asks for a frame, not a repaint: the session runs one, and its
+    -- damage decides what is presented, if anything.
+    EvRefresh -> inp
     EvWindowRedraw -> inp {inputWindowRedraw = True}
 
 isButtonEdge :: SdlEvent -> Bool

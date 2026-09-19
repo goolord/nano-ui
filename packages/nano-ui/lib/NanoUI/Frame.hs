@@ -34,6 +34,7 @@ import NanoUI.Context
   , themeScopesChanged
   , FrameMsg (..)
   , clearDirty
+  , clearWakeAt
   , decodeMessages
   , drainMessages
   , getLiveAnimations
@@ -202,6 +203,8 @@ runFrameEff unlift ctx inp ui = do
   oldStore <- getStore ctx
   wasDirty <- isDirty ctx
   clearDirty ctx
+  -- Timed wakes are re-requested by whatever is still built this frame.
+  clearWakeAt ctx
   animKeys <- IM.keysSet <$> getLiveAnimations ctx
   -- Wheel and thumb-drag input targets the previous frame's layout, so apply
   -- it while that arena is still intact, before it is reset for the new

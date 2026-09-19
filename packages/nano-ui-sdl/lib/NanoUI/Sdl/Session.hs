@@ -18,10 +18,7 @@ import NanoUI.Runner
   , shouldRedrawFrame
   , tryWithDrawingLock
   )
-import NanoUI.Testing
-  ( Context
-  , clearDirty
-  )
+import NanoUI.Testing (Context)
 import NanoUI.Sdl.Cursor (syncPointerCursor)
 import NanoUI.Sdl.Input
   ( SdlEvent (..)
@@ -32,7 +29,7 @@ import NanoUI.Sdl.Input
   , waitEvent
   , waitEventTimeout
   )
-import NanoUI.Sdl.Display (installResizeWatch)
+import NanoUI.Sdl.Display (installResizeWatch, pushRefreshEvent)
 import NanoUI.Sdl.Window (SdlEnv (..), SdlOptions (..), syncDisplay, withSdl)
 import SDL3.Sys.Bindgen.Blendmode (sDL_BLENDMODE_BLEND)
 import SDL3.Sys.Render (setRenderDrawBlendModeSafe, setRenderVSync)
@@ -87,22 +84,35 @@ runSdlSession options ctx setup shouldQuit drawFn =
                       (_, s) <- drawFn ctx' env inpSynced True
                       writeIORef prev s
                       writeIORef resizePresented (Just (inputWindowSize s))
-    -- A refresh wake (a finished file dialog) may postdate the watch's frame,
-    -- so it voids that frame's cover.
+    -- A wake (a background thread changed what the view reads, a file dialog
+    -- finished) asks for a frame. What that frame presents is up to its
+    -- damage: a wake that changed nothing on screen costs the UI pass and no
+    -- repaint or present.
+    wakeRef <- newIORef False
+    -- A wake may postdate the watch's frame, so it voids that frame's cover.
     let noteWake evs = do
-          when (EvRefresh `elem` evs) $ writeIORef resizePresented Nothing
+          when (EvRefresh `elem` evs) $ do
+            writeIORef resizePresented Nothing
+            writeIORef wakeRef True
           pure evs
     let drainUntilQuiet c inp = do
-          pending <- pollEvents
+          pending <- pollEvents >>= noteWake
           (c', inp') <- syncDisplay c env (foldl' applyEvent inp pending)
           if null pending
             then pure (c', inp')
             else drainUntilQuiet c' inp'
+    -- The opening frames are drawn here, outside the loop, so what one asks
+    -- for beyond itself has to be carried into the loop by hand. A frame
+    -- answers the wakes that came before it, and leaves the context dirty
+    -- when it needs another.
+    let startupFrame c inp = do
+          writeIORef wakeRef False
+          drawFn c env inp True
     let inpSeed = emptyInput {inputWindowSize = sdlWindowSize options}
     (ctx1, inp0) <- drainUntilQuiet ctx0 inpSeed
     writeIORef ctxRef ctx1
     scale0 <- readIORef (sdlScaleRef env)
-    (_, synced0) <- drawFn ctx1 env inp0 True
+    (_, synced0) <- startupFrame ctx1 inp0
     -- First present can apply DPI. Prev rects are empty on that frame.
     -- Draw once more before idle or the Controls page stays stretched
     -- until the first mouse move.
@@ -110,22 +120,25 @@ runSdlSession options ctx setup shouldQuit drawFn =
     writeIORef ctxRef ctx1b
     scaleSettle <- readIORef (sdlScaleRef env)
     let paintedSize = inputWindowSize inp0b
-    (_, synced0b) <- drawFn ctx1b env inp0b True
-    clearDirty ctx1b
+    (_, synced0b) <- startupFrame ctx1b inp0b
     (ctx2, inp1) <- drainUntilQuiet ctx1b synced0b
     writeIORef ctxRef ctx2
     scale1 <- readIORef (sdlScaleRef env)
     catchup <- readIORef startupCatchup
     synced1 <-
       if catchup || inputWindowSize inp1 /= paintedSize || abs (scale1 - scaleSettle) > 0.001 || abs (scaleSettle - scale0) > 0.001
-        then do
-          (_, s) <- drawFn ctx2 env inp1 True
-          clearDirty ctx2
-          pure s
+        then snd <$> startupFrame ctx2 inp1
         else pure inp1
     writeIORef startupCatchup False
     writeIORef startupDone True
     writeIORef prev synced1
+    -- The last opening frame may have asked for another: it marked the
+    -- context dirty, which the loop sees by itself, or a wake arrived after
+    -- it began, which the drains above took off the queue. Queue that wake
+    -- again, or the loop would block on a view waiting to be drawn until some
+    -- input happened along.
+    wokeSinceLastFrame <- readIORef wakeRef
+    when wokeSinceLastFrame pushRefreshEvent
     let drv =
           SessionDriver
             { sdPollEvents    = pollEvents >>= noteWake
@@ -162,23 +175,32 @@ runSdlSession options ctx setup shouldQuit drawFn =
               -- out of view) did not wait for vblank, so it must not loop
               -- without waiting.
             , sdPresentPaces  = if sdlVsync env then readIORef (sdlLastPresented env) else pure False
-            , sdShouldDraw    = \c prevInp inpSynced wasAnim wantDebug -> do
+            , sdShouldDraw    = \c prevInp inpSynced wasAnim refreshDue -> do
                 presented <- readIORef resizePresented
                 writeIORef resizePresented Nothing
+                wakeDue <- readIORef wakeRef
                 let (prevInp', inpSynced') = case presented of
                       Just size
                         | size == inputWindowSize inpSynced ->
                             (prevInp {inputWindowSize = size}, inpSynced {inputWindowRedraw = False})
                       _ -> (prevInp, inpSynced)
-                shouldRedrawFrame c prevInp' inpSynced' wasAnim (sdlContinuous env) wantDebug
+                shouldRedrawFrame c prevInp' inpSynced' wasAnim (sdlContinuous env) (refreshDue || wakeDue)
             , sdDraw          = \c inpSynced forceFull -> do
                 writeIORef resizePresented Nothing
-                ms <- tryWithDrawingLock drawing (drawFn c env inpSynced (forceFull || sdlContinuous env))
+                -- Only a frame that runs answers a wake.
+                ms <- tryWithDrawingLock drawing $ do
+                  writeIORef wakeRef False
+                  drawFn c env inpSynced (forceFull || sdlContinuous env)
                 case ms of
                   Just (dirtyOut, s) -> do
                     writeIORef prev s
                     pure (dirtyOut, s)
-                  Nothing -> pure (False, inpSynced)
+                  Nothing -> do
+                    -- The wake's event is already off the queue: queue it
+                    -- again for the pass after the lock is free.
+                    stillDue <- readIORef wakeRef
+                    when stillDue pushRefreshEvent
+                    pure (False, inpSynced)
             , sdOnCursor      = syncPointerCursor (sdlCursors env)
             , sdAlignSec      = sdlRefreshPeriod env
             , sdShouldQuit    = shouldQuit

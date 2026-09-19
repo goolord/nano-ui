@@ -5,6 +5,7 @@ module NanoUI.Widgets.Animate
   , animateToA
   , pulse
   , keepAnimating
+  , wakeAfter
   )
 where
 
@@ -20,7 +21,8 @@ import NanoUI.Context
   , getAnimationValue
   , lookupAnimation
   , setAnimationValue
-  , startAnimation
+  , keepAnimationAlive
+  , requestWakeAfter
   , startAnimationEaseDelay
   , startSpring
   )
@@ -94,14 +96,31 @@ pulse periodSec = do
     period = max 0.001 (realToFrac periodSec :: Double)
   pure (realToFrac (0.5 + 0.5 * sin (2 * pi * t / period)) :: Float)
 
--- | Keep a widget animating indefinitely so the frame loop never idles. Widgets
--- driven by the wall clock ('pulse', or drawing from 'NanoUI.Monad.uiTime')
--- rather than by a frame-counted animation would otherwise stop repainting
--- once other animations settle.
+-- | Keep a widget animating for as long as this is called, so the frame loop
+-- does not idle. Widgets driven by the wall clock ('pulse', or drawing from
+-- 'NanoUI.Monad.uiTime') rather than by a frame-counted animation would
+-- otherwise stop repainting once other animations settle. Call it every
+-- frame the widget is shown: the loop goes back to sleep on the first frame
+-- that leaves it out.
 --
 -- > bar <- progressBar' =<< pulse 6
 -- > keepAnimating bar
 keepAnimating :: (HasResponse r, Ui :> es) => r -> Eff es ()
 keepAnimating resp = do
   ctx <- askContext
-  uiIO (startAnimation ctx (respId resp) 0 1 1e9)
+  uiIO (keepAnimationAlive ctx (respId resp))
+
+-- | Ask for another frame after this many seconds, even if no input arrives.
+-- The loop sleeps until then. Call it on every frame that still needs the
+-- later one, as a clock label would to tick once a second:
+--
+-- > clock = do
+-- >   label =<< currentTimeText
+-- >   wakeAfter 1
+--
+-- Use it instead of 'keepAnimating' when a view changes on a schedule and not
+-- continuously: 'keepAnimating' runs a frame for every display refresh.
+wakeAfter :: Ui :> es => Double -> Eff es ()
+wakeAfter sec = do
+  ctx <- askContext
+  uiIO (requestWakeAfter ctx sec)

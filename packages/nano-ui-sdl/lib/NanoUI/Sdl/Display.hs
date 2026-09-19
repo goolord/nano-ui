@@ -11,10 +11,12 @@ module NanoUI.Sdl.Display
   , refreshEventType
   , initRefreshEvent
   , pushRefreshEvent
+  , takeRefreshEvent
   ) where
 
 import Control.Monad (unless, void)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import GHC.IORef (atomicSwapIORef)
 import Foreign.C.Types (CInt (..))
 import Foreign.Marshal.Alloc (alloca, callocBytes)
 import Foreign.Ptr (FunPtr, Ptr, freeHaskellFunPtr)
@@ -106,6 +108,9 @@ refreshEvent = unsafePerformIO (callocBytes (sizeOf (undefined :: SDL_Event)))
 
 initRefreshEvent :: IO Bool
 initRefreshEvent = do
+  -- A wake queued as the last session closed went down with SDL's queue.
+  -- Left pending, it would stop this session from ever queuing one.
+  takeRefreshEvent
   registered <- readIORef refreshEventType
   if registered /= 0
     then pure True
@@ -115,10 +120,31 @@ initRefreshEvent = do
       writeIORef refreshEventType ty
       pure (ty /= 0)
 
+-- | Whether a refresh event is queued that the loop has not taken yet.
+{-# NOINLINE refreshPending #-}
+refreshPending :: IORef Bool
+refreshPending = unsafePerformIO (newIORef False)
+
+-- | Wake the event loop from any thread. One queued event wakes it as well as
+-- many, so a wake while one is pending costs an atomic swap and no SDL call:
+-- the core wakes on every 'NanoUI.Testing.markDirty', most of them made by
+-- the loop's own thread in the middle of a frame.
+--
+-- The swap is a memory barrier, so whatever the caller wrote before waking is
+-- visible by the time the loop takes the event: 'takeRefreshEvent' runs
+-- before the frame that reads it.
 pushRefreshEvent :: IO ()
 pushRefreshEvent = do
   ty <- readIORef refreshEventType
-  unless (ty == 0) $ void (pushEvent refreshEvent)
+  unless (ty == 0) $ do
+    pending <- atomicSwapIORef refreshPending True
+    unless pending $ do
+      ok <- pushEvent refreshEvent
+      unless ok $ void (atomicSwapIORef refreshPending False)
+
+-- | The loop took the queued refresh event, so the next wake queues another.
+takeRefreshEvent :: IO ()
+takeRefreshEvent = void (atomicSwapIORef refreshPending False)
 
 foreign import ccall unsafe "nano_ui_window_refresh_rate"
   windowRefreshRateC :: Ptr SDL_Window -> IO CInt

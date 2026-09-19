@@ -52,6 +52,7 @@ testSpecs :: [TestSpec]
 testSpecs =
   -- Runner, state and messages
   [ TestSpec "session-loop" False runSessionLoopTest
+  , TestSpec "session-loop-wake" False runSessionLoopWakeTest
   , TestSpec "drawing-lock" False runDrawingLockTest
   , TestSpec "simd-writes" False runSimdWritesTest
   , TestSpec "no-thunks" False runNoThunksTest
@@ -127,6 +128,8 @@ testSpecs =
       runCompositeAnimationIsolationTest
   , TestSpec "button-hover-anim" False runButtonHoverAnimTest
   , TestSpec "spinner" False runSpinnerTest
+  , TestSpec "keep-animating-lapse" False runKeepAnimatingLapseTest
+  , TestSpec "wake-after" False runWakeAfterTest
   -- Keyboard
   , TestSpec "keyboard-disabled" False runKeyboardDisabledTest
   , TestSpec "disabled-pointer" False runDisabledPointerTest
@@ -151,6 +154,7 @@ testSpecs =
   , TestSpec "slider-fill-width" True runSliderFillWidthTest
   , TestSpec "search-field-clear" False runSearchFieldClearTest
   , TestSpec "search-field-debounce" False runSearchFieldDebounceTest
+  , TestSpec "search-field-set-text-debounce" False runSearchFieldSetTextDebounceTest
   , TestSpec "select-drag-to-select" False runSelectDragToSelectTest
   , TestSpec "select-keyboard" False runSelectKeyboardTest
   , TestSpec "select-change-once" False runSelectChangeOnceTest
@@ -194,6 +198,7 @@ testSpecs =
   , TestSpec "text-input-focus-sdl" True runTextInputFocusSdlTest
   , TestSpec "text-input-scroll" True runTextInputScrollTest
   , TestSpec "text-input-dirty" False runTextInputDirtyTest
+  , TestSpec "text-input-drag-wake" False runTextInputDragWakeTest
   , TestSpec
       "text-area-cut-clears-selection"
       False

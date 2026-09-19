@@ -1,5 +1,6 @@
-module Cases.Runner (runSessionLoopTest, runDrawingLockTest) where
+module Cases.Runner (runSessionLoopTest, runSessionLoopWakeTest, runDrawingLockTest) where
 
+import Control.Concurrent (threadDelay)
 import Control.Exception
   ( IOException
   , MaskingState (Unmasked)
@@ -9,10 +10,33 @@ import Control.Exception
   )
 import Data.IORef (IORef, atomicModifyIORef', modifyIORef', newIORef, readIORef)
 import NanoUI (Input (..), V2 (..), emptyInput)
-import NanoUI.Debug (newDebugSampler)
+import NanoUI.Debug (DebugSamplerRef, newDebugSampler)
 import NanoUI.Runner
-import NanoUI.Testing (Context, clearDirty)
+import NanoUI.Testing (Context, clearDirty, getWakeAt, requestWakeAfter)
 import NanoUI.Testing.Assert (assertEq)
+
+-- | A driver with no events, nothing to draw, and event 3 as the window's
+-- close. Each test overrides the fields it watches.
+quietDriver :: DebugSamplerRef -> SessionDriver Int
+quietDriver debug =
+  SessionDriver
+    { sdPollEvents = pure []
+    , sdWaitEvents = \_ -> pure [3]
+    , sdApplyEvent = \inp _ -> inp
+    , sdIsButtonEdge = const False
+    , sdIsHardQuit = const False
+    , sdIsSessionQuit = (== 3)
+    , sdSyncDisplay = \c inp -> pure (c, inp)
+    , sdDebug = debug
+    , sdContinuous = False
+    , sdPacingMs = 16
+    , sdPresentPaces = pure False
+    , sdAlignSec = 0
+    , sdShouldDraw = \_ _ _ _ _ -> pure False
+    , sdDraw = \_ inp _ -> pure (False, inp)
+    , sdOnCursor = \_ _ -> pure ()
+    , sdShouldQuit = const False
+    }
 
 -- Exercise queued edges, a dirty follow-up frame, skipped input, and blocking
 -- waits without requiring a native window or depending on wall-clock timing.
@@ -25,7 +49,7 @@ runSessionLoopTest ctx failed = do
   let
     note message = modifyIORef' logRef (<> [message])
     driver =
-      SessionDriver
+      (quietDriver debug)
         { sdPollEvents = do
             note "poll"
             pure []
@@ -38,14 +62,6 @@ runSessionLoopTest ctx failed = do
             pure events
         , sdApplyEvent = \inp event -> inp {inputMousePos = V2 (fromIntegral event) 0}
         , sdIsButtonEdge = const True
-        , sdIsHardQuit = const False
-        , sdIsSessionQuit = (== 3)
-        , sdSyncDisplay = \c inp -> pure (c, inp)
-        , sdDebug = debug
-        , sdContinuous = False
-        , sdPacingMs = 16
-        , sdPresentPaces = pure False
-        , sdAlignSec = 0
         , sdShouldDraw = \_ previous current _ _ -> do
             note ("decide " <> show (inputMousePos previous, inputMousePos current))
             pure (inputMousePos current == V2 1 0)
@@ -54,7 +70,6 @@ runSessionLoopTest ctx failed = do
             note "draw"
             pure (n <= 2, inp {inputMousePos = V2 10 0})
         , sdOnCursor = \_ _ -> note "cursor"
-        , sdShouldQuit = const False
         }
   -- A new context starts dirty, which would make the first wait immediate.
   clearDirty ctx
@@ -79,6 +94,41 @@ runSessionLoopTest ctx failed = do
     ]
     actual
   assertEq failed 3 =<< readIORef draws
+
+-- A requested wake bounds the idle wait and draws when it comes due, and the
+-- loop blocks again once nothing asks for another. No pass runs in between:
+-- the loop sleeps to the deadline instead of polling toward it.
+runSessionLoopWakeTest :: Context -> IORef Int -> IO ()
+runSessionLoopWakeTest ctx failed = do
+  logRef <- newIORef []
+  waits <- newIORef (0 :: Int)
+  debug <- newDebugSampler
+  let
+    note message = modifyIORef' logRef (<> [message])
+    driver =
+      (quietDriver debug)
+        { sdWaitEvents = \timeout -> do
+            n <- atomicModifyIORef' waits (\n -> (n + 1, n))
+            if n == 0
+              then do
+                note (if timeout > 0 && timeout <= 40 then "timed wait" else "wait " <> show timeout)
+                threadDelay (max 0 timeout * 1000)
+                pure []
+              else do
+                note ("wait " <> show timeout)
+                pure [3]
+        , sdShouldDraw = \_ _ _ _ due -> do
+            note ("due " <> show due)
+            pure due
+        , sdDraw = \_ inp _ -> do
+            note "draw"
+            pure (False, inp)
+        }
+  clearDirty ctx
+  requestWakeAfter ctx 0.03
+  runSessionLoop driver ctx emptyInput
+  assertEq failed ["timed wait", "due True", "draw", "wait -1"] =<< readIORef logRef
+  assertEq failed 0 =<< getWakeAt ctx
 
 runDrawingLockTest :: Context -> IORef Int -> IO ()
 runDrawingLockTest _ failed = do

@@ -27,10 +27,12 @@ module Cases
   , runWidgetNoStringEmitTest
   , runSearchFieldClearTest
   , runSearchFieldDebounceTest
+  , runSearchFieldSetTextDebounceTest
   ) where
 
 import Control.Monad (forM_, void, when)
 import Control.Concurrent (threadDelay)
+import GHC.Clock (getMonotonicTime)
 import Data.ByteString qualified as BS
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
@@ -833,13 +835,41 @@ runSearchFieldDebounceTest ctx failed = do
   ((rB, tB), _, _, _) <- runFrame ctx (inp0 {inputChars = "b"}) ui
   assertEq failed tB "ab"
   assert failed (not (respChanged rB))
+  -- No input marks the end of the pause, so the field asks for the frame
+  -- that commits: the loop sleeps until then instead of polling.
+  typedAt <- getMonotonicTime
+  wakeAt <- getWakeAt ctx
+  assert failed (wakeAt > typedAt && wakeAt < typedAt + 0.06)
   threadDelay 80000
   ((rC, tC), _, _, _) <- runFrame ctx inp0 ui
   assertEq failed tC "ab"
   assert failed (respChanged rC)
+  -- Committed: nothing is pending.
+  assertEq failed 0 =<< getWakeAt ctx
   threadDelay 50000
   ((rD, _), _, _, _) <- runFrame ctx inp0 ui
   assert failed (not (respChanged rD))
+
+-- Text the caller puts in a focused search field, which nobody has typed in,
+-- commits after one pause like typed text. With no edit time to age from it
+-- once looked freshly edited on every frame: it never committed, and woke
+-- the loop every debounce period for good.
+runSearchFieldSetTextDebounceTest :: Context -> IORef Int -> IO ()
+runSearchFieldSetTextDebounceTest ctx failed = do
+  queryRef <- newIORef ""
+  let inp0 = withInput 320 100
+      ui = column (held queryRef (searchFieldConfigured' (defaultSearchFieldConfig {sfcDebounceMs = 40})))
+  _ <- warmup2 ctx inp0 ui
+  _ <- runFrame ctx (tabInp inp0) ui
+  writeIORef queryRef "recent"
+  ((rA, tA), _, _, _) <- runFrame ctx inp0 ui
+  assertEq failed tA "recent"
+  assert failed (not (respChanged rA))
+  assert failed . (> 0) =<< getWakeAt ctx
+  threadDelay 80000
+  ((rB, _), _, _, _) <- runFrame ctx inp0 ui
+  assert failed (respChanged rB)
+  assertEq failed 0 =<< getWakeAt ctx
 
 runKvMultilineHeightTest :: Context -> IORef Int -> IO ()
 runKvMultilineHeightTest ctx failed = do

@@ -6,6 +6,7 @@ module Cases.TextInput
   , runTextAreaCutClearsSelectionTest
   , runTextInputCutClearsSelectionTest
   , runTextInputDirtyTest
+  , runTextInputDragWakeTest
   , runTextInputFocusSdlTest
   , runTextInputMenuTest
   , runTextInputMouseSelectionTest
@@ -492,8 +493,35 @@ runTextInputDirtyTest ctx failed = do
   let
     idle = release {inputMouseReleased = False, inputDeltaTime = 1}
   _ <- runFrame ctx idle ui
-  needFocus <- needsRedraw ctx idle idle
-  assert failed needFocus
+  _ <- runFrame ctx idle ui
+  -- Keyboard focus by itself asks for nothing: the caret does not blink, and
+  -- typing arrives as input. A focused field must let the loop sleep.
+  assert failed . not =<< needsRedraw ctx idle idle
+  assertEq failed 0 =<< getWakeAt ctx
+  assert failed =<< needsRedraw ctx idle idle {inputChars = "x"}
+
+-- A selection drag held still past the field's edge keeps asking for frames,
+-- so the text goes on scrolling under it. Inside the field, and once the
+-- button is up, nothing is asked for and the loop sleeps.
+runTextInputDragWakeTest :: Context -> IORef Int -> IO ()
+runTextInputDragWakeTest ctx failed = do
+  let
+    ui = column (textInput' "some text to select")
+    inp0 = (withInput 200 100) {inputMousePos = V2 20 20}
+  (resp, _) <- warmup2 ctx inp0 ui
+  let
+    Rect rx ry rw _ = respRect resp
+    outside = V2 (rx + rw + 40) (ry + 4)
+    (press, release) = clickPair inp0 (V2 (rx + 4) (ry + 4))
+    hold = press {inputMousePressed = False}
+  _ <- runFrame ctx press ui
+  _ <- runFrame ctx hold ui
+  assertEq failed 0 =<< getWakeAt ctx
+  _ <- runFrame ctx hold {inputMousePos = outside} ui
+  assert failed . (> 0) =<< getWakeAt ctx
+  _ <- runFrame ctx release {inputMousePos = outside} ui
+  _ <- runFrame ctx release {inputMousePos = outside, inputMouseReleased = False} ui
+  assertEq failed 0 =<< getWakeAt ctx
 
 runTextInputFfCaretTest :: Context -> IORef Int -> IO ()
 runTextInputFfCaretTest ctx failed = do

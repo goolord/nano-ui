@@ -21,7 +21,7 @@ import Data.Text qualified as T
 import Data.Text.Read qualified as TR
 import Effectful (Eff, type (:>))
 import GHC.Clock (getMonotonicTime)
-import NanoUI.Context (getStore, intKey, markDirty, registerFocusable, modifyStore)
+import NanoUI.Context (getStore, intKey, registerFocusable, requestWakeAt, modifyStore)
 import NanoUI.Input (Key (..), inputKeys, inputKeysElem, inputModifiers, inputMouseDown, inputMousePos, inputMousePressed, modShift)
 import NanoUI.Layout.Arena (NodeType (..))
 import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO)
@@ -183,8 +183,9 @@ numericInputConfigured' cfg value = do
               { storeInt = (if held1 == 0 then IM.delete heldK else IM.insert heldK held1) (storeInt st)
               , storeDouble = IM.insert key final (IM.insert repeatK repeatAt1 (storeDouble st))
               }
-  -- Keep frames coming while an arrow is held so it can repeat.
-  when (held1 /= 0) $ uiIO (markDirty ctx)
+  -- A held arrow repeats on a schedule: ask for the frame of its next step
+  -- instead of running frames back to back until then.
+  when (held1 /= 0) $ uiIO (requestWakeAt ctx repeatAt1)
   pure (setSubmitted submitted (setChanged (final /= value) resp), final)
 
 clampNumber :: NumericInputConfig -> Double -> Double

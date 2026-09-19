@@ -246,6 +246,12 @@ data AnimationState = AnimationState
   , asAnyAnimating :: {-# UNPACK #-} !Bool
   , asAnimSettled :: {-# UNPACK #-} !Bool
   , asRectless :: !(IntMap Int)
+  , asKeepAlive :: !IntSet
+  -- ^ Keys whose perpetual animation a 'keepAnimating' call holds open.
+  , asKeepTouched :: !IntSet
+  -- ^ The keys that asked again this frame. A held key missing from it at
+  -- the end of the frame lapses: its widget is no longer built, and nothing
+  -- else would ever end its animation.
   }
 
 initialAnimationState :: AnimationState
@@ -255,6 +261,8 @@ initialAnimationState = AnimationState
   , asAnyAnimating = False
   , asAnimSettled = False
   , asRectless = IM.empty
+  , asKeepAlive = IS.empty
+  , asKeepTouched = IS.empty
   }
 
 -- | How far one wheel notch scrolls, and how long a scroll takes to settle.
@@ -529,6 +537,11 @@ data Context = Context
   , ctxClipboardSet :: Text -> IO Bool
   , ctxImageAtlas :: ImageAtlas
   , ctxWakeLoop :: IORef (Maybe (IO ()))
+  , ctxWakeAt :: !(IORef Double)
+  -- ^ Monotonic time ('GHC.Clock.getMonotonicTime') of the earliest frame
+  -- anything asked for without input to cause it, or 0 for none. Each frame
+  -- starts from 0 and whatever still needs a later frame asks again, so the
+  -- loop sleeps until then instead of polling.
   , ctxHost :: IORef (Map TypeRep Dynamic)
   , ctxDefaultLayout :: IORef Layout
   }

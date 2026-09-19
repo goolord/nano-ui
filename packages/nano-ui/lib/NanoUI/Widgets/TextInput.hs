@@ -52,6 +52,7 @@ import NanoUI.Context
   , markDirty
   , recordStoreText
   , registerFocusable
+  , requestWakeAt
   , setStore
   , modifyStore
   )
@@ -294,7 +295,8 @@ buildTextInput styleIdx layout placeholder value mDebounceMs = do
 -- | Debounced change pulse for a search field. Fires when the text differs from
 -- the last committed query and either the field is empty, lost focus, or has
 -- been idle for @ms@ (trailing edge). Field text lives under @key@; the last
--- committed query under 'SlotSearchCommitted'.
+-- committed query under 'SlotSearchCommitted'. While an edit waits to commit,
+-- the frame that will commit it is scheduled with 'requestWakeAt'.
 debounceSearchChanged :: Context -> Int -> Bool -> Bool -> Float -> IO Bool
 debounceSearchChanged ctx key focused rawChanged ms = do
   store <- getStore ctx
@@ -318,7 +320,11 @@ debounceSearchChanged ctx key focused rawChanged ms = do
       not rawChanged
         && dirty
         && (T.null fieldText || not focused || idleMs >= deadline)
-  when (rawChanged || commit || committedMissing) $
+    -- Text the caller changed, in a field nobody has typed in, has no edit
+    -- time to age from. Its pause starts now: left unstamped, every frame
+    -- would see a fresh edit, and the commit would never come.
+    stamp = rawChanged || commit || (dirty && not (IM.member ageKey (storeDouble store)))
+  when (stamp || committedMissing) $
     modifyStore ctx $ \st ->
       st
         { storeText =
@@ -326,10 +332,14 @@ debounceSearchChanged ctx key focused rawChanged ms = do
               then IM.insert committedKey fieldText (storeText st)
               else storeText st
         , storeDouble =
-            if rawChanged || commit
+            if stamp
               then IM.insert ageKey now (storeDouble st)
               else storeDouble st
         }
+  -- An uncommitted edit commits once typing has paused for the deadline, and
+  -- no input arrives to mark that moment. Ask for the frame that will see it.
+  when (dirty && not commit) $
+    requestWakeAt ctx ((if rawChanged then now else lastEdit) + deadline / 1000 + 0.001)
   pure commit
 
 -- | Search field: a caption-less 'NodeTextInput' with an embedded magnifier and

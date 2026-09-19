@@ -46,6 +46,10 @@ module NanoUI.Context
   , clearDirty
   , isDirty
   , setWakeLoop
+  , requestWakeAt
+  , requestWakeAfter
+  , getWakeAt
+  , clearWakeAt
   , takeDamage
   , DamageRequest (..)
   , requestDamage
@@ -198,6 +202,7 @@ module NanoUI.Context
   , startAnimationEase
   , startAnimationEaseDelay
   , startSpring
+  , keepAnimationAlive
   , setAnimationValue
   , tickAnimations
   , getAnimationValue
@@ -334,7 +339,9 @@ import NanoUI.Types (ImageId)
 registerImage :: Context -> ImageId -> Int -> Int -> ByteString -> IO Bool
 registerImage ctx iid w h px = do
   ok <- Atlas.registerImage (ctxImageAtlas ctx) iid w h px
-  when ok (markDirty ctx)
+  -- New pixels under an id already on screen change no rect or text, and
+  -- packing can move other images' texels, so nothing narrower is safe.
+  when ok (damageFull ctx >> markDirty ctx)
   pure ok
 
 registerImages :: Foldable f => Context -> f (ImageId, Int, Int, ByteString) -> IO Bool
@@ -587,6 +594,7 @@ newContext = do
   ctxInteractionState <- newIORef initialInteractionState
   ctxImageAtlas <- Atlas.newImageAtlas
   ctxWakeLoop <- newIORef Nothing
+  ctxWakeAt <- newIORef 0
   ctxHost <- newIORef Map.empty
   ctxDefaultLayout <- newIORef defaultLayout
   ctxTheme <- newIORef defaultTheme
@@ -644,6 +652,7 @@ newContext = do
         , ctxClipboardSet = \_ -> pure False
         , ctxImageAtlas
         , ctxWakeLoop
+        , ctxWakeAt
         , ctxHost
         , ctxDefaultLayout
         }
