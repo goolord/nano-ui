@@ -168,6 +168,18 @@
   - A numeric field's held stepper arrow marked the context dirty every frame
     to reach its next repeat, which ran frames back to back with no pacing.
     It asks for the frame of the next repeat instead.
+- Dragging a pane in a `paneGrid` shows the grid as the drop will leave it.
+  The highlight was already the rect the dragged pane lands in, but it was
+  drawn over the other panes where they sat before the drop, and a drop moves
+  them too: a swap sends the target to the dragged pane's old slot, and a drop
+  on the grid's outer edge squeezes every pane into one half. Once dividers
+  had been dragged off centre, the highlight lined up with nothing on screen.
+  While a pane hovers over a drop target the grid lays out the post-drop tree
+  (`dropPreviewTree`), the dragged pane's slot empty under the highlight, and
+  the release stores that same tree. A pointer in a gutter targets the nearer
+  pane (`nearestPane`), so the preview holds while it crosses. A pointer
+  outside the grid has no target and releasing there cancels the drag;
+  `topLevelDropTarget` used to read a point beyond an edge as that edge.
 - `registerImage` damages the whole frame. New pixels under an id already on
   screen change no rect or text, so nothing else would repaint them.
 - Circles sharing a centre are concentric whatever their radii. A circle's

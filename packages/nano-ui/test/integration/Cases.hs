@@ -18,6 +18,7 @@ module Cases
   , runPanelPaintsTest
   , runPaneGridMixedDragTest
   , runPaneGridClippedControlTest
+  , runPaneGridDropPreviewTest
   , runPercentGapShrinkTest
   , runPointerCursorTest
   , runReduceClickTest
@@ -63,6 +64,8 @@ import NanoUI.Testing.Harness
   , checkLabelAlignEndInk
   , clickPair
   , held
+  , pressAt
+  , releaseAt
   , spanXOf
   , spanYOf
   , tabInp
@@ -566,6 +569,24 @@ runPanelPaintsTest ctx failed = do
   (_, _, panDraw, _) <- runFrame ctx inp (panelWith fat (label "x"))
   assertGt failed (drawVertexCount panDraw) (drawVertexCount colDraw)
 
+-- | Where 'seedMixedGrid' has got to.
+data MixedSeed = SeedStart | SeedRight Word64 | SeedDone
+
+-- | Called from every pane's 'pgViewPane', grows a fresh grid into the mixed
+-- three-pane layout over its first frames: the first pane splits vertically,
+-- then the new pane splits horizontally (one pane left, two stacked right).
+seedMixedGrid :: IOE :> es => IORef MixedSeed -> Word64 -> PaneGridCtx es -> Eff es ()
+seedMixedGrid ref pid pctx = do
+  s <- liftIO (readIORef ref)
+  case s of
+    SeedStart -> do
+      nb <- pgcSplit pctx AxisV
+      liftIO (writeIORef ref (SeedRight nb))
+    SeedRight nb | pid == nb -> do
+      _ <- pgcSplit pctx AxisH
+      liftIO (writeIORef ref SeedDone)
+    _ -> pure ()
+
 -- | Drag-drop previews must come from simulating the post-drop layout, not
 -- from halving the target's pre-drop rect: in a grid mixing 'AxisV' and
 -- 'AxisH' splits, dropping first removes the dragged pane, which collapses
@@ -617,8 +638,7 @@ runPaneGridMixedDragTest ctx failed = do
   closeRects <- newIORef IM.empty
   stateUpdates <- newIORef IM.empty
   paneStates <- newIORef IM.empty
-  step <- newIORef (0 :: Int)
-  nbRef <- newIORef (0 :: Word64)
+  seed <- newIORef SeedStart
   let inp0 = withInput 600 400
       cfg =
         defaultPaneGridConfig
@@ -636,19 +656,7 @@ runPaneGridMixedDragTest ctx failed = do
                   setValue n
                   liftIO (modifyIORef' stateUpdates (IM.delete (fromIntegral pid)))
               liftIO (modifyIORef' paneStates (IM.insert (fromIntegral pid) (marker, value)))
-              s <- liftIO (readIORef step)
-              case s of
-                0 -> do
-                  nb <- pgcSplit pctx AxisV
-                  liftIO $ do
-                    writeIORef nbRef nb
-                    writeIORef step 1
-                1 -> do
-                  nb <- liftIO (readIORef nbRef)
-                  when (pid == nb) $ do
-                    _ <- pgcSplit pctx AxisH
-                    liftIO (writeIORef step 2)
-                _ -> pure ()
+              seedMixedGrid seed pid pctx
               close <- button' "x"
               liftIO (modifyIORef' closeRects (IM.insert (fromIntegral pid) (respRect close)))
               when (respClicked close) (pgcClose pctx)
@@ -673,8 +681,11 @@ runPaneGridMixedDragTest ctx failed = do
           -- leeway must not extend into this pane and steal the drag.
           let grab = V2 (rectX ra + rectW ra - 2) (rectY ra + 12)
               -- 30px above the grid's bottom edge: inside the pane's bottom
-              -- drop zone but clear of the 20px top-level band.
-              dest = V2 (rectX rc + rectW rc / 2) (rectY rc + rectH rc - 30)
+              -- drop zone but clear of the 20px top-level band. Horizontally
+              -- the grid's middle: targets are tested with the dragged pane
+              -- lifted out, where this pane spans the full width, and its own
+              -- middle there (3/4 across the grid) is already its right zone.
+              dest = V2 (gx + gw / 2) (rectY rc + rectH rc - 30)
               ps = IM.elems rs
               gx = minimum (map rectX ps)
               gy = minimum (map rectY ps)
@@ -742,6 +753,119 @@ runPaneGridMixedDragTest ctx failed = do
         _ -> assert failed False
     _ -> assert failed False
 
+
+-- | While a pane is dragged over a drop target, the grid is laid out as the
+-- drop will leave it, with the dragged pane's slot left empty for the
+-- highlight. Highlighting the landing rect over the pre-drop panes is not
+-- enough: a drop moves the other panes too, so once the splits are uneven the
+-- highlight lines up with nothing on screen (a swap sends the target to the
+-- dragged pane's old slot). Every other pane must therefore already sit, while
+-- hovering, exactly where it sits after the release.
+runPaneGridDropPreviewTest :: Context -> IORef Int -> IO ()
+runPaneGridDropPreviewTest ctx failed = do
+  -- Per pane: 'pgcRect', and the solved rect of a full-width strip inside it.
+  seen <- newIORef IM.empty
+  seed <- newIORef SeedStart
+  let inp0 = withInput 600 400
+      cfg =
+        defaultPaneGridConfig
+          { pgLayout = fillW . fillH
+          , pgMinSize = 40
+          , pgSpacing = 4
+          , pgViewPane = \pid pctx -> do
+              strip <- labelWith' (fixedH 20 . fillW . tight) "H"
+              liftIO (modifyIORef' seen (IM.insert (fromIntegral pid) (pgcRect pctx, respRect strip)))
+              seedMixedGrid seed pid pctx
+              pure (PaneView "P" True Nothing)
+          }
+      ui = paneGrid cfg
+      -- The layout as drawn once the given input has settled (the strip's
+      -- solved rect is a frame behind the layout that produced it).
+      layoutAt inp = do
+        _ <- runFrame ctx inp ui
+        _ <- runFrame ctx inp ui
+        writeIORef seen IM.empty
+        _ <- runFrame ctx inp ui
+        readIORef seen
+      holdAt pos = (pressAt inp0 pos) {inputMousePressed = False}
+      -- Lift pane @p@ out of the grid and hover at @dest@, a point chosen
+      -- from the layout with @p@ removed (what drop targets are tested
+      -- against). Returns the layout with @p@ lifted and no target, while
+      -- hovering, and after the release.
+      dragPane p dest = do
+        before <- layoutAt inp0
+        case IM.lookup p before of
+          Nothing -> assert failed False >> pure (IM.empty, IM.empty, IM.empty)
+          Just (Rect px py _ _, _) -> do
+            _ <- runFrame ctx (pressAt inp0 (V2 (px + 10) (py + 10))) ui
+            -- Parked outside the grid: no target, the pane's space closes up.
+            lifted <- layoutAt (holdAt (V2 (-50) (-50)))
+            during <- layoutAt (holdAt (dest lifted))
+            _ <- runFrame ctx (releaseAt (holdAt (dest lifted))) ui
+            after <- layoutAt inp0
+            pure (lifted, during, after)
+      at q (fx, fy) lifted = case IM.lookup q lifted of
+        Just (Rect x y w h, _) -> V2 (x + w * fx) (y + h * fy)
+        Nothing -> V2 (-50) (-50)
+      -- Whole pixels: a dragged ratio leaves float dust (112.00001).
+      wholePx (Rect x y w h) = Rect (r x) (r y) (r w) (r h) where r v = fromIntegral (round v :: Int)
+      -- The hover showed the drop: nothing else moves on release, and the
+      -- dragged pane (not rendered while lifted) takes the empty slot.
+      previewed p (lifted, during, after) = do
+        assert failed (not (IM.member p lifted) && not (IM.member p during))
+        assert failed (IM.member p after)
+        assertEq failed during (IM.delete p after)
+  _ <- layoutAt inp0
+  _ <- layoutAt inp0
+  -- Pane 1 left, panes 3 (top) and 5 (bottom) right. Drag the root divider
+  -- from the middle to x = 120 so the columns are uneven.
+  _ <- runFrame ctx (pressAt inp0 (V2 300 200)) ui
+  _ <- runFrame ctx (holdAt (V2 120 200)) ui
+  _ <- runFrame ctx (releaseAt (holdAt (V2 120 200))) ui
+  uneven <- layoutAt inp0
+  assertEq failed (IM.map (wholePx . fst) uneven) $
+    IM.fromList
+      [ (1, Rect 0 0 112 400)
+      , (3, Rect 128 0 472 192)
+      , (5, Rect 128 208 472 192)
+      ]
+  -- The model rects are the solver's: the strip spans its pane.
+  assert failed (all (\(m, s) -> (rectX (wholePx m), rectW (wholePx m)) == (rectX (wholePx s), rectW (wholePx s))) (IM.elems uneven))
+  -- Center drop swaps. Lifted, pane 3 spans the whole top row; the swap sends
+  -- it to pane 1's narrow column, which the hover must already show.
+  swap@(liftedS, duringS, _) <- dragPane 1 (at 3 (0.5, 0.5))
+  assertEq failed (fmap (wholePx . fst) (IM.lookup 3 liftedS)) (Just (Rect 0 0 600 192))
+  assertEq failed (fmap (wholePx . fst) (IM.lookup 3 duringS)) (Just (Rect 0 0 112 400))
+  previewed 1 swap
+  -- Edge drops split the target; the target is shown already halved.
+  previewed 1 =<< dragPane 1 (at 5 (0.1, 0.5))
+  previewed 5 =<< dragPane 5 (at 3 (0.5, 0.9))
+  -- The grid's outer band squeezes the whole grid into the other half.
+  top@(_, duringT, _) <- dragPane 3 (const (V2 590 200))
+  assert failed (all (\(Rect x _ w _, _) -> x + w <= 300) (IM.elems duringT))
+  previewed 3 top
+  -- A gutter between two panes still has a target (the nearer pane), so the
+  -- preview does not drop out while the pointer crosses it.
+  gut@(liftedG, duringG, _) <- dragPane 1 $ \lifted ->
+    let panes = map fst (IM.elems lifted)
+        gutterPoints =
+          [ pt
+          | Rect x y w h <- panes
+          , pt@(V2 px py) <- [V2 (x + w + 2) (y + h / 2), V2 (x + w / 2) (y + h + 2)]
+          , px > 20 && px < 580 && py > 20 && py < 380
+          , not (any (`rectContains` pt) panes)
+          ]
+     in case gutterPoints of
+          pt : _ -> pt
+          [] -> V2 (-50) (-50)
+  assert failed (duringG /= liftedG)
+  previewed 1 gut
+  -- Outside the grid there is no target: the release cancels, and the uneven
+  -- layout comes back untouched (a top-level drop would re-split it 50/50).
+  start <- layoutAt inp0
+  (_, duringC, afterC) <- dragPane 1 (const (V2 (-20) 200))
+  assert failed (not (IM.member 1 duringC))
+  assertEq failed afterC start
 
 -- A button scrolled above its viewport can geometrically overlap the header,
 -- but its invisible rectangle must not claim the header's drag press.

@@ -30,15 +30,20 @@ module NanoUI.Widgets.SplitPane
   , treeMovePane
   , clampTreeRatio
   , dropPreview
+  , DropPreview (..)
+  , dropPreviewTree
   , dropTargetForPane
+  , nearestPane
   , topLevelDropTarget
   ) where
 
 import Control.Applicative ((<|>))
+import Data.List (minimumBy)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as M
+import Data.Ord (comparing)
 import Data.Word (Word64)
-import NanoUI.Types (Rect (..), V2 (..), clamp, clamp01, rectH, rectNonEmpty, rectW, rectX, rectY)
+import NanoUI.Types (Rect (..), V2 (..), clamp, clamp01, rectH, rectHit, rectNonEmpty, rectW, rectX, rectY)
 
 -- | Divider orientation. 'AxisV' draws a vertical divider (panes left/right),
 -- 'AxisH' draws a horizontal divider (panes stacked top/bottom).
@@ -294,13 +299,30 @@ dropTargetForPane r mouse tgt =
     ZoneTop -> DropSplit tgt AxisH True
     ZoneBottom -> DropSplit tgt AxisH False
 
+-- | The laid-out pane whose region is closest to the point: the pane under
+-- it, or across a gutter the pane on the nearer side. A pointer crossing a
+-- gutter therefore always has a drop target, and 'dropTargetForPane' reads a
+-- point just outside a region as that region's near edge. 'Nothing' only when
+-- no pane has been laid out.
+nearestPane :: Map Word64 Rect -> V2 -> Maybe (Word64, Rect)
+nearestPane regions (V2 mx my) =
+  case [(dist r, (p, r)) | (p, r) <- M.toList regions, rectNonEmpty r] of
+    [] -> Nothing
+    scored -> Just (snd (minimumBy (comparing fst) scored))
+  where
+    dist (Rect x y w h) =
+      let dx = max 0 (max (x - mx) (mx - (x + w)))
+          dy = max 0 (max (y - my) (my - (y + h)))
+       in dx * dx + dy * dy
+
 -- | Classify a drop point against the grid's outer boundary. If the pointer
--- sits within @band@ px of a grid edge, return the 'DropTop' target for that
--- edge; otherwise 'Nothing'. Checked before pane-level drops so the outermost
--- edge always restructures the whole grid.
+-- sits inside the grid within @band@ px of an edge, return the 'DropTop'
+-- target for that edge; otherwise 'Nothing'. Checked before pane-level drops
+-- so the outermost edge always restructures the whole grid. A pointer outside
+-- the grid is no target at all, so releasing there cancels the drag.
 topLevelDropTarget :: Float -> Rect -> V2 -> Maybe PaneDrop
-topLevelDropTarget band r@(Rect l t w h) (V2 x y)
-  | not (rectNonEmpty r) = Nothing
+topLevelDropTarget band r@(Rect l t w h) p@(V2 x y)
+  | not (rectHit r p) = Nothing
   | x <= l + band = Just (DropTop AxisV True)
   | x >= l + w - band = Just (DropTop AxisV False)
   | y <= t + band = Just (DropTop AxisH True)
@@ -320,9 +342,37 @@ topLevelDropTarget band r@(Rect l t w h) (V2 x y)
 -- @pgSpacing + 2 * pgLeeway@, not @pgSpacing@, or the preview regions drift
 -- from the on-screen layout. 'Nothing' when the drop cannot be performed
 -- (unknown pane ids, 'DropTop' on a single-pane grid).
+--
+-- The rect is only meaningful inside the post-drop layout: the other panes
+-- move too (a swap sends the target to the dragged pane's old slot, a
+-- top-level drop squeezes the whole grid into one half), so a caller that
+-- highlights it should draw the rest of the grid from 'dropPreviewTree' as
+-- well, not from the pre-drop tree.
 dropPreview :: Float -> Float -> GridNode -> Word64 -> Rect -> PaneDrop -> Maybe (Rect, PaneDrop)
 dropPreview minSize spacing tree moved baseRect dt = do
-  t' <- treeMovePane moved 0 dt tree
-  let (regions, _) = layoutNode minSize spacing t' baseRect
+  dp <- dropPreviewTree minSize spacing tree moved 0 baseRect dt
+  pure (dpRect dp, dt)
+
+-- | A simulated drop, laid out: everything needed to draw the grid as the
+-- drop will leave it without laying the tree out a second time.
+data DropPreview = DropPreview
+  { dpTree :: !GridNode
+    -- ^ The tree the drop produces.
+  , dpRegions :: !(Map Word64 Rect)
+    -- ^ Its pane regions ('layoutNode'), the dragged pane's included.
+  , dpDividers :: ![DividerInfo]
+    -- ^ Its dividers ('layoutNode').
+  , dpRect :: !Rect
+    -- ^ The dragged pane's region, the rect 'dropPreview' reports.
+  }
+  deriving (Eq, Show)
+
+-- | 'dropPreview' together with the tree the drop produces and its layout.
+-- The drop's new split, if any, takes @splitId@, so passing the id the real
+-- drop will use keeps the split's identity across the drop.
+dropPreviewTree :: Float -> Float -> GridNode -> Word64 -> Word64 -> Rect -> PaneDrop -> Maybe DropPreview
+dropPreviewTree minSize spacing tree moved splitId baseRect dt = do
+  t' <- treeMovePane moved splitId dt tree
+  let (regions, dividers) = layoutNode minSize spacing t' baseRect
   r <- M.lookup moved regions
-  pure (r, dt)
+  pure (DropPreview t' regions dividers r)

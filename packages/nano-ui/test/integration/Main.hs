@@ -282,6 +282,7 @@ testSpecs =
   , TestSpec "heading-mono-truncate" False runHeadingMonoTruncateTest
   , TestSpec "pane-grid-mixed-drag" False runPaneGridMixedDragTest
   , TestSpec "pane-grid-clipped-control" False runPaneGridClippedControlTest
+  , TestSpec "pane-grid-drop-preview" False runPaneGridDropPreviewTest
   -- Context menus and tooltips
   , TestSpec "context-menu-open" False runContextMenuOpenTest
   , TestSpec "context-menu-scroll-pos" False runContextMenuScrollPosTest

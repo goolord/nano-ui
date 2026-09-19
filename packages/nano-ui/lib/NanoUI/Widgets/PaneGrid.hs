@@ -14,6 +14,11 @@
 -- or onto the grid's outer edge to restructure the whole grid at top level;
 -- arrow keys navigate between panes; @m@/@x@ maximize/close and @Escape@
 -- restores while the grid is focused.
+--
+-- A dragged pane is lifted out of the grid. While it hovers over a drop
+-- target the grid is laid out as that drop will leave it, the pane's landing
+-- slot empty under a highlight, and releasing stores exactly the tree on
+-- screen. Releasing outside the grid cancels the drag.
 module NanoUI.Widgets.PaneGrid
   ( GridAxis (..)
   , PaneGridConfig (..)
@@ -132,17 +137,17 @@ import NanoUI.Widgets.SplitPane
   , GridAxis (..)
   , GridNode (..)
   , clampTreeRatio
-  , dropPreview
+  , DropPreview (..)
+  , dropPreviewTree
   , dropTargetForPane
   , layoutNode
   , mainLen
   , mainMins
-  , PaneDrop (..)
+  , nearestPane
   , paneExist
   , splitLength
   , subtreeMin
   , topLevelDropTarget
-  , treeMovePane
   , treePanes
   , treeRemovePane
   , treeSetRatio
@@ -194,13 +199,15 @@ data PaneGridCtx es = PaneGridCtx
   { pgcPaneId :: !Word64
   , pgcRect :: !Rect
     -- ^ Prev-frame screen rect of this pane (zero until it has been laid
-    -- out once; the whole grid rect while maximized). Use it to build
+    -- out once; the whole grid rect while maximized; its rect in the
+    -- previewed layout while a drop is previewed). Use it to build
     -- 'pvDragPick' handles such as a title-bar sub-rect.
   , pgcMaximized :: !Bool
     -- ^ True when this pane currently fills the whole grid.
   , pgcDragging :: !Bool
     -- ^ True while this pane's drag is armed. Once the drag threshold is
-    -- crossed, the pane is omitted from the visible layout until release.
+    -- crossed, the pane is not rendered until release: its space closes up,
+    -- or, over a drop target, its landing slot is shown empty.
   , pgcDndActive :: !Bool
     -- ^ True while any pane drag-and-drop gesture is in progress.
   , pgcSplit :: !(GridAxis -> Eff es Word64)
@@ -279,6 +286,10 @@ data GridEnv es = GridEnv
     -- grid, so ids are never reused and state keyed by pane id cannot
     -- collide with a closed pane's state.
   , geDrag0 :: !Int
+  , geLifted :: !Bool
+    -- ^ The dragged pane is lifted out of the grid: its content is not
+    -- rendered, and where the visible tree still holds it (a drop preview)
+    -- its slot is left empty.
   , geMax :: !Word64
   , geChangedRef :: !(IORef Bool)
   , geMakeCtx :: Word64 -> Rect -> Bool -> PaneGridCtx es
@@ -289,7 +300,10 @@ data DragInfo = DragInfo
   { dgiActive :: !Bool
   , dgiMoved :: !Bool
   , dgiGhost :: !(Maybe Rect)
-  , dgiZone :: !(Maybe (Rect, PaneDrop))
+  , dgiZone :: !(Maybe DropPreview)
+    -- ^ The drop under the pointer, laid out. The same tree is shown while
+    -- hovering and stored on release, so the preview cannot disagree with the
+    -- drop.
   }
 
 -- -----------------------------------------------------------------------------
@@ -376,16 +390,25 @@ paneGrid cfg = do
             , dgBaseRect = baseRect
             , dgBand = edgeBand
             , dgRegions = regions
+            , dgSeed = seed1
             }
           mGrab
           mouse
       dgiShown = dgiActive dgi && dgiMoved dgi && inputMouseDown inp
-      -- Keep the committed tree for cancellation and exact drop previews,
-      -- but close up the dragged pane's space in the live layout.
-      visibleTree = if dgiShown then treeRemovePane (fromIntegral drag0) tree0 else Just tree0
-      (visibleRegions, visibleDividers)
-        | dgiShown = maybe (M.empty, []) (\t -> layoutNode minSize gutter t baseRect) visibleTree
-        | otherwise = (regions, dividers)
+      -- The committed tree stays in the store for cancellation. The live
+      -- layout shows the drop under the pointer as it will land: the post-drop
+      -- tree, with the dragged pane's slot left empty for the highlight. The
+      -- highlight alone over the pre-drop panes would not line up with them,
+      -- since a drop moves the other panes too. With no drop target, the
+      -- dragged pane's space just closes up.
+      (visibleTree, (visibleRegions, visibleDividers))
+        | not dgiShown = (Just tree0, (regions, dividers))
+        | Just dp <- dgiZone dgi = (Just (dpTree dp), (dpRegions dp, dpDividers dp))
+        | otherwise =
+            maybe
+              (Nothing, (M.empty, []))
+              (\t -> (Just t, layoutNode minSize gutter t baseRect))
+              (treeRemovePane (fromIntegral drag0) tree0)
       divMap = M.fromList [(diSplitId d, d) | d <- visibleDividers]
       env =
         GridEnv
@@ -402,6 +425,7 @@ paneGrid cfg = do
           , geTree = tree0
           , geSeed = seed1
           , geDrag0 = drag0
+          , geLifted = dgiShown
           , geMax = maxPane
           , geChangedRef = changedRef
           , geMakeCtx = \pid rect dragging ->
@@ -428,7 +452,7 @@ paneGrid cfg = do
         rendered <- maybe (pure []) (renderNode env divMap) visibleTree
         runGestures env dividers rendered dgi
         when (dgiShown && rectNonEmpty baseRect) $
-          drawDragOverlay env wid rendered (dgiGhost dgi) (fmap fst (dgiZone dgi))
+          drawDragOverlay env wid rendered (dgiGhost dgi) (dpRect <$> dgiZone dgi)
         -- Keyboard focus also rings the focused pane, so the arrow keys show
         -- where they moved; the grid's own ring says the grid holds focus.
         ringPane <- uiIO ((&&) <$> getFocusVisible ctx <*> ((== wid) <$> getFocusId ctx))
@@ -588,8 +612,13 @@ renderNode ::
   GridNode ->
   Eff es [RenderedPane]
 renderNode env dividers = \case
-  Pane pid ->
-    renderPane env pid (paneRect env pid) (paneLay (geMinSize env)) (draggingPane env pid)
+  Pane pid
+    -- The lifted pane's landing slot in a drop preview: an empty cell of the
+    -- pane's size, which the drop-zone highlight fills.
+    | geLifted env && draggingPane env pid ->
+        [] <$ container NodeContainer (paneLay (geMinSize env)) (pure ())
+    | otherwise ->
+        renderPane env pid (paneRect env pid) (paneLay (geMinSize env)) (draggingPane env pid)
   Split sid0 ax _ a b ->
     withKey sid0 $ do
       let (wa, ha) = subtreeMin (geMinSize env) (geGutter env) a
@@ -724,6 +753,8 @@ data DragGeom = DragGeom
     -- ^ Thickness of the grid's outer top-level drop band.
   , dgRegions :: !(Map Word64 Rect)
     -- ^ Prev-frame pane regions.
+  , dgSeed :: !Word64
+    -- ^ Id the drop's new split takes ('geSeed').
   }
 
 -- | Pure drag-and-drop geometry for the current frame. Geometry is computed
@@ -731,16 +762,20 @@ data DragGeom = DragGeom
 -- so the drop zone is still resolvable on the frame the button is released.
 -- 'dgBaseRect' is the grid's own rect: its outer band (thickness 'dgBand') is
 -- a top-level drop zone, and the pointer there restructures the whole grid;
--- otherwise the pane under the pointer is the target. Every candidate is
--- resolved through 'dropPreview', which simulates the drop and lays the tree
--- back out with the grid's real 'dgGutter' and 'dgMinSize', so the
--- highlighted rect is the exact region the pane lands in even when removing
--- it reshapes the rest of a mixed-split grid.
+-- otherwise the pane nearest the pointer is the target, and a pointer outside
+-- the grid has none. Every candidate is resolved through 'dropPreviewTree',
+-- which simulates the drop and lays the tree back out with the grid's real
+-- 'dgGutter' and 'dgMinSize', so the highlighted rect is the exact region the
+-- pane lands in even when removing it reshapes the rest of a mixed-split grid.
+--
+-- Targets are hit-tested against the grid with the dragged pane removed, never
+-- against the previewed layout on screen: the target is then a function of
+-- the pointer alone, and showing a preview cannot change which drop it is.
 computeDragInfo :: Int -> Bool -> DragGeom -> Maybe (Float, Float) -> V2 -> DragInfo
 computeDragInfo drag0 latched geom mGrab mouse
   | drag0 <= 0 = DragInfo False False Nothing Nothing
   | otherwise =
-      let DragGeom{dgMinSize = minSize, dgGutter = gutter, dgTree = tree, dgBaseRect = baseRect, dgBand = band, dgRegions = regions} = geom
+      let DragGeom{dgMinSize = minSize, dgGutter = gutter, dgTree = tree, dgBaseRect = baseRect, dgBand = band, dgRegions = regions, dgSeed = seed} = geom
           pid = fromIntegral drag0
           mFrom = M.lookup pid regions
           (gx, gy) = fromMaybe (0, 0) mGrab
@@ -755,19 +790,13 @@ computeDragInfo drag0 latched geom mGrab mouse
               | moved -> Just (Rect (v2X mouse + 12) (v2Y mouse + 12) 112 28)
             _ -> Nothing
           targetRegions = maybe M.empty (\t -> fst (layoutNode minSize gutter t baseRect)) (treeRemovePane pid tree)
-          under =
-            [ (q, r)
-            | (q, r) <- M.toList targetRegions
-            , q /= pid
-            , rectHit r mouse
-            ]
+          preview = dropPreviewTree minSize gutter tree pid seed baseRect
           zone = case topLevelDropTarget band baseRect mouse of
-            Just dt -> dropPreview minSize gutter tree pid baseRect dt
-            Nothing -> case under of
-              (q, r) : _ ->
-                let dt = dropTargetForPane r mouse q
-                 in dropPreview minSize gutter tree pid baseRect dt
-              [] -> Nothing
+            Just dt -> preview dt
+            Nothing
+              | rectHit baseRect mouse ->
+                  nearestPane targetRegions mouse >>= \(q, r) -> preview (dropTargetForPane r mouse q)
+              | otherwise -> Nothing
        in DragInfo True moved ghost zone
 
 -- | Apply resize / drag transitions, writing to the widget store.
@@ -854,9 +883,10 @@ runGestures env dividers rendered dgi = do
   -- A drop clears the gesture and, when it moved the pane, stores the new
   -- tree, seed and focus in the same write.
   when (drag0 > 0 && not down) $ do
-    let moved = fromIntegral drag0
+    let moved = fromIntegral drag0 :: Word64
+        -- The previewed tree is the drop: it was built with 'geSeed'.
         dropped
-          | dgiMoved dgi = dgiZone dgi >>= \(_, dt) -> treeMovePane moved (geSeed env) dt (geTree env)
+          | dgiMoved dgi = dpTree <$> dgiZone dgi
           | otherwise = Nothing
     storeWrite env True $ \st -> case dropped of
       Nothing -> st {storeInt = IM.delete gestK (storeInt st)}
