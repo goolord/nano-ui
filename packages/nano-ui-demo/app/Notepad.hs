@@ -149,7 +149,7 @@ selftest = do
 notepadUi :: NanoUI ()
 notepadUi = do
   ------------------------------------------------------------------ hooks ---
-  (docText, setDocText) <- useText ""
+  (doc, setDoc) <- useState emptyDocument
   (docPath, setDocPath) <- useText ""
   (docDirty, setDocDirty) <- useFlag False
   (docGen, setDocGen) <- useInt 0
@@ -186,14 +186,14 @@ notepadUi = do
         Left _ -> setStatusMsg ("Could not open " <> T.pack filePath)
         Right raw -> do
           -- Lenient decode: malformed bytes become U+FFFD instead of throwing.
-          setDocText (TE.decodeUtf8With (\_ _ -> Just '\xFFFD') raw)
+          setDoc (textDocument (TE.decodeUtf8With (\_ _ -> Just '\xFFFD') raw))
           setDocPath (T.pack filePath)
           setDocDirty False
           setStatusMsg ("Opened " <> T.pack filePath)
   useFileDialog saveDlg setSaveDlg $ \chosenPaths ->
     for_ (listToMaybe chosenPaths) $ \filePath -> do
       setOpenMenu ""
-      saved <- writeDocument filePath docText
+      saved <- writeDocument filePath doc
       if saved
         then do
           setDocPath (T.pack filePath)
@@ -204,7 +204,7 @@ notepadUi = do
   ------------------------------------------------------------- menu data ---
   let
     newDocument = do
-      setDocText ""
+      setDoc emptyDocument
       setDocPath ""
       setDocGen (docGen + 1)
       setDocDirty False
@@ -216,7 +216,7 @@ notepadUi = do
           mHandle <- askSaveFileDialog defaultFileDialogOptions
           setSaveDlg mHandle
         else do
-          saved <- writeDocument (T.unpack docPath) docText
+          saved <- writeDocument (T.unpack docPath) doc
           if saved
             then do
               setDocDirty False
@@ -262,7 +262,7 @@ notepadUi = do
       whenM (menuItemShortcut "Zoom Out" "Ctrl+-") (setOpenMenu "" >> setZoom (max 0.5 (zoom / 1.1)))
       whenM (menuItemShortcut "Reset Zoom" "Ctrl+0") (setOpenMenu "" >> setZoom 1.0)
       menuSeparator
-      whenM (menuItem "Document Statistics") (setOpenMenu "" >> setStatusMsg (documentStats docText))
+      whenM (menuItem "Document Statistics") (setOpenMenu "" >> setStatusMsg (documentStats (documentText doc)))
 
     helpMenu = do
       whenM (menuItem "About nano-ui Notepad") (setOpenMenu "" >> setAboutOpen True)
@@ -280,19 +280,21 @@ notepadUi = do
       ]
     separator
 
-    (editorResp, editorText) <-
+    (editorResp, editorDoc) <-
       keyed docGen $
-        textAreaWith'
+        textAreaDocumentWith'
           (grow . minW 240 . minH 160 . fontSizeScale zoom)
-          docText
-    when (respChanged editorResp) $ do
-      setDocText editorText
+          doc
+    -- respChanged also pulses for cursor moves, which hand back the same
+    -- document.
+    when (respChanged editorResp && not (sameDocument editorDoc doc)) $ do
+      setDoc editorDoc
       setDocDirty True
     when (respId editorResp /= editorId) (setEditorId (respId editorResp))
 
     when showStatus $ do
       separator
-      statusBar docPath docDirty docText statusMsg zoom
+      statusBar docPath docDirty doc statusMsg zoom
 
   --------------------------------------------------------------- overlays ---
   (aboutResp, _) <-
@@ -337,20 +339,23 @@ menuBar openMenu setOpen entries = do
 -- Helpers
 --------------------------------------------------------------------------------
 
-writeDocument :: FilePath -> Text -> NanoUI Bool
-writeDocument filePath contents = do
+writeDocument :: FilePath -> TextDocument -> NanoUI Bool
+writeDocument filePath doc = do
   result <-
-    uiIO (try (TIO.writeFile filePath contents) :: IO (Either SomeException ()))
+    uiIO (try (TIO.writeFile filePath (documentText doc)) :: IO (Either SomeException ()))
   pure (isRight result)
 
-statusBar :: Text -> Bool -> Text -> Text -> Float -> NanoUI ()
-statusBar path dirty contents message zoomVal =
+-- | The status bar. It shows the line count, which the document keeps; the
+-- word and character counts read the whole text, so View > Document
+-- Statistics computes them when asked.
+statusBar :: Text -> Bool -> TextDocument -> Text -> Float -> NanoUI ()
+statusBar path dirty doc message zoomVal =
   rowWith (tight . gap 12 . fillW . padXY 8 4) $ do
     labelWith (tight . fontMuted) message
     flex
     labelWith (tight . fontMuted)
       ((if T.null path then "Untitled" else path) <> (if dirty then " *" else ""))
-    labelWith (tight . fontMuted) (documentStats contents)
+    labelWith (tight . fontMuted) ("Lines: " <> T.pack (show (documentLineCount doc)))
     labelWith (tight . fontMuted)
       ("Zoom: " <> T.pack (show (round (zoomVal * 100) :: Int)) <> "%")
 
