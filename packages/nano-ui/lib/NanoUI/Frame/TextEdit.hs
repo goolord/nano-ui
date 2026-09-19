@@ -32,6 +32,7 @@ import NanoUI.Context
   ( Context (..)
   , InteractionState (..)
   , TextInputDrag (..)
+  , getMenuPointerGesture
   , getsInteraction
   , requestWakeAfter
   , setTextInputDrag
@@ -49,11 +50,14 @@ import NanoUI.Types (Rect (..), rectContains)
 import NanoUI.Widgets.TextCommon (textWordBounds)
 
 -- | Mouse selection in the focused field, whichever kind it is. A release
--- ends any drag.
+-- ends any drag. A press on a menu (the field's own context menu included)
+-- belongs to the menu: it must not also place the caret or start a drag
+-- underneath, which the release would then apply over the menu's command.
 finalizeTextFieldMouse :: Context -> Input -> IO ()
 finalizeTextFieldMouse ctx inp = do
   focus <- readIORef (ctxFocusId ctx)
-  when (hashWidgetId focus /= 0) $ do
+  menuGesture <- getMenuPointerGesture ctx
+  when (hashWidgetId focus /= 0 && not menuGesture) $ do
     handled <- finalizeTextInputMouse ctx inp focus
     unless handled $ finalizeTextAreaMouse ctx inp focus
     keepDragScrolling ctx inp focus

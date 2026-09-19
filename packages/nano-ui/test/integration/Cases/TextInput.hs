@@ -28,6 +28,7 @@ module Cases.TextInput
   , runTextAreaScrollCursorLeavesViewportTest
   , runRefreshRedrawTest
   , runTextAreaMenuPulseTest
+  , runTextAreaMenuSelectAllTest
   , runTextCommandFocusTest
   , runTextAreaRemountScrollTest
   )
@@ -1269,3 +1270,38 @@ memoryClipboard :: Maybe T.Text -> Context -> IO (Context, IORef (Maybe T.Text))
 memoryClipboard initial ctx = do
   clipRef <- newIORef initial
   pure (withClipboard ctx (readIORef clipRef) (\s -> writeIORef clipRef (Just s) >> pure True), clipRef)
+
+-- | Select All from the context menu keeps the whole document selected once
+-- the button comes up. Regression: the press on the menu row also reached the
+-- text area under the menu, which placed the caret there and started a drag
+-- that the release then applied over the selection.
+runTextAreaMenuSelectAllTest :: Context -> IORef Int -> IO ()
+runTextAreaMenuSelectAllTest ctx failed = do
+  let
+    lastLine = "the last line"
+    original = T.intercalate "\n" (["line " <> T.pack (show i) | i <- [0 .. 199 :: Int]] ++ [lastLine])
+    inp0 = withInput 400 300
+    ui = column (textAreaWith' grow original)
+  (resp, _) <- warmup2 ctx inp0 ui
+  mHit <- textAreaHitForWidget ctx (respId resp)
+  case mHit of
+    Nothing -> assert failed False
+    Just hit -> do
+      let
+        field = tahFieldRect hit
+        mid = V2 (rectX field + rectW field / 3) (rectY field + rectH field / 3)
+        (focusPress, focusRelease) = clickPair inp0 mid
+        menuOpen = inp0 {inputMousePos = mid, inputMouseRightDown = True, inputMouseRightPressed = True}
+      _ <- runFrame ctx focusPress ui >> runFrame ctx focusRelease ui
+      _ <- runFrame ctx menuOpen ui
+      _ <- runFrame ctx inp0 {inputMousePos = mid} ui
+      overlays <- collectOverlayTextSpans ctx inp0
+      case [r | (r, txt, _, _, _) <- overlays, txt == "Select All"] of
+        (r : _) -> do
+          let (pickPress, pickRelease) = clickPair inp0 (spanCenter r)
+          mapM_ (\i -> runFrame ctx i ui) [pickPress, pickRelease, inp0 {inputMousePos = spanCenter r}]
+          store <- getStore ctx
+          let st = loadTextAreaState store (intKey (respId resp))
+          assertEq failed (selectionAnchor st) (Cursor 0 0)
+          assertEq failed (getCursor (buffer st)) (Cursor 200 (T.length lastLine))
+        _ -> assert failed False

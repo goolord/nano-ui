@@ -208,6 +208,7 @@ testSpecs =
   , TestSpec "text-area-zoom-scroll" True runTextAreaZoomScrollTest
   , TestSpec "text-area-remount-scroll" True runTextAreaRemountScrollTest
   , TestSpec "text-area-menu-pulse" True runTextAreaMenuPulseTest
+  , TestSpec "text-area-menu-select-all" True runTextAreaMenuSelectAllTest
   , TestSpec "text-command-focus" False runTextCommandFocusTest
   , TestSpec "text-area-scroll-drag" True runTextAreaScrollDragTest
   , TestSpec "text-area-cursor-on-scrollbar" True runTextAreaCursorOnScrollBarTest
