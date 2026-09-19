@@ -155,6 +155,23 @@ executable nano-ui-sdl-anim
     if !flag(sdl)
         buildable: False
 
+executable nano-ui-sdl-idle
+    import:           extensions
+    import:           rts-options
+    import:           warnings
+    main-is:          SdlIdle.hs
+    build-depends:
+        base ^>=4.22.0.0,
+        nano-ui,
+        nano-ui-sdl,
+        sdl3-bindgen-sys ^>=0.0.0.2,
+        text ^>=2.1
+    hs-source-dirs:   examples
+    if os(windows)
+        ghc-options: -optl-mconsole
+    if !flag(sdl)
+        buildable: False
+
 benchmark nano-ui-sdl-bench
     import:           extensions
     import:           bench-rts-options
