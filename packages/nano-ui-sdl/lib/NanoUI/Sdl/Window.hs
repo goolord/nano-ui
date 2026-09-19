@@ -25,6 +25,7 @@ import Data.Text (Text)
 import Data.Text.Foreign qualified as TextForeign
 import Foreign.C.String (withCString)
 import Foreign.Marshal.Alloc (alloca)
+import Foreign.Marshal.Utils (with)
 import Foreign.Ptr (Ptr, nullPtr)
 import Foreign.Storable (peek)
 import NanoUI (ImageId, Input (..), Size (..), Theme, V2 (..))
@@ -66,6 +67,7 @@ import NanoUI.Sdl.Debug (SdlDebugSampler, newSdlDebugSampler)
 import NanoUI.Sdl.Dialog.Types (DialogState (..), clearDialogState, newDialogState)
 import NanoUI.Sdl.Image (ImageAtlas, destroyImageAtlas, newImageAtlas)
 import NanoUI.Sdl.Render (RenderBatch, destroyRenderBatch, newRenderBatch)
+import SDL3.Sys.Bindgen.Rect (SDL_Rect (..))
 import SDL3.Sys.Bindgen.Hints (sDL_HINT_ASSERT, sDL_HINT_RENDER_VSYNC, sDL_HINT_VIDEO_DRIVER)
 import SDL3.Sys.Bindgen.Render (SDL_Renderer, SDL_Texture)
 import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
@@ -81,6 +83,7 @@ import SDL3.Sys.Render
   , getRendererName
   , renderReadPixels
   , setRenderScale
+  , setRenderTarget
   , setRenderVSync
   )
 import SDL3.Sys.Surface (destroySurface, saveBMP)
@@ -481,9 +484,23 @@ stopSdlWindow bench env = do
   destroyWindowSafe (sdlWindow env)
   quitSafe
 
+-- | Write the last presented frame to a BMP file. A retained session reads
+-- its retained texture, since SDL leaves the window backbuffer undefined
+-- after a present; a direct-to-window session reads the backbuffer.
 saveScreenshot :: SdlEnv -> FilePath -> IO Bool
 saveScreenshot env path = do
-  surface <- renderReadPixels (sdlRenderer env) (PtrConst.unsafeFromPtr nullPtr)
+  r <- readIORef (sdlRetain env)
+  let tex = retainTexture r
+      ren = sdlRenderer env
+  surface <-
+    if tex == nullPtr
+      then renderReadPixels ren (PtrConst.unsafeFromPtr nullPtr)
+      else do
+        void $ setRenderTarget ren tex
+        s <- with (SDL_Rect 0 0 (fromIntegral (retainW r)) (fromIntegral (retainH r))) $ \rp ->
+          renderReadPixels ren (PtrConst.unsafeFromPtr rp)
+        void $ setRenderTarget ren nullPtr
+        pure s
   if surface == nullPtr
     then pure False
     else withCString path $ \cpath -> do

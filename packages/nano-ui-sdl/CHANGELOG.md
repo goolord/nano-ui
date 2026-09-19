@@ -42,6 +42,8 @@
 
 ### Fixed
 
+- `saveScreenshot` reads the retained frame. It read the window
+  backbuffer, which SDL leaves undefined after a present.
 - A resize drag no longer trails the border by a step. Each step was drawn
   on `SDL_EVENT_WINDOW_RESIZED`, before the renderer had resized its swap
   chain, so it went to the old-size backbuffer and showed cropped or with a
