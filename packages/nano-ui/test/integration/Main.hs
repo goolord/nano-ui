@@ -280,6 +280,7 @@ testSpecs =
   , TestSpec "window-resize" False runWindowResizeTest
   , TestSpec "window-resize-halo-hit" False runWindowResizeHaloHitTest
   , TestSpec "heading-mono-truncate" False runHeadingMonoTruncateTest
+  , TestSpec "window-fit-scroll-gutter" False runWindowFitScrollGutterTest
   , TestSpec "pane-grid-mixed-drag" False runPaneGridMixedDragTest
   , TestSpec "pane-grid-clipped-control" False runPaneGridClippedControlTest
   , TestSpec "pane-grid-drop-preview" False runPaneGridDropPreviewTest

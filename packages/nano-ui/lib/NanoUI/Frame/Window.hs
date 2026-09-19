@@ -1,7 +1,7 @@
 {-# LANGUAGE DataKinds #-}
 
--- | Floating window input: dragging by the title bar, edge and inner-east
--- resizing, the resize cursor, and persisting window placement.
+-- | Floating window input: dragging by the title bar, resizing by the edges
+-- and margins, the resize cursor, and persisting window placement.
 module NanoUI.Frame.Window
   ( contextMeasurers
   , lookupWindowPos
@@ -44,7 +44,6 @@ import NanoUI.Input (Input (..), UiCursorKind (..), inputMouseDown, inputMousePo
 import NanoUI.Layout.Arena
   ( NodeIdx
   , NodeType (..)
-  , findChildM
   , findNodeRevM
   , foldNodesM
   , getDirection
@@ -57,7 +56,7 @@ import NanoUI.Layout.Arena
   , getRect
   , getWidgetId
   )
-import NanoUI.Layout.Solve (Measurers (..), placeWindowNode, scrollBarSlotOf)
+import NanoUI.Layout.Solve (Measurers (..), placeWindowNode, windowBodyScroller)
 import NanoUI.Style (Padding (..))
 import NanoUI.Types (DamageBounds (..), Rect (..), V2 (..), haloDamageSlop, rectContains, rectInflate)
 
@@ -71,20 +70,7 @@ topmostWindowAtResizeHalo ctx mouse =
         (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
         if w <= 0 || h <= 0
           then pure False
-          else do
-            let rect = Rect x y w h
-            if rectContains (rectInflate windowResizeHandleFor rect) mouse
-              then pure True
-              else windowInnerEastResizeHit ctx idx rect mouse
-
-windowInnerEastResizeHit :: Context -> NodeIdx -> Rect -> V2 -> IO Bool
-windowInnerEastResizeHit ctx winIdx (Rect x _ w _) mouse@(V2 mx _) = do
-  pad <- getPadding (ctxNodeArena ctx) winIdx
-  if mx < x + w - padR pad || mx > x + w
-    then pure False
-    else do
-      mLane <- windowBodyScrollLane ctx winIdx
-      pure (not (maybe False (`rectContains` mouse) mLane))
+          else pure (rectContains (rectInflate windowResizeHandleFor (Rect x y w h)) mouse)
 
 lookupWindowPos :: Context -> WidgetId -> IO (Maybe (Float, Float))
 lookupWindowPos ctx wid = do
@@ -142,22 +128,44 @@ updateWindowDrag ctx inp = do
           | inputMousePressed inp -> tryStartWindowDrag ctx (inputMousePos inp)
           | otherwise -> pure False
 
+-- | How far the resize handles reach out past the window's edges.
 windowResizeHandleFor :: Float
 windowResizeHandleFor = 12
 
--- Handles sit outside the window. The right pad strip also resizes beside the bar.
-windowResizeEdgeAt :: Rect -> V2 -> Maybe WindowResizeEdge
-windowResizeEdgeAt (Rect x y w h) (V2 mx my) =
+-- | The least a handle reaches in from an edge, for sides with no padding.
+windowResizeInnerMin :: Float
+windowResizeInnerMin = 6
+
+-- | How far along an edge from a corner its handle resizes both ways.
+windowResizeCornerReach :: Float
+windowResizeCornerReach = 16
+
+-- | Edge handle under @mouse@ for a window at @rect@ with padding @pad@. Each
+-- side's handle runs from 'windowResizeHandleFor' outside the edge to the
+-- side's padding inside it, and near a corner the handle takes both sides.
+windowResizeEdgeAt :: Padding -> Rect -> V2 -> Maybe WindowResizeEdge
+windowResizeEdgeAt pad (Rect x y w h) (V2 mx my) =
   let s = windowResizeHandleFor
-      onL = mx >= x - s && mx < x
-      onR = mx > x + w && mx <= x + w + s
-      onT = my >= y - s && my < y
-      onB = my > y + h && my <= y + h + s
-   in if not (onL || onR || onT || onB)
+      inner p extent = min (extent / 3) (max windowResizeInnerMin p)
+      reachW = min windowResizeCornerReach (w / 3)
+      reachH = min windowResizeCornerReach (h / 3)
+      inX = mx >= x - s && mx <= x + w + s
+      inY = my >= y - s && my <= y + h + s
+      onL = inY && mx >= x - s && mx < x + inner (padL pad) w
+      onR = inY && mx > x + w - inner (padR pad) w && mx <= x + w + s
+      onT = inX && my >= y - s && my < y + inner (padT pad) h
+      onB = inX && my > y + h - inner (padB pad) h && my <= y + h + s
+      onSide = onL || onR
+      onEnd = onT || onB
+      north = onT || (onSide && my < y + reachH)
+      south = onB || (onSide && my > y + h - reachH)
+      west = onL || (onEnd && mx < x + reachW)
+      east = onR || (onEnd && mx > x + w - reachW)
+   in if not (onSide || onEnd)
         then Nothing
         else
           Just $
-            case (onT, onB, onL, onR) of
+            case (north, south, west, east) of
               (True, _, True, _) -> ResizeNW
               (True, _, _, True) -> ResizeNE
               (_, True, True, _) -> ResizeSW
@@ -167,66 +175,34 @@ windowResizeEdgeAt (Rect x y w h) (V2 mx my) =
               (_, _, True, _) -> ResizeW
               _ -> ResizeE
 
-innerEastCornerEdge :: Padding -> Rect -> Float -> WindowResizeEdge
-innerEastCornerEdge pad (Rect _ y _ h) my =
-  let s = windowResizeHandleFor
-      minBand = 6
-      topBand = max minBand (min s (padT pad))
-      botBand = max minBand (min s (padB pad))
-   in if my >= y && my < y + topBand
-        then ResizeNE
-        else if my > y + h - botBand && my <= y + h then ResizeSE else ResizeE
-
 -- | Lane of the window body's scrollbar while its content overflows.
 windowBodyScrollLane :: Context -> NodeIdx -> IO (Maybe Rect)
 windowBodyScrollLane ctx winIdx = do
   let na = ctxNodeArena ctx
-  mBody <-
-    findChildM na winIdx $ \ci -> do
-      nt <- getNodeType na ci
-      if nt /= NodeScrollContainer
-        then pure False
-        else do
-          slot <- scrollBarSlotOf na ci
-          if slot /= ScrollBarWindow
-            then pure False
-            else do
-              (_, _, _, h) <- getRect na ci
-              pad <- getPadding na ci
-              contentSize <- getNodeValue na ci
-              pure (contentSize > h - padT pad - padB pad)
-  traverse
-    ( \ci -> do
-        (x, y, w, h) <- getRect na ci
-        pad <- getPadding na ci
-        dir <- getDirection na ci
-        pure (scrollChromeLane ScrollBarWindow dir x y w h pad)
-    )
-    mBody
+  mBody <- windowBodyScroller na winIdx
+  case mBody of
+    Nothing -> pure Nothing
+    Just ci -> do
+      (x, y, w, h) <- getRect na ci
+      pad <- getPadding na ci
+      contentSize <- getNodeValue na ci
+      if contentSize > h - padT pad - padB pad
+        then do
+          dir <- getDirection na ci
+          pure (Just (scrollChromeLane ScrollBarWindow dir x y w h pad))
+        else pure Nothing
 
-windowInnerResizeEdgeAt :: Context -> NodeIdx -> Rect -> V2 -> IO (Maybe WindowResizeEdge)
-windowInnerResizeEdgeAt ctx winIdx winRect@(Rect x y w h) mouse@(V2 mx my) = do
-  hit <- windowInnerEastResizeHit ctx winIdx winRect mouse
-  if hit
-    then do
-      pad <- getPadding (ctxNodeArena ctx) winIdx
-      pure (Just (innerEastCornerEdge pad winRect my))
-    else do
-      let cornerW = min 16 (w / 3)
-          cornerH = min 16 (h / 3)
-          botH = min 6 (h / 3)
-          inBotRightCorner = mx >= x + w - cornerW && mx <= x + w && my >= y + h - cornerH && my <= y + h
-          inBotEdge = mx >= x && mx <= x + w && my >= y + h - botH && my <= y + h
-      pure $
-        if inBotRightCorner
-          then Just ResizeSE
-          else if inBotEdge then Just ResizeS else Nothing
-
+-- | Resize edge under @mouse@, leaving the body's scrollbar to scroll.
 windowResizeEdgeFor :: Context -> NodeIdx -> Rect -> V2 -> IO (Maybe WindowResizeEdge)
-windowResizeEdgeFor ctx winIdx winRect mouse =
-  case windowResizeEdgeAt winRect mouse of
-    Just edge -> pure (Just edge)
-    Nothing -> windowInnerResizeEdgeAt ctx winIdx winRect mouse
+windowResizeEdgeFor ctx winIdx winRect mouse = do
+  pad <- getPadding (ctxNodeArena ctx) winIdx
+  case windowResizeEdgeAt pad winRect mouse of
+    Nothing -> pure Nothing
+    Just edge
+      | rectContains winRect mouse -> do
+          mLane <- windowBodyScrollLane ctx winIdx
+          pure (if maybe False (`rectContains` mouse) mLane then Nothing else Just edge)
+      | otherwise -> pure (Just edge)
 
 cursorForResizeEdge :: WindowResizeEdge -> UiCursorKind
 cursorForResizeEdge = \case
@@ -302,8 +278,8 @@ relayoutWindow ctx winW winH wid nw nh = do
       placeWindowNode (ctxNodeArena ctx) (contextMeasurers ctx) winW winH idx nw nh (const (fromMaybe (x, y) mpos))
 
 -- | Resize edge under @mouse@ for the topmost window whose halo holds it,
--- unless the halo is blocked or the pointer is on the title bar or one of its
--- controls.
+-- unless the halo is blocked or the pointer is on one of the window's
+-- controls. The top handle reaches over the title bar, which drags elsewhere.
 resizeEdgeTarget :: Context -> V2 -> IO (Maybe (NodeIdx, Rect, WindowResizeEdge))
 resizeEdgeTarget ctx mouse = do
   mWin <- topmostWindowAtResizeHalo ctx mouse
@@ -318,13 +294,9 @@ resizeEdgeTarget ctx mouse = do
       case mEdge of
         Nothing -> pure Nothing
         Just edge -> do
-          mTitle <- windowTitleRect ctx idx
-          if maybe False (`rectContains` mouse) mTitle
-            then pure Nothing
-            else do
-              blocked <- resizeHaloBlocked ctx mouse idx
-              overControl <- if blocked then pure False else windowTitleHasInteractive ctx idx mouse
-              pure (if blocked || overControl then Nothing else Just (idx, rect, edge))
+          blocked <- resizeHaloBlocked ctx mouse idx
+          overControl <- if blocked then pure False else windowControlAt ctx idx mouse
+          pure (if blocked || overControl then Nothing else Just (idx, rect, edge))
 
 tryStartWindowResize :: Context -> V2 -> IO Bool
 tryStartWindowResize ctx mouse@(V2 mx my) = do
@@ -391,7 +363,7 @@ tryStartWindowDrag ctx mouse@(V2 mx my) = do
       mTitle <- if nt == NodeWindow then windowTitleRect ctx idx else pure Nothing
       case mTitle of
         Just title | rectContains title mouse -> do
-          overClose <- windowTitleHasInteractive ctx idx mouse
+          overClose <- windowControlAt ctx idx mouse
           if overClose
             then pure False
             else do
@@ -424,8 +396,8 @@ windowTitleRect ctx idx = do
             Just b@(Rect _ by _ _) | y >= by -> Just b
             _ -> Just here
 
-windowTitleHasInteractive :: Context -> NodeIdx -> V2 -> IO Bool
-windowTitleHasInteractive ctx idx mouse = do
+windowControlAt :: Context -> NodeIdx -> V2 -> IO Bool
+windowControlAt ctx idx mouse = do
   mWid <- findTopWidgetUnderMouse ctx mouse isInteractiveNode
   case mWid of
     Nothing -> pure False

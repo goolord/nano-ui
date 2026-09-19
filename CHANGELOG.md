@@ -207,6 +207,16 @@
   custom measurements the solve used. A label in a font size other than the
   base no longer wraps onto a line the modal did not make room for, which
   made the modal scroll and clip its last row.
+- A window or modal that fits its width to its content and scrolls leaves
+  room for its scrollbar. The bar's gutter used to narrow the body below the
+  width its content measured, so right-aligned values, such as those of
+  `kv` rows in a body with a `minW`, lost their last letter under the clip.
+- Floating windows resize from inside their margins as well as from outside
+  their edges: each side's handle reaches 12 px out and the side's padding
+  in (at least 6 px, so the top edge has a strip above the title bar), and
+  within 16 px of a corner it resizes both ways. Before, only the right
+  padding and a 6 px bottom strip resized from inside. The window's controls
+  and its body's scrollbar still take their own presses.
 
 ### Removed
 

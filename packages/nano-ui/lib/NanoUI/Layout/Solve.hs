@@ -10,6 +10,7 @@ module NanoUI.Layout.Solve
   , computePopupPosition
   , placeWindowNode
   , scrollBarSlotOf
+  , windowBodyScroller
   , findAncestorMaxW
   , textWrapCap
   ) where
@@ -99,6 +100,7 @@ import NanoUI.Layout.Arena
   , getAlignY
   , getChildCount
   , getDirection
+  , findChildM
   , getFirstChild
   , getGap
   , getGridCols
@@ -631,17 +633,52 @@ measureContainer env@SolveEnv {seArena = na, seArrays = a} idx = do
     if wTag == SizingGrow && minW > 0 && not (isFloatingNode nt)
       then growParent na idx
       else pure False
+  let h =
+        case hTag of
+          SizingFixed -> clamp minH maxH hVal
+          _ -> clamp minH maxH (contentH + padY)
+  -- A window or modal that fits its width to its content leaves room for its
+  -- body's scrollbar when the body will scroll, or the bar's gutter narrows
+  -- the content below its measured width and clips its right edge.
+  bodyGutter <-
+    if chrome && wTag /= SizingFixed
+      then floatingBodyGutter na idx (contentH + padY - h)
+      else pure 0
   let w =
         case wTag of
           SizingFixed -> clamp minW maxW wVal
           _
             | minAssigned -> clamp minW maxW 0
-            | otherwise -> clamp minW maxW (contentW + padX)
-      h =
-        case hTag of
-          SizingFixed -> clamp minH maxH hVal
-          _ -> clamp minH maxH (contentH + padY)
+            | otherwise -> clamp minW maxW (contentW + padX + bodyGutter)
   setRect na idx 0 0 w h
+
+-- | Width the scrollbar of window or modal @idx@'s body takes when the
+-- window is @overflow@ shorter than its content.
+floatingBodyGutter :: NodeArena -> NodeIdx -> Float -> IO Float
+floatingBodyGutter na idx overflow = do
+  mBody <- windowBodyScroller na idx
+  case mBody of
+    Nothing -> pure 0
+    Just ci -> do
+      si <- getStyleIdx na ci
+      dir <- getDirection na ci
+      if isScrollStyle2D si || dir /= DirColumn
+        then pure 0
+        else do
+          pad <- getPadding na ci
+          (_, _, _, bodyH) <- getRect na ci
+          contentH <- getNodeValue na ci
+          let innerH = bodyH - padT pad - padB pad - max 0 overflow
+          pure (scrollAxisGutter (scrollPolicyY (decodeScrollConfig si)) ScrollBarWindow (padR pad) contentH innerH)
+
+-- | The scroll container holding window or modal @idx@'s body.
+windowBodyScroller :: NodeArena -> NodeIdx -> IO (Maybe NodeIdx)
+windowBodyScroller na idx =
+  findChildM na idx $ \ci -> do
+    nt <- getNodeType na ci
+    if nt /= NodeScrollContainer
+      then pure False
+      else (== ScrollBarWindow) <$> scrollBarSlotOf na ci
 
 measureScrollContainer :: SolveEnv -> NodeIdx -> IO ()
 measureScrollContainer env@SolveEnv {seArena = na, seArrays = a} idx = do

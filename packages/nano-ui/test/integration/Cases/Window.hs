@@ -9,6 +9,7 @@ module Cases.Window
   , runWindowOverlayTest
   , runWindowResizeHaloHitTest
   , runWindowResizeTest
+  , runWindowFitScrollGutterTest
   , runWindowScrollGutterTest
   , runPageWindowScrollTest
   , runWindowScrollOnlyDamageTest
@@ -397,6 +398,17 @@ runWindowResizeTest ctx failed = do
       expectCursor (V2 (x0 - 4) (y0 + h0 / 2)) UiCursorEwResize
       expectCursor (V2 (x0 + w0 + 4) (y0 + h0 / 2)) UiCursorEwResize
       expectCursor (V2 (x0 + w0 - 5) (y0 + h0 / 2)) UiCursorEwResize
+      -- Every margin resizes from inside the window too, the top one in a
+      -- strip above the title bar, and corners take both sides.
+      expectCursor (V2 (x0 + 5) (y0 + h0 / 2)) UiCursorEwResize
+      expectCursor (V2 (x0 + w0 / 2) (y0 + h0 - 5)) UiCursorNsResize
+      expectCursor (V2 (x0 + w0 / 2) (y0 + 3)) UiCursorNsResize
+      expectCursor (V2 (x0 + 5) (y0 + 5)) UiCursorNwseResize
+      expectCursor (V2 (x0 + 5) (y0 + h0 - 5)) UiCursorNeswResize
+      expectCursor (V2 (x0 + w0 - 5) (y0 + h0 - 5)) UiCursorNwseResize
+      expectCursor (V2 (x0 - 4) (y0 + 8)) UiCursorNwseResize
+      titleKind <- uiCursorKind ctx (hoverAt (V2 (x0 + w0 / 2) (y0 + 20)))
+      assert failed (titleKind /= UiCursorNsResize)
       insideKind <- uiCursorKind ctx (hoverAt (V2 (x0 + w0 - padR windowPad - 4) (y0 + h0 / 2)))
       assert failed (insideKind /= UiCursorEwResize)
       mSe <- dragWindowEdge ctx inp0 ui (V2 (x0 + w0 + 4) (y0 + h0 + 4)) (V2 (x0 + w0 + 40) (y0 + h0 + 30))
@@ -421,7 +433,16 @@ runWindowResizeTest ctx failed = do
                   mShort <- dragWindowEdge ctx inp0 ui (V2 (xn + wn / 2) (yn + hn + 4)) (V2 (xn + wn / 2) (yn + 4))
                   case mShort of
                     Nothing -> assert failed False
-                    Just (Rect _ _ _ hMin) -> assert failed (hMin + 0.01 >= minTitleH)
+                    Just (Rect xs ys ws hMin) -> do
+                      assert failed (hMin + 0.01 >= minTitleH)
+                      -- A press in the left margin, inside the window, resizes.
+                      let midY = ys + hMin / 2
+                      mInner <- dragWindowEdge ctx inp0 ui (V2 (xs + 5) midY) (V2 (xs - 25) midY)
+                      case mInner of
+                        Nothing -> assert failed False
+                        Just (Rect xi _ wi _) -> do
+                          assertGt failed wi (ws + 20)
+                          assertLt failed xi (xs - 20)
 
 runWindowResizeHaloHitTest :: Context -> IORef Int -> IO ()
 runWindowResizeHaloHitTest ctx failed = do
@@ -502,3 +523,18 @@ runHeadingMonoTruncateTest ctx failed = do
           let contentRightWide = wxWide + wwWide - padR windowPad
           assert failed (abs (fx2 + fw2 - contentRightWide) < 2.0)
         _ -> assert failed False
+
+-- | A window that fits a minimum-width body and scrolls leaves room for its
+-- scrollbar, so right-aligned values end before the bar instead of under it.
+runWindowFitScrollGutterTest :: Context -> IORef Int -> IO ()
+runWindowFitScrollGutterTest ctx failed = do
+  let inp = withInput 1200 300
+      ui = fst <$> window True "Debug" (columnWith (tight . gap 4 . minW 300 . fillW) $
+        mapM_ (\i -> kvMono (T.pack ("row " <> show (i :: Int))) (T.pack ("value" <> show i))) [1 .. 30])
+  win <- warmup2 ctx inp ui
+  let Rect wx _ ww _ = respRect win
+      contentRight = wx + ww - padR windowPad - scrollBarGutter ScrollBarWindow 0
+  spans <- collectOverlayTextSpans ctx inp
+  let values = [r | (r, t, _, _, _) <- spans, "value" `T.isPrefixOf` t]
+  assert failed (not (null values))
+  forM_ values $ \(Rect vx _ vw _) -> assert failed (vx + vw <= contentRight + 0.5)
