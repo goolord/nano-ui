@@ -63,8 +63,11 @@ import NanoUI.Testing.Harness
   ( assertSpansHas
   , centerOf
   , clickPair
+  , findExact
   , held
   , keyInp
+  , rightClickPair
+  , runClick
   , spanCenter
   , tabInp
   , warmup2
@@ -1278,8 +1281,9 @@ memoryClipboard initial ctx = do
 runTextAreaMenuSelectAllTest :: Context -> IORef Int -> IO ()
 runTextAreaMenuSelectAllTest ctx failed = do
   let
+    lastRow = 200
     lastLine = "the last line"
-    original = T.intercalate "\n" (["line " <> T.pack (show i) | i <- [0 .. 199 :: Int]] ++ [lastLine])
+    original = T.intercalate "\n" (["line " <> T.pack (show i) | i <- [0 .. lastRow - 1]] ++ [lastLine])
     inp0 = withInput 400 300
     ui = column (textAreaWith' grow original)
   (resp, _) <- warmup2 ctx inp0 ui
@@ -1290,18 +1294,15 @@ runTextAreaMenuSelectAllTest ctx failed = do
       let
         field = tahFieldRect hit
         mid = V2 (rectX field + rectW field / 3) (rectY field + rectH field / 3)
-        (focusPress, focusRelease) = clickPair inp0 mid
-        menuOpen = inp0 {inputMousePos = mid, inputMouseRightDown = True, inputMouseRightPressed = True}
-      _ <- runFrame ctx focusPress ui >> runFrame ctx focusRelease ui
+        menuOpen = fst (rightClickPair inp0 mid)
+      _ <- runClick ctx inp0 ui mid
       _ <- runFrame ctx menuOpen ui
-      _ <- runFrame ctx inp0 {inputMousePos = mid} ui
-      overlays <- collectOverlayTextSpans ctx inp0
-      case [r | (r, txt, _, _, _) <- overlays, txt == "Select All"] of
-        (r : _) -> do
-          let (pickPress, pickRelease) = clickPair inp0 (spanCenter r)
-          mapM_ (\i -> runFrame ctx i ui) [pickPress, pickRelease, inp0 {inputMousePos = spanCenter r}]
+      overlays <- collectOverlayTextSpans ctx menuOpen
+      case findExact "Select All" overlays of
+        Just pos -> do
+          _ <- runClick ctx inp0 ui pos
           store <- getStore ctx
           let st = loadTextAreaState store (intKey (respId resp))
           assertEq failed (selectionAnchor st) (Cursor 0 0)
-          assertEq failed (getCursor (buffer st)) (Cursor 200 (T.length lastLine))
-        _ -> assert failed False
+          assertEq failed (getCursor (buffer st)) (Cursor lastRow (T.length lastLine))
+        Nothing -> assert failed False
