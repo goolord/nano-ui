@@ -119,8 +119,10 @@ view n = row $ do
 types like `Ui :> es => Eff es Bool`, so a view can run in a larger effect
 stack. A frame:
 
-1. Resets the node and vertex arenas and runs the view. Widgets add layout
-   nodes and read and write the widget store.
+1. Routes the pointer to whatever was on top under it (a menu, a dropdown,
+   the floating panel in front, or the page), resets the node and vertex
+   arenas, and runs the view. Widgets add layout nodes and read and write the
+   widget store; one the pointer was not routed to sees no pointer at all.
 2. Solves layout.
 3. Resolves pointer, keyboard, and focus against the new geometry.
 4. Paints into pinned vertex and index buffers, in background, content,

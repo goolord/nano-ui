@@ -6,20 +6,17 @@ module NanoUI.Frame.Select
   , closeSelectOnOutsideClick
   , finalizeSelectKeyboard
   , finalizeSelectPick
-  , markSelectDropPress
   , drawSelectOverlays
   , collectSelectDropdownSpans
-  , findSelectUnderMouse
   , overlayMenuOwnerAt
-  , cacheOpenSelectDrop
+  , routePointer
   , tagSelectClippedSpans
   , comboDropRect
   , comboDropPickIndex
   , comboScrollGeom
   ) where
 
-import Control.Monad (forM, forM_, unless, when)
-import Data.Foldable (find)
+import Control.Monad (filterM, forM, forM_, unless, when)
 import Data.IORef (readIORef, writeIORef)
 import qualified Data.IntMap.Strict as IM
 import Data.Maybe (catMaybes, listToMaybe, maybeToList)
@@ -41,6 +38,9 @@ import NanoUI.Context
   , widgetTheme
   , isDisabled
   , InteractionState (..)
+  , PointerRoute (..)
+  , floatingLayerAt
+  , getsInteraction
   , modifyInteraction
   )
 import NanoUI.Draw (pushRect, pushRoundedRect, pushText, withClip)
@@ -49,7 +49,7 @@ import NanoUI.Frame.Chrome (overlayMenuStyle, paintMenuAccent, paintMenuPanel)
 import NanoUI.Frame.Hit (findNodeByWidgetId, widgetOverlayAllowed)
 import NanoUI.Frame.Scroll.Geometry (padTextClipRect)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
-import NanoUI.Input (Input (..), Key (..), foldInputKeys, inputKeys, inputMouseDown, inputMousePos, inputMousePressed)
+import NanoUI.Input (Input (..), Key (..), foldInputKeys, inputKeys, inputMousePos, inputMousePressed, inputPointerHeld)
 import NanoUI.Layout.Arena (NodeType (NodeSelect, NodeTextInput), findNodeM, foldNodeRevM, getNodeType, lookupNodeByWidgetId, getOptions, getRect, getWidgetId)
 import NanoUI.Store (Slot (..), slotKey)
 import NanoUI.Style (Style (..), Theme (..), scrollBarThumbColor, scrollBarTrackColor, themeAccent, themeInput)
@@ -152,27 +152,51 @@ dropdownRows fm mouse dd =
       , let row = Rect dx (top + menuItemRowH * fromIntegral i) dw menuItemRowH
       ]
 
+-- | The widget whose menu or dropdown is on top at @mouse@.
 overlayMenuOwnerAt :: Context -> V2 -> IO (Maybe WidgetId)
-overlayMenuOwnerAt ctx mouse = do
+overlayMenuOwnerAt ctx mouse =
+  overlayRouteAt ctx mouse >>= \case
+    Just RouteTextMenu -> fmap textInputMenuWidget <$> getTextInputMenu ctx
+    Just (RouteDropdown wid) -> pure (Just wid)
+    _ -> pure Nothing
+
+-- | The route to what the frame draws over every layer, when that is what is
+-- on top at @mouse@: the text-edit menu, then an open dropdown the modal
+-- state lets receive input. They are drawn rather than laid out, so nothing
+-- but this knows they cover what is under them.
+overlayRouteAt :: Context -> V2 -> IO (Maybe PointerRoute)
+overlayRouteAt ctx mouse = do
   mMenu <- getTextInputMenu ctx
   case mMenu of
-    Just m | rectContains (textInputMenuRect m) mouse -> pure (Just (textInputMenuWidget m))
-    _ -> fmap ddWidget . find (\dd -> rectContains (ddRect dd) mouse) <$> openDropdowns ctx
-
-cacheOpenSelectDrop :: Context -> IO ()
-cacheOpenSelectDrop ctx = do
-  dropdowns <- openDropdowns ctx
-  modifyInteraction ctx (\s -> s {isOpenSelectDrop = (\dd -> (ddWidget dd, ddRect dd)) <$> listToMaybe dropdowns})
-
-markSelectDropPress :: Context -> Input -> IO ()
-markSelectDropPress ctx inp =
-  when (inputMouseDown inp) $ do
-    store <- getStore ctx
-    when (anySelectOpen store) $ do
-      let mouse = inputMousePos inp
+    Just m | rectContains (textInputMenuRect m) mouse -> pure (Just RouteTextMenu)
+    _ -> do
       dropdowns <- openDropdowns ctx
-      when (any (\dd -> rectContains (ddAnchor dd) mouse || rectContains (ddRect dd) mouse) dropdowns) $
-        modifyInteraction ctx (\s -> s {isSelectDropPress = True})
+      let under = [ddWidget dd | dd <- reverse dropdowns, rectContains (ddRect dd) mouse]
+      fmap RouteDropdown . listToMaybe <$> filterM (widgetOverlayAllowed ctx) under
+
+-- | Decide where this frame's pointer goes, before the view runs. A button
+-- that is already down keeps the route it went down with, through its
+-- release, so a drag that wanders over something else stays where it began.
+-- A press always starts over, even with the other button still down: it goes
+-- to what is under it now, not through it to where the first one landed.
+routePointer :: Context -> Input -> IO PointerRoute
+routePointer ctx inp = do
+  (held, old) <- getsInteraction ctx (\s -> (isPointerHeld s, isPointerRoute s))
+  let pressed = inputMousePressed inp || inputMouseRightPressed inp
+      released = inputMouseReleased inp || inputMouseRightReleased inp
+      -- A hold that ended without its release being seen is over too.
+      holding = held && not pressed && (inputPointerHeld inp || released)
+      mouse = inputMousePos inp
+  -- What is on top: a menu or dropdown, then the floating panel in front,
+  -- then the page.
+  route <-
+    if holding
+      then pure old
+      else maybe (RouteLayer <$> floatingLayerAt ctx mouse) pure =<< overlayRouteAt ctx mouse
+  -- Most frames change neither, and an idle frame should write nothing.
+  when (route /= old || inputPointerHeld inp /= held) $
+    modifyInteraction ctx (\s -> s {isPointerRoute = route, isPointerHeld = inputPointerHeld inp})
+  pure route
 
 closeSelectOnOutsideClick :: Context -> Input -> IO ()
 closeSelectOnOutsideClick ctx inp =
@@ -294,18 +318,6 @@ finalizeSelectPick ctx inp =
               setStore ctx (setSelectOpen (st {storeInt = IM.insert key picked (storeInt st)}) key False)
               writeIORef (ctxFocusId ctx) wid
               markDirty ctx
-
--- | Topmost open dropdown owner (in reverse arena order) whose anchor or menu
--- is under @mouse@ and that the modal state lets receive input.
-findSelectUnderMouse :: Context -> V2 -> IO (Maybe WidgetId)
-findSelectUnderMouse ctx mouse = do
-  dropdowns <- openDropdowns ctx
-  firstAllowed [dd | dd <- reverse dropdowns, rectContains (ddAnchor dd) mouse || rectContains (ddRect dd) mouse]
-  where
-    firstAllowed [] = pure Nothing
-    firstAllowed (dd : rest) = do
-      allow <- widgetOverlayAllowed ctx (ddWidget dd)
-      if allow then pure (Just (ddWidget dd)) else firstAllowed rest
 
 -- | Vertical gap between the select widget and its dropdown menu.
 selectDropGap :: Float

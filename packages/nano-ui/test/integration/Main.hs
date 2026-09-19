@@ -15,6 +15,7 @@ import Cases.Keyboard
 import Cases.Modal
 import Cases.NoThunks
 import Cases.NumericInput
+import Cases.PointerOwnership
 import Cases.PointerRelease
 import Cases.RichText
 import Cases.Runner
@@ -294,6 +295,9 @@ testSpecs =
   , TestSpec "release-elsewhere" False runReleaseElsewhereTest
   , TestSpec "right-release-elsewhere" False runRightReleaseElsewhereTest
   , TestSpec "release-returns" False runReleaseReturnsTest
+  , TestSpec "pointer-ownership" True runPointerOwnershipTest
+  , TestSpec "pointer-routing-lint" False runPointerRoutingLintTest
+  , TestSpec "pointer-capture" True runPointerCaptureTest
   , TestSpec "overlap-press" False runOverlapPressTest
   , TestSpec "tooltip-hover" False runTooltipHoverTest
   , TestSpec "tooltip-id-stable" False runTooltipIdStableTest

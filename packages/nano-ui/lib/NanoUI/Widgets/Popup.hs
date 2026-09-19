@@ -149,8 +149,10 @@ floatingOverlay open dismissable addPanel enter body = do
       uiIO (modifyIORef' (ctxIdContext ctx) (fst . enterScope scopeTag))
       pure (emptyModalResp wid, Nothing)
     else do
-      inp <- askInput
-      (closed, r) <- floatingPanel True wid (addPanel wid) (enter wid) body
+      -- Hovered is the pointer on the panel as the panel's own layer sees it,
+      -- so whatever is in front of the panel takes the hover with it.
+      (mouse, (closed, r)) <-
+        floatingPanel True wid (addPanel wid) (enter wid) ((,) . inputMousePos <$> askInput <*> body)
       panel <- fromMaybe (Rect 0 0 0 0) <$> uiIO (getPrevRect ctx wid)
       outside <-
         if dismissable && rectNonEmpty panel
@@ -158,7 +160,7 @@ floatingOverlay open dismissable addPanel enter body = do
           else pure False
       let dismissed = closed || outside
       pure
-        ( mkResponse wid panel (rectHit panel (inputMousePos inp)) False dismissed dismissed
+        ( mkResponse wid panel (rectHit panel mouse) False dismissed dismissed
         , Just r
         )
 

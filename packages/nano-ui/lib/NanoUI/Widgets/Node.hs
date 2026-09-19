@@ -24,6 +24,7 @@ module NanoUI.Widgets.Node
   , containerResponse
   , withContainerNode
   , floatingPanel
+  , dropdownInput
   , addWidget
   , addWidgetStyled
   , addWidgetWithOptions
@@ -40,10 +41,10 @@ import Effectful (Eff, type (:>))
 import NanoUI.Context
   ( Context (..)
   , isDisabled
-  , pointerBlockedByOverlay
-  , OverlayState (..)
-  , getsOverlay
-  , modifyOverlay
+  , intKey
+  , routedInput
+  , getPointerRoute
+  , PointerRoute (..)
   )
 import NanoUI.Id (WidgetId (..), enterScope, hashWidgetId, scopeTag)
 import NanoUI.Input
@@ -66,7 +67,7 @@ import NanoUI.Layout.Arena
   , setStyleIdx
   , setWidgetId
   )
-import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO)
+import NanoUI.Monad (Ui, askContext, askFrameInput, askInput, localInput, nextId, uiIO)
 import NanoUI.WidgetText (packTextNodeStyleFull)
 import NanoUI.Style
   ( AlignX (..)
@@ -237,23 +238,36 @@ withContainerNode scoped idx child = do
   pure r
 
 -- | A floating panel (popup, modal, window): its node attaches to the root
--- layer and it is the current floating panel while @body@ runs. @addPanel@
--- adds the node under the given parent; @enter@ runs once the node is pushed
--- (seeding its rect, opening a modal).
+-- layer, and @body@ runs as a layer of its own, with the pointer when the
+-- panel is what the frame routed it to. @addPanel@ adds the node under the
+-- given parent; @enter@ runs once the node is pushed (seeding its rect,
+-- opening a modal).
 floatingPanel ::
   Ui :> es => Bool -> WidgetId -> (Int -> IO NodeIdx) -> IO () -> Eff es a -> Eff es a
 floatingPanel scoped wid addPanel enter body = do
   ctx <- askContext
   let arena = ctxNodeArena ctx
-  prevFloat <- uiIO (getsOverlay ctx osCurrentFloatingId)
   idx <- uiIO $ do
     stack <- readIORef (ctxContainerStack ctx)
     idx <- addPanel =<< rootAttachParent arena (parentIdx stack)
     setWidgetId arena idx wid
     pure idx
-  r <- withContainerNode scoped idx (uiIO (enter >> modifyOverlay ctx (\os -> os {osCurrentFloatingId = Just wid})) >> body)
-  uiIO (modifyOverlay ctx (\os -> os {osCurrentFloatingId = prevFloat}))
-  pure r
+  withContainerNode scoped idx $ do
+    -- A modal has to be entered first: that is what lets its own body through.
+    uiIO enter
+    frame <- askFrameInput
+    inp <- uiIO (routedInput ctx (intKey wid) frame)
+    localInput inp body
+
+-- | The input for widget @wid@'s own dropdown, which the frame draws over
+-- every layer: the frame's while the pointer is routed to that dropdown, and
+-- the view's otherwise.
+dropdownInput :: Ui :> es => WidgetId -> Eff es Input
+dropdownInput wid = do
+  ctx <- askContext
+  uiIO (getPointerRoute ctx) >>= \case
+    RouteDropdown owner | owner == wid -> askFrameInput
+    _ -> askInput
 
 addSizingLeafNode ::
   Context
@@ -364,7 +378,6 @@ resolveInteraction ctx inp wid = do
     then pure $! mkResponse wid rect False False False False
     else do
       disabled <- isDisabled ctx wid
-      blocked <- pointerBlockedByOverlay ctx mouse
       mIdx <- findNodeByWidgetId ctx wid
       let
         hitAt p = case mIdx of
@@ -385,7 +398,7 @@ resolveInteraction ctx inp wid = do
               then pure True
               else not <$> startedHere (ctxPressPos ctx)
       hovered <-
-        if disabled || blocked || captured
+        if disabled || captured
           then pure False
           else hitAt mouse
       let

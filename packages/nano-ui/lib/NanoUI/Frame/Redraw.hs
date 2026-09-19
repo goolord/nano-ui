@@ -16,7 +16,7 @@ import NanoUI.Context
   ( Context (..)
   , anyAnimating
   , anySelectOpen
-  , getMenuPointerGesture
+  , pointerHeldOffLayers
   , getScrollDrag
   , getStore
   , getTextInputMenu
@@ -139,8 +139,9 @@ debugPanelOpen ctx =
 
 probeHotId :: Context -> V2 -> IO WidgetId
 probeHotId ctx mouse = do
-  gesture <- getMenuPointerGesture ctx
-  if gesture
+  -- A button that went down on a menu or dropdown keeps everything cold.
+  offLayers <- pointerHeldOffLayers ctx
+  if offLayers
     then pure (WidgetId 0)
     else do
       mOverlay <- overlayMenuOwnerAt ctx mouse

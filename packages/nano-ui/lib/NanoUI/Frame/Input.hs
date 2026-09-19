@@ -14,25 +14,19 @@ module NanoUI.Frame.Input
   ) where
 
 import Control.Applicative ((<|>))
-import Control.Monad (unless, when)
+import Control.Monad (forM_, unless, when)
 import Data.IORef (readIORef, writeIORef)
 import qualified Data.IntMap.Strict as IM
-import Data.Maybe (isJust, isNothing)
 import NanoUI.Context
   ( Context (..)
-  , TextInputMenu (..)
   , WidgetStore (..)
   , damageWidget
   , getFocusables
-  , getMenuPointerGesture
   , getStore
-  , getTextInputMenu
   , intKey
   , isDisabled
   , markDirty
-  , pointerBlockedByOverlay
   , setAnimationValue
-  , setMenuPointerGesture
   , setStore
   , setTextInputMenu
   , startAnimation
@@ -43,11 +37,11 @@ import NanoUI.Frame.Hit
   , modalTreeOpen
   , nodeClippedHit
   , nodeInteractionHit
+  , nodeOwnsPointer
   , overlayHitAllowed
   , scrollHitRect
   )
 import NanoUI.Frame.Redraw (probeHotId)
-import NanoUI.Frame.Select (findSelectUnderMouse, overlayMenuOwnerAt)
 import NanoUI.Frame.Spans (widgetHitRect)
 import NanoUI.Frame.TextEdit (collapseTextFieldSelection)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
@@ -135,7 +129,10 @@ refreshHover ctx inp = do
 armPointerPress :: Context -> Input -> IO ()
 armPointerPress ctx inp = do
   let here = Just (inputMousePos inp)
-  when (inputMousePressed inp) $ writeIORef (ctxPressPos ctx) here
+  when (inputMousePressed inp) $ do
+    writeIORef (ctxPressPos ctx) here
+    -- A pointer press hides the keyboard focus ring.
+    writeIORef (ctxFocusVisible ctx) False
   when (inputMouseRightPressed inp) $ writeIORef (ctxRightPressPos ctx) here
 
 disarmPointerPress :: Context -> Input -> IO ()
@@ -147,25 +144,10 @@ disarmPointerPress ctx inp = do
 finalizePointerPress :: Context -> Input -> IO ()
 finalizePointerPress ctx inp =
   when (inputMousePressed inp) $ do
-    -- A pointer press hides the keyboard focus ring.
-    writeIORef (ctxFocusVisible ctx) False
-    gesture <- getMenuPointerGesture ctx
-    if gesture
-      then writeIORef (ctxActiveId ctx) (WidgetId 0)
-      else do
-        let mouse = inputMousePos inp
-        mMenu <- overlayMenuOwnerAt ctx mouse
-        case mMenu of
-          Just _ -> do
-            setMenuPointerGesture ctx True
-            writeIORef (ctxActiveId ctx) (WidgetId 0)
-          Nothing -> do
-            mWid <- findTopWidgetUnderMouse ctx mouse isInteractiveNode
-            case mWid of
-              Nothing -> pure ()
-              Just wid ->
-                whenM (not <$> isDisabled ctx wid) $
-                  writeIORef (ctxActiveId ctx) wid
+    mWid <- findTopWidgetUnderMouse ctx (inputMousePos inp) isInteractiveNode
+    forM_ mWid $ \wid ->
+      whenM (not <$> isDisabled ctx wid) $
+        writeIORef (ctxActiveId ctx) wid
 
 -- | The widget of a wanted type under @mouse@ that hover would pick: the
 -- first in arena order, since earlier siblings paint over later ones.
@@ -208,42 +190,35 @@ finalizePointerRelease ctx inp =
   when (inputMouseReleased inp) $ do
     let mouse = inputMousePos inp
         na = ctxNodeArena ctx
-    gesture <- getMenuPointerGesture ctx
-    mMenu <- overlayMenuOwnerAt ctx mouse
-    if gesture || isJust mMenu
-      then do
-        writeIORef (ctxActiveId ctx) (WidgetId 0)
-        setMenuPointerGesture ctx False
-      else do
-        active <- readIORef (ctxActiveId ctx)
-        when (hashWidgetId active /= 0) $ do
-          releasedClicked <- readIORef (ctxReleaseClickedId ctx)
-          -- Every node carrying the active id takes the release; the first
-          -- one decides whether the pointer came up over the widget.
-          let release over idx = do
-                wid <- getWidgetId na idx
-                if wid /= active
-                  then pure over
-                  else do
-                    nt <- getNodeType na idx
-                    (x, y, w, h) <- getRect na idx
-                    visible <- nodeClippedHit ctx idx (Rect x y w h) mouse
-                    when visible $ do
-                      case nt of
-                        NodeRadio -> getStyleIdx na idx >>= setParentSelection ctx idx
-                        NodeButton -> do
-                          packed <- getStyleIdx na idx
-                          when (isTabButtonStyle packed) $
-                            setParentSelection ctx idx (buttonVisualStyle packed `div` 4)
-                        _ -> pure ()
-                      when (postsLayoutClick nt && releasedClicked /= active) $ do
-                        uiHit <- inUiClickHit ctx active mouse
-                        unless uiHit $ writeIORef (ctxClickedId ctx) active
-                    pure (over <|> Just visible)
-          releasedOver <- foldNodesM na release Nothing
-          writeIORef (ctxActiveId ctx) (WidgetId 0)
-          when (releasedOver == Just True) $
-            setAnimationValue ctx active 1
+    active <- readIORef (ctxActiveId ctx)
+    when (hashWidgetId active /= 0) $ do
+      releasedClicked <- readIORef (ctxReleaseClickedId ctx)
+      -- Every node carrying the active id takes the release; the first
+      -- one decides whether the pointer came up over the widget.
+      let release over idx = do
+            wid <- getWidgetId na idx
+            if wid /= active
+              then pure over
+              else do
+                nt <- getNodeType na idx
+                (x, y, w, h) <- getRect na idx
+                visible <- nodeClippedHit ctx idx (Rect x y w h) mouse
+                when visible $ do
+                  case nt of
+                    NodeRadio -> getStyleIdx na idx >>= setParentSelection ctx idx
+                    NodeButton -> do
+                      packed <- getStyleIdx na idx
+                      when (isTabButtonStyle packed) $
+                        setParentSelection ctx idx (buttonVisualStyle packed `div` 4)
+                    _ -> pure ()
+                  when (postsLayoutClick nt && releasedClicked /= active) $ do
+                    uiHit <- inUiClickHit ctx active mouse
+                    unless uiHit $ writeIORef (ctxClickedId ctx) active
+                pure (over <|> Just visible)
+      releasedOver <- foldNodesM na release Nothing
+      writeIORef (ctxActiveId ctx) (WidgetId 0)
+      when (releasedOver == Just True) $
+        setAnimationValue ctx active 1
 
 -- Radio options and tab buttons keep their selection on the parent group.
 setParentSelection :: Context -> NodeIdx -> Int -> IO ()
@@ -261,58 +236,46 @@ postsLayoutClick nt =
 inUiClickHit :: Context -> WidgetId -> V2 -> IO Bool
 inUiClickHit ctx wid mouse = do
   disabled <- isDisabled ctx wid
-  blocked <- pointerBlockedByOverlay ctx mouse
-  if disabled || blocked
-    then pure False
-    else do
-      mrect <- scrollHitRect ctx wid
-      case mrect of
-        Nothing -> pure False
-        Just r ->
-          findNodeByWidgetId ctx wid >>= \case
-            Nothing -> pure (rectContains r mouse)
-            Just idx -> nodeInteractionHit ctx idx r mouse
+  mrect <- scrollHitRect ctx wid
+  case mrect of
+    Just r | not disabled ->
+      findNodeByWidgetId ctx wid >>= \case
+        Nothing -> pure (rectContains r mouse)
+        -- The view saw the release only if the pointer was routed to it.
+        Just idx -> do
+          owns <- nodeOwnsPointer ctx idx
+          if owns then nodeInteractionHit ctx idx r mouse else pure False
+    _ -> pure False
 
 -- Focus text inputs using solved layout rects so the caret appears on first press.
--- A press on an open dropdown overlay (select menu or a focused combo's
--- suggestions) must not clear focus first: the combo's dropdown is visible
--- exactly while its field holds focus, and the select finalizers below need
--- the owner still resolvable to route the pick.
+-- A press on the text-edit menu or an open dropdown never gets here, so it
+-- leaves focus alone: a combo's dropdown is visible exactly while its field
+-- holds focus, and the pick still has to find its owner.
 finalizeTextInputFocus :: Context -> Input -> IO ()
 finalizeTextInputFocus ctx inp =
   when (inputMousePressed inp) $ do
-    mMenu <- getTextInputMenu ctx
-    let mouse = inputMousePos inp
-    mDrop <- overlayMenuOwnerAt ctx mouse
-    let onMenu = maybe False (\menu -> rectContains (textInputMenuRect menu) mouse) mMenu
-    when (not onMenu && isNothing mDrop) $ do
-      prevFocus <- readIORef (ctxFocusId ctx)
-      mFocused <- findTextInputUnderMouse ctx mouse
-      case mFocused of
-        Nothing -> do
-          when (prevFocus /= WidgetId 0) $ markDirty ctx
-          collapseTextFieldSelection ctx prevFocus
-          writeIORef (ctxFocusId ctx) (WidgetId 0)
-          setTextInputMenu ctx Nothing
-        Just wid -> do
-          writeIORef (ctxFocusId ctx) wid
-          when (prevFocus /= wid) $ markDirty ctx
+    prevFocus <- readIORef (ctxFocusId ctx)
+    mFocused <- findTextInputUnderMouse ctx (inputMousePos inp)
+    case mFocused of
+      Nothing -> do
+        when (prevFocus /= WidgetId 0) $ markDirty ctx
+        collapseTextFieldSelection ctx prevFocus
+        writeIORef (ctxFocusId ctx) (WidgetId 0)
+        setTextInputMenu ctx Nothing
+      Just wid -> do
+        writeIORef (ctxFocusId ctx) wid
+        when (prevFocus /= wid) $ markDirty ctx
 
+-- | A press on a select's field focuses it, whether that opens or closes it.
 finalizeSelectFocus :: Context -> Input -> IO ()
 finalizeSelectFocus ctx inp =
   when (inputMousePressed inp) $ do
-    let mouse = inputMousePos inp
-    mOpen <- findSelectUnderMouse ctx mouse
-    -- A press on a select's own field that just closed its dropdown leaves no
-    -- open dropdown under the pointer, but the select keeps focus all the same.
-    mWid <- maybe (findTopWidgetUnderMouse ctx mouse (== NodeSelect)) (pure . Just) mOpen
-    case mWid of
-      Nothing -> pure ()
-      Just wid ->
-        whenM (not <$> isDisabled ctx wid) $ do
-          prev <- readIORef (ctxFocusId ctx)
-          writeIORef (ctxFocusId ctx) wid
-          when (prev /= wid) $ markDirty ctx
+    mWid <- findTopWidgetUnderMouse ctx (inputMousePos inp) (== NodeSelect)
+    forM_ mWid $ \wid ->
+      whenM (not <$> isDisabled ctx wid) $ do
+        prev <- readIORef (ctxFocusId ctx)
+        writeIORef (ctxFocusId ctx) wid
+        when (prev /= wid) $ markDirty ctx
 
 findTextInputUnderMouse :: Context -> V2 -> IO (Maybe WidgetId)
 findTextInputUnderMouse ctx mouse = do

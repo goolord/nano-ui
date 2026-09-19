@@ -23,7 +23,6 @@ import NanoUI.Context
   , beginScrollMetrics
   , cacheScrollMetrics
   , clampScrollOffset
-  , getMenuPointerGesture
   , getScrollDrag
   , getScrollOffset
   , getScrollOffset2D
@@ -34,7 +33,6 @@ import NanoUI.Context
   , setScrollOffset2D
   , nodeTheme
   , InteractionState (..)
-  , getsInteraction
   , modifyInteraction
   )
 import NanoUI.Frame.Hit (topmostModalAtMouse, topmostOverlayAtMouse)
@@ -148,18 +146,14 @@ scrollNodeGeometry ctx idx (Rect x y w h) = do
 updateScrollWheel :: Context -> Input -> IO ()
 updateScrollWheel ctx inp = do
   let scroll@(V2 wheelX wheelY) = inputScroll inp
+  -- A wheel over an open dropdown or the text-edit menu never gets here: the
+  -- combo widget scrolls its own list, and the scroller under it stays put.
   when (wheelY /= 0 || wheelX /= 0) $ do
-    -- An open dropdown (select menu or combo suggestions) owns the wheel:
-    -- the combo widget scrolls its own window, and the scroller underneath
-    -- the floating list must not move with it.
-    mDrop <- getsInteraction ctx isOpenSelectDrop
-    let overDrop = maybe False (\(_, r) -> rectContains r (inputMousePos inp)) mDrop
-    when (not overDrop) $ do
-      mNode <- findScrollNodeUnderMouse ctx (inputMousePos inp)
-      forM_ mNode $ \idx -> do
-        wid <- getWidgetId (ctxNodeArena ctx) idx
-        void (tryApplyScrollWheelDelta ctx wid scroll)
-        applyCrossAxisScroll ctx idx scroll
+    mNode <- findScrollNodeUnderMouse ctx (inputMousePos inp)
+    forM_ mNode $ \idx -> do
+      wid <- getWidgetId (ctxNodeArena ctx) idx
+      void (tryApplyScrollWheelDelta ctx wid scroll)
+      applyCrossAxisScroll ctx idx scroll
 
 -- Nested 2D: apply the unused axis to a paired scroller in the same panel.
 -- Do not walk past panel/window/modal into the page scroller.
@@ -382,10 +376,8 @@ updateScrollDrag :: Context -> Input -> IO ()
 updateScrollDrag ctx inp
   | inputMouseReleased inp = modifyInteraction ctx (\s -> s {isScrollDrag = Nothing})
   | otherwise = do
-      gesture <- getMenuPointerGesture ctx
       mDrag <- getScrollDrag ctx
       case mDrag of
-        _ | gesture -> pure ()
         Just (wid, dragDir, grabOff)
           | inputMouseDown inp -> do
               -- A hidden bar has no lane to grab.

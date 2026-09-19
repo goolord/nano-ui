@@ -226,6 +226,7 @@ test-suite nano-ui-test
         Cases.TextInput
         Cases.NumericInput
         Cases.ContextMenu
+        Cases.PointerOwnership
         Cases.PointerRelease
         Cases.CustomWidget
         Cases.Tooltip
@@ -233,7 +234,9 @@ test-suite nano-ui-test
     build-depends:
         bytestring,
         containers,
+        directory,
         effectful ^>=2.6,
+        filepath,
         nothunks,
         primitive ^>=0.9,
         text ^>=2.1

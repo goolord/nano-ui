@@ -11,6 +11,7 @@ module NanoUI.Frame.Hit
   , topmostOverlayAtMouse
   , topmostModalAtMouse
   , widgetOverlayAllowed
+  , nodeOwnsPointer
   , scrollHitRect
   , nodePointVisible
   , nodeClippedHit
@@ -18,7 +19,7 @@ module NanoUI.Frame.Hit
   ) where
 
 import Data.Maybe (isJust)
-import NanoUI.Context (Context (..), getPrevRect, getPrevClipRect)
+import NanoUI.Context (Context (..), PointerRoute (..), getPointerRoute, getPrevClipRect, getPrevRect, intKey, modalActive)
 import NanoUI.Id (WidgetId)
 import NanoUI.Layout.Arena
   ( NodeIdx
@@ -29,6 +30,7 @@ import NanoUI.Layout.Arena
   , getParent
   , getRect
   , getWidgetId
+  , isFloatingNode
   , lookupNodeByKey
   , lookupNodeByWidgetId
   , topModalNode
@@ -91,6 +93,28 @@ topmostFloatingAtMouse ctx mouse wanted =
       else do
         (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
         pure (w > 0 && h > 0 && rectContains (Rect x y w h) mouse)
+
+-- | Whether the view saw the pointer where node @idx@ was declared: the frame
+-- routed it to the node's layer (its nearest floating ancestor, or the page),
+-- and the modal on top, if one is up or was last frame, has the node inside it.
+nodeOwnsPointer :: Context -> NodeIdx -> IO Bool
+nodeOwnsPointer ctx idx =
+  getPointerRoute ctx >>= \case
+    RouteLayer routed -> do
+      layer <- layerOf idx
+      if layer /= routed
+        then pure False
+        else maybe (not <$> modalActive ctx) (nodeInSubtree ctx idx) =<< topModalNode na
+    _ -> pure False
+  where
+    na = ctxNodeArena ctx
+    layerOf i
+      | i < 0 = pure 0
+      | otherwise = do
+          nt <- getNodeType na i
+          if isFloatingNode nt
+            then intKey <$> getWidgetId na i
+            else layerOf =<< getParent na i
 
 widgetOverlayAllowed :: Context -> WidgetId -> IO Bool
 widgetOverlayAllowed ctx wid = do

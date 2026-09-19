@@ -18,18 +18,17 @@ import NanoUI.Context
   , getHotId
   , getScrollDrag
   , getStore
-  , intKey
   , isDisabled
-  , isSelectOpen
   , lookupCustomCursor
   , widgetTheme
   , getsInteraction
   , InteractionState (..)
+  , PointerRoute (..)
   )
 import NanoUI.Font (FontMetrics, sliderHandleSlack, sliderTrackBounds)
 import NanoUI.Frame.Hit (findNodeByWidgetId, nodePointVisible, scrollHitRect)
 import NanoUI.Frame.Scroll (ScrollBarLayout (..), scrollBarsFor)
-import NanoUI.Frame.Select (overlayMenuOwnerAt, selectDropRect)
+import NanoUI.Frame.Select (overlayMenuOwnerAt)
 import NanoUI.Frame.TextArea.Content (isMouseOnTextAreaScrollBarAt)
 import NanoUI.Frame.TextEdit.Menu (textEditMenuCursorKind, textFieldWidgetAtMouse)
 import NanoUI.Frame.TextInput (nodeTextFieldGeom, searchClearHit)
@@ -51,7 +50,6 @@ import NanoUI.Layout.Arena
   , findNodeM
   , getDirection
   , getNodeType
-  , getOptions
   , getParent
   , getRect
   , getStyleIdx
@@ -90,29 +88,18 @@ uiCursorKind ctx inp = do
 
 selectDropdownCursorKind :: Context -> Input -> IO (Maybe UiCursorKind)
 selectDropdownCursorKind ctx inp = do
-  let mouse = inputMousePos inp
-      na = ctxNodeArena ctx
-  dropPress <- getsInteraction ctx isSelectDropPress
-  store <- getStore ctx
-  mSel <-
-    findNodeM na $ \idx -> do
-      nt <- getNodeType na idx
-      if nt /= NodeSelect
-        then pure False
-        else do
-          wid <- getWidgetId na idx
-          opts <- getOptions na idx
-          (x, y, w, h) <- getRect na idx
-          let dropRect = selectDropRect x y w h (length opts)
-          pure ((isSelectOpen store (intKey wid) || dropPress) && rectContains dropRect mouse)
-  if isJust mSel
+  -- A pick closes the dropdown with the button still down, and the pointer
+  -- stays a pointer until it comes up.
+  pickHeld <- getsInteraction ctx $ \s ->
+    isPointerHeld s && case isPointerRoute s of
+      RouteDropdown _ -> True
+      _ -> False
+  if pickHeld
     then pure (Just UiCursorPointer)
     else
-      -- A focused combo's dropdown (visible while its field holds focus) is
-      -- not a select: pointer over its menu like the select's. The text-input
-      -- menu case inside overlayMenuOwnerAt is unreachable here, since
-      -- textEditMenuCursorKind runs first in uiCursorKind.
-      (UiCursorPointer <$) <$> overlayMenuOwnerAt ctx mouse
+      -- Over an open select's menu or a focused combo's. The text-edit menu
+      -- never gets here: textEditMenuCursorKind runs first in uiCursorKind.
+      (UiCursorPointer <$) <$> overlayMenuOwnerAt ctx (inputMousePos inp)
 
 scrollThumbCursorKind :: Context -> Input -> IO (Maybe UiCursorKind)
 scrollThumbCursorKind ctx inp = do

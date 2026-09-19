@@ -34,7 +34,7 @@ import NanoUI.Frame.Select (comboDropPickIndex, comboDropRect, comboScrollGeom)
 import NanoUI.Id (WidgetId (..))
 import NanoUI.Input (Key (..), inputKeys, inputMouseDown, inputMousePos, inputMousePressed, inputScroll)
 import NanoUI.Layout.Arena (setOptions)
-import NanoUI.Monad (Ui, askContext, askInput, uiIO)
+import NanoUI.Monad (Ui, askContext, uiIO)
 import NanoUI.Store
   ( WidgetStore (..)
   , boolInt
@@ -44,7 +44,7 @@ import NanoUI.Store
 import NanoUI.Types (Rect (..), V2 (..), clamp, rectContains, rectNonEmpty, v2X, v2Y)
 import NanoUI.WidgetText (textInputFlagSearch)
 import NanoUI.Widgets.Behavior (keyboardFocused)
-import NanoUI.Widgets.Node (Response (..), setChanged)
+import NanoUI.Widgets.Node (Response (..), dropdownInput, setChanged)
 import NanoUI.Widgets.TextInput (buildTextInput, searchFieldLayout)
 
 -- | Maximum suggestion rows the combo dropdown shows at once; Up/Down walk
@@ -279,7 +279,7 @@ comboBox' placeholder options value = do
   (resp, text) <-
     buildTextInput textInputFlagSearch searchFieldLayout placeholder value Nothing
   ctx <- askContext
-  inp <- askInput
+  inp <- dropdownInput (rawRespId resp)
   let wid = rawRespId resp
       key = intKey wid
       keys = inputKeys inp

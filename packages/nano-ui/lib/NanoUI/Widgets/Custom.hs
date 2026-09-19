@@ -97,7 +97,6 @@ import NanoUI.Context
   , writeStoreFloat
   , widgetTheme
   , modifyStore
-  , getMenuPointerGesture
   )
 import NanoUI.Draw (DrawOp (..))
 import NanoUI.Font (FontMetrics)
@@ -396,10 +395,8 @@ useDrag2D bounds = do
   let dragK = slotKey SlotDrag (intKey wid)
       mouse = inputMousePos inp
   store <- uiIO (getStore ctx)
-  -- A press that belongs to an open menu's pointer gesture drags nothing.
-  gesture <- uiIO (getMenuPointerGesture ctx)
   let active0 = IM.findWithDefault 0 dragK (storeInt store) /= 0
-      active = inputMouseDown inp && not gesture && (active0 || (inputMousePressed inp && rectContains bounds mouse))
+      active = inputMouseDown inp && (active0 || (inputMousePressed inp && rectContains bounds mouse))
       (prevX, prevY) = IM.findWithDefault (v2X mouse, v2Y mouse) dragK (storePoint store)
       delta =
         if active && active0

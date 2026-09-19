@@ -13,8 +13,8 @@ module NanoUI.Context.Core
   , getTextInputMenu
   , setTextInputMenu
   , takeTextEditLastAction
-  , getMenuPointerGesture
-  , setMenuPointerGesture
+  , getPointerRoute
+  , pointerHeldOffLayers
   , getWindowDrag
   , getWindowResize
   -- Damage
@@ -76,6 +76,7 @@ import NanoUI.Context.Types
   , DamageRequest (..)
   , DamageState (..)
   , InteractionState (..)
+  , PointerRoute (..)
   , OverlayState
   , TextInputDrag
   , TextInputMenu
@@ -151,13 +152,19 @@ takeTextEditLastAction ctx = do
   modifyInteraction ctx (\s -> s {isTextEditLastAction = Nothing})
   pure act
 
-{-# INLINE getMenuPointerGesture #-}
-getMenuPointerGesture :: Context -> IO Bool
-getMenuPointerGesture ctx = getsInteraction ctx isMenuPointerGesture
+{-# INLINE getPointerRoute #-}
+getPointerRoute :: Context -> IO PointerRoute
+getPointerRoute ctx = getsInteraction ctx isPointerRoute
 
-{-# INLINE setMenuPointerGesture #-}
-setMenuPointerGesture :: Context -> Bool -> IO ()
-setMenuPointerGesture ctx v = modifyInteraction ctx (\s -> s {isMenuPointerGesture = v})
+-- | Whether a held button went down on a menu or dropdown rather than on a
+-- layer's widgets. Nothing in the layers is hot while it lasts.
+{-# INLINE pointerHeldOffLayers #-}
+pointerHeldOffLayers :: Context -> IO Bool
+pointerHeldOffLayers ctx =
+  getsInteraction ctx $ \s ->
+    isPointerHeld s && case isPointerRoute s of
+      RouteLayer _ -> False
+      _ -> True
 
 {-# INLINE getWindowDrag #-}
 getWindowDrag :: Context -> IO (Maybe (WidgetId, Float, Float))

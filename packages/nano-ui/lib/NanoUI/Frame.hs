@@ -28,7 +28,7 @@ import Data.Typeable (Typeable)
 import Effectful (Eff, IOE, runEff, type (:>))
 import NanoUI.Context
   ( Context (..)
-  , armMenuPointerCapture
+  , PointerRoute (..)
   , beginThemeScopes
   , damageFull
   , themeScopesChanged
@@ -45,18 +45,15 @@ import NanoUI.Context
   , markDirty
   , pruneDrawOpCache
   , resetDrawingScopeCache
-  , setMenuPointerGesture
   , stepScrollGlides
   , takeDamage
   , tickAnimations
   , hasCustomLayoutInputs
   , ensureMetricCaches
-  , InteractionState (..)
   , getsOverlay
   , OverlayState (..)
   , getsDamage
   , DamageState (..)
-  , modifyInteraction
   )
 import NanoUI.Context (beginFrameModal)
 import NanoUI.Damage (FrameSnapshot (..), updatePrevRects, writeDamage)
@@ -101,12 +98,11 @@ import NanoUI.Frame.Scroll
   , updateScrollWheel
   )
 import NanoUI.Frame.Select
-  ( cacheOpenSelectDrop
-  , closeSelectOnOutsideClick
+  ( closeSelectOnOutsideClick
   , drawSelectOverlays
   , finalizeSelectKeyboard
   , finalizeSelectPick
-  , markSelectDropPress
+  , routePointer
   )
 import NanoUI.Frame.Spans
   ( collectOverlayTextSpans
@@ -132,7 +128,7 @@ import NanoUI.Frame.Window
   , updateWindowResize
   )
 import NanoUI.Id (WidgetId (..), initialIdContext)
-import NanoUI.Input (Input (..), inputMouseDown, stripInteractionInput)
+import NanoUI.Input (Input (..), inputMousePressed, stripInteractionInput, withoutPointer)
 import NanoUI.Layout.Arena
   ( captureLayoutCache
   , layoutCacheEligible
@@ -188,7 +184,7 @@ runFrameEff ::
   -> Input
   -> Eff (Ui : es) a
   -> IO (a, [FrameMsg], DrawData, Bool)
-runFrameEff unlift ctx inp ui = do
+runFrameEff unlift ctx frameInp ui = do
   ensureMetricCaches ctx
   oldHot <- readIORef (ctxLastHotId ctx)
   oldActive <- readIORef (ctxActiveId ctx)
@@ -206,29 +202,38 @@ runFrameEff unlift ctx inp ui = do
   -- Timed wakes are re-requested by whatever is still built this frame.
   clearWakeAt ctx
   animKeys <- IM.keysSet <$> getLiveAnimations ctx
+  -- Decide what the pointer belongs to before anything reads it, against the
+  -- frame the user saw. The view gets its input routed layer by layer, and
+  -- each step below gets the input of what it serves, with no pointer in it
+  -- unless that is where the pointer went, so none of them has to ask:
+  -- @layerInp@ for scrolling, windows, presses, focus and text fields,
+  -- @menuInp@ for the text-edit menu, and @dropInp@ for the dropdowns, which
+  -- only that menu is drawn over. @frameInp@, the pointer whoever it belongs
+  -- to, is for what watches the whole window: a press anywhere else closing
+  -- a menu, hover, and what the overlays paint.
+  route <- routePointer ctx frameInp
+  let routedIf mine = if mine then frameInp else withoutPointer frameInp
+      layerInp = routedIf (case route of RouteLayer _ -> True; _ -> False)
+      menuInp = routedIf (route == RouteTextMenu)
+      dropInp = routedIf (route /= RouteTextMenu)
   -- Wheel and thumb-drag input targets the previous frame's layout, so apply
   -- it while that arena is still intact, before it is reset for the new
   -- build. Settling offsets before the UI pass keeps build-time
   -- virtualization (table body rows) materialized for the range that will
   -- actually be visible, without a second build pass.
-  updateScrollWheel ctx inp
+  updateScrollWheel ctx layerInp
   -- A glide advances with the wheel, before the build, for the same reason:
   -- the offset this frame renders at is the one virtualization must see.
-  stepScrollGlides ctx (inputDeltaTime inp)
-  updateScrollDrag ctx inp
+  stepScrollGlides ctx (inputDeltaTime frameInp)
+  updateScrollDrag ctx layerInp
   beginThemeScopes ctx True
   resetNodeArena (ctxNodeArena ctx)
   resetDrawArena (ctxDrawArena ctx)
   resetUiBuildScopes ctx
-  unless (inputMouseDown inp) $
-    modifyInteraction ctx (\s -> s {isSelectDropPress = False})
-  when (not (inputMouseDown inp) && not (inputMouseReleased inp)) $
-    setMenuPointerGesture ctx False
   beginFrameModal ctx
   writeIORef (ctxReleaseClickedId ctx) (WidgetId 0)
-  armMenuPointerCapture ctx inp
-  armPointerPress ctx inp
-  result0 <- unlift (runUi ctx inp ui)
+  armPointerPress ctx frameInp
+  result0 <- unlift (runUi ctx frameInp ui)
   -- Pending click is one-shot. Clear before a mirror rebuild so toggles do not fire twice.
   writeIORef (ctxClickedId ctx) (WidgetId 0)
   storeMid <- getStore ctx
@@ -236,7 +241,7 @@ runFrameEff unlift ctx inp ui = do
     if mirrorStoresChanged oldStore storeMid
       then do
         resetUiBuild ctx
-        unlift (runUi ctx (stripInteractionInput inp) ui)
+        unlift (runUi ctx (stripInteractionInput frameInp) ui)
       else pure result0
   -- Scopes only change how nodes look, which the rect and text diffs below
   -- cannot see, and custom widgets' cached ops hold the old theme's colours.
@@ -247,13 +252,13 @@ runFrameEff unlift ctx inp ui = do
   -- so labels and layout reflect the current state.
   syncWidgetLabels ctx
   let
-    Size w h = inputWindowSize inp
+    Size w h = inputWindowSize frameInp
   reused <- tryReuseLayout ctx (Size w h)
   unless reused $ do
     solvePlaceWindows ctx w h
     captureLayout ctx (Size w h)
-  movedResize <- updateWindowResize ctx inp w h
-  movedWindow <- updateWindowDrag ctx inp
+  movedResize <- updateWindowResize ctx layerInp w h
+  movedWindow <- updateWindowDrag ctx layerInp
   when (movedResize || movedWindow) $
     placeWindows
       (ctxNodeArena ctx)
@@ -264,22 +269,25 @@ runFrameEff unlift ctx inp ui = do
       (lookupWindowSize ctx)
   persistWindowPositions ctx
   applyScrollOffsets ctx
-  finalizePointerPress ctx inp
-  finalizePointerRelease ctx inp
-  disarmPointerPress ctx inp
-  finalizeTextInputFocus ctx inp
-  finalizeSelectFocus ctx inp
-  finalizeTextFieldMouse ctx inp
-  closeTextEditMenuOnOutsideClick ctx inp
-  openTextEditMenu ctx inp
-  finalizeTextEditMenuPick ctx inp
-  closeTextEditMenuOnEscape ctx inp
+  -- A press on a menu or dropdown leaves nothing active, whatever a release
+  -- that never arrived left behind.
+  when (inputMousePressed frameInp && not (inputMousePressed layerInp)) $
+    writeIORef (ctxActiveId ctx) (WidgetId 0)
+  finalizePointerPress ctx layerInp
+  finalizePointerRelease ctx layerInp
+  disarmPointerPress ctx frameInp
+  finalizeTextInputFocus ctx layerInp
+  finalizeSelectFocus ctx layerInp
+  finalizeTextFieldMouse ctx layerInp
+  closeTextEditMenuOnOutsideClick ctx frameInp
+  openTextEditMenu ctx layerInp
+  finalizeTextEditMenuPick ctx menuInp
+  closeTextEditMenuOnEscape ctx frameInp
   constrainFocusToModal ctx
-  finalizeTabFocus ctx inp
-  finalizeSelectKeyboard ctx inp
-  markSelectDropPress ctx inp
-  finalizeSelectPick ctx inp
-  closeSelectOnOutsideClick ctx inp
+  finalizeTabFocus ctx frameInp
+  finalizeSelectKeyboard ctx frameInp
+  finalizeSelectPick ctx dropInp
+  closeSelectOnOutsideClick ctx frameInp
   storeAfter <- getStore ctx
   let storeChanged = mirrorStoresChanged storeMid storeAfter
   when storeChanged $ syncWidgetLabels ctx
@@ -288,13 +296,12 @@ runFrameEff unlift ctx inp ui = do
     solvePlaceWindows ctx w h
     captureLayout ctx (Size w h)
     applyScrollOffsets ctx
-  cacheOpenSelectDrop ctx
   updatePrevRects ctx
-  refreshHover ctx inp
-  tickAnimations ctx (inputDeltaTime inp)
+  refreshHover ctx frameInp
+  tickAnimations ctx (inputDeltaTime frameInp)
   pruneDrawOpCache ctx
   overlayOpen <- overlayMenuOpen ctx
-  writeDamage ctx inp overlayOpen
+  writeDamage ctx frameInp overlayOpen
     FrameSnapshot
       { fsWasDirty = wasDirty
       , fsSize = oldSize
@@ -322,10 +329,10 @@ runFrameEff unlift ctx inp ui = do
   lowerShapes ctx
   beginLayer (ctxDrawArena ctx) LayerOverlay
   drawWindowOverlays ctx
-  drawModalOverlays ctx (inputWindowSize inp)
+  drawModalOverlays ctx (inputWindowSize frameInp)
   drawPopupOverlays ctx
-  drawSelectOverlays ctx inp
-  drawTextEditMenuOverlays ctx inp
+  drawSelectOverlays ctx frameInp
+  drawTextEditMenuOverlays ctx frameInp
   drawData <- finishDraw (ctxDrawArena ctx)
   msgs <- drainMessages ctx
   dirtyAfterUi <- isDirty ctx

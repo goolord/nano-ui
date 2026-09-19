@@ -92,6 +92,29 @@
 
 ### Changed
 
+- The pointer goes to one place, decided once a frame. Before the view runs,
+  the frame works out what is on top under the pointer (the text-edit menu,
+  an open dropdown, the floating panel in front, or the page) and routes the
+  pointer there; a button that is already down keeps the route it went down
+  with until it comes up, and a new press always starts over, even with the
+  other button still held. Everything else reads an input with no pointer in
+  it: no buttons, no wheel, and a position far off any widget. Widgets used
+  to read every press and check for themselves whether something covered
+  them, each with its own list of things to check, and a widget or a
+  frame-end step that forgot one reacted through whatever was drawn over it.
+  Now there is nothing to forget: `askInput` is already routed, a floating
+  panel routes its own body, and the frame-end steps for scrolling, windows,
+  presses, focus and text fields are handed the same pointerless input while
+  a menu or dropdown has the pointer. `askFrameInput` is the unrouted input,
+  for what watches the whole window (a press outside dismissing a popup).
+  This replaces the menu pointer gesture flag, the cached dropdown rect, the
+  per-widget `pointerBlockedByOverlay` check and its blocked flag, and the
+  slider's and colour picker's own held-by-another-widget checks.
+- `useDrag1D` starts with a press on its track, like `useDrag2D`. It used to
+  start whenever a held button was over the track, so a drag begun elsewhere
+  picked up every slider it crossed.
+- A right click inside the text-edit menu no longer reopens the menu at the
+  pointer.
 - `textArea` keeps the document it last returned with its text, so a frame
   that edits nothing (a cursor move, a scroll) neither joins the document
   nor compares it with the text it was passed.
@@ -168,6 +191,25 @@
 
 ### Fixed
 
+- Nothing reacts through what is drawn over it. `pointer-ownership` opens
+  each kind of overlay (the text-edit menu, a select's and a combo's
+  dropdown, a popup, a window, a modal) over each kind of pointer-driven
+  widget, clicks, drags, wheels and right-clicks on the overlay, and checks
+  the widget underneath noticed nothing; 35 of its 234 cases failed:
+  - Select All from a text area's right-click menu selected only from the
+    pointer down: the press on the menu row also placed the caret in the
+    text area under it and started a drag, which the release applied.
+  - A press on the text-edit menu or a dropdown opened or closed a select
+    under it, dragged the thumb of a scrollbar under it, and started
+    resizing a table column under it.
+  - A press on a popup, window or modal opened a select under it.
+  - A `knob` turned with the wheel, and dragged, through every overlay.
+  - The wheel over the text-edit menu scrolled the text area or scroller
+    under it.
+  - A right click on a dropdown or on the text-edit menu opened the context
+    menu of a text field under it and gave it focus.
+  - A button that went down in a window dragged a slider on the page when
+    the pointer crossed its track (`pointer-capture`).
 - A window left alone uses no CPU or GPU. Three things kept the session loop
   running at the display rate behind a picture that never changed:
   - `keepAnimating`, and so `spinner`, started an animation that never ends

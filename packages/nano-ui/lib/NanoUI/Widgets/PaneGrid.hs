@@ -55,7 +55,6 @@ import NanoUI.Context
   , intKey
   , markDirty
   , markEscapeConsumed
-  , getMenuPointerGesture
   , overlayConsumesQuit
   , registerCustomDrawing
   , registerFocusable
@@ -835,14 +834,13 @@ runGestures env dividers rendered dgi = do
           ]
       gestK = slotKey SlotPaneGest (geKey env)
       grabK = slotKey SlotPaneGrab (geKey env)
-  menu <- uiIO (getMenuPointerGesture ctx)
   -- A press arms the gesture slot (negative split id for a resize, pane id
   -- for a drag) together with its start state in one store write. The resize
   -- start keeps the divider's ratio and the pointer's main-axis coordinate so
   -- drag frames move the divider by delta instead of snapping it to the
   -- pointer; the drag start keeps the title and the grab offset (mouse - pane
   -- origin) for the drag threshold.
-  when (press && not busy && not menu && not (any rpControlHit rendered)) $ do
+  when (press && not busy && not (any rpControlHit rendered)) $ do
     case hitDiv of
       Just d ->
         storeWrite env True $ \st -> st

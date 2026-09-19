@@ -22,6 +22,8 @@ import qualified Data.Text as T
 import NanoUI.Context
   ( Context (..)
   , TextInputMenu (..)
+  , PointerRoute (..)
+  , getPointerRoute
   , getTextInputMenu
   , isDisabled
   , markDirty
@@ -194,15 +196,13 @@ finalizeTextEditMenuPick ctx inp =
                     markDirty ctx
       _ -> pure ()
 
+-- | A press anywhere but on the menu closes it. This watches the frame's
+-- input: the press it waits for is by definition not the menu's own.
 closeTextEditMenuOnOutsideClick :: Context -> Input -> IO ()
 closeTextEditMenuOnOutsideClick ctx inp =
   when (inputMousePressed inp || inputMouseRightPressed inp) $ do
-    mMenu <- getTextInputMenu ctx
-    case mMenu of
-      Just menu
-        | not (rectContains (textInputMenuRect menu) (inputMousePos inp)) ->
-            setTextInputMenu ctx Nothing
-      _ -> pure ()
+    route <- getPointerRoute ctx
+    when (route /= RouteTextMenu) $ setTextInputMenu ctx Nothing
 
 closeTextEditMenuOnEscape :: Context -> Input -> IO ()
 closeTextEditMenuOnEscape ctx inp =

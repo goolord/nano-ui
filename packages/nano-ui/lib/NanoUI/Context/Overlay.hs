@@ -1,12 +1,12 @@
--- | Modal, floating-panel and menu pointer-capture state.
+-- | Modal and floating-panel state, and which layer the pointer reaches.
 module NanoUI.Context.Overlay
   ( textInputEditActive
   , modalActive
   , overlayConsumesQuit
   , markEscapeConsumed
   , pointerBlockedByModal
-  , pointerBlockedByOverlay
-  , armMenuPointerCapture
+  , routedInput
+  , floatingLayerAt
   , seedFloatingPanel
   , beginModal
   , endModal
@@ -14,22 +14,19 @@ module NanoUI.Context.Overlay
   , modalDamageFlip
   ) where
 
-import Control.Monad (when)
 import Data.IORef (readIORef)
 import Data.IntMap.Strict qualified as IM
 
 import NanoUI.Context.Core
-  ( getMenuPointerGesture
+  ( getPointerRoute
   , getTextInputMenu
   , getsOverlay
   , modifyOverlay
-  , setMenuPointerGesture
-  , getsInteraction
   )
-import NanoUI.Context.Types (Context (..), OverlayState (..), TextInputMenu (..), intKey, InteractionState (..))
+import NanoUI.Context.Types (Context (..), OverlayState (..), PointerRoute (..), intKey)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
-import NanoUI.Input (Input, Key (KeyEscape), inputKeys, inputKeysElem, inputMousePos, inputMousePressed)
-import NanoUI.Types (Rect, V2, rectContains, rectHit, rectNonEmpty)
+import NanoUI.Input (Input, Key (KeyEscape), inputKeys, inputKeysElem, withoutPointer)
+import NanoUI.Types (Rect, V2, rectHit, rectNonEmpty)
 
 textInputEditActive :: Context -> IO Bool
 textInputEditActive ctx = do
@@ -48,75 +45,31 @@ overlayConsumesQuit ctx inp = do
 markEscapeConsumed :: Context -> IO ()
 markEscapeConsumed ctx = modifyOverlay ctx (\os -> os {osEscapeConsumed = True})
 
+-- | Whether a modal is up and the view being declared is outside it.
 pointerBlockedByModal :: Context -> IO Bool
 pointerBlockedByModal ctx =
   getsOverlay ctx (\os -> osModalDepth os <= 0 && (osModalWasActive os || osModalActive os))
 
-pointerBlockedByOverlay :: Context -> V2 -> IO Bool
-pointerBlockedByOverlay ctx mouse = do
-  gesture <- getMenuPointerGesture ctx
-  blocked <-
-    if gesture
-      then pure True
-      else do
-        menuBlocked <- overlayMenuBlocksPointer ctx mouse
-        if menuBlocked
-          then pure True
-          else do
-            modalBlocked <- pointerBlockedByModal ctx
-            if modalBlocked
-              then pure True
-              else do
-                mTop <- cachedTopmost ctx mouse
-                case mTop of
-                  Nothing -> pure False
-                  Just top -> do
-                    mCur <- getsOverlay ctx osCurrentFloatingId
-                    pure (mCur /= Just top)
-  modifyOverlay ctx (\os -> os {osLastPointerBlocked = blocked})
-  pure blocked
+-- | The frame's input as the widgets being declared in @layer@ see it (0 for
+-- the page, a floating panel's key otherwise): as it is when the frame routed
+-- the pointer there and no modal stands in front, and with no pointer in it
+-- otherwise.
+routedInput :: Context -> Int -> Input -> IO Input
+routedInput ctx layer inp =
+  getPointerRoute ctx >>= \case
+    RouteLayer routed | routed == layer -> do
+      blocked <- pointerBlockedByModal ctx
+      pure (if blocked then withoutPointer inp else inp)
+    _ -> pure (withoutPointer inp)
 
-armMenuPointerCapture :: Context -> Input -> IO ()
-armMenuPointerCapture ctx inp =
-  when (inputMousePressed inp) $ do
-    blocked <- overlayMenuBlocksPointer ctx (inputMousePos inp)
-    setMenuPointerGesture ctx blocked
-
-overlayMenuBlocksPointer :: Context -> V2 -> IO Bool
-overlayMenuBlocksPointer ctx mouse = do
-  mMenu <- getTextInputMenu ctx
-  let textMenu =
-        case mMenu of
-          Just m | rectContains (textInputMenuRect m) mouse -> True
-          _ -> False
-  if textMenu
-    then pure True
-    else do
-      mDrop <- getsInteraction ctx isOpenSelectDrop
-      pure
-        ( case mDrop of
-            Just (_, r) -> rectContains r mouse
-            Nothing -> False
-        )
-
-cachedTopmost :: Context -> V2 -> IO (Maybe WidgetId)
-cachedTopmost ctx mouse = do
-  cache <- getsOverlay ctx osTopmostCache
-  case cache of
-    Just (p, t) | p == mouse -> pure t
-    _ -> do
-      t <- topmostFloatingAtMouse ctx mouse
-      modifyOverlay ctx (\os -> os {osTopmostCache = Just (mouse, t)})
-      pure t
-
-topmostFloatingAtMouse :: Context -> V2 -> IO (Maybe WidgetId)
-topmostFloatingAtMouse ctx mouse = do
+-- | The layer on top at @mouse@, going by where the floating panels were last
+-- frame: the last panel declared that holds the point, or the page.
+floatingLayerAt :: Context -> V2 -> IO Int
+floatingLayerAt ctx mouse = do
   os <- readIORef (ctxOverlayState ctx)
   let rects = osPrevFloatingRects os
-      order = osPrevFloatingOrder os
       hit k = maybe False (`rectHit` mouse) (IM.lookup k rects)
-      picked = foldl' (\acc k -> if hit k then Just k else acc) Nothing order
-  pure (WidgetId . fromIntegral <$> picked)
+  pure (foldl' (\acc k -> if hit k then k else acc) 0 (osPrevFloatingOrder os))
 
 seedFloatingPanel :: Context -> WidgetId -> Rect -> IO ()
 seedFloatingPanel ctx wid rect
@@ -124,13 +77,10 @@ seedFloatingPanel ctx wid rect
   | otherwise = do
       let k = intKey wid
       modifyOverlay ctx $ \os ->
-        let rects = IM.insert k rect (osPrevFloatingRects os)
-            order = filter (/= k) (osPrevFloatingOrder os) ++ [k]
-         in os
-              { osPrevFloatingRects = rects
-              , osPrevFloatingOrder = order
-              , osTopmostCache = Nothing
-              }
+        os
+          { osPrevFloatingRects = IM.insert k rect (osPrevFloatingRects os)
+          , osPrevFloatingOrder = filter (/= k) (osPrevFloatingOrder os) ++ [k]
+          }
 
 beginModal :: Context -> IO ()
 beginModal ctx =
@@ -147,9 +97,6 @@ beginFrameModal ctx =
       { osModalWasActive = osModalActive os
       , osModalActive = False
       , osModalDepth = 0
-      , osTopmostCache = Nothing
-      , osCurrentFloatingId = Nothing
-      , osLastPointerBlocked = False
       , osEscapeConsumed = False
       }
 

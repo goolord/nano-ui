@@ -5,6 +5,7 @@ module NanoUI.Widgets.Behavior
   ( DragAxis (..)
   , keyedDragHeld
   , useDrag1D
+  , holdActiveWhile
   , useReorder
   , useKeyNav
   , keyboardFocused
@@ -17,7 +18,7 @@ where
 
 import Control.Monad (when)
 import Data.Hashable (Hashable, hash)
-import Data.IORef (readIORef)
+import Data.IORef (readIORef, writeIORef)
 import Data.List (find)
 import Effectful (Eff, type (:>))
 import qualified Data.IntMap.Strict as IM
@@ -28,7 +29,6 @@ import NanoUI.Context
   , intKey
   , isDisabled
   , markEscapeConsumed
-  , getMenuPointerGesture
   , pointerBlockedByModal
   , Slot (..)
   , slotKey
@@ -48,7 +48,7 @@ import NanoUI.Input
   , inputMouseReleased
   , inputMouseRightPressed
   )
-import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO)
+import NanoUI.Monad (Ui, askContext, askFrameInput, askInput, nextId, uiIO)
 import NanoUI.Store (WidgetStore (..))
 import NanoUI.Types (Rect (..), clamp01, rectHit, v2X, v2Y)
 import qualified Data.Text as T
@@ -72,7 +72,9 @@ keyedDragHeld k = do
     store <- getStore ctx
     pure (IM.findWithDefault 0 dragK (storeInt store) /= 0)
 
--- | Clamped 1D drag. Maps pointer position on 'track' into [lo, hi].
+-- | Clamped 1D drag. Maps pointer position on 'track' into [lo, hi]. The drag
+-- starts with a press on the track and lasts until the button comes up; a
+-- button held from elsewhere and moved onto the track drags nothing.
 useDrag1D ::
   (Ui :> es) =>
   DragAxis ->
@@ -96,12 +98,10 @@ useDrag1D axis lo hi current track = do
       mouse = case axis of
         DragAxisX -> v2X (inputMousePos inp)
         DragAxisY -> v2Y (inputMousePos inp)
-      down = inputMouseDown inp
   store <- uiIO (getStore ctx)
-  gesture <- uiIO (getMenuPointerGesture ctx)
   let active0 = IM.findWithDefault 0 dragK (storeInt store) /= 0
-      hit = rectHit track (inputMousePos inp) && not gesture
-      active = down && not gesture && (active0 || hit)
+      started = inputMousePressed inp && rectHit track (inputMousePos inp)
+      active = inputMouseDown inp && (active0 || started)
       frac =
         if trackLen <= 0
           then 0
@@ -120,6 +120,16 @@ useDrag1D axis lo hi current track = do
                 else IM.delete dragK (storeInt st)
           }
   pure (next, active)
+
+-- | Hold the active id for @wid@ while its drag lasts and let it go after, so
+-- the widget paints and takes the cursor as pressed wherever the pointer goes.
+holdActiveWhile :: (Ui :> es) => WidgetId -> Bool -> Eff es ()
+holdActiveWhile wid dragging = do
+  ctx <- askContext
+  uiIO $ do
+    active <- readIORef (ctxActiveId ctx)
+    when (dragging /= (active == wid)) $
+      writeIORef (ctxActiveId ctx) (if dragging then wid else WidgetId 0)
 
 -- | Drag-and-drop reorder of a visible index list.
 useReorder ::
@@ -233,11 +243,13 @@ keyActivated wid = do
   nav <- useKeyNav wid
   pure (knEnter nav || knSpace nav)
 
--- | Escape and click-outside-rect dismiss. Consumes Escape when it fires.
+-- | Escape and click-outside-rect dismiss. Consumes Escape when it fires. A
+-- press anywhere else dismisses, whoever it belongs to, so this watches the
+-- frame's input rather than the pointer routed here.
 useDismissable :: (Ui :> es) => Rect -> Eff es Bool
 useDismissable panel = do
   ctx <- askContext
-  inp <- askInput
+  inp <- askFrameInput
   let mouse = inputMousePos inp
       inside = rectHit panel mouse
       esc = inputKeysElem KeyEscape (inputKeys inp)

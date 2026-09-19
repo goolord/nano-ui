@@ -3,6 +3,7 @@ module NanoUI.Testing.Harness
   ( clickPair
   , rightClickPair
   , pressAt
+  , holdAt
   , releaseAt
   , keyInp
   , tabInp
@@ -188,7 +189,7 @@ clickTab getSpans drawFrame ctx base name = do
 dragPos :: (Input -> IO ()) -> Input -> V2 -> V2 -> IO ()
 dragPos drawFrame base from to = do
   let press = pressAt base from
-      hold = press {inputMousePressed = False, inputMousePos = to}
+      hold = holdAt base to
   mapM_ drawFrame [press, hold, releaseAt hold, base, base]
 
 clickPair :: Input -> V2 -> (Input, Input)
@@ -225,6 +226,10 @@ pressAt inp pos =
     , inputMousePressed = True
     , inputMouseReleased = False
     }
+
+-- | The button still down from an earlier 'pressAt', with the pointer at @pos@.
+holdAt :: Input -> V2 -> Input
+holdAt inp pos = (pressAt inp pos) {inputMousePressed = False}
 
 releaseAt :: Input -> Input
 releaseAt press =

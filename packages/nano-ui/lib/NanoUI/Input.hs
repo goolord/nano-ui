@@ -22,6 +22,7 @@ module NanoUI.Input
   , inputKeysFromList
   , emptyInputKeys
   , stripInteractionInput
+  , withoutPointer
   , UiCursorKind (..)
   , grabHoverKind
   , grabDragKind
@@ -247,4 +248,21 @@ stripInteractionInput inp =
     , inputChars = ""
     , inputScroll = V2 0 0
     , inputDrops = emptyDropEvents
+    }
+
+-- | The frame as it looks from somewhere the pointer does not reach: under a
+-- menu, a dropdown or a panel in front, or outside the layer a held button
+-- went down in. No buttons, no wheel, and the pointer itself far off any
+-- widget, so reading the pointer there finds nothing to react to.
+withoutPointer :: Input -> Input
+withoutPointer inp =
+  inp
+    { inputMousePos = V2 (-1e6) (-1e6)
+    , inputMouseDown = False
+    , inputMousePressed = False
+    , inputMouseReleased = False
+    , inputMouseRightDown = False
+    , inputMouseRightPressed = False
+    , inputMouseRightReleased = False
+    , inputScroll = V2 0 0
     }

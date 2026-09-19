@@ -80,10 +80,13 @@ runContextMenu (isOpen0, pos0, openAt, close) rightClick child = do
           , cfgOffset = 0
           }
   when rightClick (openAt mouse)
-  (popupResp, mBody) <- popup (isOpen0 || rightClick) cfg (columnWith (tight . gap 0) (child pos))
-  let picked = respHovered popupResp && inputMouseReleased inp
+  -- A release the menu itself sees, which is one on a row, picks.
+  (popupResp, mBody) <-
+    popup (isOpen0 || rightClick) cfg $
+      (,) . inputMouseReleased <$> askInput <*> columnWith (tight . gap 0) (child pos)
+  let picked = respHovered popupResp && maybe False fst mBody
   when (respClicked popupResp || picked) close
-  pure mBody
+  pure (snd <$> mBody)
 
 -- | Open state for a context menu you position yourself: whether it is open,
 -- where it was opened, an action to open it at a point, and one to close it.

@@ -7,29 +7,22 @@ module NanoUI.Widgets.Slider
   )
 where
 
-import Control.Monad (when)
-import Data.IORef (readIORef, writeIORef)
 import Data.Text (Text)
 import Effectful (Eff, type (:>))
 import NanoUI.Context
-  ( Context (..)
-  , adoptStoreFloat
+  ( adoptStoreFloat
   , intKey
   , recordStoreFloat
   , registerFocusable
   , writeStoreFloat
-  , getsOverlay
-  , OverlayState (..)
   )
 import NanoUI.Font (sliderHandleSlack, sliderTrackBounds)
 import NanoUI.Frame.Hit (scrollHitRect)
-import NanoUI.Id (WidgetId (..), hashWidgetId)
-import NanoUI.Input (inputMouseDown, inputMousePressed)
 import NanoUI.Layout.Arena (NodeType (..))
-import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO, withKey)
+import NanoUI.Monad (Ui, askContext, nextId, uiIO, withKey)
 import NanoUI.Style (Layout, defaultLayout, fillW)
 import NanoUI.Types (Rect (..), clamp)
-import NanoUI.Widgets.Behavior (DragAxis (..), KeyNav (..), useDrag1D, useKeyNav)
+import NanoUI.Widgets.Behavior (DragAxis (..), KeyNav (..), holdActiveWhile, useDrag1D, useKeyNav)
 import NanoUI.Widgets.Node (Response, addWidget, setChanged)
 
 -- | Slider over @[minV, maxV]@ that fills the available width. Pass the
@@ -58,34 +51,22 @@ sliderWith' ::
 sliderWith' f minV maxV value = do
   wid <- nextId
   ctx <- askContext
-  inp <- askInput
   uiIO $ registerFocusable ctx wid
   let key = intKey wid
   current <- uiIO $ adoptStoreFloat ctx wid key value
   let
     frac = if maxV > minV then (current - minV) / (maxV - minV) else 0
   resp <- addWidget wid NodeSlider "" frac (f (fillW defaultLayout))
-  active <- uiIO (readIORef (ctxActiveId ctx))
-  blocked <- uiIO (getsOverlay ctx osLastPointerBlocked)
   mrect <- uiIO (scrollHitRect ctx wid)
   let
-    isActive = active == wid
-    heldByOther =
-      inputMouseDown inp
-        && not (inputMousePressed inp)
-        && hashWidgetId active /= 0
-        && not isActive
-    track0 =
+    track =
       case mrect of
         Just (Rect x y w h) ->
           let tr = sliderTrackBounds x y w h
            in Rect (rectX tr) (rectY tr - sliderHandleSlack) (rectW tr) (rectH tr + 2 * sliderHandleSlack)
         Nothing -> Rect 0 0 0 0
-    track = if blocked || heldByOther then Rect 0 0 0 0 else track0
   (dragged, dragging) <- withKey ("drag" :: Text) (useDrag1D DragAxisX minV maxV current track)
-  when (dragging && not isActive) $ uiIO $ writeIORef (ctxActiveId ctx) wid
-  when ((not dragging || blocked) && isActive) $
-    uiIO $ writeIORef (ctxActiveId ctx) (WidgetId 0)
+  holdActiveWhile wid dragging
   nav <- useKeyNav wid
   let
     range = maxV - minV

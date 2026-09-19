@@ -36,6 +36,7 @@ module NanoUI.Context.Types
   , WidgetTextPlacement (..)
   , initialDrawingCacheState
   , InteractionState (..)
+  , PointerRoute (..)
   , initialInteractionState
   , CustomMeasureFn
   , CustomDrawContext (..)
@@ -222,9 +223,6 @@ data OverlayState = OverlayState
   , osEscapeConsumed :: {-# UNPACK #-} !Bool
   , osPrevFloatingRects :: !(IntMap Rect)
   , osPrevFloatingOrder :: ![Int]
-  , osTopmostCache :: !(Maybe (V2, Maybe WidgetId))
-  , osCurrentFloatingId :: !(Maybe WidgetId)
-  , osLastPointerBlocked :: {-# UNPACK #-} !Bool
   }
 
 initialOverlayState :: OverlayState
@@ -235,9 +233,6 @@ initialOverlayState = OverlayState
   , osEscapeConsumed = False
   , osPrevFloatingRects = IM.empty
   , osPrevFloatingOrder = []
-  , osTopmostCache = Nothing
-  , osCurrentFloatingId = Nothing
-  , osLastPointerBlocked = False
   }
 
 data AnimationState = AnimationState
@@ -452,15 +447,32 @@ initialDrawingCacheState = DrawingCacheState
   , dcsDrawFitCache = IM.empty
   }
 
+-- | Where a frame's pointer events go: the press, the drag and release that
+-- follow it, the wheel, and hover. The frame decides this once, before the
+-- view runs, from what was on top under the pointer, and a held button keeps
+-- the route it went down with. Everything else sees a frame without a pointer
+-- ('NanoUI.Input.withoutPointer'), so nothing has to check whether an event
+-- was meant for it.
+data PointerRoute
+  = -- | The widgets of one layer: 0 is the page, anything else the key of the
+    -- floating panel (window, popup or modal) on top under the pointer.
+    RouteLayer !Int
+  | -- | The text-edit context menu, which the frame draws over every layer.
+    RouteTextMenu
+  | -- | An open select or combo dropdown, drawn the same way, and the widget
+    -- it belongs to.
+    RouteDropdown !WidgetId
+  deriving (Eq, Show)
+
 data InteractionState = InteractionState
   { isScrollDrag :: !(Maybe (WidgetId, DirTag, Float))
   , isTextInputDrag :: !(Maybe TextInputDrag)
   , isTextFieldClickCell :: !(Maybe TextFieldClickCell)
   , isTextInputMenu :: !(Maybe TextInputMenu)
   , isTextEditLastAction :: !(Maybe (WidgetId, TextCommand))
-  , isSelectDropPress :: {-# UNPACK #-} !Bool
-  , isOpenSelectDrop :: !(Maybe (WidgetId, Rect))
-  , isMenuPointerGesture :: {-# UNPACK #-} !Bool
+  , isPointerRoute :: !PointerRoute
+  -- | A button was down when the route was last decided, so it stands.
+  , isPointerHeld :: {-# UNPACK #-} !Bool
   , isWindowDrag :: !(Maybe (WidgetId, Float, Float))
   , isWindowResize :: !(Maybe WindowResizeDrag)
   }
@@ -473,9 +485,8 @@ initialInteractionState = InteractionState
   , isTextFieldClickCell = Nothing
   , isTextInputMenu = Nothing
   , isTextEditLastAction = Nothing
-  , isSelectDropPress = False
-  , isOpenSelectDrop = Nothing
-  , isMenuPointerGesture = False
+  , isPointerRoute = RouteLayer 0
+  , isPointerHeld = False
   , isWindowDrag = Nothing
   , isWindowResize = Nothing
   }

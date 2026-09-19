@@ -20,6 +20,8 @@ module NanoUI.Monad
   , currentId
   , askContext
   , askInput
+  , askFrameInput
+  , localInput
   , askDefaultLayout
   , withDefaultLayout
   , askHost
@@ -87,6 +89,7 @@ import NanoUI.Context
   , damageRect
   , damageWidget
   , decodeMessages
+  , routedInput
   , currentTheme
   , pushMessage
   , pushThemeScope
@@ -115,13 +118,19 @@ data Ui :: Effect
 
 type instance DispatchOf Ui = Static WithSideEffects
 
-data instance StaticRep Ui = UiRep !Context !Input !Layout
+-- The input is held twice: as routed to the view being declared, which is
+-- what widgets read, and as the frame received it ('askFrameInput'). Few
+-- things read the second, so it is lazy: a 'disabledWhen' scope strips it
+-- only if something inside asks.
+data instance StaticRep Ui = UiRep !Context !Input Input !Layout
 
 {-# INLINE runUi #-}
 runUi :: IOE :> es => Context -> Input -> Eff (Ui : es) a -> Eff es a
 runUi ctx inp ui = do
   lay <- unsafeEff_ (readIORef (ctxDefaultLayout ctx))
-  evalStaticRep (UiRep ctx inp lay) ui
+  -- The page is layer 0; floating panels route their own bodies.
+  page <- unsafeEff_ (routedInput ctx 0 inp)
+  evalStaticRep (UiRep ctx page inp lay) ui
 
 {-# INLINE runNanoUI #-}
 runNanoUI :: Context -> Input -> NanoUI a -> IO a
@@ -205,18 +214,18 @@ withKey = keyed
 {-# INLINE askContext #-}
 askContext :: Ui :> es => Eff es Context
 askContext = do
-  UiRep ctx _ _ <- getStaticRep
+  UiRep ctx _ _ _ <- getStaticRep
   pure ctx
 
 {-# INLINE askDefaultLayout #-}
 askDefaultLayout :: Ui :> es => Eff es Layout
 askDefaultLayout = do
-  UiRep _ _ l <- getStaticRep
+  UiRep _ _ _ l <- getStaticRep
   pure l
 
 {-# INLINE withDefaultLayout #-}
 withDefaultLayout :: Ui :> es => (Layout -> Layout) -> Eff es a -> Eff es a
-withDefaultLayout f = localStaticRep (\(UiRep ctx inp l) -> UiRep ctx inp (f l))
+withDefaultLayout f = localStaticRep (\(UiRep ctx inp frame l) -> UiRep ctx inp frame (f l))
 
 {-# INLINE uiFontMetrics #-}
 uiFontMetrics :: Ui :> es => Eff es FontMetrics
@@ -274,9 +283,10 @@ disabledWhen True m =
   -- The view inside sees no presses, keys or wheel, so no widget's own input
   -- handling can fire; the frame's focus and click passes check the scope.
   localStaticRep
-    (\(UiRep ctx inp l) -> UiRep ctx (stripInteractionInput inp) {inputMouseDown = False, inputMouseRightDown = False} l)
+    (\(UiRep ctx inp frame l) -> UiRep ctx (inert inp) (inert frame) l)
     (withPaintScope enter m)
   where
+    inert i = (stripInteractionInput i) {inputMouseDown = False, inputMouseRightDown = False}
     enter ctx outer
       | outer .&. 1 /= 0 = pure outer
       | otherwise = do
@@ -306,6 +316,8 @@ setUiTheme th = do
   ctx <- askContext
   uiIO (setTheme ctx th)
 
+-- | Where the pointer is, as the view being declared sees it: far off every
+-- widget while something drawn in front has the pointer.
 {-# INLINE uiMousePos #-}
 uiMousePos :: Ui :> es => Eff es V2
 uiMousePos = fmap inputMousePos askInput
@@ -313,8 +325,24 @@ uiMousePos = fmap inputMousePos askInput
 {-# INLINE askInput #-}
 askInput :: Ui :> es => Eff es Input
 askInput = do
-  UiRep _ inp _ <- getStaticRep
+  UiRep _ inp _ _ <- getStaticRep
   pure inp
+
+-- | The frame's input before routing, pointer included whoever it belongs
+-- to. For what watches the whole window rather than reacting to its own
+-- events: a click anywhere outside dismissing a popup, a floating panel
+-- working out its body's input. A widget that read its presses from this
+-- would react through whatever is drawn over it, so widgets use 'askInput'.
+{-# INLINE askFrameInput #-}
+askFrameInput :: Ui :> es => Eff es Input
+askFrameInput = do
+  UiRep _ _ frame _ <- getStaticRep
+  pure frame
+
+-- | Run a part of the view with another routed input.
+{-# INLINE localInput #-}
+localInput :: Ui :> es => Input -> Eff es a -> Eff es a
+localInput inp = localStaticRep (\(UiRep ctx _ frame l) -> UiRep ctx inp frame l)
 
 {-# INLINE windowSize #-}
 windowSize :: Ui :> es => Eff es Size

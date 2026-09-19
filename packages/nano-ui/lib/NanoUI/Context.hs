@@ -20,6 +20,7 @@ module NanoUI.Context
   , WidgetTextCacheEntry (..)
   , WidgetTextPlacement (..)
   , InteractionState (..)
+  , PointerRoute (..)
   , initialInteractionState
   , initialDamageState
   , initialOverlayState
@@ -37,8 +38,8 @@ module NanoUI.Context
   , getTextInputMenu
   , setTextInputMenu
   , takeTextEditLastAction
-  , getMenuPointerGesture
-  , setMenuPointerGesture
+  , getPointerRoute
+  , pointerHeldOffLayers
   , getWindowDrag
   , getWindowResize
   , intKey
@@ -184,8 +185,8 @@ module NanoUI.Context
   , overlayConsumesQuit
   , markEscapeConsumed
   , pointerBlockedByModal
-  , pointerBlockedByOverlay
-  , armMenuPointerCapture
+  , routedInput
+  , floatingLayerAt
   , seedFloatingPanel
   , beginModal
   , endModal
@@ -292,6 +293,7 @@ import NanoUI.Context.Types
   , MeasureCacheKey
   , MetricSource (..)
   , OverlayState (..)
+  , PointerRoute (..)
   , SpanCacheEntry (..)
   , TextFieldClickCell (..)
   , TextInputDrag (..)

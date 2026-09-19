@@ -21,7 +21,6 @@ where
 
 import Control.Monad (forM_, void, when)
 import Data.Bits ((.&.))
-import Data.IORef (readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
 import Data.Maybe (fromMaybe, isJust)
 import Data.Text (Text)
@@ -30,14 +29,11 @@ import Effectful (Eff, type (:>))
 import NanoUI.Context
   ( Context (..)
   , WidgetStore (..)
-  , getMenuPointerGesture
   , getStore
   , intKey
   , recordStoreInt
   , registerFocusable
   , setStore
-  , getsOverlay
-  , OverlayState (..)
   , modifyStore
   )
 import NanoUI.Draw
@@ -50,8 +46,8 @@ import NanoUI.Draw
 import NanoUI.Font
   ( FontMetrics (..)
   )
-import NanoUI.Id (WidgetId (..), hashWidgetId)
-import NanoUI.Input (Input (..), Key (..), inputKeys, inputKeysElem, inputModifiers, inputMouseDown, inputMousePressed, modShift)
+import NanoUI.Id (WidgetId (..))
+import NanoUI.Input (Input (..), Key (..), inputKeys, inputKeysElem, inputModifiers, modShift)
 import NanoUI.Layout.Arena
   ( NodeArena
   , NodeIdx
@@ -103,6 +99,7 @@ import NanoUI.WidgetText
   )
 import NanoUI.Widgets.Behavior
   ( DragAxis (..)
+  , holdActiveWhile
   , keyboardFocused
   , keyedDragHeld
   , useDrag1D
@@ -553,50 +550,26 @@ colorPickerCanvas :: Ui :> es => PickerParts -> Color -> Response -> Response ->
 colorPickerCanvas parts initial svResp hueResp alphaResp = do
   ctx <- askContext
   inp <- askInput
-  active <- uiIO (readIORef (ctxActiveId ctx))
-  blocked <- uiIO (getsOverlay ctx osLastPointerBlocked)
-  gesture <- uiIO (getMenuPointerGesture ctx)
   store0 <- uiIO (getStore ctx)
-  hueHeld0 <- keyedDragHeld ("hue" :: Text)
-  alphaHeld0 <- keyedDragHeld ("alpha" :: Text)
-  sHeld0 <- keyedDragHeld ("s" :: Text)
-  vHeld0 <- keyedDragHeld ("v" :: Text)
+  heldBefore <- or <$> mapM keyedDragHeld (["s", "v", "hue", "alpha"] :: [Text])
   let
     wid = ppSv parts
     showAlpha = isJust alphaResp
     current0 = widgetStoreColor store0 wid initial
     h0 = widgetStoreHue store0 wid initial
     (s0, v0) = widgetStoreSv store0 wid initial
-    svHeld0 = sHeld0 || vHeld0
-    empty = Rect 0 0 0 0
-    isActive = active == wid
-    -- A press lands on whichever part is under the pointer; the picker then
-    -- takes the active id over while it drags.
-    ownsActive = active `elem` [wid, ppHue parts, ppAlpha parts, ppPreview parts]
-    heldByOther =
-      inputMouseDown inp
-        && not (inputMousePressed inp)
-        && hashWidgetId active /= 0
-        && not ownsActive
-    locked = blocked || heldByOther || gesture
+    -- A press starts the drag of the part it lands on: the parts' hit rects
+    -- share no point, the bars' slack being narrower than the gaps.
     svSquare = colorPickerSvSquare (respRect svResp)
     band resp = Rect (rectX (respRect resp)) (rectY svSquare) (rectW (respRect resp)) (rectH svSquare)
-    svRect = if locked || hueHeld0 || alphaHeld0 then empty else svSquare
-    hueRect = if locked || svHeld0 || alphaHeld0 then empty else colorPickerBarHitRect (band hueResp)
-    alphaRect =
-      case alphaResp of
-        Just r | not (locked || svHeld0 || hueHeld0) -> colorPickerBarHitRect (band r)
-        _ -> empty
-  (sDrag, sA) <- withKey ("s" :: Text) (useDrag1D DragAxisX 0 1 s0 svRect)
-  (vDrag, vA) <- withKey ("v" :: Text) (useDrag1D DragAxisY 1 0 v0 svRect)
-  let svA = sA || vA
-  (hDrag, hA) <-
-    withKey ("hue" :: Text) (useDrag1D DragAxisY 0 360 h0 (if svA then empty else hueRect))
-  (aDrag, aA) <-
-    withKey
-      ("alpha" :: Text)
-      (useDrag1D DragAxisY 0 255 (fromIntegral (colorA current0)) (if svA || hA then empty else alphaRect))
+    hueRect = colorPickerBarHitRect (band hueResp)
+    alphaRect = maybe (Rect 0 0 0 0) (colorPickerBarHitRect . band) alphaResp
+  (sDrag, sA) <- withKey ("s" :: Text) (useDrag1D DragAxisX 0 1 s0 svSquare)
+  (vDrag, vA) <- withKey ("v" :: Text) (useDrag1D DragAxisY 1 0 v0 svSquare)
+  (hDrag, hA) <- withKey ("hue" :: Text) (useDrag1D DragAxisY 0 360 h0 hueRect)
+  (aDrag, aA) <- withKey ("alpha" :: Text) (useDrag1D DragAxisY 0 255 (fromIntegral (colorA current0)) alphaRect)
   let
+    svA = sA || vA
     dragging = svA || hA || aA
     nextHue = if hA then hDrag else h0
     nextS = if sA then sDrag else s0
@@ -607,9 +580,7 @@ colorPickerCanvas parts initial svResp hueResp alphaResp = do
     dragged
       | aA && not (svA || hA) = withAlpha (fromIntegral nextA) current0
       | otherwise = withAlpha (if showAlpha then fromIntegral nextA else 255) base
-  when (dragging && not isActive) $ uiIO $ writeIORef (ctxActiveId ctx) wid
-  when ((not dragging || blocked) && isActive) $
-    uiIO $ writeIORef (ctxActiveId ctx) (WidgetId 0)
+  holdActiveWhile wid dragging
   when (dragging && (dragged /= current0 || nextHue /= h0 || nextS /= s0 || nextV /= v0)) $
     uiIO $ modifyStore ctx (putColorState (intKey wid) dragged nextHue (nextS, nextV))
   svFocus <- keyboardFocused wid
@@ -619,7 +590,7 @@ colorPickerCanvas parts initial svResp hueResp alphaResp = do
     if not (svFocus || hueFocus || alphaFocus)
       then pure False
       else uiIO (applyColorPickerKeys ctx wid initial inp svFocus hueFocus)
-  let releasedDrag = (hueHeld0 || alphaHeld0 || svHeld0) && not dragging
+  let releasedDrag = heldBefore && not dragging
   when (releasedDrag || keyMoved) $
     uiIO $ do
       st <- getStore ctx
