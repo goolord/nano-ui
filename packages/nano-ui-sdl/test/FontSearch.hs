@@ -23,9 +23,9 @@ main = bracket temporaryRoot removePathForcibly $ \root ->
     let
       fonts =
         root </> case os of
-          "mingw32" -> "Microsoft/Windows/Fonts"
-          "darwin" -> "Library/Fonts"
-          _ -> ".local/share/fonts"
+          "mingw32" -> "Microsoft" </> "Windows" </> "Fonts"
+          "darwin" -> "Library" </> "Fonts"
+          _ -> ".local" </> "share" </> "fonts"
       regular = fonts </> "NanoSearchFixture-Regular.ttf"
       bold = fonts </> "NanoSearchFixture-Bold.ttf"
       fallback = fonts </> "NanoFallbackFixture.otf"
