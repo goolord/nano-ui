@@ -204,12 +204,16 @@ logsApp stateRef = do
 
   st0 <- uiIO $ readIORef stateRef
 
-  when (asStreaming st0 && now - asLastStream st0 >= 0.08) $
+  let streamEvery = 0.08
+      sinceStream = now - asLastStream st0
+      streamDue = asStreaming st0 && sinceStream >= streamEvery
+  when streamDue $
     mutateState $ \s -> (\s' -> s' {asLastStream = now}) <$> appendEntries s 1
 
-  -- Keep the loop running between streaming ticks.
+  -- Sleep until the next streaming tick. Marking the context dirty every
+  -- frame to get there would run frames back to back in between.
   when (asStreaming st0) $
-    uiIO $ markDirty ctx
+    wakeAfter (if streamDue then streamEvery else streamEvery - sinceStream)
 
   (allSelected, setAllSelected) <- withKey ("log-all-selected" :: Text) (useFlag False)
 
