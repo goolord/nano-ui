@@ -138,7 +138,7 @@ import NanoUI.Layout.Arena
   )
 import NanoUI.Id (WidgetId)
 import NanoUI.Style (AlignX (..), AlignY (..), FontStyle (..), FontVariant (..), FontWeight (..), Padding (..), windowMargin)
-import NanoUI.Types (PopupAnchor (..), PopupPlacement (..), Rect (..), V2 (..), clamp, onGrid)
+import NanoUI.Types (PopupAnchor (..), PopupPlacement (..), Rect (..), V2 (..), clamp, gridSpan, onGrid)
 import NanoUI.WidgetText
   ( colorPickerSvH
   , textNodeFontVariant
@@ -304,10 +304,15 @@ quantizeResultsA a count s
                   y <- readGeom a i geomY
                   w <- readGeom a i geomW
                   h <- readGeom a i geomH
+                  -- Snap both edges and take the size between them. Rounding
+                  -- the size on its own can push a node's far edge a pixel
+                  -- past the snapped origin of the sibling that starts there,
+                  -- and the node then paints over it (a table cell over the
+                  -- column rule beside it).
                   writeGeom a i geomX (onGrid s x)
                   writeGeom a i geomY (onGrid s y)
-                  writeGeom a i geomW (max 0 (onGrid s w))
-                  writeGeom a i geomH (max 0 (onGrid s h))
+                  writeGeom a i geomW (max 0 (gridSpan s x (x + w)))
+                  writeGeom a i geomH (max 0 (gridSpan s y (y + h)))
                 go (i + 1)
       go 0
 
@@ -1022,7 +1027,7 @@ positionNodeA env@SolveEnv {seArena = na, seArrays = a, seFm = fm, seLookupMeasu
       then positionScrollChildren env depth idx dir gap pad x y w h
       else positionChildren env depth idx dir gap pad x y w h
   when (hTag == SizingFit && isContainerNode nt && not (isScrollNode nt)) $
-    adjustFitHeight na fm idx minH maxH x y w
+    adjustFitHeight na idx minH maxH x y w
 
 -- | A container's resolved padding and gap, and its direction.
 {-# INLINE containerFlow #-}
@@ -1033,26 +1038,21 @@ containerFlow a idx = do
   dir <- readTagEnum a idx tagDirection
   pure (pad, gap, dir)
 
-adjustFitHeight :: NodeArena -> FontMetrics -> NodeIdx -> Float -> Float -> Float -> Float -> Float -> IO ()
-adjustFitHeight na fm idx minH maxH x y w = do
+adjustFitHeight :: NodeArena -> NodeIdx -> Float -> Float -> Float -> Float -> Float -> IO ()
+adjustFitHeight na idx minH maxH x y w = do
   fc <- getFirstChild na idx
   when (fc >= 0) $ do
     pad <- getPadding na idx
     let step maxB ci = do
           (_, subY, _, subH) <- getRect na ci
           pure (max maxB (subY + subH))
-        -- Rounding a child's origin to the nearest device pixel can put its
-        -- bottom up to half a pixel below where measurement did. That is not
-        -- content outgrowing the measurement: growing for it adds half a
-        -- pixel at every nested content-sized level, until a dialog sized to
-        -- its content overflows its own scroll viewport. The small epsilon
-        -- absorbs float error in the rounding.
-        s = fmSnapScale fm
-        snapSlack = if s > 0 then 0.5 / s + 1.0e-3 else 0
     maxB <- foldFlowChildrenM na idx step y
     let fitH = clamp minH maxH (maxB + padB pad - y)
     (_, _, _, curH) <- getRect na idx
-    when (fitH > curH + snapSlack) $
+    -- Children sit at raw positions, so only float error separates their
+    -- bottom from the measured height; the epsilon keeps that from growing
+    -- every nested content-sized level.
+    when (fitH > curH + 1.0e-3) $
       setRect na idx x y w fitH
 
 positionScrollChildren ::
@@ -1297,7 +1297,7 @@ positionRowFromParent ::
   Float ->
   Float ->
   IO ()
-positionRowFromParent env@SolveEnv {seArena = na, seFm = fm} depth parent gap cx cy cw ch = do
+positionRowFromParent env@SolveEnv {seArena = na} depth parent gap cx cy cw ch = do
   n <- loadChildrenScratch (seArena env) parent (flowChildSize env False cw ch)
   withAxisSnaps na depth n cw (gap * fromIntegral (max 0 (n - 1))) True $ \idxSnap outSnap -> do
     -- The shared baseline sits as low as the deepest one among the children
@@ -1313,12 +1313,15 @@ positionRowFromParent env@SolveEnv {seArena = na, seFm = fm} depth parent gap cx
                   b <- childRowCrossSize na ci ch >>= childBaseline env ci
                   goBase (i + 1) (max acc b)
     rowBase <- goBase 0 0
-    let goRow !i !cur !prev
+    -- The cursor stays in raw floats, never snapped: rounding it re-compounds
+    -- error every child (1.667 -> 2.0 -> ...) so a shrink row overruns its
+    -- fixed width. Each child's far edge is the next one's raw origin, so
+    -- quantizeResultsA, which snaps edges, puts both on the same pixel.
+    let goRow !i !x
           | i >= n = pure ()
           | otherwise = do
               ci <- readPrimArray idxSnap i
               fw <- readPrimArray outSnap i
-              let x = snappedOrigin (fmSnapScale fm) cur prev
               -- Fit/fixed children keep content height. Only Grow/Percent eat `ch`.
               crossH <- childRowCrossSize na ci ch
               ay <- getAlignY na ci
@@ -1331,23 +1334,8 @@ positionRowFromParent env@SolveEnv {seArena = na, seFm = fm} depth parent gap cx
               -- hands the rest to the siblings after it instead of leaving a
               -- hole.
               placedW <- readGeom (seArrays env) ci geomW
-              goRow (i + 1) (cur + min fw placedW + gap) x
-    goRow 0 cx (-1 / 0)
-
--- | Placed origin of the flow child at raw cursor @cur@ when the previous
--- sibling was placed at @prev@ (negative infinity for the first child), on a
--- device grid of scale @s@.
---
--- Flex positions stay exact: the cursor accumulates in raw floats and only the
--- placed origin snaps, never the running sum. Rounding the cumulative cursor
--- re-compounds error every child (1.667 -> 2.0 -> ...) so a shrink row
--- overruns its fixed width. The one-pixel floor past @prev@ keeps two
--- siblings from quantizing to the same origin while resisting that drift.
-{-# INLINE snappedOrigin #-}
-snappedOrigin :: Float -> Float -> Float -> Float
-snappedOrigin s cur prev
-  | s > 0 = max (onGrid s cur) (prev + 1 / s)
-  | otherwise = cur
+              goRow (i + 1) (x + min fw placedW + gap)
+    goRow 0 cx
 
 positionGrid ::
   SolveEnv ->
@@ -1414,16 +1402,15 @@ positionColumnFromParent ::
   Float ->
   Float ->
   IO ()
-positionColumnFromParent env@SolveEnv {seArena = na, seFm = fm} depth parent gap chrome px pw cx cy cw ch = do
+positionColumnFromParent env@SolveEnv {seArena = na} depth parent gap chrome px pw cx cy cw ch = do
   n <- loadChildrenScratch (seArena env) parent (flowChildSize env True cw ch)
   gapSum <- columnGapSumScratch na chrome n gap
   withAxisSnaps na depth n ch gapSum False $ \idxSnap outSnap -> do
-    let go !i !cur !prev
+    let go !i !y
           | i >= n = pure ()
           | otherwise = do
               ci <- readPrimArray idxSnap i
               fh <- readPrimArray outSnap i
-              let y = snappedOrigin (fmSnapScale fm) cur prev
               nt <- getNodeType na ci
               (fx, nodeW) <-
                 if chrome && nt == NodeSeparator
@@ -1438,8 +1425,8 @@ positionColumnFromParent env@SolveEnv {seArena = na, seFm = fm} depth parent gap
                   else do
                     nextCi <- readPrimArray idxSnap (i + 1)
                     pairColumnGap na chrome nextCi gap
-              go (i + 1) (cur + placedH + gapAfter) y
-    go 0 cy (-1 / 0)
+              go (i + 1) (y + placedH + gapAfter)
+    go 0 cy
 
 
 {-# INLINE reverseScratchTriple #-}

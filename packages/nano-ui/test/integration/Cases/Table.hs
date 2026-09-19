@@ -7,13 +7,14 @@ module Cases.Table
   , runTableHBarReachTest
   , runTableReorderTest
   , runTableResizeOverflowTest
+  , runTableRulesTileTest
   , runTableScrollRevealTest
   , runTableSharedScrollMetricsTest
   , runTableSortTest
   , runTableWrapRowStretchTest
   ) where
 
-import Control.Monad (forM, forM_, replicateM_, void, (<=<))
+import Control.Monad (filterM, forM, forM_, replicateM_, void, (<=<))
 import Data.Bits ((.&.))
 import Data.IORef (IORef)
 import Data.IntMap.Strict qualified as IM
@@ -716,3 +717,36 @@ tableBodyScrollWid ctx = do
     if nt == NodeScrollContainer then (: acc) <$> getWidgetId na i else pure acc) []
   pure (listToMaybe [w | w : rest <- tails wids, w `elem` rest])
 
+
+-- Every row of cells and column rules must tile: each child's far edge is the
+-- next one's origin. A cell that reaches a pixel past it paints over the rule
+-- there, and the column's grid line vanishes down the whole table. Covers
+-- fractional scales and fractional fixed widths, whose sizes do not round to
+-- whole device pixels.
+runTableRulesTileTest :: Context -> IORef Int -> IO ()
+runTableRulesTileTest _ failed =
+  forM_ [1, 1.25, 1.5, 2] $ \scale ->
+    forM_ [ColStretch, ColFixed 97.3] $ \middle ->
+      forM_ [470, 473 .. 530] $ \winW -> do
+        base <- newContext
+        let ctx = withFontMetrics base ((monospaceMetrics 12) {fmSnapScale = scale})
+            cfg = defaultTableConfig {tableColSizes = [ColContent, ColFixed 61.7, middle, ColContent, ColContent]}
+            ui = do
+              (tableSort, _) <- useTableSort (SortCol 0 SortAsc)
+              void (tableConfigured cfg id "people" tableFillCols tableFillRows tableSort)
+        warmup2 ctx (withInputOff winW 240) ui
+        let na = ctxNodeArena ctx
+        -- Each parent's children as (has a rule, child extents), in one pass.
+        byParent <- foldNodesM na (\acc i -> do
+          parent <- getParent na i
+          if parent < 0 then pure acc else do
+            nt <- getNodeType na i
+            (x, _, w, _) <- getRect na i
+            let merge (r1, e1) (r2, e2) = (r1 || r2, e1 ++ e2)
+            pure (IM.insertWith merge parent (nt == NodeSeparator, [(x, w)]) acc)) IM.empty
+        rows <- filterM (fmap (== DirRow) . getDirection na) [p | (p, (True, _)) <- IM.toList byParent]
+        assertGt failed (length rows) 0
+        forM_ rows $ \rowIdx -> do
+          let edges = sortOn fst (maybe [] snd (IM.lookup rowIdx byParent))
+              overlaps = [(x0, w0, x1) | ((x0, w0), (x1, _)) <- zip edges (drop 1 edges), abs (x0 + w0 - x1) > 1.0e-3]
+          assertEq failed [] overlaps

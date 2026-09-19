@@ -15,6 +15,7 @@ module NanoUI.Types
   , clamp
   , clamp01
   , onGrid
+  , gridSpan
   , roundHalfUp
   , lerpColor
   , colorLuminance
@@ -125,6 +126,16 @@ onGrid :: Float -> Float -> Float
 onGrid s v
   | s > 0 = fromIntegral (roundHalfUp (v * s)) / s
   | otherwise = v
+
+-- | Size between two edges once both are snapped with 'onGrid'. Counted in
+-- device pixels and scaled once, so an edge pair a whole number of device
+-- pixels apart gives that size exactly; subtracting two 'onGrid' results
+-- can land a float step off it. An identity on @b - a@ when @s <= 0@.
+{-# INLINE gridSpan #-}
+gridSpan :: Float -> Float -> Float -> Float
+gridSpan s a b
+  | s > 0 = fromIntegral (roundHalfUp (b * s) - roundHalfUp (a * s)) / s
+  | otherwise = b - a
 
 -- | Round to the nearest integer, ties up: the device-pixel rounding shared by
 -- 'onGrid' and the backends. Not ties-to-even (@round@): at a fractional scale

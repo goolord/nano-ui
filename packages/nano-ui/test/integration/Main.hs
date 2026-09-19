@@ -248,6 +248,7 @@ testSpecs =
   , TestSpec "table-first-col" False runTableFirstColWidthTest
   , TestSpec "table-fill-width" False runTableFillWidthTest
   , TestSpec "table-cell-pad" True runTableCellPadTest
+  , TestSpec "table-rules-tile" False runTableRulesTileTest
   , TestSpec "table-resize-overflow" True runTableResizeOverflowTest
   , TestSpec "table-col-resize-body" False runTableColResizeDemoReproTest
   , TestSpec "table-hbar-reach" True runTableHBarReachTest
