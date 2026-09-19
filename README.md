@@ -50,7 +50,9 @@ counter = do
   can run too.
 - SVG icons (`loadSvg`, `svgIcon`) and a `spinner`.
 - Backends block on input and run a frame only when something needs
-  redrawing. Each frame computes its damage against the previous one.
+  redrawing, so a window left alone uses no CPU or GPU. Each frame computes
+  its damage against the previous one. `wakeAfter` schedules a frame for a
+  view that changes on a timer.
 - State in local hooks (`useInt`, `useText`, `useState`), in your own model,
   or in a reducer with `NanoUI.Emit`.
 - Eased and spring animation.

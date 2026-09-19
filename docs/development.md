@@ -148,11 +148,54 @@ package nano-ui
 | `cabal run nano-ui-sdl-profile` | The SDL demo's UI in a hidden window: the full demo, each tab, widget microbenchmarks, and scaling |
 | `cabal run nano-ui-rgfw-profile` | The RGFW demo's frame loop on the OpenGL path in a hidden window |
 | `cabal run nano-ui-sdl-anim` | Tween and spring animations in an SDL window, for checking animation pacing by eye |
+| `cabal run nano-ui-sdl-idle -- <scene> [hidden]` | A window that should cost nothing while it is left alone. Scenes: `static`, `focus`, `wake`, `spinner`, `clock`, `type`, and `startup`. `hidden` keeps it off screen, where no pointer can disturb it |
 | `cabal bench nano-ui-id-bench` | Widget id generation; fails if a frame of ids allocates |
 | `cabal bench nano-ui-sdl-bench` | `runFrame` and SDL drawing for small, medium, and large UIs |
 
 `scripts/profile/` has helpers for cost-centre profiles and for timing the SDL
 demo's real event loop.
+
+### Idle cost
+
+A window nobody is touching should use no CPU and no GPU: the session loop
+blocks in the backend's event wait, and the process makes no context switches.
+Anything that keeps it running shows up as a fraction of a percent in Task
+Manager that never goes away, and on a laptop as battery.
+
+Set `NANO_LOOP_TRACE` to see what the loop is doing. About once a second while
+it runs, it prints to stderr the time covered, how many passes it made, how
+many drew, and why: `A` an animation, `D` a dirty context, `R` a window redraw
+request, `T` a timed wake or a debug readout refresh, and `-` for a pass
+caused by input. An idle window prints nothing, and the first line after a
+quiet spell covers all of it.
+
+```sh
+NANO_LOOP_TRACE=1 cabal run nano-ui-sdl-idle -- spinner
+```
+
+Three rules keep a view idle:
+
+- Nothing may run frames by itself except an animation that is on screen.
+  `keepAnimating` lasts as long as it keeps being called, so call it from the
+  widget it animates and not from somewhere that is always built.
+- A view that changes on a schedule (a clock, a debounce, a held button's
+  repeat) asks for its next frame with `wakeAfter`, or `requestWakeAt` from
+  code holding a `Context`. Each frame starts with no wake pending and the
+  widgets still built ask again, so one that is gone stops costing anything.
+  Do not mark the context dirty every frame to get there: a dirty context is
+  redrawn at once, which is a busy loop.
+- A background thread that changes what the view reads wakes the loop through
+  `ctxWakeLoop`. The wake runs one frame, and the frame's damage decides what
+  is presented, so waking for a change that is not on screen is cheap. A
+  change damage cannot see, such as new pixels under a registered image id,
+  needs `damageFull`.
+
+To measure a process, read its cycle time (`QueryProcessCycleTime` on
+Windows) and its threads' context switch counts over ten seconds or so. CPU
+time from the process table is counted in scheduler ticks of 15.6 ms and
+misses a loop of short wakes almost entirely. A percentage in Task Manager is
+of the whole machine, so 0.4% on 32 logical processors is an eighth of a
+core.
 
 ## Releasing
 

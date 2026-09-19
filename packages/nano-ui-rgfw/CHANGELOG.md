@@ -16,6 +16,12 @@
   last.
 - Animations run at the display rate: a per-frame sleep on top of the core
   loop's pacing halved it.
+- A frame the opening frame asks for is drawn at once. The session cleared
+  the dirty flag after it, so the view waited for input to show what it had
+  asked to show.
+- A frame with no damage skips the OpenGL render and the buffer swap, since
+  it would swap in the picture already on screen. An animation scrolled out
+  of view costs its UI pass and nothing on the GPU.
 
 ### Removed
 

@@ -4,6 +4,11 @@
 
 ### Added
 
+- `nano-ui-sdl-idle`, a window for measuring what an app costs while nobody
+  touches it: a static view, a focused search field, a background wake, a
+  spinner that goes away, a `wakeAfter` clock, a typed character, and frames
+  asked for during startup. `hidden` runs a scene off screen. See
+  "Idle cost" in `docs/development.md`.
 - Shaped text. Lines are laid out by SDL_ttf and HarfBuzz with ligatures,
   contextual forms and marks, and drawn glyph by glyph from the atlas.
   Arabic, Hebrew, Devanagari, CJK and other scripts the UI font lacks are
@@ -41,6 +46,18 @@
   on `SDL_EVENT_WINDOW_RESIZED`, before the renderer had resized its swap
   chain, so it went to the old-size backbuffer and showed cropped or with a
   bare strip; frames are now drawn on the pixel size change that follows.
+- A frame asked for while the window opens is drawn. The opening frames are
+  drawn before the loop starts, and the session then cleared the dirty flag
+  and drained the wakes they had queued, so a view that asked for another
+  frame, or a thread that finished its work that early, sat unseen until the
+  pointer crossed the window.
+- Waking the loop from another thread runs a frame and presents what that
+  frame damaged, which is nothing when the change is not on screen. Every
+  wake used to repaint and present the whole window. A font or UI scale
+  switch, which does change every pixel, asks for the full repaint itself.
+- Wakes are coalesced: while one is queued, another costs an atomic swap and
+  no `SDL_PushEvent`. The core wakes the loop on every `markDirty`, most of
+  them made by the loop's own thread in the middle of a frame.
 
 ### Removed
 

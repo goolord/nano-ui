@@ -68,6 +68,16 @@
 - `Slot` (in `NanoUI.Store` and `NanoUI.Context`) names each kind of
   per-widget store entry, and `modifyStore` in `NanoUI.Context` updates the
   store in one read and write.
+- `wakeAfter` asks for a frame after a number of seconds with no input to
+  cause it, and the loop sleeps until then: a clock label ticks with one
+  frame a second where `keepAnimating` would run one for every display
+  refresh. `requestWakeAt` and `requestWakeAfter` in `NanoUI.Context` are
+  the same for code that holds a `Context`, and `getWakeAt` reads the
+  pending time.
+- `NANO_LOOP_TRACE` prints, about once a second while the session loop runs,
+  the time covered, how many passes it made, how many drew, and why. An idle
+  window prints nothing, so what prints steadily is what keeps the process
+  awake.
 
 ### Changed
 
@@ -142,6 +152,24 @@
 
 ### Fixed
 
+- A window left alone uses no CPU or GPU. Three things kept the session loop
+  running at the display rate behind a picture that never changed:
+  - `keepAnimating`, and so `spinner`, started an animation that never ends
+    and nothing removed once the widget stopped being built. A view that
+    showed a spinner while it loaded kept drawing frames for the life of the
+    process. It now lasts as long as it keeps being called, and the first
+    frame without it lets the loop sleep.
+  - A focused text field ran a full frame every 16 ms, a leftover from a
+    backend whose typed bytes did not wake the loop. Typing arrives as input,
+    so focus alone asks for nothing. The search field's debounce, which
+    relied on those frames to notice that typing had paused, asks for the
+    one frame that commits it, and a selection dragged past a field's edge
+    asks for frames while the drag lasts.
+  - A numeric field's held stepper arrow marked the context dirty every frame
+    to reach its next repeat, which ran frames back to back with no pacing.
+    It asks for the frame of the next repeat instead.
+- `registerImage` damages the whole frame. New pixels under an id already on
+  screen change no rect or text, so nothing else would repaint them.
 - Circles sharing a centre are concentric whatever their radii. A circle's
   centre snaps to the pixel grid, not its bounding box's corner, which
   rounded differently per radius and put a small disc drawn over a larger
