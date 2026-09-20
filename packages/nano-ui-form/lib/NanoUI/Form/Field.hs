@@ -2,7 +2,6 @@
 -- this module only adapts immediate-mode controls to persistent field values.
 module NanoUI.Form.Field
   ( inputWidget
-  , textField
   , labelled
   , fieldView
   , decodeBool
@@ -27,7 +26,6 @@ import NanoUI
   , columnWith
   , fillW
   , gap
-  , respChanged
   , tight
   , uiIO
   , withKey
@@ -35,7 +33,6 @@ import NanoUI
 import NanoUI qualified as NUI
 import NanoUI.Form.Backend
   ( FormInput (..)
-  , formInputToText
   , getActiveFormPrefix
   , updateFieldInput
   )
@@ -60,13 +57,8 @@ inputWidget ::
 inputWidget name decode changed encode widget =
   maybe Unnamed.input Named.input name decode (fieldView changed encode widget)
 
-textField ::
-  FormError FormInput err =>
-  Maybe Text -> (Text -> NanoUI (Response, Text)) -> Text -> Form err Text
-textField name = inputWidget name (Right . formInputToText) respChanged FormInputText
-
-labelled :: Text -> (a -> NanoUI b) -> a -> NanoUI b
-labelled name widget value = NUI.label name >> widget value
+labelled :: Maybe Text -> (a -> NanoUI b) -> a -> NanoUI b
+labelled caption widget value = mapM_ NUI.label caption >> widget value
 
 -- | Keep the label and control in the same stable field scope. Some controls
 -- report activation rather than change, so callers supply the response flag.

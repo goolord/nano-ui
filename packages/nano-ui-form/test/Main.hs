@@ -1,10 +1,10 @@
 module Main (main) where
 
 import Data.Int (Int8)
+import Data.Sequence qualified as Seq
 import Data.Text (Text)
-import qualified Data.Sequence as Seq
-import qualified Data.Text as T
-import qualified Ditto.Types as Ditto
+import Data.Text qualified as T
+import Ditto.Types qualified as Ditto
 import NanoUI
   ( Input (..)
   , Size (..)
@@ -15,19 +15,19 @@ import NanoUI
   , runNanoUI
   , tight
   )
-import NanoUI.Testing (collectTextSpans, newContext, runFrame)
+import NanoUI qualified as NUI
 import NanoUI.Form
 import NanoUI.Form.Backend (updateFieldInput)
-import NanoUI qualified as NUI
-import qualified NanoUI.Form.Unnamed as Unnamed
-import System.IO (BufferMode (NoBuffering), hSetBuffering, stdout)
+import NanoUI.Testing (collectTextSpans, newContext, runFrame)
 import Scope (check, runScopeTests)
+import System.IO (BufferMode (NoBuffering), hSetBuffering, stdout)
 
 data Person = Person
   { personName :: !Text
-  , personAge  :: !Float
-  , personOk   :: !Bool
-  } deriving (Eq, Show)
+  , personAge :: !Float
+  , personOk :: !Bool
+  }
+  deriving (Eq, Show)
 
 failingForm :: Form Text Person
 failingForm =
@@ -93,6 +93,29 @@ main = do
         (map snd errs == ["Expected text"])
     Ditto.Ok _ -> fail "Expected custom decoder failure"
 
+  captionCtx <- newContext
+  let
+    renderCaption spec = columnWith tight $ do
+      (fieldView, result) <-
+        runNanoForm "captions" (inputText spec "initial" :: Form Text Text)
+      runFormView (Ditto.unView fieldView [])
+      pure result
+    firstCaption = (named "stable-key") {fieldLabel = Just "First caption"}
+    secondCaption = firstCaption {fieldLabel = Just "Second caption"}
+  _ <- runFrame captionCtx emptyInput (renderCaption firstCaption)
+  updateFieldInput captionCtx "captions" "stable-key" (FormInputText "kept")
+  (captionResult, _, _, _) <-
+    runFrame captionCtx emptyInput (renderCaption secondCaption)
+  case captionResult of
+    Ditto.Ok (Ditto.Proved _ value) -> check "Caption changes retain named field values" (value == "kept")
+    Ditto.Error errs -> fail (show errs)
+  captionSpans <- collectTextSpans captionCtx
+  let
+    captions = [t | (_, t, _, _, _) <- captionSpans]
+  check
+    "Built-in inputs render the independent caption"
+    ("Second caption" `elem` captions && "First caption" `notElem` captions)
+
   ctx <- newContext
   let
     inp = emptyInput {inputWindowSize = Size 60 20}
@@ -103,7 +126,7 @@ main = do
       (,,)
         <$> inputSelect "select" (Seq.fromList ["First", "Second"]) 1
         <*> inputRadio "radio" (Seq.fromList ["First", "Second"]) 0
-        <*> Unnamed.inputSelect (Just "Only") 0
+        <*> inputSelect unnamed (Just "Only") 0
   (_, collectionResult) <-
     runNanoUI ctx inp (runNanoForm "collections" collectionForm)
   case collectionResult of
@@ -129,7 +152,7 @@ main = do
       (,,)
         <$> inputEnumSelect "select" (-42)
         <*> inputEnumRadio "radio" 42
-        <*> Unnamed.inputEnumSelect (-12)
+        <*> inputEnumSelect unnamed (-12)
     checkEnums expected = do
       (_, result) <- runNanoUI ctx inp (runNanoForm "enums" enumForm)
       case result of

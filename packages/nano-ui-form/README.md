@@ -56,8 +56,19 @@ label appears only on the submission frame. `nanoFormLive` is for previews or
 other views that need the current valid value on every frame.
 
 Use `withFieldErrors` around a validated field to display its errors.
-`NanoUI.Form.Validation` supplies common validators. `NanoUI.Form.Named`
-supports named fields; `NanoUI.Form.Unnamed` exposes positional composition.
+`NanoUI.Form.Validation` supplies common validators. `NanoUI.Form.Input`
+provides one input family for named and positional fields:
+
+```haskell
+inputText "name" "Ada"                    -- stable key and caption
+inputText unnamed "Ada"                   -- numbered, no caption
+inputCheckbox (unnamed {fieldLabel = Just "Accept"}) False
+inputText ((named "login") {fieldLabel = Just "User name"}) "Ada"
+```
+
+String-literal names keep the usual syntax with `OverloadedStrings`. Wrap a
+computed `Text` in `named`. Changing `fieldLabel` does not change the stored
+form key; `fieldKey = Nothing` selects positional identity.
 
 ## Adapting a widget
 

@@ -1,7 +1,11 @@
--- | Named form inputs: each takes a name that identifies the field and is
--- shown as its label. "NanoUI.Form" re-exports these.
-module NanoUI.Form.Named
-  ( inputText
+-- | Form inputs with named or positional identity and an optional caption.
+-- "NanoUI.Form" re-exports these. Use a string literal for a labelled, named
+-- field, or 'unnamed' for a positional input.
+module NanoUI.Form.Input
+  ( FieldName (..)
+  , named
+  , unnamed
+  , inputText
   , inputTextWithPlaceholder
   , inputPassword
   , inputTextArea
@@ -45,7 +49,7 @@ import NanoUI
   , textInputConfigured'
   )
 import NanoUI qualified as NUI
-import NanoUI.Form.Backend (FormInput (..))
+import NanoUI.Form.Backend (FormInput (..), formInputToText)
 import NanoUI.Form.Field
   ( decodeBool
   , decodeFloatInput
@@ -55,106 +59,114 @@ import NanoUI.Form.Field
   , inputWidget
   , labelled
   )
-import NanoUI.Form.Field qualified as Field
-import NanoUI.Form.Types (Form, FormView (..))
+import NanoUI.Form.Types (FieldName (..), Form, FormView (..), named, unnamed)
 
 -- | Single-line text input field.
-inputText :: FormError FormInput err => Text -> Text -> Form err Text
-inputText name = Field.textField (Just name) (labelled name textInput')
+inputText :: FormError FormInput err => FieldName -> Text -> Form err Text
+inputText = textField textInput'
 
 -- | Single-line text input field with custom placeholder text.
 inputTextWithPlaceholder ::
-  FormError FormInput err => Text -> Text -> Text -> Form err Text
-inputTextWithPlaceholder placeholder name =
-  Field.textField
-    (Just name)
-    ( labelled
-        name
-        (textInputConfigured' defaultTextInputConfig {ticPlaceholder = placeholder})
-    )
+  FormError FormInput err => Text -> FieldName -> Text -> Form err Text
+inputTextWithPlaceholder placeholder =
+  textField
+    (textInputConfigured' defaultTextInputConfig {ticPlaceholder = placeholder})
 
 -- | Password text input masking entered characters.
-inputPassword :: FormError FormInput err => Text -> Text -> Form err Text
-inputPassword name =
-  Field.textField
-    (Just name)
-    (labelled name (textInputConfigured' defaultTextInputConfig {ticPassword = True}))
+inputPassword :: FormError FormInput err => FieldName -> Text -> Form err Text
+inputPassword = textField (textInputConfigured' defaultTextInputConfig {ticPassword = True})
 
 -- | Multi-line text area input.
-inputTextArea :: FormError FormInput err => Text -> Text -> Form err Text
-inputTextArea name = Field.textField (Just name) (labelled name textArea')
+inputTextArea :: FormError FormInput err => FieldName -> Text -> Form err Text
+inputTextArea = textField textArea'
+
+textField ::
+  FormError FormInput err =>
+  (Text -> NUI.NanoUI (NUI.Response, Text)) -> FieldName -> Text -> Form err Text
+textField widget name =
+  inputWidget
+    (fieldKey name)
+    (Right . formInputToText)
+    respChanged
+    FormInputText
+    (labelled (fieldLabel name) widget)
 
 -- | Checkbox toggle input.
-inputCheckbox :: FormError FormInput err => Text -> Bool -> Form err Bool
+inputCheckbox :: FormError FormInput err => FieldName -> Bool -> Form err Bool
 inputCheckbox name initial =
   inputWidget
-    (Just name)
+    (fieldKey name)
     (Right . decodeBool initial)
     respClicked
     FormInputBool
-    (checkbox' name)
+    (checkbox' (fromMaybe "" (fieldLabel name)))
     initial
 
 -- | Floating-point slider input across the range @[minV, maxV]@.
 inputSlider ::
-  FormError FormInput err => Text -> Float -> Float -> Float -> Form err Float
+  FormError FormInput err =>
+  FieldName -> Float -> Float -> Float -> Form err Float
 inputSlider name minV maxV initial =
   inputWidget
-    (Just name)
+    (fieldKey name)
     (Right . decodeFloatInput initial)
     respChanged
     FormInputFloat
-    (labelled name (slider' minV maxV))
+    (labelled (fieldLabel name) (slider' minV maxV))
     initial
 
 -- | Dropdown selection in fold order (returns selected index).
 inputSelect ::
-  (Foldable f, FormError FormInput err) => Text -> f Text -> Int -> Form err Int
+  (Foldable f, FormError FormInput err) =>
+  FieldName -> f Text -> Int -> Form err Int
 inputSelect name options initial =
   inputWidget
-    (Just name)
+    (fieldKey name)
     (Right . decodeInt initial)
     respChanged
     FormInputInt
-    (labelled name (select' options))
+    (labelled (fieldLabel name) (select' options))
     initial
 
 -- | Dropdown selection for any bounded enumeration type.
 inputEnumSelect ::
   forall a err.
-  (Bounded a, Enum a, Show a, FormError FormInput err) => Text -> a -> Form err a
+  (Bounded a, Enum a, Show a, FormError FormInput err) =>
+  FieldName -> a -> Form err a
 inputEnumSelect name = enumField (inputSelect name)
 
 -- | Radio button group (returns selected index).
 inputRadio ::
-  (Foldable f, FormError FormInput err) => Text -> f Text -> Int -> Form err Int
+  (Foldable f, FormError FormInput err) =>
+  FieldName -> f Text -> Int -> Form err Int
 inputRadio name options initial =
   inputWidget
-    (Just name)
+    (fieldKey name)
     (Right . decodeInt initial)
     respChanged
     FormInputInt
-    (labelled name (radio' options))
+    (labelled (fieldLabel name) (radio' options))
     initial
 
 -- | Radio button group for any bounded enumeration type.
 inputEnumRadio ::
   forall a err.
-  (Bounded a, Enum a, Show a, FormError FormInput err) => Text -> a -> Form err a
+  (Bounded a, Enum a, Show a, FormError FormInput err) =>
+  FieldName -> a -> Form err a
 inputEnumRadio name = enumField (inputRadio name)
 
 -- | Color picker input.
-inputColor :: FormError FormInput err => Text -> Color -> Form err Color
+inputColor :: FormError FormInput err => FieldName -> Color -> Form err Color
 inputColor name initial =
   inputWidget
-    (Just name)
+    (fieldKey name)
     ( \case
         FormInputText t -> Right (fromMaybe initial (colorFromHex t))
         _ -> Right initial
     )
     respChanged
     (FormInputText . colorToHex)
-    (labelled name colorPicker')
+    (labelled (fieldLabel name) colorPicker')
     initial
 
 -- | Static label inside a form.

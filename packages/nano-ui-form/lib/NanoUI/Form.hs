@@ -13,8 +13,11 @@ module NanoUI.Form
   , FormConfig (..)
   , defaultFormConfig
   , inputWidget
+  , FieldName (..)
+  , named
+  , unnamed
 
-    -- * Named Form Inputs
+    -- * Form Inputs
   , inputText
   , inputTextWithPlaceholder
   , inputPassword
@@ -59,10 +62,13 @@ module NanoUI.Form
   )
 where
 
-import qualified Ditto.Core as Ditto
-import qualified Ditto.Types as Ditto
-import NanoUI.Form.Named
-  ( childErrors
+import Ditto.Core qualified as Ditto
+import Ditto.Types qualified as Ditto
+import NanoUI.Form.Backend (FormInput (..), FormUI (..), liftNanoUI)
+import NanoUI.Form.Field (inputWidget)
+import NanoUI.Form.Input
+  ( FieldName (..)
+  , childErrors
   , errors
   , inputCheckbox
   , inputColor
@@ -73,16 +79,16 @@ import NanoUI.Form.Named
   , inputSelect
   , inputSlider
   , inputText
-  , inputTextWithPlaceholder
   , inputTextArea
+  , inputTextWithPlaceholder
   , label
+  , named
   , separator
+  , unnamed
   , withChildErrors
   , withErrors
   , withFieldErrors
   )
-import NanoUI.Form.Backend (FormInput (..), FormUI (..), liftNanoUI)
-import NanoUI.Form.Field (inputWidget)
 import NanoUI.Form.Runner
   ( nanoFormEx
   , nanoFormLive

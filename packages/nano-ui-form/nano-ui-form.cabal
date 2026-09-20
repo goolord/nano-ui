@@ -49,10 +49,9 @@ library
     exposed-modules:
         NanoUI.Form
         NanoUI.Form.Backend
-        NanoUI.Form.Named
+        NanoUI.Form.Input
         NanoUI.Form.Runner
         NanoUI.Form.Types
-        NanoUI.Form.Unnamed
         NanoUI.Form.Validation
         NanoUI.Form.Widgets
     other-modules:
