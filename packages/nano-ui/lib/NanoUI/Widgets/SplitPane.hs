@@ -26,6 +26,8 @@ module NanoUI.Widgets.SplitPane
   , DividerInfo (..)
   , treeSplit
   , treeSetRatio
+  , pinnedSide
+  , reflowFixed
   , treeRemovePane
   , treeMovePane
   , clampTreeRatio
@@ -202,6 +204,74 @@ treeSplit targetPaneId splitId axis newOnA newPaneId = foldGrid onPane Split
 treeSetRatio :: Word64 -> Float -> GridNode -> GridNode
 treeSetRatio splitId r =
   foldGrid Pane (\sid ax r0 -> Split sid ax (if sid == splitId then clamp01 r else r0))
+
+-- | Does this side of a split hold a pinned pane of its own? Only an
+-- immediate 'Pane' counts. A pin fixes a pane's extent along the axis of the
+-- split the pane hangs directly off, and every split above that one keeps
+-- sharing its region out by ratio, so pinning a sidebar's width leaves the
+-- height of whatever row it sits in free, and a second pinned pane deeper in
+-- the tree is a matter for its own split rather than one that cancels the
+-- first out.
+pinnedSide :: (Word64 -> Bool) -> GridNode -> Bool
+pinnedSide isFixed = \case
+  Pane p -> isFixed p
+  Split{} -> False
+
+-- | The A-side ratio that gives a split of this region the extent @d@, after
+-- the subtree minima have had their say: the inverse of 'splitLength', and
+-- already clamped, so a region with no room for the extent leaves a ratio
+-- that says what the split really does rather than one that would spring the
+-- side open the moment the pin came off. Zero for a region with no room
+-- beside the gutter, where an extent says nothing about a share.
+lengthRatio :: Float -> Float -> Float -> Float -> Float -> Float
+lengthRatio spacing avail minA minB d
+  | usable <= 0 = 0
+  | otherwise = clamp01 (splitLength spacing avail minA minB (d / usable) / usable)
+  where
+    usable = avail - spacing
+
+-- | Re-ratio a tree for a region that changed size, so that the panes the
+-- predicate picks keep their extent along their parent split's axis. The
+-- space the change adds or takes is charged to the other side of the split a
+-- pinned pane hangs directly off ('pinnedSide'); every other split keeps its
+-- ratio and so keeps sharing its region out as it did, which is what carries
+-- the difference down to a pinned pane nested deeper.
+--
+-- A split with a pinned pane on both sides, or on neither, has no one side to
+-- charge the difference to and is left to its ratio. So is a split whose old
+-- or new region has no room beside the gutter.
+--
+-- The result is still an ordinary ratio tree. A pinned pane gives way after
+-- all once the region is too small to hold it and its neighbours' minima,
+-- and, having given way, is pinned at the extent it gave way to: an extent is
+-- all the tree remembers, so a region that grows back does not know what the
+-- pane was pinned at before it had to shrink.
+reflowFixed :: (Word64 -> Bool) -> Float -> Float -> Rect -> Rect -> GridNode -> GridNode
+reflowFixed isFixed minSize spacing = go
+  where
+    go _ _ n@(Pane _) = n
+    go oldR newR (Split sid axis ratio a b) =
+      Split sid axis ratio' (go oldA newA a) (go oldB newB b)
+      where
+        (wa, ha) = subtreeMin minSize spacing a
+        (wb, hb) = subtreeMin minSize spacing b
+        (mA, mB) = mainMins axis (wa, ha) (wb, hb)
+        oldAvail = mainLen axis oldR
+        newAvail = mainLen axis newR
+        dOld = splitLength spacing oldAvail mA mB ratio
+        fixedA = pinnedSide isFixed a
+        fixedB = pinnedSide isFixed b
+        -- The A-side extent the reflow asks for: the one it had when A is the
+        -- pinned side, and the one that leaves B the extent it had when B is.
+        wanted
+          | fixedA = dOld
+          | otherwise = dOld + (newAvail - oldAvail)
+        ratio'
+          | fixedA == fixedB = ratio
+          | oldAvail - spacing <= 0 || newAvail - spacing <= 0 = ratio
+          | otherwise = lengthRatio spacing newAvail mA mB wanted
+        (oldA, oldB, _) = splitBounds axis spacing oldR dOld
+        (newA, newB, _) = splitBounds axis spacing newR (splitLength spacing newAvail mA mB ratio')
 
 -- | Remove a pane. The sibling subtree absorbs its space. @Nothing@ if the
 -- pane does not exist or removing it would empty the tree.

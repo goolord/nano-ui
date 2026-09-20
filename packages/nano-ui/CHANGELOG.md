@@ -112,6 +112,16 @@
   value it needs or count a failure, `spanRect` and `spanRectOf` find a span
   by its text, `clipCovers` checks a frame's damage, and `warmupFocused`
   warms a view up and tabs onto its first focusable.
+- `pgFixedPanes` pins panes in a `paneGrid`: a pinned pane keeps its extent
+  along its parent split's axis while the grid resizes, and the other side of
+  that split takes the whole of the difference. A sidebar therefore stays the
+  width the reader dragged it to however wide the window is. Only the pane's
+  own split is pinned, so a pinned pane at each end of a grid keeps both
+  widths and a pinned width never freezes the height of the row it sits in.
+  It still gives way when the grid is too small to hold it and its
+  neighbour's minimum both, and the divider still moves it anywhere.
+  `reflowFixed` in `NanoUI.Widgets.SplitPane` is the pure re-ratio this does,
+  and `pinnedSide` the side test it turns on.
 
 ### Changed
 

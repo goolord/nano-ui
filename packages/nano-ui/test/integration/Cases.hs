@@ -19,6 +19,7 @@ module Cases
   , runPaneGridMixedDragTest
   , runPaneGridClippedControlTest
   , runPaneGridDropPreviewTest
+  , runPaneGridPinnedPaneTest
   , runPercentGapShrinkTest
   , runPointerCursorTest
   , runReduceClickTest
@@ -84,6 +85,7 @@ import NanoUI.Widgets.SplitPane
   , dropPreviewTreeSized
   , dropTargetForPane
   , layoutNode
+  , reflowFixed
   , topLevelDropTarget
   )
 
@@ -913,6 +915,114 @@ runPaneGridDropPreviewTest ctx failed = do
   (_, duringC, afterC) <- dragPane 1 (const (V2 (-20) 200))
   assert failed (not (IM.member 1 duringC))
   assertEq failed afterC start
+
+-- | A pinned pane keeps its own width while the grid resizes: the other side
+-- of its split takes the whole of the difference, from the first frame at the
+-- new size. A ratio alone can only say that both sides scale, which is what
+-- the same grid does once the pin comes off.
+runPaneGridPinnedPaneTest :: Context -> IORef Int -> IO ()
+runPaneGridPinnedPaneTest ctx failed = do
+  rects <- newIORef IM.empty
+  split <- newIORef False
+  let inp0 = withInput 600 400
+      cfg pinned =
+        defaultPaneGridConfig
+          { pgLayout = fillW . fillH
+          , pgMinSize = 40
+          , pgSpacing = 4
+          , pgFixedPanes = if pinned then (== 1) else const False
+          , pgViewPane = \pid pctx -> do
+              liftIO (modifyIORef' rects (IM.insert (fromIntegral pid) (pgcRect pctx)))
+              -- One split on the first frame: pane 1 on the left, pane 3 (the
+              -- seed's next id) on the right.
+              done <- liftIO (readIORef split)
+              when (not done) $ do
+                _ <- pgcSplit pctx AxisV
+                liftIO (writeIORef split True)
+              pure (PaneView "P" False Nothing)
+          }
+      ui pinned = paneGrid (cfg pinned)
+      -- @n@ frames at @inp@, then one more to report what they solved:
+      -- 'pgcRect' is a frame behind, so @n = 1@ reads the very first frame at
+      -- a new size and a larger @n@ reads the settled layout.
+      settleAt pinned inp n = do
+        forM_ [1 .. n :: Int] $ \_ -> void (runFrame ctx inp (ui pinned))
+        writeIORef rects IM.empty
+        _ <- runFrame ctx inp (ui pinned)
+        readIORef rects
+      widthNear what ms p want =
+        assertJust failed (IM.lookup p ms) $ \r ->
+          if abs (rectW r - want) <= 1
+            then pure ()
+            else assertEq failed (what :: String, rectW r) (what, want)
+  _ <- warmup2 ctx inp0 (ui True)
+  _ <- warmup2 ctx inp0 (ui True)
+  -- Drag the divider left so the two panes are unmistakably uneven: with a
+  -- 4px line and 6px of leeway on each side the gutter is 16, leaving 584 to
+  -- share out, and the pointer at 120 puts the left pane at 112.
+  let holdAt pos = (pressAt inp0 pos) {inputMousePressed = False}
+  _ <- runFrame ctx (pressAt inp0 (V2 300 200)) (ui True)
+  _ <- runFrame ctx (holdAt (V2 120 200)) (ui True)
+  _ <- runFrame ctx (releaseAt (holdAt (V2 120 200))) (ui True)
+  start <- settleAt True inp0 2
+  widthNear "dragged" start 1 112
+  widthNear "dragged" start 3 472
+  -- 300px wider. The pinned pane is already at its own width on the frame the
+  -- new size arrives on, not a frame later, so a window dragged bigger cannot
+  -- shimmer it.
+  firstWide <- settleAt True (withInput 900 400) 1
+  widthNear "the first frame of a wider grid" firstWide 1 112
+  wide <- settleAt True (withInput 900 400) 3
+  widthNear "a wider grid" wide 1 112
+  widthNear "a wider grid" wide 3 772
+  -- The same going the other way.
+  narrow <- settleAt True inp0 3
+  widthNear "a narrower grid" narrow 1 112
+  widthNear "a narrower grid" narrow 3 472
+  -- Unpinned, the same tree at the same ratio scales as it always did.
+  loose <- settleAt False (withInput 900 400) 3
+  widthNear "an unpinned grid" loose 1 169.5
+  -- Pinned again, the width it was left at is the one it keeps.
+  repinned <- settleAt True inp0 3
+  widthNear "a pinned grid" repinned 1 169.5
+  -- Too narrow to hold the pinned width and the neighbour's minimum both: the
+  -- pinned pane gives way rather than pushing its neighbour off the grid.
+  squeezed <- settleAt True (withInput 100 400) 3
+  widthNear "a grid with no room" squeezed 1 44
+  widthNear "a grid with no room" squeezed 3 40
+  -- Trees the interactive case above cannot reach, against the pure re-ratio
+  -- the widget runs. A pin holds the split its pane hangs off and no other,
+  -- so two of them hold at once and an ancestor on the other axis is left to
+  -- share as it always did.
+  let minSize = 40
+      gutter = 16
+      area w h = Rect 0 0 w h
+      lay t r = fst (layoutNode minSize gutter t r)
+      reflow fixed old new t = reflowFixed (`elem` fixed) minSize gutter old new t
+      sideOf pick what t r p want =
+        assertJust failed (M.lookup p (lay t r)) $ \g ->
+          if abs (pick g - want) <= 0.01
+            then pure ()
+            else assertEq failed (what :: String, pick g) (what, want)
+      widthOf = sideOf rectW
+      heightOf = sideOf rectH
+  -- A pinned pane at each end: only the middle one takes the extra 300px.
+  let ends = Split 10 AxisV 0.25 (Pane 1) (Split 11 AxisV 0.5 (Pane 2) (Pane 3))
+      ends' = reflow [1, 3] (area 600 400) (area 900 400) ends
+  widthOf "two pinned ends" ends (area 600 400) 1 146
+  widthOf "two pinned ends" ends (area 600 400) 3 211
+  widthOf "two pinned ends" ends' (area 900 400) 1 146
+  widthOf "two pinned ends" ends' (area 900 400) 3 211
+  widthOf "two pinned ends" ends' (area 900 400) 2 511
+  -- A pinned width under a split on the other axis: the width holds, and the
+  -- heights, which no pin hangs off, still share the grid out as before.
+  let stacked = Split 20 AxisH 0.5 (Split 21 AxisV 0.5 (Pane 1) (Pane 2)) (Pane 3)
+      stacked' = reflow [1] (area 600 400) (area 900 600) stacked
+  widthOf "a pin under a stack" stacked (area 600 400) 1 292
+  widthOf "a pin under a stack" stacked' (area 900 600) 1 292
+  widthOf "a pin under a stack" stacked' (area 900 600) 2 592
+  heightOf "a pin under a stack" stacked' (area 900 600) 1 292
+  heightOf "a pin under a stack" stacked' (area 900 600) 3 292
 
 -- A button scrolled above its viewport can geometrically overlap the header,
 -- but its invisible rectangle must not claim the header's drag press.

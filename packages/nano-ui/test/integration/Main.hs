@@ -295,6 +295,7 @@ testSpecs =
   , TestSpec "pane-grid-mixed-drag" False runPaneGridMixedDragTest
   , TestSpec "pane-grid-clipped-control" False runPaneGridClippedControlTest
   , TestSpec "pane-grid-drop-preview" False runPaneGridDropPreviewTest
+  , TestSpec "pane-grid-pinned-pane" False runPaneGridPinnedPaneTest
   , -- Context menus and tooltips
     TestSpec "context-menu-open" False runContextMenuOpenTest
   , TestSpec "context-menu-scroll-pos" False runContextMenuScrollPosTest

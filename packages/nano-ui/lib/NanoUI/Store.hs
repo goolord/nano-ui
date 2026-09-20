@@ -379,6 +379,13 @@ data Slot
     -- monotonic per grid: ids are never reused, so per-pane state keyed by pane
     -- id cannot collide with a closed pane's state.
     SlotPaneNext
+  | -- | PaneGrid region span (storePoint): the (width, height) of the grid's
+    -- own rect the tree was last fitted to. A different span means the grid
+    -- was resized, which is when panes pinned by @pgFixedPanes@ have their
+    -- splits reflowed to keep their extent. Tracked whether or not anything
+    -- is pinned, so turning a pin on mid-run reflows from the size the tree
+    -- really holds rather than from whenever a pin was last set.
+    SlotPaneSpan
   | -- | The value a controlled widget last returned to its caller.
     SlotSeen
   | -- | A colour picker's opening colour.

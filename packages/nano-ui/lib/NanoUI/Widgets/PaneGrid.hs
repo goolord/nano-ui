@@ -144,6 +144,8 @@ import NanoUI.Widgets.SplitPane
   , GridAxis (..)
   , GridNode (..)
   , clampTreeRatio
+  , pinnedSide
+  , reflowFixed
   , DropPreview (..)
   , dropPreviewTreeSized
   , dropTargetForPane
@@ -192,6 +194,21 @@ data PaneGridConfig es = PaneGridConfig
     -- orientation, subject to available space and subtree minima. The
     -- preview shows the same size as the committed drop. Center swaps are
     -- unaffected (default 'False', which splits the destination equally).
+  , pgFixedPanes :: !(Word64 -> Bool)
+    -- ^ Panes that keep their size when the grid's own rect changes size
+    -- (default @const False@, every pane scaling with the grid). A pinned
+    -- pane holds its extent along its parent split's axis -- its width
+    -- between left/right panes, its height between stacked ones -- and the
+    -- other side of that split takes all of the difference. It still moves to
+    -- its neighbour's minimum when the grid grows too small to hold both, and
+    -- the divider still drags it to any width; what it stops doing is
+    -- following the grid.
+    --
+    -- Only the pane's own split is pinned, so the splits above it still
+    -- share their regions out as they did: a pinned left sidebar keeps its
+    -- width without freezing the height of the row it sits in, and a grid
+    -- with a pinned pane at each end keeps both, the panes between them
+    -- taking the difference.
   , pgViewPane :: !(Word64 -> PaneGridCtx es -> Eff es PaneView)
     -- ^ Renders the content of one pane.
   }
@@ -207,6 +224,7 @@ defaultPaneGridConfig =
     , pgLeeway = 6
     , pgEdgeBand = 20
     , pgPreserveDragSize = False
+    , pgFixedPanes = const False
     , pgViewPane = \_ _ -> pure (PaneView "" False Nothing)
     }
 
@@ -382,12 +400,34 @@ paneGrid cfg = do
       pure (start, seed + 1)
   mPrev <- uiIO (getPrevRect ctx wid)
   let baseRect = fromMaybe (Rect 0 0 0 0) mPrev
-      drag0 = findSlot fieldInt 0 gestK st
-      maxPane = validPane tree0 (findSlot fieldInt 0 maxK st)
+      spanK = slotKey SlotPaneSpan key
+      curSpan = (rectW baseRect, rectH baseRect)
+  -- A pinned pane follows its own extent, not the grid's, so a grid whose
+  -- rect changed size re-ratios its splits before anything is laid out from
+  -- them. The span the tree was last fitted to is kept beside it rather than
+  -- recovered from the rect history, so a frame that only moves the grid, or
+  -- that never reaches it at all, leaves the pins alone. A size the grid
+  -- reaches over several frames is charged to the pinned pane by the part of
+  -- the difference each frame brings. No span yet is a grid that has never
+  -- been fitted, which is nothing to reflow.
+  tree <- case lookupSlot fieldPoint spanK st of
+    Just prevSpan | prevSpan == curSpan -> pure tree0
+    mPrevSpan -> do
+      let reflowed = case mPrevSpan of
+            Just (pw, ph)
+              | any (pgFixedPanes cfg) (treePanes tree0) ->
+                  reflowFixed (pgFixedPanes cfg) minSize gutter (baseRect {rectW = pw, rectH = ph}) baseRect tree0
+            _ -> tree0
+      uiIO . modifyStore ctx $
+        insertSlot fieldPoint spanK curSpan
+          . (if reflowed == tree0 then id else insertDyn key reflowed)
+      pure reflowed
+  let drag0 = findSlot fieldInt 0 gestK st
+      maxPane = validPane tree (findSlot fieldInt 0 maxK st)
       focus0 = findSlot fieldInt 0 focusK st
-      focusedInit = resolveFocus tree0 maxPane (fromIntegral focus0)
+      focusedInit = resolveFocus tree maxPane (fromIntegral focus0)
       mouse = inputMousePos inp
-      (regions, dividers) = layoutNode minSize gutter tree0 baseRect
+      (regions, dividers) = layoutNode minSize gutter tree baseRect
   changedRef <- uiIO (newIORef False)
   let mGrab = lookupSlot fieldPoint grabK st
       dgi =
@@ -397,7 +437,7 @@ paneGrid cfg = do
           DragGeom
             { dgMinSize = minSize
             , dgGutter = gutter
-            , dgTree = tree0
+            , dgTree = tree
             , dgBaseRect = baseRect
             , dgBand = edgeBand
             , dgRegions = regions
@@ -414,13 +454,13 @@ paneGrid cfg = do
       -- since a drop moves the other panes too. With no drop target, the
       -- dragged pane's space just closes up.
       (visibleTree, (visibleRegions, visibleDividers))
-        | not dgiShown = (Just tree0, (regions, dividers))
+        | not dgiShown = (Just tree, (regions, dividers))
         | Just dp <- dgiZone dgi = (Just (dpTree dp), (dpRegions dp, dpDividers dp))
         | otherwise =
             maybe
               (Nothing, (M.empty, []))
               (\t -> (Just t, layoutNode minSize gutter t baseRect))
-              (treeRemovePane (fromIntegral drag0) tree0)
+              (treeRemovePane (fromIntegral drag0) tree)
       divMap = M.fromList [(diSplitId d, d) | d <- visibleDividers]
       env =
         GridEnv
@@ -434,7 +474,7 @@ paneGrid cfg = do
           , geLeeway = leeway
           , geRegions = visibleRegions
           , geBaseRect = baseRect
-          , geTree = tree0
+          , geTree = tree
           , geSeed = seed1
           , geDrag0 = drag0
           , geLifted = dgiShown
@@ -541,11 +581,22 @@ sizingLay wSiz hSiz =
 fillLay :: Layout
 fillLay = sizingLay (Grow 1) (Grow 1)
 
--- | A-side sizing for a split: fixed percent along the main axis. The B side
--- grows into the remainder.
+-- | Sizing for the side of a split that carries the ratio: a percent along
+-- the main axis. The other side grows into the remainder, so between them the
+-- two follow the grid as it resizes.
 splitSideLay :: GridAxis -> Float -> Layout
 splitSideLay AxisV p = sizingLay (Percent p) (Grow 1)
 splitSideLay AxisH p = sizingLay (Grow 1) (Percent p)
+
+-- | Sizing for the side of a split that holds a pinned pane: its extent in
+-- pixels along the main axis. A percent of this frame's real width is what
+-- makes an unpinned side track a resize, so a pinned one is laid out in the
+-- length it had instead and the grid grows past it. The ratio is reflowed to
+-- match on the next frame ('reflowFixed'), so the two never disagree for
+-- longer than the frame the resize arrived on.
+pinnedSideLay :: GridAxis -> Float -> Layout
+pinnedSideLay AxisV n = sizingLay (Fixed (max 0 n)) (Grow 1)
+pinnedSideLay AxisH n = sizingLay (Grow 1) (Fixed (max 0 n))
 
 minSized :: Layout -> Float -> Float -> Layout
 minSized l minW_ minH_ = l {layoutMinW = minW_, layoutMinH = minH_}
@@ -554,11 +605,11 @@ minSized l minW_ minH_ = l {layoutMinW = minW_, layoutMinH = minH_}
 paneLay :: Float -> Layout
 paneLay m = minSized fillLay m m
 
--- Percent of the main-axis extent for side A, after min clamping.
-splitPct :: Float -> Float -> Float -> Float -> Float -> Float
-splitPct spacing avail minA minB ratio
+-- Percent of the main-axis extent taken by an A side of the given length.
+splitPct :: Float -> Float -> Float
+splitPct avail d
   | avail <= 0 = 50
-  | otherwise = splitLength spacing avail minA minB ratio / avail * 100
+  | otherwise = d / avail * 100
 
 -- -----------------------------------------------------------------------------
 -- Rendering
@@ -634,9 +685,21 @@ renderNode env dividers = \case
           mDiv = M.lookup sid0 dividers
           avail = maybe 0 (mainLen ax . diRegion) mDiv
           (mA, mB) = mainMins ax (wa, ha) (wb, hb)
-          pct = splitPct (geGutter env) avail mA mB (maybe 0.5 diRatio mDiv)
-          aLay = minSized (splitSideLay ax pct) wa ha
-          bLay = minSized fillLay wb hb
+          -- The A side's extent as 'layoutNode' clamped it, which the two
+          -- sizings below express either as a share of the split's region or
+          -- as the length itself.
+          dA = splitLength (geGutter env) avail mA mB (maybe 0.5 diRatio mDiv)
+          pinA = pinnedSide (pgFixedPanes (geCfg env)) a
+          pinB = pinnedSide (pgFixedPanes (geCfg env)) b
+          (aLay, bLay)
+            -- A region of no length has no extent to hold either side at, so
+            -- both sides fall back to the share 'splitPct' reports rather
+            -- than to a zero-length pin.
+            | pinA == pinB || avail <= 0 =
+                (minSized (splitSideLay ax (splitPct avail dA)) wa ha, minSized fillLay wb hb)
+            | pinA = (minSized (pinnedSideLay ax dA) wa ha, minSized fillLay wb hb)
+            | otherwise =
+                (minSized fillLay wa ha, minSized (pinnedSideLay ax (avail - dA - geGutter env)) wb hb)
           inner = do
             a' <- container NodeContainer aLay (renderNode env dividers a)
             dividerWidget env ax
