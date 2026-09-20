@@ -432,6 +432,7 @@ knob :: Ui :> es => Float -> Float -> Float -> Eff es Float
 knob minV maxV value = snd <$> knobWith' id 36 minV maxV value
 
 {-# INLINE knob' #-}
+-- | 'knob' returning @(response, updatedValue)@.
 knob' :: Ui :> es => Float -> Float -> Float -> Eff es (Response, Float)
 knob' = knobWith' id 36
 
@@ -440,6 +441,7 @@ knob' = knobWith' id 36
 knobWith :: Ui :> es => (Layout -> Layout) -> Float -> Float -> Float -> Float -> Eff es Float
 knobWith f diameter minV maxV value = snd <$> knobWith' f diameter minV maxV value
 
+-- | 'knobWith' returning the response and updated value.
 knobWith' ::
   Ui :> es =>
   (Layout -> Layout) -> Float -> Float -> Float -> Float -> Eff es (Response, Float)
@@ -506,6 +508,7 @@ toggleSwitch :: Ui :> es => Bool -> Eff es Bool
 toggleSwitch on = snd <$> toggleSwitchWith' id on
 
 {-# INLINE toggleSwitch' #-}
+-- | 'toggleSwitch' returning @(response, enabled)@.
 toggleSwitch' :: Ui :> es => Bool -> Eff es (Response, Bool)
 toggleSwitch' = toggleSwitchWith' id
 
@@ -514,6 +517,7 @@ toggleSwitch' = toggleSwitchWith' id
 toggleSwitchWith :: Ui :> es => (Layout -> Layout) -> Bool -> Eff es Bool
 toggleSwitchWith f on = snd <$> toggleSwitchWith' f on
 
+-- | 'toggleSwitchWith' returning the response and updated flag.
 toggleSwitchWith' :: Ui :> es => (Layout -> Layout) -> Bool -> Eff es (Response, Bool)
 toggleSwitchWith' f on = do
   wid <- nextId
@@ -556,6 +560,7 @@ circularProgress :: Ui :> es => Float -> Eff es ()
 circularProgress frac = void (circularProgressWith' id 32 frac)
 
 {-# INLINE circularProgress' #-}
+-- | 'circularProgress' with a response for geometry and hover information.
 circularProgress' :: Ui :> es => Float -> Eff es Response
 circularProgress' = circularProgressWith' id 32
 
@@ -564,6 +569,7 @@ circularProgress' = circularProgressWith' id 32
 circularProgressWith :: Ui :> es => (Layout -> Layout) -> Float -> Float -> Eff es ()
 circularProgressWith f diameter frac = void (circularProgressWith' f diameter frac)
 
+-- | 'circularProgressWith' returning its response.
 circularProgressWith' :: Ui :> es => (Layout -> Layout) -> Float -> Float -> Eff es Response
 circularProgressWith' f diameter frac =
   fst <$> customWidget defaultCustomWidgetSpec
@@ -591,6 +597,7 @@ spinner :: Ui :> es => Eff es ()
 spinner = void (spinnerWith' id 18)
 
 {-# INLINE spinner' #-}
+-- | 'spinner' returning its response. Requests animation frames while declared.
 spinner' :: Ui :> es => Eff es Response
 spinner' = spinnerWith' id 18
 
@@ -599,6 +606,7 @@ spinner' = spinnerWith' id 18
 spinnerWith :: Ui :> es => (Layout -> Layout) -> Float -> Eff es ()
 spinnerWith f diameter = void (spinnerWith' f diameter)
 
+-- | 'spinnerWith' returning its response.
 spinnerWith' :: Ui :> es => (Layout -> Layout) -> Float -> Eff es Response
 spinnerWith' f diameter = do
   t <- uiTime
@@ -637,6 +645,7 @@ progressBar :: Ui :> es => Float -> Eff es ()
 progressBar frac = void (progressBarWith' id progressBarDefaultHeight frac)
 
 {-# INLINE progressBar' #-}
+-- | 'progressBar' with a response for geometry and hover information.
 progressBar' :: Ui :> es => Float -> Eff es Response
 progressBar' = progressBarWith' id progressBarDefaultHeight
 
@@ -645,6 +654,7 @@ progressBar' = progressBarWith' id progressBarDefaultHeight
 progressBarWith :: Ui :> es => (Layout -> Layout) -> Float -> Float -> Eff es ()
 progressBarWith f height frac = void (progressBarWith' f height frac)
 
+-- | 'progressBarWith' returning its response.
 progressBarWith' :: Ui :> es => (Layout -> Layout) -> Float -> Float -> Eff es Response
 progressBarWith' f height frac =
   let !barH = max 0 height
@@ -680,6 +690,7 @@ sparkline :: Ui :> es => [Float] -> Eff es ()
 sparkline values = void (sparklineWith' id 80 24 values)
 
 {-# INLINE sparkline' #-}
+-- | 'sparkline' with a response for geometry and hover information.
 sparkline' :: Ui :> es => [Float] -> Eff es Response
 sparkline' = sparklineWith' id 80 24
 
@@ -688,6 +699,7 @@ sparkline' = sparklineWith' id 80 24
 sparklineWith :: Ui :> es => (Layout -> Layout) -> Float -> Float -> [Float] -> Eff es ()
 sparklineWith f prefW prefH values = void (sparklineWith' f prefW prefH values)
 
+-- | 'sparklineWith' returning its response.
 sparklineWith' :: Ui :> es => (Layout -> Layout) -> Float -> Float -> [Float] -> Eff es Response
 sparklineWith' f prefW prefH values =
   fst <$> customWidget defaultCustomWidgetSpec

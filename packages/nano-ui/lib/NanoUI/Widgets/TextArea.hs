@@ -99,6 +99,9 @@ import NanoUI.Widgets.TextEditor
   , sealHistory
   )
 
+-- | Editor buffer, selection anchor, viewport, scroll offsets, and undo history.
+-- Positions use zero-based character rows/columns; viewport and scrolling use
+-- logical pixels. The widget stores this under its stable id.
 data TextAreaState = TextAreaState
   { buffer :: !TB.TextBuffer
   , selectionAnchor :: !TB.Cursor
@@ -109,6 +112,7 @@ data TextAreaState = TextAreaState
   }
   deriving (Show)
 
+-- | Start at the document origin with no selection or history and an unset viewport.
 initTextAreaState :: T.Text -> TextAreaState
 initTextAreaState initial =
   TextAreaState
@@ -120,6 +124,7 @@ initTextAreaState initial =
     , history = emptyHistory
     }
 
+-- | Set logical viewport width/height and line height without moving the caret.
 setTextAreaViewport :: (Double, Double) -> Double -> TextAreaState -> TextAreaState
 setTextAreaViewport vp lh state =
   state {viewportSize = vp, lineHeight = lh}
@@ -127,6 +132,7 @@ setTextAreaViewport vp lh state =
 cursorOf :: TextAreaState -> TB.Cursor
 cursorOf state = TB.getCursor (buffer state)
 
+-- | Set anchor and cursor, in that order, and scroll vertically to reveal the caret.
 setTextAreaSelection :: TB.Cursor -> TB.Cursor -> TextAreaState -> TextAreaState
 setTextAreaSelection anchor cursor state =
   let buf =
@@ -134,6 +140,7 @@ setTextAreaSelection anchor cursor state =
          in b {TB.preferredCol = TB.cursorCol cursor}
    in ensureCaretVisible state {buffer = buf, selectionAnchor = anchor}
 
+-- | Extract buffer, selection, and history for the shared text-command engine.
 textAreaEditor :: TextAreaState -> Editor
 textAreaEditor state = Editor (buffer state) (selectionAnchor state) (history state)
 
@@ -166,6 +173,7 @@ ensureCaretVisible state =
 -- Widget
 --------------------------------------------------------------------------------
 
+-- | Default viewport: grow horizontally, at least 200 pixels wide, 140 pixels tall.
 textAreaLayout :: Layout
 textAreaLayout =
   defaultLayout
@@ -185,6 +193,7 @@ textAreaLayout =
 textArea :: Ui :> es => Text -> Eff es Text
 textArea value = snd <$> textAreaWith' id value
 
+-- | 'textArea' returning @(response, updatedText)@.
 {-# INLINE textArea' #-}
 textArea' :: Ui :> es => Text -> Eff es (Response, Text)
 textArea' = textAreaWith' id
@@ -195,6 +204,7 @@ textArea' = textAreaWith' id
 textAreaWith :: Ui :> es => (Layout -> Layout) -> Text -> Eff es Text
 textAreaWith f value = snd <$> textAreaWith' f value
 
+-- | 'textAreaWith' returning @(response, updatedText)@.
 textAreaWith' :: Ui :> es => (Layout -> Layout) -> Text -> Eff es (Response, Text)
 textAreaWith' f value = do
   wid <- nextId
@@ -221,13 +231,14 @@ textAreaWith' f value = do
 -- | Multi-line text editor over a 'TextDocument'. Pass the current document;
 -- the result is the document after this frame's edits. An edit replaces the
 -- lines it touches and shares the rest, and a frame without edits returns
--- the document it was passed, so a keystroke costs the same in a long
--- document as in a short one. Join it with 'documentText' when the whole
--- text is wanted.
+-- the document it was passed. Edits avoid joining the whole document, though
+-- their cost still depends on affected lines and tree operations. Join it
+-- with 'documentText' when the whole text is wanted.
 {-# INLINE textAreaDocument #-}
 textAreaDocument :: Ui :> es => TextDocument -> Eff es TextDocument
 textAreaDocument value = snd <$> textAreaDocumentWith' id value
 
+-- | 'textAreaDocument' returning @(response, updatedDocument)@.
 {-# INLINE textAreaDocument' #-}
 textAreaDocument' :: Ui :> es => TextDocument -> Eff es (Response, TextDocument)
 textAreaDocument' = textAreaDocumentWith' id
@@ -237,6 +248,7 @@ textAreaDocument' = textAreaDocumentWith' id
 textAreaDocumentWith :: Ui :> es => (Layout -> Layout) -> TextDocument -> Eff es TextDocument
 textAreaDocumentWith f value = snd <$> textAreaDocumentWith' f value
 
+-- | 'textAreaDocumentWith' returning @(response, updatedDocument)@.
 textAreaDocumentWith' :: Ui :> es => (Layout -> Layout) -> TextDocument -> Eff es (Response, TextDocument)
 textAreaDocumentWith' f value = do
   wid <- nextId
@@ -405,7 +417,7 @@ saveTextAreaState key state =
     (vw, vh) = viewportSize state
 
 -- | Run a command on a text area outside its frame (a context menu row, an
--- app's Edit menu). A change to the text pulses 'respChanged' on the area's
+-- app's Edit menu). A change to the text pulses @respChanged@ on the area's
 -- next frame.
 applyTextAreaCommand :: Context -> WidgetId -> TextCommand -> IO ()
 applyTextAreaCommand ctx wid cmd = do

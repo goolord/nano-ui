@@ -1,5 +1,6 @@
 {-# LANGUAGE DataKinds #-}
 
+-- | Collect positioned and clipped text for external renderers and headless tests.
 module NanoUI.Frame.Spans
   ( collectTextSpans
   , collectOverlayTextSpans
@@ -92,6 +93,9 @@ import NanoUI.WidgetText
   , treeDecodeStyle
   )
 
+-- | Collect page text after layout, omitting spans covered by opaque floating
+-- panels. Each tuple is bounds, text, foreground, background, clip; coordinates
+-- are logical window coordinates. Rebuilds the context's base span arena.
 collectTextSpans :: Context -> IO [(Rect, T.Text, Color, Color, Rect)]
 collectTextSpans ctx = do
   count <- arenaCount (ctxNodeArena ctx)
@@ -102,6 +106,8 @@ collectTextSpans ctx = do
   panels <- floatingPanelRects ctx
   spanArenaToListOccluded panels arena
 
+-- | Collect window, modal, popup, dropdown, and edit-menu text in paint order.
+-- Uses the same tuple format as 'collectTextSpans' and rebuilds the overlay arena.
 collectOverlayTextSpans :: Context -> Input -> IO [(Rect, T.Text, Color, Color, Rect)]
 collectOverlayTextSpans ctx inp = do
   let arena = ctxSpanOverlay ctx
@@ -116,9 +122,11 @@ collectOverlayTextSpans ctx inp = do
   mapM_ push menu
   spanArenaToList arena
 
+-- | Collect base and overlay text separately for a host that rasterises text itself.
 collectRasterSpans :: Context -> Input -> IO ([(Rect, T.Text, Color, Color, Rect)], [(Rect, T.Text, Color, Color, Rect)])
 collectRasterSpans ctx inp = (,) <$> collectTextSpans ctx <*> collectOverlayTextSpans ctx inp
 
+-- | Total live arena nodes, including containers and decorative nodes.
 widgetNodeCount :: Context -> IO Int
 widgetNodeCount ctx = arenaCount (ctxNodeArena ctx)
 

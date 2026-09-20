@@ -1,5 +1,7 @@
 {-# LANGUAGE DataKinds #-}
 
+-- | Complete headless frames: view construction, layout, input resolution,
+-- damage, and draw-buffer generation. Backends own event waits and presentation.
 module NanoUI.Frame
   ( runFrame
   , runFrameEff
@@ -143,10 +145,14 @@ import NanoUI.Store (mirrorStoresChanged)
 import NanoUI.Style (Theme (..))
 import NanoUI.Types (Damage (..), Size (..), rectInflate, rectNonEmpty)
 
+-- | Build, lay out, resolve input, and paint one headless frame. Returns the
+-- view result, emitted messages, borrowed draw buffers, and whether state
+-- needs a follow-up frame. A local-state change can rebuild the view within
+-- this call, with one-shot input removed. Native presentation is the host's job.
 runFrame :: Context -> Input -> NanoUI a -> IO (a, [FrameMsg], DrawData, Bool)
 runFrame = runFrameEff runEff
 
--- View this model, then apply decoded messages at frame end.
+-- | View this model, then apply decoded messages at frame end.
 -- DrawData is from the pre-reduce model (one-frame lag). The idle
 -- loop redraws when the reduced model differs.
 runFrameReduce ::
@@ -159,6 +165,8 @@ runFrameReduce ::
   -> IO (a, model, [msg], DrawData, Bool)
 runFrameReduce = runFrameReduceEff runEff
 
+-- | 'runFrameReduce' for a larger effect stack, with a runner that interprets
+-- the remaining effects in IO.
 runFrameReduceEff ::
   (IOE :> es, Typeable msg, Eq model) =>
   (forall x. Eff es x -> IO x)
@@ -177,6 +185,8 @@ runFrameReduceEff unlift update ctx inp model view = do
   dirty' <- isDirty ctx
   pure (a, model', typed, draw, dirty || dirty')
 
+-- | 'runFrame' with a runner for the effects remaining after 'Ui'. Run frames
+-- serially on a context; its arenas and stores are mutable and reused.
 runFrameEff ::
   IOE :> es =>
   (forall x. Eff es x -> IO x)
@@ -317,9 +327,9 @@ runFrameEff unlift ctx frameInp ui = do
       , fsTexts = oldTexts
       , fsAnimKeys = animKeys
       }
-  -- Clip frames only repaint the damaged region: the retain texture already
-  -- holds every other pixel, and the runner scissors the present to the same
-  -- damage. The region repaints from the window backdrop, inflated by one
+  -- Clip frames repaint the damaged region of the retained texture, which
+  -- preserves the other pixels. The region starts from the window backdrop,
+  -- inflated by one
   -- logical pixel to cover the runner's outward pixel snap. Full-present
   -- frames (fresh retain, forced full, continuous) paint everything.
   paintFull <- readIORef (ctxPaintFull ctx)

@@ -24,6 +24,7 @@ import GHC.Stack (HasCallStack, callStack, prettyCallStack, withFrozenCallStack)
 import NanoUI (emptyInput, Input (..), NanoUI, Response (..), Size (..), V2 (..))
 import NanoUI.Testing (Context, DrawData, FrameMsg, runFrame, runFrameReduce)
 
+-- | Increment a test's failure counter without printing a diagnostic.
 bump :: IORef Int -> IO ()
 bump r = modifyIORef' r (+ 1)
 
@@ -34,15 +35,19 @@ failWith r detail = do
   putStrLn (prettyCallStack callStack)
   bump r
 
+-- | Count and report a failure when the condition is false, then continue.
 assert :: HasCallStack => IORef Int -> Bool -> IO ()
 assert r ok = unless ok (withFrozenCallStack (failWith r ""))
 
+-- | Require equality, printing both values and the call site on failure.
 assertEq :: (HasCallStack, Eq a, Show a) => IORef Int -> a -> a -> IO ()
 assertEq r a b = when (a /= b) (withFrozenCallStack (failWith r (show a <> " /= " <> show b)))
 
+-- | Require the first value to be strictly greater than the second.
 assertGt :: (HasCallStack, Ord a, Show a) => IORef Int -> a -> a -> IO ()
 assertGt r a b = when (a <= b) (withFrozenCallStack (failWith r (show a <> " <= " <> show b)))
 
+-- | Require the first value to be strictly less than the second.
 assertLt :: (HasCallStack, Ord a, Show a) => IORef Int -> a -> a -> IO ()
 assertLt r a b = when (a >= b) (withFrozenCallStack (failWith r (show a <> " >= " <> show b)))
 
@@ -55,19 +60,25 @@ assertJust r m k = maybe (withFrozenCallStack (failWith r "Nothing")) k m
 assertJustM :: HasCallStack => IORef Int -> IO (Maybe a) -> (a -> IO ()) -> IO ()
 assertJustM r act k = act >>= \m -> withFrozenCallStack (assertJust r m k)
 
+-- | Event-free input for a logical window width and height.
 withInput :: Float -> Float -> Input
 withInput w h = emptyInput {inputWindowSize = Size w h}
 
+-- | Run twice with the same input and return the second frame. Use event-free
+-- input for warmup; press/key events would otherwise be delivered twice.
 run2Frames :: Context -> Input -> NanoUI a -> IO (a, [FrameMsg], DrawData, Bool)
 run2Frames ctx inp ui = do
   _ <- runFrame ctx inp ui
   runFrame ctx inp ui
 
+-- | Run a complete headless frame and return only the view's result.
 evalUi :: Context -> Input -> NanoUI a -> IO a
 evalUi ctx inp ui = do
   (a, _, _, _) <- runFrame ctx inp ui
   pure a
 
+-- | Run left press and release frames through a reducer. Returns the final
+-- model, release-frame messages, and release-frame dirty flag.
 runClickReduce ::
   (Typeable msg, Eq model) =>
   (msg -> model -> model)

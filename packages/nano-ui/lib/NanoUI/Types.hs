@@ -1,3 +1,5 @@
+-- | Geometry in logical pixels, packed RGBA colours, and repaint bounds.
+-- Window coordinates start at the top-left, with x rightward and y downward.
 module NanoUI.Types
   ( V2 (..)
   , Rect (..)
@@ -46,18 +48,22 @@ module NanoUI.Types
 import Data.Bits (shiftL, shiftR, (.&.), (.|.))
 import Data.Word (Word8, Word32)
 
+-- | A two-component point, offset, or vector; units depend on its use.
 data V2 = V2
   { v2X :: {-# UNPACK #-} !Float
   , v2Y :: {-# UNPACK #-} !Float
   }
   deriving (Eq, Show)
 
+-- | Width and height in logical pixels.
 data Size = Size
   { sizeW :: {-# UNPACK #-} !Float
   , sizeH :: {-# UNPACK #-} !Float
   }
   deriving (Eq, Show)
 
+-- | Top-left origin, width, and height in logical pixels. Hit tests include
+-- the left and top edges and exclude the right and bottom edges.
 data Rect = Rect
   { rectX :: {-# UNPACK #-} !Float
   , rectY :: {-# UNPACK #-} !Float
@@ -66,14 +72,17 @@ data Rect = Rect
   }
   deriving (Eq, Show)
 
+-- | An image registered in a context's atlas. It is not a native texture handle.
 newtype ImageId = ImageId
   { unImageId :: Int
   }
   deriving (Eq, Ord, Show)
 
+-- | Straight-alpha colour packed as @0xRRGGBBAA@, with 8 bits per channel.
 newtype Color = Color Word32
   deriving (Eq, Show, Num)
 
+-- | Pack red, green, blue, and alpha channels; alpha 0 is transparent, 255 opaque.
 {-# INLINE colorRGBA #-}
 colorRGBA :: Word8 -> Word8 -> Word8 -> Word8 -> Color
 colorRGBA r g b a =
@@ -83,34 +92,42 @@ colorRGBA r g b a =
       .|. (word32Of b `shiftL` 8)
       .|. word32Of a
 
+-- | The packed @0xRRGGBBAA@ representation.
 {-# INLINE colorToWord32 #-}
 colorToWord32 :: Color -> Word32
 colorToWord32 (Color w) = w
 
+-- | Red channel, in the range 0-255.
 {-# INLINE colorR #-}
 colorR :: Color -> Word8
 colorR (Color w) = fromIntegral ((w `shiftR` 24) .&. 0xFF)
 
+-- | Green channel, in the range 0-255.
 {-# INLINE colorG #-}
 colorG :: Color -> Word8
 colorG (Color w) = fromIntegral ((w `shiftR` 16) .&. 0xFF)
 
+-- | Blue channel, in the range 0-255.
 {-# INLINE colorB #-}
 colorB :: Color -> Word8
 colorB (Color w) = fromIntegral ((w `shiftR` 8) .&. 0xFF)
 
+-- | Alpha channel, from 0 (transparent) to 255 (opaque).
 {-# INLINE colorA #-}
 colorA :: Color -> Word8
 colorA (Color w) = fromIntegral (w .&. 0xFF)
 
+-- | Interpret a packed @0xRRGGBBAA@ word without conversion.
 {-# INLINE colorFromWord32 #-}
 colorFromWord32 :: Word32 -> Color
 colorFromWord32 = Color
 
+-- | Restrict a value to inclusive lower and upper bounds, which must be ordered.
 {-# INLINE clamp #-}
 clamp :: Ord a => a -> a -> a -> a
 clamp lo hi x = max lo (min hi x)
 
+-- | Restrict a value to the inclusive range 0-1.
 {-# INLINE clamp01 #-}
 clamp01 :: Float -> Float
 clamp01 x = clamp 0 1 x
@@ -150,6 +167,8 @@ roundHalfUp r =
   let f = floor r
    in if r - fromIntegral f >= 0.5 then f + 1 else f
 
+-- | Hue in degrees (0-360), saturation and value in 0-1. Alpha is ignored;
+-- grey colours have hue 0.
 rgbToHsv :: Color -> (Float, Float, Float)
 rgbToHsv c =
   let r = fromIntegral (colorR c) / 255
@@ -170,6 +189,8 @@ rgbToHsv c =
       h = if rawH < 0 then rawH + 360 else rawH
    in (h, s, v)
 
+-- | Convert hue in degrees and saturation/value in 0-1 to an opaque colour.
+-- Hue wraps every 360 degrees; output channels are clamped.
 hsvToRgb :: Float -> Float -> Float -> Color
 hsvToRgb h s v =
   let hi = floor (h / 60) :: Int
@@ -199,10 +220,13 @@ contrastRatio a b =
       lo = min (colorLuminance a) (colorLuminance b)
    in (hi + 0.05) / (lo + 0.05)
 
+-- | Relative luminance after sRGB linearisation, in 0-1. Ignores alpha.
 colorLuminance :: Color -> Double
 colorLuminance c =
   0.2126 * srgb (colorR c) + 0.7152 * srgb (colorG c) + 0.0722 * srgb (colorB c)
 
+-- | Interpolate all four packed channels. The factor is clamped to 0-1;
+-- interpolation is in sRGB channel space, not linear light.
 lerpColor :: Color -> Color -> Float -> Color
 lerpColor (Color a) (Color b) t =
   let u = clamp01 t
@@ -226,21 +250,24 @@ srgb ch =
 word32Of :: Word8 -> Word32
 word32Of = fromIntegral
 
+-- | Test a point against half-open rectangle bounds.
 {-# INLINE rectContains #-}
 rectContains :: Rect -> V2 -> Bool
 rectContains (Rect x y w h) (V2 px py) =
   px >= x && px < x + w && py >= y && py < y + h
 
--- | A rect that has actually been laid out (nonzero extent).
+-- | Whether both width and height are strictly positive.
 {-# INLINE rectNonEmpty #-}
 rectNonEmpty :: Rect -> Bool
 rectNonEmpty r = rectW r > 0 && rectH r > 0
 
--- | Hit test that ignores rects that have not been laid out yet.
+-- | Hit test that rejects empty and negative-size rectangles.
 {-# INLINE rectHit #-}
 rectHit :: Rect -> V2 -> Bool
 rectHit r p = rectNonEmpty r && rectContains r p
 
+-- | Smallest bounding rectangle containing both inputs. Empty inputs are
+-- still included by their coordinates; filter them first if they mean no area.
 {-# INLINE rectUnion #-}
 rectUnion :: Rect -> Rect -> Rect
 rectUnion (Rect x1 y1 w1 h1) (Rect x2 y2 w2 h2) =
@@ -250,6 +277,7 @@ rectUnion (Rect x1 y1 w1 h1) (Rect x2 y2 w2 h2) =
       yEnd = max (y1 + h1) (y2 + h2)
    in Rect x y (xEnd - x) (yEnd - y)
 
+-- | Shared positive-area rectangle, or 'Nothing' for disjoint or touching edges.
 {-# INLINE rectIntersect #-}
 rectIntersect :: Rect -> Rect -> Maybe Rect
 rectIntersect (Rect x1 y1 w1 h1) (Rect x2 y2 w2 h2) =
@@ -261,6 +289,7 @@ rectIntersect (Rect x1 y1 w1 h1) (Rect x2 y2 w2 h2) =
       h = yEnd - y
    in if w > 0 && h > 0 then Just (Rect x y w h) else Nothing
 
+-- | Whether the first rectangle has positive size and lies inside the second.
 {-# INLINE rectFullyInside #-}
 rectFullyInside :: Rect -> Rect -> Bool
 rectFullyInside (Rect ix iy iw ih) (Rect ox oy ow oh) =
@@ -271,26 +300,31 @@ rectFullyInside (Rect ix iy iw ih) (Rect ox oy ow oh) =
     && ix + iw <= ox + ow
     && iy + ih <= oy + oh
 
+-- | Shared area, or zero when there is no positive-area intersection.
 {-# INLINE rectOverlapArea #-}
 rectOverlapArea :: Rect -> Rect -> Float
 rectOverlapArea a b =
   maybe 0 (\r -> rectW r * rectH r) (rectIntersect a b)
 
+-- | Extend every edge by the margin. A negative margin shrinks the rectangle.
 {-# INLINE rectInflate #-}
 rectInflate :: Float -> Rect -> Rect
 rectInflate pad (Rect x y w h) =
   Rect (x - pad) (y - pad) (w + pad * 2) (h + pad * 2)
 
+-- | Width times height. Requires non-negative dimensions for a geometric area.
 {-# INLINE rectArea #-}
 rectArea :: Rect -> Float
 rectArea (Rect _ _ w h) = w * h
 
--- Full window vs a scissor box around widgets that actually changed (hover, anim).
+-- | Region to repaint: the whole window or a clip in logical window coordinates.
+-- An empty 'DamageClip' means no repaint is needed.
 data Damage
   = DamageFull
   | DamageClip Rect
   deriving (Eq, Show)
 
+-- | Whether damage is a clip with non-positive width or height.
 {-# INLINE damageIsEmpty #-}
 damageIsEmpty :: Damage -> Bool
 damageIsEmpty dmg =
@@ -353,19 +387,24 @@ resolveDamageRect bounds r =
             else if not (rectNonEmpty rb) then ra else rectUnion ra rb
     DamageNone -> Rect 0 0 0 0
 
+-- | Add corresponding components, for example a point and an offset.
 {-# INLINE v2Add #-}
 v2Add :: V2 -> V2 -> V2
 v2Add (V2 x1 y1) (V2 x2 y2) = V2 (x1 + x2) (y1 + y2)
 
+-- | Subtract corresponding components, for example the offset between points.
 {-# INLINE v2Sub #-}
 v2Sub :: V2 -> V2 -> V2
 v2Sub (V2 x1 y1) (V2 x2 y2) = V2 (x1 - x2) (y1 - y2)
 
+-- | Point or rectangle a popup is placed relative to, in logical window coordinates.
 data PopupAnchor
   = AnchorPoint !V2
   | AnchorRect !Rect
   deriving (Eq, Show)
 
+-- | Preferred side of a popup anchor. Placement also accounts for available
+-- window space; 'PlacementAuto' lets the positioner choose a side.
 data PopupPlacement
   = PlacementBelow
   | PlacementAbove

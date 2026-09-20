@@ -71,7 +71,18 @@ comment box and put the `user-attachments` URL GitHub gives back in
 
 | Path | Contents |
 | --- | --- |
-| `packages/nano-ui/lib/NanoUI.hs` | The public API and its documentation |
+| `packages/nano-ui` | The core: widgets, layout, input handling, and the draw list |
+| `packages/nano-ui-sdl`, `packages/nano-ui-rgfw` | Window backends |
+| `packages/nano-ui-rgfw-bindings` | RGFW bindings, with the C source |
+| `packages/nano-ui-diagrams`, `packages/nano-ui-form` | Charts and diagrams, and forms |
+| `packages/nano-ui-demo` | Example applications |
+| `scripts/` | Font subsetting (`prune_inter.py`, `prune_cozette.py`) and profiling helpers |
+
+The core's modules, under `packages/nano-ui/lib`:
+
+| Path | Contents |
+| --- | --- |
+| `NanoUI.hs` | The public API and its documentation |
 | `NanoUI/Widgets/` | One module per widget family |
 | `NanoUI/Emit.hs` | Reducer-style widgets |
 | `NanoUI/Monad.hs`, `NanoUI/Id.hs` | The `Ui` effect, widget ids, and keys |
@@ -81,18 +92,10 @@ comment box and put the `user-attachments` URL GitHub gives back in
 | `NanoUI/Draw.hs`, `NanoUI/Draw/` | Vertex arenas and the draw list |
 | `NanoUI/Runner.hs` | The event loop the backends share |
 | `NanoUI/Testing.hs`, `NanoUI/Testing/` | The headless test harness |
-| `packages/nano-ui-sdl`, `packages/nano-ui-rgfw` | Window backends |
-| `packages/nano-ui-rgfw-bindings` | RGFW bindings, with the C source |
-| `packages/nano-ui-diagrams`, `packages/nano-ui-form` | Charts and diagrams, and forms |
-| `packages/nano-ui-demo` | Example applications |
-| `scripts/` | Font subsetting (`prune_inter.py`, `prune_cozette.py`) and profiling helpers |
-
-Paths in the first column from the second row to `NanoUI/Testing/` are under
-`packages/nano-ui/lib`.
 
 ## How a frame works
 
-The README's "How it works" section lists the steps of a frame, and
+The [README's "How it works" section](../README.md#how-it-works) lists the steps of a frame, and
 [rendering-pipeline.svg](rendering-pipeline.svg) (source:
 `rendering-pipeline.d2`) draws them with the backend loop around them.
 
@@ -133,9 +136,7 @@ The README's "How it works" section lists the steps of a frame, and
 
 ## Performance
 
-Packages build at Cabal's default `-O1`. The core compiles in under a minute
-that way, against more than four minutes at `-O2`, and the headless profiler
-runs slightly faster. To profile a release build, add this to
+Packages build at Cabal's default `-O1`. To compare an optimised build, add this to
 `cabal.project.local`:
 
 ```cabal
@@ -146,18 +147,17 @@ package nano-ui
 - Keep `INLINE` for small bodies and helpers inside per-vertex, per-glyph, or
   per-node loops. A large inlined body slows every importer's build for little
   runtime gain.
-- `-fspecialise-aggressively`, `-flate-specialise`, `-fmax-worker-args=32`, and
-  `-funbox-strict-fields` made the core about 12% slower on the headless
-  profiler as well as slower to build. Leave them off.
+- Measure both runtime and compile time before adding optimisation flags.
+  More inlining and specialisation can increase code size without making a
+  frame faster.
 - A custom widget without a `widgetContent` key has its ops rebuilt and
   compared every frame, since only building them shows whether what it draws
   changed. That is right for a handful of ops and wasteful for thousands: give
   an op-heavy drawing a key covering everything it reads, and an unchanged key
   skips the rebuild and the repaint. `contentKey` hashes numbers into one.
-- `bytes allocated` from `nano-ui-profile -- <scene> +RTS -s` is the same on
-  every run, so a change to per-frame code that should cost nothing leaves it
-  unchanged to the byte. Check it after restructuring such code: the order of
-  composed store writes, for one, decides what their thunks capture.
+- Compare `bytes allocated` from `cabal run nano-ui-profile -- <scene> +RTS -s`
+  with the same compiler, flags, and scene. Allocation changes can reveal work
+  that timing noise hides, including thunks retained by composed store writes.
 - Compare compile times per module with
   `cabal build <target> --ghc-options="-ddump-timings -ddump-to-file"`.
 
@@ -178,10 +178,9 @@ demo's real event loop.
 
 ### Idle cost
 
-A window nobody is touching should use no CPU and no GPU: the session loop
-blocks in the backend's event wait, and the process makes no context switches.
-Anything that keeps it running shows up as a fraction of a percent in Task
-Manager that never goes away, and on a laptop as battery.
+An idle view should not schedule frames. The session loop blocks in the
+backend's event wait unless an animation, timed wake, or debug readout needs a
+frame. OS events and runtime activity can still wake the process.
 
 Set `NANO_LOOP_TRACE` to see what the loop is doing. About once a second while
 it runs, it prints to stderr the time covered, how many passes it made, how
@@ -218,8 +217,55 @@ misses a loop of short wakes almost entirely. A percentage in Task Manager is
 of the whole machine, so 0.4% on 32 logical processors is an eighth of a
 core.
 
+## Documentation
+
+Hackage can show a package's `README.md` and `CHANGELOG.md` from its source
+distribution. Every package has a regular `README.md` listed under
+`extra-doc-files`; packages with a changelog list that too. Keep these files
+inside the package directory. A symlink outside it depends on the checkout,
+and a checkout without symlink support may contain only the target path. The
+repository's top-level `README.md` is the GitHub front page, and
+`packages/nano-ui/README.md` is the core's page on Hackage, so a change to the
+introduction or the first example belongs in both. Links in a package README
+should use absolute URLs for repository content so they work on Hackage too.
+
+Document exported names with Haddock comments. Explain units, coordinate
+spaces, ownership, defaults, and failure cases where the type does not tell
+the reader. For a variant, link to the base operation and describe the
+difference. A module header should explain when to use the module.
+
+Build a package's documentation and search index with:
+
+```sh
+cabal haddock -j1 <package> --disable-documentation --haddock-quickjump
+```
+
+This omits dependency documentation. Cabal can still rebuild dependencies
+when documentation flags change the build plan. The coverage report lists
+undocumented exports; re-exports may lack documentation if the dependency's
+Haddock files are unavailable. Check the rendered output too: coverage does
+not detect incorrect prose or broken examples.
+
+Comments say what the code does and why, in the present tense. What the code
+used to do belongs in the commit message and the changelog.
+
 ## Releasing
 
 Run `cabal check` in each package directory, then `cabal sdist all`, and build
 the archives from a clean directory. That catches files missing from
-`extra-source-files`, such as C headers and bundled fonts.
+`extra-source-files`, such as C headers and bundled fonts. Check that each
+archive's `README.md` is a regular file with the expected content. For example:
+
+```sh
+tar -tvzf dist-newstyle/sdist/nano-ui-0.1.0.1.tar.gz
+tar -xOf dist-newstyle/sdist/nano-ui-0.1.0.1.tar.gz nano-ui-0.1.0.1/README.md
+```
+
+Repeat for all seven packages, using the versions in their Cabal files.
+Check package-page links and bundled assets from the extracted archives,
+where paths outside the package are unavailable.
+
+`python scripts/check-sdist-docs.py` checks every package's README declaration,
+archive member types, and all listed documents against the working copy,
+including changelogs and the user guide. Run it after `cabal sdist` whenever these
+documents change.

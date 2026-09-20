@@ -338,6 +338,9 @@ import NanoUI.Store
 import NanoUI.Style (FontStyle, FontVariant (..), FontWeight, Theme, defaultLayout, defaultTheme)
 import NanoUI.Types (ImageId)
 
+-- | Register tightly packed RGBA8 pixels under an image id. Width and height
+-- are positive pixel counts. Returns 'False' for invalid data or atlas limits;
+-- success requests a full repaint and wakes the loop.
 {-# INLINE registerImage #-}
 registerImage :: Context -> ImageId -> Int -> Int -> ByteString -> IO Bool
 registerImage ctx iid w h px = do
@@ -347,6 +350,8 @@ registerImage ctx iid w h px = do
   when ok (damageFull ctx >> markDirty ctx)
   pure ok
 
+-- | Register every image and return whether all succeeded. Successful earlier
+-- registrations remain in place if another image fails.
 registerImages :: Foldable f => Context -> f (ImageId, Int, Int, ByteString) -> IO Bool
 registerImages ctx = foldM register True
   where
@@ -354,10 +359,15 @@ registerImages ctx = foldM register True
       result <- registerImage ctx iid w h px
       pure (ok && result)
 
+-- | Current normalised atlas UV bounds, or 'Nothing' for an unknown image.
+-- Atlas growth can change these coordinates; do not cache them across uploads.
 {-# INLINE lookupImageUv #-}
 lookupImageUv :: Context -> ImageId -> IO (Maybe (Float, Float, Float, Float))
 lookupImageUv ctx = Atlas.lookupImageUv (ctxImageAtlas ctx)
 
+-- | Atlas width, height, RGBA8 buffer, and revision for backend upload.
+-- 'Nothing' means no atlas pixels have been allocated. Treat the buffer as
+-- borrowed mutable storage and upload it before further image registration.
 {-# INLINE atlasSnapshot #-}
 atlasSnapshot :: Context -> IO (Maybe (Int, Int, ForeignPtr Word8, Int))
 atlasSnapshot ctx = Atlas.atlasSnapshot (ctxImageAtlas ctx)
@@ -385,6 +395,9 @@ defaultResolveMeasure ctx sz _w _st var txt
   where
     (textFm, scale) = resolveScale ctx sz var
 
+-- | Return a context with size/weight/style/variant font and measurement
+-- callbacks. Use the returned context for later frames; shared text caches
+-- are invalidated at the next frame boundary.
 {-# INLINE withFontResolver #-}
 withFontResolver ::
   Context ->
@@ -393,6 +406,8 @@ withFontResolver ::
   Context
 withFontResolver ctx rf rm = trackMetricSource ctx {ctxResolveFont = rf, ctxResolveMeasure = rm}
 
+-- | Replace base metrics and rebuild default measurement/resolution callbacks.
+-- Returns a configured context sharing the original session state.
 withFontMetrics :: Context -> FontMetrics -> Context
 withFontMetrics ctx fm =
   let ctx' =
@@ -405,6 +420,7 @@ withFontMetrics ctx fm =
         , ctxResolveMeasure = defaultResolveMeasure ctx'
         }
 
+-- | Replace monospace metrics and rebuild default font-resolution callbacks.
 withMonoFontMetrics :: Context -> FontMetrics -> Context
 withMonoFontMetrics ctx mono =
   let ctx' = ctx {ctxMonoFontMetrics = mono}
@@ -413,6 +429,8 @@ withMonoFontMetrics ctx mono =
         , ctxResolveMeasure = defaultResolveMeasure ctx'
         }
 
+-- | Replace proportional text measurement, returning logical width/height.
+-- The callback must agree with the font used for painting.
 withMeasureText :: Context -> (Text -> IO (Float, Float)) -> Context
 withMeasureText ctx fn =
   let ctx' = ctx {ctxMeasureText = fn}
@@ -461,6 +479,8 @@ cacheMeasureText ref scale base txt = do
       modifyIORef' ref (HashMap.insert key sz)
       pure sz
 
+-- | Install measurement under a scale-specific cache key when caching is
+-- enabled. Otherwise install the callback directly.
 wrapMeasureCache :: Float -> Context -> (Text -> IO (Float, Float)) -> Context
 wrapMeasureCache scale ctx measure =
   case ctxMeasureCache ctx of
@@ -476,6 +496,8 @@ invalidateTextCaches ctx = do
   writeIORef (ctxLayoutCache ctx) Nothing
   modifyIORef' (ctxMetricGen ctx) (+ 1)
 
+-- | Clear measurement, text-placement, and whole-layout caches and advance the
+-- metric generation. Does not itself request a repaint or wake the loop.
 clearMeasureCache :: Context -> IO ()
 clearMeasureCache ctx = do
   -- Store the evaluated source so 'ensureMetricCaches' can match its identity.
@@ -486,17 +508,19 @@ clearMeasureCache ctx = do
     Just ref -> writeIORef ref HashMap.empty
     Nothing -> pure ()
 
+-- | Configure text spans for a host that paints text separately. Use the
+-- returned context; this does not replace its font metrics.
 withExternalText :: Context -> Bool -> Context
 withExternalText ctx ext = ctx {ctxExternalText = ext}
 
--- | Configure a context's theme. Goes through 'setTheme' so a theme swapped
--- between frames invalidates the caches keyed on it, drawing-op caches
--- included, instead of leaving widgets painting the previous theme.
+-- | Apply 'setTheme' and return the same context for configuration pipelines.
 withTheme :: Context -> Theme -> IO Context
 withTheme ctx theme = do
   setTheme ctx theme
   pure ctx
 
+-- | Change the base theme, invalidate text/layout caches, and request a full
+-- repaint. An equal theme is a no-op.
 setTheme :: Context -> Theme -> IO ()
 setTheme ctx th = do
   cur <- readIORef (ctxTheme ctx)
@@ -506,12 +530,17 @@ setTheme ctx th = do
     damageFull ctx
     markDirty ctx
 
+-- | Base session theme. Use 'currentTheme' to include the current paint scope.
 getTheme :: Context -> IO Theme
 getTheme ctx = readIORef (ctxTheme ctx)
 
+-- | Install clipboard read/write callbacks. 'Nothing' means no text is
+-- available; a write returns 'False' when refused or unsupported.
 withClipboard :: Context -> IO (Maybe Text) -> (Text -> IO Bool) -> Context
 withClipboard ctx getter setter = ctx {ctxClipboardGet = getter, ctxClipboardSet = setter}
 
+-- | Enable memoised text measurement, or return an already cached context.
+-- Use the returned context for subsequent frames.
 enableMeasureCache :: Context -> IO Context
 enableMeasureCache ctx =
   case ctxMeasureCache ctx of
@@ -520,6 +549,8 @@ enableMeasureCache ctx =
       ref <- newIORef HashMap.empty
       pure ctx {ctxMeasureCache = Just ref, ctxMeasureText = cacheMeasureText ref 0 (ctxMeasureText ctx)}
 
+-- | Store one host value per runtime type. Replaces only the value of that
+-- type; other host entries remain available. Does not wake the loop.
 {-# INLINE setHost #-}
 setHost :: forall a. (Typeable a) => Context -> a -> IO ()
 setHost ctx val = do
@@ -545,6 +576,7 @@ setDrawSquareGeometry ctx = Draw.setDrawSquareGeometry (ctxDrawArena ctx)
 setDrawExternalText :: Context -> Bool -> IO ()
 setDrawExternalText ctx = Draw.setDrawExternalText (ctxDrawArena ctx)
 
+-- | Retrieve the host value of the requested type, or 'Nothing' if absent.
 {-# INLINE askHostIO #-}
 askHostIO :: forall a. (Typeable a) => Context -> IO (Maybe a)
 askHostIO ctx = do
@@ -552,10 +584,12 @@ askHostIO ctx = do
   let k = typeRep (Proxy :: Proxy a)
   pure (Map.lookup k m >>= fromDynamic)
 
+-- | Queue a message for this frame. 'drainMessages' restores emission order.
 {-# INLINE pushMessage #-}
 pushMessage :: Context -> FrameMsg -> IO ()
 pushMessage ctx msg = modifyIORef' (ctxMessages ctx) (msg :)
 
+-- | Read queued messages in emission order and clear the queue.
 {-# INLINE drainMessages #-}
 drainMessages :: Context -> IO [FrameMsg]
 drainMessages ctx = do
@@ -567,6 +601,9 @@ drainMessages ctx = do
 -- Constructors
 -- =============================================================================
 
+-- | Fresh headless context with default theme, 12-unit monospace metrics,
+-- empty state, and no native clipboard or wake callbacks. Backends configure
+-- it before the first frame; each independent session needs its own context.
 newContext :: IO Context
 newContext = do
   nodeArena <- newNodeArena
@@ -661,6 +698,8 @@ newContext = do
         }
   pure ctx
 
+-- | Headless context configured for external text, 16-unit monospace metrics,
+-- and cached measurement. Used as a starting point by pixel-based hosts.
 newPixelHostContext :: IO Context
 newPixelHostContext = do
   ctx0 <- newContext
@@ -671,6 +710,7 @@ newPixelHostContext = do
 -- Focus
 -- =============================================================================
 
+-- | Keyboard-focused widget, or @WidgetId 0@ when none has focus.
 {-# INLINE getFocusId #-}
 getFocusId :: Context -> IO WidgetId
 getFocusId ctx = readIORef (ctxFocusId ctx)
@@ -681,6 +721,7 @@ getFocusId ctx = readIORef (ctxFocusId ctx)
 getFocusVisible :: Context -> IO Bool
 getFocusVisible ctx = readIORef (ctxFocusVisible ctx)
 
+-- | Hovered widget selected by the frame, or @WidgetId 0@ for none.
 {-# INLINE getHotId #-}
 getHotId :: Context -> IO WidgetId
 getHotId ctx = readIORef (ctxHotId ctx)
@@ -704,6 +745,8 @@ registerFocusable ctx wid = do
     writePrimArray arr' idx wid
     writeIORef (ctxFocusablesCount ctx) (idx + 1)
 
+-- | Copy this frame's registered focus ids in declaration order. Modal
+-- filtering is applied separately when moving focus.
 {-# INLINE getFocusables #-}
 getFocusables :: Context -> IO [WidgetId]
 getFocusables ctx = do

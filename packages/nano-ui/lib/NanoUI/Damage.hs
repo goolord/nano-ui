@@ -1,3 +1,5 @@
+-- | Compare completed frames and explicit invalidations to choose repaint bounds.
+-- Damage is computed before painting so retained backends can redraw only a clip.
 module NanoUI.Damage
   ( updatePrevRects
   , floatingPanelRects
@@ -210,6 +212,7 @@ floatingPanelsInOrder ctx = foldNodeRevM na step []
               rect <- getNodeRect na idx
               pure ((intKey wid, rect) : acc)
 
+-- | Current floating-panel bounds keyed by widget id, in logical window coordinates.
 floatingPanelRects :: Context -> IO (IM.IntMap Rect)
 floatingPanelRects ctx = IM.fromList <$> floatingPanelsInOrder ctx
 

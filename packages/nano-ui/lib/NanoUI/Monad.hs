@@ -114,8 +114,11 @@ import NanoUI.Style (Layout, Theme, disabledTheme)
 import NanoUI.Input (Input (..), inputMousePos, inputWindowSize, stripInteractionInput)
 import NanoUI.Types (DamageBounds, Rect, Size (..), V2)
 
+-- | A view with UI operations and IO. Backend runners execute it as frames
+-- are needed; local-state changes can trigger a second pass within a frame.
 type NanoUI = Eff '[Ui, IOE]
 
+-- | Access to the current context, routed input, layout defaults, and widget ids.
 data Ui :: Effect
 
 type instance DispatchOf Ui = Static WithSideEffects
@@ -126,6 +129,8 @@ type instance DispatchOf Ui = Static WithSideEffects
 -- only if something inside asks.
 data instance StaticRep Ui = UiRep !Context !Input Input !Layout
 
+-- | Interpret UI operations using a context and input. This runs the view only;
+-- use a backend or @runFrame@ to reset arenas, solve layout, and paint.
 {-# INLINE runUi #-}
 runUi :: IOE :> es => Context -> Input -> Eff (Ui : es) a -> Eff es a
 runUi ctx inp ui = do
@@ -134,10 +139,13 @@ runUi ctx inp ui = do
   page <- unsafeEff_ (routedInput ctx 0 inp)
   evalStaticRep (UiRep ctx page inp lay) ui
 
+-- | Run 'runUi' in IO for the standard 'NanoUI' effect stack.
 {-# INLINE runNanoUI #-}
 runNanoUI :: Context -> Input -> NanoUI a -> IO a
 runNanoUI ctx inp = runEff . runUi ctx inp
 
+-- | Perform IO while building a view. The action runs on every frame that
+-- reaches it; guard one-shot effects with a button or another event.
 {-# INLINE uiIO #-}
 uiIO :: Ui :> es => IO a -> Eff es a
 uiIO m = do
@@ -151,6 +159,7 @@ withContext f = do
   UiRep ctx _ _ _ <- getStaticRep
   unsafeEff_ (f ctx)
 
+-- | Queue a typed message for the frame's reducer, in emission order.
 {-# INLINE emit #-}
 emit :: (Typeable msg, Ui :> es) => msg -> Eff es ()
 emit msg = withContext (\ctx -> pushMessage ctx (FrameMsg msg))
@@ -163,6 +172,8 @@ currentId = do
   ic <- uiIO (readIORef (ctxIdContext ctx))
   pure (idContextWidgetId ic)
 
+-- | Consume the next sibling id. Widgets and state hooks share this sequence,
+-- so conditional calls need their own 'scope'.
 {-# INLINE nextId #-}
 nextId :: Ui :> es => Eff es WidgetId
 nextId = do
@@ -172,7 +183,7 @@ nextId = do
     writeIORef (ctxIdContext ctx) $! ic {siblingId = siblingId ic + 1}
     pure (idContextWidgetId ic)
 
--- | Issue many widget ids in one IO loop (avoids deep Eff bind chains).
+-- | Reserve @n@ sibling ids without returning them. Non-positive counts do nothing.
 {-# INLINE burstNextIds #-}
 burstNextIds :: Ui :> es => Int -> Eff es ()
 burstNextIds n
@@ -183,8 +194,8 @@ burstNextIds n
         let !sid = siblingId ic + fromIntegral n
          in ic {siblingId = sid}
 
--- Run @m@ in the child context from @enter@, then restore the advanced parent
--- (also on exceptions).
+-- | Run in the child context returned by @enter@, then restore its advanced
+-- parent context, including when the action throws an exception.
 {-# INLINE withIdFrame #-}
 withIdFrame ::
   Ui :> es => (IdContext -> (IdContext, IdContext)) -> Eff es a -> Eff es a
@@ -200,6 +211,8 @@ withIdFrame enter m = do
       (\parent' -> writeIORef (ctxIdContext ctx) parent')
       (\_ -> unEff m es)
 
+-- | Give the action a child id sequence while consuming one parent id.
+-- Put conditional content inside this scope to keep later siblings stable.
 {-# INLINE scope #-}
 scope :: Ui :> es => Eff es a -> Eff es a
 scope = withIdFrame (enterScope scopeTag)
@@ -210,40 +223,45 @@ scope = withIdFrame (enterScope scopeTag)
 keyed :: (Hashable k, Ui :> es) => k -> Eff es a -> Eff es a
 keyed k = keyedTag (fromIntegral (hash k))
 
+-- | A keyed child scope using a precomputed 64-bit tag. Tags must be unique
+-- among siblings; use 'withKey' to hash an application key.
 {-# INLINE keyedTag #-}
 keyedTag :: Ui :> es => Word64 -> Eff es a -> Eff es a
 keyedTag tag = withIdFrame (enterKeyed tag)
 
+-- | Alias for 'keyed'. Use a stable item key when a list can be reordered.
 {-# INLINE withKey #-}
 withKey :: (Hashable k, Ui :> es) => k -> Eff es a -> Eff es a
 withKey = keyed
 
+-- | The mutable context for this view. It belongs to the current UI session.
 {-# INLINE askContext #-}
 askContext :: Ui :> es => Eff es Context
 askContext = do
   UiRep ctx _ _ _ <- getStaticRep
   pure ctx
 
+-- | Layout defaults in the current 'withDefaultLayout' scope.
 {-# INLINE askDefaultLayout #-}
 askDefaultLayout :: Ui :> es => Eff es Layout
 askDefaultLayout = do
   UiRep _ _ _ l <- getStaticRep
   pure l
 
+-- | Modify layout defaults for the enclosed action, restoring them on exit.
 {-# INLINE withDefaultLayout #-}
 withDefaultLayout :: Ui :> es => (Layout -> Layout) -> Eff es a -> Eff es a
 withDefaultLayout f = localStaticRep (\(UiRep ctx inp frame l) -> UiRep ctx inp frame (f l))
 
+-- | The context's base font metrics, before per-widget font overrides.
 {-# INLINE uiFontMetrics #-}
 uiFontMetrics :: Ui :> es => Eff es FontMetrics
 uiFontMetrics = fmap ctxFontMetrics askContext
 
 {-# INLINE uiTime #-}
--- | Monotonic seconds since some fixed epoch (process boot), as a 'Double'.
--- Use it for time-based animation math inside the UI effect. It stays in
--- 'Double' on purpose: converting wall-clock seconds to 'Float' loses ~3 ms
--- of resolution at 8 h uptime (worse longer), which is coarser than a frame
--- and quantizes animation sweeps into visible steps.
+-- | Monotonic seconds from an unspecified epoch. Subtract two readings to
+-- measure elapsed time; this is not a wall-clock timestamp. Keep absolute
+-- readings as 'Double' to retain precision during long sessions.
 uiTime :: Ui :> es => Eff es Double
 uiTime = uiIO getMonotonicTime
 
@@ -315,6 +333,8 @@ withPaintScope enter m = do
       (setArenaScope na)
       (\_ -> unEff m es)
 
+-- | Set the session's base theme and request a repaint. Use 'styled' for a
+-- temporary change limited to part of the view.
 {-# INLINE setUiTheme #-}
 setUiTheme :: Ui :> es => Theme -> Eff es ()
 setUiTheme th = withContext (\ctx -> setTheme ctx th)
@@ -325,6 +345,8 @@ setUiTheme th = withContext (\ctx -> setTheme ctx th)
 uiMousePos :: Ui :> es => Eff es V2
 uiMousePos = fmap inputMousePos askInput
 
+-- | Input routed to the current layer. Covered layers receive no pointer;
+-- disabled scopes also remove keyboard and other interaction events.
 {-# INLINE askInput #-}
 askInput :: Ui :> es => Eff es Input
 askInput = do
@@ -347,38 +369,48 @@ askFrameInput = do
 localInput :: Ui :> es => Input -> Eff es a -> Eff es a
 localInput inp = localStaticRep (\(UiRep ctx _ frame l) -> UiRep ctx inp frame l)
 
+-- | The application window's content size in logical pixels.
 {-# INLINE windowSize #-}
 windowSize :: Ui :> es => Eff es Size
 windowSize = fmap inputWindowSize askInput
 
+-- | Width component of 'windowSize', in logical pixels.
 {-# INLINE windowWidth #-}
 windowWidth :: Ui :> es => Eff es Float
 windowWidth = fmap (sizeW . inputWindowSize) askInput
 
+-- | Height component of 'windowSize', in logical pixels.
 {-# INLINE windowHeight #-}
 windowHeight :: Ui :> es => Eff es Float
 windowHeight = fmap (sizeH . inputWindowSize) askInput
 
+-- | Retrieve the host value installed in the context. 'Nothing' means no
+-- value was installed or its runtime type differs from the requested type.
 {-# INLINE askHost #-}
 askHost :: (Typeable a, Ui :> es) => Eff es (Maybe a)
 askHost = withContext askHostIO
 
+-- | Request repaint bounds relative to a widget's rectangle.
 {-# INLINE damageWidgetNow #-}
 damageWidgetNow :: (Ui :> es) => WidgetId -> DamageBounds -> Eff es ()
 damageWidgetNow wid bounds = withContext (\ctx -> damageWidget ctx wid bounds)
 
+-- | 'damageWidgetNow' using the integer store key of a widget.
 {-# INLINE damageKeyNow #-}
 damageKeyNow :: (Ui :> es) => Int -> DamageBounds -> Eff es ()
 damageKeyNow k bounds = withContext (\ctx -> damageKey ctx k bounds)
 
+-- | Request repaint of a rectangle in logical window coordinates.
 {-# INLINE damageRectNow #-}
 damageRectNow :: (Ui :> es) => Rect -> Eff es ()
 damageRectNow r = withContext (\ctx -> damageRect ctx r)
 
+-- | Request repaint bounds for each widget in a group.
 {-# INLINE damageGroupNow #-}
 damageGroupNow :: (Ui :> es) => [WidgetId] -> DamageBounds -> Eff es ()
 damageGroupNow wids bounds = withContext (\ctx -> damagePeers ctx wids bounds)
 
+-- | Request repaint of the entire window, for changes without widget bounds.
 {-# INLINE damageFullNow #-}
 damageFullNow :: (Ui :> es) => Eff es ()
 damageFullNow = withContext damageFull
@@ -387,9 +419,7 @@ damageFullNow = withContext damageFull
 --
 -- Example:
 --
--- @
--- whenM (button "Save") saveDocument
--- @
+-- > whenM (button "Save") saveDocument
 {-# INLINE whenM #-}
 whenM :: Monad m => m Bool -> m () -> m ()
 whenM mb ma = mb >>= \b -> when b ma

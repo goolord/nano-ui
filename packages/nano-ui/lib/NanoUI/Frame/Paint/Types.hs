@@ -1,8 +1,4 @@
--- Shared leaf module for NanoUI.Frame.Paint and its widget painter sibling:
--- both the walker (NanoUI.Frame.Paint) and the chrome painters
--- (NanoUI.Frame.Paint.Widgets) consume the paint env, so the record and its
--- small helpers live here to keep the module graph acyclic (Paint imports
--- Widgets, Widgets imports Types, Paint imports Types).
+-- | Shared paint-pass inputs for the node walker and widget painters.
 module NanoUI.Frame.Paint.Types
   ( PaintEnv (..)
   , buildPaintEnv
@@ -27,13 +23,9 @@ import NanoUI.Layout.Arena
 import NanoUI.Style (Theme)
 import NanoUI.Types (Rect (..))
 
--- | Everything a paint pass needs, bundled so the walker does not re-read the
--- theme IORef (or rebuild arena handles) for every node. Baked once per
--- frame by 'buildPaintEnv'. Fields are lazy: under
--- -funbox-strict-fields a strict paint env would unbox every reachable
--- field of Context/Theme/Style recursively, turning each record selector into
--- a ~100-way case that dominates Core size; lazy fields stay single pointers
--- (all bindings here are already-evaluated values, so no thunks are paid).
+-- | Context, arenas, fonts, and interaction state read once for a paint pass.
+-- Fields retain boxed references so compiler unboxing does not expand the
+-- context and theme records at every recursive call.
 data PaintEnv = PaintEnv
   { peContext :: Context
   , peNodeArena :: NodeArena

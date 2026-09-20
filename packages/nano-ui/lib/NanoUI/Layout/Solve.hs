@@ -168,6 +168,8 @@ import NanoUI.Frame.Scroll.Geometry
   , scrollPolicyY
   )
 
+-- | Resolve size, weight, slant, and variant to metrics plus logical-pixel
+-- text measurement. Size zero requests the backend default.
 type FontResolver = Float -> FontWeight -> FontStyle -> FontVariant -> IO (FontMetrics, Text -> IO (Float, Float))
 
 -- | Per-solve constants threaded through the measure and position passes.
@@ -268,6 +270,9 @@ measureTextNodeAt env idx txt outerW shouldWrap = do
 wrapsNarrower :: Bool -> Float -> Float -> Bool
 wrapsNarrower allowed wrapW lineW = allowed && wrapW + 0.5 < lineW && wrapW > 0
 
+-- | Measure nodes and place the page within the supplied logical width/height.
+-- The view must have finished adding nodes. Place floating nodes separately
+-- with 'placeModals', 'placeWindows', and 'placePopups', then apply scrolling.
 solveLayout :: NodeArena -> Measurers -> Float -> Float -> IO ()
 solveLayout na ms rootW rootH =
   withArenaArraysSnap na $ do
@@ -366,13 +371,15 @@ measureCustomNode na fm measureFn idx = do
 
 -- | The width a text node that is not a row's child wraps at, from its
 -- effective max width, width sizing and assigned width: 1e8 or more when
--- nothing caps it ('collectNodeTextSpans').
+-- nothing caps it (@collectNodeTextSpans@ in the text-span collector).
 textWrapCap :: Float -> SizingTag -> Float -> Float
 textWrapCap effMaxW wTag w
   | effMaxW < 1e8 = max 0 effMaxW
   | wTag == SizingGrow && w > 0 = w
   | otherwise = effMaxW
 
+-- | Find the nearest ancestor's fixed or finite maximum width, subtracting
+-- accumulated horizontal padding. Returns 1e9 when none constrains the node.
 findAncestorMaxW :: NodeArena -> NodeIdx -> IO Float
 findAncestorMaxW na idx = go idx 0
   where
@@ -1669,7 +1676,7 @@ alignY AlignBaseline cy _ _ = cy
 -- | Distance from the top of node @ci@, laid out @h@ tall, to its first
 -- baseline, as in CSS:
 --
--- * text: its first line's, where paint puts it ('collectNodeTextSpans'). One
+-- * text: its first line's, where the text-span collector puts it. One
 --   line is centered in the box, and wrapped lines start at the top. Paint
 --   wraps at explicit newlines, and outside a row where the line overflows
 --   'textWrapCap'.
@@ -1745,6 +1752,8 @@ childBaseline env@SolveEnv {seArena = na, seArrays = a, seFm = defaultFm, seReso
   where
     textBaseline fm boxH = centeredTextY fm 0 boxH (fmLineHeight fm) + fmAscent fm
 
+-- | Centre measured modals within logical window width/height and lay out
+-- their children, leaving the standard window margin where space permits.
 placeModals :: NodeArena -> Measurers -> Float -> Float -> IO ()
 placeModals na ms winW winH = do
   env <- solveEnv na ms
@@ -1761,6 +1770,9 @@ placeModals na ms winW winH = do
           y = max 0 ((winH - h) / 2)
       positionNodeA env 0 idx x y w h
 
+-- | Place measured floating windows using saved positions and sizes, with
+-- defaults near the top-right. Callbacks return x/y then width/height pairs;
+-- all values use logical pixels.
 placeWindows ::
   NodeArena ->
   Measurers ->
@@ -1805,6 +1817,9 @@ clampPopupX margin winW iw x0
   | x0 < margin && x0 + iw <= winW = max 0 x0
   | otherwise = max margin (min (winW - iw - margin) x0)
 
+-- | Popup origin from window width/height, margin, popup width/height, anchor,
+-- preferred placement, and gap. All coordinates use logical pixels.
+-- Flips or clamps placement to the available window space.
 computePopupPosition ::
   Float ->
   Float ->
@@ -1881,6 +1896,8 @@ computePopupPosition winW winH margin iw ih anchor placement offset =
     -- Keep the popup's top edge within the window margins.
     clampY y = max margin (min (winH - ih - margin) y)
 
+-- | Place measured popups using their registered anchor/side/gap, then lay out
+-- their children. Missing registrations use the origin with automatic placement.
 placePopups ::
   NodeArena ->
   Measurers ->

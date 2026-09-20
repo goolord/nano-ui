@@ -1,5 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 
+-- | Text tables described by Colonnade columns, with sorting, frozen panes,
+-- column resizing/reordering, and row virtualisation.
 module NanoUI.Widgets.Table
   ( SortDir (..)
   , SortCol (..)
@@ -79,15 +81,20 @@ tableFillInner hasStretch outer =
       Grow _ -> True
       _ -> False
 
+-- | Ascending or descending text order.
 data SortDir = SortAsc | SortDesc
   deriving (Eq, Show, Enum, Bounded)
 
+-- | Sort column by zero-based source-column index, independent of display order.
 data SortCol = SortCol {sortColIndex :: !Int, sortColDir :: !SortDir}
   deriving (Eq, Show)
 
+-- | Size to content, share spare space, or request a fixed logical-pixel width.
 data ColSize = ColContent | ColStretch | ColFixed Float
   deriving (Eq, Show)
 
+-- | Frozen leading row/column counts, column sizing, and hidden source-column
+-- indices. Column indices are zero-based; unspecified sizes use content sizing.
 data TableConfig = TableConfig
   { tableFreezeCols :: {-# UNPACK #-} !Int
   , tableFreezeRows :: {-# UNPACK #-} !Int
@@ -96,9 +103,12 @@ data TableConfig = TableConfig
   }
   deriving (Eq, Show)
 
+-- | No frozen or hidden rows/columns and content-sized columns.
 defaultTableConfig :: TableConfig
 defaultTableConfig = TableConfig 0 0 [] IS.empty
 
+-- | Widget interaction plus updated sort, display order, and hidden-column set.
+-- Indices refer to the original column definitions.
 data TableResponse = TableResponse
   { tableWidgetResponse :: !Response
   , tableSort :: !SortCol
@@ -111,6 +121,7 @@ instance HasResponse TableResponse where
   {-# INLINE toResponse #-}
   toResponse = tableWidgetResponse
 
+-- | Hidden source-column indices in ascending order.
 tableHiddenIndices :: TableResponse -> [Int]
 tableHiddenIndices = IS.toAscList . tableHiddenCols
 
@@ -133,6 +144,8 @@ sortMarkStyle sort idx
   | sortColDir sort == SortDesc = 2 `shiftL` 16
   | otherwise = 1 `shiftL` 16
 
+-- | Stable sort by the selected column's rendered text, not numeric value.
+-- Out-of-range column indices are clamped; with no columns, input order is retained.
 sortRows :: Foldable f => Colonnade Headed row Text -> SortCol -> f row -> [row]
 sortRows cols sort inputRows =
   let rows = toList inputRows
@@ -188,6 +201,7 @@ nextSortCol n cur clicked =
         then SortCol clicked (case sortColDir clamped of SortAsc -> SortDesc; SortDesc -> SortAsc)
         else SortCol clicked SortAsc
 
+-- | Local sort state and setter. Call in a stable hook position each frame.
 useTableSort :: Ui :> es => SortCol -> Eff es (SortCol, SortCol -> Eff es ())
 useTableSort initial = do
   (packed, setPacked) <- useInt (packSort initial)

@@ -140,6 +140,7 @@ joinLines lns =
           frozen <- A.unsafeFreeze dest
           pure (Text frozen 0 total)
 
+-- | Lines in document order without newline separators. Allocates the list spine.
 toLines :: TextBuffer -> [Text]
 toLines = toList . bufferLines
 
@@ -147,9 +148,11 @@ toLines = toList . bufferLines
 lineAt :: Int -> TextBuffer -> Text
 lineAt row buf = fromMaybe T.empty (Seq.lookup row (bufferLines buf))
 
+-- | Current zero-based row and character column.
 getCursor :: TextBuffer -> Cursor
 getCursor = bufferCursor
 
+-- | Line count in O(1), including the one empty line of an empty buffer.
 getLineCount :: TextBuffer -> Int
 getLineCount = Seq.length . bufferLines
 
@@ -181,9 +184,13 @@ withCursor cur buf =
 -- Navigation
 --------------------------------------------------------------------------------
 
+-- | Move one character left, crossing to the preceding line at column zero.
+-- Stops at the document start.
 moveLeft :: TextBuffer -> TextBuffer
 moveLeft buf = withCursor (positionLeft buf (getCursor buf)) buf
 
+-- | Move one character right, crossing to the next line at line end.
+-- Stops at the document end.
 moveRight :: TextBuffer -> TextBuffer
 moveRight buf = withCursor (positionRight buf (getCursor buf)) buf
 
@@ -199,9 +206,11 @@ positionRight buf (Cursor row col)
   | row + 1 < getLineCount buf = Cursor (row + 1) 0
   | otherwise = Cursor row col
 
+-- | Move up one row, retaining the preferred column and clamping to line length.
 moveUp :: TextBuffer -> TextBuffer
 moveUp = moveByRow (-1)
 
+-- | Move down one row, retaining the preferred column and clamping to line length.
 moveDown :: TextBuffer -> TextBuffer
 moveDown = moveByRow 1
 
@@ -211,17 +220,21 @@ moveByRow d buf =
       goal = preferredCol buf
    in buf {bufferCursor = clampCursor buf (Cursor (row + d) goal)}
 
+-- | Move to column zero of the current line.
 moveToBOL :: TextBuffer -> TextBuffer
 moveToBOL buf = withCursor (Cursor (cursorRow (getCursor buf)) 0) buf
 
+-- | Move just past the last character of the current line.
 moveToEOL :: TextBuffer -> TextBuffer
 moveToEOL buf =
   let row = cursorRow (getCursor buf)
    in withCursor (Cursor row (T.length (lineAt row buf))) buf
 
+-- | Move to the document start, resetting the preferred column.
 moveToTop :: TextBuffer -> TextBuffer
 moveToTop = withCursor (Cursor 0 0)
 
+-- | Move to the document end, resetting the preferred column.
 moveToBottom :: TextBuffer -> TextBuffer
 moveToBottom buf = withCursor (documentEnd buf) buf
 
@@ -304,9 +317,12 @@ insertableText = T.filter (\c -> isPrint c || c == '\t' || c == '\n') . T.replac
 -- Selection
 --------------------------------------------------------------------------------
 
+-- | Order two selection endpoints from earlier to later without clamping them.
 selectionRange :: Cursor -> Cursor -> (Cursor, Cursor)
 selectionRange a b = (min a b, max a b)
 
+-- | Text between clamped, ordered endpoints. Selection is half-open and
+-- includes newline separators crossed by the range.
 selectedText :: Cursor -> Cursor -> TextBuffer -> Text
 selectedText a b buf =
   let (lo, hi) = selectionRange (clampCursor buf a) (clampCursor buf b)
@@ -321,6 +337,7 @@ textRange (Cursor loRow loCol) (Cursor hiRow hiCol) buf
       let middle = toList (Seq.take (hiRow - loRow - 1) (Seq.drop (loRow + 1) (bufferLines buf)))
        in T.intercalate "\n" (T.drop loCol (lineAt loRow buf) : middle ++ [T.take hiCol (lineAt hiRow buf)])
 
+-- | Position immediately after the final character of the last line.
 documentEnd :: TextBuffer -> Cursor
 documentEnd buf =
   let row = getLineCount buf - 1

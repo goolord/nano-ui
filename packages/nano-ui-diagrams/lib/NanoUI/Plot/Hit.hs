@@ -40,8 +40,10 @@ hitTestChartCached dw dh (x0, x1) (y0, y1) domains points widgetRect mouse
   lx = realToFrac (v2X mouse - rectX inner)
   ly = realToFrac (v2Y mouse - rectY inner)
 
--- | The data point nearest a position in the unit plot box, given the chart's
--- domains and each series' drawn points.
+-- | The nearest drawn point to a position in the unit plot box. Distance is
+-- measured in data coordinates, not screen pixels, with no distance cutoff.
+-- Ties keep the earlier series/point. Returns 'Nothing' outside the unit box
+-- or when every series is empty.
 nearestPlotHover :: (Domain, Domain) -> [U.Vector (Double, Double)] -> Double -> Double -> Maybe PlotHover
 nearestPlotHover (xDom, yDom) points gx gy
   | gx < 0 || gx > 1 || gy < 0 || gy > 1 = Nothing

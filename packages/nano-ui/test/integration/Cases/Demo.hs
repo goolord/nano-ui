@@ -241,8 +241,7 @@ runColorPickerDragAfterFieldTest ctx failed = do
   -- it at 204.
   assert failed (colorR col < 60)
 
--- respChanged fires on the frame the colour moves and not on later frames
--- (regression: it compared the colour against the initial one). A key step
+-- respChanged fires on the frame the colour moves and not on later frames. A key step
 -- commits at once: the base colour follows the live one.
 runColorPickerChangeOnceTest :: Context -> IORef Int -> IO ()
 runColorPickerChangeOnceTest ctx failed = do

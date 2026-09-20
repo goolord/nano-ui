@@ -65,22 +65,28 @@ registerIn field setField ctx wid v =
   modifyIORef' (ctxDrawingCache ctx) $ \dc ->
     setField (IM.insert (intKey wid) v (field dc)) dc
 
+-- | Register a popup anchor, preferred placement, and logical-pixel offset
+-- for the current view pass.
 {-# INLINE registerPopupConfig #-}
 registerPopupConfig :: Context -> WidgetId -> PopupAnchor -> PopupPlacement -> Float -> IO ()
 registerPopupConfig ctx wid anchor placement offset =
   registerIn dcsPopupConfigs (\m dc -> dc {dcsPopupConfigs = m}) ctx wid (PopupConfig anchor placement offset)
 
+-- | Current popup placement registration, or 'Nothing' for an unregistered id.
 {-# INLINE lookupPopupConfig #-}
 lookupPopupConfig :: Context -> WidgetId -> IO (Maybe (PopupAnchor, PopupPlacement, Float))
 lookupPopupConfig ctx wid =
   fmap (\(PopupConfig anchor placement offset) -> (anchor, placement, offset))
     <$> lookupIn dcsPopupConfigs ctx wid
 
+-- | Register a draw builder and content version. Change the version when
+-- captured content changes without a size change.
 {-# INLINE registerDrawing #-}
 registerDrawing :: Context -> WidgetId -> Int -> DrawingBuild -> IO ()
 registerDrawing ctx wid content build =
   registerIn dcsDrawings (\m dc -> dc {dcsDrawings = m}) ctx wid (DrawingEntry content build)
 
+-- | Current drawing registration, or 'Nothing'.
 {-# INLINE lookupDrawing #-}
 lookupDrawing :: Context -> WidgetId -> IO (Maybe DrawingEntry)
 lookupDrawing = lookupIn dcsDrawings
@@ -156,6 +162,8 @@ cachedWidgetLayout ctx wid dw dh lh content incoming compute = do
           }
       pure out
 
+-- | Cached drawing-envelope width/height if line height, content key, and
+-- input layout still match. 'Nothing' requires measuring the envelope again.
 lookupDrawFitEnvelope ::
   Context ->
   WidgetId ->
@@ -173,7 +181,7 @@ lookupDrawFitEnvelope ctx wid lh content incoming = do
           Just (dfcDw e, dfcDh e)
     _ -> Nothing
 
--- | Drop cached ops for drawings that did not rebuild this frame.
+-- | Drop cached ops for drawings not registered in the current view pass.
 pruneDrawOpCache :: Context -> IO ()
 pruneDrawOpCache ctx =
   modifyIORef' (ctxDrawingCache ctx) $ \dc ->
@@ -185,11 +193,14 @@ pruneDrawOpCache ctx =
           , dcsDrawFitCache = dcsDrawFitCache dc `IM.intersection` live
           }
 
+-- | Register an interaction-aware painter. A nonzero content key must cover
+-- its external inputs; zero requests rebuilding and comparison each frame.
 {-# INLINE registerCustomDrawing #-}
 registerCustomDrawing :: Context -> WidgetId -> Int -> CustomDrawBuild -> IO ()
 registerCustomDrawing ctx wid content build =
   registerIn dcsCustomDrawings (\m dc -> dc {dcsCustomDrawings = m}) ctx wid (CustomDrawingEntry content build)
 
+-- | Current custom painter and content key, or 'Nothing'.
 {-# INLINE lookupCustomDrawing #-}
 lookupCustomDrawing :: Context -> WidgetId -> IO (Maybe CustomDrawingEntry)
 lookupCustomDrawing = lookupIn dcsCustomDrawings
@@ -296,30 +307,38 @@ drawingOpsStale ctx wid content rect = do
     Just DrawOpCacheEntry {doeContent = c, doeBounds = r} -> c /= content && r == rect
     Nothing -> False
 
+-- | Register a widget measurement callback for the current view pass.
 {-# INLINE registerCustomMeasure #-}
 registerCustomMeasure :: Context -> WidgetId -> CustomMeasureFn -> IO ()
 registerCustomMeasure = registerIn dcsCustomMeasures (\m dc -> dc {dcsCustomMeasures = m})
 
+-- | Registered measurement callback, or 'Nothing' for default layout sizing.
 {-# INLINE lookupCustomMeasure #-}
 lookupCustomMeasure :: Context -> WidgetId -> IO (Maybe CustomMeasureFn)
 lookupCustomMeasure = lookupIn dcsCustomMeasures
 
+-- | Register cursor selection from a custom widget's interaction state.
 {-# INLINE registerCustomCursor #-}
 registerCustomCursor :: Context -> WidgetId -> (CustomDrawContext -> UiCursorKind) -> IO ()
 registerCustomCursor = registerIn dcsCustomCursors (\m dc -> dc {dcsCustomCursors = m})
 
+-- | Registered cursor selector, or 'Nothing'.
 {-# INLINE lookupCustomCursor #-}
 lookupCustomCursor :: Context -> WidgetId -> IO (Maybe (CustomDrawContext -> UiCursorKind))
 lookupCustomCursor = lookupIn dcsCustomCursors
 
+-- | Register extra logical-pixel repaint margin for a custom widget's overdraw.
 {-# INLINE registerCustomDamageSlop #-}
 registerCustomDamageSlop :: Context -> WidgetId -> Float -> IO ()
 registerCustomDamageSlop = registerIn dcsCustomDamageSlop (\m dc -> dc {dcsCustomDamageSlop = m})
 
+-- | Registered repaint margin, or 'Nothing' when no override exists.
 {-# INLINE lookupCustomDamageSlop #-}
 lookupCustomDamageSlop :: Context -> WidgetId -> IO (Maybe Float)
 lookupCustomDamageSlop = lookupIn dcsCustomDamageSlop
 
+-- | Clear per-pass registrations while retaining compiled ops and fitted
+-- layouts. Call before rebuilding the view, then prune caches against new registrations.
 resetDrawingScopeCache :: Context -> IO ()
 resetDrawingScopeCache ctx =
   modifyIORef' (ctxDrawingCache ctx) $ \dc ->

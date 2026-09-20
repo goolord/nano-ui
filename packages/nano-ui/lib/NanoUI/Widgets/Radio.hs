@@ -1,5 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 
+-- | Controlled radio groups over zero-based option indices or bounded enum values.
 module NanoUI.Widgets.Radio
   ( radio
   , radio'
@@ -45,6 +46,7 @@ radioSalt = hash ("radio" :: Text)
 radio :: (Foldable f, Ui :> es) => f Text -> Int -> Eff es Int
 radio options index = snd <$> radio' options index
 
+-- | 'radio' returning the group response and selected option index.
 radio' ::
   (Foldable f, Ui :> es) => f Text -> Int -> Eff es (Response, Int)
 radio' options index =
@@ -93,6 +95,7 @@ addRadioOptions sel opts = foldM addOption (mempty, -1) (zip [0 ..] opts)
 boundedRadio :: (Bounded a, Enum a, Ui :> es) => (a -> Text) -> a -> Eff es a
 boundedRadio encode value = snd <$> boundedRadio' encode value
 
+-- | 'boundedRadio' returning the response and selected enum value.
 boundedRadio' :: (Bounded a, Enum a, Ui :> es) => (a -> Text) -> a -> Eff es (Response, a)
 boundedRadio' encode value = withBoundedIndex encode value radio'
 
@@ -101,5 +104,6 @@ boundedRadio' encode value = withBoundedIndex encode value radio'
 enumRadio :: (Bounded a, Enum a, Show a, Ui :> es) => a -> Eff es a
 enumRadio = boundedRadio (T.pack . show)
 
+-- | 'enumRadio' returning the response and selected enum value.
 enumRadio' :: (Bounded a, Enum a, Show a, Ui :> es) => a -> Eff es (Response, a)
 enumRadio' = boundedRadio' (T.pack . show)

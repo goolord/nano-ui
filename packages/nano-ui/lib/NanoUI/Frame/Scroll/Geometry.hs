@@ -62,15 +62,13 @@ data ScrollConfig = ScrollConfig
   { scrollPolicyX :: !ScrollPolicy
   , scrollPolicyY :: !ScrollPolicy
   , scrollClamp :: !Bool
-  -- | A bare scroller paints no well of its own: no input background, no
-  -- border, no window fill. Only the clipped children render, so a strip that
-  -- borrows the scroller for its offset and clip (tab headers) looks exactly
-  -- like it did before it started scrolling. Chrome policies still apply on
-  -- top: 'ScrollHidden' plus bare is the fully chrome-less scroller.
+  -- | Paint only clipped children, without a background or border. Scrollbar
+  -- policies still apply; combine with 'ScrollHidden' to omit all chrome.
   , scrollBare :: !Bool
   }
   deriving (Eq, Show)
 
+-- | Automatic bars on both axes, clamped offsets, and a painted background.
 defaultScrollConfig :: ScrollConfig
 defaultScrollConfig =
   ScrollConfig
@@ -223,6 +221,7 @@ scrollChromeActive :: ScrollConfig -> DirTag -> Float -> Float -> Bool
 scrollChromeActive cfg dir contentSize innerMain =
   scrollShowsChrome cfg dir && scrollAxisOverflows (scrollPolicyFor cfg dir) contentSize innerMain
 
+-- | Logical window-space track/thumb bounds and the maximum scroll offset.
 data ScrollBarLayout = ScrollBarLayout
   { sbTrack :: Rect
   , sbThumb :: Rect
@@ -303,6 +302,9 @@ scrollChromeLane slot dir x y w h pad =
         DirRow ->
           Rect (x + padL pad) (max y (y + h - inset (padB pad) - barW)) (max 0 (w - padL pad - padR pad)) barW
 
+-- | Track and thumb from slot, axis, x/y/width/height, padding, content extent,
+-- and current offset. Lengths use logical pixels; 'Nothing' means no usable
+-- scrollbar is needed or fits. Use 'scrollBarLayoutIn' for a reduced viewport.
 scrollBarLayout ::
   ScrollBarSlot ->
   DirTag ->

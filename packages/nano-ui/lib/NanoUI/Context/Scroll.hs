@@ -76,6 +76,8 @@ snapScrollOffset ctx v = do
   s <- Draw.getDrawSnapScale (ctxDrawArena ctx)
   pure (onGrid s v)
 
+-- | Pixel-snapped main-axis offset of a 1D scroller, or vertical offset of a
+-- text area/2D scroller. Defaults to zero before state exists.
 getScrollOffset :: Context -> WidgetId -> IO Float
 getScrollOffset ctx wid = do
   s <- getStore ctx
@@ -126,6 +128,8 @@ writeScrollOffset ctx wid off = do
                   . insertSlot fieldFloat (slotKey SlotScrollCross yKey) off
                   $ moved
 
+-- | Pixel-snapped x/y offset for text areas and 2D scrollers. For a 1D
+-- scroller, the fallback stores cross-axis in x and main-axis in y.
 getScrollOffset2D :: Context -> WidgetId -> IO V2
 getScrollOffset2D ctx wid = do
   s <- getStore ctx
@@ -177,6 +181,8 @@ writeScrollOffset2D ctx wid off = do
             . insertSlot fieldFloat crossKey (v2X off)
             $ store
 
+-- | Link a two-axis body with a separate horizontal scroller, such as a table
+-- header. Arguments are body id then horizontal id; synchronises their x offsets.
 linkScrollAxes :: Context -> WidgetId -> WidgetId -> IO ()
 linkScrollAxes ctx yWid xWid = do
   let yKey = intKey yWid
@@ -195,6 +201,7 @@ storedScrollConfig :: Int -> WidgetStore -> ScrollConfig
 storedScrollConfig key =
   decodeScrollConfig . findSlot fieldInt (encodeScrollConfig defaultScrollConfig) (slotKey SlotScrollCfg key)
 
+-- | Store axis, clamping, and chrome policy for a scroller. Equal settings are a no-op.
 setScrollConfig :: Context -> WidgetId -> ScrollConfig -> IO ()
 setScrollConfig ctx wid cfg =
   writeSlots ctx $
@@ -499,6 +506,7 @@ scrollTargetOffset ctx wid fallback = do
   st <- readIORef (ctxScrollState ctx)
   pure (maybe fallback sgTarget (IM.lookup (intKey wid) (ssGlides st)))
 
+-- | Whether a smooth-scroll target is pending for this widget.
 scrollGliding :: Context -> WidgetId -> IO Bool
 scrollGliding ctx wid =
   IM.member (intKey wid) . ssGlides <$> readIORef (ctxScrollState ctx)
@@ -515,6 +523,7 @@ clampScrollGlide ctx wid range =
   where
     clampGlide g = g {sgTarget = projectAxes (sgAxes g) (clampScrollOffset range (sgTarget g))}
 
+-- | Remove the pending glide, leaving the current offset unchanged.
 cancelScrollGlide :: Context -> WidgetId -> IO ()
 cancelScrollGlide ctx wid =
   modifyIORef' (ctxScrollState ctx) $ \st ->

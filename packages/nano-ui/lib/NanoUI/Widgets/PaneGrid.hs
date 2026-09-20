@@ -175,7 +175,7 @@ data PaneGridConfig es = PaneGridConfig
   , pgSpacing :: !Float
     -- ^ Gutter between panes per split level (default 4).
   , pgMinSize :: !Float
-    -- ^ Minimum physical size any pane may shrink to (default 40).
+    -- ^ Minimum size in logical pixels any pane may shrink to (default 40).
   , pgLeeway :: !Float
     -- ^ Extra grab margin on each side of a divider, added to 'pgSpacing' to
     -- form the divider's real layout gutter. The resize cursor and grab work
@@ -190,6 +190,8 @@ data PaneGridConfig es = PaneGridConfig
     -- ^ Renders the content of one pane.
   }
 
+-- | Default spacing and drag margins with empty pane bodies. Set 'pgViewPane'
+-- to render application content and 'pgLayout' to constrain the grid.
 defaultPaneGridConfig :: PaneGridConfig es
 defaultPaneGridConfig =
   PaneGridConfig
@@ -339,6 +341,9 @@ resolveFocus tree maxPane focus0
 -- Entry point
 -- -----------------------------------------------------------------------------
 
+-- | Stateful split-pane workspace with draggable tabs and dividers. Keep its
+-- widget identity stable; pane callbacks receive actions for splits, closes,
+-- and maximisation through 'PaneGridCtx'.
 paneGrid :: (Ui :> es) => PaneGridConfig es -> Eff es PaneGridResponse
 paneGrid cfg = do
   wid <- nextId

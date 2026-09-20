@@ -171,7 +171,7 @@ textInputMode si =
     }
 
 -- | Run a command on a single-line field outside its frame (a context menu
--- row, an app's Edit menu). A change to the text pulses 'respChanged' on the
+-- row, an app's Edit menu). A change to the text pulses @respChanged@ on the
 -- field's next frame.
 applyTextInputCommand :: Context -> WidgetId -> EditorMode -> TextCommand -> IO ()
 applyTextInputCommand ctx wid mode cmd = do
@@ -193,6 +193,8 @@ applyTextInputCommand ctx wid mode cmd = do
 -- Text fields
 -- -----------------------------------------------------------------------------
 
+-- | Placeholder, password-display masking, and layout for a single-line field.
+-- Masking affects display; the caller and widget store still hold the original text.
 data TextInputConfig = TextInputConfig
   { ticPlaceholder :: !Text
   , ticPassword :: !Bool
@@ -200,6 +202,7 @@ data TextInputConfig = TextInputConfig
   }
   deriving (Eq, Show)
 
+-- | No placeholder, no password masking, and the standard text-input layout.
 defaultTextInputConfig :: TextInputConfig
 defaultTextInputConfig =
   TextInputConfig
@@ -214,19 +217,19 @@ defaultTextInputConfig =
 textInput :: Ui :> es => Text -> Eff es Text
 textInput value = snd <$> textInputConfigured' defaultTextInputConfig value
 
+-- | 'textInput' returning @(response, updatedText)@, including change/submit flags.
 {-# INLINE textInput' #-}
 textInput' :: Ui :> es => Text -> Eff es (Response, Text)
 textInput' = textInputConfigured' defaultTextInputConfig
 
 -- | 'textInput' with a placeholder, password masking, or its own layout.
 --
--- @
--- secret' <- textInputConfigured defaultTextInputConfig {ticPassword = True} secret
--- @
+-- > secret' <- textInputConfigured defaultTextInputConfig {ticPassword = True} secret
 {-# INLINE textInputConfigured #-}
 textInputConfigured :: Ui :> es => TextInputConfig -> Text -> Eff es Text
 textInputConfigured cfg value = snd <$> textInputConfigured' cfg value
 
+-- | 'textInputConfigured' returning @(response, updatedText)@.
 textInputConfigured' :: Ui :> es => TextInputConfig -> Text -> Eff es (Response, Text)
 textInputConfigured' cfg value =
   buildTextInput
@@ -352,6 +355,7 @@ data SearchFieldConfig = SearchFieldConfig
   }
   deriving (Eq, Show)
 
+-- | Search placeholder, a 300 ms trailing debounce, and the standard search layout.
 defaultSearchFieldConfig :: SearchFieldConfig
 defaultSearchFieldConfig =
   SearchFieldConfig
@@ -362,21 +366,26 @@ defaultSearchFieldConfig =
 
 -- | Search box with a magnifier and a clear button; the first argument is the
 -- placeholder. Pass the current text; the result is the text after this
--- frame. 'respChanged' on 'searchField'' is debounced: it fires once typing
+-- frame. @respChanged@ on 'searchField'' is debounced: it fires once typing
 -- pauses, or at once when the field is cleared.
 {-# INLINE searchField #-}
 searchField :: Ui :> es => Text -> Text -> Eff es Text
 searchField placeholder value = snd <$> searchField' placeholder value
 
+-- | 'searchField' with a response. Text updates immediately; only the change
+-- flag waits for the debounce interval.
 {-# INLINE searchField' #-}
 searchField' :: Ui :> es => Text -> Text -> Eff es (Response, Text)
 searchField' placeholder =
   searchFieldConfigured' (defaultSearchFieldConfig {sfcPlaceholder = placeholder})
 
+-- | Search field with explicit placeholder, debounce in milliseconds, and layout.
 {-# INLINE searchFieldConfigured #-}
 searchFieldConfigured :: Ui :> es => SearchFieldConfig -> Text -> Eff es Text
 searchFieldConfigured cfg value = snd <$> searchFieldConfigured' cfg value
 
+-- | 'searchFieldConfigured' returning @(response, updatedText)@. Store the
+-- returned text every frame, including before the debounced change flag fires.
 searchFieldConfigured' ::
   Ui :> es => SearchFieldConfig -> Text -> Eff es (Response, Text)
 searchFieldConfigured' cfg value =
@@ -396,14 +405,17 @@ searchFieldConfigured' cfg value =
 selectableText :: Ui :> es => Text -> Eff es ()
 selectableText = selectableTextWith id
 
+-- | 'selectableText' with its response, for hover or anchored UI.
 {-# INLINE selectableText' #-}
 selectableText' :: Ui :> es => Text -> Eff es Response
 selectableText' = selectableTextWith' id
 
+-- | Read-only selectable text with a layout/font modifier.
 {-# INLINE selectableTextWith #-}
 selectableTextWith :: Ui :> es => (Layout -> Layout) -> Text -> Eff es ()
 selectableTextWith f txt = void (selectableTextWith' f txt)
 
+-- | 'selectableTextWith' returning its response; text remains caller-owned.
 selectableTextWith' :: Ui :> es => (Layout -> Layout) -> Text -> Eff es Response
 selectableTextWith' f txt = do
   layout <- f <$> askDefaultLayout

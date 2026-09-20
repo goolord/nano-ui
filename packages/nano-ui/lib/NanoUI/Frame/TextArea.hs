@@ -56,6 +56,8 @@ import qualified NanoUI.Widgets.TextArea as TA
 import qualified NanoUI.Widgets.TextBuffer as TB
 import NanoUI.Widgets.TextCommon (selectionCaretGeom, textWordBounds)
 
+-- | Solved text-area geometry for caret and selection hit tests. Coordinates
+-- and line height use logical pixels; the node index is valid only this frame.
 data TextAreaHit = TextAreaHit
   { tahNodeIdx :: !NodeIdx
   , tahFieldRect :: !Rect
@@ -193,6 +195,8 @@ drawTextAreaContentWith da ctx fm idx x y w h style = do
     (paintScrollBarLayout da (scrollBarTrackColor base theme) (scrollBarThumbColor base theme))
     (catMaybes [tasbVertical layouts, tasbHorizontal layouts])
 
+-- | Geometry and resolved line height for a current text-area node. Returns
+-- 'Nothing' for a missing id or a different node type. Call after layout.
 textAreaHitForWidget :: Context -> WidgetId -> IO (Maybe TextAreaHit)
 textAreaHitForWidget ctx wid = do
   withWidgetNode ctx wid Nothing $ \idx -> do

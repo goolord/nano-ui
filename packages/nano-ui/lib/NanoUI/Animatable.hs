@@ -1,3 +1,4 @@
+-- | Conversion of values to scalar channels for tween and spring animations.
 module NanoUI.Animatable
   ( Animatable (..)
   ) where
@@ -5,10 +6,12 @@ module NanoUI.Animatable
 import Data.Word (Word8)
 import NanoUI.Types (Color, V2 (..), clamp01, colorA, colorB, colorG, colorR, colorRGBA)
 
--- Float components for multi-component tweens. Extra components are dropped.
+-- | Float components for multi-component tweens. Extra components are dropped.
 -- Short Color lists pad RGB with 0 and alpha with 1. Other types pad with 0.
 class Animatable a where
+  -- | Channels in a stable order; colours use RGBA normalised to 0-1.
   toComponents :: a -> [Float]
+  -- | Reconstruct a value, padding missing channels as described above.
   fromComponents :: [Float] -> a
 
 instance Animatable Float where

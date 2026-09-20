@@ -26,16 +26,19 @@ import Data.Primitive.Types (Prim)
 import Data.Word (Word64, Word8)
 import GHC.Stack (HasCallStack, SrcLoc (..), callStack, getCallStack)
 
+-- | Stable store and interaction identity. Zero is reserved for no widget.
 newtype WidgetId = WidgetId Word64
   deriving stock (Eq, Ord, Show)
   deriving newtype (Hashable, Prim)
 
+-- | Parent-path hash and the next sibling's position within that path.
 data IdContext = IdContext
   { currentId :: {-# UNPACK #-} !Word64
   , siblingId :: {-# UNPACK #-} !Word64
   }
   deriving stock (Eq, Show)
 
+-- | Root path and sibling position used at the start of each view pass.
 initialIdContext :: IdContext
 initialIdContext = IdContext 0x243F6A8885A308D3 0
 
@@ -49,12 +52,15 @@ idContextWidgetId (IdContext cid sid) =
    in
     if raw == 0 then WidgetId 1 else WidgetId raw
 
+-- | Hash salt distinguishing an ordinary child scope from a keyed scope.
 scopeTag :: Word64
 scopeTag = 0x9E3779B185EBCA87
 
 keyedTag :: Word64
 keyedTag = 0xC2B2AE3D27D4EB4F
 
+-- | Return the advanced parent and a fresh child context derived from its
+-- sibling position and the supplied tag.
 {-# INLINE enterScope #-}
 enterScope :: Word64 -> IdContext -> (IdContext, IdContext)
 enterScope tag parent =
@@ -65,6 +71,8 @@ enterScope tag parent =
    in
     (parent', child)
 
+-- | Return the advanced parent and a child path derived from the key, not the
+-- sibling position. Keys must be unique within the parent.
 {-# INLINE enterKeyed #-}
 enterKeyed :: Word64 -> IdContext -> (IdContext, IdContext)
 enterKeyed tag parent =
@@ -75,6 +83,9 @@ enterKeyed tag parent =
    in
     (parent', child)
 
+-- | Hash the call site's package, module, file, line, and column. Repeated
+-- calls at one source location return the same id; this is not a list-item key.
+-- Throws if the call stack is empty.
 {-# INLINE widgetId #-}
 widgetId :: HasCallStack => WidgetId
 widgetId =
@@ -103,10 +114,13 @@ hashSrcLoc
         `mixFnv` fromIntegral srcLocStartLine
         `mixFnv` fromIntegral srcLocStartCol
 
+-- | Unwrap the id's existing hash without hashing it again.
 {-# INLINE hashWidgetId #-}
 hashWidgetId :: WidgetId -> Word64
 hashWidgetId (WidgetId w) = w
 
+-- | FNV-1a over the low byte of each character. Intended for identifier seeds,
+-- not general Unicode hashing or cryptography.
 {-# INLINE fnv1a #-}
 fnv1a :: String -> Word64
 fnv1a s =
@@ -115,6 +129,8 @@ fnv1a s =
     0xcbf29ce484222325
     s
 
+-- | Mix two 64-bit identifier components with wrapping arithmetic.
+-- This is a non-cryptographic hash combiner.
 {-# INLINE mix64 #-}
 mix64 :: Word64 -> Word64 -> Word64
 mix64 x y =
@@ -126,6 +142,7 @@ mix64 x y =
    in
     z3 * 0x94D049BB133111EB
 
+-- | Combine two hash words with an FNV xor-and-multiply step.
 {-# INLINE mixFnv #-}
 mixFnv :: Word64 -> Word64 -> Word64
 mixFnv x y = (x `xor` y) * 1099511628211

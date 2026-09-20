@@ -1,3 +1,4 @@
+-- | View-level tween and spring hooks, continuous animation, and timed frame requests.
 module NanoUI.Widgets.Animate
   ( Transition (..)
   , animate

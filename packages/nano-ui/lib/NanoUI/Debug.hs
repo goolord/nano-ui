@@ -30,14 +30,19 @@ import GHC.Conc (getNumCapabilities, getNumProcessors)
 import GHC.Stats (GCDetails (..), RTSStats (..), getRTSStats, getRTSStatsEnabled)
 import Text.Printf (printf)
 
+-- | Minimum interval between published snapshots, in seconds (0.25).
 debugRefreshSec :: Double
 debugRefreshSec = 0.25
 
+-- | Exponential moving average with 15% weight on the sample. A non-positive
+-- previous value starts a new average at the sample.
 blend :: Double -> Double -> Double
 blend prev sample
   | prev <= 0 = sample
   | otherwise = prev * 0.85 + sample * 0.15
 
+-- | Runtime counters. Memory fields use MiB, GC duration uses milliseconds,
+-- and GC percentage is elapsed GC time divided by elapsed runtime time.
 data RtsStatsSnapshot = RtsStatsSnapshot
   { rtsEnabled :: !Bool
   , rtsGcs :: !Word32
@@ -71,6 +76,8 @@ emptyRtsSnapshot =
     , rtsCpus = 0
     }
 
+-- | Sample RTS statistics when enabled with @+RTS -T@. Otherwise report only
+-- capability/processor counts and leave 'rtsEnabled' false.
 readRtsSnapshot :: IO RtsStatsSnapshot
 readRtsSnapshot = do
   caps <- getNumCapabilities
@@ -100,6 +107,8 @@ readRtsSnapshot = do
           , rtsCpus = cpus
           }
 
+-- | Published frame rates, latest phase durations in milliseconds, cumulative
+-- present/skip counts, geometry counts, and backend-supplied window coordinates.
 data CoreDebugSnapshot = CoreDebugSnapshot
   { dbgPresentFps :: !Double
   , dbgLoopFps    :: !Double
@@ -120,6 +129,7 @@ data CoreDebugSnapshot = CoreDebugSnapshot
   }
   deriving (Eq, Show)
 
+-- | Zeroed placeholder before a backend publishes a frame sample.
 emptyCoreDebugSnapshot :: CoreDebugSnapshot
 emptyCoreDebugSnapshot =
   CoreDebugSnapshot
@@ -141,6 +151,8 @@ emptyCoreDebugSnapshot =
     , dbgRts = emptyRtsSnapshot
     }
 
+-- | Mutable sampler contents. Timestamp fields use monotonic seconds; phase
+-- durations use milliseconds. Backends update this through the @noteDebug*@ functions.
 data DebugSampler = DebugSampler
   { smPresentEma   :: {-# UNPACK #-} !Double
   , smLoopEma      :: {-# UNPACK #-} !Double
@@ -160,8 +172,10 @@ data DebugSampler = DebugSampler
   , smRateT        :: {-# UNPACK #-} !Double
   }
 
+-- | Session-owned sampler reference, updated atomically by sampling operations.
 type DebugSamplerRef = IORef DebugSampler
 
+-- | Empty sampler with its rate interval starting at the current monotonic time.
 newDebugSampler :: IO DebugSamplerRef
 newDebugSampler = do
   now <- getMonotonicTime
@@ -185,6 +199,8 @@ newDebugSampler = do
       , smRateT = now
       }
 
+-- | Record loop delta time in seconds. Intervals outside 0.0001-0.25 seconds
+-- do not contribute to the loop-rate moving average.
 noteDebugLoop :: DebugSamplerRef -> Float -> IO ()
 noteDebugLoop ref dt =
   atomicModifyIORef' ref $ \s ->
@@ -196,6 +212,7 @@ noteDebugLoop ref dt =
             else smLoopEma s
      in (s {smLoopEma = ema'}, ())
 
+-- | Increment the count of loop passes that skipped presentation.
 noteDebugSkip :: DebugSamplerRef -> IO ()
 noteDebugSkip ref =
   atomicModifyIORef' ref $ \s -> (s {smSkips = smSkips s + 1}, ())
@@ -221,6 +238,8 @@ debugRefreshDue ref = do
 snapshotDue :: Double -> DebugSampler -> Bool
 snapshotDue now s = smLastDebugT s <= 0 || now - smLastDebugT s >= debugRefreshSec
 
+-- | Record UI, render, present, and total frame durations in milliseconds,
+-- followed by vertex, index, and command counts. Increments the present count.
 noteDebugPresent :: DebugSamplerRef -> Double -> Double -> Double -> Double -> Int -> Int -> Int -> IO ()
 noteDebugPresent ref uiMs renderMs presentMs frameMs verts indices cmds = do
   now <- getMonotonicTime
@@ -297,6 +316,7 @@ coreDebugSnapshot s rts =
     , dbgRts = rts
     }
 
+-- | Label/value rows for frame rates, durations, and cumulative counts.
 formatFpsRows :: CoreDebugSnapshot -> [(Text, Text)]
 formatFpsRows s =
   [ ("fps present", T.pack (printf "%6.1f" (dbgPresentFps s)))
@@ -309,6 +329,7 @@ formatFpsRows s =
   , ("skips", T.pack (printf "%10d" (dbgSkips s)))
   ]
 
+-- | Label/value rows for vertex, index, and draw-command counts.
 formatDrawRows :: CoreDebugSnapshot -> [(Text, Text)]
 formatDrawRows s =
   [ ("vertices", T.pack (printf "%10d" (dbgVerts s)))
@@ -316,6 +337,7 @@ formatDrawRows s =
   , ("commands", T.pack (printf "%10d" (dbgCmds s)))
   ]
 
+-- | Runtime-stat rows, or instructions to enable @+RTS -T@ when statistics are off.
 formatCoreRtsRows :: CoreDebugSnapshot -> [(Text, Text)]
 formatCoreRtsRows core
   | not (rtsEnabled s) =

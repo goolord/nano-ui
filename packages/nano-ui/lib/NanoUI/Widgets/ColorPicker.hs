@@ -145,9 +145,12 @@ storeColorAt :: WidgetStore -> Int -> Color -> Color
 storeColorAt store key fallback =
   colorFromWord32 (fromIntegral (findSlot fieldInt (fromIntegral (colorToWord32 fallback)) key store))
 
+-- | Picker's current stored colour, or the supplied fallback if absent.
 widgetStoreColor :: WidgetStore -> WidgetId -> Color -> Color
 widgetStoreColor store wid fallback = storeColorAt store (intKey wid) fallback
 
+-- | Picker's comparison colour, falling back to its current colour and then
+-- the caller's default.
 widgetStoreBaseColor :: WidgetStore -> WidgetId -> Color -> Color
 widgetStoreBaseColor store wid fallback =
   storeColorAt
@@ -427,6 +430,7 @@ colorPickerLabelLayout =
 colorPicker :: Ui :> es => Color -> Eff es Color
 colorPicker value = snd <$> colorPickerWith False value
 
+-- | 'colorPicker' returning @(response, updatedColour)@.
 colorPicker' :: Ui :> es => Color -> Eff es (Response, Color)
 colorPicker' = colorPickerWith False
 
@@ -435,6 +439,7 @@ colorPicker' = colorPickerWith False
 colorPickerRGBA :: Ui :> es => Color -> Eff es Color
 colorPickerRGBA value = snd <$> colorPickerWith True value
 
+-- | 'colorPickerRGBA' returning its response and colour, including alpha.
 colorPickerRGBA' :: Ui :> es => Color -> Eff es (Response, Color)
 colorPickerRGBA' = colorPickerWith True
 

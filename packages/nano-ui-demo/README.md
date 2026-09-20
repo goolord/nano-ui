@@ -34,3 +34,18 @@ hidden window and exits with an error if a check fails.
 
 SDL3, SDL3_ttf 3.2 or later, and pkg-config, as for `nano-ui-sdl`. The
 executables are behind this package's `sdl` flag, on by default.
+
+Use GHC 9.14. From an extracted source distribution, run `cabal build` and
+then the commands above. From the repository, follow the
+[development setup](https://github.com/goolord/nano-ui/blob/main/docs/development.md#setup),
+which also covers the sibling ditto checkout used by the form package.
+
+## Reading the examples
+
+- `lib/SdlDemo.hs` builds the widget tour; `lib/DemoData.hs` supplies its data.
+- `app/Notepad.hs` shows text-document state, menus, and asynchronous file dialogs.
+- `app/Logs.hs` shows a bounded log buffer and scroll-follow behaviour.
+- `lib/SdlTerminal.hs` contains the terminal parser and PTY integration.
+
+The terminal executable and its test are not built on Windows. The other
+examples support the platforms provided by `nano-ui-sdl`.

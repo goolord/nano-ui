@@ -13,3 +13,13 @@ Use plain ASCII:
 - Hyphen (`-`) only for compounds and ranges (`zero-allocation`)
 
 Docs: short sentences, plain words, one idea per bullet. Minimal example before edge cases. Tighten; do not expand unless asked. Diagrams: `->` or "to".
+
+# Comments
+
+Write for a reader who has never seen this repository.
+
+- Say what the code does and why, in the present tense. Never what it used to do, what it replaced, or which bug led to it: that goes in the commit message and the changelog.
+- Every module has a header, and every exported name has a Haddock comment (`cabal haddock` lists what is missing).
+- Give the facts the code cannot: units, coordinate space, when a result is `Nothing`, who owns a pointer, why a step has to come first.
+- Define a project term where it first matters, or use plain words.
+- Do not restate the name. Do not pad: no "This function", "simply", "robust", "in order to", "note that".

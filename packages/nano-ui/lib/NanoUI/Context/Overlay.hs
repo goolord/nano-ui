@@ -28,20 +28,25 @@ import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input (Input, Key (KeyEscape), inputKeys, inputKeysElem, withoutPointer)
 import NanoUI.Types (Rect, V2, rectHit, rectNonEmpty)
 
+-- | Whether any widget has keyboard focus or a text-edit menu is open.
+-- This checks the focus id, not the focused node's type.
 textInputEditActive :: Context -> IO Bool
 textInputEditActive ctx = do
   focus <- readIORef (ctxFocusId ctx)
   menu <- getTextInputMenu ctx
   pure (hashWidgetId focus /= 0 || menu /= Nothing)
 
+-- | Whether a modal is declared this frame or was active on the previous frame.
 modalActive :: Context -> IO Bool
 modalActive ctx = getsOverlay ctx (\os -> osModalWasActive os || osModalActive os)
 
+-- | Whether this input contains Escape already consumed by an overlay.
 overlayConsumesQuit :: Context -> Input -> IO Bool
 overlayConsumesQuit ctx inp = do
   consumed <- getsOverlay ctx osEscapeConsumed
   pure (inputKeysElem KeyEscape (inputKeys inp) && consumed)
 
+-- | Mark Escape as handled so closing an overlay does not also quit the app.
 markEscapeConsumed :: Context -> IO ()
 markEscapeConsumed ctx = modifyOverlay ctx (\os -> os {osEscapeConsumed = True})
 
@@ -71,6 +76,8 @@ floatingLayerAt ctx mouse = do
       hit k = maybe False (`rectHit` mouse) (IM.lookup k rects)
   pure (foldl' (\acc k -> if hit k then k else acc) 0 (osPrevFloatingOrder os))
 
+-- | Record known panel bounds at the front of the floating hit order before
+-- the next layout pass. Empty bounds are ignored.
 seedFloatingPanel :: Context -> WidgetId -> Rect -> IO ()
 seedFloatingPanel ctx wid rect
   | not (rectNonEmpty rect) = pure ()
@@ -82,14 +89,17 @@ seedFloatingPanel ctx wid rect
           , osPrevFloatingOrder = filter (/= k) (osPrevFloatingOrder os) ++ [k]
           }
 
+-- | Enter modal construction, increasing nesting depth and marking a modal active.
 beginModal :: Context -> IO ()
 beginModal ctx =
   modifyOverlay ctx (\os -> os {osModalActive = True, osModalDepth = osModalDepth os + 1})
 
+-- | Leave modal construction. Decreases depth without clearing the frame's active flag.
 endModal :: Context -> IO ()
 endModal ctx =
   modifyOverlay ctx (\os -> os {osModalDepth = max 0 (osModalDepth os - 1)})
 
+-- | Save the previous modal flag, then clear current depth and Escape consumption.
 beginFrameModal :: Context -> IO ()
 beginFrameModal ctx =
   modifyOverlay ctx $ \os ->
@@ -100,5 +110,6 @@ beginFrameModal ctx =
       , osEscapeConsumed = False
       }
 
+-- | Whether modal presence changed since the preceding frame.
 modalDamageFlip :: Context -> IO Bool
 modalDamageFlip ctx = getsOverlay ctx (\os -> osModalWasActive os /= osModalActive os)

@@ -53,6 +53,7 @@ anyAnimating ctx = do
     then pure True
     else not . IM.null . ssGlides <$> readIORef (ctxScrollState ctx)
 
+-- | Copy the animation map, retaining only entries still in progress.
 {-# INLINE getLiveAnimations #-}
 getLiveAnimations :: Context -> IO (IntMap Animation)
 getLiveAnimations ctx = IM.filter animInProgress . asAnimations <$> readIORef (ctxAnimationState ctx)
@@ -64,21 +65,19 @@ isAnimatingKey :: Context -> Int -> IO Bool
 isAnimatingKey ctx key =
   maybe False animInProgress . IM.lookup key . asAnimations <$> readIORef (ctxAnimationState ctx)
 
--- Consecutive frames each live animation has had no nonzero widget rect in the
--- arena. Maintained by 'NanoUI.Damage.updatePrevRects'; used by 'writeDamage'
--- to bound the DamageFull escalation for rect-less animations so a perpetual
--- animation whose widget left the arena (e.g. `keepAnimating` on a widget
--- hidden by a tab switch) stops repainting the whole window after a frame or
--- two, instead of forever.
+-- | Consecutive frames in which each animation has no visible widget bounds.
+-- The damage pass uses these counts to limit full-window repaint requests.
 {-# INLINE getAnimRectless #-}
 getAnimRectless :: Context -> IO (IntMap Int)
 getAnimRectless ctx = asRectless <$> readIORef (ctxAnimationState ctx)
 
+-- | Replace the damage pass's missing-bounds counters.
 {-# INLINE setAnimRectless #-}
 setAnimRectless :: Context -> IntMap Int -> IO ()
 setAnimRectless ctx m =
   modifyIORef' (ctxAnimationState ctx) $ \as -> as {asRectless = m}
 
+-- | Read and clear the flag indicating an animation settled during the last tick.
 takeAnimSettled :: Context -> IO Bool
 takeAnimSettled ctx = do
   as <- readIORef (ctxAnimationState ctx)
@@ -88,18 +87,24 @@ takeAnimSettled ctx = do
       pure True
     else pure False
 
+-- | Running animation for an id, or 'Nothing'. Settled values are stored separately.
 {-# INLINE lookupAnimation #-}
 lookupAnimation :: Context -> WidgetId -> IO (Maybe Animation)
 lookupAnimation ctx wid = IM.lookup (intKey wid) . asAnimations <$> readIORef (ctxAnimationState ctx)
 
+-- | Linear tween from start to end over a duration in seconds. A matching
+-- request preserves progress; non-positive duration settles immediately.
 {-# INLINE startAnimation #-}
 startAnimation :: Context -> WidgetId -> Float -> Float -> Float -> IO ()
 startAnimation ctx wid start end dur = startAnimationEase ctx wid start end dur EaseLinear
 
+-- | 'startAnimation' with a chosen easing curve and no delay.
 {-# INLINE startAnimationEase #-}
 startAnimationEase :: Context -> WidgetId -> Float -> Float -> Float -> Ease -> IO ()
 startAnimationEase ctx wid start end dur ease = startAnimationEaseDelay ctx wid start end dur ease 0
 
+-- | Tween with start, end, duration, curve, and delay. Times use seconds;
+-- negative delay is treated as zero. Matching requests do not restart it.
 startAnimationEaseDelay :: Context -> WidgetId -> Float -> Float -> Float -> Ease -> Float -> IO ()
 startAnimationEaseDelay ctx wid start end dur ease delay
   | dur <= 0 || approxEq start end = settleKey ctx key end
@@ -119,6 +124,8 @@ startAnimationEaseDelay ctx wid start end dur ease delay
   where
     key = intKey wid
 
+-- | Move toward a target, preserving an existing spring's position/velocity.
+-- With no running animation, starts at the settled value or zero.
 startSpring :: Context -> WidgetId -> SpringParams -> Float -> IO ()
 startSpring ctx wid params target = do
   let key = intKey wid
@@ -146,11 +153,8 @@ startSpring ctx wid params target = do
 keepAliveSec :: Float
 keepAliveSec = 1e9
 
--- | Hold the frame loop open for a widget until a frame goes by without this
--- call. The animation it runs never ends by itself, so it is leased: the
--- widget renews it every frame it is built, and 'tickAnimations' drops it on
--- the first frame it is not. Without the lease a spinner shown once would
--- keep the loop running at the display rate for the life of the process.
+-- | Request continuous frames while the widget calls this on every view pass.
+-- 'tickAnimations' removes the request after a frame without renewal.
 keepAnimationAlive :: Context -> WidgetId -> IO ()
 keepAnimationAlive ctx wid = do
   startAnimation ctx wid 0 1 keepAliveSec
@@ -159,10 +163,13 @@ keepAnimationAlive ctx wid = do
   unless (IS.member key (asKeepTouched as)) $
     writeIORef (ctxAnimationState ctx) $! as {asKeepTouched = IS.insert key (asKeepTouched as)}
 
+-- | Stop an animation at a value and damage its widget if the value changed.
 {-# INLINE setAnimationValue #-}
 setAnimationValue :: Context -> WidgetId -> Float -> IO ()
 setAnimationValue ctx wid val = settleKey ctx (intKey wid) val
 
+-- | Advance animations by elapsed seconds, retain settled values, and expire
+-- keep-alive requests that were not renewed in the view.
 tickAnimations :: Context -> Float -> IO ()
 tickAnimations ctx dt =
   modifyIORef' (ctxAnimationState ctx) $ \as0 ->
@@ -237,6 +244,7 @@ settleKey ctx key val = do
     damageKey ctx key (DamageInflated defaultDamageSlop)
     markDirty ctx
 
+-- | Current animated or settled value; zero when the id has neither.
 getAnimationValue :: Context -> WidgetId -> IO Float
 getAnimationValue ctx wid = do
   let key = intKey wid
@@ -245,10 +253,12 @@ getAnimationValue ctx wid = do
     Just a -> pure $! animationValue a
     Nothing -> pure $! IM.findWithDefault 0 key (asAnimRest as)
 
+-- | Settled nonzero values keyed by animation id.
 {-# INLINE getAnimRest #-}
 getAnimRest :: Context -> IO (IntMap Float)
 getAnimRest ctx = asAnimRest <$> readIORef (ctxAnimationState ctx)
 
+-- | Keep settled values only for keys accepted by the predicate.
 {-# INLINE pruneAnimRest #-}
 pruneAnimRest :: Context -> (Int -> Bool) -> IO ()
 pruneAnimRest ctx shouldKeep =

@@ -76,6 +76,8 @@ foreign import ccall unsafe "nano_ui_gl_draw_geometry"
 foreign import ccall unsafe "nano_ui_gl_draw_text"
   c_drawText :: Ptr NanoUiGl -> Int32 -> Int32 -> IO ()
 
+-- | GPU resources and glyph scratch storage owned by one OpenGL context.
+-- Release with 'freeGlRenderer' while that context is still current.
 data GlRenderer = GlRenderer
   { glHandle :: !(Ptr NanoUiGl)
   , glAtlas  :: !(IORef (Maybe GlyphAtlas))
@@ -138,6 +140,8 @@ drawCmd h !scale !fbW !fbH cmd
           c_drawGeometry h (fromIntegral x0) (fromIntegral y0) (fromIntegral x1) (fromIntegral y1)
             (cmdIndexOffset cmd) (cmdIndexCount cmd)
 
+-- | Scale logical x/y/width/height to physical pixels, snapping both edges
+-- with half-up rounding. Returns x/y/width/height with non-negative extents.
 {-# INLINE toPhysRect #-}
 toPhysRect :: Float -> Float -> Float -> Float -> Float -> (Int, Int, Int, Int)
 toPhysRect !scale !rx !ry !rw !rh =

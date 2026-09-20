@@ -1,5 +1,6 @@
 {-# LANGUAGE DataKinds #-}
 
+-- | Frame-needed checks and hover probing used while the backend waits for input.
 module NanoUI.Frame.Redraw
   ( needsRedraw
   , pointerDragActive
@@ -41,6 +42,9 @@ import NanoUI.Layout.Arena
 import NanoUI.Monad ((<&&>))
 import NanoUI.Types (V2 (..))
 
+-- | Whether state or input changes require a frame. Arguments are previous
+-- and current input. Tests hover only after pointer motion; timed wake
+-- deadlines are handled separately by the session runner.
 needsRedraw :: Context -> Input -> Input -> IO Bool
 needsRedraw ctx prev inp = do
   dirty <- isDirty ctx
@@ -67,9 +71,8 @@ needsRedraw ctx prev inp = do
           lastHot <- readIORef (ctxLastHotId ctx)
           (/= lastHot) <$> probeHotId ctx (inputMousePos inp)
 
--- Window/scroll/resize drag marks dirty every frame, so input must still be
--- polled on those frames.
--- Color picker and slider hold ctxActiveId without extra window/scroll refs.
+-- | Whether a window, scrollbar, resize, slider, or colour-picker gesture
+-- is active. Text-selection drags are tracked separately.
 pointerDragActive :: Context -> IO Bool
 pointerDragActive ctx = do
   winDrag <- isJust <$> getWindowDrag ctx
@@ -109,7 +112,7 @@ overlayMenuOpen ctx = do
               then pure False
               else not . null <$> getOptions (ctxNodeArena ctx) idx
 
--- Focused text field or its context menu. Typing reaches it as input events,
+-- | Focused text field or its context menu. Typing reaches it as input events,
 -- which wake the loop by themselves, so focus alone keeps nothing running.
 textFieldActive :: Context -> IO Bool
 textFieldActive ctx = do
@@ -118,8 +121,8 @@ textFieldActive ctx = do
     then pure True
     else focusedNodeIs ctx ctxFocusId (\nt -> nt == NodeTextInput || nt == NodeTextArea)
 
--- Last frame still has a floating node (modal or window). Used by backends to
--- decide whether overlay content might need periodic refresh (debug HUD).
+-- | Whether modal state or the current arena contains a floating panel,
+-- including windows and popups.
 floatingPanelActive :: Context -> IO Bool
 floatingPanelActive ctx = do
   modal <- modalActive ctx
@@ -127,7 +130,8 @@ floatingPanelActive ctx = do
     then pure True
     else isJust <$> findNodeM (ctxNodeArena ctx) (fmap isFloatingNode . getNodeType (ctxNodeArena ctx))
 
--- Floating window overlay (debug HUD). Prev floating rects persist across idle frames.
+-- | Whether the arena contains any floating window. The name does not imply
+-- that its contents are a debug readout.
 debugPanelOpen :: Context -> IO Bool
 debugPanelOpen ctx =
   isJust <$> findNodeM (ctxNodeArena ctx) (fmap (== NodeWindow) . getNodeType (ctxNodeArena ctx))

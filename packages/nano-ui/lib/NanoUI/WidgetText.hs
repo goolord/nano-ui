@@ -1,3 +1,5 @@
+-- | Widget labels, numeric/colour formatting, and packed node-style encodings
+-- shared by construction, layout, and painting.
 module NanoUI.WidgetText
   ( intValueText
   , treeEncodeStyle
@@ -238,6 +240,7 @@ colorPickerCurrentLabel = "Current"
 colorPickerNewLabel :: Text
 colorPickerNewLabel = "New"
 
+-- | Lowercase @#rrggbb@ text. Discards alpha; use 'colorToHexA' to retain it.
 colorToHex :: Color -> Text
 colorToHex c =
   "#" <> hexByte (colorR c) <> hexByte (colorG c) <> hexByte (colorB c)
@@ -272,6 +275,8 @@ colorPickerParseHex txt =
           a <- if n == 8 then Just <$> pair 6 else pure Nothing
           pure (r, g, b, a)
 
+-- | Parse six or eight hex digits as RGB or RGBA. Strips surrounding whitespace
+-- and leading @#@ characters; invalid digits/length return 'Nothing'. RGB is opaque.
 colorFromHex :: Text -> Maybe Color
 colorFromHex txt = do
   (r, g, b, ma) <- colorPickerParseHex txt
@@ -310,14 +315,17 @@ decodeStyleEnum shift mask fallback si =
 textNodeFontVariant :: Int -> FontVariant
 textNodeFontVariant = decodeStyleEnum 0 0x0F FontRegular
 
+-- | Decode weight bits, falling back to normal for an invalid enum value.
 {-# INLINE textNodeFontWeight #-}
 textNodeFontWeight :: Int -> FontWeight
 textNodeFontWeight = decodeStyleEnum 8 0x0F WeightNormal
 
+-- | Decode slant bits, falling back to upright for an invalid enum value.
 {-# INLINE textNodeFontStyle #-}
 textNodeFontStyle :: Int -> FontStyle
 textNodeFontStyle = decodeStyleEnum 12 0x03 FontStyleNormal
 
+-- | Decode the underline/strikethrough bits of a text node's style code.
 {-# INLINE textNodeTextDecoration #-}
 textNodeTextDecoration :: Int -> TextDecoration
 textNodeTextDecoration = decodeStyleEnum 14 0x03 DecorationNone

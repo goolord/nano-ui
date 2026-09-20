@@ -36,3 +36,25 @@ cabal run nano-ui-rgfw-profile  # demo frame loop in a hidden window, for +RTS -
 
 X11, Xcursor, Xrandr, and Xi on Linux; Cocoa on macOS; gdi32, user32, and
 shell32 on Windows. All need OpenGL 3.2.
+
+Use GHC 9.14 and add `nano-ui` and `nano-ui-rgfw` to your application's
+`build-depends`. The example uses `GHC2024` and `OverloadedStrings`.
+On Linux, install the development packages for the listed X11 libraries;
+RGFW itself is bundled by `nano-ui-rgfw-bindings`.
+
+## Sessions and rendering
+
+`runRgfwApp` owns the window and OpenGL context until the window closes.
+`runRgfwAppReduceCustom` can derive the theme and scale from your model.
+For a custom event loop, `NanoUI.Rgfw.Context`, `NanoUI.Rgfw.Gl`, and the RGFW
+bindings expose context setup and rendering. OpenGL operations must run on
+the OS thread where the context is current, and native resources must be
+closed on that thread.
+
+Layout and input use logical coordinates; `optScale` controls their mapping
+to physical pixels. The bitmap font does not provide the SDL backend's
+installed-font lookup or HarfBuzz shaping. Choose the SDL backend when those
+text features are required.
+
+See the [development guide](https://github.com/goolord/nano-ui/blob/main/docs/development.md)
+for headless tests and native rendering checks.

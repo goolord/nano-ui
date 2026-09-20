@@ -70,6 +70,7 @@ import NanoUI.Diagrams.Backend
   , diagramTextOps
   )
 
+-- | Colours for diagram content, grid, muted labels, and the enclosing frame.
 data PlotStyle = PlotStyle
   { plotInk :: Colour Double
   , plotFill :: Colour Double
@@ -80,9 +81,11 @@ data PlotStyle = PlotStyle
   }
   deriving (Eq, Show)
 
+-- | Convert RGB channels to a diagrams colour, discarding alpha.
 colourOf :: Color -> Colour Double
 colourOf c = sRGB24 (colorR c) (colorG c) (colorB c)
 
+-- | Derive plot colours from a nano-ui theme's accents and surfaces.
 themePlotStyle :: Theme -> PlotStyle
 themePlotStyle t =
   let muted = themeMuted t
@@ -96,9 +99,11 @@ themePlotStyle t =
         , plotFrameBorder = styleBorder panel
         }
 
+-- | Plot colours derived from 'defaultTheme'.
 defaultPlotStyle :: PlotStyle
 defaultPlotStyle = themePlotStyle defaultTheme
 
+-- | Cache key for theme colours used by chart content and frames.
 themePlotKey :: Theme -> Int
 themePlotKey t =
   hash (colorToWord32 (themeAccent t))
@@ -114,9 +119,12 @@ themePlotKey t =
     `hashWithSalt` colorToWord32 (styleBorder (themePanel t))
     `hashWithSalt` colorToWord32 (styleBg (themeInput t))
 
+-- | Plot colours from the current view's scoped theme.
 uiPlotStyle :: Ui :> es => Eff es PlotStyle
 uiPlotStyle = fmap themePlotStyle uiTheme
 
+-- | Estimate a scale from 1 to 2 that separates overlapping plain-text labels.
+-- The cap means this is a sizing heuristic, not a guarantee against overlap.
 labelFitScale :: FontMetrics -> SmallArray DrawOp -> Double
 labelFitScale fm ops =
   let -- Six numbers a label: its anchor, and its box's origin and size.
@@ -171,6 +179,8 @@ labelFitScale fm ops =
           !need = loO + loS + 2 - hiO
        in if den <= 1e-6 then 1.0 else max 1.0 (need / den)
 
+-- | Background and four border strokes for a logical-pixel rectangle.
+-- The second argument is border width in logical pixels.
 diagramFrame :: PlotStyle -> Float -> Rect -> SmallArray DrawOp
 diagramFrame ps bw (Rect x y w h) =
   smallArrayFromList
@@ -185,6 +195,9 @@ diagramFrame ps bw (Rect x y w h) =
 growPlotCapH :: Float
 growPlotCapH = 260
 
+-- | Choose diagram dimensions from its aspect ratio and measured labels.
+-- Growing widths retain flexibility; other widths become fixed. Prepare font
+-- metrics for all labels before calling this pure sizing operation.
 fitLayout :: FontMetrics -> Layout -> Diagram B -> Layout
 fitLayout fm layout d =
   let V2 dw dh = size d

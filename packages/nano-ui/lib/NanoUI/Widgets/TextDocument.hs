@@ -63,6 +63,8 @@ emptyDocument = TextDocument (Seq.singleton T.empty)
 documentText :: TextDocument -> Text
 documentText = TB.joinLines . documentLines
 
+-- | Share the document's line sequence without joining or copying text. Lines
+-- exclude newline separators; the sequence always contains at least one line.
 documentLines :: TextDocument -> Seq Text
 documentLines (TextDocument lns) = lns
 
@@ -70,6 +72,7 @@ documentLines (TextDocument lns) = lns
 documentLine :: Int -> TextDocument -> Text
 documentLine row doc = fromMaybe T.empty (Seq.lookup row (documentLines doc))
 
+-- | Number of lines in O(1), including the empty line in an empty document.
 documentLineCount :: TextDocument -> Int
 documentLineCount = Seq.length . documentLines
 

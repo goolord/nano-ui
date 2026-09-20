@@ -69,14 +69,18 @@ import GHC.Word (Word8 (W8#), Word32 (W32#))
 import NanoUI.Style (FontStyle (..), FontVariant (..), FontWeight (..), TextDecoration (..))
 import NanoUI.Types (Color (..), Rect (..))
 
+-- | Painting order from background through content and overlays to chrome.
 data Layer = LayerBackground | LayerContent | LayerOverlay | LayerChrome
   deriving (Eq, Show, Enum, Bounded)
 
--- Immediate vector ops, in widget pixel space. diagrams (and other plotters)
--- flatten into this list; paint emits them after layout.
+-- | Vector drawing operations in logical pixels. Builders receive a solved
+-- window-space rectangle and should place operations within it. Circles use
+-- centre/radius; strokes use endpoints and width. Image UVs are normalised.
 data DrawOp
   = FillRect !Rect !Color
+  -- ^ Solid rectangle.
   | FillRoundedRect !Rect {-# UNPACK #-} !Float !Color
+  -- ^ Rectangle, corner radius, and fill colour.
   | FillTriangle
       {-# UNPACK #-} !Float
       {-# UNPACK #-} !Float
@@ -85,11 +89,13 @@ data DrawOp
       {-# UNPACK #-} !Float
       {-# UNPACK #-} !Float
       !Color
+  -- ^ Three x/y pairs followed by the fill colour.
   | FillCircle
       {-# UNPACK #-} !Float
       {-# UNPACK #-} !Float
       {-# UNPACK #-} !Float
       !Color
+  -- ^ Centre x/y, radius, and fill colour.
   | Stroke
       {-# UNPACK #-} !Float
       {-# UNPACK #-} !Float
@@ -97,13 +103,16 @@ data DrawOp
       {-# UNPACK #-} !Float
       {-# UNPACK #-} !Float
       !Color
+  -- ^ Endpoint x0/y0/x1/y1, width, and colour.
   | StrokeRoundedRect !Rect {-# UNPACK #-} !Float {-# UNPACK #-} !Float !Color
+  -- ^ Rectangle, corner radius, border width, and colour.
   | StrokeCircle
       {-# UNPACK #-} !Float
       {-# UNPACK #-} !Float
       {-# UNPACK #-} !Float
       {-# UNPACK #-} !Float
       !Color
+  -- ^ Centre x/y, radius, border width, and colour.
   | StrokeLineAA
       {-# UNPACK #-} !Float
       {-# UNPACK #-} !Float
@@ -111,7 +120,9 @@ data DrawOp
       {-# UNPACK #-} !Float
       {-# UNPACK #-} !Float
       !Color
+  -- ^ Anti-aliased line: endpoint x0/y0/x1/y1, width, and colour.
   | FillQuadGradient !Rect !Color !Color !Color !Color
+  -- ^ Rectangle with colours at top-left, top-right, bottom-right, bottom-left.
   | DrawImageRect
       !Rect
       {-# UNPACK #-} !Int
@@ -120,6 +131,7 @@ data DrawOp
       {-# UNPACK #-} !Float
       {-# UNPACK #-} !Float
       !Color
+  -- ^ Destination rectangle, texture id, u0/v0/u1/v1, and tint colour.
   | DrawText
       {-# UNPACK #-} !Float
       {-# UNPACK #-} !Float
@@ -143,7 +155,7 @@ data DrawOp
 -- layout makes.
 data TextFont = TextFont
   { textFontSize :: {-# UNPACK #-} !Float
-  -- ^ Point size, @0@ for the theme's.
+  -- ^ Requested logical font size, @0@ for the backend default.
   , textFontVariant :: !FontVariant
   , textFontWeight :: !FontWeight
   , textFontStyle :: !FontStyle
@@ -151,7 +163,7 @@ data TextFont = TextFont
   }
   deriving (Eq, Show)
 
--- | The theme's regular font.
+-- | Regular text using the backend's default size, weight, and upright style.
 defaultTextFont :: TextFont
 defaultTextFont = TextFont 0 FontRegular WeightNormal FontStyleNormal DecorationNone
 
@@ -173,8 +185,11 @@ shiftDrawOp dx dy op =
     DrawText x y ax ay t c -> DrawText (x + dx) (y + dy) ax ay t c
     DrawTextStyled x y font t c -> DrawTextStyled (x + dx) (y + dy) font t c
 
+-- | Pure painter from solved logical window bounds to draw operations.
 type DrawingBuild = Rect -> SmallArray DrawOp
 
+-- | Indexed draw batch with logical clip, texture id, and layer. Index offset
+-- and count are elements, not byte offsets; multiply by 'indexSize' for FFI use.
 data DrawCmd = DrawCmd
   { cmdClipX :: {-# UNPACK #-} !Float
   , cmdClipY :: {-# UNPACK #-} !Float
@@ -187,6 +202,7 @@ data DrawCmd = DrawCmd
   }
   deriving (Eq, Show)
 
+-- | Contiguous range of draw commands for one layer, as element offset/count.
 data LayerSlice = LayerSlice
   { sliceOffset :: {-# UNPACK #-} !Int
   , sliceCount :: {-# UNPACK #-} !Int
@@ -347,6 +363,9 @@ instance Prim DrawCmd where
                           writeFloatOffAddr# a# 0# x# s0
   setOffAddr# = defaultSetOffAddr#
 
+-- | One frame's geometry and batches. Vertex/index pointers refer to reusable
+-- arena storage: render or copy them before running another frame on the
+-- context. Counts describe the used prefix, not buffer capacity.
 data DrawData = DrawData
   { drawVertices :: ForeignPtr Word8
   , drawVertexCount :: {-# UNPACK #-} !Int
@@ -356,14 +375,17 @@ data DrawData = DrawData
   , drawLayerSlices :: !(PrimArray LayerSlice)
   }
 
+-- | Number of batches across all layers.
 {-# INLINE drawCmdCount #-}
 drawCmdCount :: DrawData -> Int
 drawCmdCount dd = sizeofPrimArray (drawCommands dd)
 
+-- | Whether there are no draw batches.
 {-# INLINE drawCmdNull #-}
 drawCmdNull :: DrawData -> Bool
 drawCmdNull dd = drawCmdCount dd == 0
 
+-- | Visit one layer's commands in recorded order without constructing a list.
 {-# INLINE forDrawCmdsInLayer_ #-}
 forDrawCmdsInLayer_ :: Layer -> DrawData -> (DrawCmd -> IO ()) -> IO ()
 forDrawCmdsInLayer_ ly dd f =
@@ -374,6 +396,7 @@ forDrawCmdsInLayer_ ly dd f =
         | otherwise = f (indexPrimArray cmds (off + i)) >> go (i + 1)
    in go 0
 
+-- | Copy command values into a list in recorded order.
 drawCmdElems :: DrawData -> [DrawCmd]
 drawCmdElems dd =
   let cmds = drawCommands dd
@@ -405,18 +428,20 @@ data DrawArena = DrawArena
   , daExternalText :: !(IORef Bool)
   }
 
+-- | Packed vertex stride in bytes: 32.
 vertexSize :: Int
 vertexSize = 32
 
+-- | Index stride in bytes: 4, for a 32-bit unsigned index.
 indexSize :: Int
 indexSize = 4
 
--- Reserved texture id. These quads act as a backdrop dim, not a solid fill.
+-- | Reserved texture id. These quads act as a backdrop dim, not a solid fill.
 -- Mix comes from the vertex color alpha.
 backdropDimTextureId :: Int
 backdropDimTextureId = 0x7ffffffe
 
--- Reserved texture id for the per-glyph SDL_ttf atlas. The renderer binds
+-- | Reserved texture id for the per-glyph SDL_ttf atlas. The renderer binds
 -- the glyph atlas SDL_Texture when it sees this id. Glyphs are cached as
 -- white-on-alpha so vertex color tints them at draw time.
 glyphAtlasTextureId :: Int

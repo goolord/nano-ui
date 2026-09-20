@@ -107,18 +107,23 @@ data ThemeScopes = ThemeScopes
   -- ^ Last frame's scope signature ('NanoUI.Layout.Arena.getScopeSignature').
   }
 
+-- | A runtime-typed message emitted by a view. Reducers select messages by type.
 data FrameMsg where
   FrameMsg :: Typeable a => a -> FrameMsg
 
+-- | Extract messages of the requested type in traversal order; skip other types.
 decodeMessages :: (Foldable f, Typeable a) => f FrameMsg -> [a]
 decodeMessages = foldr (\(FrameMsg x) rest -> maybe rest (: rest) (cast x)) []
 
+-- | Strictly fold matching messages through an update function in traversal order.
 reduceMessages :: (Foldable f, Typeable msg) => (msg -> model -> model) -> model -> f FrameMsg -> model
 reduceMessages update = foldl' (\model (FrameMsg x) -> maybe model (`update` model) (cast x))
 
+-- | Apply messages whose type is @model -> model@, in traversal order.
 reduceUpdates :: (Foldable f, Typeable model) => model -> f FrameMsg -> model
 reduceUpdates = reduceMessages ($)
 
+-- | Text and measurement scale identifying a cached width/height result.
 type MeasureCacheKey = (Text, Float)
 
 -- | Identity of a font/measurement configuration. Pure Context modifiers
@@ -143,12 +148,16 @@ data DamageRequest
   | ReqFull                                -- ^ Force full window invalidation
   deriving (Eq, Show)
 
+-- | Text field owning the edit menu and its logical window-space bounds.
 data TextInputMenu = TextInputMenu
   { textInputMenuWidget :: WidgetId
   , textInputMenuRect :: Rect
   }
   deriving (Eq, Show)
 
+-- | Selection-drag anchor. Single-line fields use a flat character index;
+-- multiline fields use zero-based row/column positions. Click count selects
+-- character, word, or line selection behaviour.
 data TextInputDrag = TextInputDrag
   { textInputDragWidget :: WidgetId
   , textInputDragAnchor :: {-# UNPACK #-} !Int
@@ -159,6 +168,8 @@ data TextInputDrag = TextInputDrag
   }
   deriving (Eq, Show)
 
+-- | Text position of the last click, used to group repeated clicks on one cell.
+-- Positions are character indices, not UTF-8 byte offsets.
 data TextFieldClickCell = TextFieldClickCell
   { textFieldClickWidget :: WidgetId
   , textFieldClickFlat :: {-# UNPACK #-} !Int
@@ -168,6 +179,7 @@ data TextFieldClickCell = TextFieldClickCell
   }
   deriving (Eq, Show)
 
+-- | Edge or corner captured by a floating-window resize gesture.
 data WindowResizeEdge
   = ResizeN
   | ResizeS
@@ -179,6 +191,8 @@ data WindowResizeEdge
   | ResizeSW
   deriving (Eq, Show)
 
+-- | Resize gesture's initial pointer position, window bounds, and size limits.
+-- All coordinates and lengths use logical pixels.
 data WindowResizeDrag = WindowResizeDrag
   { wrdWidget :: WidgetId
   , wrdEdge :: WindowResizeEdge
@@ -195,6 +209,8 @@ data WindowResizeDrag = WindowResizeDrag
   }
   deriving (Eq, Show)
 
+-- | Frame scheduling and repaint state, including previous visible geometry
+-- keyed by widget id. Dirty state and pixel damage are tracked separately.
 data DamageState = DamageState
   { dsDirty :: !Bool
   , dsDamage :: !Damage
@@ -205,6 +221,7 @@ data DamageState = DamageState
   , dsPrevNodeTexts :: !(IntMap Text)
   }
 
+-- | Require a first frame and full repaint, with no previous geometry.
 initialDamageState :: DamageState
 initialDamageState = DamageState
   { dsDirty = True
@@ -216,6 +233,8 @@ initialDamageState = DamageState
   , dsPrevNodeTexts = IM.empty
   }
 
+-- | Current modal nesting and previous floating-panel bounds/order used for
+-- routing input before the next view is built.
 data OverlayState = OverlayState
   { osModalWasActive :: {-# UNPACK #-} !Bool
   , osModalActive :: {-# UNPACK #-} !Bool
@@ -225,6 +244,7 @@ data OverlayState = OverlayState
   , osPrevFloatingOrder :: ![Int]
   }
 
+-- | No modals, floating panels, or consumed Escape event.
 initialOverlayState :: OverlayState
 initialOverlayState = OverlayState
   { osModalWasActive = False
@@ -235,6 +255,8 @@ initialOverlayState = OverlayState
   , osPrevFloatingOrder = []
   }
 
+-- | Running animations, settled values, and per-frame keep-alive requests,
+-- keyed by widget or animation id.
 data AnimationState = AnimationState
   { asAnimations :: !(IntMap Animation)
   , asAnimRest :: !(IntMap Float)
@@ -242,13 +264,14 @@ data AnimationState = AnimationState
   , asAnimSettled :: {-# UNPACK #-} !Bool
   , asRectless :: !(IntMap Int)
   , asKeepAlive :: !IntSet
-  -- ^ Keys whose perpetual animation a 'keepAnimating' call holds open.
+  -- ^ Keys whose perpetual animation a @keepAnimating@ call holds open.
   , asKeepTouched :: !IntSet
   -- ^ The keys that asked again this frame. A held key missing from it at
   -- the end of the frame lapses: its widget is no longer built, and nothing
   -- else would ever end its animation.
   }
 
+-- | Empty animation maps with no pending animation frame.
 initialAnimationState :: AnimationState
 initialAnimationState = AnimationState
   { asAnimations = IM.empty
@@ -273,6 +296,8 @@ data ScrollTuning = ScrollTuning
   }
   deriving (Eq, Show)
 
+-- | Immediate scrolling by 60 logical pixels per wheel step. A backend may
+-- choose a font-relative step when configuring its context.
 defaultScrollTuning :: ScrollTuning
 defaultScrollTuning =
   ScrollTuning
@@ -299,6 +324,7 @@ data ScrollGlide = ScrollGlide
   }
   deriving (Eq, Show)
 
+-- | Context-wide scroll tuning, active glides, and geometry-publication keys.
 data ScrollState = ScrollState
   { ssTuning :: !ScrollTuning
   , ssGlides :: !(IntMap ScrollGlide)
@@ -309,6 +335,7 @@ data ScrollState = ScrollState
   -- the store and flipping the geometry the commands read.
   }
 
+-- | Default tuning with no glides or published scroller geometry.
 initialScrollState :: ScrollState
 initialScrollState =
   ScrollState
@@ -317,6 +344,8 @@ initialScrollState =
     , ssCached = IS.empty
     }
 
+-- | Drawing's fitted layout keyed by envelope size, line height, content key,
+-- and the caller's input layout.
 data DrawFitCache = DrawFitCache
   { dfcDw :: {-# UNPACK #-} !Double
   , dfcDh :: {-# UNPACK #-} !Double
@@ -353,6 +382,8 @@ data WidgetTextPlacement = WidgetTextPlacement
   {-# UNPACK #-} !Float
   {-# UNPACK #-} !Float
 
+-- | Widget-label measurement inputs and optional node-relative placement.
+-- Position is excluded so scrolling can reuse the measurement.
 data WidgetTextCacheEntry = WidgetTextCacheEntry
   { wtcNodeType :: {-# UNPACK #-} !Int
   , wtcStyle :: {-# UNPACK #-} !Int
@@ -364,6 +395,8 @@ data WidgetTextCacheEntry = WidgetTextCacheEntry
   , wtcPlacement :: {-# NOUNPACK #-} !(Maybe WidgetTextPlacement)
   }
 
+-- | Interaction and styling snapshot supplied to a custom widget's painter.
+-- Theme includes scoped/disabled styling; font metrics describe its text.
 data CustomDrawContext = CustomDrawContext
   { cdcHovered  :: {-# UNPACK #-} !Bool
   , cdcPressed  :: {-# UNPACK #-} !Bool
@@ -374,6 +407,8 @@ data CustomDrawContext = CustomDrawContext
   , cdcFont     :: !FontMetrics
   }
 
+-- | Pure draw-op builder for a solved rectangle in logical window coordinates.
+-- Include changing external inputs in the widget's content key when caching.
 type CustomDrawBuild = CustomDrawContext -> Rect -> SmallArray DrawOp
 
 -- | A registered custom drawing: its content key plus the op builder. A
@@ -393,6 +428,8 @@ data DrawingEntry = DrawingEntry
   , deBuild :: !DrawingBuild
   }
 
+-- | Per-widget drawing registrations and compiled-op/layout caches. Builders
+-- register during view construction; paint consumes them after layout.
 data DrawingCacheState = DrawingCacheState
   { dcsPopupConfigs :: !(IntMap PopupConfig)
   , dcsDrawings :: !(IntMap DrawingEntry)
@@ -434,6 +471,7 @@ data CustomDrawOpCacheEntry = CustomDrawOpCacheEntry
   , cdeOps :: !(SmallArray DrawOp)
   }
 
+-- | No registered drawings, popup configurations, or cached results.
 initialDrawingCacheState :: DrawingCacheState
 initialDrawingCacheState = DrawingCacheState
   { dcsPopupConfigs = IM.empty
@@ -464,6 +502,7 @@ data PointerRoute
     RouteDropdown !WidgetId
   deriving (Eq, Show)
 
+-- | Pointer route and active drag/menu gestures shared by the view and frame passes.
 data InteractionState = InteractionState
   { isScrollDrag :: !(Maybe (WidgetId, DirTag, Float))
   , isTextInputDrag :: !(Maybe TextInputDrag)
@@ -478,6 +517,7 @@ data InteractionState = InteractionState
   }
   deriving (Eq, Show)
 
+-- | Pointer routed to the page, with no held gesture, menu, or pending edit command.
 initialInteractionState :: InteractionState
 initialInteractionState = InteractionState
   { isScrollDrag = Nothing
@@ -491,6 +531,9 @@ initialInteractionState = InteractionState
   , isWindowResize = Nothing
   }
 
+-- | Mutable state for one UI session. Construct with @newContext@ and use it
+-- serially on the UI thread. Record copies share arenas, stores, and IORefs;
+-- a font-configured copy is not an independent session.
 data Context = Context
   { ctxNodeArena :: NodeArena
   , ctxDrawArena :: DrawArena
@@ -517,6 +560,7 @@ data Context = Context
   , ctxDrawingCache :: IORef DrawingCacheState
   , ctxIdContext :: IORef IdContext
   , ctxFontMetrics :: FontMetrics
+  -- ^ Base proportional-font metrics used by layout and drawing.
   , ctxMonoFontMetrics :: FontMetrics
   , ctxMeasureText :: Text -> IO (Float, Float)
   , ctxResolveFont :: !(Float -> FontWeight -> FontStyle -> FontVariant -> IO (FontMetrics, Bool))
@@ -524,25 +568,28 @@ data Context = Context
   , ctxMeasureCache :: Maybe (IORef (HashMap MeasureCacheKey (Float, Float)))
   , ctxSpanCache :: !(IORef (IntMap SpanCacheEntry))
   , ctxWidgetTextCache :: !(IORef (IntMap WidgetTextCacheEntry))
-  -- Whole-layout reuse cache (Phase 5A): cached signature + solved rects,
+  -- Whole-layout reuse cache: cached signature and solved rects,
   -- with the window size and font/theme generation it was captured under.
   , ctxLayoutCache :: !(IORef (Maybe (LayoutCache, Size, Int)))
   , ctxMetricGen :: !(IORef Int)
   , ctxMetricSource :: {-# NOUNPACK #-} !MetricSource
   , ctxLastMetricSource :: !(IORef (Maybe MetricSource))
-  -- True when the next present must repaint the whole window (fresh retain
+  -- | True when the next present must repaint the whole window (fresh retain
   -- texture, forced full, continuous present, or window expose). When False,
   -- a DamageClip frame culls the paint pass to the damaged region.
   , ctxPaintFull :: !(IORef Bool)
   , ctxExternalText :: Bool
   , ctxTheme :: !(IORef Theme)
+  -- ^ Base theme; scoped themes live in 'ctxThemeScopes'.
   , ctxThemeScopes :: !(IORef ThemeScopes)
   , ctxContainerStack :: IORef [Int]
   , ctxMessages :: IORef [FrameMsg]
   , ctxFocusables :: IORef (MutablePrimArray RealWorld WidgetId)
   , ctxFocusablesCount :: IORef Int
   , ctxSpanBase :: SpanArena
+  -- ^ Base-layer text spans for the current frame, reused on the next frame.
   , ctxSpanOverlay :: SpanArena
+  -- ^ Overlay text spans for the current frame, reused on the next frame.
   , ctxInteractionState :: !(IORef InteractionState)
   , ctxClipboardGet :: IO (Maybe Text)
   , ctxClipboardSet :: Text -> IO Bool
@@ -557,6 +604,8 @@ data Context = Context
   , ctxDefaultLayout :: IORef Layout
   }
 
+-- | Convert a widget's hash to its store key. The representation assumes a
+-- 64-bit 'Int' when preserving all identity bits.
 {-# INLINE intKey #-}
 intKey :: WidgetId -> Int
 intKey = fromIntegral . hashWidgetId

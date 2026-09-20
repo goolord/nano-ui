@@ -52,9 +52,11 @@ data EditorMode = EditorMode
   }
   deriving (Eq, Show)
 
+-- | Editable, copyable text without newline insertion.
 singleLineMode :: EditorMode
 singleLineMode = EditorMode {modeMultiLine = False, modeEditable = True, modeCopyable = True}
 
+-- | Editable, copyable text with multiline commands enabled.
 multiLineMode :: EditorMode
 multiLineMode = singleLineMode {modeMultiLine = True}
 
@@ -67,6 +69,7 @@ editorModeCode m =
     .|. (if modeEditable m then 0 else 2)
     .|. (if modeCopyable m then 0 else 4)
 
+-- | Decode a stored mode. 'Nothing' means the field-registration bit is absent.
 editorModeFromCode :: Int -> Maybe EditorMode
 editorModeFromCode code
   | code .&. 8 == 0 = Nothing
@@ -87,6 +90,7 @@ data Editor = Editor
   }
   deriving (Show)
 
+-- | Start an editor with no selection or history at the buffer's current cursor.
 editorFromBuffer :: TextBuffer -> Editor
 editorFromBuffer buf = Editor buf (TB.getCursor buf) emptyHistory
 
@@ -94,6 +98,7 @@ editorFromBuffer buf = Editor buf (TB.getCursor buf) emptyHistory
 editorSelection :: Editor -> (Cursor, Cursor)
 editorSelection ed = (editorAnchor ed, TB.getCursor (editorBuffer ed))
 
+-- | Whether the selection anchor differs from the buffer cursor.
 hasSelection :: Editor -> Bool
 hasSelection ed = editorAnchor ed /= TB.getCursor (editorBuffer ed)
 
@@ -124,6 +129,7 @@ data EditGroup = EditGroup
   }
   deriving (Eq, Show)
 
+-- | Undo and redo groups, newest first, with grouping state for consecutive edits.
 data EditHistory = EditHistory
   { historyUndo :: ![EditGroup]
   , historyRedo :: ![EditGroup]
@@ -135,6 +141,7 @@ data EditHistory = EditHistory
   }
   deriving (Eq, Show)
 
+-- | No undo/redo steps and no open edit group.
 emptyHistory :: EditHistory
 emptyHistory = EditHistory [] [] 0 False
 
@@ -142,9 +149,11 @@ emptyHistory = EditHistory [] [] 0 False
 sealHistory :: EditHistory -> EditHistory
 sealHistory h = h {historyOpen = False}
 
+-- | Whether at least one edit group can be undone.
 canUndo :: EditHistory -> Bool
 canUndo = not . null . historyUndo
 
+-- | Whether at least one undone group can be reapplied.
 canRedo :: EditHistory -> Bool
 canRedo = not . null . historyRedo
 

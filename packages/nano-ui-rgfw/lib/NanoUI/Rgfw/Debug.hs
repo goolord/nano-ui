@@ -58,6 +58,7 @@ data RgfwFrameStats = RgfwFrameStats
   }
   deriving (Eq, Show)
 
+-- | Published core timings and RGFW physical-frame statistics.
 data RgfwDebugSnapshot = RgfwDebugSnapshot
   { dbgCore  :: !CoreDebugSnapshot
   , dbgFrame :: !RgfwFrameStats
@@ -72,8 +73,10 @@ data RgfwDebugSampler = RgfwDebugSampler
   , rdsSnapshot :: !(IORef RgfwDebugSnapshot)
   }
 
+-- | Runtime-typed host entry used by 'askRgfwDebug' to locate the sampler.
 newtype RgfwDebugHost = RgfwDebugHost RgfwDebugSampler
 
+-- | Allocate a sampler with empty timing and frame snapshots.
 newRgfwDebugSampler :: IO RgfwDebugSampler
 newRgfwDebugSampler =
   RgfwDebugSampler
@@ -81,6 +84,7 @@ newRgfwDebugSampler =
     <*> newIORef (dbgFrame emptyRgfwDebug)
     <*> newIORef emptyRgfwDebug
 
+-- | Placeholder with zero counts and unit scale before measurements exist.
 emptyRgfwDebug :: RgfwDebugSnapshot
 emptyRgfwDebug =
   RgfwDebugSnapshot
@@ -88,6 +92,8 @@ emptyRgfwDebug =
     , dbgFrame = RgfwFrameStats {fsNodes = 0, fsPhysW = 0, fsPhysH = 0, fsScale = 1, fsMonScale = 1}
     }
 
+-- | Read debug data, refreshing at most four times per second. Returns
+-- 'emptyRgfwDebug' outside an RGFW session. Queries keep debug refresh active.
 askRgfwDebug :: Ui :> es => Eff es RgfwDebugSnapshot
 askRgfwDebug = do
   inp <- askInput
@@ -130,6 +136,8 @@ data RgfwDebugRows = RgfwDebugRows !RgfwDebugSnapshot !(Rows, Rows, Rows, Rows)
 
 type Rows = [(Text, Text)]
 
+-- | Draw timing, geometry, display, and RTS rows for a snapshot. Place this
+-- inside a window or panel; it does not create its own container.
 debugWindowBody :: Ui :> es => RgfwDebugSnapshot -> Eff es ()
 debugWindowBody snap = do
   ctx <- askContext

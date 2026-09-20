@@ -113,12 +113,8 @@ runModalCloseDamageTest ctx failed = do
   _ <- runFrame ctx esc ui
   checkIdleFullDamage failed ctx idle idle ui
 
--- At a fractional display scale, a modal sized to its content does not scroll
--- when that content uses fixed sizes off the device-pixel grid (regression:
--- the solve rounded the measured sizes inside the modal before placement laid
--- it out from them, and snapping a child's origin pushed its bottom below its
--- measured bottom so content-sized parents grew level after level; the body
--- overflowed its viewport by more than the scroll tolerance).
+-- At fractional display scales, fixed-size content must fit a content-sized
+-- modal without accumulating rounding error through nested containers.
 runModalFractionalScaleNoScrollTest :: Context -> IORef Int -> IO ()
 runModalFractionalScaleNoScrollTest _ failed =
   forM_ [(scale, rows, nested) | scale <- [1, 1.25, 1.5, 1.75], rows <- [4 .. 8 :: Int], nested <- [False, True]] $ \(scale, rows, nested) -> do
@@ -153,9 +149,7 @@ runModalFractionalScaleNoScrollTest _ failed =
     clipped <- scrolls (withFontMetrics short ((monospaceMetrics 12) {fmSnapScale = scale})) (withInputOff 1000 300)
     assertEq failed clipped True
 
--- A modal widens for a filling label instead of wrapping it, so the label
--- stays one line inside the modal (regression: the label reported no width, the
--- modal stayed at its minimum, and the wrapped body overflowed into a scroll).
+-- A modal widens for a filling label so it stays on one line when space permits.
 runModalFitsTextTest :: Context -> IORef Int -> IO ()
 runModalFitsTextTest ctx failed = do
   let inp = withInput 800 600
@@ -168,11 +162,8 @@ runModalFitsTextTest ctx failed = do
   assertEq failed (length whole) 1
   forM_ whole $ \(Rect _ _ tw _) -> assertGt failed (dw + 0.5) tw
 
--- A modal fits a body with a filling label set in a smaller font than the
--- base, with its last row in view (regression: placing the modal measured
--- every label in the base font, so the smaller label, sized for its own font,
--- wrapped onto a second line the modal had not measured; the modal scrolled
--- and clipped its buttons).
+-- A modal measures each label in its requested font size and keeps the last
+-- row visible when the measured body fits.
 runModalFillLabelFitsTest :: Context -> IORef Int -> IO ()
 runModalFillLabelFitsTest _ failed = forM_ [12, 17] $ \base -> do
   ctx <- (`withFontMetrics` monospaceMetrics base) <$> newContext

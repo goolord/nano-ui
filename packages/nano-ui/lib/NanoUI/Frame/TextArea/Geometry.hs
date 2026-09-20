@@ -65,12 +65,15 @@ textAreaBars fm (Rect _ _ fw fh) contentW contentH =
         , tabPadH = Padding ix (if hasV then ix + laneW else ix) 0 0
         }
 
+-- | Optional vertical and horizontal bars after accounting for their shared corner.
 data TextAreaScrollBarLayouts = TextAreaScrollBarLayouts
   { tasbVertical :: !(Maybe ScrollBarLayout)
   , tasbHorizontal :: !(Maybe ScrollBarLayout)
   }
   deriving (Eq, Show)
 
+-- | Compute both bars from field bounds, content width/height, and x/y offsets,
+-- all in logical pixels. Absent bars have 'Nothing' layouts.
 textAreaScrollBarLayouts :: FontMetrics -> Rect -> Float -> Float -> Float -> Float -> TextAreaScrollBarLayouts
 textAreaScrollBarLayouts fm field@(Rect x y w h) contentW contentH scrollX scrollY =
   let bars = textAreaBars fm field contentW contentH
@@ -82,10 +85,12 @@ textAreaScrollBarLayouts fm field@(Rect x y w h) contentW contentH scrollX scrol
         , tasbHorizontal = layout (tabHorizontal bars) DirRow (tabPadH bars) contentW scrollX
         }
 
+-- | Vertical bar from content height and y offset, assuming no horizontal overflow.
 textAreaScrollBarLayout :: FontMetrics -> Rect -> Float -> Float -> Maybe ScrollBarLayout
 textAreaScrollBarLayout fm field contentH scrollY =
   tasbVertical (textAreaScrollBarLayouts fm field 0 contentH 0 scrollY)
 
+-- | Horizontal bar from content width and x offset, assuming no vertical overflow.
 textAreaHScrollBarLayout :: FontMetrics -> Rect -> Float -> Float -> Maybe ScrollBarLayout
 textAreaHScrollBarLayout fm field contentW scrollX =
   tasbHorizontal (textAreaScrollBarLayouts fm field contentW 0 scrollX 0)

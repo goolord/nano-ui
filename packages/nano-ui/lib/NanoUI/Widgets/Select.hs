@@ -45,6 +45,7 @@ select :: (Foldable f, Ui :> es) => f Text -> Int -> Eff es Int
 select options index = snd <$> selectWith' id options index
 
 {-# INLINE select' #-}
+-- | 'select' returning @(response, selectedIndex)@. Indices are zero-based.
 select' :: (Foldable f, Ui :> es) => f Text -> Int -> Eff es (Response, Int)
 select' = selectWith' id
 
@@ -53,6 +54,7 @@ select' = selectWith' id
 selectWith :: (Foldable f, Ui :> es) => (Layout -> Layout) -> f Text -> Int -> Eff es Int
 selectWith f options index = snd <$> selectWith' f options index
 
+-- | 'selectWith' returning the response and selected index.
 selectWith' ::
   (Foldable f, Ui :> es) =>
   (Layout -> Layout) ->
@@ -103,6 +105,7 @@ selectWith' f options index = do
 boundedSelect :: (Bounded a, Enum a, Ui :> es) => (a -> Text) -> a -> Eff es a
 boundedSelect encode value = snd <$> boundedSelect' encode value
 
+-- | 'boundedSelect' returning the response and selected enum value.
 boundedSelect' :: (Bounded a, Enum a, Ui :> es) => (a -> Text) -> a -> Eff es (Response, a)
 boundedSelect' encode value = withBoundedIndex encode value select'
 
@@ -111,5 +114,6 @@ boundedSelect' encode value = withBoundedIndex encode value select'
 enumSelect :: (Bounded a, Enum a, Show a, Ui :> es) => a -> Eff es a
 enumSelect = boundedSelect (T.pack . show)
 
+-- | 'enumSelect' returning the response and selected enum value.
 enumSelect' :: (Bounded a, Enum a, Show a, Ui :> es) => a -> Eff es (Response, a)
 enumSelect' = boundedSelect' (T.pack . show)

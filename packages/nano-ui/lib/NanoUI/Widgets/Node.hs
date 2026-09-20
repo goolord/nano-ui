@@ -95,42 +95,56 @@ instance HasResponse Response where
   {-# INLINE toResponse #-}
   toResponse = id
 
+-- | Widget identity used for state, tooltips, and commands.
 {-# INLINE respId #-}
 respId :: HasResponse r => r -> WidgetId
 respId = rawRespId . toResponse
 
+-- | Widget bounds in logical window coordinates. During view construction,
+-- these come from the previous frame and can be empty on first appearance.
 {-# INLINE respRect #-}
 respRect :: HasResponse r => r -> Rect
 respRect = rawRespRect . toResponse
 
+-- | Whether the routed pointer is over the widget's visible hit area.
 {-# INLINE respHovered #-}
 respHovered :: HasResponse r => r -> Bool
 respHovered = rawRespHovered . toResponse
 
+-- | Whether the left button is held over the widget. This is a held state,
+-- not a one-frame button-down event.
 {-# INLINE respPressed #-}
 respPressed :: HasResponse r => r -> Bool
 respPressed = rawRespPressed . toResponse
 
+-- | Whether the widget reports activation on this frame.
 {-# INLINE respClicked #-}
 respClicked :: HasResponse r => r -> Bool
 respClicked = rawRespClicked . toResponse
 
+-- | Whether the widget reports a value change. Search fields debounce this flag.
 {-# INLINE respChanged #-}
 respChanged :: HasResponse r => r -> Bool
 respChanged = rawRespChanged . toResponse
 
+-- | Whether the widget reports a commit, such as Enter in a text field.
 {-# INLINE respSubmitted #-}
 respSubmitted :: HasResponse r => r -> Bool
 respSubmitted = rawRespSubmitted . toResponse
 
+-- | Whether the right button is held over the widget.
 {-# INLINE respRightPressed #-}
 respRightPressed :: HasResponse r => r -> Bool
 respRightPressed = rawRespRightPressed . toResponse
 
+-- | Whether a right-button click completed on the widget this frame.
 {-# INLINE respRightClicked #-}
 respRightClicked :: HasResponse r => r -> Bool
 respRightClicked = rawRespRightClicked . toResponse
 
+-- | Per-frame widget identity, bounds, and interaction flags. Primed widget
+-- variants expose this alongside their value. Combining responses unions
+-- bounds, ORs flags, and keeps the last nonzero id.
 data Response = Response
   { rawRespId :: !WidgetId
   , rawRespRect :: !Rect
@@ -167,12 +181,15 @@ unionRespRect a b
   | rectW b <= 0 || rectH b <= 0 = a
   | otherwise = rectUnion a b
 
+-- | Replace only the activation flag, for composite widgets.
 setClicked :: Bool -> Response -> Response
 setClicked c r = r {rawRespClicked = c}
 
+-- | Replace only the value-change flag.
 setChanged :: Bool -> Response -> Response
 setChanged c r = r {rawRespChanged = c}
 
+-- | Replace only the commit flag.
 setSubmitted :: Bool -> Response -> Response
 setSubmitted s r = r {rawRespSubmitted = s}
 

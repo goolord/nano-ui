@@ -1,5 +1,7 @@
 {-# LANGUAGE BangPatterns #-}
 
+-- | Character classes, word selection, and caret geometry shared by text fields.
+-- Text positions count Unicode characters rather than UTF-8 bytes.
 module NanoUI.Widgets.TextCommon
   ( -- * Character classes and word boundaries
     TextCharClass (..)

@@ -83,6 +83,8 @@ import SDL3.Sys.Bindgen.Mouse (sDL_BUTTON_LEFT, sDL_BUTTON_RIGHT)
 import SDL3.Sys.Bindgen.Stdinc (Sint32 (..), Uint32 (..))
 import SDL3.Sys.Keyboard (getModState)
 
+-- | Copied SDL event data. Pointer positions use SDL window coordinates until
+-- display synchronisation converts them to nano-ui's logical coordinates.
 data SdlEvent
   = EvQuit
   | EvResize Int Int
@@ -112,12 +114,16 @@ pollEvents =
             else pure (reverse acc)
     drain []
 
+-- | Wait for one native event. 'Nothing' means SDL failed to return an event
+-- or the decoded event is ignored, so it does not imply a quit request.
 waitEvent :: IO (Maybe SdlEvent)
 waitEvent =
   alloca $ \p -> do
     got <- waitEventSafe p
     if got then readIORef refreshEventType >>= \ty -> decodeEvent ty p else pure Nothing
 
+-- | Wait up to the supplied milliseconds. 'Nothing' also covers a timeout
+-- or ignored event. Call from the display thread.
 waitEventTimeout :: Int -> IO (Maybe SdlEvent)
 waitEventTimeout ms =
   alloca $ \p -> do
@@ -285,6 +291,8 @@ isRepeatableKey KeyHome = True
 isRepeatableKey KeyEnd = True
 isRepeatableKey _ = False
 
+-- | Accumulate one event into a frame's input. Resize, scale, refresh, and quit
+-- need session handling; this does not update size or convert coordinates.
 applyEvent :: Input -> SdlEvent -> Input
 applyEvent inp ev =
   case ev of
@@ -311,6 +319,7 @@ applyEvent inp ev =
     EvRefresh -> inp
     EvWindowRedraw -> inp {inputWindowRedraw = True}
 
+-- | Whether an event is a left/right press or release and should end an input batch.
 isButtonEdge :: SdlEvent -> Bool
 isButtonEdge ev =
   case ev of
@@ -320,6 +329,7 @@ isButtonEdge ev =
     EvMouseRightRelease _ _ -> True
     _ -> False
 
+-- | Ctrl+C text or an ETX character, independent of popup dismissal.
 isHardQuit :: SdlEvent -> Bool
 isHardQuit ev =
   case ev of

@@ -1,5 +1,7 @@
 {-# LANGUAGE StrictData #-}
 
+-- | Layout options, text styling, and theme palettes. Modifiers compose with
+-- @(.)@, with the leftmost modifier winning when both set the same field.
 module NanoUI.Style
   ( Sizing (..)
   , Direction (..)
@@ -114,6 +116,8 @@ import Data.Bits ((.&.), (.|.))
 import Data.Word (Word8)
 import NanoUI.Types (Color (..), colorA, colorLuminance, colorRGBA, contrastRatio, lerpColor)
 
+-- | Size along one axis. Fixed sizes use logical pixels; grow/shrink values
+-- are relative weights, and percentages use 100 for the full available size.
 data Sizing
   = Fixed Float
   | Fit
@@ -122,9 +126,11 @@ data Sizing
   | Percent Float
   deriving (Eq, Show)
 
+-- | Main axis for laying out a container's children.
 data Direction = Row | Column
   deriving (Eq, Show, Enum, Bounded)
 
+-- | Horizontal alignment: left, centre, or right.
 data AlignX = AlignStart | AlignCenter | AlignEnd
   deriving (Eq, Show, Enum, Bounded)
 
@@ -134,6 +140,7 @@ data AlignX = AlignStart | AlignCenter | AlignEnd
 data AlignY = AlignTop | AlignMiddle | AlignBottom | AlignBaseline
   deriving (Eq, Show, Enum, Bounded)
 
+-- | Insets in logical pixels, ordered left, right, top, bottom.
 data Padding = Padding
   { padL :: {-# UNPACK #-} !Float
   , padR :: {-# UNPACK #-} !Float
@@ -142,16 +149,18 @@ data Padding = Padding
   }
   deriving (Eq, Show)
 
--- Floating window chrome. The body sits one side-pad below the chrome and one
+-- | Floating window padding. The body sits one side-pad below the chrome and one
 -- side-pad above the window's bottom edge (the window's own column gap fills
 -- the top; see 'NanoUI.Widgets.Overlay').
 windowPad :: Padding
 windowPad = Padding 10 10 0 10
 
--- Screen inset for floating window/modal max size and default placement.
+-- | Screen inset in logical pixels for floating window/modal size and placement.
 windowMargin :: Float
 windowMargin = 14
 
+-- | Semantic font choice. The backend selects a face and the theme supplies
+-- colours for heading, muted, and danger text.
 data FontVariant
   = FontRegular
   | FontHeading
@@ -160,6 +169,7 @@ data FontVariant
   | FontDanger
   deriving (Eq, Show, Enum, Bounded, Ord)
 
+-- | Requested font weight. Available faces and synthetic weights depend on the backend.
 data FontWeight
   = WeightNormal
   | WeightBold
@@ -170,12 +180,14 @@ data FontWeight
   | WeightBlack
   deriving (Eq, Show, Enum, Bounded, Ord)
 
+-- | Upright, italic, or oblique text. Backend support determines the rendered face.
 data FontStyle
   = FontStyleNormal
   | FontStyleItalic
   | FontStyleOblique
   deriving (Eq, Show, Enum, Bounded, Ord)
 
+-- | Underline and strikethrough flags for text painting.
 data TextDecoration
   = DecorationNone
   | DecorationUnderline
@@ -183,8 +195,13 @@ data TextDecoration
   | DecorationUnderlineStrike
   deriving (Eq, Show, Enum, Bounded, Ord)
 
+-- | A layout update. Compose with @(.)@; the leftmost update wins when two
+-- modifiers set the same field.
 type LayoutModifier = Layout -> Layout
 
+-- | Layout and text options for a node. Lengths use logical pixels. Font size
+-- 0 selects the backend default; 'Nothing' for font colour uses the theme.
+-- Grid column count 0 leaves the count to grid sizing.
 data Layout = Layout
   { layoutDirection :: !Direction
   , layoutWidth :: !Sizing
@@ -208,6 +225,8 @@ data Layout = Layout
   }
   deriving (Eq, Show)
 
+-- | Fit-sized column with 3-pixel padding, an 8-pixel gap, top-left alignment,
+-- and the regular font. Widgets may override these defaults.
 defaultLayout :: Layout
 defaultLayout =
   Layout
@@ -232,129 +251,172 @@ defaultLayout =
     , layoutTextDecoration = DecorationNone
     }
 
+-- | Set all four padding edges in logical pixels.
 padAll :: Float -> Layout -> Layout
 padAll n l = l {layoutPadding = Padding n n n n}
 
+-- | Set horizontal and vertical padding, in that order, in logical pixels.
 padXY :: Float -> Float -> Layout -> Layout
 padXY x y l = l {layoutPadding = Padding x x y y}
 
+-- | Set the space between children in logical pixels.
 gap :: Float -> Layout -> Layout
 gap n l = l {layoutGap = n}
 
+-- | Share available horizontal space with grow weight 1.
 fillW :: Layout -> Layout
 fillW l = l {layoutWidth = Grow 1}
 
+-- | Share available vertical space with grow weight 1.
 fillH :: Layout -> Layout
 fillH l = l {layoutHeight = Grow 1}
 
+-- | Apply 'fillW' and 'fillH'.
 grow :: Layout -> Layout
 grow = fillW . fillH
 
+-- | Set the minimum width in logical pixels without changing the sizing mode.
 minW :: Float -> Layout -> Layout
 minW n l = l {layoutMinW = n}
 
+-- | Set the maximum width in logical pixels without changing the sizing mode.
 maxW :: Float -> Layout -> Layout
 maxW n l = l {layoutMaxW = n}
 
+-- | Fix width and both width limits to the given logical-pixel value.
 fixedW :: Float -> Layout -> Layout
 fixedW n l = l {layoutWidth = Fixed n, layoutMinW = n, layoutMaxW = n}
 
+-- | Set the minimum height in logical pixels without changing the sizing mode.
 minH :: Float -> Layout -> Layout
 minH n l = l {layoutMinH = n}
 
+-- | Set the maximum height in logical pixels without changing the sizing mode.
 maxH :: Float -> Layout -> Layout
 maxH n l = l {layoutMaxH = n}
 
+-- | Request a fixed height in logical pixels, retaining existing height limits.
 fixedH :: Float -> Layout -> Layout
 fixedH n l = l {layoutHeight = Fixed n}
 
+-- | Request fixed width and height in logical pixels, retaining size limits.
 fixedWH :: Float -> Float -> Layout -> Layout
 fixedWH w h l = l {layoutWidth = Fixed w, layoutHeight = Fixed h}
 
+-- | Centre vertically in the available space.
 alignMid :: Layout -> Layout
 alignMid l = l {layoutAlignY = AlignMiddle}
 
+-- | Align to the right edge of the available space.
 alignEnd :: Layout -> Layout
 alignEnd l = l {layoutAlignX = AlignEnd}
 
+-- | Remove all padding, retaining the gap between children.
 tight :: Layout -> Layout
 tight l = l {layoutPadding = Padding 0 0 0 0}
 
+-- | Set width as a percentage of the parent's available width: 100 means all.
 percent :: Float -> Layout -> Layout
 percent p l = l {layoutWidth = Percent p}
 
+-- | Set the minimum column width for an adaptive grid, in logical pixels.
+-- Non-positive values disable this minimum.
 gridMinColW :: Float -> Layout -> Layout
 gridMinColW w l = l {layoutGridMinColW = max 0 w}
 
+-- | Fixed width and width/height ratio. The ratio must be positive.
 fixedAspectW :: Float -> Float -> Layout -> Layout
 fixedAspectW w ratio = fixedWH w (w / ratio)
 
+-- | Fixed height and width/height ratio. The ratio must be positive.
 fixedAspectH :: Float -> Float -> Layout -> Layout
 fixedAspectH h ratio = fixedWH (h * ratio) h
 
+-- | Set the grid column count, clamping negative counts to zero.
 gridCols :: Int -> Layout -> Layout
 gridCols n l = l {layoutGridCols = max 0 n}
 
+-- | Select the regular font variant.
 fontRegular :: Layout -> Layout
 fontRegular l = l {layoutFontVariant = FontRegular}
 
+-- | Select the heading font variant.
 fontHeading :: Layout -> Layout
 fontHeading l = l {layoutFontVariant = FontHeading}
 
+-- | Select regular text in the theme's muted colour.
 fontMuted :: Layout -> Layout
 fontMuted l = l {layoutFontVariant = FontMuted}
 
+-- | Select the backend's monospace font variant.
 fontMono :: Layout -> Layout
 fontMono l = l {layoutFontVariant = FontMono}
 
+-- | Select text in the theme's danger colour.
 fontDanger :: Layout -> Layout
 fontDanger l = l {layoutFontVariant = FontDanger}
 
+-- | Set logical font size. Non-positive values select the backend default.
 fontSize :: Float -> Layout -> Layout
 fontSize sz l = l {layoutFontSize = max 0 sz}
 
+-- | Multiply an explicit font size, or 16 when none is set, by a scale factor.
+-- This uses 16 rather than querying the backend's default size.
 fontSizeScale :: Float -> Layout -> Layout
 fontSizeScale s l =
   let cur = layoutFontSize l
       sz = if cur > 0 then cur * s else 16 * s
    in l {layoutFontSize = max 0 sz}
 
+-- | Override the theme's text colour for this node.
 fontColor :: Color -> Layout -> Layout
 fontColor col l = l {layoutFontColor = Just col}
 
+-- | Set the requested font weight independently of its semantic variant.
 fontWeight :: FontWeight -> Layout -> Layout
 fontWeight w l = l {layoutFontWeight = w}
 
+-- | Request 'WeightBold'.
 fontBold :: Layout -> Layout
 fontBold = fontWeight WeightBold
 
+-- | Request 'WeightLight'.
 fontLight :: Layout -> Layout
 fontLight = fontWeight WeightLight
 
+-- | Request 'WeightMedium'.
 fontMedium :: Layout -> Layout
 fontMedium = fontWeight WeightMedium
 
+-- | Request 'WeightSemiBold'.
 fontSemiBold :: Layout -> Layout
 fontSemiBold = fontWeight WeightSemiBold
 
+-- | Request 'WeightExtraBold'.
 fontExtraBold :: Layout -> Layout
 fontExtraBold = fontWeight WeightExtraBold
 
+-- | Request 'WeightBlack', the heaviest weight.
 fontBlack :: Layout -> Layout
 fontBlack = fontWeight WeightBlack
 
+-- | Set upright, italic, or oblique text without changing its weight.
 fontStyle :: FontStyle -> Layout -> Layout
 fontStyle s l = l {layoutFontStyle = s}
 
+-- | Request 'FontStyleItalic'.
 fontItalic :: Layout -> Layout
 fontItalic = fontStyle FontStyleItalic
 
+-- | Request 'FontStyleOblique'.
 fontOblique :: Layout -> Layout
 fontOblique = fontStyle FontStyleOblique
 
+-- | Replace the node's underline and strikethrough settings.
 textDecoration :: TextDecoration -> Layout -> Layout
 textDecoration d l = l {layoutTextDecoration = d}
 
+-- | Add an underline while preserving any strikethrough.
 fontUnderline :: Layout -> Layout
 fontUnderline l =
   let newDeco = case layoutTextDecoration l of
@@ -363,6 +425,7 @@ fontUnderline l =
         _ -> DecorationUnderline
    in l {layoutTextDecoration = newDeco}
 
+-- | Add a strikethrough while preserving any underline.
 fontStrike :: Layout -> Layout
 fontStrike l =
   let newDeco = case layoutTextDecoration l of
@@ -371,15 +434,19 @@ fontStrike l =
         _ -> DecorationStrikethrough
    in l {layoutTextDecoration = newDeco}
 
+-- | Align to the left edge of the available space.
 alignStart :: Layout -> Layout
 alignStart l = l {layoutAlignX = AlignStart}
 
+-- | Centre horizontally in the available space.
 alignCenter :: Layout -> Layout
 alignCenter l = l {layoutAlignX = AlignCenter}
 
+-- | Align to the top edge of the available space.
 alignTop :: Layout -> Layout
 alignTop l = l {layoutAlignY = AlignTop}
 
+-- | Align to the bottom edge of the available space.
 alignBottom :: Layout -> Layout
 alignBottom l = l {layoutAlignY = AlignBottom}
 
@@ -389,6 +456,8 @@ alignBottom l = l {layoutAlignY = AlignBottom}
 alignBaseline :: Layout -> Layout
 alignBaseline l = l {layoutAlignY = AlignBaseline}
 
+-- | Surface colours and border geometry. Border width and corner radius use
+-- logical pixels and affect painting, not layout size.
 data Style = Style
   { styleBg :: {-# UNPACK #-} !Color
   , styleFg :: {-# UNPACK #-} !Color
@@ -400,6 +469,8 @@ data Style = Style
   }
   deriving (Eq, Show)
 
+-- | Colours and surface styles used to paint a view. Use theme modifiers with
+-- @styled@ for a subtree or @setUiTheme@ to change the session's base theme.
 data Theme = Theme
   { themeWindow :: {-# UNPACK #-} !Color
   , themePanel :: !Style
@@ -444,24 +515,31 @@ data Theme = Theme
 -- > styled (buttonStyle (cornerRadius 8) . accentColor teal) $ do ...
 -- > styled primary (button "Save")
 
+-- | Set the resting background, retaining hover and pressed colours.
 background :: Color -> Style -> Style
 background c s = s {styleBg = c}
 
+-- | Set a surface's text and foreground colour.
 foreground :: Color -> Style -> Style
 foreground c s = s {styleFg = c}
 
+-- | Set the border colour without changing its width.
 borderColor :: Color -> Style -> Style
 borderColor c s = s {styleBorder = c}
 
+-- | Set border width in logical pixels, clamped to zero or greater.
 borderWidth :: Float -> Style -> Style
 borderWidth w s = s {styleBorderWidth = max 0 w}
 
+-- | Set corner radius in logical pixels, clamped to zero or greater.
 cornerRadius :: Float -> Style -> Style
 cornerRadius r s = s {styleCornerRadius = max 0 r}
 
+-- | Set the background used while the pointer hovers over a control.
 hoverBackground :: Color -> Style -> Style
 hoverBackground c s = s {styleHoverBg = c}
 
+-- | Set the background used while a control is active.
 pressBackground :: Color -> Style -> Style
 pressBackground c s = s {styleActiveBg = c}
 
@@ -475,6 +553,7 @@ fillColor c s =
     , styleActiveBg = lerpColor c (colorRGBA 0 0 0 (colorA c)) 0.18
     }
 
+-- | Modify the theme's button surface.
 buttonStyle :: (Style -> Style) -> Theme -> Theme
 buttonStyle f t = t {themeButton = f (themeButton t)}
 
@@ -490,9 +569,12 @@ panelStyle f t = t {themePanel = f (themePanel t)}
 windowStyle :: (Style -> Style) -> Theme -> Theme
 windowStyle f t = t {themeFloatingWindow = f (themeFloatingWindow t)}
 
+-- | Modify button, input, panel, and floating-window surfaces together.
 everyStyle :: (Style -> Style) -> Theme -> Theme
 everyStyle f = buttonStyle f . inputStyle f . panelStyle f . windowStyle f
 
+-- | Set the accent and focus-ring colours, and recolour the selection
+-- highlight while preserving its alpha.
 accentColor :: Color -> Theme -> Theme
 accentColor c t = t {themeAccent = c, themeFocusRing = c, themeSelection = fadeAlpha c (colorA (themeSelection t))}
 
@@ -500,12 +582,15 @@ accentColor c t = t {themeAccent = c, themeFocusRing = c, themeSelection = fadeA
 textColor :: Color -> Theme -> Theme
 textColor c = everyStyle (foreground c)
 
+-- | Set the colour for secondary text.
 mutedColor :: Color -> Theme -> Theme
 mutedColor c t = t {themeMuted = c}
 
+-- | Set the colour for rich-text hyperlinks.
 linkColor :: Color -> Theme -> Theme
 linkColor c t = t {themeLink = c}
 
+-- | Set the selected-text highlight, including its alpha.
 selectionColor :: Color -> Theme -> Theme
 selectionColor c t = t {themeSelection = c}
 
@@ -544,6 +629,7 @@ primary = tinted themeAccent
 destructive :: Theme -> Theme
 destructive = tinted themeRed
 
+-- | Fill buttons with the theme's green and choose a readable label colour.
 success :: Theme -> Theme
 success = tinted themeGreen
 
@@ -658,7 +744,7 @@ defaultTheme =
         , themeDisabledFade = 0.55
         }
 
--- Status and series colours in hue order, then accent.
+-- | Series palette in order: red, orange, yellow, green, accent, purple.
 themeSeries :: Theme -> [Color]
 themeSeries t =
   [ themeRed t
@@ -675,14 +761,12 @@ separatorTrackColor :: Style -> Theme -> Color
 separatorTrackColor base theme =
   lerpColor (styleBg base) (themeSeparator theme) 0.28
 
--- Scroll track/thumb tints. The track is an opaque mix of the surface it sits
--- on (the scroller well / floating window body) toward the separator colour, so
--- the lane reads against that surface on every theme. The thumb stays a
--- translucent foreground mix so the track shows through it.
+-- | Scrollbar track colour mixed from its background surface and the separator colour.
 scrollBarTrackColor :: Style -> Theme -> Color
 scrollBarTrackColor base theme =
   separatorTrackColor base theme
 
+-- | Scrollbar thumb colour mixed from separator and foreground, with alpha 130.
 scrollBarThumbColor :: Style -> Theme -> Color
 scrollBarThumbColor base theme =
   let solid = lerpColor (themeSeparator theme) (styleFg base) 0.58

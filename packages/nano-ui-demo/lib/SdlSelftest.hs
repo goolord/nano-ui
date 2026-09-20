@@ -65,8 +65,7 @@ selftest continuous ui = do
       fail $ printf "selftest: shaped width mismatch for italic sentence: measure=%.2f, shaped=%.2f" wItal runItal
     putStrLn $ printf "MEASURE string: norm=%.1f, ital=%.1f" wNorm wItal
     -- The shaped path (fmShape / pushText) must match SDL3_ttf measurement;
-    -- catches regressions where per-glyph fallback ignored GPOS kerning for
-    -- pairs like To, AV, and fi.
+    -- include GPOS kerning and ligatures for pairs like To, AV, and fi.
     (fmNorm20, _) <- ctxResolveFont ctx 20.0 WeightNormal FontStyleNormal FontRegular
     (fmItal20, _) <- ctxResolveFont ctx 20.0 WeightNormal FontStyleItalic FontRegular
     let checkRun :: String -> FontMetrics -> FontStyle -> String -> IO ()

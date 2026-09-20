@@ -9,6 +9,8 @@ license:            MIT
 license-file:       LICENSE
 author:             goolord
 maintainer:         zacharyachurchill@gmail.com
+homepage:           https://github.com/goolord/nano-ui
+bug-reports:        https://github.com/goolord/nano-ui/issues
 category:           Graphics
 build-type:         Simple
 extra-doc-files:
@@ -18,6 +20,11 @@ extra-doc-files:
 extra-source-files:
     data/inter.ttf
     cbits/*.h
+
+source-repository head
+    type:     git
+    location: https://github.com/goolord/nano-ui.git
+    subdir:   packages/nano-ui-sdl
 
 flag sdl
     description: Build the SDL3 backend. Needs SDL3, SDL3_ttf, and pkg-config.

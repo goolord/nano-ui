@@ -17,6 +17,7 @@ import NanoUI.Widgets.Node (Response, addWidget, respClicked, setChanged)
 checkbox :: Ui :> es => Text -> Bool -> Eff es Bool
 checkbox txt checked = snd <$> checkbox' txt checked
 
+-- | 'checkbox' returning @(response, checked)@. Store the returned flag each frame.
 checkbox' :: Ui :> es => Text -> Bool -> Eff es (Response, Bool)
 checkbox' txt checked = do
   wid <- nextId

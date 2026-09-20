@@ -111,26 +111,32 @@ import NanoUI.Widgets.TextCommand (TextCommand)
 -- State records
 -- =============================================================================
 
+-- | Read a projection of the current pointer, drag, and text-menu state.
 {-# INLINE getsInteraction #-}
 getsInteraction :: Context -> (InteractionState -> a) -> IO a
 getsInteraction ctx f = f <$> readIORef (ctxInteractionState ctx)
 
+-- | Strictly update interaction state on the UI thread. Does not request repaint.
 {-# INLINE modifyInteraction #-}
 modifyInteraction :: Context -> (InteractionState -> InteractionState) -> IO ()
 modifyInteraction ctx = modifyIORef' (ctxInteractionState ctx)
 
+-- | Read a projection of modal and floating-panel state.
 {-# INLINE getsOverlay #-}
 getsOverlay :: Context -> (OverlayState -> a) -> IO a
 getsOverlay ctx f = f <$> readIORef (ctxOverlayState ctx)
 
+-- | Strictly update overlay state on the UI thread. Does not request repaint.
 {-# INLINE modifyOverlay #-}
 modifyOverlay :: Context -> (OverlayState -> OverlayState) -> IO ()
 modifyOverlay ctx = modifyIORef' (ctxOverlayState ctx)
 
+-- | Read a projection of pending damage and previous-frame geometry.
 {-# INLINE getsDamage #-}
 getsDamage :: Context -> (DamageState -> a) -> IO a
 getsDamage ctx f = f <$> readIORef (ctxDamageState ctx)
 
+-- | Strictly update damage bookkeeping without waking the event loop.
 {-# INLINE modifyDamage #-}
 modifyDamage :: Context -> (DamageState -> DamageState) -> IO ()
 modifyDamage ctx = modifyIORef' (ctxDamageState ctx)
@@ -139,28 +145,34 @@ modifyDamage ctx = modifyIORef' (ctxDamageState ctx)
 -- Interaction
 -- =============================================================================
 
+-- | Active scrollbar drag: widget, axis, and grab offset, or 'Nothing'.
 {-# INLINE getScrollDrag #-}
 getScrollDrag :: Context -> IO (Maybe (WidgetId, DirTag, Float))
 getScrollDrag ctx = getsInteraction ctx isScrollDrag
 
+-- | Replace or clear the active text-selection drag.
 {-# INLINE setTextInputDrag #-}
 setTextInputDrag :: Context -> Maybe TextInputDrag -> IO ()
 setTextInputDrag ctx v = modifyInteraction ctx (\s -> s {isTextInputDrag = v})
 
+-- | Open text-edit context menu, or 'Nothing'.
 {-# INLINE getTextInputMenu #-}
 getTextInputMenu :: Context -> IO (Maybe TextInputMenu)
 getTextInputMenu ctx = getsInteraction ctx isTextInputMenu
 
+-- | Replace or close the text-edit context menu. The caller handles damage.
 {-# INLINE setTextInputMenu #-}
 setTextInputMenu :: Context -> Maybe TextInputMenu -> IO ()
 setTextInputMenu ctx v = modifyInteraction ctx (\s -> s {isTextInputMenu = v})
 
+-- | Read and clear the last command run by a text-edit menu, with its target id.
 takeTextEditLastAction :: Context -> IO (Maybe (WidgetId, TextCommand))
 takeTextEditLastAction ctx = do
   act <- getsInteraction ctx isTextEditLastAction
   modifyInteraction ctx (\s -> s {isTextEditLastAction = Nothing})
   pure act
 
+-- | Pointer destination chosen before the current view pass.
 {-# INLINE getPointerRoute #-}
 getPointerRoute :: Context -> IO PointerRoute
 getPointerRoute ctx = getsInteraction ctx isPointerRoute
@@ -175,10 +187,12 @@ pointerHeldOffLayers ctx =
       RouteLayer _ -> False
       _ -> True
 
+-- | Dragged window id and pointer-to-window x/y offsets, or 'Nothing'.
 {-# INLINE getWindowDrag #-}
 getWindowDrag :: Context -> IO (Maybe (WidgetId, Float, Float))
 getWindowDrag ctx = getsInteraction ctx isWindowDrag
 
+-- | Active window resize gesture, including starting bounds and size limits.
 {-# INLINE getWindowResize #-}
 getWindowResize :: Context -> IO (Maybe WindowResizeDrag)
 getWindowResize ctx = getsInteraction ctx isWindowResize
@@ -187,28 +201,35 @@ getWindowResize ctx = getsInteraction ctx isWindowResize
 -- Damage
 -- =============================================================================
 
+-- | Queue repaint bounds for the frame's damage pass. Does not wake the loop;
+-- call 'markDirty' as well when a new frame must be scheduled.
 {-# INLINE requestDamage #-}
 requestDamage :: Context -> DamageRequest -> IO ()
 requestDamage ctx req = modifyDamage ctx (\ds -> ds {dsRequests = req : dsRequests ds})
 
+-- | Queue damage relative to a widget's previous and current bounds. Zero ids
+-- are ignored. Does not itself schedule a frame.
 {-# INLINE damageWidget #-}
 damageWidget :: Context -> WidgetId -> DamageBounds -> IO ()
 damageWidget ctx wid bounds
   | hashWidgetId wid == 0 = pure ()
   | otherwise = requestDamage ctx (ReqWidget wid bounds)
 
+-- | Queue widget damage by integer store key. Zero keys are ignored.
 {-# INLINE damageKey #-}
 damageKey :: Context -> Int -> DamageBounds -> IO ()
 damageKey ctx k bounds
   | k == 0 = pure ()
   | otherwise = requestDamage ctx (ReqKey k bounds)
 
+-- | Queue an explicit logical window rectangle. Empty rectangles are ignored.
 {-# INLINE damageRect #-}
 damageRect :: Context -> Rect -> IO ()
 damageRect ctx r
   | rectW r <= 0 || rectH r <= 0 = pure ()
   | otherwise = requestDamage ctx (ReqRect r)
 
+-- | Queue the same damage rule for a group of nonzero widget ids.
 {-# INLINE damagePeers #-}
 damagePeers :: Context -> [WidgetId] -> DamageBounds -> IO ()
 damagePeers ctx wids bounds =
@@ -216,24 +237,31 @@ damagePeers ctx wids bounds =
     [] -> pure ()
     valid -> requestDamage ctx (ReqPeers valid bounds)
 
+-- | Queue a whole-window repaint. Call 'markDirty' if the loop also needs waking.
 {-# INLINE damageFull #-}
 damageFull :: Context -> IO ()
 damageFull ctx = requestDamage ctx ReqFull
 
+-- | Request another view pass and invoke the installed event-loop wake action.
+-- Dirty state schedules work; damage determines which pixels are repainted.
 {-# INLINE markDirty #-}
 markDirty :: Context -> IO ()
 markDirty ctx = do
   modifyDamage ctx (\ds -> ds {dsDirty = True})
   readIORef (ctxWakeLoop ctx) >>= sequence_
 
+-- | Clear the follow-up-frame request without clearing queued repaint bounds.
 {-# INLINE clearDirty #-}
 clearDirty :: Context -> IO ()
 clearDirty ctx = modifyDamage ctx (\ds -> ds {dsDirty = False})
 
+-- | Whether state changes require another view pass.
 {-# INLINE isDirty #-}
 isDirty :: Context -> IO Bool
 isDirty ctx = getsDamage ctx dsDirty
 
+-- | Install the backend action that interrupts an event wait. A background
+-- producer should invoke the wake action after publishing synchronised data.
 {-# INLINE setWakeLoop #-}
 setWakeLoop :: Context -> IO () -> IO ()
 setWakeLoop ctx wake = writeIORef (ctxWakeLoop ctx) (Just wake)
@@ -259,18 +287,23 @@ requestWakeAfter ctx sec = do
 getWakeAt :: Context -> IO Double
 getWakeAt ctx = readIORef (ctxWakeAt ctx)
 
+-- | Clear the timed wake request at frame start; live widgets request it again.
 {-# INLINE clearWakeAt #-}
 clearWakeAt :: Context -> IO ()
 clearWakeAt ctx = writeIORef (ctxWakeAt ctx) 0
 
+-- | Read the last computed damage. Despite the name, this does not clear it.
 {-# INLINE takeDamage #-}
 takeDamage :: Context -> IO Damage
 takeDamage ctx = getsDamage ctx dsDamage
 
+-- | Last recorded widget bounds in logical window coordinates, with scrolling
+-- applied. 'Nothing' means the damage pass recorded no bounds for this id.
 {-# INLINE getPrevRect #-}
 getPrevRect :: Context -> WidgetId -> IO (Maybe Rect)
 getPrevRect ctx wid = getsDamage ctx (IM.lookup (intKey wid) . dsPrevRects)
 
+-- | Last recorded widget clip in logical window coordinates, or 'Nothing'.
 {-# INLINE getPrevClipRect #-}
 getPrevClipRect :: Context -> WidgetId -> IO (Maybe Rect)
 getPrevClipRect ctx wid = getsDamage ctx (IM.lookup (intKey wid) . dsPrevClips)
@@ -279,10 +312,13 @@ getPrevClipRect ctx wid = getsDamage ctx (IM.lookup (intKey wid) . dsPrevClips)
 -- Store
 -- =============================================================================
 
+-- | Current immutable store value. Mutations must be published through store
+-- operations so the context can track damage and follow-up frames.
 {-# INLINE getStore #-}
 getStore :: Context -> IO WidgetStore
 getStore ctx = readIORef (ctxStore ctx)
 
+-- | Replace the store, diff changed slots for damage, and wake on a change.
 setStore :: Context -> WidgetStore -> IO ()
 setStore ctx store = modifyStore ctx (const store)
 
@@ -358,12 +394,15 @@ writeSlot field ctx owner k v = do
       damageWidget ctx owner DamageSelf
       markDirty ctx
 
+-- | Write an integer slot by key, damaging its owning widget only when changed.
 writeStoreInt :: Context -> WidgetId -> Int -> Int -> IO ()
 writeStoreInt = writeSlot fieldInt
 
+-- | Write a float slot by key, damaging its owning widget only when changed.
 writeStoreFloat :: Context -> WidgetId -> Int -> Float -> IO ()
 writeStoreFloat = writeSlot fieldFloat
 
+-- | Write a boolean at the owner's base integer key, with change detection.
 {-# INLINE writeStoreBool #-}
 writeStoreBool :: Context -> WidgetId -> Bool -> IO ()
 writeStoreBool ctx owner v = writeStoreInt ctx owner (intKey owner) (boolInt v)
@@ -397,24 +436,33 @@ recordSlot field ctx k v = do
   when (lookupSlot field seenK st /= Just v) $
     writeIORef (ctxStore ctx) $! insertSlot field seenK v st
 
+-- | Adopt a controlled integer value. A value different from the last
+-- 'recordStoreInt' result wins; otherwise retain edits made between frames.
 adoptStoreInt :: Context -> WidgetId -> Int -> Int -> IO Int
 adoptStoreInt = adoptSlot fieldInt
 
+-- | Float form of 'adoptStoreInt', paired with 'recordStoreFloat'.
 adoptStoreFloat :: Context -> WidgetId -> Int -> Float -> IO Float
 adoptStoreFloat = adoptSlot fieldFloat
 
+-- | Text form of 'adoptStoreInt', paired with 'recordStoreText'.
 adoptStoreText :: Context -> WidgetId -> Int -> Text -> IO Text
 adoptStoreText = adoptSlot fieldText
 
+-- | Remember a controlled widget's returned integer for next frame's adoption.
+-- Does not request a frame or modify the widget's value slot.
 recordStoreInt :: Context -> Int -> Int -> IO ()
 recordStoreInt = recordSlot fieldInt
 
+-- | Remember the returned float for 'adoptStoreFloat'.
 recordStoreFloat :: Context -> Int -> Float -> IO ()
 recordStoreFloat = recordSlot fieldFloat
 
+-- | Remember the returned text for 'adoptStoreText'.
 recordStoreText :: Context -> Int -> Text -> IO ()
 recordStoreText = recordSlot fieldText
 
+-- | Read the boolean at a widget's base integer key, using the supplied default.
 {-# INLINE getStoreBool #-}
 getStoreBool :: Context -> WidgetId -> Bool -> IO Bool
 getStoreBool ctx wid def =
@@ -440,6 +488,8 @@ scopeDisabled ctx wid = do
 -- Theme scopes
 -- =============================================================================
 
+-- | Allocate empty current/previous scope arrays. Only entries below their
+-- recorded counts are initialised and may be read.
 newThemeScopes :: IO ThemeScopes
 newThemeScopes = do
   let unset = error "theme scope: unset"
@@ -483,10 +533,9 @@ beginThemeScopes ctx newFrame = do
           }
     else writeIORef (ctxThemeScopes ctx) $! ts {tsCount = 0, tsDisabled = False, tsChanged = False}
 
--- | Add a scope drawn with @theme@, whose nested scopes modify @raw@ and which
--- is disabled or not, and
--- return its theme index. A theme equal to last frame's at the same index
--- keeps last frame's value.
+-- | Add a scope with disabled status, raw theme, and painted theme, in that
+-- order. Returns a one-based theme index and records whether the painted
+-- theme differs from the previous frame's theme at that index.
 pushThemeScope :: Context -> Bool -> Theme -> Theme -> IO Int
 pushThemeScope ctx disabled raw theme = do
   ts <- readIORef (ctxThemeScopes ctx)
@@ -519,6 +568,8 @@ themeScopesChanged ctx = do
   sig <- getScopeSignature (ctxNodeArena ctx)
   pure (tsChanged ts || tsCount ts /= tsPrevCount ts || sig /= tsPrevSig ts)
 
+-- | Painted theme for a packed arena scope. Theme index zero uses the base
+-- theme; other indices must name a scope registered during this view pass.
 {-# INLINE scopeTheme #-}
 scopeTheme :: Context -> Int -> IO Theme
 scopeTheme ctx scope
@@ -544,6 +595,7 @@ scopeRawTheme ctx scope
 currentTheme :: Context -> IO Theme
 currentTheme ctx = getArenaScope (ctxNodeArena ctx) >>= scopeTheme ctx
 
+-- | Painted theme recorded on a live node, including disabled styling.
 {-# INLINE nodeTheme #-}
 nodeTheme :: Context -> NodeIdx -> IO Theme
 nodeTheme ctx idx = getNodeScope (ctxNodeArena ctx) idx >>= scopeTheme ctx

@@ -6,18 +6,16 @@
 -- Maintainer  : zacharyachurchill@gmail.com
 --
 -- A view is a function that runs every frame. Widgets are ordinary calls:
--- each one lays itself out, reads this frame's input, and returns what the
+-- each one adds a layout node, reads this frame's input, and returns what the
 -- user did. There are no widget objects to keep and no callbacks to register.
 --
--- @
--- counter :: NanoUI ()
--- counter = do
---   (n, setN) <- useInt 0
---   row $ do
---     whenM (button "-") (setN (n - 1))
---     label (T.pack (show n))
---     whenM (button "+") (setN (n + 1))
--- @
+-- > counter :: NanoUI ()
+-- > counter = do
+-- >   (n, setN) <- useInt 0
+-- >   row $ do
+-- >     whenM (button "-") (setN (n - 1))
+-- >     label (T.pack (show n))
+-- >     whenM (button "+") (setN (n + 1))
 --
 -- Run a view with a backend: @runSdlApp@ from @nano-ui-sdl@ or @runRgfwApp@
 -- from @nano-ui-rgfw@.
@@ -244,12 +242,10 @@ module NanoUI
     -- right-click menu runs them, and an app can run them on a field by its
     -- id:
     --
-    -- @
-    -- (resp, body') <- 'textArea'' body
-    -- canUndo <- 'textCanUndo' ('respId' resp)
-    -- 'whenM' ('menuItem' \"Undo\") ('runTextCommand' ('respId' resp) 'Undo')
-    -- 'whenM' ('menuItem' \"Insert date\") ('runTextCommand' ('respId' resp) ('InsertText' today))
-    -- @
+    -- > (resp, body') <- textArea' body
+    -- > canUndo <- textCanUndo (respId resp)
+    -- > whenM (menuItem "Undo") (runTextCommand (respId resp) Undo)
+    -- > whenM (menuItem "Insert date") (runTextCommand (respId resp) (InsertText today))
     --
     -- Every command that changes text is recorded for undo. Typing joins one
     -- undo step per word and deleting one per run; the steps keep the edits
@@ -433,12 +429,10 @@ module NanoUI
     -- How far the wheel goes, and whether a scroll glides onto its target
     -- instead of jumping, is one setting for the whole app:
     --
-    -- @
-    -- 'setScrollTuning' ctx 'defaultScrollTuning'
-    --   { 'scrollWheelStep' = 3 * rowHeight  -- three rows a notch
-    --   , 'scrollSmoothTime' = 0.12          -- glide onto it
-    --   }
-    -- @
+    -- > setScrollTuning ctx defaultScrollTuning
+    -- >   { scrollWheelStep = 3 * rowHeight  -- three rows a notch
+    -- >   , scrollSmoothTime = 0.12
+    -- >   }
     --
     -- 'setScrollStep' gives one list a step of its own. With a glide time
     -- set, every wheel notch and every 'ScrollSmooth' command eases onto its
@@ -564,11 +558,9 @@ module NanoUI
     -- view. Style and theme modifiers compose with @(.)@ like layout
     -- modifiers do:
     --
-    -- @
-    -- toolbar = 'styled' ('subtle' . 'buttonStyle' ('cornerRadius' 6)) $ 'row' $ do
-    --   'whenM' ('button' \"Open\") openFile
-    --   'styled' 'primary' ('whenM' ('button' \"Save\") save)
-    -- @
+    -- > toolbar = styled (subtle . buttonStyle (cornerRadius 6)) $ row $ do
+    -- >   whenM (button "Open") openFile
+    -- >   styled primary (whenM (button "Save") save)
     --
     -- Scopes nest, and each one modifies the theme around it, so a modifier
     -- written once ('primary', 'destructive', or one of your own) works in any

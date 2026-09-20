@@ -1,3 +1,4 @@
+-- | SDL session resources, window options, font/display synchronisation, and screenshots.
 module NanoUI.Sdl.Window
   ( RgbaImage (..)
   , SdlEnv (..)
@@ -89,7 +90,9 @@ import SDL3.Sys.Render
 import SDL3.Sys.Surface (destroySurface, saveBMP)
 import SDL3.Sys.Video (destroyWindowSafe, getWindowDisplayScale)
 
--- | Initial RGBA asset uploaded before the first frame.
+-- | Initial image: positive pixel width/height and tightly packed RGBA8 bytes,
+-- four bytes per pixel in row order. The high-level runners register these
+-- assets before the first frame.
 data RgbaImage = RgbaImage
   { rgbaImageId :: !ImageId
   , rgbaImageWidth :: !Int
@@ -118,15 +121,15 @@ data SdlOptions = SdlOptions
   , sdlAppContinuous :: !Bool
   -- ^ Continuous unthrottled rendering without waiting for events (default: 'False').
   , sdlAppFont :: !NanoUIFont
-  -- ^ UI font (default: embedded Inter).
+  -- ^ UI font (default: installed sans-serif search, falling back to bundled Inter).
   , sdlAppMonoFont :: !NanoUIFont
-  -- ^ Monospace font (default: embedded Inter).
+  -- ^ Monospace font (default: installed monospace search, falling back to Inter).
   , sdlAppFontSize :: !Float
   -- ^ Base font size in points (default: 16).
   , sdlAppTheme :: !(Maybe Theme)
   -- ^ Initial UI theme override (default: 'Nothing').
   , sdlAppShouldQuit :: !(Input -> Bool)
-  -- ^ Predicate on user input to trigger application exit (default: @const False@).\
+  -- ^ Predicate on user input to trigger application exit (default: @const False@).
   , sdlAppImages :: !(SmallArray RgbaImage)
   -- ^ Initial RGBA textures registered before the first frame.
   , sdlAppUiScale :: !Float
@@ -136,6 +139,8 @@ data SdlOptions = SdlOptions
   -- changes it at runtime.
   }
 
+-- | Resizable 1280x800 window with vsync, 16-point text, UI scale 1, installed
+-- font lookup, and bundled-font fallback. Continuous rendering is disabled.
 defaultSdlOptions :: SdlOptions
 defaultSdlOptions =
   SdlOptions
@@ -184,6 +189,9 @@ sdlWindowHiddenFlag = SDL_WindowFlags 0x0000000000000008
 scaleEpsilon :: Float
 scaleEpsilon = 0.001
 
+-- | Native resources owned by a 'withSdl' callback. Window, renderer, and font
+-- handles must stay on the display thread and must not outlive the callback.
+-- Use the supplied context, which contains this environment as host data.
 data SdlEnv = SdlEnv
   { sdlWindow :: Ptr SDL_Window
   , sdlRenderer :: Ptr SDL_Renderer
@@ -241,8 +249,9 @@ resolveZoom win setting
       density <- queryWindowPixelDensity win
       pure (if display > 0 then max 0.25 (display / density) else 1)
 
--- Layout in logical coordinates (window coordinates over the zoom);
--- draw/text rasterize at native pixel density.
+-- | Synchronise display scale, requested fonts, and logical input coordinates.
+-- Call on the display thread before drawing, then use both returned values;
+-- font changes may replace the context's metrics and invalidate cached layout.
 syncDisplay :: Context -> SdlEnv -> Input -> IO (Context, Input)
 syncDisplay ctx env inp = do
   density <- maybe (queryWindowPixelDensity (sdlWindow env)) pure (sdlForcedScale env)
@@ -304,6 +313,9 @@ data WindowConfig = WindowConfig
   , wcUiScale :: !Float
   }
 
+-- | Open native resources around an action and release them on exit, including
+-- exceptions. Supplies an SDL-equipped context. This does not run an event
+-- loop or apply the high-level runner's initial theme/image registration.
 withSdl :: SdlOptions -> Context -> (Context -> SdlEnv -> IO a) -> IO a
 withSdl opts ctx =
   withSdlWindow
@@ -321,6 +333,8 @@ withSdl opts ctx =
       , wcUiScale = sdlAppUiScale opts
       }
 
+-- | 'withSdl' for measurements: a hidden 800x600 window, bundled fonts,
+-- scale 1, continuous drawing, and no vsync or text-input setup.
 withSdlBench :: Context -> (Context -> SdlEnv -> IO a) -> IO a
 withSdlBench ctx =
   withSdlWindow

@@ -70,24 +70,31 @@ import NanoUI.WidgetText (intValueText)
 import NanoUI.Widgets.Layout (labelEx, labelWith, panelWith, row', rowWith)
 import NanoUI.Widgets.Node (Response, addWidget, addWidgetStyled)
 
+-- | Medium-weight label without padding. Uses the current font size.
 heading :: Ui :> es => Text -> Eff es ()
 heading = labelWith (tight . fontMedium)
 
+-- | Full-width label in the theme's muted colour.
 muted :: Ui :> es => Text -> Eff es ()
 muted = labelWith (fillW . fontMuted)
 
+-- | Label using the backend's monospace font variant.
 mono :: Ui :> es => Text -> Eff es ()
 mono = labelWith fontMono
 
+-- | Full-width label in the theme's danger colour.
 danger :: Ui :> es => Text -> Eff es ()
 danger = labelWith (fillW . fontDanger)
 
+-- | Label requesting bold weight.
 bold :: Ui :> es => Text -> Eff es ()
 bold = labelWith fontBold
 
+-- | Label requesting italic styling.
 italic :: Ui :> es => Text -> Eff es ()
 italic = labelWith fontItalic
 
+-- | Label with an underline.
 underline :: Ui :> es => Text -> Eff es ()
 underline = labelWith fontUnderline
 
@@ -116,9 +123,11 @@ kvBlock rows =
           (tight . gap 0 . fontMono $ defaultLayout)
           (T.concat (foldr (\(k, v) rest -> padK k : "  " : v : "\n" : rest) [] rows))
 
+-- | Full-width panel with a 300-pixel minimum width, 12x10 padding, and 8-pixel gap.
 card :: Ui :> es => Eff es a -> Eff es a
 card = panelWith (minW 300 . padXY 12 10 . gap 8 . fillW)
 
+-- | Full-width row with no padding, an 8-pixel gap, and vertical centring.
 toolbar :: Ui :> es => Eff es a -> Eff es a
 toolbar = rowWith (tight . gap 8 . alignMid . fillW)
 

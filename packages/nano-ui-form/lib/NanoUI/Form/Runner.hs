@@ -68,7 +68,10 @@ nanoFormLive prefix form = do
     FormValid a -> Just a
     FormInvalid _ -> Nothing
 
--- | Run a form with an integrated submit button.
+-- | Run a form with an integrated submit button. Arguments are stable form
+-- prefix, button label, and form. Enter in the routed input also submits,
+-- regardless of which field has focus; avoid treating multiple visible forms
+-- as independent Enter targets.
 -- Validation errors are only displayed after the first submission attempt.
 -- Returns @Just a@ only on a valid submission.
 nanoFormSubmit :: Text -> Text -> Form Text a -> NanoUI (Maybe a)
@@ -88,7 +91,8 @@ nanoFormSubmit prefix submitLabel form = do
       (True, Ditto.Ok (Ditto.Proved _ a)) -> Just a
       _                                  -> Nothing
 
--- | Detailed form runner with custom configuration.
+-- | Render with configured error visibility and an optional submit button.
+-- Returns current validity every frame, not a one-frame submission event.
 nanoFormEx :: FormConfig -> Text -> Form Text a -> NanoUI (FormStatus a)
 nanoFormEx cfg prefix form = do
   ctx <- askContext

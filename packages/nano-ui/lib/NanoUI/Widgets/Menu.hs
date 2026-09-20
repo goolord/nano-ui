@@ -1,5 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 
+-- | Menu rows, menu-bar buttons, and context-menu state for application views.
 module NanoUI.Widgets.Menu
   ( contextMenu
   , contextMenuArea
@@ -139,23 +140,20 @@ menuItemWith (MenuItem lbl hint enabled)
 
 -- | Menu row. 'True' on the frame it is clicked.
 --
--- @
--- whenM (menuItem "Open...") openFile
--- @
+-- > whenM (menuItem "Open...") openFile
 {-# INLINE menuItem #-}
 menuItem :: Ui :> es => Text -> Eff es Bool
 menuItem txt = respClicked <$> menuItem' txt
 
 {-# INLINE menuItem' #-}
+-- | 'menuItem' returning its response; activation is in @respClicked@.
 menuItem' :: Ui :> es => Text -> Eff es Response
 menuItem' txt = menuItemWith (MenuItem txt Nothing True)
 
 -- | Menu row with a shortcut hint after the label. The hint is only text;
 -- handle the key itself elsewhere.
 --
--- @
--- whenM (menuItemShortcut "Save" "Ctrl+S") saveFile
--- @
+-- > whenM (menuItemShortcut "Save" "Ctrl+S") saveFile
 menuItemShortcut :: Ui :> es => Text -> Text -> Eff es Bool
 menuItemShortcut txt hint = respClicked <$> menuItemWith (MenuItem txt (Just hint) True)
 

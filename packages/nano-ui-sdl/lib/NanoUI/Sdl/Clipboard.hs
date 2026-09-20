@@ -1,3 +1,4 @@
+-- | Install SDL clipboard text callbacks in a nano-ui context.
 module NanoUI.Sdl.Clipboard
   ( withSdlClipboard
   ) where

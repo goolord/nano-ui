@@ -1,3 +1,4 @@
+-- | SDL display facts combined with the core frame-timing sampler.
 module NanoUI.Sdl.Debug
   ( SdlDebugSnapshot (..)
   , SdlDebugSampler (..)
@@ -18,6 +19,8 @@ import NanoUI.Debug
 import System.Environment (lookupEnv)
 import Text.Printf (printf)
 
+-- | Published timing, font, renderer, and display information. Scale is
+-- physical pixels per layout unit and refresh rate is in hertz.
 data SdlDebugSnapshot = SdlDebugSnapshot
   { dbgCore      :: !CoreDebugSnapshot
   , dbgScale     :: !Float
@@ -36,6 +39,7 @@ data SdlDebugSampler = SdlDebugSampler
   , sdsTrace    :: !Bool
   }
 
+-- | Start an empty sampler and read whether @NANO_FRAME_TRACE@ is set.
 newSdlDebugSampler :: IO SdlDebugSampler
 newSdlDebugSampler =
   SdlDebugSampler
@@ -43,6 +47,7 @@ newSdlDebugSampler =
     <*> newIORef emptySdlDebug
     <*> (isJust <$> lookupEnv "NANO_FRAME_TRACE")
 
+-- | Placeholder snapshot before an SDL session publishes measurements.
 emptySdlDebug :: SdlDebugSnapshot
 emptySdlDebug =
   SdlDebugSnapshot

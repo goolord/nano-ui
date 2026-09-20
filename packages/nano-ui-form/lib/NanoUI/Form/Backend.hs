@@ -89,7 +89,7 @@ newtype FormUI a = FormUI { unFormUI :: NanoUI a }
 liftNanoUI :: NanoUI a -> FormUI a
 liftNanoUI = FormUI
 
--- | 'FormInput' instance for 'FormInput' allowing ditto decoding.
+-- | Decode scalar values as text and preserve text lists for multi-value fields.
 instance Ditto.FormInput FormInput where
   type FileType FormInput = ()
 
@@ -108,11 +108,11 @@ instance Ditto.FormInput FormInput where
 instance FormError FormInput Text where
   commonFormError = commonFormErrorText formInputToText
 
--- | Well-known slot key in 'storeDyn' for the dynamically scoped form prefix.
+-- | Dynamic-store key for the form prefix active during evaluation or rendering.
 activePrefixSlot :: Int
 activePrefixSlot = -0x464F524D -- -'FORM'
 
--- | Hash a form prefix to a unique 'IntMap' key.
+-- | Hash a form prefix into a store key. This is a hash, not a collision-free encoding.
 formStoreKey :: Text -> Int
 formStoreKey prefix = hash ("nano-ui-form:" :: Text, prefix)
 

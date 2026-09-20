@@ -67,7 +67,7 @@ resolveFontFor ctx nt size packed
     weight = textNodeFontWeight si
     style = textNodeFontStyle si
 
--- | The font a 'DrawTextStyled' op names, and whether the host draws its
+-- | The font a @DrawTextStyled@ op names, and whether the host draws its
 -- weight and slant natively.
 resolveTextFont :: Context -> TextFont -> IO (FontMetrics, Bool)
 resolveTextFont ctx (TextFont size variant weight style _)

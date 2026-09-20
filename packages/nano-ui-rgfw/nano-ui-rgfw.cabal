@@ -9,6 +9,8 @@ license:            MIT
 license-file:       LICENSE
 author:             goolord
 maintainer:         zacharyachurchill@gmail.com
+homepage:           https://github.com/goolord/nano-ui
+bug-reports:        https://github.com/goolord/nano-ui/issues
 category:           Graphics
 build-type:         Simple
 extra-doc-files:
@@ -16,6 +18,11 @@ extra-doc-files:
     README.md
 
 extra-source-files: data/cozette.min.otb
+
+source-repository head
+    type:     git
+    location: https://github.com/goolord/nano-ui.git
+    subdir:   packages/nano-ui-rgfw
 
 common extensions
     default-language: GHC2024

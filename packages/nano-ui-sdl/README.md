@@ -19,6 +19,28 @@ main = runSdlApp defaultSdlOptions (label "Hello")
 with `NanoUI.Emit`. `SdlOptions` sets the window, fonts, font size, theme, and
 vsync.
 
+## Add to an application
+
+Use GHC 9.14 and include `nano-ui` and `nano-ui-sdl` in `build-depends`.
+Set `default-language: GHC2024`; the example enables `OverloadedStrings`
+for text literals. Build the executable with `-threaded` for SDL callbacks.
+
+The high-level runners own the window and renderer until the window closes.
+For an existing event loop, use the session operations exported by
+`NanoUI.Backend.Sdl`. Keep window, renderer, and font operations on the
+session's display thread, and close the session when finished.
+
+## Fonts and coordinates
+
+`SdlOptions` selects the initial font and logical font size. `NanoUI.Sdl.NanoUIFont`
+defines font choices, and `setSdlUiFont` requests a change during a session.
+Font discovery can use installed families; a family present on one machine
+may be absent on another. The bundled Inter font provides the default.
+
+Views use logical pixels. The backend converts input and drawing to the
+window's display scale, including changes when the window moves to another
+monitor. Custom widgets should use the logical rectangle supplied by nano-ui.
+
 ## Running
 
 ```sh
@@ -33,3 +55,11 @@ flag, which is on by default.
 
 On x86-64, `-f simd` compiles the draw-batch culler with AVX2. A binary built
 that way needs an AVX2 CPU.
+
+From this package's source directory, run `cabal build` after installing the
+native libraries. Check discovery with `pkg-config --modversion sdl3 sdl3-ttf`.
+The repository's `cabal.project` enables SIMD; the published package defaults
+to the scalar culler.
+
+See the [development guide](https://github.com/goolord/nano-ui/blob/main/docs/development.md)
+for tests, profiling, and building the complete repository.

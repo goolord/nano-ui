@@ -1,5 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 
+-- | Anchored floating panels and tooltips, with caller-owned visibility state.
 module NanoUI.Widgets.Popup
   ( PopupAnchor (..)
   , PopupPlacement (..)
@@ -65,6 +66,8 @@ import NanoUI.Widgets.Node
   , respRect
   )
 
+-- | Anchor, preferred side, outside-click dismissal, and gap in logical pixels.
+-- Anchors use logical window coordinates.
 data PopupConfig = PopupConfig
   { cfgAnchor :: !PopupAnchor
   , cfgPlacement :: !PopupPlacement
@@ -73,6 +76,7 @@ data PopupConfig = PopupConfig
   }
   deriving (Eq, Show)
 
+-- | Automatic placement with a 4-pixel gap and outside-click dismissal enabled.
 defaultPopupConfig :: PopupAnchor -> PopupConfig
 defaultPopupConfig anchor =
   PopupConfig
@@ -201,10 +205,8 @@ tooltipAt placement target txt =
 
 -- | Text shown below a widget while the pointer is over it.
 --
--- @
--- save <- button' "Save"
--- tooltip save "Write the file to disk"
--- @
+-- > save <- button' "Save"
+-- > tooltip save "Write the file to disk"
 tooltip ::
   (Ui :> es, HasResponse r) =>
   r ->

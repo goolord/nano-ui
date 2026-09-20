@@ -70,9 +70,7 @@ runExternalTextTest ctx failed = do
   setDrawExternalText ctx False
 
 -- | Circles sharing a centre stay concentric at a fractional centre, filled
--- or stroked, whatever their radii (regression: the bounding box's origin
--- was snapped to the pixel grid, so @cx - radius@ rounded differently per
--- radius and a small disc drawn over a larger one sat off-centre).
+-- or stroked, whatever their radii. Pixel snapping must preserve their shared centre.
 runConcentricCirclesTest :: Context -> IORef Int -> IO ()
 runConcentricCirclesTest ctx failed = do
   let inp = withInput 200 100

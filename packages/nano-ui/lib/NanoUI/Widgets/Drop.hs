@@ -5,10 +5,8 @@
 -- 'useDrop' turns the frame's 'NanoUI.Input.DropEvent's into a 'DropTarget'
 -- for one rectangle. 'dropZone' wraps a panel and does the same for its rect.
 --
--- @
--- (_, _, target) <- dropZone fillW (label "Drop files here")
--- when (dropReceived target) (mapM_ openFile (dropFiles target))
--- @
+-- > (_, _, target) <- dropZone fillW (label "Drop files here")
+-- > when (dropReceived target) (mapM_ openFile (dropFiles target))
 module NanoUI.Widgets.Drop
   ( DropTarget (..)
   , useDrop

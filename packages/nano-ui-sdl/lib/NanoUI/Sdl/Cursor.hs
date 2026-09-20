@@ -1,3 +1,4 @@
+-- | Own SDL system cursors and apply nano-ui cursor requests on the display thread.
 module NanoUI.Sdl.Cursor
   ( SdlCursors (..)
   , initCursors

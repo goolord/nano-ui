@@ -68,9 +68,11 @@ import NanoUI.Diagrams.Tessellation
   , strokePolyline
   )
 
+-- | Diagrams backend that emits nano-ui draw operations for paths and text.
 data NanoUIBackend = NanoUIBackend
   deriving (Eq, Show)
 
+-- | Short backend name for @Diagram B@ type signatures.
 type B = NanoUIBackend
 
 type instance V NanoUIBackend = V2
@@ -215,10 +217,14 @@ clamp01 x = max 0 (min 1 x)
 toF :: Real n => n -> Float
 toF = realToFrac
 
+-- | Render into a logical-pixel viewport of the given width and height,
+-- preserving aspect ratio and centring the result. Non-positive sizes return no ops.
 diagramOps ::
   Double -> Double -> QDiagram NanoUIBackend V2 Double Any -> SmallArray DrawOp
 diagramOps = renderFull False
 
+-- | Text-only form of 'diagramOps', using the same viewport transform.
+-- Used to measure labels before building all geometry.
 diagramTextOps ::
   Double -> Double -> QDiagram NanoUIBackend V2 Double Any -> SmallArray DrawOp
 -- Text uses the same backend and viewport as geometry. In particular, do not

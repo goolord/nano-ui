@@ -63,15 +63,16 @@ import NanoUI.Font (alignedTextPen, textInkEnd)
 import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, assertLt, bump, withInput)
 
+-- | Text bounds, text, foreground, background, and clip in logical window coordinates.
 type DemoSpan = (Rect, T.Text, Color, Color, Rect)
 
 foreign import ccall unsafe "string.h memcpy" c_memcpy :: Ptr Word8 -> Ptr Word8 -> CSize -> IO ()
 
 -- | Decode the quads a frame actually rasterised: one @(rect, color)@ per
 -- six-index quad, in draw order. Span and arena queries cannot see chrome
--- (scroller wells, scrollbar lanes); this can. Every rasterised op in the
--- draw arena is emitted as 4 vertices / 6 indices; a command that breaks
--- that packing fails loudly here instead of decoding garbage.
+-- (scroller wells, scrollbar lanes); this can. Use only with quad-packed
+-- output, such as square-geometry test contexts. Triangle and rounded-shape
+-- output is not supported. Commands with counts not divisible by six throw.
 drawQuads :: DrawData -> IO [(Rect, Color)]
 drawQuads dd =
   fmap concat $
@@ -120,9 +121,11 @@ drawQuads dd =
                 , colorRGBA (toW8 r0) (toW8 g0) (toW8 b0) (toW8 a0)
                 )
 
+-- | Midpoint of a logical rectangle, without clipping it.
 spanCenter :: Rect -> V2
 spanCenter (Rect x y w h) = V2 (x + w / 2) (y + h / 2)
 
+-- | Whether any span contains the text as a substring.
 hasText :: T.Text -> [(Rect, T.Text, a, b, c)] -> Bool
 hasText needle = any (\(_, txt, _, _, _) -> needle `T.isInfixOf` txt)
 
@@ -131,9 +134,12 @@ hasText needle = any (\(_, txt, _, _, _) -> needle `T.isInfixOf` txt)
 dropSpanMarkers :: T.Text -> T.Text
 dropSpanMarkers = T.dropWhile (`elem` ['\x01', '\x02', '\x05'])
 
+-- | Trim surrounding whitespace and remove leading internal blank-glyph markers.
 spanLabel :: T.Text -> T.Text
 spanLabel txt = dropSpanMarkers (T.strip txt)
 
+-- | Centre of the rightmost nontrivial span with an exact normalised label.
+-- Returns 'Nothing' when none matches.
 findExact :: T.Text -> [DemoSpan] -> Maybe V2
 findExact needle spans =
   pickRight
@@ -143,6 +149,8 @@ findExact needle spans =
     , spanLabel txt == needle
     ]
 
+-- | Find a table-header centre, preferring its reserved sort padding over an
+-- ordinary label with the same text. Ties choose the rightmost match.
 findHeader :: T.Text -> [DemoSpan] -> Maybe V2
 findHeader needle spans =
   -- Header spans keep their sort-reserve padding ("Name   " with the arrow
@@ -163,6 +171,7 @@ findHeader needle spans =
         ]
    in pickRight (if null marked then exact else marked)
 
+-- | Centre of the rightmost span containing the substring, or 'Nothing'.
 findRightmost :: T.Text -> [DemoSpan] -> Maybe V2
 findRightmost needle spans =
   pickRight [(x, spanCenter r) | (r@(Rect x _ _ _), txt, _, _, _) <- spans, needle `T.isInfixOf` txt]
@@ -174,6 +183,7 @@ pickRight (p : ps) = Just (go p ps)
   go acc [] = snd acc
   go acc@(ax, _) (q@(qx, _) : qs) = go (if qx >= ax then q else acc) qs
 
+-- | Return a located point or throw an IO error with the supplied diagnostic.
 requireSpan :: String -> Maybe V2 -> IO V2
 requireSpan msg = maybe (fail msg) pure
 
@@ -185,6 +195,7 @@ expectText msg needle spans = unless (hasText needle spans) (fail msg)
 clickPos :: (Input -> IO ()) -> Input -> V2 -> IO ()
 clickPos drawFrame base pos = dragPos drawFrame base pos pos
 
+-- | Locate a named tab from text spans and drive a click. Fails if absent.
 clickTab :: (Context -> IO [DemoSpan]) -> (Input -> IO ()) -> Context -> Input -> T.Text -> IO ()
 clickTab getSpans drawFrame ctx base name = do
   spans <- getSpans ctx
@@ -198,6 +209,7 @@ dragPos drawFrame base from to = do
       hold = holdAt base to
   mapM_ drawFrame [press, hold, releaseAt hold, base, base]
 
+-- | Left-button press and release at a point, retaining other base-input fields.
 clickPair :: Input -> V2 -> (Input, Input)
 clickPair inp pos =
   let
@@ -206,6 +218,7 @@ clickPair inp pos =
    in
     (press, release)
 
+-- | Right-button press and release at a point. Supply event-free base input.
 rightClickPair :: Input -> V2 -> (Input, Input)
 rightClickPair inp pos =
   let
@@ -224,6 +237,7 @@ rightClickPair inp pos =
    in
     (press, release)
 
+-- | Set pointer position and left-button press/held flags, clearing its release flag.
 pressAt :: Input -> V2 -> Input
 pressAt inp pos =
   inp
@@ -237,6 +251,7 @@ pressAt inp pos =
 holdAt :: Input -> V2 -> Input
 holdAt inp pos = (pressAt inp pos) {inputMousePressed = False}
 
+-- | Release the left button at its current position, clearing its press/held flags.
 releaseAt :: Input -> Input
 releaseAt press =
   press
@@ -253,28 +268,35 @@ keyInp k inp = inp {inputKeys = inputKeysFromList [k]}
 tabInp :: Input -> Input
 tabInp = keyInp KeyTab
 
+-- | Event-free input with the requested window size and pointer at (-10,-10).
 withInputOff :: Float -> Float -> Input
 withInputOff w h =
   let inp = withInput w h
    in inp {inputMousePos = V2 (-10) (-10)}
 
+-- | Event-free input with logical width/height and elapsed time in seconds.
 withDelta :: Float -> Float -> Float -> Input
 withDelta w h dt =
   let inp = withInput w h
    in inp {inputDeltaTime = dt}
 
+-- | Centre of the response rectangle. Warm up the view before using it as a target.
 centerOf :: Response -> V2
 centerOf = spanCenter . respRect
 
+-- | Run one frame to establish previous geometry. Supply event-free input.
 warmup :: Context -> Input -> NanoUI a -> IO ()
 warmup ctx inp ui = void (runFrame ctx inp ui)
 
+-- | Run two frames and return the second result, whose responses can use solved
+-- geometry from the first. Supply event-free input.
 warmup2 :: Context -> Input -> NanoUI a -> IO a
 warmup2 ctx inp ui = do
   _ <- runFrame ctx inp ui
   (a, _, _, _) <- runFrame ctx inp ui
   pure a
 
+-- | Two-frame warmup returning the second result and borrowed drawing buffers.
 warmupDraw :: Context -> Input -> NanoUI a -> IO (a, DrawData)
 warmupDraw ctx inp ui = do
   _ <- runFrame ctx inp ui
@@ -305,6 +327,7 @@ runClick ctx inp0 ui pos = do
   (a, _, _, _) <- runFrame ctx release ui
   pure a
 
+-- | Count a failure unless some span contains the substring.
 assertSpansHas :: HasCallStack => IORef Int -> T.Text -> [(Rect, T.Text, a, b, c)] -> IO ()
 assertSpansHas failed needle spans = assert failed (hasText needle spans)
 
@@ -326,12 +349,16 @@ clipCovers :: Damage -> Rect -> Bool
 clipCovers (DamageClip clip) rect = covers clip rect
 clipCovers DamageFull _ = False
 
+-- | Y origins of spans whose unmodified text exactly matches the label.
 spanYOf :: T.Text -> [(Rect, T.Text, a, b, c)] -> [Float]
 spanYOf lbl spans = [y | (Rect _ y _ _, txt, _, _, _) <- spans, txt == lbl]
 
+-- | X origins of spans whose unmodified text exactly matches the label.
 spanXOf :: T.Text -> [(Rect, T.Text, a, b, c)] -> [Float]
 spanXOf lbl spans = [x | (Rect x _ _ _, txt, _, _, _) <- spans, txt == lbl]
 
+-- | Check that a child's right edge ends at the scroller's content edge,
+-- given gutter width and end padding in logical pixels.
 assertScrollGutterPad ::
   HasCallStack
   => IORef Int
@@ -352,6 +379,8 @@ assertScrollGutterPad failed ctx sid child gutter endPad = do
       assert failed (cx + cw >= contentRight - 0.5)
       assert failed (cx + cw <= contentRight + 0.01)
 
+-- | Scroll an overlay by one wheel step and require its title to stay fixed
+-- while its first body line moves upward. Optionally bound all spans' bottom edges.
 assertWheelTitlePinned ::
   HasCallStack
   => IORef Int
@@ -390,6 +419,8 @@ assertWheelTitlePinned failed ctx inp0 ui title line1 wheelAt mClipMax = do
         Just maxY ->
           assert failed (not (any (\(Rect _ y _ h, _, _, _, _) -> y < 0 || y + h > maxY) spans1))
 
+-- | Probe candidate y positions at a fixed x, running a frame for each, and
+-- return the first input that produces a grab cursor.
 findGrabHover ::
   Context -> NanoUI a -> Input -> Float -> [Float] -> IO (Maybe Input)
 findGrabHover ctx ui inp0 thumbX = go
@@ -402,6 +433,8 @@ findGrabHover ctx ui inp0 thumbX = go
     kind <- uiCursorKind ctx hover
     if kind == UiCursorGrab then pure (Just hover) else go ys
 
+-- | Press and move a resize handle, then run two button-up frames. Returns
+-- the window's recorded bounds, or 'Nothing' if its node is absent.
 dragWindowEdge ::
   Context
   -> Input
@@ -426,6 +459,8 @@ dragWindowEdge ctx inp0 ui grab dest = do
   (win, _, _, _) <- runFrame ctx idle ui
   getPrevRect ctx (respId win)
 
+-- | Read UV coordinates of a zero-based vertex. The index must be below
+-- 'drawVertexCount' and the borrowed draw buffers must still be valid.
 vertUv :: DrawData -> Int -> IO (Float, Float)
 vertUv dd i =
   withForeignPtr (drawVertices dd) $ \p -> do
@@ -435,6 +470,8 @@ vertUv dd i =
     v <- peekByteOff p (off + 28) :: IO Float
     pure (u, v)
 
+-- | Require the transition to idle input to need a frame, then require that
+-- frame's damage to cover the whole window.
 checkIdleFullDamage ::
   HasCallStack => IORef Int -> Context -> Input -> Input -> NanoUI a -> IO ()
 checkIdleFullDamage failed ctx inpAfter inpIdle ui = do
@@ -444,7 +481,7 @@ checkIdleFullDamage failed ctx inpAfter inpIdle ui = do
   dmg <- takeDamage ctx
   assert failed (dmg == DamageFull)
 
--- AlignEnd pins last-glyph ink, so "10" / "1i" / "1." share one right edge.
+-- | Check that right-aligned labels share an ink edge despite different glyph advances.
 -- Lives here rather than with its test case because the pen and ink helpers
 -- are internal to the library.
 checkLabelAlignEndInk :: IORef Int -> IO ()
@@ -483,9 +520,12 @@ checkLabelAlignEndInk failed = do
   when (abs (ri - boxW) > 0.01) $ bump failed
   when (abs (rd - boxW) > 0.01) $ bump failed
 
+-- | Point inside the standard floating-window title bar, away from its close button.
 windowTitleGrab :: Rect -> V2
 windowTitleGrab (Rect x0 y0 _ _) = V2 (x0 + 24) (y0 + padT windowPad + 19.5)
 
+-- | Run press and held-move frames from one point to another. Leaves the button
+-- held; the test supplies the release frame when needed.
 runDragFrom :: Context -> Input -> NanoUI a -> V2 -> V2 -> IO ()
 runDragFrom ctx inp0 ui grab dest = do
   let

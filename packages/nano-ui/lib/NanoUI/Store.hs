@@ -126,41 +126,53 @@ instance Show WidgetStore where
 -- a composition of them builds the store once.
 data Field a = Field (WidgetStore -> IntMap a) (IntMap a -> WidgetStore -> WidgetStore)
 
+-- | Integer slots, including boolean flags and selection indices.
 fieldInt :: Field Int
 fieldInt = Field storeInt (\m st -> st {storeInt = m})
 
+-- | Single-precision numeric slots.
 fieldFloat :: Field Float
 fieldFloat = Field storeFloat (\m st -> st {storeFloat = m})
 
+-- | Double-precision slots, including monotonic timestamps.
 fieldDouble :: Field Double
 fieldDouble = Field storeDouble (\m st -> st {storeDouble = m})
 
+-- | Paired float slots for positions, sizes, or offsets.
 fieldPoint :: Field (Float, Float)
 fieldPoint = Field storePoint (\m st -> st {storePoint = m})
 
+-- | Text-value slots.
 fieldText :: Field Text
 fieldText = Field storeText (\m st -> st {storeText = m})
 
+-- | Integer-set slots, such as expanded tree-node indices.
 fieldIntSet :: Field IntSet
 fieldIntSet = Field storeIntSet (\m st -> st {storeIntSet = m})
 
+-- | Ordered float-list slots.
 fieldFloatList :: Field [Float]
 fieldFloatList = Field storeFloatList (\m st -> st {storeFloatList = m})
 
+-- | Ordered integer-list slots.
 fieldIntList :: Field [Int]
 fieldIntList = Field storeIntList (\m st -> st {storeIntList = m})
 
+-- | Runtime-typed slots. Prefer 'lookupDyn' and 'insertDyn' for typed access.
 fieldDyn :: Field Dynamic
 fieldDyn = Field storeDyn (\m st -> st {storeDyn = m})
 
+-- | Read the map selected by a field descriptor.
 {-# INLINE fieldMap #-}
 fieldMap :: Field a -> WidgetStore -> IntMap a
 fieldMap (Field get _) = get
 
+-- | Pure update of one selected map; publish the resulting store through the context.
 {-# INLINE overField #-}
 overField :: Field a -> (IntMap a -> IntMap a) -> WidgetStore -> WidgetStore
 overField (Field get set) f st = set (f (get st)) st
 
+-- | Read a key from a typed map, returning 'Nothing' when absent.
 {-# INLINE lookupSlot #-}
 lookupSlot :: Field a -> Int -> WidgetStore -> Maybe a
 lookupSlot field k = IM.lookup k . fieldMap field
@@ -170,14 +182,17 @@ lookupSlot field k = IM.lookup k . fieldMap field
 findSlot :: Field a -> a -> Int -> WidgetStore -> a
 findSlot field def k = IM.findWithDefault def k . fieldMap field
 
+-- | Whether a key exists in the selected map, regardless of its value.
 {-# INLINE memberSlot #-}
 memberSlot :: Field a -> Int -> WidgetStore -> Bool
 memberSlot field k = IM.member k . fieldMap field
 
+-- | Pure insert or replacement. Does not itself notify a context or schedule a frame.
 {-# INLINE insertSlot #-}
 insertSlot :: Field a -> Int -> a -> WidgetStore -> WidgetStore
 insertSlot field k v = overField field (IM.insert k v)
 
+-- | Pure removal of a key; an absent key leaves the map unchanged.
 {-# INLINE deleteSlot #-}
 deleteSlot :: Field a -> Int -> WidgetStore -> WidgetStore
 deleteSlot field k = overField field (IM.delete k)
@@ -201,24 +216,30 @@ instance Semigroup SlotWrites where
   {-# INLINE (<>) #-}
   SlotWrites same f <> SlotWrites same' g = SlotWrites (\st -> same st && same' st) (f . g)
 
+-- | Describe a write with an equality check. In @a <> b@, @a@ wins if both
+-- writes target the same field and key.
 {-# INLINE slotWrite #-}
 slotWrite :: Eq a => Field a -> Int -> a -> SlotWrites
 slotWrite field k v = SlotWrites (\st -> lookupSlot field k st == Just v) (insertSlot field k v)
 
--- | 'slotWrite' for a slot that reads as @def@ while it is empty, which
--- writing @def@ to it then leaves empty.
+-- | 'slotWrite' whose change check treats an absent slot as @def@. A batch
+-- with no other changes can leave that slot empty; a batch that does write
+-- may materialise the default value too.
 {-# INLINE slotWriteOr #-}
 slotWriteOr :: Eq a => Field a -> a -> Int -> a -> SlotWrites
 slotWriteOr field def k v = SlotWrites (\st -> findSlot field def k st == v) (insertSlot field k v)
 
+-- | Read a runtime-typed slot. 'Nothing' means absent or a different stored type.
 {-# INLINE lookupDyn #-}
 lookupDyn :: Typeable a => Int -> WidgetStore -> Maybe a
 lookupDyn k st = IM.lookup k (storeDyn st) >>= fromDynamic
 
+-- | Store a runtime-typed value, replacing any value under the same dynamic key.
 {-# INLINE insertDyn #-}
 insertDyn :: Typeable a => Int -> a -> WidgetStore -> WidgetStore
 insertDyn k = insertSlot fieldDyn k . toDyn
 
+-- | Empty maps, zero state generation, and no open select.
 emptyWidgetStore :: WidgetStore
 emptyWidgetStore =
   WidgetStore
@@ -235,16 +256,19 @@ emptyWidgetStore =
     , storeDyn = IM.empty
     }
 
--- useText/useFlag bump this so Frame can re-run UI without watching every map.
+-- | Whether local-hook writes changed the generation used to request a view
+-- rebuild. This compares the generation only, not individual maps.
 {-# INLINE mirrorStoresChanged #-}
 mirrorStoresChanged :: WidgetStore -> WidgetStore -> Bool
 mirrorStoresChanged old new = storeMirrorGen old /= storeMirrorGen new
 
+-- | Advance the local-state generation so the frame can rebuild dependent widgets.
 {-# INLINE bumpMirror #-}
 bumpMirror :: WidgetStore -> WidgetStore
 bumpMirror st = st {storeMirrorGen = storeMirrorGen st + 1}
 
--- Mix a field tag into a widget key so two Ints (cursor vs anchor) do not collide.
+-- | Derive a key for a named sub-slot, separating values such as cursor and
+-- anchor that share one widget and one typed map. Uses a non-cryptographic hash.
 {-# INLINE slotKey #-}
 slotKey :: Slot -> Int -> Int
 slotKey s k = fromIntegral (mix64 (fromIntegral k) (slotTag s))
@@ -285,11 +309,11 @@ data Slot
     SlotTextAreaContentW
   | SlotTextAreaContentH
   | SlotTextAreaContentFont
-  | -- | The text area's 'TextBuffer' (in 'storeDyn'): its lines, which are the
+  | -- | The text area's 'NanoUI.Widgets.TextBuffer.TextBuffer' (in 'storeDyn'): its lines, which are the
     -- lines of 'SlotTextAreaDocument', and which lines changed since they
     -- were measured. Loads and paint read it.
     SlotTextAreaBuffer
-  | -- | The text area's current 'TextDocument' (in 'storeDyn'). Its value last
+  | -- | The text area's current 'NanoUI.Widgets.TextDocument.TextDocument' (in 'storeDyn'). Its value last
     -- passed or returned is under 'SlotSeen', in 'storeDyn'.
     SlotTextAreaDocument
   | -- | For a text area over 'Text' (in 'storeDyn'): the text last passed or
@@ -297,9 +321,9 @@ data Slot
     -- nothing neither splits nor joins the text.
     SlotTextAreaText
   | -- | Set (value 1) to signal that the text area's text changed through a path
-    -- that does not flow through 'Input' (e.g. a context-menu cut/paste). The
+    -- that does not flow through @Input@ (e.g. a context-menu cut/paste). The
     -- text area widget reads and clears this on its next frame, so the caller
-    -- still gets a 'respChanged' pulse for edits that carry no keys or chars.
+    -- still gets a @respChanged@ pulse for edits that carry no keys or chars.
     SlotTextAreaChanged
   | -- | A text field's undo history with the text it was recorded against, in
     -- 'storeDyn'.
@@ -339,7 +363,7 @@ data Slot
     -- clipboard menu action), not by typing.
     SlotComboLive
   | -- | PaneGrid gesture slot (storeInt): 0 none, positive = dragged pane id,
-    -- negative = split id being resized. Mirrors 'SlotDrag''s press-held-release
+    -- negative = split id being resized. Shares the 'SlotDrag' press-held-release
     -- lifecycle but keyed by the grid widget instead of a per-pane leaf.
     SlotPaneGest
   | -- | PaneGrid drag grab offset (storePoint): (mouse - pane origin) at grab start.
@@ -372,21 +396,25 @@ data Slot
 slotTag :: Slot -> Word64
 slotTag s = mix64 0x534C4F5454414753 (fromIntegral (fromEnum s))
 
+-- | Encode 'False' as 0 and 'True' as 1.
 boolInt :: Bool -> Int
 boolInt b = if b then 1 else 0
 
+-- | Decode zero as 'False' and any nonzero integer as 'True'.
 intBool :: Int -> Bool
 intBool n = n /= 0
 
--- One open select at a time.
+-- | Whether any select owns the single open-dropdown slot.
 {-# INLINE anySelectOpen #-}
 anySelectOpen :: WidgetStore -> Bool
 anySelectOpen st = storeOpenSelect st /= 0
 
+-- | Whether this nonzero widget key owns the open-dropdown slot.
 {-# INLINE isSelectOpen #-}
 isSelectOpen :: WidgetStore -> Int -> Bool
 isSelectOpen st k = k /= 0 && storeOpenSelect st == k
 
+-- | Open a select, replacing the current owner, or close it if it owns the slot.
 {-# INLINE setSelectOpen #-}
 setSelectOpen :: WidgetStore -> Int -> Bool -> WidgetStore
 setSelectOpen st k True = st {storeOpenSelect = k}
@@ -394,6 +422,7 @@ setSelectOpen st k False
   | isSelectOpen st k = closeSelects st
   | otherwise = st
 
+-- | Clear the open-dropdown owner.
 {-# INLINE closeSelects #-}
 closeSelects :: WidgetStore -> WidgetStore
 closeSelects st = st {storeOpenSelect = 0}

@@ -50,11 +50,13 @@ satisfies ok err = validate ok (const err)
 notEmpty :: Applicative m => err -> Proof m err Text Text
 notEmpty = satisfies (not . T.null . T.strip)
 
--- | Validate minimum string length.
+-- | Require at least the given number of Unicode characters. The error
+-- builder receives the actual length; this is not a grapheme-cluster count.
 minLength :: Applicative m => Int -> (Int -> err) -> Proof m err Text Text
 minLength minLen mkErr = validate ((>= minLen) . T.length) (mkErr . T.length)
 
--- | Validate maximum string length.
+-- | Require at most the given number of Unicode characters. The error
+-- builder receives the actual length.
 maxLength :: Applicative m => Int -> (Int -> err) -> Proof m err Text Text
 maxLength maxLen mkErr = validate ((<= maxLen) . T.length) (mkErr . T.length)
 
@@ -62,7 +64,8 @@ maxLength maxLen mkErr = validate ((<= maxLen) . T.length) (mkErr . T.length)
 inRange :: (Applicative m, Ord a) => a -> a -> (a -> err) -> Proof m err a a
 inRange minVal maxVal = validate (\x -> not (x < minVal || x > maxVal))
 
--- | Validate basic email structure (@user@domain.tld@).
+-- | Check for one @\@@, a nonempty local part, and a dot inside the domain.
+-- This is a small input check, not full email-syntax or deliverability validation.
 validEmail :: Applicative m => (Text -> err) -> Proof m err Text Text
 validEmail = validate isEmail
   where

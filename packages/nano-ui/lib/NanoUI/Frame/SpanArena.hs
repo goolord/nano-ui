@@ -28,6 +28,8 @@ import Data.Word (Word32)
 import GHC.Exts (RealWorld)
 import NanoUI.Types (Color (..), Rect (..), colorToWord32, rectFullyInside, rectIntersect)
 
+-- | Reusable mutable text-span storage for one frame. Entries contain logical
+-- bounds/clip, text, and foreground/background colours.
 data SpanArena = SpanArena
   { saCount :: IORef Int
   , saArrays :: IORef SpanArenaArrays
@@ -45,6 +47,7 @@ data SpanArenaArrays = SpanArenaArrays
 rectStride :: Int
 rectStride = 8
 
+-- | Empty span storage with at least 16 slots, growing as needed.
 newSpanArena :: Int -> IO SpanArena
 newSpanArena cap0 = do
   let cap = max 16 cap0
@@ -55,9 +58,11 @@ newSpanArena cap0 = do
   saArrays <- newIORef SpanArenaArrays {..}
   pure SpanArena {..}
 
+-- | Clear the live count while retaining capacity for subsequent spans.
 resetSpanArena :: SpanArena -> IO ()
 resetSpanArena sa = writeIORef (saCount sa) 0
 
+-- | Live span count, independent of allocated capacity.
 spanArenaCount :: SpanArena -> IO Int
 spanArenaCount sa = readIORef (saCount sa)
 
@@ -74,6 +79,7 @@ growSpanArena sa SpanArenaArrays {saRects = rects, saColors = colors, saTexts = 
   writeIORef (saArrays sa) a
   pure a
 
+-- | Append bounds, text, foreground, background, and clip in paint order.
 {-# INLINE pushSpan #-}
 pushSpan :: SpanArena -> Rect -> Text -> Color -> Color -> Rect -> IO ()
 pushSpan sa (Rect x y w h) txt fg bg (Rect cx cy cw ch) = do
@@ -95,6 +101,7 @@ pushSpan sa (Rect x y w h) txt fg bg (Rect cx cy cw ch) = do
   writeArray saTexts i txt
   writeIORef (saCount sa) (i + 1)
 
+-- | Copy visible clipped spans into a list in insertion order.
 spanArenaToList :: SpanArena -> IO [(Rect, Text, Color, Color, Rect)]
 spanArenaToList = spanArenaToListOccluded IM.empty
 
@@ -103,6 +110,7 @@ spanArenaToListOccluded :: IM.IntMap Rect -> SpanArena -> IO [(Rect, Text, Color
 spanArenaToListOccluded panels sa =
   foldSpans panels sa True (\acc r t fg bg c -> pure ((r, t, fg, bg, c) : acc)) []
 
+-- | Visit clipped spans in insertion order without constructing a list.
 foldSpanArena :: SpanArena -> (Rect -> Text -> Color -> Color -> Rect -> IO ()) -> IO ()
 foldSpanArena sa f = foldSpans IM.empty sa False (\_ r t fg bg c -> f r t fg bg c) ()
 

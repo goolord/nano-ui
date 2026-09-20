@@ -1,5 +1,6 @@
 {-# LANGUAGE TypeApplications #-}
 
+-- | Store immutable, read-heavy host data in a GHC compact region to reduce GC scanning.
 module NanoUI.Compact
   ( Compact
   , compactHost
@@ -12,13 +13,16 @@ import GHC.Compact (Compact, compact, getCompact)
 import NanoUI.Context (Context, setHost)
 import NanoUI.Monad (Ui, askHost)
 
--- Pin read-heavy app state so GC treats it as one block.
+-- | Copy data into a compact region and store it by type in the context.
+-- GHC's 'compact' restrictions apply: values containing functions or mutable
+-- objects cannot be compacted. This is not an FFI buffer-pinning operation.
 compactHost :: Typeable a => Context -> a -> IO (Compact a)
 compactHost ctx a = do
   region <- compact a
   setHost ctx region
   pure region
 
+-- | Read the compacted host value of the requested type, or 'Nothing' if absent.
 askCompact :: forall a es. (Typeable a, Ui :> es) => Eff es (Maybe a)
 askCompact = do
   region <- askHost @(Compact a)

@@ -51,8 +51,8 @@ counter = do
 - Text fields with undo and redo, driven by `TextCommand` values that code
   can run too.
 - SVG icons (`loadSvg`, `svgIcon`) and a `spinner`.
-- Backends block on input and run a frame only when something needs
-  redrawing, so a window left alone uses no CPU or GPU. Each frame computes
+- Backends block on input when no animation or timed update needs a frame.
+  Each frame computes
   its damage against the previous one. `wakeAfter` schedules a frame for a
   view that changes on a timer.
 - State in local hooks (`useInt`, `useText`, `useState`), in your own model,
@@ -125,10 +125,11 @@ stack. A frame:
    widget store; one the pointer was not routed to sees no pointer at all.
 2. Solves layout.
 3. Resolves pointer, keyboard, and focus against the new geometry.
-4. Paints into pinned vertex and index buffers, in background, content,
-   overlay, and chrome layers.
-5. Computes damage against the previous frame and hands the draw list to the
-   backend.
+4. Computes damage against the previous frame, including geometry, state,
+   theme, and animation changes.
+5. Paints the required region into pinned vertex and index buffers, in
+   background, content, overlay, and chrome layers, then hands the draw list
+   to the backend.
 
 [docs/rendering-pipeline.svg](docs/rendering-pipeline.svg) has the diagram.
 Per-frame code is profiled for allocation, and an
@@ -163,6 +164,9 @@ cabal run nano-ui-rgfw-demo      # the RGFW backend
 ```
 
 ## Documentation
+
+The [user guide](packages/nano-ui/GUIDE.md) covers application setup, stable
+widget identity, layout, background work, custom drawing, and headless tests.
 
 Start with the `NanoUI` module documentation: it explains how widgets return
 values, how inputs keep their state, and how layout modifiers compose.

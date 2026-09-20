@@ -1,5 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 
+-- | Modal dialogs and floating in-app windows with title bars and scrolling bodies.
 module NanoUI.Widgets.Overlay
   ( modal
   , window
@@ -72,9 +73,15 @@ data OverlayKind
   | WindowOverlay
   deriving Eq
 
+-- | Show a modal while the first argument is true, blocking interaction with
+-- content behind it. Returns a close-request response and the body's result;
+-- the result is 'Nothing' while closed. The caller owns the open flag.
 modal :: Ui :> es => Bool -> Text -> Eff es a -> Eff es (Response, Maybe a)
 modal = overlay ModalOverlay
 
+-- | Show a draggable, resizable in-app window with a scrolling body. Like
+-- 'modal', the response reports a close request and the caller updates the
+-- open flag. Other windows and the page remain interactive outside its bounds.
 window :: Ui :> es => Bool -> Text -> Eff es a -> Eff es (Response, Maybe a)
 window = overlay WindowOverlay
 

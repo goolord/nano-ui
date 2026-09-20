@@ -398,9 +398,7 @@ withVertsReserve da maxV maxI f = do
     writeIORef (daVertexCount da) (base + nv)
     writeIORef (daIndexCount da) (baseIdx + ni)
 
--- | Strict numeric loop. Replaces @forM_ [lo .. hi]@ on the rounded-geometry
--- hot path, where the intermediate range list was a measurable allocation and
--- prevented the body from fusing into a straight-line loop.
+-- | Strict numeric loop over inclusive bounds, without allocating a range list.
 {-# INLINE loopIO #-}
 loopIO :: Int -> Int -> (Int -> IO ()) -> IO ()
 loopIO !lo !hi f = go lo

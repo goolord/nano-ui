@@ -116,8 +116,7 @@ runTreeKeyboardTest ctx failed = do
 
 -- Open dropdown rows show the pointer cursor on hover and press, and
 -- respChanged fires on the frame the selection changes and not on later
--- frames (regression: it compared the index against the initial one, so it
--- stayed set, and Emit.select emitted, every frame after a pick).
+-- frames. Emit.select must therefore emit only once per selection change.
 runSelectChangeOnceTest :: Context -> IORef Int -> IO ()
 runSelectChangeOnceTest ctx failed = do
   indexRef <- newIORef 1
@@ -210,7 +209,7 @@ runSelectKeyboardTest ctx failed = do
   assertEq failed idx4 1
 
 -- Clicking an open select's own field closes the dropdown and keeps the
--- select focused (regression: the closing press cleared focus).
+-- select focused.
 runSelectCloseKeepsFocusTest :: Context -> IORef Int -> IO ()
 runSelectCloseKeepsFocusTest ctx failed = do
   indexRef <- newIORef 1

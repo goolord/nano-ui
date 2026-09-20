@@ -544,8 +544,7 @@ bodyOffset ctx = do
 -- | Horizontal reach: at the end of the horizontal scroll the last column must
 -- clear the vertical scrollbar lane, not stop with its right edge under the
 -- lane. The body scroller's own vertical bar shrinks the horizontal viewport,
--- so the reachable range must subtract that lane (regression: the range used
--- the full padding box, leaving the last column partly hidden).
+-- so the reachable range must account for the lane's width.
 runTableHBarReachTest :: Context -> IORef Int -> IO ()
 runTableHBarReachTest ctx failed = do
   let inp0 = (withInput 700 320) {inputMousePos = V2 300 160}

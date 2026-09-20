@@ -52,6 +52,7 @@ data NumericInputConfig = NumericInputConfig
   }
   deriving (Eq, Show)
 
+-- | Unbounded decimal range, integer display, step 1, and an 80-pixel minimum width.
 defaultNumericInputConfig :: NumericInputConfig
 defaultNumericInputConfig =
   NumericInputConfig
@@ -74,6 +75,7 @@ defaultNumericInputConfig =
 numericInput :: Ui :> es => Double -> Eff es Double
 numericInput value = snd <$> numericInputConfigured' defaultNumericInputConfig value
 
+-- | 'numericInput' returning @(response, updatedValue)@.
 {-# INLINE numericInput' #-}
 numericInput' :: Ui :> es => Double -> Eff es (Response, Double)
 numericInput' = numericInputConfigured' defaultNumericInputConfig
@@ -81,13 +83,12 @@ numericInput' = numericInputConfigured' defaultNumericInputConfig
 -- | 'numericInput' with a range, a step, decimal places, hexadecimal mode, or
 -- its own layout.
 --
--- @
--- byte' <- numericInputConfigured defaultNumericInputConfig {nicMin = 0, nicMax = 255, nicHex = True} byte
--- @
+-- > byte' <- numericInputConfigured defaultNumericInputConfig {nicMin = 0, nicMax = 255, nicHex = True} byte
 {-# INLINE numericInputConfigured #-}
 numericInputConfigured :: Ui :> es => NumericInputConfig -> Double -> Eff es Double
 numericInputConfigured cfg value = snd <$> numericInputConfigured' cfg value
 
+-- | 'numericInputConfigured' returning @(response, updatedValue)@.
 numericInputConfigured' :: Ui :> es => NumericInputConfig -> Double -> Eff es (Response, Double)
 numericInputConfigured' cfg value = do
   wid <- nextId

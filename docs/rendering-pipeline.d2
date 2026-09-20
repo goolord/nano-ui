@@ -68,17 +68,17 @@ frame: runFrameEff {
   style.stroke: "#3d5a80"
   direction: down
 
-  reset: "1  Reset arenas\nnode, draw, id scopes" {
+  reset: "1  Route pointer, update scroll\nthen reset arenas and id scopes" {
     class: box
     style.fill: "#f4f7fb"
     style.stroke: "#3d5a80"
   }
-  build: "2  UI build\nwidgets emit nodes, msgs, store writes" {
+  build: "2  Build view\nwidgets add nodes, messages, state writes" {
     class: box
     style.fill: "#f4f7fb"
     style.stroke: "#3d5a80"
   }
-  mirror: "Mirror store\nchanged?" {
+  mirror: "Local hook state\nchanged?" {
     class: gate
   }
   layout: "3  Layout solve\nflex measure/place, windows, scroll" {
@@ -91,12 +91,12 @@ frame: runFrameEff {
     style.fill: "#f4f7fb"
     style.stroke: "#3d5a80"
   }
-  paint: "5  Paint\nbackground, content, overlay, chrome layers" {
+  paint: "6  Paint damaged region\nbackground, content, overlay, chrome" {
     class: box
     style.fill: "#c5d4e8"
     style.stroke: "#3d5a80"
   }
-  damage: "6  Damage\nprev vs current rects, clip or full" {
+  damage: "5  Compute damage\ngeometry, state, theme, animation" {
     class: box
     style.fill: "#adc2dc"
     style.stroke: "#3d5a80"
@@ -104,8 +104,9 @@ frame: runFrameEff {
 
   reset -> build
   build -> mirror
-  mirror -> layout: once or twice
-  layout -> input -> paint -> damage
+  mirror -> build: rebuild once without one-shot input
+  mirror -> layout: view ready
+  layout -> input -> damage -> paint
 }
 
 drawdata: "DrawData\npinned verts/indices, layered cmds" {
@@ -133,6 +134,6 @@ hosts: Hosts {
 }
 
 idle.present -> frame.reset: run frame
-frame.damage -> drawdata
+frame.paint -> drawdata
 drawdata -> hosts.sdl
 drawdata -> hosts.rgfw

@@ -23,6 +23,9 @@ import NanoUI (Color, DrawOp (..), Rect (..))
 bezierTolerance :: Float
 bezierTolerance = 0.5
 
+-- | Triangulate a simple polygon in either winding order. A repeated closing
+-- point is optional. Fewer than three points yield no triangles; holes and
+-- self-intersections are unsupported and may produce incomplete output.
 triangulatePolygon :: [(Float, Float)] -> [((Float, Float), (Float, Float), (Float, Float))]
 triangulatePolygon [] = []
 triangulatePolygon [_] = []
@@ -140,6 +143,8 @@ earClip vs
     n = sizeofPrimArray vs `div` 2
     at = pointAt vs
 
+-- | Fill a simple polygon, using a rectangle op for axis-aligned rectangles
+-- and triangles otherwise. Coordinates are logical pixels.
 fillPolygon :: Color -> [(Float, Float)] -> [DrawOp]
 fillPolygon col pts =
   case axisAlignedRect pts of
@@ -163,6 +168,9 @@ axisAlignedRect pts =
     near a b = abs (a - b) <= 1e-3
 
 
+-- | Build a triangle strip of the given logical-pixel width. 'True' joins the
+-- last point to the first; open paths have flat ends. Fewer than two points
+-- yield no ops. Width should be positive.
 strokePolyline :: Color -> Float -> Bool -> [(Float, Float)] -> [DrawOp]
 strokePolyline _ _ _ [] = []
 strokePolyline _ _ _ [_] = []
@@ -219,6 +227,9 @@ strokePolyline col w closed pts0 =
                           : buildQuads (i + 1)
            in buildQuads 0
 
+-- | Approximate a cubic Bezier from start, two control points, and end.
+-- Includes both endpoints. Subdivision tests the first control point's
+-- distance from the chord against 0.5 coordinate units.
 flattenCubic ::
   (Float, Float) ->
   (Float, Float) ->

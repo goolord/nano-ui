@@ -263,11 +263,13 @@ comboStep ci cs0 =
 -- options filtered by the field text (all of them while it is empty). The
 -- value is free text: options are suggestions, not a closed set. See
 -- 'comboStep' for when the value commits. Pass the current text; the result is
--- the text after this frame, and 'respChanged' on 'comboBox'' marks a commit.
+-- the text after this frame, and @respChanged@ on 'comboBox'' marks a commit.
 {-# INLINE comboBox #-}
 comboBox :: (Foldable f, Ui :> es) => Text -> f Text -> Text -> Eff es Text
 comboBox placeholder options value = snd <$> comboBox' placeholder options value
 
+-- | 'comboBox' returning @(response, updatedText)@. The first text argument
+-- is the placeholder; the last is the controlled value.
 comboBox' :: (Foldable f, Ui :> es) => Text -> f Text -> Text -> Eff es (Response, Text)
 comboBox' placeholder options value = do
   (resp, text) <-

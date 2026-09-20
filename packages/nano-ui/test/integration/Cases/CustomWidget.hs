@@ -81,9 +81,8 @@ runCustomWidgetInteractionTest ctx failed = do
   assert failed hovered
   assert failed (not pressed)
 
--- | A click the frame queued for a widget whose pointer hit missed still
--- reaches custom widgets (regression: their default interaction rebuilt the
--- click from hover and release alone, dropping the queued click).
+-- | A queued post-layout click reaches the custom widget even when its
+-- build-time pointer hit test misses.
 runCustomWidgetQueuedClickTest :: Context -> IORef Int -> IO ()
 runCustomWidgetQueuedClickTest ctx failed = do
   let inp0 = (withInput 300 300) {inputMousePos = V2 290 290}
@@ -97,11 +96,8 @@ runCustomWidgetQueuedClickTest ctx failed = do
     (resps, _, _, _) <- runFrame ctx inp0 ui
     assert failed (map respClicked resps == [j == i | j <- [0 .. length resps - 1]])
 
--- | A custom widget whose drawing reads state from outside the spec repaints
--- when that state changes, though its rect and hover/press state stay the
--- same (regression: its ops were cached on those alone, so a table header
--- kept drawing its sort arrow after another column took the sort, and the
--- frame damaged nothing).
+-- | An unkeyed custom drawing repaints when captured state changes, even
+-- while its rectangle and hover/press state remain unchanged.
 runCustomWidgetContentDamageTest :: Context -> IORef Int -> IO ()
 runCustomWidgetContentDamageTest ctx failed = do
   let inp = withInputOff 400 300

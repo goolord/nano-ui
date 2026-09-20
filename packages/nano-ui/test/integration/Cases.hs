@@ -111,7 +111,7 @@ runFitMutedWidthTest ctx failed = do
   spans <- collectTextSpans ctx
   assertJust failed (rectW <$> spanRect "HelloFitMuted" spans) $ \w -> assertGt failed w 8
 
--- | Phase 5A: text and resize changes must invalidate the cached-layout path.
+-- | Text and resize changes must invalidate cached layout.
 runLayoutReuseTest :: Context -> IORef Int -> IO ()
 runLayoutReuseTest ctx failed = do
   let inp = withInput 400 300

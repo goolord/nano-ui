@@ -69,12 +69,15 @@ topmostWindowAtResizeHalo ctx mouse =
       rect <- getNodeRect (ctxNodeArena ctx) idx
       pure (rectNonEmpty rect && rectContains (rectInflate windowResizeHandleFor rect) mouse)
 
+-- | Saved floating-window x/y in logical pixels, or 'Nothing' before placement.
 lookupWindowPos :: Context -> WidgetId -> IO (Maybe (Float, Float))
 lookupWindowPos ctx wid = lookupSlot fieldPoint (intKey wid) <$> getStore ctx
 
+-- | Saved floating-window width/height in logical pixels, or 'Nothing'.
 lookupWindowSize :: Context -> WidgetId -> IO (Maybe (Float, Float))
 lookupWindowSize ctx wid = lookupSlot fieldPoint (slotKey SlotWinSize (intKey wid)) <$> getStore ctx
 
+-- | Save solved floating-window positions and sizes to the store for later frames.
 persistWindowPositions :: Context -> IO ()
 persistWindowPositions ctx = do
   store0 <- getStore ctx
@@ -97,6 +100,8 @@ persistWindowPositions ctx = do
   store1 <- foldNodesM na record store0
   when (store1 /= store0) $ setStore ctx store1
 
+-- | Start or continue a title-bar drag and save its position. Returns 'True'
+-- while a drag starts or is held; releases clear it. Resize gestures take priority.
 updateWindowDrag :: Context -> Input -> IO Bool
 updateWindowDrag ctx inp = do
   resizing <- isJust <$> getWindowResize ctx
@@ -237,6 +242,8 @@ resizeFromEdge wrd (V2 mx my) winW winH =
       !y = max 0 (min y0 (max 0 (winH - h)))
    in (w, h, x, y)
 
+-- | Start or continue a resize within logical window width/height. Updates
+-- stored bounds and relayouts the window. Returns 'True' while starting or held.
 updateWindowResize :: Context -> Input -> Float -> Float -> IO Bool
 updateWindowResize ctx inp winW winH = do
   drag <- getWindowResize ctx
@@ -314,6 +321,8 @@ tryStartWindowResize ctx mouse@(V2 mx my) = do
       markDirty ctx
       pure True
 
+-- | Cursor for the held resize edge or an unblocked hovered edge. 'Nothing'
+-- leaves cursor selection to other controls.
 windowResizeCursorKind :: Context -> Input -> IO (Maybe UiCursorKind)
 windowResizeCursorKind ctx inp = do
   mDrag <- getWindowResize ctx

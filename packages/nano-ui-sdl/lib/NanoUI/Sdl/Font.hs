@@ -1,3 +1,6 @@
+-- | SDL_ttf font handles, fallback selection, measurement snapshots, and glyph
+-- atlas caching. Native operations run on the owning display thread; pure
+-- snapshots remain usable after their font handles close.
 module NanoUI.Sdl.Font
   ( FontSource (..)
   , GlyphAtlas

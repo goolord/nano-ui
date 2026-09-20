@@ -1,3 +1,4 @@
+-- | Context-owned RGBA image atlas with shelf packing and versioned pixel snapshots.
 module NanoUI.Atlas
   ( ImageAtlas
   , newImageAtlas

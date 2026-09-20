@@ -1,12 +1,9 @@
--- Widget chrome painters for NanoUI, extracted from NanoUI.Frame.Paint so the
--- recursive node walker stays small. Every exported painter carries the paint
--- env built by Paint.buildPaintEnv; the walker's explicit dispatch hands each
--- widget node to one of these NOINLINE seams instead of inlining a monolithic
--- body into the loop.
 {-# OPTIONS_GHC -fasm -fno-specialise-aggressively #-}
 
 {-# LANGUAGE DataKinds #-}
 
+-- | Painters for controls and text fields. Each receives the shared paint
+-- environment; NOINLINE keeps these large bodies out of the recursive node walk.
 module NanoUI.Frame.Paint.Widgets
   ( paintWidget
   , paintTextInputNode

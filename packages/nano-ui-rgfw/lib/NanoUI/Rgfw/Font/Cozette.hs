@@ -46,22 +46,28 @@ import Foreign.Ptr (Ptr)
 import Foreign.Storable (peekElemOff, pokeElemOff)
 import NanoUI (FontMetrics (..), roundHalfUp)
 
--- 6x13 Cozette metrics
+-- | Horizontal character advance: 6 logical pixels at unit scale.
 cozetteCharAdvance :: Float
 cozetteCharAdvance = 6.0
 
+-- | Line spacing: 13 logical pixels at unit scale.
 cozetteLineHeight :: Float
 cozetteLineHeight = 13.0
 
+-- | Baseline offset from the line top: 10 logical pixels.
 cozetteAscent :: Float
 cozetteAscent = 10.0
 
+-- | Bitmap width in native font pixels, including overhang beyond the advance.
 cozetteGlyphWidth :: Int
 cozetteGlyphWidth = 7
 
+-- | Bitmap height in native font pixels.
 cozetteGlyphHeight :: Int
 cozetteGlyphHeight = 13
 
+-- | Parsed character map and glyph bitmaps at 1x, 2x, and 4x scales.
+-- Use 'getCozetteFont' for the bundled font.
 data CozetteFont = CozetteFont
   { cfNumGlyphs   :: {-# UNPACK #-} !Int
   , cfGroups      :: !(PrimArray Word32) -- start, end, glyph: three a group
@@ -75,6 +81,7 @@ data CozetteFont = CozetteFont
 embeddedFontBytes :: ByteString
 embeddedFontBytes = $(embedFileRelative "data/cozette.min.otb")
 
+-- | Shared parsed copy of the embedded Cozette font. No filesystem lookup is needed.
 {-# NOINLINE getCozetteFont #-}
 getCozetteFont :: CozetteFont
 getCozetteFont = parseCozette embeddedFontBytes
@@ -272,6 +279,8 @@ cozetteGlyphBit4x font gid c r
           !w = indexPrimArray (cfGlyphData4x font) (safeGid * 52 + r)
        in (w `shiftR` (31 - c)) .&. 1 == 1
 
+-- | Find a glyph, substituting ASCII for selected UI icons. Unsupported
+-- characters map to glyph 0, the missing-glyph bitmap.
 {-# INLINE charToGlyphId #-}
 charToGlyphId :: CozetteFont -> Char -> Word32
 charToGlyphId font c =
@@ -315,6 +324,7 @@ data CozetteScalePath
   | ScaleBoxFrom4x -- ^ other scales: the 28x52 bitmap, box-averaged
   deriving (Eq, Show)
 
+-- | Choose native, EPX-expanded, or box-averaged glyphs for a display scale.
 cozetteScalePath :: Float -> CozetteScalePath
 cozetteScalePath s
   | s <= 1.0 = ScaleExact1x
@@ -462,6 +472,8 @@ foldPenPositions font !scale !logX !logY z step = go (0 :: Int) (0 :: Int) z
             else step acc (pen logX col cozetteCharAdvance) (pen logY line cozetteLineHeight) gid
         go (col + 1) line acc' rest
 
+-- | Fixed-advance layout metrics with no shaping, kerning, or glyph callback.
+-- The RGFW renderer draws the bitmap glyphs separately.
 cozetteMetrics :: FontMetrics
 cozetteMetrics =
   FontMetrics

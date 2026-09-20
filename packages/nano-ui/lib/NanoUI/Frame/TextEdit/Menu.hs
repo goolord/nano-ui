@@ -94,6 +94,8 @@ textEditMenuRowH = \case
 textEditMenuContentH :: Float
 textEditMenuContentH = sum (map textEditMenuRowH textEditMenuRows)
 
+-- | Menu width in logical pixels, measured from command labels plus padding
+-- and bounded below by the standard menu minimum.
 textEditMenuWidth :: Context -> IO Float
 textEditMenuWidth ctx = do
   ws <- mapM (fmap fst . ctxMeasureText ctx) [lbl | TextEditMenuItem _ lbl <- textEditMenuRows]
@@ -268,6 +270,9 @@ collectTextEditMenuSpans ctx inp = do
                     | otherwise = styleBg style
               pure [(Rect labelX (centeredTextY fm ry rh th) tw th, lbl, textEditMenuItemFg style enabled, bg, menuRect)]
 
+-- | Run a text-menu command by zero-based command index (separators excluded)
+-- and record it for the caller. Indices past the end do nothing; callers must
+-- supply a non-negative index and check whether the menu action is enabled.
 applyTextFieldMenuAction :: Context -> WidgetId -> Int -> IO ()
 applyTextFieldMenuAction ctx wid item =
   forM_ (take 1 (drop item textEditMenuCommands)) $ \cmd -> do

@@ -82,6 +82,7 @@ plotMarkerRadius sz = realToFrac sz * 0.006
 plotGapRef :: FontMetrics -> Double
 plotGapRef fm = max 120 (realToFrac (fmLineHeight fm) * 7.5)
 
+-- | Space around the unit data box, in plot coordinates rather than pixels.
 data Margins = Margins
   { marginLeft :: !Double
   , marginRight :: !Double
@@ -100,6 +101,8 @@ data ChartChrome = ChartChrome
   , ccLegendW :: !Float
   }
 
+-- | Space needed for titles, ticks, and legend with the supplied font metrics.
+-- Prepare those metrics for the chart's text before measuring.
 chartMargins :: FontMetrics -> Chart -> Margins
 chartMargins fm chart = ccMargins (chartChrome fm (snd (seriesDomains chart)) chart)
 
@@ -171,6 +174,8 @@ chartChrome fm yDom chart =
 textWidth :: FontMetrics -> T.Text -> Float
 textWidth fm s = rectW (drawTextBox fm 0 0 0 (-1) s)
 
+-- | Combined x/y extents, with 5% numeric padding. Categories use zero-based
+-- positions with half a slot at each end. An empty chart uses 0-1 on both axes.
 seriesDomains :: Chart -> (Domain, Domain)
 seriesDomains chart =
   case map seriesExtent (chartSeries chart) of
@@ -284,6 +289,8 @@ renderSeries ps c xDom yDom s pts =
         StepSeries w ->
           fromVertices (stepPoints pts xDom yDom) # lc ink # lwO (plotStroke w)
 
+-- | Points used for drawing and hit tests. Numeric data may be decimated;
+-- categories become zero-based x positions paired with their values.
 seriesPoints :: Chart -> Series -> U.Vector (Double, Double)
 seriesPoints chart s =
   case seriesData s of

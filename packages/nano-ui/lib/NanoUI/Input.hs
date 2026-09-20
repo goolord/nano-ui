@@ -36,6 +36,7 @@ import qualified Data.Text as T
 import Data.Primitive.SmallArray (SmallArray, copySmallArray, emptySmallArray, newSmallArray, runSmallArray, sizeofSmallArray, smallArrayFromList)
 import NanoUI.Types (Size (..), V2 (..))
 
+-- | Navigation and editing key presses. Printable text belongs in 'inputChars'.
 data Key
   = KeyBackspace
   | KeyDelete
@@ -50,6 +51,7 @@ data Key
   | KeyEnd
   deriving (Eq, Show, Enum, Bounded)
 
+-- | Modifier keys held while the frame's input is processed.
 data Modifiers = Modifiers
   { modShift :: !Bool
   , modCtrl :: !Bool
@@ -74,6 +76,10 @@ data DropEvent = DropEvent
   }
   deriving (Eq, Show)
 
+-- | Input for one frame. Positions and window sizes use logical pixels;
+-- scroll values use wheel steps and delta time uses seconds. Held flags
+-- persist between frames; press/release flags, text, keys, and drops are
+-- events consumed once. Backends clear those events with 'clearEphemeral'.
 data Input = Input
   { inputMousePos :: {-# UNPACK #-} !V2
   , inputMouseDown :: {-# UNPACK #-} !Bool
@@ -94,6 +100,8 @@ data Input = Input
   }
   deriving (Eq, Show)
 
+-- | No events or held buttons, with an 800x600 window and zero elapsed time.
+-- Override window size and delta time when driving headless frames.
 emptyInput :: Input
 emptyInput =
   Input
@@ -115,6 +123,7 @@ emptyInput =
     , inputWindowRedraw = False
     }
 
+-- | Backend-independent cursor shape requested by a hovered control.
 data UiCursorKind
   = UiCursorDefault
   | UiCursorPointer
@@ -127,9 +136,11 @@ data UiCursorKind
   | UiCursorNeswResize
   deriving (Eq, Show)
 
+-- | Grab cursor over a target, becoming a closed hand while the left button is held.
 grabHoverKind :: Bool -> Input -> UiCursorKind
 grabHoverKind onTarget inp = grabDragKind onTarget False inp
 
+-- | Choose a grab cursor, keeping the closed hand during a drag outside the target.
 grabDragKind :: Bool -> Bool -> Input -> UiCursorKind
 grabDragKind onTarget dragging inp
   | dragging = UiCursorGrabbing
@@ -137,6 +148,8 @@ grabDragKind onTarget dragging inp
   | onTarget = UiCursorGrab
   | otherwise = UiCursorDefault
 
+-- | Clear one-shot events and the redraw flag, retaining held buttons,
+-- pointer position, modifiers, window size, and delta time.
 clearEphemeral :: Input -> Input
 clearEphemeral inp =
   inp
@@ -152,17 +165,21 @@ clearEphemeral inp =
     , inputWindowRedraw = False
     }
 
+-- | Whether Ctrl+C or Ctrl+ETX requests an unconditional quit.
 isHardQuitInput :: Input -> Bool
 isHardQuitInput inp =
   modCtrl (inputModifiers inp)
     && (T.elem 'c' (inputChars inp) || T.elem '\ETX' (inputChars inp))
 
+-- | Split after the first event satisfying the predicate. Including that edge
+-- in the first batch keeps separate press/release transitions in separate frames.
 splitFrame :: (a -> Bool) -> [a] -> ([a], [a])
 splitFrame isEdge events =
   case break isEdge events of
     (before, edge : rest) -> (before ++ [edge], rest)
     (before, []) -> (before, [])
 
+-- | Append a key in event order. Copies the small array.
 {-# INLINE appendInputKey #-}
 appendInputKey :: Key -> SmallArray Key -> SmallArray Key
 appendInputKey k ks = snocSmallArray ks k
@@ -192,29 +209,36 @@ applyMouseButton MouseLeft False inp = inp {inputMouseDown = False, inputMouseRe
 applyMouseButton MouseRight True inp = inp {inputMouseRightDown = True, inputMouseRightPressed = True}
 applyMouseButton MouseRight False inp = inp {inputMouseRightDown = False, inputMouseRightReleased = True}
 
+-- | Copy a list of key events into the frame's array, preserving order.
 {-# INLINE inputKeysFromList #-}
 inputKeysFromList :: [Key] -> SmallArray Key
 inputKeysFromList = smallArrayFromList
 
+-- | Shared empty key-event array.
 emptyInputKeys :: SmallArray Key
 emptyInputKeys = emptySmallArray
 
+-- | Shared empty drop-event array.
 emptyDropEvents :: SmallArray DropEvent
 emptyDropEvents = emptySmallArray
 
+-- | Whether the frame contains no key events.
 {-# INLINE inputKeysNull #-}
 inputKeysNull :: SmallArray Key -> Bool
 inputKeysNull ks = sizeofSmallArray ks == 0
 
+-- | Whether a key occurs in the frame's events.
 {-# INLINE inputKeysElem #-}
 inputKeysElem :: Key -> SmallArray Key -> Bool
 inputKeysElem = elem
 
+-- | Strict left fold over keys in event order.
 {-# INLINE foldInputKeys #-}
 foldInputKeys :: (a -> Key -> a) -> a -> SmallArray Key -> a
 foldInputKeys = foldl'
 
--- Buttons, keys, scroll, resize. Mouse motion alone does not count.
+-- | Compare interaction fields, including buttons, keys, scroll, drops, and
+-- window size. Pointer motion, elapsed time, and the redraw flag are ignored.
 inputInteracted :: Input -> Input -> Bool
 inputInteracted a b =
   inputMouseDown a /= inputMouseDown b
@@ -231,12 +255,14 @@ inputInteracted a b =
     || inputWindowSize a /= inputWindowSize b
     || inputDrops a /= inputDrops b
 
+-- | Whether either tracked mouse button is held.
 {-# INLINE inputPointerHeld #-}
 inputPointerHeld :: Input -> Bool
 inputPointerHeld inp =
   inputMouseDown inp || inputMouseRightDown inp
 
--- Rebuild UI after store mirrors update. Keep hover/drag; drop one-shot input.
+-- | Remove one-shot interaction events for a repeated view pass. Retains
+-- pointer position and held buttons so hover and drag state remain available.
 stripInteractionInput :: Input -> Input
 stripInteractionInput inp =
   inp

@@ -1,5 +1,6 @@
 {-# LANGUAGE DataKinds #-}
 
+-- | Choose a cursor from active gestures and the solved widget geometry.
 module NanoUI.Frame.Cursor
   ( UiCursorKind (..)
   , uiCursorKind
@@ -63,6 +64,8 @@ import NanoUI.Types (Rect (..), V2 (..), rectContains)
 import NanoUI.WidgetText (numericStepperRects, textInputNumericMode)
 import NanoUI.WidgetText (isTableHeaderStyle)
 
+-- | Cursor requested by current gestures and hit tests against the solved arena.
+-- The backend maps this result to a native cursor shape.
 uiCursorKind :: Context -> Input -> IO UiCursorKind
 uiCursorKind ctx inp = do
   -- The first query with an opinion wins; later ones do not run.
@@ -331,8 +334,10 @@ tableBodyScrollerBottom ctx idx = do
   where
     na = ctxNodeArena ctx
 
+-- | Whether 'uiCursorKind' requests the link/button pointer cursor.
 pointerCursorWanted :: Context -> Input -> IO Bool
 pointerCursorWanted ctx inp = cursorKindIs ctx inp UiCursorPointer
 
+-- | Test the resolved cursor against a requested shape.
 cursorKindIs :: Context -> Input -> UiCursorKind -> IO Bool
 cursorKindIs ctx inp want = (== want) <$> uiCursorKind ctx inp

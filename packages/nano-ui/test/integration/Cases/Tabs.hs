@@ -107,8 +107,7 @@ runTabsEmitTest ctx failed = do
     (_, msgs, _, _) <- runFrame ctx release (ui TabA)
     assertEq failed (decodeMessages msgs :: [TabMsg]) [MsgSelect TabB]
 
--- Composite responses expose every flag of their widget response
--- (regression: TabResponse dropped respSubmitted).
+-- Composite responses expose every flag of their widget response.
 runTabResponseForwardingTest :: Context -> IORef Int -> IO ()
 runTabResponseForwardingTest _ failed = do
   let inner = mempty {rawRespSubmitted = True, rawRespRightPressed = True, rawRespChanged = True}

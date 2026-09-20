@@ -1,5 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 
+-- | Layout nodes painted by cached vector operations. Use content versions
+-- whenever the builder's output can change without a size change.
 module NanoUI.Widgets.Drawing
   ( DrawOp (..)
   , DrawingBuild

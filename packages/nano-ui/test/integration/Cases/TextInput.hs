@@ -911,10 +911,7 @@ runTextAreaScrollCursorLeavesViewportTest ctx failed = do
       Cursor r2 c2 = getCursor (buffer st2)
     assertEq failed (r2, c2) (0, 1)
 
--- | A backend-requested redraw (expose/restore, dialog-completion wake) must
--- request a frame even though no user input changed. Regression: the file
--- dialog's completion wake was skipped, so the result waited for the next
--- unrelated event before it painted.
+-- | A backend redraw request needs a frame even when user input is unchanged.
 runRefreshRedrawTest :: Context -> IORef Int -> IO ()
 runRefreshRedrawTest ctx failed = do
   let
@@ -975,8 +972,6 @@ runTextAreaMenuPulseTest ctx failed = do
 
 -- | A command run from a button elsewhere (an app's Edit menu) focuses the
 -- field it edits, so Select All followed by typing replaces the text.
--- Regression: the press on the button cleared focus and 'runTextCommand' no
--- longer restored it, so the typing went nowhere.
 runTextCommandFocusTest :: Context -> IORef Int -> IO ()
 runTextCommandFocusTest ctx failed = do
   ref <- newIORef "abc"
@@ -993,9 +988,7 @@ runTextCommandFocusTest ctx failed = do
   mapM_ (\i -> runFrame ctx i ui) [press, release, inp, inp {inputChars = "Z"}, inp]
   assertEq failed "Z" =<< readIORef ref
 
--- | After the editor is remounted under a new key (the notepad remounts on file
--- load), wheel-on-hover with no focus must still scroll. Regression: the
--- remounted editor could not be scrolled until it was focused.
+-- | An editor mounted under a fresh key scrolls on wheel hover without needing focus.
 runTextAreaRemountScrollTest :: Context -> IORef Int -> IO ()
 runTextAreaRemountScrollTest ctx failed = do
   let
@@ -1177,9 +1170,8 @@ memoryClipboard initial ctx = do
   pure (withClipboard ctx (readIORef clipRef) (\s -> writeIORef clipRef (Just s) >> pure True), clipRef)
 
 -- | Select All from the context menu keeps the whole document selected once
--- the button comes up. Regression: the press on the menu row also reached the
--- text area under the menu, which placed the caret there and started a drag
--- that the release then applied over the selection.
+-- the button comes up. The menu gesture must not move the underlying caret
+-- or start a text-selection drag.
 runTextAreaMenuSelectAllTest :: Context -> IORef Int -> IO ()
 runTextAreaMenuSelectAllTest ctx failed = do
   let

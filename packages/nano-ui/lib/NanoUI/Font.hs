@@ -1,5 +1,7 @@
 {-# LANGUAGE StrictData #-}
 
+-- | Font measurement, shaping snapshots, glyph access, and shared text geometry.
+-- Layout uses logical pixels; backend callbacks prepare metrics and rasterise glyphs.
 module NanoUI.Font
   ( GlyphQuad (..)
   , ShapedText (..)
@@ -66,6 +68,8 @@ import qualified Data.Text as T
 import NanoUI.Types (Rect (..), onGrid)
 import NanoUI.Style (AlignX (..), FontStyle (..), FontVariant (..), FontWeight (..))
 
+-- | Glyph ink rectangle relative to the pen, in logical pixels, with normalised
+-- atlas UV bounds. Valid only while the backend's atlas placement remains valid.
 data GlyphQuad = GlyphQuad
   { gqX :: {-# UNPACK #-} !Float
   , gqY :: {-# UNPACK #-} !Float
@@ -98,6 +102,9 @@ data ShapedText = ShapedText
 newtype ShapedGlyphs = ShapedGlyphs (PrimArray Float)
   deriving (Eq, Show)
 
+-- | Logical-pixel font measurements and pure lookup snapshots. Prepare the
+-- metrics for the text before pure layout. Native loading and atlas mutation
+-- belong in the optional 'FontBackend' IO callbacks.
 data FontMetrics = FontMetrics
   { fmLineHeight :: {-# UNPACK #-} !Float
   , fmAscent :: {-# UNPACK #-} !Float
@@ -128,6 +135,8 @@ data FontBackend = FontBackend
 -- the node's desired (width, height).
 type CustomMeasureFn = FontMetrics -> (Float, Float) -> (Float, Float)
 
+-- | Prepare an immutable measurement snapshot for text through the backend,
+-- or return the supplied metrics when no backend is attached.
 {-# INLINE prepareFontMetrics #-}
 prepareFontMetrics :: FontMetrics -> Text -> IO FontMetrics
 prepareFontMetrics fm txt = case fmBackend fm of
@@ -146,12 +155,14 @@ prepareFontMetricsMany fm texts = case fmBackend fm of
     let !byText = Map.fromList shapes
     pure combined {fmShape = \t -> Map.findWithDefault Nothing t byText}
 
+-- | Prepare metrics and measure a single line's advance in logical pixels.
 {-# INLINE lineWidthIO #-}
 lineWidthIO :: FontMetrics -> Text -> IO Float
 lineWidthIO fm txt = do
   prepared <- prepareFontMetrics fm txt
   pure $! lineWidth prepared txt
 
+-- | Prepare metrics and measure logical width/height, accounting for newlines.
 {-# INLINE measureTextIO #-}
 measureTextIO :: FontMetrics -> Text -> IO (Float, Float)
 measureTextIO fm txt = do
@@ -166,12 +177,16 @@ drawShaped fm txt = case fmBackend fm of
   Nothing -> pure Nothing
   Just backend -> fbDrawShaped backend txt
 
+-- | Obtain a glyph quad, allowing backend atlas updates in IO. 'Nothing'
+-- means no drawable quad is available, for example for whitespace.
 {-# INLINE drawGlyph #-}
 drawGlyph :: FontMetrics -> Char -> IO (Maybe GlyphQuad)
 drawGlyph fm c = case fmBackend fm of
   Nothing -> pure (fmGlyph fm c)
   Just backend -> fbDrawGlyph backend c
 
+-- | Headless metrics with square cells of the given logical size, ascent 80%
+-- of cell height, and no drawable glyphs or shaping backend.
 monospaceMetrics :: Float -> FontMetrics
 monospaceMetrics cell =
   FontMetrics
@@ -185,6 +200,8 @@ monospaceMetrics cell =
     , fmBackend = Nothing
     }
 
+-- | Scale logical measurements and glyph geometry by a positive factor.
+-- Atlas UVs and display snap scale remain unchanged.
 scaleFontMetrics :: Float -> FontMetrics -> FontMetrics
 scaleFontMetrics s fm
   | s == 1.0 = fm
@@ -224,6 +241,7 @@ scaleFontMetrics s fm
 tableCellInset :: Float
 tableCellInset = 6
 
+-- | Per-side horizontal/vertical content inset: 1.25 space advances on each axis.
 {-# INLINE widgetContentInset #-}
 widgetContentInset :: FontMetrics -> (Float, Float)
 widgetContentInset fm =
@@ -335,6 +353,7 @@ alignedTextPen ax x w ix fm txt =
       (tx, _) = alignedTextBox ax x w ix shift
    in (tx, used)
 
+-- | Total horizontal and vertical content padding, twice 'widgetContentInset'.
 {-# INLINE widgetPadding #-}
 widgetPadding :: FontMetrics -> (Float, Float)
 widgetPadding fm =
@@ -349,6 +368,7 @@ checkboxBoxSize fm = min 22 (max 18 (fmLineHeight fm * 1.15))
 checkboxLeading :: FontMetrics -> Float
 checkboxLeading fm = checkboxBoxSize fm + 8
 
+-- | Total tree-row x/y padding: zero horizontally and at least 8 logical pixels vertically.
 {-# INLINE treeItemPadding #-}
 treeItemPadding :: FontMetrics -> (Float, Float)
 treeItemPadding fm =
@@ -384,6 +404,7 @@ sliderHandleDiameter = 18
 sliderHandleSlack :: Float
 sliderHandleSlack = (sliderHandleDiameter - sliderTrackHeight) / 2
 
+-- | A 10-pixel-high track centred vertically within x/y/width/height bounds.
 {-# INLINE sliderTrackBounds #-}
 sliderTrackBounds :: Float -> Float -> Float -> Float -> Rect
 sliderTrackBounds x y w h =
@@ -543,6 +564,8 @@ selectionSpans fm txt lo hi
        in merge [charSpan i | i <- [max 0 lo .. min n hi - 1]]
   | otherwise = [(caretX fm txt lo, caretX fm txt hi)]
 
+-- | Pure single-line advance in logical pixels. Use metrics prepared for this
+-- text to include shaping; otherwise uses character advances and kerning.
 lineWidth :: FontMetrics -> Text -> Float
 lineWidth fm line
   | T.null line = 0

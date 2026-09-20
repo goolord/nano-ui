@@ -75,6 +75,8 @@ keepDragScrolling ctx inp focus =
           unless (rectContains rect (inputMousePos inp)) $
             requestWakeAfter ctx (1 / 60)
 
+-- | Collapse selection in a current single-line or multiline field. Zero,
+-- missing, and non-text widget ids do nothing.
 collapseTextFieldSelection :: Context -> WidgetId -> IO ()
 collapseTextFieldSelection ctx wid =
   when (hashWidgetId wid /= 0) $ do

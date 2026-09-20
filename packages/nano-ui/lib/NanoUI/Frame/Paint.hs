@@ -17,6 +17,7 @@
 
 {-# LANGUAGE DataKinds #-}
 
+-- | Walk solved nodes and emit geometry, respecting clips, layers, and paint scopes.
 module NanoUI.Frame.Paint
   ( lowerShapes
   , walkChildren

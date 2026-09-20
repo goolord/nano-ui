@@ -1,3 +1,4 @@
+-- | Submit nano-ui draw batches to SDL with texture binding and damage clipping.
 module NanoUI.Sdl.Render
   ( RenderBatch
   , newRenderBatch

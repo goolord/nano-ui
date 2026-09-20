@@ -54,7 +54,7 @@ import NanoUI.Types (Color (..), Rect (..), V2 (..))
 import NanoUI.Widgets.Node (Response, addWidget, respClicked, respHovered, respRect)
 
 -- | A piece of a paragraph: text in one style, and the hyperlink it follows when
--- it is one. A string literal is 'plain' text.
+-- it is one. A string literal produces unstyled text.
 data Inline = Inline !Text (Layout -> Layout) !(Maybe Text)
 
 instance IsString Inline where
@@ -100,6 +100,8 @@ richText = richTextWith id
 richTextWith :: Ui :> es => (Layout -> Layout) -> [Inline] -> Eff es (Maybe Text)
 richTextWith f pieces = snd <$> richTextWith' f pieces
 
+-- | 'richText' returning the paragraph response and a link target clicked
+-- this frame, or 'Nothing' when no link was activated.
 richText' :: Ui :> es => [Inline] -> Eff es (Response, Maybe Text)
 richText' = richTextWith' id
 
@@ -147,6 +149,7 @@ data Paragraph = Paragraph
 
 newtype Paragraphs = Paragraphs (IORef (IM.IntMap Paragraph))
 
+-- | 'richTextWith' returning the paragraph response and optional clicked link target.
 richTextWith' :: Ui :> es => (Layout -> Layout) -> [Inline] -> Eff es (Response, Maybe Text)
 richTextWith' f pieces = do
   ctx <- askContext

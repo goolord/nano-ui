@@ -1,5 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 
+-- | Controlled tab selection, header styles, close requests, and selected-body rendering.
 module NanoUI.Widgets.Tabs
   ( Tab (..), TabStyle (..), TabOrientation (..), TabResponse (..)
   , TabsConfig (..), defaultTabsConfig
@@ -62,9 +63,11 @@ import NanoUI.Widgets.Node
   , tagContainer
   )
 
+-- | Visual treatment of the tab headers; does not change tab identity.
 data TabStyle = TabUnderline | TabPill | TabSegmented | TabContained
   deriving (Eq, Show, Enum, Bounded)
 
+-- | Header strip position relative to the selected tab's body.
 data TabOrientation = TabTop | TabBottom | TabLeft | TabRight
   deriving (Eq, Show, Enum, Bounded)
 
@@ -79,6 +82,8 @@ data TabsConfig = TabsConfig
 defaultTabsConfig :: TabsConfig
 defaultTabsConfig = TabsConfig TabUnderline TabTop
 
+-- | Tab key, header options, and body. Keys must be distinct within the bar.
+-- Closing is a request to the caller; the widget does not remove the tab.
 data Tab a body = Tab
   { tabKey :: !a
   , tabTitle :: !Text
@@ -88,6 +93,8 @@ data Tab a body = Tab
   , tabBody :: !body
   }
 
+-- | Header response, optional close request, and selected key. Store 'tabActive'
+-- and remove a tab yourself when 'tabClosed' names it.
 data TabResponse a = TabResponse
   { tabResponse :: !Response
   , tabClosed :: !(Maybe a)
@@ -99,9 +106,11 @@ instance HasResponse (TabResponse a) where
   {-# INLINE toResponse #-}
   toResponse = tabResponse
 
+-- | Enabled tab without a close button or badge.
 tab :: a -> Text -> body -> Tab a body
 tab key title body = Tab key title False False Nothing body
 
+-- | Enabled tab with a close button, reported through 'tabClosed'.
 closableTab :: a -> Text -> body -> Tab a body
 closableTab key title body = Tab key title True False Nothing body
 
@@ -393,6 +402,7 @@ tabsConfigured cfg active inputTabs =
   let ts = foldr (:) [] inputTabs
    in snd <$> tabStrip cfg active ts (Just (renderBody ts))
 
+-- | 'tabsConfigured' with selection, close requests, and header interaction details.
 tabsConfigured' :: (Foldable f, Eq a, Ui :> es) => TabsConfig -> a -> f (Tab a (Eff es ())) -> Eff es (TabResponse a)
 tabsConfigured' cfg active inputTabs =
   let ts = foldr (:) [] inputTabs
@@ -404,12 +414,16 @@ tabBar :: (Foldable f, Eq a, Ui :> es) => a -> f (Tab a body) -> Eff es a
 tabBar = tabBarConfigured defaultTabsConfig
 
 {-# INLINE tabBar' #-}
+-- | Header-only 'tabBar' with selection and close requests. Does not run tab bodies.
 tabBar' :: (Foldable f, Eq a, Ui :> es) => a -> f (Tab a body) -> Eff es (TabResponse a)
 tabBar' = tabBarConfigured' defaultTabsConfig
 
+-- | Header-only bar with explicit style/orientation. Returns the selected key
+-- without running tab bodies.
 tabBarConfigured :: (Foldable f, Eq a, Ui :> es) => TabsConfig -> a -> f (Tab a body) -> Eff es a
 tabBarConfigured cfg active ts = snd <$> tabStrip cfg active (foldr (:) [] ts) Nothing
 
+-- | 'tabBarConfigured' with interaction details and optional close request.
 tabBarConfigured' :: (Foldable f, Eq a, Ui :> es) => TabsConfig -> a -> f (Tab a body) -> Eff es (TabResponse a)
 tabBarConfigured' cfg active ts = fst <$> tabStrip cfg active (foldr (:) [] ts) Nothing
 

@@ -80,6 +80,9 @@ import SDL3.Sys.Render
   , setTextureBlendMode
   )
 
+-- | Build, draw, and present one frame on the display thread. The final flag
+-- forces a full repaint. Returns whether another frame is needed and the
+-- input state to retain. Use the context/input returned by @syncDisplay@.
 sdlDrawFrame :: Context -> NanoUI () -> SdlEnv -> Input -> Bool -> IO (Bool, Input)
 sdlDrawFrame ctx ui env inp forceFull =
   drawFrameWith ctx env inp forceFull $ do
@@ -264,6 +267,9 @@ ensureRetain env w h scale = do
   where
     roundUp n = max retainBlock (((n + retainBlock - 1) `div` retainBlock) * retainBlock)
 
+-- | Read debug information, refreshing at most four times per second.
+-- Returns the empty snapshot outside an SDL session. Repeated queries keep
+-- the debug sampler active and can schedule periodic frames.
 askSdlDebug :: Ui :> es => Eff es SdlDebugSnapshot
 askSdlDebug = do
   menv <- askHost @SdlEnv

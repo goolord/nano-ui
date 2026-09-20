@@ -1,5 +1,6 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 
+-- | SDL window dimensions, display scale, refresh timing, and event-loop wake support.
 module NanoUI.Sdl.Display
   ( defaultFontSize
   , queryWindowPixelDensity

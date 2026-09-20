@@ -104,12 +104,15 @@ plot f chart = do
 lineChart :: Ui :> es => (Layout -> Layout) -> [(Double, Double)] -> Eff es PlotResponse
 lineChart f pts = plot f (singleSeries True (line "series" pts))
 
+-- | One category-bar series with a grid, no legend, and no decimation.
 barChart :: Ui :> es => (Layout -> Layout) -> [(Text, Double)] -> Eff es PlotResponse
 barChart f pts = plot f (singleSeries False (bar "series" pts))
 
+-- | One scatter series with a grid, no legend, and no decimation.
 scatterChart :: Ui :> es => (Layout -> Layout) -> [(Double, Double)] -> Eff es PlotResponse
 scatterChart f pts = plot f (singleSeries False (scatter "series" pts))
 
+-- | One area series with a zero baseline, grid, no legend, and decimation.
 areaChart :: Ui :> es => (Layout -> Layout) -> [(Double, Double)] -> Eff es PlotResponse
 areaChart f pts = plot f (singleSeries True (area "series" pts))
 

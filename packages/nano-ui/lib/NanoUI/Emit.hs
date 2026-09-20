@@ -7,17 +7,15 @@
 --
 -- The names match "NanoUI", so import this module qualified:
 --
--- @
--- import NanoUI.Emit qualified as Emit
---
--- data Msg = Increment | Decrement
---
--- view :: Int -> NanoUI ()
--- view n = row $ do
---   Emit.button "-" Decrement
---   label (T.pack (show n))
---   Emit.button "+" Increment
--- @
+-- > import NanoUI.Emit qualified as Emit
+-- >
+-- > data Msg = Increment | Decrement
+-- >
+-- > view :: Int -> NanoUI ()
+-- > view n = row $ do
+-- >   Emit.button "-" Decrement
+-- >   label (T.pack (show n))
+-- >   Emit.button "+" Increment
 module NanoUI.Emit
   ( emit
   , button
@@ -58,18 +56,23 @@ button txt msg = do
   clicked <- W.button txt
   when clicked (emit msg)
 
+-- | Emit the mapped checked state when it differs from the supplied value.
 checkbox :: (Typeable msg, Ui :> es) => Text -> Bool -> (Bool -> msg) -> Eff es ()
 checkbox txt checked = emitChanged checked (W.checkbox txt checked)
 
+-- | Slider over minimum, maximum, and current value; emit only changed values.
 slider :: (Typeable msg, Ui :> es) => Float -> Float -> Float -> (Float -> msg) -> Eff es ()
 slider minV maxV value = emitChanged value (W.slider minV maxV value)
 
+-- | Emit the selected zero-based option index when it changes.
 select :: (Foldable f, Typeable msg, Ui :> es) => f Text -> Int -> (Int -> msg) -> Eff es ()
 select options index = emitChanged index (W.select options index)
 
+-- | Radio group that emits the selected zero-based index when it changes.
 radio :: (Foldable f, Typeable msg, Ui :> es) => f Text -> Int -> (Int -> msg) -> Eff es ()
 radio options index = emitChanged index (W.radio options index)
 
+-- | Single-line field that emits updated text. Selection-only changes emit nothing.
 textInput :: (Typeable msg, Ui :> es) => Text -> (Text -> msg) -> Eff es ()
 textInput value = emitChanged value (W.textInput value)
 

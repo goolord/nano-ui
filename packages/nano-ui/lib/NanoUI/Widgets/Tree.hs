@@ -1,6 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE BangPatterns #-}
 
+-- | Expandable tree rows with a controlled pre-order selection index.
 module NanoUI.Widgets.Tree (TreeItem (..), tree, tree') where
 
 import Control.Applicative ((<|>))
@@ -28,6 +29,7 @@ import NanoUI.Widgets.Combinators (selectableItem)
 import NanoUI.Widgets.Layout (columnWith)
 import NanoUI.Widgets.Node (Response (..), setChanged, tagContainer)
 
+-- | Label and child items for a tree row. An empty child list makes a leaf.
 data TreeItem = TreeItem {treeItemLabel :: !Text, treeItemChildren :: ![TreeItem]}
   deriving (Eq, Show)
 
@@ -136,6 +138,7 @@ treeRow rowIdx (nodeIdx, depth, hasKids, lbl) selectedIdx expandedSet = do
 tree :: (Foldable f, Ui :> es) => Text -> f TreeItem -> Int -> Eff es Int
 tree key items index = snd <$> tree' key items index
 
+-- | 'tree' returning its response and selected pre-order item index.
 tree' :: (Foldable f, Ui :> es) => Text -> f TreeItem -> Int -> Eff es (Response, Int)
 tree' key inputItems index =
   withKey ("tree:" <> key) $ do

@@ -63,12 +63,18 @@ import NanoUI.Sdl.NanoUIFont (NanoUIFont (..))
 import NanoUI.Sdl.Font.Search (listFontFamilies)
 import NanoUI.Testing (Context, newPixelContext, registerImage, runEff, withTheme)
 
+-- | Open an SDL window and run a view until close or the quit predicate fires.
+-- Owns and releases the native resources. Call from the application's display
+-- thread; the view is rebuilt for each requested frame.
 runSdlApp :: SdlOptions -> NanoUI () -> IO ()
 runSdlApp options ui = do
   ctx <- sdlContext options
   runSdlSession options ctx (const (pure ())) (sdlAppShouldQuit options) $ \c ->
     sdlDrawFrame c ui
 
+-- | Run a model-driven view, folding emitted messages through the update
+-- function in emission order. Messages of other runtime types are ignored.
+-- Use the widgets in "NanoUI.Emit" to emit changes.
 runSdlAppReduce ::
   (Typeable msg, Eq model) =>
   SdlOptions ->

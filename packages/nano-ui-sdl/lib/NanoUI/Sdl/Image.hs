@@ -1,3 +1,4 @@
+-- | Upload the core image atlas to SDL textures and manage their native lifetime.
 module NanoUI.Sdl.Image
   ( ImageAtlas
   , newImageAtlas

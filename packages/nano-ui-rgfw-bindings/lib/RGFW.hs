@@ -34,9 +34,13 @@ import Foreign.Ptr (Ptr, nullPtr)
 import Foreign.Storable (peek)
 import RGFW.Raw
 
+-- | Owned native window. Close exactly once with 'closeWindow'; there is no
+-- finalizer. Window and OpenGL operations belong on the creating OS thread.
 newtype Window = Window (Ptr RGFW_window)
   deriving (Eq, Show)
 
+-- | A copied native event. Key events carry RGFW key codes and modifier bits;
+-- motion/resize coordinates are native window pixels, not nano-ui logical units.
 data Event
   = EventNone
   | EventKeyPress !Word32 !Word8
@@ -62,9 +66,11 @@ createWindowGL title x y w h flags major minor =
         (fromIntegral flags) (fromIntegral major) (fromIntegral minor)
     pure (if ptr == nullPtr then Nothing else Just (Window ptr))
 
+-- | Present the OpenGL back buffer. The window's context must be current.
 swapBuffersGL :: Window -> IO ()
 swapBuffersGL (Window w) = c_RGFW_window_swapBuffers_OpenGL w
 
+-- | Destroy the window and its context. Invalidates the handle immediately.
 closeWindow :: Window -> IO ()
 closeWindow (Window ptr) = c_RGFW_window_close ptr
 
@@ -74,6 +80,8 @@ closeWindow (Window ptr) = c_RGFW_window_close ptr
 waitForEvent :: Int -> IO ()
 waitForEvent t = c_RGFW_waitForEvent (fromIntegral t)
 
+-- | Allocate native event storage for a callback. The pointer must not escape
+-- the callback; reuse it for consecutive 'pollEvent' calls.
 withEventBuffer :: (Ptr RGFW_event -> IO a) -> IO a
 withEventBuffer f = do
   sz <- c_rgfw_event_size
@@ -131,22 +139,26 @@ pollEvent (Window win) evPtr = do
           | otherwise ->
             pure (EventOther t)
 
+-- | Current native window width and height in pixels.
 windowSize :: Window -> IO (Int, Int)
 windowSize (Window w) = do
   CInt width <- c_rgfw_window_w w
   CInt height <- c_rgfw_window_h w
   pure (fromIntegral width, fromIntegral height)
 
+-- | Current display scale reported by RGFW, with 1 meaning unscaled.
 windowScale :: Window -> IO Float
 windowScale (Window w) = do
   CFloat s <- c_rgfw_window_scale w
   pure s
 
+-- | Select an RGFW standard cursor code. Returns 'False' if the request fails.
 setMouseStandard :: Window -> Word8 -> IO Bool
 setMouseStandard (Window win) icon = do
   CUChar res <- c_rgfw_window_set_mouse_standard win (CUChar icon)
   pure (res /= 0)
 
+-- | Restore the default cursor. Returns 'False' if the request fails.
 setMouseDefault :: Window -> IO Bool
 setMouseDefault (Window win) = do
   CUChar res <- c_rgfw_window_set_mouse_default win

@@ -1,3 +1,4 @@
+-- | Scalar easing and spring integration. Durations and elapsed time use seconds.
 module NanoUI.Animation
   ( Ease (..)
   , Animation (..)
@@ -58,6 +59,8 @@ solveBezierX p1 p2 targetT estimate iter
                   nextEst = clamp01 (estimate - errorVal / safeDeriv)
                in solveBezierX p1 p2 targetT nextEst (iter + 1)
 
+-- | Spring stiffness, damping, and mass. Time uses seconds. Integration clamps
+-- stiffness/damping to non-negative values and mass to at least 1e-6.
 data SpringParams = SpringParams
   { springStiffness :: {-# UNPACK #-} !Float
   , springDamping :: {-# UNPACK #-} !Float
@@ -65,12 +68,15 @@ data SpringParams = SpringParams
   }
   deriving (Eq, Show)
 
+-- | Lightly damped spring: stiffness 180, damping 12, mass 1.
 presetBouncy :: SpringParams
 presetBouncy = SpringParams {springStiffness = 180, springDamping = 12, springMass = 1}
 
+-- | Near-critically damped spring: stiffness 120, damping 20, mass 1.
 presetSmooth :: SpringParams
 presetSmooth = SpringParams {springStiffness = 120, springDamping = 20, springMass = 1}
 
+-- | Faster spring: stiffness 300, damping 30, mass 1.
 presetStiff :: SpringParams
 presetStiff = SpringParams {springStiffness = 300, springDamping = 30, springMass = 1}
 
@@ -83,6 +89,8 @@ maxSubstep = 1 / 30
 maxSubsteps :: Int
 maxSubsteps = 32
 
+-- | Advance position and velocity toward a target by elapsed seconds.
+-- Non-positive time leaves both unchanged; at most 32 substeps of 1/30 s are taken.
 stepSpring :: SpringParams -> Float -> Float -> Float -> Float -> (Float, Float)
 stepSpring params x v target dt
   | dt <= 0 = (x, v)
@@ -114,6 +122,8 @@ rk4 params x v xTarget dt =
     m = max 1e-6 (springMass params)
     accel pos vel = (-k * (pos - xTarget) - c * vel) / m
 
+-- | Progress curves. Cubic Bezier arguments are @x1 y1 x2 y2@ for the two
+-- control points between endpoints (0,0) and (1,1).
 data Ease
   = EaseLinear
   | EaseInQuad
@@ -130,8 +140,9 @@ data Ease
       {-# UNPACK #-} !Float
   deriving (Eq, Show)
 
--- EaseAnim start end duration elapsed ease delay delayReq
--- SpringAnim pos vel target params
+-- | Running scalar animation. 'EaseAnim' stores start, end, duration, elapsed
+-- time, curve, remaining delay, and requested delay (times in seconds).
+-- 'SpringAnim' stores position, velocity, target, and spring parameters.
 data Animation
   = EaseAnim
       {-# UNPACK #-} !Float
@@ -148,7 +159,8 @@ data Animation
       !SpringParams
   deriving (Eq, Show)
 
--- True when this ease slot matches the call-site spec and target.
+-- | Whether a tween matches curve, duration, requested delay, and target.
+-- Numeric comparisons use 'approxEq'; springs never match.
 easeSameSpec :: Animation -> Ease -> Float -> Float -> Float -> Bool
 easeSameSpec (EaseAnim _ end dur _ ease _ delayReq) wantEase wantDur delay target =
   ease == wantEase
@@ -157,7 +169,7 @@ easeSameSpec (EaseAnim _ end dur _ ease _ delayReq) wantEase wantDur delay targe
     && approxEq end target
 easeSameSpec _ _ _ _ _ = False
 
--- Map unit progress through an easing curve. Input is clamped to [0, 1].
+-- | Map unit progress through an easing curve. Input is clamped to [0, 1].
 -- EaseOutBack may return a value outside that range (overshoot).
 applyEase :: Ease -> Float -> Float
 applyEase ease t0 =
@@ -185,9 +197,12 @@ applyEase ease t0 =
            in 1 + c3 * u * u * u + c1 * u * u
         EaseCubicBezier x1 y1 x2 y2 -> evaluateBezier x1 y1 x2 y2 t
 
+-- | Absolute difference no greater than 1e-4.
 approxEq :: Float -> Float -> Bool
 approxEq a b = abs (a - b) <= 1e-4
 
+-- | Whether a tween has time remaining or a spring has position/velocity
+-- error greater than 1e-3. Delayed nontrivial tweens count as running.
 {-# INLINE animInProgress #-}
 animInProgress :: Animation -> Bool
 animInProgress (EaseAnim start end dur elapsed _ delay _) =
@@ -197,6 +212,7 @@ animInProgress (EaseAnim start end dur elapsed _ delay _) =
 animInProgress (SpringAnim pos vel target _) =
   abs (pos - target) > springEps || abs vel > springEps
 
+-- | Current interpolated value, or the target for a completed tween.
 {-# INLINE animationValue #-}
 animationValue :: Animation -> Float
 animationValue a@(EaseAnim start end dur elapsed ease delay _)
@@ -207,6 +223,7 @@ animationValue a@(EaseAnim start end dur elapsed ease delay _)
        in start + (end - start) * applyEase ease t
 animationValue (SpringAnim pos _ _ _) = pos
 
+-- | Advance an animation by elapsed seconds, including its delay.
 stepAnim :: Float -> Animation -> Animation
 stepAnim dt a@(EaseAnim start end dur elapsed ease delay delayReq)
   | not (animInProgress a) = a

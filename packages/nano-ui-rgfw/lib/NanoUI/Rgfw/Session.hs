@@ -86,6 +86,8 @@ data RgfwOptions = RgfwOptions
   -- ^ Frame pacing rate while animating. @0@ means 60.
   }
 
+-- | Centred 1680x1040 window with the dark theme, monitor scale, and 60 Hz
+-- animation pacing. Width and height are native window pixels.
 defaultRgfwOptions :: RgfwOptions
 defaultRgfwOptions =
   RgfwOptions
@@ -136,9 +138,13 @@ mapRgfwCursor kind = case kind of
   UiCursorNwseResize -> R.rgfw_mouseResizeNWSE
   UiCursorNeswResize -> R.rgfw_mouseResizeNESW
 
+-- | Run a view in an owned RGFW/OpenGL window until quit. Native resources are
+-- released on exit. Window creation failure prints a message and returns.
 runRgfwApp :: RgfwOptions -> NanoUI () -> IO ()
 runRgfwApp opts app = runRgfwAppReduce opts (\() m -> m) () (\_ -> app)
 
+-- | Model-driven runner. Fold emitted messages through the update function
+-- in order, ignoring messages of other runtime types.
 runRgfwAppReduce ::
   (Typeable msg, Eq model) =>
   RgfwOptions ->
@@ -149,6 +155,9 @@ runRgfwAppReduce ::
 runRgfwAppReduce opts =
   runRgfwAppReduceCustom opts (\_ -> (optTheme opts, optScale opts))
 
+-- | Reducer runner whose theme and UI scale are derived from the current
+-- model. A non-positive scale follows the monitor. OpenGL calls remain on
+-- the creating OS thread; native resources are released on exit.
 runRgfwAppReduceCustom ::
   (Typeable msg, Eq model) =>
   RgfwOptions ->
@@ -392,6 +401,8 @@ decodeRgfwEvents scale = go TypedNothing
       R.EventKeyRelease _ m -> Just (RgfwEvKeyRelease m)
       _ -> Nothing
 
+-- | Accumulate a decoded event into frame input. The caller handles close
+-- and resize events separately; motion coordinates are already scaled by decoding.
 applyRgfwEvent :: Input -> RgfwEvent -> Input
 applyRgfwEvent inp ev = case ev of
   RgfwEvClose -> inp

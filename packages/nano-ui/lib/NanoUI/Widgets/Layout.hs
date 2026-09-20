@@ -1,5 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 
+-- | Rows, columns, grids, panels, labels, and scrollers built during the view pass.
 module NanoUI.Widgets.Layout
   ( panel
   , panelWith
@@ -106,10 +107,12 @@ withDefaultWith f c child = do
 -- Panel
 -- =============================================================================
 
+-- | Container with the theme's panel background and border. Returns its body's result.
 {-# INLINE panel #-}
 panel :: Ui :> es => Eff es a -> Eff es a
 panel = withDefault panel'
 
+-- | 'panel' with modified layout defaults.
 {-# INLINE panelWith #-}
 panelWith :: Ui :> es => (Layout -> Layout) -> Eff es a -> Eff es a
 panelWith = (`withDefaultWith` panel')
@@ -118,6 +121,7 @@ panelWith = (`withDefaultWith` panel')
 panel' :: Ui :> es => Layout -> Eff es a -> Eff es a
 panel' = container NodePanel
 
+-- | Full-width panel tinted by a colour, with a matching border. See 'calloutWith'.
 {-# INLINE callout #-}
 callout :: Ui :> es => Color -> Eff es a -> Eff es a
 callout borderCol = calloutWith borderCol id
@@ -136,10 +140,12 @@ calloutWith col f =
 -- Row
 -- =============================================================================
 
+-- | Lay out children left to right, using current defaults and a child id scope.
 {-# INLINE row #-}
 row :: Ui :> es => Eff es a -> Eff es a
 row = withDefault row'
 
+-- | 'row' with modified layout defaults; direction remains horizontal.
 {-# INLINE rowWith #-}
 rowWith :: Ui :> es => (Layout -> Layout) -> Eff es a -> Eff es a
 rowWith = (`withDefaultWith` row')
@@ -152,10 +158,12 @@ row' layout = container NodeContainer (layout {layoutDirection = Row})
 -- Column
 -- =============================================================================
 
+-- | Lay out children top to bottom, using current defaults and a child id scope.
 {-# INLINE column #-}
 column :: Ui :> es => Eff es a -> Eff es a
 column = withDefault column'
 
+-- | 'column' with modified layout defaults; direction remains vertical.
 {-# INLINE columnWith #-}
 columnWith :: Ui :> es => (Layout -> Layout) -> Eff es a -> Eff es a
 columnWith = (`withDefaultWith` column')
@@ -182,10 +190,12 @@ vstack = column . sequence_
 -- Grid
 -- =============================================================================
 
+-- | Place children in a grid with at least one column. The count is clamped to 1.
 {-# INLINE grid #-}
 grid :: Ui :> es => Int -> Eff es a -> Eff es a
 grid n = withDefault (grid' n)
 
+-- | 'grid' with a layout modifier for spacing, sizing, and alignment.
 {-# INLINE gridWith #-}
 gridWith :: Ui :> es => Int -> (Layout -> Layout) -> Eff es a -> Eff es a
 gridWith n f = withDefaultWith f (grid' n)
@@ -233,6 +243,7 @@ label' txt = do
 labelWith :: Ui :> es => (Layout -> Layout) -> Text -> Eff es ()
 labelWith f txt = void (labelWith' f txt)
 
+-- | 'labelWith' returning geometry and interaction information in a 'Response'.
 {-# INLINE labelWith' #-}
 labelWith' :: Ui :> es => (Layout -> Layout) -> Text -> Eff es Response
 labelWith' f txt = do
@@ -280,10 +291,14 @@ spacer w h = do
   inp <- askInput
   void (uiIO $ addSizingLeafNode ctx inp wid NodeSpacer Row w h)
 
+-- | Scroll along the current layout direction, vertical by default. Constrain
+-- the viewport size so content can overflow it; the body still runs each frame.
 {-# INLINE scroll #-}
 scroll :: Ui :> es => Eff es a -> Eff es a
 scroll = withDefault scroll'
 
+-- | 'scroll' with modified viewport layout. Use 'scrollArea' when scroll commands
+-- need the container's id.
 {-# INLINE scrollWith #-}
 scrollWith :: Ui :> es => (Layout -> Layout) -> Eff es a -> Eff es a
 scrollWith = (`withDefaultWith` scroll')
@@ -293,6 +308,7 @@ scroll' :: Ui :> es => Layout -> Eff es a -> Eff es a
 scroll' layout child =
   snd <$> scrollConfigured (scrollDefault1D (layoutDirection layout)) layout child
 
+-- | Fill the available space and centre the body's children on both axes.
 {-# INLINE center #-}
 center :: Ui :> es => Eff es a -> Eff es a
 center = columnWith (grow . alignMid . (\l -> l { layoutAlignX = AlignCenter }))
@@ -337,6 +353,7 @@ scrollAreaIdConfigured wid layout cfg child = do
 scroll2D :: Ui :> es => Eff es a -> Eff es a
 scroll2D = withDefault scroll2D'
 
+-- | 'scroll2D' with modified viewport layout.
 {-# INLINE scroll2DWith #-}
 scroll2DWith :: Ui :> es => (Layout -> Layout) -> Eff es a -> Eff es a
 scroll2DWith = (`withDefaultWith` scroll2D')

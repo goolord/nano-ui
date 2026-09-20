@@ -71,7 +71,7 @@ keyedDragHeld k = do
         dragK = slotKey SlotDrag (intKey wid)
     flagSlot dragK <$> getStore ctx
 
--- | Clamped 1D drag. Maps pointer position on 'track' into [lo, hi]. The drag
+-- | Clamped 1D drag. Maps pointer position on @track@ into [lo, hi]. The drag
 -- starts with a press on the track and lasts until the button comes up; a
 -- button held from elsewhere and moved onto the track drags nothing.
 useDrag1D ::
@@ -198,7 +198,7 @@ keyboardFocused wid
           disabled <- isDisabled ctx wid
           if disabled then pure False else not <$> pointerBlockedByModal ctx
 
--- | Arrow / Enter / Space while 'wid' is focused and eligible for input.
+-- | Arrow / Enter / Space while @wid@ is focused and eligible for input.
 useKeyNav :: (Ui :> es) => WidgetId -> Eff es KeyNav
 useKeyNav wid = do
   inp <- askInput

@@ -106,7 +106,7 @@ paneExist :: GridNode -> Word64 -> Bool
 paneExist t p = foldGrid (== p) (\_ _ _ a b -> a || b) t
 
 -- | Minimum (width, height) that must be reserved for a subtree under a
--- 'minSize' per-pane floor and 'spacing' between every split level.
+-- @minSize@ per-pane floor and @spacing@ between every split level.
 subtreeMin :: Float -> Float -> GridNode -> (Float, Float)
 subtreeMin minSize spacing = \case
   Pane _ -> (minSize, minSize)
@@ -186,7 +186,7 @@ layoutNode minSize spacing sp r =
        in (M.union regionsA regionsB, self : divsA <> divsB)
 
 -- | Split the pane (first arg) along the axis with a 0.5 ratio, inserting the
--- new pane. 'newOnA' places the new pane on the A (left/top) side of the new
+-- new pane. @newOnA@ places the new pane on the A (left/top) side of the new
 -- split; 'False' puts it on the B (right/bottom) side. Returns the updated
 -- tree (unchanged if the pane does not exist).
 treeSplit :: Word64 -> Word64 -> GridAxis -> Bool -> Word64 -> GridNode -> GridNode
@@ -335,7 +335,7 @@ topLevelDropTarget band r@(Rect l t w h) p@(V2 x y)
 -- tree out ('layoutNode') into the grid rect, so it is exactly the region the
 -- dragged pane will occupy after the drop, accounting for the restructuring
 -- that removing the pane causes (its parent split collapses and sibling
--- subtrees expand) and for 'spacing' and min-size floors. Estimating the rect
+-- subtrees expand) and for @spacing@ and min-size floors. Estimating the rect
 -- from the target's pre-drop bounds goes wrong wherever mixed 'AxisV' /
 -- 'AxisH' splits make those two layouts diverge. @spacing@ must be the gutter
 -- actually laid out between panes: 'NanoUI.Widgets.PaneGrid' passes

@@ -33,18 +33,18 @@ slider :: Ui :> es => Float -> Float -> Float -> Eff es Float
 slider minV maxV value = snd <$> sliderWith' id minV maxV value
 
 {-# INLINE slider' #-}
+-- | 'slider' returning @(response, updatedValue)@ for the supplied bounds and value.
 slider' :: Ui :> es => Float -> Float -> Float -> Eff es (Response, Float)
 slider' = sliderWith' id
 
 -- | 'slider' with a layout modifier.
 --
--- @
--- volume' <- sliderWith (fixedW 200) 0 100 volume
--- @
+-- > volume' <- sliderWith (fixedW 200) 0 100 volume
 {-# INLINE sliderWith #-}
 sliderWith :: Ui :> es => (Layout -> Layout) -> Float -> Float -> Float -> Eff es Float
 sliderWith f minV maxV value = snd <$> sliderWith' f minV maxV value
 
+-- | 'sliderWith' returning the response and updated value.
 sliderWith' ::
   Ui :> es =>
   (Layout -> Layout) -> Float -> Float -> Float -> Eff es (Response, Float)

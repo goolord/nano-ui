@@ -1,6 +1,7 @@
 {-# LANGUAGE DataKinds #-}
 
--- | Focus traversal and modal focus constraints.
+-- | Keyboard focus order for Tab, keeping focus inside an open modal, and
+-- copying selection state from the store into the nodes that paint it.
 module NanoUI.Frame.Focus
   ( filterModalFocusables
   , constrainFocusToModal
@@ -28,6 +29,8 @@ import NanoUI.Layout.Arena
 import NanoUI.Store (fieldInt, findSlot, lookupSlot)
 import NanoUI.WidgetText (treeDecodeStyle)
 
+-- | Next focus id, or previous with Shift, wrapping at both ends. An unknown
+-- current id selects the first entry; an empty list returns @WidgetId 0@.
 tabNext :: WidgetId -> [WidgetId] -> Bool -> WidgetId
 tabNext cur ids shift =
   case ids of
@@ -45,7 +48,9 @@ tabNext cur ids shift =
             then lastId first rest
             else search first ids
 
--- | Scan the live focus buffer. Skip zero ids. No freeze or list copy.
+-- | 'tabNext' over the widgets that registered as focusable this frame. It
+-- reads the context's mutable array in place, so it builds no list, and it
+-- skips zero ids.
 tabNextFocusables :: Context -> WidgetId -> Bool -> IO WidgetId
 tabNextFocusables ctx cur shift = do
   n <- readIORef (ctxFocusablesCount ctx)
@@ -75,15 +80,20 @@ tabNextFocusables ctx cur shift = do
         Nothing -> firstLive 0
         Just i -> step i n
 
+-- | The ids whose widgets are inside the top modal, or all of @ids@ when no
+-- modal is open.
 filterModalFocusables :: Context -> [WidgetId] -> IO [WidgetId]
 filterModalFocusables ctx ids = do
-  -- Searching the arena once per focusable makes a large modal's Tab traversal
-  -- quadratic. Resolve its root once, then test ancestry for each widget.
+  -- The modal's root is looked up once for the whole list. Each widget then
+  -- costs one walk up its ancestors.
   top <- topModalNode (ctxNodeArena ctx)
   case top of
     Nothing -> pure ids
     Just modal -> filterM (widgetIdInSubtree ctx modal) ids
 
+-- | While a modal is open, take keyboard focus away from a widget outside the
+-- top modal. The frame runs this after the pointer steps, which can move
+-- focus, and before 'NanoUI.Frame.Input.finalizeTabFocus'.
 constrainFocusToModal :: Context -> IO ()
 constrainFocusToModal ctx = do
   top <- topModalNode (ctxNodeArena ctx)
@@ -95,6 +105,12 @@ constrainFocusToModal ctx = do
         ok <- widgetIdInSubtree ctx modal focus
         unless ok $ writeIORef (ctxFocusId ctx) (WidgetId 0)
 
+-- | Copy selection state from the store into the node values the painter
+-- reads. A checkbox's value becomes its stored flag. A radio option or a tree
+-- row gets 1 when its group's stored selection names it, and 0 otherwise.
+-- The frame runs this after the view, before layout, and again after the
+-- input steps when they changed the store, so what is painted matches the
+-- store even when the change came after the widget was declared.
 syncWidgetLabels :: Context -> IO ()
 syncWidgetLabels ctx = do
   store <- getStore ctx
@@ -105,14 +121,16 @@ syncWidgetLabels ctx = do
     let key = intKey wid
     case nt of
       NodeCheckbox ->
-        -- Only sync when the widget owns stored state; otherwise keep the
-        -- value set from the initial argument during the UI pass.
+        -- A checkbox with no stored value keeps the value the view gave its
+        -- node.
         case lookupSlot fieldInt key store of
           Just v -> setNodeValue na idx (if intBool v then 1 else 0)
           Nothing -> pure ()
       _
-        -- A radio's option index is its style; a tree row packs its node
-        -- index there. Either is selected when its group's stored value names it.
+        -- A radio option's style index is its option index. A tree row packs
+        -- its pre-order node index into the high bits of its style index.
+        -- The group keeps its selection, as one of those indices, in the Int
+        -- slot of the parent node's widget id.
         | nt == NodeRadio || nt == NodeTree -> do
             parent <- getParent na idx
             si <- getStyleIdx na idx
