@@ -110,6 +110,12 @@
 
 ### Changed
 
+- `Animatable` uses `traverseChannels` instead of `toComponents` and
+  `fromComponents`. Custom instances apply the supplied indexed action directly
+  to their fields, for example `V2 <$> f 0 x <*> f 1 y`. Keep channel indices
+  stable: they identify the component animations. The engine still uses
+  single-precision channels, including for the `Double` instance.
+
 - The pointer goes to one place, decided once a frame. Before the view runs,
   the frame works out what is on top under the pointer (the text-edit menu,
   an open dropdown, the floating panel in front, or the page) and routes the

@@ -145,7 +145,16 @@ runAnimationSpringDtTest ctx failed = do
 -- unique when two vectors animate side by side in the same parent. Tweens
 -- and springs both settle and stop requesting redraws.
 runCompositeAnimationIsolationTest :: Context -> IORef Int -> IO ()
-runCompositeAnimationIsolationTest _ failed =
+runCompositeAnimationIsolationTest _ failed = do
+  let (indices, vector) = traverseChannels (\i x -> ([i], x + fromIntegral i)) (V2 3 4)
+      color = colorRGBA 17 80 190 255
+      (rgbaIndices, roundtrip) = traverseChannels (\i x -> ([i], x)) color
+      (_, clipped) = traverseChannels (\i _ -> ([i], if i == 0 then -1 else 2)) color
+  assertEq failed [0, 1] indices
+  assertEq failed (V2 3 5) vector
+  assertEq failed [0, 1, 2, 3] rgbaIndices
+  assertEq failed color roundtrip
+  assertEq failed (colorRGBA 0 255 255 255) clipped
   forM_ [animateToA (Tween EaseLinear 0.2 0), animateToA (Spring presetSmooth)] $ \animateVector -> do
     ctx <- newContext
     let inp = withDelta 200 100 0.05

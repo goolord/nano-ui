@@ -13,10 +13,13 @@ module Main
   , storeWriteByHand
   , storeReadProbe
   , storeReadByHand
+  , channelProbe
+  , channelByHand
   ) where
 
 import Data.IntMap.Strict qualified as IM
 import Data.Text (Text)
+import Data.Functor.Identity (Identity (..))
 import Data.Word (Word32, Word8)
 import Foreign.Ptr (Ptr)
 
@@ -24,6 +27,7 @@ import Test.Inspection
 
 import NanoUI.SIMD qualified as SIMD
 import NanoUI.Store
+import NanoUI (Animatable (..), V2 (..))
 
 main :: IO ()
 main = putStrLn "inspection invariants hold"
@@ -84,3 +88,15 @@ inspect $ 'storeWriteProbe === 'storeWriteByHand
 inspect $ 'storeReadProbe === 'storeReadByHand
 inspect $ 'storeWriteProbe `hasNoType` ''Field
 inspect $ 'storeReadProbe `hasNoType` ''Field
+
+-- Direct channel traversal must specialize to scalar arithmetic, including
+-- when the channel values and the transform are supplied at runtime.
+channelProbe :: Float -> V2 -> V2
+channelProbe delta = runIdentity . traverseChannels (\_ x -> Identity (x + delta))
+
+channelByHand :: Float -> V2 -> V2
+channelByHand delta (V2 x y) = V2 (x + delta) (y + delta)
+
+inspect $ 'channelProbe === 'channelByHand
+inspect $ hasNoTypeClasses 'channelProbe
+inspect $ 'channelProbe `hasNoType` ''[]
