@@ -57,7 +57,8 @@ import NanoUI.Input
   , inputMouseRightReleased
   )
 import NanoUI.Layout.Arena
-  ( NodeIdx
+  ( NodeArena
+  , NodeIdx
   , NodeType (..)
   , addNode
   , addNodeFromLayout
@@ -347,7 +348,18 @@ addWidgetStyled ::
   -> Layout
   -> Int
   -> Eff es Response
-addWidgetStyled wid nt txt value layout styleIdx = do
+addWidgetStyled wid nt txt value layout styleIdx =
+  addWidgetNode wid nt txt value layout $ \arena idx ->
+    let effectiveStyle
+          | nt == NodeText = packTextNodeStyleFull (layoutFontVariant layout) (layoutFontWeight layout) (layoutFontStyle layout) (layoutTextDecoration layout) styleIdx
+          | otherwise = styleIdx
+     in setStyleIdx arena idx effectiveStyle
+
+-- The initializer specializes at each call site; the node allocation, identity
+-- and interaction path are shared by styled leaves and option controls.
+{-# INLINE addWidgetNode #-}
+addWidgetNode :: Ui :> es => WidgetId -> NodeType -> Text -> Float -> Layout -> (NodeArena -> NodeIdx -> IO ()) -> Eff es Response
+addWidgetNode wid nt txt value layout initialize = do
   ctx <- askContext
   inp <- askInput
   uiIO $ do
@@ -357,10 +369,7 @@ addWidgetStyled wid nt txt value layout styleIdx = do
     idx <- addNodeFromLayout (ctxNodeArena ctx) nt parent layout
     setNodeText (ctxNodeArena ctx) idx txt
     setNodeValue (ctxNodeArena ctx) idx value
-    let effectiveStyle
-          | nt == NodeText = packTextNodeStyleFull (layoutFontVariant layout) (layoutFontWeight layout) (layoutFontStyle layout) (layoutTextDecoration layout) styleIdx
-          | otherwise = styleIdx
-    setStyleIdx (ctxNodeArena ctx) idx effectiveStyle
+    initialize (ctxNodeArena ctx) idx
     setWidgetId (ctxNodeArena ctx) idx wid
     resolveInteraction ctx inp wid
 
@@ -373,19 +382,10 @@ addWidgetWithOptions ::
   -> Float
   -> Layout
   -> Eff es Response
-addWidgetWithOptions wid nt txt opts value layout = do
-  ctx <- askContext
-  inp <- askInput
-  uiIO $ do
-    stack <- readIORef (ctxContainerStack ctx)
-    let parent = parentIdx stack
-    idx <- addNodeFromLayout (ctxNodeArena ctx) nt parent layout
-    setNodeText (ctxNodeArena ctx) idx txt
-    setOptions (ctxNodeArena ctx) idx opts
-    setNodeValue (ctxNodeArena ctx) idx value
-    setStyleIdx (ctxNodeArena ctx) idx 0
-    setWidgetId (ctxNodeArena ctx) idx wid
-    resolveInteraction ctx inp wid
+addWidgetWithOptions wid nt txt opts value layout =
+  addWidgetNode wid nt txt value layout $ \arena idx -> do
+    setOptions arena idx opts
+    setStyleIdx arena idx 0
 
 resolveInteraction :: Context -> Input -> WidgetId -> IO Response
 resolveInteraction ctx inp wid = do

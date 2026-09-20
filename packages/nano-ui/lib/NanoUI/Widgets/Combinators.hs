@@ -7,13 +7,17 @@ module NanoUI.Widgets.Combinators
   , buttonStyledEx
   , selectableItem
   , withBoundedIndex
+  , finishToggle
+  , finishInput
   )
 where
 
 import Control.Monad (when)
 import Data.Text (Text)
 import Effectful (Eff, type (:>))
-import NanoUI.Context (isDisabled, registerFocusable)
+import NanoUI.Context (Context, intKey, isDisabled, recordSlot, recordStoreInt, registerFocusable, writeSlot, writeStoreBool)
+import NanoUI.Id (WidgetId)
+import NanoUI.Store (Field, boolInt)
 import NanoUI.Layout.Arena (NodeType (..))
 import NanoUI.Monad (Ui, askContext, nextId, uiIO)
 import NanoUI.Style (Layout (..))
@@ -23,6 +27,8 @@ import NanoUI.Widgets.Node
   , addWidgetStyled
   , inertResponse
   , setClicked
+  , respClicked
+  , setChanged
   )
 
 -- | Button with styleIdx for active, sort, badge, or close chrome. Focusable
@@ -58,6 +64,29 @@ selectableItem nt txt selected layout styleIdx = do
     (if selected then 1 else 0)
     layout
     styleIdx
+
+-- | Finish a boolean control after its node has registered focus eligibility.
+-- Keyboard activation changes the value without inventing a pointer click.
+{-# INLINE finishToggle #-}
+finishToggle :: Ui :> es => Context -> WidgetId -> Bool -> Response -> Eff es (Response, Bool)
+finishToggle ctx wid current resp = do
+  keyClick <- keyActivated wid
+  let clicked = respClicked resp || keyClick
+      value = current /= clicked
+  uiIO $ do
+    writeStoreBool ctx wid value
+    recordStoreInt ctx (intKey wid) (boolInt value)
+  pure (setChanged clicked resp, value)
+
+-- | Publish an input's result and remember it for controlled adoption. The
+-- caller chooses the comparison value: live state or the supplied model value.
+{-# INLINE finishInput #-}
+finishInput :: (Eq a, Ui :> es) => Field a -> Context -> WidgetId -> Int -> a -> Response -> a -> Eff es (Response, a)
+finishInput field ctx wid key original resp value = do
+  uiIO $ do
+    writeSlot field ctx wid key value
+    recordSlot field ctx key value
+  pure (setChanged (value /= original) resp, value)
 
 -- | Run an index-based picker over every value of a bounded enum. Indices
 -- are offset by @fromEnum minBound@, so enums that do not start at 0 map

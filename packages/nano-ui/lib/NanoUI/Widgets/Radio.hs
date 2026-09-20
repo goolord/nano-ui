@@ -17,17 +17,17 @@ import Data.Hashable (hash)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Effectful (Eff, type (:>))
-import NanoUI.Context (adoptStoreInt, intKey, recordStoreInt, registerFocusable, writeStoreInt)
+import NanoUI.Context (adoptStoreInt, intKey, registerFocusable)
+import NanoUI.Store (fieldInt)
 import NanoUI.Layout.Arena (NodeType (..))
 import NanoUI.Monad (Ui, askContext, nextId, uiIO, withKey)
 import NanoUI.Style (Layout, defaultLayout, fillW, gap, tight)
 import NanoUI.Types (clamp)
 import NanoUI.Widgets.Behavior (KeyNav (..), useKeyNav)
-import NanoUI.Widgets.Combinators (selectableItem, withBoundedIndex)
+import NanoUI.Widgets.Combinators (finishInput, selectableItem, withBoundedIndex)
 import NanoUI.Widgets.Layout (column')
 import NanoUI.Widgets.Node
   ( Response (..)
-  , setChanged
   , tagContainer
   )
 
@@ -72,12 +72,9 @@ radio' options index =
       tagContainer gid
       (combinedResp, clickedIdx) <- addRadioOptions selNav opts
       let !finalSel = if clickedIdx >= 0 then clickedIdx else selNav
-      uiIO $ do
-        writeStoreInt ctx gid key finalSel
-        recordStoreInt ctx key finalSel
       -- Compare with the caller's index, as 'NanoUI.Widgets.Select' does, so a
       -- selection stored between frames still reports a change.
-      pure (setChanged (finalSel /= clamp 0 (len - 1) index) combinedResp, finalSel)
+      finishInput fieldInt ctx gid key (clamp 0 (len - 1) index) combinedResp finalSel
 
 -- Use the ordinary widget path for every option, including singleton groups.
 -- It owns IDs, node construction, and scroll-aware interaction geometry.

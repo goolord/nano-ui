@@ -10,6 +10,7 @@ module NanoUI.Monad
   , runUi
   , uiIO
   , withContext
+  , withUiResource
   , emit
   , withKey
   , keyed
@@ -159,6 +160,15 @@ withContext f = do
   UiRep ctx _ _ _ <- getStaticRep
   unsafeEff_ (f ctx)
 
+-- | Acquire UI-thread state, run an action, and restore it even on exceptions.
+-- Acquisition and release are masked, as in 'bracket'; the view inherits the
+-- caller's masking state.
+{-# INLINE withUiResource #-}
+withUiResource :: Ui :> es => IO a -> (a -> IO ()) -> Eff es b -> Eff es b
+withUiResource acquire release action = do
+  UiRep {} <- getStaticRep
+  unsafeEff $ \es -> bracket acquire release (\_ -> unEff action es)
+
 -- | Queue a typed message for the frame's reducer, in emission order.
 {-# INLINE emit #-}
 emit :: (Typeable msg, Ui :> es) => msg -> Eff es ()
@@ -201,15 +211,14 @@ withIdFrame ::
   Ui :> es => (IdContext -> (IdContext, IdContext)) -> Eff es a -> Eff es a
 withIdFrame enter m = do
   ctx <- askContext
-  unsafeEff $ \es ->
-    bracket
-      (do
-        old <- readIORef (ctxIdContext ctx)
-        let !(!p, !c) = enter old
-        writeIORef (ctxIdContext ctx) c
-        pure p)
-      (\parent' -> writeIORef (ctxIdContext ctx) parent')
-      (\_ -> unEff m es)
+  withUiResource
+    (do
+      old <- readIORef (ctxIdContext ctx)
+      let !(!p, !c) = enter old
+      writeIORef (ctxIdContext ctx) c
+      pure p)
+    (writeIORef (ctxIdContext ctx))
+    m
 
 -- | Give the action a child id sequence while consuming one parent id.
 -- Put conditional content inside this scope to keep later siblings stable.
@@ -324,14 +333,13 @@ withPaintScope :: Ui :> es => (Context -> Int -> IO Int) -> Eff es a -> Eff es a
 withPaintScope enter m = do
   ctx <- askContext
   let na = ctxNodeArena ctx
-  unsafeEff $ \es ->
-    bracket
-      (do
-        old <- getArenaScope na
-        setArenaScope na =<< enter ctx old
-        pure old)
-      (setArenaScope na)
-      (\_ -> unEff m es)
+  withUiResource
+    (do
+      old <- getArenaScope na
+      setArenaScope na =<< enter ctx old
+      pure old)
+    (setArenaScope na)
+    m
 
 -- | Set the session's base theme and request a repaint. Use 'styled' for a
 -- temporary change limited to part of the view.

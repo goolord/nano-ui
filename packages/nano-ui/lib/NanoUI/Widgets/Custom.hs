@@ -85,15 +85,11 @@ import NanoUI.Context
   , getStore
   , intKey
   , isDisabled
-  , recordStoreFloat
-  , recordStoreInt
   , registerCustomCursor
   , registerCustomDamageSlop
   , registerCustomDrawing
   , registerCustomMeasure
   , registerFocusable
-  , writeStoreBool
-  , writeStoreFloat
   , widgetTheme
   , modifyStore
   )
@@ -111,7 +107,7 @@ import NanoUI.Input
   )
 import NanoUI.Layout.Arena (NodeType (NodeDrawing))
 import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO, uiTime)
-import NanoUI.Store (Slot (..), boolInt, deleteSlot, fieldPoint, findSlot, flagSlot, insertSlot, intBool, setFlagSlot, slotKey)
+import NanoUI.Store (Slot (..), boolInt, deleteSlot, fieldFloat, fieldPoint, findSlot, flagSlot, insertSlot, intBool, setFlagSlot, slotKey)
 import NanoUI.Style
   ( AlignX (..)
   , AlignY (..)
@@ -142,15 +138,14 @@ import NanoUI.Types
   , v2X
   , v2Y
   )
-import NanoUI.Widgets.Behavior (keyActivated, navStep, useKeyNav)
+import NanoUI.Widgets.Behavior (navStep, useKeyNav)
+import NanoUI.Widgets.Combinators (finishInput, finishToggle)
 import NanoUI.Widgets.Node
   ( Response
   , addWidget
-  , respClicked
   , respHovered
   , respPressed
   , respRect
-  , setChanged
   )
 import NanoUI.Widgets.Animate (keepAnimating)
 
@@ -496,10 +491,7 @@ knobWith' f diameter minV maxV value = do
         if deltaNorm /= 0
           then clamp minV maxV (current + deltaNorm * range)
           else current
-  uiIO $ do
-    writeStoreFloat ctx wid key finalVal
-    recordStoreFloat ctx key finalVal
-  pure (setChanged (finalVal /= current) resp, finalVal)
+  finishInput fieldFloat ctx wid key current resp finalVal
 
 -- | On/off switch. Pass the current state; the result is the state after
 -- this frame's click or Space/Enter.
@@ -546,13 +538,7 @@ toggleSwitchWith' f on = do
         drawStrokeRoundedRect (Rect x y w h) r 1 (styleBorder (themeButton theme))
         drawCircle (V2 thumbX thumbY) thumbR thumbCol
     }
-  keyClick <- keyActivated wid
-  let clicked = respClicked resp || keyClick
-      newVal = current /= clicked
-  uiIO $ do
-    writeStoreBool ctx wid newVal
-    recordStoreInt ctx key (boolInt newVal)
-  pure (setChanged clicked resp, newVal)
+  finishToggle ctx wid current resp
 
 -- | Progress ring for a fraction in @[0, 1]@, 32 px across.
 {-# INLINE circularProgress #-}

@@ -12,18 +12,18 @@ import Effectful (Eff, type (:>))
 import NanoUI.Context
   ( adoptStoreFloat
   , intKey
-  , recordStoreFloat
   , registerFocusable
-  , writeStoreFloat
   )
 import NanoUI.Font (sliderHandleSlack, sliderTrackBounds)
 import NanoUI.Frame.Hit (scrollHitRect)
 import NanoUI.Layout.Arena (NodeType (..))
 import NanoUI.Monad (Ui, askContext, nextId, uiIO, withKey)
 import NanoUI.Style (Layout, defaultLayout, fillW)
+import NanoUI.Store (fieldFloat)
 import NanoUI.Types (Rect (..), clamp)
 import NanoUI.Widgets.Behavior (DragAxis (..), holdActiveWhile, navStep, useDrag1D, useKeyNav)
-import NanoUI.Widgets.Node (Response, addWidget, setChanged)
+import NanoUI.Widgets.Combinators (finishInput)
+import NanoUI.Widgets.Node (Response, addWidget)
 
 -- | Slider over @[minV, maxV]@ that fills the available width. Pass the
 -- current value; the result is the value after this frame's drag or arrow
@@ -73,7 +73,4 @@ sliderWith' f minV maxV value = do
     step = if range > 0 then range / 100 else 0
     baseVal = if dragging then dragged else current
     finalVal = clamp minV maxV (baseVal + fromIntegral (navStep nav) * step)
-  uiIO $ do
-    writeStoreFloat ctx wid key finalVal
-    recordStoreFloat ctx key finalVal
-  pure (setChanged (finalVal /= current) resp, finalVal)
+  finishInput fieldFloat ctx wid key current resp finalVal
