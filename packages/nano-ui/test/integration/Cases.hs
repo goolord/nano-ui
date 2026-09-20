@@ -80,6 +80,8 @@ import NanoUI.Widgets.SplitPane
   ( GridNode (..)
   , PaneDrop (..)
   , dropPreview
+  , DropPreview (..)
+  , dropPreviewTreeSized
   , dropTargetForPane
   , layoutNode
   , topLevelDropTarget
@@ -647,6 +649,28 @@ runPaneGridMixedDragTest ctx failed = do
   assertEq failed (topLevelDropTarget 20 base (V2 300 200)) Nothing
   let dtD = DropTop AxisV True
   assertEq failed (preview dtD) (Just (Rect 0 0 298 400, DropTop AxisV True))
+
+  -- Size-preserving drops use the original pane's extent, including after
+  -- removing it collapses a parent. Both sides and axes share the same rule.
+  let sizedTree = Split 100 AxisV 0.25 (Pane 1) (Split 101 AxisH 0.3 (Pane 2) (Pane 3))
+      source = fst (layoutNode minSize gutter sizedTree base) M.! 1
+      sized dt = dropPreviewTreeSized (Just source) minSize gutter sizedTree 1 102 base dt
+  forM_ [True, False] $ \onA -> do
+    forM_ [DropTop AxisV onA, DropSplit 3 AxisV onA] $ \dt ->
+      case sized dt of
+        Nothing -> assert failed False
+        Just dp -> do
+          assert failed (abs (rectW (dpRect dp) - rectW source) < 0.01)
+          assertEq failed (M.lookup 1 (fst (layoutNode minSize gutter (dpTree dp) base))) (Just (dpRect dp))
+    -- Original height is 400; the other subtree needs 84 plus the gutter.
+    case sized (DropTop AxisH onA) of
+      Nothing -> assert failed False
+      Just dp -> assert failed (abs (rectH (dpRect dp) - 312) < 0.01)
+    let source2 = fst (layoutNode minSize gutter sizedTree base) M.! 2
+    case dropPreviewTreeSized (Just source2) minSize gutter sizedTree 2 102 base (DropTop AxisH onA) of
+      Nothing -> assert failed False
+      Just dp -> assert failed (abs (rectH (dpRect dp) - rectH source2) < 0.01)
+  assertEq failed (fmap dpRect (sized (DropSwap 2))) (M.lookup 2 (fst (layoutNode minSize gutter sizedTree base)))
 
   -- Widget level: build the same mixed grid through a live paneGrid, drag the
   -- left pane onto the bottom-right pane's lower edge, and check the drop

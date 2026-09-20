@@ -145,7 +145,7 @@ import NanoUI.Widgets.SplitPane
   , GridNode (..)
   , clampTreeRatio
   , DropPreview (..)
-  , dropPreviewTree
+  , dropPreviewTreeSized
   , dropTargetForPane
   , layoutNode
   , mainLen
@@ -186,6 +186,11 @@ data PaneGridConfig es = PaneGridConfig
     -- (default 20). Dragging a pane into this band restructures the whole grid
     -- instead of a single pane: the tree is wrapped in a new top-level split
     -- with the dragged pane on that side.
+  , pgPreserveDragSize :: !Bool
+    -- ^ Retain the dragged pane's width on left/right drops, or height on
+    -- top/bottom drops, subject to available space and subtree minima. The
+    -- preview shows the same size as the committed drop. Center swaps are
+    -- unaffected (default 'False', which splits the destination equally).
   , pgViewPane :: !(Word64 -> PaneGridCtx es -> Eff es PaneView)
     -- ^ Renders the content of one pane.
   }
@@ -200,6 +205,7 @@ defaultPaneGridConfig =
     , pgMinSize = 40
     , pgLeeway = 6
     , pgEdgeBand = 20
+    , pgPreserveDragSize = False
     , pgViewPane = \_ _ -> pure (PaneView "" False Nothing)
     }
 
@@ -395,6 +401,7 @@ paneGrid cfg = do
             , dgBand = edgeBand
             , dgRegions = regions
             , dgSeed = seed1
+            , dgPreserveSize = pgPreserveDragSize cfg
             }
           mGrab
           mouse
@@ -753,6 +760,7 @@ data DragGeom = DragGeom
     -- ^ Thickness of the grid's outer top-level drop band.
   , dgRegions :: !(Map Word64 Rect)
     -- ^ Prev-frame pane regions.
+  , dgPreserveSize :: !Bool
   , dgSeed :: !Word64
     -- ^ Id the drop's new split takes ('geSeed').
   }
@@ -763,7 +771,7 @@ data DragGeom = DragGeom
 -- 'dgBaseRect' is the grid's own rect: its outer band (thickness 'dgBand') is
 -- a top-level drop zone, and the pointer there restructures the whole grid;
 -- otherwise the pane nearest the pointer is the target, and a pointer outside
--- the grid has none. Every candidate is resolved through 'dropPreviewTree',
+-- the grid has none. Every candidate is resolved through 'dropPreviewTreeSized',
 -- which simulates the drop and lays the tree back out with the grid's real
 -- 'dgGutter' and 'dgMinSize', so the highlighted rect is the exact region the
 -- pane lands in even when removing it reshapes the rest of a mixed-split grid.
@@ -790,7 +798,7 @@ computeDragInfo drag0 latched geom mGrab mouse
               | moved -> Just (Rect (v2X mouse + 12) (v2Y mouse + 12) 112 28)
             _ -> Nothing
           targetRegions = maybe M.empty (\t -> fst (layoutNode minSize gutter t baseRect)) (treeRemovePane pid tree)
-          preview = dropPreviewTree minSize gutter tree pid seed baseRect
+          preview = dropPreviewTreeSized (if dgPreserveSize geom then mFrom else Nothing) minSize gutter tree pid seed baseRect
           zone = case topLevelDropTarget band baseRect mouse of
             Just dt -> preview dt
             Nothing

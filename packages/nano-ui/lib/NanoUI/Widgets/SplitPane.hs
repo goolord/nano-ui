@@ -32,13 +32,14 @@ module NanoUI.Widgets.SplitPane
   , dropPreview
   , DropPreview (..)
   , dropPreviewTree
+  , dropPreviewTreeSized
   , dropTargetForPane
   , nearestPane
   , topLevelDropTarget
   ) where
 
 import Control.Applicative ((<|>))
-import Data.List (minimumBy)
+import Data.List (find, minimumBy)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as M
 import Data.Ord (comparing)
@@ -371,8 +372,28 @@ data DropPreview = DropPreview
 -- The drop's new split, if any, takes @splitId@, so passing the id the real
 -- drop will use keeps the split's identity across the drop.
 dropPreviewTree :: Float -> Float -> GridNode -> Word64 -> Word64 -> Rect -> PaneDrop -> Maybe DropPreview
-dropPreviewTree minSize spacing tree moved splitId baseRect dt = do
+dropPreviewTree = dropPreviewTreeSized Nothing
+
+-- | Like 'dropPreviewTree', but optionally retain the source pane's width for
+-- left/right drops or height for top/bottom drops. The requested size is
+-- clamped to the destination's subtree minima. Center swaps ignore the size.
+-- Pass the source rect from the committed layout, never the preview layout.
+dropPreviewTreeSized :: Maybe Rect -> Float -> Float -> GridNode -> Word64 -> Word64 -> Rect -> PaneDrop -> Maybe DropPreview
+dropPreviewTreeSized source minSize spacing tree moved splitId baseRect dt = do
   t' <- treeMovePane moved splitId dt tree
-  let (regions, dividers) = layoutNode minSize spacing t' baseRect
+  let sized = case (source, dt) of
+        (Just r, DropSplit _ axis onA) -> retain r axis onA t'
+        (Just r, DropTop axis onA) -> retain r axis onA t'
+        _ -> t'
+      retain r axis onA t =
+        case find ((== splitId) . diSplitId) (snd (layoutNode minSize spacing t baseRect)) of
+          Just d
+            | let usable = mainLen axis (diRegion d) - spacing
+            , usable > 0 ->
+                let share = mainLen axis r / usable
+                    ratio = if onA then share else 1 - share
+                 in treeSetRatio splitId (clampTreeRatio t splitId (diRegion d) spacing minSize ratio) t
+          _ -> t
+      (regions, dividers) = layoutNode minSize spacing sized baseRect
   r <- M.lookup moved regions
-  pure (DropPreview t' regions dividers r)
+  pure (DropPreview sized regions dividers r)
