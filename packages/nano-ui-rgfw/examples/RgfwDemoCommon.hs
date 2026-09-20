@@ -17,6 +17,10 @@ import NanoUI
   , boundedRadio
   , button
   , button'
+  , checkbox
+  , slider
+  , textInput
+  , textArea'
   , contextMenu
   , fillH
   , fillW
@@ -193,14 +197,14 @@ appView m = do
       label "nano-ui on RGFW"
       flex
 
-      Emit.button (case currentTheme m of
+      Emit.emitWhen (button (case currentTheme m of
         ThemeNight    -> "[Theme: Tomorrow Night]"
         ThemeLight    -> "[Theme: Tomorrow Light]"
-        ThemeMidnight -> "[Theme: Midnight Black]") CycleTheme
+        ThemeMidnight -> "[Theme: Midnight Black]")) CycleTheme
 
-      Emit.button ("[" <> formatDpiScale (dpiScale m) <> " DPI Scale]") CycleScale
+      Emit.emitWhen (button ("[" <> formatDpiScale (dpiScale m) <> " DPI Scale]")) CycleScale
 
-      Emit.button (if debugOpen m then "[Debug: ON]" else "[Debug: OFF]") (ToggleDebug (not (debugOpen m)))
+      Emit.emitWhen (button (if debugOpen m then "[Debug: ON]" else "[Debug: OFF]")) (ToggleDebug (not (debugOpen m)))
 
     nextTab <-
       tabBar
@@ -234,12 +238,12 @@ viewControlsTab m = do
 
       gridWith 4 (gap 6 . fixedH 22 . fillW) $ do
         label ("Counter: " <> T.pack (show (counter m)))
-        Emit.button " +1 " Increment
-        Emit.button " -1 " Decrement
-        Emit.button " Reset " Reset
+        Emit.emitWhen (button " +1 ") Increment
+        Emit.emitWhen (button " -1 ") Decrement
+        Emit.emitWhen (button " Reset ") Reset
 
       gridWith 1 (gap 6 . fixedH 20) $ do
-        Emit.checkbox "Turbo mode" (turboOn m) ToggleTurbo
+        Emit.emitChanged (checkbox "Turbo mode") (turboOn m) ToggleTurbo
 
       gridWith 2 (gap 6 . fixedH 22) $ do
         label "Context Menu:"
@@ -258,22 +262,22 @@ viewControlsTab m = do
       gridWith 1 (gap 2) $ do
         let volPct = round (volumeVal m * 100) :: Int
         label ("Master Volume: " <> T.pack (show volPct) <> "%")
-        Emit.slider 0 1 (volumeVal m) SetVolume
+        Emit.emitChanged (slider 0 1) (volumeVal m) SetVolume
 
       gridWith 1 (gap 2) $ do
         let opPct = round (opacityVal m * 100) :: Int
         label ("Surface Opacity: " <> T.pack (show opPct) <> "%")
-        Emit.slider 0 1 (opacityVal m) SetOpacity
+        Emit.emitChanged (slider 0 1) (opacityVal m) SetOpacity
 
       gridWith 1 (gap 2) $ do
         label "Single-line Text Input:"
-        Emit.textInput (textVal m) SetInputText
+        Emit.emitChanged textInput (textVal m) SetInputText
 
       gridWith 1 (gap 2) $ do
         gridWith 2 (gap 4 . fixedH 18) $ do
           label "Multi-line Notes Field:"
-          Emit.button "Clear" ClearNotes
-        Emit.textArea (notesVal m) SetNotesText
+          Emit.emitWhen (button "Clear") ClearNotes
+        Emit.emitEdited textArea' (notesVal m) SetNotesText
 
       gridWith 1 (gap 2) $ do
         label "Preset:"
@@ -419,7 +423,7 @@ viewDiagnosticsTab m = do
 
     separator
 
-    Emit.button (if debugOpen m then "[Close Debug Window]" else "[Open Debug Window]") (ToggleDebug (not (debugOpen m)))
+    Emit.emitWhen (button (if debugOpen m then "[Close Debug Window]" else "[Open Debug Window]")) (ToggleDebug (not (debugOpen m)))
 
 main :: IO ()
 main = do

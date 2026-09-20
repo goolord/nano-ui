@@ -86,7 +86,7 @@ runKeyboardButtonTest ctx failed = do
   ((_, bEnter), _, _, _) <- runFrame ctx (keyInp KeyEnter inp0) ui
   assert failed bEnter
 
--- | A focused checkbox toggles with Space and Enter, and 'Emit.checkbox'
+-- | A focused checkbox toggles with Space and Enter, and 'Emit.emitChanged'
 -- emits its new value on keyboard activation.
 runKeyboardCheckboxTest :: Context -> IORef Int -> IO ()
 runKeyboardCheckboxTest ctx failed = do
@@ -100,7 +100,7 @@ runKeyboardCheckboxTest ctx failed = do
   assert failed (not checked2)
   let emitUi = do
         wid <- currentId
-        Emit.checkbox "Emit" False id
+        Emit.emitChanged (checkbox "Emit") False id
         pure wid
   (wid, _, _, _) <- runFrame ctx inp0 emitUi
   writeIORef (ctxFocusId ctx) wid

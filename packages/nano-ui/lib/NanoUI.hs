@@ -37,7 +37,7 @@
 -- = State
 --
 -- Keep state in local hooks ('useInt', 'useText', 'useState'), in a model you
--- pass down through the view, or in a reducer: "NanoUI.Emit" has widgets that
+-- pass down through the view, or in a reducer: "NanoUI.Emit" adapts widgets to
 -- emit messages, and the backends' reducer runners fold them into the model.
 module NanoUI
   ( -- * Views

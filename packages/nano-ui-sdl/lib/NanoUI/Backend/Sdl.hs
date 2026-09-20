@@ -74,7 +74,7 @@ runSdlApp options ui = do
 
 -- | Run a model-driven view, folding emitted messages through the update
 -- function in emission order. Messages of other runtime types are ignored.
--- Use the widgets in "NanoUI.Emit" to emit changes.
+-- Use the adapters in "NanoUI.Emit" to emit changes from ordinary widgets.
 runSdlAppReduce ::
   (Typeable msg, Eq model) =>
   SdlOptions ->

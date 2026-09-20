@@ -41,10 +41,15 @@ Code in the view can therefore run more than once. Load files and allocate
 long-lived resources before entering the backend runner. Guard one-shot IO
 with an event such as `whenM (button "Save") saveDocument`.
 
-For model-driven applications, `NanoUI.Emit` provides widgets that emit
+For model-driven applications, `NanoUI.Emit` adapts ordinary widgets to emit
 messages. A backend reducer runner applies matching messages in order after
 the view has run. A changed model requests another frame; the drawing from
 the current frame still represents the model passed into it.
+
+Use `Emit.emitWhen (button "Save") Save` for activation,
+`Emit.emitChanged (slider 0 100) volume SetVolume` for changed values, and
+`Emit.emitEdited textArea' notes SetNotes` when the response must also report
+an edit. The same adapters accept configured and custom widgets.
 
 ## Values and interaction state
 

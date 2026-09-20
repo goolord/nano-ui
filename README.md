@@ -85,8 +85,8 @@ greeter = columnWith (gap 8 . padAll 16) $ do
   labelWith (fontSize size) (if shout then T.toUpper greeting else greeting)
 ```
 
-For an Elm-style update function, the widgets in `NanoUI.Emit` emit messages
-instead of returning values, and `runSdlAppReduce` folds them into the model:
+For an Elm-style update function, `NanoUI.Emit` adapts ordinary widgets to emit
+messages, and `runSdlAppReduce` folds them into the model:
 
 ```haskell
 {-# LANGUAGE OverloadedStrings #-}
@@ -107,9 +107,9 @@ update Decrement n = n - 1
 
 view :: Int -> NanoUI ()
 view n = row $ do
-  Emit.button "-" Decrement
+  Emit.emitWhen (button "-") Decrement
   label (T.pack (show n))
-  Emit.button "+" Increment
+  Emit.emitWhen (button "+") Increment
 ```
 
 ## How it works

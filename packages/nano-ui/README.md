@@ -66,7 +66,7 @@ greeter = columnWith (gap 8 . padAll 16) $ do
 ```
 
 State can live in local hooks (`useInt`, `useText`, `useState`), in your own
-model, or in a reducer: the widgets in `NanoUI.Emit` emit messages, and the
+model, or in a reducer: `NanoUI.Emit` adapts widgets to emit messages, and the
 backends' reducer runners fold them into the model.
 
 ## What is in the box

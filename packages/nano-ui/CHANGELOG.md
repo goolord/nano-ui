@@ -110,6 +110,14 @@
 
 ### Changed
 
+- `NanoUI.Emit` exposes `emitWhen`, `emitChanged`, and `emitEdited` instead of
+  separate copies of widget names. Replace `Emit.button label msg` with
+  `Emit.emitWhen (button label) msg`, `Emit.slider lo hi value toMsg` with
+  `Emit.emitChanged (slider lo hi) value toMsg`, and `Emit.textArea value toMsg`
+  with `Emit.emitEdited textArea' value toMsg`. Configured and custom controls
+  use the same adapters. `emitChanged` compares values; `emitEdited` also gates
+  on `respChanged`.
+
 - `drawCommands` is an unboxed `Vector DrawCmd`; its field representation uses
   vector's deriving-via support instead of a handwritten `Prim` instance. Vertex
   and index buffers keep their existing FFI layout. Use `drawCmdElems` or

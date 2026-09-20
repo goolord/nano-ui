@@ -529,6 +529,21 @@ runReduceMessagesTest ctx failed = do
   let identity _ = column (Emit.emit Inc >> Emit.emit Dec)
   ((), model2, msgs2, _, dirty2) <- runFrameReduce updateCounter ctx inp model0 identity
   assert failed (msgs2 == [Inc, Dec] && model2 == Counter 0 && not dirty2)
+  -- Generic adapters run the control once and distinguish value changes from
+  -- edit pulses. A response-only pulse cannot emit the unchanged value.
+  calls <- newIORef (0 :: Int)
+  let control value = uiIO (modifyIORef' calls (+ 1)) >> pure (value + 1)
+      adapters = do
+        Emit.emitWhen (pure False) (1 :: Int)
+        Emit.emitWhen (pure True) (2 :: Int)
+        Emit.emitChanged pure (3 :: Int) id
+        Emit.emitChanged control (3 :: Int) id
+        Emit.emitEdited (\v -> pure (mempty, v + 1)) (5 :: Int) id
+        Emit.emitEdited (\v -> pure (mempty {rawRespChanged = True}, v)) (6 :: Int) id
+        Emit.emitEdited (\v -> pure (mempty {rawRespChanged = True}, v + 1)) (7 :: Int) id
+  (_, emitted, _, _) <- runFrame ctx inp adapters
+  assertEq failed [2, 4, 8] (decodeMessages emitted :: [Int])
+  assertEq failed 1 =<< readIORef calls
 
 runReduceClickTest :: Context -> IORef Int -> IO ()
 runReduceClickTest ctx failed = do

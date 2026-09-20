@@ -116,7 +116,7 @@ runTreeKeyboardTest ctx failed = do
 
 -- Open dropdown rows show the pointer cursor on hover and press, and
 -- respChanged fires on the frame the selection changes and not on later
--- frames. Emit.select must therefore emit only once per selection change.
+-- frames. Reducer adapters must therefore emit only once per selection change.
 runSelectChangeOnceTest :: Context -> IORef Int -> IO ()
 runSelectChangeOnceTest ctx failed = do
   indexRef <- newIORef 1
