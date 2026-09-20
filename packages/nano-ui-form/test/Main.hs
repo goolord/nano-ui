@@ -18,6 +18,7 @@ import NanoUI
 import NanoUI.Testing (collectTextSpans, newContext, runFrame)
 import NanoUI.Form
 import NanoUI.Form.Backend (updateFieldInput)
+import NanoUI qualified as NUI
 import qualified NanoUI.Form.Unnamed as Unnamed
 import System.IO (BufferMode (NoBuffering), hSetBuffering, stdout)
 import Scope (check, runScopeTests)
@@ -40,6 +41,34 @@ main = do
   hSetBuffering stdout NoBuffering
   putStrLn "=== Running nano-ui-form Test Suite ==="
   runScopeTests
+
+  customCtx <- newContext
+  let decodeText (FormInputText t) = Right t
+      decodeText _ = Left "Expected text"
+      customForm :: Form Text (Text, Text)
+      customForm = (,)
+        <$> inputWidget (Just "internal-key") decodeText (const False) FormInputText
+          (\value -> NUI.label "Visible caption" >> pure (mempty, if value == "initial" then "edited" else value)) "initial"
+        <*> inputWidget Nothing decodeText NUI.respChanged FormInputText NUI.textInput' "automatic"
+      runCustom = runNanoUI customCtx emptyInput (runNanoForm "custom" customForm)
+  (customView, _) <- runCustom
+  runNanoUI customCtx emptyInput (runFormView (Ditto.unView customView []))
+  (_, customResult) <- runCustom
+  case customResult of
+    Ditto.Ok (Ditto.Proved _ values) ->
+      check "Custom fields publish value changes without a response flag" (values == ("edited", "automatic"))
+    Ditto.Error errs -> fail (show errs)
+  updateFieldInput customCtx "custom" "internal-key" (FormInputText "external")
+  (_, externalResult) <- runCustom
+  case externalResult of
+    Ditto.Ok (Ditto.Proved _ values) ->
+      check "Custom field identity is independent of its visible label" (values == ("external", "automatic"))
+    Ditto.Error errs -> fail (show errs)
+  updateFieldInput customCtx "custom" "internal-key" (FormInputBool True)
+  (_, invalidResult) <- runCustom
+  case invalidResult of
+    Ditto.Error errs -> check "Custom field decoder errors reach ditto" (map snd errs == ["Expected text"])
+    Ditto.Ok _ -> fail "Expected custom decoder failure"
 
   ctx <- newContext
   let inp = emptyInput { inputWindowSize = Size 60 20 }

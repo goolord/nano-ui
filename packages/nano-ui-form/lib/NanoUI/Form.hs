@@ -12,6 +12,7 @@ module NanoUI.Form
   , FormMode (..)
   , FormConfig (..)
   , defaultFormConfig
+  , inputWidget
 
     -- * Named Form Inputs
   , inputText
@@ -80,6 +81,7 @@ import NanoUI.Form.Named
   , withFieldErrors
   )
 import NanoUI.Form.Backend (FormInput (..), FormUI (..), liftNanoUI)
+import NanoUI.Form.Field (inputWidget)
 import NanoUI.Form.Runner
   ( nanoFormEx
   , nanoFormLive

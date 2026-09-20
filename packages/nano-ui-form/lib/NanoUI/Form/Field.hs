@@ -1,7 +1,10 @@
 -- | Shared widget-to-form plumbing. Naming and validation stay with ditto;
 -- this module only adapts immediate-mode controls to persistent field values.
 module NanoUI.Form.Field
-  ( fieldView
+  ( inputWidget
+  , textField
+  , labelled
+  , fieldView
   , decodeBool
   , decodeFloatInput
   , decodeInt
@@ -14,13 +17,34 @@ import Control.Monad (when)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
+import Ditto.Backend (FormError)
+import Ditto.Generalized.Named qualified as Named
+import Ditto.Generalized.Unnamed qualified as Unnamed
 import Ditto.Types (FormId, encodeFormId)
-import NanoUI (NanoUI, Response, columnWith, fillW, gap, tight, uiIO, withKey)
-import NanoUI.Form.Backend (FormInput (..), getActiveFormPrefix, updateFieldInput)
-import NanoUI.Form.Types (FormView (..))
+import NanoUI (NanoUI, Response, columnWith, fillW, gap, tight, uiIO, withKey, respChanged)
+import NanoUI qualified as NUI
+import NanoUI.Form.Backend (FormInput (..), formInputToText, getActiveFormPrefix, updateFieldInput)
+import NanoUI.Form.Types (Form, FormView (..))
 import NanoUI.Form.Widgets (defaultErrorView)
 import NanoUI.Monad (askContext)
 import Text.Read (readMaybe)
+
+-- | Adapt a controlled widget to a form. 'Just' supplies a stable field name;
+-- 'Nothing' asks ditto to number it. Naming adds no visible label: include one
+-- in the widget action when wanted. The response predicate and value inequality
+-- both signal edits. Decoding and validation errors follow ditto's normal path.
+inputWidget ::
+  (Eq a, FormError FormInput err) =>
+  Maybe Text -> (FormInput -> Either err a) -> (Response -> Bool) ->
+  (a -> FormInput) -> (a -> NanoUI (Response, a)) -> a -> Form err a
+inputWidget name decode changed encode widget =
+  maybe Unnamed.input Named.input name decode (fieldView changed encode widget)
+
+textField :: FormError FormInput err => Maybe Text -> (Text -> NanoUI (Response, Text)) -> Text -> Form err Text
+textField name = inputWidget name (Right . formInputToText) respChanged FormInputText
+
+labelled :: Text -> (a -> NanoUI b) -> a -> NanoUI b
+labelled name widget value = NUI.label name >> widget value
 
 -- | Keep the label and control in the same stable field scope. Some controls
 -- report activation rather than change, so callers supply the response flag.

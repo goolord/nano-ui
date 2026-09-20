@@ -29,8 +29,6 @@ import Ditto.Core qualified as Ditto
 import Ditto.Generalized.Named qualified as Named
 import NanoUI
   ( Color
-  , NanoUI
-  , Response
   , TextInputConfig (..)
   , checkbox'
   , colorFromHex
@@ -53,67 +51,47 @@ import NanoUI.Form.Field
   , decodeInt
   , enumField
   , fieldErrors
-  , fieldView
+  , inputWidget
+  , labelled
   )
-import NanoUI.Form.Backend (FormInput (..), formInputToText)
+import NanoUI.Form.Field qualified as Field
+import NanoUI.Form.Backend (FormInput (..))
 import NanoUI.Form.Types (Form, FormView (..))
 
 -- | Single-line text input field.
 inputText :: FormError FormInput err => Text -> Text -> Form err Text
-inputText = textField textInput'
+inputText name = Field.textField (Just name) (labelled name textInput')
 
 -- | Single-line text input field with custom placeholder text.
 inputTextWithPlaceholder ::
   FormError FormInput err => Text -> Text -> Text -> Form err Text
-inputTextWithPlaceholder placeholder = textField (textInputConfigured' defaultTextInputConfig {ticPlaceholder = placeholder})
+inputTextWithPlaceholder placeholder name =
+  Field.textField (Just name) (labelled name (textInputConfigured' defaultTextInputConfig {ticPlaceholder = placeholder}))
 
 -- | Password text input masking entered characters.
 inputPassword :: FormError FormInput err => Text -> Text -> Form err Text
-inputPassword = textField (textInputConfigured' defaultTextInputConfig {ticPassword = True})
+inputPassword name =
+  Field.textField (Just name) (labelled name (textInputConfigured' defaultTextInputConfig {ticPassword = True}))
 
 -- | Multi-line text area input.
 inputTextArea :: FormError FormInput err => Text -> Text -> Form err Text
-inputTextArea = textField textArea'
-
-textField ::
-  FormError FormInput err =>
-  (Text -> NanoUI (Response, Text)) -> Text -> Text -> Form err Text
-textField widget name =
-  Named.input
-    name
-    (Right . formInputToText)
-    (fieldView respChanged FormInputText (labelled name widget))
-
-labelled :: Text -> (a -> NanoUI b) -> a -> NanoUI b
-labelled name widget value = NUI.label name >> widget value
+inputTextArea name = Field.textField (Just name) (labelled name textArea')
 
 -- | Checkbox toggle input.
 inputCheckbox :: FormError FormInput err => Text -> Bool -> Form err Bool
 inputCheckbox name initial =
-  Named.input
-    name
-    (Right . decodeBool initial)
-    (fieldView respClicked FormInputBool (checkbox' name))
-    initial
+  inputWidget (Just name) (Right . decodeBool initial) respClicked FormInputBool (checkbox' name) initial
 
 -- | Floating-point slider input across the range @[minV, maxV]@.
 inputSlider ::
   FormError FormInput err => Text -> Float -> Float -> Float -> Form err Float
 inputSlider name minV maxV initial =
-  Named.input
-    name
-    (Right . decodeFloatInput initial)
-    (fieldView respChanged FormInputFloat (labelled name (slider' minV maxV)))
-    initial
+  inputWidget (Just name) (Right . decodeFloatInput initial) respChanged FormInputFloat (labelled name (slider' minV maxV)) initial
 
 -- | Dropdown selection in fold order (returns selected index).
 inputSelect :: (Foldable f, FormError FormInput err) => Text -> f Text -> Int -> Form err Int
 inputSelect name options initial =
-  Named.input
-    name
-    (Right . decodeInt initial)
-    (fieldView respChanged FormInputInt (labelled name (select' options)))
-    initial
+  inputWidget (Just name) (Right . decodeInt initial) respChanged FormInputInt (labelled name (select' options)) initial
 
 -- | Dropdown selection for any bounded enumeration type.
 inputEnumSelect ::
@@ -124,11 +102,7 @@ inputEnumSelect name = enumField (inputSelect name)
 -- | Radio button group (returns selected index).
 inputRadio :: (Foldable f, FormError FormInput err) => Text -> f Text -> Int -> Form err Int
 inputRadio name options initial =
-  Named.input
-    name
-    (Right . decodeInt initial)
-    (fieldView respChanged FormInputInt (labelled name (radio' options)))
-    initial
+  inputWidget (Just name) (Right . decodeInt initial) respChanged FormInputInt (labelled name (radio' options)) initial
 
 -- | Radio button group for any bounded enumeration type.
 inputEnumRadio ::
@@ -139,17 +113,15 @@ inputEnumRadio name = enumField (inputRadio name)
 -- | Color picker input.
 inputColor :: FormError FormInput err => Text -> Color -> Form err Color
 inputColor name initial =
-  Named.input
-    name
+  inputWidget
+    (Just name)
     ( \case
         FormInputText t -> Right (fromMaybe initial (colorFromHex t))
         _ -> Right initial
     )
-    ( fieldView
-        respChanged
-        (FormInputText . colorToHex)
-        (labelled name colorPicker')
-    )
+    respChanged
+    (FormInputText . colorToHex)
+    (labelled name colorPicker')
     initial
 
 -- | Static label inside a form.

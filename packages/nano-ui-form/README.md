@@ -59,6 +59,26 @@ Use `withFieldErrors` around a validated field to display its errors.
 `NanoUI.Form.Validation` supplies common validators. `NanoUI.Form.Named`
 supports named fields; `NanoUI.Form.Unnamed` exposes positional composition.
 
+## Adapting a widget
+
+`inputWidget` adapts any controlled widget returning `(Response, value)`:
+
+```haskell
+import NanoUI qualified as UI
+
+volume :: Form Text Float
+volume = inputWidget (Just "volume") decode UI.respChanged FormInputFloat
+  (UI.knob' 0 100) 50
+  where
+    decode (FormInputFloat n) = Right n
+    decode _ = Left "Expected a volume"
+```
+
+The arguments are the optional stable name, decoder, response predicate,
+encoder, widget, and initial value. `Nothing` selects positional naming.
+Naming does not add a visible label; compose one into the widget action if
+wanted. Either the response predicate or a changed value publishes an edit.
+
 ## Build
 
 Use GHC 9.14 and add `nano-ui`, `nano-ui-form`, and `text` to your application's
