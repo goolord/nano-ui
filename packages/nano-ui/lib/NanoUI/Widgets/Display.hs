@@ -33,7 +33,6 @@ import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef)
 import Data.Map.Strict qualified as Map
-import Data.Text.Encoding qualified as TE
 import Data.Text (Text)
 import Data.Text qualified as T
 import Effectful (Eff, type (:>))
@@ -162,7 +161,7 @@ loadSvg path = do
   result <- try (BS.readFile path)
   pure $ case result of
     Left (err :: IOException) -> Left (show err)
-    Right bytes -> parseSvg (TE.decodeUtf8Lenient bytes)
+    Right bytes -> parseSvg bytes
 
 -- | An SVG icon @size@ logical pixels square, drawn in the text colour where
 -- it is used: a one-colour document (every paint @currentColor@ or

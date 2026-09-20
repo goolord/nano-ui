@@ -176,7 +176,7 @@ library
         ghc-compact ^>=0.1,
         hashable ^>=1.5,
         hashtables ^>=1.4,
-        hexml ^>=0.3.5,
+        nano-svg ^>=0.1,
         primitive ^>=0.9,
         text ^>=2.1,
         text-short ^>=0.1.6,
@@ -258,6 +258,7 @@ executable nano-ui-profile
     main-is:          Profile.hs
     hs-source-dirs:   examples
     build-depends:
+        bytestring ^>=0.12,
         primitive ^>=0.9,
         text ^>=2.1
 

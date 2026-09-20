@@ -115,6 +115,14 @@
 
 ### Changed
 
+- SVG parsing moved to the `nano-svg` package; `NanoUI.Svg` keeps only the
+  rasterizer. `parseSvg` takes a UTF-8 `ByteString` instead of `Text`, so
+  `loadSvg` no longer decodes the file first. `Svg` is now `Document` from
+  `Graphics.NanoSvg`, and `svgSize`, `svgKey` and `svgMonochrome` read its
+  fields. Documents also gain `use` and `switch`, `display` and `visibility`,
+  absolute unit lengths (`pt`, `pc`, `in`, `cm`, `mm`), percentage opacities,
+  `rgba()`, `hsl()` and the full CSS colour keyword table.
+
 - `NanoUI.Emit` exposes `emitWhen`, `emitChanged`, and `emitEdited` instead of
   separate copies of widget names. Replace `Emit.button label msg` with
   `Emit.emitWhen (button label) msg`, `Emit.slider lo hi value toMsg` with

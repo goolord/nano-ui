@@ -1,15 +1,12 @@
 {-# LANGUAGE BangPatterns #-}
 
--- | SVG documents for icons: a parser for the static subset icon sets use and
--- an anti-aliased rasterizer.
+-- | An anti-aliased rasterizer for the SVG icons that @nano-svg@ parses.
 --
--- Supported: @svg@ (with @viewBox@, @width@, @height@), @g@, @path@, @rect@,
--- @circle@, @ellipse@, @line@, @polyline@ and @polygon@; the presentation
--- attributes @fill@, @stroke@, @stroke-width@, @stroke-linecap@,
--- @stroke-linejoin@, @stroke-miterlimit@, @fill-rule@, @opacity@,
--- @fill-opacity@ and @stroke-opacity@, also inside @style@; @transform@; and
--- colours as names, @#rgb@, @#rrggbb@, @rgb()@ and @currentColor@. Gradients,
--- patterns, text, masks, clipping, filters and @use@ are ignored.
+-- @nano-svg@ reads the document into shapes with absolute segments, a
+-- transform and a resolved style; this module flattens those to contours,
+-- strokes them and scan-converts the result into an RGBA image. See
+-- "Graphics.NanoSvg" for what the parser supports; gradients, patterns,
+-- text, masks, clipping and filters are not among them.
 module NanoUI.Svg
   ( Svg
   , svgSize
@@ -21,509 +18,51 @@ module NanoUI.Svg
 
 import Control.Monad (forM_, unless, when)
 import Control.Monad.ST (ST, runST)
-import Foreign.Storable (pokeByteOff)
-import Data.Bits (xor)
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.ByteString.Internal qualified as BSI
-import Data.Char (isAlpha, isDigit, isSpace, toLower)
-import Data.Maybe (fromMaybe, mapMaybe)
-import Data.Text (Text)
-import Data.Text qualified as T
-import Data.Text.Encoding qualified as TE
-import Data.Text.Read qualified as TR
-import Text.XML.Hexml qualified as Hexml
+import Data.Maybe (fromMaybe)
 import Data.Primitive.PrimArray (MutablePrimArray, PrimArray, copyMutablePrimArray, indexPrimArray, newPrimArray, readPrimArray, setPrimArray, sizeofPrimArray, unsafeFreezePrimArray, writePrimArray)
-import Data.Primitive.SmallArray (SmallArray, indexSmallArray, sizeofSmallArray, smallArrayFromList)
+import Data.Primitive.SmallArray (SmallArray, indexSmallArray, sizeofSmallArray)
 import Data.Word (Word8)
-import NanoUI.Types (Color (..), clamp01, colorA, colorB, colorG, colorR, colorRGBA)
+import Foreign.Storable (pokeByteOff)
+import Graphics.NanoSvg
+  ( Box (..)
+  , Document (..)
+  , FillRule (..)
+  , LineCap (..)
+  , LineJoin (..)
+  , Matrix (..)
+  , Paint (..)
+  , Point (..)
+  , RGBA (..)
+  , Segment (..)
+  , Shape (..)
+  , Style (..)
+  , averageScale
+  , black
+  , multiply
+  , parseSvg
+  , transformPoint
+  )
+import NanoUI.Types (Color, colorA, colorB, colorFromWord32, colorG, colorR)
 
--- | A parsed SVG document.
-data Svg = Svg
-  { svgViewBox :: !Box
-  , svgSize :: !(Float, Float)
-  -- ^ The document's own width and height, from its @width@ and @height@ or
-  -- else its @viewBox@.
-  , svgShapes :: !(SmallArray Shape)
-  , svgKey :: !Int
-  -- ^ A hash of the source, for caching rasters.
-  , svgMonochrome :: !Bool
-  -- ^ Every paint is @currentColor@ or unspecified, so the drawing is one
-  -- colour and can be tinted.
-  }
+-- | A parsed SVG document, as @nano-svg@ returns it.
+type Svg = Document
 
--- | Documents are equal when their sources hash the same.
-instance Eq Svg where
-  a == b = svgKey a == svgKey b
+-- | The document's own width and height, from its @width@ and @height@ or
+-- else its @viewBox@.
+svgSize :: Svg -> (Float, Float)
+svgSize = documentSize
 
-instance Show Svg where
-  show doc = "<svg " <> show (svgSize doc) <> ">"
+-- | A hash of the source, for caching rasters.
+svgKey :: Svg -> Int
+svgKey = documentKey
 
-data Box = Box !Float !Float !Float !Float
-
-data Paint = PaintNone | PaintCurrent | PaintColor !Color
-  deriving (Eq)
-
-data FillRule = NonZero | EvenOdd
-  deriving (Eq)
-
-data LineCap = CapButt | CapRound | CapSquare
-  deriving (Eq)
-
-data LineJoin = JoinMiter | JoinRound | JoinBevel
-  deriving (Eq)
-
--- | Presentation state inherited from ancestors.
-data PaintStyle = PaintStyle
-  { psFill :: !(Maybe Paint)
-  , psStroke :: !(Maybe Paint)
-  , psStrokeWidth :: !Float
-  , psCap :: !LineCap
-  , psJoin :: !LineJoin
-  , psMiterLimit :: !Float
-  , psRule :: !FillRule
-  , psOpacity :: !Float
-  , psFillOpacity :: !Float
-  , psStrokeOpacity :: !Float
-  }
-
--- | Segments, the transform to user space, and the paint.
-data Shape = Shape !(SmallArray Segment) !Matrix !PaintStyle
-
-shapeStyle :: Shape -> PaintStyle
-shapeStyle (Shape _ _ style) = style
-
-data Segment
-  = MoveTo !P
-  | LineTo !P
-  | CubicTo !P !P !P
-  | QuadTo !P !P
-  | ArcTo !Float !Float !Float !Bool !Bool !P
-  | ClosePath
-
-data P = P {-# UNPACK #-} !Float {-# UNPACK #-} !Float
-
--- | @a c e / b d f@, mapping @(x, y)@ to @(a x + c y + e, b x + d y + f)@.
-data Matrix = Matrix !Float !Float !Float !Float !Float !Float
-
-identity :: Matrix
-identity = Matrix 1 0 0 1 0 0
-
-mul :: Matrix -> Matrix -> Matrix
-mul (Matrix a b c d e f) (Matrix a' b' c' d' e' f') =
-  Matrix
-    (a * a' + c * b')
-    (b * a' + d * b')
-    (a * c' + c * d')
-    (b * c' + d * d')
-    (a * e' + c * f' + e)
-    (b * e' + d * f' + f)
-
-apply :: Matrix -> P -> P
-apply (Matrix a b c d e f) (P x y) = P (a * x + c * y + e) (b * x + d * y + f)
-
---------------------------------------------------------------------------------
--- XML
---------------------------------------------------------------------------------
-
-data Element = Element !Text ![(Text, Text)] ![Element]
-
--- | The elements of a document, by hexml. Text, comments and processing
--- instructions are not elements; a DOCTYPE, which hexml rejects, is blanked
--- out first.
-parseElements :: Text -> Either String [Element]
-parseElements src =
-  case Hexml.parse (withoutDoctype (TE.encodeUtf8 src)) of
-    Left err -> Left (T.unpack (TE.decodeUtf8Lenient err))
-    Right doc -> Right (map element (Hexml.children doc))
-  where
-    element node =
-      Element
-        (localName (TE.decodeUtf8Lenient (Hexml.name node)))
-        [ (localName (TE.decodeUtf8Lenient (Hexml.attributeName a)), decodeEntities (TE.decodeUtf8Lenient (Hexml.attributeValue a)))
-        | a <- Hexml.attributes node
-        ]
-        (map element (Hexml.children node))
-    localName n = T.takeWhileEnd (/= ':') n
-
--- | The document with its DOCTYPE, internal subset included, replaced by
--- spaces, so positions in parse errors still match the source.
-withoutDoctype :: ByteString -> ByteString
-withoutDoctype bytes =
-  case BS.breakSubstring "<!DOCTYPE" bytes of
-    (_, rest) | BS.null rest -> bytes
-    (before, rest) ->
-      let close !depth !k
-            | k >= BS.length rest = k
-            | otherwise = case BS.index rest k of
-                91 -> close (depth + 1 :: Int) (k + 1)
-                93 -> close (depth - 1) (k + 1)
-                62 | depth <= 0 -> k + 1
-                _ -> close depth (k + 1)
-          end = close 0 0
-       in before <> BS.replicate end 32 <> BS.drop end rest
-
-decodeEntities :: Text -> Text
-decodeEntities =
-  T.replace "&amp;" "&" . T.replace "&lt;" "<" . T.replace "&gt;" ">" . T.replace "&quot;" "\"" . T.replace "&apos;" "'"
-
---------------------------------------------------------------------------------
--- Document
---------------------------------------------------------------------------------
-
--- | Parse an SVG document.
-parseSvg :: Text -> Either String Svg
-parseSvg src = do
-  els <- parseElements src
-  root <- case [e | e@(Element n _ _) <- els, n == "svg"] of
-    r : _ -> Right r
-    [] -> Left "no svg element"
-  let Element _ attrs _ = root
-      attr k = lookup k attrs
-      box = case attr "viewBox" >>= numbers4 of
-        Just (x, y, w, h) | w > 0 && h > 0 -> Box x y w h
-        _ -> Box 0 0 (fromMaybe 24 (attr "width" >>= length1)) (fromMaybe 24 (attr "height" >>= length1))
-      Box _ _ bw bh = box
-      width = fromMaybe bw (attr "width" >>= length1)
-      height = fromMaybe bh (attr "height" >>= length1)
-      shapes = collect identity defaultStyle root
-      -- Unspecified paints and currentColor follow the tint; an explicit
-      -- colour anywhere makes the drawing multicoloured.
-      monochromePaint p = case p of
-        Just (PaintColor _) -> False
-        _ -> True
-  pure
-    Svg
-      { svgViewBox = box
-      , svgSize = (width, height)
-      , svgShapes = smallArrayFromList shapes
-      , svgKey = T.foldl' (\h c -> (h * 16777619) `xor` fromEnum c) 2166136261 src
-      , svgMonochrome = all (\sh -> monochromePaint (psFill (shapeStyle sh)) && monochromePaint (psStroke (shapeStyle sh))) shapes
-      }
-  where
-    numbers4 t = case numberList t of
-      [a, b, c, d] -> Just (a, b, c, d)
-      _ -> Nothing
-
-defaultStyle :: PaintStyle
-defaultStyle =
-  PaintStyle
-    { psFill = Nothing
-    , psStroke = Just PaintNone
-    , psStrokeWidth = 1
-    , psCap = CapButt
-    , psJoin = JoinMiter
-    , psMiterLimit = 4
-    , psRule = NonZero
-    , psOpacity = 1
-    , psFillOpacity = 1
-    , psStrokeOpacity = 1
-    }
-
--- | Shapes in document order, each with its full transform and style.
-collect :: Matrix -> PaintStyle -> Element -> [Shape]
-collect m0 style0 (Element name attrs children) =
-  let props = attrs ++ styleProperties (fromMaybe "" (lookup "style" attrs))
-      m = maybe m0 (mul m0 . parseTransform) (lookup "transform" attrs)
-      -- Opacity multiplies down the tree; the other properties replace.
-      style = (applyProperties props style0) {psOpacity = psOpacity style0 * maybe 1 clamp01 (lookup "opacity" props >>= number1)}
-      shape segs = [Shape (smallArrayFromList segs) m style]
-      num k = fromMaybe 0 (lookup k attrs >>= length1)
-   in case name of
-        "svg" -> concatMap (collect m style) children
-        "g" -> concatMap (collect m style) children
-        "a" -> concatMap (collect m style) children
-        "path" -> shape (parsePath (fromMaybe "" (lookup "d" attrs)))
-        "rect" -> shape (rectSegments (num "x") (num "y") (num "width") (num "height") (lookup "rx" attrs >>= length1) (lookup "ry" attrs >>= length1))
-        "circle" -> shape (ellipseSegments (num "cx") (num "cy") (num "r") (num "r"))
-        "ellipse" -> shape (ellipseSegments (num "cx") (num "cy") (num "rx") (num "ry"))
-        "line" -> shape [MoveTo (P (num "x1") (num "y1")), LineTo (P (num "x2") (num "y2"))]
-        "polyline" -> shape (polySegments False (fromMaybe "" (lookup "points" attrs)))
-        "polygon" -> shape (polySegments True (fromMaybe "" (lookup "points" attrs)))
-        _ -> []
-
-styleProperties :: Text -> [(Text, Text)]
-styleProperties =
-  mapMaybe
-    ( \decl -> case T.breakOn ":" decl of
-        (k, v) | not (T.null v) -> Just (T.strip k, T.strip (T.drop 1 v))
-        _ -> Nothing
-    )
-    . T.splitOn ";"
-
-applyProperties :: [(Text, Text)] -> PaintStyle -> PaintStyle
-applyProperties props s0 = foldl step s0 props
-  where
-    step s (k, v) = case k of
-      "fill" -> s {psFill = Just (parsePaint v)}
-      "stroke" -> s {psStroke = Just (parsePaint v)}
-      "stroke-width" -> maybe s (\w -> s {psStrokeWidth = max 0 w}) (length1 v)
-      "stroke-linecap" -> case v of
-        "round" -> s {psCap = CapRound}
-        "square" -> s {psCap = CapSquare}
-        _ -> s {psCap = CapButt}
-      "stroke-linejoin" -> case v of
-        "round" -> s {psJoin = JoinRound}
-        "bevel" -> s {psJoin = JoinBevel}
-        _ -> s {psJoin = JoinMiter}
-      "stroke-miterlimit" -> maybe s (\l -> s {psMiterLimit = max 1 l}) (number1 v)
-      "fill-rule" -> s {psRule = if v == "evenodd" then EvenOdd else NonZero}
-      "fill-opacity" -> maybe s (\o -> s {psFillOpacity = clamp01 o}) (number1 v)
-      "stroke-opacity" -> maybe s (\o -> s {psStrokeOpacity = clamp01 o}) (number1 v)
-      _ -> s
-
-
-parsePaint :: Text -> Paint
-parsePaint raw
-  | v == "none" || v == "transparent" = PaintNone
-  | v == "currentcolor" = PaintCurrent
-  | Just hex <- T.stripPrefix "#" v = maybe PaintNone PaintColor (hexColor hex)
-  | Just args <- T.stripPrefix "rgb(" v = case numberList (T.takeWhile (/= ')') args) of
-      [r, g, b] -> PaintColor (colorRGBA (channel r) (channel g) (channel b) 255)
-      _ -> PaintNone
-  | otherwise = maybe (PaintColor (colorRGBA 0 0 0 255)) PaintColor (lookup v namedColors)
-  where
-    v = T.toLower (T.strip raw)
-    channel x = fromIntegral (max 0 (min 255 (round x :: Int)))
-    hexColor h = case T.unpack h of
-      [r, g, b] -> rgb (hex2 r r) (hex2 g g) (hex2 b b)
-      [r1, r2, g1, g2, b1, b2] -> rgb (hex2 r1 r2) (hex2 g1 g2) (hex2 b1 b2)
-      _ -> Nothing
-    rgb (Just r) (Just g) (Just b) = Just (colorRGBA r g b 255)
-    rgb _ _ _ = Nothing
-    hex2 a b = (\x y -> fromIntegral (x * 16 + y)) <$> hexDigit a <*> hexDigit b
-    hexDigit c
-      | isDigit c = Just (fromEnum c - fromEnum '0')
-      | c >= 'a' && c <= 'f' = Just (fromEnum c - fromEnum 'a' + 10)
-      | otherwise = Nothing
-
-namedColors :: [(Text, Color)]
-namedColors =
-  [ ("black", colorRGBA 0 0 0 255)
-  , ("white", colorRGBA 255 255 255 255)
-  , ("red", colorRGBA 255 0 0 255)
-  , ("green", colorRGBA 0 128 0 255)
-  , ("lime", colorRGBA 0 255 0 255)
-  , ("blue", colorRGBA 0 0 255 255)
-  , ("yellow", colorRGBA 255 255 0 255)
-  , ("orange", colorRGBA 255 165 0 255)
-  , ("purple", colorRGBA 128 0 128 255)
-  , ("gray", colorRGBA 128 128 128 255)
-  , ("grey", colorRGBA 128 128 128 255)
-  , ("silver", colorRGBA 192 192 192 255)
-  , ("navy", colorRGBA 0 0 128 255)
-  , ("teal", colorRGBA 0 128 128 255)
-  , ("maroon", colorRGBA 128 0 0 255)
-  , ("olive", colorRGBA 128 128 0 255)
-  , ("aqua", colorRGBA 0 255 255 255)
-  , ("cyan", colorRGBA 0 255 255 255)
-  , ("fuchsia", colorRGBA 255 0 255 255)
-  , ("magenta", colorRGBA 255 0 255 255)
-  ]
-
---------------------------------------------------------------------------------
--- Numbers, transforms and path data
---------------------------------------------------------------------------------
-
--- | Numbers separated by spaces or commas, stopping at the first thing that
--- is not a number.
-numberList :: Text -> [Float]
-numberList t0 = go (skipSep t0)
-  where
-    go t = case readNumber t of
-      Just (x, rest) -> x : go (skipSep rest)
-      Nothing -> []
-
-skipSep :: Text -> Text
-skipSep = T.dropWhile (\c -> isSpace c || c == ',')
-
--- | A number at the start of the text, allowing @.5@, @-.5e-3@ and a
--- following number that starts with a sign or a second decimal point.
-readNumber :: Text -> Maybe (Float, Text)
-readNumber t =
-  let (sign, t1) = case T.uncons t of
-        Just (c, r) | c == '-' || c == '+' -> (T.singleton c, r)
-        _ -> (T.empty, t)
-      intPart = T.takeWhile isDigit t1
-      afterInt = T.drop (T.length intPart) t1
-      (fracPart, afterFrac) = case T.uncons afterInt of
-        Just ('.', r) -> let ds = T.takeWhile isDigit r in (T.cons '.' ds, T.drop (T.length ds) r)
-        _ -> (T.empty, afterInt)
-      (expPart, rest) = case T.uncons afterFrac of
-        Just (e, r)
-          | e == 'e' || e == 'E' ->
-              let (esign, r1) = case T.uncons r of
-                    Just (c, r') | c == '-' || c == '+' -> (T.singleton c, r')
-                    _ -> (T.empty, r)
-                  eds = T.takeWhile isDigit r1
-               in if T.null eds then (T.empty, afterFrac) else (T.concat ["e", esign, eds], T.drop (T.length eds) r1)
-        _ -> (T.empty, afterFrac)
-      mantissa = intPart <> fracPart
-   in if T.null (T.filter isDigit mantissa)
-        then Nothing
-        else case TR.signed TR.rational (T.concat [sign, if T.null intPart then "0" else "", mantissa, expPart]) of
-          Right (x, _) -> Just (realToFrac (x :: Double), rest)
-          Left _ -> Nothing
-
-number1 :: Text -> Maybe Float
-number1 t = fst <$> readNumber (T.strip t)
-
--- | A length in user units: a number with an optional @px@. Percentages and
--- other units are not lengths here.
-length1 :: Text -> Maybe Float
-length1 t = case readNumber (T.strip t) of
-  Just (x, rest) | T.null rest || rest == "px" -> Just x
-  _ -> Nothing
-
-parseTransform :: Text -> Matrix
-parseTransform t0 = go identity (T.stripStart t0)
-  where
-    go m t
-      | T.null t = m
-      | otherwise =
-          let (name, rest) = T.span isAlpha t
-              (args, rest') = T.breakOn ")" (T.drop 1 (T.dropWhile (/= '(') rest))
-              next = T.dropWhile (\c -> isSpace c || c == ',') (T.drop 1 rest')
-              m' = case (name, numberList args) of
-                ("matrix", [a, b, c, d, e, f]) -> Matrix a b c d e f
-                ("translate", [x]) -> Matrix 1 0 0 1 x 0
-                ("translate", [x, y]) -> Matrix 1 0 0 1 x y
-                ("scale", [s]) -> Matrix s 0 0 s 0 0
-                ("scale", [sx, sy]) -> Matrix sx 0 0 sy 0 0
-                ("rotate", [a]) -> rotation a
-                ("rotate", [a, cx, cy]) -> Matrix 1 0 0 1 cx cy `mul` rotation a `mul` Matrix 1 0 0 1 (-cx) (-cy)
-                ("skewX", [a]) -> Matrix 1 0 (tan (a * pi / 180)) 1 0 0
-                ("skewY", [a]) -> Matrix 1 (tan (a * pi / 180)) 0 1 0 0
-                _ -> identity
-           in if T.null name then m else go (m `mul` m') next
-    rotation a =
-      let r = a * pi / 180
-       in Matrix (cos r) (sin r) (negate (sin r)) (cos r) 0 0
-
--- | Path data as absolute segments. Parsing stops at the first error, keeping
--- what came before, as renderers do.
-parsePath :: Text -> [Segment]
-parsePath = go 'M' (P 0 0) (P 0 0) Nothing . skipSep
-  where
-    -- cmd: the current (repeatable) command; cur: the current point; start:
-    -- the subpath start; ctrl: the last control point, for S and T.
-    go cmd cur start ctrl t = case T.uncons t of
-      Nothing -> []
-      Just (c, rest)
-        | isAlpha c && c /= 'e' && c /= 'E' ->
-            if toLower c == 'z'
-              then ClosePath : go (if c == 'z' then 'm' else 'M') start start Nothing (skipSep rest)
-              else run c cur start ctrl (skipSep rest)
-        | otherwise -> run cmd cur start ctrl t
-    run cmd cur@(P cx cy) start ctrl t =
-      let rel = cmd >= 'a'
-          pt (P x y) = if rel then P (cx + x) (cy + y) else P x y
-          nums n = takeNumbers n t
-       in case toLower cmd of
-            'm' -> case nums 2 of
-              Just ([x, y], r) ->
-                let p = pt (P x y)
-                 in MoveTo p : go (if rel then 'l' else 'L') p p Nothing (skipSep r)
-              _ -> []
-            'l' -> case nums 2 of
-              Just ([x, y], r) -> let p = pt (P x y) in LineTo p : go cmd p start Nothing (skipSep r)
-              _ -> []
-            'h' -> case nums 1 of
-              Just ([x], r) -> let p = P (if rel then cx + x else x) cy in LineTo p : go cmd p start Nothing (skipSep r)
-              _ -> []
-            'v' -> case nums 1 of
-              Just ([y], r) -> let p = P cx (if rel then cy + y else y) in LineTo p : go cmd p start Nothing (skipSep r)
-              _ -> []
-            'c' -> case nums 6 of
-              Just ([x1, y1, x2, y2, x, y], r) ->
-                let c2 = pt (P x2 y2)
-                    p = pt (P x y)
-                 in CubicTo (pt (P x1 y1)) c2 p : go cmd p start (Just c2) (skipSep r)
-              _ -> []
-            's' -> case nums 4 of
-              Just ([x2, y2, x, y], r) ->
-                let c1 = maybe cur (reflect cur) ctrl
-                    c2 = pt (P x2 y2)
-                    p = pt (P x y)
-                 in CubicTo c1 c2 p : go cmd p start (Just c2) (skipSep r)
-              _ -> []
-            'q' -> case nums 4 of
-              Just ([x1, y1, x, y], r) ->
-                let c1 = pt (P x1 y1)
-                    p = pt (P x y)
-                 in QuadTo c1 p : go cmd p start (Just c1) (skipSep r)
-              _ -> []
-            't' -> case nums 2 of
-              Just ([x, y], r) ->
-                let c1 = maybe cur (reflect cur) ctrl
-                    p = pt (P x y)
-                 in QuadTo c1 p : go cmd p start (Just c1) (skipSep r)
-              _ -> []
-            'a' -> case arcArgs t of
-              Just ((rx, ry, rot, large, sweep, x, y), r) ->
-                let p = pt (P x y)
-                 in ArcTo rx ry rot large sweep p : go cmd p start Nothing (skipSep r)
-              _ -> []
-            _ -> []
-    reflect (P cx cy) (P x y) = P (2 * cx - x) (2 * cy - y)
-    takeNumbers :: Int -> Text -> Maybe ([Float], Text)
-    takeNumbers 0 t = Just ([], t)
-    takeNumbers n t = do
-      (x, rest) <- readNumber t
-      (xs, rest') <- takeNumbers (n - 1) (skipSep rest)
-      pure (x : xs, rest')
-    -- Arc flags may be written without separators: @a1 1 0 00.5.5@.
-    arcArgs t = do
-      (rx, r1) <- readNumber t
-      (ry, r2) <- readNumber (skipSep r1)
-      (rot, r3) <- readNumber (skipSep r2)
-      (large, r4) <- flag (skipSep r3)
-      (sweep, r5) <- flag (skipSep r4)
-      (x, r6) <- readNumber (skipSep r5)
-      (y, r7) <- readNumber (skipSep r6)
-      pure ((rx, ry, rot, large, sweep, x, y), r7)
-    flag t = case T.uncons t of
-      Just ('0', r) -> Just (False, r)
-      Just ('1', r) -> Just (True, r)
-      _ -> Nothing
-
-rectSegments :: Float -> Float -> Float -> Float -> Maybe Float -> Maybe Float -> [Segment]
-rectSegments x y w h mrx mry
-  | w <= 0 || h <= 0 = []
-  | rx <= 0 || ry <= 0 = [MoveTo (P x y), LineTo (P (x + w) y), LineTo (P (x + w) (y + h)), LineTo (P x (y + h)), ClosePath]
-  | otherwise =
-      [ MoveTo (P (x + rx) y)
-      , LineTo (P (x + w - rx) y)
-      , ArcTo rx ry 0 False True (P (x + w) (y + ry))
-      , LineTo (P (x + w) (y + h - ry))
-      , ArcTo rx ry 0 False True (P (x + w - rx) (y + h))
-      , LineTo (P (x + rx) (y + h))
-      , ArcTo rx ry 0 False True (P x (y + h - ry))
-      , LineTo (P x (y + ry))
-      , ArcTo rx ry 0 False True (P (x + rx) y)
-      , ClosePath
-      ]
-  where
-    rx = min (w / 2) (fromMaybe (fromMaybe 0 mry) mrx)
-    ry = min (h / 2) (fromMaybe (fromMaybe 0 mrx) mry)
-
-ellipseSegments :: Float -> Float -> Float -> Float -> [Segment]
-ellipseSegments cx cy rx ry
-  | rx <= 0 || ry <= 0 = []
-  | otherwise =
-      [ MoveTo (P (cx + rx) cy)
-      , ArcTo rx ry 0 False True (P (cx - rx) cy)
-      , ArcTo rx ry 0 False True (P (cx + rx) cy)
-      , ClosePath
-      ]
-
-polySegments :: Bool -> Text -> [Segment]
-polySegments closed pts = case pairs (numberList pts) of
-  [] -> []
-  p : ps -> MoveTo p : map LineTo ps ++ [ClosePath | closed]
-  where
-    pairs (x : y : rest) = P x y : pairs rest
-    pairs _ = []
+-- | Every paint is @currentColor@ or unspecified, so the drawing is one
+-- colour and can be tinted.
+svgMonochrome :: Svg -> Bool
+svgMonochrome = documentMonochrome
 
 --------------------------------------------------------------------------------
 -- Rings
@@ -582,7 +121,7 @@ flatten m segs = buildRings (flattenWalk m segs)
 flattenWalk :: Matrix -> SmallArray Segment -> (Float -> Float -> ST s ()) -> (Int -> ST s ()) -> ST s ()
 flattenWalk m segs point end =
   let count = sizeofSmallArray segs
-      emit p = let P x y = apply m p in point x y
+      emit p = let Point x y = transformPoint m p in point x y
       finish n closed = when (n > 0) (end (if closed then 1 else 0))
       -- A segment with no subpath open starts one at the current point.
       begin n started cur = if started || n > 0 then pure n else emit cur >> pure (1 :: Int)
@@ -596,32 +135,32 @@ flattenWalk m segs point end =
               go (i + 1) (n1 + 1) True p start
             CubicTo c1 c2 p -> do
               n1 <- begin n started cur
-              k <- cubicPoints point (apply m cur) (apply m c1) (apply m c2) (apply m p)
+              k <- cubicPoints point (transformPoint m cur) (transformPoint m c1) (transformPoint m c2) (transformPoint m p)
               go (i + 1) (n1 + k) True p start
             QuadTo c1 p -> do
               n1 <- begin n started cur
-              let P x0 y0 = cur
-                  P x1 y1 = c1
-                  P x2 y2 = p
-                  q1 = P (x0 + 2 / 3 * (x1 - x0)) (y0 + 2 / 3 * (y1 - y0))
-                  q2 = P (x2 + 2 / 3 * (x1 - x2)) (y2 + 2 / 3 * (y1 - y2))
-              k <- cubicPoints point (apply m cur) (apply m q1) (apply m q2) (apply m p)
+              let Point x0 y0 = cur
+                  Point x1 y1 = c1
+                  Point x2 y2 = p
+                  q1 = Point (x0 + 2 / 3 * (x1 - x0)) (y0 + 2 / 3 * (y1 - y0))
+                  q2 = Point (x2 + 2 / 3 * (x1 - x2)) (y2 + 2 / 3 * (y1 - y2))
+              k <- cubicPoints point (transformPoint m cur) (transformPoint m q1) (transformPoint m q2) (transformPoint m p)
               go (i + 1) (n1 + k) True p start
             ArcTo rx ry rot large sweep p -> do
               n1 <- begin n started cur
               k <- arcPoints emit cur rx ry rot large sweep p
               go (i + 1) (n1 + k) True p start
             ClosePath -> finish n True >> go (i + 1) 0 False start start
-   in go 0 0 False (P 0 0) (P 0 0)
+   in go 0 0 False (Point 0 0) (Point 0 0)
 
 -- | The points after the start of a cubic, subdividing by flatness, and how
 -- many there were.
 {-# INLINE cubicPoints #-}
-cubicPoints :: (Float -> Float -> ST s ()) -> P -> P -> P -> P -> ST s Int
+cubicPoints :: (Float -> Float -> ST s ()) -> Point -> Point -> Point -> Point -> ST s Int
 cubicPoints point = go (0 :: Int)
   where
     go depth a b c d
-      | depth >= 12 || flat a b c d = let P x y = d in point x y >> pure 1
+      | depth >= 12 || flat a b c d = let Point x y = d in point x y >> pure 1
       | otherwise = do
           let ab = mid a b
               bc = mid b c
@@ -632,8 +171,8 @@ cubicPoints point = go (0 :: Int)
           k1 <- go (depth + 1) a ab abc abcd
           k2 <- go (depth + 1) abcd bcd cd d
           pure (k1 + k2)
-    mid (P x0 y0) (P x1 y1) = P ((x0 + x1) / 2) ((y0 + y1) / 2)
-    flat (P x0 y0) (P x1 y1) (P x2 y2) (P x3 y3) =
+    mid (Point x0 y0) (Point x1 y1) = Point ((x0 + x1) / 2) ((y0 + y1) / 2)
+    flat (Point x0 y0) (Point x1 y1) (Point x2 y2) (Point x3 y3) =
       let ux = 3 * x1 - 2 * x0 - x3
           uy = 3 * y1 - 2 * y0 - y3
           vx = 3 * x2 - 2 * x3 - x0
@@ -644,12 +183,12 @@ cubicPoints point = go (0 :: Int)
 -- conversion in the SVG specification, in user space, and how many there
 -- were.
 {-# INLINE arcPoints #-}
-arcPoints :: (P -> ST s ()) -> P -> Float -> Float -> Float -> Bool -> Bool -> P -> ST s Int
-arcPoints emit (P x1 y1) rx0 ry0 rotDeg large sweep (P x2 y2)
-  | rx0 == 0 || ry0 == 0 || (x1 == x2 && y1 == y2) = emit (P x2 y2) >> pure 1
+arcPoints :: (Point -> ST s ()) -> Point -> Float -> Float -> Float -> Bool -> Bool -> Point -> ST s Int
+arcPoints emit (Point x1 y1) rx0 ry0 rotDeg large sweep (Point x2 y2)
+  | rx0 == 0 || ry0 == 0 || (x1 == x2 && y1 == y2) = emit (Point x2 y2) >> pure 1
   | otherwise = do
       forM_ [1 .. steps - 1] $ \i -> emit (pointAt i)
-      emit (P x2 y2)
+      emit (Point x2 y2)
       pure steps
   where
     phi = rotDeg * pi / 180
@@ -682,7 +221,7 @@ arcPoints emit (P x1 y1) rx0 ry0 rotDeg large sweep (P x2 y2)
       let t = theta1 + dtheta * fromIntegral i / fromIntegral steps
           ex = rx * cos t
           ey = ry * sin t
-       in P (cosP * ex - sinP * ey + cx) (sinP * ex + cosP * ey + cy)
+       in Point (cosP * ex - sinP * ey + cx) (sinP * ex + cosP * ey + cy)
 
 --------------------------------------------------------------------------------
 -- Stroking
@@ -697,12 +236,12 @@ strokePolygons w cap join miterLimit contours = buildRings (strokeWalk w cap joi
 strokeWalk :: Float -> LineCap -> LineJoin -> Float -> Rings -> (Float -> Float -> ST s ()) -> (Int -> ST s ()) -> ST s ()
 strokeWalk w cap join miterLimit contours@(Rings cpts cstarts ctags) point end =
   let hw = w / 2
-      at k = P (indexPrimArray cpts (2 * k)) (indexPrimArray cpts (2 * k + 1))
-      close (P x0 y0) (P x1 y1) = abs (x0 - x1) < 1e-4 && abs (y0 - y1) < 1e-4
-      emitP (P x y) = point x y
+      at k = Point (indexPrimArray cpts (2 * k)) (indexPrimArray cpts (2 * k + 1))
+      close (Point x0 y0) (Point x1 y1) = abs (x0 - x1) < 1e-4 && abs (y0 - y1) < 1e-4
+      emitP (Point x y) = point x y
       -- Twice the signed area of a polygon's corners, positive when they
       -- wind counter-clockwise.
-      turn (P x0 y0) (P x1 y1) = x0 * y1 - x1 * y0
+      turn (Point x0 y0) (Point x1 y1) = x0 * y1 - x1 * y0
       -- A triangle or quad in the order given, or reversed when that winds
       -- clockwise.
       triangle a b c = do
@@ -715,25 +254,25 @@ strokeWalk w cap join miterLimit contours@(Rings cpts cstarts ctags) point end =
           then emitP d >> emitP c >> emitP b >> emitP a
           else emitP a >> emitP b >> emitP c >> emitP d
         end 0
-      normal (P x0 y0) (P x1 y1) =
+      normal (Point x0 y0) (Point x1 y1) =
         let dx = x1 - x0
             dy = y1 - y0
             len = max 1e-6 (sqrt (dx * dx + dy * dy))
          in (negate dy / len * hw, dx / len * hw)
-      segmentQuad a@(P ax ay) b@(P bx by) = do
+      segmentQuad a@(Point ax ay) b@(Point bx by) = do
         let (nx, ny) = normal a b
         -- The quad winds clockwise as built, whatever its direction.
-        emitP (P (ax - nx) (ay - ny))
-        emitP (P (bx - nx) (by - ny))
-        emitP (P (bx + nx) (by + ny))
-        emitP (P (ax + nx) (ay + ny))
+        emitP (Point (ax - nx) (ay - ny))
+        emitP (Point (bx - nx) (by - ny))
+        emitP (Point (bx + nx) (by + ny))
+        emitP (Point (ax + nx) (ay + ny))
         end 0
-      corner prev v@(P vx vy) next = do
+      corner prev v@(Point vx vy) next = do
         let (n1x, n1y) = normal prev v
             (n2x, n2y) = normal v next
             bevel = do
-              triangle v (P (vx + n1x) (vy + n1y)) (P (vx + n2x) (vy + n2y))
-              triangle v (P (vx - n1x) (vy - n1y)) (P (vx - n2x) (vy - n2y))
+              triangle v (Point (vx + n1x) (vy + n1y)) (Point (vx + n2x) (vy + n2y))
+              triangle v (Point (vx - n1x) (vy - n1y)) (Point (vx - n2x) (vy - n2y))
         case join of
           JoinRound -> disc v
           JoinBevel -> bevel
@@ -747,9 +286,9 @@ strokeWalk w cap join miterLimit contours@(Rings cpts cstarts ctags) point end =
             if ratio > miterLimit
               then bevel
               else do
-                quad v (P (vx + n1x) (vy + n1y)) (P (vx + mx * scale) (vy + my * scale)) (P (vx + n2x) (vy + n2y))
-                quad v (P (vx - n1x) (vy - n1y)) (P (vx - mx * scale) (vy - my * scale)) (P (vx - n2x) (vy - n2y))
-      endCap inner@(P ix iy) e@(P ex ey) = case cap of
+                quad v (Point (vx + n1x) (vy + n1y)) (Point (vx + mx * scale) (vy + my * scale)) (Point (vx + n2x) (vy + n2y))
+                quad v (Point (vx - n1x) (vy - n1y)) (Point (vx - mx * scale) (vy - my * scale)) (Point (vx - n2x) (vy - n2y))
+      endCap inner@(Point ix iy) e@(Point ex ey) = case cap of
         CapButt -> pure ()
         CapRound -> disc e
         CapSquare -> do
@@ -760,21 +299,21 @@ strokeWalk w cap join miterLimit contours@(Rings cpts cstarts ctags) point end =
               uy = dy / len * hw
               (nx, ny) = normal inner e
           -- Wound clockwise as built, like a segment's quad.
-          emitP (P (ex - nx) (ey - ny))
-          emitP (P (ex - nx + ux) (ey - ny + uy))
-          emitP (P (ex + nx + ux) (ey + ny + uy))
-          emitP (P (ex + nx) (ey + ny))
+          emitP (Point (ex - nx) (ey - ny))
+          emitP (Point (ex - nx + ux) (ey - ny + uy))
+          emitP (Point (ex + nx + ux) (ey + ny + uy))
+          emitP (Point (ex + nx) (ey + ny))
           end 0
-      disc (P cx cy) = do
+      disc (Point cx cy) = do
         let n = max 8 (min 48 (ceiling (hw * 2.5) :: Int))
         forM_ [0 .. n - 1] $ \i ->
           let t = 2 * pi * fromIntegral i / fromIntegral n in point (cx + hw * cos t) (cy + hw * sin t)
         end 0
-      square (P cx cy) = do
-        emitP (P (cx - hw) (cy - hw))
-        emitP (P (cx + hw) (cy - hw))
-        emitP (P (cx + hw) (cy + hw))
-        emitP (P (cx - hw) (cy + hw))
+      square (Point cx cy) = do
+        emitP (Point (cx - hw) (cy - hw))
+        emitP (Point (cx + hw) (cy - hw))
+        emitP (Point (cx + hw) (cy + hw))
+        emitP (Point (cx - hw) (cy + hw))
         end 0
       contour r = do
         let from = indexPrimArray cstarts r
@@ -853,35 +392,34 @@ rasterizeSvg width height current svg
       acc <- newPrimArray (width * height * 4)
       setPrimArray acc 0 (width * height * 4) (0 :: Float)
       cov <- newPrimArray (width * height)
-      let Box vx vy vw vh = svgViewBox svg
+      let Box vx vy vw vh = documentViewBox svg
           s = min (fromIntegral width / vw) (fromIntegral height / vh)
           tx = (fromIntegral width - vw * s) / 2 - vx * s
           ty = (fromIntegral height - vh * s) / 2 - vy * s
           view = Matrix s 0 0 s tx ty
-      forM_ (svgShapes svg) $ \(Shape segs m style) -> do
-        let full = view `mul` m
+      forM_ (documentShapes svg) $ \(Shape segs m style) -> do
+        let full = view `multiply` m
             contours = flatten full segs
-            Matrix a b c d _ _ = full
-            scaleOf = sqrt (abs (a * d - b * c))
-            opacity = psOpacity style
+            scaleOf = averageScale full
+            opacity = styleOpacity style
             paintColor p = case p of
               PaintNone -> Nothing
               PaintCurrent -> Just current
-              PaintColor col -> Just col
+              PaintColor col -> Just (colorFromWord32 (rgbaToWord32 col))
             -- An unspecified fill paints black, or the current colour in a
             -- monochrome document, so an icon without paints tints.
-            fill = fromMaybe (if svgMonochrome svg then PaintCurrent else PaintColor (colorRGBA 0 0 0 255)) (psFill style)
+            fill = fromMaybe (if documentMonochrome svg then PaintCurrent else PaintColor black) (styleFill style)
         forM_ (paintColor fill) $ \col -> do
-          coverPolygons width height cov (psRule style) contours
-          composite width height acc cov col (opacity * psFillOpacity style)
-        forM_ (paintColor (fromMaybe PaintNone (psStroke style))) $ \col ->
-          when (psStrokeWidth style > 0) $ do
-            let wanted = psStrokeWidth style * scaleOf
+          coverPolygons width height cov (styleFillRule style) contours
+          composite width height acc cov col (opacity * styleFillOpacity style)
+        forM_ (paintColor (fromMaybe PaintNone (styleStroke style))) $ \col ->
+          when (styleStrokeWidth style > 0) $ do
+            let wanted = styleStrokeWidth style * scaleOf
                 w = max 1 wanted
-                polys = strokePolygons w (psCap style) (psJoin style) (psMiterLimit style) contours
+                polys = strokePolygons w (styleCap style) (styleJoin style) (styleMiterLimit style) contours
             coverPolygons width height cov NonZero polys
             -- A hairline thinner than a pixel keeps its weight as opacity.
-            composite width height acc cov col (opacity * psStrokeOpacity style * min 1 (wanted / w))
+            composite width height acc cov col (opacity * styleStrokeOpacity style * min 1 (wanted / w))
       unsafeFreezePrimArray acc
 
 -- | Coverage of the rings with at least three points in @cov@ (cleared

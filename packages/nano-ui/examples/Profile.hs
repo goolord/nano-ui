@@ -2,6 +2,7 @@ module Main (main) where
 
 import Control.Exception (evaluate)
 import Control.Monad (forM_, replicateM_, void)
+import Data.ByteString (ByteString)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -83,12 +84,12 @@ textAreaTextScene ref = column $ do
   txt <- textAreaWith grow =<< uiIO (readIORef ref)
   uiIO (writeIORef ref txt)
 
-clockIcon :: Text
+clockIcon :: ByteString
 clockIcon =
   "<svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'>\
   \<circle cx='12' cy='12' r='10'/><path d='M12 6v6l4 2'/></svg>"
 
-starIcon :: Text
+starIcon :: ByteString
 starIcon =
   "<svg viewBox='0 0 24 24'><path fill='#e0a030' d='M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z'/></svg>"
 
