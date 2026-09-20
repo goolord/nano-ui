@@ -14,9 +14,20 @@
   Arabic, Hebrew, Devanagari, CJK and other scripts the UI font lacks are
   drawn from installed fallback fonts (Noto, DejaVu, and the Windows and
   macOS system fonts), found the first time a text needs them.
+- `sdlRenderDriver` and `RenderDriver`, for picking the SDL render driver a
+  window asks for. `RenderDriverAuto` is the default and lets nano-ui choose,
+  `RenderDriverSdlDefault` leaves SDL's own order alone, and
+  `RenderDriverNamed` asks for one by name. An `SDL_RENDER_DRIVER` in the
+  environment still wins over all three.
 
 ### Changed
 
+- Windows windows render through OpenGL rather than D3D11. D3D11 presents
+  through a flip-model swap chain, so a present blocks for about a refresh
+  even with vsync off; during a border drag those stalls land in Windows'
+  modal size loop and the window judders. Set
+  `sdlRenderDriver = RenderDriverSdlDefault` for the old behavior. A machine
+  whose GL will not create a context opens on SDL's own choice instead.
 - Bold and italic are drawn by the core's synthetic weight and slant over the
   regular face, since SDL_ttf's style flags do not match the glyph images
   shaped text draws. Text measurement uses the shaped width, so layout and

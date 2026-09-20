@@ -5,6 +5,7 @@ module NanoUI.Sdl.Window
   , Retain (..)
   , noRetain
   , SdlOptions (..)
+  , RenderDriver (..)
   , defaultSdlOptions
   , withSdl
   , withSdlBench
@@ -12,6 +13,8 @@ module NanoUI.Sdl.Window
   , saveScreenshot
   ) where
 
+import Control.Concurrent (rtsSupportsBoundThreads, runInBoundThread)
+import Control.Exception (IOException, catch)
 import Control.Monad (unless, void, when)
 import Control.Monad.IO.Class (liftIO)
 import Data.Acquire (Acquire, mkAcquire)
@@ -19,9 +22,11 @@ import Data.Acquire qualified as Acquire
 import Data.Bits ((.|.))
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
+import Data.Foldable (for_)
 import Data.Maybe (isJust, isNothing)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import System.Environment (lookupEnv)
+import System.Info (os)
 import Text.Read (readMaybe)
 import Data.Primitive.SmallArray (SmallArray)
 import Data.Text (Text)
@@ -71,12 +76,17 @@ import NanoUI.Sdl.Dialog.Types (DialogState (..), clearDialogState, newDialogSta
 import NanoUI.Sdl.Image (ImageAtlas, destroyImageAtlas, newImageAtlas)
 import NanoUI.Sdl.Render (RenderBatch, destroyRenderBatch, newRenderBatch)
 import SDL3.Sys.Bindgen.Rect (SDL_Rect (..))
-import SDL3.Sys.Bindgen.Hints (sDL_HINT_ASSERT, sDL_HINT_RENDER_VSYNC, sDL_HINT_VIDEO_DRIVER)
+import SDL3.Sys.Bindgen.Hints
+  ( sDL_HINT_ASSERT
+  , sDL_HINT_RENDER_DRIVER
+  , sDL_HINT_RENDER_VSYNC
+  , sDL_HINT_VIDEO_DRIVER
+  )
 import SDL3.Sys.Bindgen.Render (SDL_Renderer, SDL_Texture)
 import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
 import SDL3.Sys.Bindgen.Video (SDL_Window, SDL_WindowFlags (..))
 import SDL3.Sys.Bindgen.Init (SDL_InitFlags (..), sDL_INIT_VIDEO)
-import SDL3.Sys.Hints (setHint)
+import SDL3.Sys.Hints (resetHint, setHint)
 import SDL3.Sys.Init (initSafe, quitSafe)
 import SDL3.Sys.Keyboard (startTextInputSafe, stopTextInputSafe)
 import SDL3.Sys.Render
@@ -120,6 +130,9 @@ data SdlOptions = SdlOptions
   -- ^ Start the window hidden (default: 'False').
   , sdlAppVsync :: !Bool
   -- ^ Enable vertical synchronization (default: 'True').
+  , sdlRenderDriver :: !RenderDriver
+  -- ^ Which SDL render driver to ask for (default: 'RenderDriverAuto').
+  -- An @SDL_RENDER_DRIVER@ in the environment wins over this.
   , sdlAppContinuous :: !Bool
   -- ^ Continuous unthrottled rendering without waiting for events (default: 'False').
   , sdlAppFont :: !NanoUIFont
@@ -154,6 +167,7 @@ defaultSdlOptions =
     , sdlWindowAlwaysOnTop = False
     , sdlWindowHidden = False
     , sdlAppVsync = True
+    , sdlRenderDriver = RenderDriverAuto
     , sdlAppContinuous = False
     , sdlAppFont = defaultFontSearch
     , sdlAppMonoFont = defaultFontSearchMono
@@ -313,6 +327,7 @@ data WindowConfig = WindowConfig
   , wcMonoFont :: !NanoUIFont
   , wcFontSize :: !Float
   , wcUiScale :: !Float
+  , wcRenderDriver :: !RenderDriver
   }
 
 -- | Open native resources around an action and release them on exit, including
@@ -333,6 +348,7 @@ withSdl opts ctx =
       , wcMonoFont = sdlAppMonoFont opts
       , wcFontSize = sdlAppFontSize opts
       , wcUiScale = sdlAppUiScale opts
+      , wcRenderDriver = sdlRenderDriver opts
       }
 
 -- | 'withSdl' for measurements: a hidden 800x600 window, bundled fonts,
@@ -352,22 +368,62 @@ withSdlBench ctx =
       , wcMonoFont = DefaultFont
       , wcFontSize = defaultFontSize
       , wcUiScale = 1
+      , wcRenderDriver = RenderDriverAuto
       }
+
+-- | Which SDL render driver a session asks for.
+data RenderDriver
+  = RenderDriverAuto
+  -- ^ nano-ui picks; see 'preferredRenderDriver'.
+  | RenderDriverSdlDefault
+  -- ^ Leave SDL's own preference order alone.
+  | RenderDriverNamed !BS.ByteString
+  -- ^ An explicit driver name, e.g. @"d3d11"@ or @"opengl"@.
+  deriving (Eq, Show)
+
+-- | The render driver to ask SDL for, as an @SDL_RENDER_DRIVER@ hint value.
+-- 'Nothing' leaves SDL to its own order. The default is 'RenderDriverAuto',
+-- which on Windows prefers GL over D3D11 for the presentation stall a live
+-- resize hits; elsewhere SDL already picks well.
+preferredRenderDriver :: RenderDriver -> Maybe BS.ByteString
+preferredRenderDriver = \case
+  RenderDriverSdlDefault -> Nothing
+  RenderDriverNamed name -> Just name
+  RenderDriverAuto
+    | os == "mingw32" -> Just "opengl"
+    | otherwise -> Nothing
+
+-- | Set an SDL hint by name.
+setSdlHint :: BS.ByteString -> BS.ByteString -> IO ()
+setSdlHint name value =
+  BS.useAsCString name $ \cname ->
+    BS.useAsCString value $ \cvalue ->
+      void $ setHint (PtrConst.unsafeFromPtr cname) (PtrConst.unsafeFromPtr cvalue)
+
+-- | Run a window/renderer creation under a render driver nano-ui guessed at,
+-- and if it fails, drop the hint and try once more. A Windows machine whose
+-- GL will not create a context -- a remote desktop session, a VM on the basic
+-- display adapter -- then opens on whatever SDL can give rather than failing
+-- to start. Pass 'False' when the driver is the caller's own choice or when
+-- no hint was set: their failure is theirs to see, and a creation that failed
+-- for some other reason should report that reason once.
+retryWithoutRenderDriver ::
+  Bool -> IO (Ptr SDL_Window, Ptr SDL_Renderer) -> IO (Ptr SDL_Window, Ptr SDL_Renderer)
+retryWithoutRenderDriver False create = create
+retryWithoutRenderDriver True create =
+  create `catch` \(_ :: IOException) -> do
+    void $ BS.useAsCString sDL_HINT_RENDER_DRIVER (resetHint . PtrConst.unsafeFromPtr)
+    create
 
 withSdlWindow :: Context -> WindowConfig -> (Context -> SdlEnv -> IO a) -> IO a
 withSdlWindow ctx cfg act =
-  withTtf $ do
-    let
-      hint name value =
-        BS.useAsCString name $ \cname ->
-          BS.useAsCString value $ \cvalue ->
-            void $ setHint (PtrConst.unsafeFromPtr cname) (PtrConst.unsafeFromPtr cvalue)
+  inBoundThread $ withTtf $ do
     if wcBench cfg
       then do
-        hint sDL_HINT_ASSERT "always_ignore"
-        hint sDL_HINT_RENDER_VSYNC "0"
+        setSdlHint sDL_HINT_ASSERT "always_ignore"
+        setSdlHint sDL_HINT_RENDER_VSYNC "0"
       else do
-        hint sDL_HINT_RENDER_VSYNC (if wcVsync cfg then "1" else "0")
+        setSdlHint sDL_HINT_RENDER_VSYNC (if wcVsync cfg then "1" else "0")
         -- SDL3 only auto-picks Wayland when the compositor has the fifo-v1 /
         -- commit-timing-v1 protocols. Without them (sway, wlroots, many
         -- others) it selects X11/XWayland, giving a scale-1 window on a
@@ -379,14 +435,38 @@ withSdlWindow ctx cfg act =
         wayland <- lookupEnv "WAYLAND_DISPLAY"
         driver <- lookupEnv "SDL_VIDEO_DRIVER"
         when (isJust wayland && isNothing driver) $
-          hint sDL_HINT_VIDEO_DRIVER "wayland"
+          setSdlHint sDL_HINT_VIDEO_DRIVER "wayland"
+    -- Windows' modal size loop hands the app one step at a time and cannot
+    -- take the next until the app returns. SDL's D3D11 renderer presents
+    -- through a two-buffer flip-model swap chain, so a present blocks until a
+    -- back buffer comes free -- about a refresh -- even with vsync off. A drag
+    -- presents a newly sized swap chain every step, so those stalls land in
+    -- the size loop and the window (and the pointer with it) judders; the
+    -- bigger the window, the worse. The GL renderer does not block that way.
+    -- Measured on a 120Hz display: present p99 6.4ms under d3d11 against a
+    -- flawless drag under opengl. Benchmarks take the same driver as the apps
+    -- they stand in for, so their present numbers are numbers a user can see.
+    renderDriver <- lookupEnv "SDL_RENDER_DRIVER"
+    let
+      requested
+        | isJust renderDriver = Nothing
+        | otherwise = preferredRenderDriver (wcRenderDriver cfg)
+      -- Only a driver nano-ui chose for the caller is worth dropping again.
+      guessed = isJust requested && wcRenderDriver cfg == RenderDriverAuto
+    for_ requested (setSdlHint sDL_HINT_RENDER_DRIVER)
     fontSource <- resolveNanoUIFont (wcUiFont cfg)
     monoSource <- resolveNanoUIFont (wcMonoFont cfg)
-    Acquire.with (startSdlWindow ctx cfg fontSource monoSource) (uncurry act)
+    Acquire.with (startSdlWindow ctx cfg guessed fontSource monoSource) (uncurry act)
+  where
+    -- SDL's GL renderer -- what 'RenderDriverAuto' asks for on Windows --
+    -- keeps its context current on the OS thread that created it, and the
+    -- same thread pumps the window's messages. An unbound caller can be moved
+    -- between OS threads across a safe foreign call, so pin the session to one.
+    inBoundThread a = if rtsSupportsBoundThreads then runInBoundThread a else a
 
 startSdlWindow ::
-  Context -> WindowConfig -> FontSource -> FontSource -> Acquire (Context, SdlEnv)
-startSdlWindow ctx cfg fontSource monoSource = do
+  Context -> WindowConfig -> Bool -> FontSource -> FontSource -> Acquire (Context, SdlEnv)
+startSdlWindow ctx cfg guessedDriver fontSource monoSource = do
   mkAcquire
     ( do
         videoOk <- initSafe (SDL_InitFlags (fromIntegral sDL_INIT_VIDEO))
@@ -407,7 +487,8 @@ startSdlWindow ctx cfg fontSource monoSource = do
       _ -> Nothing
   (win, ren) <-
     mkAcquire
-      ( TextForeign.withCString (wcTitle cfg) $ \titlePtr ->
+      ( retryWithoutRenderDriver guessedDriver $
+          TextForeign.withCString (wcTitle cfg) $ \titlePtr ->
           alloca $ \winPtr -> alloca $ \renPtr -> do
             ok <-
               createWindowAndRendererSafe
