@@ -7,6 +7,7 @@ module NanoUI.Frame.Cursor
   , cursorKindIs
   ) where
 
+import Control.Monad (forM)
 import Data.IORef (readIORef)
 import qualified Data.IntMap.Strict as IM
 import Data.Maybe (fromMaybe, isJust)
@@ -26,7 +27,7 @@ import NanoUI.Context
   , PointerRoute (..)
   )
 import NanoUI.Font (FontMetrics, sliderHandleSlack, sliderTrackBounds)
-import NanoUI.Frame.Hit (findNodeByWidgetId, nodePointVisible, scrollHitRect)
+import NanoUI.Frame.Hit (findNodeByWidgetId, nodePointVisible, scrollHitRect, withWidgetNode)
 import NanoUI.Frame.Scroll (ScrollBarLayout (..), scrollBarsFor)
 import NanoUI.Frame.Select (overlayMenuOwnerAt)
 import NanoUI.Frame.TextArea.Content (isMouseOnTextAreaScrollBarAt)
@@ -55,7 +56,9 @@ import NanoUI.Layout.Arena
   , getStyleIdx
   , getWidgetId
   , isScrollNode
+  , walkAncestors
   )
+import NanoUI.Monad ((<&&>))
 import NanoUI.Types (Rect (..), V2 (..), rectContains)
 import NanoUI.WidgetText (numericStepperRects, textInputNumericMode)
 import NanoUI.WidgetText (isTableHeaderStyle)
@@ -140,13 +143,10 @@ numericStepperHit ctx wid mouse =
 
 scrollThumbHit :: Context -> V2 -> IO Bool
 scrollThumbHit ctx mouse =
-  fmap isJust . findNodeM na $ \idx -> do
-    nt <- getNodeType na idx
-    if nt /= NodeTextArea && not (isScrollNode nt)
-      then pure False
-      else do
-        wid <- getWidgetId na idx
-        any (\(_, layout, _) -> rectContains (sbThumb layout) mouse) <$> scrollBarsFor ctx idx wid
+  fmap isJust . findNodeM na $ \idx ->
+    ((\nt -> nt == NodeTextArea || isScrollNode nt) <$> getNodeType na idx) <&&> do
+      wid <- getWidgetId na idx
+      any (\(_, layout, _) -> rectContains (sbThumb layout) mouse) <$> scrollBarsFor ctx idx wid
   where
     na = ctxNodeArena ctx
 
@@ -207,10 +207,7 @@ selectCursorKind ctx wid mouse = do
 
 widgetVisibleAt :: Context -> WidgetId -> V2 -> IO Bool
 widgetVisibleAt ctx wid mouse = do
-  mIdx <- findNodeByWidgetId ctx wid
-  case mIdx of
-    Nothing -> pure False
-    Just idx -> nodePointVisible ctx idx mouse
+  withWidgetNode ctx wid False $ \idx -> nodePointVisible ctx idx mouse
 
 widgetPointerCursor :: Context -> WidgetId -> V2 -> IO UiCursorKind
 widgetPointerCursor ctx wid mouse = do
@@ -256,16 +253,13 @@ textInputCursorKind ctx wid mouse = do
 
 textAreaCursorKind :: Context -> WidgetId -> V2 -> IO UiCursorKind
 textAreaCursorKind ctx wid mouse = do
-  mIdx <- findNodeByWidgetId ctx wid
-  case mIdx of
-    Nothing -> pure UiCursorDefault
-    Just idx -> do
-      onScroll <- isMouseOnTextAreaScrollBarAt ctx idx mouse
-      if onScroll
-        then pure UiCursorDefault
-        else
-          textFieldCursorKind ctx wid mouse $ \_ x y w h ->
-            Rect x y w h
+  withWidgetNode ctx wid UiCursorDefault $ \idx -> do
+    onScroll <- isMouseOnTextAreaScrollBarAt ctx idx mouse
+    if onScroll
+      then pure UiCursorDefault
+      else
+        textFieldCursorKind ctx wid mouse $ \_ x y w h ->
+          Rect x y w h
 
 textFieldCursorKind ::
   Context ->
@@ -323,25 +317,19 @@ tableColResizeCursorKind ctx inp = do
 -- the rect is current-frame. Nothing when no such scroller exists (the
 -- caller falls back to the header button's own bottom).
 tableBodyScrollerBottom :: Context -> NodeIdx -> IO (Maybe Float)
-tableBodyScrollerBottom ctx = goUp
+tableBodyScrollerBottom ctx idx = do
+  parent <- getParent na idx
+  mScroller <- walkAncestors na parent $ \p ->
+    findChildM na p $ \c -> do
+      nt <- getNodeType na c
+      if isScrollNode nt
+        then (== DirColumn) <$> getDirection na c
+        else pure False
+  forM mScroller $ \sc -> do
+    (_, sy, _, sh) <- getRect na sc
+    pure (sy + sh)
   where
     na = ctxNodeArena ctx
-    goUp i = do
-      p <- getParent na i
-      if p < 0
-        then pure Nothing
-        else do
-          mScroller <-
-            findChildM na p $ \c -> do
-              nt <- getNodeType na c
-              if isScrollNode nt
-                then (== DirColumn) <$> getDirection na c
-                else pure False
-          case mScroller of
-            Just sc -> do
-              (_, sy, _, sh) <- getRect na sc
-              pure (Just (sy + sh))
-            Nothing -> goUp p
 
 pointerCursorWanted :: Context -> Input -> IO Bool
 pointerCursorWanted ctx inp = cursorKindIs ctx inp UiCursorPointer

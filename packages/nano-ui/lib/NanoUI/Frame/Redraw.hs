@@ -25,7 +25,7 @@ import NanoUI.Context
   , isDirty
   , modalActive
   )
-import NanoUI.Frame.Hit (findNodeByWidgetId, nodePointVisible, overlayHitAllowed)
+import NanoUI.Frame.Hit (nodePointVisible, overlayHitAllowed, withWidgetNode)
 import NanoUI.Frame.Select (overlayMenuOwnerAt)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input (Input (..), inputInteracted, inputMousePos, inputPointerHeld)
@@ -38,6 +38,7 @@ import NanoUI.Layout.Arena
   , isFloatingNode
   , isWidgetNode
   )
+import NanoUI.Monad ((<&&>))
 import NanoUI.Types (V2 (..))
 
 needsRedraw :: Context -> Input -> Input -> IO Bool
@@ -84,10 +85,7 @@ focusedNodeIs ctx ref p = do
   if hashWidgetId wid == 0
     then pure False
     else do
-      mIdx <- findNodeByWidgetId ctx wid
-      case mIdx of
-        Nothing -> pure False
-        Just idx -> p <$> getNodeType (ctxNodeArena ctx) idx
+      withWidgetNode ctx wid False $ \idx -> p <$> getNodeType (ctxNodeArena ctx) idx
 
 -- Select dropdown or text-input menu is open. Overlay hover is not a widget id.
 -- A focused combo (a search-style field carrying options) also owns an open
@@ -105,14 +103,11 @@ overlayMenuOpen ctx = do
       if hashWidgetId focus == 0
         then pure False
         else do
-          mIdx <- findNodeByWidgetId ctx focus
-          case mIdx of
-            Nothing -> pure False
-            Just idx -> do
-              nt <- getNodeType (ctxNodeArena ctx) idx
-              if nt /= NodeTextInput
-                then pure False
-                else not . null <$> getOptions (ctxNodeArena ctx) idx
+          withWidgetNode ctx focus False $ \idx -> do
+            nt <- getNodeType (ctxNodeArena ctx) idx
+            if nt /= NodeTextInput
+              then pure False
+              else not . null <$> getOptions (ctxNodeArena ctx) idx
 
 -- Focused text field or its context menu. Typing reaches it as input events,
 -- which wake the loop by themselves, so focus alone keeps nothing running.
@@ -151,10 +146,5 @@ probeHotId ctx mouse = do
         Nothing -> maybe (pure (WidgetId 0)) (getWidgetId na) =<< findNodeM na hits
   where
     na = ctxNodeArena ctx
-    hits idx = do
-      nt <- getNodeType na idx
-      if not (isWidgetNode nt)
-        then pure False
-        else do
-          visible <- nodePointVisible ctx idx mouse
-          if visible then overlayHitAllowed ctx idx mouse else pure False
+    hits idx =
+      (isWidgetNode <$> getNodeType na idx) <&&> nodePointVisible ctx idx mouse <&&> overlayHitAllowed ctx idx mouse

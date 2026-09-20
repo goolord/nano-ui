@@ -19,6 +19,7 @@ module NanoUI.Widgets.Node
   , setClicked
   , setChanged
   , setSubmitted
+  , inertResponse
   , parentIdx
   , container
   , containerResponse
@@ -174,6 +175,12 @@ setChanged c r = r {rawRespChanged = c}
 
 setSubmitted :: Bool -> Response -> Response
 setSubmitted s r = r {rawRespSubmitted = s}
+
+-- | The response of a control that takes no input: its id and rect, and no
+-- interaction.
+inertResponse :: Response -> Response
+inertResponse r =
+  r {rawRespHovered = False, rawRespPressed = False, rawRespClicked = False, rawRespRightPressed = False, rawRespRightClicked = False}
 
 mkResponse :: WidgetId -> Rect -> Bool -> Bool -> Bool -> Bool -> Response
 mkResponse wid rect hovered pressed clicked changed =

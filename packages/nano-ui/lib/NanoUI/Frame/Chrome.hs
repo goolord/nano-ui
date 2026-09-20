@@ -23,13 +23,11 @@ module NanoUI.Frame.Chrome
 
 import Control.Monad (when)
 import Data.IORef (readIORef)
-import qualified Data.IntMap.Strict as IM
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Read as TR
 import NanoUI.Context
   ( Context (..)
-  , WidgetStore (..)
   , getAnimationValue
   , getStore
   , intKey
@@ -45,12 +43,13 @@ import NanoUI.Layout.Arena
   , getNodeType
   , getNodeValue
   , getOptions
-  , getParent
   , getStyleIdx
   , getText
   , getWidgetId
   , isFloatingNode
+  , walkAncestors
   )
+import NanoUI.Store (fieldInt, fieldText, findSlot)
 import NanoUI.Style
   ( Style (..)
   , Theme (..)
@@ -80,15 +79,10 @@ import NanoUI.WidgetText
   )
 
 floatingAncestor :: Context -> NodeIdx -> IO (Maybe NodeType)
-floatingAncestor ctx idx = go idx
-  where
-    go i
-      | i < 0 = pure Nothing
-      | otherwise = do
-          nt <- getNodeType (ctxNodeArena ctx) i
-          if isFloatingNode nt
-            then pure (Just nt)
-            else getParent (ctxNodeArena ctx) i >>= go
+floatingAncestor ctx idx =
+  walkAncestors (ctxNodeArena ctx) idx $ \i -> do
+    nt <- getNodeType (ctxNodeArena ctx) i
+    pure (if isFloatingNode nt then Just nt else Nothing)
 
 displayText :: Context -> NodeType -> NodeIdx -> IO Text
 displayText ctx nt idx = do
@@ -107,7 +101,7 @@ selectCurrentOption ctx idx = do
   store <- getStore ctx
   opts <- getOptions (ctxNodeArena ctx) idx
   wid <- getWidgetId (ctxNodeArena ctx) idx
-  let picked = IM.findWithDefault 0 (intKey wid) (storeInt store)
+  let picked = findSlot fieldInt 0 (intKey wid) store
   pure $ case drop picked opts of
     (o : _) -> o
     _ -> ""
@@ -121,7 +115,7 @@ textInputValue ctx idx = do
   nt <- getNodeType na idx
   si <- getStyleIdx na idx
   store <- getStore ctx
-  let value = IM.findWithDefault "" (intKey wid) (storeText store)
+  let value = findSlot fieldText "" (intKey wid) store
   pure $
     if nt == NodeTextInput && textInputPasswordMode si
       then T.replicate (T.length value) "*"

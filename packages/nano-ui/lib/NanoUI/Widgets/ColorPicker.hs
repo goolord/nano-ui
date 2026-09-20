@@ -21,20 +21,20 @@ where
 
 import Control.Monad (forM_, void, when)
 import Data.Bits ((.&.))
-import Data.IntMap.Strict qualified as IM
 import Data.Maybe (fromMaybe, isJust)
 import Data.Text (Text)
 import Data.Word (Word8)
 import Effectful (Eff, type (:>))
 import NanoUI.Context
   ( Context (..)
-  , WidgetStore (..)
+  , WidgetStore
   , getStore
   , intKey
   , recordStoreInt
   , registerFocusable
   , setStore
   , modifyStore
+  , writeSlots
   )
 import NanoUI.Draw
   ( DrawArena
@@ -61,7 +61,7 @@ import NanoUI.Layout.Arena
   , getWidgetId
   )
 import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO, withKey)
-import NanoUI.Store (Slot (..), slotKey)
+import NanoUI.Store (Slot (..), fieldFloat, fieldInt, fieldPoint, findSlot, insertSlot, lookupSlot, slotKey, slotWriteOr)
 import NanoUI.Style
   ( AlignY (..)
   , Direction (..)
@@ -143,14 +143,7 @@ colorPickerPartOf si = toEnum (si .&. 3)
 
 storeColorAt :: WidgetStore -> Int -> Color -> Color
 storeColorAt store key fallback =
-  colorFromWord32
-    ( fromIntegral
-        ( IM.findWithDefault
-            (fromIntegral (colorToWord32 fallback))
-            key
-            (storeInt store)
-        )
-    )
+  colorFromWord32 (fromIntegral (findSlot fieldInt (fromIntegral (colorToWord32 fallback)) key store))
 
 widgetStoreColor :: WidgetStore -> WidgetId -> Color -> Color
 widgetStoreColor store wid fallback = storeColorAt store (intKey wid) fallback
@@ -168,7 +161,7 @@ widgetStoreHue store wid fallback =
   let
     (h0, _, _) = rgbToHsv (widgetStoreColor store wid fallback)
    in
-    IM.findWithDefault h0 (intKey wid) (storeFloat store)
+    findSlot fieldFloat h0 (intKey wid) store
 
 -- Black collapses S in RGB. Keep the last mouse S/V so the marker does not jitter.
 widgetStoreSv :: WidgetStore -> WidgetId -> Color -> (Float, Float)
@@ -176,16 +169,14 @@ widgetStoreSv store wid fallback =
   let
     (_, s0, v0) = rgbToHsv (widgetStoreColor store wid fallback)
    in
-    fromMaybe (s0, v0) (IM.lookup (intKey wid) (storePoint store))
+    findSlot fieldPoint (s0, v0) (intKey wid) store
 
 -- | Store the live colour with the hue and S/V it was set through.
 putColorState :: Int -> Color -> Float -> (Float, Float) -> WidgetStore -> WidgetStore
-putColorState key col hue sv st =
-  st
-    { storeInt = IM.insert key (fromIntegral (colorToWord32 col)) (storeInt st)
-    , storeFloat = IM.insert key hue (storeFloat st)
-    , storePoint = IM.insert key sv (storePoint st)
-    }
+putColorState key col hue sv =
+  insertSlot fieldInt key (fromIntegral (colorToWord32 col))
+    . insertSlot fieldFloat key hue
+    . insertSlot fieldPoint key sv
 
 withAlpha :: Word8 -> Color -> Color
 withAlpha a c = colorRGBA (colorR c) (colorG c) (colorB c) a
@@ -618,25 +609,19 @@ adoptColorPickerValue ctx wid value = do
     key = intKey wid
     packed = fromIntegral (colorToWord32 value)
     seenKey = slotKey SlotSeen key
-    ints = IM.insert seenKey packed (storeInt store0)
-  when (IM.lookup seenKey (storeInt store0) /= Just packed) $
+    seen = insertSlot fieldInt seenKey packed store0
+  when (lookupSlot fieldInt seenKey store0 /= Just packed) $
     setStore ctx $
-      if IM.lookup key (storeInt store0) == Just packed
-        then store0 {storeInt = ints}
+      if lookupSlot fieldInt key store0 == Just packed
+        then seen
         else
           let (h, s, v) = rgbToHsv value
-           in putColorState key value (clamp 0 360 h) (s, v) $
-                store0 {storeInt = IM.insert (slotKey SlotColorBase key) packed ints}
+           in putColorState key value (clamp 0 360 h) (s, v) (insertSlot fieldInt (slotKey SlotColorBase key) packed seen)
 
 commitColorPickerCurrent :: Context -> WidgetId -> Color -> IO ()
-commitColorPickerCurrent ctx wid col = do
-  st <- getStore ctx
-  let
-    packed = fromIntegral (colorToWord32 col)
-    k = slotKey SlotColorBase (intKey wid)
-    old = IM.findWithDefault packed k (storeInt st)
-  when (old /= packed) $
-    setStore ctx (st {storeInt = IM.insert k packed (storeInt st)})
+commitColorPickerCurrent ctx wid col =
+  let packed = fromIntegral (colorToWord32 col)
+   in writeSlots ctx (slotWriteOr fieldInt packed (slotKey SlotColorBase (intKey wid)) packed)
 
 -- | Arrow, Home and End keys on the focused part: the field when @svFocus@,
 -- the hue bar when @hueFocus@, otherwise the alpha bar. Arrows move a part

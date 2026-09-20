@@ -58,7 +58,8 @@ import NanoUI.Input
   , inputMouseRightPressed
   , inputWindowSize
   )
-import NanoUI.Layout.Arena (NodeType (NodeTextArea, NodeTextInput), findNodeRevM, getNodeType, getRect, getWidgetId)
+import NanoUI.Layout.Arena (NodeType (NodeTextArea, NodeTextInput), findNodeRevM, getNodeRect, getNodeType, getWidgetId)
+import NanoUI.Monad ((<&&>))
 import NanoUI.Style (Style (..), themeSeparator)
 import NanoUI.Types (Color (..), Rect (..), Size (..), V2 (..), lerpColor, rectContains)
 import NanoUI.Widgets.TextEditor (EditorMode (..), TextCommand (..), canRedo, canUndo)
@@ -156,26 +157,13 @@ textFieldWidgetAtMouse ctx mouse = do
   mIdx <-
     findNodeRevM na $ \idx -> do
       nt <- getNodeType na idx
-      if nt /= NodeTextInput && nt /= NodeTextArea
-        then pure False
-        else do
-          wid <- getWidgetId na idx
-          disabled <- isDisabled ctx wid
-          if disabled
-            then pure False
-            else do
-              (x, y, w, h) <- getRect na idx
-              hit <- nodeClippedHit ctx idx (Rect x y w h) mouse
-              if not hit
-                then pure False
-                else do
-                  allowed <- overlayHitAllowed ctx idx mouse
-                  if not allowed
-                    then pure False
-                    else
-                      if nt == NodeTextArea
-                        then not <$> isMouseOnTextAreaScrollBarAt ctx idx mouse
-                        else pure True
+      pure (nt == NodeTextInput || nt == NodeTextArea) <&&> do
+        wid <- getWidgetId na idx
+        rect <- getNodeRect na idx
+        (not <$> isDisabled ctx wid)
+          <&&> nodeClippedHit ctx idx rect mouse
+          <&&> overlayHitAllowed ctx idx mouse
+          <&&> (if nt == NodeTextArea then not <$> isMouseOnTextAreaScrollBarAt ctx idx mouse else pure True)
   traverse (getWidgetId na) mIdx
 
 finalizeTextEditMenuPick :: Context -> Input -> IO ()

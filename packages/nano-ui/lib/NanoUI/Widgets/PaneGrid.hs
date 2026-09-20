@@ -31,9 +31,7 @@ module NanoUI.Widgets.PaneGrid
 
 import Control.Monad (forM_, unless, void, when)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
-import Data.Dynamic (fromDynamic, toDyn)
 import Data.Hashable (hash)
-import Data.IntMap.Strict qualified as IM
 import Data.List (find, minimumBy)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as M
@@ -78,9 +76,19 @@ import NanoUI.Id (IdContext (..), WidgetId, hashWidgetId)
 import NanoUI.Frame.Hit (nodeInteractionHit, scrollHitRect)
 import NanoUI.Frame.Input (isInteractiveNode)
 import NanoUI.Store
-  ( WidgetStore (..)
+  ( Slot (..)
+  , WidgetStore
+  , deleteSlot
+  , fieldDyn
+  , fieldInt
+  , fieldPoint
+  , findSlot
+  , flagSlot
+  , insertDyn
+  , insertSlot
+  , lookupDyn
+  , lookupSlot
   , slotKey
-  , Slot (..)
   )
 import NanoUI.Style
   ( AlignX (..)
@@ -311,7 +319,7 @@ data DragInfo = DragInfo
 
 -- | The grid's split tree persisted in the widget store, if seeded.
 lookupTree :: Int -> WidgetStore -> Maybe GridNode
-lookupTree k st = IM.lookup k (storeDyn st) >>= fromDynamic
+lookupTree = lookupDyn
 
 -- | A stored pane id that still exists in the tree, else 0.
 validPane :: GridNode -> Int -> Word64
@@ -353,35 +361,27 @@ paneGrid cfg = do
     Just t ->
       -- Init seeded the store before the tree existed, so the stored seed
       -- is already above every id in the tree.
-      pure (t, fromIntegral (IM.findWithDefault 1 seedK (storeInt st)))
+      pure (t, fromIntegral (findSlot fieldInt 1 seedK st))
     Nothing -> do
-      let seed = max 1 (fromIntegral (IM.findWithDefault 1 seedK (storeInt st)))
+      let seed = max 1 (fromIntegral (findSlot fieldInt 1 seedK st))
           start = Pane seed
-      uiIO $
-        setStore
-          ctx
-          ( bumpMirror
-              ( st
-                  { storeInt = IM.insert seedK (fromIntegral (seed + 1)) (storeInt st)
-                  , storeDyn = IM.insert key (toDyn start) (storeDyn st)
-                  }
-              )
-          )
+      uiIO . setStore ctx . bumpMirror $
+        insertSlot fieldInt seedK (fromIntegral (seed + 1)) (insertDyn key start st)
       pure (start, seed + 1)
   mPrev <- uiIO (getPrevRect ctx wid)
   let baseRect = fromMaybe (Rect 0 0 0 0) mPrev
-      drag0 = IM.findWithDefault 0 gestK (storeInt st)
-      maxPane = validPane tree0 (IM.findWithDefault 0 maxK (storeInt st))
-      focus0 = IM.findWithDefault 0 focusK (storeInt st)
+      drag0 = findSlot fieldInt 0 gestK st
+      maxPane = validPane tree0 (findSlot fieldInt 0 maxK st)
+      focus0 = findSlot fieldInt 0 focusK st
       focusedInit = resolveFocus tree0 maxPane (fromIntegral focus0)
       mouse = inputMousePos inp
       (regions, dividers) = layoutNode minSize gutter tree0 baseRect
   changedRef <- uiIO (newIORef False)
-  let mGrab = IM.lookup grabK (storePoint st)
+  let mGrab = lookupSlot fieldPoint grabK st
       dgi =
         computeDragInfo
           drag0
-          (IM.findWithDefault 0 grabK (storeInt st) /= 0)
+          (flagSlot grabK st)
           DragGeom
             { dgMinSize = minSize
             , dgGutter = gutter
@@ -486,12 +486,8 @@ paneGrid cfg = do
   changed <- uiIO (readIORef changedRef)
   stEnd <- uiIO (getStore ctx)
   let treeEnd = lookupTree key stEnd
-      maxEnd = maybe 0 (\t -> validPane t (IM.findWithDefault 0 maxK (storeInt stEnd))) treeEnd
-      focusEnd =
-        maybe
-          0
-          (\t -> resolveFocus t maxEnd (fromIntegral (IM.findWithDefault 0 focusK (storeInt stEnd))))
-          treeEnd
+      maxEnd = maybe 0 (\t -> validPane t (findSlot fieldInt 0 maxK stEnd)) treeEnd
+      focusEnd = maybe 0 (\t -> resolveFocus t maxEnd (fromIntegral (findSlot fieldInt 0 focusK stEnd))) treeEnd
   pure
     PaneGridResponse
       { pgrChanged = changed
@@ -707,7 +703,7 @@ drawDragOverlay env wid rendered ghost zone = do
   st <- uiIO (getStore (geCtx env))
   let ctx = geCtx env
       dragPane = fromIntegral (geDrag0 env)
-      cached = IM.lookup (slotKey SlotPaneGrab (geKey env)) (storeDyn st) >>= fromDynamic
+      cached = lookupDyn (slotKey SlotPaneGrab (geKey env)) st
       title = maybe (fromMaybe "" cached) pvTitle (fmap rpView (find ((== dragPane) . rpPaneId) rendered))
       rectKey = maybe [0, 0, 0, 0, 0] (\(Rect x y w h) -> [1, x, y, w, h])
       key = contentKey (2 : fromIntegral (hash title) : rectKey ghost ++ rectKey zone)
@@ -843,25 +839,24 @@ runGestures env dividers rendered dgi = do
   when (press && not busy && not (any rpControlHit rendered)) $ do
     case hitDiv of
       Just d ->
-        storeWrite env True $ \st -> st
-          { storeInt = IM.insert gestK (negate (fromIntegral (diSplitId d))) (storeInt st)
-          , storePoint = IM.insert (slotKey SlotPaneResize (geKey env)) (diRatio d, mouseMain d mouse) (storePoint st)
-          }
+        storeWrite env True $
+          insertSlot fieldInt gestK (negate (fromIntegral (diSplitId d)))
+            . insertSlot fieldPoint (slotKey SlotPaneResize (geKey env)) (diRatio d, mouseMain d mouse)
       Nothing ->
         forM_ pickHit $ \pid -> do
           let title = maybe "" (pvTitle . rpView) (find ((== pid) . rpPaneId) rendered)
               (gx, gy) = maybe (0, 0) (\(Rect px py _ _) -> (v2X mouse - px, v2Y mouse - py)) (M.lookup pid regions)
-          storeWrite env True $ \st -> st
-            { storeDyn = IM.insert grabK (toDyn title) (storeDyn st)
-            , storeInt = IM.insert gestK (fromIntegral pid) (IM.delete grabK (storeInt st))
-            , storePoint = IM.insert grabK (gx, gy) (storePoint st)
-            }
+          storeWrite env True $
+            insertDyn grabK title
+              . insertSlot fieldInt gestK (fromIntegral pid)
+              . deleteSlot fieldInt grabK
+              . insertSlot fieldPoint grabK (gx, gy)
   when (drag0 < 0 && down) $ do
     let sid = fromIntegral (negate drag0)
     forM_ (find ((== sid) . diSplitId) dividers) $ \d -> do
       st <- uiIO (getStore ctx)
       let (ratio0, main0) =
-            IM.findWithDefault (diRatio d, mouseMain d mouse) (slotKey SlotPaneResize (geKey env)) (storePoint st)
+            findSlot fieldPoint (diRatio d, mouseMain d mouse) (slotKey SlotPaneResize (geKey env)) st
           -- The ratio shares out the region minus the divider gutter.
           usable = mainLen (diAxis d) (diRegion d) - geGutter env
           r0 =
@@ -877,7 +872,7 @@ runGestures env dividers rendered dgi = do
   -- dirty every frame for the same reason.
   when (drag0 > 0 && down) $ uiIO (markDirty ctx)
   when (drag0 > 0 && down && dgiMoved dgi) $
-    storeWrite env False $ \st -> st {storeInt = IM.insert (slotKey SlotPaneGrab (geKey env)) 1 (storeInt st)}
+    storeWrite env False (insertSlot fieldInt (slotKey SlotPaneGrab (geKey env)) 1)
   -- A drop clears the gesture and, when it moved the pane, stores the new
   -- tree, seed and focus in the same write.
   when (drag0 > 0 && not down) $ do
@@ -886,16 +881,13 @@ runGestures env dividers rendered dgi = do
         dropped
           | dgiMoved dgi = dpTree <$> dgiZone dgi
           | otherwise = Nothing
-    storeWrite env True $ \st -> case dropped of
-      Nothing -> st {storeInt = IM.delete gestK (storeInt st)}
-      Just t' ->
-        st
-          { storeDyn = IM.insert (geKey env) (toDyn t') (storeDyn st)
-          , storeInt =
-              IM.insert (slotKey SlotPaneNext (geKey env)) (fromIntegral (geSeed env + 1)) $
-                IM.insert (slotKey SlotPaneFocus (geKey env)) (fromIntegral moved) $
-                  IM.delete gestK (storeInt st)
-          }
+    storeWrite env True $
+      deleteSlot fieldInt gestK . case dropped of
+        Nothing -> id
+        Just t' ->
+          insertDyn (geKey env) t'
+            . insertSlot fieldInt (slotKey SlotPaneNext (geKey env)) (fromIntegral (geSeed env + 1))
+            . insertSlot fieldInt (slotKey SlotPaneFocus (geKey env)) (fromIntegral moved)
     when (isJust dropped) (markChanged env)
 
 mouseMain :: DividerInfo -> V2 -> Float
@@ -997,23 +989,15 @@ markChanged env = uiIO (writeIORef (geChangedRef env) True)
 -- pane id never collides with a closed pane's state.
 putTree :: (Ui :> es) => GridEnv es -> Maybe GridNode -> Eff es ()
 putTree env mTree = do
-  storeWrite env True $ \st ->
-    st {storeDyn = maybe (IM.delete k) (IM.insert k . toDyn) mTree (storeDyn st)}
+  storeWrite env True (maybe (deleteSlot fieldDyn (geKey env)) (insertDyn (geKey env)) mTree)
   markChanged env
-  where
-    k = geKey env
 
 -- | Gesture slot: 0 none, positive = dragged pane id, negative = resized
 -- split id.
 writeGest :: (Ui :> es) => GridEnv es -> Int -> Eff es ()
-writeGest env n =
-  storeWrite env True $ \st ->
-    st
-      { storeInt =
-          if n == 0
-            then IM.delete (slotKey SlotPaneGest (geKey env)) (storeInt st)
-            else IM.insert (slotKey SlotPaneGest (geKey env)) n (storeInt st)
-      }
+writeGest env n = storeWrite env True (if n == 0 then deleteSlot fieldInt k else insertSlot fieldInt k n)
+  where
+    k = slotKey SlotPaneGest (geKey env)
 
 -- | Write a pane-id slot (maximized or focused pane) when it differs,
 -- bumping the mirror; @structural@ also flags 'pgrChanged'.
@@ -1022,12 +1006,11 @@ putPaneSlot structural slot env v = do
   let k = slotKey slot (geKey env)
       n = fromIntegral v
   st <- uiIO (getStore (geCtx env))
-  when (IM.findWithDefault 0 k (storeInt st) /= n) $ do
-    storeWrite env True (\st' -> st' {storeInt = IM.insert k n (storeInt st')})
+  when (findSlot fieldInt 0 k st /= n) $ do
+    storeWrite env True (insertSlot fieldInt k n)
     when structural (markChanged env)
 
 -- | Advance the next-id seed ('SlotPaneNext').
 putSeed :: (Ui :> es) => GridEnv es -> Word64 -> Eff es ()
 putSeed env v =
-  storeWrite env False $ \st ->
-    st {storeInt = IM.insert (slotKey SlotPaneNext (geKey env)) (fromIntegral v) (storeInt st)}
+  storeWrite env False (insertSlot fieldInt (slotKey SlotPaneNext (geKey env)) (fromIntegral v))

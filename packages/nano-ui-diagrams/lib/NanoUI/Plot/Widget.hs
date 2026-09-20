@@ -8,9 +8,7 @@ module NanoUI.Plot.Widget
   , areaChart
   ) where
 
-import Data.Dynamic (fromDynamic, toDyn)
 import Data.IORef (readIORef)
-import qualified Data.IntMap.Strict as IM
 import Data.Maybe (fromMaybe, catMaybes)
 import Data.Text (Text)
 import Data.Vector.Unboxed qualified as U
@@ -28,7 +26,7 @@ import NanoUI
   , prepareFontMetricsMany
   , respRect
   )
-import NanoUI.Context (Context (..), WidgetStore (..), getStore, intKey, setStore)
+import NanoUI.Context (Context (..), getStore, intKey, setStore)
 import NanoUI.Monad (askContext, nextId, uiIO)
 import NanoUI.Diagrams.Backend (B)
 import NanoUI.Diagrams.Widget (PlotStyle, diagramWithKeyAndEnvelope, uiPlotStyle)
@@ -44,6 +42,7 @@ import NanoUI.Plot.Types
   , LegendPos (..)
   , PlotResponse (..)
   )
+import NanoUI.Store (insertDyn, lookupDyn)
 
 data CachedChart = CachedChart
   { ccChart :: !Chart
@@ -67,7 +66,7 @@ cachedChartDiagram ctx wid fm theme ps chart = do
   let k = intKey wid
   font <- readIORef (ctxMetricGen ctx)
   store <- getStore ctx
-  let previous = IM.lookup k (storeDyn store) >>= fromDynamic
+  let previous = lookupDyn k store
   case previous of
     Just cc | ccChart cc == chart && ccTheme cc == theme && ccFont cc == font && ccStyle cc == ps -> pure cc
     _ -> do
@@ -83,7 +82,7 @@ cachedChartDiagram ctx wid fm theme ps chart = do
           extY = fromMaybe (0, dh) (extentY d)
       let !v = maybe 1 ((+ 1) . ccVersion) previous
           !cc = CachedChart chart theme font ps v d dw dh extX extY domains points
-      setStore ctx (store {storeDyn = IM.insert k (toDyn cc) (storeDyn store)})
+      setStore ctx (insertDyn k cc store)
       pure cc
 
 -- | Draw a chart sized by the layout modifier. The response reports the

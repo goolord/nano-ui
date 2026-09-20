@@ -66,6 +66,7 @@ import NanoUI.Layout.Arena
   , getFirstChild
   , getLayoutRect
   , getNextSibling
+  , getNodeRect
   , getNodeType
   , getParent
   , getRect
@@ -87,8 +88,8 @@ applyScrollOffsets ctx = do
   -- A frame that added no widgets has no root to walk.
   count <- arenaCount (ctxNodeArena ctx)
   when (count > 0) $ do
-    (wx, wy, ww, wh) <- getRect (ctxNodeArena ctx) 0
-    transformSubtree ctx 0 0 0 (Rect wx wy ww wh)
+    rect <- getNodeRect (ctxNodeArena ctx) 0
+    transformSubtree ctx 0 0 0 rect
 
 transformSubtree :: Context -> NodeIdx -> Float -> Float -> Rect -> IO ()
 transformSubtree ctx idx scrollX scrollY parentClip = do
@@ -252,8 +253,8 @@ tryApplyScrollWheelDelta ctx wid (V2 wheelX wheelY) = do
               , V2 (max 0 (contentW - tabViewW bars)) (max 0 (contentH - tabViewH bars))
               )
           else do
-            (x, y, w, h) <- getRect na idx
-            (axes, _, range) <- scrollNodeGeometry ctx idx (Rect x y w h)
+            rect <- getNodeRect na idx
+            (axes, _, range) <- scrollNodeGeometry ctx idx rect
             pure (axes, range)
       step <- resolveScrollStep ctx wid
       cur <- getScrollOffsetIn ctx wid axes
@@ -276,8 +277,8 @@ findScrollNodeUnderMouse ctx mouse = do
       mModal <- topmostModalAtMouse ctx mouse
       mTop <- topmostOverlayAtMouse ctx mouse
       let start = fromMaybe 0 (mModal <|> mTop)
-      (x, y, w, h) <- getRect (ctxNodeArena ctx) start
-      queryScrollTarget ctx start mouse (Rect x y w h)
+      rect <- getNodeRect (ctxNodeArena ctx) start
+      queryScrollTarget ctx start mouse rect
 
 queryScrollTarget :: Context -> NodeIdx -> V2 -> Rect -> IO (Maybe NodeIdx)
 queryScrollTarget ctx idx mouse parentClip = do
@@ -330,8 +331,8 @@ scrollHitClip ctx idx nt parentClip
             | otherwise = rectUnion viewport (lane (snDir sn))
       pure (rectIntersect parentClip hit)
   | nt == NodePanel = do
-      (x, y, w, h) <- getRect na idx
-      pure (rectIntersect parentClip (Rect x y w h))
+      rect <- getNodeRect na idx
+      pure (rectIntersect parentClip rect)
   | otherwise = pure (Just parentClip)
   where
     na = ctxNodeArena ctx

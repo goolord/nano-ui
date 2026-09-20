@@ -16,10 +16,8 @@ module NanoUI.Frame.Input
 import Control.Applicative ((<|>))
 import Control.Monad (forM_, unless, when)
 import Data.IORef (readIORef, writeIORef)
-import qualified Data.IntMap.Strict as IM
 import NanoUI.Context
   ( Context (..)
-  , WidgetStore (..)
   , damageWidget
   , getFocusables
   , getStore
@@ -62,14 +60,16 @@ import NanoUI.Layout.Arena
   , NodeType (..)
   , findNodeM
   , foldNodesM
+  , getNodeRect
   , getNodeType
   , getParent
   , getRect
   , getStyleIdx
   , getWidgetId
   )
-import NanoUI.Monad (whenM)
-import NanoUI.Types (DamageBounds (..), Rect (..), V2 (..), defaultDamageSlop, rectContains, rectH, rectW)
+import NanoUI.Monad (whenM, (<&&>))
+import NanoUI.Store (fieldInt, insertSlot)
+import NanoUI.Types (DamageBounds (..), V2 (..), defaultDamageSlop, rectContains)
 import NanoUI.WidgetText (buttonVisualStyle, isMenuBarStyle, isMenuItemStyle, isTabButtonStyle)
 
 finalizeTabFocus :: Context -> Input -> IO ()
@@ -157,16 +157,10 @@ findTopWidgetUnderMouse ctx mouse wanted = do
   mIdx <-
     findNodeM na $ \idx -> do
       nt <- getNodeType na idx
-      if not (wanted nt)
-        then pure False
-        else do
-          (x, y, w, h) <- getRect na idx
-          rect <- widgetHitRect ctx nt idx x y w h
-          if rectW rect > 0 && rectH rect > 0
-            then do
-              hit <- nodeClippedHit ctx idx rect mouse
-              if hit then overlayHitAllowed ctx idx mouse else pure False
-            else pure False
+      pure (wanted nt) <&&> do
+        (x, y, w, h) <- getRect na idx
+        rect <- widgetHitRect ctx nt idx x y w h
+        nodeClippedHit ctx idx rect mouse <&&> overlayHitAllowed ctx idx mouse
   traverse (getWidgetId na) mIdx
 
 isInteractiveNode :: NodeType -> Bool
@@ -201,8 +195,8 @@ finalizePointerRelease ctx inp =
               then pure over
               else do
                 nt <- getNodeType na idx
-                (x, y, w, h) <- getRect na idx
-                visible <- nodeClippedHit ctx idx (Rect x y w h) mouse
+                rect <- getNodeRect na idx
+                visible <- nodeClippedHit ctx idx rect mouse
                 when visible $ do
                   case nt of
                     NodeRadio -> getStyleIdx na idx >>= setParentSelection ctx idx
@@ -227,7 +221,7 @@ setParentSelection ctx idx selected = do
   when (parent >= 0) $ do
     store <- getStore ctx
     groupWid <- getWidgetId (ctxNodeArena ctx) parent
-    setStore ctx store {storeInt = IM.insert (intKey groupWid) selected (storeInt store)}
+    setStore ctx (insertSlot fieldInt (intKey groupWid) selected store)
 
 postsLayoutClick :: NodeType -> Bool
 postsLayoutClick nt =
@@ -279,18 +273,7 @@ finalizeSelectFocus ctx inp =
 
 findTextInputUnderMouse :: Context -> V2 -> IO (Maybe WidgetId)
 findTextInputUnderMouse ctx mouse = do
-  let na = ctxNodeArena ctx
-  mIdx <-
-    findNodeM na $ \idx -> do
-      nt <- getNodeType na idx
-      if nt /= NodeTextInput && nt /= NodeTextArea
-        then pure False
-        else do
-          (x, y, w, h) <- getRect na idx
-          rect <- widgetHitRect ctx nt idx x y w h
-          hit <- nodeClippedHit ctx idx rect mouse
-          if hit then overlayHitAllowed ctx idx mouse else pure False
-  mWid <- traverse (getWidgetId na) mIdx
+  mWid <- findTopWidgetUnderMouse ctx mouse (\nt -> nt == NodeTextInput || nt == NodeTextArea)
   -- A press on a disabled field lands on nothing: it takes focus from
   -- whichever field had it and gives it to none.
   case mWid of

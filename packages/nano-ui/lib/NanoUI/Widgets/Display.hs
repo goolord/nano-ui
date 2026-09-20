@@ -41,7 +41,7 @@ import NanoUI.Atlas qualified as Atlas
 import NanoUI.Context (Context (..), askHostIO, registerImage, setHost)
 import NanoUI.Draw (getDrawSnapScale)
 import NanoUI.Layout.Arena (NodeType (..))
-import NanoUI.Monad (Ui, askContext, nextId, uiIO, uiTheme)
+import NanoUI.Monad (Ui, askContext, nextId, uiIO, uiTheme, withContext)
 import NanoUI.Svg (Svg, parseSvg, rasterizeSvg, svgKey, svgMonochrome, svgSize)
 import NanoUI.Style
   ( Layout (..)
@@ -138,18 +138,14 @@ image' f (ImageId tid) = do
 -- | An image id that no registered image uses and no earlier call returned.
 -- Take one for each image registered while the app runs.
 freshImageId :: Ui :> es => Eff es ImageId
-freshImageId = do
-  ctx <- askContext
-  uiIO (Atlas.freshImageId (ctxImageAtlas ctx))
+freshImageId = withContext (\ctx -> Atlas.freshImageId (ctxImageAtlas ctx))
 
 -- | Register an RGBA image (4 bytes a pixel, rows top to bottom) under an id
 -- while the app runs, for 'image' to draw. Returns 'False' when the size or
 -- pixels are invalid, an image of another size already has the id, or the
 -- atlas is full. An image of the same size is replaced.
 registerImageRgba :: Ui :> es => ImageId -> Int -> Int -> ByteString -> Eff es Bool
-registerImageRgba iid w h pixels = do
-  ctx <- askContext
-  uiIO (registerImage ctx iid w h pixels)
+registerImageRgba iid w h pixels = withContext (\ctx -> registerImage ctx iid w h pixels)
 
 -- | Read and parse an SVG file.
 loadSvg :: FilePath -> IO (Either String Svg)

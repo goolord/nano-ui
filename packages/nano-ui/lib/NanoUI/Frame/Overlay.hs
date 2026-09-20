@@ -13,7 +13,7 @@ import NanoUI.Draw (pushRect, withClip)
 import NanoUI.Frame.Chrome (overlayMenuStyle, overlayModalStyle, overlayWindowStyle, paintMenuPanel)
 import NanoUI.Frame.Hit (modalTreeOpen)
 import NanoUI.Frame.Paint (walkChildren)
-import NanoUI.Layout.Arena (NodeIdx, NodeType (..), forNodes_, getNodeType, getPadding, getRect)
+import NanoUI.Layout.Arena (NodeIdx, NodeType (..), forNodes_, getNodeRect, getNodeType, getPadding)
 import NanoUI.Style (Padding (..), Style, Theme, themeOverlayDim, themeSeparator)
 import NanoUI.Types (Rect (..), Size (..))
 import NanoUI.Widgets.Chrome (titleBarChromeHFor, windowChromeSepH)
@@ -51,8 +51,8 @@ forFloatingNode ctx nodeType draw =
   forNodes_ (ctxNodeArena ctx) $ \idx -> do
     nt <- getNodeType (ctxNodeArena ctx) idx
     when (nt == nodeType) $ do
-      (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-      draw idx (Rect x y w h)
+      rect <- getNodeRect (ctxNodeArena ctx) idx
+      draw idx rect
 
 drawFloatingPanel :: Context -> Theme -> NodeIdx -> Style -> Rect -> IO ()
 drawFloatingPanel ctx theme idx style rect = do

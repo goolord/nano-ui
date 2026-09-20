@@ -86,6 +86,7 @@ module NanoUI.Context
   , getStore
   , setStore
   , modifyStore
+  , writeSlots
   , getStoreBool
   , writeStoreInt
   , writeStoreFloat

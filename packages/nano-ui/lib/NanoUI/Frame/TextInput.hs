@@ -22,7 +22,6 @@ module NanoUI.Frame.TextInput
   ) where
 
 import Control.Monad (forM_, when)
-import qualified Data.IntMap.Strict as IM
 import Data.Maybe (mapMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -30,10 +29,10 @@ import NanoUI.Context
   ( Context (..)
   , TextFieldClickCell (..)
   , TextInputDrag (..)
-  , WidgetStore (..)
   , getStore
   , intKey
   , markDirty
+  , modifyStore
   , setStore
   , setTextInputDrag
   , Slot (..)
@@ -46,7 +45,7 @@ import NanoUI.Context
 import NanoUI.Draw (DrawArena, pushRect)
 import NanoUI.Font (FontMetrics (..), caretXIO, centeredTextY, lineWidthIO, prepareFontMetrics, selectionSpans, textIndexAtX, widgetContentInset)
 import NanoUI.Frame.Chrome (textInputFocused, textInputValue)
-import NanoUI.Frame.Hit (findNodeByWidgetId)
+import NanoUI.Frame.Hit (withWidgetNode)
 import NanoUI.Frame.Node (nodeFontMetrics)
 import NanoUI.Frame.Scroll.Geometry (padTextClipRect)
 import NanoUI.Id (WidgetId)
@@ -67,6 +66,7 @@ import NanoUI.Layout.Arena
   , getStyleIdx
   , getWidgetId
   )
+import NanoUI.Store (fieldFloat, fieldInt, fieldText, findSlot, insertSlot)
 import NanoUI.Style (themeSelection)
 import NanoUI.Types (Color (..), Rect (..), V2 (..), rectContains, rectIntersect, rectOverlapArea, rectW)
 import NanoUI.WidgetText
@@ -122,34 +122,29 @@ nodeTextFieldGeom ctx idx x y w h = do
 -- only active when there is text to clear.
 searchClearHit :: Context -> WidgetId -> V2 -> IO Bool
 searchClearHit ctx wid mouse = do
-  mIdx <- findNodeByWidgetId ctx wid
-  case mIdx of
-    Nothing -> pure False
-    Just idx -> do
-      si <- getStyleIdx (ctxNodeArena ctx) idx
-      opts <- getOptions (ctxNodeArena ctx) idx
-      if not (textInputSearchMode si) || not (null opts)
-        then pure False
-        else do
-          value <- textInputValue ctx idx
-          if T.null value
-            then pure False
-            else do
-              (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-              let (_, clearRect) = searchFieldIconRects (ctxFontMetrics ctx) x y w h
-              pure (rectContains clearRect mouse)
+  withWidgetNode ctx wid False $ \idx -> do
+    si <- getStyleIdx (ctxNodeArena ctx) idx
+    opts <- getOptions (ctxNodeArena ctx) idx
+    if not (textInputSearchMode si) || not (null opts)
+      then pure False
+      else do
+        value <- textInputValue ctx idx
+        if T.null value
+          then pure False
+          else do
+            (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+            let (_, clearRect) = searchFieldIconRects (ctxFontMetrics ctx) x y w h
+            pure (rectContains clearRect mouse)
 
 -- | Clear a search field. The debounced pulse picks the empty text up as an
 -- immediate (empty) commit on the next frame.
 clearSearchField :: Context -> WidgetId -> IO ()
 clearSearchField ctx wid = do
-  store <- getStore ctx
   let key = intKey wid
-      storeInt' =
-        IM.insert (slotKey SlotAnchor key) 0 $
-          IM.insert (slotKey SlotCursor key) 0 (storeInt store)
-      store' = store {storeText = IM.insert key "" (storeText store), storeInt = storeInt'}
-  setStore ctx store'
+  modifyStore ctx $
+    insertSlot fieldText key ""
+      . insertSlot fieldInt (slotKey SlotAnchor key) 0
+      . insertSlot fieldInt (slotKey SlotCursor key) 0
   markDirty ctx
 
 tagTextInputClippedSpans ::
@@ -199,11 +194,11 @@ syncTextInputScroll ctx idx x y w h = do
       value <- textInputValue ctx idx
       focus <- textInputFocused ctx idx
       (_, clip) <- nodeTextFieldGeom ctx idx x y w h
-      let cursor = IM.findWithDefault (T.length value) (slotKey SlotCursor key) (storeInt store)
-          oldScroll = IM.findWithDefault 0 (slotKey SlotTextInputScroll key) (storeFloat store)
+      let cursor = findSlot fieldInt (T.length value) (slotKey SlotCursor key) store
+          oldScroll = findSlot fieldFloat 0 (slotKey SlotTextInputScroll key) store
       newScroll <- computeTextInputScroll (ctxFontMetrics ctx) (rectW clip) value cursor oldScroll focus
       when (newScroll /= oldScroll) $
-        setStore ctx (store {storeFloat = IM.insert (slotKey SlotTextInputScroll key) newScroll (storeFloat store)})
+        setStore ctx (insertSlot fieldFloat (slotKey SlotTextInputScroll key) newScroll store)
       pure newScroll
 
 -- | What a focused single-line field paints its selection and caret from: the
@@ -225,8 +220,8 @@ readFieldEdit ctx idx x y w h scrollX = do
       (Rect _ boxY _ boxH, Rect clipX _ _ _) <- nodeTextFieldGeom ctx idx x y w h
       fm <- nodeFontMetrics ctx idx
       let key = intKey wid
-          !cursor = IM.findWithDefault (T.length value) (slotKey SlotCursor key) (storeInt store)
-          !anchor = IM.findWithDefault cursor (slotKey SlotAnchor key) (storeInt store)
+          !cursor = findSlot fieldInt (T.length value) (slotKey SlotCursor key) store
+          !anchor = findSlot fieldInt cursor (slotKey SlotAnchor key) store
       pure $! Just (FieldEdit value cursor anchor fm boxY boxH (clipX - scrollX))
 
 drawTextInputSelection :: DrawArena -> Context -> NodeIdx -> FieldEdit -> IO ()
@@ -258,37 +253,28 @@ updateTextInputSelection :: Context -> WidgetId -> Int -> Int -> IO ()
 updateTextInputSelection ctx wid anchor cursor = do
   store <- getStore ctx
   let key = intKey wid
-      oldAnchor = IM.findWithDefault cursor (slotKey SlotAnchor key) (storeInt store)
-      oldCursor = IM.findWithDefault 0 (slotKey SlotCursor key) (storeInt store)
+      oldAnchor = findSlot fieldInt cursor (slotKey SlotAnchor key) store
+      oldCursor = findSlot fieldInt 0 (slotKey SlotCursor key) store
   when (oldAnchor /= anchor || oldCursor /= cursor) $ do
-    setStore
-      ctx
-      ( store
-          { storeInt =
-              IM.insert (slotKey SlotAnchor key) anchor $
-                IM.insert (slotKey SlotCursor key) cursor (storeInt store)
-          }
-      )
+    setStore ctx $
+      insertSlot fieldInt (slotKey SlotAnchor key) anchor (insertSlot fieldInt (slotKey SlotCursor key) cursor store)
     markDirty ctx
 
 -- | Field box, text origin x (scroll applied), value and font of a single-line
 -- field.
 textInputGeomForWidget :: Context -> WidgetId -> IO (Maybe (Rect, Float, Text, FontMetrics))
 textInputGeomForWidget ctx wid = do
-  mIdx <- findNodeByWidgetId ctx wid
-  case mIdx of
-    Nothing -> pure Nothing
-    Just idx -> do
-      nt <- getNodeType (ctxNodeArena ctx) idx
-      if nt /= NodeTextInput
-        then pure Nothing
-        else do
-          (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-          (field, Rect clipX _ _ _) <- nodeTextFieldGeom ctx idx x y w h
-          scrollX <- syncTextInputScroll ctx idx x y w h
-          fm <- nodeFontMetrics ctx idx
-          value <- textInputValue ctx idx
-          pure (Just (field, clipX - scrollX, value, fm))
+  withWidgetNode ctx wid Nothing $ \idx -> do
+    nt <- getNodeType (ctxNodeArena ctx) idx
+    if nt /= NodeTextInput
+      then pure Nothing
+      else do
+        (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+        (field, Rect clipX _ _ _) <- nodeTextFieldGeom ctx idx x y w h
+        scrollX <- syncTextInputScroll ctx idx x y w h
+        fm <- nodeFontMetrics ctx idx
+        value <- textInputValue ctx idx
+        pure (Just (field, clipX - scrollX, value, fm))
 
 -- | Mouse selection in single-line field @wid@: click (with word and line
 -- multi-clicks), drag, and the search clear button. False when @wid@ is not a
@@ -330,8 +316,7 @@ collapseTextInputSelection :: Context -> WidgetId -> IO ()
 collapseTextInputSelection ctx wid = do
   store <- getStore ctx
   let key = intKey wid
-      cur = IM.findWithDefault 0 (slotKey SlotCursor key) (storeInt store)
-  setStore ctx (store {storeInt = IM.insert (slotKey SlotAnchor key) cur (storeInt store)})
+  setStore ctx (insertSlot fieldInt (slotKey SlotAnchor key) (findSlot fieldInt 0 (slotKey SlotCursor key) store) store)
 
 -- | Count a press as a multi-click only when it lands on the same cell as the
 -- previous press; anything else restarts the count at one.

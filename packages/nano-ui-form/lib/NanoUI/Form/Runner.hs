@@ -22,7 +22,7 @@ import NanoUI
   , uiIO
   , whenM
   )
-import NanoUI.Monad (askContext, askInput)
+import NanoUI.Monad (askContext, askInput, withContext)
 import NanoUI.Form.Backend
   ( FormUI (..)
   , isFormSubmitted
@@ -119,6 +119,4 @@ renderResult showErrors view result =
 -- | Reset input values and the corresponding widget state for a form prefix.
 -- Re-evaluate the form on the next frame to render its defaults.
 resetForm :: Text -> NanoUI ()
-resetForm prefix = do
-  ctx <- askContext
-  uiIO (resetFormState ctx prefix)
+resetForm prefix = withContext (\ctx -> resetFormState ctx prefix)

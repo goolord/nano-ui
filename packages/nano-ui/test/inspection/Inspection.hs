@@ -9,14 +9,21 @@ module Main
   ( main
   , solidQuadProbe
   , gradientQuadProbe
+  , storeWriteProbe
+  , storeWriteByHand
+  , storeReadProbe
+  , storeReadByHand
   ) where
 
+import Data.IntMap.Strict qualified as IM
+import Data.Text (Text)
 import Data.Word (Word32, Word8)
 import Foreign.Ptr (Ptr)
 
 import Test.Inspection
 
 import NanoUI.SIMD qualified as SIMD
+import NanoUI.Store
 
 main :: IO ()
 main = putStrLn "inspection invariants hold"
@@ -46,3 +53,34 @@ inspect $ 'gradientQuadProbe `doesNotUse` 'SIMD.pokeQuadGradientSIMD
 inspect $ 'gradientQuadProbe `doesNotUse` 'SIMD.pokeVertexSIMD
 inspect $ hasNoTypeClasses 'gradientQuadProbe
 inspect $ 'gradientQuadProbe `hasNoType` ''(,,,)
+
+-- The store's slot functions take the map they work on as a 'Field'. They
+-- must compile to the record code they stand for, with no 'Field' left, so
+-- that a composition of writes still builds the store once.
+storeWriteProbe :: Int -> Int -> Text -> WidgetStore -> WidgetStore
+storeWriteProbe k cursor txt =
+  insertSlot fieldText k txt
+    . insertSlot fieldInt (slotKey SlotCursor k) cursor
+    . deleteSlot fieldInt (slotKey SlotAnchor k)
+
+storeWriteByHand :: Int -> Int -> Text -> WidgetStore -> WidgetStore
+storeWriteByHand k cursor txt st0 =
+  let st1 = st0 {storeInt = IM.delete (slotKey SlotAnchor k) (storeInt st0)}
+      st2 = st1 {storeInt = IM.insert (slotKey SlotCursor k) cursor (storeInt st1)}
+   in st2 {storeText = IM.insert k txt (storeText st2)}
+
+storeReadProbe :: Int -> WidgetStore -> (Int, Bool, Maybe Float)
+storeReadProbe k st =
+  (findSlot fieldInt 7 (slotKey SlotCursor k) st, flagSlot k st, lookupSlot fieldFloat k st)
+
+storeReadByHand :: Int -> WidgetStore -> (Int, Bool, Maybe Float)
+storeReadByHand k st =
+  ( IM.findWithDefault 7 (slotKey SlotCursor k) (storeInt st)
+  , IM.findWithDefault 0 k (storeInt st) /= 0
+  , IM.lookup k (storeFloat st)
+  )
+
+inspect $ 'storeWriteProbe === 'storeWriteByHand
+inspect $ 'storeReadProbe === 'storeReadByHand
+inspect $ 'storeWriteProbe `hasNoType` ''Field
+inspect $ 'storeReadProbe `hasNoType` ''Field

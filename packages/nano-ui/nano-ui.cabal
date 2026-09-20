@@ -260,5 +260,7 @@ test-suite nano-ui-inspection
     main-is:          Inspection.hs
     ghc-options:      -fplugin=Test.Inspection.Plugin
     build-depends:
-        inspection-testing
+        containers,
+        inspection-testing,
+        text ^>=2.1
     hs-source-dirs:   test/inspection

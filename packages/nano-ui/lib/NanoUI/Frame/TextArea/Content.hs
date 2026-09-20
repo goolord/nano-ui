@@ -11,19 +11,15 @@ module NanoUI.Frame.TextArea.Content
   , isMouseOnTextAreaScrollBarAt
   ) where
 
-import Data.Dynamic (fromDynamic, toDyn)
 import Data.IORef (readIORef)
 import Data.Maybe (fromMaybe)
-import qualified Data.IntMap.Strict as IM
 import Data.Sequence (Seq)
 import qualified Data.Sequence as Seq
-import NanoUI.Context (Context (..), WidgetStore (..), getStore, intKey, setStore, slotKey)
+import NanoUI.Context (Context (..), WidgetStore, getStore, intKey, modifyStore, slotKey)
 import NanoUI.Font (FontMetrics (..), lineWidthIO)
 import NanoUI.Frame.TextArea.Geometry (isMouseOnTextAreaScrollBar)
-import NanoUI.Layout.Arena (NodeIdx, getNodeFontSize, getRect, getWidgetId)
-import NanoUI.Store
-  ( Slot (..)
-  )
+import NanoUI.Layout.Arena (NodeIdx, getNodeFontSize, getNodeRect, getWidgetId)
+import NanoUI.Store (Slot (..), fieldFloat, fieldPoint, findSlot, insertDyn, insertSlot, lookupDyn)
 import NanoUI.Style (FontStyle (..), FontVariant (..), FontWeight (..))
 import NanoUI.Types (Rect (..), V2, onGrid)
 import qualified NanoUI.Widgets.TextBuffer as TB
@@ -43,8 +39,7 @@ resolveTextAreaFont ctx idx = do
 -- every document it adopts, so it is only missing for a text area never
 -- declared, which holds an empty document.
 textAreaBuffer :: WidgetStore -> Int -> TB.TextBuffer
-textAreaBuffer store key =
-  fromMaybe TB.empty (IM.lookup (slotKey SlotTextAreaBuffer key) (storeDyn store) >>= fromDynamic)
+textAreaBuffer store key = fromMaybe TB.empty (lookupDyn (slotKey SlotTextAreaBuffer key) store)
 
 -- | Content extent of a text area, @(contentWidth, contentHeight)@. Measuring
 -- the width scans every character of the document, so the result is cached per
@@ -60,10 +55,10 @@ textAreaContentMetrics ctx idx = do
       cacheKeyW = slotKey SlotTextAreaContentW key
       cacheKeyH = slotKey SlotTextAreaContentH key
       widthsKey = slotKey SlotTextAreaWidths key
-      cachedFont = IM.findWithDefault (-1) cacheKeyF (storeFloat store)
-      cachedW = IM.findWithDefault (-1) cacheKeyW (storeFloat store)
+      cachedFont = findSlot fieldFloat (-1) cacheKeyF store
+      cachedW = findSlot fieldFloat (-1) cacheKeyW store
   if cachedFont == size && cachedW >= 0
-    then pure (cachedW, IM.findWithDefault 0 cacheKeyH (storeFloat store))
+    then pure (cachedW, findSlot fieldFloat 0 cacheKeyH store)
     else do
       fm <- resolveTextAreaFont ctx idx
       gen <- readIORef (ctxMetricGen ctx)
@@ -72,7 +67,7 @@ textAreaContentMetrics ctx idx = do
           lineH = onGrid (fmSnapScale fm) (fmLineHeight fm)
           contentH = fromIntegral (max 1 (Seq.length lns)) * lineH
           (seenHead, seenTail) = TB.changedLines buf
-          previous = case IM.lookup widthsKey (storeDyn store) >>= fromDynamic of
+          previous = case lookupDyn widthsKey store of
             Just lw@(LineWidths font fontGen _ _ _) | font == size && fontGen == gen -> lw
             _ -> LineWidths size gen Seq.empty (-1) 0
           LineWidths _ _ measured widest widestW = previous
@@ -94,19 +89,12 @@ textAreaContentMetrics ctx idx = do
             | widest >= 0 && snd freshWidest >= widestW = freshWidest
             | otherwise = Seq.foldlWithIndex (\best i w -> if w > snd best then (i, w) else best) (-1, 0) widths
           pick a b = if snd b > snd a then b else a
-      store' <- getStore ctx
-      setStore
-        ctx
-        ( store'
-            { storeFloat =
-                IM.insert cacheKeyF size $
-                  IM.insert cacheKeyH contentH $
-                    IM.insert cacheKeyW contentW (storeFloat store')
-            , storeDyn =
-                IM.insert widthsKey (toDyn (LineWidths size gen widths widest' contentW)) $
-                  IM.insert (slotKey SlotTextAreaBuffer key) (toDyn (TB.markLinesSeen buf)) (storeDyn store')
-            }
-        )
+      modifyStore ctx $
+        insertSlot fieldFloat cacheKeyF size
+          . insertSlot fieldFloat cacheKeyH contentH
+          . insertSlot fieldFloat cacheKeyW contentW
+          . insertDyn widthsKey (LineWidths size gen widths widest' contentW)
+          . insertDyn (slotKey SlotTextAreaBuffer key) (TB.markLinesSeen buf)
       pure (contentW, contentH)
 
 -- | Measured widths of a text area's lines, the font size and metric
@@ -119,9 +107,9 @@ data LineWidths = LineWidths !Float !Int !(Seq Float) !Int !Float
 textAreaContentGeom :: Context -> NodeIdx -> IO (FontMetrics, Rect, Float, Float)
 textAreaContentGeom ctx idx = do
   fm <- resolveTextAreaFont ctx idx
-  (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+  rect <- getNodeRect (ctxNodeArena ctx) idx
   (contentW, contentH) <- textAreaContentMetrics ctx idx
-  pure (fm, Rect x y w h, contentW, contentH)
+  pure (fm, rect, contentW, contentH)
 
 -- | Whether @mouse@ is over one of the text area's shown scrollbars. Uses the
 -- cached content extent: this runs on every hover through the cursor query.
@@ -130,5 +118,5 @@ isMouseOnTextAreaScrollBarAt ctx idx mouse = do
   (fm, field, contentW, contentH) <- textAreaContentGeom ctx idx
   wid <- getWidgetId (ctxNodeArena ctx) idx
   store <- getStore ctx
-  let (sx, sy) = IM.findWithDefault (0, 0) (slotKey SlotTextAreaScroll (intKey wid)) (storePoint store)
+  let (sx, sy) = findSlot fieldPoint (0, 0) (slotKey SlotTextAreaScroll (intKey wid)) store
   pure (isMouseOnTextAreaScrollBar fm field contentW contentH sx sy mouse)

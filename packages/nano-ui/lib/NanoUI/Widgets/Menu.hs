@@ -18,21 +18,20 @@ module NanoUI.Widgets.Menu
 where
 
 import Control.Monad (void, when)
-import Data.IntMap.Strict qualified as IM
 import Data.Text (Text)
 import Effectful (Eff, type (:>))
 import NanoUI.Context (Context (..), getStore, intKey, modifyStore)
 import NanoUI.Font (menuItemPadX, menuItemRowH, menuMinW, menuOuterPad, menuSepH, widgetContentInset)
 import NanoUI.Input (inputMousePos, inputMouseReleased)
 import NanoUI.Monad (Ui, askContext, askDefaultLayout, askInput, nextId, uiIO)
-import NanoUI.Store (WidgetStore (..), slotKey, Slot (..))
+import NanoUI.Store (Slot (..), fieldPoint, findSlot, flagSlot, insertSlot, setFlagSlot, slotKey)
 import NanoUI.Style (Layout (..), Padding (..), defaultLayout, fillW, fixedH, fontMuted, gap, minW, padXY, tight)
 import NanoUI.Types (PopupAnchor (..), PopupPlacement (..), V2 (..))
 import NanoUI.WidgetText (buttonFlagMenu, buttonFlagMenuBar)
 import NanoUI.Widgets.Combinators (buttonStyled)
 import NanoUI.Widgets.Layout (columnWith, labelEx, rowWith, separator)
 import NanoUI.Layout.Arena (NodeType (..))
-import NanoUI.Widgets.Node (HasResponse, Response (..), containerResponse, respClicked, respHovered, respRightClicked)
+import NanoUI.Widgets.Node (HasResponse, Response (..), containerResponse, inertResponse, respClicked, respHovered, respRightClicked)
 import NanoUI.Widgets.Popup (PopupConfig (..), popup)
 
 -- | A context menu for any widget response, opened by right-clicking it.
@@ -100,17 +99,10 @@ useContextMenu = do
       openK = slotKey SlotMenuOpen key
       posK = slotKey SlotMenuPos key
   store <- uiIO (getStore ctx)
-  let isOpen = IM.findWithDefault 0 openK (storeInt store) /= 0
-      (px, py) = IM.findWithDefault (0, 0) posK (storePoint store)
-      openAt (V2 x y) =
-        uiIO $
-          modifyStore ctx $ \st ->
-            st
-              { storeInt = IM.insert openK 1 (storeInt st)
-              , storePoint = IM.insert posK (x, y) (storePoint st)
-              }
-      close = uiIO $ modifyStore ctx $ \st -> st {storeInt = IM.delete openK (storeInt st)}
-  pure (isOpen, V2 px py, openAt, close)
+  let (px, py) = findSlot fieldPoint (0, 0) posK store
+      openAt (V2 x y) = uiIO (modifyStore ctx (setFlagSlot openK True . insertSlot fieldPoint posK (x, y)))
+      close = uiIO (modifyStore ctx (setFlagSlot openK False))
+  pure (flagSlot openK store, V2 px py, openAt, close)
 
 -- | One context-menu row; the whole row is the button.
 data MenuItem = MenuItem
@@ -141,14 +133,7 @@ menuItemWith (MenuItem lbl hint enabled)
       (_, resp) <-
         containerResponse NodeContainer rowLayout $
           labelEx (fixedH menuItemRowH . tight . fontMuted $ defaultLayout) text
-      pure
-        resp
-          { rawRespHovered = False
-          , rawRespPressed = False
-          , rawRespClicked = False
-          , rawRespRightPressed = False
-          , rawRespRightClicked = False
-          }
+      pure (inertResponse resp)
   where
     text = maybe lbl (\s -> mconcat [lbl, "  ", s]) hint
 

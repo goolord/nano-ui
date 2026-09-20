@@ -37,8 +37,6 @@ where
 
 import Control.Monad (foldM, void, when)
 import Data.Bits ((.|.))
-import Data.IntMap.Strict qualified as IM
-import Data.Dynamic (fromDynamic, toDyn)
 import Data.Maybe (fromMaybe, isNothing)
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -64,7 +62,21 @@ import NanoUI.Input
   )
 import NanoUI.Layout.Arena (NodeType (..))
 import NanoUI.Monad (Ui, askContext, askDefaultLayout, askInput, nextId, uiIO)
-import NanoUI.Store (WidgetStore (..), Slot (..), slotKey)
+import NanoUI.Store
+  ( Slot (..)
+  , WidgetStore
+  , deleteSlot
+  , fieldDouble
+  , fieldInt
+  , fieldText
+  , findSlot
+  , insertDyn
+  , insertSlot
+  , lookupDyn
+  , lookupSlot
+  , memberSlot
+  , slotKey
+  )
 import NanoUI.Style (Layout (..), Sizing (..), defaultLayout)
 import NanoUI.WidgetText (packTextNodeStyleFull, textInputFlagPassword, textInputFlagSearch, textInputFlagSelectable, textInputPasswordMode, textInputSelectableMode)
 import NanoUI.Widgets.Behavior (keyboardFocused)
@@ -111,18 +123,15 @@ data TextInputState = TextInputState
 loadTextInputState :: WidgetStore -> Int -> Text -> TextInputState
 loadTextInputState store key text =
   let len = T.length text
-      cursor = min len (IM.findWithDefault len (slotKey SlotCursor key) (storeInt store))
-      anchor = min len (IM.findWithDefault cursor (slotKey SlotAnchor key) (storeInt store))
+      cursor = min len (findSlot fieldInt len (slotKey SlotCursor key) store)
+      anchor = min len (findSlot fieldInt cursor (slotKey SlotAnchor key) store)
    in TextInputState text cursor anchor
 
 saveTextInputState :: Int -> TextInputState -> WidgetStore -> WidgetStore
-saveTextInputState key s store =
-  store
-    { storeText = IM.insert key (tisText s) (storeText store)
-    , storeInt =
-        IM.insert (slotKey SlotCursor key) (tisCursor s) $
-          IM.insert (slotKey SlotAnchor key) (tisAnchor s) (storeInt store)
-    }
+saveTextInputState key s =
+  insertSlot fieldText key (tisText s)
+    . insertSlot fieldInt (slotKey SlotCursor key) (tisCursor s)
+    . insertSlot fieldInt (slotKey SlotAnchor key) (tisAnchor s)
 
 -- | The editor for a field's state, with the undo history stored for it. A
 -- history recorded against other text (the caller replaced the value) is
@@ -130,7 +139,7 @@ saveTextInputState key s store =
 textInputEditor :: WidgetStore -> Int -> TextInputState -> Editor
 textInputEditor store key s =
   let buf = TB.withCursor (TB.Cursor 0 (tisCursor s)) (TB.fromText (tisText s))
-      history = case IM.lookup (slotKey SlotTextHistory key) (storeDyn store) >>= fromDynamic of
+      history = case lookupDyn (slotKey SlotTextHistory key) store of
         Just (text, h) | text == tisText s -> h
         _ -> emptyHistory
    in Editor buf (TB.clampCursor buf (TB.Cursor 0 (tisAnchor s))) history
@@ -142,10 +151,9 @@ editorTextState ed =
 
 -- | Store an editor's text, selection and history.
 saveTextEditor :: Int -> Editor -> WidgetStore -> WidgetStore
-saveTextEditor key ed store =
+saveTextEditor key ed =
   let s = editorTextState ed
-      saved = saveTextInputState key s store
-   in saved {storeDyn = IM.insert (slotKey SlotTextHistory key) (toDyn (tisText s, editorHistory ed)) (storeDyn saved)}
+   in insertDyn (slotKey SlotTextHistory key) (tisText s, editorHistory ed) . saveTextInputState key s
 
 -- | Run this frame's commands on a field, or 'Nothing' when it had none.
 editTextInput :: Context -> EditorMode -> Input -> WidgetStore -> Int -> TextInputState -> IO (Maybe Editor)
@@ -170,14 +178,14 @@ applyTextInputCommand ctx wid mode cmd = do
   store <- getStore ctx
   let
     key = intKey wid
-    s0 = loadTextInputState store key (IM.findWithDefault "" key (storeText store))
+    s0 = loadTextInputState store key (findSlot fieldText "" key store)
   let ed0 = textInputEditor store key s0
   ed <- runCommandIO ctx mode cmd ed0 {editorHistory = sealHistory (editorHistory ed0)}
   let s1 = editorTextState ed
       saved = saveTextEditor key ed store
   setStore ctx $
     if tisText s1 /= tisText s0
-      then saved {storeInt = IM.insert (slotKey SlotTextAreaChanged key) 1 (storeInt saved)}
+      then insertSlot fieldInt (slotKey SlotTextAreaChanged key) 1 saved
       else saved
   markDirty ctx
 
@@ -244,14 +252,14 @@ editTextField wid mode initial unfocusedText = do
     key = intKey wid
     modeKey = slotKey SlotTextMode key
     pulseKey = slotKey SlotTextAreaChanged key
-    stored = IM.lookup key (storeText store)
+    stored = lookupSlot fieldText key store
     s0 = loadTextInputState store key (fromMaybe initial stored)
-    pulse = IM.member pulseKey (storeInt store)
-  when (isNothing stored || IM.lookup modeKey (storeInt store) /= Just (editorModeCode mode) || pulse) $
-    uiIO $ modifyStore ctx $ \st -> st
-      { storeText = if isNothing stored then IM.insert key initial (storeText st) else storeText st
-      , storeInt = IM.delete pulseKey (IM.insert modeKey (editorModeCode mode) (storeInt st))
-      }
+    pulse = memberSlot fieldInt pulseKey store
+  when (isNothing stored || lookupSlot fieldInt modeKey store /= Just (editorModeCode mode) || pulse) $
+    uiIO . modifyStore ctx $
+      (if isNothing stored then insertSlot fieldText key initial else id)
+        . deleteSlot fieldInt pulseKey
+        . insertSlot fieldInt modeKey (editorModeCode mode)
   isFocus <- keyboardFocused wid
   mEdited <- if isFocus then uiIO (editTextInput ctx mode inp store key s0) else pure Nothing
   let s1 = case mEdited of
@@ -303,39 +311,31 @@ debounceSearchChanged ctx key focused rawChanged ms = do
   let
     committedKey = slotKey SlotSearchCommitted key
     ageKey = slotKey SlotSearchAge key
-    fieldText = IM.findWithDefault "" key (storeText store)
-    committedMissing = not (IM.member committedKey (storeText store))
-    committed = IM.findWithDefault fieldText committedKey (storeText store)
-    dirty = fieldText /= committed
+    current = findSlot fieldText "" key store
+    committedMissing = not (memberSlot fieldText committedKey store)
+    committed = findSlot fieldText current committedKey store
+    dirty = current /= committed
     needClock = rawChanged || dirty
   now <- if needClock then getMonotonicTime else pure 0
   let
     -- Debounce timing stays in Double: wall-clock seconds as Float lose
     -- resolution at long uptimes (~125 ms at 12 days), which would shift
     -- (or skip) the trailing-edge window.
-    lastEdit = IM.findWithDefault now ageKey (storeDouble store)
+    lastEdit = findSlot fieldDouble now ageKey store
     deadline = realToFrac ms :: Double
     idleMs = (now - lastEdit) * 1000
     commit =
       not rawChanged
         && dirty
-        && (T.null fieldText || not focused || idleMs >= deadline)
+        && (T.null current || not focused || idleMs >= deadline)
     -- Text the caller changed, in a field nobody has typed in, has no edit
     -- time to age from. Its pause starts now: left unstamped, every frame
     -- would see a fresh edit, and the commit would never come.
-    stamp = rawChanged || commit || (dirty && not (IM.member ageKey (storeDouble store)))
+    stamp = rawChanged || commit || (dirty && not (memberSlot fieldDouble ageKey store))
   when (stamp || committedMissing) $
-    modifyStore ctx $ \st ->
-      st
-        { storeText =
-            if commit || committedMissing
-              then IM.insert committedKey fieldText (storeText st)
-              else storeText st
-        , storeDouble =
-            if stamp
-              then IM.insert ageKey now (storeDouble st)
-              else storeDouble st
-        }
+    modifyStore ctx $
+      (if commit || committedMissing then insertSlot fieldText committedKey current else id)
+        . (if stamp then insertSlot fieldDouble ageKey now else id)
   -- An uncommitted edit commits once typing has paused for the deadline, and
   -- no input arrives to mark that moment. Ask for the frame that will see it.
   when (dirty && not commit) $

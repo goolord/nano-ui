@@ -12,8 +12,7 @@ module NanoUI.Frame.Focus
 import Control.Monad (filterM, unless, when)
 import Data.IORef (readIORef, writeIORef)
 import Data.Primitive.PrimArray (readPrimArray)
-import qualified Data.IntMap.Strict as IM
-import NanoUI.Context (Context (..), WidgetStore (..), getStore, intBool, intKey)
+import NanoUI.Context (Context (..), getStore, intBool, intKey)
 import NanoUI.Frame.Hit (widgetIdInSubtree)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Layout.Arena
@@ -26,6 +25,7 @@ import NanoUI.Layout.Arena
   , setNodeValue
   , topModalNode
   )
+import NanoUI.Store (fieldInt, findSlot, lookupSlot)
 import NanoUI.WidgetText (treeDecodeStyle)
 
 tabNext :: WidgetId -> [WidgetId] -> Bool -> WidgetId
@@ -107,7 +107,7 @@ syncWidgetLabels ctx = do
       NodeCheckbox ->
         -- Only sync when the widget owns stored state; otherwise keep the
         -- value set from the initial argument during the UI pass.
-        case IM.lookup key (storeInt store) of
+        case lookupSlot fieldInt key store of
           Just v -> setNodeValue na idx (if intBool v then 1 else 0)
           Nothing -> pure ()
       _
@@ -120,6 +120,6 @@ syncWidgetLabels ctx = do
             let own
                   | nt == NodeTree, (nodeIdx, _, _, _) <- treeDecodeStyle si = nodeIdx
                   | otherwise = si
-                selected = IM.findWithDefault own (intKey groupWid) (storeInt store)
+                selected = findSlot fieldInt own (intKey groupWid) store
             setNodeValue na idx (if selected == own then 1 else 0)
       _ -> pure ()

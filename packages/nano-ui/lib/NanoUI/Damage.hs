@@ -51,7 +51,7 @@ import NanoUI.Input
   , inputWindowSize
   )
 import NanoUI.Frame.Hit (findNodeByKey)
-import NanoUI.Store (eqByPtr, mirrorStoresChanged, ptrEq, slotKey, Slot (..))
+import NanoUI.Store (Slot (..), eqByPtr, mirrorStoresChanged, ptrEq, slotKey)
 import NanoUI.Layout.Arena
   ( NodeArena
   , NodeType (..)
@@ -60,15 +60,15 @@ import NanoUI.Layout.Arena
   , foldNodeRevM
   , getClipRect
   , getHeightSizing
+  , getNodeRect
   , getNodeType
-  , getParent
-  , getRect
   , getStyleIdx
   , getText
   , getWidgetId
   , getWidthSizing
   , isFloatingNode
   , isScrollNode
+  , walkAncestors
   )
 import NanoUI.Frame.Scroll.Geometry (decodeScrollConfig, scrollBare)
 import NanoUI.Widgets.Custom (mkCustomDrawContext)
@@ -100,7 +100,7 @@ orphanEscalateFrames = 2
 -- Partial retain clears with themeWindow. Expand interaction clips to the painted
 -- panel/window backdrop so slop pixels get the correct fill, not window color.
 backdropRectFromNode :: Context -> Int -> IO (Maybe Rect)
-backdropRectFromNode ctx idx = walkAncestors step (ctxNodeArena ctx) idx
+backdropRectFromNode ctx idx = walkAncestors (ctxNodeArena ctx) idx step
   where
     step i = do
       let na = ctxNodeArena ctx
@@ -117,23 +117,10 @@ backdropRectFromNode ctx idx = walkAncestors step (ctxNodeArena ctx) idx
               else getNonzeroRect na i
           _ -> pure Nothing
 
-{-# INLINE walkAncestors #-}
-walkAncestors :: (Int -> IO (Maybe a)) -> NodeArena -> Int -> IO (Maybe a)
-walkAncestors step arena idx = loop idx
-  where
-    loop i
-      | i < 0 = pure Nothing
-      | otherwise = do
-          mr <- step i
-          case mr of
-            Just x -> pure (Just x)
-            Nothing -> getParent arena i >>= loop
-
 {-# INLINE getNonzeroRect #-}
 getNonzeroRect :: NodeArena -> Int -> IO (Maybe Rect)
 getNonzeroRect arena i = do
-  (x, y, w, h) <- getRect arena i
-  let r = Rect x y w h
+  r <- getNodeRect arena i
   pure (if rectNonEmpty r then Just r else Nothing)
 
 updatePrevRects :: Context -> IO ()
@@ -220,8 +207,8 @@ floatingPanelsInOrder ctx = foldNodeRevM na step []
           if hashWidgetId wid == 0
             then pure acc
             else do
-              (x, y, w, h) <- getRect na idx
-              pure ((intKey wid, Rect x y w h) : acc)
+              rect <- getNodeRect na idx
+              pure ((intKey wid, rect) : acc)
 
 floatingPanelRects :: Context -> IO (IM.IntMap Rect)
 floatingPanelRects ctx = IM.fromList <$> floatingPanelsInOrder ctx
@@ -343,8 +330,7 @@ refreshCustomDrawings ctx = arenaCount na >>= \count -> go count 0 []
             then go count (i + 1) acc
             else do
               wid <- getWidgetId na i
-              (x, y, w, h) <- getRect na i
-              let rect = Rect x y w h
+              rect <- getNodeRect na i
               mCustom <- lookupCustomDrawing ctx wid
               changed <- case mCustom of
                 Just (CustomDrawingEntry content build) -> do
@@ -642,7 +628,7 @@ clipKeyRect ctx k r
 -- stops at the first scroll node even when its rect is empty.
 scrollAncestorRect :: Context -> Int -> IO (Maybe Rect)
 scrollAncestorRect ctx k =
-  findNodeByKey ctx k >>= maybe (pure Nothing) (fmap join . walkAncestors step na)
+  findNodeByKey ctx k >>= maybe (pure Nothing) (\idx -> join <$> walkAncestors na idx step)
   where
     na = ctxNodeArena ctx
     step i = do
@@ -695,7 +681,7 @@ scrollOffsetDamage ctx acc oldStore newStore =
 
 floatingAncestorRect :: Context -> Int -> IO (Maybe Rect)
 floatingAncestorRect ctx idx =
-  walkAncestors check (ctxNodeArena ctx) idx
+  walkAncestors (ctxNodeArena ctx) idx check
   where
     check i = do
       nt <- getNodeType (ctxNodeArena ctx) i

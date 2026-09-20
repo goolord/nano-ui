@@ -14,11 +14,9 @@ module NanoUI.Frame.Window
   ) where
 
 import Control.Monad (when)
-import qualified Data.IntMap.Strict as IM
 import Data.Maybe (fromMaybe, isJust)
 import NanoUI.Context
   ( Context (..)
-  , WidgetStore (..)
   , WindowResizeDrag (..)
   , WindowResizeEdge (..)
   , damageWidget
@@ -27,6 +25,7 @@ import NanoUI.Context
   , getWindowResize
   , intKey
   , markDirty
+  , modifyStore
   , setStore
   , slotKey
   , Slot (..)
@@ -35,7 +34,7 @@ import NanoUI.Context
   , lookupCustomMeasure
   )
 import NanoUI.Font (ScrollBarSlot (..))
-import NanoUI.Frame.Hit (findNodeByWidgetId, nodeInSubtree, topmostOverlayAtMouse)
+import NanoUI.Frame.Hit (findNodeByWidgetId, nodeInSubtree, topmostOverlayAtMouse, withWidgetNode)
 import NanoUI.Frame.Input (findTopWidgetUnderMouse, isInteractiveNode)
 import NanoUI.Frame.Redraw (probeHotId)
 import NanoUI.Frame.Scroll.Geometry (scrollChromeLane)
@@ -50,6 +49,7 @@ import NanoUI.Layout.Arena
   , getFirstChild
   , getMinMax
   , getNextSibling
+  , getNodeRect
   , getNodeType
   , getNodeValue
   , getPadding
@@ -57,30 +57,23 @@ import NanoUI.Layout.Arena
   , getWidgetId
   )
 import NanoUI.Layout.Solve (Measurers (..), placeWindowNode, windowBodyScroller)
+import NanoUI.Monad ((<&&>))
+import NanoUI.Store (fieldPoint, insertSlot, lookupSlot)
 import NanoUI.Style (Padding (..))
-import NanoUI.Types (DamageBounds (..), Rect (..), V2 (..), haloDamageSlop, rectContains, rectInflate)
+import NanoUI.Types (DamageBounds (..), Rect (..), V2 (..), haloDamageSlop, rectContains, rectInflate, rectNonEmpty)
 
 topmostWindowAtResizeHalo :: Context -> V2 -> IO (Maybe NodeIdx)
 topmostWindowAtResizeHalo ctx mouse =
-  findNodeRevM (ctxNodeArena ctx) $ \idx -> do
-    nt <- getNodeType (ctxNodeArena ctx) idx
-    if nt /= NodeWindow
-      then pure False
-      else do
-        (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-        if w <= 0 || h <= 0
-          then pure False
-          else pure (rectContains (rectInflate windowResizeHandleFor (Rect x y w h)) mouse)
+  findNodeRevM (ctxNodeArena ctx) $ \idx ->
+    ((== NodeWindow) <$> getNodeType (ctxNodeArena ctx) idx) <&&> do
+      rect <- getNodeRect (ctxNodeArena ctx) idx
+      pure (rectNonEmpty rect && rectContains (rectInflate windowResizeHandleFor rect) mouse)
 
 lookupWindowPos :: Context -> WidgetId -> IO (Maybe (Float, Float))
-lookupWindowPos ctx wid = do
-  store <- getStore ctx
-  pure (IM.lookup (intKey wid) (storePoint store))
+lookupWindowPos ctx wid = lookupSlot fieldPoint (intKey wid) <$> getStore ctx
 
 lookupWindowSize :: Context -> WidgetId -> IO (Maybe (Float, Float))
-lookupWindowSize ctx wid = do
-  store <- getStore ctx
-  pure (IM.lookup (slotKey SlotWinSize (intKey wid)) (storePoint store))
+lookupWindowSize ctx wid = lookupSlot fieldPoint (slotKey SlotWinSize (intKey wid)) <$> getStore ctx
 
 persistWindowPositions :: Context -> IO ()
 persistWindowPositions ctx = do
@@ -95,13 +88,12 @@ persistWindowPositions ctx = do
             (x, y, w, h) <- getRect na idx
             let k = intKey wid
                 sizeKey = slotKey SlotWinSize k
-                points = storePoint acc
             -- Keep an unchanged map as is, so the store comparison below
             -- short-circuits on pointer equality.
             pure $
-              if IM.lookup k points == Just (x, y) && IM.lookup sizeKey points == Just (w, h)
+              if lookupSlot fieldPoint k acc == Just (x, y) && lookupSlot fieldPoint sizeKey acc == Just (w, h)
                 then acc
-                else acc {storePoint = IM.insert k (x, y) (IM.insert sizeKey (w, h) points)}
+                else insertSlot fieldPoint k (x, y) (insertSlot fieldPoint sizeKey (w, h) acc)
   store1 <- foldNodesM na record store0
   when (store1 /= store0) $ setStore ctx store1
 
@@ -116,8 +108,7 @@ updateWindowDrag ctx inp = do
         Just (wid, gx, gy)
           | inputMouseDown inp -> do
               let V2 mx my = inputMousePos inp
-              store <- getStore ctx
-              setStore ctx (store {storePoint = IM.insert (intKey wid) (mx - gx, my - gy) (storePoint store)})
+              modifyStore ctx (insertSlot fieldPoint (intKey wid) (mx - gx, my - gy))
               damageWidget ctx wid (DamageInflated haloDamageSlop)
               markDirty ctx
               pure True
@@ -254,8 +245,7 @@ updateWindowResize ctx inp winW winH = do
       | inputMouseDown inp -> do
           let (nw, nh, nx, ny) = resizeFromEdge wrd (inputMousePos inp) winW winH
               key = intKey (wrdWidget wrd)
-          store <- getStore ctx
-          setStore ctx (store {storePoint = IM.insert (slotKey SlotWinSize key) (nw, nh) (IM.insert key (nx, ny) (storePoint store))})
+          modifyStore ctx (insertSlot fieldPoint (slotKey SlotWinSize key) (nw, nh) . insertSlot fieldPoint key (nx, ny))
           relayoutWindow ctx winW winH (wrdWidget wrd) nw nh
           damageWidget ctx (wrdWidget wrd) (DamageInflated haloDamageSlop)
           markDirty ctx
@@ -269,13 +259,10 @@ updateWindowResize ctx inp winW winH = do
 
 relayoutWindow :: Context -> Float -> Float -> WidgetId -> Float -> Float -> IO ()
 relayoutWindow ctx winW winH wid nw nh = do
-  mIdx <- findNodeByWidgetId ctx wid
-  case mIdx of
-    Nothing -> pure ()
-    Just idx -> do
-      mpos <- lookupWindowPos ctx wid
-      (x, y, _, _) <- getRect (ctxNodeArena ctx) idx
-      placeWindowNode (ctxNodeArena ctx) (contextMeasurers ctx) winW winH idx nw nh (const (fromMaybe (x, y) mpos))
+  withWidgetNode ctx wid () $ \idx -> do
+    mpos <- lookupWindowPos ctx wid
+    (x, y, _, _) <- getRect (ctxNodeArena ctx) idx
+    placeWindowNode (ctxNodeArena ctx) (contextMeasurers ctx) winW winH idx nw nh (const (fromMaybe (x, y) mpos))
 
 -- | Resize edge under @mouse@ for the topmost window whose halo holds it,
 -- unless the halo is blocked or the pointer is on one of the window's
@@ -286,8 +273,7 @@ resizeEdgeTarget ctx mouse = do
   case mWin of
     Nothing -> pure Nothing
     Just idx -> do
-      (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-      let rect = Rect x y w h
+      rect <- getNodeRect (ctxNodeArena ctx) idx
       -- The halo covers the window interior, so find the edge first and run
       -- the hover probe and node scans only when there is one.
       mEdge <- windowResizeEdgeFor ctx idx rect mouse
@@ -348,10 +334,7 @@ resizeHaloBlocked ctx mouse winIdx = do
       if hashWidgetId hot == 0
         then pure False
         else do
-          mHot <- findNodeByWidgetId ctx hot
-          case mHot of
-            Nothing -> pure False
-            Just hotIdx -> not <$> nodeInSubtree ctx hotIdx winIdx
+          withWidgetNode ctx hot False $ \hotIdx -> not <$> nodeInSubtree ctx hotIdx winIdx
 
 tryStartWindowDrag :: Context -> V2 -> IO Bool
 tryStartWindowDrag ctx mouse@(V2 mx my) = do

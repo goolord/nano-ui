@@ -26,7 +26,7 @@ import NanoUI.Context
   , startAnimationEaseDelay
   , startSpring
   )
-import NanoUI.Monad (Ui, askContext, nextId, scope, uiIO, uiTime, withKey)
+import NanoUI.Monad (Ui, askContext, nextId, scope, uiIO, uiTime, withContext, withKey)
 import NanoUI.Widgets.Node (HasResponse, respId)
 
 -- | How an animated value moves.
@@ -106,9 +106,7 @@ pulse periodSec = do
 -- > bar <- progressBar' =<< pulse 6
 -- > keepAnimating bar
 keepAnimating :: (HasResponse r, Ui :> es) => r -> Eff es ()
-keepAnimating resp = do
-  ctx <- askContext
-  uiIO (keepAnimationAlive ctx (respId resp))
+keepAnimating resp = withContext (\ctx -> keepAnimationAlive ctx (respId resp))
 
 -- | Ask for another frame after this many seconds, even if no input arrives.
 -- The loop sleeps until then. Call it on every frame that still needs the
@@ -121,6 +119,4 @@ keepAnimating resp = do
 -- Use it instead of 'keepAnimating' when a view changes on a schedule and not
 -- continuously: 'keepAnimating' runs a frame for every display refresh.
 wakeAfter :: Ui :> es => Double -> Eff es ()
-wakeAfter sec = do
-  ctx <- askContext
-  uiIO (requestWakeAfter ctx sec)
+wakeAfter sec = withContext (\ctx -> requestWakeAfter ctx sec)

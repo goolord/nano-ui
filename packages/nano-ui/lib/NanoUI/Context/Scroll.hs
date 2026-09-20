@@ -48,7 +48,7 @@ import Data.IORef (modifyIORef', readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
 import Data.IntSet qualified as IS
 
-import NanoUI.Context.Core (damageWidget, getPrevRect, getStore, setStore)
+import NanoUI.Context.Core (damageWidget, getPrevRect, getStore, modifyStore, setStore, writeSlots)
 import NanoUI.Context.Types
   ( Context (..)
   , ScrollAxes (..)
@@ -67,11 +67,7 @@ import NanoUI.Frame.Scroll.Geometry
   , scrollConfigNative2D
   )
 import NanoUI.Id (WidgetId)
-import NanoUI.Store
-  ( WidgetStore (..)
-  , slotKey
-  , Slot (..)
-  )
+import NanoUI.Store (Slot (..), WidgetStore, fieldFloat, fieldInt, fieldPoint, findSlot, insertSlot, lookupSlot, slotKey, slotWrite, slotWriteOr)
 import NanoUI.Types (DamageBounds (..), Rect (..), V2 (..), clamp, onGrid, v2X, v2Y)
 
 {-# INLINE snapScrollOffset #-}
@@ -84,18 +80,16 @@ getScrollOffset :: Context -> WidgetId -> IO Float
 getScrollOffset ctx wid = do
   s <- getStore ctx
   let key = intKey wid
-      points = storePoint s
-      cfgBits = IM.findWithDefault (encodeScrollConfig defaultScrollConfig) (slotKey SlotScrollCfg key) (storeInt s)
       -- Text areas keep both axes in their own slot; native 2D scrollers keep
       -- them in the offset slot, falling back to the main-axis float as
       -- 'getScrollOffset2D' does.
-      off = case IM.lookup (slotKey SlotTextAreaScroll key) points of
+      off = case lookupSlot fieldPoint (slotKey SlotTextAreaScroll key) s of
         Just (_, sy) -> sy
         Nothing
-          | scrollConfigNative2D (decodeScrollConfig cfgBits)
-          , Just (_, y) <- IM.lookup (slotKey SlotScrollOff key) points ->
+          | scrollConfigNative2D (storedScrollConfig key s)
+          , Just (_, y) <- lookupSlot fieldPoint (slotKey SlotScrollOff key) s ->
               y
-          | otherwise -> IM.findWithDefault 0 key (storeFloat s)
+          | otherwise -> findSlot fieldFloat 0 key s
   snapScrollOffset ctx off
 
 -- | Move a scroller to an offset along its main axis. Cancels a glide in
@@ -110,51 +104,41 @@ writeScrollOffset ctx wid off = do
   store <- getStore ctx
   let key = intKey wid
       sKey = slotKey SlotTextAreaScroll key
-  case IM.lookup sKey (storePoint store) of
+  case lookupSlot fieldPoint sKey store of
     Just (sx, sy) ->
       when (sy /= off) $ do
-        setStore ctx (store {storePoint = IM.insert sKey (sx, off) (storePoint store)})
+        setStore ctx (insertSlot fieldPoint sKey (sx, off) store)
         damageWidget ctx wid DamageSelf
-    Nothing -> do
-      cfg <- getScrollConfig ctx wid
-      if scrollConfigNative2D cfg
-        then do
+    Nothing
+      | scrollConfigNative2D (storedScrollConfig key store) -> do
           cur <- getScrollOffset2D ctx wid
           writeScrollOffset2D ctx wid (V2 (v2X cur) off)
-        else do
-          let prev = IM.findWithDefault 0 key (storeFloat store)
-          when (prev /= off) $ do
-            let floats0 = IM.insert key off (storeFloat store)
-                yKey = IM.findWithDefault 0 (slotKey SlotScrollLinkY key) (storeInt store)
+      | otherwise -> when (findSlot fieldFloat 0 key store /= off) $ do
+          let moved = insertSlot fieldFloat key off store
+              yKey = findSlot fieldInt 0 (slotKey SlotScrollLinkY key) store
+              prevY = findSlot fieldFloat 0 yKey moved
+          setStore ctx $
             if yKey == 0
-              then setStore ctx (store {storeFloat = floats0})
-              else do
-                let offKey = slotKey SlotScrollOff yKey
-                    crossKey = slotKey SlotScrollCross yKey
-                    prevY = IM.findWithDefault 0 yKey floats0
-                    floats1 = IM.insert yKey prevY $ IM.insert crossKey off floats0
-                    points = IM.insert offKey (off, prevY) (storePoint store)
-                setStore ctx (store {storeFloat = floats1, storePoint = points})
+              then moved
+              else
+                insertSlot fieldPoint (slotKey SlotScrollOff yKey) (off, prevY)
+                  . insertSlot fieldFloat yKey prevY
+                  . insertSlot fieldFloat (slotKey SlotScrollCross yKey) off
+                  $ moved
 
 getScrollOffset2D :: Context -> WidgetId -> IO V2
 getScrollOffset2D ctx wid = do
   s <- getStore ctx
   let widKey = intKey wid
       sKey = slotKey SlotTextAreaScroll widKey
-  v <-
-    case IM.lookup sKey (storePoint s) of
-      Just (sx, sy) -> pure (V2 sx sy)
-      Nothing -> do
-        let offKey = slotKey SlotScrollOff widKey
-            crossKey = slotKey SlotScrollCross widKey
-        case IM.lookup offKey (storePoint s) of
-          Just (x, y) -> pure (V2 x y)
+      v = case lookupSlot fieldPoint sKey s of
+        Just (sx, sy) -> V2 sx sy
+        Nothing -> case lookupSlot fieldPoint (slotKey SlotScrollOff widKey) s of
+          Just (x, y) -> V2 x y
           Nothing ->
-            pure
-              ( V2
-                  (IM.findWithDefault 0 crossKey (storeFloat s))
-                  (IM.findWithDefault 0 widKey (storeFloat s))
-              )
+            V2
+              (findSlot fieldFloat 0 (slotKey SlotScrollCross widKey) s)
+              (findSlot fieldFloat 0 widKey s)
   sx <- snapScrollOffset ctx (v2X v)
   sy <- snapScrollOffset ctx (v2Y v)
   pure (V2 sx sy)
@@ -170,69 +154,51 @@ writeScrollOffset2D ctx wid off = do
   store <- getStore ctx
   let widKey = intKey wid
       sKey = slotKey SlotTextAreaScroll widKey
+      next = (v2X off, v2Y off)
   -- Text areas only reach the first branch because `textAreaWith` seeds this
   -- slot at init; without the seed a freshly mounted editor falls through to
   -- the container slots below and its offsets are never rendered.
-  case IM.lookup sKey (storePoint store) of
-    Just (sx, sy) -> do
-      let sx' = v2X off
-          sy' = v2Y off
-      when (sx /= sx' || sy /= sy') $ do
-        setStore ctx (store {storePoint = IM.insert sKey (sx', sy') (storePoint store)})
+  case lookupSlot fieldPoint sKey store of
+    Just cur ->
+      when (cur /= next) $ do
+        setStore ctx (insertSlot fieldPoint sKey next store)
         damageWidget ctx wid DamageSelf
     Nothing -> do
       let offKey = slotKey SlotScrollOff widKey
           crossKey = slotKey SlotScrollCross widKey
-          prev = IM.lookup offKey (storePoint store)
-          next = (v2X off, v2Y off)
-          prevY = IM.findWithDefault 0 widKey (storeFloat store)
-          prevX = IM.findWithDefault 0 crossKey (storeFloat store)
-          xLink = IM.findWithDefault 0 (slotKey SlotScrollLinkX widKey) (storeInt store)
-      when (prev /= Just next || prevY /= v2Y off || prevX /= v2X off) $ do
-        let floats0 =
-              IM.insert widKey (v2Y off) $
-                IM.insert crossKey (v2X off) (storeFloat store)
-            floats1 =
-              if xLink == 0 then floats0 else IM.insert xLink (v2X off) floats0
-        setStore ctx
-          ( store
-              { storePoint = IM.insert offKey next (storePoint store)
-              , storeFloat = floats1
-              }
-          )
+          prevY = findSlot fieldFloat 0 widKey store
+          prevX = findSlot fieldFloat 0 crossKey store
+          xLink = findSlot fieldInt 0 (slotKey SlotScrollLinkX widKey) store
+      when (lookupSlot fieldPoint offKey store /= Just next || prevY /= v2Y off || prevX /= v2X off) $
+        setStore ctx $
+          insertSlot fieldPoint offKey next
+            . (if xLink == 0 then id else insertSlot fieldFloat xLink (v2X off))
+            . insertSlot fieldFloat widKey (v2Y off)
+            . insertSlot fieldFloat crossKey (v2X off)
+            $ store
 
 linkScrollAxes :: Context -> WidgetId -> WidgetId -> IO ()
 linkScrollAxes ctx yWid xWid = do
-  store <- getStore ctx
   let yKey = intKey yWid
       xKey = intKey xWid
-      ints =
-        IM.insert (slotKey SlotScrollLinkX yKey) xKey $
-          IM.insert (slotKey SlotScrollLinkY xKey) yKey (storeInt store)
-  setStore ctx (store {storeInt = ints})
+  modifyStore ctx $
+    insertSlot fieldInt (slotKey SlotScrollLinkX yKey) xKey
+      . insertSlot fieldInt (slotKey SlotScrollLinkY xKey) yKey
   V2 x2 y <- getScrollOffset2D ctx yWid
-  x1 <- do
-    s <- getStore ctx
-    pure (IM.findWithDefault 0 xKey (storeFloat s))
+  x1 <- findSlot fieldFloat 0 xKey <$> getStore ctx
   let x = if x2 == 0 && x1 /= 0 then x1 else x2
   when (x /= x2 || x /= x1) $
     setScrollOffset2D ctx yWid (V2 x y)
 
-getScrollConfig :: Context -> WidgetId -> IO ScrollConfig
-getScrollConfig ctx wid = do
-  s <- getStore ctx
-  let cfgKey = slotKey SlotScrollCfg (intKey wid)
-      bits = IM.findWithDefault (encodeScrollConfig defaultScrollConfig) cfgKey (storeInt s)
-  pure (decodeScrollConfig bits)
+-- | The scroll configuration stored under a widget key, or the default.
+storedScrollConfig :: Int -> WidgetStore -> ScrollConfig
+storedScrollConfig key =
+  decodeScrollConfig . findSlot fieldInt (encodeScrollConfig defaultScrollConfig) (slotKey SlotScrollCfg key)
 
 setScrollConfig :: Context -> WidgetId -> ScrollConfig -> IO ()
-setScrollConfig ctx wid cfg = do
-  store <- getStore ctx
-  let cfgKey = slotKey SlotScrollCfg (intKey wid)
-      bits = encodeScrollConfig cfg
-      prev = IM.findWithDefault (encodeScrollConfig defaultScrollConfig) cfgKey (storeInt store)
-  when (prev /= bits) $
-    setStore ctx (store {storeInt = IM.insert cfgKey bits (storeInt store)})
+setScrollConfig ctx wid cfg =
+  writeSlots ctx $
+    slotWriteOr fieldInt (encodeScrollConfig defaultScrollConfig) (slotKey SlotScrollCfg (intKey wid)) (encodeScrollConfig cfg)
 
 -- =============================================================================
 -- Tuning
@@ -251,20 +217,13 @@ setScrollTuning ctx tuning =
 
 -- | This scroller's own wheel step, or @0@ when it follows the context's.
 getScrollStep :: Context -> WidgetId -> IO Float
-getScrollStep ctx wid = do
-  s <- getStore ctx
-  pure (IM.findWithDefault 0 (slotKey SlotScrollStep (intKey wid)) (storeFloat s))
+getScrollStep ctx wid = findSlot fieldFloat 0 (slotKey SlotScrollStep (intKey wid)) <$> getStore ctx
 
 -- | Give one scroller its own wheel step, in pixels per notch. @0@ puts it
 -- back on the context's step. A list whose rows are a fixed height reads best
 -- at a whole number of rows per notch.
 setScrollStep :: Context -> WidgetId -> Float -> IO ()
-setScrollStep ctx wid px = do
-  store <- getStore ctx
-  let key = slotKey SlotScrollStep (intKey wid)
-      prev = IM.findWithDefault 0 key (storeFloat store)
-  when (prev /= px) $
-    setStore ctx (store {storeFloat = IM.insert key px (storeFloat store)})
+setScrollStep ctx wid px = writeSlots ctx (slotWriteOr fieldFloat 0 (slotKey SlotScrollStep (intKey wid)) px)
 
 -- | Pixels one wheel notch scrolls this scroller.
 resolveScrollStep :: Context -> WidgetId -> IO Float
@@ -300,10 +259,10 @@ getScrollMetrics :: Context -> WidgetId -> IO (Maybe ScrollMetrics)
 getScrollMetrics ctx wid = do
   s <- getStore ctx
   let key = intKey wid
-      point slot = IM.lookup (slotKey slot key) (storePoint s)
+      point slot = lookupSlot fieldPoint (slotKey slot key) s
   case (point SlotScrollViewPos, point SlotScrollViewSize, point SlotScrollRange) of
     (Just (vx, vy), Just (vw, vh), Just (mx, my)) -> do
-      let axes = decodeScrollAxes (IM.findWithDefault 0 (slotKey SlotScrollAxes key) (storeInt s))
+      let axes = decodeScrollAxes (findSlot fieldInt 0 (slotKey SlotScrollAxes key) s)
       off <- getScrollOffsetIn ctx wid axes
       pure $
         Just
@@ -348,31 +307,12 @@ writeScrollMetrics ctx wid axes (Rect vx vy vw vh) range@(V2 mx my) = do
   -- A range that just shrank (a filtered list, a narrower window) would leave
   -- a glide heading past the new end.
   clampScrollGlide ctx wid range
-  store <- getStore ctx
   let key = intKey wid
-      axesKey = slotKey SlotScrollAxes key
-      posKey = slotKey SlotScrollViewPos key
-      sizeKey = slotKey SlotScrollViewSize key
-      rangeKey = slotKey SlotScrollRange key
-      code = encodeScrollAxes axes
-      points = storePoint store
-      ints = storeInt store
-      samePoint k v = IM.lookup k points == Just v
-  unless
-    ( samePoint posKey (vx, vy)
-        && samePoint sizeKey (vw, vh)
-        && samePoint rangeKey (mx, my)
-        && IM.lookup axesKey ints == Just code
-    )
-    $ setStore ctx
-      ( store
-          { storePoint =
-              IM.insert posKey (vx, vy) $
-                IM.insert sizeKey (vw, vh) $
-                  IM.insert rangeKey (mx, my) points
-          , storeInt = IM.insert axesKey code ints
-          }
-      )
+  writeSlots ctx $
+    slotWrite fieldPoint (slotKey SlotScrollViewPos key) (vx, vy)
+      <> slotWrite fieldPoint (slotKey SlotScrollViewSize key) (vw, vh)
+      <> slotWrite fieldPoint (slotKey SlotScrollRange key) (mx, my)
+      <> slotWrite fieldInt (slotKey SlotScrollAxes key) (encodeScrollAxes axes)
 
 encodeScrollAxes :: ScrollAxes -> Int
 encodeScrollAxes = \case

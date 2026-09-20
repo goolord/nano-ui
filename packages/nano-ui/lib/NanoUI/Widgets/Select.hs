@@ -15,7 +15,6 @@ where
 
 import Control.Monad (forM_, when)
 import Data.IORef (writeIORef)
-import Data.IntMap.Strict qualified as IM
 import Data.Text (Text)
 import Data.Text qualified as T
 import Effectful (Eff, type (:>))
@@ -33,7 +32,7 @@ import NanoUI.Frame.Select (selectDropPickIndex, selectDropRect)
 import NanoUI.Input (inputMousePos, inputMousePressed, inputMouseReleased)
 import NanoUI.Layout.Arena (NodeType (..))
 import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO)
-import NanoUI.Store (WidgetStore (..), isSelectOpen, setSelectOpen)
+import NanoUI.Store (fieldInt, insertSlot, isSelectOpen, setSelectOpen)
 import NanoUI.Style (Layout, defaultLayout)
 import NanoUI.Types (Rect (..), clamp, rectContains, rectHit, rectNonEmpty, v2Y)
 import NanoUI.Widgets.Combinators (withBoundedIndex)
@@ -92,7 +91,7 @@ selectWith' f options index = do
       modifyStore ctx (\st -> setSelectOpen st key (not open))
       writeIORef (ctxFocusId ctx) wid
     forM_ picked $ \i -> do
-      modifyStore ctx (\st -> setSelectOpen (st {storeInt = IM.insert key i (storeInt st)}) key False)
+      modifyStore ctx (\st -> setSelectOpen (insertSlot fieldInt key i st) key False)
       writeIORef (ctxFocusId ctx) wid
     recordStoreInt ctx key finalIdx
   -- Compare with the caller's index, not 'current': a dropdown or keyboard

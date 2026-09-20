@@ -12,13 +12,11 @@ module NanoUI.Frame.TextArea
 
 import Control.Monad (forM_, unless, when)
 import Data.IORef (writeIORef)
-import qualified Data.IntMap.Strict as IM
 import Data.Maybe (catMaybes, isJust)
 import qualified Data.Text as T
 import NanoUI.Context
   ( Context (..)
   , TextInputDrag (..)
-  , WidgetStore (..)
   , getStore
   , intKey
   , markDirty
@@ -32,7 +30,7 @@ import NanoUI.Context
 import NanoUI.Draw (DrawArena, getDrawSnapScale, pushText, withClip)
 import NanoUI.Font (FontMetrics, caretXIO, prepareFontMetrics, selectionSpans, textIndexAtX, widgetContentInset)
 import NanoUI.Frame.Chrome (paintScrollBarLayout, textInputFocused)
-import NanoUI.Frame.Hit (findNodeByWidgetId)
+import NanoUI.Frame.Hit (withWidgetNode)
 import NanoUI.Frame.TextArea.Content
   ( isMouseOnTextAreaScrollBarAt
   , resolveTextAreaFont
@@ -50,7 +48,7 @@ import NanoUI.Input
   , inputMouseReleased
   )
 import NanoUI.Layout.Arena (NodeIdx, NodeType (NodeTextArea), getNodeType, getRect, getWidgetId)
-import NanoUI.Store (Slot (..))
+import NanoUI.Store (Slot (..), fieldInt, fieldPoint, findSlot, insertSlot, lookupSlot)
 import NanoUI.Style (Style (..), Theme, scrollBarThumbColor, scrollBarTrackColor, themePanel, themeSelection)
 import NanoUI.Types (Rect (..), V2 (..), onGrid, rectContains)
 import NanoUI.Widgets.TextArea (TextAreaState (..), loadTextAreaState, saveTextAreaState)
@@ -98,16 +96,16 @@ syncTextAreaViewport ctx idx fm x y w h = do
   let key = intKey wid
       Rect _ _ clipW clipH = textAreaFieldClip fm (Rect x y w h)
       bars = textAreaBars fm (Rect x y w h) contentW contentH
-      (sx, sy) = IM.findWithDefault (0, 0) (slotKey SlotTextAreaScroll key) (storePoint store)
+      scrollKey = slotKey SlotTextAreaScroll key
+      (sx, sy) = findSlot fieldPoint (0, 0) scrollKey store
       sx' = max 0 (min (max 0 (contentW - tabViewW bars)) sx)
       sy' = max 0 (min (max 0 (contentH - tabViewH bars)) sy)
       viewportKey = slotKey SlotTextAreaViewport key
-      pts0 = IM.insert viewportKey (clipW, clipH) (storePoint store)
-      pts1
-        | sx' /= sx || sy' /= sy = IM.insert (slotKey SlotTextAreaScroll key) (sx', sy') pts0
-        | otherwise = pts0
-  unless (sx' == sx && sy' == sy && IM.lookup viewportKey (storePoint store) == Just (clipW, clipH)) $
-    writeIORef (ctxStore ctx) $! store {storePoint = pts1}
+      clampScroll
+        | sx' /= sx || sy' /= sy = insertSlot fieldPoint scrollKey (sx', sy')
+        | otherwise = id
+  unless (sx' == sx && sy' == sy && lookupSlot fieldPoint viewportKey store == Just (clipW, clipH)) $
+    writeIORef (ctxStore ctx) $! clampScroll (insertSlot fieldPoint viewportKey (clipW, clipH) store)
 
 -- | Snap a text-area scroll offset to the device pixel grid, the same grid
 -- 'pushText' snaps to, so line pens and hit-testing stay in lockstep (and in
@@ -197,31 +195,28 @@ drawTextAreaContentWith da ctx fm idx x y w h style = do
 
 textAreaHitForWidget :: Context -> WidgetId -> IO (Maybe TextAreaHit)
 textAreaHitForWidget ctx wid = do
-  mIdx <- findNodeByWidgetId ctx wid
-  case mIdx of
-    Nothing -> pure Nothing
-    Just idx -> do
-      nt <- getNodeType (ctxNodeArena ctx) idx
-      if nt /= NodeTextArea
-        then pure Nothing
-        else do
-          (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-          fm <- resolveTextAreaFont ctx idx
-          let field = Rect x y w h
-              Rect clipX _ _ _ = textAreaFieldClip fm field
-          pure
-            ( Just
-                TextAreaHit
-                  { tahNodeIdx = idx
-                  , tahFieldRect = field
-                  , tahContentX = clipX
-                  , tahLineH = textAreaLineHeight fm
-                  , tahWidgetX = x
-                  , tahWidgetY = y
-                  , tahWidgetW = w
-                  , tahWidgetH = h
-                  }
-            )
+  withWidgetNode ctx wid Nothing $ \idx -> do
+    nt <- getNodeType (ctxNodeArena ctx) idx
+    if nt /= NodeTextArea
+      then pure Nothing
+      else do
+        (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+        fm <- resolveTextAreaFont ctx idx
+        let field = Rect x y w h
+            Rect clipX _ _ _ = textAreaFieldClip fm field
+        pure
+          ( Just
+              TextAreaHit
+                { tahNodeIdx = idx
+                , tahFieldRect = field
+                , tahContentX = clipX
+                , tahLineH = textAreaLineHeight fm
+                , tahWidgetX = x
+                , tahWidgetY = y
+                , tahWidgetW = w
+                , tahWidgetH = h
+                }
+          )
 
 textAreaCursorAt :: Context -> TA.TextAreaState -> TextAreaHit -> V2 -> IO (Int, Int)
 textAreaCursorAt ctx state hit (V2 mouseX mouseY) = do
@@ -313,7 +308,7 @@ collapseTextAreaSelection :: Context -> WidgetId -> IO ()
 collapseTextAreaSelection ctx wid = do
   store <- getStore ctx
   let key = intKey wid
-      row = IM.findWithDefault 0 (slotKey SlotTextAreaRow key) (storeInt store)
-      col = IM.findWithDefault 0 (slotKey SlotTextAreaCol key) (storeInt store)
+      row = findSlot fieldInt 0 (slotKey SlotTextAreaRow key) store
+      col = findSlot fieldInt 0 (slotKey SlotTextAreaCol key) store
       state = loadTextAreaState store key
   setStore ctx (saveTextAreaState key state {selectionAnchor = TB.Cursor row col} store)

@@ -79,6 +79,7 @@ module NanoUI.Layout.Arena
   , getAlignX
   , getAlignY
   , getRect
+  , getNodeRect
   , setRect
   , getLayoutRect
   , getClipRect
@@ -113,6 +114,7 @@ module NanoUI.Layout.Arena
   , findNodeM
   , foldNodesM
   , findChildM
+  , walkAncestors
   , LayoutCache (..)
   , newLayoutCache
   , captureLayoutCache
@@ -793,6 +795,13 @@ getRect na idx = do
   a <- arenaArrays na
   (,,,) <$> readGeom a idx geomX <*> readGeom a idx geomY <*> readGeom a idx geomW <*> readGeom a idx geomH
 
+-- | 'getRect' as a 'Rect'.
+{-# INLINE getNodeRect #-}
+getNodeRect :: NodeArena -> NodeIdx -> IO Rect
+getNodeRect na idx = do
+  a <- arenaArrays na
+  Rect <$> readGeom a idx geomX <*> readGeom a idx geomY <*> readGeom a idx geomW <*> readGeom a idx geomH
+
 {-# INLINE setRect #-}
 setRect :: NodeArena -> NodeIdx -> Float -> Float -> Float -> Float -> IO ()
 setRect na idx x y w h = do
@@ -1275,6 +1284,16 @@ foldNodesM na f z = do
         | i >= n = pure acc
         | otherwise = f acc i >>= go (i + 1)
   go 0 z
+
+-- | The first result @step@ finds walking up from @idx@, the node itself
+-- first.
+{-# INLINE walkAncestors #-}
+walkAncestors :: NodeArena -> NodeIdx -> (NodeIdx -> IO (Maybe a)) -> IO (Maybe a)
+walkAncestors na idx step = go idx
+  where
+    go !i
+      | i < 0 = pure Nothing
+      | otherwise = step i >>= maybe (getParent na i >>= go) (pure . Just)
 
 -- | First direct child of @parentIdx@ satisfying the predicate.
 {-# INLINE findChildM #-}

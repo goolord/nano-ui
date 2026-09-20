@@ -21,7 +21,6 @@ module NanoUI.Form.Backend
   ) where
 
 import Control.Monad (when, (<$!>))
-import Data.Dynamic (fromDynamic, toDyn)
 import qualified Data.IntMap.Strict as IM
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
@@ -43,8 +42,8 @@ import GHC.Generics (Generic)
 import Effectful.Exception (bracket)
 import NanoUI (NanoUI, uiIO, withKey)
 import NanoUI.Monad (askContext)
-import NanoUI.Context (Context, getStore, markDirty, setStore)
-import NanoUI.Store (WidgetStore (..))
+import NanoUI.Context (Context, getStore, markDirty, modifyStore)
+import NanoUI.Store (fieldDyn, insertDyn, lookupDyn, lookupSlot, overField)
 
 -- | A form field's raw input value, before parsing.
 data FormInput
@@ -121,26 +120,20 @@ formStoreKey prefix = hash ("nano-ui-form:" :: Text, prefix)
 getActiveFormPrefix :: Context -> IO Text
 getActiveFormPrefix ctx = do
   ws <- getStore ctx
-  pure $! fromMaybe "" (IM.lookup activePrefixSlot (storeDyn ws) >>= fromDynamic)
+  pure $! fromMaybe "" (lookupDyn activePrefixSlot ws)
 
 -- | Set the active form prefix in the current context.
 setActiveFormPrefix :: Context -> Text -> IO ()
-setActiveFormPrefix ctx prefix = do
-  ws <- getStore ctx
-  setStore ctx ws {storeDyn = IM.insert activePrefixSlot (toDyn prefix) (storeDyn ws)}
+setActiveFormPrefix ctx prefix = modifyStore ctx (insertDyn activePrefixSlot prefix)
 
 -- | Evaluate or render a form under its own prefix, restoring the enclosing
 -- prefix afterwards. Restore only this slot, so field updates survive the scope.
 withFormPrefix :: Text -> NanoUI a -> NanoUI a
 withFormPrefix prefix action = do
   ctx <- askContext
-  let restorePrefix previous = uiIO $ do
-        ws <- getStore ctx
-        setStore ctx ws
-          { storeDyn = IM.alter (const previous) activePrefixSlot (storeDyn ws)
-          }
+  let restorePrefix previous = uiIO (modifyStore ctx (overField fieldDyn (IM.alter (const previous) activePrefixSlot)))
   bracket
-    (uiIO $ IM.lookup activePrefixSlot . storeDyn <$> getStore ctx)
+    (uiIO $ lookupSlot fieldDyn activePrefixSlot <$> getStore ctx)
     restorePrefix
     (\_ -> uiIO (setActiveFormPrefix ctx prefix) >> action)
 
@@ -155,12 +148,10 @@ getStoredForm :: Context -> Text -> IO StoredForm
 getStoredForm ctx prefix = do
   ws <- getStore ctx
   -- Resolve the lookup here rather than returning a thunk over the whole store.
-  pure $! fromMaybe (StoredForm 0 emptyFormStateStore) (IM.lookup (formStoreKey prefix) (storeDyn ws) >>= fromDynamic)
+  pure $! fromMaybe (StoredForm 0 emptyFormStateStore) (lookupDyn (formStoreKey prefix) ws)
 
 setStoredForm :: Context -> Text -> StoredForm -> IO ()
-setStoredForm ctx prefix !stored = do
-  ws <- getStore ctx
-  setStore ctx ws {storeDyn = IM.insert (formStoreKey prefix) (toDyn stored) (storeDyn ws)}
+setStoredForm ctx prefix !stored = modifyStore ctx (insertDyn (formStoreKey prefix) stored)
 
 -- | Retrieve the 'FormStateStore' for a given form prefix.
 getFormStore :: Context -> Text -> IO FormStateStore

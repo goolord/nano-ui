@@ -39,6 +39,7 @@ module NanoUI.Context.Core
   , getStore
   , setStore
   , modifyStore
+  , writeSlots
   , getStoreBool
   , writeStoreInt
   , writeStoreFloat
@@ -62,7 +63,7 @@ module NanoUI.Context.Core
   , widgetTheme
   ) where
 
-import Control.Monad (forM_, when)
+import Control.Monad (forM_, unless, when)
 import Data.Bits (shiftR, (.&.))
 import Data.IORef (modifyIORef', readIORef, writeIORef)
 import Data.Primitive.SmallArray (copySmallMutableArray, newSmallArray, readSmallArray, getSizeofSmallMutableArray, writeSmallArray)
@@ -87,12 +88,20 @@ import NanoUI.Context.Types
 import NanoUI.Id (WidgetId, hashWidgetId)
 import NanoUI.Layout.Arena (DirTag, NodeIdx, getArenaScope, getNodeScope, getScopeSignature, lookupNodeByWidgetId)
 import NanoUI.Store
-  ( WidgetStore (..)
+  ( Field
+  , Slot (..)
+  , SlotWrites (..)
+  , WidgetStore (..)
   , boolInt
+  , fieldFloat
+  , fieldInt
+  , fieldText
+  , findSlot
+  , insertSlot
   , intBool
+  , lookupSlot
   , ptrEq
   , slotKey
-  , Slot (..)
   )
 import NanoUI.Style (Theme)
 import NanoUI.Types (Damage, DamageBounds (..), Rect, defaultDamageSlop, rectH, rectW)
@@ -327,33 +336,33 @@ diffKeysBy eq old new
 diffKeys :: Eq a => IntMap a -> IntMap a -> [Int]
 diffKeys = diffKeysBy (==)
 
+-- | Run slot writes, unless every slot already holds its value: an idle
+-- widget then neither rebuilds the store nor has it diffed.
+{-# INLINE writeSlots #-}
+writeSlots :: Context -> SlotWrites -> IO ()
+writeSlots ctx (SlotWrites same f) = do
+  st <- readIORef (ctxStore ctx)
+  unless (same st) (setStore ctx (f st))
+
 -- | Targeted single-slot write: compares only the target slot, updates one map
 -- field, damages the owning widget and wakes the loop. Unlike 'setStore' it
 -- never diffs the whole store, and an equal write is a no-op.
 {-# INLINE writeSlot #-}
-writeSlot ::
-  Eq a =>
-  (WidgetStore -> IntMap a) ->
-  (IntMap a -> WidgetStore -> WidgetStore) ->
-  Context ->
-  WidgetId ->
-  Int ->
-  a ->
-  IO ()
-writeSlot field setField ctx owner k v = do
+writeSlot :: Eq a => Field a -> Context -> WidgetId -> Int -> a -> IO ()
+writeSlot field ctx owner k v = do
   st <- readIORef (ctxStore ctx)
-  case IM.lookup k (field st) of
+  case lookupSlot field k st of
     Just old | old == v -> pure ()
     _ -> do
-      writeIORef (ctxStore ctx) $! setField (IM.insert k v (field st)) st
+      writeIORef (ctxStore ctx) $! insertSlot field k v st
       damageWidget ctx owner DamageSelf
       markDirty ctx
 
 writeStoreInt :: Context -> WidgetId -> Int -> Int -> IO ()
-writeStoreInt = writeSlot storeInt (\m st -> st {storeInt = m})
+writeStoreInt = writeSlot fieldInt
 
 writeStoreFloat :: Context -> WidgetId -> Int -> Float -> IO ()
-writeStoreFloat = writeSlot storeFloat (\m st -> st {storeFloat = m})
+writeStoreFloat = writeSlot fieldFloat
 
 {-# INLINE writeStoreBool #-}
 writeStoreBool :: Context -> WidgetId -> Bool -> IO ()
@@ -366,67 +375,50 @@ writeStoreBool ctx owner v = writeStoreInt ctx owner (intKey owner) (boolInt v)
 -- back, while a value changed by the application still wins. Returns the
 -- slot's value after adopting.
 {-# INLINE adoptSlot #-}
-adoptSlot ::
-  Eq a =>
-  (WidgetStore -> IntMap a) ->
-  (IntMap a -> WidgetStore -> WidgetStore) ->
-  Context ->
-  WidgetId ->
-  Int ->
-  a ->
-  IO a
-adoptSlot field setField ctx owner k v = do
+adoptSlot :: Eq a => Field a -> Context -> WidgetId -> Int -> a -> IO a
+adoptSlot field ctx owner k v = do
   st <- readIORef (ctxStore ctx)
-  let
-    m = field st
-    seenK = slotKey SlotSeen k
-  if IM.lookup seenK m == Just v
-    then pure $! IM.findWithDefault v k m
+  let seenK = slotKey SlotSeen k
+  if lookupSlot field seenK st == Just v
+    then pure $! findSlot field v k st
     else do
-      writeIORef (ctxStore ctx) $! setField (IM.insert seenK v (IM.insert k v m)) st
-      when (IM.lookup k m /= Just v) $ do
+      writeIORef (ctxStore ctx) $! insertSlot field seenK v (insertSlot field k v st)
+      when (lookupSlot field k st /= Just v) $ do
         damageWidget ctx owner DamageSelf
         markDirty ctx
       pure v
 
 -- | Remember the value a controlled widget returned this frame.
 {-# INLINE recordSlot #-}
-recordSlot ::
-  Eq a =>
-  (WidgetStore -> IntMap a) ->
-  (IntMap a -> WidgetStore -> WidgetStore) ->
-  Context ->
-  Int ->
-  a ->
-  IO ()
-recordSlot field setField ctx k v = do
+recordSlot :: Eq a => Field a -> Context -> Int -> a -> IO ()
+recordSlot field ctx k v = do
   st <- readIORef (ctxStore ctx)
   let seenK = slotKey SlotSeen k
-  when (IM.lookup seenK (field st) /= Just v) $
-    writeIORef (ctxStore ctx) $! setField (IM.insert seenK v (field st)) st
+  when (lookupSlot field seenK st /= Just v) $
+    writeIORef (ctxStore ctx) $! insertSlot field seenK v st
 
 adoptStoreInt :: Context -> WidgetId -> Int -> Int -> IO Int
-adoptStoreInt = adoptSlot storeInt (\m st -> st {storeInt = m})
+adoptStoreInt = adoptSlot fieldInt
 
 adoptStoreFloat :: Context -> WidgetId -> Int -> Float -> IO Float
-adoptStoreFloat = adoptSlot storeFloat (\m st -> st {storeFloat = m})
+adoptStoreFloat = adoptSlot fieldFloat
 
 adoptStoreText :: Context -> WidgetId -> Int -> Text -> IO Text
-adoptStoreText = adoptSlot storeText (\m st -> st {storeText = m})
+adoptStoreText = adoptSlot fieldText
 
 recordStoreInt :: Context -> Int -> Int -> IO ()
-recordStoreInt = recordSlot storeInt (\m st -> st {storeInt = m})
+recordStoreInt = recordSlot fieldInt
 
 recordStoreFloat :: Context -> Int -> Float -> IO ()
-recordStoreFloat = recordSlot storeFloat (\m st -> st {storeFloat = m})
+recordStoreFloat = recordSlot fieldFloat
 
 recordStoreText :: Context -> Int -> Text -> IO ()
-recordStoreText = recordSlot storeText (\m st -> st {storeText = m})
+recordStoreText = recordSlot fieldText
 
 {-# INLINE getStoreBool #-}
 getStoreBool :: Context -> WidgetId -> Bool -> IO Bool
 getStoreBool ctx wid def =
-  intBool . IM.findWithDefault (boolInt def) (intKey wid) . storeInt <$> getStore ctx
+  intBool . findSlot fieldInt (boolInt def) (intKey wid) <$> getStore ctx
 
 -- | Whether @wid@ was declared inside a disabled scope. A widget asks before
 -- its node exists, while the scope it is declared in is still the arena's.

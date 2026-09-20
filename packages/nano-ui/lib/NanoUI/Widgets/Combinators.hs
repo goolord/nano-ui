@@ -21,6 +21,7 @@ import NanoUI.Widgets.Behavior (keyActivated)
 import NanoUI.Widgets.Node
   ( Response (..)
   , addWidgetStyled
+  , inertResponse
   , setClicked
   )
 
@@ -45,13 +46,7 @@ buttonStyledEx enabled txt value layout styleIdx = do
     then do
       keyClick <- keyActivated wid
       pure (if keyClick then setClicked True resp else resp)
-    else pure resp
-      { rawRespHovered = False
-      , rawRespPressed = False
-      , rawRespClicked = False
-      , rawRespRightPressed = False
-      , rawRespRightClicked = False
-      }
+    else pure (inertResponse resp)
 
 selectableItem :: (Ui :> es) => NodeType -> Text -> Bool -> Layout -> Int -> Eff es Response
 selectableItem nt txt selected layout styleIdx = do

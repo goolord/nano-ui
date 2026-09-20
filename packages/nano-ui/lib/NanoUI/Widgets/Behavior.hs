@@ -11,6 +11,7 @@ module NanoUI.Widgets.Behavior
   , keyboardFocused
   , keyActivated
   , KeyNav (..)
+  , navStep
   , useDismissable
   , dragThresholdPx
   )
@@ -21,7 +22,6 @@ import Data.Hashable (Hashable, hash)
 import Data.IORef (readIORef, writeIORef)
 import Data.List (find)
 import Effectful (Eff, type (:>))
-import qualified Data.IntMap.Strict as IM
 import NanoUI.Context
   ( Context (..)
   , getFocusId
@@ -49,7 +49,7 @@ import NanoUI.Input
   , inputMouseRightPressed
   )
 import NanoUI.Monad (Ui, askContext, askFrameInput, askInput, nextId, uiIO)
-import NanoUI.Store (WidgetStore (..))
+import NanoUI.Store (fieldFloat, fieldInt, findSlot, flagSlot, insertSlot, setFlagSlot)
 import NanoUI.Types (Rect (..), clamp01, rectHit, v2X, v2Y)
 import qualified Data.Text as T
 
@@ -69,8 +69,7 @@ keyedDragHeld k = do
     old <- readIORef (ctxIdContext ctx)
     let wid = idContextWidgetId (snd (enterKeyed (fromIntegral (hash k)) old))
         dragK = slotKey SlotDrag (intKey wid)
-    store <- getStore ctx
-    pure (IM.findWithDefault 0 dragK (storeInt store) /= 0)
+    flagSlot dragK <$> getStore ctx
 
 -- | Clamped 1D drag. Maps pointer position on 'track' into [lo, hi]. The drag
 -- starts with a press on the track and lasts until the button comes up; a
@@ -99,7 +98,7 @@ useDrag1D axis lo hi current track = do
         DragAxisX -> v2X (inputMousePos inp)
         DragAxisY -> v2Y (inputMousePos inp)
   store <- uiIO (getStore ctx)
-  let active0 = IM.findWithDefault 0 dragK (storeInt store) /= 0
+  let active0 = flagSlot dragK store
       started = inputMousePressed inp && rectHit track (inputMousePos inp)
       active = inputMouseDown inp && (active0 || started)
       frac =
@@ -110,15 +109,7 @@ useDrag1D axis lo hi current track = do
         if active
           then lo + frac * (hi - lo)
           else current
-  when (active /= active0) $
-    uiIO $
-      modifyStore ctx $ \st ->
-        st
-          { storeInt =
-              if active
-                then IM.insert dragK 1 (storeInt st)
-                else IM.delete dragK (storeInt st)
-          }
+  when (active /= active0) $ uiIO (modifyStore ctx (setFlagSlot dragK active))
   pure (next, active)
 
 -- | Hold the active id for @wid@ while its drag lasts and let it go after, so
@@ -152,8 +143,8 @@ useReorder order items = do
           (\(_, r) -> rectHit r mouse)
           items
   store <- uiIO (getStore ctx)
-  let from0 = IM.findWithDefault (-1) dragK (storeInt store)
-      startX = IM.findWithDefault 0 (slotKey SlotDragW key) (storeFloat store)
+  let from0 = findSlot fieldInt (-1) dragK store
+      startX = findSlot fieldFloat 0 (slotKey SlotDragW key) store
       dragging = if press then maybe (-1) fst hit else from0
       nextDrag =
         if release || not down
@@ -168,16 +159,9 @@ useReorder order items = do
           Just toCol | release -> moveItem order dragging toCol
           _ -> order
   when (nextDrag /= from0 || (press && nextDrag >= 0)) $
-    uiIO $
-      modifyStore ctx $ \st ->
-        st
-          { storeInt = IM.insert dragK nextDrag (storeInt st)
-          , storeFloat =
-              IM.insert
-                (slotKey SlotDragW key)
-                (if press then v2X mouse else startX)
-                (storeFloat st)
-          }
+    uiIO . modifyStore ctx $
+      insertSlot fieldInt dragK nextDrag
+        . insertSlot fieldFloat (slotKey SlotDragW key) (if press then v2X mouse else startX)
   pure (nextOrder, if nextDrag >= 0 then Just nextDrag else Nothing)
 
 moveItem :: [Int] -> Int -> Int -> [Int]
@@ -234,6 +218,12 @@ useKeyNav wid = do
           , knEnter = inputKeysElem KeyEnter keys
           , knSpace = T.any (== ' ') (inputChars inp)
           }
+
+-- | The step the arrow keys ask for along a control that grows rightwards and
+-- upwards: @1@ for Right or Up, @-1@ for Left or Down.
+{-# INLINE navStep #-}
+navStep :: KeyNav -> Int
+navStep nav = fromEnum (knRight nav || knUp nav) - fromEnum (knLeft nav || knDown nav)
 
 -- | True when Enter or Space was pressed while @wid@ holds focus. Buttons,
 -- checkboxes, and toggle switches treat this as a click.

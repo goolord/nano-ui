@@ -11,7 +11,6 @@ import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Primitive.SmallArray (SmallArray, indexSmallArray, mapSmallArray', sizeofSmallArray, smallArrayFromList)
 import Effectful (Eff, type (:>))
-import qualified Data.IntMap.Strict as IM
 import qualified Data.IntSet as IS
 import NanoUI.Context (Context (..), adoptStoreInt, getFocusId, getStore, intKey, recordStoreInt, registerFocusable, setStore, writeStoreInt, modifyStore)
 import NanoUI.Font (treeChevronRect)
@@ -19,7 +18,7 @@ import NanoUI.Frame.Hit (scrollHitRect)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input (inputMousePos)
 import NanoUI.Layout.Arena (NodeType (..))
-import NanoUI.Store (WidgetStore (..))
+import NanoUI.Store (fieldIntSet, insertSlot, lookupSlot)
 import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO, withKey)
 import NanoUI.Style (defaultLayout, fillW, gap, tight)
 import NanoUI.Types (Rect (..), clamp, rectContains)
@@ -148,11 +147,11 @@ tree' key inputItems index =
         clamped = if total <= 0 then 0 else clamp 0 (total - 1) index
     selected <- uiIO $ adoptStoreInt ctx groupId groupKey clamped
     st <- uiIO (getStore ctx)
-    expandedSet <- case IM.lookup groupKey (storeIntSet st) of
+    expandedSet <- case lookupSlot fieldIntSet groupKey st of
       Just expanded -> pure expanded
       Nothing -> do
         let initial = parentIndices items
-        uiIO $ setStore ctx (st {storeIntSet = IM.insert groupKey initial (storeIntSet st)})
+        uiIO $ setStore ctx (insertSlot fieldIntSet groupKey initial st)
         pure initial
     let rows = visibleRows expandedSet items
     columnWith (tight . gap 0 . fillW) $ do
@@ -170,6 +169,6 @@ tree' key inputItems index =
         writeStoreInt ctx groupId groupKey keySel
         recordStoreInt ctx groupKey keySel
       when (keyExp /= expandedSet) $ uiIO $
-        modifyStore ctx (\st' -> st' {storeIntSet = IM.insert groupKey keyExp (storeIntSet st')})
+        modifyStore ctx (insertSlot fieldIntSet groupKey keyExp)
       maybe (pure ()) (\wid -> uiIO $ writeIORef (ctxFocusId ctx) wid) mFocus
       pure (setChanged (keySel /= selected) (fold resps), keySel)

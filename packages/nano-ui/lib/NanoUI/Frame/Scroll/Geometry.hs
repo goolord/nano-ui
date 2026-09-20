@@ -170,16 +170,19 @@ scrollGutters2D slot cfg pad contentW contentH innerW innerH =
 isScrollStyle2D :: Int -> Bool
 isScrollStyle2D si = si /= 0 && scrollConfigNative2D (decodeScrollConfig si)
 
+-- | The policy of the axis a scroller laid out along @dir@ scrolls on.
+{-# INLINE scrollPolicyFor #-}
+scrollPolicyFor :: ScrollConfig -> DirTag -> ScrollPolicy
+scrollPolicyFor cfg = \case
+  DirColumn -> scrollPolicyY cfg
+  DirRow -> scrollPolicyX cfg
+
 scrollShowsChrome :: ScrollConfig -> DirTag -> Bool
 scrollShowsChrome cfg dir =
-  case dir of
-    DirColumn -> axisShows (scrollPolicyY cfg)
-    DirRow -> axisShows (scrollPolicyX cfg)
-  where
-    axisShows = \case
-      ScrollAuto -> True
-      ScrollAlways -> True
-      _ -> False
+  case scrollPolicyFor cfg dir of
+    ScrollAuto -> True
+    ScrollAlways -> True
+    _ -> False
 
 scrollChromeSuppressed :: ScrollConfig -> DirTag -> Bool
 scrollChromeSuppressed cfg dir = not (scrollShowsChrome cfg dir)
@@ -195,12 +198,7 @@ scrollLineFor = 20
 -- ignores the wheel outright. Native 2D scrollers always keep both axes
 -- live by construction.
 scrollWheelSuppressed :: ScrollConfig -> Bool -> DirTag -> Bool
-scrollWheelSuppressed cfg native2D dir =
-  not native2D
-    && ( case dir of
-           DirColumn -> scrollPolicyY cfg == ScrollNone
-           DirRow -> scrollPolicyX cfg == ScrollNone
-       )
+scrollWheelSuppressed cfg native2D dir = not native2D && scrollPolicyFor cfg dir == ScrollNone
 
 scrollAxisOverflows :: ScrollPolicy -> Float -> Float -> Bool
 scrollAxisOverflows policy contentSize innerMain =
@@ -223,13 +221,7 @@ scrollAxisRange contentSize innerMain trailingPad
 
 scrollChromeActive :: ScrollConfig -> DirTag -> Float -> Float -> Bool
 scrollChromeActive cfg dir contentSize innerMain =
-  scrollShowsChrome cfg dir
-    && scrollAxisOverflows
-      (case dir of
-         DirColumn -> scrollPolicyY cfg
-         DirRow -> scrollPolicyX cfg)
-      contentSize
-      innerMain
+  scrollShowsChrome cfg dir && scrollAxisOverflows (scrollPolicyFor cfg dir) contentSize innerMain
 
 data ScrollBarLayout = ScrollBarLayout
   { sbTrack :: Rect
@@ -263,11 +255,11 @@ scrollContentClip slot cfg dir x y w h pad contentSize =
         case dir of
           DirColumn -> rectH base
           DirRow -> rectW base
-      (policy, trailPad) =
+      trailPad =
         case dir of
-          DirColumn -> (scrollPolicyY cfg, padR pad)
-          DirRow -> (scrollPolicyX cfg, padB pad)
-      gutter = scrollAxisGutter policy slot trailPad contentSize innerMain
+          DirColumn -> padR pad
+          DirRow -> padB pad
+      gutter = scrollAxisGutter (scrollPolicyFor cfg dir) slot trailPad contentSize innerMain
    in case dir of
         DirColumn -> Rect (rectX base) (rectY base) (max 0 (rectW base - gutter)) (rectH base)
         DirRow -> Rect (rectX base) (rectY base) (rectW base) (max 0 (rectH base - gutter))

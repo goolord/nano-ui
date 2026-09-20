@@ -5,6 +5,30 @@ module NanoUI.Store
   , emptyWidgetStore
   , mirrorStoresChanged
   , bumpMirror
+  , Field
+  , fieldInt
+  , fieldFloat
+  , fieldDouble
+  , fieldPoint
+  , fieldText
+  , fieldIntSet
+  , fieldFloatList
+  , fieldIntList
+  , fieldDyn
+  , fieldMap
+  , overField
+  , lookupSlot
+  , findSlot
+  , memberSlot
+  , insertSlot
+  , deleteSlot
+  , flagSlot
+  , setFlagSlot
+  , SlotWrites (..)
+  , slotWrite
+  , slotWriteOr
+  , lookupDyn
+  , insertDyn
   , slotKey
   , Slot (..)
   , boolInt
@@ -18,7 +42,7 @@ module NanoUI.Store
   )
 where
 
-import Data.Dynamic (Dynamic)
+import Data.Dynamic (Dynamic, Typeable, fromDynamic, toDyn)
 import Data.IntMap.Strict (IntMap)
 import Data.IntSet (IntSet)
 import Data.Text (Text)
@@ -95,6 +119,105 @@ instance Show WidgetStore where
       ++ ", storeIntList = " ++ show (storeIntList st)
       ++ ", storeDynCount = " ++ show (IM.size (storeDyn st))
       ++ " }"
+
+-- | One of the store's maps: how to read it, and how to put a new one back.
+-- The slot functions inline at the field they are given, so
+-- @insertSlot fieldInt k v@ compiles to the record update it stands for, and
+-- a composition of them builds the store once.
+data Field a = Field (WidgetStore -> IntMap a) (IntMap a -> WidgetStore -> WidgetStore)
+
+fieldInt :: Field Int
+fieldInt = Field storeInt (\m st -> st {storeInt = m})
+
+fieldFloat :: Field Float
+fieldFloat = Field storeFloat (\m st -> st {storeFloat = m})
+
+fieldDouble :: Field Double
+fieldDouble = Field storeDouble (\m st -> st {storeDouble = m})
+
+fieldPoint :: Field (Float, Float)
+fieldPoint = Field storePoint (\m st -> st {storePoint = m})
+
+fieldText :: Field Text
+fieldText = Field storeText (\m st -> st {storeText = m})
+
+fieldIntSet :: Field IntSet
+fieldIntSet = Field storeIntSet (\m st -> st {storeIntSet = m})
+
+fieldFloatList :: Field [Float]
+fieldFloatList = Field storeFloatList (\m st -> st {storeFloatList = m})
+
+fieldIntList :: Field [Int]
+fieldIntList = Field storeIntList (\m st -> st {storeIntList = m})
+
+fieldDyn :: Field Dynamic
+fieldDyn = Field storeDyn (\m st -> st {storeDyn = m})
+
+{-# INLINE fieldMap #-}
+fieldMap :: Field a -> WidgetStore -> IntMap a
+fieldMap (Field get _) = get
+
+{-# INLINE overField #-}
+overField :: Field a -> (IntMap a -> IntMap a) -> WidgetStore -> WidgetStore
+overField (Field get set) f st = set (f (get st)) st
+
+{-# INLINE lookupSlot #-}
+lookupSlot :: Field a -> Int -> WidgetStore -> Maybe a
+lookupSlot field k = IM.lookup k . fieldMap field
+
+-- | The slot's value, or @def@ while it has none.
+{-# INLINE findSlot #-}
+findSlot :: Field a -> a -> Int -> WidgetStore -> a
+findSlot field def k = IM.findWithDefault def k . fieldMap field
+
+{-# INLINE memberSlot #-}
+memberSlot :: Field a -> Int -> WidgetStore -> Bool
+memberSlot field k = IM.member k . fieldMap field
+
+{-# INLINE insertSlot #-}
+insertSlot :: Field a -> Int -> a -> WidgetStore -> WidgetStore
+insertSlot field k v = overField field (IM.insert k v)
+
+{-# INLINE deleteSlot #-}
+deleteSlot :: Field a -> Int -> WidgetStore -> WidgetStore
+deleteSlot field k = overField field (IM.delete k)
+
+-- | An int slot read as a flag: set while it holds anything but 0.
+{-# INLINE flagSlot #-}
+flagSlot :: Int -> WidgetStore -> Bool
+flagSlot k = intBool . findSlot fieldInt 0 k
+
+-- | Raise a flag slot, or remove it.
+{-# INLINE setFlagSlot #-}
+setFlagSlot :: Int -> Bool -> WidgetStore -> WidgetStore
+setFlagSlot k on = if on then insertSlot fieldInt k 1 else deleteSlot fieldInt k
+
+-- | Slot writes that know whether they would change the store. Combine them
+-- with '<>' and run them with 'NanoUI.Context.writeSlots', which leaves the
+-- store alone when every slot already holds its value.
+data SlotWrites = SlotWrites (WidgetStore -> Bool) (WidgetStore -> WidgetStore)
+
+instance Semigroup SlotWrites where
+  {-# INLINE (<>) #-}
+  SlotWrites same f <> SlotWrites same' g = SlotWrites (\st -> same st && same' st) (f . g)
+
+{-# INLINE slotWrite #-}
+slotWrite :: Eq a => Field a -> Int -> a -> SlotWrites
+slotWrite field k v = SlotWrites (\st -> lookupSlot field k st == Just v) (insertSlot field k v)
+
+-- | 'slotWrite' for a slot that reads as @def@ while it is empty, which
+-- writing @def@ to it then leaves empty.
+{-# INLINE slotWriteOr #-}
+slotWriteOr :: Eq a => Field a -> a -> Int -> a -> SlotWrites
+slotWriteOr field def k v = SlotWrites (\st -> findSlot field def k st == v) (insertSlot field k v)
+
+{-# INLINE lookupDyn #-}
+lookupDyn :: Typeable a => Int -> WidgetStore -> Maybe a
+lookupDyn k st = IM.lookup k (storeDyn st) >>= fromDynamic
+
+{-# INLINE insertDyn #-}
+insertDyn :: Typeable a => Int -> a -> WidgetStore -> WidgetStore
+insertDyn k = insertSlot fieldDyn k . toDyn
 
 emptyWidgetStore :: WidgetStore
 emptyWidgetStore =

@@ -69,7 +69,6 @@ module NanoUI.Widgets.Custom
 
 import Control.Monad (forM_, void, when)
 import Data.IORef (readIORef)
-import Data.IntMap.Strict qualified as IM
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Primitive.SmallArray (SmallArray, emptySmallArray, smallArrayFromList)
@@ -112,7 +111,7 @@ import NanoUI.Input
   )
 import NanoUI.Layout.Arena (NodeType (NodeDrawing))
 import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO, uiTime)
-import NanoUI.Store (WidgetStore (..), boolInt, intBool, Slot (..), slotKey)
+import NanoUI.Store (Slot (..), boolInt, deleteSlot, fieldPoint, findSlot, flagSlot, insertSlot, intBool, setFlagSlot, slotKey)
 import NanoUI.Style
   ( AlignX (..)
   , AlignY (..)
@@ -143,7 +142,7 @@ import NanoUI.Types
   , v2X
   , v2Y
   )
-import NanoUI.Widgets.Behavior (KeyNav (..), keyActivated, useKeyNav)
+import NanoUI.Widgets.Behavior (keyActivated, navStep, useKeyNav)
 import NanoUI.Widgets.Node
   ( Response
   , addWidget
@@ -395,9 +394,9 @@ useDrag2D bounds = do
   let dragK = slotKey SlotDrag (intKey wid)
       mouse = inputMousePos inp
   store <- uiIO (getStore ctx)
-  let active0 = IM.findWithDefault 0 dragK (storeInt store) /= 0
+  let active0 = flagSlot dragK store
       active = inputMouseDown inp && (active0 || (inputMousePressed inp && rectContains bounds mouse))
-      (prevX, prevY) = IM.findWithDefault (v2X mouse, v2Y mouse) dragK (storePoint store)
+      (prevX, prevY) = findSlot fieldPoint (v2X mouse, v2Y mouse) dragK store
       delta =
         if active && active0
           then V2 (v2X mouse - prevX) (v2Y mouse - prevY)
@@ -407,19 +406,9 @@ useDrag2D bounds = do
           (clamp (rectX bounds) (rectX bounds + rectW bounds) (v2X mouse))
           (clamp (rectY bounds) (rectY bounds + rectH bounds) (v2Y mouse))
   when (active || active0) $
-    uiIO $
-      modifyStore ctx $ \st ->
-        if active
-          then
-            st
-              { storeInt = IM.insert dragK 1 (storeInt st)
-              , storePoint = IM.insert dragK (v2X mouse, v2Y mouse) (storePoint st)
-              }
-          else
-            st
-              { storeInt = IM.delete dragK (storeInt st)
-              , storePoint = IM.delete dragK (storePoint st)
-              }
+    uiIO . modifyStore ctx $
+      setFlagSlot dragK active
+        . (if active then insertSlot fieldPoint dragK (v2X mouse, v2Y mouse) else deleteSlot fieldPoint dragK)
   pure Drag2D { dragPosition = clampedMouse, dragActive = active, dragDelta = delta }
 
 -- | Inspects mouse wheel scroll delta when pointer is hovering over bounds.
@@ -496,9 +485,7 @@ knobWith' f diameter minV maxV value = do
   let isDragging = dragActive drag
       dy = if isDragging then - v2Y (dragDelta drag) else 0
       dScroll = scrollY * 2.0
-      dKey =
-        (if knRight nav || knUp nav then 1 else 0 :: Int)
-          - (if knLeft nav || knDown nav then 1 else 0)
+      dKey = navStep nav
       deltaNorm =
         if range > 0
           then (dy / 120.0) + (dScroll / 60.0) + fromIntegral dKey * 0.05

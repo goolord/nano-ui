@@ -14,7 +14,6 @@ where
 
 import Control.Monad (foldM, when, (<$!>))
 import Data.IORef (writeIORef)
-import Data.IntMap.Strict qualified as IM
 import Data.Maybe (fromMaybe, isJust)
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -35,12 +34,7 @@ import NanoUI.Id (WidgetId (..))
 import NanoUI.Input (Key (..), inputKeys, inputMouseDown, inputMousePos, inputMousePressed, inputScroll)
 import NanoUI.Layout.Arena (setOptions)
 import NanoUI.Monad (Ui, askContext, uiIO)
-import NanoUI.Store
-  ( WidgetStore (..)
-  , boolInt
-  , Slot (..)
-  , slotKey
-  )
+import NanoUI.Store (Slot (..), boolInt, fieldFloat, fieldInt, fieldText, findSlot, flagSlot, insertSlot, slotKey)
 import NanoUI.Types (Rect (..), V2 (..), clamp, rectContains, rectNonEmpty, v2X, v2Y)
 import NanoUI.WidgetText (textInputFlagSearch)
 import NanoUI.Widgets.Behavior (keyboardFocused)
@@ -292,15 +286,15 @@ comboBox' placeholder options value = do
   store <- uiIO (getStore ctx)
   let cs0 =
         ComboState
-          { csHighlight = IM.findWithDefault (-1) (slotKey SlotComboHighlight key) (storeInt store)
-          , csWindow = IM.findWithDefault 0 (slotKey SlotComboScroll key) (storeInt store)
-          , csScrollX = IM.findWithDefault 0 (slotKey SlotComboScrollX key) (storeFloat store)
-          , csContentW = IM.findWithDefault 0 (slotKey SlotComboContentW key) (storeFloat store)
-          , csDrag = IM.findWithDefault 0 (slotKey SlotComboDrag key) (storeInt store)
-          , csDragOff = IM.findWithDefault 0 (slotKey SlotComboDragOff key) (storeFloat store)
-          , csCommitted = IM.findWithDefault value (slotKey SlotComboCommitted key) (storeText store)
-          , csLive = IM.findWithDefault text (slotKey SlotComboLive key) (storeText store)
-          , csFocused = IM.findWithDefault 0 (slotKey SlotComboFocus key) (storeInt store) /= 0
+          { csHighlight = findSlot fieldInt (-1) (slotKey SlotComboHighlight key) store
+          , csWindow = findSlot fieldInt 0 (slotKey SlotComboScroll key) store
+          , csScrollX = findSlot fieldFloat 0 (slotKey SlotComboScrollX key) store
+          , csContentW = findSlot fieldFloat 0 (slotKey SlotComboContentW key) store
+          , csDrag = findSlot fieldInt 0 (slotKey SlotComboDrag key) store
+          , csDragOff = findSlot fieldFloat 0 (slotKey SlotComboDragOff key) store
+          , csCommitted = findSlot fieldText value (slotKey SlotComboCommitted key) store
+          , csLive = findSlot fieldText text (slotKey SlotComboLive key) store
+          , csFocused = flagSlot (slotKey SlotComboFocus key) store
           }
   contentW <- uiIO $
     if isFocus && not (null displayed)
@@ -331,27 +325,22 @@ comboBox' placeholder options value = do
   when (isFocus || stepRedraw step) $
     uiIO $ do
       let len = T.length finalText
-      modifyStore ctx $ \st ->
-        let ints =
-              IM.insert (slotKey SlotComboHighlight key) (csHighlight cs1) $
-                IM.insert (slotKey SlotComboScroll key) (csWindow cs1) $
-                  IM.insert (slotKey SlotComboCount key) (length matches) $
-                    IM.insert (slotKey SlotComboFocus key) (boolInt (csFocused cs1)) $
-                      IM.insert (slotKey SlotComboDrag key) (csDrag cs1) (storeInt st)
-         in st
-              { storeInt =
-                  if stepPicked step
-                    then IM.insert (slotKey SlotCursor key) len (IM.insert (slotKey SlotAnchor key) len ints)
-                    else ints
-              , storeFloat =
-                  IM.insert (slotKey SlotComboScrollX key) (csScrollX cs1) $
-                    IM.insert (slotKey SlotComboContentW key) (csContentW cs1) $
-                      IM.insert (slotKey SlotComboDragOff key) (csDragOff cs1) (storeFloat st)
-              , storeText =
-                  IM.insert (slotKey SlotComboLive key) finalText $
-                    IM.insert (slotKey SlotComboCommitted key) (csCommitted cs1) $
-                      IM.insert key finalText (storeText st)
-              }
+          caretToEnd
+            | stepPicked step = insertSlot fieldInt (slotKey SlotCursor key) len . insertSlot fieldInt (slotKey SlotAnchor key) len
+            | otherwise = id
+      modifyStore ctx $
+        caretToEnd
+          . insertSlot fieldInt (slotKey SlotComboHighlight key) (csHighlight cs1)
+          . insertSlot fieldInt (slotKey SlotComboScroll key) (csWindow cs1)
+          . insertSlot fieldInt (slotKey SlotComboCount key) (length matches)
+          . insertSlot fieldInt (slotKey SlotComboFocus key) (boolInt (csFocused cs1))
+          . insertSlot fieldInt (slotKey SlotComboDrag key) (csDrag cs1)
+          . insertSlot fieldFloat (slotKey SlotComboScrollX key) (csScrollX cs1)
+          . insertSlot fieldFloat (slotKey SlotComboContentW key) (csContentW cs1)
+          . insertSlot fieldFloat (slotKey SlotComboDragOff key) (csDragOff cs1)
+          . insertSlot fieldText (slotKey SlotComboLive key) finalText
+          . insertSlot fieldText (slotKey SlotComboCommitted key) (csCommitted cs1)
+          . insertSlot fieldText key finalText
       when (stepDismissed step) $ do
         writeIORef (ctxFocusId ctx) (WidgetId 0)
         markEscapeConsumed ctx

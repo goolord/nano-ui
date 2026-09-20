@@ -9,6 +9,7 @@ module NanoUI.Monad
   , runNanoUI
   , runUi
   , uiIO
+  , withContext
   , emit
   , withKey
   , keyed
@@ -48,6 +49,7 @@ module NanoUI.Monad
   , whenM
   , unlessM
   , ifM
+  , (<&&>)
   )
 where
 
@@ -142,11 +144,16 @@ uiIO m = do
   UiRep {} <- getStaticRep
   unsafeEff_ m
 
+-- | Run an action on the view's 'Context'.
+{-# INLINE withContext #-}
+withContext :: Ui :> es => (Context -> IO a) -> Eff es a
+withContext f = do
+  UiRep ctx _ _ _ <- getStaticRep
+  unsafeEff_ (f ctx)
+
 {-# INLINE emit #-}
 emit :: (Typeable msg, Ui :> es) => msg -> Eff es ()
-emit msg = do
-  ctx <- askContext
-  uiIO (pushMessage ctx (FrameMsg msg))
+emit msg = withContext (\ctx -> pushMessage ctx (FrameMsg msg))
 
 -- | The id 'nextId' would issue, without consuming it.
 {-# INLINE currentId #-}
@@ -244,9 +251,7 @@ uiTime = uiIO getMonotonicTime
 -- as modified by the enclosing 'styled' and 'disabledWhen' scopes.
 {-# INLINE uiTheme #-}
 uiTheme :: Ui :> es => Eff es Theme
-uiTheme = do
-  ctx <- askContext
-  uiIO (currentTheme ctx)
+uiTheme = withContext currentTheme
 
 -- | Draw a part of the view with a modified theme. Widgets declared inside
 -- take their colours, borders and corner radii from it, and 'styled' scopes
@@ -312,9 +317,7 @@ withPaintScope enter m = do
 
 {-# INLINE setUiTheme #-}
 setUiTheme :: Ui :> es => Theme -> Eff es ()
-setUiTheme th = do
-  ctx <- askContext
-  uiIO (setTheme ctx th)
+setUiTheme th = withContext (\ctx -> setTheme ctx th)
 
 -- | Where the pointer is, as the view being declared sees it: far off every
 -- widget while something drawn in front has the pointer.
@@ -358,39 +361,27 @@ windowHeight = fmap (sizeH . inputWindowSize) askInput
 
 {-# INLINE askHost #-}
 askHost :: (Typeable a, Ui :> es) => Eff es (Maybe a)
-askHost = do
-  ctx <- askContext
-  uiIO (askHostIO ctx)
+askHost = withContext askHostIO
 
 {-# INLINE damageWidgetNow #-}
 damageWidgetNow :: (Ui :> es) => WidgetId -> DamageBounds -> Eff es ()
-damageWidgetNow wid bounds = do
-  ctx <- askContext
-  uiIO (damageWidget ctx wid bounds)
+damageWidgetNow wid bounds = withContext (\ctx -> damageWidget ctx wid bounds)
 
 {-# INLINE damageKeyNow #-}
 damageKeyNow :: (Ui :> es) => Int -> DamageBounds -> Eff es ()
-damageKeyNow k bounds = do
-  ctx <- askContext
-  uiIO (damageKey ctx k bounds)
+damageKeyNow k bounds = withContext (\ctx -> damageKey ctx k bounds)
 
 {-# INLINE damageRectNow #-}
 damageRectNow :: (Ui :> es) => Rect -> Eff es ()
-damageRectNow r = do
-  ctx <- askContext
-  uiIO (damageRect ctx r)
+damageRectNow r = withContext (\ctx -> damageRect ctx r)
 
 {-# INLINE damageGroupNow #-}
 damageGroupNow :: (Ui :> es) => [WidgetId] -> DamageBounds -> Eff es ()
-damageGroupNow wids bounds = do
-  ctx <- askContext
-  uiIO (damagePeers ctx wids bounds)
+damageGroupNow wids bounds = withContext (\ctx -> damagePeers ctx wids bounds)
 
 {-# INLINE damageFullNow #-}
 damageFullNow :: (Ui :> es) => Eff es ()
-damageFullNow = do
-  ctx <- askContext
-  uiIO (damageFull ctx)
+damageFullNow = withContext damageFull
 
 -- | Monadic variant of 'when'. Runs the second action if the first returns 'True'.
 --
@@ -407,6 +398,13 @@ whenM mb ma = mb >>= \b -> when b ma
 {-# INLINE unlessM #-}
 unlessM :: Monad m => m Bool -> m () -> m ()
 unlessM mb ma = mb >>= \b -> unless b ma
+
+-- | '&&' over effectful tests: the second runs only when the first holds.
+infixr 3 <&&>
+
+{-# INLINE (<&&>) #-}
+(<&&>) :: Monad m => m Bool -> m Bool -> m Bool
+a <&&> b = a >>= \ok -> if ok then b else pure False
 
 -- | Monadic conditional selection.
 {-# INLINE ifM #-}

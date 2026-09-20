@@ -14,7 +14,6 @@ where
 
 import Control.Monad (when)
 import Data.Char (isDigit, isHexDigit)
-import Data.IntMap.Strict qualified as IM
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -25,7 +24,7 @@ import NanoUI.Context (getStore, intKey, registerFocusable, requestWakeAt, modif
 import NanoUI.Input (Key (..), inputKeys, inputKeysElem, inputModifiers, inputMouseDown, inputMousePos, inputMousePressed, modShift)
 import NanoUI.Layout.Arena (NodeType (..))
 import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO)
-import NanoUI.Store (WidgetStore (..), slotKey, Slot (..))
+import NanoUI.Store (Slot (..), deleteSlot, fieldDouble, fieldInt, fieldText, findSlot, insertSlot, lookupSlot, slotKey)
 import NanoUI.Style (Layout (..), Sizing (..), defaultLayout)
 import NanoUI.Types (Rect (..), rectContains)
 import NanoUI.WidgetText (numericStepperRects, textInputFlagNumeric)
@@ -100,12 +99,12 @@ numericInputConfigured' cfg value = do
   let
     key = intKey wid
     given = clampNumber cfg value
-    stored = IM.lookup key (storeText store)
+    stored = lookupSlot fieldText key store
     -- Unfocused, the field shows the caller's value; focused, it keeps the
     -- text being typed.
     text0 = if isFocus then fromMaybe (formatNumber cfg given) stored else formatNumber cfg given
     s0 = loadTextInputState store key text0
-    lastValue = IM.findWithDefault given key (storeDouble store)
+    lastValue = findSlot fieldDouble given key store
   mEdited <- if isFocus then uiIO (editTextInput ctx singleLineMode inp store key s0) else pure Nothing
   resp <- addWidgetStyled wid NodeTextInput "" 0 (nicLayout cfg) textInputFlagNumeric
   let
@@ -123,7 +122,7 @@ numericInputConfigured' cfg value = do
     pressDir
       | inputMousePressed inp = over upRect 1 + over downRect (-1)
       | otherwise = 0 :: Int
-    held0 = IM.findWithDefault 0 (slotKey SlotNumericHeld key) (storeInt store)
+    held0 = findSlot fieldInt 0 (slotKey SlotNumericHeld key) store
     holding =
       held0 /= 0
         && inputMouseDown inp
@@ -135,7 +134,7 @@ numericInputConfigured' cfg value = do
       | otherwise = 0
   now <- if pressDir /= 0 || holding then uiIO getMonotonicTime else pure 0
   let
-    repeatAt0 = IM.findWithDefault 0 (slotKey SlotNumericRepeat key) (storeDouble store)
+    repeatAt0 = findSlot fieldDouble 0 (slotKey SlotNumericRepeat key) store
     -- A held arrow repeats after a pause.
     repeatDir = if pressDir == 0 && holding && now >= repeatAt0 then held0 else 0
     dir
@@ -167,7 +166,7 @@ numericInputConfigured' cfg value = do
     dirty =
       stored /= Just (tisText s2)
         || s2 /= s0
-        || IM.lookup key (storeDouble store) /= Just final
+        || lookupSlot fieldDouble key store /= Just final
         || held1 /= held0
         || repeatAt1 /= repeatAt0
   when dirty $
@@ -177,12 +176,11 @@ numericInputConfigured' cfg value = do
       let save = case mEdited of
             Just ed | editorTextState ed == s2 -> saveTextEditor key ed
             _ -> saveTextInputState key s2
-      modifyStore ctx $ \st0 ->
-        let st = save st0
-         in st
-              { storeInt = (if held1 == 0 then IM.delete heldK else IM.insert heldK held1) (storeInt st)
-              , storeDouble = IM.insert key final (IM.insert repeatK repeatAt1 (storeDouble st))
-              }
+      modifyStore ctx $
+        (if held1 == 0 then deleteSlot fieldInt heldK else insertSlot fieldInt heldK held1)
+          . insertSlot fieldDouble key final
+          . insertSlot fieldDouble repeatK repeatAt1
+          . save
   -- A held arrow repeats on a schedule: ask for the frame of its next step
   -- instead of running frames back to back until then.
   when (held1 /= 0) $ uiIO (requestWakeAt ctx repeatAt1)

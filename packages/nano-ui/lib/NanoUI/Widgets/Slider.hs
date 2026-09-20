@@ -22,7 +22,7 @@ import NanoUI.Layout.Arena (NodeType (..))
 import NanoUI.Monad (Ui, askContext, nextId, uiIO, withKey)
 import NanoUI.Style (Layout, defaultLayout, fillW)
 import NanoUI.Types (Rect (..), clamp)
-import NanoUI.Widgets.Behavior (DragAxis (..), KeyNav (..), holdActiveWhile, useDrag1D, useKeyNav)
+import NanoUI.Widgets.Behavior (DragAxis (..), holdActiveWhile, navStep, useDrag1D, useKeyNav)
 import NanoUI.Widgets.Node (Response, addWidget, setChanged)
 
 -- | Slider over @[minV, maxV]@ that fills the available width. Pass the
@@ -71,11 +71,8 @@ sliderWith' f minV maxV value = do
   let
     range = maxV - minV
     step = if range > 0 then range / 100 else 0
-    navStep =
-      (if knRight nav || knUp nav then 1 else 0 :: Int)
-        - (if knLeft nav || knDown nav then 1 else 0)
     baseVal = if dragging then dragged else current
-    finalVal = clamp minV maxV (baseVal + fromIntegral navStep * step)
+    finalVal = clamp minV maxV (baseVal + fromIntegral (navStep nav) * step)
   uiIO $ do
     writeStoreFloat ctx wid key finalVal
     recordStoreFloat ctx key finalVal

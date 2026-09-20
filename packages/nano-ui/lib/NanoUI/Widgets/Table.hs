@@ -23,7 +23,7 @@ where
 
 import Colonnade (Colonnade, Headed (..), headed, headless)
 import Colonnade.Encode qualified as Encode
-import Control.Monad (forM, forM_, unless, void, when)
+import Control.Monad (forM, forM_, void, when)
 import Control.Monad.ST (runST)
 import Data.Char (isDigit)
 import Data.Foldable (toList)
@@ -39,14 +39,13 @@ import Data.Primitive.SmallArray (SmallArray, indexSmallArray, mapSmallArray', n
 import Data.Primitive.Types (Prim)
 import Data.Vector qualified as V
 import Effectful (Eff, type (:>))
-import qualified Data.IntMap.Strict as IM
-import NanoUI.Context (Context (..), getPrevRect, getScrollOffset2D, getStore, intKey, linkScrollAxes, setStore, modifyStore)
+import NanoUI.Context (Context (..), getPrevRect, getScrollOffset2D, getStore, intKey, linkScrollAxes, modifyStore, writeSlots)
 import NanoUI.Hooks (useInt)
 import NanoUI.Font (ScrollBarSlot (..), scrollBarGutter, tableCellInset, lineWidthIO)
 import NanoUI.Input (Input (..), inputMouseDown, inputMousePos, inputMousePressed, inputMouseReleased)
 import NanoUI.Layout.Arena (NodeType (..))
 import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO, withKey)
-import NanoUI.Store (WidgetStore (..), Slot (..), slotKey)
+import NanoUI.Store (Slot (..), fieldFloat, fieldFloatList, fieldInt, fieldIntList, fieldIntSet, findSlot, insertSlot, slotKey, slotWrite)
 import NanoUI.Style (AlignX (..), AlignY (..), Direction (..), FontVariant (..), Layout (..), Padding (..), Sizing (..), defaultLayout, fillH, fillW, tight)
 import Data.Bits ((.|.), shiftL)
 import NanoUI.Types (Rect (..), clamp, rectH, rectW, rectY, v2X, V2 (..), rectContains)
@@ -321,12 +320,12 @@ tableConfigured cfg f key cols inputRows curSort =
     st0 <- uiIO (getStore ctx)
     (!contentWs, !numeric) <- uiIO (columnMetrics ctx hdrs encoded)
     let sizes = smallArrayFromList (tableColSizes cfg)
-        order0 = normalizeOrder n (IM.findWithDefault [0 .. n - 1] stateKey (storeIntList st0))
-        hidden0 = IM.findWithDefault (tableHidden cfg) stateKey (storeIntSet st0)
-        widths0 = take n (IM.findWithDefault [] stateKey (storeFloatList st0) ++ repeat 0)
-        drag0 = unpackHeaderDrag (IM.findWithDefault 0 (slotKey SlotDrag stateKey) (storeInt st0))
-        dragX0 = IM.findWithDefault 0 stateKey (storeFloat st0)
-        dragW0 = IM.findWithDefault 0 (slotKey SlotDragW stateKey) (storeFloat st0)
+        order0 = normalizeOrder n (findSlot fieldIntList [0 .. n - 1] stateKey st0)
+        hidden0 = findSlot fieldIntSet (tableHidden cfg) stateKey st0
+        widths0 = take n (findSlot fieldFloatList [] stateKey st0 ++ repeat 0)
+        drag0 = unpackHeaderDrag (findSlot fieldInt 0 (slotKey SlotDrag stateKey) st0)
+        dragX0 = findSlot fieldFloat 0 stateKey st0
+        dragW0 = findSlot fieldFloat 0 (slotKey SlotDragW stateKey) st0
         mx = v2X (inputMousePos inp)
         -- A drag cannot push a column under its colFloor: the column reserved
         -- that much space for its text, and going under it wraps the cell and
@@ -337,7 +336,7 @@ tableConfigured cfg f key cols inputRows curSort =
                 setAt c (max (colFloor sizes contentWs c) (dragW0 + mx - dragX0)) widths0
           _ -> widths0
     when (widths1 /= widths0) $ uiIO $
-      modifyStore ctx (\st -> st {storeFloatList = IM.insert stateKey widths1 (storeFloatList st)})
+      modifyStore ctx (insertSlot fieldFloatList stateKey widths1)
     let hasStretch = tableStretchN n (tableColSizes cfg)
         indexedWidths = primArrayFromList widths1
         vis = filter (`IS.notMember` hidden0) order0
@@ -567,28 +566,12 @@ tableConfigured cfg f key cols inputRows curSort =
               setClicked (hasChanged && isJust sortClick) (mconcat (map snd headerPairs ++ maybe [] pure showAllResp))
       -- Compare the five slots, not the whole store: rewriting the store only
       -- when a slot moved keeps an idle table from diffing every map each frame.
-      uiIO $ do
-        st <- getStore ctx
-        let dragCode = packHeaderDrag nextDrag
-            dragK = slotKey SlotDrag stateKey
-            dragWK = slotKey SlotDragW stateKey
-            unchanged =
-              IM.lookup stateKey (storeIntList st) == Just nextOrder
-                && IM.lookup stateKey (storeIntSet st) == Just nextHidden
-                && IM.lookup dragK (storeInt st) == Just dragCode
-                && IM.lookup stateKey (storeFloat st) == Just nextDragX
-                && IM.lookup dragWK (storeFloat st) == Just nextDragW
-        unless unchanged $
-          setStore
-            ctx
-            st
-              { storeIntList = IM.insert stateKey nextOrder (storeIntList st)
-              , storeIntSet = IM.insert stateKey nextHidden (storeIntSet st)
-              , storeInt = IM.insert dragK dragCode (storeInt st)
-              , storeFloat =
-                  IM.insert stateKey nextDragX $
-                    IM.insert dragWK nextDragW (storeFloat st)
-              }
+      uiIO . writeSlots ctx $
+        slotWrite fieldIntList stateKey nextOrder
+          <> slotWrite fieldIntSet stateKey nextHidden
+          <> slotWrite fieldInt (slotKey SlotDrag stateKey) (packHeaderDrag nextDrag)
+          <> slotWrite fieldFloat stateKey nextDragX
+          <> slotWrite fieldFloat (slotKey SlotDragW stateKey) nextDragW
       pure (TableResponse widgetResp nextSort nextOrder nextHidden)
 
 -- | One row of cells with custom row layout.

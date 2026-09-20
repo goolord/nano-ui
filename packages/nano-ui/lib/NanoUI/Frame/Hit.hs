@@ -3,6 +3,7 @@
 -- | Layout hit testing for modals, windows, and overlay stacking.
 module NanoUI.Frame.Hit
   ( findNodeByWidgetId
+  , withWidgetNode
   , findNodeByKey
   , modalTreeOpen
   , nodeInSubtree
@@ -26,6 +27,7 @@ import NanoUI.Layout.Arena
   , NodeType (NodeModal, NodePopup, NodeScrollContainer, NodeWindow)
   , findNodeRevM
   , getClipRect
+  , getNodeRect
   , getNodeType
   , getParent
   , getRect
@@ -34,11 +36,19 @@ import NanoUI.Layout.Arena
   , lookupNodeByKey
   , lookupNodeByWidgetId
   , topModalNode
+  , walkAncestors
   )
-import NanoUI.Types (Rect (..), V2 (..), rectContains, rectH, rectW)
+import NanoUI.Monad ((<&&>))
+import NanoUI.Types (Rect (..), V2 (..), rectContains, rectH, rectHit, rectW)
 
 findNodeByWidgetId :: Context -> WidgetId -> IO (Maybe NodeIdx)
 findNodeByWidgetId ctx wid = lookupNodeByWidgetId (ctxNodeArena ctx) wid
+
+-- | Run @k@ on the node a widget id is on this frame, or give @def@ when it
+-- is on none.
+{-# INLINE withWidgetNode #-}
+withWidgetNode :: Context -> WidgetId -> a -> (NodeIdx -> IO a) -> IO a
+withWidgetNode ctx wid def k = findNodeByWidgetId ctx wid >>= maybe (pure def) k
 
 findNodeByKey :: Context -> Int -> IO (Maybe NodeIdx)
 findNodeByKey ctx k = lookupNodeByKey (ctxNodeArena ctx) k
@@ -49,14 +59,8 @@ modalTreeOpen ctx = do
   pure (isJust top)
 
 nodeInSubtree :: Context -> NodeIdx -> NodeIdx -> IO Bool
-nodeInSubtree ctx idx top = go idx
-  where
-    go i
-      | i < 0 = pure False
-      | i == top = pure True
-      | otherwise = do
-          parent <- getParent (ctxNodeArena ctx) i
-          go parent
+nodeInSubtree ctx idx top =
+  isJust <$> walkAncestors (ctxNodeArena ctx) idx (\i -> pure (if i == top then Just () else Nothing))
 
 -- | Membership predicate for an already-resolved subtree root. Callers
 -- filtering many widgets can resolve the root once for the whole operation.
@@ -86,13 +90,8 @@ topmostModalAtMouse ctx mouse =
 
 topmostFloatingAtMouse :: Context -> V2 -> (NodeType -> Bool) -> IO (Maybe NodeIdx)
 topmostFloatingAtMouse ctx mouse wanted =
-  findNodeRevM (ctxNodeArena ctx) $ \idx -> do
-    nt <- getNodeType (ctxNodeArena ctx) idx
-    if not (wanted nt)
-      then pure False
-      else do
-        (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-        pure (w > 0 && h > 0 && rectContains (Rect x y w h) mouse)
+  findNodeRevM (ctxNodeArena ctx) $ \idx ->
+    (wanted <$> getNodeType (ctxNodeArena ctx) idx) <&&> ((`rectHit` mouse) <$> getNodeRect (ctxNodeArena ctx) idx)
 
 -- | Whether the view saw the pointer where node @idx@ was declared: the frame
 -- routed it to the node's layer (its nearest floating ancestor, or the page),

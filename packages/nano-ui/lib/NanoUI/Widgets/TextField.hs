@@ -12,17 +12,16 @@ module NanoUI.Widgets.TextField
 
 import Data.Dynamic (fromDynamic)
 import Data.IORef (writeIORef)
-import Data.IntMap.Strict qualified as IM
 import Data.Text (Text)
 import Data.Text qualified as T
 import Effectful (Eff, type (:>))
-import NanoUI.Context (Context (..), WidgetStore (..), getStore, intKey, setTextInputMenu)
+import NanoUI.Context (Context (..), getStore, intKey, setTextInputMenu)
 import NanoUI.Frame.Hit (findNodeByWidgetId)
 import NanoUI.Frame.TextArea.Content (textAreaBuffer)
 import NanoUI.Id (WidgetId)
 import NanoUI.Layout.Arena (NodeType (..), getNodeType, getStyleIdx)
-import NanoUI.Monad (Ui, askContext, uiIO)
-import NanoUI.Store (slotKey, Slot (..))
+import NanoUI.Monad (Ui, withContext)
+import NanoUI.Store (Slot (..), fieldDyn, fieldInt, fieldText, findSlot, lookupSlot, slotKey)
 import NanoUI.Widgets.TextArea (applyTextAreaCommand)
 import NanoUI.Widgets.TextBuffer qualified as TB
 import NanoUI.Widgets.TextEditor
@@ -43,23 +42,17 @@ import NanoUI.Widgets.TextInput (applyTextInputCommand, textInputMode)
 -- changed text and a 'NanoUI.respChanged' pulse. An id that is not a text
 -- field is ignored.
 runTextCommand :: Ui :> es => WidgetId -> TextCommand -> Eff es ()
-runTextCommand wid cmd = do
-  ctx <- askContext
-  uiIO (applyTextFieldCommand ctx wid cmd)
+runTextCommand wid cmd = withContext (\ctx -> applyTextFieldCommand ctx wid cmd)
 
 -- | Whether 'NanoUI.Widgets.TextCommand.Undo' would change the field, for
 -- enabling a menu item.
 textCanUndo :: Ui :> es => WidgetId -> Eff es Bool
-textCanUndo wid = do
-  ctx <- askContext
-  uiIO (canUndo <$> textFieldHistory ctx wid)
+textCanUndo wid = withContext (\ctx -> canUndo <$> textFieldHistory ctx wid)
 
 -- | Whether 'NanoUI.Widgets.TextCommand.Redo' would change the field, for
 -- enabling a menu item.
 textCanRedo :: Ui :> es => WidgetId -> Eff es Bool
-textCanRedo wid = do
-  ctx <- askContext
-  uiIO (canRedo <$> textFieldHistory ctx wid)
+textCanRedo wid = withContext (\ctx -> canRedo <$> textFieldHistory ctx wid)
 
 -- | Run a command on the field with this id and focus it: the command comes
 -- from a menu or button that may not be over the field, and the caret,
@@ -87,7 +80,7 @@ textFieldMode ctx wid =
         _ -> pure Nothing
     Nothing -> do
       store <- getStore ctx
-      pure (IM.lookup (slotKey SlotTextMode (intKey wid)) (storeInt store) >>= editorModeFromCode)
+      pure (lookupSlot fieldInt (slotKey SlotTextMode (intKey wid)) store >>= editorModeFromCode)
 
 -- | The undo history of the field with this id, empty when it has none. A
 -- text input's is recorded with its text; a text area drops its history
@@ -96,8 +89,8 @@ textFieldHistory :: Context -> WidgetId -> IO EditHistory
 textFieldHistory ctx wid = do
   store <- getStore ctx
   let key = intKey wid
-      stored = IM.lookup (slotKey SlotTextHistory key) (storeDyn store)
-      text = IM.findWithDefault "" key (storeText store)
+      stored = lookupSlot fieldDyn (slotKey SlotTextHistory key) store
+      text = findSlot fieldText "" key store
   pure $ case stored of
     Just dyn
       | Just h <- fromDynamic dyn -> h
@@ -114,4 +107,4 @@ textFieldHasText ctx wid = do
     Just m | modeMultiLine m ->
       let buf = textAreaBuffer store key
        in TB.getLineCount buf > 1 || not (T.null (TB.lineAt 0 buf))
-    _ -> not (T.null (IM.findWithDefault "" key (storeText store)))
+    _ -> not (T.null (findSlot fieldText "" key store))

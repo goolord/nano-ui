@@ -12,22 +12,16 @@ module NanoUI.Hooks
 where
 
 import Control.Monad (when)
-import Data.Dynamic (fromDynamic, toDyn)
-import Data.IntMap.Strict qualified as IM
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Typeable (Typeable)
 import Effectful (Eff, type (:>))
 import NanoUI.Context (getStore, intKey, setStore)
 import NanoUI.Monad (Ui, askContext, nextId, uiIO)
-import NanoUI.Store (WidgetStore (..), boolInt, bumpMirror, intBool)
+import NanoUI.Store (WidgetStore, boolInt, bumpMirror, fieldFloat, fieldInt, fieldText, insertDyn, insertSlot, intBool, lookupDyn, lookupSlot)
 
 useState :: (Typeable a, Eq a, Ui :> es) => a -> Eff es (a, a -> Eff es ())
-useState =
-  useStored
-    (\key store -> IM.lookup key (storeDyn store) >>= fromDynamic)
-    ( \key value store -> store {storeDyn = IM.insert key (toDyn value) (storeDyn store)}
-    )
+useState = useStored lookupDyn insertDyn
 
 useStored ::
   (Eq a, Ui :> es) =>
@@ -56,16 +50,10 @@ useFlag initial = do
   pure (intBool value, setValue . boolInt)
 
 useInt :: Ui :> es => Int -> Eff es (Int, Int -> Eff es ())
-useInt =
-  useStored
-    (\key -> IM.lookup key . storeInt)
-    (\key value store -> store {storeInt = IM.insert key value (storeInt store)})
+useInt = useStored (lookupSlot fieldInt) (insertSlot fieldInt)
 
 useFloat :: Ui :> es => Float -> Eff es (Float, Float -> Eff es ())
-useFloat =
-  useStored
-    (\key -> IM.lookup key . storeFloat)
-    (\key value store -> store {storeFloat = IM.insert key value (storeFloat store)})
+useFloat = useStored (lookupSlot fieldFloat) (insertSlot fieldFloat)
 
 useEnum :: (Enum a, Ui :> es) => a -> Eff es (a, a -> Eff es ())
 useEnum initial = do
@@ -73,10 +61,7 @@ useEnum initial = do
   pure (toEnum index, setIndex . fromEnum)
 
 useText :: Ui :> es => Text -> Eff es (Text, Text -> Eff es ())
-useText =
-  useStored
-    (\key -> IM.lookup key . storeText)
-    (\key value store -> store {storeText = IM.insert key value (storeText store)})
+useText = useStored (lookupSlot fieldText) (insertSlot fieldText)
 
 useToggle :: Ui :> es => Bool -> Eff es (Bool, Eff es ())
 useToggle initial = do

@@ -17,7 +17,6 @@ module NanoUI.Widgets.Drop
 
 import Control.Applicative ((<|>))
 import Control.Monad (when)
-import Data.IntMap.Strict qualified as IM
 import Data.Text (Text)
 import Data.Foldable (toList)
 import Effectful (Eff, type (:>))
@@ -32,11 +31,7 @@ import NanoUI.Input
   , inputDrops
   )
 import NanoUI.Monad (Ui, askContext, askDefaultLayout, askInput, nextId, uiIO)
-import NanoUI.Store
-  ( WidgetStore (..)
-  , Slot (..)
-  , slotKey
-  )
+import NanoUI.Store (Slot (..), deleteSlot, fieldPoint, flagSlot, insertSlot, lookupSlot, setFlagSlot, slotKey)
 import NanoUI.Style (Layout)
 import NanoUI.Types (Rect, V2 (..), rectContains)
 import NanoUI.Layout.Arena (NodeType (..))
@@ -78,8 +73,8 @@ useDrop bounds = do
       activeK = slotKey SlotDrop key
       posK = slotKey SlotDropPos key
   store <- uiIO (getStore ctx)
-  let active0 = IM.findWithDefault 0 activeK (storeInt store) /= 0
-      lastPos0 = fmap (\(x, y) -> V2 x y) (IM.lookup posK (storePoint store))
+  let active0 = flagSlot activeK store
+      lastPos0 = fmap (\(x, y) -> V2 x y) (lookupSlot fieldPoint posK store)
       events = toList (inputDrops inp)
       -- A drag is active from 'DropBegin' until 'DropComplete'.
       active1 =
@@ -111,19 +106,9 @@ useDrop bounds = do
       texts = payloads DropText
       hovered = active1 && posInside bounds lastPos1
   when (active1 /= active0 || lastPos1 /= lastPos0) $
-    uiIO $
-      modifyStore ctx $ \st ->
-        st
-          { storeInt =
-              if active1
-                then IM.insert activeK 1 (storeInt st)
-                else IM.delete activeK (storeInt st)
-          , storePoint =
-              maybe
-                (IM.delete posK (storePoint st))
-                (\(V2 x y) -> IM.insert posK (x, y) (storePoint st))
-                lastPos1
-          }
+    uiIO . modifyStore ctx $
+      setFlagSlot activeK active1
+        . maybe (deleteSlot fieldPoint posK) (\(V2 x y) -> insertSlot fieldPoint posK (x, y)) lastPos1
   pure
     DropTarget
       { dropHovered = hovered

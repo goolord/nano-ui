@@ -19,9 +19,10 @@ import NanoUI.Layout.Arena
   ( NodeArena
   , NodeIdx
   , NodeType (..)
+  , getNodeRect
   , getNodeType
   , getParent
-  , getRect
+  , walkAncestors
   )
 import NanoUI.Style (Theme)
 import NanoUI.Types (Rect (..))
@@ -71,16 +72,10 @@ buildPaintEnv ctx occluders = do
 -- | Rect of the nearest popup-panel ancestor of @idx@, if any. Menu rows use
 -- it to paint hover fills edge-to-edge across the panel.
 popupPanelRect :: Context -> NodeIdx -> IO (Maybe Rect)
-popupPanelRect ctx = go
+popupPanelRect ctx idx = do
+  parent <- getParent na idx
+  walkAncestors na parent $ \p -> do
+    nt <- getNodeType na p
+    if nt == NodePopup then Just <$> getNodeRect na p else pure Nothing
   where
-    go i = do
-      p <- getParent (ctxNodeArena ctx) i
-      if p < 0
-        then pure Nothing
-        else do
-          nt <- getNodeType (ctxNodeArena ctx) p
-          if nt == NodePopup
-            then do
-              (px, py, pw, ph) <- getRect (ctxNodeArena ctx) p
-              pure (Just (Rect px py pw ph))
-            else go p
+    na = ctxNodeArena ctx

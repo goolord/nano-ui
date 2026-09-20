@@ -36,7 +36,7 @@ import NanoUI.Context
   , requestWakeAfter
   , setTextInputDrag
   )
-import NanoUI.Frame.Hit (findNodeByWidgetId)
+import NanoUI.Frame.Hit (findNodeByWidgetId, withWidgetNode)
 import NanoUI.Frame.TextArea
 import NanoUI.Frame.TextArea.Content (resolveTextAreaFont, textAreaContentMetrics)
 import NanoUI.Frame.TextArea.Geometry
@@ -44,8 +44,8 @@ import NanoUI.Frame.TextEdit.Menu (applyTextFieldMenuAction, textEditMenuRectAt,
 import NanoUI.Frame.TextInput
 import NanoUI.Id (WidgetId, hashWidgetId)
 import NanoUI.Input (Input, inputMouseDown, inputMousePos, inputMouseReleased)
-import NanoUI.Layout.Arena (NodeType (NodeTextArea, NodeTextInput), getNodeType, getRect)
-import NanoUI.Types (Rect (..), rectContains)
+import NanoUI.Layout.Arena (NodeType (NodeTextArea, NodeTextInput), getNodeRect, getNodeType)
+import NanoUI.Types (rectContains)
 import NanoUI.Widgets.TextCommon (textWordBounds)
 
 -- | Mouse selection in the focused field, whichever kind it is. A release
@@ -71,18 +71,15 @@ keepDragScrolling ctx inp focus =
       when (textInputDragWidget drag == focus) $ do
         mIdx <- findNodeByWidgetId ctx focus
         forM_ mIdx $ \idx -> do
-          (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-          unless (rectContains (Rect x y w h) (inputMousePos inp)) $
+          rect <- getNodeRect (ctxNodeArena ctx) idx
+          unless (rectContains rect (inputMousePos inp)) $
             requestWakeAfter ctx (1 / 60)
 
 collapseTextFieldSelection :: Context -> WidgetId -> IO ()
 collapseTextFieldSelection ctx wid =
   when (hashWidgetId wid /= 0) $ do
-    mIdx <- findNodeByWidgetId ctx wid
-    case mIdx of
-      Nothing -> pure ()
-      Just idx ->
-        getNodeType (ctxNodeArena ctx) idx >>= \case
-          NodeTextInput -> collapseTextInputSelection ctx wid
-          NodeTextArea -> collapseTextAreaSelection ctx wid
-          _ -> pure ()
+    withWidgetNode ctx wid () $ \idx ->
+      getNodeType (ctxNodeArena ctx) idx >>= \case
+        NodeTextInput -> collapseTextInputSelection ctx wid
+        NodeTextArea -> collapseTextAreaSelection ctx wid
+        _ -> pure ()

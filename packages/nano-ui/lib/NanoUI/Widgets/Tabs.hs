@@ -12,7 +12,6 @@ where
 import Control.Monad (forM_, when)
 import Data.Bits ((.|.))
 import Data.List (find)
-import qualified Data.IntMap.Strict as IM
 import Data.Maybe (isJust, listToMaybe)
 import Data.Text (Text)
 import Effectful (Eff, type (:>))
@@ -28,13 +27,13 @@ import NanoUI.Context
   , setStore
   , currentTheme
   )
-import NanoUI.Frame.Hit (findNodeByWidgetId)
+import NanoUI.Frame.Hit (withWidgetNode)
 import NanoUI.Frame.Scroll.Geometry (scrollAxisRange, scrollBare, scrollHorizontalHidden)
 import NanoUI.Id (WidgetId)
 import NanoUI.Input (inputMousePos, inputScroll)
 import NanoUI.Layout.Arena (setNodeValue)
 import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO, withKey)
-import NanoUI.Store (WidgetStore (storeFloat), slotKey, Slot (..))
+import NanoUI.Store (Slot (..), fieldFloat, findSlot, insertSlot, slotKey)
 import NanoUI.Style
   ( AlignX (..)
   , AlignY (..)
@@ -227,7 +226,7 @@ renderScrollableHeaders ctx style hdrLay barLay groupId cur tabList = do
   -- scroller at all. Cached as a float so a pure scroll frame keeps its clip
   -- damage (see `onlyScrollFloatsChanged` in NanoUI.Damage).
   store <- uiIO (getStore ctx)
-  let maxOffPrev = max 0 (IM.findWithDefault 0 rangeKey (storeFloat store))
+  let maxOffPrev = max 0 (findSlot fieldFloat 0 rangeKey store)
       overflow = maxOffPrev > 0.5
   off <- uiIO (getScrollOffset ctx scrollWid)
   wheelStep <- uiIO (resolveScrollStep ctx scrollWid)
@@ -304,9 +303,8 @@ renderScrollableHeaders ctx style hdrLay barLay groupId cur tabList = do
 cacheScrollRange :: Context -> Int -> Float -> IO ()
 cacheScrollRange ctx key v = do
   st <- getStore ctx
-  let prev = IM.findWithDefault 0 key (storeFloat st)
-  when (abs (prev - v) > 0.5) $
-    setStore ctx (st {storeFloat = IM.insert key v (storeFloat st)})
+  when (abs (findSlot fieldFloat 0 key st - v) > 0.5) $
+    setStore ctx (insertSlot fieldFloat key v st)
 
 -- | A prettier thin chevron button for the strip. Disabled ends paint the
 -- glyph in the muted fg instead of dropping the button, so the row width does
@@ -375,10 +373,7 @@ renderSingleHeader hdrLay packedStyle cur t = do
 syncTabHeaderActive :: Eq a => Context -> a -> [Header a] -> IO ()
 syncTabHeaderActive ctx active resps =
   forM_ resps $ \(Header k r _) -> do
-    mIdx <- findNodeByWidgetId ctx (respId r)
-    case mIdx of
-      Just i -> setNodeValue (ctxNodeArena ctx) i (if k == active then 1 else 0)
-      Nothing -> pure ()
+    withWidgetNode ctx (respId r) () $ \i -> setNodeValue (ctxNodeArena ctx) i (if k == active then 1 else 0)
 
 -- | Tab headers and the active tab's body. Pass the active key; the result is
 -- the active key after this frame's clicks or arrow keys. Only the active

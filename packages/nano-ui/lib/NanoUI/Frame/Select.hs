@@ -18,7 +18,6 @@ module NanoUI.Frame.Select
 
 import Control.Monad (filterM, forM, forM_, unless, when)
 import Data.IORef (readIORef, writeIORef)
-import qualified Data.IntMap.Strict as IM
 import Data.Maybe (catMaybes, listToMaybe, maybeToList)
 import qualified Data.Text as T
 import NanoUI.Context
@@ -46,12 +45,13 @@ import NanoUI.Context
 import NanoUI.Draw (pushRect, pushRoundedRect, pushText, withClip)
 import NanoUI.Font (FontMetrics, centeredTextY, menuItemPadX, menuItemRowH, menuOuterPad, widgetContentInset)
 import NanoUI.Frame.Chrome (overlayMenuStyle, paintMenuAccent, paintMenuPanel)
-import NanoUI.Frame.Hit (findNodeByWidgetId, widgetOverlayAllowed)
+import NanoUI.Frame.Hit (findNodeByWidgetId, widgetOverlayAllowed, withWidgetNode)
 import NanoUI.Frame.Scroll.Geometry (padTextClipRect)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input (Input (..), Key (..), foldInputKeys, inputKeys, inputMousePos, inputMousePressed, inputPointerHeld)
 import NanoUI.Layout.Arena (NodeType (NodeSelect, NodeTextInput), findNodeM, foldNodeRevM, getNodeType, lookupNodeByWidgetId, getOptions, getRect, getWidgetId)
-import NanoUI.Store (Slot (..), slotKey)
+import NanoUI.Monad ((<&&>))
+import NanoUI.Store (Slot (..), fieldFloat, fieldInt, fieldText, findSlot, insertSlot, slotKey)
 import NanoUI.Style (Style (..), Theme (..), scrollBarThumbColor, scrollBarTrackColor, themeAccent, themeInput)
 import NanoUI.Types (Color (..), Rect (..), V2 (..), rectContains, rectIntersect)
 import NanoUI.WidgetText (selectChevronReserve)
@@ -103,8 +103,8 @@ openDropdowns ctx = do
       opts <- getOptions na idx
       (x, y, w, h) <- getRect na idx
       let key = intKey wid
-          slotInt slot def = IM.findWithDefault def (slotKey slot key) (storeInt store)
-          slotFloat slot = IM.findWithDefault 0 (slotKey slot key) (storeFloat store)
+          slotInt slot def = findSlot fieldInt def (slotKey slot key) store
+          slotFloat slot = findSlot fieldFloat 0 (slotKey slot key) store
           nOpts = length opts
           rows = slotInt SlotComboCount nOpts
           window = slotInt SlotComboScroll 0
@@ -122,7 +122,7 @@ openDropdowns ctx = do
           , ddPicked =
               if combo
                 then slotInt SlotComboHighlight (-1) - window
-                else IM.findWithDefault 0 key (storeInt store)
+                else findSlot fieldInt 0 key store
           , ddComboRows = rows
           , ddComboWindow = window
           , ddComboScrollX = slotFloat SlotComboScrollX
@@ -240,10 +240,10 @@ finalizeSelectKeyboard ctx inp = do
               n <- length <$> getOptions (ctxNodeArena ctx) idx
               when (n > 0) $ do
                 let key = intKey wid
-                    cur = IM.findWithDefault 0 key (storeInt store)
+                    cur = findSlot fieldInt 0 key store
                     next = max 0 (min (n - 1) (cur + if wantNext then 1 else -1))
                 when (next /= cur) $ do
-                  setStore ctx (store {storeInt = IM.insert key next (storeInt store)})
+                  setStore ctx (insertSlot fieldInt key next store)
                   markDirty ctx
 
 pickSelectKeyboardTarget :: Context -> WidgetId -> WidgetStore -> Bool -> IO (Maybe (WidgetId, Bool))
@@ -257,24 +257,18 @@ selectWidgetIfAny :: Context -> WidgetId -> IO (Maybe WidgetId)
 selectWidgetIfAny ctx wid
   | hashWidgetId wid == 0 = pure Nothing
   | otherwise = do
-      mIdx <- findNodeByWidgetId ctx wid
-      case mIdx of
-        Nothing -> pure Nothing
-        Just idx -> do
-          nt <- getNodeType (ctxNodeArena ctx) idx
-          disabled <- isDisabled ctx wid
-          pure (if nt == NodeSelect && not disabled then Just wid else Nothing)
+      withWidgetNode ctx wid Nothing $ \idx -> do
+        nt <- getNodeType (ctxNodeArena ctx) idx
+        disabled <- isDisabled ctx wid
+        pure (if nt == NodeSelect && not disabled then Just wid else Nothing)
 
 findOpenSelectWidget :: Context -> IO (Maybe WidgetId)
 findOpenSelectWidget ctx = do
   store <- getStore ctx
   let na = ctxNodeArena ctx
   mIdx <-
-    findNodeM na $ \idx -> do
-      nt <- getNodeType na idx
-      if nt /= NodeSelect
-        then pure False
-        else isSelectOpen store . intKey <$> getWidgetId na idx
+    findNodeM na $ \idx ->
+      ((== NodeSelect) <$> getNodeType na idx) <&&> (isSelectOpen store . intKey <$> getWidgetId na idx)
   traverse (getWidgetId na) mIdx
 
 finalizeSelectPick :: Context -> Input -> IO ()
@@ -302,20 +296,16 @@ finalizeSelectPick ctx inp =
               forM_ (comboDropPickIndex (ddRect dd) menuItemRowH nOpts mouseY) $ \picked -> do
                 let txt = maybe "" id (listToMaybe (drop picked (ddOptions dd)))
                     len = T.length txt
-                setStore
-                  ctx
-                  ( st
-                      { storeText = IM.insert key txt (storeText st)
-                      , storeInt =
-                          IM.insert (slotKey SlotCursor key) len $
-                            IM.insert (slotKey SlotAnchor key) len (storeInt st)
-                      }
-                  )
+                setStore ctx $
+                  insertSlot fieldText key txt
+                    . insertSlot fieldInt (slotKey SlotCursor key) len
+                    . insertSlot fieldInt (slotKey SlotAnchor key) len
+                    $ st
                 writeIORef (ctxFocusId ctx) (WidgetId 0)
                 markDirty ctx
           else
             forM_ (selectDropPickIndex (ddRect dd) menuItemRowH nOpts mouseY) $ \picked -> do
-              setStore ctx (setSelectOpen (st {storeInt = IM.insert key picked (storeInt st)}) key False)
+              setStore ctx (setSelectOpen (insertSlot fieldInt key picked st) key False)
               writeIORef (ctxFocusId ctx) wid
               markDirty ctx
 
