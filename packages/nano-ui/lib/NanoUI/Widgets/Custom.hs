@@ -108,7 +108,19 @@ import NanoUI.Input
   )
 import NanoUI.Layout.Arena (NodeType (NodeDrawing))
 import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO, uiTime)
-import NanoUI.Store (Slot (..), boolInt, deleteSlot, fieldFloat, fieldPoint, findSlot, flagSlot, insertSlot, intBool, setFlagSlot, slotKey)
+import NanoUI.Store
+  ( Slot (..)
+  , boolInt
+  , deleteSlot
+  , fieldFloat
+  , fieldPoint
+  , findSlot
+  , flagSlot
+  , insertSlot
+  , intBool
+  , setFlagSlot
+  , slotKey
+  )
 import NanoUI.Style
   ( AlignX (..)
   , AlignY (..)
@@ -426,58 +438,72 @@ knobWith f diameter minV maxV value = snd <$> knobWith' f diameter minV maxV val
 -- | 'knobWith' returning the response and updated value.
 knobWith' ::
   Ui :> es =>
-  (Layout -> Layout) -> Float -> Float -> Float -> Float -> Eff es (Response, Float)
+  (Layout -> Layout)
+  -> Float
+  -> Float
+  -> Float
+  -> Float
+  -> Eff es (Response, Float)
 knobWith' f diameter minV maxV value = do
   wid <- nextId
   ctx <- askContext
-  let key = intKey wid
+  let
+    key = intKey wid
   current <- uiIO $ adoptStoreFloat ctx wid key value
-  let range = maxV - minV
-      frac = if range > 0 then clamp01 ((current - minV) / range) else 0
-  (resp, ()) <- customWidgetWithId wid defaultCustomWidgetSpec
-    { widgetLayout = fixedWH diameter diameter (f defaultLayout)
-    , widgetMeasure = Just $ \_ _ -> (diameter, diameter)
-    , widgetCursor = Just (\_ -> UiCursorNsResize)
-    , widgetFocusable = True
-    , widgetContent = contentKey [frac]
-    , widgetDraw = \cdc (Rect x y w h) -> runCanvas $ do
-        let cx = x + w / 2
-            cy = y + h / 2
-            r = min (w / 2) (h / 2) - 2
-            theme = cdcTheme cdc
-            hover = cdcHovered cdc
-            pressed = cdcPressed cdc
-            bgCol =
-              if pressed
-                then styleActiveBg (themeButton theme)
-                else if hover
-                  then styleHoverBg (themeButton theme)
-                  else styleBg (themeButton theme)
-            accent = themeAccent theme
-            borderCol = styleBorder (themeButton theme)
-            angle = (135 + frac * 270) * (pi / 180)
-            ix = cx + cos angle * (r * 0.75)
-            iy = cy + sin angle * (r * 0.75)
-        drawCircle (V2 cx cy) r bgCol
-        drawStrokeCircle (V2 cx cy) r 1.5 borderCol
-        drawStrokeAA (V2 cx cy) (V2 ix iy) 2.5 accent
-    }
-  let bounds = respRect resp
+  let
+    range = maxV - minV
+    frac = if range > 0 then clamp01 ((current - minV) / range) else 0
+  (resp, ()) <-
+    customWidgetWithId
+      wid
+      defaultCustomWidgetSpec
+        { widgetLayout = fixedWH diameter diameter (f defaultLayout)
+        , widgetMeasure = Just $ \_ _ -> (diameter, diameter)
+        , widgetCursor = Just (\_ -> UiCursorNsResize)
+        , widgetFocusable = True
+        , widgetContent = contentKey [frac]
+        , widgetDraw = \cdc (Rect x y w h) -> runCanvas $ do
+            let
+              cx = x + w / 2
+              cy = y + h / 2
+              r = min (w / 2) (h / 2) - 2
+              theme = cdcTheme cdc
+              hover = cdcHovered cdc
+              pressed = cdcPressed cdc
+              bgCol =
+                if pressed
+                  then styleActiveBg (themeButton theme)
+                  else
+                    if hover
+                      then styleHoverBg (themeButton theme)
+                      else styleBg (themeButton theme)
+              accent = themeAccent theme
+              borderCol = styleBorder (themeButton theme)
+              angle = (135 + frac * 270) * (pi / 180)
+              ix = cx + cos angle * (r * 0.75)
+              iy = cy + sin angle * (r * 0.75)
+            drawCircle (V2 cx cy) r bgCol
+            drawStrokeCircle (V2 cx cy) r 1.5 borderCol
+            drawStrokeAA (V2 cx cy) (V2 ix iy) 2.5 accent
+        }
+  let
+    bounds = respRect resp
   drag <- useDrag2D bounds
   (_scrollX, scrollY) <- useWheelDelta bounds
   nav <- useKeyNav wid
-  let isDragging = dragActive drag
-      dy = if isDragging then - v2Y (dragDelta drag) else 0
-      dScroll = scrollY * 2.0
-      dKey = navStep nav
-      deltaNorm =
-        if range > 0
-          then (dy / 120.0) + (dScroll / 60.0) + fromIntegral dKey * 0.05
-          else 0
-      finalVal =
-        if deltaNorm /= 0
-          then clamp minV maxV (current + deltaNorm * range)
-          else current
+  let
+    isDragging = dragActive drag
+    dy = if isDragging then -v2Y (dragDelta drag) else 0
+    dScroll = scrollY * 2.0
+    dKey = navStep nav
+    deltaNorm =
+      if range > 0
+        then (dy / 120.0) + (dScroll / 60.0) + fromIntegral dKey * 0.05
+        else 0
+    finalVal =
+      if deltaNorm /= 0
+        then clamp minV maxV (current + deltaNorm * range)
+        else current
   finishInput fieldFloat ctx wid key current resp finalVal
 
 -- | On/off switch. Pass the current state; the result is the state after
@@ -497,34 +523,41 @@ toggleSwitchWith :: Ui :> es => (Layout -> Layout) -> Bool -> Eff es Bool
 toggleSwitchWith f on = snd <$> toggleSwitchWith' f on
 
 -- | 'toggleSwitchWith' returning the response and updated flag.
-toggleSwitchWith' :: Ui :> es => (Layout -> Layout) -> Bool -> Eff es (Response, Bool)
+toggleSwitchWith' ::
+  Ui :> es => (Layout -> Layout) -> Bool -> Eff es (Response, Bool)
 toggleSwitchWith' f on = do
   wid <- nextId
   ctx <- askContext
-  let key = intKey wid
+  let
+    key = intKey wid
   current <- intBool <$> uiIO (adoptStoreInt ctx wid key (boolInt on))
-  let pillW = 44.0
-      pillH = 24.0
-  (resp, ()) <- customWidgetWithId wid defaultCustomWidgetSpec
-    { widgetLayout = fixedWH pillW pillH (f defaultLayout)
-    , widgetMeasure = Just $ \_ _ -> (pillW, pillH)
-    , widgetCursor = Just (\_ -> UiCursorPointer)
-    , widgetFocusable = True
-    , widgetContent = contentKey [if current then 1 else 0]
-    , widgetDraw = \cdc (Rect x y w h) -> runCanvas $ do
-        let theme = cdcTheme cdc
-            r = h / 2
-            accent = themeAccent theme
-            mutedCol = styleBg (themeButton theme)
-            bgCol = if current then accent else mutedCol
-            thumbR = r - 3
-            thumbX = if current then (x + w - r) else (x + r)
-            thumbY = y + r
-            thumbCol = themeOnAccent theme
-        drawRoundedRect (Rect x y w h) r bgCol
-        drawStrokeRoundedRect (Rect x y w h) r 1 (styleBorder (themeButton theme))
-        drawCircle (V2 thumbX thumbY) thumbR thumbCol
-    }
+  let
+    pillW = 44.0
+    pillH = 24.0
+  (resp, ()) <-
+    customWidgetWithId
+      wid
+      defaultCustomWidgetSpec
+        { widgetLayout = fixedWH pillW pillH (f defaultLayout)
+        , widgetMeasure = Just $ \_ _ -> (pillW, pillH)
+        , widgetCursor = Just (\_ -> UiCursorPointer)
+        , widgetFocusable = True
+        , widgetContent = contentKey [if current then 1 else 0]
+        , widgetDraw = \cdc (Rect x y w h) -> runCanvas $ do
+            let
+              theme = cdcTheme cdc
+              r = h / 2
+              accent = themeAccent theme
+              mutedCol = styleBg (themeButton theme)
+              bgCol = if current then accent else mutedCol
+              thumbR = r - 3
+              thumbX = if current then (x + w - r) else (x + r)
+              thumbY = y + r
+              thumbCol = themeOnAccent theme
+            drawRoundedRect (Rect x y w h) r bgCol
+            drawStrokeRoundedRect (Rect x y w h) r 1 (styleBorder (themeButton theme))
+            drawCircle (V2 thumbX thumbY) thumbR thumbCol
+        }
   finishToggle ctx wid current resp
 
 -- | Progress ring for a fraction in @[0, 1]@, 32 px across.

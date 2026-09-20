@@ -15,7 +15,16 @@ where
 import Control.Monad (when)
 import Data.Text (Text)
 import Effectful (Eff, type (:>))
-import NanoUI.Context (Context, intKey, isDisabled, recordSlot, recordStoreInt, registerFocusable, writeSlot, writeStoreBool)
+import NanoUI.Context
+  ( Context
+  , intKey
+  , isDisabled
+  , recordSlot
+  , recordStoreInt
+  , registerFocusable
+  , writeSlot
+  , writeStoreBool
+  )
 import NanoUI.Id (WidgetId)
 import NanoUI.Store (Field, boolInt)
 import NanoUI.Layout.Arena (NodeType (..))
@@ -26,9 +35,9 @@ import NanoUI.Widgets.Node
   ( Response (..)
   , addWidgetStyled
   , inertResponse
-  , setClicked
   , respClicked
   , setChanged
+  , setClicked
   )
 
 -- | Button with styleIdx for active, sort, badge, or close chrome. Focusable
@@ -68,11 +77,13 @@ selectableItem nt txt selected layout styleIdx = do
 -- | Finish a boolean control after its node has registered focus eligibility.
 -- Keyboard activation changes the value without inventing a pointer click.
 {-# INLINE finishToggle #-}
-finishToggle :: Ui :> es => Context -> WidgetId -> Bool -> Response -> Eff es (Response, Bool)
+finishToggle ::
+  Ui :> es => Context -> WidgetId -> Bool -> Response -> Eff es (Response, Bool)
 finishToggle ctx wid current resp = do
   keyClick <- keyActivated wid
-  let clicked = respClicked resp || keyClick
-      value = current /= clicked
+  let
+    clicked = respClicked resp || keyClick
+    value = current /= clicked
   uiIO $ do
     writeStoreBool ctx wid value
     recordStoreInt ctx (intKey wid) (boolInt value)
@@ -81,7 +92,16 @@ finishToggle ctx wid current resp = do
 -- | Publish an input's result and remember it for controlled adoption. The
 -- caller chooses the comparison value: live state or the supplied model value.
 {-# INLINE finishInput #-}
-finishInput :: (Eq a, Ui :> es) => Field a -> Context -> WidgetId -> Int -> a -> Response -> a -> Eff es (Response, a)
+finishInput ::
+  (Eq a, Ui :> es) =>
+  Field a
+  -> Context
+  -> WidgetId
+  -> Int
+  -> a
+  -> Response
+  -> a
+  -> Eff es (Response, a)
 finishInput field ctx wid key original resp value = do
   uiIO $ do
     writeSlot field ctx wid key value
@@ -98,5 +118,5 @@ withBoundedIndex ::
 withBoundedIndex encode initial pick =
   fmap (toEnum . (+ lower))
     <$> pick (map encode [minBound .. maxBound]) (fromEnum initial - lower)
-  where
-    lower = fromEnum (minBound :: a)
+ where
+  lower = fromEnum (minBound :: a)

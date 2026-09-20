@@ -10,7 +10,8 @@ module NanoUI.Emit
   , emitWhen
   , emitChanged
   , emitEdited
-  ) where
+  )
+where
 
 import Control.Monad (when)
 import Data.Typeable (Typeable)
@@ -26,13 +27,17 @@ emitWhen widget msg = whenM widget (emit msg)
 -- | Supply the model value to a control and emit only a different returned
 -- value. The original value is passed once, including for configured widgets.
 {-# INLINE emitChanged #-}
-emitChanged :: (Eq a, Typeable msg, Ui :> es) => (a -> Eff es a) -> a -> (a -> msg) -> Eff es ()
+emitChanged ::
+  (Eq a, Typeable msg, Ui :> es) =>
+  (a -> Eff es a) -> a -> (a -> msg) -> Eff es ()
 emitChanged widget old toMsg = widget old >>= \new -> when (new /= old) (emit (toMsg new))
 
 -- | Emit a different value only when the response also reports an edit. Use
 -- for text areas or debounced controls; caret/scroll-only changes emit nothing.
 {-# INLINE emitEdited #-}
-emitEdited :: (Eq a, Typeable msg, Ui :> es) => (a -> Eff es (Response, a)) -> a -> (a -> msg) -> Eff es ()
+emitEdited ::
+  (Eq a, Typeable msg, Ui :> es) =>
+  (a -> Eff es (Response, a)) -> a -> (a -> msg) -> Eff es ()
 emitEdited widget old toMsg = do
   (resp, new) <- widget old
   when (respChanged resp && new /= old) (emit (toMsg new))

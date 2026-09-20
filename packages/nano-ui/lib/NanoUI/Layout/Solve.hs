@@ -1516,7 +1516,14 @@ distributeScratch na n avail gapSum horizontal = do
         else copyScratchRange wArr hArr outW outH 0 n
 
 -- | @out[i] = (w[i], h[i])@ for the range.
-copyScratchRange :: MutablePrimArray RealWorld Float -> MutablePrimArray RealWorld Float -> MutablePrimArray RealWorld Float -> MutablePrimArray RealWorld Float -> Int -> Int -> IO ()
+copyScratchRange ::
+  MutablePrimArray RealWorld Float
+  -> MutablePrimArray RealWorld Float
+  -> MutablePrimArray RealWorld Float
+  -> MutablePrimArray RealWorld Float
+  -> Int
+  -> Int
+  -> IO ()
 {-# INLINE copyScratchRange #-}
 copyScratchRange wArr hArr outW outH !i !end
   | i >= end = pure ()

@@ -518,29 +518,36 @@ updateCounter Dec m = m {counterN = counterN m - 1}
 
 runReduceMessagesTest :: Context -> IORef Int -> IO ()
 runReduceMessagesTest ctx failed = do
-  let inp = withInput 80 80
-      model0 = Counter 0
-      view _ =
-        column $
-          Emit.emit Inc >> Emit.emit Dec >> Emit.emit Inc >> Emit.emit ("noise" :: String)
+  let
+    inp = withInput 80 80
+    model0 = Counter 0
+    view _ =
+      column $
+        Emit.emit Inc >> Emit.emit Dec >> Emit.emit Inc >> Emit.emit ("noise" :: String)
   ((), model1, msgs, _, dirty) <- runFrameReduce updateCounter ctx inp model0 view
   assert failed (msgs == [Inc, Dec, Inc] && model1 == Counter 1 && dirty)
   -- Messages that cancel out leave the model unchanged and not dirty.
-  let identity _ = column (Emit.emit Inc >> Emit.emit Dec)
-  ((), model2, msgs2, _, dirty2) <- runFrameReduce updateCounter ctx inp model0 identity
+  let
+    identity _ = column (Emit.emit Inc >> Emit.emit Dec)
+  ((), model2, msgs2, _, dirty2) <-
+    runFrameReduce updateCounter ctx inp model0 identity
   assert failed (msgs2 == [Inc, Dec] && model2 == Counter 0 && not dirty2)
   -- Generic adapters run the control once and distinguish value changes from
   -- edit pulses. A response-only pulse cannot emit the unchanged value.
   calls <- newIORef (0 :: Int)
-  let control value = uiIO (modifyIORef' calls (+ 1)) >> pure (value + 1)
-      adapters = do
-        Emit.emitWhen (pure False) (1 :: Int)
-        Emit.emitWhen (pure True) (2 :: Int)
-        Emit.emitChanged pure (3 :: Int) id
-        Emit.emitChanged control (3 :: Int) id
-        Emit.emitEdited (\v -> pure (mempty, v + 1)) (5 :: Int) id
-        Emit.emitEdited (\v -> pure (mempty {rawRespChanged = True}, v)) (6 :: Int) id
-        Emit.emitEdited (\v -> pure (mempty {rawRespChanged = True}, v + 1)) (7 :: Int) id
+  let
+    control value = uiIO (modifyIORef' calls (+ 1)) >> pure (value + 1)
+    adapters = do
+      Emit.emitWhen (pure False) (1 :: Int)
+      Emit.emitWhen (pure True) (2 :: Int)
+      Emit.emitChanged pure (3 :: Int) id
+      Emit.emitChanged control (3 :: Int) id
+      Emit.emitEdited (\v -> pure (mempty, v + 1)) (5 :: Int) id
+      Emit.emitEdited (\v -> pure (mempty {rawRespChanged = True}, v)) (6 :: Int) id
+      Emit.emitEdited
+        (\v -> pure (mempty {rawRespChanged = True}, v + 1))
+        (7 :: Int)
+        id
   (_, emitted, _, _) <- runFrame ctx inp adapters
   assertEq failed [2, 4, 8] (decodeMessages emitted :: [Int])
   assertEq failed 1 =<< readIORef calls

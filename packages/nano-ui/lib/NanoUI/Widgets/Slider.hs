@@ -52,7 +52,8 @@ sliderWith' f minV maxV value = do
   wid <- nextId
   ctx <- askContext
   uiIO $ registerFocusable ctx wid
-  let key = intKey wid
+  let
+    key = intKey wid
   current <- uiIO $ adoptStoreFloat ctx wid key value
   let
     frac = if maxV > minV then (current - minV) / (maxV - minV) else 0
@@ -62,10 +63,17 @@ sliderWith' f minV maxV value = do
     track =
       case mrect of
         Just (Rect x y w h) ->
-          let tr = sliderTrackBounds x y w h
-           in Rect (rectX tr) (rectY tr - sliderHandleSlack) (rectW tr) (rectH tr + 2 * sliderHandleSlack)
+          let
+            tr = sliderTrackBounds x y w h
+           in
+            Rect
+              (rectX tr)
+              (rectY tr - sliderHandleSlack)
+              (rectW tr)
+              (rectH tr + 2 * sliderHandleSlack)
         Nothing -> Rect 0 0 0 0
-  (dragged, dragging) <- withKey ("drag" :: Text) (useDrag1D DragAxisX minV maxV current track)
+  (dragged, dragging) <-
+    withKey ("drag" :: Text) (useDrag1D DragAxisX minV maxV current track)
   holdActiveWhile wid dragging
   nav <- useKeyNav wid
   let

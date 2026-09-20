@@ -1,7 +1,7 @@
 module Cases.SIMD (runSimdWritesTest, runDrawLayersTest) where
 
 import Control.Monad (forM, forM_, void)
-import Data.IORef (IORef, newIORef, modifyIORef', readIORef)
+import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
 import Data.List (sort)
 import Data.Primitive.PrimArray (primArrayToList)
 import Data.Vector.Unboxed qualified as U
@@ -14,8 +14,15 @@ import Foreign.Storable (peekByteOff)
 import NanoUI.SIMD
 import NanoUI (NanoUI, button, column, emptyInput, label, modal)
 import NanoUI.Testing
-  ( Context, DrawCmd (..), DrawData (..), Layer (..), drawCmdElems,
-    forDrawCmdsInLayer_, newContext, runFrame )
+  ( Context
+  , DrawCmd (..)
+  , DrawData (..)
+  , Layer (..)
+  , drawCmdElems
+  , forDrawCmdsInLayer_
+  , newContext
+  , runFrame
+  )
 import NanoUI.Testing.Assert (assertEq)
 
 -- Check the renderer's interleaved vertex ABI, triangle winding and byte
@@ -76,24 +83,31 @@ runSimdWritesTest _ failed = do
 -- layer and visiting the layers reconstructs the complete command stream.
 runDrawLayersTest :: Context -> IORef Int -> IO ()
 runDrawLayersTest _ failed = do
-  let commands = [DrawCmd 1 2 3 4 (-7) 19 maxBound layer | layer <- [minBound .. maxBound]]
-      grown = U.create $ do
-        v <- U.thaw (U.fromList commands)
-        w <- UM.grow v (length commands)
-        UM.copy (UM.drop (length commands) w) v
-        pure w
+  let
+    commands = [DrawCmd 1 2 3 4 (-7) 19 maxBound layer | layer <- [minBound .. maxBound]]
+    grown = U.create $ do
+      v <- U.thaw (U.fromList commands)
+      w <- UM.grow v (length commands)
+      UM.copy (UM.drop (length commands) w) v
+      pure w
   assertEq failed (commands ++ commands) (U.toList grown)
-  let views :: [NanoUI ()]
-      views = [pure (), label "content", column $ do
-        void (button "outside")
-        void (modal True "overlay" (button "inside"))]
+  let
+    views :: [NanoUI ()]
+    views =
+      [ pure ()
+      , label "content"
+      , column $ do
+          void (button "outside")
+          void (modal True "overlay" (button "inside"))
+      ]
   forM_ views $ \view -> do
     ctx <- newContext
     forM_ [1 .. 3 :: Int] $ \_ -> do
       (_, _, dd, _) <- runFrame ctx emptyInput view
-      let cmds = drawCmdElems dd
-          tags = map (fromEnum . cmdLayer) cmds
-          offsets = primArrayToList (drawLayerOffsets dd)
+      let
+        cmds = drawCmdElems dd
+        tags = map (fromEnum . cmdLayer) cmds
+        offsets = primArrayToList (drawLayerOffsets dd)
       assertEq failed (sort tags) tags
       assertEq failed 5 (length offsets)
       assertEq failed [0] (take 1 offsets)

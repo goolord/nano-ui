@@ -964,51 +964,57 @@ themeFromBase16Light = themeFromBase16Mode False
 
 themeFromBase16Mode :: Bool -> Base16 -> Theme
 themeFromBase16Mode dark b =
-  let pick :: a -> a -> a
-      pick night day = if dark then night else day
-      edgeCol = pick (lerpColor (base02 b) (base03 b) 0.35) (base02 b)
-      panelBg = pick (lerpColor (base01 b) (base02 b) 0.3) (lerpColor (base00 b) (base01 b) 0.5)
-      panelSurface =
-        flatStyle
-          panelBg
-          (base05 b)
-          edgeCol
-          (pick (lerpColor panelBg (base02 b) 0.5) (lerpColor panelBg (base00 b) 0.4))
-          (lerpColor panelBg (pick (base00 b) (base02 b)) 0.4)
-   in Theme
-        { themeWindow = base00 b
-        , themePanel = panelSurface
-        , themeFloatingWindow = panelSurface
-        , themeButton =
-            flatStyle
-              (pick (base02 b) (base01 b))
-              (pick (base07 b) (base05 b))
-              edgeCol
-              (pick (lerpColor (base02 b) (base03 b) 0.4) (base02 b))
-              (pick (base01 b) (lerpColor (base02 b) (base03 b) 0.35))
-        , themeInput =
-            flatStyle
-              (base00 b)
-              (base05 b)
-              edgeCol
-              (pick (base01 b) (lerpColor (base00 b) (base01 b) 0.3))
-              (pick (base00 b) (lerpColor (base00 b) (base01 b) 0.6))
-        , themeSeparator = edgeCol
-        , themeAccent = base0D b
-        , themeMuted = base03 b
-        , themeRed = base08 b
-        , themeOrange = base09 b
-        , themeYellow = base0A b
-        , themeGreen = base0B b
-        , themePurple = base0E b
-        , themeOverlayDim = colorRGBA 0 0 0 (pick 160 100)
-        , themeOnAccent = if colorLuminance (base0D b) > 0.6 then pick (base00 b) (base07 b) else colorRGBA 255 255 255 255
-        , themeSelection = fadeAlpha (base0D b) (pick 115 80)
-        , themeFocusRing = base0D b
-        , themeLink = base0D b
-        , themeShadow = colorRGBA 0 0 0 (pick 72 36)
-        , themeDisabledFade = 0.55
-        }
+  let
+    pick :: a -> a -> a
+    pick night day = if dark then night else day
+    edgeCol = pick (lerpColor (base02 b) (base03 b) 0.35) (base02 b)
+    panelBg =
+      pick (lerpColor (base01 b) (base02 b) 0.3) (lerpColor (base00 b) (base01 b) 0.5)
+    panelSurface =
+      flatStyle
+        panelBg
+        (base05 b)
+        edgeCol
+        (pick (lerpColor panelBg (base02 b) 0.5) (lerpColor panelBg (base00 b) 0.4))
+        (lerpColor panelBg (pick (base00 b) (base02 b)) 0.4)
+   in
+    Theme
+      { themeWindow = base00 b
+      , themePanel = panelSurface
+      , themeFloatingWindow = panelSurface
+      , themeButton =
+          flatStyle
+            (pick (base02 b) (base01 b))
+            (pick (base07 b) (base05 b))
+            edgeCol
+            (pick (lerpColor (base02 b) (base03 b) 0.4) (base02 b))
+            (pick (base01 b) (lerpColor (base02 b) (base03 b) 0.35))
+      , themeInput =
+          flatStyle
+            (base00 b)
+            (base05 b)
+            edgeCol
+            (pick (base01 b) (lerpColor (base00 b) (base01 b) 0.3))
+            (pick (base00 b) (lerpColor (base00 b) (base01 b) 0.6))
+      , themeSeparator = edgeCol
+      , themeAccent = base0D b
+      , themeMuted = base03 b
+      , themeRed = base08 b
+      , themeOrange = base09 b
+      , themeYellow = base0A b
+      , themeGreen = base0B b
+      , themePurple = base0E b
+      , themeOverlayDim = colorRGBA 0 0 0 (pick 160 100)
+      , themeOnAccent =
+          if colorLuminance (base0D b) > 0.6
+            then pick (base00 b) (base07 b)
+            else colorRGBA 255 255 255 255
+      , themeSelection = fadeAlpha (base0D b) (pick 115 80)
+      , themeFocusRing = base0D b
+      , themeLink = base0D b
+      , themeShadow = colorRGBA 0 0 0 (pick 72 36)
+      , themeDisabledFade = 0.55
+      }
 
 -- | Tomorrow Night Base16 reference palette.
 base16TomorrowNight :: Base16

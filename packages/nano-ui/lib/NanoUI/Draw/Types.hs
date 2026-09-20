@@ -1,5 +1,5 @@
-{-# LANGUAGE StrictData #-}
 {-# LANGUAGE DerivingVia #-}
+{-# LANGUAGE StrictData #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | Draw-layer data: immediate vector ops, batched draw commands, the finished
@@ -24,16 +24,17 @@ module NanoUI.Draw.Types
   , indexSize
   , backdropDimTextureId
   , glyphAtlasTextureId
-  ) where
+  )
+where
 
 import Data.IORef (IORef)
 import Data.Primitive.PrimArray (MutablePrimArray, PrimArray, indexPrimArray)
 import qualified Data.Text as T
 import Data.Primitive.SmallArray (SmallArray)
 import Data.Word (Word32, Word8)
-import Data.Vector.Unboxed qualified as U
 import Data.Vector.Generic qualified as G
 import Data.Vector.Generic.Mutable qualified as GM
+import Data.Vector.Unboxed qualified as U
 import Foreign.ForeignPtr (ForeignPtr)
 import Foreign.Ptr (Ptr)
 import GHC.Exts (RealWorld)
@@ -184,9 +185,13 @@ instance U.IsoUnbox DrawCmd DrawCmdRep where
   fromURepr ((x, y, w, h), tex, off, count, layer) = DrawCmd x y w h tex off count (layerFromWord8 layer)
 
 newtype instance U.MVector s DrawCmd = MVDrawCmd (U.MVector s (U.As DrawCmd DrawCmdRep))
+
 newtype instance U.Vector DrawCmd = VDrawCmd (U.Vector (U.As DrawCmd DrawCmdRep))
+
 deriving via (U.As DrawCmd DrawCmdRep) instance GM.MVector U.MVector DrawCmd
+
 deriving via (U.As DrawCmd DrawCmdRep) instance G.Vector U.Vector DrawCmd
+
 instance U.Unbox DrawCmd
 
 {-# INLINE layerToWord8 #-}
@@ -225,14 +230,16 @@ drawCmdNull dd = drawCmdCount dd == 0
 {-# INLINE forDrawCmdsInLayer_ #-}
 forDrawCmdsInLayer_ :: Layer -> DrawData -> (DrawCmd -> IO ()) -> IO ()
 forDrawCmdsInLayer_ ly dd f =
-  let offsets = drawLayerOffsets dd
-      off = indexPrimArray offsets (fromEnum ly)
-      end = indexPrimArray offsets (fromEnum ly + 1)
-      cmds = drawCommands dd
-      go !i
-        | i >= end = pure ()
-        | otherwise = f (U.unsafeIndex cmds i) >> go (i + 1)
-   in go off
+  let
+    offsets = drawLayerOffsets dd
+    off = indexPrimArray offsets (fromEnum ly)
+    end = indexPrimArray offsets (fromEnum ly + 1)
+    cmds = drawCommands dd
+    go !i
+      | i >= end = pure ()
+      | otherwise = f (U.unsafeIndex cmds i) >> go (i + 1)
+   in
+    go off
 
 -- | Copy command values into a list in recorded order.
 drawCmdElems :: DrawData -> [DrawCmd]

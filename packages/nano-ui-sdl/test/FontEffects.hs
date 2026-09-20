@@ -9,7 +9,15 @@ import qualified Data.Text as T
 import Data.Primitive.PrimArray (indexPrimArray, sizeofPrimArray)
 import NanoUI
 import NanoUI.Testing (newPixelContext, textIndexAtX)
-import NanoUI.Backend.Sdl (NanoUIFont (..), SdlEnv (..), SdlOptions (..), defaultSdlOptions, syncDisplay, withSdl, withSdlBench)
+import NanoUI.Backend.Sdl
+  ( NanoUIFont (..)
+  , SdlEnv (..)
+  , SdlOptions (..)
+  , defaultSdlOptions
+  , syncDisplay
+  , withSdl
+  , withSdlBench
+  )
 import NanoUI.Context (ctxResolveFont, ctxResolveMeasure)
 import System.Environment (setEnv)
 import System.Mem (performGC)
@@ -24,21 +32,34 @@ main = do
   -- Window creation fails after SDL initialization. Completed acquisitions
   -- must still be released, and a subsequent session must open normally.
   setEnv "SDL_RENDER_DRIVER" "nano-ui-test-unavailable-renderer"
-  failedStart <- try (withSdl defaultSdlOptions {sdlWindowHidden = True} ctx0 (\_ _ -> fail "unexpected window")) :: IO (Either IOException ())
+  failedStart <-
+    try
+      ( withSdl
+          defaultSdlOptions {sdlWindowHidden = True}
+          ctx0
+          (\_ _ -> fail "unexpected window")
+      ) ::
+      IO (Either IOException ())
   setEnv "SDL_RENDER_DRIVER" "software"
   case failedStart of
     Left err | "SDL_CreateWindowAndRenderer failed" `isInfixOf` show err -> pure ()
     _ -> fail "unavailable renderer did not fail at creation"
   initialized <- wasInit 0
-  unless (initialized == 0) $ fail "failed acquisition leaked initialized SDL subsystems"
+  unless (initialized == 0) $
+    fail "failed acquisition leaked initialized SDL subsystems"
   (font, snapshot, width, quad) <- withSdlBench ctx0 $ \ctx env -> do
     (fm, _) <- ctxResolveFont ctx 16 WeightNormal FontStyleNormal FontRegular
-    let text = "AV To fi café λ"
+    let
+      text = "AV To fi café λ"
     prepared <- prepareFontMetrics fm text
-    (hostWidth, _) <- ctxResolveMeasure ctx 16 WeightNormal FontStyleNormal FontRegular text
+    (hostWidth, _) <-
+      ctxResolveMeasure ctx 16 WeightNormal FontStyleNormal FontRegular text
     measured <- evaluate (lineWidth prepared text)
     unless (abs (hostWidth - measured) < 0.01) $
-      fail ("prepared shaped width differs from SDL measurement: " ++ show (hostWidth, measured))
+      fail
+        ( "prepared shaped width differs from SDL measurement: "
+            ++ show (hostWidth, measured)
+        )
     scaled <- lineWidthIO (scaleFontMetrics 1.5 fm) text
     unless (abs (scaled - measured * 1.5) < 0.01) $
       fail "effectful font scaling lost its metric scale"
@@ -48,16 +69,21 @@ main = do
     -- Exceed both cache caps through measurement only. This must not fill or
     -- reset the atlas, nor alter an already-rasterised run.
     forM_ [1 .. 1100 :: Int] $ \n -> do
-      let labelText = "counter " <> T.pack (show n)
+      let
+        labelText = "counter " <> T.pack (show n)
       p <- prepareFontMetrics fm labelText
       void (evaluate (lineWidth p labelText))
     after <- drawShaped fm text
     unless (before == after) $
       fail "metric preparation mutated the atlas or raster cache"
-    let oversized = T.replicate 1000 "W"
+    let
+      oversized = T.replicate 1000 "W"
     large <- prepareFontMetrics fm oversized
     largeGlyphs <- drawShaped fm oversized
-    unless (maybe False (\(ShapedGlyphs q) -> sizeofPrimArray q == 8 * 1000) largeGlyphs && lineWidth large oversized > 0) $
+    unless
+      ( maybe False (\(ShapedGlyphs q) -> sizeofPrimArray q == 8 * 1000) largeGlyphs
+          && lineWidth large oversized > 0
+      ) $
       fail "text wider than the atlas lost its glyphs"
     shapingChecks fm
     performGC
@@ -69,7 +95,8 @@ main = do
     writeIORef (sdlFontRequestRef env) (FontSearch [])
     (replacement, _) <- syncDisplay ctx env emptyInput
     expectClosed (drawShaped fm text)
-    (fresh, _) <- ctxResolveFont replacement 16 WeightNormal FontStyleNormal FontRegular
+    (fresh, _) <-
+      ctxResolveFont replacement 16 WeightNormal FontStyleNormal FontRegular
     freshWidth <- lineWidthIO fresh text
     freshQuad <- drawShaped fresh text
     unless (abs (freshWidth - measured) < 0.01 && freshQuad /= Nothing) $

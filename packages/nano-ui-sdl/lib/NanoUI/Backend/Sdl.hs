@@ -77,11 +77,11 @@ runSdlApp options ui = do
 -- Use the adapters in "NanoUI.Emit" to emit changes from ordinary widgets.
 runSdlAppReduce ::
   (Typeable msg, Eq model) =>
-  SdlOptions ->
-  (msg -> model -> model) ->
-  model ->
-  (model -> NanoUI ()) ->
-  IO ()
+  SdlOptions
+  -> (msg -> model -> model)
+  -> model
+  -> (model -> NanoUI ())
+  -> IO ()
 runSdlAppReduce options update model view = do
   ctx <- sdlContext options
   modelRef <- newIORef model

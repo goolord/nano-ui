@@ -91,17 +91,19 @@ runKeyboardButtonTest ctx failed = do
 runKeyboardCheckboxTest :: Context -> IORef Int -> IO ()
 runKeyboardCheckboxTest ctx failed = do
   checkedRef <- newIORef False
-  let inp0 = withInputOff 200 100
-      ui = column (held checkedRef (checkbox' "Opt"))
+  let
+    inp0 = withInputOff 200 100
+    ui = column (held checkedRef (checkbox' "Opt"))
   warmupFocused ctx inp0 ui
   ((_, checked1), _, _, _) <- runFrame ctx (spaceInp inp0) ui
   assert failed checked1
   ((_, checked2), _, _, _) <- runFrame ctx (keyInp KeyEnter inp0) ui
   assert failed (not checked2)
-  let emitUi = do
-        wid <- currentId
-        Emit.emitChanged (checkbox "Emit") False id
-        pure wid
+  let
+    emitUi = do
+      wid <- currentId
+      Emit.emitChanged (checkbox "Emit") False id
+      pure wid
   (wid, _, _, _) <- runFrame ctx inp0 emitUi
   writeIORef (ctxFocusId ctx) wid
   (_, messages, _, _) <- runFrame ctx (keyInp KeyEnter inp0) emitUi

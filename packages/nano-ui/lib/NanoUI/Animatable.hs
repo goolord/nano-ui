@@ -1,7 +1,8 @@
 -- | Indexed traversal of scalar channels for tween and spring animations.
 module NanoUI.Animatable
   ( Animatable (..)
-  ) where
+  )
+where
 
 import Data.Word (Word8)
 import NanoUI.Types (Color, V2 (..), clamp01, colorA, colorB, colorG, colorR, colorRGBA)
@@ -30,9 +31,13 @@ instance Animatable V2 where
 instance Animatable Color where
   {-# INLINE traverseChannels #-}
   traverseChannels f c =
-    colorRGBA <$> channel 0 (colorR c) <*> channel 1 (colorG c) <*> channel 2 (colorB c) <*> channel 3 (colorA c)
-    where
-      channel i w = byte <$> f i (chan w)
+    colorRGBA
+      <$> channel 0 (colorR c)
+      <*> channel 1 (colorG c)
+      <*> channel 2 (colorB c)
+      <*> channel 3 (colorA c)
+   where
+    channel i w = byte <$> f i (chan w)
 
 chan :: Word8 -> Float
 chan w = fromIntegral w / 255

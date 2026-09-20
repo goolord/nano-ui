@@ -92,7 +92,8 @@ newDrawArena = do
   daSnapScale <- newIORef 0.0
   daSquareGeometry <- newIORef False
   daExternalText <- newIORef False
-  let da = DrawArena {..}
+  let
+    da = DrawArena {..}
   resetDrawArena da
   pure da
 
@@ -198,7 +199,8 @@ ensureAndAlloc da needV needI = do
 {-# NOINLINE growCmdStore #-}
 growCmdStore :: DrawArena -> Int -> IO ()
 growCmdStore da oldCap = do
-  let newCap = oldCap * 2
+  let
+    newCap = oldCap * 2
   arr <- readIORef (daCmdStore da)
   newArr <- UM.unsafeGrow arr (newCap - oldCap)
   writeIORef (daCmdStore da) newArr
@@ -219,21 +221,23 @@ flushCmd da = do
     layer <- readIORef (daCurrentLayer da)
     n <- readIORef (daCmdCount da)
     arr <- readIORef (daCmdStore da)
-    let off = fromIntegral start :: Word32
-        cnt = fromIntegral (end - start) :: Word32
+    let
+      off = fromIntegral start :: Word32
+      cnt = fromIntegral (end - start) :: Word32
     extended <-
       if n <= 0
         then pure False
         else do
           prev <- UM.unsafeRead arr (n - 1)
-          let same =
-                cmdClipX prev == cx
-                  && cmdClipY prev == cy
-                  && cmdClipW prev == cw
-                  && cmdClipH prev == ch
-                  && cmdTextureId prev == tex
-                  && cmdLayer prev == layer
-                  && cmdIndexOffset prev + cmdIndexCount prev == off
+          let
+            same =
+              cmdClipX prev == cx
+                && cmdClipY prev == cy
+                && cmdClipW prev == cw
+                && cmdClipH prev == ch
+                && cmdTextureId prev == tex
+                && cmdLayer prev == layer
+                && cmdIndexOffset prev + cmdIndexCount prev == off
           when same $
             UM.unsafeWrite arr (n - 1) prev {cmdIndexCount = cmdIndexCount prev + cnt}
           pure same
@@ -322,28 +326,32 @@ finishDraw da = do
 
 -- | Stable counting sort by layer, with cumulative offsets into the sorted
 -- array. Counts become write cursors after the prefix sum.
-groupCmdsByLayer :: U.MVector RealWorld DrawCmd -> Int -> IO (U.Vector DrawCmd, PrimArray Int)
+groupCmdsByLayer ::
+  U.MVector RealWorld DrawCmd -> Int -> IO (U.Vector DrawCmd, PrimArray Int)
 groupCmdsByLayer _ 0 = pure (U.empty, emptyLayerOffsets)
 groupCmdsByLayer src n = do
-  let layers = fromEnum (maxBound :: Layer) + 1
-      layerAt i = fromEnum . cmdLayer <$> UM.unsafeRead src i
+  let
+    layers = fromEnum (maxBound :: Layer) + 1
+    layerAt i = fromEnum . cmdLayer <$> UM.unsafeRead src i
   cursors <- newPrimArray layers
   setPrimArray cursors 0 layers (0 :: Int)
   loopIO 0 (n - 1) $ \i -> do
     l <- layerAt i
     readPrimArray cursors l >>= writePrimArray cursors l . (+ 1)
   offsets <- newPrimArray (layers + 1)
-  let prefix !l !off = do
-        writePrimArray offsets l off
-        when (l < layers) $ do
-          c <- readPrimArray cursors l
-          writePrimArray cursors l off
-          prefix (l + 1) (off + c)
+  let
+    prefix !l !off = do
+      writePrimArray offsets l off
+      when (l < layers) $ do
+        c <- readPrimArray cursors l
+        writePrimArray cursors l off
+        prefix (l + 1) (off + c)
   prefix 0 0
   dest <- UM.unsafeNew n
   loopIO 0 (n - 1) $ \i -> do
     cmd <- UM.unsafeRead src i
-    let l = fromEnum (cmdLayer cmd)
+    let
+      l = fromEnum (cmdLayer cmd)
     j <- readPrimArray cursors l
     UM.unsafeWrite dest j cmd
     writePrimArray cursors l (j + 1)

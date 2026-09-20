@@ -23,7 +23,8 @@ checkbox' txt checked = do
   wid <- nextId
   ctx <- askContext
   uiIO $ registerFocusable ctx wid
-  let key = intKey wid
+  let
+    key = intKey wid
   current <- intBool <$> uiIO (adoptStoreInt ctx wid key (boolInt checked))
   resp <- addWidget wid NodeCheckbox txt (if current then 1 else 0) defaultLayout
   finishToggle ctx wid current resp

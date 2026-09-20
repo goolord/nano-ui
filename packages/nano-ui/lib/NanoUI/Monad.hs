@@ -212,11 +212,13 @@ withIdFrame ::
 withIdFrame enter m = do
   ctx <- askContext
   withUiResource
-    (do
-      old <- readIORef (ctxIdContext ctx)
-      let !(!p, !c) = enter old
-      writeIORef (ctxIdContext ctx) c
-      pure p)
+    ( do
+        old <- readIORef (ctxIdContext ctx)
+        let
+          !(!p, !c) = enter old
+        writeIORef (ctxIdContext ctx) c
+        pure p
+    )
     (writeIORef (ctxIdContext ctx))
     m
 
@@ -332,12 +334,14 @@ disabledWhen True m =
 withPaintScope :: Ui :> es => (Context -> Int -> IO Int) -> Eff es a -> Eff es a
 withPaintScope enter m = do
   ctx <- askContext
-  let na = ctxNodeArena ctx
+  let
+    na = ctxNodeArena ctx
   withUiResource
-    (do
-      old <- getArenaScope na
-      setArenaScope na =<< enter ctx old
-      pure old)
+    ( do
+        old <- getArenaScope na
+        setArenaScope na =<< enter ctx old
+        pure old
+    )
     (setArenaScope na)
     m
 

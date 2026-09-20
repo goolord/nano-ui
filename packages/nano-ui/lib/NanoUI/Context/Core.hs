@@ -64,7 +64,8 @@ module NanoUI.Context.Core
   , currentTheme
   , nodeTheme
   , widgetTheme
-  ) where
+  )
+where
 
 import Control.Monad (forM_, unless, when)
 import Data.Bits (shiftR, (.&.))

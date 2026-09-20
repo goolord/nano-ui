@@ -93,15 +93,24 @@ data TabMsg = MsgSelect DummyTab | MsgClose DummyTab
 
 runTabsEmitTest :: Context -> IORef Int -> IO ()
 runTabsEmitTest ctx failed = do
-  let inp0 = withInput 300 100
-      ui curTab = Emit.emitChanged (\active -> tabs active
-        [ tab TabA "Alpha" (label "Body A")
-        , tab TabB "Beta" (label "Body B")
-        ]) curTab MsgSelect
+  let
+    inp0 = withInput 300 100
+    ui curTab =
+      Emit.emitChanged
+        ( \active ->
+            tabs
+              active
+              [ tab TabA "Alpha" (label "Body A")
+              , tab TabB "Beta" (label "Body B")
+              ]
+        )
+        curTab
+        MsgSelect
   _ <- runFrame ctx inp0 (ui TabA)
   spans <- collectTextSpans ctx
   assertJust failed (spanRect "Beta" spans) $ \r -> do
-    let (press, release) = clickPair inp0 (spanCenter r)
+    let
+      (press, release) = clickPair inp0 (spanCenter r)
     _ <- runFrame ctx press (ui TabA)
     (_, msgs, _, _) <- runFrame ctx release (ui TabA)
     assertEq failed (decodeMessages msgs :: [TabMsg]) [MsgSelect TabB]

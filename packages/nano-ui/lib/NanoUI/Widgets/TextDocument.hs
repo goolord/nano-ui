@@ -43,11 +43,14 @@ instance Eq TextDocument where
   a == b =
     sameDocument a b
       || liftEq sameLine (documentLines a) (documentLines b)
-    where
-      sameLine !x !y = isTrue# (reallyUnsafePtrEquality# x y) || x == y
+   where
+    sameLine !x !y = isTrue# (reallyUnsafePtrEquality# x y) || x == y
 
 instance Show TextDocument where
-  showsPrec d doc = showParen (d > 10) (showString "textDocument " . showsPrec 11 (documentText doc))
+  showsPrec d doc =
+    showParen
+      (d > 10)
+      (showString "textDocument " . showsPrec 11 (documentText doc))
 
 -- | Split a text into a document. O(length of the text).
 textDocument :: Text -> TextDocument

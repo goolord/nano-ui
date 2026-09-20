@@ -21,9 +21,24 @@ import Ditto.Backend (FormError)
 import Ditto.Generalized.Named qualified as Named
 import Ditto.Generalized.Unnamed qualified as Unnamed
 import Ditto.Types (FormId, encodeFormId)
-import NanoUI (NanoUI, Response, columnWith, fillW, gap, tight, uiIO, withKey, respChanged)
+import NanoUI
+  ( NanoUI
+  , Response
+  , columnWith
+  , fillW
+  , gap
+  , respChanged
+  , tight
+  , uiIO
+  , withKey
+  )
 import NanoUI qualified as NUI
-import NanoUI.Form.Backend (FormInput (..), formInputToText, getActiveFormPrefix, updateFieldInput)
+import NanoUI.Form.Backend
+  ( FormInput (..)
+  , formInputToText
+  , getActiveFormPrefix
+  , updateFieldInput
+  )
 import NanoUI.Form.Types (Form, FormView (..))
 import NanoUI.Form.Widgets (defaultErrorView)
 import NanoUI.Monad (askContext)
@@ -35,12 +50,19 @@ import Text.Read (readMaybe)
 -- both signal edits. Decoding and validation errors follow ditto's normal path.
 inputWidget ::
   (Eq a, FormError FormInput err) =>
-  Maybe Text -> (FormInput -> Either err a) -> (Response -> Bool) ->
-  (a -> FormInput) -> (a -> NanoUI (Response, a)) -> a -> Form err a
+  Maybe Text
+  -> (FormInput -> Either err a)
+  -> (Response -> Bool)
+  -> (a -> FormInput)
+  -> (a -> NanoUI (Response, a))
+  -> a
+  -> Form err a
 inputWidget name decode changed encode widget =
   maybe Unnamed.input Named.input name decode (fieldView changed encode widget)
 
-textField :: FormError FormInput err => Maybe Text -> (Text -> NanoUI (Response, Text)) -> Text -> Form err Text
+textField ::
+  FormError FormInput err =>
+  Maybe Text -> (Text -> NanoUI (Response, Text)) -> Text -> Form err Text
 textField name = inputWidget name (Right . formInputToText) respChanged FormInputText
 
 labelled :: Text -> (a -> NanoUI b) -> a -> NanoUI b

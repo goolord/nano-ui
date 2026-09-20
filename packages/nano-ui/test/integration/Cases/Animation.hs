@@ -146,10 +146,11 @@ runAnimationSpringDtTest ctx failed = do
 -- and springs both settle and stop requesting redraws.
 runCompositeAnimationIsolationTest :: Context -> IORef Int -> IO ()
 runCompositeAnimationIsolationTest _ failed = do
-  let (indices, vector) = traverseChannels (\i x -> ([i], x + fromIntegral i)) (V2 3 4)
-      color = colorRGBA 17 80 190 255
-      (rgbaIndices, roundtrip) = traverseChannels (\i x -> ([i], x)) color
-      (_, clipped) = traverseChannels (\i _ -> ([i], if i == 0 then -1 else 2)) color
+  let
+    (indices, vector) = traverseChannels (\i x -> ([i], x + fromIntegral i)) (V2 3 4)
+    color = colorRGBA 17 80 190 255
+    (rgbaIndices, roundtrip) = traverseChannels (\i x -> ([i], x)) color
+    (_, clipped) = traverseChannels (\i _ -> ([i], if i == 0 then -1 else 2)) color
   assertEq failed [0, 1] indices
   assertEq failed (V2 3 5) vector
   assertEq failed [0, 1, 2, 3] rgbaIndices
@@ -157,12 +158,13 @@ runCompositeAnimationIsolationTest _ failed = do
   assertEq failed (colorRGBA 0 255 255 255) clipped
   forM_ [animateToA (Tween EaseLinear 0.2 0), animateToA (Spring presetSmooth)] $ \animateVector -> do
     ctx <- newContext
-    let inp = withDelta 200 100 0.05
-        ui = do
-          a <- animateVector (V2 1 2)
-          b <- animateVector (V2 (-1) (-2))
-          label (T.pack (show (a, b)))
-          pure (a, b)
+    let
+      inp = withDelta 200 100 0.05
+      ui = do
+        a <- animateVector (V2 1 2)
+        b <- animateVector (V2 (-1) (-2))
+        label (T.pack (show (a, b)))
+        pure (a, b)
     replicateM_ 80 (runFrame ctx inp ui)
     ((V2 ax ay, V2 bx by), _, _, _) <- runFrame ctx inp ui
     assert failed (abs (ax - 1) < 0.05 && abs (ay - 2) < 0.05)

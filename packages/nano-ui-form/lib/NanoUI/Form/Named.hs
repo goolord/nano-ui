@@ -45,6 +45,7 @@ import NanoUI
   , textInputConfigured'
   )
 import NanoUI qualified as NUI
+import NanoUI.Form.Backend (FormInput (..))
 import NanoUI.Form.Field
   ( decodeBool
   , decodeFloatInput
@@ -55,7 +56,6 @@ import NanoUI.Form.Field
   , labelled
   )
 import NanoUI.Form.Field qualified as Field
-import NanoUI.Form.Backend (FormInput (..))
 import NanoUI.Form.Types (Form, FormView (..))
 
 -- | Single-line text input field.
@@ -66,12 +66,19 @@ inputText name = Field.textField (Just name) (labelled name textInput')
 inputTextWithPlaceholder ::
   FormError FormInput err => Text -> Text -> Text -> Form err Text
 inputTextWithPlaceholder placeholder name =
-  Field.textField (Just name) (labelled name (textInputConfigured' defaultTextInputConfig {ticPlaceholder = placeholder}))
+  Field.textField
+    (Just name)
+    ( labelled
+        name
+        (textInputConfigured' defaultTextInputConfig {ticPlaceholder = placeholder})
+    )
 
 -- | Password text input masking entered characters.
 inputPassword :: FormError FormInput err => Text -> Text -> Form err Text
 inputPassword name =
-  Field.textField (Just name) (labelled name (textInputConfigured' defaultTextInputConfig {ticPassword = True}))
+  Field.textField
+    (Just name)
+    (labelled name (textInputConfigured' defaultTextInputConfig {ticPassword = True}))
 
 -- | Multi-line text area input.
 inputTextArea :: FormError FormInput err => Text -> Text -> Form err Text
@@ -80,18 +87,37 @@ inputTextArea name = Field.textField (Just name) (labelled name textArea')
 -- | Checkbox toggle input.
 inputCheckbox :: FormError FormInput err => Text -> Bool -> Form err Bool
 inputCheckbox name initial =
-  inputWidget (Just name) (Right . decodeBool initial) respClicked FormInputBool (checkbox' name) initial
+  inputWidget
+    (Just name)
+    (Right . decodeBool initial)
+    respClicked
+    FormInputBool
+    (checkbox' name)
+    initial
 
 -- | Floating-point slider input across the range @[minV, maxV]@.
 inputSlider ::
   FormError FormInput err => Text -> Float -> Float -> Float -> Form err Float
 inputSlider name minV maxV initial =
-  inputWidget (Just name) (Right . decodeFloatInput initial) respChanged FormInputFloat (labelled name (slider' minV maxV)) initial
+  inputWidget
+    (Just name)
+    (Right . decodeFloatInput initial)
+    respChanged
+    FormInputFloat
+    (labelled name (slider' minV maxV))
+    initial
 
 -- | Dropdown selection in fold order (returns selected index).
-inputSelect :: (Foldable f, FormError FormInput err) => Text -> f Text -> Int -> Form err Int
+inputSelect ::
+  (Foldable f, FormError FormInput err) => Text -> f Text -> Int -> Form err Int
 inputSelect name options initial =
-  inputWidget (Just name) (Right . decodeInt initial) respChanged FormInputInt (labelled name (select' options)) initial
+  inputWidget
+    (Just name)
+    (Right . decodeInt initial)
+    respChanged
+    FormInputInt
+    (labelled name (select' options))
+    initial
 
 -- | Dropdown selection for any bounded enumeration type.
 inputEnumSelect ::
@@ -100,9 +126,16 @@ inputEnumSelect ::
 inputEnumSelect name = enumField (inputSelect name)
 
 -- | Radio button group (returns selected index).
-inputRadio :: (Foldable f, FormError FormInput err) => Text -> f Text -> Int -> Form err Int
+inputRadio ::
+  (Foldable f, FormError FormInput err) => Text -> f Text -> Int -> Form err Int
 inputRadio name options initial =
-  inputWidget (Just name) (Right . decodeInt initial) respChanged FormInputInt (labelled name (radio' options)) initial
+  inputWidget
+    (Just name)
+    (Right . decodeInt initial)
+    respChanged
+    FormInputInt
+    (labelled name (radio' options))
+    initial
 
 -- | Radio button group for any bounded enumeration type.
 inputEnumRadio ::

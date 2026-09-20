@@ -78,8 +78,9 @@ animateToA transition = animateComponents (animateTo transition)
 -- Component keys are local to one composite value, not its parent widget.
 animateComponents ::
   (Animatable a, Ui :> es) => (Float -> Eff es Float) -> a -> Eff es a
-animateComponents animateComponent target = scope $
-  traverseChannels (\index value -> withKey index (animateComponent value)) target
+animateComponents animateComponent target =
+  scope $
+    traverseChannels (\index value -> withKey index (animateComponent value)) target
 
 -- | A smoothly oscillating value in @[0,1]@ driven by the real-time clock, with
 -- the given period in seconds (e.g. @pulse 6@ sweeps once every six seconds).

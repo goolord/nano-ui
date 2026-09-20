@@ -120,18 +120,21 @@ runTreeKeyboardTest ctx failed = do
 runSelectChangeOnceTest :: Context -> IORef Int -> IO ()
 runSelectChangeOnceTest ctx failed = do
   indexRef <- newIORef 1
-  let inp0 = withInput 320 200
-      ui = held indexRef (select' ["Low", "Medium", "High"])
+  let
+    inp0 = withInput 320 200
+    ui = held indexRef (select' ["Low", "Medium", "High"])
   (resp, _) <- warmup2 ctx inp0 ui
-  let (openPress, openRelease) = clickPair inp0 (centerOf resp)
+  let
+    (openPress, openRelease) = clickPair inp0 (centerOf resp)
   _ <- runFrame ctx openPress ui
   _ <- runFrame ctx openRelease ui
   overlays <- collectOverlayTextSpans ctx openRelease
   assertJust failed (rectY <$> spanRect "Low" overlays) $ \lowY -> do
-    let lowPos = V2 (v2X (centerOf resp)) (lowY + 0.5)
-        hover = inp0 {inputMousePos = lowPos}
-        (pickPress, pickRelease) = clickPair inp0 lowPos
-        frame inp = (\((r, i), _, _, _) -> (respChanged r, i)) <$> runFrame ctx inp ui
+    let
+      lowPos = V2 (v2X (centerOf resp)) (lowY + 0.5)
+      hover = inp0 {inputMousePos = lowPos}
+      (pickPress, pickRelease) = clickPair inp0 lowPos
+      frame inp = (\((r, i), _, _, _) -> (respChanged r, i)) <$> runFrame ctx inp ui
     _ <- runFrame ctx hover ui
     hoverKind <- uiCursorKind ctx hover
     assertEq failed hoverKind UiCursorPointer
@@ -139,7 +142,8 @@ runSelectChangeOnceTest ctx failed = do
     pressKind <- uiCursorKind ctx pickPress
     assertEq failed pressKind UiCursorPointer
     rest <- mapM frame [pickRelease, inp0, inp0, inp0]
-    let results = pressed : rest
+    let
+      results = pressed : rest
     assertEq failed (map snd rest) [0, 0, 0, 0]
     assertEq failed (length (filter fst results)) 1
     assertEq failed (map fst (drop 1 rest)) [False, False, False]

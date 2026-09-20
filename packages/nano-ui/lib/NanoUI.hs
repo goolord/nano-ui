@@ -237,6 +237,7 @@ module NanoUI
   , colorFromHex
 
     -- * Text editing
+
     -- | Text fields change their text only through 'TextCommand's. Keys run
     -- them (Backspace is @'Delete' 'CharLeft'@, Ctrl+Z is 'Undo'), the
     -- right-click menu runs them, and an app can run them on a field by its
@@ -551,6 +552,7 @@ module NanoUI
   , fontStrike
 
     -- * Styling
+
     -- | A 'Theme' says how every kind of widget looks: a 'Style' for each
     -- surface (buttons, inputs, panels, floating windows) and colours for
     -- accents, text selection, links and so on. The context holds one theme
@@ -572,6 +574,7 @@ module NanoUI
   , themed
   , disabledWhen
   , uiTheme
+
     -- ** Style modifiers
   , background
   , foreground
@@ -581,6 +584,7 @@ module NanoUI
   , hoverBackground
   , pressBackground
   , fillColor
+
     -- ** Theme modifiers
   , buttonStyle
   , inputStyle

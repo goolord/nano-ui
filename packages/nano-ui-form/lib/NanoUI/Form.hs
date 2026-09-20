@@ -56,7 +56,8 @@ module NanoUI.Form
   , Ditto.view
   , Ditto.mapView
   , (Ditto.@$)
-  ) where
+  )
+where
 
 import qualified Ditto.Core as Ditto
 import qualified Ditto.Types as Ditto

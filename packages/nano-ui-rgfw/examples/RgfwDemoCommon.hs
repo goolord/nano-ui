@@ -14,13 +14,11 @@ import NanoUI
   ( Input (..)
   , NanoUI
   , Size (..)
+  , Theme
   , boundedRadio
   , button
   , button'
   , checkbox
-  , slider
-  , textInput
-  , textArea'
   , contextMenu
   , fillH
   , fillW
@@ -37,17 +35,19 @@ import NanoUI
   , menuSeparator
   , padAll
   , panelWith
+  , respClicked
   , rowWith
   , separator
+  , slider
   , tab
   , tabBar
-  , whenM
-  , window
-  , respClicked
-  , Theme
+  , textArea'
+  , textInput
   , tomorrowMidnightMinDarkTheme
   , tomorrowMinLightTheme
   , tomorrowNightMinDarkTheme
+  , whenM
+  , window
   )
 import NanoUI.Monad (askInput)
 import NanoUI.Backend.Rgfw
@@ -197,14 +197,23 @@ appView m = do
       label "nano-ui on RGFW"
       flex
 
-      Emit.emitWhen (button (case currentTheme m of
-        ThemeNight    -> "[Theme: Tomorrow Night]"
-        ThemeLight    -> "[Theme: Tomorrow Light]"
-        ThemeMidnight -> "[Theme: Midnight Black]")) CycleTheme
+      Emit.emitWhen
+        ( button
+            ( case currentTheme m of
+                ThemeNight -> "[Theme: Tomorrow Night]"
+                ThemeLight -> "[Theme: Tomorrow Light]"
+                ThemeMidnight -> "[Theme: Midnight Black]"
+            )
+        )
+        CycleTheme
 
-      Emit.emitWhen (button ("[" <> formatDpiScale (dpiScale m) <> " DPI Scale]")) CycleScale
+      Emit.emitWhen
+        (button ("[" <> formatDpiScale (dpiScale m) <> " DPI Scale]"))
+        CycleScale
 
-      Emit.emitWhen (button (if debugOpen m then "[Debug: ON]" else "[Debug: OFF]")) (ToggleDebug (not (debugOpen m)))
+      Emit.emitWhen
+        (button (if debugOpen m then "[Debug: ON]" else "[Debug: OFF]"))
+        (ToggleDebug (not (debugOpen m)))
 
     nextTab <-
       tabBar
@@ -219,10 +228,10 @@ appView m = do
     separator
 
     case activeTab m of
-      TabControls      -> viewControlsTab m
-      TabGallery       -> viewGalleryTab
-      TabAbout         -> viewAboutTab
-      TabDiagnostics   -> viewDiagnosticsTab m
+      TabControls -> viewControlsTab m
+      TabGallery -> viewGalleryTab
+      TabAbout -> viewAboutTab
+      TabDiagnostics -> viewDiagnosticsTab m
 
     when (debugOpen m) $ do
       snap <- askRgfwDebug
@@ -251,21 +260,29 @@ viewControlsTab m = do
         void $ contextMenu menuBtn $ do
           menuHeader "Edit Actions"
           menuSeparator
-          whenM (menuItemShortcut "Cut" "Ctrl+X") (Emit.emit (SetNotesText "Cut text to clipboard"))
-          whenM (menuItemShortcut "Copy" "Ctrl+C") (Emit.emit (SetNotesText "Copied text to clipboard"))
-          whenM (menuItemShortcut "Paste" "Ctrl+V") (Emit.emit (SetNotesText "Pasted text from clipboard"))
+          whenM
+            (menuItemShortcut "Cut" "Ctrl+X")
+            (Emit.emit (SetNotesText "Cut text to clipboard"))
+          whenM
+            (menuItemShortcut "Copy" "Ctrl+C")
+            (Emit.emit (SetNotesText "Copied text to clipboard"))
+          whenM
+            (menuItemShortcut "Paste" "Ctrl+V")
+            (Emit.emit (SetNotesText "Pasted text from clipboard"))
           menuSeparator
           menuHeader "System"
           whenM (menuItem "Reset Counter") (Emit.emit Reset)
           menuItemDisabled "Disabled Command"
 
       gridWith 1 (gap 2) $ do
-        let volPct = round (volumeVal m * 100) :: Int
+        let
+          volPct = round (volumeVal m * 100) :: Int
         label ("Master Volume: " <> T.pack (show volPct) <> "%")
         Emit.emitChanged (slider 0 1) (volumeVal m) SetVolume
 
       gridWith 1 (gap 2) $ do
-        let opPct = round (opacityVal m * 100) :: Int
+        let
+          opPct = round (opacityVal m * 100) :: Int
         label ("Surface Opacity: " <> T.pack (show opPct) <> "%")
         Emit.emitChanged (slider 0 1) (opacityVal m) SetOpacity
 
@@ -281,10 +298,14 @@ viewControlsTab m = do
 
       gridWith 1 (gap 2) $ do
         label "Preset:"
-        radVal <- boundedRadio (\case
-          ProfileFast     -> "Fast (Low Latency)"
-          ProfileBalanced -> "Balanced (Standard)"
-          ProfileQuality  -> "Quality (High Detail)") (profileOpt m)
+        radVal <-
+          boundedRadio
+            ( \case
+                ProfileFast -> "Fast (Low Latency)"
+                ProfileBalanced -> "Balanced (Standard)"
+                ProfileQuality -> "Quality (High Detail)"
+            )
+            (profileOpt m)
         when (radVal /= profileOpt m) (Emit.emit (SetProfile radVal))
 
     panelWith (padAll 10 . gap 8 . fillW . fillH) $ do
@@ -294,9 +315,11 @@ viewControlsTab m = do
       gridWith 2 (gap 6) $ do
         label "Active Theme:"
         label (T.pack (show (currentTheme m)))
-        let scText = case dpiScale m of
-              DpiScaleAuto -> "Auto (OS reported)"
-              sc           -> formatDpiScale sc <> " (" <> T.pack (show (physScaleFor sc)) <> "x)"
+        let
+          scText = case dpiScale m of
+            DpiScaleAuto -> "Auto (OS reported)"
+            sc ->
+              formatDpiScale sc <> " (" <> T.pack (show (physScaleFor sc)) <> "x)"
         label "DPI Scale:"
         label scText
         label "Counter Value:"
@@ -318,16 +341,19 @@ viewControlsTab m = do
 
       label "Block-character bars:"
       gridWith 2 (gap 4) $ do
-        let makeBar pct =
-              let filled = max 0 (min 20 (pct `div` 5))
-                  empty  = 20 - filled
-               in T.replicate filled "█" <> T.replicate empty "░"
-            volPct = round (volumeVal m * 100) :: Int
-            opPct  = round (opacityVal m * 100) :: Int
+        let
+          makeBar pct =
+            let
+              filled = max 0 (min 20 (pct `div` 5))
+              empty = 20 - filled
+             in
+              T.replicate filled "█" <> T.replicate empty "░"
+          volPct = round (volumeVal m * 100) :: Int
+          opPct = round (opacityVal m * 100) :: Int
         label "Master Volume:"
         label ("[" <> makeBar volPct <> "] " <> T.pack (show volPct) <> "%")
         label "Surface Opacity:"
-        label ("[" <> makeBar opPct  <> "] " <> T.pack (show opPct) <> "%")
+        label ("[" <> makeBar opPct <> "] " <> T.pack (show opPct) <> "%")
 
 -- | A sample of the glyphs in the bundled Cozette font.
 viewGalleryTab :: NanoUI ()
@@ -409,7 +435,12 @@ viewDiagnosticsTab m = do
 
     gridWith 2 (gap 4) $ do
       label "Window:"
-      label (T.pack (show (round w :: Int)) <> " x " <> T.pack (show (round h :: Int)) <> " logical px")
+      label
+        ( T.pack (show (round w :: Int))
+            <> " x "
+            <> T.pack (show (round h :: Int))
+            <> " logical px"
+        )
       label "Scale:"
       label (formatDpiScale (dpiScale m))
       label "Renderer:"
@@ -423,7 +454,9 @@ viewDiagnosticsTab m = do
 
     separator
 
-    Emit.emitWhen (button (if debugOpen m then "[Close Debug Window]" else "[Open Debug Window]")) (ToggleDebug (not (debugOpen m)))
+    Emit.emitWhen
+      (button (if debugOpen m then "[Close Debug Window]" else "[Open Debug Window]"))
+      (ToggleDebug (not (debugOpen m)))
 
 main :: IO ()
 main = do

@@ -19,7 +19,8 @@ module Main
   , commandWriteProbe
   , canvasProbe
   , canvasByHand
-  ) where
+  )
+where
 
 import Data.IntMap.Strict qualified as IM
 import Data.Text (Text)
@@ -35,7 +36,15 @@ import Test.Inspection
 
 import NanoUI.SIMD qualified as SIMD
 import NanoUI.Store
-import NanoUI (Animatable (..), V2 (..), Rect (..), Color, drawRect, drawCircle, runCanvas)
+import NanoUI
+  ( Animatable (..)
+  , Color
+  , Rect (..)
+  , V2 (..)
+  , drawCircle
+  , drawRect
+  , runCanvas
+  )
 import NanoUI.Testing (DrawCmd (..), DrawOp (..), Layer (..))
 
 main :: IO ()
@@ -112,10 +121,13 @@ inspect $ 'channelProbe `hasNoType` ''[]
 
 commandReadProbe :: U.Vector DrawCmd -> Int -> Float
 commandReadProbe cmds i =
-  let cmd = U.unsafeIndex cmds i
-   in cmdClipX cmd + cmdClipY cmd + cmdClipW cmd + cmdClipH cmd
+  let
+    cmd = U.unsafeIndex cmds i
+   in
+    cmdClipX cmd + cmdClipY cmd + cmdClipW cmd + cmdClipH cmd
 
-commandWriteProbe :: UM.MVector RealWorld DrawCmd -> Int -> Float -> Word32 -> IO ()
+commandWriteProbe ::
+  UM.MVector RealWorld DrawCmd -> Int -> Float -> Word32 -> IO ()
 commandWriteProbe cmds i x count = UM.unsafeWrite cmds i (DrawCmd x x x x i count count LayerContent)
 
 inspect $ hasNoTypeClasses 'commandReadProbe

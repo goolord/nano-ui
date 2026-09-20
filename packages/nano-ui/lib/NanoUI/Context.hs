@@ -237,7 +237,8 @@ module NanoUI.Context
   , easeSameSpec
   , approxEq
   , animInProgress
-  ) where
+  )
+where
 
 import Control.Monad (foldM, forM, when)
 import Data.Bits ((.&.))

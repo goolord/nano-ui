@@ -24,7 +24,11 @@ import NanoUI.Monad (Ui, askContext, nextId, uiIO, withKey)
 import NanoUI.Style (Layout, defaultLayout, fillW, gap, tight)
 import NanoUI.Types (clamp)
 import NanoUI.Widgets.Behavior (KeyNav (..), useKeyNav)
-import NanoUI.Widgets.Combinators (finishInput, selectableItem, withBoundedIndex)
+import NanoUI.Widgets.Combinators
+  ( finishInput
+  , selectableItem
+  , withBoundedIndex
+  )
 import NanoUI.Widgets.Layout (column')
 import NanoUI.Widgets.Node
   ( Response (..)
@@ -60,7 +64,8 @@ radio' options index =
       !len = length opts
       !key = intKey gid
     stored <- uiIO $ adoptStoreInt ctx gid key (clamp 0 (len - 1) index)
-    let !sel = clamp 0 (len - 1) stored
+    let
+      !sel = clamp 0 (len - 1) stored
     uiIO $ registerFocusable ctx gid
     nav <- useKeyNav gid
     let
@@ -71,7 +76,8 @@ radio' options index =
     column' radioGroupLay $ do
       tagContainer gid
       (combinedResp, clickedIdx) <- addRadioOptions selNav opts
-      let !finalSel = if clickedIdx >= 0 then clickedIdx else selNav
+      let
+        !finalSel = if clickedIdx >= 0 then clickedIdx else selNav
       -- Compare with the caller's index, as 'NanoUI.Widgets.Select' does, so a
       -- selection stored between frames still reports a change.
       finishInput fieldInt ctx gid key (clamp 0 (len - 1) index) combinedResp finalSel

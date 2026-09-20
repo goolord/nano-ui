@@ -330,35 +330,39 @@ scrollBarLayout slot dir x y w h pad contentSize off =
 -- that is actually visible rather than the lane-underlapped padding box. On a
 -- one-dimensional scroller @viewMain@ is just the padding box on that axis.
 scrollBarLayoutIn ::
-  ScrollBarSlot ->
-  DirTag ->
-  Float ->
-  Float ->
-  Float ->
-  Float ->
-  Padding ->
-  Float ->
-  Float ->
-  Float ->
-  Maybe ScrollBarLayout
+  ScrollBarSlot
+  -> DirTag
+  -> Float
+  -> Float
+  -> Float
+  -> Float
+  -> Padding
+  -> Float
+  -> Float
+  -> Float
+  -> Maybe ScrollBarLayout
 scrollBarLayoutIn slot dir x y w h pad viewMain contentSize off =
-  let (barW, barMargin) = scrollBarGeomFor slot
-      minThumb = 16
-      lane = scrollChromeLane slot dir x y w h pad
-      (origin, trailing) = case dir of
-        DirColumn -> (y + padT pad, padB pad)
-        DirRow -> (x + padL pad, padR pad)
-      maxOff = scrollAxisRange contentSize viewMain trailing
-      trackStart = origin + barMargin
-      trackSize = max 0 (viewMain - 2 * barMargin)
-      thumbSize = max minThumb (trackSize * viewMain / (contentSize + trailing))
-      thumbStart = trackStart + (off / maxOff) * (trackSize - thumbSize)
-      band start size = case dir of
-        DirColumn -> Rect (rectX lane) start barW size
-        DirRow -> Rect start (rectY lane) size barW
-   in if maxOff <= 0
-        then Nothing
-        else Just (ScrollBarLayout (band trackStart trackSize) (band thumbStart thumbSize) maxOff)
+  let
+    (barW, barMargin) = scrollBarGeomFor slot
+    minThumb = 16
+    lane = scrollChromeLane slot dir x y w h pad
+    (origin, trailing) = case dir of
+      DirColumn -> (y + padT pad, padB pad)
+      DirRow -> (x + padL pad, padR pad)
+    maxOff = scrollAxisRange contentSize viewMain trailing
+    trackStart = origin + barMargin
+    trackSize = max 0 (viewMain - 2 * barMargin)
+    thumbSize = max minThumb (trackSize * viewMain / (contentSize + trailing))
+    thumbStart = trackStart + (off / maxOff) * (trackSize - thumbSize)
+    band start size = case dir of
+      DirColumn -> Rect (rectX lane) start barW size
+      DirRow -> Rect start (rectY lane) size barW
+   in
+    if maxOff <= 0
+      then Nothing
+      else
+        Just
+          (ScrollBarLayout (band trackStart trackSize) (band thumbStart thumbSize) maxOff)
 
 -- | Both-axis layouts for a native 2D scroller: (vertical, horizontal). Each
 -- axis's visible main extent is reduced by the other axis's live gutter, so
@@ -389,14 +393,16 @@ scrollBarLayouts2D slot cfg x y w h pad contentW contentH offX offY =
 
 scrollOffsetFromThumb :: DirTag -> ScrollBarLayout -> Float -> V2 -> Float
 scrollOffsetFromThumb dir layout grabOff mouse =
-  let maxOff = sbMaxOff layout
-      track = sbTrack layout
-      thumb = sbThumb layout
-      (trackStart, trackSize, thumbSize, pointer) = case dir of
-        DirColumn -> (rectY track, rectH track, rectH thumb, v2Y mouse)
-        DirRow -> (rectX track, rectW track, rectW thumb, v2X mouse)
-      ratio = (pointer - grabOff - trackStart) / max 1 (trackSize - thumbSize)
-   in max 0 (min maxOff (ratio * maxOff))
+  let
+    maxOff = sbMaxOff layout
+    track = sbTrack layout
+    thumb = sbThumb layout
+    (trackStart, trackSize, thumbSize, pointer) = case dir of
+      DirColumn -> (rectY track, rectH track, rectH thumb, v2Y mouse)
+      DirRow -> (rectX track, rectW track, rectW thumb, v2X mouse)
+    ratio = (pointer - grabOff - trackStart) / max 1 (trackSize - thumbSize)
+   in
+    max 0 (min maxOff (ratio * maxOff))
 
 textClipSlop :: Float
 textClipSlop = 4

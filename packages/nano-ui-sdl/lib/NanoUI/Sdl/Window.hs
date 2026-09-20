@@ -357,10 +357,11 @@ withSdlBench ctx =
 withSdlWindow :: Context -> WindowConfig -> (Context -> SdlEnv -> IO a) -> IO a
 withSdlWindow ctx cfg act =
   withTtf $ do
-    let hint name value =
-          BS.useAsCString name $ \cname ->
-            BS.useAsCString value $ \cvalue ->
-              void $ setHint (PtrConst.unsafeFromPtr cname) (PtrConst.unsafeFromPtr cvalue)
+    let
+      hint name value =
+        BS.useAsCString name $ \cname ->
+          BS.useAsCString value $ \cvalue ->
+            void $ setHint (PtrConst.unsafeFromPtr cname) (PtrConst.unsafeFromPtr cvalue)
     if wcBench cfg
       then do
         hint sDL_HINT_ASSERT "always_ignore"
@@ -383,42 +384,61 @@ withSdlWindow ctx cfg act =
     monoSource <- resolveNanoUIFont (wcMonoFont cfg)
     Acquire.with (startSdlWindow ctx cfg fontSource monoSource) (uncurry act)
 
-startSdlWindow :: Context -> WindowConfig -> FontSource -> FontSource -> Acquire (Context, SdlEnv)
+startSdlWindow ::
+  Context -> WindowConfig -> FontSource -> FontSource -> Acquire (Context, SdlEnv)
 startSdlWindow ctx cfg fontSource monoSource = do
   mkAcquire
-    (do
-      videoOk <- initSafe (SDL_InitFlags (fromIntegral sDL_INIT_VIDEO))
-      unless videoOk $ fail "SDL_Init(SDL_INIT_VIDEO) failed")
+    ( do
+        videoOk <- initSafe (SDL_InitFlags (fromIntegral sDL_INIT_VIDEO))
+        unless videoOk $ fail "SDL_Init(SDL_INIT_VIDEO) failed"
+    )
     (const quitSafe)
   liftIO $ do
     refreshOk <- initRefreshEvent
     unless refreshOk $ fail "SDL_RegisterEvents failed for refresh wake"
-  let Size w h = wcSize cfg
-      bench = wcBench cfg
+  let
+    Size w h = wcSize cfg
+    bench = wcBench cfg
   -- NANO_FORCE_SCALE: debug override of the pixel density.
   forcedEnv <- liftIO $ lookupEnv "NANO_FORCE_SCALE"
-  let forcedScale = case forcedEnv >>= readMaybe of
-        Just s | s > 0 -> Just s
-        _ -> Nothing
-  (win, ren) <- mkAcquire
-    (TextForeign.withCString (wcTitle cfg) $ \titlePtr ->
-      alloca $ \winPtr -> alloca $ \renPtr -> do
-        ok <- createWindowAndRendererSafe (PtrConst.unsafeFromPtr titlePtr) (round w) (round h) (wcFlags cfg) winPtr renPtr
-        unless ok $ fail "SDL_CreateWindowAndRenderer failed"
-        (,) <$> peek winPtr <*> peek renPtr)
-    (\(win, ren) -> do
-      void $ setRenderScale ren 1 1
-      destroyRendererSafe ren
-      destroyWindowSafe win)
+  let
+    forcedScale = case forcedEnv >>= readMaybe of
+      Just s | s > 0 -> Just s
+      _ -> Nothing
+  (win, ren) <-
+    mkAcquire
+      ( TextForeign.withCString (wcTitle cfg) $ \titlePtr ->
+          alloca $ \winPtr -> alloca $ \renPtr -> do
+            ok <-
+              createWindowAndRendererSafe
+                (PtrConst.unsafeFromPtr titlePtr)
+                (round w)
+                (round h)
+                (wcFlags cfg)
+                winPtr
+                renPtr
+            unless ok $ fail "SDL_CreateWindowAndRenderer failed"
+            (,) <$> peek winPtr <*> peek renPtr
+      )
+      ( \(win, ren) -> do
+          void $ setRenderScale ren 1 1
+          destroyRendererSafe ren
+          destroyWindowSafe win
+      )
   density <- liftIO $ queryWindowPixelDensity win
   zoom <- liftIO $ resolveZoom win (wcUiScale cfg)
   -- The requested size is logical, so the window grows with the zoom.
   liftIO $ when (abs (zoom - 1) > scaleEpsilon) $ zoomWindow win (wcSize cfg) zoom
-  let scale = density * zoom
+  let
+    scale = density * zoom
   liftIO $ setDrawSnapScale ctx scale
   refreshHz <- liftIO $ queryWindowRefreshHz win
-  rendererName <- liftIO $ getRendererName ren >>= \name ->
-    if PtrConst.unsafeToPtr name == nullPtr then pure "unknown" else TextForeign.peekCString (PtrConst.unsafeToPtr name)
+  rendererName <-
+    liftIO $
+      getRendererName ren >>= \name ->
+        if PtrConst.unsafeToPtr name == nullPtr
+          then pure "unknown"
+          else TextForeign.peekCString (PtrConst.unsafeToPtr name)
   scaleRef <- liftIO $ newIORef scale
   uiScaleRef <- liftIO $ newIORef (wcUiScale cfg)
   fontRequestRef <- liftIO $ newIORef (wcUiFont cfg)
@@ -430,21 +450,37 @@ startSdlWindow ctx cfg fontSource monoSource = do
   retain <- mkAcquire (newIORef noRetain) $ \ref -> do
     tex <- retainTexture <$> readIORef ref
     unless (tex == nullPtr) $ destroyTexture tex
-  fontCache <- mkAcquire
-    (newSdlFontCache fontSource embeddedFontSource monoSource embeddedFontSource glyphAtlas (wcFontSize cfg) scaleRef)
-    destroySdlFontCache
-  cachedCtx <- liftIO $ newIORef . withSdlClipboard =<< withSdlFontCache fontCache ctx
-  let refreshPeriod = if refreshHz > 0 then 1 / fromIntegral refreshHz else 1 / 60
+  fontCache <-
+    mkAcquire
+      ( newSdlFontCache
+          fontSource
+          embeddedFontSource
+          monoSource
+          embeddedFontSource
+          glyphAtlas
+          (wcFontSize cfg)
+          scaleRef
+      )
+      destroySdlFontCache
+  cachedCtx <-
+    liftIO $ newIORef . withSdlClipboard =<< withSdlFontCache fontCache ctx
+  let
+    refreshPeriod = if refreshHz > 0 then 1 / fromIntegral refreshHz else 1 / 60
   liftIO $ do
     scaleOk <- setRenderScale ren 1 1
     unless scaleOk $ fail "SDL_SetRenderScale failed"
-  unless bench $ mkAcquire
-    (void (setRenderVSync ren (if wcVsync cfg then 1 else 0)) >> void (startTextInputSafe win))
-    (const (void (stopTextInputSafe win)))
+  unless bench $
+    mkAcquire
+      ( void (setRenderVSync ren (if wcVsync cfg then 1 else 0))
+          >> void (startTextInputSafe win)
+      )
+      (const (void (stopTextInputSafe win)))
   dialogState <- mkAcquire newDialogState clearDialogState
   lastPresented <- liftIO $ newIORef False
   batch <- mkAcquire (newRenderBatch ren) destroyRenderBatch
-  let env = SdlEnv
+  let
+    env =
+      SdlEnv
         { sdlWindow = win
         , sdlRenderer = ren
         , sdlRendererName = rendererName

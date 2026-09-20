@@ -64,8 +64,8 @@ import NanoUI.Layout.Arena
   , addNodeFromLayout
   , rootAttachParent
   , setNodeText
-  , setOptions
   , setNodeValue
+  , setOptions
   , setStyleIdx
   , setWidgetId
   )
@@ -350,15 +350,31 @@ addWidgetStyled ::
   -> Eff es Response
 addWidgetStyled wid nt txt value layout styleIdx =
   addWidgetNode wid nt txt value layout $ \arena idx ->
-    let effectiveStyle
-          | nt == NodeText = packTextNodeStyleFull (layoutFontVariant layout) (layoutFontWeight layout) (layoutFontStyle layout) (layoutTextDecoration layout) styleIdx
-          | otherwise = styleIdx
-     in setStyleIdx arena idx effectiveStyle
+    let
+      effectiveStyle
+        | nt == NodeText =
+            packTextNodeStyleFull
+              (layoutFontVariant layout)
+              (layoutFontWeight layout)
+              (layoutFontStyle layout)
+              (layoutTextDecoration layout)
+              styleIdx
+        | otherwise = styleIdx
+     in
+      setStyleIdx arena idx effectiveStyle
 
 -- The initializer specializes at each call site; the node allocation, identity
 -- and interaction path are shared by styled leaves and option controls.
 {-# INLINE addWidgetNode #-}
-addWidgetNode :: Ui :> es => WidgetId -> NodeType -> Text -> Float -> Layout -> (NodeArena -> NodeIdx -> IO ()) -> Eff es Response
+addWidgetNode ::
+  Ui :> es =>
+  WidgetId
+  -> NodeType
+  -> Text
+  -> Float
+  -> Layout
+  -> (NodeArena -> NodeIdx -> IO ())
+  -> Eff es Response
 addWidgetNode wid nt txt value layout initialize = do
   ctx <- askContext
   inp <- askInput

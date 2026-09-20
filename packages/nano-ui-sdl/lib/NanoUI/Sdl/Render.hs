@@ -76,14 +76,23 @@ applyClipState batch ref ren next = do
 
 -- | Draw every command in layer order, clipped to its own rect and to
 -- the damage. A full repaint with a clear colour clears the target first.
-renderDrawDataPass :: RenderBatch -> Ptr SDL_Renderer -> Maybe Color -> DrawData -> ImageAtlas -> Ptr SDL_Texture -> Damage -> IO ()
+renderDrawDataPass ::
+  RenderBatch
+  -> Ptr SDL_Renderer
+  -> Maybe Color
+  -> DrawData
+  -> ImageAtlas
+  -> Ptr SDL_Texture
+  -> Damage
+  -> IO ()
 renderDrawDataPass batch ren mClear drawData images glyphTex damage =
   when (not (damageIsEmpty damage)) $ do
     clipRef <- newIORef ClipNone
     void $ setRenderClipRect ren (PtrConst.unsafeFromPtr nullPtr)
     case (mClear, damage) of
       (Just clearColor, DamageFull) -> do
-        let (cr, cg, cb, ca) = unpackColor clearColor
+        let
+          (cr, cg, cb, ca) = unpackColor clearColor
         void $ setRenderDrawColorSafe ren cr cg cb ca
         void $ renderClearSafe ren
       (Just _clearColor, DamageClip r) ->
@@ -92,19 +101,22 @@ renderDrawDataPass batch ren mClear drawData images glyphTex damage =
         applyClipState batch clipRef ren (toClipKey r)
       (Nothing, DamageClip r) -> applyClipState batch clipRef ren (toClipKey r)
       (Nothing, DamageFull) -> pure ()
-    let clip = case damage of
-          DamageFull -> Nothing
-          DamageClip r -> Just r
-        vc = drawVertexCount drawData
-        cmds = drawCommands drawData
+    let
+      clip = case damage of
+        DamageFull -> Nothing
+        DamageClip r -> Just r
+      vc = drawVertexCount drawData
+      cmds = drawCommands drawData
     withForeignPtr (drawVertices drawData) $ \vp ->
       withForeignPtr (drawIndices drawData) $ \ip ->
-        let goCmd !i
-              | i >= U.length cmds = pure ()
-              | otherwise = do
-                  drawCmd batch ren vp vc ip images glyphTex clip clipRef (U.unsafeIndex cmds i)
-                  goCmd (i + 1)
-         in goCmd 0
+        let
+          goCmd !i
+            | i >= U.length cmds = pure ()
+            | otherwise = do
+                drawCmd batch ren vp vc ip images glyphTex clip clipRef (U.unsafeIndex cmds i)
+                goCmd (i + 1)
+         in
+          goCmd 0
     applyClipState batch clipRef ren ClipNone
 
 {-# INLINE drawCmd #-}

@@ -53,7 +53,10 @@ inputText = textField Nothing textInput'
 
 -- | Auto-enumerated password input.
 inputPassword :: FormError FormInput err => Text -> Form err Text
-inputPassword = textField Nothing (textInputConfigured' defaultTextInputConfig {ticPassword = True})
+inputPassword =
+  textField
+    Nothing
+    (textInputConfigured' defaultTextInputConfig {ticPassword = True})
 
 -- | Auto-enumerated text area input.
 inputTextArea :: FormError FormInput err => Text -> Form err Text
@@ -62,18 +65,37 @@ inputTextArea = textField Nothing textArea'
 -- | Auto-enumerated checkbox toggle.
 inputCheckbox :: FormError FormInput err => Text -> Bool -> Form err Bool
 inputCheckbox lbl initial =
-  inputWidget Nothing (Right . decodeBool initial) respClicked FormInputBool (checkbox' lbl) initial
+  inputWidget
+    Nothing
+    (Right . decodeBool initial)
+    respClicked
+    FormInputBool
+    (checkbox' lbl)
+    initial
 
 -- | Auto-enumerated slider input.
 inputSlider ::
   FormError FormInput err => Float -> Float -> Float -> Form err Float
 inputSlider minV maxV initial =
-  inputWidget Nothing (Right . decodeFloatInput initial) respChanged FormInputFloat (slider' minV maxV) initial
+  inputWidget
+    Nothing
+    (Right . decodeFloatInput initial)
+    respChanged
+    FormInputFloat
+    (slider' minV maxV)
+    initial
 
 -- | Auto-enumerated select dropdown.
-inputSelect :: (Foldable f, FormError FormInput err) => f Text -> Int -> Form err Int
+inputSelect ::
+  (Foldable f, FormError FormInput err) => f Text -> Int -> Form err Int
 inputSelect options initial =
-  inputWidget Nothing (Right . decodeInt initial) respChanged FormInputInt (select' options) initial
+  inputWidget
+    Nothing
+    (Right . decodeInt initial)
+    respChanged
+    FormInputInt
+    (select' options)
+    initial
 
 -- | Auto-enumerated select for bounded enums.
 inputEnumSelect ::
