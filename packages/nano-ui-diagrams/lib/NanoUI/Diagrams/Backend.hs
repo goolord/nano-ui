@@ -39,7 +39,6 @@ import Diagrams.Prelude
   , Trail
   , V2 (..)
   , origin
-  , p2
   , papply
   , reflectY
   , reflectionY
@@ -85,18 +84,13 @@ fullSize f (NanoUIOptions sz textOnly) = fmap (\sz' -> NanoUIOptions sz' textOnl
 instance (Typeable n, RealFloat n) => Backend NanoUIBackend V2 n where
   newtype Render NanoUIBackend V2 n
     = NRenderFull (Bool -> DiaCore.Style V2 n -> DList DrawOp)
+    deriving (Semigroup, Monoid)
   type Result NanoUIBackend V2 n = SmallArray DrawOp
   data Options NanoUIBackend V2 n = NanoUIOptions (SizeSpec V2 n) Bool
   renderRTree _ (NanoUIOptions _ textOnly) rt = smallArrayFromList (DL.toList (walkFull textOnly mempty rt))
   adjustDia c opts d = (sz, t <> reflectionY, d')
    where
     (sz, t, d') = adjustDia2D fullSize c opts (d # reflectY)
-
-instance Semigroup (Render NanoUIBackend V2 n) where
-  NRenderFull f <> NRenderFull g = NRenderFull (\textOnly sty -> f textOnly sty <> g textOnly sty)
-
-instance Monoid (Render NanoUIBackend V2 n) where
-  mempty = NRenderFull (\_ _ -> DL.empty)
 
 walkFull ::
   (Typeable n, RealFloat n) =>
@@ -150,7 +144,7 @@ trailOps ::
   DiaCore.Style V2 n -> Located (Trail V2 n) -> [DrawOp]
 trailOps sty lt =
   let
-    pts = [(toF x, toF y) | (x, y) <- map unp2 (trailSamples lt)]
+    pts = trailSamples lt
     lineW0 = sty ^. _lineWidthU
     lineW =
       case fmap toF lineW0 of
@@ -176,7 +170,7 @@ trailOps sty lt =
    in
     fills ++ strokes
 
-trailSamples :: RealFloat n => Located (Trail V2 n) -> [P2 n]
+trailSamples :: RealFloat n => Located (Trail V2 n) -> [(Float, Float)]
 trailSamples lt =
   case map sampleSeg (fixTrail lt) of
     [] -> []
@@ -188,14 +182,13 @@ trailSamples lt =
           then pts ++ take 1 pts
           else pts
 
-sampleSeg :: RealFloat n => FixedSegment V2 n -> [P2 n]
-sampleSeg (FLinear p0 p1) = [p0, p1]
+sampleSeg :: RealFloat n => FixedSegment V2 n -> [(Float, Float)]
+sampleSeg (FLinear p0 p1) = [pointFloats p0, pointFloats p1]
 sampleSeg (FCubic p0 c1 c2 p1) =
-  [ p2 (realToFrac x, realToFrac y)
-  | (x, y) <- flattenCubic (f p0) (f c1) (f c2) (f p1)
-  ]
- where
-  f p = let (x, y) = unp2 p in (toF x, toF y)
+  flattenCubic (pointFloats p0) (pointFloats c1) (pointFloats c2) (pointFloats p1)
+
+pointFloats :: Real n => P2 n -> (Float, Float)
+pointFloats p = let (x, y) = unp2 p in (toF x, toF y)
 
 solidColour :: Maybe (AlphaColour Double) -> Maybe Color
 solidColour mc = do
