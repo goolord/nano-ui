@@ -56,6 +56,7 @@ testSpecs =
   , TestSpec "session-loop-wake" False runSessionLoopWakeTest
   , TestSpec "drawing-lock" False runDrawingLockTest
   , TestSpec "simd-writes" False runSimdWritesTest
+  , TestSpec "draw-layer-offsets" False runDrawLayersTest
   , TestSpec "no-thunks" False runNoThunksTest
   , TestSpec "controlled-state" False runControlledStateTest
   , TestSpec "controlled-inputs" False runControlledInputsTest

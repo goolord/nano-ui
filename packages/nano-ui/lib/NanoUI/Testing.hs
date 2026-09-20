@@ -101,7 +101,6 @@ module NanoUI.Testing
   , DrawOp (..)
   , drawTextBox
   , Layer (..)
-  , LayerSlice (..)
   , drawCmdNull
   , drawCmdElems
   , forDrawCmdsInLayer_
@@ -201,7 +200,6 @@ import NanoUI.Draw
   , DrawData (..)
   , DrawOp (..)
   , Layer (..)
-  , LayerSlice (..)
   , backdropDimTextureId
   , glyphAtlasTextureId
   , drawCmdElems

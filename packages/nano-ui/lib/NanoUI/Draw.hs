@@ -2,7 +2,6 @@
 module NanoUI.Draw
   ( Layer (..)
   , DrawCmd (..)
-  , LayerSlice (..)
   , DrawData (..)
   , DrawArena (..)
   , DrawOp (..)

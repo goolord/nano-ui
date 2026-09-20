@@ -11,7 +11,6 @@ module NanoUI.Draw.Types
   , DrawingBuild
   , shiftDrawOp
   , DrawCmd (..)
-  , LayerSlice (..)
   , DrawData (..)
   , drawCmdCount
   , drawCmdNull
@@ -202,46 +201,6 @@ data DrawCmd = DrawCmd
   }
   deriving (Eq, Show)
 
--- | Contiguous range of draw commands for one layer, as element offset/count.
-data LayerSlice = LayerSlice
-  { sliceOffset :: {-# UNPACK #-} !Int
-  , sliceCount :: {-# UNPACK #-} !Int
-  }
-  deriving (Eq, Show)
-
--- Two packed Ints, 16 bytes, 8-byte aligned.
-instance Prim LayerSlice where
-  sizeOfType# _ = 16#
-  alignmentOfType# _ = 8#
-  indexByteArray# arr# i# =
-    let o# = i# *# 16#
-     in LayerSlice
-          (I# (indexWord8ArrayAsInt# arr# o#))
-          (I# (indexWord8ArrayAsInt# arr# (o# +# 8#)))
-  readByteArray# arr# i# s0 =
-    let o# = i# *# 16#
-     in case readWord8ArrayAsInt# arr# o# s0 of
-          (# s1, off# #) ->
-            case readWord8ArrayAsInt# arr# (o# +# 8#) s1 of
-              (# s2, cnt# #) -> (# s2, LayerSlice (I# off#) (I# cnt#) #)
-  writeByteArray# arr# i# (LayerSlice (I# off#) (I# cnt#)) s0 =
-    let o# = i# *# 16#
-     in writeWord8ArrayAsInt# arr# (o# +# 8#) cnt# (writeWord8ArrayAsInt# arr# o# off# s0)
-  setByteArray# = defaultSetByteArray#
-  indexOffAddr# addr# i# =
-    let a# = addr# `plusAddr#` (i# *# 16#)
-     in LayerSlice (I# (indexIntOffAddr# a# 0#)) (I# (indexIntOffAddr# (a# `plusAddr#` 8#) 0#))
-  readOffAddr# addr# i# s0 =
-    let a# = addr# `plusAddr#` (i# *# 16#)
-     in case readIntOffAddr# a# 0# s0 of
-          (# s1, off# #) ->
-            case readIntOffAddr# (a# `plusAddr#` 8#) 0# s1 of
-              (# s2, cnt# #) -> (# s2, LayerSlice (I# off#) (I# cnt#) #)
-  writeOffAddr# addr# i# (LayerSlice (I# off#) (I# cnt#)) s0 =
-    let a# = addr# `plusAddr#` (i# *# 16#)
-     in writeIntOffAddr# (a# `plusAddr#` 8#) 0# cnt# (writeIntOffAddr# a# 0# off# s0)
-  setOffAddr# = defaultSetOffAddr#
-
 {-# INLINE layerToWord8 #-}
 layerToWord8 :: Layer -> Word8
 layerToWord8 ly = fromIntegral (fromEnum ly)
@@ -372,7 +331,9 @@ data DrawData = DrawData
   , drawIndices :: ForeignPtr Word8
   , drawIndexCount :: {-# UNPACK #-} !Int
   , drawCommands :: !(PrimArray DrawCmd)
-  , drawLayerSlices :: !(PrimArray LayerSlice)
+  , drawLayerOffsets :: !(PrimArray Int)
+  -- ^ Cumulative command offsets: layer @i@ occupies @[offsets[i], offsets[i+1])@.
+  -- Includes a final sentinel equal to 'drawCmdCount'; empty layers repeat offsets.
   }
 
 -- | Number of batches across all layers.
@@ -389,12 +350,14 @@ drawCmdNull dd = drawCmdCount dd == 0
 {-# INLINE forDrawCmdsInLayer_ #-}
 forDrawCmdsInLayer_ :: Layer -> DrawData -> (DrawCmd -> IO ()) -> IO ()
 forDrawCmdsInLayer_ ly dd f =
-  let LayerSlice off cnt = indexPrimArray (drawLayerSlices dd) (fromEnum ly)
+  let offsets = drawLayerOffsets dd
+      off = indexPrimArray offsets (fromEnum ly)
+      end = indexPrimArray offsets (fromEnum ly + 1)
       cmds = drawCommands dd
       go !i
-        | i >= cnt = pure ()
-        | otherwise = f (indexPrimArray cmds (off + i)) >> go (i + 1)
-   in go 0
+        | i >= end = pure ()
+        | otherwise = f (indexPrimArray cmds i) >> go (i + 1)
+   in go off
 
 -- | Copy command values into a list in recorded order.
 drawCmdElems :: DrawData -> [DrawCmd]

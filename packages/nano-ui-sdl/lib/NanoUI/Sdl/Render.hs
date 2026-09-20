@@ -25,7 +25,6 @@ import NanoUI.Testing
   ( Damage (..)
   , DrawCmd (..)
   , DrawData (..)
-  , LayerSlice (..)
   , damageIsEmpty
   , glyphAtlasTextureId
   )
@@ -75,7 +74,7 @@ applyClipState batch ref ren next = do
         poke rect (SDL_Rect (fromIntegral px) (fromIntegral py) (fromIntegral pw) (fromIntegral ph))
         setRenderClipRect ren (PtrConst.unsafeFromPtr rect)
 
--- | Draw every command in layer-slice order, clipped to its own rect and to
+-- | Draw every command in layer order, clipped to its own rect and to
 -- the damage. A full repaint with a clear colour clears the target first.
 renderDrawDataPass :: RenderBatch -> Ptr SDL_Renderer -> Maybe Color -> DrawData -> ImageAtlas -> Ptr SDL_Texture -> Damage -> IO ()
 renderDrawDataPass batch ren mClear drawData images glyphTex damage =
@@ -98,21 +97,14 @@ renderDrawDataPass batch ren mClear drawData images glyphTex damage =
           DamageClip r -> Just r
         vc = drawVertexCount drawData
         cmds = drawCommands drawData
-        slices = drawLayerSlices drawData
     withForeignPtr (drawVertices drawData) $ \vp ->
       withForeignPtr (drawIndices drawData) $ \ip ->
-        let goLy !li
-              | li >= sizeofPrimArray slices = pure ()
+        let goCmd !i
+              | i >= sizeofPrimArray cmds = pure ()
               | otherwise = do
-                  let LayerSlice off cnt = indexPrimArray slices li
-                      goCmd !j
-                        | j >= cnt = pure ()
-                        | otherwise = do
-                            drawCmd batch ren vp vc ip images glyphTex clip clipRef (indexPrimArray cmds (off + j))
-                            goCmd (j + 1)
-                  goCmd 0
-                  goLy (li + 1)
-         in goLy 0
+                  drawCmd batch ren vp vc ip images glyphTex clip clipRef (indexPrimArray cmds i)
+                  goCmd (i + 1)
+         in goCmd 0
     applyClipState batch clipRef ren ClipNone
 
 {-# INLINE drawCmd #-}

@@ -1,14 +1,19 @@
-module Cases.SIMD (runSimdWritesTest) where
+module Cases.SIMD (runSimdWritesTest, runDrawLayersTest) where
 
-import Control.Monad (forM, forM_)
-import Data.IORef (IORef)
+import Control.Monad (forM, forM_, void)
+import Data.IORef (IORef, newIORef, modifyIORef', readIORef)
+import Data.List (sort)
+import Data.Primitive.PrimArray (primArrayToList)
 import Data.Word (Word32, Word8)
 import Foreign.Marshal.Alloc (allocaBytes)
 import Foreign.Marshal.Utils (fillBytes)
 import Foreign.Ptr (Ptr)
 import Foreign.Storable (peekByteOff)
 import NanoUI.SIMD
-import NanoUI.Testing (Context)
+import NanoUI (NanoUI, button, column, emptyInput, label, modal)
+import NanoUI.Testing
+  ( Context, DrawCmd (..), DrawData (..), Layer (..), drawCmdElems,
+    forDrawCmdsInLayer_, newContext, runFrame )
 import NanoUI.Testing.Assert (assertEq)
 
 -- Check the renderer's interleaved vertex ABI, triangle winding and byte
@@ -64,3 +69,31 @@ runSimdWritesTest _ failed = do
   let
     expectedOffsets = ((1, 2), (4, 6), (7, 10), (10, 14))
   assertEq failed expectedOffsets (concentricOffsetsSIMD 1 2 3 4 0 1 2 3)
+
+-- Empty layers have equal bounds; grouping preserves command order within a
+-- layer and visiting the layers reconstructs the complete command stream.
+runDrawLayersTest :: Context -> IORef Int -> IO ()
+runDrawLayersTest _ failed = do
+  let views :: [NanoUI ()]
+      views = [pure (), label "content", column $ do
+        void (button "outside")
+        void (modal True "overlay" (button "inside"))]
+  forM_ views $ \view -> do
+    ctx <- newContext
+    forM_ [1 .. 3 :: Int] $ \_ -> do
+      (_, _, dd, _) <- runFrame ctx emptyInput view
+      let cmds = drawCmdElems dd
+          tags = map (fromEnum . cmdLayer) cmds
+          offsets = primArrayToList (drawLayerOffsets dd)
+      assertEq failed (sort tags) tags
+      assertEq failed 5 (length offsets)
+      assertEq failed [0] (take 1 offsets)
+      assertEq failed [length cmds] (drop 4 offsets)
+      visited <- forM [minBound .. maxBound :: Layer] $ \layer -> do
+        ref <- newIORef []
+        forDrawCmdsInLayer_ layer dd (\cmd -> modifyIORef' ref (cmd :))
+        actual <- reverse <$> readIORef ref
+        assertEq failed (filter ((== layer) . cmdLayer) cmds) actual
+        assertEq failed (sort (map cmdIndexOffset actual)) (map cmdIndexOffset actual)
+        pure actual
+      assertEq failed cmds (concat visited)

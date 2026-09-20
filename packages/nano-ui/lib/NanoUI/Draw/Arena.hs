@@ -308,7 +308,7 @@ finishDraw da = do
   iCount <- readIORef (daIndexCount da)
   count <- readIORef (daCmdCount da)
   arr <- readIORef (daCmdStore da)
-  (cmds, slices) <- groupCmdsByLayer arr count
+  (cmds, offsets) <- groupCmdsByLayer arr count
   pure
     DrawData
       { drawVertices = vFPtr
@@ -316,29 +316,28 @@ finishDraw da = do
       , drawIndices = iFPtr
       , drawIndexCount = iCount
       , drawCommands = cmds
-      , drawLayerSlices = slices
+      , drawLayerOffsets = offsets
       }
 
--- | Stable counting sort of the recorded commands by layer, plus one slice per
--- layer into the sorted array.
-groupCmdsByLayer :: MutablePrimArray RealWorld DrawCmd -> Int -> IO (PrimArray DrawCmd, PrimArray LayerSlice)
+-- | Stable counting sort by layer, with cumulative offsets into the sorted
+-- array. Counts become write cursors after the prefix sum.
+groupCmdsByLayer :: MutablePrimArray RealWorld DrawCmd -> Int -> IO (PrimArray DrawCmd, PrimArray Int)
 groupCmdsByLayer src n = do
   let layers = fromEnum (maxBound :: Layer) + 1
       layerAt i = fromEnum . cmdLayer <$> readPrimArray src i
-  counts <- newPrimArray layers
-  setPrimArray counts 0 layers (0 :: Int)
+  cursors <- newPrimArray layers
+  setPrimArray cursors 0 layers (0 :: Int)
   loopIO 0 (n - 1) $ \i -> do
     l <- layerAt i
-    readPrimArray counts l >>= writePrimArray counts l . (+ 1)
-  cursors <- newPrimArray layers
-  slices <- newPrimArray layers
-  let offsets !l !off =
+    readPrimArray cursors l >>= writePrimArray cursors l . (+ 1)
+  offsets <- newPrimArray (layers + 1)
+  let prefix !l !off = do
+        writePrimArray offsets l off
         when (l < layers) $ do
-          c <- readPrimArray counts l
+          c <- readPrimArray cursors l
           writePrimArray cursors l off
-          writePrimArray slices l (LayerSlice off c)
-          offsets (l + 1) (off + c)
-  offsets 0 0
+          prefix (l + 1) (off + c)
+  prefix 0 0
   dest <- newPrimArray n
   loopIO 0 (n - 1) $ \i -> do
     cmd <- readPrimArray src i
@@ -346,7 +345,7 @@ groupCmdsByLayer src n = do
     j <- readPrimArray cursors l
     writePrimArray dest j cmd
     writePrimArray cursors l (j + 1)
-  (,) <$> unsafeFreezePrimArray dest <*> unsafeFreezePrimArray slices
+  (,) <$> unsafeFreezePrimArray dest <*> unsafeFreezePrimArray offsets
 
 {-# INLINE unpackColorF #-}
 unpackColorF :: Color -> (Float, Float, Float, Float)

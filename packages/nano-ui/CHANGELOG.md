@@ -110,6 +110,10 @@
 
 ### Changed
 
+- Draw data stores cumulative `drawLayerOffsets`, including a final command-count
+  sentinel, instead of `drawLayerSlices` / `LayerSlice`. Use
+  `forDrawCmdsInLayer_` to visit one layer without depending on the representation.
+
 - `Animatable` uses `traverseChannels` instead of `toComponents` and
   `fromComponents`. Custom instances apply the supplied indexed action directly
   to their fields, for example `V2 <$> f 0 x <*> f 1 y`. Keep channel indices
