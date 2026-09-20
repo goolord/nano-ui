@@ -4,6 +4,11 @@
 
 ### Added
 
+- Generic `writeSlot`, `adoptSlot`, and `recordSlot` context operations for
+  controls using a typed store `Field`, alongside the existing scalar helpers.
+- `withUiResource` in `NanoUI.Monad` brackets UI-thread state acquisition and
+  restoration, using the same exception/masking behavior as the existing scopes.
+
 - Scoped styling: `styled f` draws the widgets inside it with the theme
   modified by `f`, and `themed t` with another theme. Scopes nest, only
   affect how widgets look, and `uiTheme` reads the theme where it is called.

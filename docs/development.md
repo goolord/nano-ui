@@ -24,7 +24,7 @@ fails the build instead of swapping.
 | --- | --- |
 | `nano-ui-test` | Widgets, layout, input, focus, damage, and drawing, run headlessly frame by frame |
 | `text-buffer-spec` | The multi-line text buffer |
-| `nano-ui-inspection` | Compile-time checks that the vertex writers inline without dictionaries or tuples |
+| `nano-ui-inspection` | Compiler checks for SIMD writers, typed store slots, animation channels, unboxed commands, and canvas construction |
 | `nano-ui-rgfw-test` | RGFW input translation, the glyph atlas, and frames drawn by a software rasteriser kept in the test suite |
 | `nano-ui-font-search-test`, `nano-ui-font-effects-test` | SDL font discovery, measurement, and handle lifetimes |
 | `nano-ui-diagrams-test` | Diagram conversion, tessellation, and charts |
@@ -162,6 +162,9 @@ package nano-ui
   `cabal build <target> --ghc-options="-ddump-timings -ddump-to-file"`.
 
 ### Profilers and benchmarks
+
+[The abstraction audit](abstraction-audit.md) records the baseline, dependency
+decisions, compiler checks, and before/after measurements for the refactors.
 
 | Command | Runs |
 | --- | --- |
