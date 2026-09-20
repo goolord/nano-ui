@@ -125,7 +125,7 @@ generated vector-instance code: source reduction is not binary-size reduction.
 | `rasterific-svg` | Reject under the footprint constraint: core closure grows from 55 to 88 packages |
 | `Chart-diagrams` | Current index cannot solve `diagrams-svg` on `base-4.22`; its font/picking adapter is also substantial. Reuse the existing diagrams backend instead |
 | `text-icu` | Public bidi API lacks the visual-run mapping the shaper needs; local solve also requires unavailable `icu-i18n >= 62.1` |
-| Typed arena columns | Pilot float reads/writes pass four Core equality/erasure checks at saturated call sites. Retain existing strided accessors: the descriptor/access layer does not justify migrating the already-small named wrappers |
+| Typed arena columns | Pilot float reads/writes pass four Core equality/erasure checks at saturated call sites, but a complete six-scalar-field source migration adds 18 library lines once consumers are included; retain existing strided accessors |
 | Bracketing every container | Rejected measured variant: widgets allocation rises from 590,980,936 to 605,021,848 bytes. Existing container behavior retained |
 | Deferred generic widget descriptors | Existing `With'` implementations already own construction. Retain convenient value/response wrappers; remove the parallel reducer/form families instead |
 
@@ -142,6 +142,27 @@ constructor, generic read/write operations, and three descriptors occupy 20,
 before imports, exports, documentation, or caller changes. This small boundary
 demonstrates specialization but not a source reduction; it is not a claim that
 a future, broader schema redesign could never pay off.
+
+The follow-up source-budget experiment expands this to **all six simple scalar
+read/write pairs**: grid column count, grid minimum width, scroll content width,
+node value, node font size, and style index. It generates the descriptor API,
+removes the twelve accessors, preserves the field documentation, and migrates
+imports and calls in all 25 affected files. Both sides are formatted until
+Fourmolu reaches a fixed point, including import merging and wrapping.
+
+| Full scalar-column candidate | Formatted line change |
+| --- | ---: |
+| `Layout/Arena.hs` | -8 |
+| Other library modules | +26 |
+| Library total | **+18** |
+| Tests | +7 |
+| Complete migration | **+25** |
+
+Thus the constructor cost does amortize, but the consumer changes outweigh the
+local reduction. This candidate is rejected at the source-reduction gate,
+before changing production files or running a performance experiment. The
+374-line normalized reduction above was also rechecked using formatting to a
+fixed point, so it does not count transient import-layout differences as savings.
 
 ## Verification and migration
 
