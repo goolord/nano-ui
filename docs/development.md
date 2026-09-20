@@ -107,6 +107,12 @@ The README's "How it works" section lists the steps of a frame, and
   `adoptStoreFloat`, or `adoptStoreText`, and records what it returned with the
   matching `recordStore*`. New inputs should use the same pair, so edits made
   between frames survive a caller that passes the previous result back.
+- Widget state in the store is read and written through the slot functions of
+  `NanoUI.Store` (`findSlot fieldInt 0 key store`,
+  `insertSlot fieldPoint key p . deleteSlot fieldInt key`), not through the
+  maps. They compile to the record code they stand for. A widget that
+  publishes state every frame writes it with `writeSlots`, which skips the
+  write, and the store diff behind it, when nothing changed.
 - Local state goes through `NanoUI.Hooks`. Keyboard handling checks
   `NanoUI.Widgets.Behavior.keyboardFocused` first, so disabled widgets and
   modals are respected.
@@ -118,7 +124,11 @@ The README's "How it works" section lists the steps of a frame, and
   computation that isn't obvious.
 - Add tests for observable behaviour. Core cases live in
   `packages/nano-ui/test/integration/Cases/` and are registered in `Main.hs`
-  and the package's Cabal file.
+  and the package's Cabal file. `NanoUI.Testing.Harness` builds pointer
+  frames (`pressAt`, `holdAt`, `releaseAt`, `clickPair`), finds spans
+  (`spanRect`, `spanRectOf`) and warms views up; a test that needs a rect or
+  a span to go on takes it with `assertJust`, which counts a failure when it
+  is missing.
 - Format Haskell with the repository's `fourmolu.yaml`.
 
 ## Performance
@@ -144,6 +154,10 @@ package nano-ui
   changed. That is right for a handful of ops and wasteful for thousands: give
   an op-heavy drawing a key covering everything it reads, and an unchanged key
   skips the rebuild and the repaint. `contentKey` hashes numbers into one.
+- `bytes allocated` from `nano-ui-profile -- <scene> +RTS -s` is the same on
+  every run, so a change to per-frame code that should cost nothing leaves it
+  unchanged to the byte. Check it after restructuring such code: the order of
+  composed store writes, for one, decides what their thunks capture.
 - Compare compile times per module with
   `cabal build <target> --ghc-options="-ddump-timings -ddump-to-file"`.
 

@@ -89,6 +89,24 @@
   before the edit. Typing 1,000 characters into a
   100,000-line document takes 0.14 s instead of 1.5 s through `textArea`,
   and allocates 248 MB instead of 7.1 GB.
+- `NanoUI.Store` names the store's maps as `Field`s (`fieldInt`,
+  `fieldFloat`, `fieldPoint`, `fieldText`, ...) and reads and writes slots
+  through them: `lookupSlot`, `findSlot`, `memberSlot`, `insertSlot`,
+  `deleteSlot`, `flagSlot` and `setFlagSlot`, with `lookupDyn` and
+  `insertDyn` for `Dynamic` values. Writes are `WidgetStore -> WidgetStore`
+  and compose with `(.)`. They inline to the record code they replace, which
+  the inspection suite checks, so a composition still builds the store once.
+- `writeSlots` runs `slotWrite`s joined with `<>` and leaves the store alone
+  when every slot already holds its value, for widgets that publish state
+  each frame.
+- `withContext` runs an `IO` action on the view's `Context`, and `<&&>` is a
+  short-circuiting `&&` over effectful tests.
+- `NanoUI.Frame.Hit.withWidgetNode`, and `walkAncestors` and `getNodeRect`
+  in `NanoUI.Layout.Arena`.
+- `NanoUI.Testing`: `assertJust` and `assertJustM` carry a test on with a
+  value it needs or count a failure, `spanRect` and `spanRectOf` find a span
+  by its text, `clipCovers` checks a frame's damage, and `warmupFocused`
+  warms a view up and tabs onto its first focusable.
 
 ### Changed
 
