@@ -17,7 +17,7 @@ import NanoUI
 import NanoUI.Context (Context (ctxActiveId), getTextInputMenu, intKey, textInputMenuWidget)
 import NanoUI.Store (Slot (..), WidgetStore (..), isSelectOpen, slotKey)
 import NanoUI.Testing
-import NanoUI.Testing.Assert (assert, assertEq, withInput)
+import NanoUI.Testing.Assert (assert, assertEq, assertJust, withInput)
 import NanoUI.Testing.Harness
   ( clickPair
   , held
@@ -381,37 +381,35 @@ runPointerCaptureTest ctx failed = do
       hold = holdAt win
   _ <- frame win
   ((slider0, _), mInside) <- frame win
-  case mInside of
-    Nothing -> assert failed False
-    Just inside0 -> do
-      let Rect sx sy sw sh = respRect slider0
-          onTrack = V2 (sx + sw * 0.25) (sy + sh / 2)
-          onButton = spanCenter (respRect inside0)
-          Rect bx by _ bh = respRect inside0
-          onWindowBody = V2 (bx + 4) (by + bh + 40)
-      -- The scenario needs the window clear of the slider.
-      assert failed (v2X onButton > sx + sw)
-      -- Page to window: the slider follows the pointer, the button stays cold.
-      _ <- frame (pressAt win onTrack)
-      ((_, dragged), overWindow) <- frame (hold onButton)
-      assertEq failed dragged 100
-      assert failed (maybe False (not . respHovered) overWindow)
-      _ <- frame (releaseAt (hold onButton))
-      ((_, rested), free) <- frame (at onButton)
-      assert failed (maybe False respHovered free)
-      -- Window to page: the slider neither moves nor lights up.
-      _ <- frame (pressAt win onWindowBody)
-      ((overPage, crossed), _) <- frame (hold onTrack)
-      assertEq failed crossed rested
-      assert failed (not (respHovered overPage))
-      _ <- frame (releaseAt (hold onTrack))
-      ((freed, _), _) <- frame (at onTrack)
-      assert failed (respHovered freed)
-      -- A press is routed afresh even with the other button still down: with
-      -- the right button held on the page, a left click in the window lands.
-      let rightHeld = win {inputMouseRightDown = True}
-          chord = pressAt rightHeld onButton
-      _ <- frame (fst (rightClickPair win onTrack))
-      _ <- frame chord
-      (_, chorded) <- frame (releaseAt chord)
-      assert failed (maybe False respClicked chorded)
+  assertJust failed mInside $ \inside0 -> do
+    let Rect sx sy sw sh = respRect slider0
+        onTrack = V2 (sx + sw * 0.25) (sy + sh / 2)
+        onButton = spanCenter (respRect inside0)
+        Rect bx by _ bh = respRect inside0
+        onWindowBody = V2 (bx + 4) (by + bh + 40)
+    -- The scenario needs the window clear of the slider.
+    assert failed (v2X onButton > sx + sw)
+    -- Page to window: the slider follows the pointer, the button stays cold.
+    _ <- frame (pressAt win onTrack)
+    ((_, dragged), overWindow) <- frame (hold onButton)
+    assertEq failed dragged 100
+    assert failed (maybe False (not . respHovered) overWindow)
+    _ <- frame (releaseAt (hold onButton))
+    ((_, rested), free) <- frame (at onButton)
+    assert failed (maybe False respHovered free)
+    -- Window to page: the slider neither moves nor lights up.
+    _ <- frame (pressAt win onWindowBody)
+    ((overPage, crossed), _) <- frame (hold onTrack)
+    assertEq failed crossed rested
+    assert failed (not (respHovered overPage))
+    _ <- frame (releaseAt (hold onTrack))
+    ((freed, _), _) <- frame (at onTrack)
+    assert failed (respHovered freed)
+    -- A press is routed afresh even with the other button still down: with
+    -- the right button held on the page, a left click in the window lands.
+    let rightHeld = win {inputMouseRightDown = True}
+        chord = pressAt rightHeld onButton
+    _ <- frame (fst (rightClickPair win onTrack))
+    _ <- frame chord
+    (_, chorded) <- frame (releaseAt chord)
+    assert failed (maybe False respClicked chorded)

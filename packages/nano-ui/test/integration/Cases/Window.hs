@@ -24,15 +24,17 @@ import Data.IntMap.Strict qualified as IM
 import Data.Text qualified as T
 import NanoUI
 import NanoUI.Testing
-import NanoUI.Testing.Assert (assert, assertEq, assertGt, assertLt, withInput)
+import NanoUI.Testing.Assert (assert, assertEq, assertGt, assertJust, assertJustM, assertLt, withInput)
 import NanoUI.Testing.Harness
   ( assertWheelTitlePinned
   , centerOf
   , clickPair
   , dragWindowEdge
   , keyInp
+  , pressAt
   , runClick
   , runDragFrom
+  , spanCenter
   , spanYOf
   , warmup2
   , windowTitleGrab
@@ -55,11 +57,9 @@ runWindowScrollGutterTest ctx failed = do
   spans <- collectOverlayTextSpans ctx inp0
   let titleYs = [rectY r | (r, txt, _, _, _) <- spans, "GutterWin" `T.isInfixOf` txt]
   assert failed (not (null titleYs))
-  case mwide of
-    Nothing -> assert failed False
-    Just wide -> do
-      let Rect cx _ cw _ = respRect wide
-      assert failed (cx + cw >= contentRight - 0.5 && cx + cw <= contentRight + 0.01)
+  assertJust failed mwide $ \wide -> do
+    let Rect cx _ cw _ = respRect wide
+    assert failed (cx + cw >= contentRight - 0.5 && cx + cw <= contentRight + 0.01)
 
 runWindowCloseDamageTest :: Context -> IORef Int -> IO ()
 runWindowCloseDamageTest ctx failed = do
@@ -223,24 +223,20 @@ runOverlayClickThroughTest ctx failed = do
       ((_, cover0, mInside0), _, _, _) <- runFrame ctx inp0 u
       let coverRect = respRect cover0
       assert failed (rectW coverRect > 0 && rectH coverRect > 0)
-      case mInside0 of
-        Nothing -> assert failed False
-        Just inside0 -> do
-          let kids = [respRect inside0]
-          case childSafePoint coverRect kids of
-            Nothing -> assert failed False
-            Just pos -> do
-              let (press, release) = clickPair inp0 pos
-              _ <- runFrame ctx press u
-              ((outsidesHit, _, _), _, _, _) <- runFrame ctx release u
-              assert failed (not (any respClicked outsidesHit))
-          let ir = respRect inside0
-              ip = V2 (rectX ir + rectW ir / 2) (rectY ir + rectH ir / 2)
-          assert failed (rectW ir > 0 && rectH ir > 0)
-          let (ipress, irelease) = clickPair inp0 ip
-          _ <- runFrame ctx ipress u
-          ((_, _, mInsideHit), _, _, _) <- runFrame ctx irelease u
-          assert failed (maybe False respClicked mInsideHit)
+      assertJust failed mInside0 $ \inside0 -> do
+        let kids = [respRect inside0]
+        assertJust failed (childSafePoint coverRect kids) $ \pos -> do
+          let (press, release) = clickPair inp0 pos
+          _ <- runFrame ctx press u
+          ((outsidesHit, _, _), _, _, _) <- runFrame ctx release u
+          assert failed (not (any respClicked outsidesHit))
+        let ir = respRect inside0
+            ip = spanCenter ir
+        assert failed (rectW ir > 0 && rectH ir > 0)
+        let (ipress, irelease) = clickPair inp0 ip
+        _ <- runFrame ctx ipress u
+        ((_, _, mInsideHit), _, _, _) <- runFrame ctx irelease u
+        assert failed (maybe False respClicked mInsideHit)
     runStacked = do
       _ <- warmup2 ctx inp0 stackedUi
       ((_, mLo0, hi0, mHi0), _, _, _) <- runFrame ctx inp0 stackedUi
@@ -249,9 +245,7 @@ runOverlayClickThroughTest ctx failed = do
           let cover = respRect hi0
               kids = [respRect loBtn, respRect hiBtn]
           assert failed (rectW cover > 0 && rectH cover > 0)
-          case childSafePoint cover kids of
-            Nothing -> assert failed False
-            Just pos -> clickNone (\(_, loHit, _, _) -> maybe False respClicked loHit) stackedUi pos
+          assertJust failed (childSafePoint cover kids) $ \pos -> clickNone (\(_, loHit, _, _) -> maybe False respClicked loHit) stackedUi pos
           let hp = V2 (rectX (respRect hiBtn) + rectW (respRect hiBtn) / 2) (rectY (respRect hiBtn) + rectH (respRect hiBtn) / 2)
               (hpress, hrelease) = clickPair inp0 hp
           _ <- runFrame ctx hpress stackedUi
@@ -378,71 +372,52 @@ runWindowResizeTest :: Context -> IORef Int -> IO ()
 runWindowResizeTest ctx failed = do
   let inp0 = withInput 640 400
       ui = fmap fst (window True "Resize" (label "Body"))
-  _ <- runFrame ctx inp0 ui
-  (win0, _, _, _) <- runFrame ctx inp0 ui
-  mrect0 <- getPrevRect ctx (respId win0)
-  case mrect0 of
-    Nothing -> assert failed False
-    Just (Rect x0 y0 w0 h0) -> do
-      assert failed (w0 > 0 && h0 > 0)
-      let hoverAt p = inp0 {inputMousePos = p}
-          expectCursor p kind = do
-            k <- uiCursorKind ctx (hoverAt p)
-            assertEq failed k kind
-      expectCursor (V2 (x0 + w0 + 4) (y0 + h0 + 4)) UiCursorNwseResize
-      expectCursor (V2 (x0 - 4) (y0 - 4)) UiCursorNwseResize
-      expectCursor (V2 (x0 + w0 + 4) (y0 - 4)) UiCursorNeswResize
-      expectCursor (V2 (x0 - 4) (y0 + h0 + 4)) UiCursorNeswResize
-      expectCursor (V2 (x0 + w0 / 2) (y0 - 4)) UiCursorNsResize
-      expectCursor (V2 (x0 + w0 / 2) (y0 + h0 + 4)) UiCursorNsResize
-      expectCursor (V2 (x0 - 4) (y0 + h0 / 2)) UiCursorEwResize
-      expectCursor (V2 (x0 + w0 + 4) (y0 + h0 / 2)) UiCursorEwResize
-      expectCursor (V2 (x0 + w0 - 5) (y0 + h0 / 2)) UiCursorEwResize
-      -- Every margin resizes from inside the window too, the top one in a
-      -- strip above the title bar, and corners take both sides.
-      expectCursor (V2 (x0 + 5) (y0 + h0 / 2)) UiCursorEwResize
-      expectCursor (V2 (x0 + w0 / 2) (y0 + h0 - 5)) UiCursorNsResize
-      expectCursor (V2 (x0 + w0 / 2) (y0 + 3)) UiCursorNsResize
-      expectCursor (V2 (x0 + 5) (y0 + 5)) UiCursorNwseResize
-      expectCursor (V2 (x0 + 5) (y0 + h0 - 5)) UiCursorNeswResize
-      expectCursor (V2 (x0 + w0 - 5) (y0 + h0 - 5)) UiCursorNwseResize
-      expectCursor (V2 (x0 - 4) (y0 + 8)) UiCursorNwseResize
-      titleKind <- uiCursorKind ctx (hoverAt (V2 (x0 + w0 / 2) (y0 + 20)))
-      assert failed (titleKind /= UiCursorNsResize)
-      insideKind <- uiCursorKind ctx (hoverAt (V2 (x0 + w0 - padR windowPad - 4) (y0 + h0 / 2)))
-      assert failed (insideKind /= UiCursorEwResize)
-      mSe <- dragWindowEdge ctx inp0 ui (V2 (x0 + w0 + 4) (y0 + h0 + 4)) (V2 (x0 + w0 + 40) (y0 + h0 + 30))
-      case mSe of
-        Nothing -> assert failed False
-        Just (Rect x1 y1 w1 h1) -> do
-          assertGt failed w1 (w0 + 20)
-          assertGt failed h1 (h0 + 15)
-          mW <- dragWindowEdge ctx inp0 ui (V2 (x1 - 4) (y1 + h1 / 2)) (V2 (x1 - 36) (y1 + h1 / 2))
-          case mW of
-            Nothing -> assert failed False
-            Just (Rect xw yw ww hw) -> do
-              assertGt failed ww (w1 + 15)
-              assertLt failed xw (x1 - 10)
-              mN <- dragWindowEdge ctx inp0 ui (V2 (xw + ww / 2) (yw - 4)) (V2 (xw + ww / 2) (yw - 20))
-              case mN of
-                Nothing -> assert failed False
-                Just (Rect xn yn wn hn) -> do
-                  assertGt failed hn (hw + 8)
-                  assertLt failed yn (yw - 5)
-                  let minTitleH = 39 + padT windowPad + padB windowPad
-                  mShort <- dragWindowEdge ctx inp0 ui (V2 (xn + wn / 2) (yn + hn + 4)) (V2 (xn + wn / 2) (yn + 4))
-                  case mShort of
-                    Nothing -> assert failed False
-                    Just (Rect xs ys ws hMin) -> do
-                      assert failed (hMin + 0.01 >= minTitleH)
-                      -- A press in the left margin, inside the window, resizes.
-                      let midY = ys + hMin / 2
-                      mInner <- dragWindowEdge ctx inp0 ui (V2 (xs + 5) midY) (V2 (xs - 25) midY)
-                      case mInner of
-                        Nothing -> assert failed False
-                        Just (Rect xi _ wi _) -> do
-                          assertGt failed wi (ws + 20)
-                          assertLt failed xi (xs - 20)
+  win0 <- warmup2 ctx inp0 ui
+  assertJustM failed (getPrevRect ctx (respId win0)) $ \(Rect x0 y0 w0 h0) -> do
+    assert failed (w0 > 0 && h0 > 0)
+    let hoverAt p = inp0 {inputMousePos = p}
+        expectCursor p kind = do
+          k <- uiCursorKind ctx (hoverAt p)
+          assertEq failed k kind
+    expectCursor (V2 (x0 + w0 + 4) (y0 + h0 + 4)) UiCursorNwseResize
+    expectCursor (V2 (x0 - 4) (y0 - 4)) UiCursorNwseResize
+    expectCursor (V2 (x0 + w0 + 4) (y0 - 4)) UiCursorNeswResize
+    expectCursor (V2 (x0 - 4) (y0 + h0 + 4)) UiCursorNeswResize
+    expectCursor (V2 (x0 + w0 / 2) (y0 - 4)) UiCursorNsResize
+    expectCursor (V2 (x0 + w0 / 2) (y0 + h0 + 4)) UiCursorNsResize
+    expectCursor (V2 (x0 - 4) (y0 + h0 / 2)) UiCursorEwResize
+    expectCursor (V2 (x0 + w0 + 4) (y0 + h0 / 2)) UiCursorEwResize
+    expectCursor (V2 (x0 + w0 - 5) (y0 + h0 / 2)) UiCursorEwResize
+    -- Every margin resizes from inside the window too, the top one in a
+    -- strip above the title bar, and corners take both sides.
+    expectCursor (V2 (x0 + 5) (y0 + h0 / 2)) UiCursorEwResize
+    expectCursor (V2 (x0 + w0 / 2) (y0 + h0 - 5)) UiCursorNsResize
+    expectCursor (V2 (x0 + w0 / 2) (y0 + 3)) UiCursorNsResize
+    expectCursor (V2 (x0 + 5) (y0 + 5)) UiCursorNwseResize
+    expectCursor (V2 (x0 + 5) (y0 + h0 - 5)) UiCursorNeswResize
+    expectCursor (V2 (x0 + w0 - 5) (y0 + h0 - 5)) UiCursorNwseResize
+    expectCursor (V2 (x0 - 4) (y0 + 8)) UiCursorNwseResize
+    titleKind <- uiCursorKind ctx (hoverAt (V2 (x0 + w0 / 2) (y0 + 20)))
+    assert failed (titleKind /= UiCursorNsResize)
+    insideKind <- uiCursorKind ctx (hoverAt (V2 (x0 + w0 - padR windowPad - 4) (y0 + h0 / 2)))
+    assert failed (insideKind /= UiCursorEwResize)
+    assertJustM failed (dragWindowEdge ctx inp0 ui (V2 (x0 + w0 + 4) (y0 + h0 + 4)) (V2 (x0 + w0 + 40) (y0 + h0 + 30))) $ \(Rect x1 y1 w1 h1) -> do
+      assertGt failed w1 (w0 + 20)
+      assertGt failed h1 (h0 + 15)
+      assertJustM failed (dragWindowEdge ctx inp0 ui (V2 (x1 - 4) (y1 + h1 / 2)) (V2 (x1 - 36) (y1 + h1 / 2))) $ \(Rect xw yw ww hw) -> do
+        assertGt failed ww (w1 + 15)
+        assertLt failed xw (x1 - 10)
+        assertJustM failed (dragWindowEdge ctx inp0 ui (V2 (xw + ww / 2) (yw - 4)) (V2 (xw + ww / 2) (yw - 20))) $ \(Rect xn yn wn hn) -> do
+          assertGt failed hn (hw + 8)
+          assertLt failed yn (yw - 5)
+          let minTitleH = 39 + padT windowPad + padB windowPad
+          assertJustM failed (dragWindowEdge ctx inp0 ui (V2 (xn + wn / 2) (yn + hn + 4)) (V2 (xn + wn / 2) (yn + 4))) $ \(Rect xs ys ws hMin) -> do
+            assert failed (hMin + 0.01 >= minTitleH)
+            -- A press in the left margin, inside the window, resizes.
+            let midY = ys + hMin / 2
+            assertJustM failed (dragWindowEdge ctx inp0 ui (V2 (xs + 5) midY) (V2 (xs - 25) midY)) $ \(Rect xi _ wi _) -> do
+              assertGt failed wi (ws + 20)
+              assertLt failed xi (xs - 20)
 
 runWindowResizeHaloHitTest :: Context -> IORef Int -> IO ()
 runWindowResizeHaloHitTest ctx failed = do
@@ -456,7 +431,7 @@ runWindowResizeHaloHitTest ctx failed = do
       Rect x0 y0 _ _ = respRect win0
       grab = V2 (x0 + 24) (y0 + 22)
       destX = bx + bw + 4
-      press = inp0 {inputMousePos = grab, inputMouseDown = True, inputMousePressed = True}
+      press = pressAt inp0 grab
   _ <- runFrame ctx press ui
   let moved = press {inputMousePos = V2 (destX + 24) (y0 + 22), inputMousePressed = False}
   _ <- runFrame ctx moved ui
@@ -482,14 +457,10 @@ runSeparatorSpanTest ctx failed = do
         separator
         label "B"
         pure sid
-  _ <- runFrame ctx inp ui
-  (sid, _, _, _) <- runFrame ctx inp ui
-  mRect <- getPrevRect ctx sid
-  case mRect of
-    Just (Rect _ _ w h) -> do
-      assert failed (w >= 100)
-      assert failed (h <= 2)
-    Nothing -> assert failed False
+  sid <- warmup2 ctx inp ui
+  assertJustM failed (getPrevRect ctx sid) $ \(Rect _ _ w h) -> do
+    assert failed (w >= 100)
+    assert failed (h <= 2)
 
 runHeadingMonoTruncateTest :: Context -> IORef Int -> IO ()
 runHeadingMonoTruncateTest ctx failed = do
@@ -509,20 +480,17 @@ runHeadingMonoTruncateTest ctx failed = do
       assert failed ("..." `T.isSuffixOf` t)
       assert failed (abs (fx + fw - contentRight) < 2.0)
     _ -> assert failed False
-  mWide <- dragWindowEdge ctx inp ui (V2 (wx - 4) (wy + wh / 2)) (V2 (wx - 1100) (wy + wh / 2))
-  case mWide of
-    Nothing -> assert failed False
-    Just (Rect wxWide _ wwWide _) -> do
-      assertGt failed wwWide (ww + 800)
-      spansWide <- collectOverlayTextSpans ctx inp
-      let fontSpansWide = [(r, t) | (r, t, _, _, _) <- spansWide, "JetBrainsMono" `T.isInfixOf` t || "..." `T.isInfixOf` t]
-      case fontSpansWide of
-        [(Rect fx2 _ fw2 _, t2)] -> do
-          assert failed (t2 == longPath)
-          assert failed (not ("..." `T.isSuffixOf` t2))
-          let contentRightWide = wxWide + wwWide - padR windowPad
-          assert failed (abs (fx2 + fw2 - contentRightWide) < 2.0)
-        _ -> assert failed False
+  assertJustM failed (dragWindowEdge ctx inp ui (V2 (wx - 4) (wy + wh / 2)) (V2 (wx - 1100) (wy + wh / 2))) $ \(Rect wxWide _ wwWide _) -> do
+    assertGt failed wwWide (ww + 800)
+    spansWide <- collectOverlayTextSpans ctx inp
+    let fontSpansWide = [(r, t) | (r, t, _, _, _) <- spansWide, "JetBrainsMono" `T.isInfixOf` t || "..." `T.isInfixOf` t]
+    case fontSpansWide of
+      [(Rect fx2 _ fw2 _, t2)] -> do
+        assert failed (t2 == longPath)
+        assert failed (not ("..." `T.isSuffixOf` t2))
+        let contentRightWide = wxWide + wwWide - padR windowPad
+        assert failed (abs (fx2 + fw2 - contentRightWide) < 2.0)
+      _ -> assert failed False
 
 -- | A window that fits a minimum-width body and scrolls leaves room for its
 -- scrollbar, so right-aligned values end before the bar instead of under it.

@@ -22,7 +22,7 @@ import NanoUI.Testing
   , takeDamage
   )
 import NanoUI.Testing.Assert (assert, assertEq, withInput)
-import NanoUI.Testing.Harness (centerOf, clickPair, drawQuads, warmup2, withInputOff)
+import NanoUI.Testing.Harness (centerOf, clickPair, clipCovers, covers, drawQuads, warmup2, withInputOff)
 
 -- | Verifies custom intrinsic layout measurement via widgetMeasure hook, and
 -- that the measurement reverts once the hook is gone.
@@ -117,9 +117,7 @@ runCustomWidgetContentDamageTest ctx failed = do
   _ <- takeDamage ctx
   (_, _, draw, _) <- runFrame ctx inp (ui True)
   dmg <- takeDamage ctx
-  case dmg of
-    DamageClip clip -> assert failed (coversRect clip (respRect resp))
-    DamageFull -> assert failed False
+  assert failed (clipCovers dmg (respRect resp))
   quads <- drawQuads draw
   assert failed (any ((== red) . snd) quads)
   assert failed (not (any ((== blue) . snd) quads))
@@ -129,9 +127,7 @@ runCustomWidgetContentDamageTest ctx failed = do
   _ <- takeDamage ctx
   _ <- runFrame ctx inp (bar 0.8)
   barDmg <- takeDamage ctx
-  case barDmg of
-    DamageClip clip -> assert failed (coversRect clip (respRect barResp))
-    DamageFull -> assert failed False
+  assert failed (clipCovers barDmg (respRect barResp))
 
 -- | A content key is taken at its word: while it is unchanged the widget
 -- neither rebuilds its ops nor repaints, a new key does both, and a theme
@@ -158,7 +154,7 @@ runCustomWidgetContentKeyTest ctx failed = do
   keptQuads <- drawQuads keptDraw
   assert failed (any ((== blue) . snd) keptQuads)
   case keptDmg of
-    DamageClip clip -> assert failed (not (coversRect clip (respRect resp)))
+    DamageClip clip -> assert failed (not (covers clip (respRect resp)))
     DamageFull -> assert failed False
 
   -- A new key rebuilds and repaints.
@@ -166,9 +162,7 @@ runCustomWidgetContentKeyTest ctx failed = do
   freshDmg <- takeDamage ctx
   freshQuads <- drawQuads freshDraw
   assert failed (any ((== red) . snd) freshQuads)
-  case freshDmg of
-    DamageClip clip -> assert failed (coversRect clip (respRect resp))
-    DamageFull -> assert failed False
+  assert failed (clipCovers freshDmg (respRect resp))
 
   -- Disabling the widget repaints it: the ops rebuild in their disabled form,
   -- and disabled is not one of the roles damage already follows.
@@ -188,7 +182,7 @@ runCustomWidgetContentKeyTest ctx failed = do
   disabledQuads <- drawQuads disabledDraw
   assert failed (any ((== grey) . snd) disabledQuads)
   case disabledDmg of
-    DamageClip clip -> assert failed (coversRect clip (respRect dresp))
+    DamageClip clip -> assert failed (covers clip (respRect dresp))
     DamageFull -> pure ()
 
   -- A keyed widget that only moved still draws at its new place: paint
@@ -229,11 +223,6 @@ runCustomWidgetContentKeyTest ctx failed = do
   withThemeQuads <- drawQuads withThemeDraw
   assert failed (any ((== accent3) . snd) withThemeQuads)
   setTheme ctx theme0
-
--- | Whether a damage clip covers a widget's rect.
-coversRect :: Rect -> Rect -> Bool
-coversRect (Rect cx cy cw ch) (Rect x y w h) =
-  cx <= x && cy <= y && cx + cw >= x + w && cy + ch >= y + h
 
 -- | Verifies the reference rotary knob widget.
 runReferenceKnobTest :: Context -> IORef Int -> IO ()

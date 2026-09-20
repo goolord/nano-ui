@@ -17,8 +17,8 @@ import NanoUI.Context (Context (..), getFocusVisible, intKey)
 import NanoUI.Emit qualified as Emit
 import NanoUI.Store (WidgetStore (..))
 import NanoUI.Testing
-import NanoUI.Testing.Assert (assert, assertEq, assertGt)
-import NanoUI.Testing.Harness (centerOf, clickPair, held, keyInp, tabInp, warmup2, withInputOff)
+import NanoUI.Testing.Assert (assert, assertEq, assertGt, assertJust)
+import NanoUI.Testing.Harness (centerOf, clickPair, held, keyInp, tabInp, warmup2, warmupFocused, withInputOff)
 
 -- Retaining focus while a widget becomes disabled must not bypass the same
 -- guard used by pointer interaction. Exercise the shared key-navigation hook.
@@ -60,12 +60,10 @@ runKeyboardModalEligibilityTest ctx failed = do
   writeIORef (ctxFocusId ctx) (respId (fst outside))
   (((_, outsideValue), _), _, _, _) <- runFrame ctx (keyInp KeyEnter inp) ui
   assert failed (not outsideValue)
-  case inside of
-    Nothing -> assert failed False
-    Just (resp, _) -> do
-      writeIORef (ctxFocusId ctx) (respId resp)
-      ((_, after), _, _, _) <- runFrame ctx (keyInp KeyEnter inp) ui
-      assert failed (maybe False snd after)
+  assertJust failed inside $ \(resp, _) -> do
+    writeIORef (ctxFocusId ctx) (respId resp)
+    ((_, after), _, _, _) <- runFrame ctx (keyInp KeyEnter inp) ui
+    assert failed (maybe False snd after)
 
 -- | A space key-down frame (space arrives as a character, not a Key).
 spaceInp :: Input -> Input
@@ -79,8 +77,7 @@ runKeyboardButtonTest ctx failed = do
         a <- button "A"
         b <- button "B"
         pure (a, b)
-  _ <- warmup2 ctx inp0 ui
-  _ <- runFrame ctx (tabInp inp0) ui
+  warmupFocused ctx inp0 ui
   ((aEnter, _), _, _, _) <- runFrame ctx (keyInp KeyEnter inp0) ui
   assert failed aEnter
   ((aSpace, _), _, _, _) <- runFrame ctx (spaceInp inp0) ui
@@ -96,8 +93,7 @@ runKeyboardCheckboxTest ctx failed = do
   checkedRef <- newIORef False
   let inp0 = withInputOff 200 100
       ui = column (held checkedRef (checkbox' "Opt"))
-  _ <- warmup2 ctx inp0 ui
-  _ <- runFrame ctx (tabInp inp0) ui
+  warmupFocused ctx inp0 ui
   ((_, checked1), _, _, _) <- runFrame ctx (spaceInp inp0) ui
   assert failed checked1
   ((_, checked2), _, _, _) <- runFrame ctx (keyInp KeyEnter inp0) ui
@@ -178,8 +174,7 @@ runKeyboardTabHeaderTest ctx failed = do
           [ tab KBA "Alpha" (label "BodyA")
           , tab KBB "Beta" (label "BodyB")
           ]
-  _ <- warmup2 ctx inp0 (ui KBA)
-  _ <- runFrame ctx (tabInp inp0) (ui KBA)
+  warmupFocused ctx inp0 (ui KBA)
   (active1, _, _, _) <- runFrame ctx (keyInp KeyEnter inp0) (ui KBA)
   assertEq failed active1 KBA
   _ <- runFrame ctx (tabInp inp0) (ui KBA)

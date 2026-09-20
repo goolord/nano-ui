@@ -9,7 +9,7 @@ import Data.IORef (IORef)
 import Data.Text qualified as T
 import NanoUI
 import NanoUI.Testing
-import NanoUI.Testing.Assert (assert, evalUi, withInput)
+import NanoUI.Testing.Assert (assert, assertJustM, evalUi, withInput)
 import NanoUI.Testing.Harness (centerOf, clickPair, rightClickPair, spanCenter, warmup2)
 
 menuUi :: NanoUI (Response, Maybe (Response, Response))
@@ -64,49 +64,46 @@ runContextMenuScrollPosTest ctx failed = do
             mapM_ (\_ -> void (label "tail line")) [(1 :: Int) .. 12]
             pure (btn, cut)
   (sid, _) <- warmup2 ctx inp0 ui
-  mScroll <- getPrevRect ctx sid
-  case mScroll of
-    Nothing -> assert failed False
-    Just scrollRect@(Rect _ sy _ sh) -> do
-      let hover = inp0 {inputMousePos = spanCenter scrollRect}
-          wheel = hover {inputScroll = V2 0 1}
-          inView btn =
-            let y = rectY (respRect btn)
-                h = rectH (respRect btn)
-             in y >= sy + 4 && y + h + 8 <= sy + sh
-          pump = do
-            before <- getScrollOffset ctx sid
-            _ <- runFrame ctx wheel ui
-            after <- getScrollOffset ctx sid
-            ((_, (btn, _)), _, _, _) <- runFrame ctx hover ui
-            if inView btn || after <= before then pure (after, btn) else pump
-      (off, btn1) <- pump
-      assert failed (off > 0)
-      let clickPos = centerOf btn1
-          layoutY = rectY (respRect btn1) + off
-          (inpRightDown, inpRightUp) = rightClickPair inp0 clickPos
-      _ <- runFrame ctx inpRightDown ui
-      _ <- runFrame ctx inpRightUp ui
-      spans <- collectOverlayTextSpans ctx inpRightUp
-      let hits =
-            [ r
-            | (r, txt, _, _, _) <- spans
-            , "Scroll Cut" `T.isInfixOf` txt
-            ]
-      case hits of
-        [] -> assert failed False
-        (r : _) -> do
-          let menuY = rectY r
-              pick = V2 (rectX r + rectW r / 2) (rectY r + rectH r / 2)
-          assert failed (abs (menuY - v2Y clickPos) <= 16)
-          assert failed (abs (menuY - v2Y clickPos) < abs (menuY - layoutY))
-          let (press, release) = clickPair inp0 pick
-          _ <- runFrame ctx press ui
-          ((_, (_, picked)), _, _, _) <- runFrame ctx release ui
-          assert failed (picked == Just True)
-          _ <- runFrame ctx inp0 ui
-          spansAfter <- collectOverlayTextSpans ctx inp0
-          assert failed (not (any (\(_, txt, _, _, _) -> "Scroll Cut" `T.isInfixOf` txt) spansAfter))
+  assertJustM failed (getPrevRect ctx sid) $ \scrollRect@(Rect _ sy _ sh) -> do
+    let hover = inp0 {inputMousePos = spanCenter scrollRect}
+        wheel = hover {inputScroll = V2 0 1}
+        inView btn =
+          let y = rectY (respRect btn)
+              h = rectH (respRect btn)
+           in y >= sy + 4 && y + h + 8 <= sy + sh
+        pump = do
+          before <- getScrollOffset ctx sid
+          _ <- runFrame ctx wheel ui
+          after <- getScrollOffset ctx sid
+          ((_, (btn, _)), _, _, _) <- runFrame ctx hover ui
+          if inView btn || after <= before then pure (after, btn) else pump
+    (off, btn1) <- pump
+    assert failed (off > 0)
+    let clickPos = centerOf btn1
+        layoutY = rectY (respRect btn1) + off
+        (inpRightDown, inpRightUp) = rightClickPair inp0 clickPos
+    _ <- runFrame ctx inpRightDown ui
+    _ <- runFrame ctx inpRightUp ui
+    spans <- collectOverlayTextSpans ctx inpRightUp
+    let hits =
+          [ r
+          | (r, txt, _, _, _) <- spans
+          , "Scroll Cut" `T.isInfixOf` txt
+          ]
+    case hits of
+      [] -> assert failed False
+      (r : _) -> do
+        let menuY = rectY r
+            pick = spanCenter r
+        assert failed (abs (menuY - v2Y clickPos) <= 16)
+        assert failed (abs (menuY - v2Y clickPos) < abs (menuY - layoutY))
+        let (press, release) = clickPair inp0 pick
+        _ <- runFrame ctx press ui
+        ((_, (_, picked)), _, _, _) <- runFrame ctx release ui
+        assert failed (picked == Just True)
+        _ <- runFrame ctx inp0 ui
+        spansAfter <- collectOverlayTextSpans ctx inp0
+        assert failed (not (any (\(_, txt, _, _, _) -> "Scroll Cut" `T.isInfixOf` txt) spansAfter))
 
 -- | A disabled row lines up with the enabled rows around it: its label starts
 -- at the same x and it takes the same row height.

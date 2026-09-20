@@ -14,7 +14,7 @@ import NanoUI
 import NanoUI.Context (Context (..))
 import NanoUI.Layout.Arena (arenaCount, getStyleIdx, getText)
 import NanoUI.Testing
-import NanoUI.Testing.Assert (assert, assertEq, withInput)
+import NanoUI.Testing.Assert (assert, assertEq, assertJust, withInput)
 
 spanOf :: T.Text -> [(Rect, T.Text, Color, Color, Rect)] -> Maybe (Rect, Color)
 spanOf txt spans =
@@ -76,9 +76,7 @@ runStaleFontColorTest ctx failed = do
   _ <- runFrame ctx inp (column (void (labelWith (fontColor red) "painted")))
   _ <- runFrame ctx inp (column (void (button "plain")))
   spans <- collectTextSpans ctx
-  case spanOf "plain" spans of
-    Just (_, fg) -> assert failed (fg /= red)
-    Nothing -> assert failed False
+  assertJust failed (spanOf "plain" spans) $ \(_, fg) -> assert failed (fg /= red)
 
 -- | Font size, colour, weight, style and decoration modifiers compose on one
 -- label, and the bold/italic/underline helpers set the same style bits.

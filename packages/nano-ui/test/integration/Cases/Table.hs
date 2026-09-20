@@ -42,18 +42,13 @@ import NanoUI.Layout.Arena
   , getWidgetId
   )
 import NanoUI.Testing
-import NanoUI.Testing.Assert (assert, assertEq, assertGt, withInput)
-import NanoUI.Testing.Harness
-  ( clickPos
-  , dragPos
-  , findHeader
-  , requireSpan
-  , spanCenter
-  , warmup2
-  , withInputOff
-  )
+import NanoUI.Testing.Assert (assert, assertEq, assertGt, assertJust, assertJustM, withInput)
+import NanoUI.Testing.Harness (clickPos, dragPos, findHeader, pressAt, requireSpan, spanCenter, spanRect, warmup2, withInputOff)
 import Text.Read (readMaybe)
 
+-- | A table sorted ascending on its first column, given everything but the sort.
+sortedTable :: (SortCol -> NanoUI TableResponse) -> NanoUI ()
+sortedTable build = void (build . fst =<< useTableSort (SortCol 0 SortAsc))
 
 runTableSortTest :: Context -> IORef Int -> IO ()
 runTableSortTest _ failed = do
@@ -143,24 +138,14 @@ bottomRowIndex spans =
 runTableScrollRevealTest :: Context -> IORef Int -> IO ()
 runTableScrollRevealTest ctx failed = do
   let inp0 = (withInput 320 220) {inputMousePos = V2 40 80}
-      ui = do
-        (tableSort, _) <- useTableSort (SortCol 0 SortAsc)
-        void
-          ( tableWith
-              (fixedH 150)
-              "people"
-              tableScrollCols
-              tableScrollRows
-              tableSort
-          )
+      ui = sortedTable (tableWith (fixedH 150) "people" tableScrollCols tableScrollRows)
   -- A step of one line keeps the scroll below short enough that the rows it
   -- lands on are still in ascending label order (the table sorts the labels
   -- as text, so "row-2" comes after "row-19").
   setScrollTuning ctx defaultScrollTuning {scrollWheelStep = 20}
   -- Three warmups so virtualization settles on the real viewport height.
   _ <- runFrame ctx inp0 ui
-  _ <- runFrame ctx inp0 ui
-  _ <- runFrame ctx inp0 ui
+  _ <- warmup2 ctx inp0 ui
   spans0 <- collectTextSpans ctx
   -- Scroll six wheel lines (120px, several rows): the bottom visible row must
   -- advance because the revealed rows are materialized in the same frame.
@@ -189,19 +174,8 @@ runTableWrapRowStretchTest ctx failed = do
         [ ("row-" <> T.pack (show (i :: Int)), T.unwords (replicate 24 "lorem"))
         | i <- [1 .. 8]
         ]
-      ui = do
-        (tableSort, _) <- useTableSort (SortCol 0 SortAsc)
-        void
-          ( tableConfigured
-              cfg
-              id
-              "wrap-stretch"
-              wrapCols
-              rows
-              tableSort
-          )
-  _ <- runFrame ctx inp0 ui
-  _ <- runFrame ctx inp0 ui
+      ui = sortedTable (tableConfigured cfg id "wrap-stretch" wrapCols rows)
+  _ <- warmup2 ctx inp0 ui
   let na = ctxNodeArena ctx
   cells <- foldNodesM na (\acc i -> do
     nt <- getNodeType na i
@@ -238,58 +212,41 @@ runTableResizeOverflowTest ctx failed = do
       -- the bar appears exactly when the header lane spacer appears, which is
       -- the sequence that could clip the header.
       rows = take 5 tableScrollRows
-      ui = do
-        (tableSort, _) <- useTableSort (SortCol 0 SortAsc)
-        void
-          ( tableWith
-              (fixedH 180)
-              "resize-lane"
-              tableScrollCols
-              rows
-              tableSort
-          )
-  _ <- runFrame ctx inp0 ui
-  _ <- runFrame ctx inp0 ui
-  hdr <- headerButtonRect ctx
-  case hdr of
-    Nothing -> assert failed False
-    Just (Rect hx hy hw hh) -> do
-      let edgeX = hx + hw
-          headerY = hy + hh / 2
-          pressInp = inp0 {inputMousePos = V2 (edgeX - 2) headerY, inputMouseDown = True, inputMousePressed = True}
-          dragInp x = inp0 {inputMousePos = V2 x headerY, inputMouseDown = True}
-          -- First drag well past the pane's right edge (lane + v-bar appear),
-          -- then settle back inside the vertical-bar gutter band so the
-          -- scroller viewport and the stale lane flag disagree across frames.
-          steps = [edgeX + 160, edgeX + 320, edgeX + 300, edgeX + 290, edgeX + 310, edgeX + 300]
-      _ <- runFrame ctx pressInp ui
-      forM_ steps $ \x -> do
-        _ <- runFrame ctx (dragInp x) ui
-        mClip <- headerScrollerClip ctx
-        mHdr <- headerButtonRect ctx
-        case (mClip, mHdr) of
-          (Just (Rect _ cy _ ch), Just (Rect _ hy' _ hh')) -> assert failed (hy' + hh' <= cy + ch + 0.5)
-          _ -> assert failed False
-      -- Release the resize drag and let the layout settle.
-      _ <- runFrame ctx inp0 ui
-      _ <- runFrame ctx inp0 ui
-      -- The bar lives at the bottom of the body scroller: pressing its track
-      -- there jumps the shared horizontal offset, and dragging moves it.
-      mBody <- bodyScrollerRect ctx
-      case mBody of
-        Nothing -> assert failed False
-        Just (Rect bx by bw bh) -> do
-          let barY = by + bh - scrollBarWidth / 2
-              barPress = inp0 {inputMousePos = V2 (bx + bw * 0.3) barY, inputMouseDown = True, inputMousePressed = True}
-              barDrag x = inp0 {inputMousePos = V2 x barY, inputMouseDown = True}
-          _ <- runFrame ctx barPress ui
-          V2 off1 _ <- bodyOffset ctx
-          _ <- runFrame ctx (barDrag (bx + bw * 0.95)) ui
-          V2 off2 _ <- bodyOffset ctx
-          assertGt failed off2 off1
-          _ <- runFrame ctx (barDrag (bx + bw * 0.2)) ui
-          V2 off3 _ <- bodyOffset ctx
-          assert failed (off3 < off2)
+      ui = sortedTable (tableWith (fixedH 180) "resize-lane" tableScrollCols rows)
+  _ <- warmup2 ctx inp0 ui
+  assertJustM failed (headerButtonRect ctx) $ \(Rect hx hy hw hh) -> do
+    let edgeX = hx + hw
+        headerY = hy + hh / 2
+        pressInp = pressAt inp0 (V2 (edgeX - 2) headerY)
+        dragInp x = inp0 {inputMousePos = V2 x headerY, inputMouseDown = True}
+        -- First drag well past the pane's right edge (lane + v-bar appear),
+        -- then settle back inside the vertical-bar gutter band so the
+        -- scroller viewport and the stale lane flag disagree across frames.
+        steps = [edgeX + 160, edgeX + 320, edgeX + 300, edgeX + 290, edgeX + 310, edgeX + 300]
+    _ <- runFrame ctx pressInp ui
+    forM_ steps $ \x -> do
+      _ <- runFrame ctx (dragInp x) ui
+      mClip <- headerScrollerClip ctx
+      mHdr <- headerButtonRect ctx
+      case (mClip, mHdr) of
+        (Just (Rect _ cy _ ch), Just (Rect _ hy' _ hh')) -> assert failed (hy' + hh' <= cy + ch + 0.5)
+        _ -> assert failed False
+    -- Release the resize drag and let the layout settle.
+    _ <- warmup2 ctx inp0 ui
+    -- The bar lives at the bottom of the body scroller: pressing its track
+    -- there jumps the shared horizontal offset, and dragging moves it.
+    assertJustM failed (bodyScrollerRect ctx) $ \(Rect bx by bw bh) -> do
+      let barY = by + bh - scrollBarWidth / 2
+          barPress = pressAt inp0 (V2 (bx + bw * 0.3) barY)
+          barDrag x = inp0 {inputMousePos = V2 x barY, inputMouseDown = True}
+      _ <- runFrame ctx barPress ui
+      V2 off1 _ <- bodyOffset ctx
+      _ <- runFrame ctx (barDrag (bx + bw * 0.95)) ui
+      V2 off2 _ <- bodyOffset ctx
+      assertGt failed off2 off1
+      _ <- runFrame ctx (barDrag (bx + bw * 0.2)) ui
+      V2 off3 _ <- bodyOffset ctx
+      assert failed (off3 < off2)
 
 -- | Leftmost table-header button rect.
 headerButtonRect :: Context -> IO (Maybe Rect)
@@ -334,17 +291,7 @@ runTableFirstColWidthTest ctx failed = do
         defaultTableConfig
           { tableColSizes = [ColContent, ColStretch]
           }
-      ui = do
-        (tableSort, _) <- useTableSort (SortCol 0 SortAsc)
-        void
-          ( tableConfigured
-              cfg
-              id
-              "people"
-              tableFirstColCols
-              tableFirstColRows
-              tableSort
-          )
+      ui = sortedTable (tableConfigured cfg id "people" tableFirstColCols tableFirstColRows)
   warmup2 ctx inp0 ui
   spans <- collectTextSpans ctx
   let findLabel needle =
@@ -356,23 +303,12 @@ runTableFirstColWidthTest ctx failed = do
     _ -> assert failed False
   pixel <- newPixelContext
   let fitInp = (withInput 280 180) {inputMousePos = V2 40 60}
-      fitUi = do
-        (tableSort, _) <- useTableSort (SortCol 0 SortAsc)
-        void
-          ( tableWith
-              (fixedH 100 . (\l -> l {layoutWidth = Fit}))
-              "people"
-              tableFirstColCols
-              tableFirstColRows
-              tableSort
-          )
+      fitUi = sortedTable (tableWith (fixedH 100 . (\l -> l {layoutWidth = Fit})) "people" tableFirstColCols tableFirstColRows)
   warmup2 pixel fitInp fitUi
   fitSpans <- collectTextSpans pixel
-  case [r | (r, t, _, _, _) <- fitSpans, "long-first-col" `T.isInfixOf` t] of
-    Rect _ _ cw ch : _ -> do
-      assertGt failed cw 50
-      assert failed (ch < 40)
-    [] -> assert failed False
+  assertJust failed (spanRect "long-first-col" fitSpans) $ \(Rect _ _ cw ch) -> do
+    assertGt failed cw 50
+    assert failed (ch < 40)
 
 tableFirstColCols :: Colonnade Headed TableFirstColRow T.Text
 tableFirstColCols =
@@ -407,17 +343,7 @@ runTableFillWidthTest _ failed = do
               , ColContent
               ]
           }
-      ui = do
-        (tableSort, _) <- useTableSort (SortCol 0 SortAsc)
-        void
-          ( tableConfigured
-              cfg
-              id
-              "people"
-              tableFillCols
-              tableFillRows
-              tableSort
-          )
+      ui = sortedTable (tableConfigured cfg id "people" tableFillCols tableFillRows)
   warmup2 ctx inp0 ui
   spans <- collectTextSpans ctx
   let findLabel needle =
@@ -440,9 +366,7 @@ runTableFillWidthTest _ failed = do
 runTableCellPadTest :: Context -> IORef Int -> IO ()
 runTableCellPadTest ctx failed = do
   let inp0 = (withInput 500 240) {inputMousePos = V2 200 80}
-      ui = do
-        (tableSort, _) <- useTableSort (SortCol 0 SortAsc)
-        void (table "people" tableFillCols tableFillRows tableSort)
+      ui = sortedTable (table "people" tableFillCols tableFillRows)
   warmup2 ctx inp0 ui
   spans <- collectTextSpans ctx
   let findLabel needle =
@@ -458,9 +382,7 @@ runTableCellPadTest ctx failed = do
   plain <- newContext
   warmup2 plain ((withInput 500 200) {inputMousePos = V2 200 80}) ui
   plainSpans <- collectTextSpans plain
-  case [r | (r, t, _, _, _) <- plainSpans, "Role" `T.isInfixOf` t] of
-    Rect rx _ rw _ : _ -> assertGt failed (rx + rw) 420
-    [] -> assert failed False
+  assertJust failed (spanRect "Role" plainSpans) $ \(Rect rx _ rw _) -> assertGt failed (rx + rw) 420
 
 tableFillCols :: Colonnade Headed TableFillRow T.Text
 tableFillCols =
@@ -499,17 +421,8 @@ runTableColResizeDemoReproTest _ failed =
           scrollWith (tight . grow) $
             columnWith (padAll 6 . gap 6 . fillW) $
               card $ do
-                (tableSort, _) <- useTableSort (SortCol 0 SortAsc)
-                void
-                  ( tableWith
-                      (fixedH 280)
-                      "people"
-                      demoPeopleCols
-                      demoPeopleRows
-                      tableSort
-                  )
-    _ <- runFrame ctx inp0 ui
-    _ <- runFrame ctx inp0 ui
+                sortedTable (tableWith (fixedH 280) "people" demoPeopleCols demoPeopleRows)
+    _ <- warmup2 ctx inp0 ui
     bodyBot <- tableBodyBottom ctx
     hdrs0 <- headerButtonRects ctx
     forM_ (zip [0 ..] hdrs0) $ \(k, _) -> do
@@ -637,50 +550,31 @@ runTableHBarReachTest :: Context -> IORef Int -> IO ()
 runTableHBarReachTest ctx failed = do
   let inp0 = (withInput 700 320) {inputMousePos = V2 300 160}
       cfg = defaultTableConfig {tableColSizes = [ColFixed 500, ColFixed 500]}
-      ui = do
-        (tableSort, _) <- useTableSort (SortCol 0 SortAsc)
-        void
-          ( tableConfigured
-              cfg
-              (fixedH 200)
-              "people"
-              tableScrollCols
-              tableScrollRows
-              tableSort
-          )
-  _ <- runFrame ctx inp0 ui
-  _ <- runFrame ctx inp0 ui
-  mBody <- bodyScrollerRect ctx
-  case mBody of
-    Nothing -> assert failed False
-    Just (Rect bx by bw bh) -> do
-      let na = ctxNodeArena ctx
-      scroller <- findNodeM na (isBodyScroller ctx)
-      case scroller of
-        Nothing -> assert failed False
-        Just i -> do
-          contentW <- getScrollContentW na i
-          assertGt failed contentW bw
-          let wheel = inp0 {inputMousePos = spanCenter (Rect bx by bw bh), inputScroll = V2 50 0}
-          replicateM_ 20 (runFrame ctx wheel ui)
-          V2 offX _ <- bodyOffset ctx
-          -- Reached past the naive content - viewport range: the lane's width
-          -- is now part of the reachable range.
-          assertGt failed offX (contentW - bw)
-          -- The rightmost header cell sits fully inside the body, left of the
-          -- vertical lane.
-          hdrs <- headerButtonRects ctx
-          case reverse hdrs of
-            (Rect hx _ hw _ : _) -> do
-              assert failed (hx + hw <= bx + bw + 0.5)
-              assertGt failed (hx + hw) (bx + bw - 24)
-            [] -> assert failed False
-          -- Header and body cells scroll in lockstep.
-          spans <- collectTextSpans ctx
-          let xOf needle = listToMaybe [rectX r | (r, t, _, _, _) <- spans, needle `T.isInfixOf` t]
-          case (xOf "Value", xOf "val-") of
-            (Just headerX, Just cellX) -> assert failed (abs (headerX - cellX) <= 1)
-            _ -> assert failed False
+      ui = sortedTable (tableConfigured cfg (fixedH 200) "people" tableScrollCols tableScrollRows)
+  _ <- warmup2 ctx inp0 ui
+  assertJustM failed (bodyScrollerRect ctx) $ \(Rect bx by bw bh) -> do
+    let na = ctxNodeArena ctx
+    assertJustM failed (findNodeM na (isBodyScroller ctx)) $ \i -> do
+      contentW <- getScrollContentW na i
+      assertGt failed contentW bw
+      let wheel = inp0 {inputMousePos = spanCenter (Rect bx by bw bh), inputScroll = V2 50 0}
+      replicateM_ 20 (runFrame ctx wheel ui)
+      V2 offX _ <- bodyOffset ctx
+      -- Reached past the naive content - viewport range: the lane's width
+      -- is now part of the reachable range.
+      assertGt failed offX (contentW - bw)
+      -- The rightmost header cell sits fully inside the body, left of the
+      -- vertical lane.
+      hdrs <- headerButtonRects ctx
+      assertJust failed (listToMaybe (reverse hdrs)) $ \(Rect hx _ hw _) -> do
+        assert failed (hx + hw <= bx + bw + 0.5)
+        assertGt failed (hx + hw) (bx + bw - 24)
+      -- Header and body cells scroll in lockstep.
+      spans <- collectTextSpans ctx
+      let xOf needle = listToMaybe [rectX r | (r, t, _, _, _) <- spans, needle `T.isInfixOf` t]
+      case (xOf "Value", xOf "val-") of
+        (Just headerX, Just cellX) -> assert failed (abs (headerX - cellX) <= 1)
+        _ -> assert failed False
 
 -- A table with frozen columns builds two scroll nodes under one widget id.
 -- Only one of them may publish the body's geometry: if both did, every frame
@@ -691,21 +585,16 @@ runTableSharedScrollMetricsTest :: Context -> IORef Int -> IO ()
 runTableSharedScrollMetricsTest ctx failed = do
   let inp0 = (withInput 320 220) {inputMousePos = V2 40 80}
       cfg = defaultTableConfig {tableFreezeCols = 1}
-      ui = do
-        (tableSort, _) <- useTableSort (SortCol 0 SortAsc)
-        void (tableConfigured cfg (fixedH 150) "people" tableScrollCols tableScrollRows tableSort)
+      ui = sortedTable (tableConfigured cfg (fixedH 150) "people" tableScrollCols tableScrollRows)
   replicateM_ 3 (runFrame ctx inp0 ui)
-  bodyWid <- tableBodyScrollWid ctx
-  case bodyWid of
-    Nothing -> assert failed False
-    Just wid -> do
-      before <- getScrollMetrics ctx wid
-      assert failed (isJust before)
-      -- The pane that owns both scrollbars, not the frozen column's sliver.
-      assertEq failed (Just ScrollAxisXY) (fmap scrollAxes before)
-      _ <- runFrame ctx inp0 ui
-      after <- getScrollMetrics ctx wid
-      assertEq failed before after
+  assertJustM failed (tableBodyScrollWid ctx) $ \wid -> do
+    before <- getScrollMetrics ctx wid
+    assert failed (isJust before)
+    -- The pane that owns both scrollbars, not the frozen column's sliver.
+    assertEq failed (Just ScrollAxisXY) (fmap scrollAxes before)
+    _ <- runFrame ctx inp0 ui
+    after <- getScrollMetrics ctx wid
+    assertEq failed before after
 
 -- The widget id shared by the table body's panes: the id of the first scroll
 -- container the arena holds that another scroll container repeats.
@@ -731,9 +620,7 @@ runTableRulesTileTest _ failed =
         base <- newContext
         let ctx = withFontMetrics base ((monospaceMetrics 12) {fmSnapScale = scale})
             cfg = defaultTableConfig {tableColSizes = [ColContent, ColFixed 61.7, middle, ColContent, ColContent]}
-            ui = do
-              (tableSort, _) <- useTableSort (SortCol 0 SortAsc)
-              void (tableConfigured cfg id "people" tableFillCols tableFillRows tableSort)
+            ui = sortedTable (tableConfigured cfg id "people" tableFillCols tableFillRows)
         warmup2 ctx (withInputOff winW 240) ui
         let na = ctxNodeArena ctx
         -- Each parent's children as (has a rule, child extents), in one pass.

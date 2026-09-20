@@ -13,11 +13,16 @@ module NanoUI.Testing.Harness
   , warmup
   , warmup2
   , warmupDraw
+  , warmupFocused
   , held
   , runClick
   , assertSpansHas
   , spanYOf
   , spanXOf
+  , spanRect
+  , spanRectOf
+  , covers
+  , clipCovers
   , assertScrollGutterPad
   , assertWheelTitlePinned
   , findGrabHover
@@ -44,6 +49,7 @@ module NanoUI.Testing.Harness
 
 import Control.Monad (forM, unless, void, when)
 import Data.IORef (IORef, readIORef, writeIORef)
+import Data.Maybe (listToMaybe)
 import Data.Text qualified as T
 import Data.Word (Word32, Word8)
 import Foreign.C.Types (CSize (..))
@@ -275,6 +281,10 @@ warmupDraw ctx inp ui = do
   (a, _, draw, _) <- runFrame ctx inp ui
   pure (a, draw)
 
+-- | Warm the view up, then Tab onto its first focusable.
+warmupFocused :: Context -> Input -> NanoUI a -> IO ()
+warmupFocused ctx inp ui = warmup2 ctx inp ui >> void (runFrame ctx (tabInp inp) ui)
+
 -- | Drive a controlled input the way an application does: pass the value held
 -- in the test's 'IORef' and store the widget's result for the next frame. Not
 -- a hook: a hook write makes the frame run the view again without input, and
@@ -297,6 +307,24 @@ runClick ctx inp0 ui pos = do
 
 assertSpansHas :: HasCallStack => IORef Int -> T.Text -> [(Rect, T.Text, a, b, c)] -> IO ()
 assertSpansHas failed needle spans = assert failed (hasText needle spans)
+
+-- | The rect of the first span whose text contains @needle@.
+spanRect :: T.Text -> [(Rect, T.Text, a, b, c)] -> Maybe Rect
+spanRect needle spans = listToMaybe [r | (r, txt, _, _, _) <- spans, needle `T.isInfixOf` txt]
+
+-- | The rect of the first span whose text is exactly @lbl@.
+spanRectOf :: T.Text -> [(Rect, T.Text, a, b, c)] -> Maybe Rect
+spanRectOf lbl spans = listToMaybe [r | (r, txt, _, _, _) <- spans, txt == lbl]
+
+-- | Whether the first rect contains the second.
+covers :: Rect -> Rect -> Bool
+covers (Rect cx cy cw ch) (Rect x y w h) =
+  cx <= x && cy <= y && cx + cw >= x + w && cy + ch >= y + h
+
+-- | Whether a frame's damage was a clip, and one that covers @rect@.
+clipCovers :: Damage -> Rect -> Bool
+clipCovers (DamageClip clip) rect = covers clip rect
+clipCovers DamageFull _ = False
 
 spanYOf :: T.Text -> [(Rect, T.Text, a, b, c)] -> [Float]
 spanYOf lbl spans = [y | (Rect _ y _ _, txt, _, _, _) <- spans, txt == lbl]

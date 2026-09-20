@@ -9,6 +9,7 @@ import NoThunks.Class (NoThunks, noThunks)
 import NanoUI
 import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, withInput)
+import NanoUI.Testing.Harness (warmup2)
 
 -- | Long-lived widget state must not retain thunks in stored values. Run a
 -- frame whose widgets populate several store maps, then check every stored
@@ -24,8 +25,7 @@ runNoThunksTest ctx failed = do
         _ <- textInput "hello"
         _ <- slider 0 100 42
         pure ()
-  _ <- runFrame ctx inp ui
-  _ <- runFrame ctx inp ui
+  _ <- warmup2 ctx inp ui
   store <- readIORef (ctxStore ctx)
   checkAll failed "storeText" (storeText store)
   checkAll failed "storeInt" (storeInt store)

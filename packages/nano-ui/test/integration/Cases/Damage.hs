@@ -10,10 +10,11 @@ module Cases.Damage
   ) where
 
 import Data.IORef (IORef, readIORef, writeIORef)
+import Data.Maybe (listToMaybe)
 import NanoUI
 import NanoUI.Testing
-import NanoUI.Testing.Assert (assert, assertEq, withInput)
-import NanoUI.Testing.Harness (centerOf, drawQuads, runClick, tabInp, warmup2, withInputOff)
+import NanoUI.Testing.Assert (assert, assertEq, assertJust, withInput)
+import NanoUI.Testing.Harness (centerOf, clipCovers, covers, drawQuads, runClick, warmup2, warmupFocused, withInputOff)
 
 -- | A new version on a versioned drawing repaints its rect. Paint rebuilds the
 -- ops once the version moves, and nothing else damages them, so a clip frame
@@ -29,14 +30,7 @@ runVersionedDrawingDamageTest ctx failed = do
   _ <- takeDamage ctx
   _ <- runFrame ctx inp (ui 2)
   dmg <- takeDamage ctx
-  case dmg of
-    DamageClip clip -> assert failed (covers clip (respRect resp))
-    DamageFull -> assert failed False
-
--- | Whether the first rect contains the second.
-covers :: Rect -> Rect -> Bool
-covers (Rect cx cy cw ch) (Rect x y w h) =
-  cx <= x && cy <= y && cx + cw >= x + w && cy + ch >= y + h
+  assert failed (clipCovers dmg (respRect resp))
 
 runDamageBoundsResolutionTest :: Context -> IORef Int -> IO ()
 runDamageBoundsResolutionTest _ failed = do
@@ -66,8 +60,7 @@ runExplicitDamageWidgetTest ctx failed = do
         w2 <- button' "Second"
         pure (w1, w2)
   -- Warmup to establish solved layout rects
-  _ <- runFrame ctx inp ui
-  ((w1, _), _, _, _) <- runFrame ctx inp ui
+  (w1, _) <- warmup2 ctx inp ui
   _ <- takeDamage ctx
 
   -- Queue explicit widget damage
@@ -129,8 +122,7 @@ runStateChangeDamageTest ctx failed = do
           setName =<< textInput name
 
   -- Warm up and focus textInput via Tab
-  _ <- warmup2 ctx inp0 ui
-  _ <- runFrame ctx (tabInp inp0) ui
+  warmupFocused ctx inp0 ui
   _ <- takeDamage ctx
 
   -- Type a character into focused textInput
@@ -202,11 +194,9 @@ runClipFrameBackdropTest ctx failed = do
   case dmg of
     DamageClip clip -> do
       assert failed (covers clip (respRect file))
-      case quads of
-        (r, c) : _ -> do
-          assert failed (covers r clip)
-          assertEq failed c (themeWindow theme)
-        [] -> assert failed False
+      assertJust failed (listToMaybe quads) $ \(r, c) -> do
+        assert failed (covers r clip)
+        assertEq failed c (themeWindow theme)
     DamageFull -> assert failed False
 
 -- | Ctrl+A repaints the text area on the frame that selects, rather than
@@ -225,6 +215,4 @@ runTextAreaSelectAllDamageTest ctx failed = do
   _ <- takeDamage ctx
   _ <- runFrame ctx inp0 {inputChars = "a", inputModifiers = Modifiers False True False} ui
   dmg <- takeDamage ctx
-  case dmg of
-    DamageClip clip -> assert failed (covers clip (respRect area))
-    DamageFull -> assert failed False
+  assert failed (clipCovers dmg (respRect area))

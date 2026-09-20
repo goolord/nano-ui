@@ -12,12 +12,12 @@ module Cases.Tabs
 
 import Control.Monad (forM, forM_, replicateM)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
-import Data.Maybe (isJust)
+import Data.Maybe (isJust, listToMaybe)
 import Data.Text qualified as T
 import Data.Sequence qualified as Seq
 import NanoUI
 import NanoUI.Testing
-import NanoUI.Testing.Assert (assert, assertEq, run2Frames, withInput)
+import NanoUI.Testing.Assert (assert, assertEq, assertJust, assertJustM, run2Frames, withInput)
 import NanoUI.Testing.Harness
   ( assertSpansHas
   , clickPair
@@ -26,6 +26,8 @@ import NanoUI.Testing.Harness
   , keyInp
   , runClick
   , spanCenter
+  , spanRect
+  , spanRectOf
   , warmup2
   , withInputOff
   )
@@ -99,13 +101,11 @@ runTabsEmitTest ctx failed = do
         MsgSelect
   _ <- runFrame ctx inp0 (ui TabA)
   spans <- collectTextSpans ctx
-  case [r | (r, txt, _, _, _) <- spans, "Beta" `T.isInfixOf` txt] of
-    (r : _) -> do
-      let (press, release) = clickPair inp0 (spanCenter r)
-      _ <- runFrame ctx press (ui TabA)
-      (_, msgs, _, _) <- runFrame ctx release (ui TabA)
-      assertEq failed (decodeMessages msgs :: [TabMsg]) [MsgSelect TabB]
-    [] -> assert failed False
+  assertJust failed (spanRect "Beta" spans) $ \r -> do
+    let (press, release) = clickPair inp0 (spanCenter r)
+    _ <- runFrame ctx press (ui TabA)
+    (_, msgs, _, _) <- runFrame ctx release (ui TabA)
+    assertEq failed (decodeMessages msgs :: [TabMsg]) [MsgSelect TabB]
 
 -- Composite responses expose every flag of their widget response
 -- (regression: TabResponse dropped respSubmitted).
@@ -125,13 +125,10 @@ runTabsClosableTest ctx failed = do
         , closableTab TabB "Beta" (label "Body B")
         ]
   _ <- runFrame ctx inp0 (ui TabA)
-  mClose <- findCloseButtonRect ctx
-  case mClose of
-    Just r -> do
-      tResp <- runClick ctx inp0 (ui TabA) (spanCenter r)
-      assertEq failed (tabClosed tResp) (Just TabA)
-      assertEq failed (tabActive tResp) TabA
-    Nothing -> assert failed False
+  assertJustM failed (findCloseButtonRect ctx) $ \r -> do
+    tResp <- runClick ctx inp0 (ui TabA) (spanCenter r)
+    assertEq failed (tabClosed tResp) (Just TabA)
+    assertEq failed (tabActive tResp) TabA
 
 findCloseButtonRect :: Context -> IO (Maybe Rect)
 findCloseButtonRect ctx = do
@@ -161,13 +158,8 @@ runTabsDisabledTest _ failed = forM_ [TabTop, TabLeft] $ \orientation -> do
   headers <- mapM (\i -> (,) <$> getText arena i <*> getWidgetId arena i) [0 .. n - 1]
   _ <- warmup2 ctx inp (ui True)
   spans <- collectTextSpans ctx
-  case [r | (r, txt, _, _, _) <- spans, txt == "Disabled"] of
-    r : _ -> check =<< runClick ctx inp (ui True) (spanCenter r)
-    [] -> assert failed False
-  closeRect <- findCloseButtonRect ctx
-  case closeRect of
-    Just r -> check =<< runClick ctx inp (ui True) (spanCenter r)
-    Nothing -> assert failed False
+  assertJust failed (spanRectOf "Disabled" spans) $ \r -> check =<< runClick ctx inp (ui True) (spanCenter r)
+  assertJustM failed (findCloseButtonRect ctx) $ \r -> check =<< runClick ctx inp (ui True) (spanCenter r)
   forM_ [wid | (txt, wid) <- headers, txt == "Disabled" || txt == "\215"] $ \wid -> do
     writeIORef (ctxFocusId ctx) wid
     (result, _, _, _) <- runFrame ctx (keyInp KeyEnter inp) (ui True)
@@ -175,11 +167,9 @@ runTabsDisabledTest _ failed = forM_ [TabTop, TabLeft] $ \orientation -> do
   -- Re-enabling the same header preserves its identity and restores activation.
   _ <- warmup2 ctx inp (ui False)
   spansEnabled <- collectTextSpans ctx
-  case [r | (r, txt, _, _, _) <- spansEnabled, txt == "Disabled"] of
-    r : _ -> do
-      response <- runClick ctx inp (ui False) (spanCenter r)
-      assertEq failed (tabActive response) TabB
-    [] -> assert failed False
+  assertJust failed (spanRectOf "Disabled" spansEnabled) $ \r -> do
+    response <- runClick ctx inp (ui False) (spanCenter r)
+    assertEq failed (tabActive response) TabB
 
 runTabsStatePersistenceTest :: Context -> IORef Int -> IO ()
 runTabsStatePersistenceTest ctx failed = do
@@ -195,22 +185,20 @@ runTabsStatePersistenceTest ctx failed = do
         ]
   _ <- runFrame ctx inp0 (ui TabA)
   spans0 <- collectTextSpans ctx
-  case [r | (r, txt, _, _, _) <- spans0, "ToggleA" `T.isInfixOf` txt] of
-    (r : _) -> do
-      _ <- runClick ctx inp0 (ui TabA) (spanCenter r)
-      _ <- runFrame ctx inp0 (ui TabA)
-      spans1 <- collectTextSpans ctx
-      assertSpansHas failed "FlagIsOn" spans1
+  assertJust failed (spanRect "ToggleA" spans0) $ \r -> do
+    _ <- runClick ctx inp0 (ui TabA) (spanCenter r)
+    _ <- runFrame ctx inp0 (ui TabA)
+    spans1 <- collectTextSpans ctx
+    assertSpansHas failed "FlagIsOn" spans1
 
-      _ <- runFrame ctx inp0 (ui TabB)
-      spans2 <- collectTextSpans ctx
-      assertSpansHas failed "OtherTab" spans2
-      assert failed (not (hasText "FlagIsOn" spans2))
+    _ <- runFrame ctx inp0 (ui TabB)
+    spans2 <- collectTextSpans ctx
+    assertSpansHas failed "OtherTab" spans2
+    assert failed (not (hasText "FlagIsOn" spans2))
 
-      _ <- runFrame ctx inp0 (ui TabA)
-      spans3 <- collectTextSpans ctx
-      assertSpansHas failed "FlagIsOn" spans3
-    [] -> assert failed False
+    _ <- runFrame ctx inp0 (ui TabA)
+    spans3 <- collectTextSpans ctx
+    assertSpansHas failed "FlagIsOn" spans3
 
 runTabsDamageTest :: Context -> IORef Int -> IO ()
 runTabsDamageTest ctx failed = do
@@ -231,27 +219,25 @@ runTabsDamageTest ctx failed = do
   assertSpansHas failed "Body A" spansIdle
 
   spans <- collectTextSpans ctx
-  case [r | (r, txt, _, _, _) <- spans, "Beta" `T.isInfixOf` txt] of
-    (beta : _) -> do
-      let (press, release) = clickPair inp0 (spanCenter beta)
-      _ <- runFrame ctx press (ui TabA)
-      (resp, _, _, _) <- runFrame ctx release (ui TabA)
-      assert failed (respChanged resp && tabActive resp == TabB)
-      spansSwitch <- collectTextSpans ctx
-      assertSpansHas failed "Body B" spansSwitch
-      assert failed (not (hasText "Body A" spansSwitch))
-      let bodyB = [r | (r, txt, _, _, _) <- spansSwitch, "Body B" `T.isInfixOf` txt]
-      dSwitch <- takeDamage ctx
-      assert failed (not (null bodyB) && all (covers dSwitch) bodyB)
+  assertJust failed (spanRect "Beta" spans) $ \beta -> do
+    let (press, release) = clickPair inp0 (spanCenter beta)
+    _ <- runFrame ctx press (ui TabA)
+    (resp, _, _, _) <- runFrame ctx release (ui TabA)
+    assert failed (respChanged resp && tabActive resp == TabB)
+    spansSwitch <- collectTextSpans ctx
+    assertSpansHas failed "Body B" spansSwitch
+    assert failed (not (hasText "Body A" spansSwitch))
+    let bodyB = [r | (r, txt, _, _, _) <- spansSwitch, "Body B" `T.isInfixOf` txt]
+    dSwitch <- takeDamage ctx
+    assert failed (not (null bodyB) && all (covers dSwitch) bodyB)
 
-      _ <- runFrame ctx inp0 (ui TabB)
-      dTabB <- takeDamage ctx
-      assert failed (all (covers dTabB) bodyB)
+    _ <- runFrame ctx inp0 (ui TabB)
+    dTabB <- takeDamage ctx
+    assert failed (all (covers dTabB) bodyB)
 
-      _ <- runFrame ctx inp0 (ui TabB)
-      dSettled <- takeDamage ctx
-      assert failed (dSettled /= DamageFull)
-    [] -> assert failed False
+    _ <- runFrame ctx inp0 (ui TabB)
+    dSettled <- takeDamage ctx
+    assert failed (dSettled /= DamageFull)
 
 -- Too-wide tab strips scroll instead of overflowing. The framework scroll
 -- container owns the clip, the offset and the damage; the strip adds
@@ -281,8 +267,7 @@ runTabsScrollTest _ failed = do
 
   ctx <- newContext
   let inp = withInput 240 120
-  _ <- runFrame ctx inp (mkTabs 0)
-  _ <- runFrame ctx inp (mkTabs 0)
+  _ <- warmup2 ctx inp (mkTabs 0)
   -- The strip only pulls in its scroller once it has measured an overflow, so
   -- the arrow buttons show from the third frame on.
   _ <- runFrame ctx inp (mkTabs 0)
@@ -314,56 +299,50 @@ runTabsScrollTest _ failed = do
   -- Left and right buttons page the strip; the right arrow is pinned to the
   -- bar's far edge rather than trailing the last visible tab.
   mRight <- arrowRect ctx '\8250'
-  case mRight of
-    (r : _) -> do
-      assert failed (rectX r + rectW r > 200)
-      _ <- runClick ctx inp (mkTabs 0) (spanCenter r)
+  assertJust failed (listToMaybe mRight) $ \r -> do
+    assert failed (rectX r + rectW r > 200)
+    _ <- runClick ctx inp (mkTabs 0) (spanCenter r)
+    _ <- runFrame ctx inp (mkTabs 0)
+    spans1 <- collectTextSpans ctx
+    assert failed (not (hasText "Controls" spans1))
+    mLeft <- arrowRect ctx '\8249'
+    assertJust failed (listToMaybe mLeft) $ \left -> do
+      _ <- runClick ctx inp (mkTabs 0) (spanCenter left)
       _ <- runFrame ctx inp (mkTabs 0)
-      spans1 <- collectTextSpans ctx
-      assert failed (not (hasText "Controls" spans1))
-      mLeft <- arrowRect ctx '\8249'
-      case mLeft of
-        (left : _) -> do
-          _ <- runClick ctx inp (mkTabs 0) (spanCenter left)
-          _ <- runFrame ctx inp (mkTabs 0)
-          spans2 <- collectTextSpans ctx
-          assert failed (hasText "Controls" spans2)
-        _ -> assert failed False
-    _ -> assert failed False
+      spans2 <- collectTextSpans ctx
+      assert failed (hasText "Controls" spans2)
 
   -- Wheel up/down over the bar pages the window too (the strip maps the
   -- notches onto the horizontal offset).
   spans3 <- collectTextSpans ctx
-  case [r | (r, t, _, _, _) <- spans3, "Controls" `T.isInfixOf` t] of
-    (Rect cx cy cw ch : _) -> do
-      let wheelDown = inp {inputMousePos = spanCenter (Rect cx cy cw ch), inputScroll = V2 0 20}
-      _ <- runFrame ctx wheelDown (mkTabs 0)
-      _ <- runFrame ctx inp (mkTabs 0)
-      spans4 <- collectTextSpans ctx
-      assert failed (not (hasText "Controls" spans4))
+  assertJust failed (spanRect "Controls" spans3) $ \(Rect cx cy cw ch) -> do
+    let wheelDown = inp {inputMousePos = spanCenter (Rect cx cy cw ch), inputScroll = V2 0 20}
+    _ <- runFrame ctx wheelDown (mkTabs 0)
+    _ <- runFrame ctx inp (mkTabs 0)
+    spans4 <- collectTextSpans ctx
+    assert failed (not (hasText "Controls" spans4))
 
-      -- Left+right wheel over the bar scrolls the same offset through the
-      -- framework scroller. The vertical wheel pinned the offset at max, so
-      -- wheeling right stays put (clamped at the end); wheeling left runs
-      -- back to the start and re-shows the first tab, and further left
-      -- notches clamp at zero instead of running past it. The deltas are
-      -- coupled to the framework wheel step (scrollLineFor, 20px per notch
-      -- on window hosts): V2 0 20 saturates at max, and +/-100 notches
-      -- crosses the whole range regardless of the exact step.
-      let wheelX d = inp {inputMousePos = spanCenter (Rect cx cy cw ch), inputScroll = V2 d 0}
-      _ <- runFrame ctx (wheelX 10) (mkTabs 0)
-      _ <- runFrame ctx inp (mkTabs 0)
-      spans5 <- collectTextSpans ctx
-      assert failed (not (hasText "Controls" spans5))
-      _ <- runFrame ctx (wheelX (-100)) (mkTabs 0)
-      _ <- runFrame ctx inp (mkTabs 0)
-      spans6 <- collectTextSpans ctx
-      assert failed (hasText "Controls" spans6)
-      _ <- runFrame ctx (wheelX (-100)) (mkTabs 0)
-      _ <- runFrame ctx inp (mkTabs 0)
-      spans7 <- collectTextSpans ctx
-      assert failed (hasText "Controls" spans7)
-    _ -> assert failed False
+    -- Left+right wheel over the bar scrolls the same offset through the
+    -- framework scroller. The vertical wheel pinned the offset at max, so
+    -- wheeling right stays put (clamped at the end); wheeling left runs
+    -- back to the start and re-shows the first tab, and further left
+    -- notches clamp at zero instead of running past it. The deltas are
+    -- coupled to the framework wheel step (scrollLineFor, 20px per notch
+    -- on window hosts): V2 0 20 saturates at max, and +/-100 notches
+    -- crosses the whole range regardless of the exact step.
+    let wheelX d = inp {inputMousePos = spanCenter (Rect cx cy cw ch), inputScroll = V2 d 0}
+    _ <- runFrame ctx (wheelX 10) (mkTabs 0)
+    _ <- runFrame ctx inp (mkTabs 0)
+    spans5 <- collectTextSpans ctx
+    assert failed (not (hasText "Controls" spans5))
+    _ <- runFrame ctx (wheelX (-100)) (mkTabs 0)
+    _ <- runFrame ctx inp (mkTabs 0)
+    spans6 <- collectTextSpans ctx
+    assert failed (hasText "Controls" spans6)
+    _ <- runFrame ctx (wheelX (-100)) (mkTabs 0)
+    _ <- runFrame ctx inp (mkTabs 0)
+    spans7 <- collectTextSpans ctx
+    assert failed (hasText "Controls" spans7)
 
   -- Tab-list changes recompute the reachable range: shrinking back under
   -- the width drops the scroller and both arrows; growing past it again
@@ -372,16 +351,14 @@ runTabsScrollTest _ failed = do
   let shortLabels = ["Controls"]
       mkShort cur = tabBar cur [tab (i :: Int) l () | (i, l) <- zip [0 ..] shortLabels]
   _ <- runFrame ctx inp (mkShort 0)
-  _ <- runFrame ctx inp (mkShort 0)
-  _ <- runFrame ctx inp (mkShort 0)
+  _ <- warmup2 ctx inp (mkShort 0)
   spansS <- collectTextSpans ctx
   forM_ shortLabels $ \l -> assert failed (hasText l spansS)
   mRightS <- arrowRect ctx '\8250'
   mLeftS <- arrowRect ctx '\8249'
   assert failed (null mRightS && null mLeftS)
   _ <- runFrame ctx inp (mkTabs 0)
-  _ <- runFrame ctx inp (mkTabs 0)
-  _ <- runFrame ctx inp (mkTabs 0)
+  _ <- warmup2 ctx inp (mkTabs 0)
   spansG <- collectTextSpans ctx
   mRightG <- arrowRect ctx '\8250'
   assert failed (not (null mRightG))

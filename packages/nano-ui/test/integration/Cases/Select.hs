@@ -14,7 +14,7 @@ import Data.Text qualified as T
 import NanoUI
 import Data.Primitive.SmallArray qualified as SA
 import NanoUI.Testing
-import NanoUI.Testing.Assert (assert, assertEq, withInput)
+import NanoUI.Testing.Assert (assert, assertEq, assertJust, withInput)
 import NanoUI.Testing.Harness
   ( assertSpansHas
   , centerOf
@@ -22,7 +22,10 @@ import NanoUI.Testing.Harness
   , hasText
   , held
   , keyInp
+  , pressAt
   , runClick
+  , spanCenter
+  , spanRect
   , tabInp
   , warmup2
   )
@@ -34,7 +37,7 @@ runSliderCursorTest ctx failed = do
   (resp, _) <- warmup2 ctx inp0 ui
   let Rect rx ry rw rh = respRect resp
       track = sliderTrackBounds rx ry rw rh
-      trackMid = V2 (rectX track + rectW track / 2) (rectY track + rectH track / 2)
+      trackMid = spanCenter track
       offPos = V2 (rx + rw + 20) (ry + rh + 20)
       hoverTrack = inp0 {inputMousePos = trackMid}
   _ <- runFrame ctx hoverTrack ui
@@ -64,15 +67,13 @@ runSelectOverlayDamageTest ctx failed = do
   let idle = open {inputMouseReleased = False, inputDeltaTime = 1}
   _ <- runFrame ctx idle ui
   overlays <- collectOverlayTextSpans ctx idle
-  case [rectY r | (r, txt, _, _, _) <- overlays, "High" `T.isInfixOf` txt] of
-    (highY : _) -> do
-      let overMenu = idle {inputMousePos = V2 (v2X pos) (highY + 0.5)}
-      need <- needsRedraw ctx idle overMenu
-      assert failed need
-      _ <- runFrame ctx overMenu ui
-      dmg <- takeDamage ctx
-      assertEq failed dmg DamageFull
-    [] -> assert failed False
+  assertJust failed (rectY <$> spanRect "High" overlays) $ \highY -> do
+    let overMenu = idle {inputMousePos = V2 (v2X pos) (highY + 0.5)}
+    need <- needsRedraw ctx idle overMenu
+    assert failed need
+    _ <- runFrame ctx overMenu ui
+    dmg <- takeDamage ctx
+    assertEq failed dmg DamageFull
 
 runTreeSelectTest :: Context -> IORef Int -> IO ()
 runTreeSelectTest ctx failed = do
@@ -127,24 +128,22 @@ runSelectChangeOnceTest ctx failed = do
   _ <- runFrame ctx openPress ui
   _ <- runFrame ctx openRelease ui
   overlays <- collectOverlayTextSpans ctx openRelease
-  case [rectY r | (r, txt, _, _, _) <- overlays, "Low" `T.isInfixOf` txt] of
-    (lowY : _) -> do
-      let lowPos = V2 (v2X (centerOf resp)) (lowY + 0.5)
-          hover = inp0 {inputMousePos = lowPos}
-          (pickPress, pickRelease) = clickPair inp0 lowPos
-          frame inp = (\((r, i), _, _, _) -> (respChanged r, i)) <$> runFrame ctx inp ui
-      _ <- runFrame ctx hover ui
-      hoverKind <- uiCursorKind ctx hover
-      assertEq failed hoverKind UiCursorPointer
-      pressed <- frame pickPress
-      pressKind <- uiCursorKind ctx pickPress
-      assertEq failed pressKind UiCursorPointer
-      rest <- mapM frame [pickRelease, inp0, inp0, inp0]
-      let results = pressed : rest
-      assertEq failed (map snd rest) [0, 0, 0, 0]
-      assertEq failed (length (filter fst results)) 1
-      assertEq failed (map fst (drop 1 rest)) [False, False, False]
-    [] -> assert failed False
+  assertJust failed (rectY <$> spanRect "Low" overlays) $ \lowY -> do
+    let lowPos = V2 (v2X (centerOf resp)) (lowY + 0.5)
+        hover = inp0 {inputMousePos = lowPos}
+        (pickPress, pickRelease) = clickPair inp0 lowPos
+        frame inp = (\((r, i), _, _, _) -> (respChanged r, i)) <$> runFrame ctx inp ui
+    _ <- runFrame ctx hover ui
+    hoverKind <- uiCursorKind ctx hover
+    assertEq failed hoverKind UiCursorPointer
+    pressed <- frame pickPress
+    pressKind <- uiCursorKind ctx pickPress
+    assertEq failed pressKind UiCursorPointer
+    rest <- mapM frame [pickRelease, inp0, inp0, inp0]
+    let results = pressed : rest
+    assertEq failed (map snd rest) [0, 0, 0, 0]
+    assertEq failed (length (filter fst results)) 1
+    assertEq failed (map fst (drop 1 rest)) [False, False, False]
 
 runSelectDragToSelectTest :: Context -> IORef Int -> IO ()
 runSelectDragToSelectTest ctx failed = do
@@ -154,30 +153,28 @@ runSelectDragToSelectTest ctx failed = do
   assertEq failed idx0 1
   let Rect sx sy sw _ = respRect resp
       btnMid = V2 (sx + sw / 2) (sy + 10)
-      press = inp0 {inputMousePos = btnMid, inputMouseDown = True, inputMousePressed = True}
+      press = pressAt inp0 btnMid
   -- 1. On mousedown, the menu should show up immediately
   _ <- runFrame ctx press ui
   overlaysPress <- collectOverlayTextSpans ctx press
   assert failed (any (\(_, txt, _, _, _) -> "Low" `T.isInfixOf` txt) overlaysPress)
   assert failed (any (\(_, txt, _, _, _) -> "High" `T.isInfixOf` txt) overlaysPress)
-  case [rectY r | (r, txt, _, _, _) <- overlaysPress, "Low" `T.isInfixOf` txt] of
-    (lowY : _) -> do
-      -- 2. Move mouse over an item while still pressed
-      let drag = inp0 {inputMousePos = V2 (sx + sw / 2) (lowY + 0.5), inputMouseDown = True}
-      _ <- runFrame ctx drag ui
-      overlaysDrag <- collectOverlayTextSpans ctx drag
-      assert failed (any (\(_, txt, _, _, _) -> "Low" `T.isInfixOf` txt) overlaysDrag)
-      kind <- uiCursorKind ctx drag
-      assertEq failed kind UiCursorPointer
-      -- 3. Mouseup over the item selects it and closes the menu
-      let release = drag {inputMouseDown = False, inputMouseReleased = True}
-      ((_, idx1), _, _, _) <- runFrame ctx release ui
-      assertEq failed idx1 0
-      overlaysClosed <- collectOverlayTextSpans ctx release
-      assert failed (not (any (\(_, txt, _, _, _) -> "Low" `T.isInfixOf` txt) overlaysClosed))
-      spans <- collectTextSpans ctx
-      assertSpansHas failed "Low" spans
-    _ -> assert failed False
+  assertJust failed (rectY <$> spanRect "Low" overlaysPress) $ \lowY -> do
+    -- 2. Move mouse over an item while still pressed
+    let drag = inp0 {inputMousePos = V2 (sx + sw / 2) (lowY + 0.5), inputMouseDown = True}
+    _ <- runFrame ctx drag ui
+    overlaysDrag <- collectOverlayTextSpans ctx drag
+    assert failed (any (\(_, txt, _, _, _) -> "Low" `T.isInfixOf` txt) overlaysDrag)
+    kind <- uiCursorKind ctx drag
+    assertEq failed kind UiCursorPointer
+    -- 3. Mouseup over the item selects it and closes the menu
+    let release = drag {inputMouseDown = False, inputMouseReleased = True}
+    ((_, idx1), _, _, _) <- runFrame ctx release ui
+    assertEq failed idx1 0
+    overlaysClosed <- collectOverlayTextSpans ctx release
+    assert failed (not (any (\(_, txt, _, _, _) -> "Low" `T.isInfixOf` txt) overlaysClosed))
+    spans <- collectTextSpans ctx
+    assertSpansHas failed "Low" spans
 
 runSelectKeyboardTest :: Context -> IORef Int -> IO ()
 runSelectKeyboardTest ctx failed = do

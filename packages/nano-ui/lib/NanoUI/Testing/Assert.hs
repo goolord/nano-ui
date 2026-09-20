@@ -9,6 +9,8 @@ module NanoUI.Testing.Assert
   , assertEq
   , assertGt
   , assertLt
+  , assertJust
+  , assertJustM
   , withInput
   , run2Frames
   , evalUi
@@ -43,6 +45,15 @@ assertGt r a b = when (a <= b) (withFrozenCallStack (failWith r (show a <> " <= 
 
 assertLt :: (HasCallStack, Ord a, Show a) => IORef Int -> a -> a -> IO ()
 assertLt r a b = when (a >= b) (withFrozenCallStack (failWith r (show a <> " >= " <> show b)))
+
+-- | Run the rest of a test on a value it needs, or count a failure when
+-- there is none.
+assertJust :: HasCallStack => IORef Int -> Maybe a -> (a -> IO ()) -> IO ()
+assertJust r m k = maybe (withFrozenCallStack (failWith r "Nothing")) k m
+
+-- | 'assertJust' on the result of an action.
+assertJustM :: HasCallStack => IORef Int -> IO (Maybe a) -> (a -> IO ()) -> IO ()
+assertJustM r act k = act >>= \m -> withFrozenCallStack (assertJust r m k)
 
 withInput :: Float -> Float -> Input
 withInput w h = emptyInput {inputWindowSize = Size w h}

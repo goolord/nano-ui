@@ -9,7 +9,7 @@ import Data.IORef (IORef)
 import Data.Text qualified as T
 import NanoUI
 import NanoUI.Testing
-import NanoUI.Testing.Assert (assert, evalUi, withInput)
+import NanoUI.Testing.Assert (assert, assertJustM, evalUi, withInput)
 import NanoUI.Testing.Harness
   ( centerOf
   , hasText
@@ -77,37 +77,34 @@ runTooltipScrollPosTest ctx failed = do
             mapM_ (\_ -> void (label "tail line")) [(1 :: Int) .. 12]
             pure btn
   (sid, _) <- warmup2 ctx inp0 ui
-  mScroll <- getPrevRect ctx sid
-  case mScroll of
-    Nothing -> assert failed False
-    Just scrollRect@(Rect _ sy _ sh) -> do
-      let hover = inp0 {inputMousePos = spanCenter scrollRect}
-          wheel = hover {inputScroll = V2 0 1}
-          inView btn =
-            let y = rectY (respRect btn)
-                h = rectH (respRect btn)
-             in y >= sy + 4 && y + h + 16 <= sy + sh
-          pump = do
-            before <- getScrollOffset ctx sid
-            _ <- runFrame ctx wheel ui
-            after <- getScrollOffset ctx sid
-            ((_, btn), _, _, _) <- runFrame ctx hover ui
-            if inView btn || after <= before then pure (after, btn) else pump
-      (off, btn1) <- pump
-      assert failed (off > 0)
-      let hoverInp = inp0 {inputMousePos = centerOf btn1}
-          visualBottom = rectY (respRect btn1) + rectH (respRect btn1)
-          layoutBottom = visualBottom + off
-      _ <- runFrame ctx hoverInp ui
-      _ <- runFrame ctx hoverInp ui
-      spans <- collectOverlayTextSpans ctx hoverInp
-      let ys =
-            [ rectY r
-            | (r, txt, _, _, _) <- spans
-            , "Scrolled tip" `T.isInfixOf` txt
-            ]
-      case ys of
-        [] -> assert failed False
-        (tipY : _) -> do
-          assert failed (abs (tipY - visualBottom) <= 16)
-          assert failed (abs (tipY - visualBottom) < abs (tipY - layoutBottom))
+  assertJustM failed (getPrevRect ctx sid) $ \scrollRect@(Rect _ sy _ sh) -> do
+    let hover = inp0 {inputMousePos = spanCenter scrollRect}
+        wheel = hover {inputScroll = V2 0 1}
+        inView btn =
+          let y = rectY (respRect btn)
+              h = rectH (respRect btn)
+           in y >= sy + 4 && y + h + 16 <= sy + sh
+        pump = do
+          before <- getScrollOffset ctx sid
+          _ <- runFrame ctx wheel ui
+          after <- getScrollOffset ctx sid
+          ((_, btn), _, _, _) <- runFrame ctx hover ui
+          if inView btn || after <= before then pure (after, btn) else pump
+    (off, btn1) <- pump
+    assert failed (off > 0)
+    let hoverInp = inp0 {inputMousePos = centerOf btn1}
+        visualBottom = rectY (respRect btn1) + rectH (respRect btn1)
+        layoutBottom = visualBottom + off
+    _ <- runFrame ctx hoverInp ui
+    _ <- runFrame ctx hoverInp ui
+    spans <- collectOverlayTextSpans ctx hoverInp
+    let ys =
+          [ rectY r
+          | (r, txt, _, _, _) <- spans
+          , "Scrolled tip" `T.isInfixOf` txt
+          ]
+    case ys of
+      [] -> assert failed False
+      (tipY : _) -> do
+        assert failed (abs (tipY - visualBottom) <= 16)
+        assert failed (abs (tipY - visualBottom) < abs (tipY - layoutBottom))

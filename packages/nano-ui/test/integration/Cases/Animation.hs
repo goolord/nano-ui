@@ -20,7 +20,7 @@ import GHC.Clock (getMonotonicTime)
 import NanoUI
 import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq)
-import NanoUI.Testing.Harness (clickPair, drawQuads, withDelta)
+import NanoUI.Testing.Harness (clickPair, drawQuads, warmup2, withDelta)
 
 -- A started animation requests redraws, settles on its target, and then
 -- leaves the context idle and clean.
@@ -55,8 +55,7 @@ runAnimationDamageTest _ failed = do
       hasMove dmg = case dmg of
         DamageFull -> True
         DamageClip r -> rectW r > 0 && rectH r > 0
-  _ <- runFrame ctx idleInp idle
-  _ <- runFrame ctx idleInp idle
+  _ <- warmup2 ctx idleInp idle
   dIdle <- takeDamage ctx
   assert failed (dIdle /= DamageFull)
   _ <- runFrame ctx tweenInp ui
@@ -68,8 +67,7 @@ runAnimationDamageTest _ failed = do
         t <- animateTo (Tween EaseLinear 0.2 0) 1
         void (spacer (Fixed (20 + 80 * t)) Fit)
         label "anim"
-  _ <- runFrame ctx2 idleInp idle
-  _ <- runFrame ctx2 idleInp idle
+  _ <- warmup2 ctx2 idleInp idle
   _ <- runFrame ctx2 fastInp uiFast
   dFast <- takeDamage ctx2
   assert failed (hasMove dFast)
@@ -219,8 +217,7 @@ runKeepAnimatingLapseTest ctx failed = do
   let inp = withDelta 400 300 0.016
       loading = column (label "Loading" >> spinner)
       loaded = column (label "Loaded")
-  _ <- runFrame ctx inp loading
-  _ <- runFrame ctx inp loading
+  _ <- warmup2 ctx inp loading
   assert failed =<< anyAnimating ctx
   -- The first frame without the spinner ends its animation.
   _ <- runFrame ctx inp loaded

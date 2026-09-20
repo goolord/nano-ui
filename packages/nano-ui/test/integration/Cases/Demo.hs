@@ -14,8 +14,8 @@ import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Text qualified as T
 import NanoUI
 import NanoUI.Testing
-import NanoUI.Testing.Assert (assert, assertEq, withInput)
-import NanoUI.Testing.Harness (held, keyInp, pressAt, releaseAt, runClick, spanCenter, tabInp, warmup2, withInputOff)
+import NanoUI.Testing.Assert (assert, assertEq, assertJust, withInput)
+import NanoUI.Testing.Harness (held, holdAt, keyInp, pressAt, releaseAt, runClick, spanCenter, spanRect, tabInp, warmup2, withInputOff)
 
 data DemoTab
   = Controls
@@ -47,15 +47,13 @@ runBoundedRadioTest ctx failed = do
   (_, initial) <- warmup2 ctx inp (ui (OffsetChoice 11))
   assertEq failed initial (OffsetChoice 11)
   spans <- collectTextSpans ctx
-  case [r | (r, txt, _, _, _) <- spans, "OffsetChoice 12" `T.isInfixOf` txt] of
-    r : _ -> do
-      (_, selected) <- runClick ctx inp (ui (OffsetChoice 11)) (spanCenter r)
-      assertEq failed selected (OffsetChoice 12)
-      ((_, retained), _, _, _) <- runFrame ctx inp (ui selected)
-      assertEq failed retained selected
-      ((_, reset), _, _, _) <- runFrame ctx inp (ui (OffsetChoice 10))
-      assertEq failed reset (OffsetChoice 10)
-    [] -> assert failed False
+  assertJust failed (spanRect "OffsetChoice 12" spans) $ \r -> do
+    (_, selected) <- runClick ctx inp (ui (OffsetChoice 11)) (spanCenter r)
+    assertEq failed selected (OffsetChoice 12)
+    ((_, retained), _, _, _) <- runFrame ctx inp (ui selected)
+    assertEq failed retained selected
+    ((_, reset), _, _, _) <- runFrame ctx inp (ui (OffsetChoice 10))
+    assertEq failed reset (OffsetChoice 10)
 
 runControlsTabHeightTest :: Context -> IORef Int -> IO ()
 runControlsTabHeightTest ctx failed = do
@@ -126,8 +124,7 @@ runControlsTabHeightTest ctx failed = do
   lone <- heights ctxLone dumpLone
   dumpPage <- newIORef Nothing
   let page = demoPage dumpPage
-  _ <- runFrame ctx inp0 page
-  _ <- runFrame ctx inp0 page
+  _ <- warmup2 ctx inp0 page
   page0 <- heights ctx dumpPage
   spans0 <- collectTextSpans ctx
   dumped <- readIORef dumpPage
@@ -191,8 +188,7 @@ runColorPickerRgbaTest :: Context -> IORef Int -> IO ()
 runColorPickerRgbaTest ctx failed = do
   let inp0 = withInputOff 400 460
       ui = void (colorPickerRGBA (colorRGBA 204 102 102 128))
-  _ <- runFrame ctx inp0 ui
-  _ <- runFrame ctx inp0 ui
+  _ <- warmup2 ctx inp0 ui
   spans <- collectTextSpans ctx
   let has needle = any (\(_, t, _, _, _) -> needle `T.isInfixOf` t) spans
   assert failed (has "#cc666680")
@@ -237,11 +233,7 @@ runColorPickerDragAfterFieldTest ctx failed = do
   _ <- runFrame ctx tabKey ui
   let sv = colorPickerSvSquare (respRect resp)
       press = pressAt inp0 (V2 (rectX sv + 2) (rectY sv + 2))
-      drag =
-        press
-          { inputMousePressed = False
-          , inputMousePos = V2 (rectX sv + rectW sv * 0.9) (rectY sv + rectH sv * 0.9)
-          }
+      drag = holdAt press (V2 (rectX sv + rectW sv * 0.9) (rectY sv + rectH sv * 0.9))
   _ <- runFrame ctx press ui
   _ <- runFrame ctx drag ui
   ((_, col), _, _, _) <- runFrame ctx drag ui

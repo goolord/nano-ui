@@ -58,7 +58,7 @@ import NanoUI.Layout.Arena
   , writeTree
   )
 import NanoUI.Testing
-import NanoUI.Testing.Assert (assert, assertEq, assertGt, runClickReduce, withInput)
+import NanoUI.Testing.Assert (assert, assertEq, assertGt, assertJust, assertJustM, runClickReduce, withInput)
 import NanoUI.Testing.Harness
   ( centerOf
   , checkLabelAlignEndInk
@@ -66,12 +66,14 @@ import NanoUI.Testing.Harness
   , held
   , pressAt
   , releaseAt
+  , spanCenter
+  , spanRect
   , spanXOf
   , spanYOf
-  , tabInp
   , vertUv
   , warmup2
   , warmupDraw
+  , warmupFocused
   , withInputOff
   )
 import NanoUI.Widgets.SplitPane
@@ -107,9 +109,7 @@ runFitMutedWidthTest ctx failed = do
       ui = columnWith tight (muted "HelloFitMuted")
   _ <- runFrame ctx inp ui
   spans <- collectTextSpans ctx
-  case [w | (Rect _ _ w _, t, _, _, _) <- spans, "HelloFitMuted" `T.isInfixOf` t] of
-    (w : _) -> assertGt failed w 8
-    _ -> assert failed False
+  assertJust failed (rectW <$> spanRect "HelloFitMuted" spans) $ \w -> assertGt failed w 8
 
 -- | Phase 5A: text and resize changes must invalidate the cached-layout path.
 runLayoutReuseTest :: Context -> IORef Int -> IO ()
@@ -232,8 +232,7 @@ runEmptyFrameTest ctx failed = do
   _ <- runFrame ctx press (pure ())
   _ <- needsRedraw ctx inp0 (inp0 {inputMousePos = V2 60 60})
   _ <- uiCursorKind ctx inp0
-  _ <- runFrame ctx inp0 ui
-  (wid, _, _, _) <- runFrame ctx inp0 ui
+  wid <- warmup2 ctx inp0 ui
   mRect <- getPrevRect ctx wid
   assert failed (maybe False (\(Rect _ _ w h) -> abs (w - 40) <= 0.5 && abs (h - 24) <= 0.5) mRect)
 
@@ -281,10 +280,7 @@ runImageTest ctx failed = do
         image imgLayout (ImageId 7)
         pure wid
   (wid, drawData) <- warmupDraw ctx inp0 ui
-  mRect <- getPrevRect ctx wid
-  case mRect of
-    Just (Rect _ _ w h) -> assert failed (abs (w - 40) <= 0.5 && abs (h - 24) <= 0.5)
-    Nothing -> assert failed False
+  assertJustM failed (getPrevRect ctx wid) $ \(Rect _ _ w h) -> assert failed (abs (w - 40) <= 0.5 && abs (h - 24) <= 0.5)
   let texCmds = filter (\c -> cmdTextureId c == atlasTextureId) (drawCmdElems drawData)
   assertEq failed (length texCmds) 1
   assert failed (any (\c -> cmdIndexCount c == 12) texCmds)
@@ -372,7 +368,7 @@ runSliderFillWidthTest ctx failed = do
   assertGt failed rw 300
   let track = sliderTrackBounds rx ry rw rh
       endDrag = V2 (rectX track + rectW track - 2) (rectY track + rectH track / 2)
-  ((_, val), _, _, _) <- runFrame ctx (inp0 {inputMousePos = endDrag, inputMouseDown = True, inputMousePressed = True}) ui
+  ((_, val), _, _, _) <- runFrame ctx (pressAt inp0 endDrag) ui
   assertGt failed val 90
 
 -- | Percent children size against the row width, and flex like CSS: two 50%
@@ -455,8 +451,7 @@ runLabelAlignEndTest ctx failed = do
     ui =
       rowWith (fixedW boxW . tight . gap 0) $
         labelWith' (fillW . alignEnd . tight) "ab"
-  _ <- runFrame ctx inp ui
-  (lab, _, _, _) <- runFrame ctx inp ui
+  lab <- warmup2 ctx inp ui
   spans <- collectTextSpans ctx
   let
     Rect bx _ bw _ = respRect lab
@@ -622,7 +617,7 @@ runPaneGridMixedDragTest ctx failed = do
   assertEq failed dtB (DropSplit 2 AxisV False)
   assertEq failed (preview dtB) (Just (Rect 302 0 298 198, DropSplit 2 AxisV False))
   -- Center drop swaps; the preview is the target's exact region.
-  let dtC = dropTargetForPane r2 (V2 (rectX r2 + rectW r2 / 2) (rectY r2 + rectH r2 / 2)) 2
+  let dtC = dropTargetForPane r2 (spanCenter r2) 2
   assertEq failed dtC (DropSwap 2)
   assertEq failed (preview dtC) (Just (Rect 302 0 298 198, DropSwap 2))
   -- Top-level edge drops restructure the whole grid.
@@ -665,8 +660,7 @@ runPaneGridMixedDragTest ctx failed = do
       ui = paneGrid cfg
   _ <- warmup2 ctx inp0 ui
   _ <- runFrame ctx inp0 ui
-  _ <- runFrame ctx inp0 ui
-  (pgr0, _, _, _) <- runFrame ctx inp0 ui
+  pgr0 <- warmup2 ctx inp0 ui
   case pgrPanes pgr0 of
     [pa, pb, pc] -> do
       let expectedValues = IM.fromList [(fromIntegral p, fromIntegral p + 100) | p <- [pa, pb, pc]]
@@ -737,19 +731,17 @@ runPaneGridMixedDragTest ctx failed = do
           droppedStates <- readIORef paneStates
           assertEq failed droppedStates initialStates
           buttons <- readIORef closeRects
-          case IM.lookup (fromIntegral pa) buttons of
-            Nothing -> assert failed False
-            Just closeRect -> do
-              let closePos = V2 (rectX closeRect + rectW closeRect / 2) (rectY closeRect + rectH closeRect / 2)
-                  closePress = press {inputMousePos = closePos}
-                  closeHold = hold {inputMousePos = V2 (v2X closePos + 60) (v2Y closePos + 40)}
-              _ <- runFrame ctx closePress ui
-              writeIORef rects IM.empty
-              _ <- runFrame ctx closeHold ui
-              duringClose <- readIORef rects
-              assertEq failed (IM.size duringClose) 3
-              (closed, _, _, _) <- runFrame ctx (release {inputMousePos = closePos}) ui
-              assertEq failed (pgrPanes closed) [pb, pc]
+          assertJust failed (IM.lookup (fromIntegral pa) buttons) $ \closeRect -> do
+            let closePos = spanCenter closeRect
+                closePress = press {inputMousePos = closePos}
+                closeHold = hold {inputMousePos = V2 (v2X closePos + 60) (v2Y closePos + 40)}
+            _ <- runFrame ctx closePress ui
+            writeIORef rects IM.empty
+            _ <- runFrame ctx closeHold ui
+            duringClose <- readIORef rects
+            assertEq failed (IM.size duringClose) 3
+            (closed, _, _, _) <- runFrame ctx (release {inputMousePos = closePos}) ui
+            assertEq failed (pgrPanes closed) [pb, pc]
         _ -> assert failed False
     _ -> assert failed False
 
@@ -782,8 +774,7 @@ runPaneGridDropPreviewTest ctx failed = do
       -- The layout as drawn once the given input has settled (the strip's
       -- solved rect is a frame behind the layout that produced it).
       layoutAt inp = do
-        _ <- runFrame ctx inp ui
-        _ <- runFrame ctx inp ui
+        _ <- warmup2 ctx inp ui
         writeIORef seen IM.empty
         _ <- runFrame ctx inp ui
         readIORef seen
@@ -888,32 +879,26 @@ runPaneGridClippedControlTest ctx failed = do
             pure (PaneView "Panel" True Nothing)
         }
   _ <- warmup2 ctx inp0 ui
-  ids <- readIORef geometry
-  case ids of
-    Nothing -> assert failed False
-    Just (headerId, sid, targetId) -> do
-      headerRect <- getPrevRect ctx headerId
-      targetRect <- getPrevRect ctx targetId
-      case (headerRect, targetRect) of
-        (Just hr, Just br) -> do
-          -- Place the button's invisible center exactly in the header.
-          let headerY = rectY hr + rectH hr / 2
-          setScrollOffset ctx sid (rectY br + rectH br / 2 - headerY)
-          _ <- warmup2 ctx inp0 ui
-          hiddenRect <- getPrevRect ctx targetId
-          case hiddenRect of
-            Nothing -> assert failed False
-            Just r -> do
-              let grab = V2 (rectX r + rectW r / 2) (rectY r + rectH r / 2)
-                  press = inp0 {inputMousePos = grab, inputMouseDown = True, inputMousePressed = True}
-                  hold = press {inputMousePressed = False, inputMousePos = V2 (v2X grab + 30) (v2Y grab)}
-              assert failed (rectContains hr grab)
-              _ <- runFrame ctx press ui
-              writeIORef rendered False
-              _ <- runFrame ctx hold ui
-              stillRendered <- readIORef rendered
-              assert failed (not stillRendered)
-        _ -> assert failed False
+  assertJustM failed (readIORef geometry) $ \(headerId, sid, targetId) -> do
+    headerRect <- getPrevRect ctx headerId
+    targetRect <- getPrevRect ctx targetId
+    case (headerRect, targetRect) of
+      (Just hr, Just br) -> do
+        -- Place the button's invisible center exactly in the header.
+        let headerY = rectY hr + rectH hr / 2
+        setScrollOffset ctx sid (rectY br + rectH br / 2 - headerY)
+        _ <- warmup2 ctx inp0 ui
+        assertJustM failed (getPrevRect ctx targetId) $ \r -> do
+          let grab = spanCenter r
+              press = pressAt inp0 grab
+              hold = press {inputMousePressed = False, inputMousePos = V2 (v2X grab + 30) (v2Y grab)}
+          assert failed (rectContains hr grab)
+          _ <- runFrame ctx press ui
+          writeIORef rendered False
+          _ <- runFrame ctx hold ui
+          stillRendered <- readIORef rendered
+          assert failed (not stillRendered)
+      _ -> assert failed False
 
 -- Clicking the embedded clear (×) must empty the field, keep focus, and fire an
 -- immediate (non-debounced) change pulse.
@@ -932,17 +917,14 @@ runSearchFieldClearTest ctx failed = do
             _ <- runFrame ctx probe ui
             kind <- uiCursorKind ctx probe
             if kind == UiCursorPointer then pure (Just x) else scanClear (x - 2)
-  mcx <- scanClear (bx + bw - 6)
-  case mcx of
-    Nothing -> assert failed False
-    Just cx -> do
-      let press = inp0 {inputMousePos = V2 cx cy, inputMouseDown = True, inputMousePressed = True, inputMouseReleased = False}
-      _ <- runFrame ctx press ui
-      ((r1, t1), _, _, _) <- runFrame ctx inp0 ui
-      assertEq failed t1 ""
-      assert failed (respChanged r1)
-      ((r2, _), _, _, _) <- runFrame ctx inp0 ui
-      assert failed (not (respChanged r2))
+  assertJustM failed (scanClear (bx + bw - 6)) $ \cx -> do
+    let press = inp0 {inputMousePos = V2 cx cy, inputMouseDown = True, inputMousePressed = True, inputMouseReleased = False}
+    _ <- runFrame ctx press ui
+    ((r1, t1), _, _, _) <- runFrame ctx inp0 ui
+    assertEq failed t1 ""
+    assert failed (respChanged r1)
+    ((r2, _), _, _, _) <- runFrame ctx inp0 ui
+    assert failed (not (respChanged r2))
 
 -- Typing is echoed immediately but the change pulse only fires after the text
 -- has been idle for the configured debounce window.
@@ -951,8 +933,7 @@ runSearchFieldDebounceTest ctx failed = do
   queryRef <- newIORef ""
   let inp0 = withInput 320 100
       ui = column (held queryRef (searchFieldConfigured' (defaultSearchFieldConfig {sfcDebounceMs = 40})))
-  _ <- warmup2 ctx inp0 ui
-  _ <- runFrame ctx (tabInp inp0) ui
+  warmupFocused ctx inp0 ui
   ((rA, tA), _, _, _) <- runFrame ctx (inp0 {inputChars = "a"}) ui
   assertEq failed tA "a"
   assert failed (not (respChanged rA))
@@ -983,8 +964,7 @@ runSearchFieldSetTextDebounceTest ctx failed = do
   queryRef <- newIORef ""
   let inp0 = withInput 320 100
       ui = column (held queryRef (searchFieldConfigured' (defaultSearchFieldConfig {sfcDebounceMs = 40})))
-  _ <- warmup2 ctx inp0 ui
-  _ <- runFrame ctx (tabInp inp0) ui
+  warmupFocused ctx inp0 ui
   writeIORef queryRef "recent"
   ((rA, tA), _, _, _) <- runFrame ctx inp0 ui
   assertEq failed tA "recent"

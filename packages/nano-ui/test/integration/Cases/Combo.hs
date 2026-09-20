@@ -13,8 +13,8 @@ import Data.IORef (IORef, newIORef)
 import Data.Text qualified as T
 import NanoUI
 import NanoUI.Testing
-import NanoUI.Testing.Assert (assert, assertEq, withInput)
-import NanoUI.Testing.Harness (clickPair, hasText, held, keyInp, tabInp, warmup2)
+import NanoUI.Testing.Assert (assert, assertEq, assertJust, withInput)
+import NanoUI.Testing.Harness (clickPair, hasText, held, keyInp, pressAt, spanCenter, spanRect, tabInp, warmup2, warmupFocused)
 
 comboOpts :: [T.Text]
 comboOpts = ["Alpha Sans", "Beta Serif", "Gamma Mono", "Delta Round"]
@@ -34,8 +34,7 @@ runComboFilterTest ctx failed = do
   textRef <- newIORef ""
   let inp0 = withInput 320 100
       ui = held textRef (comboBox' "Font" comboOpts)
-  _ <- warmup2 ctx inp0 ui
-  _ <- runFrame ctx (tabInp inp0) ui
+  warmupFocused ctx inp0 ui
   _ <- runFrame ctx (inp0 {inputChars = "ga"}) ui
   overlays <- collectOverlayTextSpans ctx inp0
   assert failed (hasText "Gamma Mono" overlays)
@@ -49,8 +48,7 @@ runComboKeyboardPickTest :: Context -> IORef Int -> IO ()
 runComboKeyboardPickTest ctx failed = do
   let inp0 = withInput 320 100
       ui = comboBox' "Font" comboOpts ""
-  _ <- warmup2 ctx inp0 ui
-  _ <- runFrame ctx (tabInp inp0) ui
+  warmupFocused ctx inp0 ui
   _ <- runFrame ctx (keyInp KeyDown inp0) ui
   _ <- runFrame ctx (keyInp KeyDown inp0) ui
   ((r, t), _, _, _) <- runFrame ctx (keyInp KeyEnter inp0) ui
@@ -64,26 +62,23 @@ runComboMousePickTest :: Context -> IORef Int -> IO ()
 runComboMousePickTest ctx failed = do
   let inp0 = withInput 320 200
       ui = comboBox' "Font" comboOpts ""
-  _ <- warmup2 ctx inp0 ui
-  _ <- runFrame ctx (tabInp inp0) ui
+  warmupFocused ctx inp0 ui
   _ <- runFrame ctx inp0 ui
   overlays <- collectOverlayTextSpans ctx inp0
-  case [r | (r, txt, _, _, _) <- overlays, "Beta Serif" `T.isInfixOf` txt] of
-    (rowRect : _) -> do
-      let cx = rectX rowRect + rectW rowRect / 2
-          cy = rectY rowRect + rectH rowRect / 2
-          (press, release) = clickPair inp0 (V2 cx cy)
-      _ <- runFrame ctx press ui
-      ((r, t), _, _, _) <- runFrame ctx release ui
-      assert failed (respChanged r)
-      assertEq failed t "Beta Serif"
-      -- Picking defocuses the field: the dropdown is visible exactly while
-      -- focused, so the menu disappears with the pick.
-      focus <- getFocusId ctx
-      assertEq failed focus (WidgetId 0)
-      overlaysClosed <- collectOverlayTextSpans ctx release
-      assert failed (not (hasText "Alpha Sans" overlaysClosed))
-    _ -> assert failed False
+  assertJust failed (spanRect "Beta Serif" overlays) $ \rowRect -> do
+    let cx = rectX rowRect + rectW rowRect / 2
+        cy = rectY rowRect + rectH rowRect / 2
+        (press, release) = clickPair inp0 (V2 cx cy)
+    _ <- runFrame ctx press ui
+    ((r, t), _, _, _) <- runFrame ctx release ui
+    assert failed (respChanged r)
+    assertEq failed t "Beta Serif"
+    -- Picking defocuses the field: the dropdown is visible exactly while
+    -- focused, so the menu disappears with the pick.
+    focus <- getFocusId ctx
+    assertEq failed focus (WidgetId 0)
+    overlaysClosed <- collectOverlayTextSpans ctx release
+    assert failed (not (hasText "Alpha Sans" overlaysClosed))
 
 -- Hovering a suggestion row highlights it (hover paint, becomes the Enter
 -- target) but never commits by itself; Enter then commits the hovered row.
@@ -91,34 +86,31 @@ runComboHoverHighlightTest :: Context -> IORef Int -> IO ()
 runComboHoverHighlightTest ctx failed = do
   let inp0 = withInput 320 200
       ui = comboBox' "Font" comboOpts ""
-  _ <- warmup2 ctx inp0 ui
-  _ <- runFrame ctx (tabInp inp0) ui
+  warmupFocused ctx inp0 ui
   _ <- runFrame ctx inp0 ui
   overlays <- collectOverlayTextSpans ctx inp0
-  case [r | (r, txt, _, _, _) <- overlays, "Delta Round" `T.isInfixOf` txt] of
-    (rowRect : _) -> do
-      let hover =
-            inp0
-              { inputMousePos = V2 (rectX rowRect + rectW rowRect / 2) (rectY rowRect + rectH rowRect / 2)
-              }
-      _ <- runFrame ctx hover ui
-      -- Hover alone must not commit anything.
-      ((r0, t0), _, _, _) <- runFrame ctx hover ui
-      assert failed (not (respChanged r0) && T.null t0)
-      -- Menu rows show the pointer cursor while hovered.
-      ptr <- cursorKindIs ctx hover UiCursorPointer
-      assert failed ptr
-      -- The hovered row carries the hover background, the others do not.
-      overlaysHover <- collectOverlayTextSpans ctx hover
-      let bgFor needle = [bg | (_, txt, _, bg, _) <- overlaysHover, needle `T.isInfixOf` txt]
-      case (bgFor "Delta Round", bgFor "Alpha Sans") of
-        ([dBg], [aBg]) -> assert failed (dBg /= aBg)
-        _ -> assert failed False
-      -- Enter commits the hovered row.
-      ((r1, t1), _, _, _) <- runFrame ctx (keyInp KeyEnter hover) ui
-      assert failed (respChanged r1)
-      assertEq failed t1 "Delta Round"
-    _ -> assert failed False
+  assertJust failed (spanRect "Delta Round" overlays) $ \rowRect -> do
+    let hover =
+          inp0
+            { inputMousePos = spanCenter rowRect
+            }
+    _ <- runFrame ctx hover ui
+    -- Hover alone must not commit anything.
+    ((r0, t0), _, _, _) <- runFrame ctx hover ui
+    assert failed (not (respChanged r0) && T.null t0)
+    -- Menu rows show the pointer cursor while hovered.
+    ptr <- cursorKindIs ctx hover UiCursorPointer
+    assert failed ptr
+    -- The hovered row carries the hover background, the others do not.
+    overlaysHover <- collectOverlayTextSpans ctx hover
+    let bgFor needle = [bg | (_, txt, _, bg, _) <- overlaysHover, needle `T.isInfixOf` txt]
+    case (bgFor "Delta Round", bgFor "Alpha Sans") of
+      ([dBg], [aBg]) -> assert failed (dBg /= aBg)
+      _ -> assert failed False
+    -- Enter commits the hovered row.
+    ((r1, t1), _, _, _) <- runFrame ctx (keyInp KeyEnter hover) ui
+    assert failed (respChanged r1)
+    assertEq failed t1 "Delta Round"
 
 -- Dragging the vertical scrollbar thumb scrolls the list, and releasing the
 -- drag over a row must not commit it.
@@ -136,7 +128,7 @@ runComboScrollbarDragTest ctx failed = do
       -- flush at the drop rect's top (no outer margin).
       dropY = ry + rh + 4
       trackX = rx + rw - 5
-      press = inp0 {inputMousePos = V2 trackX (dropY + 200), inputMouseDown = True, inputMousePressed = True}
+      press = pressAt inp0 (V2 trackX (dropY + 200))
   _ <- runFrame ctx press ui
   _ <- runFrame ctx press {inputMousePressed = False} ui
   -- Release over a row position (bottom of the list): must not pick.
@@ -155,8 +147,7 @@ runComboBlurCommitTest ctx failed = do
   textRef <- newIORef ""
   let inp0 = withInput 320 200
       ui = column (held textRef (comboBox' "Font" comboOpts))
-  _ <- warmup2 ctx inp0 ui
-  _ <- runFrame ctx (tabInp inp0) ui
+  warmupFocused ctx inp0 ui
   ((rA, tA), _, _, _) <- runFrame ctx (inp0 {inputChars = "N"}) ui
   assertEq failed tA "N"
   assert failed (not (respChanged rA))
@@ -171,7 +162,7 @@ runComboBlurCommitTest ctx failed = do
   _ <- runFrame ctx (keyInp KeyBackspace inp0) ui
   -- Click far away: focus clears after the UI pass, and the frame after the
   -- blur commits the typed text.
-  let away = inp0 {inputMousePos = V2 310 5, inputMouseDown = True, inputMousePressed = True}
+  let away = pressAt inp0 (V2 310 5)
   _ <- runFrame ctx away ui
   ((rC, tC), _, _, _) <- runFrame ctx inp0 {inputMouseReleased = True} ui
   assertEq failed tC "No"
@@ -212,29 +203,24 @@ runComboWheelScrollTest ctx failed = do
   let inp0 = withInput 200 260
       long = "A Very Long Font Family Name That Overflows"
       ui = comboBox' "Fonts" (comboLongOpts ++ [long]) ""
-  _ <- warmup2 ctx inp0 ui
-  _ <- runFrame ctx (tabInp inp0) ui
+  warmupFocused ctx inp0 ui
   _ <- runFrame ctx inp0 ui
   overlays0 <- collectOverlayTextSpans ctx inp0
   assert failed (hasText "Fam 01" overlays0)
   assert failed (not (hasText "Fam 09" overlays0))
-  case [r | (r, txt, _, _, _) <- overlays0, "Fam 01" `T.isInfixOf` txt] of
-    (rowRect : _) -> do
-      let overList = inp0 {inputMousePos = V2 (rectX rowRect + 4) (rectY rowRect + rectH rowRect / 2)}
-      _ <- runFrame ctx overList ui
-      _ <- runFrame ctx overList {inputScroll = V2 5 0} ui
-      overlaysX <- collectOverlayTextSpans ctx overList
-      case [r | (r, txt, _, _, _) <- overlaysX, "Fam 01" `T.isInfixOf` txt] of
-        (after : _) -> assert failed (rectX after < rectX rowRect - 50)
-        _ -> assert failed False
-      -- The x-shift is clamped: a huge wheel does not push rows out of reach.
-      _ <- runFrame ctx overList {inputScroll = V2 1000 0} ui
-      overlaysClamped <- collectOverlayTextSpans ctx overList
-      assert failed (hasText "Fam 01" overlaysClamped)
-      _ <- runFrame ctx overList {inputScroll = V2 0 1} ui
-      overlays1 <- collectOverlayTextSpans ctx overList
-      -- One wheel notch scrolls three rows past "Fam 01".
-      assert failed (not (hasText "Fam 01" overlays1))
-      assert failed (hasText "Fam 04" overlays1)
-      assert failed (hasText "Fam 11" overlays1)
-    _ -> assert failed False
+  assertJust failed (spanRect "Fam 01" overlays0) $ \rowRect -> do
+    let overList = inp0 {inputMousePos = V2 (rectX rowRect + 4) (rectY rowRect + rectH rowRect / 2)}
+    _ <- runFrame ctx overList ui
+    _ <- runFrame ctx overList {inputScroll = V2 5 0} ui
+    overlaysX <- collectOverlayTextSpans ctx overList
+    assertJust failed (spanRect "Fam 01" overlaysX) $ \after -> assert failed (rectX after < rectX rowRect - 50)
+    -- The x-shift is clamped: a huge wheel does not push rows out of reach.
+    _ <- runFrame ctx overList {inputScroll = V2 1000 0} ui
+    overlaysClamped <- collectOverlayTextSpans ctx overList
+    assert failed (hasText "Fam 01" overlaysClamped)
+    _ <- runFrame ctx overList {inputScroll = V2 0 1} ui
+    overlays1 <- collectOverlayTextSpans ctx overList
+    -- One wheel notch scrolls three rows past "Fam 01".
+    assert failed (not (hasText "Fam 01" overlays1))
+    assert failed (hasText "Fam 04" overlays1)
+    assert failed (hasText "Fam 11" overlays1)

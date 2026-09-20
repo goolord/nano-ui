@@ -53,24 +53,29 @@ import NanoUI.Frame.TextEdit
   , textAreaScrollBarLayouts
   )
 import NanoUI.Store
-  ( WidgetStore (..)
-  , Slot (..)
+  ( Slot (..)
+  , WidgetStore (..)
   , slotKey
   )
 import NanoUI.Testing
-import NanoUI.Testing.Assert (assert, assertEq, assertGt, withInput)
+import NanoUI.Testing.Assert (assert, assertEq, assertGt, assertJust, assertJustM, withInput)
 import NanoUI.Testing.Harness
   ( assertSpansHas
   , centerOf
   , clickPair
   , findExact
   , held
+  , holdAt
   , keyInp
+  , pressAt
+  , releaseAt
   , rightClickPair
   , runClick
   , spanCenter
+  , spanRectOf
   , tabInp
   , warmup2
+  , warmupFocused
   )
 import NanoUI.Widgets.TextArea
   ( buffer
@@ -179,8 +184,7 @@ runTextInputCutClearsSelectionTest ctx failed = do
   let
     inp0 = withInput 320 120
     ui = column (held textRef textInput')
-  _ <- warmup2 ctx' inp0 ui
-  _ <- runFrame ctx' (tabInp inp0) ui
+  warmupFocused ctx' inp0 ui
   let
     shiftLeft =
       inp0
@@ -207,8 +211,7 @@ runTextInputWordKeysTest ctx failed = do
     inp0 = withInput 320 120
     ui = column (held textRef textInput')
     ctrlMods = Modifiers False True False
-  _ <- warmup2 ctx inp0 ui
-  _ <- runFrame ctx (tabInp inp0) ui
+  warmupFocused ctx inp0 ui
   -- Ctrl+Backspace deletes the word before the cursor ("world").
   _ <-
     runFrame
@@ -249,8 +252,7 @@ runTextAreaCutClearsSelectionTest ctx failed = do
   let
     inp0 = withInput 320 220
     ui = column (label "Notes" >> held textRef textArea')
-  _ <- warmup2 ctx' inp0 ui
-  _ <- runFrame ctx' (tabInp inp0) ui
+  warmupFocused ctx' inp0 ui
   _ <-
     runFrame
       ctx'
@@ -273,8 +275,7 @@ runTextInputSelectionTest ctx failed = do
   let
     inp0 = withInput 320 120
     ui = column (button "Other" >> held textRef textInput')
-  _ <- warmup2 ctx inp0 ui
-  _ <- runFrame ctx (tabInp inp0) ui
+  warmupFocused ctx inp0 ui
   _ <- runFrame ctx (tabInp inp0) ui
   let
     shiftLeft =
@@ -304,38 +305,15 @@ runTextInputMouseSelectionTest ctx failed = do
     ui = column (textInput' "hello")
   _ <- warmup2 ctx inp0 ui
   spans <- collectTextSpans ctx
-  case [r | (r, txt, _, _, _) <- spans, txt == "hello"] of
-    (Rect fx fy fw fh : _) -> do
-      let
-        fieldY = fy + fh / 2
-      _ <-
-        runFrame
-          ctx
-          ( inp0
-              { inputMousePos = V2 (fx + 1) fieldY
-              , inputMouseDown = True
-              , inputMousePressed = True
-              }
-          )
-          ui
-      _ <-
-        runFrame
-          ctx
-          (inp0 {inputMousePos = V2 (fx + fw - 1) fieldY, inputMouseDown = True})
-          ui
-      _ <-
-        runFrame
-          ctx
-          ( inp0
-              { inputMousePos = V2 (fx + fw - 1) fieldY
-              , inputMouseDown = False
-              , inputMouseReleased = True
-              }
-          )
-          ui
-      ((_, val), _, _, _) <- runFrame ctx (inp0 {inputChars = "z"}) ui
-      assertEq failed val "z"
-    _ -> assert failed False
+  assertJust failed (spanRectOf "hello" spans) $ \(Rect fx fy fw fh) -> do
+    let
+      fieldY = fy + fh / 2
+      dragged = holdAt inp0 (V2 (fx + fw - 1) fieldY)
+    _ <- runFrame ctx (pressAt inp0 (V2 (fx + 1) fieldY)) ui
+    _ <- runFrame ctx dragged ui
+    _ <- runFrame ctx (releaseAt dragged) ui
+    ((_, val), _, _, _) <- runFrame ctx (inp0 {inputChars = "z"}) ui
+    assertEq failed val "z"
 
 -- Double-click selects a word and triple-click the whole line.
 runTextInputClickSelectTest :: Context -> IORef Int -> IO ()
@@ -380,8 +358,7 @@ runTextInputClipboardTest ctx failed = do
   let
     inp0 = withInput 320 120
     ui = column (held textRef textInput')
-  _ <- warmup2 ctx' inp0 ui
-  _ <- runFrame ctx' (tabInp inp0) ui
+  warmupFocused ctx' inp0 ui
   let
     selectAll = inp0 {inputChars = "a", inputModifiers = Modifiers False True False}
     copy = inp0 {inputChars = "c", inputModifiers = Modifiers False True False}
@@ -430,35 +407,33 @@ runTextInputMenuTest ctx failed = do
     ui = column (held textRef textInput')
   _ <- warmup2 ctx' inp0 ui
   spans <- collectTextSpans ctx'
-  case [r | (r, txt, _, _, _) <- spans, txt == "hello"] of
-    (Rect fx fy _ fh : _) -> do
-      let
-        menuOpen =
-          inp0
-            { inputMousePos = V2 (fx + 1) (fy + fh / 2)
-            , inputMouseRightDown = True
-            , inputMouseRightPressed = True
-            }
-        pick entry = do
-          _ <- runFrame ctx' menuOpen ui
-          overlays <- collectOverlayTextSpans ctx' menuOpen
-          case [r | (r, txt, _, _, _) <- overlays, txt == entry] of
-            (r : _) -> do
-              let
-                (pickPress, pickRelease) = clickPair inp0 (spanCenter r)
-              _ <- runFrame ctx' pickPress ui >> runFrame ctx' pickRelease ui
-              ((_, val), _, _, _) <- runFrame ctx' inp0 ui
-              pure (Just val)
-            _ -> pure Nothing
-      pasted <- pick "Paste"
-      assertEq failed pasted (Just "hellopasted")
-      cut <- pick "Cut"
-      clip <- readIORef clipRef
-      assertEq failed clip (Just "hellopasted")
-      assertEq failed cut (Just "")
-      overlaysAfter <- collectOverlayTextSpans ctx' inp0
-      assert failed (not (any (\(_, txt, _, _, _) -> txt == "Cut") overlaysAfter))
-    _ -> assert failed False
+  assertJust failed (spanRectOf "hello" spans) $ \(Rect fx fy _ fh) -> do
+    let
+      menuOpen =
+        inp0
+          { inputMousePos = V2 (fx + 1) (fy + fh / 2)
+          , inputMouseRightDown = True
+          , inputMouseRightPressed = True
+          }
+      pick entry = do
+        _ <- runFrame ctx' menuOpen ui
+        overlays <- collectOverlayTextSpans ctx' menuOpen
+        case [r | (r, txt, _, _, _) <- overlays, txt == entry] of
+          (r : _) -> do
+            let
+              (pickPress, pickRelease) = clickPair inp0 (spanCenter r)
+            _ <- runFrame ctx' pickPress ui >> runFrame ctx' pickRelease ui
+            ((_, val), _, _, _) <- runFrame ctx' inp0 ui
+            pure (Just val)
+          _ -> pure Nothing
+    pasted <- pick "Paste"
+    assertEq failed pasted (Just "hellopasted")
+    cut <- pick "Cut"
+    clip <- readIORef clipRef
+    assertEq failed clip (Just "hellopasted")
+    assertEq failed cut (Just "")
+    overlaysAfter <- collectOverlayTextSpans ctx' inp0
+    assert failed (not (any (\(_, txt, _, _, _) -> txt == "Cut") overlaysAfter))
 
 runTextInputFocusSdlTest :: Context -> IORef Int -> IO ()
 runTextInputFocusSdlTest ctx failed = do
@@ -474,7 +449,7 @@ runTextInputFocusSdlTest ctx failed = do
     [(fx, fy)] -> do
       let
         inp1 =
-          inp0 {inputMousePos = V2 fx fy, inputMouseDown = True, inputMousePressed = True}
+          pressAt inp0 (V2 fx fy)
       _ <- runFrame ctx inp1 ui
       focus <- getFocusId ctx
       assertEq failed focus (respId resp)
@@ -497,8 +472,7 @@ runTextInputDirtyTest ctx failed = do
   _ <- runFrame ctx release ui
   let
     idle = release {inputMouseReleased = False, inputDeltaTime = 1}
-  _ <- runFrame ctx idle ui
-  _ <- runFrame ctx idle ui
+  _ <- warmup2 ctx idle ui
   -- Keyboard focus by itself asks for nothing: the caret does not blink, and
   -- typing arrives as input. A focused field must let the loop sleep.
   assert failed . not =<< needsRedraw ctx idle idle
@@ -543,17 +517,15 @@ runTextInputFfCaretTest ctx failed = do
   _ <- warmup2 ctx inp0 ui
   spans <- collectTextSpans ctx
   assertSpansHas failed fs spans
-  case [r | (r, txt, _, _, _) <- spans, txt == fs] of
-    (Rect fx fy _ fh : _) -> do
-      let
-        pos = V2 (fx + lineWidth fm (T.take 3 fs)) (fy + fh / 2)
-        (press, release) = clickPair inp0 pos
-      _ <- runFrame ctx press ui
-      _ <- runFrame ctx release ui
-      ((_, val), _, _, _) <-
-        runFrame ctx (inp0 {inputMousePos = pos, inputChars = "x"}) ui
-      assertEq failed val "fffxfff"
-    _ -> assert failed False
+  assertJust failed (spanRectOf fs spans) $ \(Rect fx fy _ fh) -> do
+    let
+      pos = V2 (fx + lineWidth fm (T.take 3 fs)) (fy + fh / 2)
+      (press, release) = clickPair inp0 pos
+    _ <- runFrame ctx press ui
+    _ <- runFrame ctx release ui
+    ((_, val), _, _, _) <-
+      runFrame ctx (inp0 {inputMousePos = pos, inputChars = "x"}) ui
+    assertEq failed val "fffxfff"
 
 runTextInputScrollTest :: Context -> IORef Int -> IO ()
 runTextInputScrollTest ctx failed = do
@@ -563,29 +535,27 @@ runTextInputScrollTest ctx failed = do
     ui = column (textInput' longText)
   (resp, _) <- warmup2 ctx inp0 ui
   spans0 <- collectTextSpans ctx
-  case [r | (r, txt, _, _, _) <- spans0, txt == longText] of
-    (Rect fx fy _ fh : _) -> do
-      let
-        pos = V2 (fx + 50) (fy + fh / 2)
-        (press, release) = clickPair inp0 pos
-      _ <- runFrame ctx press ui
-      _ <- runFrame ctx release ui
-      let
-        atEnd = keyInp KeyEnd inp0
-      _ <- runFrame ctx atEnd ui
-      store <- getStore ctx
-      let
-        key = intKey (respId resp)
-        scrollEnd = IM.findWithDefault 0 (slotKey SlotTextInputScroll key) (storeFloat store)
-      assert failed (scrollEnd > 0)
-      let
-        atHome = keyInp KeyHome inp0
-      _ <- runFrame ctx atHome ui
-      storeHome <- getStore ctx
-      let
-        scrollHome = IM.findWithDefault 0 (slotKey SlotTextInputScroll key) (storeFloat storeHome)
-      assertEq failed scrollHome 0
-    _ -> assert failed False
+  assertJust failed (spanRectOf longText spans0) $ \(Rect fx fy _ fh) -> do
+    let
+      pos = V2 (fx + 50) (fy + fh / 2)
+      (press, release) = clickPair inp0 pos
+    _ <- runFrame ctx press ui
+    _ <- runFrame ctx release ui
+    let
+      atEnd = keyInp KeyEnd inp0
+    _ <- runFrame ctx atEnd ui
+    store <- getStore ctx
+    let
+      key = intKey (respId resp)
+      scrollEnd = IM.findWithDefault 0 (slotKey SlotTextInputScroll key) (storeFloat store)
+    assert failed (scrollEnd > 0)
+    let
+      atHome = keyInp KeyHome inp0
+    _ <- runFrame ctx atHome ui
+    storeHome <- getStore ctx
+    let
+      scrollHome = IM.findWithDefault 0 (slotKey SlotTextInputScroll key) (storeFloat storeHome)
+    assertEq failed scrollHome 0
 
 runTextAreaScrollWheelTest :: Context -> IORef Int -> IO ()
 runTextAreaScrollWheelTest ctx failed = do
@@ -597,46 +567,40 @@ runTextAreaScrollWheelTest ctx failed = do
     fieldCenter = pure . spanCenter
   -- Text that fits the viewport does not wheel-scroll.
   (respShort, _) <- warmup2 ctx inp0 uiShort
-  mRectShort <- getPrevRect ctx (respId respShort)
-  case mRectShort of
-    Just r -> do
-      pos <- fieldCenter r
-      _ <- runFrame ctx (inp0 {inputMousePos = pos, inputScroll = V2 0 1}) uiShort
-      offShort <- getScrollOffset ctx (respId respShort)
-      assertEq failed offShort 0
-    _ -> assert failed False
+  assertJustM failed (getPrevRect ctx (respId respShort)) $ \r -> do
+    pos <- fieldCenter r
+    _ <- runFrame ctx (inp0 {inputMousePos = pos, inputScroll = V2 0 1}) uiShort
+    offShort <- getScrollOffset ctx (respId respShort)
+    assertEq failed offShort 0
   (resp, _) <- warmup2 ctx inp0 ui
-  mRect <- getPrevRect ctx (respId resp)
-  case mRect of
-    Just r -> do
-      pos <- fieldCenter r
-      let
-        wheelDown = inp0 {inputMousePos = pos, inputScroll = V2 0 1}
-      off0 <- getScrollOffset ctx (respId resp)
-      assertEq failed off0 0
-      -- Scroll down 1 notch
-      _ <- runFrame ctx wheelDown ui
-      off1 <- getScrollOffset ctx (respId resp)
-      assertGt failed off1 off0
-      -- Scroll down 3 more notches
-      let
-        wheelDownMore = inp0 {inputMousePos = pos, inputScroll = V2 0 3}
-      _ <- runFrame ctx wheelDownMore ui
-      off2 <- getScrollOffset ctx (respId resp)
-      assertGt failed off2 off1
-      -- Scroll up beyond top to check clamping to 0
-      let
-        wheelUp = inp0 {inputMousePos = pos, inputScroll = V2 0 (-10)}
-      _ <- runFrame ctx wheelUp ui
-      off3 <- getScrollOffset ctx (respId resp)
-      assertEq failed off3 0
-      -- Text buffer should remain completely unmodified
-      store <- getStore ctx
-      let
-        key = intKey (respId resp)
-        st = loadTextAreaState store key
-      assertEq failed (toText (buffer st)) longText
-    _ -> assert failed False
+  assertJustM failed (getPrevRect ctx (respId resp)) $ \r -> do
+    pos <- fieldCenter r
+    let
+      wheelDown = inp0 {inputMousePos = pos, inputScroll = V2 0 1}
+    off0 <- getScrollOffset ctx (respId resp)
+    assertEq failed off0 0
+    -- Scroll down 1 notch
+    _ <- runFrame ctx wheelDown ui
+    off1 <- getScrollOffset ctx (respId resp)
+    assertGt failed off1 off0
+    -- Scroll down 3 more notches
+    let
+      wheelDownMore = inp0 {inputMousePos = pos, inputScroll = V2 0 3}
+    _ <- runFrame ctx wheelDownMore ui
+    off2 <- getScrollOffset ctx (respId resp)
+    assertGt failed off2 off1
+    -- Scroll up beyond top to check clamping to 0
+    let
+      wheelUp = inp0 {inputMousePos = pos, inputScroll = V2 0 (-10)}
+    _ <- runFrame ctx wheelUp ui
+    off3 <- getScrollOffset ctx (respId resp)
+    assertEq failed off3 0
+    -- Text buffer should remain completely unmodified
+    store <- getStore ctx
+    let
+      key = intKey (respId resp)
+      st = loadTextAreaState store key
+    assertEq failed (toText (buffer st)) longText
 
 runTextAreaZoomScrollTest :: Context -> IORef Int -> IO ()
 runTextAreaZoomScrollTest ctx failed = do
@@ -645,31 +609,28 @@ runTextAreaZoomScrollTest ctx failed = do
     inp0 = withInput 320 220
     ui = column $ textAreaWith' (fontSize 32) longText
   (resp, _) <- warmup2 ctx inp0 ui
-  mHit <- textAreaHitForWidget ctx (respId resp)
-  case mHit of
-    Nothing -> assert failed False
-    Just hit -> do
-      fm <- resolveTextAreaFont ctx (tahNodeIdx hit)
-      let
-        field = tahFieldRect hit
-        lineH = tahLineH hit
-        lineCount = max 1 (length (toLines (fromText longText)))
-        contentH = fromIntegral lineCount * lineH
-        contentW = maximum (0 : [lineWidth fm l | l <- T.lines longText])
-        (ix, iy) = widgetContentInset fm
-        innerW = rectW field - 2 * ix
-        innerH = rectH field - 2 * iy
-        barLaneW = textAreaBarLane
-        barLaneH = textAreaBarLane
-        hasV0 = contentH > innerH
-        hasH = contentW > (if hasV0 then max 0 (innerW - barLaneW) else innerW)
-        availH = if hasH then max 0 (innerH - barLaneH) else innerH
-        expectedMaxY = max 0 (contentH - availH)
-        pos = V2 (rectX field + rectW field / 2) (rectY field + rectH field / 2)
-        wheelDown = inp0 {inputMousePos = pos, inputScroll = V2 0 100}
-      _ <- runFrame ctx wheelDown ui
-      off <- getScrollOffset ctx (respId resp)
-      assert failed (abs (off - expectedMaxY) < 0.5)
+  assertJustM failed (textAreaHitForWidget ctx (respId resp)) $ \hit -> do
+    fm <- resolveTextAreaFont ctx (tahNodeIdx hit)
+    let
+      field = tahFieldRect hit
+      lineH = tahLineH hit
+      lineCount = max 1 (length (toLines (fromText longText)))
+      contentH = fromIntegral lineCount * lineH
+      contentW = maximum (0 : [lineWidth fm l | l <- T.lines longText])
+      (ix, iy) = widgetContentInset fm
+      innerW = rectW field - 2 * ix
+      innerH = rectH field - 2 * iy
+      barLaneW = textAreaBarLane
+      barLaneH = textAreaBarLane
+      hasV0 = contentH > innerH
+      hasH = contentW > (if hasV0 then max 0 (innerW - barLaneW) else innerW)
+      availH = if hasH then max 0 (innerH - barLaneH) else innerH
+      expectedMaxY = max 0 (contentH - availH)
+      pos = spanCenter field
+      wheelDown = inp0 {inputMousePos = pos, inputScroll = V2 0 100}
+    _ <- runFrame ctx wheelDown ui
+    off <- getScrollOffset ctx (respId resp)
+    assert failed (abs (off - expectedMaxY) < 0.5)
 
 runTextAreaScrollDragTest :: Context -> IORef Int -> IO ()
 runTextAreaScrollDragTest ctx failed = do
@@ -678,50 +639,36 @@ runTextAreaScrollDragTest ctx failed = do
     inp0 = withInput 320 220
     ui = column (labeledArea "Notes" longText)
   (resp, _) <- warmup2 ctx inp0 ui
-  mRect <- getPrevRect ctx (respId resp)
-  case mRect of
-    Just (Rect rx ry rw rh) -> do
+  assertJustM failed (getPrevRect ctx (respId resp)) $ \(Rect rx ry rw rh) -> do
+    let
+      fm = ctxFontMetrics ctx
+      field = Rect rx ry rw rh
+      contentH = 40 * textAreaLineHeight fm
+    off0 <- getScrollOffset ctx (respId resp)
+    assertEq failed off0 0
+    assertJust failed (textAreaScrollBarLayout fm field contentH off0) $ \layout -> do
       let
-        fm = ctxFontMetrics ctx
-        field = Rect rx ry rw rh
-        contentH = 40 * textAreaLineHeight fm
-      off0 <- getScrollOffset ctx (respId resp)
-      assertEq failed off0 0
-      case textAreaScrollBarLayout fm field contentH off0 of
-        Nothing -> assert failed False
-        Just layout -> do
-          let
-            thumb = sbThumb layout
-            thumbCenter = V2 (rectX thumb + rectW thumb / 2) (rectY thumb + rectH thumb / 2)
-            press =
-              inp0
-                { inputMousePos = thumbCenter
-                , inputMouseDown = True
-                , inputMousePressed = True
-                }
-          _ <- runFrame ctx press ui
-          -- Drag the thumb down by 30 pixels
-          let
-            drag =
-              press
-                { inputMousePressed = False
-                , inputMousePos = V2 (v2X thumbCenter) (v2Y thumbCenter + 30)
-                }
-          _ <- runFrame ctx drag ui
-          off1 <- getScrollOffset ctx (respId resp)
-          assertGt failed off1 off0
-          -- Release the mouse
-          let
-            release = drag {inputMouseDown = False, inputMouseReleased = True}
-          _ <- runFrame ctx release ui
-          -- Clicking/dragging scrollbar must not initiate text selection or alter buffer
-          store <- getStore ctx
-          let
-            key = intKey (respId resp)
-            st = loadTextAreaState store key
-          assertEq failed (toText (buffer st)) longText
-          assert failed (selectionAnchor st == getCursor (buffer st))
-    _ -> assert failed False
+        thumb = sbThumb layout
+        thumbCenter = spanCenter thumb
+        press = pressAt inp0 thumbCenter
+      _ <- runFrame ctx press ui
+      -- Drag the thumb down by 30 pixels
+      let
+        drag = holdAt press (V2 (v2X thumbCenter) (v2Y thumbCenter + 30))
+      _ <- runFrame ctx drag ui
+      off1 <- getScrollOffset ctx (respId resp)
+      assertGt failed off1 off0
+      -- Release the mouse
+      let
+        release = drag {inputMouseDown = False, inputMouseReleased = True}
+      _ <- runFrame ctx release ui
+      -- Clicking/dragging scrollbar must not initiate text selection or alter buffer
+      store <- getStore ctx
+      let
+        key = intKey (respId resp)
+        st = loadTextAreaState store key
+      assertEq failed (toText (buffer st)) longText
+      assert failed (selectionAnchor st == getCursor (buffer st))
 
 runTextAreaCursorOnScrollBarTest :: Context -> IORef Int -> IO ()
 runTextAreaCursorOnScrollBarTest ctx failed = do
@@ -759,23 +706,21 @@ runTextAreaCursorOnScrollBarTest ctx failed = do
       assertEq failed textKind UiCursorText
 
       -- Hover over scrollbar thumb -> UiCursorGrab
-      case textAreaScrollBarLayout fm field contentH 0 of
-        Nothing -> assert failed False
-        Just layout -> do
-          let
-            thumb = sbThumb layout
-            thumbCenter = V2 (rectX thumb + rectW thumb / 2) (rectY thumb + rectH thumb / 2)
-            thumbHover = inp0 {inputMousePos = thumbCenter}
-          _ <- runFrame ctx thumbHover ui
-          thumbKind <- uiCursorKind ctx thumbHover
-          assertEq failed thumbKind UiCursorGrab
+      assertJust failed (textAreaScrollBarLayout fm field contentH 0) $ \layout -> do
+        let
+          thumb = sbThumb layout
+          thumbCenter = spanCenter thumb
+          thumbHover = inp0 {inputMousePos = thumbCenter}
+        _ <- runFrame ctx thumbHover ui
+        thumbKind <- uiCursorKind ctx thumbHover
+        assertEq failed thumbKind UiCursorGrab
 
-          -- Press down on scrollbar thumb -> UiCursorGrabbing
-          let
-            thumbPress = thumbHover {inputMouseDown = True, inputMousePressed = True}
-          _ <- runFrame ctx thumbPress ui
-          grabbing <- cursorKindIs ctx thumbPress UiCursorGrabbing
-          assert failed grabbing
+        -- Press down on scrollbar thumb -> UiCursorGrabbing
+        let
+          thumbPress = thumbHover {inputMouseDown = True, inputMousePressed = True}
+        _ <- runFrame ctx thumbPress ui
+        grabbing <- cursorKindIs ctx thumbPress UiCursorGrabbing
+        assert failed grabbing
     _ -> assert failed False
 
 runTextAreaHScrollWheelTest :: Context -> IORef Int -> IO ()
@@ -785,65 +730,55 @@ runTextAreaHScrollWheelTest ctx failed = do
     inp0 = withInput 320 220
     ui = column (labeledArea "Notes" longLine)
   (resp, _) <- warmup2 ctx inp0 ui
-  mRect <- getPrevRect ctx (respId resp)
-  case mRect of
-    Just (Rect rx ry rw rh) -> do
+  assertJustM failed (getPrevRect ctx (respId resp)) $ \(Rect rx ry rw rh) -> do
+    let
+      fm = ctxFontMetrics ctx
+      field = Rect rx ry rw rh
+      pos = spanCenter field
+      wheelRight = inp0 {inputMousePos = pos, inputScroll = V2 1 0}
+    V2 offX0 offY0 <- getScrollOffset2D ctx (respId resp)
+    assertEq failed offX0 0
+    assertEq failed offY0 0
+    _ <- runFrame ctx wheelRight ui
+    V2 offX1 offY1 <- getScrollOffset2D ctx (respId resp)
+    assertGt failed offX1 offX0
+    assertEq failed offY1 0
+    let
+      wheelRightMore = inp0 {inputMousePos = pos, inputScroll = V2 3 0}
+    _ <- runFrame ctx wheelRightMore ui
+    V2 offX2 _ <- getScrollOffset2D ctx (respId resp)
+    assertGt failed offX2 offX1
+    -- A click in the scrolled text lands on the column under the pointer,
+    -- counting the horizontal offset.
+    let
+      (ix, iy) = widgetContentInset fm
+      clickX = 30
+      textClick = pressAt inp0 (V2 (rectX field + ix + clickX) (rectY field + iy + 5))
+    _ <- runFrame ctx textClick ui
+    _ <- runFrame ctx textClick {inputMouseDown = False, inputMousePressed = False, inputMouseReleased = True} ui
+    store <- getStore ctx
+    let
+      key = intKey (respId resp)
+      Cursor _ col = getCursor (buffer (loadTextAreaState store key))
+    assert failed (abs (fromIntegral col - (offX2 + clickX) / fmAdvance fm '0') <= 1)
+    let
+      wheelLeft = inp0 {inputMousePos = pos, inputScroll = V2 (-10) 0}
+    _ <- runFrame ctx wheelLeft ui
+    V2 offX3 _ <- getScrollOffset2D ctx (respId resp)
+    assertEq failed offX3 0
+    -- The horizontal thumb shows the grab cursors.
+    assertJust failed (textAreaHScrollBarLayout fm field (lineWidth fm longLine) 0) $ \layout -> do
       let
-        fm = ctxFontMetrics ctx
-        field = Rect rx ry rw rh
-        pos = V2 (rectX field + rectW field / 2) (rectY field + rectH field / 2)
-        wheelRight = inp0 {inputMousePos = pos, inputScroll = V2 1 0}
-      V2 offX0 offY0 <- getScrollOffset2D ctx (respId resp)
-      assertEq failed offX0 0
-      assertEq failed offY0 0
-      _ <- runFrame ctx wheelRight ui
-      V2 offX1 offY1 <- getScrollOffset2D ctx (respId resp)
-      assertGt failed offX1 offX0
-      assertEq failed offY1 0
+        thumb = sbThumb layout
+        thumbHover = inp0 {inputMousePos = spanCenter thumb}
+      _ <- runFrame ctx thumbHover ui
+      thumbKind <- uiCursorKind ctx thumbHover
+      assertEq failed thumbKind UiCursorGrab
       let
-        wheelRightMore = inp0 {inputMousePos = pos, inputScroll = V2 3 0}
-      _ <- runFrame ctx wheelRightMore ui
-      V2 offX2 _ <- getScrollOffset2D ctx (respId resp)
-      assertGt failed offX2 offX1
-      -- A click in the scrolled text lands on the column under the pointer,
-      -- counting the horizontal offset.
-      let
-        (ix, iy) = widgetContentInset fm
-        clickX = 30
-        textClick =
-          inp0
-            { inputMousePos = V2 (rectX field + ix + clickX) (rectY field + iy + 5)
-            , inputMouseDown = True
-            , inputMousePressed = True
-            }
-      _ <- runFrame ctx textClick ui
-      _ <- runFrame ctx textClick {inputMouseDown = False, inputMousePressed = False, inputMouseReleased = True} ui
-      store <- getStore ctx
-      let
-        key = intKey (respId resp)
-        Cursor _ col = getCursor (buffer (loadTextAreaState store key))
-      assert failed (abs (fromIntegral col - (offX2 + clickX) / fmAdvance fm '0') <= 1)
-      let
-        wheelLeft = inp0 {inputMousePos = pos, inputScroll = V2 (-10) 0}
-      _ <- runFrame ctx wheelLeft ui
-      V2 offX3 _ <- getScrollOffset2D ctx (respId resp)
-      assertEq failed offX3 0
-      -- The horizontal thumb shows the grab cursors.
-      case textAreaHScrollBarLayout fm field (lineWidth fm longLine) 0 of
-        Nothing -> assert failed False
-        Just layout -> do
-          let
-            thumb = sbThumb layout
-            thumbHover = inp0 {inputMousePos = V2 (rectX thumb + rectW thumb / 2) (rectY thumb + rectH thumb / 2)}
-          _ <- runFrame ctx thumbHover ui
-          thumbKind <- uiCursorKind ctx thumbHover
-          assertEq failed thumbKind UiCursorGrab
-          let
-            thumbPress = thumbHover {inputMouseDown = True, inputMousePressed = True}
-          _ <- runFrame ctx thumbPress ui
-          grabbing <- cursorKindIs ctx thumbPress UiCursorGrabbing
-          assert failed grabbing
-    _ -> assert failed False
+        thumbPress = thumbHover {inputMouseDown = True, inputMousePressed = True}
+      _ <- runFrame ctx thumbPress ui
+      grabbing <- cursorKindIs ctx thumbPress UiCursorGrabbing
+      assert failed grabbing
 
 runTextAreaHScrollDragTest :: Context -> IORef Int -> IO ()
 runTextAreaHScrollDragTest ctx failed = do
@@ -852,47 +787,33 @@ runTextAreaHScrollDragTest ctx failed = do
     inp0 = withInput 320 220
     ui = column (labeledArea "Notes" longLine)
   (resp, _) <- warmup2 ctx inp0 ui
-  mRect <- getPrevRect ctx (respId resp)
-  case mRect of
-    Just (Rect rx ry rw rh) -> do
+  assertJustM failed (getPrevRect ctx (respId resp)) $ \(Rect rx ry rw rh) -> do
+    let
+      fm = ctxFontMetrics ctx
+      field = Rect rx ry rw rh
+      contentW = lineWidth fm longLine
+    V2 offX0 _ <- getScrollOffset2D ctx (respId resp)
+    assertEq failed offX0 0
+    assertJust failed (textAreaHScrollBarLayout fm field contentW offX0) $ \layout -> do
       let
-        fm = ctxFontMetrics ctx
-        field = Rect rx ry rw rh
-        contentW = lineWidth fm longLine
-      V2 offX0 _ <- getScrollOffset2D ctx (respId resp)
-      assertEq failed offX0 0
-      case textAreaHScrollBarLayout fm field contentW offX0 of
-        Nothing -> assert failed False
-        Just layout -> do
-          let
-            thumb = sbThumb layout
-            thumbCenter = V2 (rectX thumb + rectW thumb / 2) (rectY thumb + rectH thumb / 2)
-            press =
-              inp0
-                { inputMousePos = thumbCenter
-                , inputMouseDown = True
-                , inputMousePressed = True
-                }
-          _ <- runFrame ctx press ui
-          let
-            drag =
-              press
-                { inputMousePressed = False
-                , inputMousePos = V2 (v2X thumbCenter + 30) (v2Y thumbCenter)
-                }
-          _ <- runFrame ctx drag ui
-          V2 offX1 _ <- getScrollOffset2D ctx (respId resp)
-          assertGt failed offX1 offX0
-          let
-            release = drag {inputMouseDown = False, inputMouseReleased = True}
-          _ <- runFrame ctx release ui
-          store <- getStore ctx
-          let
-            key = intKey (respId resp)
-            st = loadTextAreaState store key
-          assertEq failed (toText (buffer st)) longLine
-          assert failed (selectionAnchor st == getCursor (buffer st))
-    _ -> assert failed False
+        thumb = sbThumb layout
+        thumbCenter = spanCenter thumb
+        press = pressAt inp0 thumbCenter
+      _ <- runFrame ctx press ui
+      let
+        drag = holdAt press (V2 (v2X thumbCenter + 30) (v2Y thumbCenter))
+      _ <- runFrame ctx drag ui
+      V2 offX1 _ <- getScrollOffset2D ctx (respId resp)
+      assertGt failed offX1 offX0
+      let
+        release = drag {inputMouseDown = False, inputMouseReleased = True}
+      _ <- runFrame ctx release ui
+      store <- getStore ctx
+      let
+        key = intKey (respId resp)
+        st = loadTextAreaState store key
+      assertEq failed (toText (buffer st)) longLine
+      assert failed (selectionAnchor st == getCursor (buffer st))
 
 runTextArea2DScrollTest :: Context -> IORef Int -> IO ()
 runTextArea2DScrollTest ctx failed = do
@@ -905,37 +826,34 @@ runTextArea2DScrollTest ctx failed = do
     inp0 = withInput 320 220
     ui = column (labeledArea "Notes" text2D)
   (resp, _) <- warmup2 ctx inp0 ui
-  mRect <- getPrevRect ctx (respId resp)
-  case mRect of
-    Just (Rect rx ry rw rh) -> do
-      let
-        fm = ctxFontMetrics ctx
-        field = Rect rx ry rw rh
-        contentH = 40 * textAreaLineHeight fm
-        contentW = maximum (0 : [lineWidth fm l | l <- lines2D])
-        barLaneW = textAreaBarLane
-        barLaneH = textAreaBarLane
-        layouts = textAreaScrollBarLayouts fm field contentW contentH 0 0
-      case (tasbVertical layouts, tasbHorizontal layouts) of
-        (Just vLayout, Just hLayout) -> do
-          let
-            vTrack = sbTrack vLayout
-            hTrack = sbTrack hLayout
-          assert
-            failed
-            (rectY vTrack + rectH vTrack <= rectY field + rectH field - barLaneH + 1)
-          assert
-            failed
-            (rectX hTrack + rectW hTrack <= rectX field + rectW field - barLaneW + 1)
-          let
-            pos = V2 (rectX field + rectW field / 2) (rectY field + rectH field / 2)
-            wheel2D = inp0 {inputMousePos = pos, inputScroll = V2 2 3}
-          _ <- runFrame ctx wheel2D ui
-          V2 offX offY <- getScrollOffset2D ctx (respId resp)
-          assertGt failed offX 0
-          assertGt failed offY 0
-        _ -> assert failed False
-    _ -> assert failed False
+  assertJustM failed (getPrevRect ctx (respId resp)) $ \(Rect rx ry rw rh) -> do
+    let
+      fm = ctxFontMetrics ctx
+      field = Rect rx ry rw rh
+      contentH = 40 * textAreaLineHeight fm
+      contentW = maximum (0 : [lineWidth fm l | l <- lines2D])
+      barLaneW = textAreaBarLane
+      barLaneH = textAreaBarLane
+      layouts = textAreaScrollBarLayouts fm field contentW contentH 0 0
+    case (tasbVertical layouts, tasbHorizontal layouts) of
+      (Just vLayout, Just hLayout) -> do
+        let
+          vTrack = sbTrack vLayout
+          hTrack = sbTrack hLayout
+        assert
+          failed
+          (rectY vTrack + rectH vTrack <= rectY field + rectH field - barLaneH + 1)
+        assert
+          failed
+          (rectX hTrack + rectW hTrack <= rectX field + rectW field - barLaneW + 1)
+        let
+          pos = spanCenter field
+          wheel2D = inp0 {inputMousePos = pos, inputScroll = V2 2 3}
+        _ <- runFrame ctx wheel2D ui
+        V2 offX offY <- getScrollOffset2D ctx (respId resp)
+        assertGt failed offX 0
+        assertGt failed offY 0
+      _ -> assert failed False
 
 runTextAreaScrollCursorLeavesViewportTest :: Context -> IORef Int -> IO ()
 runTextAreaScrollCursorLeavesViewportTest ctx failed = do
@@ -946,55 +864,52 @@ runTextAreaScrollCursorLeavesViewportTest ctx failed = do
   (resp, _) <- warmup2 ctx inp0 ui
   -- Focus the textarea via Tab
   _ <- runFrame ctx (tabInp inp0) ui
-  mRect <- getPrevRect ctx (respId resp)
-  case mRect of
-    Just (Rect rx ry rw rh) -> do
-      let
-        field = Rect rx ry rw rh
-        pos = V2 (rectX field + rectW field / 2) (rectY field + rectH field / 2)
-        key = intKey (respId resp)
+  assertJustM failed (getPrevRect ctx (respId resp)) $ \(Rect rx ry rw rh) -> do
+    let
+      field = Rect rx ry rw rh
+      pos = spanCenter field
+      key = intKey (respId resp)
 
-      -- Verify cursor is at top (line 0, col 0) and scroll is 0
-      store0 <- getStore ctx
-      let
-        st0 = loadTextAreaState store0 key
-        Cursor r0 c0 = getCursor (buffer st0)
-      assertEq failed (r0, c0) (0, 0)
-      off0 <- getScrollOffset ctx (respId resp)
-      assertEq failed off0 0
+    -- Verify cursor is at top (line 0, col 0) and scroll is 0
+    store0 <- getStore ctx
+    let
+      st0 = loadTextAreaState store0 key
+      Cursor r0 c0 = getCursor (buffer st0)
+    assertEq failed (r0, c0) (0, 0)
+    off0 <- getScrollOffset ctx (respId resp)
+    assertEq failed off0 0
 
-      -- Scroll down while focused: caret stays at line 0, but viewport scrolls down
-      let
-        wheelDown = inp0 {inputMousePos = pos, inputScroll = V2 0 5}
-      _ <- runFrame ctx wheelDown ui
-      off1 <- getScrollOffset ctx (respId resp)
-      assertGt failed off1 0
+    -- Scroll down while focused: caret stays at line 0, but viewport scrolls down
+    let
+      wheelDown = inp0 {inputMousePos = pos, inputScroll = V2 0 5}
+    _ <- runFrame ctx wheelDown ui
+    off1 <- getScrollOffset ctx (respId resp)
+    assertGt failed off1 0
 
-      -- Run an idle frame while textarea remains focused to ensure scroll offset does not snap back!
-      _ <- runFrame ctx inp0 ui
-      offIdle <- getScrollOffset ctx (respId resp)
-      assertEq failed offIdle off1
+    -- Run an idle frame while textarea remains focused to ensure scroll offset does not snap back!
+    _ <- runFrame ctx inp0 ui
+    offIdle <- getScrollOffset ctx (respId resp)
+    assertEq failed offIdle off1
 
-      -- Verify caret in buffer is still at (0, 0) even though viewport scrolled down
-      store1 <- getStore ctx
-      let
-        st1 = loadTextAreaState store1 key
-        Cursor r1 c1 = getCursor (buffer st1)
-      assertEq failed (r1, c1) (0, 0)
+    -- Verify caret in buffer is still at (0, 0) even though viewport scrolled down
+    store1 <- getStore ctx
+    let
+      st1 = loadTextAreaState store1 key
+      Cursor r1 c1 = getCursor (buffer st1)
+    assertEq failed (r1, c1) (0, 0)
 
-      -- Now send keyboard input: typing or navigating MUST bring the cursor back into view!
-      let
-        typeChar = inp0 {inputChars = "!"}
-      _ <- runFrame ctx typeChar ui
-      offAfterKey <- getScrollOffset ctx (respId resp)
-      -- Cursor is at (0, 1), so ensureCaretVisible brings scroll offset back to 0
-      assertEq failed offAfterKey 0
-      store2 <- getStore ctx
-      let
-        st2 = loadTextAreaState store2 key
-        Cursor r2 c2 = getCursor (buffer st2)
-      assertEq failed (r2, c2) (0, 1)
-    _ -> assert failed False
+    -- Now send keyboard input: typing or navigating MUST bring the cursor back into view!
+    let
+      typeChar = inp0 {inputChars = "!"}
+    _ <- runFrame ctx typeChar ui
+    offAfterKey <- getScrollOffset ctx (respId resp)
+    -- Cursor is at (0, 1), so ensureCaretVisible brings scroll offset back to 0
+    assertEq failed offAfterKey 0
+    store2 <- getStore ctx
+    let
+      st2 = loadTextAreaState store2 key
+      Cursor r2 c2 = getCursor (buffer st2)
+    assertEq failed (r2, c2) (0, 1)
 
 -- | A backend-requested redraw (expose/restore, dialog-completion wake) must
 -- request a frame even though no user input changed. Regression: the file
@@ -1022,46 +937,41 @@ runTextAreaMenuPulseTest ctx failed = do
     ui = column (held textRef (textAreaWith' grow))
   (resp0, initial) <- warmup2 ctx inp0 ui
   assertEq failed initial "abc"
-  mHit <- textAreaHitForWidget ctx (respId resp0)
-  case mHit of
-    Nothing -> assert failed False
-    Just hit -> do
+  assertJustM failed (textAreaHitForWidget ctx (respId resp0)) $ \hit -> do
+    let
+      field = tahFieldRect hit
+      mid = spanCenter field
+    -- Focus the editor, as a menu pick would.
+    let
+      (focusPress, focusRelease) = clickPair inp0 mid
+    _ <- runFrame ctx focusPress ui >> runFrame ctx focusRelease ui
+    -- Selection-only actions do not pulse: no text delta.
+    _ <- runFrame ctx inp0 (runTextCommand (respId resp0) SelectAll)
+    ((respSel, valSel), _, _, _) <- runFrame ctx inp0 ui
+    assert failed (not (respChanged respSel))
+    assertEq failed valSel "abc"
+    let
+      menuOpen =
+        inp0
+          { inputMousePos = mid
+          , inputMouseRightDown = True
+          , inputMouseRightPressed = True
+          }
+    _ <- runFrame ctx menuOpen ui
+    overlays <- collectOverlayTextSpans ctx menuOpen
+    assertJust failed (spanRectOf "Cut" overlays) $ \r -> do
+      -- The Cut runs through the field's command path on the press
+      -- frame; the very next frame (release) must deliver the pulse and
+      -- the emptied text, then go quiet again.
       let
-        field = tahFieldRect hit
-        mid = V2 (rectX field + rectW field / 2) (rectY field + rectH field / 2)
-      -- Focus the editor, as a menu pick would.
-      let
-        (focusPress, focusRelease) = clickPair inp0 mid
-      _ <- runFrame ctx focusPress ui >> runFrame ctx focusRelease ui
-      -- Selection-only actions do not pulse: no text delta.
-      _ <- runFrame ctx inp0 (runTextCommand (respId resp0) SelectAll)
-      ((respSel, valSel), _, _, _) <- runFrame ctx inp0 ui
-      assert failed (not (respChanged respSel))
-      assertEq failed valSel "abc"
-      let
-        menuOpen =
-          inp0
-            { inputMousePos = mid
-            , inputMouseRightDown = True
-            , inputMouseRightPressed = True
-            }
-      _ <- runFrame ctx menuOpen ui
-      overlays <- collectOverlayTextSpans ctx menuOpen
-      case [r | (r, txt, _, _, _) <- overlays, txt == "Cut"] of
-        (r : _) -> do
-          -- The Cut runs through the field's command path on the press
-          -- frame; the very next frame (release) must deliver the pulse and
-          -- the emptied text, then go quiet again.
-          let
-            (pickPress, pickRelease) = clickPair inp0 (spanCenter r)
-          _ <- runFrame ctx pickPress ui
-          ((resp, val), _, _, _) <- runFrame ctx pickRelease ui
-          assert failed (respChanged resp)
-          assertEq failed val ""
-          ((respIdle, valIdle), _, _, _) <- runFrame ctx inp0 ui
-          assert failed (not (respChanged respIdle))
-          assertEq failed valIdle ""
-        _ -> assert failed False
+        (pickPress, pickRelease) = clickPair inp0 (spanCenter r)
+      _ <- runFrame ctx pickPress ui
+      ((resp, val), _, _, _) <- runFrame ctx pickRelease ui
+      assert failed (respChanged resp)
+      assertEq failed val ""
+      ((respIdle, valIdle), _, _, _) <- runFrame ctx inp0 ui
+      assert failed (not (respChanged respIdle))
+      assertEq failed valIdle ""
 
 -- | A command run from a button elsewhere (an app's Edit menu) focuses the
 -- field it edits, so Select All followed by typing replaces the text.
@@ -1094,31 +1004,28 @@ runTextAreaRemountScrollTest ctx failed = do
     mkUi k = column $ keyed k $ textAreaWith' grow longText
   _ <- warmup2 ctx inp0 (mkUi (1 :: Int))
   (resp, _) <- warmup2 ctx inp0 (mkUi (2 :: Int))
-  mHit <- textAreaHitForWidget ctx (respId resp)
-  case mHit of
-    Nothing -> assert failed False
-    Just hit -> do
-      let
-        field = tahFieldRect hit
-        pos = V2 (rectX field + rectW field / 2) (rectY field + rectH field / 2)
-        -- Large delta so hover animations settle within the warm-up frames
-        -- and the idle frame below reports no damage of its own.
-        settleDt = 1.0
-        hover = inp0 {inputMousePos = pos, inputDeltaTime = settleDt}
-        warmupFrames = 4 :: Int
-      -- Park the pointer over the editor first, so the wheel frame does not
-      -- also change the hot widget (whose damage would mask a missing scroll
-      -- repaint).
-      replicateM_ warmupFrames (runFrame ctx hover (mkUi (2 :: Int)))
-      dmgIdle <- takeDamage ctx
-      assert failed (damageIsEmpty dmgIdle)
-      off0 <- getScrollOffset ctx (respId resp)
-      _ <- runFrame ctx hover {inputScroll = V2 0 1} (mkUi (2 :: Int))
-      off1 <- getScrollOffset ctx (respId resp)
-      assertGt failed off1 off0
-      -- The scroll offset must also damage the editor, or nothing repaints.
-      dmg <- takeDamage ctx
-      assert failed (not (damageIsEmpty dmg))
+  assertJustM failed (textAreaHitForWidget ctx (respId resp)) $ \hit -> do
+    let
+      field = tahFieldRect hit
+      pos = spanCenter field
+      -- Large delta so hover animations settle within the warm-up frames
+      -- and the idle frame below reports no damage of its own.
+      settleDt = 1.0
+      hover = inp0 {inputMousePos = pos, inputDeltaTime = settleDt}
+      warmupFrames = 4 :: Int
+    -- Park the pointer over the editor first, so the wheel frame does not
+    -- also change the hot widget (whose damage would mask a missing scroll
+    -- repaint).
+    replicateM_ warmupFrames (runFrame ctx hover (mkUi (2 :: Int)))
+    dmgIdle <- takeDamage ctx
+    assert failed (damageIsEmpty dmgIdle)
+    off0 <- getScrollOffset ctx (respId resp)
+    _ <- runFrame ctx hover {inputScroll = V2 0 1} (mkUi (2 :: Int))
+    off1 <- getScrollOffset ctx (respId resp)
+    assertGt failed off1 off0
+    -- The scroll offset must also damage the editor, or nothing repaints.
+    dmg <- takeDamage ctx
+    assert failed (not (damageIsEmpty dmg))
 
 -- | Ctrl+Z and Ctrl+Shift+Z undo and redo typing in a field; commands run from
 -- outside the frame edit it and pulse 'respChanged'; replacing the value the
@@ -1190,8 +1097,7 @@ runTextAreaDocumentTest ctx failed = do
       before <- readIORef ref
       ((resp, after), undoable) <- (\(a, _, _, _) -> a) <$> runFrame ctx i ui
       pure (before, resp, after, undoable)
-  _ <- warmup2 ctx inp ui
-  _ <- runFrame ctx (tabInp inp) ui
+  warmupFocused ctx inp ui
   (idleIn, idleResp, idleOut, _) <- frame inp
   assert failed (sameDocument idleIn idleOut)
   assert failed (not (respChanged idleResp))
@@ -1223,8 +1129,7 @@ runTextAreaDocumentTest ctx failed = do
     copies = column (void (textAreaDocument =<< uiIO (textDocument <$> readIORef source)))
     idle = inp {inputDeltaTime = 1}
   _ <- warmup2 copyCtx inp copies
-  _ <- runFrame copyCtx idle copies
-  _ <- runFrame copyCtx idle copies
+  _ <- warmup2 copyCtx idle copies
   assert failed . not =<< needsRedraw copyCtx idle idle
 
 -- | The content width a text area keeps up to date line by line matches a
@@ -1239,15 +1144,12 @@ runTextAreaWidthTrackingTest ctx failed = do
     ctrl = Modifiers False True False
     check = do
       (resp, _) <- frame inp
-      mHit <- textAreaHitForWidget ctx (respId resp)
-      case mHit of
-        Nothing -> assert failed False
-        Just hit -> do
-          (tracked, _) <- textAreaContentMetrics ctx (tahNodeIdx hit)
-          text <- readIORef ref
-          fm <- resolveTextAreaFont ctx (tahNodeIdx hit)
-          widths <- mapM (lineWidthIO fm) (T.splitOn "\n" text)
-          assertEq failed (maximum widths) tracked
+      assertJustM failed (textAreaHitForWidget ctx (respId resp)) $ \hit -> do
+        (tracked, _) <- textAreaContentMetrics ctx (tahNodeIdx hit)
+        text <- readIORef ref
+        fm <- resolveTextAreaFont ctx (tahNodeIdx hit)
+        widths <- mapM (lineWidthIO fm) (T.splitOn "\n" text)
+        assertEq failed (maximum widths) tracked
   _ <- warmup2 ctx inp ui
   _ <- frame (tabInp inp)
   check
@@ -1287,22 +1189,17 @@ runTextAreaMenuSelectAllTest ctx failed = do
     inp0 = withInput 400 300
     ui = column (textAreaWith' grow original)
   (resp, _) <- warmup2 ctx inp0 ui
-  mHit <- textAreaHitForWidget ctx (respId resp)
-  case mHit of
-    Nothing -> assert failed False
-    Just hit -> do
-      let
-        field = tahFieldRect hit
-        mid = V2 (rectX field + rectW field / 3) (rectY field + rectH field / 3)
-        menuOpen = fst (rightClickPair inp0 mid)
-      _ <- runClick ctx inp0 ui mid
-      _ <- runFrame ctx menuOpen ui
-      overlays <- collectOverlayTextSpans ctx menuOpen
-      case findExact "Select All" overlays of
-        Just pos -> do
-          _ <- runClick ctx inp0 ui pos
-          store <- getStore ctx
-          let st = loadTextAreaState store (intKey (respId resp))
-          assertEq failed (selectionAnchor st) (Cursor 0 0)
-          assertEq failed (getCursor (buffer st)) (Cursor lastRow (T.length lastLine))
-        Nothing -> assert failed False
+  assertJustM failed (textAreaHitForWidget ctx (respId resp)) $ \hit -> do
+    let
+      field = tahFieldRect hit
+      mid = V2 (rectX field + rectW field / 3) (rectY field + rectH field / 3)
+      menuOpen = fst (rightClickPair inp0 mid)
+    _ <- runClick ctx inp0 ui mid
+    _ <- runFrame ctx menuOpen ui
+    overlays <- collectOverlayTextSpans ctx menuOpen
+    assertJust failed (findExact "Select All" overlays) $ \pos -> do
+      _ <- runClick ctx inp0 ui pos
+      store <- getStore ctx
+      let st = loadTextAreaState store (intKey (respId resp))
+      assertEq failed (selectionAnchor st) (Cursor 0 0)
+      assertEq failed (getCursor (buffer st)) (Cursor lastRow (T.length lastLine))

@@ -12,7 +12,7 @@ import Data.IORef (IORef)
 import Data.Text qualified as T
 import NanoUI
 import NanoUI.Testing
-import NanoUI.Testing.Assert (assert, assertEq, assertGt, evalUi, withInput)
+import NanoUI.Testing.Assert (assert, assertEq, assertGt, assertJust, evalUi, withInput)
 import NanoUI.Testing.Harness
   ( centerOf
   , checkIdleFullDamage
@@ -49,26 +49,24 @@ runModalOverlayTest ctx failed = do
   assert failed (any (\(_, txt, _, _, _) -> "Inside" `T.isInfixOf` txt) overlays)
   assert failed (not (any (\(_, txt, _, _, _) -> T.strip txt == "X") overlays))
 
-  case mInside0 of
-    Nothing -> assert failed False
-    Just inside -> do
-      let (pressIn, releaseIn) = clickPair inp0 (centerOf inside)
-      _ <- runFrame ctx pressIn ui
-      ((_, _, mClicked), _, _, _) <- runFrame ctx releaseIn ui
-      assert failed (maybe False respClicked mClicked)
+  assertJust failed mInside0 $ \inside -> do
+    let (pressIn, releaseIn) = clickPair inp0 (centerOf inside)
+    _ <- runFrame ctx pressIn ui
+    ((_, _, mClicked), _, _, _) <- runFrame ctx releaseIn ui
+    assert failed (maybe False respClicked mClicked)
 
-      let (backdrop, _) = clickPair inp0 (V2 4 4)
-      ((_, dlgHit, _), _, _, _) <- runFrame ctx backdrop ui
-      assert failed (respClicked dlgHit)
+    let (backdrop, _) = clickPair inp0 (V2 4 4)
+    ((_, dlgHit, _), _, _, _) <- runFrame ctx backdrop ui
+    assert failed (respClicked dlgHit)
 
-      let esc = keyInp KeyEscape inp0
-      ((_, dlgEsc, _), _, _, _) <- runFrame ctx esc ui
-      assert failed (respClicked dlgEsc)
-      consumed <- overlayConsumesQuit ctx esc
-      assert failed consumed
-      _ <- runFrame ctx esc closedUi
-      leftover <- overlayConsumesQuit ctx esc
-      assert failed (not leftover)
+    let esc = keyInp KeyEscape inp0
+    ((_, dlgEsc, _), _, _, _) <- runFrame ctx esc ui
+    assert failed (respClicked dlgEsc)
+    consumed <- overlayConsumesQuit ctx esc
+    assert failed consumed
+    _ <- runFrame ctx esc closedUi
+    leftover <- overlayConsumesQuit ctx esc
+    assert failed (not leftover)
 
   let tallUi = modal True "Tall" $ do
         forM_ [1 .. 40 :: Int] (\i -> label (T.pack ("Row " <> show i)))
@@ -109,8 +107,7 @@ runModalCloseDamageTest ctx failed = do
       inp0 = withInputOff 320 240
       esc = keyInp KeyEscape inp0
       idle = inp0 {inputDeltaTime = 1}
-  _ <- runFrame ctx inp0 ui
-  (resp, _, _, _) <- runFrame ctx inp0 ui
+  resp <- warmup2 ctx inp0 ui
   _ <- runClick ctx inp0 ui (centerOf resp)
   checkIdleFullDamage failed ctx idle idle ui
   _ <- runFrame ctx esc ui
@@ -200,9 +197,7 @@ runModalFillLabelFitsTest _ failed = forM_ [12, 17] $ \base -> do
   spans1 <- collectOverlayTextSpans ctx wheel
   assert failed (not (null (spanYOf "An API token" spans0)))
   assertEq failed (spanYOf "An API token" spans1) (spanYOf "An API token" spans0)
-  case mOk of
-    Nothing -> assert failed False
-    Just ok -> do
-      let Rect _ dy _ dh = respRect dlg
-          Rect _ by _ bh = respRect ok
-      assertGt failed (dy + dh + 0.5) (by + bh)
+  assertJust failed mOk $ \ok -> do
+    let Rect _ dy _ dh = respRect dlg
+        Rect _ by _ bh = respRect ok
+    assertGt failed (dy + dh + 0.5) (by + bh)
