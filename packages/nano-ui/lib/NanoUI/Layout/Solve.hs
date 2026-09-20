@@ -1521,11 +1521,8 @@ copyScratchRange :: MutablePrimArray RealWorld Float -> MutablePrimArray RealWor
 copyScratchRange wArr hArr outW outH !i !end
   | i >= end = pure ()
   | otherwise = do
-      w <- readPrimArray wArr i
-      h <- readPrimArray hArr i
-      writePrimArray outW i w
-      writePrimArray outH i h
-      copyScratchRange wArr hArr outW outH (i + 1) end
+      copyMutablePrimArray outW i wArr i (end - i)
+      copyMutablePrimArray outH i hArr i (end - i)
 
 {-# INLINE sumScratchAxis #-}
 sumScratchAxis :: MutablePrimArray RealWorld Float -> MutablePrimArray RealWorld Float -> Bool -> Int -> Int -> Float -> IO Float

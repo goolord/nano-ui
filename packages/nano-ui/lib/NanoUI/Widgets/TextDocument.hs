@@ -22,7 +22,7 @@ module NanoUI.Widgets.TextDocument
   , sameLines
   ) where
 
-import Data.Foldable (toList)
+import Data.Functor.Classes (liftEq)
 import Data.Maybe (fromMaybe)
 import Data.Sequence (Seq)
 import Data.Sequence qualified as Seq
@@ -42,9 +42,7 @@ newtype TextDocument = TextDocument (Seq Text)
 instance Eq TextDocument where
   a == b =
     sameDocument a b
-      || ( documentLineCount a == documentLineCount b
-            && and (zipWith sameLine (toList (documentLines a)) (toList (documentLines b)))
-         )
+      || liftEq sameLine (documentLines a) (documentLines b)
     where
       sameLine !x !y = isTrue# (reallyUnsafePtrEquality# x y) || x == y
 
