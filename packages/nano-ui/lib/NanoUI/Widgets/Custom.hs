@@ -68,6 +68,7 @@ module NanoUI.Widgets.Custom
   ) where
 
 import Control.Monad (forM_, void, when)
+import Control.Monad.Trans.State.Strict qualified as State
 import Data.IORef (readIORef)
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -154,31 +155,17 @@ import NanoUI.Widgets.Animate (keepAnimating)
 -- -----------------------------------------------------------------------------
 
 -- | Monadic canvas builder that collects 'DrawOp' vector operations efficiently.
-newtype CanvasM a = CanvasM { runCanvasM :: ([DrawOp] -> [DrawOp]) -> (a, [DrawOp] -> [DrawOp]) }
-
-instance Functor CanvasM where
-  fmap f (CanvasM m) = CanvasM $ \s ->
-    case m s of (a, s') -> (f a, s')
-
-instance Applicative CanvasM where
-  pure a = CanvasM $ \s -> (a, s)
-  CanvasM mf <*> CanvasM mx = CanvasM $ \s ->
-    case mf s of
-      (f, s1) -> case mx s1 of
-        (x, s2) -> (f x, s2)
-
-instance Monad CanvasM where
-  CanvasM m >>= f = CanvasM $ \s ->
-    case m s of (a, s') -> runCanvasM (f a) s'
+newtype CanvasM a = CanvasM (State.State ([DrawOp] -> [DrawOp]) a)
+  deriving (Functor, Applicative, Monad)
 
 -- | Compile a 'CanvasM' block into an immutable 'SmallArray DrawOp'.
+{-# INLINE runCanvas #-}
 runCanvas :: CanvasM a -> SmallArray DrawOp
-runCanvas (CanvasM m) =
-  let (_, diff) = m id
-   in smallArrayFromList (diff [])
+runCanvas (CanvasM m) = smallArrayFromList (State.execState m id [])
 
+{-# INLINE emitOp #-}
 emitOp :: DrawOp -> CanvasM ()
-emitOp op = CanvasM $ \diff -> ((), diff . (op :))
+emitOp op = CanvasM (State.modify (. (op :)))
 
 -- | Fill a solid rectangle.
 drawRect :: Rect -> Color -> CanvasM ()

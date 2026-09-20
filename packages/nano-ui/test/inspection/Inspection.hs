@@ -17,11 +17,14 @@ module Main
   , channelByHand
   , commandReadProbe
   , commandWriteProbe
+  , canvasProbe
+  , canvasByHand
   ) where
 
 import Data.IntMap.Strict qualified as IM
 import Data.Text (Text)
 import Data.Functor.Identity (Identity (..))
+import Data.Primitive.SmallArray (SmallArray, smallArrayFromList)
 import Data.Word (Word32, Word8)
 import Data.Vector.Unboxed qualified as U
 import Data.Vector.Unboxed.Mutable qualified as UM
@@ -32,8 +35,8 @@ import Test.Inspection
 
 import NanoUI.SIMD qualified as SIMD
 import NanoUI.Store
-import NanoUI (Animatable (..), V2 (..))
-import NanoUI.Testing (DrawCmd (..), Layer (..))
+import NanoUI (Animatable (..), V2 (..), Rect (..), Color, drawRect, drawCircle, runCanvas)
+import NanoUI.Testing (DrawCmd (..), DrawOp (..), Layer (..))
 
 main :: IO ()
 main = putStrLn "inspection invariants hold"
@@ -119,3 +122,13 @@ inspect $ hasNoTypeClasses 'commandReadProbe
 inspect $ hasNoTypeClasses 'commandWriteProbe
 inspect $ 'commandReadProbe `doesNotUse` 'U.fromURepr
 inspect $ 'commandWriteProbe `doesNotUse` 'U.toURepr
+
+canvasProbe :: Float -> Color -> SmallArray DrawOp
+canvasProbe x color = runCanvas $ do
+  drawRect (Rect x 2 3 4) color
+  drawCircle (V2 5 x) 6 color
+
+canvasByHand :: Float -> Color -> SmallArray DrawOp
+canvasByHand !x color = smallArrayFromList [FillRect (Rect x 2 3 4) color, FillCircle 5 x 6 color]
+
+inspect $ 'canvasProbe === 'canvasByHand

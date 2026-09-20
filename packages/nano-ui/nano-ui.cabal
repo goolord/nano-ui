@@ -180,6 +180,7 @@ library
         primitive ^>=0.9,
         text ^>=2.1,
         text-short ^>=0.1.6,
+        transformers ^>=0.6,
         unordered-containers ^>=0.2,
         vector ^>=0.13
     hs-source-dirs:   lib
@@ -271,6 +272,7 @@ test-suite nano-ui-inspection
     build-depends:
         containers,
         inspection-testing,
+        primitive ^>=0.9,
         vector ^>=0.13,
         text ^>=2.1
     hs-source-dirs:   test/inspection
