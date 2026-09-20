@@ -662,14 +662,24 @@ runPaneGridMixedDragTest ctx failed = do
         Just dp -> do
           assert failed (abs (rectW (dpRect dp) - rectW source) < 0.01)
           assertEq failed (M.lookup 1 (fst (layoutNode minSize gutter (dpTree dp) base))) (Just (dpRect dp))
-    -- Original height is 400; the other subtree needs 84 plus the gutter.
-    case sized (DropTop AxisH onA) of
-      Nothing -> assert failed False
-      Just dp -> assert failed (abs (rectH (dpRect dp) - 312) < 0.01)
+    -- A thin left pane transfers its width to height on top/bottom drops.
+    forM_ [DropTop AxisH onA, DropSplit 3 AxisH onA] $ \dt ->
+      case sized dt of
+        Nothing -> assert failed False
+        Just dp -> assert failed (abs (rectH (dpRect dp) - rectW source) < 0.01)
     let source2 = fst (layoutNode minSize gutter sizedTree base) M.! 2
     case dropPreviewTreeSized (Just source2) minSize gutter sizedTree 2 102 base (DropTop AxisH onA) of
       Nothing -> assert failed False
       Just dp -> assert failed (abs (rectH (dpRect dp) - rectH source2) < 0.01)
+    -- Reverse orientation: a short top pane transfers height to width.
+    forM_ [DropTop AxisV onA, DropSplit 3 AxisV onA] $ \dt ->
+      case dropPreviewTreeSized (Just source2) minSize gutter sizedTree 2 102 base dt of
+        Nothing -> assert failed False
+        Just dp -> assert failed (abs (rectW (dpRect dp) - rectH source2) < 0.01)
+    -- Transferred sizes still respect the destination subtree's minimum.
+    case dropPreviewTreeSized (Just (Rect 0 0 500 400)) minSize gutter sizedTree 1 102 base (DropTop AxisH onA) of
+      Nothing -> assert failed False
+      Just dp -> assert failed (abs (rectH (dpRect dp) - 312) < 0.01)
   assertEq failed (fmap dpRect (sized (DropSwap 2))) (M.lookup 2 (fst (layoutNode minSize gutter sizedTree base)))
 
   -- Widget level: build the same mixed grid through a live paneGrid, drag the

@@ -187,8 +187,9 @@ data PaneGridConfig es = PaneGridConfig
     -- instead of a single pane: the tree is wrapped in a new top-level split
     -- with the dragged pane on that side.
   , pgPreserveDragSize :: !Bool
-    -- ^ Retain the dragged pane's width on left/right drops, or height on
-    -- top/bottom drops, subject to available space and subtree minima. The
+    -- ^ Retain the dragged pane's extent along its original parent split's
+    -- axis, transferring width to height (or vice versa) when the drop changes
+    -- orientation, subject to available space and subtree minima. The
     -- preview shows the same size as the committed drop. Center swaps are
     -- unaffected (default 'False', which splits the destination equally).
   , pgViewPane :: !(Word64 -> PaneGridCtx es -> Eff es PaneView)

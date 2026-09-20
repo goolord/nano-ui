@@ -374,8 +374,10 @@ data DropPreview = DropPreview
 dropPreviewTree :: Float -> Float -> GridNode -> Word64 -> Word64 -> Rect -> PaneDrop -> Maybe DropPreview
 dropPreviewTree = dropPreviewTreeSized Nothing
 
--- | Like 'dropPreviewTree', but optionally retain the source pane's width for
--- left/right drops or height for top/bottom drops. The requested size is
+-- | Like 'dropPreviewTree', but optionally retain the source pane's extent
+-- along its parent split's axis, transferring it to the destination axis.
+-- A thin left/right pane thus stays thin when moved to the top/bottom.
+-- The requested size is
 -- clamped to the destination's subtree minima. Center swaps ignore the size.
 -- Pass the source rect from the committed layout, never the preview layout.
 dropPreviewTreeSized :: Maybe Rect -> Float -> Float -> GridNode -> Word64 -> Word64 -> Rect -> PaneDrop -> Maybe DropPreview
@@ -385,12 +387,17 @@ dropPreviewTreeSized source minSize spacing tree moved splitId baseRect dt = do
         (Just r, DropSplit _ axis onA) -> retain r axis onA t'
         (Just r, DropTop axis onA) -> retain r axis onA t'
         _ -> t'
+      sourceAxis (Pane _) = Nothing
+      sourceAxis (Split _ axis _ a b)
+        | a == Pane moved || b == Pane moved = Just axis
+        | otherwise = sourceAxis a <|> sourceAxis b
       retain r axis onA t =
         case find ((== splitId) . diSplitId) (snd (layoutNode minSize spacing t baseRect)) of
           Just d
             | let usable = mainLen axis (diRegion d) - spacing
             , usable > 0 ->
-                let share = mainLen axis r / usable
+                let extent = mainLen (maybe axis id (sourceAxis tree)) r
+                    share = extent / usable
                     ratio = if onA then share else 1 - share
                  in treeSetRatio splitId (clampTreeRatio t splitId (diRegion d) spacing minSize ratio) t
           _ -> t
