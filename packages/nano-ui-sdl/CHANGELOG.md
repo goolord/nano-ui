@@ -28,7 +28,10 @@
   Devanagari opens 59 file descriptors instead of 959.
 - A shaped line is shaped once and shared by measuring, preparing and
   drawing, and the font directories are walked once per process.
-- No longer depends on `vector`.
+- Command rendering uses the core's unboxed vectors, traversing the already
+  layer-ordered command stream directly.
+- Session resources are composed with `Data.Acquire` from `resourcet`; each
+  acquisition carries its release action. This adds no per-frame resource layer.
 - The framebuffer, glyph rasterization and snapping follow the window's
   pixel density (`SDL_GetWindowPixelDensity`) instead of its display scale.
   On Windows window coordinates are already pixels, so at 125% scaling every
@@ -41,6 +44,9 @@
   for every pixel the border moves.
 
 ### Fixed
+
+- A failed window/renderer acquisition shuts down SDL's initialized subsystems.
+  Resources acquired before later startup failures are released too.
 
 - `saveScreenshot` reads the retained frame. It read the window
   backbuffer, which SDL leaves undefined after a present.

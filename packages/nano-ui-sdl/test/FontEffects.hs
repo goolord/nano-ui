@@ -4,20 +4,33 @@ import Control.Exception (IOException, evaluate, try)
 import Control.Monad (forM_, unless, void)
 import Data.List (isInfixOf)
 import Data.IORef (writeIORef)
+import Data.Word (Word32)
 import qualified Data.Text as T
 import Data.Primitive.PrimArray (indexPrimArray, sizeofPrimArray)
 import NanoUI
 import NanoUI.Testing (newPixelContext, textIndexAtX)
-import NanoUI.Backend.Sdl (NanoUIFont (..), SdlEnv (..), syncDisplay, withSdlBench)
+import NanoUI.Backend.Sdl (NanoUIFont (..), SdlEnv (..), SdlOptions (..), defaultSdlOptions, syncDisplay, withSdl, withSdlBench)
 import NanoUI.Context (ctxResolveFont, ctxResolveMeasure)
 import System.Environment (setEnv)
 import System.Mem (performGC)
+
+foreign import ccall unsafe "SDL_WasInit" wasInit :: Word32 -> IO Word32
 
 main :: IO ()
 main = do
   setEnv "SDL_VIDEODRIVER" "dummy"
   setEnv "SDL_RENDER_DRIVER" "software"
   ctx0 <- newPixelContext
+  -- Window creation fails after SDL initialization. Completed acquisitions
+  -- must still be released, and a subsequent session must open normally.
+  setEnv "SDL_RENDER_DRIVER" "nano-ui-test-unavailable-renderer"
+  failedStart <- try (withSdl defaultSdlOptions {sdlWindowHidden = True} ctx0 (\_ _ -> fail "unexpected window")) :: IO (Either IOException ())
+  setEnv "SDL_RENDER_DRIVER" "software"
+  case failedStart of
+    Left err | "SDL_CreateWindowAndRenderer failed" `isInfixOf` show err -> pure ()
+    _ -> fail "unavailable renderer did not fail at creation"
+  initialized <- wasInit 0
+  unless (initialized == 0) $ fail "failed acquisition leaked initialized SDL subsystems"
   (font, snapshot, width, quad) <- withSdlBench ctx0 $ \ctx env -> do
     (fm, _) <- ctxResolveFont ctx 16 WeightNormal FontStyleNormal FontRegular
     let text = "AV To fi café λ"
