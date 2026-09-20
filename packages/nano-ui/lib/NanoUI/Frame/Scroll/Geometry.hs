@@ -344,49 +344,21 @@ scrollBarLayoutIn ::
 scrollBarLayoutIn slot dir x y w h pad viewMain contentSize off =
   let (barW, barMargin) = scrollBarGeomFor slot
       minThumb = 16
-   in case dir of
-        DirColumn ->
-          let trailH = padB pad
-              extentH = contentSize + trailH
-              maxOff = scrollAxisRange contentSize viewMain trailH
-           in if maxOff <= 0
-                then Nothing
-                else
-                  let lane = scrollChromeLane slot DirColumn x y w h pad
-                      trackX = rectX lane
-                      trackY = y + padT pad + barMargin
-                      trackH = max 0 (viewMain - 2 * barMargin)
-                      thumbH = max minThumb (trackH * viewMain / extentH)
-                      ratio = off / maxOff
-                      thumbY = trackY + ratio * (trackH - thumbH)
-                   in
-                    Just
-                      ScrollBarLayout
-                        { sbTrack = Rect trackX trackY barW trackH
-                        , sbThumb = Rect trackX thumbY barW thumbH
-                        , sbMaxOff = maxOff
-                        }
-        DirRow ->
-          let trailW = padR pad
-              extentW = contentSize + trailW
-              maxOff = scrollAxisRange contentSize viewMain trailW
-           in if maxOff <= 0
-                then Nothing
-                else
-                  let lane = scrollChromeLane slot DirRow x y w h pad
-                      trackY = rectY lane
-                      trackX = x + padL pad + barMargin
-                      trackW = max 0 (viewMain - 2 * barMargin)
-                      thumbW = max minThumb (trackW * viewMain / extentW)
-                      ratio = off / maxOff
-                      thumbX = trackX + ratio * (trackW - thumbW)
-                   in
-                    Just
-                      ScrollBarLayout
-                        { sbTrack = Rect trackX trackY trackW barW
-                        , sbThumb = Rect thumbX trackY thumbW barW
-                        , sbMaxOff = maxOff
-                        }
+      lane = scrollChromeLane slot dir x y w h pad
+      (origin, trailing) = case dir of
+        DirColumn -> (y + padT pad, padB pad)
+        DirRow -> (x + padL pad, padR pad)
+      maxOff = scrollAxisRange contentSize viewMain trailing
+      trackStart = origin + barMargin
+      trackSize = max 0 (viewMain - 2 * barMargin)
+      thumbSize = max minThumb (trackSize * viewMain / (contentSize + trailing))
+      thumbStart = trackStart + (off / maxOff) * (trackSize - thumbSize)
+      band start size = case dir of
+        DirColumn -> Rect (rectX lane) start barW size
+        DirRow -> Rect start (rectY lane) size barW
+   in if maxOff <= 0
+        then Nothing
+        else Just (ScrollBarLayout (band trackStart trackSize) (band thumbStart thumbSize) maxOff)
 
 -- | Both-axis layouts for a native 2D scroller: (vertical, horizontal). Each
 -- axis's visible main extent is reduced by the other axis's live gutter, so
@@ -420,21 +392,11 @@ scrollOffsetFromThumb dir layout grabOff mouse =
   let maxOff = sbMaxOff layout
       track = sbTrack layout
       thumb = sbThumb layout
-   in case dir of
-        DirColumn ->
-          let trackY = rectY track
-              trackH = rectH track
-              thumbH = rectH thumb
-              thumbTop = v2Y mouse - grabOff
-              ratio = (thumbTop - trackY) / max 1 (trackH - thumbH)
-           in max 0 (min maxOff (ratio * maxOff))
-        DirRow ->
-          let trackX = rectX track
-              trackW = rectW track
-              thumbW = rectW thumb
-              thumbLeft = v2X mouse - grabOff
-              ratio = (thumbLeft - trackX) / max 1 (trackW - thumbW)
-           in max 0 (min maxOff (ratio * maxOff))
+      (trackStart, trackSize, thumbSize, pointer) = case dir of
+        DirColumn -> (rectY track, rectH track, rectH thumb, v2Y mouse)
+        DirRow -> (rectX track, rectW track, rectW thumb, v2X mouse)
+      ratio = (pointer - grabOff - trackStart) / max 1 (trackSize - thumbSize)
+   in max 0 (min maxOff (ratio * maxOff))
 
 textClipSlop :: Float
 textClipSlop = 4
