@@ -135,6 +135,14 @@ decoding, optics, and geometry; the raster renderer additionally brings
 Rasterific and font parsing. Moving these imports to another local package
 would not count as removing their dependency footprint.
 
+The arena pilot covers grid column count, minimum column width, and node value.
+Their existing six getters/setters occupy 18 nonblank implementation,
+signature, and pragma lines. The corresponding `Column` representation,
+constructor, generic read/write operations, and three descriptors occupy 20,
+before imports, exports, documentation, or caller changes. This small boundary
+demonstrates specialization but not a source reduction; it is not a claim that
+a future, broader schema redesign could never pay off.
+
 ## Verification and migration
 
 - `cabal build -j1 all`
@@ -142,6 +150,16 @@ would not count as removing their dependency footprint.
 - SDL demo, notepad, and logs `--selftest`: pass
 - Native RGFW profile: 500 frames complete
 - `cabal check`: core, SDL, RGFW, diagrams, and forms pass without warnings
+- `cabal sdist all`: all eight project archives generated, including ditto
+- Fresh project containing only unpacked source archives: full build and all
+  nine suites pass, including all 21 compiler inspection assertions
+
+The archive verification includes the renamed `NanoUI.Form.Input` module and
+confirms that the removed `Named` and `Unnamed` modules are absent. The isolated
+project uses the same compiler, SDL/SIMD flags, and single-job builds; none of
+its package entries refer to the original source checkout. Archives are unpacked
+before testing because Cabal treats tarball package entries as non-local
+dependencies and does not run their test suites directly.
 
 The core and form changelogs document the breaking API changes: indexed
 `Animatable` traversal, vector draw commands and cumulative layer offsets,
