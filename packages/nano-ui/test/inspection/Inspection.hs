@@ -15,12 +15,17 @@ module Main
   , storeReadByHand
   , channelProbe
   , channelByHand
+  , commandReadProbe
+  , commandWriteProbe
   ) where
 
 import Data.IntMap.Strict qualified as IM
 import Data.Text (Text)
 import Data.Functor.Identity (Identity (..))
 import Data.Word (Word32, Word8)
+import Data.Vector.Unboxed qualified as U
+import Data.Vector.Unboxed.Mutable qualified as UM
+import GHC.Exts (RealWorld)
 import Foreign.Ptr (Ptr)
 
 import Test.Inspection
@@ -28,6 +33,7 @@ import Test.Inspection
 import NanoUI.SIMD qualified as SIMD
 import NanoUI.Store
 import NanoUI (Animatable (..), V2 (..))
+import NanoUI.Testing (DrawCmd (..), Layer (..))
 
 main :: IO ()
 main = putStrLn "inspection invariants hold"
@@ -100,3 +106,16 @@ channelByHand delta (V2 x y) = V2 (x + delta) (y + delta)
 inspect $ 'channelProbe === 'channelByHand
 inspect $ hasNoTypeClasses 'channelProbe
 inspect $ 'channelProbe `hasNoType` ''[]
+
+commandReadProbe :: U.Vector DrawCmd -> Int -> Float
+commandReadProbe cmds i =
+  let cmd = U.unsafeIndex cmds i
+   in cmdClipX cmd + cmdClipY cmd + cmdClipW cmd + cmdClipH cmd
+
+commandWriteProbe :: UM.MVector RealWorld DrawCmd -> Int -> Float -> Word32 -> IO ()
+commandWriteProbe cmds i x count = UM.unsafeWrite cmds i (DrawCmd x x x x i count count LayerContent)
+
+inspect $ hasNoTypeClasses 'commandReadProbe
+inspect $ hasNoTypeClasses 'commandWriteProbe
+inspect $ 'commandReadProbe `doesNotUse` 'U.fromURepr
+inspect $ 'commandWriteProbe `doesNotUse` 'U.toURepr

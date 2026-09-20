@@ -4,6 +4,8 @@ import Control.Monad (forM, forM_, void)
 import Data.IORef (IORef, newIORef, modifyIORef', readIORef)
 import Data.List (sort)
 import Data.Primitive.PrimArray (primArrayToList)
+import Data.Vector.Unboxed qualified as U
+import Data.Vector.Unboxed.Mutable qualified as UM
 import Data.Word (Word32, Word8)
 import Foreign.Marshal.Alloc (allocaBytes)
 import Foreign.Marshal.Utils (fillBytes)
@@ -74,6 +76,13 @@ runSimdWritesTest _ failed = do
 -- layer and visiting the layers reconstructs the complete command stream.
 runDrawLayersTest :: Context -> IORef Int -> IO ()
 runDrawLayersTest _ failed = do
+  let commands = [DrawCmd 1 2 3 4 (-7) 19 maxBound layer | layer <- [minBound .. maxBound]]
+      grown = U.create $ do
+        v <- U.thaw (U.fromList commands)
+        w <- UM.grow v (length commands)
+        UM.copy (UM.drop (length commands) w) v
+        pure w
+  assertEq failed (commands ++ commands) (U.toList grown)
   let views :: [NanoUI ()]
       views = [pure (), label "content", column $ do
         void (button "outside")

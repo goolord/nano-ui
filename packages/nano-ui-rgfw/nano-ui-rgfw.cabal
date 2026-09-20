@@ -105,5 +105,6 @@ test-suite nano-ui-rgfw-test
         nano-ui-rgfw,
         nano-ui-rgfw-bindings,
         primitive ^>=0.9,
+        vector ^>=0.13,
         text ^>=2.1
     hs-source-dirs:   test

@@ -13,7 +13,7 @@ import NanoUI.Sdl.Image (ImageAtlas, lookupImage)
 import Control.Monad (void, when)
 import Data.Bits (shiftR, (.&.))
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
-import Data.Primitive.PrimArray (indexPrimArray, sizeofPrimArray)
+import Data.Vector.Unboxed qualified as U
 import Data.Word (Word8)
 import Foreign.C.Types (CFloat (..), CInt (..))
 import Foreign.ForeignPtr (withForeignPtr)
@@ -100,9 +100,9 @@ renderDrawDataPass batch ren mClear drawData images glyphTex damage =
     withForeignPtr (drawVertices drawData) $ \vp ->
       withForeignPtr (drawIndices drawData) $ \ip ->
         let goCmd !i
-              | i >= sizeofPrimArray cmds = pure ()
+              | i >= U.length cmds = pure ()
               | otherwise = do
-                  drawCmd batch ren vp vc ip images glyphTex clip clipRef (indexPrimArray cmds i)
+                  drawCmd batch ren vp vc ip images glyphTex clip clipRef (U.unsafeIndex cmds i)
                   goCmd (i + 1)
          in goCmd 0
     applyClipState batch clipRef ren ClipNone

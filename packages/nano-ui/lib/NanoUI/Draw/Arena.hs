@@ -35,16 +35,17 @@ import Data.Bits (shiftR, (.&.))
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Maybe (fromMaybe)
 import Data.Primitive.PrimArray
-  ( MutablePrimArray
-  , PrimArray
+  ( PrimArray
   , newPrimArray
+  , primArrayFromList
   , readPrimArray
   , setPrimArray
   , unsafeFreezePrimArray
   , writePrimArray
-  , resizeMutablePrimArray
   )
 import Data.Word (Word32, Word8)
+import Data.Vector.Unboxed qualified as U
+import Data.Vector.Unboxed.Mutable qualified as UM
 import Foreign.ForeignPtr (ForeignPtr, mallocForeignPtrBytes, withForeignPtr)
 import Foreign.ForeignPtr.Unsafe (unsafeForeignPtrToPtr)
 import Foreign.Marshal.Array (copyArray)
@@ -81,7 +82,7 @@ newDrawArena = do
   daIndexCap <- newIORef indexCapacity
   daIndexCount <- newIORef 0
   daIndexPool <- newIORef []
-  daCmdStore <- newIORef =<< newPrimArray cmdInitialCapacity
+  daCmdStore <- newIORef =<< UM.unsafeNew cmdInitialCapacity
   daCmdCount <- newIORef 0
   daCmdCapacity <- newIORef cmdInitialCapacity
   daCurrentLayer <- newIORef LayerContent
@@ -199,7 +200,7 @@ growCmdStore :: DrawArena -> Int -> IO ()
 growCmdStore da oldCap = do
   let newCap = oldCap * 2
   arr <- readIORef (daCmdStore da)
-  newArr <- resizeMutablePrimArray arr newCap
+  newArr <- UM.unsafeGrow arr (newCap - oldCap)
   writeIORef (daCmdStore da) newArr
   writeIORef (daCmdCapacity da) newCap
 
@@ -224,7 +225,7 @@ flushCmd da = do
       if n <= 0
         then pure False
         else do
-          prev <- readPrimArray arr (n - 1)
+          prev <- UM.unsafeRead arr (n - 1)
           let same =
                 cmdClipX prev == cx
                   && cmdClipY prev == cy
@@ -234,13 +235,13 @@ flushCmd da = do
                   && cmdLayer prev == layer
                   && cmdIndexOffset prev + cmdIndexCount prev == off
           when same $
-            writePrimArray arr (n - 1) prev {cmdIndexCount = cmdIndexCount prev + cnt}
+            UM.unsafeWrite arr (n - 1) prev {cmdIndexCount = cmdIndexCount prev + cnt}
           pure same
     unless extended $ do
       cap <- readIORef (daCmdCapacity da)
       when (n >= cap) $ growCmdStore da cap
       arr' <- readIORef (daCmdStore da)
-      writePrimArray arr' n (DrawCmd cx cy cw ch tex off cnt layer)
+      UM.unsafeWrite arr' n (DrawCmd cx cy cw ch tex off cnt layer)
       writeIORef (daCmdCount da) (n + 1)
     writeIORef (daCmdStartIndex da) end
 
@@ -321,10 +322,11 @@ finishDraw da = do
 
 -- | Stable counting sort by layer, with cumulative offsets into the sorted
 -- array. Counts become write cursors after the prefix sum.
-groupCmdsByLayer :: MutablePrimArray RealWorld DrawCmd -> Int -> IO (PrimArray DrawCmd, PrimArray Int)
+groupCmdsByLayer :: U.MVector RealWorld DrawCmd -> Int -> IO (U.Vector DrawCmd, PrimArray Int)
+groupCmdsByLayer _ 0 = pure (U.empty, emptyLayerOffsets)
 groupCmdsByLayer src n = do
   let layers = fromEnum (maxBound :: Layer) + 1
-      layerAt i = fromEnum . cmdLayer <$> readPrimArray src i
+      layerAt i = fromEnum . cmdLayer <$> UM.unsafeRead src i
   cursors <- newPrimArray layers
   setPrimArray cursors 0 layers (0 :: Int)
   loopIO 0 (n - 1) $ \i -> do
@@ -338,14 +340,18 @@ groupCmdsByLayer src n = do
           writePrimArray cursors l off
           prefix (l + 1) (off + c)
   prefix 0 0
-  dest <- newPrimArray n
+  dest <- UM.unsafeNew n
   loopIO 0 (n - 1) $ \i -> do
-    cmd <- readPrimArray src i
+    cmd <- UM.unsafeRead src i
     let l = fromEnum (cmdLayer cmd)
     j <- readPrimArray cursors l
-    writePrimArray dest j cmd
+    UM.unsafeWrite dest j cmd
     writePrimArray cursors l (j + 1)
-  (,) <$> unsafeFreezePrimArray dest <*> unsafeFreezePrimArray offsets
+  (,) <$> U.unsafeFreeze dest <*> unsafeFreezePrimArray offsets
+
+-- Empty damage frames share their immutable command index.
+emptyLayerOffsets :: PrimArray Int
+emptyLayerOffsets = primArrayFromList (replicate (fromEnum (maxBound :: Layer) + 2) 0)
 
 {-# INLINE unpackColorF #-}
 unpackColorF :: Color -> (Float, Float, Float, Float)

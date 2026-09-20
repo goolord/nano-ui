@@ -101,6 +101,7 @@ library
         hashable ^>=1.5,
         nano-ui ^>=0.1,
         primitive ^>=0.9,
+        vector ^>=0.13,
         record-hasfield ^>=1.0,
         sdl3-bindgen-sys ^>=0.0.0.2,
         text ^>=2.1,

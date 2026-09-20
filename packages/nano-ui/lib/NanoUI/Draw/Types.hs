@@ -1,4 +1,6 @@
 {-# LANGUAGE StrictData #-}
+{-# LANGUAGE DerivingVia #-}
+{-# LANGUAGE TypeFamilies #-}
 
 -- | Draw-layer data: immediate vector ops, batched draw commands, the finished
 -- per-frame draw data and the arena record. Free of font and emitter code so
@@ -25,46 +27,16 @@ module NanoUI.Draw.Types
   ) where
 
 import Data.IORef (IORef)
-import Data.Primitive.PrimArray (MutablePrimArray, PrimArray, indexPrimArray, sizeofPrimArray)
-import Data.Primitive.Types (Prim (..), defaultSetByteArray#, defaultSetOffAddr#)
+import Data.Primitive.PrimArray (MutablePrimArray, PrimArray, indexPrimArray)
 import qualified Data.Text as T
 import Data.Primitive.SmallArray (SmallArray)
 import Data.Word (Word32, Word8)
+import Data.Vector.Unboxed qualified as U
+import Data.Vector.Generic qualified as G
+import Data.Vector.Generic.Mutable qualified as GM
 import Foreign.ForeignPtr (ForeignPtr)
 import Foreign.Ptr (Ptr)
-import GHC.Exts
-  ( Float (F#)
-  , Int (I#)
-  , RealWorld
-  , (*#)
-  , (+#)
-  , indexFloatOffAddr#
-  , indexIntOffAddr#
-  , indexWord8Array#
-  , indexWord8ArrayAsFloat#
-  , indexWord8ArrayAsInt#
-  , indexWord8ArrayAsWord32#
-  , indexWord8OffAddr#
-  , indexWord32OffAddr#
-  , plusAddr#
-  , readFloatOffAddr#
-  , readIntOffAddr#
-  , readWord8Array#
-  , readWord8ArrayAsFloat#
-  , readWord8ArrayAsInt#
-  , readWord8ArrayAsWord32#
-  , readWord8OffAddr#
-  , readWord32OffAddr#
-  , writeFloatOffAddr#
-  , writeIntOffAddr#
-  , writeWord8Array#
-  , writeWord8ArrayAsFloat#
-  , writeWord8ArrayAsInt#
-  , writeWord8ArrayAsWord32#
-  , writeWord8OffAddr#
-  , writeWord32OffAddr#
-  )
-import GHC.Word (Word8 (W8#), Word32 (W32#))
+import GHC.Exts (RealWorld)
 import NanoUI.Style (FontStyle (..), FontVariant (..), FontWeight (..), TextDecoration (..))
 import NanoUI.Types (Color (..), Rect (..))
 
@@ -201,6 +173,22 @@ data DrawCmd = DrawCmd
   }
   deriving (Eq, Show)
 
+-- Vector's tuple representation stores each field in a primitive array. The
+-- isomorphism is inlined at command reads and writes.
+type DrawCmdRep = ((Float, Float, Float, Float), Int, Word32, Word32, Word8)
+
+instance U.IsoUnbox DrawCmd DrawCmdRep where
+  {-# INLINE toURepr #-}
+  toURepr (DrawCmd x y w h tex off count layer) = ((x, y, w, h), tex, off, count, layerToWord8 layer)
+  {-# INLINE fromURepr #-}
+  fromURepr ((x, y, w, h), tex, off, count, layer) = DrawCmd x y w h tex off count (layerFromWord8 layer)
+
+newtype instance U.MVector s DrawCmd = MVDrawCmd (U.MVector s (U.As DrawCmd DrawCmdRep))
+newtype instance U.Vector DrawCmd = VDrawCmd (U.Vector (U.As DrawCmd DrawCmdRep))
+deriving via (U.As DrawCmd DrawCmdRep) instance GM.MVector U.MVector DrawCmd
+deriving via (U.As DrawCmd DrawCmdRep) instance G.Vector U.Vector DrawCmd
+instance U.Unbox DrawCmd
+
 {-# INLINE layerToWord8 #-}
 layerToWord8 :: Layer -> Word8
 layerToWord8 ly = fromIntegral (fromEnum ly)
@@ -208,119 +196,6 @@ layerToWord8 ly = fromIntegral (fromEnum ly)
 {-# INLINE layerFromWord8 #-}
 layerFromWord8 :: Word8 -> Layer
 layerFromWord8 w = toEnum (fromIntegral w)
-
--- Clip floats (16) + Int tex (8) + two Word32 (8) + Layer Word8 + pad = 40.
-instance Prim DrawCmd where
-  sizeOfType# _ = 40#
-  alignmentOfType# _ = 8#
-  indexByteArray# arr# i# =
-    let o# = i# *# 40#
-     in DrawCmd
-          (F# (indexWord8ArrayAsFloat# arr# o#))
-          (F# (indexWord8ArrayAsFloat# arr# (o# +# 4#)))
-          (F# (indexWord8ArrayAsFloat# arr# (o# +# 8#)))
-          (F# (indexWord8ArrayAsFloat# arr# (o# +# 12#)))
-          (I# (indexWord8ArrayAsInt# arr# (o# +# 16#)))
-          (W32# (indexWord8ArrayAsWord32# arr# (o# +# 24#)))
-          (W32# (indexWord8ArrayAsWord32# arr# (o# +# 28#)))
-          (layerFromWord8 (W8# (indexWord8Array# arr# (o# +# 32#))))
-  readByteArray# arr# i# s0 =
-    let o# = i# *# 40#
-     in case readWord8ArrayAsFloat# arr# o# s0 of
-          (# s1, x# #) ->
-            case readWord8ArrayAsFloat# arr# (o# +# 4#) s1 of
-              (# s2, y# #) ->
-                case readWord8ArrayAsFloat# arr# (o# +# 8#) s2 of
-                  (# s3, w# #) ->
-                    case readWord8ArrayAsFloat# arr# (o# +# 12#) s3 of
-                      (# s4, h# #) ->
-                        case readWord8ArrayAsInt# arr# (o# +# 16#) s4 of
-                          (# s5, tex# #) ->
-                            case readWord8ArrayAsWord32# arr# (o# +# 24#) s5 of
-                              (# s6, off# #) ->
-                                case readWord8ArrayAsWord32# arr# (o# +# 28#) s6 of
-                                  (# s7, cnt# #) ->
-                                    case readWord8Array# arr# (o# +# 32#) s7 of
-                                      (# s8, ly# #) ->
-                                        (# s8
-                                         , DrawCmd
-                                            (F# x#)
-                                            (F# y#)
-                                            (F# w#)
-                                            (F# h#)
-                                            (I# tex#)
-                                            (W32# off#)
-                                            (W32# cnt#)
-                                            (layerFromWord8 (W8# ly#))
-                                         #)
-  writeByteArray# arr# i# cmd s0 =
-    case cmd of
-      DrawCmd (F# x#) (F# y#) (F# w#) (F# h#) (I# tex#) (W32# off#) (W32# cnt#) ly ->
-        let o# = i# *# 40#
-            !(W8# ly#) = layerToWord8 ly
-         in writeWord8Array# arr# (o# +# 32#) ly# $
-              writeWord8ArrayAsWord32# arr# (o# +# 28#) cnt# $
-                writeWord8ArrayAsWord32# arr# (o# +# 24#) off# $
-                  writeWord8ArrayAsInt# arr# (o# +# 16#) tex# $
-                    writeWord8ArrayAsFloat# arr# (o# +# 12#) h# $
-                      writeWord8ArrayAsFloat# arr# (o# +# 8#) w# $
-                        writeWord8ArrayAsFloat# arr# (o# +# 4#) y# $
-                          writeWord8ArrayAsFloat# arr# o# x# s0
-  setByteArray# = defaultSetByteArray#
-  indexOffAddr# addr# i# =
-    let a# = addr# `plusAddr#` (i# *# 40#)
-     in DrawCmd
-          (F# (indexFloatOffAddr# a# 0#))
-          (F# (indexFloatOffAddr# (a# `plusAddr#` 4#) 0#))
-          (F# (indexFloatOffAddr# (a# `plusAddr#` 8#) 0#))
-          (F# (indexFloatOffAddr# (a# `plusAddr#` 12#) 0#))
-          (I# (indexIntOffAddr# (a# `plusAddr#` 16#) 0#))
-          (W32# (indexWord32OffAddr# (a# `plusAddr#` 24#) 0#))
-          (W32# (indexWord32OffAddr# (a# `plusAddr#` 28#) 0#))
-          (layerFromWord8 (W8# (indexWord8OffAddr# (a# `plusAddr#` 32#) 0#)))
-  readOffAddr# addr# i# s0 =
-    let a# = addr# `plusAddr#` (i# *# 40#)
-     in case readFloatOffAddr# a# 0# s0 of
-          (# s1, x# #) ->
-            case readFloatOffAddr# (a# `plusAddr#` 4#) 0# s1 of
-              (# s2, y# #) ->
-                case readFloatOffAddr# (a# `plusAddr#` 8#) 0# s2 of
-                  (# s3, w# #) ->
-                    case readFloatOffAddr# (a# `plusAddr#` 12#) 0# s3 of
-                      (# s4, h# #) ->
-                        case readIntOffAddr# (a# `plusAddr#` 16#) 0# s4 of
-                          (# s5, tex# #) ->
-                            case readWord32OffAddr# (a# `plusAddr#` 24#) 0# s5 of
-                              (# s6, off# #) ->
-                                case readWord32OffAddr# (a# `plusAddr#` 28#) 0# s6 of
-                                  (# s7, cnt# #) ->
-                                    case readWord8OffAddr# (a# `plusAddr#` 32#) 0# s7 of
-                                      (# s8, ly# #) ->
-                                        (# s8
-                                         , DrawCmd
-                                            (F# x#)
-                                            (F# y#)
-                                            (F# w#)
-                                            (F# h#)
-                                            (I# tex#)
-                                            (W32# off#)
-                                            (W32# cnt#)
-                                            (layerFromWord8 (W8# ly#))
-                                         #)
-  writeOffAddr# addr# i# cmd s0 =
-    case cmd of
-      DrawCmd (F# x#) (F# y#) (F# w#) (F# h#) (I# tex#) (W32# off#) (W32# cnt#) ly ->
-        let a# = addr# `plusAddr#` (i# *# 40#)
-            !(W8# ly#) = layerToWord8 ly
-         in writeWord8OffAddr# (a# `plusAddr#` 32#) 0# ly# $
-              writeWord32OffAddr# (a# `plusAddr#` 28#) 0# cnt# $
-                writeWord32OffAddr# (a# `plusAddr#` 24#) 0# off# $
-                  writeIntOffAddr# (a# `plusAddr#` 16#) 0# tex# $
-                    writeFloatOffAddr# (a# `plusAddr#` 12#) 0# h# $
-                      writeFloatOffAddr# (a# `plusAddr#` 8#) 0# w# $
-                        writeFloatOffAddr# (a# `plusAddr#` 4#) 0# y# $
-                          writeFloatOffAddr# a# 0# x# s0
-  setOffAddr# = defaultSetOffAddr#
 
 -- | One frame's geometry and batches. Vertex/index pointers refer to reusable
 -- arena storage: render or copy them before running another frame on the
@@ -330,7 +205,7 @@ data DrawData = DrawData
   , drawVertexCount :: {-# UNPACK #-} !Int
   , drawIndices :: ForeignPtr Word8
   , drawIndexCount :: {-# UNPACK #-} !Int
-  , drawCommands :: !(PrimArray DrawCmd)
+  , drawCommands :: !(U.Vector DrawCmd)
   , drawLayerOffsets :: !(PrimArray Int)
   -- ^ Cumulative command offsets: layer @i@ occupies @[offsets[i], offsets[i+1])@.
   -- Includes a final sentinel equal to 'drawCmdCount'; empty layers repeat offsets.
@@ -339,7 +214,7 @@ data DrawData = DrawData
 -- | Number of batches across all layers.
 {-# INLINE drawCmdCount #-}
 drawCmdCount :: DrawData -> Int
-drawCmdCount dd = sizeofPrimArray (drawCommands dd)
+drawCmdCount dd = U.length (drawCommands dd)
 
 -- | Whether there are no draw batches.
 {-# INLINE drawCmdNull #-}
@@ -356,14 +231,12 @@ forDrawCmdsInLayer_ ly dd f =
       cmds = drawCommands dd
       go !i
         | i >= end = pure ()
-        | otherwise = f (indexPrimArray cmds i) >> go (i + 1)
+        | otherwise = f (U.unsafeIndex cmds i) >> go (i + 1)
    in go off
 
 -- | Copy command values into a list in recorded order.
 drawCmdElems :: DrawData -> [DrawCmd]
-drawCmdElems dd =
-  let cmds = drawCommands dd
-   in [indexPrimArray cmds i | i <- [0 .. sizeofPrimArray cmds - 1]]
+drawCmdElems = U.toList . drawCommands
 
 type BufferPool = IORef [(ForeignPtr Word8, Int)]
 
@@ -378,7 +251,7 @@ data DrawArena = DrawArena
   , daIndexCap :: !(IORef Int)
   , daIndexCount :: !(IORef Int)
   , daIndexPool :: !BufferPool
-  , daCmdStore :: !(IORef (MutablePrimArray RealWorld DrawCmd))
+  , daCmdStore :: !(IORef (U.MVector RealWorld DrawCmd))
   , daCmdCount :: !(IORef Int)
   , daCmdCapacity :: !(IORef Int)
   , daCurrentLayer :: !(IORef Layer)

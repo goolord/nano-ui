@@ -110,6 +110,11 @@
 
 ### Changed
 
+- `drawCommands` is an unboxed `Vector DrawCmd`; its field representation uses
+  vector's deriving-via support instead of a handwritten `Prim` instance. Vertex
+  and index buffers keep their existing FFI layout. Use `drawCmdElems` or
+  `forDrawCmdsInLayer_` for representation-independent command access.
+
 - Draw data stores cumulative `drawLayerOffsets`, including a final command-count
   sentinel, instead of `drawLayerSlices` / `LayerSlice`. Use
   `forDrawCmdsInLayer_` to visit one layer without depending on the representation.

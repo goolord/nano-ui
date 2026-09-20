@@ -247,6 +247,7 @@ test-suite nano-ui-test
         filepath,
         nothunks,
         primitive ^>=0.9,
+        vector ^>=0.13,
         text ^>=2.1
     hs-source-dirs:   test/integration
 
@@ -270,5 +271,6 @@ test-suite nano-ui-inspection
     build-depends:
         containers,
         inspection-testing,
+        vector ^>=0.13,
         text ^>=2.1
     hs-source-dirs:   test/inspection

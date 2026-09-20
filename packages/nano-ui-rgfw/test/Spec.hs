@@ -8,7 +8,7 @@ import Control.Monad (forM_)
 import Data.Bits ((.&.))
 import System.Exit (exitFailure)
 
-import Data.Primitive.PrimArray (mapPrimArray)
+import Data.Vector.Unboxed qualified as U
 import NanoUI.Layout.Arena
   ( NodeType (..)
   , arenaCount
@@ -236,7 +236,7 @@ testTriangleRaster =
           pure (FillTriangle ax ay bx by cx cy (colorRGBA 255 0 0 255))
       let Rect clipX clipY clipW clipH = clip
           clippedDraw = draw
-            { drawCommands = mapPrimArray (\cmd -> cmd {cmdClipX = clipX, cmdClipY = clipY, cmdClipW = clipW, cmdClipH = clipH}) (drawCommands draw)
+            { drawCommands = U.map (\cmd -> cmd {cmdClipX = clipX, cmdClipY = clipY, cmdClipW = clipW, cmdClipH = clipH}) (drawCommands draw)
             }
       renderArena surf getCozetteFont 1 clippedDraw [] []
       pixels <- mapM (peekElemOff (sBuffer surf)) [0 .. 63]
