@@ -68,14 +68,15 @@ import NanoUI.Internal.Store (fieldFloat, fieldInt, fieldText, findSlot, insertS
 import NanoUI.Internal.Style (themeSelection)
 import NanoUI.Internal.Types (Color (..), Rect (..), V2 (..), rectContains, rectIntersect, rectOverlapArea, rectW)
 import NanoUI.Internal.WidgetText
-  ( comboTextClip
+  ( hasFlag
+  , comboTextClip
   , numericTextClip
   , searchInputIconRects
   , searchInputTextClip
-  , textInputNumericMode
+  , textInputFlagNumeric
   , textInputFieldHeight
-  , textInputSearchMode
-  , textInputSelectableMode
+  , textInputFlagSearch
+  , textInputFlagSelectable
   )
 import NanoUI.Internal.Widgets.TextCommon
   ( selectionCaretGeom
@@ -104,13 +105,13 @@ nodeTextFieldGeom ctx idx x y w h = do
       box = Rect x y w h
       field = textInputFieldRect fm x y w h
   pure $
-    if textInputSelectableMode si
+    if hasFlag textInputFlagSelectable si
       then (box, box)
       else
-        if textInputNumericMode si
+        if hasFlag textInputFlagNumeric si
           then (box, numericTextClip fm x y w h)
           else
-            if textInputSearchMode si
+            if hasFlag textInputFlagSearch si
               then (box, if null opts then searchInputTextClip fm x y w h else comboTextClip fm x y w h)
               else (field, textInputFieldTextClip fm field)
 
@@ -122,7 +123,7 @@ searchClearHit ctx wid mouse = do
   withWidgetNode ctx wid False $ \idx -> do
     si <- getStyleIdx (ctxNodeArena ctx) idx
     opts <- getOptions (ctxNodeArena ctx) idx
-    if not (textInputSearchMode si) || not (null opts)
+    if not (hasFlag textInputFlagSearch si) || not (null opts)
       then pure False
       else do
         value <- textInputValue ctx idx
@@ -182,7 +183,7 @@ computeTextInputScroll fm viewportW value cursor oldScroll isFocused
 syncTextInputScroll :: Context -> NodeIdx -> Float -> Float -> Float -> Float -> IO Float
 syncTextInputScroll ctx idx x y w h = do
   si <- getStyleIdx (ctxNodeArena ctx) idx
-  if textInputSelectableMode si
+  if hasFlag textInputFlagSelectable si
     then pure 0
     else do
       wid <- getWidgetId (ctxNodeArena ctx) idx

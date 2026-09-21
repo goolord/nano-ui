@@ -74,7 +74,7 @@ import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Monad (whenM, (<&&>))
 import NanoUI.Internal.Store (fieldInt, insertSlot)
 import NanoUI.Internal.Types (DamageBounds (..), V2 (..), defaultDamageSlop, rectContains)
-import NanoUI.Internal.WidgetText (buttonVisualStyle, isMenuBarStyle, isMenuItemStyle, isTabButtonStyle)
+import NanoUI.Internal.WidgetText (hasFlag, buttonVisualStyle, buttonFlagMenuBar, buttonFlagMenu, buttonFlagTab)
 
 -- | Move keyboard focus when Tab was pressed, backwards with Shift held. Focus
 -- steps through the widgets that called 'NanoUI.Internal.Context.registerFocusable'
@@ -119,7 +119,7 @@ isMenuButtonWidget ctx wid
             then pure False
             else do
               si <- getStyleIdx (ctxNodeArena ctx) idx
-              pure (isMenuItemStyle si || isMenuBarStyle si)
+              pure (hasFlag buttonFlagMenu si || hasFlag buttonFlagMenuBar si)
 
 -- | Find the hot widget in this frame's layout and store it in 'ctxHotId' and
 -- 'ctxLastHotId'. Runs after layout and before painting. When the hot widget
@@ -244,7 +244,7 @@ finalizePointerRelease ctx inp =
                     NodeRadio -> getStyleIdx na idx >>= setParentSelection ctx idx
                     NodeButton -> do
                       packed <- getStyleIdx na idx
-                      when (isTabButtonStyle packed) $
+                      when (hasFlag buttonFlagTab packed) $
                         setParentSelection ctx idx (buttonVisualStyle packed `div` 4)
                     _ -> pure ()
                   when (postsLayoutClick nt && releasedClicked /= active) $ do

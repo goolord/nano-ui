@@ -63,16 +63,17 @@ import NanoUI.Internal.Style
   )
 import NanoUI.Internal.Types (Color (..), Rect (..), colorA, colorRGBA, lerpColor)
 import NanoUI.Internal.WidgetText
-  ( buttonFlagsFromStyle
+  ( hasFlag
+  , buttonFlagsFromStyle
   , buttonVisualStyle
-  , isMenuBarStyle
-  , isMenuItemStyle
-  , isTableHeaderStyle
+  , buttonFlagMenuBar
+  , buttonFlagMenu
+  , buttonFlagTable
   , selectDisplayText
   , stripeColor
   , tableHeaderDisplayText
   , textInputFieldText
-  , textInputPasswordMode
+  , textInputFlagPassword
   , treeDecodeStripe
   )
 
@@ -88,7 +89,7 @@ displayText ctx nt idx = do
   case nt of
     NodeButton -> do
       si <- getStyleIdx (ctxNodeArena ctx) idx
-      pure $! if isTableHeaderStyle si then tableHeaderDisplayText txt else txt
+      pure $! if hasFlag buttonFlagTable si then tableHeaderDisplayText txt else txt
     NodeTextInput -> textInputFieldText txt <$> textInputValue ctx idx <*> textInputFocused ctx idx
     NodeTextArea -> textInputValue ctx idx
     NodeSelect -> selectDisplayText txt <$> selectCurrentOption ctx idx
@@ -115,7 +116,7 @@ textInputValue ctx idx = do
   store <- getStore ctx
   let value = findSlot fieldText "" (intKey wid) store
   pure $
-    if nt == NodeTextInput && textInputPasswordMode si
+    if nt == NodeTextInput && hasFlag textInputFlagPassword si
       then T.replicate (T.length value) "*"
       else value
 
@@ -246,7 +247,7 @@ widgetVisualStyle ctx nt idx = do
         if nt == NodeButton
           then buttonFlagsFromStyle styleIdx
           else (False, False, False)
-      isMenu = nt == NodeButton && (isMenuItemStyle styleIdx || isMenuBarStyle styleIdx)
+      isMenu = nt == NodeButton && (hasFlag buttonFlagMenu styleIdx || hasFlag buttonFlagMenuBar styleIdx)
   theme <- nodeTheme ctx idx
   let isFocus = focus == wid
       isHot = wid == hot

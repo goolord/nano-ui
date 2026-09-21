@@ -67,7 +67,7 @@ import NanoUI.Internal.Layout.Arena
   )
 import NanoUI.Internal.Monad ((<&&>))
 import NanoUI.Internal.Types (Rect (..), V2 (..), rectContains)
-import NanoUI.Internal.WidgetText (isTableHeaderStyle, numericStepperRects, textInputNumericMode)
+import NanoUI.Internal.WidgetText (hasFlag, buttonFlagTable, numericStepperRects, textInputFlagNumeric)
 import NanoUI.Internal.Widgets.Custom (mkCustomDrawContext)
 
 -- | Cursor requested by current gestures and hit tests against the solved arena.
@@ -143,7 +143,7 @@ numericStepperHit ctx wid mouse =
     Nothing -> pure False
     Just idx -> do
       si <- getStyleIdx (ctxNodeArena ctx) idx
-      if not (textInputNumericMode si)
+      if not (hasFlag textInputFlagNumeric si)
         then pure False
         else do
           (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
@@ -298,7 +298,7 @@ tableColResizeCursorKind ctx inp = do
             then pure False
             else do
               si <- getStyleIdx na idx
-              if not (isTableHeaderStyle si)
+              if not (hasFlag buttonFlagTable si)
                 then pure False
                 else do
                   (x, y, w, h) <- getRect na idx

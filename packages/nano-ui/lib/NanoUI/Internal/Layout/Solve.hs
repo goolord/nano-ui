@@ -139,7 +139,8 @@ import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Style (AlignX (..), AlignY (..), FontStyle (..), FontVariant (..), FontWeight (..), Padding (..), windowMargin)
 import NanoUI.Internal.Types (PopupAnchor (..), PopupPlacement (..), Rect (..), V2 (..), clamp, gridSpan, onGrid)
 import NanoUI.Internal.WidgetText
-  ( colorPickerSvH
+  ( hasFlag
+  , colorPickerSvH
   , textNodeFontVariant
   , textNodeFontWeight
   , textNodeFontStyle
@@ -148,14 +149,14 @@ import NanoUI.Internal.WidgetText
   , selectChevronReserve
   , textInputFieldHeight
   , textInputMinWidth
-  , textInputSearchMode
-  , textInputNumericMode
+  , textInputFlagSearch
+  , textInputFlagNumeric
   , numericStepperW
-  , textInputSelectableMode
+  , textInputFlagSelectable
   , searchInputReserveW
-  , isTableHeaderStyle
-  , isMenuItemStyle
-  , isCloseButtonStyle
+  , buttonFlagTable
+  , buttonFlagMenu
+  , buttonFlagClose
   , tableHeaderDisplayText
   )
 import NanoUI.Internal.Frame.Scroll.Geometry
@@ -525,18 +526,18 @@ measureWidget env@SolveEnv {seArena = na, seArrays = a, seFm = fm, seMeasure = m
   let (padX, padY) =
         case nt of
           NodeButton
-            | isTableHeaderStyle si ->
+            | hasFlag buttonFlagTable si ->
                 (2 * tableCellInset, 0)
             -- Menu rows reserve the same gutter the text-field context menu
             -- paints (outer pad + item pad on each side of the label), so the
             -- generic popup panel sizes identically.
-            | isMenuItemStyle si ->
+            | hasFlag buttonFlagMenu si ->
                 (2 * (menuOuterPad + menuItemPadX), snd (buttonPadding fm))
             | otherwise -> buttonPadding fm
           NodeSelect -> selectPadding fm
           NodeTree -> treeItemPadding fm
           NodeTextInput
-            | textInputSelectableMode si -> (0, 0)
+            | hasFlag textInputFlagSelectable si -> (0, 0)
           _
             | nt == NodeColorPicker
                 || nt == NodeSlider
@@ -567,16 +568,16 @@ measureWidget env@SolveEnv {seArena = na, seArrays = a, seFm = fm, seMeasure = m
       -- Picker parts carry fixed layouts; the field grows to its square.
       NodeColorPicker -> pure (0, colorPickerSvH, 0, 0)
       NodeTextInput
-        | textInputSelectableMode si -> do
+        | hasFlag textInputFlagSelectable si -> do
             -- Size with the node's own font (paint and span placement resolve
             -- it too); the ambient `measure` is the default font only.
             measurer <- textNodeMeasurer env idx
             (mw, mh) <- measureFontLine measurer (if T.null txt then " " else txt)
             pure (mw, mh, 0, 0)
         -- Numeric field: a short editable box and its stepper.
-        | textInputNumericMode si ->
+        | hasFlag textInputFlagNumeric si ->
             pure (56, textInputFieldHeight fm, numericStepperW, 0)
-        | textInputSearchMode si ->
+        | hasFlag textInputFlagSearch si ->
             measureSearchInput fm measure txt
         | otherwise -> measureTextField fm measure txt False
       NodeTextArea -> measureTextField fm measure txt True
@@ -588,7 +589,7 @@ measureWidget env@SolveEnv {seArena = na, seArrays = a, seFm = fm, seMeasure = m
               if T.null txt
                 then pure " "
                 else
-                  if isTableHeaderStyle si
+                  if hasFlag buttonFlagTable si
                     then pure (tableHeaderDisplayText txt)
                     else pure txt
             (mw, mh) <- measure body
@@ -1703,7 +1704,7 @@ childBaseline env@SolveEnv {seArena = na, seArrays = a, seFm = defaultFm, seReso
                     pure (cap < 1e8 && cap + 0.5 < tw)
           pure (textBaseline fm (if wrapped then fmLineHeight fm else h))
     _
-      | hasCenteredLabel nt && not (nt == NodeButton && isCloseButtonStyle si) -> do
+      | hasCenteredLabel nt && not (nt == NodeButton && hasFlag buttonFlagClose si) -> do
           -- Widget labels take the node's font size in the default face
           -- ('resolveFontFor').
           size <- getNodeFontSize na ci

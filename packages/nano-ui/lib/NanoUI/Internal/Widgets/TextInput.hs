@@ -78,7 +78,7 @@ import NanoUI.Internal.Store
   , slotKey
   )
 import NanoUI.Internal.Style (Layout (..), defaultLayout, fillW, minW)
-import NanoUI.Internal.WidgetText (packTextNodeStyleFull, textInputFlagPassword, textInputFlagSearch, textInputFlagSelectable, textInputPasswordMode, textInputSelectableMode)
+import NanoUI.Internal.WidgetText (hasFlag, packTextNodeStyleFull, textInputFlagPassword, textInputFlagSearch, textInputFlagSelectable)
 import NanoUI.Internal.Widgets.Behavior (keyboardFocused)
 import NanoUI.Internal.Widgets.Node (Response (..), addWidgetStyled, setChanged, setSubmitted)
 import NanoUI.Widgets.TextBuffer qualified as TB
@@ -158,8 +158,8 @@ editTextInput ctx mode inp store key s0 =
 textInputMode :: Int -> EditorMode
 textInputMode si =
   singleLineMode
-    { modeEditable = not (textInputSelectableMode si)
-    , modeCopyable = not (textInputPasswordMode si)
+    { modeEditable = not (hasFlag textInputFlagSelectable si)
+    , modeCopyable = not (hasFlag textInputFlagPassword si)
     }
 
 -- | Run a command on a single-line field outside its frame (a context menu
@@ -283,7 +283,7 @@ buildTextInput styleIdx layout placeholder value mDebounceMs = do
   let key = intKey wid
   _ <- uiIO $ adoptSlot fieldText ctx wid key value
   -- Both modes are constants, so an idle field allocates no mode record.
-  let mode = if textInputPasswordMode styleIdx then singleLineMode {modeCopyable = False} else singleLineMode
+  let mode = if hasFlag textInputFlagPassword styleIdx then singleLineMode {modeCopyable = False} else singleLineMode
   (oldText, newText, isFocus, pulse) <- editTextField wid mode value Nothing
   uiIO $ recordSlot fieldText ctx key newText
   inp <- askInput

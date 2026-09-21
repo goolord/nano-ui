@@ -10,13 +10,9 @@ module NanoUI.Internal.WidgetText
   , textInputFieldPadY
   , textInputFieldHeight
   , textInputFlagSearch
-  , textInputSearchMode
   , textInputFlagSelectable
-  , textInputSelectableMode
   , textInputFlagPassword
-  , textInputPasswordMode
   , textInputFlagNumeric
-  , textInputNumericMode
   , numericStepperW
   , numericTextClip
   , numericStepperRects
@@ -42,6 +38,7 @@ module NanoUI.Internal.WidgetText
   , buttonFlagMenu
   , buttonFlagMenuBar
   , buttonFlagMask
+  , hasFlag
   , tableStripeEven
   , tableStripeOdd
   , tableSortReserve
@@ -57,11 +54,6 @@ module NanoUI.Internal.WidgetText
   , tableHeaderDisplayText
   , tableSortMarkOf
   , tableSortBlank
-  , isCloseButtonStyle
-  , isTabButtonStyle
-  , isTableHeaderStyle
-  , isMenuItemStyle
-  , isMenuBarStyle
   , buttonVisualStyle
   , buttonFlagsFromStyle
   ) where
@@ -159,36 +151,24 @@ textInputFieldText ph value focused =
 textInputFlagSearch :: Int
 textInputFlagSearch = 0x04000000
 
-{-# INLINE textInputSearchMode #-}
-textInputSearchMode :: Int -> Bool
-textInputSearchMode si = si .&. textInputFlagSearch /= 0
 
 -- | Marks a @NodeTextInput@ as a selectable text label: read-only, caption-less,
 -- chrome-less, sized to its text content, with mouse drag-to-select and copy.
 textInputFlagSelectable :: Int
 textInputFlagSelectable = 0x10000000
 
-{-# INLINE textInputSelectableMode #-}
-textInputSelectableMode :: Int -> Bool
-textInputSelectableMode si = si .&. textInputFlagSelectable /= 0
 
 -- | Marks a @NodeTextInput@ as a password field: its value is displayed masked
 -- and is never copied or cut to the clipboard.
 textInputFlagPassword :: Int
 textInputFlagPassword = 0x20000000
 
-{-# INLINE textInputPasswordMode #-}
-textInputPasswordMode :: Int -> Bool
-textInputPasswordMode si = si .&. textInputFlagPassword /= 0
 
 -- | Marks a @NodeTextInput@ as a numeric field: a caption-less box whose text
 -- stops short of an up / down stepper at its right edge.
 textInputFlagNumeric :: Int
 textInputFlagNumeric = 0x40000000
 
-{-# INLINE textInputNumericMode #-}
-textInputNumericMode :: Int -> Bool
-textInputNumericMode si = si .&. textInputFlagNumeric /= 0
 
 -- | Width of a numeric field's stepper column.
 numericStepperW :: Float
@@ -397,6 +377,11 @@ buttonFlagMenuBar = 0x08000000
 buttonFlagMask :: Int
 buttonFlagMask = buttonFlagClose .|. buttonFlagTab .|. buttonFlagTable .|. buttonFlagMenu .|. buttonFlagMenuBar
 
+-- | Whether the packed style index @si@ carries @flag@.
+{-# INLINE hasFlag #-}
+hasFlag :: Int -> Int -> Bool
+hasFlag flag si = si .&. flag /= 0
+
 {-# INLINE buttonVisualStyle #-}
 buttonVisualStyle :: Int -> Int
 buttonVisualStyle si = si .&. complement buttonFlagMask
@@ -409,22 +394,7 @@ buttonFlagsFromStyle si =
   , si .&. buttonFlagTable /= 0
   )
 
-{-# INLINE isCloseButtonStyle #-}
-isCloseButtonStyle :: Int -> Bool
-isCloseButtonStyle si = si .&. buttonFlagClose /= 0
 
-{-# INLINE isTabButtonStyle #-}
-isTabButtonStyle :: Int -> Bool
-isTabButtonStyle si = si .&. buttonFlagTab /= 0
 
-{-# INLINE isTableHeaderStyle #-}
-isTableHeaderStyle :: Int -> Bool
-isTableHeaderStyle si = si .&. buttonFlagTable /= 0
 
-{-# INLINE isMenuItemStyle #-}
-isMenuItemStyle :: Int -> Bool
-isMenuItemStyle si = si .&. buttonFlagMenu /= 0
 
-{-# INLINE isMenuBarStyle #-}
-isMenuBarStyle :: Int -> Bool
-isMenuBarStyle si = si .&. buttonFlagMenuBar /= 0

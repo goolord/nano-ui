@@ -75,18 +75,19 @@ import NanoUI.Internal.Style (AlignX (..), FontVariant (..), Style (..), Theme (
 import NanoUI.Internal.Types (Color (..), Rect (..), lerpColor, onGrid, rectIntersect)
 import NanoUI.Internal.Widgets.ColorPicker (ColorPickerPart (..), colorPickerPartOf, colorPickerPartRect, colorPickerPreviewGeom)
 import NanoUI.Internal.WidgetText
-  ( colorPickerCurrentLabel
+  ( hasFlag
+  , colorPickerCurrentLabel
   , colorPickerNewLabel
-  , isCloseButtonStyle
-  , isMenuItemStyle
-  , isTableHeaderStyle
+  , buttonFlagClose
+  , buttonFlagMenu
+  , buttonFlagTable
   , numericTextClip
   , selectChevronReserve
   , tableStripeColor
-  , textInputNumericMode
+  , textInputFlagNumeric
   , textInputFieldText
-  , textInputSearchMode
-  , textInputSelectableMode
+  , textInputFlagSearch
+  , textInputFlagSelectable
   , textNodeFontVariant
   , treeDecodeStyle
   )
@@ -156,10 +157,10 @@ collectClippedSpans' ctx idx nt clip arena = do
           NodeTextInput -> do
             si <- getStyleIdx (ctxNodeArena ctx) idx
             pure $
-              if textInputNumericMode si
+              if hasFlag textInputFlagNumeric si
                 then maybe [] (`tagClippedSpans` spans) (rectIntersect clipHere (numericTextClip fm x y w h))
                 else
-                  if textInputSelectableMode si
+                  if hasFlag textInputFlagSelectable si
                     then tagClippedSpans clipHere spans
                     else tagTextInputClippedSpans clipHere x y w h fm spans
           _ -> pure (tagClippedSpans clipHere spans)
@@ -276,7 +277,7 @@ widgetHitRect ctx nt idx x y w h = do
   case nt of
     NodeTextInput -> do
       si <- getStyleIdx (ctxNodeArena ctx) idx
-      if textInputSearchMode si || textInputSelectableMode si || textInputNumericMode si
+      if hasFlag textInputFlagSearch si || hasFlag textInputFlagSelectable si || hasFlag textInputFlagNumeric si
         then pure (Rect x y w h)
         else pure (textInputFieldRect fm x y w h)
     NodeTextArea -> pure (Rect x y w h)
@@ -284,7 +285,7 @@ widgetHitRect ctx nt idx x y w h = do
       si <- getStyleIdx (ctxNodeArena ctx) idx
       -- Close buttons get a padded target that stays inside the title bar, so
       -- the inner east resize still works below the control.
-      if isCloseButtonStyle si
+      if hasFlag buttonFlagClose si
         then pure (Rect (x - 8) (y - 4) (w + 10) (h + 4))
         else pure (Rect x y w h)
     _ -> pure (Rect x y w h)
@@ -345,7 +346,7 @@ cachedWidgetLabel ctx nt idx w h = do
   si <- getStyleIdx (ctxNodeArena ctx) idx
   txt <- displayText ctx nt idx
   ax <-
-    if nt == NodeButton && isTableHeaderStyle si
+    if nt == NodeButton && hasFlag buttonFlagTable si
       then getAlignX (ctxNodeArena ctx) idx
       else pure AlignStart
   let ntTag = fromEnum nt
@@ -370,7 +371,7 @@ cachedWidgetLabel ctx nt idx w h = do
 -- not the origin; final device-pixel snapping stays in the draw backend.
 computeWidgetLabel :: Context -> NodeType -> T.Text -> Int -> Float -> AlignX -> Float -> Float -> IO (Maybe WidgetTextPlacement)
 computeWidgetLabel ctx nt txt si fontSizeVal ax w h
-  | nt == NodeButton && isCloseButtonStyle si = pure Nothing
+  | nt == NodeButton && hasFlag buttonFlagClose si = pure Nothing
   | otherwise = do
       (source, _, measure) <- resolveFontFor ctx nt fontSizeVal si
       fm <- prepareFontMetrics source txt
@@ -378,8 +379,8 @@ computeWidgetLabel ctx nt txt si fontSizeVal ax w h
       let (ix, _) = widgetContentInset fm
           (tx, used) = case nt of
             NodeButton
-              | isTableHeaderStyle si -> alignedTextPen ax 0 w tableCellInset fm txt
-              | isMenuItemStyle si ->
+              | hasFlag buttonFlagTable si -> alignedTextPen ax 0 w tableCellInset fm txt
+              | hasFlag buttonFlagMenu si ->
                   let inset = menuItemPadX + ix
                    in (inset, min tw (max 0 (w - inset - ix)))
               | otherwise -> alignedTextPen AlignCenter 0 w 0 fm txt
@@ -422,13 +423,13 @@ computeWidgetTextPlacements ctx nt idx x y w h = do
             ]
     NodeSlider -> pure []
     NodeTextInput
-      | textInputSelectableMode si -> do
+      | hasFlag textInputFlagSelectable si -> do
           value <- textInputValue ctx idx
           let (penX, ty, selLineH) = selectableTextGeometry fm x y h
           (fw, _) <- measureTxt value
           pure [(value, penX, ty, fw, selLineH)]
       | otherwise -> do
-          let numeric = textInputNumericMode si
+          let numeric = hasFlag textInputFlagNumeric si
           ph <- if numeric then pure "" else getText (ctxNodeArena ctx) idx
           value <- textInputValue ctx idx
           focus <- textInputFocused ctx idx

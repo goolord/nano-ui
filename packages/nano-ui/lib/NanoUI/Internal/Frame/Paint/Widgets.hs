@@ -74,14 +74,15 @@ import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Style (Style, styleBg, styleBorder, styleFg, themeAccent, themeInput, themeOnAccent)
 import NanoUI.Internal.Types (Color (..), Rect (..), clamp01, colorA, lerpColor, onGrid)
 import NanoUI.Internal.WidgetText
-  ( buttonCloseTrailing
+  ( hasFlag
+  , buttonCloseTrailing
   , buttonVisualStyle
   , comboTextClip
-  , isCloseButtonStyle
-  , isMenuBarStyle
-  , isMenuItemStyle
-  , isTabButtonStyle
-  , isTableHeaderStyle
+  , buttonFlagClose
+  , buttonFlagMenuBar
+  , buttonFlagMenu
+  , buttonFlagTab
+  , buttonFlagTable
   , numericStepperRects
   , numericTextClip
   , searchInputIconRects
@@ -89,10 +90,10 @@ import NanoUI.Internal.WidgetText
   , selectChevronCenterX
   , selectChevronReserve
   , tableSortMarkOf
-  , textInputNumericMode
+  , textInputFlagNumeric
   , textInputFieldText
-  , textInputSearchMode
-  , textInputSelectableMode
+  , textInputFlagSearch
+  , textInputFlagSelectable
   , treeDecodeStyle
   )
 import NanoUI.Internal.Widgets.ColorPicker (drawColorPickerPart)
@@ -108,13 +109,13 @@ paintTextInputNode env idx rect@(Rect x y w h) = do
   style <- widgetVisualStyle ctx NodeTextInput idx
   focus <- textInputFocused ctx idx
   si <- getStyleIdx (peNodeArena env) idx
-  if textInputNumericMode si
+  if hasFlag textInputFlagNumeric si
     then paintNumericField ctx da fm style idx focus rect
     else
-      if textInputSelectableMode si
+      if hasFlag textInputFlagSelectable si
         then paintSelectableText env style idx rect
         else
-          if textInputSearchMode si
+          if hasFlag textInputFlagSearch si
             then do
               opts <- getOptions (peNodeArena env) idx
               if null opts
@@ -155,7 +156,7 @@ paintWidget env idx nt rect@(Rect _ ry _ rh) = do
   -- text-field context menu painter: the hover fill and the accent marker
   -- span the panel width instead of the (padded) node rect.
   menuRowRect <-
-    if nt == NodeButton && isMenuItemStyle si
+    if nt == NodeButton && hasFlag buttonFlagMenu si
       then maybe rect (\(Rect px _ pw _) -> Rect px ry pw rh) <$> popupPanelRect ctx idx
       else pure rect
   paintWidgetBackground env idx nt style si menuRowRect value rect
@@ -173,11 +174,11 @@ paintWidgetBackground env idx nt style si menuRowRect value (Rect x y w h) = do
       theme = peTheme env
       -- Strict: lazy Bools here would allocate thunks per widget per frame.
       !isButton = nt == NodeButton
-      !isClose = isButton && isCloseButtonStyle si
-      !isTab = isButton && isTabButtonStyle si
-      !isTable = isButton && isTableHeaderStyle si
-      !isMenuItem = isButton && isMenuItemStyle si
-      !isMenu = isMenuItem || (isButton && isMenuBarStyle si)
+      !isClose = isButton && hasFlag buttonFlagClose si
+      !isTab = isButton && hasFlag buttonFlagTab si
+      !isTable = isButton && hasFlag buttonFlagTable si
+      !isMenuItem = isButton && hasFlag buttonFlagMenu si
+      !isMenu = isMenuItem || (isButton && hasFlag buttonFlagMenuBar si)
       !hasBg = colorA (styleBg style) > 0
       !opaqueBg
         | isMenu = hasBg
@@ -260,7 +261,7 @@ paintWidgetForeground env idx nt style si (Rect x y w h) = do
   fontSize <- getNodeFontSize (peNodeArena env) idx
   (fm, _, _) <- resolveFontFor ctx nt fontSize si
   let widgetFg = fromMaybe (styleFg style) mFontColor
-      sortMark = if nt == NodeButton && isTableHeaderStyle si then tableSortMarkOf si else 0
+      sortMark = if nt == NodeButton && hasFlag buttonFlagTable si then tableSortMarkOf si else 0
       -- Table sort arrow: pinned to the header's right edge, inside the cell
       -- inset, whatever the label's alignment. The label still ends in a
       -- blank reserve slot (the ▲/▼ codepoint is not in the pruned UI font),
