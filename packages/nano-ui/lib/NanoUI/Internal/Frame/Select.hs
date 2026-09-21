@@ -8,6 +8,7 @@ module NanoUI.Internal.Frame.Select
   , drawSelectOverlays
   , collectSelectDropdownSpans
   , overlayMenuOwnerAt
+  , overlayMenuRects
   , routePointer
   , tagSelectClippedSpans
   , comboDropRect
@@ -43,7 +44,7 @@ import NanoUI.Internal.Context
   )
 import NanoUI.Internal.Draw (pushRect, pushRoundedRect, pushText, withClip)
 import NanoUI.Internal.Font (FontMetrics, centeredTextY, menuItemPadX, menuItemRowH, menuOuterPad, widgetContentInset)
-import NanoUI.Internal.Frame.Chrome (overlayMenuStyle, paintMenuAccent, paintMenuPanel)
+import NanoUI.Internal.Frame.Chrome (menuPanelBounds, overlayMenuStyle, paintMenuAccent, paintMenuPanel)
 import NanoUI.Internal.Frame.Hit (widgetOverlayAllowed, withWidgetNode)
 import NanoUI.Internal.Frame.Scroll.Geometry (padTextClipRect)
 import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
@@ -71,6 +72,15 @@ data Dropdown = Dropdown
   , ddComboScrollX :: !Float
   , ddComboContentW :: !Float
   }
+
+-- | Painted bounds of every open dropdown and of the text-edit menu. The
+-- overlays paint over the page in the retained texture, so a clip frame must
+-- repaint where they are and where they were.
+overlayMenuRects :: Context -> IO [Rect]
+overlayMenuRects ctx = do
+  dropdowns <- openDropdowns ctx
+  menu <- getTextInputMenu ctx
+  pure (map menuPanelBounds (map ddRect dropdowns ++ maybe [] (pure . textInputMenuRect) menu))
 
 -- | Every open dropdown, in arena order.
 openDropdowns :: Context -> IO [Dropdown]

@@ -91,11 +91,9 @@ focusedNodeIs ctx ref p = do
   wid <- readIORef (ref ctx)
   withWidgetNode ctx wid False $ \idx -> p <$> getNodeType (ctxNodeArena ctx) idx
 
--- Select dropdown or text-input menu is open. Overlay hover is not a widget id.
--- A focused combo (a search-style field carrying options) also owns an open
--- dropdown: report it so every frame while it is up redraws with full damage:
--- the floating list is painted by an overlay, so clip-damage frames would
--- leave stale rows in the retained texture.
+-- Select dropdown or text-input menu is open. Overlay hover is not a widget id,
+-- so while one is up every pointer move needs a frame. A focused combo (a
+-- search-style field carrying options) also owns an open dropdown.
 overlayMenuOpen :: Context -> IO Bool
 overlayMenuOpen ctx = do
   store <- getStore ctx

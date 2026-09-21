@@ -12,6 +12,7 @@ module NanoUI.Internal.Frame.Chrome
   , overlayModalStyle
   , overlayMenuStyle
   , paintMenuPanel
+  , menuPanelBounds
   , paintMenuAccent
   , paintScrollBarLayout
   , imageIdFromText
@@ -358,8 +359,16 @@ overlayModalStyle theme = (overlayMenuStyle theme) {styleCornerRadius = 2, style
 paintMenuPanel :: DrawArena -> Theme -> Style -> Rect -> IO ()
 paintMenuPanel da theme style rect@(Rect x y w h) = do
   when (colorA (themeShadow theme) > 0) $
-    pushRoundedRect da (Rect (x + 3) (y + 3) w h) (styleCornerRadius style) (themeShadow theme)
+    pushRoundedRect da (Rect (x + menuShadowOffset) (y + menuShadowOffset) w h) (styleCornerRadius style) (themeShadow theme)
   paintStyledRect da style rect
+
+-- | Everything 'paintMenuPanel' can touch for a panel at @rect@: the panel,
+-- its offset shadow, and a pixel of antialiasing around both.
+menuPanelBounds :: Rect -> Rect
+menuPanelBounds (Rect x y w h) = Rect (x - 1) (y - 1) (w + menuShadowOffset + 2) (h + menuShadowOffset + 2)
+
+menuShadowOffset :: Float
+menuShadowOffset = 3
 
 -- | Accent marker at a menu row's left edge, inset from its top and bottom.
 paintMenuAccent :: DrawArena -> Theme -> Rect -> IO ()

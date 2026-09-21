@@ -88,7 +88,6 @@ import NanoUI.Internal.Frame.Redraw
   ( debugPanelOpen
   , floatingPanelActive
   , needsRedraw
-  , overlayMenuOpen
   , pointerDragActive
   , textFieldActive
   )
@@ -102,6 +101,7 @@ import NanoUI.Internal.Frame.Select
   , drawSelectOverlays
   , finalizeSelectKeyboard
   , finalizeSelectPick
+  , overlayMenuRects
   , routePointer
   )
 import NanoUI.Internal.Frame.Spans
@@ -308,8 +308,8 @@ runFrameEff unlift ctx frameInp ui = do
   refreshHover ctx frameInp
   tickAnimations ctx (inputDeltaTime frameInp)
   pruneDrawOpCache ctx
-  overlayOpen <- overlayMenuOpen ctx
-  writeDamage ctx frameInp overlayOpen
+  menuRects <- overlayMenuRects ctx
+  writeDamage ctx frameInp menuRects
     FrameSnapshot
       { fsWasDirty = wasDirty
       , fsSize = oldSize

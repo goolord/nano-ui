@@ -243,6 +243,8 @@ data OverlayState = OverlayState
   , osTabConsumed :: {-# UNPACK #-} !Bool
   , osPrevFloatingRects :: !(IntMap Rect)
   , osPrevFloatingOrder :: ![Int]
+  -- | Painted bounds of the open dropdowns and text-edit menu last frame.
+  , osPrevMenuRects :: ![Rect]
   }
 
 -- | No modals, floating panels, or consumed Escape or Tab event.
@@ -255,6 +257,7 @@ initialOverlayState = OverlayState
   , osTabConsumed = False
   , osPrevFloatingRects = IM.empty
   , osPrevFloatingOrder = []
+  , osPrevMenuRects = []
   }
 
 -- | Running animations, settled values, and per-frame keep-alive requests,

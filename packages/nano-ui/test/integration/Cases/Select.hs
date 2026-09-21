@@ -45,7 +45,7 @@ runSliderCursorTest ctx failed = do
 runSelectOverlayDamageTest :: Context -> IORef Int -> IO ()
 runSelectOverlayDamageTest ctx failed = do
   let ui = column (select' ["Low", "Medium", "High"] 0)
-      inp0 = (withInput 320 160) {inputMousePos = V2 20 20}
+      inp0 = (withInput 640 480) {inputMousePos = V2 20 20}
   (resp, _) <- warmup2 ctx inp0 ui
   let pos = centerOf resp
       open = snd (clickPair inp0 pos)
@@ -59,7 +59,10 @@ runSelectOverlayDamageTest ctx failed = do
     assert failed need
     _ <- runFrame ctx overMenu ui
     dmg <- takeDamage ctx
-    assertEq failed dmg DamageFull
+    -- The hover moved inside the dropdown, which the arena does not hold:
+    -- the clip repaints the whole dropdown rather than the whole window.
+    assert failed (not (null overlays))
+    forM_ overlays $ \(_, _, _, _, dropRect) -> assert failed (clipCovers dmg dropRect)
 
 runTreeSelectTest :: Context -> IORef Int -> IO ()
 runTreeSelectTest ctx failed = do
