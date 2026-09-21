@@ -656,9 +656,8 @@ coverageFamilies =
 
 -- | Build immutable metric snapshots and explicit IO rasterisation callbacks.
 -- Font queries happen in 'fbPrepare' and atlas insertion in 'fbDrawShaped'.
--- Every non-empty line is shaped, so 'fbDrawGlyph' (the per-character
--- fallback for backends that do not shape) draws nothing. All coordinates are
--- logical (unscaled).
+-- Every non-empty line is shaped, so the per-character glyph fallback draws
+-- nothing. All coordinates are logical (unscaled).
 {-# NOINLINE buildGlyphFontMetrics #-}
 buildGlyphFontMetrics :: GlyphAtlas -> SdlFont -> Float -> IO (FontMetrics, Text -> IO (Float, Float))
 buildGlyphFontMetrics ga sf scale = do
@@ -824,7 +823,7 @@ buildGlyphFontMetrics ga sf scale = do
       | ord c < 128 = pure (indexSmallArray asciiGeometry (ord c))
       | otherwise = getGlyphGeometry sf inv c
 
-    backend = FontBackend prepareText shapedLookup (\_ -> pure Nothing)
+    backend = FontBackend prepareText shapedLookup
 
     prepareText txt = do
       ensureFontAlive sf

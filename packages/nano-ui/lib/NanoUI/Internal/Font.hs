@@ -128,7 +128,6 @@ data FontMetrics = FontMetrics
 data FontBackend = FontBackend
   { fbPrepare :: Text -> IO FontMetrics
   , fbDrawShaped :: Text -> IO (Maybe ShapedGlyphs)
-  , fbDrawGlyph :: Char -> IO (Maybe GlyphQuad)
   }
 
 -- | Custom node measurement: font metrics and available (width, height) to
@@ -173,11 +172,11 @@ measureTextIO fm txt = do
 drawShaped :: FontMetrics -> Text -> IO (Maybe ShapedGlyphs)
 drawShaped fm txt = maybe (pure Nothing) (`fbDrawShaped` txt) (fmBackend fm)
 
--- | Obtain a glyph quad, allowing backend atlas updates in IO. 'Nothing'
--- means no drawable quad is available, for example for whitespace.
+-- | A glyph's quad from the metrics snapshot. 'Nothing' means no drawable
+-- quad is available, for example for whitespace or a host that shapes.
 {-# INLINE drawGlyph #-}
 drawGlyph :: FontMetrics -> Char -> IO (Maybe GlyphQuad)
-drawGlyph fm c = maybe (pure (fmGlyph fm c)) (`fbDrawGlyph` c) (fmBackend fm)
+drawGlyph fm c = pure (fmGlyph fm c)
 
 -- | Headless metrics with square cells of the given logical size, ascent 80%
 -- of cell height, and no drawable glyphs or shaping backend.
@@ -215,7 +214,6 @@ scaleFontMetrics s fm
     scaleBackend backend = FontBackend
       { fbPrepare = \t -> scaleFontMetrics s <$> fbPrepare backend t
       , fbDrawShaped = \t -> fmap (fmap scaleGlyphs) (fbDrawShaped backend t)
-      , fbDrawGlyph = \c -> fmap (fmap scaleGlyph) (fbDrawGlyph backend c)
       }
     scaleGlyph gq = gq
       { gqX = gqX gq * s, gqY = gqY gq * s

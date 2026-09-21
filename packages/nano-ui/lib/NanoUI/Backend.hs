@@ -70,7 +70,7 @@ module NanoUI.Backend
     -- 'prepareFontMetrics' asks it for a snapshot prepared for one text, so
     -- that text is measured with shaping; without a backend the metrics come
     -- back as they were. 'drawShaped' shapes a run into 'ShapedGlyphs', and
-    -- 'drawGlyph' gives one glyph's 'GlyphQuad' for the atlas.
+    -- 'drawGlyph' gives one glyph's 'GlyphQuad' from the snapshot.
   , FontMetrics (..)
   , FontBackend (..)
   , prepareFontMetrics

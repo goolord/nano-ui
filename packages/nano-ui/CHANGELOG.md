@@ -495,6 +495,9 @@
 
 ### Removed
 
+- `fbDrawGlyph` from `FontBackend`. No backend drew per-character glyphs
+  through it (every non-empty SDL line is shaped); `drawGlyph` now reads
+  `fmGlyph` from the metrics snapshot.
 - `panelStyled` and `panelStyledWith`; use
   `styled (panelStyle (background bg . borderColor border))` around a panel.
 - `MenuAction`; text field menus run `TextCommand`s.
