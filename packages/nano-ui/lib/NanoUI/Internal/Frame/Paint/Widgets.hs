@@ -56,6 +56,7 @@ import NanoUI.Internal.Frame.TextInput
   , drawTextInputCaret
   , drawTextInputSelection
   , readFieldEdit
+  , textInputScroll
   , syncTextInputScroll
   , textInputFieldRect
   , textInputFieldTextClip
@@ -127,7 +128,9 @@ paintTextInputNode env idx rect@(Rect x y w h) = do
               spans <- widgetTextSpans ctx NodeTextInput idx x y w h
               case spans of
                 (Rect fx fy _ _, txt, ffg, _) : _ -> do
-                  mEdit <- readFieldEdit ctx idx x y w h =<< syncTextInputScroll ctx idx x y w h
+                  -- The placement above settled the scroll, so read it back
+                  -- rather than measure the caret again.
+                  mEdit <- readFieldEdit ctx idx x y w h =<< textInputScroll ctx idx
                   paintClippedFieldText ctx da fm style idx mEdit (textInputFieldTextClip fm field) fx fy txt ffg
                 [] -> pure ()
 

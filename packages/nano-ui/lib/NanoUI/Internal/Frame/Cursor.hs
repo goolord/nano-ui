@@ -288,25 +288,21 @@ tableColResizeCursorKind ctx inp = do
     then pure (Just UiCursorEwResize)
     else do
       mEdge <-
-        findNodeM na $ \idx -> do
-          nt <- getNodeType na idx
-          if nt /= NodeButton
-            then pure False
-            else do
-              si <- getStyleIdx na idx
-              if not (hasFlag buttonFlagTable si)
-                then pure False
-                else do
-                  (x, y, w, h) <- getRect na idx
-                  -- The resize cursor spans the whole column height
-                  -- (header plus body cells down to the body
-                  -- scroller's bottom edge), matching the drag grab
-                  -- zone: tableBodyScrollerBottom locates the same
-                  -- body scroller whose rect the grab zone anchors
-                  -- on (its prev-frame value, readable at build
-                  -- time), so the two zones cannot disagree.
-                  yBot <- fromMaybe (y + h) <$> tableBodyScrollerBottom ctx idx
-                  pure (my >= y && my <= yBot && abs (mx - (x + w)) <= 4 && w > 0 && h > 0)
+        findNodeM na $ \idx ->
+          ((== NodeButton) <$> getNodeType na idx)
+            <&&> (hasFlag buttonFlagTable <$> getStyleIdx na idx)
+            <&&> do
+              (x, y, w, h) <- getRect na idx
+              -- The resize cursor spans the whole column height (header
+              -- plus body cells down to the body scroller's bottom edge),
+              -- matching the drag grab zone: tableBodyScrollerBottom
+              -- locates the same body scroller whose rect the grab zone
+              -- anchors on (its prev-frame value, readable at build time),
+              -- so the two zones cannot disagree. The edge test comes
+              -- first, so only the header under the pointer walks up.
+              if w > 0 && h > 0 && my >= y && abs (mx - (x + w)) <= 4
+                then (\yBot -> my <= yBot) . fromMaybe (y + h) <$> tableBodyScrollerBottom ctx idx
+                else pure False
       pure (UiCursorEwResize <$ mEdge)
 
 -- | Bottom edge of a table's body scroller, located structurally from one

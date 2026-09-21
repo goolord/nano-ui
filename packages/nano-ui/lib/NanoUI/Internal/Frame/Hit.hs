@@ -37,6 +37,7 @@ import NanoUI.Internal.Layout.Arena
   ( NodeIdx
   , NodeType (NodeModal, NodePopup, NodeScrollContainer, NodeWindow)
   , findNodeRevM
+  , floatingNodeCount
   , getClipRect
   , getNodeRect
   , getNodeType
@@ -96,10 +97,15 @@ widgetIdInSubtree ctx root wid = do
 -- nodes inside the topmost one can. Anywhere else every node can.
 overlayHitAllowed :: Context -> NodeIdx -> V2 -> IO Bool
 overlayHitAllowed ctx idx mouse = do
+  -- Most frames have no floating panel, and then nothing needs looking up.
+  floating <- floatingNodeCount (ctxNodeArena ctx)
   top <-
-    runMaybeT $
-      MaybeT (topModalNode (ctxNodeArena ctx))
-        <|> MaybeT (topmostOverlayAtMouse ctx mouse)
+    if floating <= 0
+      then pure Nothing
+      else
+        runMaybeT $
+          MaybeT (topModalNode (ctxNodeArena ctx))
+            <|> MaybeT (topmostOverlayAtMouse ctx mouse)
   maybe (pure True) (nodeInSubtree ctx idx) top
 
 -- | The window or popup on top at @mouse@: the last one in arena order whose

@@ -1140,10 +1140,8 @@ captureLayoutCache na lc0 = do
 layoutCacheEligible :: NodeArena -> IO Bool
 layoutCacheEligible na = do
   n <- arenaCount na
-  a <- arenaArrays na
-  if n <= 0
-    then pure False
-    else allRangeM 0 n $ \i -> not . isFloatingNode <$> readTagEnum a i tagNodeType
+  floating <- floatingNodeCount na
+  pure (n > 0 && floating == 0)
 
 -- | Compare layout inputs, stopping at the first mismatch. Node values are
 -- paint state except on scroll containers, where they are solver outputs.

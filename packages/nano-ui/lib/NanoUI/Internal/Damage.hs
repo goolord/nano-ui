@@ -19,6 +19,7 @@ import NanoUI.Internal.Context
   ( Animation
   , Context (..)
   , DamageRequest (..)
+  , DrawingCacheState (..)
   , WidgetStore (..)
   , getHotId
   , getLiveAnimations
@@ -59,6 +60,8 @@ import NanoUI.Internal.Layout.Arena
   , NodeType (..)
   , SizingTag (..)
   , arenaCount
+  , floatingNodeCount
+  , foldNodesM
   , foldNodeRevM
   , getClipRect
   , getHeightSizing
@@ -135,16 +138,20 @@ updatePrevRects ctx = do
   let na = ctxNodeArena ctx
       bump rects = do
         rest <- getAnimRest ctx
-        let rectless' =
-              IM.fromSet
-                (\k -> if IM.member k rects then 0 else IM.findWithDefault 0 k prevRectless + 1)
-                (IM.keysSet live <> IM.keysSet rest)
-            deadRest = IM.filterWithKey (\k _ -> IM.findWithDefault 0 k rectless' > 300) rest
+        -- Frames without a rect, for the live or resting keys that have none.
+        -- A key with a rect counts 0, which every reader takes as absent, so
+        -- a frame where every animated widget has a rect builds nothing.
+        let rectlessOf :: IM.IntMap v -> IM.IntMap Int
+            rectlessOf m = IM.mapWithKey (\k _ -> IM.findWithDefault 0 k prevRectless + 1) (m `IM.difference` rects)
+            restRectless = rectlessOf rest
+            rectless' = rectlessOf live `IM.union` restRectless
+            deadRest = IM.filter (> 300) restRectless
         unless (IM.null deadRest) $
           pruneAnimRest ctx (\k -> IM.notMember k deadRest)
         -- Every key is live or resting, so this drops exactly the dead resting
         -- keys that are not live again.
-        setAnimRectless ctx (rectless' `IM.difference` (deadRest `IM.difference` live))
+        unless (IM.null rectless' && IM.null prevRectless) $
+          setAnimRectless ctx (rectless' `IM.difference` (deadRest `IM.difference` live))
   count <- arenaCount na
   if count <= 0
     then do
@@ -197,7 +204,9 @@ updatePrevRects ctx = do
       go oldRects 0 oldRects oldClips oldTexts 0 False
 
 floatingPanelsInOrder :: Context -> IO [(Int, Rect)]
-floatingPanelsInOrder ctx = foldNodeRevM na step []
+floatingPanelsInOrder ctx = do
+  floating <- floatingNodeCount na
+  if floating <= 0 then pure [] else foldNodeRevM na step []
   where
     na = ctxNodeArena ctx
     step acc idx = do
@@ -322,32 +331,36 @@ writeDamage ctx inp overlayOpen snap = do
 -- replay the previous frame's ops for it. What this costs per widget is the
 -- widget's own choice: see 'refreshCustomDrawingOps'.
 refreshCustomDrawings :: Context -> IO [Int]
-refreshCustomDrawings ctx = arenaCount na >>= \count -> go count 0 []
+refreshCustomDrawings ctx = do
+  dc <- readIORef (ctxDrawingCache ctx)
+  -- A drawing with neither entry settles nothing, so a view without drawings
+  -- skips the walk.
+  if IM.null (dcsDrawings dc) && IM.null (dcsCustomDrawings dc)
+    then pure []
+    else foldNodesM na step []
   where
     na = ctxNodeArena ctx
-    go count !i acc
-      | i >= count = pure acc
-      | otherwise = do
-          nt <- getNodeType na i
-          if nt /= NodeDrawing
-            then go count (i + 1) acc
-            else do
-              wid <- getWidgetId na i
-              rect <- getNodeRect na i
-              mCustom <- lookupCustomDrawing ctx wid
-              changed <- case mCustom of
-                Just (CustomDrawingEntry content build) -> do
-                  cdc <- mkCustomDrawContext ctx (ctxFontMetrics ctx) wid
-                  refreshCustomDrawingOps ctx wid content rect cdc build
-                Nothing -> do
-                  -- A versioned drawing rebuilds in paint once its version
-                  -- changes, but the pixels it covered still need damage. An
-                  -- unversioned one is cached by contract, so it stays put.
-                  mDrawing <- lookupDrawing ctx wid
-                  case mDrawing of
-                    Just (DrawingEntry content _) | content /= 0 -> drawingOpsStale ctx wid content rect
-                    _ -> pure False
-              go count (i + 1) (if changed then intKey wid : acc else acc)
+    step acc i = do
+      nt <- getNodeType na i
+      if nt /= NodeDrawing
+        then pure acc
+        else do
+          wid <- getWidgetId na i
+          rect <- getNodeRect na i
+          mCustom <- lookupCustomDrawing ctx wid
+          changed <- case mCustom of
+            Just (CustomDrawingEntry content build) -> do
+              cdc <- mkCustomDrawContext ctx (ctxFontMetrics ctx) wid
+              refreshCustomDrawingOps ctx wid content rect cdc build
+            Nothing -> do
+              -- A versioned drawing rebuilds in paint once its version
+              -- changes, but the pixels it covered still need damage. An
+              -- unversioned one is cached by contract, so it stays put.
+              mDrawing <- lookupDrawing ctx wid
+              case mDrawing of
+                Just (DrawingEntry content _) | content /= 0 -> drawingOpsStale ctx wid content rect
+                _ -> pure False
+          pure (if changed then intKey wid : acc else acc)
 
 -- | Whether the frame repaints the whole window rather than a clip.
 needsFullDamage :: FrameSnapshot -> FrameDelta -> Bool

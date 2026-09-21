@@ -42,6 +42,7 @@ import NanoUI.Internal.Layout.Arena
   ( NodeIdx
   , NodeType (..)
   , findNodeRevM
+  , floatingNodeCount
   , foldNodesM
   , getDirection
   , getFirstChild
@@ -61,11 +62,16 @@ import NanoUI.Internal.Style (Padding (..))
 import NanoUI.Internal.Types (DamageBounds (..), Rect (..), V2 (..), haloDamageSlop, rectContains, rectInflate, rectNonEmpty)
 
 topmostWindowAtResizeHalo :: Context -> V2 -> IO (Maybe NodeIdx)
-topmostWindowAtResizeHalo ctx mouse =
-  findNodeRevM (ctxNodeArena ctx) $ \idx ->
-    ((== NodeWindow) <$> getNodeType (ctxNodeArena ctx) idx) <&&> do
-      rect <- getNodeRect (ctxNodeArena ctx) idx
-      pure (rectNonEmpty rect && rectContains (rectInflate windowResizeHandleFor rect) mouse)
+topmostWindowAtResizeHalo ctx mouse = do
+  floating <- floatingNodeCount na
+  if floating <= 0
+    then pure Nothing
+    else findNodeRevM na $ \idx ->
+      ((== NodeWindow) <$> getNodeType na idx) <&&> do
+        rect <- getNodeRect na idx
+        pure (rectNonEmpty rect && rectContains (rectInflate windowResizeHandleFor rect) mouse)
+ where
+  na = ctxNodeArena ctx
 
 -- | Saved floating-window x/y in logical pixels, or 'Nothing' before placement.
 lookupWindowPos :: Context -> WidgetId -> IO (Maybe (Float, Float))
@@ -77,10 +83,9 @@ lookupWindowSize ctx wid = lookupSlot fieldPoint (slotKey SlotWinSize (intKey wi
 
 -- | Save solved floating-window positions and sizes to the store for later frames.
 persistWindowPositions :: Context -> IO ()
-persistWindowPositions ctx = do
+persistWindowPositions ctx = floatingNodeCount na >>= \floating -> when (floating > 0) $ do
   store0 <- getStore ctx
-  let na = ctxNodeArena ctx
-      record acc idx = do
+  let record acc idx = do
         nt <- getNodeType na idx
         if nt /= NodeWindow
           then pure acc
@@ -97,6 +102,8 @@ persistWindowPositions ctx = do
                 else insertSlot fieldPoint k (x, y) (insertSlot fieldPoint sizeKey (w, h) acc)
   store1 <- foldNodesM na record store0
   when (store1 /= store0) $ setStore ctx store1
+ where
+  na = ctxNodeArena ctx
 
 -- | Start or continue a title-bar drag and save its position. Returns 'True'
 -- while a drag starts or is held; releases clear it. Resize gestures take priority.

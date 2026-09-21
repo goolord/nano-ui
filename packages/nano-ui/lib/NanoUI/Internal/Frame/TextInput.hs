@@ -9,6 +9,7 @@ module NanoUI.Internal.Frame.TextInput
   , syncTextInputScroll
   , FieldEdit
   , readFieldEdit
+  , textInputScroll
   , drawTextInputSelection
   , drawTextInputCaret
   , drawTextCaret
@@ -179,6 +180,12 @@ computeTextInputScroll fm viewportW value cursor oldScroll isFocused
             | caretRelX + 1 > oldScroll + viewportW = caretRelX + 1 - viewportW
             | otherwise = oldScroll
       pure (max 0 (min maxScroll s0))
+
+-- | The scroll 'syncTextInputScroll' last settled for a field.
+textInputScroll :: Context -> NodeIdx -> IO Float
+textInputScroll ctx idx = do
+  wid <- getWidgetId (ctxNodeArena ctx) idx
+  findSlot fieldFloat 0 (slotKey SlotTextInputScroll (intKey wid)) <$> getStore ctx
 
 syncTextInputScroll :: Context -> NodeIdx -> Float -> Float -> Float -> Float -> IO Float
 syncTextInputScroll ctx idx x y w h = do

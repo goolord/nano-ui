@@ -25,7 +25,8 @@ module NanoUI.Internal.Context.Drawing
   , hasCustomLayoutInputs
   ) where
 
-import Data.IORef (modifyIORef', readIORef)
+import Control.Monad (when)
+import Data.IORef (modifyIORef', readIORef, writeIORef)
 import Data.IntMap.Strict (IntMap)
 import Data.IntMap.Strict qualified as IM
 import Data.Primitive.SmallArray (SmallArray, mapSmallArray')
@@ -185,15 +186,20 @@ lookupDrawFitEnvelope ctx wid lh content incoming = do
 
 -- | Drop cached ops for drawings not registered in the current view pass.
 pruneDrawOpCache :: Context -> IO ()
-pruneDrawOpCache ctx =
-  modifyIORef' (ctxDrawingCache ctx) $ \dc ->
-    let live = dcsDrawings dc
-        customLive = dcsCustomDrawings dc
-     in dc
-          { dcsDrawOpCache = dcsDrawOpCache dc `IM.intersection` live
-          , dcsCustomDrawOpCache = dcsCustomDrawOpCache dc `IM.intersection` customLive
-          , dcsDrawFitCache = dcsDrawFitCache dc `IM.intersection` live
-          }
+pruneDrawOpCache ctx = do
+  dc <- readIORef (ctxDrawingCache ctx)
+  let live = dcsDrawings dc
+      customLive = dcsCustomDrawings dc
+      -- The intersection copies a map even when it keeps every key, so
+      -- test first: most frames have nothing to drop.
+      stale cache keep = not (IM.isSubmapOfBy (\_ _ -> True) cache keep)
+  when (stale (dcsDrawOpCache dc) live || stale (dcsCustomDrawOpCache dc) customLive || stale (dcsDrawFitCache dc) live) $
+    writeIORef (ctxDrawingCache ctx) $!
+      dc
+        { dcsDrawOpCache = dcsDrawOpCache dc `IM.intersection` live
+        , dcsCustomDrawOpCache = dcsCustomDrawOpCache dc `IM.intersection` customLive
+        , dcsDrawFitCache = dcsDrawFitCache dc `IM.intersection` live
+        }
 
 -- | Register an interaction-aware painter. A nonzero content key must cover
 -- its external inputs; zero requests rebuilding and comparison each frame.
