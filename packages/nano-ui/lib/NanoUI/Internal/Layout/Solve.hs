@@ -64,6 +64,7 @@ import NanoUI.Internal.Layout.Arena
   , SizingTag (..)
   , arenaArrays
   , arenaCount
+  , floatingNodeCount
   , hasCenteredLabel
   , withArenaArraysSnap
   , geomX
@@ -281,11 +282,17 @@ solveLayout na ms rootW rootH =
       env <- solveEnv na ms
       measurePass env count
       positionNodeA env 0 0 0 0 rootW rootH
-      quantizeResultsA (seArrays env) count (fmSnapScale (msFm ms))
+      floatingCount <- floatingNodeCount na
+      quantizeResultsA (seArrays env) count floatingCount (fmSnapScale (msFm ms))
 
-quantizeResultsA :: NodeArenaArrays -> Int -> Float -> IO ()
-quantizeResultsA a count s
+-- | Snap the solved geometry of the @count@ nodes to the device pixel grid of
+-- scale @s@. @floatingCount@ is the arena's floating node count.
+quantizeResultsA :: NodeArenaArrays -> Int -> Int -> Float -> IO ()
+quantizeResultsA a count floatingCount s
   | s <= 0 = pure ()
+  -- Nothing floats, so every node snaps and none needs marking.
+  | floatingCount <= 0 =
+      let go i = when (i < count) (snapNode i >> go (i + 1)) in go 0
   | otherwise = do
       -- A floating node (modal, window, popup) and everything inside it is
       -- laid out by placement after the solve, which sizes the subtree from
@@ -304,22 +311,23 @@ quantizeResultsA a count s
                     then pure True
                     else if parent >= 0 then (/= 0) <$> readPrimArray floating parent else pure False
                 writePrimArray floating i (if inFloating then 1 else 0)
-                unless inFloating $ do
-                  x <- readGeom a i geomX
-                  y <- readGeom a i geomY
-                  w <- readGeom a i geomW
-                  h <- readGeom a i geomH
-                  -- Snap both edges and take the size between them. Rounding
-                  -- the size on its own can push a node's far edge a pixel
-                  -- past the snapped origin of the sibling that starts there,
-                  -- and the node then paints over it (a table cell over the
-                  -- column rule beside it).
-                  writeGeom a i geomX (onGrid s x)
-                  writeGeom a i geomY (onGrid s y)
-                  writeGeom a i geomW (max 0 (gridSpan s x (x + w)))
-                  writeGeom a i geomH (max 0 (gridSpan s y (y + h)))
+                unless inFloating (snapNode i)
                 go (i + 1)
       go 0
+ where
+  snapNode i = do
+    x <- readGeom a i geomX
+    y <- readGeom a i geomY
+    w <- readGeom a i geomW
+    h <- readGeom a i geomH
+    -- Snap both edges and take the size between them. Rounding the size on
+    -- its own can push a node's far edge a pixel past the snapped origin of
+    -- the sibling that starts there, and the node then paints over it (a
+    -- table cell over the column rule beside it).
+    writeGeom a i geomX (onGrid s x)
+    writeGeom a i geomY (onGrid s y)
+    writeGeom a i geomW (max 0 (gridSpan s x (x + w)))
+    writeGeom a i geomH (max 0 (gridSpan s y (y + h)))
 
 measurePass :: SolveEnv -> Int -> IO ()
 measurePass env count = do
