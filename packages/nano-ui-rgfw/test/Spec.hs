@@ -45,9 +45,7 @@ import NanoUI.Testing
 import NanoUI.Rgfw.Internal.Font.Cozette
   ( CozetteFont (..)
   , charToGlyphId
-  , cozetteGlyphBit1x
-  , cozetteGlyphBit2x
-  , cozetteGlyphBit4x
+  , cozetteGlyphBit
   , getCozetteFont
   , renderGlyphScaledToBuffer
   )
@@ -139,16 +137,16 @@ testScale2xGlyphTables = do
   let font = getCozetteFont
       testGlyphs = [1, 2, 34, 36, 65, 95]
   forM_ testGlyphs $ \gid -> do
-    let expectedBit2x = scale2x 7 13 (cozetteGlyphBit1x font gid)
-        matches2x = and [ cozetteGlyphBit2x font gid x y == expectedBit2x x y
+    let expectedBit2x = scale2x 7 13 (cozetteGlyphBit font 1 gid)
+        matches2x = and [ cozetteGlyphBit font 2 gid x y == expectedBit2x x y
                         | y <- [0 .. 25]
                         , x <- [0 .. 13]
                         ]
     assert ("Scale2x 14x26 precomputed table matches pure scale2x for glyph " ++ show gid) matches2x
 
   forM_ testGlyphs $ \gid -> do
-    let expectedBit4x = scale2x 14 26 (cozetteGlyphBit2x font gid)
-        matches4x = and [ cozetteGlyphBit4x font gid x y == expectedBit4x x y
+    let expectedBit4x = scale2x 14 26 (cozetteGlyphBit font 2 gid)
+        matches4x = and [ cozetteGlyphBit font 4 gid x y == expectedBit4x x y
                         | y <- [0 .. 51]
                         , x <- [0 .. 27]
                         ]

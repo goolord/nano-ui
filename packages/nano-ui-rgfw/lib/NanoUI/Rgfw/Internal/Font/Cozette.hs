@@ -15,14 +15,12 @@ module NanoUI.Rgfw.Internal.Font.Cozette
   , cozetteScalePath
   , cozetteGlyphFootprint
   , charToGlyphId
-  , cozetteGlyphBit1x
-  , cozetteGlyphBit2x
-  , cozetteGlyphBit4x
+  , cozetteGlyphBit
   , renderGlyphScaledToBuffer
   , foldPenPositions
   ) where
 
-import Control.Monad (when)
+import Control.Monad (forM_, when)
 import Control.Monad.ST (ST, runST)
 import Data.Bits (Bits, setBit, shiftL, shiftR, testBit, (.&.), (.|.))
 import Data.ByteString (ByteString)
@@ -72,7 +70,6 @@ cozetteGlyphHeight = 13
 data CozetteFont = CozetteFont
   { cfNumGlyphs   :: {-# UNPACK #-} !Int
   , cfGroups      :: !(PrimArray Word32) -- start, end, glyph: three a group
-  , cfGlyphData   :: !(PrimArray Word8)  -- 921 * 12 bytes of packed 7x13 bitmap bits
   , cfGlyphData1x :: !(PrimArray Word8)  -- 921 * 13 bytes of row-unpacked Word8s (1 byte per row)
   , cfGlyphData2x :: !(PrimArray Word16) -- 921 * 26 Word16s (14 bits per row, 26 rows per glyph)
   , cfGlyphData4x :: !(PrimArray Word32) -- 921 * 52 Word32s (28 bits per row, 52 rows per glyph)
@@ -145,56 +142,22 @@ parseCozette bs = runST $ do
       numGlyphs = lastGlyph + 1
       imgDataOff = fromIntegral (parseWord32 bs (stOff + 4))
 
-  -- Allocate glyph data buffer (numGlyphs * 12 bytes)
-  mutArr <- newPrimArray (numGlyphs * 12)
-  let loadGlyphs !g
-        | g >= numGlyphs = pure ()
-        | otherwise = do
-            let off1 = fromIntegral (parseWord32 bs (stOff + 8 + g * 4))
-                off2 = fromIntegral (parseWord32 bs (stOff + 8 + (g + 1) * 4))
-                len = off2 - off1
-                srcBase = ebdtOff + imgDataOff + off1
-                copyBytes !b
-                  | b >= 12 = pure ()
-                  | b < len = do
-                      let !byteVal = BS.index bs (srcBase + b)
-                      writePrimArray mutArr (g * 12 + b) byteVal
-                      copyBytes (b + 1)
-                  | otherwise = do
-                      writePrimArray mutArr (g * 12 + b) 0
-                      copyBytes (b + 1)
-            copyBytes 0
-            loadGlyphs (g + 1)
-  loadGlyphs 0
-  frozen1x <- unsafeFreezePrimArray mutArr
-  frozen1xRows <- build1xRowGlyphs numGlyphs frozen1x
-  frozen2x <- buildEpxTable numGlyphs 7 13 15 (getGlyphBit1x frozen1x)
-  frozen4x <- buildEpxTable numGlyphs 14 26 31 (getGlyphBit2x frozen2x)
-  pure $ CozetteFont numGlyphs (primArrayFromList (concat [[start, end, glyph] | (start, end, glyph) <- groups])) frozen1x frozen1xRows frozen2x frozen4x
-
--- | Build unpacked 1x glyphs: 13 bytes per glyph (1 byte per row, bit (7 - c) for col c).
-build1xRowGlyphs :: Int -> PrimArray Word8 -> ST s (PrimArray Word8)
-build1xRowGlyphs !numGlyphs !arr = do
-  mutArr1x <- newPrimArray (numGlyphs * 13)
-  let forEachGlyph !gid
-        | gid >= numGlyphs = pure ()
-        | otherwise = do
-            let forEachRow !r
-                  | r >= 13 = pure ()
-                  | otherwise = do
-                      let buildRow !c !acc
-                            | c >= 7 = acc
-                            | otherwise =
-                                let !bit = getGlyphBit1x arr gid c r
-                                    !bitVal = bit `shiftL` (7 - c)
-                                 in buildRow (c + 1) (acc .|. bitVal)
-                      let !rowByte = buildRow 0 0
-                      writePrimArray mutArr1x (gid * 13 + r) rowByte
-                      forEachRow (r + 1)
-            forEachRow 0
-            forEachGlyph (gid + 1)
-  forEachGlyph 0
-  unsafeFreezePrimArray mutArr1x
+  -- Unpack each glyph's 7x13 bitmap (bits packed MSB first, rows back to
+  -- back, the image possibly shorter than 12 bytes) into one byte per row.
+  rows1x <- newPrimArray (numGlyphs * 13)
+  forM_ [0 .. numGlyphs - 1] $ \g -> do
+    let off1 = fromIntegral (parseWord32 bs (stOff + 8 + g * 4))
+        off2 = fromIntegral (parseWord32 bs (stOff + 8 + (g + 1) * 4))
+        src = ebdtOff + imgDataOff + off1
+        packedBit i =
+          let b = i `shiftR` 3
+           in b < off2 - off1 && testBit (BS.index bs (src + b)) (7 - i .&. 7)
+        row r = foldl' (\acc c -> if packedBit (r * 7 + c) then setBit acc (7 - c) else acc) 0 [0 .. 6]
+    forM_ [0 .. 12] $ \r -> writePrimArray rows1x (g * 13 + r) (row r :: Word8)
+  frozen1x <- unsafeFreezePrimArray rows1x
+  frozen2x <- buildEpxTable numGlyphs 7 13 15 (rowBit frozen1x 7 13 7)
+  frozen4x <- buildEpxTable numGlyphs 14 26 31 (rowBit frozen2x 14 26 15)
+  pure $ CozetteFont numGlyphs (primArrayFromList (concat [[start, end, glyph] | (start, end, glyph) <- groups])) frozen1x frozen2x frozen4x
 
 -- | The EPX (Scale2x) rule: the 2x2 block replacing pixel @e@, given its
 -- neighbours above (@b@), left (@d@), right (@f@) and below (@h@), as
@@ -211,10 +174,10 @@ epx b d e f h
   | otherwise = (e, e, e, e)
 
 -- | EPX-double every glyph of a table: @srcW@ x @srcH@ source bits per glyph
--- (@bitAt gid col row@, 0 outside the glyph) become 2 * @srcH@ rows of
+-- (@bitAt gid col row@, unset outside the glyph) become 2 * @srcH@ rows of
 -- 2 * @srcW@ bits, column 0 at bit @msb@.
 {-# INLINE buildEpxTable #-}
-buildEpxTable :: (Prim w, Bits w, Num w) => Int -> Int -> Int -> Int -> (Int -> Int -> Int -> Word8) -> ST s (PrimArray w)
+buildEpxTable :: (Prim w, Bits w, Num w) => Int -> Int -> Int -> Int -> (Int -> Int -> Int -> Bool) -> ST s (PrimArray w)
 buildEpxTable !numGlyphs !srcW !srcH !msb bitAt = do
   out <- newPrimArray (numGlyphs * 2 * srcH)
   let forGlyph !gid = when (gid < numGlyphs) $ do
@@ -232,53 +195,27 @@ buildEpxTable !numGlyphs !srcW !srcH !msb bitAt = do
             let (e0, e1, e2, e3) =
                   epx (bitAt gid c (r - 1)) (bitAt gid (c - 1) r) (bitAt gid c r) (bitAt gid (c + 1) r) (bitAt gid c (r + 1))
                 !bit0 = msb - 2 * c
-                put v i acc = if v /= 0 then setBit acc i else acc
+                put v i acc = if v then setBit acc i else acc
              in rowPair gid r (c + 1) (put e1 (bit0 - 1) (put e0 bit0 top)) (put e3 (bit0 - 1) (put e2 bit0 bot))
   forGlyph 0
   unsafeFreezePrimArray out
 
-{-# INLINE getGlyphBit1x #-}
-getGlyphBit1x :: PrimArray Word8 -> Int -> Int -> Int -> Word8
-getGlyphBit1x !arr !gid !c !r
-  | c < 0 || c >= 7 || r < 0 || r >= 13 = 0
-  | otherwise =
-      let !bitIdx = r * 7 + c
-          !byteIdx = gid * 12 + (bitIdx `shiftR` 3)
-          !bitInByte = 7 - (bitIdx .&. 7)
-          !b = indexPrimArray arr byteIdx
-       in (b `shiftR` bitInByte) .&. 1
+-- | Pixel @(col, row)@ of glyph @gid@ in a table of @h@ rows per glyph with
+-- column 0 at bit @msb@; unset outside the @w@ x @h@ glyph.
+{-# INLINE rowBit #-}
+rowBit :: (Prim w, Bits w) => PrimArray w -> Int -> Int -> Int -> Int -> Int -> Int -> Bool
+rowBit arr w h msb gid c r =
+  c >= 0 && c < w && r >= 0 && r < h && testBit (indexPrimArray arr (gid * h + r)) (msb - c)
 
-{-# INLINE getGlyphBit2x #-}
-getGlyphBit2x :: PrimArray Word16 -> Int -> Int -> Int -> Word8
-getGlyphBit2x !arr2x !gid !c !r
-  | c < 0 || c >= 14 || r < 0 || r >= 26 = 0
-  | otherwise =
-      let !w = indexPrimArray arr2x (gid * 26 + r)
-       in fromIntegral ((w `shiftR` (15 - c)) .&. 1)
-
--- | Query whether a pixel is set in the 1x glyph
-cozetteGlyphBit1x :: CozetteFont -> Word32 -> Int -> Int -> Bool
-cozetteGlyphBit1x font gid c r =
-  let !safeGid = if fromIntegral gid < cfNumGlyphs font then fromIntegral gid else 0
-   in getGlyphBit1x (cfGlyphData font) safeGid c r == 1
-
--- | Query whether a pixel is set in the Scale2x 2x glyph (width 14, height 26)
-cozetteGlyphBit2x :: CozetteFont -> Word32 -> Int -> Int -> Bool
-cozetteGlyphBit2x font gid c r
-  | c < 0 || c >= 14 || r < 0 || r >= 26 = False
-  | otherwise =
-      let !safeGid = if fromIntegral gid < cfNumGlyphs font then fromIntegral gid else 0
-          !w = indexPrimArray (cfGlyphData2x font) (safeGid * 26 + r)
-       in (w `shiftR` (15 - c)) .&. 1 == 1
-
--- | Query whether a pixel is set in the Scale4x 4x glyph (width 28, height 52)
-cozetteGlyphBit4x :: CozetteFont -> Word32 -> Int -> Int -> Bool
-cozetteGlyphBit4x font gid c r
-  | c < 0 || c >= 28 || r < 0 || r >= 52 = False
-  | otherwise =
-      let !safeGid = if fromIntegral gid < cfNumGlyphs font then fromIntegral gid else 0
-          !w = indexPrimArray (cfGlyphData4x font) (safeGid * 52 + r)
-       in (w `shiftR` (31 - c)) .&. 1 == 1
+-- | Whether a pixel is set in a glyph at scale 1 (7x13), 2 (14x26) or 4
+-- (28x52). An unknown glyph reads as glyph 0.
+cozetteGlyphBit :: CozetteFont -> Int -> Word32 -> Int -> Int -> Bool
+cozetteGlyphBit font scale gid = case scale of
+  1 -> rowBit (cfGlyphData1x font) 7 13 7 g
+  2 -> rowBit (cfGlyphData2x font) 14 26 15 g
+  _ -> rowBit (cfGlyphData4x font) 28 52 31 g
+  where
+    g = if fromIntegral gid < cfNumGlyphs font then fromIntegral gid else 0
 
 -- | Find a glyph, substituting ASCII for selected UI icons. Unsupported
 -- characters map to glyph 0, the missing-glyph bitmap.
