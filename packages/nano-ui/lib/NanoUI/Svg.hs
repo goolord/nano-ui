@@ -247,11 +247,11 @@ strokeWalk w cap join miterLimit contours@(Rings cpts cstarts ctags) point end =
           then emitP c >> emitP b >> emitP a
           else emitP a >> emitP b >> emitP c
         end 0
-      quad a b c d = do
-        if turn a b + turn b c + turn c d + turn d a < 0
-          then emitP d >> emitP c >> emitP b >> emitP a
-          else emitP a >> emitP b >> emitP c >> emitP d
-        end 0
+      quad a b c d
+        | turn a b + turn b c + turn c d + turn d a < 0 = emit4 d c b a
+        | otherwise = emit4 a b c d
+      -- A quad in the order given.
+      emit4 a b c d = emitP a >> emitP b >> emitP c >> emitP d >> end 0
       normal (Point x0 y0) (Point x1 y1) =
         let dx = x1 - x0
             dy = y1 - y0
@@ -260,11 +260,7 @@ strokeWalk w cap join miterLimit contours@(Rings cpts cstarts ctags) point end =
       segmentQuad a@(Point ax ay) b@(Point bx by) = do
         let (nx, ny) = normal a b
         -- The quad winds clockwise as built, whatever its direction.
-        emitP (Point (ax - nx) (ay - ny))
-        emitP (Point (bx - nx) (by - ny))
-        emitP (Point (bx + nx) (by + ny))
-        emitP (Point (ax + nx) (ay + ny))
-        end 0
+        emit4 (Point (ax - nx) (ay - ny)) (Point (bx - nx) (by - ny)) (Point (bx + nx) (by + ny)) (Point (ax + nx) (ay + ny))
       corner prev v@(Point vx vy) next = do
         let (n1x, n1y) = normal prev v
             (n2x, n2y) = normal v next
@@ -297,22 +293,14 @@ strokeWalk w cap join miterLimit contours@(Rings cpts cstarts ctags) point end =
               uy = dy / len * hw
               (nx, ny) = normal inner e
           -- Wound clockwise as built, like a segment's quad.
-          emitP (Point (ex - nx) (ey - ny))
-          emitP (Point (ex - nx + ux) (ey - ny + uy))
-          emitP (Point (ex + nx + ux) (ey + ny + uy))
-          emitP (Point (ex + nx) (ey + ny))
-          end 0
+          emit4 (Point (ex - nx) (ey - ny)) (Point (ex - nx + ux) (ey - ny + uy)) (Point (ex + nx + ux) (ey + ny + uy)) (Point (ex + nx) (ey + ny))
       disc (Point cx cy) = do
         let n = max 8 (min 48 (ceiling (hw * 2.5) :: Int))
         forM_ [0 .. n - 1] $ \i ->
           let t = 2 * pi * fromIntegral i / fromIntegral n in point (cx + hw * cos t) (cy + hw * sin t)
         end 0
-      square (Point cx cy) = do
-        emitP (Point (cx - hw) (cy - hw))
-        emitP (Point (cx + hw) (cy - hw))
-        emitP (Point (cx + hw) (cy + hw))
-        emitP (Point (cx - hw) (cy + hw))
-        end 0
+      square (Point cx cy) =
+        emit4 (Point (cx - hw) (cy - hw)) (Point (cx + hw) (cy - hw)) (Point (cx + hw) (cy + hw)) (Point (cx - hw) (cy + hw))
       contour r = do
         let from = indexPrimArray cstarts r
             to = indexPrimArray cstarts (r + 1)
