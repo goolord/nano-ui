@@ -1840,38 +1840,10 @@ computePopupPosition winW winH margin iw ih anchor placement offset =
        in (x, y)
     AnchorRect (Rect rx ry rw rh) ->
       case placement of
-        PlacementBelow ->
-          let x0 = rx
-              y0 = ry + rh + offset
-              y = if y0 + ih > winH - margin && ry - ih - offset >= margin
-                    then ry - ih - offset
-                    else y0
-              x = clampPopupX margin winW iw x0
-           in (x, clampY y)
-        PlacementAbove ->
-          let x0 = rx
-              y0 = ry - ih - offset
-              y = if y0 < margin && ry + rh + offset + ih <= winH - margin
-                    then ry + rh + offset
-                    else y0
-              x = clampPopupX margin winW iw x0
-           in (x, clampY y)
-        PlacementRight ->
-          let x0 = rx + rw + offset
-              y0 = ry
-              x = if x0 + iw > winW - margin && rx - iw - offset >= margin
-                    then rx - iw - offset
-                    else x0
-              y = clampY y0
-           in (clampPopupX margin winW iw x, y)
-        PlacementLeft ->
-          let x0 = rx - iw - offset
-              y0 = ry
-              x = if x0 < margin && rx + rw + offset + iw <= winW - margin
-                    then rx + rw + offset
-                    else x0
-              y = clampY y0
-           in (clampPopupX margin winW iw x, y)
+        PlacementBelow -> (clampPopupX margin winW iw rx, clampY (after ry rh winH ih))
+        PlacementAbove -> (clampPopupX margin winW iw rx, clampY (before ry rh winH ih))
+        PlacementRight -> (clampPopupX margin winW iw (after rx rw winW iw), clampY ry)
+        PlacementLeft -> (clampPopupX margin winW iw (before rx rw winW iw), clampY ry)
         PlacementAuto ->
           let spaceBelow = winH - margin - (ry + rh + offset)
               spaceAbove = ry - offset - margin
@@ -1885,6 +1857,15 @@ computePopupPosition winW winH margin iw ih anchor placement offset =
   where
     -- Keep the popup's top edge within the window margins.
     clampY y = max margin (min (winH - ih - margin) y)
+    -- A popup of @size@ after (or before) the anchor span @lo@..@lo + len@ on
+    -- an axis of length @lim@, taking the other side when it would overflow
+    -- and the other side fits.
+    after lo len lim size
+      | lo + len + offset + size > lim - margin && lo - size - offset >= margin = lo - size - offset
+      | otherwise = lo + len + offset
+    before lo len lim size
+      | lo - size - offset < margin && lo + len + offset + size <= lim - margin = lo + len + offset
+      | otherwise = lo - size - offset
 
 -- | Place measured popups using their registered anchor/side/gap, then lay out
 -- their children. Missing registrations use the origin with automatic placement.
