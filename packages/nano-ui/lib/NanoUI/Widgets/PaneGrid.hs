@@ -600,15 +600,13 @@ fillLay = sizingLay (Grow 1) (Grow 1)
 -- the main axis. The other side grows into the remainder, so between them the
 -- two follow the grid as it resizes.
 splitSideLay :: GridAxis -> Float -> Layout
-splitSideLay AxisV p = sizingLay (Percent p) (Grow 1)
-splitSideLay AxisH p = sizingLay (Grow 1) (Percent p)
+splitSideLay axis p = axisLay axis (Percent p)
 
 -- | Sizing for a side of a split whose region has no length yet: a grow
 -- weight along the main axis, so the two sides share the region left after
 -- the gutter in the split's ratio. A zero weight would not grow at all.
 splitWeightLay :: GridAxis -> Float -> Layout
-splitWeightLay AxisV w = sizingLay (Grow (max 1.0e-3 w)) (Grow 1)
-splitWeightLay AxisH w = sizingLay (Grow 1) (Grow (max 1.0e-3 w))
+splitWeightLay axis w = axisLay axis (Grow (max 1.0e-3 w))
 
 -- | Sizing for the side of a split that holds a pinned pane: its extent in
 -- pixels along the main axis. A percent of this frame's real width is what
@@ -617,8 +615,12 @@ splitWeightLay AxisH w = sizingLay (Grow 1) (Grow (max 1.0e-3 w))
 -- match on the next frame ('reflowFixed'), so the two never disagree for
 -- longer than the frame the resize arrived on.
 pinnedSideLay :: GridAxis -> Float -> Layout
-pinnedSideLay AxisV n = sizingLay (Fixed (max 0 n)) (Grow 1)
-pinnedSideLay AxisH n = sizingLay (Grow 1) (Fixed (max 0 n))
+pinnedSideLay axis n = axisLay axis (Fixed (max 0 n))
+
+-- | @s@ along the axis's main direction, growing across it.
+axisLay :: GridAxis -> Sizing -> Layout
+axisLay AxisV s = sizingLay s (Grow 1)
+axisLay AxisH s = sizingLay (Grow 1) s
 
 minSized :: Layout -> Float -> Float -> Layout
 minSized l minW_ minH_ = l {layoutMinW = minW_, layoutMinH = minH_}
@@ -754,15 +756,11 @@ dividerWidget env axis = do
   void $
     customWidget
       defaultCustomWidgetSpec
-        { widgetLayout = dLay
+        { widgetLayout = axisLay axis (Fixed (geGutter env))
         , widgetContent = contentKey [if axis == AxisV then 1 else 2, geThickness env, geLeeway env]
         , widgetDraw = \cdc rect -> drawDivider cdc rect axis (geThickness env) (geLeeway env)
         , widgetCursor = Just (const (if axis == AxisV then UiCursorEwResize else UiCursorNsResize))
         }
-  where
-    dLay = case axis of
-      AxisV -> sizingLay (Fixed (geGutter env)) (Grow 1)
-      AxisH -> sizingLay (Grow 1) (Fixed (geGutter env))
 
 drawDivider :: CustomDrawContext -> Rect -> GridAxis -> Float -> Float -> SmallArray DrawOp
 drawDivider cdc rect axis thickness leeway =
