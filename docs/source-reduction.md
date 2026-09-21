@@ -143,3 +143,51 @@ and the native profile completes 500 frames. Seven paired 10-million-read
 probes change 1.622720 to 0.623470 ns/key read (-61.58%), with 16 B/read on
 both sides (`nano-ui-events-hsc.json`). These are accessor measurements, not
 a claim that rendering has accelerated by the same proportion.
+
+## Larger backend candidates: acceptance not established
+
+### SDL_ttf renderer text engine
+
+The retained renderer-engine probe in `scripts/profile/ttf-text-engine.c`
+uses the bundled Inter font at 16 pt, with the backend's light hinting and
+kerning settings. SDL 3.4.14 / SDL_ttf 3.2.2 produce:
+
+| Native style | Text size | Regular layout preserved? | Pixel hash |
+| --- | --- | --- | --- |
+| regular | 249 x 20 | yes | d4b90961c93a69d3 |
+| bold | 284 x 20 | no | 236a6c53a759a8a5 |
+| italic | 249 x 20 | yes | 8735982c41c2553a |
+| bold + italic | 284 x 20 | no | 89818b1a21d9a798 |
+
+The existing backend preserves regular-face layout for seven synthetic
+weights and shears quads by exactly 0.18 around the baseline
+(`NanoUI/Draw/Text.hs`). Native bold is therefore not a behavior-preserving
+substitute. Repeated upright native draws could emulate weights, but the
+renderer-engine API does not expose a custom shear or atlas draw geometry.
+`TTF_GetGPUTextDrawData` belongs to the separate SDL_GPU engine; it cannot
+feed textures to the existing renderer abstraction across its supported
+drivers and SDL >=3.2 minimum.
+
+A hybrid would retain glyph geometry/atlas support for synthetic slant or add
+per-run render targets and transformed-text caching, alongside a new ordered
+text-command path and immutable caret snapshots. The probe rejects the direct
+substitution before migrating widget/editing/custom-drawing consumers. No
+subsystem-deletion or negligible-performance-loss claim is established for
+the larger hybrid, so it is not landed. The smaller atlas and FFI replacements
+above provide concrete dependency reuse without this compatibility cost.
+
+The probe can be compiled through the built SDL package, for example with
+`cabal exec -- ghc -no-hs-main -optc-O2 -package-db dist-newstyle/packagedb/ghc-9.14.1 -package-id nano-ui-sdl-0.1.0.1-inplace -o PROBE scripts/profile/ttf-text-engine.c`.
+On Windows add `-optl-mconsole`. Run it with the absolute path to
+`packages/nano-ui-sdl/data/inter.ttf`.
+
+### RGFW text emission
+
+The separate RGFW text pass is constrained by two existing behaviors:
+per-character half-up physical-pixel snapping (`Rgfw/Gl.hs` and the snapping
+tests), and text drawn after the corresponding geometry layer
+(`Rgfw/Context.hs`). The core glyph path snaps the pen and uses a different
+geometry/text ordering. Replacing it with a `FontBackend` adapter alone is
+not equivalent; introducing another snapping policy and text-order queue in
+core would add machinery instead of simply deleting the backend's emitter.
+Retain the current renderer and its dependency-light bitmap-font backend.
