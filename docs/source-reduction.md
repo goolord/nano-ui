@@ -246,3 +246,30 @@ widget/geometry framework:
   saving to justify replacing the already-inspected zero-cost interface.
 - Existing pointer-aware/Dynamic store equality and function-valued damage
   semantics are not ordinary stock/Generic equality; retain those instances.
+
+## Forms and diagrams boundaries
+
+A shared scalar-control helper for the form package was prototyped twice. With
+the caption applied inside the helper it saved and spent exactly the same 24
+lines. Widening it to carry the activation flag and every scalar control left
+the raw count 13 lines lower, but Fourmolu expands an argument-heavy signature
+and five call sites at the repository's column limit, so the
+formatter-normalized count was **18 lines higher**. The plan's gate rejects an
+abstraction that enlarges the normalized total, so both variants were reverted.
+Measure after formatting, not before.
+
+The form runner's `nanoFormSubmit` and `nanoFormEx` share only the
+`submitted-before` lookup and `withNanoForm` scope; their Enter handling,
+validation-status return, and submit-button behavior differ. A helper for two
+call sites saves no lines before the shared scope is counted. `FormView`'s
+`Semigroup`/`Monoid` are already two small instances. Retain the runners and
+instances as written.
+
+The core SVG flattener and the diagrams `flattenCubic` share an algorithm but
+not a contract: one is an `ST` emitter over `Point` with a depth cap and a
+two-control flatness test at 0.25 device-pixel tolerance, the other a pure list
+over float pairs that tests one control at 0.5 logical-unit tolerance.
+Extracting a shared, parameterized subdivision would add a generic point
+abstraction and a cross-package export used once, and would change one side's
+tessellation. Retain both, as the earlier audit did for its tessellation
+candidates.
