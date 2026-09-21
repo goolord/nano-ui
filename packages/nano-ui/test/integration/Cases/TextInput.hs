@@ -633,42 +633,45 @@ runTextAreaZoomScrollTest ctx failed = do
     off <- getScrollOffset ctx (respId resp)
     assert failed (abs (off - expectedMaxY) < 0.5)
 
-runTextAreaScrollDragTest :: Context -> IORef Int -> IO ()
-runTextAreaScrollDragTest ctx failed = do
+runTextAreaScrollDragTest, runTextAreaHScrollDragTest :: Context -> IORef Int -> IO ()
+runTextAreaScrollDragTest = textAreaThumbDragTest False
+runTextAreaHScrollDragTest = textAreaThumbDragTest True
+
+-- | Dragging a text area's vertical (or, when @horizontal@, horizontal)
+-- thumb scrolls it without selecting or editing the text.
+textAreaThumbDragTest :: Bool -> Context -> IORef Int -> IO ()
+textAreaThumbDragTest horizontal ctx failed = do
   let
-    longText = T.unlines ["Line " <> T.pack (show (i :: Int)) | i <- [1 .. 40]]
+    txt
+      | horizontal = T.replicate 15 "0123456789"
+      | otherwise = T.unlines ["Line " <> T.pack (show (i :: Int)) | i <- [1 .. 40]]
     inp0 = withInput 320 220
-    ui = column (labeledArea "Notes" longText)
+    ui = column (labeledArea "Notes" txt)
   (resp, _) <- warmup2 ctx inp0 ui
-  assertJustM failed (getPrevRect ctx (respId resp)) $ \(Rect rx ry rw rh) -> do
-    let
-      fm = ctxFontMetrics ctx
-      field = Rect rx ry rw rh
-      contentH = 40 * textAreaLineHeight fm
-    off0 <- getScrollOffset ctx (respId resp)
+  let
+    fm = ctxFontMetrics ctx
+    offset = (if horizontal then v2X else v2Y) <$> getScrollOffset2D ctx (respId resp)
+  assertJustM failed (getPrevRect ctx (respId resp)) $ \field -> do
+    off0 <- offset
     assertEq failed off0 0
-    assertJust failed (textAreaScrollBarLayout fm field contentH off0) $ \layout -> do
+    let
+      bar
+        | horizontal = textAreaHScrollBarLayout fm field (lineWidth fm txt) off0
+        | otherwise = textAreaScrollBarLayout fm field (40 * textAreaLineHeight fm) off0
+    assertJust failed bar $ \layout -> do
       let
-        thumb = sbThumb layout
-        thumbCenter = spanCenter thumb
-        press = pressAt inp0 thumbCenter
+        V2 cx cy = spanCenter (sbThumb layout)
+        press = pressAt inp0 (V2 cx cy)
+        -- 30 pixels along the track.
+        drag = holdAt press (if horizontal then V2 (cx + 30) cy else V2 cx (cy + 30))
       _ <- runFrame ctx press ui
-      -- Drag the thumb down by 30 pixels
-      let
-        drag = holdAt press (V2 (v2X thumbCenter) (v2Y thumbCenter + 30))
       _ <- runFrame ctx drag ui
-      off1 <- getScrollOffset ctx (respId resp)
+      off1 <- offset
       assertGt failed off1 off0
-      -- Release the mouse
-      let
-        release = drag {inputMouseDown = False, inputMouseReleased = True}
-      _ <- runFrame ctx release ui
-      -- Clicking/dragging scrollbar must not initiate text selection or alter buffer
-      store <- getStore ctx
-      let
-        key = intKey (respId resp)
-        st = loadTextAreaState store key
-      assertEq failed (toText (buffer st)) longText
+      _ <- runFrame ctx drag {inputMouseDown = False, inputMouseReleased = True} ui
+      -- Dragging the scrollbar must not start a selection or edit the text.
+      st <- (`loadTextAreaState` intKey (respId resp)) <$> getStore ctx
+      assertEq failed (toText (buffer st)) txt
       assert failed (selectionAnchor st == getCursor (buffer st))
 
 runTextAreaCursorOnScrollBarTest :: Context -> IORef Int -> IO ()
@@ -780,41 +783,6 @@ runTextAreaHScrollWheelTest ctx failed = do
       _ <- runFrame ctx thumbPress ui
       grabbing <- cursorKindIs ctx thumbPress UiCursorGrabbing
       assert failed grabbing
-
-runTextAreaHScrollDragTest :: Context -> IORef Int -> IO ()
-runTextAreaHScrollDragTest ctx failed = do
-  let
-    longLine = T.replicate 15 "0123456789"
-    inp0 = withInput 320 220
-    ui = column (labeledArea "Notes" longLine)
-  (resp, _) <- warmup2 ctx inp0 ui
-  assertJustM failed (getPrevRect ctx (respId resp)) $ \(Rect rx ry rw rh) -> do
-    let
-      fm = ctxFontMetrics ctx
-      field = Rect rx ry rw rh
-      contentW = lineWidth fm longLine
-    V2 offX0 _ <- getScrollOffset2D ctx (respId resp)
-    assertEq failed offX0 0
-    assertJust failed (textAreaHScrollBarLayout fm field contentW offX0) $ \layout -> do
-      let
-        thumb = sbThumb layout
-        thumbCenter = spanCenter thumb
-        press = pressAt inp0 thumbCenter
-      _ <- runFrame ctx press ui
-      let
-        drag = holdAt press (V2 (v2X thumbCenter + 30) (v2Y thumbCenter))
-      _ <- runFrame ctx drag ui
-      V2 offX1 _ <- getScrollOffset2D ctx (respId resp)
-      assertGt failed offX1 offX0
-      let
-        release = drag {inputMouseDown = False, inputMouseReleased = True}
-      _ <- runFrame ctx release ui
-      store <- getStore ctx
-      let
-        key = intKey (respId resp)
-        st = loadTextAreaState store key
-      assertEq failed (toText (buffer st)) longLine
-      assert failed (selectionAnchor st == getCursor (buffer st))
 
 runTextArea2DScrollTest :: Context -> IORef Int -> IO ()
 runTextArea2DScrollTest ctx failed = do
