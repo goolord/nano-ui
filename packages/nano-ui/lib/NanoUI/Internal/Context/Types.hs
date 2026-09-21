@@ -519,6 +519,9 @@ data InteractionState = InteractionState
   , isPointerHeld :: {-# UNPACK #-} !Bool
   , isWindowDrag :: !(Maybe (WidgetId, Float, Float))
   , isWindowResize :: !(Maybe WindowResizeDrag)
+  -- | A table header is resizing a column. Set by the table on the frames it
+  -- does, cleared when the pointer is let go.
+  , isColumnResize :: {-# UNPACK #-} !Bool
   }
   deriving (Eq, Show)
 
@@ -534,6 +537,7 @@ initialInteractionState = InteractionState
   , isPointerHeld = False
   , isWindowDrag = Nothing
   , isWindowResize = Nothing
+  , isColumnResize = False
   }
 
 -- | Mutable state for one UI session. Construct with @newContext@ and use it

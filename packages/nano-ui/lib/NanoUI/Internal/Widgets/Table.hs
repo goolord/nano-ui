@@ -39,7 +39,7 @@ import Data.Primitive.SmallArray (SmallArray, indexSmallArray, mapSmallArray', n
 import Data.Primitive.Types (Prim)
 import Data.Vector qualified as V
 import Effectful (Eff, type (:>))
-import NanoUI.Internal.Context (Context (..), getPrevRect, getScrollOffset2D, getStore, intKey, linkScrollAxes, modifyStore, writeSlots)
+import NanoUI.Internal.Context (Context (..), InteractionState (..), getPrevRect, getScrollOffset2D, getStore, intKey, linkScrollAxes, modifyInteraction, modifyStore, writeSlots)
 import NanoUI.Internal.Hooks (useInt)
 import NanoUI.Internal.Font (ScrollBarSlot (..), scrollBarGutter, tableCellInset, lineWidthIO)
 import NanoUI.Internal.Input (Input (..), inputMouseDown, inputMousePos, inputMousePressed, inputMouseReleased)
@@ -584,6 +584,11 @@ tableConfigured cfg f key cols inputRows curSort =
           <> slotWrite fieldInt (slotKey SlotDrag stateKey) (packHeaderDrag nextDrag)
           <> slotWrite fieldFloat stateKey nextDragX
           <> slotWrite fieldFloat (slotKey SlotDragW stateKey) nextDragW
+      -- The cursor shows the resize arrow for the whole drag, wherever the
+      -- pointer goes; letting go clears it.
+      case nextDrag of
+        HeaderResize _ | inputMouseDown inp -> uiIO (modifyInteraction ctx (\s -> s {isColumnResize = True}))
+        _ -> pure ()
       pure (TableResponse widgetResp nextSort nextOrder nextHidden)
 
 -- | One row of cells with custom row layout.

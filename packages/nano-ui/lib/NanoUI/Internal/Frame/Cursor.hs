@@ -11,16 +11,13 @@ import Control.Monad (forM)
 import Control.Monad.Trans.Maybe (MaybeT (..))
 import Data.Foldable (asum)
 import Data.IORef (readIORef)
-import Data.IntMap.Strict qualified as IM
 import Data.Maybe (fromMaybe, isJust)
 import NanoUI.Internal.Context
   ( Context (..)
   , InteractionState (..)
   , PointerRoute (..)
-  , WidgetStore (..)
   , getHotId
   , getScrollDrag
-  , getStore
   , getsInteraction
   , isDisabled
   , lookupCustomCursor
@@ -283,9 +280,8 @@ textFieldCursorKind ctx wid mouse fieldAt = do
 
 tableColResizeCursorKind :: Context -> Input -> IO (Maybe UiCursorKind)
 tableColResizeCursorKind ctx inp = do
-  store <- getStore ctx
+  dragging <- getsInteraction ctx isColumnResize
   let
-    dragging = any (\n -> n <= -1000 && n > -2000) (IM.elems (storeInt store))
     na = ctxNodeArena ctx
     V2 mx my = inputMousePos inp
   if inputMouseDown inp && dragging

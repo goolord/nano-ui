@@ -390,6 +390,13 @@ runTableColResizeDemoReproTest _ failed =
           case (drop k before, drop k after) of
             (Rect _ _ wb _ : _, Rect _ _ wa _ : _) -> assertGt failed wa (wb + 30)
             _ -> assert failed False
+          -- The arrow stays for the whole drag, off the edge too, and goes
+          -- once the button is let go.
+          let offInp = inp0 {inputMousePos = V2 (edgeX + 60) 490, inputMouseDown = True}
+          assertEq failed UiCursorEwResize =<< uiCursorKind ctx offInp
+          _ <- runFrame ctx offInp {inputMouseDown = False, inputMouseReleased = True} ui
+          released <- uiCursorKind ctx offInp
+          assert failed (released /= UiCursorEwResize)
         _ -> assert failed False
 
 demoPeopleCols :: Colonnade Headed (T.Text, T.Text, T.Text, T.Text, T.Text) T.Text

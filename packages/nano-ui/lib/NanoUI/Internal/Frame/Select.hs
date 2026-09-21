@@ -194,7 +194,12 @@ routePointer ctx inp = do
       else maybe (RouteLayer <$> floatingLayerAt ctx mouse) pure =<< overlayRouteAt ctx mouse
   -- Most frames change neither, and an idle frame should write nothing.
   when (route /= old || inputPointerHeld inp /= held) $
-    modifyInteraction ctx (\s -> s {isPointerRoute = route, isPointerHeld = inputPointerHeld inp})
+    modifyInteraction ctx $ \s ->
+      s
+        { isPointerRoute = route
+        , isPointerHeld = inputPointerHeld inp
+        , isColumnResize = isColumnResize s && inputPointerHeld inp
+        }
   pure route
 
 closeSelectOnOutsideClick :: Context -> Input -> IO ()
