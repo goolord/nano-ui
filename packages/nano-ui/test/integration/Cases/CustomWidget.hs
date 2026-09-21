@@ -16,8 +16,7 @@ import NanoUI
 import NanoUI.Backend
 import NanoUI.Context (Context (..))
 import NanoUI.Testing
-  ( UiCursorKind (..)
-  , cursorKindIs
+  ( cursorKindIs
   , newContext
   , runFrame
   , takeDamage

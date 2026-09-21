@@ -188,7 +188,10 @@ their backend session.
 `NanoUI.Backend`: `emptyInput` and the functions that fold a window's events
 into it, the `FontBackend` callbacks that measure and shape text, the `Damage`
 a frame reports so only changed rectangles are presented, and the paddings and
-widths the widgets lay themselves out by.
+widths the widgets lay themselves out by. Input carries over from frame to
+frame: pass the last frame's through `clearEphemeral`, which drops one-shot
+events and keeps held buttons, the pointer and the window size, and fold the
+new events into that rather than into a fresh `emptyInput`.
 `NanoUI.Context` holds the state that outlives a frame, and `NanoUI.Runner`
 sequences events, redraws and wake-ups. The two backends in this repository,
 `NanoUI.Backend.Sdl` and `NanoUI.Backend.Rgfw`, are the worked examples.

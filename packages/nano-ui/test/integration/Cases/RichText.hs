@@ -9,7 +9,7 @@ import Data.Text qualified as T
 import NanoUI
 import NanoUI.Backend
 import NanoUI.Context (Context (..))
-import NanoUI.Testing (UiCursorKind (..), cursorKindIs, runFrame)
+import NanoUI.Testing (cursorKindIs, runFrame)
 import NanoUI.Testing.Assert (assert, assertEq, withInput)
 import NanoUI.Testing.Harness (clickPair, drawQuads, warmup2)
 

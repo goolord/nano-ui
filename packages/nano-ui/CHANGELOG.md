@@ -9,9 +9,14 @@
   into it, the `FontBackend` callbacks that measure and shape text, the
   `Damage` a frame reports, the paddings and widths the widgets lay
   themselves out by, how a `WidgetId` is derived, the compact region host
-  state lives in, and `runUi` / `runNanoUI`. All of it came out of `NanoUI`,
-  so the root module is now the view API and nothing else, and the two do not
-  overlap.
+  state lives in, and `runUi` / `runNanoUI`. Most of it came out of `NanoUI`
+  (see Changed). It also re-exports `MouseButton`, `applyMouseButton` and
+  `clearEphemeral` from `NanoUI.Input`, so a backend's event loop needs the
+  one import, and the input types `Input`, `Key`, `Modifiers`, `DropEvent`
+  and `DropType`, which `NanoUI` keeps too. The names the two modules share
+  are the same entities, so importing both is unambiguous.
+- `NanoUI` exports `UiCursorKind`, which `widgetCursor` on a custom widget
+  returns, so choosing its pointer no longer needs `NanoUI.Testing`.
 
 - `NanoUIEs`, the effect row behind `NanoUI`. A widget configuration carrying
   its caller's row, such as `PaneGridConfig`, can now be named from an
@@ -164,10 +169,11 @@
   it. The names that moved are `runUi`, `runNanoUI`; `emptyInput`,
   `appendInputKey`, `appendDropEvent`, `emptyDropEvents`, `emptyInputKeys`,
   `inputKeysFromList`, `inputKeysNull`, `foldInputKeys`, `inputInteracted`,
-  `inputPointerHeld`; `FontMetrics`, `FontBackend`, `prepareFontMetrics`,
+  `inputPointerHeld`; `FontBackend`, `prepareFontMetrics`,
   `prepareFontMetricsMany`, `scaleFontMetrics`, `monospaceMetrics`,
-  `uiFontMetrics`, `measureTextIO`, `lineWidthIO`, `lineWidth`, `drawShaped`,
-  `drawGlyph`, `drawTextBox`, `GlyphQuad`, `ShapedText`, `ShapedGlyphs`;
+  `uiFontMetrics`, `measureTextIO`, `lineWidthIO`, `drawShaped`,
+  `drawGlyph`, `drawTextBox`, `GlyphQuad`, `ShapedText`, `ShapedGlyphs`, and
+  the fields of `FontMetrics` other than `fmLineHeight` and `fmAscent`;
   `Damage`, `DamageBounds`, `defaultDamageSlop`, `sliderDamageSlop`,
   `haloDamageSlop`, `resolveDamageRect`, `damageWidgetNow`, `damageKeyNow`,
   `damageRectNow`, `damageGroupNow`, `damageFullNow`; `widgetContentInset`,
@@ -177,7 +183,9 @@
   `burstNextIds`; and `Compact`, `compactHost`, `askCompact`. `Input`, `Key`,
   `Modifiers`, `inputKeysElem`, `WidgetId`, `nextId`, `currentId`, `DrawOp`
   and `shiftDrawOp` stay in `NanoUI`: a view reads input and a custom widget
-  builds draw ops.
+  builds draw ops. So do `FontMetrics`, with `fmLineHeight` and `fmAscent`,
+  and `lineWidth`, because a custom widget's measure function and `cdcFont`
+  hand it metrics to size its text with.
 
 - SVG parsing moved to the `nano-svg` package; `NanoUI.Svg` keeps only the
   rasterizer. `parseSvg` takes a UTF-8 `ByteString` instead of `Text`, so

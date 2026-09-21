@@ -389,10 +389,13 @@ module NanoUI
   , TextFont (..)
   , defaultTextFont
   , DrawingBuild
-  , drawTextBox
   , shiftDrawOp
 
     -- * Custom widgets
+
+    -- | A measure function and 'cdcFont' hand a widget the context's
+    -- 'FontMetrics'; 'lineWidth' and 'fmLineHeight' size text with them.
+    -- 'widgetCursor' picks the pointer shown over the widget.
   , CustomWidgetSpec (..)
   , defaultCustomWidgetSpec
   , customWidget
@@ -400,6 +403,9 @@ module NanoUI
   , contentKey
   , CustomDrawContext (..)
   , CustomMeasureFn
+  , FontMetrics (fmLineHeight, fmAscent)
+  , lineWidth
+  , UiCursorKind (..)
   , CustomDrawBuild
   , CanvasM
   , runCanvas
@@ -682,6 +688,7 @@ import NanoUI.Animatable
 import NanoUI.Animation
 import NanoUI.Context
 import NanoUI.Draw
+import NanoUI.Font (FontMetrics (..), lineWidth)
 import NanoUI.Hooks
 import NanoUI.Id (WidgetId (..))
 import NanoUI.Input

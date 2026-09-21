@@ -14,8 +14,9 @@
 --
 -- Writing a GUI needs none of it: "NanoUI" has the widgets, layout, styling
 -- and state, and a backend's own runner (@runSdlApp@, @runRgfwApp@) starts
--- the loop. Nothing here shadows a name in "NanoUI": the input types it
--- re-exports are the same ones "NanoUI" has, so importing both is safe.
+-- the loop. Nothing here shadows a name in "NanoUI": the names the two
+-- share (the input types, 'FontMetrics' and 'lineWidth') are the same
+-- entities in both, so importing both is safe.
 --
 -- A backend's frame is: collect events into an 'Input', run the view with
 -- "NanoUI.Runner" or "NanoUI.Testing", take the 'Damage' and present the
@@ -33,12 +34,15 @@ module NanoUI.Backend
 
     -- * Input
 
-    -- | Start from 'emptyInput' each frame, fold the window's events into
-    -- it, and hand it to the frame runner. Keys arrive through
-    -- 'appendInputKey', mouse buttons through 'applyMouseButton' and dropped
-    -- files through 'appendDropEvent'; typed characters belong in
-    -- 'inputChars' rather than as keys. 'clearEphemeral' drops what only the
-    -- frame it arrived in should see, for a frame redrawn without new events.
+    -- | Start from 'emptyInput' once. Each later frame carries the last
+    -- frame's input forward through 'clearEphemeral', which drops the
+    -- one-shot events (keys, typed text, clicks, scroll, drops) and keeps
+    -- what is held (buttons, pointer, modifiers, window size), then folds the
+    -- window's new events into it. Starting from 'emptyInput' every frame
+    -- instead forgets a held button and the pointer between events. Keys
+    -- arrive through 'appendInputKey', mouse buttons through
+    -- 'applyMouseButton' and dropped files through 'appendDropEvent'; typed
+    -- characters belong in 'inputChars' rather than as keys.
   , Input (..)
   , Key (..)
   , Modifiers (..)
@@ -60,11 +64,12 @@ module NanoUI.Backend
 
     -- * Fonts
 
-    -- | A backend installs a 'FontBackend' on the context and nano-ui calls
-    -- back into it to measure and shape. 'prepareFontMetrics' builds the
-    -- 'FontMetrics' a size and family is measured through, 'drawShaped'
-    -- shapes a run into 'ShapedGlyphs', and 'drawGlyph' gives one glyph's
-    -- 'GlyphQuad' for the atlas.
+    -- | A backend hands the context 'FontMetrics' whose 'fmBackend' is a
+    -- 'FontBackend', and nano-ui calls back into it to measure and shape.
+    -- 'prepareFontMetrics' asks it for a snapshot prepared for one text, so
+    -- that text is measured with shaping; without a backend the metrics come
+    -- back as they were. 'drawShaped' shapes a run into 'ShapedGlyphs', and
+    -- 'drawGlyph' gives one glyph's 'GlyphQuad' for the atlas.
   , FontMetrics (..)
   , FontBackend (..)
   , prepareFontMetrics
