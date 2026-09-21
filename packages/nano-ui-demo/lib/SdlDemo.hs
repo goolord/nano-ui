@@ -49,12 +49,12 @@ import Control.Concurrent (forkIO)
 import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, tryTakeMVar)
 import Control.Exception (SomeException, displayException, evaluate, try)
 import Control.Monad (forM, forM_, unless, void, when)
+import Control.Monad.IO.Class (liftIO)
 import Data.Foldable (for_, toList)
 import Data.List (elemIndex)
 import Data.Maybe (fromMaybe, isJust, listToMaybe)
 import Data.Primitive.SmallArray (SmallArray, smallArrayFromList)
 import Data.Word (Word64)
-import Effectful (Eff, type (:>))
 import NanoUI
 import NanoUI.Backend.Sdl
 import NanoUI.Debug (CoreDebugSnapshot (..), formatCoreRtsRows)
@@ -149,9 +149,9 @@ newtype GifLoad = GifLoad (MVar (Either String [(Int, Int, BS.ByteString)]))
 -- | Start loading an animated GIF while the app runs. The file is read and
 -- decoded with JuicyPixels on a background thread, so the frame that starts
 -- the load does not stall. Collect the frames with 'gifFrames'.
-loadGif :: Ui :> es => FilePath -> Eff es GifLoad
+loadGif :: FilePath -> NanoUI GifLoad
 loadGif path =
-  uiIO $ do
+  liftIO $ do
     done <- newEmptyMVar
     _ <- forkIO $ do
       decoded <- try $ do
@@ -171,9 +171,9 @@ loadGif path =
 -- while the file is still decoding, then the frames' ids or why the file could
 -- not be used. The result comes once; keep it. Registering stops at the first
 -- frame the atlas refuses.
-gifFrames :: Ui :> es => GifLoad -> Eff es (Maybe (Either String (SmallArray ImageId)))
+gifFrames :: GifLoad -> NanoUI (Maybe (Either String (SmallArray ImageId)))
 gifFrames (GifLoad done) =
-  uiIO (tryTakeMVar done) >>= traverse (either (pure . Left) (register []))
+  liftIO (tryTakeMVar done) >>= traverse (either (pure . Left) (register []))
   where
     register ids [] = pure (Right (smallArrayFromList (reverse ids)))
     register ids ((w, h, pixels) : rest) = do
@@ -234,7 +234,7 @@ data DemoSettings = DemoSettings ![T.Text] !Bool
 demoSettings :: NanoUI DemoSettings
 demoSettings = do
   ctx <- askContext
-  uiIO $ do
+  liftIO $ do
     cached <- askHostIO ctx
     case cached of
       Just settings -> pure settings
@@ -526,8 +526,8 @@ demoUi = do
               -- each size rasterizes once.
               case icons of
                 Nothing -> do
-                  paths <- uiIO (mapM (\icon -> getDataFileName ("data/icons/" <> icon <> ".svg")) ["clock", "check", "star", "face"])
-                  setIcons . Just =<< uiIO (mapM loadSvg paths)
+                  paths <- liftIO (mapM (\icon -> getDataFileName ("data/icons/" <> icon <> ".svg")) ["clock", "check", "star", "face"])
+                  setIcons . Just =<< liftIO (mapM loadSvg paths)
                 Just loaded -> do
                   tint <- themeAccent <$> uiTheme
                   rowWith (tight . gap gapInline . alignMid) $
@@ -548,7 +548,7 @@ demoUi = do
                   keepAnimating =<< labelWith' (fillW . fontMuted) "Loading lick.gif..."
                   case lickLoad of
                     Nothing -> do
-                      path <- uiIO (getDataFileName "data/lick.gif")
+                      path <- liftIO (getDataFileName "data/lick.gif")
                       setLickLoad . Just =<< loadGif path
                     Just pending -> mapM_ (setLick . Just) =<< gifFrames pending
                 Just (Left err) -> muted ("Could not load lick.gif: " <> T.pack err)
@@ -882,7 +882,7 @@ tableSortDirText s =
 -- §7  Pane grid demo
 ------------------------------------------------------------------------------
 
-demoPaneGridCfg :: (Ui :> es) => Bool -> PaneGridConfig es
+demoPaneGridCfg :: Bool -> PaneGridConfig NanoUIEs
 demoPaneGridCfg showHeader =
   defaultPaneGridConfig
     { pgLayout = fillW . fixedH 380
@@ -902,7 +902,7 @@ demoPaneTitle pid maximized =
 -- 'showHeader' 'False' drops it and the pane becomes a bare canvas body. The
 -- whole pane is still a drag handle either way ('pvDraggable'), so a headerless
 -- pane can be grabbed anywhere to reorder it.
-demoPaneHeader :: (Ui :> es) => Word64 -> Bool -> PaneGridCtx es -> Eff es ()
+demoPaneHeader :: Word64 -> Bool -> PaneGridCtx NanoUIEs -> NanoUI ()
 demoPaneHeader pid maximized pctx =
   rowWith (tight . gap gapMicro . alignMid . fillW) $ do
     box (alignMid . fixedWH 3 16) demoAccent
@@ -914,7 +914,7 @@ demoPaneHeader pid maximized pctx =
     whenM (button "x") (pgcClose pctx)
 
 -- | Each pane is a card, so panes stay distinct with the headers off.
-demoPaneView :: (Ui :> es) => Bool -> Word64 -> PaneGridCtx es -> Eff es PaneView
+demoPaneView :: Bool -> Word64 -> PaneGridCtx NanoUIEs -> NanoUI PaneView
 demoPaneView showHeader pid pctx = do
   let maximized = pgcMaximized pctx
   panelWith (padAll gapLayout . gap gapLayout . grow) $ do
@@ -987,7 +987,7 @@ data CachedDebugText = CachedDebugText !SdlDebugSnapshot !DebugText
 debugText :: SdlDebugSnapshot -> NanoUI DebugText
 debugText s = do
   ctx <- askContext
-  uiIO $ do
+  liftIO $ do
     cached <- askHostIO ctx
     case cached of
       Just (CachedDebugText previous text) | previous == s -> pure text

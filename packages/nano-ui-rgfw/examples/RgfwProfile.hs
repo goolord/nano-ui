@@ -4,7 +4,6 @@ module Main (main) where
 
 import Control.Exception (bracket)
 import Control.Monad (replicateM_)
-import Effectful (runEff)
 import NanoUI
   ( Input (..)
   , Size (..)
@@ -12,7 +11,7 @@ import NanoUI
   , V2 (..)
   , emptyInput
   )
-import NanoUI.Testing (collectRasterSpans, runFrameEff)
+import NanoUI.Testing (collectRasterSpans, runFrame)
 import NanoUI.Rgfw.Context (newRgfwContext)
 import NanoUI.Rgfw.Font.Cozette (getCozetteFont)
 import NanoUI.Rgfw.Gl (freeGlRenderer, newGlRenderer, renderArenaGl)
@@ -44,7 +43,7 @@ main = do
       Just win -> bracket newGlRenderer freeGlRenderer $ \renderer -> do
         ctx <- newRgfwContext theme
         let runSingleFrame = do
-              (_, _, draw, _) <- runFrameEff runEff ctx inp (appView m)
+              (_, _, draw, _) <- runFrame ctx inp (appView m)
               (baseSpans, overlaySpans) <- collectRasterSpans ctx inp
               renderArenaGl renderer getCozetteFont scale physW physH (themeWindow theme) draw baseSpans overlaySpans
               R.swapBuffersGL win

@@ -84,7 +84,6 @@ executable nano-ui-rgfw-profile
     other-modules:    RgfwDemoCommon
     build-depends:
         base ^>=4.22.0.0,
-        effectful-core ^>=2.6,
         nano-ui,
         nano-ui-rgfw,
         nano-ui-rgfw-bindings,

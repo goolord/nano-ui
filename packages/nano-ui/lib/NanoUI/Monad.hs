@@ -5,6 +5,7 @@
 -- scopes and keys, theme scopes, and damage requests from inside a view.
 module NanoUI.Monad
   ( NanoUI
+  , NanoUIEs
   , Ui
   , runNanoUI
   , runUi
@@ -117,7 +118,11 @@ import NanoUI.Types (DamageBounds, Rect, Size (..), V2)
 
 -- | A view with UI operations and IO. Backend runners execute it as frames
 -- are needed; local-state changes can trigger a second pass within a frame.
-type NanoUI = Eff '[Ui, IOE]
+type NanoUI = Eff NanoUIEs
+
+-- | The effect row a 'NanoUI' view runs in. Name it where a widget's
+-- configuration carries its caller's row, as @PaneGridConfig NanoUIEs@ does.
+type NanoUIEs = '[Ui, IOE]
 
 -- | Access to the current context, routed input, layout defaults, and widget ids.
 data Ui :: Effect

@@ -2,6 +2,7 @@ module Main (main) where
 
 import Control.Exception (evaluate)
 import Control.Monad (forM_, replicateM_, void)
+import Control.Monad.IO.Class (liftIO)
 import Data.ByteString (ByteString)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.Text (Text)
@@ -74,15 +75,15 @@ canvasScene key =
 -- editor path, whose per-frame cost must not grow with the document.
 textAreaScene :: IORef TextDocument -> NanoUI ()
 textAreaScene ref = column $ do
-  doc <- textAreaDocumentWith grow =<< uiIO (readIORef ref)
-  uiIO (writeIORef ref doc)
+  doc <- textAreaDocumentWith grow =<< liftIO (readIORef ref)
+  liftIO (writeIORef ref doc)
 
 -- | 'textAreaScene' over 'Text', which joins the document on every frame
 -- that edits it.
 textAreaTextScene :: IORef Text -> NanoUI ()
 textAreaTextScene ref = column $ do
-  txt <- textAreaWith grow =<< uiIO (readIORef ref)
-  uiIO (writeIORef ref txt)
+  txt <- textAreaWith grow =<< liftIO (readIORef ref)
+  liftIO (writeIORef ref txt)
 
 clockIcon :: ByteString
 clockIcon =

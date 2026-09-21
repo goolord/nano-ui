@@ -42,6 +42,7 @@
 module NanoUI
   ( -- * Views
     NanoUI
+  , NanoUIEs
   , Ui
   , runUi
   , runNanoUI

@@ -86,7 +86,6 @@ library demo-common
     build-depends:
         bytestring ^>=0.12,
         diagrams-lib >=1.6 && <1.7,
-        effectful-core ^>=2.6,
         filepath ^>=1.5,
         JuicyPixels ^>=3.3,
         nano-ui ^>=0.1,
@@ -132,7 +131,6 @@ executable nano-ui-sdl-logs
     import:           sdl-exe
     main-is:          Logs.hs
     build-depends:
-        effectful-core ^>=2.6,
         nano-ui ^>=0.1,
         nano-ui-sdl ^>=0.1,
         text ^>=2.1,

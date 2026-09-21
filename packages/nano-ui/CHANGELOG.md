@@ -4,6 +4,10 @@
 
 ### Added
 
+- `NanoUIEs`, the effect row behind `NanoUI`. A widget configuration carrying
+  its caller's row, such as `PaneGridConfig`, can now be named from an
+  ordinary view without depending on `effectful`.
+
 - Caption buttons for a window that draws its own title bar: `captionButtons`
   draws minimize, maximize-or-restore and close and says which was pressed,
   `captionButton` draws one of them, and `CaptionConfig` sizes them, rounds

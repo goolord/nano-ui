@@ -11,6 +11,7 @@ module SdlSelftest
 
 import Control.Concurrent (threadDelay)
 import Control.Monad (unless, void, when)
+import Control.Monad.IO.Class (liftIO)
 import Data.Char (isDigit)
 import Data.Foldable (for_)
 import Data.IORef (newIORef, readIORef, writeIORef)
@@ -274,7 +275,7 @@ selftest continuous ui = do
     sampledDraws <- newIORef 0
     let observeDebug = do
           snapshot <- askSdlDebug
-          uiIO $ writeIORef sampledDraws (dbgPresents (dbgCore snapshot))
+          liftIO $ writeIORef sampledDraws (dbgPresents (dbgCore snapshot))
           ui
     drawWith observeDebug base
     previous <- readIORef sampledDraws

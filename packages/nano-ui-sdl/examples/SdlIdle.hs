@@ -27,6 +27,7 @@ module Main (main) where
 
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Monad (forM_, forever, void, when)
+import Control.Monad.IO.Class (liftIO)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Foreign.C.String (newCString)
 import Foreign.Marshal.Alloc (callocBytes)
@@ -68,12 +69,12 @@ main = do
 
 idleUi :: String -> IORef Int -> IORef Bool -> IORef Double -> NanoUI ()
 idleUi scene frames started typedAt = do
-  n <- uiIO (readIORef frames)
-  uiIO (writeIORef frames (n + 1))
+  n <- liftIO (readIORef frames)
+  liftIO (writeIORef frames (n + 1))
   ctx <- askContext
   -- Background work starts once, from the first frame.
-  first <- uiIO (not <$> readIORef started)
-  when first $ uiIO $ do
+  first <- liftIO (not <$> readIORef started)
+  when first $ liftIO $ do
     writeIORef started True
     when (scene == "wake") $ do
       mWake <- readIORef (ctxWakeLoop ctx)
@@ -84,7 +85,7 @@ idleUi scene frames started typedAt = do
       pushTextInput "a"
   -- Ask for the next frame both ways a view can: by marking the context
   -- dirty, and by waking the loop as a background thread would.
-  when (scene == "startup" && n < 10) $ uiIO $ do
+  when (scene == "startup" && n < 10) $ liftIO $ do
     if even n
       then markDirty ctx
       else readIORef (ctxWakeLoop ctx) >>= sequence_
@@ -97,8 +98,8 @@ idleUi scene frames started typedAt = do
     setQuery query'
     -- Hold keyboard focus without a click, as an app's search box would.
     when (scene `elem` ["focus", "type"] && n < 4) $
-      uiIO (writeIORef (ctxFocusId ctx) (respId resp))
-    when (scene == "type" && respChanged resp) $ uiIO $ do
+      liftIO (writeIORef (ctxFocusId ctx) (respId resp))
+    when (scene == "type" && respChanged resp) $ liftIO $ do
       now <- getMonotonicTime
       sent <- readIORef typedAt
       printf "search %s committed %.0f ms after the key\n" (show query') ((now - sent) * 1000)

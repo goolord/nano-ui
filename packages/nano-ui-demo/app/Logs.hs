@@ -4,12 +4,12 @@
 module Main (main) where
 
 import Control.Monad (foldM, forM, forM_, unless, void, when)
+import Control.Monad.IO.Class (liftIO)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Vector.Mutable qualified as MV
 import Data.Vector.Unboxed.Mutable qualified as MU
-import Effectful (Eff, type (:>))
 import NanoUI
 import NanoUI.Backend.Sdl
 import NanoUI.Context
@@ -190,19 +190,19 @@ logChromeFallbackH :: Float
 logChromeFallbackH = 140.0
 
 {-# NOINLINE logsApp #-}
-logsApp :: Ui :> es => IORef AppState -> Eff es ()
+logsApp :: IORef AppState -> NanoUI ()
 logsApp stateRef = do
   ctx <- askContext
   inp <- askInput
   now <- uiTime
 
   -- The state lives outside the store, so a change must wake and repaint.
-  let mutateState f = uiIO $ do
+  let mutateState f = liftIO $ do
         readIORef stateRef >>= f >>= writeIORef stateRef
         markDirty ctx
         damageFull ctx
 
-  st0 <- uiIO $ readIORef stateRef
+  st0 <- liftIO $ readIORef stateRef
 
   let streamEvery = 0.08
       sinceStream = now - asLastStream st0
@@ -217,7 +217,7 @@ logsApp stateRef = do
 
   (allSelected, setAllSelected) <- withKey ("log-all-selected" :: Text) (useFlag False)
 
-  mMenuAction <- uiIO $ takeTextEditLastAction ctx
+  mMenuAction <- liftIO $ takeTextEditLastAction ctx
   case mMenuAction of
     Just (_, SelectAll) -> setAllSelected True
     _ -> pure ()
@@ -236,24 +236,24 @@ logsApp stateRef = do
   -- scrollbar is chrome, not an interactive widget, so `ctxActiveId` stays 0
   -- for gutter grabs and only an actual row press clears.
   when (allSelected && (inputMousePressed inp || inputMouseDown inp || inputMouseReleased inp)) $ do
-    active <- uiIO $ readIORef (ctxActiveId ctx)
-    mRect <- uiIO $ maybe (pure Nothing) (getPrevRect ctx) (asScrollerWid st0)
+    active <- liftIO $ readIORef (ctxActiveId ctx)
+    mRect <- liftIO $ maybe (pure Nothing) (getPrevRect ctx) (asScrollerWid st0)
     when (active /= WidgetId 0 && maybe False (`rectContains` inputMousePos inp) mRect) $
       setAllSelected False
 
   columnWith (tight . fillW . fillH . gap 0) $ do
-    stLive <- uiIO $ readIORef stateRef
+    stLive <- liftIO $ readIORef stateRef
     renderHeaderToolbar mutateState stLive (allSelected, setAllSelected)
     separator
 
     -- Re-read after the toolbar so its changes lay out in this frame.
-    st <- uiIO $ readIORef stateRef
+    st <- liftIO $ readIORef stateRef
     renderLogScroller stateRef allSelected st
 
     -- Copy after the scroller pass: a focused row's own Ctrl+C runs inside
     -- selectableTextWith during the scroller pass and would otherwise overwrite
     -- the clipboard with a single row.
-    let copyAll = uiIO $ do
+    let copyAll = liftIO $ do
           rows <- forM [0 .. asShownCount st - 1] (fmap leLine . shownEntry st)
           void (ctxClipboardSet ctx (T.unlines rows))
     case mMenuAction of
@@ -264,11 +264,10 @@ logsApp stateRef = do
     renderStatusBar (asCount st) (asShownCount st) allSelected
 
 renderHeaderToolbar ::
-  Ui :> es =>
-  ((AppState -> IO AppState) -> Eff es ()) ->
+  ((AppState -> IO AppState) -> NanoUI ()) ->
   AppState ->
-  (Bool, Bool -> Eff es ()) ->
-  Eff es ()
+  (Bool, Bool -> NanoUI ()) ->
+  NanoUI ()
 renderHeaderToolbar mutateState st (allSelected, setAllSelected) = do
   let totalCount = asCount st
       filteredCount = asShownCount st
@@ -325,13 +324,13 @@ renderHeaderToolbar mutateState st (allSelected, setAllSelected) = do
         filterPill (Just LevelError) "ERROR"
         filterPill (Just LevelDebug) "DEBUG"
 
-renderLogScroller :: Ui :> es => IORef AppState -> Bool -> AppState -> Eff es ()
+renderLogScroller :: IORef AppState -> Bool -> AppState -> NanoUI ()
 renderLogScroller stateRef allSelected st = do
   scrollWid <- withKey ("log-scroller" :: Text) nextId
   when (asScrollerWid st /= Just scrollWid) $
-    uiIO $ writeIORef stateRef st {asScrollerWid = Just scrollWid}
+    liftIO $ writeIORef stateRef st {asScrollerWid = Just scrollWid}
   ctx <- askContext
-  mPrevRect <- uiIO $ getPrevRect ctx scrollWid
+  mPrevRect <- liftIO $ getPrevRect ctx scrollWid
   inp <- askInput
 
   (sticky, setSticky) <- withKey ("log-sticky" :: Text) (useFlag True)
@@ -343,7 +342,7 @@ renderLogScroller stateRef allSelected st = do
       viewH = maybe (sizeH (inputWindowSize inp) - logChromeFallbackH) rectH mPrevRect
       maxOff = max 0 (totalH - viewH)
 
-  curOff <- uiIO $ getScrollOffset2D ctx scrollWid
+  curOff <- liftIO $ getScrollOffset2D ctx scrollWid
   let curY = v2Y curOff
       curX = v2X curOff
       -- The offset moved since last frame, so the user scrolled.
@@ -358,7 +357,7 @@ renderLogScroller stateRef allSelected st = do
   effY <-
     if abs (targetY - curY) > 0.5
       then do
-        uiIO $ setScrollOffset2D ctx scrollWid (V2 curX targetY)
+        liftIO $ setScrollOffset2D ctx scrollWid (V2 curX targetY)
         pure targetY
       else pure curY
 
@@ -392,11 +391,11 @@ renderLogScroller stateRef allSelected st = do
     columnWith (tight . gap 0 . minW 1200) $ do
       when (topH > 0) $ spacer Fit (Fixed topH)
       forM_ [firstVis .. lastVis] $ \idx -> do
-        entry <- uiIO $ shownEntry st idx
+        entry <- liftIO $ shownEntry st idx
         withKey (leId entry) $ renderLogRow allSelected entry
       when (botH > 0) $ spacer Fit (Fixed botH)
 
-renderLogRow :: Ui :> es => Bool -> LogEntry -> Eff es ()
+renderLogRow :: Bool -> LogEntry -> NanoUI ()
 renderLogRow isAllSel entry = do
   let col = levelColor (leLevel entry)
       rowLay = tight . fixedH logRowH . padXY 8 2 . alignMid
@@ -405,7 +404,7 @@ renderLogRow isAllSel entry = do
     then styled (panelStyle (background (colorRGBA 45 65 95 255) . borderColor (colorRGBA 70 100 145 255))) (panelWith rowLay rowBody)
     else rowWith rowLay rowBody
 
-renderStatusBar :: Ui :> es => Int -> Int -> Bool -> Eff es ()
+renderStatusBar :: Int -> Int -> Bool -> NanoUI ()
 renderStatusBar totalCount filteredCount allSelected = do
   styled (panelStyle (background (colorRGBA 20 24 32 255) . borderColor (colorRGBA 45 52 64 255))) $ panelWith fillW $ do
     rowWith (tight . fillW . padXY 12 4 . alignMid . gap 16) $ do

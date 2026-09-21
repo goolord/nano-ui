@@ -1,6 +1,7 @@
 module Main (main) where
 
 import Control.Monad (forM, forM_, replicateM_, unless, void, when)
+import Control.Monad.IO.Class (liftIO)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
 import Data.Primitive.SmallArray (SmallArray, indexSmallArray, sizeofSmallArray, smallArrayFromList)
 import GHC.Clock (getMonotonicTimeNSec)
@@ -182,7 +183,7 @@ main = do
       fmap smallArrayFromList $ forM demoSwatches $ \(_, pixels) -> do
         iid <- freshImageId
         ok <- registerImageRgba iid 32 32 pixels
-        unless ok (uiIO (fail "registerImageRgba failed"))
+        unless ok (liftIO (fail "registerImageRgba failed"))
         pure iid
 
     putStrLn "--- 3. WIDGET MICROBENCHMARKS (100 widgets in container, runFrame) ---"

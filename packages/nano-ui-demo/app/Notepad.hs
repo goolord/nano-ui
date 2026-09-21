@@ -9,6 +9,7 @@ module Main (main) where
 
 import Control.Exception (SomeException, try)
 import Control.Monad (void, when)
+import Control.Monad.IO.Class (liftIO)
 import Data.ByteString qualified as BS
 import Data.Foldable (for_)
 import Data.Either (isRight)
@@ -181,7 +182,7 @@ notepadUi = do
       setOpenMenu ""
       setDocGen (docGen + 1)
       loaded <-
-        uiIO (try (BS.readFile filePath) :: IO (Either SomeException BS.ByteString))
+        liftIO (try (BS.readFile filePath) :: IO (Either SomeException BS.ByteString))
       case loaded of
         Left _ -> setStatusMsg ("Could not open " <> T.pack filePath)
         Right raw -> do
@@ -235,7 +236,7 @@ notepadUi = do
       whenM (menuItem "Save") (setOpenMenu "" >> saveDocument False)
       whenM (menuItemShortcut "Save As..." "Ctrl+Shift+S") (setOpenMenu "" >> saveDocument True)
       menuSeparator
-      whenM (menuItemShortcut "Exit" "Esc") (setOpenMenu "" >> uiIO exitSuccess)
+      whenM (menuItemShortcut "Exit" "Esc") (setOpenMenu "" >> liftIO exitSuccess)
 
     editMenu = do
       canUndo <- textCanUndo editorId
@@ -342,7 +343,7 @@ menuBar openMenu setOpen entries = do
 writeDocument :: FilePath -> TextDocument -> NanoUI Bool
 writeDocument filePath doc = do
   result <-
-    uiIO (try (TIO.writeFile filePath (documentText doc)) :: IO (Either SomeException ()))
+    liftIO (try (TIO.writeFile filePath (documentText doc)) :: IO (Either SomeException ()))
   pure (isRight result)
 
 -- | The status bar. It shows the line count, which the document keeps; the
