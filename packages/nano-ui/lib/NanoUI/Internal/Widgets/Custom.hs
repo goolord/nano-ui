@@ -71,12 +71,11 @@ import Data.Text qualified as T
 import Data.Primitive.SmallArray (SmallArray, emptySmallArray, smallArrayFromList)
 import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context
-  ( Context (..)
+  ( adoptSlot
+  , Context (..)
   , CustomDrawBuild
   , CustomDrawContext (..)
   , CustomMeasureFn
-  , adoptStoreFloat
-  , adoptStoreInt
   , getFocusId
   , getHotId
   , getStore
@@ -108,7 +107,8 @@ import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena (NodeType (NodeDrawing))
 import NanoUI.Internal.Monad (Ui, askContext, askInput, nextId, uiIO, uiTime)
 import NanoUI.Internal.Store
-  ( Slot (..)
+  ( fieldInt
+  , Slot (..)
   , boolInt
   , deleteSlot
   , fieldFloat
@@ -480,7 +480,7 @@ knobWith' f diameter minV maxV value = do
   ctx <- askContext
   let
     key = intKey wid
-  current <- uiIO $ adoptStoreFloat ctx wid key value
+  current <- uiIO $ adoptSlot fieldFloat ctx wid key value
   let
     range = maxV - minV
     frac = if range > 0 then clamp01 ((current - minV) / range) else 0
@@ -561,7 +561,7 @@ toggleSwitchWith' f on = do
   ctx <- askContext
   let
     key = intKey wid
-  current <- intBool <$> uiIO (adoptStoreInt ctx wid key (boolInt on))
+  current <- intBool <$> uiIO (adoptSlot fieldInt ctx wid key (boolInt on))
   let
     pillW = 44.0
     pillH = 24.0

@@ -268,7 +268,7 @@ textAreaCore f wid value = do
               . insertDyn (slotKey SlotTextAreaBuffer key) (documentBuffer value)
               . deleteSlot fieldDyn (slotKey SlotTextHistory key)
               . deleteSlot fieldFloat contentCacheKey
-  -- Adopt the caller's document the way 'adoptStoreText' does. Comparing the
+  -- Adopt the caller's document the way 'adoptSlot' does. Comparing the
   -- document the caller passes back with the stored one is O(1) ('==' checks
   -- identity first). A replaced document gets a buffer over its lines and
   -- orphans the content size measured for the old one, and its undo history,

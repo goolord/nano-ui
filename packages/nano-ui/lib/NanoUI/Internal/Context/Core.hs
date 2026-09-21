@@ -44,15 +44,7 @@ module NanoUI.Internal.Context.Core
   , adoptSlot
   , recordSlot
   , getStoreBool
-  , writeStoreInt
-  , writeStoreFloat
   , writeStoreBool
-  , adoptStoreInt
-  , adoptStoreFloat
-  , adoptStoreText
-  , recordStoreInt
-  , recordStoreFloat
-  , recordStoreText
   , isDisabled
   -- Theme scopes
   , newThemeScopes
@@ -73,7 +65,6 @@ import Data.IORef (modifyIORef', readIORef, writeIORef)
 import Data.Primitive.SmallArray (copySmallMutableArray, newSmallArray, readSmallArray, getSizeofSmallMutableArray, writeSmallArray)
 import Data.IntMap.Strict (IntMap)
 import Data.IntMap.Strict qualified as IM
-import Data.Text (Text)
 import GHC.Clock (getMonotonicTime)
 
 import NanoUI.Internal.Context.Types
@@ -97,9 +88,7 @@ import NanoUI.Internal.Store
   , SlotWrites (..)
   , WidgetStore (..)
   , boolInt
-  , fieldFloat
   , fieldInt
-  , fieldText
   , findSlot
   , insertSlot
   , intBool
@@ -398,18 +387,12 @@ writeSlot field ctx owner k v = do
       damageWidget ctx owner DamageSelf
       markDirty ctx
 
--- | Write an integer slot by key, damaging its owning widget only when changed.
-writeStoreInt :: Context -> WidgetId -> Int -> Int -> IO ()
-writeStoreInt = writeSlot fieldInt
 
--- | Write a float slot by key, damaging its owning widget only when changed.
-writeStoreFloat :: Context -> WidgetId -> Int -> Float -> IO ()
-writeStoreFloat = writeSlot fieldFloat
 
 -- | Write a boolean at the owner's base integer key, with change detection.
 {-# INLINE writeStoreBool #-}
 writeStoreBool :: Context -> WidgetId -> Bool -> IO ()
-writeStoreBool ctx owner v = writeStoreInt ctx owner (intKey owner) (boolInt v)
+writeStoreBool ctx owner v = writeSlot fieldInt ctx owner (intKey owner) (boolInt v)
 
 -- | Controlled widgets take their value from the caller every frame. The
 -- caller's value replaces the stored one only when it differs from the value
@@ -440,31 +423,11 @@ recordSlot field ctx k v = do
   when (lookupSlot field seenK st /= Just v) $
     writeIORef (ctxStore ctx) $! insertSlot field seenK v st
 
--- | Adopt a controlled integer value. A value different from the last
--- 'recordStoreInt' result wins; otherwise retain edits made between frames.
-adoptStoreInt :: Context -> WidgetId -> Int -> Int -> IO Int
-adoptStoreInt = adoptSlot fieldInt
 
--- | Float form of 'adoptStoreInt', paired with 'recordStoreFloat'.
-adoptStoreFloat :: Context -> WidgetId -> Int -> Float -> IO Float
-adoptStoreFloat = adoptSlot fieldFloat
 
--- | Text form of 'adoptStoreInt', paired with 'recordStoreText'.
-adoptStoreText :: Context -> WidgetId -> Int -> Text -> IO Text
-adoptStoreText = adoptSlot fieldText
 
--- | Remember a controlled widget's returned integer for next frame's adoption.
--- Does not request a frame or modify the widget's value slot.
-recordStoreInt :: Context -> Int -> Int -> IO ()
-recordStoreInt = recordSlot fieldInt
 
--- | Remember the returned float for 'adoptStoreFloat'.
-recordStoreFloat :: Context -> Int -> Float -> IO ()
-recordStoreFloat = recordSlot fieldFloat
 
--- | Remember the returned text for 'adoptStoreText'.
-recordStoreText :: Context -> Int -> Text -> IO ()
-recordStoreText = recordSlot fieldText
 
 -- | Read the boolean at a widget's base integer key, using the supplied default.
 {-# INLINE getStoreBool #-}

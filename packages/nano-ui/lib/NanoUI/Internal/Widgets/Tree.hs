@@ -10,13 +10,13 @@ import Data.Text (Text)
 import Data.Primitive.SmallArray (SmallArray, indexSmallArray, mapSmallArray', sizeofSmallArray, smallArrayFromList)
 import Effectful (Eff, type (:>))
 import qualified Data.IntSet as IS
-import NanoUI.Internal.Context (Context (..), adoptStoreInt, getFocusId, getStore, intKey, recordStoreInt, registerFocusable, setStore, writeStoreInt, modifyStore)
+import NanoUI.Internal.Context (Context (..), adoptSlot, getFocusId, getStore, intKey, recordSlot, registerFocusable, setStore, writeSlot, modifyStore)
 import NanoUI.Internal.Font (treeChevronRect)
 import NanoUI.Internal.Frame.Hit (scrollHitRect)
 import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Internal.Input (inputMousePos)
 import NanoUI.Internal.Layout.Arena (NodeType (..))
-import NanoUI.Internal.Store (fieldIntSet, insertSlot, lookupSlot)
+import NanoUI.Internal.Store (fieldInt, fieldIntSet, insertSlot, lookupSlot)
 import NanoUI.Internal.Monad (Ui, askContext, askInput, nextId, uiIO, withKey)
 import NanoUI.Internal.Style (defaultLayout, fillW, gap, tight)
 import NanoUI.Internal.Types (Rect (..), clamp, rectContains)
@@ -145,7 +145,7 @@ tree' key inputItems index =
         groupKey = intKey groupId
         total = forestSize items
         clamped = if total <= 0 then 0 else clamp 0 (total - 1) index
-    selected <- uiIO $ adoptStoreInt ctx groupId groupKey clamped
+    selected <- uiIO $ adoptSlot fieldInt ctx groupId groupKey clamped
     st <- uiIO (getStore ctx)
     expandedSet <- case lookupSlot fieldIntSet groupKey st of
       Just expanded -> pure expanded
@@ -166,8 +166,8 @@ tree' key inputItems index =
       nav <- useKeyNav focus
       let (keySel, keyExp, mFocus) = treeKeyNav nav rows resps focus afterClickSel afterClickExp
       uiIO $ do
-        writeStoreInt ctx groupId groupKey keySel
-        recordStoreInt ctx groupKey keySel
+        writeSlot fieldInt ctx groupId groupKey keySel
+        recordSlot fieldInt ctx groupKey keySel
       when (keyExp /= expandedSet) $ uiIO $
         modifyStore ctx (insertSlot fieldIntSet groupKey keyExp)
       maybe (pure ()) (\wid -> uiIO $ writeIORef (ctxFocusId ctx) wid) mFocus

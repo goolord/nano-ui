@@ -17,13 +17,13 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context
-  ( Context (..)
+  ( recordSlot
+  , Context (..)
   , getStore
   , intKey
   , markDirty
   , markEscapeConsumed
   , modifyStore
-  , recordStoreText
   )
 import NanoUI.Internal.Font (FontMetrics, menuItemRowH)
 import NanoUI.Internal.Frame.Hit (findNodeByWidgetId)
@@ -351,5 +351,5 @@ comboBox' placeholder options value = do
   uiIO $ do
     findNodeByWidgetId ctx wid
       >>= mapM_ (\idx -> setOptions (ctxNodeArena ctx) idx (take comboBoxMaxVisible (drop (csWindow cs1) matches)))
-    recordStoreText ctx key finalText
+    recordSlot fieldText ctx key finalText
   pure (setChanged (isJust (stepCommit step)) resp, finalText)

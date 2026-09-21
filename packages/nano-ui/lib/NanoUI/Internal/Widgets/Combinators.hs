@@ -17,13 +17,12 @@ import NanoUI.Internal.Context
   , intKey
   , isDisabled
   , recordSlot
-  , recordStoreInt
   , registerFocusable
   , writeSlot
   , writeStoreBool
   )
 import NanoUI.Internal.Id (WidgetId)
-import NanoUI.Internal.Store (Field, boolInt)
+import NanoUI.Internal.Store (fieldInt, Field, boolInt)
 import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Monad (Ui, askContext, nextId, uiIO)
 import NanoUI.Internal.Style (Layout (..))
@@ -83,7 +82,7 @@ finishToggle ctx wid current resp = do
     value = current /= clicked
   uiIO $ do
     writeStoreBool ctx wid value
-    recordStoreInt ctx (intKey wid) (boolInt value)
+    recordSlot fieldInt ctx (intKey wid) (boolInt value)
   pure (setChanged clicked resp, value)
 
 -- | Publish an input's result and remember it for controlled adoption. The

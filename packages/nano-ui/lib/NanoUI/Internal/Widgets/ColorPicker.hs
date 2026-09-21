@@ -24,11 +24,11 @@ import Data.Text (Text)
 import Data.Word (Word8)
 import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context
-  ( Context (..)
+  ( recordSlot
+  , Context (..)
   , WidgetStore
   , getStore
   , intKey
-  , recordStoreInt
   , registerFocusable
   , setStore
   , modifyStore
@@ -514,7 +514,7 @@ colorPickerWith showAlpha value = do
         writeColor (colorRGBA r g b (if showAlpha then fromMaybe (colorA hex) ma else 255))
     final <- readColor
     pure (start, final, svResp)
-  uiIO $ recordStoreInt ctx key (fromIntegral (colorToWord32 final))
+  uiIO $ recordSlot fieldInt ctx key (fromIntegral (colorToWord32 final))
   pure (setChanged (final /= start) svResp, final)
 
 -- | The field and the bars: pointer drags, then arrow keys on whichever part
@@ -583,7 +583,7 @@ channelField pct label hi value =
         defaultNumericInputConfig {nicMin = 0, nicMax = fromIntegral hi, nicLayout = colorPickerChannelLayout}
         (fromIntegral value)
 
--- | Adopt the caller's colour as 'NanoUI.Internal.Context.adoptStoreInt' does. A new
+-- | Adopt the caller's colour as 'adoptSlot' does. A new
 -- colour also resets the hue, S/V, and the "current" swatch.
 adoptColorPickerValue :: Context -> WidgetId -> Color -> IO ()
 adoptColorPickerValue ctx wid value = do

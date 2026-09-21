@@ -17,11 +17,11 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context
-  ( Context (..)
-  , adoptStoreInt
+  ( recordSlot
+  , adoptSlot
+  , Context (..)
   , getStore
   , intKey
-  , recordStoreInt
   , registerFocusable
   , modifyStore
   )
@@ -69,7 +69,7 @@ selectWith' f options index = do
       xs -> xs
     n = length opts
     key = intKey wid
-  stored <- uiIO $ adoptStoreInt ctx wid key (clamp 0 (n - 1) index)
+  stored <- uiIO $ adoptSlot fieldInt ctx wid key (clamp 0 (n - 1) index)
   store0 <- uiIO (getStore ctx)
   let
     current = clamp 0 (n - 1) stored
@@ -93,7 +93,7 @@ selectWith' f options index = do
     forM_ picked $ \i -> do
       modifyStore ctx (\st -> setSelectOpen (insertSlot fieldInt key i st) key False)
       writeIORef (ctxFocusId ctx) wid
-    recordStoreInt ctx key finalIdx
+    recordSlot fieldInt ctx key finalIdx
   -- Compare with the caller's index, not 'current': a dropdown or keyboard
   -- pick lands in the store between frames and must still report a change.
   pure (setChanged (finalIdx /= clamp 0 (n - 1) index) resp, finalIdx)

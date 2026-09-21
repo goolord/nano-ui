@@ -43,12 +43,12 @@ import Data.Text qualified as T
 import Effectful (Eff, type (:>))
 import GHC.Clock (getMonotonicTime)
 import NanoUI.Internal.Context
-  ( Context (..)
-  , adoptStoreText
+  ( recordSlot
+  , adoptSlot
+  , Context (..)
   , getStore
   , intKey
   , markDirty
-  , recordStoreText
   , registerFocusable
   , requestWakeAt
   , setStore
@@ -265,7 +265,7 @@ editTextField wid mode initial unfocusedText = do
   pure (tisText s0, tisText s1, isFocus, pulse)
 
 -- | Shared single-line field builder. The caller's @value@ is adopted as by
--- 'NanoUI.Internal.Context.adoptStoreText'. @styleIdx@ may carry the search or password
+-- 'adoptSlot'. @styleIdx@ may carry the search or password
 -- flag on a @NodeTextInput@; when @mDebounceMs@ is present the returned change
 -- pulse is delayed until the text has been idle for that long (immediate for
 -- clear clicks).
@@ -281,11 +281,11 @@ buildTextInput styleIdx layout placeholder value mDebounceMs = do
   wid <- nextId
   ctx <- askContext
   let key = intKey wid
-  _ <- uiIO $ adoptStoreText ctx wid key value
+  _ <- uiIO $ adoptSlot fieldText ctx wid key value
   -- Both modes are constants, so an idle field allocates no mode record.
   let mode = if textInputPasswordMode styleIdx then singleLineMode {modeCopyable = False} else singleLineMode
   (oldText, newText, isFocus, pulse) <- editTextField wid mode value Nothing
-  uiIO $ recordStoreText ctx key newText
+  uiIO $ recordSlot fieldText ctx key newText
   inp <- askInput
   let submitted = isFocus && KeyEnter `elem` inputKeys inp
       edited = pulse || newText /= oldText
@@ -414,7 +414,7 @@ selectableTextWith' f txt = do
   wid <- nextId
   ctx <- askContext
   -- The caller owns the text; the editor only moves the selection.
-  _ <- uiIO $ adoptStoreText ctx wid (intKey wid) txt
+  _ <- uiIO $ adoptSlot fieldText ctx wid (intKey wid) txt
   _ <- editTextField wid singleLineMode {modeEditable = False} txt Nothing
   let styleIdx =
         textInputFlagSelectable

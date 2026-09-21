@@ -10,7 +10,7 @@ where
 import Data.Text (Text)
 import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context
-  ( adoptStoreFloat
+  ( adoptSlot
   , intKey
   , registerFocusable
   )
@@ -54,7 +54,7 @@ sliderWith' f minV maxV value = do
   uiIO $ registerFocusable ctx wid
   let
     key = intKey wid
-  current <- uiIO $ adoptStoreFloat ctx wid key value
+  current <- uiIO $ adoptSlot fieldFloat ctx wid key value
   let
     frac = if maxV > minV then (current - minV) / (maxV - minV) else 0
   resp <- addWidget wid NodeSlider "" frac (f (fillW defaultLayout))

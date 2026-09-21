@@ -95,15 +95,7 @@ module NanoUI.Internal.Context
   , adoptSlot
   , recordSlot
   , getStoreBool
-  , writeStoreInt
-  , writeStoreFloat
   , writeStoreBool
-  , adoptStoreInt
-  , adoptStoreFloat
-  , adoptStoreText
-  , recordStoreInt
-  , recordStoreFloat
-  , recordStoreText
   , isDisabled
   , newThemeScopes
   , beginThemeScopes

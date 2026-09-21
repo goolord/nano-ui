@@ -3,10 +3,10 @@ module NanoUI.Internal.Widgets.Checkbox (checkbox, checkbox', checkboxWith, chec
 
 import Data.Text (Text)
 import Effectful (Eff, type (:>))
-import NanoUI.Internal.Context (adoptStoreInt, intKey, registerFocusable)
+import NanoUI.Internal.Context (adoptSlot, intKey, registerFocusable)
 import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Monad (Ui, askContext, nextId, uiIO)
-import NanoUI.Internal.Store (boolInt, intBool)
+import NanoUI.Internal.Store (fieldInt, boolInt, intBool)
 import NanoUI.Internal.Style (Layout, defaultLayout)
 import NanoUI.Internal.Widgets.Combinators (finishToggle)
 import NanoUI.Internal.Widgets.Node (Response, addWidget)
@@ -36,6 +36,6 @@ checkboxWith' f txt checked = do
   uiIO $ registerFocusable ctx wid
   let
     key = intKey wid
-  current <- intBool <$> uiIO (adoptStoreInt ctx wid key (boolInt checked))
+  current <- intBool <$> uiIO (adoptSlot fieldInt ctx wid key (boolInt checked))
   resp <- addWidget wid NodeCheckbox txt (if current then 1 else 0) (f defaultLayout)
   finishToggle ctx wid current resp

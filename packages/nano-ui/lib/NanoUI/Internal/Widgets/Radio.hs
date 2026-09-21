@@ -15,7 +15,7 @@ import Data.Hashable (hash)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Effectful (Eff, type (:>))
-import NanoUI.Internal.Context (adoptStoreInt, intKey, registerFocusable)
+import NanoUI.Internal.Context (adoptSlot, intKey, registerFocusable)
 import NanoUI.Internal.Store (fieldInt)
 import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Monad (Ui, askContext, nextId, uiIO, withKey)
@@ -61,7 +61,7 @@ radio' options index =
         xs -> xs
       !len = length opts
       !key = intKey gid
-    stored <- uiIO $ adoptStoreInt ctx gid key (clamp 0 (len - 1) index)
+    stored <- uiIO $ adoptSlot fieldInt ctx gid key (clamp 0 (len - 1) index)
     let
       !sel = clamp 0 (len - 1) stored
     uiIO $ registerFocusable ctx gid
