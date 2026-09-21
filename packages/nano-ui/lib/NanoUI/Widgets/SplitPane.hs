@@ -263,9 +263,19 @@ reflowFixed isFixed minSize spacing = go
         fixedB = pinnedSide isFixed b
         -- The A-side extent the reflow asks for: the one it had when A is the
         -- pinned side, and the one that leaves B the extent it had when B is.
+        --
+        -- The pinned side is kept to a whole unit. A reflow that runs on
+        -- every frame of a resize drag would otherwise walk it a fraction at
+        -- a time: the extent is kept as a ratio of a region that is changing
+        -- size, and going out to a ratio and back again does not land on
+        -- quite the same number twice. It is the pinned side's own extent
+        -- that is rounded, not A's: a B side kept as what A leaves over would
+        -- take every step's rounding of A with it, and a region that grows
+        -- by a fraction of a unit a step walks it off by that much each time.
         wanted
-          | fixedA = dOld
-          | otherwise = dOld + (newAvail - oldAvail)
+          | fixedA = whole dOld
+          | otherwise = (newAvail - spacing) - whole (oldAvail - spacing - dOld)
+        whole v = fromIntegral (round v :: Int)
         ratio'
           | fixedA == fixedB = ratio
           | oldAvail - spacing <= 0 || newAvail - spacing <= 0 = ratio

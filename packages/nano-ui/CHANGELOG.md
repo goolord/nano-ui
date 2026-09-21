@@ -265,6 +265,11 @@
   them. The fade is half a pixel now and the rest of the width is solid: the
   same ink over a narrower band (`arcFeather` in `NanoUI.Draw.Shapes`).
 
+- A pinned pane keeps a whole number of layout units, on whichever side of
+  its split it is pinned. Its extent is kept as a ratio of a region that
+  changes size, and going out to a ratio and back walked it a fraction at a
+  time on every frame of a resize drag.
+
 - Nothing reacts through what is drawn over it. `pointer-ownership` opens
   each kind of overlay (the text-edit menu, a select's and a combo's
   dropdown, a popup, a window, a modal) over each kind of pointer-driven

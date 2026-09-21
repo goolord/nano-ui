@@ -1023,6 +1023,14 @@ runPaneGridPinnedPaneTest ctx failed = do
   widthOf "a pin under a stack" stacked' (area 900 600) 2 592
   heightOf "a pin under a stack" stacked' (area 900 600) 1 292
   heightOf "a pin under a stack" stacked' (area 900 600) 3 292
+  -- A pane pinned on the right holds through a drag that grows the grid by a
+  -- fraction of a unit a frame, as a zoomed window does by a pixel: the
+  -- rounding that keeps the pinned side whole must not walk it.
+  let rightPin = Split 30 AxisV 0.5 (Pane 1) (Pane 2)
+      at k = area (600 + k * 2 / 3) 400
+      dragged = foldl (\t k -> reflow [2] (at k) (at (k + 1)) t) rightPin [0 .. 29 :: Float]
+  widthOf "a right-hand pin through a fractional drag" rightPin (at 0) 2 292
+  widthOf "a right-hand pin through a fractional drag" dragged (at 30) 2 292
 
 -- A button scrolled above its viewport can geometrically overlap the header,
 -- but its invisible rectangle must not claim the header's drag press.
