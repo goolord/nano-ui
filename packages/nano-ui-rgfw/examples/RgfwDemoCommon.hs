@@ -78,22 +78,19 @@ data ProfileChoice
   | ProfileQuality
   deriving (Bounded, Enum, Eq, Show)
 
+-- | In the order the scale button cycles through them.
 data DpiScaleChoice
   = DpiScaleAuto
-  | DpiScale05
   | DpiScale1
   | DpiScale15
   | DpiScale2
   | DpiScale3
+  | DpiScale05
   deriving (Bounded, Enum, Eq, Show)
 
 formatDpiScale :: DpiScaleChoice -> Text
 formatDpiScale DpiScaleAuto = "Auto (OS)"
-formatDpiScale DpiScale05   = "0.5x"
-formatDpiScale DpiScale1    = "1.0x"
-formatDpiScale DpiScale15   = "1.5x"
-formatDpiScale DpiScale2    = "2.0x"
-formatDpiScale DpiScale3    = "3.0x"
+formatDpiScale sc = T.pack (show (physScaleFor sc)) <> "x"
 
 physScaleFor :: DpiScaleChoice -> Float
 physScaleFor DpiScaleAuto = 0.0 -- 0.0 means: use the DPI reported by the OS by default
@@ -169,15 +166,7 @@ update msg m =
    in case msg of
         SetTab t         -> m' {activeTab = t}
         CycleTheme       -> m' {currentTheme = nextEnum (currentTheme m)}
-        CycleScale       ->
-          let nextSc = case dpiScale m of
-                DpiScaleAuto -> DpiScale1
-                DpiScale1    -> DpiScale15
-                DpiScale15   -> DpiScale2
-                DpiScale2    -> DpiScale3
-                DpiScale3    -> DpiScale05
-                DpiScale05   -> DpiScaleAuto
-           in m' {dpiScale = nextSc}
+        CycleScale       -> m' {dpiScale = nextEnum (dpiScale m)}
         Increment        -> m' {counter = counter m + 1}
         Decrement        -> m' {counter = counter m - 1}
         Reset            -> m' {counter = 0}
@@ -399,23 +388,14 @@ viewGalleryTab = do
 
       gridWith 1 (gap 4) $ do
         label "Icon buttons:"
-        gridWith 4 (gap 4 . fixedH 24 . fillW) $ do
-          void $ button "\xF002 Search"
-          void $ button "\xF004 Health"
-          void $ button "\xF005 Star"
-          void $ button "\xF00C Check"
-          void $ button "\xF00D Close"
-          void $ button "\xF013 Settings"
-          void $ button "\xF01E Reload"
-          void $ button "\xF026 Mute"
-          void $ button "\xF028 Sound"
-          void $ button "\xF04B Play"
-          void $ button "\xF04C Pause"
-          void $ button "\xF04D Stop"
-          void $ button "\xF188 Debug"
-          void $ button "\xF11B Gamepad"
-          void $ button "⏎ Enter"
-          void $ button "⎋ Esc"
+        gridWith 4 (gap 4 . fixedH 24 . fillW) $
+          mapM_
+            (void . button)
+            [ "\xF002 Search", "\xF004 Health", "\xF005 Star", "\xF00C Check"
+            , "\xF00D Close", "\xF013 Settings", "\xF01E Reload", "\xF026 Mute"
+            , "\xF028 Sound", "\xF04B Play", "\xF04C Pause", "\xF04D Stop"
+            , "\xF188 Debug", "\xF11B Gamepad", "⏎ Enter", "⎋ Esc"
+            ]
 
 viewAboutTab :: NanoUI ()
 viewAboutTab =
