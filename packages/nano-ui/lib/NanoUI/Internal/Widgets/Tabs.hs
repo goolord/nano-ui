@@ -367,8 +367,8 @@ syncTabHeaderActive ctx active resps =
     withWidgetNode ctx (respId r) () $ \i -> setNodeValue (ctxNodeArena ctx) i (if k == active then 1 else 0)
 
 -- | Tab headers and the active tab's body. Pass the active key; the result is
--- the active key after this frame's clicks or arrow keys. Only the active
--- tab's body runs.
+-- the active key after this frame's clicks, or Enter or Space on a focused
+-- header. Only the active tab's body runs.
 {-# INLINE tabs #-}
 tabs :: (Foldable f, Eq a, Ui :> es) => a -> f (Tab a (Eff es ())) -> Eff es a
 tabs = tabsConfigured defaultTabsConfig
