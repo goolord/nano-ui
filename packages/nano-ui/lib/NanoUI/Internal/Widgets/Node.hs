@@ -157,18 +157,11 @@ data Response = Response
   deriving (Eq, Show)
 
 instance Semigroup Response where
-  a <> b =
+  Response i1 r1 h1 p1 c1 ch1 s1 rp1 rc1 <> Response i2 r2 h2 p2 c2 ch2 s2 rp2 rc2 =
     Response
-      { rawRespId = if rawRespId b == WidgetId 0 then rawRespId a else rawRespId b
-      , rawRespRect = unionRespRect (rawRespRect a) (rawRespRect b)
-      , rawRespHovered = rawRespHovered a || rawRespHovered b
-      , rawRespPressed = rawRespPressed a || rawRespPressed b
-      , rawRespClicked = rawRespClicked a || rawRespClicked b
-      , rawRespChanged = rawRespChanged a || rawRespChanged b
-      , rawRespSubmitted = rawRespSubmitted a || rawRespSubmitted b
-      , rawRespRightPressed = rawRespRightPressed a || rawRespRightPressed b
-      , rawRespRightClicked = rawRespRightClicked a || rawRespRightClicked b
-      }
+      (if i2 == WidgetId 0 then i1 else i2)
+      (unionRespRect r1 r2)
+      (h1 || h2) (p1 || p2) (c1 || c2) (ch1 || ch2) (s1 || s2) (rp1 || rp2) (rc1 || rc2)
 
 instance Monoid Response where
   mempty = mkResponse (WidgetId 0) (Rect 0 0 0 0) False False False False
@@ -199,17 +192,7 @@ inertResponse r =
 
 mkResponse :: WidgetId -> Rect -> Bool -> Bool -> Bool -> Bool -> Response
 mkResponse wid rect hovered pressed clicked changed =
-  Response
-    { rawRespId = wid
-    , rawRespRect = rect
-    , rawRespHovered = hovered
-    , rawRespPressed = pressed
-    , rawRespClicked = clicked
-    , rawRespChanged = changed
-    , rawRespSubmitted = False
-    , rawRespRightPressed = False
-    , rawRespRightClicked = False
-    }
+  Response wid rect hovered pressed clicked changed False False False
 
 emptyModalResp :: WidgetId -> Response
 emptyModalResp wid = mempty {rawRespId = wid}
@@ -456,18 +439,7 @@ resolveInteraction ctx inp wid = do
       let
         clicked = released || pending == wid
         rightClicked = rightReleased
-      pure $!
-        Response
-          { rawRespId = wid
-          , rawRespRect = rect
-          , rawRespHovered = hovered
-          , rawRespPressed = pressed
-          , rawRespClicked = clicked
-          , rawRespChanged = False
-          , rawRespSubmitted = False
-          , rawRespRightPressed = rightPressed
-          , rawRespRightClicked = rightClicked
-          }
+      pure $! Response wid rect hovered pressed clicked False False rightPressed rightClicked
 
 -- | Stamp the current container with a widget id (radio/tree group key).
 tagContainer :: Ui :> es => WidgetId -> Eff es ()
