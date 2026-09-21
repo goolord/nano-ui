@@ -18,7 +18,7 @@ module NanoUI.Sdl.Display
 import Control.Monad (unless, void)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import GHC.IORef (atomicSwapIORef)
-import Foreign.C.Types (CInt (..))
+import Foreign.C.Types (CBool (..), CInt (..))
 import Foreign.Marshal.Alloc (alloca, callocBytes)
 import Foreign.Ptr (FunPtr, Ptr, freeHaskellFunPtr)
 import Foreign.Storable (peek, poke, sizeOf)
@@ -89,7 +89,7 @@ queryMouseWindowPos =
 installResizeWatch :: IO () -> IO (IO ())
 installResizeWatch act = do
   fp <- mkResizeCb act
-  ok <- installResizeWatchC fp
+  ok <- (/= 0) <$> installResizeWatchC fp
   unless ok $ fail "SDL_AddEventWatch failed"
   pure $ do
     removeResizeWatchC
@@ -154,7 +154,7 @@ foreign import ccall "wrapper"
   mkResizeCb :: IO () -> IO (FunPtr (IO ()))
 
 foreign import ccall safe "nano_ui_install_resize_watch"
-  installResizeWatchC :: FunPtr (IO ()) -> IO Bool
+  installResizeWatchC :: FunPtr (IO ()) -> IO CBool
 
 foreign import ccall safe "nano_ui_remove_resize_watch"
   removeResizeWatchC :: IO ()

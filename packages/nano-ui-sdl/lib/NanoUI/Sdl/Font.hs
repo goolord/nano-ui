@@ -56,7 +56,7 @@ import qualified GHC.Foreign as GHC
 import GHC.IO.Encoding (getFileSystemEncoding)
 import Data.Text.Unsafe (lengthWord8)
 import Foreign.C.String (CString, withCString)
-import Foreign.C.Types (CFloat (..), CInt (..), CSize (..), CUInt (..))
+import Foreign.C.Types (CBool (..), CFloat (..), CInt (..), CSize (..), CUInt (..))
 import Foreign.Ptr (IntPtr (..), Ptr, castPtr, intPtrToPtr, nullPtr, plusPtr, ptrToIntPtr)
 import Foreign.Storable (peek, peekElemOff, poke, sizeOf)
 import Data.Unique (hashUnique, newUnique)
@@ -344,7 +344,7 @@ lookupOrInsertGlyph ga sf c = do
       mSlot <- case mMetrics of
         Nothing -> pure Nothing
         Just metrics ->
-          placeGlyphImage ga (ttfRenderGlyphSurface (sfFont sf) cp) >>= \case
+          placeGlyphImage ga (fmap (/= 0) . ttfRenderGlyphSurface (sfFont sf) cp) >>= \case
             Nothing -> pure Nothing
             Just slot -> do
               -- TTF_GetGlyphImage is a tight bitmap. Place it with the font
@@ -364,7 +364,7 @@ lookupOrInsertGlyphIndex ga fontKey handle gi = do
   case IM.lookup fontKey entries >>= IM.lookup gi of
     Just mSlot -> pure mSlot
     Nothing -> do
-      mSlot <- placeGlyphImage ga (ttfRenderGlyphIndexSurface (intPtrToPtr (IntPtr handle)) (fromIntegral gi))
+      mSlot <- placeGlyphImage ga (fmap (/= 0) . ttfRenderGlyphIndexSurface (intPtrToPtr (IntPtr handle)) (fromIntegral gi))
       modifyIORef' (gaIndexEntries ga) (IM.insertWith IM.union fontKey (IM.singleton gi mSlot))
       pure mSlot
 
@@ -485,7 +485,7 @@ shapeLine sf inv txt = do
     let shapeAll !_ [] = pure ()
         shapeAll !p ((start, end, dir) : rest) = do
           withUtf8 (T.take (end - start) (T.drop start txt)) $ \cstr len -> do
-            ok <- ttfShape (sfFont sf) cstr len dir (resultOf p)
+            ok <- (/= 0) <$> ttfShape (sfFont sf) cstr len dir (resultOf p)
             unless ok $ ttfShapedFree (resultOf p)
           shapeAll (p + 1) rest
     shapeAll 0 runs
@@ -1138,7 +1138,7 @@ tryInsert atlas surf =
     let py = plusPtr px (sizeOf (0 :: CFloat))
         tw = plusPtr py (sizeOf (0 :: CFloat))
         th = plusPtr tw (sizeOf (0 :: CFloat))
-    ok <- textAtlasInsertSurface atlas surf px py tw th
+    ok <- (/= 0) <$> textAtlasInsertSurface atlas surf px py tw th
     if ok
       then do
         x <- realToFrac <$> peek px
@@ -1154,6 +1154,9 @@ withUtf8 txt act =
     act (castPtr ptr) (fromIntegral len)
 
 -- Header-checked imports also adapt C bool to Haskell Bool at the ABI boundary.
+-- The ccall imports of nano-ui's own bool functions below return CBool: a C
+-- bool defines only the low byte of the return register, which a Haskell
+-- Bool result would read in full.
 foreign import capi unsafe "SDL3_ttf/SDL_ttf.h TTF_Init"
   ttfInit :: IO Bool
 
@@ -1198,7 +1201,7 @@ foreign import ccall unsafe "nano_ui_text_atlas_insert_surface"
     Ptr CFloat ->
     Ptr CFloat ->
     Ptr CFloat ->
-    IO Bool
+    IO CBool
 
 foreign import ccall unsafe "SDL_DestroySurface"
   freeSurface :: Ptr () -> IO ()
@@ -1219,10 +1222,10 @@ foreign import ccall unsafe "nano_ui_ttf_render_glyph_surface"
     Ptr () ->        -- font
     CUInt ->         -- codepoint
     Ptr (Ptr ()) ->  -- out_surface
-    IO Bool
+    IO CBool
 
 foreign import ccall unsafe "nano_ui_ttf_shape"
-  ttfShape :: Ptr () -> CString -> CSize -> CInt -> Ptr () -> IO Bool
+  ttfShape :: Ptr () -> CString -> CSize -> CInt -> Ptr () -> IO CBool
 
 foreign import ccall unsafe "nano_ui_ttf_shaped_free"
   ttfShapedFree :: Ptr () -> IO ()
@@ -1237,7 +1240,7 @@ foreign import ccall unsafe "nano_ui_ttf_shaped_ptr"
   ttfShapedPtr :: Ptr () -> CInt -> IO (Ptr ())
 
 foreign import ccall unsafe "nano_ui_ttf_render_glyph_index_surface"
-  ttfRenderGlyphIndexSurface :: Ptr () -> CUInt -> Ptr (Ptr ()) -> IO Bool
+  ttfRenderGlyphIndexSurface :: Ptr () -> CUInt -> Ptr (Ptr ()) -> IO CBool
 
 foreign import capi unsafe "SDL3_ttf/SDL_ttf.h TTF_FontHasGlyph"
   ttfHasGlyph :: Ptr () -> CUInt -> IO Bool
