@@ -1,18 +1,4 @@
-module Cases.Table
-  ( runPageWheelAboveTableTest
-  , runTableCellPadTest
-  , runTableColResizeDemoReproTest
-  , runTableFillWidthTest
-  , runTableFirstColWidthTest
-  , runTableHBarReachTest
-  , runTableReorderTest
-  , runTableResizeOverflowTest
-  , runTableRulesTileTest
-  , runTableScrollRevealTest
-  , runTableSharedScrollMetricsTest
-  , runTableSortTest
-  , runTableWrapRowStretchTest
-  ) where
+module Cases.Table (tests) where
 
 import Control.Monad (filterM, forM, forM_, replicateM_, void, (<=<))
 import Data.Bits ((.&.))
@@ -46,6 +32,24 @@ import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, assertGt, assertJust, assertJustM, withInput)
 import NanoUI.Testing.Harness (clickPos, dragPos, findHeader, pressAt, requireSpan, spanCenter, spanRect, warmup2, withInputOff)
 import Text.Read (readMaybe)
+import Spec (Spec, pixelSpec, spec)
+
+tests :: [Spec]
+tests =
+  [ spec "table-sort" runTableSortTest
+  , pixelSpec "table-reorder" runTableReorderTest
+  , pixelSpec "table-scroll-reveal" runTableScrollRevealTest
+  , pixelSpec "table-shared-scroll-metrics" runTableSharedScrollMetricsTest
+  , pixelSpec "page-wheel-above-table" runPageWheelAboveTableTest
+  , pixelSpec "table-wrap-row-stretch" runTableWrapRowStretchTest
+  , spec "table-first-col" runTableFirstColWidthTest
+  , spec "table-fill-width" runTableFillWidthTest
+  , pixelSpec "table-cell-pad" runTableCellPadTest
+  , spec "table-rules-tile" runTableRulesTileTest
+  , pixelSpec "table-resize-overflow" runTableResizeOverflowTest
+  , spec "table-col-resize-body" runTableColResizeDemoReproTest
+  , pixelSpec "table-hbar-reach" runTableHBarReachTest
+  ]
 
 -- | A table sorted ascending on its first column, given everything but the sort.
 sortedTable :: (SortCol -> NanoUI TableResponse) -> NanoUI ()

@@ -1,38 +1,4 @@
-module Cases.TextInput
-  ( runTextInputClickSelectTest
-  , runTextInputClipboardTest
-  , runTextInputPasswordTest
-  , runTextInputCursorTest
-  , runTextAreaCutClearsSelectionTest
-  , runTextInputCutClearsSelectionTest
-  , runTextInputDirtyTest
-  , runTextInputDragWakeTest
-  , runTextInputFocusSdlTest
-  , runTextInputMenuTest
-  , runTextInputMouseSelectionTest
-  , runTextInputSelectionTest
-  , runTextInputFfCaretTest
-  , runTextInputScrollTest
-  , runTextInputWordKeysTest
-  , runTextInputBatchTest
-  , runTextUndoTest
-  , runTextAreaWidthTrackingTest
-  , runTextAreaDocumentTest
-  , runTextAreaScrollWheelTest
-  , runTextAreaZoomScrollTest
-  , runTextAreaScrollDragTest
-  , runTextAreaCursorOnScrollBarTest
-  , runTextAreaHScrollWheelTest
-  , runTextAreaHScrollDragTest
-  , runTextArea2DScrollTest
-  , runTextAreaScrollCursorLeavesViewportTest
-  , runRefreshRedrawTest
-  , runTextAreaMenuPulseTest
-  , runTextAreaMenuSelectAllTest
-  , runTextCommandFocusTest
-  , runTextAreaRemountScrollTest
-  )
-where
+module Cases.TextInput (tests) where
 
 import Control.Monad (forM_, replicateM, replicateM_, void, when)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
@@ -89,6 +55,43 @@ import NanoUI.Widgets.TextBuffer
   , toLines
   , toText
   )
+import Spec (Spec, pixelSpec, spec)
+
+tests :: [Spec]
+tests =
+  [ spec "refresh-forces-redraw" runRefreshRedrawTest
+  , spec "text-undo" runTextUndoTest
+  , spec "text-area-width-tracking" runTextAreaWidthTrackingTest
+  , spec "text-area-document" runTextAreaDocumentTest
+  , spec "text-input-cursor" runTextInputCursorTest
+  , spec "text-input-batch" runTextInputBatchTest
+  , spec "text-input-selection" runTextInputSelectionTest
+  , spec "text-input-mouse-selection" runTextInputMouseSelectionTest
+  , spec "text-input-click-select" runTextInputClickSelectTest
+  , spec "text-input-word-keys" runTextInputWordKeysTest
+  , spec "text-input-cut-clears-selection" runTextInputCutClearsSelectionTest
+  , spec "text-input-clipboard" runTextInputClipboardTest
+  , spec "text-input-password" runTextInputPasswordTest
+  , spec "text-input-menu" runTextInputMenuTest
+  , spec "text-input-ff-caret" runTextInputFfCaretTest
+  , pixelSpec "text-input-focus-sdl" runTextInputFocusSdlTest
+  , pixelSpec "text-input-scroll" runTextInputScrollTest
+  , spec "text-input-dirty" runTextInputDirtyTest
+  , spec "text-input-drag-wake" runTextInputDragWakeTest
+  , spec "text-area-cut-clears-selection" runTextAreaCutClearsSelectionTest
+  , pixelSpec "text-area-scroll-wheel" runTextAreaScrollWheelTest
+  , pixelSpec "text-area-zoom-scroll" runTextAreaZoomScrollTest
+  , pixelSpec "text-area-remount-scroll" runTextAreaRemountScrollTest
+  , pixelSpec "text-area-menu-pulse" runTextAreaMenuPulseTest
+  , pixelSpec "text-area-menu-select-all" runTextAreaMenuSelectAllTest
+  , spec "text-command-focus" runTextCommandFocusTest
+  , pixelSpec "text-area-scroll-drag" runTextAreaScrollDragTest
+  , pixelSpec "text-area-cursor-on-scrollbar" runTextAreaCursorOnScrollBarTest
+  , pixelSpec "text-area-hscroll-wheel" runTextAreaHScrollWheelTest
+  , pixelSpec "text-area-hscroll-drag" runTextAreaHScrollDragTest
+  , pixelSpec "text-area-2d-scroll" runTextArea2DScrollTest
+  , pixelSpec "text-area-scroll-cursor-leaves-viewport" runTextAreaScrollCursorLeavesViewportTest
+  ]
 
 runTextInputBatchTest :: Context -> IORef Int -> IO ()
 runTextInputBatchTest ctx failed = do

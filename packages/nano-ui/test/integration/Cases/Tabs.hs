@@ -1,14 +1,4 @@
-module Cases.Tabs
-  ( runTabsClosableTest
-  , runTabsDisabledTest
-  , runTabsDamageTest
-  , runTabsEmitTest
-  , runTabsLazinessTest
-  , runTabsScrollTest
-  , runTabsStatePersistenceTest
-  , runPanelBodySwapDamageTest
-  , runTabResponseForwardingTest
-  ) where
+module Cases.Tabs (tests) where
 
 import Control.Monad (forM, forM_, replicateM)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
@@ -34,6 +24,20 @@ import NanoUI.Testing.Harness
 import NanoUI.Internal.Context (Context (..))
 import NanoUI.Emit qualified as Emit
 import NanoUI.Internal.Layout.Arena (arenaCount, findNodeM, getRect, getText, getWidgetId)
+import Spec (Spec, pixelSpec, spec)
+
+tests :: [Spec]
+tests =
+  [ spec "panel-body-swap-damage" runPanelBodySwapDamageTest
+  , spec "tabs-laziness" runTabsLazinessTest
+  , spec "tabs-emit" runTabsEmitTest
+  , spec "tabs-closable" runTabsClosableTest
+  , pixelSpec "tabs-disabled" runTabsDisabledTest
+  , spec "tabs-scroll" runTabsScrollTest
+  , spec "tabs-state-persistence" runTabsStatePersistenceTest
+  , spec "tabs-damage" runTabsDamageTest
+  , spec "tab-response-forwarding" runTabResponseForwardingTest
+  ]
 
 data DummyTab = TabA | TabB | TabC
   deriving (Eq, Show)

@@ -1,22 +1,4 @@
-module Cases.Window
-  ( runFitHeaderNoShrinkTest
-  , runOverlayClickThroughTest
-  , runOverlayPanelLiveTest
-  , runOverlaySiblingStateTest
-  , runSeparatorSpanTest
-  , runWindowCloseDamageTest
-  , runWindowDragTest
-  , runWindowOverlayTest
-  , runWindowResizeHaloHitTest
-  , runWindowResizeTest
-  , runWindowFitScrollGutterTest
-  , runWindowScrollGutterTest
-  , runPageWindowScrollTest
-  , runWindowScrollOnlyDamageTest
-  , runWindowContentChurnTest
-  , runScrolledDebugToggleTest
-  , runHeadingMonoTruncateTest
-  ) where
+module Cases.Window (tests) where
 
 import Control.Monad (forM_, replicateM, void, when)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
@@ -41,6 +23,28 @@ import NanoUI.Testing.Harness
   , windowTitleGrab
   , withInputOff
   )
+import Spec (Spec, pixelSpec, spec)
+
+tests :: [Spec]
+tests =
+  [ spec "fit-header-no-shrink" runFitHeaderNoShrinkTest
+  , spec "separator-span" runSeparatorSpanTest
+  , pixelSpec "window-scroll-gutter" runWindowScrollGutterTest
+  , spec "window-overlay" runWindowOverlayTest
+  , spec "overlay-sibling-state" runOverlaySiblingStateTest
+  , spec "overlay-click-through" runOverlayClickThroughTest
+  , spec "overlay-panel-live" runOverlayPanelLiveTest
+  , spec "window-drag" runWindowDragTest
+  , spec "window-close-damage" runWindowCloseDamageTest
+  , spec "page-window-scroll" runPageWindowScrollTest
+  , spec "window-scroll-only-damage" runWindowScrollOnlyDamageTest
+  , spec "window-content-churn" runWindowContentChurnTest
+  , spec "scrolled-debug-toggle" runScrolledDebugToggleTest
+  , spec "window-resize" runWindowResizeTest
+  , spec "window-resize-halo-hit" runWindowResizeHaloHitTest
+  , spec "heading-mono-truncate" runHeadingMonoTruncateTest
+  , spec "window-fit-scroll-gutter" runWindowFitScrollGutterTest
+  ]
 
 runWindowScrollGutterTest :: Context -> IORef Int -> IO ()
 runWindowScrollGutterTest ctx failed = do

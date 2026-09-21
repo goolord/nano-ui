@@ -1,4 +1,4 @@
-module Cases.SIMD (runSimdWritesTest, runDrawLayersTest) where
+module Cases.SIMD (tests) where
 
 import Control.Monad (forM, forM_, void)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
@@ -25,6 +25,13 @@ import NanoUI.Testing
   , runFrame
   )
 import NanoUI.Testing.Assert (assertEq)
+import Spec (Spec, spec)
+
+tests :: [Spec]
+tests =
+  [ spec "simd-writes" runSimdWritesTest
+  , spec "draw-layer-offsets" runDrawLayersTest
+  ]
 
 -- Check the renderer's interleaved vertex ABI, triangle winding and byte
 -- offsets directly. Guard bytes also catch writes beyond either buffer range.

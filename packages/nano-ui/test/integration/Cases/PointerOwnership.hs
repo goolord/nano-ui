@@ -1,11 +1,7 @@
 -- | The pointer belongs to whatever is on top. Every kind of overlay is opened
 -- over every kind of pointer-driven widget, the pointer clicks, drags, wheels
 -- and right-clicks on the overlay, and the widget underneath must not notice.
-module Cases.PointerOwnership
-  ( runPointerOwnershipTest
-  , runPointerRoutingLintTest
-  , runPointerCaptureTest
-  ) where
+module Cases.PointerOwnership (tests) where
 
 import Control.Monad (filterM, forM, forM_, when)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
@@ -31,6 +27,14 @@ import NanoUI.Internal.Widgets.TextArea (buffer, loadTextAreaState, selectionAnc
 import NanoUI.Widgets.TextBuffer (getCursor)
 import System.Directory (doesDirectoryExist, listDirectory)
 import System.FilePath (makeRelative, takeExtension, (</>))
+import Spec (Spec, pixelSpec, spec)
+
+tests :: [Spec]
+tests =
+  [ pixelSpec "pointer-ownership" runPointerOwnershipTest
+  , spec "pointer-routing-lint" runPointerRoutingLintTest
+  , pixelSpec "pointer-capture" runPointerCaptureTest
+  ]
 
 -- | Something drawn over the page. Its source is declared above the widget
 -- under test; @ovOpen@ lists the frames that open it, given the source's

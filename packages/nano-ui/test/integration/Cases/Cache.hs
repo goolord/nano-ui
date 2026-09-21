@@ -1,8 +1,4 @@
-module Cases.Cache
-  ( runMetricCacheInvalidationTest
-  , runWidgetPlacementCacheTest
-  , runLayoutPaintStateTest
-  ) where
+module Cases.Cache (tests) where
 
 import Control.Monad (forM_, void)
 import Control.Exception (evaluate)
@@ -21,6 +17,14 @@ import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, assertGt)
 import NanoUI.Testing.Harness (withInputOff)
 import System.Mem.StableName (makeStableName)
+import Spec (Spec, spec)
+
+tests :: [Spec]
+tests =
+  [ spec "metric-cache-invalidation" runMetricCacheInvalidationTest
+  , spec "widget-placement-cache" runWidgetPlacementCacheTest
+  , spec "layout-cache-paint-state" runLayoutPaintStateTest
+  ]
 
 -- Copy the mutable draw buffers before another frame can reuse them. Counts
 -- alone cannot detect stale geometry, colors or translated text.

@@ -1,4 +1,4 @@
-module Cases.Runner (runSessionLoopTest, runSessionLoopWakeTest, runDrawingLockTest) where
+module Cases.Runner (tests) where
 
 import Control.Concurrent (threadDelay)
 import Control.Exception
@@ -15,6 +15,14 @@ import NanoUI.Internal.Debug (DebugSamplerRef, newDebugSampler)
 import NanoUI.Runner
 import NanoUI.Testing (Context, clearDirty, getWakeAt, requestWakeAfter)
 import NanoUI.Testing.Assert (assertEq)
+import Spec (Spec, spec)
+
+tests :: [Spec]
+tests =
+  [ spec "session-loop" runSessionLoopTest
+  , spec "session-loop-wake" runSessionLoopWakeTest
+  , spec "drawing-lock" runDrawingLockTest
+  ]
 
 -- | A driver with no events, nothing to draw, and event 3 as the window's
 -- close. Each test overrides the fields it watches.

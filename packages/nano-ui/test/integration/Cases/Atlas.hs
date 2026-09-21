@@ -1,4 +1,4 @@
-module Cases.Atlas (runAtlasGrowthTest) where
+module Cases.Atlas (tests) where
 
 import Control.Monad (forM_)
 import Data.ByteString qualified as BS
@@ -10,6 +10,12 @@ import NanoUI (ImageId (..))
 import NanoUI.Internal.Context (lookupImageUv)
 import NanoUI.Testing (Context, atlasSnapshot, newContext, registerImage)
 import NanoUI.Testing.Assert (assert, assertEq)
+import Spec (Spec, spec)
+
+tests :: [Spec]
+tests =
+  [ spec "atlas-growth" runAtlasGrowthTest
+  ]
 
 runAtlasGrowthTest :: Context -> IORef Int -> IO ()
 runAtlasGrowthTest ctx failed = do

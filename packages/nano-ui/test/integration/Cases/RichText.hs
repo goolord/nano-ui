@@ -1,7 +1,4 @@
-module Cases.RichText
-  ( runRichTextWrapTest
-  , runRichTextLinkTest
-  ) where
+module Cases.RichText (tests) where
 
 import Control.Monad (void)
 import Data.IORef (IORef)
@@ -12,6 +9,13 @@ import NanoUI.Internal.Context (Context (..))
 import NanoUI.Testing (cursorKindIs, runFrame)
 import NanoUI.Testing.Assert (assert, assertEq, withInput)
 import NanoUI.Testing.Harness (clickPair, drawQuads, warmup2)
+import Spec (Spec, spec)
+
+tests :: [Spec]
+tests =
+  [ spec "rich-text-wrap" runRichTextWrapTest
+  , spec "rich-text-link" runRichTextLinkTest
+  ]
 
 -- | A paragraph wraps at its column's width, taking a line's height per line,
 -- and mixed pieces share a line.

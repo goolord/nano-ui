@@ -1,13 +1,4 @@
-module Cases.Damage
-  ( runDamageBoundsResolutionTest
-  , runExplicitDamageWidgetTest
-  , runDamageQueueClearedPerFrameTest
-  , runStateChangeDamageTest
-  , runOrphanAnimationDamageSettlesTest
-  , runVersionedDrawingDamageTest
-  , runClipFrameBackdropTest
-  , runTextAreaSelectAllDamageTest
-  ) where
+module Cases.Damage (tests) where
 
 import Data.IORef (IORef, readIORef, writeIORef)
 import Data.Maybe (listToMaybe)
@@ -16,6 +7,19 @@ import NanoUI.Backend
 import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, assertJust, withInput)
 import NanoUI.Testing.Harness (centerOf, clipCovers, covers, drawQuads, runClick, warmup2, warmupFocused, withInputOff)
+import Spec (Spec, spec)
+
+tests :: [Spec]
+tests =
+  [ spec "damage-bounds-resolution" runDamageBoundsResolutionTest
+  , spec "damage-widget-explicit" runExplicitDamageWidgetTest
+  , spec "damage-queue-cleared" runDamageQueueClearedPerFrameTest
+  , spec "damage-state-change" runStateChangeDamageTest
+  , spec "damage-orphan-anim-settles" runOrphanAnimationDamageSettlesTest
+  , spec "versioned-drawing-damage" runVersionedDrawingDamageTest
+  , spec "clip-frame-backdrop" runClipFrameBackdropTest
+  , spec "textarea-select-all-damage" runTextAreaSelectAllDamageTest
+  ]
 
 -- | A new version on a versioned drawing repaints its rect. Paint rebuilds the
 -- ops once the version moves, and nothing else damages them, so a clip frame

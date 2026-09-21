@@ -1,11 +1,4 @@
-module Cases.Styling
-  ( runDisabledPointerTest
-  , runDisabledFocusOrderTest
-  , runDisabledLookTest
-  , runStyledPaintTest
-  , runStyledNestingTest
-  , runStyledDamageTest
-  ) where
+module Cases.Styling (tests) where
 
 import Control.Monad (forM_)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
@@ -15,6 +8,17 @@ import NanoUI.Testing
 import Data.Text (Text)
 import NanoUI.Testing.Assert (assert, assertEq)
 import NanoUI.Testing.Harness (centerOf, clickPair, drawQuads, held, tabInp, warmup2, warmupDraw, withInputOff)
+import Spec (Spec, spec)
+
+tests :: [Spec]
+tests =
+  [ spec "disabled-pointer" runDisabledPointerTest
+  , spec "disabled-focus-order" runDisabledFocusOrderTest
+  , spec "disabled-look" runDisabledLookTest
+  , spec "styled-paint" runStyledPaintTest
+  , spec "styled-nesting" runStyledNestingTest
+  , spec "styled-damage" runStyledDamageTest
+  ]
 
 -- | A pointer press, drag and typing on a disabled widget change nothing and
 -- give it no focus.

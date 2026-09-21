@@ -2,22 +2,7 @@
 -- on: where it was laid out, the keyboard, the clipboard, frames for a
 -- pointer moving over it, its content key, and a pane grid it lays out from
 -- a split of its own.
-module Cases.ViewApi
-  ( runLastRectTest
-  , runHoldFocusTest
-  , runHoldFocusModalTest
-  , runHoldFocusTabTest
-  , runClipboardTest
-  , runPointerTrackTest
-  , runContentKeyOfTest
-  , runCheckboxWithTest
-  , runPaneGridInitialTest
-  , runPaneGridInitialOnceTest
-  , runPaneGridUnfocusableTest
-  , runScrollUiTest
-  , runTakeEscapeTest
-  , runModalWithTest
-  ) where
+module Cases.ViewApi (tests) where
 
 import Control.Monad (forM_, void, when)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
@@ -31,6 +16,25 @@ import NanoUI.Monad (focusedWidget, releaseFocus)
 import NanoUI.Testing (needsRedraw, runFrame)
 import NanoUI.Testing.Assert (assert, assertEq, assertJust, withInput)
 import NanoUI.Testing.Harness (centerOf, rightClickPair, warmup2)
+import Spec (Spec, spec)
+
+tests :: [Spec]
+tests =
+  [ spec "last-rect" runLastRectTest
+  , spec "hold-focus" runHoldFocusTest
+  , spec "hold-focus-modal" runHoldFocusModalTest
+  , spec "hold-focus-tab" runHoldFocusTabTest
+  , spec "clipboard" runClipboardTest
+  , spec "pointer-track" runPointerTrackTest
+  , spec "content-key-of" runContentKeyOfTest
+  , spec "checkbox-with" runCheckboxWithTest
+  , spec "pane-grid-initial" runPaneGridInitialTest
+  , spec "pane-grid-initial-once" runPaneGridInitialOnceTest
+  , spec "pane-grid-unfocusable" runPaneGridUnfocusableTest
+  , spec "scroll-ui" runScrollUiTest
+  , spec "take-escape" runTakeEscapeTest
+  , spec "modal-with" runModalWithTest
+  ]
 
 -- | 'lastRect' is nothing before a widget's first frame and the rect it was
 -- laid out in after it.

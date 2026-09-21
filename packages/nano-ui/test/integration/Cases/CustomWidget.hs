@@ -1,13 +1,4 @@
-module Cases.CustomWidget
-  ( runCustomWidgetMeasureTest
-  , runCustomWidgetCursorTest
-  , runCustomWidgetInteractionTest
-  , runCustomWidgetQueuedClickTest
-  , runCustomWidgetContentDamageTest
-  , runCustomWidgetContentKeyTest
-  , runReferenceKnobTest
-  , runDropTargetTest
-  ) where
+module Cases.CustomWidget (tests) where
 
 import Control.Monad (forM_, void)
 import Data.IORef (IORef, writeIORef)
@@ -23,6 +14,19 @@ import NanoUI.Testing
   )
 import NanoUI.Testing.Assert (assert, assertEq, withInput)
 import NanoUI.Testing.Harness (centerOf, clickPair, clipCovers, covers, drawQuads, warmup2, withInputOff)
+import Spec (Spec, spec)
+
+tests :: [Spec]
+tests =
+  [ spec "custom-widget-measure" runCustomWidgetMeasureTest
+  , spec "custom-widget-cursor" runCustomWidgetCursorTest
+  , spec "custom-widget-interaction" runCustomWidgetInteractionTest
+  , spec "custom-widget-queued-click" runCustomWidgetQueuedClickTest
+  , spec "custom-widget-content-damage" runCustomWidgetContentDamageTest
+  , spec "custom-widget-content-key" runCustomWidgetContentKeyTest
+  , spec "custom-widget-knob" runReferenceKnobTest
+  , spec "drop-target" runDropTargetTest
+  ]
 
 -- | Verifies custom intrinsic layout measurement via widgetMeasure hook, and
 -- that the measurement reverts once the hook is gone.

@@ -1,9 +1,4 @@
-module Cases.State
-  ( runControlledInputsTest
-  , runControlledStateTest
-  , runHookStateTest
-  , runCollectionApiTest
-  ) where
+module Cases.State (tests) where
 
 import Control.Monad (forM_, when)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
@@ -19,6 +14,15 @@ import NanoUI.Internal.Store (WidgetStore (..))
 import NanoUI.Testing (clearDirty, collectTextSpans, isDirty, runFrame)
 import NanoUI.Testing.Assert (assert, assertEq)
 import NanoUI.Testing.Harness (keyInp, tabInp, warmup2, withInputOff)
+import Spec (Spec, spec)
+
+tests :: [Spec]
+tests =
+  [ spec "controlled-state" runControlledStateTest
+  , spec "controlled-inputs" runControlledInputsTest
+  , spec "hook-state" runHookStateTest
+  , spec "collection-api" runCollectionApiTest
+  ]
 
 runCollectionApiTest :: Context -> IORef Int -> IO ()
 runCollectionApiTest ctx failed = do

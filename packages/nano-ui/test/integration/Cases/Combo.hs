@@ -1,13 +1,4 @@
-module Cases.Combo
-  ( runComboBlurCommitTest
-  , runComboEscapeRevertTest
-  , runComboFilterTest
-  , runComboHoverHighlightTest
-  , runComboKeyboardPickTest
-  , runComboMousePickTest
-  , runComboScrollbarDragTest
-  , runComboWheelScrollTest
-  ) where
+module Cases.Combo (tests) where
 
 import Data.IORef (IORef, newIORef)
 import Data.Text qualified as T
@@ -16,6 +7,19 @@ import NanoUI.Backend
 import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, assertJust, withInput)
 import NanoUI.Testing.Harness (clickPair, hasText, held, keyInp, pressAt, spanCenter, spanRect, tabInp, warmup2, warmupFocused)
+import Spec (Spec, spec)
+
+tests :: [Spec]
+tests =
+  [ spec "combo-filter" runComboFilterTest
+  , spec "combo-keyboard-pick" runComboKeyboardPickTest
+  , spec "combo-mouse-pick" runComboMousePickTest
+  , spec "combo-blur-commit" runComboBlurCommitTest
+  , spec "combo-escape-revert" runComboEscapeRevertTest
+  , spec "combo-hover-highlight" runComboHoverHighlightTest
+  , spec "combo-scrollbar-drag" runComboScrollbarDragTest
+  , spec "combo-wheel-scroll" runComboWheelScrollTest
+  ]
 
 comboOpts :: [T.Text]
 comboOpts = ["Alpha Sans", "Beta Serif", "Gamma Mono", "Delta Round"]

@@ -1,11 +1,4 @@
-module Cases.Modal
-  ( runModalCloseDamageTest
-  , runModalNoPhantomScrollTest
-  , runModalOverlayTest
-  , runModalFitsTextTest
-  , runModalFractionalScaleNoScrollTest
-  , runModalFillLabelFitsTest
-  ) where
+module Cases.Modal (tests) where
 
 import Control.Monad (forM_, when)
 import Data.IORef (IORef)
@@ -24,6 +17,17 @@ import NanoUI.Testing.Harness
   , warmup2
   , withInputOff
   )
+import Spec (Spec, spec)
+
+tests :: [Spec]
+tests =
+  [ spec "modal-overlay" runModalOverlayTest
+  , spec "modal-fits-text" runModalFitsTextTest
+  , spec "modal-no-phantom-scroll" runModalNoPhantomScrollTest
+  , spec "modal-close-damage" runModalCloseDamageTest
+  , spec "modal-fractional-scale-no-scroll" runModalFractionalScaleNoScrollTest
+  , spec "modal-fill-label-fits" runModalFillLabelFitsTest
+  ]
 
 runModalOverlayTest :: Context -> IORef Int -> IO ()
 runModalOverlayTest ctx failed = do

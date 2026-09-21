@@ -1,10 +1,4 @@
-module Cases.Grid
-  ( runGridColumnsWithFontColorTest
-  , runNestedGridTest
-  , runStaleFontColorTest
-  , runFontCompositionTest
-  , runAlignBaselineTest
-  ) where
+module Cases.Grid (tests) where
 
 import Control.Monad (void)
 import Data.IORef (IORef)
@@ -15,6 +9,16 @@ import NanoUI.Internal.Context (Context (..))
 import NanoUI.Internal.Layout.Arena (arenaCount, getStyleIdx, getText)
 import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, assertJust, withInput)
+import Spec (Spec, pixelSpec, spec)
+
+tests :: [Spec]
+tests =
+  [ spec "grid-columns-font-color" runGridColumnsWithFontColorTest
+  , spec "grid-nested" runNestedGridTest
+  , spec "stale-font-color" runStaleFontColorTest
+  , pixelSpec "font-composition" runFontCompositionTest
+  , pixelSpec "align-baseline" runAlignBaselineTest
+  ]
 
 spanOf :: T.Text -> [(Rect, T.Text, Color, Color, Rect)] -> Maybe (Rect, Color)
 spanOf txt spans =

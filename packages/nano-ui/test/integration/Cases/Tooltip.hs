@@ -1,8 +1,4 @@
-module Cases.Tooltip
-  ( runTooltipHoverTest
-  , runTooltipIdStableTest
-  , runTooltipScrollPosTest
-  ) where
+module Cases.Tooltip (tests) where
 
 import Control.Monad (void)
 import Data.IORef (IORef)
@@ -16,6 +12,14 @@ import NanoUI.Testing.Harness
   , spanCenter
   , warmup2
   )
+import Spec (Spec, spec)
+
+tests :: [Spec]
+tests =
+  [ spec "tooltip-hover" runTooltipHoverTest
+  , spec "tooltip-id-stable" runTooltipIdStableTest
+  , spec "tooltip-scroll-pos" runTooltipScrollPosTest
+  ]
 
 -- Hovering shows a text tooltip, and a widget tooltip only evaluates its body
 -- while hovered.

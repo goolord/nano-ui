@@ -1,13 +1,4 @@
-module Cases.Select
-  ( runSelectDragToSelectTest
-  , runSelectKeyboardTest
-  , runSelectOverlayDamageTest
-  , runSelectChangeOnceTest
-  , runSelectCloseKeepsFocusTest
-  , runSliderCursorTest
-  , runTreeKeyboardTest
-  , runTreeSelectTest
-  ) where
+module Cases.Select (tests) where
 
 import Data.IORef (IORef, newIORef)
 import Data.Text qualified as T
@@ -30,6 +21,19 @@ import NanoUI.Testing.Harness
   , tabInp
   , warmup2
   )
+import Spec (Spec, pixelSpec, spec)
+
+tests :: [Spec]
+tests =
+  [ pixelSpec "slider-cursor" runSliderCursorTest
+  , spec "select-drag-to-select" runSelectDragToSelectTest
+  , spec "select-keyboard" runSelectKeyboardTest
+  , spec "select-change-once" runSelectChangeOnceTest
+  , spec "select-close-keeps-focus" runSelectCloseKeepsFocusTest
+  , spec "select-overlay-damage" runSelectOverlayDamageTest
+  , spec "tree-select" runTreeSelectTest
+  , spec "tree-keyboard" runTreeKeyboardTest
+  ]
 
 runSliderCursorTest :: Context -> IORef Int -> IO ()
 runSliderCursorTest ctx failed = do

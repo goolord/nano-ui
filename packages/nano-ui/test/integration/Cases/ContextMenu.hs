@@ -1,8 +1,4 @@
-module Cases.ContextMenu
-  ( runContextMenuOpenTest
-  , runContextMenuScrollPosTest
-  , runContextMenuDisabledRowTest
-  ) where
+module Cases.ContextMenu (tests) where
 
 import Control.Monad (void)
 import Data.IORef (IORef)
@@ -11,6 +7,14 @@ import NanoUI
 import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertJustM, evalUi, withInput)
 import NanoUI.Testing.Harness (centerOf, clickPair, rightClickPair, spanCenter, warmup2)
+import Spec (Spec, spec)
+
+tests :: [Spec]
+tests =
+  [ spec "context-menu-open" runContextMenuOpenTest
+  , spec "context-menu-scroll-pos" runContextMenuScrollPosTest
+  , spec "context-menu-disabled-row" runContextMenuDisabledRowTest
+  ]
 
 menuUi :: NanoUI (Response, Maybe (Response, Response))
 menuUi = column $ do

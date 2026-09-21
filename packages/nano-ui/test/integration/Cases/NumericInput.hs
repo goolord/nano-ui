@@ -1,7 +1,4 @@
-module Cases.NumericInput
-  ( runNumericInputHexTest
-  , runNumericInputTest
-  ) where
+module Cases.NumericInput (tests) where
 
 import Data.IORef (IORef, newIORef)
 import Data.Text qualified as T
@@ -10,6 +7,13 @@ import NanoUI.Backend
 import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, withInput)
 import NanoUI.Testing.Harness (held, pressAt, releaseAt, warmup2)
+import Spec (Spec, spec)
+
+tests :: [Spec]
+tests =
+  [ spec "numeric-input" runNumericInputTest
+  , spec "numeric-input-hex" runNumericInputHexTest
+  ]
 
 -- A numeric field steps with the arrow keys (Shift steps ten times as far),
 -- drops typing that is not a number, clamps to its range while typing, and

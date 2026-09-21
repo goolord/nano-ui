@@ -1,7 +1,4 @@
-module Cases.Svg
-  ( runSvgRasterTest
-  , runSvgIconTest
-  ) where
+module Cases.Svg (tests) where
 
 import Data.ByteString qualified as BS
 import Data.IORef (IORef)
@@ -10,6 +7,13 @@ import NanoUI.Svg (rasterizeSvg, svgMonochrome)
 import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq)
 import NanoUI.Testing.Harness (drawQuads, warmupDraw, withInputOff)
+import Spec (Spec, spec)
+
+tests :: [Spec]
+tests =
+  [ spec "svg-raster" runSvgRasterTest
+  , spec "svg-icon" runSvgIconTest
+  ]
 
 -- | Strokes, even-odd holes and transforms rasterize where they should.
 runSvgRasterTest :: Context -> IORef Int -> IO ()

@@ -1,7 +1,4 @@
-module Cases.Caption
-  ( runDragSpansTest
-  , runCaptionButtonsTest
-  ) where
+module Cases.Caption (tests) where
 
 import Data.IORef (IORef)
 import NanoUI
@@ -9,6 +6,13 @@ import NanoUI.Internal.Context (Context (..))
 import NanoUI.Testing (runFrame)
 import NanoUI.Testing.Assert (assert, assertEq, withInput)
 import NanoUI.Testing.Harness (clickPair, spanCenter, warmup2)
+import Spec (Spec, spec)
+
+tests :: [Spec]
+tests =
+  [ spec "caption-drag-spans" runDragSpansTest
+  , spec "caption-buttons" runCaptionButtonsTest
+  ]
 
 -- | What is left of a title bar to drag a window by: the gaps between the
 -- widgets in it, and nothing where a widget is.

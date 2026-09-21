@@ -1,14 +1,4 @@
-module Cases.Keyboard
-  ( runKeyboardButtonTest
-  , runKeyboardCheckboxTest
-  , runKeyboardSliderTest
-  , runKeyboardRadioTest
-  , runKeyboardToggleTest
-  , runKeyboardTabHeaderTest
-  , runKeyboardDisabledTest
-  , runKeyboardModalEligibilityTest
-  , runKeyboardFocusRingTest
-  ) where
+module Cases.Keyboard (tests) where
 
 import Data.IORef (IORef, newIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
@@ -19,6 +9,20 @@ import NanoUI.Internal.Store (WidgetStore (..))
 import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, assertGt, assertJust)
 import NanoUI.Testing.Harness (centerOf, clickPair, held, keyInp, tabInp, warmup2, warmupFocused, withInputOff)
+import Spec (Spec, pixelSpec, spec)
+
+tests :: [Spec]
+tests =
+  [ spec "keyboard-disabled" runKeyboardDisabledTest
+  , spec "keyboard-modal-eligibility" runKeyboardModalEligibilityTest
+  , spec "keyboard-focus-ring" runKeyboardFocusRingTest
+  , spec "keyboard-button" runKeyboardButtonTest
+  , spec "keyboard-checkbox" runKeyboardCheckboxTest
+  , pixelSpec "keyboard-slider" runKeyboardSliderTest
+  , spec "keyboard-radio" runKeyboardRadioTest
+  , spec "keyboard-toggle" runKeyboardToggleTest
+  , spec "keyboard-tab-header" runKeyboardTabHeaderTest
+  ]
 
 -- Retaining focus while a widget becomes disabled must not bypass the same
 -- guard used by pointer interaction. Exercise the shared key-navigation hook.

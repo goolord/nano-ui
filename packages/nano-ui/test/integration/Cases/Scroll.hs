@@ -1,24 +1,4 @@
-module Cases.Scroll
-  ( runNestedScrollFocusTest
-  , runNestedScrollTest
-  , runScrollBarGutterTest
-  , runScrollButtonClickTest
-  , runScrollDamageTest
-  , runScrollHoverClipTest
-  , runScrollThumbCursorTest
-  , runScrollTopClipTest
-  , runScrolledOutImmunityTest
-  , run2DPadFillOverflowTest
-  , run2DPadOverflowScrollsTest
-  , runScrollLockstepProbeTest
-  , runPageScrollBackdropCoverageTest
-  , runScrollStepTest
-  , runScrollSmoothTest
-  , runScrollMetricsTest
-  , runScrollIntoViewTest
-  , runScrollGlideClampTest
-  , runScroll2DGrowMinWidthTest
-  ) where
+module Cases.Scroll (tests) where
 
 import Control.Monad (forM, forM_, replicateM, replicateM_, void, when)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
@@ -54,6 +34,30 @@ import NanoUI.Testing.Harness
   , warmup2
   , withInputOff
   )
+import Spec (Spec, pixelSpec, spec)
+
+tests :: [Spec]
+tests =
+  [ spec "scroll-thumb-cursor" runScrollThumbCursorTest
+  , pixelSpec "scroll-bar-gutter" runScrollBarGutterTest
+  , spec "scroll-damage" runScrollDamageTest
+  , pixelSpec "scroll-top-clip" runScrollTopClipTest
+  , spec "nested-scroll" runNestedScrollTest
+  , spec "nested-scroll-focus" runNestedScrollFocusTest
+  , spec "scroll-hover-clip" runScrollHoverClipTest
+  , spec "scroll-button-click" runScrollButtonClickTest
+  , spec "scroll-scrolled-out" runScrolledOutImmunityTest
+  , spec "scroll-lockstep-probe" runScrollLockstepProbeTest
+  , spec "scroll-2d-grow-min-width" runScroll2DGrowMinWidthTest
+  , spec "page-scroll-backdrop-coverage" runPageScrollBackdropCoverageTest
+  , pixelSpec "scroll-2d-pad-fill-overflow" run2DPadFillOverflowTest
+  , pixelSpec "scroll-2d-pad-overflow-scrolls" run2DPadOverflowScrollsTest
+  , pixelSpec "scroll-step" runScrollStepTest
+  , pixelSpec "scroll-smooth" runScrollSmoothTest
+  , pixelSpec "scroll-metrics" runScrollMetricsTest
+  , pixelSpec "scroll-into-view" runScrollIntoViewTest
+  , pixelSpec "scroll-glide-clamp" runScrollGlideClampTest
+  ]
 
 runScrollThumbCursorTest :: Context -> IORef Int -> IO ()
 runScrollThumbCursorTest ctx failed = do

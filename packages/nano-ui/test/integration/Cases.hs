@@ -1,36 +1,4 @@
-module Cases
-  ( runAspectLayoutTest
-  , runCheckboxInitialTest
-  , runDrawingTest
-  , runEmbedStateTest
-  , runEmptyFrameTest
-  , runFitMutedWidthTest
-  , runGrowSplitTest
-  , runHostSlotTest
-  , runHoverDamageTest
-  , runIdKeyedListTest
-  , runKvMultilineHeightTest
-  , runImageTest
-  , runImageSwapDamageTest
-  , runLabelAlignEndTest
-  , runLayoutReuseTest
-  , runDeepNestingTest
-  , runPanelPaintsTest
-  , runPaneGridMixedDragTest
-  , runPaneGridClippedControlTest
-  , runPaneGridDropPreviewTest
-  , runPaneGridPinnedPaneTest
-  , runPercentGapShrinkTest
-  , runPointerCursorTest
-  , runReduceClickTest
-  , runReduceMessagesTest
-  , runResponsiveWrapTest
-  , runSliderFillWidthTest
-  , runWidgetNoStringEmitTest
-  , runSearchInputClearTest
-  , runSearchInputDebounceTest
-  , runSearchInputSetTextDebounceTest
-  ) where
+module Cases (tests) where
 
 import Control.Monad (forM_, void, when)
 import Control.Concurrent (threadDelay)
@@ -89,6 +57,42 @@ import NanoUI.Internal.Widgets.SplitPane
   , reflowFixed
   , topLevelDropTarget
   )
+import Spec (Spec, pixelSpec, spec)
+
+tests :: [Spec]
+tests =
+  [ spec "embed-state" runEmbedStateTest
+  , spec "host-slot" runHostSlotTest
+  , spec "reduce-messages" runReduceMessagesTest
+  , spec "reduce-click" runReduceClickTest
+  , spec "widget-no-string-emit" runWidgetNoStringEmitTest
+  , spec "id-keyed-list" runIdKeyedListTest
+  , spec "fit-muted-width" runFitMutedWidthTest
+  , spec "layout-reuse" runLayoutReuseTest
+  , spec "deep-nesting" runDeepNestingTest
+  , spec "grow-split" runGrowSplitTest
+  , spec "percent-gap-shrink" runPercentGapShrinkTest
+  , spec "aspect-layout" runAspectLayoutTest
+  , pixelSpec "label-align-end" runLabelAlignEndTest
+  , pixelSpec "responsive-wrap" runResponsiveWrapTest
+  , pixelSpec "kv-multiline-height" runKvMultilineHeightTest
+  , spec "panel-paints" runPanelPaintsTest
+  , spec "drawing" runDrawingTest
+  , spec "image" runImageTest
+  , spec "empty-frame" runEmptyFrameTest
+  , spec "image-swap-damage" runImageSwapDamageTest
+  , spec "pointer-cursor" runPointerCursorTest
+  , spec "hover-damage" runHoverDamageTest
+  , spec "checkbox-initial" runCheckboxInitialTest
+  , pixelSpec "slider-fill-width" runSliderFillWidthTest
+  , spec "search-input-clear" runSearchInputClearTest
+  , spec "search-input-debounce" runSearchInputDebounceTest
+  , spec "search-input-set-text-debounce" runSearchInputSetTextDebounceTest
+  , spec "pane-grid-mixed-drag" runPaneGridMixedDragTest
+  , spec "pane-grid-clipped-control" runPaneGridClippedControlTest
+  , spec "pane-grid-drop-preview" runPaneGridDropPreviewTest
+  , spec "pane-grid-pinned-pane" runPaneGridPinnedPaneTest
+  ]
 
 runIdKeyedListTest :: Context -> IORef Int -> IO ()
 runIdKeyedListTest ctx failed = do

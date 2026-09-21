@@ -222,6 +222,7 @@ test-suite nano-ui-test
     main-is:          Main.hs
     other-modules:
         Cases
+        Spec
         Cases.Animation
         Cases.Caption
         Cases.Atlas

@@ -1,11 +1,6 @@
 -- | A click belongs to the widget its press went down on. Dragging off a
 -- widget and letting go over a neighbour must fire nothing.
-module Cases.PointerRelease
-  ( runReleaseElsewhereTest
-  , runRightReleaseElsewhereTest
-  , runReleaseReturnsTest
-  , runOverlapPressTest
-  ) where
+module Cases.PointerRelease (tests) where
 
 import Control.Monad (void)
 import Data.IORef (IORef, newIORef)
@@ -14,6 +9,15 @@ import NanoUI
 import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, withInput)
 import NanoUI.Testing.Harness (centerOf, held, warmup2)
+import Spec (Spec, spec)
+
+tests :: [Spec]
+tests =
+  [ spec "release-elsewhere" runReleaseElsewhereTest
+  , spec "right-release-elsewhere" runRightReleaseElsewhereTest
+  , spec "release-returns" runReleaseReturnsTest
+  , spec "overlap-press" runOverlapPressTest
+  ]
 
 -- | Press one widget, drag onto another, release: neither one fires, this
 -- frame or the next.

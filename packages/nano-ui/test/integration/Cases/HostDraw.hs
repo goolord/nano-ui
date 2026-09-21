@@ -1,8 +1,4 @@
-module Cases.HostDraw
-  ( runSquareGeometryTest
-  , runExternalTextTest
-  , runConcentricCirclesTest
-  ) where
+module Cases.HostDraw (tests) where
 
 import Control.Monad (forM, void)
 import Data.IORef (IORef)
@@ -14,6 +10,14 @@ import NanoUI
 import NanoUI.Internal.Context (setDrawExternalText, setDrawSnapScale, setDrawSquareGeometry)
 import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, withInput)
+import Spec (Spec, spec)
+
+tests :: [Spec]
+tests =
+  [ spec "draw-square-geometry" runSquareGeometryTest
+  , spec "draw-external-text" runExternalTextTest
+  , spec "draw-concentric-circles" runConcentricCirclesTest
+  ]
 
 -- | Alpha of every vertex of every indexed triangle.
 triangleAlphas :: DrawData -> IO [(Float, Float, Float)]

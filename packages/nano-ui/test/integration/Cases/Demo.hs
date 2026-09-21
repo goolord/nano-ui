@@ -1,13 +1,4 @@
-module Cases.Demo
-  ( runControlsTabHeightTest
-  , runBoundedRadioTest
-  , runColorPickerCommitTest
-  , runColorPickerChangeOnceTest
-  , runColorPickerBarKeysTest
-  , runColorPickerRgbaTest
-  , runColorPickerEditTest
-  , runColorPickerDragAfterFieldTest
-  ) where
+module Cases.Demo (tests) where
 
 import Control.Monad (void)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
@@ -17,6 +8,19 @@ import NanoUI.Backend
 import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, assertJust, withInput)
 import NanoUI.Testing.Harness (held, holdAt, keyInp, pressAt, releaseAt, runClick, spanCenter, spanRect, tabInp, warmup2, withInputOff)
+import Spec (Spec, pixelSpec)
+
+tests :: [Spec]
+tests =
+  [ pixelSpec "color-picker-commit" runColorPickerCommitTest
+  , pixelSpec "color-picker-rgba" runColorPickerRgbaTest
+  , pixelSpec "color-picker-edit" runColorPickerEditTest
+  , pixelSpec "color-picker-change-once" runColorPickerChangeOnceTest
+  , pixelSpec "color-picker-bar-keys" runColorPickerBarKeysTest
+  , pixelSpec "color-picker-drag-after-field" runColorPickerDragAfterFieldTest
+  , pixelSpec "controls-tab-height" runControlsTabHeightTest
+  , pixelSpec "bounded-radio-offset" runBoundedRadioTest
+  ]
 
 data DemoTab
   = Controls

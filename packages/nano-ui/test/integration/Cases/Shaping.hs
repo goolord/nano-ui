@@ -1,7 +1,4 @@
-module Cases.Shaping
-  ( runBidiRunsTest
-  , runShapedCaretTest
-  ) where
+module Cases.Shaping (tests) where
 
 import Data.IORef (IORef)
 import Data.Primitive.PrimArray (primArrayFromList)
@@ -9,6 +6,13 @@ import NanoUI.Backend
 import NanoUI.Bidi (BidiRun (..), bidiRuns, needsBidi)
 import NanoUI.Testing (Context, caretX, selectionSpans, textIndexAtX)
 import NanoUI.Testing.Assert (assert, assertEq)
+import Spec (Spec, spec)
+
+tests :: [Spec]
+tests =
+  [ spec "bidi-runs" runBidiRunsTest
+  , spec "shaped-carets" runShapedCaretTest
+  ]
 
 -- | Direction runs come out in visual order, with numbers and spaces
 -- resolved against their neighbours.

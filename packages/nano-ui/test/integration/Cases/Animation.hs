@@ -1,16 +1,4 @@
-module Cases.Animation
-  ( runAnimationBezierTest
-  , runButtonHoverAnimTest
-  , runAnimationDamageTest
-  , runAnimationSettleTest
-  , runAnimationSpringDtTest
-  , runAnimationSpringRetargetTest
-  , runAnimationStaggerTest
-  , runCompositeAnimationIsolationTest
-  , runSpinnerTest
-  , runKeepAnimatingLapseTest
-  , runWakeAfterTest
-  ) where
+module Cases.Animation (tests) where
 
 import Control.Concurrent (threadDelay)
 import Control.Monad (forM_, replicateM, replicateM_, void)
@@ -22,6 +10,22 @@ import NanoUI.Backend
 import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq)
 import NanoUI.Testing.Harness (clickPair, drawQuads, warmup2, withDelta)
+import Spec (Spec, spec)
+
+tests :: [Spec]
+tests =
+  [ spec "animation-settle" runAnimationSettleTest
+  , spec "animation-damage" runAnimationDamageTest
+  , spec "animation-stagger" runAnimationStaggerTest
+  , spec "animation-bezier" runAnimationBezierTest
+  , spec "animation-spring-retarget" runAnimationSpringRetargetTest
+  , spec "animation-spring-dt" runAnimationSpringDtTest
+  , spec "composite-animation-isolation" runCompositeAnimationIsolationTest
+  , spec "button-hover-anim" runButtonHoverAnimTest
+  , spec "spinner" runSpinnerTest
+  , spec "keep-animating-lapse" runKeepAnimatingLapseTest
+  , spec "wake-after" runWakeAfterTest
+  ]
 
 -- A started animation requests redraws, settles on its target, and then
 -- leaves the context idle and clean.

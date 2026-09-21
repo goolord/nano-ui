@@ -1,4 +1,4 @@
-module Cases.NoThunks (runNoThunksTest) where
+module Cases.NoThunks (tests) where
 
 import Data.IORef (IORef, readIORef)
 import qualified Data.IntMap.Strict as IM
@@ -10,6 +10,12 @@ import NanoUI
 import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, withInput)
 import NanoUI.Testing.Harness (warmup2)
+import Spec (Spec, spec)
+
+tests :: [Spec]
+tests =
+  [ spec "no-thunks" runNoThunksTest
+  ]
 
 -- | Long-lived widget state must not retain thunks in stored values. Run a
 -- frame whose widgets populate several store maps, then check every stored
