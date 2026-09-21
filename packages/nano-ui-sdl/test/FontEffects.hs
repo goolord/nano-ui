@@ -110,7 +110,6 @@ main = do
   void (evaluate quad)
   expectClosed (prepareFontMetrics font "new text")
   expectClosed (drawShaped font "AV To fi café λ")
-  expectClosed (drawGlyph font 'A')
   putStrLn "font effects: ok"
 
 -- | Shaping reorders right-to-left text and gives every character a caret:

@@ -154,36 +154,6 @@ static SDL_Surface *glyph_image_to_rgba(SDL_Surface *raw, TTF_ImageType image_ty
     return out;
 }
 
-bool nano_ui_ttf_render_glyph_surface(
-    TTF_Font *font,
-    Uint32 codepoint,
-    SDL_Surface **out_surface)
-{
-    if (!font || !out_surface) {
-        return false;
-    }
-
-    TTF_ImageType image_type = TTF_IMAGE_INVALID;
-    SDL_Surface *raw = TTF_GetGlyphImage(font, codepoint, &image_type);
-    if (!raw) {
-        SDL_Color white = {255, 255, 255, 255};
-        raw = TTF_RenderGlyph_Blended(font, codepoint, white);
-        image_type = TTF_IMAGE_ALPHA;
-    }
-    if (!raw) {
-        return false;
-    }
-
-    SDL_Surface *converted = glyph_image_to_rgba(raw, image_type);
-    SDL_DestroySurface(raw);
-    if (!converted) {
-        return false;
-    }
-
-    *out_surface = converted;
-    return true;
-}
-
 int nano_ui_ttf_get_kerning(TTF_Font *font, Uint32 prev_cp, Uint32 cp)
 {
     if (!font) {

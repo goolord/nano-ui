@@ -64,33 +64,31 @@ configureBenchIO = do
   void $ setConsoleOutputCP 65001
 #endif
 
--- | Warm ASCII glyph lookups must not allocate: the atlas UV/bearing record
--- is cached and shared per font, so a steady-state 'fmGlyph' hit is array
--- reads and a pointer return. This gate catches reintroducing a
--- per-character 'GlyphQuad' / 'Just' allocation on the text hot path.
+-- | Warm shaped-line lookups must not allocate: a drawn line's quads are
+-- cached per text and returned as the shared cached value, so a steady-state
+-- hit is a hash lookup and a pointer return. This gate catches reintroducing
+-- a per-draw allocation on the text hot path.
 --
--- The probe walks a shared 'Char' list rather than 'T.index', because
--- 'T.index' allocates in this context and would mask the lookup cost.
+-- The probe walks a shared list of lines so selecting one allocates nothing.
 glyphLookupAlloc :: Context -> IO Integer
 glyphLookupAlloc ctx = do
   (fm, _) <- ctxResolveFont ctx 16 WeightNormal FontStyleNormal FontRegular
-  let sample = "The quick brown fox jumps over the lazy dog 0123456789!?.,;:"
-      chars = sample
-      len = length chars
+  let sample = ["The quick brown fox", "jumps over", "the lazy dog", "0123456789!?.,;:"]
+      len = length sample
       lookups = 20000 :: Int
-      step :: Int -> Float -> IO Float
+      step :: Int -> Int -> IO Int
       step !n !acc =
         if n <= 0
-           then pure acc
+          then pure acc
           else
-            -- Force selection before the indirect glyph call; otherwise the
-            -- benchmark allocates a character-selection thunk per lookup.
-            let !c = chars !! (n `mod` len)
-              in drawGlyph fm c >>= \case
-                  Just gq -> step (n - 1) (acc + gqW gq)
+            -- Force selection before the indirect call; otherwise the
+            -- benchmark allocates a selection thunk per lookup.
+            let !txt = sample !! (n `mod` len)
+             in drawShaped fm txt >>= \case
+                  Just _ -> step (n - 1) (acc + 1)
                   Nothing -> step (n - 1) acc
-  -- Warm every character so every lookup shares a cached 'Maybe'.
-  mapM_ (drawGlyph fm) chars
+  -- Warm every line so every lookup hits the cache.
+  mapM_ (drawShaped fm) sample
   performGC
   -- The thread allocation counter is current even if this probe never fills
   -- the nursery. RTSStats.allocated_bytes only catches up at a GC.
@@ -111,7 +109,7 @@ glyphLookupGate ctx = do
       perLookup = fromIntegral bytes / fromIntegral lookups :: Double
   printf "glyph-lookup: %.3f B/lookup (budget %.1f)\n" perLookup glyphLookupAllocBudget
   when (perLookup > glyphLookupAllocBudget) $ do
-    putStrLn "FAIL: warm glyph lookups allocate; expected the cached quad to be shared"
+    putStrLn "FAIL: warm shaped lookups allocate; expected the cached quads to be shared"
     exitFailure
 
 main :: IO ()

@@ -39,11 +39,8 @@ import qualified Data.IntSet as IS
 import Data.Primitive.SmallArray
   ( SmallArray
   , indexSmallArray
-  , newSmallArray
-  , readSmallArray
   , sizeofSmallArray
   , smallArrayFromList
-  , writeSmallArray
   )
 import Data.Primitive.PrimArray (PrimArray, indexPrimArray, newPrimArray, primArrayFromList, readPrimArray, setPrimArray, sizeofPrimArray, unsafeFreezePrimArray, writePrimArray)
 import Data.Int (Int32)
@@ -74,6 +71,7 @@ import NanoUI.Backend
   , GlyphQuad (..)
   , ShapedGlyphs (..)
   , ShapedText (..)
+  , drawShaped
   , monospaceMetrics
   )
 import NanoUI.Testing
@@ -116,22 +114,14 @@ fontSourceLabel (FontFromMemory _ label) = label
 
 -- | Per-glyph atlas slot. UVs are normalised to [0,1] within the atlas texture.
 data GlyphSlot = GlyphSlot
-  { gsW :: {-# UNPACK #-} !Float -- pixel width of glyph image
-  , gsH :: {-# UNPACK #-} !Float -- pixel height of glyph image
-  , gsU0 :: {-# UNPACK #-} !Float
+  { gsU0 :: {-# UNPACK #-} !Float
   , gsV0 :: {-# UNPACK #-} !Float
   , gsU1 :: {-# UNPACK #-} !Float
   , gsV1 :: {-# UNPACK #-} !Float
-  , gsOffX :: {-# UNPACK #-} !Float -- bearing x (pixels, at font scale)
-  , gsOffY :: {-# UNPACK #-} !Float -- bearing y (pixels, at font scale)
-  , gsAdvX :: {-# UNPACK #-} !Float -- horizontal advance (pixels, at font scale)
   }
 
 data GlyphAtlas = GlyphAtlas
   { gaAtlas :: !(Ptr ())
-  , -- | Glyph slots by font id, then codepoint. Closing a font drops its inner
-    -- map instead of scanning every glyph.
-    gaEntries :: !(IORef (IM.IntMap (IM.IntMap (Maybe GlyphSlot))))
   , gaEpoch :: !(IORef Word64)
   , -- | An insertion failed (atlas out of space) during the last frame; the
     -- atlas must be reset at the next frame start, before any quad is
@@ -144,6 +134,7 @@ data GlyphAtlas = GlyphAtlas
     -- text quads and must not be presented.
     gaResetFlag :: !(IORef Bool)
   , -- | Glyph slots by font id, then glyph index: what shaped text draws.
+    -- Closing a font drops its inner map instead of scanning every glyph.
     gaIndexEntries :: !(IORef (IM.IntMap (IM.IntMap (Maybe GlyphSlot))))
   , -- | Actions to run after every reset (re-warming the base fonts).
     gaRewarmHooks :: !(IORef [IO ()])
@@ -258,24 +249,13 @@ newGlyphAtlas :: Ptr SDL_Renderer -> IO GlyphAtlas
 newGlyphAtlas ren = do
   atlas <- textAtlasCreate ren
   when (atlas == nullPtr) $ fail "nano_ui_text_atlas_create failed (glyph)"
-  entries <- newIORef IM.empty
-  indexEntries <- newIORef IM.empty
-  epoch <- newIORef 0
-  needsReset <- newIORef False
-  resetFlag <- newIORef False
-  rewarms <- newIORef []
-  alive <- newIORef True
-  pure
-    GlyphAtlas
-      { gaAtlas = atlas
-      , gaEntries = entries
-      , gaIndexEntries = indexEntries
-      , gaEpoch = epoch
-      , gaNeedsReset = needsReset
-      , gaResetFlag = resetFlag
-      , gaRewarmHooks = rewarms
-      , gaAlive = alive
-      }
+  GlyphAtlas atlas
+    <$> newIORef 0
+    <*> newIORef False
+    <*> newIORef False
+    <*> newIORef IM.empty
+    <*> newIORef []
+    <*> newIORef True
 
 destroyGlyphAtlas :: GlyphAtlas -> IO ()
 destroyGlyphAtlas ga = do
@@ -284,14 +264,13 @@ destroyGlyphAtlas ga = do
 
 -- | Register an action to run after every atlas reset (DPI change, font
 -- switch, exhaustion recovery). 'newSdlFontCache' registers one that re-warms
--- the base fonts' ASCII glyphs, so the next frame pays no cold glyph misses.
+-- the base fonts' printable ASCII, so the next frame pays no cold glyph misses.
 registerGlyphAtlasRewarm :: GlyphAtlas -> IO () -> IO ()
 registerGlyphAtlasRewarm ga hook = modifyIORef' (gaRewarmHooks ga) (hook :)
 
 resetGlyphAtlas :: GlyphAtlas -> IO ()
 resetGlyphAtlas ga = do
   modifyIORef' (gaEpoch ga) (+1)
-  writeIORef (gaEntries ga) IM.empty
   writeIORef (gaIndexEntries ga) IM.empty
   writeIORef (gaNeedsReset ga) False
   textAtlasReset (gaAtlas ga)
@@ -325,36 +304,6 @@ prepareGlyphAtlasForFrame ga = do
 takeGlyphAtlasResetFlag :: GlyphAtlas -> IO Bool
 takeGlyphAtlasResetFlag ga = atomicModifyIORef' (gaResetFlag ga) (\v -> (False, v))
 
--- | Pre-rasterise printable ASCII into the glyph atlas to avoid cold misses
--- on the first rendered frame.
-warmGlyphAtlas :: GlyphAtlas -> SdlFont -> IO ()
-warmGlyphAtlas ga sf =
-  mapM_ (\c -> lookupOrInsertGlyph ga sf c) [' ' .. '~']
-
--- | Look up or insert a glyph into the atlas.  Returns 'Nothing' for
--- characters that have no glyph (e.g. control characters).
-lookupOrInsertGlyph :: GlyphAtlas -> SdlFont -> Char -> IO (Maybe GlyphSlot)
-lookupOrInsertGlyph ga sf c = do
-  entries <- readIORef (gaEntries ga)
-  case IM.lookup (fromIntegral (sfId sf)) entries >>= IM.lookup (ord c) of
-    Just mSlot -> pure mSlot
-    Nothing -> do
-      let !cp = fromIntegral (ord c) :: CUInt
-      mMetrics <- getGlyphMetrics sf cp
-      mSlot <- case mMetrics of
-        Nothing -> pure Nothing
-        Just metrics ->
-          placeGlyphImage ga (fmap (/= 0) . ttfRenderGlyphSurface (sfFont sf) cp) >>= \case
-            Nothing -> pure Nothing
-            Just slot -> do
-              -- TTF_GetGlyphImage is a tight bitmap. Place it with the font
-              -- bearings: pen + minX, lineTop + (ascent - maxY). Do not clamp
-              -- minX; monospace glyphs are often centered (minX > 0).
-              let !placed = slot {gsOffX = gmMinX metrics, gsOffY = sfAscent sf - gmMaxY metrics, gsAdvX = gmAdvance metrics}
-              pure (Just placed)
-      modifyIORef' (gaEntries ga) (IM.insertWith IM.union (fromIntegral (sfId sf)) (IM.singleton (ord c) mSlot))
-      pure mSlot
-
 -- | Look up or insert a glyph by font and glyph index, the way shaped text
 -- names glyphs. Glyphs are keyed by the font's id, which is never reused, and
 -- rendered through its handle.
@@ -368,8 +317,8 @@ lookupOrInsertGlyphIndex ga fontKey handle gi = do
       modifyIORef' (gaIndexEntries ga) (IM.insertWith IM.union fontKey (IM.singleton gi mSlot))
       pure mSlot
 
--- | Render a glyph image into a surface and copy it into the atlas, as a slot
--- with no bearings or advance. 'Nothing' when there is no image or no room.
+-- | Render a glyph image into a surface and copy it into the atlas.
+-- 'Nothing' when there is no image or no room.
 -- A full atlas is reset at the next frame start (see 'markAtlasExhausted'):
 -- wiping the texture here would leave quads already recorded this frame
 -- sampling blank pixels. The glyph is unavailable for the rest of the frame,
@@ -392,15 +341,10 @@ placeGlyphImage ga render = do
         Just (px, py, tw, th) -> do
           let !slot =
                 GlyphSlot
-                  { gsW = tw
-                  , gsH = th
-                  , gsU0 = px / glyphAtlasSize
+                  { gsU0 = px / glyphAtlasSize
                   , gsV0 = py / glyphAtlasSize
                   , gsU1 = (px + tw) / glyphAtlasSize
                   , gsV1 = (py + th) / glyphAtlasSize
-                  , gsOffX = 0
-                  , gsOffY = 0
-                  , gsAdvX = 0
                   }
           pure (Just slot)
 
@@ -710,22 +654,11 @@ coverageFamilies =
   , "Apple SD Gothic Neo", "Apple Symbols"
   ]
 
--- | ASCII glyph-cache slot. The cached 'Maybe' is shared on every hit, so a
--- warm lookup returns the same heap object instead of rebuilding
--- @Just GlyphQuad@ on each character.
-data CachedQuad
-  = UncachedQuad
-  -- Preserve the cached object even with -funbox-strict-fields: unpacking it
-  -- defeats sharing and reconstructs the lookup result on every hit.
-  | Cached {-# NOUNPACK #-} !(Maybe GlyphQuad)
-
 -- | Build immutable metric snapshots and explicit IO rasterisation callbacks.
--- Font queries happen in 'fbPrepare'; atlas insertion happens in 'fbDrawShaped'
--- and 'fbDrawGlyph'. All coordinates are logical (unscaled).
---
--- Standard ASCII (0..127) lookups are backed by a 'SmallMutableArray'
--- fast path for branchless O(1) in-memory indexing, with automatic cache invalidation
--- whenever the underlying glyph atlas is reset.
+-- Font queries happen in 'fbPrepare' and atlas insertion in 'fbDrawShaped'.
+-- Every non-empty line is shaped, so 'fbDrawGlyph' (the per-character
+-- fallback for backends that do not shape) draws nothing. All coordinates are
+-- logical (unscaled).
 {-# NOINLINE buildGlyphFontMetrics #-}
 buildGlyphFontMetrics :: GlyphAtlas -> SdlFont -> Float -> IO (FontMetrics, Text -> IO (Float, Float))
 buildGlyphFontMetrics ga sf scale = do
@@ -745,17 +678,6 @@ buildGlyphFontMetrics ga sf scale = do
           | metrics <- asciiMetrics
           ]
 
-  -- Cache of ASCII 0..127 glyph quads with epoch-based invalidation
-  asciiCacheArr <- newSmallArray 128 UncachedQuad
-  initEpoch <- readIORef (gaEpoch ga)
-  asciiEpochRef <- newIORef initEpoch
-
-  -- Non-ASCII glyph quads are memoised per font here (keyed by codepoint) so
-  -- repeated text still hits a shared value instead of rebuilding the record
-  -- on every character. Invalidated with the atlas epoch.
-  nonAsciiCacheRef <- newIORef IM.empty
-  nonAsciiEpochRef <- newIORef initEpoch
-
   -- Kerning pairs are sparse and each miss costs a shaped 2-glyph
   -- layout, so a pair cache keeps the hot pen loops off the FFI
   -- boundary after first contact. Keyed by packed codepoint pair on this
@@ -774,71 +696,6 @@ buildGlyphFontMetrics ga sf scale = do
   quadEpochRef <- newIORef initQuadEpoch
 
   let
-    slotToQuad !gs =
-      GlyphQuad
-        { gqX  = gsOffX gs / inv
-        , gqY  = gsOffY gs / inv
-        , gqW  = gsW    gs / inv
-        , gqH  = gsH    gs / inv
-        , gqU0 = gsU0   gs
-        , gqV0 = gsV0   gs
-        , gqU1 = gsU1   gs
-        , gqV1 = gsV1   gs
-        }
-
-    resetAsciiCache !epoch = do
-      writeIORef asciiEpochRef epoch
-      mapM_ (\i -> writeSmallArray asciiCacheArr i UncachedQuad) [0 .. 127 :: Int]
-
-    lookupAsciiQuad !cp = do
-      curEpoch <- readIORef (gaEpoch ga)
-      lastEpoch <- readIORef asciiEpochRef
-      when (curEpoch /= lastEpoch) $ resetAsciiCache curEpoch
-      cached <- readSmallArray asciiCacheArr cp
-      case cached of
-        Cached mq -> pure mq
-        UncachedQuad -> do
-          mSlot <- lookupOrInsertGlyph ga sf (toEnum cp)
-          newEpoch <- readIORef (gaEpoch ga)
-          if newEpoch /= curEpoch
-            then do
-              -- The atlas was reset during insertion: this slot's UVs are
-              -- already stale, so do not cache them.
-              resetAsciiCache newEpoch
-              pure (fmap slotToQuad mSlot)
-            else do
-              let !mq = fmap slotToQuad mSlot
-              writeSmallArray asciiCacheArr cp (Cached mq)
-              pure mq
-
-    lookupNonAsciiQuad !c = do
-      curEpoch <- readIORef (gaEpoch ga)
-      lastEpoch <- readIORef nonAsciiEpochRef
-      when (curEpoch /= lastEpoch) $ do
-        writeIORef nonAsciiEpochRef curEpoch
-        writeIORef nonAsciiCacheRef IM.empty
-      m <- readIORef nonAsciiCacheRef
-      case IM.lookup (ord c) m of
-        Just mq -> pure mq
-        Nothing -> do
-          mSlot <- lookupOrInsertGlyph ga sf c
-          newEpoch <- readIORef (gaEpoch ga)
-          if newEpoch /= curEpoch
-            then pure (fmap slotToQuad mSlot)
-            else do
-              let !mq = fmap slotToQuad mSlot
-              modifyIORef' nonAsciiCacheRef (IM.insert (ord c) mq)
-              pure mq
-
-    {-# NOINLINE glyphLookup #-}
-    glyphLookup !c = do
-      ensureFontAlive sf
-      ensureAtlasAlive ga
-      let !cp = ord c
-      if (fromIntegral cp :: Word) < 128
-             then lookupAsciiQuad cp
-             else lookupNonAsciiQuad c
-
     {-# NOINLINE advanceLookup #-}
     advanceLookup !c =
       let !cp = ord c
@@ -967,7 +824,7 @@ buildGlyphFontMetrics ga sf scale = do
       | ord c < 128 = pure (indexSmallArray asciiGeometry (ord c))
       | otherwise = getGlyphGeometry sf inv c
 
-    backend = FontBackend prepareText shapedLookup glyphLookup
+    backend = FontBackend prepareText shapedLookup (\_ -> pure Nothing)
 
     prepareText txt = do
       ensureFontAlive sf
@@ -1217,13 +1074,6 @@ foreign import capi unsafe "SDL3_ttf/SDL_ttf.h TTF_GetGlyphMetrics"
     Ptr CInt -> -- out_advance
     IO Bool
 
-foreign import ccall unsafe "nano_ui_ttf_render_glyph_surface"
-  ttfRenderGlyphSurface ::
-    Ptr () ->        -- font
-    CUInt ->         -- codepoint
-    Ptr (Ptr ()) ->  -- out_surface
-    IO CBool
-
 foreign import ccall unsafe "nano_ui_ttf_shape"
   ttfShape :: Ptr () -> CString -> CSize -> CInt -> Ptr () -> IO CBool
 
@@ -1307,11 +1157,12 @@ newSdlFontCache primary fallback mono monoFb ga basePt scaleRef = do
   baseEntriesRef <- newIORef (sansEntry, monoEntry)
   cacheRef <- newIORef emptyBounded
   -- The hook reads the base entries when it runs, so a reset always warms the
-  -- live fonts, never ones already closed.
-  let rewarm = do
+  -- live fonts, never ones already closed. Shaping a line places the glyphs
+  -- that drawing it reads.
+  let printableAscii = T.pack [' ' .. '~']
+      rewarm = do
         (sans, monoBase) <- readIORef baseEntriesRef
-        warmGlyphAtlas ga (cfeFont sans)
-        warmGlyphAtlas ga (cfeFont monoBase)
+        forM_ [sans, monoBase] $ \e -> drawShaped (cfeFm e) printableAscii
   registerGlyphAtlasRewarm ga rewarm
   rewarm
   pure
@@ -1345,7 +1196,6 @@ closeCachedFonts ga fonts = do
   fallbacks <- concat <$> mapM (fmap IM.elems . readIORef . sfFallbacks) fonts
   let handles = IS.fromList [fromIntegral (sfId f) | f <- fonts ++ fallbacks]
   mapM_ closeFont fonts
-  modifyIORef' (gaEntries ga) (`IM.withoutKeys` IS.fromList (map (fromIntegral . sfId) fonts))
   modifyIORef' (gaIndexEntries ga) (`IM.withoutKeys` handles)
 
 -- | Close every open font, base and dynamic.
