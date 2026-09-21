@@ -49,7 +49,7 @@ data Key
   | KeyDown
   | KeyHome
   | KeyEnd
-  deriving (Eq, Show, Enum, Bounded)
+  deriving (Eq, Show, Enum)
 
 -- | Modifier keys held while the frame's input is processed.
 data Modifiers = Modifiers
@@ -134,7 +134,7 @@ data UiCursorKind
   | UiCursorEwResize
   | UiCursorNwseResize
   | UiCursorNeswResize
-  deriving (Eq, Show)
+  deriving (Eq, Show, Enum)
 
 -- | Grab cursor over a target, becoming a closed hand while the left button is held.
 grabHoverKind :: Bool -> Input -> UiCursorKind
