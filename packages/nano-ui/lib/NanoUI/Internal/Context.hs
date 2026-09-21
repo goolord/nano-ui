@@ -242,7 +242,6 @@ import Control.Monad (foldM, forM, when, (<=<))
 import Data.Bits ((.&.))
 import Data.ByteString (ByteString)
 import Data.Dynamic (fromDynamic, toDyn)
-import Data.HashMap.Strict (HashMap)
 import Data.HashMap.Strict qualified as HashMap
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
@@ -293,8 +292,10 @@ import NanoUI.Internal.Context.Types
   , DrawingEntry (..)
   , FrameMsg (..)
   , InteractionState (..)
+  , MeasureCache (..)
   , MeasureCacheKey
   , MetricSource (..)
+  , emptyMeasureCache
   , OverlayState (..)
   , PointerRoute (..)
   , SpanCacheEntry (..)
@@ -461,20 +462,28 @@ ensureMetricCaches ctx = do
       markDirty ctx
 
 cacheMeasureText ::
-  IORef (HashMap MeasureCacheKey (Float, Float)) ->
+  IORef MeasureCache ->
   Float ->
   (Text -> IO (Float, Float)) ->
   Text ->
   IO (Float, Float)
 cacheMeasureText ref scale base txt = do
   let key = (txt, scale)
-  m <- readIORef ref
-  case HashMap.lookup key m of
+      remember sz (MeasureCache young n old)
+        | n >= measureCacheCap = MeasureCache (HashMap.singleton key sz) 1 young
+        | otherwise = MeasureCache (HashMap.insert key sz young) (n + 1) old
+  cache@(MeasureCache young _ old) <- readIORef ref
+  case HashMap.lookup key young of
     Just sz -> pure sz
     Nothing -> do
-      sz <- base txt
-      modifyIORef' ref (HashMap.insert key sz)
+      -- A hit in the old generation moves up to the young one.
+      sz <- maybe (base txt) pure (HashMap.lookup key old)
+      writeIORef ref $! remember sz cache
       pure sz
+
+-- | Measurements per generation of the measure cache.
+measureCacheCap :: Int
+measureCacheCap = 4096
 
 -- | Install measurement under a scale-specific cache key when caching is
 -- enabled. Otherwise install the callback directly.
@@ -502,7 +511,7 @@ clearMeasureCache ctx = do
   let !source = ctxMetricSource ctx
   writeIORef (ctxLastMetricSource ctx) (Just source)
   invalidateTextCaches ctx
-  mapM_ (`writeIORef` HashMap.empty) (ctxMeasureCache ctx)
+  mapM_ (`writeIORef` emptyMeasureCache) (ctxMeasureCache ctx)
 
 -- | Configure text spans for a host that paints text separately. Use the
 -- returned context; this does not replace its font metrics.
@@ -542,7 +551,7 @@ enableMeasureCache ctx =
   case ctxMeasureCache ctx of
     Just _ -> pure ctx
     Nothing -> do
-      ref <- newIORef HashMap.empty
+      ref <- newIORef emptyMeasureCache
       pure ctx {ctxMeasureCache = Just ref, ctxMeasureText = cacheMeasureText ref 0 (ctxMeasureText ctx)}
 
 -- | Store one host value per runtime type. Replaces only the value of that

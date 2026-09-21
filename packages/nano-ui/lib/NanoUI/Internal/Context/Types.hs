@@ -5,6 +5,8 @@
 module NanoUI.Internal.Context.Types
   ( Context (..)
   , MeasureCacheKey
+  , MeasureCache (..)
+  , emptyMeasureCache
   , MetricSource (..)
   , TextInputMenu (..)
   , TextInputDrag (..)
@@ -51,6 +53,7 @@ module NanoUI.Internal.Context.Types
 
 import Data.Dynamic (Dynamic)
 import Data.HashMap.Strict (HashMap)
+import Data.HashMap.Strict qualified as HashMap
 import Data.IORef (IORef)
 import Data.IntMap.Strict (IntMap)
 import Data.IntMap.Strict qualified as IM
@@ -125,6 +128,18 @@ reduceUpdates = reduceMessages ($)
 
 -- | Text and measurement scale identifying a cached width/height result.
 type MeasureCacheKey = (Text, Float)
+
+-- | Memoised measurements in two generations: the young map, its size, and
+-- the old map. A full young map replaces the old one, so text that stops
+-- being shown (a clock, a log) is dropped while text measured every
+-- generation stays.
+data MeasureCache = MeasureCache
+  !(HashMap MeasureCacheKey (Float, Float))
+  !Int
+  !(HashMap MeasureCacheKey (Float, Float))
+
+emptyMeasureCache :: MeasureCache
+emptyMeasureCache = MeasureCache HashMap.empty 0 HashMap.empty
 
 -- | Identity of a font/measurement configuration. Pure Context modifiers
 -- replace this value; the next frame invalidates shared caches if its identity
@@ -577,7 +592,7 @@ data Context = Context
   , ctxMeasureText :: Text -> IO (Float, Float)
   , ctxResolveFont :: !(Float -> FontWeight -> FontStyle -> FontVariant -> IO (FontMetrics, Bool))
   , ctxResolveMeasure :: !(Float -> FontWeight -> FontStyle -> FontVariant -> Text -> IO (Float, Float))
-  , ctxMeasureCache :: Maybe (IORef (HashMap MeasureCacheKey (Float, Float)))
+  , ctxMeasureCache :: Maybe (IORef MeasureCache)
   , ctxSpanCache :: !(IORef (IntMap SpanCacheEntry))
   , ctxWidgetTextCache :: !(IORef (IntMap WidgetTextCacheEntry))
   -- | What widgets derive from their arguments and keep between frames
