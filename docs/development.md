@@ -180,7 +180,7 @@ demo's real event loop.
 For source-reduction work, `python scripts/profile/source-budget.py BASE_REF`
 counts all maintained library Haskell and C, excluding demos and vendored RGFW.
 Changed Haskell is formatted to the same Fourmolu fixed point on both sides.
-`compare-builds.py BASE_BUILD CANDIDATE_BUILD --suite core|sdl|render|atlas --output FILE`
+`compare-builds.py BASE_BUILD CANDIDATE_BUILD --suite core|sdl|render|atlas|events --output FILE`
 runs already-built executables in alternating order and records raw output,
 executable hashes, allocation and timing medians. It never rebuilds the baseline.
 Use `--executables` to supply executable paths instead of build directories.
