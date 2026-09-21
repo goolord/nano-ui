@@ -123,12 +123,12 @@ module NanoUI.Internal.Layout.Arena
   , ensureAxisSnapshot
   , memoizeWidth
   , forNodes_
-  , forNodesOfType_
   , forFloatingNodes_
   , forChildNodes_
   , foldFlowChildrenM
   , findNodeRevM
   , findFloatingNodeRevM
+  , walkFloatingAncestors
   , foldNodeRevM
   , findNodeM
   , foldNodesM
@@ -1586,6 +1586,19 @@ walkAncestors na idx step = go idx
     go !i
       | i < 0 = pure Nothing
       | otherwise = step i >>= maybe (getParent na i >>= go) (pure . Just)
+
+-- | 'walkAncestors' that offers @step@ only the floating nodes (modal,
+-- window, popup), with their type. Most frames have no floating node, and
+-- then this skips the walk.
+{-# INLINE walkFloatingAncestors #-}
+walkFloatingAncestors :: NodeArena -> NodeIdx -> (NodeIdx -> NodeType -> IO (Maybe a)) -> IO (Maybe a)
+walkFloatingAncestors na idx step = do
+  floating <- floatingNodeCount na
+  if floating <= 0
+    then pure Nothing
+    else walkAncestors na idx $ \i -> do
+      nt <- getNodeType na i
+      if isFloatingNode nt then step i nt else pure Nothing
 
 -- | First direct child of @parentIdx@ satisfying the predicate.
 {-# INLINE findChildM #-}

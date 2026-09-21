@@ -152,7 +152,7 @@ import NanoUI.Internal.Id
   , scopeTag
   )
 import NanoUI.Internal.Layout.Arena (getArenaScope, setArenaScope)
-import NanoUI.Internal.Style (FontStyle, FontVariant, FontWeight, Layout, TextDecoration (DecorationNone), Theme, disabledTheme)
+import NanoUI.Internal.Style (FontStyle, FontVariant, FontWeight, Layout, TextDecoration (DecorationNone), Theme, defaultLayout, disabledTheme)
 import NanoUI.Internal.Input (Input (..), Key (KeyEscape), inputKeysElem, inputMousePos, inputWindowSize, stripInteractionInput)
 import NanoUI.Internal.Types (DamageBounds, Rect, Size (..), V2)
 
@@ -180,10 +180,9 @@ data instance StaticRep Ui = UiRep !Context !Input Input !Layout
 {-# INLINE runUi #-}
 runUi :: IOE :> es => Context -> Input -> Eff (Ui : es) a -> Eff es a
 runUi ctx inp ui = do
-  lay <- unsafeEff_ (readIORef (ctxDefaultLayout ctx))
   -- The page is layer 0; floating panels route their own bodies.
   page <- unsafeEff_ (routedInput ctx 0 inp)
-  evalStaticRep (UiRep ctx page inp lay) ui
+  evalStaticRep (UiRep ctx page inp defaultLayout) ui
 
 -- | Run 'runUi' in IO for the standard 'NanoUI' effect stack.
 {-# INLINE runNanoUI #-}

@@ -23,12 +23,11 @@ import NanoUI.Internal.Context
   ( Context (..)
   , damageWidget
   , getFocusables
-  , getStore
   , intKey
   , isDisabled
   , markDirty
+  , modifyStore
   , setAnimationValue
-  , setStore
   , setTextInputMenu
   , startAnimation
   , tabConsumed
@@ -40,12 +39,13 @@ import NanoUI.Internal.Frame.Hit
   , nodeInteractionHit
   , nodeOwnsPointer
   , overlayHitAllowed
+  , overlayHitRoot
   , scrollHitRect
   , withWidgetNode
   )
 import NanoUI.Internal.Frame.Redraw (probeHotId)
-import NanoUI.Internal.Frame.Spans (widgetHitRect)
 import NanoUI.Internal.Frame.TextEdit (collapseTextFieldSelection)
+import NanoUI.Internal.Frame.TextInput (nodeTextFieldGeom)
 import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Internal.Input
   ( Input (..)
@@ -74,8 +74,8 @@ import NanoUI.Internal.Layout.Arena
   )
 import NanoUI.Internal.Monad (unlessM, whenM, (<&&>))
 import NanoUI.Internal.Store (fieldInt, insertSlot)
-import NanoUI.Internal.Types (DamageBounds (..), V2 (..), defaultDamageSlop, rectContains)
-import NanoUI.Internal.WidgetText (hasFlag, buttonVisualStyle, buttonFlagMenuBar, buttonFlagMenu, buttonFlagTab)
+import NanoUI.Internal.Types (DamageBounds (..), Rect (..), V2 (..), defaultDamageSlop, rectContains)
+import NanoUI.Internal.WidgetText (hasFlag, buttonFlagClose, buttonFlagMenuBar, buttonFlagMenu, buttonFlagTab, tabHeaderIndex)
 
 -- | Move keyboard focus when Tab was pressed, backwards with Shift held. Focus
 -- steps through the widgets that called 'NanoUI.Internal.Context.registerFocusable'
@@ -173,14 +173,30 @@ finalizePointerPress ctx inp =
 findTopWidgetUnderMouse :: Context -> V2 -> (NodeType -> Bool) -> IO (Maybe WidgetId)
 findTopWidgetUnderMouse ctx mouse wanted = do
   let na = ctxNodeArena ctx
+  top <- overlayHitRoot ctx mouse
   mIdx <-
     findNodeM na $ \idx -> do
       nt <- getNodeType na idx
       pure (wanted nt) <&&> do
         (x, y, w, h) <- getRect na idx
         rect <- widgetHitRect ctx nt idx x y w h
-        nodeClippedHit ctx idx rect mouse <&&> overlayHitAllowed ctx idx mouse
+        nodeClippedHit ctx idx rect mouse <&&> overlayHitAllowed ctx top idx
   traverse (getWidgetId na) mIdx
+
+-- | The rect a press on node @idx@ must land in: a text field's box
+-- ('nodeTextFieldGeom'), a close button's padded target, or the node rect.
+widgetHitRect :: Context -> NodeType -> NodeIdx -> Float -> Float -> Float -> Float -> IO Rect
+widgetHitRect ctx nt idx x y w h = case nt of
+  NodeTextInput -> fst <$> nodeTextFieldGeom ctx idx x y w h
+  NodeButton -> do
+    si <- getStyleIdx (ctxNodeArena ctx) idx
+    -- Close buttons get a padded target that stays inside the title bar, so
+    -- the inner east resize still works below the control.
+    pure $
+      if hasFlag buttonFlagClose si
+        then Rect (x - 8) (y - 4) (w + 10) (h + 4)
+        else Rect x y w h
+  _ -> pure (Rect x y w h)
 
 -- | The node types a press can make active: the controls of 'isWidgetNode'
 -- except the bare 'NodeWidget', which paints and takes nothing.
@@ -227,7 +243,7 @@ finalizePointerRelease ctx inp =
                     NodeButton -> do
                       packed <- getStyleIdx na idx
                       when (hasFlag buttonFlagTab packed) $
-                        setParentSelection ctx idx (buttonVisualStyle packed `div` 4)
+                        setParentSelection ctx idx (tabHeaderIndex packed)
                     _ -> pure ()
                   when (postsLayoutClick nt && releasedClicked /= active) $ do
                     unlessM (inUiClickHit ctx active mouse) $
@@ -246,9 +262,8 @@ setParentSelection :: Context -> NodeIdx -> Int -> IO ()
 setParentSelection ctx idx selected = do
   parent <- getParent (ctxNodeArena ctx) idx
   when (parent >= 0) $ do
-    store <- getStore ctx
     groupWid <- getWidgetId (ctxNodeArena ctx) parent
-    setStore ctx (insertSlot fieldInt (intKey groupWid) selected store)
+    modifyStore ctx (insertSlot fieldInt (intKey groupWid) selected)
 
 -- | The node types for which 'finalizePointerRelease' turns a release the view
 -- missed into a click on the next frame.

@@ -18,15 +18,12 @@ module NanoUI.Internal.Widgets.TextArea
   , textAreaDocumentWith'
   , textAreaLayout
   , loadTextAreaState
-  , loadTextAreaStateWithBuffer
   , saveTextAreaState
-  , textAreaEditor
   , runTextAreaCommand
   , applyTextAreaCommand
   ) where
 
 import Control.Monad (foldM, unless, when)
-import Data.Dynamic (fromDynamic, toDyn)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -351,14 +348,9 @@ textAreaCore f wid value = do
 -- | The text area's editor state as stored. A text area that has not been
 -- declared yet holds an empty document.
 loadTextAreaState :: WidgetStore -> Int -> TextAreaState
-loadTextAreaState store key = loadTextAreaStateWithBuffer store key (textAreaBuffer store key)
-
--- | 'loadTextAreaState' with the buffer already resolved (the paint path
--- reads the buffer and hands it straight through, avoiding a second store
--- lookup).
-loadTextAreaStateWithBuffer :: WidgetStore -> Int -> TB.TextBuffer -> TextAreaState
-loadTextAreaStateWithBuffer store key buf0 =
-  let row = findSlot fieldInt 0 (slotKey SlotTextAreaRow key) store
+loadTextAreaState store key =
+  let buf0 = textAreaBuffer store key
+      row = findSlot fieldInt 0 (slotKey SlotTextAreaRow key) store
       col = findSlot fieldInt 0 (slotKey SlotTextAreaCol key) store
       anchorRow = findSlot fieldInt row (slotKey SlotTextAreaAnchorRow key) store
       anchorCol = findSlot fieldInt col (slotKey SlotTextAreaAnchorCol key) store
@@ -393,7 +385,7 @@ saveTextAreaState key state =
     . insertSlot fieldPoint (slotKey SlotTextAreaViewport key) (realToFrac vw, realToFrac vh)
     . insertDyn (slotKey SlotTextAreaBuffer key) buf
     . insertDyn (slotKey SlotTextHistory key) (history state)
-    . overField fieldDyn withDocument
+    . withDocument
     . insertSlot fieldInt (slotKey SlotTextAreaRow key) row
     . insertSlot fieldInt (slotKey SlotTextAreaCol key) col
     . insertSlot fieldInt (slotKey SlotTextAreaPrefCol key) (TB.preferredCol buf)
@@ -404,9 +396,9 @@ saveTextAreaState key state =
     TB.Cursor row col = TB.getCursor buf
     TB.Cursor anchorRow anchorCol = selectionAnchor state
     docKey = slotKey SlotTextAreaDocument key
-    withDocument dyn = case IM.lookup docKey dyn >>= fromDynamic of
-      Just doc | sameLines (documentLines doc) (TB.bufferLines buf) -> dyn
-      _ -> IM.insert docKey (toDyn (bufferDocument buf)) dyn
+    withDocument st = case lookupDyn docKey st of
+      Just doc | sameLines (documentLines doc) (TB.bufferLines buf) -> st
+      _ -> insertDyn docKey (bufferDocument buf) st
     (sx, sy) = scrollOffset state
     (vw, vh) = viewportSize state
 

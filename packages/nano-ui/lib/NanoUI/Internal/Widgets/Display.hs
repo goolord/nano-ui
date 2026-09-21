@@ -26,7 +26,7 @@ module NanoUI.Internal.Widgets.Display
 where
 
 import Control.Exception (IOException, try)
-import Control.Monad (void)
+import Control.Monad (void, when)
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef)
@@ -210,9 +210,7 @@ svgIconWith' f doc = do
       Nothing -> do
         iid <- Atlas.freshImageId (ctxImageAtlas ctx)
         ok <- registerImage ctx iid pw ph (rasterizeSvg pw ph rasterColor doc)
-        if ok
-          then atomicModifyIORef' cache (\m -> (Map.insert key iid m, ()))
-          else pure ()
+        when ok $ atomicModifyIORef' cache (\m -> (Map.insert key iid m, ()))
         pure (if ok then iid else ImageId 0)
   image' (const lay) iid
 

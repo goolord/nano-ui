@@ -48,7 +48,7 @@ import NanoUI.Internal.Frame.Chrome
   )
 import NanoUI.Internal.Frame.Node (resolveFontFor)
 import NanoUI.Internal.Frame.Paint.Types (PaintEnv (..), popupPanelRect)
-import NanoUI.Internal.Frame.Spans (forWidgetTextPlacements_, selectableTextGeometry, widgetTextSpans)
+import NanoUI.Internal.Frame.Spans (computeWidgetTextPlacements, forWidgetTextPlacements_, selectableTextGeometry, textInputFg)
 import NanoUI.Internal.Frame.TextArea (drawTextAreaContentWith)
 import NanoUI.Internal.Frame.TextArea.Content (resolveTextAreaFont)
 import NanoUI.Internal.Frame.TextInput
@@ -73,11 +73,12 @@ import NanoUI.Internal.Layout.Arena
   , getWidgetId
   )
 import NanoUI.Internal.Style (Style, styleBg, styleBorder, styleFg, themeAccent, themeInput, themeOnAccent)
-import NanoUI.Internal.Types (Color (..), Rect (..), clamp, clamp01, colorA, lerpColor, onGrid)
+import NanoUI.Internal.Types (Color (..), Rect (..), clamp, clamp01, colorA, lerpColor, onGrid, rectInflate)
 import NanoUI.Internal.WidgetText
   ( hasFlag
   , buttonCloseTrailing
   , buttonVisualStyle
+  , tabHeaderStyle
   , comboTextClip
   , buttonFlagClose
   , buttonFlagMenuBar
@@ -125,9 +126,10 @@ paintTextInputNode env idx rect@(Rect x y w h) = do
             else do
               let field = textInputFieldRect fm x y w h
               paintStyledRect da style field
-              spans <- widgetTextSpans ctx NodeTextInput idx x y w h
-              case spans of
-                (Rect fx fy _ _, txt, ffg, _) : _ -> do
+              placements <- computeWidgetTextPlacements ctx NodeTextInput idx x y w h
+              case placements of
+                (txt, fx, fy, _, _) : _ -> do
+                  ffg <- textInputFg ctx style idx focus
                   -- The placement above settled the scroll, so read it back
                   -- rather than measure the caret again.
                   mEdit <- readFieldEdit ctx idx x y w h =<< textInputScroll ctx idx
@@ -200,7 +202,7 @@ paintWidgetBackground env idx nt style si menuRowRect value (Rect x y w h) = do
     -- metrics, so the two painters cannot drift.
     when (wid == hot) $ paintMenuAccent da theme menuRowRect
   when isTab $
-    paintTabHeader da theme (buttonVisualStyle si `mod` 4) (value > 0.5) style x y w h
+    paintTabHeader da theme (tabHeaderStyle si) (value > 0.5) style x y w h
   when isTable $
     paintTableHeader da theme (value > 0.5) style x y w h
   case nt of
@@ -447,7 +449,7 @@ drawChoiceControl da fm style x y h r bw value accent well solidChecked postMark
       pushRoundedStroke da outer r bw accent
       postMark bx by box
     else do
-      let inner = Rect (bx + bw) (by + bw) (box - 2 * bw) (box - 2 * bw)
+      let inner = rectInflate (-bw) outer
           innerR = max 0 (r - bw)
           strokeCol = if checked then accent else styleBorder style
       pushRoundedRect da inner innerR well

@@ -22,7 +22,6 @@ import NanoUI.Internal.Font
   ( FontMetrics (..)
   , GlyphQuad (..)
   , ShapedGlyphs (..)
-  , drawGlyph
   , drawShaped
   , kernedAdvance
   , lineWidth
@@ -175,7 +174,7 @@ pushGlyphQuads da fm slant px py txt col = do
               Just (c, rest) -> do
                 let !adv = kernedAdvance fm prev c
                     next !q' = walk q' (ox + adv) (Just c) rest
-                drawGlyph fm c >>= \case
+                case fmGlyph fm c of
                   Nothing
                     | adv > 0 && c /= ' ' -> do
                         pokeGlyphQuad vp ip base baseIdx 0 baselineY r g b a q (onGrid scale ox) (onGrid scale py) adv (fmLineHeight fm) whitePixelU whitePixelV whitePixelU whitePixelV

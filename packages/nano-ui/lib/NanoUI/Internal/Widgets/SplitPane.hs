@@ -18,7 +18,6 @@ module NanoUI.Internal.Widgets.SplitPane
   , paneExist
   , subtreeMin
   , mainMins
-  , splitMins
   , mainLen
   , splitLength
   , layoutNode

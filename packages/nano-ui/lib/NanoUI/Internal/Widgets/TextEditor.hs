@@ -30,7 +30,7 @@ module NanoUI.Internal.Widgets.TextEditor
   , canRedo
   ) where
 
-import Control.Monad (void, when)
+import Control.Monad (unless, void, when)
 import Data.Bits ((.&.), (.|.))
 import Data.Char (isPrint, isSpace, toLower)
 import Data.Text qualified as T
@@ -290,7 +290,7 @@ runCommandIO ctx mode cmd ed =
       let (a, c) = editorSelection ed
           buf = editorBuffer ed
           txt = if a /= c then TB.selectedText a c buf else TB.toText buf
-      when (not (T.null txt)) $ void (ctxClipboardSet ctx txt)
+      unless (T.null txt) $ void (ctxClipboardSet ctx txt)
 
 -- | The command a key runs. Ctrl or Alt turns character and deletion keys
 -- into word motions, and Shift extends the selection.

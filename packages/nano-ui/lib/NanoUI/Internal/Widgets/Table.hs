@@ -23,7 +23,7 @@ where
 
 import Colonnade (Colonnade, Headed (..), headed, headless)
 import Colonnade.Encode qualified as Encode
-import Control.Monad (forM, forM_, void, when)
+import Control.Monad (forM, forM_, unless, void, when)
 import Control.Monad.ST (runST)
 import Data.Char (isDigit)
 import Data.Foldable (toList)
@@ -245,19 +245,15 @@ colFloor sizes contentWs i = case smallAt sizes i ColContent of
   _ -> max minColW (primAt contentWs i minColW)
 
 colSizing :: Bool -> Bool -> SmallArray ColSize -> PrimArray Float -> PrimArray Float -> Int -> Sizing
-colSizing fillInner hasStretch sizes contentWs stored i =
-  let saved = primAt stored i 0
-      floorW = colFloor sizes contentWs i
-   in case smallAt sizes i ColContent of
-        ColFixed _ -> Fixed (max floorW saved)
-        ColStretch
-          | saved > 0 -> Fixed (max floorW saved)
-          | fillInner -> Grow 1
-          | otherwise -> Fixed floorW
-        ColContent
-          | saved > 0 -> Fixed (max floorW saved)
-          | fillInner && not hasStretch -> Grow 1
-          | otherwise -> Fixed floorW
+colSizing fillInner hasStretch sizes contentWs stored i
+  | saved > 0 = Fixed (max floorW saved)
+  | otherwise = case smallAt sizes i ColContent of
+      ColStretch | fillInner -> Grow 1
+      ColContent | fillInner && not hasStretch -> Grow 1
+      _ -> Fixed floorW
+  where
+    saved = primAt stored i 0
+    floorW = colFloor sizes contentWs i
 
 colBoxLayout :: Sizing -> Float -> Layout
 colBoxLayout sizing minCol =
@@ -494,7 +490,7 @@ tableConfigured cfg f key cols inputRows curSort =
               if null frozenIdx
                 then pure []
                 else zip frozenIdx <$> frozenPane
-            when (not (null frozenIdx) && not (null unfrozenIdx)) $ void separator
+            unless (null frozenIdx || null unfrozenIdx) $ void separator
             unfrozenHs <-
               if null unfrozenIdx then pure [] else zip unfrozenIdx <$> unfrozenPane
             pure (frozenHs ++ unfrozenHs)
@@ -558,12 +554,9 @@ tableConfigured cfg f key cols inputRows curSort =
               (i : _) | IS.size hidden0 + 1 < n -> IS.insert i hidden0
               _ -> hidden0
           sortClick =
-            if dragged || isJust mReorder || vis' /= vis || isResize
+            if dragged || isJust mReorder || vis' /= vis || isResize || (isJust edgeCol && (inputMouseDown inp || inputMouseReleased inp))
               then Nothing
-              else
-                if isJust edgeCol && (inputMouseDown inp || inputMouseReleased inp)
-                  then Nothing
-                  else listToMaybe [i | (i, r) <- headerPairs, respClicked r]
+              else listToMaybe [i | (i, r) <- headerPairs, respClicked r]
           nextSort = maybe sort0 (nextSortCol n sort0) sortClick
           hasChanged = nextSort /= sort0 || nextOrder /= order0 || nextHidden /= hidden0 || widths1 /= widths0
           widgetResp =
@@ -591,7 +584,7 @@ gridColumnsLay lay keys layouts cells =
  where
   -- Walk in lockstep without allocating zip tuples and indices per cell.
   go first (key : moreKeys) (layout : moreLayouts) (cell : moreCells) = do
-    when (not first) $ void separator
+    unless first $ void separator
     void (withKey key (column' layout cell))
     go False moreKeys moreLayouts moreCells
   go _ _ _ _ = pure ()

@@ -15,7 +15,6 @@ module NanoUI.Internal.Store
   , fieldFloatList
   , fieldIntList
   , fieldDyn
-  , fieldMap
   , overField
   , lookupSlot
   , findSlot

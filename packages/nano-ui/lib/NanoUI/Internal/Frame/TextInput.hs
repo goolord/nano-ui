@@ -316,10 +316,10 @@ finalizeTextInputMouse ctx inp wid = do
       pure True
 
 collapseTextInputSelection :: Context -> WidgetId -> IO ()
-collapseTextInputSelection ctx wid = do
-  store <- getStore ctx
-  let key = intKey wid
-  setStore ctx (insertSlot fieldInt (slotKey SlotAnchor key) (findSlot fieldInt 0 (slotKey SlotCursor key) store) store)
+collapseTextInputSelection ctx wid =
+  modifyStore ctx $ \store -> insertSlot fieldInt (slotKey SlotAnchor key) (findSlot fieldInt 0 (slotKey SlotCursor key) store) store
+ where
+  key = intKey wid
 
 -- | Count a press as a multi-click only when it lands on the same cell as the
 -- previous press; anything else restarts the count at one.

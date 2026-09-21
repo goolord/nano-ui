@@ -9,7 +9,6 @@ module NanoUI.Internal.Id
   , idContextWidgetId
   , widgetId
   , hashWidgetId
-  , fnv1a
   , mix64
   , mixFnv
   , scopeTag

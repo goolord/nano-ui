@@ -18,7 +18,7 @@ import NanoUI.Internal.Context
   , getStore
   , intKey
   , markDirty
-  , setStore
+  , modifyStore
   , setTextInputDrag
   , slotKey
   , nodeTheme
@@ -236,8 +236,7 @@ textAreaCursorAt ctx state hit (V2 mouseX mouseY) = do
 updateTextAreaSelection :: Context -> WidgetId -> TextAreaHit -> TB.Cursor -> TB.Cursor -> IO ()
 updateTextAreaSelection ctx wid hit anchor cursor = do
   state0 <- loadHitState ctx hit
-  store <- getStore ctx
-  setStore ctx (TA.saveTextAreaState (intKey wid) (TA.setTextAreaSelection anchor cursor state0) store)
+  modifyStore ctx (TA.saveTextAreaState (intKey wid) (TA.setTextAreaSelection anchor cursor state0))
   markDirty ctx
 
 applyTextAreaDrag :: Context -> WidgetId -> TextAreaHit -> Int -> Int -> Int -> Int -> Int -> IO ()
@@ -291,10 +290,11 @@ finalizeTextAreaMouse ctx inp wid = do
           _ -> pure ()
 
 collapseTextAreaSelection :: Context -> WidgetId -> IO ()
-collapseTextAreaSelection ctx wid = do
-  store <- getStore ctx
-  let key = intKey wid
-      row = findSlot fieldInt 0 (slotKey SlotTextAreaRow key) store
-      col = findSlot fieldInt 0 (slotKey SlotTextAreaCol key) store
-      state = loadTextAreaState store key
-  setStore ctx (saveTextAreaState key state {selectionAnchor = TB.Cursor row col} store)
+collapseTextAreaSelection ctx wid =
+  modifyStore ctx $ \store ->
+    let row = findSlot fieldInt 0 (slotKey SlotTextAreaRow key) store
+        col = findSlot fieldInt 0 (slotKey SlotTextAreaCol key) store
+        state = loadTextAreaState store key
+     in saveTextAreaState key state {selectionAnchor = TB.Cursor row col} store
+ where
+  key = intKey wid

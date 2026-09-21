@@ -24,7 +24,7 @@ import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Monad (Ui, askContext, askInput, nextId, uiIO)
 import NanoUI.Internal.Store (Slot (..), deleteSlot, fieldDouble, fieldInt, fieldText, findSlot, insertSlot, lookupSlot, slotKey)
 import NanoUI.Internal.Style (Layout (..), Sizing (..), defaultLayout)
-import NanoUI.Internal.Types (Rect (..), rectContains)
+import NanoUI.Internal.Types (Rect (..), clamp, rectContains)
 import NanoUI.Internal.WidgetText (numericStepperRects, textInputFlagNumeric)
 import NanoUI.Internal.Widgets.Behavior (keyboardFocused)
 import NanoUI.Internal.Widgets.Node (Response, addWidgetStyled, respHovered, respRect, setChanged, setSubmitted)
@@ -186,7 +186,7 @@ numericInputConfigured' cfg value = do
   pure (setSubmitted submitted (setChanged (final /= value) resp), final)
 
 clampNumber :: NumericInputConfig -> Double -> Double
-clampNumber cfg = max (nicMin cfg) . min (nicMax cfg)
+clampNumber cfg = clamp (nicMin cfg) (nicMax cfg)
 
 -- | The value rounded to what the field shows.
 roundNumber :: NumericInputConfig -> Double -> Double

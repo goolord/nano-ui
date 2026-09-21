@@ -821,7 +821,7 @@ drawOverlay theme title ghost zone =
     forM_ ghost $ \gr -> do
       drawRoundedRect gr 2 panelFill
       drawStrokeRoundedRect gr 2 2 panelBorder
-      when (not (T.null title)) $
+      unless (T.null title) $
         drawText (V2 (rectX gr + 6) (rectY gr + 6)) AlignStart AlignTop shortTitle (fadeAlpha (styleFg win) 160)
     forM_ zone $ \zr -> do
       drawRoundedRect zr 2 previewFill

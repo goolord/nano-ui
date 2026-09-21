@@ -69,7 +69,7 @@ import NanoUI.Internal.Frame.Scroll.Geometry
   )
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Store (Slot (..), WidgetStore, fieldFloat, fieldInt, fieldPoint, findSlot, insertSlot, lookupSlot, slotKey, slotWrite, slotWriteOr)
-import NanoUI.Internal.Types (DamageBounds (..), Rect (..), V2 (..), clamp, onGrid, v2X, v2Y)
+import NanoUI.Internal.Types (DamageBounds (..), Rect (..), V2 (..), clamp, onGrid, v2Add, v2X, v2Y)
 
 {-# INLINE snapScrollOffset #-}
 snapScrollOffset :: Context -> Float -> IO Float
@@ -399,9 +399,9 @@ scrollPages ctx wid (V2 px py) behavior =
     scrollMetricsBy ctx wid m (V2 (px * vw) (py * vh)) behavior
 
 scrollMetricsBy :: Context -> WidgetId -> ScrollMetrics -> V2 -> ScrollBehavior -> IO ()
-scrollMetricsBy ctx wid m (V2 dx dy) behavior = do
-  V2 bx by <- scrollTargetOffset ctx wid (scrollOffset m)
-  applyScrollTarget ctx wid (scrollAxes m) (clampScrollOffset (scrollRange m) (V2 (bx + dx) (by + dy))) behavior
+scrollMetricsBy ctx wid m delta behavior = do
+  base <- scrollTargetOffset ctx wid (scrollOffset m)
+  applyScrollTarget ctx wid (scrollAxes m) (clampScrollOffset (scrollRange m) (v2Add base delta)) behavior
 
 -- | Scroll back to the top (and left).
 scrollToStart :: Context -> WidgetId -> ScrollBehavior -> IO ()

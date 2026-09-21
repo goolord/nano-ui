@@ -43,7 +43,7 @@ import NanoUI.Internal.Font
   , widgetContentInset
   )
 import NanoUI.Internal.Frame.Chrome (overlayMenuStyle, paintMenuAccent, paintMenuPanel)
-import NanoUI.Internal.Frame.Hit (nodeClippedHit, overlayHitAllowed, widgetOverlayAllowed)
+import NanoUI.Internal.Frame.Hit (nodeClippedHit, overlayHitAllowed, overlayHitRoot, widgetOverlayAllowed)
 import NanoUI.Internal.Frame.TextArea.Content (isMouseOnTextAreaScrollBarAt)
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Input
@@ -153,6 +153,7 @@ openTextEditMenu ctx inp =
 textFieldWidgetAtMouse :: Context -> V2 -> IO (Maybe WidgetId)
 textFieldWidgetAtMouse ctx mouse = do
   let na = ctxNodeArena ctx
+  top <- overlayHitRoot ctx mouse
   mIdx <-
     findNodeRevM na $ \idx -> do
       nt <- getNodeType na idx
@@ -161,7 +162,7 @@ textFieldWidgetAtMouse ctx mouse = do
         rect <- getNodeRect na idx
         (not <$> isDisabled ctx wid)
           <&&> nodeClippedHit ctx idx rect mouse
-          <&&> overlayHitAllowed ctx idx mouse
+          <&&> overlayHitAllowed ctx top idx
           <&&> (if nt == NodeTextArea then not <$> isMouseOnTextAreaScrollBarAt ctx idx mouse else pure True)
   traverse (getWidgetId na) mIdx
 

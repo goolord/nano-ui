@@ -59,14 +59,12 @@ textCanRedo wid = withContext (\ctx -> canRedo <$> textFieldHistory ctx wid)
 -- selection highlight and next keystroke belong to the field it edited.
 applyTextFieldCommand :: Context -> WidgetId -> TextCommand -> IO ()
 applyTextFieldCommand ctx wid cmd =
-  textFieldMode ctx wid >>= \case
-    Just mode -> do
-      if modeMultiLine mode
-        then applyTextAreaCommand ctx wid cmd
-        else applyTextInputCommand ctx wid mode cmd
-      writeIORef (ctxFocusId ctx) wid
-      setTextInputMenu ctx Nothing
-    Nothing -> pure ()
+  textFieldMode ctx wid >>= mapM_ (\mode -> do
+    if modeMultiLine mode
+      then applyTextAreaCommand ctx wid cmd
+      else applyTextInputCommand ctx wid mode cmd
+    writeIORef (ctxFocusId ctx) wid
+    setTextInputMenu ctx Nothing)
 
 -- | How the field with this id edits: from its node when it has one this
 -- frame, or from what it recorded the last time it was declared.

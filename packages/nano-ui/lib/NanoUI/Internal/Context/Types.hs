@@ -613,7 +613,6 @@ data Context = Context
   -- starts from 0 and whatever still needs a later frame asks again, so the
   -- loop sleeps until then instead of polling.
   , ctxHost :: IORef (Map TypeRep Dynamic)
-  , ctxDefaultLayout :: IORef Layout
   }
 
 -- | Convert a widget's hash to its store key. The representation assumes a

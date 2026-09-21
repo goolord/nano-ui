@@ -46,6 +46,7 @@ import NanoUI.Internal.Context
   , OverlayState (..)
   , getsDamage
   , modifyDamage
+  , getsOverlay
   , modifyOverlay
   )
 import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
@@ -57,6 +58,7 @@ import NanoUI.Internal.Frame.Hit (findNodeByKey)
 import NanoUI.Internal.Store (Slot (..), eqByPtr, mirrorStoresChanged, ptrEq, slotKey)
 import NanoUI.Internal.Layout.Arena
   ( NodeArena
+  , NodeIdx
   , NodeType (..)
   , SizingTag (..)
   , arenaCount
@@ -74,6 +76,7 @@ import NanoUI.Internal.Layout.Arena
   , isFloatingNode
   , isScrollNode
   , walkAncestors
+  , walkFloatingAncestors
   )
 import NanoUI.Internal.Frame.Scroll.Geometry (decodeScrollConfig, scrollBare)
 import NanoUI.Internal.Widgets.Custom (mkCustomDrawContext)
@@ -318,8 +321,11 @@ writeDamage ctx inp snap = do
       then pure DamageFull
       else clipDamage ctx snap delta
   modifyDamage ctx (\ds -> ds {dsDamage = dmg, dsLastWindowSize = inputWindowSize inp, dsRequests = []})
-  modifyOverlay ctx $ \os ->
-    os {osPrevFloatingRects = newFloatingRects, osPrevFloatingOrder = map fst panels}
+  -- Most frames have no panel now or before, and then there is nothing to write.
+  prevEmpty <- getsOverlay ctx (IM.null . osPrevFloatingRects)
+  unless (null panels && prevEmpty) $
+    modifyOverlay ctx $ \os ->
+      os {osPrevFloatingRects = newFloatingRects, osPrevFloatingOrder = map fst panels}
   when modalFlip (markDirty ctx)
   when (fdFloatingChanged delta && not (IM.null (fsFloatingRects snap) && not (IM.null newFloatingRects))) $
     markDirty ctx
@@ -431,7 +437,8 @@ clipDamage ctx snap d = do
         when (hashWidgetId wid /= 0) $ do
           newR <- getPrevRect ctx wid
           slop <- fromMaybe defaultDamageSlop <$> lookupCustomDamageSlop ctx wid
-          let addSide = mapM_ (\r -> clipKeyRect ctx (intKey wid) (rectInflate slop r) >>= mapM_ (addRect acc))
+          clip <- keyViewportClip ctx (intKey wid)
+          let addSide = mapM_ (mapM_ (addRect acc) . clipKeyRect (intKey wid) clip . rectInflate slop)
           addSide (oldOf wid)
           addSide newR
         addBackdrop (intKey wid)
@@ -452,9 +459,10 @@ clipDamage ctx snap d = do
   when (fdScrollChanged d || fdPointsChanged d) $
     scrollOffsetDamage ctx acc (fsStore snap) (fdStore d)
   let addAnim k =
-        unless (k == 0) $
+        unless (k == 0) $ do
+          clip <- keyViewportClip ctx k
           forM_ [IM.lookup k oldRects, IM.lookup k newRects] $
-            mapM_ (\r -> clipKeyRect ctx k (rectInflate defaultDamageSlop r) >>= mapM_ (addRect acc))
+            mapM_ (mapM_ (addRect acc) . clipKeyRect k clip . rectInflate defaultDamageSlop)
   IS.foldr (\k rest -> addAnim k >> rest) (pure ()) (fsAnimKeys snap)
   IM.foldrWithKey
     (\k _ rest -> unless (IS.member k (fsAnimKeys snap)) (addAnim k) >> rest)
@@ -473,9 +481,9 @@ clipDamage ctx snap d = do
           -- outside the text rect; damage the scroll node's full rect so the
           -- lane repaints.
           addRect acc r
-          mIdx <- findNodeByKey ctx k
-          isImage <- maybe (pure False) (fmap (== NodeImage) . getNodeType (ctxNodeArena ctx)) mIdx
-          unless isImage $ scrollAncestorRect ctx k >>= mapM_ (addRect acc)
+          findNodeByKey ctx k >>= mapM_ (\idx -> do
+            isImage <- (== NodeImage) <$> getNodeType (ctxNodeArena ctx) idx
+            unless isImage $ scrollAncestorRect ctx idx >>= mapM_ (addRect acc))
   unless (ptrEq (fdTexts d) (fsTexts snap)) $
     IM.foldrWithKey (\k _ rest -> addText k >> rest) (pure ()) $
       IM.differenceWith
@@ -485,7 +493,9 @@ clipDamage ctx snap d = do
   -- Drawings redrawn in place repaint their own rects, like a text change
   -- that keeps its rect.
   forM_ (fdRedrawn d) $ \k ->
-    forM_ (IM.lookup k newRects) $ \r -> clipKeyRect ctx k r >>= mapM_ (addRect acc)
+    forM_ (IM.lookup k newRects) $ \r -> do
+      clip <- keyViewportClip ctx k
+      mapM_ (addRect acc) (clipKeyRect k clip r)
   unless (fdScrollOnly d) $ addGroup acc (fdSettledMoved d)
   -- Keys that left repaint as the current backdrop over their old rects. Keys
   -- that arrived must repaint inside their new rects too: the retain texture
@@ -525,10 +535,11 @@ resolveDamageRequests ctx acc oldRects newRects reqs =
     ReqKey k bounds -> resolveKey k bounds
     ReqPeers wids bounds -> forM_ wids $ \wid -> resolveKey (intKey wid) bounds
   where
-    resolveKey k bounds =
+    resolveKey k bounds = do
+      clip <- keyViewportClip ctx k
       forM_ [IM.lookup k oldRects, IM.lookup k newRects] $
         mapM_ $ \r -> do
-          clipped <- clipDeltaToScrollViewport ctx k (resolveDamageRect bounds r)
+          let clipped = clipToViewport clip (resolveDamageRect bounds r)
           when (rectNonEmpty clipped) $ addRect acc clipped
 
 -- | A running union of rects, as @x0, y0, x1, y1@ followed by how many of
@@ -613,31 +624,35 @@ rectDeltas ctx panelRects old new
       let !present = x0 <= x1
       pure (RectGroup present (present && not (null panelRects) && outside == 0) bounds)
 
+-- | The scroll-viewport clip of a keyed node. Look it up once per key and
+-- clip each of its rects with 'clipToViewport'.
+keyViewportClip :: Context -> Int -> IO (Maybe Rect)
+keyViewportClip ctx k = findNodeByKey ctx k >>= maybe (pure Nothing) (getClipRect (ctxNodeArena ctx))
+
+clipToViewport :: Maybe Rect -> Rect -> Rect
+clipToViewport clip r = maybe r (fromMaybe (Rect 0 0 0 0) . rectIntersect r) clip
+
 clipDeltaToScrollViewport :: Context -> Int -> Rect -> IO Rect
-clipDeltaToScrollViewport ctx k r = do
-  findNodeByKey ctx k >>= \case
-    Nothing -> pure r
-    Just idx ->
-      maybe r (fromMaybe (Rect 0 0 0 0) . rectIntersect r)
-        <$> getClipRect (ctxNodeArena ctx) idx
+clipDeltaToScrollViewport ctx k r = (`clipToViewport` r) <$> keyViewportClip ctx k
 
 clipRectToWindow :: Float -> Float -> Rect -> Rect
 clipRectToWindow winW winH r =
   fromMaybe (Rect 0 0 0 0) (rectIntersect r (Rect 0 0 winW winH))
 
-clipKeyRect :: Context -> Int -> Rect -> IO (Maybe Rect)
-clipKeyRect ctx k r
-  | k == 0 = pure (Just r)
-  | otherwise = do
-      clipped <- clipDeltaToScrollViewport ctx k r
-      pure (if rectNonEmpty clipped then Just clipped else Nothing)
+-- | A keyed rect clipped to its viewport ('keyViewportClip'), or 'Nothing'
+-- when nothing of it shows. Key 0 is not clipped.
+clipKeyRect :: Int -> Maybe Rect -> Rect -> Maybe Rect
+clipKeyRect k clip r
+  | k == 0 = Just r
+  | otherwise =
+      let clipped = clipToViewport clip r
+       in if rectNonEmpty clipped then Just clipped else Nothing
 
 -- | Rect of the nearest scroll-container ancestor of a keyed node, covering
 -- the content viewport and the scrollbar lane its chrome paints in. The walk
 -- stops at the first scroll node even when its rect is empty.
-scrollAncestorRect :: Context -> Int -> IO (Maybe Rect)
-scrollAncestorRect ctx k =
-  findNodeByKey ctx k >>= maybe (pure Nothing) (\idx -> join <$> walkAncestors na idx step)
+scrollAncestorRect :: Context -> NodeIdx -> IO (Maybe Rect)
+scrollAncestorRect ctx idx = join <$> walkAncestors na idx step
   where
     na = ctxNodeArena ctx
     step i = do
@@ -690,10 +705,4 @@ scrollOffsetDamage ctx acc oldStore newStore =
 
 floatingAncestorRect :: Context -> Int -> IO (Maybe Rect)
 floatingAncestorRect ctx idx =
-  walkAncestors (ctxNodeArena ctx) idx check
-  where
-    check i = do
-      nt <- getNodeType (ctxNodeArena ctx) i
-      if isFloatingNode nt
-        then getNonzeroRect (ctxNodeArena ctx) i
-        else pure Nothing
+  walkFloatingAncestors (ctxNodeArena ctx) idx (\i _ -> getNonzeroRect (ctxNodeArena ctx) i)

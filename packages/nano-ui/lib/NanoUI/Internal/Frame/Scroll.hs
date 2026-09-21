@@ -11,7 +11,7 @@ module NanoUI.Internal.Frame.Scroll
 where
 
 import Control.Applicative ((<|>))
-import Control.Monad (forM_, unless, when)
+import Control.Monad (forM_, join, unless, when)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Maybe (MaybeT (..))
 import Data.Foldable (find)
@@ -92,6 +92,7 @@ import NanoUI.Internal.Layout.Arena
   , setClipRect
   , setRect
   , snapshotLayoutRects
+  , walkAncestors
   )
 import NanoUI.Internal.Style (Padding (..), themePanel)
 import NanoUI.Internal.Types (Rect (..), V2 (..), rectContains, rectIntersect, rectUnion)
@@ -120,7 +121,7 @@ transformSubtree ctx idx scrollX scrollY parentClip = do
     if floating
       then getRect na idx
       else pure (lx + sx, ly + sy, lw, lh)
-  when (not floating) $ setRect na idx vx vy vw vh
+  unless floating $ setRect na idx vx vy vw vh
   (!childScrollX, !childScrollY, !childClip) <-
     if isScrollNode nt
       then do
@@ -214,21 +215,22 @@ scrollCrossAxisStop nt =
 
 walkOppositeAncestor :: Context -> NodeIdx -> DirTag -> IO (Maybe WidgetId)
 walkOppositeAncestor ctx idx childDir = do
-  p <- getParent (ctxNodeArena ctx) idx
-  if p < 0
-    then pure Nothing
-    else do
-      nt <- getNodeType (ctxNodeArena ctx) p
-      if scrollCrossAxisStop nt
-        then pure Nothing
-        else
-          if not (isScrollNode nt)
-            then walkOppositeAncestor ctx p childDir
-            else do
-              pdir <- getDirection (ctxNodeArena ctx) p
-              if pdir == childDir
-                then walkOppositeAncestor ctx p childDir
-                else Just <$> getWidgetId (ctxNodeArena ctx) p
+  p <- getParent na idx
+  join <$> walkAncestors na p step
+ where
+  na = ctxNodeArena ctx
+  step i = do
+    nt <- getNodeType na i
+    if scrollCrossAxisStop nt
+      then pure (Just Nothing)
+      else
+        if not (isScrollNode nt)
+          then pure Nothing
+          else do
+            pdir <- getDirection na i
+            if pdir == childDir
+              then pure Nothing
+              else Just . Just <$> getWidgetId na i
 
 findOppositeScrollDescendant ::
   Context -> NodeIdx -> DirTag -> IO (Maybe WidgetId)
@@ -240,17 +242,9 @@ findOppositeScrollDescendant ctx idx childDir = goChildren idx
     | ci < 0 = pure Nothing
     | otherwise = do
         nt <- getNodeType (ctxNodeArena ctx) ci
-        found <-
-          if isScrollNode nt
-            then do
-              d <- getDirection (ctxNodeArena ctx) ci
-              if d == want
-                then Just <$> getWidgetId (ctxNodeArena ctx) ci
-                else goChildren ci
-            else goChildren ci
-        case found of
-          Just w -> pure (Just w)
-          Nothing -> getNextSibling (ctxNodeArena ctx) ci >>= go
+        hit <- pure (isScrollNode nt) <&&> ((== want) <$> getDirection (ctxNodeArena ctx) ci)
+        found <- if hit then Just <$> getWidgetId (ctxNodeArena ctx) ci else goChildren ci
+        maybe (getNextSibling (ctxNodeArena ctx) ci >>= go) (pure . Just) found
 
 -- | Node owning scroller @wid@: its text area, or the first scroll container
 -- with that id that the predicate does not rule out (table slave panes share

@@ -170,5 +170,5 @@ tree' key inputItems index =
         recordSlot fieldInt ctx groupKey keySel
       when (keyExp /= expandedSet) $ uiIO $
         modifyStore ctx (insertSlot fieldIntSet groupKey keyExp)
-      maybe (pure ()) (\wid -> uiIO $ writeIORef (ctxFocusId ctx) wid) mFocus
+      mapM_ (uiIO . writeIORef (ctxFocusId ctx)) mFocus
       pure (setChanged (keySel /= selected) (fold resps), keySel)

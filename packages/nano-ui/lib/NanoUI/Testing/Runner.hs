@@ -4,7 +4,7 @@ module NanoUI.Testing.Runner
   ( runTests
   ) where
 
-import Control.Monad (forM_, when)
+import Control.Monad (forM_, unless, when)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
 import NanoUI.Testing (Context)
 import System.Environment (getArgs)
@@ -22,7 +22,7 @@ runTests specs = do
     want name = wantAll || name `elem` args
     names = [name | (name, _, _) <- specs]
     unknown = filter (`notElem` names) args
-  when (not (null unknown)) $
+  unless (null unknown) $
     fail ("Unknown test names: " ++ unwords unknown)
   failed <- newIORef (0 :: Int)
   failedTests <- newIORef (0 :: Int)

@@ -6,7 +6,7 @@ module NanoUI.Internal.Widgets.Overlay
   )
 where
 
-import Control.Monad (void, when)
+import Control.Monad (unless, void, when)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Effectful (Eff, type (:>))
@@ -181,7 +181,7 @@ overlay kind shape open title child = do
   floatingOverlay open isModal addOverlayNode enter $ do
     close <-
       row' (titleBarLayoutFor barH) $ do
-        when (not (T.null title)) $
+        unless (T.null title) $
           case kind of
             ModalOverlay -> titleLabel
             WindowOverlay -> withKey title titleLabel

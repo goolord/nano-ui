@@ -53,17 +53,17 @@ anyAnimating ctx = do
     then pure True
     else not . IM.null . ssGlides <$> readIORef (ctxScrollState ctx)
 
--- | Copy the animation map, retaining only entries still in progress.
+-- | The running animations. Every entry is in progress: the start functions
+-- settle a request that would not move, and 'tickAnimations' moves finished
+-- entries to the resting values.
 {-# INLINE getLiveAnimations #-}
 getLiveAnimations :: Context -> IO (IntMap Animation)
-getLiveAnimations ctx = IM.filter animInProgress . asAnimations <$> readIORef (ctxAnimationState ctx)
+getLiveAnimations ctx = asAnimations <$> readIORef (ctxAnimationState ctx)
 
--- | Whether the widget key has an animation in progress. Unlike
--- 'getLiveAnimations' this does not rebuild the animation map.
+-- | Whether the widget key has an animation in progress.
 {-# INLINE isAnimatingKey #-}
 isAnimatingKey :: Context -> Int -> IO Bool
-isAnimatingKey ctx key =
-  maybe False animInProgress . IM.lookup key . asAnimations <$> readIORef (ctxAnimationState ctx)
+isAnimatingKey ctx key = IM.member key <$> getLiveAnimations ctx
 
 -- | Consecutive frames in which each animation has no visible widget bounds.
 -- The damage pass uses these counts to limit full-window repaint requests.

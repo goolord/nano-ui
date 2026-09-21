@@ -304,7 +304,7 @@ rectFullyInside (Rect ix iy iw ih) (Rect ox oy ow oh) =
 {-# INLINE rectOverlapArea #-}
 rectOverlapArea :: Rect -> Rect -> Float
 rectOverlapArea a b =
-  maybe 0 (\r -> rectW r * rectH r) (rectIntersect a b)
+  maybe 0 rectArea (rectIntersect a b)
 
 -- | Extend every edge by the margin. A negative margin shrinks the rectangle.
 {-# INLINE rectInflate #-}

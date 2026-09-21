@@ -23,16 +23,13 @@ module NanoUI.Internal.Widgets.Layout
   , flex
   , scroll
   , scrollWith
-  , scroll'
   , scroll2D
   , scroll2DWith
-  , scroll2D'
   , scrollArea
   , scrollArea2D
   , scrollAreaIdConfigured
   , grid
   , gridWith
-  , grid'
   , responsive
   , responsiveRowCol
   , center
@@ -59,8 +56,7 @@ import NanoUI.Internal.Layout.Arena
   , setStyleIdx
   , setWidgetId
   )
-import NanoUI.Internal.Input (Input (inputWindowSize))
-import NanoUI.Internal.Monad (Ui, askContext, askDefaultLayout, askInput, nextId, styled, uiIO, withContext)
+import NanoUI.Internal.Monad (Ui, askContext, askDefaultLayout, askInput, nextId, styled, uiIO, windowWidth, withContext)
 import NanoUI.Internal.Style
   ( AlignX (..)
   , Direction (..)
@@ -74,7 +70,7 @@ import NanoUI.Internal.Style
   , panelStyle
   )
 import NanoUI.Internal.Style qualified as Style
-import NanoUI.Internal.Types (Color (..), Size (..), lerpColor)
+import NanoUI.Internal.Types (Color (..), lerpColor)
 import NanoUI.Internal.Widgets.Node
   ( Response
   , addSizingLeafNode
@@ -208,18 +204,16 @@ grid' n layout = container NodeContainer (layout {layoutGridCols = max 1 n})
 {-# INLINE responsive #-}
 responsive :: Ui :> es => Float -> (Eff es a -> Eff es a) -> (Eff es a -> Eff es a) -> Eff es a -> Eff es a
 responsive breakpoint wideContainer narrowContainer child = do
-  inp <- askInput
-  let w = sizeW (inputWindowSize inp)
+  w <- windowWidth
   if w >= breakpoint then wideContainer child else narrowContainer child
 
 -- | A row while the window is at least @breakpoint@ wide, a column below it.
 {-# INLINE responsiveRowCol #-}
 responsiveRowCol :: Ui :> es => Float -> (Layout -> Layout) -> Eff es a -> Eff es a
 responsiveRowCol breakpoint f child = do
-  inp <- askInput
+  w <- windowWidth
   base <- askDefaultLayout
-  let w = sizeW (inputWindowSize inp)
-      dir = if w >= breakpoint then Row else Column
+  let dir = if w >= breakpoint then Row else Column
   container NodeContainer ((f base) {layoutDirection = dir}) child
 
 -- | A line of text. Newlines start new lines.

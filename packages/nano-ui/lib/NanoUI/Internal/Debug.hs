@@ -4,7 +4,6 @@ module NanoUI.Internal.Debug
   ( debugRefreshSec
   , blend
   , RtsStatsSnapshot (..)
-  , readRtsSnapshot
   , CoreDebugSnapshot (..)
   , emptyCoreDebugSnapshot
   , DebugSampler (..)

@@ -337,7 +337,7 @@ import NanoUI.Internal.Store
   , Slot (..)
   , slotKey
   )
-import NanoUI.Internal.Style (FontStyle, FontVariant (..), FontWeight, Theme, defaultLayout, defaultTheme)
+import NanoUI.Internal.Style (FontStyle, FontVariant (..), FontWeight, Theme, defaultTheme)
 import NanoUI.Internal.Types (ImageId)
 
 -- | Register tightly packed RGBA8 pixels under an image id. Width and height
@@ -628,7 +628,6 @@ newContext = do
   ctxWakeLoop <- newIORef Nothing
   ctxWakeAt <- newIORef 0
   ctxHost <- newIORef Map.empty
-  ctxDefaultLayout <- newIORef defaultLayout
   ctxTheme <- newIORef defaultTheme
   ctxThemeScopes <- newIORef =<< newThemeScopes
   ctxSpanCache <- newIORef IM.empty

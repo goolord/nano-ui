@@ -24,7 +24,7 @@ module NanoUI.Internal.Frame.Paint
 
 import Control.Monad (forM_, unless, when)
 import Data.Bits ((.&.))
-import Data.Maybe (catMaybes, fromMaybe)
+import Data.Maybe (catMaybes, fromMaybe, isJust)
 import Data.Primitive.PrimArray
   ( PrimArray
   , emptyPrimArray
@@ -306,7 +306,7 @@ paintScrollContainerNode env idx rect@(Rect x y w h) = do
   -- invisible on a cleared backdrop, and clip replay then always
   -- repaints the whole viewport.
   unless (scrollBare (snConfig sn)) $ do
-    inFloating <- maybe False isFloatingNode <$> floatingAncestor ctx idx
+    inFloating <- isJust <$> floatingAncestor ctx idx
     (wTag, _) <- getWidthSizing arena idx
     (hTag, _) <- getHeightSizing arena idx
     if wTag == SizingGrow && hTag == SizingGrow

@@ -9,6 +9,7 @@ module NanoUI.Internal.Frame.Hit
   , nodeInSubtree
   , widgetIdInSubtree
   , overlayHitAllowed
+  , overlayHitRoot
   , topmostOverlayAtMouse
   , topmostModalAtMouse
   , widgetOverlayAllowed
@@ -22,7 +23,7 @@ where
 
 import Control.Applicative ((<|>))
 import Control.Monad.Trans.Maybe (MaybeT (..))
-import Data.Maybe (isJust)
+import Data.Maybe (isJust, isNothing)
 import NanoUI.Internal.Context
   ( Context (..)
   , PointerRoute (..)
@@ -43,11 +44,11 @@ import NanoUI.Internal.Layout.Arena
   , getNodeType
   , getParent
   , getWidgetId
-  , isFloatingNode
   , lookupNodeByKey
   , lookupNodeByWidgetId
   , topModalNode
   , walkAncestors
+  , walkFloatingAncestors
   )
 import NanoUI.Internal.Monad ((<&&>))
 import NanoUI.Internal.Types (Rect (..), V2 (..), rectContains, rectHit)
@@ -88,22 +89,26 @@ nodeInSubtree ctx idx top =
 widgetIdInSubtree :: Context -> NodeIdx -> WidgetId -> IO Bool
 widgetIdInSubtree ctx root wid = withWidgetNode ctx wid False (\idx -> nodeInSubtree ctx idx root)
 
--- | Whether the pointer at @mouse@ can reach node @idx@ past the floating
--- panels. While a modal is open, only the nodes inside the top modal can be
--- reached. Otherwise, when a window or popup lies under the point, only the
--- nodes inside the topmost one can. Anywhere else every node can.
-overlayHitAllowed :: Context -> NodeIdx -> V2 -> IO Bool
-overlayHitAllowed ctx idx mouse = do
+-- | The floating panel that the pointer at @mouse@ is confined to, for
+-- 'overlayHitAllowed'. While a modal is open it is the top modal. Otherwise
+-- it is the topmost window or popup under the point. 'Nothing' anywhere
+-- else. A caller that tests many nodes looks it up once.
+overlayHitRoot :: Context -> V2 -> IO (Maybe NodeIdx)
+overlayHitRoot ctx mouse = do
   -- Most frames have no floating panel, and then nothing needs looking up.
   floating <- floatingNodeCount (ctxNodeArena ctx)
-  top <-
-    if floating <= 0
-      then pure Nothing
-      else
-        runMaybeT $
-          MaybeT (topModalNode (ctxNodeArena ctx))
-            <|> MaybeT (topmostOverlayAtMouse ctx mouse)
-  maybe (pure True) (nodeInSubtree ctx idx) top
+  if floating <= 0
+    then pure Nothing
+    else
+      runMaybeT $
+        MaybeT (topModalNode (ctxNodeArena ctx))
+          <|> MaybeT (topmostOverlayAtMouse ctx mouse)
+
+-- | Whether the pointer can reach node @idx@ past the floating panels: every
+-- node can when the 'overlayHitRoot' is 'Nothing', otherwise only the nodes
+-- inside it.
+overlayHitAllowed :: Context -> Maybe NodeIdx -> NodeIdx -> IO Bool
+overlayHitAllowed ctx top idx = maybe (pure True) (nodeInSubtree ctx idx) top
 
 -- | The window or popup on top at @mouse@: the last one in arena order whose
 -- rect holds the point.
@@ -145,13 +150,7 @@ nodeOwnsPointer ctx idx =
     _ -> pure False
  where
   na = ctxNodeArena ctx
-  layerOf i
-    | i < 0 = pure 0
-    | otherwise = do
-        nt <- getNodeType na i
-        if isFloatingNode nt
-          then intKey <$> getWidgetId na i
-          else layerOf =<< getParent na i
+  layerOf i = maybe 0 intKey <$> walkFloatingAncestors na i (\j _ -> Just <$> getWidgetId na j)
 
 -- | Whether widget @wid@ may show and use a dropdown or menu of its own. With
 -- no modal open it always may. While one is open, only a widget inside the
@@ -221,22 +220,20 @@ nodeInteractionHit ctx idx rect mouse = do
 -- container above node @idx@. A scroll container with no recorded viewport
 -- does not constrain the point.
 scrollViewportHit :: Context -> NodeIdx -> V2 -> IO Bool
-scrollViewportHit ctx idx mouse = go idx
+scrollViewportHit ctx idx mouse
+  | idx <= 0 = pure True
+  | otherwise = do
+      p <- getParent na idx
+      isNothing <$> walkAncestors na p outside
  where
-  go i
-    | i <= 0 = pure True
-    | otherwise = do
-        p <- getParent (ctxNodeArena ctx) i
-        if p < 0
-          then pure True
-          else do
-            nt <- getNodeType (ctxNodeArena ctx) p
-            if nt == NodeScrollContainer
-              then do
-                wid <- getWidgetId (ctxNodeArena ctx) p
-                mClip <- getPrevClipRect ctx wid
-                case mClip of
-                  Nothing -> go p
-                  Just clip ->
-                    if rectContains clip mouse then go p else pure False
-              else go p
+  na = ctxNodeArena ctx
+  -- 'Just' at a scroll container whose recorded viewport misses the mouse.
+  outside i = do
+    nt <- getNodeType na i
+    if nt /= NodeScrollContainer
+      then pure Nothing
+      else do
+        mClip <- getPrevClipRect ctx =<< getWidgetId na i
+        pure $ case mClip of
+          Just clip | not (rectContains clip mouse) -> Just ()
+          _ -> Nothing

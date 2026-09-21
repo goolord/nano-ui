@@ -4,8 +4,9 @@ module NanoUI.Internal.Frame.Spans
   , collectOverlayTextSpans
   , collectRasterSpans
   , widgetNodeCount
-  , widgetHitRect
   , widgetTextSpans
+  , computeWidgetTextPlacements
+  , textInputFg
   , forWidgetTextPlacements_
   , selectableTextGeometry
   , collectNodeTextSpans
@@ -86,7 +87,6 @@ import NanoUI.Internal.WidgetText
   , tableStripeColor
   , textInputFlagNumeric
   , textInputFieldText
-  , textInputFlagSearch
   , textInputFlagSelectable
   , textNodeFontVariant
   , treeDecodeStyle
@@ -271,41 +271,28 @@ collectNodeTextSpans ctx idx = do
               cache
           pure spans
 
-widgetHitRect :: Context -> NodeType -> NodeIdx -> Float -> Float -> Float -> Float -> IO Rect
-widgetHitRect ctx nt idx x y w h = do
-  let fm = ctxFontMetrics ctx
-  case nt of
-    NodeTextInput -> do
-      si <- getStyleIdx (ctxNodeArena ctx) idx
-      if hasFlag textInputFlagSearch si || hasFlag textInputFlagSelectable si || hasFlag textInputFlagNumeric si
-        then pure (Rect x y w h)
-        else pure (textInputFieldRect fm x y w h)
-    NodeTextArea -> pure (Rect x y w h)
-    NodeButton -> do
-      si <- getStyleIdx (ctxNodeArena ctx) idx
-      -- Close buttons get a padded target that stays inside the title bar, so
-      -- the inner east resize still works below the control.
-      if hasFlag buttonFlagClose si
-        then pure (Rect (x - 8) (y - 4) (w + 10) (h + 4))
-        else pure (Rect x y w h)
-    _ -> pure (Rect x y w h)
-
 widgetTextSpans ::
   Context -> NodeType -> NodeIdx -> Float -> Float -> Float -> Float -> IO [(Rect, T.Text, Color, Color)]
 widgetTextSpans ctx nt idx x y w h = do
   style <- widgetVisualStyle ctx nt idx
-  mFontColor <- getNodeFontColor (ctxNodeArena ctx) idx
   placements <- widgetTextPlacements ctx nt idx x y w h
-  let fg = fromMaybe (styleFg style) mFontColor
-      bg = styleBg style
+  let bg = styleBg style
   case nt of
     NodeTextInput -> do
-      value <- textInputValue ctx idx
-      focus <- textInputFocused ctx idx
-      let fieldFg = if T.null value && not focus then lerpColor fg bg 0.40 else fg
-      pure [(Rect px py tw th, txt, fieldFg, bg) | (txt, px, py, tw, th) <- placements]
-    _ ->
+      fg <- textInputFg ctx style idx =<< textInputFocused ctx idx
+      pure [(Rect px py tw th, txt, fg, bg) | (txt, px, py, tw, th) <- placements]
+    _ -> do
+      fg <- fromMaybe (styleFg style) <$> getNodeFontColor (ctxNodeArena ctx) idx
       pure [(Rect px py tw th, txt, fg, bg) | (txt, px, py, tw, th) <- placements, not (T.null txt)]
+
+-- | The colour of a text input's text: the node's font colour, else the
+-- style's, faded toward the background while the field is empty and
+-- unfocused.
+textInputFg :: Context -> Style -> NodeIdx -> Bool -> IO Color
+textInputFg ctx style idx focus = do
+  fg <- fromMaybe (styleFg style) <$> getNodeFontColor (ctxNodeArena ctx) idx
+  value <- textInputValue ctx idx
+  pure (if T.null value && not focus then lerpColor fg (styleBg style) 0.40 else fg)
 
 widgetTextPlacements ::
   Context -> NodeType -> NodeIdx -> Float -> Float -> Float -> Float -> IO [(T.Text, Float, Float, Float, Float)]

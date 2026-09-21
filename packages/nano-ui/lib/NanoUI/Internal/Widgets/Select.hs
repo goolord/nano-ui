@@ -12,6 +12,7 @@ module NanoUI.Internal.Widgets.Select
 where
 
 import Control.Monad (forM_, when)
+import Data.Foldable (toList)
 import Data.IORef (writeIORef)
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -64,7 +65,7 @@ selectWith' f options index = do
   ctx <- askContext
   uiIO $ registerFocusable ctx wid
   let
-    opts = case foldr (:) [] options of
+    opts = case toList options of
       [] -> [""]
       xs -> xs
     n = length opts

@@ -45,8 +45,7 @@ import NanoUI.Internal.Layout.Arena
   , getStyleIdx
   , getText
   , getWidgetId
-  , isFloatingNode
-  , walkAncestors
+  , walkFloatingAncestors
   )
 import NanoUI.Internal.Store (fieldInt, fieldText, findSlot)
 import NanoUI.Internal.Style
@@ -65,7 +64,7 @@ import NanoUI.Internal.Style
 import NanoUI.Internal.Types (Color (..), Rect (..), clamp, colorA, colorRGBA, lerpColor)
 import NanoUI.Internal.WidgetText
   ( hasFlag
-  , buttonVisualStyle
+  , tabHeaderStyle
   , buttonFlagClose
   , buttonFlagMenuBar
   , buttonFlagMenu
@@ -80,10 +79,7 @@ import NanoUI.Internal.WidgetText
   )
 
 floatingAncestor :: Context -> NodeIdx -> IO (Maybe NodeType)
-floatingAncestor ctx idx =
-  walkAncestors (ctxNodeArena ctx) idx $ \i -> do
-    nt <- getNodeType (ctxNodeArena ctx) i
-    pure (if isFloatingNode nt then Just nt else Nothing)
+floatingAncestor ctx idx = walkFloatingAncestors (ctxNodeArena ctx) idx (\_ nt -> pure (Just nt))
 
 displayText :: Context -> NodeType -> NodeIdx -> IO Text
 displayText ctx nt idx = do
@@ -207,12 +203,12 @@ tableHeaderVisualStyle theme isSorted =
         }
 
 paintTabHeader :: DrawArena -> Theme -> Int -> Bool -> Style -> Float -> Float -> Float -> Float -> IO ()
-paintTabHeader da theme styleIdx isActive style x y w h = do
+paintTabHeader da theme tabStyle isActive style x y w h = do
   let rect = Rect x y w h
       r = max 0 (styleCornerRadius style)
       bg = styleBg style
   if isActive
-    then case styleIdx `mod` 4 of
+    then case tabStyle of
       1 -> pushRoundedRect da rect r bg
       2 -> do
         pushRoundedRect da rect r bg
@@ -281,7 +277,7 @@ widgetVisualStyle ctx nt idx = do
           NodeButton
             | isMenu -> menuItemVisualStyle theme val
             | isClose -> closeButtonStyle theme isHot animT
-            | isTab -> tabHeaderVisualStyle theme (buttonVisualStyle styleIdx `mod` 4) (val > 0.5)
+            | isTab -> tabHeaderVisualStyle theme (tabHeaderStyle styleIdx) (val > 0.5)
             | isTable -> tableHeaderVisualStyle theme (val > 0.5)
             | val > 0.5 ->
                 (themeButton theme)

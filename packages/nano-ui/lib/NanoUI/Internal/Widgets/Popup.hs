@@ -26,16 +26,15 @@ import NanoUI.Internal.Context
   , seedFloatingPanel
   )
 import NanoUI.Internal.Id (WidgetId, enterScope, scopeTag)
-import NanoUI.Internal.Input (inputMousePos)
 import NanoUI.Internal.Layout.Arena (NodeIdx, NodeType (..), addNode)
 import NanoUI.Internal.Monad
   ( Ui
   , askContext
   , askDefaultLayout
-  , askInput
   , lastRect
   , nextId
   , uiIO
+  , uiMousePos
   )
 import NanoUI.Internal.Style
   ( AlignX (..)
@@ -155,7 +154,7 @@ floatingOverlay open dismissable addPanel enter body = do
       -- Hovered is the pointer on the panel as the panel's own layer sees it,
       -- so whatever is in front of the panel takes the hover with it.
       (mouse, (closed, r)) <-
-        floatingPanel True wid (addPanel wid) (enter wid) ((,) . inputMousePos <$> askInput <*> body)
+        floatingPanel True wid (addPanel wid) (enter wid) ((,) <$> uiMousePos <*> body)
       panel <- fromMaybe (Rect 0 0 0 0) <$> lastRect wid
       outside <-
         if dismissable && rectNonEmpty panel

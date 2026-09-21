@@ -24,7 +24,7 @@ import NanoUI.Internal.Context
   , isPointerTracked
   , modalActive
   )
-import NanoUI.Internal.Frame.Hit (nodePointVisible, overlayHitAllowed, withWidgetNode)
+import NanoUI.Internal.Frame.Hit (nodePointVisible, overlayHitAllowed, overlayHitRoot, withWidgetNode)
 import NanoUI.Internal.Frame.Select (focusedComboNode, overlayMenuOwnerAt)
 import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Internal.Input (Input (..), inputInteracted, inputMousePos, inputPointerHeld)
@@ -135,8 +135,10 @@ probeHotId ctx mouse = do
       case mOverlay of
         Just wid -> pure wid
         -- Earlier siblings paint over later ones, so the first hit wins.
-        Nothing -> maybe (pure (WidgetId 0)) (getWidgetId na) =<< findNodeM na hits
+        Nothing -> do
+          top <- overlayHitRoot ctx mouse
+          let hits idx =
+                (isWidgetNode <$> getNodeType na idx) <&&> nodePointVisible ctx idx mouse <&&> overlayHitAllowed ctx top idx
+          maybe (pure (WidgetId 0)) (getWidgetId na) =<< findNodeM na hits
   where
     na = ctxNodeArena ctx
-    hits idx =
-      (isWidgetNode <$> getNodeType na idx) <&&> nodePointVisible ctx idx mouse <&&> overlayHitAllowed ctx idx mouse

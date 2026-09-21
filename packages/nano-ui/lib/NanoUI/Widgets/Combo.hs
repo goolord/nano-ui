@@ -11,6 +11,7 @@ module NanoUI.Widgets.Combo
 where
 
 import Control.Monad (foldM, when, (<$!>))
+import Data.Foldable (toList)
 import Data.IORef (writeIORef)
 import Data.Maybe (fromMaybe, isJust)
 import Data.Text (Text)
@@ -56,7 +57,7 @@ comboFiltered options q
       let needle = T.toLower q
         in filter (T.isInfixOf needle . T.toLower) opts
   where
-    opts = foldr (:) [] options
+    opts = toList options
 
 -- | A combo's state between frames.
 data ComboState = ComboState

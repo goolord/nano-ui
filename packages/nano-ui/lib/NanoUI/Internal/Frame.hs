@@ -307,8 +307,9 @@ runFrameEff unlift ctx frameInp ui = do
   -- moved one repaints where it was.
   menuRects <- overlayMenuRects ctx
   prevMenuRects <- getsOverlay ctx osPrevMenuRects
-  mapM_ (damageRect ctx) (menuRects ++ prevMenuRects)
-  modifyOverlay ctx (\os -> os {osPrevMenuRects = menuRects})
+  unless (null menuRects && null prevMenuRects) $ do
+    mapM_ (damageRect ctx) (menuRects ++ prevMenuRects)
+    modifyOverlay ctx (\os -> os {osPrevMenuRects = menuRects})
   writeDamage ctx frameInp
     FrameSnapshot
       { fsWasDirty = wasDirty

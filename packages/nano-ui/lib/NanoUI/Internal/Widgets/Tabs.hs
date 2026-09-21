@@ -10,7 +10,7 @@ where
 
 import Control.Applicative ((<|>))
 import Control.Monad (forM_, when)
-import Data.Bits ((.|.))
+import Data.Foldable (toList)
 import Data.List (find)
 import Data.Maybe (fromMaybe, isJust, listToMaybe)
 import Data.Text (Text)
@@ -51,7 +51,7 @@ import NanoUI.Internal.Style
   , tight
   )
 import NanoUI.Internal.Types (Rect (..), clamp, rectContains, rectW, v2Y)
-import NanoUI.Internal.WidgetText (buttonFlagClose, buttonFlagTab)
+import NanoUI.Internal.WidgetText (buttonFlagClose, tabEncodeStyle)
 import NanoUI.Internal.Widgets.Combinators (buttonStyledEx)
 import NanoUI.Internal.Widgets.Layout (column', columnWith, row', rowWith, scrollAreaIdConfigured)
 import NanoUI.Internal.Widgets.Node
@@ -318,7 +318,7 @@ renderHeaders ::
   [(Int, Tab a body)] ->
   Eff es (TabResponse a, a, [Header a])
 renderHeaders ctx hdrLay styleVal cur indexed = do
-  resps <- mapM (\(i, t) -> withKey i (renderSingleHeader hdrLay (styleVal + 4 * i) cur t)) indexed
+  resps <- mapM (\(i, t) -> withKey i (renderSingleHeader hdrLay (tabEncodeStyle styleVal i) cur t)) indexed
   let clickedKeys = [headerKey h | h <- resps, respClicked (headerResponse h), not (headerClosed h)]
       closedKey = headerKey <$> find headerClosed resps
       nextTab = fromMaybe cur (listToMaybe clickedKeys)
@@ -341,10 +341,9 @@ renderSingleHeader ::
   a ->
   Tab a body ->
   Eff es (Header a)
-renderSingleHeader hdrLay packedStyle cur t = do
+renderSingleHeader hdrLay tabStyle cur t = do
   let isActive = tabKey t == cur
       headerText = maybe (tabTitle t) (\b -> mconcat [tabTitle t, " (", b, ")"]) (tabBadge t)
-      tabStyle = packedStyle .|. buttonFlagTab
       headerButton = buttonStyledEx (not (tabDisabled t))
   if tabClosable t
     then do
@@ -377,13 +376,13 @@ tabs' = tabsConfigured' defaultTabsConfig
 -- | 'tabs' with a header style and placement.
 tabsConfigured :: (Foldable f, Eq a, Ui :> es) => TabsConfig -> a -> f (Tab a (Eff es ())) -> Eff es a
 tabsConfigured cfg active inputTabs =
-  let ts = foldr (:) [] inputTabs
+  let ts = toList inputTabs
    in snd <$> tabStrip cfg active ts (Just (renderBody ts))
 
 -- | 'tabsConfigured' with selection, close requests, and header interaction details.
 tabsConfigured' :: (Foldable f, Eq a, Ui :> es) => TabsConfig -> a -> f (Tab a (Eff es ())) -> Eff es (TabResponse a)
 tabsConfigured' cfg active inputTabs =
-  let ts = foldr (:) [] inputTabs
+  let ts = toList inputTabs
    in fst <$> tabStrip cfg active ts (Just (renderBody ts))
 
 -- | Tab headers only; the caller renders the body.
@@ -399,13 +398,13 @@ tabBar' = tabBarConfigured' defaultTabsConfig
 -- | Header-only bar with explicit style/orientation. Returns the selected key
 -- without running tab bodies.
 tabBarConfigured :: (Foldable f, Eq a, Ui :> es) => TabsConfig -> a -> f (Tab a body) -> Eff es a
-tabBarConfigured cfg active ts = snd <$> tabStrip cfg active (foldr (:) [] ts) Nothing
+tabBarConfigured cfg active ts = snd <$> tabStrip cfg active (toList ts) Nothing
 
 -- | 'tabBarConfigured' with interaction details and optional close request.
 tabBarConfigured' :: (Foldable f, Eq a, Ui :> es) => TabsConfig -> a -> f (Tab a body) -> Eff es (TabResponse a)
-tabBarConfigured' cfg active ts = fst <$> tabStrip cfg active (foldr (:) [] ts) Nothing
+tabBarConfigured' cfg active ts = fst <$> tabStrip cfg active (toList ts) Nothing
 
 renderBody :: (Eq a, Ui :> es) => [Tab a (Eff es ())] -> a -> Eff es ()
 renderBody ts activeKey =
   columnWith (tight . fillW) $
-    maybe (pure ()) tabBody (find ((== activeKey) . tabKey) ts <|> listToMaybe ts)
+    mapM_ tabBody (find ((== activeKey) . tabKey) ts <|> listToMaybe ts)
