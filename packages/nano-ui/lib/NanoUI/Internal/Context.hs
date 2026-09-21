@@ -412,24 +412,19 @@ withFontResolver ctx rf rm = trackMetricSource ctx {ctxResolveFont = rf, ctxReso
 -- Returns a configured context sharing the original session state.
 withFontMetrics :: Context -> FontMetrics -> Context
 withFontMetrics ctx fm =
-  let ctx' =
-        ctx
-          { ctxFontMetrics = fm
-          , ctxMeasureText = measureTextIO fm
-          }
-   in trackMetricSource ctx'
-        { ctxResolveFont = defaultResolveFont ctx'
-        , ctxResolveMeasure = defaultResolveMeasure ctx'
-        }
+  withDefaultResolvers ctx {ctxFontMetrics = fm, ctxMeasureText = measureTextIO fm}
 
 -- | Replace monospace metrics and rebuild default font-resolution callbacks.
 withMonoFontMetrics :: Context -> FontMetrics -> Context
-withMonoFontMetrics ctx mono =
-  let ctx' = ctx {ctxMonoFontMetrics = mono}
-   in trackMetricSource ctx'
-        { ctxResolveFont = defaultResolveFont ctx'
-        , ctxResolveMeasure = defaultResolveMeasure ctx'
-        }
+withMonoFontMetrics ctx mono = withDefaultResolvers ctx {ctxMonoFontMetrics = mono}
+
+-- | Rebuild the default font and measurement resolvers over @ctx@'s metrics.
+withDefaultResolvers :: Context -> Context
+withDefaultResolvers ctx =
+  trackMetricSource ctx
+    { ctxResolveFont = defaultResolveFont ctx
+    , ctxResolveMeasure = defaultResolveMeasure ctx
+    }
 
 -- | Replace proportional text measurement, returning logical width/height.
 -- The callback must agree with the font used for painting.
@@ -668,7 +663,7 @@ newPixelHostContext :: IO Context
 newPixelHostContext = do
   ctx0 <- newContext
   ctx <- enableMeasureCache ctx0
-  withTheme (withExternalText (withFontMetrics ctx (monospaceMetrics 16)) True) defaultTheme
+  pure (withExternalText (withFontMetrics ctx (monospaceMetrics 16)) True)
 
 -- =============================================================================
 -- Focus

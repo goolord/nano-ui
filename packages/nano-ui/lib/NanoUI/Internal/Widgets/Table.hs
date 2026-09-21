@@ -44,7 +44,7 @@ import NanoUI.Internal.Hooks (useInt)
 import NanoUI.Internal.Font (ScrollBarSlot (..), scrollBarGutter, tableCellInset, lineWidthIO)
 import NanoUI.Internal.Input (Input (..), inputMouseDown, inputMousePos, inputMousePressed, inputMouseReleased)
 import NanoUI.Internal.Layout.Arena (NodeType (..))
-import NanoUI.Internal.Monad (Ui, askContext, askInput, nextId, uiIO, withKey)
+import NanoUI.Internal.Monad (Ui, askContext, askInput, lastRect, nextId, uiIO, withKey)
 import NanoUI.Internal.Store (Slot (..), fieldFloat, fieldFloatList, fieldInt, fieldIntList, fieldIntSet, findSlot, insertSlot, slotKey, slotWrite)
 import NanoUI.Internal.Style (AlignX (..), AlignY (..), Direction (..), FontVariant (..), Layout (..), Padding (..), Sizing (..), defaultLayout, fillH, fillW, tight)
 import Data.Bits ((.|.), shiftL)
@@ -234,14 +234,7 @@ smallAt xs i fallback = if i >= 0 && i < sizeofSmallArray xs then indexSmallArra
 
 resolvedWidth :: SmallArray ColSize -> PrimArray Float -> PrimArray Float -> Int -> Float
 resolvedWidth sizes contentWs stored i =
-  let contentW = max minColW (primAt contentWs i minColW)
-      saved = primAt stored i 0
-   in case smallAt sizes i ColContent of
-        ColStretch -> if saved > contentW then saved else contentW
-        ColFixed f ->
-          let base = max minColW f
-           in if saved > 0 then max base saved else base
-        ColContent -> if saved > 0 then max contentW saved else contentW
+  max (colFloor sizes contentWs i) (primAt stored i 0)
 
 -- Width floor a column cannot shrink under: its declared fixed width, else
 -- its content minimum. Shared by colSizing and the resize-drag clamp so a
@@ -360,7 +353,7 @@ tableConfigured cfg f key cols inputRows curSort =
           sortIndices
             (sortColDir sort0)
             (mapSmallArray' (\cells -> fromMaybe T.empty (cells V.!? sortColIndex sort0)) encoded)
-        pinnedN = min nRows (max 0 (tableFreezeRows cfg))
+        pinnedN = clamp 0 nRows (tableFreezeRows cfg)
         scrollN = nRows - pinnedN
         rowMinH = 28
         fillInner = tableFillInner hasStretch outerLayout
@@ -446,7 +439,7 @@ tableConfigured cfg f key cols inputRows curSort =
           -- The body scroller has no padding, so its whole lane is gutter.
           let vGutter = scrollBarGutter ScrollBarList 0
               idxs = unfrozenIdx
-          mPrevV <- uiIO (getPrevRect ctx vWid)
+          mPrevV <- lastRect vWid
           let totalH = fromIntegral scrollN * rowMinH
               -- Prev-frame decision, one frame behind the body scroller's live 2D
               -- gutter: on the frame the vertical bar first appears (or vanishes)
@@ -505,7 +498,7 @@ tableConfigured cfg f key cols inputRows curSort =
             unfrozenHs <-
               if null unfrozenIdx then pure [] else zip unfrozenIdx <$> unfrozenPane
             pure (frozenHs ++ unfrozenHs)
-      mBodyRect <- uiIO (getPrevRect ctx vWid)
+      mBodyRect <- lastRect vWid
       let mouse = inputMousePos inp
           edgePad = 4
           -- Resize grab zone spans the header band plus the body scroller: a

@@ -8,30 +8,28 @@ module NanoUI.Internal.Widgets.Tabs
   )
 where
 
+import Control.Applicative ((<|>))
 import Control.Monad (forM_, when)
 import Data.Bits ((.|.))
 import Data.List (find)
-import Data.Maybe (isJust, listToMaybe)
+import Data.Maybe (fromMaybe, isJust, listToMaybe)
 import Data.Text (Text)
 import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context
   ( Context (..)
-  , getPrevRect
   , getScrollOffset
   , getStore
   , intKey
-  , markDirty
   , resolveScrollStep
   , setScrollOffset
   , setStore
-  , currentTheme
   )
 import NanoUI.Internal.Frame.Hit (withWidgetNode)
 import NanoUI.Internal.Frame.Scroll.Geometry (scrollAxisRange, scrollBare, scrollHorizontalHidden)
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Input (inputMousePos, inputScroll)
 import NanoUI.Internal.Layout.Arena (setNodeValue)
-import NanoUI.Internal.Monad (Ui, askContext, askInput, nextId, uiIO, withKey)
+import NanoUI.Internal.Monad (Ui, askContext, askInput, lastRect, nextId, requestFrame, uiIO, uiTheme, withKey)
 import NanoUI.Internal.Store (Slot (..), fieldFloat, findSlot, insertSlot, slotKey)
 import NanoUI.Internal.Style
   ( Direction (..)
@@ -221,15 +219,15 @@ renderScrollableHeaders ctx style hdrLay barLay groupId cur tabList = do
       overflow = maxOffPrev > 0.5
   off <- uiIO (getScrollOffset ctx scrollWid)
   wheelStep <- uiIO (resolveScrollStep ctx scrollWid)
-  mBar <- uiIO (getPrevRect ctx groupId)
-  mScr <- uiIO (getPrevRect ctx scrollWid)
+  mBar <- lastRect groupId
+  mScr <- lastRect scrollWid
   inp <- askInput
   let overBar = maybe False (\r -> rectContains r (inputMousePos inp)) mBar
       notches = if overBar then round (v2Y (inputScroll inp)) else 0 :: Int
       canLeft = overflow && off > 0.5
   leftResp <-
     if overflow
-      then Just <$> withKey ("tab-arrow-left" :: Text) (arrowButton ctx hdrLay arrowW h (not canLeft) leftGlyph)
+      then Just <$> withKey ("tab-arrow-left" :: Text) (arrowButton hdrLay arrowW h (not canLeft) leftGlyph)
       else pure Nothing
   (tabResp, nextTab, resps) <-
     if overflow
@@ -259,7 +257,7 @@ renderScrollableHeaders ctx style hdrLay barLay groupId cur tabList = do
     canRight = overflow && off < maxOff - 0.5
   rightResp <-
     if overflow
-      then Just <$> withKey ("tab-arrow-right" :: Text) (arrowButton ctx hdrLay arrowW h (not canRight) rightGlyph)
+      then Just <$> withKey ("tab-arrow-right" :: Text) (arrowButton hdrLay arrowW h (not canRight) rightGlyph)
       else pure Nothing
   uiIO (cacheScrollRange ctx rangeKey maxOff)
   -- One final offset per frame. The paged result folds the arrow pages, the
@@ -300,9 +298,9 @@ cacheScrollRange ctx key v = do
 -- | A prettier thin chevron button for the strip. Disabled ends paint the
 -- glyph in the muted fg instead of dropping the button, so the row width does
 -- not jump as you page to either end.
-arrowButton :: (Ui :> es) => Context -> Layout -> Float -> Float -> Bool -> Text -> Eff es Response
-arrowButton ctx hdrLay arrowW barH muted glyph = do
-  theme <- uiIO (currentTheme ctx)
+arrowButton :: (Ui :> es) => Layout -> Float -> Float -> Bool -> Text -> Eff es Response
+arrowButton hdrLay arrowW barH muted glyph = do
+  theme <- uiTheme
   let lay =
         hdrLay
           { layoutWidth = Fixed arrowW
@@ -323,9 +321,7 @@ renderHeaders ctx hdrLay styleVal cur indexed = do
   resps <- mapM (\(i, t) -> withKey i (renderSingleHeader hdrLay (styleVal + 4 * i) cur t)) indexed
   let clickedKeys = [headerKey h | h <- resps, respClicked (headerResponse h), not (headerClosed h)]
       closedKey = headerKey <$> find headerClosed resps
-      nextTab = case clickedKeys of
-        (k : _) -> k
-        [] -> cur
+      nextTab = fromMaybe cur (listToMaybe clickedKeys)
       hasChanged = nextTab /= cur
       hasClicked = not (null clickedKeys)
       overallResp =
@@ -334,7 +330,7 @@ renderHeaders ctx hdrLay styleVal cur indexed = do
           , tabClosed = closedKey
           , tabActive = nextTab
           }
-  when (hasChanged || isJust closedKey) $ uiIO (markDirty ctx)
+  when (hasChanged || isJust closedKey) requestFrame
   when hasChanged $ uiIO (syncTabHeaderActive ctx nextTab resps)
   pure (overallResp, nextTab, resps)
 
@@ -412,6 +408,4 @@ tabBarConfigured' cfg active ts = fst <$> tabStrip cfg active (foldr (:) [] ts) 
 renderBody :: (Eq a, Ui :> es) => [Tab a (Eff es ())] -> a -> Eff es ()
 renderBody ts activeKey =
   columnWith (tight . fillW) $
-    case find ((== activeKey) . tabKey) ts of
-      Just selected -> tabBody selected
-      Nothing -> maybe (pure ()) tabBody (listToMaybe ts)
+    maybe (pure ()) tabBody (find ((== activeKey) . tabKey) ts <|> listToMaybe ts)

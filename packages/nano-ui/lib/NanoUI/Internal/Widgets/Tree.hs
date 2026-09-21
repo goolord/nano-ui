@@ -10,14 +10,14 @@ import Data.Text (Text)
 import Data.Primitive.SmallArray (SmallArray, indexSmallArray, mapSmallArray', sizeofSmallArray, smallArrayFromList)
 import Effectful (Eff, type (:>))
 import qualified Data.IntSet as IS
-import NanoUI.Internal.Context (Context (..), adoptSlot, getFocusId, getStore, intKey, recordSlot, registerFocusable, setStore, writeSlot, modifyStore)
+import NanoUI.Internal.Context (Context (..), adoptSlot, getStore, intKey, recordSlot, registerFocusable, setStore, writeSlot, modifyStore)
 import NanoUI.Internal.Font (treeChevronRect)
 import NanoUI.Internal.Frame.Hit (scrollHitRect)
 import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Internal.Input (inputMousePos)
 import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Store (fieldInt, fieldIntSet, insertSlot, lookupSlot)
-import NanoUI.Internal.Monad (Ui, askContext, askInput, nextId, uiIO, withKey)
+import NanoUI.Internal.Monad (Ui, askContext, askInput, focusedWidget, nextId, uiIO, withKey)
 import NanoUI.Internal.Style (defaultLayout, fillW, gap, tight)
 import NanoUI.Internal.Types (Rect (..), clamp, rectContains)
 import NanoUI.Internal.WidgetText (treeEncodeStyle)
@@ -162,7 +162,7 @@ tree' key inputItems index =
       let resps = mapSmallArray' (\(r, _, _) -> r) results
           afterClickSel = fromMaybe selected (foldr (\(_, idx, _) rest -> idx <|> rest) Nothing results)
           afterClickExp = fromMaybe expandedSet (foldr (\(_, _, s) rest -> s <|> rest) Nothing results)
-      focus <- uiIO (getFocusId ctx)
+      focus <- focusedWidget
       nav <- useKeyNav focus
       let (keySel, keyExp, mFocus) = treeKeyNav nav rows resps focus afterClickSel afterClickExp
       uiIO $ do

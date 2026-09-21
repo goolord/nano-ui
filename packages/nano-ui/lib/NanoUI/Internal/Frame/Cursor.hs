@@ -24,8 +24,7 @@ import NanoUI.Internal.Context
   )
 import NanoUI.Internal.Font (sliderHandleSlack, sliderTrackBounds)
 import NanoUI.Internal.Frame.Hit
-  ( findNodeByWidgetId
-  , nodePointVisible
+  ( nodePointVisible
   , scrollHitRect
   , withWidgetNode
   )
@@ -125,12 +124,10 @@ textFieldHoverCursorKind ctx inp = do
   let
     mouse = inputMousePos inp
   mWid <- textFieldWidgetAtMouse ctx mouse
-  case mWid of
-    Nothing -> pure Nothing
-    Just wid -> do
-      onClear <- searchClearHit ctx wid mouse
-      onStepper <- numericStepperHit ctx wid mouse
-      pure (Just (if onClear || onStepper then UiCursorPointer else UiCursorText))
+  forM mWid $ \wid -> do
+    onClear <- searchClearHit ctx wid mouse
+    onStepper <- numericStepperHit ctx wid mouse
+    pure (if onClear || onStepper then UiCursorPointer else UiCursorText)
 
 -- | Whether the pointer is over a numeric field's stepper, which takes the
 -- pointer cursor rather than the text cursor.
@@ -174,19 +171,18 @@ cursorKindAt ctx wid mouse inp
             Nothing -> do
               -- Resolve the node through the arena's id index rather than
               -- building a type table of every widget for two lookups.
-              mNodeType <-
-                findNodeByWidgetId ctx wid >>= traverse (getNodeType (ctxNodeArena ctx))
-              case mNodeType of
-                Just NodeButton -> widgetPointerCursor ctx wid mouse
-                Just NodeCheckbox -> widgetPointerCursor ctx wid mouse
-                Just NodeRadio -> widgetPointerCursor ctx wid mouse
-                Just NodeTree -> widgetPointerCursor ctx wid mouse
-                Just NodeSelect -> rectCursorKind UiCursorPointer ctx wid mouse
-                Just NodeColorPicker -> pure UiCursorPointer
-                Just NodeTextInput -> textInputCursorKind ctx wid mouse
-                Just NodeTextArea -> textAreaCursorKind ctx wid mouse
-                Just NodeSlider -> sliderCursorKind ctx wid mouse inp
-                _ -> pure UiCursorDefault
+              withWidgetNode ctx wid UiCursorDefault $ \idx ->
+                getNodeType (ctxNodeArena ctx) idx >>= \case
+                  NodeButton -> widgetPointerCursor ctx wid mouse
+                  NodeCheckbox -> widgetPointerCursor ctx wid mouse
+                  NodeRadio -> widgetPointerCursor ctx wid mouse
+                  NodeTree -> widgetPointerCursor ctx wid mouse
+                  NodeSelect -> rectCursorKind UiCursorPointer ctx wid mouse
+                  NodeColorPicker -> pure UiCursorPointer
+                  NodeTextInput -> textInputCursorKind ctx wid mouse
+                  NodeTextArea -> textAreaCursorKind ctx wid mouse
+                  NodeSlider -> sliderCursorKind ctx wid mouse inp
+                  _ -> pure UiCursorDefault
 
 -- | @kind@ over the widget's visible rect, the default cursor elsewhere.
 rectCursorKind :: UiCursorKind -> Context -> WidgetId -> V2 -> IO UiCursorKind
@@ -233,18 +229,17 @@ textInputCursorKind ctx wid mouse = do
   visible <- widgetVisibleAt ctx wid mouse
   if not visible
     then pure UiCursorDefault
-    else do
-      mIdx <- findNodeByWidgetId ctx wid
+    else withWidgetNode ctx wid UiCursorDefault $ \idx -> do
       mrect <- scrollHitRect ctx wid
-      case (mIdx, mrect) of
-        (Just idx, Just (Rect x y w h)) -> do
+      case mrect of
+        Just (Rect x y w h) -> do
           (field, _) <- nodeTextFieldGeom ctx idx x y w h
           onStepper <- numericStepperHit ctx wid mouse
           pure $
             if onStepper
               then UiCursorPointer
               else if rectContains field mouse then UiCursorText else UiCursorDefault
-        _ -> pure UiCursorDefault
+        Nothing -> pure UiCursorDefault
 
 textAreaCursorKind :: Context -> WidgetId -> V2 -> IO UiCursorKind
 textAreaCursorKind ctx wid mouse = do

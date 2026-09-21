@@ -69,7 +69,6 @@ import NanoUI.Internal.Frame.Chrome
   ( floatingAncestor
   , imageIdFromText
   , overlayMenuStyle
-  , overlayModalStyle
   , overlayWindowStyle
   , paintScrollBarLayout
   , paintStyledRect
@@ -160,8 +159,7 @@ collectFloatingOccluders ctx = do
     isOpaque s = colorA (styleBg s) == 255
     occludes theme = \case
       NodeWindow -> isOpaque (overlayWindowStyle theme)
-      NodeModal -> isOpaque (overlayModalStyle theme)
-      NodePopup -> isOpaque (overlayMenuStyle theme)
+      nt | nt == NodeModal || nt == NodePopup -> isOpaque (overlayMenuStyle theme)
       _ -> False
     addOccluder na buf !n idx = do
       nt <- getNodeType na idx

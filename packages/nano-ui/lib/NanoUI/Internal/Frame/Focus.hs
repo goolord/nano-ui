@@ -8,7 +8,7 @@ module NanoUI.Internal.Frame.Focus
   , tabNextFocusables
   ) where
 
-import Control.Monad (filterM, unless, when)
+import Control.Monad (filterM, forM_, unless, when)
 import Data.IORef (readIORef, writeIORef)
 import Data.Primitive.PrimArray (readPrimArray)
 import NanoUI.Internal.Context (Context (..), getStore, intBool, intKey)
@@ -95,13 +95,11 @@ filterModalFocusables ctx ids = do
 constrainFocusToModal :: Context -> IO ()
 constrainFocusToModal ctx = do
   top <- topModalNode (ctxNodeArena ctx)
-  case top of
-    Nothing -> pure ()
-    Just modal -> do
-      focus <- readIORef (ctxFocusId ctx)
-      when (hashWidgetId focus /= 0) $ do
-        ok <- widgetIdInSubtree ctx modal focus
-        unless ok $ writeIORef (ctxFocusId ctx) (WidgetId 0)
+  forM_ top $ \modal -> do
+    focus <- readIORef (ctxFocusId ctx)
+    when (hashWidgetId focus /= 0) $ do
+      ok <- widgetIdInSubtree ctx modal focus
+      unless ok $ writeIORef (ctxFocusId ctx) (WidgetId 0)
 
 -- | Copy selection state from the store into the node values the painter
 -- reads. A checkbox's value becomes its stored flag. A radio option or a tree
@@ -121,9 +119,8 @@ syncWidgetLabels ctx = do
       NodeCheckbox ->
         -- A checkbox with no stored value keeps the value the view gave its
         -- node.
-        case lookupSlot fieldInt key store of
-          Just v -> setNodeValue na idx (if intBool v then 1 else 0)
-          Nothing -> pure ()
+        forM_ (lookupSlot fieldInt key store) $ \v ->
+          setNodeValue na idx (if intBool v then 1 else 0)
       _
         -- A radio option's style index is its option index. A tree row packs
         -- its pre-order node index into the high bits of its style index.

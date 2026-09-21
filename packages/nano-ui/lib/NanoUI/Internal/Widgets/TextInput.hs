@@ -4,9 +4,7 @@ module NanoUI.Internal.Widgets.TextInput
   ( TextInputState (..)
   , loadTextInputState
   , saveTextInputState
-  , textInputLayout
   , searchInputLayout
-  , textInputEditor
   , editorTextState
   , saveTextEditor
   , editTextInput
@@ -61,7 +59,7 @@ import NanoUI.Internal.Input
   , inputKeys
   )
 import NanoUI.Internal.Layout.Arena (NodeType (..))
-import NanoUI.Internal.Monad (Ui, askContext, askDefaultLayout, askInput, nextId, uiIO)
+import NanoUI.Internal.Monad (Ui, askContext, askDefaultLayout, askInput, nextId, uiIO, withContext)
 import NanoUI.Internal.Store
   ( Slot (..)
   , WidgetStore
@@ -412,9 +410,8 @@ selectableTextWith' :: Ui :> es => (Layout -> Layout) -> Text -> Eff es Response
 selectableTextWith' f txt = do
   layout <- f <$> askDefaultLayout
   wid <- nextId
-  ctx <- askContext
   -- The caller owns the text; the editor only moves the selection.
-  _ <- uiIO $ adoptSlot fieldText ctx wid (intKey wid) txt
+  _ <- withContext (\ctx -> adoptSlot fieldText ctx wid (intKey wid) txt)
   _ <- editTextField wid singleLineMode {modeEditable = False} txt Nothing
   let styleIdx =
         textInputFlagSelectable

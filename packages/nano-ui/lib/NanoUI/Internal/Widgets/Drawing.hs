@@ -15,7 +15,7 @@ import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context (cachedWidgetLayout, registerDrawing)
 import NanoUI.Internal.Draw (DrawOp (..), DrawingBuild)
 import NanoUI.Internal.Layout.Arena (NodeType (NodeDrawing))
-import NanoUI.Internal.Monad (Ui, askContext, nextId, uiIO)
+import NanoUI.Internal.Monad (Ui, askContext, nextId, uiIO, withContext)
 import NanoUI.Internal.Style (Layout, defaultLayout)
 import NanoUI.Internal.Types (Rect)
 import NanoUI.Internal.Widgets.Node (Response, addWidget)
@@ -40,8 +40,7 @@ drawing = drawingVersioned 0
 drawingVersioned :: Ui :> es => Int -> (Layout -> Layout) -> (Rect -> SmallArray DrawOp) -> Eff es Response
 drawingVersioned version f build = do
   wid <- nextId
-  ctx <- askContext
-  uiIO (registerDrawing ctx wid version build)
+  withContext (\ctx -> registerDrawing ctx wid version build)
   addWidget wid NodeDrawing T.empty 0 (f defaultLayout)
 
 -- | Like 'drawingVersioned', but the layout itself comes from @compute@, which

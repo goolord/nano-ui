@@ -9,7 +9,6 @@ module NanoUI.Internal.Frame.Chrome
   , strokeStyledRect
   , paintStyledRect
   , overlayWindowStyle
-  , overlayModalStyle
   , overlayMenuStyle
   , paintMenuPanel
   , menuPanelBounds
@@ -294,7 +293,7 @@ widgetVisualStyle ctx nt idx = do
           _ -> themeButton theme
       widgetBase =
         case mFloat of
-          Just NodeModal | modalAware -> overlayModalStyle theme
+          Just NodeModal | modalAware -> overlayMenuStyle theme
           _ -> base
       bg
         | nt == NodeTextInput, isFocus = styleActiveBg widgetBase
@@ -350,9 +349,6 @@ overlayMenuStyle theme =
 
 overlayWindowStyle :: Theme -> Style
 overlayWindowStyle theme = (themeFloatingWindow theme) {styleCornerRadius = 2, styleBorderWidth = 1}
-
-overlayModalStyle :: Theme -> Style
-overlayModalStyle theme = (overlayMenuStyle theme) {styleCornerRadius = 2, styleBorderWidth = 1}
 
 -- | Panel behind menus, dropdowns and floating windows: the theme's offset
 -- shadow, then the styled fill and border.

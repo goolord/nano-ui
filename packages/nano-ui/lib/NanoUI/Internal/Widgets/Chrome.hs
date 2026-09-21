@@ -4,9 +4,7 @@ module NanoUI.Internal.Widgets.Chrome
   , titleBarChromeHFor
   , titleBarLayoutFor
   , titleLabelLayoutFor
-  , floatMinFor
   , closeButton
-  , windowChromeTop
   , windowChromeSepH
   ) where
 
@@ -24,7 +22,6 @@ import NanoUI.Internal.Style
   , gap
   , tight
   )
-import NanoUI.Internal.Types (clamp)
 import NanoUI.Internal.Widgets.Combinators (buttonStyled)
 import NanoUI.Internal.Widgets.Node (Response)
 
@@ -54,9 +51,6 @@ titleLabelLayoutFor :: Float -> Layout
 titleLabelLayoutFor barH =
   (fixedH barH . alignMid . tight) $
     defaultLayout {layoutMinH = barH, layoutMaxH = barH}
-
-floatMinFor :: Float -> Float -> Float
-floatMinFor authored avail = clamp 1 avail authored
 
 {-# INLINE closeButton #-}
 closeButton :: (Ui :> es) => Eff es Response

@@ -53,7 +53,7 @@ import NanoUI.Internal.Font
   , centeredTextY
   )
 import NanoUI.Internal.Layout.Arena
-  ( forNodesOfType_
+  ( forFloatingNodes_
   , DirTag (..)
   , FlexScratch (..)
   , IOArr
@@ -445,12 +445,9 @@ growParent na idx = getParent na idx >>= go True
           (pwTag, _) <- getWidthSizing na p
           if pwTag == SizingGrow
             then getParent na p >>= go False
-            else
-              if isParent
-                then pure False
-                else do
-                  nt <- getNodeType na p
-                  pure (nt /= NodeModal)
+            else if isParent
+              then pure False
+              else (/= NodeModal) <$> getNodeType na p
 
 measureImage :: NodeArena -> NodeIdx -> IO ()
 measureImage na idx = do
@@ -593,13 +590,10 @@ measureWidget env@SolveEnv {seArena = na, seArrays = a, seFm = fm, seMeasure = m
         | nt == NodeCheckbox || nt == NodeRadio ->
             measureMarkedWidget fm measure txt (checkboxLeading fm)
         | otherwise -> do
-            body <-
-              if T.null txt
-                then pure " "
-                else
-                  if hasFlag buttonFlagTable si
-                    then pure (tableHeaderDisplayText txt)
-                    else pure txt
+            let body
+                  | T.null txt = " "
+                  | hasFlag buttonFlagTable si = tableHeaderDisplayText txt
+                  | otherwise = txt
             (mw, mh) <- measure body
             pure (mw, mh, 0, 0)
   let rawW = tw + padX + extraW
@@ -875,8 +869,7 @@ measureGridScratch env idx gCols minColW innerMaxW innerAvailH gap = do
 recomputeFitHeightAtWidth :: SolveEnv -> NodeIdx -> Float -> IO Float
 recomputeFitHeightAtWidth env idx availW = do
   let na = seArena env
-  (_, h) <- memoizeWidth na (naFitMemo na) idx availW ((,) 0 <$> recomputeFitHeightAtWidthGo env idx availW)
-  pure h
+  snd <$> memoizeWidth na (naFitMemo na) idx availW ((,) 0 <$> recomputeFitHeightAtWidthGo env idx availW)
 
 recomputeFitHeightAtWidthGo :: SolveEnv -> NodeIdx -> Float -> IO Float
 recomputeFitHeightAtWidthGo env@SolveEnv {seArena = na, seFm = fm, seLookupMeasure = lookupMeasure} idx availW = do
@@ -1183,13 +1176,12 @@ positionColumnScroll env@SolveEnv {seArena = na} depth parent gap cx cy innerW i
               fh <- readPrimArray outSnap i
               nt <- getNodeType na ci
               fx <- columnChildX na ci cx innerW
-              let cw = innerW
-                  visibleSlice = max 0 (innerH - (curY - cy))
+              let visibleSlice = max 0 (innerH - (curY - cy))
                   nodeH =
                     if isScrollNode nt
                       then min fh visibleSlice
                       else fh
-              positionNodeA env (depth + 1) ci fx curY cw nodeH
+              positionNodeA env (depth + 1) ci fx curY innerW nodeH
               (_, _, _, placedH) <- getRect na ci
               go (i + 1) (curY + placedH + gap)
     go 0 cy
@@ -1468,8 +1460,6 @@ swapPrim arr a b = do
 
 columnGapSumScratch :: NodeArena -> Bool -> Int -> Float -> IO Float
 columnGapSumScratch _ False _ _ = pure 0
-columnGapSumScratch _ True n _
-  | n <= 1 = pure 0
 columnGapSumScratch na True n gap = do
   FlexScratch {fsIdx = idxArr} <- readIORef (naScratch na)
   let go !i !acc
@@ -1756,11 +1746,10 @@ childBaseline env@SolveEnv {seArena = na, seArrays = a, seFm = defaultFm, seReso
 placeModals :: NodeArena -> Measurers -> Float -> Float -> IO ()
 placeModals na ms winW winH = do
   env <- solveEnv na ms
-  let margin = windowMargin
-  forNodesOfType_ na NodeModal $ \idx -> do
+  forFloatingNodes_ na NodeModal $ \idx -> do
     (_, _, iw, ih) <- getRect na idx
-    let maxW = max 0 (winW - 2 * margin)
-        maxH = max 0 (winH - 2 * margin)
+    let maxW = max 0 (winW - 2 * windowMargin)
+        maxH = max 0 (winH - 2 * windowMargin)
         w = min iw maxW
         h = min ih maxH
         x = max 0 ((winW - w) / 2)
@@ -1779,13 +1768,12 @@ placeWindows ::
   (WidgetId -> IO (Maybe (Float, Float))) ->
   IO ()
 placeWindows na ms winW winH lookupPos lookupSize = do
-  let margin = windowMargin
-  forNodesOfType_ na NodeWindow $ \idx -> do
+  forFloatingNodes_ na NodeWindow $ \idx -> do
     wid <- getWidgetId na idx
     (_, _, iw, ih) <- getRect na idx
     (w0, h0) <- fromMaybe (min iw winW, min ih winH) <$> lookupSize wid
     mpos <- lookupPos wid
-    placeWindowNode na ms winW winH idx w0 h0 $ \w -> fromMaybe (winW - w - margin, margin) mpos
+    placeWindowNode na ms winW winH idx w0 h0 $ \w -> fromMaybe (winW - w - windowMargin, windowMargin) mpos
 
 -- | Lay out window @idx@ at size @w0 h0@, clamped to its min and max size and
 -- the screen, with its origin, given that size, clamped on screen. Fit sizing
@@ -1883,11 +1871,10 @@ placePopups ::
   IO ()
 placePopups na ms winW winH lookupAnchor = do
   env <- solveEnv na ms
-  let margin = windowMargin
-  forNodesOfType_ na NodePopup $ \idx -> do
+  forFloatingNodes_ na NodePopup $ \idx -> do
     wid <- getWidgetId na idx
     (_, _, iw, ih) <- getRect na idx
     mcfg <- lookupAnchor wid
     let (anchor, placement, offset) = fromMaybe (AnchorPoint (V2 0 0), PlacementAuto, 4) mcfg
-        (x, y) = computePopupPosition winW winH margin iw ih anchor placement offset
+        (x, y) = computePopupPosition winW winH windowMargin iw ih anchor placement offset
     positionNodeA env 0 idx x y iw ih

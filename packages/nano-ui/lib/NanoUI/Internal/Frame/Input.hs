@@ -17,7 +17,7 @@ module NanoUI.Internal.Frame.Input
   ) where
 
 import Control.Applicative ((<|>))
-import Control.Monad (forM_, unless, when)
+import Control.Monad (forM_, when)
 import Data.IORef (readIORef, writeIORef)
 import NanoUI.Internal.Context
   ( Context (..)
@@ -35,8 +35,7 @@ import NanoUI.Internal.Context
   )
 import NanoUI.Internal.Frame.Focus (filterModalFocusables, tabNext, tabNextFocusables)
 import NanoUI.Internal.Frame.Hit
-  ( findNodeByWidgetId
-  , modalTreeOpen
+  ( modalTreeOpen
   , nodeClippedHit
   , nodeInteractionHit
   , nodeOwnsPointer
@@ -73,7 +72,7 @@ import NanoUI.Internal.Layout.Arena
   , getStyleIdx
   , getWidgetId
   )
-import NanoUI.Internal.Monad (whenM, (<&&>))
+import NanoUI.Internal.Monad (unlessM, whenM, (<&&>))
 import NanoUI.Internal.Store (fieldInt, insertSlot)
 import NanoUI.Internal.Types (DamageBounds (..), V2 (..), defaultDamageSlop, rectContains)
 import NanoUI.Internal.WidgetText (hasFlag, buttonVisualStyle, buttonFlagMenuBar, buttonFlagMenu, buttonFlagTab)
@@ -231,8 +230,8 @@ finalizePointerRelease ctx inp =
                         setParentSelection ctx idx (buttonVisualStyle packed `div` 4)
                     _ -> pure ()
                   when (postsLayoutClick nt && releasedClicked /= active) $ do
-                    uiHit <- inUiClickHit ctx active mouse
-                    unless uiHit $ writeIORef (ctxClickedId ctx) active
+                    unlessM (inUiClickHit ctx active mouse) $
+                      writeIORef (ctxClickedId ctx) active
                 pure (over <|> Just visible)
       releasedOver <- foldNodesM na release Nothing
       writeIORef (ctxActiveId ctx) (WidgetId 0)
@@ -268,13 +267,10 @@ inUiClickHit ctx wid mouse = do
   mrect <- scrollHitRect ctx wid
   case mrect of
     Just r | not disabled ->
-      findNodeByWidgetId ctx wid >>= \case
-        Nothing -> pure (rectContains r mouse)
-        -- The view saw the release only if the frame routed the pointer to
-        -- this node's layer.
-        Just idx -> do
-          owns <- nodeOwnsPointer ctx idx
-          if owns then nodeInteractionHit ctx idx r mouse else pure False
+      -- The view saw the release only if the frame routed the pointer to
+      -- this node's layer.
+      withWidgetNode ctx wid (rectContains r mouse) $ \idx ->
+        nodeOwnsPointer ctx idx <&&> nodeInteractionHit ctx idx r mouse
     _ -> pure False
 
 -- | Focus the enabled text field under a left press using solved geometry.

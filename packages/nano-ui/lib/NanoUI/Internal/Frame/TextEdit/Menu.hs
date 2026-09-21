@@ -16,6 +16,7 @@ module NanoUI.Internal.Frame.TextEdit.Menu
 
 import Control.Monad (forM, forM_, unless, when)
 import Data.IORef (writeIORef)
+import Data.Maybe (isJust)
 import qualified Data.Text as T
 import NanoUI.Internal.Context
   ( Context (..)
@@ -57,7 +58,7 @@ import NanoUI.Internal.Input
   , inputWindowSize
   )
 import NanoUI.Internal.Layout.Arena (NodeType (NodeTextArea, NodeTextInput), findNodeRevM, getNodeRect, getNodeType, getWidgetId)
-import NanoUI.Internal.Monad ((<&&>))
+import NanoUI.Internal.Monad (whenM, (<&&>))
 import NanoUI.Internal.Style (Style (..), Theme, themeSeparator)
 import NanoUI.Internal.Types (Color (..), Rect (..), Size (..), V2 (..), clamp, lerpColor, rectContains)
 import NanoUI.Internal.Widgets.TextEditor (EditorMode (..), TextCommand (..), canRedo, canUndo)
@@ -142,14 +143,12 @@ openTextEditMenu ctx inp =
   when (inputMouseRightPressed inp) $ do
     let mouse@(V2 mx my) = inputMousePos inp
     mWid <- textFieldWidgetAtMouse ctx mouse
-    case mWid of
-      Nothing -> pure ()
-      Just wid -> do
-        writeIORef (ctxFocusId ctx) wid
-        menuW <- textEditMenuWidth ctx
-        let menuRect = textEditMenuRectAt mx my menuW (inputWindowSize inp)
-        setTextInputMenu ctx (Just (TextInputMenu wid menuRect))
-        markDirty ctx
+    forM_ mWid $ \wid -> do
+      writeIORef (ctxFocusId ctx) wid
+      menuW <- textEditMenuWidth ctx
+      let menuRect = textEditMenuRectAt mx my menuW (inputWindowSize inp)
+      setTextInputMenu ctx (Just (TextInputMenu wid menuRect))
+      markDirty ctx
 
 textFieldWidgetAtMouse :: Context -> V2 -> IO (Maybe WidgetId)
 textFieldWidgetAtMouse ctx mouse = do
@@ -195,12 +194,10 @@ closeTextEditMenuOnOutsideClick ctx inp =
 closeTextEditMenuOnEscape :: Context -> Input -> IO ()
 closeTextEditMenuOnEscape ctx inp =
   when (inputKeysElem KeyEscape (inputKeys inp)) $
-    getTextInputMenu ctx >>= \case
-      Nothing -> pure ()
-      Just _ -> do
-        setTextInputMenu ctx Nothing
-        markEscapeConsumed ctx
-        markDirty ctx
+    whenM (isJust <$> getTextInputMenu ctx) $ do
+      setTextInputMenu ctx Nothing
+      markEscapeConsumed ctx
+      markDirty ctx
 
 textEditMenuCursorKind :: Context -> Input -> IO (Maybe UiCursorKind)
 textEditMenuCursorKind ctx inp = do

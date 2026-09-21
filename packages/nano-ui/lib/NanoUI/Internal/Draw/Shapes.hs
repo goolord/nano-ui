@@ -9,7 +9,6 @@ module NanoUI.Internal.Draw.Shapes
   , pushRoundedRect
   , pushRoundedRectRaw
   , pushRoundedStroke
-  , pushRoundedStrokeRaw
   , pushCircle
   , pushCircleStroke
   , pushLine

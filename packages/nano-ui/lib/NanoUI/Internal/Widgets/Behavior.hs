@@ -24,7 +24,6 @@ import Data.List (find)
 import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context
   ( Context (..)
-  , getFocusId
   , getStore
   , intKey
   , isDisabled
@@ -48,7 +47,7 @@ import NanoUI.Internal.Input
   , inputMouseReleased
   , inputMouseRightPressed
   )
-import NanoUI.Internal.Monad (Ui, askContext, askFrameInput, askInput, nextId, uiIO)
+import NanoUI.Internal.Monad (Ui, askContext, askFrameInput, askInput, focusedWidget, nextId, uiIO, withContext)
 import NanoUI.Internal.Store (fieldFloat, fieldInt, findSlot, flagSlot, insertSlot, setFlagSlot)
 import NanoUI.Internal.Types (Rect (..), clamp01, rectHit, v2X, v2Y)
 import qualified Data.Text as T
@@ -191,7 +190,7 @@ keyboardFocused wid
   | hashWidgetId wid == 0 = pure False
   | otherwise = do
       ctx <- askContext
-      focus <- uiIO (getFocusId ctx)
+      focus <- focusedWidget
       if focus /= wid
         then pure False
         else uiIO $ do
@@ -238,12 +237,11 @@ keyActivated wid = do
 -- frame's input rather than the pointer routed here.
 useDismissable :: (Ui :> es) => Rect -> Eff es Bool
 useDismissable panel = do
-  ctx <- askContext
   inp <- askFrameInput
   let mouse = inputMousePos inp
       inside = rectHit panel mouse
       esc = inputKeysElem KeyEscape (inputKeys inp)
       backdrop = (inputMousePressed inp || inputMouseRightPressed inp) && not inside
       dismissed = esc || backdrop
-  when esc $ uiIO (markEscapeConsumed ctx)
+  when esc $ withContext markEscapeConsumed
   pure dismissed

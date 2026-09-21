@@ -43,13 +43,10 @@ import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context
   ( Context (..)
   , bumpMirror
-  , damageWidget
   , getFocusId
   , getFocusVisible
-  , getPrevRect
   , getStore
   , intKey
-  , markDirty
   , markEscapeConsumed
   , overlayConsumesQuit
   , registerCustomDrawing
@@ -69,7 +66,7 @@ import NanoUI.Internal.Input
   , inputMousePos
   , inputMousePressed
   )
-import NanoUI.Internal.Monad (Ui, askContext, askInput, nextId, releaseFocus, uiIO, withIdFrame, withKey)
+import NanoUI.Internal.Monad (Ui, askContext, askInput, damageWidgetNow, focusedWidget, lastRect, nextId, releaseFocus, requestFrame, uiIO, withIdFrame, withKey)
 import NanoUI.Internal.Id (IdContext (..), WidgetId, hashWidgetId)
 import NanoUI.Internal.Frame.Hit (nodeInteractionHit, scrollHitRect)
 import NanoUI.Internal.Frame.Input (isInteractiveNode)
@@ -430,7 +427,7 @@ paneGrid cfg = do
       uiIO . setStore ctx . bumpMirror $
         insertSlot fieldInt seedK (fromIntegral next) (insertDyn key start st)
       pure (start, next)
-  mPrev <- uiIO (getPrevRect ctx wid)
+  mPrev <- lastRect wid
   let baseRect = fromMaybe (Rect 0 0 0 0) mPrev
       spanK = slotKey SlotPaneSpan key
       curSpan = (rectW baseRect, rectH baseRect)
@@ -549,7 +546,7 @@ paneGrid cfg = do
   -- pane unless something earlier in the pass already consumed it (e.g. a
   -- dismissable popup inside a pane); the grid then claims the key so
   -- neither a nested overlay nor the app also acts on it.
-  focusedNow <- uiIO (getFocusId ctx)
+  focusedNow <- focusedWidget
   when (pgFocusable cfg && focusedNow == wid) $ do
     nav <- useKeyNav wid
     let ch = inputChars inp
@@ -559,7 +556,7 @@ paneGrid cfg = do
     when (knUp nav) $ moveFocus env cur (0, -1)
     when (knDown nav) $ moveFocus env cur (0, 1)
     when (knLeft nav || knRight nav || knUp nav || knDown nav) $
-      uiIO (damageWidget ctx wid (DamageInflated 0))
+      damageWidgetNow wid (DamageInflated 0)
     when (T.any (== 'm') ch) $ maximizePane env cur
     when (T.any (== 'x') ch) $ closePane env cur
     when (inputKeysElem KeyEscape (inputKeys inp)) $ do
@@ -971,7 +968,7 @@ runGestures env dividers rendered dgi = do
   -- ghost follows the pointer, and without a dirty flag the debug HUD's slow
   -- refresh paces the whole frame (4 fps). Window / scroll / resize drags mark
   -- dirty every frame for the same reason.
-  when (drag0 > 0 && down) $ uiIO (markDirty ctx)
+  when (drag0 > 0 && down) requestFrame
   when (drag0 > 0 && down && dgiMoved dgi) $
     storeWrite env False (insertSlot fieldInt (slotKey SlotPaneGrab (geKey env)) 1)
   -- A drop clears the gesture and, when it moved the pane, stores the new
@@ -1007,9 +1004,7 @@ moveFocus ::
   (Float, Float) ->
   Eff es ()
 moveFocus env cur dir =
-  case neighborPane (geRegions env) cur dir of
-    Just pid -> putPaneSlot False SlotPaneFocus env pid
-    Nothing -> pure ()
+  forM_ (neighborPane (geRegions env) cur dir) (putPaneSlot False SlotPaneFocus env)
 
 neighborPane :: Map Word64 Rect -> Word64 -> (Float, Float) -> Maybe Word64
 neighborPane regions cur (dx, dy) =

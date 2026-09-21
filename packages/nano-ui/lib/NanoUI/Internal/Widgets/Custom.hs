@@ -63,7 +63,7 @@ module NanoUI.Internal.Widgets.Custom
   , sparklineWith'
   ) where
 
-import Control.Monad (forM_, void, when)
+import Control.Monad (forM_, void, when, zipWithM_)
 import Control.Monad.Trans.State.Strict qualified as State
 import Data.IORef (readIORef)
 import Data.Text (Text)
@@ -501,13 +501,10 @@ knobWith' f diameter minV maxV value = do
               theme = cdcTheme cdc
               hover = cdcHovered cdc
               pressed = cdcPressed cdc
-              bgCol =
-                if pressed
-                  then styleActiveBg (themeButton theme)
-                  else
-                    if hover
-                      then styleHoverBg (themeButton theme)
-                      else styleBg (themeButton theme)
+              bgCol
+                | pressed = styleActiveBg (themeButton theme)
+                | hover = styleHoverBg (themeButton theme)
+                | otherwise = styleBg (themeButton theme)
               accent = themeAccent theme
               borderCol = styleBorder (themeButton theme)
               angle = (135 + frac * 270) * (pi / 180)
@@ -764,13 +761,6 @@ sparklineWith' f prefW prefH values =
                            (y + rh - pad - ((v - minV) / range) * plotH)
                       | (i, v) <- zip [0 :: Int ..] vs
                       ]
-                drawSegments [] = pure ()
-                drawSegments [_] = pure ()
-                drawSegments (p1 : p2 : rest) = do
-                  drawStrokeAA p1 p2 1.5 accent
-                  drawSegments (p2 : rest)
-            drawSegments pts
-            case pts of
-              [] -> pure ()
-              _ -> drawCircle (last pts) 2.5 accent
+            zipWithM_ (\p1 p2 -> drawStrokeAA p1 p2 1.5 accent) pts (drop 1 pts)
+            drawCircle (last pts) 2.5 accent
     }

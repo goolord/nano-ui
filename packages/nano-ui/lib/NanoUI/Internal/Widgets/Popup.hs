@@ -33,6 +33,7 @@ import NanoUI.Internal.Monad
   , askContext
   , askDefaultLayout
   , askInput
+  , lastRect
   , nextId
   , uiIO
   )
@@ -155,7 +156,7 @@ floatingOverlay open dismissable addPanel enter body = do
       -- so whatever is in front of the panel takes the hover with it.
       (mouse, (closed, r)) <-
         floatingPanel True wid (addPanel wid) (enter wid) ((,) . inputMousePos <$> askInput <*> body)
-      panel <- fromMaybe (Rect 0 0 0 0) <$> uiIO (getPrevRect ctx wid)
+      panel <- fromMaybe (Rect 0 0 0 0) <$> lastRect wid
       outside <-
         if dismissable && rectNonEmpty panel
           then useDismissable panel

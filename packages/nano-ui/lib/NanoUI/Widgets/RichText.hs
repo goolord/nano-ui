@@ -19,7 +19,7 @@ import Data.Hashable (hashWithSalt)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
 import Data.IntMap.Strict qualified as IM
 import Data.List (dropWhileEnd, groupBy)
-import Data.Maybe (fromMaybe, isJust)
+import Data.Maybe (fromMaybe, isJust, listToMaybe)
 import Data.Primitive.SmallArray (SmallArray, indexSmallArray, smallArrayFromList)
 import Data.String (IsString (..))
 import Data.Text (Text)
@@ -201,16 +201,15 @@ richTextWith' f pieces = do
       hoveredRun
         | not (respHovered resp) = Nothing
         | otherwise =
-            case [ tokenRun tok
-                 | line <- paraLines para
-                 , my >= ry + lineTop line && my < ry + lineTop line + lineHeight line
-                 , (x, tok) <- lineTokens line
-                 , tokenKind tok /= Break
-                 , mx >= rx + x && mx < rx + x + tokenWidth tok
-                 , isJust (runTarget (indexSmallArray runs (tokenRun tok)))
-                 ] of
-              run : _ -> Just run
-              [] -> Nothing
+            listToMaybe
+              [ tokenRun tok
+              | line <- paraLines para
+              , my >= ry + lineTop line && my < ry + lineTop line + lineHeight line
+              , (x, tok) <- lineTokens line
+              , tokenKind tok /= Break
+              , mx >= rx + x && mx < rx + x + tokenWidth tok
+              , isJust (runTarget (indexSmallArray runs (tokenRun tok)))
+              ]
       -- Words are drawn one by one, so a decoration is drawn once across a
       -- piece's words on a line and the spaces between them.
       draw _cdc (Rect x0 y0 w _) =

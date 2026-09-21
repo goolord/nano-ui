@@ -5,7 +5,6 @@ module NanoUI.Internal.Frame.Redraw
   , textFieldActive
   , floatingPanelActive
   , debugPanelOpen
-  , overlayMenuOpen
   , probeHotId
   ) where
 
@@ -26,16 +25,16 @@ import NanoUI.Internal.Context
   , modalActive
   )
 import NanoUI.Internal.Frame.Hit (nodePointVisible, overlayHitAllowed, withWidgetNode)
-import NanoUI.Internal.Frame.Select (overlayMenuOwnerAt)
+import NanoUI.Internal.Frame.Select (focusedComboNode, overlayMenuOwnerAt)
 import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Internal.Input (Input (..), inputInteracted, inputMousePos, inputPointerHeld)
 import NanoUI.Internal.Layout.Arena
   ( NodeType (..)
+  , findFloatingNodeRevM
   , findNodeM
+  , floatingNodeCount
   , getNodeType
-  , getOptions
   , getWidgetId
-  , isFloatingNode
   , isWidgetNode
   )
 import NanoUI.Internal.Monad ((<&&>))
@@ -100,11 +99,7 @@ overlayMenuOpen ctx = do
   menu <- getTextInputMenu ctx
   if anySelectOpen store || isJust menu
     then pure True
-    else do
-      focus <- readIORef (ctxFocusId ctx)
-      withWidgetNode ctx focus False $ \idx ->
-        ((== NodeTextInput) <$> getNodeType (ctxNodeArena ctx) idx)
-          <&&> (not . null <$> getOptions (ctxNodeArena ctx) idx)
+    else isJust <$> focusedComboNode ctx
 
 -- | Focused text field or its context menu. Typing reaches it as input events,
 -- which wake the loop by themselves, so focus alone keeps nothing running.
@@ -120,15 +115,14 @@ textFieldActive ctx = do
 floatingPanelActive :: Context -> IO Bool
 floatingPanelActive ctx = do
   modal <- modalActive ctx
-  if modal
-    then pure True
-    else isJust <$> findNodeM (ctxNodeArena ctx) (fmap isFloatingNode . getNodeType (ctxNodeArena ctx))
+  floating <- floatingNodeCount (ctxNodeArena ctx)
+  pure (modal || floating > 0)
 
 -- | Whether the arena contains any floating window. The name does not imply
 -- that its contents are a debug readout.
 debugPanelOpen :: Context -> IO Bool
 debugPanelOpen ctx =
-  isJust <$> findNodeM (ctxNodeArena ctx) (fmap (== NodeWindow) . getNodeType (ctxNodeArena ctx))
+  isJust <$> findFloatingNodeRevM (ctxNodeArena ctx) (fmap (== NodeWindow) . getNodeType (ctxNodeArena ctx))
 
 probeHotId :: Context -> V2 -> IO WidgetId
 probeHotId ctx mouse = do

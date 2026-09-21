@@ -164,7 +164,7 @@ lineWidthIO fm txt = do
 measureTextIO :: FontMetrics -> Text -> IO (Float, Float)
 measureTextIO fm txt = do
   prepared <- prepareFontMetrics fm txt
-  pure $! measureText prepared txt
+  pure $! (lineWidth prepared txt, fmLineHeight prepared)
 
 -- | The glyph quads of a shaped line, placing glyphs in the host's atlas as
 -- needed; 'Nothing' when the host does not shape.
@@ -300,18 +300,6 @@ centeredTextY fm y h th =
     -- rigid. Snapping only the constant offset keeps every row fixed on the
     -- grid no matter where y falls.
 
--- Origin and used width inside the node box, inset on all AlignX sides.
-{-# INLINE alignedTextBox #-}
-alignedTextBox :: AlignX -> Float -> Float -> Float -> Float -> (Float, Float)
-alignedTextBox ax x w ix tw =
-  let contentW = max 0 (w - 2 * ix)
-      used = min tw contentW
-      tx = case ax of
-        AlignEnd -> x + w - ix - used
-        AlignCenter -> x + ix + (contentW - used) / 2
-        AlignStart -> x + ix
-   in (tx, used)
-
 -- Last glyph ink right in the same space as 'pushText' (pen + gqX + gqW).
 -- Falls back to advance when 'fmGlyph' is Nothing (tests).
 textInkEnd :: FontMetrics -> Text -> Float
@@ -333,16 +321,14 @@ textInkEnd fm txt =
 alignedTextPen :: AlignX -> Float -> Float -> Float -> FontMetrics -> Text -> (Float, Float)
 alignedTextPen ax x w ix fm txt =
   let tw = lineWidth fm txt
-      ink = textInkEnd fm txt
       contentW = max 0 (w - 2 * ix)
       used = min tw contentW
-      shift =
-        if tw > contentW
-          then used
-          else case ax of
-            AlignStart -> used
-            _ -> ink
-      (tx, _) = alignedTextBox ax x w ix shift
+      -- Origin inside the node box, inset on all AlignX sides.
+      shift = if tw > contentW then used else min (textInkEnd fm txt) contentW
+      tx = case ax of
+        AlignStart -> x + ix
+        AlignEnd -> x + w - ix - shift
+        AlignCenter -> x + ix + (contentW - shift) / 2
    in (tx, used)
 
 -- | Total horizontal and vertical content padding, twice 'widgetContentInset'.
@@ -354,7 +340,7 @@ widgetPadding fm =
 
 {-# INLINE checkboxBoxSize #-}
 checkboxBoxSize :: FontMetrics -> Float
-checkboxBoxSize fm = min 22 (max 18 (fmLineHeight fm * 1.15))
+checkboxBoxSize fm = clamp 18 22 (fmLineHeight fm * 1.15)
 
 {-# INLINE checkboxLeading #-}
 checkboxLeading :: FontMetrics -> Float
@@ -463,12 +449,6 @@ scrollLayoutGutter :: ScrollBarSlot -> Float -> Float -> Float -> Float
 scrollLayoutGutter slot trailPad contentSize innerMain
   | contentSize <= innerMain = 0
   | otherwise = scrollBarGutter slot trailPad
-
-measureText :: FontMetrics -> Text -> (Float, Float)
-measureText fm txt =
-  let h = fmLineHeight fm
-      w = lineWidth fm txt
-   in (w, h)
 
 -- | The one policy for "does this node use the ambient base font, or does it
 -- need the host resolver?". A zero size with a plain weight/style and the

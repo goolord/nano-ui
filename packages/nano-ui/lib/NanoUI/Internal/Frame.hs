@@ -31,6 +31,7 @@ import NanoUI.Internal.Context
   , PointerRoute (..)
   , beginThemeScopes
   , damageFull
+  , damageRect
   , themeScopesChanged
   , FrameMsg (..)
   , clearDirty
@@ -51,6 +52,7 @@ import NanoUI.Internal.Context
   , hasCustomLayoutInputs
   , ensureMetricCaches
   , getsOverlay
+  , modifyOverlay
   , OverlayState (..)
   , getsDamage
   , DamageState (..)
@@ -137,8 +139,8 @@ import NanoUI.Internal.Layout.Arena
   , resetNodeArena
   , restoreLayoutCache
   )
-import NanoUI.Internal.Layout.Solve (placeModals, placePopups, placeWindows, solveLayout)
-import NanoUI.Internal.Monad (NanoUI, Ui, runUi, whenM)
+import NanoUI.Internal.Layout.Solve (Measurers, placeModals, placePopups, placeWindows, solveLayout)
+import NanoUI.Internal.Monad (NanoUI, Ui, runUi, unlessM, whenM)
 import NanoUI.Internal.Store (mirrorStoresChanged)
 import NanoUI.Internal.Style (Theme (..))
 import NanoUI.Internal.Types (Damage (..), Size (..), rectInflate, rectNonEmpty)
@@ -261,20 +263,12 @@ runFrameEff unlift ctx frameInp ui = do
   syncWidgetLabels ctx
   let
     Size w h = inputWindowSize frameInp
-  reused <- tryReuseLayout ctx (Size w h)
-  unless reused $ do
-    solvePlaceWindows ctx w h
-    captureLayout ctx (Size w h)
+  unlessM (tryReuseLayout ctx (Size w h)) $
+    solveLayoutAndCapture ctx w h
   movedResize <- updateWindowResize ctx layerInp w h
   movedWindow <- updateWindowDrag ctx layerInp
   when (movedResize || movedWindow) $
-    placeWindows
-      (ctxNodeArena ctx)
-      (contextMeasurers ctx)
-      w
-      h
-      (lookupWindowPos ctx)
-      (lookupWindowSize ctx)
+    placeFloatingWindows ctx (contextMeasurers ctx) w h
   persistWindowPositions ctx
   applyScrollOffsets ctx
   -- A press on a menu or dropdown leaves nothing active, whatever a release
@@ -301,15 +295,21 @@ runFrameEff unlift ctx frameInp ui = do
   when storeChanged $ syncWidgetLabels ctx
   let layoutDirty = storeChanged || movedResize || movedWindow
   when layoutDirty $ do
-    solvePlaceWindows ctx w h
-    captureLayout ctx (Size w h)
+    solveLayoutAndCapture ctx w h
     applyScrollOffsets ctx
   updatePrevRects ctx
   refreshHover ctx frameInp
   tickAnimations ctx (inputDeltaTime frameInp)
   pruneDrawOpCache ctx
+  -- Dropdowns and the text-edit menu are not in the arena, so nothing in the
+  -- damage pass sees their rows change under the pointer, their filter or
+  -- their scroll. Each open one repaints whole every frame, and a closed or
+  -- moved one repaints where it was.
   menuRects <- overlayMenuRects ctx
-  writeDamage ctx frameInp menuRects
+  prevMenuRects <- getsOverlay ctx osPrevMenuRects
+  mapM_ (damageRect ctx) (menuRects ++ prevMenuRects)
+  modifyOverlay ctx (\os -> os {osPrevMenuRects = menuRects})
+  writeDamage ctx frameInp
     FrameSnapshot
       { fsWasDirty = wasDirty
       , fsSize = oldSize
@@ -376,24 +376,25 @@ resetUiBuildScopes ctx = do
   writeIORef (ctxHotId ctx) (WidgetId 0)
   resetDrawingScopeCache ctx
 
-solvePlaceWindows :: Context -> Float -> Float -> IO ()
-solvePlaceWindows ctx w h = do
+-- | Solve and place everything, floating panels included, then snapshot the
+-- result for the next frame to reuse.
+solveLayoutAndCapture :: Context -> Float -> Float -> IO ()
+solveLayoutAndCapture ctx w h = do
   let ms = contextMeasurers ctx
   solveLayout (ctxNodeArena ctx) ms w h
   placeModals (ctxNodeArena ctx) ms w h
-  placeWindows
-    (ctxNodeArena ctx)
-    ms
-    w
-    h
-    (lookupWindowPos ctx)
-    (lookupWindowSize ctx)
+  placeFloatingWindows ctx ms w h
   placePopups
     (ctxNodeArena ctx)
     ms
     w
     h
     (lookupPopupConfig ctx)
+  captureLayout ctx (Size w h)
+
+placeFloatingWindows :: Context -> Measurers -> Float -> Float -> IO ()
+placeFloatingWindows ctx ms w h =
+  placeWindows (ctxNodeArena ctx) ms w h (lookupWindowPos ctx) (lookupWindowSize ctx)
 
 -- | Reuse solved geometry for unchanged layout inputs. Floating placement and
 -- custom measurement have dependencies outside the arena and must be solved.
@@ -409,9 +410,7 @@ tryReuseLayout ctx size = do
         Just (c, cachedSize, cachedGen)
           | cachedSize == size && cachedGen == gen -> do
               ok <- layoutInputsMatch (ctxNodeArena ctx) c
-              if ok
-                then restoreLayoutCache (ctxNodeArena ctx) c >> pure True
-                else pure False
+              ok <$ when ok (restoreLayoutCache (ctxNodeArena ctx) c)
         _ -> pure False
 
 -- | Snapshot the solved layout so the next frame can reuse it.

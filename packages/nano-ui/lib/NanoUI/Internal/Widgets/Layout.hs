@@ -29,7 +29,6 @@ module NanoUI.Internal.Widgets.Layout
   , scroll2D'
   , scrollArea
   , scrollArea2D
-  , scrollConfigured
   , scrollAreaIdConfigured
   , grid
   , gridWith
@@ -54,7 +53,6 @@ import NanoUI.Internal.Frame.Scroll.Geometry
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Layout.Arena
   ( DirTag (..)
-  , NodeIdx
   , NodeType (..)
   , addNodeFromLayout
   , getDirection
@@ -62,7 +60,7 @@ import NanoUI.Internal.Layout.Arena
   , setWidgetId
   )
 import NanoUI.Internal.Input (Input (inputWindowSize))
-import NanoUI.Internal.Monad (Ui, askContext, askDefaultLayout, askInput, nextId, styled, uiIO)
+import NanoUI.Internal.Monad (Ui, askContext, askDefaultLayout, askInput, nextId, styled, uiIO, withContext)
 import NanoUI.Internal.Style
   ( AlignX (..)
   , Direction (..)
@@ -285,9 +283,8 @@ separator = void $ do
 spacer :: Ui :> es => Sizing -> Sizing -> Eff es ()
 spacer w h = do
   wid <- nextId
-  ctx <- askContext
   inp <- askInput
-  void (uiIO $ addSizingLeafNode ctx inp wid NodeSpacer Row w h)
+  void (withContext (\ctx -> addSizingLeafNode ctx inp wid NodeSpacer Row w h))
 
 -- | Scroll along the current layout direction, vertical by default. Constrain
 -- the viewport size so content can overflow it; the body still runs each frame.
@@ -311,27 +308,6 @@ scroll' layout child =
 center :: Ui :> es => Eff es a -> Eff es a
 center = columnWith (grow . alignMid . (\l -> l { layoutAlignX = AlignCenter }))
 
--- | Push a scroll container node, run the child inside it, then pop.
-{-# INLINE scrollContainerWith #-}
-scrollContainerWith :: Ui :> es => WidgetId -> (NodeIdx -> IO ()) -> Layout -> Eff es a -> Eff es a
-scrollContainerWith wid setup layout child = do
-  ctx <- askContext
-  idx <- uiIO $ do
-    stack <- readIORef (ctxContainerStack ctx)
-    idx <- addNodeFromLayout (ctxNodeArena ctx) NodeScrollContainer (parentIdx stack) layout
-    setWidgetId (ctxNodeArena ctx) idx wid
-    setup idx
-    pure idx
-  -- Unscoped: a scroll container's children keep their parent's id scope.
-  withContainerNode False idx child
-
--- | Style index + context scroll config for a container with a chosen config.
-{-# INLINE configureScrollContainer #-}
-configureScrollContainer :: Context -> WidgetId -> ScrollConfig -> NodeIdx -> IO ()
-configureScrollContainer ctx wid cfg idx = do
-  setStyleIdx (ctxNodeArena ctx) idx (encodeScrollConfig cfg)
-  setScrollConfig ctx wid cfg
-
 -- | 'scrollWith' that also returns the container's widget id, which keys its
 -- scroll offset.
 {-# INLINE scrollArea #-}
@@ -344,7 +320,17 @@ scrollArea f child = do
 scrollAreaIdConfigured :: Ui :> es => WidgetId -> Layout -> ScrollConfig -> Eff es a -> Eff es a
 scrollAreaIdConfigured wid layout cfg child = do
   ctx <- askContext
-  scrollContainerWith wid (configureScrollContainer ctx wid cfg) layout child
+  -- Push a scroll container node carrying the config's style index and
+  -- context scroll config, run the child inside it, then pop.
+  idx <- uiIO $ do
+    stack <- readIORef (ctxContainerStack ctx)
+    idx <- addNodeFromLayout (ctxNodeArena ctx) NodeScrollContainer (parentIdx stack) layout
+    setWidgetId (ctxNodeArena ctx) idx wid
+    setStyleIdx (ctxNodeArena ctx) idx (encodeScrollConfig cfg)
+    setScrollConfig ctx wid cfg
+    pure idx
+  -- Unscoped: a scroll container's children keep their parent's id scope.
+  withContainerNode False idx child
 
 -- | Scroll container on both axes.
 {-# INLINE scroll2D #-}
@@ -370,7 +356,6 @@ scrollArea2D f child = do
 {-# INLINE scrollConfigured #-}
 scrollConfigured :: Ui :> es => ScrollConfig -> Layout -> Eff es a -> Eff es (WidgetId, a)
 scrollConfigured cfg layout child = do
-  ctx <- askContext
   wid <- nextId
-  r <- scrollContainerWith wid (configureScrollContainer ctx wid cfg) layout child
+  r <- scrollAreaIdConfigured wid layout cfg child
   pure (wid, r)

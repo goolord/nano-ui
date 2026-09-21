@@ -11,7 +11,7 @@ module NanoUI.Internal.Frame.Scroll
 where
 
 import Control.Applicative ((<|>))
-import Control.Monad (forM_, void, when)
+import Control.Monad (forM_, unless, when)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Maybe (MaybeT (..))
 import Data.Foldable (find)
@@ -194,7 +194,7 @@ updateScrollWheel ctx inp = do
     mNode <- findScrollNodeUnderMouse ctx (inputMousePos inp)
     forM_ mNode $ \idx -> do
       wid <- getWidgetId (ctxNodeArena ctx) idx
-      void (tryApplyScrollWheelDelta ctx wid scroll)
+      applyScrollWheelDelta ctx wid scroll
       applyCrossAxisScroll ctx idx scroll
 
 -- Nested 2D: apply the unused axis to a paired scroller in the same panel.
@@ -206,7 +206,7 @@ applyCrossAxisScroll ctx idx scroll = do
     runMaybeT $
       MaybeT (walkOppositeAncestor ctx idx dir)
         <|> MaybeT (findOppositeScrollDescendant ctx idx dir)
-  forM_ target $ \wid -> tryApplyScrollWheelDelta ctx wid scroll
+  forM_ target $ \wid -> applyScrollWheelDelta ctx wid scroll
 
 scrollCrossAxisStop :: NodeType -> Bool
 scrollCrossAxisStop nt =
@@ -276,37 +276,34 @@ scrollOwnerNode suppressed ctx wid =
  where
   na = ctxNodeArena ctx
 
-tryApplyScrollWheelDelta :: Context -> WidgetId -> V2 -> IO Bool
-tryApplyScrollWheelDelta ctx wid (V2 wheelX wheelY) = do
+applyScrollWheelDelta :: Context -> WidgetId -> V2 -> IO ()
+applyScrollWheelDelta ctx wid (V2 wheelX wheelY) = do
   mIdx <- scrollOwnerNode scrollWheelSuppressed ctx wid
-  case mIdx of
-    Nothing -> pure False
-    Just idx -> do
-      nt <- getNodeType na idx
-      (axes, range) <-
-        if nt == NodeTextArea
-          then do
-            (fm, field, contentW, contentH) <- textAreaContentGeom ctx idx
-            let
-              bars = textAreaBars fm field contentW contentH
-            pure
-              ( ScrollAxisXY
-              , V2 (max 0 (contentW - tabViewW bars)) (max 0 (contentH - tabViewH bars))
-              )
-          else do
-            rect <- getNodeRect na idx
-            (axes, _, range) <- scrollNodeGeometry ctx idx rect
-            pure (axes, range)
-      step <- resolveScrollStep ctx wid
-      cur <- getScrollOffsetIn ctx wid axes
-      -- Notches land on where the scroller is headed, not on where it is, so
-      -- a flick mid-glide adds to the throw instead of restarting it.
-      base@(V2 baseX baseY) <- scrollTargetOffset ctx wid cur
-      let
-        next = clampScrollOffset range (V2 (baseX + wheelX * step) (baseY + wheelY * step))
-      if next == base && next == cur
-        then pure False
-        else True <$ applyScrollTarget ctx wid axes next ScrollSmooth
+  forM_ mIdx $ \idx -> do
+    nt <- getNodeType na idx
+    (axes, range) <-
+      if nt == NodeTextArea
+        then do
+          (fm, field, contentW, contentH) <- textAreaContentGeom ctx idx
+          let
+            bars = textAreaBars fm field contentW contentH
+          pure
+            ( ScrollAxisXY
+            , V2 (max 0 (contentW - tabViewW bars)) (max 0 (contentH - tabViewH bars))
+            )
+        else do
+          rect <- getNodeRect na idx
+          (axes, _, range) <- scrollNodeGeometry ctx idx rect
+          pure (axes, range)
+    step <- resolveScrollStep ctx wid
+    cur <- getScrollOffsetIn ctx wid axes
+    -- Notches land on where the scroller is headed, not on where it is, so
+    -- a flick mid-glide adds to the throw instead of restarting it.
+    base@(V2 baseX baseY) <- scrollTargetOffset ctx wid cur
+    let
+      next = clampScrollOffset range (V2 (baseX + wheelX * step) (baseY + wheelY * step))
+    unless (next == base && next == cur) $
+      applyScrollTarget ctx wid axes next ScrollSmooth
  where
   na = ctxNodeArena ctx
 
@@ -429,6 +426,13 @@ scrollBarsFor ctx idx wid = do
          | Just layout <- [mH]
          ]
 
+-- | Bars of scroller @wid@ a thumb drag can grab. A hidden bar has no lane
+-- to grab.
+grabbableBars :: Context -> WidgetId -> IO [(DirTag, ScrollBarLayout, Float -> IO ())]
+grabbableBars ctx wid =
+  maybe (pure []) (\idx -> scrollBarsFor ctx idx wid)
+    =<< scrollOwnerNode (\cfg _ dir -> scrollChromeSuppressed cfg dir) ctx wid
+
 updateScrollDrag :: Context -> Input -> IO ()
 updateScrollDrag ctx inp
   | inputMouseReleased inp =
@@ -438,10 +442,7 @@ updateScrollDrag ctx inp
       case mDrag of
         Just (wid, dragDir, grabOff)
           | inputMouseDown inp -> do
-              -- A hidden bar has no lane to grab.
-              bars <-
-                maybe (pure []) (\idx -> scrollBarsFor ctx idx wid)
-                  =<< scrollOwnerNode (\cfg _ dir -> scrollChromeSuppressed cfg dir) ctx wid
+              bars <- grabbableBars ctx wid
               forM_ bars $ \(dir, layout, setOffset) ->
                 when (dir == dragDir) $
                   setOffset (scrollOffsetFromThumb dir layout grabOff (inputMousePos inp))
@@ -457,9 +458,7 @@ tryStartScrollDrag ctx inp = do
   mIdx <- findScrollNodeUnderMouse ctx mouse
   forM_ mIdx $ \hitIdx -> do
     wid <- getWidgetId (ctxNodeArena ctx) hitIdx
-    bars <-
-      maybe (pure []) (\idx -> scrollBarsFor ctx idx wid)
-        =<< scrollOwnerNode (\cfg _ dir -> scrollChromeSuppressed cfg dir) ctx wid
+    bars <- grabbableBars ctx wid
     forM_
       ( find
           (\(_, l, _) -> rectContains (sbThumb l) mouse || rectContains (sbTrack l) mouse)

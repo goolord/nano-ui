@@ -41,6 +41,13 @@ blend prev sample
   | prev <= 0 = sample
   | otherwise = prev * 0.85 + sample * 0.15
 
+-- | Fold the rate of an interval of @dt@ seconds into @ema@. Intervals outside
+-- 0.0001-0.25 seconds leave it unchanged.
+blendRate :: Double -> Double -> Double
+blendRate ema dt
+  | dt > 1e-4 && dt < 0.25 = blend ema (1 / dt)
+  | otherwise = ema
+
 -- | Runtime counters. Memory fields use MiB, GC duration uses milliseconds,
 -- and GC percentage is elapsed GC time divided by elapsed runtime time.
 data RtsStatsSnapshot = RtsStatsSnapshot
@@ -204,13 +211,7 @@ newDebugSampler = do
 noteDebugLoop :: DebugSamplerRef -> Float -> IO ()
 noteDebugLoop ref dt =
   atomicModifyIORef' ref $ \s ->
-    let dtD = realToFrac dt :: Double
-        fps = if dtD > 1e-4 && dtD < 0.25 then 1 / dtD else 0
-        ema' =
-          if fps > 0
-            then blend (smLoopEma s) fps
-            else smLoopEma s
-     in (s {smLoopEma = ema'}, ())
+    (s {smLoopEma = blendRate (smLoopEma s) (realToFrac dt)}, ())
 
 -- | Increment the count of loop passes that skipped presentation.
 noteDebugSkip :: DebugSamplerRef -> IO ()
@@ -244,29 +245,20 @@ noteDebugPresent :: DebugSamplerRef -> Double -> Double -> Double -> Double -> I
 noteDebugPresent ref uiMs renderMs presentMs frameMs verts indices cmds = do
   now <- getMonotonicTime
   atomicModifyIORef' ref $ \s ->
-    let dt = now - smLastPresentT s
-        instantFps =
-          if dt > 1e-4 && dt < 0.25
-            then 1 / dt
-            else 0
-        ema' =
-          if instantFps > 0
-            then blend (smPresentEma s) instantFps
-            else smPresentEma s
-     in ( s
-             { smPresentEma = ema'
-             , smLastPresentT = now
-             , smPresents = smPresents s + 1
-             , smUiMs = uiMs
-             , smRenderMs = renderMs
-             , smPresentMs = presentMs
-             , smFrameMs = frameMs
-             , smVerts = verts
-             , smIndices = indices
-             , smCmds = cmds
-             }
-        , ()
-        )
+    ( s
+        { smPresentEma = blendRate (smPresentEma s) (now - smLastPresentT s)
+        , smLastPresentT = now
+        , smPresents = smPresents s + 1
+        , smUiMs = uiMs
+        , smRenderMs = renderMs
+        , smPresentMs = presentMs
+        , smFrameMs = frameMs
+        , smVerts = verts
+        , smIndices = indices
+        , smCmds = cmds
+        }
+    , ()
+    )
 
 -- | The published snapshot, rebuilt at most every 'debugRefreshSec' and cached
 -- in between. A due query samples the core stats and hands them to @build@,

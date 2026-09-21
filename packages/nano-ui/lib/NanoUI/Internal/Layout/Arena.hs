@@ -124,9 +124,11 @@ module NanoUI.Internal.Layout.Arena
   , memoizeWidth
   , forNodes_
   , forNodesOfType_
+  , forFloatingNodes_
   , forChildNodes_
   , foldFlowChildrenM
   , findNodeRevM
+  , findFloatingNodeRevM
   , foldNodeRevM
   , findNodeM
   , foldNodesM
@@ -699,12 +701,8 @@ resetNodeArena na = do
   -- epochs bounds retained stale ids without allocating a table every frame.
   !ep <- readIORef (naEpoch na)
   let !ep' = ep + 1
-  if ep' == 0 || (ep' .&. 0x7F == 0)
-    then do
-      let !nextEp = if ep' == 0 then 1 else ep'
-      writeIORef (naEpoch na) nextEp
-      writeIORef (naIndex na) =<< HT.new
-    else writeIORef (naEpoch na) ep'
+  writeIORef (naEpoch na) (if ep' == 0 then 1 else ep')
+  when (ep' .&. 0x7F == 0) $ writeIORef (naIndex na) =<< HT.new
 
 -- | The topmost (last added) modal node, if any.
 {-# INLINE topModalNode #-}
@@ -745,19 +743,14 @@ withArenaArraysSnap na act =
 ensureCapacity :: NodeArena -> Int -> IO ()
 ensureCapacity na needed = do
   cap <- readIORef (naCapacity na)
-  if needed < cap
-    then pure ()
-    else do
-      let newCap = cap * 2
-      newA <- readIORef (naArrays na) >>= growNodeArenaArrays cap newCap
-      growWidthMemo (naWrapMemo na) cap newCap
-      growWidthMemo (naFitMemo na) cap newCap
-      writeIORef (naArrays na) newA
-      m <- readIORef (naArraysSnap na)
-      case m of
-        Just{} -> writeIORef (naArraysSnap na) (Just newA)
-        Nothing -> pure ()
-      writeIORef (naCapacity na) newCap
+  when (needed >= cap) $ do
+    let newCap = cap * 2
+    newA <- readIORef (naArrays na) >>= growNodeArenaArrays cap newCap
+    growWidthMemo (naWrapMemo na) cap newCap
+    growWidthMemo (naFitMemo na) cap newCap
+    writeIORef (naArrays na) newA
+    readIORef (naArraysSnap na) >>= mapM_ (\_ -> writeIORef (naArraysSnap na) (Just newA))
+    writeIORef (naCapacity na) newCap
 
 -- | Copy of @a@ with room for @newCap@ nodes; new slots are zero or empty.
 growNodeArenaArrays :: Int -> Int -> NodeArenaArrays -> IO NodeArenaArrays
@@ -1389,14 +1382,11 @@ ensureAxisSnapshot na depth needed = do
     else do
       let !newCap = max needed (cap * 2)
           !levels = sizeofMutableArray arr
-      forM_ [0 .. levels - 1] $ \i -> do
-        m <- readArray arr i
-        case m of
-          Nothing -> pure ()
-          Just (AxisSnapshot idx out) -> do
-            idx' <- growPrimArrayCopy idx cap newCap 0
-            out' <- growPrimArrayCopy out cap newCap 0
-            writeArray arr i (Just (AxisSnapshot idx' out'))
+      forM_ [0 .. levels - 1] $ \i ->
+        readArray arr i >>= mapM_ (\(AxisSnapshot idx out) -> do
+          idx' <- growPrimArrayCopy idx cap newCap 0
+          out' <- growPrimArrayCopy out cap newCap 0
+          writeArray arr i (Just (AxisSnapshot idx' out')))
       writeIORef (naSnapCap na) newCap
       getLevel arr d newCap
   where
@@ -1490,6 +1480,14 @@ forNodesOfType_ na t f = forNodes_ na $ \idx -> do
   nt <- getNodeType na idx
   when (nt == t) (f idx)
 
+-- | 'forNodesOfType_' for a floating type (modal, window, popup). Most frames
+-- have no floating node, and then this skips the arena walk.
+{-# INLINE forFloatingNodes_ #-}
+forFloatingNodes_ :: NodeArena -> NodeType -> (NodeIdx -> IO ()) -> IO ()
+forFloatingNodes_ na t f = do
+  floating <- floatingNodeCount na
+  when (floating > 0) (forNodesOfType_ na t f)
+
 -- | Visit direct children in reverse declaration order, including floating nodes.
 {-# INLINE forChildNodes_ #-}
 forChildNodes_ :: NodeArena -> NodeIdx -> (NodeIdx -> IO ()) -> IO ()
@@ -1532,6 +1530,13 @@ findNodeRevM na p = do
             if ok then pure (Just i) else go (i - 1)
   go (n - 1)
 
+-- | 'findNodeRevM' for a predicate that only floating nodes can satisfy. It
+-- skips the arena walk when nothing floats.
+{-# INLINE findFloatingNodeRevM #-}
+findFloatingNodeRevM :: NodeArena -> (NodeIdx -> IO Bool) -> IO (Maybe NodeIdx)
+findFloatingNodeRevM na p = do
+  floating <- floatingNodeCount na
+  if floating > 0 then findNodeRevM na p else pure Nothing
 
 -- | Strict effectful fold over nodes from last declared to first.
 {-# INLINE foldNodeRevM #-}

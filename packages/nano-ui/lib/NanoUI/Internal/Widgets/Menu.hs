@@ -8,7 +8,6 @@ module NanoUI.Internal.Widgets.Menu
   , menuButtonWith
   , menuButtonWith'
   , MenuItem (..)
-  , menuItemWith
   , menuItem
   , menuItem'
   , menuItemShortcut

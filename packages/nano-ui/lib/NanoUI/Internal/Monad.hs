@@ -72,7 +72,6 @@ module NanoUI.Internal.Monad
   )
 where
 
-
 import Control.Exception (bracket)
 import Control.Monad (unless, when)
 import Data.Bits (shiftL, (.&.), (.|.))
@@ -223,10 +222,7 @@ emit msg = withContext (\ctx -> pushMessage ctx (FrameMsg msg))
 -- | The id 'nextId' would issue, without consuming it.
 {-# INLINE currentId #-}
 currentId :: Ui :> es => Eff es WidgetId
-currentId = do
-  ctx <- askContext
-  ic <- uiIO (readIORef (ctxIdContext ctx))
-  pure (idContextWidgetId ic)
+currentId = withContext (fmap idContextWidgetId . readIORef . ctxIdContext)
 
 -- | Consume the next sibling id. Widgets and state hooks share this sequence,
 -- so conditional calls need their own 'scope'.
@@ -274,9 +270,8 @@ withIdFrame enter m = do
 scope :: Ui :> es => Eff es a -> Eff es a
 scope = withIdFrame (enterScope scopeTag)
 
-{-# INLINE keyed #-}
-
 -- | Stable child path from @tag@. Keys must be unique among siblings in the same scope.
+{-# INLINE keyed #-}
 keyed :: (Hashable k, Ui :> es) => k -> Eff es a -> Eff es a
 keyed k = keyedTag (fromIntegral (hash k))
 

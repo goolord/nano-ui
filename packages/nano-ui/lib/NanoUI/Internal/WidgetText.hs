@@ -7,7 +7,6 @@ module NanoUI.Internal.WidgetText
   , treeDecodeStripe
   , textInputFieldText
   , textInputMinWidth
-  , textInputFieldPadY
   , textInputFieldHeight
   , textInputFlagSearch
   , textInputFlagSelectable
@@ -37,10 +36,7 @@ module NanoUI.Internal.WidgetText
   , buttonFlagTable
   , buttonFlagMenu
   , buttonFlagMenuBar
-  , buttonFlagMask
   , hasFlag
-  , tableStripeEven
-  , tableStripeOdd
   , tableSortReserve
   , tableStripeColor
   , stripeColor
@@ -49,11 +45,9 @@ module NanoUI.Internal.WidgetText
   , textNodeFontWeight
   , textNodeFontStyle
   , textNodeTextDecoration
-  , textNodeStripe
   , tableHeaderLabel
   , tableHeaderDisplayText
   , tableSortMarkOf
-  , tableSortBlank
   , buttonVisualStyle
   ) where
 
@@ -139,35 +133,29 @@ searchInputIconRects fm x y w h =
    in (mag, clear)
 
 textInputFieldText :: Text -> Text -> Bool -> Text
-textInputFieldText ph value focused =
-  let body = value
-   in if T.null body && not focused
-        then ph
-        else body
+textInputFieldText ph value focused
+  | T.null value && not focused = ph
+  | otherwise = value
 
 -- | Marks a @NodeTextInput@ as a caption-less search field. Lives in the high
 -- style bits (like the button flags) so it survives the arena's int storage.
 textInputFlagSearch :: Int
 textInputFlagSearch = 0x04000000
 
-
 -- | Marks a @NodeTextInput@ as a selectable text label: read-only, caption-less,
 -- chrome-less, sized to its text content, with mouse drag-to-select and copy.
 textInputFlagSelectable :: Int
 textInputFlagSelectable = 0x10000000
-
 
 -- | Marks a @NodeTextInput@ as a password field: its value is displayed masked
 -- and is never copied or cut to the clipboard.
 textInputFlagPassword :: Int
 textInputFlagPassword = 0x20000000
 
-
 -- | Marks a @NodeTextInput@ as a numeric field: a caption-less box whose text
 -- stops short of an up / down stepper at its right edge.
 textInputFlagNumeric :: Int
 textInputFlagNumeric = 0x40000000
-
 
 -- | Width of a numeric field's stepper column.
 numericStepperW :: Float
@@ -384,8 +372,3 @@ hasFlag flag si = si .&. flag /= 0
 {-# INLINE buttonVisualStyle #-}
 buttonVisualStyle :: Int -> Int
 buttonVisualStyle si = si .&. complement buttonFlagMask
-
-
-
-
-

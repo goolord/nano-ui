@@ -36,7 +36,7 @@ import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Layout.Arena
   ( NodeIdx
   , NodeType (NodeModal, NodePopup, NodeScrollContainer, NodeWindow)
-  , findNodeRevM
+  , findFloatingNodeRevM
   , floatingNodeCount
   , getClipRect
   , getNodeRect
@@ -123,7 +123,7 @@ topmostModalAtMouse ctx mouse =
 topmostFloatingAtMouse ::
   Context -> V2 -> (NodeType -> Bool) -> IO (Maybe NodeIdx)
 topmostFloatingAtMouse ctx mouse wanted =
-  findNodeRevM (ctxNodeArena ctx) $ \idx ->
+  findFloatingNodeRevM (ctxNodeArena ctx) $ \idx ->
     (wanted <$> getNodeType (ctxNodeArena ctx) idx)
       <&&> ((`rectHit` mouse) <$> getNodeRect (ctxNodeArena ctx) idx)
 

@@ -10,10 +10,10 @@ import Control.Monad (when)
 import Data.IORef (readIORef)
 import NanoUI.Internal.Context (Context (..), nodeTheme)
 import NanoUI.Internal.Draw (pushRect, withClip)
-import NanoUI.Internal.Frame.Chrome (overlayMenuStyle, overlayModalStyle, overlayWindowStyle, paintMenuPanel)
+import NanoUI.Internal.Frame.Chrome (overlayMenuStyle, overlayWindowStyle, paintMenuPanel)
 import NanoUI.Internal.Frame.Hit (modalTreeOpen)
 import NanoUI.Internal.Frame.Paint (walkChildren)
-import NanoUI.Internal.Layout.Arena (forNodesOfType_, NodeIdx, NodeType (..), getNodeRect, getPadding)
+import NanoUI.Internal.Layout.Arena (forFloatingNodes_, NodeIdx, NodeType (..), getNodeRect, getPadding)
 import NanoUI.Internal.Style (Padding (..), Style, Theme, themeOverlayDim, themeSeparator)
 import NanoUI.Internal.Types (Rect (..), Size (..))
 import NanoUI.Internal.Widgets.Chrome (titleBarChromeHFor, windowChromeSepH)
@@ -44,11 +44,11 @@ drawModalOverlays ctx (Size ww wh) = do
     pushRect (ctxDrawArena ctx) (Rect 0 0 ww wh) (themeOverlayDim theme)
     forFloatingNode ctx NodeModal $ \idx rect -> do
       modalTheme <- nodeTheme ctx idx
-      drawFloatingPanel ctx modalTheme idx (overlayModalStyle modalTheme) rect
+      drawFloatingPanel ctx modalTheme idx (overlayMenuStyle modalTheme) rect
 
 forFloatingNode :: Context -> NodeType -> (NodeIdx -> Rect -> IO ()) -> IO ()
 forFloatingNode ctx nodeType draw =
-  forNodesOfType_ (ctxNodeArena ctx) nodeType $ \idx ->
+  forFloatingNodes_ (ctxNodeArena ctx) nodeType $ \idx ->
     draw idx =<< getNodeRect (ctxNodeArena ctx) idx
 
 drawFloatingPanel :: Context -> Theme -> NodeIdx -> Style -> Rect -> IO ()

@@ -13,6 +13,7 @@ where
 import Control.Applicative ((<|>))
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
+import Data.Functor ((<&>))
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
 import Data.Word (Word8)
@@ -87,13 +88,9 @@ registerImage (ImageAtlas ref) (ImageId tid) w h pixels
               writeIORef ref st0 {asGen = asGen st0 + 1}
               pure True
           | otherwise -> pure False
-        Nothing -> do
-          mSt <- fitImage st0 tid w h pixels
-          case mSt of
-            Nothing -> pure False
-            Just st1 -> do
-              writeIORef ref st1
-              pure True
+        Nothing ->
+          fitImage st0 tid w h pixels
+            >>= maybe (pure False) (\st1 -> True <$ writeIORef ref st1)
 
 -- | An id above every registered image's and every id this returned before.
 -- An id the app picks itself can still collide with one returned and not yet
@@ -109,20 +106,15 @@ lookupImageUv ::
   ImageAtlas -> ImageId -> IO (Maybe (Float, Float, Float, Float))
 lookupImageUv (ImageAtlas ref) (ImageId tid) = do
   st <- readIORef ref
+  let fw = fromIntegral (asW st)
+      fh = fromIntegral (asH st)
   pure $
-    case IM.lookup tid (asSlots st) of
-      Nothing -> Nothing
-      Just (AtlasSlot x y w h) ->
-        let
-          fw = fromIntegral (asW st)
-          fh = fromIntegral (asH st)
-         in
-          Just
-            ( fromIntegral x / fw
-            , fromIntegral y / fh
-            , fromIntegral (x + w) / fw
-            , fromIntegral (y + h) / fh
-            )
+    IM.lookup tid (asSlots st) <&> \(AtlasSlot x y w h) ->
+      ( fromIntegral x / fw
+      , fromIntegral y / fh
+      , fromIntegral (x + w) / fw
+      , fromIntegral (y + h) / fh
+      )
 
 -- Pinned pixel buffer. SDL uploads this pointer; do not copy to ByteString first.
 atlasSnapshot :: ImageAtlas -> IO (Maybe (Int, Int, ForeignPtr Word8, Int))

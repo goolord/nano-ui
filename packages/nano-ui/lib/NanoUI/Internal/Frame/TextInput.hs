@@ -34,6 +34,7 @@ import NanoUI.Internal.Context
   , modifyStore
   , setStore
   , setTextInputDrag
+  , writeSlots
   , Slot (..)
   , slotKey
   , nodeTheme
@@ -65,7 +66,7 @@ import NanoUI.Internal.Layout.Arena
   , getStyleIdx
   , getWidgetId
   )
-import NanoUI.Internal.Store (fieldFloat, fieldInt, fieldText, findSlot, insertSlot)
+import NanoUI.Internal.Store (fieldFloat, fieldInt, fieldText, findSlot, insertSlot, slotWriteOr)
 import NanoUI.Internal.Style (themeSelection)
 import NanoUI.Internal.Types (Color (..), Rect (..), V2 (..), clamp, rectContains, rectIntersect, rectOverlapArea, rectW)
 import NanoUI.Internal.WidgetText
@@ -255,15 +256,12 @@ drawTextInputCaret da (FieldEdit value cursor _ fm boxY boxH textX) fg = do
   drawTextCaret da caretX caretY caretH fg
 
 updateTextInputSelection :: Context -> WidgetId -> Int -> Int -> IO ()
-updateTextInputSelection ctx wid anchor cursor = do
-  store <- getStore ctx
-  let key = intKey wid
-      oldAnchor = findSlot fieldInt cursor (slotKey SlotAnchor key) store
-      oldCursor = findSlot fieldInt 0 (slotKey SlotCursor key) store
-  when (oldAnchor /= anchor || oldCursor /= cursor) $ do
-    setStore ctx $
-      insertSlot fieldInt (slotKey SlotAnchor key) anchor (insertSlot fieldInt (slotKey SlotCursor key) cursor store)
-    markDirty ctx
+updateTextInputSelection ctx wid anchor cursor =
+  writeSlots ctx $
+    slotWriteOr fieldInt cursor (slotKey SlotAnchor key) anchor
+      <> slotWriteOr fieldInt 0 (slotKey SlotCursor key) cursor
+  where
+    key = intKey wid
 
 -- | Field box, text origin x (scroll applied), value and font of a single-line
 -- field.

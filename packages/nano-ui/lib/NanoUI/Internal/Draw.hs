@@ -35,7 +35,6 @@ module NanoUI.Internal.Draw
   , pushRoundedRect
   , pushRoundedRectRaw
   , pushRoundedStroke
-  , pushRoundedStrokeRaw
   , pushCircle
   , pushCircleStroke
   , pushLine

@@ -48,10 +48,9 @@ import NanoUI.Internal.Style
   , windowMargin
   , windowPad
   )
-import NanoUI.Internal.Types (Rect (..), Size (..), rectNonEmpty)
+import NanoUI.Internal.Types (Rect (..), Size (..), clamp, rectNonEmpty)
 import NanoUI.Internal.Widgets.Chrome
   ( closeButton
-  , floatMinFor
   , modalTitleBarH
   , titleBarChromeHFor
   , titleBarLayoutFor
@@ -125,10 +124,7 @@ overlay kind shape open title child = do
     -- the body, matching the window's left/right padding. Modals keep
     -- their own larger gap.
     bodyGap = if isModal then 8 else 10
-    minWidth =
-      floatMinFor
-        (if isModal then 260 else 280)
-        availW
+    minWidth = clamp 1 availW (if isModal then 260 else 280)
     minHeight =
       if isModal
         then 0
@@ -221,15 +217,11 @@ floatingSeedRect ctx wid isModal minWidth minHeight margin winW winH = do
         k = intKey wid
         pos = lookupSlot fieldPoint k store
         sz = lookupSlot fieldPoint (slotKey SlotWinSize k) store
+        h1 = max minHeight 1
       pure $
         case (pos, sz) of
           (Just (x, y), Just (w, h)) | w > 0 && h > 0 -> Rect x y w h
-          (Just (x, y), _) -> Rect x y minWidth (max minHeight 1)
-          _ ->
-            let
-              w = minWidth
-              h = max minHeight 1
-             in
-              if isModal
-                then Rect ((winW - w) / 2) ((winH - h) / 2) w h
-                else Rect (max 0 (winW - w - margin)) margin w h
+          (Just (x, y), _) -> Rect x y minWidth h1
+          _
+            | isModal -> Rect ((winW - minWidth) / 2) ((winH - h1) / 2) minWidth h1
+            | otherwise -> Rect (max 0 (winW - minWidth - margin)) margin minWidth h1

@@ -47,9 +47,12 @@ module NanoUI.Testing.Harness
   , drawQuads
   ) where
 
-import Control.Monad (forM, unless, void, when)
+import Control.Applicative ((<|>))
+import Control.Monad (forM, forM_, unless, void, when)
 import Data.IORef (IORef, readIORef, writeIORef)
+import Data.List (maximumBy)
 import Data.Maybe (listToMaybe)
+import Data.Ord (comparing)
 import Data.Text qualified as T
 import Data.Word (Word32, Word8)
 import Foreign.C.Types (CSize (..))
@@ -165,13 +168,7 @@ findHeader needle spans =
         , w > 1 && h > 1
         , T.isPrefixOf (needle <> " ") (dropSpanMarkers txt)
         ]
-      exact =
-        [ (x, spanCenter r)
-        | (r@(Rect x _ w h), txt, _, _, _) <- spans
-        , w > 1 && h > 1
-        , spanLabel txt == needle
-        ]
-   in pickRight (if null marked then exact else marked)
+   in pickRight marked <|> findExact needle spans
 
 -- | Centre of the rightmost span containing the substring, or 'Nothing'.
 findRightmost :: T.Text -> [DemoSpan] -> Maybe V2
@@ -180,10 +177,8 @@ findRightmost needle spans =
 
 pickRight :: [(Float, V2)] -> Maybe V2
 pickRight [] = Nothing
-pickRight (p : ps) = Just (go p ps)
- where
-  go acc [] = snd acc
-  go acc@(ax, _) (q@(qx, _) : qs) = go (if qx >= ax then q else acc) qs
+-- maximumBy keeps the later of equal elements, so ties choose the rightmost.
+pickRight ps = Just (snd (maximumBy (comparing fst) ps))
 
 -- | Return a located point or throw an IO error with the supplied diagnostic.
 requireSpan :: String -> Maybe V2 -> IO V2
@@ -413,13 +408,9 @@ assertWheelTitlePinned failed ctx inp0 ui title line1 wheelAt mClipMax = do
       case (titleYs0, titleYs1) of
         (y0 : _, y1 : _) -> assertEq failed y1 y0
         _ -> assert failed False
-      case line1Ys1 of
-        [] -> pure ()
-        b1 : _ -> assertLt failed b1 b0
-      case mClipMax of
-        Nothing -> pure ()
-        Just maxY ->
-          assert failed (not (any (\(Rect _ y _ h, _, _, _, _) -> y < 0 || y + h > maxY) spans1))
+      forM_ (listToMaybe line1Ys1) $ \b1 -> assertLt failed b1 b0
+      forM_ mClipMax $ \maxY ->
+        assert failed (not (any (\(Rect _ y _ h, _, _, _, _) -> y < 0 || y + h > maxY) spans1))
 
 -- | Probe candidate y positions at a fixed x, running a frame for each, and
 -- return the first input that produces a grab cursor.
@@ -445,16 +436,7 @@ dragWindowEdge ::
   -> V2
   -> IO (Maybe Rect)
 dragWindowEdge ctx inp0 ui grab dest = do
-  let
-    press = pressAt inp0 grab
-  _ <- runFrame ctx press ui
-  let
-    dragged =
-      press
-        { inputMousePos = dest
-        , inputMousePressed = False
-        }
-  _ <- runFrame ctx dragged ui
+  runDragFrom ctx inp0 ui grab dest
   let
     idle = inp0 {inputMousePos = dest}
   _ <- runFrame ctx idle ui

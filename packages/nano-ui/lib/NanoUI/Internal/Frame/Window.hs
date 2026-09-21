@@ -11,7 +11,10 @@ module NanoUI.Internal.Frame.Window
   , windowResizeCursorKind
   ) where
 
-import Control.Monad (when)
+import Control.Monad (guard, when)
+import Control.Monad.IO.Class (liftIO)
+import Control.Monad.Trans.Maybe (MaybeT (..))
+import Data.Functor ((<&>))
 import Data.Maybe (fromMaybe, isJust)
 import NanoUI.Internal.Context
   ( Context (..)
@@ -41,7 +44,7 @@ import NanoUI.Internal.Input (Input (..), UiCursorKind (..), inputMouseDown, inp
 import NanoUI.Internal.Layout.Arena
   ( NodeIdx
   , NodeType (..)
-  , findNodeRevM
+  , findFloatingNodeRevM
   , floatingNodeCount
   , foldNodesM
   , getDirection
@@ -62,14 +65,11 @@ import NanoUI.Internal.Style (Padding (..))
 import NanoUI.Internal.Types (DamageBounds (..), Rect (..), V2 (..), clamp, haloDamageSlop, rectContains, rectInflate, rectNonEmpty)
 
 topmostWindowAtResizeHalo :: Context -> V2 -> IO (Maybe NodeIdx)
-topmostWindowAtResizeHalo ctx mouse = do
-  floating <- floatingNodeCount na
-  if floating <= 0
-    then pure Nothing
-    else findNodeRevM na $ \idx ->
-      ((== NodeWindow) <$> getNodeType na idx) <&&> do
-        rect <- getNodeRect na idx
-        pure (rectNonEmpty rect && rectContains (rectInflate windowResizeHandleFor rect) mouse)
+topmostWindowAtResizeHalo ctx mouse =
+  findFloatingNodeRevM na $ \idx ->
+    ((== NodeWindow) <$> getNodeType na idx) <&&> do
+      rect <- getNodeRect na idx
+      pure (rectNonEmpty rect && rectContains (rectInflate windowResizeHandleFor rect) mouse)
  where
   na = ctxNodeArena ctx
 
@@ -280,21 +280,15 @@ relayoutWindow ctx winW winH wid nw nh = do
 -- unless the halo is blocked or the pointer is on one of the window's
 -- controls. The top handle reaches over the title bar, which drags elsewhere.
 resizeEdgeTarget :: Context -> V2 -> IO (Maybe (NodeIdx, Rect, WindowResizeEdge))
-resizeEdgeTarget ctx mouse = do
-  mWin <- topmostWindowAtResizeHalo ctx mouse
-  case mWin of
-    Nothing -> pure Nothing
-    Just idx -> do
-      rect <- getNodeRect (ctxNodeArena ctx) idx
-      -- The halo covers the window interior, so find the edge first and run
-      -- the hover probe and node scans only when there is one.
-      mEdge <- windowResizeEdgeFor ctx idx rect mouse
-      case mEdge of
-        Nothing -> pure Nothing
-        Just edge -> do
-          blocked <- resizeHaloBlocked ctx mouse idx
-          overControl <- if blocked then pure False else windowControlAt ctx idx mouse
-          pure (if blocked || overControl then Nothing else Just (idx, rect, edge))
+resizeEdgeTarget ctx mouse = runMaybeT $ do
+  idx <- MaybeT (topmostWindowAtResizeHalo ctx mouse)
+  rect <- liftIO (getNodeRect (ctxNodeArena ctx) idx)
+  -- The halo covers the window interior, so find the edge first and run the
+  -- hover probe and node scans only when there is one.
+  edge <- MaybeT (windowResizeEdgeFor ctx idx rect mouse)
+  guard . not =<< liftIO (resizeHaloBlocked ctx mouse idx)
+  guard . not =<< liftIO (windowControlAt ctx idx mouse)
+  pure (idx, rect, edge)
 
 tryStartWindowResize :: Context -> V2 -> IO Bool
 tryStartWindowResize ctx mouse@(V2 mx my) = do
@@ -374,11 +368,9 @@ windowTitleRect ctx idx = do
   (_, wy, _, _) <- getRect (ctxNodeArena ctx) idx
   fc <- getFirstChild (ctxNodeArena ctx) idx
   mBest <- go fc Nothing
-  pure $ case mBest of
-    Nothing -> Nothing
-    Just (Rect cx cy cw ch) ->
-      let topY = min wy cy
-       in Just (Rect cx topY cw ((cy - topY) + ch))
+  pure $ mBest <&> \(Rect cx cy cw ch) ->
+    let topY = min wy cy
+     in Rect cx topY cw ((cy - topY) + ch)
   where
     go ci best
       | ci < 0 = pure best

@@ -107,27 +107,29 @@ syncTextAreaViewport ctx idx fm x y w h = do
   unless (sx' == sx && sy' == sy && lookupSlot fieldPoint viewportKey store == Just (clipW, clipH)) $
     writeIORef (ctxStore ctx) $! clampScroll (insertSlot fieldPoint viewportKey (clipW, clipH) store)
 
--- | Snap a text-area scroll offset to the device pixel grid, the same grid
--- 'pushText' snaps to, so line pens and hit-testing stay in lockstep (and in
--- agreement with each other) while the text area scrolls. The raw 'Double'
--- offset keeps sub-pixel wheel deltas; only the applied value is quantized.
-textAreaSnap :: DrawArena -> IO (Float -> Float)
-textAreaSnap da = onGrid <$> getDrawSnapScale da
+-- | A text area's scroll offset snapped to the device pixel grid, the same
+-- grid 'pushText' snaps to, so line pens and hit-testing stay in lockstep
+-- (and in agreement with each other) while the text area scrolls. The raw
+-- 'Double' offset keeps sub-pixel wheel deltas; only the applied value is
+-- quantized.
+{-# INLINE textAreaScrollSnapped #-}
+textAreaScrollSnapped :: DrawArena -> TA.TextAreaState -> IO (Float, Float)
+textAreaScrollSnapped da state = do
+  s <- getDrawSnapScale da
+  let (scrollX, scrollY) = TA.scrollOffset state
+  pure (onGrid s (realToFrac scrollX), onGrid s (realToFrac scrollY))
 
 -- | The selection highlight on the rows between @firstRow@ and @lastRow@,
 -- the ones in view.
 drawTextAreaSelectionLines :: DrawArena -> Int -> Int -> TA.TextAreaState -> Rect -> FontMetrics -> Theme -> IO ()
 drawTextAreaSelectionLines da firstRow lastRow state (Rect fieldX fieldY _ _) fm theme = do
-  snap <- textAreaSnap da
   let anchor = TA.selectionAnchor state
       cursor = TB.getCursor (TA.buffer state)
   when (anchor /= cursor) $ do
+    (scrollXf, scrollYf) <- textAreaScrollSnapped da state
     let (lo, hi) = TB.selectionRange anchor cursor
         lineH = textAreaLineHeight fm
         (ix, iy) = widgetContentInset fm
-        (scrollX, scrollY) = TA.scrollOffset state
-        scrollXf = snap (realToFrac scrollX)
-        scrollYf = snap (realToFrac scrollY)
         contentTop = fieldY + iy
         selBg = themeSelection theme
         loRow = TB.cursorRow lo
@@ -147,7 +149,6 @@ drawTextAreaSelectionLines da firstRow lastRow state (Rect fieldX fieldY _ _) fm
 -- that also needs it (for the field frame) resolves it once.
 drawTextAreaContentWith :: DrawArena -> Context -> FontMetrics -> NodeIdx -> Float -> Float -> Float -> Float -> Style -> IO ()
 drawTextAreaContentWith da ctx fm idx x y w h style = do
-  snap <- textAreaSnap da
   syncTextAreaViewport ctx idx fm x y w h
   focus <- textInputFocused ctx idx
   theme <- nodeTheme ctx idx
@@ -157,10 +158,8 @@ drawTextAreaContentWith da ctx fm idx x y w h style = do
       fg = styleFg style
   state <- loadTextAreaStateAt ctx idx fm x y w h
   (contentW, contentH) <- textAreaContentMetrics ctx idx
+  (scrollXf, scrollYf) <- textAreaScrollSnapped da state
   let buf = TA.buffer state
-      (scrollX, scrollY) = TA.scrollOffset state
-      scrollXf = snap (realToFrac scrollX)
-      scrollYf = snap (realToFrac scrollY)
       contentX = clipX - scrollXf
       layouts = textAreaScrollBarLayouts fm field contentW contentH scrollXf scrollYf
       textClip =
@@ -222,13 +221,10 @@ textAreaHitForWidget ctx wid = do
 
 textAreaCursorAt :: Context -> TA.TextAreaState -> TextAreaHit -> V2 -> IO (Int, Int)
 textAreaCursorAt ctx state hit (V2 mouseX mouseY) = do
-  snap <- textAreaSnap (ctxDrawArena ctx)
+  (scrollXf, scrollYf) <- textAreaScrollSnapped (ctxDrawArena ctx) state
   fm <- resolveTextAreaFont ctx (tahNodeIdx hit)
   let buf = TA.buffer state
       lineCount = max 1 (TB.getLineCount buf)
-      (scrollX, scrollY) = TA.scrollOffset state
-      scrollXf = snap (realToFrac scrollX)
-      scrollYf = snap (realToFrac scrollY)
       (_, iy) = widgetContentInset fm
       Rect _ fieldY _ _ = tahFieldRect hit
       relY = mouseY - (fieldY + iy) + scrollYf
@@ -263,38 +259,36 @@ applyTextAreaDrag ctx wid hit anchorRow anchorCol row col clicks
 finalizeTextAreaMouse :: Context -> Input -> WidgetId -> IO ()
 finalizeTextAreaMouse ctx inp wid = do
   mHit <- textAreaHitForWidget ctx wid
-  case mHit of
-    Nothing -> pure ()
-    Just hit -> do
-      let mouse = inputMousePos inp
-      onScroll <- isMouseOnTextAreaScrollBarAt ctx (tahNodeIdx hit) mouse
-      let cursorAtMouse = do
-            state <- loadHitState ctx hit
-            textAreaCursorAt ctx state hit mouse
-      if inputMousePressed inp && rectContains (tahFieldRect hit) mouse && not onScroll
-        then do
-          (row, col) <- cursorAtMouse
-          clicks <- normalizeTextFieldClicks ctx wid 0 row col True (max 1 (inputMouseClicks inp))
-          applyTextAreaDrag ctx wid hit row col row col clicks
-          setTextInputDrag ctx (Just (TextInputDrag wid 0 row col True clicks))
-        else do
-          mDrag <- getsInteraction ctx isTextInputDrag
-          case mDrag of
-            Just drag
-              | textInputDragWidget drag == wid
-                  , textInputDragMultiline drag
-                  , inputMouseDown inp || inputMouseReleased inp -> do
-                  (row, col) <- cursorAtMouse
-                  applyTextAreaDrag
-                    ctx
-                    wid
-                    hit
-                    (textInputDragAnchorRow drag)
-                    (textInputDragAnchorCol drag)
-                    row
-                    col
-                    (textInputDragClicks drag)
-            _ -> pure ()
+  forM_ mHit $ \hit -> do
+    let mouse = inputMousePos inp
+    onScroll <- isMouseOnTextAreaScrollBarAt ctx (tahNodeIdx hit) mouse
+    let cursorAtMouse = do
+          state <- loadHitState ctx hit
+          textAreaCursorAt ctx state hit mouse
+    if inputMousePressed inp && rectContains (tahFieldRect hit) mouse && not onScroll
+      then do
+        (row, col) <- cursorAtMouse
+        clicks <- normalizeTextFieldClicks ctx wid 0 row col True (max 1 (inputMouseClicks inp))
+        applyTextAreaDrag ctx wid hit row col row col clicks
+        setTextInputDrag ctx (Just (TextInputDrag wid 0 row col True clicks))
+      else do
+        mDrag <- getsInteraction ctx isTextInputDrag
+        case mDrag of
+          Just drag
+            | textInputDragWidget drag == wid
+                , textInputDragMultiline drag
+                , inputMouseDown inp || inputMouseReleased inp -> do
+                (row, col) <- cursorAtMouse
+                applyTextAreaDrag
+                  ctx
+                  wid
+                  hit
+                  (textInputDragAnchorRow drag)
+                  (textInputDragAnchorCol drag)
+                  row
+                  col
+                  (textInputDragClicks drag)
+          _ -> pure ()
 
 collapseTextAreaSelection :: Context -> WidgetId -> IO ()
 collapseTextAreaSelection ctx wid = do

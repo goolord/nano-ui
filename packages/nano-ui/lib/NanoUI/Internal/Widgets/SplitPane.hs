@@ -302,12 +302,10 @@ treeMovePane moved splitId dt tree
   | otherwise =
       case dt of
         DropSwap tgt
-          | tgt == moved -> Nothing
-          | not (paneExist tree tgt) -> Nothing
+          | tgt == moved || not (paneExist tree tgt) -> Nothing
           | otherwise -> Just (treeSwapPanes moved tgt tree)
         DropSplit tgt axis onA
-          | tgt == moved -> Nothing
-          | not (paneExist tree tgt) -> Nothing
+          | tgt == moved || not (paneExist tree tgt) -> Nothing
           | otherwise -> treeSplit tgt splitId axis onA moved <$> treeRemovePane moved tree
         DropTop axis onA
           | treeSize tree <= 1 -> Nothing
@@ -329,18 +327,14 @@ findSplitNode s@(Split sid0 _ _ a b) target
 -- | Clamp a proposed ratio for a split so both subtrees keep at least their
 -- minimum size within the given region.
 clampTreeRatio :: GridNode -> Word64 -> Rect -> Float -> Float -> Float -> Float
-clampTreeRatio tree splitId region spacing minSize r0 =
-  case findSplitNode tree splitId of
-    Nothing -> r0
-    Just (Pane _) -> r0
-    Just (Split _ ax _ a b) ->
-      let avail = mainLen ax region
-          usable = avail - spacing
-       in if usable <= 0
-            then r0
-            else
-              let (mA, mB) = splitMins minSize spacing ax a b
-               in splitLength spacing avail mA mB r0 / usable
+clampTreeRatio tree splitId region spacing minSize r0
+  | Just (Split _ ax _ a b) <- findSplitNode tree splitId
+  , let avail = mainLen ax region
+        usable = avail - spacing
+  , not (usable <= 0) =
+      let (mA, mB) = splitMins minSize spacing ax a b
+       in splitLength spacing avail mA mB r0 / usable
+  | otherwise = r0
 
 -- | Which drop zone a pointer falls into for a target pane rect.
 data EdgeZone = ZoneCenter | ZoneLeft | ZoneRight | ZoneTop | ZoneBottom

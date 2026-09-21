@@ -14,11 +14,13 @@ module NanoUI.Internal.Frame.Select
   , comboDropRect
   , comboDropPickIndex
   , comboScrollGeom
+  , focusedComboNode
   ) where
 
 import Control.Monad (filterM, forM, forM_, unless, when)
 import Data.IORef (readIORef, writeIORef)
-import Data.Maybe (catMaybes, listToMaybe, maybeToList)
+import Data.List (sortOn)
+import Data.Maybe (catMaybes, fromMaybe, listToMaybe)
 import qualified Data.Text as T
 import NanoUI.Internal.Context
   ( Context (..)
@@ -47,10 +49,10 @@ import NanoUI.Internal.Font (FontMetrics, centeredTextY, menuItemPadX, menuItemR
 import NanoUI.Internal.Frame.Chrome (menuPanelBounds, overlayMenuStyle, paintMenuAccent, paintMenuPanel)
 import NanoUI.Internal.Frame.Hit (widgetOverlayAllowed, withWidgetNode)
 import NanoUI.Internal.Frame.Scroll.Geometry (padTextClipRect)
-import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
+import NanoUI.Internal.Id (WidgetId (..))
 import NanoUI.Internal.Input (Input (..), Key (..), foldInputKeys, inputKeys, inputMousePos, inputMousePressed, inputPointerHeld)
-import NanoUI.Internal.Layout.Arena (NodeType (NodeSelect, NodeTextInput), findNodeM, foldNodeRevM, getNodeType, lookupNodeByWidgetId, getOptions, getRect, getWidgetId)
-import NanoUI.Internal.Monad ((<&&>))
+import NanoUI.Internal.Layout.Arena (NodeArena, NodeIdx, NodeType (NodeSelect, NodeTextInput), getNodeType, lookupNodeByKey, lookupNodeByWidgetId, getOptions, getRect, getWidgetId)
+import NanoUI.Internal.Monad (whenM, (<&&>))
 import NanoUI.Internal.Store (Slot (..), fieldFloat, fieldInt, fieldText, findSlot, insertSlot, slotKey)
 import NanoUI.Internal.Style (Style (..), Theme (..), scrollBarThumbColor, scrollBarTrackColor, themeAccent, themeInput)
 import NanoUI.Internal.Types (Color (..), Rect (..), V2 (..), clamp, rectContains, rectIntersect)
@@ -86,28 +88,15 @@ overlayMenuRects ctx = do
 openDropdowns :: Context -> IO [Dropdown]
 openDropdowns ctx = do
   store <- getStore ctx
-  focus <- readIORef (ctxFocusId ctx)
-  -- Selects open only through the store flag and combos only while focused.
-  -- With no select open, the focused node is the only candidate, so only an
-  -- open select walks the arena.
-  if anySelectOpen store
-    then foldNodeRevM na (\acc idx -> maybe acc (: acc) <$> dropdownAt store focus idx) []
-    else
-      if hashWidgetId focus == 0
-        then pure []
-        else maybe (pure []) (fmap maybeToList . dropdownAt store focus) =<< lookupNodeByWidgetId na focus
+  -- Selects open only through the store flag and combos only while focused,
+  -- so at most two nodes hold a dropdown, and both are looked up directly.
+  sel <- openSelectNode ctx store
+  combo <- focusedComboNode ctx
+  forM (sortOn fst (catMaybes [(,False) <$> sel, (,True) <$> combo])) $ \(idx, isCombo) -> do
+    wid <- getWidgetId na idx
+    build store idx wid isCombo
   where
     na = ctxNodeArena ctx
-    dropdownAt store focus idx =
-      getNodeType na idx >>= \case
-        NodeSelect -> do
-          wid <- getWidgetId na idx
-          if isSelectOpen store (intKey wid) then Just <$> build store idx wid False else pure Nothing
-        NodeTextInput -> do
-          wid <- getWidgetId na idx
-          opts <- getOptions na idx
-          if wid /= focus || null opts then pure Nothing else Just <$> build store idx wid True
-        _ -> pure Nothing
     build store idx wid combo = do
       opts <- getOptions na idx
       (x, y, w, h) <- getRect na idx
@@ -137,6 +126,11 @@ openDropdowns ctx = do
           , ddComboScrollX = slotFloat SlotComboScrollX
           , ddComboContentW = contentW
           }
+
+-- | The open dropdowns the modal state lets be drawn and picked from, in
+-- arena order.
+allowedDropdowns :: Context -> IO [Dropdown]
+allowedDropdowns ctx = filterM (widgetOverlayAllowed ctx . ddWidget) =<< openDropdowns ctx
 
 -- | One placed row of an open dropdown.
 data DropdownRow = DropdownRow
@@ -240,9 +234,8 @@ finalizeSelectKeyboard ctx inp = do
     focus <- readIORef (ctxFocusId ctx)
     store <- getStore ctx
     mTarget <- pickSelectKeyboardTarget ctx focus store wantStep
-    forM_ mTarget $ \(wid, open) -> do
-      allow <- widgetOverlayAllowed ctx wid
-      when allow $
+    forM_ mTarget $ \(wid, open) ->
+      whenM (widgetOverlayAllowed ctx wid) $
         if wantEsc || wantEnter
           then when open $ do
             setStore ctx (setSelectOpen store (intKey wid) False)
@@ -274,22 +267,35 @@ selectWidgetIfAny ctx wid =
     pure (if nt == NodeSelect && not disabled then Just wid else Nothing)
 
 findOpenSelectWidget :: Context -> IO (Maybe WidgetId)
-findOpenSelectWidget ctx = do
-  store <- getStore ctx
-  let na = ctxNodeArena ctx
-  mIdx <-
-    findNodeM na $ \idx ->
-      ((== NodeSelect) <$> getNodeType na idx) <&&> (isSelectOpen store . intKey <$> getWidgetId na idx)
-  traverse (getWidgetId na) mIdx
+findOpenSelectWidget ctx =
+  traverse (getWidgetId (ctxNodeArena ctx)) =<< openSelectNode ctx =<< getStore ctx
+
+-- | The node of the select whose dropdown the store holds open.
+openSelectNode :: Context -> WidgetStore -> IO (Maybe NodeIdx)
+openSelectNode ctx store
+  | not (anySelectOpen store) = pure Nothing
+  | otherwise =
+      keepNode ctx (\na idx -> (== NodeSelect) <$> getNodeType na idx)
+        =<< lookupNodeByKey (ctxNodeArena ctx) (storeOpenSelect store)
+
+-- | The focused node when it is a combo (a text input carrying options),
+-- which owns an open dropdown for as long as it holds focus.
+focusedComboNode :: Context -> IO (Maybe NodeIdx)
+focusedComboNode ctx =
+  keepNode ctx (\na idx -> ((== NodeTextInput) <$> getNodeType na idx) <&&> (not . null <$> getOptions na idx))
+    =<< lookupNodeByWidgetId (ctxNodeArena ctx) =<< readIORef (ctxFocusId ctx)
+
+keepNode :: Context -> (NodeArena -> NodeIdx -> IO Bool) -> Maybe NodeIdx -> IO (Maybe NodeIdx)
+keepNode _ _ Nothing = pure Nothing
+keepNode ctx p (Just idx) = (\ok -> if ok then Just idx else Nothing) <$> p (ctxNodeArena ctx) idx
 
 finalizeSelectPick :: Context -> Input -> IO ()
 finalizeSelectPick ctx inp =
   when (inputMousePressed inp || inputMouseReleased inp) $ do
     let mouse@(V2 _ mouseY) = inputMousePos inp
-    dropdowns <- openDropdowns ctx
-    forM_ dropdowns $ \dd -> do
-      allow <- widgetOverlayAllowed ctx (ddWidget dd)
-      when (allow && rectContains (ddRect dd) mouse) $ do
+    dropdowns <- allowedDropdowns ctx
+    forM_ dropdowns $ \dd ->
+      when (rectContains (ddRect dd) mouse) $ do
         st <- getStore ctx
         let wid = ddWidget dd
             key = intKey wid
@@ -305,7 +311,7 @@ finalizeSelectPick ctx inp =
                 onLane = any (\(track, _) -> rectContains track mouse) (catMaybes [vSb, hSb])
             when (inputMousePressed inp && not onLane) $
               forM_ (comboDropPickIndex (ddRect dd) menuItemRowH nOpts mouseY) $ \picked -> do
-                let txt = maybe "" id (listToMaybe (drop picked (ddOptions dd)))
+                let txt = fromMaybe "" (listToMaybe (drop picked (ddOptions dd)))
                     len = T.length txt
                 setStore ctx $
                   insertSlot fieldText key txt
@@ -410,12 +416,10 @@ comboDropPickIndex (Rect _ dy _ _) itemH nOpts mouseY =
 
 drawSelectOverlays :: Context -> Input -> IO ()
 drawSelectOverlays ctx inp = do
-  dropdowns <- openDropdowns ctx
+  dropdowns <- allowedDropdowns ctx
   forM_ dropdowns $ \dd -> do
-    allow <- widgetOverlayAllowed ctx (ddWidget dd)
-    when allow $ do
-      theme <- widgetTheme ctx (ddWidget dd)
-      drawDropdownMenu ctx inp theme dd
+    theme <- widgetTheme ctx (ddWidget dd)
+    drawDropdownMenu ctx inp theme dd
 
 -- | Paint one open dropdown (select or combo). The combo list clips to its
 -- inner area (so x-shifted text and row fills stop at the scrollbar lanes)
@@ -454,24 +458,21 @@ drawDropdownMenu ctx inp theme dd = do
 
 collectSelectDropdownSpans :: Context -> Input -> IO [(Rect, T.Text, Color, Color, Rect)]
 collectSelectDropdownSpans ctx inp = do
-  dropdowns <- openDropdowns ctx
+  dropdowns <- allowedDropdowns ctx
   let fm = ctxFontMetrics ctx
   fmap concat . forM dropdowns $ \dd -> do
-    allow <- widgetOverlayAllowed ctx (ddWidget dd)
     style <- overlayMenuStyle <$> widgetTheme ctx (ddWidget dd)
-    if not allow
-      then pure []
-      else fmap concat . forM (dropdownRows fm (inputMousePos inp) dd) $ \row ->
-        if T.null (drOption row)
-          then pure []
-          else do
-            (tw, th) <- ctxMeasureText ctx (drOption row)
-            let Rect _ ry _ rh = drRect row
-                bg
-                  | drHovered row = styleHoverBg style
-                  | drIndex row == ddPicked dd = styleActiveBg style
-                  | otherwise = styleBg style
-            pure [(Rect (drTextX row) (centeredTextY fm ry rh th) tw th, drOption row, styleFg style, bg, ddRect dd)]
+    fmap concat . forM (dropdownRows fm (inputMousePos inp) dd) $ \row ->
+      if T.null (drOption row)
+        then pure []
+        else do
+          (tw, th) <- ctxMeasureText ctx (drOption row)
+          let Rect _ ry _ rh = drRect row
+              bg
+                | drHovered row = styleHoverBg style
+                | drIndex row == ddPicked dd = styleActiveBg style
+                | otherwise = styleBg style
+          pure [(Rect (drTextX row) (centeredTextY fm ry rh th) tw th, drOption row, styleFg style, bg, ddRect dd)]
 
 tagSelectClippedSpans ::
   Rect -> Float -> Float -> Float -> Float -> FontMetrics -> [(Rect, T.Text, Color, Color)] -> [(Rect, T.Text, Color, Color, Rect)]

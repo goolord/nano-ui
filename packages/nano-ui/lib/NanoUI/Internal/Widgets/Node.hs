@@ -27,13 +27,13 @@ module NanoUI.Internal.Widgets.Node
   , addWidgetStyled
   , addWidgetWithOptions
   , addSizingLeafNode
-  , resolveInteraction
   , tagContainer
   )
 where
 
 import Control.Monad (when)
 import Data.IORef (readIORef, writeIORef)
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context
@@ -66,7 +66,7 @@ import NanoUI.Internal.Layout.Arena
   , setStyleIdx
   , setWidgetId
   )
-import NanoUI.Internal.Monad (Ui, askContext, askFrameInput, askInput, localInput, nextId, uiIO)
+import NanoUI.Internal.Monad (Ui, askContext, askFrameInput, askInput, localInput, nextId, uiIO, withContext)
 import NanoUI.Internal.WidgetText (packTextNodeStyleFull)
 import NanoUI.Internal.Style
   ( AlignX (..)
@@ -203,10 +203,9 @@ container nt layout child = runContainer nt layout Nothing child
 containerResponse :: Ui :> es => NodeType -> Layout -> Eff es a -> Eff es (a, Response)
 containerResponse nt layout child = do
   wid <- nextId
-  ctx <- askContext
   inp <- askInput
   r <- runContainer nt layout (Just wid) child
-  resp <- uiIO (resolveInteraction ctx inp wid)
+  resp <- withContext (\ctx -> resolveInteraction ctx inp wid)
   pure (r, resp)
 
 runContainer :: Ui :> es => NodeType -> Layout -> Maybe WidgetId -> Eff es a -> Eff es a
@@ -268,9 +267,8 @@ floatingPanel scoped wid addPanel enter body = do
 -- every layer: the frame's while the pointer is routed to that dropdown, and
 -- the view's otherwise.
 dropdownInput :: Ui :> es => WidgetId -> Eff es Input
-dropdownInput wid = do
-  ctx <- askContext
-  uiIO (getPointerRoute ctx) >>= \case
+dropdownInput wid =
+  withContext getPointerRoute >>= \case
     RouteDropdown owner | owner == wid -> askFrameInput
     _ -> askInput
 
@@ -390,9 +388,7 @@ resolveInteraction ctx inp wid = do
   pending <- readIORef (ctxClickedId ctx)
   let
     mouse = inputMousePos inp
-    rect = case mrect of
-      Just r -> r
-      Nothing -> Rect 0 0 0 0
+    rect = fromMaybe (Rect 0 0 0 0) mrect
     canHit = rectHit rect mouse || pending == wid
   if not canHit
     then pure $! mkResponse wid rect False False False False

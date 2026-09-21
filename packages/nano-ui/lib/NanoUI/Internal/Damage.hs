@@ -46,7 +46,6 @@ import NanoUI.Internal.Context
   , OverlayState (..)
   , getsDamage
   , modifyDamage
-  , getsOverlay
   , modifyOverlay
   )
 import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
@@ -249,9 +248,6 @@ data FrameSnapshot = FrameSnapshot
 -- reason never pays for them.
 data FrameDelta = FrameDelta
   { fdWinSize :: !Size
-  , fdMenuRects :: ![Rect]
-  -- ^ Painted bounds of the open dropdowns and text-edit menu.
-  , fdPrevMenuRects :: ![Rect]
   , fdStore :: !WidgetStore
   , fdRects :: !(IM.IntMap Rect)
   , fdTexts :: !(IM.IntMap Text)
@@ -276,8 +272,8 @@ data FrameDelta = FrameDelta
   -- ^ Keys of drawings whose ops changed at an unchanged rect.
   }
 
-writeDamage :: Context -> Input -> [Rect] -> FrameSnapshot -> IO ()
-writeDamage ctx inp menuRects snap = do
+writeDamage :: Context -> Input -> FrameSnapshot -> IO ()
+writeDamage ctx inp snap = do
   newStore <- getStore ctx
   panels <- floatingPanelsInOrder ctx
   newRects <- getsDamage ctx dsPrevRects
@@ -289,7 +285,6 @@ writeDamage ctx inp menuRects snap = do
   winDragActive <- isJust <$> getWindowDrag ctx
   winResizeActive <- isJust <$> getWindowResize ctx
   requests <- getsDamage ctx dsRequests
-  prevMenuRects <- getsOverlay ctx osPrevMenuRects
   redrawn <- refreshCustomDrawings ctx
   let oldRects = fsRects snap
       oldStore = fsStore snap
@@ -299,8 +294,6 @@ writeDamage ctx inp menuRects snap = do
       delta =
         FrameDelta
           { fdWinSize = inputWindowSize inp
-          , fdMenuRects = menuRects
-          , fdPrevMenuRects = prevMenuRects
           , fdStore = newStore
           , fdRects = newRects
           , fdTexts = newTexts
@@ -326,7 +319,7 @@ writeDamage ctx inp menuRects snap = do
       else clipDamage ctx snap delta
   modifyDamage ctx (\ds -> ds {dsDamage = dmg, dsLastWindowSize = inputWindowSize inp, dsRequests = []})
   modifyOverlay ctx $ \os ->
-    os {osPrevFloatingRects = newFloatingRects, osPrevFloatingOrder = map fst panels, osPrevMenuRects = menuRects}
+    os {osPrevFloatingRects = newFloatingRects, osPrevFloatingOrder = map fst panels}
   when modalFlip (markDirty ctx)
   when (fdFloatingChanged delta && not (IM.null (fsFloatingRects snap) && not (IM.null newFloatingRects))) $
     markDirty ctx
@@ -505,12 +498,6 @@ clipDamage ctx snap d = do
   let addFloating other k r rest = unless (IM.lookup k other == Just r) (addRect acc r) >> rest
   IM.foldrWithKey (addFloating (fdFloatingRects d)) (pure ()) (fsFloatingRects snap)
   IM.foldrWithKey (addFloating (fsFloatingRects snap)) (pure ()) (fdFloatingRects d)
-  -- Dropdowns and the text-edit menu are not in the arena, so nothing above
-  -- sees their rows change under the pointer, their filter or their scroll.
-  -- Each open one repaints whole every frame, and a closed or moved one
-  -- repaints where it was.
-  mapM_ (addRect acc) (fdMenuRects d)
-  mapM_ (addRect acc) (fdPrevMenuRects d)
   base <- readRectUnion acc
   let clip = clipRectToWindow winW winH base
       winArea = winW * winH

@@ -3,7 +3,6 @@
 module NanoUI.Internal.Widgets.TextCommon
   ( -- * Character classes and word boundaries
     TextCharClass (..)
-  , textCharClass
   , textWordBounds
     -- * Selection and caret helpers
   , textSelectionForDrag
