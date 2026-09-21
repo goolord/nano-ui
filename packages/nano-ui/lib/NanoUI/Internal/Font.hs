@@ -61,6 +61,7 @@ module NanoUI.Internal.Font
   , sliderHandleSlack
   ) where
 
+import Data.Char (isSpace)
 import qualified Data.Map.Strict as Map
 import Data.Primitive.PrimArray (PrimArray, imapPrimArray, indexPrimArray, mapPrimArray, sizeofPrimArray)
 import Data.Text (Text)
@@ -567,7 +568,10 @@ measureTextWrappedIO lineW fm txt maxW = do
     _ -> (min maxW (maximum ws), lineH * fromIntegral (length textLines))
 
 -- | Wrap each paragraph to @maxW@ using the host line measure: whole words
--- first, characters for words (or paragraphs) that cannot fit.
+-- first, characters for words (or paragraphs) that cannot fit. Each line
+-- starts from a guess at the paragraph's average character width, which the
+-- host measure then confirms, so a paragraph costs a few host measures a line
+-- rather than one a word.
 wrapTextLinesIO :: (Text -> IO Float) -> Text -> Float -> IO [Text]
 wrapTextLinesIO lineW txt maxW = concat <$> mapM wrapParagraph (T.lines txt)
   where
@@ -576,48 +580,126 @@ wrapTextLinesIO lineW txt maxW = concat <$> mapM wrapParagraph (T.lines txt)
       | T.null para = pure [""]
       | otherwise = do
           w <- lineW para
+          let perLine = charsPerWidth w para maxW
           if w <= maxW
             then pure [para]
             else if T.any (== ' ') para
-              then wrapWords (T.words para) []
-              else reverse <$> charLines para []
-    wrapWords [] acc = pure (reverse acc)
-    wrapWords (word : wordsLeft) acc = case acc of
-      [] -> startLine word wordsLeft acc
-      line : rest -> do
-        let candidate = line <> " " <> word
-        width <- lineW candidate
-        if width <= maxW
-          then wrapWords wordsLeft (candidate : rest)
-          else startLine word wordsLeft acc
-    startLine word wordsLeft acc = do
-      width <- lineW word
-      if width <= maxW
-        then wrapWords wordsLeft (word : acc)
-        else do
-          broken <- charLines word []
-          wrapWords wordsLeft (broken ++ acc)
-    charLines chunk acc
+              then wrapWords perLine (singleSpaced para) []
+              else reverse <$> charLines perLine para []
+    -- Lines keep one space between words, whatever separated them.
+    singleSpaced para
+      | T.all (\c -> c == ' ' || not (isSpace c)) para
+          && not (" " `T.isPrefixOf` para || " " `T.isSuffixOf` para || "  " `T.isInfixOf` para) =
+          para
+      | otherwise = T.unwords (T.words para)
+    -- @rest@ is the paragraph from its next word on, one space between
+    -- words, so every candidate line is a slice of it and costs no copy.
+    wrapWords perLine = startLine
+      where
+        startLine rest acc
+          | T.null rest = pure (reverse acc)
+          | otherwise = do
+              let word = T.takeWhile (/= ' ') rest
+              width <- lineW word
+              if width <= maxW
+                then extend rest (T.length word) acc
+                else do
+                  -- The last piece of a broken word starts the next line.
+                  pieces <- charLines perLine word []
+                  case pieces of
+                    piece : done -> extend (T.drop (T.length word - T.length piece) rest) (T.length piece) (done ++ acc)
+                    [] -> startLine (T.drop (T.length word + 1) rest) acc
+        -- Append as many of the next words as fit to the line that starts
+        -- @fromLine@ and is @lineLen@ characters long. The line can end at
+        -- @lineLen@, before each later space, or at the paragraph's end; the
+        -- search starts from the last of those within @perLine@ characters
+        -- and steps a word at a time.
+        extend fromLine lineLen acc = do
+          let fits end = (<= maxW) <$> lineW (T.take end fromLine)
+              nextEnd end
+                | T.null (T.drop end fromLine) = Nothing
+                | otherwise = Just (end + 1 + T.length (T.takeWhile (/= ' ') (T.drop (end + 1) fromLine)))
+              prevEnd end = T.length (fst (T.breakOnEnd " " (T.take end fromLine))) - 1
+              guess
+                | T.compareLength fromLine perLine /= GT = T.length fromLine
+                | otherwise = max lineLen (prevEnd (perLine + 1))
+              up end = case nextEnd end of
+                Just end' -> fits end' >>= \ok -> if ok then up end' else pure end
+                Nothing -> pure end
+              down end
+                | end' <= lineLen = pure lineLen
+                | otherwise = fits end' >>= \ok -> if ok then pure end' else down end'
+                where
+                  end' = prevEnd end
+          end <-
+            if guess <= lineLen
+              then up lineLen
+              else fits guess >>= \ok -> if ok then up guess else down guess
+          let line = T.take end fromLine
+              rest = T.drop (end + 1) fromLine
+          if T.null rest then pure (reverse (line : acc)) else startLine rest (line : acc)
+    charLines perLine chunk acc
       | T.null chunk = pure acc
       | otherwise = do
-          (line, rest) <- takeWidth lineW maxW chunk
+          (line, rest) <- takeWidth perLine lineW maxW chunk
           if T.null line
             then pure acc
-            else charLines rest (line : acc)
+            else charLines perLine rest (line : acc)
 
--- Always consume at least one character from non-empty text, even when a
--- single glyph exceeds the available width, so wrapping makes progress.
-takeWidth :: (Text -> IO Float) -> Float -> Text -> IO (Text, Text)
-takeWidth lineW maxW txt
-  | T.null txt = pure (txt, T.empty)
-  | otherwise = (`T.splitAt` txt) <$> maxFit 1 (T.length txt)
+-- | About how many characters of @txt@, which the host measures @w@ wide,
+-- fit in @maxW@.
+charsPerWidth :: Float -> Text -> Float -> Int
+charsPerWidth w txt maxW
+  | w <= 0 = maxBound `div` 2
+  | otherwise = floor (maxW * fromIntegral (T.length txt) / w)
+
+-- | The largest count from @lo@ to @hi@ that @fits@, where @lo@ fits and
+-- fitting is monotone. Probes @guess@ and the count after it first, then
+-- widens by doubling steps and bisects, so a close guess costs two probes.
+largestFitting :: (Int -> IO Bool) -> Int -> Int -> Int -> IO Int
+largestFitting fits lo0 hi0 guess
+  | hi0 <= lo0 = pure lo0
+  | otherwise = do
+      let g = clamp (lo0 + 1) hi0 guess
+      ok <- fits g
+      if ok then up g 1 else down g 1
   where
-    maxFit lo hi
-      | lo >= hi = pure lo
+    -- @lo@ fits.
+    up !lo !step
+      | lo >= hi0 = pure lo
       | otherwise = do
-          let mid = (lo + hi + 1) `div` 2
-          ok <- (<= maxW) <$> lineW (T.take mid txt)
-          if ok then maxFit mid hi else maxFit lo (mid - 1)
+          let p = min hi0 (lo + step)
+          ok <- fits p
+          if ok then up p (step * 2) else bisect lo p
+    -- @hi@ does not fit.
+    down !hi !step
+      | p <= lo0 = bisect lo0 hi
+      | otherwise = do
+          ok <- fits p
+          if ok then bisect p hi else down p (step * 2)
+      where
+        p = hi - step
+    -- @lo@ fits and @hi@ does not.
+    bisect !lo !hi
+      | hi - lo <= 1 = pure lo
+      | otherwise = do
+          let mid = (lo + hi) `div` 2
+          ok <- fits mid
+          if ok then bisect mid hi else bisect lo mid
+
+-- | Split off the longest prefix that fits @maxW@, starting the search at
+-- @guess@ characters. Always consume at least one character from non-empty
+-- text, even when a single glyph exceeds the available width, so wrapping
+-- makes progress.
+takeWidth :: Int -> (Text -> IO Float) -> Float -> Text -> IO (Text, Text)
+takeWidth guess lineW maxW txt
+  | T.null txt = pure (txt, T.empty)
+  | otherwise = (`T.splitAt` txt) <$> largestFitting fits 1 maxBound guess
+  where
+    -- A count past the end does not fit, so the search needs no length.
+    fits k
+      | T.compareLength txt k == LT = pure False
+      | otherwise = (<= maxW) <$> lineW (T.take k txt)
 
 truncateTextIO :: (Text -> IO Float) -> Float -> Text -> IO Text
 truncateTextIO lineW maxW txt
@@ -629,7 +711,7 @@ truncateTextIO lineW maxW txt
         else do
           ellW <- lineW "..."
           if maxW <= ellW
-            then fst <$> takeWidth lineW maxW txt
+            then fst <$> takeWidth (charsPerWidth w txt maxW) lineW maxW txt
             else do
-              (fit, _) <- takeWidth lineW (maxW - ellW) txt
+              (fit, _) <- takeWidth (charsPerWidth w txt (maxW - ellW)) lineW (maxW - ellW) txt
               pure (T.dropWhileEnd (== '.') fit <> "...")
