@@ -4,6 +4,10 @@
 
 ### Added
 
+- `padTop`, `padBottom` and `padLRTB`, beside `padAll` and `padXY`. `padTop`
+  and `padBottom` set one edge and keep the other three, so
+  `padTop 0 . padXY 12 6` pads 12 at the sides and 6 at the foot only;
+  `padLRTB` sets all four, in `Padding`'s order.
 - `NanoUI.Backend`, holding what a window backend is built from and a view
   never touches: `emptyInput` and the functions that fold a window's events
   into it, the `FontBackend` callbacks that measure and shape text, the

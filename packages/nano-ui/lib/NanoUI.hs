@@ -521,6 +521,11 @@ module NanoUI
   , withDefaultLayout
   , padAll
   , padXY
+  , padLeft
+  , padRight
+  , padTop
+  , padBottom
+  , padLRTB
   , gap
   , fillW
   , fillH

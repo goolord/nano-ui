@@ -60,6 +60,11 @@ module NanoUI.Style
   , windowMargin
   , padAll
   , padXY
+  , padTop
+  , padBottom
+  , padLeft
+  , padRight
+  , padLRTB
   , gap
   , fillW
   , fillH
@@ -258,6 +263,24 @@ padAll n l = l {layoutPadding = Padding n n n n}
 -- | Set horizontal and vertical padding, in that order, in logical pixels.
 padXY :: Float -> Float -> Layout -> Layout
 padXY x y l = l {layoutPadding = Padding x x y y}
+
+-- | Set the top padding in logical pixels, keeping the other three edges.
+padTop :: Float -> Layout -> Layout
+padTop n l = l {layoutPadding = (layoutPadding l) {padT = n}}
+
+-- | Set the bottom padding in logical pixels, keeping the other three edges.
+padBottom :: Float -> Layout -> Layout
+padBottom n l = l {layoutPadding = (layoutPadding l) {padB = n}}
+
+padLeft :: Float -> Layout -> Layout
+padLeft n l = l {layoutPadding = (layoutPadding l) {padL = n}}
+
+padRight :: Float -> Layout -> Layout
+padRight n l = l {layoutPadding = (layoutPadding l) {padR = n}}
+
+-- | Set left, right, top and bottom padding, in that order, in logical pixels.
+padLRTB :: Float -> Float -> Float -> Float -> Layout -> Layout
+padLRTB left right top bottom l = l {layoutPadding = Padding left right top bottom}
 
 -- | Set the space between children in logical pixels.
 gap :: Float -> Layout -> Layout
