@@ -40,7 +40,10 @@ def main():
         if old == new:
             continue
         raw = len(new.splitlines()) - len(old.splitlines())
-        fixed = len(normalized(path, new).splitlines()) - len(normalized(path, old).splitlines())
+        # A .hs -> .hsc migration must not earn credit just because Fourmolu
+        # cannot parse the macros in the replacement. Count both sides raw.
+        migrated = path.endswith(".hs") and path[:-3] + ".hsc" in before | after
+        fixed = raw if migrated else len(normalized(path, new).splitlines()) - len(normalized(path, old).splitlines())
         raw_delta += raw
         normalized_delta += fixed
         print(f"{raw:+5d} raw {fixed:+5d} normalized  {path}")

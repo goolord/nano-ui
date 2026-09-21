@@ -5,7 +5,7 @@ single-header C library for windows, input, and OpenGL contexts. The C source
 is bundled and compiled with the package.
 
 `RGFW` is the wrapped API that `nano-ui-rgfw` uses; `RGFW.Raw` is the direct
-FFI layer. The bindings cover what the backend needs: OpenGL windows, events,
+native layer. The bindings cover what the backend needs: OpenGL windows, events,
 window size and scale, cursors, and the clipboard.
 
 ## Window lifetime
@@ -42,6 +42,11 @@ drawing; a renderer must draw and call `swapBuffersGL` to present a frame.
 
 `RGFW.Raw` exposes unchecked pointers and C constants. Prefer `RGFW` unless
 you need a native operation that the wrapper does not provide.
+
+Event accessors and constants are derived from `RGFW.h` by `hsc2hs`, so field
+reads do not cross the FFI and offsets follow the platform's C layout. Inspect
+an event's tag before reading a union member. Existing raw accessor signatures
+are retained, including widening RGFW's byte-sized physical key to `CUInt`.
 
 ## Requirements
 

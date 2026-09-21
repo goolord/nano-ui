@@ -1,5 +1,5 @@
--- | Foreign imports of RGFW and the accessor functions in @cbits/RGFW.c@, plus
--- the event type, mouse button, key, modifier and window flag constants.
+-- | RGFW imports and header-derived event accessors and constants. The C
+-- compiler supplies field offsets and enum values from the bundled header.
 module RGFW.Raw
   ( RGFW_window
   , RGFW_event
@@ -98,6 +98,9 @@ import Data.Word (Word8, Word32)
 import Foreign.C.String (CString)
 import Foreign.C.Types (CFloat (..), CInt (..), CSize (..), CUChar (..), CUInt (..))
 import Foreign.Ptr (Ptr)
+import Foreign.Storable (peekByteOff)
+
+#include "RGFW.h"
 
 -- | Opaque native window. The creating thread owns its lifetime.
 data RGFW_window
@@ -127,54 +130,54 @@ foreign import ccall "rgfw_create_window_gl"
 foreign import ccall "RGFW_window_swapBuffers_OpenGL"
   c_RGFW_window_swapBuffers_OpenGL :: Ptr RGFW_window -> IO ()
 
--- Accessors (cbits/RGFW.c)
+-- Event accessors read only the union member selected by the event tag.
 -- | Event tag; inspect it before reading fields of the event union.
-foreign import ccall unsafe "rgfw_event_type"
-  c_rgfw_event_type :: Ptr RGFW_event -> IO CUChar
+c_rgfw_event_type :: Ptr RGFW_event -> IO CUChar
+c_rgfw_event_type = #{peek RGFW_event, type}
 
 -- | Mouse-motion x coordinate in native window pixels.
-foreign import ccall unsafe "rgfw_event_mouse_x"
-  c_rgfw_event_mouse_x :: Ptr RGFW_event -> IO CInt
+c_rgfw_event_mouse_x :: Ptr RGFW_event -> IO CInt
+c_rgfw_event_mouse_x = #{peek RGFW_event, mouse.x}
 
 -- | Mouse-motion y coordinate in native window pixels.
-foreign import ccall unsafe "rgfw_event_mouse_y"
-  c_rgfw_event_mouse_y :: Ptr RGFW_event -> IO CInt
+c_rgfw_event_mouse_y :: Ptr RGFW_event -> IO CInt
+c_rgfw_event_mouse_y = #{peek RGFW_event, mouse.y}
 
 -- | Button code from a mouse-button event; see 'rgfw_mouseLeft'.
-foreign import ccall unsafe "rgfw_event_button_value"
-  c_rgfw_event_button_value :: Ptr RGFW_event -> IO CUChar
+c_rgfw_event_button_value :: Ptr RGFW_event -> IO CUChar
+c_rgfw_event_button_value = #{peek RGFW_event, button.value}
 
 -- | Horizontal wheel delta from a scroll event.
-foreign import ccall unsafe "rgfw_event_delta_x"
-  c_rgfw_event_delta_x :: Ptr RGFW_event -> IO CFloat
+c_rgfw_event_delta_x :: Ptr RGFW_event -> IO CFloat
+c_rgfw_event_delta_x = #{peek RGFW_event, delta.x}
 
 -- | Vertical wheel delta from a scroll event.
-foreign import ccall unsafe "rgfw_event_delta_y"
-  c_rgfw_event_delta_y :: Ptr RGFW_event -> IO CFloat
+c_rgfw_event_delta_y :: Ptr RGFW_event -> IO CFloat
+c_rgfw_event_delta_y = #{peek RGFW_event, delta.y}
 
 -- | RGFW key code from a key press or release, not a Unicode text character.
-foreign import ccall unsafe "rgfw_event_key_value"
-  c_rgfw_event_key_value :: Ptr RGFW_event -> IO CUInt
+c_rgfw_event_key_value :: Ptr RGFW_event -> IO CUInt
+c_rgfw_event_key_value p = fromIntegral <$> (#{peek RGFW_event, key.value} p :: IO #{type RGFW_key})
 
 -- | Modifier bit mask from a key event; test with the @rgfw_mod*@ constants.
-foreign import ccall unsafe "rgfw_event_key_mod"
-  c_rgfw_event_key_mod :: Ptr RGFW_event -> IO CUChar
+c_rgfw_event_key_mod :: Ptr RGFW_event -> IO CUChar
+c_rgfw_event_key_mod = #{peek RGFW_event, key.mod}
 
 -- | Code point from a character event. Validate it before converting to 'Char'.
-foreign import ccall unsafe "rgfw_event_keyChar_value"
-  c_rgfw_event_keyChar_value :: Ptr RGFW_event -> IO CUInt
+c_rgfw_event_keyChar_value :: Ptr RGFW_event -> IO CUInt
+c_rgfw_event_keyChar_value = #{peek RGFW_event, keyChar.value}
 
 -- | Native pixel width carried by a resize event.
-foreign import ccall unsafe "rgfw_event_update_w"
-  c_rgfw_event_update_w :: Ptr RGFW_event -> IO CInt
+c_rgfw_event_update_w :: Ptr RGFW_event -> IO CInt
+c_rgfw_event_update_w = #{peek RGFW_event, update.w}
 
 -- | Native pixel height carried by a resize event.
-foreign import ccall unsafe "rgfw_event_update_h"
-  c_rgfw_event_update_h :: Ptr RGFW_event -> IO CInt
+c_rgfw_event_update_h :: Ptr RGFW_event -> IO CInt
+c_rgfw_event_update_h = #{peek RGFW_event, update.h}
 
 -- | Native event structure size in bytes, for allocating event storage.
-foreign import ccall unsafe "rgfw_event_size"
-  c_rgfw_event_size :: IO CSize
+c_rgfw_event_size :: IO CSize
+c_rgfw_event_size = pure #{size RGFW_event}
 
 -- | Current native window width in pixels. Requires a live non-null pointer.
 foreign import ccall unsafe "rgfw_window_w"
@@ -189,12 +192,12 @@ foreign import ccall unsafe "rgfw_window_scale"
   c_rgfw_window_scale :: Ptr RGFW_window -> IO CFloat
 
 -- | Horizontal display scale from a scale-update event.
-foreign import ccall unsafe "rgfw_event_scale_x"
-  c_rgfw_event_scale_x :: Ptr RGFW_event -> IO CFloat
+c_rgfw_event_scale_x :: Ptr RGFW_event -> IO CFloat
+c_rgfw_event_scale_x = #{peek RGFW_event, scale.x}
 
 -- | Vertical display scale from a scale-update event.
-foreign import ccall unsafe "rgfw_event_scale_y"
-  c_rgfw_event_scale_y :: Ptr RGFW_event -> IO CFloat
+c_rgfw_event_scale_y :: Ptr RGFW_event -> IO CFloat
+c_rgfw_event_scale_y = #{peek RGFW_event, scale.y}
 
 -- Clipboard (cbits/RGFW.c)
 -- | Borrow clipboard UTF-8 until the next clipboard read. Writes the byte
@@ -214,26 +217,26 @@ rgfw_mouseButtonPressed, rgfw_mouseButtonReleased, rgfw_mouseScroll, rgfw_mouseM
 -- | Event tags for window movement, resize, focus, scale, and close requests.
 rgfw_windowMoved, rgfw_windowResized, rgfw_windowFocusIn, rgfw_windowFocusOut, rgfw_scaleUpdated, rgfw_windowClose :: Word8
 
-rgfw_eventNone           = 0
-rgfw_keyPressed          = 1
-rgfw_keyReleased         = 2
-rgfw_keyChar             = 3
-rgfw_mouseButtonPressed  = 4
-rgfw_mouseButtonReleased = 5
-rgfw_mouseScroll         = 6
-rgfw_mouseMotion         = 7
-rgfw_windowMoved         = 11
-rgfw_windowResized       = 12
-rgfw_windowFocusIn       = 13
-rgfw_windowFocusOut      = 14
-rgfw_scaleUpdated        = 22
-rgfw_windowClose         = 16
+rgfw_eventNone           = #{const RGFW_eventNone}
+rgfw_keyPressed          = #{const RGFW_keyPressed}
+rgfw_keyReleased         = #{const RGFW_keyReleased}
+rgfw_keyChar             = #{const RGFW_keyChar}
+rgfw_mouseButtonPressed  = #{const RGFW_mouseButtonPressed}
+rgfw_mouseButtonReleased = #{const RGFW_mouseButtonReleased}
+rgfw_mouseScroll         = #{const RGFW_mouseScroll}
+rgfw_mouseMotion         = #{const RGFW_mouseMotion}
+rgfw_windowMoved         = #{const RGFW_windowMoved}
+rgfw_windowResized       = #{const RGFW_windowResized}
+rgfw_windowFocusIn       = #{const RGFW_windowFocusIn}
+rgfw_windowFocusOut      = #{const RGFW_windowFocusOut}
+rgfw_scaleUpdated        = #{const RGFW_scaleUpdated}
+rgfw_windowClose         = #{const RGFW_windowClose}
 
 -- | RGFW button codes, distinct from cursor-shape codes.
 rgfw_mouseLeft, rgfw_mouseMiddle, rgfw_mouseRight :: Word8
-rgfw_mouseLeft   = 0
-rgfw_mouseMiddle = 1
-rgfw_mouseRight  = 2
+rgfw_mouseLeft   = #{const RGFW_mouseLeft}
+rgfw_mouseMiddle = #{const RGFW_mouseMiddle}
+rgfw_mouseRight  = #{const RGFW_mouseRight}
 
 -- | Editing key codes carried by key events.
 rgfw_keyBackSpace, rgfw_keyTab, rgfw_keyReturn, rgfw_keyEscape, rgfw_keyDelete :: Word32
@@ -241,34 +244,34 @@ rgfw_keyBackSpace, rgfw_keyTab, rgfw_keyReturn, rgfw_keyEscape, rgfw_keyDelete :
 rgfw_keyA, rgfw_keyZ :: Word32
 -- | Navigation key codes carried by key events.
 rgfw_keyUp, rgfw_keyDown, rgfw_keyLeft, rgfw_keyRight, rgfw_keyEnd, rgfw_keyHome :: Word32
-rgfw_keyBackSpace = 8
-rgfw_keyTab       = 9
-rgfw_keyReturn    = 10
-rgfw_keyEscape    = 27
-rgfw_keyDelete    = 127
-rgfw_keyA         = 97
-rgfw_keyZ         = 122
-rgfw_keyUp        = 162
-rgfw_keyDown      = 163
-rgfw_keyLeft      = 164
-rgfw_keyRight     = 165
-rgfw_keyEnd       = 168
-rgfw_keyHome      = 169
+rgfw_keyBackSpace = #{const RGFW_keyBackSpace}
+rgfw_keyTab       = #{const RGFW_keyTab}
+rgfw_keyReturn    = #{const RGFW_keyReturn}
+rgfw_keyEscape    = #{const RGFW_keyEscape}
+rgfw_keyDelete    = #{const RGFW_keyDelete}
+rgfw_keyA         = #{const RGFW_keyA}
+rgfw_keyZ         = #{const RGFW_keyZ}
+rgfw_keyUp        = #{const RGFW_keyUp}
+rgfw_keyDown      = #{const RGFW_keyDown}
+rgfw_keyLeft      = #{const RGFW_keyLeft}
+rgfw_keyRight     = #{const RGFW_keyRight}
+rgfw_keyEnd       = #{const RGFW_keyEnd}
+rgfw_keyHome      = #{const RGFW_keyHome}
 
 -- | Independent modifier bits, combined with bitwise OR in key events.
 rgfw_modCapsLock, rgfw_modNumLock, rgfw_modControl, rgfw_modAlt, rgfw_modShift, rgfw_modSuper, rgfw_modScrollLock :: Word8
-rgfw_modCapsLock   = 1
-rgfw_modNumLock    = 2
-rgfw_modControl    = 4
-rgfw_modAlt        = 8
-rgfw_modShift      = 16
-rgfw_modSuper      = 32
-rgfw_modScrollLock = 64
+rgfw_modCapsLock   = #{const RGFW_modCapsLock}
+rgfw_modNumLock    = #{const RGFW_modNumLock}
+rgfw_modControl    = #{const RGFW_modControl}
+rgfw_modAlt        = #{const RGFW_modAlt}
+rgfw_modShift      = #{const RGFW_modShift}
+rgfw_modSuper      = #{const RGFW_modSuper}
+rgfw_modScrollLock = #{const RGFW_modScrollLock}
 
 -- | Window creation flags for centred placement and initially hidden windows.
 rgfw_windowCenter, rgfw_windowHide :: Word32
-rgfw_windowCenter = 64
-rgfw_windowHide   = 512
+rgfw_windowCenter = #{const RGFW_windowCenter}
+rgfw_windowHide   = #{const RGFW_windowHide}
 
 -- Mouse cursors
 -- | Set a standard cursor shape. Returns zero on failure or for a null window.
@@ -288,21 +291,21 @@ rgfw_mouseResizeNW, rgfw_mouseResizeN, rgfw_mouseResizeNE, rgfw_mouseResizeE :: 
 -- | Directional resize cursor codes: southeast, south, southwest, west, and all directions.
 rgfw_mouseResizeSE, rgfw_mouseResizeS, rgfw_mouseResizeSW, rgfw_mouseResizeW, rgfw_mouseResizeAll :: Word8
 
-rgfw_mouseNormal       = 0
-rgfw_mouseArrow        = 1
-rgfw_mouseIbeam        = 2
-rgfw_mouseCrosshair    = 3
-rgfw_mousePointingHand = 4
-rgfw_mouseResizeEW     = 5
-rgfw_mouseResizeNS     = 6
-rgfw_mouseResizeNWSE   = 7
-rgfw_mouseResizeNESW   = 8
-rgfw_mouseResizeNW     = 9
-rgfw_mouseResizeN      = 10
-rgfw_mouseResizeNE     = 11
-rgfw_mouseResizeE      = 12
-rgfw_mouseResizeSE     = 13
-rgfw_mouseResizeS      = 14
-rgfw_mouseResizeSW     = 15
-rgfw_mouseResizeW      = 16
-rgfw_mouseResizeAll    = 17
+rgfw_mouseNormal       = #{const RGFW_mouseNormal}
+rgfw_mouseArrow        = #{const RGFW_mouseArrow}
+rgfw_mouseIbeam        = #{const RGFW_mouseIbeam}
+rgfw_mouseCrosshair    = #{const RGFW_mouseCrosshair}
+rgfw_mousePointingHand = #{const RGFW_mousePointingHand}
+rgfw_mouseResizeEW     = #{const RGFW_mouseResizeEW}
+rgfw_mouseResizeNS     = #{const RGFW_mouseResizeNS}
+rgfw_mouseResizeNWSE   = #{const RGFW_mouseResizeNWSE}
+rgfw_mouseResizeNESW   = #{const RGFW_mouseResizeNESW}
+rgfw_mouseResizeNW     = #{const RGFW_mouseResizeNW}
+rgfw_mouseResizeN      = #{const RGFW_mouseResizeN}
+rgfw_mouseResizeNE     = #{const RGFW_mouseResizeNE}
+rgfw_mouseResizeE      = #{const RGFW_mouseResizeE}
+rgfw_mouseResizeSE     = #{const RGFW_mouseResizeSE}
+rgfw_mouseResizeS      = #{const RGFW_mouseResizeS}
+rgfw_mouseResizeSW     = #{const RGFW_mouseResizeSW}
+rgfw_mouseResizeW      = #{const RGFW_mouseResizeW}
+rgfw_mouseResizeAll    = #{const RGFW_mouseResizeAll}

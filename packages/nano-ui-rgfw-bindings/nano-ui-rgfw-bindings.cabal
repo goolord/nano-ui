@@ -39,6 +39,7 @@ library
     include-dirs:     cbits
     install-includes: RGFW.h
     c-sources:        cbits/RGFW.c
+    build-tool-depends: hsc2hs:hsc2hs
     build-depends:
         base ^>=4.22.0.0,
         bytestring ^>=0.12,
@@ -50,3 +51,15 @@ library
         frameworks: Cocoa
     else
         extra-libraries: X11 Xcursor Xrandr Xi
+
+test-suite nano-ui-rgfw-bindings-test
+    import: warnings
+    type: exitcode-stdio-1.0
+    default-language: GHC2024
+    hs-source-dirs: test
+    main-is: Events.hs
+    c-sources: test/Events.c
+    include-dirs: cbits
+    build-depends: base ^>=4.22.0.0, nano-ui-rgfw-bindings
+    if os(windows)
+        ghc-options: -optl-mconsole

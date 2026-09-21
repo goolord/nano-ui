@@ -18,17 +18,19 @@ module RGFW
   , writeClipboardText
   -- Re-exports
   , module RGFW.Raw
-  ) where
+  )
+where
 
 import Data.ByteString.Unsafe (unsafePackCStringLen)
 import Data.Char (chr)
+import Data.Function (on)
 import Data.Text (Text)
-import qualified Data.Text as T
+import Data.Text qualified as T
 import Data.Text.Encoding (decodeUtf8Lenient)
-import qualified Data.Text.Foreign as TF
-import Data.Word (Word8, Word32)
+import Data.Text.Foreign qualified as TF
+import Data.Word (Word32, Word8)
 import Foreign.C.String (withCString)
-import Foreign.C.Types (CFloat (..), CInt (..), CSize (..), CUChar (..), CUInt (..))
+import Foreign.C.Types (CSize (..), CUChar (..), CUInt (..))
 import Foreign.Marshal.Alloc (alloca, allocaBytes)
 import Foreign.Ptr (Ptr, nullPtr)
 import Foreign.Storable (peek)
@@ -58,12 +60,20 @@ data Event
 -- | Create a window with a core-profile OpenGL context of at least the
 -- given major/minor version made current on the calling OS thread. 'Nothing'
 -- when the window or the context cannot be created.
-createWindowGL :: String -> Int -> Int -> Int -> Int -> Word32 -> Int -> Int -> IO (Maybe Window)
+createWindowGL ::
+  String -> Int -> Int -> Int -> Int -> Word32 -> Int -> Int -> IO (Maybe Window)
 createWindowGL title x y w h flags major minor =
   withCString title $ \cTitle -> do
     ptr <-
-      c_rgfw_create_window_gl cTitle (fromIntegral x) (fromIntegral y) (fromIntegral w) (fromIntegral h)
-        (fromIntegral flags) (fromIntegral major) (fromIntegral minor)
+      c_rgfw_create_window_gl
+        cTitle
+        (fromIntegral x)
+        (fromIntegral y)
+        (fromIntegral w)
+        (fromIntegral h)
+        (fromIntegral flags)
+        (fromIntegral major)
+        (fromIntegral minor)
     pure (if ptr == nullPtr then Nothing else Just (Window ptr))
 
 -- | Present the OpenGL back buffer. The window's context must be current.
@@ -96,73 +106,63 @@ pollEvent (Window win) evPtr = do
     else do
       CUChar t <- c_rgfw_event_type evPtr
       case t of
-        _ | t == rgfw_keyPressed -> do
-            CUInt val <- c_rgfw_event_key_value evPtr
-            CUChar m <- c_rgfw_event_key_mod evPtr
-            pure (EventKeyPress val m)
-          | t == rgfw_keyReleased -> do
-            CUInt val <- c_rgfw_event_key_value evPtr
-            CUChar m <- c_rgfw_event_key_mod evPtr
-            pure (EventKeyRelease val m)
+        _
+          | t == rgfw_keyPressed || t == rgfw_keyReleased -> do
+              CUInt val <- c_rgfw_event_key_value evPtr
+              CUChar m <- c_rgfw_event_key_mod evPtr
+              pure ((if t == rgfw_keyPressed then EventKeyPress else EventKeyRelease) val m)
           | t == rgfw_keyChar -> do
-            CUInt val <- c_rgfw_event_keyChar_value evPtr
-            let !cInt = fromIntegral val :: Int
-            -- An invalid code point is still an event: reporting EventNone
-            -- would read as an empty queue and stall the rest of the batch.
-            if (cInt >= 0 && cInt <= 0x10FFFF) && not (cInt >= 0xD800 && cInt <= 0xDFFF)
-              then pure (EventKeyChar (chr cInt))
-              else pure (EventOther t)
-          | t == rgfw_mouseButtonPressed -> do
-            CUChar b <- c_rgfw_event_button_value evPtr
-            pure (EventMouseButton b True)
-          | t == rgfw_mouseButtonReleased -> do
-            CUChar b <- c_rgfw_event_button_value evPtr
-            pure (EventMouseButton b False)
-          | t == rgfw_mouseMotion -> do
-            CInt mx <- c_rgfw_event_mouse_x evPtr
-            CInt my <- c_rgfw_event_mouse_y evPtr
-            pure (EventMouseMotion (fromIntegral mx) (fromIntegral my))
-          | t == rgfw_mouseScroll -> do
-            dx <- c_rgfw_event_delta_x evPtr
-            dy <- c_rgfw_event_delta_y evPtr
-            pure (EventMouseScroll (realToFrac dx) (realToFrac dy))
-          | t == rgfw_windowResized -> do
-            CInt uw <- c_rgfw_event_update_w evPtr
-            CInt uh <- c_rgfw_event_update_h evPtr
-            pure (EventWindowResize (fromIntegral uw) (fromIntegral uh))
-          | t == rgfw_scaleUpdated -> do
-            sx <- c_rgfw_event_scale_x evPtr
-            sy <- c_rgfw_event_scale_y evPtr
-            pure (EventScaleUpdate (realToFrac sx) (realToFrac sy))
+              CUInt val <- c_rgfw_event_keyChar_value evPtr
+              let
+                !cInt = fromIntegral val :: Int
+              -- An invalid code point is still an event: reporting EventNone
+              -- would read as an empty queue and stall the rest of the batch.
+              if (cInt >= 0 && cInt <= 0x10FFFF) && not (cInt >= 0xD800 && cInt <= 0xDFFF)
+                then pure (EventKeyChar (chr cInt))
+                else pure (EventOther t)
+          | t == rgfw_mouseButtonPressed || t == rgfw_mouseButtonReleased -> do
+              CUChar b <- c_rgfw_event_button_value evPtr
+              pure (EventMouseButton b (t == rgfw_mouseButtonPressed))
+          | t == rgfw_mouseMotion ->
+              liftA2
+                (EventMouseMotion `on` fromIntegral)
+                (c_rgfw_event_mouse_x evPtr)
+                (c_rgfw_event_mouse_y evPtr)
+          | t == rgfw_mouseScroll ->
+              liftA2
+                (EventMouseScroll `on` realToFrac)
+                (c_rgfw_event_delta_x evPtr)
+                (c_rgfw_event_delta_y evPtr)
+          | t == rgfw_windowResized ->
+              liftA2
+                (EventWindowResize `on` fromIntegral)
+                (c_rgfw_event_update_w evPtr)
+                (c_rgfw_event_update_h evPtr)
+          | t == rgfw_scaleUpdated ->
+              liftA2
+                (EventScaleUpdate `on` realToFrac)
+                (c_rgfw_event_scale_x evPtr)
+                (c_rgfw_event_scale_y evPtr)
           | t == rgfw_windowClose ->
-            pure EventWindowClose
+              pure EventWindowClose
           | otherwise ->
-            pure (EventOther t)
+              pure (EventOther t)
 
 -- | Current native window width and height in pixels.
 windowSize :: Window -> IO (Int, Int)
-windowSize (Window w) = do
-  CInt width <- c_rgfw_window_w w
-  CInt height <- c_rgfw_window_h w
-  pure (fromIntegral width, fromIntegral height)
+windowSize (Window w) = liftA2 ((,) `on` fromIntegral) (c_rgfw_window_w w) (c_rgfw_window_h w)
 
 -- | Current display scale reported by RGFW, with 1 meaning unscaled.
 windowScale :: Window -> IO Float
-windowScale (Window w) = do
-  CFloat s <- c_rgfw_window_scale w
-  pure s
+windowScale (Window w) = realToFrac <$> c_rgfw_window_scale w
 
 -- | Select an RGFW standard cursor code. Returns 'False' if the request fails.
 setMouseStandard :: Window -> Word8 -> IO Bool
-setMouseStandard (Window win) icon = do
-  CUChar res <- c_rgfw_window_set_mouse_standard win (CUChar icon)
-  pure (res /= 0)
+setMouseStandard (Window win) icon = (/= 0) <$> c_rgfw_window_set_mouse_standard win (CUChar icon)
 
 -- | Restore the default cursor. Returns 'False' if the request fails.
 setMouseDefault :: Window -> IO Bool
-setMouseDefault (Window win) = do
-  CUChar res <- c_rgfw_window_set_mouse_default win
-  pure (res /= 0)
+setMouseDefault (Window win) = (/= 0) <$> c_rgfw_window_set_mouse_default win
 
 -- | The system clipboard's text, if it holds any. Needs an open window; on
 -- X11 it waits for the selection owner to convert the data. Invalid UTF-8
@@ -181,6 +181,5 @@ readClipboardText =
 -- | Replace the system clipboard with text (UTF-8); 'False' if refused.
 writeClipboardText :: Text -> IO Bool
 writeClipboardText txt =
-  TF.withCStringLen txt $ \(ptr, len) -> do
-    CUChar ok <- c_rgfw_write_clipboard_text ptr (fromIntegral len)
-    pure (ok /= 0)
+  TF.withCStringLen txt $ \(ptr, len) ->
+    (/= 0) <$> c_rgfw_write_clipboard_text ptr (fromIntegral len)

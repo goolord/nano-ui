@@ -26,6 +26,7 @@ fails the build instead of swapping.
 | `text-buffer-spec` | The multi-line text buffer |
 | `nano-ui-inspection` | Compiler checks for SIMD writers, typed store slots, animation channels, unboxed commands, and canvas construction |
 | `nano-ui-rgfw-test` | RGFW input translation, the glyph atlas, and frames drawn by a software rasteriser kept in the test suite |
+| `nano-ui-rgfw-bindings-test` | Native event union layouts, key width, modifiers, and constant values |
 | `nano-ui-font-search-test`, `nano-ui-font-effects-test` | SDL font discovery, measurement, and handle lifetimes |
 | `nano-ui-render-test` | Native SDL readback of partial-damage triangles and clipping |
 | `nano-ui-diagrams-test` | Diagram conversion, tessellation, and charts |

@@ -121,3 +121,25 @@ Seven paired native atlas runs, each measuring 100 reset-and-1,024-insertion
 cycles after five warmups: 2.966593 to 2.886646 ms/cycle (-2.69%), with zero
 Haskell bytes/cycle on both sides (`nano-ui-atlas-direct.json`). This exercises
 cold uploads and resets rather than only warmed glyph lookups.
+
+## RGFW binding boundary
+
+`RGFW.Raw.hsc` derives event offsets, storage size and constants from the
+bundled C header. It removes the parallel C event getters while preserving
+their Haskell signatures. RGFW physical keys are one byte (the old getter
+widened them to 32 bits); the generated getter explicitly preserves this
+conversion instead of reading neighbouring repeat/modifier bytes. Key/button
+event construction shares press/release handling, and independent coordinate
+reads use applicative construction.
+
+The boundary removes 14 physical / 31 normalized library lines. The `.hs` to
+`.hsc` migration is counted raw on both sides: it receives no artificial
+formatter savings from changing to a format Fourmolu cannot parse. There is
+no new runtime dependency; `hsc2hs` is declared as a build tool.
+
+An independent C fixture writes each relevant union member, including a key
+with nonzero neighbouring bytes. All native ABI and existing RGFW tests pass,
+and the native profile completes 500 frames. Seven paired 10-million-read
+probes change 1.622720 to 0.623470 ns/key read (-61.58%), with 16 B/read on
+both sides (`nano-ui-events-hsc.json`). These are accessor measurements, not
+a claim that rendering has accelerated by the same proportion.
