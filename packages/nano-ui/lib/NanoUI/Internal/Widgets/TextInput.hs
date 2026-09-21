@@ -77,7 +77,7 @@ import NanoUI.Internal.Store
   , memberSlot
   , slotKey
   )
-import NanoUI.Internal.Style (Layout (..), Sizing (..), defaultLayout)
+import NanoUI.Internal.Style (Layout (..), defaultLayout, fillW, minW)
 import NanoUI.Internal.WidgetText (packTextNodeStyleFull, textInputFlagPassword, textInputFlagSearch, textInputFlagSelectable, textInputPasswordMode, textInputSelectableMode)
 import NanoUI.Internal.Widgets.Behavior (keyboardFocused)
 import NanoUI.Internal.Widgets.Node (Response (..), addWidgetStyled, setChanged, setSubmitted)
@@ -95,20 +95,12 @@ import NanoUI.Internal.Widgets.TextEditor
   )
 
 textInputLayout :: Layout
-textInputLayout =
-  defaultLayout
-    { layoutWidth = Grow 1
-    , layoutMinW = 160
-    }
+textInputLayout = minW 160 (fillW defaultLayout)
 
 -- | Layout for a caption-less search field. Grows to fill, keeps a little more
 -- room for the embedded magnifier / clear chrome than a plain text input.
 searchInputLayout :: Layout
-searchInputLayout =
-  defaultLayout
-    { layoutWidth = Grow 1
-    , layoutMinW = 180
-    }
+searchInputLayout = minW 180 (fillW defaultLayout)
 
 data TextInputState = TextInputState
   { tisText :: !Text

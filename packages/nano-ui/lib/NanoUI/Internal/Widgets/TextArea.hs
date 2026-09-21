@@ -70,7 +70,7 @@ import NanoUI.Internal.Store
   , overField
   , slotKey
   )
-import NanoUI.Internal.Style (FontStyle (..), FontVariant (..), FontWeight (..), Layout (..), Sizing (..), defaultLayout)
+import NanoUI.Internal.Style (FontStyle (..), FontVariant (..), FontWeight (..), Layout (..), defaultLayout, fillW, fixedH, minW)
 import NanoUI.Internal.Types (DamageBounds (..), clamp)
 import NanoUI.Internal.Widgets.Behavior (keyboardFocused)
 import NanoUI.Internal.Widgets.Node (Response, addWidget, setChanged)
@@ -174,12 +174,7 @@ ensureCaretVisible state =
 
 -- | Default viewport: grow horizontally, at least 200 pixels wide, 140 pixels tall.
 textAreaLayout :: Layout
-textAreaLayout =
-  defaultLayout
-    { layoutWidth = Grow 1
-    , layoutMinW = 200
-    , layoutHeight = Fixed 140
-    }
+textAreaLayout = fixedH 140 . minW 200 . fillW $ defaultLayout
 
 -- | Multi-line text editor over 'Text'. Pass the current text; the result is
 -- the text after this frame's edits. Pair it with a 'label' when a caption is

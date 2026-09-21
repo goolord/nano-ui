@@ -91,13 +91,15 @@ import NanoUI.Internal.Store
 import NanoUI.Internal.Style
   ( AlignX (..)
   , AlignY (..)
-  , Direction (..)
   , Layout (..)
-  , Padding (..)
   , Sizing (..)
   , Style (..)
   , Theme (..)
   , defaultLayout
+  , gap
+  , minH
+  , minW
+  , tight
   , fadeAlpha
   , separatorTrackColor
   )
@@ -585,27 +587,10 @@ paneGrid cfg = do
 -- -----------------------------------------------------------------------------
 
 gridRootLayout :: Float -> (Layout -> Layout) -> Layout
-gridRootLayout minSize f =
-  f
-    defaultLayout
-      { layoutDirection = Column
-      , layoutGap = 0
-      , layoutPadding = Padding 0 0 0 0
-      , layoutWidth = Grow 1
-      , layoutHeight = Grow 1
-      , layoutMinW = minSize
-      , layoutMinH = minSize
-      }
+gridRootLayout minSize f = f (minW minSize . minH minSize $ fillLay)
 
 sizingLay :: Sizing -> Sizing -> Layout
-sizingLay wSiz hSiz =
-  defaultLayout
-    { layoutDirection = Column
-    , layoutPadding = Padding 0 0 0 0
-    , layoutGap = 0
-    , layoutWidth = wSiz
-    , layoutHeight = hSiz
-    }
+sizingLay wSiz hSiz = tight . gap 0 $ defaultLayout {layoutWidth = wSiz, layoutHeight = hSiz}
 
 -- | Zero-gap, zero-padding, grow-to-fill layout.
 fillLay :: Layout

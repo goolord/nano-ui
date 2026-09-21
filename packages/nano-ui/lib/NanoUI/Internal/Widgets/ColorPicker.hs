@@ -61,13 +61,19 @@ import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Monad (Ui, askContext, askInput, nextId, uiIO, withKey)
 import NanoUI.Internal.Store (Slot (..), fieldFloat, fieldInt, fieldPoint, findSlot, insertSlot, lookupSlot, slotKey, slotWriteOr)
 import NanoUI.Internal.Style
-  ( AlignY (..)
-  , Direction (..)
+  ( Direction (..)
   , Layout (..)
-  , Padding (..)
-  , Sizing (..)
   , Style (..)
+  , alignMid
   , defaultLayout
+  , fillW
+  , fixedH
+  , fixedW
+  , gap
+  , maxW
+  , minW
+  , percent
+  , tight
   )
 import NanoUI.Internal.Types
   ( Color (..)
@@ -357,64 +363,38 @@ drawColorPickerPart na idx fm da store style rect = do
       swatch new newCol
 
 colorPickerLayout :: Layout
-colorPickerLayout =
-  defaultLayout
-    { layoutDirection = Column
-    , layoutWidth = Grow 1
-    , layoutGap = colorPickerGap
-    , layoutPadding = Padding 0 0 0 0
-    }
+colorPickerLayout = tight . fillW . gap colorPickerGap $ defaultLayout
 
 -- The field, bars and preview side by side.
 colorPickerCanvasLayout :: Layout
-colorPickerCanvasLayout =
-  colorPickerLayout {layoutDirection = Row}
+colorPickerCanvasLayout = colorPickerLayout {layoutDirection = Row}
 
 -- The field grows up to a square as tall as the row.
 colorPickerSvLayout :: Layout
 colorPickerSvLayout =
-  defaultLayout
-    { layoutWidth = Grow 1
-    , layoutHeight = Fixed colorPickerSvH
-    , layoutMinW = 60
-    , layoutMaxW = colorPickerSvH
-    , layoutPadding = Padding 0 0 0 0
-    }
+  tight . fillW . fixedH colorPickerSvH . minW 60 . maxW colorPickerSvH $ defaultLayout
 
 colorPickerColumnLayout :: Float -> Layout
-colorPickerColumnLayout w =
-  colorPickerSvLayout {layoutWidth = Fixed w, layoutMinW = w, layoutMaxW = w}
+colorPickerColumnLayout w = fixedW w colorPickerSvLayout
 
 -- A row of channel fields. Children are groups sized by 'percent' so the
 -- R/G/B(/A) and H/S/V rows share the same column widths.
 colorPickerRowLayout :: Layout
-colorPickerRowLayout =
-  colorPickerLayout {layoutDirection = Row, layoutAlignY = AlignMiddle}
+colorPickerRowLayout = alignMid colorPickerCanvasLayout
 
 -- One channel field: an inline label plus its bare box, taking @pct@ of the row.
 colorPickerFieldGroupLayout :: Float -> Layout
-colorPickerFieldGroupLayout pct =
-  colorPickerLayout
-    { layoutDirection = Row
-    , layoutWidth = Percent pct
-    , layoutAlignY = AlignMiddle
-    }
+colorPickerFieldGroupLayout pct = percent pct colorPickerRowLayout
 
 colorPickerFieldLayout :: Layout
-colorPickerFieldLayout =
-  defaultLayout
-    { layoutWidth = Grow 1
-    , layoutMinW = 40
-    , layoutPadding = Padding 0 0 0 0
-    }
+colorPickerFieldLayout = tight . fillW . minW 40 $ defaultLayout
 
 -- A numeric channel field: room for three digits beside its stepper.
 colorPickerChannelLayout :: Layout
-colorPickerChannelLayout = colorPickerFieldLayout {layoutMinW = 60}
+colorPickerChannelLayout = minW 60 colorPickerFieldLayout
 
 colorPickerLabelLayout :: Layout
-colorPickerLabelLayout =
-  defaultLayout {layoutPadding = Padding 0 0 0 0, layoutAlignY = AlignMiddle}
+colorPickerLabelLayout = tight (alignMid defaultLayout)
 
 -- | RGB colour picker: a saturation/value field, a hue bar, and RGB, HSV and
 -- hex fields. Pass the current colour; the result is the colour after this
@@ -455,11 +435,11 @@ rgbaChannels = rgbChannels ++ [("A", colorA, \v c -> colorRGBA (colorR c) (color
 hsvChannels :: [(Text, Int, (Float, Float, Float) -> Int, Int -> (Float, Float, Float) -> (Float, Float, Float))]
 hsvChannels =
   [ ("H", 360, \(h, _, _) -> round h, \n (_, s, v) -> (fromIntegral n, s, v))
-  , ("S", 100, \(_, s, _) -> round (s * 100), \n (h, _, v) -> (h, percent n, v))
-  , ("V", 100, \(_, _, v) -> round (v * 100), \n (h, s, _) -> (h, s, percent n))
+  , ("S", 100, \(_, s, _) -> round (s * 100), \n (h, _, v) -> (h, fraction n, v))
+  , ("V", 100, \(_, _, v) -> round (v * 100), \n (h, s, _) -> (h, s, fraction n))
   ]
   where
-    percent n = fromIntegral n / 100
+    fraction n = fromIntegral n / 100
 
 -- | Widget ids of a picker's parts. The field's id keys the picker's state.
 data PickerParts = PickerParts

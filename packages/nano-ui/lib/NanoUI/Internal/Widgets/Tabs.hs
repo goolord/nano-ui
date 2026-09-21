@@ -34,15 +34,21 @@ import NanoUI.Internal.Layout.Arena (setNodeValue)
 import NanoUI.Internal.Monad (Ui, askContext, askInput, nextId, uiIO, withKey)
 import NanoUI.Internal.Store (Slot (..), fieldFloat, findSlot, insertSlot, slotKey)
 import NanoUI.Internal.Style
-  ( AlignX (..)
-  , AlignY (..)
-  , Direction (..)
+  ( Direction (..)
   , Layout (..)
   , Padding (..)
   , Sizing (..)
+  , alignCenter
+  , alignMid
   , defaultLayout
+  , fillH
   , fillW
+  , fixedH
+  , gap
   , grow
+  , padAll
+  , padTop
+  , padXY
   , themeMuted
   , tight
   )
@@ -137,25 +143,16 @@ tabStrip (TabsConfig style orient) cur tabList mRenderBody = do
   let vertical = orient == TabLeft || orient == TabRight
       h = tabHeaderH
       styleVal = fromEnum style
-      hdrLay =
-        defaultLayout
-          { layoutHeight = Fixed h
-          , layoutPadding = Padding 8 8 4 4
-          , layoutAlignX = AlignCenter
-          , layoutAlignY = AlignMiddle
-          , layoutGap = 4
-          }
-      barLay =
-        if vertical
-          then defaultLayout {layoutDirection = Column, layoutWidth = Fit, layoutHeight = Grow 1, layoutGap = 2, layoutPadding = Padding 2 2 2 2}
-          else
-            defaultLayout
-              { layoutDirection = Row
-              , layoutWidth = Grow 1
-              , layoutHeight = Fixed (h + 4)
-              , layoutGap = if style == TabSegmented then 0 else 4
-              , layoutPadding = if style == TabContained then Padding 0 0 2 0 else Padding 0 0 0 0
-              }
+      hdrLay = padXY 8 4 . fixedH h . alignCenter . alignMid . gap 4 $ defaultLayout
+      barLay
+        | vertical = padAll 2 . gap 2 . fillH $ defaultLayout
+        | otherwise =
+            (if style == TabContained then padTop 2 else id)
+              . tight
+              . fillW
+              . fixedH (h + 4)
+              . gap (if style == TabSegmented then 0 else 4)
+              $ defaultLayout {layoutDirection = Row}
   let headerBar =
         if vertical
           then column' barLay $ do
@@ -206,21 +203,8 @@ renderScrollableHeaders ctx style hdrLay barLay groupId cur tabList = do
       arrowW = 26
       leftGlyph = "\8249"
       rightGlyph = "\8250"
-      innerLay =
-        defaultLayout
-          { layoutDirection = Row
-          , layoutWidth = Fit
-          , layoutHeight = Fixed h
-          , layoutGap = layoutGap barLay
-          , layoutPadding = Padding 0 0 0 0
-          }
-      scrollerLay =
-        defaultLayout
-          { layoutDirection = Row
-          , layoutWidth = Grow 1
-          , layoutHeight = Fixed h
-          , layoutPadding = Padding 0 0 0 0
-          }
+      innerLay = tight . fixedH h . gap (layoutGap barLay) $ defaultLayout {layoutDirection = Row}
+      scrollerLay = tight . fillW . fixedH h $ defaultLayout {layoutDirection = Row}
       -- Hidden + bare: the scroller owns the clip, offset, wheel, and damage
       -- but paints nothing (no well, no scrollbar), so the headers look
       -- exactly as they did before the strip could scroll.
