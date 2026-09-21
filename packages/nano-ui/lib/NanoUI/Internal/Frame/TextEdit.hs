@@ -36,7 +36,7 @@ import NanoUI.Internal.Context
   , requestWakeAfter
   , setTextInputDrag
   )
-import NanoUI.Internal.Frame.Hit (findNodeByWidgetId, withWidgetNode)
+import NanoUI.Internal.Frame.Hit (withWidgetNode)
 import NanoUI.Internal.Frame.TextArea
 import NanoUI.Internal.Frame.TextArea.Content (resolveTextAreaFont, textAreaContentMetrics)
 import NanoUI.Internal.Frame.TextArea.Geometry
@@ -69,8 +69,7 @@ keepDragScrolling ctx inp focus =
     mDrag <- getsInteraction ctx isTextInputDrag
     forM_ mDrag $ \drag ->
       when (textInputDragWidget drag == focus) $ do
-        mIdx <- findNodeByWidgetId ctx focus
-        forM_ mIdx $ \idx -> do
+        withWidgetNode ctx focus () $ \idx -> do
           rect <- getNodeRect (ctxNodeArena ctx) idx
           unless (rectContains rect (inputMousePos inp)) $
             requestWakeAfter ctx (1 / 60)
@@ -79,9 +78,8 @@ keepDragScrolling ctx inp focus =
 -- missing, and non-text widget ids do nothing.
 collapseTextFieldSelection :: Context -> WidgetId -> IO ()
 collapseTextFieldSelection ctx wid =
-  when (hashWidgetId wid /= 0) $ do
-    withWidgetNode ctx wid () $ \idx ->
-      getNodeType (ctxNodeArena ctx) idx >>= \case
-        NodeTextInput -> collapseTextInputSelection ctx wid
-        NodeTextArea -> collapseTextAreaSelection ctx wid
-        _ -> pure ()
+  withWidgetNode ctx wid () $ \idx ->
+    getNodeType (ctxNodeArena ctx) idx >>= \case
+      NodeTextInput -> collapseTextInputSelection ctx wid
+      NodeTextArea -> collapseTextAreaSelection ctx wid
+      _ -> pure ()

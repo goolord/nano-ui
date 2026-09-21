@@ -42,7 +42,6 @@ import NanoUI.Internal.Layout.Arena
   , getNodeRect
   , getNodeType
   , getParent
-  , getRect
   , getWidgetId
   , isFloatingNode
   , lookupNodeByKey
@@ -51,7 +50,7 @@ import NanoUI.Internal.Layout.Arena
   , walkAncestors
   )
 import NanoUI.Internal.Monad ((<&&>))
-import NanoUI.Internal.Types (Rect (..), V2 (..), rectContains, rectH, rectHit, rectW)
+import NanoUI.Internal.Types (Rect (..), V2 (..), rectContains, rectHit)
 
 -- | The node that carries widget id @wid@ in this frame's arena. 'Nothing' for
 -- @WidgetId 0@ and for a widget the view has not declared this frame. When
@@ -87,9 +86,7 @@ nodeInSubtree ctx idx top =
 -- descendants. 'False' when the widget has no node this frame. The root is a
 -- node index, so a caller that tests many widgets looks it up once.
 widgetIdInSubtree :: Context -> NodeIdx -> WidgetId -> IO Bool
-widgetIdInSubtree ctx root wid = do
-  node <- findNodeByWidgetId ctx wid
-  maybe (pure False) (\idx -> nodeInSubtree ctx idx root) node
+widgetIdInSubtree ctx root wid = withWidgetNode ctx wid False (\idx -> nodeInSubtree ctx idx root)
 
 -- | Whether the pointer at @mouse@ can reach node @idx@ past the floating
 -- panels. While a modal is open, only the nodes inside the top modal can be
@@ -179,10 +176,8 @@ scrollHitRect = getPrevRect
 {-# INLINE nodePointVisible #-}
 nodePointVisible :: Context -> NodeIdx -> V2 -> IO Bool
 nodePointVisible ctx idx mouse = do
-  (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-  let
-    vis = Rect x y w h
-  if not (w > 0 && h > 0 && rectContains vis mouse)
+  vis <- getNodeRect (ctxNodeArena ctx) idx
+  if not (rectHit vis mouse)
     then pure False
     else do
       mClip <- getClipRect (ctxNodeArena ctx) idx
@@ -196,7 +191,7 @@ nodePointVisible ctx idx mouse = do
 {-# INLINE nodeClippedHit #-}
 nodeClippedHit :: Context -> NodeIdx -> Rect -> V2 -> IO Bool
 nodeClippedHit ctx idx rect mouse = do
-  if not (rectW rect > 0 && rectH rect > 0 && rectContains rect mouse)
+  if not (rectHit rect mouse)
     then pure False
     else do
       na <- pure (ctxNodeArena ctx)
@@ -218,7 +213,7 @@ nodeClippedHit ctx idx rect mouse = do
 {-# INLINE nodeInteractionHit #-}
 nodeInteractionHit :: Context -> NodeIdx -> Rect -> V2 -> IO Bool
 nodeInteractionHit ctx idx rect mouse = do
-  if not (rectW rect > 0 && rectH rect > 0 && rectContains rect mouse)
+  if not (rectHit rect mouse)
     then pure False
     else scrollViewportHit ctx idx mouse
 

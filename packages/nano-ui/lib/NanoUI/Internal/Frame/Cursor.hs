@@ -136,17 +136,15 @@ textFieldHoverCursorKind ctx inp = do
 -- pointer cursor rather than the text cursor.
 numericStepperHit :: Context -> WidgetId -> V2 -> IO Bool
 numericStepperHit ctx wid mouse =
-  findNodeByWidgetId ctx wid >>= \case
-    Nothing -> pure False
-    Just idx -> do
-      si <- getStyleIdx (ctxNodeArena ctx) idx
-      if not (hasFlag textInputFlagNumeric si)
-        then pure False
-        else do
-          (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-          let
-            (up, down) = numericStepperRects x y w h
-          pure (rectContains up mouse || rectContains down mouse)
+  withWidgetNode ctx wid False $ \idx -> do
+    si <- getStyleIdx (ctxNodeArena ctx) idx
+    if not (hasFlag textInputFlagNumeric si)
+      then pure False
+      else do
+        (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+        let
+          (up, down) = numericStepperRects x y w h
+        pure (rectContains up mouse || rectContains down mouse)
 
 scrollThumbHit :: Context -> V2 -> IO Bool
 scrollThumbHit ctx mouse =

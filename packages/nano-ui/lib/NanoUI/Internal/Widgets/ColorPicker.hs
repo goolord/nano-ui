@@ -50,8 +50,7 @@ import NanoUI.Internal.Layout.Arena
   ( NodeArena
   , NodeIdx
   , NodeType (..)
-  , getFirstChild
-  , getNextSibling
+  , findChildM
   , getNodeType
   , getParent
   , getRect
@@ -199,16 +198,12 @@ colorPickerSvSquare (Rect x y w h) =
 pickerSvNode :: NodeArena -> NodeIdx -> IO NodeIdx
 pickerSvNode na idx = do
   parent <- getParent na idx
-  if parent < 0 then pure idx else getFirstChild na parent >>= go
-  where
-    go ci
-      | ci < 0 = pure idx
-      | otherwise = do
-          nt <- getNodeType na ci
-          si <- getStyleIdx na ci
-          if nt == NodeColorPicker && colorPickerPartOf si == PickerSv
-            then pure ci
-            else getNextSibling na ci >>= go
+  if parent < 0
+    then pure idx
+    else fmap (fromMaybe idx) . findChildM na parent $ \ci -> do
+      nt <- getNodeType na ci
+      si <- getStyleIdx na ci
+      pure (nt == NodeColorPicker && colorPickerPartOf si == PickerSv)
 
 -- | Where the part at @idx@ (laid out at @rect@) draws: the field's square, or
 -- the part's column cut to the square's height so the bars and the preview

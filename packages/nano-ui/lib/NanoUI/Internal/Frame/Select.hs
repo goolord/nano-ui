@@ -44,7 +44,7 @@ import NanoUI.Internal.Context
 import NanoUI.Internal.Draw (pushRect, pushRoundedRect, pushText, withClip)
 import NanoUI.Internal.Font (FontMetrics, centeredTextY, menuItemPadX, menuItemRowH, menuOuterPad, widgetContentInset)
 import NanoUI.Internal.Frame.Chrome (overlayMenuStyle, paintMenuAccent, paintMenuPanel)
-import NanoUI.Internal.Frame.Hit (findNodeByWidgetId, widgetOverlayAllowed, withWidgetNode)
+import NanoUI.Internal.Frame.Hit (widgetOverlayAllowed, withWidgetNode)
 import NanoUI.Internal.Frame.Scroll.Geometry (padTextClipRect)
 import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Internal.Input (Input (..), Key (..), foldInputKeys, inputKeys, inputMousePos, inputMousePressed, inputPointerHeld)
@@ -239,8 +239,7 @@ finalizeSelectKeyboard ctx inp = do
             when wantEsc $ markEscapeConsumed ctx
             markDirty ctx
           else do
-            mIdx <- findNodeByWidgetId ctx wid
-            forM_ mIdx $ \idx -> do
+            withWidgetNode ctx wid () $ \idx -> do
               n <- length <$> getOptions (ctxNodeArena ctx) idx
               when (n > 0) $ do
                 let key = intKey wid
@@ -258,13 +257,11 @@ pickSelectKeyboardTarget ctx focus store wantStep = do
     Nothing -> fmap (,True) <$> findOpenSelectWidget ctx
 
 selectWidgetIfAny :: Context -> WidgetId -> IO (Maybe WidgetId)
-selectWidgetIfAny ctx wid
-  | hashWidgetId wid == 0 = pure Nothing
-  | otherwise = do
-      withWidgetNode ctx wid Nothing $ \idx -> do
-        nt <- getNodeType (ctxNodeArena ctx) idx
-        disabled <- isDisabled ctx wid
-        pure (if nt == NodeSelect && not disabled then Just wid else Nothing)
+selectWidgetIfAny ctx wid =
+  withWidgetNode ctx wid Nothing $ \idx -> do
+    nt <- getNodeType (ctxNodeArena ctx) idx
+    disabled <- isDisabled ctx wid
+    pure (if nt == NodeSelect && not disabled then Just wid else Nothing)
 
 findOpenSelectWidget :: Context -> IO (Maybe WidgetId)
 findOpenSelectWidget ctx = do

@@ -42,6 +42,7 @@ import NanoUI.Internal.Frame.Hit
   , nodeOwnsPointer
   , overlayHitAllowed
   , scrollHitRect
+  , withWidgetNode
   )
 import NanoUI.Internal.Frame.Redraw (probeHotId)
 import NanoUI.Internal.Frame.Spans (widgetHitRect)
@@ -109,18 +110,10 @@ finalizeTabFocus ctx inp =
 -- | Whether @wid@ is a menu row or a menu-bar title. Their hover highlight
 -- switches on and off at once, so 'refreshHover' runs no animation for them.
 isMenuButtonWidget :: Context -> WidgetId -> IO Bool
-isMenuButtonWidget ctx wid
-  | hashWidgetId wid == 0 = pure False
-  | otherwise =
-      findNodeByWidgetId ctx wid >>= \case
-        Nothing -> pure False
-        Just idx -> do
-          nt <- getNodeType (ctxNodeArena ctx) idx
-          if nt /= NodeButton
-            then pure False
-            else do
-              si <- getStyleIdx (ctxNodeArena ctx) idx
-              pure (hasFlag buttonFlagMenu si || hasFlag buttonFlagMenuBar si)
+isMenuButtonWidget ctx wid =
+  withWidgetNode ctx wid False $ \idx ->
+    ((== NodeButton) <$> getNodeType (ctxNodeArena ctx) idx)
+      <&&> ((\si -> hasFlag buttonFlagMenu si || hasFlag buttonFlagMenuBar si) <$> getStyleIdx (ctxNodeArena ctx) idx)
 
 -- | Find the hot widget in this frame's layout and store it in 'ctxHotId' and
 -- 'ctxLastHotId'. Runs after layout and before painting. When the hot widget

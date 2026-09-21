@@ -61,6 +61,7 @@ import NanoUI.Internal.Frame.TextArea.Geometry
   , textAreaScrollBarLayouts
   )
 import NanoUI.Internal.Id (WidgetId)
+import NanoUI.Internal.Monad ((<&&>))
 import NanoUI.Internal.Input
   ( Input (..)
   , inputMouseDown
@@ -264,19 +265,14 @@ scrollOwnerNode ::
 scrollOwnerNode suppressed ctx wid =
   findNodeM na $ \idx -> do
     nt <- getNodeType na idx
-    if nt /= NodeTextArea && not (isScrollNode nt)
-      then pure False
-      else do
-        owner <- getWidgetId na idx
-        if owner /= wid
-          then pure False
-          else
-            if nt == NodeTextArea
-              then pure True
-              else do
-                si <- getStyleIdx na idx
-                dir <- getDirection na idx
-                pure (not (suppressed (decodeScrollConfig si) (isScrollStyle2D si) dir))
+    pure (nt == NodeTextArea || isScrollNode nt)
+      <&&> ((== wid) <$> getWidgetId na idx)
+      <&&> if nt == NodeTextArea
+        then pure True
+        else do
+          si <- getStyleIdx na idx
+          dir <- getDirection na idx
+          pure (not (suppressed (decodeScrollConfig si) (isScrollStyle2D si) dir))
  where
   na = ctxNodeArena ctx
 

@@ -89,10 +89,7 @@ pointerDragActive ctx = do
 focusedNodeIs :: Context -> (Context -> IORef WidgetId) -> (NodeType -> Bool) -> IO Bool
 focusedNodeIs ctx ref p = do
   wid <- readIORef (ref ctx)
-  if hashWidgetId wid == 0
-    then pure False
-    else do
-      withWidgetNode ctx wid False $ \idx -> p <$> getNodeType (ctxNodeArena ctx) idx
+  withWidgetNode ctx wid False $ \idx -> p <$> getNodeType (ctxNodeArena ctx) idx
 
 -- Select dropdown or text-input menu is open. Overlay hover is not a widget id.
 -- A focused combo (a search-style field carrying options) also owns an open
@@ -107,14 +104,9 @@ overlayMenuOpen ctx = do
     then pure True
     else do
       focus <- readIORef (ctxFocusId ctx)
-      if hashWidgetId focus == 0
-        then pure False
-        else do
-          withWidgetNode ctx focus False $ \idx -> do
-            nt <- getNodeType (ctxNodeArena ctx) idx
-            if nt /= NodeTextInput
-              then pure False
-              else not . null <$> getOptions (ctxNodeArena ctx) idx
+      withWidgetNode ctx focus False $ \idx ->
+        ((== NodeTextInput) <$> getNodeType (ctxNodeArena ctx) idx)
+          <&&> (not . null <$> getOptions (ctxNodeArena ctx) idx)
 
 -- | Focused text field or its context menu. Typing reaches it as input events,
 -- which wake the loop by themselves, so focus alone keeps nothing running.

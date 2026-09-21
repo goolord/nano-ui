@@ -32,11 +32,11 @@ import NanoUI.Internal.Context
   , lookupCustomMeasure
   )
 import NanoUI.Internal.Font (ScrollBarSlot (..))
-import NanoUI.Internal.Frame.Hit (findNodeByWidgetId, nodeInSubtree, topmostOverlayAtMouse, withWidgetNode)
+import NanoUI.Internal.Frame.Hit (nodeInSubtree, topmostOverlayAtMouse, widgetIdInSubtree, withWidgetNode)
 import NanoUI.Internal.Frame.Input (findTopWidgetUnderMouse, isInteractiveNode)
 import NanoUI.Internal.Frame.Redraw (probeHotId)
 import NanoUI.Internal.Frame.Scroll.Geometry (scrollChromeLane)
-import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
+import NanoUI.Internal.Id (WidgetId (..))
 import NanoUI.Internal.Input (Input (..), UiCursorKind (..), inputMouseDown, inputMousePos, inputMousePressed)
 import NanoUI.Internal.Layout.Arena
   ( NodeIdx
@@ -345,10 +345,7 @@ resizeHaloBlocked ctx mouse winIdx = do
     Just other | other /= winIdx -> pure True
     _ -> do
       hot <- probeHotId ctx mouse
-      if hashWidgetId hot == 0
-        then pure False
-        else do
-          withWidgetNode ctx hot False $ \hotIdx -> not <$> nodeInSubtree ctx hotIdx winIdx
+      withWidgetNode ctx hot False $ \hotIdx -> not <$> nodeInSubtree ctx hotIdx winIdx
 
 tryStartWindowDrag :: Context -> V2 -> IO Bool
 tryStartWindowDrag ctx mouse@(V2 mx my) = do
@@ -394,13 +391,8 @@ windowTitleRect ctx idx = do
             _ -> Just here
 
 windowControlAt :: Context -> NodeIdx -> V2 -> IO Bool
-windowControlAt ctx idx mouse = do
-  mWid <- findTopWidgetUnderMouse ctx mouse isInteractiveNode
-  case mWid of
-    Nothing -> pure False
-    Just wid -> do
-      mNode <- findNodeByWidgetId ctx wid
-      maybe (pure False) (\wi -> nodeInSubtree ctx wi idx) mNode
+windowControlAt ctx idx mouse =
+  maybe (pure False) (widgetIdInSubtree ctx idx) =<< findTopWidgetUnderMouse ctx mouse isInteractiveNode
 
 -- | How the context measures text and custom widgets, for the solve and for
 -- placing floating nodes after it.
