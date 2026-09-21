@@ -123,6 +123,7 @@ module NanoUI.Internal.Layout.Arena
   , ensureAxisSnapshot
   , memoizeWidth
   , forNodes_
+  , forNodesOfType_
   , forChildNodes_
   , foldFlowChildrenM
   , findNodeRevM
@@ -1483,6 +1484,13 @@ forNodes_ na f = do
         | i >= n = pure ()
         | otherwise = f i >> go (i + 1)
   go 0
+
+-- | 'forNodes_' over the nodes of type @t@ only.
+{-# INLINE forNodesOfType_ #-}
+forNodesOfType_ :: NodeArena -> NodeType -> (NodeIdx -> IO ()) -> IO ()
+forNodesOfType_ na t f = forNodes_ na $ \idx -> do
+  nt <- getNodeType na idx
+  when (nt == t) (f idx)
 
 -- | Visit direct children in reverse declaration order, including floating nodes.
 {-# INLINE forChildNodes_ #-}

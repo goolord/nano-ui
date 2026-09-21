@@ -46,11 +46,11 @@ import NanoUI.Internal.Frame.TextEdit.Menu (collectTextEditMenuSpans)
 import NanoUI.Internal.Frame.TextInput (syncTextInputScroll, tagTextInputClippedSpans, textInputFieldRect)
 import NanoUI.Internal.Input (Input)
 import NanoUI.Internal.Layout.Arena
-  ( NodeIdx
+  ( forNodesOfType_
+  , NodeIdx
   , NodeType (..)
   , SizingTag (..)
   , arenaCount
-  , forNodes_
   , getAlignX
   , getClipRect
   , getFirstChild
@@ -458,12 +458,10 @@ computeWidgetTextPlacements ctx nt idx x y w h = do
 -- | Spans inside every floating panel of one kind, clipped to its content box.
 collectFloatingSpansInto :: Context -> NodeType -> SpanArena -> IO ()
 collectFloatingSpansInto ctx wanted arena =
-  forNodes_ (ctxNodeArena ctx) $ \idx -> do
-    nt <- getNodeType (ctxNodeArena ctx) idx
-    when (nt == wanted) $ do
-      (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-      clip <-
-        if isScrollNode nt
-          then (\sn -> scrollNodeViewport sn x y w h) <$> readScrollNode (ctxNodeArena ctx) idx
-          else padContentClip x y w h <$> getPadding (ctxNodeArena ctx) idx
-      walkChildSpans ctx idx clip arena
+  forNodesOfType_ (ctxNodeArena ctx) wanted $ \idx -> do
+    (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+    clip <-
+      if isScrollNode wanted
+        then (\sn -> scrollNodeViewport sn x y w h) <$> readScrollNode (ctxNodeArena ctx) idx
+        else padContentClip x y w h <$> getPadding (ctxNodeArena ctx) idx
+    walkChildSpans ctx idx clip arena

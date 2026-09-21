@@ -53,7 +53,8 @@ import NanoUI.Internal.Font
   , centeredTextY
   )
 import NanoUI.Internal.Layout.Arena
-  ( DirTag (..)
+  ( forNodesOfType_
+  , DirTag (..)
   , FlexScratch (..)
   , IOArr
   , NodeArena
@@ -129,7 +130,6 @@ import NanoUI.Internal.Layout.Arena
   , AxisSnapshot (..)
   , ensureAxisSnapshot
   , memoizeWidth
-  , forNodes_
   , foldFlowChildrenM
   , naScratch
   , naWrapMemo
@@ -1748,17 +1748,15 @@ placeModals :: NodeArena -> Measurers -> Float -> Float -> IO ()
 placeModals na ms winW winH = do
   env <- solveEnv na ms
   let margin = windowMargin
-  forNodes_ na $ \idx -> do
-    nt <- getNodeType na idx
-    when (nt == NodeModal) $ do
-      (_, _, iw, ih) <- getRect na idx
-      let maxW = max 0 (winW - 2 * margin)
-          maxH = max 0 (winH - 2 * margin)
-          w = min iw maxW
-          h = min ih maxH
-          x = max 0 ((winW - w) / 2)
-          y = max 0 ((winH - h) / 2)
-      positionNodeA env 0 idx x y w h
+  forNodesOfType_ na NodeModal $ \idx -> do
+    (_, _, iw, ih) <- getRect na idx
+    let maxW = max 0 (winW - 2 * margin)
+        maxH = max 0 (winH - 2 * margin)
+        w = min iw maxW
+        h = min ih maxH
+        x = max 0 ((winW - w) / 2)
+        y = max 0 ((winH - h) / 2)
+    positionNodeA env 0 idx x y w h
 
 -- | Place measured floating windows using saved positions and sizes, with
 -- defaults near the top-right. Callbacks return x/y then width/height pairs;
@@ -1773,14 +1771,12 @@ placeWindows ::
   IO ()
 placeWindows na ms winW winH lookupPos lookupSize = do
   let margin = windowMargin
-  forNodes_ na $ \idx -> do
-    nt <- getNodeType na idx
-    when (nt == NodeWindow) $ do
-      wid <- getWidgetId na idx
-      (_, _, iw, ih) <- getRect na idx
-      (w0, h0) <- fromMaybe (min iw winW, min ih winH) <$> lookupSize wid
-      mpos <- lookupPos wid
-      placeWindowNode na ms winW winH idx w0 h0 $ \w -> fromMaybe (winW - w - margin, margin) mpos
+  forNodesOfType_ na NodeWindow $ \idx -> do
+    wid <- getWidgetId na idx
+    (_, _, iw, ih) <- getRect na idx
+    (w0, h0) <- fromMaybe (min iw winW, min ih winH) <$> lookupSize wid
+    mpos <- lookupPos wid
+    placeWindowNode na ms winW winH idx w0 h0 $ \w -> fromMaybe (winW - w - margin, margin) mpos
 
 -- | Lay out window @idx@ at size @w0 h0@, clamped to its min and max size and
 -- the screen, with its origin, given that size, clamped on screen. Fit sizing
@@ -1879,12 +1875,10 @@ placePopups ::
 placePopups na ms winW winH lookupAnchor = do
   env <- solveEnv na ms
   let margin = windowMargin
-  forNodes_ na $ \idx -> do
-    nt <- getNodeType na idx
-    when (nt == NodePopup) $ do
-      wid <- getWidgetId na idx
-      (_, _, iw, ih) <- getRect na idx
-      mcfg <- lookupAnchor wid
-      let (anchor, placement, offset) = fromMaybe (AnchorPoint (V2 0 0), PlacementAuto, 4) mcfg
-          (x, y) = computePopupPosition winW winH margin iw ih anchor placement offset
-      positionNodeA env 0 idx x y iw ih
+  forNodesOfType_ na NodePopup $ \idx -> do
+    wid <- getWidgetId na idx
+    (_, _, iw, ih) <- getRect na idx
+    mcfg <- lookupAnchor wid
+    let (anchor, placement, offset) = fromMaybe (AnchorPoint (V2 0 0), PlacementAuto, 4) mcfg
+        (x, y) = computePopupPosition winW winH margin iw ih anchor placement offset
+    positionNodeA env 0 idx x y iw ih
