@@ -60,7 +60,7 @@ import NanoUI.Input
   )
 import NanoUI.Layout.Arena (NodeType (NodeTextArea, NodeTextInput), findNodeRevM, getNodeRect, getNodeType, getWidgetId)
 import NanoUI.Monad ((<&&>))
-import NanoUI.Style (Style (..), themeSeparator)
+import NanoUI.Style (Style (..), Theme, themeSeparator)
 import NanoUI.Types (Color (..), Rect (..), Size (..), V2 (..), lerpColor, rectContains)
 import NanoUI.Widgets.TextEditor (EditorMode (..), TextCommand (..), canRedo, canUndo)
 import NanoUI.Widgets.TextField (applyTextFieldCommand, textFieldHasText, textFieldHistory, textFieldMode)
@@ -216,59 +216,52 @@ textEditMenuCursorKind ctx inp = do
           pure (Just (if enabled then UiCursorPointer else UiCursorDefault))
     _ -> pure Nothing
 
-drawTextEditMenuOverlays :: Context -> Input -> IO ()
-drawTextEditMenuOverlays ctx inp = do
-  mMenu <- getTextInputMenu ctx
-  forM_ mMenu $ \menu -> do
+-- | Resolve the allowed menu once for either painting or complete span queries.
+withTextEditMenu :: Context -> a -> (WidgetId -> Rect -> Theme -> IO a) -> IO a
+withTextEditMenu ctx absent consume = getTextInputMenu ctx >>= \case
+  Nothing -> pure absent
+  Just menu -> do
     let wid = textInputMenuWidget menu
     allow <- widgetOverlayAllowed ctx wid
-    when allow $ do
-      theme <- widgetTheme ctx wid
-      let da = ctxDrawArena ctx
-          fm = ctxFontMetrics ctx
-          menuRect = textInputMenuRect menu
-          style = overlayMenuStyle theme
-          Rect contentX _ _ _ = textEditMenuContentRect menuRect
-          labelX = contentX + menuItemPadX + fst (widgetContentInset fm)
-      paintMenuPanel da theme style menuRect
-      forM_ (textEditMenuLayout menuRect) $ \case
-        (TextEditMenuSep, Rect rx ry rw rh) ->
-          pushRect da (Rect (rx + menuItemPadX) (ry + rh / 2) (rw - 2 * menuItemPadX) 1) (themeSeparator theme)
-        (TextEditMenuItem action lbl, row@(Rect _ ry _ rh)) -> do
-          enabled <- textFieldMenuActionEnabled ctx wid action
-          when (enabled && rectContains row (inputMousePos inp)) $ do
-            pushRect da row (styleHoverBg style)
-            paintMenuAccent da theme row
-          unless (T.null lbl) $ do
-            (_, th) <- ctxMeasureText ctx lbl
-            pushText da fm labelX (centeredTextY fm ry rh th) lbl (textEditMenuItemFg style enabled)
+    if allow
+      then widgetTheme ctx wid >>= consume wid (textInputMenuRect menu)
+      else pure absent
+
+drawTextEditMenuOverlays :: Context -> Input -> IO ()
+drawTextEditMenuOverlays ctx inp = withTextEditMenu ctx () $ \wid menuRect theme -> do
+  let da = ctxDrawArena ctx
+      fm = ctxFontMetrics ctx
+      style = overlayMenuStyle theme
+      Rect contentX _ _ _ = textEditMenuContentRect menuRect
+      labelX = contentX + menuItemPadX + fst (widgetContentInset fm)
+  paintMenuPanel da theme style menuRect
+  forM_ (textEditMenuLayout menuRect) $ \case
+    (TextEditMenuSep, Rect rx ry rw rh) ->
+      pushRect da (Rect (rx + menuItemPadX) (ry + rh / 2) (rw - 2 * menuItemPadX) 1) (themeSeparator theme)
+    (TextEditMenuItem action lbl, row@(Rect _ ry _ rh)) -> do
+      enabled <- textFieldMenuActionEnabled ctx wid action
+      when (enabled && rectContains row (inputMousePos inp)) $ do
+        pushRect da row (styleHoverBg style)
+        paintMenuAccent da theme row
+      unless (T.null lbl) $ do
+        (_, th) <- ctxMeasureText ctx lbl
+        pushText da fm labelX (centeredTextY fm ry rh th) lbl (textEditMenuItemFg style enabled)
 
 collectTextEditMenuSpans :: Context -> Input -> IO [(Rect, T.Text, Color, Color, Rect)]
-collectTextEditMenuSpans ctx inp = do
-  mMenu <- getTextInputMenu ctx
-  case mMenu of
-    Nothing -> pure []
-    Just menu -> do
-      let wid = textInputMenuWidget menu
-      allow <- widgetOverlayAllowed ctx wid
-      if not allow
-        then pure []
-        else do
-          theme <- widgetTheme ctx wid
-          let fm = ctxFontMetrics ctx
-              menuRect = textInputMenuRect menu
-              style = overlayMenuStyle theme
-              Rect contentX _ _ _ = textEditMenuContentRect menuRect
-              labelX = contentX + menuItemPadX + fst (widgetContentInset fm)
-          fmap concat . forM (textEditMenuLayout menuRect) $ \case
-            (TextEditMenuSep, _) -> pure []
-            (TextEditMenuItem action lbl, row@(Rect _ ry _ rh)) -> do
-              enabled <- textFieldMenuActionEnabled ctx wid action
-              (tw, th) <- ctxMeasureText ctx lbl
-              let bg
-                    | enabled && rectContains row (inputMousePos inp) = styleHoverBg style
-                    | otherwise = styleBg style
-              pure [(Rect labelX (centeredTextY fm ry rh th) tw th, lbl, textEditMenuItemFg style enabled, bg, menuRect)]
+collectTextEditMenuSpans ctx inp = withTextEditMenu ctx [] $ \wid menuRect theme -> do
+  let fm = ctxFontMetrics ctx
+      style = overlayMenuStyle theme
+      Rect contentX _ _ _ = textEditMenuContentRect menuRect
+      labelX = contentX + menuItemPadX + fst (widgetContentInset fm)
+  fmap concat . forM (textEditMenuLayout menuRect) $ \case
+    (TextEditMenuSep, _) -> pure []
+    (TextEditMenuItem action lbl, row@(Rect _ ry _ rh)) -> do
+      enabled <- textFieldMenuActionEnabled ctx wid action
+      (tw, th) <- ctxMeasureText ctx lbl
+      let bg
+            | enabled && rectContains row (inputMousePos inp) = styleHoverBg style
+            | otherwise = styleBg style
+      pure [(Rect labelX (centeredTextY fm ry rh th) tw th, lbl, textEditMenuItemFg style enabled, bg, menuRect)]
 
 -- | Run a text-menu command by zero-based command index (separators excluded)
 -- and record it for the caller. Indices past the end do nothing; callers must

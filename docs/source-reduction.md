@@ -219,3 +219,30 @@ generated comparison called `$fEqSpanCacheKey_$c==` with two reconstructed
 temporary inspection assertion were reverted. Retain flat cache inputs and
 explicit comparisons rather than introduce hot-path allocation and a public
 record migration for that saving.
+
+Text-menu painting and complete span queries share their allowed-menu/theme
+resolution without materializing a common draw-op list. Pane-tree removal
+uses `liftA2` and left-biased alternatives to retain either surviving child;
+pane moves map the existing split operation over a successful removal. These
+changes remove another 11 normalized lines and pass the core integration suite.
+
+The remaining core candidates were narrowed rather than turned into a new
+widget/geometry framework:
+
+- The text-command engine is already shared. Numeric input's rejection-before-
+  history rule and multiline document identity, width-cache invalidation and
+  selection damage remain in their adapters. A unified persisted editor would
+  require a store/damage migration, not just deletion of duplicate commands.
+- Axis scrollbar calculations already share the normal-scroller kernel.
+  Combo rows retain integer window rounding, bounded thumb sizing and delayed
+  drag start; viewport reveal policies differ for oversized targets. Moving
+  these into a policy record would retain the branches and add call adapters.
+- The solver's column loops share storage but have distinct height and gap
+  rules (visible-slice caps versus fixed-height/chrome gaps). Keep the reusable
+  primitive buffers and specialized loops, including their explicit recursion.
+- `microlens` is not added: the entire existing `Field` abstraction and slot
+  helpers are only about 76 documented lines, much of which would remain as
+  slot policy and compatibility wrappers. There is no demonstrated drastic
+  saving to justify replacing the already-inspected zero-cost interface.
+- Existing pointer-aware/Dynamic store equality and function-valued damage
+  semantics are not ordinary stock/Generic equality; retain those instances.

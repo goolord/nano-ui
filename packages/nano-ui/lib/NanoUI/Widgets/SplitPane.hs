@@ -289,10 +289,7 @@ treeRemovePane :: Word64 -> GridNode -> Maybe GridNode
 treeRemovePane pid = foldGrid onPane onSplit
   where
     onPane p = if p == pid then Nothing else Just (Pane p)
-    onSplit sid ax r0 ma mb = case (ma, mb) of
-      (Just a, Just b) -> Just (Split sid ax r0 a b)
-      (Nothing, b) -> b
-      (a, Nothing) -> a
+    onSplit sid ax r0 ma mb = liftA2 (Split sid ax r0) ma mb <|> ma <|> mb
 
 -- | Swap two panes by id (content follows the pane id).
 treeSwapPanes :: Word64 -> Word64 -> GridNode -> GridNode
@@ -314,9 +311,7 @@ treeMovePane moved splitId dt tree
         DropSplit tgt axis onA
           | tgt == moved -> Nothing
           | not (paneExist tree tgt) -> Nothing
-          | otherwise -> do
-              t' <- treeRemovePane moved tree
-              Just (treeSplit tgt splitId axis onA moved t')
+          | otherwise -> treeSplit tgt splitId axis onA moved <$> treeRemovePane moved tree
         DropTop axis onA
           | treeSize tree <= 1 -> Nothing
           | otherwise -> do
