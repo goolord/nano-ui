@@ -261,23 +261,12 @@ headerScrollerClip ctx = do
 isTableHeaderStyleIdx :: Int -> Bool
 isTableHeaderStyleIdx si = si .&. 0x80000000 /= 0
 
-tableScrollCols :: Colonnade Headed TableScrollRow T.Text
-tableScrollCols =
-  mconcat
-    [ headed "Name" tableScrollName
-    , headed "Value" tableScrollVal
-    ]
+-- | Name/value rows: @row-i@, @val-i@.
+tableScrollCols :: Colonnade Headed (T.Text, T.Text) T.Text
+tableScrollCols = headed "Name" fst <> headed "Value" snd
 
-data TableScrollRow = TableScrollRow
-  { tableScrollName :: T.Text
-  , tableScrollVal :: T.Text
-  }
-
-tableScrollRows :: [TableScrollRow]
-tableScrollRows =
-  [ TableScrollRow ("row-" <> T.pack (show (i :: Int))) ("val-" <> T.pack (show i))
-  | i <- [1 .. 20]
-  ]
+tableScrollRows :: [(T.Text, T.Text)]
+tableScrollRows = [("row-" <> n, "val-" <> n) | i <- [1 .. 20 :: Int], let n = T.pack (show i)]
 
 -- A content-sized first column fits its longest cell, and in a fit-width 2D
 -- table vertical overflow must not shrink it either.
@@ -288,41 +277,24 @@ runTableFirstColWidthTest ctx failed = do
         defaultTableConfig
           { tableColSizes = [ColContent, ColStretch]
           }
-      ui = sortedTable (tableConfigured cfg id "people" tableFirstColCols tableFirstColRows)
+      ui = sortedTable (tableConfigured cfg id "people" tableScrollCols tableFirstColRows)
   warmup2 ctx inp0 ui
   spans <- collectTextSpans ctx
-  let findLabel needle =
-        listToMaybe [(r, t) | (r, t, _, _, _) <- spans, needle `T.isInfixOf` t]
-  assertJust failed ((,) <$> findLabel "long-first-col" <*> findLabel "val-1") $ \((Rect cn _ cw _, _), (Rect vx _ _ _, _)) -> do
+  let findLabel needle = spanRect needle spans
+  assertJust failed ((,) <$> findLabel "long-first-col" <*> findLabel "val-1") $ \(Rect cn _ cw _, Rect vx _ _ _) -> do
       assertGt failed cw 50
       assert failed (vx > cn + cw - 2)
   pixel <- newPixelContext
   let fitInp = (withInput 280 180) {inputMousePos = V2 40 60}
-      fitUi = sortedTable (tableWith (fixedH 100 . (\l -> l {layoutWidth = Fit})) "people" tableFirstColCols tableFirstColRows)
+      fitUi = sortedTable (tableWith (fixedH 100 . (\l -> l {layoutWidth = Fit})) "people" tableScrollCols tableFirstColRows)
   warmup2 pixel fitInp fitUi
   fitSpans <- collectTextSpans pixel
   assertJust failed (spanRect "long-first-col" fitSpans) $ \(Rect _ _ cw ch) -> do
     assertGt failed cw 50
     assert failed (ch < 40)
 
-tableFirstColCols :: Colonnade Headed TableFirstColRow T.Text
-tableFirstColCols =
-  mconcat
-    [ headed "Name" tableFirstColName
-    , headed "Value" tableFirstColVal
-    ]
-
-data TableFirstColRow = TableFirstColRow
-  { tableFirstColName :: T.Text
-  , tableFirstColVal :: T.Text
-  }
-
-tableFirstColRows :: [TableFirstColRow]
-tableFirstColRows =
-  TableFirstColRow "long-first-col" "short"
-    : [ TableFirstColRow ("row-" <> T.pack (show (i :: Int))) ("val-" <> T.pack (show i))
-      | i <- [1 .. 8 :: Int]
-      ]
+tableFirstColRows :: [(T.Text, T.Text)]
+tableFirstColRows = ("long-first-col", "short") : take 8 tableScrollRows
 
 runTableFillWidthTest :: Context -> IORef Int -> IO ()
 runTableFillWidthTest _ failed = do
@@ -338,16 +310,15 @@ runTableFillWidthTest _ failed = do
               , ColContent
               ]
           }
-      ui = sortedTable (tableConfigured cfg id "people" tableFillCols tableFillRows)
+      ui = sortedTable (tableConfigured cfg id "people" demoPeopleCols tableFillRows)
   warmup2 ctx inp0 ui
   spans <- collectTextSpans ctx
-  let findLabel needle =
-        listToMaybe [(r, t) | (r, t, _, _, _) <- spans, needle `T.isInfixOf` t]
+  let findLabel needle = spanRect needle spans
   case (findLabel "Name", findLabel "David", findLabel "Role", findLabel "Manager") of
-    ( Just (Rect nx _ _ _, _)
-      , Just (Rect cx _ _ _, _)
-      , Just (Rect rx _ rw _, _)
-      , Just (Rect mx _ mw _, _)
+    ( Just (Rect nx _ _ _)
+      , Just (Rect cx _ _ _)
+      , Just (Rect rx _ rw _)
+      , Just (Rect mx _ mw _)
       ) -> do
       assert failed (abs (nx - cx) <= 1)
       assertGt failed (rx + rw) 380
@@ -361,13 +332,12 @@ runTableFillWidthTest _ failed = do
 runTableCellPadTest :: Context -> IORef Int -> IO ()
 runTableCellPadTest ctx failed = do
   let inp0 = (withInput 500 240) {inputMousePos = V2 200 80}
-      ui = sortedTable (table "people" tableFillCols tableFillRows)
+      ui = sortedTable (table "people" demoPeopleCols tableFillRows)
   warmup2 ctx inp0 ui
   spans <- collectTextSpans ctx
-  let findLabel needle =
-        listToMaybe [(r, t) | (r, t, _, _, _) <- spans, needle `T.isInfixOf` t]
+  let findLabel needle = spanRect needle spans
   case (findLabel "Name", findLabel "David", findLabel "63", findLabel "Austin") of
-    (Just (Rect hx _ _ _, _), Just (Rect nx _ _ _, _), Just (Rect ax _ aw _, _), Just (Rect cx _ _ _, _)) -> do
+    (Just (Rect hx _ _ _), Just (Rect nx _ _ _), Just (Rect ax _ aw _), Just (Rect cx _ _ _)) -> do
       assert failed (abs (hx - nx) <= 1)
       assertGt failed nx 4
       assertGt failed (cx - (ax + aw)) 10
@@ -379,29 +349,11 @@ runTableCellPadTest ctx failed = do
   plainSpans <- collectTextSpans plain
   assertJust failed (spanRect "Role" plainSpans) $ \(Rect rx _ rw _) -> assertGt failed (rx + rw) 420
 
-tableFillCols :: Colonnade Headed TableFillRow T.Text
-tableFillCols =
-  mconcat
-    [ headed "Name" tableFillName
-    , headed "Dept" tableFillDept
-    , headed "Age" tableFillAge
-    , headed "City" tableFillCity
-    , headed "Role" tableFillRole
-    ]
-
-data TableFillRow = TableFillRow
-  { tableFillName :: T.Text
-  , tableFillDept :: T.Text
-  , tableFillAge :: T.Text
-  , tableFillCity :: T.Text
-  , tableFillRole :: T.Text
-  }
-
-tableFillRows :: [TableFillRow]
+tableFillRows :: [(T.Text, T.Text, T.Text, T.Text, T.Text)]
 tableFillRows =
-  [ TableFillRow "David" "Eng" "63" "Austin" "Staff"
-  , TableFillRow "Maya" "Ops" "41" "Tokyo" "Manager"
-  , TableFillRow "Chen" "Design" "26" "Shanghai" "IC"
+  [ ("David", "Eng", "63", "Austin", "Staff")
+  , ("Maya", "Ops", "41", "Tokyo", "Manager")
+  , ("Chen", "Design", "26", "Shanghai", "IC")
   ]
 
 -- The demo's page structure (page scroller, card panel, five columns). Every
@@ -612,7 +564,7 @@ runTableRulesTileTest _ failed =
         base <- newContext
         let ctx = withFontMetrics base ((monospaceMetrics 12) {fmSnapScale = scale})
             cfg = defaultTableConfig {tableColSizes = [ColContent, ColFixed 61.7, middle, ColContent, ColContent]}
-            ui = sortedTable (tableConfigured cfg id "people" tableFillCols tableFillRows)
+            ui = sortedTable (tableConfigured cfg id "people" demoPeopleCols tableFillRows)
         warmup2 ctx (withInputOff winW 240) ui
         let na = ctxNodeArena ctx
         -- Each parent's children as (has a rule, child extents), in one pass.
