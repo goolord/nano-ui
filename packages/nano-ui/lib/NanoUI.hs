@@ -183,10 +183,6 @@ module NanoUI
   , checkbox'
   , checkboxWith
   , checkboxWith'
-  , toggleSwitch
-  , toggleSwitch'
-  , toggleSwitchWith
-  , toggleSwitchWith'
   , radio
   , radio'
   , boundedRadio
@@ -205,10 +201,6 @@ module NanoUI
   , slider'
   , sliderWith
   , sliderWith'
-  , knob
-  , knob'
-  , knobWith
-  , knobWith'
   , TextInputConfig (..)
   , defaultTextInputConfig
   , textInput
@@ -237,14 +229,7 @@ module NanoUI
   , textAreaDocument'
   , textAreaDocumentWith
   , textAreaDocumentWith'
-  , TextDocument
-  , textDocument
-  , emptyDocument
-  , documentText
-  , documentLines
-  , documentLine
-  , documentLineCount
-  , sameDocument
+  , module NanoUI.Widgets.TextDocument
   , colorPicker
   , colorPicker'
   , colorPickerRGBA
@@ -273,9 +258,7 @@ module NanoUI
   , TextCommand (..)
   , TextMotion (..)
   , Cursor (..)
-  , runTextCommand
-  , textCanUndo
-  , textCanRedo
+  , module NanoUI.Widgets.TextField
 
     -- * Tabs, trees, and tables
   , Tab (..)
@@ -358,35 +341,8 @@ module NanoUI
   , GridNode (..)
   , paneGrid
 
-    -- * Progress and sparklines
-  , progressBar
-  , progressBar'
-  , progressBarWith
-  , progressBarWith'
-  , circularProgress
-  , circularProgress'
-  , circularProgressWith
-  , circularProgressWith'
-  , spinner
-  , spinner'
-  , spinnerWith
-  , spinnerWith'
-  , Inline
-  , inlineText
-  , inlineWith
-  , restyle
-  , strong
-  , emphasis
-  , inlineCode
-  , hyperlink
-  , richText
-  , richText'
-  , richTextWith
-  , richTextWith'
-  , sparkline
-  , sparkline'
-  , sparklineWith
-  , sparklineWith'
+    -- * Rich text
+  , module NanoUI.Widgets.RichText
 
     -- * Images and drawing
   , ImageId (..)
@@ -413,45 +369,19 @@ module NanoUI
 
     -- * Custom widgets
 
-    -- | A measure function and 'cdcFont' hand a widget the context's
+    -- | "NanoUI.Widgets.Custom" also holds the canvas-drawn widgets: toggle
+    -- switches, knobs, progress bars, spinners and sparklines.
+    --
+    -- A measure function and 'cdcFont' hand a widget the context's
     -- 'FontMetrics'; 'lineWidth' and 'fmLineHeight' size text with them.
     -- 'widgetCursor' picks the pointer shown over the widget.
-  , CustomWidgetSpec (..)
-  , defaultCustomWidgetSpec
-  , customWidget
-  , customWidgetWithId
-  , contentKey
-  , contentKeyOf
-  , KeyPart
-  , keyPart
-  , CustomDrawContext (..)
-  , CustomMeasureFn
+  , module NanoUI.Widgets.Custom
   , FontMetrics (fmLineHeight, fmAscent)
   , lineWidth
   , lineWidthUi
   , uiFontMetrics
   , resolveFontUi
   , UiCursorKind (..)
-  , CustomDrawBuild
-  , CanvasM
-  , runCanvas
-  , canvas
-  , drawRect
-  , drawRoundedRect
-  , drawCircle
-  , drawStroke
-  , drawStrokeRoundedRect
-  , drawStrokeCircle
-  , drawStrokeAA
-  , drawQuadGradient
-  , drawLinearGradientH
-  , drawLinearGradientV
-  , drawImage
-  , drawImageUV
-  , drawText
-  , useDrag2D
-  , Drag2D (..)
-  , useWheelDelta
 
     -- * Drag and drop
   , DropType (..)
