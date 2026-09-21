@@ -55,3 +55,36 @@ The benchmark scripts save all samples and executable hashes. Measurement
 files for this boundary are under the session's approved temporary directory,
 including `nano-ui-render-preserved-batch.json` and
 `nano-ui-sdl-preserved-batch.json`.
+
+## Core fallback and cursor boundary
+
+Use `MaybeT`/`Alternative` for short-circuiting overlay and scroll-target
+queries, `asum` for cursor priority, and the existing custom draw-context
+constructor for custom cursor callbacks. The new helper imports use the
+existing `transformers` dependency. This removes 26 formatter-normalized
+library lines. Physical lines increase by 79 because these modules had not
+previously been normalized to the repository's formatter configuration.
+
+The hot live/previous clip query was also piloted with `MaybeT`. It erased
+the transformer and dictionaries, but generated a different join structure
+from the handwritten branch; its exact Core-equivalence check failed.
+Retain the original implementation at that particularly hot boundary.
+
+To remove uncertainty about pre-existing build artifacts, a fresh detached
+checkout of `a92ac09` was compiled at `-O1` in `nano-ui-loc-baseline` under
+the session's temporary directory. Only the ditto checkout path and profiler
+sample-length/precision instrumentation differ from that commit. Subsequent
+comparisons use this freshly compiled baseline.
+
+Seven paired headless runs against that baseline (`nano-ui-core-fallback-fresh.json`):
+
+| Scene | Baseline MUT seconds | Candidate MUT seconds | Allocated bytes, both |
+| --- | ---: | ---: | ---: |
+| widgets | 0.581701 | 0.573951 | 592,624,096 |
+| canvas | 0.233204 | 0.231805 | 636,939,944 |
+| canvas-keyed | 0.091284 | 0.091009 | 120,750,624 |
+| textarea | 0.109863 | 0.109625 | 248,726,552 |
+| svg | 0.397240 | 0.388935 | 449,985,488 |
+
+The unchanged SVG path also moves in timing: these are regression measurements,
+not evidence that every workload sped up. Allocation is exactly unchanged.

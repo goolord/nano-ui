@@ -6,33 +6,41 @@ module NanoUI.Frame.Cursor
   , uiCursorKind
   , pointerCursorWanted
   , cursorKindIs
-  ) where
+  )
+where
 
 import Control.Monad (forM)
+import Control.Monad.Trans.Maybe (MaybeT (..))
+import Data.Foldable (asum)
 import Data.IORef (readIORef)
-import qualified Data.IntMap.Strict as IM
+import Data.IntMap.Strict qualified as IM
 import Data.Maybe (fromMaybe, isJust)
 import NanoUI.Context
   ( Context (..)
-  , CustomDrawContext (..)
+  , InteractionState (..)
+  , PointerRoute (..)
   , WidgetStore (..)
-  , getFocusId
   , getHotId
   , getScrollDrag
   , getStore
+  , getsInteraction
   , isDisabled
   , lookupCustomCursor
-  , widgetTheme
-  , getsInteraction
-  , InteractionState (..)
-  , PointerRoute (..)
   )
 import NanoUI.Font (FontMetrics, sliderHandleSlack, sliderTrackBounds)
-import NanoUI.Frame.Hit (findNodeByWidgetId, nodePointVisible, scrollHitRect, withWidgetNode)
+import NanoUI.Frame.Hit
+  ( findNodeByWidgetId
+  , nodePointVisible
+  , scrollHitRect
+  , withWidgetNode
+  )
 import NanoUI.Frame.Scroll (ScrollBarLayout (..), scrollBarsFor)
 import NanoUI.Frame.Select (overlayMenuOwnerAt)
 import NanoUI.Frame.TextArea.Content (isMouseOnTextAreaScrollBarAt)
-import NanoUI.Frame.TextEdit.Menu (textEditMenuCursorKind, textFieldWidgetAtMouse)
+import NanoUI.Frame.TextEdit.Menu
+  ( textEditMenuCursorKind
+  , textFieldWidgetAtMouse
+  )
 import NanoUI.Frame.TextInput (nodeTextFieldGeom, searchClearHit)
 import NanoUI.Frame.Window (windowResizeCursorKind)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
@@ -61,8 +69,8 @@ import NanoUI.Layout.Arena
   )
 import NanoUI.Monad ((<&&>))
 import NanoUI.Types (Rect (..), V2 (..), rectContains)
-import NanoUI.WidgetText (numericStepperRects, textInputNumericMode)
-import NanoUI.WidgetText (isTableHeaderStyle)
+import NanoUI.WidgetText (isTableHeaderStyle, numericStepperRects, textInputNumericMode)
+import NanoUI.Widgets.Custom (mkCustomDrawContext)
 
 -- | Cursor requested by current gestures and hit tests against the solved arena.
 -- The backend maps this result to a native cursor shape.
@@ -70,9 +78,7 @@ uiCursorKind :: Context -> Input -> IO UiCursorKind
 uiCursorKind ctx inp = do
   -- The first query with an opinion wins; later ones do not run.
   mKind <-
-    foldr
-      (\query rest -> query >>= maybe rest (pure . Just))
-      (pure Nothing)
+    runMaybeT . asum . map MaybeT $
       [ textEditMenuCursorKind ctx inp
       , selectDropdownCursorKind ctx inp
       , windowResizeCursorKind ctx inp
@@ -83,7 +89,8 @@ uiCursorKind ctx inp = do
   case mKind of
     Just k -> pure k
     Nothing -> do
-      let mouse = inputMousePos inp
+      let
+        mouse = inputMousePos inp
       active <- readIORef (ctxActiveId ctx)
       activeKind <- cursorKindAt ctx active mouse inp
       if activeKind /= UiCursorDefault
@@ -120,7 +127,8 @@ scrollThumbCursorKind ctx inp = do
 -- clear button raises the pointer cursor; everywhere else over a field is text.
 textFieldHoverCursorKind :: Context -> Input -> IO (Maybe UiCursorKind)
 textFieldHoverCursorKind ctx inp = do
-  let mouse = inputMousePos inp
+  let
+    mouse = inputMousePos inp
   mWid <- textFieldWidgetAtMouse ctx mouse
   case mWid of
     Nothing -> pure Nothing
@@ -141,7 +149,8 @@ numericStepperHit ctx wid mouse =
         then pure False
         else do
           (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-          let (up, down) = numericStepperRects x y w h
+          let
+            (up, down) = numericStepperRects x y w h
           pure (rectContains up mouse || rectContains down mouse)
 
 scrollThumbHit :: Context -> V2 -> IO Bool
@@ -149,9 +158,10 @@ scrollThumbHit ctx mouse =
   fmap isJust . findNodeM na $ \idx ->
     ((\nt -> nt == NodeTextArea || isScrollNode nt) <$> getNodeType na idx) <&&> do
       wid <- getWidgetId na idx
-      any (\(_, layout, _) -> rectContains (sbThumb layout) mouse) <$> scrollBarsFor ctx idx wid
-  where
-    na = ctxNodeArena ctx
+      any (\(_, layout, _) -> rectContains (sbThumb layout) mouse)
+        <$> scrollBarsFor ctx idx wid
+ where
+  na = ctxNodeArena ctx
 
 cursorKindAt :: Context -> WidgetId -> V2 -> Input -> IO UiCursorKind
 cursorKindAt ctx wid mouse inp
@@ -167,26 +177,12 @@ cursorKindAt ctx wid mouse inp
               visible <- widgetVisibleAt ctx wid mouse
               if not visible
                 then pure UiCursorDefault
-                else do
-                  active <- readIORef (ctxActiveId ctx)
-                  hot <- getHotId ctx
-                  focused <- (== wid) <$> getFocusId ctx
-                  theme <- widgetTheme ctx wid
-                  let cdc =
-                        CustomDrawContext
-                          { cdcHovered = hot == wid
-                          , cdcPressed = active == wid
-                          , cdcFocused = focused
-                          , cdcActive = active == wid
-                          , cdcDisabled = disabled
-                          , cdcTheme = theme
-                          , cdcFont = ctxFontMetrics ctx
-                          }
-                  pure (cursorFn cdc)
+                else cursorFn <$> mkCustomDrawContext ctx (ctxFontMetrics ctx) wid
             Nothing -> do
               -- Resolve the node through the arena's id index rather than
               -- building a type table of every widget for two lookups.
-              mNodeType <- findNodeByWidgetId ctx wid >>= traverse (getNodeType (ctxNodeArena ctx))
+              mNodeType <-
+                findNodeByWidgetId ctx wid >>= traverse (getNodeType (ctxNodeArena ctx))
               case mNodeType of
                 Just NodeButton -> widgetPointerCursor ctx wid mouse
                 Just NodeCheckbox -> widgetPointerCursor ctx wid mouse
@@ -206,7 +202,11 @@ selectCursorKind ctx wid mouse = do
     then pure UiCursorDefault
     else do
       mrect <- scrollHitRect ctx wid
-      pure (if maybe False (`rectContains` mouse) mrect then UiCursorPointer else UiCursorDefault)
+      pure
+        ( if maybe False (`rectContains` mouse) mrect
+            then UiCursorPointer
+            else UiCursorDefault
+        )
 
 widgetVisibleAt :: Context -> WidgetId -> V2 -> IO Bool
 widgetVisibleAt ctx wid mouse = do
@@ -232,9 +232,11 @@ sliderCursorKind ctx wid mouse inp = do
             case mrect of
               Nothing -> UiCursorDefault
               Just (Rect x y w h) ->
-                let Rect tx ty tw th = sliderTrackBounds x y w h
-                    hitRect = Rect tx (ty - sliderHandleSlack) tw (th + 2 * sliderHandleSlack)
-                 in grabDragKind (rectContains hitRect mouse) False inp
+                let
+                  Rect tx ty tw th = sliderTrackBounds x y w h
+                  hitRect = Rect tx (ty - sliderHandleSlack) tw (th + 2 * sliderHandleSlack)
+                 in
+                  grabDragKind (rectContains hitRect mouse) False inp
 
 textInputCursorKind :: Context -> WidgetId -> V2 -> IO UiCursorKind
 textInputCursorKind ctx wid mouse = do
@@ -260,16 +262,15 @@ textAreaCursorKind ctx wid mouse = do
     onScroll <- isMouseOnTextAreaScrollBarAt ctx idx mouse
     if onScroll
       then pure UiCursorDefault
-      else
-        textFieldCursorKind ctx wid mouse $ \_ x y w h ->
-          Rect x y w h
+      else textFieldCursorKind ctx wid mouse $ \_ x y w h ->
+        Rect x y w h
 
 textFieldCursorKind ::
-  Context ->
-  WidgetId ->
-  V2 ->
-  (FontMetrics -> Float -> Float -> Float -> Float -> Rect) ->
-  IO UiCursorKind
+  Context
+  -> WidgetId
+  -> V2
+  -> (FontMetrics -> Float -> Float -> Float -> Float -> Rect)
+  -> IO UiCursorKind
 textFieldCursorKind ctx wid mouse fieldAt = do
   visible <- widgetVisibleAt ctx wid mouse
   if not visible
@@ -285,9 +286,10 @@ textFieldCursorKind ctx wid mouse fieldAt = do
 tableColResizeCursorKind :: Context -> Input -> IO (Maybe UiCursorKind)
 tableColResizeCursorKind ctx inp = do
   store <- getStore ctx
-  let dragging = any (\n -> n <= -1000 && n > -2000) (IM.elems (storeInt store))
-      na = ctxNodeArena ctx
-      V2 mx my = inputMousePos inp
+  let
+    dragging = any (\n -> n <= -1000 && n > -2000) (IM.elems (storeInt store))
+    na = ctxNodeArena ctx
+    V2 mx my = inputMousePos inp
   if inputMouseDown inp && dragging
     then pure (Just UiCursorEwResize)
     else do
@@ -331,8 +333,8 @@ tableBodyScrollerBottom ctx idx = do
   forM mScroller $ \sc -> do
     (_, sy, _, sh) <- getRect na sc
     pure (sy + sh)
-  where
-    na = ctxNodeArena ctx
+ where
+  na = ctxNodeArena ctx
 
 -- | Whether 'uiCursorKind' requests the link/button pointer cursor.
 pointerCursorWanted :: Context -> Input -> IO Bool

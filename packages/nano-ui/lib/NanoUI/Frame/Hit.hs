@@ -19,10 +19,21 @@ module NanoUI.Frame.Hit
   , nodePointVisible
   , nodeClippedHit
   , nodeInteractionHit
-  ) where
+  )
+where
 
+import Control.Applicative ((<|>))
+import Control.Monad.Trans.Maybe (MaybeT (..))
 import Data.Maybe (isJust)
-import NanoUI.Context (Context (..), PointerRoute (..), getPointerRoute, getPrevClipRect, getPrevRect, intKey, modalActive)
+import NanoUI.Context
+  ( Context (..)
+  , PointerRoute (..)
+  , getPointerRoute
+  , getPrevClipRect
+  , getPrevRect
+  , intKey
+  , modalActive
+  )
 import NanoUI.Id (WidgetId)
 import NanoUI.Layout.Arena
   ( NodeIdx
@@ -62,14 +73,16 @@ findNodeByKey ctx k = lookupNodeByKey (ctxNodeArena ctx) k
 -- | Whether the arena holds a modal node, which it does when the view
 -- declared an open modal.
 modalTreeOpen :: Context -> IO Bool
-modalTreeOpen ctx = do
-  top <- topModalNode (ctxNodeArena ctx)
-  pure (isJust top)
+modalTreeOpen ctx = isJust <$> topModalNode (ctxNodeArena ctx)
 
 -- | Whether node @idx@ is node @top@ or one of its descendants.
 nodeInSubtree :: Context -> NodeIdx -> NodeIdx -> IO Bool
 nodeInSubtree ctx idx top =
-  isJust <$> walkAncestors (ctxNodeArena ctx) idx (\i -> pure (if i == top then Just () else Nothing))
+  isJust
+    <$> walkAncestors
+      (ctxNodeArena ctx)
+      idx
+      (\i -> pure (if i == top then Just () else Nothing))
 
 -- | Whether the node of widget @wid@ is node @root@ or one of its
 -- descendants. 'False' when the widget has no node this frame. The root is a
@@ -85,14 +98,11 @@ widgetIdInSubtree ctx root wid = do
 -- nodes inside the topmost one can. Anywhere else every node can.
 overlayHitAllowed :: Context -> NodeIdx -> V2 -> IO Bool
 overlayHitAllowed ctx idx mouse = do
-  mModal <- topModalNode (ctxNodeArena ctx)
-  case mModal of
-    Just top -> nodeInSubtree ctx idx top
-    Nothing -> do
-      mTop <- topmostOverlayAtMouse ctx mouse
-      case mTop of
-        Nothing -> pure True
-        Just tidx -> nodeInSubtree ctx idx tidx
+  top <-
+    runMaybeT $
+      MaybeT (topModalNode (ctxNodeArena ctx))
+        <|> MaybeT (topmostOverlayAtMouse ctx mouse)
+  maybe (pure True) (nodeInSubtree ctx idx) top
 
 -- | The window or popup on top at @mouse@: the last one in arena order whose
 -- rect holds the point.
@@ -109,10 +119,12 @@ topmostModalAtMouse ctx mouse =
 -- | The last node in arena order whose type satisfies @wanted@ and whose
 -- non-empty rect holds @mouse@. The frame paints the panels of one type in
 -- arena order, so among them the last one is on top.
-topmostFloatingAtMouse :: Context -> V2 -> (NodeType -> Bool) -> IO (Maybe NodeIdx)
+topmostFloatingAtMouse ::
+  Context -> V2 -> (NodeType -> Bool) -> IO (Maybe NodeIdx)
 topmostFloatingAtMouse ctx mouse wanted =
   findNodeRevM (ctxNodeArena ctx) $ \idx ->
-    (wanted <$> getNodeType (ctxNodeArena ctx) idx) <&&> ((`rectHit` mouse) <$> getNodeRect (ctxNodeArena ctx) idx)
+    (wanted <$> getNodeType (ctxNodeArena ctx) idx)
+      <&&> ((`rectHit` mouse) <$> getNodeRect (ctxNodeArena ctx) idx)
 
 -- | Whether the frame routed the pointer to node @idx@, which decides whether
 -- its widget saw the pointer while the view ran. The route must be the node's
@@ -130,15 +142,15 @@ nodeOwnsPointer ctx idx =
         then pure False
         else maybe (not <$> modalActive ctx) (nodeInSubtree ctx idx) =<< topModalNode na
     _ -> pure False
-  where
-    na = ctxNodeArena ctx
-    layerOf i
-      | i < 0 = pure 0
-      | otherwise = do
-          nt <- getNodeType na i
-          if isFloatingNode nt
-            then intKey <$> getWidgetId na i
-            else layerOf =<< getParent na i
+ where
+  na = ctxNodeArena ctx
+  layerOf i
+    | i < 0 = pure 0
+    | otherwise = do
+        nt <- getNodeType na i
+        if isFloatingNode nt
+          then intKey <$> getWidgetId na i
+          else layerOf =<< getParent na i
 
 -- | Whether widget @wid@ may show and use a dropdown or menu of its own. With
 -- no modal open it always may. While one is open, only a widget inside the
@@ -146,9 +158,7 @@ nodeOwnsPointer ctx idx =
 widgetOverlayAllowed :: Context -> WidgetId -> IO Bool
 widgetOverlayAllowed ctx wid = do
   top <- topModalNode (ctxNodeArena ctx)
-  case top of
-    Nothing -> pure True
-    Just modal -> widgetIdInSubtree ctx modal wid
+  maybe (pure True) (\modal -> widgetIdInSubtree ctx modal wid) top
 
 -- | The on-screen rect of widget @wid@ as 'NanoUI.Damage.updatePrevRects'
 -- last recorded it: in window coordinates, with scroll offsets applied. While
@@ -166,7 +176,8 @@ scrollHitRect = getPrevRect
 nodePointVisible :: Context -> NodeIdx -> V2 -> IO Bool
 nodePointVisible ctx idx mouse = do
   (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-  let vis = Rect x y w h
+  let
+    vis = Rect x y w h
   if not (w > 0 && h > 0 && rectContains vis mouse)
     then pure False
     else do
@@ -212,21 +223,21 @@ nodeInteractionHit ctx idx rect mouse = do
 -- does not constrain the point.
 scrollViewportHit :: Context -> NodeIdx -> V2 -> IO Bool
 scrollViewportHit ctx idx mouse = go idx
-  where
-    go i
-      | i <= 0 = pure True
-      | otherwise = do
-          p <- getParent (ctxNodeArena ctx) i
-          if p < 0
-            then pure True
-            else do
-              nt <- getNodeType (ctxNodeArena ctx) p
-              if nt == NodeScrollContainer
-                then do
-                  wid <- getWidgetId (ctxNodeArena ctx) p
-                  mClip <- getPrevClipRect ctx wid
-                  case mClip of
-                    Nothing -> go p
-                    Just clip ->
-                      if rectContains clip mouse then go p else pure False
-                else go p
+ where
+  go i
+    | i <= 0 = pure True
+    | otherwise = do
+        p <- getParent (ctxNodeArena ctx) i
+        if p < 0
+          then pure True
+          else do
+            nt <- getNodeType (ctxNodeArena ctx) p
+            if nt == NodeScrollContainer
+              then do
+                wid <- getWidgetId (ctxNodeArena ctx) p
+                mClip <- getPrevClipRect ctx wid
+                case mClip of
+                  Nothing -> go p
+                  Just clip ->
+                    if rectContains clip mouse then go p else pure False
+              else go p
