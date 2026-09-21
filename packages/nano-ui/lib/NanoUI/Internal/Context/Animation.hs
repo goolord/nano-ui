@@ -249,9 +249,7 @@ getAnimationValue :: Context -> WidgetId -> IO Float
 getAnimationValue ctx wid = do
   let key = intKey wid
   as <- readIORef (ctxAnimationState ctx)
-  case IM.lookup key (asAnimations as) of
-    Just a -> pure $! animationValue a
-    Nothing -> pure $! IM.findWithDefault 0 key (asAnimRest as)
+  pure $! maybe (IM.findWithDefault 0 key (asAnimRest as)) animationValue (IM.lookup key (asAnimations as))
 
 -- | Settled nonzero values keyed by animation id.
 {-# INLINE getAnimRest #-}

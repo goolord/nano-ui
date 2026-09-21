@@ -139,9 +139,7 @@ type CustomMeasureFn = FontMetrics -> (Float, Float) -> (Float, Float)
 -- or return the supplied metrics when no backend is attached.
 {-# INLINE prepareFontMetrics #-}
 prepareFontMetrics :: FontMetrics -> Text -> IO FontMetrics
-prepareFontMetrics fm txt = case fmBackend fm of
-  Nothing -> pure fm
-  Just backend -> fbPrepare backend txt
+prepareFontMetrics fm txt = maybe (pure fm) (`fbPrepare` txt) (fmBackend fm)
 
 -- | Prepare a finite text workspace for pure multi-label layout algorithms.
 prepareFontMetricsMany :: FontMetrics -> [Text] -> IO FontMetrics
@@ -173,17 +171,13 @@ measureTextIO fm txt = do
 -- needed; 'Nothing' when the host does not shape.
 {-# INLINE drawShaped #-}
 drawShaped :: FontMetrics -> Text -> IO (Maybe ShapedGlyphs)
-drawShaped fm txt = case fmBackend fm of
-  Nothing -> pure Nothing
-  Just backend -> fbDrawShaped backend txt
+drawShaped fm txt = maybe (pure Nothing) (`fbDrawShaped` txt) (fmBackend fm)
 
 -- | Obtain a glyph quad, allowing backend atlas updates in IO. 'Nothing'
 -- means no drawable quad is available, for example for whitespace.
 {-# INLINE drawGlyph #-}
 drawGlyph :: FontMetrics -> Char -> IO (Maybe GlyphQuad)
-drawGlyph fm c = case fmBackend fm of
-  Nothing -> pure (fmGlyph fm c)
-  Just backend -> fbDrawGlyph backend c
+drawGlyph fm c = maybe (pure (fmGlyph fm c)) (`fbDrawGlyph` c) (fmBackend fm)
 
 -- | Headless metrics with square cells of the given logical size, ascent 80%
 -- of cell height, and no drawable glyphs or shaping backend.

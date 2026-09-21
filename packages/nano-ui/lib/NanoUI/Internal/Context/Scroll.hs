@@ -43,6 +43,7 @@ module NanoUI.Internal.Context.Scroll
   , stepScrollGlides
   ) where
 
+import Control.Applicative ((<|>))
 import Control.Monad (unless, when)
 import Data.IORef (modifyIORef', readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
@@ -135,14 +136,11 @@ getScrollOffset2D ctx wid = do
   s <- getStore ctx
   let widKey = intKey wid
       sKey = slotKey SlotTextAreaScroll widKey
-      v = case lookupSlot fieldPoint sKey s of
-        Just (sx, sy) -> V2 sx sy
-        Nothing -> case lookupSlot fieldPoint (slotKey SlotScrollOff widKey) s of
-          Just (x, y) -> V2 x y
-          Nothing ->
-            V2
-              (findSlot fieldFloat 0 (slotKey SlotScrollCross widKey) s)
-              (findSlot fieldFloat 0 widKey s)
+      v =
+        maybe
+          (V2 (findSlot fieldFloat 0 (slotKey SlotScrollCross widKey) s) (findSlot fieldFloat 0 widKey s))
+          (uncurry V2)
+          (lookupSlot fieldPoint sKey s <|> lookupSlot fieldPoint (slotKey SlotScrollOff widKey) s)
   sx <- snapScrollOffset ctx (v2X v)
   sy <- snapScrollOffset ctx (v2Y v)
   pure (V2 sx sy)

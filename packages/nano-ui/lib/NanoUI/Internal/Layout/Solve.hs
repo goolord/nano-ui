@@ -1904,8 +1904,6 @@ placePopups na ms winW winH lookupAnchor = do
       wid <- getWidgetId na idx
       (_, _, iw, ih) <- getRect na idx
       mcfg <- lookupAnchor wid
-      let (anchor, placement, offset) = case mcfg of
-            Just (a, p, o) -> (a, p, o)
-            Nothing -> (AnchorPoint (V2 0 0), PlacementAuto, 4)
+      let (anchor, placement, offset) = fromMaybe (AnchorPoint (V2 0 0), PlacementAuto, 4) mcfg
           (x, y) = computePopupPosition winW winH margin iw ih anchor placement offset
       positionNodeA env 0 idx x y iw ih

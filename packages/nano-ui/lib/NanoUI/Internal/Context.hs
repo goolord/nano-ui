@@ -246,7 +246,7 @@ module NanoUI.Internal.Context
   )
 where
 
-import Control.Monad (foldM, forM, when)
+import Control.Monad (foldM, forM, when, (<=<))
 import Data.Bits ((.&.))
 import Data.ByteString (ByteString)
 import Data.Dynamic (fromDynamic, toDyn)
@@ -514,9 +514,7 @@ clearMeasureCache ctx = do
   let !source = ctxMetricSource ctx
   writeIORef (ctxLastMetricSource ctx) (Just source)
   invalidateTextCaches ctx
-  case ctxMeasureCache ctx of
-    Just ref -> writeIORef ref HashMap.empty
-    Nothing -> pure ()
+  mapM_ (`writeIORef` HashMap.empty) (ctxMeasureCache ctx)
 
 -- | Configure text spans for a host that paints text separately. Use the
 -- returned context; this does not replace its font metrics.
@@ -589,10 +587,7 @@ setDrawExternalText ctx = Draw.setDrawExternalText (ctxDrawArena ctx)
 -- | Retrieve the host value of the requested type, or 'Nothing' if absent.
 {-# INLINE askHostIO #-}
 askHostIO :: forall a. (Typeable a) => Context -> IO (Maybe a)
-askHostIO ctx = do
-  m <- readIORef (ctxHost ctx)
-  let k = typeRep (Proxy :: Proxy a)
-  pure (Map.lookup k m >>= fromDynamic)
+askHostIO ctx = (fromDynamic <=< Map.lookup (typeRep (Proxy :: Proxy a))) <$> readIORef (ctxHost ctx)
 
 -- | Queue a message for this frame. 'drainMessages' restores emission order.
 {-# INLINE pushMessage #-}

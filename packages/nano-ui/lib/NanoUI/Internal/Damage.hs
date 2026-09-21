@@ -606,12 +606,9 @@ clipDeltaToScrollViewport :: Context -> Int -> Rect -> IO Rect
 clipDeltaToScrollViewport ctx k r = do
   findNodeByKey ctx k >>= \case
     Nothing -> pure r
-    Just idx -> do
-      mClip <- getClipRect (ctxNodeArena ctx) idx
-      pure $
-        case mClip of
-          Nothing -> r
-          Just clip -> fromMaybe (Rect 0 0 0 0) (rectIntersect r clip)
+    Just idx ->
+      maybe r (fromMaybe (Rect 0 0 0 0) . rectIntersect r)
+        <$> getClipRect (ctxNodeArena ctx) idx
 
 clipRectToWindow :: Float -> Float -> Rect -> Rect
 clipRectToWindow winW winH r =
