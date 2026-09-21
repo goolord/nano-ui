@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | Implementation of "NanoUI.Widgets.Custom", which re-exports all of it
 -- except 'mkCustomDrawContext', which the paint and damage passes use to
 -- build the context a custom widget draws with.

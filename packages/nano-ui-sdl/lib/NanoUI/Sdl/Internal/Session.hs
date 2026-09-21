@@ -1,5 +1,3 @@
-{-# LANGUAGE DataKinds #-}
-
 -- | SDL window session loop: event poll, resize sync, frame present.
 module NanoUI.Sdl.Internal.Session
   ( runSdlSession

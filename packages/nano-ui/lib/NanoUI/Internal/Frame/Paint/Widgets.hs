@@ -1,6 +1,5 @@
 {-# OPTIONS_GHC -fasm -fno-specialise-aggressively #-}
 
-{-# LANGUAGE DataKinds #-}
 
 -- | Painters for controls and text fields. Each receives the shared paint
 -- environment; NOINLINE keeps these large bodies out of the recursive node walk.

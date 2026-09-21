@@ -1,5 +1,3 @@
-{-# LANGUAGE DataKinds #-}
-
 -- | Frame-needed checks and hover probing used while the backend waits for input.
 module NanoUI.Internal.Frame.Redraw
   ( needsRedraw

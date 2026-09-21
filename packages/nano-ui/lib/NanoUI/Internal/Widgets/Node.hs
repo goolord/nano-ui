@@ -1,6 +1,3 @@
-{-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | Widget node construction and interaction responses.
 module NanoUI.Internal.Widgets.Node
   ( Response (..)

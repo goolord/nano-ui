@@ -1,5 +1,3 @@
-{-# LANGUAGE DataKinds #-}
-
 -- | Widget paint helpers: labels, styles, rects, menu panels and display text.
 module NanoUI.Internal.Frame.Chrome
   ( floatingAncestor

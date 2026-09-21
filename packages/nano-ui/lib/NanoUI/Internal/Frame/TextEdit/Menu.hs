@@ -1,5 +1,3 @@
-{-# LANGUAGE DataKinds #-}
-
 -- | Text-field context menu (Cut / Copy / Paste / Select All): opening,
 -- picking, painting, spans and cursor.
 module NanoUI.Internal.Frame.TextEdit.Menu

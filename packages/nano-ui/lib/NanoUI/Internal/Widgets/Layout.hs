@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | Rows, columns, grids, panels, labels, and scrollers built during the view pass.
 module NanoUI.Internal.Widgets.Layout
   ( panel

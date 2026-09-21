@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | Display helpers: styled labels, key/value rows, cards, toolbars, images
 -- and colour boxes.
 module NanoUI.Internal.Widgets.Display

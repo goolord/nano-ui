@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | Controlled radio groups over zero-based option indices or bounded enum values.
 module NanoUI.Internal.Widgets.Radio
   ( radio

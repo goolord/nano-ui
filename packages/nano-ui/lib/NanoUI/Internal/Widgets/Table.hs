@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | Text tables described by Colonnade columns, with sorting, frozen panes,
 -- column resizing/reordering, and row virtualisation.
 module NanoUI.Internal.Widgets.Table

@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | Floating overlay chrome: title bars, close buttons.
 module NanoUI.Internal.Widgets.Chrome
   ( modalTitleBarH

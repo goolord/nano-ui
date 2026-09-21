@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | Combo box: a search field with a filtered, scrollable suggestion dropdown.
 -- The per-frame logic is the pure 'comboStep' over a persisted 'ComboState'.
 module NanoUI.Widgets.Combo

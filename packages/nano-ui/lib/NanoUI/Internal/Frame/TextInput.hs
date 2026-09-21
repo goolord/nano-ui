@@ -1,5 +1,3 @@
-{-# LANGUAGE DataKinds #-}
-
 -- | Single-line text fields: field geometry, horizontal scroll, caret and
 -- selection painting, and mouse selection. Also holds the click-count and
 -- caret primitives the text area shares.

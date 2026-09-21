@@ -1,6 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE BangPatterns #-}
-
 -- | Expandable tree rows with a controlled pre-order selection index.
 module NanoUI.Internal.Widgets.Tree (TreeItem (..), tree, tree') where
 

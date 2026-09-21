@@ -1,5 +1,3 @@
-{-# LANGUAGE DataKinds #-}
-
 -- | SDL3 draw path: retained damage updates or direct continuous presentation.
 module NanoUI.Sdl.Internal.Runner
   ( sdlDrawFrame

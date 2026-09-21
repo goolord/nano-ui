@@ -1,5 +1,3 @@
-{-# LANGUAGE TypeApplications #-}
-
 -- | Store immutable, read-heavy host data in a GHC compact region to reduce GC scanning.
 module NanoUI.Internal.Compact
   ( Compact

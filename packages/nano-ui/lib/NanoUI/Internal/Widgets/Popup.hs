@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | Anchored floating panels and tooltips, with caller-owned visibility state.
 module NanoUI.Internal.Widgets.Popup
   ( PopupAnchor (..)

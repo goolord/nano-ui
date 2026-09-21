@@ -1,5 +1,3 @@
-{-# LANGUAGE BangPatterns #-}
-
 -- | Implementation of "NanoUI.Widgets.TextArea", plus loading and saving a
 -- text area's state in the widget store and running commands on it from
 -- outside its frame.

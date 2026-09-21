@@ -1,5 +1,3 @@
-{-# LANGUAGE BangPatterns #-}
-
 -- | Store-backed text-area content shared by painting, scrolling and hit
 -- testing: the node font, the cached document buffer and the cached content
 -- extent. Free of the editor widget modules so scroll code stays light.

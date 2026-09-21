@@ -1,5 +1,3 @@
-{-# LANGUAGE DataKinds #-}
-
 -- | Scroll input: offsets baked into the arena, wheel routing, and scrollbar
 -- thumb drags and track jumps.
 module NanoUI.Internal.Frame.Scroll

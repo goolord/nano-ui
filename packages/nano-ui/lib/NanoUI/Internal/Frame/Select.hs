@@ -1,5 +1,3 @@
-{-# LANGUAGE DataKinds #-}
-
 -- | Post-layout select/dropdown picking, keyboard navigation, and dismissal.
 module NanoUI.Internal.Frame.Select
   ( selectDropRect

@@ -1,5 +1,3 @@
-{-# LANGUAGE DataKinds #-}
-
 -- | Hit tests against the node arena: finding a widget's node, testing a point
 -- against a node's rect and clip, and deciding which nodes the modals and
 -- floating panels leave reachable by the pointer.

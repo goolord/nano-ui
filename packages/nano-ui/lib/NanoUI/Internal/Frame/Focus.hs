@@ -1,5 +1,3 @@
-{-# LANGUAGE DataKinds #-}
-
 -- | Keyboard focus order for Tab, keeping focus inside an open modal, and
 -- copying selection state from the store into the nodes that paint it.
 module NanoUI.Internal.Frame.Focus

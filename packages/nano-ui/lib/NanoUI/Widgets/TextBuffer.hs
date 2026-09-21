@@ -1,5 +1,3 @@
-{-# LANGUAGE BangPatterns #-}
-
 -- | A text document as a finger tree of lines with a cursor. Every change is
 -- a 'TextEdit': replace the text at a position with other text. An edit
 -- touches only the lines it spans, so edits, cursor moves and line lookups

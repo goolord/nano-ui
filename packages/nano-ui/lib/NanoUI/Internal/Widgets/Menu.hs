@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | Menu rows, menu-bar buttons, and context-menu state for application views.
 module NanoUI.Internal.Widgets.Menu
   ( contextMenu

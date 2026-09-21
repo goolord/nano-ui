@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | Colour picker. The saturation / value field, the hue bar, the alpha bar and
 -- the Current / New preview are separate 'NodeColorPicker' nodes in one row,
 -- so each bar is its own focus stop with its own keyboard control.

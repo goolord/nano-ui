@@ -1,5 +1,3 @@
-{-# LANGUAGE BangPatterns #-}
-
 -- | An anti-aliased rasterizer for the SVG icons that @nano-svg@ parses.
 --
 -- @nano-svg@ reads the document into shapes with absolute segments, a

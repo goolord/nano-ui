@@ -1,5 +1,3 @@
-{-# LANGUAGE MagicHash #-}
-
 -- | Implementation of "NanoUI.Widgets.TextDocument", plus the conversions
 -- between a document and the widgets' text buffer.
 module NanoUI.Internal.Widgets.TextDocument

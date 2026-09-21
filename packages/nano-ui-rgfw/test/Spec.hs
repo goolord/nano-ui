@@ -1,6 +1,3 @@
-{-# LANGUAGE BangPatterns #-}
-{-# LANGUAGE OverloadedStrings #-}
-
 module Main (main) where
 
 import Control.Exception (IOException, bracket, try)

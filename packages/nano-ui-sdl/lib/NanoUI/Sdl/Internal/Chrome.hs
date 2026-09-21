@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | Window management the toolkit does not need for itself: the title, the
 -- size, and everything a window that draws its own title bar has to do in
 -- its place.

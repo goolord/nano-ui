@@ -1,5 +1,3 @@
-{-# LANGUAGE DataKinds #-}
-
 -- | Complete headless frames: view construction, layout, input resolution,
 -- damage, and draw-buffer generation. Backends own event waits and presentation.
 module NanoUI.Internal.Frame

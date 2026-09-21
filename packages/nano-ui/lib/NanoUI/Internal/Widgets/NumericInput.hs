@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | Numeric field: a text field that only accepts numbers, with an up / down
 -- stepper, arrow-key steps, and an optional hexadecimal mode.
 module NanoUI.Internal.Widgets.NumericInput

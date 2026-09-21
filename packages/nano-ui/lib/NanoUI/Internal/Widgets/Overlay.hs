@@ -1,6 +1,3 @@
-{-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | Modal dialogs and floating in-app windows with title bars and scrolling bodies.
 module NanoUI.Internal.Widgets.Overlay
   ( modal

@@ -1,5 +1,3 @@
-{-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | Implementation of "NanoUI.Monad", plus running a view against a context,

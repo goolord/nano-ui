@@ -1,5 +1,3 @@
-{-# LANGUAGE LambdaCase #-}
-
 -- | Pure pane-grid tree model and geometry, modelled on iced's @PaneGrid@.
 --
 -- A 'GridNode' is a binary split tree of panes. Each split stores an axis

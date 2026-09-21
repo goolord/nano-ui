@@ -1,5 +1,3 @@
-{-# LANGUAGE DataKinds #-}
-
 -- | The pointer and keyboard steps that 'NanoUI.Internal.Frame.runFrame' runs around
 -- the view: recording where a press landed, choosing the active and hot
 -- widgets, turning a release into a click, and moving keyboard focus. All but

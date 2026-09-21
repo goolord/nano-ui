@@ -1,6 +1,3 @@
-{-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | Button and selection helpers shared by the widget modules.
 module NanoUI.Internal.Widgets.Combinators
   ( buttonStyled

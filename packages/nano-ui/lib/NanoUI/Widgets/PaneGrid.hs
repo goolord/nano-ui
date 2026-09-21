@@ -1,6 +1,3 @@
-{-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | Interactive pane grid with resizable dividers, modelled on iced's
 -- @PaneGrid@.
 --

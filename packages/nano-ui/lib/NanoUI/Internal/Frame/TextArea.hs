@@ -1,5 +1,3 @@
-{-# LANGUAGE DataKinds #-}
-
 -- | Multi-line text areas: content painting (lines, selection, caret and
 -- scrollbars) and mouse selection.
 module NanoUI.Internal.Frame.TextArea

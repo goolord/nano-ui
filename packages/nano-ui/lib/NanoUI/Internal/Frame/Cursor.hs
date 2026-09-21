@@ -1,5 +1,3 @@
-{-# LANGUAGE DataKinds #-}
-
 -- | Choose a cursor from active gestures and the solved widget geometry.
 module NanoUI.Internal.Frame.Cursor
   ( UiCursorKind (..)

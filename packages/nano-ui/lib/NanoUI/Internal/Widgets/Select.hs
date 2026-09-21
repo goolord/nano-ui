@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | Dropdown select.
 module NanoUI.Internal.Widgets.Select
   ( select

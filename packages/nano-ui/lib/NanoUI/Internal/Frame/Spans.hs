@@ -1,5 +1,3 @@
-{-# LANGUAGE DataKinds #-}
-
 -- | Collect positioned and clipped text for external renderers and headless tests.
 module NanoUI.Internal.Frame.Spans
   ( collectTextSpans

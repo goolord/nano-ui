@@ -1,4 +1,3 @@
-{-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE StrictData #-}
 
 -- | Widget ids and the id context they are derived from. See the

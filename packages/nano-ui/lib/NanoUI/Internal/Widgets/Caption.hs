@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | The chrome a window with no frame of its own has to draw for itself: the
 -- three caption buttons, the border around the whole window, and the
 -- geometry that says what the rest of the title bar is for.

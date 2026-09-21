@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | Controlled tab selection, header styles, close requests, and selected-body rendering.
 module NanoUI.Internal.Widgets.Tabs
   ( Tab (..), TabStyle (..), TabOrientation (..), TabResponse (..)
