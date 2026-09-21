@@ -145,6 +145,7 @@ library
         NanoUI.WidgetText
         NanoUI.Widgets.Node
         NanoUI.Widgets.Chrome
+        NanoUI.Widgets.Caption
         NanoUI.Widgets.Layout
         NanoUI.Widgets.Tabs
         NanoUI.Widgets.Radio
@@ -211,6 +212,7 @@ test-suite nano-ui-test
     other-modules:
         Cases
         Cases.Animation
+        Cases.Caption
         Cases.Atlas
         Cases.Combo
         Cases.Damage

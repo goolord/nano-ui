@@ -7,6 +7,8 @@ module NanoUI.Widgets.Menu
   , useContextMenu
   , menuButton
   , menuButton'
+  , menuButtonWith
+  , menuButtonWith'
   , MenuItem (..)
   , menuItemWith
   , menuItem
@@ -175,8 +177,19 @@ menuButton txt open = respClicked <$> menuButton' txt open
 
 -- | 'menuButton' returning its 'Response', whose rect anchors the drop-down.
 menuButton' :: Ui :> es => Text -> Bool -> Eff es Response
-menuButton' txt open =
-  buttonStyled txt (if open then 1 else 0) menuBarTitleLayout buttonFlagMenuBar
+menuButton' = menuButtonWith' id
+
+-- | 'menuButton' with modified layout. A menu bar whose row is taller than a
+-- label gives its titles 'NanoUI.fillH', so that each one covers the bar it
+-- is in and its text sits in the middle of it rather than at the top.
+{-# INLINE menuButtonWith #-}
+menuButtonWith :: Ui :> es => (Layout -> Layout) -> Text -> Bool -> Eff es Bool
+menuButtonWith f txt open = respClicked <$> menuButtonWith' f txt open
+
+-- | 'menuButtonWith' returning its 'Response'.
+menuButtonWith' :: Ui :> es => (Layout -> Layout) -> Text -> Bool -> Eff es Response
+menuButtonWith' f txt open =
+  buttonStyled txt (if open then 1 else 0) (f menuBarTitleLayout) buttonFlagMenuBar
 
 menuBarTitleLayout :: Layout
 menuBarTitleLayout = tight $ defaultLayout

@@ -81,6 +81,9 @@ library
         NanoUI.Sdl.Debug
         NanoUI.Sdl.Dialog
         NanoUI.Sdl.Dialog.Types
+        NanoUI.Sdl.Chrome
+        NanoUI.Sdl.Chrome.Types
+        NanoUI.Sdl.Frame
         NanoUI.Sdl.Display
         NanoUI.Sdl.Font
         NanoUI.Sdl.Font.Inter
@@ -108,10 +111,15 @@ library
         text ^>=2.1,
         unordered-containers ^>=0.2
     hs-source-dirs:   lib
+    -- The frame and drop shadow under a window with no title bar are DWM's;
+    -- see "NanoUI.Sdl.Frame".
+    if os(windows)
+        extra-libraries: dwmapi, user32
     if !flag(sdl)
         buildable: False
     if flag(sdl)
-        c-sources:        cbits/nano_ui_ttf.c
+        c-sources:        cbits/nano_ui_frame.c
+                          cbits/nano_ui_ttf.c
                           cbits/nano_ui_display.c
                           cbits/nano_ui_batch.c
                           cbits/nano_ui_text_atlas.c

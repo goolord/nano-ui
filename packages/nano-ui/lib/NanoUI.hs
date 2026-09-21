@@ -153,6 +153,8 @@ module NanoUI
   , buttonWith'
   , menuButton
   , menuButton'
+  , menuButtonWith
+  , menuButtonWith'
   , menuItem
   , menuItem'
   , menuItemShortcut
@@ -311,6 +313,24 @@ module NanoUI
   , tooltipAt
   , tooltipWidget
   , withTooltip
+
+    -- * Window caption
+
+    -- | The minimize, maximize and close buttons of a window that draws its
+    -- own title bar, and the geometry the backend needs to make the rest of
+    -- that bar drag and resize the window.
+  , CaptionGlyph (..)
+  , CaptionAction (..)
+  , CaptionConfig (..)
+  , defaultCaptionConfig
+  , captionButton
+  , captionButtons
+  , captionButtonsConfigured
+  , captionBarHeight
+  , dragSpans
+  , WindowFrame (..)
+  , defaultWindowFrame
+  , windowFrame
 
     -- * Pane grids
   , PaneGridConfig (..)
@@ -724,6 +744,7 @@ import NanoUI.Types
 import NanoUI.WidgetText
 import NanoUI.Widgets.Animate
 import NanoUI.Widgets.Button
+import NanoUI.Widgets.Caption
 import NanoUI.Widgets.Checkbox
 import NanoUI.Widgets.ColorPicker
 import NanoUI.Widgets.Combo

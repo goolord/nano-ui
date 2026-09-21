@@ -22,6 +22,33 @@ module NanoUI.Backend.Sdl
   , askSaveFileDialog
   , askOpenFolderDialog
   , pollFileDialogUi
+    -- * Window chrome
+  , WindowChrome (..)
+  , defaultWindowChrome
+  , defaultResizeBorder
+  , setWindowChrome
+  , clearWindowChrome
+  , setWindowTitle
+  , setWindowSize
+  , minimizeWindow
+  , maximizeWindow
+  , restoreWindow
+  , toggleMaximized
+  , windowMaximized
+  , windowResizable
+  , windowZoom
+  , WindowDecorations (..)
+  , setWindowDecorations
+  , setWindowShadow
+  , CaptionOptions (..)
+  , defaultCaptionOptions
+  , windowCaption
+  , windowCaptionWith
+  , setWindowTitleUi
+  , setWindowChromeUi
+  , minimizeWindowUi
+  , toggleMaximizedUi
+  , windowMaximizedUi
   , NanoUIFont (..)
   , listFontFamilies
   , runSdlApp
@@ -42,7 +69,7 @@ import NanoUI (NanoUI)
 import NanoUI.Sdl.Runner (askSdlDebug, drawReduceEff, sdlDrawFrame, setSdlUiFont, setSdlUiScale)
 import NanoUI.Sdl.Session (runSdlSession)
 import NanoUI.Sdl.Debug (SdlDebugSnapshot (..))
-import NanoUI.Sdl.Window (RgbaImage (..), SdlEnv (..), SdlOptions (..), defaultSdlOptions, saveScreenshot, syncDisplay, withSdl, withSdlBench)
+import NanoUI.Sdl.Window (RgbaImage (..), SdlEnv (..), SdlOptions (..), WindowDecorations (..), defaultSdlOptions, saveScreenshot, syncDisplay, windowZoom, withSdl, withSdlBench)
 import NanoUI.Sdl.Dialog
   ( FileDialogId (..)
   , FileDialogOptions (..)
@@ -58,6 +85,32 @@ import NanoUI.Sdl.Dialog
   , cancelFileDialog
   , pollFileDialogUi
   , saveFileDialog
+  )
+import NanoUI.Sdl.Chrome
+  ( WindowChrome (..)
+  , clearWindowChrome
+  , defaultResizeBorder
+  , defaultWindowChrome
+  , maximizeWindow
+  , minimizeWindow
+  , minimizeWindowUi
+  , restoreWindow
+  , setWindowChrome
+  , setWindowChromeUi
+  , setWindowSize
+  , setWindowTitle
+  , setWindowDecorations
+  , setWindowShadow
+  , setWindowTitleUi
+  , toggleMaximized
+  , toggleMaximizedUi
+  , CaptionOptions (..)
+  , defaultCaptionOptions
+  , windowCaption
+  , windowCaptionWith
+  , windowMaximized
+  , windowMaximizedUi
+  , windowResizable
   )
 import NanoUI.Sdl.NanoUIFont (NanoUIFont (..))
 import NanoUI.Sdl.Font.Search (listFontFamilies)

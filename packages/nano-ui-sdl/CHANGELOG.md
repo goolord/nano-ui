@@ -4,6 +4,52 @@
 
 ### Added
 
+- Everything a window without the desktop's title bar has to do for itself.
+  `windowCaption` is the whole of it in one call from a view -- it draws the
+  three caption buttons, minimizes and maximizes for you, tells the desktop
+  which strip of the bar drags the window and which edges resize it, and
+  answers whether the window was asked to close. `windowCaptionWith` takes a
+  `CaptionOptions`: the buttons' size, and how far in from the window's edges
+  takes hold of one to resize it. The top edge has a reach of its own, since
+  it is the one edge with no frame outside it to take hold of instead. A
+  window that still has the desktop's title bar gets the buttons and nothing
+  else, and a fullscreen one has no bar to drag and no edges to resize.
+- `WindowChrome`, `setWindowChrome` and `clearWindowChrome` for a window that
+  draws chrome of another shape. The regions are given in layout units and
+  converted by the window's zoom, and they go to an `SDL_SetWindowHitTest`,
+  so a drag region also snaps the window to the sides of the screen,
+  maximizes it on a double click, and hangs the window menu off the right
+  button.
+- `setWindowTitle`, `setWindowSize` (the size of the view, whatever frame
+  the desktop keeps around it), `minimizeWindow`, `maximizeWindow`,
+  `restoreWindow`, `toggleMaximized`, `windowMaximized` and `windowResizable`,
+  with `setWindowTitleUi`, `minimizeWindowUi`, `toggleMaximizedUi`,
+  `windowMaximizedUi` and `setWindowChromeUi` for calling them from a view.
+- `WindowDecorations`: `DecorationsFull`, `DecorationsFrame` or
+  `DecorationsNone`, how much of the desktop's title bar and frame a window
+  keeps. `sdlWindowDecorations` picks it when the window opens and
+  `setWindowDecorations` changes it afterwards.
+  `DecorationsFrame` is for a view that draws its own title bar. On Windows a
+  window with no frame is a popup: there is nothing outside its edges, so
+  nothing to take hold of it by, and an application that resizes by its edges
+  has to spend its own chrome on them. `DecorationsFrame` puts the ordinary
+  frame back, the sizing frame's width in on every side and no caption, so
+  the frame stays where it always is -- invisible, outside the window you can
+  see, what the desktop resizes the window by, and what carries its shadow.
+  The window is made that much larger, so `sdlWindowSize` is still the size
+  of the view. Two things go with it. The desktop's own border line is taken
+  off, since with no caption that line falls on the view's first row, over
+  the border the view draws there. And the desktop's rounding is turned off:
+  the corners it rounds are the frame's, a frame's width outside the view, so
+  the view's own corners are square whatever happens there, and a rounding
+  that only shapes the shadow leaves the shadow curving round a window that
+  is not. A window that cannot be resized, or is fullscreen, gets DWM's
+  shadow and no frame. Elsewhere it is a borderless window and the
+  compositor decides.
+  `DecorationsNone` keeps nothing of the desktop's; `setWindowShadow` puts
+  DWM's shadow under one that wants it.
+- `windowZoom`, the window coordinates a layout unit is worth.
+
 - `nano-ui-sdl-idle`, a window for measuring what an app costs while nobody
   touches it: a static view, a focused search field, a background wake, a
   spinner that goes away, a `wakeAfter` clock, a typed character, and frames
@@ -21,6 +67,9 @@
   environment still wins over all three.
 
 ### Changed
+
+- `sdlWindowBorderless` is replaced by `sdlWindowDecorations`:
+  `DecorationsFull` for `False`, and `DecorationsNone` for what `True` did.
 
 - Windows windows render through OpenGL rather than D3D11. D3D11 presents
   through a flip-model swap chain, so a present blocks for about a refresh

@@ -4,6 +4,7 @@ import Cases
 import Cases.Animation
 import Cases.Atlas
 import Cases.Cache
+import Cases.Caption
 import Cases.Combo
 import Cases.ContextMenu
 import Cases.CustomWidget
@@ -89,6 +90,8 @@ testSpecs =
   , TestSpec "stale-font-color" False runStaleFontColorTest
   , TestSpec "font-composition" True runFontCompositionTest
   , TestSpec "align-baseline" True runAlignBaselineTest
+  , TestSpec "caption-drag-spans" False runDragSpansTest
+  , TestSpec "caption-buttons" False runCaptionButtonsTest
   , -- Drawing
     TestSpec "draw-square-geometry" False runSquareGeometryTest
   , TestSpec "draw-external-text" False runExternalTextTest

@@ -5,11 +5,13 @@ module NanoUI.Sdl.Window
   , Retain (..)
   , noRetain
   , SdlOptions (..)
+  , WindowDecorations (..)
   , RenderDriver (..)
   , defaultSdlOptions
   , withSdl
   , withSdlBench
   , syncDisplay
+  , windowZoom
   , saveScreenshot
   ) where
 
@@ -49,7 +51,9 @@ import NanoUI.Sdl.Display
   , queryWindowRefreshHz
   , zoomWindow
   )
+import NanoUI.Sdl.Chrome.Types (ChromeState, clearChromeState, newChromeState)
 import NanoUI.Sdl.Clipboard (withSdlClipboard)
+import NanoUI.Sdl.Frame (WindowDecorations (..), applyDecorations)
 import NanoUI.Sdl.Cursor (SdlCursors (..), destroyCursors, initCursors)
 import NanoUI.Sdl.Font
   ( FontSource (..)
@@ -122,8 +126,11 @@ data SdlOptions = SdlOptions
   -- ^ Allow the window to be resized (default: 'True').
   , sdlWindowFullscreen :: !Bool
   -- ^ Open the window in fullscreen mode (default: 'False').
-  , sdlWindowBorderless :: !Bool
-  -- ^ Create a borderless window (default: 'False').
+  , sdlWindowDecorations :: !WindowDecorations
+  -- ^ How much of the desktop's title bar and frame the window keeps
+  -- (default: 'DecorationsFull'). 'DecorationsFrame' is for a view that
+  -- draws its own title bar ('NanoUI.Backend.Sdl.windowCaption');
+  -- 'NanoUI.Backend.Sdl.setWindowDecorations' changes it afterwards.
   , sdlWindowAlwaysOnTop :: !Bool
   -- ^ Keep the window on top of other windows (default: 'False').
   , sdlWindowHidden :: !Bool
@@ -163,7 +170,7 @@ defaultSdlOptions =
     , sdlWindowSize = defaultWindowSize
     , sdlWindowResizable = True
     , sdlWindowFullscreen = False
-    , sdlWindowBorderless = False
+    , sdlWindowDecorations = DecorationsFull
     , sdlWindowAlwaysOnTop = False
     , sdlWindowHidden = False
     , sdlAppVsync = True
@@ -192,7 +199,7 @@ windowFlags opts =
     0x0000000000002000
       .|. flag sdlWindowResizable 0x0000000000000020
       .|. flag sdlWindowFullscreen 0x0000000000000001
-      .|. flag sdlWindowBorderless 0x0000000000000010
+      .|. flag ((/= DecorationsFull) . sdlWindowDecorations) 0x0000000000000010
       .|. flag sdlWindowAlwaysOnTop 0x0000000000010000
       .|. flag sdlWindowHidden 0x0000000000000008
   where
@@ -233,6 +240,9 @@ data SdlEnv = SdlEnv
   , sdlCachedCtx :: !(IORef Context)
   , sdlFontCache :: !SdlFontCache
   , sdlDialogState :: !DialogState
+  , sdlChromeState :: !ChromeState
+  -- ^ What a borderless window's own title bar is for; see
+  -- "NanoUI.Sdl.Chrome".
   }
 
 -- | The retained framebuffer. The texture is allocated in blocks larger than
@@ -264,6 +274,12 @@ resolveZoom win setting
       display <- getWindowDisplayScale win
       density <- queryWindowPixelDensity win
       pure (if display > 0 then max 0.25 (display / density) else 1)
+
+-- | Window coordinates per layout unit: the zoom the window is running at,
+-- which is what 'sdlAppUiScale' asks for or what the display's content scale
+-- works out to. A frame is laid out in window coordinates divided by this.
+windowZoom :: SdlEnv -> IO Float
+windowZoom env = resolveZoom (sdlWindow env) =<< readIORef (sdlUiScaleRef env)
 
 -- | Synchronise display scale, requested fonts, and logical input coordinates.
 -- Call on the display thread before drawing, then use both returned values;
@@ -319,6 +335,9 @@ data WindowConfig = WindowConfig
   { wcTitle :: !Text
   , wcSize :: !Size
   , wcFlags :: !SDL_WindowFlags
+  , wcDecorations :: !WindowDecorations
+  -- ^ What the desktop is asked for beyond the flags: its frame or its
+  -- shadow under a window with no title bar.
   , wcBench :: !Bool
   -- ^ Hidden benchmark window: bench hints, no vsync setup or text input.
   , wcVsync :: !Bool
@@ -341,6 +360,7 @@ withSdl opts ctx =
       { wcTitle = sdlWindowTitle opts
       , wcSize = sdlWindowSize opts
       , wcFlags = windowFlags opts
+      , wcDecorations = sdlWindowDecorations opts
       , wcBench = False
       , wcVsync = sdlAppVsync opts
       , wcContinuous = sdlAppContinuous opts
@@ -361,6 +381,7 @@ withSdlBench ctx =
       { wcTitle = "nano-ui-bench"
       , wcSize = Size 800 600
       , wcFlags = sdlWindowHiddenFlag
+      , wcDecorations = DecorationsFull
       , wcBench = True
       , wcVsync = False
       , wcContinuous = True
@@ -485,6 +506,9 @@ startSdlWindow ctx cfg guessedDriver fontSource monoSource = do
     forcedScale = case forcedEnv >>= readMaybe of
       Just s | s > 0 -> Just s
       _ -> Nothing
+  -- Before the window, so that it is released after the window is gone: the
+  -- window holds the hit test this frees.
+  chromeState <- mkAcquire newChromeState clearChromeState
   (win, ren) <-
     mkAcquire
       ( retryWithoutRenderDriver guessedDriver $
@@ -510,6 +534,10 @@ startSdlWindow ctx cfg guessedDriver fontSource monoSource = do
   zoom <- liftIO $ resolveZoom win (wcUiScale cfg)
   -- The requested size is logical, so the window grows with the zoom.
   liftIO $ when (abs (zoom - 1) > scaleEpsilon) $ zoomWindow win (wcSize cfg) zoom
+  -- After the zoom: SDL sizes a borderless window as though its view were
+  -- the whole of it, so the desktop's frame goes on around a view that is
+  -- already the size asked for, and the window grows by the frame.
+  liftIO $ when (wcDecorations cfg /= DecorationsFull) (applyDecorations win (wcDecorations cfg))
   let
     scale = density * zoom
   liftIO $ setDrawSnapScale ctx scale
@@ -583,6 +611,7 @@ startSdlWindow ctx cfg guessedDriver fontSource monoSource = do
         , sdlCachedCtx = cachedCtx
         , sdlFontCache = fontCache
         , sdlDialogState = dialogState
+        , sdlChromeState = chromeState
         }
   ctx' <- liftIO $ readIORef cachedCtx
   liftIO $ setHost ctx' env >> setWakeLoop ctx' pushRefreshEvent

@@ -4,6 +4,28 @@
 
 ### Added
 
+- Caption buttons for a window that draws its own title bar: `captionButtons`
+  draws minimize, maximize-or-restore and close and says which was pressed,
+  `captionButton` draws one of them, and `CaptionConfig` sizes them, rounds
+  the close button's corner and says what red it lights up in. The glyphs are
+  drawn rather than written, so they need nothing of the font.
+- `dragSpans` works out what is left of a title bar to drag a window by: the
+  row, minus the rectangles of everything in it that takes a click. Hand the
+  result to a backend as the window's drag region.
+- `captionBarHeight`, a title bar tall enough to leave the topmost pixels to
+  resizing the window.
+- `menuButtonWith` and `menuButtonWith'`, for a menu bar whose row is taller
+  than a label: `fillH` gives each title the height of the bar, so its text
+  sits in the middle of the bar rather than at the top of it.
+- `windowFrame` draws a border around the whole window with the view inside
+  it, which is what tells a window with no frame of its own from whatever is
+  behind it. `WindowFrame` gives its width, colour and corner radius: the
+  width is also the inset the view is drawn at, the radius wants to be what
+  the desktop rounds the window by or the line is cut off at the corners, and
+  a width of zero draws no border without moving anything inside or
+  disturbing its state. The style is the frame's own: panels inside it are
+  drawn in the theme around it.
+
 - Generic `writeSlot`, `adoptSlot`, and `recordSlot` context operations for
   controls using a typed store `Field`, alongside the existing scalar helpers.
 - `withUiResource` in `NanoUI.Monad` brackets UI-thread state acquisition and

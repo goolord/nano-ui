@@ -131,7 +131,7 @@ main = do
               , sdlAppVsync = cfgVsync cfg
               , sdlAppContinuous = cfgContinuous cfg
               , sdlWindowFullscreen = cfgFullscreen cfg
-              , sdlWindowBorderless = cfgBorderless cfg
+              , sdlWindowDecorations = if cfgBorderless cfg then DecorationsFrame else DecorationsFull
               , sdlWindowAlwaysOnTop = cfgAlwaysOnTop cfg
               , sdlWindowSize = Size (fromMaybe 1280 (cfgWidth cfg)) (fromMaybe 800 (cfgHeight cfg))
               }
