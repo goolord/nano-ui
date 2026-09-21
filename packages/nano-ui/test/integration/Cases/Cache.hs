@@ -11,6 +11,7 @@ import Data.IORef (IORef, readIORef, writeIORef)
 import Foreign.ForeignPtr (withForeignPtr)
 import Foreign.Ptr (castPtr)
 import NanoUI
+import NanoUI.Backend
 import NanoUI.Context (Context (..))
 import NanoUI.Layout.Arena
   ( NodeType (..), addNodeFromLayout, getRect, setNodeText, setNodeValue

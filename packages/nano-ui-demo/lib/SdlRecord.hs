@@ -14,6 +14,7 @@ import Control.Monad (forM_, replicateM_, unless, void, when)
 import GHC.Clock (getMonotonicTime)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import NanoUI
+import NanoUI.Backend
 import NanoUI.Backend.Sdl
 import NanoUI.Testing (Context, collectOverlayTextSpans, collectTextSpans, newPixelContext)
 import NanoUI.Testing.Harness (DemoSpan, findExact, findHeader, findRightmost, keyInp)

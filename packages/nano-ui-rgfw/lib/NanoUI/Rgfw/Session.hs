@@ -24,24 +24,27 @@ import Data.Word (Word8, Word32)
 import Foreign.Ptr (Ptr)
 import GHC.Clock (getMonotonicTime)
 import NanoUI
-  ( Input (..)
-  , Key (..)
-  , Modifiers (..)
-  , NanoUI
+  ( NanoUI
   , Size (..)
   , Theme (..)
   , V2 (..)
-  , appendInputKey
-  , emptyInput
   , tomorrowNightMinDarkTheme
   , v2Add
+  )
+import NanoUI.Backend
+  ( Input (..)
+  , Key (..)
+  , Modifiers (..)
+  , MouseButton (..)
+  , appendInputKey
+  , applyMouseButton
+  , emptyInput
   )
 import NanoUI.Context
   ( Context (..)
   , setHost
   , withClipboard
   )
-import NanoUI.Input (MouseButton (..), applyMouseButton)
 import NanoUI.Testing
   ( DrawData (..)
   , UiCursorKind (..)

@@ -9,6 +9,7 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Primitive.SmallArray (SmallArray)
 import NanoUI
+import NanoUI.Backend (emptyInput, inputKeysFromList)
 import NanoUI.Svg (rasterizeSvg)
 import NanoUI.Testing (newContext, runFrame)
 import System.Environment (getArgs)

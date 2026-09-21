@@ -8,9 +8,8 @@ module NanoUI.Sdl.Session
 import Control.Exception (bracket)
 import Control.Monad (void, when)
 import Data.IORef (newIORef, readIORef, writeIORef)
-import NanoUI (Input (..), emptyInput)
+import NanoUI.Backend (Input (..), clearEphemeral, emptyInput)
 import NanoUI.Sdl.Debug (SdlDebugSampler (..))
-import NanoUI.Input (clearEphemeral)
 import NanoUI.Runner
   ( SessionDriver (..)
   , newDrawingLock

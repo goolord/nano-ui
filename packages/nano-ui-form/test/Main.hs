@@ -9,13 +9,12 @@ import NanoUI
   ( Input (..)
   , Size (..)
   , columnWith
-  , emptyInput
   , maxW
   , minW
-  , runNanoUI
   , tight
   )
 import NanoUI qualified as NUI
+import NanoUI.Backend (emptyInput, runNanoUI)
 import NanoUI.Form
 import NanoUI.Form.Backend (updateFieldInput)
 import NanoUI.Testing (collectTextSpans, newContext, runFrame)

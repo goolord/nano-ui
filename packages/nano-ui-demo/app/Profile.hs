@@ -12,6 +12,7 @@ import Text.Printf (printf)
 import qualified Data.Text as T
 
 import NanoUI
+import NanoUI.Backend (Damage (..), emptyInput)
 import NanoUI.Backend.Sdl
   ( SdlEnv (..)
   , sdlDrawFrame

@@ -19,6 +19,7 @@ import Data.List (sortOn)
 import Data.Maybe (isJust)
 import Data.Primitive.PrimArray (sizeofPrimArray)
 import NanoUI
+import NanoUI.Backend
 import NanoUI.Backend.Sdl
 import NanoUI.Context (ctxResolveFont, ctxResolveMeasure)
 import NanoUI.Debug (CoreDebugSnapshot (dbgPresents))

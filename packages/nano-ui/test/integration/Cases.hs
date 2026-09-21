@@ -44,6 +44,7 @@ import Data.Word (Word64)
 import Effectful (liftIO)
 import Effectful.State.Static.Local (State, evalState, get, modify)
 import NanoUI
+import NanoUI.Backend
 import NanoUI.Context (Context (..))
 import NanoUI.Emit qualified as Emit
 import NanoUI.Layout.Arena

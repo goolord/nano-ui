@@ -123,6 +123,10 @@ The [README's "How it works" section](../README.md#how-it-works) lists the steps
   without any new input. Add a test when you change it.
 - Backend-independent event sequencing lives in `NanoUI.Runner`. A backend
   supplies a `SessionDriver` for event translation and presentation.
+- `NanoUI` is the view API and `NanoUI.Backend` is what a backend is built
+  from. A name a view never uses belongs in `NanoUI.Backend`: input
+  construction, font callbacks, damage, frame metrics, id derivation. Adding
+  one to `NanoUI` instead is what makes the root module hard to read.
 - Write code inline. Add a function when it removes real duplication or names a
   computation that isn't obvious.
 - Add tests for observable behaviour. Core cases live in

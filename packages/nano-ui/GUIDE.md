@@ -182,6 +182,17 @@ Backends receive borrowed `DrawData` buffers. Draw or copy them before the
 next frame reuses the arena. Native font and renderer handles must not outlive
 their backend session.
 
+## Writing a backend
+
+`NanoUI` is the view API. What a backend is written against is in
+`NanoUI.Backend`: `emptyInput` and the functions that fold a window's events
+into it, the `FontBackend` callbacks that measure and shape text, the `Damage`
+a frame reports so only changed rectangles are presented, and the paddings and
+widths the widgets lay themselves out by.
+`NanoUI.Context` holds the state that outlives a frame, and `NanoUI.Runner`
+sequences events, redraws and wake-ups. The two backends in this repository,
+`NanoUI.Backend.Sdl` and `NanoUI.Backend.Rgfw`, are the worked examples.
+
 ## Headless tests
 
 `NanoUI.Testing` exposes `newContext` and `runFrame`. A frame returns the view

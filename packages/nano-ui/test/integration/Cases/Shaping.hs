@@ -5,7 +5,7 @@ module Cases.Shaping
 
 import Data.IORef (IORef)
 import Data.Primitive.PrimArray (primArrayFromList)
-import NanoUI
+import NanoUI.Backend
 import NanoUI.Bidi (BidiRun (..), bidiRuns, needsBidi)
 import NanoUI.Testing (Context, caretX, selectionSpans, textIndexAtX)
 import NanoUI.Testing.Assert (assert, assertEq)

@@ -13,6 +13,7 @@ import Control.Monad (void)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Text qualified as T
 import NanoUI
+import NanoUI.Backend
 import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, assertJust, withInput)
 import NanoUI.Testing.Harness (held, holdAt, keyInp, pressAt, releaseAt, runClick, spanCenter, spanRect, tabInp, warmup2, withInputOff)

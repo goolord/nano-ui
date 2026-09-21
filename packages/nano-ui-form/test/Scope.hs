@@ -14,10 +14,9 @@ import NanoUI
   , Rect (..)
   , columnWith
   , fillW
-  , inputKeysFromList
-  , runNanoUI
   , uiIO
   )
+import NanoUI.Backend (inputKeysFromList, runNanoUI)
 import NanoUI.Context (ctxFocusId, ctxNodeArena)
 import NanoUI.Form
 import NanoUI.Form.Backend

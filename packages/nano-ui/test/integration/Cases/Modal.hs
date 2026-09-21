@@ -11,6 +11,7 @@ import Control.Monad (forM_, when)
 import Data.IORef (IORef)
 import Data.Text qualified as T
 import NanoUI
+import NanoUI.Backend
 import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, assertGt, assertJust, evalUi, withInput)
 import NanoUI.Testing.Harness

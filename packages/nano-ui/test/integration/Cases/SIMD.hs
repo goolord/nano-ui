@@ -12,7 +12,8 @@ import Foreign.Marshal.Utils (fillBytes)
 import Foreign.Ptr (Ptr)
 import Foreign.Storable (peekByteOff)
 import NanoUI.SIMD
-import NanoUI (NanoUI, button, column, emptyInput, label, modal)
+import NanoUI (NanoUI, button, column, label, modal)
+import NanoUI.Backend (emptyInput)
 import NanoUI.Testing
   ( Context
   , DrawCmd (..)

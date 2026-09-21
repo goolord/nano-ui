@@ -20,6 +20,7 @@ import Data.Text.Encoding qualified as TE
 import Data.Text.IO qualified as TIO
 import DemoApp (useFileDialog)
 import NanoUI
+import NanoUI.Backend (emptyInput)
 import NanoUI.Backend.Sdl
 import NanoUI.Monad (askInput)
 import NanoUI.Testing (collectOverlayTextSpans, collectTextSpans, newPixelContext)

@@ -4,6 +4,15 @@
 
 ### Added
 
+- `NanoUI.Backend`, holding what a window backend is built from and a view
+  never touches: `emptyInput` and the functions that fold a window's events
+  into it, the `FontBackend` callbacks that measure and shape text, the
+  `Damage` a frame reports, the paddings and widths the widgets lay
+  themselves out by, how a `WidgetId` is derived, the compact region host
+  state lives in, and `runUi` / `runNanoUI`. All of it came out of `NanoUI`,
+  so the root module is now the view API and nothing else, and the two do not
+  overlap.
+
 - `NanoUIEs`, the effect row behind `NanoUI`. A widget configuration carrying
   its caller's row, such as `PaneGridConfig`, can now be named from an
   ordinary view without depending on `effectful`.
@@ -150,6 +159,25 @@
   and `pinnedSide` the side test it turns on.
 
 ### Changed
+
+- `NanoUI` no longer exports the backend surface; import `NanoUI.Backend` for
+  it. The names that moved are `runUi`, `runNanoUI`; `emptyInput`,
+  `appendInputKey`, `appendDropEvent`, `emptyDropEvents`, `emptyInputKeys`,
+  `inputKeysFromList`, `inputKeysNull`, `foldInputKeys`, `inputInteracted`,
+  `inputPointerHeld`; `FontMetrics`, `FontBackend`, `prepareFontMetrics`,
+  `prepareFontMetricsMany`, `scaleFontMetrics`, `monospaceMetrics`,
+  `uiFontMetrics`, `measureTextIO`, `lineWidthIO`, `lineWidth`, `drawShaped`,
+  `drawGlyph`, `drawTextBox`, `GlyphQuad`, `ShapedText`, `ShapedGlyphs`;
+  `Damage`, `DamageBounds`, `defaultDamageSlop`, `sliderDamageSlop`,
+  `haloDamageSlop`, `resolveDamageRect`, `damageWidgetNow`, `damageKeyNow`,
+  `damageRectNow`, `damageGroupNow`, `damageFullNow`; `widgetContentInset`,
+  `widgetPadding`, `treeItemPadding`, `ScrollBarSlot`, `scrollBarGutter`,
+  `scrollBarWidth`, `windowPad`, `windowMargin`; `IdContext`,
+  `initialIdContext`, `widgetId`, `hashWidgetId`, `mix64`, `mixFnv`,
+  `burstNextIds`; and `Compact`, `compactHost`, `askCompact`. `Input`, `Key`,
+  `Modifiers`, `inputKeysElem`, `WidgetId`, `nextId`, `currentId`, `DrawOp`
+  and `shiftDrawOp` stay in `NanoUI`: a view reads input and a custom widget
+  builds draw ops.
 
 - SVG parsing moved to the `nano-svg` package; `NanoUI.Svg` keeps only the
   rasterizer. `parseSvg` takes a UTF-8 `ByteString` instead of `Text`, so

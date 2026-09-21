@@ -13,6 +13,7 @@ import Control.Monad (forM_, void)
 import Data.IORef (IORef, writeIORef)
 import Data.Primitive.SmallArray qualified as SA
 import NanoUI
+import NanoUI.Backend
 import NanoUI.Context (Context (..))
 import NanoUI.Testing
   ( UiCursorKind (..)

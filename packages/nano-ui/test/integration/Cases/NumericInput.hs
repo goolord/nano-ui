@@ -6,6 +6,7 @@ module Cases.NumericInput
 import Data.IORef (IORef, newIORef)
 import Data.Text qualified as T
 import NanoUI
+import NanoUI.Backend
 import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, withInput)
 import NanoUI.Testing.Harness (held, pressAt, releaseAt, warmup2)

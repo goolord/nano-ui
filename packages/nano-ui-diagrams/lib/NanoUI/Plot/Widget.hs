@@ -15,17 +15,15 @@ import Data.Vector.Unboxed qualified as U
 import Diagrams.Prelude (Diagram, V2 (..), extentX, extentY, size)
 import Effectful (Eff, type (:>))
 import NanoUI
-  ( FontMetrics
-  , Layout
+  ( Layout
   , Theme
   , Ui
   , WidgetId
-  , uiFontMetrics
   , uiMousePos
   , uiTheme
-  , prepareFontMetricsMany
   , respRect
   )
+import NanoUI.Backend (FontMetrics, prepareFontMetricsMany, uiFontMetrics)
 import NanoUI.Context (Context (..), getStore, intKey, setStore)
 import NanoUI.Monad (askContext, nextId, uiIO)
 import NanoUI.Diagrams.Backend (B)

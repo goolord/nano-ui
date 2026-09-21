@@ -23,6 +23,7 @@ import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
 import Data.Text qualified as T
 import NanoUI
+import NanoUI.Backend
 import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, assertGt, assertJust, assertJustM, assertLt, withInput)
 import NanoUI.Testing.Harness

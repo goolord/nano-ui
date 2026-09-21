@@ -21,7 +21,8 @@ import Control.Monad (unless, when)
 import Data.IORef (IORef, modifyIORef')
 import Data.Typeable (Typeable)
 import GHC.Stack (HasCallStack, callStack, prettyCallStack, withFrozenCallStack)
-import NanoUI (emptyInput, Input (..), NanoUI, Response (..), Size (..), V2 (..))
+import NanoUI (Input (..), NanoUI, Response (..), Size (..), V2 (..))
+import NanoUI.Backend (emptyInput)
 import NanoUI.Testing (Context, DrawData, FrameMsg, runFrame, runFrameReduce)
 
 -- | Increment a test's failure counter without printing a diagnostic.

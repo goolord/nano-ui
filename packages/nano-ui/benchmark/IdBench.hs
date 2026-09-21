@@ -3,6 +3,7 @@ module Main (main) where
 import Control.Monad (forM_, replicateM_, void, when)
 import GHC.Stats (RTSStats (..), getRTSStats)
 import NanoUI
+import NanoUI.Backend (burstNextIds, emptyInput)
 import NanoUI.Testing (newContext, runFrame)
 import System.Exit (exitFailure)
 import System.Mem (performGC)

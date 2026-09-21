@@ -38,14 +38,12 @@ import Diagrams.Prelude
   )
 import NanoUI
   ( Color
-  , FontMetrics (..)
   , Rect (..)
   , Theme (..)
-  , drawTextBox
-  , fmLineHeight
   , lerpColor
   , themeSeries
   )
+import NanoUI.Backend (FontMetrics (..), drawTextBox, fmLineHeight)
 import NanoUI.Diagrams.Backend (B)
 import NanoUI.Diagrams.Widget (PlotStyle (..), colourOf)
 import NanoUI.Plot.Decimate (lttb)

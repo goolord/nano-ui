@@ -59,6 +59,7 @@ import Foreign.Ptr (Ptr, plusPtr)
 import Foreign.Storable (peekByteOff)
 import GHC.Stack (HasCallStack)
 import NanoUI
+import NanoUI.Backend
 import NanoUI.Font (alignedTextPen, textInkEnd)
 import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, assertLt, bump, withInput)

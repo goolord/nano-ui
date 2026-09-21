@@ -69,6 +69,7 @@ library
     import:           warnings
     exposed-modules:
         NanoUI
+        NanoUI.Backend
         NanoUI.Context
         NanoUI.Context.Types
         NanoUI.Debug

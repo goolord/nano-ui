@@ -12,6 +12,7 @@ module Cases.Select
 import Data.IORef (IORef, newIORef)
 import Data.Text qualified as T
 import NanoUI
+import NanoUI.Backend
 import Data.Primitive.SmallArray qualified as SA
 import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, assertJust, withInput)

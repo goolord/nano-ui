@@ -62,7 +62,9 @@ counter = do
   view with `styled` and composable modifiers, as in
   `styled (primary . buttonStyle (cornerRadius 6)) (button "Save")`.
   `disabledWhen` switches widgets off.
-- `NanoUI.Testing` runs frames headlessly on scripted input, for tests.
+- `NanoUI.Testing` runs frames headlessly on scripted input, for tests, and
+  `NanoUI.Backend` has the font, input and damage plumbing a window backend
+  is written against. `NanoUI` itself is only what writing a GUI needs.
 
 ## Examples
 

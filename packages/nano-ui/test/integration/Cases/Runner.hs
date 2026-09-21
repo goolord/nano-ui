@@ -9,7 +9,8 @@ import Control.Exception
   , try
   )
 import Data.IORef (IORef, atomicModifyIORef', modifyIORef', newIORef, readIORef)
-import NanoUI (Input (..), V2 (..), emptyInput)
+import NanoUI (Input (..), V2 (..))
+import NanoUI.Backend (emptyInput)
 import NanoUI.Debug (DebugSamplerRef, newDebugSampler)
 import NanoUI.Runner
 import NanoUI.Testing (Context, clearDirty, getWakeAt, requestWakeAfter)

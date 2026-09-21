@@ -12,6 +12,7 @@ module Cases.Damage
 import Data.IORef (IORef, readIORef, writeIORef)
 import Data.Maybe (listToMaybe)
 import NanoUI
+import NanoUI.Backend
 import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, assertJust, withInput)
 import NanoUI.Testing.Harness (centerOf, clipCovers, covers, drawQuads, runClick, warmup2, warmupFocused, withInputOff)

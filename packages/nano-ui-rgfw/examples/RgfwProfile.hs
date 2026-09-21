@@ -9,8 +9,8 @@ import NanoUI
   , Size (..)
   , Theme (..)
   , V2 (..)
-  , emptyInput
   )
+import NanoUI.Backend (emptyInput)
 import NanoUI.Testing (collectRasterSpans, runFrame)
 import NanoUI.Rgfw.Context (newRgfwContext)
 import NanoUI.Rgfw.Font.Cozette (getCozetteFont)

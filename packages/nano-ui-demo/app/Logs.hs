@@ -11,6 +11,7 @@ import Data.Text qualified as T
 import Data.Vector.Mutable qualified as MV
 import Data.Vector.Unboxed.Mutable qualified as MU
 import NanoUI
+import NanoUI.Backend (emptyInput)
 import NanoUI.Backend.Sdl
 import NanoUI.Context
   ( Context (..)

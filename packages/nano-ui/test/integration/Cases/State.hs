@@ -13,6 +13,7 @@ import Data.Text (Text)
 import Data.Sequence qualified as Seq
 import Data.Primitive.SmallArray qualified as SA
 import NanoUI
+import NanoUI.Backend
 import NanoUI.Context (Context (..), getStore, intKey, registerImages, lookupImageUv)
 import NanoUI.Store (WidgetStore (..))
 import NanoUI.Testing (clearDirty, collectTextSpans, isDirty, runFrame)

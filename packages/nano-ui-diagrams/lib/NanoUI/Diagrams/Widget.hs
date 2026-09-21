@@ -28,7 +28,6 @@ import Effectful (Eff, type (:>))
 import NanoUI
   ( Color
   , DrawOp (..)
-  , FontMetrics (..)
   , Layout (..)
   , Rect (..)
   , Response
@@ -42,7 +41,6 @@ import NanoUI
   , colorToWord32
   , defaultLayout
   , defaultTheme
-  , drawTextBox
   , drawingCached
   , lerpColor
   , shiftDrawOp
@@ -57,10 +55,9 @@ import NanoUI
   , themeSeparator
   , themeWindow
   , themeYellow
-  , uiFontMetrics
-  , prepareFontMetricsMany
   , uiTheme
   )
+import NanoUI.Backend (FontMetrics (..), drawTextBox, prepareFontMetricsMany, uiFontMetrics)
 import NanoUI.Context (lookupDrawFitEnvelope)
 import NanoUI.Monad (askContext, currentId, uiIO)
 import NanoUI.Diagrams.Backend

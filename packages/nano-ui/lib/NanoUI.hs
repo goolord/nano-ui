@@ -20,6 +20,11 @@
 -- Run a view with a backend: @runSdlApp@ from @nano-ui-sdl@ or @runRgfwApp@
 -- from @nano-ui-rgfw@.
 --
+-- This module is the view API and nothing else. Writing a backend of your
+-- own, or a harness that drives frames itself, needs "NanoUI.Backend"
+-- instead: input construction, font callbacks, damage, and the metrics the
+-- widgets lay themselves out by.
+--
 -- = Conventions
 --
 -- * Widgets return what you usually need: 'Bool' for buttons and menu items,
@@ -44,8 +49,6 @@ module NanoUI
     NanoUI
   , NanoUIEs
   , Ui
-  , runUi
-  , runNanoUI
   , uiIO
   , whenM
   , unlessM
@@ -74,14 +77,7 @@ module NanoUI
   , withKey
   , nextId
   , currentId
-  , burstNextIds
   , WidgetId (..)
-  , IdContext
-  , initialIdContext
-  , widgetId
-  , hashWidgetId
-  , mix64
-  , mixFnv
 
     -- * Responses
   , Response (..)
@@ -428,7 +424,6 @@ module NanoUI
     -- * Drag and drop
   , DropType (..)
   , DropEvent (..)
-  , emptyDropEvents
   , DropTarget (..)
   , useDrop
   , dropZone
@@ -672,71 +667,23 @@ module NanoUI
   , roundHalfUp
 
     -- * Input
+
+    -- | The input a view reads: where the pointer is, which keys came in
+    -- this frame, and what was typed. A backend fills one of these in every
+    -- frame with the functions in "NanoUI.Backend".
   , Input (..)
   , Key (..)
   , Modifiers (..)
-  , emptyInput
-  , inputInteracted
-  , inputPointerHeld
-  , appendInputKey
-  , appendDropEvent
-  , emptyInputKeys
   , inputKeysElem
-  , inputKeysFromList
-  , inputKeysNull
-  , foldInputKeys
-
-    -- * Damage
-  , Damage (..)
-  , DamageBounds (..)
-  , defaultDamageSlop
-  , sliderDamageSlop
-  , haloDamageSlop
-  , resolveDamageRect
-  , damageWidgetNow
-  , damageKeyNow
-  , damageRectNow
-  , damageGroupNow
-  , damageFullNow
-
-    -- * Backend support
-  , FontMetrics (..)
-  , FontBackend (..)
-  , prepareFontMetrics
-  , prepareFontMetricsMany
-  , measureTextIO
-  , lineWidthIO
-  , lineWidth
-  , drawShaped
-  , drawGlyph
-  , GlyphQuad (..)
-  , ShapedText (..)
-  , ShapedGlyphs (..)
-  , scaleFontMetrics
-  , monospaceMetrics
-  , uiFontMetrics
-  , widgetContentInset
-  , widgetPadding
-  , treeItemPadding
-  , ScrollBarSlot (..)
-  , scrollBarGutter
-  , scrollBarWidth
-  , windowPad
-  , windowMargin
-  , Compact
-  , compactHost
-  , askCompact
   )
 where
 
 import NanoUI.Animatable
 import NanoUI.Animation
-import NanoUI.Compact
 import NanoUI.Context
 import NanoUI.Draw
-import NanoUI.Font
 import NanoUI.Hooks
-import NanoUI.Id (IdContext, WidgetId (..), hashWidgetId, initialIdContext, mix64, mixFnv, widgetId)
+import NanoUI.Id (WidgetId (..))
 import NanoUI.Input
 import NanoUI.Monad
 import NanoUI.Style

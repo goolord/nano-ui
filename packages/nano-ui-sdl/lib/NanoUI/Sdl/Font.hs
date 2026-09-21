@@ -62,11 +62,13 @@ import qualified Data.ByteString as BS
 import System.Directory (getTemporaryDirectory, removeFile)
 import System.IO (hClose, openTempFile)
 import NanoUI
-  ( FontMetrics (..)
-  , FontBackend (..)
-  , FontStyle (..)
+  ( FontStyle (..)
   , FontVariant (..)
   , FontWeight (..)
+  )
+import NanoUI.Backend
+  ( FontBackend (..)
+  , FontMetrics (..)
   , GlyphQuad (..)
   , ShapedGlyphs (..)
   , ShapedText (..)

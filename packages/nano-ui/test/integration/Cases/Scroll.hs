@@ -29,6 +29,7 @@ import Foreign.Ptr (Ptr, castPtr)
 import Foreign.Storable (peekElemOff)
 import Data.Text qualified as T
 import NanoUI
+import NanoUI.Backend
 import NanoUI.Context (ctxNodeArena, setDrawSnapScale)
 import NanoUI.Layout.Arena
   ( NodeType (..)
