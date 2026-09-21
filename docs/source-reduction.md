@@ -366,3 +366,67 @@ the solver's height resolution (two lines on the per-node path). The
 excluded trade-offs were a shared SDL/RGFW event type, trimming the RGFW
 bindings, public re-export shells over internal modules, and demo/debug
 text changes. Internal modules keep explicit export lists.
+
+## Fifth pass
+
+Baseline `866b610`, same toolchain. Haskell across all packages goes from
+61,591 to 61,060 physical lines (**-531**). Maintained library code accounts
+for -124 physical / **-151 Fourmolu-normalized** lines, tests for -423, and
+the demo library for -10.
+
+| Commit | Change |
+| --- | --- |
+| `194782d` | Each integration module exports one `tests` list; `Main` concatenates them instead of naming all 252 tests a third time (-100) |
+| `eaf7a53` | A `Spec` prelude re-exports the library, harness, assertions, `Control.Monad` and `Data.IORef` for the integration modules (-308); three local helpers that shadowed harness names are renamed or replaced |
+| `f133b74` | `writeStoreInt`/`Float`, `adoptStore*` and `recordStore*` were partial applications of `writeSlot`, `adoptSlot` and `recordSlot`; callers use those directly (-54) |
+| `ff9e71e` | `fbDrawGlyph` dropped from `FontBackend`: SDL's always returned `Nothing` and RGFW attaches no backend, so `drawGlyph` reads `fmGlyph` (breaking; in the changelog) |
+| `ba90e13` | `splitMins` for the three hand-written `subtreeMin`/`mainMins` pairs; the test-only `dropPreview`/`dropPreviewTree` wrappers and the unused `treeMovePane` export are gone (-28) |
+| `1061603` | A click selects as a drag that has not moved: `textSelectionForClick` and `applyTextAreaClick` repeated the drag rules (-19) |
+| `69b4599` | `withHiddenWindow` in `DemoApp` for the three demo self-tests and the recorder (-10) |
+| `8444ed3` | Select rows pick through the combo row index, offset to their centred block |
+| `cee897c` | `forNodesOfType_` for the five arena walks that visit one node type |
+| `77b847f` | One `hasFlag` for the packed style flags in place of nine one-bit predicates (-28) |
+| `4fbf32e` | `isInteractiveNode` is `isWidgetNode` without `NodeWidget`; the `cacheableWidgetLabel` alias is inlined (-13) |
+
+Checks: `cabal build all`, all twelve suites, the demo self-tests, both
+benchmark suites (glyph lookup 0.002 B against its 1 B budget), `cabal check`
+and `cabal sdist all` pass. Headless allocation is byte-identical in all six
+profile scenes after every library commit.
+
+The plan for this pass estimated structural savings from a code survey
+(about -1.6k to -2.3k library lines). Reading the sites showed most of the
+apparent duplication is deliberate, and those candidates were not landed:
+
+- **One clip walk.** The paint walk pushes draw-arena clips as it goes, the
+  scroll-target hit test deliberately includes the scrollbar lanes, and the
+  view-time viewport test reads the previous frame's clips. Only the span walk
+  could read the stored clips (about 6 lines), and the stored clip falls back
+  to the parent's where the span walk culls, so it was left alone.
+- **1D scrolling as 2D.** `ScrollAxes`, `getScrollOffsetIn` and
+  `scrollBarLayoutIn` already share the kernel; what remains is three stored
+  offset slots, whose merger is a persisted-state migration.
+- **Dropdowns and the text menu on `NodePopup`.** They are post-layout
+  overlays so they open, pick and route the pointer within one frame. The
+  widget-side select pick looked redundant with `finalizeSelectPick`, but
+  removing it fails `select-drag-to-select`: a press on the select that is
+  released over a row keeps its route and only the widget sees it.
+- **A node-kind table.** Painting and measuring differ per kind; the kind
+  predicates are a handful of short documented functions. `hasFlag` and the
+  derived `isInteractiveNode` took what was shared.
+- **Axis-generic solver reads.** Each site treats a fixed size differently
+  (clamped or not, defaults of 32 or 8, percent, padding); an eight-field
+  record was already rejected in the first pass.
+- **One text-wrap decision.** The sites already share `textWrapCap`,
+  `findAncestorMaxW` and `wrapsNarrower`; an `effectiveMaxW` helper nets zero.
+- **Behaviour hooks.** Table resize, the pane divider and the combo thumb
+  each fold their drag into a different state encoding; the raw key reads in
+  the colour picker, numeric input and combo sit in IO or pure step functions
+  that `KeyNav` (an `Eff` hook gated on focus) does not reach; the drag latch
+  shared by `useDrag1D` and `useDrag2D` is two lines.
+- **Stored-editor command helper, backend runner helper.** Both pairs load and
+  save different state; a shared function needs as many parameters as it
+  saves lines.
+- **`DragGeom` in `GridEnv`.** `GridEnv` is built from the drag result.
+- **The text-area wheel test pair and the other packages' suites.** The two
+  tests diverge after their first steps; the RGFW, forms, diagrams and SDL
+  suites have no repeated registration to remove.
