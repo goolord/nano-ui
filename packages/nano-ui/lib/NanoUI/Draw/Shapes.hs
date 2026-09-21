@@ -70,6 +70,20 @@ pushImage da rect tex u0 v0 u1 v1 col
 cornerSegments :: Int
 cornerSegments = 4
 
+-- | How far a stroked arc fades out either side of its solid part, in
+-- pixels. A quad's alpha is interpolated across it and read at the middle of
+-- each pixel, so a straight side, snapped to the grid, is read at the line's
+-- own alpha and comes out at full strength. An arc is not on the grid and
+-- never can be: its curve passes between the pixels, and each one is read
+-- some way down the fade. A whole pixel of fade on each side, with no solid
+-- part between them, leaves the brightest pixel of a hairline arc at about
+-- three quarters of the colour the straight sides it joins are drawn in, so
+-- a rounded corner reads lighter than its own edges. Half a pixel, with the
+-- rest of the width left solid, spends the same ink over a narrower band and
+-- gives the pixels nearest the curve the whole of it.
+arcFeather :: Float
+arcFeather = 0.5
+
 -- Precomputed unit-circle cos/sin for rounded-rect corners (4 segments per 90° arc).
 {-# INLINE cornerCosSin #-}
 cornerCosSin :: Int -> Int -> (Float, Float)
@@ -319,10 +333,12 @@ pushRoundedStrokeRaw da (Rect px py w h) radius bw col
               !doTB = midW >= 0.001
               !doLR = midH >= 0.001
               !stripCount = (if doTB then 2 else 0) + (if doLR then 2 else 0)
-              -- Hairlines have coincident inner/outer core rings. Share that
-              -- ring and omit its zero-area triangles instead of submitting
-              -- a fourth vertex and a third quad for every arc segment.
-              !core = max 0 (ibw * 0.5 - 0.5)
+              -- A stroke no wider than the feather has coincident inner/outer
+              -- core rings. Share that ring and omit its zero-area triangles
+              -- instead of submitting a fourth vertex and a third quad for
+              -- every arc segment. A one-pixel hairline has a solid core now
+              -- and takes the four-vertex path.
+              !core = max 0 ((ibw - arcFeather) * 0.5)
               !hasCore = core > 0
               !arcStride = if hasCore then 4 else 3
               !arcIndices = if hasCore then 18 else 12
@@ -335,8 +351,8 @@ pushRoundedStrokeRaw da (Rect px py w h) radius bw col
                 pokeArc !vi !ii !ccx !ccy !q = do
                   let !inner = max 0 (cr - core)
                       !outerR = cr + core
-                      !innerAA = max 0 (inner - 1.0)
-                      !outerAA = outerR + 1.0
+                      !innerAA = max 0 (inner - arcFeather)
+                      !outerAA = outerR + arcFeather
                   loopIO 0 n $ \i -> do
                     let !(ct, st) = cornerCosSin q i
                         !v0 = base + vi + i * arcStride

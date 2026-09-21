@@ -255,6 +255,16 @@
 
 ### Fixed
 
+- A hairline rounded border is drawn at the same strength all the way round.
+  A quad's alpha is read at the middle of each pixel, so a straight side,
+  snapped to the grid, comes out at the colour it was asked for, while an arc
+  passes between the pixels and each one is read some way down the fade
+  either side of it. With a whole pixel of fade and nothing solid between,
+  the brightest pixel of a corner reached about three quarters of the colour
+  its own straight edges were drawn in, and the corner read lighter than
+  them. The fade is half a pixel now and the rest of the width is solid: the
+  same ink over a narrower band (`arcFeather` in `NanoUI.Draw.Shapes`).
+
 - Nothing reacts through what is drawn over it. `pointer-ownership` opens
   each kind of overlay (the text-edit menu, a select's and a combo's
   dropdown, a popup, a window, a modal) over each kind of pointer-driven
