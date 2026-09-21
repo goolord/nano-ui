@@ -330,66 +330,25 @@ syncDisplay ctx env inp = do
   ctxMeasured <- readIORef (sdlCachedCtx env)
   pure (ctxMeasured, inp {inputWindowSize = winSize, inputMousePos = mouse})
 
--- | Everything a window session is opened with, besides the context.
-data WindowConfig = WindowConfig
-  { wcTitle :: !Text
-  , wcSize :: !Size
-  , wcFlags :: !SDL_WindowFlags
-  , wcDecorations :: !WindowDecorations
-  -- ^ What the desktop is asked for beyond the flags: its frame or its
-  -- shadow under a window with no title bar.
-  , wcBench :: !Bool
-  -- ^ Hidden benchmark window: bench hints, no vsync setup or text input.
-  , wcVsync :: !Bool
-  , wcContinuous :: !Bool
-  , wcUiFont :: !NanoUIFont
-  , wcMonoFont :: !NanoUIFont
-  , wcFontSize :: !Float
-  , wcUiScale :: !Float
-  , wcRenderDriver :: !RenderDriver
-  }
-
 -- | Open native resources around an action and release them on exit, including
 -- exceptions. Supplies an SDL-equipped context. This does not run an event
 -- loop or apply the high-level runner's initial theme/image registration.
 withSdl :: SdlOptions -> Context -> (Context -> SdlEnv -> IO a) -> IO a
-withSdl opts ctx =
-  withSdlWindow
-    ctx
-    WindowConfig
-      { wcTitle = sdlWindowTitle opts
-      , wcSize = sdlWindowSize opts
-      , wcFlags = windowFlags opts
-      , wcDecorations = sdlWindowDecorations opts
-      , wcBench = False
-      , wcVsync = sdlAppVsync opts
-      , wcContinuous = sdlAppContinuous opts
-      , wcUiFont = sdlAppFont opts
-      , wcMonoFont = sdlAppMonoFont opts
-      , wcFontSize = sdlAppFontSize opts
-      , wcUiScale = sdlAppUiScale opts
-      , wcRenderDriver = sdlRenderDriver opts
-      }
+withSdl = withSdlWindow False
 
 -- | 'withSdl' for measurements: a hidden 800x600 window, bundled fonts,
 -- scale 1, continuous drawing, and no vsync or text-input setup.
 withSdlBench :: Context -> (Context -> SdlEnv -> IO a) -> IO a
-withSdlBench ctx =
+withSdlBench =
   withSdlWindow
-    ctx
-    WindowConfig
-      { wcTitle = "nano-ui-bench"
-      , wcSize = Size 800 600
-      , wcFlags = sdlWindowHiddenFlag
-      , wcDecorations = DecorationsFull
-      , wcBench = True
-      , wcVsync = False
-      , wcContinuous = True
-      , wcUiFont = DefaultFont
-      , wcMonoFont = DefaultFont
-      , wcFontSize = defaultFontSize
-      , wcUiScale = 1
-      , wcRenderDriver = RenderDriverAuto
+    True
+    defaultSdlOptions
+      { sdlWindowTitle = "nano-ui-bench"
+      , sdlWindowSize = Size 800 600
+      , sdlAppVsync = False
+      , sdlAppContinuous = True
+      , sdlAppFont = DefaultFont
+      , sdlAppMonoFont = DefaultFont
       }
 
 -- | Which SDL render driver a session asks for.
@@ -436,15 +395,17 @@ retryWithoutRenderDriver True create =
     void $ BS.useAsCString sDL_HINT_RENDER_DRIVER (resetHint . PtrConst.unsafeFromPtr)
     create
 
-withSdlWindow :: Context -> WindowConfig -> (Context -> SdlEnv -> IO a) -> IO a
-withSdlWindow ctx cfg act =
+-- | Open a session. A bench session is a hidden window with bench hints and
+-- no vsync setup or text input.
+withSdlWindow :: Bool -> SdlOptions -> Context -> (Context -> SdlEnv -> IO a) -> IO a
+withSdlWindow bench opts ctx act =
   inBoundThread $ withTtf $ do
-    if wcBench cfg
+    if bench
       then do
         setSdlHint sDL_HINT_ASSERT "always_ignore"
         setSdlHint sDL_HINT_RENDER_VSYNC "0"
       else do
-        setSdlHint sDL_HINT_RENDER_VSYNC (if wcVsync cfg then "1" else "0")
+        setSdlHint sDL_HINT_RENDER_VSYNC (if sdlAppVsync opts then "1" else "0")
         -- SDL3 only auto-picks Wayland when the compositor has the fifo-v1 /
         -- commit-timing-v1 protocols. Without them (sway, wlroots, many
         -- others) it selects X11/XWayland, giving a scale-1 window on a
@@ -471,13 +432,13 @@ withSdlWindow ctx cfg act =
     let
       requested
         | isJust renderDriver = Nothing
-        | otherwise = preferredRenderDriver (wcRenderDriver cfg)
+        | otherwise = preferredRenderDriver (sdlRenderDriver opts)
       -- Only a driver nano-ui chose for the caller is worth dropping again.
-      guessed = isJust requested && wcRenderDriver cfg == RenderDriverAuto
+      guessed = isJust requested && sdlRenderDriver opts == RenderDriverAuto
     for_ requested (setSdlHint sDL_HINT_RENDER_DRIVER)
-    fontSource <- resolveNanoUIFont (wcUiFont cfg)
-    monoSource <- resolveNanoUIFont (wcMonoFont cfg)
-    Acquire.with (startSdlWindow ctx cfg guessed fontSource monoSource) (uncurry act)
+    fontSource <- resolveNanoUIFont (sdlAppFont opts)
+    monoSource <- resolveNanoUIFont (sdlAppMonoFont opts)
+    Acquire.with (startSdlWindow bench opts ctx guessed fontSource monoSource) (uncurry act)
   where
     -- SDL's GL renderer -- what 'RenderDriverAuto' asks for on Windows --
     -- keeps its context current on the OS thread that created it, and the
@@ -486,8 +447,8 @@ withSdlWindow ctx cfg act =
     inBoundThread a = if rtsSupportsBoundThreads then runInBoundThread a else a
 
 startSdlWindow ::
-  Context -> WindowConfig -> Bool -> FontSource -> FontSource -> Acquire (Context, SdlEnv)
-startSdlWindow ctx cfg guessedDriver fontSource monoSource = do
+  Bool -> SdlOptions -> Context -> Bool -> FontSource -> FontSource -> Acquire (Context, SdlEnv)
+startSdlWindow bench opts ctx guessedDriver fontSource monoSource = do
   mkAcquire
     ( do
         videoOk <- initSafe (SDL_InitFlags (fromIntegral sDL_INIT_VIDEO))
@@ -498,8 +459,7 @@ startSdlWindow ctx cfg guessedDriver fontSource monoSource = do
     refreshOk <- initRefreshEvent
     unless refreshOk $ fail "SDL_RegisterEvents failed for refresh wake"
   let
-    Size w h = wcSize cfg
-    bench = wcBench cfg
+    Size w h = sdlWindowSize opts
   -- NANO_FORCE_SCALE: debug override of the pixel density.
   forcedEnv <- liftIO $ lookupEnv "NANO_FORCE_SCALE"
   let
@@ -512,14 +472,14 @@ startSdlWindow ctx cfg guessedDriver fontSource monoSource = do
   (win, ren) <-
     mkAcquire
       ( retryWithoutRenderDriver guessedDriver $
-          TextForeign.withCString (wcTitle cfg) $ \titlePtr ->
+          TextForeign.withCString (sdlWindowTitle opts) $ \titlePtr ->
           alloca $ \winPtr -> alloca $ \renPtr -> do
             ok <-
               createWindowAndRendererSafe
                 (PtrConst.unsafeFromPtr titlePtr)
                 (round w)
                 (round h)
-                (wcFlags cfg)
+                (if bench then sdlWindowHiddenFlag else windowFlags opts)
                 winPtr
                 renPtr
             unless ok $ fail "SDL_CreateWindowAndRenderer failed"
@@ -531,13 +491,13 @@ startSdlWindow ctx cfg guessedDriver fontSource monoSource = do
           destroyWindowSafe win
       )
   density <- liftIO $ queryWindowPixelDensity win
-  zoom <- liftIO $ resolveZoom win (wcUiScale cfg)
+  zoom <- liftIO $ resolveZoom win (sdlAppUiScale opts)
   -- The requested size is logical, so the window grows with the zoom.
-  liftIO $ when (abs (zoom - 1) > scaleEpsilon) $ zoomWindow win (wcSize cfg) zoom
+  liftIO $ when (abs (zoom - 1) > scaleEpsilon) $ zoomWindow win (sdlWindowSize opts) zoom
   -- After the zoom: SDL sizes a borderless window as though its view were
   -- the whole of it, so the desktop's frame goes on around a view that is
   -- already the size asked for, and the window grows by the frame.
-  liftIO $ when (wcDecorations cfg /= DecorationsFull) (applyDecorations win (wcDecorations cfg))
+  liftIO $ when (sdlWindowDecorations opts /= DecorationsFull) (applyDecorations win (sdlWindowDecorations opts))
   let
     scale = density * zoom
   liftIO $ setDrawSnapScale ctx scale
@@ -549,9 +509,9 @@ startSdlWindow ctx cfg guessedDriver fontSource monoSource = do
           then pure "unknown"
           else TextForeign.peekCString (PtrConst.unsafeToPtr name)
   scaleRef <- liftIO $ newIORef scale
-  uiScaleRef <- liftIO $ newIORef (wcUiScale cfg)
-  fontRequestRef <- liftIO $ newIORef (wcUiFont cfg)
-  fontAppliedRef <- liftIO $ newIORef (wcUiFont cfg)
+  uiScaleRef <- liftIO $ newIORef (sdlAppUiScale opts)
+  fontRequestRef <- liftIO $ newIORef (sdlAppFont opts)
+  fontAppliedRef <- liftIO $ newIORef (sdlAppFont opts)
   glyphAtlas <- mkAcquire (newGlyphAtlas ren) destroyGlyphAtlas
   images <- mkAcquire newImageAtlas destroyImageAtlas
   cursors <- mkAcquire initCursors destroyCursors
@@ -567,7 +527,7 @@ startSdlWindow ctx cfg guessedDriver fontSource monoSource = do
           monoSource
           embeddedFontSource
           glyphAtlas
-          (wcFontSize cfg)
+          (sdlAppFontSize opts)
           scaleRef
       )
       destroySdlFontCache
@@ -580,7 +540,7 @@ startSdlWindow ctx cfg guessedDriver fontSource monoSource = do
     unless scaleOk $ fail "SDL_SetRenderScale failed"
   unless bench $
     mkAcquire
-      ( void (setRenderVSync ren (if wcVsync cfg then 1 else 0))
+      ( void (setRenderVSync ren (if sdlAppVsync opts then 1 else 0))
           >> void (startTextInputSafe win)
       )
       (const (void (stopTextInputSafe win)))
@@ -605,9 +565,9 @@ startSdlWindow ctx cfg guessedDriver fontSource monoSource = do
         , sdlDebug = debug
         , sdlRetain = retain
         , sdlLastPresented = lastPresented
-        , sdlVsync = wcVsync cfg
+        , sdlVsync = sdlAppVsync opts
         , sdlRefreshPeriod = refreshPeriod
-        , sdlContinuous = wcContinuous cfg
+        , sdlContinuous = sdlAppContinuous opts
         , sdlCachedCtx = cachedCtx
         , sdlFontCache = fontCache
         , sdlDialogState = dialogState
