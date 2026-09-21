@@ -316,14 +316,11 @@ selectDropRect :: Float -> Float -> Float -> Float -> Int -> Rect
 selectDropRect x y w h nOpts =
   Rect x (y + h + selectDropGap) w (menuItemRowH * fromIntegral nOpts + 2 * menuOuterPad)
 
+-- | Row index at @mouseY@ for a select dropdown, whose rows sit centred in
+-- the drop rect.
 selectDropPickIndex :: Rect -> Float -> Int -> Float -> Maybe Int
-selectDropPickIndex dropRect itemH nOpts mouseY =
-  let Rect _ dy _ dh = dropRect
-      innerH = itemH * fromIntegral nOpts
-      rel = mouseY - dy - max 0 ((dh - innerH) / 2)
-   in if rel < 0 || rel >= innerH
-        then Nothing
-        else Just (max 0 (min (nOpts - 1) (floor (rel / max itemH 1))))
+selectDropPickIndex (Rect dx dy dw dh) itemH nOpts =
+  comboDropPickIndex (Rect dx (dy + max 0 ((dh - itemH * fromIntegral nOpts) / 2)) dw dh) itemH nOpts
 
 -- Combo dropdown scrollbar sizes: lane thickness and the shortest a thumb
 -- ever gets.
