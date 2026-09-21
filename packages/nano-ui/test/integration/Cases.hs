@@ -66,6 +66,7 @@ import NanoUI.Testing.Harness
   , checkLabelAlignEndInk
   , clickPair
   , held
+  , holdAt
   , pressAt
   , releaseAt
   , spanCenter
@@ -613,6 +614,10 @@ seedMixedGrid ref pid pctx = do
 -- 'AxisH' splits, dropping first removes the dragged pane, which collapses
 -- its parent split and re-flows the sibling subtrees, so the naive highlight
 -- lands at the wrong position and size.
+-- | A filling grid with 40px minimum panes and 4px dividers.
+testGridConfig :: PaneGridConfig es
+testGridConfig = defaultPaneGridConfig {pgLayout = fillW . fillH, pgMinSize = 40, pgSpacing = 4}
+
 runPaneGridMixedDragTest :: Context -> IORef Int -> IO ()
 runPaneGridMixedDragTest ctx failed = do
   -- Model level: vertical root split with a horizontal split inside the right
@@ -694,11 +699,8 @@ runPaneGridMixedDragTest ctx failed = do
   seed <- newIORef SeedStart
   let inp0 = withInput 600 400
       cfg =
-        defaultPaneGridConfig
-          { pgLayout = fillW . fillH
-          , pgMinSize = 40
-          , pgSpacing = 4
-          , pgViewPane = \pid pctx -> do
+        testGridConfig
+          { pgViewPane = \pid pctx -> do
               liftIO (modifyIORef' rects (IM.insert (fromIntegral pid) (pgcRect pctx)))
               (value, setValue) <- useInt 0
               marker <- nextId
@@ -816,11 +818,8 @@ runPaneGridDropPreviewTest ctx failed = do
   seed <- newIORef SeedStart
   let inp0 = withInput 600 400
       cfg =
-        defaultPaneGridConfig
-          { pgLayout = fillW . fillH
-          , pgMinSize = 40
-          , pgSpacing = 4
-          , pgViewPane = \pid pctx -> do
+        testGridConfig
+          { pgViewPane = \pid pctx -> do
               strip <- labelWith' (fixedH 20 . fillW . tight) "H"
               liftIO (modifyIORef' seen (IM.insert (fromIntegral pid) (pgcRect pctx, respRect strip)))
               seedMixedGrid seed pid pctx
@@ -834,7 +833,6 @@ runPaneGridDropPreviewTest ctx failed = do
         writeIORef seen IM.empty
         _ <- runFrame ctx inp ui
         readIORef seen
-      holdAt pos = (pressAt inp0 pos) {inputMousePressed = False}
       -- Lift pane @p@ out of the grid and hover at @dest@, a point chosen
       -- from the layout with @p@ removed (what drop targets are tested
       -- against). Returns the layout with @p@ lifted and no target, while
@@ -846,9 +844,9 @@ runPaneGridDropPreviewTest ctx failed = do
           Just (Rect px py _ _, _) -> do
             _ <- runFrame ctx (pressAt inp0 (V2 (px + 10) (py + 10))) ui
             -- Parked outside the grid: no target, the pane's space closes up.
-            lifted <- layoutAt (holdAt (V2 (-50) (-50)))
-            during <- layoutAt (holdAt (dest lifted))
-            _ <- runFrame ctx (releaseAt (holdAt (dest lifted))) ui
+            lifted <- layoutAt (holdAt inp0 (V2 (-50) (-50)))
+            during <- layoutAt (holdAt inp0 (dest lifted))
+            _ <- runFrame ctx (releaseAt (holdAt inp0 (dest lifted))) ui
             after <- layoutAt inp0
             pure (lifted, during, after)
       at q (fx, fy) lifted = case IM.lookup q lifted of
@@ -867,8 +865,8 @@ runPaneGridDropPreviewTest ctx failed = do
   -- Pane 1 left, panes 3 (top) and 5 (bottom) right. Drag the root divider
   -- from the middle to x = 120 so the columns are uneven.
   _ <- runFrame ctx (pressAt inp0 (V2 300 200)) ui
-  _ <- runFrame ctx (holdAt (V2 120 200)) ui
-  _ <- runFrame ctx (releaseAt (holdAt (V2 120 200))) ui
+  _ <- runFrame ctx (holdAt inp0 (V2 120 200)) ui
+  _ <- runFrame ctx (releaseAt (holdAt inp0 (V2 120 200))) ui
   uneven <- layoutAt inp0
   assertEq failed (IM.map (wholePx . fst) uneven) $
     IM.fromList
@@ -924,11 +922,8 @@ runPaneGridPinnedPaneTest ctx failed = do
   split <- newIORef False
   let inp0 = withInput 600 400
       cfg pinned =
-        defaultPaneGridConfig
-          { pgLayout = fillW . fillH
-          , pgMinSize = 40
-          , pgSpacing = 4
-          , pgFixedPanes = if pinned then (== 1) else const False
+        testGridConfig
+          { pgFixedPanes = if pinned then (== 1) else const False
           , pgViewPane = \pid pctx -> do
               liftIO (modifyIORef' rects (IM.insert (fromIntegral pid) (pgcRect pctx)))
               -- One split on the first frame: pane 1 on the left, pane 3 (the
@@ -958,10 +953,9 @@ runPaneGridPinnedPaneTest ctx failed = do
   -- Drag the divider left so the two panes are unmistakably uneven: with a
   -- 4px line and 6px of leeway on each side the gutter is 16, leaving 584 to
   -- share out, and the pointer at 120 puts the left pane at 112.
-  let holdAt pos = (pressAt inp0 pos) {inputMousePressed = False}
   _ <- runFrame ctx (pressAt inp0 (V2 300 200)) (ui True)
-  _ <- runFrame ctx (holdAt (V2 120 200)) (ui True)
-  _ <- runFrame ctx (releaseAt (holdAt (V2 120 200))) (ui True)
+  _ <- runFrame ctx (holdAt inp0 (V2 120 200)) (ui True)
+  _ <- runFrame ctx (releaseAt (holdAt inp0 (V2 120 200))) (ui True)
   start <- settleAt True inp0 2
   widthNear "dragged" start 1 112
   widthNear "dragged" start 3 472
