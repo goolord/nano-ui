@@ -191,3 +191,11 @@ geometry/text ordering. Replacing it with a `FontBackend` adapter alone is
 not equivalent; introducing another snapping policy and text-order queue in
 core would add machinery instead of simply deleting the backend's emitter.
 Retain the current renderer and its dependency-light bitmap-font backend.
+
+## Context construction boundary
+
+Use `RecordWildCards` only at the headless context factory, where every
+reference is already bound locally under its exact field name. Keep font,
+clipboard and recursive resolver defaults explicit. This removes 31 lines
+without adding an abstraction, changing record layout, or changing the
+allocation sequence. Core tests and all 21 existing inspection checks pass.

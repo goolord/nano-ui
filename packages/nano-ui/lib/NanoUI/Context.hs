@@ -1,3 +1,5 @@
+{-# LANGUAGE RecordWildCards #-}
+
 -- | The 'Context' a view runs against, and the operations on its state:
 -- focus, dirty flags and damage, the widget store, drawing and measure
 -- caches, overlays, and host hooks. Backends and advanced widgets use this
@@ -653,56 +655,23 @@ newContext = do
   ctxMetricGen <- newIORef 0
   ctxLastMetricSource <- newIORef Nothing
   ctxPaintFull <- newIORef True
+  -- References above use their field names; font-dependent defaults stay
+  -- explicit, including the resolvers that close over this context.
   let fm0 = monospaceMetrics 12
       ctx = Context
         { ctxNodeArena = nodeArena
         , ctxDrawArena = drawArena
-        , ctxHotId
-        , ctxLastHotId
-        , ctxActiveId
-        , ctxClickedId
-        , ctxReleaseClickedId
-        , ctxPressPos
-        , ctxRightPressPos
-        , ctxFocusId
-        , ctxFocusVisible
-        , ctxStore
-        , ctxDamageState
-        , ctxOverlayState
-        , ctxAnimationState
-        , ctxScrollState
-        , ctxDrawingCache
-        , ctxIdContext
         , ctxFontMetrics = fm0
         , ctxMonoFontMetrics = fm0
         , ctxMeasureText = measureTextIO fm0
         , ctxResolveFont = defaultResolveFont ctx
         , ctxResolveMeasure = defaultResolveMeasure ctx
         , ctxMeasureCache = Nothing
-        , ctxSpanCache
-        , ctxWidgetTextCache
-        , ctxLayoutCache
-        , ctxMetricGen
         , ctxMetricSource = InitialMetricSource
-        , ctxLastMetricSource
-        , ctxPaintFull
         , ctxExternalText = False
-        , ctxTheme
-        , ctxThemeScopes
-        , ctxContainerStack
-        , ctxMessages
-        , ctxFocusables
-        , ctxFocusablesCount
-        , ctxSpanBase
-        , ctxSpanOverlay
-        , ctxInteractionState
         , ctxClipboardGet = pure Nothing
         , ctxClipboardSet = \_ -> pure False
-        , ctxImageAtlas
-        , ctxWakeLoop
-        , ctxWakeAt
-        , ctxHost
-        , ctxDefaultLayout
+        , ..
         }
   pure ctx
 
