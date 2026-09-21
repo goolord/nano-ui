@@ -6,7 +6,51 @@ Baseline binaries remain in `dist-newstyle`; candidates build in a separate
 directory. No dependency or library code is removed from the source accounting
 by moving it into another local package.
 
+## Result
+
+Across every maintained library package (core, SDL, RGFW, bindings, diagrams,
+forms; excluding demos, tests, and vendored `RGFW.h`), the accepted changes
+remove **237 physical / 373 formatter-normalized lines** from `a92ac09`.
+Counting new tests, docs, and generators is outside that figure either way.
+
+Accepted boundaries:
+
+| Commit | Boundary | Normalized lines |
+| --- | --- | ---: |
+| `c03d4db` | Simpler, triangle-correct SDL damage rejection | -152 |
+| `3b69c4c` | Shared cursor state and short-circuiting fallbacks | -26 |
+| `30575c6` | Header-checked SDL_ttf imports in place of forwarding wrappers | -75 |
+| `162d9f3` | SDL-owned atlas storage, direct glyph uploads | -27 |
+| `f472ff9` | RGFW event bindings and constants derived from the header | -31 |
+| `0dd0f79` | `RecordWildCards` at the context factory | -31 |
+| `4cc2784` | Shared palette defaults and map policies | -20 |
+| `496c32b` | Shared text-menu setup and pane fallbacks | -11 |
+
+Rejected after measurement: direct SDL submission and its variants; the strict
+unpacked span-cache key; the form scalar-control helper; a shared SVG/diagrams
+cubic flattener; and the larger SDL_ttf renderer-engine migration. Each is
+recorded below with the evidence that failed the gate.
+
+## Final validation
+
+- `cabal build -j1 all`: succeeds with the repository's `-Werror` project
+  settings.
+- `cabal test -j1 all`: all eleven suites pass (`nano-ui-test`,
+  `nano-ui-inspection`, `text-buffer-spec`, `nano-ui-render-test`,
+  `nano-ui-font-effects-test`, `nano-ui-font-search-test`, `nano-ui-rgfw-test`,
+  `nano-ui-rgfw-bindings-test`, `nano-ui-diagrams-test`, `nano-ui-form-test`,
+  `ditto-test`).
+- SDL demo, notepad, and logs `--selftest`: pass.
+- `cabal run nano-ui-rgfw-profile`: completes 500 frames.
+- `cabal bench nano-ui-id-bench`: passes, including the per-frame id-allocation
+  gate.
+- `cabal check` for nano-ui, nano-ui-sdl, nano-ui-rgfw-bindings, and
+  nano-ui-form: no errors or warnings.
+- `cabal sdist all`: all eight archives generated; the RGFW bindings archive
+  contains `lib/RGFW/Raw.hsc` and `test/Events.c`.
+
 ## SDL geometry boundary
+
 
 The accepted implementation retains native coalescing and its full-redraw
 path. It replaces the quad-only scalar/AVX2 damage loops with a conservative
