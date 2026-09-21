@@ -115,23 +115,10 @@ main = do
   case dropWhile (/= "--record") args of
     _ : dir : _ -> SdlRecord.record dir demoUi
     _ -> do
-      let (cfgUpdates, _, _) = getOpt Permute options args
-          cfg = foldl' (flip id) defaultDemoConfig cfgUpdates
-      if cfgHelp cfg
-        then putStr (usageInfo "Usage: nano-ui-sdl-demo [OPTIONS]" options)
-        else do
-          runSdlApp
-            defaultSdlOptions
-              { sdlAppShouldQuit = \inp -> inputKeysElem KeyEscape (inputKeys inp)
-              , sdlAppTheme = Just defaultTheme
-              , sdlAppVsync = cfgVsync cfg
-              , sdlAppContinuous = cfgContinuous cfg
-              , sdlWindowFullscreen = cfgFullscreen cfg
-              , sdlWindowDecorations = if cfgBorderless cfg then DecorationsFrame else DecorationsFull
-              , sdlWindowAlwaysOnTop = cfgAlwaysOnTop cfg
-              , sdlWindowSize = Size (fromMaybe 1280 (cfgWidth cfg)) (fromMaybe 800 (cfgHeight cfg))
-              }
-            demoUi
+      let (updates, _, _) = getOpt Permute options args
+      case sequence updates of
+        Nothing -> putStr (usageInfo "Usage: nano-ui-sdl-demo [OPTIONS]" options)
+        Just fs -> runSdlApp (foldl' (flip id) demoOptions fs) demoUi
 
 ------------------------------------------------------------------------------
 -- §2  Assets & shared look
@@ -1078,38 +1065,25 @@ displayRows s =
 -- §10  CLI plumbing
 ------------------------------------------------------------------------------
 
-data DemoConfig = DemoConfig
-  { cfgVsync :: !Bool
-  , cfgContinuous :: !Bool
-  , cfgFullscreen :: !Bool
-  , cfgBorderless :: !Bool
-  , cfgAlwaysOnTop :: !Bool
-  , cfgWidth :: !(Maybe Float)
-  , cfgHeight :: !(Maybe Float)
-  , cfgHelp :: !Bool
-  }
-
-defaultDemoConfig :: DemoConfig
-defaultDemoConfig =
-  DemoConfig
-    { cfgVsync = True
-    , cfgContinuous = False
-    , cfgFullscreen = False
-    , cfgBorderless = False
-    , cfgAlwaysOnTop = False
-    , cfgWidth = Nothing
-    , cfgHeight = Nothing
-    , cfgHelp = False
+demoOptions :: SdlOptions
+demoOptions =
+  defaultSdlOptions
+    { sdlAppShouldQuit = \inp -> inputKeysElem KeyEscape (inputKeys inp)
+    , sdlAppTheme = Just defaultTheme
+    , sdlWindowSize = Size 1280 800
     }
 
-options :: [OptDescr (DemoConfig -> DemoConfig)]
+-- | Each option's change to 'demoOptions'; 'Nothing' asks for the help text.
+options :: [OptDescr (Maybe (SdlOptions -> SdlOptions))]
 options =
-  [ Option ['v'] ["vsync"] (ReqArg (\s cfg -> cfg { cfgVsync = s `elem` ["true", "True", "1"] }) "BOOL") "Enable or disable vsync (true/false, default: true)"
-  , Option ['c', 'b', 'f'] ["continuous", "benchmark", "fps"] (NoArg (\cfg -> cfg { cfgContinuous = True, cfgVsync = False })) "Continuous unthrottled rendering, to show uncapped FPS (disables vsync)"
-  , Option ['F'] ["fullscreen"] (NoArg (\cfg -> cfg { cfgFullscreen = True })) "Launch window in fullscreen mode"
-  , Option [] ["borderless"] (NoArg (\cfg -> cfg { cfgBorderless = True })) "Launch borderless window"
-  , Option ['t'] ["always-on-top"] (NoArg (\cfg -> cfg { cfgAlwaysOnTop = True })) "Keep window always on top"
-  , Option ['W'] ["width"] (ReqArg (\s cfg -> cfg { cfgWidth = readMaybe s }) "PX") "Initial window width in pixels (default: 1280)"
-  , Option ['H'] ["height"] (ReqArg (\s cfg -> cfg { cfgHeight = readMaybe s }) "PX") "Initial window height in pixels (default: 800)"
-  , Option ['h', '?'] ["help"] (NoArg (\cfg -> cfg { cfgHelp = True })) "Show help and command-line options"
+  [ Option ['v'] ["vsync"] (ReqArg (\s -> Just $ \o -> o {sdlAppVsync = s `elem` ["true", "True", "1"]}) "BOOL") "Enable or disable vsync (true/false, default: true)"
+  , Option ['c', 'b', 'f'] ["continuous", "benchmark", "fps"] (NoArg (Just $ \o -> o {sdlAppContinuous = True, sdlAppVsync = False})) "Continuous unthrottled rendering, to show uncapped FPS (disables vsync)"
+  , Option ['F'] ["fullscreen"] (NoArg (Just $ \o -> o {sdlWindowFullscreen = True})) "Launch window in fullscreen mode"
+  , Option [] ["borderless"] (NoArg (Just $ \o -> o {sdlWindowDecorations = DecorationsFrame})) "Launch borderless window"
+  , Option ['t'] ["always-on-top"] (NoArg (Just $ \o -> o {sdlWindowAlwaysOnTop = True})) "Keep window always on top"
+  , Option ['W'] ["width"] (ReqArg (\s -> size (\w sz -> sz {sizeW = w}) s) "PX") "Initial window width in pixels (default: 1280)"
+  , Option ['H'] ["height"] (ReqArg (\s -> size (\h sz -> sz {sizeH = h}) s) "PX") "Initial window height in pixels (default: 800)"
+  , Option ['h', '?'] ["help"] (NoArg Nothing) "Show help and command-line options"
   ]
+  where
+    size f s = Just $ \o -> maybe o (\px -> o {sdlWindowSize = f px (sdlWindowSize o)}) (readMaybe s)
