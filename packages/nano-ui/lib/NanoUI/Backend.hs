@@ -20,12 +20,13 @@
 --
 -- A backend's frame is: collect events into an 'Input', run the view with
 -- "NanoUI.Runner" or "NanoUI.Testing", take the 'Damage' and present the
--- rectangles it names. "NanoUI.Context" holds the state that outlives a
--- frame, and the font callbacks below are what it measures text with.
+-- rectangles it names. The @Context@ that "NanoUI.Testing" creates holds the
+-- state that outlives a frame, and the font callbacks below are what it
+-- measures text with.
 module NanoUI.Backend
   ( -- * Running a view
 
-    -- | These run one view against a @Context@ from "NanoUI.Context" and an
+    -- | These run one view against a @Context@ from "NanoUI.Testing" and an
     -- 'Input'. Most backends want a whole frame instead: @runFrame@ in
     -- "NanoUI.Testing", or the runners in "NanoUI.Runner", which lay out,
     -- paint and collect damage around a call to these.
@@ -143,9 +144,9 @@ module NanoUI.Backend
   )
 where
 
-import NanoUI.Compact (Compact, askCompact, compactHost)
-import NanoUI.Draw.Text (drawTextBox)
-import NanoUI.Font
+import NanoUI.Internal.Compact (Compact, askCompact, compactHost)
+import NanoUI.Internal.Draw.Text (drawTextBox)
+import NanoUI.Internal.Font
   ( FontBackend (..)
   , FontMetrics (..)
   , GlyphQuad (..)
@@ -167,7 +168,7 @@ import NanoUI.Font
   , widgetContentInset
   , widgetPadding
   )
-import NanoUI.Id
+import NanoUI.Internal.Id
   ( IdContext
   , hashWidgetId
   , initialIdContext
@@ -175,7 +176,7 @@ import NanoUI.Id
   , mixFnv
   , widgetId
   )
-import NanoUI.Input
+import NanoUI.Internal.Input
   ( DropEvent (..)
   , DropType (..)
   , Input (..)
@@ -195,7 +196,7 @@ import NanoUI.Input
   , inputKeysNull
   , inputPointerHeld
   )
-import NanoUI.Monad
+import NanoUI.Internal.Monad
   ( burstNextIds
   , damageFullNow
   , damageGroupNow
@@ -206,8 +207,8 @@ import NanoUI.Monad
   , runUi
   , uiFontMetrics
   )
-import NanoUI.Style (windowMargin, windowPad)
-import NanoUI.Types
+import NanoUI.Internal.Style (windowMargin, windowPad)
+import NanoUI.Internal.Types
   ( Damage (..)
   , DamageBounds (..)
   , defaultDamageSlop

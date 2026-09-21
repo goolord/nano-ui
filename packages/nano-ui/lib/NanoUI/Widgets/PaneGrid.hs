@@ -4,7 +4,7 @@
 -- | Interactive pane grid with resizable dividers, modelled on iced's
 -- @PaneGrid@.
 --
--- The grid is a binary split tree ('NanoUI.Widgets.SplitPane.GridNode')
+-- The grid is a binary split tree ('GridNode')
 -- persisted per widget as a "Data.Dynamic" value in the widget store.
 --
 -- Panes are rendered through the user-provided 'pgViewPane', which receives a
@@ -43,7 +43,7 @@ import Data.Text qualified as T
 import Data.Primitive.SmallArray (SmallArray)
 import Data.Word (Word64)
 import Effectful (Eff, type (:>))
-import NanoUI.Context
+import NanoUI.Internal.Context
   ( Context (..)
   , bumpMirror
   , damageWidget
@@ -60,8 +60,8 @@ import NanoUI.Context
   , setStore
   , modifyStore
   )
-import NanoUI.Draw (DrawOp)
-import NanoUI.Input
+import NanoUI.Internal.Draw (DrawOp)
+import NanoUI.Internal.Input
   ( Input (..)
   , Key (..)
   , UiCursorKind (..)
@@ -72,11 +72,11 @@ import NanoUI.Input
   , inputMousePos
   , inputMousePressed
   )
-import NanoUI.Monad (Ui, askContext, askInput, nextId, releaseFocus, uiIO, withIdFrame, withKey)
-import NanoUI.Id (IdContext (..), WidgetId, hashWidgetId)
-import NanoUI.Frame.Hit (nodeInteractionHit, scrollHitRect)
-import NanoUI.Frame.Input (isInteractiveNode)
-import NanoUI.Store
+import NanoUI.Internal.Monad (Ui, askContext, askInput, nextId, releaseFocus, uiIO, withIdFrame, withKey)
+import NanoUI.Internal.Id (IdContext (..), WidgetId, hashWidgetId)
+import NanoUI.Internal.Frame.Hit (nodeInteractionHit, scrollHitRect)
+import NanoUI.Internal.Frame.Input (isInteractiveNode)
+import NanoUI.Internal.Store
   ( Slot (..)
   , WidgetStore
   , deleteSlot
@@ -91,7 +91,7 @@ import NanoUI.Store
   , lookupSlot
   , slotKey
   )
-import NanoUI.Style
+import NanoUI.Internal.Style
   ( AlignX (..)
   , AlignY (..)
   , Direction (..)
@@ -104,7 +104,7 @@ import NanoUI.Style
   , fadeAlpha
   , separatorTrackColor
   )
-import NanoUI.Types
+import NanoUI.Internal.Types
   ( DamageBounds (..)
   , Rect (..)
   , V2 (..)
@@ -120,8 +120,8 @@ import NanoUI.Types
   , v2X
   , v2Y
   )
-import NanoUI.Widgets.Behavior (KeyNav (..), dragThresholdPx, useKeyNav)
-import NanoUI.Widgets.Custom
+import NanoUI.Internal.Widgets.Behavior (KeyNav (..), dragThresholdPx, useKeyNav)
+import NanoUI.Internal.Widgets.Custom
   ( CustomWidgetSpec (..)
   , CustomDrawContext (..)
   , contentKey
@@ -134,14 +134,14 @@ import NanoUI.Widgets.Custom
   , drawText
   , runCanvas
   )
-import NanoUI.Widgets.Layout (column', row')
-import NanoUI.Layout.Arena (NodeType (..), arenaCount, getNodeType, getWidgetId)
-import NanoUI.Widgets.Node
+import NanoUI.Internal.Widgets.Layout (column', row')
+import NanoUI.Internal.Layout.Arena (NodeType (..), arenaCount, getNodeType, getWidgetId)
+import NanoUI.Internal.Widgets.Node
   ( container
   , containerResponse
   , tagContainer
   )
-import NanoUI.Widgets.SplitPane
+import NanoUI.Internal.Widgets.SplitPane
   ( DividerInfo (..)
   , GridAxis (..)
   , GridNode (..)
@@ -1090,7 +1090,7 @@ restorePane env = putPaneSlot True SlotPaneMax env 0
 
 -- | One store round-trip. @mirror@ bumps the mirror generation so the
 -- running frame rebuilds its UI and layout with the new value (see
--- 'NanoUI.Frame'); the store write itself wakes the renderer.
+-- 'NanoUI.Internal.Frame'); the store write itself wakes the renderer.
 storeWrite ::
   (Ui :> es) =>
   GridEnv es ->

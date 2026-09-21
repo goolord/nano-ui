@@ -11,7 +11,7 @@ import Foreign.Marshal.Alloc (allocaBytes)
 import Foreign.Marshal.Utils (fillBytes)
 import Foreign.Ptr (Ptr)
 import Foreign.Storable (peekByteOff)
-import NanoUI.SIMD
+import NanoUI.Internal.SIMD
 import NanoUI (NanoUI, button, column, label, modal)
 import NanoUI.Backend (emptyInput)
 import NanoUI.Testing

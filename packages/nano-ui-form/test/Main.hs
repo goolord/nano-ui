@@ -16,7 +16,7 @@ import NanoUI
 import NanoUI qualified as NUI
 import NanoUI.Backend (emptyInput, runNanoUI)
 import NanoUI.Form
-import NanoUI.Form.Backend (updateFieldInput)
+import NanoUI.Form.Internal.Backend (updateFieldInput)
 import NanoUI.Testing (collectTextSpans, newContext, runFrame)
 import Scope (check, runScopeTests)
 import System.IO (BufferMode (NoBuffering), hSetBuffering, stdout)

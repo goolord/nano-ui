@@ -31,9 +31,9 @@ import NanoUI.Testing.Harness
   , warmup2
   , withInputOff
   )
-import NanoUI.Context (Context (..))
+import NanoUI.Internal.Context (Context (..))
 import NanoUI.Emit qualified as Emit
-import NanoUI.Layout.Arena (arenaCount, findNodeM, getRect, getText, getWidgetId)
+import NanoUI.Internal.Layout.Arena (arenaCount, findNodeM, getRect, getText, getWidgetId)
 
 data DummyTab = TabA | TabB | TabC
   deriving (Eq, Show)

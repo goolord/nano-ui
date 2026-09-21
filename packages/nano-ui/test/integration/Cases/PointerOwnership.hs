@@ -14,8 +14,8 @@ import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Text qualified as T
 import Data.Text.IO qualified as TIO
 import NanoUI
-import NanoUI.Context (Context (ctxActiveId), getTextInputMenu, intKey, textInputMenuWidget)
-import NanoUI.Store (Slot (..), WidgetStore (..), isSelectOpen, slotKey)
+import NanoUI.Internal.Context (Context (ctxActiveId), getTextInputMenu, intKey, textInputMenuWidget)
+import NanoUI.Internal.Store (Slot (..), WidgetStore (..), isSelectOpen, slotKey)
 import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, assertJust, withInput)
 import NanoUI.Testing.Harness
@@ -27,7 +27,7 @@ import NanoUI.Testing.Harness
   , rightClickPair
   , spanCenter
   )
-import NanoUI.Widgets.TextArea (buffer, loadTextAreaState, selectionAnchor)
+import NanoUI.Internal.Widgets.TextArea (buffer, loadTextAreaState, selectionAnchor)
 import NanoUI.Widgets.TextBuffer (getCursor)
 import System.Directory (doesDirectoryExist, listDirectory)
 import System.FilePath (makeRelative, takeExtension, (</>))
@@ -341,7 +341,8 @@ scenario mOv vc offset shift gesture = do
 -- | The frame's unrouted input is for the code that does the routing and for
 -- what watches the whole window. A widget reading its presses from it would
 -- react through whatever is drawn on top, the bug the rest of this module
--- looks for, so every module that touches it is listed here.
+-- looks for, so every module that touches it is listed here. The scan starts
+-- at the imports, so a module that only re-exports it passes.
 runPointerRoutingLintTest :: Context -> IORef Int -> IO ()
 runPointerRoutingLintTest _ failed = do
   roots <- filterM doesDirectoryExist ["lib", "packages/nano-ui/lib"]
@@ -351,15 +352,15 @@ runPointerRoutingLintTest _ failed = do
       files <- haskellFiles root
       when (length files < 50) $ complain ("only " <> show (length files) <> " sources under " <> root)
       forM_ files $ \file -> do
-        src <- TIO.readFile file
+        src <- snd . T.breakOn "\nimport " <$> TIO.readFile file
         let rel = map (\c -> if c == '\\' then '/' else c) (makeRelative root file)
         when ("askFrameInput" `T.isInfixOf` src && rel `notElem` allowed) $
           complain (rel <> " reads the unrouted input (askFrameInput); widgets use askInput")
   where
     allowed =
-      [ "NanoUI/Monad.hs" -- defines it
-      , "NanoUI/Widgets/Node.hs" -- routes a floating panel's body and a dropdown's owner
-      , "NanoUI/Widgets/Behavior.hs" -- useDismissable: a press anywhere else dismisses
+      [ "NanoUI/Internal/Monad.hs" -- defines it
+      , "NanoUI/Internal/Widgets/Node.hs" -- routes a floating panel's body and a dropdown's owner
+      , "NanoUI/Internal/Widgets/Behavior.hs" -- useDismissable: a press anywhere else dismisses
       ]
     complain msg = putStrLn ("  " <> msg) >> modifyIORef' failed (+ 1)
     haskellFiles dir = do

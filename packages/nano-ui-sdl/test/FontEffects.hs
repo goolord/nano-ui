@@ -19,7 +19,7 @@ import NanoUI.Backend.Sdl
   , withSdl
   , withSdlBench
   )
-import NanoUI.Context (ctxResolveFont, ctxResolveMeasure)
+import NanoUI.Internal.Context (ctxResolveFont, ctxResolveMeasure)
 import System.Environment (setEnv)
 import System.Mem (performGC)
 

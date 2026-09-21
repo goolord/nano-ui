@@ -21,10 +21,10 @@ import NanoUI.Backend.Sdl
   , syncDisplay
   , withSdlBench
   )
-import NanoUI.Debug (debugRefreshDue, emptyCoreDebugSnapshot, isDebugActive, newDebugSampler, refreshDebugSnapshot)
+import NanoUI.Internal.Debug (debugRefreshDue, emptyCoreDebugSnapshot, isDebugActive, newDebugSampler, refreshDebugSnapshot)
 import NanoUI.Diagrams
-import NanoUI.Context (ctxNodeArena)
-import NanoUI.Layout.Arena (NodeType (NodeButton), findNodeRevM, getNodeType, getRect, getText)
+import NanoUI.Internal.Context (ctxNodeArena)
+import NanoUI.Internal.Layout.Arena (NodeType (NodeButton), findNodeRevM, getNodeType, getRect, getText)
 import NanoUI.Testing
   ( Context
   , newPixelContext

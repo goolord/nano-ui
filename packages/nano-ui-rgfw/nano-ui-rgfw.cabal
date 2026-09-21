@@ -48,11 +48,11 @@ library
     import:           warnings
     exposed-modules:
         NanoUI.Backend.Rgfw
-        NanoUI.Rgfw.Context
-        NanoUI.Rgfw.Debug
-        NanoUI.Rgfw.Font.Cozette
-        NanoUI.Rgfw.Gl
-        NanoUI.Rgfw.Session
+        NanoUI.Rgfw.Internal.Context
+        NanoUI.Rgfw.Internal.Debug
+        NanoUI.Rgfw.Internal.Font.Cozette
+        NanoUI.Rgfw.Internal.Gl
+        NanoUI.Rgfw.Internal.Session
     c-sources:        cbits/nano_ui_gl.c
     build-depends:
         base ^>=4.22.0.0,

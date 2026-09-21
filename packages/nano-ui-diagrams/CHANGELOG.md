@@ -4,6 +4,7 @@
 
 ### Changed
 
+- `NanoUI.Diagrams.Tessellation` is now `NanoUI.Diagrams.Internal.Tessellation`.
 - Draw ops are a `SmallArray DrawOp` from `primitive` instead of a boxed
   `Vector` in `diagramOps`, `diagramTextOps`, `diagramFrame` and
   `labelFitScale`.

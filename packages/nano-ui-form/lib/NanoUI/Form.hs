@@ -64,8 +64,8 @@ where
 
 import Ditto.Core qualified as Ditto
 import Ditto.Types qualified as Ditto
-import NanoUI.Form.Backend (FormInput (..), FormUI (..), liftNanoUI)
-import NanoUI.Form.Field (inputWidget)
+import NanoUI.Form.Internal.Backend (FormInput (..), FormUI (..), liftNanoUI)
+import NanoUI.Form.Internal.Field (inputWidget)
 import NanoUI.Form.Input
   ( FieldName (..)
   , childErrors

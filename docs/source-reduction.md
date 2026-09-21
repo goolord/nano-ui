@@ -205,7 +205,7 @@ kerning settings. SDL 3.4.14 / SDL_ttf 3.2.2 produce:
 
 The existing backend preserves regular-face layout for seven synthetic
 weights and shears quads by exactly 0.18 around the baseline
-(`NanoUI/Draw/Text.hs`). Native bold is therefore not a behavior-preserving
+(`NanoUI/Internal/Draw/Text.hs`). Native bold is therefore not a behavior-preserving
 substitute. Repeated upright native draws could emulate weights, but the
 renderer-engine API does not expose a custom shear or atlas draw geometry.
 `TTF_GetGPUTextDrawData` belongs to the separate SDL_GPU engine; it cannot

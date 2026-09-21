@@ -18,7 +18,7 @@ import Data.Maybe (fromMaybe, isJust)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Effectful (Eff, type (:>))
-import NanoUI.Context
+import NanoUI.Internal.Context
   ( Context (..)
   , getStore
   , intKey
@@ -27,19 +27,19 @@ import NanoUI.Context
   , modifyStore
   , recordStoreText
   )
-import NanoUI.Font (FontMetrics, menuItemRowH)
-import NanoUI.Frame.Hit (findNodeByWidgetId)
-import NanoUI.Frame.Select (comboDropPickIndex, comboDropRect, comboScrollGeom)
-import NanoUI.Id (WidgetId (..))
-import NanoUI.Input (Key (..), inputKeys, inputMouseDown, inputMousePos, inputMousePressed, inputScroll)
-import NanoUI.Layout.Arena (setOptions)
-import NanoUI.Monad (Ui, askContext, uiIO)
-import NanoUI.Store (Slot (..), boolInt, fieldFloat, fieldInt, fieldText, findSlot, flagSlot, insertSlot, slotKey)
-import NanoUI.Types (Rect (..), V2 (..), clamp, rectContains, rectNonEmpty, v2X, v2Y)
-import NanoUI.WidgetText (textInputFlagSearch)
-import NanoUI.Widgets.Behavior (keyboardFocused)
-import NanoUI.Widgets.Node (Response (..), dropdownInput, setChanged)
-import NanoUI.Widgets.TextInput (buildTextInput, searchInputLayout)
+import NanoUI.Internal.Font (FontMetrics, menuItemRowH)
+import NanoUI.Internal.Frame.Hit (findNodeByWidgetId)
+import NanoUI.Internal.Frame.Select (comboDropPickIndex, comboDropRect, comboScrollGeom)
+import NanoUI.Internal.Id (WidgetId (..))
+import NanoUI.Internal.Input (Key (..), inputKeys, inputMouseDown, inputMousePos, inputMousePressed, inputScroll)
+import NanoUI.Internal.Layout.Arena (setOptions)
+import NanoUI.Internal.Monad (Ui, askContext, uiIO)
+import NanoUI.Internal.Store (Slot (..), boolInt, fieldFloat, fieldInt, fieldText, findSlot, flagSlot, insertSlot, slotKey)
+import NanoUI.Internal.Types (Rect (..), V2 (..), clamp, rectContains, rectNonEmpty, v2X, v2Y)
+import NanoUI.Internal.WidgetText (textInputFlagSearch)
+import NanoUI.Internal.Widgets.Behavior (keyboardFocused)
+import NanoUI.Internal.Widgets.Node (Response (..), dropdownInput, setChanged)
+import NanoUI.Internal.Widgets.TextInput (buildTextInput, searchInputLayout)
 
 -- | Maximum suggestion rows the combo dropdown shows at once; Up/Down walk
 -- the highlight and the wheel scrolls the list through a sliding window.

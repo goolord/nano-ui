@@ -25,7 +25,7 @@ import Data.IntMap.Strict qualified as IM
 import Data.Text (Text)
 import Effectful (liftIO)
 import NanoUI
-import NanoUI.Context (Context (..), withClipboard)
+import NanoUI.Internal.Context (Context (..), withClipboard)
 import NanoUI.Input (inputKeysFromList)
 import NanoUI.Monad (focusedWidget, releaseFocus)
 import NanoUI.Testing (needsRedraw, runFrame)

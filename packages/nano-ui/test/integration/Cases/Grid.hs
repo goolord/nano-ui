@@ -11,8 +11,8 @@ import Data.IORef (IORef)
 import Data.List (nub)
 import qualified Data.Text as T
 import NanoUI
-import NanoUI.Context (Context (..))
-import NanoUI.Layout.Arena (arenaCount, getStyleIdx, getText)
+import NanoUI.Internal.Context (Context (..))
+import NanoUI.Internal.Layout.Arena (arenaCount, getStyleIdx, getText)
 import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, assertJust, withInput)
 

@@ -66,11 +66,11 @@ import Data.IORef (newIORef)
 import Data.Primitive.SmallArray (SmallArray)
 import Data.Typeable (Typeable)
 import NanoUI (NanoUI)
-import NanoUI.Sdl.Runner (askSdlDebug, drawReduceEff, sdlDrawFrame, setSdlUiFont, setSdlUiScale)
-import NanoUI.Sdl.Session (runSdlSession)
-import NanoUI.Sdl.Debug (SdlDebugSnapshot (..))
-import NanoUI.Sdl.Window (RgbaImage (..), SdlEnv (..), SdlOptions (..), WindowDecorations (..), defaultSdlOptions, saveScreenshot, syncDisplay, windowZoom, withSdl, withSdlBench)
-import NanoUI.Sdl.Dialog
+import NanoUI.Sdl.Internal.Runner (askSdlDebug, drawReduceEff, sdlDrawFrame, setSdlUiFont, setSdlUiScale)
+import NanoUI.Sdl.Internal.Session (runSdlSession)
+import NanoUI.Sdl.Internal.Debug (SdlDebugSnapshot (..))
+import NanoUI.Sdl.Internal.Window (RgbaImage (..), SdlEnv (..), SdlOptions (..), WindowDecorations (..), defaultSdlOptions, saveScreenshot, syncDisplay, windowZoom, withSdl, withSdlBench)
+import NanoUI.Sdl.Internal.Dialog
   ( FileDialogId (..)
   , FileDialogOptions (..)
   , FileDialogResult (..)
@@ -86,7 +86,7 @@ import NanoUI.Sdl.Dialog
   , pollFileDialogUi
   , saveFileDialog
   )
-import NanoUI.Sdl.Chrome
+import NanoUI.Sdl.Internal.Chrome
   ( WindowChrome (..)
   , clearWindowChrome
   , defaultResizeBorder
@@ -112,8 +112,8 @@ import NanoUI.Sdl.Chrome
   , windowMaximizedUi
   , windowResizable
   )
-import NanoUI.Sdl.NanoUIFont (NanoUIFont (..))
-import NanoUI.Sdl.Font.Search (listFontFamilies)
+import NanoUI.Sdl.Internal.NanoUIFont (NanoUIFont (..))
+import NanoUI.Sdl.Internal.Font.Search (listFontFamilies)
 import NanoUI.Testing (Context, newPixelContext, registerImage, runEff, withTheme)
 
 -- | Open an SDL window and run a view until close or the quit predicate fires.

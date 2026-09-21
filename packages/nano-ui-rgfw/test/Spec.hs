@@ -9,7 +9,7 @@ import Data.Bits ((.&.))
 import System.Exit (exitFailure)
 
 import Data.Vector.Unboxed qualified as U
-import NanoUI.Layout.Arena
+import NanoUI.Internal.Layout.Arena
   ( NodeType (..)
   , arenaCount
   , getNodeType
@@ -37,7 +37,7 @@ import NanoUI
 import Foreign.Marshal.Alloc (allocaBytes, callocBytes, free)
 import Foreign.Storable (peekByteOff, peekElemOff)
 import NanoUI.Input (Input (..), Modifiers (..), emptyInput)
-import NanoUI.Context (Context (..))
+import NanoUI.Internal.Context (Context (..))
 import NanoUI.Testing
   ( DrawCmd (..)
   , DrawData (..)
@@ -45,7 +45,7 @@ import NanoUI.Testing
   , newPixelContext
   , runFrame
   )
-import NanoUI.Rgfw.Font.Cozette
+import NanoUI.Rgfw.Internal.Font.Cozette
   ( CozetteFont (..)
   , charToGlyphId
   , cozetteGlyphBit1x
@@ -54,10 +54,10 @@ import NanoUI.Rgfw.Font.Cozette
   , getCozetteFont
   , renderGlyphScaledToBuffer
   )
-import NanoUI.Rgfw.Context (newRgfwContext)
-import NanoUI.Rgfw.Gl (GlyphAtlas (..), atlasCell, bakeGlyphAtlas, glyphAtlasFor, toPhysRect, writeSpanQuads)
+import NanoUI.Rgfw.Internal.Context (newRgfwContext)
+import NanoUI.Rgfw.Internal.Gl (GlyphAtlas (..), atlasCell, bakeGlyphAtlas, glyphAtlasFor, toPhysRect, writeSpanQuads)
 import NanoUI.Rgfw.Render (renderArena)
-import NanoUI.Rgfw.Session (applyRgfwEvent, decodeRgfwEvents)
+import NanoUI.Rgfw.Internal.Session (applyRgfwEvent, decodeRgfwEvents)
 import RGFW (Event (..))
 import NanoUI.Rgfw.Surface
   ( clearScreen

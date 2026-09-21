@@ -16,8 +16,8 @@ where
 import Control.Monad (when)
 import Data.Typeable (Typeable)
 import Effectful (Eff, type (:>))
-import NanoUI.Monad (Ui, emit, whenM)
-import NanoUI.Widgets.Node (Response, respChanged)
+import NanoUI.Internal.Monad (Ui, emit, whenM)
+import NanoUI.Internal.Widgets.Node (Response, respChanged)
 
 -- | Emit a message when an action activates, for example a button or menu item.
 {-# INLINE emitWhen #-}

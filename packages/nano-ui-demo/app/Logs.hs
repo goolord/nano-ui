@@ -13,14 +13,14 @@ import Data.Vector.Unboxed.Mutable qualified as MU
 import NanoUI
 import NanoUI.Backend (emptyInput)
 import NanoUI.Backend.Sdl
-import NanoUI.Context
+import NanoUI.Internal.Context
   ( Context (..)
   , damageFull
   , getPrevRect
   , markDirty
   , takeTextEditLastAction
   )
-import NanoUI.Monad (askContext)
+import NanoUI.Internal.Monad (askContext)
 import NanoUI.Testing (collectTextSpans, newPixelContext)
 import NanoUI.Testing.Harness (clickPos, expectText, findExact, hasText, keyInp, requireSpan)
 import System.Environment (getArgs)

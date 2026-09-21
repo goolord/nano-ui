@@ -28,7 +28,7 @@ import Foreign.C.Types (CInt (..))
 import GHC.IO.Exception (IOException (..))
 import NanoUI hiding (scrollBy)
 import NanoUI.Backend.Sdl
-import NanoUI.Sdl.Input (SdlEvent (..), applyEvent, pollEvents)
+import NanoUI.Sdl.Internal.Input (SdlEvent (..), applyEvent, pollEvents)
 import NanoUI.Testing (newPixelContext)
 import Streaming (Of (..))
 import Streaming.Prelude qualified as S

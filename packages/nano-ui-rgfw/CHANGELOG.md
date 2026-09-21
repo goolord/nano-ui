@@ -4,6 +4,8 @@
 
 ### Changed
 
+- `NanoUI.Rgfw.Context`, `.Debug`, `.Gl`, `.Session` and `.Font.Cozette` are
+  now under `NanoUI.Rgfw.Internal`. `NanoUI.Backend.Rgfw` is the API.
 - `RgfwOptions`'s `optTheme`, `newRgfwContext` and `applyRgfwTheme` take a
   core `Theme`, drawn with square corners and 1px borders.
 - The Cozette glyph table uses `primitive` arrays.

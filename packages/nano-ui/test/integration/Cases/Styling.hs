@@ -10,7 +10,7 @@ module Cases.Styling
 import Control.Monad (forM_)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import NanoUI
-import NanoUI.Context (Context (..))
+import NanoUI.Internal.Context (Context (..))
 import NanoUI.Testing
 import Data.Text (Text)
 import NanoUI.Testing.Assert (assert, assertEq)

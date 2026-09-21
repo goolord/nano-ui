@@ -10,9 +10,9 @@ import Foreign.ForeignPtr (withForeignPtr)
 import Foreign.Ptr (Ptr)
 import Foreign.Storable (peekByteOff, peekElemOff, pokeElemOff)
 import NanoUI (Color (..), Rect (..), roundHalfUp)
-import NanoUI.Rgfw.Context (TextSpan, paintInLayerOrder)
-import NanoUI.Rgfw.Font.Cozette (CozetteFont)
-import NanoUI.Rgfw.Gl (physClip, toPhysRect)
+import NanoUI.Rgfw.Internal.Context (TextSpan, paintInLayerOrder)
+import NanoUI.Rgfw.Internal.Font.Cozette (CozetteFont)
+import NanoUI.Rgfw.Internal.Gl (physClip, toPhysRect)
 import NanoUI.Rgfw.Surface
   ( RgfwSurface (..)
   , drawTextScaled
@@ -40,7 +40,7 @@ type RGBA = (Float, Float, Float, Float)
 -- so RGFW gets theme parity and core drawing behavior for free.
 --
 -- The frame must come from a context built by
--- 'NanoUI.Rgfw.Context.newRgfwContext': square geometry means the buffer holds
+-- 'NanoUI.Rgfw.Internal.Context.newRgfwContext': square geometry means the buffer holds
 -- only flat quads and triangles (no rounded fans or transparent AA fringes),
 -- and external text means it holds no text quads, so every primitive is filled
 -- as-is and glyphs come solely from the span lists.

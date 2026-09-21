@@ -135,8 +135,8 @@ module NanoUI.Testing
   , textNodeTextDecoration
   ) where
 
-import NanoUI.Compact (Compact, askCompact, compactHost)
-import NanoUI.Context
+import NanoUI.Internal.Compact (Compact, askCompact, compactHost)
+import NanoUI.Internal.Context
   ( Context (..)
   , FrameMsg (..)
   , anyAnimating
@@ -193,9 +193,9 @@ import NanoUI.Context
   , getTheme
   , wrapMeasureCache
   )
-import NanoUI.Context (newContext, newPixelHostContext)
-import NanoUI.Frame.SpanArena (SpanArena, foldSpanArena, spanArenaCount)
-import NanoUI.Draw
+import NanoUI.Internal.Context (newContext, newPixelHostContext)
+import NanoUI.Internal.Frame.SpanArena (SpanArena, foldSpanArena, spanArenaCount)
+import NanoUI.Internal.Draw
   ( DrawCmd (..)
   , DrawData (..)
   , DrawOp (..)
@@ -211,14 +211,14 @@ import NanoUI.Draw
   , indexSize
   , vertexSize
   )
-import NanoUI.Damage (floatingPanelRects)
-import NanoUI.Font (caretX, lineWidth, selectionSpans, sliderTrackBounds, textIndexAtX)
-import NanoUI.Widgets.ColorPicker
+import NanoUI.Internal.Damage (floatingPanelRects)
+import NanoUI.Internal.Font (caretX, lineWidth, selectionSpans, sliderTrackBounds, textIndexAtX)
+import NanoUI.Internal.Widgets.ColorPicker
   ( colorPickerSvSquare
   , widgetStoreBaseColor
   , widgetStoreColor
   )
-import NanoUI.Frame
+import NanoUI.Internal.Frame
   ( UiCursorKind (..)
   , collectOverlayTextSpans
   , collectRasterSpans
@@ -237,11 +237,11 @@ import NanoUI.Frame
   , uiCursorKind
   , widgetNodeCount
   )
-import NanoUI.Frame.Scroll (ScrollBarLayout (..), scrollBarLayout)
-import NanoUI.Layout.Solve (computePopupPosition)
-import NanoUI.Monad (Ui, askContext, askHost, askInput, uiIO)
-import NanoUI.WidgetText (textNodeFontStyle, textNodeFontWeight, textNodeTextDecoration)
-import NanoUI.Types (Damage (..), damageIsEmpty)
+import NanoUI.Internal.Frame.Scroll (ScrollBarLayout (..), scrollBarLayout)
+import NanoUI.Internal.Layout.Solve (computePopupPosition)
+import NanoUI.Internal.Monad (Ui, askContext, askHost, askInput, uiIO)
+import NanoUI.Internal.WidgetText (textNodeFontStyle, textNodeFontWeight, textNodeTextDecoration)
+import NanoUI.Internal.Types (Damage (..), damageIsEmpty)
 import Effectful (Eff, IOE, runEff, type (:>))
 
 -- | A headless context for tests: 16px monospace metrics, the measure cache

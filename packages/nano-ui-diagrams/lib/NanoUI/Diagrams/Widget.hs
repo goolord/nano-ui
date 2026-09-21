@@ -58,8 +58,9 @@ import NanoUI
   , uiTheme
   )
 import NanoUI.Backend (FontMetrics (..), drawTextBox, prepareFontMetricsMany, uiFontMetrics)
-import NanoUI.Context (lookupDrawFitEnvelope)
-import NanoUI.Monad (askContext, currentId, uiIO)
+import NanoUI.Internal.Context (lookupDrawFitEnvelope)
+import NanoUI.Internal.Monad (askContext)
+import NanoUI.Monad (currentId, uiIO)
 import NanoUI.Diagrams.Backend
   ( B
   , NanoUIBackend

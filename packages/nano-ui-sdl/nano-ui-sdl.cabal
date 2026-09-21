@@ -66,27 +66,27 @@ library
     import:           warnings
     exposed-modules:
         NanoUI.Backend.Sdl
-        NanoUI.Sdl.Input
-        NanoUI.Sdl.NanoUIFont
+        NanoUI.Sdl.Internal.Input
+        NanoUI.Sdl.Internal.NanoUIFont
     other-modules:
-        NanoUI.Sdl.Session
-        NanoUI.Sdl.Runner
-        NanoUI.Sdl.Clipboard
-        NanoUI.Sdl.Cursor
-        NanoUI.Sdl.Debug
-        NanoUI.Sdl.Dialog
-        NanoUI.Sdl.Dialog.Types
-        NanoUI.Sdl.Chrome
-        NanoUI.Sdl.Chrome.Types
-        NanoUI.Sdl.Frame
-        NanoUI.Sdl.Display
-        NanoUI.Sdl.Font
-        NanoUI.Sdl.Font.Inter
-        NanoUI.Sdl.Font.Resolve
-        NanoUI.Sdl.Font.Search
-        NanoUI.Sdl.Image
-        NanoUI.Sdl.Render
-        NanoUI.Sdl.Window
+        NanoUI.Sdl.Internal.Session
+        NanoUI.Sdl.Internal.Runner
+        NanoUI.Sdl.Internal.Clipboard
+        NanoUI.Sdl.Internal.Cursor
+        NanoUI.Sdl.Internal.Debug
+        NanoUI.Sdl.Internal.Dialog
+        NanoUI.Sdl.Internal.Dialog.Types
+        NanoUI.Sdl.Internal.Chrome
+        NanoUI.Sdl.Internal.Chrome.Types
+        NanoUI.Sdl.Internal.Frame
+        NanoUI.Sdl.Internal.Display
+        NanoUI.Sdl.Internal.Font
+        NanoUI.Sdl.Internal.Font.Inter
+        NanoUI.Sdl.Internal.Font.Resolve
+        NanoUI.Sdl.Internal.Font.Search
+        NanoUI.Sdl.Internal.Image
+        NanoUI.Sdl.Internal.Render
+        NanoUI.Sdl.Internal.Window
     build-depends:
         base ^>=4.22.0.0,
         bytestring ^>=0.12,
@@ -107,7 +107,7 @@ library
         unordered-containers ^>=0.2
     hs-source-dirs:   lib
     -- The frame and drop shadow under a window with no title bar are DWM's;
-    -- see "NanoUI.Sdl.Frame".
+    -- see "NanoUI.Sdl.Internal.Frame".
     if os(windows)
         extra-libraries: dwmapi, user32
     if !flag(sdl)
@@ -126,7 +126,7 @@ test-suite nano-ui-render-test
     type:             exitcode-stdio-1.0
     main-is:          Rendering.hs
     hs-source-dirs:   test, lib
-    other-modules:    NanoUI.Sdl.Render, NanoUI.Sdl.Image
+    other-modules:    NanoUI.Sdl.Internal.Render, NanoUI.Sdl.Internal.Image
     if os(windows)
         ghc-options: -optl-mconsole
     build-depends:
@@ -144,7 +144,7 @@ test-suite nano-ui-font-search-test
     type:             exitcode-stdio-1.0
     main-is:          FontSearch.hs
     hs-source-dirs:   test, lib
-    other-modules:    NanoUI.Sdl.Font.Search
+    other-modules:    NanoUI.Sdl.Internal.Font.Search
     build-depends:
         base ^>=4.22.0.0,
         containers ^>=0.8,

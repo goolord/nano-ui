@@ -17,8 +17,8 @@ import Foreign.Storable (peekByteOff, pokeByteOff)
 import GHC.Clock (getMonotonicTimeNSec)
 import GHC.Conc (getAllocationCounter)
 import NanoUI (Color, Rect (..), colorRGBA)
-import NanoUI.Sdl.Image (destroyImageAtlas, newImageAtlas)
-import NanoUI.Sdl.Render
+import NanoUI.Sdl.Internal.Image (destroyImageAtlas, newImageAtlas)
+import NanoUI.Sdl.Internal.Render
   ( destroyRenderBatch
   , flushRenderBatch
   , newRenderBatch

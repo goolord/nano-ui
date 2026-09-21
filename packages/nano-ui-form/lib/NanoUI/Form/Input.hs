@@ -49,8 +49,8 @@ import NanoUI
   , textInputConfigured'
   )
 import NanoUI qualified as NUI
-import NanoUI.Form.Backend (FormInput (..), formInputToText)
-import NanoUI.Form.Field
+import NanoUI.Form.Internal.Backend (FormInput (..), formInputToText)
+import NanoUI.Form.Internal.Field
   ( decodeBool
   , decodeFloatInput
   , decodeInt

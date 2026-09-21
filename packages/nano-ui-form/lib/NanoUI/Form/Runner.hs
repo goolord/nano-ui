@@ -22,8 +22,9 @@ import NanoUI
   , uiIO
   , whenM
   )
-import NanoUI.Monad (askContext, askInput, withContext)
-import NanoUI.Form.Backend
+import NanoUI.Internal.Monad (askContext, withContext)
+import NanoUI.Monad (askInput)
+import NanoUI.Form.Internal.Backend
   ( FormUI (..)
   , isFormSubmitted
   , markFormSubmitted

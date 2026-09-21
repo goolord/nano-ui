@@ -45,9 +45,9 @@ import Effectful (liftIO)
 import Effectful.State.Static.Local (State, evalState, get, modify)
 import NanoUI
 import NanoUI.Backend
-import NanoUI.Context (Context (..))
+import NanoUI.Internal.Context (Context (..))
 import NanoUI.Emit qualified as Emit
-import NanoUI.Layout.Arena
+import NanoUI.Internal.Layout.Arena
   ( NodeType (..)
   , arenaArrays
   , foldNodesM
@@ -78,7 +78,7 @@ import NanoUI.Testing.Harness
   , warmupFocused
   , withInputOff
   )
-import NanoUI.Widgets.SplitPane
+import NanoUI.Internal.Widgets.SplitPane
   ( PaneDrop (..)
   , dropPreview
   , DropPreview (..)

@@ -2,8 +2,8 @@ module Cases.NoThunks (runNoThunksTest) where
 
 import Data.IORef (IORef, readIORef)
 import qualified Data.IntMap.Strict as IM
-import NanoUI.Context (Context (..))
-import NanoUI.Store (WidgetStore (..))
+import NanoUI.Internal.Context (Context (..))
+import NanoUI.Internal.Store (WidgetStore (..))
 import NoThunks.Class (NoThunks, noThunks)
 
 import NanoUI

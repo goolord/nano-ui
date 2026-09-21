@@ -211,6 +211,27 @@
 
 ### Changed
 
+- Modules that are not API moved under `NanoUI.Internal`. `NanoUI.Context`,
+  `NanoUI.Context.Types`, `NanoUI.Debug`, `NanoUI.Id`,
+  `NanoUI.Layout.Arena`, `NanoUI.Layout.Solve`, `NanoUI.Store`, `NanoUI.SIMD`,
+  `NanoUI.Frame.Hit`, `NanoUI.Frame.TextEdit`, `NanoUI.Frame.Window` and
+  `NanoUI.Widgets.SplitPane` are still exposed, as `NanoUI.Internal.*`, and
+  the hidden modules moved there too.
+- `NanoUI.Monad` and `NanoUI.Input` keep what a view or custom widget uses.
+  `runUi`, `runNanoUI`, `askContext`, `withContext`, `withIdFrame`,
+  `burstNextIds`, `FrameMsg`, `decodeMessages`, `reduceMessages`,
+  `reduceUpdates`, `stripInteractionInput`, `withoutPointer`,
+  `isHardQuitInput` and `splitFrame` moved to `NanoUI.Internal.Monad` and
+  `NanoUI.Internal.Input`; `NanoUI.Backend` and `NanoUI.Testing` still export
+  the ones they did.
+- `NanoUI.Widgets.Custom`, `.TextArea`, `.TextDocument`, `.TextEditor` and
+  `.TextField` no longer export the helpers the frame uses
+  (`mkCustomDrawContext`, `loadTextAreaState`, `loadTextAreaStateWithBuffer`,
+  `saveTextAreaState`, `textAreaEditor`, `applyTextAreaCommand`,
+  `bufferDocument`, `documentBuffer`, `sameLines`, `editorModeCode`,
+  `editorModeFromCode`, `applyTextFieldCommand`, `textFieldMode`,
+  `textFieldHistory`, `textFieldHasText`). They are in the matching
+  `NanoUI.Internal.Widgets` module.
 - `searchField` is now `searchInput`, to match `textInput`, and the rest of
   its family follows: `searchInput'`, `searchInputConfigured`,
   `searchInputConfigured'`, `SearchInputConfig` and

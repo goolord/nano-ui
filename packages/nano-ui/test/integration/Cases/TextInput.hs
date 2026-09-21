@@ -40,8 +40,8 @@ import Data.IntMap.Strict qualified as IM
 import Data.Text qualified as T
 import NanoUI
 import NanoUI.Backend
-import NanoUI.Context (intKey)
-import NanoUI.Frame.TextEdit
+import NanoUI.Internal.Context (intKey)
+import NanoUI.Internal.Frame.TextEdit
   ( TextAreaHit (..)
   , TextAreaScrollBarLayouts (..)
   , resolveTextAreaFont
@@ -53,7 +53,7 @@ import NanoUI.Frame.TextEdit
   , textAreaScrollBarLayout
   , textAreaScrollBarLayouts
   )
-import NanoUI.Store
+import NanoUI.Internal.Store
   ( Slot (..)
   , WidgetStore (..)
   , slotKey
@@ -78,7 +78,7 @@ import NanoUI.Testing.Harness
   , warmup2
   , warmupFocused
   )
-import NanoUI.Widgets.TextArea
+import NanoUI.Internal.Widgets.TextArea
   ( buffer
   , loadTextAreaState
   , selectionAnchor

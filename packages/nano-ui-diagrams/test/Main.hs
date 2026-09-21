@@ -20,8 +20,8 @@ import Diagrams.Prelude
   )
 import NanoUI
 import NanoUI.Backend
-import NanoUI.Context (Context (..), DrawingCacheState (..), withFontMetrics)
-import NanoUI.Context.Types (DrawOpCacheEntry (..))
+import NanoUI.Internal.Context (Context (..), DrawingCacheState (..), withFontMetrics)
+import NanoUI.Internal.Context.Types (DrawOpCacheEntry (..))
 import NanoUI.Diagrams
   ( B
   , defaultPlotStyle
@@ -30,7 +30,7 @@ import NanoUI.Diagrams
   , fitLayout
   )
 import NanoUI.Diagrams.Backend (diagramTextOps)
-import NanoUI.Diagrams.Tessellation
+import NanoUI.Diagrams.Internal.Tessellation
   ( strokePolyline
   , triangulatePolygon
   )

@@ -17,9 +17,9 @@ import NanoUI
   , uiIO
   )
 import NanoUI.Backend (inputKeysFromList, runNanoUI)
-import NanoUI.Context (ctxFocusId, ctxNodeArena)
+import NanoUI.Internal.Context (ctxFocusId, ctxNodeArena)
 import NanoUI.Form
-import NanoUI.Form.Backend
+import NanoUI.Form.Internal.Backend
   ( FormStateStore (..)
   , emptyFormStateStore
   , getActiveFormPrefix
@@ -31,8 +31,8 @@ import NanoUI.Form.Backend
   , updateFieldInput
   , withFormPrefix
   )
-import NanoUI.Id (WidgetId)
-import NanoUI.Layout.Arena
+import NanoUI.Internal.Id (WidgetId)
+import NanoUI.Internal.Layout.Arena
   ( NodeType (NodeCheckbox, NodeTextArea)
   , arenaCount
   , getNodeType

@@ -68,6 +68,9 @@
 
 ### Changed
 
+- `NanoUI.Sdl.Input` and `NanoUI.Sdl.NanoUIFont` are now
+  `NanoUI.Sdl.Internal.Input` and `NanoUI.Sdl.Internal.NanoUIFont`.
+  `NanoUIFont` is still exported from `NanoUI.Backend.Sdl`.
 - Glyph surfaces upload directly to SDL's streaming atlas. SDL owns its
   initialization/reset storage; the backend no longer maintains a second
   full-size CPU pixel buffer.

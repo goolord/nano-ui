@@ -61,7 +61,7 @@ import NanoUI
   , shiftDrawOp
   , themeMuted
   )
-import NanoUI.Diagrams.Tessellation
+import NanoUI.Diagrams.Internal.Tessellation
   ( fillPolygon
   , flattenCubic
   , strokePolyline

@@ -7,7 +7,7 @@ import Foreign.ForeignPtr (withForeignPtr)
 import Foreign.Marshal.Array (peekArray)
 import Foreign.Ptr (plusPtr)
 import NanoUI (ImageId (..))
-import NanoUI.Context (lookupImageUv)
+import NanoUI.Internal.Context (lookupImageUv)
 import NanoUI.Testing (Context, atlasSnapshot, newContext, registerImage)
 import NanoUI.Testing.Assert (assert, assertEq)
 

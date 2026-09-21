@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `NanoUI.Form.Backend` is now `NanoUI.Form.Internal.Backend`. `NanoUI.Form`
+  still exports `FormInput`, `FormUI` and `liftNanoUI`.
 - `inputWidget` adapts custom controlled widgets to named or positional fields,
   with explicit decoding, encoding, and response policy.
 - `NanoUI.Form.Input` replaces the parallel `Named` and `Unnamed` modules.

@@ -11,7 +11,7 @@ import Foreign.ForeignPtr (withForeignPtr)
 import Foreign.Ptr (Ptr)
 import Foreign.Storable (peekByteOff)
 import NanoUI
-import NanoUI.Context (setDrawExternalText, setDrawSnapScale, setDrawSquareGeometry)
+import NanoUI.Internal.Context (setDrawExternalText, setDrawSnapScale, setDrawSquareGeometry)
 import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, withInput)
 

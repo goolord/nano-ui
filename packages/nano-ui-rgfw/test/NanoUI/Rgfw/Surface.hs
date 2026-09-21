@@ -29,7 +29,7 @@ import Foreign.Marshal.Alloc (free, mallocBytes)
 import Foreign.Ptr (Ptr, castPtr, plusPtr)
 import Foreign.Storable (pokeElemOff)
 import NanoUI (Color (..))
-import NanoUI.Rgfw.Font.Cozette (CozetteFont, foldPenPositions, renderGlyphScaledToBuffer)
+import NanoUI.Rgfw.Internal.Font.Cozette (CozetteFont, foldPenPositions, renderGlyphScaledToBuffer)
 
 data ClipRect = ClipRect
   { crX0 :: {-# UNPACK #-} !Int

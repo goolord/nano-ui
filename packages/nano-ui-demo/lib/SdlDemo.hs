@@ -57,10 +57,10 @@ import Data.Primitive.SmallArray (SmallArray, smallArrayFromList)
 import Data.Word (Word64)
 import NanoUI
 import NanoUI.Backend.Sdl
-import NanoUI.Debug (CoreDebugSnapshot (..), formatCoreRtsRows)
+import NanoUI.Internal.Debug (CoreDebugSnapshot (..), formatCoreRtsRows)
 import NanoUI.Diagrams
-import NanoUI.Monad (askContext)
-import NanoUI.Context (askHostIO, setHost)
+import NanoUI.Internal.Monad (askContext)
+import NanoUI.Internal.Context (askHostIO, setHost)
 import Paths_nano_ui_demo (getDataFileName)
 import Diagrams.Prelude
   ( Diagram

@@ -25,8 +25,8 @@ import Data.Text qualified as T
 import Data.Primitive.SmallArray qualified as SA
 import NanoUI
 import NanoUI.Backend
-import NanoUI.Context (ctxNodeArena)
-import NanoUI.Layout.Arena
+import NanoUI.Internal.Context (ctxNodeArena)
+import NanoUI.Internal.Layout.Arena
   ( DirTag (..)
   , NodeIdx
   , NodeType (..)

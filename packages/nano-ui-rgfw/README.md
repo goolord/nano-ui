@@ -46,10 +46,10 @@ RGFW itself is bundled by `nano-ui-rgfw-bindings`.
 
 `runRgfwApp` owns the window and OpenGL context until the window closes.
 `runRgfwAppReduceCustom` can derive the theme and scale from your model.
-For a custom event loop, `NanoUI.Rgfw.Context`, `NanoUI.Rgfw.Gl`, and the RGFW
-bindings expose context setup and rendering. OpenGL operations must run on
-the OS thread where the context is current, and native resources must be
-closed on that thread.
+For a custom event loop, the internal modules `NanoUI.Rgfw.Internal.Context`
+and `NanoUI.Rgfw.Internal.Gl`, with the RGFW bindings, expose context setup and
+rendering. OpenGL operations must run on the OS thread where the context is
+current, and native resources must be closed on that thread.
 
 Layout and input use logical coordinates; `optScale` controls their mapping
 to physical pixels. The bitmap font does not provide the SDL backend's

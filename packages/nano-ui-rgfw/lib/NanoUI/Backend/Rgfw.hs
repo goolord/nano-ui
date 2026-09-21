@@ -15,14 +15,14 @@ module NanoUI.Backend.Rgfw
   , emptyRgfwDebug
   ) where
 
-import NanoUI.Rgfw.Context (applyRgfwTheme, newRgfwContext)
-import NanoUI.Rgfw.Debug
+import NanoUI.Rgfw.Internal.Context (applyRgfwTheme, newRgfwContext)
+import NanoUI.Rgfw.Internal.Debug
   ( RgfwDebugSnapshot (..)
   , askRgfwDebug
   , debugWindowBody
   , emptyRgfwDebug
   )
-import NanoUI.Rgfw.Session
+import NanoUI.Rgfw.Internal.Session
   ( RgfwOptions (..)
   , defaultRgfwOptions
   , runRgfwApp

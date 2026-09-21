@@ -2,7 +2,7 @@ module Main (main) where
 
 import Control.Exception (bracket)
 import Control.Monad (unless)
-import NanoUI.Sdl.Font.Search (listFontFamilies, searchFonts)
+import NanoUI.Sdl.Internal.Font.Search (listFontFamilies, searchFonts)
 import System.Directory
   ( createDirectory
   , createDirectoryIfMissing

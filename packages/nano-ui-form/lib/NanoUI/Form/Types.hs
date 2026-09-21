@@ -18,7 +18,7 @@ import Data.Text qualified as T
 import Ditto.Core qualified as Ditto
 import Ditto.Types (FormRange)
 import NanoUI (NanoUI)
-import NanoUI.Form.Backend (FormInput, FormUI)
+import NanoUI.Form.Internal.Backend (FormInput, FormUI)
 
 -- | View representation for forms in nano-ui.
 -- Forms compose sequentially via '<*>' by sequencing their widget rendering actions.

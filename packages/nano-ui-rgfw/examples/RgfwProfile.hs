@@ -12,9 +12,9 @@ import NanoUI
   )
 import NanoUI.Backend (emptyInput)
 import NanoUI.Testing (collectRasterSpans, runFrame)
-import NanoUI.Rgfw.Context (newRgfwContext)
-import NanoUI.Rgfw.Font.Cozette (getCozetteFont)
-import NanoUI.Rgfw.Gl (freeGlRenderer, newGlRenderer, renderArenaGl)
+import NanoUI.Rgfw.Internal.Context (newRgfwContext)
+import NanoUI.Rgfw.Internal.Font.Cozette (getCozetteFont)
+import NanoUI.Rgfw.Internal.Gl (freeGlRenderer, newGlRenderer, renderArenaGl)
 import qualified RGFW as R
 import RgfwDemoCommon (appView, currentTheme, dpiScale, initialModel, physScaleFor, themeForChoice)
 

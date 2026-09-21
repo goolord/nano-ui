@@ -45,7 +45,7 @@ import Graphics.NanoSvg
   , parseSvg
   , transformPoint
   )
-import NanoUI.Types (Color, colorA, colorB, colorFromWord32, colorG, colorR)
+import NanoUI.Internal.Types (Color, colorA, colorB, colorFromWord32, colorG, colorR)
 
 -- | A parsed SVG document, as @nano-svg@ returns it.
 type Svg = Document

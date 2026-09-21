@@ -7,7 +7,7 @@ import GHC.IO.Encoding (setLocaleEncoding, utf8)
 import GHC.Conc (getAllocationCounter)
 import NanoUI
 import NanoUI.Backend
-import NanoUI.Context (Context (..))
+import NanoUI.Internal.Context (Context (..))
 import NanoUI.Testing (newPixelContext, runFrame)
 import NanoUI.Backend.Sdl (SdlEnv (..), sdlDrawFrame, syncDisplay, withSdlBench)
 import System.Exit (exitFailure)

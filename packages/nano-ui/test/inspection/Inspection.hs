@@ -34,8 +34,8 @@ import Foreign.Ptr (Ptr)
 
 import Test.Inspection
 
-import NanoUI.SIMD qualified as SIMD
-import NanoUI.Store
+import NanoUI.Internal.SIMD qualified as SIMD
+import NanoUI.Internal.Store
 import NanoUI
   ( Animatable (..)
   , Color

@@ -737,46 +737,46 @@ module NanoUI
   )
 where
 
-import NanoUI.Animatable
-import NanoUI.Animation
-import NanoUI.Context
-import NanoUI.Draw
-import NanoUI.Font (FontMetrics (..), lineWidth)
-import NanoUI.Hooks
-import NanoUI.Id (WidgetId (..))
-import NanoUI.Input
-import NanoUI.Monad
-import NanoUI.Style
+import NanoUI.Internal.Animatable
+import NanoUI.Internal.Animation
+import NanoUI.Internal.Context
+import NanoUI.Internal.Draw
+import NanoUI.Internal.Font (FontMetrics (..), lineWidth)
+import NanoUI.Internal.Hooks
+import NanoUI.Internal.Id (WidgetId (..))
+import NanoUI.Internal.Input
+import NanoUI.Internal.Monad
+import NanoUI.Internal.Style
 import NanoUI.Svg
-import NanoUI.Types
-import NanoUI.WidgetText
-import NanoUI.Widgets.Animate
-import NanoUI.Widgets.Button
-import NanoUI.Widgets.Caption
-import NanoUI.Widgets.Checkbox
-import NanoUI.Widgets.ColorPicker
+import NanoUI.Internal.Types
+import NanoUI.Internal.WidgetText
+import NanoUI.Internal.Widgets.Animate
+import NanoUI.Internal.Widgets.Button
+import NanoUI.Internal.Widgets.Caption
+import NanoUI.Internal.Widgets.Checkbox
+import NanoUI.Internal.Widgets.ColorPicker
 import NanoUI.Widgets.Combo
 import NanoUI.Widgets.Custom
-import NanoUI.Widgets.Display
-import NanoUI.Widgets.Drawing
-import NanoUI.Widgets.Drop
-import NanoUI.Widgets.Layout
-import NanoUI.Widgets.Menu
-import NanoUI.Widgets.Node
-import NanoUI.Widgets.NumericInput
-import NanoUI.Widgets.Overlay
+import NanoUI.Internal.Widgets.Display
+import NanoUI.Internal.Widgets.Drawing
+import NanoUI.Internal.Widgets.Drop
+import NanoUI.Internal.Widgets.Layout
+import NanoUI.Internal.Widgets.Menu
+import NanoUI.Internal.Widgets.Node
+import NanoUI.Internal.Widgets.NumericInput
+import NanoUI.Internal.Widgets.Overlay
 import NanoUI.Widgets.PaneGrid
-import NanoUI.Widgets.Popup
-import NanoUI.Widgets.Radio
+import NanoUI.Internal.Widgets.Popup
+import NanoUI.Internal.Widgets.Radio
 import NanoUI.Widgets.RichText
-import NanoUI.Widgets.Select
-import NanoUI.Widgets.Slider
-import NanoUI.Widgets.Table
-import NanoUI.Widgets.Tabs
+import NanoUI.Internal.Widgets.Select
+import NanoUI.Internal.Widgets.Slider
+import NanoUI.Internal.Widgets.Table
+import NanoUI.Internal.Widgets.Tabs
 import NanoUI.Widgets.TextArea
 import NanoUI.Widgets.TextBuffer
 import NanoUI.Widgets.TextCommand
 import NanoUI.Widgets.TextDocument
 import NanoUI.Widgets.TextField
-import NanoUI.Widgets.TextInput
-import NanoUI.Widgets.Tree
+import NanoUI.Internal.Widgets.TextInput
+import NanoUI.Internal.Widgets.Tree

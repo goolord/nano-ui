@@ -32,7 +32,7 @@ session's display thread, and close the session when finished.
 
 ## Fonts and coordinates
 
-`SdlOptions` selects the initial font and logical font size. `NanoUI.Sdl.NanoUIFont`
+`SdlOptions` selects the initial font and logical font size. `NanoUIFont`
 defines font choices, and `setSdlUiFont` requests a change during a session.
 Font discovery can use installed families; a family present on one machine
 may be absent on another. The bundled Inter font provides the default.

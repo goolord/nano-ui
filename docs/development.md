@@ -72,18 +72,24 @@ comment box and put the `user-attachments` URL GitHub gives back in
 | `packages/nano-ui-demo` | Example applications |
 | `scripts/` | Font subsetting (`prune_inter.py`, `prune_cozette.py`) and profiling helpers |
 
-The core's modules, under `packages/nano-ui/lib`:
+The core's modules, under `packages/nano-ui/lib`. A module outside
+`NanoUI/Internal/` is public API. Everything else lives under
+`NanoUI/Internal/`; some of those modules are exposed for backends, tests and
+tools that need more than the API, but they can change at any time. The other
+packages follow the same rule with `NanoUI.Sdl.Internal`, `NanoUI.Rgfw.Internal`,
+`NanoUI.Diagrams.Internal` and `NanoUI.Form.Internal`.
 
 | Path | Contents |
 | --- | --- |
 | `NanoUI.hs` | The public API and its documentation |
-| `NanoUI/Widgets/` | One module per widget family |
+| `NanoUI/Widgets/` | Public widget modules, for qualified imports and names `NanoUI` does not re-export |
+| `NanoUI/Internal/Widgets/` | The widget implementations |
 | `NanoUI/Emit.hs` | Reducer-style widgets |
-| `NanoUI/Monad.hs`, `NanoUI/Id.hs` | The `Ui` effect, widget ids, and keys |
-| `NanoUI/Hooks.hs`, `NanoUI/Store.hs`, `NanoUI/Context.hs`, `NanoUI/Context/` | Widget state and the frame context |
-| `NanoUI/Layout/` | Layout storage and the solver |
-| `NanoUI/Frame.hs`, `NanoUI/Frame/` | Per-frame input, focus, painting, and damage |
-| `NanoUI/Draw.hs`, `NanoUI/Draw/` | Vertex arenas and the draw list |
+| `NanoUI/Internal/Monad.hs`, `NanoUI/Internal/Id.hs` | The `Ui` effect, widget ids, and keys |
+| `NanoUI/Internal/Hooks.hs`, `NanoUI/Internal/Store.hs`, `NanoUI/Internal/Context.hs`, `NanoUI/Internal/Context/` | Widget state and the frame context |
+| `NanoUI/Internal/Layout/` | Layout storage and the solver |
+| `NanoUI/Internal/Frame.hs`, `NanoUI/Internal/Frame/` | Per-frame input, focus, painting, and damage |
+| `NanoUI/Internal/Draw.hs`, `NanoUI/Internal/Draw/` | Vertex arenas and the draw list |
 | `NanoUI/Runner.hs` | The event loop the backends share |
 | `NanoUI/Testing.hs`, `NanoUI/Testing/` | The headless test harness |
 
@@ -105,13 +111,13 @@ The [README's "How it works" section](../README.md#how-it-works) lists the steps
   matching `recordStore*`. New inputs should use the same pair, so edits made
   between frames survive a caller that passes the previous result back.
 - Widget state in the store is read and written through the slot functions of
-  `NanoUI.Store` (`findSlot fieldInt 0 key store`,
+  `NanoUI.Internal.Store` (`findSlot fieldInt 0 key store`,
   `insertSlot fieldPoint key p . deleteSlot fieldInt key`), not through the
   maps. They compile to the record code they stand for. A widget that
   publishes state every frame writes it with `writeSlots`, which skips the
   write, and the store diff behind it, when nothing changed.
-- Local state goes through `NanoUI.Hooks`. Keyboard handling checks
-  `NanoUI.Widgets.Behavior.keyboardFocused` first, so disabled widgets and
+- Local state goes through `NanoUI.Internal.Hooks`. Keyboard handling checks
+  `NanoUI.Internal.Widgets.Behavior.keyboardFocused` first, so disabled widgets and
   modals are respected.
 - Damage is part of correctness: a state change can need a follow-up frame
   without any new input. Add a test when you change it.

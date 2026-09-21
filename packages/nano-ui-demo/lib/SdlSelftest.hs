@@ -21,8 +21,8 @@ import Data.Primitive.PrimArray (sizeofPrimArray)
 import NanoUI
 import NanoUI.Backend
 import NanoUI.Backend.Sdl
-import NanoUI.Context (ctxResolveFont, ctxResolveMeasure)
-import NanoUI.Debug (CoreDebugSnapshot (dbgPresents))
+import NanoUI.Internal.Context (ctxResolveFont, ctxResolveMeasure)
+import NanoUI.Internal.Debug (CoreDebugSnapshot (dbgPresents))
 import NanoUI.Testing
   ( collectOverlayTextSpans
   , collectTextSpans

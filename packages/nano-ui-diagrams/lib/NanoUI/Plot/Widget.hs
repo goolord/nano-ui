@@ -24,8 +24,9 @@ import NanoUI
   , respRect
   )
 import NanoUI.Backend (FontMetrics, prepareFontMetricsMany, uiFontMetrics)
-import NanoUI.Context (Context (..), getStore, intKey, setStore)
-import NanoUI.Monad (askContext, nextId, uiIO)
+import NanoUI.Internal.Context (Context (..), getStore, intKey, setStore)
+import NanoUI.Internal.Monad (askContext)
+import NanoUI.Monad (nextId, uiIO)
 import NanoUI.Diagrams.Backend (B)
 import NanoUI.Diagrams.Widget (PlotStyle, diagramWithKeyAndEnvelope, uiPlotStyle)
 import NanoUI.Plot.Builder qualified as Builder
@@ -40,7 +41,7 @@ import NanoUI.Plot.Types
   , LegendPos (..)
   , PlotResponse (..)
   )
-import NanoUI.Store (insertDyn, lookupDyn)
+import NanoUI.Internal.Store (insertDyn, lookupDyn)
 
 data CachedChart = CachedChart
   { ccChart :: !Chart

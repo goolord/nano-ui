@@ -25,7 +25,7 @@ import Data.String (IsString (..))
 import Data.Text (Text)
 import Data.Text qualified as T
 import Effectful (Eff, type (:>))
-import NanoUI.Context
+import NanoUI.Internal.Context
   ( Context (..)
   , askHostIO
   , intKey
@@ -34,13 +34,13 @@ import NanoUI.Context
   , registerCustomDrawing
   , registerCustomMeasure
   )
-import NanoUI.Draw (DrawOp (..), TextFont (..))
-import NanoUI.Font (FontMetrics (..), lineWidthIO)
-import NanoUI.Frame.Node (resolveTextFont)
-import NanoUI.Input (Input (..), UiCursorKind (..))
-import NanoUI.Layout.Arena (NodeType (NodeDrawing))
-import NanoUI.Monad (Ui, askContext, askDefaultLayout, askInput, nextId, uiIO, uiTheme)
-import NanoUI.Style
+import NanoUI.Internal.Draw (DrawOp (..), TextFont (..))
+import NanoUI.Internal.Font (FontMetrics (..), lineWidthIO)
+import NanoUI.Internal.Frame.Node (resolveTextFont)
+import NanoUI.Internal.Input (Input (..), UiCursorKind (..))
+import NanoUI.Internal.Layout.Arena (NodeType (NodeDrawing))
+import NanoUI.Internal.Monad (Ui, askContext, askDefaultLayout, askInput, nextId, uiIO, uiTheme)
+import NanoUI.Internal.Style
   ( FontVariant (..)
   , Layout (..)
   , TextDecoration (..)
@@ -50,8 +50,8 @@ import NanoUI.Style
   , fontMono
   , styleFg
   )
-import NanoUI.Types (Color (..), Rect (..), V2 (..))
-import NanoUI.Widgets.Node (Response, addWidget, respClicked, respHovered, respRect)
+import NanoUI.Internal.Types (Color (..), Rect (..), V2 (..))
+import NanoUI.Internal.Widgets.Node (Response, addWidget, respClicked, respHovered, respRect)
 
 -- | A piece of a paragraph: text in one style, and the hyperlink it follows when
 -- it is one. A string literal produces unstyled text.
