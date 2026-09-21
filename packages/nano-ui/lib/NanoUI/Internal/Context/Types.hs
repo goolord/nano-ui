@@ -580,6 +580,10 @@ data Context = Context
   , ctxMeasureCache :: Maybe (IORef (HashMap MeasureCacheKey (Float, Float)))
   , ctxSpanCache :: !(IORef (IntMap SpanCacheEntry))
   , ctxWidgetTextCache :: !(IORef (IntMap WidgetTextCacheEntry))
+  -- | What widgets derive from their arguments and keep between frames
+  -- (a table's column widths and sort), by widget key. It is not state, so
+  -- a write neither damages nor wakes the loop. Cleared with the text caches.
+  , ctxDerivedCache :: !(IORef (IntMap Dynamic))
   -- Whole-layout reuse cache: cached signature and solved rects,
   -- with the window size and font/theme generation it was captured under.
   , ctxLayoutCache :: !(IORef (Maybe (LayoutCache, Size, Int)))

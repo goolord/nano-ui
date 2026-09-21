@@ -26,7 +26,10 @@ import Colonnade.Encode qualified as Encode
 import Control.Monad (forM, forM_, unless, void, when)
 import Control.Monad.ST (runST)
 import Data.Char (isDigit)
+import Data.Dynamic (fromDynamic, toDyn)
 import Data.Foldable (toList)
+import Data.IORef (readIORef, writeIORef)
+import Data.IntMap.Strict qualified as IM
 import Data.IntSet (IntSet)
 import Data.IntSet qualified as IS
 import Data.List (sortOn)
@@ -48,6 +51,7 @@ import NanoUI.Internal.Monad (Ui, askContext, askInput, lastRect, nextId, uiIO, 
 import NanoUI.Internal.Store (Slot (..), fieldFloat, fieldFloatList, fieldInt, fieldIntList, fieldIntSet, findSlot, insertSlot, slotKey, slotWrite)
 import NanoUI.Internal.Style (AlignX (..), AlignY (..), Direction (..), FontVariant (..), Layout (..), Padding (..), Sizing (..), defaultLayout, fillH, fillW, tight)
 import Data.Bits ((.|.), shiftL)
+import GHC.Exts (isTrue#, reallyUnsafePtrEquality#)
 import NanoUI.Internal.Types (Rect (..), clamp, rectH, rectW, rectY, v2X, V2 (..), rectContains)
 import NanoUI.Internal.WidgetText (buttonFlagTable, tableHeaderLabel, tableSortReserve)
 import NanoUI.Internal.Widgets.Behavior (dragThresholdPx, useReorder)
@@ -164,6 +168,59 @@ isNumericCell txt =
         Just (c, rest) | c == '-' || c == '+' -> rest
         _ -> s
    in not (T.null digits) && T.all isDigit digits
+
+-- | What a table derives from its rows each frame: the cells as text, each
+-- column's content width and numeric flag, and the row order for a sort.
+-- Kept between frames in 'ctxDerivedCache' with the rows and columns it was
+-- derived from, so a frame whose rows are the same value, or encode to the
+-- same text, measures and sorts nothing.
+data TableDerived = TableDerived
+  { tdRows :: !Opaque
+  , tdCols :: !Opaque
+  , tdHeaders :: !(V.Vector Text)
+  , tdEncoded :: !(SmallArray (V.Vector Text))
+  , tdWidths :: !(PrimArray Float)
+  , tdNumeric :: !(SmallArray Bool)
+  , tdSort :: !SortCol
+  , tdOrder :: !(PrimArray Int)
+  }
+
+-- | A value of any type, kept only to compare by pointer.
+data Opaque = forall a. Opaque a
+
+samePtr :: Opaque -> b -> Bool
+samePtr (Opaque a) b = isTrue# (reallyUnsafePtrEquality# a b)
+
+-- | The table's derived data for @rows@ under @sort@, from the cache when the
+-- rows and columns are the ones it was derived from or encode to its text.
+tableDerived :: Foldable f => Context -> Int -> Colonnade Headed row Text -> f row -> SortCol -> IO TableDerived
+tableDerived ctx key cols rows sort = do
+  cache <- readIORef (ctxDerivedCache ctx)
+  let cached = IM.lookup key cache >>= fromDynamic
+      hdrs = Encode.header id cols
+      -- Each row is encoded once and shared by measuring, sorting and the
+      -- cells; the sort orders row indices.
+      encoded = smallArrayFromList [Encode.row id cols r | r <- toList rows]
+      orderFor cells = sortIndices (sortColDir sort) (mapSmallArray' (\row -> fromMaybe T.empty (row V.!? sortColIndex sort)) cells)
+  derived <- case cached of
+    Just d
+      | samePtr (tdRows d) rows && samePtr (tdCols d) cols -> pure d
+      | tdEncoded d == encoded && tdHeaders d == hdrs ->
+          pure d {tdRows = Opaque rows, tdCols = Opaque cols}
+    _ -> do
+      (widths, numeric) <- columnMetrics ctx hdrs encoded
+      pure (TableDerived (Opaque rows) (Opaque cols) hdrs encoded widths numeric sort (orderFor encoded))
+  let !resorted
+        | tdSort derived == sort = derived
+        | otherwise = derived {tdSort = sort, tdOrder = orderFor (tdEncoded derived)}
+  case cached of
+    Just d | samePtr (Opaque d) resorted -> pure ()
+    _ ->
+      -- A table that stops being built leaves its entry behind, so a cache
+      -- grown past a few dozen tables starts over.
+      writeIORef (ctxDerivedCache ctx) $!
+        IM.insert key (toDyn resorted) (if IM.size cache >= 64 then IM.empty else cache)
+  pure resorted
 
 -- | Content width and numeric flag of each column, measured once over the
 -- encoded rows.
@@ -312,14 +369,11 @@ tableConfigured cfg f key cols inputRows curSort =
     let n = columnCount cols
         sort0 = clampSortCol n curSort
         stateKey = intKey stateWid
-        hdrs = Encode.header id cols
-        -- Each row is encoded once and shared by measuring, sorting and the
-        -- cells; the sort orders row indices.
-        encoded = smallArrayFromList [Encode.row id cols r | r <- toList inputRows]
     ctx <- askContext
     inp <- askInput
     st0 <- uiIO (getStore ctx)
-    (!contentWs, !numeric) <- uiIO (columnMetrics ctx hdrs encoded)
+    TableDerived {tdHeaders = hdrs, tdEncoded = encoded, tdWidths = contentWs, tdNumeric = numeric, tdOrder = sorted} <-
+      uiIO (tableDerived ctx stateKey cols inputRows sort0)
     let sizes = smallArrayFromList (tableColSizes cfg)
         order0 = normalizeOrder n (findSlot fieldIntList [0 .. n - 1] stateKey st0)
         hidden0 = findSlot fieldIntSet (tableHidden cfg) stateKey st0
@@ -345,10 +399,6 @@ tableConfigured cfg f key cols inputRows curSort =
         frozenIdx = take freezeN vis
         unfrozenIdx = drop freezeN vis
         nRows = sizeofSmallArray encoded
-        sorted =
-          sortIndices
-            (sortColDir sort0)
-            (mapSmallArray' (\cells -> fromMaybe T.empty (cells V.!? sortColIndex sort0)) encoded)
         pinnedN = clamp 0 nRows (tableFreezeRows cfg)
         scrollN = nRows - pinnedN
         rowMinH = 28

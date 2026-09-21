@@ -490,6 +490,7 @@ invalidateTextCaches :: Context -> IO ()
 invalidateTextCaches ctx = do
   writeIORef (ctxSpanCache ctx) IM.empty
   writeIORef (ctxWidgetTextCache ctx) IM.empty
+  writeIORef (ctxDerivedCache ctx) IM.empty
   writeIORef (ctxLayoutCache ctx) Nothing
   modifyIORef' (ctxMetricGen ctx) (+ 1)
 
@@ -632,6 +633,7 @@ newContext = do
   ctxThemeScopes <- newIORef =<< newThemeScopes
   ctxSpanCache <- newIORef IM.empty
   ctxWidgetTextCache <- newIORef IM.empty
+  ctxDerivedCache <- newIORef IM.empty
   ctxLayoutCache <- newIORef Nothing
   ctxMetricGen <- newIORef 0
   ctxLastMetricSource <- newIORef Nothing
