@@ -110,10 +110,7 @@ chartChrome fm yDom chart =
   let yLabels = map formatTick (niceTicks 6 yDom)
       maxYW = maximum (0 : map (textWidth fm) yLabels)
       lh = fmLineHeight fm
-      yTitleW =
-        case chartYTitle chart of
-          Nothing -> 0
-          Just t -> textWidth fm t
+      yTitleW = maybe 0 (textWidth fm) (chartYTitle chart)
       legendW =
         case chartLegend chart of
           LegendNone -> 0
@@ -229,22 +226,9 @@ chartDiagram fm theme ps (xDom, yDom) points chart =
           [ plotLbl ps 1 0.5 (T.unpack (formatTick y)) # moveTo (p2 (-tickPad, toY y))
           | y <- yTicks
           ]
-      title =
-        case chartTitle chart of
-          Nothing -> mempty
-          Just t -> plotLbl ps 0.5 0 (T.unpack t) # moveTo (p2 (0.5, 1.03))
-      xt =
-        case chartXTitle chart of
-          Nothing -> mempty
-          Just t ->
-            plotLbl ps 0.5 1 (T.unpack t)
-              # moveTo (p2 (0.5, ccXTitleY chrome))
-      yt =
-        case chartYTitle chart of
-          Nothing -> mempty
-          Just t ->
-            plotLbl ps 1 0.5 (T.unpack t)
-              # moveTo (p2 (ccYTitleX chrome, 0.5))
+      title = foldMap (\t -> plotLbl ps 0.5 0 (T.unpack t) # moveTo (p2 (0.5, 1.03))) (chartTitle chart)
+      xt = foldMap (\t -> plotLbl ps 0.5 1 (T.unpack t) # moveTo (p2 (0.5, ccXTitleY chrome))) (chartXTitle chart)
+      yt = foldMap (\t -> plotLbl ps 1 0.5 (T.unpack t) # moveTo (p2 (ccYTitleX chrome, 0.5))) (chartYTitle chart)
       coloredSeries =
         [ (fromMaybe fallback (seriesColor s), s)
         | (fallback, s) <- zip (cycle (themeSeries theme)) (chartSeries chart)
@@ -352,30 +336,21 @@ stepPoints pts xDom yDom =
         (U.zip pts (U.drop 1 pts))
 
 markShape :: MarkShape -> Float -> Colour Double -> P2 Double -> Diagram B
-markShape MarkCircle w c p =
-  circle (plotMarkerRadius w) # fc c # lw none # moveTo p
-markShape MarkSquare w c p =
-  let s = plotMarkerRadius w * 2
-   in rect s s # fc c # lw none # moveTo p
-markShape MarkDiamond w c p =
-  let r = plotMarkerRadius w * 1.4
-   in closedPoly [p2 (0, r), p2 (r, 0), p2 (0, -r), p2 (-r, 0)]
-        # fc c
-        # lw none
-        # moveTo p
-markShape MarkTriangle w c p =
-  let r = plotMarkerRadius w * 1.6
-   in closedPoly [p2 (0, r), p2 (-r, -r * 0.6), p2 (r, -r * 0.6)]
-        # fc c
-        # lw none
-        # moveTo p
-markShape MarkCross w c p =
-  let r = plotMarkerRadius w * 1.4
-      sw = plotStroke w
-   in ( (fromVertices [p2 (-r, -r), p2 (r, r)] # lc c # lwO sw)
-          <> (fromVertices [p2 (-r, r), p2 (r, -r)] # lc c # lwO sw)
-      )
-        # moveTo p
+markShape shape w c p = moveTo p $ case shape of
+  MarkCircle -> filled (circle (plotMarkerRadius w))
+  MarkSquare -> let s = plotMarkerRadius w * 2 in filled (rect s s)
+  MarkDiamond ->
+    let r = plotMarkerRadius w * 1.4
+     in filled (closedPoly [p2 (0, r), p2 (r, 0), p2 (0, -r), p2 (-r, 0)])
+  MarkTriangle ->
+    let r = plotMarkerRadius w * 1.6
+     in filled (closedPoly [p2 (0, r), p2 (-r, -r * 0.6), p2 (r, -r * 0.6)])
+  MarkCross ->
+    let r = plotMarkerRadius w * 1.4
+        stroke' a b = fromVertices [a, b] # lc c # lwO (plotStroke w)
+     in stroke' (p2 (-r, -r)) (p2 (r, r)) <> stroke' (p2 (-r, r)) (p2 (r, -r))
+  where
+    filled d = d # fc c # lw none
 
 renderLegend :: FontMetrics -> PlotStyle -> [(Color, Series)] -> Chart -> ChartChrome -> Diagram B
 renderLegend _ _ _ Chart {chartLegend = LegendNone} _ = mempty
