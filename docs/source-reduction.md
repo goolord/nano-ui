@@ -88,3 +88,16 @@ Seven paired headless runs against that baseline (`nano-ui-core-fallback-fresh.j
 
 The unchanged SVG path also moves in timing: these are regression measurements,
 not evidence that every workload sped up. Allocation is exactly unchanged.
+
+## SDL_ttf forwarding boundary
+
+Nine trivial SDL_ttf wrappers now use header-checked `capi` imports. GHC
+generates the ABI adaptation (including C `bool`), while line skip/ascent use
+the API's integer result types and convert at the existing snapshot boundary.
+The memory stream opens through `TTF_OpenFontIO` with autoclose instead of
+manually populating SDL properties. Rendering policy, glyph-image conversion,
+shaping, fallback ordering and owned stream storage retain their implementations.
+
+This removes 75 maintained library lines, physical and normalized. Native
+font-effects and font-search suites pass, including fallback shaping, immutable
+snapshots, cache eviction, embedded-font reload, and retained-handle rejection.

@@ -5,16 +5,6 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-bool nano_ui_ttf_init(void)
-{
-    return TTF_Init();
-}
-
-void nano_ui_ttf_quit(void)
-{
-    TTF_Quit();
-}
-
 /* Kerning is on by default; pin it so shaping survives defaults changing.
  * Direction and script stay unset: shaping detects them per run, so
  * right-to-left and complex scripts shape as themselves. Light grid-fitting
@@ -46,13 +36,6 @@ TTF_Font *nano_ui_ttf_copy_font(TTF_Font *font, float ptsize)
     return pin_font_rendering(copy);
 }
 
-void nano_ui_ttf_remove_fallback(TTF_Font *font, TTF_Font *fallback)
-{
-    if (font && fallback) {
-        TTF_RemoveFallbackFont(font, fallback);
-    }
-}
-
 TTF_Font *nano_ui_ttf_open_font_memory(const void *data, size_t size, float ptsize)
 {
     /* The font reads this stream after the Haskell ByteString callback ends.
@@ -66,34 +49,7 @@ TTF_Font *nano_ui_ttf_open_font_memory(const void *data, size_t size, float ptsi
         SDL_CloseIO(stream);
         return NULL;
     }
-    SDL_PropertiesID props = SDL_CreateProperties();
-    if (!props) {
-        SDL_CloseIO(stream);
-        return NULL;
-    }
-    SDL_SetPointerProperty(props, TTF_PROP_FONT_CREATE_IOSTREAM_POINTER, stream);
-    SDL_SetBooleanProperty(props, TTF_PROP_FONT_CREATE_IOSTREAM_AUTOCLOSE_BOOLEAN, true);
-    SDL_SetFloatProperty(props, TTF_PROP_FONT_CREATE_SIZE_FLOAT, ptsize);
-    TTF_Font *font = TTF_OpenFontWithProperties(props);
-    SDL_DestroyProperties(props);
-    return pin_font_rendering(font);
-}
-
-void nano_ui_ttf_close_font(TTF_Font *font)
-{
-    if (font) {
-        TTF_CloseFont(font);
-    }
-}
-
-float nano_ui_ttf_line_skip(TTF_Font *font)
-{
-    return (float)TTF_GetFontLineSkip(font);
-}
-
-float nano_ui_ttf_ascent(TTF_Font *font)
-{
-    return (float)TTF_GetFontAscent(font);
+    return pin_font_rendering(TTF_OpenFontIO(stream, true, ptsize));
 }
 
 float nano_ui_ttf_space_advance(TTF_Font *font)
@@ -108,30 +64,6 @@ float nano_ui_ttf_space_advance(TTF_Font *font)
         return (float)advance;
     }
     return 0.f;
-}
-
-bool nano_ui_ttf_glyph_metrics(
-    TTF_Font *font,
-    Uint32 codepoint,
-    int *out_minx,
-    int *out_maxx,
-    int *out_miny,
-    int *out_maxy,
-    int *out_advance)
-{
-    if (!font) {
-        return false;
-    }
-    int minx = 0, maxx = 0, miny = 0, maxy = 0, advance = 0;
-    if (!TTF_GetGlyphMetrics(font, codepoint, &minx, &maxx, &miny, &maxy, &advance)) {
-        return false;
-    }
-    if (out_minx)   *out_minx   = minx;
-    if (out_maxx)   *out_maxx   = maxx;
-    if (out_miny)   *out_miny   = miny;
-    if (out_maxy)   *out_maxy   = maxy;
-    if (out_advance) *out_advance = advance;
-    return true;
 }
 
 static Uint8 glyph_channel_max(Uint8 r, Uint8 g, Uint8 b)
@@ -462,14 +394,4 @@ bool nano_ui_ttf_render_glyph_index_surface(TTF_Font *font, Uint32 glyph_index, 
     }
     *out_surface = converted;
     return true;
-}
-
-bool nano_ui_ttf_has_glyph(TTF_Font *font, Uint32 ch)
-{
-    return font && TTF_FontHasGlyph(font, ch);
-}
-
-bool nano_ui_ttf_add_fallback(TTF_Font *font, TTF_Font *fallback)
-{
-    return font && fallback && TTF_AddFallbackFont(font, fallback);
 }

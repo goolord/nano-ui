@@ -1,3 +1,5 @@
+{-# LANGUAGE CApiFFI #-}
+
 -- | SDL_ttf font handles, fallback selection, measurement snapshots, and glyph
 -- atlas caching. Native operations run on the owning display thread; pure
 -- snapshots remain usable after their font handles close.
@@ -1067,8 +1069,8 @@ readSdlFont ptsize mTemp font = do
       { sfId = fid
       , sfAlive = alive
       , sfFont = font
-      , sfLineSkip = realToFrac lineSkip
-      , sfAscent = realToFrac ascent
+      , sfLineSkip = fromIntegral lineSkip
+      , sfAscent = fromIntegral ascent
       , sfSpaceAdvance = realToFrac spaceAdv
       , sfTempPath = mTemp
       , sfPointSize = ptsize
@@ -1151,10 +1153,11 @@ withUtf8 txt act =
   TF.useAsPtr txt $ \ptr len ->
     act (castPtr ptr) (fromIntegral len)
 
-foreign import ccall unsafe "nano_ui_ttf_init"
+-- Header-checked imports also adapt C bool to Haskell Bool at the ABI boundary.
+foreign import capi unsafe "SDL3_ttf/SDL_ttf.h TTF_Init"
   ttfInit :: IO Bool
 
-foreign import ccall unsafe "nano_ui_ttf_quit"
+foreign import capi unsafe "SDL3_ttf/SDL_ttf.h TTF_Quit"
   ttfQuit :: IO ()
 
 foreign import ccall unsafe "nano_ui_ttf_open_font"
@@ -1163,14 +1166,14 @@ foreign import ccall unsafe "nano_ui_ttf_open_font"
 foreign import ccall unsafe "nano_ui_ttf_open_font_memory"
   ttfOpenFontMemory :: Ptr () -> CSize -> CFloat -> IO (Ptr ())
 
-foreign import ccall unsafe "nano_ui_ttf_close_font"
+foreign import capi unsafe "SDL3_ttf/SDL_ttf.h TTF_CloseFont"
   ttfCloseFont :: Ptr () -> IO ()
 
-foreign import ccall unsafe "nano_ui_ttf_line_skip"
-  ttfLineSkip :: Ptr () -> IO CFloat
+foreign import capi unsafe "SDL3_ttf/SDL_ttf.h TTF_GetFontLineSkip"
+  ttfLineSkip :: Ptr () -> IO CInt
 
-foreign import ccall unsafe "nano_ui_ttf_ascent"
-  ttfAscent :: Ptr () -> IO CFloat
+foreign import capi unsafe "SDL3_ttf/SDL_ttf.h TTF_GetFontAscent"
+  ttfAscent :: Ptr () -> IO CInt
 
 foreign import ccall unsafe "nano_ui_ttf_space_advance"
   ttfSpaceAdvance :: Ptr () -> IO CFloat
@@ -1200,7 +1203,7 @@ foreign import ccall unsafe "nano_ui_text_atlas_insert_surface"
 foreign import ccall unsafe "SDL_DestroySurface"
   freeSurface :: Ptr () -> IO ()
 
-foreign import ccall unsafe "nano_ui_ttf_glyph_metrics"
+foreign import capi unsafe "SDL3_ttf/SDL_ttf.h TTF_GetGlyphMetrics"
   ttfGlyphMetrics ::
     Ptr () ->   -- font
     CUInt ->    -- codepoint
@@ -1236,13 +1239,13 @@ foreign import ccall unsafe "nano_ui_ttf_shaped_ptr"
 foreign import ccall unsafe "nano_ui_ttf_render_glyph_index_surface"
   ttfRenderGlyphIndexSurface :: Ptr () -> CUInt -> Ptr (Ptr ()) -> IO Bool
 
-foreign import ccall unsafe "nano_ui_ttf_has_glyph"
+foreign import capi unsafe "SDL3_ttf/SDL_ttf.h TTF_FontHasGlyph"
   ttfHasGlyph :: Ptr () -> CUInt -> IO Bool
 
-foreign import ccall unsafe "nano_ui_ttf_add_fallback"
+foreign import capi unsafe "SDL3_ttf/SDL_ttf.h TTF_AddFallbackFont"
   ttfAddFallback :: Ptr () -> Ptr () -> IO Bool
 
-foreign import ccall unsafe "nano_ui_ttf_remove_fallback"
+foreign import capi unsafe "SDL3_ttf/SDL_ttf.h TTF_RemoveFallbackFont"
   ttfRemoveFallback :: Ptr () -> Ptr () -> IO ()
 
 foreign import ccall unsafe "nano_ui_ttf_copy_font"
