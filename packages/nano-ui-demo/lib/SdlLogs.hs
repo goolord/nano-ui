@@ -296,26 +296,16 @@ renderHeaderToolbar mutateState st (allSelected, setAllSelected) = do
           labelWith (fontMono . fontBold . fontColor (colorRGBA 235 203 139 255) . tight) "[● ALL SELECTED]"
 
       rowWith (tight . fillW . alignMid . gap 8) $ do
-        streamClicked <- button (if asStreaming st then "Pause Stream" else "Start Stream")
-        when streamClicked $
+        whenM (button (if asStreaming st then "Pause Stream" else "Start Stream")) $
           mutateState (\s -> pure s {asStreaming = not (asStreaming s), asLastStream = 0.0})
-
-        burst100Clicked <- button "+100"
-        when burst100Clicked $
-          mutateState (`appendEntries` 100)
-
-        burst1000Clicked <- button "+1000"
-        when burst1000Clicked $
-          mutateState (`appendEntries` 1000)
-
-        clearClicked <- button "Clear"
-        when clearClicked $
+        whenM (button "+100") $ mutateState (`appendEntries` 100)
+        whenM (button "+1000") $ mutateState (`appendEntries` 1000)
+        whenM (button "Clear") $
           mutateState (\s -> pure s {asCount = 0, asNextId = 1, asShownStart = 0, asShownCount = 0})
 
         spacer (Fixed 8) Fit
 
-        selAllClicked <- buttonWith (if allSelected then fontBold else id) (if allSelected then "Deselect All" else "Select All")
-        when selAllClicked $
+        whenM (buttonWith (if allSelected then fontBold else id) (if allSelected then "Deselect All" else "Select All")) $
           setAllSelected (not allSelected)
 
         spacer (Fixed 8) Fit
@@ -373,8 +363,7 @@ renderLogScroller stateRef allSelected st = do
       then labelWith (fontMono . fontBold . fontColor (colorRGBA 163 190 140 255) . tight) "● PINNED"
       else do
         labelWith (fontMono . fontBold . fontColor (colorRGBA 235 203 139 255) . tight) "⏸ UNPINNED (reading history)"
-        jumpClicked <- buttonWith (fontColor (colorRGBA 136 192 208 255) . fontBold) "Jump to Bottom"
-        when jumpClicked $
+        whenM (buttonWith (fontColor (colorRGBA 136 192 208 255) . fontBold) "Jump to Bottom") $
           setReqJump True
 
   -- Visible rows plus one above and below.
