@@ -19,8 +19,7 @@ import Control.Monad (foldM, forM, unless, when)
 import Data.IORef (readIORef)
 import Data.Maybe (fromMaybe)
 import Data.Primitive.PrimArray
-  ( MutablePrimArray
-  , copyMutablePrimArray
+  ( copyMutablePrimArray
   , newPrimArray
   , readPrimArray
   , writePrimArray
@@ -29,7 +28,6 @@ import Data.Primitive.Types (Prim)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Word (Word8)
-import GHC.Exts (RealWorld)
 import NanoUI.Internal.Font
   ( CustomMeasureFn
   , FontMetrics (..)
@@ -57,6 +55,7 @@ import NanoUI.Internal.Font
 import NanoUI.Internal.Layout.Arena
   ( DirTag (..)
   , FlexScratch (..)
+  , IOArr
   , NodeArena
   , NodeArenaArrays
   , NodeIdx
@@ -293,7 +292,7 @@ quantizeResultsA a count s
       -- content-sized parts off their content, so the subtree keeps them;
       -- placement overwrites its geometry anyway. A parent always precedes
       -- its children, so one pass marks each node from its parent.
-      floating <- newPrimArray count :: IO (MutablePrimArray RealWorld Word8)
+      floating <- newPrimArray count :: IO (IOArr Word8)
       let go i
             | i >= count = pure ()
             | otherwise = do
@@ -812,7 +811,7 @@ gridColumnCount gCols minColW availW gap
   | otherwise = 1
 
 -- | Height of grid row @r@: its tallest child.
-gridRowHeight :: MutablePrimArray RealWorld Float -> Int -> Int -> Int -> IO Float
+gridRowHeight :: IOArr Float -> Int -> Int -> Int -> IO Float
 gridRowHeight hArr n cols r = go 0 0
   where
     go !j !accH
@@ -1272,7 +1271,7 @@ withAxisSnaps ::
   Float ->
   Float ->
   Bool ->
-  (MutablePrimArray RealWorld Int -> MutablePrimArray RealWorld Float -> IO a) ->
+  (IOArr Int -> IOArr Float -> IO a) ->
   IO a
 withAxisSnaps na depth n availMain gapSum horizontal act = do
   distributeScratch na n availMain gapSum horizontal
@@ -1286,7 +1285,7 @@ withAxisSnaps na depth n availMain gapSum horizontal act = do
 -- | Like 'withAxisSnaps' but snapshots the unscaled child cross sizes instead
 -- of the distributed main-axis result. Grids compute rows from the measured
 -- child heights, so freezing them lets the recursion reuse the working scratch.
-withGridScratch :: NodeArena -> Int -> Int -> (MutablePrimArray RealWorld Int -> MutablePrimArray RealWorld Float -> IO a) -> IO a
+withGridScratch :: NodeArena -> Int -> Int -> (IOArr Int -> IOArr Float -> IO a) -> IO a
 withGridScratch na depth n act = do
   FlexScratch {fsIdx = idxArr, fsH = hArr} <- readIORef (naScratch na)
   AxisSnapshot idxSnap crossSnap <- ensureAxisSnapshot na depth n
@@ -1437,13 +1436,7 @@ positionColumnFromParent env@SolveEnv {seArena = na} depth parent gap chrome px 
 
 
 {-# INLINE reverseScratchTriple #-}
-reverseScratchTriple ::
-  MutablePrimArray RealWorld Int ->
-  MutablePrimArray RealWorld Float ->
-  MutablePrimArray RealWorld Float ->
-  Int ->
-  Int ->
-  IO ()
+reverseScratchTriple :: IOArr Int -> IOArr Float -> IOArr Float -> Int -> Int -> IO ()
 reverseScratchTriple idxArr mainArr crossArr lo hi = do
   let go !a !b
         | a >= b = pure ()
@@ -1455,14 +1448,14 @@ reverseScratchTriple idxArr mainArr crossArr lo hi = do
   go lo hi
 
 {-# INLINE swapPrim #-}
-swapPrim :: (Prim a) => MutablePrimArray RealWorld a -> Int -> Int -> IO ()
+swapPrim :: (Prim a) => IOArr a -> Int -> Int -> IO ()
 swapPrim arr a b = do
   x <- readPrimArray arr a
   y <- readPrimArray arr b
   writePrimArray arr a y
   writePrimArray arr b x
-{-# SPECIALIZE swapPrim :: MutablePrimArray RealWorld Int -> Int -> Int -> IO () #-}
-{-# SPECIALIZE swapPrim :: MutablePrimArray RealWorld Float -> Int -> Int -> IO () #-}
+{-# SPECIALIZE swapPrim :: IOArr Int -> Int -> Int -> IO () #-}
+{-# SPECIALIZE swapPrim :: IOArr Float -> Int -> Int -> IO () #-}
 
 columnGapSumScratch :: NodeArena -> Bool -> Int -> Float -> IO Float
 columnGapSumScratch _ False _ _ = pure 0
@@ -1516,14 +1509,7 @@ distributeScratch na n avail gapSum horizontal = do
         else copyScratchRange wArr hArr outW outH 0 n
 
 -- | @out[i] = (w[i], h[i])@ for the range.
-copyScratchRange ::
-  MutablePrimArray RealWorld Float
-  -> MutablePrimArray RealWorld Float
-  -> MutablePrimArray RealWorld Float
-  -> MutablePrimArray RealWorld Float
-  -> Int
-  -> Int
-  -> IO ()
+copyScratchRange :: IOArr Float -> IOArr Float -> IOArr Float -> IOArr Float -> Int -> Int -> IO ()
 {-# INLINE copyScratchRange #-}
 copyScratchRange wArr hArr outW outH !i !end
   | i >= end = pure ()
@@ -1532,7 +1518,7 @@ copyScratchRange wArr hArr outW outH !i !end
       copyMutablePrimArray outH i hArr i (end - i)
 
 {-# INLINE sumScratchAxis #-}
-sumScratchAxis :: MutablePrimArray RealWorld Float -> MutablePrimArray RealWorld Float -> Bool -> Int -> Int -> Float -> IO Float
+sumScratchAxis :: IOArr Float -> IOArr Float -> Bool -> Int -> Int -> Float -> IO Float
 sumScratchAxis wArr hArr horizontal !i !end !acc
   | i >= end = pure acc
   | otherwise = do
@@ -1547,7 +1533,7 @@ getAxisSizing na idx horizontal =
 
 -- | Sum a sizing-derived flex factor over the first @n@ scratch children.
 {-# INLINE sumFactors #-}
-sumFactors :: (SizingTag -> Float -> Float) -> NodeArena -> MutablePrimArray RealWorld Int -> Bool -> Int -> IO Float
+sumFactors :: (SizingTag -> Float -> Float) -> NodeArena -> IOArr Int -> Bool -> Int -> IO Float
 sumFactors factor na idxArr horizontal n = go 0 0
   where
     go !i !acc
@@ -1577,7 +1563,7 @@ shrinkFactor tag val =
     -- sibling (page scroll) is taller than the window.
     _ -> 0
 
-markGrowFlags :: NodeArena -> MutablePrimArray RealWorld Int -> MutablePrimArray RealWorld Float -> MutablePrimArray RealWorld Float -> MutablePrimArray RealWorld Float -> MutablePrimArray RealWorld Float -> Bool -> Int -> Int -> IO ()
+markGrowFlags :: NodeArena -> IOArr Int -> IOArr Float -> IOArr Float -> IOArr Float -> IOArr Float -> Bool -> Int -> Int -> IO ()
 markGrowFlags na idxArr wArr hArr mainArr crossArr horizontal !i !end
   | i >= end = pure ()
   | otherwise = do
@@ -1593,7 +1579,7 @@ markGrowFlags na idxArr wArr hArr mainArr crossArr horizontal !i !end
 -- One sweep: sum content of non-grow + already-locked children (factor 0) and
 -- grow factors of the still-unlocked.
 {-# INLINE scanGrow #-}
-scanGrow :: MutablePrimArray RealWorld Float -> MutablePrimArray RealWorld Float -> Int -> Int -> Float -> Float -> IO (Float, Float)
+scanGrow :: IOArr Float -> IOArr Float -> Int -> Int -> Float -> Float -> IO (Float, Float)
 scanGrow mainArr crossArr !i !end !occupied !gfSum
   | i >= end = pure (occupied, gfSum)
   | otherwise = do
@@ -1606,7 +1592,7 @@ scanGrow mainArr crossArr !i !end !occupied !gfSum
 
 -- Pin every grow child whose content exceeds its would-be share by clearing
 -- its factor; its content stays in mainArr.
-lockGrow :: MutablePrimArray RealWorld Float -> MutablePrimArray RealWorld Float -> Float -> Float -> Int -> Int -> Int -> IO Int
+lockGrow :: IOArr Float -> IOArr Float -> Float -> Float -> Int -> Int -> Int -> IO Int
 lockGrow mainArr crossArr !free !gfSum !i !end !acc
   | i >= end = pure acc
   | otherwise = do
@@ -1623,7 +1609,7 @@ lockGrow mainArr crossArr !free !gfSum !i !end !acc
 
 -- Each lock shrinks the share pool, possibly locking more children; the
 -- locked set only grows, so this fixpoints within n sweeps.
-settleGrow :: MutablePrimArray RealWorld Float -> MutablePrimArray RealWorld Float -> Float -> Float -> Int -> Int -> IO (Float, Float)
+settleGrow :: IOArr Float -> IOArr Float -> Float -> Float -> Int -> Int -> IO (Float, Float)
 settleGrow mainArr crossArr avail gapSum n !passes = do
   (occupied, gfSum) <- scanGrow mainArr crossArr 0 n 0 0
   let free = avail - gapSum - occupied
@@ -1634,7 +1620,7 @@ settleGrow mainArr crossArr avail gapSum n !passes = do
 
 -- Hand shares to unlocked grow children and restore real cross sizes where
 -- the factors clobbered them.
-applyGrowShares :: MutablePrimArray RealWorld Float -> MutablePrimArray RealWorld Float -> MutablePrimArray RealWorld Float -> MutablePrimArray RealWorld Float -> Bool -> Float -> Float -> Int -> Int -> IO ()
+applyGrowShares :: IOArr Float -> IOArr Float -> IOArr Float -> IOArr Float -> Bool -> Float -> Float -> Int -> Int -> IO ()
 applyGrowShares wArr hArr mainArr crossArr horizontal !free !gfSum !i !end
   | i >= end = pure ()
   | otherwise = do
@@ -1646,7 +1632,7 @@ applyGrowShares wArr hArr mainArr crossArr horizontal !free !gfSum !i !end
       writePrimArray crossArr i (if horizontal then ih else iw)
       applyGrowShares wArr hArr mainArr crossArr horizontal free gfSum (i + 1) end
 
-applyShrink :: NodeArena -> MutablePrimArray RealWorld Int -> MutablePrimArray RealWorld Float -> MutablePrimArray RealWorld Float -> MutablePrimArray RealWorld Float -> MutablePrimArray RealWorld Float -> Bool -> Float -> Float -> Int -> Int -> IO ()
+applyShrink :: NodeArena -> IOArr Int -> IOArr Float -> IOArr Float -> IOArr Float -> IOArr Float -> Bool -> Float -> Float -> Int -> Int -> IO ()
 applyShrink na idxArr wArr hArr outW outH horizontal !overflow !shrinkTotal !i !end
   | i >= end = pure ()
   | otherwise = do

@@ -20,6 +20,7 @@
 -- lets a frame whose layout inputs did not change skip the solve.
 module NanoUI.Internal.Layout.Arena
   ( NodeIdx
+  , IOArr
   , NodeType (..)
   , NodeArenaArrays (..)
   , isWidgetNode
@@ -168,6 +169,9 @@ import NanoUI.Internal.Types (Color (..), Rect (..))
 -- optional node (a parent, a first child, a next sibling), -1 means none.
 type NodeIdx = Int
 
+-- | The arena's mutable unboxed arrays.
+type IOArr = MutablePrimArray RealWorld
+
 -- | What kind of node this is. The solver chooses how to measure a node by
 -- its type, and paint chooses how to draw it. The arena stores the type as a
 -- 'Word8' ('tagNodeType') through the derived 'Enum' instance, so there can be
@@ -308,24 +312,24 @@ data DirTag = DirRow | DirColumn
 -- name the slots of that row. The other arrays hold one element per node.
 -- Growing the arena replaces all of them together.
 data NodeArenaArrays = NodeArenaArrays
-  { naArrGeom :: !(MutablePrimArray RealWorld Float)
+  { naArrGeom :: !(IOArr Float)
   -- ^ Rects, 10 floats per node. See 'geomX'.
-  , naArrStyle :: !(MutablePrimArray RealWorld Float)
+  , naArrStyle :: !(IOArr Float)
   -- ^ Layout inputs and a few other numbers, 16 floats per node. See
   -- 'styleWVal'.
-  , naArrTags :: !(MutablePrimArray RealWorld Word8)
+  , naArrTags :: !(IOArr Word8)
   -- ^ Enum values, 8 bytes per node. See 'tagNodeType'.
-  , naArrTree :: !(MutablePrimArray RealWorld Int)
+  , naArrTree :: !(IOArr Int)
   -- ^ Tree links and other integers, 8 per node. See 'treeParent'.
   , naArrTextStore :: !(MutableArray RealWorld Text)
   -- ^ Each node's text. 'addNode' does not clear a slot, so read it with
   -- 'getText', which checks that the node set a text.
   , naArrOptionsStore :: !(MutableArray RealWorld [Text])
   -- ^ Each node's option list ('getOptions'), empty unless the node set one.
-  , naArrFontColor :: !(MutablePrimArray RealWorld Int)
+  , naArrFontColor :: !(IOArr Int)
   -- ^ Each node's font colour: 0 for none, and otherwise the colour's 32-bit
   -- word with bit 32 set. See 'getNodeFontColor'.
-  , naArrScope :: !(MutablePrimArray RealWorld Int)
+  , naArrScope :: !(IOArr Int)
   -- ^ The paint scope each node was added under: the theme that a @styled@ or
   -- @disabledWhen@ block around the node selected, and whether the node is
   -- disabled. The theme index sits above bit 0, with 0 for the context's
@@ -394,17 +398,17 @@ data NodeArena = NodeArena
 data FlexScratch = FlexScratch
   { fsCap :: !Int
   -- ^ Children that each array has room for.
-  , fsIdx :: !(MutablePrimArray RealWorld Int)
+  , fsIdx :: !(IOArr Int)
   -- ^ Node index of each child.
-  , fsW :: !(MutablePrimArray RealWorld Float)
+  , fsW :: !(IOArr Float)
   -- ^ Width of each child before the sharing: its measured width, or its
   -- percentage of the container's inner width.
-  , fsH :: !(MutablePrimArray RealWorld Float)
+  , fsH :: !(IOArr Float)
   -- ^ Height of each child before the sharing.
-  , fsOutW :: !(MutablePrimArray RealWorld Float)
+  , fsOutW :: !(IOArr Float)
   -- ^ Width of each child after the space is shared out. A column copies
   -- 'fsW' through unchanged.
-  , fsOutH :: !(MutablePrimArray RealWorld Float)
+  , fsOutH :: !(IOArr Float)
   -- ^ Height of each child after the space is shared out. A row copies 'fsH'
   -- through unchanged.
   }
@@ -414,10 +418,10 @@ data FlexScratch = FlexScratch
 -- 'naFrameTag', so every entry expires at the next 'resetNodeArena'.
 -- 'memoizeWidth' reads and writes it.
 data WidthMemo = WidthMemo
-  { wmTags :: !(MutablePrimArray RealWorld Word32)
+  { wmTags :: !(IOArr Word32)
   -- ^ Per node, the frame tag its entry was written under. 0 marks an entry
   -- that was never written.
-  , wmSlots :: !(MutablePrimArray RealWorld Float)
+  , wmSlots :: !(IOArr Float)
   -- ^ Per node, @memoStride@ floats: the width, then the two results.
   }
 
@@ -429,9 +433,9 @@ maxSnapDepth = 256
 -- depth before the position pass recurses into the children and overwrites
 -- 'FlexScratch'. Both arrays are indexed by the child's position.
 data AxisSnapshot = AxisSnapshot
-  { asIdx :: !(MutablePrimArray RealWorld Int)
+  { asIdx :: !(IOArr Int)
   -- ^ Node index of each flow child, in the order the view declared them.
-  , asOut :: !(MutablePrimArray RealWorld Float)
+  , asOut :: !(IOArr Float)
   -- ^ For a row or column, the size each child gets along the main axis. For
   -- a grid, each child's measured height.
   }
@@ -768,7 +772,7 @@ growNodeArenaArrays cap newCap a = do
   pure NodeArenaArrays {..}
 
 {-# NOINLINE growPrimArrayCopy #-}
-growPrimArrayCopy :: Prim a => MutablePrimArray RealWorld a -> Int -> Int -> a -> IO (MutablePrimArray RealWorld a)
+growPrimArrayCopy :: Prim a => IOArr a -> Int -> Int -> a -> IO (IOArr a)
 growPrimArrayCopy oldArr cap newCap defVal = do
   newArr <- resizeMutablePrimArray oldArr newCap
   setPrimArray newArr cap (newCap - cap) defVal
@@ -1177,7 +1181,7 @@ allRangeM lo hi p = go lo
           if ok then go (i + 1) else pure False
 
 {-# INLINE primEqAt #-}
-primEqAt :: (Prim a, Eq a) => MutablePrimArray RealWorld a -> MutablePrimArray RealWorld a -> Int -> IO Bool
+primEqAt :: (Prim a, Eq a) => IOArr a -> IOArr a -> Int -> IO Bool
 primEqAt x y i = (==) <$> readPrimArray x i <*> readPrimArray y i
 
 {-# INLINE boxedEqAt #-}
@@ -1186,7 +1190,7 @@ boxedEqAt x y i = (==) <$> readArray x i <*> readArray y i
 
 -- The scroll-extent and node-value columns hold solver outputs or paint-only
 -- values, so they are skipped.
-styleMatch :: MutablePrimArray RealWorld Float -> MutablePrimArray RealWorld Float -> Int -> IO Bool
+styleMatch :: IOArr Float -> IOArr Float -> Int -> IO Bool
 styleMatch x y n =
   allRangeM 0 n $ \i ->
     let !base = i * styleStride
@@ -1195,7 +1199,7 @@ styleMatch x y n =
 
 -- Box/image/drawing style IDs are paint data; their intrinsic dimensions come
 -- from sizing constraints. The grid column count only matters to containers.
-treeMatch :: NodeArenaArrays -> MutablePrimArray RealWorld Int -> Int -> IO Bool
+treeMatch :: NodeArenaArrays -> IOArr Int -> Int -> IO Bool
 treeMatch a cached n =
   allRangeM 0 n $ \i -> do
     nt <- readTagEnum a i tagNodeType
