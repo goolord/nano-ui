@@ -82,6 +82,7 @@ executable nano-ui-rgfw-profile
     import:           warnings
     main-is:          RgfwProfile.hs
     other-modules:    RgfwDemoCommon
+    ghc-options:      -rtsopts "-with-rtsopts=-A64m -T -I0"
     build-depends:
         base ^>=4.22.0.0,
         nano-ui,
