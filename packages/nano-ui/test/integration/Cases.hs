@@ -79,8 +79,7 @@ import NanoUI.Testing.Harness
   , withInputOff
   )
 import NanoUI.Widgets.SplitPane
-  ( GridNode (..)
-  , PaneDrop (..)
+  ( PaneDrop (..)
   , dropPreview
   , DropPreview (..)
   , dropPreviewTreeSized

@@ -1,3 +1,4 @@
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE TypeFamilies #-}
 
@@ -29,6 +30,8 @@ module NanoUI.Monad
   , withDefaultLayout
   , askHost
   , uiFontMetrics
+  , resolveFontUi
+  , lineWidthUi
   , uiTime
   , uiTheme
   , setUiTheme
@@ -39,6 +42,21 @@ module NanoUI.Monad
   , windowSize
   , windowWidth
   , windowHeight
+  , lastRect
+  , holdFocus
+  , releaseFocus
+  , focusedWidget
+  , getClipboard
+  , setClipboard
+  , requestFrame
+  , takeEscape
+  , getScrollMetricsUi
+  , setScrollOffsetUi
+  , scrollToUi
+  , scrollByUi
+  , scrollPagesUi
+  , scrollRectIntoViewUi
+  , setScrollStepUi
   , damageWidgetNow
   , damageKeyNow
   , damageRectNow
@@ -61,6 +79,7 @@ import Control.Monad (unless, when)
 import Data.Bits (shiftL, (.&.), (.|.))
 import Data.Hashable (Hashable, hash)
 import Data.IORef (modifyIORef', readIORef, writeIORef)
+import Data.Text (Text)
 import Data.Typeable (Typeable)
 import Data.Word (Word64)
 import Effectful
@@ -93,6 +112,27 @@ import NanoUI.Context
   , damageRect
   , damageWidget
   , decodeMessages
+  , getFocusId
+  , getPrevRect
+  , getScrollMetrics
+  , getStore
+  , getTextInputMenu
+  , anySelectOpen
+  , markDirty
+  , markEscapeConsumed
+  , markTabConsumed
+  , overlayConsumesQuit
+  , scrollBy
+  , scrollPages
+  , scrollRectIntoView
+  , scrollTo
+  , setScrollOffset2D
+  , setScrollOffsetIn
+  , setScrollStep
+  , ScrollAlign
+  , ScrollBehavior
+  , ScrollMetrics (..)
+  , pointerBlockedByModal
   , routedInput
   , currentTheme
   , pushMessage
@@ -102,18 +142,20 @@ import NanoUI.Context
   , reduceMessages
   , reduceUpdates
   )
-import NanoUI.Font (FontMetrics)
+import NanoUI.Draw.Types (TextFont (..))
+import NanoUI.Font (FontMetrics, lineWidthIO)
+import NanoUI.Frame.Node (resolveTextFont)
 import NanoUI.Id
   ( IdContext (siblingId)
-  , WidgetId
+  , WidgetId (..)
   , enterKeyed
   , enterScope
   , idContextWidgetId
   , scopeTag
   )
 import NanoUI.Layout.Arena (getArenaScope, setArenaScope)
-import NanoUI.Style (Layout, Theme, disabledTheme)
-import NanoUI.Input (Input (..), inputMousePos, inputWindowSize, stripInteractionInput)
+import NanoUI.Style (FontStyle, FontVariant, FontWeight, Layout, TextDecoration (DecorationNone), Theme, disabledTheme)
+import NanoUI.Input (Input (..), Key (KeyEscape), inputKeysElem, inputMousePos, inputWindowSize, stripInteractionInput)
 import NanoUI.Types (DamageBounds, Rect, Size (..), V2)
 
 -- | A view with UI operations and IO. Backend runners execute it as frames
@@ -274,6 +316,23 @@ withDefaultLayout f = localStaticRep (\(UiRep ctx inp frame l) -> UiRep ctx inp 
 uiFontMetrics :: Ui :> es => Eff es FontMetrics
 uiFontMetrics = fmap ctxFontMetrics askContext
 
+-- | Metrics for text at a size, weight, style and variant, resolved through
+-- the backend's fonts: what a custom widget measures and places its text by
+-- when it draws in a font other than the context's.
+--
+-- It resolves the font as a 'DrawTextStyled' op naming the same size,
+-- weight, style and variant is painted, so text measured with these metrics
+-- is drawn at the width it was measured at.
+resolveFontUi :: Ui :> es => Float -> FontWeight -> FontStyle -> FontVariant -> Eff es FontMetrics
+resolveFontUi size weight style variant =
+  withContext (\ctx -> fst <$> resolveTextFont ctx (TextFont size variant weight style DecorationNone))
+
+-- | The advance of one line of text in these metrics, in logical pixels. Unlike
+-- the pure 'NanoUI.Font.lineWidth' it first loads the glyphs the text needs,
+-- so it is right for metrics that have not drawn this text yet.
+lineWidthUi :: Ui :> es => FontMetrics -> Text -> Eff es Float
+lineWidthUi fm txt = uiIO (lineWidthIO fm txt)
+
 {-# INLINE uiTime #-}
 -- | Monotonic seconds from an unspecified epoch. Subtract two readings to
 -- measure elapsed time; this is not a wall-clock timestamp. Keep absolute
@@ -400,6 +459,133 @@ windowWidth = fmap (sizeW . inputWindowSize) askInput
 {-# INLINE windowHeight #-}
 windowHeight :: Ui :> es => Eff es Float
 windowHeight = fmap (sizeH . inputWindowSize) askInput
+
+-- | Where a widget was laid out last frame, or 'Nothing' before its first.
+-- A widget that works out its own input -- a list that scrolls itself, a
+-- text view hit-testing a click -- reads the rect it will be given from here,
+-- since this frame's is solved only after the view has run:
+--
+-- > wid <- nextId
+-- > rect <- fromMaybe (Rect 0 0 320 240) <$> lastRect wid
+-- > ... work out this frame from rect and the input ...
+-- > customWidgetWithId wid spec
+lastRect :: Ui :> es => WidgetId -> Eff es (Maybe Rect)
+lastRect wid = withContext (\ctx -> getPrevRect ctx wid)
+
+-- | Give a widget the keyboard, without the focus ring Tab would draw round
+-- it. A widget that should keep the keyboard while some condition holds calls
+-- this every frame the condition does; nothing happens if it already has it.
+--
+-- Tab pressed that frame is the widget's: focus stays where it is, and an
+-- editor reads the Tab from the input to indent. A click elsewhere still moves
+-- focus off, until the next frame's call takes it back.
+--
+-- An open 'NanoUI.Widgets.Overlay.modal' keeps the keyboard inside it:
+-- called outside one while it is up, this does nothing, so a widget behind
+-- the modal cannot take the keys typed into it.
+holdFocus :: Ui :> es => WidgetId -> Eff es ()
+holdFocus wid = withContext $ \ctx -> do
+  focus <- getFocusId ctx
+  behindModal <- pointerBlockedByModal ctx
+  unless behindModal $ do
+    markTabConsumed ctx
+    when (focus /= wid) $ do
+      writeIORef (ctxFocusId ctx) wid
+      writeIORef (ctxFocusVisible ctx) False
+
+-- | Take the keyboard off a widget, if it has it; nothing then has focus.
+releaseFocus :: Ui :> es => WidgetId -> Eff es ()
+releaseFocus wid = withContext $ \ctx -> do
+  focus <- getFocusId ctx
+  when (focus == wid) (writeIORef (ctxFocusId ctx) (WidgetId 0))
+
+-- | The widget that has the keyboard, or @'WidgetId' 0@ for none.
+focusedWidget :: Ui :> es => Eff es WidgetId
+focusedWidget = withContext getFocusId
+
+-- | The clipboard's text, through whatever clipboard the backend installed.
+-- 'Nothing' for an empty clipboard or none at all.
+getClipboard :: Ui :> es => Eff es (Maybe Text)
+getClipboard = withContext ctxClipboardGet
+
+-- | Put text on the clipboard. 'False' when the backend could not.
+setClipboard :: Ui :> es => Text -> Eff es Bool
+setClipboard txt = withContext (\ctx -> ctxClipboardSet ctx txt)
+
+-- | Ask for another frame after this one. For a view whose state lives
+-- outside nano-ui and changed after the part showing it was declared: the
+-- frame that shows the change has to be asked for, since nothing nano-ui
+-- keeps says it is due.
+--
+-- Ask only when something did change. The frame asked for repaints the whole
+-- window, and a view that asks every frame keeps the loop from ever sleeping;
+-- 'NanoUI.Widgets.Animate.wakeAfter' asks for a frame at a later time.
+requestFrame :: Ui :> es => Eff es ()
+requestFrame = withContext markDirty
+
+-- | Whether Escape was pressed this frame and is the view's to act on, and
+-- if so, take it: nothing after this sees it either. 'False' when something
+-- earlier in the frame took it, and while a text field's right-click menu or
+-- a dropdown is open, since that Escape is for closing it. A dialog that
+-- Escape puts away reads it here rather than from the input, so the Escape
+-- that closes a menu inside it does not close the dialog as well.
+takeEscape :: Ui :> es => Eff es Bool
+takeEscape = do
+  inp <- askInput
+  if not (inputKeysElem KeyEscape (inputKeys inp))
+    then pure False
+    else withContext $ \ctx -> do
+      taken <- overlayConsumesQuit ctx inp
+      menu <- getTextInputMenu ctx
+      dropdown <- anySelectOpen <$> getStore ctx
+      let ours = not taken && null menu && not dropdown
+      when ours (markEscapeConsumed ctx)
+      pure ours
+
+-- | The scroller's geometry as its last layout left it (its viewport, range
+-- and offset), or 'Nothing' before it has been laid out. The id is the one a
+-- 'NanoUI.scrollArea' hands back; to run a command before the scroller is
+-- declared, take its id with 'currentId' first:
+--
+-- > sid <- currentId
+-- > metrics <- getScrollMetricsUi sid
+-- > (_, rows) <- scrollArea (fillW . fillH) (visibleRows metrics)
+getScrollMetricsUi :: Ui :> es => WidgetId -> Eff es (Maybe ScrollMetrics)
+getScrollMetricsUi wid = withContext (\ctx -> getScrollMetrics ctx wid)
+
+-- | Put a scroller at an offset in window axes, cancelling a glide; a 1D
+-- scroller ignores the axis it does not scroll on. Unlike
+-- 'scrollToUi' the offset is not held to the range the last layout found,
+-- so it can place content this frame is about to lay out; the layout holds
+-- it to the content's real range.
+setScrollOffsetUi :: Ui :> es => WidgetId -> V2 -> Eff es ()
+setScrollOffsetUi wid off = withContext $ \ctx ->
+  getScrollMetrics ctx wid >>= \case
+    Just m -> setScrollOffsetIn ctx wid (scrollAxes m) off
+    Nothing -> setScrollOffset2D ctx wid off
+
+-- | Scroll to an offset, held to the scroller's range.
+scrollToUi :: Ui :> es => WidgetId -> V2 -> ScrollBehavior -> Eff es ()
+scrollToUi wid off behavior = withContext (\ctx -> scrollTo ctx wid off behavior)
+
+-- | Scroll by a delta in pixels.
+scrollByUi :: Ui :> es => WidgetId -> V2 -> ScrollBehavior -> Eff es ()
+scrollByUi wid delta behavior = withContext (\ctx -> scrollBy ctx wid delta behavior)
+
+-- | Scroll by whole viewports: @V2 0 0.5@ is half a page down.
+scrollPagesUi :: Ui :> es => WidgetId -> V2 -> ScrollBehavior -> Eff es ()
+scrollPagesUi wid pages behavior = withContext (\ctx -> scrollPages ctx wid pages behavior)
+
+-- | Scroll a rectangle of the content, in content coordinates, into view:
+-- the row a keyboard selection moved to in a list that builds only the rows
+-- it shows.
+scrollRectIntoViewUi :: Ui :> es => WidgetId -> Rect -> ScrollAlign -> ScrollBehavior -> Eff es ()
+scrollRectIntoViewUi wid r align behavior = withContext (\ctx -> scrollRectIntoView ctx wid r align behavior)
+
+-- | Give a scroller its own wheel step, in pixels a notch; @0@ puts it back on
+-- the app's.
+setScrollStepUi :: Ui :> es => WidgetId -> Float -> Eff es ()
+setScrollStepUi wid px = withContext (\ctx -> setScrollStep ctx wid px)
 
 -- | Retrieve the host value installed in the context. 'Nothing' means no
 -- value was installed or its runtime type differs from the requested type.

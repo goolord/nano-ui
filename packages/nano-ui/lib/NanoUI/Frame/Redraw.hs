@@ -24,6 +24,7 @@ import NanoUI.Context
   , getWindowDrag
   , getWindowResize
   , isDirty
+  , isPointerTracked
   , modalActive
   )
 import NanoUI.Frame.Hit (nodePointVisible, overlayHitAllowed, withWidgetNode)
@@ -68,8 +69,13 @@ needsRedraw ctx prev inp = do
       if not moved
         then pure False
         else do
+          -- A widget that tracks the pointer wants every move over it;
+          -- one that does not wants only the move that leaves it.
           lastHot <- readIORef (ctxLastHotId ctx)
-          (/= lastHot) <$> probeHotId ctx (inputMousePos inp)
+          tracked <- if hashWidgetId lastHot == 0 then pure False else isPointerTracked ctx lastHot
+          if tracked
+            then pure True
+            else (/= lastHot) <$> probeHotId ctx (inputMousePos inp)
 
 -- | Whether a window, scrollbar, resize, slider, or colour-picker gesture
 -- is active. Text-selection drags are tracked separately.

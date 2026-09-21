@@ -19,6 +19,8 @@ module NanoUI.Context.Drawing
   , lookupCustomCursor
   , registerCustomDamageSlop
   , lookupCustomDamageSlop
+  , registerPointerTracked
+  , isPointerTracked
   , resetDrawingScopeCache
   , hasCustomLayoutInputs
   ) where
@@ -337,6 +339,18 @@ registerCustomDamageSlop = registerIn dcsCustomDamageSlop (\m dc -> dc {dcsCusto
 lookupCustomDamageSlop :: Context -> WidgetId -> IO (Maybe Float)
 lookupCustomDamageSlop = lookupIn dcsCustomDamageSlop
 
+-- | Ask for a frame whenever the pointer moves over a widget, not only when
+-- it crosses onto another one: for a widget that draws what is under the
+-- pointer inside itself, such as the row of a self-drawn list.
+{-# INLINE registerPointerTracked #-}
+registerPointerTracked :: Context -> WidgetId -> IO ()
+registerPointerTracked ctx wid = registerIn dcsPointerTracked (\m dc -> dc {dcsPointerTracked = m}) ctx wid ()
+
+-- | Whether a widget asked for a frame on every pointer move over it.
+{-# INLINE isPointerTracked #-}
+isPointerTracked :: Context -> WidgetId -> IO Bool
+isPointerTracked ctx wid = (== Just ()) <$> lookupIn dcsPointerTracked ctx wid
+
 -- | Clear per-pass registrations while retaining compiled ops and fitted
 -- layouts. Call before rebuilding the view, then prune caches against new registrations.
 resetDrawingScopeCache :: Context -> IO ()
@@ -349,6 +363,7 @@ resetDrawingScopeCache ctx =
       , dcsCustomCursors = IM.empty
       , dcsCustomDrawings = IM.empty
       , dcsCustomDamageSlop = IM.empty
+      , dcsPointerTracked = IM.empty
       }
 
 -- | True when any node has a custom measure function, whose output is not

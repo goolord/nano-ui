@@ -57,6 +57,22 @@ module NanoUI
   , windowWidth
   , windowHeight
   , uiMousePos
+  , askInput
+  , uiTime
+  , requestFrame
+  , lastRect
+
+    -- * Focus
+
+    -- | Tab moves the keyboard between focusable widgets, and a click gives it
+    -- to the widget clicked. A view that decides for itself where typing goes
+    -- -- an editor that keeps the keyboard while its find bar is shut -- says
+    -- so with 'holdFocus' each frame it should, and gets that frame's Tab.
+  , holdFocus
+
+    -- * Clipboard
+  , getClipboard
+  , setClipboard
 
     -- * Widget identity
 
@@ -165,6 +181,8 @@ module NanoUI
     -- * Inputs
   , checkbox
   , checkbox'
+  , checkboxWith
+  , checkboxWith'
   , toggleSwitch
   , toggleSwitch'
   , toggleSwitchWith
@@ -299,6 +317,7 @@ module NanoUI
 
     -- * Overlays
   , modal
+  , modalWith
   , window
   , PopupAnchor (..)
   , PopupPlacement (..)
@@ -336,6 +355,7 @@ module NanoUI
   , PaneView (..)
   , PaneGridResponse (..)
   , GridAxis (..)
+  , GridNode (..)
   , paneGrid
 
     -- * Progress and sparklines
@@ -401,10 +421,16 @@ module NanoUI
   , customWidget
   , customWidgetWithId
   , contentKey
+  , contentKeyOf
+  , KeyPart
+  , keyPart
   , CustomDrawContext (..)
   , CustomMeasureFn
   , FontMetrics (fmLineHeight, fmAscent)
   , lineWidth
+  , lineWidthUi
+  , uiFontMetrics
+  , resolveFontUi
   , UiCursorKind (..)
   , CustomDrawBuild
   , CanvasM
@@ -491,6 +517,26 @@ module NanoUI
   , setScrollOffset
   , getScrollOffset2D
   , setScrollOffset2D
+
+    -- ** From a view
+
+    -- | The same commands, run from inside a view rather than handed the
+    -- context. A command that should act on this frame is run before the
+    -- scroller is declared, with the id 'currentId' says it will take; the
+    -- rows a list builds for itself are worked out from 'getScrollMetricsUi'
+    -- the same way:
+    --
+    -- > sid <- currentId
+    -- > when moved (scrollRectIntoViewUi sid (Rect 0 (row * rowH) 1 rowH) ScrollNearest ScrollInstant)
+    -- > metrics <- getScrollMetricsUi sid
+    -- > (_, picked) <- scrollArea (fillW . fillH) (visibleRows metrics)
+  , getScrollMetricsUi
+  , setScrollOffsetUi
+  , scrollToUi
+  , scrollByUi
+  , scrollPagesUi
+  , scrollRectIntoViewUi
+  , setScrollStepUi
 
     -- * Animation
   , Transition (..)
@@ -686,6 +732,8 @@ module NanoUI
   , Key (..)
   , Modifiers (..)
   , inputKeysElem
+  , foldInputKeys
+  , takeEscape
   )
 where
 

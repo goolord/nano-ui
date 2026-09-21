@@ -31,6 +31,7 @@ import Cases.Table
 import Cases.Tabs
 import Cases.TextInput
 import Cases.Tooltip
+import Cases.ViewApi
 import Cases.Window
 import Data.IORef (IORef)
 import NanoUI.Testing (Context, newContext, newPixelContext)
@@ -92,6 +93,21 @@ testSpecs =
   , TestSpec "align-baseline" True runAlignBaselineTest
   , TestSpec "caption-drag-spans" False runDragSpansTest
   , TestSpec "caption-buttons" False runCaptionButtonsTest
+  , -- The view API a self-driven widget leans on
+    TestSpec "last-rect" False runLastRectTest
+  , TestSpec "hold-focus" False runHoldFocusTest
+  , TestSpec "hold-focus-modal" False runHoldFocusModalTest
+  , TestSpec "hold-focus-tab" False runHoldFocusTabTest
+  , TestSpec "clipboard" False runClipboardTest
+  , TestSpec "pointer-track" False runPointerTrackTest
+  , TestSpec "content-key-of" False runContentKeyOfTest
+  , TestSpec "checkbox-with" False runCheckboxWithTest
+  , TestSpec "pane-grid-initial" False runPaneGridInitialTest
+  , TestSpec "pane-grid-initial-once" False runPaneGridInitialOnceTest
+  , TestSpec "pane-grid-unfocusable" False runPaneGridUnfocusableTest
+  , TestSpec "scroll-ui" False runScrollUiTest
+  , TestSpec "take-escape" False runTakeEscapeTest
+  , TestSpec "modal-with" False runModalWithTest
   , -- Drawing
     TestSpec "draw-square-geometry" False runSquareGeometryTest
   , TestSpec "draw-external-text" False runExternalTextTest

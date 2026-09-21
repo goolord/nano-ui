@@ -82,6 +82,8 @@ module NanoUI.Context
   , lookupCustomCursor
   , registerCustomDamageSlop
   , lookupCustomDamageSlop
+  , registerPointerTracked
+  , isPointerTracked
   , resetDrawingScopeCache
   , getStore
   , setStore
@@ -188,6 +190,8 @@ module NanoUI.Context
   , modalActive
   , overlayConsumesQuit
   , markEscapeConsumed
+  , markTabConsumed
+  , tabConsumed
   , pointerBlockedByModal
   , routedInput
   , floatingLayerAt

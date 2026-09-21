@@ -31,6 +31,7 @@ import NanoUI.Context
   , scrollTargetOffset
   , setScrollOffset
   , setScrollOffset2D
+  , setScrollOffsetIn
   , nodeTheme
   , InteractionState (..)
   , modifyInteraction
@@ -112,7 +113,17 @@ transformSubtree ctx idx scrollX scrollY parentClip = do
         -- The only pass that sees a scroller's placed geometry. Everything
         -- that scrolls one between frames reads it back from here.
         cacheScrollMetrics ctx wid axes viewport range
-        V2 dx dy <- getScrollOffsetIn ctx wid axes
+        -- An offset set outright before this layout, or left over from
+        -- content that has since shrunk, is held to the range the content
+        -- has now, on the axes this scroller owns.
+        cur@(V2 cx cy) <- getScrollOffsetIn ctx wid axes
+        let V2 hx hy = clampScrollOffset range cur
+            held = case axes of
+              ScrollAxisY -> V2 cx hy
+              ScrollAxisX -> V2 hx cy
+              ScrollAxisXY -> V2 hx hy
+        when (held /= cur) $ setScrollOffsetIn ctx wid axes held
+        let V2 dx dy = held
         let clip = within viewport
         setClipRect na idx clip
         pure (sx - dx, sy - dy, clip)

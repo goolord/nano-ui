@@ -22,7 +22,6 @@ import DemoApp (useFileDialog)
 import NanoUI
 import NanoUI.Backend (emptyInput)
 import NanoUI.Backend.Sdl
-import NanoUI.Monad (askInput)
 import NanoUI.Testing (collectOverlayTextSpans, collectTextSpans, newPixelContext)
 import NanoUI.Testing.Harness
   ( clickPos

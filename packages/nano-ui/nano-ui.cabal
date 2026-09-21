@@ -242,6 +242,7 @@ test-suite nano-ui-test
         Cases.PointerRelease
         Cases.CustomWidget
         Cases.Tooltip
+        Cases.ViewApi
         Cases.Window
     build-depends:
         bytestring,

@@ -4,6 +4,8 @@ module NanoUI.Context.Overlay
   , modalActive
   , overlayConsumesQuit
   , markEscapeConsumed
+  , markTabConsumed
+  , tabConsumed
   , pointerBlockedByModal
   , routedInput
   , floatingLayerAt
@@ -49,6 +51,15 @@ overlayConsumesQuit ctx inp = do
 -- | Mark Escape as handled so closing an overlay does not also quit the app.
 markEscapeConsumed :: Context -> IO ()
 markEscapeConsumed ctx = modifyOverlay ctx (\os -> os {osEscapeConsumed = True})
+
+-- | Keep this frame's Tab from moving focus: the widget holding the keyboard
+-- acts on it itself.
+markTabConsumed :: Context -> IO ()
+markTabConsumed ctx = modifyOverlay ctx (\os -> os {osTabConsumed = True})
+
+-- | Whether something took this frame's Tab with 'markTabConsumed'.
+tabConsumed :: Context -> IO Bool
+tabConsumed ctx = getsOverlay ctx osTabConsumed
 
 -- | Whether a modal is up and the view being declared is outside it.
 pointerBlockedByModal :: Context -> IO Bool
@@ -99,7 +110,8 @@ endModal :: Context -> IO ()
 endModal ctx =
   modifyOverlay ctx (\os -> os {osModalDepth = max 0 (osModalDepth os - 1)})
 
--- | Save the previous modal flag, then clear current depth and Escape consumption.
+-- | Save the previous modal flag, then clear current depth and Escape and Tab
+-- consumption.
 beginFrameModal :: Context -> IO ()
 beginFrameModal ctx =
   modifyOverlay ctx $ \os ->
@@ -108,6 +120,7 @@ beginFrameModal ctx =
       , osModalActive = False
       , osModalDepth = 0
       , osEscapeConsumed = False
+      , osTabConsumed = False
       }
 
 -- | Whether modal presence changed since the preceding frame.

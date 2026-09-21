@@ -33,6 +33,7 @@ import NanoUI.Context
   , setStore
   , setTextInputMenu
   , startAnimation
+  , tabConsumed
   )
 import NanoUI.Frame.Focus (filterModalFocusables, tabNext, tabNextFocusables)
 import NanoUI.Frame.Hit
@@ -81,10 +82,11 @@ import NanoUI.WidgetText (buttonVisualStyle, isMenuBarStyle, isMenuItemStyle, is
 -- steps through the widgets that called 'NanoUI.Context.registerFocusable'
 -- during the view, in declaration order, and wraps at both ends. While a modal
 -- is open, only the widgets inside the top modal take part. Focus moved this
--- way shows the focus ring.
+-- way shows the focus ring. A Tab taken by the widget holding the keyboard
+-- ('NanoUI.Context.markTabConsumed') moves nothing.
 finalizeTabFocus :: Context -> Input -> IO ()
 finalizeTabFocus ctx inp =
-  when (inputKeysElem KeyTab (inputKeys inp)) $ do
+  whenM (pure (inputKeysElem KeyTab (inputKeys inp)) <&&> (not <$> tabConsumed ctx)) $ do
     open <- modalTreeOpen ctx
     let shift = modShift (inputModifiers inp)
     cur <- readIORef (ctxFocusId ctx)

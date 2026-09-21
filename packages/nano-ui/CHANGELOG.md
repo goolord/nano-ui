@@ -4,6 +4,48 @@
 
 ### Added
 
+- What a widget that works out its own input needs, without
+  `NanoUI.Context`: `lastRect`, where a widget was laid out last frame, which
+  is the rect a list that scrolls itself hit-tests this frame's pointer
+  against; `holdFocus`, which gives a widget the keyboard without the ring Tab
+  draws, and that frame's Tab with it, so an editor indents on Tab rather
+  than losing focus to the next widget for a frame (`NanoUI.Monad` also has
+  `releaseFocus` and `focusedWidget`); `getClipboard` and `setClipboard`, through whatever clipboard the backend
+  installed; `requestFrame`, for a view whose state lives outside nano-ui and
+  changed after the part showing it was declared; `resolveFontUi` and
+  `lineWidthUi`, for a widget that draws in a font other than the context's.
+  `NanoUI` also exports `askInput`, `uiTime`, `uiFontMetrics` and
+  `foldInputKeys`, which it had only from `NanoUI.Monad` and `NanoUI.Input`.
+- Scroll commands run from a view rather than handed the context:
+  `getScrollMetricsUi`, `setScrollOffsetUi`, `scrollToUi`, `scrollByUi`,
+  `scrollPagesUi`, `scrollRectIntoViewUi` and `setScrollStepUi`. A command
+  meant for this frame names the scroller by the id `currentId` says it
+  will take.
+- `takeEscape`: whether Escape was pressed this frame and nothing earlier
+  took it, nor an open text-field menu or dropdown, and if so takes it. For a
+  dialog that Escape puts away, so the Escape that closes a menu inside it
+  does not close the dialog too.
+- `modalWith`, a modal with a layout modifier for its panel:
+  `modalWith (fixedWH w h)` gives it a size, and a body laid out with
+  `fillW . fillH` fills it.
+- `widgetTrackPointer` on a custom widget: a frame for every pointer move over
+  it, not only for a move onto another widget. For a widget that draws what
+  is under the pointer inside itself, such as the hovered row of a list that
+  draws its own rows, which otherwise had to ask for a frame on a timer while
+  the pointer was over it.
+- `contentKeyOf`, a content key over values of any `Hashable` types:
+  `contentKeyOf [keyPart version, keyPart scrollY, keyPart query]`. Unlike
+  `contentKey` it hashes an `Int` or a `Double` whole, and takes text
+  without the caller hashing it first.
+- `checkboxWith` and `checkboxWith'`, a checkbox with a layout modifier:
+  `checkboxWith alignMid` centres it in a row taller than itself.
+- `pgInitial` on `PaneGridConfig`, the split tree a grid starts from, with
+  pane and split ids of the caller's choosing; `NanoUI` exports `GridNode` to
+  write it with. A grid that had to be seeded in the widget store before its
+  first frame, to start with a split at a given ratio, is now given one.
+- `pgFocusable` on `PaneGridConfig`: off, the grid is no Tab stop and its
+  arrow, `m`, `x` and Escape keys do nothing, for a grid whose panes own the
+  keyboard.
 - `padTop`, `padBottom` and `padLRTB`, beside `padAll` and `padXY`. `padTop`
   and `padBottom` set one edge and keep the other three, so
   `padTop 0 . padXY 12 6` pads 12 at the sides and 6 at the foot only;
@@ -327,6 +369,9 @@
 
 ### Fixed
 
+- A scroller's offset set past its content, or left over from content that
+  has since shrunk, is held to the content's range at the next layout, on the
+  axes the scroller owns. It used to stay out of range.
 - A hairline rounded border is drawn at the same strength all the way round.
   A quad's alpha is read at the middle of each pixel, so a straight side,
   snapped to the grid, comes out at the colour it was asked for, while an arc

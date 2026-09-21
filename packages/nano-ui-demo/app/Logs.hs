@@ -20,7 +20,7 @@ import NanoUI.Context
   , markDirty
   , takeTextEditLastAction
   )
-import NanoUI.Monad (askContext, askInput, uiTime)
+import NanoUI.Monad (askContext)
 import NanoUI.Testing (collectTextSpans, newPixelContext)
 import NanoUI.Testing.Harness (clickPos, expectText, findExact, hasText, keyInp, requireSpan)
 import System.Environment (getArgs)

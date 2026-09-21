@@ -240,17 +240,19 @@ data OverlayState = OverlayState
   , osModalActive :: {-# UNPACK #-} !Bool
   , osModalDepth :: {-# UNPACK #-} !Int
   , osEscapeConsumed :: {-# UNPACK #-} !Bool
+  , osTabConsumed :: {-# UNPACK #-} !Bool
   , osPrevFloatingRects :: !(IntMap Rect)
   , osPrevFloatingOrder :: ![Int]
   }
 
--- | No modals, floating panels, or consumed Escape event.
+-- | No modals, floating panels, or consumed Escape or Tab event.
 initialOverlayState :: OverlayState
 initialOverlayState = OverlayState
   { osModalWasActive = False
   , osModalActive = False
   , osModalDepth = 0
   , osEscapeConsumed = False
+  , osTabConsumed = False
   , osPrevFloatingRects = IM.empty
   , osPrevFloatingOrder = []
   }
@@ -437,6 +439,8 @@ data DrawingCacheState = DrawingCacheState
   , dcsCustomMeasures :: !(IntMap CustomMeasureFn)
   , dcsCustomCursors :: !(IntMap (CustomDrawContext -> UiCursorKind))
   , dcsCustomDamageSlop :: !(IntMap Float)
+  , dcsPointerTracked :: !(IntMap ())
+    -- ^ Custom widgets that want a frame for every pointer move over them.
   , dcsDrawOpCache :: !(IntMap DrawOpCacheEntry)
   , dcsCustomDrawOpCache :: !(IntMap CustomDrawOpCacheEntry)
   , dcsDrawFitCache :: !(IntMap DrawFitCache)
@@ -480,6 +484,7 @@ initialDrawingCacheState = DrawingCacheState
   , dcsCustomMeasures = IM.empty
   , dcsCustomCursors = IM.empty
   , dcsCustomDamageSlop = IM.empty
+  , dcsPointerTracked = IM.empty
   , dcsDrawOpCache = IM.empty
   , dcsCustomDrawOpCache = IM.empty
   , dcsDrawFitCache = IM.empty

@@ -15,6 +15,9 @@ module NanoUI.Widgets.Custom
   , customWidget
   , customWidgetWithId
   , contentKey
+  , contentKeyOf
+  , KeyPart
+  , keyPart
   , CustomDrawContext (..)
   , CustomMeasureFn
   , CustomDrawBuild
@@ -91,11 +94,14 @@ import NanoUI.Context
   , registerCustomDrawing
   , registerCustomMeasure
   , registerFocusable
+  , registerPointerTracked
   , widgetTheme
   , modifyStore
   )
 import NanoUI.Draw (DrawOp (..))
 import NanoUI.Font (FontMetrics)
+import Data.Word (Word64)
+import Data.Hashable (Hashable, hash)
 import GHC.Float (castFloatToWord32)
 import NanoUI.Id (WidgetId, mix64)
 import NanoUI.Input
@@ -263,6 +269,14 @@ data CustomWidgetSpec a = CustomWidgetSpec
     -- ^ Whether this widget accepts tab/keyboard focus.
   , widgetDamageSlop :: !Float
     -- ^ Padding added to dirty rectangles (for shadows, glow, or drag handles).
+  , widgetTrackPointer :: !Bool
+    -- ^ Run a frame for every pointer move over the widget (default 'False').
+    -- A frame is otherwise run for a pointer that only moved when it crosses
+    -- onto another widget, which is all a widget whose look follows its own
+    -- hover needs. One that draws what is under the pointer inside itself --
+    -- the hovered row of a list that draws its own rows -- sets this, and
+    -- keys its drawing on that row, so a move within one row repaints
+    -- nothing.
   , widgetInteract   :: !(Response -> CustomDrawContext -> Input -> (Response, a))
     -- ^ Interaction hook. It receives the widget's resolved 'Response' (hover,
     -- press, right-click, and clicks including one queued from a previous
@@ -280,6 +294,7 @@ defaultCustomWidgetSpec = CustomWidgetSpec
   , widgetCursor     = Nothing
   , widgetFocusable  = False
   , widgetDamageSlop = defaultDamageSlop
+  , widgetTrackPointer = False
   , widgetInteract   = \resp _ _ -> (resp, ())
   }
 
@@ -288,10 +303,32 @@ defaultCustomWidgetSpec = CustomWidgetSpec
 -- there becomes 1.
 {-# INLINE contentKey #-}
 contentKey :: [Float] -> Int
-contentKey vs =
-  let raw = foldl' (\acc v -> mix64 acc (fromIntegral (castFloatToWord32 v))) 0x9E3779B97F4A7C15 vs
+contentKey vs = contentKeyOf [KeyPart (fromIntegral (castFloatToWord32 v)) | v <- vs]
+
+-- | A 'widgetContent' key over values of any 'Hashable' types:
+--
+-- > widgetContent = contentKeyOf [keyPart version, keyPart scrollY, keyPart query, keyPart selected]
+--
+-- Pass every value the drawing reads, as with 'contentKey'. The parts are
+-- mixed in order, so two lists of the same values in another order make
+-- another key, and an 'Int' or a 'Double' is hashed whole where
+-- 'contentKey' would round it to a 'Float'.
+{-# INLINE contentKeyOf #-}
+contentKeyOf :: [KeyPart] -> Int
+contentKeyOf parts =
+  let raw = foldl' (\acc (KeyPart v) -> mix64 acc v) 0x9E3779B97F4A7C15 parts
       k = fromIntegral raw
    in if k == 0 then 1 else k
+
+-- | One value of a 'contentKeyOf' key, made by 'keyPart'.
+newtype KeyPart = KeyPart Word64
+
+-- | A value's part of a content key: its 'hash', which a list, a 'Maybe' or
+-- a tuple of values has as well, and a type of the app's own has by deriving
+-- 'Hashable'.
+{-# INLINE keyPart #-}
+keyPart :: Hashable a => a -> KeyPart
+keyPart = KeyPart . fromIntegral . hash
 
 -- | Build the draw context a custom widget sees, resolving hover/press/focus
 -- state for @wid@ from the ambient context. One policy for state masking.
@@ -332,6 +369,7 @@ customWidgetWithId wid spec = do
     mapM_ (registerCustomCursor ctx wid) (widgetCursor spec)
     when (widgetDamageSlop spec > 0) $
       registerCustomDamageSlop ctx wid (widgetDamageSlop spec)
+    when (widgetTrackPointer spec) $ registerPointerTracked ctx wid
   resp0 <- addWidget wid NodeDrawing T.empty 0 (widgetLayout spec)
   cdc <- uiIO (customDrawContext ctx (ctxFontMetrics ctx) wid (respHovered resp0) (respPressed resp0))
   pure (widgetInteract spec resp0 cdc inp)

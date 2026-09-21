@@ -1,8 +1,10 @@
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 -- | Modal dialogs and floating in-app windows with title bars and scrolling bodies.
 module NanoUI.Widgets.Overlay
   ( modal
+  , modalWith
   , window
   )
 where
@@ -37,8 +39,11 @@ import NanoUI.Style
   ( AlignX (..)
   , AlignY (..)
   , Direction (..)
+  , Layout (..)
   , Padding (..)
   , Sizing (..)
+  , defaultLayout
+  , fillW
   , grow
   , padB
   , padT
@@ -57,7 +62,8 @@ import NanoUI.Widgets.Chrome
   )
 import NanoUI.Widgets.Popup (floatingOverlay)
 import NanoUI.Widgets.Layout
-  ( flex
+  ( columnWith
+  , flex
   , labelEx
   , row'
   , scrollWith
@@ -77,18 +83,34 @@ data OverlayKind
 -- content behind it. Returns a close-request response and the body's result;
 -- the result is 'Nothing' while closed. The caller owns the open flag.
 modal :: Ui :> es => Bool -> Text -> Eff es a -> Eff es (Response, Maybe a)
-modal = overlay ModalOverlay
+modal = overlay ModalOverlay id
+
+-- | 'modal' with a layout modifier for its panel, which by default fits its
+-- body. The title bar, the rule under it and the padding are the panel's
+-- own. A panel given a fixed height holds its body rather than scrolling it,
+-- and the body fills what the title bar leaves, so a body laid out with
+-- @fillW . fillH@ takes exactly the panel's inside:
+--
+-- > winW <- windowWidth
+-- > winH <- windowHeight
+-- > modalWith (fixedWH (winW - 40) (winH - 40)) open "Find" $
+-- >   columnWith (fillW . fillH) body
+--
+-- A panel is never larger than the window, less the margin every floating
+-- panel keeps from its edge.
+modalWith :: Ui :> es => (Layout -> Layout) -> Bool -> Text -> Eff es a -> Eff es (Response, Maybe a)
+modalWith = overlay ModalOverlay
 
 -- | Show a draggable, resizable in-app window with a scrolling body. Like
 -- 'modal', the response reports a close request and the caller updates the
 -- open flag. Other windows and the page remain interactive outside its bounds.
 window :: Ui :> es => Bool -> Text -> Eff es a -> Eff es (Response, Maybe a)
-window = overlay WindowOverlay
+window = overlay WindowOverlay id
 
 overlay ::
   Ui :> es =>
-  OverlayKind -> Bool -> Text -> Eff es a -> Eff es (Response, Maybe a)
-overlay kind open title child = do
+  OverlayKind -> (Layout -> Layout) -> Bool -> Text -> Eff es a -> Eff es (Response, Maybe a)
+overlay kind shape open title child = do
   ctx <- askContext
   inp <- askInput
   let
@@ -115,27 +137,53 @@ overlay kind open title child = do
         then 0
         else
           min availH (padT padding + titleBarChromeHFor + bodyGap + padB padding)
+    -- The panel's own layout, as the caller shapes it. Its sizes are held
+    -- inside the window, whatever the caller asked for.
+    panel =
+      shape
+        defaultLayout
+          { layoutDirection = Column
+          , layoutWidth = Fit
+          , layoutHeight = Fit
+          , layoutPadding = padding
+          , layoutGap = bodyGap
+          , layoutMinW = minWidth
+          , layoutMinH = minHeight
+          , layoutMaxW = availW
+          , layoutMaxH = availH
+          , layoutAlignX = AlignStart
+          , layoutAlignY = AlignTop
+          }
+    within avail = \case
+      Fixed v -> Fixed (min avail v)
+      sz -> sz
+    panelW = within availW (layoutWidth panel)
+    panelH = within availH (layoutHeight panel)
+    -- A panel of a fixed size is seeded at that size, so its first frame is
+    -- already where it stays.
+    seedW = case panelW of Fixed v -> v; _ -> minWidth
+    seedH = case panelH of Fixed v -> v; _ -> minHeight
     addOverlayNode _ parent =
       addNode
         (ctxNodeArena ctx)
         (if isModal then NodeModal else NodeWindow)
         parent
-        Column
-        Fit
-        Fit
-        padding
-        bodyGap
-        minWidth
-        minHeight
-        availW
-        availH
+        (layoutDirection panel)
+        panelW
+        panelH
+        (layoutPadding panel)
+        (layoutGap panel)
+        (min availW (layoutMinW panel))
+        (min availH (layoutMinH panel))
+        (min availW (layoutMaxW panel))
+        (min availH (layoutMaxH panel))
         0
-        AlignStart
-        AlignTop
+        (layoutAlignX panel)
+        (layoutAlignY panel)
     enter wid = do
       when isModal (beginModal ctx)
       seedFloatingPanel ctx wid
-        =<< floatingSeedRect ctx wid isModal minWidth minHeight margin winW winH
+        =<< floatingSeedRect ctx wid isModal seedW seedH margin winW winH
     titleLabel = void (labelEx (titleLabelLayoutFor barH) title)
   floatingOverlay open isModal addOverlayNode enter $ do
     close <-
@@ -147,7 +195,12 @@ overlay kind open title child = do
         flex
         withKey ("close" :: Text) closeButton
     when (isModal && not (T.null title)) separator
-    r <- scrollWith (tight . grow) child
+    -- A panel of a fixed height holds its body, which fills what the
+    -- title bar leaves; any other panel scrolls a body taller than the
+    -- window.
+    r <- case panelH of
+      Fixed _ -> columnWith (tight . grow . fillW) child
+      _ -> scrollWith (tight . grow) child
     when isModal (uiIO (endModal ctx))
     pure (respClicked close, r)
 

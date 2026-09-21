@@ -37,7 +37,6 @@ import GHC.Clock (getMonotonicTime)
 import NanoUI
 import NanoUI.Backend.Sdl (SdlOptions (..), defaultSdlOptions, runSdlApp)
 import NanoUI.Context (Context (..))
-import NanoUI.Monad (uiTime)
 import NanoUI.Testing (askContext, markDirty)
 import SDL3.Sys.Bindgen.Events (SDL_Event, SDL_TextInputEvent (..), data SDL_EVENT_TEXT_INPUT)
 import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst

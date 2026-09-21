@@ -21,6 +21,7 @@
 -- screen. Releasing outside the grid cancels the drag.
 module NanoUI.Widgets.PaneGrid
   ( GridAxis (..)
+  , GridNode (..)
   , PaneGridConfig (..)
   , defaultPaneGridConfig
   , PaneGridCtx (..)
@@ -71,7 +72,7 @@ import NanoUI.Input
   , inputMousePos
   , inputMousePressed
   )
-import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO, withIdFrame, withKey)
+import NanoUI.Monad (Ui, askContext, askInput, nextId, releaseFocus, uiIO, withIdFrame, withKey)
 import NanoUI.Id (IdContext (..), WidgetId, hashWidgetId)
 import NanoUI.Frame.Hit (nodeInteractionHit, scrollHitRect)
 import NanoUI.Frame.Input (isInteractiveNode)
@@ -107,6 +108,7 @@ import NanoUI.Types
   ( DamageBounds (..)
   , Rect (..)
   , V2 (..)
+  , clamp01
   , lerpColor
   , rectHit
   , rectH
@@ -209,6 +211,21 @@ data PaneGridConfig es = PaneGridConfig
     -- width without freezing the height of the row it sits in, and a grid
     -- with a pinned pane at each end keeps both, the panes between them
     -- taking the difference.
+  , pgInitial :: !(Maybe GridNode)
+    -- ^ The split tree the grid starts from on its first frame (default
+    -- 'Nothing', a single pane). A grid whose last pane is closed starts
+    -- again from one fresh pane, not from this tree. Pane and split ids are
+    -- the caller's to choose: unique within the tree, from 1 and below
+    -- @2^63@ (0 is the grid's "none"), and the ids 'pgViewPane' is asked
+    -- for; panes the grid makes later take ids above all of them. A ratio
+    -- is honoured from the first frame, and a pinned pane ('pgFixedPanes')
+    -- keeps the extent the ratio gives it once the grid has a size:
+    --
+    -- > pgInitial = Just (Split 3 AxisV 0.25 (Pane 1) (Pane 2))
+  , pgFocusable :: !Bool
+    -- ^ Whether the grid is a Tab stop whose arrow, @m@, @x@ and Escape keys
+    -- act on its panes (default 'True'). Turn it off for a grid that only
+    -- lays out and resizes panes whose content owns the keyboard.
   , pgViewPane :: !(Word64 -> PaneGridCtx es -> Eff es PaneView)
     -- ^ Renders the content of one pane.
   }
@@ -225,6 +242,8 @@ defaultPaneGridConfig =
     , pgEdgeBand = 20
     , pgPreserveDragSize = False
     , pgFixedPanes = const False
+    , pgInitial = Nothing
+    , pgFocusable = True
     , pgViewPane = \_ _ -> pure (PaneView "" False Nothing)
     }
 
@@ -344,6 +363,12 @@ data DragInfo = DragInfo
 -- Tree + focus state
 -- -----------------------------------------------------------------------------
 
+-- | The largest pane or split id in a tree.
+treeMaxId :: GridNode -> Word64
+treeMaxId = \case
+  Pane p -> p
+  Split sid _ _ a b -> maximum [sid, treeMaxId a, treeMaxId b]
+
 -- | The grid's split tree persisted in the widget store, if seeded.
 lookupTree :: Int -> WidgetStore -> Maybe GridNode
 lookupTree = lookupDyn
@@ -374,7 +399,9 @@ paneGrid cfg = do
   wid <- nextId
   ctx <- askContext
   inp <- askInput
-  uiIO (registerFocusable ctx wid)
+  -- A grid that is no Tab stop gives up any focus it still has, from a frame
+  -- when it was one, so its ring does not stay drawn round a pane.
+  if pgFocusable cfg then uiIO (registerFocusable ctx wid) else releaseFocus wid
   let key = intKey wid
       gestK = slotKey SlotPaneGest key
       grabK = slotKey SlotPaneGrab key
@@ -393,11 +420,17 @@ paneGrid cfg = do
       -- is already above every id in the tree.
       pure (t, fromIntegral (findSlot fieldInt 1 seedK st))
     Nothing -> do
-      let seed = max 1 (fromIntegral (findSlot fieldInt 1 seedK st))
-          start = Pane seed
+      let mStored = lookupSlot fieldInt seedK st
+          stored = maybe 1 (max 1 . fromIntegral) mStored
+          (start, next) = case pgInitial cfg of
+            -- A stored seed is a grid that had a tree and closed its last
+            -- pane. It starts again from one fresh pane, like any other grid,
+            -- so no id a closed pane's state is kept under comes back.
+            Just t | Nothing <- mStored -> (t, max stored (treeMaxId t + 1))
+            _ -> (Pane stored, stored + 1)
       uiIO . setStore ctx . bumpMirror $
-        insertSlot fieldInt seedK (fromIntegral (seed + 1)) (insertDyn key start st)
-      pure (start, seed + 1)
+        insertSlot fieldInt seedK (fromIntegral next) (insertDyn key start st)
+      pure (start, next)
   mPrev <- uiIO (getPrevRect ctx wid)
   let baseRect = fromMaybe (Rect 0 0 0 0) mPrev
       spanK = slotKey SlotPaneSpan key
@@ -518,7 +551,7 @@ paneGrid cfg = do
   -- dismissable popup inside a pane); the grid then claims the key so
   -- neither a nested overlay nor the app also acts on it.
   focusedNow <- uiIO (getFocusId ctx)
-  when (focusedNow == wid) $ do
+  when (pgFocusable cfg && focusedNow == wid) $ do
     nav <- useKeyNav wid
     let ch = inputChars inp
         cur = focusedInit
@@ -588,6 +621,13 @@ splitSideLay :: GridAxis -> Float -> Layout
 splitSideLay AxisV p = sizingLay (Percent p) (Grow 1)
 splitSideLay AxisH p = sizingLay (Grow 1) (Percent p)
 
+-- | Sizing for a side of a split whose region has no length yet: a grow
+-- weight along the main axis, so the two sides share the region left after
+-- the gutter in the split's ratio. A zero weight would not grow at all.
+splitWeightLay :: GridAxis -> Float -> Layout
+splitWeightLay AxisV w = sizingLay (Grow (max 1.0e-3 w)) (Grow 1)
+splitWeightLay AxisH w = sizingLay (Grow 1) (Grow (max 1.0e-3 w))
+
 -- | Sizing for the side of a split that holds a pinned pane: its extent in
 -- pixels along the main axis. A percent of this frame's real width is what
 -- makes an unpinned side track a resize, so a pinned one is laid out in the
@@ -605,11 +645,10 @@ minSized l minW_ minH_ = l {layoutMinW = minW_, layoutMinH = minH_}
 paneLay :: Float -> Layout
 paneLay m = minSized fillLay m m
 
--- Percent of the main-axis extent taken by an A side of the given length.
+-- Percent of the main-axis extent, of positive length, taken by an A side of
+-- the given length.
 splitPct :: Float -> Float -> Float
-splitPct avail d
-  | avail <= 0 = 50
-  | otherwise = d / avail * 100
+splitPct avail d = d / avail * 100
 
 -- -----------------------------------------------------------------------------
 -- Rendering
@@ -678,7 +717,7 @@ renderNode env dividers = \case
         [] <$ container NodeContainer (paneLay (geMinSize env)) (pure ())
     | otherwise ->
         renderPane env pid (paneRect env pid) (paneLay (geMinSize env)) (draggingPane env pid)
-  Split sid0 ax _ a b ->
+  Split sid0 ax ratio a b ->
     withKey sid0 $ do
       let (wa, ha) = subtreeMin (geMinSize env) (geGutter env) a
           (wb, hb) = subtreeMin (geMinSize env) (geGutter env) b
@@ -692,10 +731,15 @@ renderNode env dividers = \case
           pinA = pinnedSide (pgFixedPanes (geCfg env)) a
           pinB = pinnedSide (pgFixedPanes (geCfg env)) b
           (aLay, bLay)
-            -- A region of no length has no extent to hold either side at, so
-            -- both sides fall back to the share 'splitPct' reports rather
-            -- than to a zero-length pin.
-            | pinA == pinB || avail <= 0 =
+            -- A region not laid out yet -- the grid's first frame, or a split
+            -- made this frame -- has no length to take a share of or to pin
+            -- a side at. The two sides share out what the solver gives them
+            -- after the gutter, in the split's own ratio.
+            | avail <= 0 =
+                ( minSized (splitWeightLay ax (clamp01 ratio)) wa ha
+                , minSized (splitWeightLay ax (1 - clamp01 ratio)) wb hb
+                )
+            | pinA == pinB =
                 (minSized (splitSideLay ax (splitPct avail dA)) wa ha, minSized fillLay wb hb)
             | pinA = (minSized (pinnedSideLay ax dA) wa ha, minSized fillLay wb hb)
             | otherwise =
