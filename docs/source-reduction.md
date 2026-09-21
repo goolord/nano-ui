@@ -317,3 +317,52 @@ Extracting a shared, parameterized subdivision would add a generic point
 abstraction and a cross-package export used once, and would change one side's
 tessellation. Retain both, as the earlier audit did for its tessellation
 candidates.
+
+## Fourth pass
+
+Baseline `92df64d`, same toolchain. Haskell across all packages goes from
+62,434 to 61,591 physical lines (**-843**) and from 70,746 to 69,892
+Fourmolu-normalized lines (**-854**); library directories account for -681
+physical lines, tests for -138. The SDL shim loses another 30 lines of C.
+
+| Commit | Change |
+| --- | --- |
+| `501d279` | `LANGUAGE` pragmas already on through GHC2024 or `default-extensions` (-109) |
+| `3f23b53` | The facade lists `Widgets.Custom`, `RichText`, `TextDocument` and `TextField` as modules; the export set is unchanged (checked against the interface file) |
+| `7c81c4a` | `IOArr` for the arena's mutable arrays |
+| `f63d5c1` | SDL: every non-empty line is shaped, so the per-character glyph path (codepoint-keyed atlas, ASCII/non-ASCII quad caches, C glyph renderer) was only reached for empty text. Removed; the atlas re-warm now shapes a printable-ASCII line |
+| `29ac074` | SDL sessions open from `SdlOptions`; `WindowConfig` was a field-for-field copy |
+| `9b4f0c3` | SDL cursors in a `SmallArray` indexed by a derived `Enum` |
+| `22eeeb4` | Cozette rows unpacked directly, one bit reader; the 1x/2x/4x tables are unchanged |
+| `dea82d8` | `maybe`/`<\|>` in place of nested `case` fallbacks |
+| `6fa50d2` | Widget layouts composed from the `Style` modifiers instead of record literals |
+| `a110dcd` | `Response` built positionally |
+| `b712c50` | One flip rule for the four rect-anchored popup sides (equal to the old placement on 11,016 cases) |
+| `7d6d041`, `a5d89e2` | Pane grid `axisLay`; one four-point emitter in the SVG stroker (rasters byte-identical for every cap/join) |
+| `ae14ff8` | Diagrams: `foldMap` titles, one fill for marker shapes (chart ops unchanged) |
+| `0feccc2`, `0112fff`, `1e6fa04` | Demo options parsed into `SdlOptions`; RGFW demo cycles scales with `nextEnum`; `whenM` in the log viewer |
+| tests | `assertJust`, `t`/`px` runner helpers, one thumb-drag test for both axes, tuple table fixtures, shared pane grid config |
+
+Checks: `cabal build all`, all twelve buildable suites, the demo UI tests,
+500 RGFW profile frames and `cabal check` pass. Headless allocation is
+byte-identical in all five scenes. The SDL bench's warm lookup gate now
+measures shaped lines (0.002 B/lookup). SDL microbenchmarks shift by about
+±100 B/frame after `29ac074`; with ten times longer samples that falls to
+about ±10 B, so it is a one-off startup allocation amortized over the
+samples, not a per-frame cost. Seven-pair SDL timings are centred on zero.
+
+The headless `svg` scene reads about 2% slower from `dea82d8` on. That scene
+only calls `rasterizeSvg`, and `NanoUI/Svg.o` is byte-identical before and
+after the commit (GHC does not recompile it), so this is a binary-layout
+effect on the rasterizer's loop rather than slower code.
+
+Considered and not landed: `hsc2hs` for the shaped-result struct (about -10
+net once the new module and build tool are counted); `RecordWildCards` at SDL
+constructors (the locals do not share the field names); a shared
+theme-scope accessor (-1 after imports); `fixedSpec` for custom widgets, a
+`benchN` profile helper, the form `select`/`radio` helper and `FormView`
+deriving via `Ap` (each under five lines net); a `MultiWayIf` rewrite of
+the solver's height resolution (two lines on the per-node path). The
+excluded trade-offs were a shared SDL/RGFW event type, trimming the RGFW
+bindings, public re-export shells over internal modules, and demo/debug
+text changes. Internal modules keep explicit export lists.
