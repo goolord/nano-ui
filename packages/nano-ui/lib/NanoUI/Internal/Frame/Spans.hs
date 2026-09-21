@@ -307,16 +307,13 @@ widgetTextSpans ctx nt idx x y w h = do
     _ ->
       pure [(Rect px py tw th, txt, fg, bg) | (txt, px, py, tw, th) <- placements, not (T.null txt)]
 
--- | Cacheable widget labels depend on text, style, font size, alignment and
--- dimensions, but not the absolute node origin. Text
--- fields / areas / colour pickers / sliders are data-dependent and stay out.
-cacheableWidgetLabel :: NodeType -> Bool
-cacheableWidgetLabel = hasCenteredLabel
-
 widgetTextPlacements ::
   Context -> NodeType -> NodeIdx -> Float -> Float -> Float -> Float -> IO [(T.Text, Float, Float, Float, Float)]
 widgetTextPlacements ctx nt idx x y w h
-  | cacheableWidgetLabel nt = do
+  -- A centred label's placement depends on its text, style, font, alignment
+  -- and size but not its origin, so it is cached. Field, picker and slider
+  -- text depends on their data.
+  | hasCenteredLabel nt = do
       placement <- cachedWidgetLabel ctx nt idx w h
       pure [(txt, x + px, y + py, tw, th) | Just (WidgetTextPlacement txt px py tw th) <- [placement]]
   | otherwise = computeWidgetTextPlacements ctx nt idx x y w h
@@ -328,7 +325,7 @@ forWidgetTextPlacements_ ::
   Context -> NodeType -> NodeIdx -> Float -> Float -> Float -> Float ->
   (Bool -> T.Text -> Float -> Float -> Float -> Float -> IO ()) -> IO ()
 forWidgetTextPlacements_ ctx nt idx x y w h emit
-  | cacheableWidgetLabel nt = do
+  | hasCenteredLabel nt = do
       placement <- cachedWidgetLabel ctx nt idx w h
       case placement of
         Nothing -> pure ()

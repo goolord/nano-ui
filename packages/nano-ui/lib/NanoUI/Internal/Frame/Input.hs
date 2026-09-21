@@ -60,7 +60,8 @@ import NanoUI.Internal.Input
   , modShift
   )
 import NanoUI.Internal.Layout.Arena
-  ( NodeIdx
+  ( isWidgetNode
+  , NodeIdx
   , NodeType (..)
   , findNodeM
   , foldNodesM
@@ -189,21 +190,10 @@ findTopWidgetUnderMouse ctx mouse wanted = do
         nodeClippedHit ctx idx rect mouse <&&> overlayHitAllowed ctx idx mouse
   traverse (getWidgetId na) mIdx
 
--- | The node types a press can make active: buttons, checkboxes, radio
--- options, tree rows, sliders, selects, colour pickers, text fields, text
--- areas, and drawing nodes, which custom widgets use.
+-- | The node types a press can make active: the controls of 'isWidgetNode'
+-- except the bare 'NodeWidget', which paints and takes nothing.
 isInteractiveNode :: NodeType -> Bool
-isInteractiveNode nt =
-  nt == NodeButton
-    || nt == NodeCheckbox
-    || nt == NodeRadio
-    || nt == NodeTree
-    || nt == NodeSlider
-    || nt == NodeSelect
-    || nt == NodeColorPicker
-    || nt == NodeTextInput
-    || nt == NodeTextArea
-    || nt == NodeDrawing
+isInteractiveNode nt = nt /= NodeWidget && isWidgetNode nt
 
 -- | Resolve a left-button release against this frame's solved rects, and let
 -- go of the active widget. Runs after layout.
