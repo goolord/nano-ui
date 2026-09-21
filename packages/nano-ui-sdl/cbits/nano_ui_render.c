@@ -34,9 +34,15 @@ void nano_ui_batch_flush(NanoUiBatch *batch)
         }
         return;
     }
-    const SDL_Vertex *sdl_verts = (const SDL_Vertex *)batch->verts;
+    /* The interleaved SDL_Vertex buffer read in place through strides; an
+     * untextured batch passes no UVs. */
+    const SDL_Vertex *v = (const SDL_Vertex *)batch->verts;
     const int *idx = (const int *)batch->indices + batch->pending_start;
-    SDL_RenderGeometry(batch->renderer, batch->pending_texture, sdl_verts, batch->vert_count, idx, batch->pending_n);
+    const int stride = (int)sizeof(SDL_Vertex);
+    SDL_RenderGeometryRaw(batch->renderer, batch->pending_texture,
+                          &v->position.x, stride, &v->color, stride,
+                          batch->pending_texture ? &v->tex_coord.x : NULL, stride,
+                          batch->vert_count, idx, batch->pending_n, (int)sizeof(int));
     batch->pending_n = 0;
     batch->pending_start = 0;
     batch->pending_texture = NULL;
