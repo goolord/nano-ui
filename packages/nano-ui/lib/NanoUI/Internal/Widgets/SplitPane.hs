@@ -18,6 +18,7 @@ module NanoUI.Internal.Widgets.SplitPane
   , paneExist
   , subtreeMin
   , mainMins
+  , splitMins
   , mainLen
   , splitLength
   , layoutNode
@@ -27,11 +28,8 @@ module NanoUI.Internal.Widgets.SplitPane
   , pinnedSide
   , reflowFixed
   , treeRemovePane
-  , treeMovePane
   , clampTreeRatio
-  , dropPreview
   , DropPreview (..)
-  , dropPreviewTree
   , dropPreviewTreeSized
   , dropTargetForPane
   , nearestPane
@@ -129,6 +127,11 @@ mainMins :: GridAxis -> (Float, Float) -> (Float, Float) -> (Float, Float)
 mainMins AxisV (wa, _) (wb, _) = (wa, wb)
 mainMins AxisH (_, ha) (_, hb) = (ha, hb)
 
+-- | 'mainMins' of a split's two subtrees.
+splitMins :: Float -> Float -> GridAxis -> GridNode -> GridNode -> (Float, Float)
+splitMins minSize spacing axis a b =
+  mainMins axis (subtreeMin minSize spacing a) (subtreeMin minSize spacing b)
+
 -- | A-side extent for a split along its main axis, honouring the subtree
 -- minima. The ratio shares out the extent left after the gutter between the
 -- sides, so a 0.5 split gives both sides the same length. Falls back to the
@@ -177,9 +180,7 @@ layoutNode minSize spacing sp r =
   case sp of
     Pane pid -> (M.singleton pid r, [])
     Split sid axis ratio0 a b ->
-      let (wa, ha) = subtreeMin minSize spacing a
-          (wb, hb) = subtreeMin minSize spacing b
-          (mA, mB) = mainMins axis (wa, ha) (wb, hb)
+      let (mA, mB) = splitMins minSize spacing axis a b
           (rA, rB, band) = splitBounds axis spacing r (splitLength spacing (mainLen axis r) mA mB ratio0)
           self = DividerInfo sid axis r band ratio0
           (regionsA, divsA) = layoutNode minSize spacing a rA
@@ -251,9 +252,7 @@ reflowFixed isFixed minSize spacing = go
     go oldR newR (Split sid axis ratio a b) =
       Split sid axis ratio' (go oldA newA a) (go oldB newB b)
       where
-        (wa, ha) = subtreeMin minSize spacing a
-        (wb, hb) = subtreeMin minSize spacing b
-        (mA, mB) = mainMins axis (wa, ha) (wb, hb)
+        (mA, mB) = splitMins minSize spacing axis a b
         oldAvail = mainLen axis oldR
         newAvail = mainLen axis newR
         dOld = splitLength spacing oldAvail mA mB ratio
@@ -340,9 +339,7 @@ clampTreeRatio tree splitId region spacing minSize r0 =
        in if usable <= 0
             then r0
             else
-              let (wa, ha) = subtreeMin minSize spacing a
-                  (wb, hb) = subtreeMin minSize spacing b
-                  (mA, mB) = mainMins ax (wa, ha) (wb, hb)
+              let (mA, mB) = splitMins minSize spacing ax a b
                in splitLength spacing avail mA mB r0 / usable
 
 -- | Which drop zone a pointer falls into for a target pane rect.
@@ -403,10 +400,22 @@ topLevelDropTarget band r@(Rect l t w h) p@(V2 x y)
   | y >= t + h - band = Just (DropTop AxisH False)
   | otherwise = Nothing
 
--- | Drop preview for a drop target: the rect to highlight and the
--- 'PaneDrop' the drop performs. The highlight is found by simulating the
--- drop ('treeMovePane' with a throwaway split id) and laying the resulting
--- tree out ('layoutNode') into the grid rect, so it is exactly the region the
+-- | A simulated drop, laid out: everything needed to draw the grid as the
+-- drop will leave it without laying the tree out a second time.
+data DropPreview = DropPreview
+  { dpTree :: !GridNode
+    -- ^ The tree the drop produces.
+  , dpRegions :: !(Map Word64 Rect)
+    -- ^ Its pane regions ('layoutNode'), the dragged pane's included.
+  , dpDividers :: ![DividerInfo]
+    -- ^ Its dividers ('layoutNode').
+  , dpRect :: !Rect
+    -- ^ The dragged pane's region.
+  }
+  deriving (Eq, Show)
+
+-- | Drop preview for a drop target. The rect to highlight ('dpRect') comes
+-- from simulating the drop ('treeMovePane') and laying the resulting tree out ('layoutNode') into the grid rect, so it is exactly the region the
 -- dragged pane will occupy after the drop, accounting for the restructuring
 -- that removing the pane causes (its parent split collapses and sibling
 -- subtrees expand) and for @spacing@ and min-size floors. Estimating the rect
@@ -420,39 +429,16 @@ topLevelDropTarget band r@(Rect l t w h) p@(V2 x y)
 -- The rect is only meaningful inside the post-drop layout: the other panes
 -- move too (a swap sends the target to the dragged pane's old slot, a
 -- top-level drop squeezes the whole grid into one half), so a caller that
--- highlights it should draw the rest of the grid from 'dropPreviewTree' as
--- well, not from the pre-drop tree.
-dropPreview :: Float -> Float -> GridNode -> Word64 -> Rect -> PaneDrop -> Maybe (Rect, PaneDrop)
-dropPreview minSize spacing tree moved baseRect dt = do
-  dp <- dropPreviewTree minSize spacing tree moved 0 baseRect dt
-  pure (dpRect dp, dt)
-
--- | A simulated drop, laid out: everything needed to draw the grid as the
--- drop will leave it without laying the tree out a second time.
-data DropPreview = DropPreview
-  { dpTree :: !GridNode
-    -- ^ The tree the drop produces.
-  , dpRegions :: !(Map Word64 Rect)
-    -- ^ Its pane regions ('layoutNode'), the dragged pane's included.
-  , dpDividers :: ![DividerInfo]
-    -- ^ Its dividers ('layoutNode').
-  , dpRect :: !Rect
-    -- ^ The dragged pane's region, the rect 'dropPreview' reports.
-  }
-  deriving (Eq, Show)
-
--- | 'dropPreview' together with the tree the drop produces and its layout.
+-- highlights it should draw the rest of the grid from 'dpTree' as well,
+-- not from the pre-drop tree.
+--
 -- The drop's new split, if any, takes @splitId@, so passing the id the real
--- drop will use keeps the split's identity across the drop.
-dropPreviewTree :: Float -> Float -> GridNode -> Word64 -> Word64 -> Rect -> PaneDrop -> Maybe DropPreview
-dropPreviewTree = dropPreviewTreeSized Nothing
-
--- | Like 'dropPreviewTree', but optionally retain the source pane's extent
--- along its parent split's axis, transferring it to the destination axis.
--- A thin left/right pane thus stays thin when moved to the top/bottom.
--- The requested size is
--- clamped to the destination's subtree minima. Center swaps ignore the size.
--- Pass the source rect from the committed layout, never the preview layout.
+-- drop will use keeps the split's identity across the drop. With a @source@
+-- rect the source pane keeps its extent along its parent split's axis,
+-- transferred to the destination axis, so a thin left/right pane stays thin
+-- when moved to the top/bottom. The requested size is clamped to the
+-- destination's subtree minima, and center swaps ignore it. Pass the source
+-- rect from the committed layout, never the preview layout.
 dropPreviewTreeSized :: Maybe Rect -> Float -> Float -> GridNode -> Word64 -> Word64 -> Rect -> PaneDrop -> Maybe DropPreview
 dropPreviewTreeSized source minSize spacing tree moved splitId baseRect dt = do
   t' <- treeMovePane moved splitId dt tree

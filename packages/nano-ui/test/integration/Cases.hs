@@ -26,7 +26,6 @@ import NanoUI.Internal.Layout.Arena
   )
 import NanoUI.Internal.Widgets.SplitPane
   ( PaneDrop (..)
-  , dropPreview
   , DropPreview (..)
   , dropPreviewTreeSized
   , dropTargetForPane
@@ -609,7 +608,7 @@ runPaneGridMixedDragTest ctx failed = do
       regions0 = fst (layoutNode minSize gutter tree0 base)
       r2 = regions0 M.! 2
       r3 = regions0 M.! 3
-      preview dt = dropPreview minSize gutter tree0 1 base dt
+      preview dt = (\dp -> (dpRect dp, dt)) <$> dropPreviewTreeSized Nothing minSize gutter tree0 1 0 base dt
   assertEq failed regions0 $
     M.fromList
       [ (1, Rect 0 0 298 400)
