@@ -320,8 +320,8 @@ runTabsScrollTest _ failed = do
     -- wheeling right stays put (clamped at the end); wheeling left runs
     -- back to the start and re-shows the first tab, and further left
     -- notches clamp at zero instead of running past it. The deltas are
-    -- coupled to the framework wheel step (scrollLineFor, 20px per notch
-    -- on window hosts): V2 0 20 saturates at max, and +/-100 notches
+    -- coupled to the framework wheel step (scrollWheelStep, 60px per notch
+    -- by default): V2 0 20 saturates at max, and +/-100 notches
     -- crosses the whole range regardless of the exact step.
     let wheelX d = inp {inputMousePos = spanCenter (Rect cx cy cw ch), inputScroll = V2 d 0}
     _ <- runFrame ctx (wheelX 10) (mkTabs 0)

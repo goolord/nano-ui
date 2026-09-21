@@ -339,13 +339,9 @@ normalizeTextFieldClicks ctx wid flat row col multiline rawClicks = do
     then modifyInteraction ctx (\s -> s {isTextFieldClickCell = Just cell}) >> pure rawClicks
     else do
       mPrev <- getsInteraction ctx isTextFieldClickCell
-      if maybe False (sameCell cell) mPrev
+      -- A single-line cell leaves row and column 0 and a multiline one
+      -- leaves the flat index 0, so the derived equality compares the
+      -- coordinates that mode uses.
+      if mPrev == Just cell
         then pure rawClicks
         else modifyInteraction ctx (\s -> s {isTextFieldClickCell = Just cell}) >> pure 1
-  where
-    sameCell a b =
-      textFieldClickWidget a == textFieldClickWidget b
-        && textFieldClickMultiline a == textFieldClickMultiline b
-        && if textFieldClickMultiline a
-          then textFieldClickRow a == textFieldClickRow b && textFieldClickCol a == textFieldClickCol b
-          else textFieldClickFlat a == textFieldClickFlat b

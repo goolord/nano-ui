@@ -55,7 +55,6 @@ module NanoUI.Internal.WidgetText
   , tableSortMarkOf
   , tableSortBlank
   , buttonVisualStyle
-  , buttonFlagsFromStyle
   ) where
 
 import Data.Bits ((.&.), (.|.), complement, shiftL, shiftR)
@@ -385,14 +384,6 @@ hasFlag flag si = si .&. flag /= 0
 {-# INLINE buttonVisualStyle #-}
 buttonVisualStyle :: Int -> Int
 buttonVisualStyle si = si .&. complement buttonFlagMask
-
-{-# INLINE buttonFlagsFromStyle #-}
-buttonFlagsFromStyle :: Int -> (Bool, Bool, Bool)
-buttonFlagsFromStyle si =
-  ( si .&. buttonFlagClose /= 0
-  , si .&. buttonFlagTab /= 0
-  , si .&. buttonFlagTable /= 0
-  )
 
 
 

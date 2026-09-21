@@ -22,7 +22,7 @@ import NanoUI.Internal.Context
   , isDisabled
   , lookupCustomCursor
   )
-import NanoUI.Internal.Font (FontMetrics, sliderHandleSlack, sliderTrackBounds)
+import NanoUI.Internal.Font (sliderHandleSlack, sliderTrackBounds)
 import NanoUI.Internal.Frame.Hit
   ( findNodeByWidgetId
   , nodePointVisible
@@ -181,25 +181,22 @@ cursorKindAt ctx wid mouse inp
                 Just NodeCheckbox -> widgetPointerCursor ctx wid mouse
                 Just NodeRadio -> widgetPointerCursor ctx wid mouse
                 Just NodeTree -> widgetPointerCursor ctx wid mouse
-                Just NodeSelect -> selectCursorKind ctx wid mouse
+                Just NodeSelect -> rectCursorKind UiCursorPointer ctx wid mouse
                 Just NodeColorPicker -> pure UiCursorPointer
                 Just NodeTextInput -> textInputCursorKind ctx wid mouse
                 Just NodeTextArea -> textAreaCursorKind ctx wid mouse
                 Just NodeSlider -> sliderCursorKind ctx wid mouse inp
                 _ -> pure UiCursorDefault
 
-selectCursorKind :: Context -> WidgetId -> V2 -> IO UiCursorKind
-selectCursorKind ctx wid mouse = do
+-- | @kind@ over the widget's visible rect, the default cursor elsewhere.
+rectCursorKind :: UiCursorKind -> Context -> WidgetId -> V2 -> IO UiCursorKind
+rectCursorKind kind ctx wid mouse = do
   visible <- widgetVisibleAt ctx wid mouse
   if not visible
     then pure UiCursorDefault
     else do
       mrect <- scrollHitRect ctx wid
-      pure
-        ( if maybe False (`rectContains` mouse) mrect
-            then UiCursorPointer
-            else UiCursorDefault
-        )
+      pure (if maybe False (`rectContains` mouse) mrect then kind else UiCursorDefault)
 
 widgetVisibleAt :: Context -> WidgetId -> V2 -> IO Bool
 widgetVisibleAt ctx wid mouse = do
@@ -255,26 +252,7 @@ textAreaCursorKind ctx wid mouse = do
     onScroll <- isMouseOnTextAreaScrollBarAt ctx idx mouse
     if onScroll
       then pure UiCursorDefault
-      else textFieldCursorKind ctx wid mouse $ \_ x y w h ->
-        Rect x y w h
-
-textFieldCursorKind ::
-  Context
-  -> WidgetId
-  -> V2
-  -> (FontMetrics -> Float -> Float -> Float -> Float -> Rect)
-  -> IO UiCursorKind
-textFieldCursorKind ctx wid mouse fieldAt = do
-  visible <- widgetVisibleAt ctx wid mouse
-  if not visible
-    then pure UiCursorDefault
-    else do
-      mrect <- scrollHitRect ctx wid
-      pure $
-        case mrect of
-          Just (Rect x y w h)
-            | rectContains (fieldAt (ctxFontMetrics ctx) x y w h) mouse -> UiCursorText
-          _ -> UiCursorDefault
+      else rectCursorKind UiCursorText ctx wid mouse
 
 tableColResizeCursorKind :: Context -> Input -> IO (Maybe UiCursorKind)
 tableColResizeCursorKind ctx inp = do

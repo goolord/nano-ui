@@ -21,6 +21,7 @@ module NanoUI.Internal.Frame.Chrome
 
 import Control.Monad (when)
 import Data.IORef (readIORef)
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Read as TR
@@ -64,10 +65,11 @@ import NanoUI.Internal.Style
 import NanoUI.Internal.Types (Color (..), Rect (..), colorA, colorRGBA, lerpColor)
 import NanoUI.Internal.WidgetText
   ( hasFlag
-  , buttonFlagsFromStyle
   , buttonVisualStyle
+  , buttonFlagClose
   , buttonFlagMenuBar
   , buttonFlagMenu
+  , buttonFlagTab
   , buttonFlagTable
   , selectDisplayText
   , stripeColor
@@ -243,11 +245,11 @@ widgetVisualStyle ctx nt idx = do
     if nt == NodeButton || nt == NodeTree
       then getStyleIdx (ctxNodeArena ctx) idx
       else pure 0
-  let (isClose, isTab, isTable) =
-        if nt == NodeButton
-          then buttonFlagsFromStyle styleIdx
-          else (False, False, False)
-      isMenu = nt == NodeButton && (hasFlag buttonFlagMenu styleIdx || hasFlag buttonFlagMenuBar styleIdx)
+  let buttonFlag flag = nt == NodeButton && hasFlag flag styleIdx
+      isClose = buttonFlag buttonFlagClose
+      isTab = buttonFlag buttonFlagTab
+      isTable = buttonFlag buttonFlagTable
+      isMenu = buttonFlag buttonFlagMenu || buttonFlag buttonFlagMenuBar
   theme <- nodeTheme ctx idx
   let isFocus = focus == wid
       isHot = wid == hot
@@ -264,27 +266,18 @@ widgetVisualStyle ctx nt idx = do
           NodeTree ->
             let btn = themeButton theme
                 accent = themeAccent theme
-                unselectedBg =
-                  case stripeColor theme (treeDecodeStripe styleIdx) of
-                    Just c -> c
-                    Nothing -> styleBg (themePanel theme)
+                unselectedBg = fromMaybe (styleBg (themePanel theme)) (stripeColor theme (treeDecodeStripe styleIdx))
+                treeStyle fill hoverT activeT =
+                  btn
+                    { styleBg = fill
+                    , styleHoverBg = lerpColor unselectedBg accent hoverT
+                    , styleActiveBg = lerpColor unselectedBg accent activeT
+                    , styleBorderWidth = 0
+                    , styleCornerRadius = 0
+                    }
              in if val > 0.5
-                  then
-                    btn
-                      { styleBg = lerpColor unselectedBg accent 0.25
-                      , styleHoverBg = lerpColor unselectedBg accent 0.35
-                      , styleActiveBg = lerpColor unselectedBg accent 0.45
-                      , styleBorderWidth = 0
-                      , styleCornerRadius = 0
-                      }
-                  else
-                    btn
-                      { styleBg = unselectedBg
-                      , styleHoverBg = lerpColor unselectedBg accent 0.12
-                      , styleActiveBg = lerpColor unselectedBg accent 0.22
-                      , styleBorderWidth = 0
-                      , styleCornerRadius = 0
-                      }
+                  then treeStyle (lerpColor unselectedBg accent 0.25) 0.35 0.45
+                  else treeStyle unselectedBg 0.12 0.22
           NodeButton
             | isMenu -> menuItemVisualStyle theme val
             | isClose -> closeButtonStyle theme isHot animT

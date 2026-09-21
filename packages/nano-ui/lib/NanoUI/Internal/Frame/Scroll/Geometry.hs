@@ -23,7 +23,6 @@ module NanoUI.Internal.Frame.Scroll.Geometry
   , scrollGutters2D
   , scrollChromeSuppressed
   , scrollWheelSuppressed
-  , scrollLineFor
   , scrollAxisOverflows
   , scrollChromeActive
   , isScrollStyle2D
@@ -182,12 +181,6 @@ scrollShowsChrome cfg dir =
 
 scrollChromeSuppressed :: ScrollConfig -> DirTag -> Bool
 scrollChromeSuppressed cfg dir = not (scrollShowsChrome cfg dir)
-
--- | Distance one wheel notch scrolls along a live axis. Window hosts step a
--- text line. Widgets that map wheel notches onto a scroller's offset share
--- this so the step cannot drift per caller.
-scrollLineFor :: Float
-scrollLineFor = 20
 
 -- | Wheel eligibility is wider than chrome eligibility: a hidden bar never
 -- paints or drags, but it still scrolls. Only a dead axis ('ScrollNone')
