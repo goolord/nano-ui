@@ -727,8 +727,7 @@ runPaneGridMixedDragTest ctx failed = do
       initialStates <- readIORef paneStates
       assertEq failed (IM.map snd initialStates) expectedValues
       rs <- readIORef rects
-      case (IM.lookup (fromIntegral pa) rs, IM.lookup (fromIntegral pc) rs) of
-        (Just ra, Just rc) -> do
+      assertJust failed ((,) <$> IM.lookup (fromIntegral pa) rs <*> IM.lookup (fromIntegral pc) rs) $ \(ra, rc) -> do
           -- Inside the header, only 2px from the divider: the gutter's
           -- leeway must not extend into this pane and steal the drag.
           let grab = V2 (rectX ra + rectW ra - 2) (rectY ra + 12)
@@ -800,7 +799,6 @@ runPaneGridMixedDragTest ctx failed = do
             assertEq failed (IM.size duringClose) 3
             (closed, _, _, _) <- runFrame ctx (release {inputMousePos = closePos}) ui
             assertEq failed (pgrPanes closed) [pb, pc]
-        _ -> assert failed False
     _ -> assert failed False
 
 
@@ -1056,8 +1054,7 @@ runPaneGridClippedControlTest ctx failed = do
   assertJustM failed (readIORef geometry) $ \(headerId, sid, targetId) -> do
     headerRect <- getPrevRect ctx headerId
     targetRect <- getPrevRect ctx targetId
-    case (headerRect, targetRect) of
-      (Just hr, Just br) -> do
+    assertJust failed ((,) <$> headerRect <*> targetRect) $ \(hr, br) -> do
         -- Place the button's invisible center exactly in the header.
         let headerY = rectY hr + rectH hr / 2
         setScrollOffset ctx sid (rectY br + rectH br / 2 - headerY)
@@ -1072,7 +1069,6 @@ runPaneGridClippedControlTest ctx failed = do
           _ <- runFrame ctx hold ui
           stillRendered <- readIORef rendered
           assert failed (not stillRendered)
-      _ -> assert failed False
 
 -- Clicking the embedded clear (×) must empty the field, keep focus, and fire an
 -- immediate (non-debounced) change pulse.

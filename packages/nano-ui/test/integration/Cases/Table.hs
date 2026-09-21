@@ -153,15 +153,13 @@ runTableScrollRevealTest ctx failed = do
   let scrollInp = inp0 {inputScroll = V2 0 6}
   _ <- runFrame ctx scrollInp ui
   spans1 <- collectTextSpans ctx
-  case (bottomRowIndex spans0, bottomRowIndex spans1) of
-    (Just lo, Just hi) -> do
+  assertJust failed ((,) <$> bottomRowIndex spans0 <*> bottomRowIndex spans1) $ \(lo, hi) -> do
       assert failed (hi > lo)
       -- The revealed band must be filled with real rows, not one clipped sliver
       -- of a stale row scrolling past the top edge.
       let
         visibleRows = [r | (r, t, _, _, _) <- spans1, "row-" `T.isPrefixOf` t]
       assert failed (length visibleRows >= 3)
-    _ -> assert failed False
 
 -- When one cell wraps to several lines the whole row grows; every other
 -- cell in the row must stretch to the same height so stripe backgrounds and
@@ -229,9 +227,7 @@ runTableResizeOverflowTest ctx failed = do
       _ <- runFrame ctx (dragInp x) ui
       mClip <- headerScrollerClip ctx
       mHdr <- headerButtonRect ctx
-      case (mClip, mHdr) of
-        (Just (Rect _ cy _ ch), Just (Rect _ hy' _ hh')) -> assert failed (hy' + hh' <= cy + ch + 0.5)
-        _ -> assert failed False
+      assertJust failed ((,) <$> mClip <*> mHdr) $ \(Rect _ cy _ ch, Rect _ hy' _ hh') -> assert failed (hy' + hh' <= cy + ch + 0.5)
     -- Release the resize drag and let the layout settle.
     _ <- warmup2 ctx inp0 ui
     -- The bar lives at the bottom of the body scroller: pressing its track
@@ -297,11 +293,9 @@ runTableFirstColWidthTest ctx failed = do
   spans <- collectTextSpans ctx
   let findLabel needle =
         listToMaybe [(r, t) | (r, t, _, _, _) <- spans, needle `T.isInfixOf` t]
-  case (findLabel "long-first-col", findLabel "val-1") of
-    (Just (Rect cn _ cw _, _), Just (Rect vx _ _ _, _)) -> do
+  assertJust failed ((,) <$> findLabel "long-first-col" <*> findLabel "val-1") $ \((Rect cn _ cw _, _), (Rect vx _ _ _, _)) -> do
       assertGt failed cw 50
       assert failed (vx > cn + cw - 2)
-    _ -> assert failed False
   pixel <- newPixelContext
   let fitInp = (withInput 280 180) {inputMousePos = V2 40 60}
       fitUi = sortedTable (tableWith (fixedH 100 . (\l -> l {layoutWidth = Fit})) "people" tableFirstColCols tableFirstColRows)
@@ -572,9 +566,7 @@ runTableHBarReachTest ctx failed = do
       -- Header and body cells scroll in lockstep.
       spans <- collectTextSpans ctx
       let xOf needle = listToMaybe [rectX r | (r, t, _, _, _) <- spans, needle `T.isInfixOf` t]
-      case (xOf "Value", xOf "val-") of
-        (Just headerX, Just cellX) -> assert failed (abs (headerX - cellX) <= 1)
-        _ -> assert failed False
+      assertJust failed ((,) <$> xOf "Value" <*> xOf "val-") $ \(headerX, cellX) -> assert failed (abs (headerX - cellX) <= 1)
 
 -- A table with frozen columns builds two scroll nodes under one widget id.
 -- Only one of them may publish the body's geometry: if both did, every frame

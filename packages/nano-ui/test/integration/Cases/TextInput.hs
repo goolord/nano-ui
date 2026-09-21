@@ -836,8 +836,7 @@ runTextArea2DScrollTest ctx failed = do
       barLaneW = textAreaBarLane
       barLaneH = textAreaBarLane
       layouts = textAreaScrollBarLayouts fm field contentW contentH 0 0
-    case (tasbVertical layouts, tasbHorizontal layouts) of
-      (Just vLayout, Just hLayout) -> do
+    assertJust failed ((,) <$> tasbVertical layouts <*> tasbHorizontal layouts) $ \(vLayout, hLayout) -> do
         let
           vTrack = sbTrack vLayout
           hTrack = sbTrack hLayout
@@ -854,7 +853,6 @@ runTextArea2DScrollTest ctx failed = do
         V2 offX offY <- getScrollOffset2D ctx (respId resp)
         assertGt failed offX 0
         assertGt failed offY 0
-      _ -> assert failed False
 
 runTextAreaScrollCursorLeavesViewportTest :: Context -> IORef Int -> IO ()
 runTextAreaScrollCursorLeavesViewportTest ctx failed = do

@@ -328,9 +328,7 @@ runScrollUiTest ctx failed = do
   writeIORef command (Just (\sid -> scrollPagesUi sid (V2 0 (-0.5)) ScrollInstant))
   settle
   after <- offsetNow
-  case (before, after) of
-    (Just b, Just a) -> assert failed (a < b)
-    _ -> assert failed False
+  assertJust failed ((,) <$> before <*> after) $ \(b, a) -> assert failed (a < b)
 
 -- | 'takeEscape' is the view's when nothing else took it, is taken once, and
 -- is not the view's while a text field's menu is open.

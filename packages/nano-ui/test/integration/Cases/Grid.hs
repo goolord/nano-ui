@@ -93,13 +93,11 @@ runFontCompositionTest ctx failed = do
         underline "Underline Helper"
   _ <- runFrame ctx inp ui
   spans <- collectTextSpans ctx
-  case (spanOf "Standard Text" spans, spanOf "Composed" spans) of
-    (Just (std, stdFg), Just (r, fg)) -> do
+  assertJust failed ((,) <$> spanOf "Standard Text" spans <*> spanOf "Composed" spans) $ \((std, stdFg), (r, fg)) -> do
       assertEq failed (rectH std) 16.0
       assertEq failed (rectH r) 24.0
       assertEq failed fg customCol
       assert failed (stdFg /= customCol)
-    _ -> assert failed False
   let na = ctxNodeArena ctx
   n <- arenaCount na
   styles <- mapM (\i -> (,) <$> getText na i <*> getStyleIdx na i) [0 .. n - 1]

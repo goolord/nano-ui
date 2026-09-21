@@ -241,8 +241,7 @@ runOverlayClickThroughTest ctx failed = do
     runStacked = do
       _ <- warmup2 ctx inp0 stackedUi
       ((_, mLo0, hi0, mHi0), _, _, _) <- runFrame ctx inp0 stackedUi
-      case (mLo0, mHi0) of
-        (Just loBtn, Just hiBtn) -> do
+      assertJust failed ((,) <$> mLo0 <*> mHi0) $ \(loBtn, hiBtn) -> do
           let cover = respRect hi0
               kids = [respRect loBtn, respRect hiBtn]
           assert failed (rectW cover > 0 && rectH cover > 0)
@@ -252,7 +251,6 @@ runOverlayClickThroughTest ctx failed = do
           _ <- runFrame ctx hpress stackedUi
           ((_, _, _, mHiHit), _, _, _) <- runFrame ctx hrelease stackedUi
           assert failed (maybe False respClicked mHiHit)
-        _ -> assert failed False
   runCovered windowUi
   runCovered modalUi
   runStacked

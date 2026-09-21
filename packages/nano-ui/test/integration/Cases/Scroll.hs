@@ -614,8 +614,7 @@ runScrollIntoViewTest ctx failed = do
   _ <- runFrame ctx inp0 ui
   mAfter <- getScrollMetrics ctx sid
   mRow <- getPrevRect ctx target
-  case (mAfter, mRow) of
-    (Just m, Just r) -> do
+  assertJust failed ((,) <$> mAfter <*> mRow) $ \(m, r) -> do
       -- The row sits against the top of the viewport, whole.
       assert failed (abs (rectY r - rectY (scrollViewport m)) < 1.5)
       -- Already in view: the nearest alignment leaves the offset alone.
@@ -635,7 +634,6 @@ runScrollIntoViewTest ctx failed = do
       _ <- runFrame ctx inp0 ui
       off <- getScrollOffset ctx sid
       assert failed (abs (off - rowH * 8) < 1.5)
-    _ -> assert failed False
 
 -- Content that shrinks under a glide pulls the glide back with it: the
 -- scroller must not coast to an offset the shorter content cannot reach and
