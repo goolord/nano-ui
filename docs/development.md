@@ -27,6 +27,7 @@ fails the build instead of swapping.
 | `nano-ui-inspection` | Compiler checks for SIMD writers, typed store slots, animation channels, unboxed commands, and canvas construction |
 | `nano-ui-rgfw-test` | RGFW input translation, the glyph atlas, and frames drawn by a software rasteriser kept in the test suite |
 | `nano-ui-font-search-test`, `nano-ui-font-effects-test` | SDL font discovery, measurement, and handle lifetimes |
+| `nano-ui-render-test` | Native SDL readback of partial-damage triangles and clipping |
 | `nano-ui-diagrams-test` | Diagram conversion, tessellation, and charts |
 | `nano-ui-form-test` | Form scopes, validation, reset, and submission |
 | `nano-ui-terminal-test` | The terminal demo's escape-sequence parser and PTY |
@@ -58,14 +59,6 @@ comment box and put the `user-attachments` URL GitHub gives back in
 
 - `nano-ui-sdl:sdl` builds the SDL backend. `nano-ui-demo` and `nano-ui-form`
   have their own `sdl` flag for the executables that need it.
-- `nano-ui-sdl:simd` compiles the draw-batch culler with AVX2. It only applies
-  on x86-64, and the resulting binary needs an AVX2 CPU. To build without it,
-  add this to `cabal.project.local`:
-
-  ```cabal
-  package nano-ui-sdl
-    flags: -simd
-  ```
 
 ## Repository layout
 
@@ -182,6 +175,17 @@ decisions, compiler checks, and before/after measurements for the refactors.
 
 `scripts/profile/` has helpers for cost-centre profiles and for timing the SDL
 demo's real event loop.
+
+For source-reduction work, `python scripts/profile/source-budget.py BASE_REF`
+counts all maintained library Haskell and C, excluding demos and vendored RGFW.
+Changed Haskell is formatted to the same Fourmolu fixed point on both sides.
+`compare-builds.py BASE_BUILD CANDIDATE_BUILD --suite core|sdl|render --output FILE`
+runs already-built executables in alternating order and records raw output,
+executable hashes, allocation and timing medians. It never rebuilds the baseline.
+Use `--executables` to supply executable paths instead of build directories.
+`NANO_PROFILE_ITERATIONS` lengthens the SDL profiler's default 40-frame samples;
+`NANO_RENDER_ITERATIONS` lengthens the render probe's default 500-frame samples.
+The latter runs with `cabal test nano-ui-render-test --test-options=--bench`.
 
 ### Idle cost
 

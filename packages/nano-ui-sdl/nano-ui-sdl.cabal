@@ -31,11 +31,6 @@ flag sdl
     manual: True
     default: True
 
-flag simd
-    description: Compile the batch culler with AVX2 (x86-64 only; the binary then requires an AVX2 CPU)
-    manual: True
-    default: False
-
 common extensions
     default-language: GHC2024
     default-extensions:
@@ -121,13 +116,28 @@ library
         c-sources:        cbits/nano_ui_frame.c
                           cbits/nano_ui_ttf.c
                           cbits/nano_ui_display.c
-                          cbits/nano_ui_batch.c
+                          cbits/nano_ui_render.c
                           cbits/nano_ui_text_atlas.c
         include-dirs:     cbits
         pkgconfig-depends: sdl3 >= 3.2, sdl3-ttf >= 3.2
-        -- nano_ui_batch.c falls back to a scalar cull loop without __AVX2__.
-        if flag(simd) && arch(x86_64)
-            cc-options:   -mavx2
+
+test-suite nano-ui-render-test
+    import:           extensions, warnings, rts-options
+    type:             exitcode-stdio-1.0
+    main-is:          Rendering.hs
+    hs-source-dirs:   test, lib
+    other-modules:    NanoUI.Sdl.Render, NanoUI.Sdl.Image
+    if os(windows)
+        ghc-options: -optl-mconsole
+    build-depends:
+        base ^>=4.22.0.0,
+        nano-ui,
+        nano-ui-sdl,
+        primitive ^>=0.9,
+        sdl3-bindgen-sys ^>=0.0.0.2,
+        vector ^>=0.13
+    if !flag(sdl)
+        buildable: False
 
 test-suite nano-ui-font-search-test
     import:           extensions, warnings

@@ -6,10 +6,10 @@ module NanoUI.Sdl.Render
   , flushRenderBatch
   , renderDrawDataPass
   , snapDamage
-  ) where
+  )
+where
 
-import NanoUI.Sdl.Image (ImageAtlas, lookupImage)
-
+import Control.Exception (onException)
 import Control.Monad (void, when)
 import Data.Bits (shiftR, (.&.))
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
@@ -21,6 +21,7 @@ import Foreign.Marshal.Alloc (free, malloc)
 import Foreign.Ptr (Ptr, nullPtr)
 import Foreign.Storable (poke)
 import NanoUI (Color (..), Rect (..), rectIntersect)
+import NanoUI.Sdl.Image (ImageAtlas, lookupImage)
 import NanoUI.Testing
   ( Damage (..)
   , DrawCmd (..)
@@ -39,29 +40,38 @@ import SDL3.Sys.Render
 
 data ClipState
   = ClipNone
-  | ClipKey {-# UNPACK #-} !Int {-# UNPACK #-} !Int {-# UNPACK #-} !Int {-# UNPACK #-} !Int
-  deriving (Eq)
+  | ClipKey
+      {-# UNPACK #-} !Int
+      {-# UNPACK #-} !Int
+      {-# UNPACK #-} !Int
+      {-# UNPACK #-} !Int
+  deriving Eq
 
 {-# INLINE snapDamage #-}
 snapDamage :: Float -> Damage -> Damage
 snapDamage _ DamageFull = DamageFull
 snapDamage scale (DamageClip (Rect x y w h)) =
-  let px = fromIntegral (floor (x * scale) :: Int) / scale
-      py = fromIntegral (floor (y * scale) :: Int) / scale
-      pw = fromIntegral (ceiling ((x + w) * scale) :: Int) / scale - px
-      ph = fromIntegral (ceiling ((y + h) * scale) :: Int) / scale - py
-   in DamageClip (Rect px py pw ph)
+  let
+    px = fromIntegral (floor (x * scale) :: Int) / scale
+    py = fromIntegral (floor (y * scale) :: Int) / scale
+    pw = fromIntegral (ceiling ((x + w) * scale) :: Int) / scale - px
+    ph = fromIntegral (ceiling ((y + h) * scale) :: Int) / scale - py
+   in
+    DamageClip (Rect px py pw ph)
 
 {-# INLINE toClipKey #-}
 toClipKey :: Rect -> ClipState
 toClipKey (Rect x y w h) =
-  let px = floor x :: Int
-      py = floor y :: Int
-      x1 = ceiling (x + w) :: Int
-      y1 = ceiling (y + h) :: Int
-   in ClipKey px py (max 1 (x1 - px)) (max 1 (y1 - py))
+  let
+    px = floor x :: Int
+    py = floor y :: Int
+    x1 = ceiling (x + w) :: Int
+    y1 = ceiling (y + h) :: Int
+   in
+    ClipKey px py (max 1 (x1 - px)) (max 1 (y1 - py))
 
-applyClipState :: RenderBatch -> IORef ClipState -> Ptr SDL_Renderer -> ClipState -> IO ()
+applyClipState ::
+  RenderBatch -> IORef ClipState -> Ptr SDL_Renderer -> ClipState -> IO ()
 applyClipState batch ref ren next = do
   prev <- readIORef ref
   when (prev /= next) $ do
@@ -70,8 +80,11 @@ applyClipState batch ref ren next = do
     void $ case next of
       ClipNone -> setRenderClipRect ren (PtrConst.unsafeFromPtr nullPtr)
       ClipKey px py pw ph -> do
-        let rect = rbClipRect batch
-        poke rect (SDL_Rect (fromIntegral px) (fromIntegral py) (fromIntegral pw) (fromIntegral ph))
+        let
+          rect = rbClipRect batch
+        poke
+          rect
+          (SDL_Rect (fromIntegral px) (fromIntegral py) (fromIntegral pw) (fromIntegral ph))
         setRenderClipRect ren (PtrConst.unsafeFromPtr rect)
 
 -- | Draw every command in layer order, clipped to its own rect and to
@@ -121,25 +134,26 @@ renderDrawDataPass batch ren mClear drawData images glyphTex damage =
 
 {-# INLINE drawCmd #-}
 drawCmd ::
-  RenderBatch ->
-  Ptr SDL_Renderer ->
-  Ptr Word8 ->
-  Int ->
-  Ptr Word8 ->
-  ImageAtlas ->
-  Ptr SDL_Texture ->
-  Maybe Rect ->
-  IORef ClipState ->
-  DrawCmd ->
-  IO ()
+  RenderBatch
+  -> Ptr SDL_Renderer
+  -> Ptr Word8
+  -> Int
+  -> Ptr Word8
+  -> ImageAtlas
+  -> Ptr SDL_Texture
+  -> Maybe Rect
+  -> IORef ClipState
+  -> DrawCmd
+  -> IO ()
 drawCmd batch ren vp vc ip images glyphTex mDamage clipRef cmd = do
-  let !count = fromIntegral (cmdIndexCount cmd)
-      !cmdRect = Rect (cmdClipX cmd) (cmdClipY cmd) (cmdClipW cmd) (cmdClipH cmd)
-      !cmdOpen = cmdClipW cmd >= 1e8 || cmdClipH cmd >= 1e8
-      live = case (mDamage, cmdOpen) of
-        (Nothing, _) -> Just cmdRect
-        (Just dmg, True) -> Just dmg
-        (Just dmg, False) -> rectIntersect dmg cmdRect
+  let
+    !count = fromIntegral (cmdIndexCount cmd)
+    !cmdRect = Rect (cmdClipX cmd) (cmdClipY cmd) (cmdClipW cmd) (cmdClipH cmd)
+    !cmdOpen = cmdClipW cmd >= 1e8 || cmdClipH cmd >= 1e8
+    live = case (mDamage, cmdOpen) of
+      (Nothing, _) -> Just cmdRect
+      (Just dmg, True) -> Just dmg
+      (Just dmg, False) -> rectIntersect dmg cmdRect
   when (count >= 3) $
     case live of
       Nothing -> pure ()
@@ -147,15 +161,33 @@ drawCmd batch ren vp vc ip images glyphTex mDamage clipRef cmd = do
         if cmdOpen && mDamage == Nothing
           then applyClipState batch clipRef ren ClipNone
           else applyClipState batch clipRef ren (toClipKey clip)
-        let !start = fromIntegral (cmdIndexOffset cmd)
-            !texId = cmdTextureId cmd
+        let
+          !start = fromIntegral (cmdIndexOffset cmd)
+          !texId = cmdTextureId cmd
         tex <-
           if texId == glyphAtlasTextureId
             then pure glyphTex
-            else if texId > 0
-              then maybe nullPtr id <$> lookupImage images texId
-              else pure nullPtr
-        batchDrawRange batch vp vc ip start count tex mDamage
+            else
+              if texId > 0
+                then maybe nullPtr id <$> lookupImage images texId
+                else pure nullPtr
+        let
+          (hasDamage, dx, dy, dw, dh) = case mDamage of
+            Nothing -> (0, 0, 0, 0, 0)
+            Just (Rect x y w h) -> (1, realToFrac x, realToFrac y, realToFrac w, realToFrac h)
+        batchDrawRange
+          (rbBatch batch)
+          vp
+          (fromIntegral vc)
+          ip
+          start
+          count
+          tex
+          hasDamage
+          dx
+          dy
+          dw
+          dh
 
 {-# INLINE unpackColor #-}
 unpackColor :: Color -> (Word8, Word8, Word8, Word8)
@@ -166,11 +198,9 @@ unpackColor (Color w) =
   , fromIntegral (w .&. 0xFF)
   )
 
--- | The C batch and a clip rect it passes to SDL, both owned for the session.
-data RenderBatch = RenderBatch
-  { rbBatch :: !(Ptr ())
-  , rbClipRect :: !(Ptr SDL_Rect)
-  }
+-- | Session-owned coalescing state and reusable clip storage. Commands whose
+-- logical clips differ can still merge after damage clipping and pixel rounding.
+data RenderBatch = RenderBatch {rbBatch :: !(Ptr ()), rbClipRect :: !(Ptr SDL_Rect)}
 
 -- | Create a persistent render batch. Reusing one batch across frames avoids
 -- a C calloc/free pair per presented frame; flush after each render pass.
@@ -179,48 +209,13 @@ newRenderBatch ren = do
   p <- batchCreate ren
   if p == nullPtr
     then fail "nano_ui_batch_create failed"
-    else RenderBatch p <$> malloc
+    else (RenderBatch p <$> malloc) `onException` batchDestroy p
 
 destroyRenderBatch :: RenderBatch -> IO ()
-destroyRenderBatch batch = do
-  batchDestroy (rbBatch batch)
-  free (rbClipRect batch)
+destroyRenderBatch batch = batchDestroy (rbBatch batch) >> free (rbClipRect batch)
 
 flushRenderBatch :: RenderBatch -> IO ()
-flushRenderBatch batch = batchFlush (rbBatch batch)
-
-batchDrawRange ::
-  RenderBatch ->
-  Ptr Word8 ->
-  Int ->
-  Ptr Word8 ->
-  Int ->
-  Int ->
-  Ptr SDL_Texture ->
-  Maybe Rect ->
-  IO ()
-batchDrawRange batch verts vc indices start n tex mDmg =
-  batchDrawRangeC
-    (rbBatch batch)
-    verts
-    (ci vc)
-    indices
-    (ci start)
-    (ci n)
-    tex
-    hasDmg
-    (cf dx)
-    (cf dy)
-    (cf dw)
-    (cf dh)
-  where
-    ci = fromIntegral
-    (hasDmg, dx, dy, dw, dh) = case mDmg of
-      Nothing -> (0, 0, 0, 0, 0)
-      Just (Rect x y w h) -> (1, x, y, w, h)
-
-cf :: Float -> CFloat
-cf = realToFrac
+flushRenderBatch = batchFlush . rbBatch
 
 foreign import ccall unsafe "nano_ui_batch_create"
   batchCreate :: Ptr SDL_Renderer -> IO (Ptr ())
@@ -232,17 +227,17 @@ foreign import ccall unsafe "nano_ui_batch_flush"
   batchFlush :: Ptr () -> IO ()
 
 foreign import ccall unsafe "nano_ui_batch_draw_range"
-  batchDrawRangeC ::
-    Ptr () ->
-    Ptr Word8 ->
-    CInt ->
-    Ptr Word8 ->
-    CInt ->
-    CInt ->
-    Ptr SDL_Texture ->
-    CInt ->
-    CFloat ->
-    CFloat ->
-    CFloat ->
-    CFloat ->
-    IO ()
+  batchDrawRange ::
+    Ptr ()
+    -> Ptr Word8
+    -> CInt
+    -> Ptr Word8
+    -> CInt
+    -> CInt
+    -> Ptr SDL_Texture
+    -> CInt
+    -> CFloat
+    -> CFloat
+    -> CFloat
+    -> CFloat
+    -> IO ()

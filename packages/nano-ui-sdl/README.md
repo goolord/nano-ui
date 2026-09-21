@@ -53,8 +53,8 @@ cabal bench nano-ui-sdl-bench  # runFrame and SDL drawing timings
 SDL3 and SDL3_ttf 3.2 or later, and pkg-config. The backend is behind the `sdl`
 flag, which is on by default.
 
-On x86-64, `-f simd` compiles the draw-batch culler with AVX2. A binary built
-that way needs an AVX2 CPU.
+Geometry submission uses SDL3 with conservative triangle damage rejection;
+it does not require AVX2.
 
 From this package's source directory, run `cabal build` after installing the
 native libraries. Check discovery with `pkg-config --modversion sdl3 sdl3-ttf`.

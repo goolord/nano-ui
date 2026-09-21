@@ -18,13 +18,12 @@ package *
 
 -- -Werror is set here and not in the .cabal files, so warnings fail a
 -- development build without failing a downstream build of a published package.
--- The flags lines turn on the SDL backend, the executables that need it, and
--- the AVX2 batch culler (docs/development.md, "Flags").
+-- The flags lines turn on the SDL backend and the executables that need it.
 package nano-ui
   ghc-options: -Werror
 
 package nano-ui-sdl
-  flags: +sdl +simd
+  flags: +sdl
   ghc-options: -Werror
 
 package nano-ui-demo

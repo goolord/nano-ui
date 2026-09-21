@@ -105,6 +105,9 @@
 
 ### Fixed
 
+- Partial redraws retain independent triangles and a command's final triangle.
+  Damage rejection checks all three vertices rather than assuming quad pairs.
+
 - A failed window/renderer acquisition shuts down SDL's initialized subsystems.
   Resources acquired before later startup failures are released too.
 
@@ -128,6 +131,9 @@
   them made by the loop's own thread in the middle of a frame.
 
 ### Removed
+
+- The `simd` Cabal flag and AVX2-only damage culler. Remove `+simd`/`-simd`
+  from local project flags; the triangle culler works on every supported CPU.
 
 - `newSdlContext`; the runners create their own context.
 - `isDebugActive`, `newSdlDebugSampler`, `readSdlDebug` and `takeDebugLive`
