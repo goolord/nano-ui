@@ -1,11 +1,8 @@
 module Cases.TextInput (tests) where
 
-import Control.Monad (forM_, replicateM, replicateM_, void, when)
-import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Spec
 import Data.IntMap.Strict qualified as IM
 import Data.Text qualified as T
-import NanoUI
-import NanoUI.Backend
 import NanoUI.Internal.Context (intKey)
 import NanoUI.Internal.Frame.TextEdit
   ( TextAreaHit (..)
@@ -24,26 +21,6 @@ import NanoUI.Internal.Store
   , WidgetStore (..)
   , slotKey
   )
-import NanoUI.Testing
-import NanoUI.Testing.Assert (assert, assertEq, assertGt, assertJust, assertJustM, withInput)
-import NanoUI.Testing.Harness
-  ( assertSpansHas
-  , centerOf
-  , clickPair
-  , findExact
-  , held
-  , holdAt
-  , keyInp
-  , pressAt
-  , releaseAt
-  , rightClickPair
-  , runClick
-  , spanCenter
-  , spanRectOf
-  , tabInp
-  , warmup2
-  , warmupFocused
-  )
 import NanoUI.Internal.Widgets.TextArea
   ( buffer
   , loadTextAreaState
@@ -55,7 +32,6 @@ import NanoUI.Widgets.TextBuffer
   , toLines
   , toText
   )
-import Spec (Spec, pixelSpec, spec)
 
 tests :: [Spec]
 tests =

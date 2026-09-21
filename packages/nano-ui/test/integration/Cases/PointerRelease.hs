@@ -2,14 +2,8 @@
 -- widget and letting go over a neighbour must fire nothing.
 module Cases.PointerRelease (tests) where
 
-import Control.Monad (void)
-import Data.IORef (IORef, newIORef)
+import Spec
 import Data.Maybe (isJust, isNothing)
-import NanoUI
-import NanoUI.Testing
-import NanoUI.Testing.Assert (assert, withInput)
-import NanoUI.Testing.Harness (centerOf, held, warmup2)
-import Spec (Spec, spec)
 
 tests :: [Spec]
 tests =

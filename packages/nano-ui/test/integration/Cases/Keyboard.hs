@@ -1,15 +1,10 @@
 module Cases.Keyboard (tests) where
 
-import Data.IORef (IORef, newIORef, writeIORef)
+import Spec
 import Data.IntMap.Strict qualified as IM
-import NanoUI
 import NanoUI.Internal.Context (Context (..), getFocusVisible, intKey)
 import NanoUI.Emit qualified as Emit
 import NanoUI.Internal.Store (WidgetStore (..))
-import NanoUI.Testing
-import NanoUI.Testing.Assert (assert, assertEq, assertGt, assertJust)
-import NanoUI.Testing.Harness (centerOf, clickPair, held, keyInp, tabInp, warmup2, warmupFocused, withInputOff)
-import Spec (Spec, pixelSpec, spec)
 
 tests :: [Spec]
 tests =

@@ -1,15 +1,10 @@
 module Cases.Grid (tests) where
 
-import Control.Monad (void)
-import Data.IORef (IORef)
+import Spec
 import Data.List (nub)
 import qualified Data.Text as T
-import NanoUI
 import NanoUI.Internal.Context (Context (..))
 import NanoUI.Internal.Layout.Arena (arenaCount, getStyleIdx, getText)
-import NanoUI.Testing
-import NanoUI.Testing.Assert (assert, assertEq, assertJust, withInput)
-import Spec (Spec, pixelSpec, spec)
 
 tests :: [Spec]
 tests =

@@ -1,13 +1,7 @@
 module Cases.ContextMenu (tests) where
 
-import Control.Monad (void)
-import Data.IORef (IORef)
+import Spec
 import Data.Text qualified as T
-import NanoUI
-import NanoUI.Testing
-import NanoUI.Testing.Assert (assert, assertJustM, evalUi, withInput)
-import NanoUI.Testing.Harness (centerOf, clickPair, rightClickPair, spanCenter, warmup2)
-import Spec (Spec, spec)
 
 tests :: [Spec]
 tests =
@@ -83,9 +77,9 @@ runContextMenuScrollPosTest ctx failed = do
           if inView btn || after <= before then pure (after, btn) else pump
     (off, btn1) <- pump
     assert failed (off > 0)
-    let clickPos = centerOf btn1
+    let menuPos = centerOf btn1
         layoutY = rectY (respRect btn1) + off
-        (inpRightDown, inpRightUp) = rightClickPair inp0 clickPos
+        (inpRightDown, inpRightUp) = rightClickPair inp0 menuPos
     _ <- runFrame ctx inpRightDown ui
     _ <- runFrame ctx inpRightUp ui
     spans <- collectOverlayTextSpans ctx inpRightUp
@@ -99,8 +93,8 @@ runContextMenuScrollPosTest ctx failed = do
       (r : _) -> do
         let menuY = rectY r
             pick = spanCenter r
-        assert failed (abs (menuY - v2Y clickPos) <= 16)
-        assert failed (abs (menuY - v2Y clickPos) < abs (menuY - layoutY))
+        assert failed (abs (menuY - v2Y menuPos) <= 16)
+        assert failed (abs (menuY - v2Y menuPos) < abs (menuY - layoutY))
         let (press, release) = clickPair inp0 pick
         _ <- runFrame ctx press ui
         ((_, (_, picked)), _, _, _) <- runFrame ctx release ui

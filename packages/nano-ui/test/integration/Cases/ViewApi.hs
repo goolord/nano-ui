@@ -4,19 +4,12 @@
 -- a split of its own.
 module Cases.ViewApi (tests) where
 
-import Control.Monad (forM_, void, when)
-import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
+import Spec
 import Data.IntMap.Strict qualified as IM
 import Data.Text (Text)
 import Effectful (liftIO)
-import NanoUI
-import NanoUI.Internal.Context (Context (..), withClipboard)
-import NanoUI.Input (inputKeysFromList)
+import NanoUI.Internal.Context (Context (..))
 import NanoUI.Monad (focusedWidget, releaseFocus)
-import NanoUI.Testing (needsRedraw, runFrame)
-import NanoUI.Testing.Assert (assert, assertEq, assertJust, withInput)
-import NanoUI.Testing.Harness (centerOf, rightClickPair, warmup2)
-import Spec (Spec, spec)
 
 tests :: [Spec]
 tests =
@@ -79,7 +72,6 @@ runHoldFocusTest ctx failed = do
 runHoldFocusModalTest :: Context -> IORef Int -> IO ()
 runHoldFocusModalTest ctx failed = do
   let inp = withInput 400 300
-      tabInp = inp {inputKeys = inputKeysFromList [KeyTab]}
       ui = do
         page <- nextId
         holdFocus page
@@ -90,7 +82,7 @@ runHoldFocusModalTest ctx failed = do
         pure page
   _ <- warmup2 ctx inp ui
   -- Tab puts the keyboard on a widget in the modal.
-  _ <- runFrame ctx tabInp ui
+  _ <- runFrame ctx (tabInp inp) ui
   inModal <- readIORef (ctxFocusId ctx)
   (page, _, _, _) <- runFrame ctx inp ui
   _ <- runFrame ctx inp ui
@@ -105,7 +97,6 @@ runHoldFocusTabTest :: Context -> IORef Int -> IO ()
 runHoldFocusTabTest ctx failed = do
   holding <- newIORef True
   let inp = withInput 400 300
-      tabInp = inp {inputKeys = inputKeysFromList [KeyTab]}
       focusable = defaultCustomWidgetSpec {widgetLayout = fixedWH 100 30 defaultLayout, widgetFocusable = True}
       ui = do
         wid <- nextId
@@ -115,13 +106,13 @@ runHoldFocusTabTest ctx failed = do
         _ <- customWidget focusable
         pure wid
   wid <- warmup2 ctx inp ui
-  _ <- runFrame ctx tabInp ui
+  _ <- runFrame ctx (tabInp inp) ui
   kept <- readIORef (ctxFocusId ctx)
   ring <- readIORef (ctxFocusVisible ctx)
   assertEq failed kept wid
   assertEq failed ring False
   writeIORef holding False
-  _ <- runFrame ctx tabInp ui
+  _ <- runFrame ctx (tabInp inp) ui
   moved <- readIORef (ctxFocusId ctx)
   assert failed (moved /= wid && moved /= WidgetId 0)
 
@@ -281,16 +272,15 @@ runPaneGridInitialOnceTest ctx failed = do
 runPaneGridUnfocusableTest :: Context -> IORef Int -> IO ()
 runPaneGridUnfocusableTest ctx failed = do
   let inp = withInput 400 300
-      tabInp = inp {inputKeys = inputKeysFromList [KeyTab]}
       ui focusable = do
         resp <- paneGrid defaultPaneGridConfig {pgLayout = fillW . fillH, pgFocusable = focusable}
         focus <- focusedWidget
         pure (resp, focus)
   _ <- warmup2 ctx inp (ui False)
-  _ <- runFrame ctx tabInp (ui False)
+  _ <- runFrame ctx (tabInp inp) (ui False)
   ((_, notFocused), _, _, _) <- runFrame ctx inp (ui False)
   assertEq failed notFocused (WidgetId 0)
-  _ <- runFrame ctx tabInp (ui True)
+  _ <- runFrame ctx (tabInp inp) (ui True)
   ((_, focused), _, _, _) <- runFrame ctx inp (ui True)
   assert failed (focused /= WidgetId 0)
 

@@ -1,13 +1,7 @@
 module Cases.NumericInput (tests) where
 
-import Data.IORef (IORef, newIORef)
+import Spec
 import Data.Text qualified as T
-import NanoUI
-import NanoUI.Backend
-import NanoUI.Testing
-import NanoUI.Testing.Assert (assert, assertEq, withInput)
-import NanoUI.Testing.Harness (held, pressAt, releaseAt, warmup2)
-import Spec (Spec, spec)
 
 tests :: [Spec]
 tests =

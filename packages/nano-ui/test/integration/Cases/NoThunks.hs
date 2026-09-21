@@ -1,16 +1,11 @@
 module Cases.NoThunks (tests) where
 
-import Data.IORef (IORef, readIORef)
+import Spec
 import qualified Data.IntMap.Strict as IM
 import NanoUI.Internal.Context (Context (..))
 import NanoUI.Internal.Store (WidgetStore (..))
 import NoThunks.Class (NoThunks, noThunks)
 
-import NanoUI
-import NanoUI.Testing
-import NanoUI.Testing.Assert (assert, withInput)
-import NanoUI.Testing.Harness (warmup2)
-import Spec (Spec, spec)
 
 tests :: [Spec]
 tests =

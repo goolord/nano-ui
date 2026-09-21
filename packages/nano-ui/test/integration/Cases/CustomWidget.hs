@@ -1,20 +1,8 @@
 module Cases.CustomWidget (tests) where
 
-import Control.Monad (forM_, void)
-import Data.IORef (IORef, writeIORef)
+import Spec
 import Data.Primitive.SmallArray qualified as SA
-import NanoUI
-import NanoUI.Backend
 import NanoUI.Internal.Context (Context (..))
-import NanoUI.Testing
-  ( cursorKindIs
-  , newContext
-  , runFrame
-  , takeDamage
-  )
-import NanoUI.Testing.Assert (assert, assertEq, withInput)
-import NanoUI.Testing.Harness (centerOf, clickPair, clipCovers, covers, drawQuads, warmup2, withInputOff)
-import Spec (Spec, spec)
 
 tests :: [Spec]
 tests =

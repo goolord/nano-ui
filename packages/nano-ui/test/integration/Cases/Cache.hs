@@ -1,23 +1,16 @@
 module Cases.Cache (tests) where
 
-import Control.Monad (forM_, void)
+import Spec
 import Control.Exception (evaluate)
 import Data.ByteString qualified as BS
-import Data.IORef (IORef, readIORef, writeIORef)
 import Foreign.ForeignPtr (withForeignPtr)
 import Foreign.Ptr (castPtr)
-import NanoUI
-import NanoUI.Backend
 import NanoUI.Internal.Context (Context (..))
 import NanoUI.Internal.Layout.Arena
   ( NodeType (..), addNodeFromLayout, getRect, setNodeText, setNodeValue
   , setStyleIdx, setWidgetId
   )
-import NanoUI.Testing
-import NanoUI.Testing.Assert (assert, assertEq, assertGt)
-import NanoUI.Testing.Harness (withInputOff)
 import System.Mem.StableName (makeStableName)
-import Spec (Spec, spec)
 
 tests :: [Spec]
 tests =

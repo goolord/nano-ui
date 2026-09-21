@@ -1,29 +1,8 @@
 module Cases.Window (tests) where
 
-import Control.Monad (forM_, replicateM, void, when)
-import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Spec
 import Data.IntMap.Strict qualified as IM
 import Data.Text qualified as T
-import NanoUI
-import NanoUI.Backend
-import NanoUI.Testing
-import NanoUI.Testing.Assert (assert, assertEq, assertGt, assertJust, assertJustM, assertLt, withInput)
-import NanoUI.Testing.Harness
-  ( assertWheelTitlePinned
-  , centerOf
-  , clickPair
-  , dragWindowEdge
-  , keyInp
-  , pressAt
-  , runClick
-  , runDragFrom
-  , spanCenter
-  , spanYOf
-  , warmup2
-  , windowTitleGrab
-  , withInputOff
-  )
-import Spec (Spec, pixelSpec, spec)
 
 tests :: [Spec]
 tests =

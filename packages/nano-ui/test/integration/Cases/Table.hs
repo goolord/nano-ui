@@ -1,16 +1,13 @@
 module Cases.Table (tests) where
 
-import Control.Monad (filterM, forM, forM_, replicateM_, void, (<=<))
+import Spec
 import Data.Bits ((.&.))
-import Data.IORef (IORef)
 import Data.IntMap.Strict qualified as IM
 import Data.List (sortBy, sortOn, tails)
 import Data.Maybe (isJust, listToMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Primitive.SmallArray qualified as SA
-import NanoUI
-import NanoUI.Backend
 import NanoUI.Internal.Context (ctxNodeArena)
 import NanoUI.Internal.Layout.Arena
   ( DirTag (..)
@@ -28,11 +25,7 @@ import NanoUI.Internal.Layout.Arena
   , getStyleIdx
   , getWidgetId
   )
-import NanoUI.Testing
-import NanoUI.Testing.Assert (assert, assertEq, assertGt, assertJust, assertJustM, withInput)
-import NanoUI.Testing.Harness (clickPos, dragPos, findHeader, pressAt, requireSpan, spanCenter, spanRect, warmup2, withInputOff)
 import Text.Read (readMaybe)
-import Spec (Spec, pixelSpec, spec)
 
 tests :: [Spec]
 tests =

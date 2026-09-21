@@ -1,30 +1,12 @@
 module Cases.Tabs (tests) where
 
-import Control.Monad (forM, forM_, replicateM)
-import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
+import Spec
 import Data.Maybe (isJust, listToMaybe)
 import Data.Text qualified as T
 import Data.Sequence qualified as Seq
-import NanoUI
-import NanoUI.Testing
-import NanoUI.Testing.Assert (assert, assertEq, assertJust, assertJustM, run2Frames, withInput)
-import NanoUI.Testing.Harness
-  ( assertSpansHas
-  , clickPair
-  , drawQuads
-  , hasText
-  , keyInp
-  , runClick
-  , spanCenter
-  , spanRect
-  , spanRectOf
-  , warmup2
-  , withInputOff
-  )
 import NanoUI.Internal.Context (Context (..))
 import NanoUI.Emit qualified as Emit
 import NanoUI.Internal.Layout.Arena (arenaCount, findNodeM, getRect, getText, getWidgetId)
-import Spec (Spec, pixelSpec, spec)
 
 tests :: [Spec]
 tests =
@@ -218,7 +200,7 @@ runTabsDamageTest ctx failed = do
         [ tab TabA "Alpha" (label "Body A with some text")
         , tab TabB "Beta" (label "Body B different widgets")
         ]
-      covers dmg (Rect rx ry rw rh) = case dmg of
+      repaints dmg (Rect rx ry rw rh) = case dmg of
         DamageFull -> True
         DamageClip (Rect dx dy dw dh) -> rx >= dx && ry >= dy && rx + rw <= dx + dw && ry + rh <= dy + dh
   _ <- runFrame ctx inp0 (ui TabA)
@@ -240,11 +222,11 @@ runTabsDamageTest ctx failed = do
     assert failed (not (hasText "Body A" spansSwitch))
     let bodyB = [r | (r, txt, _, _, _) <- spansSwitch, "Body B" `T.isInfixOf` txt]
     dSwitch <- takeDamage ctx
-    assert failed (not (null bodyB) && all (covers dSwitch) bodyB)
+    assert failed (not (null bodyB) && all (repaints dSwitch) bodyB)
 
     _ <- runFrame ctx inp0 (ui TabB)
     dTabB <- takeDamage ctx
-    assert failed (all (covers dTabB) bodyB)
+    assert failed (all (repaints dTabB) bodyB)
 
     _ <- runFrame ctx inp0 (ui TabB)
     dSettled <- takeDamage ctx

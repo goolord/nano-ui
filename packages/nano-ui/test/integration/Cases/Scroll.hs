@@ -1,15 +1,12 @@
 module Cases.Scroll (tests) where
 
-import Control.Monad (forM, forM_, replicateM, replicateM_, void, when)
-import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Spec
 import Data.List (sort)
 import Data.Maybe (isJust, isNothing, listToMaybe)
 import Foreign.ForeignPtr (withForeignPtr)
 import Foreign.Ptr (Ptr, castPtr)
 import Foreign.Storable (peekElemOff)
 import Data.Text qualified as T
-import NanoUI
-import NanoUI.Backend
 import NanoUI.Internal.Context (ctxNodeArena, setDrawSnapScale)
 import NanoUI.Internal.Layout.Arena
   ( NodeType (..)
@@ -20,21 +17,6 @@ import NanoUI.Internal.Layout.Arena
   , getScrollContentW
   , getWidgetId
   )
-import NanoUI.Testing
-import NanoUI.Testing.Assert (assert, assertEq, assertGt, assertJust, assertJustM, withInput)
-import NanoUI.Testing.Harness
-  ( assertScrollGutterPad
-  , centerOf
-  , drawQuads
-  , findGrabHover
-  , runClick
-  , spanCenter
-  , spanYOf
-  , tabInp
-  , warmup2
-  , withInputOff
-  )
-import Spec (Spec, pixelSpec, spec)
 
 tests :: [Spec]
 tests =

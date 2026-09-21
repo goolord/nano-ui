@@ -1,18 +1,15 @@
 module Cases (tests) where
 
-import Control.Monad (forM_, void, when)
+import Spec
 import Control.Concurrent (threadDelay)
 import GHC.Clock (getMonotonicTime)
 import Data.ByteString qualified as BS
-import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
 import Data.Map.Strict qualified as M
 import Data.Text qualified as T
 import Data.Word (Word64)
 import Effectful (liftIO)
 import Effectful.State.Static.Local (State, evalState, get, modify)
-import NanoUI
-import NanoUI.Backend
 import NanoUI.Internal.Context (Context (..))
 import NanoUI.Emit qualified as Emit
 import NanoUI.Internal.Layout.Arena
@@ -27,26 +24,6 @@ import NanoUI.Internal.Layout.Arena
   , writeTagEnum
   , writeTree
   )
-import NanoUI.Testing
-import NanoUI.Testing.Assert (assert, assertEq, assertGt, assertJust, assertJustM, runClickReduce, withInput)
-import NanoUI.Testing.Harness
-  ( centerOf
-  , checkLabelAlignEndInk
-  , clickPair
-  , held
-  , holdAt
-  , pressAt
-  , releaseAt
-  , spanCenter
-  , spanRect
-  , spanXOf
-  , spanYOf
-  , vertUv
-  , warmup2
-  , warmupDraw
-  , warmupFocused
-  , withInputOff
-  )
 import NanoUI.Internal.Widgets.SplitPane
   ( PaneDrop (..)
   , dropPreview
@@ -57,7 +34,6 @@ import NanoUI.Internal.Widgets.SplitPane
   , reflowFixed
   , topLevelDropTarget
   )
-import Spec (Spec, pixelSpec, spec)
 
 tests :: [Spec]
 tests =

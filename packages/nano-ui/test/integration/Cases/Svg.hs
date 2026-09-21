@@ -1,13 +1,8 @@
 module Cases.Svg (tests) where
 
+import Spec
 import Data.ByteString qualified as BS
-import Data.IORef (IORef)
-import NanoUI
 import NanoUI.Svg (rasterizeSvg, svgMonochrome)
-import NanoUI.Testing
-import NanoUI.Testing.Assert (assert, assertEq)
-import NanoUI.Testing.Harness (drawQuads, warmupDraw, withInputOff)
-import Spec (Spec, spec)
 
 tests :: [Spec]
 tests =

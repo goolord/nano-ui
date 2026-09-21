@@ -1,12 +1,8 @@
 module Cases.Shaping (tests) where
 
-import Data.IORef (IORef)
+import Spec
 import Data.Primitive.PrimArray (primArrayFromList)
-import NanoUI.Backend
 import NanoUI.Bidi (BidiRun (..), bidiRuns, needsBidi)
-import NanoUI.Testing (Context, caretX, selectionSpans, textIndexAtX)
-import NanoUI.Testing.Assert (assert, assertEq)
-import Spec (Spec, spec)
 
 tests :: [Spec]
 tests =

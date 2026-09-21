@@ -1,16 +1,9 @@
 module Cases.Animation (tests) where
 
+import Spec
 import Control.Concurrent (threadDelay)
-import Control.Monad (forM_, replicateM, replicateM_, void)
-import Data.IORef (IORef)
 import Data.Text qualified as T
 import GHC.Clock (getMonotonicTime)
-import NanoUI
-import NanoUI.Backend
-import NanoUI.Testing
-import NanoUI.Testing.Assert (assert, assertEq)
-import NanoUI.Testing.Harness (clickPair, drawQuads, warmup2, withDelta)
-import Spec (Spec, spec)
 
 tests :: [Spec]
 tests =

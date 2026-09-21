@@ -3,31 +3,17 @@
 -- and right-clicks on the overlay, and the widget underneath must not notice.
 module Cases.PointerOwnership (tests) where
 
-import Control.Monad (filterM, forM, forM_, when)
-import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
+import Spec
 import Data.IntMap.Strict qualified as IM
 import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Text qualified as T
 import Data.Text.IO qualified as TIO
-import NanoUI
 import NanoUI.Internal.Context (Context (ctxActiveId), getTextInputMenu, intKey, textInputMenuWidget)
 import NanoUI.Internal.Store (Slot (..), WidgetStore (..), isSelectOpen, slotKey)
-import NanoUI.Testing
-import NanoUI.Testing.Assert (assert, assertEq, assertJust, withInput)
-import NanoUI.Testing.Harness
-  ( clickPair
-  , held
-  , holdAt
-  , pressAt
-  , releaseAt
-  , rightClickPair
-  , spanCenter
-  )
 import NanoUI.Internal.Widgets.TextArea (buffer, loadTextAreaState, selectionAnchor)
 import NanoUI.Widgets.TextBuffer (getCursor)
 import System.Directory (doesDirectoryExist, listDirectory)
 import System.FilePath (makeRelative, takeExtension, (</>))
-import Spec (Spec, pixelSpec, spec)
 
 tests :: [Spec]
 tests =

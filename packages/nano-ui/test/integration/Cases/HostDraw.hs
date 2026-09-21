@@ -1,16 +1,11 @@
 module Cases.HostDraw (tests) where
 
-import Control.Monad (forM, void)
-import Data.IORef (IORef)
+import Spec
 import Data.Word (Word32, Word8)
 import Foreign.ForeignPtr (withForeignPtr)
 import Foreign.Ptr (Ptr)
 import Foreign.Storable (peekByteOff)
-import NanoUI
 import NanoUI.Internal.Context (setDrawExternalText, setDrawSnapScale, setDrawSquareGeometry)
-import NanoUI.Testing
-import NanoUI.Testing.Assert (assert, assertEq, withInput)
-import Spec (Spec, spec)
 
 tests :: [Spec]
 tests =

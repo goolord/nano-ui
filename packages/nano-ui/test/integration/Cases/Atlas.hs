@@ -1,16 +1,11 @@
 module Cases.Atlas (tests) where
 
-import Control.Monad (forM_)
+import Spec
 import Data.ByteString qualified as BS
-import Data.IORef (IORef)
 import Foreign.ForeignPtr (withForeignPtr)
 import Foreign.Marshal.Array (peekArray)
 import Foreign.Ptr (plusPtr)
-import NanoUI (ImageId (..))
 import NanoUI.Internal.Context (lookupImageUv)
-import NanoUI.Testing (Context, atlasSnapshot, newContext, registerImage)
-import NanoUI.Testing.Assert (assert, assertEq)
-import Spec (Spec, spec)
 
 tests :: [Spec]
 tests =

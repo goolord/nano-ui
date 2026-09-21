@@ -1,7 +1,6 @@
 module Cases.SIMD (tests) where
 
-import Control.Monad (forM, forM_, void)
-import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
+import Spec
 import Data.List (sort)
 import Data.Primitive.PrimArray (primArrayToList)
 import Data.Vector.Unboxed qualified as U
@@ -12,20 +11,6 @@ import Foreign.Marshal.Utils (fillBytes)
 import Foreign.Ptr (Ptr)
 import Foreign.Storable (peekByteOff)
 import NanoUI.Internal.SIMD
-import NanoUI (NanoUI, button, column, label, modal)
-import NanoUI.Backend (emptyInput)
-import NanoUI.Testing
-  ( Context
-  , DrawCmd (..)
-  , DrawData (..)
-  , Layer (..)
-  , drawCmdElems
-  , forDrawCmdsInLayer_
-  , newContext
-  , runFrame
-  )
-import NanoUI.Testing.Assert (assertEq)
-import Spec (Spec, spec)
 
 tests :: [Spec]
 tests =

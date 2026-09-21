@@ -1,14 +1,8 @@
 module Cases.Styling (tests) where
 
-import Control.Monad (forM_)
-import Data.IORef (IORef, newIORef, readIORef, writeIORef)
-import NanoUI
+import Spec
 import NanoUI.Internal.Context (Context (..))
-import NanoUI.Testing
 import Data.Text (Text)
-import NanoUI.Testing.Assert (assert, assertEq)
-import NanoUI.Testing.Harness (centerOf, clickPair, drawQuads, held, tabInp, warmup2, warmupDraw, withInputOff)
-import Spec (Spec, spec)
 
 tests :: [Spec]
 tests =

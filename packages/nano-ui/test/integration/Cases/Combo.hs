@@ -1,13 +1,7 @@
 module Cases.Combo (tests) where
 
-import Data.IORef (IORef, newIORef)
+import Spec
 import Data.Text qualified as T
-import NanoUI
-import NanoUI.Backend
-import NanoUI.Testing
-import NanoUI.Testing.Assert (assert, assertEq, assertJust, withInput)
-import NanoUI.Testing.Harness (clickPair, hasText, held, keyInp, pressAt, spanCenter, spanRect, tabInp, warmup2, warmupFocused)
-import Spec (Spec, spec)
 
 tests :: [Spec]
 tests =

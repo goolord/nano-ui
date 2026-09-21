@@ -1,27 +1,8 @@
 module Cases.Select (tests) where
 
-import Data.IORef (IORef, newIORef)
+import Spec
 import Data.Text qualified as T
-import NanoUI
-import NanoUI.Backend
 import Data.Primitive.SmallArray qualified as SA
-import NanoUI.Testing
-import NanoUI.Testing.Assert (assert, assertEq, assertJust, withInput)
-import NanoUI.Testing.Harness
-  ( assertSpansHas
-  , centerOf
-  , clickPair
-  , hasText
-  , held
-  , keyInp
-  , pressAt
-  , runClick
-  , spanCenter
-  , spanRect
-  , tabInp
-  , warmup2
-  )
-import Spec (Spec, pixelSpec, spec)
 
 tests :: [Spec]
 tests =

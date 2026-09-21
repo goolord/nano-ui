@@ -1,5 +1,6 @@
 module Cases.Runner (tests) where
 
+import Spec
 import Control.Concurrent (threadDelay)
 import Control.Exception
   ( IOException
@@ -8,14 +9,8 @@ import Control.Exception
   , throwIO
   , try
   )
-import Data.IORef (IORef, atomicModifyIORef', modifyIORef', newIORef, readIORef)
-import NanoUI (Input (..), V2 (..))
-import NanoUI.Backend (emptyInput)
 import NanoUI.Internal.Debug (DebugSamplerRef, newDebugSampler)
 import NanoUI.Runner
-import NanoUI.Testing (Context, clearDirty, getWakeAt, requestWakeAfter)
-import NanoUI.Testing.Assert (assertEq)
-import Spec (Spec, spec)
 
 tests :: [Spec]
 tests =

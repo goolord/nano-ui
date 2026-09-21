@@ -1,18 +1,7 @@
 module Cases.Tooltip (tests) where
 
-import Control.Monad (void)
-import Data.IORef (IORef)
+import Spec
 import Data.Text qualified as T
-import NanoUI
-import NanoUI.Testing
-import NanoUI.Testing.Assert (assert, assertJustM, evalUi, withInput)
-import NanoUI.Testing.Harness
-  ( centerOf
-  , hasText
-  , spanCenter
-  , warmup2
-  )
-import Spec (Spec, spec)
 
 tests :: [Spec]
 tests =

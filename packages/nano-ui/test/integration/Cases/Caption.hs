@@ -1,12 +1,6 @@
 module Cases.Caption (tests) where
 
-import Data.IORef (IORef)
-import NanoUI
-import NanoUI.Internal.Context (Context (..))
-import NanoUI.Testing (runFrame)
-import NanoUI.Testing.Assert (assert, assertEq, withInput)
-import NanoUI.Testing.Harness (clickPair, spanCenter, warmup2)
-import Spec (Spec, spec)
+import Spec
 
 tests :: [Spec]
 tests =
