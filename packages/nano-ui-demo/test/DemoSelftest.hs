@@ -23,7 +23,6 @@ import NanoUI.Internal.Debug (CoreDebugSnapshot (dbgPresents))
 import NanoUI.Testing
   ( collectOverlayTextSpans
   , collectTextSpans
-  , newPixelContext
   )
 import NanoUI.Testing.Harness
   ( findExact
@@ -37,21 +36,14 @@ import NanoUI.Testing.Harness
 import NanoUI.Testing.Harness qualified as Harness
 import Text.Printf (printf)
 import qualified Data.Text as T
+import DemoApp (withHiddenWindow)
 import SdlDemo (demoUi)
 
 -- | Draw 'demoUi' on a hidden SDL window and drive it through the main
 -- widget interactions, failing loudly on any regression.
 selftest :: Bool -> IO ()
 selftest continuous = do
-  ctx0 <- newPixelContext
-  let opts =
-        defaultSdlOptions
-          { sdlWindowHidden = True
-          , sdlWindowSize = Size 1280 800
-          , sdlWindowResizable = False
-          , sdlAppContinuous = continuous
-          }
-  withSdl opts ctx0 $ \ctx env -> do
+  withHiddenWindow 1280 800 (V2 (-10) (-10)) (\o -> o {sdlAppContinuous = continuous}) $ \ctx env _ -> do
     -- Shaped-run font measurement must match SDL3_ttf string measurement.
     (fmNorm16, _) <- ctxResolveFont ctx 16.0 WeightNormal FontStyleNormal FontRegular
     (fmItal16, _) <- ctxResolveFont ctx 16.0 WeightNormal FontStyleItalic FontRegular

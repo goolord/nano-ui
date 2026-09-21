@@ -7,9 +7,8 @@ module NotepadSelftest
 
 import Control.Monad (void, when)
 import NanoUI
-import NanoUI.Backend (emptyInput)
 import NanoUI.Backend.Sdl
-import NanoUI.Testing (collectOverlayTextSpans, collectTextSpans, newPixelContext)
+import NanoUI.Testing (collectOverlayTextSpans, collectTextSpans)
 import NanoUI.Testing.Harness
   ( clickPos
   , findExact
@@ -18,21 +17,13 @@ import NanoUI.Testing.Harness
   , hasText
   , requireSpan
   )
+import DemoApp (withHiddenWindow)
 import SdlNotepad (notepadUi)
 
 selftest :: IO ()
 selftest = do
-  ctx0 <- newPixelContext
-  withSdl
-    defaultSdlOptions
-      { sdlWindowHidden = True
-      , sdlWindowSize = Size 1000 720
-      , sdlWindowResizable = False
-      }
-    ctx0
-    $ \ctx env -> do
+  withHiddenWindow 1000 720 (V2 500 400) id $ \ctx env base -> do
       let
-        base = emptyInput {inputWindowSize = Size 1000 720, inputMousePos = V2 500 400}
         drawFrame inp = void (sdlDrawFrame ctx notepadUi env inp False)
 
       mapM_ drawFrame [base, base]

@@ -9,27 +9,18 @@ import Control.Monad (unless, void)
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Text qualified as T
 import NanoUI
-import NanoUI.Backend (emptyInput)
 import NanoUI.Backend.Sdl
 import NanoUI.Internal.Context (Context (..), getPrevRect)
-import NanoUI.Testing (collectTextSpans, newPixelContext)
+import NanoUI.Testing (collectTextSpans)
 import NanoUI.Testing.Harness (clickPos, expectText, findExact, hasText, keyInp, requireSpan)
+import DemoApp (withHiddenWindow)
 import SdlLogs (AppState (..), appendEntries, logsApp, newAppState)
 
 selftest :: IO ()
 selftest = do
-  ctx0 <- newPixelContext
-  withSdl
-    defaultSdlOptions
-      { sdlWindowHidden = True
-      , sdlWindowSize = Size 1000 700
-      , sdlWindowResizable = False
-      }
-    ctx0
-    $ \ctx env -> do
+  withHiddenWindow 1000 700 (V2 500 350) id $ \ctx env baseInput -> do
       appStateRef <- newIORef =<< newAppState 60 False
-      let baseInput = emptyInput {inputWindowSize = Size 1000 700, inputMousePos = V2 500 350}
-          drawFrame inp = void (sdlDrawFrame ctx (logsApp appStateRef) env inp False)
+      let drawFrame inp = void (sdlDrawFrame ctx (logsApp appStateRef) env inp False)
 
       drawFrame baseInput
       drawFrame baseInput

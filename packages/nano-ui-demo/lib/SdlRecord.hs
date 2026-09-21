@@ -10,13 +10,13 @@ module SdlRecord
     ) where
 
 import Control.Concurrent (threadDelay)
+import DemoApp (withHiddenWindow)
 import Control.Monad (forM_, replicateM_, unless, void, when)
 import GHC.Clock (getMonotonicTime)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import NanoUI
-import NanoUI.Backend
 import NanoUI.Backend.Sdl
-import NanoUI.Testing (Context, collectOverlayTextSpans, collectTextSpans, newPixelContext)
+import NanoUI.Testing (Context, collectOverlayTextSpans, collectTextSpans)
 import NanoUI.Testing.Harness (DemoSpan, findExact, findHeader, findRightmost, keyInp)
 import System.FilePath ((</>))
 import Text.Printf (printf)
@@ -50,16 +50,8 @@ data Rec = Rec
 -- | Record the tour of @ui@ into @dir@, which must exist.
 record :: FilePath -> NanoUI () -> IO ()
 record dir ui = do
-  ctx0 <- newPixelContext
-  let opts =
-        defaultSdlOptions
-          { sdlWindowHidden = True
-          , sdlWindowSize = Size winW winH
-          , sdlWindowResizable = False
-          }
   logRef <- newIORef []
-  withSdl opts ctx0 $ \ctx env -> do
-    let idle = emptyInput {inputWindowSize = Size winW winH, inputMousePos = V2 (-10) (-10)}
+  withHiddenWindow winW winH (V2 (-10) (-10)) id $ \ctx env idle -> do
     (ctx', base) <- syncDisplay ctx env idle
     -- The first frames load fonts; the Graphics tab loads its images once.
     replicateM_ 3 (void (sdlDrawFrame ctx' ui env base True))
