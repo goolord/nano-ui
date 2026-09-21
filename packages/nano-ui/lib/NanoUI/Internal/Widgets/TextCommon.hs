@@ -6,7 +6,6 @@ module NanoUI.Internal.Widgets.TextCommon
   , textCharClass
   , textWordBounds
     -- * Selection and caret helpers
-  , textSelectionForClick
   , textSelectionForDrag
   , selectionCaretGeom
   ) where
@@ -40,14 +39,9 @@ textWordBounds text raw
           , i + T.length (T.takeWhile sameClass after)
           )
 
--- | Calculate selection span for single/double/triple click.
-textSelectionForClick :: Text -> Int -> Int -> (Int, Int)
-textSelectionForClick value idx clicks
-  | clicks >= 3 = (0, T.length value)
-  | clicks == 2 = textWordBounds value idx
-  | otherwise = (idx, idx)
-
--- | Calculate selection span when dragging mouse across text.
+-- | Selection span for a mouse drag from @anchor@ to @idx@ after @clicks@
+-- clicks: characters, whole words, or the whole value. A click is a drag
+-- that has not moved.
 textSelectionForDrag :: Text -> Int -> Int -> Int -> (Int, Int)
 textSelectionForDrag value anchor idx clicks
   | clicks >= 3 = (0, T.length value)

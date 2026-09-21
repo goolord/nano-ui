@@ -79,7 +79,6 @@ import NanoUI.Internal.WidgetText
   )
 import NanoUI.Internal.Widgets.TextCommon
   ( selectionCaretGeom
-  , textSelectionForClick
   , textSelectionForDrag
   )
 
@@ -295,7 +294,7 @@ finalizeTextInputMouse ctx inp wid = do
             else do
               idx <- charAt
               clicks <- normalizeTextFieldClicks ctx wid idx 0 0 False (max 1 (inputMouseClicks inp))
-              uncurry (updateTextInputSelection ctx wid) (textSelectionForClick value idx clicks)
+              uncurry (updateTextInputSelection ctx wid) (textSelectionForDrag value idx idx clicks)
               setTextInputDrag ctx (Just (TextInputDrag wid idx 0 0 False clicks))
         else do
           mDrag <- getsInteraction ctx isTextInputDrag

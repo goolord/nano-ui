@@ -244,21 +244,11 @@ updateTextAreaSelection ctx wid hit anchor cursor = do
   setStore ctx (TA.saveTextAreaState (intKey wid) (TA.setTextAreaSelection anchor cursor state0) store)
   markDirty ctx
 
-applyTextAreaClick :: Context -> WidgetId -> TextAreaHit -> Int -> Int -> Int -> IO ()
-applyTextAreaClick ctx wid hit row col clicks
+applyTextAreaDrag :: Context -> WidgetId -> TextAreaHit -> Int -> Int -> Int -> Int -> Int -> IO ()
+applyTextAreaDrag ctx wid hit anchorRow anchorCol row col clicks
   | clicks >= 3 = do
       state <- loadHitState ctx hit
       updateTextAreaSelection ctx wid hit (TB.Cursor 0 0) (TB.documentEnd (TA.buffer state))
-  | clicks == 2 = do
-      state <- loadHitState ctx hit
-      let (lo, hi) = textWordBounds (TB.lineAt row (TA.buffer state)) col
-      updateTextAreaSelection ctx wid hit (TB.Cursor row lo) (TB.Cursor row hi)
-  | otherwise =
-      updateTextAreaSelection ctx wid hit (TB.Cursor row col) (TB.Cursor row col)
-
-applyTextAreaDrag :: Context -> WidgetId -> TextAreaHit -> Int -> Int -> Int -> Int -> Int -> IO ()
-applyTextAreaDrag ctx wid hit anchorRow anchorCol row col clicks
-  | clicks >= 3 = applyTextAreaClick ctx wid hit row col clicks
   | clicks == 2 = do
       state <- loadHitState ctx hit
       let buf = TA.buffer state
@@ -285,7 +275,7 @@ finalizeTextAreaMouse ctx inp wid = do
         then do
           (row, col) <- cursorAtMouse
           clicks <- normalizeTextFieldClicks ctx wid 0 row col True (max 1 (inputMouseClicks inp))
-          applyTextAreaClick ctx wid hit row col clicks
+          applyTextAreaDrag ctx wid hit row col row col clicks
           setTextInputDrag ctx (Just (TextInputDrag wid 0 row col True clicks))
         else do
           mDrag <- getsInteraction ctx isTextInputDrag
