@@ -214,7 +214,27 @@ main = do
       , ("Table: 200 rows x 5 cols", benchTable "hugeTable" (tablePeople 200))
       , ("Tree: 50 items (unfolded)", benchLargeTree)
       , ("Plot: Line chart (500 pts)", benchLargeChart)
+      , ("Table: 2000 rows x 5 cols", benchTable "giantTable" (tablePeople 2000))
       ]
+    -- Rows built inside the frame, as a view that filters or maps them would.
+    rowCount <- newIORef (2000 :: Int)
+    measureBench "Table: 2000 rows, rebuilt rows" $ do
+      n <- readIORef rowCount
+      void (runFrame ctx' inp (benchTable "freshTable" (tablePeople n)))
+    -- A label that changes every frame misses the whole-layout cache, so the
+    -- paragraphs beside it are wrapped again each frame.
+    wrapCounter <- newIORef (0 :: Int)
+    measureBench "Wrap: 20 paragraphs, live label" $ do
+      k <- readIORef wrapCounter
+      modifyIORef' wrapCounter (+ 1)
+      void (runFrame ctx' inp (benchWrap 480 k))
+    -- A width that changes every frame, as when dragging a window's edge:
+    -- every candidate line is new text to measure.
+    resizeCounter <- newIORef (0 :: Int)
+    measureBench "Wrap: 20 paragraphs, resizing" $ do
+      k <- readIORef resizeCounter
+      modifyIORef' resizeCounter (+ 1)
+      void (runFrame ctx' inp (benchWrap (400 + fromIntegral (k `mod` 200)) 0))
     putStrLn ""
     putStrLn "================================================================================"
     putStrLn "Profiling complete."
@@ -404,6 +424,20 @@ benchTable key rows = void $ tableWith (fixedH 400 . gap 8) key colPeople rows (
 
 tablePeople :: Int -> [DemoPerson]
 tablePeople n = [DemoPerson (T.pack ("Name " <> show i)) (T.pack ("Dept " <> show (i `mod` 5))) (20 + i) "City" "Role" | i <- [1 .. n]]
+
+benchWrap :: Float -> Int -> NanoUI ()
+benchWrap width k = columnWith (tight . gap 4 . fixedW width) $ do
+  label (T.pack ("frame " <> show k))
+  forM_ wrapParagraphs label
+
+-- | Twenty paragraphs of 120 words, each several lines at 400 to 600 pixels.
+wrapParagraphs :: [T.Text]
+wrapParagraphs =
+  [ T.unwords [ws !! ((i * 7 + j * 3) `mod` length ws) | j <- [0 .. 119 :: Int]]
+  | i <- [1 .. 20 :: Int]
+  ]
+  where
+    ws = T.words "the quick brown fox jumps over a lazy dog while seven wizards quietly hex bold nymphs and pack my box with five dozen liquor jugs"
 
 benchLargeTree :: NanoUI ()
 benchLargeTree =
