@@ -68,6 +68,10 @@
 
 ### Changed
 
+- Glyph surfaces upload directly to SDL's streaming atlas. SDL owns its
+  initialization/reset storage; the backend no longer maintains a second
+  full-size CPU pixel buffer.
+
 - `sdlWindowBorderless` is replaced by `sdlWindowDecorations`:
   `DecorationsFull` for `False`, and `DecorationsNone` for what `True` did.
 

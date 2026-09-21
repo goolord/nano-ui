@@ -179,13 +179,16 @@ demo's real event loop.
 For source-reduction work, `python scripts/profile/source-budget.py BASE_REF`
 counts all maintained library Haskell and C, excluding demos and vendored RGFW.
 Changed Haskell is formatted to the same Fourmolu fixed point on both sides.
-`compare-builds.py BASE_BUILD CANDIDATE_BUILD --suite core|sdl|render --output FILE`
+`compare-builds.py BASE_BUILD CANDIDATE_BUILD --suite core|sdl|render|atlas --output FILE`
 runs already-built executables in alternating order and records raw output,
 executable hashes, allocation and timing medians. It never rebuilds the baseline.
 Use `--executables` to supply executable paths instead of build directories.
 `NANO_PROFILE_ITERATIONS` lengthens the SDL profiler's default 40-frame samples;
 `NANO_RENDER_ITERATIONS` lengthens the render probe's default 500-frame samples.
 The latter runs with `cabal test nano-ui-render-test --test-options=--bench`.
+Use `--test-options=--atlas-bench` for atlas reset/upload timing and
+`--test-options=--native` for readback on the selected native renderer instead
+of the software/dummy renderer used by the default test suite.
 
 ### Idle cost
 

@@ -2,7 +2,6 @@
 
 #include <SDL3/SDL.h>
 #include <stdlib.h>
-#include <string.h>
 
 enum {
     NANO_UI_TEXT_ATLAS_SIZE = 2048,
@@ -13,7 +12,6 @@ enum {
 struct NanoUiTextAtlas {
     SDL_Renderer *renderer;
     SDL_Texture *tex;
-    Uint8 *pixels;
     int w;
     int h;
     int x;
@@ -21,28 +19,19 @@ struct NanoUiTextAtlas {
     int row_h;
 };
 
-static void init_white_pixel(NanoUiTextAtlas *atlas)
+/* SDL owns the streaming storage. A lock is write-only, so initialize the
+ * complete surface on creation/reset, including transparent glyph padding. */
+static bool clear_texture(NanoUiTextAtlas *atlas)
 {
-    if (!atlas || !atlas->pixels || atlas->w <= 0 || atlas->h <= 0) {
-        return;
-    }
-    for (int y = 0; y < NANO_UI_WHITE_PATCH_SIZE && y < atlas->h; y++) {
-        for (int x = 0; x < NANO_UI_WHITE_PATCH_SIZE && x < atlas->w; x++) {
-            size_t off = ((size_t)y * (size_t)atlas->w + (size_t)x) * 4;
-            atlas->pixels[off + 0] = 255;
-            atlas->pixels[off + 1] = 255;
-            atlas->pixels[off + 2] = 255;
-            atlas->pixels[off + 3] = 255;
-        }
-    }
-}
-
-static bool upload_all(NanoUiTextAtlas *atlas)
-{
-    if (!atlas->tex || !atlas->pixels || atlas->w <= 0 || atlas->h <= 0) {
+    SDL_Surface *surface = NULL;
+    if (!SDL_LockTextureToSurface(atlas->tex, NULL, &surface)) {
         return false;
     }
-    return SDL_UpdateTexture(atlas->tex, NULL, atlas->pixels, atlas->w * 4);
+    SDL_Rect white = {0, 0, NANO_UI_WHITE_PATCH_SIZE, NANO_UI_WHITE_PATCH_SIZE};
+    bool ok = SDL_FillSurfaceRect(surface, NULL, 0) &&
+              SDL_FillSurfaceRect(surface, &white, 0xffffffffu);
+    SDL_UnlockTexture(atlas->tex);
+    return ok;
 }
 
 static bool create_texture(NanoUiTextAtlas *atlas, int w, int h)
@@ -58,17 +47,15 @@ static bool create_texture(NanoUiTextAtlas *atlas, int w, int h)
      * shaped-run placement). NEAREST snaps to the closest texel and makes
      * scaled/slightly-misaligned text look blocky and pixelated. */
     SDL_SetTextureScaleMode(tex, SDL_SCALEMODE_LINEAR);
-    Uint8 *px = (Uint8 *)calloc((size_t)w * (size_t)h, 4);
-    if (!px) {
+    atlas->tex = tex;
+    if (!clear_texture(atlas)) {
         SDL_DestroyTexture(tex);
+        atlas->tex = NULL;
         return false;
     }
-    atlas->tex = tex;
-    atlas->pixels = px;
     atlas->w = w;
     atlas->h = h;
-    init_white_pixel(atlas);
-    return upload_all(atlas);
+    return true;
 }
 
 static bool slot_for(NanoUiTextAtlas *atlas, int gw, int gh, int *out_x, int *out_y)
@@ -102,20 +89,6 @@ static bool slot_for(NanoUiTextAtlas *atlas, int gw, int gh, int *out_x, int *ou
     return false;
 }
 
-/* Glyph surfaces arrive as RGBA32 (glyph_image_to_rgba in nano_ui_ttf.c). */
-static bool blit_surface(NanoUiTextAtlas *atlas, SDL_Surface *surface, int x, int y)
-{
-    const Uint8 *src = (const Uint8 *)surface->pixels;
-    int w = surface->w;
-    int h = surface->h;
-    for (int row = 0; row < h; row++) {
-        Uint8 *dst = atlas->pixels + ((y + row) * atlas->w + x) * 4;
-        memcpy(dst, src + (size_t)row * (size_t)surface->pitch, (size_t)w * 4);
-    }
-    SDL_Rect rect = {x, y, w, h};
-    return SDL_UpdateTexture(atlas->tex, &rect, atlas->pixels + (y * atlas->w + x) * 4, atlas->w * 4);
-}
-
 NanoUiTextAtlas *nano_ui_text_atlas_create(SDL_Renderer *renderer)
 {
     if (!renderer) {
@@ -137,7 +110,6 @@ void nano_ui_text_atlas_destroy(NanoUiTextAtlas *atlas)
     if (atlas->tex) {
         SDL_DestroyTexture(atlas->tex);
     }
-    free(atlas->pixels);
     free(atlas);
 }
 
@@ -167,7 +139,10 @@ bool nano_ui_text_atlas_insert_surface(
     if (!slot_for(atlas, gw, gh, &x, &y)) {
         return false;
     }
-    if (!blit_surface(atlas, surface, x, y)) {
+    /* Glyph surfaces already have the atlas's RGBA32 format. Preserve their
+     * pitch instead of copying each row into a second full-size CPU atlas. */
+    SDL_Rect rect = {x, y, gw, gh};
+    if (!SDL_UpdateTexture(atlas->tex, &rect, surface->pixels, surface->pitch)) {
         return false;
     }
     atlas->x = x + gw + NANO_UI_TEXT_ATLAS_PAD;
@@ -197,9 +172,7 @@ void nano_ui_text_atlas_reset(NanoUiTextAtlas *atlas)
     atlas->x = NANO_UI_WHITE_PATCH_SIZE + NANO_UI_TEXT_ATLAS_PAD;
     atlas->y = NANO_UI_TEXT_ATLAS_PAD;
     atlas->row_h = NANO_UI_WHITE_PATCH_SIZE;
-    if (atlas->pixels && atlas->w > 0 && atlas->h > 0) {
-        memset(atlas->pixels, 0, (size_t)atlas->w * (size_t)atlas->h * 4);
-        init_white_pixel(atlas);
-        upload_all(atlas);
+    if (atlas->tex) {
+        clear_texture(atlas);
     }
 }

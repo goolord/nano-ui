@@ -101,3 +101,23 @@ shaping, fallback ordering and owned stream storage retain their implementations
 This removes 75 maintained library lines, physical and normalized. Native
 font-effects and font-search suites pass, including fallback shaping, immutable
 snapshots, cache eviction, embedded-font reload, and retained-handle rejection.
+
+## SDL atlas storage boundary
+
+Upload RGBA glyph surfaces directly with their own pitch. SDL's texture lock
+and surface-fill APIs initialize/reset the texture, including the white patch
+and transparent padding. This removes 27 library lines and the library-owned
+2048 x 2048 x 4-byte shadow allocation. SDL/driver staging storage is still
+backend-dependent; this is not a claim of 16 MiB less process residency on
+every renderer.
+
+Readback tests pass before and after the change, with both software and native
+renderers. They cover a padded source pitch, glyph pixels, transparent padding,
+the white patch, and clearing the old glyph pixels on reset. Font-effects and
+all three SDL app self-tests pass. The SDL benchmark's warm lookup gate reports
+0.090 B/lookup against its existing 1 B budget; all six frame/draw cases pass.
+
+Seven paired native atlas runs, each measuring 100 reset-and-1,024-insertion
+cycles after five warmups: 2.966593 to 2.886646 ms/cycle (-2.69%), with zero
+Haskell bytes/cycle on both sides (`nano-ui-atlas-direct.json`). This exercises
+cold uploads and resets rather than only warmed glyph lookups.
