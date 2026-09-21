@@ -37,8 +37,8 @@
 --   * Diagnostics:  debug readouts from the SDL backend
 --
 -- The entry point is 'main' (§1) with a small CLI; the argument plumbing is the
--- last section of this file. The automated UI test lives in its own module,
--- "SdlSelftest".
+-- last section of this file. The automated UI test is the
+-- @nano-ui-demo-test@ suite.
 
 module SdlDemo
     ( main
@@ -91,7 +91,6 @@ import qualified Data.Text as T
 import Data.Primitive.SmallArray (indexSmallArray, sizeofSmallArray)
 import qualified Data.Vector.Storable as VS
 import qualified SdlRecord
-import qualified SdlSelftest
 
 import DemoApp (useFileDialog)
 import DemoData
@@ -108,16 +107,13 @@ import DemoData
 -- §1  App entry (main)
 ------------------------------------------------------------------------------
 
--- | Run @cabal run nano-ui-sdl-demo@ for the windowed app, or
--- @cabal run nano-ui-sdl-demo -- --selftest@ for the headless UI test
--- (defined in "SdlSelftest"). @--record DIR@ records the README video's
--- frames (see "SdlRecord").
+-- | Run @cabal run nano-ui-sdl-demo@ for the windowed app. @--record DIR@
+-- records the README video's frames (see "SdlRecord").
 main :: IO ()
 main = do
   args <- getArgs
   case dropWhile (/= "--record") args of
     _ : dir : _ -> SdlRecord.record dir demoUi
-    _ | "--selftest" `elem` args -> SdlSelftest.selftest ("--continuous" `elem` args) demoUi
     _ -> do
       let (cfgUpdates, _, _) = getOpt Permute options args
           cfg = foldl' (flip id) defaultDemoConfig cfgUpdates

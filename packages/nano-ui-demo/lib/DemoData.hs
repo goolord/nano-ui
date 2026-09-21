@@ -1,4 +1,4 @@
--- | Demo data shared by the SDL demo, profile harness, and self-test.
+-- | Demo data shared by the SDL demo, profile harness, and UI tests.
 --
 -- Everything here is plain data: people records, the showcase tree, chart
 -- datasets, and generated images.

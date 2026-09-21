@@ -70,7 +70,7 @@ common sdl-exe
     if os(windows)
         ghc-options: -optl-mconsole
 
--- Modules shared by the executables and the terminal test, compiled once.
+-- Modules shared by the executables and the tests, compiled once.
 library demo-common
     import:           sdl-app
     visibility:       private
@@ -79,8 +79,9 @@ library demo-common
         DemoApp
         DemoData
         SdlDemo
+        SdlLogs
+        SdlNotepad
         SdlRecord
-        SdlSelftest
     other-modules:    Paths_nano_ui_demo
     autogen-modules:  Paths_nano_ui_demo
     build-depends:
@@ -120,21 +121,12 @@ executable nano-ui-sdl-profile
 executable nano-ui-sdl-notepad
     import:           sdl-exe
     main-is:          Notepad.hs
-    build-depends:
-        bytestring ^>=0.12,
-        nano-ui ^>=0.1,
-        nano-ui-demo:demo-common,
-        nano-ui-sdl ^>=0.1,
-        text ^>=2.1
+    build-depends:    nano-ui-demo:demo-common
 
 executable nano-ui-sdl-logs
     import:           sdl-exe
     main-is:          Logs.hs
-    build-depends:
-        nano-ui ^>=0.1,
-        nano-ui-sdl ^>=0.1,
-        text ^>=2.1,
-        vector ^>=0.13
+    build-depends:    nano-ui-demo:demo-common
 
 executable nano-ui-sdl-terminal
     import:           sdl-exe
@@ -142,6 +134,24 @@ executable nano-ui-sdl-terminal
     build-depends:    nano-ui-demo:demo-common
     if os(windows)
         buildable: False
+
+-- Drives the demo, notepad, and log viewer in hidden windows.
+test-suite nano-ui-demo-test
+    import:           sdl-app
+    import:           rts-options
+    type:             exitcode-stdio-1.0
+    main-is:          DemoTest.hs
+    hs-source-dirs:   test
+    other-modules:
+        DemoSelftest
+        LogsSelftest
+        NotepadSelftest
+    build-depends:
+        nano-ui ^>=0.1,
+        nano-ui-demo:demo-common,
+        nano-ui-sdl ^>=0.1,
+        primitive ^>=0.9,
+        text ^>=2.1
 
 test-suite nano-ui-terminal-test
     import:           sdl-app

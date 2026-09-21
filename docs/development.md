@@ -31,18 +31,18 @@ fails the build instead of swapping.
 | `nano-ui-render-test` | Native SDL readback of partial-damage triangles and clipping |
 | `nano-ui-diagrams-test` | Diagram conversion, tessellation, and charts |
 | `nano-ui-form-test` | Form scopes, validation, reset, and submission |
+| `nano-ui-demo-test` | The SDL demo, notepad, and log viewer, driven in hidden windows |
 | `nano-ui-terminal-test` | The terminal demo's escape-sequence parser and PTY |
 
 Run one suite with `cabal test nano-ui-test --test-show-details=failures`.
 
 The headless suites don't exercise native presentation. After changing a
-backend, run its demo. The SDL demo, notepad, and log viewer each have a
-self-test that drives the app in a hidden window and exits:
+backend, run its demo. `nano-ui-demo-test` drives the SDL demo (in both
+buffered and continuous presentation), notepad, and log viewer through real
+SDL windows, hidden:
 
 ```sh
-cabal run nano-ui-sdl-demo -- --selftest
-cabal run nano-ui-sdl-notepad -- --selftest
-cabal run nano-ui-sdl-logs -- --selftest
+cabal test nano-ui-demo-test
 ```
 
 The RGFW backend has its own demo, `cabal run nano-ui-rgfw-demo`.

@@ -24,11 +24,12 @@ cabal run nano-ui-sdl-notepad
 cabal run nano-ui-sdl-logs
 cabal run nano-ui-sdl-terminal
 cabal run nano-ui-sdl-profile
+cabal test nano-ui-demo-test
 cabal test nano-ui-terminal-test
 ```
 
-The demo, notepad, and log viewer take `--selftest`, which drives the app in a
-hidden window and exits with an error if a check fails.
+`nano-ui-demo-test` drives the demo, notepad, and log viewer in hidden windows
+and fails if a check does not hold.
 
 ## Requirements
 

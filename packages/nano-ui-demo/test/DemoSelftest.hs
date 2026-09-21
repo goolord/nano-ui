@@ -1,11 +1,8 @@
--- | Headless UI self-test for the SDL demo. It draws 'demoUi' on a hidden
+-- | Headless UI test for the SDL demo. It draws 'demoUi' on a hidden
 -- window, drives real mouse and keyboard gestures, and checks the text spans
--- each frame produced. The app passes in its UI, so this module does not
--- import "SdlDemo".
---
--- Run via @cabal run nano-ui-sdl-demo -- --selftest@; add
--- @--continuous@ to exercise direct-to-window presentation.
-module SdlSelftest
+-- each frame produced. With @continuous@ set it exercises direct-to-window
+-- presentation.
+module DemoSelftest
     ( selftest
     ) where
 
@@ -40,11 +37,12 @@ import NanoUI.Testing.Harness
 import NanoUI.Testing.Harness qualified as Harness
 import Text.Printf (printf)
 import qualified Data.Text as T
+import SdlDemo (demoUi)
 
--- | Draw the given UI on a hidden SDL window and drive it through the main
+-- | Draw 'demoUi' on a hidden SDL window and drive it through the main
 -- widget interactions, failing loudly on any regression.
-selftest :: Bool -> NanoUI () -> IO ()
-selftest continuous ui = do
+selftest :: Bool -> IO ()
+selftest continuous = do
   ctx0 <- newPixelContext
   let opts =
         defaultSdlOptions
@@ -103,11 +101,11 @@ selftest continuous ui = do
             }
     (ctx', base) <- syncDisplay ctx env idle
     let drawWith frameUi inp = void (sdlDrawFrame ctx' frameUi env inp False)
-        drawOnce = drawWith ui
+        drawOnce = drawWith demoUi
         clickPos = Harness.clickPos drawOnce base
         dragPos = Harness.dragPos drawOnce base
         clickTab = Harness.clickTab collectTextSpans drawOnce ctx' base
-    void (sdlDrawFrame ctx' ui env base True)
+    void (sdlDrawFrame ctx' demoUi env base True)
     spans0 <- collectTextSpans ctx'
     expectText "selftest: Controls body missing" "Feature" spans0
     -- A field value wider than the glyph atlas draws glyph by glyph, and the
@@ -277,7 +275,7 @@ selftest continuous ui = do
     let observeDebug = do
           snapshot <- askSdlDebug
           liftIO $ writeIORef sampledDraws (dbgPresents (dbgCore snapshot))
-          ui
+          demoUi
     drawWith observeDebug base
     previous <- readIORef sampledDraws
     threadDelay 300000
@@ -286,4 +284,4 @@ selftest continuous ui = do
     refreshed <- collectOverlayTextSpans ctx' base
     unless (current > previous && isJust (findExact (T.pack (show current)) refreshed)) $
       fail "selftest: Debug draws counter did not refresh"
-  putStrLn "selftest: ok"
+  putStrLn ("demo selftest" <> (if continuous then " (continuous)" else "") <> ": ok")
