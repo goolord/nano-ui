@@ -48,7 +48,7 @@ import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena (NodeIdx, NodeType (NodeTextArea), getNodeType, getRect, getWidgetId)
 import NanoUI.Internal.Store (Slot (..), fieldInt, fieldPoint, findSlot, insertSlot, lookupSlot)
 import NanoUI.Internal.Style (Style (..), Theme, scrollBarThumbColor, scrollBarTrackColor, themePanel, themeSelection)
-import NanoUI.Internal.Types (Rect (..), V2 (..), onGrid, rectContains)
+import NanoUI.Internal.Types (Rect (..), V2 (..), clamp, onGrid, rectContains)
 import NanoUI.Internal.Widgets.TextArea (TextAreaState (..), loadTextAreaState, saveTextAreaState)
 import qualified NanoUI.Internal.Widgets.TextArea as TA
 import qualified NanoUI.Widgets.TextBuffer as TB
@@ -98,8 +98,8 @@ syncTextAreaViewport ctx idx fm x y w h = do
       bars = textAreaBars fm (Rect x y w h) contentW contentH
       scrollKey = slotKey SlotTextAreaScroll key
       (sx, sy) = findSlot fieldPoint (0, 0) scrollKey store
-      sx' = max 0 (min (max 0 (contentW - tabViewW bars)) sx)
-      sy' = max 0 (min (max 0 (contentH - tabViewH bars)) sy)
+      sx' = clamp 0 (max 0 (contentW - tabViewW bars)) sx
+      sy' = clamp 0 (max 0 (contentH - tabViewH bars)) sy
       viewportKey = slotKey SlotTextAreaViewport key
       clampScroll
         | sx' /= sx || sy' /= sy = insertSlot fieldPoint scrollKey (sx', sy')
@@ -134,7 +134,7 @@ drawTextAreaSelectionLines da firstRow lastRow state (Rect fieldX fieldY _ _) fm
         hiRow = TB.cursorRow hi
     forM_ [max loRow firstRow .. min hiRow lastRow] $ \row -> do
       let line = TB.lineAt row (TA.buffer state)
-          clampCol c = max 0 (min (T.length line) c)
+          clampCol c = clamp 0 (T.length line) c
           startCol = clampCol (if row == loRow then TB.cursorCol lo else 0)
           endCol = clampCol (if row == hiRow then TB.cursorCol hi else T.length line)
       when (startCol < endCol) $ do
@@ -232,7 +232,7 @@ textAreaCursorAt ctx state hit (V2 mouseX mouseY) = do
       (_, iy) = widgetContentInset fm
       Rect _ fieldY _ _ = tahFieldRect hit
       relY = mouseY - (fieldY + iy) + scrollYf
-      row = max 0 (min (lineCount - 1) (floor (relY / max 1 (tahLineH hit))))
+      row = clamp 0 (lineCount - 1) (floor (relY / max 1 (tahLineH hit)))
       line = TB.lineAt row buf
   prepared <- prepareFontMetrics fm line
   pure (row, textIndexAtX prepared line (max 0 (mouseX - (tahContentX hit - scrollXf))))

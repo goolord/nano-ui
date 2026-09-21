@@ -59,7 +59,7 @@ import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena (NodeType (NodeTextArea, NodeTextInput), findNodeRevM, getNodeRect, getNodeType, getWidgetId)
 import NanoUI.Internal.Monad ((<&&>))
 import NanoUI.Internal.Style (Style (..), Theme, themeSeparator)
-import NanoUI.Internal.Types (Color (..), Rect (..), Size (..), V2 (..), lerpColor, rectContains)
+import NanoUI.Internal.Types (Color (..), Rect (..), Size (..), V2 (..), clamp, lerpColor, rectContains)
 import NanoUI.Internal.Widgets.TextEditor (EditorMode (..), TextCommand (..), canRedo, canUndo)
 import NanoUI.Internal.Widgets.TextField (applyTextFieldCommand, textFieldHasText, textFieldHistory, textFieldMode)
 
@@ -103,7 +103,7 @@ textEditMenuWidth ctx = do
 textEditMenuRectAt :: Float -> Float -> Float -> Size -> Rect
 textEditMenuRectAt x y menuW (Size ww wh) =
   let h = 2 * menuOuterPad + textEditMenuContentH
-   in Rect (max 0 (min x (ww - menuW))) (max 0 (min y (wh - h))) menuW h
+   in Rect (clamp 0 (ww - menuW) x) (clamp 0 (wh - h) y) menuW h
 
 textEditMenuContentRect :: Rect -> Rect
 textEditMenuContentRect (Rect x y w _) =

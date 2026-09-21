@@ -73,7 +73,7 @@ import NanoUI.Internal.Layout.Arena
   , getWidgetId
   )
 import NanoUI.Internal.Style (Style, styleBg, styleBorder, styleFg, themeAccent, themeInput, themeOnAccent)
-import NanoUI.Internal.Types (Color (..), Rect (..), clamp01, colorA, lerpColor, onGrid)
+import NanoUI.Internal.Types (Color (..), Rect (..), clamp, clamp01, colorA, lerpColor, onGrid)
 import NanoUI.Internal.WidgetText
   ( hasFlag
   , buttonCloseTrailing
@@ -245,7 +245,7 @@ paintSliderBody env x y w h value = do
             else min innerR (innerFillW / 2)
     pushRoundedRect da (Rect innerX innerY innerFillW innerH) fillR (themeAccent theme)
   let handleD = sliderHandleDiameter
-      handleCx = tx + max (handleD / 2) (min (tw - handleD / 2) fillW)
+      handleCx = tx + clamp (handleD / 2) (tw - handleD / 2) fillW
       handleHy = ty + (th - handleD) / 2
       innerD = handleD - 2
   pushRoundedRect

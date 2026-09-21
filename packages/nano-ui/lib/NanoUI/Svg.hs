@@ -43,7 +43,7 @@ import Graphics.NanoSvg
   , parseSvg
   , transformPoint
   )
-import NanoUI.Internal.Types (Color, colorA, colorB, colorFromWord32, colorG, colorR)
+import NanoUI.Internal.Types (Color, clamp, colorA, colorB, colorFromWord32, colorG, colorR)
 
 -- | A parsed SVG document, as @nano-svg@ returns it.
 type Svg = Document
@@ -295,7 +295,7 @@ strokeWalk w cap join miterLimit contours@(Rings cpts cstarts ctags) point end =
           -- Wound clockwise as built, like a segment's quad.
           emit4 (Point (ex - nx) (ey - ny)) (Point (ex - nx + ux) (ey - ny + uy)) (Point (ex + nx + ux) (ey + ny + uy)) (Point (ex + nx) (ey + ny))
       disc (Point cx cy) = do
-        let n = max 8 (min 48 (ceiling (hw * 2.5) :: Int))
+        let n = clamp 8 48 (ceiling (hw * 2.5) :: Int)
         forM_ [0 .. n - 1] $ \i ->
           let t = 2 * pi * fromIntegral i / fromIntegral n in point (cx + hw * cos t) (cy + hw * sin t)
         end 0
@@ -366,7 +366,7 @@ rasterizeSvg width height current svg
   | otherwise = BSI.unsafeCreate (width * height * 4) $ \out ->
       forM_ [0 .. width * height - 1] $ \i -> do
         let al = indexPrimArray image (i * 4 + 3)
-            byte x = fromIntegral (max 0 (min 255 (round (x * 255) :: Int))) :: Word8
+            byte x = fromIntegral (clamp 0 255 (round (x * 255) :: Int)) :: Word8
             unpremul k = pokeByteOff out (i * 4 + k) (if al <= 0 then 0 else byte (indexPrimArray image (i * 4 + k) / al))
         unpremul 0
         unpremul 1
@@ -475,8 +475,8 @@ coverPolygons width height cov rule rings@(Rings pts starts _) = do
         EvenOdd -> odd w
       add i v = readPrimArray cov i >>= \c -> writePrimArray cov i (c + v)
       spanCover base xa0 xb0 = do
-        let xa = max 0 (min (fromIntegral width) xa0)
-            xb = max 0 (min (fromIntegral width) xb0)
+        let xa = clamp 0 (fromIntegral width) xa0
+            xb = clamp 0 (fromIntegral width) xb0
         when (xb > xa) $ do
           let ia = floor xa :: Int
               ib = min (width - 1) (floor xb)

@@ -62,7 +62,7 @@ import NanoUI.Internal.Style
   , themeOnAccent
   , themeShadow
   )
-import NanoUI.Internal.Types (Color (..), Rect (..), colorA, colorRGBA, lerpColor)
+import NanoUI.Internal.Types (Color (..), Rect (..), clamp, colorA, colorRGBA, lerpColor)
 import NanoUI.Internal.WidgetText
   ( hasFlag
   , buttonVisualStyle
@@ -323,7 +323,7 @@ fillStyledRect da style rect =
 strokeStyledRect :: DrawArena -> Style -> Rect -> IO ()
 strokeStyledRect da style rect@(Rect _ _ w h) =
   when (styleBorderWidth style > 0) $ do
-    let rr = max 0 (min (styleCornerRadius style) (min (w / 2) (h / 2)))
+    let rr = clamp 0 (min (w / 2) (h / 2)) (styleCornerRadius style)
     pushRoundedStroke da rect rr (max 1 (styleBorderWidth style)) (styleBorder style)
 
 -- | A style's fill, then its border.

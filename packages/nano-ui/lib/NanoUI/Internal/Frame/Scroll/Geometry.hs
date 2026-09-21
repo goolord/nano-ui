@@ -42,7 +42,7 @@ import NanoUI.Internal.Font
   , scrollBarSideGap
   , scrollLayoutGutter
   )
-import NanoUI.Internal.Types (Color, Rect (..), V2 (..), rectH, rectIntersect, rectW, rectX, rectY, v2X, v2Y)
+import NanoUI.Internal.Types (Color, Rect (..), V2 (..), clamp, rectH, rectIntersect, rectW, rectX, rectY, v2X, v2Y)
 import NanoUI.Internal.Layout.Arena (DirTag (..))
 import NanoUI.Internal.Style (Direction (..), Padding (..), Style (..), styleBorderWidth, windowPad)
 
@@ -393,7 +393,7 @@ scrollOffsetFromThumb dir layout grabOff mouse =
       DirRow -> (rectX track, rectW track, rectW thumb, v2X mouse)
     ratio = (pointer - grabOff - trackStart) / max 1 (trackSize - thumbSize)
    in
-    max 0 (min maxOff (ratio * maxOff))
+    clamp 0 maxOff (ratio * maxOff)
 
 textClipSlop :: Float
 textClipSlop = 4

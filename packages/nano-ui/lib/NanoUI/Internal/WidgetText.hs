@@ -69,7 +69,7 @@ import Data.Word (Word8)
 import Numeric (showHex)
 import NanoUI.Internal.Font (FontMetrics (..), fmLineHeight, widgetContentInset)
 import NanoUI.Internal.Style (FontStyle (..), FontVariant (..), FontWeight (..), TextDecoration (..), Theme (..), styleBg, themeButton, themePanel, themeWindow)
-import NanoUI.Internal.Types (Color (..), Rect (..), colorA, colorB, colorG, colorR, colorRGBA, lerpColor)
+import NanoUI.Internal.Types (Color (..), Rect (..), clamp, colorA, colorB, colorG, colorR, colorRGBA, lerpColor)
 import qualified Data.Text as T
 
 intValueText :: Int -> Text
@@ -111,7 +111,7 @@ textInputFieldHeight fm = fmLineHeight fm + 2 * textInputFieldPadY fm
 searchInputChrome :: FontMetrics -> (Float, Float, Float, Float)
 searchInputChrome fm =
   let (ix, _) = widgetContentInset fm
-      s = max 12 (min 15 (fmLineHeight fm * 0.8))
+      s = clamp 12 15 (fmLineHeight fm * 0.8)
       pad = fmAdvance fm ' ' * 0.6
    in (s, ix, ix + s + pad, pad + s + ix)
 

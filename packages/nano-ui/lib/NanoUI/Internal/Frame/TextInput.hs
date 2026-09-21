@@ -67,7 +67,7 @@ import NanoUI.Internal.Layout.Arena
   )
 import NanoUI.Internal.Store (fieldFloat, fieldInt, fieldText, findSlot, insertSlot)
 import NanoUI.Internal.Style (themeSelection)
-import NanoUI.Internal.Types (Color (..), Rect (..), V2 (..), rectContains, rectIntersect, rectOverlapArea, rectW)
+import NanoUI.Internal.Types (Color (..), Rect (..), V2 (..), clamp, rectContains, rectIntersect, rectOverlapArea, rectW)
 import NanoUI.Internal.WidgetText
   ( hasFlag
   , comboTextClip
@@ -179,7 +179,7 @@ computeTextInputScroll fm viewportW value cursor oldScroll isFocused
             | caretRelX < oldScroll = caretRelX
             | caretRelX + 1 > oldScroll + viewportW = caretRelX + 1 - viewportW
             | otherwise = oldScroll
-      pure (max 0 (min maxScroll s0))
+      pure (clamp 0 maxScroll s0)
 
 -- | The scroll 'syncTextInputScroll' last settled for a field.
 textInputScroll :: Context -> NodeIdx -> IO Float

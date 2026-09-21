@@ -61,6 +61,7 @@ import GHC.Stack (HasCallStack)
 import NanoUI
 import NanoUI.Backend
 import NanoUI.Internal.Font (alignedTextPen, textInkEnd)
+import NanoUI.Internal.Types (clamp)
 import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, assertLt, bump, withInput)
 
@@ -116,7 +117,7 @@ drawQuads dd =
             (x0, y0, r0, g0, b0, a0) : rest -> do
               let xs = x0 : map (\(x, _, _, _, _, _) -> x) rest
                   ys = y0 : map (\(_, y, _, _, _, _) -> y) rest
-                  toW8 f = max 0 (min 255 (round (f * 255)))
+                  toW8 f = clamp 0 255 (round (f * 255))
               pure
                 ( Rect (minimum xs) (minimum ys) (maximum xs - minimum xs) (maximum ys - minimum ys)
                 , colorRGBA (toW8 r0) (toW8 g0) (toW8 b0) (toW8 a0)

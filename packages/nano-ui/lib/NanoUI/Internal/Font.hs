@@ -65,7 +65,7 @@ import qualified Data.Map.Strict as Map
 import Data.Primitive.PrimArray (PrimArray, imapPrimArray, indexPrimArray, mapPrimArray, sizeofPrimArray)
 import Data.Text (Text)
 import qualified Data.Text as T
-import NanoUI.Internal.Types (Rect (..), onGrid)
+import NanoUI.Internal.Types (Rect (..), clamp, onGrid)
 import NanoUI.Internal.Style (AlignX (..), FontStyle (..), FontVariant (..), FontWeight (..))
 
 -- | Glyph ink rectangle relative to the pen, in logical pixels, with normalised
@@ -527,7 +527,7 @@ caretX :: FontMetrics -> Text -> Int -> Float
 caretX fm txt i = case fmShape fm txt of
   Just st ->
     let carets = stCarets st
-     in if sizeofPrimArray carets == 0 then 0 else indexPrimArray carets (max 0 (min (sizeofPrimArray carets - 1) i))
+     in if sizeofPrimArray carets == 0 then 0 else indexPrimArray carets (clamp 0 (sizeofPrimArray carets - 1) i)
   Nothing -> lineWidth fm (T.take i txt)
 
 caretXIO :: FontMetrics -> Text -> Int -> IO Float

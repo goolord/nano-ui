@@ -52,7 +52,7 @@ import NanoUI.Internal.Layout.Arena (NodeType (NodeSelect, NodeTextInput), findN
 import NanoUI.Internal.Monad ((<&&>))
 import NanoUI.Internal.Store (Slot (..), fieldFloat, fieldInt, fieldText, findSlot, insertSlot, slotKey)
 import NanoUI.Internal.Style (Style (..), Theme (..), scrollBarThumbColor, scrollBarTrackColor, themeAccent, themeInput)
-import NanoUI.Internal.Types (Color (..), Rect (..), V2 (..), rectContains, rectIntersect)
+import NanoUI.Internal.Types (Color (..), Rect (..), V2 (..), clamp, rectContains, rectIntersect)
 import NanoUI.Internal.WidgetText (selectChevronReserve)
 
 -- | An open dropdown: a select with its open flag set, or a combo box (a
@@ -244,7 +244,7 @@ finalizeSelectKeyboard ctx inp = do
               when (n > 0) $ do
                 let key = intKey wid
                     cur = findSlot fieldInt 0 key store
-                    next = max 0 (min (n - 1) (cur + if wantNext then 1 else -1))
+                    next = clamp 0 (n - 1) (cur + if wantNext then 1 else -1)
                 when (next /= cur) $ do
                   setStore ctx (insertSlot fieldInt key next store)
                   markDirty ctx
@@ -361,9 +361,9 @@ comboScrollGeom (Rect dx dy dw dh) n vis win xOff contentW =
         then
           let Rect vx vy _ vh = vTrack
               trackH = max 1 vh
-              thumbH = max (min comboSbMinThumb trackH) (min trackH (trackH * fromIntegral vis / fromIntegral n))
+              thumbH = clamp (min comboSbMinThumb trackH) trackH (trackH * fromIntegral vis / fromIntegral n)
               maxWin = max 1 (n - vis)
-              ty = vy + (trackH - thumbH) * fromIntegral (max 0 (min maxWin win)) / fromIntegral maxWin
+              ty = vy + (trackH - thumbH) * fromIntegral (clamp 0 maxWin win) / fromIntegral maxWin
            in Just (vTrack, Rect (vx + 2) ty (comboSbW - 4) thumbH)
         else Nothing
     hSb =
@@ -371,9 +371,9 @@ comboScrollGeom (Rect dx dy dw dh) n vis win xOff contentW =
         then
           let Rect hx hy hw _ = hTrack
               trackW = max 1 hw
-              thumbW = max (min comboSbMinThumb trackW) (min trackW (trackW * usableW / contentW))
+              thumbW = clamp (min comboSbMinThumb trackW) trackW (trackW * usableW / contentW)
               maxOff = max 1 (contentW - usableW)
-              tx = hx + (trackW - thumbW) * max 0 (min maxOff xOff) / maxOff
+              tx = hx + (trackW - thumbW) * clamp 0 maxOff xOff / maxOff
            in Just (hTrack, Rect tx (hy + 2) thumbW (comboSbW - 4))
         else Nothing
    in (inner, vSb, hSb, usableW)
@@ -396,7 +396,7 @@ comboDropPickIndex (Rect _ dy _ _) itemH nOpts mouseY =
   let rel = mouseY - dy
    in if rel < 0 || rel >= itemH * fromIntegral nOpts
         then Nothing
-        else Just (max 0 (min (nOpts - 1) (floor (rel / max itemH 1))))
+        else Just (clamp 0 (nOpts - 1) (floor (rel / max itemH 1)))
 
 drawSelectOverlays :: Context -> Input -> IO ()
 drawSelectOverlays ctx inp = do

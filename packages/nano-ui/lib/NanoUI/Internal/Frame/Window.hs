@@ -59,7 +59,7 @@ import NanoUI.Internal.Layout.Solve (Measurers (..), placeWindowNode, windowBody
 import NanoUI.Internal.Monad ((<&&>))
 import NanoUI.Internal.Store (fieldPoint, insertSlot, lookupSlot)
 import NanoUI.Internal.Style (Padding (..))
-import NanoUI.Internal.Types (DamageBounds (..), Rect (..), V2 (..), haloDamageSlop, rectContains, rectInflate, rectNonEmpty)
+import NanoUI.Internal.Types (DamageBounds (..), Rect (..), V2 (..), clamp, haloDamageSlop, rectContains, rectInflate, rectNonEmpty)
 
 topmostWindowAtResizeHalo :: Context -> V2 -> IO (Maybe NodeIdx)
 topmostWindowAtResizeHalo ctx mouse = do
@@ -239,12 +239,12 @@ resizeFromEdge wrd (V2 mx my) winW winH =
         | fromS = wrdStartH wrd + dy
         | fromN = wrdStartH wrd - dy
         | otherwise = wrdStartH wrd
-      !w = max minW (min maxW w0)
-      !h = max minH (min maxH h0)
+      !w = clamp minW maxW w0
+      !h = clamp minH maxH h0
       !x0 = if fromW then right0 - w else wrdStartX wrd
       !y0 = if fromN then bottom0 - h else wrdStartY wrd
-      !x = max 0 (min x0 (max 0 (winW - w)))
-      !y = max 0 (min y0 (max 0 (winH - h)))
+      !x = clamp 0 (max 0 (winW - w)) x0
+      !y = clamp 0 (max 0 (winH - h)) y0
    in (w, h, x, y)
 
 -- | Start or continue a resize within logical window width/height. Updates

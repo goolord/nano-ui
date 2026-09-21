@@ -1802,7 +1802,7 @@ placeWindowNode na ms winW winH idx w0 h0 originFor = do
 clampPopupX :: Float -> Float -> Float -> Float -> Float
 clampPopupX margin winW iw x0
   | x0 < margin && x0 + iw <= winW = max 0 x0
-  | otherwise = max margin (min (winW - iw - margin) x0)
+  | otherwise = clamp margin (winW - iw - margin) x0
 
 -- | Popup origin from window width/height, margin, popup width/height, anchor,
 -- preferred placement, and gap. All coordinates use logical pixels.
@@ -1830,7 +1830,7 @@ computePopupPosition winW winH margin iw ih anchor placement offset =
             _ -> py
           x = if x0 + iw > winW - margin && px - iw - margin >= 0
                 then px - iw - offset
-                else max margin (min (winW - iw - margin) x0)
+                else clamp margin (winW - iw - margin) x0
           y = if y0 + ih > winH - margin && py - ih - margin >= 0
                 then py - ih - offset
                 else clampY y0
@@ -1853,7 +1853,7 @@ computePopupPosition winW winH margin iw ih anchor placement offset =
           (clampPopupX margin winW iw rx, clampY (ry + rh + offset))
   where
     -- Keep the popup's top edge within the window margins.
-    clampY y = max margin (min (winH - ih - margin) y)
+    clampY y = clamp margin (winH - ih - margin) y
     -- A popup of @size@ after (or before) the anchor span @lo@..@lo + len@ on
     -- an axis of length @lim@, taking the other side when it would overflow
     -- and the other side fits.

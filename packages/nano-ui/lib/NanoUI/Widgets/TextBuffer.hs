@@ -64,6 +64,7 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Array qualified as A
 import Data.Text.Internal (Text (..))
+import NanoUI.Internal.Types (clamp)
 
 -- | Zero-indexed logical (row, column) position in the buffer. Fields are
 -- row then column, so the derived 'Ord' is document order.
@@ -168,8 +169,8 @@ markLinesSeen buf = let n = getLineCount buf in buf {bufferSeenHead = n, bufferS
 -- | The nearest position inside the document.
 clampCursor :: TextBuffer -> Cursor -> Cursor
 clampCursor buf (Cursor row col) =
-  let !r = max 0 (min (getLineCount buf - 1) row)
-      !c = max 0 (min (T.length (lineAt r buf)) col)
+  let !r = clamp 0 (getLineCount buf - 1) row
+      !c = clamp 0 (T.length (lineAt r buf)) col
    in Cursor r c
 
 -- | Move to a position, clamped into the document, without changing text.
