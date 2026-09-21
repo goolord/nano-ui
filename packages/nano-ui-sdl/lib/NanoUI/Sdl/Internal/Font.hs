@@ -156,16 +156,17 @@ ensureAtlasAlive ga = do
   alive <- readIORef (gaAlive ga)
   unless alive (fail "font backend used after destroyGlyphAtlas")
 
--- | Maximum number of shaped-run cache entries per 'FontMetrics'. Dynamic,
--- ever-changing text (FPS counters, timers, percentages, mouse positions)
--- generates unique strings over time; without a bound the run cache (and
--- the atlas rectangles its renders occupy) would grow without limit. The
--- cap sits well above a realistic frame's string working set so steady
--- static text is never evicted (re-rendering an evicted run leaks its old
--- atlas rectangle); atlas exhaustion itself is recovered by the deferred
--- reset in 'prepareGlyphAtlasForFrame', which also clears the whole cache.
+-- | Entries per generation of each shaped-run cache on a 'FontMetrics'.
+-- Dynamic, ever-changing text (FPS counters, timers, percentages, mouse
+-- positions) generates unique strings over time, so the caches are bounded.
+-- Atlas exhaustion is recovered by the deferred reset in
+-- 'prepareGlyphAtlasForFrame', which also clears the quad cache.
 runCacheCap :: Int
 runCacheCap = 1024
+
+-- | Kerning pairs per generation of a font's pair cache.
+kernCacheCap :: Int
+kernCacheCap = 4096
 
 -- Entry-count limits alone do not bound retained text: edited oversized lines
 -- can otherwise keep thousands of full-document versions alive per font.
@@ -195,6 +196,35 @@ insertBounded cap k v (BoundedCache m order) =
           let (evicted, m'') = HM.alterF (\old -> (old, Nothing)) victim m'
            in (BoundedCache m'' (rest Seq.|> k), evicted)
       | otherwise -> (BoundedCache m' (order Seq.|> k), Nothing)
+
+-- | A hash map kept in two generations, a cheap stand-in for least recently
+-- used. Inserts go to the young map; a hit in the old map moves the entry up.
+-- When the young map fills it becomes the old one and the old one is dropped,
+-- so an entry survives while it is used once a generation, however many
+-- one-off keys (wrap probes, table cells) pass through. Plain insertion order
+-- evicted the oldest key even when every frame used it.
+-- The fields are the young map, its size and the old map.
+data GenCache k v = GenCache !(HM.HashMap k v) !Int !(HM.HashMap k v)
+
+emptyGen :: GenCache k v
+emptyGen = GenCache HM.empty 0 HM.empty
+
+insertGen :: Hashable k => Int -> k -> v -> GenCache k v -> GenCache k v
+insertGen cap k v (GenCache young n old)
+  | n >= cap = GenCache (HM.singleton k v) 1 young
+  | otherwise = GenCache (HM.insert k v young) (n + 1) old
+
+-- | Look @k@ up, moving an old entry to the young map.
+lookupGen :: Hashable k => Int -> IORef (GenCache k v) -> k -> IO (Maybe v)
+lookupGen cap ref k = do
+  cache@(GenCache young _ old) <- readIORef ref
+  case HM.lookup k young of
+    Just v -> pure (Just v)
+    Nothing -> case HM.lookup k old of
+      Just v -> do
+        writeIORef ref $! insertGen cap k v cache
+        pure (Just v)
+      Nothing -> pure Nothing
 
 -- Native glyph measurements have one representation, shared by metric-only
 -- preparation and atlas placement. Pixel bearings are unscaled here.
@@ -681,16 +711,17 @@ buildGlyphFontMetrics ga sf scale = do
   -- layout, so a pair cache keeps the hot pen loops off the FFI
   -- boundary after first contact. Keyed by packed codepoint pair on this
   -- 'FontMetrics' (the font id is implicit).
-  kernCacheRef <- newIORef emptyBounded
+  kernCacheRef <- newIORef emptyGen
 
   -- Shaped lines: SDL3_ttf lays each string out with its kerning,
   -- ligatures, contextual forms, fallback fonts and right-to-left runs. A
   -- line's layout is kept with its metric snapshot, which survives atlas
   -- resets; the glyph quads drawn from it hold atlas UVs, so their cache is
-  -- dropped with the atlas epoch. Both caches are bounded by 'runCacheCap'.
-  preparedRef <- newIORef emptyBounded
-  shapedRef <- newIORef emptyBounded
-  quadCacheRef <- newIORef emptyBounded
+  -- dropped with the atlas epoch. Each cache keeps two generations of
+-- 'runCacheCap' entries.
+  preparedRef <- newIORef emptyGen
+  shapedRef <- newIORef emptyGen
+  quadCacheRef <- newIORef emptyGen
   initQuadEpoch <- readIORef (gaEpoch ga)
   quadEpochRef <- newIORef initQuadEpoch
 
@@ -711,14 +742,13 @@ buildGlyphFontMetrics ga sf scale = do
       -- The cache lives on this 'FontMetrics', so the font id is constant and
       -- the pair can be packed into a single Int key: no tuple on the hot path.
       let !pk = (ord prev `shiftL` 21) .|. ord c
-      cache <- readIORef kernCacheRef
-      case HM.lookup pk (bcEntries cache) of
+      cached <- lookupGen kernCacheCap kernCacheRef pk
+      case cached of
         Just k -> pure k
         Nothing -> do
           raw <- ttfGetKerning (sfFont sf) (fromIntegral (ord prev) :: CUInt) (fromIntegral (ord c) :: CUInt)
           let !k = fromIntegral raw / inv
-          -- At most 4096 pairs per font.
-          writeIORef kernCacheRef $! fst (insertBounded 4096 pk k cache)
+          modifyIORef' kernCacheRef (insertGen kernCacheCap pk k)
           pure k
 
     -- The glyph quads of a shaped line, from the atlas. Quads are cached per
@@ -733,17 +763,17 @@ buildGlyphFontMetrics ga sf scale = do
           quadEp <- readIORef quadEpochRef
           when (quadEp /= ep) $ do
             writeIORef quadEpochRef ep
-            writeIORef quadCacheRef emptyBounded
-          cache <- readIORef quadCacheRef
+            writeIORef quadCacheRef emptyGen
           -- Entries are kept wrapped so a hit returns them without allocating.
-          case HM.lookup txt (bcEntries cache) of
+          cached <- lookupGen runCacheCap quadCacheRef txt
+          case cached of
             Just quads -> pure quads
             Nothing -> do
               shaped <- shapeOf txt
               quads <- Just <$> placeGlyphs shaped
               epAfter <- readIORef (gaEpoch ga)
               when (cacheableText txt && epAfter == ep) $
-                modifyIORef' quadCacheRef (fst . insertBounded runCacheCap txt quads)
+                modifyIORef' quadCacheRef (insertGen runCacheCap txt quads)
               pure quads
 
     -- Put a shaped line's glyphs in the atlas. A glyph the atlas has no room
@@ -803,14 +833,14 @@ buildGlyphFontMetrics ga sf scale = do
     -- drawing it. Fonts that cover characters this one lacks join it before
     -- the line is shaped.
     shapeOf !txt = do
-      shapedCache <- readIORef shapedRef
-      case HM.lookup txt (bcEntries shapedCache) of
+      cached <- lookupGen runCacheCap shapedRef txt
+      case cached of
         Just shaped -> pure shaped
         Nothing -> do
           ensureCoverage sf txt
           shaped <- shapeLine sf inv txt
           when (cacheableText txt) $
-            writeIORef shapedRef $! fst (insertBounded runCacheCap txt shaped shapedCache)
+            modifyIORef' shapedRef (insertGen runCacheCap txt shaped)
           pure shaped
 
     -- The width shaping draws with, so layout and drawing agree.
@@ -827,8 +857,8 @@ buildGlyphFontMetrics ga sf scale = do
 
     prepareText txt = do
       ensureFontAlive sf
-      prepared <- readIORef preparedRef
-      case HM.lookup txt (bcEntries prepared) of
+      cached <- lookupGen runCacheCap preparedRef txt
+      case cached of
         Just fm -> pure fm
         Nothing -> do
           let insertChar m c = IM.insert (ord c) c m
@@ -859,7 +889,7 @@ buildGlyphFontMetrics ga sf scale = do
                 , fmSnapScale = inv
                 }
           when (cacheableText txt) $
-            writeIORef preparedRef $! fst (insertBounded runCacheCap txt fm prepared)
+            modifyIORef' preparedRef (insertGen runCacheCap txt fm)
           pure fm
 
   fm <- prepareText ""
