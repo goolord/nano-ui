@@ -467,10 +467,8 @@ clipDamage ctx snap d = do
           unless isImage $ scrollAncestorRect ctx k >>= mapM_ (addRect acc)
   unless (ptrEq (fdTexts d) (fsTexts snap)) $
     IM.foldrWithKey (\k _ rest -> addText k >> rest) (pure ()) $
-      IM.mergeWithKey
-        (\_ new old -> if new /= old then Just () else Nothing)
-        (IM.map (const ()))
-        (const IM.empty)
+      IM.differenceWith
+        (\new old -> if new /= old then Just new else Nothing)
         (fdTexts d)
         (fsTexts snap)
   -- Drawings redrawn in place repaint their own rects, like a text change

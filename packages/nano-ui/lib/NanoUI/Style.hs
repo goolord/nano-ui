@@ -809,7 +809,7 @@ tomorrowNightMinDarkTheme =
           edgeCol
           (colorRGBA 52 54 62 255)  -- #34363E
           (colorRGBA 26 27 29 255)  -- #1A1B1D
-   in Theme
+   in (accentColor accentCol defaultTheme)
         { themeWindow = colorRGBA 23 24 26 255         -- #17181A (dark root window backdrop)
         , themePanel = panelSurface
         , themeFloatingWindow = panelSurface
@@ -828,7 +828,6 @@ tomorrowNightMinDarkTheme =
               (colorRGBA 29 30 33 255)
               (colorRGBA 19 20 22 255)
         , themeSeparator = sepCol
-        , themeAccent = accentCol
         , themeMuted = colorRGBA 150 152 150 255       -- comment #969896
         , themeRed = colorRGBA 204 102 102 255         -- base.red #CC6666
         , themeOrange = colorRGBA 222 147 95 255       -- base.orange #DE935F
@@ -836,12 +835,7 @@ tomorrowNightMinDarkTheme =
         , themeGreen = colorRGBA 181 189 104 255       -- base.green #B5BD68
         , themePurple = colorRGBA 178 148 187 255      -- base.purple #B294BB
         , themeOverlayDim = colorRGBA 0 0 0 160
-        , themeOnAccent = colorRGBA 255 255 255 255
-        , themeSelection = fadeAlpha accentCol 115
-        , themeFocusRing = accentCol
         , themeLink = accentCol
-        , themeShadow = colorRGBA 0 0 0 72
-        , themeDisabledFade = 0.55
         }
   where
   edgeCol    = colorRGBA 77 80 87 255              -- window #4D5057 (touch brighter crisp border)
@@ -858,7 +852,7 @@ tomorrowMinLightTheme =
           (colorRGBA 222 222 222 255)  -- #DEDEDE
           (colorRGBA 231 231 231 255)  -- #E7E7E7 (darker than #F2F2F2 so hover reads)
           (colorRGBA 219 219 219 255)  -- #DBDBDB
-   in Theme
+   in (accentColor (colorRGBA 82 134 188 255) defaultTheme) -- #5286BC (Tomorrow Blue)
         { themeWindow = colorRGBA 255 255 255 255     -- #FFFFFF
         , themePanel = panelSurface
         , themeFloatingWindow = panelSurface
@@ -877,7 +871,6 @@ tomorrowMinLightTheme =
               (colorRGBA 243 243 243 255)  -- #F3F3F3 (darker than white so hover reads)
               (colorRGBA 255 255 255 255)  -- focus keeps the normal white bg; accent border signals focus
         , themeSeparator = colorRGBA 222 222 222 255  -- #DEDEDE
-        , themeAccent = colorRGBA 82 134 188 255      -- #5286BC (Tomorrow Blue)
         , themeMuted = colorRGBA 140 140 140 255      -- #8C8C8C
         , themeRed = colorRGBA 197 78 82 255          -- Tomorrow Red #C54E52
         , themeOrange = colorRGBA 231 140 69 255      -- Tomorrow Orange #E78C45
@@ -885,12 +878,9 @@ tomorrowMinLightTheme =
         , themeGreen = colorRGBA 113 140 0 255        -- Tomorrow Green #718C00
         , themePurple = colorRGBA 137 91 144 255      -- Tomorrow Purple #895B90
         , themeOverlayDim = colorRGBA 0 0 0 100
-        , themeOnAccent = colorRGBA 255 255 255 255
         , themeSelection = fadeAlpha (colorRGBA 82 134 188 255) 80
-        , themeFocusRing = colorRGBA 82 134 188 255
         , themeLink = colorRGBA 66 113 174 255
         , themeShadow = colorRGBA 0 0 0 36
-        , themeDisabledFade = 0.55
         }
 
 -- | Ported from "Tomorrow at Midnight Min" in https://github.com/biaqat/tomorrow-min-theme-zed
@@ -903,7 +893,7 @@ tomorrowMidnightMinDarkTheme =
           edgeCol
           (colorRGBA 46 48 56 255)  -- #2E3038
           (colorRGBA 12 13 15 255)  -- #0C0D0F
-   in Theme
+   in (accentColor accentCol defaultTheme)
         { themeWindow = colorRGBA 0 0 0 255           -- #000000 (pitch black root window backdrop)
         , themePanel = panelSurface
         , themeFloatingWindow = panelSurface
@@ -922,7 +912,6 @@ tomorrowMidnightMinDarkTheme =
               (colorRGBA 21 22 28 255)
               (colorRGBA 8 9 11 255)
         , themeSeparator = sepCol
-        , themeAccent = accentCol
         , themeMuted = colorRGBA 128 132 150 255       -- #808496
         , themeRed = colorRGBA 213 78 83 255           -- bright.red #D54E53
         , themeOrange = colorRGBA 231 140 69 255       -- bright.orange #E78C45
@@ -930,12 +919,8 @@ tomorrowMidnightMinDarkTheme =
         , themeGreen = colorRGBA 185 202 74 255        -- bright.green #B9CA4A
         , themePurple = colorRGBA 195 151 216 255      -- bright.purple #C397D8
         , themeOverlayDim = colorRGBA 0 0 0 160
-        , themeOnAccent = colorRGBA 255 255 255 255
-        , themeSelection = fadeAlpha accentCol 115
-        , themeFocusRing = accentCol
         , themeLink = accentCol
         , themeShadow = colorRGBA 0 0 0 96
-        , themeDisabledFade = 0.55
         }
   where
   edgeCol    = colorRGBA 48 52 70 255              -- #303446
@@ -1001,7 +986,7 @@ themeFromBase16Mode dark b =
         (pick (lerpColor panelBg (base02 b) 0.5) (lerpColor panelBg (base00 b) 0.4))
         (lerpColor panelBg (pick (base00 b) (base02 b)) 0.4)
    in
-    Theme
+    (accentColor (base0D b) defaultTheme)
       { themeWindow = base00 b
       , themePanel = panelSurface
       , themeFloatingWindow = panelSurface
@@ -1020,7 +1005,6 @@ themeFromBase16Mode dark b =
             (pick (base01 b) (lerpColor (base00 b) (base01 b) 0.3))
             (pick (base00 b) (lerpColor (base00 b) (base01 b) 0.6))
       , themeSeparator = edgeCol
-      , themeAccent = base0D b
       , themeMuted = base03 b
       , themeRed = base08 b
       , themeOrange = base09 b
@@ -1033,10 +1017,8 @@ themeFromBase16Mode dark b =
             then pick (base00 b) (base07 b)
             else colorRGBA 255 255 255 255
       , themeSelection = fadeAlpha (base0D b) (pick 115 80)
-      , themeFocusRing = base0D b
       , themeLink = base0D b
       , themeShadow = colorRGBA 0 0 0 (pick 72 36)
-      , themeDisabledFade = 0.55
       }
 
 -- | Tomorrow Night Base16 reference palette.

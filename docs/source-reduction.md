@@ -199,3 +199,23 @@ reference is already bound locally under its exact field name. Keep font,
 clipboard and recursive resolver defaults explicit. This removes 31 lines
 without adding an abstraction, changing record layout, or changing the
 allocation sequence. Core tests and all 21 existing inspection checks pass.
+
+## Core policy reuse and rejected cache-key pilot
+
+Built-in palettes and Base16 construction reuse `defaultTheme` and
+`accentColor` for shared defaults instead of repeating them. Complete `Show`
+snapshots of the four built-ins and all three Base16 constructors over both
+bundled palettes match the freshly compiled baseline exactly (ten themes).
+Text damage uses `IntMap.differenceWith` for its asymmetric changed/new-key
+set rather than supplying all three policies to a general merge. Existing
+damage, styling and core integration tests pass; this removes 20 library lines.
+
+A strict, unpacked `SpanCacheKey` with stock-derived `Eq` was implemented
+and tested as a bounded deriving pilot. Behavior tests passed, but the entire
+migration saved only four normalized library lines after the new type and
+exports were counted. The `-O1` inspection probe failed key erasure: the
+generated comparison called `$fEqSpanCacheKey_$c==` with two reconstructed
+`SpanCacheKey` records, including the unpacked cached key. The pilot and its
+temporary inspection assertion were reverted. Retain flat cache inputs and
+explicit comparisons rather than introduce hot-path allocation and a public
+record migration for that saving.
