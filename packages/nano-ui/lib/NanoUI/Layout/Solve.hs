@@ -153,7 +153,7 @@ import NanoUI.WidgetText
   , textInputNumericMode
   , numericStepperW
   , textInputSelectableMode
-  , searchFieldReserveW
+  , searchInputReserveW
   , isTableHeaderStyle
   , isMenuItemStyle
   , isCloseButtonStyle
@@ -499,15 +499,15 @@ measureTextField fm measure txt multiline = do
   pure (contentW, fieldH, 0, 0)
 
 -- Caption-less search box: single row tall, icons counted in the width budget.
-measureSearchField ::
+measureSearchInput ::
   FontMetrics ->
   (Text -> IO (Float, Float)) ->
   Text ->
   IO (Float, Float, Float, Float)
-measureSearchField fm measure txt = do
+measureSearchInput fm measure txt = do
   let lbl = if T.null txt then " " else txt
   (lw, _) <- measure lbl
-  let contentW = max textInputMinWidth lw + searchFieldReserveW fm
+  let contentW = max textInputMinWidth lw + searchInputReserveW fm
   pure (contentW, textInputFieldHeight fm, 0, 0)
 
 measureWidget :: SolveEnv -> NodeIdx -> IO ()
@@ -578,7 +578,7 @@ measureWidget env@SolveEnv {seArena = na, seArrays = a, seFm = fm, seMeasure = m
         | textInputNumericMode si ->
             pure (56, textInputFieldHeight fm, numericStepperW, 0)
         | textInputSearchMode si ->
-            measureSearchField fm measure txt
+            measureSearchInput fm measure txt
         | otherwise -> measureTextField fm measure txt False
       NodeTextArea -> measureTextField fm measure txt True
       _

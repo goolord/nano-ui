@@ -169,6 +169,12 @@
 
 ### Changed
 
+- `searchField` is now `searchInput`, to match `textInput`, and the rest of
+  its family follows: `searchInput'`, `searchInputConfigured`,
+  `searchInputConfigured'`, `SearchInputConfig` and
+  `defaultSearchInputConfig`. The config's fields take `textInput`'s prefix
+  shape too: `sicPlaceholder`, `sicDebounceMs` and `sicLayout`, formerly
+  `sfc`.
 - `NanoUI` no longer exports the backend surface; import `NanoUI.Backend` for
   it. The names that moved are `runUi`, `runNanoUI`; `emptyInput`,
   `appendInputKey`, `appendDropEvent`, `emptyDropEvents`, `emptyInputKeys`,

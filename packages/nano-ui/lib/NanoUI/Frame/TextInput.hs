@@ -72,8 +72,8 @@ import NanoUI.Types (Color (..), Rect (..), V2 (..), rectContains, rectIntersect
 import NanoUI.WidgetText
   ( comboTextClip
   , numericTextClip
-  , searchFieldIconRects
-  , searchFieldTextClip
+  , searchInputIconRects
+  , searchInputTextClip
   , textInputNumericMode
   , textInputFieldHeight
   , textInputSearchMode
@@ -114,7 +114,7 @@ nodeTextFieldGeom ctx idx x y w h = do
           then (box, numericTextClip fm x y w h)
           else
             if textInputSearchMode si
-              then (box, if null opts then searchFieldTextClip fm x y w h else comboTextClip fm x y w h)
+              then (box, if null opts then searchInputTextClip fm x y w h else comboTextClip fm x y w h)
               else (field, textInputFieldTextClip fm field)
 
 -- | Whether the pointer is over the clear (×) button of a non-empty search
@@ -133,13 +133,13 @@ searchClearHit ctx wid mouse = do
           then pure False
           else do
             (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-            let (_, clearRect) = searchFieldIconRects (ctxFontMetrics ctx) x y w h
+            let (_, clearRect) = searchInputIconRects (ctxFontMetrics ctx) x y w h
             pure (rectContains clearRect mouse)
 
 -- | Clear a search field. The debounced pulse picks the empty text up as an
 -- immediate (empty) commit on the next frame.
-clearSearchField :: Context -> WidgetId -> IO ()
-clearSearchField ctx wid = do
+clearSearchInput :: Context -> WidgetId -> IO ()
+clearSearchInput ctx wid = do
   let key = intKey wid
   modifyStore ctx $
     insertSlot fieldText key ""
@@ -293,7 +293,7 @@ finalizeTextInputMouse ctx inp wid = do
         then do
           cleared <- searchClearHit ctx wid mouse
           if cleared
-            then clearSearchField ctx wid
+            then clearSearchInput ctx wid
             else do
               idx <- charAt
               clicks <- normalizeTextFieldClicks ctx wid idx 0 0 False (max 1 (inputMouseClicks inp))

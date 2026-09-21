@@ -94,7 +94,7 @@ idleUi scene frames started typedAt = do
     heading "Idle probe"
     label "This window should use no CPU or GPU while it is left alone."
     (query, setQuery) <- useText ""
-    (resp, query') <- searchField' "Search" query
+    (resp, query') <- searchInput' "Search" query
     setQuery query'
     -- Hold keyboard focus without a click, as an app's search box would.
     when (scene `elem` ["focus", "type"] && n < 4) $

@@ -85,8 +85,8 @@ import NanoUI.WidgetText
   , isTableHeaderStyle
   , numericStepperRects
   , numericTextClip
-  , searchFieldIconRects
-  , searchFieldTextClip
+  , searchInputIconRects
+  , searchInputTextClip
   , selectChevronCenterX
   , selectChevronReserve
   , tableSortMarkOf
@@ -119,7 +119,7 @@ paintTextInputNode env idx rect@(Rect x y w h) = do
             then do
               opts <- getOptions (peNodeArena env) idx
               if null opts
-                then paintSearchField ctx da fm style idx focus rect
+                then paintSearchInput ctx da fm style idx focus rect
                 else paintComboField ctx da fm style idx focus rect
             else do
               let field = textInputFieldRect fm x y w h
@@ -351,15 +351,15 @@ drawStepArrow da up (Rect sx sy sw sh) col = do
 -- | Caption-less search field: box fills the node rect, magnifier on the left,
 -- clear (×) on the right when there is text, and the editable value / caret /
 -- selection confined to the space between them.
-paintSearchField :: Context -> DrawArena -> FontMetrics -> Style -> NodeIdx -> Bool -> Rect -> IO ()
-paintSearchField ctx da fm style idx focus box@(Rect x y w h) = do
-  let (magRect, Rect cx cy cw ch) = searchFieldIconRects fm x y w h
+paintSearchInput :: Context -> DrawArena -> FontMetrics -> Style -> NodeIdx -> Bool -> Rect -> IO ()
+paintSearchInput ctx da fm style idx focus box@(Rect x y w h) = do
+  let (magRect, Rect cx cy cw ch) = searchInputIconRects fm x y w h
       iconCol = lerpColor (styleFg style) (styleBg style) 0.45
   paintStyledRect da style box
   value <- textInputValue ctx idx
   lbl <- getText (ctxNodeArena ctx) idx
   drawSearchMagnifier da magRect iconCol
-  paintFieldValue ctx da fm style idx focus box (searchFieldTextClip fm x y w h) lbl value
+  paintFieldValue ctx da fm style idx focus box (searchInputTextClip fm x y w h) lbl value
   unless (T.null value) $
     drawCloseIcon da False cx cy cw ch iconCol
 

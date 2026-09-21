@@ -45,7 +45,7 @@ runKeyboardDisabledTest _ctx failed = do
   check (toggleSwitch' False) (spaceInp inp)
   check (textInput' "initial") (inp {inputChars = "x"})
   check (textArea' "initial") (inp {inputChars = "x"})
-  check (searchField' "Search" "initial") (inp {inputChars = "x"})
+  check (searchInput' "Search" "initial") (inp {inputChars = "x"})
   check (comboBox' "Choose" ["initial", "other"] "initial") (inp {inputChars = "x"})
   check (do r <- button' "Disabled"; pure (r, respClicked r)) (keyInp KeyEnter inp)
 

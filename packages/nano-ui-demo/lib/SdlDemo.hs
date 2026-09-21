@@ -30,7 +30,7 @@
 --   * Graphics:     image gallery, an animated GIF, and a progressBar driven
 --                   by a pulsing value
 --   * Typography:   label / labelWith + the @font*@ style combinators
---   * List:         tree, searchField
+--   * List:         tree, searchInput
 --   * Table:        tableWith (needs useTableSort)
 --   * Panes:        paneGrid
 --   * Plots:        plot, barChart, areaChart, diagram
@@ -299,8 +299,8 @@ demoUi = do
   useFileDialog folderDlg setFolderDlg $ \paths ->
     setFolderPath (maybe "" T.pack (listToMaybe paths))
   -- List tab.
-  (searchText, setSearchText) <- useText "" -- live searchField text
-  (searchQuery, setSearchQuery) <- useText "" -- committed searchField value
+  (searchText, setSearchText) <- useText "" -- live searchInput text
+  (searchQuery, setSearchQuery) <- useText "" -- committed searchInput value
   (peopleMatches, setPeopleMatches) <- useState demoPeople -- filtered rows
   (treeSel, setTreeSel) <- useInt 0 -- tree selection index
   -- Table tab.
@@ -620,7 +620,7 @@ demoUi = do
               separator
               heading "Searchable list"
               muted "Type to filter. The debounced search commits on a pause; the filtered list is cached and only recomputed when the committed query changes."
-              (qResp, qVal) <- searchField' "Filter people (name, role, city…)" searchText
+              (qResp, qVal) <- searchInput' "Filter people (name, role, city…)" searchText
               setSearchText qVal
               when (respChanged qResp) $ do
                 setSearchQuery qVal

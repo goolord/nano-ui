@@ -5,7 +5,7 @@ module NanoUI.Widgets.TextInput
   , loadTextInputState
   , saveTextInputState
   , textInputLayout
-  , searchFieldLayout
+  , searchInputLayout
   , textInputEditor
   , editorTextState
   , saveTextEditor
@@ -19,12 +19,12 @@ module NanoUI.Widgets.TextInput
   , textInput'
   , textInputConfigured
   , textInputConfigured'
-  , SearchFieldConfig (..)
-  , defaultSearchFieldConfig
-  , searchField
-  , searchField'
-  , searchFieldConfigured
-  , searchFieldConfigured'
+  , SearchInputConfig (..)
+  , defaultSearchInputConfig
+  , searchInput
+  , searchInput'
+  , searchInputConfigured
+  , searchInputConfigured'
   , buildTextInput
   , editTextField
     -- * Selectable text
@@ -103,8 +103,8 @@ textInputLayout =
 
 -- | Layout for a caption-less search field. Grows to fill, keeps a little more
 -- room for the embedded magnifier / clear chrome than a plain text input.
-searchFieldLayout :: Layout
-searchFieldLayout =
+searchInputLayout :: Layout
+searchInputLayout =
   defaultLayout
     { layoutWidth = Grow 1
     , layoutMinW = 180
@@ -348,53 +348,53 @@ debounceSearchChanged ctx key focused rawChanged ms = do
 -- | Search field: a caption-less 'NodeTextInput' with an embedded magnifier and
 -- clear button. The label acts as the placeholder. Change pulses are debounced
 -- (trailing edge); clearing with the embedded button fires immediately.
-data SearchFieldConfig = SearchFieldConfig
-  { sfcPlaceholder :: !Text
-  , sfcDebounceMs :: !Float
-  , sfcLayout :: !Layout
+data SearchInputConfig = SearchInputConfig
+  { sicPlaceholder :: !Text
+  , sicDebounceMs :: !Float
+  , sicLayout :: !Layout
   }
   deriving (Eq, Show)
 
 -- | Search placeholder, a 300 ms trailing debounce, and the standard search layout.
-defaultSearchFieldConfig :: SearchFieldConfig
-defaultSearchFieldConfig =
-  SearchFieldConfig
-    { sfcPlaceholder = "Search…"
-    , sfcDebounceMs = 300
-    , sfcLayout = searchFieldLayout
+defaultSearchInputConfig :: SearchInputConfig
+defaultSearchInputConfig =
+  SearchInputConfig
+    { sicPlaceholder = "Search…"
+    , sicDebounceMs = 300
+    , sicLayout = searchInputLayout
     }
 
 -- | Search box with a magnifier and a clear button; the first argument is the
 -- placeholder. Pass the current text; the result is the text after this
--- frame. @respChanged@ on 'searchField'' is debounced: it fires once typing
+-- frame. @respChanged@ on 'searchInput'' is debounced: it fires once typing
 -- pauses, or at once when the field is cleared.
-{-# INLINE searchField #-}
-searchField :: Ui :> es => Text -> Text -> Eff es Text
-searchField placeholder value = snd <$> searchField' placeholder value
+{-# INLINE searchInput #-}
+searchInput :: Ui :> es => Text -> Text -> Eff es Text
+searchInput placeholder value = snd <$> searchInput' placeholder value
 
--- | 'searchField' with a response. Text updates immediately; only the change
+-- | 'searchInput' with a response. Text updates immediately; only the change
 -- flag waits for the debounce interval.
-{-# INLINE searchField' #-}
-searchField' :: Ui :> es => Text -> Text -> Eff es (Response, Text)
-searchField' placeholder =
-  searchFieldConfigured' (defaultSearchFieldConfig {sfcPlaceholder = placeholder})
+{-# INLINE searchInput' #-}
+searchInput' :: Ui :> es => Text -> Text -> Eff es (Response, Text)
+searchInput' placeholder =
+  searchInputConfigured' (defaultSearchInputConfig {sicPlaceholder = placeholder})
 
 -- | Search field with explicit placeholder, debounce in milliseconds, and layout.
-{-# INLINE searchFieldConfigured #-}
-searchFieldConfigured :: Ui :> es => SearchFieldConfig -> Text -> Eff es Text
-searchFieldConfigured cfg value = snd <$> searchFieldConfigured' cfg value
+{-# INLINE searchInputConfigured #-}
+searchInputConfigured :: Ui :> es => SearchInputConfig -> Text -> Eff es Text
+searchInputConfigured cfg value = snd <$> searchInputConfigured' cfg value
 
--- | 'searchFieldConfigured' returning @(response, updatedText)@. Store the
+-- | 'searchInputConfigured' returning @(response, updatedText)@. Store the
 -- returned text every frame, including before the debounced change flag fires.
-searchFieldConfigured' ::
-  Ui :> es => SearchFieldConfig -> Text -> Eff es (Response, Text)
-searchFieldConfigured' cfg value =
+searchInputConfigured' ::
+  Ui :> es => SearchInputConfig -> Text -> Eff es (Response, Text)
+searchInputConfigured' cfg value =
   buildTextInput
     textInputFlagSearch
-    (sfcLayout cfg)
-    (sfcPlaceholder cfg)
+    (sicLayout cfg)
+    (sicPlaceholder cfg)
     value
-    (Just (sfcDebounceMs cfg))
+    (Just (sicDebounceMs cfg))
 
 -- -----------------------------------------------------------------------------
 -- Selectable text

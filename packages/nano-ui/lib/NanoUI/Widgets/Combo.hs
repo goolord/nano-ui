@@ -39,7 +39,7 @@ import NanoUI.Types (Rect (..), V2 (..), clamp, rectContains, rectNonEmpty, v2X,
 import NanoUI.WidgetText (textInputFlagSearch)
 import NanoUI.Widgets.Behavior (keyboardFocused)
 import NanoUI.Widgets.Node (Response (..), dropdownInput, setChanged)
-import NanoUI.Widgets.TextInput (buildTextInput, searchFieldLayout)
+import NanoUI.Widgets.TextInput (buildTextInput, searchInputLayout)
 
 -- | Maximum suggestion rows the combo dropdown shows at once; Up/Down walk
 -- the highlight and the wheel scrolls the list through a sliding window.
@@ -258,7 +258,7 @@ comboStep ci cs0 =
       | escDismiss = committed0
       | otherwise = text
 
--- | Combo box: the 'searchField' with a select-style dropdown of options.
+-- | Combo box: the 'searchInput' with a select-style dropdown of options.
 -- While the field holds focus, the shared select dropdown overlay lists the
 -- options filtered by the field text (all of them while it is empty). The
 -- value is free text: options are suggestions, not a closed set. See
@@ -273,7 +273,7 @@ comboBox placeholder options value = snd <$> comboBox' placeholder options value
 comboBox' :: (Foldable f, Ui :> es) => Text -> f Text -> Text -> Eff es (Response, Text)
 comboBox' placeholder options value = do
   (resp, text) <-
-    buildTextInput textInputFlagSearch searchFieldLayout placeholder value Nothing
+    buildTextInput textInputFlagSearch searchInputLayout placeholder value Nothing
   ctx <- askContext
   inp <- dropdownInput (rawRespId resp)
   let wid = rawRespId resp

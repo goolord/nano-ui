@@ -21,9 +21,9 @@ module NanoUI.WidgetText
   , numericTextClip
   , numericStepperRects
   , comboTextClip
-  , searchFieldReserveW
-  , searchFieldTextClip
-  , searchFieldIconRects
+  , searchInputReserveW
+  , searchInputTextClip
+  , searchInputIconRects
   , selectDisplayText
   , selectChevronReserve
   , selectChevronCenterX
@@ -117,31 +117,31 @@ textInputFieldHeight fm = fmLineHeight fm + 2 * textInputFieldPadY fm
 -- (icon diameter, outer pad, left chrome lead, right chrome tail). The lead/tail
 -- are the horizontal space the magnifier / clear buttons reserve either side of
 -- the editable text.
-searchFieldChrome :: FontMetrics -> (Float, Float, Float, Float)
-searchFieldChrome fm =
+searchInputChrome :: FontMetrics -> (Float, Float, Float, Float)
+searchInputChrome fm =
   let (ix, _) = widgetContentInset fm
       s = max 12 (min 15 (fmLineHeight fm * 0.8))
       pad = fmAdvance fm ' ' * 0.6
    in (s, ix, ix + s + pad, pad + s + ix)
 
 -- | Total horizontal chrome a caption-less search box reserves for its icons.
-searchFieldReserveW :: FontMetrics -> Float
-searchFieldReserveW fm =
-  let (_, _, lead, tailw) = searchFieldChrome fm
+searchInputReserveW :: FontMetrics -> Float
+searchInputReserveW fm =
+  let (_, _, lead, tailw) = searchInputChrome fm
    in lead + tailw
 
 -- | Region a caption-less search field's editable text may occupy. Excludes the
 -- magnifier on the left and the clear slot on the right.
-searchFieldTextClip :: FontMetrics -> Float -> Float -> Float -> Float -> Rect
-searchFieldTextClip fm x y w h =
-  let (_, _, lead, tailw) = searchFieldChrome fm
+searchInputTextClip :: FontMetrics -> Float -> Float -> Float -> Float -> Rect
+searchInputTextClip fm x y w h =
+  let (_, _, lead, tailw) = searchInputChrome fm
       (_, iy) = widgetContentInset fm
    in Rect (x + lead) (y + iy) (max 0 (w - lead - tailw)) (max 0 (h - 2 * iy))
 
 -- | Square slots (magnifier left, clear right) the search icons are drawn in.
-searchFieldIconRects :: FontMetrics -> Float -> Float -> Float -> Float -> (Rect, Rect)
-searchFieldIconRects fm x y w h =
-  let (s, ix, _, _) = searchFieldChrome fm
+searchInputIconRects :: FontMetrics -> Float -> Float -> Float -> Float -> (Rect, Rect)
+searchInputIconRects fm x y w h =
+  let (s, ix, _, _) = searchInputChrome fm
       cy = y + h / 2
       mag = Rect (x + ix) (cy - s / 2) s s
       clear = Rect (x + w - ix - s) (cy - s / 2) s s

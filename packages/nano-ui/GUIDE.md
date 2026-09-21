@@ -74,7 +74,7 @@ buttons and labels return the response itself. `respChanged` reports an
 edit, `respSubmitted` reports a commit, and `respClicked` reports activation.
 `respPressed` is a held-button state, not a one-frame press event.
 
-`searchField'` returns edited text immediately but debounces `respChanged`.
+`searchInput'` returns edited text immediately but debounces `respChanged`.
 Store its text on every frame; use the change flag to trigger a search.
 
 ## Stable identity

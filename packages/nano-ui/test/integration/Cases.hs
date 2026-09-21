@@ -27,9 +27,9 @@ module Cases
   , runResponsiveWrapTest
   , runSliderFillWidthTest
   , runWidgetNoStringEmitTest
-  , runSearchFieldClearTest
-  , runSearchFieldDebounceTest
-  , runSearchFieldSetTextDebounceTest
+  , runSearchInputClearTest
+  , runSearchInputDebounceTest
+  , runSearchInputSetTextDebounceTest
   ) where
 
 import Control.Monad (forM_, void, when)
@@ -1077,11 +1077,11 @@ runPaneGridClippedControlTest ctx failed = do
 
 -- Clicking the embedded clear (×) must empty the field, keep focus, and fire an
 -- immediate (non-debounced) change pulse.
-runSearchFieldClearTest :: Context -> IORef Int -> IO ()
-runSearchFieldClearTest ctx failed = do
+runSearchInputClearTest :: Context -> IORef Int -> IO ()
+runSearchInputClearTest ctx failed = do
   queryRef <- newIORef "hello world"
   let inp0 = withInput 320 100
-      ui = column (held queryRef (searchField' "Search…"))
+      ui = column (held queryRef (searchInput' "Search…"))
   (resp, _) <- warmup2 ctx inp0 ui
   let Rect bx by bw bh = respRect resp
       cy = by + bh / 2
@@ -1103,11 +1103,11 @@ runSearchFieldClearTest ctx failed = do
 
 -- Typing is echoed immediately but the change pulse only fires after the text
 -- has been idle for the configured debounce window.
-runSearchFieldDebounceTest :: Context -> IORef Int -> IO ()
-runSearchFieldDebounceTest ctx failed = do
+runSearchInputDebounceTest :: Context -> IORef Int -> IO ()
+runSearchInputDebounceTest ctx failed = do
   queryRef <- newIORef ""
   let inp0 = withInput 320 100
-      ui = column (held queryRef (searchFieldConfigured' (defaultSearchFieldConfig {sfcDebounceMs = 40})))
+      ui = column (held queryRef (searchInputConfigured' (defaultSearchInputConfig {sicDebounceMs = 40})))
   warmupFocused ctx inp0 ui
   ((rA, tA), _, _, _) <- runFrame ctx (inp0 {inputChars = "a"}) ui
   assertEq failed tA "a"
@@ -1134,11 +1134,11 @@ runSearchFieldDebounceTest ctx failed = do
 -- commits after one pause like typed text. With no edit time to age from it
 -- once looked freshly edited on every frame: it never committed, and woke
 -- the loop every debounce period for good.
-runSearchFieldSetTextDebounceTest :: Context -> IORef Int -> IO ()
-runSearchFieldSetTextDebounceTest ctx failed = do
+runSearchInputSetTextDebounceTest :: Context -> IORef Int -> IO ()
+runSearchInputSetTextDebounceTest ctx failed = do
   queryRef <- newIORef ""
   let inp0 = withInput 320 100
-      ui = column (held queryRef (searchFieldConfigured' (defaultSearchFieldConfig {sfcDebounceMs = 40})))
+      ui = column (held queryRef (searchInputConfigured' (defaultSearchInputConfig {sicDebounceMs = 40})))
   warmupFocused ctx inp0 ui
   writeIORef queryRef "recent"
   ((rA, tA), _, _, _) <- runFrame ctx inp0 ui

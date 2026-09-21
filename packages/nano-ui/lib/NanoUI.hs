@@ -203,12 +203,12 @@ module NanoUI
   , numericInput'
   , numericInputConfigured
   , numericInputConfigured'
-  , SearchFieldConfig (..)
-  , defaultSearchFieldConfig
-  , searchField
-  , searchField'
-  , searchFieldConfigured
-  , searchFieldConfigured'
+  , SearchInputConfig (..)
+  , defaultSearchInputConfig
+  , searchInput
+  , searchInput'
+  , searchInputConfigured
+  , searchInputConfigured'
   , comboBox
   , comboBox'
   , textArea

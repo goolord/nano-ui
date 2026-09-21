@@ -158,12 +158,12 @@ testSpecs =
     TestSpec "checkbox-initial" False runCheckboxInitialTest
   , TestSpec "slider-cursor" True runSliderCursorTest
   , TestSpec "slider-fill-width" True runSliderFillWidthTest
-  , TestSpec "search-field-clear" False runSearchFieldClearTest
-  , TestSpec "search-field-debounce" False runSearchFieldDebounceTest
+  , TestSpec "search-input-clear" False runSearchInputClearTest
+  , TestSpec "search-input-debounce" False runSearchInputDebounceTest
   , TestSpec
-      "search-field-set-text-debounce"
+      "search-input-set-text-debounce"
       False
-      runSearchFieldSetTextDebounceTest
+      runSearchInputSetTextDebounceTest
   , TestSpec "select-drag-to-select" False runSelectDragToSelectTest
   , TestSpec "select-keyboard" False runSelectKeyboardTest
   , TestSpec "select-change-once" False runSelectChangeOnceTest
