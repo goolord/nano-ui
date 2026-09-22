@@ -6,7 +6,7 @@ module NanoUI.Sdl.Internal.Cursor
   , syncPointerCursor
   ) where
 
-import Control.Monad (forM_, void, when)
+import Control.Monad (void, when)
 import Data.Foldable (toList)
 import Data.Primitive.SmallArray (SmallArray, indexSmallArray, smallArrayFromList)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
@@ -62,10 +62,8 @@ initCursors = do
 
 -- | Destroy the cursors this session created. SDL owns the default one.
 destroyCursors :: SdlCursors -> IO ()
-destroyCursors SdlCursors {scCursors, scMoveFallback = fb} = do
-  forM_ (drop 1 (toList scCursors)) $ \cur ->
-    when (cur /= nullPtr && cur /= fb) (destroyCursorSafe cur)
-  destroyCursorSafe fb
+destroyCursors SdlCursors {scCursors, scMoveFallback = fb} =
+  mapM_ destroyCursorSafe (fb : filter (/= fb) (drop 1 (toList scCursors)))
 
 syncPointerCursor :: SdlCursors -> Context -> Input -> IO ()
 syncPointerCursor cursors ctx inp = do
