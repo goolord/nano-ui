@@ -43,6 +43,8 @@ module NanoUI.Internal.Types
   , v2Sub
   , PopupAnchor (..)
   , PopupPlacement (..)
+  , foldUpTo
+  , forUpTo_
   ) where
 
 import Data.Bits (shiftL, shiftR, (.&.), (.|.))
@@ -408,3 +410,17 @@ data PopupPlacement
   | PlacementAtCursor
   | PlacementAuto
   deriving (Eq, Show)
+
+-- | Strict left fold over @0 .. n - 1@.
+{-# INLINE foldUpTo #-}
+foldUpTo :: Int -> (a -> Int -> IO a) -> a -> IO a
+foldUpTo n f = go 0
+  where
+    go !i !acc
+      | i >= n = pure acc
+      | otherwise = f acc i >>= go (i + 1)
+
+-- | Run @f@ on @0 .. n - 1@ in order, without allocating a range list.
+{-# INLINE forUpTo_ #-}
+forUpTo_ :: Int -> (Int -> IO ()) -> IO ()
+forUpTo_ n f = foldUpTo n (\() i -> f i) ()

@@ -34,7 +34,7 @@ import NanoUI.Internal.SIMD
   , pokeQuadSIMD
   , pokeVertexSIMD
   )
-import NanoUI.Internal.Types (Color (..), Rect (..), onGrid)
+import NanoUI.Internal.Types (Color (..), Rect (..), forUpTo_, onGrid)
 
 {-# INLINE pushRect #-}
 pushRect :: DrawArena -> Rect -> Color -> IO ()
@@ -244,7 +244,7 @@ pushRoundedRectRaw da (Rect x y w h) radius col
                       !centerIdx = fromIntegral (base + vi) :: Word32
                       !inRad = max 0 (rad - 1.0)
                   pokeVertexSIMD vp vBase ccx ccy cr cg cb ca u u
-                  loopIO 0 segs $ \i -> do
+                  forUpTo_ (segs + 1) $ \i -> do
                     let !(ct, st) = cornerCosSin q i
                         !rimI = base + vi + 1 + i
                         !outI = base + vi + 1 + ring + i
@@ -354,11 +354,11 @@ pushRoundedStrokeRaw da (Rect px py w h) radius bw col
                       !outerR = cr + core
                       !innerAA = max 0 (inner - arcFeather)
                       !outerAA = outerR + arcFeather
-                  loopIO 0 n $ \i -> do
+                  forUpTo_ (n + 1) $ \i -> do
                     let !(ct, st) = cornerCosSin q i
                     pokeBandVerts vp ((base + vi + i * arcStride) * vertexSize) hasCore r g b a $
                       concentricOffsetsSIMD ccx ccy ct st innerAA inner outerR outerAA
-                  loopIO 0 (n - 1) $ \i -> do
+                  forUpTo_ n $ \i -> do
                     let !va = fromIntegral (base + vi + i * arcStride) :: Word32
                     pokeBandIndices ip ((baseIdx + ii + i * arcIndices) * indexSize) hasCore va (va + fromIntegral arcStride)
                 !viLR = if doTB then 16 else 0
@@ -571,7 +571,7 @@ polygonAAFrom da rx ry pts tris col
           -- Square geometry has no fade, so no fringe either.
           !fringe = if square then 0 else n
       withVertsRaw da (n + fringe) (nt + 6 * fringe) $ \vp ip base baseIdx -> do
-        loopIO 0 (n - 1) $ \i -> do
+        forUpTo_ n $ \i -> do
           let (ax, ay) = normalAt (if i == 0 then n - 1 else i - 1)
               (bx, by) = normalAt i
               (mx, my) = miterOf ax ay bx by
@@ -580,9 +580,9 @@ polygonAAFrom da rx ry pts tris col
           pokeVertexSIMD vp ((base + i) * vertexSize) (vx - f * mx) (vy - f * my) r g b a whitePixel whitePixel
           when (fringe > 0) $
             pokeVertexSIMD vp ((base + n + i) * vertexSize) (vx + f * mx) (vy + f * my) r g b 0 whitePixel whitePixel
-        loopIO 0 (nt - 1) $ \k ->
+        forUpTo_ nt $ \k ->
           pokeByteOff ip ((baseIdx + k) * indexSize) (fromIntegral (base + indexPrimArray tris k) :: Word32)
-        loopIO 0 (fringe - 1) $ \i -> do
+        forUpTo_ fringe $ \i -> do
           let !j = if i + 1 >= n then 0 else i + 1
               !inI = fromIntegral (base + i) :: Word32
               !inJ = fromIntegral (base + j) :: Word32
@@ -628,7 +628,7 @@ pushPolylineAA da pts w closed col
             let !j = if i + 1 >= n then 0 else i + 1
              in segNormal (px i) (py i) (px j) (py j)
       withVertsRaw da (4 * n) (18 * segs) $ \vp ip base baseIdx -> do
-        loopIO 0 (n - 1) $ \i -> do
+        forUpTo_ n $ \i -> do
           let (ax, ay)
                 | i > 0 = normalAt (i - 1)
                 | closed = normalAt (n - 1)
@@ -639,7 +639,7 @@ pushPolylineAA da pts w closed col
               (mx, my) = miterOf ax ay bx by
           pokeBandVerts vp ((base + 4 * i) * vertexSize) True r g b a $
             concentricOffsetsSIMD (px i + ox) (py i + oy) mx my (-outer) (-core) core outer
-        loopIO 0 (segs - 1) $ \i -> do
+        forUpTo_ segs $ \i -> do
           let !j = if i + 1 >= n then 0 else i + 1
               !va = fromIntegral (base + 4 * i) :: Word32
               !vb = fromIntegral (base + 4 * j) :: Word32

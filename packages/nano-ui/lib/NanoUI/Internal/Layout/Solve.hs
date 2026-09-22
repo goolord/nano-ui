@@ -124,7 +124,7 @@ import NanoUI.Internal.Layout.Arena
   )
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Style (AlignX (..), AlignY (..), FontStyle (..), FontVariant (..), FontWeight (..), Padding (..), windowMargin)
-import NanoUI.Internal.Types (PopupAnchor (..), PopupPlacement (..), Rect (..), V2 (..), clamp, gridSpan, onGrid)
+import NanoUI.Internal.Types (PopupAnchor (..), PopupPlacement (..), Rect (..), V2 (..), clamp, foldUpTo, forUpTo_, gridSpan, onGrid)
 import NanoUI.Internal.WidgetText
   ( hasFlag
   , colorPickerSvH
@@ -1396,20 +1396,6 @@ distributeScratch na n avail gapSum horizontal = do
         main <- readPrimArray out i
         let delta = negate slack * shrinkFactor ax / shrinkTotal
         writePrimArray out i (max (axMin ax) (main - delta))
-
--- | Strict left fold over @0 .. n - 1@.
-{-# INLINE foldUpTo #-}
-foldUpTo :: Int -> (a -> Int -> IO a) -> a -> IO a
-foldUpTo n f = go 0
-  where
-    go !i !acc
-      | i >= n = pure acc
-      | otherwise = f acc i >>= go (i + 1)
-
--- | Run @f@ on @0 .. n - 1@ in order.
-{-# INLINE forUpTo_ #-}
-forUpTo_ :: Int -> (Int -> IO ()) -> IO ()
-forUpTo_ n f = foldUpTo n (\() i -> f i) ()
 
 {-# INLINE shrinkFactor #-}
 shrinkFactor :: AxisSizing -> Float
