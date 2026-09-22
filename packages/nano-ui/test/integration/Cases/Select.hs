@@ -12,6 +12,7 @@ tests =
   , spec "select-change-once" runSelectChangeOnceTest
   , spec "select-close-keeps-focus" runSelectCloseKeepsFocusTest
   , spec "select-overlay-damage" runSelectOverlayDamageTest
+  , spec "select-dropdown-span-colors" runSelectDropdownSpanColorsTest
   , spec "tree-select" runTreeSelectTest
   , spec "tree-keyboard" runTreeKeyboardTest
   ]
@@ -63,6 +64,24 @@ runSelectOverlayDamageTest ctx failed = do
     -- the clip repaints the whole dropdown rather than the whole window.
     assert failed (not (null overlays))
     forM_ overlays $ \(_, _, _, _, dropRect) -> assert failed (clipCovers dmg dropRect)
+
+-- | An open dropdown's text spans carry the colours it is painted in: the
+-- picked row's text in the accent colour, the others in the menu's.
+runSelectDropdownSpanColorsTest :: Context -> IORef Int -> IO ()
+runSelectDropdownSpanColorsTest ctx failed = do
+  theme <- getTheme ctx
+  let ui = column (select' ["Low", "Medium", "High"] 0)
+      inp0 = (withInput 640 480) {inputMousePos = V2 600 400}
+  (resp, _) <- warmup2 ctx inp0 ui
+  let open = snd (clickPair inp0 (centerOf resp))
+  _ <- runClick ctx inp0 ui (centerOf resp)
+  let away = open {inputMouseReleased = False, inputMousePos = V2 600 400}
+  _ <- runFrame ctx away ui
+  overlays <- collectOverlayTextSpans ctx away
+  let fgOf lbl = [fg | (_, txt, fg, _, _) <- overlays, txt == lbl]
+  assertEq failed (fgOf "Low") [themeAccent theme]
+  assertEq failed (length (fgOf "Medium")) 1
+  assert failed (themeAccent theme `notElem` fgOf "Medium")
 
 runTreeSelectTest :: Context -> IORef Int -> IO ()
 runTreeSelectTest ctx failed = do

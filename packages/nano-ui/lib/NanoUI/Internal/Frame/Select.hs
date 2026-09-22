@@ -432,18 +432,22 @@ collectSelectDropdownSpans ctx inp = do
   dropdowns <- allowedDropdowns ctx
   let fm = ctxFontMetrics ctx
   fmap concat . forM dropdowns $ \dd -> do
-    style <- overlayMenuStyle <$> widgetTheme ctx (ddWidget dd)
+    theme <- widgetTheme ctx (ddWidget dd)
+    let style = overlayMenuStyle theme
     fmap concat . forM (dropdownRows fm (inputMousePos inp) dd) $ \row ->
       if T.null (drOption row)
         then pure []
         else do
           (tw, th) <- ctxMeasureText ctx (drOption row)
           let Rect _ ry _ rh = drRect row
+              picked = drIndex row == ddPicked dd
               bg
                 | drHovered row = styleHoverBg style
-                | drIndex row == ddPicked dd = styleActiveBg style
+                | picked = styleActiveBg style
                 | otherwise = styleBg style
-          pure [(Rect (drTextX row) (centeredTextY fm ry rh th) tw th, drOption row, styleFg style, bg, ddRect dd)]
+              -- As painted: the picked row's text is in the accent colour.
+              fg = if picked then themeAccent theme else styleFg style
+          pure [(Rect (drTextX row) (centeredTextY fm ry rh th) tw th, drOption row, fg, bg, ddRect dd)]
 
 tagSelectClippedSpans ::
   Rect -> Float -> Float -> Float -> Float -> FontMetrics -> [(Rect, T.Text, Color, Color)] -> [(Rect, T.Text, Color, Color, Rect)]
