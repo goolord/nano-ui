@@ -37,7 +37,7 @@ import NanoUI.Internal.Layout.Arena
   , getWidgetId
   , isWidgetNode
   )
-import NanoUI.Internal.Monad ((<&&>))
+import NanoUI.Internal.Monad (ifM, (<&&>))
 import NanoUI.Internal.Types (V2 (..))
 
 -- | Whether state or input changes require a frame. Arguments are previous
@@ -47,8 +47,7 @@ needsRedraw :: Context -> Input -> Input -> IO Bool
 needsRedraw ctx prev inp = do
   dirty <- isDirty ctx
   anim <- anyAnimating ctx
-  mDrag <- getsInteraction ctx isScrollDrag
-  mWinDrag <- getsInteraction ctx isWindowDrag
+  drag <- getsInteraction ctx (\s -> isJust (isScrollDrag s) || isJust (isWindowDrag s))
   overlay <- overlayMenuOpen ctx
   let moved = inputMousePos prev /= inputMousePos inp
   if dirty
@@ -56,8 +55,7 @@ needsRedraw ctx prev inp = do
     || inputInteracted prev inp
     || inputWindowRedraw inp
     || inputPointerHeld inp
-    || isJust mDrag
-    || isJust mWinDrag
+    || drag
     || (overlay && moved)
     then pure True
     else
@@ -79,11 +77,10 @@ needsRedraw ctx prev inp = do
 -- is active. Text-selection drags are tracked separately.
 pointerDragActive :: Context -> IO Bool
 pointerDragActive ctx = do
-  winDrag <- isJust <$> getsInteraction ctx isWindowDrag
-  scrollDrag <- isJust <$> getsInteraction ctx isScrollDrag
-  winResize <- isJust <$> getsInteraction ctx isWindowResize
+  gesture <- getsInteraction ctx $ \s ->
+    isJust (isWindowDrag s) || isJust (isScrollDrag s) || isJust (isWindowResize s)
   sliderOrPicker <- focusedNodeIs ctx ctxActiveId (\nt -> nt == NodeSlider || nt == NodeColorPicker)
-  pure (winDrag || scrollDrag || winResize || sliderOrPicker)
+  pure (gesture || sliderOrPicker)
 
 -- | Whether the node of the widget id held in @ref@ satisfies @p@.
 focusedNodeIs :: Context -> (Context -> IORef WidgetId) -> (NodeType -> Bool) -> IO Bool
@@ -105,19 +102,15 @@ overlayMenuOpen ctx = do
 -- | Focused text field or its context menu. Typing reaches it as input events,
 -- which wake the loop by themselves, so focus alone keeps nothing running.
 textFieldActive :: Context -> IO Bool
-textFieldActive ctx = do
-  menu <- getsInteraction ctx isTextInputMenu
-  if isJust menu
-    then pure True
-    else focusedNodeIs ctx ctxFocusId (\nt -> nt == NodeTextInput || nt == NodeTextArea)
+textFieldActive ctx =
+  ifM (isJust <$> getsInteraction ctx isTextInputMenu) (pure True) $
+    focusedNodeIs ctx ctxFocusId (\nt -> nt == NodeTextInput || nt == NodeTextArea)
 
 -- | Whether modal state or the current arena contains a floating panel,
 -- including windows and popups.
 floatingPanelActive :: Context -> IO Bool
-floatingPanelActive ctx = do
-  modal <- modalActive ctx
-  floating <- floatingNodeCount (ctxNodeArena ctx)
-  pure (modal || floating > 0)
+floatingPanelActive ctx =
+  (||) <$> modalActive ctx <*> ((> 0) <$> floatingNodeCount (ctxNodeArena ctx))
 
 -- | Whether the arena contains any floating window. The name does not imply
 -- that its contents are a debug readout.
