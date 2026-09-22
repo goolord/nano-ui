@@ -806,7 +806,7 @@ pairColumnGap na True b gap = do
 foldChromeColumnScratch :: NodeArena -> Int -> Float -> IO (Float, Float)
 foldChromeColumnScratch na n gap = do
   FlexScratch {fsW = wArr, fsH = hArr} <- readIORef (naScratch na)
-  gapSum <- columnGapSumScratch na True n gap
+  gapSum <- columnGapSumScratch na n gap
   maxW <- foldUpTo n (\m i -> max m <$> readPrimArray wArr i) 0
   totalH <- foldUpTo n (\t i -> (t +) <$> readPrimArray hArr i) 0
   pure (maxW, totalH + gapSum)
@@ -1324,9 +1324,10 @@ positionColumn ::
   IO ()
 positionColumn env@SolveEnv {seArena = na} !depth !parent !gap chrome scrollContent !px !pw !cx !cy !cw !ch = do
   n <- loadChildrenScratch na parent (flowChildSize env True cw ch)
-  gapSum <- case scrollContent of
-    Just _ -> pure (gap * fromIntegral (max 0 (n - 1)))
-    Nothing -> columnGapSumScratch na chrome n gap
+  -- The gaps come out of the height shared, as in a row, or grow children
+  -- overflow the column by them.
+  gapSum <-
+    if chrome then columnGapSumScratch na n gap else pure (gap * fromIntegral (max 0 (n - 1)))
   withAxisSnaps na depth n (fromMaybe ch scrollContent) gapSum False $ \idxSnap outSnap -> do
     let go !i !y = when (i < n) $ do
           ci <- readPrimArray idxSnap i
@@ -1348,9 +1349,10 @@ positionColumn env@SolveEnv {seArena = na} !depth !parent !gap chrome scrollCont
           go (i + 1) (y + placedH + gapAfter)
     go 0 cy
 
-columnGapSumScratch :: NodeArena -> Bool -> Int -> Float -> IO Float
-columnGapSumScratch _ False _ _ = pure 0
-columnGapSumScratch na True n gap = do
+-- | The gaps between the first @n@ scratch children of a window's or modal's
+-- column, where a separator takes none before it.
+columnGapSumScratch :: NodeArena -> Int -> Float -> IO Float
+columnGapSumScratch na n gap = do
   FlexScratch {fsIdx = idxArr} <- readIORef (naScratch na)
   let addGap acc i = readPrimArray idxArr (i + 1) >>= \b -> (acc +) <$> pairColumnGap na True b gap
   foldUpTo (n - 1) addGap 0
