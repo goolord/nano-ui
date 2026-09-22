@@ -57,7 +57,6 @@ import NanoUI.Internal.Input
   ( Input (..)
   , inputWindowSize
   )
-import NanoUI.Internal.Frame.Hit (findNodeByKey)
 import NanoUI.Internal.Store (Slot (..), eqByPtr, mirrorStoresChanged, ptrEq, slotChangedKeys, slotKey)
 import NanoUI.Internal.Layout.Arena
   ( AxisSizing (..)
@@ -79,6 +78,7 @@ import NanoUI.Internal.Layout.Arena
   , getWidthSizing
   , isFloatingNode
   , isScrollNode
+  , lookupNodeByKey
   , walkAncestors
   , walkFloatingAncestors
   )
@@ -497,9 +497,9 @@ clipDamage ctx snap d owners = do
   let addNodeBackdrop =
         maybe (pure Nothing) (backdropRectFromNode ctx)
           >=> mapM_ (addRect acc . clipRectToWindow winW winH)
-      addBackdrop k = unless (k == 0) $ addNodeBackdrop =<< findNodeByKey ctx k
+      addBackdrop k = unless (k == 0) $ addNodeBackdrop =<< lookupNodeByKey (ctxNodeArena ctx) k
       addInteraction wid = unless (k == 0) $ do
-        node <- findNodeByKey ctx k
+        node <- lookupNodeByKey (ctxNodeArena ctx) k
         newR <- getPrevRect ctx wid
         slop <- fromMaybe defaultDamageSlop <$> lookupCustomDamageSlop ctx wid
         clip <- maybe (pure Nothing) (getClipRect (ctxNodeArena ctx)) node
@@ -758,7 +758,7 @@ rectDeltas ctx panelRects old new
 -- | The scroll-viewport clip of a keyed node. Look it up once per key and
 -- clip each of its rects with 'clipToViewport'.
 keyViewportClip :: Context -> Int -> IO (Maybe Rect)
-keyViewportClip ctx k = findNodeByKey ctx k >>= maybe (pure Nothing) (getClipRect (ctxNodeArena ctx))
+keyViewportClip ctx k = lookupNodeByKey (ctxNodeArena ctx) k >>= maybe (pure Nothing) (getClipRect (ctxNodeArena ctx))
 
 clipToViewport :: Maybe Rect -> Rect -> Rect
 clipToViewport clip r = maybe r (fromMaybe (Rect 0 0 0 0) . rectIntersect r) clip
@@ -836,7 +836,7 @@ floatingAncestorRect ctx idx =
 storeKeyChanges :: Context -> WidgetStore -> WidgetStore -> IO ([Int], IM.IntMap NodeIdx)
 storeKeyChanges ctx oldStore newStore = do
   misses <-
-    filterM (\k -> isNothing <$> findNodeByKey ctx k) (slotChangedKeys oldStore newStore)
+    filterM (\k -> isNothing <$> lookupNodeByKey (ctxNodeArena ctx) k) (slotChangedKeys oldStore newStore)
   owners <-
     if null misses then pure IM.empty else storeKeyOwners (ctxNodeArena ctx) (IS.fromList misses)
   pure (misses, owners)

@@ -6,14 +6,14 @@ module NanoUI.Internal.Frame.Overlay
   , drawPopupOverlays
   ) where
 
-import Control.Monad (when)
 import Data.IORef (readIORef)
+import Data.Maybe (isJust)
 import NanoUI.Internal.Context (Context (..), nodeTheme)
 import NanoUI.Internal.Draw (pushRect, withClip)
 import NanoUI.Internal.Frame.Chrome (overlayMenuStyle, overlayWindowStyle, paintMenuPanel)
-import NanoUI.Internal.Frame.Hit (modalTreeOpen)
 import NanoUI.Internal.Frame.Paint (walkChildren)
-import NanoUI.Internal.Layout.Arena (forFloatingNodes_, NodeIdx, NodeType (..), getNodeRect, getPadding)
+import NanoUI.Internal.Layout.Arena (forFloatingNodes_, NodeIdx, NodeType (..), getNodeRect, getPadding, topModalNode)
+import NanoUI.Internal.Monad (whenM)
 import NanoUI.Internal.Style (Padding (..), Style, Theme, themeOverlayDim, themeSeparator)
 import NanoUI.Internal.Types (Rect (..), Size (..))
 import NanoUI.Internal.Widgets.Chrome (titleBarChromeHFor, windowChromeSepH)
@@ -35,9 +35,8 @@ drawPopupOverlays ctx =
   forFloatingNode ctx NodePopup (drawMenuFloating ctx)
 
 drawModalOverlays :: Context -> Size -> IO ()
-drawModalOverlays ctx (Size ww wh) = do
-  found <- modalTreeOpen ctx
-  when found $ do
+drawModalOverlays ctx (Size ww wh) =
+  whenM (isJust <$> topModalNode (ctxNodeArena ctx)) $ do
     theme <- readIORef (ctxTheme ctx)
     pushRect (ctxDrawArena ctx) (Rect 0 0 ww wh) (themeOverlayDim theme)
     forFloatingNode ctx NodeModal (drawMenuFloating ctx)

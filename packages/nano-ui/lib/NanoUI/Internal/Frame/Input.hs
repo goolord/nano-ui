@@ -8,14 +8,12 @@ module NanoUI.Internal.Frame.Input
   , refreshHover
   , armPointerPress
   , disarmPointerPress
-  , PressTargets
   , pressTargets
   , finalizePointerPress
   , finalizePointerRelease
   , finalizeTextInputFocus
   , finalizeSelectFocus
   , findTopWidgetUnderMouse
-  , isInteractiveNode
   ) where
 
 import Control.Applicative ((<|>))
@@ -35,10 +33,9 @@ import NanoUI.Internal.Context
   , tabConsumed
   , InteractionState (..)
   )
-import NanoUI.Internal.Frame.Focus (filterModalFocusables, tabNext, tabNextFocusables)
+import NanoUI.Internal.Frame.Focus (filterModalFocusables, tabNext)
 import NanoUI.Internal.Frame.Hit
-  ( modalTreeOpen
-  , nodeClippedHit
+  ( nodeClippedHit
   , nodeInteractionHit
   , nodeOwnsPointer
   , overlayHitAllowed
@@ -88,16 +85,9 @@ import NanoUI.Internal.WidgetText (hasFlag, buttonFlagClose, buttonFlagMenuBar, 
 finalizeTabFocus :: Context -> Input -> IO ()
 finalizeTabFocus ctx inp =
   whenM (pure (inputKeysElem KeyTab (inputKeys inp)) <&&> (not <$> tabConsumed ctx)) $ do
-    open <- modalTreeOpen ctx
-    let shift = modShift (inputModifiers inp)
     cur <- readIORef (ctxFocusId ctx)
-    next <-
-      if not open
-        then tabNextFocusables ctx cur shift
-        else do
-          focusables <- getFocusables ctx
-          ids <- filterModalFocusables ctx (filter (/= WidgetId 0) focusables)
-          pure (tabNext cur ids shift)
+    ids <- filterModalFocusables ctx . filter (/= WidgetId 0) =<< getFocusables ctx
+    let next = tabNext cur ids (modShift (inputModifiers inp))
     when (hashWidgetId next /= 0) $ do
       -- Tab can reveal the focus ring without changing the focused rectangle.
       -- Damage that case explicitly; geometry comparison cannot detect it.
@@ -179,8 +169,8 @@ pressTargets ctx inp
       _ <- findClassNodeM na PointerNodes $ \idx -> do
         nt <- getNodeType na idx
         PressTargets i t s <- readIORef found
-        let wantI = isNothing i && isInteractiveNode nt
-            wantT = isNothing t && isTextFieldNode nt
+        let wantI = isNothing i && isWidgetNode nt
+            wantT = isNothing t && (nt == NodeTextInput || nt == NodeTextArea)
             wantS = isNothing s && nt == NodeSelect
         pure (wantI || wantT || wantS) <&&> widgetUnderMouse ctx top mouse nt idx <&&> do
           wid <- getWidgetId na idx
@@ -191,10 +181,6 @@ pressTargets ctx inp
       readIORef found
  where
   none = PressTargets Nothing Nothing Nothing
-
--- | Text fields and text areas, which a press focuses.
-isTextFieldNode :: NodeType -> Bool
-isTextFieldNode nt = nt == NodeTextInput || nt == NodeTextArea
 
 -- | On a left press, make the interactive widget under the pointer the active
 -- widget, unless it is disabled. Runs after layout. 'pressTargets' searches
@@ -244,11 +230,6 @@ widgetHitRect ctx nt idx x y w h = case nt of
         then Rect (x - 8) (y - 4) (w + 10) (h + 4)
         else Rect x y w h
   _ -> pure (Rect x y w h)
-
--- | The node types a press can make active: the controls of 'isWidgetNode'
--- except the bare 'NodeWidget', which paints and takes nothing.
-isInteractiveNode :: NodeType -> Bool
-isInteractiveNode nt = nt /= NodeWidget && isWidgetNode nt
 
 -- | Resolve a left-button release against this frame's solved rects, and let
 -- go of the active widget. Runs after layout.

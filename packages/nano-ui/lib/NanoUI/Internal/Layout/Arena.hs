@@ -176,8 +176,6 @@ data NodeType
   -- ^ Empty space.
   | NodeSeparator
   -- ^ A one-pixel rule.
-  | NodeWidget
-  -- ^ A widget that paints nothing. No widget in the library adds one.
   | NodeButton
   -- ^ A button. Flags in its style index turn it into a close button, a tab,
   -- a table header, a menu-bar title or a menu item.
@@ -224,7 +222,6 @@ data NodeType
 isWidgetNode :: NodeType -> Bool
 isWidgetNode nt =
   case nt of
-    NodeWidget -> True
     NodeButton -> True
     NodeCheckbox -> True
     NodeRadio -> True

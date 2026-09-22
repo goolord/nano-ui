@@ -65,7 +65,6 @@ import NanoUI.Internal.Input
 import NanoUI.Internal.Monad (Ui, (<&&>), askContext, askInput, damageWidgetNow, focusedWidget, lastRect, nextId, releaseFocus, requestFrame, uiIO, withIdFrame, withKey)
 import NanoUI.Internal.Id (IdContext (..), WidgetId, hashWidgetId)
 import NanoUI.Internal.Frame.Hit (nodeInteractionHit, scrollHitRect)
-import NanoUI.Internal.Frame.Input (isInteractiveNode)
 import NanoUI.Internal.Store (insertDyn, lookupDyn)
 import NanoUI.Internal.Style
   ( AlignX (..)
@@ -114,7 +113,7 @@ import NanoUI.Widgets.Custom
   , runCanvas
   )
 import NanoUI.Internal.Widgets.Layout (column', row')
-import NanoUI.Internal.Layout.Arena (NodeType (..), arenaCount, getNodeType, getWidgetId)
+import NanoUI.Internal.Layout.Arena (NodeType (..), arenaCount, getNodeType, getWidgetId, isWidgetNode)
 import NanoUI.Internal.Widgets.Node
   ( container
   , containerResponse
@@ -603,7 +602,7 @@ renderPane env pid rect =
                 | idx >= end = pure False
                 | otherwise = do
                     nt <- getNodeType arena idx
-                    hit <- pure (isInteractiveNode nt) <&&> do
+                    hit <- pure (isWidgetNode nt) <&&> do
                       child <- getWidgetId arena idx
                       r <- scrollHitRect ctx child
                       maybe (pure False) (\childRect -> nodeInteractionHit ctx idx childRect (inputMousePos inp)) r

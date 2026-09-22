@@ -4,8 +4,6 @@
 module NanoUI.Internal.Frame.Hit
   ( findNodeByWidgetId
   , withWidgetNode
-  , findNodeByKey
-  , modalTreeOpen
   , nodeInSubtree
   , widgetIdInSubtree
   , overlayHitAllowed
@@ -46,7 +44,6 @@ import NanoUI.Internal.Layout.Arena
   , getNodeType
   , getParent
   , getWidgetId
-  , lookupNodeByKey
   , lookupNodeByWidgetId
   , topModalNode
   , walkAncestors
@@ -66,15 +63,6 @@ findNodeByWidgetId ctx wid = lookupNodeByWidgetId (ctxNodeArena ctx) wid
 {-# INLINE withWidgetNode #-}
 withWidgetNode :: Context -> WidgetId -> a -> (NodeIdx -> IO a) -> IO a
 withWidgetNode ctx wid def k = findNodeByWidgetId ctx wid >>= maybe (pure def) k
-
--- | 'findNodeByWidgetId' for a widget's 'Int' key ('intKey').
-findNodeByKey :: Context -> Int -> IO (Maybe NodeIdx)
-findNodeByKey ctx k = lookupNodeByKey (ctxNodeArena ctx) k
-
--- | Whether the arena holds a modal node, which it does when the view
--- declared an open modal.
-modalTreeOpen :: Context -> IO Bool
-modalTreeOpen ctx = isJust <$> topModalNode (ctxNodeArena ctx)
 
 -- | Whether node @idx@ is node @top@ or one of its descendants.
 nodeInSubtree :: Context -> NodeIdx -> NodeIdx -> IO Bool
