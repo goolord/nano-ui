@@ -16,7 +16,7 @@ module NanoUI.Sdl.Internal.Display
   ) where
 
 import Control.Monad (unless, void)
-import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.IORef (IORef, newIORef)
 import GHC.IORef (atomicSwapIORef)
 import Foreign.C.Types (CBool (..), CInt (..))
 import Foreign.Marshal.Alloc (alloca, callocBytes)
@@ -85,30 +85,28 @@ installResizeWatch act = do
     removeResizeWatchC
     freeHaskellFunPtr fp
 
--- | The user event type that wakes the event loop, registered once per
--- process by 'initRefreshEvent'; 0 until then.
-{-# NOINLINE refreshEventType #-}
-refreshEventType :: IORef Word32
-refreshEventType = unsafePerformIO (newIORef 0)
-
 -- | The event 'pushRefreshEvent' sends, filled in once by 'initRefreshEvent'.
 -- The core wakes the loop on every 'markDirty', so a push must not allocate.
 {-# NOINLINE refreshEvent #-}
 refreshEvent :: Ptr SDL_Event
 refreshEvent = unsafePerformIO (callocBytes (sizeOf (undefined :: SDL_Event)))
 
+-- | The user event type that wakes the event loop, registered once per
+-- process by 'initRefreshEvent'; 0 until then.
+refreshEventType :: IO Word32
+refreshEventType = (\(Uint32 ty) -> ty) <$> peek refreshEvent.type'
+
 initRefreshEvent :: IO Bool
 initRefreshEvent = do
   -- A wake queued as the last session closed went down with SDL's queue.
   -- Left pending, it would stop this session from ever queuing one.
   takeRefreshEvent
-  registered <- readIORef refreshEventType
+  registered <- refreshEventType
   if registered /= 0
     then pure True
     else do
       ty <- registerEvents 1
       poke refreshEvent.type' (Uint32 ty)
-      writeIORef refreshEventType ty
       pure (ty /= 0)
 
 -- | Whether a refresh event is queued that the loop has not taken yet.
@@ -126,7 +124,7 @@ refreshPending = unsafePerformIO (newIORef False)
 -- before the frame that reads it.
 pushRefreshEvent :: IO ()
 pushRefreshEvent = do
-  ty <- readIORef refreshEventType
+  ty <- refreshEventType
   unless (ty == 0) $ do
     pending <- atomicSwapIORef refreshPending True
     unless pending $ do

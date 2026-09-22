@@ -13,7 +13,6 @@ module NanoUI.Sdl.Internal.Input
 
 import Control.Monad (mfilter)
 import Data.Bits ((.&.))
-import Data.IORef (readIORef)
 import qualified Data.Text as T
 import Data.Text (Text)
 import qualified Data.Text.Foreign as TF
@@ -107,7 +106,7 @@ data SdlEvent
 pollEvents :: IO [SdlEvent]
 pollEvents =
   alloca $ \(p :: Ptr SDL_Event) -> do
-    refreshTy <- readIORef refreshEventType
+    refreshTy <- refreshEventType
     let drain acc = do
           got <- pollEventSafe p
           if got
@@ -123,7 +122,7 @@ waitEvent :: Int -> IO (Maybe SdlEvent)
 waitEvent ms =
   alloca $ \p -> do
     got <- if ms < 0 then waitEventSafe p else waitEventTimeoutSafe p (fromIntegral ms)
-    if got then readIORef refreshEventType >>= \ty -> decodeEvent ty p else pure Nothing
+    if got then refreshEventType >>= \ty -> decodeEvent ty p else pure Nothing
 
 -- | Translate one SDL event, given the refresh event type; 'Nothing' for
 -- events the UI ignores.
