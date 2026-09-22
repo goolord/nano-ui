@@ -11,7 +11,6 @@ where
 
 import Control.Exception (onException)
 import Control.Monad (void, when)
-import Data.Bits (shiftR, (.&.))
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Maybe (fromMaybe)
 import Data.Vector.Unboxed qualified as U
@@ -21,7 +20,7 @@ import Foreign.ForeignPtr (withForeignPtr)
 import Foreign.Marshal.Alloc (free, malloc)
 import Foreign.Ptr (Ptr, nullPtr)
 import Foreign.Storable (poke)
-import NanoUI (Color (..), Rect (..), rectIntersect)
+import NanoUI (Color, Rect (..), colorA, colorB, colorG, colorR, rectIntersect)
 import NanoUI.Sdl.Internal.Image (ImageAtlas, lookupImage)
 import NanoUI.Testing
   ( Damage (..)
@@ -89,35 +88,29 @@ applyClipState batch ref ren next = do
         setRenderClipRect ren (PtrConst.unsafeFromPtr rect)
 
 -- | Draw every command in layer order, clipped to its own rect and to
--- the damage. A full repaint with a clear colour clears the target first.
+-- the damage. A full repaint clears the target to the colour first.
 renderDrawDataPass ::
   RenderBatch
   -> Ptr SDL_Renderer
-  -> Maybe Color
+  -> Color
   -> DrawData
   -> ImageAtlas
   -> (Int -> Ptr SDL_Texture)
   -- ^ The glyph atlas's texture for each of its pages.
   -> Damage
   -> IO ()
-renderDrawDataPass batch ren mClear drawData images glyphTex damage =
+renderDrawDataPass batch ren bg drawData images glyphTex damage =
   when (not (damageIsEmpty damage)) $ do
     clipRef <- newIORef ClipNone
     void $ setRenderClipRect ren (PtrConst.unsafeFromPtr nullPtr)
-    case (mClear, damage) of
-      (Just clearColor, DamageFull) -> do
-        let
-          (cr, cg, cb, ca) = unpackColor clearColor
-        void $ setRenderDrawColorSafe ren cr cg cb ca
-        void $ renderClearSafe ren
+    clip <- case damage of
+      DamageFull -> do
+        void $ setRenderDrawColorSafe ren (colorR bg) (colorG bg) (colorB bg) (colorA bg)
+        Nothing <$ renderClearSafe ren
       -- The draw list starts a clip frame with its own window backdrop, so
       -- a clip needs no clear here.
-      (_, DamageClip r) -> applyClipState batch clipRef ren (toClipKey r)
-      (Nothing, DamageFull) -> pure ()
+      DamageClip r -> Just r <$ applyClipState batch clipRef ren (toClipKey r)
     let
-      clip = case damage of
-        DamageFull -> Nothing
-        DamageClip r -> Just r
       vc = drawVertexCount drawData
       cmds = drawCommands drawData
     withForeignPtr (drawVertices drawData) $ \vp ->
@@ -185,15 +178,6 @@ drawCmd batch ren vp vc ip images glyphTex mDamage clipRef cmd = do
           dy
           dw
           dh
-
-{-# INLINE unpackColor #-}
-unpackColor :: Color -> (Word8, Word8, Word8, Word8)
-unpackColor (Color w) =
-  ( fromIntegral ((w `shiftR` 24) .&. 0xFF)
-  , fromIntegral ((w `shiftR` 16) .&. 0xFF)
-  , fromIntegral ((w `shiftR` 8) .&. 0xFF)
-  , fromIntegral (w .&. 0xFF)
-  )
 
 -- | Session-owned coalescing state and reusable clip storage. Commands whose
 -- logical clips differ can still merge after damage clipping and pixel rounding.

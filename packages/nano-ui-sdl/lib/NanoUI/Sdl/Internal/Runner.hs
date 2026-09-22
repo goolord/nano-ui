@@ -163,7 +163,7 @@ drawFrameWith ctx env inp forceFull evaluateUi = do
       renderDrawDataPass
         batch
         ren
-        (if damage == DamageFull then Just (themeWindow theme) else Nothing)
+        (themeWindow theme)
         drawData
         (sdlImages env)
         glyphTex
