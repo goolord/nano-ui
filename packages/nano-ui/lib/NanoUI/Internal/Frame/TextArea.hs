@@ -10,7 +10,6 @@ module NanoUI.Internal.Frame.TextArea
   , textWordBounds
     -- * Geometry
   , textAreaLineHeight
-  , textAreaFieldClip
   , textAreaBarLane
   , TextAreaBars (..)
   , textAreaBars
