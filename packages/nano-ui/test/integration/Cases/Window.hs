@@ -3,6 +3,8 @@ module Cases.Window (tests) where
 import Spec
 import Data.IntMap.Strict qualified as IM
 import Data.Text qualified as T
+import NanoUI.Internal.Context (Context (..))
+import NanoUI.Internal.Layout.Arena (arenaCount, getNodeRect)
 
 tests :: [Spec]
 tests =
@@ -14,6 +16,7 @@ tests =
   , spec "overlay-click-through" runOverlayClickThroughTest
   , spec "overlay-panel-live" runOverlayPanelLiveTest
   , spec "window-drag" runWindowDragTest
+  , spec "window-layout-reuse" runWindowLayoutReuseTest
   , spec "window-close-damage" runWindowCloseDamageTest
   , spec "page-window-scroll" runPageWindowScrollTest
   , spec "window-scroll-only-damage" runWindowScrollOnlyDamageTest
@@ -254,6 +257,38 @@ runWindowDragTest ctx failed = do
   let Rect x1 y1 _ _ = respRect win1
   assert failed (x1 < x0 - 10)
   assert failed (y1 > y0 + 10)
+
+-- | With a window open the solve is reused and only the floating panels are
+-- placed again, still or mid-drag. Each such frame lays out every node where
+-- the same frame solved from scratch does.
+runWindowLayoutReuseTest :: Context -> IORef Int -> IO ()
+runWindowLayoutReuseTest ctx failed = do
+  let inp0 = withInput 640 400
+      ui = do
+        column $ forM_ [1 .. 20 :: Int] $ \i -> void (button (T.pack ("row " <> show i)))
+        fmap fst (window True "Tools" (column (label "Body" >> void (button "ok"))))
+      rects = do
+        n <- arenaCount (ctxNodeArena ctx)
+        mapM (getNodeRect (ctxNodeArena ctx)) [0 .. n - 1]
+      -- The frame as it ran, then the same frame with nothing to reuse.
+      sameAsFresh frameInp = do
+        (win, _, _, _) <- runFrame ctx frameInp ui
+        reused <- rects
+        writeIORef (ctxLayoutCache ctx) Nothing
+        _ <- runFrame ctx frameInp ui
+        fresh <- rects
+        assertEq failed reused fresh
+        pure (respRect win)
+  win0 <- warmup2 ctx inp0 ui
+  let r0 = respRect win0
+      V2 gx gy = windowTitleGrab r0
+  _ <- sameAsFresh inp0
+  _ <- runFrame ctx inp0 {inputMousePos = V2 gx gy, inputMouseDown = True, inputMousePressed = True} ui
+  forM_ [1 .. 4 :: Int] $ \k -> do
+    let step = inp0 {inputMousePos = V2 (gx - 20 * fromIntegral k) (gy + 10 * fromIntegral k), inputMouseDown = True}
+    void (sameAsFresh step)
+  Rect x1 y1 _ _ <- sameAsFresh inp0 {inputMousePos = V2 (gx - 80) (gy + 40), inputMouseReleased = True}
+  assert failed (x1 < rectX r0 - 40 && y1 > rectY r0 + 20)
 
 -- Wheeling over a window's body scrolls the window, not the page, whether the
 -- window is declared inside a page scroll area or beside one.

@@ -1128,13 +1128,12 @@ captureLayoutCache na lc0 = do
   copyMutableArray (naArrOptionsStore c) 0 (naArrOptionsStore a) 0 n
   pure lc {lcCount = n}
 
--- | Floating placement depends on state outside the arena descriptor. Custom
--- measurement is checked separately by Frame, which owns its registration.
+-- | Whether the arena holds a layout to cache. The cache holds the solve
+-- before floating placement, which depends on state outside the arena and
+-- runs again on reuse. Custom measurement is checked separately by Frame,
+-- which owns its registration.
 layoutCacheEligible :: NodeArena -> IO Bool
-layoutCacheEligible na = do
-  n <- arenaCount na
-  floating <- floatingNodeCount na
-  pure (n > 0 && floating == 0)
+layoutCacheEligible na = (> 0) <$> arenaCount na
 
 -- | Compare layout inputs, stopping at the first mismatch. Node values are
 -- paint state except on scroll containers, where they are solver outputs.

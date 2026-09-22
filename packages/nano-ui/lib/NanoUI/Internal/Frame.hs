@@ -269,8 +269,11 @@ runFrameEff unlift ctx frameInp ui = do
     solveLayoutAndCapture ctx w h
   movedResize <- updateWindowResize ctx layerInp w h
   movedWindow <- updateWindowDrag ctx layerInp
+  -- A window moved or resized changes only where the floating panels go:
+  -- the solve before placement stands, so place them again over it.
   when (movedResize || movedWindow) $
-    placeFloatingWindows ctx (contextMeasurers ctx) w h
+    unlessM (replaceFloating ctx (Size w h)) $
+      solveLayoutAndCapture ctx w h
   persistWindowPositions ctx
   applyScrollOffsets ctx
   -- A press on a menu or dropdown leaves nothing active, whatever a release
@@ -295,8 +298,7 @@ runFrameEff unlift ctx frameInp ui = do
   storeAfter <- getStore ctx
   let storeChanged = mirrorStoresChanged storeMid storeAfter
   when storeChanged $ syncWidgetLabels ctx
-  let layoutDirty = storeChanged || movedResize || movedWindow
-  when layoutDirty $ do
+  when storeChanged $ do
     solveLayoutAndCapture ctx w h
     applyScrollOffsets ctx
   updatePrevRects ctx
@@ -387,8 +389,16 @@ resetUiBuildScopes ctx = do
 -- result for the next frame to reuse.
 solveLayoutAndCapture :: Context -> Float -> Float -> IO ()
 solveLayoutAndCapture ctx w h = do
+  solveLayout (ctxNodeArena ctx) (contextMeasurers ctx) w h
+  captureLayout ctx (Size w h)
+  placeFloating ctx w h
+
+-- | Place modals, windows and popups over a solved layout. Their places
+-- depend on state outside the arena (window positions, popup anchors), so
+-- they are placed every frame, including one whose solve was reused.
+placeFloating :: Context -> Float -> Float -> IO ()
+placeFloating ctx w h = do
   let ms = contextMeasurers ctx
-  solveLayout (ctxNodeArena ctx) ms w h
   placeModals (ctxNodeArena ctx) ms w h
   placeFloatingWindows ctx ms w h
   placePopups
@@ -397,14 +407,27 @@ solveLayoutAndCapture ctx w h = do
     w
     h
     (lookupPopupConfig ctx)
-  captureLayout ctx (Size w h)
+
+-- | Put back this frame's solve, as captured before placement, and place the
+-- floating panels again. 'False' when there is no such capture.
+replaceFloating :: Context -> Size -> IO Bool
+replaceFloating ctx size@(Size w h) = do
+  gen <- readIORef (ctxMetricGen ctx)
+  readIORef (ctxLayoutCache ctx) >>= \case
+    Just (c, cachedSize, cachedGen)
+      | cachedSize == size && cachedGen == gen -> do
+          restoreLayoutCache (ctxNodeArena ctx) c
+          placeFloating ctx w h
+          pure True
+    _ -> pure False
 
 placeFloatingWindows :: Context -> Measurers -> Float -> Float -> IO ()
 placeFloatingWindows ctx ms w h =
   placeWindows (ctxNodeArena ctx) ms w h (lookupWindowPos ctx) (lookupWindowSize ctx)
 
--- | Reuse solved geometry for unchanged layout inputs. Floating placement and
--- custom measurement have dependencies outside the arena and must be solved.
+-- | Reuse solved geometry for unchanged layout inputs. Custom measurement has
+-- dependencies outside the arena and must be solved; floating panels are
+-- placed again over the reused solve ('placeFloating').
 tryReuseLayout :: Context -> Size -> IO Bool
 tryReuseLayout ctx size = do
   custom <- hasCustomLayoutInputs ctx
@@ -417,10 +440,15 @@ tryReuseLayout ctx size = do
         Just (c, cachedSize, cachedGen)
           | cachedSize == size && cachedGen == gen -> do
               ok <- layoutInputsMatch (ctxNodeArena ctx) c
-              ok <$ when ok (restoreLayoutCache (ctxNodeArena ctx) c)
+              when ok $ do
+                restoreLayoutCache (ctxNodeArena ctx) c
+                let Size w h = size
+                placeFloating ctx w h
+              pure ok
         _ -> pure False
 
--- | Snapshot the solved layout so the next frame can reuse it.
+-- | Snapshot the solved layout, before floating placement, so the next frame
+-- can reuse it.
 captureLayout :: Context -> Size -> IO ()
 captureLayout ctx size = do
   custom <- hasCustomLayoutInputs ctx
