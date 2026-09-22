@@ -12,8 +12,6 @@ module NanoUI.Internal.Store
   , fieldPoint
   , fieldText
   , fieldIntSet
-  , fieldFloatList
-  , fieldIntList
   , fieldDyn
   , fieldQuiet
   , overField
@@ -100,8 +98,6 @@ slotChangedKeys old new =
   diffKeys (storeInt old) (storeInt new)
     ++ diffKeys (storeDouble old) (storeDouble new)
     ++ diffKeys (storeText old) (storeText new)
-    ++ diffKeys (storeFloatList old) (storeFloatList new)
-    ++ diffKeys (storeIntList old) (storeIntList new)
     ++ diffKeys (storeIntSet old) (storeIntSet new)
     ++ diffKeysBy ptrEq (storeDyn old) (storeDyn new)
 
@@ -116,8 +112,6 @@ data WidgetStore = WidgetStore
   , storePoint :: !(IntMap (Float, Float))
   , storeText :: !(IntMap Text)
   , storeIntSet :: !(IntMap IntSet)
-  , storeFloatList :: !(IntMap [Float])
-  , storeIntList :: !(IntMap [Int])
   , storeDyn :: !(IntMap Dynamic)
   , storeQuiet :: !(IntMap Int)
   -- ^ Interaction bookkeeping no paint reads, such as whether a drag hook's
@@ -154,14 +148,6 @@ fieldText = Field storeText (\m st -> st {storeText = m})
 -- | Integer-set slots, such as expanded tree-node indices.
 fieldIntSet :: Field IntSet
 fieldIntSet = Field storeIntSet (\m st -> st {storeIntSet = m})
-
--- | Ordered float-list slots.
-fieldFloatList :: Field [Float]
-fieldFloatList = Field storeFloatList (\m st -> st {storeFloatList = m})
-
--- | Ordered integer-list slots.
-fieldIntList :: Field [Int]
-fieldIntList = Field storeIntList (\m st -> st {storeIntList = m})
 
 -- | Runtime-typed slots. Prefer 'lookupDyn' and 'insertDyn' for typed access.
 fieldDyn :: Field Dynamic
@@ -271,8 +257,6 @@ emptyWidgetStore =
     , storePoint = IM.empty
     , storeText = IM.empty
     , storeIntSet = IM.empty
-    , storeFloatList = IM.empty
-    , storeIntList = IM.empty
     , storeDyn = IM.empty
     , storeQuiet = IM.empty
     }

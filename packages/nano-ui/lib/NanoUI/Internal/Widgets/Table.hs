@@ -42,13 +42,13 @@ import Data.Primitive.SmallArray (SmallArray, indexSmallArray, mapSmallArray', n
 import Data.Primitive.Types (Prim)
 import Data.Vector qualified as V
 import Effectful (Eff, type (:>))
-import NanoUI.Internal.Context (Context (..), InteractionState (..), getPrevRect, getScrollOffset2D, getStore, intKey, linkScrollAxes, modifyInteraction, modifyStore, writeSlots)
+import NanoUI.Internal.Context (Context (..), InteractionState (..), getPrevRect, getScrollOffset2D, getStore, intKey, linkScrollAxes, modifyInteraction, writeSlots)
 import NanoUI.Internal.Hooks (useInt)
 import NanoUI.Internal.Font (ScrollBarSlot (..), scrollBarGutter, tableCellInset, lineWidthIO)
 import NanoUI.Internal.Input (Input (..), UiCursorKind (..), inputMouseDown, inputMousePos, inputMousePressed, inputMouseReleased)
 import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Monad (Ui, askContext, askInput, lastRect, nextId, uiIO, withKey)
-import NanoUI.Internal.Store (Slot (..), fieldFloat, fieldFloatList, fieldInt, fieldIntList, fieldIntSet, findSlot, insertSlot, slotKey, slotWrite)
+import NanoUI.Internal.Store (Slot (..), SlotWrites (..), fieldFloat, fieldInt, fieldIntSet, findSlot, insertDyn, lookupDyn, slotKey, slotWrite)
 import NanoUI.Internal.Style (AlignX (..), AlignY (..), Direction (..), FontVariant (..), Layout (..), Sizing (..), defaultLayout, fillH, fillW, minW, tight)
 import Data.Bits ((.|.), shiftL)
 import GHC.Exts (isTrue#, reallyUnsafePtrEquality#)
@@ -347,9 +347,11 @@ tableConfigured cfg f key cols inputRows curSort =
     TableDerived {tdHeaders = hdrs, tdEncoded = encoded, tdWidths = contentWs, tdNumeric = numeric, tdOrder = sorted} <-
       uiIO (tableDerived ctx stateKey cols inputRows sort0)
     let sizes = smallArrayFromList (tableColSizes cfg)
-        order0 = normalizeOrder n (findSlot fieldIntList [0 .. n - 1] stateKey st0)
+        -- The column order and the widths columns were dragged to.
+        (storedOrder, storedWidths) = fromMaybe ([0 .. n - 1], []) (lookupDyn stateKey st0)
+        order0 = normalizeOrder n storedOrder
         hidden0 = findSlot fieldIntSet (tableHidden cfg) stateKey st0
-        widths0 = take n (findSlot fieldFloatList [] stateKey st0 ++ repeat 0)
+        widths0 = take n (storedWidths ++ repeat 0 :: [Float])
         drag0 = unpackHeaderDrag (findSlot fieldInt 0 (slotKey SlotDrag stateKey) st0)
         dragX0 = findSlot fieldFloat 0 stateKey st0
         dragW0 = findSlot fieldFloat 0 (slotKey SlotDragW stateKey) st0
@@ -362,8 +364,6 @@ tableConfigured cfg f key cols inputRows curSort =
             | inputMouseDown inp ->
                 setAt c (max (colFloor sizes contentWs c) (dragW0 + mx - dragX0)) widths0
           _ -> widths0
-    when (widths1 /= widths0) $ uiIO $
-      modifyStore ctx (insertSlot fieldFloatList stateKey widths1)
     let outerLayout = f (fillW flatLayout)
         hasStretch = any (== ColStretch) (take n (tableColSizes cfg))
         vis = filter (`IS.notMember` hidden0) order0
@@ -570,7 +570,7 @@ tableConfigured cfg f key cols inputRows curSort =
       -- Compare the five slots, not the whole store: rewriting the store only
       -- when a slot moved keeps an idle table from diffing every map each frame.
       uiIO . writeSlots ctx $
-        slotWrite fieldIntList stateKey nextOrder
+        SlotWrites (\st -> lookupDyn stateKey st == Just (nextOrder, widths1)) (insertDyn stateKey (nextOrder, widths1))
           <> slotWrite fieldIntSet stateKey nextHidden
           <> slotWrite fieldInt (slotKey SlotDrag stateKey) (packHeaderDrag nextDrag)
           <> slotWrite fieldFloat stateKey nextDragX
