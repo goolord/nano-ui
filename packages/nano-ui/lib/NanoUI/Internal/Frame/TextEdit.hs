@@ -241,13 +241,10 @@ closeTextEditMenuOnEscape ctx inp =
       markDirty ctx
 
 textEditMenuCursorKind :: Context -> Input -> IO (Maybe UiCursorKind)
-textEditMenuCursorKind ctx inp = do
-  mMenu <- getsInteraction ctx isTextInputMenu
-  let mouse = inputMousePos inp
-  case mMenu of
+textEditMenuCursorKind ctx inp =
+  getsInteraction ctx isTextInputMenu >>= \case
     Just (TextInputMenu wid menuRect)
-      | rectContains menuRect mouse
-      , Just cmd <- textEditMenuPick menuRect mouse -> do
+      | Just cmd <- textEditMenuPick menuRect (inputMousePos inp) -> do
           enabled <- textFieldMenuEnabled ctx wid cmd
           pure (Just (if enabled then UiCursorPointer else UiCursorDefault))
     _ -> pure Nothing
