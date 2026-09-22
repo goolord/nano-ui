@@ -4,6 +4,7 @@ module NanoUI.Backend.Sdl
   , SdlDebugSnapshot (..)
   , SdlEnv (..)
   , SdlOptions (..)
+  , RenderDriver (..)
   , askSdlDebug
   , setSdlUiFont
   , setSdlUiScale
@@ -66,7 +67,7 @@ import NanoUI (NanoUI)
 import NanoUI.Sdl.Internal.Runner (askSdlDebug, drawReduceEff, sdlDrawFrame, setSdlUiFont, setSdlUiScale)
 import NanoUI.Sdl.Internal.Session (runSdlSession)
 import NanoUI.Sdl.Internal.Debug (SdlDebugSnapshot (..))
-import NanoUI.Sdl.Internal.Window (RgbaImage (..), SdlEnv (..), SdlOptions (..), WindowDecorations (..), defaultSdlOptions, saveScreenshot, syncDisplay, windowZoom, withSdl, withSdlBench)
+import NanoUI.Sdl.Internal.Window (RenderDriver (..), RgbaImage (..), SdlEnv (..), SdlOptions (..), WindowDecorations (..), defaultSdlOptions, saveScreenshot, syncDisplay, windowZoom, withSdl, withSdlBench)
 import NanoUI.Sdl.Internal.Dialog
   ( FileDialogId (..)
   , FileDialogOptions (..)
