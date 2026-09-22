@@ -70,7 +70,6 @@ import NanoUI.Internal.Layout.Arena
   , NodeClass (..)
   , foldClassNodesM
   , foldClassNodeRevM
-  , foldFloatingNodeRevM
   , getClipRect
   , getHeightSizing
   , getNodeRect
@@ -215,7 +214,7 @@ updatePrevRects ctx = do
 
 floatingPanelsInOrder :: Context -> IO [(Int, Rect)]
 floatingPanelsInOrder ctx = do
-  foldFloatingNodeRevM na step []
+  foldClassNodeRevM na FloatingNodes step []
   where
     na = ctxNodeArena ctx
     step acc idx = do

@@ -137,11 +137,11 @@ import NanoUI.Internal.Layout.Arena
   , LayoutCache (..)
   , NodeIdx
   , NodeType (..)
+  , arenaCount
   , captureLayoutCache
   , floatingNodeCount
   , getNodeType
   , getWidgetId
-  , layoutCacheEligible
   , layoutSigMatches
   , computeSubtreeHashes
   , newLayoutCache
@@ -465,8 +465,8 @@ restoreCachedLayout ctx size@(Size w h) valid = do
 -- can reuse it.
 captureLayout :: Context -> Size -> IM.IntMap CustomMeasureRecord -> IO ()
 captureLayout ctx size measures = do
-  eligible <- layoutCacheEligible (ctxNodeArena ctx)
-  if not eligible
+  n <- arenaCount (ctxNodeArena ctx)
+  if n <= 0
     then writeIORef (ctxLayoutCache ctx) Nothing
     else do
       gen <- readIORef (ctxMetricGen ctx)

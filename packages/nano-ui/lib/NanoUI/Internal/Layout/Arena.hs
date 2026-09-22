@@ -38,8 +38,6 @@ module NanoUI.Internal.Layout.Arena
   , arenaCount
   , topModalNode
   , floatingNodeCount
-  , foldFloatingNodesM
-  , foldFloatingNodeRevM
   , arenaArrays
   , withArenaArraysSnap
   , geomX
@@ -125,7 +123,6 @@ module NanoUI.Internal.Layout.Arena
   , forChildNodes_
   , foldFlowChildrenM
   , findNodeRevM
-  , findFloatingNodeRevM
   , findClassNodeM
   , findClassNodeRevM
   , foldClassNodesM
@@ -140,7 +137,6 @@ module NanoUI.Internal.Layout.Arena
   , CustomMeasureRecord
   , newLayoutCache
   , captureLayoutCache
-  , layoutCacheEligible
   , layoutSigMatches
   , computeSubtreeHashes
   , subtreeArrays
@@ -769,7 +765,7 @@ resetNodeArena na = do
 -- | The topmost (last added) modal node, if any.
 {-# INLINE topModalNode #-}
 topModalNode :: NodeArena -> IO (Maybe NodeIdx)
-topModalNode na = findFloatingNodeRevM na (fmap (== NodeModal) . getNodeType na)
+topModalNode na = findClassNodeRevM na FloatingNodes (fmap (== NodeModal) . getNodeType na)
 
 -- | Fold a tagged value into a running hash. Tags separate the fields so a
 -- value moving between fields of one node changes the hash.
@@ -1114,11 +1110,7 @@ setScrollContentW na idx v = arenaArrays na >>= \a -> writeStyle a idx styleScro
 parentIsRow :: NodeArena -> NodeIdx -> IO Bool
 parentIsRow na idx = do
   p <- getParent na idx
-  if p < 0
-    then pure False
-    else do
-      dir <- getDirection na p
-      pure (dir == DirRow)
+  if p < 0 then pure False else (== DirRow) <$> getDirection na p
 
 -- | Horizontal alignment requested by the node.
 {-# INLINE getAlignX #-}
@@ -1165,8 +1157,7 @@ getClipRect na idx = do
   y <- readGeom a idx geomClipY
   w <- readGeom a idx geomClipW
   h <- readGeom a idx geomClipH
-  let r = Rect x y w h
-  pure (if w > 0 && h > 0 then Just r else Nothing)
+  pure (if w > 0 && h > 0 then Just (Rect x y w h) else Nothing)
 
 -- | Store a clip in logical window coordinates. Empty clips read back as 'Nothing'.
 {-# INLINE setClipRect #-}
@@ -1231,18 +1222,9 @@ captureLayoutCache na lc0 = do
   sig <- getInputSignature na
   subA <- readIORef (naSubHash na)
   measuredA <- readIORef (naMeasured na)
-  let !oldCap = lcCap lc0
-      !newCap = max n (oldCap * 2)
-  lc <-
-    if n <= oldCap
-      then pure lc0
-      else do
-        lcSub <- growPrimArrayCopy (lcSub lc0) oldCap newCap 0
-        lcMeasured <- growPrimArrayCopy (lcMeasured lc0) (oldCap * 2) (newCap * 2) 0
-        lcGeom <- growPrimArrayCopy (lcGeom lc0) (oldCap * geomStride) (newCap * geomStride) 0
-        lcStyle <- growPrimArrayCopy (lcStyle lc0) (oldCap * styleStride) (newCap * styleStride) 0
-        lcTags <- growPrimArrayCopy (lcTags lc0) (oldCap * tagStride) (newCap * tagStride) 0
-        pure lc0 {lcCap = newCap, lcSub, lcMeasured, lcGeom, lcStyle, lcTags}
+  -- The copies below overwrite everything a capture reads, so a cache too
+  -- small for the arena is replaced rather than grown.
+  lc <- if n <= lcCap lc0 then pure lc0 else newLayoutCache (max n (lcCap lc0 * 2))
   a <- arenaArrays na
   copyMutablePrimArray (lcGeom lc) 0 (naArrGeom a) 0 (n * geomStride)
   copyMutablePrimArray (lcStyle lc) 0 (naArrStyle a) 0 (n * styleStride)
@@ -1250,13 +1232,6 @@ captureLayoutCache na lc0 = do
   copyMutablePrimArray (lcSub lc) 0 subA 0 n
   copyMutablePrimArray (lcMeasured lc) 0 measuredA 0 (n * 2)
   pure lc {lcCount = n, lcSig = sig}
-
--- | Whether the arena holds a layout to cache. The cache holds the solve
--- before floating placement, which depends on state outside the arena and
--- runs again on reuse. Custom measurement is checked separately by Frame,
--- which owns its registration.
-layoutCacheEligible :: NodeArena -> IO Bool
-layoutCacheEligible na = (> 0) <$> arenaCount na
 
 -- | Whether the frame's layout inputs hash to what the cache captured.
 layoutSigMatches :: NodeArena -> LayoutCache -> IO Bool
@@ -1330,14 +1305,6 @@ cachedHash ref idx same salt x = do
 getWidgetId :: NodeArena -> NodeIdx -> IO WidgetId
 getWidgetId na idx = arenaArrays na >>= \a -> WidgetId . fromIntegral <$> readTree a idx treeWidgetId
 
-{-# INLINE packEpochNode #-}
-packEpochNode :: Word32 -> NodeIdx -> Word64
-packEpochNode !epoch !idx = (fromIntegral epoch `shiftL` 32) .|. (fromIntegral idx .&. 0xFFFFFFFF)
-
-{-# INLINE unpackEpochNode #-}
-unpackEpochNode :: Word64 -> (Word32, NodeIdx)
-unpackEpochNode !w = (fromIntegral (w `shiftR` 32), fromIntegral (w .&. 0xFFFFFFFF))
-
 -- | Assign a node's identity and index nonzero ids for lookup. Assign once per
 -- node: this does not remove a mapping previously stored under another id.
 {-# INLINE setWidgetId #-}
@@ -1350,7 +1317,7 @@ setWidgetId na idx wid = do
   when (hashWidgetId wid /= 0) $ do
     !ep <- readIORef (naEpoch na)
     table <- readIORef (naIndex na)
-    HT.insert table wid (packEpochNode ep idx)
+    HT.insert table wid (fromIntegral ep `shiftL` 32 .|. (fromIntegral idx .&. 0xFFFFFFFF))
 
 -- | Node most recently indexed under this id in the current frame. Returns
 -- 'Nothing' for zero, an unknown id, or an entry from an earlier frame.
@@ -1365,8 +1332,8 @@ lookupNodeByWidgetId na wid
         Nothing -> pure Nothing
         Just val -> do
           !ep <- readIORef (naEpoch na)
-          let (!entryEp, !idx) = unpackEpochNode val
-          pure (if entryEp == ep then Just idx else Nothing)
+          let !idx = fromIntegral (val .&. 0xFFFFFFFF)
+          pure (if val `shiftR` 32 == fromIntegral ep then Just idx else Nothing)
 
 -- | 'lookupNodeByWidgetId' using the id's integer store key.
 {-# INLINE lookupNodeByKey #-}
@@ -1580,17 +1547,10 @@ growScratch na s needed = do
 -- order, looking only at the floating nodes.
 {-# INLINE forFloatingNodes_ #-}
 forFloatingNodes_ :: NodeArena -> NodeType -> (NodeIdx -> IO ()) -> IO ()
-forFloatingNodes_ na t f = foldFloatingNodesM na (\() idx -> getNodeType na idx >>= \nt -> when (nt == t) (f idx)) ()
+forFloatingNodes_ na t f =
+  forClassNodes_ na FloatingNodes $ \idx -> getNodeType na idx >>= \nt -> when (nt == t) (f idx)
 
--- | Strict fold over the floating nodes in arena order.
-{-# INLINE foldFloatingNodesM #-}
-foldFloatingNodesM :: NodeArena -> (a -> NodeIdx -> IO a) -> a -> IO a
-foldFloatingNodesM na = foldClassNodesM na FloatingNodes
 
--- | Strict fold over the floating nodes from last declared to first.
-{-# INLINE foldFloatingNodeRevM #-}
-foldFloatingNodeRevM :: NodeArena -> (a -> NodeIdx -> IO a) -> a -> IO a
-foldFloatingNodeRevM na = foldClassNodeRevM na FloatingNodes
 
 -- | Visit direct children in reverse declaration order, including floating nodes.
 {-# INLINE forChildNodes_ #-}
@@ -1660,11 +1620,6 @@ findNodeRevM na p = arenaCount na >>= \n -> findSeqM True n pure p
 foldNodesM :: NodeArena -> (a -> NodeIdx -> IO a) -> a -> IO a
 foldNodesM na f z = arenaCount na >>= \n -> foldSeqM False n pure f z
 
--- | 'findNodeRevM' for a predicate that only floating nodes can satisfy. It
--- visits only the floating nodes.
-{-# INLINE findFloatingNodeRevM #-}
-findFloatingNodeRevM :: NodeArena -> (NodeIdx -> IO Bool) -> IO (Maybe NodeIdx)
-findFloatingNodeRevM na = findClassNodeRevM na FloatingNodes
 
 -- | The length of the list of class @c@ in 'naClassNodes', and a reader for
 -- its @i@th node.

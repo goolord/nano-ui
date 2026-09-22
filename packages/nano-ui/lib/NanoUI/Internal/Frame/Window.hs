@@ -44,11 +44,12 @@ import NanoUI.Internal.Id (WidgetId (..))
 import NanoUI.Internal.Input (Input (..), UiCursorKind (..), inputMouseDown, inputMousePos, inputMousePressed)
 import NanoUI.Internal.Layout.Arena
   ( AxisSizing (..)
+  , NodeClass (FloatingNodes)
   , NodeIdx
   , NodeType (..)
-  , findFloatingNodeRevM
+  , findClassNodeRevM
   , floatingNodeCount
-  , foldFloatingNodesM
+  , foldClassNodesM
   , getDirection
   , getFirstChild
   , getHeightSizing
@@ -69,7 +70,7 @@ import NanoUI.Internal.Types (DamageBounds (..), Rect (..), V2 (..), clamp, halo
 
 topmostWindowAtResizeHalo :: Context -> V2 -> IO (Maybe NodeIdx)
 topmostWindowAtResizeHalo ctx mouse =
-  findFloatingNodeRevM na $ \idx ->
+  findClassNodeRevM na FloatingNodes $ \idx ->
     ((== NodeWindow) <$> getNodeType na idx) <&&> do
       rect <- getNodeRect na idx
       pure (rectNonEmpty rect && rectContains (rectInflate windowResizeHandleFor rect) mouse)
@@ -103,7 +104,7 @@ persistWindowPositions ctx = floatingNodeCount na >>= \floating -> when (floatin
               if lookupSlot fieldPoint k acc == Just (x, y) && lookupSlot fieldPoint sizeKey acc == Just (w, h)
                 then acc
                 else insertSlot fieldPoint k (x, y) (insertSlot fieldPoint sizeKey (w, h) acc)
-  store1 <- foldFloatingNodesM na record store0
+  store1 <- foldClassNodesM na FloatingNodes record store0
   when (store1 /= store0) $ setStore ctx store1
  where
   na = ctxNodeArena ctx

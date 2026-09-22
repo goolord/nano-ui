@@ -93,12 +93,13 @@ import NanoUI.Internal.Id (hashWidgetId)
 import NanoUI.Internal.Layout.Arena
   ( AxisSizing (..)
   , DirTag (..)
+  , NodeClass (FloatingNodes)
   , NodeIdx
   , NodeType (..)
   , SizingTag (..)
   , arenaCount
   , floatingNodeCount
-  , foldFloatingNodesM
+  , foldClassNodesM
   , forChildNodes_
   , getHeightSizing
   , getNodeFontColor
@@ -156,7 +157,7 @@ collectFloatingOccluders ctx = do
     then pure emptyPrimArray
     else do
       buf <- newPrimArray (floating * 4)
-      n <- foldFloatingNodesM na (addOccluder na buf) 0
+      n <- foldClassNodesM na FloatingNodes (addOccluder na buf) 0
       shrinkMutablePrimArray buf (n * 4)
       unsafeFreezePrimArray buf
   where

@@ -30,8 +30,8 @@ import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Internal.Input (Input (..), inputInteracted, inputMousePos, inputPointerHeld)
 import NanoUI.Internal.Layout.Arena
   ( NodeType (..)
-  , findFloatingNodeRevM
-  , NodeClass (PointerNodes)
+  , findClassNodeRevM
+  , NodeClass (FloatingNodes, PointerNodes)
   , findClassNodeM
   , floatingNodeCount
   , getNodeType
@@ -121,7 +121,7 @@ floatingPanelActive ctx = do
 -- that its contents are a debug readout.
 debugPanelOpen :: Context -> IO Bool
 debugPanelOpen ctx =
-  isJust <$> findFloatingNodeRevM (ctxNodeArena ctx) (fmap (== NodeWindow) . getNodeType (ctxNodeArena ctx))
+  isJust <$> findClassNodeRevM (ctxNodeArena ctx) FloatingNodes (fmap (== NodeWindow) . getNodeType (ctxNodeArena ctx))
 
 probeHotId :: Context -> V2 -> IO WidgetId
 probeHotId ctx mouse = do
