@@ -131,7 +131,7 @@ tree' key inputItems index =
         clamped = if total <= 0 then 0 else clamp 0 (total - 1) index
         -- Every parent starts expanded.
         allParents = IS.fromList [i | (i, _, True, _) <- toList (visibleRows (const True) items)]
-    selected <- uiIO $ adoptSlot fieldInt ctx groupId groupKey clamped
+    selected <- uiIO $ adoptSlot fieldInt ctx groupId clamped
     expandedSet <- fromMaybe allParents . lookupSlot fieldIntSet groupKey <$> uiIO (getStore ctx)
     let rows = visibleRows (`IS.member` expandedSet) items
     columnWith (tight . gap 0 . fillW) $ do
@@ -146,7 +146,7 @@ tree' key inputItems index =
       focus <- focusedWidget
       nav <- useKeyNav focus
       let (keySel, keyExp, mFocus) = treeKeyNav nav rows resps focus clickSel clickExp
-      result <- finishInput fieldInt ctx groupId groupKey selected (fold resps) keySel
+      result <- finishInput fieldInt ctx groupId selected (fold resps) keySel
       uiIO (writeSlots ctx (slotWrite fieldIntSet groupKey keyExp))
       mapM_ (uiIO . writeIORef (ctxFocusId ctx)) mFocus
       pure result

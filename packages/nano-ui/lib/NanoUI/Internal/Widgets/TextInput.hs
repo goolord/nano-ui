@@ -261,7 +261,7 @@ buildTextInput styleIdx layout placeholder value mDebounceMs = do
   wid <- nextId
   ctx <- askContext
   let key = intKey wid
-  _ <- uiIO $ adoptSlot fieldText ctx wid key value
+  _ <- uiIO $ adoptSlot fieldText ctx wid value
   -- Both modes are constants, so an idle field allocates no mode record.
   let mode = if hasFlag textInputFlagPassword styleIdx then singleLineMode {modeCopyable = False} else singleLineMode
   (oldText, newText, isFocus, pulse) <- editTextField wid mode value Nothing
@@ -393,7 +393,7 @@ selectableTextWith' f txt = do
   layout <- f <$> askDefaultLayout
   wid <- nextId
   -- The caller owns the text; the editor only moves the selection.
-  _ <- withContext (\ctx -> adoptSlot fieldText ctx wid (intKey wid) txt)
+  _ <- withContext (\ctx -> adoptSlot fieldText ctx wid txt)
   _ <- editTextField wid singleLineMode {modeEditable = False} txt Nothing
   let styleIdx = textInputFlagSelectable .|. packTextNodeStyle layout 0
   addWidgetStyled wid NodeTextInput txt 0 layout styleIdx

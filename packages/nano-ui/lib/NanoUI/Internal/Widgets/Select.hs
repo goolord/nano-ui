@@ -71,7 +71,7 @@ selectWith' f options index = do
     n = length opts
     key = intKey wid
     given = clamp 0 (n - 1) index
-  stored <- uiIO $ adoptSlot fieldInt ctx wid key given
+  stored <- uiIO $ adoptSlot fieldInt ctx wid given
   store0 <- uiIO (getStore ctx)
   let
     current = clamp 0 (n - 1) stored

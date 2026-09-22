@@ -17,7 +17,7 @@ import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Effectful (Eff, type (:>))
-import NanoUI.Internal.Context (adoptSlot, intKey, registerFocusable)
+import NanoUI.Internal.Context (adoptSlot, registerFocusable)
 import NanoUI.Internal.Store (fieldInt)
 import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Monad (Ui, askContext, nextId, uiIO, withKey)
@@ -55,9 +55,8 @@ radio' options index =
         [] -> [""]
         xs -> xs
       !len = length opts
-      !key = intKey gid
       !given = clamp 0 (len - 1) index
-    stored <- uiIO $ adoptSlot fieldInt ctx gid key given
+    stored <- uiIO $ adoptSlot fieldInt ctx gid given
     let
       !sel = clamp 0 (len - 1) stored
     uiIO $ registerFocusable ctx gid
@@ -74,7 +73,7 @@ radio' options index =
       -- Compare with the caller's index, as 'NanoUI.Internal.Widgets.Select' does, so a
       -- selection stored between frames still reports a change.
       let clicked = findIndex rawRespClicked resps
-      finishInput fieldInt ctx gid key given (mconcat resps) (fromMaybe selNav clicked)
+      finishInput fieldInt ctx gid given (mconcat resps) (fromMaybe selNav clicked)
 
 -- | Radio buttons for every value of a bounded enum, labelled by @encode@.
 {-# INLINE boundedRadio #-}

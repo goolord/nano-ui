@@ -12,7 +12,6 @@ import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context
   ( adoptSlot
   , getPrevRect
-  , intKey
   , registerFocusable
   )
 import NanoUI.Internal.Font (sliderHitBounds)
@@ -52,9 +51,7 @@ sliderWith' f minV maxV value = do
   wid <- nextId
   ctx <- askContext
   uiIO $ registerFocusable ctx wid
-  let
-    key = intKey wid
-  current <- uiIO $ adoptSlot fieldFloat ctx wid key value
+  current <- uiIO $ adoptSlot fieldFloat ctx wid value
   let
     range = maxV - minV
     frac = if range > 0 then (current - minV) / range else 0
@@ -70,4 +67,4 @@ sliderWith' f minV maxV value = do
   let
     step = if range > 0 then range / 100 else 0
     finalVal = clamp minV maxV (dragged + fromIntegral (navStep nav) * step)
-  finishInput fieldFloat ctx wid key current resp finalVal
+  finishInput fieldFloat ctx wid current resp finalVal

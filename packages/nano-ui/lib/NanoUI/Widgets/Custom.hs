@@ -449,9 +449,7 @@ knobWith' ::
 knobWith' f diameter minV maxV value = do
   wid <- nextId
   ctx <- askContext
-  let
-    key = intKey wid
-  current <- uiIO $ adoptSlot fieldFloat ctx wid key value
+  current <- uiIO $ adoptSlot fieldFloat ctx wid value
   let
     range = maxV - minV
     frac = if range > 0 then clamp01 ((current - minV) / range) else 0
@@ -489,7 +487,7 @@ knobWith' f diameter minV maxV value = do
     finalVal
       | range > 0 && deltaNorm /= 0 = clamp minV maxV (current + deltaNorm * range)
       | otherwise = current
-  finishInput fieldFloat ctx wid key current resp finalVal
+  finishInput fieldFloat ctx wid current resp finalVal
 
 -- | On/off switch. Pass the current state; the result is the state after
 -- this frame's click or Space/Enter.
@@ -513,9 +511,7 @@ toggleSwitchWith' ::
 toggleSwitchWith' f on = do
   wid <- nextId
   ctx <- askContext
-  let
-    key = intKey wid
-  current <- intBool <$> uiIO (adoptSlot fieldInt ctx wid key (boolInt on))
+  current <- intBool <$> uiIO (adoptSlot fieldInt ctx wid (boolInt on))
   let
     pillW = 44.0
     pillH = 24.0

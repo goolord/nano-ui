@@ -350,12 +350,13 @@ writeStoreBool ctx owner v = writeSlot fieldInt ctx owner (intKey owner) (boolIn
 -- the widget last returned ('recordSlot'). An edit applied between frames,
 -- such as a menu cut, then survives a caller that passes the previous result
 -- back, while a value changed by the application still wins. Returns the
--- slot's value after adopting.
+-- value of the owner's slot after adopting.
 {-# INLINE adoptSlot #-}
-adoptSlot :: Eq a => Field a -> Context -> WidgetId -> Int -> a -> IO a
-adoptSlot field ctx owner k v = do
+adoptSlot :: Eq a => Field a -> Context -> WidgetId -> a -> IO a
+adoptSlot field ctx owner v = do
   st <- readIORef (ctxStore ctx)
-  let seenK = slotKey SlotSeen k
+  let k = intKey owner
+      seenK = slotKey SlotSeen k
   if lookupSlot field seenK st == Just v
     then pure $! findSlot field v k st
     else do
