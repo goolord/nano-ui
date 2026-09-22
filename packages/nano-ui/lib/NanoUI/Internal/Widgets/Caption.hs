@@ -50,7 +50,7 @@ import NanoUI.Internal.Style
   , styleFg
   , tight
   )
-import NanoUI.Internal.Types (Color, Rect (..), V2 (..), lerpColor)
+import NanoUI.Internal.Types (Color, Rect (..), V2 (..), lerpColor, rectUnion)
 import NanoUI.Internal.Widgets.Custom
   ( CanvasM
   , CustomWidgetSpec (..)
@@ -172,9 +172,7 @@ captionButtonsConfigured cfg maximized = do
         | respClicked mid = Just CaptionToggleMaximize
         | respClicked close = Just CaptionClose
         | otherwise = Nothing
-  pure (action, spanOf (respRect mini) (respRect close))
-  where
-    spanOf a b = Rect (rectX a) (rectY a) (rectX b + rectW b - rectX a) (max (rectH a) (rectH b))
+  pure (action, rectUnion (respRect mini) (respRect close))
 
 --------------------------------------------------------------------------------
 -- The window's border
