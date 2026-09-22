@@ -77,21 +77,10 @@ import NanoUI.Internal.Layout.Arena
   , hasCenteredLabel
   , withArenaArraysSnap
   , subtreeArrays
-  , geomX
-  , geomY
-  , geomW
-  , geomH
-  , stylePadL
-  , stylePadR
-  , stylePadT
-  , stylePadB
-  , styleGap
-  , styleGridMinColW
-  , tagNodeType
-  , tagDirection
-  , treeStyleIdx
-  , treeGridCols
-  , tagScrollBarSlot
+  , GeomCol (..)
+  , StyleCol (..)
+  , TagCol (..)
+  , TreeCol (..)
   , readAxisSizing
   , readGeom
   , writeTagEnum
@@ -99,8 +88,6 @@ import NanoUI.Internal.Layout.Arena
   , readStyle
   , readTagEnum
   , readTree
-  , treeParent
-  , treeChildCount
   , walkAncestors
   , getAlignX
   , getAlignY
@@ -336,8 +323,8 @@ quantizeResultsA a count floatingCount s
       -- its children, so one pass marks each node from its parent.
       floating <- newPrimArray count :: IO (IOArr Word8)
       forUpTo_ count $ \i -> do
-        nt <- readTagEnum a i tagNodeType
-        parent <- readTree a i treeParent
+        nt <- readTagEnum a i TagNodeType
+        parent <- readTree a i TreeParent
         inFloating <-
           if isFloatingNode nt
             then pure True
@@ -346,18 +333,18 @@ quantizeResultsA a count floatingCount s
         unless inFloating (snapNode i)
  where
   snapNode i = do
-    x <- readGeom a i geomX
-    y <- readGeom a i geomY
-    w <- readGeom a i geomW
-    h <- readGeom a i geomH
+    x <- readGeom a i GeomX
+    y <- readGeom a i GeomY
+    w <- readGeom a i GeomW
+    h <- readGeom a i GeomH
     -- Snap both edges and take the size between them. Rounding the size on
     -- its own can push a node's far edge a pixel past the snapped origin of
     -- the sibling that starts there, and the node then paints over it (a
     -- table cell over the column rule beside it).
-    writeGeom a i geomX (onGrid s x)
-    writeGeom a i geomY (onGrid s y)
-    writeGeom a i geomW (max 0 (gridSpan s x (x + w)))
-    writeGeom a i geomH (max 0 (gridSpan s y (y + h)))
+    writeGeom a i GeomX (onGrid s x)
+    writeGeom a i GeomY (onGrid s y)
+    writeGeom a i GeomW (max 0 (gridSpan s x (x + w)))
+    writeGeom a i GeomH (max 0 (gridSpan s y (y + h)))
 
 measurePass :: SolveEnv -> Int -> IO ()
 measurePass env count = case seCache env of
@@ -381,7 +368,7 @@ measurePass env count = case seCache env of
             ch <- readPrimArray (lcMeasured lc) (idx * 2 + 1)
             pure (cw == w && ch == h)
       unless same $ do
-        p <- readTree (seArrays env) idx treeParent
+        p <- readTree (seArrays env) idx TreeParent
         when (p >= 0) $ writePrimArray moved p 1
   where
     -- Children follow their parent in the arena, so a descending walk
@@ -403,7 +390,7 @@ restoreMeasured env lc moved idx
   | otherwise = do
       hit <- (==) <$> readPrimArray (seSub env) idx <*> readPrimArray (lcSub lc) idx
       childMoved <- (/= 0) <$> readPrimArray moved idx
-      nt <- readTagEnum (seArrays env) idx tagNodeType
+      nt <- readTagEnum (seArrays env) idx TagNodeType
       if not hit || childMoved || nt == NodeDrawing || isScrollNode nt
         then pure False
         else do
@@ -424,7 +411,7 @@ recordMeasured env idx = do
 
 measureNode :: SolveEnv -> NodeIdx -> IO ()
 measureNode env@SolveEnv {seArena = na} idx = do
-  nt <- readTagEnum (seArrays env) idx tagNodeType
+  nt <- readTagEnum (seArrays env) idx TagNodeType
   case nt of
     NodeText -> measureTextNode env idx
     NodeSpacer -> measureSpacer na idx
@@ -611,9 +598,9 @@ measureMarkedWidget fm measure body leading (padX, padY) = do
 
 measureWidget :: SolveEnv -> NodeIdx -> IO ()
 measureWidget env@SolveEnv {seArena = na, seArrays = a, seMs = Measurers {msFm = fm, msMeasure = measure}} idx = do
-  nt <- readTagEnum a idx tagNodeType
+  nt <- readTagEnum a idx TagNodeType
   txt <- getText na idx
-  si <- readTree a idx treeStyleIdx
+  si <- readTree a idx TreeStyleIdx
   wAx <- readAxisSizing a idx True
   hAx <- readAxisSizing a idx False
   -- The content with its padding and whatever sits beside the label.
@@ -676,11 +663,11 @@ measureWidget env@SolveEnv {seArena = na, seArrays = a, seMs = Measurers {msFm =
 measureContainer :: SolveEnv -> NodeIdx -> IO ()
 measureContainer env@SolveEnv {seArena = na, seArrays = a} idx = do
   (pad, gap, dir) <- containerFlow a idx
-  gCols <- readTree a idx treeGridCols
-  minColW <- readStyle a idx styleGridMinColW
+  gCols <- readTree a idx TreeGridCols
+  minColW <- readStyle a idx StyleGridMinColW
   wAx@(AxisSizing wTag _ minW _) <- readAxisSizing a idx True
   hAx <- readAxisSizing a idx False
-  nt <- readTagEnum a idx tagNodeType
+  nt <- readTagEnum a idx TagNodeType
   let chrome = isChromeColumn nt dir
       padX = padL pad + padR pad
       padY = padT pad + padB pad
@@ -766,7 +753,7 @@ measureScrollContainer env@SolveEnv {seArena = na, seArrays = a} idx = do
         pure (pnt == NodeWindow || pnt == NodeModal)
   inPanel <- hasPanelAncestor na parent
   let slot = classifyScrollBar isWin (wTag == SizingGrow && hTag == SizingGrow && not inPanel)
-  writeTagEnum a idx tagScrollBarSlot slot
+  writeTagEnum a idx TagScrollBarSlot slot
   let assignedInnerH =
         case hTag of
           SizingFixed -> max 0 (hVal - padY)
@@ -947,7 +934,7 @@ recomputeFitHeightAtWidthGo env@SolveEnv {seArena = na, seArrays = a} idx availW
 {-# INLINE loadChildrenScratch #-}
 loadChildrenScratch :: NodeArena -> NodeIdx -> (NodeIdx -> IO (Float, Float)) -> IO Int
 loadChildrenScratch na parent sizeOf = do
-  cc <- arenaArrays na >>= \a -> readTree a parent treeChildCount
+  cc <- arenaArrays na >>= \a -> readTree a parent TreeChildCount
   FlexScratch {fsIdx = idxArr, fsW = wArr, fsH = hArr} <- ensureScratchCapacity na cc
   -- The sibling links run from the last child to the first, so the children
   -- fill the arrays from the end. Floating children leave room at the front,
@@ -972,8 +959,8 @@ loadChildrenScratch na parent sizeOf = do
 flowChildSize :: SolveEnv -> Bool -> Float -> Float -> NodeIdx -> IO (Float, Float)
 flowChildSize env refit availW availH ci = do
   let a = seArrays env
-  w <- readGeom a ci geomW
-  h <- readGeom a ci geomH
+  w <- readGeom a ci GeomW
+  h <- readGeom a ci GeomH
   AxisSizing wTag wVal minW maxW <- readAxisSizing a ci True
   AxisSizing hTag hVal minH maxH <- readAxisSizing a ci False
   let w' =
@@ -1001,9 +988,9 @@ positionNodeA ::
 positionNodeA env@SolveEnv {seArena = na, seArrays = a} !depth !idx !x !y !availW !availH = do
   wAx <- readAxisSizing a idx True
   hAx@(AxisSizing hTag _ minH maxH) <- readAxisSizing a idx False
-  intrinsicW <- readGeom a idx geomW
-  intrinsicH <- readGeom a idx geomH
-  nt <- readTagEnum a idx tagNodeType
+  intrinsicW <- readGeom a idx GeomW
+  intrinsicH <- readGeom a idx GeomH
+  nt <- readTagEnum a idx TagNodeType
   let !w = resolveSize wAx intrinsicW availW
       !resolvedH = resolveSize hAx intrinsicH availH
   isRowChild <- parentIsRow na idx
@@ -1040,9 +1027,9 @@ positionNodeA env@SolveEnv {seArena = na, seArrays = a} !depth !idx !x !y !avail
 {-# INLINE containerFlow #-}
 containerFlow :: NodeArenaArrays -> NodeIdx -> IO (Padding, Float, DirTag)
 containerFlow a idx = do
-  pad <- Padding <$> readStyle a idx stylePadL <*> readStyle a idx stylePadR <*> readStyle a idx stylePadT <*> readStyle a idx stylePadB
-  gap <- readStyle a idx styleGap
-  dir <- readTagEnum a idx tagDirection
+  pad <- Padding <$> readStyle a idx StylePadL <*> readStyle a idx StylePadR <*> readStyle a idx StylePadT <*> readStyle a idx StylePadB
+  gap <- readStyle a idx StyleGap
+  dir <- readTagEnum a idx TagDirection
   pure (pad, gap, dir)
 
 adjustFitHeight :: NodeArena -> NodeIdx -> Float -> Float -> Float -> Float -> Float -> IO ()
@@ -1140,7 +1127,7 @@ positionScrollChildren env@SolveEnv {seArena = na} depth idx dir gap pad px py p
 -- areas and other nodes read 'ScrollBarList'.
 {-# INLINE scrollBarSlotOf #-}
 scrollBarSlotOf :: NodeArena -> NodeIdx -> IO ScrollBarSlot
-scrollBarSlotOf na idx = arenaArrays na >>= \a -> readTagEnum a idx tagScrollBarSlot
+scrollBarSlotOf na idx = arenaArrays na >>= \a -> readTagEnum a idx TagScrollBarSlot
 
 -- | Whether @p@ or an ancestor below the nearest floating node is a panel.
 hasPanelAncestor :: NodeArena -> NodeIdx -> IO Bool
@@ -1187,9 +1174,9 @@ positionChildren ::
   Float ->
   IO ()
 positionChildren env@SolveEnv {seArrays = a} depth idx dir gap pad px py pw ph = do
-  nt <- readTagEnum a idx tagNodeType
-  gCols <- readTree a idx treeGridCols
-  minColW <- readStyle a idx styleGridMinColW
+  nt <- readTagEnum a idx TagNodeType
+  gCols <- readTree a idx TreeGridCols
+  minColW <- readStyle a idx StyleGridMinColW
   let chrome = isChromeColumn nt dir
       cx = px + padL pad
       cy = py + padT pad
@@ -1295,7 +1282,7 @@ positionRowFromParent env@SolveEnv {seArena = na} depth parent gap cx cy cw ch =
           -- A grow child that its max width stopped short of its share
           -- hands the rest to the siblings after it instead of leaving a
           -- hole.
-          placedW <- readGeom (seArrays env) ci geomW
+          placedW <- readGeom (seArrays env) ci GeomW
           goRow (i + 1) (x + min fw placedW + gap)
     goRow 0 cx
 

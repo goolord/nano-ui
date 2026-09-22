@@ -18,9 +18,8 @@ import NanoUI.Internal.Layout.Arena
   , foldNodesM
   , getNodeType
   , getNodeValue
-  , tagNodeType
-  , treeFirstChild
-  , treeNextSibling
+  , TagCol (..)
+  , TreeCol (..)
   , writeTagEnum
   , writeTree
   )
@@ -203,9 +202,9 @@ runPointerCursorTest ctx failed = do
 runEmptyFrameTest :: Context -> IORef Int -> IO ()
 runEmptyFrameTest ctx failed = do
   arrays <- arenaArrays (ctxNodeArena ctx)
-  writeTagEnum arrays 0 tagNodeType NodeContainer
-  writeTree arrays 0 treeFirstChild 0
-  writeTree arrays 0 treeNextSibling (-1)
+  writeTagEnum arrays 0 TagNodeType NodeContainer
+  writeTree arrays 0 TreeFirstChild 0
+  writeTree arrays 0 TreeNextSibling (-1)
   let inp0 = (withInput 320 200) {inputMousePos = V2 40 40}
       press = inp0 {inputMouseDown = True, inputMousePressed = True, inputScroll = V2 0 1}
       ui = row $ do
