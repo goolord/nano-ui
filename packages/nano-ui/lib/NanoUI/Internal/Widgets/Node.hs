@@ -27,7 +27,6 @@ module NanoUI.Internal.Widgets.Node
   , addWidget
   , addWidgetStyled
   , addWidgetWithOptions
-  , addSizingLeafNode
   , tagContainer
   )
 where
@@ -60,7 +59,6 @@ import NanoUI.Internal.Layout.Arena
   ( NodeArena
   , NodeIdx
   , NodeType (..)
-  , addNode
   , addNodeFromLayout
   , rootAttachParent
   , setNodeText
@@ -71,13 +69,7 @@ import NanoUI.Internal.Layout.Arena
   )
 import NanoUI.Internal.Monad (Ui, askContext, askFrameInput, askInput, localInput, nextId, uiIO, withContext)
 import NanoUI.Internal.WidgetText (packTextNodeStyle)
-import NanoUI.Internal.Style
-  ( Direction (..)
-  , Layout (..)
-  , Padding (..)
-  , Sizing (..)
-  , defaultLayout
-  )
+import NanoUI.Internal.Style (Layout (..))
 import NanoUI.Internal.Types (Rect (..), rectContains, rectH, rectHit, rectUnion, rectW)
 import NanoUI.Internal.Frame.Hit (findNodeByWidgetId, nodeInteractionHit, scrollHitRect)
 
@@ -281,29 +273,6 @@ dropdownInput wid =
   withContext (\ctx -> getsInteraction ctx isPointerRoute) >>= \case
     RouteDropdown owner | owner == wid -> askFrameInput
     _ -> askInput
-
-addSizingLeafNode ::
-  Context
-  -> Input
-  -> WidgetId
-  -> NodeType
-  -> Direction
-  -> Sizing
-  -> Sizing
-  -> IO Response
-addSizingLeafNode ctx inp wid nt dir wSiz hSiz = do
-  parent <- currentParent ctx
-  let layout =
-        defaultLayout
-          { layoutDirection = dir
-          , layoutWidth = wSiz
-          , layoutHeight = hSiz
-          , layoutPadding = Padding 0 0 0 0
-          , layoutGap = 0
-          }
-  idx <- addNode (ctxNodeArena ctx) nt parent layout
-  setWidgetId (ctxNodeArena ctx) idx wid
-  resolveInteraction ctx inp wid
 
 {-# INLINE addWidget #-}
 addWidget ::
