@@ -20,7 +20,9 @@ import Control.Monad (foldM, forM, forM_, mfilter, unless, when)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IM
+import Data.List (sortOn)
 import Data.Maybe (fromMaybe)
+import Data.Ord (Down (..))
 import Data.Primitive.PrimArray
   ( copyMutablePrimArray
   , newPrimArray
@@ -1610,7 +1612,7 @@ distributeScratch na n avail gapSum horizontal = do
           let mainArr = if horizontal then outW else outH
               crossArr = if horizontal then outH else outW
           markGrowFlags na idxArr wArr hArr mainArr crossArr horizontal 0 n
-          (free, gfSum) <- settleGrow mainArr crossArr avail gapSum n (n + 1)
+          (free, gfSum) <- settleGrow mainArr crossArr avail gapSum n 0
           applyGrowShares wArr hArr mainArr crossArr horizontal free gfSum 0 n
     else
       if slack < -0.001
@@ -1721,15 +1723,52 @@ lockGrow mainArr crossArr !free !gfSum !i !end !acc
         else lockGrow mainArr crossArr free gfSum (i + 1) end acc
 
 -- Each lock shrinks the share pool, possibly locking more children; the
--- locked set only grows, so this fixpoints within n sweeps.
+-- locked set only grows, so this fixpoints within n sweeps, and a row of n
+-- children could take n. Rows settle in a few; one still locking after
+-- 'waterFillAfter' sweeps is settled by 'waterFillGrow', which the next sweep
+-- confirms, so no row takes more than a sort and that many sweeps.
 settleGrow :: IOArr Float -> IOArr Float -> Float -> Float -> Int -> Int -> IO (Float, Float)
-settleGrow mainArr crossArr avail gapSum n !passes = do
+settleGrow mainArr crossArr avail gapSum n !pass = do
   (occupied, gfSum) <- scanGrow mainArr crossArr 0 n 0 0
   let free = avail - gapSum - occupied
   locked <- lockGrow mainArr crossArr free gfSum 0 n 0
-  if locked == 0 || passes <= 1
+  if locked == 0 || pass >= n
     then pure (free, gfSum)
-    else settleGrow mainArr crossArr avail gapSum n (passes - 1)
+    else do
+      when (pass + 1 == waterFillAfter) $ waterFillGrow mainArr crossArr (avail - gapSum) n
+      settleGrow mainArr crossArr avail gapSum n (pass + 1)
+
+-- | Sweeps 'settleGrow' makes before it sorts. Rows with varied content and
+-- weights settle in three or four, and below this the sweeps cost less than
+-- the sort.
+waterFillAfter :: Int
+waterFillAfter = 8
+
+-- Lock, in one go, every grow child that 'lockGrow' sweeps would lock one
+-- after another. A child locks when its content per unit of grow factor is
+-- more than the share per unit left once the children above it lock; the
+-- share per unit only falls as children lock, so taking children by content
+-- per unit, largest first, and stopping at the first that fits locks the
+-- same set.
+waterFillGrow :: IOArr Float -> IOArr Float -> Float -> Int -> IO ()
+waterFillGrow mainArr crossArr room n = do
+  (occupied, gfSum) <- scanGrow mainArr crossArr 0 n 0 0
+  let collect !i acc
+        | i >= n = pure acc
+        | otherwise = do
+            gf <- readPrimArray crossArr i
+            if gf > 0
+              then do
+                need <- readPrimArray mainArr i
+                collect (i + 1) ((need / gf, need, gf, i) : acc)
+              else collect (i + 1) acc
+      lockFrom !free !g ((_, need, gf, i) : rest)
+        | need * g > gf * free = do
+            writePrimArray crossArr i 0
+            lockFrom (free - need) (g - gf) rest
+      lockFrom _ _ _ = pure ()
+  growing <- collect 0 []
+  lockFrom (room - occupied) gfSum (sortOn (\(perUnit, _, _, _) -> Down perUnit) growing)
 
 -- Hand shares to unlocked grow children and restore real cross sizes where
 -- the factors clobbered them.
