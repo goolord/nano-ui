@@ -55,7 +55,7 @@ import NanoUI.Internal.Input
   ( Input (..)
   , inputWindowSize
   )
-import NanoUI.Internal.Store (Slot (..), eqByPtr, mirrorStoresChanged, ptrEq, slotChangedKeys, slotKey)
+import NanoUI.Internal.Store (Slot (..), diffKeys, eqByPtr, mirrorStoresChanged, ptrEq, slotChangedKeys, slotKey)
 import NanoUI.Internal.Layout.Arena
   ( AxisSizing (..)
   , NodeArena
@@ -706,23 +706,18 @@ clipKeyRect k clip r
 
 scrollOffsetDamage :: Context -> RectUnion -> WidgetStore -> WidgetStore -> IO ()
 scrollOffsetDamage ctx acc oldStore newStore =
-  unless (IM.null changedKeys) $ do
+  unless (null changedKeys) $ do
     -- Every store key that holds a scroll node's offset, mapped to the first
     -- such node, and every scroll range, mapped to each node with that id.
     -- Built once, only on frames where an offset or range changed.
     owners <- foldClassNodeRevM na PointerNodes addOwner IM.empty
-    IM.foldrWithKey
-      ( \k _ rest -> do
-          forM_ (IM.findWithDefault [] k owners) $ \idx -> do
-            -- The scroll node's rect covers the content viewport AND the
-            -- scrollbar lane: offset changes move the thumb, which paints
-            -- outside the content clip.
-            getNonzeroRect na idx >>= mapM_ (addRect acc)
-            walkFloatingAncestors na idx (\i _ -> getNonzeroRect na i) >>= mapM_ (addRect acc)
-          rest
-      )
-      (pure ())
-      changedKeys
+    forM_ changedKeys $ \k ->
+      forM_ (IM.findWithDefault [] k owners) $ \idx -> do
+        -- The scroll node's rect covers the content viewport AND the
+        -- scrollbar lane: offset changes move the thumb, which paints
+        -- outside the content clip.
+        getNonzeroRect na idx >>= mapM_ (addRect acc)
+        walkFloatingAncestors na idx (\i _ -> getNonzeroRect na i) >>= mapM_ (addRect acc)
   where
     na = ctxNodeArena ctx
     -- Floating-pane offsets live in storeFloat; wheel/keyboard offsets
@@ -734,12 +729,10 @@ scrollOffsetDamage ctx acc oldStore newStore =
     -- and repaints nothing here. Two scrollers can share an id (a table's
     -- frozen pane and body), and only the first publishes, so a range change
     -- repaints every scroller with the id.
+    (oldF, newF) = (storeFloat oldStore, storeFloat newStore)
     changedKeys =
-      changedKeysWith (fmap (const ()) . IM.filter (/= 0)) (storeFloat oldStore) (storeFloat newStore)
-        `IM.union` changedKeysWith (fmap (const ())) (storePoint oldStore) (storePoint newStore)
-    changedKeysWith :: Eq a => (IM.IntMap a -> IM.IntMap ()) -> IM.IntMap a -> IM.IntMap a -> IM.IntMap ()
-    changedKeysWith oneSided old new =
-      IM.mergeWithKey (\_ a b -> if a /= b then Just () else Nothing) oneSided oneSided old new
+      filter (\k -> IM.findWithDefault 0 k oldF /= IM.findWithDefault 0 k newF) (diffKeys oldF newF)
+        ++ diffKeys (storePoint oldStore) (storePoint newStore)
     addOwner m idx = do
       nt <- getNodeType na idx
       if not (isScrollNode nt)
