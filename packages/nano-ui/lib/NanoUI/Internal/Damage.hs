@@ -207,21 +207,16 @@ updatePrevRects ctx = do
       go oldRects 0 oldRects oldClips oldTexts 0 False
 
 floatingPanelsInOrder :: Context -> IO [(Int, Rect)]
-floatingPanelsInOrder ctx = do
-  foldClassNodeRevM na FloatingNodes step []
+floatingPanelsInOrder ctx = foldClassNodeRevM na FloatingNodes step []
   where
     na = ctxNodeArena ctx
     step acc idx = do
-      nt <- getNodeType na idx
-      if not (isFloatingNode nt)
+      wid <- getWidgetId na idx
+      if hashWidgetId wid == 0
         then pure acc
         else do
-          wid <- getWidgetId na idx
-          if hashWidgetId wid == 0
-            then pure acc
-            else do
-              rect <- getNodeRect na idx
-              pure ((intKey wid, rect) : acc)
+          rect <- getNodeRect na idx
+          pure ((intKey wid, rect) : acc)
 
 -- | Current floating-panel bounds keyed by widget id, in logical window coordinates.
 floatingPanelRects :: Context -> IO (IM.IntMap Rect)
