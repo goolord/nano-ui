@@ -41,7 +41,6 @@ runSdlSession options drawFn = do
     registerImage ctx image w h pixels >>= (`unless` fail "registerImage failed")
   withSdl options ctx $ \ctx0 env -> do
     void $ setRenderDrawBlendModeSafe (sdlRenderer env) (fromIntegral sDL_BLENDMODE_BLEND)
-    ctxRef <- newIORef ctx0
     prev <- newIORef emptyInput
     drawing <- newDrawingLock
     startupDone <- newIORef False
@@ -54,12 +53,12 @@ runSdlSession options drawFn = do
     -- decided whether to draw. That frame already covers the size change and
     -- expose events the loop is about to see.
     resizePresented <- newIORef Nothing
+    -- The live context is the session's: 'syncDisplay' answers it.
     let onResize = void $ tryWithDrawingLock drawing $ do
-          liveCtx <- readIORef ctxRef
+          liveCtx <- readIORef (sdlCachedCtx env)
           inp <- readIORef prev
           scale0 <- readIORef (sdlScaleRef env)
           (ctx', inpSynced) <- syncDisplay liveCtx env (clearEphemeral inp)
-          writeIORef ctxRef ctx'
           writeIORef prev inpSynced
           scale1 <- readIORef (sdlScaleRef env)
           done <- readIORef startupDone
@@ -89,7 +88,7 @@ runSdlSession options drawFn = do
           pending <- pollEvents >>= noteWake
           (c', inp') <- syncDisplay c env (foldl' applyEvent inp pending)
           if null pending
-            then (c', inp') <$ writeIORef ctxRef c'
+            then pure (c', inp')
             else settle c' inp'
     -- The opening frames are drawn here, outside the loop, so what one asks
     -- for beyond itself has to be carried into the loop by hand. A frame
@@ -139,10 +138,8 @@ runSdlSession options drawFn = do
                 when paused $ do
                   void $ setRenderVSync (sdlRenderer env) 1
                   writeIORef vsyncPaused False
-                (c', inp') <- syncDisplay c env inp
-                writeIORef ctxRef c'
-                writeIORef prev inp'
-                pure (c', inp')
+                synced@(_, inp') <- syncDisplay c env inp
+                synced <$ writeIORef prev inp'
             , sdDebug         = sdlDebug env
             , sdContinuous    = sdlContinuous env
               -- With vsync on, presents throttle the loop. With vsync off a
