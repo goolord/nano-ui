@@ -168,10 +168,9 @@ noteDebugPresent ref uiMs renderMs presentMs frameMs verts indices cmds =
       }
 
 -- | The published snapshot, rebuilt at most every 'debugRefreshSec' and kept
--- by the sampler in between. A due query, or the first, samples the core
--- stats and hands them to @build@, which adds the backend's fields: window
--- size and mouse position are left 0 for it to fill. Every query marks the
--- readout active ('debugCadence').
+-- in the sampler. A due query samples the core stats for @build@ to add the
+-- backend's fields to: window size and mouse position are left 0 for it.
+-- Every query marks the readout active ('debugCadence').
 refreshDebugSnapshot :: Typeable s => DebugSamplerRef -> (CoreDebugSnapshot -> IO s) -> IO s
 refreshDebugSnapshot ref build = do
   now <- getMonotonicTime
