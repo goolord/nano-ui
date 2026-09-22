@@ -22,7 +22,6 @@ module NanoUI.Internal.Context.Drawing
   , registerPointerTracked
   , isPointerTracked
   , resetDrawingScopeCache
-  , hasCustomLayoutInputs
   ) where
 
 import Control.Monad (when)
@@ -372,9 +371,4 @@ resetDrawingScopeCache ctx =
       , dcsPointerTracked = IM.empty
       }
 
--- | True when any node has a custom measure function, whose output is not
--- captured by the arena descriptor comparison, so whole-layout reuse must be
--- disabled for the frame.
-hasCustomLayoutInputs :: Context -> IO Bool
-hasCustomLayoutInputs ctx =
-  not . IM.null . dcsCustomMeasures <$> readIORef (ctxDrawingCache ctx)
+

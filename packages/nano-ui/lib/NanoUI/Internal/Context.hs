@@ -160,7 +160,6 @@ module NanoUI.Internal.Context
   , wrapMeasureCache
   , clearMeasureCache
   , ensureMetricCaches
-  , hasCustomLayoutInputs
   , withExternalText
   , withTheme
   , setTheme
@@ -727,4 +726,5 @@ getFocusables ctx = do
   count <- readIORef (ctxFocusablesCount ctx)
   arr <- readIORef (ctxFocusables ctx)
   forM [0 .. count - 1] (readPrimArray arr)
+
 

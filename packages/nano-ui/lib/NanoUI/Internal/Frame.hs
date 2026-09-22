@@ -26,6 +26,7 @@ import Data.IORef (modifyIORef', readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
 import Data.Typeable (Typeable)
 import Effectful (Eff, IOE, runEff, type (:>))
+import GHC.Float (castFloatToWord32)
 import NanoUI.Internal.Context
   ( Context (..)
   , PointerRoute (..)
@@ -43,6 +44,7 @@ import NanoUI.Internal.Context
   , getPrevRect
   , getStore
   , isDirty
+  , lookupCustomMeasure
   , lookupPopupConfig
   , markDirty
   , pruneDrawOpCache
@@ -51,13 +53,13 @@ import NanoUI.Internal.Context
   , takeDamage
   , takeDamagePieces
   , tickAnimations
-  , hasCustomLayoutInputs
   , ensureMetricCaches
   , getsOverlay
   , modifyOverlay
   , OverlayState (..)
   , getsDamage
   , DamageState (..)
+  , DrawingCacheState (..)
   )
 import NanoUI.Internal.Context (beginFrameModal)
 import NanoUI.Internal.Damage (FrameSnapshot (..), updatePrevRects, writeDamage)
@@ -135,16 +137,21 @@ import NanoUI.Internal.Frame.Window
 import NanoUI.Internal.Id (WidgetId (..), initialIdContext)
 import NanoUI.Internal.Input (Input (..), inputMousePressed, stripInteractionInput, withoutPointer)
 import NanoUI.Internal.Layout.Arena
-  ( LayoutCache
+  ( LayoutCache (..)
+  , NodeType (..)
+  , arenaCount
   , captureLayoutCache
   , floatingNodeCount
+  , foldNodesM
+  , getNodeType
+  , getWidgetId
   , layoutCacheEligible
-  , layoutInputsMatch
+  , layoutSigMatches
   , newLayoutCache
   , resetNodeArena
   , restoreLayoutCache
   )
-import NanoUI.Internal.Layout.Solve (placeModals, placePopups, placeWindows, solveLayout)
+import NanoUI.Internal.Layout.Solve (customMeasureAvail, placeModals, placePopups, placeWindows, solveLayout)
 import NanoUI.Internal.Monad (NanoUI, Ui, runUi, unlessM, whenM)
 import NanoUI.Internal.Store (mirrorStoresChanged)
 import NanoUI.Internal.Style (Theme (..))
@@ -420,15 +427,53 @@ placeFloating ctx w h = do
 replaceFloating :: Context -> Size -> IO Bool
 replaceFloating ctx size = restoreCachedLayout ctx size (\_ -> pure True)
 
--- | Reuse solved geometry for unchanged layout inputs. Custom measurement has
--- dependencies outside the arena and must be solved; floating panels are
--- placed again over the reused solve ('placeFloating').
+-- | Reuse solved geometry for unchanged layout inputs, checked by the input
+-- signature and by every custom measure still returning its recorded size.
+-- Floating panels are placed again over the reused solve ('placeFloating').
 tryReuseLayout :: Context -> Size -> IO Bool
-tryReuseLayout ctx size = do
-  custom <- hasCustomLayoutInputs ctx
-  if custom
-    then pure False
-    else restoreCachedLayout ctx size (layoutInputsMatch (ctxNodeArena ctx))
+tryReuseLayout ctx size = restoreCachedLayout ctx size (layoutReuseValid ctx)
+
+-- | Layout reuse is sound when the frame's layout inputs hash to what the
+-- cache captured, and when every custom measure still returns the sizes the
+-- captured solve recorded. The signature covers the measure's declared
+-- inputs, but its closure may read state outside the arena, which only
+-- running it again can check.
+layoutReuseValid :: Context -> LayoutCache -> IO Bool
+layoutReuseValid ctx lc = do
+  okSig <- layoutSigMatches (ctxNodeArena ctx) lc
+  if not okSig || IM.null (lcMeasures lc)
+    then pure okSig
+    else customMeasuresStable ctx lc
+
+-- | Re-run each captured custom measurement and compare. A node whose
+-- measure is gone, whose offered space moved, or whose returned size differs
+-- forces a re-solve.
+customMeasuresStable :: Context -> LayoutCache -> IO Bool
+customMeasuresStable ctx lc = do
+  let na = ctxNodeArena ctx
+      fm = ctxFontMetrics ctx
+  n <- arenaCount na
+  let go [] = pure True
+      go ((idx, (aw, ah, ow, oh)) : rest)
+        | idx >= n = pure False
+        | otherwise = do
+            nt <- getNodeType na idx
+            if nt /= NodeDrawing
+              then pure False
+              else do
+                wid <- getWidgetId na idx
+                lookupCustomMeasure ctx wid >>= \case
+                  Nothing -> pure False
+                  Just fn -> do
+                    (aw', ah') <- customMeasureAvail na idx
+                    if castFloatToWord32 aw' /= aw || castFloatToWord32 ah' /= ah
+                      then pure False
+                      else do
+                        let (mw, mh) = fn fm (aw', ah')
+                        if castFloatToWord32 mw == ow && castFloatToWord32 mh == oh
+                          then go rest
+                          else pure False
+  go (IM.toList (lcMeasures lc))
 
 -- | Restore the cached solve for this size and font generation when @valid@
 -- accepts it, and place the floating panels over it.
@@ -449,8 +494,7 @@ restoreCachedLayout ctx size@(Size w h) valid = do
 -- can reuse it.
 captureLayout :: Context -> Size -> IO ()
 captureLayout ctx size = do
-  custom <- hasCustomLayoutInputs ctx
-  eligible <- if custom then pure False else layoutCacheEligible (ctxNodeArena ctx)
+  eligible <- layoutCacheEligible (ctxNodeArena ctx)
   if not eligible
     then writeIORef (ctxLayoutCache ctx) Nothing
     else do
@@ -460,5 +504,33 @@ captureLayout ctx size = do
         Just (c, _, _) -> pure c
         Nothing -> newLayoutCache 64
       c <- captureLayoutCache (ctxNodeArena ctx) c0
-      writeIORef (ctxLayoutCache ctx) (Just (c, size, gen))
+      c' <- snapshotCustomMeasures ctx c
+      writeIORef (ctxLayoutCache ctx) (Just (c', size, gen))
+
+-- | Record each custom-measured node's intrinsic measurement, so reuse can
+-- check the measure still returns it. Runs only on capture (solve) frames,
+-- and builds nothing when no widget measured itself custom.
+snapshotCustomMeasures :: Context -> LayoutCache -> IO LayoutCache
+snapshotCustomMeasures ctx lc = do
+  dc <- readIORef (ctxDrawingCache ctx)
+  if IM.null (dcsCustomMeasures dc)
+    then pure lc {lcMeasures = IM.empty}
+    else do
+      entries <- foldNodesM na step []
+      pure lc {lcMeasures = IM.fromList entries}
+  where
+    na = ctxNodeArena ctx
+    fm = ctxFontMetrics ctx
+    step acc idx = do
+      nt <- getNodeType na idx
+      if nt /= NodeDrawing
+        then pure acc
+        else do
+          wid <- getWidgetId na idx
+          lookupCustomMeasure ctx wid >>= \case
+            Nothing -> pure acc
+            Just fn -> do
+              (aw, ah) <- customMeasureAvail na idx
+              let (mw, mh) = fn fm (aw, ah)
+              pure ((idx, (castFloatToWord32 aw, castFloatToWord32 ah, castFloatToWord32 mw, castFloatToWord32 mh)) : acc)
 

@@ -226,6 +226,15 @@
 
 ### Changed
 
+- Whole-layout reuse is validated by a hash over the frame's layout inputs
+  instead of comparing every node's columns: the arena folds each node's
+  constraints, links, text, options, widget id, style code, and grid fields
+  into `getInputSignature` as the view builds, and reuse compares one word.
+  Text and option lists keep a per-node hash that a repeated `Text` object
+  reuses, so a steady frame hashes no string bytes. Custom-measured widgets
+  no longer disable reuse: the cache records each measure's offered space
+  and returned size at capture, and reuse re-runs the measure to check it
+  still returns that size.
 - State writes repaint per key instead of escalating to a whole-window
   repaint. A store write damages its changed keys' widgets (resolved through
   the arena, including the sub-slot spellings text fields, text areas, drop

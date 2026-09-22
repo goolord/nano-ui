@@ -140,16 +140,21 @@ module NanoUI.Internal.Layout.Arena
   , newLayoutCache
   , captureLayoutCache
   , layoutCacheEligible
+  , layoutSigMatches
   , layoutInputsMatch
+  , getInputSignature
   , restoreLayoutCache
   ) where
 
 import Control.Exception (bracket_)
-import Control.Monad (foldM, forM_, when)
+import Control.Monad (foldM, forM_, unless, when)
 import Data.Bits (shiftL, shiftR, xor, (.&.), (.|.))
 import Data.HashTable.IO (BasicHashTable)
 import qualified Data.HashTable.IO as HT
+import Data.Hashable (hash)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
+import Data.IntMap.Strict (IntMap)
+import qualified Data.IntMap.Strict as IM
 import Data.Primitive.Array (MutableArray, copyMutableArray, newArray, readArray, sizeofMutableArray, writeArray)
 import Data.Primitive.PrimArray
   ( MutablePrimArray
@@ -165,7 +170,9 @@ import GHC.Exts (RealWorld)
 import Data.Text (Text)
 import Data.Word (Word8, Word32, Word64)
 import qualified Data.Text as T
+import GHC.Float (castFloatToWord32)
 import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
+import NanoUI.Internal.Store (ptrEq)
 import NanoUI.Internal.Style (AlignX, AlignY, Direction (..), Layout (..), Padding (..), Sizing (..))
 import NanoUI.Internal.Types (Color (..), Rect (..))
 
@@ -386,6 +393,20 @@ data NodeArena = NodeArena
   , naScopeSig :: IORef Word64
   -- ^ A hash over the index and scope of every node added under a scope other
   -- than 0 since the reset. See 'getScopeSignature'.
+  , naInputSig :: IORef Word64
+  -- ^ A hash over every layout input written since the reset: each node's
+  -- constraints and links as 'addNode' wrote them, and every later change
+  -- through the input setters ('setNodeText', 'setStyleIdx', 'setOptions',
+  -- 'setWidgetId', 'setGridCols', 'setGridMinColW', 'setNodeFontSize').
+  -- Solver outputs, paint state, and geometry are excluded. See
+  -- 'getInputSignature'.
+  , naTextHash :: IORef (IOArr Word64)
+  -- ^ Per node, the hash of the text the last 'setNodeText' stored. A node
+  -- re-set with the same 'Text' object keeps its hash, so a steady frame
+  -- hashes no text bytes.
+  , naOptionsHash :: IORef (IOArr Word64)
+  -- ^ Per node, the hash of the option list the last 'setOptions' stored,
+  -- reused the same way as 'naTextHash'.
   , naTopModal :: IORef Int
   -- ^ Index of the last modal node added this frame, or -1. Node types are
   -- fixed when a node is added and indices only grow until a reset, so this
@@ -684,6 +705,9 @@ newNodeArena = do
   naIndex <- newIORef =<< HT.new
   naScope <- newIORef 0
   naScopeSig <- newIORef 0
+  naInputSig <- newIORef 0
+  naTextHash <- newIORef =<< newPrimArray cap
+  naOptionsHash <- newIORef =<< newPrimArray cap
   naTopModal <- newIORef (-1)
   naFloatingNodes <- newIORef []
   pure NodeArena {..}
@@ -696,6 +720,7 @@ resetNodeArena na = do
   writeIORef (naCount na) 0
   writeIORef (naScope na) 0
   writeIORef (naScopeSig na) 0
+  writeIORef (naInputSig na) 0
   writeIORef (naTopModal na) (-1)
   writeIORef (naFloatingNodes na) []
   -- 0 marks a memo entry that was never written, so the tag wraps to 1.
@@ -714,6 +739,14 @@ topModalNode :: NodeArena -> IO (Maybe NodeIdx)
 topModalNode na = do
   i <- readIORef (naTopModal na)
   pure (if i >= 0 then Just i else Nothing)
+
+-- | Fold one input's tag and value into 'naInputSig'. Tags separate the
+-- fields so a value moving between fields of one node changes the hash.
+{-# INLINE mixInputSig #-}
+mixInputSig :: NodeArena -> Word64 -> Word64 -> IO ()
+mixInputSig na tag v = do
+  sig <- readIORef (naInputSig na)
+  writeIORef (naInputSig na) $! (sig * 0x100000001b3) `xor` (tag * 0x9E3779B97F4A7C15 `xor` v)
 
 -- | Number of modal, window, and popup nodes added since the last reset.
 {-# INLINE floatingNodeCount #-}
@@ -753,6 +786,8 @@ ensureCapacity na needed = do
     growWidthMemo (naWrapMemo na) cap newCap
     growWidthMemo (naFitMemo na) cap newCap
     writeIORef (naArrays na) newA
+    readIORef (naTextHash na) >>= \a -> writeIORef (naTextHash na) =<< growPrimArrayCopy a cap newCap 0
+    readIORef (naOptionsHash na) >>= \a -> writeIORef (naOptionsHash na) =<< growPrimArrayCopy a cap newCap 0
     readIORef (naArraysSnap na) >>= mapM_ (\_ -> writeIORef (naArraysSnap na) (Just newA))
     writeIORef (naCapacity na) newCap
 
@@ -868,6 +903,36 @@ addNode na nt parent dir wSiz hSiz pad gap minW minH maxW maxH grow ax ay = do
   writeTree a idx treeFirstChild (-1)
   writeTree a idx treeNextSibling (-1)
   writeTree a idx treeTextIdx (-1)
+
+  -- Fold this node's creation inputs into the frame's input signature, the
+  -- O(1) successor of comparing every column at reuse time. Values are the
+  -- ones already in registers above.
+  let !nodeSig =
+        foldl'
+          (\acc (t, v) -> (acc * 0x9E3779B97F4A7C15) `xor` (t * 0x100000001b3 `xor` v))
+          (fromIntegral idx `shiftL` 32 .|. fromIntegral (idx + 1) :: Word64)
+          [ (0x4e54, fromIntegral (fromEnum nt))
+          , (0x4449, fromIntegral (fromEnum dir))
+          , (0x5754, fromIntegral (fromEnum wTag))
+          , (0x5746, fromIntegral (castFloatToWord32 wVal))
+          , (0x4854, fromIntegral (fromEnum hTag))
+          , (0x4846, fromIntegral (castFloatToWord32 hVal))
+          , (0x504c, fromIntegral (castFloatToWord32 (padL pad)))
+          , (0x5052, fromIntegral (castFloatToWord32 (padR pad)))
+          , (0x5054, fromIntegral (castFloatToWord32 (padT pad)))
+          , (0x5042, fromIntegral (castFloatToWord32 (padB pad)))
+          , (0x4741, fromIntegral (castFloatToWord32 gap))
+          , (0x4d57, fromIntegral (castFloatToWord32 minW))
+          , (0x4d48, fromIntegral (castFloatToWord32 minH))
+          , (0x5857, fromIntegral (castFloatToWord32 maxW))
+          , (0x5848, fromIntegral (castFloatToWord32 maxH))
+          , (0x4752, fromIntegral (castFloatToWord32 grow))
+          , (0x4158, fromIntegral (fromEnum ax))
+          , (0x4159, fromIntegral (fromEnum ay))
+          , (0x5041, fromIntegral (parent + 1))
+          ]
+  mixInputSig na 0x4e4f (fromIntegral (hash nodeSig))
+
   writePrimArray (naArrFontColor a) idx 0
   scope <- readIORef (naScope na)
   writePrimArray (naArrScope a) idx scope
@@ -882,6 +947,8 @@ addNode na nt parent dir wSiz hSiz pad gap minW minH maxW maxH grow ax ay = do
     writeTree a parent treeFirstChild idx
     cc <- readTree a parent treeChildCount
     writeTree a parent treeChildCount (cc + 1)
+    -- The parent's child list is a layout input: mix the new head and count.
+    mixInputSig na 0x4348 (fromIntegral parent * 0x9E3779B97F4A7C15 `xor` (fromIntegral idx `shiftL` 32 .|. fromIntegral (cc + 1)))
   when (isFloatingNode nt) $ do
     when (nt == NodeModal) $ writeIORef (naTopModal na) idx
     modifyIORef' (naFloatingNodes na) (idx :)
@@ -915,13 +982,28 @@ addNodeFromLayout na nt parent l = do
   setNodeFontColor na idx (layoutFontColor l)
   pure idx
 
--- | Assign text to a live node and mark its text slot as present.
+-- | Assign text to a live node and mark its text slot as present. Re-setting
+-- the same 'Text' object reuses its cached hash, so a steady frame hashes no
+-- text bytes.
 {-# INLINE setNodeText #-}
 setNodeText :: NodeArena -> NodeIdx -> Text -> IO ()
 setNodeText na idx txt = do
   a <- arenaArrays na
+  old <- readArray (naArrTextStore a) idx
+  th <- readIORef (naTextHash na)
+  cached <- readPrimArray th idx
+  !h <- do
+    -- Same closure means same text, so the cached hash stands. 'False' only
+    -- means hash the bytes.
+    if old `ptrEq` txt && cached /= 0
+      then pure cached
+      else do
+        let !h = fromIntegral (hash txt) `xor` 0x54455854
+        writePrimArray th idx h
+        pure h
   writeArray (naArrTextStore a) idx txt
   writeTree a idx treeTextIdx idx
+  mixInputSig na 0x5458 h
 
 -- | Parent index, or -1 for a root.
 {-# INLINE getParent #-}
@@ -960,7 +1042,9 @@ getGridCols na idx = arenaArrays na >>= \a -> readTree a idx treeGridCols
 
 {-# INLINE setGridCols #-}
 setGridCols :: NodeArena -> NodeIdx -> Int -> IO ()
-setGridCols na idx c = arenaArrays na >>= \a -> writeTree a idx treeGridCols c
+setGridCols na idx c = do
+  arenaArrays na >>= \a -> writeTree a idx treeGridCols c
+  mixInputSig na 0x4743 (fromIntegral c)
 
 -- | Width sizing mode and its parameter; see 'styleWVal' for units.
 {-# INLINE getWidthSizing #-}
@@ -1008,7 +1092,9 @@ getGridMinColW na idx = arenaArrays na >>= \a -> readStyle a idx styleGridMinCol
 
 {-# INLINE setGridMinColW #-}
 setGridMinColW :: NodeArena -> NodeIdx -> Float -> IO ()
-setGridMinColW na idx v = arenaArrays na >>= \a -> writeStyle a idx styleGridMinColW v
+setGridMinColW na idx v = do
+  arenaArrays na >>= \a -> writeStyle a idx styleGridMinColW v
+  mixInputSig na 0x474d (fromIntegral (castFloatToWord32 v))
 
 -- | Whether the parent has row direction. A root returns 'False'.
 {-# INLINE parentIsRow #-}
@@ -1102,6 +1188,14 @@ snapshotLayoutRects na = do
 data LayoutCache = LayoutCache
   { lcCap :: !Int
   , lcCount :: !Int
+  , lcSig :: !Word64
+  -- ^ The input signature ('getInputSignature') the solve was captured with.
+  , lcMeasures :: !(IntMap (Word32, Word32, Word32, Word32))
+  -- ^ Per custom-measured node, the (available width, available height,
+  -- measured width, measured height) the solve recorded, as raw float words.
+  -- Frame owns checking these: a measure may read state outside the arena,
+  -- which the input signature cannot see. Empty when no node measured
+  -- itself custom, so the common frame pays nothing.
   , lcArrays :: !NodeArenaArrays
   }
 
@@ -1109,18 +1203,19 @@ data LayoutCache = LayoutCache
 newLayoutCache :: Int -> IO LayoutCache
 newLayoutCache cap0 = do
   let !cap = max 16 cap0
-  LayoutCache cap 0 <$> newNodeArenaArrays cap
+  LayoutCache cap 0 0 IM.empty <$> newNodeArenaArrays cap
 
 -- | Snapshot the current (post-solve) arena form, constraints and rects.
 captureLayoutCache :: NodeArena -> LayoutCache -> IO LayoutCache
 captureLayoutCache na lc0 = do
   n <- arenaCount na
+  sig <- getInputSignature na
   let !oldCap = lcCap lc0
       !newCap = max n (oldCap * 2)
   lc <-
     if n <= oldCap
       then pure lc0
-      else LayoutCache newCap (lcCount lc0) <$> growNodeArenaArrays oldCap newCap (lcArrays lc0)
+      else LayoutCache newCap (lcCount lc0) (lcSig lc0) (lcMeasures lc0) <$> growNodeArenaArrays oldCap newCap (lcArrays lc0)
   a <- arenaArrays na
   let c = lcArrays lc
   copyMutablePrimArray (naArrGeom c) 0 (naArrGeom a) 0 (n * geomStride)
@@ -1129,7 +1224,7 @@ captureLayoutCache na lc0 = do
   copyMutablePrimArray (naArrTree c) 0 (naArrTree a) 0 (n * treeStride)
   copyMutableArray (naArrTextStore c) 0 (naArrTextStore a) 0 n
   copyMutableArray (naArrOptionsStore c) 0 (naArrOptionsStore a) 0 n
-  pure lc {lcCount = n}
+  pure lc {lcCount = n, lcSig = sig}
 
 -- | Whether the arena holds a layout to cache. The cache holds the solve
 -- before floating placement, which depends on state outside the arena and
@@ -1137,6 +1232,16 @@ captureLayoutCache na lc0 = do
 -- which owns its registration.
 layoutCacheEligible :: NodeArena -> IO Bool
 layoutCacheEligible na = (> 0) <$> arenaCount na
+
+-- | Whether the frame's layout inputs hash to what the cache captured. The
+-- O(1) successor of 'layoutInputsMatch', which stays as the exhaustive check
+-- a debugging run can compare against.
+layoutSigMatches :: NodeArena -> LayoutCache -> IO Bool
+layoutSigMatches na lc = do
+  n <- arenaCount na
+  if n <= 0 || n /= lcCount lc
+    then pure False
+    else (== lcSig lc) <$> getInputSignature na
 
 -- | Compare layout inputs, stopping at the first mismatch. Node values are
 -- paint state except on scroll containers, where they are solver outputs.
@@ -1243,12 +1348,24 @@ getOptions na idx = do
   a <- arenaArrays na
   readArray (naArrOptionsStore a) idx
 
--- | Replace a node's choice labels for this frame.
+-- | Replace a node's choice labels for this frame. Re-setting the same list
+-- object reuses its cached hash, like 'setNodeText'.
 {-# INLINE setOptions #-}
 setOptions :: NodeArena -> NodeIdx -> [Text] -> IO ()
 setOptions na idx opts = do
   a <- arenaArrays na
+  old <- readArray (naArrOptionsStore a) idx
+  oh <- readIORef (naOptionsHash na)
+  cached <- readPrimArray oh idx
+  !h <- do
+    if old `ptrEq` opts && cached /= 0
+      then pure cached
+      else do
+        let !h = fromIntegral (hash opts) `xor` 0x4f505453
+        writePrimArray oh idx h
+        pure h
   writeArray (naArrOptionsStore a) idx opts
+  mixInputSig na 0x4f50 h
 
 -- | Identity assigned to the node, or @WidgetId 0@ for an untagged node.
 {-# INLINE getWidgetId #-}
@@ -1271,6 +1388,7 @@ setWidgetId na idx wid = do
   a <- arenaArrays na
   let WidgetId w = wid
   writeTree a idx treeWidgetId (fromIntegral w)
+  mixInputSig na 0x5749 w
   when (hashWidgetId wid /= 0) $ do
     !ep <- readIORef (naEpoch na)
     table <- readIORef (naIndex na)
@@ -1315,7 +1433,9 @@ getNodeFontSize na idx = arenaArrays na >>= \a -> readStyle a idx styleFontSize
 
 {-# INLINE setNodeFontSize #-}
 setNodeFontSize :: NodeArena -> NodeIdx -> Float -> IO ()
-setNodeFontSize na idx v = arenaArrays na >>= \a -> writeStyle a idx styleFontSize v
+setNodeFontSize na idx v = do
+  arenaArrays na >>= \a -> writeStyle a idx styleFontSize v
+  mixInputSig na 0x4648 (fromIntegral (castFloatToWord32 v))
 
 -- | Explicit font colour, or 'Nothing' to use the theme. This is paint-only
 -- state and does not invalidate cached layout.
@@ -1358,16 +1478,37 @@ setArenaScope na = writeIORef (naScope na)
 getScopeSignature :: NodeArena -> IO Word64
 getScopeSignature na = readIORef (naScopeSig na)
 
+-- | Hash over every layout input written since the reset: each node's
+-- constraints and tree links as 'addNode' wrote them, plus every later change
+-- through 'setNodeText', 'setOptions', 'setWidgetId', 'setStyleIdx',
+-- 'setGridCols', 'setGridMinColW' and 'setNodeFontSize'. Solver outputs
+-- ('setScrollContentW', 'tagScrollBarSlot', rects), paint state ('setNodeValue',
+-- 'setNodeFontColor'), and the node count are excluded — the count is mixed
+-- in through the per-node indices, so a different node count hashes
+-- differently with overwhelming probability, and 'layoutSigMatches' checks it
+-- exactly.
+{-# INLINE getInputSignature #-}
+getInputSignature :: NodeArena -> IO Word64
+getInputSignature na = readIORef (naInputSig na)
+
 -- | Type-specific style code. Its encoding depends on 'getNodeType', such as
 -- button flags, a radio option index, or packed text styling.
 {-# INLINE getStyleIdx #-}
 getStyleIdx :: NodeArena -> NodeIdx -> IO Int
 getStyleIdx na idx = arenaArrays na >>= \a -> readTree a idx treeStyleIdx
 
--- | Store a style code encoded for this node's type.
+-- | Store a style code encoded for this node's type. Part of the layout
+-- input signature, except on box, image, and drawing nodes: their style code
+-- is paint data (a colour, a version), exactly as the exhaustive comparison
+-- excludes it for them.
 {-# INLINE setStyleIdx #-}
 setStyleIdx :: NodeArena -> NodeIdx -> Int -> IO ()
-setStyleIdx na idx v = arenaArrays na >>= \a -> writeTree a idx treeStyleIdx v
+setStyleIdx na idx v = do
+  a <- arenaArrays na
+  writeTree a idx treeStyleIdx v
+  nt <- readTagEnum a idx tagNodeType
+  unless (nt == NodeBox || nt == NodeImage || nt == NodeDrawing) $
+    mixInputSig na 0x5354 (fromIntegral v)
 
 -- | Get the snapshot buffers for a recursion depth, grown to hold at least
 -- @needed@ entries. Buffers are reused across frames; nothing is allocated in

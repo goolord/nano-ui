@@ -2,6 +2,7 @@
 -- positions modals, windows and popups.
 module NanoUI.Internal.Layout.Solve
   ( solveLayout
+  , customMeasureAvail
   , FontResolver
   , Measurers (..)
   , placeModals
@@ -367,15 +368,26 @@ measureCustomNode ::
   NodeIdx ->
   IO ()
 measureCustomNode na fm measureFn idx = do
+  (availW, availH) <- customMeasureAvail na idx
   (minW, minH, maxW, maxH) <- getMinMax na idx
+  (wTag, wVal) <- getWidthSizing na idx
+  (hTag, hVal) <- getHeightSizing na idx
+  let (mw, mh) = measureFn fm (availW, availH)
+      w = case wTag of SizingFixed -> wVal; _ -> clamp minW maxW mw
+      h = case hTag of SizingFixed -> hVal; _ -> clamp minH maxH mh
+  setRect na idx 0 0 w h
+
+-- | The space a custom measure is offered: its own fixed size, or its finite
+-- maximum in either axis. 'measureCustomNode' derives its measurement from
+-- this, and layout-reuse validation re-derives it for the same check.
+customMeasureAvail :: NodeArena -> NodeIdx -> IO (Float, Float)
+customMeasureAvail na idx = do
+  (_, _, maxW, maxH) <- getMinMax na idx
   (wTag, wVal) <- getWidthSizing na idx
   (hTag, hVal) <- getHeightSizing na idx
   let availW = case wTag of SizingFixed -> wVal; _ -> if maxW < 1e8 then maxW else 1e9
       availH = case hTag of SizingFixed -> hVal; _ -> if maxH < 1e8 then maxH else 1e9
-      (mw, mh) = measureFn fm (availW, availH)
-      w = case wTag of SizingFixed -> wVal; _ -> clamp minW maxW mw
-      h = case hTag of SizingFixed -> hVal; _ -> clamp minH maxH mh
-  setRect na idx 0 0 w h
+  pure (availW, availH)
 
 -- | The width a text node that is not a row's child wraps at, from its
 -- effective max width, width sizing and assigned width: 1e8 or more when
