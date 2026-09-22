@@ -30,7 +30,7 @@ import NanoUI
   , tight
   )
 import NanoUI.Backend (Damage (..), emptyInput)
-import NanoUI.Testing (ctxPaintFull, collectRasterSpans, damageIsEmpty, runFrame, takeDamage)
+import NanoUI.Testing (ctxPaintFull, collectRasterSpans, damageIsEmpty, runFrame, takeDamage, takeDamagePieces)
 import NanoUI.Rgfw.Internal.Context (newRgfwContext)
 import NanoUI.Rgfw.Internal.Font.Cozette (getCozetteFont)
 import NanoUI.Rgfw.Internal.Gl (freeGlRenderer, newGlRenderer, readRetainedPixels, renderArenaGl)
@@ -91,8 +91,9 @@ main = do
               let drawn = not (damageIsEmpty damage && not force)
               when drawn $ do
                 (baseSpans, overlaySpans) <- collectRasterSpans ctx frameInp
+                pieces <- if force then pure [] else takeDamagePieces ctx
                 _ <- renderArenaGl renderer getCozetteFont scale physW physH (themeWindow theme)
-                  (if force then DamageFull else damage) draw baseSpans overlaySpans
+                  (if force then DamageFull else damage) pieces draw baseSpans overlaySpans
                 R.swapBuffersGL win
               pure drawn
             -- Partial frames 16 ms apart until nothing changes, so hover

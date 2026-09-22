@@ -34,6 +34,7 @@ import Control.Monad (foldM, when)
 import Data.Bits (shiftR, (.&.))
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Int (Int32)
+import Data.Maybe (fromMaybe)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Internal as BSI
 import qualified Data.Text as T
@@ -122,6 +123,8 @@ freeGlRenderer r = do
 --
 -- A 'DamageClip' frame redraws only its damage and keeps the other pixels
 -- from the frames before, so its 'DrawData' may leave out what lies outside.
+-- Its damage pieces ('NanoUI.Testing.takeDamagePieces'), when it has some,
+-- are all it redraws: text is cut to each, as draw commands already are.
 -- When the window's size has changed there are no such pixels: the frame is
 -- drawn over a blank window and 'renderArenaGl' returns 'False', and the
 -- caller should draw the next frame in full. It returns 'True' otherwise.
@@ -133,11 +136,12 @@ renderArenaGl ::
   Int -> -- framebuffer height
   Color -> -- clear colour
   Damage -> -- what to redraw, in logical pixels
+  [Rect] -> -- the damage's pieces, if any
   DrawData ->
   [TextSpan] -> -- base spans
   [TextSpan] -> -- overlay spans
   IO Bool
-renderArenaGl r font !scale !fbW !fbH bg damage drawData baseSpans overlaySpans = do
+renderArenaGl r font !scale !fbW !fbH bg damage pieces drawData baseSpans overlaySpans = do
   let !h = glHandle r
       (!bgR, !bgG, !bgB, _) = colorFloats bg
       (!full, box@(!bx0, !by0, !bx1, !by1)) = case damage of
@@ -148,11 +152,15 @@ renderArenaGl r font !scale !fbW !fbH bg damage drawData baseSpans overlaySpans 
       (fromIntegral bx0) (fromIntegral by0) (fromIntegral bx1) (fromIntegral by1)
   when (began == 0) $ fail "nano-ui-rgfw: retained framebuffer setup failed"
   let !kept = began == 1
-      !textBox = if kept then box else (0, 0, fbW, fbH)
+      textBoxes
+        | not kept = [(0, 0, fbW, fbH)]
+        | null pieces = [box]
+        | otherwise = map (damageBox scale fbW fbH) pieces
   atlas <- ensureAtlas r font scale
-  buf <- ensureTextCapacity r ((spanChars baseSpans + spanChars overlaySpans) * 6)
-  nBase <- foldM (writeSpanQuads atlas font textBox buf) 0 baseSpans
-  nAll <- foldM (writeSpanQuads atlas font textBox buf) nBase overlaySpans
+  buf <- ensureTextCapacity r ((spanChars baseSpans + spanChars overlaySpans) * 6 * length textBoxes)
+  let spansIn spans n0 = foldM (\n tb -> foldM (writeSpanQuads atlas font tb buf) n spans) n0 textBoxes
+  nBase <- spansIn baseSpans 0
+  nAll <- spansIn overlaySpans nBase
   withForeignPtr (drawVertices drawData) $ \vp ->
     withForeignPtr (drawIndices drawData) $ \ip ->
       c_uploadGeometry h vp (fromIntegral (drawVertexCount drawData)) ip (fromIntegral (drawIndexCount drawData))
@@ -170,16 +178,13 @@ readRetainedPixels :: GlRenderer -> Int -> Int -> IO BS.ByteString
 readRetainedPixels r w h =
   BSI.create (w * h * 4) (c_readRetained (glHandle r))
 
--- | The physical pixels a damage clip repaints, as @(x0, y0, x1, y1)@ within a
--- w x h framebuffer. The core paints a clip frame's backdrop one logical pixel
--- past the damage, and the box takes every pixel that reaches.
+-- | The physical pixels a damage rect repaints, as @(x0, y0, x1, y1)@ within
+-- a w x h framebuffer. The core paints a clip frame's backdrop one logical
+-- pixel past the damage, and the box is the scissor a command clipped to that
+-- backdrop gets, so text never lands on a pixel the backdrop left.
 damageBox :: Float -> Int -> Int -> Rect -> (Int, Int, Int, Int)
 damageBox !scale !w !h (Rect x y rw rh) =
-  ( max 0 (floor ((x - 1) * scale))
-  , max 0 (floor ((y - 1) * scale))
-  , min w (ceiling ((x + rw + 1) * scale))
-  , min h (ceiling ((y + rh + 1) * scale))
-  )
+  fromMaybe (0, 0, 0, 0) (physClip scale w h (Rect (x - 1) (y - 1) (rw + 2) (rh + 2)))
 
 drawCmd :: Ptr NanoUiGl -> Float -> Int -> Int -> DrawCmd -> IO ()
 drawCmd h !scale !fbW !fbH cmd

@@ -19,6 +19,9 @@
   378 KB allocated. `renderArenaGl` takes the frame's `Damage` and returns
   whether it kept the retained pixels, and `writeSpanQuads` clips to a box of
   physical pixels instead of a framebuffer size.
+- `renderArenaGl` takes the frame's damage pieces and cuts text to each. Two
+  labels changing in opposite corners of a window of text went from 0.41 to
+  0.11 ms a frame, since they no longer repaint everything between them.
 
 ### Fixed
 

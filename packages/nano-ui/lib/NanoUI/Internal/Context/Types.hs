@@ -229,6 +229,10 @@ data WindowResizeDrag = WindowResizeDrag
 data DamageState = DamageState
   { dsDirty :: !Bool
   , dsDamage :: !Damage
+  , dsDamagePieces :: ![Rect]
+  -- ^ Disjoint rects inside a 'DamageClip' that together hold all of its
+  -- damage, when two or more are much smaller than the clip; otherwise empty,
+  -- and the clip is the one piece.
   , dsRequests :: ![DamageRequest]
   , dsLastWindowSize :: !Size
   , dsPrevRects :: !(IntMap Rect)
@@ -241,6 +245,7 @@ initialDamageState :: DamageState
 initialDamageState = DamageState
   { dsDirty = True
   , dsDamage = DamageFull
+  , dsDamagePieces = []
   , dsRequests = []
   , dsLastWindowSize = Size 0 0
   , dsPrevRects = IM.empty

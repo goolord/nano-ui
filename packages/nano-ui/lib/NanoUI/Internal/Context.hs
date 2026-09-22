@@ -54,6 +54,7 @@ module NanoUI.Internal.Context
   , getWakeAt
   , clearWakeAt
   , takeDamage
+  , takeDamagePieces
   , DamageRequest (..)
   , requestDamage
   , damageWidget

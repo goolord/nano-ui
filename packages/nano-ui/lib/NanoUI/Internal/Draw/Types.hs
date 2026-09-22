@@ -269,6 +269,9 @@ data DrawArena = DrawArena
   , daSnapScale :: !(IORef Float)
   , daSquareGeometry :: !(IORef Bool)
   , daExternalText :: !(IORef Bool)
+  , daClipPieces :: !(IORef (PrimArray Float))
+  -- ^ Disjoint rects as @x0, y0, x1, y1@ runs that every command is cut to,
+  -- one copy per rect it meets; empty for none.
   }
 
 -- | Packed vertex stride in bytes: 32.

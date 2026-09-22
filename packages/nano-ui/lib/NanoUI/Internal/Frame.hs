@@ -48,6 +48,7 @@ import NanoUI.Internal.Context
   , resetDrawingScopeCache
   , stepScrollGlides
   , takeDamage
+  , takeDamagePieces
   , tickAnimations
   , hasCustomLayoutInputs
   , ensureMetricCaches
@@ -67,6 +68,7 @@ import NanoUI.Internal.Draw
   , pushRect
   , resetDrawArena
   , setClip
+  , setClipPieces
   )
 import NanoUI.Internal.Frame.Cursor
   ( UiCursorKind (..)
@@ -143,7 +145,7 @@ import NanoUI.Internal.Layout.Solve (Measurers, placeModals, placePopups, placeW
 import NanoUI.Internal.Monad (NanoUI, Ui, runUi, unlessM, whenM)
 import NanoUI.Internal.Store (mirrorStoresChanged)
 import NanoUI.Internal.Style (Theme (..))
-import NanoUI.Internal.Types (Damage (..), Size (..), rectInflate, rectNonEmpty)
+import NanoUI.Internal.Types (Damage (..), Rect, Size (..), rectInflate, rectNonEmpty)
 
 -- | Build, lay out, resolve input, and paint one headless frame. Returns the
 -- view result, emitted messages, borrowed draw buffers, and whether state
@@ -333,8 +335,9 @@ runFrameEff unlift ctx frameInp ui = do
   -- frames (fresh retain, forced full, continuous) paint everything.
   paintFull <- readIORef (ctxPaintFull ctx)
   beginLayer (ctxDrawArena ctx) LayerBackground
-  unless paintFull $
-    paintDamageClip ctx =<< takeDamage ctx
+  unless paintFull $ do
+    damage <- takeDamage ctx
+    paintDamageClip ctx damage =<< takeDamagePieces ctx
   lowerShapes ctx
   beginLayer (ctxDrawArena ctx) LayerOverlay
   drawWindowOverlays ctx
@@ -358,16 +361,19 @@ resetUiBuild ctx = do
 -- | Start a clip frame from the window backdrop, as a full frame starts from a
 -- window-coloured clear. Widgets with a transparent fill, such as an idle
 -- menu-bar title, draw nothing over the pixels they covered, so without the
--- backdrop a hover that just ended would stay in the retain texture.
-paintDamageClip :: Context -> Damage -> IO ()
-paintDamageClip _ DamageFull = pure ()
-paintDamageClip ctx (DamageClip r) = do
+-- backdrop a hover that just ended would stay in the retain texture. Damage
+-- in pieces paints a backdrop over each, and every command is cut to them.
+paintDamageClip :: Context -> Damage -> [Rect] -> IO ()
+paintDamageClip _ DamageFull _ = pure ()
+paintDamageClip ctx (DamageClip r) pieces = do
   let da = ctxDrawArena ctx
       clip = rectInflate 1 r
+      backdrops = if null pieces then [clip] else map (rectInflate 1) pieces
   setClip da clip
+  setClipPieces da (if null pieces then [] else backdrops)
   when (rectNonEmpty r) $ do
     theme <- readIORef (ctxTheme ctx)
-    pushRect da clip (themeWindow theme)
+    mapM_ (flip (pushRect da) (themeWindow theme)) backdrops
 
 resetUiBuildScopes :: Context -> IO ()
 resetUiBuildScopes ctx = do

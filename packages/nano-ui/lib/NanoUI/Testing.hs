@@ -111,6 +111,8 @@ module NanoUI.Testing
   , glyphAtlasTextureId
   , Damage (..)
   , takeDamage
+  , takeDamagePieces
+  , damagePieces
   , damageIsEmpty
     -- * Effectful
   , Eff
@@ -181,6 +183,7 @@ import NanoUI.Internal.Context
   , startAnimationEaseDelay
   , startSpring
   , takeDamage
+  , takeDamagePieces
   , textInputEditActive
   , withClipboard
   , withExternalText
@@ -211,7 +214,7 @@ import NanoUI.Internal.Draw
   , indexSize
   , vertexSize
   )
-import NanoUI.Internal.Damage (floatingPanelRects)
+import NanoUI.Internal.Damage (damagePieces, floatingPanelRects)
 import NanoUI.Internal.Font (caretX, lineWidth, selectionSpans, sliderTrackBounds, textIndexAtX)
 import NanoUI.Internal.Widgets.ColorPicker
   ( colorPickerSvSquare

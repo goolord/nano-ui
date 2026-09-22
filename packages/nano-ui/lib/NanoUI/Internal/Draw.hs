@@ -19,6 +19,8 @@ module NanoUI.Internal.Draw
   , currentLayer
   , currentClip
   , setClip
+  , setClipPieces
+  , getClipPieces
   , withClip
   , finishDraw
   , drawCmdCount

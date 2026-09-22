@@ -15,6 +15,8 @@ module NanoUI.Internal.Draw.Arena
   , currentLayer
   , currentClip
   , setClip
+  , setClipPieces
+  , getClipPieces
   , withClip
   , setTexture
   , finishDraw
@@ -36,10 +38,13 @@ import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Maybe (fromMaybe)
 import Data.Primitive.PrimArray
   ( PrimArray
+  , emptyPrimArray
+  , indexPrimArray
   , newPrimArray
   , primArrayFromList
   , readPrimArray
   , setPrimArray
+  , sizeofPrimArray
   , unsafeFreezePrimArray
   , writePrimArray
   )
@@ -92,6 +97,7 @@ newDrawArena = do
   daSnapScale <- newIORef 0.0
   daSquareGeometry <- newIORef False
   daExternalText <- newIORef False
+  daClipPieces <- newIORef emptyPrimArray
   let
     da = DrawArena {..}
   resetDrawArena da
@@ -106,6 +112,21 @@ resetDrawArena da = do
   setClip da (Rect 0 0 1e9 1e9)
   writeIORef (daCurrentTexture da) glyphAtlasTextureId
   writeIORef (daCmdStartIndex da) 0
+  writeIORef (daClipPieces da) emptyPrimArray
+
+-- | Cut every command of this frame to each of these disjoint rects, as a
+-- copy per rect it meets. A frame whose damage lies in pieces far apart
+-- paints under their bounding box, and the pieces keep it from drawing over
+-- the pixels between them, which it has not cleared.
+setClipPieces :: DrawArena -> [Rect] -> IO ()
+setClipPieces da rects =
+  writeIORef (daClipPieces da) $
+    primArrayFromList (concat [[x, y, x + w, y + h] | Rect x y w h <- rects])
+
+-- | The rects 'setClipPieces' set, as @x0, y0, x1, y1@ runs.
+{-# INLINE getClipPieces #-}
+getClipPieces :: DrawArena -> IO (PrimArray Float)
+getClipPieces da = readIORef (daClipPieces da)
 
 -- | Device pixel scale used to snap primitive origins/endpoints to whole
 -- device pixels. A non-positive value disables snapping. The SDL backend keeps
@@ -311,8 +332,13 @@ finishDraw da = do
   iFPtr <- readIORef (daIndexFPtr da)
   vCount <- readIORef (daVertexCount da)
   iCount <- readIORef (daIndexCount da)
-  count <- readIORef (daCmdCount da)
-  arr <- readIORef (daCmdStore da)
+  count0 <- readIORef (daCmdCount da)
+  arr0 <- readIORef (daCmdStore da)
+  pieces <- readIORef (daClipPieces da)
+  (arr, count) <-
+    if sizeofPrimArray pieces == 0
+      then pure (arr0, count0)
+      else cutCmdsToPieces pieces arr0 count0
   (cmds, offsets) <- groupCmdsByLayer arr count
   pure
     DrawData
@@ -323,6 +349,43 @@ finishDraw da = do
       , drawCommands = cmds
       , drawLayerOffsets = offsets
       }
+
+-- | Each command once per piece its clip meets, clipped to that piece, in
+-- command order. Pieces are disjoint, so the order among one command's
+-- copies does not matter.
+cutCmdsToPieces ::
+  PrimArray Float -> U.MVector RealWorld DrawCmd -> Int -> IO (U.MVector RealWorld DrawCmd, Int)
+cutCmdsToPieces pieces src n = do
+  let
+    k = sizeofPrimArray pieces `quot` 4
+  dest <- UM.unsafeNew (max 1 (n * k))
+  let
+    go !i !m
+      | i >= n = pure m
+      | otherwise = do
+          cmd <- UM.unsafeRead src i
+          let
+            cx0 = cmdClipX cmd
+            cy0 = cmdClipY cmd
+            cx1 = cx0 + cmdClipW cmd
+            cy1 = cy0 + cmdClipH cmd
+            piece !j !m'
+              | j >= k = pure m'
+              | otherwise = do
+                  let
+                    o = j * 4
+                    x0 = max cx0 (indexPrimArray pieces o)
+                    y0 = max cy0 (indexPrimArray pieces (o + 1))
+                    x1 = min cx1 (indexPrimArray pieces (o + 2))
+                    y1 = min cy1 (indexPrimArray pieces (o + 3))
+                  if x1 <= x0 || y1 <= y0
+                    then piece (j + 1) m'
+                    else do
+                      UM.unsafeWrite dest m' cmd {cmdClipX = x0, cmdClipY = y0, cmdClipW = x1 - x0, cmdClipH = y1 - y0}
+                      piece (j + 1) (m' + 1)
+          piece 0 m >>= go (i + 1)
+  m <- go 0 0
+  pure (dest, m)
 
 -- | Stable counting sort by layer, with cumulative offsets into the sorted
 -- array. Counts become write cursors after the prefix sum.

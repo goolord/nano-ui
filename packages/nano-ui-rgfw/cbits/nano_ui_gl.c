@@ -380,10 +380,11 @@ static int ngl_ensure_retain(nano_ui_gl* r, int32_t w, int32_t h) {
 
 /* Start a frame on the retained framebuffer: viewport, fixed pipeline state,
  * and the logical -> physical scale for this frame's geometry. A full frame
- * clears everything; otherwise only the damage box (x0, y0, x1, y1 in
- * top-left physical pixels) is cleared and drawn, and the pixels outside it
- * are last frame's. A replaced framebuffer holds no last frame, so the frame
- * is cleared in full, and returns 2: the caller must draw it again in full.
+ * clears everything; otherwise nothing is cleared, since the frame's own
+ * backdrop covers what it repaints, and nothing is drawn outside the damage
+ * box (x0, y0, x1, y1 in top-left physical pixels), where the pixels are last
+ * frame's. A replaced framebuffer holds no last frame, so the frame is
+ * cleared in full, and returns 2: the caller must draw it again in full.
  * Returns 0 if the retained framebuffer cannot be made, and 1 otherwise. */
 int32_t nano_ui_gl_begin(nano_ui_gl* r, int32_t fbW, int32_t fbH, float scale, float red,
                          float green, float blue, int32_t full, int32_t x0, int32_t y0, int32_t x1,
@@ -410,10 +411,12 @@ int32_t nano_ui_gl_begin(nano_ui_gl* r, int32_t fbW, int32_t fbH, float scale, f
   gl->Disable(GL_DEPTH_TEST);
   gl->Disable(GL_CULL_FACE);
   gl->Disable(GL_FRAMEBUFFER_SRGB);
+  gl->Disable(GL_SCISSOR_TEST);
+  if (full || replaced) {
+    gl->ClearColor(red, green, blue, 1.0f);
+    gl->Clear(GL_COLOR_BUFFER_BIT);
+  }
   gl->Enable(GL_SCISSOR_TEST);
-  gl->Scissor(r->dx0, r->fbH - r->dy1, r->dx1 - r->dx0, r->dy1 - r->dy0);
-  gl->ClearColor(red, green, blue, 1.0f);
-  gl->Clear(GL_COLOR_BUFFER_BIT);
   gl->Enable(GL_BLEND);
   gl->BlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
   gl->UseProgram(r->program);

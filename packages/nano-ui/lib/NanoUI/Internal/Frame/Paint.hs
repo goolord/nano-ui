@@ -195,7 +195,7 @@ paintNodeWithEnv env idx = do
       !r = min (x + w + paintOverhang) (cx + cw)
       !b = min (y + h + paintOverhang) (cy + ch)
   unless (w <= 0 || h <= 0 || r <= l || b <= t) $
-    unless (occluded (peOccluders env) l t r b) $ do
+    unless (occluded (peOccluders env) l t r b || missesPieces (pePieces env) l t r b) $ do
       nt <- getNodeType (peNodeArena env) idx
       scope <- getNodeScope (peNodeArena env) idx
       if scope == peScope env
@@ -218,6 +218,22 @@ occluded occ !l !t !r !b = go 0
           && r <= indexPrimArray occ (o + 2)
           && b <= indexPrimArray occ (o + 3) =
           True
+      | otherwise = go (o + 4)
+
+-- | Whether the damage pieces leave out the clipped node rect @l, t, r, b@:
+-- there are some, and it meets none of them.
+{-# INLINE missesPieces #-}
+missesPieces :: PrimArray Float -> Float -> Float -> Float -> Float -> Bool
+missesPieces ps !l !t !r !b = end > 0 && go 0
+  where
+    !end = sizeofPrimArray ps
+    go !o
+      | o >= end = True
+      | l < indexPrimArray ps (o + 2)
+          && t < indexPrimArray ps (o + 3)
+          && r > indexPrimArray ps o
+          && b > indexPrimArray ps (o + 1) =
+          False
       | otherwise = go (o + 4)
 
 -- | How far a node may paint outside its rect: the focus ring sits 2px out

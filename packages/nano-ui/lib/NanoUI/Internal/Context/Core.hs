@@ -27,6 +27,7 @@ module NanoUI.Internal.Context.Core
   , getWakeAt
   , clearWakeAt
   , takeDamage
+  , takeDamagePieces
   , requestDamage
   , damageWidget
   , damageKey
@@ -289,6 +290,14 @@ clearWakeAt ctx = writeIORef (ctxWakeAt ctx) 0
 {-# INLINE takeDamage #-}
 takeDamage :: Context -> IO Damage
 takeDamage ctx = getsDamage ctx dsDamage
+
+-- | The disjoint rects a 'DamageClip' frame repaints, when its damage lies in
+-- two or more places far apart; empty when the whole clip repaints. A
+-- backend that draws text itself must clip it to each; draw commands
+-- already are.
+{-# INLINE takeDamagePieces #-}
+takeDamagePieces :: Context -> IO [Rect]
+takeDamagePieces ctx = getsDamage ctx dsDamagePieces
 
 -- | Last recorded widget bounds in logical window coordinates, with scrolling
 -- applied. 'Nothing' means the damage pass recorded no bounds for this id.

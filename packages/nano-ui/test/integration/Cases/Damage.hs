@@ -2,6 +2,7 @@ module Cases.Damage (tests) where
 
 import Spec
 import Data.Maybe (listToMaybe)
+import Data.Text qualified as T
 
 tests :: [Spec]
 tests =
@@ -13,7 +14,51 @@ tests =
   , spec "versioned-drawing-damage" runVersionedDrawingDamageTest
   , spec "clip-frame-backdrop" runClipFrameBackdropTest
   , spec "textarea-select-all-damage" runTextAreaSelectAllDamageTest
+  , spec "damage-pieces-merge" runDamagePiecesMergeTest
+  , spec "damage-pieces-far-labels" runFarLabelsDamagePiecesTest
   ]
+
+-- | Far-apart rects stay apart, near ones merge, and a frame never has more
+-- than four pieces or just one.
+runDamagePiecesMergeTest :: Context -> IORef Int -> IO ()
+runDamagePiecesMergeTest _ failed = do
+  let a = Rect 0 0 20 10
+      b = Rect 500 400 20 10
+  assertEq failed (length (damagePieces [a, b])) 2
+  -- Within the merge gap: one piece, which is the bounding box itself.
+  assertEq failed (damagePieces [a, Rect 30 0 20 10]) []
+  assertEq failed (damagePieces [a]) []
+  assertEq failed (damagePieces []) []
+  -- A third rect joining two pieces' gap merges them all.
+  assertEq failed (damagePieces [a, Rect 40 0 20 10, Rect 20 0 20 10]) []
+  let scattered = [Rect (fromIntegral i * 100) (fromIntegral i * 80) 10 10 | i <- [0 .. 7 :: Int]]
+      pieces = damagePieces scattered
+  assert failed (length pieces == 4)
+  -- Every rect lies inside a piece, and the pieces are disjoint.
+  assert failed (all (\r -> any (insideRect r) pieces) scattered)
+  assert failed (and [rectIntersect p q == Nothing | (i, p) <- zip [0 :: Int ..] pieces, (j, q) <- zip [0 ..] pieces, i < j])
+
+-- | Two labels changing in opposite corners repaint as two pieces, and each
+-- draw command lies inside one of them.
+runFarLabelsDamagePiecesTest :: Context -> IORef Int -> IO ()
+runFarLabelsDamagePiecesTest ctx failed = do
+  let inp = withInput 800 600
+      ui k = columnWith (fillW . fillH) $ do
+        label (tshow k)
+        flex
+        rowWith fillW $ flex >> label (tshow k)
+      tshow = T.pack . show :: Int -> T.Text
+  _ <- warmup2 ctx inp (ui 1)
+  writeIORef (ctxPaintFull ctx) False
+  (_, _, dd, _) <- runFrame ctx inp (ui 2)
+  dmg <- takeDamage ctx
+  pieces <- takeDamagePieces ctx
+  assert failed (case dmg of DamageClip _ -> True; DamageFull -> False)
+  assertEq failed (length pieces) 2
+  let clipOf c = Rect (cmdClipX c) (cmdClipY c) (cmdClipW c) (cmdClipH c)
+      inPiece c = any (insideRect (clipOf c) . rectInflate 1) pieces
+  assert failed (not (null (drawCmdElems dd)) && all inPiece (drawCmdElems dd))
+  writeIORef (ctxPaintFull ctx) True
 
 -- | A new version on a versioned drawing repaints its rect. Paint rebuilds the
 -- ops once the version moves, and nothing else damages them, so a clip frame
@@ -215,3 +260,8 @@ runTextAreaSelectAllDamageTest ctx failed = do
   _ <- runFrame ctx inp0 {inputChars = "a", inputModifiers = Modifiers False True False} ui
   dmg <- takeDamage ctx
   assert failed (clipCovers dmg (respRect area))
+
+-- | Whether the first rect lies within the second.
+insideRect :: Rect -> Rect -> Bool
+insideRect (Rect ax ay aw ah) (Rect bx by bw bh) =
+  ax >= bx && ay >= by && ax + aw <= bx + bw && ay + ah <= by + bh

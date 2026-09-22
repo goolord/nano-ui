@@ -5,10 +5,11 @@ module NanoUI.Internal.Damage
   , floatingPanelRects
   , FrameSnapshot (..)
   , writeDamage
+  , damagePieces
   ) where
 
 import Control.Monad (forM_, join, unless, when)
-import Data.IORef (readIORef)
+import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
 import Data.IntMap.Strict qualified as IM
 import Data.IntSet qualified as IS
 import Data.Maybe (fromMaybe, isJust)
@@ -316,11 +317,17 @@ writeDamage ctx inp snap = do
           , fdChurn = churn
           , fdRedrawn = redrawn
           }
-  dmg <-
+  (dmg, pieces) <-
     if needsFullDamage snap delta
-      then pure DamageFull
+      then pure (DamageFull, [])
       else clipDamage ctx snap delta
-  modifyDamage ctx (\ds -> ds {dsDamage = dmg, dsLastWindowSize = inputWindowSize inp, dsRequests = []})
+  modifyDamage ctx $ \ds ->
+    ds
+      { dsDamage = dmg
+      , dsDamagePieces = pieces
+      , dsLastWindowSize = inputWindowSize inp
+      , dsRequests = []
+      }
   -- Most frames have no panel now or before, and then there is nothing to write.
   prevEmpty <- getsOverlay ctx (IM.null . osPrevFloatingRects)
   unless (null panels && prevEmpty) $
@@ -408,9 +415,10 @@ needsFullDamage snap d =
         && not (fdScrollChanged d)
         && not (rgInPanels (fdSettledMoved d))
 
--- | The clip covering everything that changed, or 'DamageFull' once that clip
--- exceeds half the window.
-clipDamage :: Context -> FrameSnapshot -> FrameDelta -> IO Damage
+-- | The clip covering everything that changed, with the pieces it splits
+-- into ('damagePieces'), or 'DamageFull' once the pieces cover over half the
+-- window.
+clipDamage :: Context -> FrameSnapshot -> FrameDelta -> IO (Damage, [Rect])
 clipDamage ctx snap d = do
   let oldRects = fsRects snap
       newRects = fdRects d
@@ -420,7 +428,7 @@ clipDamage ctx snap d = do
         | wid == fsActive snap = fsActiveRect snap
         | wid == fsFocus snap = fsFocusRect snap
         | otherwise = Nothing
-  acc <- newRectUnion
+  acc <- newPieceUnion
   resolveDamageRequests ctx acc oldRects newRects (fdRequests d)
   -- Backdrop expansion covers interaction slop (hover/press halos) and
   -- explicit damage requests. Animation keys must not expand to their panel
@@ -509,16 +517,68 @@ clipDamage ctx snap d = do
   IM.foldrWithKey (addFloating (fdFloatingRects d)) (pure ()) (fsFloatingRects snap)
   IM.foldrWithKey (addFloating (fsFloatingRects snap)) (pure ()) (fdFloatingRects d)
   base <- readRectUnion acc
+  added <- readAddedRects acc
   let clip = clipRectToWindow winW winH base
       winArea = winW * winH
+      pieces = maybe [] (damagePieces . map (clipRectToWindow winW winH)) added
+      area = if null pieces then rectArea clip else sum (map rectArea pieces)
   -- A live animation with an empty clip is not DamageFull: its
   -- key was either scroll-clipped out of view (nothing visible
   -- changes; scrolling back in damages via the scroll delta) or
   -- rect-less, which missingAnim already promoted to full.
   pure $
-    if winArea > 0 && rectArea clip > winArea * 0.5
-      then DamageFull
-      else DamageClip clip
+    if winArea > 0 && area > winArea * 0.5
+      then (DamageFull, [])
+      else (DamageClip clip, pieces)
+
+-- | Most rects a frame's damage splits into.
+maxDamagePieces :: Int
+maxDamagePieces = 4
+
+-- | Rects closer than this, in logical pixels, merge into one piece. It is
+-- more than the backdrop's inflation on both sides, so pieces stay disjoint
+-- once each is painted a pixel past its edge.
+pieceMergeGap :: Float
+pieceMergeGap = 16
+
+-- | Split damage into at most 'maxDamagePieces' disjoint rects: rects that
+-- overlap or lie within 'pieceMergeGap' of each other merge, and then the
+-- pair whose union grows least merges until few enough remain. Returns no
+-- pieces when one or none remain, or when they cover most of their bounding
+-- box, since painting the box costs about the same.
+damagePieces :: [Rect] -> [Rect]
+damagePieces rects =
+  case shrink (settle (filter rectNonEmpty rects)) of
+    ps@(_ : _ : _)
+      | sum (map rectArea ps) < 0.7 * rectArea (foldr1 rectUnion ps) -> ps
+    _ -> []
+  where
+    near (Rect ax ay aw ah) (Rect bx by bw bh) =
+      ax - pieceMergeGap < bx + bw
+        && bx - pieceMergeGap < ax + aw
+        && ay - pieceMergeGap < by + bh
+        && by - pieceMergeGap < ay + ah
+    -- Insert each rect, merging it into the first near piece and carrying
+    -- the union on; repeat until no insert merges, as a union can reach a
+    -- piece placed before it.
+    settle ps =
+      let ps' = foldl' (flip insert) [] ps
+       in if length ps' == length ps then ps' else settle ps'
+    insert r [] = [r]
+    insert r (p : ps)
+      | near p r = insert (rectUnion p r) ps
+      | otherwise = p : insert r ps
+    shrink ps
+      | length ps <= maxDamagePieces = ps
+      | otherwise =
+          let indexed = zip [0 :: Int ..] ps
+              cost a b = rectArea (rectUnion a b) - rectArea a - rectArea b
+              (_, i, j) =
+                minimum
+                  [(cost a b, i', j') | (i', a) <- indexed, (j', b) <- indexed, i' < j']
+              merged = rectUnion (ps !! i) (ps !! j)
+              rest = [p | (k, p) <- indexed, k /= i, k /= j]
+           in shrink (settle (merged : rest))
 
 resolveDamageRequests ::
   Context ->
@@ -543,25 +603,39 @@ resolveDamageRequests ctx acc oldRects newRects reqs =
           when (rectNonEmpty clipped) $ addRect acc clipped
 
 -- | A running union of rects, as @x0, y0, x1, y1@ followed by how many of
--- them lie outside every floating panel. The bounds start inverted, so the
--- first rect sets them and an empty union reads back as the zero rect.
-newtype RectUnion = RectUnion (MutablePrimArray RealWorld Float)
+-- them lie outside every floating panel and how many more of them to keep.
+-- The bounds start inverted, so the first rect sets them and an empty union
+-- reads back as the zero rect.
+data RectUnion = RectUnion !(MutablePrimArray RealWorld Float) !(IORef [Rect])
 
+-- | A union that keeps no rects, only their bounds.
 newRectUnion :: IO RectUnion
-newRectUnion = do
-  a <- newPrimArray 5
+newRectUnion = newRectUnionKeeping (-2)
+
+-- | A union that also keeps the first 'pieceRectLimit' rects, for
+-- 'damagePieces'. A frame that adds more repaints their bounds.
+newPieceUnion :: IO RectUnion
+newPieceUnion = newRectUnionKeeping pieceRectLimit
+
+pieceRectLimit :: Int
+pieceRectLimit = 64
+
+newRectUnionKeeping :: Int -> IO RectUnion
+newRectUnionKeeping keep = do
+  a <- newPrimArray 6
   writePrimArray a 0 infinity
   writePrimArray a 1 infinity
   writePrimArray a 2 (-infinity)
   writePrimArray a 3 (-infinity)
   writePrimArray a 4 0
-  pure (RectUnion a)
+  writePrimArray a 5 (fromIntegral keep)
+  RectUnion a <$> newIORef []
   where
     infinity = 1 / 0
 
 {-# INLINE addRect #-}
 addRect :: RectUnion -> Rect -> IO ()
-addRect (RectUnion a) (Rect x y w h) = do
+addRect (RectUnion a kept) r@(Rect x y w h) = do
   x0 <- readPrimArray a 0
   y0 <- readPrimArray a 1
   x1 <- readPrimArray a 2
@@ -570,9 +644,22 @@ addRect (RectUnion a) (Rect x y w h) = do
   writePrimArray a 1 (min y0 y)
   writePrimArray a 2 (max x1 (x + w))
   writePrimArray a 3 (max y1 (y + h))
+  -- Room left to keep rects: -1 once it ran out, -2 for a union that keeps
+  -- none.
+  room <- readPrimArray a 5
+  if room > 0
+    then writePrimArray a 5 (room - 1) >> modifyIORef' kept (r :)
+    else when (room == 0) (writePrimArray a 5 (-1))
+
+-- | The rects a piece union kept, or 'Nothing' if more were added than it
+-- keeps.
+readAddedRects :: RectUnion -> IO (Maybe [Rect])
+readAddedRects (RectUnion a kept) = do
+  room <- readPrimArray a 5
+  if room == -1 then pure Nothing else Just <$> readIORef kept
 
 readRectUnion :: RectUnion -> IO Rect
-readRectUnion (RectUnion a) = do
+readRectUnion (RectUnion a _) = do
   x0 <- readPrimArray a 0
   y0 <- readPrimArray a 1
   x1 <- readPrimArray a 2
@@ -599,7 +686,7 @@ rectDeltas ctx panelRects old new
   | otherwise = do
       settled <- newRectUnion
       churn <- newRectUnion
-      let note acc@(RectUnion a) r = do
+      let note acc@(RectUnion a _) r = do
             addRect acc r
             unless (any (rectFullyInside r) panelRects) $
               readPrimArray a 4 >>= writePrimArray a 4 . (+ 1)
@@ -616,7 +703,7 @@ rectDeltas ctx panelRects old new
       (,) <$> freeze settled <*> freeze churn
   where
     emptyGroup = RectGroup False False (Rect 0 0 0 0)
-    freeze acc@(RectUnion a) = do
+    freeze acc@(RectUnion a _) = do
       bounds <- readRectUnion acc
       x0 <- readPrimArray a 0
       x1 <- readPrimArray a 2

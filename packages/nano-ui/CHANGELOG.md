@@ -208,6 +208,14 @@
   neighbour's minimum both, and the divider still moves it anywhere.
   `reflowFixed` in `NanoUI.Widgets.SplitPane` is the pure re-ratio this does,
   and `pinnedSide` the side test it turns on.
+- Damage in places far apart repaints as up to four disjoint pieces instead
+  of their bounding box. Two labels changing in opposite corners no longer
+  repaint the whole window: paint skips nodes that meet no piece, each piece
+  gets its own backdrop, and every draw command is cut to the pieces it meets.
+  A frame goes full once its pieces, not their bounding box, cover half the
+  window. `DamageClip` is still the bounding box; `takeDamagePieces` in
+  `NanoUI.Testing` gives the pieces, which a backend that draws text outside
+  the draw commands must clip it to, and `damagePieces` is how they are made.
 
 ### Changed
 

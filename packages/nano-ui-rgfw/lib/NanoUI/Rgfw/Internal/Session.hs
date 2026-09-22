@@ -55,6 +55,7 @@ import NanoUI.Testing
   , runEff
   , runFrameReduceEff
   , takeDamage
+  , takeDamagePieces
   , uiCursorKind
   )
 import NanoUI.Internal.Debug (noteDebugPresent, noteDebugSkip)
@@ -271,9 +272,10 @@ runRgfwAppReduceCustom opts getThemeAndScale updateModel initialModel view = inB
                   tRenderStart <- getMonotonicTime
                   curMonScale <- readIORef monScaleRef
                   (baseSpans, overlaySpans) <- collectRasterSpans c curInp
+                  pieces <- if paintFull then pure [] else takeDamagePieces c
                   kept <-
                     renderArenaGl renderer font curScale pw ph (themeWindow frameTheme)
-                      (if paintFull then DamageFull else damage) drawData baseSpans overlaySpans
+                      (if paintFull then DamageFull else damage) pieces drawData baseSpans overlaySpans
                   -- A framebuffer the renderer had to replace held nothing to
                   -- keep: forget the size, and the frame asked for next is full.
                   writeIORef presentedRef (if kept then (pw, ph, curScale) else (0, 0, 0))
