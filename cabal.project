@@ -6,7 +6,6 @@ packages:
   packages/nano-ui-rgfw-bindings
   packages/nano-ui-rgfw
   packages/nano-ui-form
-  ../ditto
 
 tests: True
 benchmarks: True
