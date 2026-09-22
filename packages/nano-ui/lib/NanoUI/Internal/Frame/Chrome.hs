@@ -124,11 +124,13 @@ textInputFocused ctx idx = do
   focus <- readIORef (ctxFocusId ctx)
   pure (focus == wid)
 
+-- | Fully transparent black.
+transparentColor :: Color
+transparentColor = colorRGBA 0 0 0 0
+
 -- | Transparent fills and no border.
 clearStyle :: Style -> Style
-clearStyle s = s {styleBg = clear, styleHoverBg = clear, styleActiveBg = clear, styleBorderWidth = 0}
-  where
-    clear = colorRGBA 0 0 0 0
+clearStyle s = s {styleBg = transparentColor, styleHoverBg = transparentColor, styleActiveBg = transparentColor, styleBorderWidth = 0}
 
 closeButtonStyle :: Theme -> Bool -> Float -> Style
 closeButtonStyle theme isHot animT =
@@ -143,7 +145,6 @@ tabHeaderVisualStyle theme styleIdx isActive =
       btn = themeButton theme
       muted = themeMuted theme
       accent = themeAccent theme
-      clear = colorRGBA 0 0 0 0
       hoverLift = lerpColor (themeWindow theme) (styleHoverBg btn) 0.55
       (cr, activeBg, activeFg, activeBw, inactFg) = case styleIdx of
         1 -> (6, accent, themeOnAccent theme, 0, muted)
@@ -159,10 +160,10 @@ tabHeaderVisualStyle theme styleIdx isActive =
           , styleCornerRadius = cr
           }
         else panel
-          { styleBg = clear
+          { styleBg = transparentColor
           , styleHoverBg = hoverLift
           , styleFg = inactFg
-          , styleBorder = clear
+          , styleBorder = transparentColor
           , styleBorderWidth = 0
           , styleCornerRadius = cr
           }
@@ -174,14 +175,13 @@ menuItemVisualStyle :: Theme -> Float -> Style
 menuItemVisualStyle theme val =
   let menu = overlayMenuStyle theme
       accent = themeAccent theme
-      clear = colorRGBA 0 0 0 0
       openBg = lerpColor (styleBg menu) accent 0.3
       isOpen = val > 0.5
    in menu
-        { styleBg = if isOpen then openBg else clear
+        { styleBg = if isOpen then openBg else transparentColor
         , styleHoverBg = if isOpen then openBg else styleHoverBg menu
         , styleActiveBg = lerpColor (styleBg menu) accent 0.4
-        , styleBorder = clear
+        , styleBorder = transparentColor
         , styleBorderWidth = 0
         -- The text-field context menu fills hovered rows with a square
         -- pushRect; keep the generic menu identical.
@@ -208,16 +208,15 @@ paintTabHeader da theme tabStyle isActive style x y w h = do
       r = max 0 (styleCornerRadius style)
       bg = styleBg style
   if isActive
-    then case tabStyle of
-      1 -> pushRoundedRect da rect r bg
-      2 -> do
-        pushRoundedRect da rect r bg
-        strokeStyledRect da style rect
-      _ -> do
-        pushRoundedRect da rect r bg
-        pushRoundedStroke da (Rect x y w (h + 1)) (min r (min (w / 2) (h / 2))) 1 (styleBorder (themePanel theme))
-        pushRect da (Rect x (y + h - 2) w 2) (themeAccent theme)
-    else when (bg /= colorRGBA 0 0 0 0) $ pushRoundedRect da rect r bg
+    then do
+      pushRoundedRect da rect r bg
+      case tabStyle of
+        1 -> pure ()
+        2 -> strokeStyledRect da style rect
+        _ -> do
+          pushRoundedStroke da (Rect x y w (h + 1)) (min r (min (w / 2) (h / 2))) 1 (styleBorder (themePanel theme))
+          pushRect da (Rect x (y + h - 2) w 2) (themeAccent theme)
+    else when (bg /= transparentColor) $ pushRoundedRect da rect r bg
 
 paintTableHeader :: DrawArena -> Theme -> Bool -> Style -> Float -> Float -> Float -> Float -> IO ()
 paintTableHeader da theme isSorted style x y w h = do

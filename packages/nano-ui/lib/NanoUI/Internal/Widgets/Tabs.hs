@@ -134,7 +134,7 @@ tabStrip ::
   a ->
   [Tab a body] ->
   Maybe (a -> Eff es ()) ->
-  Eff es (TabResponse a, a)
+  Eff es (TabResponse a)
 tabStrip (TabsConfig style orient) cur tabList mRenderBody = do
   ctx <- askContext
   groupId <- nextId
@@ -155,18 +155,17 @@ tabStrip (TabsConfig style orient) cur tabList mRenderBody = do
         if vertical
           then column' barLay $ do
             tagContainer groupId
-            (tabResp, nextTab, _) <- renderHeaders ctx hdrLay styleVal cur (zip [0 :: Int ..] tabList)
-            pure (tabResp, nextTab)
+            fst <$> renderHeaders ctx hdrLay styleVal cur (zip [0 :: Int ..] tabList)
           else row' barLay $ do
             tagContainer groupId
-            renderScrollableHeaders ctx style hdrLay barLay groupId cur tabList
+            renderScrollableHeaders ctx styleVal hdrLay barLay groupId cur tabList
   case mRenderBody of
     Nothing -> headerBar
     Just bodyRender ->
       let shell layout = layout $ do
-            (tabResp, nextTab) <- headerBar
-            bodyRender nextTab
-            pure (tabResp, nextTab)
+            tabResp <- headerBar
+            bodyRender (tabActive tabResp)
+            pure tabResp
        in if vertical
             then shell (rowWith (tight . fillW . grow))
             else shell (columnWith (tight . fillW))
@@ -186,19 +185,17 @@ tabStrip (TabsConfig style orient) cur tabList mRenderBody = do
 renderScrollableHeaders ::
   (Eq a, Ui :> es) =>
   Context ->
-  TabStyle ->
+  Int ->
   Layout ->
   Layout ->
   WidgetId ->
   a ->
   [Tab a body] ->
-  Eff es (TabResponse a, a)
-renderScrollableHeaders ctx style hdrLay barLay groupId cur tabList = do
+  Eff es (TabResponse a)
+renderScrollableHeaders ctx styleVal hdrLay barLay groupId cur tabList = do
   scrollWid <- withKey ("tab-scroller" :: Text) nextId
   let h = tabHeaderH
-      styleVal = fromEnum style
       barPad = layoutPadding barLay
-      arrowW = 26
       leftGlyph = "\8249"
       rightGlyph = "\8250"
       innerLay = tight . fixedH h . gap (layoutGap barLay) $ defaultLayout {layoutDirection = Row}
@@ -227,9 +224,9 @@ renderScrollableHeaders ctx style hdrLay barLay groupId cur tabList = do
       canLeft = overflow && off > 0.5
   leftResp <-
     if overflow
-      then Just <$> withKey ("tab-arrow-left" :: Text) (arrowButton hdrLay arrowW h (not canLeft) leftGlyph)
+      then Just <$> withKey ("tab-arrow-left" :: Text) (arrowButton hdrLay (not canLeft) leftGlyph)
       else pure Nothing
-  (tabResp, nextTab, resps) <-
+  (tabResp, resps) <-
     if overflow
       then scrollAreaIdConfigured scrollWid scrollerLay scrollerCfg renderInner
       else renderInner
@@ -257,7 +254,7 @@ renderScrollableHeaders ctx style hdrLay barLay groupId cur tabList = do
     canRight = overflow && off < maxOff - 0.5
   rightResp <-
     if overflow
-      then Just <$> withKey ("tab-arrow-right" :: Text) (arrowButton hdrLay arrowW h (not canRight) rightGlyph)
+      then Just <$> withKey ("tab-arrow-right" :: Text) (arrowButton hdrLay (not canRight) rightGlyph)
       else pure Nothing
   uiIO (cacheScrollRange ctx rangeKey maxOff)
   -- One final offset per frame. The paged result folds the arrow pages, the
@@ -273,8 +270,8 @@ renderScrollableHeaders ctx style hdrLay barLay groupId cur tabList = do
         | otherwise = off
       finalOff
         | overflow
-        , nextTab /= cur
-        , Just header <- find ((== nextTab) . headerKey) resps
+        , tabActive tabResp /= cur
+        , Just header <- find ((== tabActive tabResp) . headerKey) resps
         , let hr = respRect (headerResponse header) =
             if rectX hr < viewX
               then max 0 (off - (viewX - rectX hr))
@@ -285,7 +282,7 @@ renderScrollableHeaders ctx style hdrLay barLay groupId cur tabList = do
         | otherwise = pagedOff
   when (finalOff /= off) $
     uiIO (setScrollOffset ctx scrollWid finalOff)
-  pure (tabResp, nextTab)
+  pure tabResp
 
 -- | Remember the scroller's reachable range for the next frame's arrow
 -- visibility. Sub-pixel churn is ignored so a parked strip never dirties.
@@ -298,13 +295,13 @@ cacheScrollRange ctx key v = do
 -- | A prettier thin chevron button for the strip. Disabled ends paint the
 -- glyph in the muted fg instead of dropping the button, so the row width does
 -- not jump as you page to either end.
-arrowButton :: (Ui :> es) => Layout -> Float -> Float -> Bool -> Text -> Eff es Response
-arrowButton hdrLay arrowW barH muted glyph = do
+arrowButton :: (Ui :> es) => Layout -> Bool -> Text -> Eff es Response
+arrowButton hdrLay muted glyph = do
   theme <- uiTheme
   let lay =
         hdrLay
-          { layoutWidth = Fixed arrowW
-          , layoutHeight = Fixed barH
+          { layoutWidth = Fixed 26
+          , layoutHeight = Fixed tabHeaderH
           , layoutFontColor = if muted then Just (themeMuted theme) else Nothing
           }
   buttonStyledEx (not muted) glyph 0 lay 0
@@ -316,7 +313,7 @@ renderHeaders ::
   Int ->
   a ->
   [(Int, Tab a body)] ->
-  Eff es (TabResponse a, a, [Header a])
+  Eff es (TabResponse a, [Header a])
 renderHeaders ctx hdrLay styleVal cur indexed = do
   resps <- mapM (\(i, t) -> withKey i (renderSingleHeader hdrLay (tabEncodeStyle styleVal i) cur t)) indexed
   let clickedKeys = [headerKey h | h <- resps, respClicked (headerResponse h), not (headerClosed h)]
@@ -332,7 +329,7 @@ renderHeaders ctx hdrLay styleVal cur indexed = do
           }
   when (hasChanged || isJust closedKey) requestFrame
   when hasChanged $ uiIO (syncTabHeaderActive ctx nextTab resps)
-  pure (overallResp, nextTab, resps)
+  pure (overallResp, resps)
 
 renderSingleHeader ::
   (Eq a, Ui :> es) =>
@@ -345,15 +342,16 @@ renderSingleHeader hdrLay tabStyle cur t = do
   let isActive = tabKey t == cur
       headerText = maybe (tabTitle t) (\b -> mconcat [tabTitle t, " (", b, ")"]) (tabBadge t)
       headerButton = buttonStyledEx (not (tabDisabled t))
+      mainButton = headerButton headerText (if isActive then 1 else 0) hdrLay tabStyle
   if tabClosable t
     then do
       (tabResp, closed) <- rowWith tight $ do
-        resp <- headerButton headerText (if isActive then 1 else 0) hdrLay tabStyle
+        resp <- mainButton
         closeResp <- headerButton "\215" 0 (hdrLay {layoutPadding = Padding 2 4 4 4}) buttonFlagClose
         pure (resp, respClicked closeResp)
       pure (Header (tabKey t) tabResp closed)
     else do
-      resp <- headerButton headerText (if isActive then 1 else 0) hdrLay tabStyle
+      resp <- mainButton
       pure (Header (tabKey t) resp False)
 
 syncTabHeaderActive :: Eq a => Context -> a -> [Header a] -> IO ()
@@ -377,13 +375,13 @@ tabs' = tabsConfigured' defaultTabsConfig
 tabsConfigured :: (Foldable f, Eq a, Ui :> es) => TabsConfig -> a -> f (Tab a (Eff es ())) -> Eff es a
 tabsConfigured cfg active inputTabs =
   let ts = toList inputTabs
-   in snd <$> tabStrip cfg active ts (Just (renderBody ts))
+   in tabActive <$> tabStrip cfg active ts (Just (renderBody ts))
 
 -- | 'tabsConfigured' with selection, close requests, and header interaction details.
 tabsConfigured' :: (Foldable f, Eq a, Ui :> es) => TabsConfig -> a -> f (Tab a (Eff es ())) -> Eff es (TabResponse a)
 tabsConfigured' cfg active inputTabs =
   let ts = toList inputTabs
-   in fst <$> tabStrip cfg active ts (Just (renderBody ts))
+   in tabStrip cfg active ts (Just (renderBody ts))
 
 -- | Tab headers only; the caller renders the body.
 {-# INLINE tabBar #-}
@@ -398,11 +396,11 @@ tabBar' = tabBarConfigured' defaultTabsConfig
 -- | Header-only bar with explicit style/orientation. Returns the selected key
 -- without running tab bodies.
 tabBarConfigured :: (Foldable f, Eq a, Ui :> es) => TabsConfig -> a -> f (Tab a body) -> Eff es a
-tabBarConfigured cfg active ts = snd <$> tabStrip cfg active (toList ts) Nothing
+tabBarConfigured cfg active ts = tabActive <$> tabStrip cfg active (toList ts) Nothing
 
 -- | 'tabBarConfigured' with interaction details and optional close request.
 tabBarConfigured' :: (Foldable f, Eq a, Ui :> es) => TabsConfig -> a -> f (Tab a body) -> Eff es (TabResponse a)
-tabBarConfigured' cfg active ts = fst <$> tabStrip cfg active (toList ts) Nothing
+tabBarConfigured' cfg active ts = tabStrip cfg active (toList ts) Nothing
 
 renderBody :: (Eq a, Ui :> es) => [Tab a (Eff es ())] -> a -> Eff es ()
 renderBody ts activeKey =

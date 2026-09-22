@@ -98,7 +98,7 @@ import NanoUI.Internal.Style
   , minW
   , tight
   , fadeAlpha
-  , separatorTrackColor
+  , scrollBarTrackColor
   )
 import NanoUI.Internal.Types
   ( DamageBounds (..)
@@ -637,7 +637,7 @@ splitPct avail d = d / avail * 100
 
 renderMaxPane :: (Ui :> es) => GridEnv es -> Word64 -> Eff es [RenderedPane]
 renderMaxPane env pid =
-  renderPane env pid (geBaseRect env) (paneLay (geMinSize env)) False
+  renderPane env pid (geBaseRect env) False
 
 -- | Enter a pane's grid-relative identity scope while leaving the split tree's
 -- layout scopes intact. Consume one sibling just as 'withKey' does.
@@ -651,17 +651,16 @@ renderPane ::
   GridEnv es ->
   Word64 ->
   Rect ->
-  Layout ->
   Bool ->
   Eff es [RenderedPane]
-renderPane env pid rect lay dragging =
+renderPane env pid rect dragging =
   withPaneKey env pid $ do
     inp <- askInput
     let ctx = geCtx env
         arena = ctxNodeArena ctx
     start <- uiIO (arenaCount arena)
     let ctxt = geMakeCtx env pid rect dragging
-    (view, _) <- containerResponse NodeContainer lay (pgViewPane (geCfg env) pid ctxt)
+    (view, _) <- containerResponse NodeContainer (paneLay (geMinSize env)) (pgViewPane (geCfg env) pid ctxt)
     -- Press ownership must be checked against previous solved child rects:
     -- ctxActiveId is only finalized after this frame's UI has been built.
     controlHit <-
@@ -697,7 +696,7 @@ renderNode env dividers = \case
     | geLifted env && draggingPane env pid ->
         [] <$ container NodeContainer (paneLay (geMinSize env)) (pure ())
     | otherwise ->
-        renderPane env pid (paneRect env pid) (paneLay (geMinSize env)) (draggingPane env pid)
+        renderPane env pid (paneRect env pid) (draggingPane env pid)
   Split sid0 ax ratio a b ->
     withKey sid0 $ do
       let (wa, ha) = subtreeMin (geMinSize env) (geGutter env) a
@@ -711,20 +710,18 @@ renderNode env dividers = \case
           dA = splitLength (geGutter env) avail mA mB (maybe 0.5 diRatio mDiv)
           pinA = pinnedSide (pgFixedPanes (geCfg env)) a
           pinB = pinnedSide (pgFixedPanes (geCfg env)) b
-          (aLay, bLay)
+          (aSide, bSide)
             -- A region not laid out yet -- the grid's first frame, or a split
             -- made this frame -- has no length to take a share of or to pin
             -- a side at. The two sides share out what the solver gives them
             -- after the gutter, in the split's own ratio.
             | avail <= 0 =
-                ( minSized (splitWeightLay ax (clamp01 ratio)) wa ha
-                , minSized (splitWeightLay ax (1 - clamp01 ratio)) wb hb
-                )
-            | pinA == pinB =
-                (minSized (splitSideLay ax (splitPct avail dA)) wa ha, minSized fillLay wb hb)
-            | pinA = (minSized (pinnedSideLay ax dA) wa ha, minSized fillLay wb hb)
-            | otherwise =
-                (minSized fillLay wa ha, minSized (pinnedSideLay ax (avail - dA - geGutter env)) wb hb)
+                (splitWeightLay ax (clamp01 ratio), splitWeightLay ax (1 - clamp01 ratio))
+            | pinA == pinB = (splitSideLay ax (splitPct avail dA), fillLay)
+            | pinA = (pinnedSideLay ax dA, fillLay)
+            | otherwise = (fillLay, pinnedSideLay ax (avail - dA - geGutter env))
+          aLay = minSized aSide wa ha
+          bLay = minSized bSide wb hb
           inner = do
             a' <- container NodeContainer aLay (renderNode env dividers a)
             dividerWidget env ax
@@ -765,7 +762,7 @@ drawDivider cdc rect axis thickness leeway =
     let theme = cdcTheme cdc
         panel = themePanel theme
         rail = lerpColor (styleBg panel) (themeSeparator theme) 0.12
-        track = separatorTrackColor panel theme
+        track = scrollBarTrackColor panel theme
         trackRect = case axis of
           AxisV -> Rect (rectX rect + leeway) (rectY rect) thickness (rectH rect)
           AxisH -> Rect (rectX rect) (rectY rect + leeway) (rectW rect) thickness
@@ -963,7 +960,7 @@ runGestures env dividers rendered dgi = do
               else ratio0 + (mouseMain d mouse - main0) / usable
           r' = clampTreeRatio (geTree env) sid (diRegion d) (geGutter env) (geMinSize env) r0
        in putTree env (Just (treeSetRatio sid r' (geTree env)))
-  when (drag0 < 0 && not down) $ writeGest env 0
+  when (drag0 < 0 && not down) $ clearGest env
   -- Keep the loop at the display cadence while a pane is being dragged: the
   -- ghost follows the pointer, and without a dirty flag the debug HUD's slow
   -- refresh paces the whole frame (4 fps). Window / scroll / resize drags mark
@@ -1058,7 +1055,7 @@ maximizePane env pid = do
   putPaneSlot True SlotPaneMax env v
   -- Maximizing hides the dividers and every other pane, so an armed drag or
   -- resize gesture could never complete; cancel it instead of leaking it.
-  when (v /= 0) (writeGest env 0)
+  when (v /= 0) (clearGest env)
 
 restorePane :: (Ui :> es) => GridEnv es -> Eff es ()
 restorePane env = putPaneSlot True SlotPaneMax env 0
@@ -1088,12 +1085,10 @@ putTree env mTree = do
   storeWrite env True (maybe (deleteSlot fieldDyn (geKey env)) (insertDyn (geKey env)) mTree)
   markChanged env
 
--- | Gesture slot: 0 none, positive = dragged pane id, negative = resized
--- split id.
-writeGest :: (Ui :> es) => GridEnv es -> Int -> Eff es ()
-writeGest env n = storeWrite env True (if n == 0 then deleteSlot fieldInt k else insertSlot fieldInt k n)
-  where
-    k = slotKey SlotPaneGest (geKey env)
+-- | Clear the gesture slot (0 none, positive = dragged pane id, negative =
+-- resized split id).
+clearGest :: (Ui :> es) => GridEnv es -> Eff es ()
+clearGest env = storeWrite env True (deleteSlot fieldInt (slotKey SlotPaneGest (geKey env)))
 
 -- | Write a pane-id slot (maximized or focused pane) when it differs,
 -- bumping the mirror; @structural@ also flags 'pgrChanged'.

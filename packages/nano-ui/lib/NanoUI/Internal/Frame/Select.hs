@@ -307,7 +307,7 @@ finalizeSelectPick ctx inp =
             -- option text into the field and defocuses it: the combo's
             -- dropdown is visible exactly while focused, so the menu
             -- disappears with the pick.
-            let (_, vSb, hSb, _) = comboScrollGeom (ddRect dd) (ddComboRows dd) nOpts (ddComboWindow dd) (ddComboScrollX dd) (ddComboContentW dd)
+            let (_, vSb, hSb, _) = ddComboGeom dd
                 onLane = any (\(track, _) -> rectContains track mouse) (catMaybes [vSb, hSb])
             when (inputMousePressed inp && not onLane) $
               forM_ (comboDropPickIndex (ddRect dd) menuItemRowH nOpts mouseY) $ \picked -> do
@@ -367,11 +367,12 @@ comboScrollGeom (Rect dx dy dw dh) n vis win xOff contentW =
     usableW = max 0 (dw - vLaneW)
     hScroll = contentW > usableW && contentW > 0
     hLaneH = if hScroll then comboSbW else 0
+    usableH = max 0 (dh - hLaneH)
     -- Rows fill the drop rect from the top, stopping short of the lanes.
-    inner = Rect dx dy (max 0 (dw - vLaneW)) (max 0 (dh - hLaneH))
+    inner = Rect dx dy usableW usableH
     -- Lanes sit flush against the dropdown border and share the corner.
-    vTrack = Rect (dx + dw - comboSbW) dy comboSbW (max 0 (dh - hLaneH))
-    hTrack = Rect dx (dy + dh - comboSbW) (max 0 (dw - vLaneW)) comboSbW
+    vTrack = Rect (dx + dw - comboSbW) dy comboSbW usableH
+    hTrack = Rect dx (dy + dh - comboSbW) usableW comboSbW
     vSb =
       if vScroll
         then
@@ -393,6 +394,11 @@ comboScrollGeom (Rect dx dy dw dh) n vis win xOff contentW =
            in Just (hTrack, Rect tx (hy + 2) thumbW (comboSbW - 4))
         else Nothing
    in (inner, vSb, hSb, usableW)
+
+-- | 'comboScrollGeom' of an open combo dropdown.
+ddComboGeom :: Dropdown -> (Rect, Maybe (Rect, Rect), Maybe (Rect, Rect), Float)
+ddComboGeom dd =
+  comboScrollGeom (ddRect dd) (ddComboRows dd) (length (ddOptions dd)) (ddComboWindow dd) (ddComboScrollX dd) (ddComboContentW dd)
 
 -- | Combo dropdown rect: like 'selectDropRect', but with no outer margin
 -- (rows start flush at the top), and the height reserves a flush bottom
@@ -446,7 +452,7 @@ drawDropdownMenu ctx inp theme dd = do
   paintMenuPanel da theme style (ddRect dd)
   if ddCombo dd
     then do
-      let (inner, vSb, hSb, _) = comboScrollGeom (ddRect dd) (ddComboRows dd) (length (ddOptions dd)) (ddComboWindow dd) (ddComboScrollX dd) (ddComboContentW dd)
+      let (inner, vSb, hSb, _) = ddComboGeom dd
           base = themeInput theme
           drawBar (track, thumb) = do
             pushRect da track (scrollBarTrackColor base theme)

@@ -210,7 +210,7 @@ scrollAxisRange contentSize innerMain trailingPad
 
 scrollChromeActive :: ScrollConfig -> DirTag -> Float -> Float -> Bool
 scrollChromeActive cfg dir contentSize innerMain =
-  scrollShowsChrome cfg dir && scrollAxisOverflows (scrollPolicyFor cfg dir) contentSize innerMain
+  scrollAxisOverflows (scrollPolicyFor cfg dir) contentSize innerMain
 
 -- | Logical window-space track/thumb bounds and the maximum scroll offset.
 data ScrollBarLayout = ScrollBarLayout

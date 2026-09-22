@@ -45,6 +45,7 @@ import NanoUI.Internal.Style
   , Layout (..)
   , TextDecoration (..)
   , Theme (..)
+  , addUnderline
   , fontBold
   , fontItalic
   , fontMono
@@ -238,9 +239,9 @@ richTextWith' f pieces = do
         where
           lineY line run = y0 + lineTop line + lineAscent line - runAscent run
           isSpaceToken (_, tok) = tokenKind tok == Space
-      decorationOf runIdx
-        | Just runIdx == hoveredRun = underlined (textFontDecoration (runFont (indexSmallArray runs runIdx)))
-        | otherwise = textFontDecoration (runFont (indexSmallArray runs runIdx))
+      decorationOf runIdx =
+        (if Just runIdx == hoveredRun then addUnderline else id)
+          (textFontDecoration (runFont (indexSmallArray runs runIdx)))
       -- Where underline and strikethrough sit below a line box's top, as
       -- styled labels draw them.
       decorationOffsets deco run =
@@ -267,9 +268,6 @@ richTextWith' f pieces = do
         | otherwise = Nothing
   pure (resp, clicked)
   where
-    underlined DecorationStrikethrough = DecorationUnderlineStrike
-    underlined DecorationNone = DecorationUnderline
-    underlined deco = deco
     lineBoxes lines' = (maximum (0 : map lineWidth lines'), sum (map lineHeight lines'))
 
 -- | The font a piece's layout chooses.

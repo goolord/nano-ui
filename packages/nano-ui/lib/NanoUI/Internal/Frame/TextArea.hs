@@ -61,10 +61,6 @@ data TextAreaHit = TextAreaHit
   , tahFieldRect :: !Rect
   , tahContentX :: !Float
   , tahLineH :: !Float
-  , tahWidgetX :: !Float
-  , tahWidgetY :: !Float
-  , tahWidgetW :: !Float
-  , tahWidgetH :: !Float
   }
 
 -- | Editor state of the text area at @idx@, its viewport set from the field
@@ -81,7 +77,8 @@ loadTextAreaStateAt ctx idx fm x y w h = do
 loadHitState :: Context -> TextAreaHit -> IO TA.TextAreaState
 loadHitState ctx hit = do
   fm <- resolveTextAreaFont ctx (tahNodeIdx hit)
-  loadTextAreaStateAt ctx (tahNodeIdx hit) fm (tahWidgetX hit) (tahWidgetY hit) (tahWidgetW hit) (tahWidgetH hit)
+  let Rect x y w h = tahFieldRect hit
+  loadTextAreaStateAt ctx (tahNodeIdx hit) fm x y w h
 
 -- | Record the text viewport and clamp the stored scroll to the content.
 -- This paint already reflects both, so the write marks nothing dirty: a
@@ -212,10 +209,6 @@ textAreaHitForWidget ctx wid = do
                 , tahFieldRect = field
                 , tahContentX = clipX
                 , tahLineH = textAreaLineHeight fm
-                , tahWidgetX = x
-                , tahWidgetY = y
-                , tahWidgetW = w
-                , tahWidgetH = h
                 }
           )
 
@@ -233,25 +226,25 @@ textAreaCursorAt ctx state hit (V2 mouseX mouseY) = do
   prepared <- prepareFontMetrics fm line
   pure (row, textIndexAtX prepared line (max 0 (mouseX - (tahContentX hit - scrollXf))))
 
-updateTextAreaSelection :: Context -> WidgetId -> TextAreaHit -> TB.Cursor -> TB.Cursor -> IO ()
-updateTextAreaSelection ctx wid hit anchor cursor = do
-  state0 <- loadHitState ctx hit
+-- | Save @state0@ (the state the gesture loaded; nothing writes the store in
+-- between) with its selection set to @anchor@..@cursor@.
+updateTextAreaSelection :: Context -> WidgetId -> TA.TextAreaState -> TB.Cursor -> TB.Cursor -> IO ()
+updateTextAreaSelection ctx wid state0 anchor cursor = do
   modifyStore ctx (TA.saveTextAreaState (intKey wid) (TA.setTextAreaSelection anchor cursor state0))
   markDirty ctx
 
-applyTextAreaDrag :: Context -> WidgetId -> TextAreaHit -> Int -> Int -> Int -> Int -> Int -> IO ()
-applyTextAreaDrag ctx wid hit anchorRow anchorCol row col clicks
-  | clicks >= 3 = do
-      state <- loadHitState ctx hit
-      updateTextAreaSelection ctx wid hit (TB.Cursor 0 0) (TB.documentEnd (TA.buffer state))
-  | clicks == 2 = do
-      state <- loadHitState ctx hit
-      let buf = TA.buffer state
-          (a0, a1) = textWordBounds (TB.lineAt anchorRow buf) anchorCol
+applyTextAreaDrag :: Context -> WidgetId -> TA.TextAreaState -> Int -> Int -> Int -> Int -> Int -> IO ()
+applyTextAreaDrag ctx wid state anchorRow anchorCol row col clicks
+  | clicks >= 3 =
+      updateTextAreaSelection ctx wid state (TB.Cursor 0 0) (TB.documentEnd buf)
+  | clicks == 2 =
+      let (a0, a1) = textWordBounds (TB.lineAt anchorRow buf) anchorCol
           (c0, c1) = textWordBounds (TB.lineAt row buf) col
-      updateTextAreaSelection ctx wid hit (TB.Cursor anchorRow (min a0 c0)) (TB.Cursor row (max a1 c1))
+       in updateTextAreaSelection ctx wid state (TB.Cursor anchorRow (min a0 c0)) (TB.Cursor row (max a1 c1))
   | otherwise =
-      updateTextAreaSelection ctx wid hit (TB.Cursor anchorRow anchorCol) (TB.Cursor row col)
+      updateTextAreaSelection ctx wid state (TB.Cursor anchorRow anchorCol) (TB.Cursor row col)
+ where
+  buf = TA.buffer state
 
 -- | Mouse selection in text area @wid@: press (with word and document
 -- multi-clicks) and drag. Presses on the scrollbars are left to the scroller.
@@ -261,14 +254,17 @@ finalizeTextAreaMouse ctx inp wid = do
   forM_ mHit $ \hit -> do
     let mouse = inputMousePos inp
     onScroll <- isMouseOnTextAreaScrollBarAt ctx (tahNodeIdx hit) mouse
+    -- One load serves the hit test and the selection write: nothing writes
+    -- the store in between (click counting lives in the interaction state).
     let cursorAtMouse = do
           state <- loadHitState ctx hit
-          textAreaCursorAt ctx state hit mouse
+          (row, col) <- textAreaCursorAt ctx state hit mouse
+          pure (state, row, col)
     if inputMousePressed inp && rectContains (tahFieldRect hit) mouse && not onScroll
       then do
-        (row, col) <- cursorAtMouse
+        (state, row, col) <- cursorAtMouse
         clicks <- normalizeTextFieldClicks ctx wid 0 row col True (max 1 (inputMouseClicks inp))
-        applyTextAreaDrag ctx wid hit row col row col clicks
+        applyTextAreaDrag ctx wid state row col row col clicks
         setTextInputDrag ctx (Just (TextInputDrag wid 0 row col True clicks))
       else do
         mDrag <- getsInteraction ctx isTextInputDrag
@@ -277,11 +273,11 @@ finalizeTextAreaMouse ctx inp wid = do
             | textInputDragWidget drag == wid
                 , textInputDragMultiline drag
                 , inputMouseDown inp || inputMouseReleased inp -> do
-                (row, col) <- cursorAtMouse
+                (state, row, col) <- cursorAtMouse
                 applyTextAreaDrag
                   ctx
                   wid
-                  hit
+                  state
                   (textInputDragAnchorRow drag)
                   (textInputDragAnchorCol drag)
                   row

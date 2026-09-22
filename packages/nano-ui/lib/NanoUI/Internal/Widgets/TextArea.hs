@@ -209,15 +209,14 @@ textAreaWith' f value = do
         Just (t, doc) | t == value -> doc
         _ -> textDocument value
   (resp, doc) <- textAreaCore f wid incoming
-  let out = case cached of
-        Just (t, d) | sameDocument d doc -> t
-        _
-          | sameDocument doc incoming -> value
-          | otherwise -> documentText doc
   case cached of
-    Just (_, d) | sameDocument d doc -> pure ()
-    _ -> uiIO $ modifyStore ctx (insertDyn textKey (out, doc))
-  pure (resp, out)
+    Just (t, d) | sameDocument d doc -> pure (resp, t)
+    _ -> do
+      let out
+            | sameDocument doc incoming = value
+            | otherwise = documentText doc
+      uiIO $ modifyStore ctx (insertDyn textKey (out, doc))
+      pure (resp, out)
 
 -- | Multi-line text editor over a 'TextDocument'. Pass the current document;
 -- the result is the document after this frame's edits. An edit replaces the

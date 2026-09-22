@@ -280,15 +280,15 @@ runFrameEff unlift ctx frameInp ui = do
   -- so labels and layout reflect the current state.
   syncWidgetLabels ctx
   let
-    Size w h = inputWindowSize frameInp
-  unlessM (tryReuseLayout ctx (Size w h)) $
+    size@(Size w h) = inputWindowSize frameInp
+  unlessM (tryReuseLayout ctx size) $
     solveLayoutAndCapture ctx w h
   movedResize <- updateWindowResize ctx layerInp w h
   movedWindow <- updateWindowDrag ctx layerInp
   -- A window moved or resized changes only where the floating panels go:
   -- the solve before placement stands, so place them again over it.
   when (movedResize || movedWindow) $
-    unlessM (replaceFloating ctx (Size w h)) $
+    unlessM (replaceFloating ctx size) $
       solveLayoutAndCapture ctx w h
   persistWindowPositions ctx
   applyScrollOffsets ctx
@@ -317,7 +317,7 @@ runFrameEff unlift ctx frameInp ui = do
   -- stands unless the arena's inputs or a custom measure moved.
   when (mirrorStoresChanged storeBuilt storeAfter) $ do
     syncWidgetLabels ctx
-    unlessM (tryReuseLayout ctx (Size w h)) $
+    unlessM (tryReuseLayout ctx size) $
       solveLayoutAndCapture ctx w h
     applyScrollOffsets ctx
   updatePrevRects ctx
@@ -362,7 +362,7 @@ runFrameEff unlift ctx frameInp ui = do
   lowerShapes ctx
   beginLayer (ctxDrawArena ctx) LayerOverlay
   drawWindowOverlays ctx
-  drawModalOverlays ctx (inputWindowSize frameInp)
+  drawModalOverlays ctx size
   drawPopupOverlays ctx
   drawSelectOverlays ctx frameInp
   drawTextEditMenuOverlays ctx frameInp

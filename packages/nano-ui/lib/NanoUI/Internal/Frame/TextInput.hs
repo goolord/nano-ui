@@ -106,16 +106,13 @@ nodeTextFieldGeom ctx idx x y w h = do
   let fm = ctxFontMetrics ctx
       box = Rect x y w h
       field = textInputFieldRect fm x y w h
-  pure $
-    if hasFlag textInputFlagSelectable si
-      then (box, box)
-      else
-        if hasFlag textInputFlagNumeric si
-          then (box, numericTextClip fm x y w h)
-          else
-            if hasFlag textInputFlagSearch si
-              then (box, if null opts then searchInputTextClip fm x y w h else comboTextClip fm x y w h)
-              else (field, textInputFieldTextClip fm field)
+      geom
+        | hasFlag textInputFlagSelectable si = (box, box)
+        | hasFlag textInputFlagNumeric si = (box, numericTextClip fm x y w h)
+        | hasFlag textInputFlagSearch si =
+            (box, if null opts then searchInputTextClip fm x y w h else comboTextClip fm x y w h)
+        | otherwise = (field, textInputFieldTextClip fm field)
+  pure geom
 
 -- | Whether the pointer is over the clear (×) button of a non-empty search
 -- field. Search fields reserve that slot even when empty, but the button is

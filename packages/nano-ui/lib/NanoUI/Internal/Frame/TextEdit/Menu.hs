@@ -126,11 +126,9 @@ textEditMenuPickAction menuRect mouse@(V2 _ my) =
    in if my < top || my >= top + textEditMenuContentH
         then Nothing
         else
-          case [entry | (entry, row) <- textEditMenuLayout menuRect, rectContainsY row] of
+          case [entry | (entry, row) <- textEditMenuLayout menuRect, rectContains row mouse] of
             TextEditMenuItem action _ : _ -> Just action
             _ -> Nothing
-  where
-    rectContainsY (Rect _ ry _ rh) = let V2 _ py = mouse in py >= ry && py < ry + rh
 
 textEditMenuItemFg :: Style -> Bool -> Color
 textEditMenuItemFg style enabled =

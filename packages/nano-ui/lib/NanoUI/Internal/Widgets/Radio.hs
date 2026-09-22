@@ -61,7 +61,8 @@ radio' options index =
         xs -> xs
       !len = length opts
       !key = intKey gid
-    stored <- uiIO $ adoptSlot fieldInt ctx gid key (clamp 0 (len - 1) index)
+      !given = clamp 0 (len - 1) index
+    stored <- uiIO $ adoptSlot fieldInt ctx gid key given
     let
       !sel = clamp 0 (len - 1) stored
     uiIO $ registerFocusable ctx gid
@@ -78,7 +79,7 @@ radio' options index =
         !finalSel = if clickedIdx >= 0 then clickedIdx else selNav
       -- Compare with the caller's index, as 'NanoUI.Internal.Widgets.Select' does, so a
       -- selection stored between frames still reports a change.
-      finishInput fieldInt ctx gid key (clamp 0 (len - 1) index) combinedResp finalSel
+      finishInput fieldInt ctx gid key given combinedResp finalSel
 
 -- Use the ordinary widget path for every option, including singleton groups.
 -- It owns IDs, node construction, and scroll-aware interaction geometry.

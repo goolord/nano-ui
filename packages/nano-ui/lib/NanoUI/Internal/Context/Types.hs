@@ -104,7 +104,6 @@ data ThemeScopes = ThemeScopes
   -- @styled@ scopes modify.
   , tsPrevCount :: {-# UNPACK #-} !Int
   , tsPrev :: !(SmallMutableArray RealWorld Theme)
-  , tsPrevRaw :: !(SmallMutableArray RealWorld Theme)
   , tsDisabled :: !Bool
   -- ^ A disabled scope was entered this pass, so some widget may be disabled.
   , tsChanged :: !Bool

@@ -22,7 +22,7 @@ import Data.Maybe (listToMaybe)
 import Data.Word (Word8)
 import Foreign.ForeignPtr (ForeignPtr, mallocForeignPtrBytes, withForeignPtr)
 import Foreign.Marshal.Utils (copyBytes, fillBytes)
-import Foreign.Ptr (plusPtr)
+import Foreign.Ptr (Ptr, plusPtr)
 import NanoUI.Internal.Types (ImageId (..))
 
 -- | GPU texture id shared by every packed image so draw cmds batch.
@@ -200,16 +200,16 @@ fitImage st0 tid w h pixels =
   case cursorFor st0 w h <|> cursorFor grown w h of
     Nothing -> pure Nothing
     Just (x, y, placed) -> do
+      let resized = asW placed /= asW st0 || asH placed /= asH st0
       fp <-
-        if asW placed == asW st0 && asH placed == asH st0
-          then pure (asPtr st0)
-          else do
-            resized <- allocPixels (asW placed) (asH placed)
-            copyAtlas (asPtr st0) (asW st0) (asH st0) resized (asW placed)
-            pure resized
+        if resized
+          then do
+            buf <- allocPixels (asW placed) (asH placed)
+            copyAtlas (asPtr st0) (asW st0) (asH st0) buf (asW placed)
+            pure buf
+          else pure (asPtr st0)
       blitPixels fp (asW placed) x y w h pixels
       let slot = AtlasSlot x y w h
-          resized = asW placed /= asW st0 || asH placed /= asH st0
           written = recordWrite slot placed
       pure $
         Just
@@ -257,24 +257,23 @@ copyAtlas :: ForeignPtr Word8 -> Int -> Int -> ForeignPtr Word8 -> Int -> IO ()
 copyAtlas src oldW oldH dst newW =
   withForeignPtr src $ \sp ->
     withForeignPtr dst $ \dp ->
-      mapM_ (copyRow sp dp) [0 .. oldH - 1]
- where
-  rowBytes = oldW * 4
-  copyRow sp dp row =
-    copyBytes
-      (dp `plusPtr` (row * newW * 4))
-      (sp `plusPtr` (row * oldW * 4))
-      rowBytes
+      copyRows dp newW 0 sp oldW oldW oldH
 
 blitPixels ::
   ForeignPtr Word8 -> Int -> Int -> Int -> Int -> Int -> ByteString -> IO ()
 blitPixels dest destW destX destY w h pixels =
   withForeignPtr dest $ \dp ->
     BS.useAsCStringLen pixels $ \(sp, _) ->
-      mapM_ (copyRow dp sp) [0 .. h - 1]
+      copyRows dp destW (destY * destW + destX) sp w w h
+
+-- | Copy @rows@ rows of @w@ RGBA pixels from @src@, @srcW@ pixels a row, to
+-- @dst@, @dstW@ pixels a row, starting @dstOff@ pixels in.
+copyRows :: Ptr a -> Int -> Int -> Ptr b -> Int -> Int -> Int -> IO ()
+copyRows dst dstW dstOff src srcW w rows =
+  mapM_ copyRow [0 .. rows - 1]
  where
-  copyRow dp sp row =
+  copyRow row =
     copyBytes
-      (dp `plusPtr` (((destY + row) * destW + destX) * 4))
-      (sp `plusPtr` (row * w * 4))
+      (dst `plusPtr` ((dstOff + row * dstW) * 4))
+      (src `plusPtr` (row * srcW * 4))
       (w * 4)

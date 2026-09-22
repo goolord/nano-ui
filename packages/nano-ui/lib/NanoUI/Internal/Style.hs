@@ -52,7 +52,6 @@ module NanoUI.Internal.Style
   , readableOn
   , disabledTheme
   , themeSeries
-  , separatorTrackColor
   , scrollBarTrackColor
   , scrollBarThumbColor
   , fadeAlpha
@@ -109,6 +108,7 @@ module NanoUI.Internal.Style
   , fontOblique
   , textDecoration
   , fontUnderline
+  , addUnderline
   , fontStrike
   , alignStart
   , alignCenter
@@ -441,12 +441,14 @@ textDecoration d l = l {layoutTextDecoration = d}
 
 -- | Add an underline while preserving any strikethrough.
 fontUnderline :: Layout -> Layout
-fontUnderline l =
-  let newDeco = case layoutTextDecoration l of
-        DecorationStrikethrough -> DecorationUnderlineStrike
-        DecorationUnderlineStrike -> DecorationUnderlineStrike
-        _ -> DecorationUnderline
-   in l {layoutTextDecoration = newDeco}
+fontUnderline l = l {layoutTextDecoration = addUnderline (layoutTextDecoration l)}
+
+-- | The decoration with an underline added, keeping any strikethrough.
+addUnderline :: TextDecoration -> TextDecoration
+addUnderline = \case
+  DecorationStrikethrough -> DecorationUnderlineStrike
+  DecorationUnderlineStrike -> DecorationUnderlineStrike
+  _ -> DecorationUnderline
 
 -- | Add a strikethrough while preserving any underline.
 fontStrike :: Layout -> Layout
@@ -778,16 +780,12 @@ themeSeries t =
   , themePurple t
   ]
 
--- | Opaque tint of a base surface toward the separator color: the track color
--- for scrollbar tracks, divider strips, and similar hairline chrome.
-separatorTrackColor :: Style -> Theme -> Color
-separatorTrackColor base theme =
-  lerpColor (styleBg base) (themeSeparator theme) 0.28
-
--- | Scrollbar track colour mixed from its background surface and the separator colour.
+-- | Scrollbar track colour: an opaque tint of its background surface toward
+-- the separator colour, also used for divider strips and similar hairline
+-- chrome.
 scrollBarTrackColor :: Style -> Theme -> Color
 scrollBarTrackColor base theme =
-  separatorTrackColor base theme
+  lerpColor (styleBg base) (themeSeparator theme) 0.28
 
 -- | Scrollbar thumb colour mixed from separator and foreground, with alpha 130.
 scrollBarThumbColor :: Style -> Theme -> Color

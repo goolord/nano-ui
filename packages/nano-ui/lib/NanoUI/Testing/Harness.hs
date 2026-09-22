@@ -66,7 +66,7 @@ import NanoUI.Backend
 import NanoUI.Internal.Font (alignedTextPen, textInkEnd)
 import NanoUI.Internal.Types (clamp)
 import NanoUI.Testing
-import NanoUI.Testing.Assert (assert, assertEq, assertLt, bump, withInput)
+import NanoUI.Testing.Assert (assert, assertEq, assertLt, bump, evalUi, run2Frames, withInput)
 
 -- | Text bounds, text, foreground, background, and clip in logical window coordinates.
 type DemoSpan = (Rect, T.Text, Color, Color, Rect)
@@ -289,16 +289,12 @@ warmup ctx inp ui = void (runFrame ctx inp ui)
 -- | Run two frames and return the second result, whose responses can use solved
 -- geometry from the first. Supply event-free input.
 warmup2 :: Context -> Input -> NanoUI a -> IO a
-warmup2 ctx inp ui = do
-  _ <- runFrame ctx inp ui
-  (a, _, _, _) <- runFrame ctx inp ui
-  pure a
+warmup2 ctx inp ui = warmup ctx inp ui >> evalUi ctx inp ui
 
 -- | Two-frame warmup returning the second result and borrowed drawing buffers.
 warmupDraw :: Context -> Input -> NanoUI a -> IO (a, DrawData)
 warmupDraw ctx inp ui = do
-  _ <- runFrame ctx inp ui
-  (a, _, draw, _) <- runFrame ctx inp ui
+  (a, _, draw, _) <- run2Frames ctx inp ui
   pure (a, draw)
 
 -- | Warm the view up, then Tab onto its first focusable.
@@ -318,12 +314,11 @@ held ref widget = do
 -- | Run a press frame and a release frame at @pos@ ('clickPair'), returning
 -- the release frame's result.
 runClick :: Context -> Input -> NanoUI a -> V2 -> IO a
-runClick ctx inp0 ui pos = do
+runClick ctx inp0 ui pos =
   let
     (press, release) = clickPair inp0 pos
-  _ <- runFrame ctx press ui
-  (a, _, _, _) <- runFrame ctx release ui
-  pure a
+   in
+    warmup ctx press ui >> evalUi ctx release ui
 
 -- | Count a failure unless some span contains the substring.
 assertSpansHas :: HasCallStack => IORef Int -> T.Text -> [(Rect, T.Text, a, b, c)] -> IO ()
@@ -438,10 +433,7 @@ dragWindowEdge ::
   -> IO (Maybe Rect)
 dragWindowEdge ctx inp0 ui grab dest = do
   runDragFrom ctx inp0 ui grab dest
-  let
-    idle = inp0 {inputMousePos = dest}
-  _ <- runFrame ctx idle ui
-  (win, _, _, _) <- runFrame ctx idle ui
+  win <- warmup2 ctx (inp0 {inputMousePos = dest}) ui
   getPrevRect ctx (respId win)
 
 -- | Read UV coordinates of a zero-based vertex. The index must be below
@@ -516,6 +508,4 @@ runDragFrom ctx inp0 ui grab dest = do
   let
     press = pressAt inp0 grab
   _ <- runFrame ctx press ui
-  let
-    moved = press {inputMousePos = dest, inputMousePressed = False}
-  void (runFrame ctx moved ui)
+  void (runFrame ctx (holdAt inp0 dest) ui)

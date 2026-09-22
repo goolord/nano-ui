@@ -64,9 +64,10 @@ where
 import Control.Monad (forM_, unless, when)
 import Data.Bits (shiftR, (.&.))
 import Data.IORef (modifyIORef', readIORef, writeIORef)
-import Data.Primitive.SmallArray (copySmallMutableArray, newSmallArray, readSmallArray, getSizeofSmallMutableArray, writeSmallArray)
+import Data.Primitive.SmallArray (SmallMutableArray, copySmallMutableArray, newSmallArray, readSmallArray, getSizeofSmallMutableArray, writeSmallArray)
 import Data.IntMap.Strict qualified as IM
 import GHC.Clock (getMonotonicTime)
+import GHC.Exts (RealWorld)
 
 import NanoUI.Internal.Context.Types
   ( Context (..)
@@ -384,8 +385,6 @@ writeSlot field ctx owner k v = do
       damageWidget ctx owner DamageSelf
       markDirtyCovered ctx
 
-
-
 -- | Write a boolean at the owner's base integer key, with change detection.
 {-# INLINE writeStoreBool #-}
 writeStoreBool :: Context -> WidgetId -> Bool -> IO ()
@@ -419,12 +418,6 @@ recordSlot field ctx k v = do
   let seenK = slotKey SlotSeen k
   when (lookupSlot field seenK st /= Just v) $
     writeIORef (ctxStore ctx) $! insertSlot field seenK v st
-
-
-
-
-
-
 
 -- | Read the boolean at a widget's base integer key, using the supplied default.
 {-# INLINE getStoreBool #-}
@@ -460,7 +453,6 @@ newThemeScopes = do
   cur <- newSmallArray 8 unset
   raw <- newSmallArray 8 unset
   prev <- newSmallArray 8 unset
-  prevRaw <- newSmallArray 8 unset
   pure
     ThemeScopes
       { tsCount = 0
@@ -468,7 +460,6 @@ newThemeScopes = do
       , tsRaw = raw
       , tsPrevCount = 0
       , tsPrev = prev
-      , tsPrevRaw = prevRaw
       , tsDisabled = False
       , tsChanged = False
       , tsPrevSig = 0
@@ -487,10 +478,8 @@ beginThemeScopes ctx newFrame = do
         ts
           { tsCount = 0
           , tsThemes = tsPrev ts
-          , tsRaw = tsPrevRaw ts
           , tsPrevCount = tsCount ts
           , tsPrev = tsThemes ts
-          , tsPrevRaw = tsRaw ts
           , tsDisabled = False
           , tsChanged = False
           , tsPrevSig = sig
@@ -504,16 +493,18 @@ pushThemeScope :: Context -> Bool -> Theme -> Theme -> IO Int
 pushThemeScope ctx disabled raw theme = do
   ts <- readIORef (ctxThemeScopes ctx)
   let !i = tsCount ts
-  cap <- getSizeofSmallMutableArray (tsThemes ts)
-  (themes, raws) <-
-    if i < cap
-      then pure (tsThemes ts, tsRaw ts)
-      else do
-        grown <- newSmallArray (cap * 2) theme
-        copySmallMutableArray grown 0 (tsThemes ts) 0 i
-        grownRaw <- newSmallArray (cap * 2) raw
-        copySmallMutableArray grownRaw 0 (tsRaw ts) 0 i
-        pure (grown, grownRaw)
+      -- The two arrays grow separately: 'tsThemes' trades places with
+      -- 'tsPrev' each frame, so its capacity can differ from that of 'tsRaw'.
+      withRoom arr fill = do
+        cap <- getSizeofSmallMutableArray arr
+        if i < cap
+          then pure arr
+          else do
+            grown <- newSmallArray (cap * 2) fill
+            copySmallMutableArray grown 0 arr 0 i
+            pure grown
+  themes <- withRoom (tsThemes ts) theme
+  raws <- withRoom (tsRaw ts) raw
   same <-
     if i < tsPrevCount ts
       then (== theme) <$> readSmallArray (tsPrev ts) i
@@ -536,21 +527,21 @@ themeScopesChanged ctx = do
 -- theme; other indices must name a scope registered during this view pass.
 {-# INLINE scopeTheme #-}
 scopeTheme :: Context -> Int -> IO Theme
-scopeTheme ctx scope
-  | ti == 0 = readIORef (ctxTheme ctx)
-  | otherwise = do
-      ts <- readIORef (ctxThemeScopes ctx)
-      readSmallArray (tsThemes ts) (ti - 1)
-  where
-    !ti = scope `shiftR` 1
+scopeTheme = scopeThemeIn tsThemes
 
 -- | A scope's theme before any disabled scope faded it.
 scopeRawTheme :: Context -> Int -> IO Theme
-scopeRawTheme ctx scope
+scopeRawTheme = scopeThemeIn tsRaw
+
+-- | The theme a packed arena scope names in one of the scope arrays, or the
+-- base theme for theme index zero.
+{-# INLINE scopeThemeIn #-}
+scopeThemeIn :: (ThemeScopes -> SmallMutableArray RealWorld Theme) -> Context -> Int -> IO Theme
+scopeThemeIn arr ctx scope
   | ti == 0 = readIORef (ctxTheme ctx)
   | otherwise = do
       ts <- readIORef (ctxThemeScopes ctx)
-      readSmallArray (tsRaw ts) (ti - 1)
+      readSmallArray (arr ts) (ti - 1)
   where
     !ti = scope `shiftR` 1
 

@@ -282,16 +282,14 @@ strokeWalk w cap join miterLimit contours@(Rings cpts cstarts ctags) point end =
               else do
                 quad v (Point (vx + n1x) (vy + n1y)) (Point (vx + mx * scale) (vy + my * scale)) (Point (vx + n2x) (vy + n2y))
                 quad v (Point (vx - n1x) (vy - n1y)) (Point (vx - mx * scale) (vy - my * scale)) (Point (vx - n2x) (vy - n2y))
-      endCap inner@(Point ix iy) e@(Point ex ey) = case cap of
+      endCap inner e@(Point ex ey) = case cap of
         CapButt -> pure ()
         CapRound -> disc e
         CapSquare -> do
-          let dx = ex - ix
-              dy = ey - iy
-              len = max 1e-6 (sqrt (dx * dx + dy * dy))
-              ux = dx / len * hw
-              uy = dy / len * hw
-              (nx, ny) = normal inner e
+          -- The outward direction, hw long: the normal turned back.
+          let (nx, ny) = normal inner e
+              ux = ny
+              uy = negate nx
           -- Wound clockwise as built, like a segment's quad.
           emit4 (Point (ex - nx) (ey - ny)) (Point (ex - nx + ux) (ey - ny + uy)) (Point (ex + nx + ux) (ey + ny + uy)) (Point (ex + nx) (ey + ny))
       disc (Point cx cy) = do
@@ -325,8 +323,10 @@ strokeWalk w cap join miterLimit contours@(Rings cpts cstarts ctags) point end =
           0 -> pure ()
           1 -> do
             p <- pt 0
-            when (cap == CapRound) (disc p)
-            when (cap == CapSquare) (square p)
+            case cap of
+              CapButt -> pure ()
+              CapRound -> disc p
+              CapSquare -> square p
           _ -> do
             forM_ [0 .. n - 2] $ \i -> do
               a <- pt i

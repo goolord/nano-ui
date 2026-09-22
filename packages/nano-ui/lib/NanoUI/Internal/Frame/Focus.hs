@@ -117,24 +117,25 @@ syncWidgetLabels ctx = do
     nt <- getNodeType na idx
     wid <- getWidgetId na idx
     let key = intKey wid
+        -- The group keeps its selection, as the index @ownOf@ reads from a
+        -- member's style index, in the Int slot of the parent node's widget
+        -- id.
+        syncGroup ownOf = do
+          parent <- getParent na idx
+          si <- getStyleIdx na idx
+          groupWid <- getWidgetId na parent
+          let own = ownOf si
+              selected = findSlot fieldInt own (intKey groupWid) store
+          setNodeValue na idx (if selected == own then 1 else 0)
     case nt of
       NodeCheckbox ->
         -- A checkbox with no stored value keeps the value the view gave its
         -- node.
         forM_ (lookupSlot fieldInt key store) $ \v ->
           setNodeValue na idx (if intBool v then 1 else 0)
-      _
-        -- A radio option's style index is its option index. A tree row packs
-        -- its pre-order node index into the high bits of its style index.
-        -- The group keeps its selection, as one of those indices, in the Int
-        -- slot of the parent node's widget id.
-        | nt == NodeRadio || nt == NodeTree -> do
-            parent <- getParent na idx
-            si <- getStyleIdx na idx
-            groupWid <- getWidgetId na parent
-            let own
-                  | nt == NodeTree, (nodeIdx, _, _, _) <- treeDecodeStyle si = nodeIdx
-                  | otherwise = si
-                selected = findSlot fieldInt own (intKey groupWid) store
-            setNodeValue na idx (if selected == own then 1 else 0)
+      -- A radio option's style index is its option index.
+      NodeRadio -> syncGroup id
+      -- A tree row packs its pre-order node index into the high bits of its
+      -- style index.
+      NodeTree -> syncGroup (\si -> let (nodeIdx, _, _, _) = treeDecodeStyle si in nodeIdx)
       _ -> pure ()

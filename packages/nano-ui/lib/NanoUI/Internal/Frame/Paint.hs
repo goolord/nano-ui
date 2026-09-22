@@ -35,6 +35,7 @@ import Data.Primitive.PrimArray
   , unsafeFreezePrimArray
   , writePrimArray
   )
+import Data.Primitive.SmallArray (SmallArray)
 import qualified Data.Text as T
 import Data.Word (Word32)
 import NanoUI.Internal.Context
@@ -53,7 +54,8 @@ import NanoUI.Internal.Context
   , scopeTheme
   )
 import NanoUI.Internal.Draw
-  ( Layer (..)
+  ( DrawOp
+  , Layer (..)
   , beginLayer
   , currentClip
   , currentLayer
@@ -290,10 +292,14 @@ paintContainerNode env idx rect = do
   wid <- getWidgetId (peNodeArena env) idx
   mBuild <- lookupCustomDrawing ctx wid
   forM_ mBuild $ \(CustomDrawingEntry _ build) -> do
-    let fm = peFontMetrics env
-        da = peDrawArena env
-    cdc <- mkCustomDrawContext ctx fm wid
-    withClip da rect (emitDrawOps da fm (resolveTextFont ctx) (build cdc rect))
+    cdc <- mkCustomDrawContext ctx (peFontMetrics env) wid
+    emitDrawingOps env rect (build cdc rect)
+
+-- | A drawing's ops clipped to its rect, in the env's default font.
+emitDrawingOps :: PaintEnv -> Rect -> SmallArray DrawOp -> IO ()
+emitDrawingOps env rect ops =
+  let da = peDrawArena env
+   in withClip da rect (emitDrawOps da (peFontMetrics env) (resolveTextFont (peContext env)) ops)
 
 paintPanelNode :: PaintEnv -> NodeIdx -> Rect -> IO ()
 paintPanelNode env idx rect = do
@@ -421,20 +427,18 @@ paintImageNode env idx rect = do
 paintDrawingNode :: PaintEnv -> NodeIdx -> Rect -> IO ()
 paintDrawingNode env idx rect = do
   let ctx = peContext env
-      fm = peFontMetrics env
-      da = peDrawArena env
   wid <- getWidgetId (peNodeArena env) idx
   mCustomBuild <- lookupCustomDrawing ctx wid
   case mCustomBuild of
     Just (CustomDrawingEntry content customBuild) -> do
-      cdc <- mkCustomDrawContext ctx fm wid
+      cdc <- mkCustomDrawContext ctx (peFontMetrics env) wid
       ops <- cachedCustomDrawingOps ctx wid content rect cdc customBuild
-      withClip da rect (emitDrawOps da fm (resolveTextFont ctx) ops)
+      emitDrawingOps env rect ops
     Nothing -> do
       mBuild <- lookupDrawing ctx wid
       forM_ mBuild $ \(DrawingEntry content build) -> do
         ops <- cachedDrawingOps ctx wid content rect build
-        withClip da rect (emitDrawOps da fm (resolveTextFont ctx) ops)
+        emitDrawingOps env rect ops
 
 -- | Lower the children of @idx@ with the current paint env. NOINLINE keeps
 -- this recursive call out of the simplifier's loop analysis, so the whole

@@ -96,7 +96,7 @@ import NanoUI.Internal.Layout.Arena
   , walkAncestors
   )
 import NanoUI.Internal.Style (Padding (..), themePanel)
-import NanoUI.Internal.Types (Rect (..), V2 (..), rectContains, rectIntersect, rectUnion)
+import NanoUI.Internal.Types (Rect (..), V2 (..), rectContains, rectHit, rectIntersect, rectUnion)
 
 applyScrollOffsets :: Context -> IO ()
 applyScrollOffsets ctx = do
@@ -343,12 +343,10 @@ scrollHitSelf ctx idx nt mouse clip
         bars = textAreaBars fm field contentW contentH
       pure $ case rectIntersect clip field of
         Just fclip
-          | visibleHit fclip && (tabVertical bars || tabHorizontal bars) -> Just idx
+          | rectHit fclip mouse && (tabVertical bars || tabHorizontal bars) -> Just idx
         _ -> Nothing
-  | isScrollNode nt && visibleHit clip = pure (Just idx)
+  | isScrollNode nt && rectHit clip mouse = pure (Just idx)
   | otherwise = pure Nothing
- where
-  visibleHit r@(Rect _ _ rw rh) = rw > 0 && rh > 0 && rectContains r mouse
 
 -- Same clip stack as the span walk: scroll viewport (plus its bar lanes),
 -- then panel bounds.

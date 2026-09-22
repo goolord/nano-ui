@@ -14,12 +14,12 @@ import Data.Maybe (fromMaybe)
 import Data.Sequence (Seq)
 import qualified Data.Sequence as Seq
 import NanoUI.Internal.Context (Context (..), WidgetStore, getStore, intKey, modifyStore, slotKey)
-import NanoUI.Internal.Font (FontMetrics (..), lineWidthIO)
-import NanoUI.Internal.Frame.TextArea.Geometry (isMouseOnTextAreaScrollBar)
+import NanoUI.Internal.Font (FontMetrics, lineWidthIO)
+import NanoUI.Internal.Frame.TextArea.Geometry (isMouseOnTextAreaScrollBar, textAreaLineHeight)
 import NanoUI.Internal.Layout.Arena (NodeIdx, getNodeFontSize, getNodeRect, getWidgetId)
 import NanoUI.Internal.Store (Slot (..), fieldFloat, fieldPoint, findSlot, insertDyn, insertSlot, lookupDyn)
 import NanoUI.Internal.Style (FontStyle (..), FontVariant (..), FontWeight (..))
-import NanoUI.Internal.Types (Rect (..), V2, onGrid)
+import NanoUI.Internal.Types (Rect (..), V2)
 import qualified NanoUI.Widgets.TextBuffer as TB
 
 -- | Font the text-area content is laid out and painted in. Honors the node's
@@ -62,7 +62,7 @@ textAreaContentMetrics ctx idx = do
       gen <- readIORef (ctxMetricGen ctx)
       let buf = textAreaBuffer store key
           lns = TB.bufferLines buf
-          lineH = onGrid (fmSnapScale fm) (fmLineHeight fm)
+          lineH = textAreaLineHeight fm
           contentH = fromIntegral (max 1 (Seq.length lns)) * lineH
           (seenHead, seenTail) = TB.changedLines buf
           previous = case lookupDyn widthsKey store of
@@ -77,7 +77,9 @@ textAreaContentMetrics ctx idx = do
       fresh <- traverse (lineWidthIO fm) changed
       let widths = Seq.take keepHead measured <> fresh <> Seq.drop (Seq.length measured - keepTail) measured
           shift = Seq.length lns - Seq.length measured
-          freshWidest = Seq.foldlWithIndex (\best i w -> if w > snd best then (keepHead + i, w) else best) (-1, 0) fresh
+          widestFrom :: Int -> Seq Float -> (Int, Float)
+          widestFrom off =Seq.foldlWithIndex (\best i w -> if w > snd best then (off + i, w) else best) (-1, 0)
+          freshWidest = widestFrom keepHead fresh
           -- The widest line so far still counts when it was kept; only when
           -- an edit touched it do the widths need a full pass.
           -- A changed line at least as wide as the old widest also still wins.
@@ -85,7 +87,7 @@ textAreaContentMetrics ctx idx = do
             | widest >= 0 && widest < keepHead = pick (widest, widestW) freshWidest
             | widest >= 0 && widest >= Seq.length measured - keepTail = pick (widest + shift, widestW) freshWidest
             | widest >= 0 && snd freshWidest >= widestW = freshWidest
-            | otherwise = Seq.foldlWithIndex (\best i w -> if w > snd best then (i, w) else best) (-1, 0) widths
+            | otherwise = widestFrom 0 widths
           pick a b = if snd b > snd a then b else a
       modifyStore ctx $
         insertSlot fieldFloat cacheKeyF size

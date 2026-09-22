@@ -39,7 +39,6 @@ import Data.Vector.Generic qualified as G
 import Data.Vector.Generic.Mutable qualified as GM
 import Data.Vector.Unboxed qualified as U
 import Foreign.ForeignPtr (ForeignPtr)
-import Foreign.Ptr (Ptr)
 import GHC.Exts (RealWorld)
 import NanoUI.Internal.Style (FontStyle (..), FontVariant (..), FontWeight (..), TextDecoration (..))
 import NanoUI.Internal.Types (Color (..), Rect (..))
@@ -270,23 +269,19 @@ type BufferPool = IORef [(ForeignPtr Word8, Int)]
 
 data DrawArena = DrawArena
   { daVertexFPtr :: !(IORef (ForeignPtr Word8))
-  , daVertexPtr :: !(IORef (Ptr Word8))
   , daVertexCap :: !(IORef Int)
-  , daVertexCount :: !(IORef Int)
   , daVertexPool :: !BufferPool
   , daIndexFPtr :: !(IORef (ForeignPtr Word8))
-  , daIndexPtr :: !(IORef (Ptr Word8))
   , daIndexCap :: !(IORef Int)
-  , daIndexCount :: !(IORef Int)
   , daIndexPool :: !BufferPool
+  , daCounts :: !(MutablePrimArray RealWorld Int)
+  -- ^ Vertex count, index count, command count and the pending command's
+  -- start index, unboxed so the per-primitive writes do not allocate.
   , daCmdStore :: !(IORef (U.MVector RealWorld DrawCmd))
-  , daCmdCount :: !(IORef Int)
-  , daCmdCapacity :: !(IORef Int)
   , daCurrentLayer :: !(IORef Layer)
   , daCurrentClip :: !(MutablePrimArray RealWorld Float)
   -- ^ The current clip rect: x, y, width and height.
   , daCurrentTexture :: !(IORef Int)
-  , daCmdStartIndex :: !(IORef Int)
   , daSnapScale :: !(IORef Float)
   , daSquareGeometry :: !(IORef Bool)
   , daExternalText :: !(IORef Bool)

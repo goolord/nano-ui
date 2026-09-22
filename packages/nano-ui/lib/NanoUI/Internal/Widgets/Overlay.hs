@@ -19,7 +19,6 @@ import NanoUI.Internal.Context
   , intKey
   , seedFloatingPanel
   )
-import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Input
   ( inputWindowSize
   )
@@ -175,8 +174,27 @@ overlay kind shape open title child = do
         (layoutAlignY panel)
     enter wid = do
       when isModal (beginModal ctx)
-      seedFloatingPanel ctx wid
-        =<< floatingSeedRect ctx wid isModal seedW seedH margin winW winH
+      seedFloatingPanel ctx wid =<< seedRect wid
+    -- Last frame's rect, else the stored position and size, else centred
+    -- (modal) or at the window's top-right corner.
+    seedRect wid = do
+      mPrev <- getPrevRect ctx wid
+      case mPrev of
+        Just r | rectNonEmpty r -> pure r
+        _ -> do
+          store <- getStore ctx
+          let
+            k = intKey wid
+            pos = lookupSlot fieldPoint k store
+            sz = lookupSlot fieldPoint (slotKey SlotWinSize k) store
+            h1 = max seedH 1
+          pure $
+            case (pos, sz) of
+              (Just (x, y), Just (w, h)) | w > 0 && h > 0 -> Rect x y w h
+              (Just (x, y), _) -> Rect x y seedW h1
+              _
+                | isModal -> Rect ((winW - seedW) / 2) ((winH - h1) / 2) seedW h1
+                | otherwise -> Rect (max 0 (winW - seedW - margin)) margin seedW h1
     titleLabel = void (labelEx (titleLabelLayoutFor barH) title)
   floatingOverlay open isModal addOverlayNode enter $ do
     close <-
@@ -196,32 +214,3 @@ overlay kind shape open title child = do
       _ -> scrollWith (tight . grow) child
     when isModal (uiIO (endModal ctx))
     pure (respClicked close, r)
-
-floatingSeedRect ::
-  Context
-  -> WidgetId
-  -> Bool
-  -> Float
-  -> Float
-  -> Float
-  -> Float
-  -> Float
-  -> IO Rect
-floatingSeedRect ctx wid isModal minWidth minHeight margin winW winH = do
-  mPrev <- getPrevRect ctx wid
-  case mPrev of
-    Just r | rectNonEmpty r -> pure r
-    _ -> do
-      store <- getStore ctx
-      let
-        k = intKey wid
-        pos = lookupSlot fieldPoint k store
-        sz = lookupSlot fieldPoint (slotKey SlotWinSize k) store
-        h1 = max minHeight 1
-      pure $
-        case (pos, sz) of
-          (Just (x, y), Just (w, h)) | w > 0 && h > 0 -> Rect x y w h
-          (Just (x, y), _) -> Rect x y minWidth h1
-          _
-            | isModal -> Rect ((winW - minWidth) / 2) ((winH - h1) / 2) minWidth h1
-            | otherwise -> Rect (max 0 (winW - minWidth - margin)) margin minWidth h1

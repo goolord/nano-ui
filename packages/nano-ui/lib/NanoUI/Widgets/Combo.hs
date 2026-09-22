@@ -13,7 +13,7 @@ where
 import Control.Monad (foldM, when, (<$!>))
 import Data.Foldable (toList)
 import Data.IORef (writeIORef)
-import Data.Maybe (fromMaybe, isJust)
+import Data.Maybe (fromMaybe, isJust, listToMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Effectful (Eff, type (:>))
@@ -153,7 +153,7 @@ comboStep ci cs0 =
     displayed = ciRows ci
     contentW = ciContentW ci
     n = length displayed
-    vis = max 1 comboBoxMaxVisible
+    vis = comboBoxMaxVisible
     storedHi = csHighlight cs0
     storedWin = csWindow cs0
     storedX = csScrollX cs0
@@ -237,9 +237,8 @@ comboStep ci cs0 =
     dragOff' | startV = vGrab | startH = hGrab | otherwise = dragOff0
     -- Enter commits only an explicitly highlighted row (hover or Up/Down).
     picked = isFocus && n > 0 && hi' >= 0 && ciEnter ci
-    pickedText = case drop (max 0 hi') displayed of
-      chosen : _ | hi' >= 0 -> chosen
-      _ -> text
+    -- Only read when 'picked', so @hi'@ is a row.
+    pickedText = fromMaybe text (listToMaybe (drop hi' displayed))
     escDismiss = isFocus && ciEscape ci
     -- Commit points: Enter, a row click (the frame-side pick lands as a
     -- frame-start text the widget did not produce), and losing focus (which

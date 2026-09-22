@@ -202,7 +202,12 @@ collectNodeTextSpans ctx idx = do
       (_, _, maxW, _) <- getMinMax arena idx
       (wTag, _) <- getWidthSizing arena idx
       isRowChild <- parentIsRow arena idx
-      effMaxW <- if maxW < 1e8 then pure maxW else findAncestorMaxW arena idx
+      -- 'nodeTextLines' wraps a row child only at its own newlines, so
+      -- only then does the ancestor cap matter; skip the walk to the root.
+      effMaxW <-
+        if maxW < 1e8 || (isRowChild && not (T.any (== '\n') raw))
+          then pure maxW
+          else findAncestorMaxW arena idx
       let rect = Rect x y w h
           mStripe = tableStripeColor theme si
           variantFg = case textNodeFontVariant si of
@@ -430,12 +435,11 @@ computeWidgetTextPlacements ctx nt idx x y w h = do
       | otherwise -> do
           band@(Rect bx _ _ _) <- colorPickerPartRect (ctxNodeArena ctx) idx (Rect x y w h)
           let (currentY, _, newY, _) = colorPickerPreviewGeom fm band
-              labelH = fmLineHeight fm
           (cw, ch) <- measureTxt colorPickerCurrentLabel
           (nw, nh) <- measureTxt colorPickerNewLabel
           pure
-            [ (colorPickerCurrentLabel, bx, centeredTextY fm currentY labelH ch, cw, ch)
-            , (colorPickerNewLabel, bx, centeredTextY fm newY labelH nh, nw, nh)
+            [ (colorPickerCurrentLabel, bx, centeredTextY fm currentY lineH ch, cw, ch)
+            , (colorPickerNewLabel, bx, centeredTextY fm newY lineH nh, nw, nh)
             ]
     NodeSlider -> pure []
     NodeTextInput

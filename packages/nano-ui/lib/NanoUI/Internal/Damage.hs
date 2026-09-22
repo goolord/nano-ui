@@ -501,10 +501,8 @@ clipDamage ctx snap d owners = do
     scrollOffsetDamage ctx acc (fsStore snap) (fdStore d)
   storeKeyDamage ctx acc oldRects newRects owners
   let addAnim k =
-        unless (k == 0) $ do
-          clip <- keyViewportClip ctx k
-          forM_ [IM.lookup k oldRects, IM.lookup k newRects] $
-            mapM_ (mapM_ (addRect acc) . clipKeyRect k clip . rectInflate defaultDamageSlop)
+        unless (k == 0) $
+          resolveKeyDamage ctx acc oldRects newRects k (DamageInflated defaultDamageSlop)
   IS.foldr (\k rest -> addAnim k >> rest) (pure ()) (fsAnimKeys snap)
   IM.foldrWithKey
     (\k _ rest -> unless (IS.member k (fsAnimKeys snap)) (addAnim k) >> rest)
@@ -618,12 +616,17 @@ resolveDamageRequests ctx acc oldRects newRects reqs =
     ReqKey k bounds -> resolveKey k bounds
     ReqPeers wids bounds -> forM_ wids $ \wid -> resolveKey (intKey wid) bounds
   where
-    resolveKey k bounds = do
-      clip <- keyViewportClip ctx k
-      forM_ [IM.lookup k oldRects, IM.lookup k newRects] $
-        mapM_ $ \r -> do
-          let clipped = clipToViewport clip (resolveDamageRect bounds r)
-          when (rectNonEmpty clipped) $ addRect acc clipped
+    resolveKey = resolveKeyDamage ctx acc oldRects newRects
+
+-- | Damage key @k@'s old and new rects, resolved through @bounds@ and clipped
+-- to the key's viewport ('keyViewportClip').
+resolveKeyDamage :: Context -> RectUnion -> IM.IntMap Rect -> IM.IntMap Rect -> Int -> DamageBounds -> IO ()
+resolveKeyDamage ctx acc oldRects newRects k bounds = do
+  clip <- keyViewportClip ctx k
+  forM_ [IM.lookup k oldRects, IM.lookup k newRects] $
+    mapM_ $ \r -> do
+      let clipped = clipToViewport clip (resolveDamageRect bounds r)
+      when (rectNonEmpty clipped) $ addRect acc clipped
 
 -- | A running union of rects, as @x0, y0, x1, y1@ followed by how many of
 -- them lie outside every floating panel, and for a piece union the rects
@@ -887,9 +890,9 @@ storeKeyOwners na wanted = do
 
 -- | Damage for the changed store keys that are not widget keys, through the
 -- widgets owning them ('storeKeyOwners'): each owner once, as a 'ReqWidget'
--- with the standard slop.
+-- with the standard slop would.
 storeKeyDamage :: Context -> RectUnion -> IM.IntMap Rect -> IM.IntMap Rect -> IM.IntMap NodeIdx -> IO ()
-storeKeyDamage ctx acc oldRects newRects owners = do
-  wids <- mapM (getWidgetId (ctxNodeArena ctx)) (IS.toList (IS.fromList (IM.elems owners)))
-  resolveDamageRequests ctx acc oldRects newRects
-    [ReqWidget wid (DamageInflated defaultDamageSlop) | wid <- wids]
+storeKeyDamage ctx acc oldRects newRects owners =
+  forM_ (IS.toList (IS.fromList (IM.elems owners))) $ \idx -> do
+    wid <- getWidgetId (ctxNodeArena ctx) idx
+    resolveKeyDamage ctx acc oldRects newRects (intKey wid) (DamageInflated defaultDamageSlop)

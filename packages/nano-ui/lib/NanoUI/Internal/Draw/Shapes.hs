@@ -17,11 +17,12 @@ module NanoUI.Internal.Draw.Shapes
   , pushFilledTriangle
   , pushPolygonAA
   , pushPolylineAA
+  , points3
   ) where
 
 import Control.Monad (when)
 import Data.IORef (readIORef)
-import Data.Primitive.PrimArray (PrimArray, indexPrimArray, primArrayFromListN, sizeofPrimArray)
+import Data.Primitive.PrimArray (PrimArray, indexPrimArray, newPrimArray, primArrayFromListN, runPrimArray, sizeofPrimArray, writePrimArray)
 import Data.Word (Word32, Word8)
 import Foreign.Ptr (Ptr)
 import Foreign.Storable (pokeByteOff)
@@ -144,21 +145,45 @@ pokeStripAt vp ip base baseIdx vi ii x0 y0 x1 y1 bw r g b a = do
       !half = bw * 0.5
       !core = max 0 (half - 0.5)
       !outer = half + 0.5
-      pokeEnd !ev !ex !ey = do
-        let ((p0x, p0y), (p1x, p1y), (p2x, p2y), (p3x, p3y)) =
-              concentricOffsetsSIMD ex ey nx ny (-outer) (-core) core outer
-            !vBase = (base + vi + ev) * vertexSize
-        pokeVertexSIMD vp vBase p0x p0y r g b 0 whitePixelU whitePixelV
-        pokeVertexSIMD vp (vBase + 32) p1x p1y r g b a whitePixelU whitePixelV
-        pokeVertexSIMD vp (vBase + 64) p2x p2y r g b a whitePixelU whitePixelV
-        pokeVertexSIMD vp (vBase + 96) p3x p3y r g b 0 whitePixelU whitePixelV
+      pokeEnd !ev !ex !ey =
+        pokeBandVerts vp ((base + vi + ev) * vertexSize) True r g b a $
+          concentricOffsetsSIMD ex ey nx ny (-outer) (-core) core outer
   pokeEnd 0 x0 y0
   pokeEnd 4 x1 y1
   let !va = fromIntegral (base + vi) :: Word32
-      !vb = va + 4
-  pokeQuadIndices ip ((baseIdx + ii) * indexSize) va (va + 1) (vb + 1) vb
-  pokeQuadIndices ip ((baseIdx + ii + 6) * indexSize) (va + 1) (va + 2) (vb + 2) (vb + 1)
-  pokeQuadIndices ip ((baseIdx + ii + 12) * indexSize) (va + 2) (va + 3) (vb + 3) (vb + 2)
+  pokeBandIndices ip ((baseIdx + ii) * indexSize) True va (va + 4)
+
+-- | Poke one cross-section of a coverage-AA band at byte offset @vBase@: four
+-- points clear, solid, solid, clear, or with @hasCore@ off three, the two
+-- solid ones sharing the second point.
+{-# INLINE pokeBandVerts #-}
+pokeBandVerts ::
+  Ptr Word8 ->
+  Int ->
+  Bool ->
+  Float ->
+  Float ->
+  Float ->
+  Float ->
+  ((Float, Float), (Float, Float), (Float, Float), (Float, Float)) ->
+  IO ()
+pokeBandVerts vp vBase hasCore r g b a ((p0x, p0y), (p1x, p1y), (p2x, p2y), (p3x, p3y)) = do
+  pokeVertexSIMD vp vBase p0x p0y r g b 0 whitePixelU whitePixelV
+  pokeVertexSIMD vp (vBase + 32) p1x p1y r g b a whitePixelU whitePixelV
+  when hasCore $
+    pokeVertexSIMD vp (vBase + 64) p2x p2y r g b a whitePixelU whitePixelV
+  pokeVertexSIMD vp (vBase + if hasCore then 96 else 64) p3x p3y r g b 0 whitePixelU whitePixelV
+
+-- | Index the quads between two 'pokeBandVerts' cross-sections starting at
+-- vertices @va@ and @vb@, at byte offset @iOff@: three quads, or two without
+-- @hasCore@.
+{-# INLINE pokeBandIndices #-}
+pokeBandIndices :: Ptr Word8 -> Int -> Bool -> Word32 -> Word32 -> IO ()
+pokeBandIndices ip iOff hasCore va vb = do
+  pokeQuadIndices ip iOff va (va + 1) (vb + 1) vb
+  pokeQuadIndices ip (iOff + 24) (va + 1) (va + 2) (vb + 2) (vb + 1)
+  when hasCore $
+    pokeQuadIndices ip (iOff + 48) (va + 2) (va + 3) (vb + 3) (vb + 2)
 
 {-# INLINE pushRoundedRect #-}
 pushRoundedRect :: DrawArena -> Rect -> Float -> Color -> IO ()
@@ -357,23 +382,11 @@ pushRoundedStrokeRaw da (Rect px py w h) radius bw col
                       !outerAA = outerR + arcFeather
                   loopIO 0 n $ \i -> do
                     let !(ct, st) = cornerCosSin q i
-                        !v0 = base + vi + i * arcStride
-                        !vBase = v0 * vertexSize
-                        ((p0x, p0y), (p1x, p1y), (p2x, p2y), (p3x, p3y)) =
-                          concentricOffsetsSIMD ccx ccy ct st innerAA inner outerR outerAA
-                    pokeVertexSIMD vp vBase p0x p0y r g b 0 whitePixelU whitePixelV
-                    pokeVertexSIMD vp (vBase + 32) p1x p1y r g b a whitePixelU whitePixelV
-                    when hasCore $
-                      pokeVertexSIMD vp (vBase + 64) p2x p2y r g b a whitePixelU whitePixelV
-                    pokeVertexSIMD vp (vBase + (arcStride - 1) * vertexSize) p3x p3y r g b 0 whitePixelU whitePixelV
+                    pokeBandVerts vp ((base + vi + i * arcStride) * vertexSize) hasCore r g b a $
+                      concentricOffsetsSIMD ccx ccy ct st innerAA inner outerR outerAA
                   loopIO 0 (n - 1) $ \i -> do
                     let !va = fromIntegral (base + vi + i * arcStride) :: Word32
-                        !vb = va + fromIntegral arcStride
-                        !iOff = (baseIdx + ii + i * arcIndices) * indexSize
-                    pokeQuadIndices ip iOff va (va + 1) (vb + 1) vb
-                    pokeQuadIndices ip (iOff + 24) (va + 1) (va + 2) (vb + 2) (vb + 1)
-                    when hasCore $
-                      pokeQuadIndices ip (iOff + 48) (va + 2) (va + 3) (vb + 3) (vb + 2)
+                    pokeBandIndices ip ((baseIdx + ii + i * arcIndices) * indexSize) hasCore va (va + fromIntegral arcStride)
                 !viLR = if doTB then 16 else 0
                 !iiLR = if doTB then 36 else 0
                 !viC = stripCount * 8
@@ -489,8 +502,23 @@ pushFilledTriangle da x0 y0 x1 y1 x2 y2 =
     da
     ((min x0 (min x1 x2) + max x0 (max x1 x2)) * 0.5)
     y0
-    (primArrayFromListN 6 [x0, y0, x1, y1, x2, y2])
+    (points3 x0 y0 x1 y1 x2 y2)
     triangleIndices
+
+-- | Three points as the flat coordinate array 'pushPolygonAA' and
+-- 'pushPolylineAA' take, written straight into the array: a list literal
+-- through 'primArrayFromListN' is not fused and boxes every coordinate.
+{-# INLINE points3 #-}
+points3 :: Float -> Float -> Float -> Float -> Float -> Float -> PrimArray Float
+points3 x0 y0 x1 y1 x2 y2 = runPrimArray $ do
+  a <- newPrimArray 6
+  writePrimArray a 0 x0
+  writePrimArray a 1 y0
+  writePrimArray a 2 x1
+  writePrimArray a 3 y1
+  writePrimArray a 4 x2
+  writePrimArray a 5 y2
+  pure a
 
 triangleIndices :: PrimArray Int
 triangleIndices = primArrayFromListN 3 [0, 1, 2]
@@ -634,21 +662,13 @@ pushPolylineAA da pts w closed col
                 | i < n - 1 || closed = normalAt i
                 | otherwise = normalAt (n - 2)
               (mx, my) = miterOf ax ay bx by
-              ((p0x, p0y), (p1x, p1y), (p2x, p2y), (p3x, p3y)) =
-                concentricOffsetsSIMD (px i + ox) (py i + oy) mx my (-outer) (-core) core outer
-              !vBase = (base + 4 * i) * vertexSize
-          pokeVertexSIMD vp vBase p0x p0y r g b 0 whitePixelU whitePixelV
-          pokeVertexSIMD vp (vBase + 32) p1x p1y r g b a whitePixelU whitePixelV
-          pokeVertexSIMD vp (vBase + 64) p2x p2y r g b a whitePixelU whitePixelV
-          pokeVertexSIMD vp (vBase + 96) p3x p3y r g b 0 whitePixelU whitePixelV
+          pokeBandVerts vp ((base + 4 * i) * vertexSize) True r g b a $
+            concentricOffsetsSIMD (px i + ox) (py i + oy) mx my (-outer) (-core) core outer
         loopIO 0 (segs - 1) $ \i -> do
           let !j = if i + 1 >= n then 0 else i + 1
               !va = fromIntegral (base + 4 * i) :: Word32
               !vb = fromIntegral (base + 4 * j) :: Word32
-              !iOff = (baseIdx + 18 * i) * indexSize
-          pokeQuadIndices ip iOff va (va + 1) (vb + 1) vb
-          pokeQuadIndices ip (iOff + 24) (va + 1) (va + 2) (vb + 2) (vb + 1)
-          pokeQuadIndices ip (iOff + 48) (va + 2) (va + 3) (vb + 3) (vb + 2)
+          pokeBandIndices ip ((baseIdx + 18 * i) * indexSize) True va vb
   where
     !n = sizeofPrimArray pts `div` 2
     px i = indexPrimArray pts (2 * i)

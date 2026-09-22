@@ -78,22 +78,16 @@ newDrawArena = do
   vFPtr <- mallocForeignPtrBytes (vertexCapacity * vertexSize)
   iFPtr <- mallocForeignPtrBytes (indexCapacity * indexSize)
   daVertexFPtr <- newIORef vFPtr
-  daVertexPtr <- newIORef (unsafeForeignPtrToPtr vFPtr)
   daVertexCap <- newIORef vertexCapacity
-  daVertexCount <- newIORef 0
   daVertexPool <- newIORef []
   daIndexFPtr <- newIORef iFPtr
-  daIndexPtr <- newIORef (unsafeForeignPtrToPtr iFPtr)
   daIndexCap <- newIORef indexCapacity
-  daIndexCount <- newIORef 0
   daIndexPool <- newIORef []
+  daCounts <- newPrimArray countSlots
   daCmdStore <- newIORef =<< UM.unsafeNew cmdInitialCapacity
-  daCmdCount <- newIORef 0
-  daCmdCapacity <- newIORef cmdInitialCapacity
   daCurrentLayer <- newIORef LayerContent
   daCurrentClip <- newPrimArray 4
   daCurrentTexture <- newIORef glyphAtlasTextureId
-  daCmdStartIndex <- newIORef 0
   daSnapScale <- newIORef 0.0
   daSquareGeometry <- newIORef False
   daExternalText <- newIORef False
@@ -105,14 +99,27 @@ newDrawArena = do
 
 resetDrawArena :: DrawArena -> IO ()
 resetDrawArena da = do
-  writeIORef (daVertexCount da) 0
-  writeIORef (daIndexCount da) 0
-  writeIORef (daCmdCount da) 0
+  setPrimArray (daCounts da) 0 countSlots 0
   writeIORef (daCurrentLayer da) LayerContent
   setClip da (Rect 0 0 1e9 1e9)
   writeIORef (daCurrentTexture da) glyphAtlasTextureId
-  writeIORef (daCmdStartIndex da) 0
   writeIORef (daClipPieces da) emptyPrimArray
+
+-- 'daCounts' slots.
+vertexCountSlot, indexCountSlot, cmdCountSlot, cmdStartSlot, countSlots :: Int
+vertexCountSlot = 0
+indexCountSlot = 1
+cmdCountSlot = 2
+cmdStartSlot = 3
+countSlots = 4
+
+{-# INLINE getCount #-}
+getCount :: DrawArena -> Int -> IO Int
+getCount da = readPrimArray (daCounts da)
+
+{-# INLINE setCount #-}
+setCount :: DrawArena -> Int -> Int -> IO ()
+setCount da = writePrimArray (daCounts da)
 
 -- | Cut every command of this frame to each of these disjoint rects, as a
 -- copy per rect it meets. A frame whose damage lies in pieces far apart
@@ -176,13 +183,12 @@ poolGive pool ptr cap = do
 growBuffer ::
   Int ->
   IORef (ForeignPtr Word8) ->
-  IORef (Ptr Word8) ->
   IORef Int ->
   BufferPool ->
   Int ->
   Int ->
   IO ()
-growBuffer count fptrRef ptrRef capRef pool elemBytes needElems = do
+growBuffer count fptrRef capRef pool elemBytes needElems = do
   cap <- readIORef capRef
   let required = count + needElems
   when (required > cap) $ do
@@ -194,38 +200,34 @@ growBuffer count fptrRef ptrRef capRef pool elemBytes needElems = do
         copyArray newP oldP (count * elemBytes)
     poolGive pool oldFPtr cap
     writeIORef fptrRef newFPtr
-    writeIORef ptrRef (unsafeForeignPtrToPtr newFPtr)
     writeIORef capRef newCap
 
 ensureCapacity :: DrawArena -> Int -> Int -> IO ()
 ensureCapacity da needVerts needIndices = do
-  vCount <- readIORef (daVertexCount da)
-  growBuffer vCount (daVertexFPtr da) (daVertexPtr da) (daVertexCap da) (daVertexPool da) vertexSize needVerts
-  iCount <- readIORef (daIndexCount da)
-  growBuffer iCount (daIndexFPtr da) (daIndexPtr da) (daIndexCap da) (daIndexPool da) indexSize needIndices
+  vCount <- getCount da vertexCountSlot
+  growBuffer vCount (daVertexFPtr da) (daVertexCap da) (daVertexPool da) vertexSize needVerts
+  iCount <- getCount da indexCountSlot
+  growBuffer iCount (daIndexFPtr da) (daIndexCap da) (daIndexPool da) indexSize needIndices
 
 {-# INLINE ensureAndAlloc #-}
 ensureAndAlloc :: DrawArena -> Int -> Int -> IO (Ptr Word8, Ptr Word8, Int, Int)
 ensureAndAlloc da needV needI = do
-  vCount <- readIORef (daVertexCount da)
-  iCount <- readIORef (daIndexCount da)
+  vCount <- getCount da vertexCountSlot
+  iCount <- getCount da indexCountSlot
   vCap <- readIORef (daVertexCap da)
   iCap <- readIORef (daIndexCap da)
   unless (vCount + needV <= vCap && iCount + needI <= iCap) $
     ensureCapacity da needV needI
-  vp <- readIORef (daVertexPtr da)
-  ip <- readIORef (daIndexPtr da)
+  vp <- unsafeForeignPtrToPtr <$> readIORef (daVertexFPtr da)
+  ip <- unsafeForeignPtrToPtr <$> readIORef (daIndexFPtr da)
   pure (vp, ip, vCount, iCount)
 
 {-# NOINLINE growCmdStore #-}
-growCmdStore :: DrawArena -> Int -> IO ()
-growCmdStore da oldCap = do
-  let
-    newCap = oldCap * 2
+growCmdStore :: DrawArena -> IO ()
+growCmdStore da = do
   arr <- readIORef (daCmdStore da)
-  newArr <- UM.unsafeGrow arr (newCap - oldCap)
+  newArr <- UM.unsafeGrow arr (UM.length arr)
   writeIORef (daCmdStore da) newArr
-  writeIORef (daCmdCapacity da) newCap
 
 -- | Close the pending index run as a command. A run that continues the last
 -- command's state and index range extends that command instead. Only reached
@@ -234,13 +236,13 @@ growCmdStore da oldCap = do
 {-# NOINLINE flushCmd #-}
 flushCmd :: DrawArena -> IO ()
 flushCmd da = do
-  start <- readIORef (daCmdStartIndex da)
-  end <- readIORef (daIndexCount da)
+  start <- getCount da cmdStartSlot
+  end <- getCount da indexCountSlot
   when (end > start) $ do
     Rect cx cy cw ch <- currentClip da
     tex <- readIORef (daCurrentTexture da)
     layer <- readIORef (daCurrentLayer da)
-    n <- readIORef (daCmdCount da)
+    n <- getCount da cmdCountSlot
     arr <- readIORef (daCmdStore da)
     let
       off = fromIntegral start :: Word32
@@ -263,12 +265,11 @@ flushCmd da = do
             UM.unsafeWrite arr (n - 1) prev {cmdIndexCount = cmdIndexCount prev + cnt}
           pure same
     unless extended $ do
-      cap <- readIORef (daCmdCapacity da)
-      when (n >= cap) $ growCmdStore da cap
+      when (n >= UM.length arr) $ growCmdStore da
       arr' <- readIORef (daCmdStore da)
       UM.unsafeWrite arr' n (DrawCmd cx cy cw ch tex off cnt layer)
-      writeIORef (daCmdCount da) (n + 1)
-    writeIORef (daCmdStartIndex da) end
+      setCount da cmdCountSlot (n + 1)
+    setCount da cmdStartSlot end
 
 {-# INLINE currentLayer #-}
 currentLayer :: DrawArena -> IO Layer
@@ -280,7 +281,7 @@ beginLayer da layer = do
   when (cur /= layer) $ do
     flushCmd da
     writeIORef (daCurrentLayer da) layer
-    readIORef (daIndexCount da) >>= writeIORef (daCmdStartIndex da)
+    getCount da indexCountSlot >>= setCount da cmdStartSlot
 
 setClip :: DrawArena -> Rect -> IO ()
 setClip da (Rect x y w h) = do
@@ -330,9 +331,9 @@ finishDraw da = do
   flushCmd da
   vFPtr <- readIORef (daVertexFPtr da)
   iFPtr <- readIORef (daIndexFPtr da)
-  vCount <- readIORef (daVertexCount da)
-  iCount <- readIORef (daIndexCount da)
-  count0 <- readIORef (daCmdCount da)
+  vCount <- getCount da vertexCountSlot
+  iCount <- getCount da indexCountSlot
+  count0 <- getCount da cmdCountSlot
   arr0 <- readIORef (daCmdStore da)
   pieces <- readIORef (daClipPieces da)
   (arr, count) <-
@@ -438,14 +439,9 @@ unpackColorF (Color w) =
 -- commit the vertex/index counts afterwards. INLINE: erased at -O.
 {-# INLINE withVerts #-}
 withVerts :: DrawArena -> Int -> Int -> (Ptr Word8 -> Ptr Word8 -> Int -> Int -> Word32 -> IO ()) -> IO ()
-withVerts da needV needI f = do
-  (vp, ip, base, baseIdx) <- ensureAndAlloc da needV needI
-  let !vOff = base * vertexSize
-      !iOff = baseIdx * indexSize
-      !baseIdxWord = fromIntegral base :: Word32
-  f vp ip vOff iOff baseIdxWord
-  writeIORef (daVertexCount da) (base + needV)
-  writeIORef (daIndexCount da) (baseIdx + needI)
+withVerts da needV needI f =
+  withVertsRaw da needV needI $ \vp ip base baseIdx ->
+    f vp ip (base * vertexSize) (baseIdx * indexSize) (fromIntegral base)
 
 -- Like 'withVerts' but for primitives that index vertices relative to 'base'
 -- themselves instead of using one contiguous offset.
@@ -454,8 +450,8 @@ withVertsRaw :: DrawArena -> Int -> Int -> (Ptr Word8 -> Ptr Word8 -> Int -> Int
 withVertsRaw da needV needI f = do
   (vp, ip, base, baseIdx) <- ensureAndAlloc da needV needI
   f vp ip base baseIdx
-  writeIORef (daVertexCount da) (base + needV)
-  writeIORef (daIndexCount da) (baseIdx + needI)
+  setCount da vertexCountSlot (base + needV)
+  setCount da indexCountSlot (baseIdx + needI)
 
 -- | Reserve room for up to @maxV@ vertices / @maxI@ indices, hand the body a
 -- commit action, then record only the counts the body reports. Batches many
@@ -471,8 +467,8 @@ withVertsReserve ::
 withVertsReserve da maxV maxI f = do
   (vp, ip, base, baseIdx) <- ensureAndAlloc da maxV maxI
   f vp ip base baseIdx $ \nv ni -> do
-    writeIORef (daVertexCount da) (base + nv)
-    writeIORef (daIndexCount da) (baseIdx + ni)
+    setCount da vertexCountSlot (base + nv)
+    setCount da indexCountSlot (baseIdx + ni)
 
 -- | Strict numeric loop over inclusive bounds, without allocating a range list.
 {-# INLINE loopIO #-}

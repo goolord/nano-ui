@@ -127,7 +127,7 @@ cachedDrawingOps ctx wid content rect build = do
     if content == 0
       then isAnimatingKey ctx k
       else pure False
-  cached <- IM.lookup k . dcsDrawOpCache <$> readIORef (ctxDrawingCache ctx)
+  cached <- lookupIn dcsDrawOpCache ctx wid
   let hit = case cached of
         Just DrawOpCacheEntry {doeContent = c, doeBounds = r, doeOps = ops}
           | c == content && not animated -> Just (r, ops)
@@ -242,7 +242,7 @@ cachedCustomDrawingOps ::
 cachedCustomDrawingOps ctx wid content rect cdc build = do
   let k = intKey wid
   gen <- readIORef (ctxMetricGen ctx)
-  cached <- IM.lookup k . dcsCustomDrawOpCache <$> readIORef (ctxDrawingCache ctx)
+  cached <- lookupIn dcsCustomDrawOpCache ctx wid
   let hit = case cached of
         Just e | customEntryMatches e content rect cdc gen -> Just (cdeBounds e, cdeOps e)
         _ -> Nothing
@@ -274,7 +274,7 @@ refreshCustomDrawingOps ::
 refreshCustomDrawingOps ctx wid content rect cdc build = do
   let k = intKey wid
   gen <- readIORef (ctxMetricGen ctx)
-  cached <- IM.lookup k . dcsCustomDrawOpCache <$> readIORef (ctxDrawingCache ctx)
+  cached <- lookupIn dcsCustomDrawOpCache ctx wid
   let keyed = content /= 0
   case cached of
     -- A keyed widget that only moved keeps its ops: paint translates them, and
@@ -311,7 +311,7 @@ storeCustomDrawingOps ctx k content rect cdc gen ops =
 -- and checking the version costs nothing next to building the ops here.
 drawingOpsStale :: Context -> WidgetId -> Int -> Rect -> IO Bool
 drawingOpsStale ctx wid content rect = do
-  cached <- IM.lookup (intKey wid) . dcsDrawOpCache <$> readIORef (ctxDrawingCache ctx)
+  cached <- lookupIn dcsDrawOpCache ctx wid
   pure $ case cached of
     Just DrawOpCacheEntry {doeContent = c, doeBounds = r} -> c /= content && r == rect
     Nothing -> False

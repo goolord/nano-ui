@@ -12,7 +12,6 @@ module NanoUI.Internal.Frame.Paint.Widgets
 import Control.Monad (unless, when)
 import Data.IORef (readIORef)
 import Data.Maybe (fromMaybe)
-import Data.Primitive.PrimArray (primArrayFromListN)
 import qualified Data.Text as T
 import NanoUI.Internal.Context (Context (..), getStore)
 import NanoUI.Internal.Draw
@@ -20,6 +19,7 @@ import NanoUI.Internal.Draw
   , pushCircle
   , pushFilledTriangle
   , pushLine
+  , points3
   , pushPolylineAA
   , pushRoundedRect
   , pushRoundedRectRaw
@@ -76,7 +76,7 @@ import NanoUI.Internal.Layout.Arena
   , getWidgetId
   )
 import NanoUI.Internal.Style (AlignX (..), Style, styleBg, styleBorder, styleFg, themeAccent, themeInput, themeOnAccent)
-import NanoUI.Internal.Types (Color (..), Rect (..), clamp, clamp01, colorA, lerpColor, onGrid, rectInflate)
+import NanoUI.Internal.Types (Color (..), Rect (..), clamp, clamp01, colorA, lerpColor, onGrid, rectInflate, rectNonEmpty)
 import NanoUI.Internal.WidgetText
   ( hasFlag
   , buttonCloseTrailing
@@ -114,30 +114,27 @@ paintTextInputNode env idx rect@(Rect x y w h) = do
   style <- widgetVisualStyle ctx NodeTextInput idx
   focus <- textInputFocused ctx idx
   si <- getStyleIdx (peNodeArena env) idx
-  if hasFlag textInputFlagNumeric si
-    then paintNumericField ctx da fm style idx focus rect
-    else
-      if hasFlag textInputFlagSelectable si
-        then paintSelectableText env style idx rect
-        else
-          if hasFlag textInputFlagSearch si
-            then do
-              opts <- getOptions (peNodeArena env) idx
-              if null opts
-                then paintSearchInput ctx da fm style idx focus rect
-                else paintComboField ctx da fm style idx focus rect
-            else do
-              let field = textInputFieldRect fm x y w h
-              paintStyledRect da style field
-              placements <- computeWidgetTextPlacements ctx NodeTextInput idx x y w h
-              case placements of
-                (txt, fx, fy, _, _) : _ -> do
-                  ffg <- textInputFg ctx style idx focus
-                  -- The placement above settled the scroll, so read it back
-                  -- rather than measure the caret again.
-                  mEdit <- readFieldEdit ctx idx x y w h =<< textInputScroll ctx idx
-                  paintClippedFieldText ctx da fm style idx mEdit (textInputFieldTextClip fm field) fx fy txt ffg
-                [] -> pure ()
+  let paint
+        | hasFlag textInputFlagNumeric si = paintNumericField ctx da fm style idx focus rect
+        | hasFlag textInputFlagSelectable si = paintSelectableText env style idx rect
+        | hasFlag textInputFlagSearch si = do
+            opts <- getOptions (peNodeArena env) idx
+            if null opts
+              then paintSearchInput ctx da fm style idx focus rect
+              else paintComboField ctx da fm style idx focus rect
+        | otherwise = do
+            let field = textInputFieldRect fm x y w h
+            paintStyledRect da style field
+            placements <- computeWidgetTextPlacements ctx NodeTextInput idx x y w h
+            case placements of
+              (txt, fx, fy, _, _) : _ -> do
+                ffg <- textInputFg ctx style idx focus
+                -- The placement above settled the scroll, so read it back
+                -- rather than measure the caret again.
+                mEdit <- readFieldEdit ctx idx x y w h =<< textInputScroll ctx idx
+                paintClippedFieldText ctx da fm style idx mEdit (textInputFieldTextClip fm field) fx fy txt ffg
+              [] -> pure ()
+  paint
 
 -- | Multi-line text area.
 {-# NOINLINE paintTextAreaNode #-}
@@ -214,7 +211,7 @@ paintWidgetBackground env idx nt style si menuRowRect value (Rect x y w h) = do
     NodeTree -> do
       let (_, depth, hasKids, expanded) = treeDecodeStyle si
       when hasKids $
-        drawTreeChevron da fm x y w h depth expanded (styleFg style)
+        drawTreeChevron da fm x y h depth expanded (styleFg style)
     NodeSlider -> paintSliderBody env x y w h value
     NodeButton -> when isClose $ drawCloseIcon da (buttonVisualStyle si == buttonCloseTrailing) x y w h (styleFg style)
     NodeSelect -> drawSelectChevron da False x y w h (styleFg style)
@@ -235,14 +232,11 @@ paintSliderBody env x y w h value = do
       well = lerpColor (styleBg (themeInput theme)) outline 0.35
       bw = 1
       innerR = max 0 (trackR - bw)
-      innerX = tx + bw
-      innerY = ty + bw
-      innerW = tw - 2 * bw
-      innerH = th - 2 * bw
+      !inner@(Rect innerX innerY innerW innerH) = rectInflate (-bw) track
       innerFillW = max 0 (innerW * clamp01 value)
   pushRoundedStroke da track trackR bw outline
-  when (innerW > 0 && innerH > 0) $
-    pushRoundedRect da (Rect innerX innerY innerW innerH) innerR well
+  when (rectNonEmpty inner) $
+    pushRoundedRect da inner innerR well
   when (innerFillW > 0) $ do
     let fillR =
           if innerFillW >= innerW - 0.5
@@ -356,9 +350,15 @@ drawStepArrow :: DrawArena -> Bool -> Rect -> Color -> IO ()
 drawStepArrow da up (Rect sx sy sw sh) col = do
   let cx = sx + sw / 2
       cy = sy + sh / 2 + (if up then 1 else -1)
-      hw = 3.6
       tip = if up then -2.4 else 2.4
-  pushFilledTriangle da (cx - hw) (cy - tip * 0.35) (cx + hw) (cy - tip * 0.35) cx (cy + tip) col
+  pushArrowhead da cx cy 3.6 tip col
+
+-- | A filled arrowhead @2 * hw@ wide around @(cx, cy)@, its point @tip@ below
+-- the centre (above for a negative @tip@) and its base a third of that the
+-- other way. Shared by the stepper arrows and the select chevron.
+pushArrowhead :: DrawArena -> Float -> Float -> Float -> Float -> Color -> IO ()
+pushArrowhead da cx cy hw tip =
+  pushFilledTriangle da (cx - hw) (cy - tip * 0.35) (cx + hw) (cy - tip * 0.35) cx (cy + tip)
 
 -- | Caption-less search field: box fills the node rect, magnifier on the left,
 -- clear (×) on the right when there is text, and the editable value / caret /
@@ -518,13 +518,12 @@ drawSelectChevron :: DrawArena -> Bool -> Float -> Float -> Float -> Float -> Co
 drawSelectChevron da up x y w h col = do
   let cx = selectChevronCenterX x w
       cy = y + h / 2
-      hw = 4.2
       tip = if up then -2.6 else 2.6
-  pushFilledTriangle da (cx - hw) (cy - tip * 0.35) (cx + hw) (cy - tip * 0.35) cx (cy + tip) col
+  pushArrowhead da cx cy 4.2 tip col
 
-drawTreeChevron :: DrawArena -> FontMetrics -> Float -> Float -> Float -> Float -> Int -> Bool -> Color -> IO ()
-drawTreeChevron da fm x y w h depth expanded col = do
-  let Rect cx cy cw ch = treeChevronRect fm x y w h depth
+drawTreeChevron :: DrawArena -> FontMetrics -> Float -> Float -> Float -> Int -> Bool -> Color -> IO ()
+drawTreeChevron da fm x y h depth expanded col = do
+  let Rect cx cy cw ch = treeChevronRect fm x y h depth
       mx = cx + cw / 2
       my = cy + ch / 2
       s = min 4.5 (min cw ch * 0.28)
@@ -532,6 +531,6 @@ drawTreeChevron da fm x y w h depth expanded col = do
       -- One mitered polyline, not two capped lines: the caps of a line this
       -- thin are single-pixel squares, and the arms snapped apart.
       pts
-        | expanded = [mx - s, my - s * 0.45, mx, my + s * 0.7, mx + s, my - s * 0.45]
-        | otherwise = [mx - s * 0.45, my - s, mx + s * 0.7, my, mx - s * 0.45, my + s]
-  pushPolylineAA da (primArrayFromListN 6 pts) t False col
+        | expanded = points3 (mx - s) (my - s * 0.45) mx (my + s * 0.7) (mx + s) (my - s * 0.45)
+        | otherwise = points3 (mx - s * 0.45) (my - s) (mx + s * 0.7) my (mx - s * 0.45) (my + s)
+  pushPolylineAA da pts t False col

@@ -497,14 +497,30 @@ customMeasure ::
   FontMetrics -> CustomMeasureFn -> (SizingTag, Float) -> (SizingTag, Float) -> Float -> Float ->
   ((Float, Float), CustomMeasureRecord)
 customMeasure fm measureFn (wTag, wVal) (hTag, hVal) maxW maxH =
-  let aw = case wTag of SizingFixed -> wVal; _ -> if maxW < 1e8 then maxW else 1e9
-      ah = case hTag of SizingFixed -> hVal; _ -> if maxH < 1e8 then maxH else 1e9
+  let aw = case wTag of SizingFixed -> wVal; _ -> offeredExtent maxW
+      ah = case hTag of SizingFixed -> hVal; _ -> offeredExtent maxH
       (mw, mh) = measureFn fm (aw, ah)
       !aw' = castFloatToWord32 aw
       !ah' = castFloatToWord32 ah
       !mw' = castFloatToWord32 mw
       !mh' = castFloatToWord32 mh
    in ((mw, mh), (aw', ah', mw', mh'))
+
+-- | The space a custom measure is offered along an axis without a fixed
+-- size: the node's maximum when it is finite (under 1e8), and 1e9 otherwise.
+{-# INLINE offeredExtent #-}
+offeredExtent :: Float -> Float
+offeredExtent m = if m < 1e8 then m else 1e9
+
+-- | A measured drawing's height at width @w@, clamped to @minH@ and @maxH@,
+-- or @fallback@ when its widget has no custom measure.
+{-# INLINE drawingHeightAt #-}
+drawingHeightAt :: SolveEnv -> NodeIdx -> Float -> Float -> Float -> Float -> IO Float
+drawingHeightAt SolveEnv {seArena = na, seFm = fm, seLookupMeasure = lookupMeasure} idx w minH maxH fallback = do
+  wid <- getWidgetId na idx
+  lookupMeasure wid >>= \case
+    Just measure -> pure (clamp minH maxH (snd (measure fm (w, offeredExtent maxH))))
+    Nothing -> pure fallback
 
 -- | The width a text node that is not a row's child wraps at, from its
 -- effective max width, width sizing and assigned width: 1e8 or more when
@@ -1001,7 +1017,7 @@ recomputeFitHeightAtWidth env idx availW = do
   snd <$> memoizeWidth na (naFitMemo na) idx availW ((,) 0 <$> recomputeFitHeightAtWidthGo env idx availW)
 
 recomputeFitHeightAtWidthGo :: SolveEnv -> NodeIdx -> Float -> IO Float
-recomputeFitHeightAtWidthGo env@SolveEnv {seArena = na, seFm = fm, seLookupMeasure = lookupMeasure} idx availW = do
+recomputeFitHeightAtWidthGo env@SolveEnv {seArena = na} idx availW = do
   nt <- getNodeType na idx
   (minW, minH, maxW, maxH) <- getMinMax na idx
   (wTag, wVal) <- getWidthSizing na idx
@@ -1027,11 +1043,7 @@ recomputeFitHeightAtWidthGo env@SolveEnv {seArena = na, seFm = fm, seLookupMeasu
 
     -- A measured drawing, like wrapped text, can be taller when narrower.
     NodeDrawing
-      | hTag == SizingFit -> do
-          wid <- getWidgetId na idx
-          lookupMeasure wid >>= \case
-            Just measure -> pure (clamp minH maxH (snd (measure fm (effW', if maxH < 1e8 then maxH else 1e9))))
-            Nothing -> pure oldH
+      | hTag == SizingFit -> drawingHeightAt env idx effW' minH maxH oldH
       | otherwise -> pure oldH
 
     _ | (nt == NodeContainer || nt == NodePanel), hTag /= SizingFixed -> do
@@ -1075,7 +1087,7 @@ loadChildrenScratch na parent sizeOf = do
         writePrimArray hArr i h
         pure (i + 1)
   n <- foldFlowChildrenM na parent write 0
-  reverseScratchTriple idxArr wArr hArr 0 (n - 1)
+  reverseScratchTriple idxArr wArr hArr (n - 1)
   pure n
 
 -- | Scratch size of a flow child: its measured box, with percent sizing
@@ -1117,7 +1129,7 @@ positionNodeA ::
   Float ->
   Float ->
   IO ()
-positionNodeA env@SolveEnv {seArena = na, seArrays = a, seFm = fm, seLookupMeasure = lookupMeasure} depth idx x y availW availH = do
+positionNodeA env@SolveEnv {seArena = na, seArrays = a} depth idx x y availW availH = do
   minW <- readStyle a idx styleMinW
   minH <- readStyle a idx styleMinH
   maxW <- readStyle a idx styleMaxW
@@ -1149,13 +1161,10 @@ positionNodeA env@SolveEnv {seArena = na, seArrays = a, seFm = fm, seLookupMeasu
           then pure (clamp minH maxH (max intrinsicH availH))
           else
             if nt == NodeDrawing && hTag == SizingFit && w /= intrinsicW
-              then do
+              then
                 -- A measured drawing laid out at another width than it was
                 -- measured at takes its height at the width it got.
-                wid <- getWidgetId na idx
-                lookupMeasure wid >>= \case
-                  Just measure -> pure (clamp minH maxH (snd (measure fm (w, if maxH < 1e8 then maxH else 1e9))))
-                  Nothing -> pure (clamp minH maxH (resolveSize hTag hVal intrinsicH availH minH maxH))
+                drawingHeightAt env idx w minH maxH (clamp minH maxH (resolveSize hTag hVal intrinsicH availH minH maxH))
               else pure (clamp minH maxH (resolveSize hTag hVal intrinsicH availH minH maxH))
   setRect na idx x y w h
   when (isContainerNode nt) $ do
@@ -1277,12 +1286,9 @@ hasPanelAncestor na = go
       | p < 0 = pure False
       | otherwise = do
           nt <- getNodeType na p
-          case nt of
-            NodePanel -> pure True
-            NodeWindow -> pure False
-            NodeModal -> pure False
-            NodePopup -> pure False
-            _ -> getParent na p >>= go
+          if nt == NodePanel
+            then pure True
+            else if isFloatingNode nt then pure False else getParent na p >>= go
 
 positionColumnScroll ::
   SolveEnv ->
@@ -1384,14 +1390,12 @@ childRowCrossSize na ci availCross = do
 columnChildHeight :: NodeArena -> NodeIdx -> Float -> IO Float
 columnChildHeight na ci scratchH = do
   (hTag, _) <- getHeightSizing na ci
+  (_, minH, _, maxH) <- getMinMax na ci
   case hTag of
     SizingFixed -> do
-      (_, minH, _, maxH) <- getMinMax na ci
       (_, _, _, ih) <- getRect na ci
       pure (clamp minH maxH ih)
-    _ -> do
-      (_, minH, _, maxH) <- getMinMax na ci
-      pure (clamp minH maxH scratchH)
+    _ -> pure (clamp minH maxH scratchH)
 
 {-# INLINE withAxisSnaps #-}
 withAxisSnaps ::
@@ -1564,10 +1568,10 @@ positionColumnFromParent env@SolveEnv {seArena = na} depth parent gap chrome px 
               go (i + 1) (y + placedH + gapAfter)
     go 0 cy
 
-
+-- | Reverse elements 0 through @hi@ of the three arrays together.
 {-# INLINE reverseScratchTriple #-}
-reverseScratchTriple :: IOArr Int -> IOArr Float -> IOArr Float -> Int -> Int -> IO ()
-reverseScratchTriple idxArr mainArr crossArr lo hi = do
+reverseScratchTriple :: IOArr Int -> IOArr Float -> IOArr Float -> Int -> IO ()
+reverseScratchTriple idxArr mainArr crossArr hi = do
   let go !a !b
         | a >= b = pure ()
         | otherwise = do
@@ -1575,7 +1579,7 @@ reverseScratchTriple idxArr mainArr crossArr lo hi = do
             swapPrim mainArr a b
             swapPrim crossArr a b
             go (a + 1) (b - 1)
-  go lo hi
+  go 0 hi
 
 {-# INLINE swapPrim #-}
 swapPrim :: (Prim a) => IOArr a -> Int -> Int -> IO ()
@@ -1609,7 +1613,7 @@ distributeScratch na n avail gapSum horizontal = do
     then do
       growTotal <- sumFactors growFactor na idxArr horizontal n
       if growTotal <= 0
-        then copyScratchRange wArr hArr outW outH 0 n
+        then copyScratch wArr hArr outW outH n
         else do
           -- Grow children share the free space by factor, but no child is
           -- squeezed below its content size (a min-content floor, like CSS
@@ -1632,18 +1636,18 @@ distributeScratch na n avail gapSum horizontal = do
         then do
           shrinkTotal <- sumFactors shrinkFactor na idxArr horizontal n
           if shrinkTotal <= 0
-            then copyScratchRange wArr hArr outW outH 0 n
+            then copyScratch wArr hArr outW outH n
             else applyShrink na idxArr wArr hArr outW outH horizontal (negate slack) shrinkTotal 0 n
-        else copyScratchRange wArr hArr outW outH 0 n
+        else copyScratch wArr hArr outW outH n
 
--- | @out[i] = (w[i], h[i])@ for the range.
-copyScratchRange :: IOArr Float -> IOArr Float -> IOArr Float -> IOArr Float -> Int -> Int -> IO ()
-{-# INLINE copyScratchRange #-}
-copyScratchRange wArr hArr outW outH !i !end
-  | i >= end = pure ()
+-- | @out[i] = (w[i], h[i])@ for the first @n@ children.
+copyScratch :: IOArr Float -> IOArr Float -> IOArr Float -> IOArr Float -> Int -> IO ()
+{-# INLINE copyScratch #-}
+copyScratch wArr hArr outW outH !n
+  | n <= 0 = pure ()
   | otherwise = do
-      copyMutablePrimArray outW i wArr i (end - i)
-      copyMutablePrimArray outH i hArr i (end - i)
+      copyMutablePrimArray outW 0 wArr 0 n
+      copyMutablePrimArray outH 0 hArr 0 n
 
 {-# INLINE sumScratchAxis #-}
 sumScratchAxis :: IOArr Float -> IOArr Float -> Bool -> Int -> Int -> Float -> IO Float

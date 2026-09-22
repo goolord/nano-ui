@@ -154,7 +154,7 @@ floatingOverlay open dismissable addPanel enter body = do
       -- Hovered is the pointer on the panel as the panel's own layer sees it,
       -- so whatever is in front of the panel takes the hover with it.
       (mouse, (closed, r)) <-
-        floatingPanel True wid (addPanel wid) (enter wid) ((,) <$> uiMousePos <*> body)
+        floatingPanel wid (addPanel wid) (enter wid) ((,) <$> uiMousePos <*> body)
       panel <- fromMaybe (Rect 0 0 0 0) <$> lastRect wid
       outside <-
         if dismissable && rectNonEmpty panel
@@ -162,7 +162,7 @@ floatingOverlay open dismissable addPanel enter body = do
           else pure False
       let dismissed = closed || outside
       pure
-        ( mkResponse wid panel (rectHit panel mouse) False dismissed dismissed
+        ( mkResponse wid panel (rectHit panel mouse) dismissed dismissed
         , Just r
         )
 
@@ -172,10 +172,20 @@ tooltipWidget ::
   r ->
   Eff es a ->
   Eff es (Maybe a)
-tooltipWidget target child =
-  snd <$> popup (respHovered target) cfg child
+tooltipWidget target child = snd <$> hoverPopup PlacementBelow target child
+
+-- | A non-dismissable popup at @placement@ around @target@, open while the
+-- pointer is over it.
+hoverPopup ::
+  (Ui :> es, HasResponse r) =>
+  PopupPlacement ->
+  r ->
+  Eff es a ->
+  Eff es (Response, Maybe a)
+hoverPopup placement target =
+  popup (respHovered target) cfg
   where
-    cfg = (defaultPopupConfig (AnchorRect (respRect target))) {cfgPlacement = PlacementBelow, cfgDismissable = False}
+    cfg = (defaultPopupConfig (AnchorRect (respRect target))) {cfgPlacement = placement, cfgDismissable = False}
 
 -- | Attach a rich tooltip widget to an inner UI computation.
 withTooltip ::
@@ -196,10 +206,7 @@ tooltipAt ::
   r ->
   Text ->
   Eff es ()
-tooltipAt placement target txt =
-  void (popup (respHovered target) cfg (label txt))
-  where
-    cfg = (defaultPopupConfig (AnchorRect (respRect target))) {cfgPlacement = placement, cfgDismissable = False}
+tooltipAt placement target txt = void (hoverPopup placement target (label txt))
 
 -- | Text shown below a widget while the pointer is over it.
 --

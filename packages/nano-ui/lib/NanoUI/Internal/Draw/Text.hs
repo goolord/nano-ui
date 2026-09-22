@@ -264,13 +264,10 @@ pushPreparedTextStyledQuads da fm weight fstyle deco x y txt col
             WeightBold -> [0, 1]
             WeightExtraBold -> [0, 1, 1.5]
             WeightBlack -> [0, 1, 1.5, 2]
-      if slant == 0 && weight == WeightNormal
-        then pushPreparedTextQuads da fm px py txt col
-        else do
-          shaped <- drawShaped fm txt
-          forM_ passes $ \k -> case shaped of
-            Just glyphs -> pushShapedQuads da fm slant (px + k * bOff) py glyphs col
-            Nothing -> pushGlyphQuads da fm slant (px + k * bOff) py txt col
+      shaped <- drawShaped fm txt
+      forM_ passes $ \k -> case shaped of
+        Just glyphs -> pushShapedQuads da fm slant (px + k * bOff) py glyphs col
+        Nothing -> pushGlyphQuads da fm slant (px + k * bOff) py txt col
       when (deco /= DecorationNone) $ do
         let !textW = lineWidth fm txt
             !thick = max 1.0 (0.06 * lh)

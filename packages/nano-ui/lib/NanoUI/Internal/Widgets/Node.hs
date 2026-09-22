@@ -165,7 +165,7 @@ instance Semigroup Response where
       (h1 || h2) (p1 || p2) (c1 || c2) (ch1 || ch2) (s1 || s2) (rp1 || rp2) (rc1 || rc2)
 
 instance Monoid Response where
-  mempty = mkResponse (WidgetId 0) (Rect 0 0 0 0) False False False False
+  mempty = mkResponse (WidgetId 0) (Rect 0 0 0 0) False False False
 
 unionRespRect :: Rect -> Rect -> Rect
 unionRespRect a b
@@ -191,9 +191,10 @@ inertResponse :: Response -> Response
 inertResponse r =
   r {rawRespHovered = False, rawRespPressed = False, rawRespClicked = False, rawRespRightPressed = False, rawRespRightClicked = False}
 
-mkResponse :: WidgetId -> Rect -> Bool -> Bool -> Bool -> Bool -> Response
-mkResponse wid rect hovered pressed clicked changed =
-  Response wid rect hovered pressed clicked changed False False False
+-- | An unpressed response with the given hover, click, and change flags.
+mkResponse :: WidgetId -> Rect -> Bool -> Bool -> Bool -> Response
+mkResponse wid rect hovered clicked changed =
+  Response wid rect hovered False clicked changed False False False
 
 emptyModalResp :: WidgetId -> Response
 emptyModalResp wid = mempty {rawRespId = wid}
@@ -252,10 +253,10 @@ withContainerNode scoped idx child = do
 -- layer, and @body@ runs as a layer of its own, with the pointer when the
 -- panel is what the frame routed it to. @addPanel@ adds the node under the
 -- given parent; @enter@ runs once the node is pushed (seeding its rect,
--- opening a modal).
+-- opening a modal). The body runs in a fresh id scope.
 floatingPanel ::
-  Ui :> es => Bool -> WidgetId -> (Int -> IO NodeIdx) -> IO () -> Eff es a -> Eff es a
-floatingPanel scoped wid addPanel enter body = do
+  Ui :> es => WidgetId -> (Int -> IO NodeIdx) -> IO () -> Eff es a -> Eff es a
+floatingPanel wid addPanel enter body = do
   ctx <- askContext
   let arena = ctxNodeArena ctx
   idx <- uiIO $ do
@@ -263,7 +264,7 @@ floatingPanel scoped wid addPanel enter body = do
     idx <- addPanel =<< rootAttachParent arena (parentIdx stack)
     setWidgetId arena idx wid
     pure idx
-  withContainerNode scoped idx $ do
+  withContainerNode True idx $ do
     -- A modal has to be entered first: that is what lets its own body through.
     uiIO enter
     frame <- askFrameInput
@@ -398,7 +399,7 @@ resolveInteraction ctx inp wid = do
     rect = fromMaybe (Rect 0 0 0 0) mrect
     canHit = rectHit rect mouse || pending == wid
   if not canHit
-    then pure $! mkResponse wid rect False False False False
+    then pure $! mkResponse wid rect False False False
     else do
       disabled <- isDisabled ctx wid
       mIdx <- findNodeByWidgetId ctx wid

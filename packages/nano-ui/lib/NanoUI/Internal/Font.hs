@@ -373,8 +373,8 @@ treeRowLeading fm depth =
   treeIndentStep fm * fromIntegral (max 0 depth) + treeChevronLeading fm
 
 {-# INLINE treeChevronRect #-}
-treeChevronRect :: FontMetrics -> Float -> Float -> Float -> Float -> Int -> Rect
-treeChevronRect fm x y _w h depth =
+treeChevronRect :: FontMetrics -> Float -> Float -> Float -> Int -> Rect
+treeChevronRect fm x y h depth =
   let indent = treeIndentStep fm * fromIntegral (max 0 depth)
       lead = max 1 (treeChevronLeading fm)
    in Rect (x + indent) y lead h

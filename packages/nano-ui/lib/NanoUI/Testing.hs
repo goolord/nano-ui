@@ -223,7 +223,6 @@ import NanoUI.Internal.Draw
   , drawCmdNull
   , drawCmdCount
   , drawTextBox
-  , drawVertices
   , indexSize
   , vertexSize
   )

@@ -128,7 +128,6 @@ implicitLevel :: Int -> Class -> Int
 implicitLevel base k
   | even base = case k of
       R -> base + 1
-      AL -> base + 1
       AN -> base + 2
       EN -> base + 2
       _ -> base

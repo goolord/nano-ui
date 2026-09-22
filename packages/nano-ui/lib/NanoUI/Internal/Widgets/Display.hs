@@ -47,6 +47,7 @@ import NanoUI.Internal.Style
   , alignMid
   , defaultLayout
   , fillW
+  , fixedWH
   , fontBold
   , fontDanger
   , fontItalic
@@ -98,17 +99,18 @@ underline = labelWith fontUnderline
 -- | Key/value row: a muted key on the left, the value right-aligned. Trailing
 -- whitespace in the value is dropped.
 kv :: Ui :> es => Text -> Text -> Eff es ()
-kv k v =
-  row' (tight . gap 12 . alignMid . fillW $ defaultLayout) $ do
-    void (labelEx (fontMuted . tight . minW 88 $ defaultLayout) k)
-    void (labelEx (tight . fillW . alignEnd $ defaultLayout) (T.stripEnd v))
+kv = kvRow fontMuted id
 
 -- | Key/value row with a monospace value.
 kvMono :: Ui :> es => Text -> Text -> Eff es ()
-kvMono k v =
+kvMono = kvRow id fontMono
+
+-- | The row behind 'kv' and 'kvMono', given the key's and the value's font.
+kvRow :: Ui :> es => (Layout -> Layout) -> (Layout -> Layout) -> Text -> Text -> Eff es ()
+kvRow keyF valF k v =
   row' (tight . gap 12 . alignMid . fillW $ defaultLayout) $ do
-    void (labelEx (tight . minW 88 $ defaultLayout) k)
-    void (labelEx (tight . fillW . alignEnd . fontMono $ defaultLayout) (T.stripEnd v))
+    void (labelEx (keyF . tight . minW 88 $ defaultLayout) k)
+    void (labelEx (tight . fillW . alignEnd . valF $ defaultLayout) (T.stripEnd v))
 
 -- | Key/value pairs as one monospace block with the keys padded to a column.
 kvBlock :: (Foldable f, Ui :> es) => f (Text, Text) -> Eff es ()
@@ -167,9 +169,7 @@ loadSvg path = do
 -- its @currentColor@ with it.
 {-# INLINE svgIcon #-}
 svgIcon :: Ui :> es => Float -> Svg -> Eff es ()
-svgIcon size = svgIconWith (fixedSquare size)
-  where
-    fixedSquare n l = l {layoutWidth = Fixed n, layoutHeight = Fixed n}
+svgIcon size = svgIconWith (fixedWH size size)
 
 -- | An SVG document sized by the layout modifier: a fixed width and height,
 -- or else the document's own size. A 'NanoUI.fontColor' in the modifier

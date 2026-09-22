@@ -70,7 +70,8 @@ selectWith' f options index = do
       xs -> xs
     n = length opts
     key = intKey wid
-  stored <- uiIO $ adoptSlot fieldInt ctx wid key (clamp 0 (n - 1) index)
+    given = clamp 0 (n - 1) index
+  stored <- uiIO $ adoptSlot fieldInt ctx wid key given
   store0 <- uiIO (getStore ctx)
   let
     current = clamp 0 (n - 1) stored
@@ -97,7 +98,7 @@ selectWith' f options index = do
     recordSlot fieldInt ctx key finalIdx
   -- Compare with the caller's index, not 'current': a dropdown or keyboard
   -- pick lands in the store between frames and must still report a change.
-  pure (setChanged (finalIdx /= clamp 0 (n - 1) index) resp, finalIdx)
+  pure (setChanged (finalIdx /= given) resp, finalIdx)
 
 -- | Select over every value of a bounded enum, labelled by @encode@.
 {-# INLINE boundedSelect #-}

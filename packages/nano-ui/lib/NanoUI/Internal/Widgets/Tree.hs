@@ -10,7 +10,7 @@ import Data.Text (Text)
 import Data.Primitive.SmallArray (SmallArray, indexSmallArray, mapSmallArray', sizeofSmallArray, smallArrayFromList)
 import Effectful (Eff, type (:>))
 import qualified Data.IntSet as IS
-import NanoUI.Internal.Context (Context (..), adoptSlot, getStore, intKey, recordSlot, registerFocusable, setStore, writeSlot, modifyStore)
+import NanoUI.Internal.Context (Context (..), adoptSlot, getStore, intKey, registerFocusable, setStore, modifyStore)
 import NanoUI.Internal.Font (treeChevronRect)
 import NanoUI.Internal.Frame.Hit (scrollHitRect)
 import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
@@ -22,7 +22,7 @@ import NanoUI.Internal.Style (defaultLayout, fillW, gap, tight)
 import NanoUI.Internal.Types (Rect (..), clamp, rectContains)
 import NanoUI.Internal.WidgetText (treeEncodeStyle)
 import NanoUI.Internal.Widgets.Behavior (KeyNav (..), useKeyNav)
-import NanoUI.Internal.Widgets.Combinators (selectableItem)
+import NanoUI.Internal.Widgets.Combinators (finishInput, selectableItem)
 import NanoUI.Internal.Widgets.Layout (columnWith)
 import NanoUI.Internal.Widgets.Node (Response (..), setChanged, tagContainer)
 
@@ -120,8 +120,8 @@ treeRow rowIdx (nodeIdx, depth, hasKids, lbl) selectedIdx expandedSet = do
       mrect <- scrollHitRect ctx (rawRespId resp)
       let mouse = inputMousePos inp
           onChevron = case mrect of
-            Just rect@(Rect x y w h) ->
-              rectContains (treeChevronRect (ctxFontMetrics ctx) x y w h depth) mouse
+            Just rect@(Rect x y _ h) ->
+              rectContains (treeChevronRect (ctxFontMetrics ctx) x y h depth) mouse
                 && rectContains rect mouse
             _ -> False
       if hasKids && onChevron
@@ -165,10 +165,8 @@ tree' key inputItems index =
       focus <- focusedWidget
       nav <- useKeyNav focus
       let (keySel, keyExp, mFocus) = treeKeyNav nav rows resps focus afterClickSel afterClickExp
-      uiIO $ do
-        writeSlot fieldInt ctx groupId groupKey keySel
-        recordSlot fieldInt ctx groupKey keySel
+      result <- finishInput fieldInt ctx groupId groupKey selected (fold resps) keySel
       when (keyExp /= expandedSet) $ uiIO $
         modifyStore ctx (insertSlot fieldIntSet groupKey keyExp)
       mapM_ (uiIO . writeIORef (ctxFocusId ctx)) mFocus
-      pure (setChanged (keySel /= selected) (fold resps), keySel)
+      pure result

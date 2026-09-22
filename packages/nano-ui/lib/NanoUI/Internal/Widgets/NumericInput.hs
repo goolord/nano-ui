@@ -121,7 +121,9 @@ numericInputConfigured' cfg value = do
     pressDir
       | inputMousePressed inp = over upRect 1 + over downRect (-1)
       | otherwise = 0 :: Int
-    held0 = findSlot fieldInt 0 (slotKey SlotNumericHeld key) store
+    heldK = slotKey SlotNumericHeld key
+    repeatK = slotKey SlotNumericRepeat key
+    held0 = findSlot fieldInt 0 heldK store
     holding =
       held0 /= 0
         && inputMouseDown inp
@@ -133,7 +135,7 @@ numericInputConfigured' cfg value = do
       | otherwise = 0
   now <- if pressDir /= 0 || holding then uiIO getMonotonicTime else pure 0
   let
-    repeatAt0 = findSlot fieldDouble 0 (slotKey SlotNumericRepeat key) store
+    repeatAt0 = findSlot fieldDouble 0 repeatK store
     -- A held arrow repeats after a pause.
     repeatDir = if pressDir == 0 && holding && now >= repeatAt0 then held0 else 0
     dir
@@ -160,8 +162,6 @@ numericInputConfigured' cfg value = do
           let t = formatNumber cfg final
            in TextInputState t (T.length t) (T.length t)
       | otherwise = s1
-    heldK = slotKey SlotNumericHeld key
-    repeatK = slotKey SlotNumericRepeat key
     dirty =
       stored /= Just (tisText s2)
         || s2 /= s0

@@ -32,9 +32,7 @@ drawWindowOverlays ctx =
 
 drawPopupOverlays :: Context -> IO ()
 drawPopupOverlays ctx =
-  forFloatingNode ctx NodePopup $ \idx rect -> do
-    theme <- nodeTheme ctx idx
-    drawFloatingPanel ctx theme idx (overlayMenuStyle theme) rect
+  forFloatingNode ctx NodePopup (drawMenuFloating ctx)
 
 drawModalOverlays :: Context -> Size -> IO ()
 drawModalOverlays ctx (Size ww wh) = do
@@ -42,14 +40,18 @@ drawModalOverlays ctx (Size ww wh) = do
   when found $ do
     theme <- readIORef (ctxTheme ctx)
     pushRect (ctxDrawArena ctx) (Rect 0 0 ww wh) (themeOverlayDim theme)
-    forFloatingNode ctx NodeModal $ \idx rect -> do
-      modalTheme <- nodeTheme ctx idx
-      drawFloatingPanel ctx modalTheme idx (overlayMenuStyle modalTheme) rect
+    forFloatingNode ctx NodeModal (drawMenuFloating ctx)
 
 forFloatingNode :: Context -> NodeType -> (NodeIdx -> Rect -> IO ()) -> IO ()
 forFloatingNode ctx nodeType draw =
   forFloatingNodes_ (ctxNodeArena ctx) nodeType $ \idx ->
     draw idx =<< getNodeRect (ctxNodeArena ctx) idx
+
+-- | A menu-style floating panel in its node's theme.
+drawMenuFloating :: Context -> NodeIdx -> Rect -> IO ()
+drawMenuFloating ctx idx rect = do
+  theme <- nodeTheme ctx idx
+  drawFloatingPanel ctx theme idx (overlayMenuStyle theme) rect
 
 drawFloatingPanel :: Context -> Theme -> NodeIdx -> Style -> Rect -> IO ()
 drawFloatingPanel ctx theme idx style rect = do

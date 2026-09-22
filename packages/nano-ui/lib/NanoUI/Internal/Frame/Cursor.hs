@@ -134,15 +134,19 @@ textFieldHoverCursorKind ctx inp = do
 -- pointer cursor rather than the text cursor.
 numericStepperHit :: Context -> WidgetId -> V2 -> IO Bool
 numericStepperHit ctx wid mouse =
-  withWidgetNode ctx wid False $ \idx -> do
-    si <- getStyleIdx (ctxNodeArena ctx) idx
-    if not (hasFlag textInputFlagNumeric si)
-      then pure False
-      else do
-        (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-        let
-          (up, down) = numericStepperRects x y w h
-        pure (rectContains up mouse || rectContains down mouse)
+  withWidgetNode ctx wid False $ \idx -> numericStepperHitAt ctx idx mouse
+
+-- | 'numericStepperHit' for an already-resolved node.
+numericStepperHitAt :: Context -> NodeIdx -> V2 -> IO Bool
+numericStepperHitAt ctx idx mouse = do
+  si <- getStyleIdx (ctxNodeArena ctx) idx
+  if not (hasFlag textInputFlagNumeric si)
+    then pure False
+    else do
+      (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+      let
+        (up, down) = numericStepperRects x y w h
+      pure (rectContains up mouse || rectContains down mouse)
 
 scrollThumbHit :: Context -> V2 -> IO Bool
 scrollThumbHit ctx mouse =
@@ -174,21 +178,21 @@ cursorKindAt ctx wid mouse inp
               -- building a type table of every widget for two lookups.
               withWidgetNode ctx wid UiCursorDefault $ \idx ->
                 getNodeType (ctxNodeArena ctx) idx >>= \case
-                  NodeButton -> widgetPointerCursor ctx wid mouse
-                  NodeCheckbox -> widgetPointerCursor ctx wid mouse
-                  NodeRadio -> widgetPointerCursor ctx wid mouse
-                  NodeTree -> widgetPointerCursor ctx wid mouse
-                  NodeSelect -> rectCursorKind UiCursorPointer ctx wid mouse
+                  NodeButton -> widgetPointerCursor ctx idx mouse
+                  NodeCheckbox -> widgetPointerCursor ctx idx mouse
+                  NodeRadio -> widgetPointerCursor ctx idx mouse
+                  NodeTree -> widgetPointerCursor ctx idx mouse
+                  NodeSelect -> rectCursorKind UiCursorPointer ctx idx wid mouse
                   NodeColorPicker -> pure UiCursorPointer
-                  NodeTextInput -> textInputCursorKind ctx wid mouse
-                  NodeTextArea -> textAreaCursorKind ctx wid mouse
-                  NodeSlider -> sliderCursorKind ctx wid mouse inp
+                  NodeTextInput -> textInputCursorKind ctx idx wid mouse
+                  NodeTextArea -> textAreaCursorKind ctx idx wid mouse
+                  NodeSlider -> sliderCursorKind ctx idx wid mouse inp
                   _ -> pure UiCursorDefault
 
 -- | @kind@ over the widget's visible rect, the default cursor elsewhere.
-rectCursorKind :: UiCursorKind -> Context -> WidgetId -> V2 -> IO UiCursorKind
-rectCursorKind kind ctx wid mouse = do
-  visible <- widgetVisibleAt ctx wid mouse
+rectCursorKind :: UiCursorKind -> Context -> NodeIdx -> WidgetId -> V2 -> IO UiCursorKind
+rectCursorKind kind ctx idx wid mouse = do
+  visible <- nodePointVisible ctx idx mouse
   if not visible
     then pure UiCursorDefault
     else do
@@ -199,18 +203,18 @@ widgetVisibleAt :: Context -> WidgetId -> V2 -> IO Bool
 widgetVisibleAt ctx wid mouse = do
   withWidgetNode ctx wid False $ \idx -> nodePointVisible ctx idx mouse
 
-widgetPointerCursor :: Context -> WidgetId -> V2 -> IO UiCursorKind
-widgetPointerCursor ctx wid mouse = do
-  visible <- widgetVisibleAt ctx wid mouse
+widgetPointerCursor :: Context -> NodeIdx -> V2 -> IO UiCursorKind
+widgetPointerCursor ctx idx mouse = do
+  visible <- nodePointVisible ctx idx mouse
   pure (if visible then UiCursorPointer else UiCursorDefault)
 
-sliderCursorKind :: Context -> WidgetId -> V2 -> Input -> IO UiCursorKind
-sliderCursorKind ctx wid mouse inp = do
+sliderCursorKind :: Context -> NodeIdx -> WidgetId -> V2 -> Input -> IO UiCursorKind
+sliderCursorKind ctx idx wid mouse inp = do
   active <- readIORef (ctxActiveId ctx)
   if active == wid && inputMouseDown inp
     then pure UiCursorGrabbing
     else do
-      visible <- widgetVisibleAt ctx wid mouse
+      visible <- nodePointVisible ctx idx mouse
       if not visible
         then pure UiCursorDefault
         else do
@@ -225,30 +229,29 @@ sliderCursorKind ctx wid mouse inp = do
                  in
                   grabDragKind (rectContains hitRect mouse) False inp
 
-textInputCursorKind :: Context -> WidgetId -> V2 -> IO UiCursorKind
-textInputCursorKind ctx wid mouse = do
-  visible <- widgetVisibleAt ctx wid mouse
+textInputCursorKind :: Context -> NodeIdx -> WidgetId -> V2 -> IO UiCursorKind
+textInputCursorKind ctx idx wid mouse = do
+  visible <- nodePointVisible ctx idx mouse
   if not visible
     then pure UiCursorDefault
-    else withWidgetNode ctx wid UiCursorDefault $ \idx -> do
+    else do
       mrect <- scrollHitRect ctx wid
       case mrect of
         Just (Rect x y w h) -> do
           (field, _) <- nodeTextFieldGeom ctx idx x y w h
-          onStepper <- numericStepperHit ctx wid mouse
+          onStepper <- numericStepperHitAt ctx idx mouse
           pure $
             if onStepper
               then UiCursorPointer
               else if rectContains field mouse then UiCursorText else UiCursorDefault
         Nothing -> pure UiCursorDefault
 
-textAreaCursorKind :: Context -> WidgetId -> V2 -> IO UiCursorKind
-textAreaCursorKind ctx wid mouse = do
-  withWidgetNode ctx wid UiCursorDefault $ \idx -> do
-    onScroll <- isMouseOnTextAreaScrollBarAt ctx idx mouse
-    if onScroll
-      then pure UiCursorDefault
-      else rectCursorKind UiCursorText ctx wid mouse
+textAreaCursorKind :: Context -> NodeIdx -> WidgetId -> V2 -> IO UiCursorKind
+textAreaCursorKind ctx idx wid mouse = do
+  onScroll <- isMouseOnTextAreaScrollBarAt ctx idx mouse
+  if onScroll
+    then pure UiCursorDefault
+    else rectCursorKind UiCursorText ctx idx wid mouse
 
 tableColResizeCursorKind :: Context -> Input -> IO (Maybe UiCursorKind)
 tableColResizeCursorKind ctx inp = do

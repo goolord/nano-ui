@@ -114,12 +114,7 @@ startAnimationEaseDelay ctx wid start end dur ease delay
       case IM.lookup key (asAnimations as) of
         Just a@(EaseAnim aStart _ _ _ _ _ _) | approxEq aStart start && easeSameSpec a ease dur req end -> pure ()
         _ ->
-          writeIORef (ctxAnimationState ctx) $!
-            as
-              { asAnimRest = IM.delete key (asAnimRest as)
-              , asAnimations = IM.insert key (EaseAnim start end dur 0 ease req req) (asAnimations as)
-              , asAnyAnimating = True
-              }
+          writeIORef (ctxAnimationState ctx) $! insertRunning key (EaseAnim start end dur 0 ease req req) as
       markDirtyIfOrphan ctx key
   where
     key = intKey wid
@@ -140,13 +135,18 @@ startSpring ctx wid params target = do
       if abs (pos - target) <= springEps && abs vel <= springEps
         then settleKey ctx key target
         else do
-          writeIORef (ctxAnimationState ctx) $!
-            as
-              { asAnimRest = IM.delete key (asAnimRest as)
-              , asAnimations = IM.insert key (SpringAnim pos vel target params) (asAnimations as)
-              , asAnyAnimating = True
-              }
+          writeIORef (ctxAnimationState ctx) $! insertRunning key (SpringAnim pos vel target params) as
           markDirtyIfOrphan ctx key
+
+-- | Run @anim@ at @key@ in place of the key's resting value, if any.
+{-# INLINE insertRunning #-}
+insertRunning :: Int -> Animation -> AnimationState -> AnimationState
+insertRunning key anim as =
+  as
+    { asAnimRest = IM.delete key (asAnimRest as)
+    , asAnimations = IM.insert key anim (asAnimations as)
+    , asAnyAnimating = True
+    }
 
 -- | How long a 'keepAnimationAlive' animation would run by itself: in effect
 -- forever. The lease below ends it.

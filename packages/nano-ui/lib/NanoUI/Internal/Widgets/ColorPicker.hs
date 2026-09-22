@@ -65,6 +65,7 @@ import NanoUI.Internal.Style
   , Style (..)
   , alignMid
   , defaultLayout
+  , fadeAlpha
   , fillW
   , fixedH
   , fixedW
@@ -197,9 +198,6 @@ putColorState key col hue sv =
     . insertSlot fieldFloat key hue
     . insertSlot fieldPoint key sv
 
-withAlpha :: Word8 -> Color -> Color
-withAlpha a c = colorRGBA (colorR c) (colorG c) (colorB c) a
-
 -- | The square the saturation / value field fills, centered in its node.
 colorPickerSvSquare :: Rect -> Rect
 colorPickerSvSquare (Rect x y w h) =
@@ -314,8 +312,8 @@ drawAlphaBar :: DrawArena -> Rect -> Color -> IO ()
 drawAlphaBar da rect col = do
   drawChecker da rect
   let
-    c0 = withAlpha 0 col
-    c1 = withAlpha 255 col
+    c0 = fadeAlpha col 0
+    c1 = fadeAlpha col 255
   pushQuadGradient da rect c0 c0 c1 c1
 
 drawBarHandle :: DrawArena -> Rect -> Float -> Color -> IO ()
@@ -436,7 +434,7 @@ rgbChannels =
   , ("G", colorG, \v c -> colorRGBA (colorR c) v (colorB c) (colorA c))
   , ("B", colorB, \v c -> colorRGBA (colorR c) (colorG c) v (colorA c))
   ]
-rgbaChannels = rgbChannels ++ [("A", colorA, \v c -> colorRGBA (colorR c) (colorG c) (colorB c) v)]
+rgbaChannels = rgbChannels ++ [("A", colorA, flip fadeAlpha)]
 
 -- | The HSV fields: label, the largest value, the shown value, and the
 -- (hue, s, v) a typed value makes.
@@ -496,7 +494,7 @@ colorPickerWith showAlpha value = do
         let shown = fromIntegral (get rgb)
         n <- channelField pct lbl 255 shown
         when (n /= shown) $
-          writeColor (set (fromIntegral n) (withAlpha (alphaOf rgb) rgb))
+          writeColor (set (fromIntegral n) (fadeAlpha rgb (alphaOf rgb)))
     hsvStore <- uiIO (getStore ctx)
     let
       (s0, v0) = widgetStoreSv hsvStore wid value
@@ -507,7 +505,7 @@ colorPickerWith showAlpha value = do
         n <- channelField pct lbl hi (shown hsv)
         when (n /= shown hsv) $ do
           let (h, s, v) = edit n hsv
-          writePicker (withAlpha alpha (hsvToRgb h s v)) h (s, v)
+          writePicker (fadeAlpha (hsvToRgb h s v) alpha) h (s, v)
       when showAlpha $
         void (container NodeContainer (colorPickerFieldGroupLayout pct) (pure ()))
     hex <- readColor
@@ -560,8 +558,8 @@ colorPickerCanvas parts initial svResp hueResp alphaResp = do
       if aA then clamp 0 255 (round aDrag :: Int) else fromIntegral (colorA current0)
     base = hsvToRgb nextHue nextS nextV
     dragged
-      | aA && not (svA || hA) = withAlpha (fromIntegral nextA) current0
-      | otherwise = withAlpha (if showAlpha then fromIntegral nextA else 255) base
+      | aA && not (svA || hA) = fadeAlpha current0 (fromIntegral nextA)
+      | otherwise = fadeAlpha base (if showAlpha then fromIntegral nextA else 255)
   holdActiveWhile wid dragging
   when (dragging && (dragged /= current0 || nextHue /= h0 || nextS /= s0 || nextV /= v0)) $
     uiIO $ modifyStore ctx (putColorState (pickerKey wid) dragged nextHue (nextS, nextV))
@@ -641,11 +639,11 @@ applyColorPickerKeys ctx wid fallback inp svFocus hueFocus = do
       | svFocus =
           let sat = clamp01 (s + dx * step / 100)
               val = clamp01 (v - dy * step / 100)
-           in (withAlpha (colorA current) (hsvToRgb h sat val), h, (sat, val))
+           in (fadeAlpha (hsvToRgb h sat val) (colorA current), h, (sat, val))
       | hueFocus =
           let hue = bar 0 360 h
-           in (withAlpha (colorA current) (hsvToRgb hue s v), hue, (s, v))
-      | otherwise = (withAlpha (round (bar 0 255 a)) current, h, (s, v))
+           in (fadeAlpha (hsvToRgb hue s v) (colorA current), hue, (s, v))
+      | otherwise = (fadeAlpha current (round (bar 0 255 a)), h, (s, v))
     moved = col' /= current || h' /= h || sv' /= (s, v)
   when moved $
     setStore ctx (putColorState (pickerKey wid) col' h' sv' store)

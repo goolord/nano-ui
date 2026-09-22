@@ -360,9 +360,7 @@ finalizeTextInputFocus ctx inp targets =
         collapseTextFieldSelection ctx prevFocus
         writeIORef (ctxFocusId ctx) (WidgetId 0)
         setTextInputMenu ctx Nothing
-      Just wid -> do
-        writeIORef (ctxFocusId ctx) wid
-        when (prevFocus /= wid) $ markDirty ctx
+      Just wid -> focusWidget ctx wid
 
 -- | On a left press on an enabled select's field, give the select keyboard
 -- focus, whether the press opens or closes it. Runs after
@@ -371,10 +369,14 @@ finalizeTextInputFocus ctx inp targets =
 finalizeSelectFocus :: Context -> PressTargets -> IO ()
 finalizeSelectFocus ctx targets =
   forM_ (ptSelect targets) $ \wid ->
-    whenM (not <$> isDisabled ctx wid) $ do
-      prev <- readIORef (ctxFocusId ctx)
-      writeIORef (ctxFocusId ctx) wid
-      when (prev /= wid) $ markDirty ctx
+    whenM (not <$> isDisabled ctx wid) $ focusWidget ctx wid
+
+-- | Give @wid@ keyboard focus, repainting when focus moved.
+focusWidget :: Context -> WidgetId -> IO ()
+focusWidget ctx wid = do
+  prev <- readIORef (ctxFocusId ctx)
+  writeIORef (ctxFocusId ctx) wid
+  when (prev /= wid) $ markDirty ctx
 
 -- | The text field or text area a press landed on, unless it is disabled.
 enabledTextField :: Context -> Maybe WidgetId -> IO (Maybe WidgetId)

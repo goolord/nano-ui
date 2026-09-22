@@ -151,19 +151,7 @@ grabDragKind onTarget dragging inp
 -- | Clear one-shot events and the redraw flag, retaining held buttons,
 -- pointer position, modifiers, window size, and delta time.
 clearEphemeral :: Input -> Input
-clearEphemeral inp =
-  inp
-    { inputKeys = emptyInputKeys
-    , inputChars = ""
-    , inputMousePressed = False
-    , inputMouseReleased = False
-    , inputMouseRightPressed = False
-    , inputMouseRightReleased = False
-    , inputMouseClicks = 1
-    , inputScroll = V2 0 0
-    , inputDrops = emptyDropEvents
-    , inputWindowRedraw = False
-    }
+clearEphemeral inp = (stripInteractionInput inp) {inputMouseClicks = 1, inputWindowRedraw = False}
 
 -- | Whether Ctrl+C or Ctrl+ETX requests an unconditional quit.
 isHardQuitInput :: Input -> Bool

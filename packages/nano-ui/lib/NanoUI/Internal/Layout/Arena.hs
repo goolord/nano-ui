@@ -1283,7 +1283,6 @@ snapshotLayoutRects na = do
 
 -- | Cached layout signature and solved geometry for whole-layout reuse. The
 -- backing arrays are reused; only cache misses capture a new solved frame.
--- The font colour and scope columns are paint state and stay unused.
 data LayoutCache = LayoutCache
   { lcCap :: !Int
   , lcCount :: !Int
@@ -1304,7 +1303,13 @@ data LayoutCache = LayoutCache
   -- solve restores its measured size instead of measuring again.
   , lcMeasured :: !(IOArr Float)
   -- ^ Per captured node, the width and height its measure took (two floats).
-  , lcArrays :: !NodeArenaArrays
+  , lcGeom :: !(IOArr Float)
+  -- ^ The captured 'naArrGeom'.
+  , lcStyle :: !(IOArr Float)
+  -- ^ The captured 'naArrStyle'. A restore reads only the columns the solver
+  -- writes.
+  , lcTags :: !(IOArr Word8)
+  -- ^ The captured 'naArrTags'. A restore reads only 'tagScrollBarSlot'.
   }
 
 -- | A custom measure's (available width, available height, measured width,
@@ -1315,10 +1320,12 @@ type CustomMeasureRecord = (Word32, Word32, Word32, Word32)
 newLayoutCache :: Int -> IO LayoutCache
 newLayoutCache cap0 = do
   let !cap = max 16 cap0
-  lcArrays <- newNodeArenaArrays cap
   lcSub <- newPrimArray cap
   lcMeasured <- newPrimArray (cap * 2)
-  pure (LayoutCache cap 0 0 IM.empty IS.empty lcSub lcMeasured lcArrays)
+  lcGeom <- newPrimArray (cap * geomStride)
+  lcStyle <- newPrimArray (cap * styleStride)
+  lcTags <- newPrimArray (cap * tagStride)
+  pure (LayoutCache cap 0 0 IM.empty IS.empty lcSub lcMeasured lcGeom lcStyle lcTags)
 
 -- | Snapshot the current (post-solve) arena form, constraints and rects.
 captureLayoutCache :: NodeArena -> LayoutCache -> IO LayoutCache
@@ -1333,18 +1340,16 @@ captureLayoutCache na lc0 = do
     if n <= oldCap
       then pure lc0
       else do
-        lcArrays <- growNodeArenaArrays oldCap newCap (lcArrays lc0)
         lcSub <- growPrimArrayCopy (lcSub lc0) oldCap newCap 0
         lcMeasured <- growPrimArrayCopy (lcMeasured lc0) (oldCap * 2) (newCap * 2) 0
-        pure lc0 {lcCap = newCap, lcSub, lcMeasured, lcArrays}
+        lcGeom <- growPrimArrayCopy (lcGeom lc0) (oldCap * geomStride) (newCap * geomStride) 0
+        lcStyle <- growPrimArrayCopy (lcStyle lc0) (oldCap * styleStride) (newCap * styleStride) 0
+        lcTags <- growPrimArrayCopy (lcTags lc0) (oldCap * tagStride) (newCap * tagStride) 0
+        pure lc0 {lcCap = newCap, lcSub, lcMeasured, lcGeom, lcStyle, lcTags}
   a <- arenaArrays na
-  let c = lcArrays lc
-  copyMutablePrimArray (naArrGeom c) 0 (naArrGeom a) 0 (n * geomStride)
-  copyMutablePrimArray (naArrStyle c) 0 (naArrStyle a) 0 (n * styleStride)
-  copyMutablePrimArray (naArrTags c) 0 (naArrTags a) 0 (n * tagStride)
-  copyMutablePrimArray (naArrTree c) 0 (naArrTree a) 0 (n * treeStride)
-  copyMutableArray (naArrTextStore c) 0 (naArrTextStore a) 0 n
-  copyMutableArray (naArrOptionsStore c) 0 (naArrOptionsStore a) 0 n
+  copyMutablePrimArray (lcGeom lc) 0 (naArrGeom a) 0 (n * geomStride)
+  copyMutablePrimArray (lcStyle lc) 0 (naArrStyle a) 0 (n * styleStride)
+  copyMutablePrimArray (lcTags lc) 0 (naArrTags a) 0 (n * tagStride)
   copyMutablePrimArray (lcSub lc) 0 subA 0 n
   copyMutablePrimArray (lcMeasured lc) 0 measuredA 0 (n * 2)
   pure lc {lcCount = n, lcSig = sig}
@@ -1370,21 +1375,17 @@ restoreLayoutCache :: NodeArena -> LayoutCache -> IO ()
 restoreLayoutCache na lc = do
   a <- arenaArrays na
   let !n = lcCount lc
-      c = lcArrays lc
-  copyMutablePrimArray (naArrGeom a) 0 (naArrGeom c) 0 (n * geomStride)
-  let go !i
-        | i >= n = pure ()
-        | otherwise = do
-            nt <- readTagEnum a i tagNodeType
-            -- Scroll content width, node value (the content height) and
-            -- scrollbar slot.
-            when (isScrollNode nt) $ do
-              let !off = i * styleStride + styleScrollContentW
-                  !slotOff = i * tagStride + tagScrollBarSlot
-              copyMutablePrimArray (naArrStyle a) off (naArrStyle c) off 2
-              readPrimArray (naArrTags c) slotOff >>= writePrimArray (naArrTags a) slotOff
-            go (i + 1)
-  go 0
+  copyMutablePrimArray (naArrGeom a) 0 (lcGeom lc) 0 (n * geomStride)
+  -- Scroll content width, node value (the content height) and scrollbar
+  -- slot. Scroll containers are pointer nodes, so walk that class, not the
+  -- whole arena.
+  forClassNodes_ na PointerNodes $ \i -> do
+    nt <- readTagEnum a i tagNodeType
+    when (isScrollNode nt) $ do
+      let !off = i * styleStride + styleScrollContentW
+          !slotOff = i * tagStride + tagScrollBarSlot
+      copyMutablePrimArray (naArrStyle a) off (lcStyle lc) off 2
+      readPrimArray (lcTags lc) slotOff >>= writePrimArray (naArrTags a) slotOff
 
 -- | Node text, or empty text when no text was assigned this frame.
 {-# INLINE getText #-}
@@ -1662,8 +1663,7 @@ ensureSnapLevelsArr na arr need = do
     then pure arr
     else do
       let !newSz = max need (sz * 2)
-      arr' <- newArray newSz Nothing
-      copyMutableArray arr' 0 arr 0 sz
+      arr' <- growBoxedStoreCopy Nothing arr sz newSz
       writeIORef (naSnapLevels na) arr'
       pure arr'
 

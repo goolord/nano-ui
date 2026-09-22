@@ -133,6 +133,7 @@ useReorder order items = do
   inp <- askInput
   let key = intKey wid
       dragK = slotKey SlotDrag key
+      dragWK = slotKey SlotDragW key
       mouse = inputMousePos inp
       down = inputMouseDown inp
       press = inputMousePressed inp
@@ -143,7 +144,7 @@ useReorder order items = do
           items
   store <- uiIO (getStore ctx)
   let from0 = findSlot fieldInt (-1) dragK store
-      startX = findSlot fieldFloat 0 (slotKey SlotDragW key) store
+      startX = findSlot fieldFloat 0 dragWK store
       dragging = if press then maybe (-1) fst hit else from0
       nextDrag =
         if release || not down
@@ -160,7 +161,7 @@ useReorder order items = do
   when (nextDrag /= from0 || (press && nextDrag >= 0)) $
     uiIO . modifyStore ctx $
       insertSlot fieldInt dragK nextDrag
-        . insertSlot fieldFloat (slotKey SlotDragW key) (if press then v2X mouse else startX)
+        . insertSlot fieldFloat dragWK (if press then v2X mouse else startX)
   pure (nextOrder, if nextDrag >= 0 then Just nextDrag else Nothing)
 
 moveItem :: [Int] -> Int -> Int -> [Int]

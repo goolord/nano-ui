@@ -125,8 +125,14 @@ searchInputReserveW fm =
 searchInputTextClip :: FontMetrics -> Float -> Float -> Float -> Float -> Rect
 searchInputTextClip fm x y w h =
   let (_, _, lead, tailw) = searchInputChrome fm
-      (_, iy) = widgetContentInset fm
-   in Rect (x + lead) (y + iy) (max 0 (w - lead - tailw)) (max 0 (h - 2 * iy))
+   in textClipBetween fm lead tailw x y w h
+
+-- | A field's text region: inside the vertical content inset, between @lead@
+-- from the left edge and @trail@ from the right.
+textClipBetween :: FontMetrics -> Float -> Float -> Float -> Float -> Float -> Float -> Rect
+textClipBetween fm lead trail x y w h =
+  let (_, iy) = widgetContentInset fm
+   in Rect (x + lead) (y + iy) (max 0 (w - lead - trail)) (max 0 (h - 2 * iy))
 
 -- | Square slots (magnifier left, clear right) the search icons are drawn in.
 searchInputIconRects :: FontMetrics -> Float -> Float -> Float -> Float -> (Rect, Rect)
@@ -184,8 +190,8 @@ numericStepperRects x y w h =
 -- to the select chevron reserve on the right.
 comboTextClip :: FontMetrics -> Float -> Float -> Float -> Float -> Rect
 comboTextClip fm x y w h =
-  let (ix, iy) = widgetContentInset fm
-   in Rect (x + ix) (y + iy) (max 0 (w - ix - selectChevronReserve)) (max 0 (h - 2 * iy))
+  let (ix, _) = widgetContentInset fm
+   in textClipBetween fm ix selectChevronReserve x y w h
 
 selectDisplayText :: Text -> Text -> Text
 selectDisplayText lbl opt
