@@ -24,7 +24,6 @@ import NanoUI.Sdl.Internal.Input
   , isHardQuit
   , pollEvents
   , waitEvent
-  , waitEventTimeout
   )
 import NanoUI.Sdl.Internal.Display (installResizeWatch, pushRefreshEvent)
 import NanoUI.Sdl.Internal.Window (SdlEnv (..), SdlOptions (..), syncDisplay, withSdl)
@@ -143,7 +142,7 @@ runSdlSession options ctx setup shouldQuit drawFn =
                 -- Take the rest of the queue with the event that ended the
                 -- wait, so one pass sees a whole burst (a resize queues
                 -- several window events at once).
-                woke <- if t < 0 then waitEvent else waitEventTimeout t
+                woke <- waitEvent t
                 case woke of
                   Nothing -> pure []
                   Just ev -> noteWake . (ev :) =<< pollEvents
