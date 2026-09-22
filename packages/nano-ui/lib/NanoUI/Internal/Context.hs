@@ -379,15 +379,15 @@ registerImages ctx = foldM register True
 lookupImageUv :: Context -> ImageId -> IO (Maybe (Float, Float, Float, Float))
 lookupImageUv ctx = Atlas.lookupImageUv (ctxImageAtlas ctx)
 
--- | Atlas width, height, RGBA8 buffer, and revision for backend upload.
--- 'Nothing' means no atlas pixels have been allocated. Treat the buffer as
--- borrowed mutable storage and upload it before further image registration.
 -- | What a texture of the image atlas uploaded at generation @since@ (0 for
 -- none) needs, with the atlas's size, pixels and generation.
 {-# INLINE atlasChanges #-}
 atlasChanges :: Context -> Int -> IO (Maybe (Int, Int, ForeignPtr Word8, Int, AtlasUpload))
 atlasChanges ctx = Atlas.atlasChanges (ctxImageAtlas ctx)
 
+-- | Atlas width, height, RGBA8 buffer, and revision for backend upload.
+-- 'Nothing' means no atlas pixels have been allocated. Treat the buffer as
+-- borrowed mutable storage and upload it before further image registration.
 {-# INLINE atlasSnapshot #-}
 atlasSnapshot :: Context -> IO (Maybe (Int, Int, ForeignPtr Word8, Int))
 atlasSnapshot ctx = Atlas.atlasSnapshot (ctxImageAtlas ctx)
