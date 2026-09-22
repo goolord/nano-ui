@@ -119,16 +119,14 @@ bestMatch norm files =
 
 matchScore :: String -> String -> Maybe Int
 matchScore "" _ = Nothing
-matchScore norm stem
-  | stem == norm = Just 100
-  | otherwise =
-      case stripPrefix norm stem of
-        Nothing -> Nothing
-        Just t
-          | t `elem` regularTails -> Just 90
-          | t `elem` otherTails -> Just 70
-          | "variable" `isInfixOf` t -> Just 20
-          | otherwise -> Just 60
+matchScore norm stem = score <$> stripPrefix norm stem
+  where
+    score t
+      | null t = 100
+      | t `elem` regularTails = 90
+      | t `elem` otherTails = 70
+      | "variable" `isInfixOf` t = 20
+      | otherwise = 60
 
 -- | Style tails that indicate the regular weight of a family.
 regularTails :: [String]
