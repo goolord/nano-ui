@@ -47,7 +47,7 @@ import NanoUI.Internal.Frame.Node (readScrollNode, resolveFontFor, scrollNodeVie
 import NanoUI.Internal.Frame.Scroll.Geometry (padContentClip, tagClippedSpans)
 import NanoUI.Internal.Frame.Select (collectSelectDropdownSpans, tagSelectClippedSpans)
 import NanoUI.Internal.Frame.SpanArena (SpanArena, pushSpan, resetSpanArena, spanArenaToList, spanArenaToListOccluded)
-import NanoUI.Internal.Frame.TextEdit.Menu (collectTextEditMenuSpans)
+import NanoUI.Internal.Frame.TextEdit (collectTextEditMenuSpans)
 import NanoUI.Internal.Frame.TextInput (syncTextInputScroll, tagTextInputClippedSpans, textInputFieldRect)
 import NanoUI.Internal.Input (Input)
 import NanoUI.Internal.Layout.Arena

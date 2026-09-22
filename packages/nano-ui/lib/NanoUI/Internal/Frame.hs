@@ -115,7 +115,7 @@ import NanoUI.Internal.Frame.Spans
   )
 import NanoUI.Internal.Frame.Overlay (drawModalOverlays, drawPopupOverlays, drawWindowOverlays)
 import NanoUI.Internal.Frame.TextArea (finalizeTextFieldMouse)
-import NanoUI.Internal.Frame.TextEdit.Menu
+import NanoUI.Internal.Frame.TextEdit
   ( closeTextEditMenuOnEscape
   , closeTextEditMenuOnOutsideClick
   , drawTextEditMenuOverlays

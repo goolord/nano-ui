@@ -1,7 +1,11 @@
--- | Text-field context menu (Undo / Redo / Cut / Copy / Paste / Select All):
--- opening, picking, painting, spans and cursor.
-module NanoUI.Internal.Frame.TextEdit.Menu
-  ( openTextEditMenu
+-- | Editing text fields from outside their frame: the commands an app or the
+-- context menu runs on a field by its id, and the context menu itself (Undo /
+-- Redo / Cut / Copy / Paste / Select All): opening, picking, painting, spans
+-- and cursor.
+module NanoUI.Internal.Frame.TextEdit
+  ( applyTextFieldCommand
+  , textFieldEditor
+  , openTextEditMenu
   , finalizeTextEditMenuPick
   , closeTextEditMenuOnOutsideClick
   , closeTextEditMenuOnEscape
@@ -19,10 +23,14 @@ import NanoUI.Internal.Context
   ( Context (..)
   , TextInputMenu (..)
   , PointerRoute (..)
+  , damageWidget
+  , getStore
   , getsInteraction
+  , intKey
   , isDisabled
   , markDirty
   , markEscapeConsumed
+  , modifyStore
   , widgetTheme
   , InteractionState (..)
   , modifyInteraction
@@ -39,7 +47,7 @@ import NanoUI.Internal.Font
   , widgetContentInset
   )
 import NanoUI.Internal.Frame.Chrome (overlayMenuStyle, paintMenuAccent, paintMenuPanel)
-import NanoUI.Internal.Frame.Hit (nodeClippedHit, overlayHitAllowed, overlayHitRoot, widgetOverlayAllowed)
+import NanoUI.Internal.Frame.Hit (findNodeByWidgetId, nodeClippedHit, overlayHitAllowed, overlayHitRoot, widgetOverlayAllowed)
 import NanoUI.Internal.Frame.TextArea (isMouseOnTextAreaScrollBarAt)
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Input
@@ -53,13 +61,71 @@ import NanoUI.Internal.Input
   , inputMouseRightPressed
   , inputWindowSize
   )
-import NanoUI.Internal.Layout.Arena (NodeClass (PointerNodes), NodeType (NodeTextArea, NodeTextInput), findClassNodeRevM, getNodeRect, getNodeType, getWidgetId)
+import NanoUI.Internal.Layout.Arena
+  ( NodeClass (PointerNodes)
+  , NodeType (NodeTextArea, NodeTextInput)
+  , findClassNodeRevM
+  , getNodeRect
+  , getNodeType
+  , getStyleIdx
+  , getWidgetId
+  )
 import NanoUI.Internal.Monad (ifM, whenM, (<&&>))
+import NanoUI.Internal.Store (Slot (..), WidgetStore, fieldInt, insertSlot, lookupDyn, slotKey)
 import NanoUI.Internal.Style (Style (..), Theme, themeSeparator)
-import NanoUI.Internal.Types (Color (..), Rect (..), Size (..), V2 (..), clamp, lerpColor, rectContains)
-import NanoUI.Widgets.TextEditor (Editor (..), EditorMode (..), TextCommand (..), canRedo, canUndo)
-import NanoUI.Internal.Widgets.TextField (applyTextFieldCommand, textFieldEditor)
+import NanoUI.Internal.Types (Color (..), DamageBounds (..), Rect (..), Size (..), V2 (..), clamp, lerpColor, rectContains)
+import NanoUI.Internal.Widgets.TextArea (textAreaFieldEditor)
+import NanoUI.Internal.Widgets.TextDocument (sameLines)
+import NanoUI.Internal.Widgets.TextInput (textInputFieldEditor, textInputMode)
 import NanoUI.Widgets.TextBuffer qualified as TB
+import NanoUI.Widgets.TextEditor
+  ( Editor (..)
+  , EditorMode (..)
+  , TextCommand (..)
+  , canRedo
+  , canUndo
+  , multiLineMode
+  , runCommandIO
+  , sealHistory
+  )
+
+-- | Run a command on the field with this id and focus it: the command comes
+-- from a menu or button that may not be over the field, and the caret,
+-- selection highlight and next keystroke belong to the field it edited. A
+-- change to the text pulses @respChanged@ on the field's next frame.
+applyTextFieldCommand :: Context -> WidgetId -> TextCommand -> IO ()
+applyTextFieldCommand ctx wid cmd =
+  textFieldEditor ctx wid >>= mapM_ (\(mode, ed0, save) -> do
+    ed <- runCommandIO ctx mode cmd ed0 {editorHistory = sealHistory (editorHistory ed0)}
+    let edited = not (sameLines (TB.bufferLines (editorBuffer ed)) (TB.bufferLines (editorBuffer ed0)))
+        pulse = if edited then insertSlot fieldInt (slotKey SlotTextAreaChanged (intKey wid)) 1 else id
+    modifyStore ctx (pulse . save ed)
+    -- Store damage is keyed on slots, not the widget: damage the widget so a
+    -- selection-only command (Select All) repaints this frame.
+    damageWidget ctx wid DamageSelf
+    markDirty ctx
+    writeIORef (ctxFocusId ctx) wid
+    modifyInteraction ctx (\s -> s {isTextInputMenu = Nothing}))
+
+-- | The field with this id as a command from outside its frame sees it: how
+-- it edits, its stored editor, and how to store an edited one. Its mode comes
+-- from its node when it has one this frame, or from what it recorded the last
+-- time it was declared.
+textFieldEditor :: Context -> WidgetId -> IO (Maybe (EditorMode, Editor, Editor -> WidgetStore -> WidgetStore))
+textFieldEditor ctx wid = do
+  store <- getStore ctx
+  let key = intKey wid
+  mMode <-
+    findNodeByWidgetId ctx wid >>= \case
+      Just idx ->
+        getNodeType (ctxNodeArena ctx) idx >>= \case
+          NodeTextInput -> Just . textInputMode <$> getStyleIdx (ctxNodeArena ctx) idx
+          NodeTextArea -> pure (Just multiLineMode)
+          _ -> pure Nothing
+      Nothing -> pure (lookupDyn (slotKey SlotTextMode key) store)
+  pure $ flip fmap mMode $ \mode ->
+    let (ed, save) = (if modeMultiLine mode then textAreaFieldEditor else textInputFieldEditor) store key
+     in (mode, ed, save)
 
 -- | The menu's rows in order: a command and its label, or a separator.
 textEditMenuRows :: [Maybe (TextCommand, T.Text)]

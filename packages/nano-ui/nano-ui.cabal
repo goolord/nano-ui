@@ -110,7 +110,6 @@ library
         NanoUI.Internal.Widgets.SplitPane
         NanoUI.Internal.Widgets.TextArea
         NanoUI.Internal.Widgets.TextDocument
-        NanoUI.Internal.Widgets.TextField
     other-modules:
         NanoUI.Internal.Animatable
         NanoUI.Internal.Animation
@@ -145,7 +144,7 @@ library
         NanoUI.Internal.Frame.Overlay
         NanoUI.Internal.Frame.Spans
         NanoUI.Internal.Frame.SpanArena
-        NanoUI.Internal.Frame.TextEdit.Menu
+        NanoUI.Internal.Frame.TextEdit
         NanoUI.Internal.Frame.TextInput
         NanoUI.Internal.Style
         NanoUI.Internal.Types
