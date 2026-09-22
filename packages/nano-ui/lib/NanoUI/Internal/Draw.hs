@@ -52,6 +52,7 @@ module NanoUI.Internal.Draw
   , drawTextBox
   , pushText
   , pushTextStyled
+  , pushPreparedTextStyled
   , emitDrawOps
   ) where
 

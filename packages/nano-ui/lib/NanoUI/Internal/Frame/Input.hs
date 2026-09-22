@@ -26,10 +26,9 @@ import NanoUI.Internal.Context
   ( Context (..)
   , damageWidget
   , getFocusables
-  , intKey
   , isDisabled
   , markDirty
-  , modifyStore
+  , markDirtyCovered
   , setAnimationValue
   , setTextInputMenu
   , startAnimation
@@ -71,15 +70,13 @@ import NanoUI.Internal.Layout.Arena
   , foldNodesM
   , getNodeRect
   , getNodeType
-  , getParent
   , getRect
   , getStyleIdx
   , getWidgetId
   )
 import NanoUI.Internal.Monad (unlessM, whenM, (<&&>))
-import NanoUI.Internal.Store (fieldInt, insertSlot)
 import NanoUI.Internal.Types (DamageBounds (..), Rect (..), V2 (..), defaultDamageSlop, rectContains)
-import NanoUI.Internal.WidgetText (hasFlag, buttonFlagClose, buttonFlagMenuBar, buttonFlagMenu, buttonFlagTab, tabHeaderIndex)
+import NanoUI.Internal.WidgetText (hasFlag, buttonFlagClose, buttonFlagMenuBar, buttonFlagMenu)
 
 -- | Move keyboard focus when Tab was pressed, backwards with Shift held. Focus
 -- steps through the widgets that called 'NanoUI.Internal.Context.registerFocusable'
@@ -268,13 +265,12 @@ isInteractiveNode nt = nt /= NodeWidget && isWidgetNode nt
 -- this is its first frame. This step repeats the test with the solved rect.
 -- When the release is on the active widget and the view did not see it there,
 -- the widget's id goes into 'ctxClickedId', and the widget reports the click
--- on the next frame. Only the node types in 'postsLayoutClick' get one.
+-- on the next frame, which this asks for. Only the node types in
+-- 'postsLayoutClick' get one. A radio option or tab header reports it like any
+-- other click, and its group picks it on that frame.
 --
--- A radio option that takes the release writes its index straight into its
--- group's selection ('setParentSelection'), so the group returns it on the
--- next frame whether or not the view saw the release. A tab button's index is
--- written the same way. A release on the widget also sets its hover animation
--- to 1, so it paints as fully hovered at once.
+-- A release on the widget also sets its hover animation to 1, so it paints as
+-- fully hovered at once.
 finalizePointerRelease :: Context -> Input -> IO ()
 finalizePointerRelease ctx inp =
   when (inputMouseReleased inp) $ do
@@ -294,39 +290,23 @@ finalizePointerRelease ctx inp =
                 nt <- getNodeType na idx
                 rect <- getNodeRect na idx
                 visible <- nodeClippedHit ctx idx rect mouse
-                when visible $ do
-                  case nt of
-                    NodeRadio -> getStyleIdx na idx >>= setParentSelection ctx idx
-                    NodeButton -> do
-                      packed <- getStyleIdx na idx
-                      when (hasFlag buttonFlagTab packed) $
-                        setParentSelection ctx idx (tabHeaderIndex packed)
-                    _ -> pure ()
-                  when (postsLayoutClick nt && releasedClicked /= active) $ do
-                    unlessM (inUiClickHit ctx active mouse) $
-                      writeIORef (ctxClickedId ctx) active
+                when (visible && postsLayoutClick nt && releasedClicked /= active) $
+                  unlessM (inUiClickHit ctx active mouse) $ do
+                    writeIORef (ctxClickedId ctx) active
+                    -- Covered: whatever the click changes is damaged on the
+                    -- frame that reports it.
+                    markDirtyCovered ctx
                 pure (over <|> Just visible)
       releasedOver <- foldNodesM na release Nothing
       writeIORef (ctxActiveId ctx) (WidgetId 0)
       when (releasedOver == Just True) $
         setAnimationValue ctx active 1
 
--- | Write @selected@ into the Int slot keyed by the widget id of node @idx@'s
--- parent. A radio group tags the container that holds its options with the
--- group's id ('NanoUI.Internal.Widgets.Node.tagContainer') and keeps its selected
--- index in that slot.
-setParentSelection :: Context -> NodeIdx -> Int -> IO ()
-setParentSelection ctx idx selected = do
-  parent <- getParent (ctxNodeArena ctx) idx
-  when (parent >= 0) $ do
-    groupWid <- getWidgetId (ctxNodeArena ctx) parent
-    modifyStore ctx (insertSlot fieldInt (intKey groupWid) selected)
-
 -- | The node types for which 'finalizePointerRelease' turns a release the view
 -- missed into a click on the next frame.
 postsLayoutClick :: NodeType -> Bool
 postsLayoutClick nt =
-  nt == NodeButton || nt == NodeTree || nt == NodeSelect || nt == NodeCheckbox
+  nt == NodeButton || nt == NodeTree || nt == NodeSelect || nt == NodeCheckbox || nt == NodeRadio
 
 -- | Whether the view's own hit test saw a release at @mouse@ on widget @wid@.
 -- It repeats the test of 'NanoUI.Internal.Widgets.Node.resolveInteraction': the widget

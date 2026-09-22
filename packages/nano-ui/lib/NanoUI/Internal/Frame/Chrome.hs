@@ -64,8 +64,8 @@ import NanoUI.Internal.Style
 import NanoUI.Internal.Types (Color (..), Rect (..), clamp, colorA, colorRGBA, lerpColor)
 import NanoUI.Internal.WidgetText
   ( hasFlag
-  , tabHeaderStyle
   , buttonFlagClose
+  , buttonVisualStyle
   , buttonFlagMenuBar
   , buttonFlagMenu
   , buttonFlagTab
@@ -276,7 +276,7 @@ widgetVisualStyle ctx nt idx = do
           NodeButton
             | isMenu -> menuItemVisualStyle theme val
             | isClose -> closeButtonStyle theme isHot animT
-            | isTab -> tabHeaderVisualStyle theme (tabHeaderStyle styleIdx) (val > 0.5)
+            | isTab -> tabHeaderVisualStyle theme (buttonVisualStyle styleIdx) (val > 0.5)
             | isTable -> tableHeaderVisualStyle theme (val > 0.5)
             | val > 0.5 ->
                 (themeButton theme)

@@ -8,7 +8,7 @@ module NanoUI.Internal.Damage
   , damagePieces
   ) where
 
-import Control.Monad (filterM, forM_, join, unless, when)
+import Control.Monad (filterM, forM_, unless, when)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
 import Data.IntMap.Strict qualified as IM
 import Data.IntSet qualified as IS
@@ -513,17 +513,7 @@ clipDamage ctx snap d owners = do
   -- New text keys inside floating panels also land here; outside panels the
   -- keysChanged predicate already forces full damage. updatePrevRects keeps
   -- last frame's map when no text changed.
-  let addText k =
-        forM_ (IM.lookup k newRects) $ \r -> do
-          -- An image that switched to another image keeps its size, so only
-          -- its own rect repaints. A text change can reflow the enclosing
-          -- scroller's content and reactivate/resize its chrome (thumb, caps)
-          -- outside the text rect; damage the scroll node's full rect so the
-          -- lane repaints.
-          addRect acc r
-          findNodeByKey ctx k >>= mapM_ (\idx -> do
-            isImage <- (== NodeImage) <$> getNodeType (ctxNodeArena ctx) idx
-            unless isImage $ scrollAncestorRect ctx idx >>= mapM_ (addRect acc))
+  let addText k = mapM_ (addRect acc) (IM.lookup k newRects)
   unless (ptrEq (fdTexts d) (fsTexts snap)) $
     IM.foldrWithKey (\k _ rest -> addText k >> rest) (pure ()) $
       IM.differenceWith
@@ -763,28 +753,16 @@ clipKeyRect k clip r
       let clipped = clipToViewport clip r
        in if rectNonEmpty clipped then Just clipped else Nothing
 
--- | Rect of the nearest scroll-container ancestor of a keyed node, covering
--- the content viewport and the scrollbar lane its chrome paints in. The walk
--- stops at the first scroll node even when its rect is empty.
-scrollAncestorRect :: Context -> NodeIdx -> IO (Maybe Rect)
-scrollAncestorRect ctx idx = join <$> walkAncestors na idx step
-  where
-    na = ctxNodeArena ctx
-    step i = do
-      nt <- getNodeType na i
-      if isScrollNode nt
-        then Just <$> getNonzeroRect na i
-        else pure Nothing
-
 scrollOffsetDamage :: Context -> RectUnion -> WidgetStore -> WidgetStore -> IO ()
 scrollOffsetDamage ctx acc oldStore newStore =
   unless (IM.null changedKeys) $ do
     -- Every store key that holds a scroll node's offset, mapped to the first
-    -- such node. Built once, only on frames where an offset changed.
+    -- such node, and every scroll range, mapped to each node with that id.
+    -- Built once, only on frames where an offset or range changed.
     owners <- foldClassNodeRevM na PointerNodes addOwner IM.empty
     IM.foldrWithKey
       ( \k _ rest -> do
-          forM_ (IM.lookup k owners) $ \idx -> do
+          forM_ (IM.findWithDefault [] k owners) $ \idx -> do
             -- The scroll node's rect covers the content viewport AND the
             -- scrollbar lane: offset changes move the thumb, which paints
             -- outside the content clip.
@@ -799,7 +777,12 @@ scrollOffsetDamage ctx acc oldStore newStore =
     -- Floating-pane offsets live in storeFloat; wheel/keyboard offsets
     -- live under the SlotTextAreaScroll slot in storePoint. Both move the
     -- scroller's content and its chrome. New or removed float offsets only
-    -- count when nonzero.
+    -- count when nonzero. The range the scroll pass publishes to storePoint
+    -- changes with the content's size, which resizes the thumb and can show
+    -- or hide a bar; content that changes but still fits keeps a zero range
+    -- and repaints nothing here. Two scrollers can share an id (a table's
+    -- frozen pane and body), and only the first publishes, so a range change
+    -- repaints every scroller with the id.
     changedKeys =
       changedKeysWith (fmap (const ()) . IM.filter (/= 0)) (storeFloat oldStore) (storeFloat newStore)
         `IM.union` changedKeysWith (fmap (const ())) (storePoint oldStore) (storePoint newStore)
@@ -813,10 +796,12 @@ scrollOffsetDamage ctx acc oldStore newStore =
         else do
           wid <- getWidgetId na idx
           let widKey = intKey wid
+              one = [idx]
           pure $
-            IM.insert widKey idx $
-              IM.insert (slotKey SlotScrollCross widKey) idx $
-                IM.insert (slotKey SlotTextAreaScroll widKey) idx m
+            IM.insert widKey one $
+              IM.insert (slotKey SlotScrollCross widKey) one $
+                IM.insert (slotKey SlotTextAreaScroll widKey) one $
+                  IM.insertWith (++) (slotKey SlotScrollRange widKey) one m
 
 floatingAncestorRect :: Context -> Int -> IO (Maybe Rect)
 floatingAncestorRect ctx idx =

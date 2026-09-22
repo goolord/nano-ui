@@ -51,8 +51,6 @@ module NanoUI.Internal.WidgetText
   , tableSortMarkOf
   , buttonVisualStyle
   , tabEncodeStyle
-  , tabHeaderStyle
-  , tabHeaderIndex
   ) where
 
 import Data.Bits ((.&.), (.|.), complement, shiftL, shiftR)
@@ -400,18 +398,8 @@ hasFlag flag si = si .&. flag /= 0
 buttonVisualStyle :: Int -> Int
 buttonVisualStyle si = si .&. complement buttonFlagMask
 
--- | A tab header's packed button style: the strip's tab style (0-3), the
--- header's index in the strip, and 'buttonFlagTab'.
+-- | A tab header's packed button style: the strip's tab style (0-3) and
+-- 'buttonFlagTab'.
 {-# INLINE tabEncodeStyle #-}
-tabEncodeStyle :: Int -> Int -> Int
-tabEncodeStyle style i = (style + 4 * i) .|. buttonFlagTab
-
--- | The strip's tab style from a packed tab header style ('tabEncodeStyle').
-{-# INLINE tabHeaderStyle #-}
-tabHeaderStyle :: Int -> Int
-tabHeaderStyle si = buttonVisualStyle si `mod` 4
-
--- | The header's index in its strip from a packed tab header style.
-{-# INLINE tabHeaderIndex #-}
-tabHeaderIndex :: Int -> Int
-tabHeaderIndex si = buttonVisualStyle si `div` 4
+tabEncodeStyle :: Int -> Int
+tabEncodeStyle style = style .|. buttonFlagTab

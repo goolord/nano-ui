@@ -32,7 +32,7 @@ module NanoUI.Internal.Widgets.TextEditor
 
 import Control.Monad (unless, void, when)
 import Data.Bits ((.&.), (.|.))
-import Data.Char (isPrint, isSpace, toLower)
+import Data.Char (chr, isPrint, isSpace, ord, toLower)
 import Data.Text qualified as T
 import Data.Text.Short qualified as TS
 import NanoUI.Internal.Context (Context (..))
@@ -327,29 +327,24 @@ inputTextCommands mode inp = T.foldr char keys (inputChars inp)
     keys = foldr (\k rest -> maybe rest (: rest) (keyCommand mode mods k)) [] (inputKeys inp)
 
 -- | The command a character typed with Ctrl runs. Letters may arrive as the
--- letter or as their control code.
+-- letter or as their control code (1 for A to 26 for Z), which is read as the
+-- letter, so Ctrl+Shift+Z redoes whichever way it arrives.
 ctrlCharCommand :: EditorMode -> Modifiers -> Char -> Maybe TextCommand
 ctrlCharCommand mode mods c =
-  case toLower c of
+  case toLower letter of
     'a' -> Just SelectAll
     'c' -> Just Copy
     'x' -> Just Cut
     'v' -> Just Paste
-    'z' | modShift mods || c == 'Z' -> Just Redo
+    'z' | modShift mods || letter == 'Z' -> Just Redo
     'z' -> Just Undo
     'y' -> Just Redo
     'k' | multi -> Just (Delete LineEnd)
     'u' | multi -> Just (Delete LineStart)
     'e' | multi -> Just (Move LineEnd False)
-    '\x01' -> Just SelectAll
-    '\x03' -> Just Copy
-    '\x18' -> Just Cut
-    '\x16' -> Just Paste
-    '\x1a' -> Just Undo
-    '\x19' -> Just Redo
-    '\v' | multi -> Just (Delete LineEnd)
-    '\NAK' | multi -> Just (Delete LineStart)
-    '\ENQ' | multi -> Just (Move LineEnd False)
     _ -> Nothing
   where
     multi = modeMultiLine mode
+    letter
+      | c >= '\x01' && c <= '\x1a' = chr (ord c + 0x60)
+      | otherwise = c

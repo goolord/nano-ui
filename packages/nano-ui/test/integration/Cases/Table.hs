@@ -379,6 +379,9 @@ runTableColResizeDemoReproTest _ failed =
           _ <- runFrame ctx hoverInp ui
           kind <- uiCursorKind ctx hoverInp
           assertEq failed kind UiCursorEwResize
+          -- Away from the edge, the header is not a resize zone.
+          midKind <- uiCursorKind ctx inp0 {inputMousePos = V2 (hx + hw / 2) grabY}
+          assert failed (midKind /= UiCursorEwResize)
           let pressInp = hoverInp {inputMouseDown = True, inputMousePressed = True}
               dragInp x = inp0 {inputMousePos = V2 x grabY, inputMouseDown = True}
           before <- headerButtonRects ctx

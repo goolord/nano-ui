@@ -4,6 +4,7 @@ module Cases.PointerRelease (tests) where
 
 import Spec
 import Data.Maybe (isJust, isNothing)
+import Data.Text qualified as T
 
 tests :: [Spec]
 tests =
@@ -11,7 +12,51 @@ tests =
   , spec "right-release-elsewhere" runRightReleaseElsewhereTest
   , spec "release-returns" runReleaseReturnsTest
   , spec "overlap-press" runOverlapPressTest
+  , spec "release-moved-radio" runReleaseMovedRadioTest
+  , spec "release-moved-tab" runReleaseMovedTabTest
   ]
+
+-- | Press a control, then release where it moved to on the same frame. The
+-- view tests the release against the rect it had before the move and misses
+-- it; the frame posts the click from the solved rect, asks for the next frame,
+-- and the control reports it there.
+releaseAfterMove ::
+  Context -> IORef Int -> T.Text -> (Float -> NanoUI a) -> (a -> Bool) -> IO ()
+releaseAfterMove ctx failed lbl ui picked = do
+  let inp0 = withInput 320 240
+      shift = 100
+  _ <- warmup2 ctx inp0 (ui 0)
+  spans <- collectTextSpans ctx
+  assertJust failed (spanRectOf lbl spans) $ \r -> do
+    let V2 px py = spanCenter r
+        press = inp0 {inputMousePos = V2 px py, inputMouseDown = True, inputMousePressed = True}
+        release = inp0 {inputMousePos = V2 px (py + shift), inputMouseReleased = True}
+    _ <- runFrame ctx press (ui 0)
+    (missed, _, _, dirty) <- runFrame ctx release (ui shift)
+    assert failed (not (picked missed))
+    assert failed dirty
+    (next, _, _, _) <- runFrame ctx inp0 {inputMousePos = V2 px (py + shift)} (ui shift)
+    assert failed (picked next)
+
+runReleaseMovedRadioTest :: Context -> IORef Int -> IO ()
+runReleaseMovedRadioTest ctx failed = do
+  sel <- newIORef (0 :: Int)
+  releaseAfterMove ctx failed "two"
+    ( \d -> column $ do
+        columnWith (fixedH d . fillW) (pure ())
+        snd <$> held sel (radio' ["one", "two", "three"])
+    )
+    (== 1)
+
+runReleaseMovedTabTest :: Context -> IORef Int -> IO ()
+runReleaseMovedTabTest ctx failed = do
+  cur <- newIORef (0 :: Int)
+  releaseAfterMove ctx failed "Beta"
+    ( \d -> column $ do
+        columnWith (fixedH d . fillW) (pure ())
+        snd <$> held cur (\i -> (\r -> (r, tabActive r)) <$> tabBar' i [tab 0 "Alpha" (), tab 1 "Beta" ()])
+    )
+    (== 1)
 
 -- | Press one widget, drag onto another, release: neither one fires, this
 -- frame or the next.

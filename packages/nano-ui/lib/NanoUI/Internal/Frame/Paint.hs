@@ -42,6 +42,8 @@ import NanoUI.Internal.Context
   ( Context (..)
   , CustomDrawingEntry (..)
   , DrawingEntry (..)
+  , SpanCacheEntry (..)
+  , SpanLines (..)
   , atlasTextureId
   , cachedCustomDrawingOps
   , cachedDrawingOps
@@ -63,7 +65,7 @@ import NanoUI.Internal.Draw
   , pushImage
   , pushRect
   , pushRoundedStroke
-  , pushTextStyled
+  , pushPreparedTextStyled
   , withClip
   )
 import NanoUI.Internal.Font (ScrollBarSlot (..))
@@ -75,7 +77,7 @@ import NanoUI.Internal.Frame.Chrome
   , paintScrollBarLayout
   , paintStyledRect
   )
-import NanoUI.Internal.Frame.Node (ScrollNode (..), readScrollNode, resolveFontFor, resolveTextFont, scrollNodeViewport)
+import NanoUI.Internal.Frame.Node (ScrollNode (..), nodeFontNative, readScrollNode, resolveTextFont, scrollNodeViewport)
 import NanoUI.Internal.Frame.Paint.Types (PaintEnv (..), buildPaintEnv)
 import NanoUI.Internal.Frame.Paint.Widgets (paintTextAreaNode, paintTextInputNode, paintWidget)
 import NanoUI.Internal.Frame.Scroll.Geometry
@@ -86,7 +88,7 @@ import NanoUI.Internal.Frame.Scroll.Geometry
   , scrollBarLayouts2D
   , scrollChromeActive
   )
-import NanoUI.Internal.Frame.Spans (collectNodeTextSpans)
+import NanoUI.Internal.Frame.Spans (textNodeSpanEntry)
 import NanoUI.Internal.Id (hashWidgetId)
 import NanoUI.Internal.Layout.Arena
   ( DirTag (..)
@@ -374,24 +376,32 @@ paintScrollChrome env idx (ScrollNode slot cfg native2D dir pad contentMain cont
     mapM_ (paintScrollBarLayout da (scrollBarTrackColor base theme) (scrollBarThumbColor base theme)) bars
     beginLayer da layer
 
+-- | A text node's lines, drawn with the metrics its span cache entry prepared
+-- for each line when it was laid out.
 {-# NOINLINE paintTextNode #-}
 paintTextNode :: PaintEnv -> NodeIdx -> Rect -> IO ()
-paintTextNode env idx rect = do
+paintTextNode env idx rect@(Rect x y w h) = do
   let arena = peNodeArena env
       da = peDrawArena env
   si <- getStyleIdx arena idx
   forM_ (tableStripeColor (peTheme env) si) (pushRect da rect)
   raw <- getText arena idx
   unless (T.null raw) $ do
-    spans <- collectNodeTextSpans (peContext env) idx
+    e <- textNodeSpanEntry (peContext env) idx x y w h
     fontSize <- getNodeFontSize arena idx
-    (fm, isNative, _) <- resolveFontFor (peContext env) NodeText fontSize si
-    let deco = textNodeTextDecoration si
-        weight = if isNative then WeightNormal else textNodeFontWeight si
-        style = if isNative then FontStyleNormal else textNodeFontStyle si
-    forM_ spans $ \(Rect tx ty _ _, line, spanFg, _) ->
-      unless (T.null line) $
-        pushTextStyled da fm weight style deco tx ty line spanFg
+    native <- nodeFontNative (peContext env) fontSize si
+    let !deco = textNodeTextDecoration si
+        !weight = if native then WeightNormal else textNodeFontWeight si
+        !style = if native then FontStyleNormal else textNodeFontStyle si
+        draw (Rect tx ty _ _, line, spanFg, _) prepared =
+          unless (T.null line) $
+            pushPreparedTextStyled da prepared weight style deco tx ty line spanFg
+        -- 'placeSpanLines' makes one span per line, in order.
+        wrapped (s : ss) ((_, prepared) : lns) = draw s prepared >> wrapped ss lns
+        wrapped _ _ = pure ()
+    case sceLines e of
+      SpanWrapped lns -> wrapped (sceSpans e) lns
+      SpanSingle _ prepared -> mapM_ (`draw` prepared) (sceSpans e)
 
 paintSeparatorNode :: PaintEnv -> Rect -> IO ()
 paintSeparatorNode env (Rect x y w h) =
@@ -431,8 +441,7 @@ paintDrawingNode env idx rect = do
   mCustomBuild <- lookupCustomDrawing ctx wid
   case mCustomBuild of
     Just (CustomDrawingEntry content customBuild) -> do
-      cdc <- mkCustomDrawContext ctx (peFontMetrics env) wid
-      ops <- cachedCustomDrawingOps ctx wid content rect cdc customBuild
+      ops <- cachedCustomDrawingOps ctx wid content rect (mkCustomDrawContext ctx (peFontMetrics env) wid) customBuild
       emitDrawingOps env rect ops
     Nothing -> do
       mBuild <- lookupDrawing ctx wid

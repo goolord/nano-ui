@@ -28,11 +28,11 @@ import Control.Monad.ST (runST)
 import Data.Char (isDigit)
 import Data.Dynamic (fromDynamic, toDyn)
 import Data.Foldable (toList)
-import Data.IORef (readIORef, writeIORef)
+import Data.IORef (modifyIORef', readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
 import Data.IntSet (IntSet)
 import Data.IntSet qualified as IS
-import Data.List (sortOn)
+import Data.List (find, sortOn)
 import Data.Maybe (fromMaybe, isJust, listToMaybe)
 import Data.Ord (Down (..))
 import Data.Text (Text)
@@ -45,7 +45,7 @@ import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context (Context (..), InteractionState (..), getPrevRect, getScrollOffset2D, getStore, intKey, linkScrollAxes, modifyInteraction, modifyStore, writeSlots)
 import NanoUI.Internal.Hooks (useInt)
 import NanoUI.Internal.Font (ScrollBarSlot (..), scrollBarGutter, tableCellInset, lineWidthIO)
-import NanoUI.Internal.Input (Input (..), inputMouseDown, inputMousePos, inputMousePressed, inputMouseReleased)
+import NanoUI.Internal.Input (Input (..), UiCursorKind (..), inputMouseDown, inputMousePos, inputMousePressed, inputMouseReleased)
 import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Monad (Ui, askContext, askInput, lastRect, nextId, uiIO, withKey)
 import NanoUI.Internal.Store (Slot (..), fieldFloat, fieldFloatList, fieldInt, fieldIntList, fieldIntSet, findSlot, insertSlot, slotKey, slotWrite)
@@ -550,11 +550,9 @@ tableConfigured cfg f key cols inputRows curSort =
           -- Resize grab zone spans the header band plus the body scroller: a
           -- column boundary is resizable anywhere down the table, not just on
           -- the header cell. The bottom anchor is the body scroller's rect
-          -- (prev frame: readable at build time). The resize cursor
-          -- (Frame.Cursor.tableColResizeCursorKind) locates the same scroller
-          -- structurally and uses its current-frame rect, so the grab zone and
-          -- the cursor zone are the same rect and cannot drift apart. First
-          -- frame (no prev rect yet): header band only.
+          -- (prev frame: readable at build time). The same rects are the
+          -- resize cursor's zones, so the two cannot drift apart. First frame
+          -- (no prev rect yet): header band only.
           hdrSpans =
             [ (rectY rr, rectY rr + rectH rr)
             | (_, r) <- headerPairs
@@ -566,7 +564,8 @@ tableConfigured cfg f key cols inputRows curSort =
               ( minimum (map fst hdrSpans)
               , maybe (maximum (map snd hdrSpans)) (\(Rect _ by _ bh) -> by + bh) mBodyRect
               )
-          edgeCol = headerEdgeHit edgePad edgeTop edgeBot headerPairs mouse
+          edgeZones = headerEdgeZones edgePad edgeTop edgeBot headerPairs
+          edgeCol = fst <$> find (\(_, r) -> rectContains r mouse) edgeZones
           hoverCol = listToMaybe [i | (i, r) <- headerPairs, rectContains (rawRespRect r) mouse]
           headerRects = [(i, rawRespRect r) | (i, r) <- headerPairs]
           (isResize, isReorder) = case drag0 of
@@ -574,6 +573,9 @@ tableConfigured cfg f key cols inputRows curSort =
             HeaderReorder _ -> (False, True)
             HeaderIdle -> (False, False)
           resizing = isResize && inputMouseDown inp
+      unless (null edgeZones) . uiIO $
+        -- Strict in the spine and the rects, so no thunk waits in the IORef.
+        modifyIORef' (ctxCursorZones ctx) (\zs -> foldl' (\acc (_, !r) -> (r, UiCursorEwResize) : acc) zs edgeZones)
       (vis', mReorder) <-
         withKey ("reorder" :: Text) $
           useReorder vis (if resizing || isJust edgeCol then [] else headerRects)
@@ -711,18 +713,14 @@ rebuildOrder hidden newVis old =
 minColW :: Float
 minColW = 40
 
--- | Hit-test a column resize edge. The grab zone spans the whole column
--- height (header top to body bottom), so a column can be resized by its
--- boundary line anywhere down the table, not just on the header cell.
-headerEdgeHit :: Float -> Float -> Float -> [(Int, Response)] -> V2 -> Maybe Int
-headerEdgeHit pad yTop yBot cols mouse =
-  listToMaybe
-    [ i
-    | (i, r) <- cols
-    , let Rect x y w h = rawRespRect r
-    , w > 0 && h > 0
-    , let mx = v2X mouse
-          my = v2Y mouse
-    , my >= min y yTop && my <= max (y + h) yBot
-    , abs (mx - (x + w)) <= pad
-    ]
+-- | Each column's resize edge zone. The zone spans the whole column height
+-- (header top to body bottom), so a column can be resized by its boundary
+-- line anywhere down the table, not just on the header cell.
+headerEdgeZones :: Float -> Float -> Float -> [(Int, Response)] -> [(Int, Rect)]
+headerEdgeZones pad yTop yBot cols =
+  [ (i, Rect (x + w - pad) top (2 * pad) (max (y + h) yBot - top))
+  | (i, r) <- cols
+  , let Rect x y w h = rawRespRect r
+        top = min y yTop
+  , w > 0 && h > 0
+  ]

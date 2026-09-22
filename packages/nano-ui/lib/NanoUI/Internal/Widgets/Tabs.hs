@@ -315,7 +315,7 @@ renderHeaders ::
   [(Int, Tab a body)] ->
   Eff es (TabResponse a, [Header a])
 renderHeaders ctx hdrLay styleVal cur indexed = do
-  resps <- mapM (\(i, t) -> withKey i (renderSingleHeader hdrLay (tabEncodeStyle styleVal i) cur t)) indexed
+  resps <- mapM (\(i, t) -> withKey i (renderSingleHeader hdrLay (tabEncodeStyle styleVal) cur t)) indexed
   let clickedKeys = [headerKey h | h <- resps, respClicked (headerResponse h), not (headerClosed h)]
       closedKey = headerKey <$> find headerClosed resps
       nextTab = fromMaybe cur (listToMaybe clickedKeys)

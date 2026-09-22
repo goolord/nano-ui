@@ -524,7 +524,7 @@ drawingHeightAt SolveEnv {seArena = na, seFm = fm, seLookupMeasure = lookupMeasu
 
 -- | The width a text node that is not a row's child wraps at, from its
 -- effective max width, width sizing and assigned width: 1e8 or more when
--- nothing caps it (@collectNodeTextSpans@ in the text-span collector).
+-- nothing caps it (@textNodeSpanEntry@ in the text-span collector).
 textWrapCap :: Float -> SizingTag -> Float -> Float
 textWrapCap effMaxW wTag w
   | effMaxW < 1e8 = max 0 effMaxW

@@ -107,14 +107,19 @@ serveOps ::
   IO (SmallArray DrawOp)
 serveOps hit rect rebuilt store =
   case hit of
-    Just (r, ops)
-      | rectW r == rectW rect && rectH r == rectH rect ->
-          if rectX r == rectX rect && rectY r == rectY rect
-            then pure ops
-            else keep (mapSmallArray' (shiftDrawOp (rectX rect - rectX r) (rectY rect - rectY r)) ops)
-    _ -> keep rebuilt
-  where
-    keep ops = store ops >> pure ops
+    Just (r, ops) | rectW r == rectW rect && rectH r == rectH rect -> placeOps r rect ops store
+    _ -> store rebuilt >> pure rebuilt
+
+-- | Ops built at @r@ for a same-size @rect@: as they are, or translated and
+-- written back with @store@ when the widget moved.
+{-# INLINE placeOps #-}
+placeOps :: Rect -> Rect -> SmallArray DrawOp -> (SmallArray DrawOp -> IO ()) -> IO (SmallArray DrawOp)
+placeOps r rect ops store
+  | rectX r == rectX rect && rectY r == rectY rect = pure ops
+  | otherwise = do
+      let moved = mapSmallArray' (shiftDrawOp (rectX rect - rectX r) (rectY rect - rectY r)) ops
+      store moved
+      pure moved
 
 -- | Rebuild draw ops when the content version or width/height change. A move
 -- only translates. An unversioned drawing (content 0) additionally drops its
@@ -219,34 +224,53 @@ lookupCustomDrawing = lookupIn dcsCustomDrawings
 {-# INLINE customEntryMatches #-}
 customEntryMatches :: CustomDrawOpCacheEntry -> Int -> Rect -> CustomDrawContext -> Int -> Bool
 customEntryMatches e content rect cdc gen =
-  cdeContent e == content
-    && rectW (cdeBounds e) == rectW rect
-    && rectH (cdeBounds e) == rectH rect
+  customEntrySized e content rect gen
     && cdeHovered e == cdcHovered cdc
     && cdePressed e == cdcPressed cdc
     && cdeFocused e == cdcFocused cdc
     && cdeDisabled e == cdcDisabled cdc
+
+-- | 'customEntryMatches' without the interaction state: the content key, the
+-- size and the metrics generation.
+{-# INLINE customEntrySized #-}
+customEntrySized :: CustomDrawOpCacheEntry -> Int -> Rect -> Int -> Bool
+customEntrySized e content rect gen =
+  cdeContent e == content
+    && rectW (cdeBounds e) == rectW rect
+    && rectH (cdeBounds e) == rectH rect
     && cdeGen e == gen
 
 -- | Draw ops for a custom widget's paint: the ops 'refreshCustomDrawingOps'
--- settled on this frame while every input still matches, translated if the
--- widget only moved, else a fresh build.
+-- settled on this frame, translated if the widget only moved, else a fresh
+-- build with the draw context from @newCdc@.
+--
+-- The refresh ran against this frame's interaction state, which nothing
+-- changes before paint, so an entry with this content, size and metrics is
+-- this frame's and paint need not build a context to check it. Two nodes
+-- sharing an id at different sizes miss here, and the one painted second
+-- rebuilds.
 cachedCustomDrawingOps ::
   Context ->
   WidgetId ->
   Int ->
   Rect ->
-  CustomDrawContext ->
+  IO CustomDrawContext ->
   CustomDrawBuild ->
   IO (SmallArray DrawOp)
-cachedCustomDrawingOps ctx wid content rect cdc build = do
+cachedCustomDrawingOps ctx wid content rect newCdc build = do
   let k = intKey wid
   gen <- readIORef (ctxMetricGen ctx)
   cached <- lookupIn dcsCustomDrawOpCache ctx wid
-  let hit = case cached of
-        Just e | customEntryMatches e content rect cdc gen -> Just (cdeBounds e, cdeOps e)
-        _ -> Nothing
-  serveOps hit rect (build cdc rect) (storeCustomDrawingOps ctx k content rect cdc gen)
+  case cached of
+    Just e
+      | customEntrySized e content rect gen ->
+          placeOps (cdeBounds e) rect (cdeOps e) $ \ops ->
+            registerIn dcsCustomDrawOpCache (\m dc -> dc {dcsCustomDrawOpCache = m}) ctx wid e {cdeBounds = rect, cdeOps = ops}
+    _ -> do
+      cdc <- newCdc
+      let ops = build cdc rect
+      storeCustomDrawingOps ctx k content rect cdc gen ops
+      pure ops
 
 -- | Settle a custom widget's ops for this frame and cache them for paint,
 -- returning whether what it draws changed at an unchanged rect.

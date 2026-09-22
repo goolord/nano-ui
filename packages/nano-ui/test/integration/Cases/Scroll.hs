@@ -23,6 +23,7 @@ tests =
   [ spec "scroll-thumb-cursor" runScrollThumbCursorTest
   , pixelSpec "scroll-bar-gutter" runScrollBarGutterTest
   , spec "scroll-damage" runScrollDamageTest
+  , spec "scroll-text-damage" runScrollTextDamageTest
   , pixelSpec "scroll-top-clip" runScrollTopClipTest
   , spec "nested-scroll" runNestedScrollTest
   , spec "nested-scroll-focus" runNestedScrollFocusTest
@@ -124,6 +125,44 @@ runScrollDamageTest ctx failed = do
     case dScroll of
       DamageFull -> assert failed False
       DamageClip r -> assert failed (rectW r > 0 && rectH r > 0 && rectH r <= 60 + defaultDamageSlop * 2 && not (damageIsEmpty dScroll))
+
+-- A text change inside a scroller repaints the scrollbar lane only when it
+-- changes the content's size: a same-size edit repaints the text alone, and
+-- one that makes the content taller moves the thumb.
+runScrollTextDamageTest :: Context -> IORef Int -> IO ()
+runScrollTextDamageTest ctx failed = do
+  let scrollUi :: T.Text -> T.Text -> NanoUI WidgetId
+      scrollUi firstLine lastLine =
+        fmap fst $
+          scrollArea (fillW . fixedH 60) $
+            column $ do
+              label firstLine
+              replicateM_ 6 (label "scroll line")
+              label lastLine
+      inp0 = withInputOff 200 120
+  sid <- warmup2 ctx inp0 (scrollUi "count 1" "last")
+  _ <- takeDamage ctx
+  assertJustM failed (getPrevRect ctx sid) $ \(Rect sx sy sw sh) -> do
+    let lane = V2 (sx + sw - 2) (sy + sh / 2)
+    -- Same size: the first line's text only.
+    _ <- runFrame ctx inp0 (scrollUi "count 2" "last")
+    dSame <- takeDamage ctx
+    case dSame of
+      DamageClip r -> assert failed (rectW r > 0 && rectH r > 0 && not (rectContains r lane))
+      DamageFull -> assert failed False
+    -- Taller: the last line gains two more, and the lane repaints. On the page
+    -- the lines that moved repaint the window whole, so run this in a floating
+    -- window, where they are clipped to the scroller's viewport.
+    let inWindow firstLine lastLine = snd <$> window True "Lines" (scrollUi firstLine lastLine)
+        winInp = withInputOff 640 400
+    mWsid <- warmup2 ctx winInp (inWindow "count 1" "last")
+    _ <- takeDamage ctx
+    assertJust failed mWsid $ \wsid -> assertJustM failed (getPrevRect ctx wsid) $ \(Rect wx wy ww wh) -> do
+      _ <- runFrame ctx winInp (inWindow "count 1" "last\nmore\nmore")
+      dTaller <- takeDamage ctx
+      case dTaller of
+        DamageClip r -> assert failed (rectContains r (V2 (wx + ww - 2) (wy + wh / 2)))
+        DamageFull -> assert failed False
 
 -- Ghosting guard: a grow×grow (page-level) scroll container paints no well,
 -- so on clip frames the strip vacated by scrolled content has no covering

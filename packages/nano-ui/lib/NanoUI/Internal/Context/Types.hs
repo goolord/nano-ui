@@ -663,6 +663,9 @@ data Context = Context
   , ctxSpanOverlay :: SpanArena
   -- ^ Overlay text spans for the current frame, reused on the next frame.
   , ctxInteractionState :: !(IORef InteractionState)
+  -- | Rects the view asked a cursor for this build, newest first: a table's
+  -- column edges. Each build starts empty.
+  , ctxCursorZones :: !(IORef [(Rect, UiCursorKind)])
   , ctxClipboardGet :: IO (Maybe Text)
   , ctxClipboardSet :: Text -> IO Bool
   , ctxImageAtlas :: ImageAtlas

@@ -403,6 +403,7 @@ resetUiBuildScopes ctx = do
   writeIORef (ctxIdContext ctx) initialIdContext
   writeIORef (ctxFocusablesCount ctx) 0
   writeIORef (ctxHotId ctx) (WidgetId 0)
+  writeIORef (ctxCursorZones ctx) []
   resetDrawingScopeCache ctx
 
 -- | Solve and place everything, floating panels included, then snapshot the

@@ -3,6 +3,7 @@
 -- viewport.
 module NanoUI.Internal.Frame.Node
   ( resolveFontFor
+  , nodeFontNative
   , resolveTextFont
   , nodeFontMetrics
   , ScrollNode (..)
@@ -63,6 +64,19 @@ resolveFontFor ctx nt size packed
       pure (fm, native, ctxResolveMeasure ctx size weight style variant)
   where
     si = if nt == NodeText || nt == NodeTextInput then packed else 0
+    variant = textNodeFontVariant si
+    weight = textNodeFontWeight si
+    style = textNodeFontStyle si
+
+-- | Whether the host draws the weight and slant of the font a text node of
+-- @size@ and packed style @si@ is set in ('resolveFontFor'), for paint, which
+-- takes the metrics from the span cache.
+{-# INLINE nodeFontNative #-}
+nodeFontNative :: Context -> Float -> Int -> IO Bool
+nodeFontNative ctx size si
+  | isDefaultNodeFont size weight style variant = pure False
+  | otherwise = snd <$> ctxResolveFont ctx size weight style variant
+  where
     variant = textNodeFontVariant si
     weight = textNodeFontWeight si
     style = textNodeFontStyle si

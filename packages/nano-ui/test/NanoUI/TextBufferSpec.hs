@@ -204,6 +204,11 @@ spec = do
         redone = typeArea (Modifiers True True False) "z" [] undone
       TB.toText (TA.buffer undone) `shouldBe` "one "
       TB.toText (TA.buffer redone) `shouldBe` "one two"
+      -- Some backends deliver Ctrl+letter as its control code.
+      TE.inputTextCommands TE.singleLineMode (frameInput (Modifiers True True False) "\x1a" [])
+        `shouldBe` [TE.Redo]
+      TE.inputTextCommands TE.singleLineMode (frameInput ctrlMods "\x1a\x19" [])
+        `shouldBe` [TE.Undo, TE.Redo]
 
     it "Ctrl+Alt types characters (AltGr) while Ctrl alone runs shortcuts" $ do
       let

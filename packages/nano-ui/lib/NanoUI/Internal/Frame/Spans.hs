@@ -10,6 +10,7 @@ module NanoUI.Internal.Frame.Spans
   , forWidgetTextPlacements_
   , selectableTextGeometry
   , collectNodeTextSpans
+  , textNodeSpanEntry
   ) where
 
 import Control.Monad (forM, unless, when)
@@ -192,80 +193,85 @@ collectNodeTextSpans ctx idx = do
   (x, y, w, h) <- getRect arena idx
   if nt /= NodeText
     then if isWidgetNode nt then widgetTextSpans ctx nt idx x y w h else pure []
-    else do
-      theme <- nodeTheme ctx idx
-      raw <- getText arena idx
-      si <- getStyleIdx arena idx
-      mCustomCol <- getNodeFontColor arena idx
-      fontSize <- getNodeFontSize arena idx
-      ax <- getAlignX arena idx
-      (_, _, maxW, _) <- getMinMax arena idx
-      (wTag, _) <- getWidthSizing arena idx
-      isRowChild <- parentIsRow arena idx
-      -- 'nodeTextLines' wraps a row child only at its own newlines, so
-      -- only then does the ancestor cap matter; skip the walk to the root.
-      effMaxW <-
-        if maxW < 1e8 || (isRowChild && not (T.any (== '\n') raw))
-          then pure maxW
-          else findAncestorMaxW arena idx
-      let rect = Rect x y w h
-          mStripe = tableStripeColor theme si
-          variantFg = case textNodeFontVariant si of
-            FontHeading -> themeAccent theme
-            FontMuted -> themeMuted theme
-            FontDanger -> themeRed theme
-            _ -> styleFg (themePanel theme)
-          fg = fromMaybe variantFg mCustomCol
-          bg = fromMaybe (styleBg (themePanel theme)) mStripe
-          !ix = if isJust mStripe then tableCellInset else 0
-          -- What the lines depend on: everything but where the node is and
-          -- how tall, and the colours. Inlined at both uses, so a cache hit
-          -- allocates no closure for it.
-          {-# INLINE sameLines #-}
-          sameLines e =
-            sceText e == raw
-              && sceStyle e == si
-              && sceFontSize e == fontSize
-              && sceWidthTag e == fromEnum wTag
-              && rectW (sceRect e) == w
-              && sceEffMaxW e == effMaxW
-              && sceRowChild e == isRowChild
-              && sceInset e == ix
-      cache <- readIORef (ctxSpanCache ctx)
-      case IM.lookup idx cache of
-        Just e
-          | sameLines e
-              && sceRect e == rect
-              && sceFg e == fg
-              && sceBg e == bg
-              && sceAlign e == fromEnum ax ->
-              pure (sceSpans e)
-        mEntry -> do
-          (fm, textLines) <- case mEntry of
-            Just e | sameLines e -> pure (sceFont e, sceLines e)
-            _ -> nodeTextLines ctx raw si fontSize wTag maxW effMaxW isRowChild ix w
-          let spans = [(r, line, fg, bg) | (r, line) <- placeSpanLines ax fm ix x y w h textLines]
-          writeIORef (ctxSpanCache ctx) $
-            IM.insert
-              idx
-              SpanCacheEntry
-                { sceText = raw
-                , sceFg = fg
-                , sceBg = bg
-                , sceStyle = si
-                , sceFontSize = fontSize
-                , sceAlign = fromEnum ax
-                , sceWidthTag = fromEnum wTag
-                , sceRect = rect
-                , sceEffMaxW = effMaxW
-                , sceRowChild = isRowChild
-                , sceInset = ix
-                , sceFont = fm
-                , sceLines = textLines
-                , sceSpans = spans
-                }
-              cache
-          pure spans
+    else sceSpans <$> textNodeSpanEntry ctx idx x y w h
+
+-- | Text node @idx@'s span cache entry at @(x, y)@, @w@ by @h@, brought up to
+-- date: its spans, and the metrics prepared for each line, which paint draws
+-- with.
+textNodeSpanEntry :: Context -> NodeIdx -> Float -> Float -> Float -> Float -> IO SpanCacheEntry
+textNodeSpanEntry ctx idx x y w h = do
+  let arena = ctxNodeArena ctx
+  theme <- nodeTheme ctx idx
+  raw <- getText arena idx
+  si <- getStyleIdx arena idx
+  mCustomCol <- getNodeFontColor arena idx
+  fontSize <- getNodeFontSize arena idx
+  ax <- getAlignX arena idx
+  (_, _, maxW, _) <- getMinMax arena idx
+  (wTag, _) <- getWidthSizing arena idx
+  isRowChild <- parentIsRow arena idx
+  -- 'nodeTextLines' wraps a row child only at its own newlines, so
+  -- only then does the ancestor cap matter; skip the walk to the root.
+  effMaxW <-
+    if maxW < 1e8 || (isRowChild && not (T.any (== '\n') raw))
+      then pure maxW
+      else findAncestorMaxW arena idx
+  let rect = Rect x y w h
+      mStripe = tableStripeColor theme si
+      variantFg = case textNodeFontVariant si of
+        FontHeading -> themeAccent theme
+        FontMuted -> themeMuted theme
+        FontDanger -> themeRed theme
+        _ -> styleFg (themePanel theme)
+      fg = fromMaybe variantFg mCustomCol
+      bg = fromMaybe (styleBg (themePanel theme)) mStripe
+      !ix = if isJust mStripe then tableCellInset else 0
+      -- What the lines depend on: everything but where the node is and
+      -- how tall, and the colours. Inlined at both uses, so a cache hit
+      -- allocates no closure for it.
+      {-# INLINE sameLines #-}
+      sameLines e =
+        sceText e == raw
+          && sceStyle e == si
+          && sceFontSize e == fontSize
+          && sceWidthTag e == fromEnum wTag
+          && rectW (sceRect e) == w
+          && sceEffMaxW e == effMaxW
+          && sceRowChild e == isRowChild
+          && sceInset e == ix
+  cache <- readIORef (ctxSpanCache ctx)
+  case IM.lookup idx cache of
+    Just e
+      | sameLines e
+          && sceRect e == rect
+          && sceFg e == fg
+          && sceBg e == bg
+          && sceAlign e == fromEnum ax ->
+          pure e
+    mEntry -> do
+      (fm, textLines) <- case mEntry of
+        Just e | sameLines e -> pure (sceFont e, sceLines e)
+        _ -> nodeTextLines ctx raw si fontSize wTag maxW effMaxW isRowChild ix w
+      let spans = [(r, line, fg, bg) | (r, line) <- placeSpanLines ax fm ix x y w h textLines]
+          entry =
+            SpanCacheEntry
+              { sceText = raw
+              , sceFg = fg
+              , sceBg = bg
+              , sceStyle = si
+              , sceFontSize = fontSize
+              , sceAlign = fromEnum ax
+              , sceWidthTag = fromEnum wTag
+              , sceRect = rect
+              , sceEffMaxW = effMaxW
+              , sceRowChild = isRowChild
+              , sceInset = ix
+              , sceFont = fm
+              , sceLines = textLines
+              , sceSpans = spans
+              }
+      writeIORef (ctxSpanCache ctx) $ IM.insert idx entry cache
+      pure entry
 
 -- | A text node's lines for width @w@ and the font they are set in: wrapped
 -- where the node wraps (through the context's wrap cache, which the solve

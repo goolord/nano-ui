@@ -692,6 +692,7 @@ newContext = do
   ctxSpanBase <- newSpanArena 64
   ctxSpanOverlay <- newSpanArena 64
   ctxInteractionState <- newIORef initialInteractionState
+  ctxCursorZones <- newIORef []
   ctxImageAtlas <- Atlas.newImageAtlas
   ctxWakeLoop <- newIORef Nothing
   ctxWakeAt <- newIORef 0

@@ -230,6 +230,10 @@
 
 ### Changed
 
+- A text change inside a scroller repaints the text, and the scroller's
+  scrollbar only when the content's size changed. Every text change used to
+  repaint the whole scroller.
+
 - The measure pass skips unchanged subtrees. After the view builds, each
   node's hash covers its own inputs, its ancestors' (text wraps at an
   ancestor's width) and, through its children's hashes, its whole subtree;
@@ -436,6 +440,16 @@
   or 1.38 GB instead of 1.48 GB with a modal.
 
 ### Fixed
+
+- Ctrl+Shift+Z redoes in text fields and areas when the backend delivers it
+  as the control code for Z rather than the letter. It undid instead.
+- A click the view missed because the widget moved on the frame the button
+  came up asks for the frame that reports it. Unless the release also changed
+  the widget's hover, the click could wait for the next input. Radio options and
+  tab headers report such a click like any other widget, where they used to
+  write their group's selection behind the view's back.
+- A scroller whose content grows or shrinks without its text changing (a box
+  resized, a row added inside a floating window) repaints its scrollbar.
 
 - Table sort arrows, select and combo chevrons, numeric stepper arrows and
   `FillTriangle` are anti-aliased, and keep their shape: each corner used to

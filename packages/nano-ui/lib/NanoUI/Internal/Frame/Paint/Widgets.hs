@@ -81,7 +81,6 @@ import NanoUI.Internal.WidgetText
   ( hasFlag
   , buttonCloseTrailing
   , buttonVisualStyle
-  , tabHeaderStyle
   , comboTextClip
   , buttonFlagClose
   , buttonFlagMenuBar
@@ -202,7 +201,7 @@ paintWidgetBackground env idx nt style si menuRowRect value (Rect x y w h) = do
     -- metrics, so the two painters cannot drift.
     when (wid == hot) $ paintMenuAccent da theme menuRowRect
   when isTab $
-    paintTabHeader da theme (tabHeaderStyle si) (value > 0.5) style x y w h
+    paintTabHeader da theme (buttonVisualStyle si) (value > 0.5) style x y w h
   when isTable $
     paintTableHeader da theme (value > 0.5) style x y w h
   case nt of

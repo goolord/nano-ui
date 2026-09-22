@@ -9,9 +9,9 @@ where
 
 import Control.Monad (forM)
 import Control.Monad.Trans.Maybe (MaybeT (..))
-import Data.Foldable (asum)
+import Data.Foldable (asum, find)
 import Data.IORef (readIORef)
-import Data.Maybe (fromMaybe, isJust)
+import Data.Maybe (isJust)
 import NanoUI.Internal.Context
   ( Context (..)
   , InteractionState (..)
@@ -47,24 +47,19 @@ import NanoUI.Internal.Input
   , inputMousePos
   )
 import NanoUI.Internal.Layout.Arena
-  ( DirTag (..)
-  , NodeClass (PointerNodes)
+  ( NodeClass (PointerNodes)
   , NodeIdx
   , NodeType (..)
-  , findChildM
   , findClassNodeM
-  , getDirection
   , getNodeType
-  , getParent
   , getRect
   , getStyleIdx
   , getWidgetId
   , isScrollNode
-  , walkAncestors
   )
 import NanoUI.Internal.Monad ((<&&>))
 import NanoUI.Internal.Types (Rect (..), V2 (..), rectContains)
-import NanoUI.Internal.WidgetText (hasFlag, buttonFlagTable, numericStepperRects, textInputFlagNumeric)
+import NanoUI.Internal.WidgetText (hasFlag, numericStepperRects, textInputFlagNumeric)
 import NanoUI.Internal.Widgets.Custom (mkCustomDrawContext)
 
 -- | Cursor requested by current gestures and hit tests against the solved arena.
@@ -77,7 +72,7 @@ uiCursorKind ctx inp = do
       [ textEditMenuCursorKind ctx inp
       , selectDropdownCursorKind ctx inp
       , windowResizeCursorKind ctx inp
-      , tableColResizeCursorKind ctx inp
+      , cursorZoneKind ctx inp
       , scrollThumbCursorKind ctx inp
       , textFieldHoverCursorKind ctx inp
       ]
@@ -253,53 +248,16 @@ textAreaCursorKind ctx idx wid mouse = do
     then pure UiCursorDefault
     else rectCursorKind UiCursorText ctx idx wid mouse
 
-tableColResizeCursorKind :: Context -> Input -> IO (Maybe UiCursorKind)
-tableColResizeCursorKind ctx inp = do
+-- | The cursor of the newest zone the view registered under the pointer
+-- ('ctxCursorZones'), or the resize arrow for a whole column-resize drag.
+cursorZoneKind :: Context -> Input -> IO (Maybe UiCursorKind)
+cursorZoneKind ctx inp = do
   dragging <- getsInteraction ctx isColumnResize
-  let
-    na = ctxNodeArena ctx
-    V2 mx my = inputMousePos inp
   if inputMouseDown inp && dragging
     then pure (Just UiCursorEwResize)
     else do
-      mEdge <-
-        findClassNodeM na PointerNodes $ \idx ->
-          ((== NodeButton) <$> getNodeType na idx)
-            <&&> (hasFlag buttonFlagTable <$> getStyleIdx na idx)
-            <&&> do
-              (x, y, w, h) <- getRect na idx
-              -- The resize cursor spans the whole column height (header
-              -- plus body cells down to the body scroller's bottom edge),
-              -- matching the drag grab zone: tableBodyScrollerBottom
-              -- locates the same body scroller whose rect the grab zone
-              -- anchors on (its prev-frame value, readable at build time),
-              -- so the two zones cannot disagree. The edge test comes
-              -- first, so only the header under the pointer walks up.
-              if w > 0 && h > 0 && my >= y && abs (mx - (x + w)) <= 4
-                then (\yBot -> my <= yBot) . fromMaybe (y + h) <$> tableBodyScrollerBottom ctx idx
-                else pure False
-      pure (UiCursorEwResize <$ mEdge)
-
--- | Bottom edge of a table's body scroller, located structurally from one
--- of its header buttons: walk up to the first ancestor that has a direct
--- Column-direction scroll-container child (the pane column built by
--- tableSplitPanes) and take that child's rect bottom. Runs post-solve, so
--- the rect is current-frame. Nothing when no such scroller exists (the
--- caller falls back to the header button's own bottom).
-tableBodyScrollerBottom :: Context -> NodeIdx -> IO (Maybe Float)
-tableBodyScrollerBottom ctx idx = do
-  parent <- getParent na idx
-  mScroller <- walkAncestors na parent $ \p ->
-    findChildM na p $ \c -> do
-      nt <- getNodeType na c
-      if isScrollNode nt
-        then (== DirColumn) <$> getDirection na c
-        else pure False
-  forM mScroller $ \sc -> do
-    (_, sy, _, sh) <- getRect na sc
-    pure (sy + sh)
- where
-  na = ctxNodeArena ctx
+      let mouse = inputMousePos inp
+      fmap snd . find (\(r, _) -> rectContains r mouse) <$> readIORef (ctxCursorZones ctx)
 
 -- | Whether 'uiCursorKind' requests the link/button pointer cursor.
 pointerCursorWanted :: Context -> Input -> IO Bool
