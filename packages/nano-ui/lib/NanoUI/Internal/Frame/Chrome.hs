@@ -292,16 +292,12 @@ widgetVisualStyle ctx nt idx = do
         | hashWidgetId wid == hashWidgetId active = styleActiveBg widgetBase
         | nt == NodeCheckbox || nt == NodeRadio || nt == NodeSlider || isClose = styleBg widgetBase
         | isMenu = if isHot then styleHoverBg widgetBase else styleBg widgetBase
-        | otherwise = hoverBackground widgetBase animT isHot
+        | styleBg widgetBase == styleHoverBg widgetBase = styleBg widgetBase
+        | otherwise = lerpColor (styleBg widgetBase) (styleHoverBg widgetBase) hotT
+      hotT = if isHot && not (animT > 0) then 1 else animT
   -- Idle widgets (no hover/active tint change) reuse the base style record
   -- rather than allocating a fresh Style through a record update.
   pure $! if bg == styleBg widgetBase then widgetBase else widgetBase {styleBg = bg}
-
-hoverBackground :: Style -> Float -> Bool -> Color
-hoverBackground base val isHot
-  | styleBg base == styleHoverBg base = styleBg base
-  | isHot = lerpColor (styleBg base) (styleHoverBg base) (if val > 0 then val else 1)
-  | otherwise = lerpColor (styleBg base) (styleHoverBg base) val
 
 {-# INLINE fillStyledRect #-}
 fillStyledRect :: DrawArena -> Style -> Rect -> IO ()

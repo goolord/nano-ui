@@ -128,41 +128,45 @@ collectRasterSpans ctx inp = (,) <$> collectTextSpans ctx <*> collectOverlayText
 widgetNodeCount :: Context -> IO Int
 widgetNodeCount ctx = arenaCount (ctxNodeArena ctx)
 
-{-# INLINE collectClippedSpans #-}
+-- | Spans of node @idx@ and its subtree inside @clip@, floating subtrees left
+-- out.
 collectClippedSpans :: Context -> NodeIdx -> Rect -> SpanArena -> IO ()
 collectClippedSpans ctx idx clip arena = do
   nt <- getNodeType (ctxNodeArena ctx) idx
-  unless (isFloatingNode nt) $
-    collectClippedSpans' ctx idx nt clip arena
-
-collectClippedSpans' :: Context -> NodeIdx -> NodeType -> Rect -> SpanArena -> IO ()
-collectClippedSpans' ctx idx nt clip arena = do
-  (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-  mClipChildren <-
-    if isScrollNode nt
-      then
-        getClipRect (ctxNodeArena ctx) idx >>= \case
-          Just live -> pure (rectIntersect clip live)
-          Nothing -> (\sn -> rectIntersect clip (scrollNodeViewport sn x y w h)) <$> readScrollNode (ctxNodeArena ctx) idx
-      else pure (if nt == NodePanel then rectIntersect clip (Rect x y w h) else Just clip)
-  forM_ mClipChildren $ \clipHere -> do
-    let fm = ctxFontMetrics ctx
-    spans <- collectNodeTextSpans ctx idx
-    here <-
-      case nt of
-        NodeSelect -> pure (tagSelectClippedSpans clipHere x y w h fm spans)
-        NodeTextInput -> do
-          si <- getStyleIdx (ctxNodeArena ctx) idx
-          pure $
-            if hasFlag textInputFlagNumeric si
-              then maybe [] (`tagClippedSpans` spans) (rectIntersect clipHere (numericTextClip fm x y w h))
-              else
-                if hasFlag textInputFlagSelectable si
-                  then tagClippedSpans clipHere spans
-                  else tagTextInputClippedSpans clipHere x y w h fm spans
-        _ -> pure (tagClippedSpans clipHere spans)
-    pushSpans arena here
-    walkChildSpans ctx idx clipHere arena
+  unless (isFloatingNode nt) $ do
+    (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+    mClipChildren <-
+      if isScrollNode nt
+        then
+          getClipRect (ctxNodeArena ctx) idx >>= \case
+            Just live -> pure (rectIntersect clip live)
+            Nothing -> (\sn -> rectIntersect clip (scrollNodeViewport sn x y w h)) <$> readScrollNode (ctxNodeArena ctx) idx
+        else pure (if nt == NodePanel then rectIntersect clip (Rect x y w h) else Just clip)
+    forM_ mClipChildren $ \clipHere -> do
+      let fm = ctxFontMetrics ctx
+      -- A text node's spans are cached per node until its inputs change.
+      -- Placement uses glyph ink ('alignedTextPen'), not TTF_GetStringSize;
+      -- wrapping still measures with the host so line breaks stay on the TTF
+      -- width.
+      spans <-
+        if nt == NodeText
+          then sceSpans <$> textNodeSpanEntry ctx idx x y w h
+          else if isWidgetNode nt then widgetTextSpans ctx nt idx x y w h else pure []
+      here <-
+        case nt of
+          NodeSelect -> pure (tagSelectClippedSpans clipHere x y w h fm spans)
+          NodeTextInput -> do
+            si <- getStyleIdx (ctxNodeArena ctx) idx
+            pure $
+              if hasFlag textInputFlagNumeric si
+                then maybe [] (`tagClippedSpans` spans) (rectIntersect clipHere (numericTextClip fm x y w h))
+                else
+                  if hasFlag textInputFlagSelectable si
+                    then tagClippedSpans clipHere spans
+                    else tagTextInputClippedSpans clipHere x y w h fm spans
+          _ -> pure (tagClippedSpans clipHere spans)
+      pushSpans arena here
+      walkChildSpans ctx idx clipHere arena
 
 walkChildSpans :: Context -> NodeIdx -> Rect -> SpanArena -> IO ()
 walkChildSpans ctx idx clip arena = getFirstChild (ctxNodeArena ctx) idx >>= go
@@ -174,19 +178,6 @@ walkChildSpans ctx idx clip arena = getFirstChild (ctxNodeArena ctx) idx >>= go
           -- Later siblings paint under earlier ones; walk reverse then collect.
           go ns
           collectClippedSpans ctx ci clip arena
-
--- | Text spans of one node. A text node's spans are cached per node until
--- its inputs change. Placement uses glyph ink ('alignedTextPen'), not
--- TTF_GetStringSize; wrapping still measures with the host so line breaks
--- stay on the TTF width.
-collectNodeTextSpans :: Context -> NodeIdx -> IO [(Rect, T.Text, Color, Color)]
-collectNodeTextSpans ctx idx = do
-  let arena = ctxNodeArena ctx
-  nt <- getNodeType arena idx
-  (x, y, w, h) <- getRect arena idx
-  if nt /= NodeText
-    then if isWidgetNode nt then widgetTextSpans ctx nt idx x y w h else pure []
-    else sceSpans <$> textNodeSpanEntry ctx idx x y w h
 
 -- | Text node @idx@'s span cache entry at @(x, y)@, @w@ by @h@, brought up to
 -- date: its spans, and the metrics prepared for each line, which paint draws
