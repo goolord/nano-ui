@@ -187,35 +187,6 @@ edgeSides = \case
   ResizeSE -> (1, 1)
   ResizeSW -> (-1, 1)
 
--- | Lane of the window body's scrollbar while its content overflows.
-windowBodyScrollLane :: Context -> NodeIdx -> IO (Maybe Rect)
-windowBodyScrollLane ctx winIdx = do
-  let na = ctxNodeArena ctx
-  mBody <- windowBodyScroller na winIdx
-  case mBody of
-    Nothing -> pure Nothing
-    Just ci -> do
-      (x, y, w, h) <- getRect na ci
-      pad <- getPadding na ci
-      contentSize <- getNodeValue na ci
-      if contentSize > h - padT pad - padB pad
-        then do
-          dir <- getDirection na ci
-          pure (Just (scrollChromeLane ScrollBarWindow dir x y w h pad))
-        else pure Nothing
-
--- | Resize edge under @mouse@, leaving the body's scrollbar to scroll.
-windowResizeEdgeFor :: Context -> NodeIdx -> Rect -> V2 -> IO (Maybe WindowResizeEdge)
-windowResizeEdgeFor ctx winIdx winRect mouse = do
-  pad <- getPadding (ctxNodeArena ctx) winIdx
-  case windowResizeEdgeAt pad winRect mouse of
-    Nothing -> pure Nothing
-    Just edge
-      | rectContains winRect mouse -> do
-          mLane <- windowBodyScrollLane ctx winIdx
-          pure (if maybe False (`rectContains` mouse) mLane then Nothing else Just edge)
-      | otherwise -> pure (Just edge)
-
 cursorForResizeEdge :: WindowResizeEdge -> UiCursorKind
 cursorForResizeEdge edge = case edgeSides edge of
   (0, _) -> UiCursorNsResize
@@ -263,67 +234,57 @@ updateWindowResize ctx inp winW winH =
 -- controls. The top handle reaches over the title bar, which drags elsewhere.
 resizeEdgeTarget :: Context -> V2 -> IO (Maybe (NodeIdx, Rect, WindowResizeEdge))
 resizeEdgeTarget ctx mouse = runMaybeT $ do
-  let inHalo r = rectNonEmpty r && rectContains (rectInflate windowResizeHandleFor r) mouse
+  let na = ctxNodeArena ctx
+      inHalo r = rectNonEmpty r && rectContains (rectInflate windowResizeHandleFor r) mouse
   idx <- MaybeT (topmostFloating ctx (== NodeWindow) inHalo)
-  rect <- liftIO (getNodeRect (ctxNodeArena ctx) idx)
+  rect <- liftIO (getNodeRect na idx)
   -- The halo covers the window interior, so find the edge first and run the
   -- hover probe and node scans only when there is one.
-  edge <- MaybeT (windowResizeEdgeFor ctx idx rect mouse)
-  guard . not =<< liftIO (resizeHaloBlocked ctx mouse idx)
+  pad <- liftIO (getPadding na idx)
+  edge <- MaybeT (pure (windowResizeEdgeAt pad rect mouse))
+  -- The body's scrollbar, while its content overflows, scrolls instead.
+  when (rectContains rect mouse) $ do
+    onLane <- liftIO $ windowBodyScroller na idx >>= \case
+      Nothing -> pure False
+      Just ci -> do
+        (x, y, w, h) <- getRect na ci
+        bodyPad <- getPadding na ci
+        contentSize <- getNodeValue na ci
+        dir <- getDirection na ci
+        pure $
+          contentSize > h - padT bodyPad - padB bodyPad
+            && rectContains (scrollChromeLane ScrollBarWindow dir x y w h bodyPad) mouse
+    guard (not onLane)
+  -- The halo must not steal hits from another window's interior or from page
+  -- widgets.
+  inside <- liftIO (topmostOverlayAtMouse ctx mouse)
+  guard (maybe True (== idx) inside)
+  hot <- liftIO (probeHotId ctx mouse)
+  guard =<< liftIO (withWidgetNode ctx hot True (\hotIdx -> nodeInSubtree ctx hotIdx idx))
   guard . not =<< liftIO (windowControlAt ctx idx mouse)
   pure (idx, rect, edge)
 
 tryStartWindowResize :: Context -> V2 -> IO Bool
-tryStartWindowResize ctx mouse@(V2 mx my) = do
-  mTarget <- resizeEdgeTarget ctx mouse
-  case mTarget of
-    Nothing -> pure False
-    Just (idx, Rect x y w h, edge) -> do
-      wid <- getWidgetId (ctxNodeArena ctx) idx
-      AxisSizing _ _ minW maxW <- getWidthSizing (ctxNodeArena ctx) idx
-      AxisSizing _ _ minH maxH <- getHeightSizing (ctxNodeArena ctx) idx
-      modifyInteraction ctx $ \s ->
-        s
-          { isWindowResize =
-              Just
-                WindowResizeDrag
-                  { wrdWidget = wid
-                  , wrdEdge = edge
-                  , wrdGrabX = mx
-                  , wrdGrabY = my
-                  , wrdStartX = x
-                  , wrdStartY = y
-                  , wrdStartW = w
-                  , wrdStartH = h
-                  , wrdMinW = minW
-                  , wrdMinH = minH
-                  , wrdMaxW = maxW
-                  , wrdMaxH = maxH
-                  }
-          }
-      markDirty ctx
-      pure True
+tryStartWindowResize ctx mouse@(V2 mx my) = fmap isJust . runMaybeT $ do
+  (idx, Rect x y w h, edge) <- MaybeT (resizeEdgeTarget ctx mouse)
+  liftIO $ do
+    let na = ctxNodeArena ctx
+    wid <- getWidgetId na idx
+    AxisSizing _ _ minW maxW <- getWidthSizing na idx
+    AxisSizing _ _ minH maxH <- getHeightSizing na idx
+    let drag = WindowResizeDrag wid edge mx my x y w h minW minH maxW maxH
+    modifyInteraction ctx (\s -> s {isWindowResize = Just drag})
+    markDirty ctx
 
 -- | Cursor for the held resize edge or an unblocked hovered edge. 'Nothing'
 -- leaves cursor selection to other controls.
 windowResizeCursorKind :: Context -> Input -> IO (Maybe UiCursorKind)
-windowResizeCursorKind ctx inp = do
-  mDrag <- getsInteraction ctx isWindowResize
-  case mDrag of
+windowResizeCursorKind ctx inp =
+  getsInteraction ctx isWindowResize >>= \case
     Just wrd
       | inputMouseDown inp -> pure (Just (cursorForResizeEdge (wrdEdge wrd)))
       | otherwise -> pure Nothing
     Nothing -> fmap (\(_, _, edge) -> cursorForResizeEdge edge) <$> resizeEdgeTarget ctx (inputMousePos inp)
-
--- Halo must not steal hits from page widgets or another window's interior.
-resizeHaloBlocked :: Context -> V2 -> NodeIdx -> IO Bool
-resizeHaloBlocked ctx mouse winIdx = do
-  mInside <- topmostOverlayAtMouse ctx mouse
-  case mInside of
-    Just other | other /= winIdx -> pure True
-    _ -> do
-      hot <- probeHotId ctx mouse
-      withWidgetNode ctx hot False $ \hotIdx -> not <$> nodeInSubtree ctx hotIdx winIdx
 
 tryStartWindowDrag :: Context -> V2 -> IO Bool
 tryStartWindowDrag ctx mouse@(V2 mx my) = fmap isJust . runMaybeT $ do
