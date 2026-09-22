@@ -31,8 +31,7 @@ where
 
 import Control.Monad (when)
 import Data.IORef (readIORef, writeIORef)
-import Data.Functor ((<&>))
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Text (Text)
 import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context
@@ -73,10 +72,7 @@ import NanoUI.Internal.Frame.Hit (findNodeByWidgetId, nodeInteractionHit, scroll
 
 -- | The innermost open container, or @-1@ at the root.
 currentParent :: Context -> IO Int
-currentParent ctx =
-  readIORef (ctxContainerStack ctx) <&> \case
-    [] -> -1
-    (p : _) -> p
+currentParent ctx = fromMaybe (-1) . listToMaybe <$> readIORef (ctxContainerStack ctx)
 
 -- | Anything that carries a widget 'Response' (composite widget results such
 -- as 'NanoUI.Internal.Widgets.Tabs.TabResponse'). The @resp*@ accessors work on all of them.

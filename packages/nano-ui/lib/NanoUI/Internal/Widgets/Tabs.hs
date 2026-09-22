@@ -306,9 +306,12 @@ tabsConfigured cfg active = fmap tabActive . tabsConfigured' cfg active
 
 -- | 'tabsConfigured' with selection, close requests, and header interaction details.
 tabsConfigured' :: (Foldable f, Eq a, Ui :> es) => TabsConfig -> a -> f (Tab a (Eff es ())) -> Eff es (TabResponse a)
-tabsConfigured' cfg active inputTabs =
-  let ts = toList inputTabs
-   in tabStrip cfg active ts (Just (renderBody ts))
+tabsConfigured' cfg active inputTabs = tabStrip cfg active ts (Just body)
+  where
+    ts = toList inputTabs
+    -- Only the active tab's body runs, or the first tab's when none matches.
+    body k =
+      columnWith (tight . fillW) $ mapM_ tabBody (find ((== k) . tabKey) ts <|> listToMaybe ts)
 
 -- | Tab headers only; the caller renders the body.
 {-# INLINE tabBar #-}
@@ -328,8 +331,3 @@ tabBarConfigured cfg active = fmap tabActive . tabBarConfigured' cfg active
 -- | 'tabBarConfigured' with interaction details and optional close request.
 tabBarConfigured' :: (Foldable f, Eq a, Ui :> es) => TabsConfig -> a -> f (Tab a body) -> Eff es (TabResponse a)
 tabBarConfigured' cfg active ts = tabStrip cfg active (toList ts) Nothing
-
-renderBody :: (Eq a, Ui :> es) => [Tab a (Eff es ())] -> a -> Eff es ()
-renderBody ts activeKey =
-  columnWith (tight . fillW) $
-    mapM_ tabBody (find ((== activeKey) . tabKey) ts <|> listToMaybe ts)

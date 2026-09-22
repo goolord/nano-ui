@@ -58,10 +58,10 @@ import NanoUI.Internal.Layout.Arena
   )
 import NanoUI.Internal.Monad (Ui, askContext, askDefaultLayout, nextId, styled, uiIO, windowWidth, withContext)
 import NanoUI.Internal.Style
-  ( AlignX (..)
-  , Direction (..)
+  ( Direction (..)
   , Layout (..)
   , Sizing (..)
+  , alignCenter
   , alignMid
   , defaultLayout
   , fillW
@@ -162,11 +162,8 @@ grid n = gridWith n id
 -- | 'grid' with a layout modifier for spacing, sizing, and alignment.
 {-# INLINE gridWith #-}
 gridWith :: Ui :> es => Int -> (Layout -> Layout) -> Eff es a -> Eff es a
-gridWith n f = withDefaultWith f (grid' n)
-
-{-# INLINE grid' #-}
-grid' :: Ui :> es => Int -> Layout -> Eff es a -> Eff es a
-grid' n layout = container NodeContainer (layout {layoutGridCols = max 1 n})
+gridWith n f =
+  withDefaultWith f $ \layout -> container NodeContainer layout {layoutGridCols = max 1 n}
 
 -- | Choose between two container builders based on window width.
 {-# INLINE responsive #-}
@@ -244,7 +241,7 @@ addSizedLeaf ctx wid nt dir w h = do
 -- | Fill the available space and centre the body's children on both axes.
 {-# INLINE center #-}
 center :: Ui :> es => Eff es a -> Eff es a
-center = columnWith (grow . alignMid . (\l -> l { layoutAlignX = AlignCenter }))
+center = columnWith (grow . alignMid . alignCenter)
 
 -- | Scroll along the current layout direction, vertical by default. Constrain
 -- the viewport size so content can overflow it; the body still runs each frame.
