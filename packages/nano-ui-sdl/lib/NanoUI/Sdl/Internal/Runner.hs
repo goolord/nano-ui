@@ -106,7 +106,7 @@ prepareRetain ctx env inp forceFull = do
   -- out of space during the previous frame, reset it now (re-warming the
   -- base fonts) so a reset can never wipe the texture underneath
   -- already-recorded text mid-frame.
-  prepareGlyphAtlasForFrame (sdlGlyphAtlas env)
+  prepareGlyphAtlasForFrame (sdlFontCache env)
   scale <- readIORef (sdlScaleRef env)
   let Size lw lh = inputWindowSize inp
       pw = max 1 (round (lw * scale))

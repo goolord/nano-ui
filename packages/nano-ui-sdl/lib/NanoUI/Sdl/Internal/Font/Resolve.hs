@@ -1,19 +1,13 @@
 -- | Resolve font requests to installed files or the bundled Inter fallback.
 module NanoUI.Sdl.Internal.Font.Resolve
-  ( embeddedFontSource
-  , resolveNanoUIFont
+  ( resolveNanoUIFont
   , defaultFontSearch
   , defaultFontSearchMono
   ) where
 
-import NanoUI.Sdl.Internal.Font (FontSource (..))
-import NanoUI.Sdl.Internal.Font.Inter (fontInterBytes, fontInterLabel)
+import NanoUI.Sdl.Internal.Font (FontSource (..), embeddedFontSource)
 import NanoUI.Sdl.Internal.Font.Search (searchFonts)
 import NanoUI.Sdl.Internal.NanoUIFont (NanoUIFont (..))
-
--- | Bundled Inter bytes and their diagnostic label.
-embeddedFontSource :: FontSource
-embeddedFontSource = FontFromMemory fontInterBytes fontInterLabel
 
 -- | Ordered sans-serif family preferences, starting with Inter.
 defaultFontSearch :: NanoUIFont

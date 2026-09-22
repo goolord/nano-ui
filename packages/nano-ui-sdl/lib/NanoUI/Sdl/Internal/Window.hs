@@ -69,8 +69,7 @@ import NanoUI.Sdl.Internal.Font
   , withTtf
   )
 import NanoUI.Sdl.Internal.Font.Resolve
-  ( embeddedFontSource
-  , resolveNanoUIFont
+  ( resolveNanoUIFont
   , defaultFontSearch
   , defaultFontSearchMono
   )
@@ -521,15 +520,7 @@ startSdlWindow bench opts ctx guessedDriver fontSource monoSource = do
     unless (tex == nullPtr) $ destroyTexture tex
   fontCache <-
     mkAcquire
-      ( newSdlFontCache
-          fontSource
-          embeddedFontSource
-          monoSource
-          embeddedFontSource
-          glyphAtlas
-          (sdlAppFontSize opts)
-          scaleRef
-      )
+      (newSdlFontCache fontSource monoSource glyphAtlas (sdlAppFontSize opts) scaleRef)
       destroySdlFontCache
   cachedCtx <-
     liftIO $ newIORef . withSdlClipboard =<< withSdlFontCache fontCache ctx
