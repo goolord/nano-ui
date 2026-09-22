@@ -30,7 +30,7 @@ import NanoUI.Internal.Frame.Hit
   )
 import NanoUI.Internal.Frame.Scroll (ScrollBarLayout (..), scrollBarsFor)
 import NanoUI.Internal.Frame.Select (overlayMenuOwnerAt)
-import NanoUI.Internal.Frame.TextArea.Content (isMouseOnTextAreaScrollBarAt)
+import NanoUI.Internal.Frame.TextArea (isMouseOnTextAreaScrollBarAt)
 import NanoUI.Internal.Frame.TextEdit.Menu
   ( textEditMenuCursorKind
   , textFieldWidgetAtMouse

@@ -52,7 +52,7 @@ import NanoUI.Internal.Frame.Node (resolveFontFor)
 import NanoUI.Internal.Frame.Paint.Types (PaintEnv (..), popupPanelRect)
 import NanoUI.Internal.Frame.Spans (forWidgetTextPlacements_, plainFieldPen, selectableTextGeometry, textInputFg)
 import NanoUI.Internal.Frame.TextArea (drawTextAreaContentWith)
-import NanoUI.Internal.Frame.TextArea.Content (resolveTextAreaFont)
+import NanoUI.Internal.Frame.TextArea (resolveTextAreaFont)
 import NanoUI.Internal.Frame.TextInput
   ( FieldEdit
   , drawTextInputCaret

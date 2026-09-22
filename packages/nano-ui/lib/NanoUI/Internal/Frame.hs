@@ -114,7 +114,7 @@ import NanoUI.Internal.Frame.Spans
   , widgetNodeCount
   )
 import NanoUI.Internal.Frame.Overlay (drawModalOverlays, drawPopupOverlays, drawWindowOverlays)
-import NanoUI.Internal.Frame.TextEdit (finalizeTextFieldMouse)
+import NanoUI.Internal.Frame.TextArea (finalizeTextFieldMouse)
 import NanoUI.Internal.Frame.TextEdit.Menu
   ( closeTextEditMenuOnEscape
   , closeTextEditMenuOnOutsideClick

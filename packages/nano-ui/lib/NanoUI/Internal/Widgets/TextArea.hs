@@ -17,6 +17,7 @@ module NanoUI.Internal.Widgets.TextArea
   , textAreaDocumentWith
   , textAreaDocumentWith'
   , textAreaLayout
+  , textAreaBuffer
   , loadTextAreaState
   , saveTextAreaState
   , runTextAreaCommand
@@ -41,7 +42,6 @@ import NanoUI.Internal.Context
   , InteractionState (..)
   )
 import NanoUI.Internal.Font (fmLineHeight)
-import NanoUI.Internal.Frame.TextArea.Content (textAreaBuffer)
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Input
   ( Input (..)
@@ -336,8 +336,13 @@ textAreaCore f wid value = do
   resp <- addWidget wid NodeTextArea "" 0 layout
   pure (setChanged stateChanged resp, newDoc)
 
--- | The text area's editor state as stored. A text area that has not been
--- declared yet holds an empty document.
+-- | The text area's 'TB.TextBuffer', which holds its document and caret. The
+-- widget stores one over the lines of every document it adopts, so it is only
+-- missing for a text area never declared, which holds an empty document.
+textAreaBuffer :: WidgetStore -> Int -> TB.TextBuffer
+textAreaBuffer store key = fromMaybe TB.empty (lookupDyn (slotKey SlotTextAreaBuffer key) store)
+
+-- | The text area's editor state as stored.
 loadTextAreaState :: WidgetStore -> Int -> TextAreaState
 loadTextAreaState store key =
   let buf = textAreaBuffer store key

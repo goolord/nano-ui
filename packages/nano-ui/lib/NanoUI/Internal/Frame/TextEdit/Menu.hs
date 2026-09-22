@@ -40,7 +40,7 @@ import NanoUI.Internal.Font
   )
 import NanoUI.Internal.Frame.Chrome (overlayMenuStyle, paintMenuAccent, paintMenuPanel)
 import NanoUI.Internal.Frame.Hit (nodeClippedHit, overlayHitAllowed, overlayHitRoot, widgetOverlayAllowed)
-import NanoUI.Internal.Frame.TextArea.Content (isMouseOnTextAreaScrollBarAt)
+import NanoUI.Internal.Frame.TextArea (isMouseOnTextAreaScrollBarAt)
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Input
   ( Input (..)

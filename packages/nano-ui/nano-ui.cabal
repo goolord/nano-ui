@@ -97,7 +97,7 @@ library
         NanoUI.Internal.Context.Types
         NanoUI.Internal.Debug
         NanoUI.Internal.Frame.Hit
-        NanoUI.Internal.Frame.TextEdit
+        NanoUI.Internal.Frame.TextArea
         NanoUI.Internal.Frame.Window
         NanoUI.Internal.Id
         NanoUI.Internal.Input
@@ -146,8 +146,6 @@ library
         NanoUI.Internal.Frame.Overlay
         NanoUI.Internal.Frame.Spans
         NanoUI.Internal.Frame.SpanArena
-        NanoUI.Internal.Frame.TextArea
-        NanoUI.Internal.Frame.TextArea.Content
         NanoUI.Internal.Frame.TextEdit.Menu
         NanoUI.Internal.Frame.TextInput
         NanoUI.Internal.Style

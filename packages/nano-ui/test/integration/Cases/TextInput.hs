@@ -4,7 +4,7 @@ import Spec
 import Data.IntMap.Strict qualified as IM
 import Data.Text qualified as T
 import NanoUI.Internal.Context (intKey)
-import NanoUI.Internal.Frame.TextEdit
+import NanoUI.Internal.Frame.TextArea
   ( TextAreaHit (..)
   , TextAreaScrollBarLayouts (..)
   , resolveTextAreaFont

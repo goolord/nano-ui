@@ -53,7 +53,7 @@ import NanoUI.Internal.Frame.Scroll.Geometry
   , scrollOffsetFromThumb
   , scrollWheelSuppressed
   )
-import NanoUI.Internal.Frame.TextArea.Content
+import NanoUI.Internal.Frame.TextArea
   ( TextAreaBars (..)
   , TextAreaScrollBarLayouts (..)
   , textAreaBars
