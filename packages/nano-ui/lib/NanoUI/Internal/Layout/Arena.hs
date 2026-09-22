@@ -444,10 +444,6 @@ data NodeArena = NodeArena
   -- floats). 'captureLayoutCache' snapshots it, and a reused solve restores
   -- clean subtrees' measurements from the snapshot instead of measuring
   -- again.
-  , naTopModal :: IORef Int
-  -- ^ Index of the last modal node added this frame, or -1. Node types are
-  -- fixed when a node is added and indices only grow until a reset, so this
-  -- is the topmost modal without a scan.
   , naClassNodes :: IORef (IOArr Int)
   -- ^ The node lists of 'NodeClass', one after another: class @c@ keeps its
   -- @i@th node at element @fromEnum c * capacity + i@. A list never holds
@@ -743,7 +739,6 @@ newNodeArena = do
   naOwnHash <- newIORef =<< newPrimArray cap
   naSubHash <- newIORef =<< newPrimArray cap
   naMeasured <- newIORef =<< newPrimArray (cap * 2)
-  naTopModal <- newIORef (-1)
   naClassNodes <- newIORef =<< newPrimArray (cap * nodeClassCount)
   naClassCounts <- newPrimArray nodeClassCount
   setPrimArray naClassCounts 0 nodeClassCount 0
@@ -767,7 +762,6 @@ resetNodeArena na = do
   writeIORef (naScope na) 0
   writeIORef (naScopeSig na) 0
   writePrimArray (naInputSig na) 0 0
-  writeIORef (naTopModal na) (-1)
   setPrimArray (naClassCounts na) 0 nodeClassCount 0
   -- 0 marks a memo entry that was never written, so the tag wraps to 1.
   !ft <- readIORef (naFrameTag na)
@@ -782,9 +776,7 @@ resetNodeArena na = do
 -- | The topmost (last added) modal node, if any.
 {-# INLINE topModalNode #-}
 topModalNode :: NodeArena -> IO (Maybe NodeIdx)
-topModalNode na = do
-  i <- readIORef (naTopModal na)
-  pure (if i >= 0 then Just i else Nothing)
+topModalNode na = findFloatingNodeRevM na (fmap (== NodeModal) . getNodeType na)
 
 -- | Fold a tagged value into a running hash. Tags separate the fields so a
 -- value moving between fields of one node changes the hash.
@@ -1023,9 +1015,7 @@ addNode na nt parent dir wSiz hSiz pad gap minW minH maxW maxH grow ax ay = do
     writeTree a parent treeFirstChild idx
     cc <- readTree a parent treeChildCount
     writeTree a parent treeChildCount (cc + 1)
-  when (isFloatingNode nt) $ do
-    when (nt == NodeModal) $ writeIORef (naTopModal na) idx
-    pushClassNode na FloatingNodes idx
+  when (isFloatingNode nt) $ pushClassNode na FloatingNodes idx
   when (isWidgetNode nt || isScrollNode nt) $ do
     pushClassNode na PointerNodes idx
     when (nt == NodeCheckbox || nt == NodeRadio || nt == NodeTree) $
