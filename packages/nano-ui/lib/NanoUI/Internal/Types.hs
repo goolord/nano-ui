@@ -87,10 +87,10 @@ newtype Color = Color Word32
 colorRGBA :: Word8 -> Word8 -> Word8 -> Word8 -> Color
 colorRGBA r g b a =
   Color $
-    (word32Of r `shiftL` 24)
-      .|. (word32Of g `shiftL` 16)
-      .|. (word32Of b `shiftL` 8)
-      .|. word32Of a
+    (fromIntegral r `shiftL` 24)
+      .|. (fromIntegral g `shiftL` 16)
+      .|. (fromIntegral b `shiftL` 8)
+      .|. fromIntegral a
 
 -- | The packed @0xRRGGBBAA@ representation.
 {-# INLINE colorToWord32 #-}
@@ -179,14 +179,13 @@ rgbToHsv c =
       delta = maxC - minC
       v = maxC
       s = if maxC <= 0 then 0 else delta / maxC
-      rawH
+      h
         | delta <= 0 = 0
         | maxC == r =
             let t = (g - b) / delta
              in if t < 0 then 60 * (t + 6) else 60 * t
         | maxC == g = 60 * (((b - r) / delta) + 2)
         | otherwise = 60 * (((r - g) / delta) + 4)
-      h = if rawH < 0 then rawH + 360 else rawH
    in (h, s, v)
 
 -- | Convert hue in degrees and saturation/value in 0-1 to an opaque colour.
@@ -245,10 +244,6 @@ srgb :: Word8 -> Double
 srgb ch =
   let x = fromIntegral ch / 255
    in if x <= 0.04045 then x / 12.92 else ((x + 0.055) / 1.055) ** 2.4
-
-{-# INLINE word32Of #-}
-word32Of :: Word8 -> Word32
-word32Of = fromIntegral
 
 -- | Test a point against half-open rectangle bounds.
 {-# INLINE rectContains #-}

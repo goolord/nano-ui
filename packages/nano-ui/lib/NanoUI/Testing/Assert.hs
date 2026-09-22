@@ -14,16 +14,14 @@ module NanoUI.Testing.Assert
   , withInput
   , run2Frames
   , evalUi
-  , runClickReduce
   ) where
 
 import Control.Monad (unless, when)
 import Data.IORef (IORef, modifyIORef')
-import Data.Typeable (Typeable)
 import GHC.Stack (HasCallStack, callStack, prettyCallStack, withFrozenCallStack)
-import NanoUI (Input (..), NanoUI, Response (..), Size (..), V2 (..))
+import NanoUI (Input (..), NanoUI, Size (..))
 import NanoUI.Backend (emptyInput)
-import NanoUI.Testing (Context, DrawData, FrameMsg, runFrame, runFrameReduce)
+import NanoUI.Testing (Context, DrawData, FrameMsg, runFrame)
 
 -- | Increment a test's failure counter without printing a diagnostic.
 bump :: IORef Int -> IO ()
@@ -68,42 +66,8 @@ withInput w h = emptyInput {inputWindowSize = Size w h}
 -- | Run twice with the same input and return the second frame. Use event-free
 -- input for warmup; press/key events would otherwise be delivered twice.
 run2Frames :: Context -> Input -> NanoUI a -> IO (a, [FrameMsg], DrawData, Bool)
-run2Frames ctx inp ui = do
-  _ <- runFrame ctx inp ui
-  runFrame ctx inp ui
+run2Frames ctx inp ui = runFrame ctx inp ui >> runFrame ctx inp ui
 
 -- | Run a complete headless frame and return only the view's result.
 evalUi :: Context -> Input -> NanoUI a -> IO a
-evalUi ctx inp ui = do
-  (a, _, _, _) <- runFrame ctx inp ui
-  pure a
-
--- | Run left press and release frames through a reducer. Returns the final
--- model, release-frame messages, and release-frame dirty flag.
-runClickReduce ::
-  (Typeable msg, Eq model) =>
-  (msg -> model -> model)
-  -> Context
-  -> Input
-  -> model
-  -> (model -> NanoUI Response)
-  -> V2
-  -> IO (model, [msg], Bool)
-runClickReduce reduce ctx inp0 model0 view pos = do
-  let
-    press =
-      inp0
-        { inputMousePos = pos
-        , inputMouseDown = True
-        , inputMousePressed = True
-        , inputMouseReleased = False
-        }
-    release =
-      press
-        { inputMousePressed = False
-        , inputMouseDown = False
-        , inputMouseReleased = True
-        }
-  (_, modelP, _, _, _) <- runFrameReduce reduce ctx press model0 view
-  (_, modelR, msgs, _, dirty) <- runFrameReduce reduce ctx release modelP view
-  pure (modelR, msgs, dirty)
+evalUi ctx inp ui = (\(a, _, _, _) -> a) <$> runFrame ctx inp ui

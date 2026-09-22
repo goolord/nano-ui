@@ -16,6 +16,7 @@ module NanoUI.Testing.Harness
   , warmupFocused
   , held
   , runClick
+  , runClickReduce
   , assertSpansHas
   , spanYOf
   , spanXOf
@@ -54,11 +55,9 @@ import Data.List (maximumBy)
 import Data.Maybe (listToMaybe)
 import Data.Ord (comparing)
 import Data.Text qualified as T
-import Data.Word (Word32, Word8)
-import Foreign.C.Types (CSize (..))
+import Data.Typeable (Typeable)
+import Data.Word (Word32)
 import Foreign.ForeignPtr (withForeignPtr)
-import Foreign.Marshal.Alloc (allocaBytes)
-import Foreign.Ptr (Ptr, plusPtr)
 import Foreign.Storable (peekByteOff)
 import GHC.Stack (HasCallStack)
 import NanoUI
@@ -66,12 +65,10 @@ import NanoUI.Backend
 import NanoUI.Internal.Font (alignedTextPen, textInkEnd)
 import NanoUI.Internal.Types (clamp)
 import NanoUI.Testing
-import NanoUI.Testing.Assert (assert, assertEq, assertLt, bump, evalUi, run2Frames, withInput)
+import NanoUI.Testing.Assert (assert, assertEq, assertJustM, assertLt, bump, evalUi, run2Frames, withInput)
 
 -- | Text bounds, text, foreground, background, and clip in logical window coordinates.
 type DemoSpan = (Rect, T.Text, Color, Color, Rect)
-
-foreign import ccall unsafe "string.h memcpy" c_memcpy :: Ptr Word8 -> Ptr Word8 -> CSize -> IO ()
 
 -- | Decode the quads a frame actually rasterised: one @(rect, color)@ per
 -- six-index quad, in draw order. Span and arena queries cannot see chrome
@@ -80,51 +77,29 @@ foreign import ccall unsafe "string.h memcpy" c_memcpy :: Ptr Word8 -> Ptr Word8
 -- output is not supported. Commands with counts not divisible by six throw.
 drawQuads :: DrawData -> IO [(Rect, Color)]
 drawQuads dd =
-  fmap concat $
-    forM (drawCmdElems dd) $ \c -> do
-      let ioff = fromIntegral (cmdIndexOffset c)
-          icnt = fromIntegral (cmdIndexCount c)
-      when (icnt `rem` 6 /= 0) $
-        error ("drawQuads: draw command packs " ++ show icnt ++ " indices; not quad-packed")
-      sequence
-        [ decodeQuad (ioff + q)
-        | q <- [0, 6 .. icnt - 1]
-        ]
-  where
-    verts = drawVertices dd
-    idxs = drawIndices dd
-    peekWord32 :: Ptr Word8 -> IO Word32
-    peekWord32 off = allocaBytes 4 $ \tmp -> do
-      c_memcpy tmp off 4
-      peekByteOff tmp 0
-    peekVertex :: Ptr Word8 -> Int -> IO (Float, Float, Float, Float, Float, Float)
-    peekVertex vp vi =
-      allocaBytes vertexSize $ \tmp -> do
-        c_memcpy tmp (vp `plusPtr` (vi * vertexSize)) (fromIntegral vertexSize)
-        x <- peekByteOff tmp 0
-        y <- peekByteOff tmp 4
-        r <- peekByteOff tmp 8
-        g <- peekByteOff tmp 12
-        b <- peekByteOff tmp 16
-        a <- peekByteOff tmp 20
-        pure (x, y, r, g, b, a)
-    decodeQuad iStart =
-      withForeignPtr verts $ \vp ->
-        withForeignPtr idxs $ \ip -> do
-          vis <-
-            forM [iStart .. iStart + 3] $ \ii -> do
-              vi <- fromIntegral <$> peekWord32 (ip `plusPtr` (ii * indexSize))
-              peekVertex vp vi
-          case vis of
-            [] -> pure (Rect 0 0 0 0, colorRGBA 0 0 0 0)
-            (x0, y0, r0, g0, b0, a0) : rest -> do
-              let xs = x0 : map (\(x, _, _, _, _, _) -> x) rest
-                  ys = y0 : map (\(_, y, _, _, _, _) -> y) rest
-                  toW8 f = clamp 0 255 (round (f * 255))
-              pure
+  withForeignPtr (drawVertices dd) $ \vp ->
+    withForeignPtr (drawIndices dd) $ \ip ->
+      fmap concat $
+        forM (drawCmdElems dd) $ \c -> do
+          let ioff = fromIntegral (cmdIndexOffset c)
+              icnt = fromIntegral (cmdIndexCount c)
+          when (icnt `rem` 6 /= 0) $
+            error ("drawQuads: draw command packs " ++ show icnt ++ " indices; not quad-packed")
+          forM [ioff, ioff + 6 .. ioff + icnt - 1] $ \q -> do
+            -- Each corner as its x, y, r, g, b, a floats.
+            corners <-
+              forM [q .. q + 3] $ \ii -> do
+                vi <- fromIntegral <$> (peekByteOff ip (ii * indexSize) :: IO Word32)
+                forM [0 .. 5] $ \k -> peekByteOff vp (vi * vertexSize + 4 * k) :: IO Float
+            let xs = [x | x : _ <- corners]
+                ys = [y | _ : y : _ <- corners]
+                toW8 f = clamp 0 255 (round (f * 255))
+            pure $ case corners of
+              [_, _, r, g, b, a] : _ ->
                 ( Rect (minimum xs) (minimum ys) (maximum xs - minimum xs) (maximum ys - minimum ys)
-                , colorRGBA (toW8 r0) (toW8 g0) (toW8 b0) (toW8 a0)
+                , colorRGBA (toW8 r) (toW8 g) (toW8 b) (toW8 a)
                 )
+              _ -> (Rect 0 0 0 0, colorRGBA 0 0 0 0)
 
 -- | Midpoint of a logical rectangle, without clipping it.
 spanCenter :: Rect -> V2
@@ -209,41 +184,18 @@ dragPos drawFrame base from to = do
 
 -- | Left-button press and release at a point, retaining other base-input fields.
 clickPair :: Input -> V2 -> (Input, Input)
-clickPair inp pos =
-  let
-    press = pressAt inp pos
-    release = releaseAt press
-   in
-    (press, release)
+clickPair inp pos = let press = pressAt inp pos in (press, releaseAt press)
 
 -- | Right-button press and release at a point. Supply event-free base input.
 rightClickPair :: Input -> V2 -> (Input, Input)
 rightClickPair inp pos =
-  let
-    press =
-      inp
-        { inputMousePos = pos
-        , inputMouseRightDown = True
-        , inputMouseRightPressed = True
-        }
-    release =
-      press
-        { inputMouseRightDown = False
-        , inputMouseRightPressed = False
-        , inputMouseRightReleased = True
-        }
-   in
-    (press, release)
+  let press = applyMouseButton MouseRight True inp {inputMousePos = pos}
+   in (press, applyMouseButton MouseRight False press {inputMouseRightPressed = False})
 
 -- | Set pointer position and left-button press/held flags, clearing its release flag.
 pressAt :: Input -> V2 -> Input
 pressAt inp pos =
-  inp
-    { inputMousePos = pos
-    , inputMouseDown = True
-    , inputMousePressed = True
-    , inputMouseReleased = False
-    }
+  (applyMouseButton MouseLeft True inp {inputMousePos = pos}) {inputMouseReleased = False}
 
 -- | The button still down from an earlier 'pressAt', with the pointer at @pos@.
 holdAt :: Input -> V2 -> Input
@@ -251,12 +203,7 @@ holdAt inp pos = (pressAt inp pos) {inputMousePressed = False}
 
 -- | Release the left button at its current position, clearing its press/held flags.
 releaseAt :: Input -> Input
-releaseAt press =
-  press
-    { inputMouseDown = False
-    , inputMousePressed = False
-    , inputMouseReleased = True
-    }
+releaseAt press = applyMouseButton MouseLeft False press {inputMousePressed = False}
 
 -- | A single key-down frame.
 keyInp :: Key -> Input -> Input
@@ -268,15 +215,11 @@ tabInp = keyInp KeyTab
 
 -- | Event-free input with the requested window size and pointer at (-10,-10).
 withInputOff :: Float -> Float -> Input
-withInputOff w h =
-  let inp = withInput w h
-   in inp {inputMousePos = V2 (-10) (-10)}
+withInputOff w h = (withInput w h) {inputMousePos = V2 (-10) (-10)}
 
 -- | Event-free input with logical width/height and elapsed time in seconds.
 withDelta :: Float -> Float -> Float -> Input
-withDelta w h dt =
-  let inp = withInput w h
-   in inp {inputDeltaTime = dt}
+withDelta w h dt = (withInput w h) {inputDeltaTime = dt}
 
 -- | Centre of the response rectangle. Warm up the view before using it as a target.
 centerOf :: Response -> V2
@@ -293,9 +236,7 @@ warmup2 ctx inp ui = warmup ctx inp ui >> evalUi ctx inp ui
 
 -- | Two-frame warmup returning the second result and borrowed drawing buffers.
 warmupDraw :: Context -> Input -> NanoUI a -> IO (a, DrawData)
-warmupDraw ctx inp ui = do
-  (a, _, draw, _) <- run2Frames ctx inp ui
-  pure (a, draw)
+warmupDraw ctx inp ui = (\(a, _, draw, _) -> (a, draw)) <$> run2Frames ctx inp ui
 
 -- | Warm the view up, then Tab onto its first focusable.
 warmupFocused :: Context -> Input -> NanoUI a -> IO ()
@@ -319,6 +260,23 @@ runClick ctx inp0 ui pos =
     (press, release) = clickPair inp0 pos
    in
     warmup ctx press ui >> evalUi ctx release ui
+
+-- | Run left press and release frames ('clickPair') through a reducer. Returns
+-- the final model, release-frame messages, and release-frame dirty flag.
+runClickReduce ::
+  (Typeable msg, Eq model) =>
+  (msg -> model -> model)
+  -> Context
+  -> Input
+  -> model
+  -> (model -> NanoUI Response)
+  -> V2
+  -> IO (model, [msg], Bool)
+runClickReduce reduce ctx inp0 model0 view pos = do
+  let (press, release) = clickPair inp0 pos
+  (_, modelP, _, _, _) <- runFrameReduce reduce ctx press model0 view
+  (_, modelR, msgs, _, dirty) <- runFrameReduce reduce ctx release modelP view
+  pure (modelR, msgs, dirty)
 
 -- | Count a failure unless some span contains the substring.
 assertSpansHas :: HasCallStack => IORef Int -> T.Text -> [(Rect, T.Text, a, b, c)] -> IO ()
@@ -361,19 +319,16 @@ assertScrollGutterPad ::
   -> Float
   -> Float
   -> IO ()
-assertScrollGutterPad failed ctx sid child gutter endPad = do
-  mrect <- getPrevRect ctx sid
-  case mrect of
-    Nothing -> assert failed False
-    Just (Rect sx _ sw _) -> do
-      let
-        Rect cx _ cw _ = respRect child
-        contentRight = sx + sw - endPad - gutter
-      assert failed (cx + cw >= contentRight - 0.5)
-      assert failed (cx + cw <= contentRight + 0.01)
+assertScrollGutterPad failed ctx sid child gutter endPad =
+  assertJustM failed (getPrevRect ctx sid) $ \(Rect sx _ sw _) -> do
+    let
+      Rect cx _ cw _ = respRect child
+      contentRight = sx + sw - endPad - gutter
+    assert failed (cx + cw >= contentRight - 0.5)
+    assert failed (cx + cw <= contentRight + 0.01)
 
 -- | Scroll an overlay by one wheel step and require its title to stay fixed
--- while its first body line moves upward. Optionally bound all spans' bottom edges.
+-- while its first body line moves upward (if it is still shown).
 assertWheelTitlePinned ::
   HasCallStack
   => IORef Int
@@ -383,30 +338,17 @@ assertWheelTitlePinned ::
   -> T.Text
   -> T.Text
   -> V2
-  -> Maybe Float
   -> IO ()
-assertWheelTitlePinned failed ctx inp0 ui title line1 wheelAt mClipMax = do
+assertWheelTitlePinned failed ctx inp0 ui title line1 wheelAt = do
+  let wheel = inp0 {inputMousePos = wheelAt, inputScroll = V2 0 1}
   spans0 <- collectOverlayTextSpans ctx inp0
-  let
-    titleYs0 = spanYOf title spans0
-    line1Ys0 = spanYOf line1 spans0
-  assert failed (not (null titleYs0))
-  case line1Ys0 of
-    [] -> assert failed False
-    b0 : _ -> do
-      let
-        wheel = inp0 {inputMousePos = wheelAt, inputScroll = V2 0 1}
-      _ <- runFrame ctx wheel ui
-      spans1 <- collectOverlayTextSpans ctx wheel
-      let
-        titleYs1 = spanYOf title spans1
-        line1Ys1 = spanYOf line1 spans1
-      case (titleYs0, titleYs1) of
-        (y0 : _, y1 : _) -> assertEq failed y1 y0
-        _ -> assert failed False
-      forM_ (listToMaybe line1Ys1) $ \b1 -> assertLt failed b1 b0
-      forM_ mClipMax $ \maxY ->
-        assert failed (not (any (\(Rect _ y _ h, _, _, _, _) -> y < 0 || y + h > maxY) spans1))
+  _ <- runFrame ctx wheel ui
+  spans1 <- collectOverlayTextSpans ctx wheel
+  case (spanYOf title spans0, spanYOf title spans1, spanYOf line1 spans0) of
+    (y0 : _, y1 : _, b0 : _) -> do
+      assertEq failed y1 y0
+      forM_ (listToMaybe (spanYOf line1 spans1)) $ \b1 -> assertLt failed b1 b0
+    _ -> assert failed False
 
 -- | Probe candidate y positions at a fixed x, running a frame for each, and
 -- return the first input that produces a grab cursor.
@@ -440,12 +382,8 @@ dragWindowEdge ctx inp0 ui grab dest = do
 -- 'drawVertexCount' and the borrowed draw buffers must still be valid.
 vertUv :: DrawData -> Int -> IO (Float, Float)
 vertUv dd i =
-  withForeignPtr (drawVertices dd) $ \p -> do
-    let
-      off = i * vertexSize
-    u <- peekByteOff p (off + 24) :: IO Float
-    v <- peekByteOff p (off + 28) :: IO Float
-    pure (u, v)
+  withForeignPtr (drawVertices dd) $ \p ->
+    (,) <$> peekByteOff p (i * vertexSize + 24) <*> peekByteOff p (i * vertexSize + 28)
 
 -- | Require the transition to idle input to need a frame, then require that
 -- frame's damage to cover the whole window.
@@ -462,40 +400,22 @@ checkIdleFullDamage failed ctx inpAfter inpIdle ui = do
 -- Lives here rather than with its test case because the pen and ink helpers
 -- are internal to the library.
 checkLabelAlignEndInk :: IORef Int -> IO ()
-checkLabelAlignEndInk failed = do
-  let
-    gq xoff gw =
-      GlyphQuad
-        { gqX = xoff
-        , gqY = 0
-        , gqW = gw
-        , gqH = 10
-        , gqU0 = 0
-        , gqV0 = 0
-        , gqU1 = 1
-        , gqV1 = 1
-        }
+checkLabelAlignEndInk failed =
+  forM_ ["10", "1i", "1."] $ \txt -> do
+    let (tx, _) = alignedTextPen AlignEnd 0 boxW 0 fm txt
+    when (abs (tx + textInkEnd fm txt - boxW) > 0.01) $ bump failed
+  where
+    boxW = 100
+    -- Narrow 'i' and '.' advances, with ink offset inside each glyph box.
+    glyph xoff gw = Just (GlyphQuad xoff 0 gw 10 0 0 1 1)
     fm =
       (monospaceMetrics 10)
-        { fmAdvance = \c -> case c of
-            'i' -> 4
-            '.' -> 4
-            _ -> 10
+        { fmAdvance = \c -> if c == 'i' || c == '.' then 4 else 10
         , fmGlyph = \c -> case c of
-            'i' -> Just (gq 0.5 3)
-            '.' -> Just (gq 1 1)
-            _ -> Just (gq 1 8)
+            'i' -> glyph 0.5 3
+            '.' -> glyph 1 1
+            _ -> glyph 1 8
         }
-    boxW = 100
-    visualRight txt =
-      let (tx, _) = alignedTextPen AlignEnd 0 boxW 0 fm txt
-       in tx + textInkEnd fm txt
-    r0 = visualRight "10"
-    ri = visualRight "1i"
-    rd = visualRight "1."
-  when (abs (r0 - boxW) > 0.01) $ bump failed
-  when (abs (ri - boxW) > 0.01) $ bump failed
-  when (abs (rd - boxW) > 0.01) $ bump failed
 
 -- | Point inside the standard floating-window title bar, away from its close button.
 windowTitleGrab :: Rect -> V2
@@ -504,8 +424,5 @@ windowTitleGrab (Rect x0 y0 _ _) = V2 (x0 + 24) (y0 + padT windowPad + 19.5)
 -- | Run press and held-move frames from one point to another. Leaves the button
 -- held; the test supplies the release frame when needed.
 runDragFrom :: Context -> Input -> NanoUI a -> V2 -> V2 -> IO ()
-runDragFrom ctx inp0 ui grab dest = do
-  let
-    press = pressAt inp0 grab
-  _ <- runFrame ctx press ui
-  void (runFrame ctx (holdAt inp0 dest) ui)
+runDragFrom ctx inp0 ui grab dest =
+  forM_ [pressAt inp0 grab, holdAt inp0 dest] $ \inp -> runFrame ctx inp ui

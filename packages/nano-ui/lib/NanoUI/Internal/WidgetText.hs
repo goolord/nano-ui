@@ -41,7 +41,7 @@ module NanoUI.Internal.WidgetText
   , tableSortReserve
   , tableStripeColor
   , stripeColor
-  , packTextNodeStyleFull
+  , packTextNodeStyle
   , textNodeFontKey
   , textNodeFontVariant
   , textNodeFontWeight
@@ -66,7 +66,7 @@ import Data.Word (Word8)
 import GHC.Float (castFloatToWord32)
 import Numeric (showHex)
 import NanoUI.Internal.Font (FontMetrics (..), fmLineHeight, widgetContentInset)
-import NanoUI.Internal.Style (FontStyle (..), FontVariant (..), FontWeight (..), TextDecoration (..), Theme (..), styleBg, themeButton, themePanel, themeWindow)
+import NanoUI.Internal.Style (FontStyle (..), FontVariant (..), FontWeight (..), Layout (..), TextDecoration (..), Theme (..), styleBg)
 import NanoUI.Internal.Types (Color (..), Rect (..), clamp, colorA, colorB, colorG, colorR, colorRGBA, lerpColor)
 import qualified Data.Text as T
 
@@ -90,8 +90,9 @@ treeDecodeStyle s =
   , s .&. 0x200 /= 0
   )
 
+-- | A tree row's stripe code for 'stripeColor', from its odd-row bit.
 treeDecodeStripe :: Int -> Int
-treeDecodeStripe s = if s .&. 0x400 /= 0 then tableStripeOdd else tableStripeEven
+treeDecodeStripe s = if s .&. 0x400 /= 0 then 2 else 1
 
 textInputMinWidth :: Float
 textInputMinWidth = 160
@@ -239,18 +240,14 @@ hexBytes =
 -- | Parse a hex colour, accepting an optional leading @#@ and either 6 or 8
 -- digits. The fourth component is 'Nothing' for the six-digit form.
 colorPickerParseHex :: Text -> Maybe (Word8, Word8, Word8, Maybe Word8)
-colorPickerParseHex txt =
-  let bare = T.dropWhile (== '#') (T.strip txt)
-      pair i = parseHexPair (T.take 2 (T.drop i bare))
-      n = T.length bare
-   in if n /= 6 && n /= 8
-        then Nothing
-        else do
-          r <- pair 0
-          g <- pair 2
-          b <- pair 4
-          a <- if n == 8 then Just <$> pair 6 else pure Nothing
-          pure (r, g, b, a)
+colorPickerParseHex txt
+  | (n == 6 || n == 8) && T.all isHexDigit bare =
+      Just (byte 0, byte 2, byte 4, if n == 8 then Just (byte 6) else Nothing)
+  | otherwise = Nothing
+  where
+    bare = T.dropWhile (== '#') (T.strip txt)
+    n = T.length bare
+    byte i = fromIntegral (digitToInt (T.index bare i) * 16 + digitToInt (T.index bare (i + 1)))
 
 -- | Parse six or eight hex digits as RGB or RGBA. Strips surrounding whitespace
 -- and leading @#@ characters; invalid digits/length return 'Nothing'. RGB is opaque.
@@ -259,26 +256,16 @@ colorFromHex txt = do
   (r, g, b, ma) <- colorPickerParseHex txt
   pure (colorRGBA r g b (fromMaybe 255 ma))
 
-parseHexPair :: Text -> Maybe Word8
-parseHexPair t = case T.unpack t of
-  [hi, lo]
-    | isHexDigit hi && isHexDigit lo -> Just (fromIntegral (digitToInt hi * 16 + digitToInt lo))
-  _ -> Nothing
-
-tableStripeEven :: Int
-tableStripeEven = 1
-
-tableStripeOdd :: Int
-tableStripeOdd = 2
-
-{-# INLINE packTextNodeStyleFull #-}
-packTextNodeStyleFull :: FontVariant -> FontWeight -> FontStyle -> TextDecoration -> Int -> Int
-packTextNodeStyleFull fvar weight fstyle deco stripe =
+-- | A text node's style index: the layout's font variant, weight, slant and
+-- decoration, and a row stripe code (see 'stripeColor') in bits 4-7.
+{-# INLINE packTextNodeStyle #-}
+packTextNodeStyle :: Layout -> Int -> Int
+packTextNodeStyle l stripe =
   (stripe `shiftL` 4)
-    .|. (fromEnum fvar .&. 0x0F)
-    .|. ((fromEnum weight .&. 0x0F) `shiftL` 8)
-    .|. ((fromEnum fstyle .&. 0x03) `shiftL` 12)
-    .|. ((fromEnum deco .&. 0x03) `shiftL` 14)
+    .|. (fromEnum (layoutFontVariant l) .&. 0x0F)
+    .|. ((fromEnum (layoutFontWeight l) .&. 0x0F) `shiftL` 8)
+    .|. ((fromEnum (layoutFontStyle l) .&. 0x03) `shiftL` 12)
+    .|. ((fromEnum (layoutTextDecoration l) .&. 0x03) `shiftL` 14)
 
 -- | The enum packed in the style bits at @shift@ under @mask@, or @fallback@
 -- when they hold no constructor.
@@ -313,19 +300,17 @@ textNodeFontStyle = decodeStyleEnum 12 0x03 FontStyleNormal
 textNodeTextDecoration :: Int -> TextDecoration
 textNodeTextDecoration = decodeStyleEnum 14 0x03 DecorationNone
 
-{-# INLINE textNodeStripe #-}
-textNodeStripe :: Int -> Int
-textNodeStripe si = (si `shiftR` 4) .&. 0x0F
-
+-- | Row fill for stripe code 1 (even rows) or 2 (odd rows); 0 is unstriped.
 {-# INLINE stripeColor #-}
 stripeColor :: Theme -> Int -> Maybe Color
-stripeColor theme s
-  | s == tableStripeEven = Just (lerpColor (styleBg (themePanel theme)) (themeWindow theme) 0.26)
-  | s == tableStripeOdd = Just (lerpColor (styleBg (themePanel theme)) (styleBg (themeButton theme)) 0.55)
-  | otherwise = Nothing
+stripeColor theme s = case s of
+  1 -> Just (lerpColor (styleBg (themePanel theme)) (themeWindow theme) 0.26)
+  2 -> Just (lerpColor (styleBg (themePanel theme)) (styleBg (themeButton theme)) 0.55)
+  _ -> Nothing
 
+-- | The row fill a text node's style index asks for.
 tableStripeColor :: Theme -> Int -> Maybe Color
-tableStripeColor theme si = stripeColor theme (textNodeStripe si)
+tableStripeColor theme si = stripeColor theme ((si `shiftR` 4) .&. 0x0F)
 
 -- | Slot reserved in every header so the sort mark never changes column
 -- width: trailing, or leading ('tableSortReserveLead') in a right-aligned
@@ -342,10 +327,8 @@ tableHeaderLabel alignEnd hdr
   | alignEnd = tableSortReserveLead <> hdr
   | otherwise = hdr <> tableSortReserve
 
--- | Sort direction encoded for a table-header style. Lives in bits 16-17: the
--- low nibbles are the font fields, and a mark value of 1 or 2 in bit 0-1 used
--- to flip the header's font variant (heading / muted), which blanked the
--- arrow glyph.
+-- | Sort direction encoded for a table-header style, in bits 16-17: clear of
+-- the font fields in the low bits, which it would otherwise restyle.
 tableSortMarkOf :: Int -> Int
 tableSortMarkOf styleIdx = (styleIdx `shiftR` 16) .&. 0x03
 

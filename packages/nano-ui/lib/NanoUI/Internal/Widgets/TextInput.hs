@@ -76,7 +76,7 @@ import NanoUI.Internal.Store
   , slotKey
   )
 import NanoUI.Internal.Style (Layout (..), defaultLayout, fillW, minW)
-import NanoUI.Internal.WidgetText (hasFlag, packTextNodeStyleFull, textInputFlagPassword, textInputFlagSearch, textInputFlagSelectable)
+import NanoUI.Internal.WidgetText (hasFlag, packTextNodeStyle, textInputFlagPassword, textInputFlagSearch, textInputFlagSelectable)
 import NanoUI.Internal.Widgets.Behavior (keyboardFocused)
 import NanoUI.Internal.Widgets.Node (Response (..), addWidgetStyled, setChanged, setSubmitted)
 import NanoUI.Widgets.TextBuffer qualified as TB
@@ -413,12 +413,5 @@ selectableTextWith' f txt = do
   -- The caller owns the text; the editor only moves the selection.
   _ <- withContext (\ctx -> adoptSlot fieldText ctx wid (intKey wid) txt)
   _ <- editTextField wid singleLineMode {modeEditable = False} txt Nothing
-  let styleIdx =
-        textInputFlagSelectable
-          .|. packTextNodeStyleFull
-                (layoutFontVariant layout)
-                (layoutFontWeight layout)
-                (layoutFontStyle layout)
-                (layoutTextDecoration layout)
-                0
+  let styleIdx = textInputFlagSelectable .|. packTextNodeStyle layout 0
   addWidgetStyled wid NodeTextInput txt 0 layout styleIdx

@@ -127,10 +127,6 @@ module NanoUI.Testing
   , askInput
   , Ui
   , uiIO
-    -- * Compact
-  , Compact
-  , compactHost
-  , askCompact
     -- * Text measurement
   , lineWidth
   , textIndexAtX
@@ -144,7 +140,6 @@ module NanoUI.Testing
   , textNodeTextDecoration
   ) where
 
-import NanoUI.Internal.Compact (Compact, askCompact, compactHost)
 import NanoUI.Internal.Context
   ( Context (..)
   , FrameMsg (..)
@@ -204,7 +199,7 @@ import NanoUI.Internal.Context
   , getTheme
   , wrapMeasureCache
   )
-import NanoUI.Internal.Context (newContext, newPixelHostContext)
+import NanoUI.Internal.Context (newContext, newPixelContext)
 import NanoUI.Internal.Frame.SpanArena (SpanArena, foldSpanArena, spanArenaCount)
 import NanoUI.Internal.Draw
   ( DrawCmd (..)
@@ -256,8 +251,3 @@ import NanoUI.Internal.Monad (Ui, askContext, askHost, askInput, uiIO)
 import NanoUI.Internal.WidgetText (textNodeFontStyle, textNodeFontWeight, textNodeTextDecoration)
 import NanoUI.Internal.Types (Damage (..), damageIsEmpty)
 import Effectful (Eff, IOE, runEff, type (:>))
-
--- | A headless context for tests: 16px monospace metrics, the measure cache
--- on, and the default theme.
-newPixelContext :: IO Context
-newPixelContext = newPixelHostContext
