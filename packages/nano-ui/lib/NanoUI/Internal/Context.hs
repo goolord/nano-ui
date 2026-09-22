@@ -78,7 +78,6 @@ module NanoUI.Internal.Context
   , writeSlot
   , adoptSlot
   , recordSlot
-  , getStoreBool
   , writeStoreBool
   , isDisabled
   , beginThemeScopes
@@ -178,8 +177,6 @@ module NanoUI.Internal.Context
   , modalDamageFlip
   -- Animation
   , AnimationState (..)
-  , getsAnimation
-  , modifyAnimation
   , anyAnimating
   , getLiveAnimations
   , takeAnimSettled

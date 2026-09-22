@@ -38,7 +38,6 @@ module NanoUI.Internal.Context.Core
   , writeSlot
   , adoptSlot
   , recordSlot
-  , getStoreBool
   , writeStoreBool
   , isDisabled
   -- Theme scopes
@@ -85,7 +84,6 @@ import NanoUI.Internal.Store
   , fieldInt
   , findSlot
   , insertSlot
-  , intBool
   , lookupSlot
   , slotKey
   )
@@ -374,12 +372,6 @@ recordSlot field ctx k v = do
   let seenK = slotKey SlotSeen k
   when (lookupSlot field seenK st /= Just v) $
     writeIORef (ctxStore ctx) $! insertSlot field seenK v st
-
--- | Read the boolean at a widget's base integer key, using the supplied default.
-{-# INLINE getStoreBool #-}
-getStoreBool :: Context -> WidgetId -> Bool -> IO Bool
-getStoreBool ctx wid def =
-  intBool . findSlot fieldInt (boolInt def) (intKey wid) <$> getStore ctx
 
 -- | Whether @wid@ was declared inside a disabled scope. A widget asks before
 -- its node exists, while the scope it is declared in is still the arena's.

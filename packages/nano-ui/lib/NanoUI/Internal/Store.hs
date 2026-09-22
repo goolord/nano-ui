@@ -13,7 +13,6 @@ module NanoUI.Internal.Store
   , fieldText
   , fieldIntSet
   , fieldDyn
-  , fieldQuiet
   , overField
   , lookupSlot
   , findSlot
