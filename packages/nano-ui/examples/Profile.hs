@@ -42,6 +42,26 @@ pointerScene n = columnWith (fillW . fillH) $ do
       void (checkbox "c" False)
       void (button (T.pack ("b" <> show i)))
 
+-- | 60 rows of 5 to 154 grow columns, with content widths up to 40 pixels
+-- and grow weights of 0.5 to 3 from a fixed pseudo-random sequence, under a
+-- label that changes every frame so the layout is solved again. Sharing a
+-- row's space locks the columns whose content outgrows their share, and in
+-- about one row in four that takes more than two passes.
+growScene :: Int -> NanoUI ()
+growScene frame = columnWith (tight . gap 0 . fillW . fillH) $ do
+  label (T.pack (show frame))
+  forM_ (take 60 (iterate (lcg . lcg . lcg) 7)) $ \seed ->
+    rowWith (tight . gap 0 . fillW) $ forM_ (growRow seed) $ \(c, g) ->
+      columnWith (\l -> (tight l) {layoutWidth = Grow g}) (spacer (Fixed c) (Fixed 1))
+ where
+  lcg x = (x * 1103515245 + 12345) `mod` 2147483648 :: Int
+  growRow seed =
+    let k = 5 + seed `mod` 150
+        xs = take (2 * k) (drop 1 (iterate lcg seed))
+     in [(fromIntegral (a `mod` 4000) / 100, [1, 2, 3, 0.5] !! (b `mod` 4)) | (a, b) <- pairs xs]
+  pairs (a : b : r) = (a, b) : pairs r
+  pairs _ = []
+
 -- | A grid of buttons and labels: the ordinary widget path.
 widgetScene :: NanoUI ()
 widgetScene =
@@ -190,6 +210,14 @@ main = do
       ct <- readIORef cursorTime
       let perFrame t = show (t * 1000 / fromIntegral frames) ++ " ms"
       putStrLn ("profiled " ++ show frames ++ " pointer frames: " ++ perFrame (t1 - t0) ++ "/frame, cursor query " ++ perFrame ct)
+    ("grow" : _) -> do
+      let inp = emptyInput {inputWindowSize = Size 1280 800, inputDeltaTime = 0.016}
+          frames = 2000 :: Int
+      replicateM_ 5 (void (runFrame ctx inp (growScene 0)))
+      t0 <- getMonotonicTime
+      forM_ [1 .. frames] $ \i -> void (runFrame ctx inp (growScene i))
+      t1 <- getMonotonicTime
+      putStrLn ("profiled " ++ show frames ++ " grow frames: " ++ show ((t1 - t0) * 1000 / fromIntegral frames) ++ " ms/frame")
     ("textarea" : _) -> do
       ref <- newIORef (textDocument longDocument)
       typeIntoMiddle (textAreaScene ref)
