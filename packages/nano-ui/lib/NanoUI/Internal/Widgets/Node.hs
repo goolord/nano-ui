@@ -19,6 +19,7 @@ module NanoUI.Internal.Widgets.Node
   , inertResponse
   , parentIdx
   , container
+  , containerWithId
   , containerResponse
   , withContainerNode
   , floatingPanel
@@ -199,6 +200,12 @@ emptyModalResp wid = mempty {rawRespId = wid}
 
 container :: Ui :> es => NodeType -> Layout -> Eff es a -> Eff es a
 container nt layout child = runContainer nt layout Nothing child
+
+-- | 'container' tagged with @wid@, so store keys and damage requests under
+-- that id resolve to the container. Containers are never hot, so the id does
+-- not make it hoverable.
+containerWithId :: Ui :> es => NodeType -> Layout -> WidgetId -> Eff es a -> Eff es a
+containerWithId nt layout wid child = runContainer nt layout (Just wid) child
 
 containerResponse :: Ui :> es => NodeType -> Layout -> Eff es a -> Eff es (a, Response)
 containerResponse nt layout child = do

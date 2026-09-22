@@ -2,11 +2,15 @@ module Cases.Demo (tests) where
 
 import Spec
 import Data.Text qualified as T
+import NanoUI.Internal.Context (Context (..))
+import NanoUI.Internal.Layout.Arena (NodeType (..), arenaCount, getNodeRect, getNodeType)
 
 tests :: [Spec]
 tests =
   [ pixelSpec "color-picker-commit" runColorPickerCommitTest
   , pixelSpec "color-picker-rgba" runColorPickerRgbaTest
+  , pixelSpec "color-picker-part-damage" runColorPickerPartDamageTest
+  , pixelSpec "color-picker-drag-damage" runColorPickerDragDamageTest
   , pixelSpec "color-picker-edit" runColorPickerEditTest
   , pixelSpec "color-picker-change-once" runColorPickerChangeOnceTest
   , pixelSpec "color-picker-bar-keys" runColorPickerBarKeysTest
@@ -181,6 +185,52 @@ runColorPickerCommitTest ctx failed = do
     failed
     (packed (widgetStoreBaseColor storeDone wid initial))
     (packed (widgetStoreColor storeDone wid initial))
+
+-- Moving the colour with an arrow key on the focused field moves the markers
+-- on the hue and alpha bars and recolours the preview swatch, which are
+-- sibling parts with their own rects. The picker's state is keyed on the
+-- container that holds them, so the frame repaints a clip covering every part.
+runColorPickerPartDamageTest :: Context -> IORef Int -> IO ()
+runColorPickerPartDamageTest ctx failed = do
+  colorRef <- newIORef (colorRGBA 204 102 102 255)
+  let inp0 = withInput 400 1200
+      ui = held colorRef colorPickerRGBA'
+      key k = inp0 {inputKeys = inputKeysFromList [k]}
+  _ <- warmup2 ctx inp0 ui
+  _ <- runFrame ctx (key KeyTab) ui
+  _ <- runFrame ctx inp0 ui
+  _ <- takeDamage ctx
+  _ <- runFrame ctx (key KeyRight) ui
+  dmg <- takeDamage ctx
+  let na = ctxNodeArena ctx
+  n <- arenaCount na
+  parts <- fmap concat . forM [0 .. n - 1] $ \i -> do
+    nt <- getNodeType na i
+    if nt /= NodeColorPicker
+      then pure []
+      else pure <$> getNodeRect na i
+  -- The field, hue bar, alpha bar and preview.
+  assertEq failed (length parts) 4
+  assert failed (all (clipCovers dmg) parts)
+
+-- A press that starts a drag on the SV field, and the release that ends it,
+-- repaint a clip. The drag hooks' held flags are bookkeeping no node owns;
+-- were they diffed like widget state they would escalate both frames to
+-- DamageFull.
+runColorPickerDragDamageTest :: Context -> IORef Int -> IO ()
+runColorPickerDragDamageTest ctx failed = do
+  colorRef <- newIORef (colorRGBA 204 102 102 255)
+  let inp0 = withInput 400 1200
+      ui = held colorRef colorPickerRGBA'
+  (resp, _) <- warmup2 ctx inp0 ui
+  _ <- takeDamage ctx
+  let (press, release) = clickPair inp0 (centerOf resp)
+  _ <- runFrame ctx press ui
+  pressDmg <- takeDamage ctx
+  assert failed (clipCovers pressDmg (respRect resp))
+  _ <- runFrame ctx release ui
+  releaseDmg <- takeDamage ctx
+  assert failed (releaseDmg /= DamageFull)
 
 runColorPickerRgbaTest :: Context -> IORef Int -> IO ()
 runColorPickerRgbaTest ctx failed = do

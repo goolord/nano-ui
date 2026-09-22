@@ -227,34 +227,33 @@
 ### Changed
 
 - The measure pass skips unchanged subtrees. After the view builds, each
-  node's hash covers its own inputs and, through its children's hashes, its
-  whole subtree; the solve restores a captured subtree's measured size when
-  its hash matches instead of wrapping its text again, so a frame that
-  changed one label re-measures that label's branch only. Drawing widgets
-  always measure fresh, since a measure hook's presence is not arena state.
-  Position and quantization run over every node, so a partially measured
-  solve computes exactly what a full one would.
+  node's hash covers its own inputs, its ancestors' (text wraps at an
+  ancestor's width) and, through its children's hashes, its whole subtree;
+  the solve restores a captured node's measured size when its hash matches
+  and its children all came out their captured sizes, instead of wrapping
+  its text again, so a frame that changed one label re-measures that label's
+  branch only. Drawing widgets and scroll containers always measure fresh,
+  and a font-metric change restores nothing. Position and quantization run
+  over every node, so a partially measured solve computes exactly what a
+  full one would.
 - Whole-layout reuse is validated by a hash over the frame's layout inputs
   instead of comparing every node's columns: the arena folds each node's
   constraints, links, text, options, widget id, style code, and grid fields
   into `getInputSignature` as the view builds, and reuse compares one word.
   Text and option lists keep a per-node hash that a repeated `Text` object
   reuses, so a steady frame hashes no string bytes. Custom-measured widgets
-  no longer disable reuse: the cache records each measure's offered space
-  and returned size at capture, and reuse re-runs the measure to check it
-  still returns that size.
+  no longer disable reuse: the cache records which widgets registered a
+  measure and each measure's offered space and returned size at capture,
+  and reuse re-runs the measures to check they still return those sizes.
 - State writes repaint per key instead of escalating to a whole-window
   repaint. A store write damages its changed keys' widgets (resolved through
   the arena, including the sub-slot spellings text fields, text areas, drop
   targets, menus and colour pickers write), and the follow-up frame such a
-  write requests clips rather than repaints everything. A write falls back
-  to full damage only when some changed key resolves to no widget — a local
-  hook's key — and the frame's rect and text diffs came out empty, since
-  then nothing narrower than the window is known to cover what changed.
-  Model-driven changes ('runFrameReduce', 'requestFrame') follow the same
-  rule: their diffs cover the frame, or it repaints whole. 'requestFrame'
-  now asks for a covered frame; a style-only external change needs
-  `damageWidget` or `damageRect` alongside it.
+  write requests clips rather than repaints everything. A write still
+  repaints the whole window when some changed key resolves to no widget — a
+  local hook's key — and so does the frame after a model change from
+  `runFrameReduce`, a focus change, or `requestFrame`: each may change paint
+  state (a colour, a value) that no rect or text diff describes.
 - Modules that are not API moved under `NanoUI.Internal`. `NanoUI.Context`,
   `NanoUI.Context.Types`, `NanoUI.Debug`, `NanoUI.Id`,
   `NanoUI.Layout.Arena`, `NanoUI.Layout.Solve`, `NanoUI.Store`, `NanoUI.SIMD`,
@@ -434,6 +433,11 @@
 
 ### Fixed
 
+- Starting or ending a drag on a colour picker's field or bars, a slider, or
+  a knob repaints only the widget, not the whole window. The drag hooks kept
+  their held flag in a store slot no widget owns, and a changed slot with no
+  owner repaints everything. They now keep it in `storeQuiet`, a map for
+  bookkeeping that no paint reads and the damage diff skips.
 - A scroller's offset set past its content, or left over from content that
   has since shrunk, is held to the content's range at the next layout, on the
   axes the scroller owns. It used to stay out of range.

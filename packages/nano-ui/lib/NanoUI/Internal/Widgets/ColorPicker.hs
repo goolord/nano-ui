@@ -17,15 +17,14 @@ module NanoUI.Internal.Widgets.ColorPicker
   )
 where
 
-import Control.Monad (forM_, unless, void, when)
+import Control.Monad (forM_, void, when)
 import Data.Bits ((.&.))
 import Data.Maybe (fromMaybe, isJust)
 import Data.Text (Text)
 import Data.Word (Word8)
 import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context
-  ( damageParentKey
-  , recordSlot
+  ( recordSlot
   , Context (..)
   , WidgetStore
   , getStore
@@ -45,7 +44,7 @@ import NanoUI.Internal.Draw
 import NanoUI.Internal.Font
   ( FontMetrics (..)
   )
-import NanoUI.Internal.Id (WidgetId (..))
+import NanoUI.Internal.Id (WidgetId (..), mix64)
 import NanoUI.Internal.Input (Input (..), Key (..), inputKeys, inputKeysElem, inputModifiers, modShift)
 import NanoUI.Internal.Layout.Arena
   ( NodeArena
@@ -77,7 +76,6 @@ import NanoUI.Internal.Style
   )
 import NanoUI.Internal.Types
   ( Color (..)
-  , DamageBounds (..)
   , Rect (..)
   , clamp
   , clamp01
@@ -88,7 +86,6 @@ import NanoUI.Internal.Types
   , colorR
   , colorRGBA
   , colorToWord32
-  , defaultDamageSlop
   , hsvToRgb
   , rectH
   , rectW
@@ -115,6 +112,7 @@ import NanoUI.Internal.Widgets.Node
   , addWidget
   , addWidgetStyled
   , container
+  , containerWithId
   , respRect
   , setChanged
   )
@@ -147,13 +145,25 @@ data ColorPickerPart = PickerSv | PickerHue | PickerAlpha | PickerPreview
 colorPickerPartOf :: Int -> ColorPickerPart
 colorPickerPartOf si = toEnum (si .&. 3)
 
+-- | The id of the container holding a picker's parts, derived from the
+-- field's id. The picker's state is keyed on it: every part reads that state
+-- at paint time, and a write to the container's key damages the container's
+-- rect, which covers them all. Readers take the field's id (the picker's
+-- response id) and map it here.
+pickerStateId :: WidgetId -> WidgetId
+pickerStateId (WidgetId w) = WidgetId (mix64 w 0x434F4C5243414E56)
+
+-- | The store key of a picker's state, from the field's id.
+pickerKey :: WidgetId -> Int
+pickerKey = intKey . pickerStateId
+
 storeColorAt :: WidgetStore -> Int -> Color -> Color
 storeColorAt store key fallback =
   colorFromWord32 (fromIntegral (findSlot fieldInt (fromIntegral (colorToWord32 fallback)) key store))
 
 -- | Picker's current stored colour, or the supplied fallback if absent.
 widgetStoreColor :: WidgetStore -> WidgetId -> Color -> Color
-widgetStoreColor store wid fallback = storeColorAt store (intKey wid) fallback
+widgetStoreColor store wid fallback = storeColorAt store (pickerKey wid) fallback
 
 -- | Picker's comparison colour, falling back to its current colour and then
 -- the caller's default.
@@ -161,7 +171,7 @@ widgetStoreBaseColor :: WidgetStore -> WidgetId -> Color -> Color
 widgetStoreBaseColor store wid fallback =
   storeColorAt
     store
-    (slotKey SlotColorBase (intKey wid))
+    (slotKey SlotColorBase (pickerKey wid))
     (widgetStoreColor store wid fallback)
 
 -- RGB cannot tell hue 0 from 360. Keep the slider end the user last set.
@@ -170,7 +180,7 @@ widgetStoreHue store wid fallback =
   let
     (h0, _, _) = rgbToHsv (widgetStoreColor store wid fallback)
    in
-    findSlot fieldFloat h0 (intKey wid) store
+    findSlot fieldFloat h0 (pickerKey wid) store
 
 -- Black collapses S in RGB. Keep the last mouse S/V so the marker does not jitter.
 widgetStoreSv :: WidgetStore -> WidgetId -> Color -> (Float, Float)
@@ -178,7 +188,7 @@ widgetStoreSv store wid fallback =
   let
     (_, s0, v0) = rgbToHsv (widgetStoreColor store wid fallback)
    in
-    findSlot fieldPoint (s0, v0) (intKey wid) store
+    findSlot fieldPoint (s0, v0) (pickerKey wid) store
 
 -- | Store the live colour with the hue and S/V it was set through.
 putColorState :: Int -> Color -> Float -> (Float, Float) -> WidgetStore -> WidgetStore
@@ -197,7 +207,7 @@ colorPickerSvSquare (Rect x y w h) =
    in Rect (x + (w - s) / 2) (y + (h - s) / 2) s s
 
 -- | The field node of the picker a part belongs to: the part's sibling that
--- paints the saturation / value square. Its widget id keys the picker's state.
+-- paints the saturation / value square. Its widget id names the picker.
 pickerSvNode :: NodeArena -> NodeIdx -> IO NodeIdx
 pickerSvNode na idx = do
   parent <- getParent na idx
@@ -454,15 +464,10 @@ colorPickerWith showAlpha value = do
   parts <- PickerParts <$> nextId <*> nextId <*> nextId <*> nextId
   let
     wid = ppSv parts
-    key = intKey wid
+    key = pickerKey wid
     pct = 100 / (if showAlpha then 4 else 3)
     readColor = (\st -> widgetStoreColor st wid value) <$> uiIO (getStore ctx)
-    -- A colour change repaints every part: the bar markers and the preview
-    -- swatch read the store at paint time, and no single part's rect covers
-    -- them. The parent container holds them all.
-    writePicker col hue sv = uiIO $ do
-      modifyStore ctx (putColorState key col hue sv)
-      damageParentKey ctx key (DamageInflated defaultDamageSlop)
+    writePicker col hue sv = uiIO (modifyStore ctx (putColorState key col hue sv))
     writeColor col =
       let (h, s, v) = rgbToHsv col
        in writePicker col (clamp 0 360 h) (s, v)
@@ -474,7 +479,7 @@ colorPickerWith showAlpha value = do
     mapM_ (registerFocusable ctx) (wid : ppHue parts : [ppAlpha parts | showAlpha])
   (start, final, svResp) <- container NodeContainer colorPickerLayout $ do
     (svResp, hueResp, alphaResp) <-
-      container NodeContainer colorPickerCanvasLayout $ do
+      containerWithId NodeContainer colorPickerCanvasLayout (pickerStateId wid) $ do
         sv <- part wid PickerSv colorPickerSvLayout
         hue <- part (ppHue parts) PickerHue (colorPickerColumnLayout colorPickerBarW)
         alpha <-
@@ -559,7 +564,7 @@ colorPickerCanvas parts initial svResp hueResp alphaResp = do
       | otherwise = withAlpha (if showAlpha then fromIntegral nextA else 255) base
   holdActiveWhile wid dragging
   when (dragging && (dragged /= current0 || nextHue /= h0 || nextS /= s0 || nextV /= v0)) $
-    uiIO $ modifyStore ctx (putColorState (intKey wid) dragged nextHue (nextS, nextV))
+    uiIO $ modifyStore ctx (putColorState (pickerKey wid) dragged nextHue (nextS, nextV))
   svFocus <- keyboardFocused wid
   hueFocus <- keyboardFocused (ppHue parts)
   alphaFocus <- if showAlpha then keyboardFocused (ppAlpha parts) else pure False
@@ -592,29 +597,22 @@ adoptColorPickerValue :: Context -> WidgetId -> Color -> IO ()
 adoptColorPickerValue ctx wid value = do
   store0 <- getStore ctx
   let
-    key = intKey wid
+    key = pickerKey wid
     packed = fromIntegral (colorToWord32 value)
     seenKey = slotKey SlotSeen key
     seen = insertSlot fieldInt seenKey packed store0
-  when (lookupSlot fieldInt seenKey store0 /= Just packed) $ do
+  when (lookupSlot fieldInt seenKey store0 /= Just packed) $
     setStore ctx $
       if lookupSlot fieldInt key store0 == Just packed
         then seen
         else
           let (h, s, v) = rgbToHsv value
            in putColorState key value (clamp 0 360 h) (s, v) (insertSlot fieldInt (slotKey SlotColorBase key) packed seen)
-    -- The caller's colour changed every part's pixels (bars, preview).
-    damageParentKey ctx key (DamageInflated defaultDamageSlop)
 
 commitColorPickerCurrent :: Context -> WidgetId -> Color -> IO ()
-commitColorPickerCurrent ctx wid col = do
-  let key = intKey wid
-      packed = fromIntegral (colorToWord32 col)
-  st <- getStore ctx
-  -- The base slot only repaints the preview swatch; skip when unchanged.
-  unless (lookupSlot fieldInt (slotKey SlotColorBase key) st == Just packed) $ do
-    writeSlots ctx (slotWriteOr fieldInt packed (slotKey SlotColorBase key) packed)
-    damageParentKey ctx key (DamageInflated defaultDamageSlop)
+commitColorPickerCurrent ctx wid col =
+  let packed = fromIntegral (colorToWord32 col)
+   in writeSlots ctx (slotWriteOr fieldInt packed (slotKey SlotColorBase (pickerKey wid)) packed)
 
 -- | Arrow, Home and End keys on the focused part: the field when @svFocus@,
 -- the hue bar when @hueFocus@, otherwise the alpha bar. Arrows move a part
@@ -649,8 +647,6 @@ applyColorPickerKeys ctx wid fallback inp svFocus hueFocus = do
            in (withAlpha (colorA current) (hsvToRgb hue s v), hue, (s, v))
       | otherwise = (withAlpha (round (bar 0 255 a)) current, h, (s, v))
     moved = col' /= current || h' /= h || sv' /= (s, v)
-  when moved $ do
-    setStore ctx (putColorState (intKey wid) col' h' sv' store)
-    -- Arrow-key moves repaint every part's marker, not just the focused one.
-    damageParentKey ctx (intKey wid) (DamageInflated defaultDamageSlop)
+  when moved $
+    setStore ctx (putColorState (pickerKey wid) col' h' sv' store)
   pure moved

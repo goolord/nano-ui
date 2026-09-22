@@ -114,10 +114,10 @@ import NanoUI.Internal.Store
   , fieldFloat
   , fieldPoint
   , findSlot
-  , flagSlot
   , insertSlot
   , intBool
-  , setFlagSlot
+  , quietFlag
+  , setQuietFlag
   , slotKey
   )
 import NanoUI.Internal.Style
@@ -414,12 +414,13 @@ useDrag2D bounds = do
   wid <- nextId
   ctx <- askContext
   inp <- askInput
-  -- The drag flag lives in 'storeInt' and the last pointer position in
-  -- 'storePoint', both under the widget's drag slot.
+  -- The drag flag lives in 'storeQuiet' (bookkeeping: the knob paints from
+  -- its value and pressed state, which damage on their own) and the last
+  -- pointer position in 'storePoint', both under the widget's drag slot.
   let dragK = slotKey SlotDrag (intKey wid)
       mouse = inputMousePos inp
   store <- uiIO (getStore ctx)
-  let active0 = flagSlot dragK store
+  let active0 = quietFlag dragK store
       active = inputMouseDown inp && (active0 || (inputMousePressed inp && rectContains bounds mouse))
       (prevX, prevY) = findSlot fieldPoint (v2X mouse, v2Y mouse) dragK store
       delta =
@@ -432,7 +433,7 @@ useDrag2D bounds = do
           (clamp (rectY bounds) (rectY bounds + rectH bounds) (v2Y mouse))
   when (active || active0) $
     uiIO . modifyStore ctx $
-      setFlagSlot dragK active
+      setQuietFlag dragK active
         . (if active then insertSlot fieldPoint dragK (v2X mouse, v2Y mouse) else deleteSlot fieldPoint dragK)
   pure Drag2D { dragPosition = clampedMouse, dragActive = active, dragDelta = delta }
 

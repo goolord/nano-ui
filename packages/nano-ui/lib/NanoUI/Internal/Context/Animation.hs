@@ -241,6 +241,9 @@ settleKey ctx key val = do
         as {asAnimations = anims', asAnimRest = rest', asAnyAnimating = not (IM.null anims')}
     Nothing -> when restChanged $ writeIORef (ctxAnimationState ctx) $! as {asAnimRest = rest'}
   when (maybe (not (approxEq prevRest val)) (not . approxEq val . animationValue) prevLive) $ do
+    -- Covered: the key's widget paints from this value and its rect is
+    -- damaged. 'animate' and 'animateTo' key a fresh id with no node, and
+    -- those repaint whole through 'markDirtyIfOrphan' while they run.
     damageKey ctx key (DamageInflated defaultDamageSlop)
     markDirtyCovered ctx
 
@@ -262,4 +265,3 @@ pruneAnimRest :: Context -> (Int -> Bool) -> IO ()
 pruneAnimRest ctx shouldKeep =
   modifyIORef' (ctxAnimationState ctx) $ \as ->
     as {asAnimRest = IM.filterWithKey (\k _ -> shouldKeep k) (asAnimRest as)}
-

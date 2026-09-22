@@ -62,10 +62,6 @@ module NanoUI.Internal.Layout.Arena
   , tagWSizing
   , tagHSizing
   , tagScrollBarSlot
-  , tagStride
-  , styleScrollContentW
-  , styleStride
-  , styleNodeValue
   , treeParent
   , treeFirstChild
   , treeNextSibling
@@ -141,11 +137,11 @@ module NanoUI.Internal.Layout.Arena
   , findChildM
   , walkAncestors
   , LayoutCache (..)
+  , CustomMeasureRecord
   , newLayoutCache
   , captureLayoutCache
   , layoutCacheEligible
   , layoutSigMatches
-  , layoutInputsMatch
   , getInputSignature
   , computeSubtreeHashes
   , subtreeArrays
@@ -157,10 +153,12 @@ import Control.Monad (foldM, forM_, unless, when)
 import Data.Bits (shiftL, shiftR, xor, (.&.), (.|.))
 import Data.HashTable.IO (BasicHashTable)
 import qualified Data.HashTable.IO as HT
-import Data.Hashable (hash)
+import Data.Hashable (Hashable, hash)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IM
+import Data.IntSet (IntSet)
+import qualified Data.IntSet as IS
 import Data.Primitive.Array (MutableArray, copyMutableArray, newArray, readArray, sizeofMutableArray, writeArray)
 import Data.Primitive.PrimArray
   ( MutablePrimArray
@@ -399,8 +397,9 @@ data NodeArena = NodeArena
   , naScopeSig :: IORef Word64
   -- ^ A hash over the index and scope of every node added under a scope other
   -- than 0 since the reset. See 'getScopeSignature'.
-  , naInputSig :: IORef Word64
-  -- ^ A hash over every layout input written since the reset: each node's
+  , naInputSig :: IOArr Word64
+  -- ^ A hash over every layout input written since the reset, in one unboxed
+  -- slot so a mix allocates nothing: each node's
   -- constraints and links as 'addNode' wrote them, and every later change
   -- through the input setters ('setNodeText', 'setStyleIdx', 'setOptions',
   -- 'setWidgetId', 'setGridCols', 'setGridMinColW', 'setNodeFontSize').
@@ -417,11 +416,12 @@ data NodeArena = NodeArena
   -- ^ Per node, the hash of the node's own creation inputs, as 'addNode'
   -- wrote it. 'computeSubtreeHashes' folds these into 'naSubHash'.
   , naSubHash :: IORef (IOArr Word64)
-  -- ^ Per node, the hash of the node's whole subtree: its own inputs and,
-  -- through the children's subtree hashes, every descendant's. A mismatch
-  -- against the layout cache marks the subtree dirty and propagates to every
-  -- ancestor, since each ancestor's hash covers its descendants. Written by
-  -- 'computeSubtreeHashes'.
+  -- ^ Per node, the key the solve restores its measurement by: a hash of its
+  -- own inputs, its ancestors' (text wraps at an ancestor's width, a scroll
+  -- bar sits by its panel) and, through the children's keys, every
+  -- descendant's. A mismatch against the layout cache marks the node dirty
+  -- and propagates to every ancestor, since each ancestor's key covers its
+  -- descendants. Written by 'computeSubtreeHashes'.
   , naMeasured :: IORef (IOArr Float)
   -- ^ Per node, the width and height the measure pass took for it (two
   -- floats). 'captureLayoutCache' snapshots it, and a reused solve restores
@@ -577,10 +577,10 @@ styleFontSize = 15
 -- * 'tagWSizing', 'tagHSizing': the 'SizingTag' of the width and the height.
 -- * 'tagScrollBarSlot': a 'NanoUI.Internal.Font.ScrollBarSlot', which says where a
 --   scroll container's bar sits. The solver's measure pass writes it, so the
---   layout cache leaves it out of the comparison and restores it on a hit.
+--   input signature leaves it out and the layout cache restores it on a hit.
 -- * @tagAlignX@, @tagAlignY@: the 'AlignX' and the 'AlignY'.
 tagStride, tagNodeType, tagDirection, tagWSizing, tagHSizing, tagScrollBarSlot, tagAlignX, tagAlignY :: Int
-tagStride = 8 -- a power of two: layoutInputsMatch finds a column with a mask
+tagStride = 8
 tagNodeType = 0
 tagDirection = 1
 tagWSizing = 2
@@ -725,15 +725,24 @@ newNodeArena = do
   naIndex <- newIORef =<< HT.new
   naScope <- newIORef 0
   naScopeSig <- newIORef 0
-  naInputSig <- newIORef 0
-  naTextHash <- newIORef =<< newPrimArray cap
-  naOptionsHash <- newIORef =<< newPrimArray cap
+  naInputSig <- newPrimArray 1
+  writePrimArray naInputSig 0 0
+  -- Zeroed: the stores start as the shared 'T.empty' and '[]', which pass the
+  -- same-object check, and 0 marks a hash that was never taken.
+  naTextHash <- newIORef =<< newZeroedPrimArray cap
+  naOptionsHash <- newIORef =<< newZeroedPrimArray cap
   naOwnHash <- newIORef =<< newPrimArray cap
   naSubHash <- newIORef =<< newPrimArray cap
   naMeasured <- newIORef =<< newPrimArray (cap * 2)
   naTopModal <- newIORef (-1)
   naFloatingNodes <- newIORef []
   pure NodeArena {..}
+
+newZeroedPrimArray :: Int -> IO (IOArr Word64)
+newZeroedPrimArray n = do
+  arr <- newPrimArray n
+  setPrimArray arr 0 n 0
+  pure arr
 
 -- | Begin an empty frame while retaining array capacity. Invalidates node
 -- indices, width memos, and widget-id lookups, and resets paint-scope and
@@ -743,7 +752,7 @@ resetNodeArena na = do
   writeIORef (naCount na) 0
   writeIORef (naScope na) 0
   writeIORef (naScopeSig na) 0
-  writeIORef (naInputSig na) 0
+  writePrimArray (naInputSig na) 0 0
   writeIORef (naTopModal na) (-1)
   writeIORef (naFloatingNodes na) []
   -- 0 marks a memo entry that was never written, so the tag wraps to 1.
@@ -763,13 +772,18 @@ topModalNode na = do
   i <- readIORef (naTopModal na)
   pure (if i >= 0 then Just i else Nothing)
 
--- | Fold one input's tag and value into 'naInputSig'. Tags separate the
--- fields so a value moving between fields of one node changes the hash.
+-- | Fold a tagged value into a running hash. Tags separate the fields so a
+-- value moving between fields of one node changes the hash.
+{-# INLINE mixTagged #-}
+mixTagged :: Word64 -> Word64 -> Word64 -> Word64
+mixTagged acc tag v = (acc * 0x9E3779B97F4A7C15) `xor` (tag * 0x100000001b3 `xor` v)
+
+-- | Fold one input's tag and value into 'naInputSig'.
 {-# INLINE mixInputSig #-}
 mixInputSig :: NodeArena -> Word64 -> Word64 -> IO ()
 mixInputSig na tag v = do
-  sig <- readIORef (naInputSig na)
-  writeIORef (naInputSig na) $! (sig * 0x100000001b3) `xor` (tag * 0x9E3779B97F4A7C15 `xor` v)
+  sig <- readPrimArray (naInputSig na) 0
+  writePrimArray (naInputSig na) 0 (mixTagged sig tag v)
 
 -- | Fold a post-creation input change into the node's own hash and the
 -- frame's input signature. The subtree hash a later solve compares against
@@ -779,7 +793,7 @@ mixNodeInput :: NodeArena -> NodeIdx -> Word64 -> Word64 -> IO ()
 mixNodeInput na idx tag v = do
   own <- readIORef (naOwnHash na)
   o <- readPrimArray own idx
-  writePrimArray own idx $! ((o * 0x9E3779B97F4A7C15) `xor` (tag * 0x100000001b3 `xor` v))
+  writePrimArray own idx (mixTagged o tag v)
   mixInputSig na tag v
 
 -- | Number of modal, window, and popup nodes added since the last reset.
@@ -820,11 +834,12 @@ ensureCapacity na needed = do
     growWidthMemo (naWrapMemo na) cap newCap
     growWidthMemo (naFitMemo na) cap newCap
     writeIORef (naArrays na) newA
-    readIORef (naTextHash na) >>= \a -> writeIORef (naTextHash na) =<< growPrimArrayCopy a cap newCap 0
-    readIORef (naOptionsHash na) >>= \a -> writeIORef (naOptionsHash na) =<< growPrimArrayCopy a cap newCap 0
-    readIORef (naOwnHash na) >>= \a -> writeIORef (naOwnHash na) =<< growPrimArrayCopy a cap newCap 0
-    readIORef (naSubHash na) >>= \a -> writeIORef (naSubHash na) =<< growPrimArrayCopy a cap newCap 0
-    readIORef (naMeasured na) >>= \a -> writeIORef (naMeasured na) =<< growPrimArrayCopy a (cap * 2) (newCap * 2) 0
+    let growRef r old new = readIORef r >>= \a -> writeIORef r =<< growPrimArrayCopy a old new 0
+    growRef (naTextHash na) cap newCap
+    growRef (naOptionsHash na) cap newCap
+    growRef (naOwnHash na) cap newCap
+    growRef (naSubHash na) cap newCap
+    growRef (naMeasured na) (cap * 2) (newCap * 2)
     readIORef (naArraysSnap na) >>= mapM_ (\_ -> writeIORef (naArraysSnap na) (Just newA))
     writeIORef (naCapacity na) newCap
 
@@ -946,7 +961,7 @@ addNode na nt parent dir wSiz hSiz pad gap minW minH maxW maxH grow ax ay = do
   -- ones already in registers above.
   let !nodeSig =
         foldl'
-          (\acc (t, v) -> (acc * 0x9E3779B97F4A7C15) `xor` (t * 0x100000001b3 `xor` v))
+          (\acc (t, v) -> mixTagged acc t v)
           (fromIntegral idx `shiftL` 32 .|. fromIntegral (idx + 1) :: Word64)
           [ (0x4e54, fromIntegral (fromEnum nt))
           , (0x4449, fromIntegral (fromEnum dir))
@@ -968,7 +983,7 @@ addNode na nt parent dir wSiz hSiz pad gap minW minH maxW maxH grow ax ay = do
           , (0x4159, fromIntegral (fromEnum ay))
           , (0x5041, fromIntegral (parent + 1))
           ]
-  mixInputSig na 0x4e4f (fromIntegral (hash nodeSig))
+  mixInputSig na 0x4e4f nodeSig
   ownA <- readIORef (naOwnHash na)
   writePrimArray ownA idx nodeSig
 
@@ -986,8 +1001,6 @@ addNode na nt parent dir wSiz hSiz pad gap minW minH maxW maxH grow ax ay = do
     writeTree a parent treeFirstChild idx
     cc <- readTree a parent treeChildCount
     writeTree a parent treeChildCount (cc + 1)
-    -- The parent's child list is a layout input: mix the new head and count.
-    mixInputSig na 0x4348 (fromIntegral parent * 0x9E3779B97F4A7C15 `xor` (fromIntegral idx `shiftL` 32 .|. fromIntegral (cc + 1)))
   when (isFloatingNode nt) $ do
     when (nt == NodeModal) $ writeIORef (naTopModal na) idx
     modifyIORef' (naFloatingNodes na) (idx :)
@@ -1029,17 +1042,7 @@ setNodeText :: NodeArena -> NodeIdx -> Text -> IO ()
 setNodeText na idx txt = do
   a <- arenaArrays na
   old <- readArray (naArrTextStore a) idx
-  th <- readIORef (naTextHash na)
-  cached <- readPrimArray th idx
-  !h <- do
-    -- Same closure means same text, so the cached hash stands. 'False' only
-    -- means hash the bytes.
-    if old `ptrEq` txt && cached /= 0
-      then pure cached
-      else do
-        let !h = fromIntegral (hash txt) `xor` 0x54455854
-        writePrimArray th idx h
-        pure h
+  h <- cachedHash (naTextHash na) idx (old `ptrEq` txt) 0x54455854 txt
   writeArray (naArrTextStore a) idx txt
   writeTree a idx treeTextIdx idx
   mixNodeInput na idx 0x5458 h
@@ -1229,39 +1232,42 @@ data LayoutCache = LayoutCache
   , lcCount :: !Int
   , lcSig :: !Word64
   -- ^ The input signature ('getInputSignature') the solve was captured with.
-  , lcMeasures :: !(IntMap (Word32, Word32, Word32, Word32))
-  -- ^ Per custom-measured node, the (available width, available height,
-  -- measured width, measured height) the solve recorded, as raw float words.
+  , lcMeasures :: !(IntMap CustomMeasureRecord)
+  -- ^ Per custom-measured node, what the solve's measure recorded.
   -- Frame owns checking these: a measure may read state outside the arena,
   -- which the input signature cannot see. Empty when no node measured
   -- itself custom, so the common frame pays nothing.
-  , lcOwn :: !(IOArr Word64)
-  -- ^ The own-input hashes of the captured frame, for subtree-granular reuse.
+  , lcMeasureHooks :: !IntSet
+  -- ^ The widgets with a custom measure registered at capture. Frame checks
+  -- the set is unchanged, since gaining a hook changes a node's size without
+  -- touching the arena.
   , lcSub :: !(IOArr Word64)
-  -- ^ The subtree hashes of the captured frame. A node whose current subtree
-  -- hash matches this was measured the same way last solve, and the solve
-  -- restores its measured size instead of measuring again.
+  -- ^ The restore keys ('naSubHash') of the captured frame. A node whose
+  -- current key matches this was measured the same way last solve, and the
+  -- solve restores its measured size instead of measuring again.
   , lcMeasured :: !(IOArr Float)
   -- ^ Per captured node, the width and height its measure took (two floats).
   , lcArrays :: !NodeArenaArrays
   }
+
+-- | A custom measure's (available width, available height, measured width,
+-- measured height), as raw float words.
+type CustomMeasureRecord = (Word32, Word32, Word32, Word32)
 
 -- | Empty layout cache with at least 16 slots. Capture a solved frame before reuse.
 newLayoutCache :: Int -> IO LayoutCache
 newLayoutCache cap0 = do
   let !cap = max 16 cap0
   lcArrays <- newNodeArenaArrays cap
-  lcOwn <- newPrimArray cap
   lcSub <- newPrimArray cap
   lcMeasured <- newPrimArray (cap * 2)
-  pure (LayoutCache cap 0 0 IM.empty lcOwn lcSub lcMeasured lcArrays)
+  pure (LayoutCache cap 0 0 IM.empty IS.empty lcSub lcMeasured lcArrays)
 
 -- | Snapshot the current (post-solve) arena form, constraints and rects.
 captureLayoutCache :: NodeArena -> LayoutCache -> IO LayoutCache
 captureLayoutCache na lc0 = do
   n <- arenaCount na
   sig <- getInputSignature na
-  ownA <- readIORef (naOwnHash na)
   subA <- readIORef (naSubHash na)
   measuredA <- readIORef (naMeasured na)
   let !oldCap = lcCap lc0
@@ -1271,12 +1277,9 @@ captureLayoutCache na lc0 = do
       then pure lc0
       else do
         lcArrays <- growNodeArenaArrays oldCap newCap (lcArrays lc0)
-        lcOwn <- growPrimArrayCopy (lcOwn lc0) oldCap newCap 0
         lcSub <- growPrimArrayCopy (lcSub lc0) oldCap newCap 0
         lcMeasured <- growPrimArrayCopy (lcMeasured lc0) (oldCap * 2) (newCap * 2) 0
-        pure LayoutCache { lcCap = newCap, lcCount = lcCount lc0, lcSig = lcSig lc0
-                         , lcMeasures = lcMeasures lc0, lcOwn = lcOwn, lcSub = lcSub
-                         , lcMeasured = lcMeasured, lcArrays = lcArrays }
+        pure lc0 {lcCap = newCap, lcSub, lcMeasured, lcArrays}
   a <- arenaArrays na
   let c = lcArrays lc
   copyMutablePrimArray (naArrGeom c) 0 (naArrGeom a) 0 (n * geomStride)
@@ -1285,7 +1288,6 @@ captureLayoutCache na lc0 = do
   copyMutablePrimArray (naArrTree c) 0 (naArrTree a) 0 (n * treeStride)
   copyMutableArray (naArrTextStore c) 0 (naArrTextStore a) 0 n
   copyMutableArray (naArrOptionsStore c) 0 (naArrOptionsStore a) 0 n
-  copyMutablePrimArray (lcOwn lc) 0 ownA 0 n
   copyMutablePrimArray (lcSub lc) 0 subA 0 n
   copyMutablePrimArray (lcMeasured lc) 0 measuredA 0 (n * 2)
   pure lc {lcCount = n, lcSig = sig}
@@ -1297,81 +1299,13 @@ captureLayoutCache na lc0 = do
 layoutCacheEligible :: NodeArena -> IO Bool
 layoutCacheEligible na = (> 0) <$> arenaCount na
 
--- | Whether the frame's layout inputs hash to what the cache captured. The
--- O(1) successor of 'layoutInputsMatch', which stays as the exhaustive check
--- a debugging run can compare against.
+-- | Whether the frame's layout inputs hash to what the cache captured.
 layoutSigMatches :: NodeArena -> LayoutCache -> IO Bool
 layoutSigMatches na lc = do
   n <- arenaCount na
   if n <= 0 || n /= lcCount lc
     then pure False
     else (== lcSig lc) <$> getInputSignature na
-
--- | Compare layout inputs, stopping at the first mismatch. Node values are
--- paint state except on scroll containers, where they are solver outputs.
--- Neither belongs in the layout-input signature.
-layoutInputsMatch :: NodeArena -> LayoutCache -> IO Bool
-layoutInputsMatch na lc = do
-  n <- arenaCount na
-  if n <= 0 || n /= lcCount lc
-    then pure False
-    else do
-      -- The cache only holds eligible layouts, and matching node types
-      -- keep the current one eligible too.
-      a <- arenaArrays na
-      let c = lcArrays lc
-      andThen (styleMatch (naArrStyle a) (naArrStyle c) n) $
-        andThen (allRangeM 0 (n * tagStride) (\k -> if k .&. (tagStride - 1) == tagScrollBarSlot then pure True else primEqAt (naArrTags a) (naArrTags c) k)) $
-          andThen (treeMatch a (naArrTree c) n) $
-            andThen (allRangeM 0 n (boxedEqAt (naArrTextStore a) (naArrTextStore c))) $
-              allRangeM 0 n (boxedEqAt (naArrOptionsStore a) (naArrOptionsStore c))
-
-{-# INLINE andThen #-}
-andThen :: IO Bool -> IO Bool -> IO Bool
-andThen check next = do
-  ok <- check
-  if ok then next else pure False
-
--- | Whether @p@ holds at every index in @[lo, hi)@, stopping at the first miss.
-{-# INLINE allRangeM #-}
-allRangeM :: Int -> Int -> (Int -> IO Bool) -> IO Bool
-allRangeM lo hi p = go lo
-  where
-    go !i
-      | i >= hi = pure True
-      | otherwise = do
-          ok <- p i
-          if ok then go (i + 1) else pure False
-
-{-# INLINE primEqAt #-}
-primEqAt :: (Prim a, Eq a) => IOArr a -> IOArr a -> Int -> IO Bool
-primEqAt x y i = (==) <$> readPrimArray x i <*> readPrimArray y i
-
-{-# INLINE boxedEqAt #-}
-boxedEqAt :: Eq a => MutableArray RealWorld a -> MutableArray RealWorld a -> Int -> IO Bool
-boxedEqAt x y i = (==) <$> readArray x i <*> readArray y i
-
--- The scroll-extent and node-value columns hold solver outputs or paint-only
--- values, so they are skipped.
-styleMatch :: IOArr Float -> IOArr Float -> Int -> IO Bool
-styleMatch x y n =
-  allRangeM 0 n $ \i ->
-    let !base = i * styleStride
-     in andThen (allRangeM base (base + styleScrollContentW) (primEqAt x y)) $
-          allRangeM (base + styleGridMinColW) (base + styleStride) (primEqAt x y)
-
--- Box/image/drawing style IDs are paint data; their intrinsic dimensions come
--- from sizing constraints. The grid column count only matters to containers.
-treeMatch :: NodeArenaArrays -> IOArr Int -> Int -> IO Bool
-treeMatch a cached n =
-  allRangeM 0 n $ \i -> do
-    nt <- readTagEnum a i tagNodeType
-    let paintStyle = nt == NodeBox || nt == NodeImage || nt == NodeDrawing
-        !base = i * treeStride
-    allRangeM 0 treeStride $ \j ->
-      if (j == treeStyleIdx && paintStyle) || (j == treeGridCols && not (isContainerNode nt))
-        then pure True
-        else (==) <$> readTree a i j <*> readPrimArray cached (base + j)
 
 -- | Restore only solver outputs. Rebuilt paint values/colors must survive a
 -- cache hit; copying the entire cached style array would revert them.
@@ -1419,17 +1353,22 @@ setOptions :: NodeArena -> NodeIdx -> [Text] -> IO ()
 setOptions na idx opts = do
   a <- arenaArrays na
   old <- readArray (naArrOptionsStore a) idx
-  oh <- readIORef (naOptionsHash na)
-  cached <- readPrimArray oh idx
-  !h <- do
-    if old `ptrEq` opts && cached /= 0
-      then pure cached
-      else do
-        let !h = fromIntegral (hash opts) `xor` 0x4f505453
-        writePrimArray oh idx h
-        pure h
+  h <- cachedHash (naOptionsHash na) idx (old `ptrEq` opts) 0x4f505453 opts
   writeArray (naArrOptionsStore a) idx opts
   mixNodeInput na idx 0x4f50 h
+
+-- | The node's value hash from @ref@ when @same@ says the value is the
+-- object last hashed there, else a fresh hash of @x@, salted and cached.
+{-# INLINE cachedHash #-}
+cachedHash :: Hashable a => IORef (IOArr Word64) -> NodeIdx -> Bool -> Word64 -> a -> IO Word64
+cachedHash ref idx same salt x = do
+  arr <- readIORef ref
+  c <- readPrimArray arr idx
+  if same && c /= 0
+    then pure c
+    else do
+      let !h = fromIntegral (hash x) `xor` salt
+      h <$ writePrimArray arr idx h
 
 -- | Identity assigned to the node, or @WidgetId 0@ for an untagged node.
 {-# INLINE getWidgetId #-}
@@ -1546,36 +1485,49 @@ getScopeSignature na = readIORef (naScopeSig na)
 -- constraints and tree links as 'addNode' wrote them, plus every later change
 -- through 'setNodeText', 'setOptions', 'setWidgetId', 'setStyleIdx',
 -- 'setGridCols', 'setGridMinColW' and 'setNodeFontSize'. Solver outputs
--- ('setScrollContentW', 'tagScrollBarSlot', rects), paint state ('setNodeValue',
--- 'setNodeFontColor'), and the node count are excluded — the count is mixed
--- in through the per-node indices, so a different node count hashes
--- differently with overwhelming probability, and 'layoutSigMatches' checks it
+-- ('setScrollContentW', 'tagScrollBarSlot', rects) and paint state
+-- ('setNodeValue', 'setNodeFontColor') are excluded. Tree links need no mix
+-- of their own: every node's index and parent are in its creation hash, and
+-- children are prepended in index order, so the child lists follow. The node
+-- count enters through the indices too; 'layoutSigMatches' also checks it
 -- exactly.
 {-# INLINE getInputSignature #-}
 getInputSignature :: NodeArena -> IO Word64
-getInputSignature na = readIORef (naInputSig na)
+getInputSignature na = readPrimArray (naInputSig na) 0
 
--- | Fold every node's own hash with its children's subtree hashes, walking
--- from the last node down so each child's hash is final before its parent
--- reads it. Child positions mix in, so reordering children counts as a
--- change. Run after the view has built and before layout decides whether to
--- reuse the cached solve.
+-- | Compute every node's restore key ('naSubHash'). A first pass, parents
+-- before children, parks each node's ancestor chain (its ancestors' own
+-- hashes) in its slot. A second pass, from the last node down so each child's
+-- key is final before its parent reads it, folds the node's own hash and chain
+-- with its children's keys. Child positions mix in, so reordering children
+-- counts as a change. Run after the view has built and before the solve.
 computeSubtreeHashes :: NodeArena -> IO ()
 computeSubtreeHashes na = do
   n <- arenaCount na
   a <- arenaArrays na
   own <- readIORef (naOwnHash na)
   sub <- readIORef (naSubHash na)
-  let go !i
+  let chain !i
+        | i >= n = pure ()
+        | otherwise = do
+            p <- readTree a i treeParent
+            anc <-
+              if p < 0
+                then pure 0
+                else mixTagged <$> readPrimArray sub p <*> pure 0x414e <*> readPrimArray own p
+            writePrimArray sub i anc
+            chain (i + 1)
+      fold !i
         | i < 0 = pure ()
         | otherwise = do
             o <- readPrimArray own i
+            anc <- readPrimArray sub i
             fc <- readTree a i treeFirstChild
             (cnt, acc) <- walkKids a sub 0 o fc
-            let !s = ((acc * 0x9E3779B97F4A7C15) `xor` (cnt * 0x100000001b3)) `xor` o
-            writePrimArray sub i s
-            go (i - 1)
-  go (n - 1)
+            writePrimArray sub i (mixTagged acc cnt (o `xor` anc))
+            fold (i - 1)
+  chain 0
+  fold (n - 1)
 
 -- | Fold a child list (most recently added first) into the parent's subtree
 -- hash, each child's position mixed in so reordering counts as a change.
@@ -1585,12 +1537,12 @@ walkKids a sub !pos !h !c
   | otherwise = do
       sh <- readPrimArray sub c
       nxt <- readTree a c treeNextSibling
-      walkKids a sub (pos + 1) ((h * 0x9E3779B97F4A7C15) `xor` (sh + pos * 0x100000001b3)) nxt
+      walkKids a sub (pos + 1) (mixTagged h pos sh) nxt
 
--- | The own-hash, subtree-hash, and measured-size arrays the solver reads
--- and writes during a solve. Do not retain them across arena growth.
-subtreeArrays :: NodeArena -> IO (IOArr Word64, IOArr Word64, IOArr Float)
-subtreeArrays na = (,,) <$> readIORef (naOwnHash na) <*> readIORef (naSubHash na) <*> readIORef (naMeasured na)
+-- | The subtree-hash and measured-size arrays the solver reads and writes
+-- during a solve. Do not retain them across arena growth.
+subtreeArrays :: NodeArena -> IO (IOArr Word64, IOArr Float)
+subtreeArrays na = (,) <$> readIORef (naSubHash na) <*> readIORef (naMeasured na)
 
 -- | Type-specific style code. Its encoding depends on 'getNodeType', such as
 -- button flags, a radio option index, or packed text styling.
@@ -1600,8 +1552,7 @@ getStyleIdx na idx = arenaArrays na >>= \a -> readTree a idx treeStyleIdx
 
 -- | Store a style code encoded for this node's type. Part of the layout
 -- input signature, except on box, image, and drawing nodes: their style code
--- is paint data (a colour, a version), exactly as the exhaustive comparison
--- excludes it for them.
+-- is paint data (a colour, a version).
 {-# INLINE setStyleIdx #-}
 setStyleIdx :: NodeArena -> NodeIdx -> Int -> IO ()
 setStyleIdx na idx v = do
@@ -1857,5 +1808,3 @@ findChildM na parentIdx p = do
             ok <- p ci
             if ok then pure (Just ci) else getNextSibling na ci >>= go
   go fc
-
-

@@ -48,7 +48,7 @@ import NanoUI.Internal.Input
   , inputMouseRightPressed
   )
 import NanoUI.Internal.Monad (Ui, askContext, askFrameInput, askInput, focusedWidget, nextId, uiIO, withContext)
-import NanoUI.Internal.Store (fieldFloat, fieldInt, findSlot, flagSlot, insertSlot, setFlagSlot)
+import NanoUI.Internal.Store (fieldFloat, fieldInt, findSlot, insertSlot, quietFlag, setQuietFlag)
 import NanoUI.Internal.Types (Rect (..), clamp01, rectHit, v2X, v2Y)
 import qualified Data.Text as T
 
@@ -68,7 +68,7 @@ keyedDragHeld k = do
     old <- readIORef (ctxIdContext ctx)
     let wid = idContextWidgetId (snd (enterKeyed (fromIntegral (hash k)) old))
         dragK = slotKey SlotDrag (intKey wid)
-    flagSlot dragK <$> getStore ctx
+    quietFlag dragK <$> getStore ctx
 
 -- | Clamped 1D drag. Maps pointer position on @track@ into [lo, hi]. The drag
 -- starts with a press on the track and lasts until the button comes up; a
@@ -97,7 +97,7 @@ useDrag1D axis lo hi current track = do
         DragAxisX -> v2X (inputMousePos inp)
         DragAxisY -> v2Y (inputMousePos inp)
   store <- uiIO (getStore ctx)
-  let active0 = flagSlot dragK store
+  let active0 = quietFlag dragK store
       started = inputMousePressed inp && rectHit track (inputMousePos inp)
       active = inputMouseDown inp && (active0 || started)
       frac =
@@ -108,7 +108,7 @@ useDrag1D axis lo hi current track = do
         if active
           then lo + frac * (hi - lo)
           else current
-  when (active /= active0) $ uiIO (modifyStore ctx (setFlagSlot dragK active))
+  when (active /= active0) $ uiIO (modifyStore ctx (setQuietFlag dragK active))
   pure (next, active)
 
 -- | Hold the active id for @wid@ while its drag lasts and let it go after, so

@@ -7,8 +7,8 @@ import Foreign.ForeignPtr (withForeignPtr)
 import Foreign.Ptr (castPtr)
 import NanoUI.Internal.Context (Context (..))
 import NanoUI.Internal.Layout.Arena
-  ( NodeType (..), addNodeFromLayout, getRect, setNodeText, setNodeValue
-  , setStyleIdx, setWidgetId
+  ( NodeType (..), addNodeFromLayout, getRect, setNodeText
+  , setNodeValue, setStyleIdx, setWidgetId
   )
 import System.Mem.StableName (makeStableName)
 
@@ -17,6 +17,7 @@ tests =
   [ spec "metric-cache-invalidation" runMetricCacheInvalidationTest
   , spec "widget-placement-cache" runWidgetPlacementCacheTest
   , spec "layout-cache-paint-state" runLayoutPaintStateTest
+  , spec "partial-measure-ancestor-width" runPartialMeasureAncestorTest
   ]
 
 -- Copy the mutable draw buffers before another frame can reuse them. Counts
@@ -135,3 +136,24 @@ runLayoutPaintStateTest ctx failed = do
   writeIORef (ctxLayoutCache ctx) Nothing
   (_, _, coldDraw, _) <- runFrame ctx inp (ui 0.8 blue)
   assertEq failed changed =<< snapshotDraw coldDraw
+
+-- A label wraps at its container's width. A frame that changes only the
+-- container's width must measure the label again, not restore the size it
+-- wrapped to under the old width.
+runPartialMeasureAncestorTest :: Context -> IORef Int -> IO ()
+runPartialMeasureAncestorTest ctx failed = do
+  let inp = withInputOff 400 300
+      ui c w = uiIO $ do
+        let na = ctxNodeArena c
+        parent <- addNodeFromLayout na NodeContainer (-1) (fixedWH w 200 defaultLayout)
+        i <- addNodeFromLayout na NodeText parent defaultLayout
+        setNodeText na i "a long label that wraps onto several lines at a narrow width"
+      rects = arenaRects
+  void $ runFrame ctx inp (ui ctx 360)
+  wide <- rects ctx
+  void $ runFrame ctx inp (ui ctx 120)
+  narrow <- rects ctx
+  assert failed (wide /= narrow)
+  fresh <- newContext
+  void $ runFrame fresh inp (ui fresh 120)
+  assertEq failed narrow =<< rects fresh

@@ -15,7 +15,6 @@ module NanoUI.Internal.Context.Types
   , WindowResizeDrag (..)
   , DamageRequest (..)
   , DamageState (..)
-  , FollowReason (..)
   , initialDamageState
   , OverlayState (..)
   , initialOverlayState
@@ -161,9 +160,6 @@ data DamageRequest
   | ReqKey !Int !DamageBounds              -- ^ Invalidate widget bounds by integer key
   | ReqRect !Rect                          -- ^ Invalidate an explicit window-space rectangle
   | ReqPeers ![WidgetId] !DamageBounds     -- ^ Invalidate a collection of widgets
-  -- ^ Invalidate the parent container of the widget a key resolves to, so a
-  -- state change repaints the sibling parts around it (colour-picker bars).
-  | ReqParentKey !Int !DamageBounds
   | ReqFull                                -- ^ Force full window invalidation
   deriving (Eq, Show)
 
@@ -232,10 +228,10 @@ data WindowResizeDrag = WindowResizeDrag
 -- keyed by widget id. Dirty state and pixel damage are tracked separately.
 data DamageState = DamageState
   { dsDirty :: !Bool
-  , dsDirtyStore :: !Bool
-  -- ^ Set alongside 'dsDirty' by store writes: their visible effects are
-  -- damaged per key, so the follow-up frame they request needs no full
-  -- repaint. 'markDirty' alone leaves it False.
+  , dsDirtyOpaque :: !Bool
+  -- ^ Some request since the last clear came through 'markDirty', whose
+  -- effects no diff is known to cover. 'markDirtyCovered' leaves it alone,
+  -- so a covered request never downgrades an opaque one.
   , dsDamage :: !Damage
   , dsDamagePieces :: ![Rect]
   -- ^ Disjoint rects inside a 'DamageClip' that together hold all of its
@@ -252,7 +248,7 @@ data DamageState = DamageState
 initialDamageState :: DamageState
 initialDamageState = DamageState
   { dsDirty = True
-  , dsDirtyStore = False
+  , dsDirtyOpaque = False
   , dsDamage = DamageFull
   , dsDamagePieces = []
   , dsRequests = []
@@ -261,15 +257,6 @@ initialDamageState = DamageState
   , dsPrevClips = IM.empty
   , dsPrevNodeTexts = IM.empty
   }
-
--- | Why the previous frame asked for this one. Store writes damage their own
--- effects per key ('FollowStore'); anything else that marks the frame dirty,
--- such as a model change, may alter pixels no diff can see ('FollowOpaque').
-data FollowReason
-  = FollowNone
-  | FollowStore
-  | FollowOpaque
-  deriving (Eq, Show)
 
 -- | Current modal nesting and previous floating-panel bounds/order used for
 -- routing input before the next view is built.

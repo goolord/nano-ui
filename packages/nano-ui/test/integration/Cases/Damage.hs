@@ -16,6 +16,8 @@ tests =
   , spec "textarea-select-all-damage" runTextAreaSelectAllDamageTest
   , spec "damage-pieces-merge" runDamagePiecesMergeTest
   , spec "damage-pieces-far-labels" runFarLabelsDamagePiecesTest
+  , spec "damage-hook-paint-change" runHookPaintChangeDamageTest
+  , spec "damage-float-hook-paint-change" runFloatHookPaintChangeDamageTest
   ]
 
 -- | Far-apart rects stay apart, near ones merge, and a frame never has more
@@ -260,3 +262,40 @@ runTextAreaSelectAllDamageTest ctx failed = do
   _ <- runFrame ctx inp0 {inputChars = "a", inputModifiers = Modifiers False True False} ui
   dmg <- takeDamage ctx
   assert failed (clipCovers dmg (respRect area))
+
+-- | A local-hook write that changes a label's text and, elsewhere, a box's
+-- colour repaints the whole window: the text diff alone would clip to the
+-- label and leave the box showing its old colour, which no diff describes.
+runHookPaintChangeDamageTest :: Context -> IORef Int -> IO ()
+runHookPaintChangeDamageTest ctx failed = do
+  let ui = do
+        (on, setOn) <- useFlag False
+        resp <- button' "Toggle"
+        when (respClicked resp) (setOn (not on))
+        -- Same length in a monospace font: the label keeps its rect, so only
+        -- the text diff sees the change.
+        void $ labelWith fontMono (if on then "one" else "two")
+        box (fixedWH 40 40) (if on then colorRGBA 255 0 0 255 else colorRGBA 0 0 255 255)
+        pure resp
+      inp0 = withInputOff 320 240
+  resp <- warmup2 ctx inp0 ui
+  _ <- runClick ctx inp0 ui (centerOf resp)
+  dmg <- takeDamage ctx
+  assertEq failed dmg DamageFull
+
+-- | A 'useFloat' write that only changes a box's colour repaints the whole
+-- window. The hook's key names no widget and floats are outside the store
+-- diff, so only the hook write itself says the box needs repainting.
+runFloatHookPaintChangeDamageTest :: Context -> IORef Int -> IO ()
+runFloatHookPaintChangeDamageTest ctx failed = do
+  let ui = do
+        (level, setLevel) <- useFloat 0
+        resp <- button' "Raise"
+        when (respClicked resp) (setLevel (level + 1))
+        box (fixedWH 40 40) (if level > 0 then colorRGBA 255 0 0 255 else colorRGBA 0 0 255 255)
+        pure resp
+      inp0 = withInputOff 320 240
+  resp <- warmup2 ctx inp0 ui
+  _ <- runClick ctx inp0 ui (centerOf resp)
+  dmg <- takeDamage ctx
+  assertEq failed dmg DamageFull

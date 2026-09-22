@@ -15,6 +15,7 @@ module NanoUI.Internal.Store
   , fieldFloatList
   , fieldIntList
   , fieldDyn
+  , fieldQuiet
   , overField
   , lookupSlot
   , findSlot
@@ -23,6 +24,8 @@ module NanoUI.Internal.Store
   , deleteSlot
   , flagSlot
   , setFlagSlot
+  , quietFlag
+  , setQuietFlag
   , SlotWrites (..)
   , slotWrite
   , slotWriteOr
@@ -38,6 +41,8 @@ module NanoUI.Internal.Store
   , closeSelects
   , ptrEq
   , eqByPtr
+  , diffKeys
+  , slotChangedKeys
   )
 where
 
@@ -64,6 +69,42 @@ ptrEq a b = isTrue# (reallyUnsafePtrEquality# a b)
 eqByPtr :: Eq a => a -> a -> Bool
 eqByPtr a b = ptrEq a b || a == b
 
+-- | Keys whose values differ between two maps, a key that left or joined
+-- included.
+diffKeysBy :: (a -> a -> Bool) -> IntMap a -> IntMap a -> [Int]
+diffKeysBy eq old new
+  -- Unchanged maps keep their identity through a record update; skip the
+  -- whole merge when the caller only rebuilt a different field.
+  | ptrEq old new = []
+  | otherwise =
+      IM.keys
+        ( IM.mergeWithKey
+            (\_ a b -> if eq a b then Nothing else Just ())
+            (IM.map (const ()))
+            (IM.map (const ()))
+            old
+            new
+        )
+
+-- | 'diffKeysBy' with '==' behind a pointer check: an entry a map update left
+-- alone keeps its object, so it compares without touching its value.
+diffKeys :: Eq a => IntMap a -> IntMap a -> [Int]
+diffKeys = diffKeysBy eqByPtr
+
+-- | The keys whose values changed between two stores in every slot map but
+-- the scroll offsets ('storeFloat', 'storePoint') and the 'storeQuiet'
+-- bookkeeping. Lazy: a caller that only asks whether anything changed stops
+-- at the first changed key.
+slotChangedKeys :: WidgetStore -> WidgetStore -> [Int]
+slotChangedKeys old new =
+  diffKeys (storeInt old) (storeInt new)
+    ++ diffKeys (storeDouble old) (storeDouble new)
+    ++ diffKeys (storeText old) (storeText new)
+    ++ diffKeys (storeFloatList old) (storeFloatList new)
+    ++ diffKeys (storeIntList old) (storeIntList new)
+    ++ diffKeys (storeIntSet old) (storeIntSet new)
+    ++ diffKeysBy ptrEq (storeDyn old) (storeDyn new)
+
 -- | Dynamic values do not implement Eq, but we can verify equality via
 -- pointer equality fast path followed by checking key structure and
 -- pointer equality of each Dynamic element.
@@ -87,6 +128,10 @@ data WidgetStore = WidgetStore
   , storeFloatList :: !(IntMap [Float])
   , storeIntList :: !(IntMap [Int])
   , storeDyn :: !(IntMap Dynamic)
+  , storeQuiet :: !(IntMap Int)
+  -- ^ Interaction bookkeeping no paint reads, such as whether a drag hook's
+  -- press is still held. Writes to it neither damage nor wake the loop: the
+  -- visible effects of the interaction go through the widget's own slots.
   }
 
 instance Eq WidgetStore where
@@ -102,6 +147,7 @@ instance Eq WidgetStore where
       && eqByPtr (storeFloatList a) (storeFloatList b)
       && eqByPtr (storeIntList a) (storeIntList b)
       && eqDynMap (storeDyn a) (storeDyn b)
+      && eqByPtr (storeQuiet a) (storeQuiet b)
 
 instance Show WidgetStore where
   show st =
@@ -117,6 +163,7 @@ instance Show WidgetStore where
       ++ ", storeFloatList = " ++ show (storeFloatList st)
       ++ ", storeIntList = " ++ show (storeIntList st)
       ++ ", storeDynCount = " ++ show (IM.size (storeDyn st))
+      ++ ", storeQuiet = " ++ show (storeQuiet st)
       ++ " }"
 
 -- | One of the store's maps: how to read it, and how to put a new one back.
@@ -160,6 +207,11 @@ fieldIntList = Field storeIntList (\m st -> st {storeIntList = m})
 -- | Runtime-typed slots. Prefer 'lookupDyn' and 'insertDyn' for typed access.
 fieldDyn :: Field Dynamic
 fieldDyn = Field storeDyn (\m st -> st {storeDyn = m})
+
+-- | Integer bookkeeping slots that no paint reads ('storeQuiet'). The store
+-- diff that drives damage skips them.
+fieldQuiet :: Field Int
+fieldQuiet = Field storeQuiet (\m st -> st {storeQuiet = m})
 
 -- | Read the map selected by a field descriptor.
 {-# INLINE fieldMap #-}
@@ -205,6 +257,16 @@ flagSlot k = intBool . findSlot fieldInt 0 k
 {-# INLINE setFlagSlot #-}
 setFlagSlot :: Int -> Bool -> WidgetStore -> WidgetStore
 setFlagSlot k on = if on then insertSlot fieldInt k 1 else deleteSlot fieldInt k
+
+-- | 'flagSlot' over the bookkeeping slots ('fieldQuiet').
+{-# INLINE quietFlag #-}
+quietFlag :: Int -> WidgetStore -> Bool
+quietFlag k = intBool . findSlot fieldQuiet 0 k
+
+-- | 'setFlagSlot' over the bookkeeping slots ('fieldQuiet').
+{-# INLINE setQuietFlag #-}
+setQuietFlag :: Int -> Bool -> WidgetStore -> WidgetStore
+setQuietFlag k on = if on then insertSlot fieldQuiet k 1 else deleteSlot fieldQuiet k
 
 -- | Slot writes that know whether they would change the store. Combine them
 -- with '<>' and run them with 'NanoUI.Internal.Context.writeSlots', which leaves the
@@ -253,6 +315,7 @@ emptyWidgetStore =
     , storeFloatList = IM.empty
     , storeIntList = IM.empty
     , storeDyn = IM.empty
+    , storeQuiet = IM.empty
     }
 
 -- | Whether local-hook writes changed the generation used to request a view

@@ -32,7 +32,6 @@ module NanoUI.Internal.Context.Core
   , requestDamage
   , damageWidget
   , damageKey
-  , damageParentKey
   , damageRect
   , damagePeers
   , damageFull
@@ -66,7 +65,6 @@ import Control.Monad (forM_, unless, when)
 import Data.Bits (shiftR, (.&.))
 import Data.IORef (modifyIORef', readIORef, writeIORef)
 import Data.Primitive.SmallArray (copySmallMutableArray, newSmallArray, readSmallArray, getSizeofSmallMutableArray, writeSmallArray)
-import Data.IntMap.Strict (IntMap)
 import Data.IntMap.Strict qualified as IM
 import GHC.Clock (getMonotonicTime)
 
@@ -91,12 +89,13 @@ import NanoUI.Internal.Store
   , SlotWrites (..)
   , WidgetStore (..)
   , boolInt
+  , diffKeys
+  , slotChangedKeys
   , fieldInt
   , findSlot
   , insertSlot
   , intBool
   , lookupSlot
-  , ptrEq
   , slotKey
   )
 import NanoUI.Internal.Style (Theme)
@@ -218,15 +217,6 @@ damageKey ctx k bounds
   | k == 0 = pure ()
   | otherwise = requestDamage ctx (ReqKey k bounds)
 
--- | Queue damage for the container the widget a key resolves to sits in, so a
--- state change repaints the sibling parts around it (colour-picker bars and
--- preview swatch). Zero keys are ignored.
-{-# INLINE damageParentKey #-}
-damageParentKey :: Context -> Int -> DamageBounds -> IO ()
-damageParentKey ctx k bounds
-  | k == 0 = pure ()
-  | otherwise = requestDamage ctx (ReqParentKey k bounds)
-
 -- | Queue an explicit logical window rectangle. Empty rectangles are ignored.
 {-# INLINE damageRect #-}
 damageRect :: Context -> Rect -> IO ()
@@ -249,30 +239,27 @@ damageFull ctx = requestDamage ctx ReqFull
 
 -- | Request another view pass and invoke the installed event-loop wake action.
 -- Dirty state schedules work; damage determines which pixels are repainted.
--- An opaque request — not from a store write — also clears the store flag, so
--- the follow-up frame it asks for does not trust per-key store damage it was
--- not asked for.
+-- The request is opaque: its follow-up frame repaints the whole window.
 {-# INLINE markDirty #-}
 markDirty :: Context -> IO ()
 markDirty ctx = do
-  modifyDamage ctx (\ds -> ds {dsDirty = True, dsDirtyStore = False})
+  modifyDamage ctx (\ds -> ds {dsDirty = True, dsDirtyOpaque = True})
   readIORef (ctxWakeLoop ctx) >>= sequence_
 
 -- | 'markDirty' for a request whose visible effects the frame's own damage
 -- machinery already covers: store writes are damaged per key ('modifyStore',
--- 'writeSlot', 'adoptSlot') and interaction role changes damage their hot,
--- active, and focus rects. The follow-up frame these request clips instead of
--- repainting the whole window.
+-- 'writeSlot', 'adoptSlot'). The follow-up frame these request clips instead
+-- of repainting the whole window.
 {-# INLINE markDirtyCovered #-}
 markDirtyCovered :: Context -> IO ()
 markDirtyCovered ctx = do
-  modifyDamage ctx (\ds -> ds {dsDirty = True, dsDirtyStore = True})
+  modifyDamage ctx (\ds -> ds {dsDirty = True})
   readIORef (ctxWakeLoop ctx) >>= sequence_
 
 -- | Clear the follow-up-frame request without clearing queued repaint bounds.
 {-# INLINE clearDirty #-}
 clearDirty :: Context -> IO ()
-clearDirty ctx = modifyDamage ctx (\ds -> ds {dsDirty = False, dsDirtyStore = False})
+clearDirty ctx = modifyDamage ctx (\ds -> ds {dsDirty = False, dsDirtyOpaque = False})
 
 -- | Whether state changes require another view pass.
 {-# INLINE isDirty #-}
@@ -360,15 +347,9 @@ modifyStore ctx f = do
   let !store = f prev
   writeIORef (ctxStore ctx) store
   let changedKeys =
-        diffKeys (storeInt prev) (storeInt store)
+        slotChangedKeys prev store
           ++ diffKeys (storeFloat prev) (storeFloat store)
-          ++ diffKeys (storeDouble prev) (storeDouble store)
           ++ diffKeys (storePoint prev) (storePoint store)
-          ++ diffKeys (storeText prev) (storeText store)
-          ++ diffKeys (storeFloatList prev) (storeFloatList store)
-          ++ diffKeys (storeIntList prev) (storeIntList store)
-          ++ diffKeys (storeIntSet prev) (storeIntSet store)
-          ++ diffKeysBy ptrEq (storeDyn prev) (storeDyn store)
   -- The key diff doubles as the store comparison: checking 'prev /= store'
   -- first would walk every changed map twice. Its lazy concatenation stops at
   -- the first changed key and allocates less than a list per map.
@@ -380,24 +361,6 @@ modifyStore ctx f = do
     $ do
       forM_ changedKeys $ \k -> damageKey ctx k (DamageInflated defaultDamageSlop)
       markDirtyCovered ctx
-
-diffKeysBy :: (a -> a -> Bool) -> IntMap a -> IntMap a -> [Int]
-diffKeysBy eq old new
-  -- Unchanged maps keep their identity through a record update; skip the
-  -- whole merge when the caller only rebuilt a different field.
-  | ptrEq old new = []
-  | otherwise =
-      IM.keys
-        ( IM.mergeWithKey
-            (\_ a b -> if eq a b then Nothing else Just ())
-            (IM.map (const ()))
-            (IM.map (const ()))
-            old
-            new
-        )
-
-diffKeys :: Eq a => IntMap a -> IntMap a -> [Int]
-diffKeys = diffKeysBy (==)
 
 -- | Run slot writes, unless every slot already holds its value: an idle
 -- widget then neither rebuilds the store nor has it diffed.
@@ -608,6 +571,3 @@ widgetTheme ctx wid = do
   if tsCount ts == 0
     then readIORef (ctxTheme ctx)
     else lookupNodeByWidgetId (ctxNodeArena ctx) wid >>= maybe (currentTheme ctx) (nodeTheme ctx)
-
-
-

@@ -15,6 +15,7 @@ module NanoUI.Internal.Context.Drawing
   , drawingOpsStale
   , registerCustomMeasure
   , lookupCustomMeasure
+  , customMeasureHooks
   , registerCustomCursor
   , lookupCustomCursor
   , registerCustomDamageSlop
@@ -28,6 +29,7 @@ import Control.Monad (when)
 import Data.IORef (modifyIORef', readIORef, writeIORef)
 import Data.IntMap.Strict (IntMap)
 import Data.IntMap.Strict qualified as IM
+import Data.IntSet (IntSet)
 import Data.Primitive.SmallArray (SmallArray, mapSmallArray')
 
 import NanoUI.Internal.Context.Animation (isAnimatingKey)
@@ -324,6 +326,10 @@ registerCustomMeasure = registerIn dcsCustomMeasures (\m dc -> dc {dcsCustomMeas
 lookupCustomMeasure :: Context -> WidgetId -> IO (Maybe CustomMeasureFn)
 lookupCustomMeasure = lookupIn dcsCustomMeasures
 
+-- | The widgets with a measurement callback registered this view pass.
+customMeasureHooks :: Context -> IO IntSet
+customMeasureHooks ctx = IM.keysSet . dcsCustomMeasures <$> readIORef (ctxDrawingCache ctx)
+
 -- | Register cursor selection from a custom widget's interaction state.
 {-# INLINE registerCustomCursor #-}
 registerCustomCursor :: Context -> WidgetId -> (CustomDrawContext -> UiCursorKind) -> IO ()
@@ -370,5 +376,3 @@ resetDrawingScopeCache ctx =
       , dcsCustomDamageSlop = IM.empty
       , dcsPointerTracked = IM.empty
       }
-
-

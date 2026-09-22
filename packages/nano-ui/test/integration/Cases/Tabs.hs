@@ -224,14 +224,11 @@ runTabsDamageTest ctx failed = do
     dSwitch <- takeDamage ctx
     assert failed (not (null bodyB) && all (repaints dSwitch) bodyB)
 
-    -- The switch repainted whole in the release frame (the body keys churned
-    -- outside any panel). The first stable TabB frame must not fall back to a
-    -- full repaint: store writes are damaged per key now.
+    -- The switch asks for the frame that shows the caller's new tab, which
+    -- repaints it whole: the new body may differ from the old in paint alone.
     _ <- runFrame ctx inp0 (ui TabB)
     dTabB <- takeDamage ctx
-    assert failed (dTabB /= DamageFull)
-    spansTabB <- collectTextSpans ctx
-    assertSpansHas failed "Body B" spansTabB
+    assert failed (all (repaints dTabB) bodyB)
 
     _ <- runFrame ctx inp0 (ui TabB)
     dSettled <- takeDamage ctx

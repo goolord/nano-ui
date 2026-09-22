@@ -25,7 +25,7 @@ import NanoUI.Internal.Context
   , getFocusables
   , intKey
   , isDisabled
-  , markDirtyCovered
+  , markDirty
   , modifyStore
   , setAnimationValue
   , setTextInputMenu
@@ -104,7 +104,7 @@ finalizeTabFocus ctx inp =
         damageWidget ctx next (DamageInflated defaultDamageSlop)
       writeIORef (ctxFocusId ctx) next
       writeIORef (ctxFocusVisible ctx) True
-      markDirtyCovered ctx
+      markDirty ctx
 
 -- | Whether @wid@ is a menu row or a menu-bar title. Their hover highlight
 -- switches on and off at once, so 'refreshHover' runs no animation for them.
@@ -299,13 +299,13 @@ finalizeTextInputFocus ctx inp =
     mFocused <- findTextInputUnderMouse ctx (inputMousePos inp)
     case mFocused of
       Nothing -> do
-        when (prevFocus /= WidgetId 0) $ markDirtyCovered ctx
+        when (prevFocus /= WidgetId 0) $ markDirty ctx
         collapseTextFieldSelection ctx prevFocus
         writeIORef (ctxFocusId ctx) (WidgetId 0)
         setTextInputMenu ctx Nothing
       Just wid -> do
         writeIORef (ctxFocusId ctx) wid
-        when (prevFocus /= wid) $ markDirtyCovered ctx
+        when (prevFocus /= wid) $ markDirty ctx
 
 -- | On a left press on an enabled select's field, give the select keyboard
 -- focus, whether the press opens or closes it. Runs after
@@ -319,7 +319,7 @@ finalizeSelectFocus ctx inp =
       whenM (not <$> isDisabled ctx wid) $ do
         prev <- readIORef (ctxFocusId ctx)
         writeIORef (ctxFocusId ctx) wid
-        when (prev /= wid) $ markDirtyCovered ctx
+        when (prev /= wid) $ markDirty ctx
 
 -- | The enabled text field or text area under @mouse@, if any.
 findTextInputUnderMouse :: Context -> V2 -> IO (Maybe WidgetId)
@@ -332,6 +332,3 @@ findTextInputUnderMouse ctx mouse = do
       disabled <- isDisabled ctx wid
       pure (if disabled then Nothing else Just wid)
     Nothing -> pure Nothing
-
-
-

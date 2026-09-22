@@ -4,7 +4,6 @@ import Spec
 import Data.IntMap.Strict qualified as IM
 import Data.Text qualified as T
 import NanoUI.Internal.Context (Context (..))
-import NanoUI.Internal.Layout.Arena (arenaCount, getNodeRect)
 
 tests :: [Spec]
 tests =
@@ -267,9 +266,7 @@ runWindowLayoutReuseTest ctx failed = do
       ui = do
         column $ forM_ [1 .. 20 :: Int] $ \i -> void (button (T.pack ("row " <> show i)))
         fmap fst (window True "Tools" (column (label "Body" >> void (button "ok"))))
-      rects = do
-        n <- arenaCount (ctxNodeArena ctx)
-        mapM (getNodeRect (ctxNodeArena ctx)) [0 .. n - 1]
+      rects = arenaRects ctx
       -- The frame as it ran, then the same frame with nothing to reuse.
       sameAsFresh frameInp = do
         (win, _, _, _) <- runFrame ctx frameInp ui

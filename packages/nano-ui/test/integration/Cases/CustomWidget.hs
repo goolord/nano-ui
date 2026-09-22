@@ -7,6 +7,7 @@ import NanoUI.Internal.Context (Context (..))
 tests :: [Spec]
 tests =
   [ spec "custom-widget-measure" runCustomWidgetMeasureTest
+  , spec "custom-widget-measure-parent" runCustomWidgetMeasureParentTest
   , spec "custom-widget-cursor" runCustomWidgetCursorTest
   , spec "custom-widget-interaction" runCustomWidgetInteractionTest
   , spec "custom-widget-queued-click" runCustomWidgetQueuedClickTest
@@ -32,6 +33,34 @@ runCustomWidgetMeasureTest ctx failed = do
   plain <- warmup2 ctx inp (ui Nothing)
   let Rect _ _ pw ph = respRect plain
   assertEq failed (pw, ph) (32, 32)
+  -- Gaining the hook back changes the size too, with the arena unchanged.
+  back <- warmup2 ctx inp (ui (Just $ \_ _ -> (160, 48)))
+  let Rect _ _ bw bh = respRect back
+  assertEq failed (bw, bh) (160, 48)
+
+-- | A custom measure whose result changes with nothing in the arena changed
+-- must resize the containers sized from it, not only the widget.
+runCustomWidgetMeasureParentTest :: Context -> IORef Int -> IO ()
+runCustomWidgetMeasureParentTest ctx failed = do
+  let inp = withInput 400 400
+      -- The inner column takes its width from the widget, and the label
+      -- after it in the row sits where that width ends.
+      ui w = column $ row $ do
+        resp <- column $
+          fst <$> customWidget defaultCustomWidgetSpec
+            { widgetMeasure = Just (\_ _ -> (w, 48))
+            , widgetLayout = defaultLayout
+            }
+        void $ label "after"
+        pure resp
+      rects = arenaRects
+  void $ warmup2 ctx inp (ui 120)
+  resp <- warmup2 ctx inp (ui 240)
+  assertEq failed (rectW (respRect resp)) 240
+  fresh <- newContext
+  void $ warmup2 fresh inp (ui 240)
+  grown <- rects ctx
+  assertEq failed grown =<< rects fresh
 
 -- | Verifies dynamic cursor resolution on custom widgets.
 runCustomWidgetCursorTest :: Context -> IORef Int -> IO ()

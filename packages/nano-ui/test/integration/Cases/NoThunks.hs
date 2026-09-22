@@ -33,6 +33,7 @@ runNoThunksTest ctx failed = do
   checkAll failed "storeFloat" (storeFloat store)
   checkAll failed "storeDouble" (storeDouble store)
   checkAll failed "storePoint" (storePoint store)
+  checkAll failed "storeQuiet" (storeQuiet store)
   where
     checkAll ::
       NoThunks v => IORef Int -> String -> IM.IntMap v -> IO ()
