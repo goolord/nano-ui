@@ -30,6 +30,7 @@ import Data.Foldable (traverse_)
 import Data.List (delete, elemIndex)
 import Foreign.Marshal.Alloc (alloca, allocaBytes)
 import Foreign.Marshal.Array (advancePtr, allocaArray, peekArray)
+import Foreign.Marshal.Utils (with)
 import Data.Char (isPrint, isSpace, ord)
 import NanoUI.Bidi (BidiRun (..), bidiRuns, needsBidi)
 import NanoUI.Sdl.Internal.Font.Inter (fontInterBytes, fontInterLabel)
@@ -60,7 +61,7 @@ import Data.Text.Unsafe (lengthWord8)
 import Foreign.C.String (CString, withCString)
 import Foreign.C.Types (CBool (..), CFloat (..), CInt (..), CSize (..), CUInt (..))
 import Foreign.Ptr (Ptr, castPtr, nullPtr, plusPtr)
-import Foreign.Storable (peek, peekElemOff, poke)
+import Foreign.Storable (peek, peekElemOff)
 import Data.Unique (hashUnique, newUnique)
 import qualified Data.ByteString as BS
 import NanoUI (FontVariant (..))
@@ -262,10 +263,8 @@ lookupOrInsertGlyph ga font gi = do
 -- that could not be placed.
 placeGlyphImage :: GlyphAtlas -> SdlFont -> Int -> IO (Maybe GlyphSlot)
 placeGlyphImage ga font gi = do
-  surf <- alloca $ \sp -> do
-    poke sp nullPtr
-    ok <- ttfRenderGlyphIndexSurface (sfFont font) (fromIntegral gi) sp
-    if ok /= 0 then peek sp else pure nullPtr
+  -- The surface is left null when there is no image.
+  surf <- with nullPtr $ \sp -> ttfRenderGlyphIndexSurface (sfFont font) (fromIntegral gi) sp >> peek sp
   if surf == nullPtr
     then pure Nothing
     else alloca $ \pagePtr -> allocaArray 4 $ \out -> do
@@ -725,15 +724,14 @@ openFontSource source ptsize =
       else open embeddedFontSource `catch` \(_ :: SomeException) -> throwIO e
   where
     pt = realToFrac ptsize
-    open (FontFromPath path) = do
-      font <- withCString path (`ttfOpenFont` pt)
-      when (font == nullPtr) $ fail ("TTF_OpenFont failed for " ++ path)
-      readSdlFont ptsize font
-    open (FontFromMemory bs label) = do
-      -- SDL_ttf reads from its own copy of the bytes, so the font outlives
-      -- the ByteString's pinning.
-      font <- unsafeUseAsCStringLen bs $ \(ptr, len) -> ttfOpenFontMemory (castPtr ptr) (fromIntegral len) pt
-      when (font == nullPtr) $ fail ("TTF_OpenFont failed for in-memory font " ++ label)
+    open src = do
+      font <- case src of
+        FontFromPath path -> withCString path (`ttfOpenFont` pt)
+        -- SDL_ttf reads from its own copy of the bytes, so the font outlives
+        -- the ByteString's pinning.
+        FontFromMemory bs _ ->
+          unsafeUseAsCStringLen bs $ \(ptr, len) -> ttfOpenFontMemory (castPtr ptr) (fromIntegral len) pt
+      when (font == nullPtr) $ fail ("TTF_OpenFont failed for " ++ fontSourceLabel src)
       readSdlFont ptsize font
 
 -- | Wrap an open TTF font.

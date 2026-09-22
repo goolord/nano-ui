@@ -41,16 +41,12 @@ import System.IO.Unsafe (unsafePerformIO)
 -- framebuffer by the display scale rendered 1.56x the window's pixels and
 -- squeezed them back down on every present.
 queryWindowPixelDensity :: Ptr SDL_Window -> IO Float
-queryWindowPixelDensity win = do
-  s <- getWindowPixelDensity win
-  pure (if s > 0 then s else 1)
+queryWindowPixelDensity win = (\s -> if s > 0 then s else 1) <$> getWindowPixelDensity win
 
 -- | Vertical refresh rate of the window's current display mode, in Hz
 -- (0 when unavailable).
 queryWindowRefreshHz :: Ptr SDL_Window -> IO Int
-queryWindowRefreshHz win = do
-  hz <- windowRefreshRateC win
-  pure (max 0 (fromIntegral hz))
+queryWindowRefreshHz win = max 0 . fromIntegral <$> windowRefreshRateC win
 
 -- | Window size in window (logical) coordinates; 0x0 when SDL cannot say.
 -- SDL_GetWindowSize already returns the window-coordinate size, not pixels.
