@@ -449,7 +449,8 @@ runCustomMeasure na fm measureFn idx = do
 -- Returns the size it asks for and the record of the call, forced with the
 -- pair so the cache holds words rather than the closure.
 {-# INLINE customMeasure #-}
-customMeasure :: FontMetrics -> CustomMeasureFn -> AxisSizing -> AxisSizing -> ((Float, Float), CustomMeasureRecord)
+customMeasure ::
+  FontMetrics -> CustomMeasureFn -> AxisSizing -> AxisSizing -> ((Float, Float), CustomMeasureRecord)
 customMeasure fm measureFn wAx hAx =
   let aw = offeredExtent wAx
       ah = offeredExtent hAx
@@ -482,10 +483,10 @@ sizeWithin (AxisSizing tag val lo hi) content = clamp lo hi (if tag == SizingFix
 -- limits, or @fallback@ when its widget has no custom measure.
 {-# INLINE drawingHeightAt #-}
 drawingHeightAt :: SolveEnv -> NodeIdx -> Float -> AxisSizing -> Float -> IO Float
-drawingHeightAt SolveEnv {seArena = na, seMs = Measurers {msFm = fm, msLookupMeasure = lookupMeasure}} idx w hAx fallback = do
+drawingHeightAt SolveEnv {seArena = na, seMs = ms} idx w hAx fallback = do
   wid <- getWidgetId na idx
-  lookupMeasure wid >>= \case
-    Just measure -> pure (clamp (axMin hAx) (axMax hAx) (snd (measure fm (w, offeredExtent hAx))))
+  msLookupMeasure ms wid >>= \case
+    Just measure -> pure (clamp (axMin hAx) (axMax hAx) (snd (measure (msFm ms) (w, offeredExtent hAx))))
     Nothing -> pure fallback
 
 -- | The width a text node that is not a row's child wraps at, from its

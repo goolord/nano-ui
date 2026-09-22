@@ -314,8 +314,9 @@ data DirTag = DirRow | DirColumn
 
 -- | The arena's per-node arrays. The first four are strided: node @idx@ owns
 -- the half-open range @idx * stride@ to @(idx + 1) * stride@, and the columns
--- ('GeomCol', 'StyleCol', 'TagCol', 'TreeCol') name the slots of that row. The other arrays hold one element per node.
--- Growing the arena replaces all of them together.
+-- ('GeomCol', 'StyleCol', 'TagCol', 'TreeCol') name the slots of that row.
+-- The other arrays hold one element per node. Growing the arena replaces all
+-- of them together.
 data NodeArenaArrays = NodeArenaArrays
   { naArrGeom :: !(IOArr Float)
   -- ^ Rects, 8 floats per node. See 'GeomCol'.
