@@ -164,6 +164,7 @@ import Data.Primitive.Array (MutableArray, copyMutableArray, newArray, readArray
 import Data.Primitive.PrimArray
   ( MutablePrimArray
   , copyMutablePrimArray
+  , getSizeofMutablePrimArray
   , newPrimArray
   , readPrimArray
   , setPrimArray
@@ -386,10 +387,8 @@ data NodeArena = NodeArena
   -- the rest of the time.
   , naScratch :: IORef FlexScratch
   -- ^ The solver's buffers for the container it is working on.
-  , naSnapCap :: IORef Int
-  -- ^ Entries that each buffer in 'naSnapLevels' has room for.
-  , naSnapLevels :: IORef (MutableArray RealWorld (Maybe AxisSnapshot))
-  -- ^ One 'AxisSnapshot' per nesting depth of the position pass, 'Nothing'
+  , naSnapLevels :: IORef (MutableArray RealWorld AxisSnapshot)
+  -- ^ One 'AxisSnapshot' per nesting depth of the position pass, empty
   -- until the pass first reaches that depth. Laying out a child overwrites
   -- 'naScratch', so a container copies its child list here, at its own depth,
   -- before it recurses into its children.
@@ -492,10 +491,6 @@ data WidthMemo = WidthMemo
   , wmSlots :: !(IOArr Float)
   -- ^ Per node, @memoStride@ floats: the width, then the two results.
   }
-
--- | Initial nesting-depth capacity. 'ensureSnapLevelsArr' grows it as needed.
-maxSnapDepth :: Int
-maxSnapDepth = 256
 
 -- | A container's copy of its child list, taken at the container's nesting
 -- depth before the position pass recurses into the children and overwrites
@@ -721,19 +716,17 @@ newWidthMemo cap = do
   pure WidthMemo {..}
 
 -- | An empty arena. It starts with room for 256 nodes (@initialCapacity@), 64
--- children of one container in the solver's buffers, and 256 nesting depths
--- (@maxSnapDepth@). All three grow when a view needs more.
+-- children of one container in the solver's buffers, and 256 nesting depths.
+-- All three grow when a view needs more.
 newNodeArena :: IO NodeArena
 newNodeArena = do
   let cap = initialCapacity
-      scratchCap = 64
   naCount <- newIORef 0
   naCapacity <- newIORef cap
   naArrays <- newIORef =<< newNodeArenaArrays cap
   naArraysSnap <- newIORef Nothing
-  naScratch <- newIORef =<< newFlexScratch scratchCap
-  naSnapCap <- newIORef scratchCap
-  naSnapLevels <- newIORef =<< newArray maxSnapDepth Nothing
+  naScratch <- newIORef =<< newFlexScratch 64
+  naSnapLevels <- newIORef =<< newArray 256 =<< newAxisSnapshot 0
   naFrameTag <- newIORef 1
   naWrapMemo <- newIORef =<< newWidthMemo cap
   naFitMemo <- newIORef =<< newWidthMemo cap
@@ -1591,52 +1584,32 @@ setStyleIdx na idx v = do
   unless (nt == NodeBox || nt == NodeImage || nt == NodeDrawing) $
     mixNodeInput na idx 0x5354 (fromIntegral v)
 
--- | Get the snapshot buffers for a recursion depth, grown to hold at least
--- @needed@ entries. Buffers are reused across frames; nothing is allocated in
--- steady state once capacity is warm.
+-- | The snapshot buffers for nesting depth @depth@, with room for at least
+-- @needed@ entries. Each depth keeps its buffers across frames, so nothing is
+-- allocated in steady state once they are big enough, and nesting depth has
+-- no fixed limit.
 {-# NOINLINE ensureAxisSnapshot #-}
 ensureAxisSnapshot :: NodeArena -> Int -> Int -> IO AxisSnapshot
 ensureAxisSnapshot na depth needed = do
-  arr0 <- readIORef (naSnapLevels na)
-  let !d = max 0 depth
-  arr <- ensureSnapLevelsArr na arr0 (d + 1)
-  cap <- readIORef (naSnapCap na)
+  levels0 <- readIORef (naSnapLevels na)
+  let !sz = sizeofMutableArray levels0
+  levels <-
+    if depth < sz
+      then pure levels0
+      else do
+        empty <- newAxisSnapshot 0
+        levels <- growBoxedStoreCopy empty levels0 sz (max (depth + 1) (sz * 2))
+        levels <$ writeIORef (naSnapLevels na) levels
+  s <- readArray levels depth
+  cap <- getSizeofMutablePrimArray (asIdx s)
   if needed <= cap
-    then getLevel arr d cap
+    then pure s
     else do
-      let !newCap = max needed (cap * 2)
-          !levels = sizeofMutableArray arr
-      forM_ [0 .. levels - 1] $ \i ->
-        readArray arr i >>= mapM_ (\(AxisSnapshot idx out) -> do
-          idx' <- growPrimArrayCopy idx cap newCap 0
-          out' <- growPrimArrayCopy out cap newCap 0
-          writeArray arr i (Just (AxisSnapshot idx' out')))
-      writeIORef (naSnapCap na) newCap
-      getLevel arr d newCap
-  where
-    getLevel arr d currentCap = do
-      m <- readArray arr d
-      case m of
-        Just s -> pure s
-        Nothing -> do
-          asIdx <- newPrimArray currentCap
-          asOut <- newPrimArray currentCap
-          let s = AxisSnapshot asIdx asOut
-          writeArray arr d (Just s)
-          pure s
+      s' <- newAxisSnapshot (max needed (max 64 (cap * 2)))
+      s' <$ writeArray levels depth s'
 
--- | Grow the per-depth snapshot-level array to hold at least @need@ levels,
--- so nesting depth has no fixed limit.
-ensureSnapLevelsArr :: NodeArena -> MutableArray RealWorld (Maybe AxisSnapshot) -> Int -> IO (MutableArray RealWorld (Maybe AxisSnapshot))
-ensureSnapLevelsArr na arr need = do
-  let !sz = sizeofMutableArray arr
-  if need <= sz
-    then pure arr
-    else do
-      let !newSz = max need (sz * 2)
-      arr' <- growBoxedStoreCopy Nothing arr sz newSz
-      writeIORef (naSnapLevels na) arr'
-      pure arr'
+newAxisSnapshot :: Int -> IO AxisSnapshot
+newAxisSnapshot cap = AxisSnapshot <$> newPrimArray cap <*> newPrimArray cap
 
 -- | Memoize @compute@ for node @idx@ at width @key@ in one of the arena's
 -- per-frame memos. Widths within 0.25 px share an entry so near-identical
