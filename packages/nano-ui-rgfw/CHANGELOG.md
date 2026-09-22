@@ -11,6 +11,14 @@
 - The Cozette glyph table uses `primitive` arrays.
 - No longer depends on `vector`.
 - `NanoUI.Rgfw.Gl` exports `physClip` and `toPhysRect`.
+- A frame repaints only its damage. Frames draw into a retained offscreen
+  framebuffer, which each present copies to the window, and a frame that is
+  not forced, resized or rescaled paints and uploads only the widgets and
+  glyphs inside its damage. In `nano-ui-rgfw-profile`, a changing counter
+  above a window of text went from 0.49 to 0.19 ms a frame, and from 1160 to
+  378 KB allocated. `renderArenaGl` takes the frame's `Damage` and returns
+  whether it kept the retained pixels, and `writeSpanQuads` clips to a box of
+  physical pixels instead of a framebuffer size.
 
 ### Fixed
 

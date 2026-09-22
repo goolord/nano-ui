@@ -85,6 +85,7 @@ executable nano-ui-rgfw-profile
     ghc-options:      -rtsopts "-with-rtsopts=-A64m -T -I0"
     build-depends:
         base ^>=4.22.0.0,
+        bytestring,
         nano-ui,
         nano-ui-rgfw,
         nano-ui-rgfw-bindings,

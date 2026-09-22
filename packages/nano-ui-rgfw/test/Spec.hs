@@ -323,7 +323,7 @@ testSpanQuads = do
       ah = fromIntegral (gaHeight ga) :: Float
       (ax, ay) = atlasCell ga (fromIntegral (charToGlyphId font 'A'))
       quads txt clip = allocaBytes (64 * 32) $ \buf -> do
-        n <- writeSpanQuads ga font 200 100 buf 0 (Rect 10 5 0 0, txt, red, red, clip)
+        n <- writeSpanQuads ga font (0, 0, 200, 100) buf 0 (Rect 10 5 0 0, txt, red, red, clip)
         vs <- mapM (\i -> mapM (\o -> peekByteOff buf (i * 32 + o)) [0, 4, 24, 28]) [0 .. n - 1]
         pure (n, vs :: [[Float]])
   (n1, v1) <- quads "A B\nC" (Rect 0 0 100 50)

@@ -6,6 +6,9 @@
 -- software blitter bakes at the current scale, so glyph pixels match what the
 -- blitter stamps.
 --
+-- Frames draw into a retained framebuffer and a present copies it to the
+-- window, so a frame whose damage is a clip draws only inside it.
+--
 -- The frame must come from a context built by
 -- 'NanoUI.Rgfw.Internal.Context.newRgfwContext' (external text: the buffer holds no
 -- text quads). Draw order is 'NanoUI.Rgfw.Internal.Context.paintInLayerOrder'.
@@ -14,6 +17,8 @@ module NanoUI.Rgfw.Internal.Gl
   , newGlRenderer
   , freeGlRenderer
   , renderArenaGl
+  , readRetainedPixels
+  , damageBox
   , GlyphAtlas (..)
   , glyphAtlasFor
   , atlasCell
@@ -21,6 +26,7 @@ module NanoUI.Rgfw.Internal.Gl
   , writeSpanQuads
   , toPhysRect
   , physClip
+  , physClipIn
   ) where
 
 import Control.Exception (bracket)
@@ -28,6 +34,9 @@ import Control.Monad (foldM, when)
 import Data.Bits (shiftR, (.&.))
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Int (Int32)
+import qualified Data.ByteString as BS
+import qualified Data.ByteString.Internal as BSI
+import qualified Data.Text as T
 import qualified Data.Text.Foreign as TF
 import Data.Word (Word32, Word8)
 import Foreign.ForeignPtr (withForeignPtr)
@@ -35,10 +44,12 @@ import Foreign.Marshal.Alloc (callocBytes, free, reallocBytes)
 import Foreign.Ptr (Ptr, nullPtr)
 import Foreign.Storable (pokeByteOff)
 import NanoUI (Color (..), Rect (..), roundHalfUp)
+import NanoUI.Backend (Damage (..))
 import NanoUI.Rgfw.Internal.Context (TextSpan, paintInLayerOrder)
 import NanoUI.Rgfw.Internal.Font.Cozette
   ( CozetteFont (..)
   , cozetteGlyphFootprint
+  , cozetteLineHeight
   , foldPenPositions
   , renderGlyphScaledToBuffer
   )
@@ -62,7 +73,13 @@ foreign import ccall unsafe "nano_ui_gl_upload_atlas"
   c_uploadAtlas :: Ptr NanoUiGl -> Ptr Word32 -> Int32 -> Int32 -> IO Int32
 
 foreign import ccall unsafe "nano_ui_gl_begin"
-  c_begin :: Ptr NanoUiGl -> Int32 -> Int32 -> Float -> Float -> Float -> Float -> IO ()
+  c_begin :: Ptr NanoUiGl -> Int32 -> Int32 -> Float -> Float -> Float -> Float -> Int32 -> Int32 -> Int32 -> Int32 -> Int32 -> IO Int32
+
+foreign import ccall unsafe "nano_ui_gl_present"
+  c_present :: Ptr NanoUiGl -> IO ()
+
+foreign import ccall unsafe "nano_ui_gl_read_retained"
+  c_readRetained :: Ptr NanoUiGl -> Ptr Word8 -> IO ()
 
 foreign import ccall unsafe "nano_ui_gl_upload_geometry"
   c_uploadGeometry :: Ptr NanoUiGl -> Ptr Word8 -> Int32 -> Ptr Word8 -> Int32 -> IO ()
@@ -100,8 +117,14 @@ freeGlRenderer r = do
   (p, _) <- readIORef (glText r)
   free p
 
--- | Draw a frame into the current context's default framebuffer. The caller
--- swaps buffers.
+-- | Draw a frame into the retained framebuffer and copy it to the current
+-- context's default framebuffer. The caller swaps buffers.
+--
+-- A 'DamageClip' frame redraws only its damage and keeps the other pixels
+-- from the frames before, so its 'DrawData' may leave out what lies outside.
+-- When the window's size has changed there are no such pixels: the frame is
+-- drawn over a blank window and 'renderArenaGl' returns 'False', and the
+-- caller should draw the next frame in full. It returns 'True' otherwise.
 renderArenaGl ::
   GlRenderer ->
   CozetteFont ->
@@ -109,18 +132,27 @@ renderArenaGl ::
   Int -> -- framebuffer width (physical pixels)
   Int -> -- framebuffer height
   Color -> -- clear colour
+  Damage -> -- what to redraw, in logical pixels
   DrawData ->
   [TextSpan] -> -- base spans
   [TextSpan] -> -- overlay spans
-  IO ()
-renderArenaGl r font !scale !fbW !fbH bg drawData baseSpans overlaySpans = do
-  atlas <- ensureAtlas r font scale
-  buf <- ensureTextCapacity r ((spanChars baseSpans + spanChars overlaySpans) * 6)
-  nBase <- foldM (writeSpanQuads atlas font fbW fbH buf) 0 baseSpans
-  nAll <- foldM (writeSpanQuads atlas font fbW fbH buf) nBase overlaySpans
+  IO Bool
+renderArenaGl r font !scale !fbW !fbH bg damage drawData baseSpans overlaySpans = do
   let !h = glHandle r
       (!bgR, !bgG, !bgB, _) = colorFloats bg
-  c_begin h (fromIntegral fbW) (fromIntegral fbH) scale bgR bgG bgB
+      (!full, box@(!bx0, !by0, !bx1, !by1)) = case damage of
+        DamageFull -> (1, (0, 0, fbW, fbH))
+        DamageClip rect -> (0, damageBox scale fbW fbH rect)
+  began <-
+    c_begin h (fromIntegral fbW) (fromIntegral fbH) scale bgR bgG bgB full
+      (fromIntegral bx0) (fromIntegral by0) (fromIntegral bx1) (fromIntegral by1)
+  when (began == 0) $ fail "nano-ui-rgfw: retained framebuffer setup failed"
+  let !kept = began == 1
+      !textBox = if kept then box else (0, 0, fbW, fbH)
+  atlas <- ensureAtlas r font scale
+  buf <- ensureTextCapacity r ((spanChars baseSpans + spanChars overlaySpans) * 6)
+  nBase <- foldM (writeSpanQuads atlas font textBox buf) 0 baseSpans
+  nAll <- foldM (writeSpanQuads atlas font textBox buf) nBase overlaySpans
   withForeignPtr (drawVertices drawData) $ \vp ->
     withForeignPtr (drawIndices drawData) $ \ip ->
       c_uploadGeometry h vp (fromIntegral (drawVertexCount drawData)) ip (fromIntegral (drawIndexCount drawData))
@@ -129,6 +161,25 @@ renderArenaGl r font !scale !fbW !fbH bg drawData baseSpans overlaySpans = do
     (\layer -> forDrawCmdsInLayer_ layer drawData (drawCmd h scale fbW fbH))
     (c_drawText h 0 (fromIntegral nBase))
     (c_drawText h (fromIntegral nBase) (fromIntegral (nAll - nBase)))
+  c_present h
+  pure kept
+
+-- | The retained frame's pixels, for checking what frames drew: RGBA rows,
+-- bottom row first, of a w x h frame, which must be the last frame's size.
+readRetainedPixels :: GlRenderer -> Int -> Int -> IO BS.ByteString
+readRetainedPixels r w h =
+  BSI.create (w * h * 4) (c_readRetained (glHandle r))
+
+-- | The physical pixels a damage clip repaints, as @(x0, y0, x1, y1)@ within a
+-- w x h framebuffer. The core paints a clip frame's backdrop one logical pixel
+-- past the damage, and the box takes every pixel that reaches.
+damageBox :: Float -> Int -> Int -> Rect -> (Int, Int, Int, Int)
+damageBox !scale !w !h (Rect x y rw rh) =
+  ( max 0 (floor ((x - 1) * scale))
+  , max 0 (floor ((y - 1) * scale))
+  , min w (ceiling ((x + rw + 1) * scale))
+  , min h (ceiling ((y + rh + 1) * scale))
+  )
 
 drawCmd :: Ptr NanoUiGl -> Float -> Int -> Int -> DrawCmd -> IO ()
 drawCmd h !scale !fbW !fbH cmd
@@ -155,12 +206,17 @@ toPhysRect !scale !rx !ry !rw !rh =
 -- w x h target, as @(x0, y0, x1, y1)@ with exclusive ends; 'Nothing' if empty.
 {-# INLINE physClip #-}
 physClip :: Float -> Int -> Int -> Rect -> Maybe (Int, Int, Int, Int)
-physClip !scale !w !h (Rect x y rw rh) =
+physClip !scale !w !h = physClipIn scale (0, 0, w, h)
+
+-- | 'physClip' intersected with a box of physical pixels instead of a target.
+{-# INLINE physClipIn #-}
+physClipIn :: Float -> (Int, Int, Int, Int) -> Rect -> Maybe (Int, Int, Int, Int)
+physClipIn !scale (!bx0, !by0, !bx1, !by1) (Rect x y rw rh) =
   let (!px, !py, !pw, !ph) = toPhysRect scale x y rw rh
-      !x0 = max 0 px
-      !y0 = max 0 py
-      !x1 = min w (px + pw)
-      !y1 = min h (py + ph)
+      !x0 = max bx0 px
+      !y0 = max by0 py
+      !x1 = min bx1 (px + pw)
+      !y1 = min by1 (py + ph)
    in if x0 >= x1 || y0 >= y1 then Nothing else Just (x0, y0, x1, y1)
 
 -- | Cell grid of one glyph bake. Every glyph owns a 'gaCellW' x 'gaCellH'
@@ -236,13 +292,20 @@ spanChars = foldl' (\acc (_, t, _, _, _) -> acc + TF.lengthWord8 t) 0
 -- | Append a span's glyph quads to a vertex buffer, 6 vertices per glyph in
 -- the core's vertex layout: physical-pixel position, span colour, atlas UV.
 -- Pen positions are 'foldPenPositions' at the atlas scale. Quads are clipped
--- to the span clip and the framebuffer with UVs cut to match, so text draws
--- need no scissor. The buffer must have room for 6 vertices per character;
--- returns the new vertex count.
-writeSpanQuads :: GlyphAtlas -> CozetteFont -> Int -> Int -> Ptr Word8 -> Int -> TextSpan -> IO Int
-writeSpanQuads ga font !fbW !fbH buf !n0 (Rect rx ry _ _, txt, fg, _, clip) =
-  case physClip scale fbW fbH clip of
+-- to the span clip and a box of physical pixels, @(x0, y0, x1, y1)@, with UVs
+-- cut to match, so text draws need no scissor. A span whose glyphs all lie
+-- outside is skipped without visiting them. The buffer must have room for 6
+-- vertices per character; returns the new vertex count.
+writeSpanQuads :: GlyphAtlas -> CozetteFont -> (Int, Int, Int, Int) -> Ptr Word8 -> Int -> TextSpan -> IO Int
+writeSpanQuads ga font box buf !n0 (Rect rx ry _ _, txt, fg, _, clip) =
+  case physClipIn scale box clip of
     Nothing -> pure n0
+    Just (_, cy0, cx1, cy1)
+      -- No pen lies left of or above the span origin, and each line's pen
+      -- lies at most 'lineStep' (plus a pixel of rounding) below the last.
+      -- Counting lines is left for spans that begin above the box.
+      | penX0 >= cx1 || penY0 >= cy1 -> pure n0
+      | penY0 + gaCellH ga <= cy0 && penY0 + newlines * lineStep + gaCellH ga + 1 <= cy0 -> pure n0
     Just (cx0, cy0, cx1, cy1) ->
       let quad !n !penX !penY !glyph =
             let !gid = if fromIntegral glyph < cfNumGlyphs font then fromIntegral glyph else 0
@@ -266,6 +329,10 @@ writeSpanQuads ga font !fbW !fbH buf !n0 (Rect rx ry _ _, txt, fg, _, clip) =
        in foldPenPositions font scale rx ry n0 quad txt
   where
     !scale = gaScale ga
+    !penX0 = roundHalfUp (rx * scale)
+    !penY0 = roundHalfUp (ry * scale)
+    newlines = T.count "\n" txt
+    !lineStep = ceiling (cozetteLineHeight * scale) :: Int
     !aw = fromIntegral (gaWidth ga) :: Float
     !ah = fromIntegral (gaHeight ga) :: Float
     (!fr, !fgG, !fb, !fa) = colorFloats fg

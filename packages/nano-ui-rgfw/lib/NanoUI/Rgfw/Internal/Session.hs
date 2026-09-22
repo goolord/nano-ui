@@ -32,7 +32,8 @@ import NanoUI
   , v2Add
   )
 import NanoUI.Backend
-  ( Input (..)
+  ( Damage (..)
+  , Input (..)
   , Key (..)
   , Modifiers (..)
   , MouseButton (..)
@@ -209,6 +210,10 @@ runRgfwAppReduceCustom opts getThemeAndScale updateModel initialModel view = inB
       -- model's theme skips rebuilding the squared theme on every frame.
       themeRef <- newIORef initTheme
       cursorRef <- newIORef UiCursorDefault
+      -- Physical size and scale of the last presented frame. The retained
+      -- framebuffer holds that frame, so a frame at another size or scale
+      -- has nothing to keep and paints in full.
+      presentedRef <- newIORef (0, 0, 0)
 
       ctx0 <- newRgfwContext initTheme
       let ctx = withClipboard ctx0 R.readClipboardText R.writeClipboardText
@@ -237,9 +242,15 @@ runRgfwAppReduceCustom opts getThemeAndScale updateModel initialModel view = inB
         -- A frame whose damage is empty would swap in the picture already on
         -- screen, so it skips the render and the swap: an animation scrolled
         -- out of view costs its UI pass and nothing on the GPU. The opening
-        -- frame and an animation's settle frame are forced.
+        -- frame and an animation's settle frame are forced. Other frames
+        -- paint only their damage over the retained last frame.
         let drawOne force c curInp = do
               tUiStart <- getMonotonicTime
+              curScale <- readIORef scaleRef
+              (pw, ph) <- readIORef winSizeRef
+              presented <- readIORef presentedRef
+              let !paintFull = force || presented /= (pw, ph, curScale) || inputWindowRedraw curInp
+              writeIORef (ctxPaintFull c) paintFull
               curModel <- readIORef modelRef
               let (frameTheme, _) = getThemeAndScale curModel
               appliedTheme <- readIORef themeRef
@@ -252,15 +263,20 @@ runRgfwAppReduceCustom opts getThemeAndScale updateModel initialModel view = inB
               tUiEnd <- getMonotonicTime
               let !uiMs = (tUiEnd - tUiStart) * 1000.0
               damage <- takeDamage c
-              if damageIsEmpty damage && not force
-                then noteDebugSkip (rdsSampler debugSampler)
+              if damageIsEmpty damage && not paintFull
+                then do
+                  noteDebugSkip (rdsSampler debugSampler)
+                  pure (dirtyAfterUi, curInp)
                 else do
                   tRenderStart <- getMonotonicTime
                   curMonScale <- readIORef monScaleRef
-                  curScale <- readIORef scaleRef
-                  (pw, ph) <- readIORef winSizeRef
                   (baseSpans, overlaySpans) <- collectRasterSpans c curInp
-                  renderArenaGl renderer font curScale pw ph (themeWindow frameTheme) drawData baseSpans overlaySpans
+                  kept <-
+                    renderArenaGl renderer font curScale pw ph (themeWindow frameTheme)
+                      (if paintFull then DamageFull else damage) drawData baseSpans overlaySpans
+                  -- A framebuffer the renderer had to replace held nothing to
+                  -- keep: forget the size, and the frame asked for next is full.
+                  writeIORef presentedRef (if kept then (pw, ph, curScale) else (0, 0, 0))
                   tRenderEnd <- getMonotonicTime
                   let !renderMs = (tRenderEnd - tRenderStart) * 1000.0
 
@@ -281,9 +297,9 @@ runRgfwAppReduceCustom opts getThemeAndScale updateModel initialModel view = inB
                       , fsScale = curScale
                       , fsMonScale = curMonScale
                       }
-              -- A reduced message that switched themes changed the model, so
-              -- the core marks the frame dirty and the next one applies it.
-              pure (dirtyAfterUi, curInp)
+                  -- A reduced message that switched themes changed the model, so
+                  -- the core marks the frame dirty and the next one applies it.
+                  pure (dirtyAfterUi || not kept, curInp)
 
         let drv =
               SessionDriver

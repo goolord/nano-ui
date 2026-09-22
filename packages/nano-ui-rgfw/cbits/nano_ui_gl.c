@@ -3,7 +3,11 @@
  * Geometry is the core's shared draw buffer uploaded as-is (32-byte vertices:
  * position, RGBA, UV; 32-bit indices) and drawn per command under a scissor.
  * Text is pre-clipped glyph quads in physical pixels, sampled from an R8
- * coverage atlas. GL entry points are resolved through RGFW's loader, so this
+ * coverage atlas.
+ *
+ * Frames draw into a retained offscreen framebuffer, which keeps the pixels
+ * outside a frame's damage, and every present copies it to the window: the
+ * window's back buffer is undefined after a swap, the retained one is not. GL entry points are resolved through RGFW's loader, so this
  * file needs no GL headers and adds no link dependencies. */
 
 #include <stdint.h>
@@ -39,6 +43,7 @@ typedef intptr_t GLsizeiptr;
 #define GL_BLEND 0x0BE2
 #define GL_SCISSOR_TEST 0x0C11
 #define GL_UNPACK_ALIGNMENT 0x0CF5
+#define GL_PACK_ALIGNMENT 0x0D05
 #define GL_TEXTURE_2D 0x0DE1
 #define GL_UNSIGNED_BYTE 0x1401
 #define GL_UNSIGNED_INT 0x1405
@@ -53,6 +58,13 @@ typedef intptr_t GLsizeiptr;
 #define GL_COLOR_BUFFER_BIT 0x4000
 #define GL_CLAMP_TO_EDGE 0x812F
 #define GL_R8 0x8229
+#define GL_RGBA 0x1908
+#define GL_RGBA8 0x8058
+#define GL_READ_FRAMEBUFFER 0x8CA8
+#define GL_DRAW_FRAMEBUFFER 0x8CA9
+#define GL_FRAMEBUFFER_COMPLETE 0x8CD5
+#define GL_COLOR_ATTACHMENT0 0x8CE0
+#define GL_FRAMEBUFFER 0x8D40
 #define GL_TEXTURE0 0x84C0
 #define GL_ARRAY_BUFFER 0x8892
 #define GL_ELEMENT_ARRAY_BUFFER 0x8893
@@ -107,7 +119,13 @@ typedef intptr_t GLsizeiptr;
   X(void, ActiveTexture, (GLenum))                                                                  \
   X(void, TexParameteri, (GLenum, GLenum, GLint))                                                   \
   X(void, TexImage2D, (GLenum, GLint, GLint, GLsizei, GLsizei, GLint, GLenum, GLenum, const void*)) \
-  X(void, DeleteTextures, (GLsizei, const GLuint*))
+  X(void, DeleteTextures, (GLsizei, const GLuint*))                                                  X(void, ReadPixels, (GLint, GLint, GLsizei, GLsizei, GLenum, GLenum, void*))                      \
+  X(void, GenFramebuffers, (GLsizei, GLuint*))                                                      \
+  X(void, BindFramebuffer, (GLenum, GLuint))                                                        \
+  X(void, FramebufferTexture2D, (GLenum, GLenum, GLenum, GLuint, GLint))                            \
+  X(GLenum, CheckFramebufferStatus, (GLenum))                                                       \
+  X(void, DeleteFramebuffers, (GLsizei, const GLuint*))                                             \
+  X(void, BlitFramebuffer, (GLint, GLint, GLint, GLint, GLint, GLint, GLint, GLint, GLbitfield, GLenum))
 
 typedef struct ngl_api {
 #define X(ret, name, args) ret(NGL_API* name) args;
@@ -127,7 +145,10 @@ typedef struct nano_ui_gl {
   GLuint geomVao, geomVbo, geomEbo;
   GLuint textVao, textVbo;
   GLuint atlas;
+  GLuint retainFbo, retainTex;
+  int32_t retainCapW, retainCapH; /* texture size, the window rounded up */
   int32_t fbW, fbH;
+  int32_t dx0, dy0, dx1, dy1; /* this frame's damage, top-left physical pixels */
   float scale; /* logical -> physical, for geometry vertices */
   int mode;
 } nano_ui_gl;
@@ -290,6 +311,8 @@ nano_ui_gl* nano_ui_gl_create(void) {
 void nano_ui_gl_destroy(nano_ui_gl* r) {
   if (r == NULL) return;
   ngl_api* gl = &r->gl;
+  if (r->retainFbo) gl->DeleteFramebuffers(1, &r->retainFbo);
+  if (r->retainTex) gl->DeleteTextures(1, &r->retainTex);
   if (r->atlas) gl->DeleteTextures(1, &r->atlas);
   if (r->textVbo) gl->DeleteBuffers(1, &r->textVbo);
   if (r->textVao) gl->DeleteVertexArrays(1, &r->textVao);
@@ -316,20 +339,79 @@ int32_t nano_ui_gl_upload_atlas(nano_ui_gl* r, const uint32_t* pixels, int32_t w
   return 1;
 }
 
-/* Start a frame: viewport, clear to the background, fixed pipeline state, and
- * the logical -> physical scale for this frame's geometry. */
-void nano_ui_gl_begin(nano_ui_gl* r, int32_t fbW, int32_t fbH, float scale, float red, float green,
-                      float blue) {
+/* Pixels the retained texture is rounded up to, in each dimension. */
+enum { NGL_RETAIN_BLOCK = 256 };
+
+static int32_t ngl_round_up(int32_t n) {
+  return (n + NGL_RETAIN_BLOCK - 1) / NGL_RETAIN_BLOCK * NGL_RETAIN_BLOCK;
+}
+
+/* Make the retained framebuffer hold at least w x h pixels. A texture well
+ * past the window is given back, but not for a shrink of a block or so, which
+ * a drag back out would undo. Returns 1 if the texture was replaced, which
+ * discards its pixels, 0 if it was kept, and -1 on failure. */
+static int ngl_ensure_retain(nano_ui_gl* r, int32_t w, int32_t h) {
+  ngl_api* gl = &r->gl;
+  int fits = r->retainFbo && w <= r->retainCapW && h <= r->retainCapH;
+  int roomy = r->retainCapW - w > 2 * NGL_RETAIN_BLOCK || r->retainCapH - h > 2 * NGL_RETAIN_BLOCK;
+  if (fits && !roomy) return 0;
+  if (!r->retainFbo) {
+    gl->GenFramebuffers(1, &r->retainFbo);
+    gl->GenTextures(1, &r->retainTex);
+  }
+  r->retainCapW = ngl_round_up(w);
+  r->retainCapH = ngl_round_up(h);
+  gl->BindTexture(GL_TEXTURE_2D, r->retainTex);
+  gl->TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+  gl->TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+  gl->TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, r->retainCapW, r->retainCapH, 0, GL_RGBA,
+                 GL_UNSIGNED_BYTE, NULL);
+  gl->BindFramebuffer(GL_FRAMEBUFFER, r->retainFbo);
+  gl->FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, r->retainTex, 0);
+  if (gl->CheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+    fprintf(stderr, "nano-ui-rgfw: retained framebuffer is incomplete\n");
+    gl->BindFramebuffer(GL_FRAMEBUFFER, 0);
+    r->retainCapW = 0;
+    r->retainCapH = 0;
+    return -1;
+  }
+  return 1;
+}
+
+/* Start a frame on the retained framebuffer: viewport, fixed pipeline state,
+ * and the logical -> physical scale for this frame's geometry. A full frame
+ * clears everything; otherwise only the damage box (x0, y0, x1, y1 in
+ * top-left physical pixels) is cleared and drawn, and the pixels outside it
+ * are last frame's. A replaced framebuffer holds no last frame, so the frame
+ * is cleared in full, and returns 2: the caller must draw it again in full.
+ * Returns 0 if the retained framebuffer cannot be made, and 1 otherwise. */
+int32_t nano_ui_gl_begin(nano_ui_gl* r, int32_t fbW, int32_t fbH, float scale, float red,
+                         float green, float blue, int32_t full, int32_t x0, int32_t y0, int32_t x1,
+                         int32_t y1) {
   ngl_api* gl = &r->gl;
   r->fbW = fbW > 0 ? fbW : 1;
   r->fbH = fbH > 0 ? fbH : 1;
   r->scale = scale;
   r->mode = NGL_MODE_NONE;
+  int replaced = ngl_ensure_retain(r, r->fbW, r->fbH);
+  if (replaced < 0) return 0;
+  if (full || replaced) {
+    x0 = 0;
+    y0 = 0;
+    x1 = r->fbW;
+    y1 = r->fbH;
+  }
+  r->dx0 = x0 > 0 ? x0 : 0;
+  r->dy0 = y0 > 0 ? y0 : 0;
+  r->dx1 = x1 < r->fbW ? x1 : r->fbW;
+  r->dy1 = y1 < r->fbH ? y1 : r->fbH;
+  gl->BindFramebuffer(GL_FRAMEBUFFER, r->retainFbo);
   gl->Viewport(0, 0, r->fbW, r->fbH);
-  gl->Disable(GL_SCISSOR_TEST);
   gl->Disable(GL_DEPTH_TEST);
   gl->Disable(GL_CULL_FACE);
   gl->Disable(GL_FRAMEBUFFER_SRGB);
+  gl->Enable(GL_SCISSOR_TEST);
+  gl->Scissor(r->dx0, r->fbH - r->dy1, r->dx1 - r->dx0, r->dy1 - r->dy0);
   gl->ClearColor(red, green, blue, 1.0f);
   gl->Clear(GL_COLOR_BUFFER_BIT);
   gl->Enable(GL_BLEND);
@@ -338,6 +420,28 @@ void nano_ui_gl_begin(nano_ui_gl* r, int32_t fbW, int32_t fbH, float scale, floa
   gl->Uniform2f(r->uViewport, (GLfloat)r->fbW, (GLfloat)r->fbH);
   gl->ActiveTexture(GL_TEXTURE0);
   gl->BindTexture(GL_TEXTURE_2D, r->atlas);
+  return replaced && !full ? 2 : 1;
+}
+
+/* Read the retained frame as RGBA rows, bottom row first, into out, which
+ * holds fbW * fbH * 4 bytes of the last frame's size. */
+void nano_ui_gl_read_retained(nano_ui_gl* r, uint8_t* out) {
+  ngl_api* gl = &r->gl;
+  gl->BindFramebuffer(GL_READ_FRAMEBUFFER, r->retainFbo);
+  gl->PixelStorei(GL_PACK_ALIGNMENT, 1);
+  gl->ReadPixels(0, 0, r->fbW, r->fbH, GL_RGBA, GL_UNSIGNED_BYTE, out);
+  gl->BindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
+/* Copy the retained frame to the window's back buffer. The caller swaps. */
+void nano_ui_gl_present(nano_ui_gl* r) {
+  ngl_api* gl = &r->gl;
+  gl->Disable(GL_SCISSOR_TEST);
+  gl->BindFramebuffer(GL_READ_FRAMEBUFFER, r->retainFbo);
+  gl->BindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+  gl->BlitFramebuffer(0, 0, r->fbW, r->fbH, 0, 0, r->fbW, r->fbH, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+  gl->BindFramebuffer(GL_FRAMEBUFFER, 0);
+  r->mode = NGL_MODE_NONE;
 }
 
 void nano_ui_gl_upload_geometry(nano_ui_gl* r, const void* vertices, int32_t vertexCount,
@@ -362,16 +466,20 @@ void nano_ui_gl_upload_text(nano_ui_gl* r, const void* vertices, int32_t vertexC
 }
 
 /* Draw one command's index range. The clip is in top-left physical pixels,
- * already intersected with the framebuffer; vertices are logical and scaled
- * in the vertex shader by the frame's scale. */
+ * already intersected with the framebuffer, and is cut to the frame's damage;
+ * vertices are logical and scaled in the vertex shader by the frame's scale. */
 void nano_ui_gl_draw_geometry(nano_ui_gl* r, int32_t x0, int32_t y0, int32_t x1, int32_t y1,
                               uint32_t firstIndex, uint32_t indexCount) {
   ngl_api* gl = &r->gl;
+  if (x0 < r->dx0) x0 = r->dx0;
+  if (y0 < r->dy0) y0 = r->dy0;
+  if (x1 > r->dx1) x1 = r->dx1;
+  if (y1 > r->dy1) y1 = r->dy1;
+  if (x0 >= x1 || y0 >= y1) return;
   if (r->mode != NGL_MODE_GEOMETRY) {
     gl->BindVertexArray(r->geomVao);
     gl->Uniform1f(r->uTextured, 0.0f);
     gl->Uniform1f(r->uScale, r->scale);
-    gl->Enable(GL_SCISSOR_TEST);
     r->mode = NGL_MODE_GEOMETRY;
   }
   gl->Scissor(x0, r->fbH - y1, x1 - x0, y1 - y0);
@@ -379,7 +487,8 @@ void nano_ui_gl_draw_geometry(nano_ui_gl* r, int32_t x0, int32_t y0, int32_t x1,
                    (const void*)((uintptr_t)firstIndex * NGL_INDEX_BYTES));
 }
 
-/* Draw a range of the uploaded glyph vertices (physical pixels, pre-clipped). */
+/* Draw a range of the uploaded glyph vertices (physical pixels, pre-clipped
+ * to the frame's damage). */
 void nano_ui_gl_draw_text(nano_ui_gl* r, int32_t firstVertex, int32_t vertexCount) {
   ngl_api* gl = &r->gl;
   if (vertexCount <= 0) return;
@@ -387,7 +496,7 @@ void nano_ui_gl_draw_text(nano_ui_gl* r, int32_t firstVertex, int32_t vertexCoun
     gl->BindVertexArray(r->textVao);
     gl->Uniform1f(r->uTextured, 1.0f);
     gl->Uniform1f(r->uScale, 1.0f);
-    gl->Disable(GL_SCISSOR_TEST);
+    gl->Scissor(r->dx0, r->fbH - r->dy1, r->dx1 - r->dx0, r->dy1 - r->dy0);
     r->mode = NGL_MODE_TEXT;
   }
   gl->DrawArrays(GL_TRIANGLES, firstVertex, vertexCount);
