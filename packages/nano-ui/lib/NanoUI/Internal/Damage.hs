@@ -485,7 +485,14 @@ clipDamage ctx snap d owners = do
         | wid == fsFocus snap = fsFocusRect snap
         | otherwise = Nothing
   acc <- newIORef []
-  resolveDamageRequests ctx acc oldRects newRects (fdRequests d)
+  let resolveKey = resolveKeyDamage ctx acc oldRects newRects
+      resolveSlop k = resolveKey k (DamageInflated defaultDamageSlop)
+  forM_ (fdRequests d) $ \case
+    ReqFull -> pure ()
+    ReqRect r -> addRect acc r
+    ReqWidget wid bounds -> resolveKey (intKey wid) bounds
+    ReqKey k bounds -> resolveKey k bounds
+    ReqPeers wids bounds -> forM_ wids $ \wid -> resolveKey (intKey wid) bounds
   -- Backdrop expansion covers interaction slop (hover/press halos) and
   -- explicit damage requests. Animation keys must not expand to their panel
   -- backdrop: an animated widget inside a large panel would damage the whole
@@ -523,10 +530,12 @@ clipDamage ctx snap d owners = do
     _ -> pure ()
   when (fdScrollChanged d || fdPointsChanged d) $
     scrollOffsetDamage ctx acc (fsStore snap) (fdStore d)
-  storeKeyDamage ctx acc oldRects newRects owners
-  let addAnim k =
-        unless (k == 0) $
-          resolveKeyDamage ctx acc oldRects newRects k (DamageInflated defaultDamageSlop)
+  -- The changed store keys that are not widget keys, through the widgets
+  -- owning them ('storeKeyOwners'): each owner once, as a 'ReqWidget' with the
+  -- standard slop would.
+  forM_ (IS.toList (IS.fromList (IM.elems owners))) $ \idx ->
+    resolveSlop . intKey =<< getWidgetId (ctxNodeArena ctx) idx
+  let addAnim k = unless (k == 0) $ resolveSlop k
   IS.foldr (\k rest -> addAnim k >> rest) (pure ()) (fsAnimKeys snap)
   IM.foldrWithKey
     (\k _ rest -> unless (IS.member k (fsAnimKeys snap)) (addAnim k) >> rest)
@@ -617,23 +626,6 @@ damagePieces rects =
               (pair, rest) = partition (\(k, _) -> k == i || k == j) indexed
            in shrink (settle (foldr1 rectUnion (map snd pair) : map snd rest))
 
-resolveDamageRequests ::
-  Context ->
-  RectUnion ->
-  IM.IntMap Rect ->
-  IM.IntMap Rect ->
-  [DamageRequest] ->
-  IO ()
-resolveDamageRequests ctx acc oldRects newRects reqs =
-  forM_ reqs $ \case
-    ReqFull -> pure ()
-    ReqRect r -> addRect acc r
-    ReqWidget wid bounds -> resolveKey (intKey wid) bounds
-    ReqKey k bounds -> resolveKey k bounds
-    ReqPeers wids bounds -> forM_ wids $ \wid -> resolveKey (intKey wid) bounds
-  where
-    resolveKey = resolveKeyDamage ctx acc oldRects newRects
-
 -- | Damage key @k@'s old and new rects, resolved through @bounds@ and clipped
 -- to the key's viewport ('keyViewportClip').
 resolveKeyDamage :: Context -> RectUnion -> IM.IntMap Rect -> IM.IntMap Rect -> Int -> DamageBounds -> IO ()
@@ -702,7 +694,9 @@ rectDeltas ctx panelRects old new
 -- | The scroll-viewport clip of a keyed node. Look it up once per key and
 -- clip each of its rects with 'clipToViewport'.
 keyViewportClip :: Context -> Int -> IO (Maybe Rect)
-keyViewportClip ctx k = lookupNodeByKey (ctxNodeArena ctx) k >>= maybe (pure Nothing) (getClipRect (ctxNodeArena ctx))
+keyViewportClip ctx k = lookupNodeByKey na k >>= maybe (pure Nothing) (getClipRect na)
+  where
+    na = ctxNodeArena ctx
 
 clipToViewport :: Maybe Rect -> Rect -> Rect
 clipToViewport clip r = maybe r (fromMaybe (Rect 0 0 0 0) . rectIntersect r) clip
@@ -733,7 +727,7 @@ scrollOffsetDamage ctx acc oldStore newStore =
             -- scrollbar lane: offset changes move the thumb, which paints
             -- outside the content clip.
             getNonzeroRect na idx >>= mapM_ (addRect acc)
-            floatingAncestorRect ctx idx >>= mapM_ (addRect acc)
+            walkFloatingAncestors na idx (\i _ -> getNonzeroRect na i) >>= mapM_ (addRect acc)
           rest
       )
       (pure ())
@@ -768,10 +762,6 @@ scrollOffsetDamage ctx acc oldStore newStore =
               IM.insert (slotKey SlotScrollCross widKey) one $
                 IM.insert (slotKey SlotTextAreaScroll widKey) one $
                   IM.insertWith (++) (slotKey SlotScrollRange widKey) one m
-
-floatingAncestorRect :: Context -> Int -> IO (Maybe Rect)
-floatingAncestorRect ctx idx =
-  walkFloatingAncestors (ctxNodeArena ctx) idx (\i _ -> getNonzeroRect (ctxNodeArena ctx) i)
 
 -- | The store keys (outside the scroll offsets) whose value changed and that
 -- are not themselves widget keys, with the node each owns through a sub-slot
@@ -842,12 +832,3 @@ ownerSlots =
   , SlotMenuOpen
   , SlotColorBase
   ]
-
--- | Damage for the changed store keys that are not widget keys, through the
--- widgets owning them ('storeKeyOwners'): each owner once, as a 'ReqWidget'
--- with the standard slop would.
-storeKeyDamage :: Context -> RectUnion -> IM.IntMap Rect -> IM.IntMap Rect -> IM.IntMap NodeIdx -> IO ()
-storeKeyDamage ctx acc oldRects newRects owners =
-  forM_ (IS.toList (IS.fromList (IM.elems owners))) $ \idx -> do
-    wid <- getWidgetId (ctxNodeArena ctx) idx
-    resolveKeyDamage ctx acc oldRects newRects (intKey wid) (DamageInflated defaultDamageSlop)
