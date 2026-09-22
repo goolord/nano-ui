@@ -336,8 +336,7 @@ quantizeResultsA :: NodeArenaArrays -> Int -> Int -> Float -> IO ()
 quantizeResultsA a count floatingCount s
   | s <= 0 = pure ()
   -- Nothing floats, so every node snaps and none needs marking.
-  | floatingCount <= 0 =
-      let go i = when (i < count) (snapNode i >> go (i + 1)) in go 0
+  | floatingCount <= 0 = forUpTo_ count snapNode
   | otherwise = do
       -- A floating node (modal, window, popup) and everything inside it is
       -- laid out by placement after the solve, which sizes the subtree from
@@ -346,19 +345,15 @@ quantizeResultsA a count floatingCount s
       -- placement overwrites its geometry anyway. A parent always precedes
       -- its children, so one pass marks each node from its parent.
       floating <- newPrimArray count :: IO (IOArr Word8)
-      let go i
-            | i >= count = pure ()
-            | otherwise = do
-                nt <- readTagEnum a i tagNodeType
-                parent <- readTree a i treeParent
-                inFloating <-
-                  if isFloatingNode nt
-                    then pure True
-                    else if parent >= 0 then (/= 0) <$> readPrimArray floating parent else pure False
-                writePrimArray floating i (if inFloating then 1 else 0)
-                unless inFloating (snapNode i)
-                go (i + 1)
-      go 0
+      forUpTo_ count $ \i -> do
+        nt <- readTagEnum a i tagNodeType
+        parent <- readTree a i treeParent
+        inFloating <-
+          if isFloatingNode nt
+            then pure True
+            else if parent >= 0 then (/= 0) <$> readPrimArray floating parent else pure False
+        writePrimArray floating i (if inFloating then 1 else 0)
+        unless inFloating (snapNode i)
  where
   snapNode i = do
     x <- readGeom a i geomX
@@ -865,13 +860,9 @@ foldChromeColumnScratch :: NodeArena -> Int -> Float -> IO (Float, Float)
 foldChromeColumnScratch na n gap = do
   FlexScratch {fsW = wArr, fsH = hArr} <- readIORef (naScratch na)
   gapSum <- columnGapSumScratch na True n gap
-  let go !i !maxW !totalH
-        | i >= n = pure (maxW, totalH + gapSum)
-        | otherwise = do
-            w <- readPrimArray wArr i
-            h <- readPrimArray hArr i
-            go (i + 1) (max maxW w) (totalH + h)
-  go 0 0 0
+  maxW <- foldUpTo n (\m i -> max m <$> readPrimArray wArr i) 0
+  totalH <- foldUpTo n (\t i -> (t +) <$> readPrimArray hArr i) 0
+  pure (maxW, totalH + gapSum)
 
 -- | Grid column count: explicit, else as many @minColW@ columns as fit in a
 -- positive @availW@, else one.
@@ -884,17 +875,8 @@ gridColumnCount gCols minColW availW gap
 
 -- | Height of grid row @r@: its tallest child.
 gridRowHeight :: IOArr Float -> Int -> Int -> Int -> IO Float
-gridRowHeight hArr n cols r = go 0 0
-  where
-    go !j !accH
-      | j >= cols = pure accH
-      | otherwise = do
-          let k = r * cols + j
-          if k >= n
-            then pure accH
-            else do
-              h <- readPrimArray hArr k
-              go (j + 1) (max accH h)
+gridRowHeight hArr n cols r =
+  foldUpTo (min cols (n - r * cols)) (\m j -> max m <$> readPrimArray hArr (r * cols + j)) 0
 
 measureGridScratch ::
   SolveEnv ->
@@ -913,12 +895,7 @@ measureGridScratch env idx gCols minColW innerMaxW innerAvailH gap = do
       FlexScratch {fsW = wArr, fsH = hArr} <- readIORef (naScratch (seArena env))
       let cols = gridColumnCount gCols minColW (if innerMaxW < 1e8 then innerMaxW else 0) gap
           numRows = (n + cols - 1) `quot` cols
-          calcRows !r !totalH
-            | r >= numRows = pure totalH
-            | otherwise = do
-                rowH <- gridRowHeight hArr n cols r
-                calcRows (r + 1) (totalH + rowH)
-      totalH <- calcRows 0 0
+      totalH <- foldUpTo numRows (\t r -> (t +) <$> gridRowHeight hArr n cols r) 0
       let contentH = totalH + gap * fromIntegral (max 0 (numRows - 1))
       contentW <-
         if innerMaxW > 0 && innerMaxW < 1e8
@@ -926,12 +903,7 @@ measureGridScratch env idx gCols minColW innerMaxW innerAvailH gap = do
           else if minColW > 0
             then pure (fromIntegral cols * minColW + gap * fromIntegral (max 0 (cols - 1)))
             else do
-              let getMaxChildW !i !accW
-                    | i >= n = pure accW
-                    | otherwise = do
-                        w <- readPrimArray wArr i
-                        getMaxChildW (i + 1) (max accW w)
-              maxChildW <- getMaxChildW 0 0
+              maxChildW <- foldUpTo n (\m i -> max m <$> readPrimArray wArr i) 0
               pure (fromIntegral cols * maxChildW + gap * fromIntegral (max 0 (cols - 1)))
       pure (contentW, contentH)
 
@@ -1051,7 +1023,7 @@ positionNodeA ::
   Float ->
   Float ->
   IO ()
-positionNodeA env@SolveEnv {seArena = na, seArrays = a} depth idx x y availW availH = do
+positionNodeA env@SolveEnv {seArena = na, seArrays = a} !depth !idx !x !y !availW !availH = do
   wAx <- readAxisSizing a idx True
   hAx@(AxisSizing hTag _ minH maxH) <- readAxisSizing a idx False
   intrinsicW <- readGeom a idx geomW
@@ -1158,7 +1130,9 @@ positionScrollChildren env@SolveEnv {seArena = na} depth idx dir gap pad px py p
                   then max contentSize (innerW - gutterRow)
                   else contentSize
           positionRowFromParent env depth idx gap cx cy rowMain (innerH - gutterRow)
-        DirColumn -> positionColumnScroll env depth idx gap cx cy (innerW - gutterCol) innerH contentSize
+        DirColumn -> do
+          let viewW = innerW - gutterCol
+          positionColumn env depth idx gap False (Just contentSize) cx viewW cx cy viewW innerH
   fc <- getFirstChild na idx
   when (fc >= 0) $ do
     let step (FlowAcc count maxB maxR) ci = do
@@ -1203,37 +1177,6 @@ hasPanelAncestor na = go
           if nt == NodePanel
             then pure True
             else if isFloatingNode nt then pure False else getParent na p >>= go
-
-positionColumnScroll ::
-  SolveEnv ->
-  Int ->
-  NodeIdx ->
-  Float ->
-  Float ->
-  Float ->
-  Float ->
-  Float ->
-  Float ->
-  IO ()
-positionColumnScroll env@SolveEnv {seArena = na} depth parent gap cx cy innerW innerH contentSize = do
-  n <- loadChildrenScratch (seArena env) parent (flowChildSize env True innerW innerH)
-  withAxisSnaps na depth n contentSize (gap * fromIntegral (max 0 (n - 1))) False $ \idxSnap outSnap -> do
-    let go !i !curY
-          | i >= n = pure ()
-          | otherwise = do
-              ci <- readPrimArray idxSnap i
-              fh <- readPrimArray outSnap i
-              nt <- getNodeType na ci
-              fx <- columnChildX na ci cx innerW
-              let visibleSlice = max 0 (innerH - (curY - cy))
-                  nodeH =
-                    if isScrollNode nt
-                      then min fh visibleSlice
-                      else fh
-              positionNodeA env (depth + 1) ci fx curY innerW nodeH
-              (_, _, _, placedH) <- getRect na ci
-              go (i + 1) (curY + placedH + gap)
-    go 0 cy
 
 -- | Left edge of column child @ci@ in a column of width @cw@ at @cx@. Grow and
 -- percent children already take the full width; alignment is for content
@@ -1285,7 +1228,7 @@ positionChildren env@SolveEnv {seArena = na} depth idx dir gap pad px py pw ph =
     then positionGrid env depth idx gCols minColW gap cx cy cw ch
     else case dir of
       DirRow -> positionRowFromParent env depth idx gap cx cy cw ch
-      DirColumn -> positionColumnFromParent env depth idx gap chrome px pw cx cy cw ch
+      DirColumn -> positionColumn env depth idx gap chrome Nothing px pw cx cy cw ch
 
 childRowCrossSize :: NodeArena -> NodeIdx -> Float -> IO Float
 childRowCrossSize na ci availCross = do
@@ -1309,6 +1252,9 @@ columnChildHeight na ci scratchH = do
       pure (clamp minH maxH ih)
     _ -> pure (clamp minH maxH scratchH)
 
+-- | Share out the main axis among the first @n@ scratch children
+-- ('distributeScratch') and run @act@ on a snapshot of their indices and
+-- shares ('withSnapshot').
 {-# INLINE withAxisSnaps #-}
 withAxisSnaps ::
   NodeArena ->
@@ -1321,22 +1267,22 @@ withAxisSnaps ::
   IO a
 withAxisSnaps na depth n availMain gapSum horizontal act = do
   distributeScratch na n availMain gapSum horizontal
-  FlexScratch {fsIdx = idxArr, fsOut = outArr} <- readIORef (naScratch na)
-  AxisSnapshot idxSnap outSnap <- ensureAxisSnapshot na depth n
-  copyMutablePrimArray idxSnap 0 idxArr 0 n
-  copyMutablePrimArray outSnap 0 outArr 0 n
-  act idxSnap outSnap
+  withSnapshot na depth n fsOut act
 
--- | Like 'withAxisSnaps' but snapshots the unscaled child cross sizes instead
--- of the distributed main-axis result. Grids compute rows from the measured
--- child heights, so freezing them lets the recursion reuse the working scratch.
-withGridScratch :: NodeArena -> Int -> Int -> (IOArr Int -> IOArr Float -> IO a) -> IO a
-withGridScratch na depth n act = do
-  FlexScratch {fsIdx = idxArr, fsH = hArr} <- readIORef (naScratch na)
-  AxisSnapshot idxSnap crossSnap <- ensureAxisSnapshot na depth n
-  copyMutablePrimArray idxSnap 0 idxArr 0 n
-  copyMutablePrimArray crossSnap 0 hArr 0 n
-  act idxSnap crossSnap
+-- | Copy the first @n@ scratch child indices, and beside them the scratch
+-- array @sizes@ picks, to the snapshot for nesting depth @depth@, and run
+-- @act@ on the copies. Laying out a child reuses the scratch, so a container
+-- walks its children from the snapshot.
+{-# INLINE withSnapshot #-}
+withSnapshot ::
+  NodeArena -> Int -> Int -> (FlexScratch -> IOArr Float) ->
+  (IOArr Int -> IOArr Float -> IO a) -> IO a
+withSnapshot na depth n sizes act = do
+  s <- readIORef (naScratch na)
+  AxisSnapshot idxSnap sizeSnap <- ensureAxisSnapshot na depth n
+  copyMutablePrimArray idxSnap 0 (fsIdx s) 0 n
+  copyMutablePrimArray sizeSnap 0 (sizes s) 0 n
+  act idxSnap sizeSnap
 
 positionRowFromParent ::
   SolveEnv ->
@@ -1353,39 +1299,33 @@ positionRowFromParent env@SolveEnv {seArena = na} depth parent gap cx cy cw ch =
   withAxisSnaps na depth n cw (gap * fromIntegral (max 0 (n - 1))) True $ \idxSnap outSnap -> do
     -- The shared baseline sits as low as the deepest one among the children
     -- aligned on it, so the child with the tallest ascent stays at the top.
-    let goBase !i !acc
-          | i >= n = pure acc
-          | otherwise = do
-              ci <- readPrimArray idxSnap i
-              ay <- getAlignY na ci
-              if ay /= AlignBaseline
-                then goBase (i + 1) acc
-                else do
-                  b <- childRowCrossSize na ci ch >>= childBaseline env ci
-                  goBase (i + 1) (max acc b)
-    rowBase <- goBase 0 0
+    let lowestBaseline acc i = do
+          ci <- readPrimArray idxSnap i
+          ay <- getAlignY na ci
+          if ay /= AlignBaseline
+            then pure acc
+            else max acc <$> (childRowCrossSize na ci ch >>= childBaseline env ci)
+    rowBase <- foldUpTo n lowestBaseline 0
     -- The cursor stays in raw floats, never snapped: rounding it re-compounds
     -- error every child (1.667 -> 2.0 -> ...) so a shrink row overruns its
     -- fixed width. Each child's far edge is the next one's raw origin, so
     -- quantizeResultsA, which snaps edges, puts both on the same pixel.
-    let goRow !i !x
-          | i >= n = pure ()
-          | otherwise = do
-              ci <- readPrimArray idxSnap i
-              fw <- readPrimArray outSnap i
-              -- Fit/fixed children keep content height. Only Grow/Percent eat `ch`.
-              crossH <- childRowCrossSize na ci ch
-              ay <- getAlignY na ci
-              fy <-
-                if ay == AlignBaseline
-                  then (\b -> cy + rowBase - b) <$> childBaseline env ci crossH
-                  else pure (alignY ay cy ch crossH)
-              positionNodeA env (depth + 1) ci x fy fw crossH
-              -- A grow child that its max width stopped short of its share
-              -- hands the rest to the siblings after it instead of leaving a
-              -- hole.
-              placedW <- readGeom (seArrays env) ci geomW
-              goRow (i + 1) (x + min fw placedW + gap)
+    let goRow !i !x = when (i < n) $ do
+          ci <- readPrimArray idxSnap i
+          fw <- readPrimArray outSnap i
+          -- Fit/fixed children keep content height. Only Grow/Percent eat `ch`.
+          crossH <- childRowCrossSize na ci ch
+          ay <- getAlignY na ci
+          fy <-
+            if ay == AlignBaseline
+              then (\b -> cy + rowBase - b) <$> childBaseline env ci crossH
+              else pure (alignY ay cy ch crossH)
+          positionNodeA env (depth + 1) ci x fy fw crossH
+          -- A grow child that its max width stopped short of its share
+          -- hands the rest to the siblings after it instead of leaving a
+          -- hole.
+          placedW <- readGeom (seArrays env) ci geomW
+          goRow (i + 1) (x + min fw placedW + gap)
     goRow 0 cx
 
 positionGrid ::
@@ -1409,42 +1349,37 @@ positionGrid env@SolveEnv {seArena = na} depth parent gCols minColW gap cx cy cw
     -- Freeze child indices and their measured cross sizes before recursing.
     -- Children reuse the working scratch while this grid iterates rows and
     -- columns, so the live arrays would be clobbered by the first child.
-    withGridScratch na depth n $ \idxArr hArr ->
-      do
-        let goRows !r !curY
-              | r >= numRows = pure ()
-              | otherwise = do
-                  rowH <- gridRowHeight hArr n cols r
-                  let goCols !j
-                        | j >= cols = pure ()
-                        | otherwise = do
-                            let k = r * cols + j
-                            if k >= n
-                              then pure ()
-                              else do
-                                ci <- readPrimArray idxArr k
-                                wAx <- getWidthSizing na ci
-                                hAx <- getHeightSizing na ci
-                                (_, _, iw, ih) <- getRect na ci
-                                let childW = resolveSize wAx iw colW
-                                    childH = resolveSize hAx ih rowH
-                                    itemX = cx + fromIntegral j * (colW + gap)
-                                ax <- getAlignX na ci
-                                ay <- getAlignY na ci
-                                let fx = alignX ax itemX colW childW
-                                    fy = alignY ay curY rowH childH
-                                positionNodeA env (depth + 1) ci fx fy colW rowH
-                                goCols (j + 1)
-                  goCols 0
-                  goRows (r + 1) (curY + rowH + gap)
-        goRows 0 cy
+    withSnapshot na depth n fsH $ \idxArr hArr -> do
+      let goRows !r !curY = when (r < numRows) $ do
+            rowH <- gridRowHeight hArr n cols r
+            forUpTo_ (min cols (n - r * cols)) $ \j -> do
+              ci <- readPrimArray idxArr (r * cols + j)
+              wAx <- getWidthSizing na ci
+              hAx <- getHeightSizing na ci
+              (_, _, iw, ih) <- getRect na ci
+              let childW = resolveSize wAx iw colW
+                  childH = resolveSize hAx ih rowH
+                  itemX = cx + fromIntegral j * (colW + gap)
+              ax <- getAlignX na ci
+              ay <- getAlignY na ci
+              let fx = alignX ax itemX colW childW
+                  fy = alignY ay curY rowH childH
+              positionNodeA env (depth + 1) ci fx fy colW rowH
+            goRows (r + 1) (curY + rowH + gap)
+      goRows 0 cy
 
-positionColumnFromParent ::
+-- | Place a column's flow children top to bottom in the box @cx cy cw ch@. A
+-- scroll column shares out its content height (@scrollContent@) and gives a
+-- scroll child no more than the part of the viewport below its top; any other
+-- column shares out @ch@. In a window's or modal's column (@chrome@) a
+-- separator spans the padding box (@px@, @pw@) and takes no gap before it.
+positionColumn ::
   SolveEnv ->
   Int ->
   NodeIdx ->
   Float ->
   Bool ->
+  Maybe Float ->
   Float ->
   Float ->
   Float ->
@@ -1452,43 +1387,38 @@ positionColumnFromParent ::
   Float ->
   Float ->
   IO ()
-positionColumnFromParent env@SolveEnv {seArena = na} depth parent gap chrome px pw cx cy cw ch = do
-  n <- loadChildrenScratch (seArena env) parent (flowChildSize env True cw ch)
-  gapSum <- columnGapSumScratch na chrome n gap
-  withAxisSnaps na depth n ch gapSum False $ \idxSnap outSnap -> do
-    let go !i !y
-          | i >= n = pure ()
-          | otherwise = do
-              ci <- readPrimArray idxSnap i
-              fh <- readPrimArray outSnap i
-              nt <- getNodeType na ci
-              (fx, nodeW) <-
-                if chrome && nt == NodeSeparator
-                  then pure (px, pw)
-                  else (,cw) <$> columnChildX na ci cx cw
-              childH <- columnChildHeight na ci fh
-              positionNodeA env (depth + 1) ci fx y nodeW childH
-              (_, _, _, placedH) <- getRect na ci
-              gapAfter <-
-                if i + 1 >= n
-                  then pure 0
-                  else do
-                    nextCi <- readPrimArray idxSnap (i + 1)
-                    pairColumnGap na chrome nextCi gap
-              go (i + 1) (y + placedH + gapAfter)
+positionColumn env@SolveEnv {seArena = na} !depth !parent !gap chrome scrollContent !px !pw !cx !cy !cw !ch = do
+  n <- loadChildrenScratch na parent (flowChildSize env True cw ch)
+  gapSum <- case scrollContent of
+    Just _ -> pure (gap * fromIntegral (max 0 (n - 1)))
+    Nothing -> columnGapSumScratch na chrome n gap
+  withAxisSnaps na depth n (fromMaybe ch scrollContent) gapSum False $ \idxSnap outSnap -> do
+    let go !i !y = when (i < n) $ do
+          ci <- readPrimArray idxSnap i
+          fh <- readPrimArray outSnap i
+          nt <- getNodeType na ci
+          (fx, nodeW) <-
+            if chrome && nt == NodeSeparator
+              then pure (px, pw)
+              else (,cw) <$> columnChildX na ci cx cw
+          childH <- case scrollContent of
+            Just _ -> pure (if isScrollNode nt then min fh (max 0 (ch - (y - cy))) else fh)
+            Nothing -> columnChildHeight na ci fh
+          positionNodeA env (depth + 1) ci fx y nodeW childH
+          (_, _, _, placedH) <- getRect na ci
+          gapAfter <-
+            if i + 1 >= n
+              then pure 0
+              else readPrimArray idxSnap (i + 1) >>= \b -> pairColumnGap na chrome b gap
+          go (i + 1) (y + placedH + gapAfter)
     go 0 cy
 
 columnGapSumScratch :: NodeArena -> Bool -> Int -> Float -> IO Float
 columnGapSumScratch _ False _ _ = pure 0
 columnGapSumScratch na True n gap = do
   FlexScratch {fsIdx = idxArr} <- readIORef (naScratch na)
-  let go !i !acc
-        | i >= n - 1 = pure acc
-        | otherwise = do
-            b <- readPrimArray idxArr (i + 1)
-            g <- pairColumnGap na True b gap
-            go (i + 1) (acc + g)
-  go 0 0
+  let addGap acc i = readPrimArray idxArr (i + 1) >>= \b -> (acc +) <$> pairColumnGap na True b gap
+  foldUpTo (n - 1) addGap 0
 
 -- | Share the main axis among the first @n@ scratch children: 'fsOut' gets
 -- each child's size along it, starting from its content size ('fsW' or
@@ -1576,20 +1506,15 @@ scanGrow mainArr crossArr !i !end !occupied !gfSum
 
 -- Pin every grow child whose content exceeds its would-be share by clearing
 -- its factor; its content stays in mainArr.
-lockGrow :: IOArr Float -> IOArr Float -> Float -> Float -> Int -> Int -> Int -> IO Int
-lockGrow mainArr crossArr !free !gfSum !i !end !acc
-  | i >= end = pure acc
-  | otherwise = do
+lockGrow :: IOArr Float -> IOArr Float -> Float -> Float -> Int -> IO Int
+lockGrow mainArr crossArr !free !gfSum n = foldUpTo n lock 0
+  where
+    lock acc i = do
       gf <- readPrimArray crossArr i
-      if gf > 0
-        then do
-          need <- readPrimArray mainArr i
-          if need * gfSum > gf * free
-            then do
-              writePrimArray crossArr i 0
-              lockGrow mainArr crossArr free gfSum (i + 1) end (acc + 1)
-            else lockGrow mainArr crossArr free gfSum (i + 1) end acc
-        else lockGrow mainArr crossArr free gfSum (i + 1) end acc
+      need <- readPrimArray mainArr i
+      if gf > 0 && need * gfSum > gf * free
+        then (acc + 1) <$ writePrimArray crossArr i 0
+        else pure acc
 
 -- Each lock shrinks the share pool, possibly locking more children; the
 -- locked set only grows, so this fixpoints within n sweeps, and a row of n
@@ -1600,7 +1525,7 @@ settleGrow :: IOArr Float -> IOArr Float -> Float -> Float -> Int -> Int -> IO (
 settleGrow mainArr crossArr avail gapSum n !pass = do
   (occupied, gfSum) <- scanGrow mainArr crossArr 0 n 0 0
   let free = avail - gapSum - occupied
-  locked <- lockGrow mainArr crossArr free gfSum 0 n 0
+  locked <- lockGrow mainArr crossArr free gfSum n
   if locked == 0 || pass >= n
     then pure (free, gfSum)
     else do
@@ -1622,21 +1547,16 @@ waterFillAfter = 8
 waterFillGrow :: IOArr Float -> IOArr Float -> Float -> Int -> IO ()
 waterFillGrow mainArr crossArr room n = do
   (occupied, gfSum) <- scanGrow mainArr crossArr 0 n 0 0
-  let collect !i acc
-        | i >= n = pure acc
-        | otherwise = do
-            gf <- readPrimArray crossArr i
-            if gf > 0
-              then do
-                need <- readPrimArray mainArr i
-                collect (i + 1) ((need / gf, need, gf, i) : acc)
-              else collect (i + 1) acc
+  let collect acc i = do
+        gf <- readPrimArray crossArr i
+        need <- readPrimArray mainArr i
+        pure (if gf > 0 then (need / gf, need, gf, i) : acc else acc)
       lockFrom !free !g ((_, need, gf, i) : rest)
         | need * g > gf * free = do
             writePrimArray crossArr i 0
             lockFrom (free - need) (g - gf) rest
       lockFrom _ _ _ = pure ()
-  growing <- collect 0 []
+  growing <- foldUpTo n collect []
   lockFrom (room - occupied) gfSum (sortOn (\(perUnit, _, _, _) -> Down perUnit) growing)
 
 alignX :: AlignX -> Float -> Float -> Float -> Float
