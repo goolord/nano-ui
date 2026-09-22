@@ -25,11 +25,6 @@ import NanoUI.Internal.Font (FontMetrics, prepareFontMetrics, textIndexAtX, widg
 import NanoUI.Internal.Frame.Chrome (paintScrollBarLayout, textInputFocused)
 import NanoUI.Internal.Frame.Hit (withWidgetNode)
 import NanoUI.Internal.Frame.TextArea.Content
-  ( isMouseOnTextAreaScrollBarAt
-  , resolveTextAreaFont
-  , textAreaContentMetrics
-  )
-import NanoUI.Internal.Frame.TextArea.Geometry
 import NanoUI.Internal.Frame.TextInput (FieldDoc (..), drawLineCaret, drawLineSelection, selectWithMouse)
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Input (Input, inputMousePos)

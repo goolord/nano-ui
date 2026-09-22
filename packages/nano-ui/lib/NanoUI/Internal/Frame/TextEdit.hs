@@ -15,8 +15,6 @@ module NanoUI.Internal.Frame.TextEdit
   , textAreaBarLane
   , textAreaLineHeight
   , textAreaHitForWidget
-  , textAreaScrollBarLayout
-  , textAreaHScrollBarLayout
   , textAreaScrollBarLayouts
   ) where
 
@@ -35,8 +33,7 @@ import NanoUI.Internal.Context
   )
 import NanoUI.Internal.Frame.Hit (withWidgetNode)
 import NanoUI.Internal.Frame.TextArea
-import NanoUI.Internal.Frame.TextArea.Content (resolveTextAreaFont, textAreaContentMetrics)
-import NanoUI.Internal.Frame.TextArea.Geometry
+import NanoUI.Internal.Frame.TextArea.Content
 import NanoUI.Internal.Frame.TextInput
 import NanoUI.Internal.Id (WidgetId, hashWidgetId)
 import NanoUI.Internal.Input (Input, inputMouseDown, inputMousePos, inputMousePressed, inputMouseReleased)

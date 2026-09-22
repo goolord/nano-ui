@@ -148,7 +148,6 @@ library
         NanoUI.Internal.Frame.SpanArena
         NanoUI.Internal.Frame.TextArea
         NanoUI.Internal.Frame.TextArea.Content
-        NanoUI.Internal.Frame.TextArea.Geometry
         NanoUI.Internal.Frame.TextEdit.Menu
         NanoUI.Internal.Frame.TextInput
         NanoUI.Internal.Style

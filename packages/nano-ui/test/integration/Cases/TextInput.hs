@@ -11,9 +11,7 @@ import NanoUI.Internal.Frame.TextEdit
   , textAreaContentMetrics
   , textAreaBarLane
   , textAreaLineHeight
-  , textAreaHScrollBarLayout
   , textAreaHitForWidget
-  , textAreaScrollBarLayout
   , textAreaScrollBarLayouts
   )
 import NanoUI.Internal.Store
@@ -635,8 +633,8 @@ textAreaThumbDragTest horizontal ctx failed = do
     assertEq failed off0 0
     let
       bar
-        | horizontal = textAreaHScrollBarLayout fm field (lineWidth fm txt) off0
-        | otherwise = textAreaScrollBarLayout fm field (40 * textAreaLineHeight fm) off0
+        | horizontal = tasbHorizontal (textAreaScrollBarLayouts fm field (lineWidth fm txt) 0 off0 0)
+        | otherwise = tasbVertical (textAreaScrollBarLayouts fm field 0 (40 * textAreaLineHeight fm) 0 off0)
     assertJust failed bar $ \layout -> do
       let
         V2 cx cy = spanCenter (sbThumb layout)
@@ -689,7 +687,7 @@ runTextAreaCursorOnScrollBarTest ctx failed = do
       assertEq failed textKind UiCursorText
 
       -- Hover over scrollbar thumb -> UiCursorGrab
-      assertJust failed (textAreaScrollBarLayout fm field contentH 0) $ \layout -> do
+      assertJust failed (tasbVertical (textAreaScrollBarLayouts fm field 0 contentH 0 0)) $ \layout -> do
         let
           thumb = sbThumb layout
           thumbCenter = spanCenter thumb
@@ -750,7 +748,7 @@ runTextAreaHScrollWheelTest ctx failed = do
     V2 offX3 _ <- getScrollOffset2D ctx (respId resp)
     assertEq failed offX3 0
     -- The horizontal thumb shows the grab cursors.
-    assertJust failed (textAreaHScrollBarLayout fm field (lineWidth fm longLine) 0) $ \layout -> do
+    assertJust failed (tasbHorizontal (textAreaScrollBarLayouts fm field (lineWidth fm longLine) 0 0 0)) $ \layout -> do
       let
         thumb = sbThumb layout
         thumbHover = inp0 {inputMousePos = spanCenter thumb}

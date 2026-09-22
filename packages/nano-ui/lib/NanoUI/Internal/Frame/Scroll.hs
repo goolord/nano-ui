@@ -53,11 +53,11 @@ import NanoUI.Internal.Frame.Scroll.Geometry
   , scrollOffsetFromThumb
   , scrollWheelSuppressed
   )
-import NanoUI.Internal.Frame.TextArea.Content (textAreaContentGeom)
-import NanoUI.Internal.Frame.TextArea.Geometry
+import NanoUI.Internal.Frame.TextArea.Content
   ( TextAreaBars (..)
   , TextAreaScrollBarLayouts (..)
   , textAreaBars
+  , textAreaContentGeom
   , textAreaScrollBarLayouts
   )
 import NanoUI.Internal.Id (WidgetId)

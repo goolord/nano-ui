@@ -57,7 +57,6 @@ import NanoUI.Internal.Store
   , WidgetStore
   , deleteSlot
   , fieldDyn
-  , fieldFloat
   , fieldInt
   , fieldPoint
   , findSlot
@@ -254,25 +253,23 @@ textAreaCore f wid value = do
   let layout = f textAreaLayout
       key = intKey wid
       seenKey = slotKey SlotSeen key
-      docKey = slotKey SlotTextAreaDocument key
-      contentCacheKey = slotKey SlotTextAreaContentFont key
+      bufKey = slotKey SlotTextAreaBuffer key
       changedSlotKey = slotKey SlotTextAreaChanged key
-      storedDoc k = lookupDyn k store0
+      stored :: Maybe TB.TextBuffer = lookupDyn bufKey store0
       adoptDocument
-        | storedDoc docKey == Just value = id
+        | fmap bufferDocument stored == Just value = id
         | otherwise =
-            insertDyn docKey value
-              . insertDyn (slotKey SlotTextAreaBuffer key) (documentBuffer value)
+            insertDyn bufKey (maybe id keepCaret stored (documentBuffer value))
               . deleteSlot fieldDyn (slotKey SlotTextHistory key)
-              . deleteSlot fieldFloat contentCacheKey
+      keepCaret old new = (TB.withCursor (TB.getCursor old) new) {TB.preferredCol = TB.preferredCol old}
   -- Adopt the caller's document the way 'adoptSlot' does. Comparing the
   -- document the caller passes back with the stored one is O(1) ('==' checks
-  -- identity first). A replaced document gets a buffer over its lines and
-  -- orphans the content size measured for the old one, and its undo history,
-  -- recorded against the old text, goes with them. Seed the scroll slot too:
-  -- the wheel and drag paths write offsets through setScrollOffset2D, which
-  -- only updates the text area's slot once it exists.
-  when (storedDoc seenKey /= Just value) $
+  -- identity first). A replaced document gets a buffer over its lines, whose
+  -- widths are then measured afresh, keeping the caret where it was, and its
+  -- undo history, recorded against the old text, goes. Seed the scroll slot
+  -- too: the wheel and drag paths write offsets through setScrollOffset2D,
+  -- which only updates the text area's slot once it exists.
+  when (lookupDyn seenKey store0 /= Just value) $
     uiIO . setStore ctx $
       insertDyn seenKey value
         . adoptDocument
@@ -280,7 +277,7 @@ textAreaCore f wid value = do
         . insertSlot fieldInt (slotKey SlotTextMode key) (editorModeCode multiLineMode)
         $ store0
   store <- uiIO (getStore ctx)
-  let current = fromMaybe value (lookupDyn docKey store)
+  let current = maybe value bufferDocument (lookupDyn bufKey store)
       -- Set by commands run outside the frame ('applyTextAreaCommand') whose
       -- edits carry no keys or chars; folded into 'changed' so the caller
       -- gets its respChanged pulse, then cleared in the state write below.
@@ -314,18 +311,14 @@ textAreaCore f wid value = do
                 || selectionAnchor newState /= selectionAnchor oldState
                 || scrollOffset newState /= scrollOffset oldState
                 || menuPulse
-        -- Saving writes the new buffer and its document together; drop only
-        -- the content size measured for the old text, and the menu pulse. The
-        -- store damage is keyed on slots, not the widget, so damage the widget
-        -- itself: a selection-only change (Ctrl+A) would otherwise repaint
-        -- nothing until the next frame.
+        -- Saving writes the new buffer, which is the document, and drops the
+        -- menu pulse. The store damage is keyed on slots, not the widget, so
+        -- damage the widget itself: a selection-only change (Ctrl+A) would
+        -- otherwise repaint nothing until the next frame.
         when changed $
           uiIO $ do
             damageWidget ctx wid DamageSelf
-            modifyStore ctx $
-              deleteSlot fieldInt changedSlotKey
-                . (if textChanged then deleteSlot fieldFloat contentCacheKey else id)
-                . saveTextAreaState key newState
+            modifyStore ctx (deleteSlot fieldInt changedSlotKey . saveTextAreaState key newState)
         pure (doc, changed)
       else do
         -- A command run on the unfocused area ('applyTextAreaCommand') still
@@ -349,56 +342,34 @@ textAreaCore f wid value = do
 -- declared yet holds an empty document.
 loadTextAreaState :: WidgetStore -> Int -> TextAreaState
 loadTextAreaState store key =
-  let buf0 = textAreaBuffer store key
-      row = findSlot fieldInt 0 (slotKey SlotTextAreaRow key) store
-      col = findSlot fieldInt 0 (slotKey SlotTextAreaCol key) store
+  let buf = textAreaBuffer store key
+      TB.Cursor row col = TB.getCursor buf
       anchorRow = findSlot fieldInt row (slotKey SlotTextAreaAnchorRow key) store
       anchorCol = findSlot fieldInt col (slotKey SlotTextAreaAnchorCol key) store
-      pref = findSlot fieldInt col (slotKey SlotTextAreaPrefCol key) store
-      scroll =
-        let (sx, sy) = findSlot fieldPoint (0, 0) (slotKey SlotTextAreaScroll key) store
-         in (realToFrac sx, realToFrac sy)
-      viewport =
-        let (vw, vh) = findSlot fieldPoint (200, 96) (slotKey SlotTextAreaViewport key) store
-         in (realToFrac vw, realToFrac vh)
-      buf =
-        let b = TB.withCursor (TB.Cursor row col) buf0
-         in b {TB.preferredCol = pref}
-      anchor = TB.getCursor (TB.withCursor (TB.Cursor anchorRow anchorCol) buf0)
-      -- Replacing the document drops its history, so the history is always
-      -- the current document's.
-      hist = fromMaybe emptyHistory (lookupDyn (slotKey SlotTextHistory key) store)
+      (sx, sy) = findSlot fieldPoint (0, 0) (slotKey SlotTextAreaScroll key) store
+      (vw, vh) = findSlot fieldPoint (200, 96) (slotKey SlotTextAreaViewport key) store
    in TextAreaState
         { buffer = buf
-        , selectionAnchor = anchor
-        , scrollOffset = scroll
-        , viewportSize = viewport
+        , selectionAnchor = TB.clampCursor buf (TB.Cursor anchorRow anchorCol)
+        , scrollOffset = (realToFrac sx, realToFrac sy)
+        , viewportSize = (realToFrac vw, realToFrac vh)
         , lineHeight = 16
-        , history = hist
+        , -- Replacing the document drops its history, so the history is
+          -- always the current document's.
+          history = fromMaybe emptyHistory (lookupDyn (slotKey SlotTextHistory key) store)
         }
 
--- | Store the editor state. When its lines are not the stored document's, the
--- document becomes theirs, so the buffer and the document stay in step.
+-- | Store the editor state. The buffer holds the document and the caret.
 saveTextAreaState :: Int -> TextAreaState -> WidgetStore -> WidgetStore
 saveTextAreaState key state =
   insertSlot fieldPoint (slotKey SlotTextAreaScroll key) (realToFrac sx, realToFrac sy)
     . insertSlot fieldPoint (slotKey SlotTextAreaViewport key) (realToFrac vw, realToFrac vh)
-    . insertDyn (slotKey SlotTextAreaBuffer key) buf
+    . insertDyn (slotKey SlotTextAreaBuffer key) (buffer state)
     . insertDyn (slotKey SlotTextHistory key) (history state)
-    . withDocument
-    . insertSlot fieldInt (slotKey SlotTextAreaRow key) row
-    . insertSlot fieldInt (slotKey SlotTextAreaCol key) col
-    . insertSlot fieldInt (slotKey SlotTextAreaPrefCol key) (TB.preferredCol buf)
     . insertSlot fieldInt (slotKey SlotTextAreaAnchorRow key) anchorRow
     . insertSlot fieldInt (slotKey SlotTextAreaAnchorCol key) anchorCol
   where
-    buf = buffer state
-    TB.Cursor row col = TB.getCursor buf
     TB.Cursor anchorRow anchorCol = selectionAnchor state
-    docKey = slotKey SlotTextAreaDocument key
-    withDocument st = case lookupDyn docKey st of
-      Just doc | sameLines (documentLines doc) (TB.bufferLines buf) -> st
-      _ -> insertDyn docKey (bufferDocument buf) st
     (sx, sy) = scrollOffset state
     (vw, vh) = viewportSize state
 
@@ -413,13 +384,9 @@ applyTextAreaCommand ctx wid cmd = do
   s1 <- withEditor s0 <$> runCommandIO ctx multiLineMode cmd (textAreaEditor s0 {history = sealHistory (history s0)})
   let edited = not (sameLines (TB.bufferLines (buffer s1)) (TB.bufferLines (buffer s0)))
       saved = saveTextAreaState key s1 store
-  -- A changed text also drops the content size measured for the old one.
   setStore ctx $
     if edited
-      then
-        insertSlot fieldInt (slotKey SlotTextAreaChanged key) 1
-          . deleteSlot fieldFloat (slotKey SlotTextAreaContentFont key)
-          $ saved
+      then insertSlot fieldInt (slotKey SlotTextAreaChanged key) 1 saved
       else saved
   -- Store damage is keyed on slots, not the widget: damage the widget so a
   -- selection-only command (Select All) repaints this frame.

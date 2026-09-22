@@ -340,27 +340,15 @@ data Slot
   | SlotScrollViewSize
   | SlotScrollRange
   | SlotScrollContent
-  | SlotTextAreaRow
-  | SlotTextAreaCol
-  | SlotTextAreaPrefCol
   | SlotTextAreaScroll
   | SlotTextAreaViewport
   | SlotTextAreaAnchorRow
   | SlotTextAreaAnchorCol
-  | -- | Cached text-area content extent (max line width, line count * line
-    -- height) and the node font size they were measured at. Recomputing the width
-    -- scans every character of the document, so it is cached and only refreshed
-    -- when the text or font changes.
-    SlotTextAreaContentW
-  | SlotTextAreaContentH
-  | SlotTextAreaContentFont
-  | -- | The text area's 'NanoUI.Widgets.TextBuffer.TextBuffer' (in 'storeDyn'): its lines, which are the
-    -- lines of 'SlotTextAreaDocument', and which lines changed since they
-    -- were measured. Loads and paint read it.
+  | -- | The text area's 'NanoUI.Widgets.TextBuffer.TextBuffer' (in 'storeDyn'):
+    -- its lines, which are its current document, its caret, and which lines
+    -- changed since they were measured. Loads and paint read it. The document
+    -- last passed or returned is under 'SlotSeen', in 'storeDyn'.
     SlotTextAreaBuffer
-  | -- | The text area's current 'NanoUI.Internal.Widgets.TextDocument.TextDocument' (in 'storeDyn'). Its value last
-    -- passed or returned is under 'SlotSeen', in 'storeDyn'.
-    SlotTextAreaDocument
   | -- | For a text area over 'Text' (in 'storeDyn'): the text last passed or
     -- returned and the document it is the text of, so a frame that edits
     -- nothing neither splits nor joins the text.
@@ -376,8 +364,9 @@ data Slot
   | -- | Which kind of text field a widget id is: 1 single-line, 2 multi-line.
     -- Commands sent to the id between frames read it.
     SlotTextMode
-  | -- | A text area's measured line widths, in 'storeDyn', kept in step with its
-    -- lines so an edit remeasures only the lines it changed.
+  | -- | A text area's measured line widths and content extent, in 'storeDyn',
+    -- kept in step with its lines so an edit remeasures only the lines it
+    -- changed.
     SlotTextAreaWidths
   | SlotTextInputScroll
   | -- | Search-field debounce bookkeeping. Text slots on the text widget id: the last
