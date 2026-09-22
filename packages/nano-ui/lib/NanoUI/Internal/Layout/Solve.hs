@@ -5,9 +5,7 @@ module NanoUI.Internal.Layout.Solve
   , runCustomMeasure
   , FontResolver
   , Measurers (..)
-  , placeModals
-  , placeWindows
-  , placePopups
+  , placeFloatingNodes
   , computePopupPosition
   , placeWindowNode
   , scrollBarSlotOf
@@ -60,8 +58,9 @@ import NanoUI.Internal.Font
   , centeredTextY
   )
 import NanoUI.Internal.Layout.Arena
-  ( forFloatingNodes_
-  , AxisSizing (..)
+  ( AxisSizing (..)
+  , NodeClass (FloatingNodes)
+  , forClassNodes_
   , DirTag (..)
   , FlexScratch (..)
   , IOArr
@@ -307,7 +306,7 @@ wrapsNarrower allowed wrapW lineW = allowed && wrapW + 0.5 < lineW && wrapW > 0
 -- | Measure nodes and place the page within the supplied logical width/height.
 -- The view must have finished adding nodes, and 'computeSubtreeHashes' must
 -- have run for this frame. Place floating nodes separately with
--- 'placeModals', 'placeWindows', and 'placePopups', then apply scrolling.
+-- 'placeFloatingNodes', then apply scrolling.
 -- When a layout cache captured under the same font metrics is supplied, a
 -- node whose inputs, ancestors' inputs and subtree are unchanged since that
 -- solve, and whose children all came out their captured sizes, takes its
@@ -1730,39 +1729,42 @@ childBaseline env@SolveEnv {seArena = na, seArrays = a, seFm = defaultFm, seReso
   where
     textBaseline fm boxH = centeredTextY fm 0 boxH (fmLineHeight fm) + fmAscent fm
 
--- | Centre measured modals within logical window width/height and lay out
--- their children, leaving the standard window margin where space permits.
-placeModals :: NodeArena -> Measurers -> Float -> Float -> IO ()
-placeModals na ms winW winH = do
-  env <- solveEnv na ms Nothing
-  forFloatingNodes_ na NodeModal $ \idx -> do
-    (_, _, iw, ih) <- getRect na idx
-    let maxW = max 0 (winW - 2 * windowMargin)
-        maxH = max 0 (winH - 2 * windowMargin)
-        w = min iw maxW
-        h = min ih maxH
-        x = max 0 ((winW - w) / 2)
-        y = max 0 ((winH - h) / 2)
-    positionNodeA env 0 idx x y w h
-
--- | Place measured floating windows using saved positions and sizes, with
--- defaults near the top-right. Callbacks return x/y then width/height pairs;
--- all values use logical pixels.
-placeWindows ::
+-- | Place the measured modals, windows and popups within a window @winW@
+-- by @winH@ logical pixels, and lay out their children. A modal is centred,
+-- leaving the standard window margin where space permits. A window takes its
+-- saved position and size (@lookupPos@, @lookupSize@), by default its
+-- measured size near the top-right corner. A popup goes where its registered
+-- anchor, side and gap put it ('computePopupPosition'), by default at the
+-- origin with automatic placement.
+placeFloatingNodes ::
   NodeArena ->
   Measurers ->
   Float ->
   Float ->
   (WidgetId -> IO (Maybe (Float, Float))) ->
   (WidgetId -> IO (Maybe (Float, Float))) ->
+  (WidgetId -> IO (Maybe (PopupAnchor, PopupPlacement, Float))) ->
   IO ()
-placeWindows na ms winW winH lookupPos lookupSize = do
-  forFloatingNodes_ na NodeWindow $ \idx -> do
+placeFloatingNodes na ms winW winH lookupPos lookupSize lookupAnchor = do
+  env <- solveEnv na ms Nothing
+  forClassNodes_ na FloatingNodes $ \idx -> do
+    nt <- getNodeType na idx
     wid <- getWidgetId na idx
     (_, _, iw, ih) <- getRect na idx
-    (w0, h0) <- fromMaybe (min iw winW, min ih winH) <$> lookupSize wid
-    mpos <- lookupPos wid
-    placeWindowNode na ms winW winH idx w0 h0 $ \w -> fromMaybe (winW - w - windowMargin, windowMargin) mpos
+    case nt of
+      NodeModal -> do
+        let w = min iw (max 0 (winW - 2 * windowMargin))
+            h = min ih (max 0 (winH - 2 * windowMargin))
+        positionNodeA env 0 idx (max 0 ((winW - w) / 2)) (max 0 ((winH - h) / 2)) w h
+      NodeWindow -> do
+        (w0, h0) <- fromMaybe (min iw winW, min ih winH) <$> lookupSize wid
+        mpos <- lookupPos wid
+        placeWindowNode na ms winW winH idx w0 h0 $ \w -> fromMaybe (winW - w - windowMargin, windowMargin) mpos
+      _ -> do
+        mcfg <- lookupAnchor wid
+        let (anchor, placement, offset) = fromMaybe (AnchorPoint (V2 0 0), PlacementAuto, 4) mcfg
+            (x, y) = computePopupPosition winW winH windowMargin iw ih anchor placement offset
+        positionNodeA env 0 idx x y iw ih
 
 -- | Lay out window @idx@ at size @w0 h0@, clamped to its min and max size and
 -- the screen, with its origin, given that size, clamped on screen. Fit sizing
@@ -1849,22 +1851,3 @@ computePopupPosition winW winH margin iw ih anchor placement offset =
     before lo len lim size
       | lo - size - offset < margin && lo + len + offset + size <= lim - margin = lo + len + offset
       | otherwise = lo - size - offset
-
--- | Place measured popups using their registered anchor/side/gap, then lay out
--- their children. Missing registrations use the origin with automatic placement.
-placePopups ::
-  NodeArena ->
-  Measurers ->
-  Float ->
-  Float ->
-  (WidgetId -> IO (Maybe (PopupAnchor, PopupPlacement, Float))) ->
-  IO ()
-placePopups na ms winW winH lookupAnchor = do
-  env <- solveEnv na ms Nothing
-  forFloatingNodes_ na NodePopup $ \idx -> do
-    wid <- getWidgetId na idx
-    (_, _, iw, ih) <- getRect na idx
-    mcfg <- lookupAnchor wid
-    let (anchor, placement, offset) = fromMaybe (AnchorPoint (V2 0 0), PlacementAuto, 4) mcfg
-        (x, y) = computePopupPosition winW winH windowMargin iw ih anchor placement offset
-    positionNodeA env 0 idx x y iw ih

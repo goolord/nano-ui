@@ -177,7 +177,7 @@ testZOrderRenderArena = do
   clearScreen surf 0
   renderArena surf (getCozetteFont) 1.0 draw baseSpans overlaySpans
 
-  -- placeWindows pins floating windows to the top-right corner; probe its
+  -- placeFloatingNodes pins floating windows to the top-right corner; probe its
   -- title bar center and a bottom-left box pixel far from the window.
   let na = ctxNodeArena ctx
   nNodes <- arenaCount na

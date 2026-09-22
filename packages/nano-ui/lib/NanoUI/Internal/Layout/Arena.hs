@@ -302,8 +302,8 @@ isScrollNode nt = nt == NodeScrollContainer
 
 -- | Whether the node is a modal, window or popup. The solver leaves a floating
 -- node out of its parent's flow and places it after the solve
--- ('NanoUI.Internal.Layout.Solve.placeModals' and the functions next to it), and paint
--- draws it over the page.
+-- ('NanoUI.Internal.Layout.Solve.placeFloatingNodes'), and paint draws it over
+-- the page.
 isFloatingNode :: NodeType -> Bool
 isFloatingNode nt = nt == NodeModal || nt == NodeWindow || nt == NodePopup
 
