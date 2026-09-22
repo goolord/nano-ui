@@ -36,7 +36,6 @@ import SDL3.Sys.Bindgen.Video (SDL_Window)
 import SDL3.Sys.Video qualified as SDL
 
 #if defined(mingw32_HOST_OS)
-import Control.Monad (unless)
 import Data.ByteString qualified as BS
 import Data.Int (Int32)
 import Data.Word (Word32)
@@ -120,9 +119,8 @@ applyWindowShadow :: Ptr SDL_Window -> Bool -> IO ()
 nativeFrameOutset :: Ptr SDL_Window -> IO (Int, Int)
 
 #if defined(mingw32_HOST_OS)
-applyNativeFrame win on = do
-  hwnd <- windowHwnd win
-  unless (hwnd == nullPtr) $ do
+applyNativeFrame win on =
+  withHwnd win () $ \hwnd -> do
     nanoUiSetNativeFrame hwnd (if on then 1 else 0)
     -- The desktop draws a line of its own around a window that has a frame,
     -- and along the top, where the client area reaches the edge of the
@@ -137,9 +135,8 @@ applyNativeFrame win on = do
     -- corners are the view's to draw.
     setWindowWord hwnd dwmwaCornerPreference (if on then dwmwcpDoNotRound else dwmwcpDefault)
 
-applyWindowShadow win on = do
-  hwnd <- windowHwnd win
-  unless (hwnd == nullPtr) $ do
+applyWindowShadow win on =
+  withHwnd win () $ \hwnd -> do
     -- DWM hangs the shadow off the non-client area, which a popup window is
     -- not rendered with unless it is asked for. Off goes back to what the
     -- window's style says rather than to never, which would take the shadow
@@ -150,13 +147,10 @@ applyWindowShadow win on = do
     -- least that does, and the view paints over it.
     withArray (if on then [0, 0, 1, 0] else [0, 0, 0, 0]) (void . dwmExtendFrameIntoClientArea hwnd)
 
-nativeFrameOutset win = do
-  hwnd <- windowHwnd win
-  if hwnd == nullPtr
-    then pure (0, 0)
-    else do
-      ((), across, down) <- outPair (nanoUiNativeFrameOutset hwnd)
-      pure (fromIntegral across, fromIntegral down)
+nativeFrameOutset win =
+  withHwnd win (0, 0) $ \hwnd -> do
+    ((), across, down) <- outPair (nanoUiNativeFrameOutset hwnd)
+    pure (fromIntegral across, fromIntegral down)
 
 -- | Safe, not unsafe: this one puts the window procedure on and takes it off
 -- again, and Windows dispatches messages from inside both.
@@ -166,12 +160,14 @@ foreign import ccall safe "nano_ui_set_native_frame"
 foreign import ccall unsafe "nano_ui_native_frame_outset"
   nanoUiNativeFrameOutset :: Ptr () -> Ptr CInt -> Ptr CInt -> IO ()
 
--- | The window's @HWND@, or null for a window that has none.
-windowHwnd :: Ptr SDL_Window -> IO (Ptr ())
-windowHwnd win = do
+-- | Run an action on the window's @HWND@, or answer @none@ for a window that
+-- has none.
+withHwnd :: Ptr SDL_Window -> a -> (Ptr () -> IO a) -> IO a
+withHwnd win none act = do
   props <- SDL.getWindowProperties win
-  fmap castPtr $ BS.useAsCString sDL_PROP_WINDOW_WIN32_HWND_POINTER $ \name ->
+  hwnd <- BS.useAsCString sDL_PROP_WINDOW_WIN32_HWND_POINTER $ \name ->
     getPointerProperty props (PtrConst.unsafeFromPtr name) nullPtr
+  if hwnd == nullPtr then pure none else act (castPtr hwnd)
 
 -- | Set one of the desktop's window attributes that takes a word. The border
 -- colour and the corner preference are both Windows 11's. An older Windows
