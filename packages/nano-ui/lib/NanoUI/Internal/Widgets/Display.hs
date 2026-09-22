@@ -140,9 +140,7 @@ image f iid = void (image' f iid)
 image' :: Ui :> es => (Layout -> Layout) -> ImageId -> Eff es Response
 image' f (ImageId tid) = do
   wid <- nextId
-  let
-    stored = if tid <= 0 then T.empty else intValueText tid
-  addWidget wid NodeImage stored 0 (f defaultLayout)
+  addWidget wid NodeImage (if tid <= 0 then T.empty else intValueText tid) 0 (f defaultLayout)
 
 -- | An image id that no registered image uses and no earlier call returned.
 -- Take one for each image registered while the app runs.

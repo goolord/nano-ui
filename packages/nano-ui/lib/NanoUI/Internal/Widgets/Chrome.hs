@@ -22,7 +22,7 @@ import NanoUI.Internal.Style
   , gap
   , tight
   )
-import NanoUI.Internal.Widgets.Combinators (buttonStyled)
+import NanoUI.Internal.Widgets.Combinators (buttonStyledEx)
 import NanoUI.Internal.Widgets.Node (Response)
 
 titleBarH :: Float
@@ -54,6 +54,6 @@ titleLabelLayoutFor barH =
 
 {-# INLINE closeButton #-}
 closeButton :: (Ui :> es) => Eff es Response
-closeButton = buttonStyled "" 0 layout (buttonFlagClose .|. buttonCloseTrailing)
+closeButton = buttonStyledEx True "" 0 layout (buttonFlagClose .|. buttonCloseTrailing)
   where
     layout = tight . fixedWH closeButtonSize closeButtonSize . alignMid $ defaultLayout

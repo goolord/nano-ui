@@ -55,7 +55,7 @@ import GHC.Exts (isTrue#, reallyUnsafePtrEquality#)
 import NanoUI.Internal.Types (Rect (..), clamp, rectH, rectW, v2X, V2 (..), rectContains)
 import NanoUI.Internal.WidgetText (buttonFlagTable, tableHeaderLabel, tableSortReserve)
 import NanoUI.Internal.Widgets.Behavior (dragThresholdPx, useReorder)
-import NanoUI.Internal.Widgets.Combinators (buttonStyled)
+import NanoUI.Internal.Widgets.Combinators (buttonStyledEx)
 import NanoUI.Internal.Widgets.Layout (column', panel', row', scrollAreaIdConfigured, separator, spacer)
 import NanoUI.Internal.Frame.Scroll.Geometry (ScrollConfig (..), ScrollPolicy (..), scrollHorizontalHidden, scrollVerticalAuto, scrollVerticalHidden)
 import NanoUI.Internal.Widgets.Node
@@ -414,7 +414,7 @@ tableConfigured cfg f key cols inputRows curSort =
               when (k > 0) $ void separator
               withKey i $
                 column' (colBox i) $
-                  buttonStyled (tableHeaderLabel (smallAt numeric i False) (fromMaybe T.empty (hdrs V.!? i))) (if sortColIndex sort0 == i then 1 else 0) (cellLayout i) (sortMarkStyle sort0 i .|. buttonFlagTable)
+                  buttonStyledEx True (tableHeaderLabel (smallAt numeric i False) (fromMaybe T.empty (hdrs V.!? i))) (if sortColIndex sort0 == i then 1 else 0) (cellLayout i) (sortMarkStyle sort0 i .|. buttonFlagTable)
           void separator
           let !rowLay = gridRowLay idxs
               !colLays = map colBox idxs
@@ -497,7 +497,7 @@ tableConfigured cfg f key cols inputRows curSort =
         if IS.null hidden0
           then pure Nothing
           else fmap Just $
-            buttonStyled "Show all columns" 0 (tight . fillW $ defaultLayout) 0
+            buttonStyledEx True "Show all columns" 0 (tight . fillW $ defaultLayout) 0
       headerPairs <-
         panel' paneRoot $ do
           tagContainer tableWid
