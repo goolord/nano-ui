@@ -49,7 +49,7 @@ import NanoUI.Sdl.Internal.Font
   , glyphAtlasTextures
   , sdlFontCacheSource
   , prepareGlyphAtlasForFrame
-  , takeGlyphAtlasResetFlag
+  , glyphAtlasFull
   )
 import NanoUI.Sdl.Internal.NanoUIFont (NanoUIFont)
 import NanoUI.Sdl.Internal.Render (flushRenderBatch, renderDrawDataPass, snapDamage)
@@ -133,13 +133,12 @@ drawFrameWith ctx env inp forceFull evaluateUi = do
           then DamageFull
           else snapDamage scale dmg0
   writeIORef (sdlLastPresented env) False
-  -- A glyph-atlas reset or exhaustion during the UI pass means quads
-  -- recorded before that point hold stale (or unplaceable) UVs. Drop the
-  -- frame instead of presenting it: the screen keeps the previous valid
-  -- frame, 'damageFull' forces a full repaint, and
+  -- A glyph-atlas exhaustion during the UI pass means text quads the frame
+  -- could not place. Drop the frame instead of presenting it: the screen
+  -- keeps the previous valid frame, 'damageFull' forces a full repaint, and
   -- 'prepareGlyphAtlasForFrame' resets the atlas before the next frame
   -- records any quads, so text never flickers or vanishes for a frame.
-  atlasReset <- takeGlyphAtlasResetFlag (sdlGlyphAtlas env)
+  atlasReset <- glyphAtlasFull (sdlGlyphAtlas env)
   if atlasReset || damageIsEmpty damage || lw <= 0 || lh <= 0
     then do
       when atlasReset $ do
