@@ -386,10 +386,7 @@ fontSize sz l = l {layoutFontSize = max 0 sz}
 -- | Multiply an explicit font size, or 16 when none is set, by a scale factor.
 -- This uses 16 rather than querying the backend's default size.
 fontSizeScale :: Float -> Layout -> Layout
-fontSizeScale s l =
-  let cur = layoutFontSize l
-      sz = if cur > 0 then cur * s else 16 * s
-   in l {layoutFontSize = max 0 sz}
+fontSizeScale s l = fontSize ((if layoutFontSize l > 0 then layoutFontSize l else 16) * s) l
 
 -- | Override the theme's text colour for this node.
 fontColor :: Color -> Layout -> Layout
