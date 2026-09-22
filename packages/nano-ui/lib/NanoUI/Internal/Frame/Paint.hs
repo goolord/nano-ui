@@ -78,8 +78,7 @@ import NanoUI.Internal.Frame.Chrome
   , paintStyledRect
   )
 import NanoUI.Internal.Frame.Node (ScrollNode (..), nodeFontNative, readScrollNode, resolveTextFont, scrollNodeViewport)
-import NanoUI.Internal.Frame.Paint.Types (PaintEnv (..), buildPaintEnv)
-import NanoUI.Internal.Frame.Paint.Widgets (paintTextAreaNode, paintTextInputNode, paintWidget)
+import NanoUI.Internal.Frame.Paint.Widgets (PaintEnv (..), buildPaintEnv, paintTextAreaNode, paintTextInputNode, paintWidget)
 import NanoUI.Internal.Frame.Scroll.Geometry
   ( borderContentClip
   , padContentClip

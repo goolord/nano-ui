@@ -1,10 +1,13 @@
 {-# OPTIONS_GHC -fasm -fno-specialise-aggressively #-}
 
 
--- | Painters for controls and text fields. Each receives the shared paint
--- environment; NOINLINE keeps these large bodies out of the recursive node walk.
+-- | Painters for controls and text fields, and the paint environment they
+-- share with the node walk. NOINLINE keeps these large bodies out of the
+-- recursive node walk.
 module NanoUI.Internal.Frame.Paint.Widgets
-  ( paintWidget
+  ( PaintEnv (..)
+  , buildPaintEnv
+  , paintWidget
   , paintTextInputNode
   , paintTextAreaNode
   ) where
@@ -12,10 +15,12 @@ module NanoUI.Internal.Frame.Paint.Widgets
 import Control.Monad (unless, when)
 import Data.IORef (readIORef)
 import Data.Maybe (fromMaybe)
+import Data.Primitive.PrimArray (PrimArray)
 import qualified Data.Text as T
 import NanoUI.Internal.Context (Context (..), getStore)
 import NanoUI.Internal.Draw
   ( DrawArena (..)
+  , getClipPieces
   , pushCircle
   , pushFilledTriangle
   , pushLine
@@ -49,7 +54,6 @@ import NanoUI.Internal.Frame.Chrome
   , widgetVisualStyle
   )
 import NanoUI.Internal.Frame.Node (resolveFontFor)
-import NanoUI.Internal.Frame.Paint.Types (PaintEnv (..), popupPanelRect)
 import NanoUI.Internal.Frame.Spans (forWidgetTextPlacements_, plainFieldPen, selectableTextGeometry, textInputFg)
 import NanoUI.Internal.Frame.TextArea (drawTextAreaContentWith)
 import NanoUI.Internal.Frame.TextArea.Content (resolveTextAreaFont)
@@ -62,19 +66,25 @@ import NanoUI.Internal.Frame.TextInput
   , textInputFieldRect
   , textInputFieldTextClip
   )
+import NanoUI.Internal.Id (WidgetId (..))
 import NanoUI.Internal.Layout.Arena
-  ( NodeIdx
+  ( NodeArena
+  , NodeIdx
   , NodeType (..)
   , getAlignX
   , getNodeFontColor
   , getNodeFontSize
+  , getNodeRect
+  , getNodeType
   , getNodeValue
   , getOptions
+  , getParent
   , getStyleIdx
   , getText
   , getWidgetId
+  , walkAncestors
   )
-import NanoUI.Internal.Style (AlignX (..), Style, styleBg, styleBorder, styleFg, themeAccent, themeInput, themeOnAccent)
+import NanoUI.Internal.Style (AlignX (..), Style, Theme, styleBg, styleBorder, styleFg, themeAccent, themeInput, themeOnAccent)
 import NanoUI.Internal.Types (Color (..), Rect (..), clamp, clamp01, colorA, lerpColor, onGrid, rectInflate, rectNonEmpty)
 import NanoUI.Internal.WidgetText
   ( hasFlag
@@ -100,6 +110,60 @@ import NanoUI.Internal.WidgetText
   , treeDecodeStyle
   )
 import NanoUI.Internal.Widgets.ColorPicker (drawColorPickerPart)
+
+-- | Context, arenas, fonts, and interaction state read once for a paint pass.
+-- Fields retain boxed references so compiler unboxing does not expand the
+-- context and theme records at every recursive call.
+data PaintEnv = PaintEnv
+  { peContext :: Context
+  , peNodeArena :: NodeArena
+  , peDrawArena :: DrawArena
+  , peTheme :: Theme
+  , peScope :: Int
+    -- ^ The node scope 'peTheme' belongs to. A node in another scope repaints
+    -- its subtree with that scope's theme.
+  , peFontMetrics :: FontMetrics
+  , peOccluders :: PrimArray Float
+    -- ^ Opaque floating panel rects as @x0, y0, x1, y1@ runs; empty when the
+    -- frame has none.
+  , peFocusRing :: WidgetId
+    -- ^ The focused widget while its keyboard focus ring shows, else 0.
+  , pePieces :: PrimArray Float
+    -- ^ The frame's damage pieces as @x0, y0, x1, y1@ runs, of which a node
+    -- must meet one to paint; empty when the clip is the one piece.
+  }
+
+-- | Locality helper for callers inside the paint frame loop; a fresh env
+-- re-reads the theme once.
+{-# NOINLINE buildPaintEnv #-}
+buildPaintEnv :: Context -> PrimArray Float -> IO PaintEnv
+buildPaintEnv ctx occluders = do
+  theme <- readIORef (ctxTheme ctx)
+  focus <- readIORef (ctxFocusId ctx)
+  focusVisible <- readIORef (ctxFocusVisible ctx)
+  pieces <- getClipPieces (ctxDrawArena ctx)
+  pure PaintEnv
+    { peContext = ctx
+    , peNodeArena = ctxNodeArena ctx
+    , peDrawArena = ctxDrawArena ctx
+    , peTheme = theme
+    , peScope = 0
+    , peFontMetrics = ctxFontMetrics ctx
+    , peOccluders = occluders
+    , peFocusRing = if focusVisible then focus else WidgetId 0
+    , pePieces = pieces
+    }
+
+-- | Rect of the nearest popup-panel ancestor of @idx@, if any. Menu rows use
+-- it to paint hover fills edge-to-edge across the panel.
+popupPanelRect :: Context -> NodeIdx -> IO (Maybe Rect)
+popupPanelRect ctx idx = do
+  parent <- getParent na idx
+  walkAncestors na parent $ \p -> do
+    nt <- getNodeType na p
+    if nt == NodePopup then Just <$> getNodeRect na p else pure Nothing
+  where
+    na = ctxNodeArena ctx
 
 -- | Single-line text input: selectable, bare, search, combo or captioned field
 -- depending on the node's visual style.
@@ -205,8 +269,8 @@ paintWidgetBackground env idx nt style si menuRowRect value (Rect x y w h) = do
   when isTable $
     paintTableHeader da theme (value > 0.5) style x y w h
   case nt of
-    NodeCheckbox -> drawCheckbox da fm style x y h value (themeAccent theme) (styleBg (themeInput theme)) (themeOnAccent theme)
-    NodeRadio -> drawRadio da fm style x y h value (themeAccent theme) (styleBg (themeInput theme))
+    NodeCheckbox -> drawChoiceControl da fm style theme x y h value True
+    NodeRadio -> drawChoiceControl da fm style theme x y h value False
     NodeTree -> do
       let (_, depth, hasKids, expanded) = treeDecodeStyle si
       when hasKids $
@@ -423,52 +487,33 @@ paintComboField ctx da fm style idx focus box@(Rect x y w h) = do
     (lerpColor (styleFg style) (styleBg style) 0.45)
   paintFieldValue ctx da fm style idx focus box (comboTextClip fm x y w h) lbl value
 
-verticallyCenteredBox :: Float -> Float -> Float -> Float
-verticallyCenteredBox y h box =
-  let slotH = min h (box + 4)
-   in y + max 0 ((slotH - box) / 2)
-
-drawChoiceControl ::
-  DrawArena ->
-  FontMetrics ->
-  Style ->
-  Float ->
-  Float ->
-  Float ->
-  Float ->
-  Float ->
-  Float ->
-  Color ->
-  Color ->
-  Bool ->
-  (Float -> Float -> Float -> IO ()) ->
-  IO ()
-drawChoiceControl da fm style x y h r bw value accent well solidChecked postMark = do
+-- | The box of a checkbox (@isCheckbox@) or radio button at @x@, centred in
+-- a slot at most 4 pixels taller than it within @y h@. A checked checkbox is
+-- a solid accent box with a check mark; otherwise the box is a well, and a
+-- checked radio's has an accent ring and dot.
+drawChoiceControl :: DrawArena -> FontMetrics -> Style -> Theme -> Float -> Float -> Float -> Float -> Bool -> IO ()
+drawChoiceControl da fm style theme x y h value isCheckbox = do
   let box = checkboxBoxSize fm
-      bx = x
-      by = verticallyCenteredBox y h box
-      outer = Rect bx by box box
+      !r = if isCheckbox then min 6 (box / 3.5) else box / 2
+      !bw = if isCheckbox then 1.5 else 2
+      by = y + max 0 ((min h (box + 4) - box) / 2)
+      outer = Rect x by box box
       checked = value >= 0.5
-  if checked && solidChecked
+      accent = themeAccent theme
+  if checked && isCheckbox
     then do
       pushRoundedRect da outer r accent
       pushRoundedStroke da outer r bw accent
-      postMark bx by box
+      drawCheckboxMark da x by box (themeOnAccent theme)
     else do
-      let inner = rectInflate (-bw) outer
-          innerR = max 0 (r - bw)
-          strokeCol = if checked then accent else styleBorder style
-      pushRoundedRect da inner innerR well
-      pushRoundedStroke da outer r bw strokeCol
-      when checked $ postMark bx by box
-
-drawCheckbox :: DrawArena -> FontMetrics -> Style -> Float -> Float -> Float -> Float -> Color -> Color -> Color -> IO ()
-drawCheckbox da fm style x y h value accent well mark =
-  let box = checkboxBoxSize fm
-      r = min 6 (box / 3.5)
-      bw = 1.5
-   in drawChoiceControl da fm style x y h r bw value accent well True $ \bx by b ->
-        drawCheckboxMark da bx by b mark
+      pushRoundedRect da (rectInflate (-bw) outer) (max 0 (r - bw)) (styleBg (themeInput theme))
+      pushRoundedStroke da outer r bw (if checked then accent else styleBorder style)
+      when checked $ do
+        s <- readIORef (daSnapScale da)
+        let !dot = box * 0.72
+            !dx = onGrid s x + (box - dot) / 2
+            !dy = onGrid s by + (box - dot) / 2
+        pushRoundedRectRaw da (Rect dx dy dot dot) (dot / 2) accent
 
 drawCheckboxMark :: DrawArena -> Float -> Float -> Float -> Color -> IO ()
 drawCheckboxMark da bx by box markCol = do
@@ -488,18 +533,6 @@ drawCheckboxMark da bx by box markCol = do
   cap x0 y0
   cap x1 y1
   cap x2 y2
-
-drawRadio :: DrawArena -> FontMetrics -> Style -> Float -> Float -> Float -> Float -> Color -> Color -> IO ()
-drawRadio da fm style x y h value accent well =
-  let box = checkboxBoxSize fm
-      r = box / 2
-      bw = 2
-   in drawChoiceControl da fm style x y h r bw value accent well False $ \bx by b -> do
-        s <- readIORef (daSnapScale da)
-        let !dot = b * 0.72
-            !dx = onGrid s bx + (b - dot) / 2
-            !dy = onGrid s by + (b - dot) / 2
-        pushRoundedRectRaw da (Rect dx dy dot dot) (dot / 2) accent
 
 -- | A cross centered in the box, or against its right edge when @trailing@.
 drawCloseIcon :: DrawArena -> Bool -> Float -> Float -> Float -> Float -> Color -> IO ()
