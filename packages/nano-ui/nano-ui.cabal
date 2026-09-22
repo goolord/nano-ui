@@ -141,7 +141,6 @@ library
         NanoUI.Internal.Frame.Scroll.Geometry
         NanoUI.Internal.Frame.Select
         NanoUI.Internal.Frame.Node
-        NanoUI.Internal.Frame.Overlay
         NanoUI.Internal.Frame.Spans
         NanoUI.Internal.Frame.SpanArena
         NanoUI.Internal.Frame.TextArea

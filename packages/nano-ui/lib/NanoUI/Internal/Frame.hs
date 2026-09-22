@@ -11,6 +11,7 @@ where
 import Control.Monad (unless, when)
 import Data.IORef (modifyIORef', readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
+import Data.Maybe (isJust)
 import Data.Typeable (Typeable)
 import Effectful (Eff, IOE, runEff, type (:>))
 import NanoUI.Internal.Context
@@ -41,6 +42,7 @@ import NanoUI.Internal.Context
   , getsOverlay
   , modifyOverlay
   , OverlayState (..)
+  , nodeTheme
   )
 import NanoUI.Internal.Context (beginFrameModal)
 import NanoUI.Internal.Damage (FrameSnapshot (..), captureFrameSnapshot, updatePrevRects, writeDamage)
@@ -53,6 +55,7 @@ import NanoUI.Internal.Draw
   , resetDrawArena
   , setClip
   , setClipPieces
+  , withClip
   )
 import NanoUI.Internal.Frame.Input
   ( armPointerPress
@@ -66,7 +69,8 @@ import NanoUI.Internal.Frame.Input
   , refreshHover
   )
 import NanoUI.Internal.Frame.Focus (constrainFocusToModal, syncWidgetLabels)
-import NanoUI.Internal.Frame.Paint (lowerShapes)
+import NanoUI.Internal.Frame.Chrome (overlayMenuStyle, overlayWindowStyle, paintMenuPanel)
+import NanoUI.Internal.Frame.Paint (lowerShapes, walkChildren)
 import NanoUI.Internal.Frame.Scroll
   ( applyScrollOffsets
   , updateScrollDrag
@@ -80,7 +84,6 @@ import NanoUI.Internal.Frame.Select
   , overlayMenuRects
   , routePointer
   )
-import NanoUI.Internal.Frame.Overlay (drawModalOverlays, drawPopupOverlays, drawWindowOverlays)
 import NanoUI.Internal.Frame.TextEdit (finalizeTextFieldMouse)
 import NanoUI.Internal.Frame.TextEdit.Menu
   ( closeTextEditMenuOnEscape
@@ -105,19 +108,24 @@ import NanoUI.Internal.Layout.Arena
   , arenaCount
   , captureLayoutCache
   , floatingNodeCount
+  , forFloatingNodes_
+  , getNodeRect
   , getNodeType
+  , getPadding
   , getWidgetId
   , layoutSigMatches
   , computeSubtreeHashes
   , newLayoutCache
   , resetNodeArena
   , restoreLayoutCache
+  , topModalNode
   )
 import NanoUI.Internal.Layout.Solve (placeFloatingNodes, runCustomMeasure, solveLayout)
 import NanoUI.Internal.Monad (NanoUI, Ui, runUi, whenM)
 import NanoUI.Internal.Store (mirrorStoresChanged)
-import NanoUI.Internal.Style (Theme (..))
-import NanoUI.Internal.Types (Damage (..), Rect, Size (..), rectInflate, rectNonEmpty)
+import NanoUI.Internal.Style (Padding (..), Theme (..), themeOverlayDim, themeSeparator)
+import NanoUI.Internal.Types (Damage (..), Rect (..), Size (..), rectInflate, rectNonEmpty)
+import NanoUI.Internal.Widgets.Chrome (titleBarChromeHFor, windowChromeSepH)
 
 -- | Build, lay out, resolve input, and paint one headless frame. Returns the
 -- view result, emitted messages, borrowed draw buffers, and whether state
@@ -290,9 +298,7 @@ runFrameEff unlift ctx frameInp ui = do
     paintDamageClip ctx damage =<< takeDamagePieces ctx
   lowerShapes ctx
   beginLayer (ctxDrawArena ctx) LayerOverlay
-  drawWindowOverlays ctx
-  drawModalOverlays ctx size
-  drawPopupOverlays ctx
+  drawFloatingPanels ctx size
   drawSelectOverlays ctx frameInp
   drawTextEditMenuOverlays ctx frameInp
   drawData <- finishDraw (ctxDrawArena ctx)
@@ -314,6 +320,31 @@ resetUiBuild ctx newFrame = do
   writeIORef (ctxHotId ctx) (WidgetId 0)
   writeIORef (ctxCursorZones ctx) []
   resetDrawingScopeCache ctx
+
+-- | Paint the floating panels over the page: windows with their title-bar
+-- separator, the modal backdrop and the modals, then popups. Each is a
+-- menu-style panel in its node's theme with its subtree clipped inside.
+drawFloatingPanels :: Context -> Size -> IO ()
+drawFloatingPanels ctx (Size ww wh) = do
+  let na = ctxNodeArena ctx
+      da = ctxDrawArena ctx
+      panels nt style after = forFloatingNodes_ na nt $ \idx -> do
+        rect <- getNodeRect na idx
+        theme <- nodeTheme ctx idx
+        paintMenuPanel da theme (style theme) rect
+        withClip da rect (walkChildren ctx idx)
+        after theme idx rect
+      plain _ _ _ = pure ()
+  panels NodeWindow overlayWindowStyle $ \theme idx (Rect x y w _) -> do
+    pad <- getPadding na idx
+    let sepY = y + padT pad + titleBarChromeHFor - windowChromeSepH
+        sepW = max 0 (w - padL pad - padR pad)
+    pushRect da (Rect (x + padL pad) sepY sepW windowChromeSepH) (themeSeparator theme)
+  whenM (isJust <$> topModalNode na) $ do
+    theme <- readIORef (ctxTheme ctx)
+    pushRect da (Rect 0 0 ww wh) (themeOverlayDim theme)
+    panels NodeModal overlayMenuStyle plain
+  panels NodePopup overlayMenuStyle plain
 
 -- | Start a clip frame from the window backdrop, as a full frame starts from a
 -- window-coloured clear. Widgets with a transparent fill, such as an idle
