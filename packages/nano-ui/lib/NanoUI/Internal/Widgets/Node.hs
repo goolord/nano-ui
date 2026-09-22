@@ -12,14 +12,12 @@ module NanoUI.Internal.Widgets.Node
   , respRightPressed
   , respRightClicked
   , mkResponse
-  , emptyModalResp
   , setClicked
   , setChanged
   , setSubmitted
   , inertResponse
   , currentParent
   , container
-  , containerWithId
   , containerResponse
   , withContainerNode
   , floatingPanel
@@ -27,15 +25,13 @@ module NanoUI.Internal.Widgets.Node
   , addWidget
   , addWidgetStyled
   , addWidgetWithOptions
-  , addSizingLeafNode
   , tagContainer
   )
 where
 
 import Control.Monad (when)
 import Data.IORef (readIORef, writeIORef)
-import Data.Functor ((<&>))
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Text (Text)
 import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context
@@ -60,7 +56,6 @@ import NanoUI.Internal.Layout.Arena
   ( NodeArena
   , NodeIdx
   , NodeType (..)
-  , addNode
   , addNodeFromLayout
   , rootAttachParent
   , setNodeText
@@ -69,24 +64,15 @@ import NanoUI.Internal.Layout.Arena
   , setStyleIdx
   , setWidgetId
   )
-import NanoUI.Internal.Monad (Ui, askContext, askFrameInput, askInput, localInput, nextId, uiIO, withContext)
+import NanoUI.Internal.Monad (Ui, (<&&>), askContext, askFrameInput, askInput, localInput, nextId, uiIO, withContext)
 import NanoUI.Internal.WidgetText (packTextNodeStyle)
-import NanoUI.Internal.Style
-  ( Direction (..)
-  , Layout (..)
-  , Padding (..)
-  , Sizing (..)
-  , defaultLayout
-  )
+import NanoUI.Internal.Style (Layout (..))
 import NanoUI.Internal.Types (Rect (..), rectContains, rectH, rectHit, rectUnion, rectW)
 import NanoUI.Internal.Frame.Hit (findNodeByWidgetId, nodeInteractionHit, scrollHitRect)
 
 -- | The innermost open container, or @-1@ at the root.
 currentParent :: Context -> IO Int
-currentParent ctx =
-  readIORef (ctxContainerStack ctx) <&> \case
-    [] -> -1
-    (p : _) -> p
+currentParent ctx = fromMaybe (-1) . listToMaybe <$> readIORef (ctxContainerStack ctx)
 
 -- | Anything that carries a widget 'Response' (composite widget results such
 -- as 'NanoUI.Internal.Widgets.Tabs.TabResponse'). The @resp*@ accessors work on all of them.
@@ -199,35 +185,22 @@ mkResponse :: WidgetId -> Rect -> Bool -> Bool -> Bool -> Response
 mkResponse wid rect hovered clicked changed =
   Response wid rect hovered False clicked changed False False False
 
-emptyModalResp :: WidgetId -> Response
-emptyModalResp wid = mempty {rawRespId = wid}
-
 container :: Ui :> es => NodeType -> Layout -> Eff es a -> Eff es a
-container nt layout child = runContainer nt layout Nothing child
+container nt layout child = do
+  ctx <- askContext
+  idx <- uiIO $ do
+    parent <- currentParent ctx
+    addNodeFromLayout (ctxNodeArena ctx) nt parent layout
+  withContainerNode True idx child
 
--- | 'container' tagged with @wid@, so store keys and damage requests under
--- that id resolve to the container. Containers are never hot, so the id does
--- not make it hoverable.
-containerWithId :: Ui :> es => NodeType -> Layout -> WidgetId -> Eff es a -> Eff es a
-containerWithId nt layout wid child = runContainer nt layout (Just wid) child
-
+-- | A 'container' tagged with a fresh id, and its interaction under that id.
 containerResponse :: Ui :> es => NodeType -> Layout -> Eff es a -> Eff es (a, Response)
 containerResponse nt layout child = do
   wid <- nextId
   inp <- askInput
-  r <- runContainer nt layout (Just wid) child
+  r <- container nt layout (tagContainer wid >> child)
   resp <- withContext (\ctx -> resolveInteraction ctx inp wid)
   pure (r, resp)
-
-runContainer :: Ui :> es => NodeType -> Layout -> Maybe WidgetId -> Eff es a -> Eff es a
-runContainer nt layout mWid child = do
-  ctx <- askContext
-  idx <- uiIO $ do
-    parent <- currentParent ctx
-    idx <- addNodeFromLayout (ctxNodeArena ctx) nt parent layout
-    mapM_ (setWidgetId (ctxNodeArena ctx) idx) mWid
-    pure idx
-  withContainerNode True idx child
 
 -- | Push container node @idx@ (already added under the current parent), run
 -- @child@ inside it, then pop. @scoped@ also runs the children in a fresh id
@@ -237,15 +210,12 @@ withContainerNode :: Ui :> es => Bool -> NodeIdx -> Eff es a -> Eff es a
 withContainerNode scoped idx child = do
   ctx <- askContext
   (stack, parentIds) <- uiIO $ do
-    stack0 <- readIORef (ctxContainerStack ctx)
-    writeIORef (ctxContainerStack ctx) (idx : stack0)
-    ids0 <- readIORef (ctxIdContext ctx)
-    if scoped
-      then do
-        let (parentIds, childIds) = enterScope scopeTag ids0
-        writeIORef (ctxIdContext ctx) childIds
-        pure (stack0, parentIds)
-      else pure (stack0, ids0)
+    stack <- readIORef (ctxContainerStack ctx)
+    writeIORef (ctxContainerStack ctx) (idx : stack)
+    ids <- readIORef (ctxIdContext ctx)
+    let !(!parentIds, !childIds) = if scoped then enterScope scopeTag ids else (ids, ids)
+    writeIORef (ctxIdContext ctx) childIds
+    pure (stack, parentIds)
   r <- child
   uiIO $ do
     writeIORef (ctxContainerStack ctx) stack
@@ -282,29 +252,6 @@ dropdownInput wid =
     RouteDropdown owner | owner == wid -> askFrameInput
     _ -> askInput
 
-addSizingLeafNode ::
-  Context
-  -> Input
-  -> WidgetId
-  -> NodeType
-  -> Direction
-  -> Sizing
-  -> Sizing
-  -> IO Response
-addSizingLeafNode ctx inp wid nt dir wSiz hSiz = do
-  parent <- currentParent ctx
-  let layout =
-        defaultLayout
-          { layoutDirection = dir
-          , layoutWidth = wSiz
-          , layoutHeight = hSiz
-          , layoutPadding = Padding 0 0 0 0
-          , layoutGap = 0
-          }
-  idx <- addNode (ctxNodeArena ctx) nt parent layout
-  setWidgetId (ctxNodeArena ctx) idx wid
-  resolveInteraction ctx inp wid
-
 {-# INLINE addWidget #-}
 addWidget ::
   Ui :> es =>
@@ -328,12 +275,7 @@ addWidgetStyled ::
   -> Eff es Response
 addWidgetStyled wid nt txt value layout styleIdx =
   addWidgetNode wid nt txt value layout $ \arena idx ->
-    let
-      effectiveStyle
-        | nt == NodeText = packTextNodeStyle layout styleIdx
-        | otherwise = styleIdx
-     in
-      setStyleIdx arena idx effectiveStyle
+    setStyleIdx arena idx (if nt == NodeText then packTextNodeStyle layout styleIdx else styleIdx)
 
 -- The initializer specializes at each call site; the node allocation, identity
 -- and interaction path are shared by styled leaves and option controls.
@@ -381,8 +323,7 @@ resolveInteraction ctx inp wid = do
   let
     mouse = inputMousePos inp
     rect = fromMaybe (Rect 0 0 0 0) mrect
-    canHit = rectHit rect mouse || pending == wid
-  if not canHit
+  if not (rectHit rect mouse || pending == wid)
     then pure $! mkResponse wid rect False False False
     else do
       disabled <- isDisabled ctx wid
@@ -399,37 +340,27 @@ resolveInteraction ctx inp wid = do
       -- drag passes over is not hovered, so it neither lights up nor reports a
       -- press of its own.
       captured <-
-        if not (inputMouseDown inp)
-          then pure False
-          else
-            if hashWidgetId active /= 0 && active /= wid
-              then pure True
-              else not <$> startedHere (ctxPressPos ctx)
-      hovered <-
-        if disabled || captured
-          then pure False
-          else hitAt mouse
+        pure (inputMouseDown inp)
+          <&&> if hashWidgetId active /= 0 && active /= wid
+            then pure True
+            else not <$> startedHere (ctxPressPos ctx)
+      hovered <- pure (not (disabled || captured)) <&&> hitAt mouse
       let
         pressed = hovered && inputMouseDown inp
         rightPressed = hovered && inputMouseRightDown inp
       -- The click belongs to whatever the press went down on: a release that
       -- drifted here from a neighbouring widget is not this widget's click.
-      released <-
-        if hovered && inputMouseReleased inp
-          then startedHere (ctxPressPos ctx)
-          else pure False
-      rightReleased <-
-        if hovered && inputMouseRightReleased inp
-          then startedHere (ctxRightPressPos ctx)
-          else pure False
+      released <- pure (hovered && inputMouseReleased inp) <&&> startedHere (ctxPressPos ctx)
+      rightClicked <-
+        pure (hovered && inputMouseRightReleased inp) <&&> startedHere (ctxRightPressPos ctx)
       when (released && wid == active) $
         writeIORef (ctxReleaseClickedId ctx) wid
-      let
-        clicked = released || pending == wid
-        rightClicked = rightReleased
+      let clicked = released || pending == wid
       pure $! Response wid rect hovered pressed clicked False False rightPressed rightClicked
 
--- | Stamp the current container with a widget id (radio/tree group key).
+-- | Stamp the current container with a widget id (a radio or tree group key),
+-- so store keys and damage requests under that id resolve to the container.
+-- Containers are never hot, so the id does not make it hoverable.
 tagContainer :: Ui :> es => WidgetId -> Eff es ()
 tagContainer wid = do
   ctx <- askContext

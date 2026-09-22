@@ -1,8 +1,6 @@
 -- | Button and selection helpers shared by the widget modules.
 module NanoUI.Internal.Widgets.Combinators
-  ( buttonStyled
-  , buttonStyledEx
-  , selectableItem
+  ( buttonStyledEx
   , withBoundedIndex
   , finishToggle
   , finishInput
@@ -36,12 +34,10 @@ import NanoUI.Internal.Widgets.Node
   , setClicked
   )
 
--- | Button with styleIdx for active, sort, badge, or close chrome. Focusable
--- and activatable with Enter or Space while focused.
-buttonStyled :: (Ui :> es) => Text -> Float -> Layout -> Int -> Eff es Response
-buttonStyled = buttonStyledEx True
-
--- | Shared activation path for ordinary buttons, menu items, and header chrome.
+-- | A button, given whether it is enabled, its value, and a style index for
+-- active, sort, badge, or close chrome: the shared activation path for
+-- ordinary buttons, menu items, and header chrome. An enabled button is
+-- focusable and activatable with Enter or Space while focused.
 -- Disabled controls keep their identity and geometry but cannot take focus or
 -- activate, including through a click queued before they became disabled.
 {-# INLINE buttonStyledEx #-}
@@ -58,17 +54,6 @@ buttonStyledEx enabled txt value layout styleIdx = do
       keyClick <- keyActivated wid
       pure (if keyClick then setClicked True resp else resp)
     else pure (inertResponse resp)
-
-selectableItem :: (Ui :> es) => NodeType -> Text -> Bool -> Layout -> Int -> Eff es Response
-selectableItem nt txt selected layout styleIdx = do
-  wid <- nextId
-  addWidgetStyled
-    wid
-    nt
-    txt
-    (if selected then 1 else 0)
-    layout
-    styleIdx
 
 -- | Finish a boolean control after its node has registered focus eligibility.
 -- Keyboard activation changes the value without inventing a pointer click.

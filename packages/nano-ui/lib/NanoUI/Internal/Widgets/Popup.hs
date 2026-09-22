@@ -56,7 +56,6 @@ import NanoUI.Internal.Widgets.Node
   ( HasResponse
   , Response (..)
   , containerResponse
-  , emptyModalResp
   , floatingPanel
   , mkResponse
   , respHovered
@@ -137,7 +136,7 @@ floatingOverlay open dismissable addPanel enter body = do
   if not open
     then do
       uiIO (modifyIORef' (ctxIdContext ctx) (fst . enterScope scopeTag))
-      pure (emptyModalResp wid, Nothing)
+      pure (mempty {rawRespId = wid}, Nothing)
     else do
       -- Hovered is the pointer on the panel as the panel's own layer sees it,
       -- so whatever is in front of the panel takes the hover with it.

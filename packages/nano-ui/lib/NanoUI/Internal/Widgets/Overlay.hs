@@ -56,7 +56,7 @@ import NanoUI.Internal.Style
   )
 import NanoUI.Internal.Types (Rect (..), Size (..), clamp, rectNonEmpty)
 import NanoUI.Internal.WidgetText (buttonCloseTrailing, buttonFlagClose)
-import NanoUI.Internal.Widgets.Combinators (buttonStyled)
+import NanoUI.Internal.Widgets.Combinators (buttonStyledEx)
 import NanoUI.Internal.Widgets.Popup (floatingOverlay)
 import NanoUI.Internal.Widgets.Layout
   ( columnWith
@@ -205,7 +205,7 @@ overlay isModal shape open title child = do
           (if isModal then id else withKey title) (void (labelEx titleLayout title))
         flex
         withKey ("close" :: Text) $
-          buttonStyled "" 0 (tight . fixedWH 24 24 . alignMid $ defaultLayout) $
+          buttonStyledEx True "" 0 (tight . fixedWH 24 24 . alignMid $ defaultLayout) $
             buttonFlagClose .|. buttonCloseTrailing
     when (isModal && not (T.null title)) separator
     -- A panel of a fixed height holds its body, which fills what the

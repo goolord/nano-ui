@@ -27,7 +27,7 @@ import NanoUI.Internal.Store (Slot (..), fieldPoint, findSlot, flagSlot, insertS
 import NanoUI.Internal.Style (Layout (..), Padding (..), defaultLayout, fillW, fixedH, fontMuted, gap, minW, padXY, tight)
 import NanoUI.Internal.Types (PopupAnchor (..), PopupPlacement (..), V2 (..))
 import NanoUI.Internal.WidgetText (buttonFlagMenu, buttonFlagMenuBar)
-import NanoUI.Internal.Widgets.Combinators (buttonStyled)
+import NanoUI.Internal.Widgets.Combinators (buttonStyledEx)
 import NanoUI.Internal.Widgets.Layout (columnWith, labelEx, rowWith, separator)
 import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Widgets.Node (HasResponse, Response (..), containerResponse, inertResponse, respClicked, respHovered, respRightClicked)
@@ -107,7 +107,7 @@ useContextMenu = do
 -- solver reserves for menu buttons. Its response never reports interaction.
 menuItemWith :: Ui :> es => Text -> Maybe Text -> Bool -> Eff es Response
 menuItemWith lbl hint enabled
-  | enabled = buttonStyled text 0 menuRowLayout buttonFlagMenu
+  | enabled = buttonStyledEx True text 0 menuRowLayout buttonFlagMenu
   | otherwise = do
       ctx <- askContext
       let (ix, _) = widgetContentInset (ctxFontMetrics ctx)
@@ -170,7 +170,7 @@ menuButtonWith f txt open = respClicked <$> menuButtonWith' f txt open
 -- | 'menuButtonWith' returning its 'Response'.
 menuButtonWith' :: Ui :> es => (Layout -> Layout) -> Text -> Bool -> Eff es Response
 menuButtonWith' f txt open =
-  buttonStyled txt (if open then 1 else 0) (f (tight defaultLayout)) buttonFlagMenuBar
+  buttonStyledEx True txt (if open then 1 else 0) (f (tight defaultLayout)) buttonFlagMenuBar
 
 -- | Separator line inside a context menu, matching the text-field context
 -- menu painter exactly: a 1px rule inset 'menuItemPadX' from the panel edge

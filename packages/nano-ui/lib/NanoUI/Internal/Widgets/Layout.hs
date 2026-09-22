@@ -50,43 +50,36 @@ import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Layout.Arena
   ( DirTag (..)
   , NodeType (..)
+  , addNode
   , addNodeFromLayout
   , getDirection
   , setStyleIdx
   , setWidgetId
   )
-import NanoUI.Internal.Monad (Ui, askContext, askDefaultLayout, askInput, nextId, styled, uiIO, windowWidth, withContext)
+import NanoUI.Internal.Monad (Ui, askContext, askDefaultLayout, nextId, styled, uiIO, windowWidth, withContext)
 import NanoUI.Internal.Style
-  ( AlignX (..)
-  , Direction (..)
+  ( Direction (..)
   , Layout (..)
   , Sizing (..)
+  , alignCenter
   , alignMid
+  , defaultLayout
   , fillW
   , gap
   , grow
   , padXY
   , panelStyle
+  , tight
   )
 import NanoUI.Internal.Style qualified as Style
 import NanoUI.Internal.Types (Color (..), lerpColor)
 import NanoUI.Internal.Widgets.Node
   ( Response
-  , addSizingLeafNode
   , addWidget
   , container
-
   , currentParent
   , withContainerNode
   )
-
--- =============================================================================
--- Internal Ambient Helpers
--- =============================================================================
-
-{-# INLINE withDefault #-}
-withDefault :: Ui :> es => (Layout -> Eff es a -> Eff es r) -> Eff es a -> Eff es r
-withDefault = withDefaultWith id
 
 {-# INLINE withDefaultWith #-}
 withDefaultWith :: Ui :> es => (Layout -> Layout) -> (Layout -> Eff es a -> Eff es r) -> Eff es a -> Eff es r
@@ -94,14 +87,10 @@ withDefaultWith f c child = do
   base <- askDefaultLayout
   c (f base) child
 
--- =============================================================================
--- Panel
--- =============================================================================
-
 -- | Container with the theme's panel background and border. Returns its body's result.
 {-# INLINE panel #-}
 panel :: Ui :> es => Eff es a -> Eff es a
-panel = withDefault panel'
+panel = panelWith id
 
 -- | 'panel' with modified layout defaults.
 {-# INLINE panelWith #-}
@@ -127,14 +116,10 @@ calloutWith col f =
     (\t -> panelStyle (Style.background (lerpColor col (Style.styleBg (Style.themePanel t)) 0.88) . Style.borderColor col) t)
     . panelWith (f . padXY 10 6 . gap 8 . fillW)
 
--- =============================================================================
--- Row
--- =============================================================================
-
 -- | Lay out children left to right, using current defaults and a child id scope.
 {-# INLINE row #-}
 row :: Ui :> es => Eff es a -> Eff es a
-row = withDefault row'
+row = rowWith id
 
 -- | 'row' with modified layout defaults; direction remains horizontal.
 {-# INLINE rowWith #-}
@@ -145,14 +130,10 @@ rowWith = (`withDefaultWith` row')
 row' :: Ui :> es => Layout -> Eff es a -> Eff es a
 row' layout = container NodeContainer (layout {layoutDirection = Row})
 
--- =============================================================================
--- Column
--- =============================================================================
-
 -- | Lay out children top to bottom, using current defaults and a child id scope.
 {-# INLINE column #-}
 column :: Ui :> es => Eff es a -> Eff es a
-column = withDefault column'
+column = columnWith id
 
 -- | 'column' with modified layout defaults; direction remains vertical.
 {-# INLINE columnWith #-}
@@ -162,10 +143,6 @@ columnWith = (`withDefaultWith` column')
 {-# INLINE column' #-}
 column' :: Ui :> es => Layout -> Eff es a -> Eff es a
 column' layout = container NodeContainer (layout {layoutDirection = Column})
-
--- =============================================================================
--- Collection stacks
--- =============================================================================
 
 -- | Run a collection of widgets side by side, as in @hstack (map label names)@.
 {-# INLINE hstack #-}
@@ -177,27 +154,16 @@ hstack = row . sequence_
 vstack :: (Foldable f, Ui :> es) => f (Eff es ()) -> Eff es ()
 vstack = column . sequence_
 
--- =============================================================================
--- Grid
--- =============================================================================
-
 -- | Place children in a grid with at least one column. The count is clamped to 1.
 {-# INLINE grid #-}
 grid :: Ui :> es => Int -> Eff es a -> Eff es a
-grid n = withDefault (grid' n)
+grid n = gridWith n id
 
 -- | 'grid' with a layout modifier for spacing, sizing, and alignment.
 {-# INLINE gridWith #-}
 gridWith :: Ui :> es => Int -> (Layout -> Layout) -> Eff es a -> Eff es a
-gridWith n f = withDefaultWith f (grid' n)
-
-{-# INLINE grid' #-}
-grid' :: Ui :> es => Int -> Layout -> Eff es a -> Eff es a
-grid' n layout = container NodeContainer (layout {layoutGridCols = max 1 n})
-
--- =============================================================================
--- Responsive
--- =============================================================================
+gridWith n f =
+  withDefaultWith f $ \layout -> container NodeContainer layout {layoutGridCols = max 1 n}
 
 -- | Choose between two container builders based on window width.
 {-# INLINE responsive #-}
@@ -209,11 +175,7 @@ responsive breakpoint wideContainer narrowContainer child = do
 -- | A row while the window is at least @breakpoint@ wide, a column below it.
 {-# INLINE responsiveRowCol #-}
 responsiveRowCol :: Ui :> es => Float -> (Layout -> Layout) -> Eff es a -> Eff es a
-responsiveRowCol breakpoint f child = do
-  w <- windowWidth
-  base <- askDefaultLayout
-  let dir = if w >= breakpoint then Row else Column
-  container NodeContainer ((f base) {layoutDirection = dir}) child
+responsiveRowCol breakpoint f = responsive breakpoint (rowWith f) (columnWith f)
 
 -- | A line of text. Newlines start new lines.
 {-# INLINE label #-}
@@ -223,9 +185,7 @@ label txt = void (label' txt)
 -- | 'label' returning its 'Response', for a tooltip or an anchored popup.
 {-# INLINE label' #-}
 label' :: Ui :> es => Text -> Eff es Response
-label' txt = do
-  base <- askDefaultLayout
-  labelEx base txt
+label' = labelWith' id
 
 -- | 'label' with a layout modifier, for example @labelWith fontMono@.
 {-# INLINE labelWith #-}
@@ -252,67 +212,59 @@ flex = spacer (Grow 1) Fit
 
 -- | A one-pixel rule: horizontal in a column, vertical in a row.
 separator :: Ui :> es => Eff es ()
-separator = void $ do
+separator = do
   wid <- nextId
-  ctx <- askContext
-  inp <- askInput
-  uiIO $ do
+  withContext $ \ctx -> do
     parent <- currentParent ctx
-    parentDir <-
-      if parent < 0
-        then pure DirColumn
-        else getDirection (ctxNodeArena ctx) parent
-    let
-      (dir, wSiz, hSiz) =
-        case parentDir of
-          DirColumn -> (Column, Grow 1, Fixed 1)
-          DirRow -> (Row, Fixed 1, Grow 1)
-    addSizingLeafNode ctx inp wid NodeSeparator dir wSiz hSiz
+    parentDir <- if parent < 0 then pure DirColumn else getDirection (ctxNodeArena ctx) parent
+    case parentDir of
+      DirColumn -> addSizedLeaf ctx wid NodeSeparator Column (Grow 1) (Fixed 1)
+      DirRow -> addSizedLeaf ctx wid NodeSeparator Row (Fixed 1) (Grow 1)
 
 -- | Empty space with the given sizing on each axis.
 {-# INLINE spacer #-}
 spacer :: Ui :> es => Sizing -> Sizing -> Eff es ()
 spacer w h = do
   wid <- nextId
-  inp <- askInput
-  void (withContext (\ctx -> addSizingLeafNode ctx inp wid NodeSpacer Row w h))
+  withContext (\ctx -> addSizedLeaf ctx wid NodeSpacer Row w h)
+
+-- | A leaf with no content under the current parent, sized on each axis. It
+-- takes no input, so it resolves no 'Response'.
+addSizedLeaf :: Context -> WidgetId -> NodeType -> Direction -> Sizing -> Sizing -> IO ()
+addSizedLeaf ctx wid nt dir w h = do
+  parent <- currentParent ctx
+  idx <-
+    addNode (ctxNodeArena ctx) nt parent . gap 0 . tight $
+      defaultLayout {layoutDirection = dir, layoutWidth = w, layoutHeight = h}
+  setWidgetId (ctxNodeArena ctx) idx wid
+
+-- | Fill the available space and centre the body's children on both axes.
+{-# INLINE center #-}
+center :: Ui :> es => Eff es a -> Eff es a
+center = columnWith (grow . alignMid . alignCenter)
 
 -- | Scroll along the current layout direction, vertical by default. Constrain
 -- the viewport size so content can overflow it; the body still runs each frame.
 {-# INLINE scroll #-}
 scroll :: Ui :> es => Eff es a -> Eff es a
-scroll = withDefault scroll'
+scroll = scrollWith id
 
 -- | 'scroll' with modified viewport layout. Use 'scrollArea' when scroll commands
 -- need the container's id.
 {-# INLINE scrollWith #-}
 scrollWith :: Ui :> es => (Layout -> Layout) -> Eff es a -> Eff es a
-scrollWith = (`withDefaultWith` scroll')
-
-{-# INLINE scroll' #-}
-scroll' :: Ui :> es => Layout -> Eff es a -> Eff es a
-scroll' layout child =
-  snd <$> scrollConfigured (scrollDefault1D (layoutDirection layout)) layout child
-
--- | Fill the available space and centre the body's children on both axes.
-{-# INLINE center #-}
-center :: Ui :> es => Eff es a -> Eff es a
-center = columnWith (grow . alignMid . (\l -> l { layoutAlignX = AlignCenter }))
+scrollWith f child = snd <$> scrollArea f child
 
 -- | 'scrollWith' that also returns the container's widget id, which keys its
 -- scroll offset.
 {-# INLINE scrollArea #-}
 scrollArea :: Ui :> es => (Layout -> Layout) -> Eff es a -> Eff es (WidgetId, a)
-scrollArea f child = do
-  layout <- f <$> askDefaultLayout
-  scrollConfigured (scrollDefault1D (layoutDirection layout)) layout child
+scrollArea = scrollAreaFrom (scrollDefault1D . layoutDirection)
 
 {-# INLINE scrollAreaIdConfigured #-}
 scrollAreaIdConfigured :: Ui :> es => WidgetId -> Layout -> ScrollConfig -> Eff es a -> Eff es a
 scrollAreaIdConfigured wid layout cfg child = do
   ctx <- askContext
-  -- Push a scroll container node carrying the config as its style index,
-  -- run the child inside it, then pop.
   idx <- uiIO $ do
     parent <- currentParent ctx
     idx <- addNodeFromLayout (ctxNodeArena ctx) NodeScrollContainer parent layout
@@ -325,27 +277,24 @@ scrollAreaIdConfigured wid layout cfg child = do
 -- | Scroll container on both axes.
 {-# INLINE scroll2D #-}
 scroll2D :: Ui :> es => Eff es a -> Eff es a
-scroll2D = withDefault scroll2D'
+scroll2D = scroll2DWith id
 
 -- | 'scroll2D' with modified viewport layout.
 {-# INLINE scroll2DWith #-}
 scroll2DWith :: Ui :> es => (Layout -> Layout) -> Eff es a -> Eff es a
-scroll2DWith = (`withDefaultWith` scroll2D')
-
-{-# INLINE scroll2D' #-}
-scroll2D' :: Ui :> es => Layout -> Eff es a -> Eff es a
-scroll2D' layout child = fmap snd (scrollConfigured defaultScrollConfig layout child)
+scroll2DWith f child = snd <$> scrollArea2D f child
 
 -- | 'scroll2DWith' that also returns the container's widget id.
 {-# INLINE scrollArea2D #-}
 scrollArea2D :: Ui :> es => (Layout -> Layout) -> Eff es a -> Eff es (WidgetId, a)
-scrollArea2D f child = do
-  layout <- f <$> askDefaultLayout
-  scrollConfigured defaultScrollConfig layout child
+scrollArea2D = scrollAreaFrom (const defaultScrollConfig)
 
-{-# INLINE scrollConfigured #-}
-scrollConfigured :: Ui :> es => ScrollConfig -> Layout -> Eff es a -> Eff es (WidgetId, a)
-scrollConfigured cfg layout child = do
+-- | A scroll container with a fresh id over the modified defaults, configured
+-- from its layout.
+{-# INLINE scrollAreaFrom #-}
+scrollAreaFrom ::
+  Ui :> es => (Layout -> ScrollConfig) -> (Layout -> Layout) -> Eff es a -> Eff es (WidgetId, a)
+scrollAreaFrom config f child = do
+  layout <- f <$> askDefaultLayout
   wid <- nextId
-  r <- scrollAreaIdConfigured wid layout cfg child
-  pure (wid, r)
+  (wid,) <$> scrollAreaIdConfigured wid layout (config layout) child

@@ -113,9 +113,9 @@ import NanoUI.Internal.Widgets.Node
   , addWidget
   , addWidgetStyled
   , container
-  , containerWithId
   , respRect
   , setChanged
+  , tagContainer
   )
 import NanoUI.Internal.Widgets.NumericInput (NumericInputConfig (..), defaultNumericInputConfig, numericInputConfigured)
 import NanoUI.Widgets.TextEditor (singleLineMode)
@@ -396,7 +396,8 @@ colorPickerWith showAlpha value = do
     mapM_ (registerFocusable ctx) (wid : hueWid : [alphaWid | showAlpha])
   (start, final, svResp) <- container NodeContainer (colorPickerLayout Column) $ do
     (sv, hue, alphaPart) <-
-      containerWithId NodeContainer (colorPickerLayout Row) (pickerStateId wid) $ do
+      container NodeContainer (colorPickerLayout Row) $ do
+        tagContainer (pickerStateId wid)
         sv <- part wid PickerSv colorPickerSvLayout
         hue <- part hueWid PickerHue (column colorPickerBarW)
         alphaPart <-
