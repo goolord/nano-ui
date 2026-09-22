@@ -4,6 +4,11 @@
 
 ### Changed
 
+- Plots and diagrams are anti-aliased. A filled path is one `FillPolygon`
+  and a stroked one one `StrokePolyline`, instead of hard-edged
+  `FillTriangle`s whose corners each snapped to the pixel grid, so lines
+  and markers no longer come out jagged. Strokes join with miters rather
+  than narrowing at each bend.
 - `NanoUI.Diagrams.Tessellation` is now `NanoUI.Diagrams.Internal.Tessellation`.
 - Draw ops are a `SmallArray DrawOp` from `primitive` instead of a boxed
   `Vector` in `diagramOps`, `diagramTextOps`, `diagramFrame` and

@@ -322,12 +322,20 @@ stripeColor theme s
 tableStripeColor :: Theme -> Int -> Maybe Color
 tableStripeColor theme si = stripeColor theme (textNodeStripe si)
 
--- | Trailing slot reserved in every header so the sort mark never changes column width.
+-- | Slot reserved in every header so the sort mark never changes column
+-- width: trailing, or leading ('tableSortReserveLead') in a right-aligned
+-- column, whose arrow sits on the left.
 tableSortReserve :: Text
 tableSortReserve = "  ▲"
 
-tableHeaderLabel :: Text -> Text
-tableHeaderLabel hdr = hdr <> tableSortReserve
+tableSortReserveLead :: Text
+tableSortReserveLead = "▲  "
+
+-- | A header's label with its sort slot, leading when @alignEnd@.
+tableHeaderLabel :: Bool -> Text -> Text
+tableHeaderLabel alignEnd hdr
+  | alignEnd = tableSortReserveLead <> hdr
+  | otherwise = hdr <> tableSortReserve
 
 -- | Sort direction encoded for a table-header style. Lives in bits 16-17: the
 -- low nibbles are the font fields, and a mark value of 1 or 2 in bit 0-1 used
@@ -343,8 +351,10 @@ tableSortBlank :: Text
 tableSortBlank = T.map (const ' ') tableSortReserve
 
 tableHeaderDisplayText :: Text -> Text
-tableHeaderDisplayText txt =
-  fromMaybe txt (T.stripSuffix tableSortReserve txt) <> tableSortBlank
+tableHeaderDisplayText txt
+  | Just hdr <- T.stripSuffix tableSortReserve txt = hdr <> tableSortBlank
+  | Just hdr <- T.stripPrefix tableSortReserveLead txt = tableSortBlank <> hdr
+  | otherwise = txt <> tableSortBlank
 
 -- Type flags live in bits 28-31 so visual style and tab index stay in the low bits.
 buttonFlagClose :: Int

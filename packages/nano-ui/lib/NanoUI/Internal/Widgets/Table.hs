@@ -443,7 +443,7 @@ tableConfigured cfg f key cols inputRows curSort =
               when (k > 0) $ void separator
               withKey i $
                 column' (colBox i) $
-                  buttonStyled (tableHeaderLabel (fromMaybe T.empty (hdrs V.!? i))) (if sortColIndex sort0 == i then 1 else 0) (cellLayout i) (sortMarkStyle sort0 i .|. buttonFlagTable)
+                  buttonStyled (tableHeaderLabel (smallAt numeric i False) (fromMaybe T.empty (hdrs V.!? i))) (if sortColIndex sort0 == i then 1 else 0) (cellLayout i) (sortMarkStyle sort0 i .|. buttonFlagTable)
           void separator
           let !rowLay = gridRowLay idxs
               !colLays = map colBox idxs

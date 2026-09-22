@@ -31,7 +31,7 @@ module NanoUI.Internal.Draw.Types
 where
 
 import Data.IORef (IORef)
-import Data.Primitive.PrimArray (MutablePrimArray, PrimArray, indexPrimArray)
+import Data.Primitive.PrimArray (MutablePrimArray, PrimArray, generatePrimArray, indexPrimArray, sizeofPrimArray)
 import qualified Data.Text as T
 import Data.Primitive.SmallArray (SmallArray)
 import Data.Word (Word32, Word8)
@@ -64,7 +64,9 @@ data DrawOp
       {-# UNPACK #-} !Float
       {-# UNPACK #-} !Float
       !Color
-  -- ^ Three x/y pairs followed by the fill colour.
+  -- ^ Three x/y pairs followed by the fill colour. The edges are
+  -- anti-aliased, so a shape tessellated into triangles shows faint seams
+  -- along the shared edges; fill it with 'FillPolygon' instead.
   | FillCircle
       {-# UNPACK #-} !Float
       {-# UNPACK #-} !Float
@@ -96,6 +98,14 @@ data DrawOp
       {-# UNPACK #-} !Float
       !Color
   -- ^ Anti-aliased line: endpoint x0/y0/x1/y1, width, and colour.
+  | FillPolygon !(PrimArray Float) !(PrimArray Int) !Color
+  -- ^ Simple polygon with anti-aliased edges: its outline as x/y pairs,
+  -- without repeating the first point; index triples into the outline's
+  -- points that cover it; and the fill colour.
+  | StrokePolyline !(PrimArray Float) {-# UNPACK #-} !Float !Bool !Color
+  -- ^ Anti-aliased polyline with mitered joins: its points as x/y pairs,
+  -- width, whether the last point joins back to the first (which is then not
+  -- repeated), and colour.
   | FillQuadGradient !Rect !Color !Color !Color !Color
   -- ^ Rectangle with colours at top-left, top-right, bottom-right, bottom-left.
   | DrawImageRect
@@ -155,10 +165,18 @@ shiftDrawOp dx dy op =
     StrokeRoundedRect (Rect x y w h) r bw c -> StrokeRoundedRect (Rect (x + dx) (y + dy) w h) r bw c
     StrokeCircle cx cy r bw c -> StrokeCircle (cx + dx) (cy + dy) r bw c
     StrokeLineAA x0 y0 x1 y1 bw c -> StrokeLineAA (x0 + dx) (y0 + dy) (x1 + dx) (y1 + dy) bw c
+    FillPolygon pts tris c -> FillPolygon (shiftPoints dx dy pts) tris c
+    StrokePolyline pts w closed c -> StrokePolyline (shiftPoints dx dy pts) w closed c
     FillQuadGradient (Rect x y w h) c0 c1 c2 c3 -> FillQuadGradient (Rect (x + dx) (y + dy) w h) c0 c1 c2 c3
     DrawImageRect (Rect x y w h) tex u0 v0 u1 v1 c -> DrawImageRect (Rect (x + dx) (y + dy) w h) tex u0 v0 u1 v1 c
     DrawText x y ax ay t c -> DrawText (x + dx) (y + dy) ax ay t c
     DrawTextStyled x y font t c -> DrawTextStyled (x + dx) (y + dy) font t c
+
+-- | Translate x/y pairs.
+shiftPoints :: Float -> Float -> PrimArray Float -> PrimArray Float
+shiftPoints dx dy pts =
+  generatePrimArray (sizeofPrimArray pts) $ \i ->
+    indexPrimArray pts i + (if even i then dx else dy)
 
 -- | Pure painter from solved logical window bounds to draw operations.
 type DrawingBuild = Rect -> SmallArray DrawOp

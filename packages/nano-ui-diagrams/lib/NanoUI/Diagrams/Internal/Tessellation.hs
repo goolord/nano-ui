@@ -13,6 +13,7 @@ import Data.Primitive.PrimArray
   ( PrimArray
   , indexPrimArray
   , newPrimArray
+  , primArrayFromList
   , readPrimArray
   , runPrimArray
   , sizeofPrimArray
@@ -30,8 +31,8 @@ triangulatePolygon :: [(Float, Float)] -> [((Float, Float), (Float, Float), (Flo
 triangulatePolygon [] = []
 triangulatePolygon [_] = []
 triangulatePolygon pts0 =
-  let pts = stripClosed pts0
-    in earClip (pointsArray pts)
+  let !vs = pointsArray (stripClosed pts0)
+   in [(pointAt vs a, pointAt vs b, pointAt vs c) | (a, b, c) <- earClip vs]
 
 stripClosed :: [(Float, Float)] -> [(Float, Float)]
 stripClosed [] = []
@@ -80,10 +81,11 @@ pointInTri p a b c =
       d3 = sign (p, c, a)
    in not ((d1 < 0 || d2 < 0 || d3 < 0) && (d1 > 0 || d2 > 0 || d3 > 0))
 
-earClip :: PrimArray Float -> [((Float, Float), (Float, Float), (Float, Float))]
+-- | Index triples into @vs@'s points.
+earClip :: PrimArray Float -> [(Int, Int, Int)]
 earClip vs
   | n < 3 = []
-  | n == 3 = [(at 0, at 1, at 2)]
+  | n == 3 = [(0, 1, 2)]
   | otherwise = runST $ do
       let !ccw = signedArea vs >= 0
       -- Coordinates never move. Remove an ear by relinking two neighbours,
@@ -116,12 +118,12 @@ earClip vs
             | otherwise = do
                 q <- readPrimArray nexts i
                 rest <- fan origin q (left - 1)
-                pure ((at origin, at i, at q) : rest)
+                pure ((origin, i, q) : rest)
           go !first !count !idx !tries tris
             | count == 3 = do
                 second <- readPrimArray nexts first
                 third <- readPrimArray nexts second
-                pure ((at first, at second, at third) : tris)
+                pure ((first, second, third) : tris)
             | tries >= count = do
                 isConvexRing <- convex first count
                 if isConvexRing then do
@@ -136,7 +138,7 @@ earClip vs
                   writePrimArray nexts p q
                   writePrimArray prevs q p
                   let !first' = if idx == first then q else first
-                  go first' (count - 1) first' 0 (tri : tris)
+                  go first' (count - 1) first' 0 ((p, idx, q) : tris)
                 else go first count q (tries + 1) tris
       reverse <$> go 0 n 0 0 []
   where
@@ -144,15 +146,26 @@ earClip vs
     at = pointAt vs
 
 -- | Fill a simple polygon, using a rectangle op for axis-aligned rectangles
--- and triangles otherwise. Coordinates are logical pixels.
+-- and one anti-aliased polygon otherwise, so the triangles it is cut into
+-- show no seams. Coordinates are logical pixels.
 fillPolygon :: Color -> [(Float, Float)] -> [DrawOp]
 fillPolygon col pts =
   case axisAlignedRect pts of
     Just r -> [FillRect r col]
     Nothing ->
-      [ FillTriangle x0 y0 x1 y1 x2 y2 col
-      | ((x0, y0), (x1, y1), (x2, y2)) <- triangulatePolygon pts
-      ]
+      let !vs = pointsArray (dedupe (stripClosed pts))
+          tris = earClip vs
+       in if null tris
+            then []
+            else [FillPolygon vs (primArrayFromList [i | (a, b, c) <- tris, i <- [a, b, c]]) col]
+
+-- | Drop each point equal to the one before it; a zero-length edge has no
+-- direction to offset along.
+dedupe :: [(Float, Float)] -> [(Float, Float)]
+dedupe (p : q : rest)
+  | p == q = dedupe (p : rest)
+  | otherwise = p : dedupe (q : rest)
+dedupe ps = ps
 
 axisAlignedRect :: [(Float, Float)] -> Maybe Rect
 axisAlignedRect pts =
@@ -168,64 +181,17 @@ axisAlignedRect pts =
     near a b = abs (a - b) <= 1e-3
 
 
--- | Build a triangle strip of the given logical-pixel width. 'True' joins the
--- last point to the first; open paths have flat ends. Fewer than two points
--- yield no ops. Width should be positive.
+-- | Stroke a polyline of the given logical-pixel width as one anti-aliased
+-- op with mitered joins. 'True' joins the last point to the first; open
+-- paths have flat ends. Fewer than two distinct points yield no ops. Width
+-- should be positive.
 strokePolyline :: Color -> Float -> Bool -> [(Float, Float)] -> [DrawOp]
-strokePolyline _ _ _ [] = []
-strokePolyline _ _ _ [_] = []
 strokePolyline col w closed pts0 =
-  let pts = if closed && length pts0 > 2 then stripClosed pts0 else pts0
-      hw = w / 2
-      !vPts = pointsArray pts
-      !n = sizeofPrimArray vPts `div` 2
-   in if n < 2
-        then []
-        else
-          let !segCount = if closed then n else n - 1
-              -- Each segment's unit normal, x then y.
-              !segNormals = runPrimArray $ do
-                out <- newPrimArray (2 * segCount)
-                forM_ [0 .. segCount - 1] $ \i -> do
-                  let !(p0x, p0y) = pointAt vPts i
-                      !(p1x, p1y) = pointAt vPts ((i + 1) `mod` n)
-                      nx = p0y - p1y
-                      ny = p1x - p0x
-                      d = sqrt (nx * nx + ny * ny)
-                  writePrimArray out (2 * i) (if d <= 1e-9 then 0 else nx / d)
-                  writePrimArray out (2 * i + 1) (if d <= 1e-9 then 0 else ny / d)
-                pure out
-              joinNormal !i
-                | not closed && i <= 0 = pointAt segNormals 0
-                | not closed && i >= n - 1 = pointAt segNormals (segCount - 1)
-                | otherwise =
-                    let (ax, ay) = pointAt segNormals ((i - 1 + segCount) `mod` segCount)
-                        (bx, by) = pointAt segNormals (i `mod` segCount)
-                        sx = ax + bx
-                        sy = ay + by
-                        d = sqrt (sx * sx + sy * sy)
-                     in if d <= 1e-9 then (0, 0) else (sx / d, sy / d)
-              -- Adjacent quads share a vertex, so offset each vertex once: the
-              -- two sides' points, four numbers a vertex.
-              !offsets = runPrimArray $ do
-                out <- newPrimArray (4 * n)
-                forM_ [0 .. n - 1] $ \i -> do
-                  let (!px, !py) = pointAt vPts i
-                      (!nx, !ny) = joinNormal i
-                  writePrimArray out (4 * i) (px + hw * nx)
-                  writePrimArray out (4 * i + 1) (py + hw * ny)
-                  writePrimArray out (4 * i + 2) (px - hw * nx)
-                  writePrimArray out (4 * i + 3) (py - hw * ny)
-                pure out
-              offset i k = indexPrimArray offsets (4 * i + k)
-              buildQuads !i
-                | i >= segCount = []
-                | otherwise =
-                    let !j = if closed then (i + 1) `mod` n else i + 1
-                     in FillTriangle (offset i 0) (offset i 1) (offset j 0) (offset j 1) (offset j 2) (offset j 3) col
-                          : FillTriangle (offset i 0) (offset i 1) (offset j 2) (offset j 3) (offset i 2) (offset i 3) col
-                          : buildQuads (i + 1)
-           in buildQuads 0
+  let pts1 = dedupe pts0
+      pts = if closed && length pts1 > 2 then stripClosed pts1 else pts1
+   in case pts of
+        (_ : _ : _) -> [StrokePolyline (pointsArray pts) w (closed && length pts > 2) col]
+        _ -> []
 
 -- | Approximate a cubic Bezier from start, two control points, and end.
 -- Includes both endpoints. Subdivision tests the first control point's

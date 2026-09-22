@@ -34,7 +34,7 @@ import NanoUI
 import Foreign.Marshal.Alloc (allocaBytes, callocBytes, free)
 import Foreign.Storable (peekByteOff, peekElemOff)
 import NanoUI.Input (Input (..), Modifiers (..), emptyInput)
-import NanoUI.Internal.Context (Context (..))
+import NanoUI.Internal.Context (Context (..), setDrawSquareGeometry)
 import NanoUI.Testing
   ( DrawCmd (..)
   , DrawData (..)
@@ -205,7 +205,9 @@ testZOrderRenderArena = do
   freeRgfwSurface surf
 
 -- Check coverage and clipping pixel-for-pixel, including empty iteration
--- bounds and reversed winding in the numeric raster loops.
+-- bounds and reversed winding in the numeric raster loops. Square geometry
+-- leaves out the triangle's anti-aliased fringe, which this rasteriser would
+-- fill flat in its corners' average colour.
 testTriangleRaster :: IO ()
 testTriangleRaster =
   bracket (newOffscreenRgfwSurface 8 8) freeRgfwSurface $ \surf -> do
@@ -227,6 +229,7 @@ testTriangleRaster =
     forM_ cases $ \(name, clip, (ax, ay, bx, by, cx, cy), covered) -> do
       clearScreen surf 0
       ctx <- newPixelContext
+      setDrawSquareGeometry ctx True
       (_, _, draw, _) <- runFrame ctx (emptyInput {inputWindowSize = Size 8 8}) $
         drawing (fixedWH 8 8) $ \_ ->
           pure (FillTriangle ax ay bx by cx cy (colorRGBA 255 0 0 255))

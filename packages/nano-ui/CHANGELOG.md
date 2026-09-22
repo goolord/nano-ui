@@ -4,6 +4,10 @@
 
 ### Added
 
+- `FillPolygon` and `StrokePolyline` draw ops: a simple polygon, given with
+  its triangulation, and a polyline with mitered joins, both anti-aliased
+  along their outline only. A shape cut into `FillTriangle`s would show
+  faint seams where the triangles meet.
 - What a widget that works out its own input needs, without
   `NanoUI.Context`: `lastRect`, where a widget was laid out last frame, which
   is the rect a list that scrolls itself hit-tests this frame's pointer
@@ -433,6 +437,15 @@
 
 ### Fixed
 
+- Table sort arrows, select and combo chevrons, numeric stepper arrows and
+  `FillTriangle` are anti-aliased, and keep their shape: each corner used to
+  snap to the pixel grid on its own, so an arrow centred between two pixels
+  came out lopsided. The shape now moves to the grid as a whole and its
+  edges fade out across one device pixel. Tree chevrons are one mitered
+  anti-aliased line instead of two lines with square single-pixel caps.
+- A right-aligned table column shows its sort arrow on the left of the
+  header, and reserves the arrow's slot there, instead of on the right,
+  across the column from its label.
 - Starting or ending a drag on a colour picker's field or bars, a slider, or
   a knob repaints only the widget, not the whole window. The drag hooks kept
   their held flag in a store slot no widget owns, and a changed slot with no

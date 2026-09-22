@@ -5,7 +5,8 @@ import Data.Colour.Names (coral, steelblue)
 import Data.Foldable (toList)
 import Data.IORef (readIORef)
 import Data.List (tails)
-import Data.Maybe (fromMaybe, listToMaybe)
+import Data.Maybe (fromMaybe, listToMaybe, mapMaybe)
+import Data.Primitive.PrimArray (primArrayToList, sizeofPrimArray)
 import Data.Text qualified as T
 import Data.Primitive.SmallArray (SmallArray, emptySmallArray)
 import Data.Vector qualified as V
@@ -207,22 +208,14 @@ testStrokeCoversMidpoint :: IO ()
 testStrokeCoversMidpoint = do
   let
     col = themeRed defaultTheme
-    ops = strokePolyline col 2 False [(0, 0), (20, 0), (20, 20)]
-    tris =
-      [ ((x0, y0), (x1, y1), (x2, y2))
-      | FillTriangle x0 y0 x1 y1 x2 y2 _ <- ops
-      ]
-    covered p = any (inTri p) tris
-  check "stroke polyline left a gap along the segment" (covered (10, 0) && covered (1, 0) && covered (20, 10))
-
-inTri ::
-  (Float, Float) -> ((Float, Float), (Float, Float), (Float, Float)) -> Bool
-inTri p (a, b, c) =
-  let
-    s = triArea a b c
-    s' = triArea p b c + triArea a p c + triArea a b p
-   in
-    s > 1e-6 && abs (s' - s) <= 1e-3
+    ops = strokePolyline col 2 False [(0, 0), (20, 0), (20, 0), (20, 20)]
+  -- One anti-aliased op for the whole line, its repeated point dropped.
+  check "stroke polyline changed its points" $ case ops of
+    [StrokePolyline pts 2 False c] -> c == col && primArrayToList pts == [0, 0, 20, 0, 20, 20]
+    _ -> False
+  check "closed stroke polyline repeated its first point" $ case strokePolyline col 1 True [(0, 0), (10, 0), (10, 10), (0, 0)] of
+    [StrokePolyline pts 1 True _] -> sizeofPrimArray pts == 6
+    _ -> False
 
 testNiceTicks :: IO ()
 testNiceTicks = do
@@ -418,7 +411,7 @@ testLegendColors fm = do
       ops = toList (diagramOps 400 280 (chartDia fm chart {chartLegend = position}))
       labels =
         [text | DrawText _ _ _ _ text _ <- ops, text == "custom" || text == "default"]
-      colors = [color | FillTriangle _ _ _ _ _ _ color <- ops]
+      colors = mapMaybe inkColor ops
     if position == LegendNone
       then
         check "hidden legend rendered entries" (null labels && custom `notElem` colors)
@@ -426,8 +419,29 @@ testLegendColors fm = do
         check "legend lost or duplicated a series label" (length labels == 2 && "custom" `elem` labels && "default" `elem` labels)
         check "legend colors differ from series colors" (custom `elem` colors && fallback `elem` colors)
 
+-- | The colour of a polygon fill or a polyline stroke.
+inkColor :: DrawOp -> Maybe Color
+inkColor (FillPolygon _ _ c) = Just c
+inkColor (StrokePolyline _ _ _ c) = Just c
+inkColor _ = Nothing
+
+-- | Triangles across the polygon fills.
 fillTriCount :: SmallArray DrawOp -> Int
-fillTriCount ops = length [() | FillTriangle {} <- toList ops]
+fillTriCount ops = sum [sizeofPrimArray tris `div` 3 | FillPolygon _ tris _ <- toList ops]
+
+-- | Every x of the polygon fills and polyline strokes in @c@.
+inkXsOf :: Color -> SmallArray DrawOp -> [Float]
+inkXsOf c ops =
+  [ x
+  | op <- toList ops
+  , inkColor op == Just c
+  , pts <- case op of
+      FillPolygon p _ _ -> [p]
+      StrokePolyline p _ _ _ -> [p]
+      _ -> []
+  , (i, x) <- zip [0 :: Int ..] (primArrayToList pts)
+  , even i
+  ]
 
 testClosedSeriesFills :: FontMetrics -> IO ()
 testClosedSeriesFills fm = do
@@ -438,12 +452,7 @@ testClosedSeriesFills fm = do
     triOps = seriesOps (withMarker MarkTriangle (scatter "t" [(1, 1)]))
     crossOps = seriesOps (withMarker MarkCross (scatter "x" [(8, 8)]))
     ink = fromMaybe (themeRed defaultTheme) (listToMaybe (themeSeries defaultTheme))
-    inkXs =
-      [ x
-      | FillTriangle x0 _ x1 _ x2 _ c <- toList crossOps
-      , c == ink
-      , x <- [x0, x1, x2]
-      ]
+    inkXs = inkXsOf ink crossOps
   check "area series produced no fill triangles" (fillTriCount areaOps >= 2)
   check "diamond marker produced no fill" (fillTriCount diamondOps >= 2)
   check "triangle marker produced no fill" (fillTriCount triOps >= 1)

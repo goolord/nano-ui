@@ -158,15 +158,16 @@ findExact needle spans =
 -- ordinary label with the same text. Ties choose the rightmost match.
 findHeader :: T.Text -> [DemoSpan] -> Maybe V2
 findHeader needle spans =
-  -- Header spans keep their sort-reserve padding ("Name   " with the arrow
-  -- glyph blanked when unsorted), while every other "Name" label is trimmed.
-  -- Match the raw, untrimmed text so the header wins over right-aligned kv
-  -- values that happen to repeat the column name.
+  -- Header spans keep their sort-reserve padding ("Name   ", or "   Age" in
+  -- a right-aligned column, the arrow glyph blanked), while every other
+  -- "Name" label is trimmed. Match the raw, untrimmed text so the header wins
+  -- over right-aligned kv values that happen to repeat the column name.
   let marked =
         [ (x, spanCenter r)
         | (r@(Rect x _ w h), txt, _, _, _) <- spans
         , w > 1 && h > 1
-        , T.isPrefixOf (needle <> " ") (dropSpanMarkers txt)
+        , let raw = dropSpanMarkers txt
+        , T.isPrefixOf (needle <> " ") raw || T.isSuffixOf (" " <> needle) raw
         ]
    in pickRight marked <|> findExact needle spans
 

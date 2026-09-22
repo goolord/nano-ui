@@ -12,6 +12,7 @@ module NanoUI.Internal.Frame.Paint.Widgets
 import Control.Monad (unless, when)
 import Data.IORef (readIORef)
 import Data.Maybe (fromMaybe)
+import Data.Primitive.PrimArray (primArrayFromListN)
 import qualified Data.Text as T
 import NanoUI.Internal.Context (Context (..), getStore)
 import NanoUI.Internal.Draw
@@ -19,6 +20,7 @@ import NanoUI.Internal.Draw
   , pushCircle
   , pushFilledTriangle
   , pushLine
+  , pushPolylineAA
   , pushRoundedRect
   , pushRoundedRectRaw
   , pushRoundedStroke
@@ -64,6 +66,7 @@ import NanoUI.Internal.Frame.TextInput
 import NanoUI.Internal.Layout.Arena
   ( NodeIdx
   , NodeType (..)
+  , getAlignX
   , getNodeFontColor
   , getNodeFontSize
   , getNodeValue
@@ -72,7 +75,7 @@ import NanoUI.Internal.Layout.Arena
   , getText
   , getWidgetId
   )
-import NanoUI.Internal.Style (Style, styleBg, styleBorder, styleFg, themeAccent, themeInput, themeOnAccent)
+import NanoUI.Internal.Style (AlignX (..), Style, styleBg, styleBorder, styleFg, themeAccent, themeInput, themeOnAccent)
 import NanoUI.Internal.Types (Color (..), Rect (..), clamp, clamp01, colorA, lerpColor, onGrid, rectInflate)
 import NanoUI.Internal.WidgetText
   ( hasFlag
@@ -267,11 +270,15 @@ paintWidgetForeground env idx nt style si (Rect x y w h) = do
   (fm, _, _) <- resolveFontFor ctx nt fontSize si
   let widgetFg = fromMaybe (styleFg style) mFontColor
       sortMark = if nt == NodeButton && hasFlag buttonFlagTable si then tableSortMarkOf si else 0
-      -- Table sort arrow: pinned to the header's right edge, inside the cell
-      -- inset, whatever the label's alignment. The label still ends in a
-      -- blank reserve slot (the ▲/▼ codepoint is not in the pruned UI font),
-      -- which keeps the column wide enough for the text and the arrow.
-      sortArrowX = x + w - tableCellInset - 5
+  -- Table sort arrow: pinned inside the cell inset to the edge the label
+  -- does not align to, the right edge for a left-aligned label and the left
+  -- for a right-aligned one. The label carries a blank reserve slot on that
+  -- side (the ▲/▼ codepoint is not in the pruned UI font), which keeps the
+  -- column wide enough for the text and the arrow.
+  sortAlign <- if sortMark /= 0 then getAlignX (peNodeArena env) idx else pure AlignStart
+  let sortArrowX
+        | sortAlign == AlignEnd = x + tableCellInset + 5
+        | otherwise = x + w - tableCellInset - 5
       drawPlacement lastLine txt px py _ th =
         unless (T.null txt) $ do
           pushText da fm px py txt widgetFg
@@ -521,11 +528,10 @@ drawTreeChevron da fm x y w h depth expanded col = do
       mx = cx + cw / 2
       my = cy + ch / 2
       s = min 4.5 (min cw ch * 0.28)
-      t = max 1.0 (s * 0.16)
-  if expanded
-    then do
-      pushLine da (mx - s) (my - s * 0.45) mx (my + s * 0.7) t col
-      pushLine da mx (my + s * 0.7) (mx + s) (my - s * 0.45) t col
-    else do
-      pushLine da (mx - s * 0.45) (my - s) (mx + s * 0.7) my t col
-      pushLine da (mx + s * 0.7) my (mx - s * 0.45) (my + s) t col
+      t = max 1.5 (s * 0.3)
+      -- One mitered polyline, not two capped lines: the caps of a line this
+      -- thin are single-pixel squares, and the arms snapped apart.
+      pts
+        | expanded = [mx - s, my - s * 0.45, mx, my + s * 0.7, mx + s, my - s * 0.45]
+        | otherwise = [mx - s * 0.45, my - s, mx + s * 0.7, my, mx - s * 0.45, my + s]
+  pushPolylineAA da (primArrayFromListN 6 pts) t False col

@@ -15,10 +15,13 @@ module NanoUI.Internal.Draw.Shapes
   , pushStrokeAA
   , pushStroke
   , pushFilledTriangle
+  , pushPolygonAA
+  , pushPolylineAA
   ) where
 
 import Control.Monad (when)
 import Data.IORef (readIORef)
+import Data.Primitive.PrimArray (PrimArray, indexPrimArray, primArrayFromListN, sizeofPrimArray)
 import Data.Word (Word32, Word8)
 import Foreign.Ptr (Ptr)
 import Foreign.Storable (pokeByteOff)
@@ -475,15 +478,178 @@ pushStroke da x1 y1 x2 y2 thickness col
             poke (vOff + 96) (px1 - hx) (py1 - hy)
             pokeQuadIndices ip iOff baseIdxWord (baseIdxWord + 1) (baseIdxWord + 2) (baseIdxWord + 3)
 
+-- | A lone filled triangle with anti-aliased edges; see 'pushPolygonAA'. It
+-- moves to put the middle of its width, not its first corner, on the grid,
+-- so an arrow symmetric about an upright axis stays symmetric whatever its
+-- width, and its first corner's row, which an arrow's flat base passes
+-- through, stays sharp.
 pushFilledTriangle :: DrawArena -> Float -> Float -> Float -> Float -> Float -> Float -> Color -> IO ()
-pushFilledTriangle da x0 y0 x1 y1 x2 y2 col = do
-  s <- readIORef (daSnapScale da)
-  setTexture da glyphAtlasTextureId
-  let !(r, g, b, a) = unpackColorF col
-  withVerts da 3 3 $ \vp ip vOff iOff baseIdxWord -> do
-    pokeVertexSIMD vp vOff (onGrid s x0) (onGrid s y0) r g b a whitePixelU whitePixelV
-    pokeVertexSIMD vp (vOff + 32) (onGrid s x1) (onGrid s y1) r g b a whitePixelU whitePixelV
-    pokeVertexSIMD vp (vOff + 64) (onGrid s x2) (onGrid s y2) r g b a whitePixelU whitePixelV
-    pokeByteOff ip iOff baseIdxWord
-    pokeByteOff ip (iOff + 4) (baseIdxWord + 1)
-    pokeByteOff ip (iOff + 8) (baseIdxWord + 2)
+pushFilledTriangle da x0 y0 x1 y1 x2 y2 =
+  polygonAAFrom
+    da
+    ((min x0 (min x1 x2) + max x0 (max x1 x2)) * 0.5)
+    y0
+    (primArrayFromListN 6 [x0, y0, x1, y1, x2, y2])
+    triangleIndices
+
+triangleIndices :: PrimArray Int
+triangleIndices = primArrayFromListN 3 [0, 1, 2]
+
+-- | Half the width of an anti-aliased edge's fade, in logical pixels: half a
+-- device pixel, so an edge on the grid is solid on one side of it and clear
+-- on the other.
+{-# INLINE edgeFeather #-}
+edgeFeather :: Float -> Float
+edgeFeather s = if s > 0 then 0.5 / s else 0.5
+
+-- | How far a miter may reach, as a multiple of the offset squared: a join
+-- sharper than 120 degrees is cut back to twice the offset instead of
+-- shooting off into a spike.
+miterLimit :: Float
+miterLimit = 4
+
+-- | The offset at a vertex between two edges with unit normals @a@ and @b@,
+-- scaled so moving the vertex by @d@ along it moves both edges by @d@. A zero
+-- normal (a repeated point) defers to the other.
+{-# INLINE miterOf #-}
+miterOf :: Float -> Float -> Float -> Float -> (Float, Float)
+miterOf ax ay bx by
+  | ax == 0 && ay == 0 = (bx, by)
+  | bx == 0 && by == 0 = (ax, ay)
+  | d2 < 1.0e-6 = (ax, ay)
+  | otherwise = let !k = min miterLimit (1 / d2) in (mx * k, my * k)
+  where
+    !mx = (ax + bx) * 0.5
+    !my = (ay + by) * 0.5
+    !d2 = mx * mx + my * my
+
+-- | Unit normal of the segment from @(x0, y0)@ to @(x1, y1)@, a quarter turn
+-- from its direction, or zero for a zero-length segment.
+{-# INLINE segNormal #-}
+segNormal :: Float -> Float -> Float -> Float -> (Float, Float)
+segNormal x0 y0 x1 y1 =
+  let !dx = x1 - x0
+      !dy = y1 - y0
+      !len = sqrt (dx * dx + dy * dy)
+   in if len < 1.0e-6 then (0, 0) else (-dy / len, dx / len)
+
+-- | Fill a simple polygon with anti-aliased edges. @pts@ holds its outline as
+-- x/y pairs, in either winding and without repeating the first point, and
+-- @tris@ index triples into those points that cover it. The polygon moves as
+-- a whole to put its first point on the device grid: snapping each point on
+-- its own would bend a small shape, an arrow's two sides landing a pixel
+-- apart. Each edge then fades out across one device pixel centred on it, so
+-- an edge on the grid comes out sharp and a slanted one smooth.
+pushPolygonAA :: DrawArena -> PrimArray Float -> PrimArray Int -> Color -> IO ()
+pushPolygonAA da pts tris
+  | sizeofPrimArray pts < 2 = const (pure ())
+  | otherwise = polygonAAFrom da (indexPrimArray pts 0) (indexPrimArray pts 1) pts tris
+
+-- | 'pushPolygonAA', moved to put @(rx, ry)@ rather than the first point on
+-- the grid.
+{-# NOINLINE polygonAAFrom #-}
+polygonAAFrom :: DrawArena -> Float -> Float -> PrimArray Float -> PrimArray Int -> Color -> IO ()
+polygonAAFrom da rx ry pts tris col
+  | n < 3 || nt < 3 || area == 0 = pure ()
+  | otherwise = do
+      s <- readIORef (daSnapScale da)
+      square <- readIORef (daSquareGeometry da)
+      setTexture da glyphAtlasTextureId
+      let !ox = onGrid s rx - rx
+          !oy = onGrid s ry - ry
+          !f = if square then 0 else edgeFeather s
+          -- 'segNormal' points into a polygon of positive area.
+          !out = if area > 0 then -1 else 1
+          normalAt i =
+            let !j = if i + 1 >= n then 0 else i + 1
+                (nx, ny) = segNormal (px i) (py i) (px j) (py j)
+             in (nx * out, ny * out)
+          !(r, g, b, a) = unpackColorF col
+          -- Square geometry has no fade, so no fringe either.
+          !fringe = if square then 0 else n
+      withVertsRaw da (n + fringe) (nt + 6 * fringe) $ \vp ip base baseIdx -> do
+        loopIO 0 (n - 1) $ \i -> do
+          let (ax, ay) = normalAt (if i == 0 then n - 1 else i - 1)
+              (bx, by) = normalAt i
+              (mx, my) = miterOf ax ay bx by
+              !vx = px i + ox
+              !vy = py i + oy
+          pokeVertexSIMD vp ((base + i) * vertexSize) (vx - f * mx) (vy - f * my) r g b a whitePixelU whitePixelV
+          when (fringe > 0) $
+            pokeVertexSIMD vp ((base + n + i) * vertexSize) (vx + f * mx) (vy + f * my) r g b 0 whitePixelU whitePixelV
+        loopIO 0 (nt - 1) $ \k ->
+          pokeByteOff ip ((baseIdx + k) * indexSize) (fromIntegral (base + indexPrimArray tris k) :: Word32)
+        loopIO 0 (fringe - 1) $ \i -> do
+          let !j = if i + 1 >= n then 0 else i + 1
+              !inI = fromIntegral (base + i) :: Word32
+              !inJ = fromIntegral (base + j) :: Word32
+              !m = fromIntegral n :: Word32
+          pokeQuadIndices ip ((baseIdx + nt + 6 * i) * indexSize) inI inJ (inJ + m) (inI + m)
+  where
+    !n = sizeofPrimArray pts `div` 2
+    !nt = sizeofPrimArray tris - sizeofPrimArray tris `mod` 3
+    px i = indexPrimArray pts (2 * i)
+    py i = indexPrimArray pts (2 * i + 1)
+    !area = shoelace 0 0
+    shoelace !i !acc
+      | i >= n = acc
+      | otherwise =
+          let !j = if i + 1 >= n then 0 else i + 1
+           in shoelace (i + 1) (acc + px i * py j - px j * py i)
+
+-- | Stroke a polyline @w@ wide with anti-aliased sides and mitered joins.
+-- @pts@ holds x/y pairs; @closed@ joins the last point back to the first,
+-- which should not be repeated. Open ends are cut square at their points.
+-- The line moves as a whole to put its first point's edges on the device
+-- grid, as 'pushPolygonAA' moves a polygon, so a level or upright line a
+-- whole number of pixels wide is sharp and every segment keeps its angle.
+-- A line thinner than its fade keeps its ink by drawing fainter.
+{-# NOINLINE pushPolylineAA #-}
+pushPolylineAA :: DrawArena -> PrimArray Float -> Float -> Bool -> Color -> IO ()
+pushPolylineAA da pts w closed col
+  | n < 2 || w <= 0 = pure ()
+  | otherwise = do
+      s <- readIORef (daSnapScale da)
+      square <- readIORef (daSquareGeometry da)
+      setTexture da glyphAtlasTextureId
+      let !hw = w * 0.5
+          !ox = onGrid s (px 0 - hw) + hw - px 0
+          !oy = onGrid s (py 0 - hw) + hw - py 0
+          !f = if square then 0 else edgeFeather s
+          !core = max 0 (hw - f)
+          !outer = hw + f
+          !(r, g, b, a0) = unpackColorF col
+          !a = if core > 0 then a0 else a0 * min 1 (w / outer)
+          !segs = if closed then n else n - 1
+          normalAt i =
+            let !j = if i + 1 >= n then 0 else i + 1
+             in segNormal (px i) (py i) (px j) (py j)
+      withVertsRaw da (4 * n) (18 * segs) $ \vp ip base baseIdx -> do
+        loopIO 0 (n - 1) $ \i -> do
+          let (ax, ay)
+                | i > 0 = normalAt (i - 1)
+                | closed = normalAt (n - 1)
+                | otherwise = normalAt 0
+              (bx, by)
+                | i < n - 1 || closed = normalAt i
+                | otherwise = normalAt (n - 2)
+              (mx, my) = miterOf ax ay bx by
+              ((p0x, p0y), (p1x, p1y), (p2x, p2y), (p3x, p3y)) =
+                concentricOffsetsSIMD (px i + ox) (py i + oy) mx my (-outer) (-core) core outer
+              !vBase = (base + 4 * i) * vertexSize
+          pokeVertexSIMD vp vBase p0x p0y r g b 0 whitePixelU whitePixelV
+          pokeVertexSIMD vp (vBase + 32) p1x p1y r g b a whitePixelU whitePixelV
+          pokeVertexSIMD vp (vBase + 64) p2x p2y r g b a whitePixelU whitePixelV
+          pokeVertexSIMD vp (vBase + 96) p3x p3y r g b 0 whitePixelU whitePixelV
+        loopIO 0 (segs - 1) $ \i -> do
+          let !j = if i + 1 >= n then 0 else i + 1
+              !va = fromIntegral (base + 4 * i) :: Word32
+              !vb = fromIntegral (base + 4 * j) :: Word32
+              !iOff = (baseIdx + 18 * i) * indexSize
+          pokeQuadIndices ip iOff va (va + 1) (vb + 1) vb
+          pokeQuadIndices ip (iOff + 24) (va + 1) (va + 2) (vb + 2) (vb + 1)
+          pokeQuadIndices ip (iOff + 48) (va + 2) (va + 3) (vb + 3) (vb + 2)
+  where
+    !n = sizeofPrimArray pts `div` 2
+    px i = indexPrimArray pts (2 * i)
+    py i = indexPrimArray pts (2 * i + 1)
