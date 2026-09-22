@@ -10,6 +10,7 @@ module NanoUI.Internal.Frame.Hit
   , overlayHitRoot
   , topmostOverlayAtMouse
   , topmostModalAtMouse
+  , topmostFloating
   , widgetOverlayAllowed
   , nodeOwnsPointer
   , scrollHitRect
@@ -104,23 +105,20 @@ overlayHitAllowed ctx top idx = maybe (pure True) (nodeInSubtree ctx idx) top
 -- rect holds the point.
 topmostOverlayAtMouse :: Context -> V2 -> IO (Maybe NodeIdx)
 topmostOverlayAtMouse ctx mouse =
-  topmostFloatingAtMouse ctx mouse (\nt -> nt == NodeWindow || nt == NodePopup)
+  topmostFloating ctx (\nt -> nt == NodeWindow || nt == NodePopup) (`rectHit` mouse)
 
 -- | The modal on top at @mouse@: the last one in arena order whose rect holds
 -- the point.
 topmostModalAtMouse :: Context -> V2 -> IO (Maybe NodeIdx)
-topmostModalAtMouse ctx mouse =
-  topmostFloatingAtMouse ctx mouse (== NodeModal)
+topmostModalAtMouse ctx mouse = topmostFloating ctx (== NodeModal) (`rectHit` mouse)
 
--- | The last node in arena order whose type satisfies @wanted@ and whose
--- non-empty rect holds @mouse@. The frame paints the panels of one type in
--- arena order, so among them the last one is on top.
-topmostFloatingAtMouse ::
-  Context -> V2 -> (NodeType -> Bool) -> IO (Maybe NodeIdx)
-topmostFloatingAtMouse ctx mouse wanted =
+-- | The last floating node in arena order whose type satisfies @wanted@ and
+-- whose rect satisfies @at@. The frame paints the panels of one type in arena
+-- order, so among them the last one is on top.
+topmostFloating :: Context -> (NodeType -> Bool) -> (Rect -> Bool) -> IO (Maybe NodeIdx)
+topmostFloating ctx wanted at =
   findClassNodeRevM (ctxNodeArena ctx) FloatingNodes $ \idx ->
-    (wanted <$> getNodeType (ctxNodeArena ctx) idx)
-      <&&> ((`rectHit` mouse) <$> getNodeRect (ctxNodeArena ctx) idx)
+    (wanted <$> getNodeType (ctxNodeArena ctx) idx) <&&> (at <$> getNodeRect (ctxNodeArena ctx) idx)
 
 -- | Whether the frame routed the pointer to node @idx@, which decides whether
 -- its widget saw the pointer while the view ran. The route must be the node's
