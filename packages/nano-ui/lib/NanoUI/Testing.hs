@@ -226,25 +226,16 @@ import NanoUI.Internal.Widgets.ColorPicker
   , widgetStoreBaseColor
   , widgetStoreColor
   )
-import NanoUI.Internal.Frame
-  ( UiCursorKind (..)
-  , collectOverlayTextSpans
-  , collectRasterSpans
-  , collectTextSpans
-  , cursorKindIs
-  , debugPanelOpen
+import NanoUI.Internal.Frame (runFrame, runFrameEff, runFrameReduce, runFrameReduceEff)
+import NanoUI.Internal.Frame.Cursor (UiCursorKind (..), cursorKindIs, pointerCursorWanted, uiCursorKind)
+import NanoUI.Internal.Frame.Redraw
+  ( debugPanelOpen
   , floatingPanelActive
   , needsRedraw
-  , pointerCursorWanted
   , pointerDragActive
-  , runFrame
-  , runFrameEff
-  , runFrameReduce
-  , runFrameReduceEff
   , textFieldActive
-  , uiCursorKind
-  , widgetNodeCount
   )
+import NanoUI.Internal.Frame.Spans (collectOverlayTextSpans, collectRasterSpans, collectTextSpans, widgetNodeCount)
 import NanoUI.Internal.Frame.Scroll (ScrollBarLayout (..), scrollBarLayout)
 import NanoUI.Internal.Layout.Solve (computePopupPosition)
 import NanoUI.Internal.Monad (Ui, askContext, askHost, askInput, uiIO)
