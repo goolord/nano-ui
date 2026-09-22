@@ -29,6 +29,7 @@ import Effectful (Eff, IOE, runEff, type (:>))
 import NanoUI.Internal.Context
   ( Context (..)
   , PointerRoute (..)
+  , FollowReason (..)
   , beginThemeScopes
   , damageFull
   , damageRect
@@ -212,6 +213,7 @@ runFrameEff unlift ctx frameInp ui = do
   oldSize <- getsDamage ctx dsLastWindowSize
   oldStore <- getStore ctx
   wasDirty <- isDirty ctx
+  wasStoreDirty <- getsDamage ctx dsDirtyStore
   clearDirty ctx
   -- Timed wakes are re-requested by whatever is still built this frame.
   clearWakeAt ctx
@@ -318,7 +320,11 @@ runFrameEff unlift ctx frameInp ui = do
     modifyOverlay ctx (\os -> os {osPrevMenuRects = menuRects})
   writeDamage ctx frameInp
     FrameSnapshot
-      { fsWasDirty = wasDirty
+      { fsFollowUp =
+          -- Store writes damage their effects per key, so the frame they
+          -- request clips; anything else that marked the frame dirty (a
+          -- model change, 'requestFrame') may have touched any pixel.
+          if wasStoreDirty then FollowStore else if wasDirty then FollowOpaque else FollowNone
       , fsSize = oldSize
       , fsStore = oldStore
       , fsHot = oldHot
@@ -455,3 +461,4 @@ captureLayout ctx size = do
         Nothing -> newLayoutCache 64
       c <- captureLayoutCache (ctxNodeArena ctx) c0
       writeIORef (ctxLayoutCache ctx) (Just (c, size, gen))
+

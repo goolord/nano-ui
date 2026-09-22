@@ -46,8 +46,10 @@ module NanoUI.Internal.Context
   , getWindowResize
   , intKey
   , markDirty
+  , markDirtyCovered
   , clearDirty
   , isDirty
+  , FollowReason (..)
   , setWakeLoop
   , requestWakeAt
   , requestWakeAfter
@@ -59,6 +61,7 @@ module NanoUI.Internal.Context
   , requestDamage
   , damageWidget
   , damageKey
+  , damageParentKey
   , damageRect
   , damagePeers
   , damageFull
@@ -291,6 +294,7 @@ import NanoUI.Internal.Context.Types
   , DrawFitCache (..)
   , DrawingCacheState (..)
   , DrawingEntry (..)
+  , FollowReason (..)
   , FrameMsg (..)
   , InteractionState (..)
   , MeasureCache (..)
@@ -723,3 +727,4 @@ getFocusables ctx = do
   count <- readIORef (ctxFocusablesCount ctx)
   arr <- readIORef (ctxFocusables ctx)
   forM [0 .. count - 1] (readPrimArray arr)
+

@@ -97,10 +97,21 @@ runModalCloseDamageTest ctx failed = do
       esc = keyInp KeyEscape inp0
       idle = inp0 {inputDeltaTime = 1}
   resp <- warmup2 ctx inp0 ui
+  -- Opening: the click frame runs the view a second time with the flag set,
+  -- builds the modal, and repaints the whole window (floating panel change).
   _ <- runClick ctx inp0 ui (centerOf resp)
-  checkIdleFullDamage failed ctx idle idle ui
+  dmgOpen <- takeDamage ctx
+  assertEq failed dmgOpen DamageFull
+  -- The idle frame after only settles the button's release, as a clip: the
+  -- store write behind the open is damaged per key, not whole-window.
+  _ <- runFrame ctx idle ui
+  dmgIdle <- takeDamage ctx
+  assert failed (dmgIdle /= DamageFull)
+  assert failed (not (damageIsEmpty dmgIdle))
+  -- Closing: the escape frame removes the modal and repaints the whole window.
   _ <- runFrame ctx esc ui
-  checkIdleFullDamage failed ctx idle idle ui
+  dmgEsc <- takeDamage ctx
+  assertEq failed dmgEsc DamageFull
 
 -- At fractional display scales, fixed-size content must fit a content-sized
 -- modal without accumulating rounding error through nested containers.

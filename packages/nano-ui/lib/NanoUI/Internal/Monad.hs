@@ -116,7 +116,7 @@ import NanoUI.Internal.Context
   , getStore
   , getTextInputMenu
   , anySelectOpen
-  , markDirty
+  , markDirtyCovered
   , markEscapeConsumed
   , markTabConsumed
   , overlayConsumesQuit
@@ -510,11 +510,14 @@ setClipboard txt = withContext (\ctx -> ctxClipboardSet ctx txt)
 -- frame that shows the change has to be asked for, since nothing nano-ui
 -- keeps says it is due.
 --
--- Ask only when something did change. The frame asked for repaints the whole
--- window, and a view that asks every frame keeps the loop from ever sleeping;
+-- Ask only when something did change; a view that asks every frame keeps the
+-- loop from ever sleeping. The change must show up in the next frame's rect,
+-- text, or key damage, as any rebuild does; pair the request with
+-- 'damageWidget' or 'damageRect' when it would not be. Style-only external
+-- changes need a full-repaint request instead.
 -- 'NanoUI.Internal.Widgets.Animate.wakeAfter' asks for a frame at a later time.
 requestFrame :: Ui :> es => Eff es ()
-requestFrame = withContext markDirty
+requestFrame = withContext markDirtyCovered
 
 -- | Whether Escape was pressed this frame and is the view's to act on, and
 -- if so, take it: nothing after this sees it either. 'False' when something

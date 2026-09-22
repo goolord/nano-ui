@@ -37,7 +37,7 @@ import NanoUI.Internal.Animation
   , stepAnim
   , writeRest
   )
-import NanoUI.Internal.Context.Core (damageKey, getsDamage, markDirty)
+import NanoUI.Internal.Context.Core (damageKey, getsDamage, markDirty, markDirtyCovered)
 import NanoUI.Internal.Context.Types (AnimationState (..), Context (..), DamageState (..), ScrollState (..), intKey)
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Layout.Arena (getRect, lookupNodeByKey)
@@ -242,7 +242,7 @@ settleKey ctx key val = do
     Nothing -> when restChanged $ writeIORef (ctxAnimationState ctx) $! as {asAnimRest = rest'}
   when (maybe (not (approxEq prevRest val)) (not . approxEq val . animationValue) prevLive) $ do
     damageKey ctx key (DamageInflated defaultDamageSlop)
-    markDirty ctx
+    markDirtyCovered ctx
 
 -- | Current animated or settled value; zero when the id has neither.
 getAnimationValue :: Context -> WidgetId -> IO Float
@@ -262,3 +262,4 @@ pruneAnimRest :: Context -> (Int -> Bool) -> IO ()
 pruneAnimRest ctx shouldKeep =
   modifyIORef' (ctxAnimationState ctx) $ \as ->
     as {asAnimRest = IM.filterWithKey (\k _ -> shouldKeep k) (asAnimRest as)}
+

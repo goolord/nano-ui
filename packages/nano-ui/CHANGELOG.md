@@ -226,6 +226,18 @@
 
 ### Changed
 
+- State writes repaint per key instead of escalating to a whole-window
+  repaint. A store write damages its changed keys' widgets (resolved through
+  the arena, including the sub-slot spellings text fields, text areas, drop
+  targets, menus and colour pickers write), and the follow-up frame such a
+  write requests clips rather than repaints everything. A write falls back
+  to full damage only when some changed key resolves to no widget — a local
+  hook's key — and the frame's rect and text diffs came out empty, since
+  then nothing narrower than the window is known to cover what changed.
+  Model-driven changes ('runFrameReduce', 'requestFrame') follow the same
+  rule: their diffs cover the frame, or it repaints whole. 'requestFrame'
+  now asks for a covered frame; a style-only external change needs
+  `damageWidget` or `damageRect` alongside it.
 - Modules that are not API moved under `NanoUI.Internal`. `NanoUI.Context`,
   `NanoUI.Context.Types`, `NanoUI.Debug`, `NanoUI.Id`,
   `NanoUI.Layout.Arena`, `NanoUI.Layout.Solve`, `NanoUI.Store`, `NanoUI.SIMD`,

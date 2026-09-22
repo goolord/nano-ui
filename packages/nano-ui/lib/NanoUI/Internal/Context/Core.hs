@@ -19,6 +19,7 @@ module NanoUI.Internal.Context.Core
   , getWindowResize
   -- Damage
   , markDirty
+  , markDirtyCovered
   , clearDirty
   , isDirty
   , setWakeLoop
@@ -31,6 +32,7 @@ module NanoUI.Internal.Context.Core
   , requestDamage
   , damageWidget
   , damageKey
+  , damageParentKey
   , damageRect
   , damagePeers
   , damageFull
@@ -216,6 +218,15 @@ damageKey ctx k bounds
   | k == 0 = pure ()
   | otherwise = requestDamage ctx (ReqKey k bounds)
 
+-- | Queue damage for the container the widget a key resolves to sits in, so a
+-- state change repaints the sibling parts around it (colour-picker bars and
+-- preview swatch). Zero keys are ignored.
+{-# INLINE damageParentKey #-}
+damageParentKey :: Context -> Int -> DamageBounds -> IO ()
+damageParentKey ctx k bounds
+  | k == 0 = pure ()
+  | otherwise = requestDamage ctx (ReqParentKey k bounds)
+
 -- | Queue an explicit logical window rectangle. Empty rectangles are ignored.
 {-# INLINE damageRect #-}
 damageRect :: Context -> Rect -> IO ()
@@ -238,16 +249,30 @@ damageFull ctx = requestDamage ctx ReqFull
 
 -- | Request another view pass and invoke the installed event-loop wake action.
 -- Dirty state schedules work; damage determines which pixels are repainted.
+-- An opaque request — not from a store write — also clears the store flag, so
+-- the follow-up frame it asks for does not trust per-key store damage it was
+-- not asked for.
 {-# INLINE markDirty #-}
 markDirty :: Context -> IO ()
 markDirty ctx = do
-  modifyDamage ctx (\ds -> ds {dsDirty = True})
+  modifyDamage ctx (\ds -> ds {dsDirty = True, dsDirtyStore = False})
+  readIORef (ctxWakeLoop ctx) >>= sequence_
+
+-- | 'markDirty' for a request whose visible effects the frame's own damage
+-- machinery already covers: store writes are damaged per key ('modifyStore',
+-- 'writeSlot', 'adoptSlot') and interaction role changes damage their hot,
+-- active, and focus rects. The follow-up frame these request clips instead of
+-- repainting the whole window.
+{-# INLINE markDirtyCovered #-}
+markDirtyCovered :: Context -> IO ()
+markDirtyCovered ctx = do
+  modifyDamage ctx (\ds -> ds {dsDirty = True, dsDirtyStore = True})
   readIORef (ctxWakeLoop ctx) >>= sequence_
 
 -- | Clear the follow-up-frame request without clearing queued repaint bounds.
 {-# INLINE clearDirty #-}
 clearDirty :: Context -> IO ()
-clearDirty ctx = modifyDamage ctx (\ds -> ds {dsDirty = False})
+clearDirty ctx = modifyDamage ctx (\ds -> ds {dsDirty = False, dsDirtyStore = False})
 
 -- | Whether state changes require another view pass.
 {-# INLINE isDirty #-}
@@ -354,7 +379,7 @@ modifyStore ctx f = do
     )
     $ do
       forM_ changedKeys $ \k -> damageKey ctx k (DamageInflated defaultDamageSlop)
-      markDirty ctx
+      markDirtyCovered ctx
 
 diffKeysBy :: (a -> a -> Bool) -> IntMap a -> IntMap a -> [Int]
 diffKeysBy eq old new
@@ -394,7 +419,7 @@ writeSlot field ctx owner k v = do
     _ -> do
       writeIORef (ctxStore ctx) $! insertSlot field k v st
       damageWidget ctx owner DamageSelf
-      markDirty ctx
+      markDirtyCovered ctx
 
 
 
@@ -420,7 +445,7 @@ adoptSlot field ctx owner k v = do
       writeIORef (ctxStore ctx) $! insertSlot field seenK v (insertSlot field k v st)
       when (lookupSlot field k st /= Just v) $ do
         damageWidget ctx owner DamageSelf
-        markDirty ctx
+        markDirtyCovered ctx
       pure v
 
 -- | Remember the value a controlled widget returned this frame.
@@ -583,3 +608,6 @@ widgetTheme ctx wid = do
   if tsCount ts == 0
     then readIORef (ctxTheme ctx)
     else lookupNodeByWidgetId (ctxNodeArena ctx) wid >>= maybe (currentTheme ctx) (nodeTheme ctx)
+
+
+

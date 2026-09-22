@@ -17,14 +17,15 @@ module NanoUI.Internal.Widgets.ColorPicker
   )
 where
 
-import Control.Monad (forM_, void, when)
+import Control.Monad (forM_, unless, void, when)
 import Data.Bits ((.&.))
 import Data.Maybe (fromMaybe, isJust)
 import Data.Text (Text)
 import Data.Word (Word8)
 import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context
-  ( recordSlot
+  ( damageParentKey
+  , recordSlot
   , Context (..)
   , WidgetStore
   , getStore
@@ -76,6 +77,7 @@ import NanoUI.Internal.Style
   )
 import NanoUI.Internal.Types
   ( Color (..)
+  , DamageBounds (..)
   , Rect (..)
   , clamp
   , clamp01
@@ -86,6 +88,7 @@ import NanoUI.Internal.Types
   , colorR
   , colorRGBA
   , colorToWord32
+  , defaultDamageSlop
   , hsvToRgb
   , rectH
   , rectW
@@ -454,7 +457,12 @@ colorPickerWith showAlpha value = do
     key = intKey wid
     pct = 100 / (if showAlpha then 4 else 3)
     readColor = (\st -> widgetStoreColor st wid value) <$> uiIO (getStore ctx)
-    writePicker col hue sv = uiIO (modifyStore ctx (putColorState key col hue sv))
+    -- A colour change repaints every part: the bar markers and the preview
+    -- swatch read the store at paint time, and no single part's rect covers
+    -- them. The parent container holds them all.
+    writePicker col hue sv = uiIO $ do
+      modifyStore ctx (putColorState key col hue sv)
+      damageParentKey ctx key (DamageInflated defaultDamageSlop)
     writeColor col =
       let (h, s, v) = rgbToHsv col
        in writePicker col (clamp 0 360 h) (s, v)
@@ -588,18 +596,25 @@ adoptColorPickerValue ctx wid value = do
     packed = fromIntegral (colorToWord32 value)
     seenKey = slotKey SlotSeen key
     seen = insertSlot fieldInt seenKey packed store0
-  when (lookupSlot fieldInt seenKey store0 /= Just packed) $
+  when (lookupSlot fieldInt seenKey store0 /= Just packed) $ do
     setStore ctx $
       if lookupSlot fieldInt key store0 == Just packed
         then seen
         else
           let (h, s, v) = rgbToHsv value
            in putColorState key value (clamp 0 360 h) (s, v) (insertSlot fieldInt (slotKey SlotColorBase key) packed seen)
+    -- The caller's colour changed every part's pixels (bars, preview).
+    damageParentKey ctx key (DamageInflated defaultDamageSlop)
 
 commitColorPickerCurrent :: Context -> WidgetId -> Color -> IO ()
-commitColorPickerCurrent ctx wid col =
-  let packed = fromIntegral (colorToWord32 col)
-   in writeSlots ctx (slotWriteOr fieldInt packed (slotKey SlotColorBase (intKey wid)) packed)
+commitColorPickerCurrent ctx wid col = do
+  let key = intKey wid
+      packed = fromIntegral (colorToWord32 col)
+  st <- getStore ctx
+  -- The base slot only repaints the preview swatch; skip when unchanged.
+  unless (lookupSlot fieldInt (slotKey SlotColorBase key) st == Just packed) $ do
+    writeSlots ctx (slotWriteOr fieldInt packed (slotKey SlotColorBase key) packed)
+    damageParentKey ctx key (DamageInflated defaultDamageSlop)
 
 -- | Arrow, Home and End keys on the focused part: the field when @svFocus@,
 -- the hue bar when @hueFocus@, otherwise the alpha bar. Arrows move a part
@@ -634,6 +649,8 @@ applyColorPickerKeys ctx wid fallback inp svFocus hueFocus = do
            in (withAlpha (colorA current) (hsvToRgb hue s v), hue, (s, v))
       | otherwise = (withAlpha (round (bar 0 255 a)) current, h, (s, v))
     moved = col' /= current || h' /= h || sv' /= (s, v)
-  when moved $
+  when moved $ do
     setStore ctx (putColorState (intKey wid) col' h' sv' store)
+    -- Arrow-key moves repaint every part's marker, not just the focused one.
+    damageParentKey ctx (intKey wid) (DamageInflated defaultDamageSlop)
   pure moved

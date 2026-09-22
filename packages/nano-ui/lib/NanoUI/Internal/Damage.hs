@@ -8,12 +8,12 @@ module NanoUI.Internal.Damage
   , damagePieces
   ) where
 
-import Control.Monad (forM_, join, unless, when)
+import Control.Monad (filterM, forM_, join, unless, when)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
 import Data.IntMap.Strict qualified as IM
 import Data.IntSet qualified as IS
 import Data.List (partition, tails)
-import Data.Maybe (fromMaybe, isJust)
+import Data.Maybe (fromMaybe, isJust, isNothing)
 import Data.Primitive.PrimArray (MutablePrimArray, newPrimArray, readPrimArray, writePrimArray)
 import Data.Text (Text)
 import GHC.Exts (RealWorld)
@@ -22,6 +22,7 @@ import NanoUI.Internal.Context
   , Context (..)
   , DamageRequest (..)
   , DrawingCacheState (..)
+  , FollowReason (..)
   , WidgetStore (..)
   , getHotId
   , getLiveAnimations
@@ -33,7 +34,7 @@ import NanoUI.Internal.Context
   , getWindowDrag
   , getWindowResize
   , intKey
-  , markDirty
+  , markDirtyCovered
   , modalDamageFlip
   , setAnimRectless
   , takeAnimSettled
@@ -57,7 +58,7 @@ import NanoUI.Internal.Input
   , inputWindowSize
   )
 import NanoUI.Internal.Frame.Hit (findNodeByKey)
-import NanoUI.Internal.Store (Slot (..), eqByPtr, mirrorStoresChanged, ptrEq, slotKey)
+import NanoUI.Internal.Store (Slot (..), eqByPtr, ptrEq, slotKey)
 import NanoUI.Internal.Layout.Arena
   ( NodeArena
   , NodeIdx
@@ -71,6 +72,7 @@ import NanoUI.Internal.Layout.Arena
   , getHeightSizing
   , getNodeRect
   , getNodeType
+  , getParent
   , getStyleIdx
   , getText
   , getWidgetId
@@ -84,6 +86,7 @@ import NanoUI.Internal.Frame.Scroll.Geometry (decodeScrollConfig, scrollBare)
 import NanoUI.Internal.Widgets.Custom (mkCustomDrawContext)
 import NanoUI.Internal.Types
   ( Damage (..)
+  , DamageBounds (..)
   , Rect (..)
   , Size (..)
   , defaultDamageSlop
@@ -232,7 +235,11 @@ floatingPanelRects ctx = IM.fromList <$> floatingPanelsInOrder ctx
 -- | State 'NanoUI.Internal.Frame' captures before the UI pass; 'writeDamage' compares
 -- it against the finished frame.
 data FrameSnapshot = FrameSnapshot
-  { fsWasDirty :: !Bool
+  { fsFollowUp :: !FollowReason
+  -- ^ Why the previous frame asked for this one. 'FollowStore' frames clip:
+  -- store writes damaged their effects per key. 'FollowOpaque' frames (model
+  -- changes, other 'markDirty' calls) repaint all when this frame's diffs are
+  -- empty, since the change they follow may have altered any pixel.
   , fsSize :: !Size
   , fsStore :: !WidgetStore
   , fsHot :: !WidgetId
@@ -274,6 +281,17 @@ data FrameDelta = FrameDelta
   -- ^ Rects of keys that left or joined the arena.
   , fdRedrawn :: ![Int]
   -- ^ Keys of drawings whose ops changed at an unchanged rect.
+  , fdStoreChangedKeys :: [Int]
+  -- ^ Store keys (outside the scroll offsets 'scrollOffsetDamage' owns) whose
+  -- value changed since the snapshot. Lazy: a frame that is already
+  -- 'DamageFull' for a cheap reason never diffs the store.
+  , fdStoreOwners :: IM.IntMap NodeIdx
+  -- ^ Store key to owning node, built once when a changed key is not itself a
+  -- widget key. Lazy with 'fdStoreChangedKeys'.
+  , fdKeysUnresolved :: Bool
+  -- ^ Some changed key resolves to no node even through 'fdStoreOwners': a
+  -- local hook's key, or a widget-internal key nothing in the arena carries.
+  -- Nothing narrower than a full repaint is known to cover what it changed.
   }
 
 writeDamage :: Context -> Input -> FrameSnapshot -> IO ()
@@ -295,7 +313,19 @@ writeDamage ctx inp snap = do
       newFloatingRects = IM.fromList panels
   (settledMoved, churn) <- rectDeltas ctx (map snd panels) oldRects newRects
   let scrollChanged = not (eqByPtr (storeFloat oldStore) (storeFloat newStore))
-      delta =
+  -- Keys whose widget state changed outside the scroll offsets. Widget keys
+  -- resolve straight to their node; the rest go through the owners fold, built
+  -- only when some key needs it. Keys left unresolved after both are what full
+  -- damage still guards: nothing narrower than the window is known to cover
+  -- what they changed.
+  let changedKeys = storeChangedKeys oldStore newStore
+  hashMisses <-
+    filterM (\k -> isNothing <$> findNodeByKey ctx k) changedKeys
+  owners <- if null hashMisses then pure IM.empty else storeKeyOwners (ctxNodeArena ctx)
+  -- Key 0 names no widget and is damaged by nothing, so its writes cannot
+  -- escalate a frame.
+  let keysUnresolved = any (\k -> k /= 0 && IM.notMember k owners) hashMisses
+  let delta =
         FrameDelta
           { fdWinSize = inputWindowSize inp
           , fdStore = newStore
@@ -316,6 +346,9 @@ writeDamage ctx inp snap = do
           , fdSettledMoved = settledMoved
           , fdChurn = churn
           , fdRedrawn = redrawn
+          , fdStoreChangedKeys = changedKeys
+          , fdStoreOwners = owners
+          , fdKeysUnresolved = keysUnresolved
           }
   (dmg, pieces) <-
     if needsFullDamage snap delta
@@ -333,9 +366,12 @@ writeDamage ctx inp snap = do
   unless (null panels && prevEmpty) $
     modifyOverlay ctx $ \os ->
       os {osPrevFloatingRects = newFloatingRects, osPrevFloatingOrder = map fst panels}
-  when modalFlip (markDirty ctx)
+  -- The follow-up frames these request only settle placement: the flip and
+  -- floating change each made this frame repaint whole already, so their
+  -- pixels are not waiting on the next frame.
+  when modalFlip (markDirtyCovered ctx)
   when (fdFloatingChanged delta && not (IM.null (fsFloatingRects snap) && not (IM.null newFloatingRects))) $
-    markDirty ctx
+    markDirtyCovered ctx
 
 -- | Settle every drawing's ops for this frame and return the keys of those
 -- that now draw something else at an unchanged rect. A drawing follows state
@@ -375,12 +411,22 @@ refreshCustomDrawings ctx = do
           pure (if changed then intKey wid : acc else acc)
 
 -- | Whether the frame repaints the whole window rather than a clip.
+--
+-- Store writes are repainted per key instead: every changed key that resolves
+-- to a node ('fdStoreChangedKeys', 'fdStoreOwners') is damaged by
+-- 'storeKeyDamage', so the frame only falls back to full when some changed key
+-- resolves to nothing ('fdKeysUnresolved' — a local hook's key, whose effect
+-- on this frame's pixels no diff can describe) and the rect and text diffs
+-- came out empty. A follow-up frame requested by a model change
+-- ('FollowOpaque') gets the same treatment: the diffs describe what changed,
+-- or nothing narrower than the window is known to.
 needsFullDamage :: FrameSnapshot -> FrameDelta -> Bool
 needsFullDamage snap d =
   ReqFull `elem` fdRequests d
     || not (fdScrollOnly d)
-      && ( fsWasDirty snap
-             || mirrorStoresChanged (fsStore snap) (fdStore d)
+      && ( neverPainted
+             || followResidual
+             || storeResidual
              || sizeChanged
              || fdModalFlip d
              || fdFloatingChanged d
@@ -394,6 +440,9 @@ needsFullDamage snap d =
     oldRects = fsRects snap
     newRects = fdRects d
     oldSize = fsSize snap
+    -- Before any frame there is nothing to diff against, and the window
+    -- backdrop outside every widget rect was never painted.
+    neverPainted = oldSize == Size 0 0
     sizeChanged = oldSize /= Size 0 0 && oldSize /= fdWinSize d
     recentlyRectless k = IM.findWithDefault 0 k (fdRectless d) < orphanEscalateFrames
     orphanAnim =
@@ -414,6 +463,22 @@ needsFullDamage snap d =
         && not (fdAnimLive d)
         && not (fdScrollChanged d)
         && not (rgInPanels (fdSettledMoved d))
+    -- Nothing the rect, text, or key diffs describe changed this frame.
+    -- Text equality needs the structural fallback: bare 'ptrEq' on the two
+    -- map fields can answer differently before and after they are forced.
+    arenaDeltaEmpty =
+      eqByPtr (fdTexts d) (fsTexts snap)
+        && not (rgAny (fdSettledMoved d))
+        && not (rgAny (fdChurn d))
+    storeResidual = fdKeysUnresolved d && arenaDeltaEmpty
+    followResidual = case fsFollowUp snap of
+      FollowNone -> False
+      -- Store writes damaged their effects per key; nothing more to repaint.
+      FollowStore -> False
+      -- The change that asked for this frame may have altered pixels the
+      -- diffs cannot see (a style derived from the model). Empty diffs then
+      -- mean repaint all; non-empty diffs already cover the frame.
+      FollowOpaque -> arenaDeltaEmpty
 
 -- | The clip covering everything that changed, with the pieces it splits
 -- into ('damagePieces'), or 'DamageFull' once the pieces cover over half the
@@ -463,9 +528,11 @@ clipDamage ctx snap d = do
   role (fsFocus snap) (fsFocusRect snap) =<< readIORef (ctxFocusId ctx)
   forM_ (fdRequests d) $ \case
     ReqKey k _ -> addBackdrop k
+    ReqParentKey k _ -> addBackdrop k
     _ -> pure ()
   when (fdScrollChanged d || fdPointsChanged d) $
     scrollOffsetDamage ctx acc (fsStore snap) (fdStore d)
+  storeKeyDamage ctx acc oldRects newRects (fdStoreOwners d) (fdStoreChangedKeys d)
   let addAnim k =
         unless (k == 0) $ do
           clip <- keyViewportClip ctx k
@@ -582,6 +649,7 @@ resolveDamageRequests ctx acc oldRects newRects reqs =
     ReqRect r -> addRect acc r
     ReqWidget wid bounds -> resolveKey (intKey wid) bounds
     ReqKey k bounds -> resolveKey k bounds
+    ReqParentKey k bounds -> resolveParentKey k bounds
     ReqPeers wids bounds -> forM_ wids $ \wid -> resolveKey (intKey wid) bounds
   where
     resolveKey k bounds = do
@@ -590,6 +658,15 @@ resolveDamageRequests ctx acc oldRects newRects reqs =
         mapM_ $ \r -> do
           let clipped = clipToViewport clip (resolveDamageRect bounds r)
           when (rectNonEmpty clipped) $ addRect acc clipped
+    -- The container a keyed node sits in: a state change repaints the
+    -- sibling parts around it, which no single key's rect covers.
+    resolveParentKey k bounds =
+      findNodeByKey ctx k >>= mapM_ (\idx -> do
+        mPr <- getParent (ctxNodeArena ctx) idx >>= getNonzeroRect (ctxNodeArena ctx)
+        forM_ mPr $ \pr -> do
+          clip <- keyViewportClip ctx k
+          let clipped = clipToViewport clip (resolveDamageRect bounds pr)
+          when (rectNonEmpty clipped) $ addRect acc clipped)
 
 -- | A running union of rects, as @x0, y0, x1, y1@ followed by how many of
 -- them lie outside every floating panel, and for a piece union the rects
@@ -784,3 +861,95 @@ scrollOffsetDamage ctx acc oldStore newStore =
 floatingAncestorRect :: Context -> Int -> IO (Maybe Rect)
 floatingAncestorRect ctx idx =
   walkFloatingAncestors (ctxNodeArena ctx) idx (\i _ -> getNonzeroRect (ctxNodeArena ctx) i)
+
+-- | The store keys (outside the scroll offsets 'scrollOffsetDamage' owns)
+-- whose value changed between two stores. A key that left or joined counts;
+-- 'ptrEq' skips maps a record update never touched.
+storeChangedKeys :: WidgetStore -> WidgetStore -> [Int]
+storeChangedKeys old new =
+  diff (storeInt old) (storeInt new)
+    ++ diff (storeDouble old) (storeDouble new)
+    ++ diff (storeText old) (storeText new)
+    ++ diff (storeFloatList old) (storeFloatList new)
+    ++ diff (storeIntList old) (storeIntList new)
+    ++ diff (storeIntSet old) (storeIntSet new)
+    ++ diffBy ptrEq (storeDyn old) (storeDyn new)
+  where
+    one = IM.map (const ())
+    diff m m'
+      | ptrEq m m' = []
+      | otherwise = IM.keys (IM.mergeWithKey (\_ a b -> if a == b then Nothing else Just ()) one one m m')
+    diffBy eq m m'
+      | ptrEq m m' = []
+      | otherwise = IM.keys (IM.mergeWithKey (\_ a b -> if eq a b then Nothing else Just ()) one one m m')
+
+-- | Every store key that maps to a node this frame, keyed by the node that
+-- owns it: each widget's base key plus the sub-slot spellings its reads and
+-- writes use. Built once per frame, only when a changed key is not itself a
+-- widget key.
+storeKeyOwners :: NodeArena -> IO (IM.IntMap NodeIdx)
+storeKeyOwners na = foldNodeRevM na addOwner IM.empty
+  where
+    addOwner m idx = do
+      wid <- getWidgetId na idx
+      if hashWidgetId wid == 0
+        then pure m
+        else do
+          let k = intKey wid
+          pure $! foldl' (\m' sk -> IM.insert sk idx m') m (ownerKeys k)
+    -- The slots whose writes repaint from the store at paint time: carets and
+    -- anchors in text fields, a text area's document, buffer, history and
+    -- content extents, drag targets, and the seen/mode records a controlled
+    -- edit co-writes.
+    ownerKeys k =
+      [ k
+      , slotKey SlotSeen k
+      , slotKey SlotCursor k
+      , slotKey SlotAnchor k
+      , slotKey SlotTextMode k
+      , slotKey SlotTextHistory k
+      , slotKey SlotSearchCommitted k
+      , slotKey SlotSearchAge k
+      , slotKey SlotTextAreaRow k
+      , slotKey SlotTextAreaCol k
+      , slotKey SlotTextAreaPrefCol k
+      , slotKey SlotTextAreaAnchorRow k
+      , slotKey SlotTextAreaAnchorCol k
+      , slotKey SlotTextAreaViewport k
+      , slotKey SlotTextAreaChanged k
+      , slotKey SlotTextAreaText k
+      , slotKey SlotTextAreaDocument k
+      , slotKey SlotTextAreaBuffer k
+      , slotKey SlotTextAreaContentW k
+      , slotKey SlotTextAreaContentH k
+      , slotKey SlotTextAreaContentFont k
+      , slotKey SlotTextInputScroll k
+      , slotKey SlotDrop k
+      , slotKey SlotDropPos k
+      , slotKey SlotNumericHeld k
+      , slotKey SlotNumericRepeat k
+      , slotKey SlotMenuOpen k
+      , slotKey SlotMenuPos k
+      ]
+
+-- | Per-key repaint bounds for the store keys that changed outside the scroll
+-- offsets: each key's owner widget's old and new rect, inflated by the
+-- standard slop and clipped to its scroll viewport. Keys that resolve by
+-- widget id were already damaged by their 'ReqKey' requests, so this only has
+-- work when sub-slot spellings needed the owners fold; keys that resolve to
+-- no node at all — the ones 'needsFullDamage' escalates on — add nothing.
+storeKeyDamage :: Context -> RectUnion -> IM.IntMap Rect -> IM.IntMap Rect -> IM.IntMap NodeIdx -> [Int] -> IO ()
+storeKeyDamage ctx acc oldRects newRects owners keys
+  | IM.null owners = pure ()
+  | otherwise =
+      forM_ keys $ \k ->
+        unless (k == 0) $ do
+          let na = ctxNodeArena ctx
+          mIdx <- findNodeByKey ctx k
+          forM_ (maybe (IM.lookup k owners) Just mIdx) $ \idx -> do
+            clip <- getClipRect na idx
+            wid <- getWidgetId na idx
+            let addSide =
+                  mapM_ (addRect acc . clipToViewport clip . resolveDamageRect (DamageInflated defaultDamageSlop))
+            addSide (IM.lookup (intKey wid) oldRects)
+            addSide (IM.lookup (intKey wid) newRects)
