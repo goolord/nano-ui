@@ -41,7 +41,7 @@ pushRect :: DrawArena -> Rect -> Color -> IO ()
 pushRect da rect col = do
   r <- snapRectOrigin da rect
   setTexture da glyphAtlasTextureId
-  pushQuad da r whitePixelU whitePixelV whitePixelU whitePixelV col
+  pushQuad da r whitePixel whitePixel whitePixel whitePixel col
 
 -- Quad with a color per corner. GPU interpolates across the two triangles.
 -- Corners: top-left, top-right, bottom-right, bottom-left.
@@ -58,7 +58,7 @@ pushQuadGradient da (Rect x y w h) tl tr br bl
           !c2 = unpackColorF br
           !c3 = unpackColorF bl
       withVerts da 4 6 $ \vp ip vOff iOff baseIdxWord ->
-        pokeQuadGradientSIMD vp vOff ip iOff px py w h whitePixelU whitePixelV c0 c1 c2 c3 baseIdxWord
+        pokeQuadGradientSIMD vp vOff ip iOff px py w h whitePixel whitePixel c0 c1 c2 c3 baseIdxWord
 
 {-# INLINE pushImage #-}
 pushImage :: DrawArena -> Rect -> Int -> Float -> Float -> Float -> Float -> Color -> IO ()
@@ -69,7 +69,7 @@ pushImage da rect tex u0 v0 u1 v1 col
       setTexture da tex
       pushQuad da r u0 v0 u1 v1 col
 
--- 4 segments per 90° arc. Lookup table in cornerCosSin has 5 points per quadrant.
+-- 4 segments per 90° arc, so 'cornerCosSin' has 5 points per quadrant.
 cornerSegments :: Int
 cornerSegments = 4
 
@@ -87,32 +87,24 @@ cornerSegments = 4
 arcFeather :: Float
 arcFeather = 0.5
 
--- Precomputed unit-circle cos/sin for rounded-rect corners (4 segments per 90° arc).
+-- | Precomputed unit-circle cos/sin of point @seg@ of rounded-rect corner @q@
+-- (top left, then clockwise): each corner's arc is the one before it turned a
+-- quarter.
 {-# INLINE cornerCosSin #-}
 cornerCosSin :: Int -> Int -> (Float, Float)
 cornerCosSin q seg =
-  case q * 5 + seg of
-    0 -> (-1.0, 0.0)
-    1 -> (-0.9238795325, -0.3826834324)
-    2 -> (-0.7071067812, -0.7071067812)
-    3 -> (-0.3826834324, -0.9238795325)
-    4 -> (0.0, -1.0)
-    5 -> (0.0, -1.0)
-    6 -> (0.3826834324, -0.9238795325)
-    7 -> (0.7071067812, -0.7071067812)
-    8 -> (0.9238795325, -0.3826834324)
-    9 -> (1.0, 0.0)
-    10 -> (1.0, 0.0)
-    11 -> (0.9238795325, 0.3826834324)
-    12 -> (0.7071067812, 0.7071067812)
-    13 -> (0.3826834324, 0.9238795325)
-    14 -> (0.0, 1.0)
-    15 -> (0.0, 1.0)
-    16 -> (-0.3826834324, 0.9238795325)
-    17 -> (-0.7071067812, 0.7071067812)
-    18 -> (-0.9238795325, 0.3826834324)
-    19 -> (-1.0, 0.0)
-    _ -> (0.0, 0.0)
+  case q of
+    0 -> (-c, -s)
+    1 -> (s, -c)
+    2 -> (c, s)
+    _ -> (-s, c)
+  where
+    (c, s) = case seg of
+      0 -> (1.0, 0.0)
+      1 -> (0.9238795325, 0.3826834324)
+      2 -> (0.7071067812, 0.7071067812)
+      3 -> (0.3826834324, 0.9238795325)
+      _ -> (0.0, 1.0)
 
 -- | Poke one coverage-AA strip into a reservation at vertex offset @vi@ and
 -- index offset @ii@ (both relative to @base@/@baseIdx@). Callers guarantee
@@ -168,11 +160,11 @@ pokeBandVerts ::
   ((Float, Float), (Float, Float), (Float, Float), (Float, Float)) ->
   IO ()
 pokeBandVerts vp vBase hasCore r g b a ((p0x, p0y), (p1x, p1y), (p2x, p2y), (p3x, p3y)) = do
-  pokeVertexSIMD vp vBase p0x p0y r g b 0 whitePixelU whitePixelV
-  pokeVertexSIMD vp (vBase + 32) p1x p1y r g b a whitePixelU whitePixelV
+  pokeVertexSIMD vp vBase p0x p0y r g b 0 whitePixel whitePixel
+  pokeVertexSIMD vp (vBase + 32) p1x p1y r g b a whitePixel whitePixel
   when hasCore $
-    pokeVertexSIMD vp (vBase + 64) p2x p2y r g b a whitePixelU whitePixelV
-  pokeVertexSIMD vp (vBase + if hasCore then 96 else 64) p3x p3y r g b 0 whitePixelU whitePixelV
+    pokeVertexSIMD vp (vBase + 64) p2x p2y r g b a whitePixel whitePixel
+  pokeVertexSIMD vp (vBase + if hasCore then 96 else 64) p3x p3y r g b 0 whitePixel whitePixel
 
 -- | Index the quads between two 'pokeBandVerts' cross-sections starting at
 -- vertices @va@ and @vb@, at byte offset @iOff@: three quads, or two without
@@ -227,8 +219,7 @@ pushRoundedRectRaw da (Rect x y w h) radius col
               !needI = quadCount * 6 + 4 * cornerI
           withVertsRaw da needV needI $ \vp ip base baseIdx -> do
             let !(cr, cg, cb, ca) = unpackColorF col
-                !u = whitePixelU
-                !v = whitePixelV
+                !u = whitePixel
                 pokeQuadAt !vi !ii !qx !qy !qw !qh =
                   pokeQuadSIMD
                     vp
@@ -240,9 +231,9 @@ pushRoundedRectRaw da (Rect x y w h) radius col
                     qw
                     qh
                     u
-                    v
                     u
-                    v
+                    u
+                    u
                     cr
                     cg
                     cb
@@ -252,13 +243,13 @@ pushRoundedRectRaw da (Rect x y w h) radius col
                   let !vBase = (base + vi) * vertexSize
                       !centerIdx = fromIntegral (base + vi) :: Word32
                       !inRad = max 0 (rad - 1.0)
-                  pokeVertexSIMD vp vBase ccx ccy cr cg cb ca u v
+                  pokeVertexSIMD vp vBase ccx ccy cr cg cb ca u u
                   loopIO 0 segs $ \i -> do
                     let !(ct, st) = cornerCosSin q i
                         !rimI = base + vi + 1 + i
                         !outI = base + vi + 1 + ring + i
-                    pokeVertexSIMD vp (rimI * vertexSize) (ccx + inRad * ct) (ccy + inRad * st) cr cg cb ca u v
-                    pokeVertexSIMD vp (outI * vertexSize) (ccx + rad * ct) (ccy + rad * st) cr cg cb 0 u v
+                    pokeVertexSIMD vp (rimI * vertexSize) (ccx + inRad * ct) (ccy + inRad * st) cr cg cb ca u u
+                    pokeVertexSIMD vp (outI * vertexSize) (ccx + rad * ct) (ccy + rad * st) cr cg cb 0 u u
                     when (i > 0) $ do
                       let !k = i - 1
                           !rim0 = fromIntegral (base + vi + i) :: Word32
@@ -406,7 +397,7 @@ pushSquareStroke :: DrawArena -> Float -> Float -> Float -> Float -> Float -> Co
 pushSquareStroke da x y w h t col = do
   let edge qx qy qw qh =
         when (qw > 0 && qh > 0) $
-          pushQuad da (Rect qx qy qw qh) whitePixelU whitePixelV whitePixelU whitePixelV col
+          pushQuad da (Rect qx qy qw qh) whitePixel whitePixel whitePixel whitePixel col
       !innerH = h - 2 * t
   edge x y w t
   edge x (y + h - t) w t
@@ -482,7 +473,7 @@ pushStroke da x1 y1 x2 y2 thickness col
               !hy = dx * invLen
           withVerts da 4 6 $ \vp ip vOff iOff baseIdxWord -> do
             let !(r, g, b, a) = unpackColorF col
-                poke off px py = pokeVertexSIMD vp off px py r g b a whitePixelU whitePixelV
+                poke off px py = pokeVertexSIMD vp off px py r g b a whitePixel whitePixel
             poke vOff (px1 + hx) (py1 + hy)
             poke (vOff + 32) (px2 + hx) (py2 + hy)
             poke (vOff + 64) (px2 - hx) (py2 - hy)
@@ -600,9 +591,9 @@ polygonAAFrom da rx ry pts tris col
               (mx, my) = miterOf ax ay bx by
               !vx = px i + ox
               !vy = py i + oy
-          pokeVertexSIMD vp ((base + i) * vertexSize) (vx - f * mx) (vy - f * my) r g b a whitePixelU whitePixelV
+          pokeVertexSIMD vp ((base + i) * vertexSize) (vx - f * mx) (vy - f * my) r g b a whitePixel whitePixel
           when (fringe > 0) $
-            pokeVertexSIMD vp ((base + n + i) * vertexSize) (vx + f * mx) (vy + f * my) r g b 0 whitePixelU whitePixelV
+            pokeVertexSIMD vp ((base + n + i) * vertexSize) (vx + f * mx) (vy + f * my) r g b 0 whitePixel whitePixel
         loopIO 0 (nt - 1) $ \k ->
           pokeByteOff ip ((baseIdx + k) * indexSize) (fromIntegral (base + indexPrimArray tris k) :: Word32)
         loopIO 0 (fringe - 1) $ \i -> do

@@ -28,13 +28,12 @@ module NanoUI.Internal.Draw.Arena
   , unpackColorF
   , pokeQuadIndices
   , loopIO
-  , whitePixelU
-  , whitePixelV
+  , whitePixel
   ) where
 
 import Control.Monad (unless, when)
 import Data.Bits (shiftR, (.&.))
-import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Maybe (fromMaybe)
 import Data.Primitive.PrimArray
   ( PrimArray
@@ -51,7 +50,7 @@ import Data.Primitive.PrimArray
 import Data.Word (Word32, Word8)
 import Data.Vector.Unboxed qualified as U
 import Data.Vector.Unboxed.Mutable qualified as UM
-import Foreign.ForeignPtr (ForeignPtr, mallocForeignPtrBytes, withForeignPtr)
+import Foreign.ForeignPtr (mallocForeignPtrBytes, withForeignPtr)
 import Foreign.ForeignPtr.Unsafe (unsafeForeignPtrToPtr)
 import Foreign.Marshal.Array (copyArray)
 import Foreign.Ptr (Ptr)
@@ -67,9 +66,6 @@ vertexCapacity = 4096
 indexCapacity :: Int
 indexCapacity = 8192
 
-bufferPoolLimit :: Int
-bufferPoolLimit = 4
-
 cmdInitialCapacity :: Int
 cmdInitialCapacity = 64
 
@@ -79,10 +75,8 @@ newDrawArena = do
   iFPtr <- mallocForeignPtrBytes (indexCapacity * indexSize)
   daVertexFPtr <- newIORef vFPtr
   daVertexCap <- newIORef vertexCapacity
-  daVertexPool <- newIORef []
   daIndexFPtr <- newIORef iFPtr
   daIndexCap <- newIORef indexCapacity
-  daIndexPool <- newIORef []
   daCounts <- newPrimArray countSlots
   daCmdStore <- newIORef =<< UM.unsafeNew cmdInitialCapacity
   daCurrentLayer <- newIORef LayerContent
@@ -163,51 +157,27 @@ setDrawSquareGeometry da = writeIORef (daSquareGeometry da)
 setDrawExternalText :: DrawArena -> Bool -> IO ()
 setDrawExternalText da = writeIORef (daExternalText da)
 
-{-# NOINLINE poolTake #-}
-poolTake :: BufferPool -> Int -> Int -> IO (ForeignPtr Word8)
-poolTake pool bytes minCap = do
-  entries <- readIORef pool
-  case break (\(_, cap) -> cap >= minCap) entries of
-    (before, (ptr, _) : after) -> do
-      writeIORef pool (before ++ after)
-      pure ptr
-    _ -> mallocForeignPtrBytes bytes
-
-{-# NOINLINE poolGive #-}
-poolGive :: BufferPool -> ForeignPtr Word8 -> Int -> IO ()
-poolGive pool ptr cap = do
-  entries <- readIORef pool
-  writeIORef pool (take bufferPoolLimit ((ptr, cap) : entries))
-
-{-# NOINLINE growBuffer #-}
-growBuffer ::
-  Int ->
-  IORef (ForeignPtr Word8) ->
-  IORef Int ->
-  BufferPool ->
-  Int ->
-  Int ->
-  IO ()
-growBuffer count fptrRef capRef pool elemBytes needElems = do
-  cap <- readIORef capRef
-  let required = count + needElems
-  when (required > cap) $ do
-    oldFPtr <- readIORef fptrRef
-    let newCap = max (cap * 2) required
-    newFPtr <- poolTake pool (newCap * elemBytes) newCap
-    withForeignPtr newFPtr $ \newP ->
-      withForeignPtr oldFPtr $ \oldP ->
-        copyArray newP oldP (count * elemBytes)
-    poolGive pool oldFPtr cap
-    writeIORef fptrRef newFPtr
-    writeIORef capRef newCap
-
-ensureCapacity :: DrawArena -> Int -> Int -> IO ()
-ensureCapacity da needVerts needIndices = do
-  vCount <- getCount da vertexCountSlot
-  growBuffer vCount (daVertexFPtr da) (daVertexCap da) (daVertexPool da) vertexSize needVerts
-  iCount <- getCount da indexCountSlot
-  growBuffer iCount (daIndexFPtr da) (daIndexCap da) (daIndexPool da) indexSize needIndices
+-- | Make room for @needV@ vertices after the first @vCount@ and @needI@
+-- indices after the first @iCount@, copying each full buffer into one of at
+-- least twice its capacity.
+{-# NOINLINE growBuffers #-}
+growBuffers :: DrawArena -> Int -> Int -> Int -> Int -> IO ()
+growBuffers da vCount iCount needV needI = do
+  grow (daVertexFPtr da) (daVertexCap da) vertexSize vCount needV
+  grow (daIndexFPtr da) (daIndexCap da) indexSize iCount needI
+  where
+    grow fptrRef capRef elemBytes count needElems = do
+      cap <- readIORef capRef
+      let required = count + needElems
+      when (required > cap) $ do
+        oldFPtr <- readIORef fptrRef
+        let newCap = max (cap * 2) required
+        newFPtr <- mallocForeignPtrBytes (newCap * elemBytes)
+        withForeignPtr newFPtr $ \newP ->
+          withForeignPtr oldFPtr $ \oldP ->
+            copyArray newP oldP (count * elemBytes)
+        writeIORef fptrRef newFPtr
+        writeIORef capRef newCap
 
 {-# INLINE ensureAndAlloc #-}
 ensureAndAlloc :: DrawArena -> Int -> Int -> IO (Ptr Word8, Ptr Word8, Int, Int)
@@ -217,7 +187,7 @@ ensureAndAlloc da needV needI = do
   vCap <- readIORef (daVertexCap da)
   iCap <- readIORef (daIndexCap da)
   unless (vCount + needV <= vCap && iCount + needI <= iCap) $
-    ensureCapacity da needV needI
+    growBuffers da vCount iCount needV needI
   vp <- unsafeForeignPtrToPtr <$> readIORef (daVertexFPtr da)
   ip <- unsafeForeignPtrToPtr <$> readIORef (daIndexFPtr da)
   pure (vp, ip, vCount, iCount)
@@ -502,9 +472,7 @@ pokeQuadIndices ip off a b c d = do
   pokeByteOff ip (off + 16) c
   pokeByteOff ip (off + 20) d
 
--- | Center of the 4x4 white pixel patch in the 1024x1024 font atlas.
-whitePixelU :: Float
-whitePixelU = 1.5 / 1024.0
-
-whitePixelV :: Float
-whitePixelV = 1.5 / 1024.0
+-- | The u and v of the center of the 4x4 white pixel patch in the 1024x1024
+-- font atlas.
+whitePixel :: Float
+whitePixel = 1.5 / 1024.0

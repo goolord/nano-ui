@@ -19,7 +19,6 @@ module NanoUI.Internal.Draw.Types
   , forDrawCmdsInLayer_
   , drawCmdElems
   , DrawArena (..)
-  , BufferPool
   , vertexSize
   , indexSize
   , backdropDimTextureId
@@ -200,9 +199,9 @@ type DrawCmdRep = ((Float, Float, Float, Float), Int, Word32, Word32, Word8)
 
 instance U.IsoUnbox DrawCmd DrawCmdRep where
   {-# INLINE toURepr #-}
-  toURepr (DrawCmd x y w h tex off count layer) = ((x, y, w, h), tex, off, count, layerToWord8 layer)
+  toURepr (DrawCmd x y w h tex off count layer) = ((x, y, w, h), tex, off, count, fromIntegral (fromEnum layer))
   {-# INLINE fromURepr #-}
-  fromURepr ((x, y, w, h), tex, off, count, layer) = DrawCmd x y w h tex off count (layerFromWord8 layer)
+  fromURepr ((x, y, w, h), tex, off, count, layer) = DrawCmd x y w h tex off count (toEnum (fromIntegral layer))
 
 newtype instance U.MVector s DrawCmd = MVDrawCmd (U.MVector s (U.As DrawCmd DrawCmdRep))
 
@@ -213,14 +212,6 @@ deriving via (U.As DrawCmd DrawCmdRep) instance GM.MVector U.MVector DrawCmd
 deriving via (U.As DrawCmd DrawCmdRep) instance G.Vector U.Vector DrawCmd
 
 instance U.Unbox DrawCmd
-
-{-# INLINE layerToWord8 #-}
-layerToWord8 :: Layer -> Word8
-layerToWord8 ly = fromIntegral (fromEnum ly)
-
-{-# INLINE layerFromWord8 #-}
-layerFromWord8 :: Word8 -> Layer
-layerFromWord8 w = toEnum (fromIntegral w)
 
 -- | One frame's geometry and batches. Vertex/index pointers refer to reusable
 -- arena storage: render or copy them before running another frame on the
@@ -265,15 +256,11 @@ forDrawCmdsInLayer_ ly dd f =
 drawCmdElems :: DrawData -> [DrawCmd]
 drawCmdElems = U.toList . drawCommands
 
-type BufferPool = IORef [(ForeignPtr Word8, Int)]
-
 data DrawArena = DrawArena
   { daVertexFPtr :: !(IORef (ForeignPtr Word8))
   , daVertexCap :: !(IORef Int)
-  , daVertexPool :: !BufferPool
   , daIndexFPtr :: !(IORef (ForeignPtr Word8))
   , daIndexCap :: !(IORef Int)
-  , daIndexPool :: !BufferPool
   , daCounts :: !(MutablePrimArray RealWorld Int)
   -- ^ Vertex count, index count, command count and the pending command's
   -- start index, unboxed so the per-primitive writes do not allocate.

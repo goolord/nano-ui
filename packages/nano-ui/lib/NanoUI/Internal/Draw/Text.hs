@@ -231,7 +231,7 @@ pushGlyphQuads da fm slant px py txt col = do
                     case fmGlyph fm c of
                       Nothing
                         | adv > 0 && c /= ' ' && not (outside ox adv) -> do
-                            pokeGlyphQuad vp ip base baseIdx 0 baselineY r g b a q (onGrid scale ox) (onGrid scale py) adv (fmLineHeight fm) whitePixelU whitePixelV whitePixelU whitePixelV
+                            pokeGlyphQuad vp ip base baseIdx 0 baselineY r g b a q (onGrid scale ox) (onGrid scale py) adv (fmLineHeight fm) whitePixel whitePixel whitePixel whitePixel
                             next (q + 1)
                         | otherwise -> next q
                       Just gq
