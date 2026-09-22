@@ -130,7 +130,6 @@ library
         NanoUI.Internal.Frame.Cursor
         NanoUI.Internal.Draw.Arena
         NanoUI.Internal.Draw.Shapes
-        NanoUI.Internal.Draw.Text
         NanoUI.Internal.Draw.Types
         NanoUI.Internal.Frame.Input
         NanoUI.Internal.Frame.Chrome

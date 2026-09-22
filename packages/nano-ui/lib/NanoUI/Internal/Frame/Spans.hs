@@ -113,9 +113,7 @@ collectOverlayTextSpans :: Context -> Input -> IO [(Rect, T.Text, Color, Color, 
 collectOverlayTextSpans ctx inp = do
   let arena = ctxSpanOverlay ctx
   resetSpanArena arena
-  collectFloatingSpansInto ctx NodeWindow arena
-  collectFloatingSpansInto ctx NodeModal arena
-  collectFloatingSpansInto ctx NodePopup arena
+  mapM_ (\nt -> collectFloatingSpansInto ctx nt arena) [NodeWindow, NodeModal, NodePopup]
   collectSelectDropdownSpans ctx inp >>= pushSpans arena
   collectTextEditMenuSpans ctx inp >>= pushSpans arena
   spanArenaToList IM.empty arena

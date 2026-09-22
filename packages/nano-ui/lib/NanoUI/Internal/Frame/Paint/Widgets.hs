@@ -356,10 +356,9 @@ paintWidgetForeground env idx nt style si (Rect x y w h) = do
 -- | Sort direction triangle for a table header: up when ascending, down when
 -- descending, centered on the label line in the header's reserved slot.
 drawSortTriangle :: DrawArena -> Float -> Float -> Bool -> Color -> IO ()
-drawSortTriangle da cx cy down col =
-  if down
-    then pushFilledTriangle da (cx - 5) (cy - 3.5) (cx + 5) (cy - 3.5) cx (cy + 3.5) col
-    else pushFilledTriangle da (cx - 5) (cy + 3.5) (cx + 5) (cy + 3.5) cx (cy - 3.5) col
+drawSortTriangle da cx cy down =
+  let tip = if down then 3.5 else -3.5
+   in pushFilledTriangle da (cx - 5) (cy - tip) (cx + 5) (cy - tip) cx (cy + tip)
 
 -- | Draw a single-line field's text, and its selection and caret while it is
 -- being edited, inside @clip@. @penX/penY@ locate @txt@ (absolute).
