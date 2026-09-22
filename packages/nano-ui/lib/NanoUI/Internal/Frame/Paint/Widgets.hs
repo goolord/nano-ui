@@ -1,6 +1,5 @@
 {-# OPTIONS_GHC -fasm -fno-specialise-aggressively #-}
 
-
 -- | Painters for controls and text fields, and the paint environment they
 -- share with the node walk. NOINLINE keeps these large bodies out of the
 -- recursive node walk.

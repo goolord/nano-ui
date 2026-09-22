@@ -15,7 +15,6 @@
 -- LLVM; hence the guard flags below.
 {-# OPTIONS_GHC -fasm -fno-specialise-aggressively #-}
 
-
 -- | Walk solved nodes and emit geometry, respecting clips, layers, and paint scopes.
 module NanoUI.Internal.Frame.Paint
   ( lowerShapes

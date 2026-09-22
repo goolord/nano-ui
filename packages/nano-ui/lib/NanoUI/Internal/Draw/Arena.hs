@@ -192,13 +192,6 @@ ensureAndAlloc da needV needI = do
   ip <- unsafeForeignPtrToPtr <$> readIORef (daIndexFPtr da)
   pure (vp, ip, vCount, iCount)
 
-{-# NOINLINE growCmdStore #-}
-growCmdStore :: DrawArena -> IO ()
-growCmdStore da = do
-  arr <- readIORef (daCmdStore da)
-  newArr <- UM.unsafeGrow arr (UM.length arr)
-  writeIORef (daCmdStore da) newArr
-
 -- | Close the pending index run as a command. A run that continues the last
 -- command's state and index range extends that command instead. Only reached
 -- when the layer, clip or texture changes and from 'finishDraw', so it stays
@@ -235,8 +228,12 @@ flushCmd da = do
             UM.unsafeWrite arr (n - 1) prev {cmdIndexCount = cmdIndexCount prev + cnt}
           pure same
     unless extended $ do
-      when (n >= UM.length arr) $ growCmdStore da
-      arr' <- readIORef (daCmdStore da)
+      arr' <-
+        if n < UM.length arr
+          then pure arr
+          else do
+            grown <- UM.unsafeGrow arr (UM.length arr)
+            grown <$ writeIORef (daCmdStore da) grown
       UM.unsafeWrite arr' n (DrawCmd cx cy cw ch tex off cnt layer)
       setCount da cmdCountSlot (n + 1)
     setCount da cmdStartSlot end
@@ -271,7 +268,6 @@ currentClip da = do
   w <- readPrimArray clip 2
   h <- readPrimArray clip 3
   pure $! Rect x y w h
-
 
 -- | Run @act@ clipped to the intersection with the current clip. Not
 -- exception-safe: the frame resets the clip before the next paint anyway.
