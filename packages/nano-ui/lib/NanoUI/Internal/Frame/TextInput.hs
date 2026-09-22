@@ -1,6 +1,6 @@
 -- | Single-line text fields: field geometry, horizontal scroll, caret and
--- selection painting, and mouse selection. Also holds the click-count and
--- caret primitives the text area shares.
+-- selection painting, and mouse selection. Also holds the line painting, word
+-- bounds and mouse selection the text area shares.
 module NanoUI.Internal.Frame.TextInput
   ( textInputFieldRect
   , textInputFieldTextClip
@@ -11,16 +11,19 @@ module NanoUI.Internal.Frame.TextInput
   , readFieldEdit
   , drawTextInputSelection
   , drawTextInputCaret
-  , drawTextCaret
-  , drawTextSelectionLine
+  , drawLineSelection
+  , drawLineCaret
   , searchClearHit
-  , normalizeTextFieldClicks
-  , finalizeTextInputMouse
-  , collapseTextInputSelection
+  , textWordBounds
+  , FieldDoc (..)
+  , selectWithMouse
+  , textInputMouse
   ) where
 
 import Control.Monad (forM_, when)
+import Data.Char (isAlphaNum, isSpace)
 import Data.Maybe (mapMaybe)
+import Data.Sequence qualified as Seq
 import Data.Text (Text)
 import qualified Data.Text as T
 import NanoUI.Internal.Context
@@ -55,16 +58,8 @@ import NanoUI.Internal.Input
   , inputMousePressed
   , inputMouseReleased
   )
-import NanoUI.Internal.Layout.Arena
-  ( NodeIdx
-  , NodeType (NodeTextInput)
-  , getNodeType
-  , getOptions
-  , getRect
-  , getStyleIdx
-  , getWidgetId
-  )
-import NanoUI.Internal.Monad (ifM, (<&&>))
+import NanoUI.Internal.Layout.Arena (NodeIdx, getOptions, getRect, getStyleIdx, getWidgetId)
+import NanoUI.Internal.Monad (ifM, unlessM, (<&&>))
 import NanoUI.Internal.Store (fieldFloat, fieldInt, fieldText, findSlot, insertSlot, slotWriteOr)
 import NanoUI.Internal.Style (themeSelection)
 import NanoUI.Internal.Types (Color (..), Rect (..), V2 (..), clamp, rectContains, rectIntersect, rectOverlapArea, rectW)
@@ -80,10 +75,7 @@ import NanoUI.Internal.WidgetText
   , textInputFlagSearch
   , textInputFlagSelectable
   )
-import NanoUI.Internal.Widgets.TextCommon
-  ( selectionCaretGeom
-  , textSelectionForDrag
-  )
+import NanoUI.Widgets.TextBuffer qualified as TB
 
 textInputFieldRect :: FontMetrics -> Float -> Float -> Float -> Float -> Rect
 textInputFieldRect fm x y w h =
@@ -152,14 +144,21 @@ tagTextInputClippedSpans parentClip x y w h fm spans =
          in (rect, txt, fg, bg,) <$> (rectIntersect area clipRect >>= rectIntersect parentClip)
    in mapMaybe tagOne spans
 
-drawTextCaret :: DrawArena -> Float -> Float -> Float -> Color -> IO ()
-drawTextCaret da caretX caretY caretH fg =
-  pushRect da (Rect caretX caretY 1 caretH) fg
+-- | The selection highlight behind characters @lo@ to @hi@ of @line@, whose
+-- pen starts at @x@, on a row at @y@ of height @lineH@.
+drawLineSelection :: DrawArena -> FontMetrics -> Text -> Int -> Int -> Float -> Float -> Float -> Color -> IO ()
+drawLineSelection da fm line lo hi x y lineH color = do
+  prepared <- prepareFontMetrics fm line
+  forM_ (selectionSpans prepared line lo hi) $ \(wLo, wHi) ->
+    when (wHi > wLo) $
+      pushRect da (Rect (x + wLo) y (max 1 (wHi - wLo)) (max 4 lineH)) color
 
-drawTextSelectionLine :: DrawArena -> Float -> Float -> Float -> Float -> Color -> IO ()
-drawTextSelectionLine da selX selY selW selH selBg =
-  when (selW > 0) $
-    pushRect da (Rect selX selY (max 1 selW) (max 4 selH)) selBg
+-- | The caret before character @col@ of @line@, whose pen starts at @x@, on a
+-- row at @y@ of height @lineH@.
+drawLineCaret :: DrawArena -> FontMetrics -> Text -> Int -> Float -> Float -> Float -> Color -> IO ()
+drawLineCaret da fm line col x y lineH fg = do
+  pw <- caretXIO fm line col
+  pushRect da (Rect (x + pw) (y + 1) 1 (max 4 (lineH - 2))) fg
 
 computeTextInputScroll :: FontMetrics -> Float -> Text -> Int -> Float -> Bool -> IO Float
 computeTextInputScroll fm viewportW value cursor oldScroll isFocused
@@ -218,111 +217,97 @@ readFieldEdit ctx idx x y w h scrollX = do
       pure $! Just (FieldEdit value cursor anchor fm boxY boxH (clipX - scrollX))
 
 drawTextInputSelection :: DrawArena -> Context -> NodeIdx -> FieldEdit -> IO ()
-drawTextInputSelection da ctx idx (FieldEdit value cursor anchor fm boxY boxH textX) = do
-  let selLo = min anchor cursor
-      selHi = max anchor cursor
-      lineH = fmLineHeight fm
-  when (selLo < selHi) $ do
+drawTextInputSelection da ctx idx (FieldEdit value cursor anchor fm boxY boxH textX) =
+  when (anchor /= cursor) $ do
     theme <- nodeTheme ctx idx
-    prepared <- prepareFontMetrics fm value
-    forM_ (selectionSpans prepared value selLo selHi) $ \(wLo, wHi) ->
-      drawTextSelectionLine
-        da
-        (textX + wLo)
-        (centeredTextY fm boxY boxH lineH)
-        (wHi - wLo)
-        lineH
-        (themeSelection theme)
+    let lineH = fmLineHeight fm
+    drawLineSelection da fm value (min anchor cursor) (max anchor cursor) textX (centeredTextY fm boxY boxH lineH) lineH (themeSelection theme)
 
 drawTextInputCaret :: DrawArena -> FieldEdit -> Color -> IO ()
-drawTextInputCaret da (FieldEdit value cursor _ fm boxY boxH textX) fg = do
+drawTextInputCaret da (FieldEdit value cursor _ fm boxY boxH textX) =
   let lineH = fmLineHeight fm
-  pw <- caretXIO fm value cursor
-  let (caretX, caretY, caretH) =
-        selectionCaretGeom textX (centeredTextY fm boxY boxH lineH) pw lineH
-  drawTextCaret da caretX caretY caretH fg
+   in drawLineCaret da fm value cursor textX (centeredTextY fm boxY boxH lineH) lineH
 
-updateTextInputSelection :: Context -> WidgetId -> Int -> Int -> IO ()
-updateTextInputSelection ctx wid anchor cursor =
-  writeSlots ctx $
-    slotWriteOr fieldInt cursor (slotKey SlotAnchor key) anchor
-      <> slotWriteOr fieldInt 0 (slotKey SlotCursor key) cursor
-  where
-    key = intKey wid
+data CharClass = WordChar | SpaceChar | OtherChar
+  deriving (Eq)
 
--- | Field box, text origin x (scroll applied), value and font of a single-line
--- field.
-textInputGeomForWidget :: Context -> WidgetId -> IO (Maybe (Rect, Float, Text, FontMetrics))
-textInputGeomForWidget ctx wid = do
-  withWidgetNode ctx wid Nothing $ \idx -> do
-    nt <- getNodeType (ctxNodeArena ctx) idx
-    if nt /= NodeTextInput
-      then pure Nothing
-      else do
-        (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-        (field, Rect clipX _ _ _) <- nodeTextFieldGeom ctx idx x y w h
-        scrollX <- syncTextInputScroll ctx idx x y w h
-        fm <- nodeFontMetrics ctx idx
-        value <- textInputValue ctx idx
-        pure (Just (field, clipX - scrollX, value, fm))
-
--- | Mouse selection in single-line field @wid@: click (with word and line
--- multi-clicks), drag, and the search clear button. False when @wid@ is not a
--- single-line field.
-finalizeTextInputMouse :: Context -> Input -> WidgetId -> IO Bool
-finalizeTextInputMouse ctx inp wid = do
-  mGeom <- textInputGeomForWidget ctx wid
-  case mGeom of
-    Nothing -> pure False
-    Just (fieldRect, contentX, value, fm) -> do
-      let mouse@(V2 mouseX _) = inputMousePos inp
-          charAt = do
-            prepared <- prepareFontMetrics fm value
-            pure (textIndexAtX prepared value (max 0 (mouseX - contentX)))
-      if inputMousePressed inp && rectContains fieldRect mouse
-        then ifM (searchClearHit ctx wid mouse) (clearSearchInput ctx wid) $ do
-          idx <- charAt
-          clicks <- normalizeTextFieldClicks ctx wid idx 0 0 False (max 1 (inputMouseClicks inp))
-          uncurry (updateTextInputSelection ctx wid) (textSelectionForDrag value idx idx clicks)
-          modifyInteraction ctx (\s -> s {isTextInputDrag = Just (TextInputDrag wid idx 0 0 False clicks)})
-        else do
-          mDrag <- getsInteraction ctx isTextInputDrag
-          case mDrag of
-            Just drag
-              | textInputDragWidget drag == wid
-                  , not (textInputDragMultiline drag)
-                  , inputMouseDown inp || inputMouseReleased inp -> do
-                  idx <- charAt
-                  uncurry (updateTextInputSelection ctx wid) $
-                    textSelectionForDrag value (textInputDragAnchor drag) idx (textInputDragClicks drag)
-            _ -> pure ()
-      pure True
-
-collapseTextInputSelection :: Context -> WidgetId -> IO ()
-collapseTextInputSelection ctx wid =
-  modifyStore ctx $ \store -> insertSlot fieldInt (slotKey SlotAnchor key) (findSlot fieldInt 0 (slotKey SlotCursor key) store) store
+-- | The run of word characters (letters, digits, underscores), spaces or
+-- other characters around character @raw@ of @text@, clamped into it.
+-- Positions count characters, not UTF-8 bytes.
+textWordBounds :: Text -> Int -> (Int, Int)
+textWordBounds text raw
+  | T.null text = (0, 0)
+  | otherwise =
+      -- Split once: repeatedly indexing UTF-8 text makes long-word selection
+      -- quadratic. The clamped index guarantees a non-empty suffix.
+      let i = clamp 0 (T.length text - 1) raw
+          (before, after) = T.splitAt i text
+          sameClass = (== charClass (T.head after)) . charClass
+       in ( i - T.length (T.takeWhileEnd sameClass before)
+          , i + T.length (T.takeWhile sameClass after)
+          )
  where
-  key = intKey wid
+  charClass c
+    | isAlphaNum c || c == '_' = WordChar
+    | isSpace c = SpaceChar
+    | otherwise = OtherChar
 
--- | Count a press as a multi-click only when it lands on the same cell as the
--- previous press; anything else restarts the count at one.
-normalizeTextFieldClicks :: Context -> WidgetId -> Int -> Int -> Int -> Bool -> Int -> IO Int
-normalizeTextFieldClicks ctx wid flat row col multiline rawClicks = do
-  let cell =
-        TextFieldClickCell
-          { textFieldClickWidget = wid
-          , textFieldClickFlat = flat
-          , textFieldClickRow = row
-          , textFieldClickCol = col
-          , textFieldClickMultiline = multiline
-          }
-  if rawClicks <= 1
-    then modifyInteraction ctx (\s -> s {isTextFieldClickCell = Just cell}) >> pure rawClicks
-    else do
-      mPrev <- getsInteraction ctx isTextFieldClickCell
-      -- A single-line cell leaves row and column 0 and a multiline one
-      -- leaves the flat index 0, so the derived equality compares the
-      -- coordinates that mode uses.
-      if mPrev == Just cell
-        then pure rawClicks
-        else modifyInteraction ctx (\s -> s {isTextFieldClickCell = Just cell}) >> pure 1
+-- | A field's document at the pointer: the position under it, the document,
+-- and how the field stores a selection (anchor, then cursor).
+data FieldDoc = FieldDoc !TB.Cursor !TB.TextBuffer (TB.Cursor -> TB.Cursor -> IO ())
+
+-- | Mouse selection in focused field @wid@: a press in @box@, with word and
+-- whole-document multi-clicks, and the drag it starts. On a press
+-- @chromePress@ runs first and takes the press when it lands on the field's
+-- own chrome. @atMouse@ reads the document at the pointer.
+selectWithMouse :: Context -> Input -> WidgetId -> Rect -> IO Bool -> IO FieldDoc -> IO ()
+selectWithMouse ctx inp wid box chromePress atMouse
+  | inputMousePressed inp && rectContains box (inputMousePos inp) =
+      unlessM chromePress $ do
+        FieldDoc pos buf select <- atMouse
+        -- A press counts as a multi-click only on the cell of the press before.
+        prev <- getsInteraction ctx isTextFieldClickCell
+        let cell = Just (TextFieldClickCell wid pos)
+            clicks = if prev == cell then max 1 (inputMouseClicks inp) else 1
+        uncurry select (dragSelection buf pos pos clicks)
+        modifyInteraction ctx $ \s ->
+          s {isTextFieldClickCell = cell, isTextInputDrag = Just (TextInputDrag wid pos clicks)}
+  | inputMouseDown inp || inputMouseReleased inp =
+      getsInteraction ctx isTextInputDrag >>= \case
+        Just (TextInputDrag dragWid anchor clicks) | dragWid == wid -> do
+          FieldDoc pos buf select <- atMouse
+          uncurry select (dragSelection buf anchor pos clicks)
+        _ -> pure ()
+  | otherwise = pure ()
+
+-- | The selection a drag from @anchor@ to @pos@ makes after @clicks@ clicks:
+-- characters, whole words, or the whole document. A click is a drag that has
+-- not moved.
+dragSelection :: TB.TextBuffer -> TB.Cursor -> TB.Cursor -> Int -> (TB.Cursor, TB.Cursor)
+dragSelection buf anchor@(TB.Cursor ar ac) pos@(TB.Cursor r c) clicks
+  | clicks >= 3 = (TB.Cursor 0 0, TB.documentEnd buf)
+  | clicks == 2 =
+      let (a0, a1) = textWordBounds (TB.lineAt ar buf) ac
+          (c0, c1) = textWordBounds (TB.lineAt r buf) c
+       in (TB.Cursor ar (min a0 c0), TB.Cursor r (max a1 c1))
+  | otherwise = (anchor, pos)
+
+-- | Mouse selection in single-line field @wid@ at @idx@ ('selectWithMouse'),
+-- and a search field's clear button.
+textInputMouse :: Context -> Input -> WidgetId -> NodeIdx -> IO ()
+textInputMouse ctx inp wid idx = do
+  (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+  (box, Rect clipX _ _ _) <- nodeTextFieldGeom ctx idx x y w h
+  scrollX <- syncTextInputScroll ctx idx x y w h
+  let mouse@(V2 mouseX _) = inputMousePos inp
+      key = intKey wid
+      clearPress = ifM (searchClearHit ctx wid mouse) (True <$ clearSearchInput ctx wid) (pure False)
+  selectWithMouse ctx inp wid box clearPress $ do
+    fm <- nodeFontMetrics ctx idx
+    value <- textInputValue ctx idx
+    prepared <- prepareFontMetrics fm value
+    let pos = TB.Cursor 0 (textIndexAtX prepared value (max 0 (mouseX - (clipX - scrollX))))
+    pure $ FieldDoc pos (TB.fromLines (Seq.singleton value)) $ \(TB.Cursor _ anchor) (TB.Cursor _ cursor) ->
+      writeSlots ctx $
+        slotWriteOr fieldInt cursor (slotKey SlotAnchor key) anchor
+          <> slotWriteOr fieldInt 0 (slotKey SlotCursor key) cursor
