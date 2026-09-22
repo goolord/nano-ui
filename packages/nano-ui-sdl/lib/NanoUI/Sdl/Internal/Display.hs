@@ -44,11 +44,6 @@ import System.IO.Unsafe (unsafePerformIO)
 queryWindowPixelDensity :: Ptr SDL_Window -> IO Float
 queryWindowPixelDensity win = (\s -> if s > 0 then s else 1) <$> getWindowPixelDensity win
 
--- | Vertical refresh rate of the window's current display mode, in Hz
--- (0 when unavailable).
-queryWindowRefreshHz :: Ptr SDL_Window -> IO Int
-queryWindowRefreshHz win = max 0 . fromIntegral <$> windowRefreshRateC win
-
 -- | Window size in window (logical) coordinates; 0x0 when SDL cannot say.
 -- SDL_GetWindowSize already returns the window-coordinate size, not pixels.
 -- Dividing by the display scale would shrink the logical size on DPI-scaled
@@ -136,8 +131,10 @@ pushRefreshEvent = do
 takeRefreshEvent :: IO ()
 takeRefreshEvent = void (atomicSwapIORef refreshPending False)
 
+-- | Vertical refresh rate of the window's current display mode, in Hz
+-- (0 when unavailable).
 foreign import ccall unsafe "nano_ui_window_refresh_rate"
-  windowRefreshRateC :: Ptr SDL_Window -> IO CInt
+  queryWindowRefreshHz :: Ptr SDL_Window -> IO CInt
 
 foreign import ccall "wrapper"
   mkResizeCb :: IO () -> IO (FunPtr (IO ()))
