@@ -1,7 +1,7 @@
 module Main (main) where
 
 import Control.Exception (evaluate)
-import Control.Monad (forM_, replicateM_, void)
+import Control.Monad (forM_, replicateM_, void, when)
 import Control.Monad.IO.Class (liftIO)
 import Data.ByteString (ByteString)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
@@ -18,6 +18,17 @@ import System.IO.Unsafe (unsafePerformIO)
 -- Enough frames for a stable time profile without an interactive window.
 iterations :: Int
 iterations = 3000
+
+-- | A floating window above @n@ rows of a scroll area.
+windowScene :: Int -> NanoUI ()
+windowScene n = columnWith (fillW . fillH) $ do
+  void $ scroll2DWith (fillW . fillH) $ columnWith (tight . fillW) $
+    forM_ [1 .. n] $ \i -> rowWith (tight . fillW) $ do
+      label (T.pack ("row " <> show i))
+      void (button (T.pack ("b" <> show i)))
+  void $ window True "Tools" $ columnWith (tight . gap 4 . minW 200) $ do
+    label "a floating window"
+    void (button "ok")
 
 -- | A grid of buttons and labels: the ordinary widget path.
 widgetScene :: NanoUI ()
@@ -126,6 +137,21 @@ main = do
               void (evaluate (rasterizeSvg (16 + i `mod` 2) 16 white doc))
               void (evaluate (rasterizeSvg (128 + i `mod` 2) 128 white doc))
       putStrLn "profiled 1000 rasterizations of two icons at 16 and 128 px"
+    ("window" : rest) -> do
+      -- A floating window over 3000 rows of a scroll area, held still or,
+      -- with "drag", dragged back and forth by its title bar.
+      let inp = emptyInput {inputWindowSize = Size 1280 800, inputMousePos = V2 5 790, inputDeltaTime = 0.016}
+          drag = rest == ["drag"]
+          ui = windowScene 3000
+          grab = V2 1014 22
+      replicateM_ 5 (void (runFrame ctx inp ui))
+      when drag $
+        void (runFrame ctx inp {inputMousePos = grab, inputMouseDown = True, inputMousePressed = True} ui)
+      forM_ [1 .. 300 :: Int] $ \i -> do
+        let V2 gx gy = grab
+            step = inp {inputMousePos = V2 (gx - 100 + fromIntegral (i `mod` 2) * 6) (gy + 50), inputMouseDown = True}
+        void (runFrame ctx (if drag then step else inp) ui)
+      putStrLn ("profiled 300 window frames" ++ if drag then ", dragging" else "")
     ("textarea" : _) -> do
       ref <- newIORef (textDocument longDocument)
       typeIntoMiddle (textAreaScene ref)
