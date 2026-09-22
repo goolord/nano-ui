@@ -4,9 +4,9 @@
 --
 -- A node is an index ('NodeIdx') into those arrays. Indices count up in the
 -- order the view adds nodes, so a parent's index is lower than its children's.
--- The strided arrays give every node a row of fixed width, and a column
--- constant such as 'geomX' or 'treeParent' names a slot in the row: node
--- @idx@ keeps geometry column @col@ at element @idx * geomStride + col@ of
+-- The strided arrays give every node a row of fixed width, and a column such
+-- as 'GeomX' or 'TreeParent' names a slot in the row: node @idx@ keeps
+-- geometry column @col@ at element @idx * geomStride + fromEnum col@ of
 -- 'naArrGeom'. 'NodeArenaArrays' lists the arrays, and accessors such as
 -- 'getRect' and 'getParent' hide the arithmetic.
 --
@@ -38,36 +38,12 @@ module NanoUI.Internal.Layout.Arena
   , arenaCount
   , topModalNode
   , floatingNodeCount
-  , foldFloatingNodesM
-  , foldFloatingNodeRevM
   , arenaArrays
   , withArenaArraysSnap
-  , geomX
-  , geomY
-  , geomW
-  , geomH
-  , styleWVal
-  , styleHVal
-  , styleMinW
-  , styleMinH
-  , styleMaxW
-  , styleMaxH
-  , stylePadL
-  , stylePadR
-  , stylePadT
-  , stylePadB
-  , styleGap
-  , styleGridMinColW
-  , tagNodeType
-  , tagDirection
-  , tagWSizing
-  , tagHSizing
-  , tagScrollBarSlot
-  , treeParent
-  , treeFirstChild
-  , treeNextSibling
-  , treeStyleIdx
-  , treeGridCols
+  , GeomCol (..)
+  , StyleCol (..)
+  , TagCol (..)
+  , TreeCol (..)
   , readGeom
   , writeGeom
   , readStyle
@@ -82,18 +58,15 @@ module NanoUI.Internal.Layout.Arena
   , getParent
   , getFirstChild
   , getNextSibling
-  , getChildCount
   , getNodeType
   , getDirection
-  , getGridCols
-  , getGridMinColW
   , getScrollContentW
   , setScrollContentW
+  , AxisSizing (..)
+  , readAxisSizing
   , getWidthSizing
   , getHeightSizing
   , getPadding
-  , getGap
-  , getMinMax
   , parentIsRow
   , getAlignX
   , getAlignY
@@ -123,19 +96,16 @@ module NanoUI.Internal.Layout.Arena
   , AxisSnapshot (..)
   , ensureAxisSnapshot
   , memoizeWidth
-  , forNodes_
   , forFloatingNodes_
   , forChildNodes_
   , foldFlowChildrenM
   , findNodeRevM
-  , findFloatingNodeRevM
   , findClassNodeM
   , findClassNodeRevM
   , foldClassNodesM
   , foldClassNodeRevM
   , forClassNodes_
   , walkFloatingAncestors
-  , foldNodeRevM
   , findNodeM
   , foldNodesM
   , findChildM
@@ -144,9 +114,7 @@ module NanoUI.Internal.Layout.Arena
   , CustomMeasureRecord
   , newLayoutCache
   , captureLayoutCache
-  , layoutCacheEligible
   , layoutSigMatches
-  , getInputSignature
   , computeSubtreeHashes
   , subtreeArrays
   , restoreLayoutCache
@@ -167,6 +135,7 @@ import Data.Primitive.Array (MutableArray, copyMutableArray, newArray, readArray
 import Data.Primitive.PrimArray
   ( MutablePrimArray
   , copyMutablePrimArray
+  , getSizeofMutablePrimArray
   , newPrimArray
   , readPrimArray
   , setPrimArray
@@ -194,7 +163,7 @@ type IOArr = MutablePrimArray RealWorld
 
 -- | What kind of node this is. The solver chooses how to measure a node by
 -- its type, and paint chooses how to draw it. The arena stores the type as a
--- 'Word8' ('tagNodeType') through the derived 'Enum' instance, so there can be
+-- 'Word8' ('TagNodeType') through the derived 'Enum' instance, so there can be
 -- at most 256 constructors. Several types keep type-specific data in the
 -- node's style index ('getStyleIdx').
 data NodeType
@@ -303,8 +272,8 @@ isScrollNode nt = nt == NodeScrollContainer
 
 -- | Whether the node is a modal, window or popup. The solver leaves a floating
 -- node out of its parent's flow and places it after the solve
--- ('NanoUI.Internal.Layout.Solve.placeModals' and the functions next to it), and paint
--- draws it over the page.
+-- ('NanoUI.Internal.Layout.Solve.placeFloatingNodes'), and paint draws it over
+-- the page.
 isFloatingNode :: NodeType -> Bool
 isFloatingNode nt = nt == NodeModal || nt == NodeWindow || nt == NodePopup
 
@@ -326,8 +295,8 @@ data NodeClass
   deriving (Eq, Enum, Bounded)
 
 -- | The constructor of a 'Sizing' without its number, as the arena stores it
--- in 'tagWSizing' and 'tagHSizing'. The number goes in 'styleWVal' or
--- 'styleHVal'.
+-- in 'TagWSizing' and 'TagHSizing'. The number goes in 'StyleWVal' or
+-- 'StyleHVal'.
 data SizingTag
   = SizingFixed
   | SizingFit
@@ -336,7 +305,7 @@ data SizingTag
   | SizingPercent
   deriving (Eq, Show, Enum, Bounded)
 
--- | A 'Direction' as the arena stores it in 'tagDirection'. On a container
+-- | A 'Direction' as the arena stores it in 'TagDirection'. On a container
 -- it is the axis the children are laid out along. A separator carries its
 -- parent's direction, which decides whether the rule is horizontal or
 -- vertical.
@@ -344,20 +313,20 @@ data DirTag = DirRow | DirColumn
   deriving (Eq, Show, Enum, Bounded)
 
 -- | The arena's per-node arrays. The first four are strided: node @idx@ owns
--- the half-open range @idx * stride@ to @(idx + 1) * stride@, and the column
--- constants ('geomX', 'styleGap', 'tagNodeType', 'treeParent' and the rest)
--- name the slots of that row. The other arrays hold one element per node.
--- Growing the arena replaces all of them together.
+-- the half-open range @idx * stride@ to @(idx + 1) * stride@, and the columns
+-- ('GeomCol', 'StyleCol', 'TagCol', 'TreeCol') name the slots of that row.
+-- The other arrays hold one element per node. Growing the arena replaces all
+-- of them together.
 data NodeArenaArrays = NodeArenaArrays
   { naArrGeom :: !(IOArr Float)
-  -- ^ Rects, 10 floats per node. See 'geomX'.
+  -- ^ Rects, 8 floats per node. See 'GeomCol'.
   , naArrStyle :: !(IOArr Float)
   -- ^ Layout inputs and a few other numbers, 16 floats per node. See
-  -- 'styleWVal'.
+  -- 'StyleCol'.
   , naArrTags :: !(IOArr Word8)
-  -- ^ Enum values, 8 bytes per node. See 'tagNodeType'.
+  -- ^ Enum values, 8 bytes per node. See 'TagCol'.
   , naArrTree :: !(IOArr Int)
-  -- ^ Tree links and other integers, 8 per node. See 'treeParent'.
+  -- ^ Tree links and other integers, 8 per node. See 'TreeCol'.
   , naArrTextStore :: !(MutableArray RealWorld Text)
   -- ^ Each node's text. 'addNode' does not clear a slot, so read it with
   -- 'getText', which checks that the node set a text.
@@ -389,10 +358,8 @@ data NodeArena = NodeArena
   -- the rest of the time.
   , naScratch :: IORef FlexScratch
   -- ^ The solver's buffers for the container it is working on.
-  , naSnapCap :: IORef Int
-  -- ^ Entries that each buffer in 'naSnapLevels' has room for.
-  , naSnapLevels :: IORef (MutableArray RealWorld (Maybe AxisSnapshot))
-  -- ^ One 'AxisSnapshot' per nesting depth of the position pass, 'Nothing'
+  , naSnapLevels :: IORef (MutableArray RealWorld AxisSnapshot)
+  -- ^ One 'AxisSnapshot' per nesting depth of the position pass, empty
   -- until the pass first reaches that depth. Laying out a child overwrites
   -- 'naScratch', so a container copies its child list here, at its own depth,
   -- before it recurses into its children.
@@ -420,12 +387,10 @@ data NodeArena = NodeArena
   -- than 0 since the reset. See 'getScopeSignature'.
   , naInputSig :: IOArr Word64
   -- ^ A hash over every layout input written since the reset, in one unboxed
-  -- slot so a mix allocates nothing: each node's
-  -- constraints and links as 'addNode' wrote them, and every later change
-  -- through the input setters ('setNodeText', 'setStyleIdx', 'setOptions',
-  -- 'setWidgetId', 'setGridCols', 'setGridMinColW', 'setNodeFontSize').
-  -- Solver outputs, paint state, and geometry are excluded. See
-  -- 'getInputSignature'.
+  -- slot so a mix allocates nothing: each node's layout and links as
+  -- 'addNode' wrote them, and every later change through the input setters
+  -- ('setNodeText', 'setStyleIdx', 'setOptions', 'setWidgetId'). Solver
+  -- outputs, paint state, and geometry are excluded. See 'getInputSignature'.
   , naTextHash :: IORef (IOArr Word64)
   -- ^ Per node, the hash of the text the last 'setNodeText' stored. A node
   -- re-set with the same 'Text' object keeps its hash, so a steady frame
@@ -448,10 +413,6 @@ data NodeArena = NodeArena
   -- floats). 'captureLayoutCache' snapshots it, and a reused solve restores
   -- clean subtrees' measurements from the snapshot instead of measuring
   -- again.
-  , naTopModal :: IORef Int
-  -- ^ Index of the last modal node added this frame, or -1. Node types are
-  -- fixed when a node is added and indices only grow until a reset, so this
-  -- is the topmost modal without a scan.
   , naClassNodes :: IORef (IOArr Int)
   -- ^ The node lists of 'NodeClass', one after another: class @c@ keeps its
   -- @i@th node at element @fromEnum c * capacity + i@. A list never holds
@@ -476,12 +437,10 @@ data FlexScratch = FlexScratch
   -- percentage of the container's inner width.
   , fsH :: !(IOArr Float)
   -- ^ Height of each child before the sharing.
-  , fsOutW :: !(IOArr Float)
-  -- ^ Width of each child after the space is shared out. A column copies
-  -- 'fsW' through unchanged.
-  , fsOutH :: !(IOArr Float)
-  -- ^ Height of each child after the space is shared out. A row copies 'fsH'
-  -- through unchanged.
+  , fsOut :: !(IOArr Float)
+  -- ^ Size of each child along the main axis after the space is shared out.
+  , fsGrow :: !(IOArr Float)
+  -- ^ Working space for the sharing: each child's grow factor.
   }
 
 -- | A memo with one entry per node: a width, and two results computed for the
@@ -495,10 +454,6 @@ data WidthMemo = WidthMemo
   , wmSlots :: !(IOArr Float)
   -- ^ Per node, @memoStride@ floats: the width, then the two results.
   }
-
--- | Initial nesting-depth capacity. 'ensureSnapLevelsArr' grows it as needed.
-maxSnapDepth :: Int
-maxSnapDepth = 256
 
 -- | A container's copy of its child list, taken at the container's nesting
 -- depth before the position pass recurses into the children and overwrites
@@ -516,175 +471,137 @@ data AxisSnapshot = AxisSnapshot
 initialCapacity :: Int
 initialCapacity = 256
 
+-- | The width of a node's row in 'naArrGeom', 'naArrStyle', 'naArrTags' and
+-- 'naArrTree'. Each is at least the number of columns of 'GeomCol',
+-- 'StyleCol', 'TagCol' and 'TreeCol', and the columns past those are unused.
+geomStride, styleStride, tagStride, treeStride :: Int
+geomStride = 8
+styleStride = 16
+tagStride = 8
+treeStride = 8
+
 -- | Columns of 'naArrGeom', in logical pixels and window coordinates.
--- @geomStride@ is the width of a node's row.
 --
--- * 'geomX', 'geomY', 'geomW', 'geomH': the node's rect. The solver's measure
---   pass stores the measured size in 'geomW' and 'geomH' with the origin at 0.
+-- * 'GeomX', 'GeomY', 'GeomW', 'GeomH': the node's rect. The solver's measure
+--   pass stores the measured size in 'GeomW' and 'GeomH' with the origin at 0.
 --   Its position pass then writes the placed rect. Last,
 --   'NanoUI.Internal.Frame.Scroll.applyScrollOffsets' moves the origin by the offsets
 --   of the scroll containers around the node.
-geomStride, geomX, geomY, geomW, geomH :: Int
-geomStride = 8
-geomX = 0
-geomY = 1
-geomW = 2
-geomH = 3
-
--- | Columns of 'naArrGeom' that hold the node's clip rect, in window
--- coordinates. See 'getClipRect'.
-geomClipX, geomClipY, geomClipW, geomClipH :: Int
-geomClipX = 4
-geomClipY = 5
-geomClipW = 6
-geomClipH = 7
+-- * 'GeomClipX', 'GeomClipY', 'GeomClipW', 'GeomClipH': the node's clip rect,
+--   in window coordinates. See 'getClipRect'.
+data GeomCol
+  = GeomX | GeomY | GeomW | GeomH
+  | GeomClipX | GeomClipY | GeomClipW | GeomClipH
+  deriving (Enum)
 
 -- | Columns of 'naArrStyle': the numbers the node was laid out with, in
--- logical pixels unless stated. @styleStride@ is the width of a node's row.
+-- logical pixels unless stated.
 --
--- * 'styleWVal', 'styleHVal': the number of the width or height 'Sizing'. It
+-- * 'StyleWVal', 'StyleHVal': the number of the width or height 'Sizing'. It
 --   is the size for 'Fixed', the factor for 'Grow' and 'Shrink', the
---   percentage for 'Percent', and 0 for 'Fit'. 'tagWSizing' and 'tagHSizing'
+--   percentage for 'Percent', and 0 for 'Fit'. 'TagWSizing' and 'TagHSizing'
 --   say which.
--- * 'stylePadL', 'stylePadR', 'stylePadT', 'stylePadB': the padding inside the
+-- * 'StylePadL', 'StylePadR', 'StylePadT', 'StylePadB': the padding inside the
 --   left, right, top and bottom edges.
-styleStride, styleWVal, styleHVal, stylePadL, stylePadR, stylePadT, stylePadB :: Int
-styleStride = 16
-styleWVal = 0
-styleHVal = 1
-stylePadL = 2
-stylePadR = 3
-stylePadT = 4
-stylePadB = 5
-
--- | More columns of 'naArrStyle', in logical pixels.
---
--- * 'styleGap': the space between neighbouring children.
--- * 'styleMinW', 'styleMinH', 'styleMaxW', 'styleMaxH': the size limits. A
+-- * 'StyleGap': the space between neighbouring children.
+-- * 'StyleMinW', 'StyleMinH', 'StyleMaxW', 'StyleMaxH': the size limits. A
 --   maximum of 1e8 or more means no limit, and the default layout uses 1e9.
--- * @styleGrow@: the @grow@ argument of 'addNode'. The solver does not read
---   it. A node's grow factor is the number of its 'Grow' sizing.
-styleGap, styleMinW, styleMinH, styleMaxW, styleMaxH, styleGrow :: Int
-styleGap = 6
-styleMinW = 7
-styleMinH = 8
-styleMaxW = 9
-styleMaxH = 10
-styleGrow = 11
-
--- | The last columns of 'naArrStyle'. The first two are not layout inputs, so
--- the layout cache does not compare them.
---
--- * @styleScrollContentW@: the content width of a scroll container that
+-- * 'StyleScrollContentW': the content width of a scroll container that
 --   scrolls both ways, which the solver writes ('getScrollContentW').
--- * @styleNodeValue@: the node value ('getNodeValue').
--- * 'styleGridMinColW': the least column width of a grid that fits as many
---   columns as it can, or 0 ('getGridMinColW').
--- * @styleFontSize@: the font size, or 0 for the default ('getNodeFontSize').
-styleScrollContentW, styleNodeValue, styleGridMinColW, styleFontSize :: Int
-styleScrollContentW = 12
-styleNodeValue = 13
-styleGridMinColW = 14
-styleFontSize = 15
+-- * 'StyleNodeValue': the node value ('getNodeValue').
+-- * 'StyleGridMinColW': the least column width of a grid that fits as many
+--   columns as it can, or 0.
+-- * 'StyleFontSize': the font size, or 0 for the default ('getNodeFontSize').
+--
+-- The layout cache does not compare 'StyleScrollContentW' and
+-- 'StyleNodeValue', which are not layout inputs.
+data StyleCol
+  = StyleWVal | StyleHVal
+  | StylePadL | StylePadR | StylePadT | StylePadB
+  | StyleGap | StyleMinW | StyleMinH | StyleMaxW | StyleMaxH
+  | StyleScrollContentW | StyleNodeValue | StyleGridMinColW | StyleFontSize
+  deriving (Enum)
 
 -- | Columns of 'naArrTags'. Each holds one enum value as a 'Word8', written
--- with 'writeTagEnum'. @tagStride@ is the width of a node's row, and column 7
--- is unused.
+-- with 'writeTagEnum'.
 --
--- * 'tagNodeType': the 'NodeType'.
--- * 'tagDirection': the 'DirTag'.
--- * 'tagWSizing', 'tagHSizing': the 'SizingTag' of the width and the height.
--- * 'tagScrollBarSlot': a 'NanoUI.Internal.Font.ScrollBarSlot', which says where a
+-- * 'TagNodeType': the 'NodeType'.
+-- * 'TagDirection': the 'DirTag'.
+-- * 'TagWSizing', 'TagHSizing': the 'SizingTag' of the width and the height.
+-- * 'TagScrollBarSlot': a 'NanoUI.Internal.Font.ScrollBarSlot', which says where a
 --   scroll container's bar sits. The solver's measure pass writes it, so the
 --   input signature leaves it out and the layout cache restores it on a hit.
--- * @tagAlignX@, @tagAlignY@: the 'AlignX' and the 'AlignY'.
-tagStride, tagNodeType, tagDirection, tagWSizing, tagHSizing, tagScrollBarSlot, tagAlignX, tagAlignY :: Int
-tagStride = 8
-tagNodeType = 0
-tagDirection = 1
-tagWSizing = 2
-tagHSizing = 3
-tagScrollBarSlot = 4
-tagAlignX = 5
-tagAlignY = 6
+-- * 'TagAlignX', 'TagAlignY': the 'AlignX' and the 'AlignY'.
+data TagCol
+  = TagNodeType | TagDirection | TagWSizing | TagHSizing
+  | TagScrollBarSlot | TagAlignX | TagAlignY
+  deriving (Enum)
 
--- | Columns of 'naArrTree'. @treeStride@ is the width of a node's row. A link
--- that leads nowhere is -1.
+-- | Columns of 'naArrTree'. A link that leads nowhere is -1.
 --
--- * 'treeParent': the parent's index.
--- * 'treeFirstChild': the child that was added last. 'addNode' puts every new
+-- * 'TreeParent': the parent's index.
+-- * 'TreeFirstChild': the child that was added last. 'addNode' puts every new
 --   child at the head of its parent's list.
--- * 'treeNextSibling': the sibling that was added before this node. Following
+-- * 'TreeNextSibling': the sibling that was added before this node. Following
 --   these links therefore visits a node's children from the last to the first.
--- * @treeChildCount@: the number of children, floating ones included.
-treeStride, treeParent, treeFirstChild, treeNextSibling, treeChildCount :: Int
-treeStride = 8
-treeParent = 0
-treeFirstChild = 1
-treeNextSibling = 2
-treeChildCount = 3
-
--- | More columns of 'naArrTree'.
---
--- * @treeWidgetId@: the 'WidgetId' converted to an 'Int', or 0 for none.
--- * 'treeStyleIdx': the style index ('getStyleIdx').
--- * @treeTextIdx@: the node's slot in 'naArrTextStore', which is its own
+-- * 'TreeChildCount': the number of children, floating ones included.
+-- * 'TreeWidgetId': the 'WidgetId' converted to an 'Int', or 0 for none.
+-- * 'TreeStyleIdx': the style index ('getStyleIdx').
+-- * 'TreeTextIdx': the node's slot in 'naArrTextStore', which is its own
 --   index, or -1 when the node has no text.
--- * 'treeGridCols': the column count of a grid, or 0 ('getGridCols').
-treeWidgetId, treeStyleIdx, treeTextIdx, treeGridCols :: Int
-treeWidgetId = 4
-treeStyleIdx = 5
-treeTextIdx = 6
-treeGridCols = 7
+-- * 'TreeGridCols': the column count of a grid, or 0.
+data TreeCol
+  = TreeParent | TreeFirstChild | TreeNextSibling | TreeChildCount
+  | TreeWidgetId | TreeStyleIdx | TreeTextIdx | TreeGridCols
+  deriving (Enum)
 
--- | Read geometry column @col@ ('geomX' and the rest) of node @idx@. Like the
--- other raw accessors below, it takes the arrays so that a loop can fetch them
--- once with 'arenaArrays', and it does not check that @idx@ is below
--- 'arenaCount'.
+-- | Read geometry column @col@ of node @idx@. Like the other raw accessors
+-- below, it takes the arrays so that a loop can fetch them once with
+-- 'arenaArrays', and it does not check that @idx@ is below 'arenaCount'.
 {-# INLINE readGeom #-}
-readGeom :: NodeArenaArrays -> NodeIdx -> Int -> IO Float
-readGeom a idx col = readPrimArray (naArrGeom a) (idx * geomStride + col)
+readGeom :: NodeArenaArrays -> NodeIdx -> GeomCol -> IO Float
+readGeom a idx col = readPrimArray (naArrGeom a) (idx * geomStride + fromEnum col)
 
 -- | Write geometry column @col@ of node @idx@.
 {-# INLINE writeGeom #-}
-writeGeom :: NodeArenaArrays -> NodeIdx -> Int -> Float -> IO ()
-writeGeom a idx col = writePrimArray (naArrGeom a) (idx * geomStride + col)
+writeGeom :: NodeArenaArrays -> NodeIdx -> GeomCol -> Float -> IO ()
+writeGeom a idx col = writePrimArray (naArrGeom a) (idx * geomStride + fromEnum col)
 
--- | Read style column @col@ ('styleWVal' and the rest) of node @idx@.
+-- | Read style column @col@ of node @idx@.
 {-# INLINE readStyle #-}
-readStyle :: NodeArenaArrays -> NodeIdx -> Int -> IO Float
-readStyle a idx col = readPrimArray (naArrStyle a) (idx * styleStride + col)
+readStyle :: NodeArenaArrays -> NodeIdx -> StyleCol -> IO Float
+readStyle a idx col = readPrimArray (naArrStyle a) (idx * styleStride + fromEnum col)
 
 -- | Write style column @col@ of node @idx@.
 {-# INLINE writeStyle #-}
-writeStyle :: NodeArenaArrays -> NodeIdx -> Int -> Float -> IO ()
-writeStyle a idx col = writePrimArray (naArrStyle a) (idx * styleStride + col)
+writeStyle :: NodeArenaArrays -> NodeIdx -> StyleCol -> Float -> IO ()
+writeStyle a idx col = writePrimArray (naArrStyle a) (idx * styleStride + fromEnum col)
 
 -- | Read tag column @col@ of node @idx@ and decode it with 'toEnum'. The
 -- caller picks the result type, which must be the type the column was written
--- with: 'NodeType' for 'tagNodeType', 'DirTag' for 'tagDirection', and so on.
+-- with: 'NodeType' for 'TagNodeType', 'DirTag' for 'TagDirection', and so on.
 {-# INLINE readTagEnum #-}
-readTagEnum :: Enum e => NodeArenaArrays -> NodeIdx -> Int -> IO e
+readTagEnum :: Enum e => NodeArenaArrays -> NodeIdx -> TagCol -> IO e
 readTagEnum a idx col = do
-  t <- readPrimArray (naArrTags a) (idx * tagStride + col)
+  t <- readPrimArray (naArrTags a) (idx * tagStride + fromEnum col)
   pure $! toEnum (fromIntegral t)
 
 -- | Write an enum value as one byte. Its 'fromEnum' value must be in 0-255
 -- and must use the type expected by the column.
 {-# INLINE writeTagEnum #-}
-writeTagEnum :: Enum e => NodeArenaArrays -> NodeIdx -> Int -> e -> IO ()
-writeTagEnum a idx col v = writePrimArray (naArrTags a) (idx * tagStride + col) (fromIntegral (fromEnum v))
+writeTagEnum :: Enum e => NodeArenaArrays -> NodeIdx -> TagCol -> e -> IO ()
+writeTagEnum a idx col v = writePrimArray (naArrTags a) (idx * tagStride + fromEnum col) (fromIntegral (fromEnum v))
 
--- | Read tree column @col@ ('treeParent' and the rest) of node @idx@.
+-- | Read tree column @col@ of node @idx@.
 {-# INLINE readTree #-}
-readTree :: NodeArenaArrays -> NodeIdx -> Int -> IO Int
-readTree a idx col = readPrimArray (naArrTree a) (idx * treeStride + col)
+readTree :: NodeArenaArrays -> NodeIdx -> TreeCol -> IO Int
+readTree a idx col = readPrimArray (naArrTree a) (idx * treeStride + fromEnum col)
 
 -- | Write tree column @col@ of node @idx@. Writing a link column by hand can
 -- leave the child lists and the child counts inconsistent.
 {-# INLINE writeTree #-}
-writeTree :: NodeArenaArrays -> NodeIdx -> Int -> Int -> IO ()
-writeTree a idx col = writePrimArray (naArrTree a) (idx * treeStride + col)
+writeTree :: NodeArenaArrays -> NodeIdx -> TreeCol -> Int -> IO ()
+writeTree a idx col = writePrimArray (naArrTree a) (idx * treeStride + fromEnum col)
 
 -- | Arrays with room for @cap@ nodes. The primitive arrays start
 -- uninitialised: 'addNode' fills in a node's elements when it adds the node.
@@ -706,8 +623,8 @@ newFlexScratch fsCap = do
   fsIdx <- newPrimArray fsCap
   fsW <- newPrimArray fsCap
   fsH <- newPrimArray fsCap
-  fsOutW <- newPrimArray fsCap
-  fsOutH <- newPrimArray fsCap
+  fsOut <- newPrimArray fsCap
+  fsGrow <- newPrimArray fsCap
   pure FlexScratch {..}
 
 -- | Floats per node in 'wmSlots': the width and the two results.
@@ -724,19 +641,17 @@ newWidthMemo cap = do
   pure WidthMemo {..}
 
 -- | An empty arena. It starts with room for 256 nodes (@initialCapacity@), 64
--- children of one container in the solver's buffers, and 256 nesting depths
--- (@maxSnapDepth@). All three grow when a view needs more.
+-- children of one container in the solver's buffers, and 256 nesting depths.
+-- All three grow when a view needs more.
 newNodeArena :: IO NodeArena
 newNodeArena = do
   let cap = initialCapacity
-      scratchCap = 64
   naCount <- newIORef 0
   naCapacity <- newIORef cap
   naArrays <- newIORef =<< newNodeArenaArrays cap
   naArraysSnap <- newIORef Nothing
-  naScratch <- newIORef =<< newFlexScratch scratchCap
-  naSnapCap <- newIORef scratchCap
-  naSnapLevels <- newIORef =<< newArray maxSnapDepth Nothing
+  naScratch <- newIORef =<< newFlexScratch 64
+  naSnapLevels <- newIORef =<< newArray 256 =<< newAxisSnapshot 0
   naFrameTag <- newIORef 1
   naWrapMemo <- newIORef =<< newWidthMemo cap
   naFitMemo <- newIORef =<< newWidthMemo cap
@@ -753,7 +668,6 @@ newNodeArena = do
   naOwnHash <- newIORef =<< newPrimArray cap
   naSubHash <- newIORef =<< newPrimArray cap
   naMeasured <- newIORef =<< newPrimArray (cap * 2)
-  naTopModal <- newIORef (-1)
   naClassNodes <- newIORef =<< newPrimArray (cap * nodeClassCount)
   naClassCounts <- newPrimArray nodeClassCount
   setPrimArray naClassCounts 0 nodeClassCount 0
@@ -777,7 +691,6 @@ resetNodeArena na = do
   writeIORef (naScope na) 0
   writeIORef (naScopeSig na) 0
   writePrimArray (naInputSig na) 0 0
-  writeIORef (naTopModal na) (-1)
   setPrimArray (naClassCounts na) 0 nodeClassCount 0
   -- 0 marks a memo entry that was never written, so the tag wraps to 1.
   !ft <- readIORef (naFrameTag na)
@@ -792,9 +705,7 @@ resetNodeArena na = do
 -- | The topmost (last added) modal node, if any.
 {-# INLINE topModalNode #-}
 topModalNode :: NodeArena -> IO (Maybe NodeIdx)
-topModalNode na = do
-  i <- readIORef (naTopModal na)
-  pure (if i >= 0 then Just i else Nothing)
+topModalNode na = findClassNodeRevM na FloatingNodes (fmap (== NodeModal) . getNodeType na)
 
 -- | Fold a tagged value into a running hash. Tags separate the fields so a
 -- value moving between fields of one node changes the hash.
@@ -927,66 +838,53 @@ rootAttachParent na parent
       n <- arenaCount na
       pure (if n > 0 then 0 else -1)
 
--- | Append a node and link it at the head of its parent's child list. Parent
--- must be -1 or an existing node index. Arguments after padding are gap,
--- minimum width/height, maximum width/height, and a stored grow value; the
--- solver takes grow weights from the sizing arguments. Lengths use logical pixels.
+-- | Append a node laid out by the given 'Layout' and link it at the head of
+-- its parent's child list. The parent must be -1 or an existing node index.
+-- The caller assigns widget identity, text and type-specific style data.
 {-# INLINE addNode #-}
-addNode ::
-  NodeArena ->
-  NodeType ->
-  Int ->
-  Direction ->
-  Sizing ->
-  Sizing ->
-  Padding ->
-  Float ->
-  Float ->
-  Float ->
-  Float ->
-  Float ->
-  Float ->
-  AlignX ->
-  AlignY ->
-  IO NodeIdx
-addNode na nt parent dir wSiz hSiz pad gap minW minH maxW maxH grow ax ay = do
+addNode :: NodeArena -> NodeType -> Int -> Layout -> IO NodeIdx
+addNode na nt parent Layout {..} = do
   idx <- readIORef (naCount na)
   ensureCapacity na (idx + 1)
-  let (wTag, wVal) = sizingTag wSiz
-      (hTag, hVal) = sizingTag hSiz
+  let (wTag, wVal) = sizingTag layoutWidth
+      (hTag, hVal) = sizingTag layoutHeight
+      pad = layoutPadding
   a <- arenaArrays na
 
   setPrimArray (naArrGeom a) (idx * geomStride) geomStride 0
 
-  writeStyle a idx styleWVal wVal
-  writeStyle a idx styleHVal hVal
-  writeStyle a idx stylePadL (padL pad)
-  writeStyle a idx stylePadR (padR pad)
-  writeStyle a idx stylePadT (padT pad)
-  writeStyle a idx stylePadB (padB pad)
-  writeStyle a idx styleGap gap
-  writeStyle a idx styleMinW minW
-  writeStyle a idx styleMinH minH
-  writeStyle a idx styleMaxW maxW
-  writeStyle a idx styleMaxH maxH
-  writeStyle a idx styleGrow grow
-  setPrimArray (naArrStyle a) (idx * styleStride + styleScrollContentW) (styleStride - styleScrollContentW) 0
+  writeStyle a idx StyleWVal wVal
+  writeStyle a idx StyleHVal hVal
+  writeStyle a idx StylePadL (padL pad)
+  writeStyle a idx StylePadR (padR pad)
+  writeStyle a idx StylePadT (padT pad)
+  writeStyle a idx StylePadB (padB pad)
+  writeStyle a idx StyleGap layoutGap
+  writeStyle a idx StyleMinW layoutMinW
+  writeStyle a idx StyleMinH layoutMinH
+  writeStyle a idx StyleMaxW layoutMaxW
+  writeStyle a idx StyleMaxH layoutMaxH
+  let !valuesOff = fromEnum StyleScrollContentW
+  setPrimArray (naArrStyle a) (idx * styleStride + valuesOff) (styleStride - valuesOff) 0
+  writeStyle a idx StyleGridMinColW layoutGridMinColW
+  writeStyle a idx StyleFontSize layoutFontSize
 
   setPrimArray (naArrTags a) (idx * tagStride) tagStride 0
-  writeTagEnum a idx tagNodeType nt
-  writeTagEnum a idx tagDirection $ case dir of
+  writeTagEnum a idx TagNodeType nt
+  writeTagEnum a idx TagDirection $ case layoutDirection of
     Row -> DirRow
     Column -> DirColumn
-  writeTagEnum a idx tagWSizing wTag
-  writeTagEnum a idx tagHSizing hTag
-  writeTagEnum a idx tagAlignX ax
-  writeTagEnum a idx tagAlignY ay
+  writeTagEnum a idx TagWSizing wTag
+  writeTagEnum a idx TagHSizing hTag
+  writeTagEnum a idx TagAlignX layoutAlignX
+  writeTagEnum a idx TagAlignY layoutAlignY
 
   setPrimArray (naArrTree a) (idx * treeStride) treeStride 0
-  writeTree a idx treeParent parent
-  writeTree a idx treeFirstChild (-1)
-  writeTree a idx treeNextSibling (-1)
-  writeTree a idx treeTextIdx (-1)
+  writeTree a idx TreeParent parent
+  writeTree a idx TreeFirstChild (-1)
+  writeTree a idx TreeNextSibling (-1)
+  writeTree a idx TreeTextIdx (-1)
+  writeTree a idx TreeGridCols layoutGridCols
 
   -- Fold this node's creation inputs into the frame's input signature, the
   -- O(1) successor of comparing every column at reuse time. Values are the
@@ -996,7 +894,7 @@ addNode na nt parent dir wSiz hSiz pad gap minW minH maxW maxH grow ax ay = do
           (\acc (t, v) -> mixTagged acc t v)
           (fromIntegral idx `shiftL` 32 .|. fromIntegral (idx + 1) :: Word64)
           [ (0x4e54, fromIntegral (fromEnum nt))
-          , (0x4449, fromIntegral (fromEnum dir))
+          , (0x4449, fromIntegral (fromEnum layoutDirection))
           , (0x5754, fromIntegral (fromEnum wTag))
           , (0x5746, fromIntegral (castFloatToWord32 wVal))
           , (0x4854, fromIntegral (fromEnum hTag))
@@ -1005,21 +903,26 @@ addNode na nt parent dir wSiz hSiz pad gap minW minH maxW maxH grow ax ay = do
           , (0x5052, fromIntegral (castFloatToWord32 (padR pad)))
           , (0x5054, fromIntegral (castFloatToWord32 (padT pad)))
           , (0x5042, fromIntegral (castFloatToWord32 (padB pad)))
-          , (0x4741, fromIntegral (castFloatToWord32 gap))
-          , (0x4d57, fromIntegral (castFloatToWord32 minW))
-          , (0x4d48, fromIntegral (castFloatToWord32 minH))
-          , (0x5857, fromIntegral (castFloatToWord32 maxW))
-          , (0x5848, fromIntegral (castFloatToWord32 maxH))
-          , (0x4752, fromIntegral (castFloatToWord32 grow))
-          , (0x4158, fromIntegral (fromEnum ax))
-          , (0x4159, fromIntegral (fromEnum ay))
+          , (0x4741, fromIntegral (castFloatToWord32 layoutGap))
+          , (0x4d57, fromIntegral (castFloatToWord32 layoutMinW))
+          , (0x4d48, fromIntegral (castFloatToWord32 layoutMinH))
+          , (0x5857, fromIntegral (castFloatToWord32 layoutMaxW))
+          , (0x5848, fromIntegral (castFloatToWord32 layoutMaxH))
+          , (0x4743, fromIntegral layoutGridCols)
+          , (0x474d, fromIntegral (castFloatToWord32 layoutGridMinColW))
+          , (0x4648, fromIntegral (castFloatToWord32 layoutFontSize))
+          , (0x4158, fromIntegral (fromEnum layoutAlignX))
+          , (0x4159, fromIntegral (fromEnum layoutAlignY))
           , (0x5041, fromIntegral (parent + 1))
           ]
   mixInputSig na 0x4e4f nodeSig
   ownA <- readIORef (naOwnHash na)
   writePrimArray ownA idx nodeSig
 
-  writePrimArray (naArrFontColor a) idx 0
+  -- The font colour is paint state, so the signature leaves it out.
+  writePrimArray (naArrFontColor a) idx $ case layoutFontColor of
+    Nothing -> 0
+    Just (Color w) -> 0x100000000 .|. fromIntegral w
   scope <- readIORef (naScope na)
   writePrimArray (naArrScope a) idx scope
   when (scope /= 0) $ do
@@ -1028,14 +931,12 @@ addNode na nt parent dir wSiz hSiz pad gap minW minH maxW maxH grow ax ay = do
   writeArray (naArrOptionsStore a) idx []
 
   when (parent >= 0) $ do
-    fc <- readTree a parent treeFirstChild
-    writeTree a idx treeNextSibling fc
-    writeTree a parent treeFirstChild idx
-    cc <- readTree a parent treeChildCount
-    writeTree a parent treeChildCount (cc + 1)
-  when (isFloatingNode nt) $ do
-    when (nt == NodeModal) $ writeIORef (naTopModal na) idx
-    pushClassNode na FloatingNodes idx
+    fc <- readTree a parent TreeFirstChild
+    writeTree a idx TreeNextSibling fc
+    writeTree a parent TreeFirstChild idx
+    cc <- readTree a parent TreeChildCount
+    writeTree a parent TreeChildCount (cc + 1)
+  when (isFloatingNode nt) $ pushClassNode na FloatingNodes idx
   when (isWidgetNode nt || isScrollNode nt) $ do
     pushClassNode na PointerNodes idx
     when (nt == NodeCheckbox || nt == NodeRadio || nt == NodeTree) $
@@ -1055,32 +956,9 @@ pushClassNode na c idx = do
   writePrimArray arr (ci * cap + k) idx
   writePrimArray (naClassCounts na) ci (k + 1)
 
--- | Add a node using layout fields, including grid and font-size/colour options.
--- The caller assigns widget identity, text, and type-specific style data.
+-- | 'addNode' as a call instead of inlined, for the view's many call sites.
 addNodeFromLayout :: NodeArena -> NodeType -> Int -> Layout -> IO NodeIdx
-addNodeFromLayout na nt parent l = do
-  idx <-
-    addNode
-      na
-      nt
-      parent
-      (layoutDirection l)
-      (layoutWidth l)
-      (layoutHeight l)
-      (layoutPadding l)
-      (layoutGap l)
-      (layoutMinW l)
-      (layoutMinH l)
-      (layoutMaxW l)
-      (layoutMaxH l)
-      0
-      (layoutAlignX l)
-      (layoutAlignY l)
-  setGridCols na idx (layoutGridCols l)
-  setGridMinColW na idx (layoutGridMinColW l)
-  setNodeFontSize na idx (layoutFontSize l)
-  setNodeFontColor na idx (layoutFontColor l)
-  pure idx
+addNodeFromLayout na nt parent l = addNode na nt parent l
 
 -- | Assign text to a live node and mark its text slot as present. Re-setting
 -- the same 'Text' object reuses its cached hash, so a steady frame hashes no
@@ -1092,120 +970,96 @@ setNodeText na idx txt = do
   old <- readArray (naArrTextStore a) idx
   h <- cachedHash (naTextHash na) idx (old `ptrEq` txt) 0x54455854 txt
   writeArray (naArrTextStore a) idx txt
-  writeTree a idx treeTextIdx idx
+  writeTree a idx TreeTextIdx idx
   mixNodeInput na idx 0x5458 h
 
 -- | Parent index, or -1 for a root.
 {-# INLINE getParent #-}
 getParent :: NodeArena -> NodeIdx -> IO NodeIdx
-getParent na idx = arenaArrays na >>= \a -> readTree a idx treeParent
+getParent na idx = arenaArrays na >>= \a -> readTree a idx TreeParent
 
 -- | Most recently added direct child, or -1 when there are none.
 {-# INLINE getFirstChild #-}
 getFirstChild :: NodeArena -> NodeIdx -> IO NodeIdx
-getFirstChild na idx = arenaArrays na >>= \a -> readTree a idx treeFirstChild
+getFirstChild na idx = arenaArrays na >>= \a -> readTree a idx TreeFirstChild
 
 -- | Next sibling in reverse declaration order, or -1 at the end.
 {-# INLINE getNextSibling #-}
 getNextSibling :: NodeArena -> NodeIdx -> IO NodeIdx
-getNextSibling na idx = arenaArrays na >>= \a -> readTree a idx treeNextSibling
-
--- | Number of direct children, including floating nodes.
-{-# INLINE getChildCount #-}
-getChildCount :: NodeArena -> NodeIdx -> IO Int
-getChildCount na idx = arenaArrays na >>= \a -> readTree a idx treeChildCount
+getNextSibling na idx = arenaArrays na >>= \a -> readTree a idx TreeNextSibling
 
 -- | Node kind assigned at insertion, which selects layout and paint behaviour.
 {-# INLINE getNodeType #-}
 getNodeType :: NodeArena -> NodeIdx -> IO NodeType
-getNodeType na idx = arenaArrays na >>= \a -> readTagEnum a idx tagNodeType
+getNodeType na idx = arenaArrays na >>= \a -> readTagEnum a idx TagNodeType
 
 -- | Main layout axis stored on the node.
 {-# INLINE getDirection #-}
 getDirection :: NodeArena -> NodeIdx -> IO DirTag
-getDirection na idx = arenaArrays na >>= \a -> readTagEnum a idx tagDirection
+getDirection na idx = arenaArrays na >>= \a -> readTagEnum a idx TagDirection
 
--- | Explicit grid column count, or zero when none is set.
-{-# INLINE getGridCols #-}
-getGridCols :: NodeArena -> NodeIdx -> IO Int
-getGridCols na idx = arenaArrays na >>= \a -> readTree a idx treeGridCols
+-- | One axis of a node's layout constraints: the sizing mode, its number (see
+-- 'StyleWVal' for units), and the minimum and maximum size in logical pixels.
+data AxisSizing = AxisSizing
+  { axTag :: !SizingTag
+  , axVal :: !Float
+  , axMin :: !Float
+  , axMax :: !Float
+  }
 
-{-# INLINE setGridCols #-}
-setGridCols :: NodeArena -> NodeIdx -> Int -> IO ()
-setGridCols na idx c = do
-  arenaArrays na >>= \a -> writeTree a idx treeGridCols c
-  mixNodeInput na idx 0x4743 (fromIntegral c)
+-- | The width's 'AxisSizing' with @horizontal@, else the height's.
+{-# INLINE readAxisSizing #-}
+readAxisSizing :: NodeArenaArrays -> NodeIdx -> Bool -> IO AxisSizing
+readAxisSizing a idx horizontal = do
+  AxisSizing
+    <$> readTagEnum a idx (if horizontal then TagWSizing else TagHSizing)
+    <*> readStyle a idx (if horizontal then StyleWVal else StyleHVal)
+    <*> readStyle a idx (if horizontal then StyleMinW else StyleMinH)
+    <*> readStyle a idx (if horizontal then StyleMaxW else StyleMaxH)
 
--- | Width sizing mode and its parameter; see 'styleWVal' for units.
+-- | The width's 'AxisSizing'.
 {-# INLINE getWidthSizing #-}
-getWidthSizing :: NodeArena -> NodeIdx -> IO (SizingTag, Float)
-getWidthSizing na idx = arenaArrays na >>= \a -> (,) <$> readTagEnum a idx tagWSizing <*> readStyle a idx styleWVal
+getWidthSizing :: NodeArena -> NodeIdx -> IO AxisSizing
+getWidthSizing na idx = arenaArrays na >>= \a -> readAxisSizing a idx True
 
--- | Height sizing mode and its parameter; see 'styleHVal' for units.
+-- | The height's 'AxisSizing'.
 {-# INLINE getHeightSizing #-}
-getHeightSizing :: NodeArena -> NodeIdx -> IO (SizingTag, Float)
-getHeightSizing na idx = arenaArrays na >>= \a -> (,) <$> readTagEnum a idx tagHSizing <*> readStyle a idx styleHVal
+getHeightSizing :: NodeArena -> NodeIdx -> IO AxisSizing
+getHeightSizing na idx = arenaArrays na >>= \a -> readAxisSizing a idx False
 
 -- | Insets in logical pixels, ordered left, right, top, bottom.
 {-# INLINE getPadding #-}
 getPadding :: NodeArena -> NodeIdx -> IO Padding
 getPadding na idx = do
   a <- arenaArrays na
-  Padding <$> readStyle a idx stylePadL <*> readStyle a idx stylePadR <*> readStyle a idx stylePadT <*> readStyle a idx stylePadB
-
--- | Space between children, in logical pixels.
-{-# INLINE getGap #-}
-getGap :: NodeArena -> NodeIdx -> IO Float
-getGap na idx = arenaArrays na >>= \a -> readStyle a idx styleGap
-
--- | Minimum width, minimum height, maximum width, maximum height, in logical pixels.
-{-# INLINE getMinMax #-}
-getMinMax :: NodeArena -> NodeIdx -> IO (Float, Float, Float, Float)
-getMinMax na idx = do
-  a <- arenaArrays na
-  (,,,) <$> readStyle a idx styleMinW <*> readStyle a idx styleMinH <*> readStyle a idx styleMaxW <*> readStyle a idx styleMaxH
+  Padding <$> readStyle a idx StylePadL <*> readStyle a idx StylePadR <*> readStyle a idx StylePadT <*> readStyle a idx StylePadB
 
 -- | Solved horizontal content extent of a two-axis scroller, in logical pixels.
 {-# INLINE getScrollContentW #-}
 getScrollContentW :: NodeArena -> NodeIdx -> IO Float
-getScrollContentW na idx = arenaArrays na >>= \a -> readStyle a idx styleScrollContentW
+getScrollContentW na idx = arenaArrays na >>= \a -> readStyle a idx StyleScrollContentW
 
 -- | Store the solver's horizontal content extent for a scroller.
 {-# INLINE setScrollContentW #-}
 setScrollContentW :: NodeArena -> NodeIdx -> Float -> IO ()
-setScrollContentW na idx v = arenaArrays na >>= \a -> writeStyle a idx styleScrollContentW v
-
--- | Adaptive grid's minimum column width in logical pixels, or zero if unset.
-{-# INLINE getGridMinColW #-}
-getGridMinColW :: NodeArena -> NodeIdx -> IO Float
-getGridMinColW na idx = arenaArrays na >>= \a -> readStyle a idx styleGridMinColW
-
-{-# INLINE setGridMinColW #-}
-setGridMinColW :: NodeArena -> NodeIdx -> Float -> IO ()
-setGridMinColW na idx v = do
-  arenaArrays na >>= \a -> writeStyle a idx styleGridMinColW v
-  mixNodeInput na idx 0x474d (fromIntegral (castFloatToWord32 v))
+setScrollContentW na idx v = arenaArrays na >>= \a -> writeStyle a idx StyleScrollContentW v
 
 -- | Whether the parent has row direction. A root returns 'False'.
 {-# INLINE parentIsRow #-}
 parentIsRow :: NodeArena -> NodeIdx -> IO Bool
 parentIsRow na idx = do
   p <- getParent na idx
-  if p < 0
-    then pure False
-    else do
-      dir <- getDirection na p
-      pure (dir == DirRow)
+  if p < 0 then pure False else (== DirRow) <$> getDirection na p
 
 -- | Horizontal alignment requested by the node.
 {-# INLINE getAlignX #-}
 getAlignX :: NodeArena -> NodeIdx -> IO AlignX
-getAlignX na idx = arenaArrays na >>= \a -> readTagEnum a idx tagAlignX
+getAlignX na idx = arenaArrays na >>= \a -> readTagEnum a idx TagAlignX
 
 -- | Vertical alignment requested by the node.
 {-# INLINE getAlignY #-}
 getAlignY :: NodeArena -> NodeIdx -> IO AlignY
-getAlignY na idx = arenaArrays na >>= \a -> readTagEnum a idx tagAlignY
+getAlignY na idx = arenaArrays na >>= \a -> readTagEnum a idx TagAlignY
 
 -- | Current x, y, width, height in logical pixels. After scroll offsets are
 -- applied, the origin is in window coordinates; before layout it is unset.
@@ -1213,24 +1067,24 @@ getAlignY na idx = arenaArrays na >>= \a -> readTagEnum a idx tagAlignY
 getRect :: NodeArena -> NodeIdx -> IO (Float, Float, Float, Float)
 getRect na idx = do
   a <- arenaArrays na
-  (,,,) <$> readGeom a idx geomX <*> readGeom a idx geomY <*> readGeom a idx geomW <*> readGeom a idx geomH
+  (,,,) <$> readGeom a idx GeomX <*> readGeom a idx GeomY <*> readGeom a idx GeomW <*> readGeom a idx GeomH
 
 -- | 'getRect' as a 'Rect'.
 {-# INLINE getNodeRect #-}
 getNodeRect :: NodeArena -> NodeIdx -> IO Rect
 getNodeRect na idx = do
   a <- arenaArrays na
-  Rect <$> readGeom a idx geomX <*> readGeom a idx geomY <*> readGeom a idx geomW <*> readGeom a idx geomH
+  Rect <$> readGeom a idx GeomX <*> readGeom a idx GeomY <*> readGeom a idx GeomW <*> readGeom a idx GeomH
 
 -- | Write x, y, width, and height. Does not update the saved layout origin or clip.
 {-# INLINE setRect #-}
 setRect :: NodeArena -> NodeIdx -> Float -> Float -> Float -> Float -> IO ()
 setRect na idx x y w h = do
   a <- arenaArrays na
-  writeGeom a idx geomX x
-  writeGeom a idx geomY y
-  writeGeom a idx geomW w
-  writeGeom a idx geomH h
+  writeGeom a idx GeomX x
+  writeGeom a idx GeomY y
+  writeGeom a idx GeomW w
+  writeGeom a idx GeomH h
 
 -- | Positive-area clip in logical window coordinates. 'Nothing' means the
 -- stored clip is empty or unset; those cases share the same representation.
@@ -1238,22 +1092,21 @@ setRect na idx x y w h = do
 getClipRect :: NodeArena -> NodeIdx -> IO (Maybe Rect)
 getClipRect na idx = do
   a <- arenaArrays na
-  x <- readGeom a idx geomClipX
-  y <- readGeom a idx geomClipY
-  w <- readGeom a idx geomClipW
-  h <- readGeom a idx geomClipH
-  let r = Rect x y w h
-  pure (if w > 0 && h > 0 then Just r else Nothing)
+  x <- readGeom a idx GeomClipX
+  y <- readGeom a idx GeomClipY
+  w <- readGeom a idx GeomClipW
+  h <- readGeom a idx GeomClipH
+  pure (if w > 0 && h > 0 then Just (Rect x y w h) else Nothing)
 
 -- | Store a clip in logical window coordinates. Empty clips read back as 'Nothing'.
 {-# INLINE setClipRect #-}
 setClipRect :: NodeArena -> NodeIdx -> Rect -> IO ()
 setClipRect na idx (Rect x y w h) = do
   a <- arenaArrays na
-  writeGeom a idx geomClipX x
-  writeGeom a idx geomClipY y
-  writeGeom a idx geomClipW w
-  writeGeom a idx geomClipH h
+  writeGeom a idx GeomClipX x
+  writeGeom a idx GeomClipY y
+  writeGeom a idx GeomClipW w
+  writeGeom a idx GeomClipH h
 
 -- | Cached layout signature and solved geometry for whole-layout reuse. The
 -- backing arrays are reused; only cache misses capture a new solved frame.
@@ -1283,7 +1136,7 @@ data LayoutCache = LayoutCache
   -- ^ The captured 'naArrStyle'. A restore reads only the columns the solver
   -- writes.
   , lcTags :: !(IOArr Word8)
-  -- ^ The captured 'naArrTags'. A restore reads only 'tagScrollBarSlot'.
+  -- ^ The captured 'naArrTags'. A restore reads only 'TagScrollBarSlot'.
   }
 
 -- | A custom measure's (available width, available height, measured width,
@@ -1308,18 +1161,9 @@ captureLayoutCache na lc0 = do
   sig <- getInputSignature na
   subA <- readIORef (naSubHash na)
   measuredA <- readIORef (naMeasured na)
-  let !oldCap = lcCap lc0
-      !newCap = max n (oldCap * 2)
-  lc <-
-    if n <= oldCap
-      then pure lc0
-      else do
-        lcSub <- growPrimArrayCopy (lcSub lc0) oldCap newCap 0
-        lcMeasured <- growPrimArrayCopy (lcMeasured lc0) (oldCap * 2) (newCap * 2) 0
-        lcGeom <- growPrimArrayCopy (lcGeom lc0) (oldCap * geomStride) (newCap * geomStride) 0
-        lcStyle <- growPrimArrayCopy (lcStyle lc0) (oldCap * styleStride) (newCap * styleStride) 0
-        lcTags <- growPrimArrayCopy (lcTags lc0) (oldCap * tagStride) (newCap * tagStride) 0
-        pure lc0 {lcCap = newCap, lcSub, lcMeasured, lcGeom, lcStyle, lcTags}
+  -- The copies below overwrite everything a capture reads, so a cache too
+  -- small for the arena is replaced rather than grown.
+  lc <- if n <= lcCap lc0 then pure lc0 else newLayoutCache (max n (lcCap lc0 * 2))
   a <- arenaArrays na
   copyMutablePrimArray (lcGeom lc) 0 (naArrGeom a) 0 (n * geomStride)
   copyMutablePrimArray (lcStyle lc) 0 (naArrStyle a) 0 (n * styleStride)
@@ -1327,13 +1171,6 @@ captureLayoutCache na lc0 = do
   copyMutablePrimArray (lcSub lc) 0 subA 0 n
   copyMutablePrimArray (lcMeasured lc) 0 measuredA 0 (n * 2)
   pure lc {lcCount = n, lcSig = sig}
-
--- | Whether the arena holds a layout to cache. The cache holds the solve
--- before floating placement, which depends on state outside the arena and
--- runs again on reuse. Custom measurement is checked separately by Frame,
--- which owns its registration.
-layoutCacheEligible :: NodeArena -> IO Bool
-layoutCacheEligible na = (> 0) <$> arenaCount na
 
 -- | Whether the frame's layout inputs hash to what the cache captured.
 layoutSigMatches :: NodeArena -> LayoutCache -> IO Bool
@@ -1354,10 +1191,10 @@ restoreLayoutCache na lc = do
   -- slot. Scroll containers are pointer nodes, so walk that class, not the
   -- whole arena.
   forClassNodes_ na PointerNodes $ \i -> do
-    nt <- readTagEnum a i tagNodeType
+    nt <- readTagEnum a i TagNodeType
     when (isScrollNode nt) $ do
-      let !off = i * styleStride + styleScrollContentW
-          !slotOff = i * tagStride + tagScrollBarSlot
+      let !off = i * styleStride + fromEnum StyleScrollContentW
+          !slotOff = i * tagStride + fromEnum TagScrollBarSlot
       copyMutablePrimArray (naArrStyle a) off (lcStyle lc) off 2
       readPrimArray (lcTags lc) slotOff >>= writePrimArray (naArrTags a) slotOff
 
@@ -1366,7 +1203,7 @@ restoreLayoutCache na lc = do
 getText :: NodeArena -> NodeIdx -> IO Text
 getText na idx = do
   a <- arenaArrays na
-  ti <- readTree a idx treeTextIdx
+  ti <- readTree a idx TreeTextIdx
   if ti < 0
     then pure T.empty
     else readArray (naArrTextStore a) ti
@@ -1374,9 +1211,7 @@ getText na idx = do
 -- | Choices stored on a select node, or an empty list when none were assigned.
 {-# INLINE getOptions #-}
 getOptions :: NodeArena -> NodeIdx -> IO [Text]
-getOptions na idx = do
-  a <- arenaArrays na
-  readArray (naArrOptionsStore a) idx
+getOptions na idx = arenaArrays na >>= \a -> readArray (naArrOptionsStore a) idx
 
 -- | Replace a node's choice labels for this frame. Re-setting the same list
 -- object reuses its cached hash, like 'setNodeText'.
@@ -1405,15 +1240,7 @@ cachedHash ref idx same salt x = do
 -- | Identity assigned to the node, or @WidgetId 0@ for an untagged node.
 {-# INLINE getWidgetId #-}
 getWidgetId :: NodeArena -> NodeIdx -> IO WidgetId
-getWidgetId na idx = arenaArrays na >>= \a -> WidgetId . fromIntegral <$> readTree a idx treeWidgetId
-
-{-# INLINE packEpochNode #-}
-packEpochNode :: Word32 -> NodeIdx -> Word64
-packEpochNode !epoch !idx = (fromIntegral epoch `shiftL` 32) .|. (fromIntegral idx .&. 0xFFFFFFFF)
-
-{-# INLINE unpackEpochNode #-}
-unpackEpochNode :: Word64 -> (Word32, NodeIdx)
-unpackEpochNode !w = (fromIntegral (w `shiftR` 32), fromIntegral (w .&. 0xFFFFFFFF))
+getWidgetId na idx = arenaArrays na >>= \a -> WidgetId . fromIntegral <$> readTree a idx TreeWidgetId
 
 -- | Assign a node's identity and index nonzero ids for lookup. Assign once per
 -- node: this does not remove a mapping previously stored under another id.
@@ -1422,12 +1249,12 @@ setWidgetId :: NodeArena -> NodeIdx -> WidgetId -> IO ()
 setWidgetId na idx wid = do
   a <- arenaArrays na
   let WidgetId w = wid
-  writeTree a idx treeWidgetId (fromIntegral w)
+  writeTree a idx TreeWidgetId (fromIntegral w)
   mixNodeInput na idx 0x5749 w
   when (hashWidgetId wid /= 0) $ do
     !ep <- readIORef (naEpoch na)
     table <- readIORef (naIndex na)
-    HT.insert table wid (packEpochNode ep idx)
+    HT.insert table wid (fromIntegral ep `shiftL` 32 .|. (fromIntegral idx .&. 0xFFFFFFFF))
 
 -- | Node most recently indexed under this id in the current frame. Returns
 -- 'Nothing' for zero, an unknown id, or an entry from an earlier frame.
@@ -1442,8 +1269,8 @@ lookupNodeByWidgetId na wid
         Nothing -> pure Nothing
         Just val -> do
           !ep <- readIORef (naEpoch na)
-          let (!entryEp, !idx) = unpackEpochNode val
-          pure (if entryEp == ep then Just idx else Nothing)
+          let !idx = fromIntegral (val .&. 0xFFFFFFFF)
+          pure (if val `shiftR` 32 == fromIntegral ep then Just idx else Nothing)
 
 -- | 'lookupNodeByWidgetId' using the id's integer store key.
 {-# INLINE lookupNodeByKey #-}
@@ -1454,23 +1281,17 @@ lookupNodeByKey na key = lookupNodeByWidgetId na (WidgetId (fromIntegral key))
 -- solved content height. Interpret it according to 'getNodeType'.
 {-# INLINE getNodeValue #-}
 getNodeValue :: NodeArena -> NodeIdx -> IO Float
-getNodeValue na idx = arenaArrays na >>= \a -> readStyle a idx styleNodeValue
+getNodeValue na idx = arenaArrays na >>= \a -> readStyle a idx StyleNodeValue
 
 -- | Set the type-specific numeric value read by the solver or painter.
 {-# INLINE setNodeValue #-}
 setNodeValue :: NodeArena -> NodeIdx -> Float -> IO ()
-setNodeValue na idx v = arenaArrays na >>= \a -> writeStyle a idx styleNodeValue v
+setNodeValue na idx v = arenaArrays na >>= \a -> writeStyle a idx StyleNodeValue v
 
 -- | Explicit logical font size, or zero for the backend default.
 {-# INLINE getNodeFontSize #-}
 getNodeFontSize :: NodeArena -> NodeIdx -> IO Float
-getNodeFontSize na idx = arenaArrays na >>= \a -> readStyle a idx styleFontSize
-
-{-# INLINE setNodeFontSize #-}
-setNodeFontSize :: NodeArena -> NodeIdx -> Float -> IO ()
-setNodeFontSize na idx v = do
-  arenaArrays na >>= \a -> writeStyle a idx styleFontSize v
-  mixNodeInput na idx 0x4648 (fromIntegral (castFloatToWord32 v))
+getNodeFontSize na idx = arenaArrays na >>= \a -> readStyle a idx StyleFontSize
 
 -- | Explicit font colour, or 'Nothing' to use the theme. This is paint-only
 -- state and does not invalidate cached layout.
@@ -1479,18 +1300,8 @@ getNodeFontColor :: NodeArena -> NodeIdx -> IO (Maybe Color)
 getNodeFontColor na idx = do
   a <- arenaArrays na
   val <- readPrimArray (naArrFontColor a) idx
-  if (val .&. 0x100000000) /= 0
-    then pure (Just (Color (fromIntegral (val .&. 0xFFFFFFFF))))
-    else pure Nothing
-
-{-# INLINE setNodeFontColor #-}
-setNodeFontColor :: NodeArena -> NodeIdx -> Maybe Color -> IO ()
-setNodeFontColor na idx mCol = do
-  a <- arenaArrays na
-  let val = case mCol of
-        Nothing -> 0
-        Just (Color w) -> 0x100000000 .|. fromIntegral w
-  writePrimArray (naArrFontColor a) idx val
+  let hasColor = (val .&. 0x100000000) /= 0
+  pure (if hasColor then Just (Color (fromIntegral (val .&. 0xFFFFFFFF))) else Nothing)
 
 -- | Packed paint scope: theme index above bit 0, disabled flag in bit 0.
 {-# INLINE getNodeScope #-}
@@ -1514,11 +1325,10 @@ getScopeSignature :: NodeArena -> IO Word64
 getScopeSignature na = readIORef (naScopeSig na)
 
 -- | Hash over every layout input written since the reset: each node's
--- constraints and tree links as 'addNode' wrote them, plus every later change
--- through 'setNodeText', 'setOptions', 'setWidgetId', 'setStyleIdx',
--- 'setGridCols', 'setGridMinColW' and 'setNodeFontSize'. Solver outputs
--- ('setScrollContentW', 'tagScrollBarSlot', rects) and paint state
--- ('setNodeValue', 'setNodeFontColor') are excluded. Tree links need no mix
+-- layout and tree links as 'addNode' wrote them, plus every later change
+-- through 'setNodeText', 'setOptions', 'setWidgetId' and 'setStyleIdx'.
+-- Solver outputs ('setScrollContentW', 'TagScrollBarSlot', rects) and paint
+-- state ('setNodeValue', the font colour) are excluded. Tree links need no mix
 -- of their own: every node's index and parent are in its creation hash, and
 -- children are prepended in index order, so the child lists follow. The node
 -- count enters through the indices too; 'layoutSigMatches' also checks it
@@ -1542,7 +1352,7 @@ computeSubtreeHashes na = do
   let chain !i
         | i >= n = pure ()
         | otherwise = do
-            p <- readTree a i treeParent
+            p <- readTree a i TreeParent
             anc <-
               if p < 0
                 then pure 0
@@ -1554,7 +1364,7 @@ computeSubtreeHashes na = do
         | otherwise = do
             o <- readPrimArray own i
             anc <- readPrimArray sub i
-            fc <- readTree a i treeFirstChild
+            fc <- readTree a i TreeFirstChild
             (cnt, acc) <- walkKids a sub 0 o fc
             writePrimArray sub i (mixTagged acc cnt (o `xor` anc))
             fold (i - 1)
@@ -1568,7 +1378,7 @@ walkKids a sub !pos !h !c
   | c < 0 = pure (pos, h)
   | otherwise = do
       sh <- readPrimArray sub c
-      nxt <- readTree a c treeNextSibling
+      nxt <- readTree a c TreeNextSibling
       walkKids a sub (pos + 1) (mixTagged h pos sh) nxt
 
 -- | The subtree-hash and measured-size arrays the solver reads and writes
@@ -1580,7 +1390,7 @@ subtreeArrays na = (,) <$> readIORef (naSubHash na) <*> readIORef (naMeasured na
 -- button flags, a radio option index, or packed text styling.
 {-# INLINE getStyleIdx #-}
 getStyleIdx :: NodeArena -> NodeIdx -> IO Int
-getStyleIdx na idx = arenaArrays na >>= \a -> readTree a idx treeStyleIdx
+getStyleIdx na idx = arenaArrays na >>= \a -> readTree a idx TreeStyleIdx
 
 -- | Store a style code encoded for this node's type. Part of the layout
 -- input signature, except on box, image, and drawing nodes: their style code
@@ -1589,57 +1399,37 @@ getStyleIdx na idx = arenaArrays na >>= \a -> readTree a idx treeStyleIdx
 setStyleIdx :: NodeArena -> NodeIdx -> Int -> IO ()
 setStyleIdx na idx v = do
   a <- arenaArrays na
-  writeTree a idx treeStyleIdx v
-  nt <- readTagEnum a idx tagNodeType
+  writeTree a idx TreeStyleIdx v
+  nt <- readTagEnum a idx TagNodeType
   unless (nt == NodeBox || nt == NodeImage || nt == NodeDrawing) $
     mixNodeInput na idx 0x5354 (fromIntegral v)
 
--- | Get the snapshot buffers for a recursion depth, grown to hold at least
--- @needed@ entries. Buffers are reused across frames; nothing is allocated in
--- steady state once capacity is warm.
+-- | The snapshot buffers for nesting depth @depth@, with room for at least
+-- @needed@ entries. Each depth keeps its buffers across frames, so nothing is
+-- allocated in steady state once they are big enough, and nesting depth has
+-- no fixed limit.
 {-# NOINLINE ensureAxisSnapshot #-}
 ensureAxisSnapshot :: NodeArena -> Int -> Int -> IO AxisSnapshot
 ensureAxisSnapshot na depth needed = do
-  arr0 <- readIORef (naSnapLevels na)
-  let !d = max 0 depth
-  arr <- ensureSnapLevelsArr na arr0 (d + 1)
-  cap <- readIORef (naSnapCap na)
+  levels0 <- readIORef (naSnapLevels na)
+  let !sz = sizeofMutableArray levels0
+  levels <-
+    if depth < sz
+      then pure levels0
+      else do
+        empty <- newAxisSnapshot 0
+        levels <- growBoxedStoreCopy empty levels0 sz (max (depth + 1) (sz * 2))
+        levels <$ writeIORef (naSnapLevels na) levels
+  s <- readArray levels depth
+  cap <- getSizeofMutablePrimArray (asIdx s)
   if needed <= cap
-    then getLevel arr d cap
+    then pure s
     else do
-      let !newCap = max needed (cap * 2)
-          !levels = sizeofMutableArray arr
-      forM_ [0 .. levels - 1] $ \i ->
-        readArray arr i >>= mapM_ (\(AxisSnapshot idx out) -> do
-          idx' <- growPrimArrayCopy idx cap newCap 0
-          out' <- growPrimArrayCopy out cap newCap 0
-          writeArray arr i (Just (AxisSnapshot idx' out')))
-      writeIORef (naSnapCap na) newCap
-      getLevel arr d newCap
-  where
-    getLevel arr d currentCap = do
-      m <- readArray arr d
-      case m of
-        Just s -> pure s
-        Nothing -> do
-          asIdx <- newPrimArray currentCap
-          asOut <- newPrimArray currentCap
-          let s = AxisSnapshot asIdx asOut
-          writeArray arr d (Just s)
-          pure s
+      s' <- newAxisSnapshot (max needed (max 64 (cap * 2)))
+      s' <$ writeArray levels depth s'
 
--- | Grow the per-depth snapshot-level array to hold at least @need@ levels,
--- so nesting depth has no fixed limit.
-ensureSnapLevelsArr :: NodeArena -> MutableArray RealWorld (Maybe AxisSnapshot) -> Int -> IO (MutableArray RealWorld (Maybe AxisSnapshot))
-ensureSnapLevelsArr na arr need = do
-  let !sz = sizeofMutableArray arr
-  if need <= sz
-    then pure arr
-    else do
-      let !newSz = max need (sz * 2)
-      arr' <- growBoxedStoreCopy Nothing arr sz newSz
-      writeIORef (naSnapLevels na) arr'
-      pure arr'
+newAxisSnapshot :: Int -> IO AxisSnapshot
+newAxisSnapshot cap = AxisSnapshot <$> newPrimArray cap <*> newPrimArray cap
 
 -- | Memoize @compute@ for node @idx@ at width @key@ in one of the arena's
 -- per-frame memos. Widths within 0.25 px share an entry so near-identical
@@ -1668,52 +1458,30 @@ memoizeWidth na ref idx key compute = do
       writePrimArray slots' (base + 2) y
       pure r
 
--- | The flex scratch, grown to hold at least @needed@ entries.
+-- | The flex scratch, with room for at least @needed@ entries. Growing it
+-- replaces the buffers without copying: a container fills them only after
+-- asking for room, and reads its children back from its snapshot once a
+-- child may have used them.
 {-# INLINE ensureScratchCapacity #-}
 ensureScratchCapacity :: NodeArena -> Int -> IO FlexScratch
 ensureScratchCapacity na needed = do
   s <- readIORef (naScratch na)
-  if needed <= fsCap s then pure s else growScratch na s needed
+  if needed <= fsCap s then pure s else growScratch na (max needed (fsCap s * 2))
 
 {-# NOINLINE growScratch #-}
-growScratch :: NodeArena -> FlexScratch -> Int -> IO FlexScratch
-growScratch na s needed = do
-  let !cap = fsCap s
-      !newCap = max needed (cap * 2)
-  fsIdx <- growPrimArrayCopy (fsIdx s) cap newCap (-1)
-  fsW <- growPrimArrayCopy (fsW s) cap newCap 0
-  fsH <- growPrimArrayCopy (fsH s) cap newCap 0
-  fsOutW <- growPrimArrayCopy (fsOutW s) cap newCap 0
-  fsOutH <- growPrimArrayCopy (fsOutH s) cap newCap 0
-  let s' = FlexScratch {fsCap = newCap, ..}
-  writeIORef (naScratch na) s'
-  pure s'
-
--- | Visit live nodes in declaration order. The count is captured before traversal.
-{-# INLINE forNodes_ #-}
-forNodes_ :: NodeArena -> (NodeIdx -> IO ()) -> IO ()
-forNodes_ na f = do
-  n <- arenaCount na
-  let go !i
-        | i >= n = pure ()
-        | otherwise = f i >> go (i + 1)
-  go 0
+growScratch :: NodeArena -> Int -> IO FlexScratch
+growScratch na cap = do
+  s <- newFlexScratch cap
+  s <$ writeIORef (naScratch na) s
 
 -- | Visit the nodes of a floating type (modal, window, popup) in arena
 -- order, looking only at the floating nodes.
 {-# INLINE forFloatingNodes_ #-}
 forFloatingNodes_ :: NodeArena -> NodeType -> (NodeIdx -> IO ()) -> IO ()
-forFloatingNodes_ na t f = foldFloatingNodesM na (\() idx -> getNodeType na idx >>= \nt -> when (nt == t) (f idx)) ()
+forFloatingNodes_ na t f =
+  forClassNodes_ na FloatingNodes $ \idx -> getNodeType na idx >>= \nt -> when (nt == t) (f idx)
 
--- | Strict fold over the floating nodes in arena order.
-{-# INLINE foldFloatingNodesM #-}
-foldFloatingNodesM :: NodeArena -> (a -> NodeIdx -> IO a) -> a -> IO a
-foldFloatingNodesM na = foldClassNodesM na FloatingNodes
 
--- | Strict fold over the floating nodes from last declared to first.
-{-# INLINE foldFloatingNodeRevM #-}
-foldFloatingNodeRevM :: NodeArena -> (a -> NodeIdx -> IO a) -> a -> IO a
-foldFloatingNodeRevM na = foldClassNodeRevM na FloatingNodes
 
 -- | Visit direct children in reverse declaration order, including floating nodes.
 {-# INLINE forChildNodes_ #-}
@@ -1744,28 +1512,50 @@ foldFlowChildrenM na parentIdx f z = do
               else f acc ci >>= go ns
   go fc z
 
+-- | Strict fold over the nodes @at 0@ to @at (k - 1)@, or from the last to
+-- the first with @rev@.
+{-# INLINE foldSeqM #-}
+foldSeqM :: Bool -> Int -> (Int -> IO NodeIdx) -> (a -> NodeIdx -> IO a) -> a -> IO a
+foldSeqM rev k at f = go (if rev then k - 1 else 0)
+  where
+    go !i !acc
+      | i < 0 || i >= k = pure acc
+      | otherwise = at i >>= f acc >>= go (if rev then i - 1 else i + 1)
+
+-- | The first of the nodes @at 0@ to @at (k - 1)@, or the last with @rev@,
+-- that satisfies the predicate.
+{-# INLINE findSeqM #-}
+findSeqM :: Bool -> Int -> (Int -> IO NodeIdx) -> (NodeIdx -> IO Bool) -> IO (Maybe NodeIdx)
+findSeqM rev k at p = go (if rev then k - 1 else 0)
+  where
+    go !i
+      | i < 0 || i >= k = pure Nothing
+      | otherwise = do
+          idx <- at i
+          ok <- p idx
+          if ok then pure (Just idx) else go (if rev then i - 1 else i + 1)
+
+-- | First node, in arena order, satisfying the predicate.
+{-# INLINE findNodeM #-}
+findNodeM :: NodeArena -> (NodeIdx -> IO Bool) -> IO (Maybe NodeIdx)
+findNodeM na p = arenaCount na >>= \n -> findSeqM False n pure p
+
 -- | Find the last declared matching node, or 'Nothing'. Stops at the first match
 -- while scanning backwards.
 {-# INLINE findNodeRevM #-}
 findNodeRevM :: NodeArena -> (NodeIdx -> IO Bool) -> IO (Maybe NodeIdx)
-findNodeRevM na p = do
-  n <- arenaCount na
-  let go !i
-        | i < 0 = pure Nothing
-        | otherwise = do
-            ok <- p i
-            if ok then pure (Just i) else go (i - 1)
-  go (n - 1)
+findNodeRevM na p = arenaCount na >>= \n -> findSeqM True n pure p
 
--- | 'findNodeRevM' for a predicate that only floating nodes can satisfy. It
--- visits only the floating nodes.
-{-# INLINE findFloatingNodeRevM #-}
-findFloatingNodeRevM :: NodeArena -> (NodeIdx -> IO Bool) -> IO (Maybe NodeIdx)
-findFloatingNodeRevM na = findClassNodeRevM na FloatingNodes
+-- | Left fold over every node in arena order.
+{-# INLINE foldNodesM #-}
+foldNodesM :: NodeArena -> (a -> NodeIdx -> IO a) -> a -> IO a
+foldNodesM na f z = arenaCount na >>= \n -> foldSeqM False n pure f z
 
--- | Where the list of class @c@ starts in 'naClassNodes', and its length.
+
+-- | The length of the list of class @c@ in 'naClassNodes', and a reader for
+-- its @i@th node.
 {-# INLINE classNodes #-}
-classNodes :: NodeArena -> NodeClass -> IO (IOArr Int, Int, Int)
+classNodes :: NodeArena -> NodeClass -> IO (Int, Int -> IO NodeIdx)
 classNodes na c = do
   let ci = fromEnum c
   arr <- readIORef (naClassNodes na)
@@ -1773,105 +1563,34 @@ classNodes na c = do
   k <- readPrimArray (naClassCounts na) ci
   -- Forced here: a lazy offset would be a thunk and a box on every walk.
   let !base = ci * cap
-  pure (arr, base, k)
+  pure (k, \i -> readPrimArray arr (base + i))
 
 -- | 'findNodeM' over the nodes of one class: the first in arena order that
 -- satisfies the predicate.
 {-# INLINE findClassNodeM #-}
 findClassNodeM :: NodeArena -> NodeClass -> (NodeIdx -> IO Bool) -> IO (Maybe NodeIdx)
-findClassNodeM na c p = do
-  (arr, base, k) <- classNodes na c
-  let go !i
-        | i >= k = pure Nothing
-        | otherwise = do
-            idx <- readPrimArray arr (base + i)
-            ok <- p idx
-            if ok then pure (Just idx) else go (i + 1)
-  go 0
+findClassNodeM na c p = classNodes na c >>= \(k, at) -> findSeqM False k at p
 
 -- | 'findNodeRevM' over the nodes of one class: the last in arena order that
 -- satisfies the predicate.
 {-# INLINE findClassNodeRevM #-}
 findClassNodeRevM :: NodeArena -> NodeClass -> (NodeIdx -> IO Bool) -> IO (Maybe NodeIdx)
-findClassNodeRevM na c p = do
-  (arr, base, k) <- classNodes na c
-  let go !i
-        | i < 0 = pure Nothing
-        | otherwise = do
-            idx <- readPrimArray arr (base + i)
-            ok <- p idx
-            if ok then pure (Just idx) else go (i - 1)
-  go (k - 1)
+findClassNodeRevM na c p = classNodes na c >>= \(k, at) -> findSeqM True k at p
 
 -- | 'foldNodesM' over the nodes of one class, in arena order.
 {-# INLINE foldClassNodesM #-}
 foldClassNodesM :: NodeArena -> NodeClass -> (a -> NodeIdx -> IO a) -> a -> IO a
-foldClassNodesM na c f z = do
-  (arr, base, k) <- classNodes na c
-  let go !i !acc
-        | i >= k = pure acc
-        | otherwise = do
-            idx <- readPrimArray arr (base + i)
-            acc' <- f acc idx
-            go (i + 1) acc'
-  go 0 z
+foldClassNodesM na c f z = classNodes na c >>= \(k, at) -> foldSeqM False k at f z
 
--- | 'foldNodeRevM' over the nodes of one class, from last declared to first.
+-- | 'foldClassNodesM' from last declared to first.
 {-# INLINE foldClassNodeRevM #-}
 foldClassNodeRevM :: NodeArena -> NodeClass -> (a -> NodeIdx -> IO a) -> a -> IO a
-foldClassNodeRevM na c f z = do
-  (arr, base, k) <- classNodes na c
-  let go !i !acc
-        | i < 0 = pure acc
-        | otherwise = do
-            idx <- readPrimArray arr (base + i)
-            acc' <- f acc idx
-            go (i - 1) acc'
-  go (k - 1) z
+foldClassNodeRevM na c f z = classNodes na c >>= \(k, at) -> foldSeqM True k at f z
 
--- | 'forNodes_' over the nodes of one class, in arena order.
+-- | Visit the nodes of one class in arena order.
 {-# INLINE forClassNodes_ #-}
 forClassNodes_ :: NodeArena -> NodeClass -> (NodeIdx -> IO ()) -> IO ()
 forClassNodes_ na c f = foldClassNodesM na c (\() idx -> f idx) ()
-
--- | Strict effectful fold over nodes from last declared to first.
-{-# INLINE foldNodeRevM #-}
-foldNodeRevM :: NodeArena -> (a -> NodeIdx -> IO a) -> a -> IO a
-foldNodeRevM na f z = do
-  n <- arenaCount na
-  let go !i !acc
-        | i < 0 = pure acc
-        | otherwise = do
-            acc' <- f acc i
-            go (i - 1) acc'
-  go (n - 1) z
-
--- ---------------------------------------------------------------------------
--- Frame traversal helpers: forward node scans and child searches, shaped like
--- 'forNodes_' and 'findNodeRevM'.
--- ---------------------------------------------------------------------------
-
--- | First node, in arena order, satisfying the predicate.
-{-# INLINE findNodeM #-}
-findNodeM :: NodeArena -> (NodeIdx -> IO Bool) -> IO (Maybe NodeIdx)
-findNodeM na p = do
-  n <- arenaCount na
-  let go !i
-        | i >= n = pure Nothing
-        | otherwise = do
-            ok <- p i
-            if ok then pure (Just i) else go (i + 1)
-  go 0
-
--- | Left fold over every node in arena order.
-{-# INLINE foldNodesM #-}
-foldNodesM :: NodeArena -> (a -> NodeIdx -> IO a) -> a -> IO a
-foldNodesM na f z = do
-  n <- arenaCount na
-  let go !i !acc
-        | i >= n = pure acc
-        | otherwise = f acc i >>= go (i + 1)
-  go 0 z
 
 -- | The first result @step@ finds walking up from @idx@, the node itself
 -- first.

@@ -42,14 +42,16 @@ import NanoUI.Internal.Frame.Scroll.Geometry (scrollChromeLane)
 import NanoUI.Internal.Id (WidgetId (..))
 import NanoUI.Internal.Input (Input (..), UiCursorKind (..), inputMouseDown, inputMousePos, inputMousePressed)
 import NanoUI.Internal.Layout.Arena
-  ( NodeIdx
+  ( AxisSizing (..)
+  , NodeClass (FloatingNodes)
+  , NodeIdx
   , NodeType (..)
-  , findFloatingNodeRevM
+  , findClassNodeRevM
   , floatingNodeCount
-  , foldFloatingNodesM
+  , foldClassNodesM
   , getDirection
   , getFirstChild
-  , getMinMax
+  , getHeightSizing
   , getNextSibling
   , getNodeRect
   , getNodeType
@@ -57,6 +59,7 @@ import NanoUI.Internal.Layout.Arena
   , getPadding
   , getRect
   , getWidgetId
+  , getWidthSizing
   )
 import NanoUI.Internal.Layout.Solve (Measurers (..), placeWindowNode, windowBodyScroller)
 import NanoUI.Internal.Monad ((<&&>))
@@ -66,7 +69,7 @@ import NanoUI.Internal.Types (DamageBounds (..), Rect (..), V2 (..), clamp, halo
 
 topmostWindowAtResizeHalo :: Context -> V2 -> IO (Maybe NodeIdx)
 topmostWindowAtResizeHalo ctx mouse =
-  findFloatingNodeRevM na $ \idx ->
+  findClassNodeRevM na FloatingNodes $ \idx ->
     ((== NodeWindow) <$> getNodeType na idx) <&&> do
       rect <- getNodeRect na idx
       pure (rectNonEmpty rect && rectContains (rectInflate windowResizeHandleFor rect) mouse)
@@ -100,7 +103,7 @@ persistWindowPositions ctx = floatingNodeCount na >>= \floating -> when (floatin
               if lookupSlot fieldPoint k acc == Just (x, y) && lookupSlot fieldPoint sizeKey acc == Just (w, h)
                 then acc
                 else insertSlot fieldPoint k (x, y) (insertSlot fieldPoint sizeKey (w, h) acc)
-  store1 <- foldFloatingNodesM na record store0
+  store1 <- foldClassNodesM na FloatingNodes record store0
   when (store1 /= store0) $ setStore ctx store1
  where
   na = ctxNodeArena ctx
@@ -294,7 +297,8 @@ tryStartWindowResize ctx mouse@(V2 mx my) = do
     Nothing -> pure False
     Just (idx, Rect x y w h, edge) -> do
       wid <- getWidgetId (ctxNodeArena ctx) idx
-      (minW, minH, maxW, maxH) <- getMinMax (ctxNodeArena ctx) idx
+      AxisSizing _ _ minW maxW <- getWidthSizing (ctxNodeArena ctx) idx
+      AxisSizing _ _ minH maxH <- getHeightSizing (ctxNodeArena ctx) idx
       modifyInteraction ctx $ \s ->
         s
           { isWindowResize =

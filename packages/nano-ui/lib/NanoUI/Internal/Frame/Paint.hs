@@ -89,13 +89,15 @@ import NanoUI.Internal.Frame.Scroll.Geometry
 import NanoUI.Internal.Frame.Spans (textNodeSpanEntry)
 import NanoUI.Internal.Id (hashWidgetId)
 import NanoUI.Internal.Layout.Arena
-  ( DirTag (..)
+  ( AxisSizing (..)
+  , DirTag (..)
+  , NodeClass (FloatingNodes)
   , NodeIdx
   , NodeType (..)
   , SizingTag (..)
   , arenaCount
   , floatingNodeCount
-  , foldFloatingNodesM
+  , foldClassNodesM
   , forChildNodes_
   , getHeightSizing
   , getNodeFontColor
@@ -153,7 +155,7 @@ collectFloatingOccluders ctx = do
     then pure emptyPrimArray
     else do
       buf <- newPrimArray (floating * 4)
-      n <- foldFloatingNodesM na (addOccluder na buf) 0
+      n <- foldClassNodesM na FloatingNodes (addOccluder na buf) 0
       shrinkMutablePrimArray buf (n * 4)
       unsafeFreezePrimArray buf
   where
@@ -309,8 +311,8 @@ paintScrollContainerNode env idx rect@(Rect x y w h) = do
   -- repaints the whole viewport.
   unless (scrollBare (snConfig sn)) $ do
     inFloating <- isJust <$> floatingAncestor ctx idx
-    (wTag, _) <- getWidthSizing arena idx
-    (hTag, _) <- getHeightSizing arena idx
+    wTag <- axTag <$> getWidthSizing arena idx
+    hTag <- axTag <$> getHeightSizing arena idx
     if wTag == SizingGrow && hTag == SizingGrow
       then pushRect da rect (if inFloating then styleBg (themeFloatingWindow tm) else themeWindow tm)
       else do

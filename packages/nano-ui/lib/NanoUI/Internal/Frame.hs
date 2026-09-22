@@ -137,18 +137,18 @@ import NanoUI.Internal.Layout.Arena
   , LayoutCache (..)
   , NodeIdx
   , NodeType (..)
+  , arenaCount
   , captureLayoutCache
   , floatingNodeCount
   , getNodeType
   , getWidgetId
-  , layoutCacheEligible
   , layoutSigMatches
   , computeSubtreeHashes
   , newLayoutCache
   , resetNodeArena
   , restoreLayoutCache
   )
-import NanoUI.Internal.Layout.Solve (placeModals, placePopups, placeWindows, runCustomMeasure, solveLayout)
+import NanoUI.Internal.Layout.Solve (placeFloatingNodes, runCustomMeasure, solveLayout)
 import NanoUI.Internal.Monad (NanoUI, Ui, runUi, unlessM, whenM)
 import NanoUI.Internal.Store (mirrorStoresChanged)
 import NanoUI.Internal.Style (Theme (..))
@@ -401,10 +401,8 @@ placeFloating ctx w h = do
   let na = ctxNodeArena ctx
       ms = contextMeasurers ctx
   floating <- floatingNodeCount na
-  when (floating > 0) $ do
-    placeModals na ms w h
-    placeWindows na ms w h (lookupWindowPos ctx) (lookupWindowSize ctx)
-    placePopups na ms w h (lookupPopupConfig ctx)
+  when (floating > 0) $
+    placeFloatingNodes na ms w h (lookupWindowPos ctx) (lookupWindowSize ctx) (lookupPopupConfig ctx)
 
 -- | Put back this frame's solve, as captured before placement, and place the
 -- floating panels again. 'False' when there is no such capture.
@@ -467,8 +465,8 @@ restoreCachedLayout ctx size@(Size w h) valid = do
 -- can reuse it.
 captureLayout :: Context -> Size -> IM.IntMap CustomMeasureRecord -> IO ()
 captureLayout ctx size measures = do
-  eligible <- layoutCacheEligible (ctxNodeArena ctx)
-  if not eligible
+  n <- arenaCount (ctxNodeArena ctx)
+  if n <= 0
     then writeIORef (ctxLayoutCache ctx) Nothing
     else do
       gen <- readIORef (ctxMetricGen ctx)

@@ -72,12 +72,11 @@ import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Monad (Ui, askContext, askFrameInput, askInput, localInput, nextId, uiIO, withContext)
 import NanoUI.Internal.WidgetText (packTextNodeStyle)
 import NanoUI.Internal.Style
-  ( AlignX (..)
-  , AlignY (..)
-  , Direction (..)
+  ( Direction (..)
   , Layout (..)
   , Padding (..)
   , Sizing (..)
+  , defaultLayout
   )
 import NanoUI.Internal.Types (Rect (..), rectContains, rectH, rectHit, rectUnion, rectW)
 import NanoUI.Internal.Frame.Hit (findNodeByWidgetId, nodeInteractionHit, scrollHitRect)
@@ -294,23 +293,15 @@ addSizingLeafNode ::
   -> IO Response
 addSizingLeafNode ctx inp wid nt dir wSiz hSiz = do
   parent <- currentParent ctx
-  idx <-
-    addNode
-      (ctxNodeArena ctx)
-      nt
-      parent
-      dir
-      wSiz
-      hSiz
-      (Padding 0 0 0 0)
-      0
-      0
-      0
-      1e9
-      1e9
-      0
-      AlignStart
-      AlignTop
+  let layout =
+        defaultLayout
+          { layoutDirection = dir
+          , layoutWidth = wSiz
+          , layoutHeight = hSiz
+          , layoutPadding = Padding 0 0 0 0
+          , layoutGap = 0
+          }
+  idx <- addNode (ctxNodeArena ctx) nt parent layout
   setWidgetId (ctxNodeArena ctx) idx wid
   resolveInteraction ctx inp wid
 

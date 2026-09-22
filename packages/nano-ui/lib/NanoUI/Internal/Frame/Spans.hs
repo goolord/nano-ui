@@ -48,7 +48,8 @@ import NanoUI.Internal.Frame.TextEdit.Menu (collectTextEditMenuSpans)
 import NanoUI.Internal.Frame.TextInput (syncTextInputScroll, tagTextInputClippedSpans, textInputFieldRect)
 import NanoUI.Internal.Input (Input)
 import NanoUI.Internal.Layout.Arena
-  ( forFloatingNodes_
+  ( AxisSizing (..)
+  , forFloatingNodes_
   , NodeIdx
   , NodeType (..)
   , SizingTag (..)
@@ -56,7 +57,6 @@ import NanoUI.Internal.Layout.Arena
   , getAlignX
   , getClipRect
   , getFirstChild
-  , getMinMax
   , getNextSibling
   , getNodeFontColor
   , getNodeFontSize
@@ -189,8 +189,7 @@ textNodeSpanEntry ctx idx x y w h = do
   mCustomCol <- getNodeFontColor arena idx
   fontSize <- getNodeFontSize arena idx
   ax <- getAlignX arena idx
-  (_, _, maxW, _) <- getMinMax arena idx
-  (wTag, _) <- getWidthSizing arena idx
+  AxisSizing wTag _ _ maxW <- getWidthSizing arena idx
   isRowChild <- parentIsRow arena idx
   -- 'nodeTextLines' wraps a row child only at its own newlines, so
   -- only then does the ancestor cap matter; skip the walk to the root.

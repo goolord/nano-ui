@@ -60,7 +60,8 @@ import NanoUI.Internal.Input
 import NanoUI.Internal.Frame.Hit (findNodeByKey)
 import NanoUI.Internal.Store (Slot (..), eqByPtr, mirrorStoresChanged, ptrEq, slotChangedKeys, slotKey)
 import NanoUI.Internal.Layout.Arena
-  ( NodeArena
+  ( AxisSizing (..)
+  , NodeArena
   , NodeIdx
   , NodeType (..)
   , SizingTag (..)
@@ -68,7 +69,6 @@ import NanoUI.Internal.Layout.Arena
   , NodeClass (..)
   , foldClassNodesM
   , foldClassNodeRevM
-  , foldFloatingNodeRevM
   , getClipRect
   , getHeightSizing
   , getNodeRect
@@ -122,8 +122,8 @@ backdropRectFromNode ctx idx = walkAncestors (ctxNodeArena ctx) idx step
         then getNonzeroRect na i
         else case nt of
           NodeScrollContainer -> do
-            (wTag, _) <- getWidthSizing na i
-            (hTag, _) <- getHeightSizing na i
+            wTag <- axTag <$> getWidthSizing na i
+            hTag <- axTag <$> getHeightSizing na i
             si <- getStyleIdx na i
             if (wTag == SizingGrow && hTag == SizingGrow) || scrollBare (decodeScrollConfig si)
               then pure Nothing
@@ -214,7 +214,7 @@ updatePrevRects ctx = do
 
 floatingPanelsInOrder :: Context -> IO [(Int, Rect)]
 floatingPanelsInOrder ctx = do
-  foldFloatingNodeRevM na step []
+  foldClassNodeRevM na FloatingNodes step []
   where
     na = ctxNodeArena ctx
     step acc idx = do
