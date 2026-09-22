@@ -347,7 +347,7 @@ data ScrollAxes
   = ScrollAxisY
   | ScrollAxisX
   | ScrollAxisXY
-  deriving (Eq, Show)
+  deriving (Eq, Show, Enum)
 
 -- | A scroller on its way to an offset it has not reached yet. The target is
 -- in window axes and already clamped to the scroller's range.
