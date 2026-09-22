@@ -26,15 +26,9 @@ import System.IO.Unsafe (unsafePerformIO)
 -- matches.  Generic families like @monospace@ are expanded to a list of
 -- concrete families first.
 searchFonts :: [String] -> IO (Maybe FilePath)
-searchFonts names = case concatMap families names of
-  [] -> pure Nothing
-  candidates -> do
-    files <- fontStems
-    pure (listToMaybe (mapMaybe (`bestMatch` files) candidates))
+searchFonts names = listToMaybe <$> searchFontFamilies (concatMap families names)
   where
-    families name =
-      let norm = normalize name
-       in if null norm then [] else maybe [norm] (concatMap families) (expandGeneric norm)
+    families name = maybe [name] (concatMap families) (expandGeneric (normalize name))
 
 -- | The file for each family that is installed, in the order asked, reading
 -- the font directories once.
