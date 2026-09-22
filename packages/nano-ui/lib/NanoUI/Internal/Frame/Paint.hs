@@ -196,47 +196,28 @@ paintNodeWithEnv env idx = do
       !t = max (y - paintOverhang) cy
       !r = min (x + w + paintOverhang) (cx + cw)
       !b = min (y + h + paintOverhang) (cy + ch)
-  unless (w <= 0 || h <= 0 || r <= l || b <= t) $
-    unless (occluded (peOccluders env) l t r b || missesPieces (pePieces env) l t r b) $ do
-      nt <- getNodeType (peNodeArena env) idx
-      scope <- getNodeScope (peNodeArena env) idx
-      if scope == peScope env
-        then lowerNodeVisible env idx nt (Rect x y w h)
-        else do
-          theme <- scopeTheme (peContext env) scope
-          lowerNodeVisible env {peTheme = theme, peScope = scope} idx nt (Rect x y w h)
+      -- An opaque floating panel covers the clipped rect, or there are damage
+      -- pieces and it meets none of them.
+      occluded = anyRun (peOccluders env) $ \x0 y0 x1 y1 -> l >= x0 && t >= y0 && r <= x1 && b <= y1
+      missesPieces =
+        sizeofPrimArray (pePieces env) > 0
+          && not (anyRun (pePieces env) $ \x0 y0 x1 y1 -> l < x1 && t < y1 && r > x0 && b > y0)
+  unless (w <= 0 || h <= 0 || r <= l || b <= t || occluded || missesPieces) $ do
+    nt <- getNodeType (peNodeArena env) idx
+    scope <- getNodeScope (peNodeArena env) idx
+    if scope == peScope env
+      then lowerNodeVisible env idx nt (Rect x y w h)
+      else do
+        theme <- scopeTheme (peContext env) scope
+        lowerNodeVisible env {peTheme = theme, peScope = scope} idx nt (Rect x y w h)
 
--- | Whether an opaque floating panel fully covers the clipped node rect
--- @l, t, r, b@, which the caller has already checked is non-empty.
-{-# INLINE occluded #-}
-occluded :: PrimArray Float -> Float -> Float -> Float -> Float -> Bool
-occluded occ !l !t !r !b = go 0
+-- | Whether @p@ holds for any of the @x0, y0, x1, y1@ runs of @rects@.
+{-# INLINE anyRun #-}
+anyRun :: PrimArray Float -> (Float -> Float -> Float -> Float -> Bool) -> Bool
+anyRun rects p = go 0
   where
-    !end = sizeofPrimArray occ
-    go !o
-      | o >= end = False
-      | l >= indexPrimArray occ o
-          && t >= indexPrimArray occ (o + 1)
-          && r <= indexPrimArray occ (o + 2)
-          && b <= indexPrimArray occ (o + 3) =
-          True
-      | otherwise = go (o + 4)
-
--- | Whether the damage pieces leave out the clipped node rect @l, t, r, b@:
--- there are some, and it meets none of them.
-{-# INLINE missesPieces #-}
-missesPieces :: PrimArray Float -> Float -> Float -> Float -> Float -> Bool
-missesPieces ps !l !t !r !b = end > 0 && go 0
-  where
-    !end = sizeofPrimArray ps
-    go !o
-      | o >= end = True
-      | l < indexPrimArray ps (o + 2)
-          && t < indexPrimArray ps (o + 3)
-          && r > indexPrimArray ps o
-          && b > indexPrimArray ps (o + 1) =
-          False
-      | otherwise = go (o + 4)
+    at = indexPrimArray rects
+    go !o = o < sizeofPrimArray rects && (p (at o) (at (o + 1)) (at (o + 2)) (at (o + 3)) || go (o + 4))
 
 -- | How far a node may paint outside its rect: the focus ring sits 2px out
 -- with a 1.5px stroke.
