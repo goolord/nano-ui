@@ -244,9 +244,10 @@ main = do
       void (sdlDrawFrame ctx' (benchCorners k) sdlEnv inp False)
     -- The bound for one line: a text area holding a single long line, painted
     -- in full each frame as a horizontal scroll or a resize would.
-    forM_ [4000, 20000 :: Int] $ \n ->
+    forM_ [4000, 20000 :: Int] $ \n -> do
+      let txt = T.replicate (n `quot` 10) "abcdefghi "
       measureBench ("Long line: " <> show n <> " chars, full") $
-        void (sdlDrawFrame ctx' (benchLongLine n) sdlEnv inp True)
+        void (sdlDrawFrame ctx' (benchLongLine txt) sdlEnv inp True)
     putStrLn ""
     putStrLn "================================================================================"
     putStrLn "Profiling complete."
@@ -442,12 +443,9 @@ benchWrap width k = columnWith (tight . gap 4 . fixedW width) $ do
   label (T.pack ("frame " <> show k))
   forM_ wrapParagraphs label
 
--- | A text area whose one line is @n@ characters long.
-benchLongLine :: Int -> NanoUI ()
-benchLongLine n = void $ textAreaWith (fixedWH 600 200) (longLines !! (if n > 4000 then 1 else 0))
-
-longLines :: [T.Text]
-longLines = [T.replicate (n `quot` 10) "abcdefghi " | n <- [4000, 20000 :: Int]]
+-- | A text area holding one line.
+benchLongLine :: T.Text -> NanoUI ()
+benchLongLine txt = void $ textAreaWith (fixedWH 600 200) txt
 
 -- | The paragraphs between a label in the top-left corner and one in the
 -- bottom-right, both changing every frame.

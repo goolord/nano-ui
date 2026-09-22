@@ -105,7 +105,6 @@ import NanoUI.Internal.Layout.Arena
   , getText
   , getWidgetId
   , getWidthSizing
-  , isFloatingNode
   )
 import NanoUI.Internal.Style
   ( FontStyle (..)
@@ -163,7 +162,7 @@ collectFloatingOccluders ctx = do
       _ -> False
     addOccluder na buf !n idx = do
       nt <- getNodeType na idx
-      opaque <- if isFloatingNode nt then (`occludes` nt) <$> nodeTheme ctx idx else pure False
+      opaque <- (`occludes` nt) <$> nodeTheme ctx idx
       if not opaque
         then pure n
         else do

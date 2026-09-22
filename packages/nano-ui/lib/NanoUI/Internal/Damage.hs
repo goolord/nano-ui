@@ -12,6 +12,7 @@ import Control.Monad (forM_, join, unless, when)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
 import Data.IntMap.Strict qualified as IM
 import Data.IntSet qualified as IS
+import Data.List (partition, tails)
 import Data.Maybe (fromMaybe, isJust)
 import Data.Primitive.PrimArray (MutablePrimArray, newPrimArray, readPrimArray, writePrimArray)
 import Data.Text (Text)
@@ -552,32 +553,21 @@ damagePieces rects =
       | sum (map rectArea ps) < 0.7 * rectArea (foldr1 rectUnion ps) -> ps
     _ -> []
   where
-    near (Rect ax ay aw ah) (Rect bx by bw bh) =
-      ax - pieceMergeGap < bx + bw
-        && bx - pieceMergeGap < ax + aw
-        && ay - pieceMergeGap < by + bh
-        && by - pieceMergeGap < ay + ah
-    -- Insert each rect, merging it into the first near piece and carrying
-    -- the union on; repeat until no insert merges, as a union can reach a
-    -- piece placed before it.
-    settle ps =
-      let ps' = foldl' (flip insert) [] ps
-       in if length ps' == length ps then ps' else settle ps'
-    insert r [] = [r]
-    insert r (p : ps)
-      | near p r = insert (rectUnion p r) ps
-      | otherwise = p : insert r ps
+    near a b = isJust (rectIntersect (rectInflate pieceMergeGap a) b)
+    -- Merge the first near pair until no pair is near.
+    settle ps = maybe ps settle (mergeNear ps)
+    mergeNear [] = Nothing
+    mergeNear (p : ps) = case break (near p) ps of
+      (before, q : after) -> Just (rectUnion p q : before ++ after)
+      (_, []) -> (p :) <$> mergeNear ps
     shrink ps
       | length ps <= maxDamagePieces = ps
       | otherwise =
           let indexed = zip [0 :: Int ..] ps
               cost a b = rectArea (rectUnion a b) - rectArea a - rectArea b
-              (_, i, j) =
-                minimum
-                  [(cost a b, i', j') | (i', a) <- indexed, (j', b) <- indexed, i' < j']
-              merged = rectUnion (ps !! i) (ps !! j)
-              rest = [p | (k, p) <- indexed, k /= i, k /= j]
-           in shrink (settle (merged : rest))
+              (_, i, j) = minimum [(cost a b, i', j') | ((i', a) : later) <- tails indexed, (j', b) <- later]
+              (pair, rest) = partition (\(k, _) -> k == i || k == j) indexed
+           in shrink (settle (foldr1 rectUnion (map snd pair) : map snd rest))
 
 resolveDamageRequests ::
   Context ->
@@ -602,33 +592,35 @@ resolveDamageRequests ctx acc oldRects newRects reqs =
           when (rectNonEmpty clipped) $ addRect acc clipped
 
 -- | A running union of rects, as @x0, y0, x1, y1@ followed by how many of
--- them lie outside every floating panel and how many more of them to keep.
--- The bounds start inverted, so the first rect sets them and an empty union
--- reads back as the zero rect.
-data RectUnion = RectUnion !(MutablePrimArray RealWorld Float) !(IORef [Rect])
+-- them lie outside every floating panel, and for a piece union the rects
+-- themselves. The bounds start inverted, so the first rect sets them and an
+-- empty union reads back as the zero rect.
+data RectUnion = RectUnion !(MutablePrimArray RealWorld Float) !(Maybe (IORef KeptRects))
 
--- | A union that keeps no rects, only their bounds.
+-- | The rects a piece union holds, up to 'pieceRectLimit'.
+data KeptRects = Kept !Int [Rect] | TooMany
+
+-- | A union that keeps only the bounds of its rects.
 newRectUnion :: IO RectUnion
-newRectUnion = newRectUnionKeeping (-2)
+newRectUnion = newUnion Nothing
 
 -- | A union that also keeps the first 'pieceRectLimit' rects, for
 -- 'damagePieces'. A frame that adds more repaints their bounds.
 newPieceUnion :: IO RectUnion
-newPieceUnion = newRectUnionKeeping pieceRectLimit
+newPieceUnion = newUnion . Just =<< newIORef (Kept 0 [])
 
 pieceRectLimit :: Int
 pieceRectLimit = 64
 
-newRectUnionKeeping :: Int -> IO RectUnion
-newRectUnionKeeping keep = do
-  a <- newPrimArray 6
+newUnion :: Maybe (IORef KeptRects) -> IO RectUnion
+newUnion kept = do
+  a <- newPrimArray 5
   writePrimArray a 0 infinity
   writePrimArray a 1 infinity
   writePrimArray a 2 (-infinity)
   writePrimArray a 3 (-infinity)
   writePrimArray a 4 0
-  writePrimArray a 5 (fromIntegral keep)
-  RectUnion a <$> newIORef []
+  pure (RectUnion a kept)
   where
     infinity = 1 / 0
 
@@ -643,19 +635,19 @@ addRect (RectUnion a kept) r@(Rect x y w h) = do
   writePrimArray a 1 (min y0 y)
   writePrimArray a 2 (max x1 (x + w))
   writePrimArray a 3 (max y1 (y + h))
-  -- Room left to keep rects: -1 once it ran out, -2 for a union that keeps
-  -- none.
-  room <- readPrimArray a 5
-  if room > 0
-    then writePrimArray a 5 (room - 1) >> modifyIORef' kept (r :)
-    else when (room == 0) (writePrimArray a 5 (-1))
+  forM_ kept $ \ref -> modifyIORef' ref $ \case
+    Kept n rs | n < pieceRectLimit -> Kept (n + 1) (r : rs)
+    _ -> TooMany
 
--- | The rects a piece union kept, or 'Nothing' if more were added than it
--- keeps.
+-- | The rects a piece union kept, or 'Nothing' if it kept none or more were
+-- added than it keeps.
 readAddedRects :: RectUnion -> IO (Maybe [Rect])
-readAddedRects (RectUnion a kept) = do
-  room <- readPrimArray a 5
-  if room == -1 then pure Nothing else Just <$> readIORef kept
+readAddedRects (RectUnion _ kept) = case kept of
+  Nothing -> pure Nothing
+  Just ref ->
+    readIORef ref >>= \case
+      Kept _ rs -> pure (Just rs)
+      TooMany -> pure Nothing
 
 readRectUnion :: RectUnion -> IO Rect
 readRectUnion (RectUnion a _) = do

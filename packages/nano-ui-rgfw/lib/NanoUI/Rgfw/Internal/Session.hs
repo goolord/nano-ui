@@ -273,12 +273,9 @@ runRgfwAppReduceCustom opts getThemeAndScale updateModel initialModel view = inB
                   curMonScale <- readIORef monScaleRef
                   (baseSpans, overlaySpans) <- collectRasterSpans c curInp
                   pieces <- if paintFull then pure [] else takeDamagePieces c
-                  kept <-
-                    renderArenaGl renderer font curScale pw ph (themeWindow frameTheme)
+                  renderArenaGl renderer font curScale pw ph (themeWindow frameTheme)
                       (if paintFull then DamageFull else damage) pieces drawData baseSpans overlaySpans
-                  -- A framebuffer the renderer had to replace held nothing to
-                  -- keep: forget the size, and the frame asked for next is full.
-                  writeIORef presentedRef (if kept then (pw, ph, curScale) else (0, 0, 0))
+                  writeIORef presentedRef $! (pw, ph, curScale)
                   tRenderEnd <- getMonotonicTime
                   let !renderMs = (tRenderEnd - tRenderStart) * 1000.0
 
@@ -301,7 +298,7 @@ runRgfwAppReduceCustom opts getThemeAndScale updateModel initialModel view = inB
                       }
                   -- A reduced message that switched themes changed the model, so
                   -- the core marks the frame dirty and the next one applies it.
-                  pure (dirtyAfterUi || not kept, curInp)
+                  pure (dirtyAfterUi, curInp)
 
         let drv =
               SessionDriver

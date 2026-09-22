@@ -7,6 +7,7 @@ import Control.Exception (bracket)
 import Control.Monad (forM_, replicateM_, unless, void, when)
 import qualified Data.ByteString as BS
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
+import Data.Maybe (fromMaybe)
 import GHC.Clock (getMonotonicTimeNSec)
 import GHC.Stats (RTSStats (..), getRTSStats)
 import System.Environment (lookupEnv)
@@ -48,7 +49,7 @@ physH = 1040
 measure :: String -> IO () -> IO ()
 measure name action = do
   requested <- lookupEnv "NANO_PROFILE_ITERATIONS"
-  let runs = max 1 (maybe iterations id (requested >>= readMaybe))
+  let runs = max 1 (fromMaybe iterations (requested >>= readMaybe))
   replicateM_ 20 action
   performGC
   s0 <- getRTSStats
@@ -88,11 +89,11 @@ main = do
               writeIORef (ctxPaintFull ctx) force
               (_, _, draw, _) <- runFrame ctx frameInp view
               damage <- takeDamage ctx
-              let drawn = not (damageIsEmpty damage && not force)
+              let drawn = force || not (damageIsEmpty damage)
               when drawn $ do
                 (baseSpans, overlaySpans) <- collectRasterSpans ctx frameInp
                 pieces <- if force then pure [] else takeDamagePieces ctx
-                _ <- renderArenaGl renderer getCozetteFont scale physW physH (themeWindow theme)
+                renderArenaGl renderer getCozetteFont scale physW physH (themeWindow theme)
                   (if force then DamageFull else damage) pieces draw baseSpans overlaySpans
                 R.swapBuffersGL win
               pure drawn

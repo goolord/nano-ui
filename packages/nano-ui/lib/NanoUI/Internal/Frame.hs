@@ -134,14 +134,16 @@ import NanoUI.Internal.Frame.Window
 import NanoUI.Internal.Id (WidgetId (..), initialIdContext)
 import NanoUI.Internal.Input (Input (..), inputMousePressed, stripInteractionInput, withoutPointer)
 import NanoUI.Internal.Layout.Arena
-  ( captureLayoutCache
+  ( LayoutCache
+  , captureLayoutCache
+  , floatingNodeCount
   , layoutCacheEligible
   , layoutInputsMatch
   , newLayoutCache
   , resetNodeArena
   , restoreLayoutCache
   )
-import NanoUI.Internal.Layout.Solve (Measurers, placeModals, placePopups, placeWindows, solveLayout)
+import NanoUI.Internal.Layout.Solve (placeModals, placePopups, placeWindows, solveLayout)
 import NanoUI.Internal.Monad (NanoUI, Ui, runUi, unlessM, whenM)
 import NanoUI.Internal.Store (mirrorStoresChanged)
 import NanoUI.Internal.Style (Theme (..))
@@ -370,9 +372,10 @@ paintDamageClip _ DamageFull _ = pure ()
 paintDamageClip ctx (DamageClip r) pieces = do
   let da = ctxDrawArena ctx
       clip = rectInflate 1 r
-      backdrops = if null pieces then [clip] else map (rectInflate 1) pieces
+      pieceClips = map (rectInflate 1) pieces
+      backdrops = if null pieces then [clip] else pieceClips
   setClip da clip
-  setClipPieces da (if null pieces then [] else backdrops)
+  setClipPieces da pieceClips
   when (rectNonEmpty r) $ do
     theme <- readIORef (ctxTheme ctx)
     mapM_ (flip (pushRect da) (themeWindow theme)) backdrops
@@ -398,32 +401,18 @@ solveLayoutAndCapture ctx w h = do
 -- they are placed every frame, including one whose solve was reused.
 placeFloating :: Context -> Float -> Float -> IO ()
 placeFloating ctx w h = do
-  let ms = contextMeasurers ctx
-  placeModals (ctxNodeArena ctx) ms w h
-  placeFloatingWindows ctx ms w h
-  placePopups
-    (ctxNodeArena ctx)
-    ms
-    w
-    h
-    (lookupPopupConfig ctx)
+  let na = ctxNodeArena ctx
+      ms = contextMeasurers ctx
+  floating <- floatingNodeCount na
+  when (floating > 0) $ do
+    placeModals na ms w h
+    placeWindows na ms w h (lookupWindowPos ctx) (lookupWindowSize ctx)
+    placePopups na ms w h (lookupPopupConfig ctx)
 
 -- | Put back this frame's solve, as captured before placement, and place the
 -- floating panels again. 'False' when there is no such capture.
 replaceFloating :: Context -> Size -> IO Bool
-replaceFloating ctx size@(Size w h) = do
-  gen <- readIORef (ctxMetricGen ctx)
-  readIORef (ctxLayoutCache ctx) >>= \case
-    Just (c, cachedSize, cachedGen)
-      | cachedSize == size && cachedGen == gen -> do
-          restoreLayoutCache (ctxNodeArena ctx) c
-          placeFloating ctx w h
-          pure True
-    _ -> pure False
-
-placeFloatingWindows :: Context -> Measurers -> Float -> Float -> IO ()
-placeFloatingWindows ctx ms w h =
-  placeWindows (ctxNodeArena ctx) ms w h (lookupWindowPos ctx) (lookupWindowSize ctx)
+replaceFloating ctx size = restoreCachedLayout ctx size (\_ -> pure True)
 
 -- | Reuse solved geometry for unchanged layout inputs. Custom measurement has
 -- dependencies outside the arena and must be solved; floating panels are
@@ -433,19 +422,22 @@ tryReuseLayout ctx size = do
   custom <- hasCustomLayoutInputs ctx
   if custom
     then pure False
-    else do
-      gen <- readIORef (ctxMetricGen ctx)
-      mc <- readIORef (ctxLayoutCache ctx)
-      case mc of
-        Just (c, cachedSize, cachedGen)
-          | cachedSize == size && cachedGen == gen -> do
-              ok <- layoutInputsMatch (ctxNodeArena ctx) c
-              when ok $ do
-                restoreLayoutCache (ctxNodeArena ctx) c
-                let Size w h = size
-                placeFloating ctx w h
-              pure ok
-        _ -> pure False
+    else restoreCachedLayout ctx size (layoutInputsMatch (ctxNodeArena ctx))
+
+-- | Restore the cached solve for this size and font generation when @valid@
+-- accepts it, and place the floating panels over it.
+restoreCachedLayout :: Context -> Size -> (LayoutCache -> IO Bool) -> IO Bool
+restoreCachedLayout ctx size@(Size w h) valid = do
+  gen <- readIORef (ctxMetricGen ctx)
+  readIORef (ctxLayoutCache ctx) >>= \case
+    Just (c, cachedSize, cachedGen)
+      | cachedSize == size && cachedGen == gen -> do
+          ok <- valid c
+          when ok $ do
+            restoreLayoutCache (ctxNodeArena ctx) c
+            placeFloating ctx w h
+          pure ok
+    _ -> pure False
 
 -- | Snapshot the solved layout, before floating placement, so the next frame
 -- can reuse it.

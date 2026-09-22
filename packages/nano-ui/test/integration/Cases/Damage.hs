@@ -35,7 +35,7 @@ runDamagePiecesMergeTest _ failed = do
       pieces = damagePieces scattered
   assert failed (length pieces == 4)
   -- Every rect lies inside a piece, and the pieces are disjoint.
-  assert failed (all (\r -> any (insideRect r) pieces) scattered)
+  assert failed (all (\r -> any (`covers` r) pieces) scattered)
   assert failed (and [rectIntersect p q == Nothing | (i, p) <- zip [0 :: Int ..] pieces, (j, q) <- zip [0 ..] pieces, i < j])
 
 -- | Two labels changing in opposite corners repaint as two pieces, and each
@@ -56,7 +56,7 @@ runFarLabelsDamagePiecesTest ctx failed = do
   assert failed (case dmg of DamageClip _ -> True; DamageFull -> False)
   assertEq failed (length pieces) 2
   let clipOf c = Rect (cmdClipX c) (cmdClipY c) (cmdClipW c) (cmdClipH c)
-      inPiece c = any (insideRect (clipOf c) . rectInflate 1) pieces
+      inPiece c = any ((`covers` clipOf c) . rectInflate 1) pieces
   assert failed (not (null (drawCmdElems dd)) && all inPiece (drawCmdElems dd))
   writeIORef (ctxPaintFull ctx) True
 
@@ -260,8 +260,3 @@ runTextAreaSelectAllDamageTest ctx failed = do
   _ <- runFrame ctx inp0 {inputChars = "a", inputModifiers = Modifiers False True False} ui
   dmg <- takeDamage ctx
   assert failed (clipCovers dmg (respRect area))
-
--- | Whether the first rect lies within the second.
-insideRect :: Rect -> Rect -> Bool
-insideRect (Rect ax ay aw ah) (Rect bx by bw bh) =
-  ax >= bx && ay >= by && ax + aw <= bx + bw && ay + ah <= by + bh

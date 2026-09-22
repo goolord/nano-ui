@@ -390,11 +390,10 @@ data NodeArena = NodeArena
   -- ^ Index of the last modal node added this frame, or -1. Node types are
   -- fixed when a node is added and indices only grow until a reset, so this
   -- is the topmost modal without a scan.
-  , naFloatingCount :: IORef Int
-  -- ^ Floating nodes (windows, modals, popups) added this frame.
   , naFloatingNodes :: IORef [NodeIdx]
-  -- ^ Their indices, last added first, so the passes that look only at
-  -- floating panels skip the rest of the arena.
+  -- ^ Floating nodes (windows, modals, popups) added this frame, last added
+  -- first, so the passes that look only at floating panels skip the rest of
+  -- the arena.
   }
 
 -- | The solver's buffers for the flow children of one container (its children
@@ -686,7 +685,6 @@ newNodeArena = do
   naScope <- newIORef 0
   naScopeSig <- newIORef 0
   naTopModal <- newIORef (-1)
-  naFloatingCount <- newIORef 0
   naFloatingNodes <- newIORef []
   pure NodeArena {..}
 
@@ -699,7 +697,6 @@ resetNodeArena na = do
   writeIORef (naScope na) 0
   writeIORef (naScopeSig na) 0
   writeIORef (naTopModal na) (-1)
-  writeIORef (naFloatingCount na) 0
   writeIORef (naFloatingNodes na) []
   -- 0 marks a memo entry that was never written, so the tag wraps to 1.
   !ft <- readIORef (naFrameTag na)
@@ -721,7 +718,7 @@ topModalNode na = do
 -- | Number of modal, window, and popup nodes added since the last reset.
 {-# INLINE floatingNodeCount #-}
 floatingNodeCount :: NodeArena -> IO Int
-floatingNodeCount na = readIORef (naFloatingCount na)
+floatingNodeCount na = length <$> readIORef (naFloatingNodes na)
 
 -- | Live node count. Valid indices are 0 through count minus one.
 {-# INLINE arenaCount #-}
@@ -887,8 +884,6 @@ addNode na nt parent dir wSiz hSiz pad gap minW minH maxW maxH grow ax ay = do
     writeTree a parent treeChildCount (cc + 1)
   when (isFloatingNode nt) $ do
     when (nt == NodeModal) $ writeIORef (naTopModal na) idx
-    fc <- readIORef (naFloatingCount na)
-    writeIORef (naFloatingCount na) (fc + 1)
     modifyIORef' (naFloatingNodes na) (idx :)
   writeIORef (naCount na) (idx + 1)
   pure idx

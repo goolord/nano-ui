@@ -44,7 +44,7 @@ import Foreign.ForeignPtr (withForeignPtr)
 import Foreign.Marshal.Alloc (callocBytes, free, reallocBytes)
 import Foreign.Ptr (Ptr, nullPtr)
 import Foreign.Storable (pokeByteOff)
-import NanoUI (Color (..), Rect (..), roundHalfUp)
+import NanoUI (Color (..), Rect (..), rectInflate, roundHalfUp)
 import NanoUI.Backend (Damage (..))
 import NanoUI.Rgfw.Internal.Context (TextSpan, paintInLayerOrder)
 import NanoUI.Rgfw.Internal.Font.Cozette
@@ -74,7 +74,7 @@ foreign import ccall unsafe "nano_ui_gl_upload_atlas"
   c_uploadAtlas :: Ptr NanoUiGl -> Ptr Word32 -> Int32 -> Int32 -> IO Int32
 
 foreign import ccall unsafe "nano_ui_gl_begin"
-  c_begin :: Ptr NanoUiGl -> Int32 -> Int32 -> Float -> Float -> Float -> Float -> Int32 -> Int32 -> Int32 -> Int32 -> Int32 -> IO Int32
+  c_begin :: Ptr NanoUiGl -> Int32 -> Int32 -> Float -> Float -> Float -> Float -> Int32 -> IO Int32
 
 foreign import ccall unsafe "nano_ui_gl_present"
   c_present :: Ptr NanoUiGl -> IO ()
@@ -125,9 +125,7 @@ freeGlRenderer r = do
 -- from the frames before, so its 'DrawData' may leave out what lies outside.
 -- Its damage pieces ('NanoUI.Testing.takeDamagePieces'), when it has some,
 -- are all it redraws: text is cut to each, as draw commands already are.
--- When the window's size has changed there are no such pixels: the frame is
--- drawn over a blank window and 'renderArenaGl' returns 'False', and the
--- caller should draw the next frame in full. It returns 'True' otherwise.
+-- A frame at a new size has no such pixels and must be a 'DamageFull' one.
 renderArenaGl ::
   GlRenderer ->
   CozetteFont ->
@@ -140,22 +138,15 @@ renderArenaGl ::
   DrawData ->
   [TextSpan] -> -- base spans
   [TextSpan] -> -- overlay spans
-  IO Bool
+  IO ()
 renderArenaGl r font !scale !fbW !fbH bg damage pieces drawData baseSpans overlaySpans = do
   let !h = glHandle r
       (!bgR, !bgG, !bgB, _) = colorFloats bg
-      (!full, box@(!bx0, !by0, !bx1, !by1)) = case damage of
-        DamageFull -> (1, (0, 0, fbW, fbH))
-        DamageClip rect -> (0, damageBox scale fbW fbH rect)
-  began <-
-    c_begin h (fromIntegral fbW) (fromIntegral fbH) scale bgR bgG bgB full
-      (fromIntegral bx0) (fromIntegral by0) (fromIntegral bx1) (fromIntegral by1)
+      (!full, textBoxes) = case damage of
+        DamageFull -> (1, [(0, 0, fbW, fbH)])
+        DamageClip rect -> (0, map (damageBox scale fbW fbH) (if null pieces then [rect] else pieces))
+  began <- c_begin h (fromIntegral fbW) (fromIntegral fbH) scale bgR bgG bgB full
   when (began == 0) $ fail "nano-ui-rgfw: retained framebuffer setup failed"
-  let !kept = began == 1
-      textBoxes
-        | not kept = [(0, 0, fbW, fbH)]
-        | null pieces = [box]
-        | otherwise = map (damageBox scale fbW fbH) pieces
   atlas <- ensureAtlas r font scale
   buf <- ensureTextCapacity r ((spanChars baseSpans + spanChars overlaySpans) * 6 * length textBoxes)
   let spansIn spans n0 = foldM (\n tb -> foldM (writeSpanQuads atlas font tb buf) n spans) n0 textBoxes
@@ -170,7 +161,6 @@ renderArenaGl r font !scale !fbW !fbH bg damage pieces drawData baseSpans overla
     (c_drawText h 0 (fromIntegral nBase))
     (c_drawText h (fromIntegral nBase) (fromIntegral (nAll - nBase)))
   c_present h
-  pure kept
 
 -- | The retained frame's pixels, for checking what frames drew: RGBA rows,
 -- bottom row first, of a w x h frame, which must be the last frame's size.
@@ -183,8 +173,7 @@ readRetainedPixels r w h =
 -- pixel past the damage, and the box is the scissor a command clipped to that
 -- backdrop gets, so text never lands on a pixel the backdrop left.
 damageBox :: Float -> Int -> Int -> Rect -> (Int, Int, Int, Int)
-damageBox !scale !w !h (Rect x y rw rh) =
-  fromMaybe (0, 0, 0, 0) (physClip scale w h (Rect (x - 1) (y - 1) (rw + 2) (rh + 2)))
+damageBox !scale !w !h = fromMaybe (0, 0, 0, 0) . physClip scale w h . rectInflate 1
 
 drawCmd :: Ptr NanoUiGl -> Float -> Int -> Int -> DrawCmd -> IO ()
 drawCmd h !scale !fbW !fbH cmd
@@ -305,13 +294,13 @@ writeSpanQuads :: GlyphAtlas -> CozetteFont -> (Int, Int, Int, Int) -> Ptr Word8
 writeSpanQuads ga font box buf !n0 (Rect rx ry _ _, txt, fg, _, clip) =
   case physClipIn scale box clip of
     Nothing -> pure n0
-    Just (_, cy0, cx1, cy1)
+    Just (cx0, cy0, cx1, cy1)
       -- No pen lies left of or above the span origin, and each line's pen
       -- lies at most 'lineStep' (plus a pixel of rounding) below the last.
       -- Counting lines is left for spans that begin above the box.
       | penX0 >= cx1 || penY0 >= cy1 -> pure n0
       | penY0 + gaCellH ga <= cy0 && penY0 + newlines * lineStep + gaCellH ga + 1 <= cy0 -> pure n0
-    Just (cx0, cy0, cx1, cy1) ->
+      | otherwise ->
       let quad !n !penX !penY !glyph =
             let !gid = if fromIntegral glyph < cfNumGlyphs font then fromIntegral glyph else 0
                 (!ax, !ay) = atlasCell ga gid
