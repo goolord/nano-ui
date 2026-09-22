@@ -43,8 +43,6 @@ runSdlSession options drawFn = do
     void $ setRenderDrawBlendModeSafe (sdlRenderer env) (fromIntegral sDL_BLENDMODE_BLEND)
     prev <- newIORef emptyInput
     drawing <- newDrawingLock
-    startupDone <- newIORef False
-    startupCatchup <- newIORef False
     -- The resize watch presents with vsync off: Windows' modal size loop
     -- cannot take the next drag step while a present waits for vblank. The
     -- main loop turns vsync back on before its own frames.
@@ -61,27 +59,19 @@ runSdlSession options drawFn = do
           (ctx', inpSynced) <- syncDisplay liveCtx env (clearEphemeral inp)
           writeIORef prev inpSynced
           scale1 <- readIORef (sdlScaleRef env)
-          done <- readIORef startupDone
-          if not done
-            then writeIORef startupCatchup True
-            else unless (inputWindowSize inpSynced == inputWindowSize inp && scale1 == scale0) $ do
-              paused <- readIORef vsyncPaused
-              when (sdlVsync env && not paused) $ do
-                void $ setRenderVSync (sdlRenderer env) 0
-                writeIORef vsyncPaused True
-              _ <- drawFn ctx' env inpSynced True
-              writeIORef resizePresented (Just (inputWindowSize inpSynced))
+          unless (inputWindowSize inpSynced == inputWindowSize inp && scale1 == scale0) $ do
+            paused <- readIORef vsyncPaused
+            when (sdlVsync env && not paused) $ do
+              void $ setRenderVSync (sdlRenderer env) 0
+              writeIORef vsyncPaused True
+            _ <- drawFn ctx' env inpSynced True
+            writeIORef resizePresented (Just (inputWindowSize inpSynced))
     -- A wake (a background thread changed what the view reads, a file dialog
     -- finished) asks for a frame. What that frame presents is up to its
     -- damage: a wake that changed nothing on screen costs the UI pass and no
     -- repaint or present.
     wakeRef <- newIORef False
-    -- A wake may postdate the watch's frame, so it voids that frame's cover.
-    let noteWake evs = do
-          when (EvRefresh `elem` evs) $ do
-            writeIORef resizePresented Nothing
-            writeIORef wakeRef True
-          pure evs
+    let noteWake evs = evs <$ when (EvRefresh `elem` evs) (writeIORef wakeRef True)
     -- Take every queued event into the input, syncing the display after
     -- each batch, until none is left.
     let settle c inp = do
@@ -108,10 +98,8 @@ runSdlSession options drawFn = do
     startupFrame ctx1b inp0b
     (ctx2, inp1) <- settle ctx1b inp0b
     scale1 <- readIORef (sdlScaleRef env)
-    catchup <- readIORef startupCatchup
-    when (catchup || inputWindowSize inp1 /= inputWindowSize inp0b || abs (scale1 - scaleSettle) > 0.001 || abs (scaleSettle - scale0) > 0.001) $
+    when (inputWindowSize inp1 /= inputWindowSize inp0b || abs (scale1 - scaleSettle) > 0.001 || abs (scaleSettle - scale0) > 0.001) $
       startupFrame ctx2 inp1
-    writeIORef startupDone True
     writeIORef prev inp1
     -- The last opening frame may have asked for another: it marked the
     -- context dirty, which the loop sees by itself, or a wake arrived after
