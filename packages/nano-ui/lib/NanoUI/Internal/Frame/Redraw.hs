@@ -15,11 +15,9 @@ import NanoUI.Internal.Context
   , anyAnimating
   , anySelectOpen
   , pointerHeldOffLayers
-  , getScrollDrag
+  , getsInteraction
   , getStore
-  , getTextInputMenu
-  , getWindowDrag
-  , getWindowResize
+  , InteractionState (..)
   , isDirty
   , isPointerTracked
   , modalActive
@@ -48,8 +46,8 @@ needsRedraw :: Context -> Input -> Input -> IO Bool
 needsRedraw ctx prev inp = do
   dirty <- isDirty ctx
   anim <- anyAnimating ctx
-  mDrag <- getScrollDrag ctx
-  mWinDrag <- getWindowDrag ctx
+  mDrag <- getsInteraction ctx isScrollDrag
+  mWinDrag <- getsInteraction ctx isWindowDrag
   overlay <- overlayMenuOpen ctx
   let moved = inputMousePos prev /= inputMousePos inp
   if dirty
@@ -77,9 +75,9 @@ needsRedraw ctx prev inp = do
 -- is active. Text-selection drags are tracked separately.
 pointerDragActive :: Context -> IO Bool
 pointerDragActive ctx = do
-  winDrag <- isJust <$> getWindowDrag ctx
-  scrollDrag <- isJust <$> getScrollDrag ctx
-  winResize <- isJust <$> getWindowResize ctx
+  winDrag <- isJust <$> getsInteraction ctx isWindowDrag
+  scrollDrag <- isJust <$> getsInteraction ctx isScrollDrag
+  winResize <- isJust <$> getsInteraction ctx isWindowResize
   sliderOrPicker <- focusedNodeIs ctx ctxActiveId (\nt -> nt == NodeSlider || nt == NodeColorPicker)
   pure (winDrag || scrollDrag || winResize || sliderOrPicker)
 
@@ -95,7 +93,7 @@ focusedNodeIs ctx ref p = do
 overlayMenuOpen :: Context -> IO Bool
 overlayMenuOpen ctx = do
   store <- getStore ctx
-  menu <- getTextInputMenu ctx
+  menu <- getsInteraction ctx isTextInputMenu
   if anySelectOpen store || isJust menu
     then pure True
     else isJust <$> focusedComboNode ctx
@@ -104,7 +102,7 @@ overlayMenuOpen ctx = do
 -- which wake the loop by themselves, so focus alone keeps nothing running.
 textFieldActive :: Context -> IO Bool
 textFieldActive ctx = do
-  menu <- getTextInputMenu ctx
+  menu <- getsInteraction ctx isTextInputMenu
   if isJust menu
     then pure True
     else focusedNodeIs ctx ctxFocusId (\nt -> nt == NodeTextInput || nt == NodeTextArea)

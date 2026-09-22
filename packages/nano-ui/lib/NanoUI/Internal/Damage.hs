@@ -32,8 +32,8 @@ import NanoUI.Internal.Context
   , getAnimRectless
   , getPrevRect
   , getStore
-  , getWindowDrag
-  , getWindowResize
+  , getsInteraction
+  , InteractionState (..)
   , intKey
   , markDirtyCovered
   , modalDamageFlip
@@ -318,8 +318,8 @@ writeDamage ctx inp snap = do
   liveAnims <- getLiveAnimations ctx
   settled <- takeAnimSettled ctx
   rectless <- getAnimRectless ctx
-  winDragActive <- isJust <$> getWindowDrag ctx
-  winResizeActive <- isJust <$> getWindowResize ctx
+  winDragActive <- isJust <$> getsInteraction ctx isWindowDrag
+  winResizeActive <- isJust <$> getsInteraction ctx isWindowResize
   requests <- getsDamage ctx dsRequests
   redrawn <- refreshCustomDrawings ctx
   let oldRects = fsRects snap

@@ -8,15 +8,8 @@ module NanoUI.Internal.Context.Core
   , getsDamage
   , modifyDamage
   -- Interaction
-  , getScrollDrag
-  , setTextInputDrag
-  , getTextInputMenu
-  , setTextInputMenu
   , takeTextEditLastAction
-  , getPointerRoute
   , pointerHeldOffLayers
-  , getWindowDrag
-  , getWindowResize
   -- Damage
   , markDirty
   , markDirtyCovered
@@ -76,14 +69,11 @@ import NanoUI.Internal.Context.Types
   , InteractionState (..)
   , PointerRoute (..)
   , OverlayState
-  , TextInputDrag
-  , TextInputMenu
   , ThemeScopes (..)
-  , WindowResizeDrag
   , intKey
   )
 import NanoUI.Internal.Id (WidgetId, hashWidgetId)
-import NanoUI.Internal.Layout.Arena (DirTag, NodeIdx, getArenaScope, getNodeScope, getScopeSignature, lookupNodeByWidgetId)
+import NanoUI.Internal.Layout.Arena (NodeIdx, getArenaScope, getNodeScope, getScopeSignature, lookupNodeByWidgetId)
 import NanoUI.Internal.Store
   ( Field
   , Slot (..)
@@ -141,37 +131,12 @@ modifyDamage ctx = modifyIORef' (ctxDamageState ctx)
 -- Interaction
 -- =============================================================================
 
--- | Active scrollbar drag: widget, axis, and grab offset, or 'Nothing'.
-{-# INLINE getScrollDrag #-}
-getScrollDrag :: Context -> IO (Maybe (WidgetId, DirTag, Float))
-getScrollDrag ctx = getsInteraction ctx isScrollDrag
-
--- | Replace or clear the active text-selection drag.
-{-# INLINE setTextInputDrag #-}
-setTextInputDrag :: Context -> Maybe TextInputDrag -> IO ()
-setTextInputDrag ctx v = modifyInteraction ctx (\s -> s {isTextInputDrag = v})
-
--- | Open text-edit context menu, or 'Nothing'.
-{-# INLINE getTextInputMenu #-}
-getTextInputMenu :: Context -> IO (Maybe TextInputMenu)
-getTextInputMenu ctx = getsInteraction ctx isTextInputMenu
-
--- | Replace or close the text-edit context menu. The caller handles damage.
-{-# INLINE setTextInputMenu #-}
-setTextInputMenu :: Context -> Maybe TextInputMenu -> IO ()
-setTextInputMenu ctx v = modifyInteraction ctx (\s -> s {isTextInputMenu = v})
-
 -- | Read and clear the last command run by a text-edit menu, with its target id.
 takeTextEditLastAction :: Context -> IO (Maybe (WidgetId, TextCommand))
 takeTextEditLastAction ctx = do
   act <- getsInteraction ctx isTextEditLastAction
   modifyInteraction ctx (\s -> s {isTextEditLastAction = Nothing})
   pure act
-
--- | Pointer destination chosen before the current view pass.
-{-# INLINE getPointerRoute #-}
-getPointerRoute :: Context -> IO PointerRoute
-getPointerRoute ctx = getsInteraction ctx isPointerRoute
 
 -- | Whether a held button went down on a menu or dropdown rather than on a
 -- layer's widgets. Nothing in the layers is hot while it lasts.
@@ -182,16 +147,6 @@ pointerHeldOffLayers ctx =
     isPointerHeld s && case isPointerRoute s of
       RouteLayer _ -> False
       _ -> True
-
--- | Dragged window id and pointer-to-window x/y offsets, or 'Nothing'.
-{-# INLINE getWindowDrag #-}
-getWindowDrag :: Context -> IO (Maybe (WidgetId, Float, Float))
-getWindowDrag ctx = getsInteraction ctx isWindowDrag
-
--- | Active window resize gesture, including starting bounds and size limits.
-{-# INLINE getWindowResize #-}
-getWindowResize :: Context -> IO (Maybe WindowResizeDrag)
-getWindowResize ctx = getsInteraction ctx isWindowResize
 
 -- =============================================================================
 -- Damage

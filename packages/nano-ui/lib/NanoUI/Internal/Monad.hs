@@ -114,7 +114,8 @@ import NanoUI.Internal.Context
   , getPrevRect
   , getScrollMetrics
   , getStore
-  , getTextInputMenu
+  , getsInteraction
+  , InteractionState (..)
   , anySelectOpen
   , markDirty
   , markEscapeConsumed
@@ -526,7 +527,7 @@ takeEscape = do
     then pure False
     else withContext $ \ctx -> do
       taken <- overlayConsumesQuit ctx inp
-      menu <- getTextInputMenu ctx
+      menu <- getsInteraction ctx isTextInputMenu
       dropdown <- anySelectOpen <$> getStore ctx
       let ours = not taken && null menu && not dropdown
       when ours (markEscapeConsumed ctx)

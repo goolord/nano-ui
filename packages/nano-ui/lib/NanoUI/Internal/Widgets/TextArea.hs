@@ -37,8 +37,9 @@ import NanoUI.Internal.Context
   , markDirty
   , registerFocusable
   , setStore
-  , setTextInputDrag
+  , modifyInteraction
   , modifyStore
+  , InteractionState (..)
   )
 import NanoUI.Internal.Font (fmLineHeight)
 import NanoUI.Internal.Frame.TextArea.Content (textAreaBuffer)
@@ -296,7 +297,7 @@ textAreaCore f wid value = do
             s1 = setTextAreaViewport (viewportSize oldState) (realToFrac (fmLineHeight editFm)) oldState
             hadInput = not (T.null (inputChars inp)) || not (inputKeysNull (inputKeys inp))
         newState <- uiIO $ do
-          when hadInput $ setTextInputDrag ctx Nothing
+          when hadInput $ modifyInteraction ctx (\s -> s {isTextInputDrag = Nothing})
           case inputTextCommands multiLineMode inp of
             [] -> pure s1
             cmds -> withEditor s1 <$> foldM (flip (runCommandIO ctx multiLineMode)) (textAreaEditor s1) cmds

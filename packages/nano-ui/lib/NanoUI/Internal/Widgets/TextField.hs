@@ -15,7 +15,7 @@ import Data.IORef (writeIORef)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Effectful (Eff, type (:>))
-import NanoUI.Internal.Context (Context (..), getStore, intKey, setTextInputMenu)
+import NanoUI.Internal.Context (Context (..), InteractionState (..), getStore, intKey, modifyInteraction)
 import NanoUI.Internal.Frame.Hit (findNodeByWidgetId)
 import NanoUI.Internal.Frame.TextArea.Content (textAreaBuffer)
 import NanoUI.Internal.Id (WidgetId)
@@ -64,7 +64,7 @@ applyTextFieldCommand ctx wid cmd =
       then applyTextAreaCommand ctx wid cmd
       else applyTextInputCommand ctx wid mode cmd
     writeIORef (ctxFocusId ctx) wid
-    setTextInputMenu ctx Nothing)
+    modifyInteraction ctx (\s -> s {isTextInputMenu = Nothing}))
 
 -- | How the field with this id edits: from its node when it has one this
 -- frame, or from what it recorded the last time it was declared.

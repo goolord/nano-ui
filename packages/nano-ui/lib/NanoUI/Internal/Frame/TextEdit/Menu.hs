@@ -22,12 +22,10 @@ import NanoUI.Internal.Context
   ( Context (..)
   , TextInputMenu (..)
   , PointerRoute (..)
-  , getPointerRoute
-  , getTextInputMenu
+  , getsInteraction
   , isDisabled
   , markDirty
   , markEscapeConsumed
-  , setTextInputMenu
   , widgetTheme
   , InteractionState (..)
   , modifyInteraction
@@ -145,7 +143,7 @@ openTextEditMenu ctx inp =
       writeIORef (ctxFocusId ctx) wid
       menuW <- textEditMenuWidth ctx
       let menuRect = textEditMenuRectAt mx my menuW (inputWindowSize inp)
-      setTextInputMenu ctx (Just (TextInputMenu wid menuRect))
+      modifyInteraction ctx (\s -> s {isTextInputMenu = Just (TextInputMenu wid menuRect)})
       markDirty ctx
 
 textFieldWidgetAtMouse :: Context -> V2 -> IO (Maybe WidgetId)
@@ -167,17 +165,17 @@ textFieldWidgetAtMouse ctx mouse = do
 finalizeTextEditMenuPick :: Context -> Input -> IO ()
 finalizeTextEditMenuPick ctx inp =
   when (inputMousePressed inp) $ do
-    mMenu <- getTextInputMenu ctx
+    mMenu <- getsInteraction ctx isTextInputMenu
     case mMenu of
       Just menu
         | rectContains (textInputMenuRect menu) (inputMousePos inp) ->
             case textEditMenuPickAction (textInputMenuRect menu) (inputMousePos inp) of
-              Nothing -> setTextInputMenu ctx Nothing
+              Nothing -> modifyInteraction ctx (\s -> s {isTextInputMenu = Nothing})
               Just action ->
                 ifM
                   (textFieldMenuActionEnabled ctx (textInputMenuWidget menu) action)
                   (applyTextFieldMenuAction ctx (textInputMenuWidget menu) action)
-                  (setTextInputMenu ctx Nothing >> markDirty ctx)
+                  (modifyInteraction ctx (\s -> s {isTextInputMenu = Nothing}) >> markDirty ctx)
       _ -> pure ()
 
 -- | A press anywhere but on the menu closes it. This watches the frame's
@@ -185,20 +183,20 @@ finalizeTextEditMenuPick ctx inp =
 closeTextEditMenuOnOutsideClick :: Context -> Input -> IO ()
 closeTextEditMenuOnOutsideClick ctx inp =
   when (inputMousePressed inp || inputMouseRightPressed inp) $ do
-    route <- getPointerRoute ctx
-    when (route /= RouteTextMenu) $ setTextInputMenu ctx Nothing
+    route <- getsInteraction ctx isPointerRoute
+    when (route /= RouteTextMenu) $ modifyInteraction ctx (\s -> s {isTextInputMenu = Nothing})
 
 closeTextEditMenuOnEscape :: Context -> Input -> IO ()
 closeTextEditMenuOnEscape ctx inp =
   when (inputKeysElem KeyEscape (inputKeys inp)) $
-    whenM (isJust <$> getTextInputMenu ctx) $ do
-      setTextInputMenu ctx Nothing
+    whenM (isJust <$> getsInteraction ctx isTextInputMenu) $ do
+      modifyInteraction ctx (\s -> s {isTextInputMenu = Nothing})
       markEscapeConsumed ctx
       markDirty ctx
 
 textEditMenuCursorKind :: Context -> Input -> IO (Maybe UiCursorKind)
 textEditMenuCursorKind ctx inp = do
-  mMenu <- getTextInputMenu ctx
+  mMenu <- getsInteraction ctx isTextInputMenu
   let mouse = inputMousePos inp
   case mMenu of
     Just menu
@@ -210,7 +208,7 @@ textEditMenuCursorKind ctx inp = do
 
 -- | Resolve the allowed menu once for either painting or complete span queries.
 withTextEditMenu :: Context -> a -> (WidgetId -> Rect -> Theme -> IO a) -> IO a
-withTextEditMenu ctx absent consume = getTextInputMenu ctx >>= \case
+withTextEditMenu ctx absent consume = getsInteraction ctx isTextInputMenu >>= \case
   Nothing -> pure absent
   Just menu -> do
     let wid = textInputMenuWidget menu

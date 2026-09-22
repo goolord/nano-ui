@@ -30,9 +30,10 @@ import NanoUI.Internal.Context
   , markDirty
   , markDirtyCovered
   , setAnimationValue
-  , setTextInputMenu
+  , modifyInteraction
   , startAnimation
   , tabConsumed
+  , InteractionState (..)
   )
 import NanoUI.Internal.Frame.Focus (filterModalFocusables, tabNext, tabNextFocusables)
 import NanoUI.Internal.Frame.Hit
@@ -331,7 +332,7 @@ finalizeTextInputFocus ctx inp targets =
         when (prevFocus /= WidgetId 0) $ markDirty ctx
         collapseTextFieldSelection ctx prevFocus
         writeIORef (ctxFocusId ctx) (WidgetId 0)
-        setTextInputMenu ctx Nothing
+        modifyInteraction ctx (\s -> s {isTextInputMenu = Nothing})
       Just wid -> focusWidget ctx wid
 
 -- | On a left press on an enabled select's field, give the select keyboard

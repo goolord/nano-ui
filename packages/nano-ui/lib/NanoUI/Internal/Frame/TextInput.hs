@@ -32,7 +32,6 @@ import NanoUI.Internal.Context
   , markDirty
   , modifyStore
   , setStore
-  , setTextInputDrag
   , writeSlots
   , Slot (..)
   , slotKey
@@ -285,7 +284,7 @@ finalizeTextInputMouse ctx inp wid = do
           idx <- charAt
           clicks <- normalizeTextFieldClicks ctx wid idx 0 0 False (max 1 (inputMouseClicks inp))
           uncurry (updateTextInputSelection ctx wid) (textSelectionForDrag value idx idx clicks)
-          setTextInputDrag ctx (Just (TextInputDrag wid idx 0 0 False clicks))
+          modifyInteraction ctx (\s -> s {isTextInputDrag = Just (TextInputDrag wid idx 0 0 False clicks)})
         else do
           mDrag <- getsInteraction ctx isTextInputDrag
           case mDrag of

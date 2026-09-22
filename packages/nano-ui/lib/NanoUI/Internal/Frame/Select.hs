@@ -29,7 +29,6 @@ import NanoUI.Internal.Context
   , anySelectOpen
   , closeSelects
   , getStore
-  , getTextInputMenu
   , intKey
   , isSelectOpen
   , markDirty
@@ -81,7 +80,7 @@ data Dropdown = Dropdown
 overlayMenuRects :: Context -> IO [Rect]
 overlayMenuRects ctx = do
   dropdowns <- openDropdowns ctx
-  menu <- getTextInputMenu ctx
+  menu <- getsInteraction ctx isTextInputMenu
   pure (map menuPanelBounds (map ddRect dropdowns ++ maybe [] (pure . textInputMenuRect) menu))
 
 -- | Every open dropdown, in arena order.
@@ -159,7 +158,7 @@ dropdownRows fm mouse dd =
 overlayMenuOwnerAt :: Context -> V2 -> IO (Maybe WidgetId)
 overlayMenuOwnerAt ctx mouse =
   overlayRouteAt ctx mouse >>= \case
-    Just RouteTextMenu -> fmap textInputMenuWidget <$> getTextInputMenu ctx
+    Just RouteTextMenu -> fmap textInputMenuWidget <$> getsInteraction ctx isTextInputMenu
     Just (RouteDropdown wid) -> pure (Just wid)
     _ -> pure Nothing
 
@@ -169,7 +168,7 @@ overlayMenuOwnerAt ctx mouse =
 -- but this knows they cover what is under them.
 overlayRouteAt :: Context -> V2 -> IO (Maybe PointerRoute)
 overlayRouteAt ctx mouse = do
-  mMenu <- getTextInputMenu ctx
+  mMenu <- getsInteraction ctx isTextInputMenu
   case mMenu of
     Just m | rectContains (textInputMenuRect m) mouse -> pure (Just RouteTextMenu)
     _ -> do

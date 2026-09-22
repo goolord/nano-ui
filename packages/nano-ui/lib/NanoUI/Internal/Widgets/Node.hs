@@ -43,8 +43,9 @@ import NanoUI.Internal.Context
   , isDisabled
   , intKey
   , routedInput
-  , getPointerRoute
+  , getsInteraction
   , PointerRoute (..)
+  , InteractionState (..)
   )
 import NanoUI.Internal.Id (WidgetId (..), enterScope, hashWidgetId, scopeTag)
 import NanoUI.Internal.Input
@@ -278,7 +279,7 @@ floatingPanel wid addPanel enter body = do
 -- the view's otherwise.
 dropdownInput :: Ui :> es => WidgetId -> Eff es Input
 dropdownInput wid =
-  withContext getPointerRoute >>= \case
+  withContext (\ctx -> getsInteraction ctx isPointerRoute) >>= \case
     RouteDropdown owner | owner == wid -> askFrameInput
     _ -> askInput
 

@@ -34,7 +34,7 @@ import NanoUI.Internal.Context
   , TextInputDrag (..)
   , getsInteraction
   , requestWakeAfter
-  , setTextInputDrag
+  , modifyInteraction
   )
 import NanoUI.Internal.Frame.Hit (withWidgetNode)
 import NanoUI.Internal.Frame.TextArea
@@ -58,7 +58,7 @@ finalizeTextFieldMouse ctx inp = do
     unless handled $ finalizeTextAreaMouse ctx inp focus
     keepDragScrolling ctx inp focus
   when (inputMouseReleased inp) $
-    setTextInputDrag ctx Nothing
+    modifyInteraction ctx (\s -> s {isTextInputDrag = Nothing})
 
 -- | A selection dragged past the field's edge scrolls a step a frame, as the
 -- caret follows the pointer. A pointer held still out there sends no input to

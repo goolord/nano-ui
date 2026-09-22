@@ -25,7 +25,7 @@ import NanoUI.Internal.Context
   , beginScrollMetrics
   , cacheScrollMetrics
   , clampScrollOffset
-  , getScrollDrag
+  , getsInteraction
   , getScrollOffset
   , getScrollOffset2D
   , getScrollOffsetIn
@@ -428,7 +428,7 @@ updateScrollDrag ctx inp
   | inputMouseReleased inp =
       modifyInteraction ctx (\s -> s {isScrollDrag = Nothing})
   | otherwise = do
-      mDrag <- getScrollDrag ctx
+      mDrag <- getsInteraction ctx isScrollDrag
       case mDrag of
         Just (wid, dragDir, grabOff)
           | inputMouseDown inp -> do

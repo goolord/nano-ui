@@ -19,7 +19,7 @@ import NanoUI.Internal.Context
   , intKey
   , markDirty
   , modifyStore
-  , setTextInputDrag
+  , modifyInteraction
   , slotKey
   , nodeTheme
   , getsInteraction
@@ -264,7 +264,7 @@ finalizeTextAreaMouse ctx inp wid = do
         (state, row, col) <- cursorAtMouse
         clicks <- normalizeTextFieldClicks ctx wid 0 row col True (max 1 (inputMouseClicks inp))
         applyTextAreaDrag ctx wid state row col row col clicks
-        setTextInputDrag ctx (Just (TextInputDrag wid 0 row col True clicks))
+        modifyInteraction ctx (\s -> s {isTextInputDrag = Just (TextInputDrag wid 0 row col True clicks)})
       else do
         mDrag <- getsInteraction ctx isTextInputDrag
         case mDrag of

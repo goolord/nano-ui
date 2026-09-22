@@ -27,11 +27,12 @@ import Data.Maybe (isJust, isNothing)
 import NanoUI.Internal.Context
   ( Context (..)
   , PointerRoute (..)
-  , getPointerRoute
+  , getsInteraction
   , getPrevClipRect
   , getPrevRect
   , intKey
   , modalActive
+  , InteractionState (..)
   )
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Layout.Arena
@@ -141,7 +142,7 @@ topmostFloatingAtMouse ctx mouse wanted =
 -- ('NanoUI.Internal.Context.pointerBlockedByModal').
 nodeOwnsPointer :: Context -> NodeIdx -> IO Bool
 nodeOwnsPointer ctx idx =
-  getPointerRoute ctx >>= \case
+  getsInteraction ctx isPointerRoute >>= \case
     RouteLayer routed -> do
       layer <- layerOf idx
       pure (layer == routed)

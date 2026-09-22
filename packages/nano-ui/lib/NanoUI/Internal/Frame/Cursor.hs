@@ -17,7 +17,6 @@ import NanoUI.Internal.Context
   , InteractionState (..)
   , PointerRoute (..)
   , getHotId
-  , getScrollDrag
   , getsInteraction
   , isDisabled
   , lookupCustomCursor
@@ -106,7 +105,7 @@ selectDropdownCursorKind ctx inp = do
 
 scrollThumbCursorKind :: Context -> Input -> IO (Maybe UiCursorKind)
 scrollThumbCursorKind ctx inp = do
-  mDrag <- getScrollDrag ctx
+  mDrag <- getsInteraction ctx isScrollDrag
   if inputMouseDown inp && isJust mDrag
     then pure (Just UiCursorGrabbing)
     else do

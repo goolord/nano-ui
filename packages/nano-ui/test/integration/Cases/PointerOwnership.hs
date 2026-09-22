@@ -8,7 +8,7 @@ import Data.IntMap.Strict qualified as IM
 import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Text qualified as T
 import Data.Text.IO qualified as TIO
-import NanoUI.Internal.Context (Context (ctxActiveId), getTextInputMenu, intKey, textInputMenuWidget)
+import NanoUI.Internal.Context (Context (ctxActiveId), InteractionState (..), getsInteraction, intKey, textInputMenuWidget)
 import NanoUI.Internal.Store (Slot (..), WidgetStore (..), isSelectOpen, slotKey)
 import NanoUI.Internal.Widgets.TextArea (buffer, loadTextAreaState, selectionAnchor)
 import NanoUI.Widgets.TextBuffer (getCursor)
@@ -305,7 +305,7 @@ scenario mOv vc offset shift gesture = do
         probe <- vcProbe vc ctx resp
         focus <- getFocusId ctx
         active <- readIORef (ctxActiveId ctx)
-        menu <- getTextInputMenu ctx
+        menu <- getsInteraction ctx isTextInputMenu
         let state =
               [ (value /= value0, "value " <> value0 <> " -> " <> value)
               , (probe /= probe0, "state " <> probe0 <> " -> " <> probe)

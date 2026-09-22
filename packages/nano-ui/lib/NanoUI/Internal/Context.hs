@@ -36,15 +36,8 @@ module NanoUI.Internal.Context
   , modifyOverlay
   , getsDamage
   , modifyDamage
-  , getScrollDrag
-  , setTextInputDrag
-  , getTextInputMenu
-  , setTextInputMenu
   , takeTextEditLastAction
-  , getPointerRoute
   , pointerHeldOffLayers
-  , getWindowDrag
-  , getWindowResize
   , intKey
   , markDirty
   , markDirtyCovered

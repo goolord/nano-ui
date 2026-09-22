@@ -20,12 +20,11 @@ import Data.IORef (readIORef)
 import Data.IntMap.Strict qualified as IM
 
 import NanoUI.Internal.Context.Core
-  ( getPointerRoute
-  , getTextInputMenu
+  ( getsInteraction
   , getsOverlay
   , modifyOverlay
   )
-import NanoUI.Internal.Context.Types (Context (..), OverlayState (..), PointerRoute (..), intKey)
+import NanoUI.Internal.Context.Types (Context (..), InteractionState (..), OverlayState (..), PointerRoute (..), intKey)
 import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Internal.Input (Input, Key (KeyEscape), inputKeys, inputKeysElem, withoutPointer)
 import NanoUI.Internal.Types (Rect, V2, rectHit, rectNonEmpty)
@@ -35,7 +34,7 @@ import NanoUI.Internal.Types (Rect, V2, rectHit, rectNonEmpty)
 textInputEditActive :: Context -> IO Bool
 textInputEditActive ctx = do
   focus <- readIORef (ctxFocusId ctx)
-  menu <- getTextInputMenu ctx
+  menu <- getsInteraction ctx isTextInputMenu
   pure (hashWidgetId focus /= 0 || menu /= Nothing)
 
 -- | Whether a modal is declared this frame or was active on the previous frame.
@@ -72,7 +71,7 @@ pointerBlockedByModal ctx =
 -- otherwise.
 routedInput :: Context -> Int -> Input -> IO Input
 routedInput ctx layer inp =
-  getPointerRoute ctx >>= \case
+  getsInteraction ctx isPointerRoute >>= \case
     RouteLayer routed | routed == layer -> do
       blocked <- pointerBlockedByModal ctx
       pure (if blocked then withoutPointer inp else inp)

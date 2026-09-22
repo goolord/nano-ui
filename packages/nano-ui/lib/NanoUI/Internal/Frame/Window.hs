@@ -23,8 +23,7 @@ import NanoUI.Internal.Context
   , WindowResizeEdge (..)
   , damageWidget
   , getStore
-  , getWindowDrag
-  , getWindowResize
+  , getsInteraction
   , intKey
   , markDirty
   , modifyStore
@@ -110,8 +109,8 @@ persistWindowPositions ctx = floatingNodeCount na >>= \floating -> when (floatin
 -- while a drag starts or is held; releases clear it. Resize gestures take priority.
 updateWindowDrag :: Context -> Input -> IO Bool
 updateWindowDrag ctx inp =
-  (isNothing <$> getWindowResize ctx) <&&> do
-    drag <- getWindowDrag ctx
+  (isNothing <$> getsInteraction ctx isWindowResize) <&&> do
+    drag <- getsInteraction ctx isWindowDrag
     case drag of
       Just (wid, gx, gy)
         | inputMouseDown inp -> do
@@ -249,7 +248,7 @@ resizeFromEdge wrd (V2 mx my) winW winH =
 -- stored bounds and relayouts the window. Returns 'True' while starting or held.
 updateWindowResize :: Context -> Input -> Float -> Float -> IO Bool
 updateWindowResize ctx inp winW winH = do
-  drag <- getWindowResize ctx
+  drag <- getsInteraction ctx isWindowResize
   case drag of
     Just wrd
       | inputMouseDown inp -> do
@@ -322,7 +321,7 @@ tryStartWindowResize ctx mouse@(V2 mx my) = do
 -- leaves cursor selection to other controls.
 windowResizeCursorKind :: Context -> Input -> IO (Maybe UiCursorKind)
 windowResizeCursorKind ctx inp = do
-  mDrag <- getWindowResize ctx
+  mDrag <- getsInteraction ctx isWindowResize
   case mDrag of
     Just wrd
       | inputMouseDown inp -> pure (Just (cursorForResizeEdge (wrdEdge wrd)))
