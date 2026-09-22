@@ -12,7 +12,6 @@ where
 import Control.Exception (onException)
 import Control.Monad (void, when)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
-import Data.Maybe (fromMaybe)
 import Data.Vector.Unboxed qualified as U
 import Data.Word (Word8)
 import Foreign.C.Types (CFloat (..), CInt (..))
@@ -160,7 +159,7 @@ drawCmd batch ren vp vc ip images glyphTex mDamage clipRef cmd = do
         tex <-
           if textureGlyphPage texId >= 0
             then pure (glyphTex (textureGlyphPage texId))
-            else fromMaybe nullPtr <$> lookupImage images texId
+            else lookupImage images texId
         let
           (hasDamage, dx, dy, dw, dh) = case mDamage of
             Nothing -> (0, 0, 0, 0, 0)

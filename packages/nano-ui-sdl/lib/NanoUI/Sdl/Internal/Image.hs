@@ -9,7 +9,7 @@ module NanoUI.Sdl.Internal.Image
 where
 
 import Control.Exception (mask_)
-import Control.Monad (when)
+import Control.Monad (unless, void)
 import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef, writeIORef)
 import Data.Word (Word8)
 import Foreign.ForeignPtr (ForeignPtr, withForeignPtr)
@@ -74,19 +74,16 @@ updateRegions tex w pixels rects =
 
 uploadAtlas ::
   Ptr SDL_Renderer -> ImageAtlas -> Int -> Int -> ForeignPtr Word8 -> Int -> IO ()
-uploadAtlas ren (ImageAtlas ref) w h pixels gen = mask_ $
-  withForeignPtr pixels $ \ptr -> do
-    tex <- createTextureSafe ren SDL_PIXELFORMAT_RGBA32 SDL_TEXTUREACCESS_STATIC (fromIntegral w) (fromIntegral h)
-    ok <-
-      if tex == nullPtr
-        then pure False
-        else do
-          _ <- setTextureBlendMode tex (fromIntegral sDL_BLENDMODE_BLEND)
-          uploaded <- updateTextureSafe tex (PtrConst.unsafeFromPtr nullPtr) (PtrConst.unsafeFromPtr (castPtr ptr)) (fromIntegral (w * 4))
-          if uploaded then pure True else destroyTexture tex >> pure False
-    when ok $ publish ref (Just (AtlasTexture tex gen))
+uploadAtlas ren (ImageAtlas ref) w h pixels gen = mask_ $ do
+  tex <- createTextureSafe ren SDL_PIXELFORMAT_RGBA32 SDL_TEXTUREACCESS_STATIC (fromIntegral w) (fromIntegral h)
+  unless (tex == nullPtr) $ do
+    void $ setTextureBlendMode tex (fromIntegral sDL_BLENDMODE_BLEND)
+    uploaded <- updateRegions tex w pixels [(0, 0, w, h)]
+    if uploaded then publish ref (Just (AtlasTexture tex gen)) else destroyTexture tex
 
-lookupImage :: ImageAtlas -> Int -> IO (Maybe (Ptr SDL_Texture))
+-- | The texture for a texture id, or null for one that is not the image
+-- atlas's or an atlas not uploaded yet.
+lookupImage :: ImageAtlas -> Int -> IO (Ptr SDL_Texture)
 lookupImage (ImageAtlas ref) tid
-  | tid == atlasTextureId = fmap atTexture <$> readIORef ref
-  | otherwise = pure Nothing
+  | tid == atlasTextureId = maybe nullPtr atTexture <$> readIORef ref
+  | otherwise = pure nullPtr
