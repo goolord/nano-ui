@@ -63,7 +63,7 @@ sliderWith' f minV maxV value = do
   let
     track = maybe (Rect 0 0 0 0) (\(Rect x y w h) -> sliderHitBounds x y w h) mrect
   -- An idle drag hands back the value it was given.
-  (dragged, dragging) <-
+  (dragged, dragging, _) <-
     withKey ("drag" :: Text) (useDrag1D DragAxisX minV maxV current track)
   holdActiveWhile wid dragging
   nav <- useKeyNav wid

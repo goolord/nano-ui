@@ -3,7 +3,6 @@
 -- check. Their state lives in the widget store.
 module NanoUI.Internal.Widgets.Behavior
   ( DragAxis (..)
-  , keyedDragHeld
   , useDrag1D
   , holdActiveWhile
   , useReorder
@@ -18,7 +17,6 @@ module NanoUI.Internal.Widgets.Behavior
 where
 
 import Control.Monad (when)
-import Data.Hashable (Hashable, hash)
 import Data.IORef (readIORef, writeIORef)
 import Data.List (find)
 import Data.Maybe (fromMaybe)
@@ -34,7 +32,7 @@ import NanoUI.Internal.Context
   , slotKey
   , modifyStore
   )
-import NanoUI.Internal.Id (WidgetId (..), enterKeyed, hashWidgetId, idContextWidgetId)
+import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Internal.Input
   ( Input (..)
   , Key (..)
@@ -60,18 +58,11 @@ dragThresholdPx = 8
 data DragAxis = DragAxisX | DragAxisY
   deriving (Eq, Show)
 
--- | True when a prior keyed useDrag1D on this path is still held.
--- Peeks the keyed first-id without enterKeyed bumping parent siblingId.
-keyedDragHeld :: (Hashable k, Ui :> es) => k -> Eff es Bool
-keyedDragHeld k = withContext $ \ctx -> do
-  old <- readIORef (ctxIdContext ctx)
-  let wid = idContextWidgetId (snd (enterKeyed (fromIntegral (hash k)) old))
-      dragK = slotKey SlotDrag (intKey wid)
-  quietFlag dragK <$> getStore ctx
-
 -- | Clamped 1D drag. Maps pointer position on @track@ into [lo, hi]. The drag
 -- starts with a press on the track and lasts until the button comes up; a
--- button held from elsewhere and moved onto the track drags nothing.
+-- button held from elsewhere and moved onto the track drags nothing. Returns
+-- the value, whether the drag is held, and whether it was held before this
+-- frame.
 useDrag1D ::
   (Ui :> es) =>
   DragAxis ->
@@ -79,7 +70,7 @@ useDrag1D ::
   Float ->
   Float ->
   Rect ->
-  Eff es (Float, Bool)
+  Eff es (Float, Bool, Bool)
 useDrag1D axis lo hi current track = do
   wid <- nextId
   ctx <- askContext
@@ -93,7 +84,7 @@ useDrag1D axis lo hi current track = do
       active = inputMouseDown inp && (active0 || started)
       frac = if trackLen <= 0 then 0 else clamp01 ((mouse - origin) / trackLen)
   when (active /= active0) $ uiIO (modifyStore ctx (setQuietFlag dragK active))
-  pure (if active then lo + frac * (hi - lo) else current, active)
+  pure (if active then lo + frac * (hi - lo) else current, active, active0)
 
 -- | Hold the active id for @wid@ while its drag lasts and let it go after, so
 -- the widget paints and takes the cursor as pressed wherever the pointer goes.
