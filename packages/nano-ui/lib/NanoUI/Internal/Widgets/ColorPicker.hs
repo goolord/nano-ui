@@ -127,16 +127,6 @@ colorPickerDefaultColor = colorRGBA 128 128 128 255
 colorPickerBarW :: Float
 colorPickerBarW = 14
 
-colorPickerSwatchH :: Float
-colorPickerSwatchH = 30
-
-colorPickerSwatchW :: Float
-colorPickerSwatchW = 80
-
--- Width reserved for the Current / New preview column (label plus swatch).
-colorPickerPreviewW :: Float
-colorPickerPreviewW = 112
-
 -- | The piece of a colour picker a 'NodeColorPicker' node paints, kept in the
 -- low bits of its style.
 data ColorPickerPart = PickerSv | PickerHue | PickerAlpha | PickerPreview
@@ -158,9 +148,13 @@ pickerStateId (WidgetId w) = WidgetId (mix64 w 0x434F4C5243414E56)
 pickerKey :: WidgetId -> Int
 pickerKey = intKey . pickerStateId
 
+-- | A colour as the store's int slots hold it.
+packColor :: Color -> Int
+packColor = fromIntegral . colorToWord32
+
 storeColorAt :: WidgetStore -> Int -> Color -> Color
 storeColorAt store key fallback =
-  colorFromWord32 (fromIntegral (findSlot fieldInt (fromIntegral (colorToWord32 fallback)) key store))
+  colorFromWord32 (fromIntegral (findSlot fieldInt (packColor fallback) key store))
 
 -- | Picker's current stored colour, or the supplied fallback if absent.
 widgetStoreColor :: WidgetStore -> WidgetId -> Color -> Color
@@ -175,28 +169,23 @@ widgetStoreBaseColor store wid fallback =
     (slotKey SlotColorBase (pickerKey wid))
     (widgetStoreColor store wid fallback)
 
--- RGB cannot tell hue 0 from 360. Keep the slider end the user last set.
-widgetStoreHue :: WidgetStore -> WidgetId -> Color -> Float
-widgetStoreHue store wid fallback =
+-- | The picker's hue, saturation and value. RGB cannot tell hue 0 from 360,
+-- and black collapses S, so the hue and S/V the user last set are kept: the
+-- hue slider stays at the end it was put at, and the marker does not jitter.
+widgetStoreHsv :: WidgetStore -> WidgetId -> Color -> (Float, Float, Float)
+widgetStoreHsv store wid fallback =
   let
-    (h0, _, _) = rgbToHsv (widgetStoreColor store wid fallback)
+    (h0, s0, v0) = rgbToHsv (widgetStoreColor store wid fallback)
+    (s, v) = findSlot fieldPoint (s0, v0) (pickerKey wid) store
    in
-    findSlot fieldFloat h0 (pickerKey wid) store
-
--- Black collapses S in RGB. Keep the last mouse S/V so the marker does not jitter.
-widgetStoreSv :: WidgetStore -> WidgetId -> Color -> (Float, Float)
-widgetStoreSv store wid fallback =
-  let
-    (_, s0, v0) = rgbToHsv (widgetStoreColor store wid fallback)
-   in
-    findSlot fieldPoint (s0, v0) (pickerKey wid) store
+    (findSlot fieldFloat h0 (pickerKey wid) store, s, v)
 
 -- | Store the live colour with the hue and S/V it was set through.
-putColorState :: Int -> Color -> Float -> (Float, Float) -> WidgetStore -> WidgetStore
-putColorState key col hue sv =
-  insertSlot fieldInt key (fromIntegral (colorToWord32 col))
-    . insertSlot fieldFloat key hue
-    . insertSlot fieldPoint key sv
+putColorState :: Int -> Color -> (Float, Float, Float) -> WidgetStore -> WidgetStore
+putColorState key col (h, s, v) =
+  insertSlot fieldInt key (packColor col)
+    . insertSlot fieldFloat key h
+    . insertSlot fieldPoint key (s, v)
 
 -- | The square the saturation / value field fills, centered in its node.
 colorPickerSvSquare :: Rect -> Rect
@@ -235,56 +224,14 @@ colorPickerPreviewGeom :: FontMetrics -> Rect -> (Float, Rect, Float, Rect)
 colorPickerPreviewGeom fm (Rect x y w h) =
   let
     labelH = fmLineHeight fm
-    swatchW = min colorPickerSwatchW w
-    swatchH = clamp 0 colorPickerSwatchH (h - labelH * 2 - colorPickerGap)
+    swatchW = min 80 w
+    swatchH = clamp 0 30 (h - labelH * 2 - colorPickerGap)
     stackH = labelH + swatchH + colorPickerGap + labelH + swatchH
     top = y + max 0 ((h - stackH) / 2)
     currentY = top + labelH
     newLabelY = currentY + swatchH + colorPickerGap
    in
     (top, Rect x currentY swatchW swatchH, newLabelY, Rect x (newLabelY + labelH) swatchW swatchH)
-
--- Wider than the painted bar so the handle is easy to grab.
-colorPickerBarHitRect :: Rect -> Rect
-colorPickerBarHitRect (Rect x y w h) =
-  let
-    pad = 2
-   in
-    Rect (x - pad) y (w + pad * 2) h
-
-drawSvField :: DrawArena -> Rect -> Float -> IO ()
-drawSvField da rect hue = do
-  let
-    white = colorRGBA 255 255 255 255
-    hueCol = hsvToRgb hue 1 1
-    clear = colorRGBA 0 0 0 0
-    black = colorRGBA 0 0 0 255
-  -- Horizontal: white to hue. Vertical overlay: fade to black (alpha over).
-  pushQuadGradient da rect white hueCol hueCol white
-  pushQuadGradient da rect clear clear black black
-
--- Vertical rainbow: each stop band fades into the next.
-drawHueBar :: DrawArena -> Rect -> IO ()
-drawHueBar da rect =
-  let
-    stops = (6 :: Int)
-    cellH = rectH rect / fromIntegral stops
-    stopCol i = hsvToRgb (360 * fromIntegral i / fromIntegral stops) 1 1
-   in
-    mapM_
-      ( \i ->
-          let
-            cell = Rect (rectX rect) (rectY rect + fromIntegral i * cellH) (rectW rect) cellH
-           in
-            pushQuadGradient
-              da
-              cell
-              (stopCol i)
-              (stopCol i)
-              (stopCol (i + 1))
-              (stopCol (i + 1))
-      )
-      [0 .. stops - 1]
 
 drawChecker :: DrawArena -> Rect -> IO ()
 drawChecker da (Rect x y w h) = goRows 0
@@ -308,56 +255,47 @@ drawChecker da (Rect x y w h) = goRows 0
       pushRect da (Rect rx ry' cw ch) col
       goCols ry (cx + 1)
 
-drawAlphaBar :: DrawArena -> Rect -> Color -> IO ()
-drawAlphaBar da rect col = do
-  drawChecker da rect
-  let
-    c0 = fadeAlpha col 0
-    c1 = fadeAlpha col 255
-  pushQuadGradient da rect c0 c0 c1 c1
-
-drawBarHandle :: DrawArena -> Rect -> Float -> Color -> IO ()
-drawBarHandle da bar cy col = do
-  let
-    w = rectW bar
-    x = rectX bar
-    h = 4
-    handle = Rect (x - 3) (cy - h / 2) (w + 6) h
-  pushRoundedRect da handle 2 (colorRGBA 255 255 255 255)
-  pushRoundedStroke da handle 2 1 col
-
 -- | Paint one part of a picker from its state in the store.
 drawColorPickerPart :: NodeArena -> NodeIdx -> FontMetrics -> DrawArena -> WidgetStore -> Style -> Rect -> IO ()
 drawColorPickerPart na idx fm da store style rect = do
   si <- getStyleIdx na idx
   owner <- pickerSvNode na idx >>= getWidgetId na
-  area <- colorPickerPartRect na idx rect
+  area@(Rect x y w h) <- colorPickerPartRect na idx rect
   let
     newCol = widgetStoreColor store owner colorPickerDefaultColor
+    (hue, sat, val) = widgetStoreHsv store owner colorPickerDefaultColor
     border = styleBorder style
+    white = colorRGBA 255 255 255 255
     handleCol = colorRGBA 0 0 0 180
+    -- A bar's outline and its handle, @frac@ of the way down.
+    barHandle frac = do
+      let handle = Rect (x - 3) (y + frac * h - 2) (w + 6) 4
+      pushRoundedStroke da area 3 1 border
+      pushRoundedRect da handle 2 white
+      pushRoundedStroke da handle 2 1 handleCol
   case colorPickerPartOf si of
     PickerSv -> do
       let
-        hue = widgetStoreHue store owner colorPickerDefaultColor
-        (sat, val) = widgetStoreSv store owner colorPickerDefaultColor
-        marker = 6
-        mx = rectX area + sat * rectW area
-        my = rectY area + (1 - val) * rectH area
-        dot = Rect (mx - marker / 2) (my - marker / 2) marker marker
-      drawSvField da area hue
+        hueCol = hsvToRgb hue 1 1
+        dot = Rect (x + sat * w - 3) (y + (1 - val) * h - 3) 6 6
+      -- Horizontal: white to hue. Vertical overlay: fade to black (alpha over).
+      pushQuadGradient da area white hueCol hueCol white
+      pushQuadGradient da area (colorRGBA 0 0 0 0) (colorRGBA 0 0 0 0) (colorRGBA 0 0 0 255) (colorRGBA 0 0 0 255)
       pushRoundedStroke da area 4 1 border
-      pushRoundedRect da dot (marker / 2) (colorRGBA 255 255 255 255)
-      pushRoundedStroke da dot (marker / 2) 1 handleCol
+      pushRoundedRect da dot 3 white
+      pushRoundedStroke da dot 3 1 handleCol
     PickerHue -> do
-      let hue = widgetStoreHue store owner colorPickerDefaultColor
-      drawHueBar da area
-      pushRoundedStroke da area 3 1 border
-      drawBarHandle da area (rectY area + (hue / 360) * rectH area) handleCol
+      -- Vertical rainbow: each of six stop bands fades into the next.
+      let
+        cellH = h / 6
+        stop i = hsvToRgb (60 * fromIntegral i) 1 1
+      forM_ [0 .. 5 :: Int] $ \i ->
+        pushQuadGradient da (Rect x (y + fromIntegral i * cellH) w cellH) (stop i) (stop i) (stop (i + 1)) (stop (i + 1))
+      barHandle (hue / 360)
     PickerAlpha -> do
-      drawAlphaBar da area newCol
-      pushRoundedStroke da area 3 1 border
-      drawBarHandle da area (rectY area + (fromIntegral (colorA newCol) / 255) * rectH area) handleCol
+      drawChecker da area
+      pushQuadGradient da area (fadeAlpha newCol 0) (fadeAlpha newCol 0) (fadeAlpha newCol 255) (fadeAlpha newCol 255)
+      barHandle (fromIntegral (colorA newCol) / 255)
     PickerPreview -> do
       let
         (_, current, _, new) = colorPickerPreviewGeom fm area
@@ -368,25 +306,19 @@ drawColorPickerPart na idx fm da store style rect = do
       swatch current (widgetStoreBaseColor store owner colorPickerDefaultColor)
       swatch new newCol
 
-colorPickerLayout :: Layout
-colorPickerLayout = tight . fillW . gap colorPickerGap $ defaultLayout
-
--- The field, bars and preview side by side.
-colorPickerCanvasLayout :: Layout
-colorPickerCanvasLayout = colorPickerLayout {layoutDirection = Row}
+-- | The picker's column, and with 'Row' the row of its parts.
+colorPickerLayout :: Direction -> Layout
+colorPickerLayout dir = tight . fillW . gap colorPickerGap $ defaultLayout {layoutDirection = dir}
 
 -- The field grows up to a square as tall as the row.
 colorPickerSvLayout :: Layout
 colorPickerSvLayout =
   tight . fillW . fixedH colorPickerSvH . minW 60 . maxW colorPickerSvH $ defaultLayout
 
-colorPickerColumnLayout :: Float -> Layout
-colorPickerColumnLayout w = fixedW w colorPickerSvLayout
-
 -- A row of channel fields. Children are groups sized by 'percent' so the
 -- R/G/B(/A) and H/S/V rows share the same column widths.
 colorPickerRowLayout :: Layout
-colorPickerRowLayout = alignMid colorPickerCanvasLayout
+colorPickerRowLayout = alignMid (colorPickerLayout Row)
 
 -- One channel field: an inline label plus its bare box, taking @pct@ of the row.
 colorPickerFieldGroupLayout :: Float -> Layout
@@ -394,13 +326,6 @@ colorPickerFieldGroupLayout pct = percent pct colorPickerRowLayout
 
 colorPickerFieldLayout :: Layout
 colorPickerFieldLayout = tight . fillW . minW 40 $ defaultLayout
-
--- A numeric channel field: room for three digits beside its stepper.
-colorPickerChannelLayout :: Layout
-colorPickerChannelLayout = minW 60 colorPickerFieldLayout
-
-colorPickerLabelLayout :: Layout
-colorPickerLabelLayout = tight (alignMid defaultLayout)
 
 -- | RGB colour picker: a saturation/value field, a hue bar, and RGB, HSV and
 -- hex fields. Pass the current colour; the result is the colour after this
@@ -447,46 +372,41 @@ hsvChannels =
   where
     fraction n = fromIntegral n / 100
 
--- | Widget ids of a picker's parts. The field's id keys the picker's state.
-data PickerParts = PickerParts
-  { ppSv :: !WidgetId
-  , ppHue :: !WidgetId
-  , ppAlpha :: !WidgetId
-  , ppPreview :: !WidgetId
-  }
-
 colorPickerWith ::
   Ui :> es => Bool -> Color -> Eff es (Response, Color)
 colorPickerWith showAlpha value = do
   ctx <- askContext
-  parts <- PickerParts <$> nextId <*> nextId <*> nextId <*> nextId
+  -- The field's id keys the picker's state.
+  wid <- nextId
+  hueWid <- nextId
+  alphaWid <- nextId
+  previewWid <- nextId
   let
-    wid = ppSv parts
     key = pickerKey wid
     pct = 100 / (if showAlpha then 4 else 3)
     readColor = (\st -> widgetStoreColor st wid value) <$> uiIO (getStore ctx)
-    writePicker col hue sv = uiIO (modifyStore ctx (putColorState key col hue sv))
-    writeColor col =
-      let (h, s, v) = rgbToHsv col
-       in writePicker col (clamp 0 360 h) (s, v)
+    writePicker col hsv = uiIO (modifyStore ctx (putColorState key col hsv))
+    writeColor col = writePicker col (rgbToHsv col)
     -- Without the alpha bar the colour stays opaque.
     alphaOf c = if showAlpha then colorA c else 255
-    part pid p lay = addWidgetStyled pid NodeColorPicker "" 0 lay (fromEnum p)
+    part pid p lay = (,) pid <$> addWidgetStyled pid NodeColorPicker "" 0 lay (fromEnum p)
+    column w = fixedW w colorPickerSvLayout
   uiIO $ do
     adoptColorPickerValue ctx wid value
-    mapM_ (registerFocusable ctx) (wid : ppHue parts : [ppAlpha parts | showAlpha])
-  (start, final, svResp) <- container NodeContainer colorPickerLayout $ do
-    (svResp, hueResp, alphaResp) <-
-      containerWithId NodeContainer colorPickerCanvasLayout (pickerStateId wid) $ do
+    mapM_ (registerFocusable ctx) (wid : hueWid : [alphaWid | showAlpha])
+  (start, final, svResp) <- container NodeContainer (colorPickerLayout Column) $ do
+    (sv, hue, alphaPart) <-
+      containerWithId NodeContainer (colorPickerLayout Row) (pickerStateId wid) $ do
         sv <- part wid PickerSv colorPickerSvLayout
-        hue <- part (ppHue parts) PickerHue (colorPickerColumnLayout colorPickerBarW)
-        alpha <-
+        hue <- part hueWid PickerHue (column colorPickerBarW)
+        alphaPart <-
           if showAlpha
-            then Just <$> part (ppAlpha parts) PickerAlpha (colorPickerColumnLayout colorPickerBarW)
+            then Just <$> part alphaWid PickerAlpha (column colorPickerBarW)
             else pure Nothing
-        void (part (ppPreview parts) PickerPreview (colorPickerColumnLayout colorPickerPreviewW))
-        pure (sv, hue, alpha)
-    start <- colorPickerCanvas parts value svResp hueResp alphaResp
+        -- The Current / New preview: a label above each swatch.
+        void (part previewWid PickerPreview (column 112))
+        pure (sv, hue, alphaPart)
+    start <- colorPickerCanvas sv hue alphaPart value
     -- Only the focused field edits, so each row's fields share one store read.
     rgb <- readColor
     _ <- container NodeContainer colorPickerRowLayout $
@@ -497,15 +417,14 @@ colorPickerWith showAlpha value = do
           writeColor (set (fromIntegral n) (fadeAlpha rgb (alphaOf rgb)))
     hsvStore <- uiIO (getStore ctx)
     let
-      (s0, v0) = widgetStoreSv hsvStore wid value
-      hsv = (widgetStoreHue hsvStore wid value, s0, v0)
+      hsv = widgetStoreHsv hsvStore wid value
       alpha = alphaOf (widgetStoreColor hsvStore wid value)
     _ <- container NodeContainer colorPickerRowLayout $ do
       forM_ hsvChannels $ \(lbl, hi, shown, edit) -> do
         n <- channelField pct lbl hi (shown hsv)
         when (n /= shown hsv) $ do
-          let (h, s, v) = edit n hsv
-          writePicker (fadeAlpha (hsvToRgb h s v) alpha) h (s, v)
+          let hsv'@(h, s, v) = edit n hsv
+          writePicker (fadeAlpha (hsvToRgb h s v) alpha) hsv'
       when showAlpha $
         void (container NodeContainer (colorPickerFieldGroupLayout pct) (pure ()))
     hex <- readColor
@@ -519,53 +438,55 @@ colorPickerWith showAlpha value = do
       forM_ (colorPickerParseHex thex) $ \(r, g, b, ma) ->
         writeColor (colorRGBA r g b (if showAlpha then fromMaybe (colorA hex) ma else 255))
     final <- readColor
-    pure (start, final, svResp)
-  uiIO $ recordSlot fieldInt ctx key (fromIntegral (colorToWord32 final))
+    pure (start, final, snd sv)
+  uiIO $ recordSlot fieldInt ctx key (packColor final)
   pure (setChanged (final /= start) svResp, final)
 
--- | The field and the bars: pointer drags, then arrow keys on whichever part
--- holds focus, then committing the "current" swatch when a drag ends or a key
--- moved the colour. Returns the colour the frame started with.
-colorPickerCanvas :: Ui :> es => PickerParts -> Color -> Response -> Response -> Maybe Response -> Eff es Color
-colorPickerCanvas parts initial svResp hueResp alphaResp = do
+-- | The field and the bars, each its part's id and response: pointer drags,
+-- then arrow keys on whichever part holds focus, then committing the
+-- "current" swatch when a drag ends or a key moved the colour. Returns the
+-- colour the frame started with.
+colorPickerCanvas ::
+  Ui :> es =>
+  (WidgetId, Response) ->
+  (WidgetId, Response) ->
+  Maybe (WidgetId, Response) ->
+  Color ->
+  Eff es Color
+colorPickerCanvas (wid, svResp) (hueWid, hueResp) alphaPart initial = do
   ctx <- askContext
   inp <- askInput
   store0 <- uiIO (getStore ctx)
   heldBefore <- or <$> mapM keyedDragHeld (["s", "v", "hue", "alpha"] :: [Text])
   let
-    wid = ppSv parts
-    showAlpha = isJust alphaResp
     current0 = widgetStoreColor store0 wid initial
-    h0 = widgetStoreHue store0 wid initial
-    (s0, v0) = widgetStoreSv store0 wid initial
+    (h0, s0, v0) = widgetStoreHsv store0 wid initial
     -- A press starts the drag of the part it lands on: the parts' hit rects
     -- share no point, the bars' slack being narrower than the gaps.
     svSquare = colorPickerSvSquare (respRect svResp)
-    band resp = Rect (rectX (respRect resp)) (rectY svSquare) (rectW (respRect resp)) (rectH svSquare)
-    hueRect = colorPickerBarHitRect (band hueResp)
-    alphaRect = maybe (Rect 0 0 0 0) (colorPickerBarHitRect . band) alphaResp
-  (sDrag, sA) <- withKey ("s" :: Text) (useDrag1D DragAxisX 0 1 s0 svSquare)
-  (vDrag, vA) <- withKey ("v" :: Text) (useDrag1D DragAxisY 1 0 v0 svSquare)
-  (hDrag, hA) <- withKey ("hue" :: Text) (useDrag1D DragAxisY 0 360 h0 hueRect)
-  (aDrag, aA) <- withKey ("alpha" :: Text) (useDrag1D DragAxisY 0 255 (fromIntegral (colorA current0)) alphaRect)
+    -- A bar's column cut to the field's height, and wider than the painted
+    -- bar so the handle is easy to grab.
+    barHit resp =
+      Rect (rectX (respRect resp) - 2) (rectY svSquare) (rectW (respRect resp) + 4) (rectH svSquare)
+  -- An idle drag hands back the value it was given.
+  (s, sA) <- withKey ("s" :: Text) (useDrag1D DragAxisX 0 1 s0 svSquare)
+  (v, vA) <- withKey ("v" :: Text) (useDrag1D DragAxisY 1 0 v0 svSquare)
+  (h, hA) <- withKey ("hue" :: Text) (useDrag1D DragAxisY 0 360 h0 (barHit hueResp))
+  (a, aA) <-
+    withKey ("alpha" :: Text) $
+      useDrag1D DragAxisY 0 255 (fromIntegral (colorA current0)) (maybe (Rect 0 0 0 0) (barHit . snd) alphaPart)
   let
-    svA = sA || vA
-    dragging = svA || hA || aA
-    nextHue = if hA then hDrag else h0
-    nextS = if sA then sDrag else s0
-    nextV = if vA then vDrag else v0
-    nextA =
-      if aA then clamp 0 255 (round aDrag :: Int) else fromIntegral (colorA current0)
-    base = hsvToRgb nextHue nextS nextV
+    dragging = sA || vA || hA || aA
+    alpha = fromIntegral (clamp 0 255 (round a :: Int))
     dragged
-      | aA && not (svA || hA) = fadeAlpha current0 (fromIntegral nextA)
-      | otherwise = fadeAlpha base (if showAlpha then fromIntegral nextA else 255)
+      | aA && not (sA || vA || hA) = fadeAlpha current0 alpha
+      | otherwise = fadeAlpha (hsvToRgb h s v) (if isJust alphaPart then alpha else 255)
   holdActiveWhile wid dragging
-  when (dragging && (dragged /= current0 || nextHue /= h0 || nextS /= s0 || nextV /= v0)) $
-    uiIO $ modifyStore ctx (putColorState (pickerKey wid) dragged nextHue (nextS, nextV))
+  when (dragging && (dragged /= current0 || h /= h0 || s /= s0 || v /= v0)) $
+    uiIO $ modifyStore ctx (putColorState (pickerKey wid) dragged (h, s, v))
   svFocus <- keyboardFocused wid
-  hueFocus <- keyboardFocused (ppHue parts)
-  alphaFocus <- if showAlpha then keyboardFocused (ppAlpha parts) else pure False
+  hueFocus <- keyboardFocused hueWid
+  alphaFocus <- maybe (pure False) (keyboardFocused . fst) alphaPart
   keyMoved <-
     pure (svFocus || hueFocus || alphaFocus)
       <&&> uiIO (applyColorPickerKeys ctx wid initial inp svFocus hueFocus)
@@ -582,10 +503,11 @@ channelField :: Ui :> es => Float -> Text -> Int -> Int -> Eff es Int
 channelField pct label hi value =
   container NodeContainer (colorPickerFieldGroupLayout pct) $ do
     labelWid <- nextId
-    void (addWidget labelWid NodeText label 0 colorPickerLabelLayout)
+    void (addWidget labelWid NodeText label 0 (tight (alignMid defaultLayout)))
+    -- Room for three digits beside the stepper.
     round
       <$> numericInputConfigured
-        defaultNumericInputConfig {nicMin = 0, nicMax = fromIntegral hi, nicLayout = colorPickerChannelLayout}
+        defaultNumericInputConfig {nicMin = 0, nicMax = fromIntegral hi, nicLayout = minW 60 colorPickerFieldLayout}
         (fromIntegral value)
 
 -- | Adopt the caller's colour as 'adoptSlot' does. A new
@@ -595,20 +517,18 @@ adoptColorPickerValue ctx wid value = do
   store0 <- getStore ctx
   let
     key = pickerKey wid
-    packed = fromIntegral (colorToWord32 value)
+    packed = packColor value
     seenKey = slotKey SlotSeen key
     seen = insertSlot fieldInt seenKey packed store0
   when (lookupSlot fieldInt seenKey store0 /= Just packed) $
     setStore ctx $
       if lookupSlot fieldInt key store0 == Just packed
         then seen
-        else
-          let (h, s, v) = rgbToHsv value
-           in putColorState key value (clamp 0 360 h) (s, v) (insertSlot fieldInt (slotKey SlotColorBase key) packed seen)
+        else putColorState key value (rgbToHsv value) (insertSlot fieldInt (slotKey SlotColorBase key) packed seen)
 
 commitColorPickerCurrent :: Context -> WidgetId -> Color -> IO ()
 commitColorPickerCurrent ctx wid col =
-  let packed = fromIntegral (colorToWord32 col)
+  let packed = packColor col
    in writeSlots ctx (slotWriteOr fieldInt packed (slotKey SlotColorBase (pickerKey wid)) packed)
 
 -- | Arrow, Home and End keys on the focused part: the field when @svFocus@,
@@ -627,23 +547,21 @@ applyColorPickerKeys ctx wid fallback inp svFocus hueFocus = do
     dx = along KeyLeft KeyRight
     dy = along KeyUp KeyDown
     current = widgetStoreColor store wid fallback
-    h = widgetStoreHue store wid current
-    (s, v) = widgetStoreSv store wid current
-    a = fromIntegral (colorA current) :: Float
+    hsv@(h, s, v) = widgetStoreHsv store wid fallback
     bar lo hi cur
       | down KeyHome = lo
       | down KeyEnd = hi
       | otherwise = clamp lo hi (cur + (dx + dy) * step)
-    (col', h', sv')
+    (col', hsv')
       | svFocus =
           let sat = clamp01 (s + dx * step / 100)
               val = clamp01 (v - dy * step / 100)
-           in (fadeAlpha (hsvToRgb h sat val) (colorA current), h, (sat, val))
+           in (fadeAlpha (hsvToRgb h sat val) (colorA current), (h, sat, val))
       | hueFocus =
           let hue = bar 0 360 h
-           in (fadeAlpha (hsvToRgb hue s v) (colorA current), hue, (s, v))
-      | otherwise = (fadeAlpha current (round (bar 0 255 a)), h, (s, v))
-    moved = col' /= current || h' /= h || sv' /= (s, v)
+           in (fadeAlpha (hsvToRgb hue s v) (colorA current), (hue, s, v))
+      | otherwise = (fadeAlpha current (round (bar 0 255 (fromIntegral (colorA current)))), hsv)
+    moved = col' /= current || hsv' /= hsv
   when moved $
-    setStore ctx (putColorState (pickerKey wid) col' h' sv' store)
+    setStore ctx (putColorState (pickerKey wid) col' hsv' store)
   pure moved

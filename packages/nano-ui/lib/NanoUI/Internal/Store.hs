@@ -407,30 +407,6 @@ data Slot
     -- value that differs from it changed externally (a frame-side row pick or a
     -- clipboard menu action), not by typing.
     SlotComboLive
-  | -- | PaneGrid gesture slot (storeInt): 0 none, positive = dragged pane id,
-    -- negative = split id being resized. Shares the 'SlotDrag' press-held-release
-    -- lifecycle but keyed by the grid widget instead of a per-pane leaf.
-    SlotPaneGest
-  | -- | PaneGrid drag grab offset (storePoint): (mouse - pane origin) at grab start.
-    SlotPaneGrab
-  | -- | PaneGrid keyboard-navigation focus: focused pane id (0 = none, auto-first).
-    SlotPaneFocus
-  | -- | PaneGrid maximize state: maximized pane id (0 = none).
-    SlotPaneMax
-  | -- | PaneGrid resize start (storePoint): (ratio, main-axis mouse) captured when a
-    -- divider is first grabbed, so dragging moves it by delta rather than snapping.
-    SlotPaneResize
-  | -- | PaneGrid id seed (storeInt): next split / pane id to allocate. Strictly
-    -- monotonic per grid: ids are never reused, so per-pane state keyed by pane
-    -- id cannot collide with a closed pane's state.
-    SlotPaneNext
-  | -- | PaneGrid region span (storePoint): the (width, height) of the grid's
-    -- own rect the tree was last fitted to. A different span means the grid
-    -- was resized, which is when panes pinned by @pgFixedPanes@ have their
-    -- splits reflowed to keep their extent. Tracked whether or not anything
-    -- is pinned, so turning a pin on mid-run reflows from the size the tree
-    -- really holds rather than from whenever a pin was last set.
-    SlotPaneSpan
   | -- | The value a controlled widget last returned to its caller.
     SlotSeen
   | -- | A colour picker's opening colour.

@@ -25,7 +25,7 @@ import NanoUI.Internal.Widgets.Node (Response, addWidget)
 -- drops while the widget animates because the builder has no content key, and
 -- a builder that draws something else at the same size neither rebuilds nor
 -- repaints. Use 'drawingVersioned' for output that changes, or
--- 'NanoUI.Internal.Widgets.Custom.customWidget' without a key to have every frame
+-- 'NanoUI.Widgets.Custom.customWidget' without a key to have every frame
 -- rebuild and compare.
 {-# INLINE drawing #-}
 drawing :: Ui :> es => (Layout -> Layout) -> (Rect -> SmallArray DrawOp) -> Eff es Response
