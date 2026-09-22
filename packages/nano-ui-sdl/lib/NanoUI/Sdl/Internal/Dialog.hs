@@ -28,7 +28,7 @@ module NanoUI.Sdl.Internal.Dialog
   , pollFileDialogUi
   ) where
 
-import Control.Monad (forM, unless, void)
+import Control.Monad (forM, unless, void, (>=>))
 import Data.Int (Int32)
 import Data.IntMap.Strict qualified as IM
 import Data.IORef (IORef, atomicModifyIORef', atomicWriteIORef, newIORef, readIORef)
@@ -39,6 +39,7 @@ import Effectful (Eff, type (:>))
 import Foreign.C.String (newCString, peekCString)
 import Foreign.Marshal.Alloc (free)
 import Foreign.Marshal.Array (newArray, peekArray0)
+import Foreign.Marshal.Utils (maybePeek)
 import Foreign.Ptr (FunPtr, Ptr, castFunPtr, castPtr, nullPtr)
 import Foreign.StablePtr (castPtrToStablePtr, castStablePtrToPtr, deRefStablePtr, freeStablePtr, newStablePtr)
 import NanoUI.Sdl.Internal.Display (pushRefreshEvent)
@@ -234,10 +235,7 @@ onResult userdata filelist _filterIdx = do
   let launch = castPtrToStablePtr userdata
   (result, release) <- deRefStablePtr launch
   freeStablePtr launch
-  paths <-
-    if filelist == nullPtr
-      then pure Nothing
-      else Just <$> (peekArray0 nullPtr (castPtr filelist) >>= traverse peekCString)
+  paths <- maybePeek (peekArray0 nullPtr >=> traverse peekCString) (castPtr filelist)
   release
   atomicWriteIORef result $ case paths of
     Nothing -> FileDialogFailed

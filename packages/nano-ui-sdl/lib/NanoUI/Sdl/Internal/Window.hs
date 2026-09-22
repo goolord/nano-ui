@@ -18,7 +18,7 @@ module NanoUI.Sdl.Internal.Window
 
 import Control.Concurrent (rtsSupportsBoundThreads, runInBoundThread)
 import Control.Exception (IOException, catch)
-import Control.Monad (unless, void, when)
+import Control.Monad (mfilter, unless, void, when)
 import Control.Monad.IO.Class (liftIO)
 import Data.Acquire (Acquire, mkAcquire)
 import Data.Acquire qualified as Acquire
@@ -26,7 +26,7 @@ import Data.Bits ((.|.))
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.Foldable (for_)
-import Data.Maybe (isJust, isNothing)
+import Data.Maybe (fromMaybe, isJust, isNothing)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import System.Environment (lookupEnv)
 import System.Info (os)
@@ -36,15 +36,14 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Foreign qualified as TextForeign
 import Foreign.C.String (withCString)
-import Foreign.Marshal.Alloc (alloca)
-import Foreign.Marshal.Utils (with)
+import Foreign.Marshal.Utils (maybePeek, with)
 import Foreign.Ptr (Ptr, castPtr, nullPtr)
-import Foreign.Storable (peek)
 import NanoUI (ImageId, Input (..), Size (..), Theme, V2 (..))
 import NanoUI.Internal.Context (Context (..), setDrawSnapScale)
 import NanoUI.Testing (clearMeasureCache, damageFull, markDirty, setHost, setWakeLoop, withClipboard)
 import NanoUI.Sdl.Internal.Display
   ( initRefreshEvent
+  , outPair
   , pushRefreshEvent
   , queryMouseWindowPos
   , queryWindowPixelDensity
@@ -307,8 +306,7 @@ syncDisplay ctx env inp = do
   when scaleChanged $ do
     -- Presents leave the renderer at 1:1 pixels; re-assert it only when the
     -- pixel density moves.
-    ok <- setRenderScale (sdlRenderer env) 1 1
-    unless ok $ fail "SDL_SetRenderScale failed"
+    setRenderScale (sdlRenderer env) 1 1 >>= (`unless` fail "SDL_SetRenderScale failed")
     writeIORef (sdlScaleRef env) scale
     setDrawSnapScale ctx scale
   -- Runtime font-family switch: the app publishes its requested family through
@@ -363,26 +361,14 @@ withSdlBench =
 -- | Which SDL render driver a session asks for.
 data RenderDriver
   = RenderDriverAuto
-  -- ^ nano-ui picks; see 'preferredRenderDriver'.
+  -- ^ nano-ui picks: GL on Windows, for the presentation stall a live resize
+  -- hits under D3D11, and SDL's own order elsewhere, where it picks well.
   | RenderDriverSdlDefault
   -- ^ Leave SDL's own preference order alone.
   | RenderDriverNamed !BS.ByteString
   -- ^ An explicit driver name, e.g. @"d3d11"@ or @"opengl"@.
   deriving (Eq, Show)
 
--- | The render driver to ask SDL for, as an @SDL_RENDER_DRIVER@ hint value.
--- 'Nothing' leaves SDL to its own order. The default is 'RenderDriverAuto',
--- which on Windows prefers GL over D3D11 for the presentation stall a live
--- resize hits; elsewhere SDL already picks well.
-preferredRenderDriver :: RenderDriver -> Maybe BS.ByteString
-preferredRenderDriver = \case
-  RenderDriverSdlDefault -> Nothing
-  RenderDriverNamed name -> Just name
-  RenderDriverAuto
-    | os == "mingw32" -> Just "opengl"
-    | otherwise -> Nothing
-
--- | Set an SDL hint by name.
 setSdlHint :: BS.ByteString -> BS.ByteString -> IO ()
 setSdlHint name value =
   BS.useAsCString name $ \cname ->
@@ -439,9 +425,12 @@ withSdlWindow bench opts ctx act =
     -- they stand in for, so their present numbers are numbers a user can see.
     renderDriver <- lookupEnv "SDL_RENDER_DRIVER"
     let
-      requested
-        | isJust renderDriver = Nothing
-        | otherwise = preferredRenderDriver (sdlRenderDriver opts)
+      -- The @SDL_RENDER_DRIVER@ hint to set, if any.
+      requested = case sdlRenderDriver opts of
+        _ | isJust renderDriver -> Nothing
+        RenderDriverNamed name -> Just name
+        RenderDriverAuto | os == "mingw32" -> Just "opengl"
+        _ -> Nothing
       -- Only a driver nano-ui chose for the caller is worth dropping again.
       guessed = isJust requested && sdlRenderDriver opts == RenderDriverAuto
     for_ requested (setSdlHint sDL_HINT_RENDER_DRIVER)
@@ -459,40 +448,25 @@ startSdlWindow ::
   Bool -> SdlOptions -> Context -> Bool -> FontSource -> FontSource -> Acquire (Context, SdlEnv)
 startSdlWindow bench opts ctx guessedDriver fontSource monoSource = do
   mkAcquire
-    ( do
-        videoOk <- initSafe (SDL_InitFlags (fromIntegral sDL_INIT_VIDEO))
-        unless videoOk $ fail "SDL_Init(SDL_INIT_VIDEO) failed"
-    )
+    (initSafe (SDL_InitFlags (fromIntegral sDL_INIT_VIDEO)) >>= (`unless` fail "SDL_Init(SDL_INIT_VIDEO) failed"))
     (const quitSafe)
-  liftIO $ do
-    refreshOk <- initRefreshEvent
-    unless refreshOk $ fail "SDL_RegisterEvents failed for refresh wake"
+  liftIO $ initRefreshEvent >>= (`unless` fail "SDL_RegisterEvents failed for refresh wake")
   let
     Size w h = sdlWindowSize opts
   -- NANO_FORCE_SCALE: debug override of the pixel density.
-  forcedEnv <- liftIO $ lookupEnv "NANO_FORCE_SCALE"
-  let
-    sdlForcedScale = case forcedEnv >>= readMaybe of
-      Just s | s > 0 -> Just s
-      _ -> Nothing
+  sdlForcedScale <- liftIO $ mfilter (> 0) . (>>= readMaybe) <$> lookupEnv "NANO_FORCE_SCALE"
   -- Before the window, so that it is released after the window is gone: the
   -- window holds the hit test this frees.
   sdlChromeState <- mkAcquire newChromeState clearChromeState
   (sdlWindow, sdlRenderer) <-
     mkAcquire
       ( retryWithoutRenderDriver guessedDriver $
-          TextForeign.withCString (sdlWindowTitle opts) $ \titlePtr ->
-          alloca $ \winPtr -> alloca $ \renPtr -> do
-            ok <-
-              createWindowAndRendererSafe
-                (PtrConst.unsafeFromPtr titlePtr)
-                (round w)
-                (round h)
-                (if bench then sdlWindowHiddenFlag else windowFlags opts)
-                winPtr
-                renPtr
+          TextForeign.withCString (sdlWindowTitle opts) $ \titlePtr -> do
+            let flags = if bench then sdlWindowHiddenFlag else windowFlags opts
+            (ok, win, ren) <-
+              outPair (createWindowAndRendererSafe (PtrConst.unsafeFromPtr titlePtr) (round w) (round h) flags)
             unless ok $ fail "SDL_CreateWindowAndRenderer failed"
-            (,) <$> peek winPtr <*> peek renPtr
+            pure (win, ren)
       )
       ( \(win, ren) -> do
           void $ setRenderScale ren 1 1
@@ -512,11 +486,7 @@ startSdlWindow bench opts ctx guessedDriver fontSource monoSource = do
   liftIO $ setDrawSnapScale ctx scale
   refreshHz <- liftIO $ queryWindowRefreshHz sdlWindow
   sdlRendererName <-
-    liftIO $
-      getRendererName sdlRenderer >>= \name ->
-        if PtrConst.unsafeToPtr name == nullPtr
-          then pure "unknown"
-          else TextForeign.peekCString (PtrConst.unsafeToPtr name)
+    liftIO $ fromMaybe "unknown" <$> (maybePeek TextForeign.peekCString . PtrConst.unsafeToPtr =<< getRendererName sdlRenderer)
   sdlScaleRef <- liftIO $ newIORef scale
   sdlUiScaleRef <- liftIO $ newIORef (sdlAppUiScale opts)
   sdlFontRequestRef <- liftIO $ newIORef (sdlAppFont opts)
@@ -540,9 +510,7 @@ startSdlWindow bench opts ctx guessedDriver fontSource monoSource = do
     sdlRefreshPeriod = if refreshHz > 0 then 1 / fromIntegral refreshHz else 1 / 60
     sdlVsync = sdlAppVsync opts
     sdlContinuous = sdlAppContinuous opts
-  liftIO $ do
-    scaleOk <- setRenderScale sdlRenderer 1 1
-    unless scaleOk $ fail "SDL_SetRenderScale failed"
+  liftIO $ setRenderScale sdlRenderer 1 1 >>= (`unless` fail "SDL_SetRenderScale failed")
   unless bench $
     mkAcquire
       ( void (setRenderVSync sdlRenderer (if sdlVsync then 1 else 0))
@@ -573,12 +541,10 @@ withSdlClipboard ctx = withClipboard ctx readClipboard writeClipboard
     writeClipboard txt = TextForeign.withCString txt (setClipboardText . PtrConst.unsafeFromPtr)
     readClipboard = do
       ptr <- getClipboardText
-      if ptr == nullPtr
-        then pure Nothing
-        else do
-          txt <- TextForeign.peekCString ptr
-          free (castPtr ptr)
-          pure (if T.null txt then Nothing else Just txt)
+      txt <- maybePeek TextForeign.peekCString ptr
+      -- SDL_free takes a null pointer too.
+      free (castPtr ptr)
+      pure (mfilter (not . T.null) txt)
 
 -- | Write the last presented frame to a BMP file. A retained session reads
 -- its retained texture, since SDL leaves the window backbuffer undefined
