@@ -45,7 +45,6 @@ import Control.Monad (unless, when)
 import Data.IORef (modifyIORef', readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
 import Data.IntSet qualified as IS
-import Data.Maybe (fromMaybe)
 
 import NanoUI.Internal.Context.Core (damageWidget, getPrevRect, getStore, setStore, writeSlots)
 import NanoUI.Internal.Context.Types
@@ -74,16 +73,17 @@ snapScrollOffset ctx v = do
 -- scroller's offset reads @(cross, main)@ and a 2D one's @(x, y)@. Floats keep
 -- a scroll frame a 'storeFloat'-only change, which the damage pass clips.
 {-# INLINE storedScrollOffset #-}
-storedScrollOffset :: Int -> WidgetStore -> (Float, Float)
+storedScrollOffset :: Int -> WidgetStore -> V2
 storedScrollOffset key s =
-  fromMaybe
-    (findSlot fieldFloat 0 (slotKey SlotScrollCross key) s, findSlot fieldFloat 0 key s)
+  maybe
+    (V2 (findSlot fieldFloat 0 (slotKey SlotScrollCross key) s) (findSlot fieldFloat 0 key s))
+    (uncurry V2)
     (lookupSlot fieldPoint (slotKey SlotTextAreaScroll key) s)
 
 -- | Pixel-snapped main-axis offset of a 1D scroller, or vertical offset of a
 -- text area/2D scroller. Defaults to zero before state exists.
 getScrollOffset :: Context -> WidgetId -> IO Float
-getScrollOffset ctx wid = snapScrollOffset ctx . snd . storedScrollOffset (intKey wid) =<< getStore ctx
+getScrollOffset ctx wid = snapScrollOffset ctx . v2Y . storedScrollOffset (intKey wid) =<< getStore ctx
 
 -- | Move a scroller to an offset along its main axis. Cancels a glide in
 -- flight: whoever sets an offset outright owns it.
@@ -94,14 +94,14 @@ setScrollOffset ctx wid off = do
 
 writeScrollOffset :: Context -> WidgetId -> Float -> IO ()
 writeScrollOffset ctx wid off = do
-  (x, _) <- storedScrollOffset (intKey wid) <$> getStore ctx
+  V2 x _ <- storedScrollOffset (intKey wid) <$> getStore ctx
   writeScrollOffset2D ctx wid (V2 x off)
 
 -- | Pixel-snapped x/y offset for text areas and 2D scrollers. For a 1D
 -- scroller, the fallback stores cross-axis in x and main-axis in y.
 getScrollOffset2D :: Context -> WidgetId -> IO V2
 getScrollOffset2D ctx wid = do
-  (x, y) <- storedScrollOffset (intKey wid) <$> getStore ctx
+  V2 x y <- storedScrollOffset (intKey wid) <$> getStore ctx
   V2 <$> snapScrollOffset ctx x <*> snapScrollOffset ctx y
 
 -- | Move a scroller to an offset on both axes. Cancels a glide in flight.
@@ -146,7 +146,7 @@ linkScrollAxes ctx yWid xWid = do
     slotWrite fieldInt (slotKey SlotScrollLinkX yKey) xKey
       <> slotWrite fieldInt (slotKey SlotScrollLinkY xKey) yKey
   store <- getStore ctx
-  let (x2, y) = storedScrollOffset yKey store
+  let V2 x2 y = storedScrollOffset yKey store
       x1 = findSlot fieldFloat 0 xKey store
       x = if x2 == 0 && x1 /= 0 then x1 else x2
   when (x /= x2 || x /= x1) $
