@@ -46,7 +46,7 @@ import NanoUI.Internal.Layout.Arena
   , NodeType (..)
   , findFloatingNodeRevM
   , floatingNodeCount
-  , foldNodesM
+  , foldFloatingNodesM
   , getDirection
   , getFirstChild
   , getMinMax
@@ -100,7 +100,7 @@ persistWindowPositions ctx = floatingNodeCount na >>= \floating -> when (floatin
               if lookupSlot fieldPoint k acc == Just (x, y) && lookupSlot fieldPoint sizeKey acc == Just (w, h)
                 then acc
                 else insertSlot fieldPoint k (x, y) (insertSlot fieldPoint sizeKey (w, h) acc)
-  store1 <- foldNodesM na record store0
+  store1 <- foldFloatingNodesM na record store0
   when (store1 /= store0) $ setStore ctx store1
  where
   na = ctxNodeArena ctx

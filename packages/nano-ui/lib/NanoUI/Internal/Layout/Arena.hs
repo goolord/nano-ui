@@ -37,6 +37,8 @@ module NanoUI.Internal.Layout.Arena
   , arenaCount
   , topModalNode
   , floatingNodeCount
+  , foldFloatingNodesM
+  , foldFloatingNodeRevM
   , arenaArrays
   , withArenaArraysSnap
   , geomX
@@ -143,11 +145,11 @@ module NanoUI.Internal.Layout.Arena
   ) where
 
 import Control.Exception (bracket_)
-import Control.Monad (forM_, when)
+import Control.Monad (foldM, forM_, when)
 import Data.Bits (shiftL, shiftR, xor, (.&.), (.|.))
 import Data.HashTable.IO (BasicHashTable)
 import qualified Data.HashTable.IO as HT
-import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.Primitive.Array (MutableArray, copyMutableArray, newArray, readArray, sizeofMutableArray, writeArray)
 import Data.Primitive.PrimArray
   ( MutablePrimArray
@@ -390,6 +392,9 @@ data NodeArena = NodeArena
   -- is the topmost modal without a scan.
   , naFloatingCount :: IORef Int
   -- ^ Floating nodes (windows, modals, popups) added this frame.
+  , naFloatingNodes :: IORef [NodeIdx]
+  -- ^ Their indices, last added first, so the passes that look only at
+  -- floating panels skip the rest of the arena.
   }
 
 -- | The solver's buffers for the flow children of one container (its children
@@ -682,6 +687,7 @@ newNodeArena = do
   naScopeSig <- newIORef 0
   naTopModal <- newIORef (-1)
   naFloatingCount <- newIORef 0
+  naFloatingNodes <- newIORef []
   pure NodeArena {..}
 
 -- | Begin an empty frame while retaining array capacity. Invalidates node
@@ -694,6 +700,7 @@ resetNodeArena na = do
   writeIORef (naScopeSig na) 0
   writeIORef (naTopModal na) (-1)
   writeIORef (naFloatingCount na) 0
+  writeIORef (naFloatingNodes na) []
   -- 0 marks a memo entry that was never written, so the tag wraps to 1.
   !ft <- readIORef (naFrameTag na)
   writeIORef (naFrameTag na) (if ft == maxBound then 1 else ft + 1)
@@ -882,6 +889,7 @@ addNode na nt parent dir wSiz hSiz pad gap minW minH maxW maxH grow ax ay = do
     when (nt == NodeModal) $ writeIORef (naTopModal na) idx
     fc <- readIORef (naFloatingCount na)
     writeIORef (naFloatingCount na) (fc + 1)
+    modifyIORef' (naFloatingNodes na) (idx :)
   writeIORef (naCount na) (idx + 1)
   pure idx
 
@@ -1472,20 +1480,21 @@ forNodes_ na f = do
         | otherwise = f i >> go (i + 1)
   go 0
 
--- | 'forNodes_' over the nodes of type @t@ only.
-{-# INLINE forNodesOfType_ #-}
-forNodesOfType_ :: NodeArena -> NodeType -> (NodeIdx -> IO ()) -> IO ()
-forNodesOfType_ na t f = forNodes_ na $ \idx -> do
-  nt <- getNodeType na idx
-  when (nt == t) (f idx)
-
--- | 'forNodesOfType_' for a floating type (modal, window, popup). Most frames
--- have no floating node, and then this skips the arena walk.
+-- | Visit the nodes of a floating type (modal, window, popup) in arena
+-- order, looking only at the floating nodes.
 {-# INLINE forFloatingNodes_ #-}
 forFloatingNodes_ :: NodeArena -> NodeType -> (NodeIdx -> IO ()) -> IO ()
-forFloatingNodes_ na t f = do
-  floating <- floatingNodeCount na
-  when (floating > 0) (forNodesOfType_ na t f)
+forFloatingNodes_ na t f = foldFloatingNodesM na (\() idx -> getNodeType na idx >>= \nt -> when (nt == t) (f idx)) ()
+
+-- | Strict fold over the floating nodes in arena order.
+{-# INLINE foldFloatingNodesM #-}
+foldFloatingNodesM :: NodeArena -> (a -> NodeIdx -> IO a) -> a -> IO a
+foldFloatingNodesM na f z = readIORef (naFloatingNodes na) >>= foldM f z . reverse
+
+-- | Strict fold over the floating nodes from last declared to first.
+{-# INLINE foldFloatingNodeRevM #-}
+foldFloatingNodeRevM :: NodeArena -> (a -> NodeIdx -> IO a) -> a -> IO a
+foldFloatingNodeRevM na f z = readIORef (naFloatingNodes na) >>= foldM f z
 
 -- | Visit direct children in reverse declaration order, including floating nodes.
 {-# INLINE forChildNodes_ #-}
@@ -1530,12 +1539,13 @@ findNodeRevM na p = do
   go (n - 1)
 
 -- | 'findNodeRevM' for a predicate that only floating nodes can satisfy. It
--- skips the arena walk when nothing floats.
+-- visits only the floating nodes.
 {-# INLINE findFloatingNodeRevM #-}
 findFloatingNodeRevM :: NodeArena -> (NodeIdx -> IO Bool) -> IO (Maybe NodeIdx)
-findFloatingNodeRevM na p = do
-  floating <- floatingNodeCount na
-  if floating > 0 then findNodeRevM na p else pure Nothing
+findFloatingNodeRevM na p = readIORef (naFloatingNodes na) >>= go
+  where
+    go [] = pure Nothing
+    go (i : is) = p i >>= \ok -> if ok then pure (Just i) else go is
 
 -- | Strict effectful fold over nodes from last declared to first.
 {-# INLINE foldNodeRevM #-}
