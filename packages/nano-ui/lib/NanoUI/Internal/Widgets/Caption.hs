@@ -51,7 +51,7 @@ import NanoUI.Internal.Style
   , tight
   )
 import NanoUI.Internal.Types (Color, Rect (..), V2 (..), lerpColor)
-import NanoUI.Internal.Widgets.Custom
+import NanoUI.Widgets.Custom
   ( CanvasM
   , CustomWidgetSpec (..)
   , customWidget

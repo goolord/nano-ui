@@ -117,7 +117,7 @@ import NanoUI.Internal.Types
   , v2Y
   )
 import NanoUI.Internal.Widgets.Behavior (KeyNav (..), dragThresholdPx, useKeyNav)
-import NanoUI.Internal.Widgets.Custom
+import NanoUI.Widgets.Custom
   ( CustomWidgetSpec (..)
   , CustomDrawContext (..)
   , contentKey
