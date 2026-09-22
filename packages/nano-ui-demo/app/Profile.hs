@@ -11,6 +11,7 @@ import System.Mem (performGC)
 import System.Environment (lookupEnv)
 import Text.Read (readMaybe)
 import Text.Printf (printf)
+import qualified Data.ByteString as BS
 import qualified Data.Text as T
 
 import NanoUI
@@ -253,6 +254,19 @@ main = do
       modifyIORef' splitCounter (+ 1)
       void (runFrame ctx' (dividerAt k) benchSplit)
     void (runFrame ctx' inp {inputMouseReleased = True} benchSplit)
+    -- One small image changing every frame in an atlas holding 12 large
+    -- ones, as a live thumbnail does: getting it to the GPU is the cost.
+    void $ runFrame ctx' inp $ forM_ [1 .. 12 :: Int] $ \i -> do
+      iid <- freshImageId
+      ok <- registerImageRgba iid 1024 256 (BS.replicate (1024 * 256 * 4) (fromIntegral i))
+      unless ok (liftIO (fail "registerImageRgba failed"))
+    (liveImage, _, _, _) <- runFrame ctx' inp freshImageId
+    let livePixels k = BS.replicate (64 * 64 * 4) (if even k then 40 else 200)
+    liveCounter <- newIORef (0 :: Int)
+    measureBench "Images: one 64x64 changing, 12 1024x256" $ do
+      k <- readIORef liveCounter
+      modifyIORef' liveCounter (+ 1)
+      void (sdlDrawFrame ctx' (benchLiveImage liveImage (livePixels k)) sdlEnv inp False)
     -- The bound for one line: a text area holding a single long line, painted
     -- in full each frame as a horizontal scroll or a resize would.
     forM_ [4000, 20000 :: Int] $ \n -> do
@@ -453,6 +467,13 @@ benchWrap :: Float -> Int -> NanoUI ()
 benchWrap width k = columnWith (tight . gap 4 . fixedW width) $ do
   label (T.pack ("frame " <> show k))
   forM_ wrapParagraphs label
+
+-- | An image given new pixels every frame.
+benchLiveImage :: ImageId -> BS.ByteString -> NanoUI ()
+benchLiveImage iid pixels = do
+  ok <- registerImageRgba iid 64 64 pixels
+  unless ok (liftIO (fail "registerImageRgba failed"))
+  image (fixedWH 64 64) iid
 
 -- | Two panes side by side, each holding the paragraphs.
 benchSplit :: NanoUI ()
