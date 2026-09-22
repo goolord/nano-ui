@@ -69,9 +69,7 @@ module NanoUI.Internal.Context
   , registerCustomMeasure
   , lookupCustomMeasure
   , customMeasureHooks
-  , lookupCustomCursor
   , lookupCustomDamageSlop
-  , isPointerTracked
   , resetDrawingScopeCache
   , getStore
   , setStore
@@ -180,12 +178,13 @@ module NanoUI.Internal.Context
   , beginFrameModal
   , modalDamageFlip
   -- Animation
+  , AnimationState (..)
+  , getsAnimation
+  , modifyAnimation
   , anyAnimating
   , getLiveAnimations
   , takeAnimSettled
   , lookupAnimation
-  , getAnimRectless
-  , setAnimRectless
   , startAnimation
   , startAnimationEase
   , startAnimationEaseDelay
@@ -194,8 +193,6 @@ module NanoUI.Internal.Context
   , setAnimationValue
   , tickAnimations
   , getAnimationValue
-  , getAnimRest
-  , pruneAnimRest
   , FrameMsg (..)
   , decodeMessages
   , reduceMessages
@@ -264,7 +261,8 @@ import NanoUI.Internal.Context.Drawing
 import NanoUI.Internal.Context.Overlay
 import NanoUI.Internal.Context.Scroll
 import NanoUI.Internal.Context.Types
-  ( Context (..)
+  ( AnimationState (..)
+  , Context (..)
   , CustomDrawBuild
   , CustomDrawContext (..)
   , CustomDrawingEntry (..)

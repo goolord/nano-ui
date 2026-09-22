@@ -293,8 +293,11 @@ initialOverlayState = OverlayState
 data AnimationState = AnimationState
   { asAnimations :: !(IntMap Animation)
   , asAnimRest :: !(IntMap Float)
+  -- ^ Settled nonzero values.
   , asAnimSettled :: {-# UNPACK #-} !Bool
   , asRectless :: !(IntMap Int)
+  -- ^ Consecutive frames each animated key has had no visible widget bounds,
+  -- which the damage pass uses to limit full-window repaints.
   , asKeepAlive :: !IntSet
   -- ^ Keys whose perpetual animation a @keepAnimating@ call holds open.
   , asKeepTouched :: !IntSet

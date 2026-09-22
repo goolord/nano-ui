@@ -19,7 +19,8 @@ import NanoUI.Internal.Context
   , getStore
   , InteractionState (..)
   , isDirty
-  , isPointerTracked
+  , lookupCustomDrawing
+  , CustomDrawingEntry (..)
   , modalActive
   )
 import NanoUI.Internal.Frame.Hit (nodePointVisible, overlayHitAllowed, overlayHitRoot, withWidgetNode)
@@ -66,7 +67,10 @@ needsRedraw ctx prev inp = do
         -- A widget that tracks the pointer wants every move over it;
         -- one that does not wants only the move that leaves it.
         lastHot <- readIORef (ctxLastHotId ctx)
-        tracked <- if hashWidgetId lastHot == 0 then pure False else isPointerTracked ctx lastHot
+        tracked <-
+          if hashWidgetId lastHot == 0
+            then pure False
+            else maybe False cdrTracked <$> lookupCustomDrawing ctx lastHot
         if tracked
           then pure True
           else (/= lastHot) <$> probeHotId ctx (inputMousePos inp)

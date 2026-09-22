@@ -19,7 +19,8 @@ import NanoUI.Internal.Context
   , getHotId
   , getsInteraction
   , isDisabled
-  , lookupCustomCursor
+  , lookupCustomDrawing
+  , CustomDrawingEntry (..)
   )
 import NanoUI.Internal.Font (sliderHitBounds)
 import NanoUI.Internal.Frame.Hit
@@ -160,7 +161,7 @@ cursorKindAt ctx wid mouse inp
       if disabled
         then pure UiCursorDefault
         else do
-          mCursorFn <- lookupCustomCursor ctx wid
+          mCursorFn <- (>>= cdrCursor) <$> lookupCustomDrawing ctx wid
           case mCursorFn of
             Just cursorFn -> do
               visible <- widgetVisibleAt ctx wid mouse

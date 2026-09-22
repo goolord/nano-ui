@@ -27,9 +27,9 @@ import NanoUI.Internal.Context
   , WidgetStore (..)
   , getHotId
   , getLiveAnimations
-  , getAnimRest
-  , pruneAnimRest
-  , getAnimRectless
+  , getsAnimation
+  , modifyAnimation
+  , AnimationState (..)
   , getPrevRect
   , getStore
   , getsInteraction
@@ -37,7 +37,6 @@ import NanoUI.Internal.Context
   , intKey
   , markDirtyCovered
   , modalDamageFlip
-  , setAnimRectless
   , takeAnimSettled
   , lookupCustomDamageSlop
   , lookupCustomDrawing
@@ -140,13 +139,13 @@ getNonzeroRect arena i = do
 updatePrevRects :: Context -> IO ()
 updatePrevRects ctx = do
   live <- getLiveAnimations ctx
-  prevRectless <- getAnimRectless ctx
+  prevRectless <- getsAnimation ctx asRectless
   oldRects <- getsDamage ctx dsPrevRects
   oldClips <- getsDamage ctx dsPrevClips
   oldTexts <- getsDamage ctx dsPrevNodeTexts
   let na = ctxNodeArena ctx
       bump rects = do
-        rest <- getAnimRest ctx
+        rest <- getsAnimation ctx asAnimRest
         -- Frames without a rect, for the live or resting keys that have none.
         -- A key with a rect counts 0, which every reader takes as absent, so
         -- a frame where every animated widget has a rect builds nothing.
@@ -156,11 +155,12 @@ updatePrevRects ctx = do
             rectless' = rectlessOf live `IM.union` restRectless
             deadRest = IM.filter (> 300) restRectless
         unless (IM.null deadRest) $
-          pruneAnimRest ctx (\k -> IM.notMember k deadRest)
+          modifyAnimation ctx (\as -> as {asAnimRest = asAnimRest as `IM.difference` deadRest})
         -- Every key is live or resting, so this drops exactly the dead resting
         -- keys that are not live again.
         unless (IM.null rectless' && IM.null prevRectless) $
-          setAnimRectless ctx (rectless' `IM.difference` (deadRest `IM.difference` live))
+          modifyAnimation ctx $ \as ->
+            as {asRectless = rectless' `IM.difference` (deadRest `IM.difference` live)}
   count <- arenaCount na
   if count <= 0
     then do
@@ -317,7 +317,7 @@ writeDamage ctx inp snap = do
   modalFlip <- modalDamageFlip ctx
   liveAnims <- getLiveAnimations ctx
   settled <- takeAnimSettled ctx
-  rectless <- getAnimRectless ctx
+  rectless <- getsAnimation ctx asRectless
   winDragActive <- isJust <$> getsInteraction ctx isWindowDrag
   winResizeActive <- isJust <$> getsInteraction ctx isWindowResize
   requests <- getsDamage ctx dsRequests

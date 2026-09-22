@@ -17,9 +17,7 @@ module NanoUI.Internal.Context.Drawing
   , registerCustomMeasure
   , lookupCustomMeasure
   , customMeasureHooks
-  , lookupCustomCursor
   , lookupCustomDamageSlop
-  , isPointerTracked
   , resetDrawingScopeCache
   ) where
 
@@ -47,7 +45,6 @@ import NanoUI.Internal.Context.Types
   )
 import NanoUI.Internal.Draw (DrawOp, DrawingBuild, shiftDrawOp)
 import NanoUI.Internal.Id (WidgetId)
-import NanoUI.Internal.Input (UiCursorKind)
 import NanoUI.Internal.Style (Layout)
 import NanoUI.Internal.Types (PopupAnchor, PopupPlacement, Rect (..), rectH, rectW)
 
@@ -333,24 +330,11 @@ lookupCustomMeasure = lookupIn dcsCustomMeasures
 customMeasureHooks :: Context -> IO IntSet
 customMeasureHooks ctx = IM.keysSet . dcsCustomMeasures <$> readIORef (ctxDrawingCache ctx)
 
--- | Registered cursor selector, or 'Nothing'.
-{-# INLINE lookupCustomCursor #-}
-lookupCustomCursor :: Context -> WidgetId -> IO (Maybe (CustomDrawContext -> UiCursorKind))
-lookupCustomCursor ctx wid = (>>= cdrCursor) <$> lookupIn dcsCustomDrawings ctx wid
-
 -- | Registered repaint margin, or 'Nothing' when no override exists.
 {-# INLINE lookupCustomDamageSlop #-}
 lookupCustomDamageSlop :: Context -> WidgetId -> IO (Maybe Float)
 lookupCustomDamageSlop ctx wid =
   mfilter (> 0) . fmap cdrDamageSlop <$> lookupIn dcsCustomDrawings ctx wid
-
--- | Whether a widget asked for a frame on every pointer move over it, rather
--- than only when the pointer crosses onto another one: what a widget drawing
--- what is under the pointer inside itself, such as the row of a self-drawn
--- list, registers.
-{-# INLINE isPointerTracked #-}
-isPointerTracked :: Context -> WidgetId -> IO Bool
-isPointerTracked ctx wid = maybe False cdrTracked <$> lookupIn dcsCustomDrawings ctx wid
 
 -- | Clear per-pass registrations while retaining compiled ops and fitted
 -- layouts. Call before rebuilding the view, then prune caches against new registrations.

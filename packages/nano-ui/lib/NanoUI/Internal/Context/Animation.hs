@@ -1,11 +1,11 @@
 -- | Per-widget animations: starting, ticking, settling and reading values.
 module NanoUI.Internal.Context.Animation
-  ( anyAnimating
+  ( getsAnimation
+  , modifyAnimation
+  , anyAnimating
   , getLiveAnimations
   , takeAnimSettled
   , lookupAnimation
-  , getAnimRectless
-  , setAnimRectless
   , startAnimation
   , startAnimationEase
   , startAnimationEaseDelay
@@ -14,8 +14,6 @@ module NanoUI.Internal.Context.Animation
   , setAnimationValue
   , tickAnimations
   , getAnimationValue
-  , getAnimRest
-  , pruneAnimRest
   ) where
 
 import Control.Monad (unless, when)
@@ -41,6 +39,16 @@ import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Layout.Arena (getNodeRect, lookupNodeByKey)
 import NanoUI.Internal.Types (DamageBounds (..), defaultDamageSlop, rectNonEmpty)
 
+-- | Read a projection of running and settled animations.
+{-# INLINE getsAnimation #-}
+getsAnimation :: Context -> (AnimationState -> a) -> IO a
+getsAnimation ctx f = f <$> readIORef (ctxAnimationState ctx)
+
+-- | Strictly update animation state. Does not request a frame or damage.
+{-# INLINE modifyAnimation #-}
+modifyAnimation :: Context -> (AnimationState -> AnimationState) -> IO ()
+modifyAnimation ctx = modifyIORef' (ctxAnimationState ctx)
+
 -- | Whether the frame loop has to keep drawing: an animation is running, or a
 -- scroller is still gliding onto its target.
 {-# INLINE anyAnimating #-}
@@ -56,19 +64,7 @@ anyAnimating ctx = do
 -- entries to the resting values.
 {-# INLINE getLiveAnimations #-}
 getLiveAnimations :: Context -> IO (IntMap Animation)
-getLiveAnimations ctx = asAnimations <$> readIORef (ctxAnimationState ctx)
-
--- | Consecutive frames in which each animation has no visible widget bounds.
--- The damage pass uses these counts to limit full-window repaint requests.
-{-# INLINE getAnimRectless #-}
-getAnimRectless :: Context -> IO (IntMap Int)
-getAnimRectless ctx = asRectless <$> readIORef (ctxAnimationState ctx)
-
--- | Replace the damage pass's missing-bounds counters.
-{-# INLINE setAnimRectless #-}
-setAnimRectless :: Context -> IntMap Int -> IO ()
-setAnimRectless ctx m =
-  modifyIORef' (ctxAnimationState ctx) $ \as -> as {asRectless = m}
+getLiveAnimations ctx = getsAnimation ctx asAnimations
 
 -- | Read and clear the flag indicating an animation settled during the last tick.
 takeAnimSettled :: Context -> IO Bool
@@ -241,15 +237,3 @@ getAnimationValue ctx wid = do
   let key = intKey wid
   as <- readIORef (ctxAnimationState ctx)
   pure $! maybe (IM.findWithDefault 0 key (asAnimRest as)) animationValue (IM.lookup key (asAnimations as))
-
--- | Settled nonzero values keyed by animation id.
-{-# INLINE getAnimRest #-}
-getAnimRest :: Context -> IO (IntMap Float)
-getAnimRest ctx = asAnimRest <$> readIORef (ctxAnimationState ctx)
-
--- | Keep settled values only for keys accepted by the predicate.
-{-# INLINE pruneAnimRest #-}
-pruneAnimRest :: Context -> (Int -> Bool) -> IO ()
-pruneAnimRest ctx shouldKeep =
-  modifyIORef' (ctxAnimationState ctx) $ \as ->
-    as {asAnimRest = IM.filterWithKey (\k _ -> shouldKeep k) (asAnimRest as)}
