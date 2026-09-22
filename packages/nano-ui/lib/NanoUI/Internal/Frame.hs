@@ -147,6 +147,7 @@ import NanoUI.Internal.Layout.Arena
   , getWidgetId
   , layoutCacheEligible
   , layoutSigMatches
+  , computeSubtreeHashes
   , newLayoutCache
   , resetNodeArena
   , restoreLayoutCache
@@ -276,6 +277,10 @@ runFrameEff unlift ctx frameInp ui = do
   syncWidgetLabels ctx
   let
     Size w h = inputWindowSize frameInp
+  -- Fold each node's own inputs with its children's subtree hashes: reuse
+  -- checks the root's input signature, and a failed check still lets the
+  -- solve restore clean subtrees' measurements by their subtree hashes.
+  computeSubtreeHashes (ctxNodeArena ctx)
   unlessM (tryReuseLayout ctx (Size w h)) $
     solveLayoutAndCapture ctx w h
   movedResize <- updateWindowResize ctx layerInp w h
@@ -402,10 +407,12 @@ resetUiBuildScopes ctx = do
   resetDrawingScopeCache ctx
 
 -- | Solve and place everything, floating panels included, then snapshot the
--- result for the next frame to reuse.
+-- result for the next frame to reuse. The solve measures only the subtrees
+-- whose hashes changed since the cache's capture.
 solveLayoutAndCapture :: Context -> Float -> Float -> IO ()
 solveLayoutAndCapture ctx w h = do
-  solveLayout (ctxNodeArena ctx) (contextMeasurers ctx) w h
+  mCache <- fmap (\(c, _, _) -> c) <$> readIORef (ctxLayoutCache ctx)
+  solveLayout (ctxNodeArena ctx) (contextMeasurers ctx) w h mCache
   captureLayout ctx (Size w h)
   placeFloating ctx w h
 

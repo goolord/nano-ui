@@ -28,7 +28,7 @@ import Data.Primitive.PrimArray
 import Data.Primitive.Types (Prim)
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Word (Word8)
+import Data.Word (Word8, Word64)
 import NanoUI.Internal.Font
   ( CustomMeasureFn
   , FontMetrics (..)
@@ -58,6 +58,7 @@ import NanoUI.Internal.Layout.Arena
   , DirTag (..)
   , FlexScratch (..)
   , IOArr
+  , LayoutCache (..)
   , NodeArena
   , NodeArenaArrays
   , NodeIdx
@@ -68,6 +69,7 @@ import NanoUI.Internal.Layout.Arena
   , floatingNodeCount
   , hasCenteredLabel
   , withArenaArraysSnap
+  , subtreeArrays
   , geomX
   , geomY
   , geomW
@@ -84,6 +86,9 @@ import NanoUI.Internal.Layout.Arena
   , stylePadB
   , styleGap
   , styleGridMinColW
+  , styleScrollContentW
+  , styleStride
+  , tagStride
   , tagNodeType
   , tagDirection
   , treeStyleIdx
@@ -91,6 +96,8 @@ import NanoUI.Internal.Layout.Arena
   , tagWSizing
   , tagHSizing
   , tagScrollBarSlot
+  , naArrStyle
+  , naArrTags
   , readGeom
   , writeTagEnum
   , writeGeom
@@ -183,6 +190,21 @@ data SolveEnv = SolveEnv
   , seMeasure :: !(Text -> IO (Float, Float))
   , seResolveFont :: !FontResolver
   , seLookupMeasure :: !(WidgetId -> IO (Maybe CustomMeasureFn))
+  , seSub :: !(IOArr Word64)
+  -- ^ The arena's per-node subtree hashes, written by 'computeSubtreeHashes'
+  -- for this frame and read by the measure pass.
+  , seMeasured :: !(IOArr Float)
+  -- ^ The arena's per-node measured sizes (two floats), written by the
+  -- measure pass and snapshotted at capture.
+  , seCacheSub :: !(Maybe (IOArr Word64))
+  -- ^ The cache's subtree hashes. A node whose hash matches measures the
+  -- same way as the captured solve, so its measured size is restored instead
+  -- of recomputed.
+  , seCacheMeasured :: !(Maybe (IOArr Float))
+  -- ^ The cache's measured sizes, restored for matching subtrees.
+  , seCacheArrays :: !(Maybe NodeArenaArrays)
+  -- ^ The cache's arena columns, for the scroll outputs a clean scroll
+  -- container keeps (its content extent, value, and scrollbar slot).
   }
 
 -- | How text and custom widgets are measured. The solve and the placement of
@@ -196,10 +218,23 @@ data Measurers = Measurers
   , msLookupMeasure :: !(WidgetId -> IO (Maybe CustomMeasureFn))
   }
 
-solveEnv :: NodeArena -> Measurers -> IO SolveEnv
-solveEnv na Measurers {msFm, msMonoFm, msMeasure, msResolveFont, msLookupMeasure} = do
+solveEnv :: NodeArena -> Measurers -> Maybe LayoutCache -> IO SolveEnv
+solveEnv na Measurers {msFm, msMonoFm, msMeasure, msResolveFont, msLookupMeasure} mCache = do
   a <- arenaArrays na
-  pure (SolveEnv na a msFm msMonoFm msMeasure msResolveFont msLookupMeasure)
+  (_, sub, measured) <- subtreeArrays na
+  let seBase =
+        SolveEnv na a msFm msMonoFm msMeasure msResolveFont msLookupMeasure sub measured
+          Nothing Nothing Nothing
+  case mCache of
+    Just lc
+      | lcCount lc > 0 ->
+          pure
+            seBase
+              { seCacheSub = Just (lcSub lc)
+              , seCacheMeasured = Just (lcMeasured lc)
+              , seCacheArrays = Just (lcArrays lc)
+              }
+    _ -> pure seBase
 
 -- | Strict accumulator for flow-child folds: a child count and two running
 -- sums or extents. The strict fields keep the folds unboxed.
@@ -273,14 +308,20 @@ wrapsNarrower :: Bool -> Float -> Float -> Bool
 wrapsNarrower allowed wrapW lineW = allowed && wrapW + 0.5 < lineW && wrapW > 0
 
 -- | Measure nodes and place the page within the supplied logical width/height.
--- The view must have finished adding nodes. Place floating nodes separately
--- with 'placeModals', 'placeWindows', and 'placePopups', then apply scrolling.
-solveLayout :: NodeArena -> Measurers -> Float -> Float -> IO ()
-solveLayout na ms rootW rootH =
+-- The view must have finished adding nodes, and 'computeSubtreeHashes' must
+-- have run for this frame. Place floating nodes separately with
+-- 'placeModals', 'placeWindows', and 'placePopups', then apply scrolling.
+-- When a layout cache is supplied, a node whose subtree hash matches the
+-- cache restores its captured measured size instead of measuring again: its
+-- inputs and everything under it are unchanged since that solve. Position
+-- and quantization run over every node regardless, so the result is exactly
+-- what a full solve computes.
+solveLayout :: NodeArena -> Measurers -> Float -> Float -> Maybe LayoutCache -> IO ()
+solveLayout na ms rootW rootH mCache =
   withArenaArraysSnap na $ do
     count <- arenaCount na
     when (count > 0) $ do
-      env <- solveEnv na ms
+      env <- solveEnv na ms mCache
       measurePass env count
       positionNodeA env 0 0 0 0 rootW rootH
       floatingCount <- floatingNodeCount na
@@ -335,9 +376,76 @@ measurePass env count = do
   let go !idx
         | idx < 0 = pure ()
         | otherwise = do
-            measureNode env idx
+            measureOrRestore env idx
+            recordMeasured env idx
             go (idx - 1)
   go (count - 1)
+
+-- | Measure one node, or, when its subtree hash matches the cache's, restore
+-- the measured size the captured solve recorded. A hash match means the
+-- node's own inputs and everything under it are unchanged since that solve,
+-- so its measurement is identical; the size comes back exactly as the cache
+-- recorded it, and the position pass recomputes geometry from it as usual.
+-- A custom-measured node never restores: its closure may read state outside
+-- the arena, which no hash over arena inputs can see.
+measureOrRestore :: SolveEnv -> NodeIdx -> IO ()
+measureOrRestore env@SolveEnv {seSub = sub, seCacheSub = mCacheSub} idx =
+  case mCacheSub of
+    Nothing -> measureNode env idx
+    Just cacheSub -> do
+      s <- readPrimArray sub idx
+      cached <- readPrimArray cacheSub idx
+      restorable <-
+        if cached /= s
+          then pure False
+          else do
+            -- A drawing node never restores: whether it measures itself
+            -- custom is not in the arena, and losing the hook changes what
+            -- its size means (a custom size reverts to the image default).
+            nt <- readTagEnum (seArrays env) idx tagNodeType
+            pure (nt /= NodeDrawing)
+      if not restorable
+        then measureNode env idx
+        else do
+          nt <- readTagEnum (seArrays env) idx tagNodeType
+          if isScrollNode nt
+            then restoreScrollOutputs env idx
+            else restoreMeasuredSize env idx
+
+-- | Copy a captured node's measured width and height into its geometry.
+restoreMeasuredSize :: SolveEnv -> NodeIdx -> IO ()
+restoreMeasuredSize env idx = do
+  case seCacheMeasured env of
+    Nothing -> pure ()
+    Just cm -> do
+      w <- readPrimArray cm (idx * 2)
+      h <- readPrimArray cm (idx * 2 + 1)
+      setRect (seArena env) idx 0 0 w h
+
+-- | A clean scroll container keeps the captured solve's content extent,
+-- content-height value, and scrollbar slot: the rebuilt frame's addNode
+-- zeroed them, and the position pass only writes them for scroll containers
+-- it lays out fresh.
+restoreScrollOutputs :: SolveEnv -> NodeIdx -> IO ()
+restoreScrollOutputs env idx = do
+  restoreMeasuredSize env idx
+  case (seCacheArrays env, seCacheMeasured env) of
+    (Just ca, Just _) -> do
+      let a = seArrays env
+          styleOff = idx * styleStride + styleScrollContentW
+      copyMutablePrimArray (naArrStyle a) styleOff (naArrStyle ca) styleOff 2
+      let slotOff = idx * tagStride + tagScrollBarSlot
+      readPrimArray (naArrTags ca) slotOff >>= writePrimArray (naArrTags a) slotOff
+    _ -> pure ()
+
+-- | Record the node's measured size for the next capture, whether it was
+-- just measured or restored.
+recordMeasured :: SolveEnv -> NodeIdx -> IO ()
+recordMeasured env idx = do
+  (_, _, w, h) <- getRect (seArena env) idx
+  let ma = seMeasured env
+  writePrimArray ma (idx * 2) w
+  writePrimArray ma (idx * 2 + 1) h
 
 measureNode :: SolveEnv -> NodeIdx -> IO ()
 measureNode env@SolveEnv {seArena = na, seFm = fm} idx = do
@@ -1757,7 +1865,7 @@ childBaseline env@SolveEnv {seArena = na, seArrays = a, seFm = defaultFm, seReso
 -- their children, leaving the standard window margin where space permits.
 placeModals :: NodeArena -> Measurers -> Float -> Float -> IO ()
 placeModals na ms winW winH = do
-  env <- solveEnv na ms
+  env <- solveEnv na ms Nothing
   forFloatingNodes_ na NodeModal $ \idx -> do
     (_, _, iw, ih) <- getRect na idx
     let maxW = max 0 (winW - 2 * windowMargin)
@@ -1799,7 +1907,7 @@ placeWindowNode na ms winW winH idx w0 h0 originFor = do
       x = clamp 0 (max 0 (winW - w)) x0
       y = clamp 0 (max 0 (winH - h)) y0
   setRect na idx x y w h
-  env <- solveEnv na ms
+  env <- solveEnv na ms Nothing
   (pad, gap, dir) <- containerFlow (seArrays env) idx
   positionChildren env 0 idx dir gap pad x y w h
 
@@ -1882,7 +1990,7 @@ placePopups ::
   (WidgetId -> IO (Maybe (PopupAnchor, PopupPlacement, Float))) ->
   IO ()
 placePopups na ms winW winH lookupAnchor = do
-  env <- solveEnv na ms
+  env <- solveEnv na ms Nothing
   forFloatingNodes_ na NodePopup $ \idx -> do
     wid <- getWidgetId na idx
     (_, _, iw, ih) <- getRect na idx
@@ -1890,3 +1998,9 @@ placePopups na ms winW winH lookupAnchor = do
     let (anchor, placement, offset) = fromMaybe (AnchorPoint (V2 0 0), PlacementAuto, 4) mcfg
         (x, y) = computePopupPosition winW winH windowMargin iw ih anchor placement offset
     positionNodeA env 0 idx x y iw ih
+
+
+
+
+
+

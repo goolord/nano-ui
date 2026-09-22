@@ -226,6 +226,14 @@
 
 ### Changed
 
+- The measure pass skips unchanged subtrees. After the view builds, each
+  node's hash covers its own inputs and, through its children's hashes, its
+  whole subtree; the solve restores a captured subtree's measured size when
+  its hash matches instead of wrapping its text again, so a frame that
+  changed one label re-measures that label's branch only. Drawing widgets
+  always measure fresh, since a measure hook's presence is not arena state.
+  Position and quantization run over every node, so a partially measured
+  solve computes exactly what a full one would.
 - Whole-layout reuse is validated by a hash over the frame's layout inputs
   instead of comparing every node's columns: the arena folds each node's
   constraints, links, text, options, widget id, style code, and grid fields
