@@ -65,6 +65,7 @@ module NanoUI.Internal.Layout.Arena
   , tagScrollBarSlot
   , treeParent
   , treeFirstChild
+  , treeChildCount
   , treeNextSibling
   , treeStyleIdx
   , treeGridCols
@@ -82,11 +83,8 @@ module NanoUI.Internal.Layout.Arena
   , getParent
   , getFirstChild
   , getNextSibling
-  , getChildCount
   , getNodeType
   , getDirection
-  , getGridCols
-  , getGridMinColW
   , getScrollContentW
   , setScrollContentW
   , AxisSizing (..)
@@ -94,7 +92,6 @@ module NanoUI.Internal.Layout.Arena
   , getWidthSizing
   , getHeightSizing
   , getPadding
-  , getGap
   , parentIsRow
   , getAlignX
   , getAlignY
@@ -563,7 +560,7 @@ styleMaxH = 10
 --   scrolls both ways, which the solver writes ('getScrollContentW').
 -- * @styleNodeValue@: the node value ('getNodeValue').
 -- * 'styleGridMinColW': the least column width of a grid that fits as many
---   columns as it can, or 0 ('getGridMinColW').
+--   columns as it can, or 0.
 -- * @styleFontSize@: the font size, or 0 for the default ('getNodeFontSize').
 styleScrollContentW, styleNodeValue, styleGridMinColW, styleFontSize :: Int
 styleScrollContentW = 12
@@ -600,7 +597,7 @@ tagAlignY = 6
 --   child at the head of its parent's list.
 -- * 'treeNextSibling': the sibling that was added before this node. Following
 --   these links therefore visits a node's children from the last to the first.
--- * @treeChildCount@: the number of children, floating ones included.
+-- * 'treeChildCount': the number of children, floating ones included.
 treeStride, treeParent, treeFirstChild, treeNextSibling, treeChildCount :: Int
 treeStride = 8
 treeParent = 0
@@ -614,7 +611,7 @@ treeChildCount = 3
 -- * 'treeStyleIdx': the style index ('getStyleIdx').
 -- * @treeTextIdx@: the node's slot in 'naArrTextStore', which is its own
 --   index, or -1 when the node has no text.
--- * 'treeGridCols': the column count of a grid, or 0 ('getGridCols').
+-- * 'treeGridCols': the column count of a grid, or 0.
 treeWidgetId, treeStyleIdx, treeTextIdx, treeGridCols :: Int
 treeWidgetId = 4
 treeStyleIdx = 5
@@ -1054,11 +1051,6 @@ getFirstChild na idx = arenaArrays na >>= \a -> readTree a idx treeFirstChild
 getNextSibling :: NodeArena -> NodeIdx -> IO NodeIdx
 getNextSibling na idx = arenaArrays na >>= \a -> readTree a idx treeNextSibling
 
--- | Number of direct children, including floating nodes.
-{-# INLINE getChildCount #-}
-getChildCount :: NodeArena -> NodeIdx -> IO Int
-getChildCount na idx = arenaArrays na >>= \a -> readTree a idx treeChildCount
-
 -- | Node kind assigned at insertion, which selects layout and paint behaviour.
 {-# INLINE getNodeType #-}
 getNodeType :: NodeArena -> NodeIdx -> IO NodeType
@@ -1068,11 +1060,6 @@ getNodeType na idx = arenaArrays na >>= \a -> readTagEnum a idx tagNodeType
 {-# INLINE getDirection #-}
 getDirection :: NodeArena -> NodeIdx -> IO DirTag
 getDirection na idx = arenaArrays na >>= \a -> readTagEnum a idx tagDirection
-
--- | Explicit grid column count, or zero when none is set.
-{-# INLINE getGridCols #-}
-getGridCols :: NodeArena -> NodeIdx -> IO Int
-getGridCols na idx = arenaArrays na >>= \a -> readTree a idx treeGridCols
 
 -- | One axis of a node's layout constraints: the sizing mode, its number (see
 -- 'styleWVal' for units), and the minimum and maximum size in logical pixels.
@@ -1112,11 +1099,6 @@ getPadding na idx = do
   a <- arenaArrays na
   Padding <$> readStyle a idx stylePadL <*> readStyle a idx stylePadR <*> readStyle a idx stylePadT <*> readStyle a idx stylePadB
 
--- | Space between children, in logical pixels.
-{-# INLINE getGap #-}
-getGap :: NodeArena -> NodeIdx -> IO Float
-getGap na idx = arenaArrays na >>= \a -> readStyle a idx styleGap
-
 -- | Solved horizontal content extent of a two-axis scroller, in logical pixels.
 {-# INLINE getScrollContentW #-}
 getScrollContentW :: NodeArena -> NodeIdx -> IO Float
@@ -1126,11 +1108,6 @@ getScrollContentW na idx = arenaArrays na >>= \a -> readStyle a idx styleScrollC
 {-# INLINE setScrollContentW #-}
 setScrollContentW :: NodeArena -> NodeIdx -> Float -> IO ()
 setScrollContentW na idx v = arenaArrays na >>= \a -> writeStyle a idx styleScrollContentW v
-
--- | Adaptive grid's minimum column width in logical pixels, or zero if unset.
-{-# INLINE getGridMinColW #-}
-getGridMinColW :: NodeArena -> NodeIdx -> IO Float
-getGridMinColW na idx = arenaArrays na >>= \a -> readStyle a idx styleGridMinColW
 
 -- | Whether the parent has row direction. A root returns 'False'.
 {-# INLINE parentIsRow #-}

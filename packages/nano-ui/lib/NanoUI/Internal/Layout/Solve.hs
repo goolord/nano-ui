@@ -100,15 +100,12 @@ import NanoUI.Internal.Layout.Arena
   , readTagEnum
   , readTree
   , treeParent
+  , treeChildCount
   , getAlignX
   , getAlignY
-  , getChildCount
   , getDirection
   , findChildM
   , getFirstChild
-  , getGap
-  , getGridCols
-  , getGridMinColW
   , getHeightSizing
   , getNodeType
   , getOptions
@@ -913,7 +910,7 @@ recomputeFitHeightAtWidth env idx availW = do
   snd <$> memoizeWidth na (naFitMemo na) idx availW ((,) 0 <$> recomputeFitHeightAtWidthGo env idx availW)
 
 recomputeFitHeightAtWidthGo :: SolveEnv -> NodeIdx -> Float -> IO Float
-recomputeFitHeightAtWidthGo env@SolveEnv {seArena = na} idx availW = do
+recomputeFitHeightAtWidthGo env@SolveEnv {seArena = na, seArrays = a} idx availW = do
   nt <- getNodeType na idx
   AxisSizing wTag wVal minW maxW <- getWidthSizing na idx
   hAx@(AxisSizing hTag _ minH maxH) <- getHeightSizing na idx
@@ -942,12 +939,10 @@ recomputeFitHeightAtWidthGo env@SolveEnv {seArena = na} idx availW = do
       | otherwise -> pure oldH
 
     _ | (nt == NodeContainer || nt == NodePanel), hTag /= SizingFixed -> do
-          dir <- getDirection na idx
+          (pad, gap, dir) <- containerFlow a idx
           if dir == DirRow
             then pure oldH
             else do
-              pad <- getPadding na idx
-              gap <- getGap na idx
               let innerW = max 0 (effW' - padL pad - padR pad)
                   step (FlowAcc count contentH _) ci = do
                     AxisSizing subWTag subWVal _ subMaxW <- getWidthSizing na ci
@@ -972,7 +967,7 @@ recomputeFitHeightAtWidthGo env@SolveEnv {seArena = na} idx availW = do
 {-# INLINE loadChildrenScratch #-}
 loadChildrenScratch :: NodeArena -> NodeIdx -> (NodeIdx -> IO (Float, Float)) -> IO Int
 loadChildrenScratch na parent sizeOf = do
-  cc <- getChildCount na parent
+  cc <- arenaArrays na >>= \a -> readTree a parent treeChildCount
   FlexScratch {fsIdx = idxArr, fsW = wArr, fsH = hArr} <- ensureScratchCapacity na cc
   -- The sibling links run from the last child to the first, so the children
   -- fill the arrays from the end. Floating children leave room at the front,
@@ -1215,10 +1210,10 @@ positionChildren ::
   Float ->
   Float ->
   IO ()
-positionChildren env@SolveEnv {seArena = na} depth idx dir gap pad px py pw ph = do
-  nt <- getNodeType na idx
-  gCols <- getGridCols na idx
-  minColW <- getGridMinColW na idx
+positionChildren env@SolveEnv {seArrays = a} depth idx dir gap pad px py pw ph = do
+  nt <- readTagEnum a idx tagNodeType
+  gCols <- readTree a idx treeGridCols
+  minColW <- readStyle a idx styleGridMinColW
   let chrome = isChromeColumn nt dir
       cx = px + padL pad
       cy = py + padT pad
