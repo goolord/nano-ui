@@ -653,8 +653,8 @@ newContext = do
   ctxMessages <- newIORef []
   ctxFocusables <- newIORef =<< newPrimArray 64
   ctxFocusablesCount <- newIORef 0
-  ctxSpanBase <- newSpanArena 64
-  ctxSpanOverlay <- newSpanArena 64
+  ctxSpanBase <- newSpanArena
+  ctxSpanOverlay <- newSpanArena
   ctxInteractionState <- newIORef initialInteractionState
   ctxCursorZones <- newIORef []
   ctxImageAtlas <- Atlas.newImageAtlas

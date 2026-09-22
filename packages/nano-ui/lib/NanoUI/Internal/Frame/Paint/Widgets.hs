@@ -1,21 +1,25 @@
 {-# OPTIONS_GHC -fasm -fno-specialise-aggressively #-}
 
-
--- | Painters for controls and text fields. Each receives the shared paint
--- environment; NOINLINE keeps these large bodies out of the recursive node walk.
+-- | Painters for controls and text fields, and the paint environment they
+-- share with the node walk. NOINLINE keeps these large bodies out of the
+-- recursive node walk.
 module NanoUI.Internal.Frame.Paint.Widgets
-  ( paintWidget
+  ( PaintEnv (..)
+  , buildPaintEnv
+  , paintWidget
   , paintTextInputNode
   , paintTextAreaNode
   ) where
 
-import Control.Monad (unless, when)
+import Control.Monad (unless, void, when)
 import Data.IORef (readIORef)
 import Data.Maybe (fromMaybe)
+import Data.Primitive.PrimArray (PrimArray)
 import qualified Data.Text as T
 import NanoUI.Internal.Context (Context (..), getStore)
 import NanoUI.Internal.Draw
   ( DrawArena (..)
+  , getClipPieces
   , pushCircle
   , pushFilledTriangle
   , pushLine
@@ -48,8 +52,7 @@ import NanoUI.Internal.Frame.Chrome
   , textInputValue
   , widgetVisualStyle
   )
-import NanoUI.Internal.Frame.Node (resolveFontFor)
-import NanoUI.Internal.Frame.Paint.Types (PaintEnv (..), popupPanelRect)
+import NanoUI.Internal.Frame.Node (nodeFontMetrics, resolveFontFor)
 import NanoUI.Internal.Frame.Spans (forWidgetTextPlacements_, plainFieldPen, selectableTextGeometry, textInputFg)
 import NanoUI.Internal.Frame.TextArea (drawTextAreaContentWith)
 import NanoUI.Internal.Frame.TextArea.Content (resolveTextAreaFont)
@@ -62,19 +65,23 @@ import NanoUI.Internal.Frame.TextInput
   , textInputFieldRect
   , textInputFieldTextClip
   )
+import NanoUI.Internal.Id (WidgetId (..))
 import NanoUI.Internal.Layout.Arena
-  ( NodeIdx
+  ( NodeArena
+  , NodeIdx
   , NodeType (..)
   , getAlignX
   , getNodeFontColor
   , getNodeFontSize
+  , getNodeRect
   , getNodeValue
   , getOptions
   , getStyleIdx
   , getText
   , getWidgetId
+  , walkFloatingAncestors
   )
-import NanoUI.Internal.Style (AlignX (..), Style, styleBg, styleBorder, styleFg, themeAccent, themeInput, themeOnAccent)
+import NanoUI.Internal.Style (AlignX (..), Style, Theme, styleBg, styleBorder, styleFg, themeAccent, themeInput, themeOnAccent)
 import NanoUI.Internal.Types (Color (..), Rect (..), clamp, clamp01, colorA, lerpColor, onGrid, rectInflate, rectNonEmpty)
 import NanoUI.Internal.WidgetText
   ( hasFlag
@@ -101,6 +108,49 @@ import NanoUI.Internal.WidgetText
   )
 import NanoUI.Internal.Widgets.ColorPicker (drawColorPickerPart)
 
+-- | Context, arenas, fonts, and interaction state read once for a paint pass.
+-- Fields retain boxed references so compiler unboxing does not expand the
+-- context and theme records at every recursive call.
+data PaintEnv = PaintEnv
+  { peContext :: Context
+  , peNodeArena :: NodeArena
+  , peDrawArena :: DrawArena
+  , peTheme :: Theme
+  , peScope :: Int
+    -- ^ The node scope 'peTheme' belongs to. A node in another scope repaints
+    -- its subtree with that scope's theme.
+  , peFontMetrics :: FontMetrics
+  , peOccluders :: PrimArray Float
+    -- ^ Opaque floating panel rects as @x0, y0, x1, y1@ runs; empty when the
+    -- frame has none.
+  , peFocusRing :: WidgetId
+    -- ^ The focused widget while its keyboard focus ring shows, else 0.
+  , pePieces :: PrimArray Float
+    -- ^ The frame's damage pieces as @x0, y0, x1, y1@ runs, of which a node
+    -- must meet one to paint; empty when the clip is the one piece.
+  }
+
+-- | Locality helper for callers inside the paint frame loop; a fresh env
+-- re-reads the theme once.
+{-# NOINLINE buildPaintEnv #-}
+buildPaintEnv :: Context -> PrimArray Float -> IO PaintEnv
+buildPaintEnv ctx occluders = do
+  theme <- readIORef (ctxTheme ctx)
+  focus <- readIORef (ctxFocusId ctx)
+  focusVisible <- readIORef (ctxFocusVisible ctx)
+  pieces <- getClipPieces (ctxDrawArena ctx)
+  pure PaintEnv
+    { peContext = ctx
+    , peNodeArena = ctxNodeArena ctx
+    , peDrawArena = ctxDrawArena ctx
+    , peTheme = theme
+    , peScope = 0
+    , peFontMetrics = ctxFontMetrics ctx
+    , peOccluders = occluders
+    , peFocusRing = if focusVisible then focus else WidgetId 0
+    , pePieces = pieces
+    }
+
 -- | Single-line text input: selectable, bare, search, combo or captioned field
 -- depending on the node's visual style.
 {-# NOINLINE paintTextInputNode #-}
@@ -113,13 +163,32 @@ paintTextInputNode env idx rect@(Rect x y w h) = do
   focus <- textInputFocused ctx idx
   si <- getStyleIdx (peNodeArena env) idx
   let paint
-        | hasFlag textInputFlagNumeric si = paintNumericField ctx da fm style idx focus rect
+        -- The box, its value clipped left of the stepper, and the stepper's up
+        -- and down arrows beside a rule.
+        | hasFlag textInputFlagNumeric si = do
+            let (up@(Rect ux _ _ _), down) = numericStepperRects x y w h
+                iconCol = lerpColor (styleFg style) (styleBg style) 0.4
+            void $ paintCaptionlessField env style idx focus rect (numericTextClip fm x y w h) False $ do
+              pushLine da ux (y + 4) ux (y + h - 4) 1 (lerpColor (styleBorder style) (styleBg style) 0.4)
+              drawStepArrow da True up iconCol
+              drawStepArrow da False down iconCol
         | hasFlag textInputFlagSelectable si = paintSelectableText env style idx rect
         | hasFlag textInputFlagSearch si = do
             opts <- getOptions (peNodeArena env) idx
+            let iconCol = lerpColor (styleFg style) (styleBg style) 0.45
+                (magRect, Rect cx cy cw ch) = searchInputIconRects fm x y w h
+                field clip = paintCaptionlessField env style idx focus rect clip True
             if null opts
-              then paintSearchInput ctx da fm style idx focus rect
-              else paintComboField ctx da fm style idx focus rect
+              -- A search field: a magnifier on the left and a clear (×) on the
+              -- right while there is text.
+              then do
+                value <- field (searchInputTextClip fm x y w h) (drawSearchMagnifier da magRect iconCol)
+                unless (T.null value) $
+                  drawCloseIcon da False cx cy cw ch iconCol
+              -- A combo box: a select chevron in the right reserve that flips up
+              -- while the dropdown is open (i.e. focused).
+              else void $ field (comboTextClip fm x y w h) $
+                drawSelectChevron da focus (x + w - selectChevronReserve) y selectChevronReserve h iconCol
         | otherwise = do
             let field = textInputFieldRect fm x y w h
             paintStyledRect da style field
@@ -161,7 +230,11 @@ paintWidget env idx nt rect@(Rect _ ry _ rh) = do
   -- span the panel width instead of the (padded) node rect.
   menuRowRect <-
     if nt == NodeButton && hasFlag buttonFlagMenu si
-      then maybe rect (\(Rect px _ pw _) -> Rect px ry pw rh) <$> popupPanelRect ctx idx
+      then do
+        let na = peNodeArena env
+        panel <- walkFloatingAncestors na idx $ \p pnt ->
+          if pnt == NodePopup then Just <$> getNodeRect na p else pure Nothing
+        pure (maybe rect (\(Rect px _ pw _) -> Rect px ry pw rh) panel)
       else pure rect
   paintWidgetBackground env idx nt style si menuRowRect value rect
   paintWidgetForeground env idx nt style si rect
@@ -205,8 +278,8 @@ paintWidgetBackground env idx nt style si menuRowRect value (Rect x y w h) = do
   when isTable $
     paintTableHeader da theme (value > 0.5) style x y w h
   case nt of
-    NodeCheckbox -> drawCheckbox da fm style x y h value (themeAccent theme) (styleBg (themeInput theme)) (themeOnAccent theme)
-    NodeRadio -> drawRadio da fm style x y h value (themeAccent theme) (styleBg (themeInput theme))
+    NodeCheckbox -> drawChoiceControl da fm style theme x y h value True
+    NodeRadio -> drawChoiceControl da fm style theme x y h value False
     NodeTree -> do
       let (_, depth, hasKids, expanded) = treeDecodeStyle si
       when hasKids $
@@ -282,10 +355,9 @@ paintWidgetForeground env idx nt style si (Rect x y w h) = do
 -- | Sort direction triangle for a table header: up when ascending, down when
 -- descending, centered on the label line in the header's reserved slot.
 drawSortTriangle :: DrawArena -> Float -> Float -> Bool -> Color -> IO ()
-drawSortTriangle da cx cy down col =
-  if down
-    then pushFilledTriangle da (cx - 5) (cy - 3.5) (cx + 5) (cy - 3.5) cx (cy + 3.5) col
-    else pushFilledTriangle da (cx - 5) (cy + 3.5) (cx + 5) (cy + 3.5) cx (cy - 3.5) col
+drawSortTriangle da cx cy down =
+  let tip = if down then 3.5 else -3.5
+   in pushFilledTriangle da (cx - 5) (cy - tip) (cx + 5) (cy - tip) cx (cy + tip)
 
 -- | Draw a single-line field's text, and its selection and caret while it is
 -- being edited, inside @clip@. @penX/penY@ locate @txt@ (absolute).
@@ -310,10 +382,18 @@ paintClippedFieldText ctx da fm style idx mEdit clip penX penY txt fg =
       pushText da fm penX penY txt fg
     mapM_ (\edit -> drawTextInputCaret da edit (styleFg style)) mEdit
 
--- | A caption-less field's value, or @placeholder@ (dimmed) while empty and
--- unfocused, scrolled to keep the caret in @clip@.
-paintFieldValue :: Context -> DrawArena -> FontMetrics -> Style -> NodeIdx -> Bool -> Rect -> Rect -> T.Text -> T.Text -> IO ()
-paintFieldValue ctx da fm style idx focus (Rect x y w h) clip@(Rect clipX _ _ _) placeholder value = do
+-- | A caption-less field filling @box@: the box, @chrome@, then its value,
+-- or its label as a placeholder (dimmed) while empty and unfocused when it
+-- has one, scrolled to keep the caret in @clip@. Returns the value.
+paintCaptionlessField :: PaintEnv -> Style -> NodeIdx -> Bool -> Rect -> Rect -> Bool -> IO () -> IO T.Text
+paintCaptionlessField env style idx focus box@(Rect x y w h) clip@(Rect clipX _ _ _) hasPlaceholder chrome = do
+  let ctx = peContext env
+      da = peDrawArena env
+      fm = peFontMetrics env
+  paintStyledRect da style box
+  value <- textInputValue ctx idx
+  placeholder <- if hasPlaceholder then getText (ctxNodeArena ctx) idx else pure ""
+  chrome
   let display = textInputFieldText placeholder value focus
       baseFg = styleFg style
   scrollX <- syncTextInputScroll ctx idx x y w h
@@ -328,20 +408,7 @@ paintFieldValue ctx da fm style idx focus (Rect x y w h) clip@(Rect clipX _ _ _)
           )
   mEdit <- readFieldEdit ctx idx x y w h scrollX
   paintClippedFieldText ctx da fm style idx mEdit clip (clipX - scrollX) ty display fg
-
--- | Numeric field: the box, its value clipped left of the stepper, and the
--- stepper's up and down arrows beside a rule.
-paintNumericField :: Context -> DrawArena -> FontMetrics -> Style -> NodeIdx -> Bool -> Rect -> IO ()
-paintNumericField ctx da fm style idx focus box@(Rect x y w h) = do
-  paintStyledRect da style box
-  value <- textInputValue ctx idx
-  let (up@(Rect ux _ _ _), down) = numericStepperRects x y w h
-      iconCol = lerpColor (styleFg style) (styleBg style) 0.4
-      ruleCol = lerpColor (styleBorder style) (styleBg style) 0.4
-  pushLine da ux (y + 4) ux (y + h - 4) 1 ruleCol
-  drawStepArrow da True up iconCol
-  drawStepArrow da False down iconCol
-  paintFieldValue ctx da fm style idx focus box (numericTextClip fm x y w h) "" value
+  pure value
 
 -- | A stepper arrow in its half of the stepper, nudged toward the other half so
 -- the pair reads as one control.
@@ -359,32 +426,14 @@ pushArrowhead :: DrawArena -> Float -> Float -> Float -> Float -> Color -> IO ()
 pushArrowhead da cx cy hw tip =
   pushFilledTriangle da (cx - hw) (cy - tip * 0.35) (cx + hw) (cy - tip * 0.35) cx (cy + tip)
 
--- | Caption-less search field: box fills the node rect, magnifier on the left,
--- clear (×) on the right when there is text, and the editable value / caret /
--- selection confined to the space between them.
-paintSearchInput :: Context -> DrawArena -> FontMetrics -> Style -> NodeIdx -> Bool -> Rect -> IO ()
-paintSearchInput ctx da fm style idx focus box@(Rect x y w h) = do
-  let (magRect, Rect cx cy cw ch) = searchInputIconRects fm x y w h
-      iconCol = lerpColor (styleFg style) (styleBg style) 0.45
-  paintStyledRect da style box
-  value <- textInputValue ctx idx
-  lbl <- getText (ctxNodeArena ctx) idx
-  drawSearchMagnifier da magRect iconCol
-  paintFieldValue ctx da fm style idx focus box (searchInputTextClip fm x y w h) lbl value
-  unless (T.null value) $
-    drawCloseIcon da False cx cy cw ch iconCol
-
 -- | Selectable text: chrome-less, border-less, naturally sized text field
 -- that supports mouse drag selection and text copying without an insertion caret.
 paintSelectableText :: PaintEnv -> Style -> NodeIdx -> Rect -> IO ()
 paintSelectableText env style idx rect@(Rect x y w h) = do
   let ctx = peContext env
       da = peDrawArena env
-      arena = peNodeArena env
-  si <- getStyleIdx arena idx
-  mFontColor <- getNodeFontColor arena idx
-  fontSize <- getNodeFontSize arena idx
-  (fm, _, _) <- resolveFontFor ctx NodeTextInput fontSize si
+  mFontColor <- getNodeFontColor (peNodeArena env) idx
+  fm <- nodeFontMetrics ctx idx
   value <- textInputValue ctx idx
   let (penX, ty, _) = selectableTextGeometry fm x y h
   mEdit <- readFieldEdit ctx idx x y w h 0
@@ -405,70 +454,33 @@ drawSearchMagnifier da (Rect x y w h) col = do
   pushRoundedStroke da (Rect (cx - r0) (cy - r0) (2 * r0) (2 * r0)) r0 t col
   pushLine da (cx + startOff) (cy + startOff) (cx + endOff) (cy + endOff) (t * 0.8) col
 
--- | Combo box field: the search field's full-rect editable box, but styled
--- like a dropdown: no magnifier or clear chrome, and a select chevron in the
--- right reserve that flips up while the dropdown is open (i.e. focused).
-paintComboField :: Context -> DrawArena -> FontMetrics -> Style -> NodeIdx -> Bool -> Rect -> IO ()
-paintComboField ctx da fm style idx focus box@(Rect x y w h) = do
-  paintStyledRect da style box
-  value <- textInputValue ctx idx
-  lbl <- getText (ctxNodeArena ctx) idx
-  drawSelectChevron
-    da
-    focus
-    (x + w - selectChevronReserve)
-    y
-    selectChevronReserve
-    h
-    (lerpColor (styleFg style) (styleBg style) 0.45)
-  paintFieldValue ctx da fm style idx focus box (comboTextClip fm x y w h) lbl value
-
-verticallyCenteredBox :: Float -> Float -> Float -> Float
-verticallyCenteredBox y h box =
-  let slotH = min h (box + 4)
-   in y + max 0 ((slotH - box) / 2)
-
-drawChoiceControl ::
-  DrawArena ->
-  FontMetrics ->
-  Style ->
-  Float ->
-  Float ->
-  Float ->
-  Float ->
-  Float ->
-  Float ->
-  Color ->
-  Color ->
-  Bool ->
-  (Float -> Float -> Float -> IO ()) ->
-  IO ()
-drawChoiceControl da fm style x y h r bw value accent well solidChecked postMark = do
+-- | The box of a checkbox (@isCheckbox@) or radio button at @x@, centred in
+-- a slot at most 4 pixels taller than it within @y h@. A checked checkbox is
+-- a solid accent box with a check mark; otherwise the box is a well, and a
+-- checked radio's has an accent ring and dot.
+drawChoiceControl :: DrawArena -> FontMetrics -> Style -> Theme -> Float -> Float -> Float -> Float -> Bool -> IO ()
+drawChoiceControl da fm style theme x y h value isCheckbox = do
   let box = checkboxBoxSize fm
-      bx = x
-      by = verticallyCenteredBox y h box
-      outer = Rect bx by box box
+      !r = if isCheckbox then min 6 (box / 3.5) else box / 2
+      !bw = if isCheckbox then 1.5 else 2
+      by = y + max 0 ((min h (box + 4) - box) / 2)
+      outer = Rect x by box box
       checked = value >= 0.5
-  if checked && solidChecked
+      accent = themeAccent theme
+  if checked && isCheckbox
     then do
       pushRoundedRect da outer r accent
       pushRoundedStroke da outer r bw accent
-      postMark bx by box
+      drawCheckboxMark da x by box (themeOnAccent theme)
     else do
-      let inner = rectInflate (-bw) outer
-          innerR = max 0 (r - bw)
-          strokeCol = if checked then accent else styleBorder style
-      pushRoundedRect da inner innerR well
-      pushRoundedStroke da outer r bw strokeCol
-      when checked $ postMark bx by box
-
-drawCheckbox :: DrawArena -> FontMetrics -> Style -> Float -> Float -> Float -> Float -> Color -> Color -> Color -> IO ()
-drawCheckbox da fm style x y h value accent well mark =
-  let box = checkboxBoxSize fm
-      r = min 6 (box / 3.5)
-      bw = 1.5
-   in drawChoiceControl da fm style x y h r bw value accent well True $ \bx by b ->
-        drawCheckboxMark da bx by b mark
+      pushRoundedRect da (rectInflate (-bw) outer) (max 0 (r - bw)) (styleBg (themeInput theme))
+      pushRoundedStroke da outer r bw (if checked then accent else styleBorder style)
+      when checked $ do
+        s <- readIORef (daSnapScale da)
+        let !dot = box * 0.72
+            !dx = onGrid s x + (box - dot) / 2
+            !dy = onGrid s by + (box - dot) / 2
+        pushRoundedRectRaw da (Rect dx dy dot dot) (dot / 2) accent
 
 drawCheckboxMark :: DrawArena -> Float -> Float -> Float -> Color -> IO ()
 drawCheckboxMark da bx by box markCol = do
@@ -488,18 +500,6 @@ drawCheckboxMark da bx by box markCol = do
   cap x0 y0
   cap x1 y1
   cap x2 y2
-
-drawRadio :: DrawArena -> FontMetrics -> Style -> Float -> Float -> Float -> Float -> Color -> Color -> IO ()
-drawRadio da fm style x y h value accent well =
-  let box = checkboxBoxSize fm
-      r = box / 2
-      bw = 2
-   in drawChoiceControl da fm style x y h r bw value accent well False $ \bx by b -> do
-        s <- readIORef (daSnapScale da)
-        let !dot = b * 0.72
-            !dx = onGrid s bx + (b - dot) / 2
-            !dy = onGrid s by + (b - dot) / 2
-        pushRoundedRectRaw da (Rect dx dy dot dot) (dot / 2) accent
 
 -- | A cross centered in the box, or against its right edge when @trailing@.
 drawCloseIcon :: DrawArena -> Bool -> Float -> Float -> Float -> Float -> Color -> IO ()

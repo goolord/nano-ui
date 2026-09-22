@@ -33,7 +33,6 @@ import NanoUI.Internal.Context
   , nodeTheme
   )
 import NanoUI.Internal.Draw (DrawArena, pushRect, pushRoundedRect, pushRoundedStroke)
-import NanoUI.Internal.Font (menuAccentInset, menuAccentW)
 import NanoUI.Internal.Frame.Scroll.Geometry (ScrollBarLayout (..))
 import NanoUI.Internal.Id (hashWidgetId)
 import NanoUI.Internal.Layout.Arena
@@ -293,16 +292,12 @@ widgetVisualStyle ctx nt idx = do
         | hashWidgetId wid == hashWidgetId active = styleActiveBg widgetBase
         | nt == NodeCheckbox || nt == NodeRadio || nt == NodeSlider || isClose = styleBg widgetBase
         | isMenu = if isHot then styleHoverBg widgetBase else styleBg widgetBase
-        | otherwise = hoverBackground widgetBase animT isHot
+        | styleBg widgetBase == styleHoverBg widgetBase = styleBg widgetBase
+        | otherwise = lerpColor (styleBg widgetBase) (styleHoverBg widgetBase) hotT
+      hotT = if isHot && not (animT > 0) then 1 else animT
   -- Idle widgets (no hover/active tint change) reuse the base style record
   -- rather than allocating a fresh Style through a record update.
   pure $! if bg == styleBg widgetBase then widgetBase else widgetBase {styleBg = bg}
-
-hoverBackground :: Style -> Float -> Bool -> Color
-hoverBackground base val isHot
-  | styleBg base == styleHoverBg base = styleBg base
-  | isHot = lerpColor (styleBg base) (styleHoverBg base) (if val > 0 then val else 1)
-  | otherwise = lerpColor (styleBg base) (styleHoverBg base) val
 
 {-# INLINE fillStyledRect #-}
 fillStyledRect :: DrawArena -> Style -> Rect -> IO ()
@@ -358,14 +353,11 @@ menuPanelBounds (Rect x y w h) = Rect (x - 1) (y - 1) (w + menuShadowOffset + 2)
 menuShadowOffset :: Float
 menuShadowOffset = 3
 
--- | Accent marker at a menu row's left edge, inset from its top and bottom.
+-- | Accent marker, 2 pixels wide, at a menu row's left edge, inset 3 pixels
+-- from its top and bottom.
 paintMenuAccent :: DrawArena -> Theme -> Rect -> IO ()
 paintMenuAccent da theme (Rect x y _ h) =
-  pushRoundedRect
-    da
-    (Rect x (y + menuAccentInset) menuAccentW (max 0 (h - 2 * menuAccentInset)))
-    1
-    (themeAccent theme)
+  pushRoundedRect da (Rect x (y + 3) 2 (max 0 (h - 6))) 1 (themeAccent theme)
 
 -- | Scrollbar track and thumb, each rounded to at most 4px.
 paintScrollBarLayout :: DrawArena -> Color -> Color -> ScrollBarLayout -> IO ()

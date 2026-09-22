@@ -1,4 +1,7 @@
--- | Draw layer facade: data types, arena, geometry and text emitters.
+{-# LANGUAGE StrictData #-}
+
+-- | Draw layer facade: data types, arena and geometry, plus the text emitters
+-- (plain and synthetic-styled) and the 'DrawOp' interpreter.
 module NanoUI.Internal.Draw
   ( Layer (..)
   , DrawCmd (..)
@@ -41,12 +44,9 @@ module NanoUI.Internal.Draw
   , pushRoundedRectRaw
   , pushRoundedStroke
   , pushCircle
-  , pushCircleStroke
   , pushLine
   , pushStrokeAA
-  , pushStroke
   , pushFilledTriangle
-  , pushPolygonAA
   , pushPolylineAA
   , points3
   , drawTextBox
@@ -55,7 +55,305 @@ module NanoUI.Internal.Draw
   , emitDrawOps
   ) where
 
+import Control.Monad (forM_, unless, when)
+import Data.IORef (readIORef)
+import qualified Data.Text as T
+import Data.Primitive.SmallArray (SmallArray, indexSmallArray, sizeofSmallArray)
+import Data.Primitive.PrimArray (indexPrimArray, readPrimArray, sizeofPrimArray)
+import Data.Word (Word32, Word8)
+import Foreign.Ptr (Ptr)
 import NanoUI.Internal.Draw.Arena
 import NanoUI.Internal.Draw.Shapes
-import NanoUI.Internal.Draw.Text
 import NanoUI.Internal.Draw.Types
+import NanoUI.Internal.Font
+  ( FontMetrics (..)
+  , GlyphQuad (..)
+  , ShapedGlyphs (..)
+  , drawShaped
+  , kernedAdvance
+  , lineWidth
+  , prepareFontMetrics
+  )
+import NanoUI.Internal.SIMD (pokeQuadSIMD, pokeVertexSIMD)
+import NanoUI.Internal.Style (FontStyle (..), FontWeight (..), TextDecoration (..))
+import NanoUI.Internal.Types (Color (..), Rect (..), onGrid)
+
+-- | Pixel box for a 'DrawText' using host advances. diagrams text has no
+-- envelope, so plot sizing uses this instead of `fontSizeL`.
+drawTextBox :: FontMetrics -> Float -> Float -> Float -> Float -> T.Text -> Rect
+drawTextBox fm x y ax ay t =
+  let tw = lineWidth fm t
+      th = fmLineHeight fm
+      px = x - tw * max 0 ax
+      py =
+        if ay < 0
+          then y - fmAscent fm
+          else y - th * (1 - ay)
+   in Rect px py tw th
+
+{-# INLINE pushText #-}
+pushText :: DrawArena -> FontMetrics -> Float -> Float -> T.Text -> Color -> IO ()
+pushText _da _fm _x _y txt _col | T.null txt = pure ()
+pushText da fm x y txt col = do
+  prepared <- prepareFontMetrics fm txt
+  external <- readIORef (daExternalText da)
+  unless external $ pushPreparedTextQuads da prepared x y txt col
+
+-- | Styled text with metrics already prepared for @txt@.
+pushPreparedTextStyled ::
+  DrawArena ->
+  FontMetrics ->
+  FontWeight ->
+  FontStyle ->
+  TextDecoration ->
+  Float ->
+  Float ->
+  T.Text ->
+  Color ->
+  IO ()
+pushPreparedTextStyled da prepared weight fstyle deco x y txt col = do
+  external <- readIORef (daExternalText da)
+  unless external $ pushPreparedTextStyledQuads da prepared weight fstyle deco x y txt col
+
+-- Snapping the pen to the device pixel grid keeps every glyph quad on a whole
+-- pixel. Advances, bearings, and ink sizes are all integer pixel counts divided
+-- by the snap scale, so snapping the origin alone aligns the whole line:
+-- otherwise fractional layout positions leave glyphs straddling pixel
+-- boundaries, which makes nearest-sampled atlas text blurry and jitter as
+-- scroll position changes.
+pushPreparedTextQuads :: DrawArena -> FontMetrics -> Float -> Float -> T.Text -> Color -> IO ()
+pushPreparedTextQuads da fm x y txt col = do
+  let !px = onGrid (fmSnapScale fm) x
+      !py = onGrid (fmSnapScale fm) y
+  -- The host's shaped glyphs when it shapes, otherwise glyphs by character.
+  drawShaped fm txt >>= \case
+    Just glyphs -> pushShapedQuads da fm 0 px py glyphs col
+    Nothing -> pushGlyphQuads da fm 0 px py txt col
+
+-- | How far a glyph's x may fall behind a glyph before it in a line, and how
+-- wide a glyph may be, in line heights. Pens only move right in visual order:
+-- a glyph lands left of an earlier one only by a negative bearing or as a
+-- mark over the glyph before it, and no glyph is wider than a few ems. The
+-- clip skips in 'pushShapedQuads' and 'pushGlyphQuads' rely on it.
+glyphSlackLines :: Float
+glyphSlackLines = 4
+
+-- | A shaped line's glyph quads from pen @(px, py)@, sheared by @slant@
+-- around the baseline like 'pushGlyphQuads'. Glyphs wholly left or right of
+-- the current clip emit nothing. Glyph x offsets rise in visual order, to
+-- within 'glyphSlackLines', so a binary search finds the first glyph that
+-- can reach the clip and the walk stops at the first one that starts well
+-- past it: a long line in a narrow view costs the glyphs it shows plus a
+-- search. Glyphs on another atlas page than the one before them start a new
+-- draw command on that page's texture.
+pushShapedQuads :: DrawArena -> FontMetrics -> Float -> Float -> Float -> ShapedGlyphs -> Color -> IO ()
+pushShapedQuads da fm slant px py (ShapedGlyphs quads) col = do
+  let !count = sizeofPrimArray quads `div` 8
+  when (count > 0) $ do
+    cx <- readPrimArray (daCurrentClip da) 0
+    cw <- readPrimArray (daCurrentClip da) 2
+    let -- A sheared glyph leans at most this far past its box.
+        !lean = abs slant * (fmLineHeight fm + abs (fmAscent fm))
+        !left = cx - lean
+        !right = cx + cw + lean
+        !slack = glyphSlackLines * fmLineHeight fm
+        at k = indexPrimArray quads k
+        -- The first glyph in [lo, hi) whose x reaches @left - slack@. Every
+        -- glyph before it ends left of the clip.
+        firstReaching !lo !hi
+          | lo >= hi = lo
+          | otherwise =
+              let !mid = (lo + hi) `div` 2
+               in if px + at (mid * 8) < left - slack
+                    then firstReaching (mid + 1) hi
+                    else firstReaching lo mid
+        !start = firstReaching 0 count
+        !(r, g, b, a) = unpackColorF col
+        !baselineY = py + fmAscent fm
+        -- The glyphs from @q0@ on that are on atlas page @page@, until one
+        -- that is not.
+        drawPage !q0 !page = do
+          setTexture da (glyphPageTextureId page)
+          let !shown = count - q0
+              !pageU = fromIntegral page
+          withVertsReserve da (shown * 4) (shown * 6) $ \vp ip base baseIdx commit -> do
+            let go !q !m
+                  | q >= count = commit (m * 4) (m * 6)
+                  | otherwise = do
+                      let !o = q * 8
+                          !gx = px + at o
+                          !gw = at (o + 2)
+                          !u0 = at (o + 4)
+                      if gx > right + slack
+                        -- This glyph and every later one start right of the clip.
+                        then commit (m * 4) (m * 6)
+                        else if gx + gw < left || gx > right
+                        then go (q + 1) m
+                        else if u0 < pageU || u0 >= pageU + 1
+                        then commit (m * 4) (m * 6) >> drawPage q (truncate u0)
+                        else do
+                          let !gy = py + at (o + 1)
+                              !gh = at (o + 3)
+                              !v0 = at (o + 5)
+                              !u1 = at (o + 6)
+                              !v1 = at (o + 7)
+                          pokeGlyphQuad vp ip base baseIdx slant baselineY r g b a m gx gy gw gh (u0 - pageU) v0 (u1 - pageU) v1
+                          go (q + 1) (m + 1)
+            go q0 0
+    drawPage start 0
+
+-- | Glyph quad @q@ of a text reservation whose vertices start at @base@ and
+-- indices at @baseIdx@. A non-zero @slant@ shears the quad around
+-- @baselineY@. INLINE: it runs per glyph and takes more arguments than GHC
+-- unboxes for a call.
+{-# INLINE pokeGlyphQuad #-}
+pokeGlyphQuad ::
+  Ptr Word8 ->
+  Ptr Word8 ->
+  Int ->
+  Int ->
+  Float ->
+  Float ->
+  Float ->
+  Float ->
+  Float ->
+  Float ->
+  Int ->
+  Float ->
+  Float ->
+  Float ->
+  Float ->
+  Float ->
+  Float ->
+  Float ->
+  Float ->
+  IO ()
+pokeGlyphQuad vp ip base baseIdx slant baselineY r g b a q gx gy gw gh u0 v0 u1 v1 = do
+  let !vb = (base + q * 4) * vertexSize
+      !ib = (baseIdx + q * 6) * indexSize
+      !i0 = fromIntegral (base + q * 4) :: Word32
+  if slant == 0
+    then pokeQuadSIMD vp vb ip ib gx gy gw gh u0 v0 u1 v1 r g b a i0
+    else do
+      let !gy1 = gy + gh
+          !topDx = slant * (baselineY - gy)
+          !botDx = slant * (baselineY - gy1)
+      pokeVertexSIMD vp vb (gx + topDx) gy r g b a u0 v0
+      pokeVertexSIMD vp (vb + 32) (gx + gw + topDx) gy r g b a u1 v0
+      pokeVertexSIMD vp (vb + 64) (gx + gw + botDx) gy1 r g b a u1 v1
+      pokeVertexSIMD vp (vb + 96) (gx + botDx) gy1 r g b a u0 v1
+      pokeQuadIndices ip ib i0 (i0 + 1) (i0 + 2) (i0 + 3)
+
+-- | Glyph quads for one line from pen @(px, py)@, used as given: synthetic bold
+-- relies on its sub-pixel pass offsets. Every quad shares one arena
+-- reservation. A non-zero @slant@ shears glyphs around the shared baseline for
+-- synthetic oblique, so stems stay parallel and descenders lean left. A glyph
+-- the font lacks draws an upright advance box on the device grid. As in
+-- 'pushShapedQuads', glyphs wholly outside the clip emit nothing, and the
+-- walk stops once the pen is well past it.
+pushGlyphQuads :: DrawArena -> FontMetrics -> Float -> Float -> Float -> T.Text -> Color -> IO ()
+pushGlyphQuads da fm slant px py txt col = do
+  let !cap = T.length txt
+  when (cap > 0) $ do
+    scale <- readIORef (daSnapScale da)
+    cx <- readPrimArray (daCurrentClip da) 0
+    cw <- readPrimArray (daCurrentClip da) 2
+    setTexture da glyphAtlasTextureId
+    withVertsReserve da (cap * 4) (cap * 6) $ \vp ip base baseIdx commit -> do
+      let !(r, g, b, a) = unpackColorF col
+          !baselineY = py + fmAscent fm
+          !lean = abs slant * (fmLineHeight fm + abs (fmAscent fm))
+          !left = cx - lean
+          !right = cx + cw + lean
+          !stop = right + glyphSlackLines * fmLineHeight fm
+          outside gx gw = gx + gw < left || gx > right
+          walk !q !ox !prev !t =
+            case T.uncons t of
+              Nothing -> pure q
+              Just (c, rest)
+                | ox > stop -> pure q
+                | otherwise -> do
+                    let !adv = kernedAdvance fm prev c
+                        next !q' = walk q' (ox + adv) (Just c) rest
+                    case fmGlyph fm c of
+                      Nothing
+                        | adv > 0 && c /= ' ' && not (outside ox adv) -> do
+                            pokeGlyphQuad vp ip base baseIdx 0 baselineY r g b a q (onGrid scale ox) (onGrid scale py) adv (fmLineHeight fm) whitePixel whitePixel whitePixel whitePixel
+                            next (q + 1)
+                        | otherwise -> next q
+                      Just gq
+                        | outside (ox + gqX gq) (gqW gq) -> next q
+                        | otherwise -> do
+                            pokeGlyphQuad vp ip base baseIdx slant baselineY r g b a q (ox + gqX gq) (py + gqY gq) (gqW gq) (gqH gq) (gqU0 gq) (gqV0 gq) (gqU1 gq) (gqV1 gq)
+                            next (q + 1)
+      !k <- walk 0 px Nothing txt
+      commit (k * 4) (k * 6)
+
+-- | Synthetic weight, slant and decoration over the plain text path. Upright
+-- normal weight keeps the run path; every other pass walks glyphs.
+pushPreparedTextStyledQuads :: DrawArena -> FontMetrics -> FontWeight -> FontStyle -> TextDecoration -> Float -> Float -> T.Text -> Color -> IO ()
+pushPreparedTextStyledQuads da fm weight fstyle deco x y txt col
+  | weight == WeightNormal && fstyle == FontStyleNormal && deco == DecorationNone =
+      pushPreparedTextQuads da fm x y txt col
+  | otherwise = do
+      let !px = onGrid (fmSnapScale fm) x
+          !py = onGrid (fmSnapScale fm) y
+          !lh = fmLineHeight fm
+          !bOff = max 1.0 (0.05 * lh)
+          !slant = if fstyle == FontStyleNormal then 0 else 0.18
+          -- Pen offsets, in bold steps, of the passes that synthesize a weight.
+          passes = case weight of
+            WeightNormal -> [0]
+            WeightLight -> [0]
+            WeightMedium -> [0, 0.5]
+            WeightSemiBold -> [0, 0.75]
+            WeightBold -> [0, 1]
+            WeightExtraBold -> [0, 1, 1.5]
+            WeightBlack -> [0, 1, 1.5, 2]
+      shaped <- drawShaped fm txt
+      forM_ passes $ \k -> case shaped of
+        Just glyphs -> pushShapedQuads da fm slant (px + k * bOff) py glyphs col
+        Nothing -> pushGlyphQuads da fm slant (px + k * bOff) py txt col
+      when (deco /= DecorationNone) $ do
+        let !textW = lineWidth fm txt
+            !thick = max 1.0 (0.06 * lh)
+            underline = pushRect da (Rect px (py + fmAscent fm + max 1.0 (0.1 * lh)) textW thick) col
+            strike = pushRect da (Rect px (py + fmAscent fm * 0.65) textW thick) col
+        case deco of
+          DecorationUnderline -> underline
+          DecorationStrikethrough -> strike
+          DecorationUnderlineStrike -> underline >> strike
+          DecorationNone -> pure ()
+
+-- | Emit ops with @fm@ as the default font and @resolve@ giving the font of
+-- styled text, and whether it draws its weight and slant natively.
+emitDrawOps :: DrawArena -> FontMetrics -> (TextFont -> IO (FontMetrics, Bool)) -> SmallArray DrawOp -> IO ()
+emitDrawOps da fm resolve ops = go 0
+  where
+    go !i
+      | i >= sizeofSmallArray ops = pure ()
+      | otherwise = emitOne (indexSmallArray ops i) >> go (i + 1)
+    emitOne (FillRect r c) = pushRect da r c
+    emitOne (FillRoundedRect r radius c) = pushRoundedRect da r radius c
+    emitOne (FillTriangle x0 y0 x1 y1 x2 y2 c) = pushFilledTriangle da x0 y0 x1 y1 x2 y2 c
+    emitOne (FillCircle cx cy radius c) = pushCircle da cx cy radius c
+    emitOne (Stroke x0 y0 x1 y1 t c) = pushStroke da x0 y0 x1 y1 t c
+    emitOne (StrokeRoundedRect r radius bw c) = pushRoundedStroke da r radius bw c
+    emitOne (StrokeCircle cx cy radius bw c) = pushCircleStroke da cx cy radius bw c
+    emitOne (StrokeLineAA x0 y0 x1 y1 bw c) = pushStrokeAA da x0 y0 x1 y1 bw c
+    emitOne (FillPolygon pts tris c) = pushPolygonAA da pts tris c
+    emitOne (StrokePolyline pts w closed c) = pushPolylineAA da pts w closed c
+    emitOne (FillQuadGradient r c0 c1 c2 c3) = pushQuadGradient da r c0 c1 c2 c3
+    emitOne (DrawImageRect r tex u0 v0 u1 v1 c) = pushImage da r tex u0 v0 u1 v1 c
+    emitOne (DrawText x y ax ay t c) = do
+      prepared <- prepareFontMetrics fm t
+      let Rect px py _ _ = drawTextBox prepared x y ax ay t
+      -- Drawing text has no collected text span, so it keeps its quads even
+      -- when the host rasterizes widget text externally.
+      pushPreparedTextQuads da prepared px py t c
+    emitOne (DrawTextStyled x y font t c) = do
+      (styledFm, native) <- resolve font
+      let weight = if native then WeightNormal else textFontWeight font
+          fstyle = if native then FontStyleNormal else textFontStyle font
+      prepared <- prepareFontMetrics styledFm t
+      pushPreparedTextStyledQuads da prepared weight fstyle (textFontDecoration font) x y t c

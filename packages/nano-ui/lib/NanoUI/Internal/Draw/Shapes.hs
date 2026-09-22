@@ -41,7 +41,7 @@ pushRect :: DrawArena -> Rect -> Color -> IO ()
 pushRect da rect col = do
   r <- snapRectOrigin da rect
   setTexture da glyphAtlasTextureId
-  pushQuad da r whitePixelU whitePixelV whitePixelU whitePixelV col
+  pushQuad da r whitePixel whitePixel whitePixel whitePixel col
 
 -- Quad with a color per corner. GPU interpolates across the two triangles.
 -- Corners: top-left, top-right, bottom-right, bottom-left.
@@ -58,7 +58,7 @@ pushQuadGradient da (Rect x y w h) tl tr br bl
           !c2 = unpackColorF br
           !c3 = unpackColorF bl
       withVerts da 4 6 $ \vp ip vOff iOff baseIdxWord ->
-        pokeQuadGradientSIMD vp vOff ip iOff px py w h whitePixelU whitePixelV c0 c1 c2 c3 baseIdxWord
+        pokeQuadGradientSIMD vp vOff ip iOff px py w h whitePixel whitePixel c0 c1 c2 c3 baseIdxWord
 
 {-# INLINE pushImage #-}
 pushImage :: DrawArena -> Rect -> Int -> Float -> Float -> Float -> Float -> Color -> IO ()
@@ -69,7 +69,7 @@ pushImage da rect tex u0 v0 u1 v1 col
       setTexture da tex
       pushQuad da r u0 v0 u1 v1 col
 
--- 4 segments per 90° arc. Lookup table in cornerCosSin has 5 points per quadrant.
+-- 4 segments per 90° arc, so 'cornerCosSin' has 5 points per quadrant.
 cornerSegments :: Int
 cornerSegments = 4
 
@@ -87,32 +87,24 @@ cornerSegments = 4
 arcFeather :: Float
 arcFeather = 0.5
 
--- Precomputed unit-circle cos/sin for rounded-rect corners (4 segments per 90° arc).
+-- | Precomputed unit-circle cos/sin of point @seg@ of rounded-rect corner @q@
+-- (top left, then clockwise): each corner's arc is the one before it turned a
+-- quarter.
 {-# INLINE cornerCosSin #-}
 cornerCosSin :: Int -> Int -> (Float, Float)
 cornerCosSin q seg =
-  case q * 5 + seg of
-    0 -> (-1.0, 0.0)
-    1 -> (-0.9238795325, -0.3826834324)
-    2 -> (-0.7071067812, -0.7071067812)
-    3 -> (-0.3826834324, -0.9238795325)
-    4 -> (0.0, -1.0)
-    5 -> (0.0, -1.0)
-    6 -> (0.3826834324, -0.9238795325)
-    7 -> (0.7071067812, -0.7071067812)
-    8 -> (0.9238795325, -0.3826834324)
-    9 -> (1.0, 0.0)
-    10 -> (1.0, 0.0)
-    11 -> (0.9238795325, 0.3826834324)
-    12 -> (0.7071067812, 0.7071067812)
-    13 -> (0.3826834324, 0.9238795325)
-    14 -> (0.0, 1.0)
-    15 -> (0.0, 1.0)
-    16 -> (-0.3826834324, 0.9238795325)
-    17 -> (-0.7071067812, 0.7071067812)
-    18 -> (-0.9238795325, 0.3826834324)
-    19 -> (-1.0, 0.0)
-    _ -> (0.0, 0.0)
+  case q of
+    0 -> (-c, -s)
+    1 -> (s, -c)
+    2 -> (c, s)
+    _ -> (-s, c)
+  where
+    (c, s) = case seg of
+      0 -> (1.0, 0.0)
+      1 -> (0.9238795325, 0.3826834324)
+      2 -> (0.7071067812, 0.7071067812)
+      3 -> (0.3826834324, 0.9238795325)
+      _ -> (0.0, 1.0)
 
 -- | Poke one coverage-AA strip into a reservation at vertex offset @vi@ and
 -- index offset @ii@ (both relative to @base@/@baseIdx@). Callers guarantee
@@ -168,11 +160,11 @@ pokeBandVerts ::
   ((Float, Float), (Float, Float), (Float, Float), (Float, Float)) ->
   IO ()
 pokeBandVerts vp vBase hasCore r g b a ((p0x, p0y), (p1x, p1y), (p2x, p2y), (p3x, p3y)) = do
-  pokeVertexSIMD vp vBase p0x p0y r g b 0 whitePixelU whitePixelV
-  pokeVertexSIMD vp (vBase + 32) p1x p1y r g b a whitePixelU whitePixelV
+  pokeVertexSIMD vp vBase p0x p0y r g b 0 whitePixel whitePixel
+  pokeVertexSIMD vp (vBase + 32) p1x p1y r g b a whitePixel whitePixel
   when hasCore $
-    pokeVertexSIMD vp (vBase + 64) p2x p2y r g b a whitePixelU whitePixelV
-  pokeVertexSIMD vp (vBase + if hasCore then 96 else 64) p3x p3y r g b 0 whitePixelU whitePixelV
+    pokeVertexSIMD vp (vBase + 64) p2x p2y r g b a whitePixel whitePixel
+  pokeVertexSIMD vp (vBase + if hasCore then 96 else 64) p3x p3y r g b 0 whitePixel whitePixel
 
 -- | Index the quads between two 'pokeBandVerts' cross-sections starting at
 -- vertices @va@ and @vb@, at byte offset @iOff@: three quads, or two without
@@ -227,8 +219,7 @@ pushRoundedRectRaw da (Rect x y w h) radius col
               !needI = quadCount * 6 + 4 * cornerI
           withVertsRaw da needV needI $ \vp ip base baseIdx -> do
             let !(cr, cg, cb, ca) = unpackColorF col
-                !u = whitePixelU
-                !v = whitePixelV
+                !u = whitePixel
                 pokeQuadAt !vi !ii !qx !qy !qw !qh =
                   pokeQuadSIMD
                     vp
@@ -240,9 +231,9 @@ pushRoundedRectRaw da (Rect x y w h) radius col
                     qw
                     qh
                     u
-                    v
                     u
-                    v
+                    u
+                    u
                     cr
                     cg
                     cb
@@ -252,13 +243,13 @@ pushRoundedRectRaw da (Rect x y w h) radius col
                   let !vBase = (base + vi) * vertexSize
                       !centerIdx = fromIntegral (base + vi) :: Word32
                       !inRad = max 0 (rad - 1.0)
-                  pokeVertexSIMD vp vBase ccx ccy cr cg cb ca u v
+                  pokeVertexSIMD vp vBase ccx ccy cr cg cb ca u u
                   loopIO 0 segs $ \i -> do
                     let !(ct, st) = cornerCosSin q i
                         !rimI = base + vi + 1 + i
                         !outI = base + vi + 1 + ring + i
-                    pokeVertexSIMD vp (rimI * vertexSize) (ccx + inRad * ct) (ccy + inRad * st) cr cg cb ca u v
-                    pokeVertexSIMD vp (outI * vertexSize) (ccx + rad * ct) (ccy + rad * st) cr cg cb 0 u v
+                    pokeVertexSIMD vp (rimI * vertexSize) (ccx + inRad * ct) (ccy + inRad * st) cr cg cb ca u u
+                    pokeVertexSIMD vp (outI * vertexSize) (ccx + rad * ct) (ccy + rad * st) cr cg cb 0 u u
                     when (i > 0) $ do
                       let !k = i - 1
                           !rim0 = fromIntegral (base + vi + i) :: Word32
@@ -326,34 +317,19 @@ pushRoundedStrokeRaw da (Rect px py w h) radius bw col
           !ibw = min bw (min (w * 0.5) (h * 0.5))
       if square
         then pushSquareStroke da px py w h ibw col
-        else if rad <= 0.5
-        then do
-          let !t = ibw
-              !ox = px + t / 2
-              !oy = py + t / 2
-              !ow = max 0 (w - t)
-              !oh = max 0 (h - t)
-              !doTB = ow >= 0.001
-              !doLR = oh >= 0.001
-              !stripCount = (if doTB then 2 else 0) + (if doLR then 2 else 0)
-          withVertsRaw da (stripCount * 8) (stripCount * 18) $ \vp ip base baseIdx -> do
-            let !(r, g, b, a) = unpackColorF col
-                !viLR = if doTB then 16 else 0
-                !iiLR = if doTB then 36 else 0
-            when doTB $ do
-              pokeStripAt vp ip base baseIdx 0 0 ox oy (ox + ow) oy t r g b a
-              pokeStripAt vp ip base baseIdx 8 18 ox (oy + oh) (ox + ow) (oy + oh) t r g b a
-            when doLR $ do
-              pokeStripAt vp ip base baseIdx viLR iiLR ox oy ox (oy + oh) t r g b a
-              pokeStripAt vp ip base baseIdx (viLR + 8) (iiLR + 18) (ox + ow) oy (ox + ow) (oy + oh) t r g b a
         else do
           let !n = cornerSegments
-          let !midW = max 0 (w - 2 * rad)
-              !midH = max 0 (h - 2 * rad)
+              -- Square corners run the sides' centre lines into each other;
+              -- rounded ones end the sides where the arcs start.
+              !corners = rad > 0.5
               !topY = py + ibw / 2
-              !botY = py + h - ibw / 2
               !leftX = px + ibw / 2
-              !rightX = px + w - ibw / 2
+              !x0 = if corners then px + rad else leftX
+              !y0 = if corners then py + rad else topY
+              !midW = max 0 (if corners then w - 2 * rad else w - ibw)
+              !midH = max 0 (if corners then h - 2 * rad else h - ibw)
+              !botY = if corners then py + h - ibw / 2 else topY + midH
+              !rightX = if corners then px + w - ibw / 2 else leftX + midW
               !cr = max 0.25 (rad - ibw / 2)
               !doTB = midW >= 0.001
               !doLR = midH >= 0.001
@@ -369,8 +345,8 @@ pushRoundedStrokeRaw da (Rect px py w h) radius bw col
               !arcIndices = if hasCore then 18 else 12
               !arcV = (n + 1) * arcStride
               !arcI = n * arcIndices
-              !needV = stripCount * 8 + 4 * arcV
-              !needI = stripCount * 18 + 4 * arcI
+              !needV = stripCount * 8 + (if corners then 4 * arcV else 0)
+              !needI = stripCount * 18 + (if corners then 4 * arcI else 0)
           withVertsRaw da needV needI $ \vp ip base baseIdx -> do
             let !(r, g, b, a) = unpackColorF col
                 pokeArc !vi !ii !ccx !ccy !q = do
@@ -390,15 +366,16 @@ pushRoundedStrokeRaw da (Rect px py w h) radius bw col
                 !viC = stripCount * 8
                 !iiC = stripCount * 18
             when doTB $ do
-              pokeStripAt vp ip base baseIdx 0 0 (px + rad) topY (px + rad + midW) topY ibw r g b a
-              pokeStripAt vp ip base baseIdx 8 18 (px + rad) botY (px + rad + midW) botY ibw r g b a
+              pokeStripAt vp ip base baseIdx 0 0 x0 topY (x0 + midW) topY ibw r g b a
+              pokeStripAt vp ip base baseIdx 8 18 x0 botY (x0 + midW) botY ibw r g b a
             when doLR $ do
-              pokeStripAt vp ip base baseIdx viLR iiLR leftX (py + rad) leftX (py + rad + midH) ibw r g b a
-              pokeStripAt vp ip base baseIdx (viLR + 8) (iiLR + 18) rightX (py + rad) rightX (py + rad + midH) ibw r g b a
-            pokeArc viC iiC (px + rad) (py + rad) 0
-            pokeArc (viC + arcV) (iiC + arcI) (px + w - rad) (py + rad) 1
-            pokeArc (viC + 2 * arcV) (iiC + 2 * arcI) (px + w - rad) (py + h - rad) 2
-            pokeArc (viC + 3 * arcV) (iiC + 3 * arcI) (px + rad) (py + h - rad) 3
+              pokeStripAt vp ip base baseIdx viLR iiLR leftX y0 leftX (y0 + midH) ibw r g b a
+              pokeStripAt vp ip base baseIdx (viLR + 8) (iiLR + 18) rightX y0 rightX (y0 + midH) ibw r g b a
+            when corners $ do
+              pokeArc viC iiC (px + rad) (py + rad) 0
+              pokeArc (viC + arcV) (iiC + arcI) (px + w - rad) (py + rad) 1
+              pokeArc (viC + 2 * arcV) (iiC + 2 * arcI) (px + w - rad) (py + h - rad) 2
+              pokeArc (viC + 3 * arcV) (iiC + 3 * arcI) (px + rad) (py + h - rad) 3
 
 -- | Border of four flat rects inside @(x, y, w, h)@, @t@ thick. The origin is
 -- already snapped by the caller; the texture is already selected.
@@ -406,7 +383,7 @@ pushSquareStroke :: DrawArena -> Float -> Float -> Float -> Float -> Float -> Co
 pushSquareStroke da x y w h t col = do
   let edge qx qy qw qh =
         when (qw > 0 && qh > 0) $
-          pushQuad da (Rect qx qy qw qh) whitePixelU whitePixelV whitePixelU whitePixelV col
+          pushQuad da (Rect qx qy qw qh) whitePixel whitePixel whitePixel whitePixel col
       !innerH = h - 2 * t
   edge x y w t
   edge x (y + h - t) w t
@@ -482,7 +459,7 @@ pushStroke da x1 y1 x2 y2 thickness col
               !hy = dx * invLen
           withVerts da 4 6 $ \vp ip vOff iOff baseIdxWord -> do
             let !(r, g, b, a) = unpackColorF col
-                poke off px py = pokeVertexSIMD vp off px py r g b a whitePixelU whitePixelV
+                poke off px py = pokeVertexSIMD vp off px py r g b a whitePixel whitePixel
             poke vOff (px1 + hx) (py1 + hy)
             poke (vOff + 32) (px2 + hx) (py2 + hy)
             poke (vOff + 64) (px2 - hx) (py2 - hy)
@@ -600,9 +577,9 @@ polygonAAFrom da rx ry pts tris col
               (mx, my) = miterOf ax ay bx by
               !vx = px i + ox
               !vy = py i + oy
-          pokeVertexSIMD vp ((base + i) * vertexSize) (vx - f * mx) (vy - f * my) r g b a whitePixelU whitePixelV
+          pokeVertexSIMD vp ((base + i) * vertexSize) (vx - f * mx) (vy - f * my) r g b a whitePixel whitePixel
           when (fringe > 0) $
-            pokeVertexSIMD vp ((base + n + i) * vertexSize) (vx + f * mx) (vy + f * my) r g b 0 whitePixelU whitePixelV
+            pokeVertexSIMD vp ((base + n + i) * vertexSize) (vx + f * mx) (vy + f * my) r g b 0 whitePixel whitePixel
         loopIO 0 (nt - 1) $ \k ->
           pokeByteOff ip ((baseIdx + k) * indexSize) (fromIntegral (base + indexPrimArray tris k) :: Word32)
         loopIO 0 (fringe - 1) $ \i -> do

@@ -38,8 +38,6 @@ module NanoUI.Internal.Font
   , menuItemRowH
   , menuSepH
   , menuMinW
-  , menuAccentW
-  , menuAccentInset
   , centeredTextY
   , alignedTextPen
   , textInkEnd
@@ -205,11 +203,9 @@ scaleFontMetrics :: Float -> FontMetrics -> FontMetrics
 scaleFontMetrics s fm
   | s == 1.0 = fm
   | otherwise =
-      FontMetrics
+      fm
         { fmLineHeight = fmLineHeight fm * s
         , fmAscent = fmAscent fm * s
-        -- Snap scale is a display property, not a font-size property.
-        , fmSnapScale = fmSnapScale fm
         , fmAdvance = \c -> fmAdvance fm c * s
         , fmKerning = \a b -> fmKerning fm a b * s
         , fmShape = \t -> fmap scaleShape (fmShape fm t)
@@ -248,17 +244,11 @@ widgetContentInset fm =
 
 {-# INLINE buttonPadding #-}
 buttonPadding :: FontMetrics -> (Float, Float)
-buttonPadding fm =
-  let adv = fmAdvance fm ' '
-      lh = fmLineHeight fm
-   in (adv * 2.0, lh * 0.30)
+buttonPadding fm = (fmAdvance fm ' ' * 2.0, fmLineHeight fm * 0.30)
 
 {-# INLINE selectPadding #-}
 selectPadding :: FontMetrics -> (Float, Float)
-selectPadding fm =
-  let adv = fmAdvance fm ' '
-      lh = fmLineHeight fm
-   in (adv * 2.0, lh * 0.50)
+selectPadding fm = (fmAdvance fm ' ' * 2.0, fmLineHeight fm * 0.50)
 
 -- Menu metrics shared by the text-field context menu painter, the generic
 -- context-menu widgets, and the layout/paint passes, so both menus render
@@ -284,27 +274,18 @@ menuSepH = 9
 menuMinW :: Float
 menuMinW = 148
 
--- | Width of the hover accent marker painted at a menu row's left edge.
-menuAccentW :: Float
-menuAccentW = 2
-
--- | Gap between the hover accent marker and the row's top and bottom edges.
-menuAccentInset :: Float
-menuAccentInset = 3
-
+-- Snap the (constant) baseline offset to the device grid rather than the
+-- whole pen: pen = snap(y + offset) rounds a fractional offset with ties
+-- to even, so adjacent rows (and the same row across a sub-pixel scroll)
+-- land on alternating device pixels while the geometry beside them stays
+-- rigid. Snapping only the constant offset keeps every row fixed on the
+-- grid no matter where y falls.
 {-# INLINE centeredTextY #-}
 centeredTextY :: FontMetrics -> Float -> Float -> Float -> Float
 centeredTextY fm y h th =
   case fmGlyph fm 'H' of
     Nothing -> y + (h - th) / 2
     Just gq -> y + onGrid (fmSnapScale fm) (h / 2 - (gqY gq + gqH gq / 2))
-  where
-    -- Snap the (constant) baseline offset to the device grid rather than the
-    -- whole pen: pen = snap(y + offset) rounds a fractional offset with ties
-    -- to even, so adjacent rows (and the same row across a sub-pixel scroll)
-    -- land on alternating device pixels while the geometry beside them stays
-    -- rigid. Snapping only the constant offset keeps every row fixed on the
-    -- grid no matter where y falls.
 
 -- Last glyph ink right in the same space as 'pushText' (pen + gqX + gqW).
 -- Falls back to advance when 'fmGlyph' is Nothing (tests).
@@ -355,9 +336,7 @@ checkboxLeading fm = checkboxBoxSize fm + 8
 -- | Total tree-row x/y padding: zero horizontally and at least 8 logical pixels vertically.
 {-# INLINE treeItemPadding #-}
 treeItemPadding :: FontMetrics -> (Float, Float)
-treeItemPadding fm =
-  let lh = fmLineHeight fm
-   in (0, max 8 (fromIntegral (round (lh * 0.40) :: Int)))
+treeItemPadding fm = (0, max 8 (fromIntegral (round (fmLineHeight fm * 0.40) :: Int)))
 
 {-# INLINE treeIndentStep #-}
 treeIndentStep :: FontMetrics -> Float

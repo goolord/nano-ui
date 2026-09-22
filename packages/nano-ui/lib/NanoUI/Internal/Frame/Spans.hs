@@ -4,13 +4,10 @@ module NanoUI.Internal.Frame.Spans
   , collectOverlayTextSpans
   , collectRasterSpans
   , widgetNodeCount
-  , widgetTextSpans
-  , computeWidgetTextPlacements
   , plainFieldPen
   , textInputFg
   , forWidgetTextPlacements_
   , selectableTextGeometry
-  , collectNodeTextSpans
   , textNodeSpanEntry
   ) where
 
@@ -46,7 +43,7 @@ import NanoUI.Internal.Frame.Chrome (displayText, textInputFocused, textInputVal
 import NanoUI.Internal.Frame.Node (readScrollNode, resolveFontFor, scrollNodeViewport)
 import NanoUI.Internal.Frame.Scroll.Geometry (padContentClip, tagClippedSpans)
 import NanoUI.Internal.Frame.Select (collectSelectDropdownSpans, tagSelectClippedSpans)
-import NanoUI.Internal.Frame.SpanArena (SpanArena, pushSpan, resetSpanArena, spanArenaToList, spanArenaToListOccluded)
+import NanoUI.Internal.Frame.SpanArena (SpanArena, pushSpans, resetSpanArena, spanArenaToList)
 import NanoUI.Internal.Frame.TextEdit.Menu (collectTextEditMenuSpans)
 import NanoUI.Internal.Frame.TextInput (syncTextInputScroll, tagTextInputClippedSpans, textInputFieldRect)
 import NanoUI.Internal.Input (Input)
@@ -108,23 +105,18 @@ collectTextSpans ctx = do
   when (count > 0) $
     collectClippedSpans ctx 0 (Rect 0 0 1e9 1e9) arena
   panels <- floatingPanelRects ctx
-  spanArenaToListOccluded panels arena
+  spanArenaToList panels arena
 
 -- | Collect window, modal, popup, dropdown, and edit-menu text in paint order.
 -- Uses the same tuple format as 'collectTextSpans' and rebuilds the overlay arena.
 collectOverlayTextSpans :: Context -> Input -> IO [(Rect, T.Text, Color, Color, Rect)]
 collectOverlayTextSpans ctx inp = do
   let arena = ctxSpanOverlay ctx
-      push (r, t, fg, bg, c) = pushSpan arena r t fg bg c
   resetSpanArena arena
-  collectFloatingSpansInto ctx NodeWindow arena
-  collectFloatingSpansInto ctx NodeModal arena
-  collectFloatingSpansInto ctx NodePopup arena
-  drops <- collectSelectDropdownSpans ctx inp
-  menu <- collectTextEditMenuSpans ctx inp
-  mapM_ push drops
-  mapM_ push menu
-  spanArenaToList arena
+  mapM_ (\nt -> collectFloatingSpansInto ctx nt arena) [NodeWindow, NodeModal, NodePopup]
+  collectSelectDropdownSpans ctx inp >>= pushSpans arena
+  collectTextEditMenuSpans ctx inp >>= pushSpans arena
+  spanArenaToList IM.empty arena
 
 -- | Collect base and overlay text separately for a host that rasterises text itself.
 collectRasterSpans :: Context -> Input -> IO ([(Rect, T.Text, Color, Color, Rect)], [(Rect, T.Text, Color, Color, Rect)])
@@ -134,41 +126,45 @@ collectRasterSpans ctx inp = (,) <$> collectTextSpans ctx <*> collectOverlayText
 widgetNodeCount :: Context -> IO Int
 widgetNodeCount ctx = arenaCount (ctxNodeArena ctx)
 
-{-# INLINE collectClippedSpans #-}
+-- | Spans of node @idx@ and its subtree inside @clip@, floating subtrees left
+-- out.
 collectClippedSpans :: Context -> NodeIdx -> Rect -> SpanArena -> IO ()
 collectClippedSpans ctx idx clip arena = do
   nt <- getNodeType (ctxNodeArena ctx) idx
-  unless (isFloatingNode nt) $
-    collectClippedSpans' ctx idx nt clip arena
-
-collectClippedSpans' :: Context -> NodeIdx -> NodeType -> Rect -> SpanArena -> IO ()
-collectClippedSpans' ctx idx nt clip arena = do
-  (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-  mClipChildren <-
-    if isScrollNode nt
-      then
-        getClipRect (ctxNodeArena ctx) idx >>= \case
-          Just live -> pure (rectIntersect clip live)
-          Nothing -> (\sn -> rectIntersect clip (scrollNodeViewport sn x y w h)) <$> readScrollNode (ctxNodeArena ctx) idx
-      else pure (if nt == NodePanel then rectIntersect clip (Rect x y w h) else Just clip)
-  forM_ mClipChildren $ \clipHere -> do
-    let fm = ctxFontMetrics ctx
-    spans <- collectNodeTextSpans ctx idx
-    here <-
-      case nt of
-        NodeSelect -> pure (tagSelectClippedSpans clipHere x y w h fm spans)
-        NodeTextInput -> do
-          si <- getStyleIdx (ctxNodeArena ctx) idx
-          pure $
-            if hasFlag textInputFlagNumeric si
-              then maybe [] (`tagClippedSpans` spans) (rectIntersect clipHere (numericTextClip fm x y w h))
-              else
-                if hasFlag textInputFlagSelectable si
-                  then tagClippedSpans clipHere spans
-                  else tagTextInputClippedSpans clipHere x y w h fm spans
-        _ -> pure (tagClippedSpans clipHere spans)
-    mapM_ (\(r, t, fg, bg, c) -> pushSpan arena r t fg bg c) here
-    walkChildSpans ctx idx clipHere arena
+  unless (isFloatingNode nt) $ do
+    (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+    mClipChildren <-
+      if isScrollNode nt
+        then
+          getClipRect (ctxNodeArena ctx) idx >>= \case
+            Just live -> pure (rectIntersect clip live)
+            Nothing -> (\sn -> rectIntersect clip (scrollNodeViewport sn x y w h)) <$> readScrollNode (ctxNodeArena ctx) idx
+        else pure (if nt == NodePanel then rectIntersect clip (Rect x y w h) else Just clip)
+    forM_ mClipChildren $ \clipHere -> do
+      let fm = ctxFontMetrics ctx
+      -- A text node's spans are cached per node until its inputs change.
+      -- Placement uses glyph ink ('alignedTextPen'), not TTF_GetStringSize;
+      -- wrapping still measures with the host so line breaks stay on the TTF
+      -- width.
+      spans <-
+        if nt == NodeText
+          then sceSpans <$> textNodeSpanEntry ctx idx x y w h
+          else if isWidgetNode nt then widgetTextSpans ctx nt idx x y w h else pure []
+      here <-
+        case nt of
+          NodeSelect -> pure (tagSelectClippedSpans clipHere x y w h fm spans)
+          NodeTextInput -> do
+            si <- getStyleIdx (ctxNodeArena ctx) idx
+            pure $
+              if hasFlag textInputFlagNumeric si
+                then maybe [] (`tagClippedSpans` spans) (rectIntersect clipHere (numericTextClip fm x y w h))
+                else
+                  if hasFlag textInputFlagSelectable si
+                    then tagClippedSpans clipHere spans
+                    else tagTextInputClippedSpans clipHere x y w h fm spans
+          _ -> pure (tagClippedSpans clipHere spans)
+      pushSpans arena here
+      walkChildSpans ctx idx clipHere arena
 
 walkChildSpans :: Context -> NodeIdx -> Rect -> SpanArena -> IO ()
 walkChildSpans ctx idx clip arena = getFirstChild (ctxNodeArena ctx) idx >>= go
@@ -180,19 +176,6 @@ walkChildSpans ctx idx clip arena = getFirstChild (ctxNodeArena ctx) idx >>= go
           -- Later siblings paint under earlier ones; walk reverse then collect.
           go ns
           collectClippedSpans ctx ci clip arena
-
--- | Text spans of one node. A text node's spans are cached per node until
--- its inputs change. Placement uses glyph ink ('alignedTextPen'), not
--- TTF_GetStringSize; wrapping still measures with the host so line breaks
--- stay on the TTF width.
-collectNodeTextSpans :: Context -> NodeIdx -> IO [(Rect, T.Text, Color, Color)]
-collectNodeTextSpans ctx idx = do
-  let arena = ctxNodeArena ctx
-  nt <- getNodeType arena idx
-  (x, y, w, h) <- getRect arena idx
-  if nt /= NodeText
-    then if isWidgetNode nt then widgetTextSpans ctx nt idx x y w h else pure []
-    else sceSpans <$> textNodeSpanEntry ctx idx x y w h
 
 -- | Text node @idx@'s span cache entry at @(x, y)@, @w@ by @h@, brought up to
 -- date: its spans, and the metrics prepared for each line, which paint draws
@@ -317,7 +300,15 @@ widgetTextSpans ::
   Context -> NodeType -> NodeIdx -> Float -> Float -> Float -> Float -> IO [(Rect, T.Text, Color, Color)]
 widgetTextSpans ctx nt idx x y w h = do
   style <- widgetVisualStyle ctx nt idx
-  placements <- widgetTextPlacements ctx nt idx x y w h
+  placements <-
+    -- A centred label's placement depends on its text, style, font, alignment
+    -- and size but not its origin, so it is cached. Field, picker and slider
+    -- text depends on their data.
+    if hasCenteredLabel nt
+      then do
+        placement <- cachedWidgetLabel ctx nt idx w h
+        pure [(txt, x + px, y + py, tw, th) | Just (WidgetTextPlacement txt px py tw th) <- [placement]]
+      else computeWidgetTextPlacements ctx nt idx x y w h
   let bg = styleBg style
   case nt of
     NodeTextInput -> do
@@ -335,17 +326,6 @@ textInputFg ctx style idx focus = do
   fg <- fromMaybe (styleFg style) <$> getNodeFontColor (ctxNodeArena ctx) idx
   value <- textInputValue ctx idx
   pure (if T.null value && not focus then lerpColor fg (styleBg style) 0.40 else fg)
-
-widgetTextPlacements ::
-  Context -> NodeType -> NodeIdx -> Float -> Float -> Float -> Float -> IO [(T.Text, Float, Float, Float, Float)]
-widgetTextPlacements ctx nt idx x y w h
-  -- A centred label's placement depends on its text, style, font, alignment
-  -- and size but not its origin, so it is cached. Field, picker and slider
-  -- text depends on their data.
-  | hasCenteredLabel nt = do
-      placement <- cachedWidgetLabel ctx nt idx w h
-      pure [(txt, x + px, y + py, tw, th) | Just (WidgetTextPlacement txt px py tw th) <- [placement]]
-  | otherwise = computeWidgetTextPlacements ctx nt idx x y w h
 
 -- | Runtime consumer API. The Bool marks the last placement (for table sort
 -- arrows); cached labels are translated directly into the consumer.
@@ -461,7 +441,6 @@ computeWidgetTextPlacements ctx nt idx x y w h = do
             [ (colorPickerCurrentLabel, bx, centeredTextY fm currentY lineH ch, cw, ch)
             , (colorPickerNewLabel, bx, centeredTextY fm newY lineH nh, nw, nh)
             ]
-    NodeSlider -> pure []
     NodeTextInput
       | hasFlag textInputFlagSelectable si -> do
           value <- textInputValue ctx idx
@@ -481,14 +460,9 @@ computeWidgetTextPlacements ctx nt idx x y w h = do
         [ (lbl, x, centeredTextY fm y lineH lh, lw, lh)
         , (value, x + ix, y + iy, fw, h)
         ]
-    NodeDrawing -> pure []
-    _ -> do
-      txt <- displayText ctx nt idx
-      ax <- getAlignX (ctxNodeArena ctx) idx
-      (_, th) <- measureTxt txt
-      prepared <- prepareFontMetrics fm txt
-      let (tx, used) = alignedTextPen ax x w ix prepared txt
-      pure [(txt, tx, centeredTextY fm y h th, used, th)]
+    -- Sliders, drawings and plain widgets carry no text; the other widgets
+    -- have centred labels ('cachedWidgetLabel').
+    _ -> pure []
 
 -- | Spans inside every floating panel of one kind, clipped to its content box.
 collectFloatingSpansInto :: Context -> NodeType -> SpanArena -> IO ()

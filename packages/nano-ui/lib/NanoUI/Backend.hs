@@ -145,7 +145,7 @@ module NanoUI.Backend
 where
 
 import NanoUI.Internal.Compact (Compact, askCompact, compactHost)
-import NanoUI.Internal.Draw.Text (drawTextBox)
+import NanoUI.Internal.Draw (drawTextBox)
 import NanoUI.Internal.Font
   ( FontBackend (..)
   , FontMetrics (..)
