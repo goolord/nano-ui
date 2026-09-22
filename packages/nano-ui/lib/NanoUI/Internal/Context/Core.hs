@@ -55,7 +55,7 @@ module NanoUI.Internal.Context.Core
 where
 
 import Control.Monad (forM_, unless, when)
-import Data.Bits (shiftR, (.&.))
+import Data.Bits (shiftL, shiftR, (.&.), (.|.))
 import Data.IORef (modifyIORef', readIORef, writeIORef)
 import Data.Primitive.SmallArray (SmallMutableArray, copySmallMutableArray, newSmallArray, readSmallArray, getSizeofSmallMutableArray, writeSmallArray)
 import Data.IntMap.Strict qualified as IM
@@ -89,7 +89,7 @@ import NanoUI.Internal.Store
   , lookupSlot
   , slotKey
   )
-import NanoUI.Internal.Style (Theme)
+import NanoUI.Internal.Style (Theme, disabledTheme)
 import NanoUI.Internal.Types (Damage, DamageBounds (..), Rect, defaultDamageSlop, rectH, rectW)
 import NanoUI.Widgets.TextCommand (TextCommand)
 
@@ -441,13 +441,15 @@ beginThemeScopes ctx newFrame = do
           }
     else writeIORef (ctxThemeScopes ctx) $! ts {tsCount = 0, tsDisabled = False, tsChanged = False}
 
--- | Add a scope with disabled status, raw theme, and painted theme, in that
--- order. Returns a one-based theme index and records whether the painted
+-- | Add a scope with its disabled status and raw theme, painted faded
+-- ('disabledTheme') when disabled. Returns the packed arena scope (the
+-- one-based theme index and the disabled bit) and records whether the painted
 -- theme differs from the previous frame's theme at that index.
-pushThemeScope :: Context -> Bool -> Theme -> Theme -> IO Int
-pushThemeScope ctx disabled raw theme = do
+pushThemeScope :: Context -> Bool -> Theme -> IO Int
+pushThemeScope ctx disabled raw = do
   ts <- readIORef (ctxThemeScopes ctx)
   let !i = tsCount ts
+      theme = if disabled then disabledTheme raw else raw
       -- The two arrays grow separately: 'tsThemes' trades places with
       -- 'tsPrev' each frame, so its capacity can differ from that of 'tsRaw'.
       withRoom arr fill = do
@@ -468,7 +470,7 @@ pushThemeScope ctx disabled raw theme = do
   writeSmallArray raws i raw
   writeIORef (ctxThemeScopes ctx) $!
     ts {tsCount = i + 1, tsThemes = themes, tsRaw = raws, tsDisabled = tsDisabled ts || disabled, tsChanged = tsChanged ts || not same}
-  pure (i + 1)
+  pure (((i + 1) `shiftL` 1) .|. fromEnum disabled)
 
 -- | Whether this frame's scopes look different from last frame's: a theme
 -- changed, scopes were added or dropped, or nodes moved between scopes.

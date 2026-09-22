@@ -61,10 +61,6 @@ module NanoUI.Internal.Monad
   , damageRectNow
   , damageGroupNow
   , damageFullNow
-  , FrameMsg (..)
-  , decodeMessages
-  , reduceMessages
-  , reduceUpdates
   , whenM
   , unlessM
   , ifM
@@ -73,8 +69,8 @@ module NanoUI.Internal.Monad
 where
 
 import Control.Exception (bracket)
-import Control.Monad (unless, when)
-import Data.Bits (shiftL, (.&.), (.|.))
+import Control.Monad (unless, when, (<$!>))
+import Data.Bits ((.&.))
 import Data.Hashable (Hashable, hash)
 import Data.IORef (modifyIORef', readIORef, writeIORef)
 import Data.Text (Text)
@@ -109,7 +105,6 @@ import NanoUI.Internal.Context
   , damagePeers
   , damageRect
   , damageWidget
-  , decodeMessages
   , getFocusId
   , getPrevRect
   , getScrollMetrics
@@ -138,8 +133,6 @@ import NanoUI.Internal.Context
   , pushThemeScope
   , scopeRawTheme
   , setTheme
-  , reduceMessages
-  , reduceUpdates
   )
 import NanoUI.Internal.Draw.Types (TextFont (..))
 import NanoUI.Internal.Font (FontMetrics, lineWidthIO)
@@ -153,7 +146,7 @@ import NanoUI.Internal.Id
   , scopeTag
   )
 import NanoUI.Internal.Layout.Arena (getArenaScope, setArenaScope)
-import NanoUI.Internal.Style (FontStyle, FontVariant, FontWeight, Layout, TextDecoration (DecorationNone), Theme, defaultLayout, disabledTheme)
+import NanoUI.Internal.Style (FontStyle, FontVariant, FontWeight, Layout, TextDecoration (DecorationNone), Theme, defaultLayout)
 import NanoUI.Internal.Input (Input (..), Key (KeyEscape), inputKeysElem, inputMousePos, inputWindowSize, stripInteractionInput)
 import NanoUI.Internal.Types (DamageBounds, Rect, Size (..), V2)
 
@@ -174,7 +167,12 @@ type instance DispatchOf Ui = Static WithSideEffects
 -- what widgets read, and as the frame received it ('askFrameInput'). Few
 -- things read the second, so it is lazy: a 'disabledWhen' scope strips it
 -- only if something inside asks.
-data instance StaticRep Ui = UiRep !Context !Input Input !Layout
+data instance StaticRep Ui = UiRep
+  { repContext :: !Context
+  , repInput :: !Input
+  , repFrame :: Input
+  , repLayout :: !Layout
+  }
 
 -- | Interpret UI operations using a context and input. This runs the view only;
 -- use a backend or @runFrame@ to reset arenas, solve layout, and paint.
@@ -201,9 +199,7 @@ uiIO m = do
 -- | Run an action on the view's 'Context'.
 {-# INLINE withContext #-}
 withContext :: Ui :> es => (Context -> IO a) -> Eff es a
-withContext f = do
-  UiRep ctx _ _ _ <- getStaticRep
-  unsafeEff_ (f ctx)
+withContext f = getStaticRep >>= \r -> unsafeEff_ (f $! repContext r)
 
 -- | Acquire UI-thread state, run an action, and restore it even on exceptions.
 -- Acquisition and release are masked, as in 'bracket'; the view inherits the
@@ -286,21 +282,17 @@ withKey = keyed
 -- | The mutable context for this view. It belongs to the current UI session.
 {-# INLINE askContext #-}
 askContext :: Ui :> es => Eff es Context
-askContext = do
-  UiRep ctx _ _ _ <- getStaticRep
-  pure ctx
+askContext = repContext <$!> getStaticRep
 
 -- | Layout defaults in the current 'withDefaultLayout' scope.
 {-# INLINE askDefaultLayout #-}
 askDefaultLayout :: Ui :> es => Eff es Layout
-askDefaultLayout = do
-  UiRep _ _ _ l <- getStaticRep
-  pure l
+askDefaultLayout = repLayout <$!> getStaticRep
 
 -- | Modify layout defaults for the enclosed action, restoring them on exit.
 {-# INLINE withDefaultLayout #-}
 withDefaultLayout :: Ui :> es => (Layout -> Layout) -> Eff es a -> Eff es a
-withDefaultLayout f = localStaticRep (\(UiRep ctx inp frame l) -> UiRep ctx inp frame (f l))
+withDefaultLayout f = localStaticRep (\r -> r {repLayout = f (repLayout r)})
 
 -- | The context's base font metrics, before per-widget font overrides.
 {-# INLINE uiFontMetrics #-}
@@ -349,11 +341,8 @@ uiTheme = withContext currentTheme
 -- widgets look, never their layout.
 {-# INLINE styled #-}
 styled :: Ui :> es => (Theme -> Theme) -> Eff es a -> Eff es a
-styled f = withPaintScope $ \ctx outer -> do
-  raw <- f <$> scopeRawTheme ctx outer
-  let !disabled = outer .&. 1
-  ti <- pushThemeScope ctx (disabled /= 0) raw (if disabled /= 0 then disabledTheme raw else raw)
-  pure ((ti `shiftL` 1) .|. disabled)
+styled f = withPaintScope $ \ctx outer ->
+  pushThemeScope ctx (outer .&. 1 /= 0) . f =<< scopeRawTheme ctx outer
 
 -- | Draw a part of the view with another theme, whatever the theme around it.
 {-# INLINE themed #-}
@@ -372,16 +361,13 @@ disabledWhen True m =
   -- The view inside sees no presses, keys or wheel, so no widget's own input
   -- handling can fire; the frame's focus and click passes check the scope.
   localStaticRep
-    (\(UiRep ctx inp frame l) -> UiRep ctx (inert inp) (inert frame) l)
+    (\r -> r {repInput = inert (repInput r), repFrame = inert (repFrame r)})
     (withPaintScope enter m)
   where
     inert i = (stripInteractionInput i) {inputMouseDown = False, inputMouseRightDown = False}
     enter ctx outer
       | outer .&. 1 /= 0 = pure outer
-      | otherwise = do
-          raw <- scopeRawTheme ctx outer
-          ti <- pushThemeScope ctx True raw (disabledTheme raw)
-          pure ((ti `shiftL` 1) .|. 1)
+      | otherwise = pushThemeScope ctx True =<< scopeRawTheme ctx outer
 
 -- Run @m@ with the arena scope @enter@ picks, then restore the scope around it
 -- (also on exceptions).
@@ -416,9 +402,7 @@ uiMousePos = fmap inputMousePos askInput
 -- disabled scopes also remove keyboard and other interaction events.
 {-# INLINE askInput #-}
 askInput :: Ui :> es => Eff es Input
-askInput = do
-  UiRep _ inp _ _ <- getStaticRep
-  pure inp
+askInput = repInput <$!> getStaticRep
 
 -- | The frame's input before routing, pointer included whoever it belongs
 -- to. For what watches the whole window rather than reacting to its own
@@ -428,13 +412,13 @@ askInput = do
 {-# INLINE askFrameInput #-}
 askFrameInput :: Ui :> es => Eff es Input
 askFrameInput = do
-  UiRep _ _ frame _ <- getStaticRep
+  UiRep {repFrame = frame} <- getStaticRep
   pure frame
 
 -- | Run a part of the view with another routed input.
 {-# INLINE localInput #-}
 localInput :: Ui :> es => Input -> Eff es a -> Eff es a
-localInput inp = localStaticRep (\(UiRep ctx _ frame l) -> UiRep ctx inp frame l)
+localInput inp = localStaticRep (\r -> r {repInput = inp})
 
 -- | The application window's content size in logical pixels.
 {-# INLINE windowSize #-}
