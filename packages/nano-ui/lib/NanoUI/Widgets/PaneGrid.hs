@@ -95,6 +95,7 @@ import NanoUI.Internal.Types
   , rectW
   , rectX
   , rectY
+  , v2Sub
   , v2X
   , v2Y
   )
@@ -287,7 +288,6 @@ data PaneGridResponse = PaneGridResponse
   }
   deriving (Eq, Show)
 
-
 -- -----------------------------------------------------------------------------
 -- Internal state
 -- -----------------------------------------------------------------------------
@@ -325,10 +325,10 @@ data Gesture
     -- ^ A divider drag: the split's id, and its ratio and the pointer's
     -- main-axis coordinate at the press, so the divider moves by the pointer's
     -- delta instead of snapping to it.
-  | Drag !Word64 !Float !Float !Bool !Text
-    -- ^ A pane drag: the pane's id, the grab offset from its origin (for the
-    -- drag threshold), whether the pointer has crossed the threshold, and the
-    -- pane's title for the drag indicator.
+  | Drag !Word64 !V2 !Bool !Text
+    -- ^ A pane drag: the pane's id, the pointer at the press (for the drag
+    -- threshold), whether the pointer has crossed the threshold since, and
+    -- the pane's title for the drag indicator.
   deriving (Eq)
 
 data RenderedPane = RenderedPane
@@ -364,17 +364,17 @@ data GridEnv es = GridEnv
 -- Tree + focus state
 -- -----------------------------------------------------------------------------
 
--- | A stored pane id that still exists in the tree, else 0.
-validPane :: GridNode -> Word64 -> Word64
-validPane t p = if paneExist t p then p else 0
-
--- | Focused pane: a maximized pane wins, then the stored focus if the pane
--- still exists, then the first pane in the tree.
-resolveFocus :: GridNode -> Word64 -> Word64 -> Word64
-resolveFocus tree maxPane focus0
-  | maxPane /= 0 = maxPane
-  | paneExist tree focus0 = focus0
-  | otherwise = fromMaybe 1 (listToMaybe (treePanes tree))
+-- | The maximized pane (0 = none) and the focused pane of a state over its
+-- tree. A stored pane id counts while the pane still exists; a maximized pane
+-- has the focus, and with no stored focus the first pane does.
+paneFocus :: GridNode -> GridState -> (Word64, Word64)
+paneFocus tree g = (maxPane, focus)
+  where
+    maxPane = if paneExist tree (gsMax g) then gsMax g else 0
+    focus
+      | maxPane /= 0 = maxPane
+      | paneExist tree (gsFocus g) = gsFocus g
+      | otherwise = fromMaybe 1 (listToMaybe (treePanes tree))
 
 -- -----------------------------------------------------------------------------
 -- Entry point
@@ -425,8 +425,7 @@ paneGrid cfg = do
         _ -> tree0
       gs = started {gsTree = Just tree, gsSpan = Just curSpan}
   when (Just gs /= stored) $ uiIO (modifyStore ctx (insertDyn key gs))
-  let maxPane = validPane tree (gsMax gs)
-      focused = resolveFocus tree maxPane (gsFocus gs)
+  let (maxPane, focused) = paneFocus tree gs
       mouse = inputMousePos inp
       (regions, dividers) = layoutNode minSize gutter tree baseRect
       -- Pure drag-and-drop geometry for the current frame. Geometry is
@@ -446,14 +445,10 @@ paneGrid cfg = do
       -- then a function of the pointer alone, and showing a preview cannot
       -- change which drop it is.
       (dragMoved, dragZone, remaining) = case gsGesture gs of
-        Drag pid gx gy moved0 _ ->
+        Drag pid press moved0 _ ->
           let mFrom = M.lookup pid regions
-              moved = moved0 || case mFrom of
-                Just (Rect px py _ _) ->
-                  let vx = v2X mouse - (px + gx)
-                      vy = v2Y mouse - (py + gy)
-                   in vx * vx + vy * vy > dragThresholdPx * dragThresholdPx
-                Nothing -> False
+              V2 dx dy = v2Sub mouse press
+              moved = moved0 || dx * dx + dy * dy > dragThresholdPx * dragThresholdPx
               rest = treeRemovePane pid tree
               targetRegions = maybe M.empty (\t -> fst (layoutNode minSize gutter t baseRect)) rest
               preview = dropPreviewTreeSized (if pgPreserveDragSize cfg then mFrom else Nothing) minSize gutter tree pid (gsSeed gs) baseRect
@@ -508,7 +503,7 @@ paneGrid cfg = do
   container NodeContainer (pgLayout cfg (paneLay minSize)) $ do
     tagContainer wid
     if maxPane /= 0
-      then void (renderPane env maxPane baseRect False)
+      then void (renderPane env maxPane baseRect)
       else do
         rendered <- maybe (pure []) (renderNode env (M.fromList [(diSplitId d, d) | d <- visibleDividers])) visibleTree
         runGestures env dividers rendered dragMoved dragZone
@@ -543,13 +538,13 @@ paneGrid cfg = do
         uiIO (markEscapeConsumed ctx)
 
   end <- fromMaybe gs . lookupDyn key <$> uiIO (getStore ctx)
-  let maxEnd = maybe 0 (\t -> validPane t (gsMax end)) (gsTree end)
+  let (maxEnd, focusEnd) = maybe (0, 0) (`paneFocus` end) (gsTree end)
   pure
     PaneGridResponse
       { pgrChanged = gsTree end /= gsTree gs || gsMax end /= gsMax gs
       , pgrPaneCount = maybe 0 treeSize (gsTree end)
       , pgrPanes = maybe [] treePanes (gsTree end)
-      , pgrFocusedPane = maybe 0 (\t -> resolveFocus t maxEnd (gsFocus end)) (gsTree end)
+      , pgrFocusedPane = focusEnd
       , pgrMaximizedPane = maxEnd
       }
 
@@ -588,15 +583,14 @@ renderPane ::
   GridEnv es ->
   Word64 ->
   Rect ->
-  Bool ->
   Eff es [RenderedPane]
-renderPane env pid rect dragging =
+renderPane env pid rect =
   withPaneKey env pid $ do
     inp <- askInput
     let ctx = geCtx env
         arena = ctxNodeArena ctx
     start <- uiIO (arenaCount arena)
-    let ctxt = geMakeCtx env pid rect dragging
+    let ctxt = geMakeCtx env pid rect (draggingPane env pid)
     (view, _) <- containerResponse NodeContainer (paneLay (geMinSize env)) (pgViewPane (geCfg env) pid ctxt)
     -- Press ownership must be checked against previous solved child rects:
     -- ctxActiveId is only finalized after this frame's UI has been built.
@@ -631,7 +625,7 @@ renderNode env dividers = \case
         [] <$ container NodeContainer (paneLay (geMinSize env)) (pure ())
     -- Its prev-frame rect, zero until the pane has been laid out once.
     | otherwise ->
-        renderPane env pid (M.findWithDefault (Rect 0 0 0 0) pid (geRegions env)) (draggingPane env pid)
+        renderPane env pid (M.findWithDefault (Rect 0 0 0 0) pid (geRegions env))
   Split sid ax ratio a b ->
     withKey sid $ do
       let (wa, ha) = subtreeMin (geMinSize env) (geGutter env) a
@@ -673,7 +667,7 @@ renderNode env dividers = \case
 -- | Is this the pane being drag-and-dropped?
 draggingPane :: GridEnv es -> Word64 -> Bool
 draggingPane env pid = case gsGesture (geState env) of
-  Drag p _ _ _ _ -> p == pid
+  Drag p _ _ _ -> p == pid
   _ -> False
 
 -- | The divider: a 'NodeDrawing' spanning the full gutter (visible thickness
@@ -730,7 +724,7 @@ drawDragOverlay env wid (V2 mx my) zone =
       drawStrokeRoundedRect (rectInflate (-1) zr) 2 2 accent
   where
     title = case gsGesture (geState env) of
-      Drag _ _ _ _ t -> t
+      Drag _ _ _ t -> t
       _ -> ""
     ghost = Rect (mx + 12) (my + 12) 112 28
     key = contentKey (2 : fromIntegral (hash title) : mx : my : maybe [0, 0, 0, 0, 0] (\(Rect x y w h) -> [1, x, y, w, h]) zone)
@@ -765,9 +759,7 @@ runGestures env dividers rendered moved zone = do
   when (inputMousePressed inp && gsGesture (geState env) == NoGesture && not (any rpControlHit rendered)) $
     case (hitDiv, pickHit) of
       (Just d, _) -> setGesture True (Resize (diSplitId d) (diRatio d) (mouseMain (diAxis d) mouse))
-      (_, Just pane) ->
-        let Rect px py _ _ = M.findWithDefault (Rect (v2X mouse) (v2Y mouse) 0 0) (rpPaneId pane) (geRegions env)
-         in setGesture True (Drag (rpPaneId pane) (v2X mouse - px) (v2Y mouse - py) False (pvTitle (rpView pane)))
+      (_, Just pane) -> setGesture True (Drag (rpPaneId pane) mouse False (pvTitle (rpView pane)))
       _ -> pure ()
   case gsGesture (geState env) of
     NoGesture -> pure ()
@@ -780,14 +772,14 @@ runGestures env dividers rendered moved zone = do
             void . updateGrid env True $ \s ->
               s {gsTree = treeSetRatio sid (clampRatio (geGutter env) d r0) <$> gsTree s}
       | otherwise -> setGesture True NoGesture
-    Drag pid gx gy moved0 title
+    Drag pid press moved0 title
       -- Keep the loop at the display cadence while a pane is being dragged:
       -- the indicator follows the pointer, and without a dirty flag the debug
       -- HUD's slow refresh paces the whole frame (4 fps). Window / scroll /
       -- resize drags mark dirty every frame for the same reason.
       | down -> do
           requestFrame
-          when (moved && not moved0) $ setGesture False (Drag pid gx gy True title)
+          when (moved && not moved0) $ setGesture False (Drag pid press True title)
       -- A drop clears the gesture and, when it moved the pane, stores the new
       -- tree, seed and focus in the same write. The previewed tree is the
       -- drop: it was built with this frame's seed.
