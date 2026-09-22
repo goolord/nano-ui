@@ -1460,26 +1460,21 @@ memoizeWidth na ref idx key compute = do
       writePrimArray slots' (base + 2) y
       pure r
 
--- | The flex scratch, grown to hold at least @needed@ entries.
+-- | The flex scratch, with room for at least @needed@ entries. Growing it
+-- replaces the buffers without copying: a container fills them only after
+-- asking for room, and reads its children back from its snapshot once a
+-- child may have used them.
 {-# INLINE ensureScratchCapacity #-}
 ensureScratchCapacity :: NodeArena -> Int -> IO FlexScratch
 ensureScratchCapacity na needed = do
   s <- readIORef (naScratch na)
-  if needed <= fsCap s then pure s else growScratch na s needed
+  if needed <= fsCap s then pure s else growScratch na (max needed (fsCap s * 2))
 
 {-# NOINLINE growScratch #-}
-growScratch :: NodeArena -> FlexScratch -> Int -> IO FlexScratch
-growScratch na s needed = do
-  let !cap = fsCap s
-      !newCap = max needed (cap * 2)
-  fsIdx <- growPrimArrayCopy (fsIdx s) cap newCap (-1)
-  fsW <- growPrimArrayCopy (fsW s) cap newCap 0
-  fsH <- growPrimArrayCopy (fsH s) cap newCap 0
-  fsOut <- growPrimArrayCopy (fsOut s) cap newCap 0
-  fsGrow <- growPrimArrayCopy (fsGrow s) cap newCap 0
-  let s' = FlexScratch {fsCap = newCap, ..}
-  writeIORef (naScratch na) s'
-  pure s'
+growScratch :: NodeArena -> Int -> IO FlexScratch
+growScratch na cap = do
+  s <- newFlexScratch cap
+  s <$ writeIORef (naScratch na) s
 
 -- | Visit the nodes of a floating type (modal, window, popup) in arena
 -- order, looking only at the floating nodes.

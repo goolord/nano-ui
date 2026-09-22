@@ -358,10 +358,8 @@ measurePass env count = case seCache env of
       unless restored (measureNode env idx)
       (w, h) <- recordMeasured env idx
       same <-
-        if restored
-          then pure True
-          else if idx >= lcCount lc
-          then pure False
+        if restored || idx >= lcCount lc
+          then pure restored
           else do
             cw <- readPrimArray (lcMeasured lc) (idx * 2)
             ch <- readPrimArray (lcMeasured lc) (idx * 2 + 1)
@@ -858,63 +856,60 @@ measureGridScratch env idx gCols minColW innerMaxW innerAvailH gap = do
               pure (fromIntegral cols * maxChildW + gap * fromIntegral (max 0 (cols - 1)))
       pure (contentW, contentH)
 
+-- | The height node @idx@ takes when @availW@ is offered to it: text and a
+-- measured drawing can wrap taller when narrower, and so can a column that
+-- holds them. Memoized per node and width for the frame.
 recomputeFitHeightAtWidth :: SolveEnv -> NodeIdx -> Float -> IO Float
-recomputeFitHeightAtWidth env idx availW = do
-  let na = seArena env
-  snd <$> memoizeWidth na (naFitMemo na) idx availW ((,) 0 <$> recomputeFitHeightAtWidthGo env idx availW)
+recomputeFitHeightAtWidth env@SolveEnv {seArena = na, seArrays = a} idx availW =
+  fmap snd . memoizeWidth na (naFitMemo na) idx availW . fmap ((,) 0) $ do
+    nt <- getNodeType na idx
+    wAx@(AxisSizing wTag _ minW maxW) <- getWidthSizing na idx
+    hAx@(AxisSizing hTag _ minH maxH) <- getHeightSizing na idx
+    (_, _, _, oldH) <- getRect na idx
+    let -- The width a node takes of @avail@: fixed, a percentage, or all of it.
+        widthOf (AxisSizing tag val _ _) avail = case tag of
+          SizingPercent -> avail * val / 100
+          SizingFixed -> val
+          _ -> avail
+        effW' = clamp minW maxW (widthOf wAx availW)
+    case nt of
+      NodeText
+        | hTag /= SizingFixed -> do
+            isRowChild <- parentIsRow na idx
+            txt <- getText na idx
+            if T.null txt
+              then pure (clamp minH maxH 0)
+              else do
+                TextBox {tbWrapped, tbH, tbLineH} <-
+                  measureTextNodeAt env idx txt effW' (wrapsNarrower (wTag /= SizingFit && not isRowChild))
+                pure (if tbWrapped then clamp minH maxH (max tbLineH tbH) else oldH)
+        | otherwise -> pure oldH
 
-recomputeFitHeightAtWidthGo :: SolveEnv -> NodeIdx -> Float -> IO Float
-recomputeFitHeightAtWidthGo env@SolveEnv {seArena = na, seArrays = a} idx availW = do
-  nt <- getNodeType na idx
-  AxisSizing wTag wVal minW maxW <- getWidthSizing na idx
-  hAx@(AxisSizing hTag _ minH maxH) <- getHeightSizing na idx
-  (_, _, _, oldH) <- getRect na idx
-  let effW = case wTag of
-        SizingPercent -> availW * wVal / 100
-        SizingFixed -> wVal
-        _ -> availW
-      effW' = clamp minW maxW effW
-  case nt of
-    NodeText
-      | hTag /= SizingFixed -> do
-          isRowChild <- parentIsRow na idx
-          txt <- getText na idx
-          if T.null txt
-            then pure (clamp minH maxH 0)
-            else do
-              TextBox {tbWrapped, tbH, tbLineH} <-
-                measureTextNodeAt env idx txt effW' (wrapsNarrower (wTag /= SizingFit && not isRowChild))
-              pure (if tbWrapped then clamp minH maxH (max tbLineH tbH) else oldH)
-      | otherwise -> pure oldH
+      -- A measured drawing, like wrapped text, can be taller when narrower.
+      NodeDrawing
+        | hTag == SizingFit -> drawingHeightAt env idx effW' hAx oldH
+        | otherwise -> pure oldH
 
-    -- A measured drawing, like wrapped text, can be taller when narrower.
-    NodeDrawing
-      | hTag == SizingFit -> drawingHeightAt env idx effW' hAx oldH
-      | otherwise -> pure oldH
+      _ | (nt == NodeContainer || nt == NodePanel), hTag /= SizingFixed -> do
+            (pad, gap, dir) <- containerFlow a idx
+            if dir == DirRow
+              then pure oldH
+              else do
+                let innerW = max 0 (effW' - padL pad - padR pad)
+                    step (FlowAcc count contentH _) ci = do
+                      subAx <- getWidthSizing na ci
+                      let subW = widthOf subAx innerW
+                          subW' = if axMax subAx < 1e8 then min subW (axMax subAx) else subW
+                      subH <- recomputeFitHeightAtWidth env ci subW'
+                      pure (FlowAcc (count + 1) (contentH + subH) 0)
+                FlowAcc count contentH _ <- foldFlowChildrenM na idx step (FlowAcc 0 0 0)
+                let totalH =
+                      if count <= 0
+                        then 0
+                        else contentH + gap * fromIntegral (count - 1)
+                pure (clamp minH maxH (totalH + padT pad + padB pad))
 
-    _ | (nt == NodeContainer || nt == NodePanel), hTag /= SizingFixed -> do
-          (pad, gap, dir) <- containerFlow a idx
-          if dir == DirRow
-            then pure oldH
-            else do
-              let innerW = max 0 (effW' - padL pad - padR pad)
-                  step (FlowAcc count contentH _) ci = do
-                    AxisSizing subWTag subWVal _ subMaxW <- getWidthSizing na ci
-                    let subW = case subWTag of
-                          SizingPercent -> innerW * subWVal / 100
-                          SizingFixed -> subWVal
-                          _ -> innerW
-                        subW' = if subMaxW < 1e8 then min subW subMaxW else subW
-                    subH <- recomputeFitHeightAtWidth env ci subW'
-                    pure (FlowAcc (count + 1) (contentH + subH) 0)
-              FlowAcc count contentH _ <- foldFlowChildrenM na idx step (FlowAcc 0 0 0)
-              let totalH =
-                    if count <= 0
-                      then 0
-                      else contentH + gap * fromIntegral (count - 1)
-              pure (clamp minH maxH (totalH + padT pad + padB pad))
-
-    _ -> pure oldH
+      _ -> pure oldH
 
 -- | Load a parent's flow children into the flex scratch in child order, with
 -- each child's (width, height) from @sizeOf@. Returns the child count.
