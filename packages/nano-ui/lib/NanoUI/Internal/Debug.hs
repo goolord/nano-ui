@@ -8,8 +8,7 @@ module NanoUI.Internal.Debug
   , newDebugSampler
   , noteDebugLoop
   , noteDebugSkip
-  , isDebugActive
-  , debugRefreshDue
+  , debugCadence
   , noteDebugPresent
   , refreshDebugSnapshot
   , formatFpsRows
@@ -133,23 +132,18 @@ noteDebugLoop ref dt =
 noteDebugSkip :: DebugSamplerRef -> IO ()
 noteDebugSkip ref = noteCore ref $ \c -> c {dbgSkips = dbgSkips c + 1}
 
--- | Debug HUD cadence is driven by actual snapshot consumption: a snapshot
--- query ('refreshDebugSnapshot') refreshes 'smLastQueryT', so the 4 Hz refresh
--- loop only runs while a stats window is being built. An open window alone
--- does not count as activity, or the event loop would wake every refresh
--- period while any floating window is open.
-isDebugActive :: DebugSamplerRef -> IO Bool
-isDebugActive ref = do
+-- | Whether the readout is active, and whether it is and its published
+-- snapshot is older than 'debugRefreshSec'. Activity is driven by actual
+-- snapshot consumption: a snapshot query ('refreshDebugSnapshot') refreshes
+-- 'smLastQueryT', so the 4 Hz refresh loop only runs while a stats window is
+-- being built. An open window alone does not count as activity, or the event
+-- loop would wake every refresh period while any floating window is open.
+debugCadence :: DebugSamplerRef -> IO (Bool, Bool)
+debugCadence ref = do
   now <- getMonotonicTime
   s <- readIORef ref
-  pure (now - smLastQueryT s < 1.0)
-
--- | Whether the published snapshot is older than 'debugRefreshSec'.
-debugRefreshDue :: DebugSamplerRef -> IO Bool
-debugRefreshDue ref = do
-  now <- getMonotonicTime
-  s <- readIORef ref
-  pure (snapshotDue now s)
+  let active = now - smLastQueryT s < 1.0
+  pure (active, active && snapshotDue now s)
 
 snapshotDue :: Double -> DebugSampler -> Bool
 snapshotDue now s = smLastDebugT s <= 0 || now - smLastDebugT s >= debugRefreshSec
@@ -173,7 +167,7 @@ noteDebugPresent ref uiMs renderMs presentMs frameMs verts indices cmds =
 -- | The published snapshot, rebuilt at most every 'debugRefreshSec' and cached
 -- in between. A due query samples the core stats and hands them to @build@,
 -- which adds the backend's fields: window size and mouse position are left 0
--- for it to fill. Every query marks the readout active ('isDebugActive').
+-- for it to fill. Every query marks the readout active ('debugCadence').
 refreshDebugSnapshot :: DebugSamplerRef -> IORef s -> (CoreDebugSnapshot -> IO s) -> IO s
 refreshDebugSnapshot ref cache build = do
   now <- getMonotonicTime

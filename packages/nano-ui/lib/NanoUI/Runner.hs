@@ -40,9 +40,8 @@ import NanoUI.Internal.Context
   )
 import NanoUI.Internal.Debug
   ( DebugSamplerRef
-  , debugRefreshDue
+  , debugCadence
   , debugRefreshSec
-  , isDebugActive
   , noteDebugLoop
   , noteDebugSkip
   )
@@ -262,15 +261,13 @@ runSessionLoop drv ctx0 inp0 = do
             else if pendingDirty
               then (,False) <$> waitForEvents 0 False lastT
               else do
-                debugActive <- isDebugActive (sdDebug drv)
-                debugDue <- debugRefreshDue (sdDebug drv)
+                (debugActive, dueNow) <- debugCadence (sdDebug drv)
                 animating <- anyAnimating ctx
                 dirty <- isDirty ctx
                 presentPaces <- sdPresentPaces drv
                 wakeAt <- getWakeAt ctx
                 waitT <- if wakeAt > 0 then getMonotonicTime else pure 0
-                let dueNow = debugActive && debugDue
-                    paced = wasAnim || animating
+                let paced = wasAnim || animating
                     -- Nothing moves by itself: sleep until input, or until
                     -- the earliest frame something asked for.
                     wakeMs

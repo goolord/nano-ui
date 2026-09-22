@@ -22,7 +22,7 @@ import NanoUI.Backend.Sdl
   , syncDisplay
   , withSdlBench
   )
-import NanoUI.Internal.Debug (debugRefreshDue, emptyCoreDebugSnapshot, isDebugActive, newDebugSampler, refreshDebugSnapshot)
+import NanoUI.Internal.Debug (debugCadence, emptyCoreDebugSnapshot, newDebugSampler, refreshDebugSnapshot)
 import NanoUI.Diagrams
 import NanoUI.Internal.Context (ctxNodeArena)
 import NanoUI.Internal.Layout.Arena (NodeType (NodeButton), findNodeRevM, getNodeType, getRect, getText)
@@ -144,9 +144,8 @@ main = do
         putStrLn "--- 5b. IDLE CADENCE (debug gating) ---"
         cadRef <- newDebugSampler
         let cadence = do
-              active <- isDebugActive cadRef
-              due <- debugRefreshDue cadRef
-              pure (show active, if active && due then 0 :: Int else if active then 250 else -1)
+              (active, due) <- debugCadence cadRef
+              pure (show active, if due then 0 :: Int else if active then 250 else -1)
         (active0, wait0) <- cadence
         printf "  plain window, no stats query : active=%-5s waitTimeout=%-3d (blocks until the next event)\n" active0 wait0
         snapRef <- newIORef emptyCoreDebugSnapshot
