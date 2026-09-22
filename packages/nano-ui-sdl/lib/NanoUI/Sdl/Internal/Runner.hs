@@ -236,7 +236,7 @@ askSdlDebug = askHost @SdlEnv >>= maybe (pure emptySdlDebug) (uiIO . sample)
   where
     sample env = do
       -- The display is queried only when the snapshot refreshes.
-      refreshDebugSnapshot (sdlDebug env) (sdlDebugSnapshot env) $ \core -> do
+      refreshDebugSnapshot (sdlDebug env) $ \core -> do
         scale <- readIORef (sdlScaleRef env)
         fontSource <- sdlFontCacheSource (sdlFontCache env)
         Size ww wh <- queryWindowLogicalSize (sdlWindow env)

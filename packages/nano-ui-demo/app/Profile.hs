@@ -22,7 +22,7 @@ import NanoUI.Backend.Sdl
   , syncDisplay
   , withSdlBench
   )
-import NanoUI.Internal.Debug (debugCadence, emptyCoreDebugSnapshot, newDebugSampler, refreshDebugSnapshot)
+import NanoUI.Internal.Debug (debugCadence, newDebugSampler, refreshDebugSnapshot)
 import NanoUI.Diagrams
 import NanoUI.Internal.Context (ctxNodeArena)
 import NanoUI.Internal.Layout.Arena (NodeType (NodeButton), findNodeRevM, getNodeType, getRect, getText)
@@ -148,8 +148,7 @@ main = do
               pure (show active, if due then 0 :: Int else if active then 250 else -1)
         (active0, wait0) <- cadence
         printf "  plain window, no stats query : active=%-5s waitTimeout=%-3d (blocks until the next event)\n" active0 wait0
-        snapRef <- newIORef emptyCoreDebugSnapshot
-        _ <- refreshDebugSnapshot cadRef snapRef pure
+        _ <- refreshDebugSnapshot cadRef pure
         (active1, wait1) <- cadence
         printf "  stats window queried         : active=%-5s waitTimeout=%-3d (4 Hz HUD refresh sustained)\n" active1 wait1
         putStrLn ""

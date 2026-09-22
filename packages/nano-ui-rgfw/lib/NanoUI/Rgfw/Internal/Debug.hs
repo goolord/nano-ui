@@ -62,24 +62,21 @@ data RgfwDebugSnapshot = RgfwDebugSnapshot
   }
   deriving (Eq, Show)
 
--- | The core sampler, the latest frame stats, and the last published
--- snapshot.
+-- | The core sampler and the latest frame stats.
 data RgfwDebugSampler = RgfwDebugSampler
   { rdsSampler  :: !DebugSamplerRef
   , rdsFrame    :: !(IORef RgfwFrameStats)
-  , rdsSnapshot :: !(IORef RgfwDebugSnapshot)
   }
 
 -- | Runtime-typed host entry used by 'askRgfwDebug' to locate the sampler.
 newtype RgfwDebugHost = RgfwDebugHost RgfwDebugSampler
 
--- | Allocate a sampler with empty timing and frame snapshots.
+-- | Allocate a sampler with empty timing and frame stats.
 newRgfwDebugSampler :: IO RgfwDebugSampler
 newRgfwDebugSampler =
   RgfwDebugSampler
     <$> newDebugSampler
     <*> newIORef (dbgFrame emptyRgfwDebug)
-    <*> newIORef emptyRgfwDebug
 
 -- | Placeholder with zero counts and unit scale before measurements exist.
 emptyRgfwDebug :: RgfwDebugSnapshot
@@ -98,7 +95,7 @@ askRgfwDebug = do
   case mhost of
     Nothing -> pure emptyRgfwDebug
     Just (RgfwDebugHost s) ->
-      uiIO $ refreshDebugSnapshot (rdsSampler s) (rdsSnapshot s) $ \core -> do
+      uiIO $ refreshDebugSnapshot (rdsSampler s) $ \core -> do
         let Size lw lh = inputWindowSize inp
             V2 mx my = inputMousePos inp
         frame <- readIORef (rdsFrame s)

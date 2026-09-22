@@ -15,7 +15,8 @@ module NanoUI.Internal.Debug
   , formatDrawRows
   ) where
 
-import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef, writeIORef)
+import Data.Dynamic (Dynamic, Typeable, fromDynamic, toDyn)
+import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Word (Word32, Word64)
@@ -106,10 +107,12 @@ data DebugSampler = DebugSampler
   { smCore :: !CoreDebugSnapshot
   -- ^ The next snapshot, but for what a refresh samples: the present rate,
   -- window coordinates and runtime statistics.
-  , smLastDebugT :: !Double
+  , smPublished :: !Dynamic
+  -- ^ The backend's snapshot the last refresh built.
   , smLastQueryT :: !Double
   , smRatePresents :: !Word64
-  , smRateT :: !Double
+  , smLastDebugT :: !Double
+  -- ^ When the last refresh was, or the sampler was made.
   }
 
 -- | Session-owned sampler reference, updated atomically by sampling operations.
@@ -117,7 +120,7 @@ type DebugSamplerRef = IORef DebugSampler
 
 -- | Empty sampler with its rate interval starting at the current monotonic time.
 newDebugSampler :: IO DebugSamplerRef
-newDebugSampler = newIORef . DebugSampler emptyCoreDebugSnapshot 0 0 0 =<< getMonotonicTime
+newDebugSampler = newIORef . DebugSampler emptyCoreDebugSnapshot (toDyn ()) 0 0 =<< getMonotonicTime
 
 noteCore :: DebugSamplerRef -> (CoreDebugSnapshot -> CoreDebugSnapshot) -> IO ()
 noteCore ref f = atomicModifyIORef' ref $ \s -> (s {smCore = f (smCore s)}, ())
@@ -146,7 +149,7 @@ debugCadence ref = do
   pure (active, active && snapshotDue now s)
 
 snapshotDue :: Double -> DebugSampler -> Bool
-snapshotDue now s = smLastDebugT s <= 0 || now - smLastDebugT s >= debugRefreshSec
+snapshotDue now s = now - smLastDebugT s >= debugRefreshSec
 
 -- | Record UI, render, present, and total frame durations in milliseconds,
 -- followed by vertex, index, and command counts. Increments the present count.
@@ -164,33 +167,34 @@ noteDebugPresent ref uiMs renderMs presentMs frameMs verts indices cmds =
       , dbgCmds = cmds
       }
 
--- | The published snapshot, rebuilt at most every 'debugRefreshSec' and cached
--- in between. A due query samples the core stats and hands them to @build@,
--- which adds the backend's fields: window size and mouse position are left 0
--- for it to fill. Every query marks the readout active ('debugCadence').
-refreshDebugSnapshot :: DebugSamplerRef -> IORef s -> (CoreDebugSnapshot -> IO s) -> IO s
-refreshDebugSnapshot ref cache build = do
+-- | The published snapshot, rebuilt at most every 'debugRefreshSec' and kept
+-- by the sampler in between. A due query, or the first, samples the core
+-- stats and hands them to @build@, which adds the backend's fields: window
+-- size and mouse position are left 0 for it to fill. Every query marks the
+-- readout active ('debugCadence').
+refreshDebugSnapshot :: Typeable s => DebugSamplerRef -> (CoreDebugSnapshot -> IO s) -> IO s
+refreshDebugSnapshot ref build = do
   now <- getMonotonicTime
-  due <- atomicModifyIORef' ref $ \cur -> (cur {smLastQueryT = now}, snapshotDue now cur)
-  if not due
-    then readIORef cache
-    else do
+  cached <- atomicModifyIORef' ref $ \cur ->
+    (cur {smLastQueryT = now}, if snapshotDue now cur then Nothing else fromDynamic (smPublished cur))
+  case cached of
+    Just snap -> pure snap
+    Nothing -> do
       rts <- readRtsRows
       core <- atomicModifyIORef' ref $ \cur ->
         -- Actual presents per second since the previous refresh, which stays
         -- truthful when presents are sparse (idle app: ~4/s with the HUD
         -- open, not the theoretical fps of one fast frame).
-        let elapsed = now - smRateT cur
+        let elapsed = now - smLastDebugT cur
             presents = dbgPresents (smCore cur)
             rate
               | elapsed > 1e-3 = fromIntegral (presents - smRatePresents cur) / elapsed
               | otherwise = 0
-         in ( cur {smLastDebugT = now, smRatePresents = presents, smRateT = now}
+         in ( cur {smLastDebugT = now, smRatePresents = presents}
             , (smCore cur) {dbgPresentFps = rate, dbgRts = rts}
             )
       snap <- build core
-      writeIORef cache snap
-      pure snap
+      snap <$ atomicModifyIORef' ref (\cur -> (cur {smPublished = toDyn snap}, ()))
 
 -- | Label/value rows for frame rates, durations, and cumulative counts.
 formatFpsRows :: CoreDebugSnapshot -> [(Text, Text)]
