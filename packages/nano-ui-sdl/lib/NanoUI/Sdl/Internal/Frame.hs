@@ -41,11 +41,11 @@ import Data.ByteString qualified as BS
 import Data.Int (Int32)
 import Data.Word (Word32)
 import Foreign.C.Types (CInt (..))
-import Foreign.Marshal.Alloc (alloca)
 import Foreign.Marshal.Array (allocaArray)
 import Foreign.Marshal.Utils (with)
 import Foreign.Ptr (castPtr, nullPtr)
-import Foreign.Storable (peek, pokeElemOff)
+import Foreign.Storable (pokeElemOff)
+import NanoUI.Sdl.Internal.Display (outPair)
 import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
 import SDL3.Sys.Bindgen.Video (sDL_PROP_WINDOW_WIN32_HWND_POINTER)
 import SDL3.Sys.Properties (getPointerProperty)
@@ -158,9 +158,9 @@ nativeFrameOutset win = do
   hwnd <- windowHwnd win
   if hwnd == nullPtr
     then pure (0, 0)
-    else alloca $ \pa -> alloca $ \pd -> do
-      nanoUiNativeFrameOutset hwnd pa pd
-      (,) <$> (fromIntegral <$> peek pa) <*> (fromIntegral <$> peek pd)
+    else do
+      ((), across, down) <- outPair (nanoUiNativeFrameOutset hwnd)
+      pure (fromIntegral across, fromIntegral down)
 
 -- | Safe, not unsafe: this one puts the window procedure on and takes it off
 -- again, and Windows dispatches messages from inside both.
