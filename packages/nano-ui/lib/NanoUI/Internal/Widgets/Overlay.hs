@@ -3,10 +3,13 @@ module NanoUI.Internal.Widgets.Overlay
   ( modal
   , modalWith
   , window
+  , windowTitleBarH
+  , windowChromeSepH
   )
 where
 
 import Control.Monad (unless, void, when)
+import Data.Bits ((.|.))
 import Data.Text (Text)
 import Data.Text qualified as T
 import Effectful (Eff, type (:>))
@@ -38,8 +41,12 @@ import NanoUI.Internal.Style
   , Layout (..)
   , Padding (..)
   , Sizing (..)
+  , alignMid
   , defaultLayout
   , fillW
+  , fixedH
+  , fixedWH
+  , gap
   , grow
   , padB
   , padT
@@ -48,13 +55,8 @@ import NanoUI.Internal.Style
   , windowPad
   )
 import NanoUI.Internal.Types (Rect (..), Size (..), clamp, rectNonEmpty)
-import NanoUI.Internal.Widgets.Chrome
-  ( closeButton
-  , modalTitleBarH
-  , titleBarChromeHFor
-  , titleBarLayoutFor
-  , titleLabelLayoutFor
-  )
+import NanoUI.Internal.WidgetText (buttonCloseTrailing, buttonFlagClose)
+import NanoUI.Internal.Widgets.Combinators (buttonStyled)
 import NanoUI.Internal.Widgets.Popup (floatingOverlay)
 import NanoUI.Internal.Widgets.Layout
   ( columnWith
@@ -69,16 +71,19 @@ import NanoUI.Internal.Widgets.Node
   , respClicked
   )
 
-data OverlayKind
-  = ModalOverlay
-  | WindowOverlay
-  deriving Eq
+-- | A window's chrome above its body: the title bar, the 10px above it and
+-- the rule under it, which the frame paints ('windowChromeSepH').
+windowTitleBarH :: Float
+windowTitleBarH = 28 + 10 + windowChromeSepH
+
+windowChromeSepH :: Float
+windowChromeSepH = 1
 
 -- | Show a modal while the first argument is true, blocking interaction with
 -- content behind it. Returns a close-request response and the body's result;
 -- the result is 'Nothing' while closed. The caller owns the open flag.
 modal :: Ui :> es => Bool -> Text -> Eff es a -> Eff es (Response, Maybe a)
-modal = overlay ModalOverlay id
+modal = overlay True id
 
 -- | 'modal' with a layout modifier for its panel, which by default fits its
 -- body. The title bar, the rule under it and the padding are the panel's
@@ -94,18 +99,19 @@ modal = overlay ModalOverlay id
 -- A panel is never larger than the window, less the margin every floating
 -- panel keeps from its edge.
 modalWith :: Ui :> es => (Layout -> Layout) -> Bool -> Text -> Eff es a -> Eff es (Response, Maybe a)
-modalWith = overlay ModalOverlay
+modalWith = overlay True
 
 -- | Show a draggable, resizable in-app window with a scrolling body. Like
 -- 'modal', the response reports a close request and the caller updates the
 -- open flag. Other windows and the page remain interactive outside its bounds.
 window :: Ui :> es => Bool -> Text -> Eff es a -> Eff es (Response, Maybe a)
-window = overlay WindowOverlay id
+window = overlay False id
 
+-- | A modal (@isModal@) or a window.
 overlay ::
   Ui :> es =>
-  OverlayKind -> (Layout -> Layout) -> Bool -> Text -> Eff es a -> Eff es (Response, Maybe a)
-overlay kind shape open title child = do
+  Bool -> (Layout -> Layout) -> Bool -> Text -> Eff es a -> Eff es (Response, Maybe a)
+overlay isModal shape open title child = do
   ctx <- askContext
   inp <- askInput
   let
@@ -113,12 +119,11 @@ overlay kind shape open title child = do
     margin = windowMargin
     availW = max 1 (winW - 2 * margin)
     availH = max 1 (winH - 2 * margin)
-    isModal = kind == ModalOverlay
     -- Modals share the window's side padding. The body's scrollbar sits
     -- out in it just inside the panel's edge, that padding from the
     -- content.
     padding = if isModal then windowPad {padB = 12} else windowPad
-    barH = if isModal then modalTitleBarH else titleBarChromeHFor
+    barH = if isModal then 40 else windowTitleBarH
     -- Window body breathing room: one side-pad between the chrome and
     -- the body, matching the window's left/right padding. Modals keep
     -- their own larger gap.
@@ -128,7 +133,7 @@ overlay kind shape open title child = do
       if isModal
         then 0
         else
-          min availH (padT padding + titleBarChromeHFor + bodyGap + padB padding)
+          min availH (padT padding + windowTitleBarH + bodyGap + padB padding)
     -- The panel's own layout, as the caller shapes it. Its sizes are held
     -- inside the window, whatever the caller asked for.
     panel =
@@ -191,16 +196,17 @@ overlay kind shape open title child = do
               _
                 | isModal -> Rect ((winW - seedW) / 2) ((winH - h1) / 2) seedW h1
                 | otherwise -> Rect (max 0 (winW - seedW - margin)) margin seedW h1
-    titleLabel = void (labelEx (titleLabelLayoutFor barH) title)
+    titleLayout =
+      (fixedH barH . alignMid . tight) defaultLayout {layoutMinH = barH, layoutMaxH = barH}
   floatingOverlay open isModal addOverlayNode enter $ do
     close <-
-      row' (titleBarLayoutFor barH) $ do
+      row' (tight . gap 6 . alignMid . fixedH barH . fillW $ defaultLayout) $ do
         unless (T.null title) $
-          case kind of
-            ModalOverlay -> titleLabel
-            WindowOverlay -> withKey title titleLabel
+          (if isModal then id else withKey title) (void (labelEx titleLayout title))
         flex
-        withKey ("close" :: Text) closeButton
+        withKey ("close" :: Text) $
+          buttonStyled "" 0 (tight . fixedWH 24 24 . alignMid $ defaultLayout) $
+            buttonFlagClose .|. buttonCloseTrailing
     when (isModal && not (T.null title)) separator
     -- A panel of a fixed height holds its body, which fills what the
     -- title bar leaves; any other panel scrolls a body taller than the

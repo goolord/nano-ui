@@ -793,8 +793,8 @@ storeKeyOwners na wanted = do
   go (n - 1) (0 :: Int) IM.empty
 
 -- | The sub-slots whose writes repaint from the store at paint time: carets and
--- anchors in text fields, a text area's document, buffer, history and content
--- extents, drag targets, a colour picker's opening colour, and the seen/mode
+-- anchors in text fields, a text area's buffer (its document and caret) and
+-- history, drag targets, a colour picker's opening colour, and the seen/mode
 -- records a controlled edit co-writes. Shared, so resolving an owner does not
 -- build a key list per node per frame.
 ownerSlots :: [Slot]
@@ -806,17 +806,11 @@ ownerSlots =
   , SlotTextHistory
   , SlotSearchCommitted
   , SlotSearchAge
-  , SlotTextAreaRow
-  , SlotTextAreaCol
-  , SlotTextAreaPrefCol
   , SlotTextAreaAnchorRow
   , SlotTextAreaAnchorCol
   , SlotTextAreaChanged
   , SlotTextAreaText
-  , SlotTextAreaDocument
   , SlotTextAreaBuffer
-  , SlotTextAreaContentW
-  , SlotTextAreaContentH
   , SlotDrop
   , SlotNumericHeld
   , SlotNumericRepeat

@@ -39,7 +39,7 @@ where
 import Control.Monad (void)
 import Data.Text (Text)
 import Effectful (Eff, type (:>))
-import NanoUI.Internal.Context (Context (..), setScrollConfig)
+import NanoUI.Internal.Context (Context (..))
 import NanoUI.Internal.Frame.Scroll.Geometry
   ( ScrollConfig (..)
   , defaultScrollConfig
@@ -311,14 +311,13 @@ scrollArea f child = do
 scrollAreaIdConfigured :: Ui :> es => WidgetId -> Layout -> ScrollConfig -> Eff es a -> Eff es a
 scrollAreaIdConfigured wid layout cfg child = do
   ctx <- askContext
-  -- Push a scroll container node carrying the config's style index and
-  -- context scroll config, run the child inside it, then pop.
+  -- Push a scroll container node carrying the config as its style index,
+  -- run the child inside it, then pop.
   idx <- uiIO $ do
     parent <- currentParent ctx
     idx <- addNodeFromLayout (ctxNodeArena ctx) NodeScrollContainer parent layout
     setWidgetId (ctxNodeArena ctx) idx wid
     setStyleIdx (ctxNodeArena ctx) idx (encodeScrollConfig cfg)
-    setScrollConfig ctx wid cfg
     pure idx
   -- Unscoped: a scroll container's children keep their parent's id scope.
   withContainerNode False idx child

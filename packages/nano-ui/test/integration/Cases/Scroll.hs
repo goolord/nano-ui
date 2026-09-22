@@ -497,7 +497,7 @@ padTestPx, padTestBoth :: Float
 padTestPx = 6
 padTestBoth = padTestPx * 2
 
--- Same overflow epsilon as scrollAxisOverflows / scrollAxisRange.
+-- Same overflow epsilon as scrollChromeActive / scrollAxisRange.
 overflowEps :: Float
 overflowEps = 0.5
 

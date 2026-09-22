@@ -7,7 +7,6 @@ module NanoUI.Internal.Widgets.Menu
   , menuButton'
   , menuButtonWith
   , menuButtonWith'
-  , MenuItem (..)
   , menuItem
   , menuItem'
   , menuItemShortcut
@@ -32,7 +31,7 @@ import NanoUI.Internal.Widgets.Combinators (buttonStyled)
 import NanoUI.Internal.Widgets.Layout (columnWith, labelEx, rowWith, separator)
 import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Widgets.Node (HasResponse, Response (..), containerResponse, inertResponse, respClicked, respHovered, respRightClicked)
-import NanoUI.Internal.Widgets.Popup (PopupConfig (..), popup)
+import NanoUI.Internal.Widgets.Popup (PopupConfig (..), defaultPopupConfig, popup)
 
 -- | A context menu for any widget response, opened by right-clicking it.
 -- Returns the menu body's result while the menu is open.
@@ -71,13 +70,7 @@ runContextMenu (isOpen0, pos0, openAt, close) rightClick child = do
   inp <- askInput
   let mouse = inputMousePos inp
       pos = if rightClick then mouse else pos0
-      cfg =
-        PopupConfig
-          { cfgAnchor = AnchorPoint pos
-          , cfgPlacement = PlacementAtCursor
-          , cfgDismissable = True
-          , cfgOffset = 0
-          }
+      cfg = (defaultPopupConfig (AnchorPoint pos)) {cfgPlacement = PlacementAtCursor, cfgOffset = 0}
   when rightClick (openAt mouse)
   -- A release the menu itself sees, which is one on a row, picks.
   (popupResp, mBody) <-
@@ -104,25 +97,16 @@ useContextMenu = do
       close = uiIO (modifyStore ctx (setFlagSlot openK False))
   pure (flagSlot openK store, V2 px py, openAt, close)
 
--- | One context-menu row; the whole row is the button.
-data MenuItem = MenuItem
-  { menuItemLabel :: !Text
-  , menuItemHint :: !(Maybe Text)
-    -- ^ Shortcut hint shown after the label, e.g. @Ctrl+S@.
-  , menuItemEnabled :: !Bool
-    -- ^ Disabled rows are dimmed and cannot be clicked or focused.
-  }
-  deriving (Eq, Show)
-
--- | Render a menu row, returning its full 'Response'. A disabled row is a
--- muted label, not a disabled button: hover tracking does not know a button's
--- enabled flag and would still highlight it. Text nodes ignore padding, so the
+-- | Render a menu row, with an optional shortcut hint after the label,
+-- returning its full 'Response'. A disabled row is a muted label, not a
+-- disabled button: hover tracking does not know a button's enabled flag and
+-- would still highlight it. Text nodes ignore padding, so the
 -- label sits in a container that reproduces an enabled row's geometry: the
 -- 'menuItemRowH' height and 'menuMinW' width, the label inset 'menuItemPadX'
 -- plus the button's content inset, and the same total horizontal gutter the
 -- solver reserves for menu buttons. Its response never reports interaction.
-menuItemWith :: Ui :> es => MenuItem -> Eff es Response
-menuItemWith (MenuItem lbl hint enabled)
+menuItemWith :: Ui :> es => Text -> Maybe Text -> Bool -> Eff es Response
+menuItemWith lbl hint enabled
   | enabled = buttonStyled text 0 menuRowLayout buttonFlagMenu
   | otherwise = do
       ctx <- askContext
@@ -147,18 +131,18 @@ menuItem txt = respClicked <$> menuItem' txt
 {-# INLINE menuItem' #-}
 -- | 'menuItem' returning its response; activation is in @respClicked@.
 menuItem' :: Ui :> es => Text -> Eff es Response
-menuItem' txt = menuItemWith (MenuItem txt Nothing True)
+menuItem' txt = menuItemWith txt Nothing True
 
 -- | Menu row with a shortcut hint after the label. The hint is only text;
 -- handle the key itself elsewhere.
 --
 -- > whenM (menuItemShortcut "Save" "Ctrl+S") saveFile
 menuItemShortcut :: Ui :> es => Text -> Text -> Eff es Bool
-menuItemShortcut txt hint = respClicked <$> menuItemWith (MenuItem txt (Just hint) True)
+menuItemShortcut txt hint = respClicked <$> menuItemWith txt (Just hint) True
 
 -- | Dimmed menu row that cannot be clicked.
 menuItemDisabled :: Ui :> es => Text -> Eff es ()
-menuItemDisabled txt = void (menuItemWith (MenuItem txt Nothing False))
+menuItemDisabled txt = void (menuItemWith txt Nothing False)
 
 -- | Row layout shared by menu items, matching the text-field context menu:
 -- 28px rows and a 148px minimum menu width (@menuItemRowH@ and @menuMinW@ in
@@ -186,10 +170,7 @@ menuButtonWith f txt open = respClicked <$> menuButtonWith' f txt open
 -- | 'menuButtonWith' returning its 'Response'.
 menuButtonWith' :: Ui :> es => (Layout -> Layout) -> Text -> Bool -> Eff es Response
 menuButtonWith' f txt open =
-  buttonStyled txt (if open then 1 else 0) (f menuBarTitleLayout) buttonFlagMenuBar
-
-menuBarTitleLayout :: Layout
-menuBarTitleLayout = tight $ defaultLayout
+  buttonStyled txt (if open then 1 else 0) (f (tight defaultLayout)) buttonFlagMenuBar
 
 -- | Separator line inside a context menu, matching the text-field context
 -- menu painter exactly: a 1px rule inset 'menuItemPadX' from the panel edge

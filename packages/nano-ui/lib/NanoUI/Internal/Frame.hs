@@ -84,8 +84,8 @@ import NanoUI.Internal.Frame.Select
   , overlayMenuRects
   , routePointer
   )
-import NanoUI.Internal.Frame.TextEdit (finalizeTextFieldMouse)
-import NanoUI.Internal.Frame.TextEdit.Menu
+import NanoUI.Internal.Frame.TextArea (finalizeTextFieldMouse)
+import NanoUI.Internal.Frame.TextEdit
   ( closeTextEditMenuOnEscape
   , closeTextEditMenuOnOutsideClick
   , drawTextEditMenuOverlays
@@ -125,7 +125,7 @@ import NanoUI.Internal.Monad (NanoUI, Ui, runUi, whenM)
 import NanoUI.Internal.Store (mirrorStoresChanged)
 import NanoUI.Internal.Style (Padding (..), Theme (..), themeOverlayDim, themeSeparator)
 import NanoUI.Internal.Types (Damage (..), Rect (..), Size (..), rectInflate, rectNonEmpty)
-import NanoUI.Internal.Widgets.Chrome (titleBarChromeHFor, windowChromeSepH)
+import NanoUI.Internal.Widgets.Overlay (windowChromeSepH, windowTitleBarH)
 
 -- | Build, lay out, resolve input, and paint one headless frame. Returns the
 -- view result, emitted messages, borrowed draw buffers, and whether state
@@ -337,7 +337,7 @@ drawFloatingPanels ctx (Size ww wh) = do
       plain _ _ _ = pure ()
   panels NodeWindow overlayWindowStyle $ \theme idx (Rect x y w _) -> do
     pad <- getPadding na idx
-    let sepY = y + padT pad + titleBarChromeHFor - windowChromeSepH
+    let sepY = y + padT pad + windowTitleBarH - windowChromeSepH
         sepW = max 0 (w - padL pad - padR pad)
     pushRect da (Rect (x + padL pad) sepY sepW windowChromeSepH) (themeSeparator theme)
   whenM (isJust <$> topModalNode na) $ do

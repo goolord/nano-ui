@@ -97,7 +97,7 @@ library
         NanoUI.Internal.Context.Types
         NanoUI.Internal.Debug
         NanoUI.Internal.Frame.Hit
-        NanoUI.Internal.Frame.TextEdit
+        NanoUI.Internal.Frame.TextArea
         NanoUI.Internal.Frame.Window
         NanoUI.Internal.Id
         NanoUI.Internal.Input
@@ -110,8 +110,6 @@ library
         NanoUI.Internal.Widgets.SplitPane
         NanoUI.Internal.Widgets.TextArea
         NanoUI.Internal.Widgets.TextDocument
-        NanoUI.Internal.Widgets.TextEditor
-        NanoUI.Internal.Widgets.TextField
     other-modules:
         NanoUI.Internal.Animatable
         NanoUI.Internal.Animation
@@ -143,16 +141,12 @@ library
         NanoUI.Internal.Frame.Node
         NanoUI.Internal.Frame.Spans
         NanoUI.Internal.Frame.SpanArena
-        NanoUI.Internal.Frame.TextArea
-        NanoUI.Internal.Frame.TextArea.Content
-        NanoUI.Internal.Frame.TextArea.Geometry
-        NanoUI.Internal.Frame.TextEdit.Menu
+        NanoUI.Internal.Frame.TextEdit
         NanoUI.Internal.Frame.TextInput
         NanoUI.Internal.Style
         NanoUI.Internal.Types
         NanoUI.Internal.WidgetText
         NanoUI.Internal.Widgets.Node
-        NanoUI.Internal.Widgets.Chrome
         NanoUI.Internal.Widgets.Caption
         NanoUI.Internal.Widgets.Layout
         NanoUI.Internal.Widgets.Tabs
@@ -162,7 +156,6 @@ library
         NanoUI.Internal.Widgets.Drawing
         NanoUI.Internal.Widgets.TextInput
         NanoUI.Internal.Widgets.NumericInput
-        NanoUI.Internal.Widgets.TextCommon
         NanoUI.Internal.Widgets.Animate
         NanoUI.Internal.Widgets.Overlay
         NanoUI.Internal.Widgets.Popup

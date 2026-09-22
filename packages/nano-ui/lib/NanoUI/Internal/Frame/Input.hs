@@ -45,7 +45,7 @@ import NanoUI.Internal.Frame.Hit
   , withWidgetNode
   )
 import NanoUI.Internal.Frame.Redraw (probeHotId)
-import NanoUI.Internal.Frame.TextEdit (collapseTextFieldSelection)
+import NanoUI.Internal.Frame.TextArea (collapseTextFieldSelection)
 import NanoUI.Internal.Frame.TextInput (nodeTextFieldGeom)
 import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Internal.Input

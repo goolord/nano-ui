@@ -1,7 +1,7 @@
 module Main (main) where
 
 import Data.Text qualified as T
-import NanoUI.Internal.Frame.TextEdit (textWordBounds)
+import NanoUI.Internal.Frame.TextArea (textWordBounds)
 import NanoUI.Input (Input (..), Key (..), Modifiers (..), emptyInput, inputKeysFromList)
 import NanoUI.Widgets.TextArea as TA
 import NanoUI.Widgets.TextBuffer as TB

@@ -57,7 +57,7 @@ import NanoUI.Internal.WidgetText (buttonFlagTable, tableHeaderLabel, tableSortR
 import NanoUI.Internal.Widgets.Behavior (dragThresholdPx, useReorder)
 import NanoUI.Internal.Widgets.Combinators (buttonStyled)
 import NanoUI.Internal.Widgets.Layout (column', panel', row', scrollAreaIdConfigured, separator, spacer)
-import NanoUI.Internal.Frame.Scroll.Geometry (ScrollConfig (..), ScrollPolicy (..), scrollHorizontalHidden, scrollVerticalAuto, scrollVerticalHidden)
+import NanoUI.Internal.Frame.Scroll.Geometry (defaultScrollConfig, scrollHorizontalHidden, scrollVerticalAuto, scrollVerticalHidden)
 import NanoUI.Internal.Widgets.Node
   ( HasResponse (..)
   , Response (..)
@@ -489,7 +489,7 @@ tableConfigured cfg f key cols inputRows curSort =
             scrollAreaIdConfigured
               vWid
               (fillIf fillInner (fillH flatLayout))
-              (ScrollConfig ScrollAuto ScrollAuto True False)
+              defaultScrollConfig
               (bodyBlock unfrozenIdx)
             pure hs
     column' outerLayout $ do

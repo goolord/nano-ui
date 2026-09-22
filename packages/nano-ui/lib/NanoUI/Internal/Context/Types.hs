@@ -79,6 +79,7 @@ import NanoUI.Internal.Input (UiCursorKind)
 import NanoUI.Internal.Layout.Arena (DirTag, LayoutCache, NodeArena)
 import NanoUI.Internal.Store (WidgetStore)
 import NanoUI.Internal.Style (FontStyle, FontVariant, FontWeight, Layout, Theme)
+import NanoUI.Widgets.TextBuffer (Cursor)
 import NanoUI.Widgets.TextCommand (TextCommand)
 import NanoUI.Internal.Types
   ( Color
@@ -173,15 +174,12 @@ data TextInputMenu = TextInputMenu
   }
   deriving (Eq, Show)
 
--- | Selection-drag anchor. Single-line fields use a flat character index;
--- multiline fields use zero-based row/column positions. Click count selects
--- character, word, or line selection behaviour.
+-- | Selection-drag anchor, a position in the field's document (row 0 in a
+-- single-line field). Click count selects character, word, or line selection
+-- behaviour.
 data TextInputDrag = TextInputDrag
   { textInputDragWidget :: WidgetId
-  , textInputDragAnchor :: {-# UNPACK #-} !Int
-  , textInputDragAnchorRow :: {-# UNPACK #-} !Int
-  , textInputDragAnchorCol :: {-# UNPACK #-} !Int
-  , textInputDragMultiline :: {-# UNPACK #-} !Bool
+  , textInputDragAnchor :: {-# UNPACK #-} !Cursor
   , textInputDragClicks :: {-# UNPACK #-} !Int
   }
   deriving (Eq, Show)
@@ -190,10 +188,7 @@ data TextInputDrag = TextInputDrag
 -- Positions are character indices, not UTF-8 byte offsets.
 data TextFieldClickCell = TextFieldClickCell
   { textFieldClickWidget :: WidgetId
-  , textFieldClickFlat :: {-# UNPACK #-} !Int
-  , textFieldClickRow :: {-# UNPACK #-} !Int
-  , textFieldClickCol :: {-# UNPACK #-} !Int
-  , textFieldClickMultiline :: {-# UNPACK #-} !Bool
+  , textFieldClickAt :: {-# UNPACK #-} !Cursor
   }
   deriving (Eq, Show)
 
@@ -347,7 +342,7 @@ data ScrollAxes
   = ScrollAxisY
   | ScrollAxisX
   | ScrollAxisXY
-  deriving (Eq, Show)
+  deriving (Eq, Show, Enum)
 
 -- | A scroller on its way to an offset it has not reached yet. The target is
 -- in window axes and already clamped to the scroller's range.

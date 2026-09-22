@@ -118,7 +118,7 @@ import NanoUI.Internal.Widgets.Node
   , setChanged
   )
 import NanoUI.Internal.Widgets.NumericInput (NumericInputConfig (..), defaultNumericInputConfig, numericInputConfigured)
-import NanoUI.Internal.Widgets.TextEditor (singleLineMode)
+import NanoUI.Widgets.TextEditor (singleLineMode)
 import NanoUI.Internal.Widgets.TextInput (editTextField)
 
 colorPickerDefaultColor :: Color

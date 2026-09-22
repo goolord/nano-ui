@@ -16,7 +16,6 @@ module NanoUI.Internal.Widgets.Drop
 import Control.Applicative ((<|>))
 import Control.Monad (when)
 import Data.Text (Text)
-import Data.Foldable (toList)
 import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context
   ( getStore
@@ -72,36 +71,23 @@ useDrop bounds = do
       posK = slotKey SlotDropPos key
   store <- uiIO (getStore ctx)
   let active0 = flagSlot activeK store
-      lastPos0 = fmap (\(x, y) -> V2 x y) (lookupSlot fieldPoint posK store)
-      events = toList (inputDrops inp)
-      -- A drag is active from 'DropBegin' until 'DropComplete'.
-      active1 =
-        foldl'
-          ( \active ev -> case dropEventType ev of
-              DropBegin -> True
-              DropComplete -> False
-              _ -> active
-          )
-          active0
-          events
-      -- Tracked position after each event: only 'DropPosition' moves it and
-      -- 'DropComplete' clears it. Payload events leave it unchanged, so a
-      -- payload is attributed to the position at that point in the sequence,
-      -- not to the frame's final position.
-      positions =
-        drop 1 $ scanl
-          ( \pos ev -> case dropEventType ev of
-              DropPosition -> dropEventPos ev <|> pos
-              DropComplete -> Nothing
-              _ -> pos
-          )
-          lastPos0
-          events
-      lastPos1 = last (lastPos0 : positions)
-      payloads ty =
-        [dropEventData ev | (ev, pos) <- zip events positions, dropEventType ev == ty, posInside bounds pos]
-      files = payloads DropFile
-      texts = payloads DropText
+      lastPos0 = uncurry V2 <$> lookupSlot fieldPoint posK store
+      -- A drag is active from 'DropBegin' until 'DropComplete'. Only
+      -- 'DropPosition' moves the tracked position and 'DropComplete' clears
+      -- it. Payload events leave it unchanged, so a payload is attributed to
+      -- the position at that point in the sequence, not to the frame's final
+      -- position.
+      step (active, pos, fs, ts) ev = case dropEventType ev of
+        DropBegin -> (True, pos, fs, ts)
+        DropPosition -> (active, dropEventPos ev <|> pos, fs, ts)
+        DropComplete -> (False, Nothing, fs, ts)
+        DropFile | posInside bounds pos -> (active, pos, dropEventData ev : fs, ts)
+        DropText | posInside bounds pos -> (active, pos, fs, dropEventData ev : ts)
+        _ -> (active, pos, fs, ts)
+      (active1, lastPos1, filesRev, textsRev) =
+        foldl' step (active0, lastPos0, [], []) (inputDrops inp)
+      files = reverse filesRev
+      texts = reverse textsRev
       hovered = active1 && posInside bounds lastPos1
   when (active1 /= active0 || lastPos1 /= lastPos0) $
     uiIO . modifyStore ctx $
