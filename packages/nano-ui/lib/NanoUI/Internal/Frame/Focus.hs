@@ -1,13 +1,12 @@
 -- | Keyboard focus order for Tab, keeping focus inside an open modal, and
 -- copying selection state from the store into the nodes that paint it.
 module NanoUI.Internal.Frame.Focus
-  ( filterModalFocusables
-  , constrainFocusToModal
+  ( constrainFocusToModal
   , syncWidgetLabels
   , tabNext
   ) where
 
-import Control.Monad (filterM, forM_, unless, when)
+import Control.Monad (forM_, unless, when)
 import Data.IORef (readIORef, writeIORef)
 import Data.Maybe (fromMaybe, listToMaybe)
 import NanoUI.Internal.Context (Context (..), getStore, intBool, intKey)
@@ -36,17 +35,6 @@ tabNext cur ids shift =
     (before, _ : after)
       | shift -> reverse (if null before then ids else before)
       | otherwise -> after ++ ids
-
--- | The ids whose widgets are inside the top modal, or all of @ids@ when no
--- modal is open.
-filterModalFocusables :: Context -> [WidgetId] -> IO [WidgetId]
-filterModalFocusables ctx ids = do
-  -- The modal's root is looked up once for the whole list. Each widget then
-  -- costs one walk up its ancestors.
-  top <- topModalNode (ctxNodeArena ctx)
-  case top of
-    Nothing -> pure ids
-    Just modal -> filterM (widgetIdInSubtree ctx modal) ids
 
 -- | While a modal is open, take keyboard focus away from a widget outside the
 -- top modal. The frame runs this after the pointer steps, which can move

@@ -17,7 +17,7 @@ module NanoUI.Internal.Frame.Input
   ) where
 
 import Control.Applicative ((<|>))
-import Control.Monad (when)
+import Control.Monad (filterM, when)
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Maybe (isJust, isNothing)
 import NanoUI.Internal.Context
@@ -33,7 +33,7 @@ import NanoUI.Internal.Context
   , tabConsumed
   , InteractionState (..)
   )
-import NanoUI.Internal.Frame.Focus (filterModalFocusables, tabNext)
+import NanoUI.Internal.Frame.Focus (tabNext)
 import NanoUI.Internal.Frame.Hit
   ( nodeClippedHit
   , nodeInteractionHit
@@ -41,6 +41,7 @@ import NanoUI.Internal.Frame.Hit
   , overlayHitAllowed
   , overlayHitRoot
   , scrollHitRect
+  , widgetIdInSubtree
   , withWidgetNode
   )
 import NanoUI.Internal.Frame.Redraw (probeHotId)
@@ -71,6 +72,7 @@ import NanoUI.Internal.Layout.Arena
   , getRect
   , getStyleIdx
   , getWidgetId
+  , topModalNode
   )
 import NanoUI.Internal.Monad (ifM, unlessM, whenM, (<&&>))
 import NanoUI.Internal.Types (DamageBounds (..), Rect (..), V2 (..), defaultDamageSlop, rectContains)
@@ -86,7 +88,11 @@ finalizeTabFocus :: Context -> Input -> IO ()
 finalizeTabFocus ctx inp =
   whenM (pure (inputKeysElem KeyTab (inputKeys inp)) <&&> (not <$> tabConsumed ctx)) $ do
     cur <- readIORef (ctxFocusId ctx)
-    ids <- filterModalFocusables ctx . filter (/= WidgetId 0) =<< getFocusables ctx
+    -- The modal's root is looked up once for the whole list. Each widget then
+    -- costs one walk up its ancestors.
+    top <- topModalNode (ctxNodeArena ctx)
+    let inModal w = maybe (pure True) (\modal -> widgetIdInSubtree ctx modal w) top
+    ids <- filterM inModal . filter (/= WidgetId 0) =<< getFocusables ctx
     let next = tabNext cur ids (modShift (inputModifiers inp))
     when (hashWidgetId next /= 0) $ do
       -- Tab can reveal the focus ring without changing the focused rectangle.

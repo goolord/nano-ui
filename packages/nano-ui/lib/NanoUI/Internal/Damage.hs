@@ -111,22 +111,18 @@ orphanEscalateFrames = 2
 -- Partial retain clears with themeWindow. Expand interaction clips to the painted
 -- panel/window backdrop so slop pixels get the correct fill, not window color.
 backdropRectFromNode :: Context -> Int -> IO (Maybe Rect)
-backdropRectFromNode ctx idx = walkAncestors (ctxNodeArena ctx) idx step
+backdropRectFromNode ctx idx = walkAncestors na idx $ \i -> do
+  nt <- getNodeType na i
+  paints <- case nt of
+    NodeScrollContainer -> do
+      wTag <- axTag <$> getWidthSizing na i
+      hTag <- axTag <$> getHeightSizing na i
+      si <- getStyleIdx na i
+      pure (not ((wTag == SizingGrow && hTag == SizingGrow) || scrollBare (decodeScrollConfig si)))
+    _ -> pure (nt == NodePanel || isFloatingNode nt)
+  if paints then getNonzeroRect na i else pure Nothing
   where
-    step i = do
-      let na = ctxNodeArena ctx
-      nt <- getNodeType na i
-      if nt == NodePanel || isFloatingNode nt
-        then getNonzeroRect na i
-        else case nt of
-          NodeScrollContainer -> do
-            wTag <- axTag <$> getWidthSizing na i
-            hTag <- axTag <$> getHeightSizing na i
-            si <- getStyleIdx na i
-            if (wTag == SizingGrow && hTag == SizingGrow) || scrollBare (decodeScrollConfig si)
-              then pure Nothing
-              else getNonzeroRect na i
-          _ -> pure Nothing
+    na = ctxNodeArena ctx
 
 {-# INLINE getNonzeroRect #-}
 getNonzeroRect :: NodeArena -> Int -> IO (Maybe Rect)
