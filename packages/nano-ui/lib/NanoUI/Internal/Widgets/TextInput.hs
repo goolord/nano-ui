@@ -9,7 +9,7 @@ module NanoUI.Internal.Widgets.TextInput
   , saveTextEditor
   , editTextInput
   , textInputMode
-  , applyTextInputCommand
+  , textInputFieldEditor
     -- * Text fields
   , TextInputConfig (..)
   , defaultTextInputConfig
@@ -46,10 +46,8 @@ import NanoUI.Internal.Context
   , Context (..)
   , getStore
   , intKey
-  , markDirty
   , registerFocusable
   , requestWakeAt
-  , setStore
   , modifyStore
   )
 import NanoUI.Internal.Id (WidgetId)
@@ -83,12 +81,10 @@ import NanoUI.Widgets.TextBuffer qualified as TB
 import NanoUI.Internal.Widgets.TextEditor
   ( Editor (..)
   , EditorMode (..)
-  , TextCommand (..)
   , inputTextCommands
   , editorModeCode
   , emptyHistory
   , runCommandIO
-  , sealHistory
   , singleLineMode
   )
 
@@ -160,24 +156,11 @@ textInputMode si =
     , modeCopyable = not (hasFlag textInputFlagPassword si)
     }
 
--- | Run a command on a single-line field outside its frame (a context menu
--- row, an app's Edit menu). A change to the text pulses @respChanged@ on the
--- field's next frame.
-applyTextInputCommand :: Context -> WidgetId -> EditorMode -> TextCommand -> IO ()
-applyTextInputCommand ctx wid mode cmd = do
-  store <- getStore ctx
-  let
-    key = intKey wid
-    s0 = loadTextInputState store key (findSlot fieldText "" key store)
-  let ed0 = textInputEditor store key s0
-  ed <- runCommandIO ctx mode cmd ed0 {editorHistory = sealHistory (editorHistory ed0)}
-  let s1 = editorTextState ed
-      saved = saveTextEditor key ed store
-  setStore ctx $
-    if tisText s1 /= tisText s0
-      then insertSlot fieldInt (slotKey SlotTextAreaChanged key) 1 saved
-      else saved
-  markDirty ctx
+-- | A single-line field's stored editor, for a command run outside its frame,
+-- and how to store the edited editor.
+textInputFieldEditor :: WidgetStore -> Int -> (Editor, Editor -> WidgetStore -> WidgetStore)
+textInputFieldEditor store key =
+  (textInputEditor store key (loadTextInputState store key (findSlot fieldText "" key store)), saveTextEditor key)
 
 -- -----------------------------------------------------------------------------
 -- Text fields

@@ -57,8 +57,9 @@ import NanoUI.Internal.Layout.Arena (NodeClass (PointerNodes), NodeType (NodeTex
 import NanoUI.Internal.Monad (ifM, whenM, (<&&>))
 import NanoUI.Internal.Style (Style (..), Theme, themeSeparator)
 import NanoUI.Internal.Types (Color (..), Rect (..), Size (..), V2 (..), clamp, lerpColor, rectContains)
-import NanoUI.Internal.Widgets.TextEditor (EditorMode (..), TextCommand (..), canRedo, canUndo)
-import NanoUI.Internal.Widgets.TextField (applyTextFieldCommand, textFieldHasText, textFieldHistory, textFieldMode)
+import NanoUI.Internal.Widgets.TextEditor (Editor (..), EditorMode (..), TextCommand (..), canRedo, canUndo)
+import NanoUI.Internal.Widgets.TextField (applyTextFieldCommand, textFieldEditor)
+import NanoUI.Widgets.TextBuffer qualified as TB
 
 -- | The menu's rows in order: a command and its label, or a separator.
 textEditMenuRows :: [Maybe (TextCommand, T.Text)]
@@ -230,13 +231,10 @@ collectTextEditMenuSpans ctx inp = withTextEditMenu ctx [] $ \wid menuRect theme
 
 -- | Whether @cmd@ can run on field @wid@ now.
 textFieldMenuEnabled :: Context -> WidgetId -> TextCommand -> IO Bool
-textFieldMenuEnabled ctx wid cmd = do
-  mMode <- textFieldMode ctx wid
-  history <- textFieldHistory ctx wid
-  hasText <- textFieldHasText ctx wid
-  case mMode of
+textFieldMenuEnabled ctx wid cmd =
+  textFieldEditor ctx wid >>= \case
     Nothing -> pure False
-    Just mode -> case cmd of
+    Just (mode, Editor buf _ history, _) -> case cmd of
       Undo -> pure (modeEditable mode && canUndo history)
       Redo -> pure (modeEditable mode && canRedo history)
       Cut -> pure (modeEditable mode && modeCopyable mode && hasText)
@@ -245,3 +243,5 @@ textFieldMenuEnabled ctx wid cmd = do
         | modeEditable mode -> maybe False (not . T.null) <$> ctxClipboardGet ctx
         | otherwise -> pure False
       _ -> pure hasText
+     where
+      hasText = TB.getLineCount buf > 1 || not (T.null (TB.lineAt 0 buf))

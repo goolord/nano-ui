@@ -20,7 +20,7 @@ module NanoUI.Internal.Widgets.TextArea
   , loadTextAreaState
   , saveTextAreaState
   , runTextAreaCommand
-  , applyTextAreaCommand
+  , textAreaFieldEditor
   ) where
 
 import Control.Monad (foldM, unless, when)
@@ -34,7 +34,6 @@ import NanoUI.Internal.Context
   , damageWidget
   , getStore
   , intKey
-  , markDirty
   , registerFocusable
   , setStore
   , modifyInteraction
@@ -92,7 +91,6 @@ import NanoUI.Internal.Widgets.TextEditor
   , multiLineMode
   , runCommand
   , runCommandIO
-  , sealHistory
   )
 
 -- | Editor buffer, selection anchor, viewport, scroll offsets, and undo history.
@@ -278,7 +276,7 @@ textAreaCore f wid value = do
         $ store0
   store <- uiIO (getStore ctx)
   let current = maybe value bufferDocument (lookupDyn bufKey store)
-      -- Set by commands run outside the frame ('applyTextAreaCommand') whose
+      -- Set by commands run outside the frame ('applyTextFieldCommand') whose
       -- edits carry no keys or chars; folded into 'changed' so the caller
       -- gets its respChanged pulse, then cleared in the state write below.
       menuPulse = memberSlot fieldInt changedSlotKey store
@@ -321,7 +319,7 @@ textAreaCore f wid value = do
             modifyStore ctx (deleteSlot fieldInt changedSlotKey . saveTextAreaState key newState)
         pure (doc, changed)
       else do
-        -- A command run on the unfocused area ('applyTextAreaCommand') still
+        -- A command run on the unfocused area ('applyTextFieldCommand') still
         -- pulses this frame's respChanged, once.
         when menuPulse $
           uiIO $ modifyStore ctx (deleteSlot fieldInt changedSlotKey)
@@ -373,22 +371,9 @@ saveTextAreaState key state =
     (sx, sy) = scrollOffset state
     (vw, vh) = viewportSize state
 
--- | Run a command on a text area outside its frame (a context menu row, an
--- app's Edit menu). A change to the text pulses @respChanged@ on the area's
--- next frame.
-applyTextAreaCommand :: Context -> WidgetId -> TextCommand -> IO ()
-applyTextAreaCommand ctx wid cmd = do
-  store <- getStore ctx
-  let key = intKey wid
-      s0 = loadTextAreaState store key
-  s1 <- withEditor s0 <$> runCommandIO ctx multiLineMode cmd (textAreaEditor s0 {history = sealHistory (history s0)})
-  let edited = not (sameLines (TB.bufferLines (buffer s1)) (TB.bufferLines (buffer s0)))
-      saved = saveTextAreaState key s1 store
-  setStore ctx $
-    if edited
-      then insertSlot fieldInt (slotKey SlotTextAreaChanged key) 1 saved
-      else saved
-  -- Store damage is keyed on slots, not the widget: damage the widget so a
-  -- selection-only command (Select All) repaints this frame.
-  damageWidget ctx wid DamageSelf
-  markDirty ctx
+-- | A text area's stored editor, for a command run outside its frame, and
+-- how to store the edited editor, keeping the caret in view.
+textAreaFieldEditor :: WidgetStore -> Int -> (Editor, Editor -> WidgetStore -> WidgetStore)
+textAreaFieldEditor store key =
+  let state = loadTextAreaState store key
+   in (textAreaEditor state, saveTextAreaState key . withEditor state)
