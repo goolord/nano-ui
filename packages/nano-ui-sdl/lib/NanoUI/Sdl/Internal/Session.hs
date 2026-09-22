@@ -22,7 +22,6 @@ import NanoUI.Sdl.Internal.Input
   ( SdlEvent (..)
   , applyEvent
   , isButtonEdge
-  , isHardQuit
   , pollEvents
   , waitEvent
   )
@@ -133,7 +132,8 @@ runSdlSession options drawFn = do
                 waitEvent t >>= maybe (pure []) (\ev -> noteWake . (ev :) =<< pollEvents)
             , sdApplyEvent    = applyEvent
             , sdIsButtonEdge  = isButtonEdge
-            , sdIsHardQuit    = isHardQuit
+            -- The loop's own check of the folded input catches Ctrl+C.
+            , sdIsHardQuit    = const False
             , sdIsSessionQuit = (== EvQuit)
             , sdSyncDisplay   = \c inp -> do
                 paused <- readIORef vsyncPaused
