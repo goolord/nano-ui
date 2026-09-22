@@ -189,18 +189,13 @@ nodeClippedHit ctx idx rect mouse =
 -- not solved. @rect@ is the widget's rect from the previous frame
 -- ('scrollHitRect'). The point must be inside it, and inside the previous
 -- frame's viewport of every scroll container above node @idx@, so content
--- scrolled out of view takes no input. The node's own clip rect is not read:
+-- scrolled out of view takes no input; a scroll container with no recorded
+-- viewport does not constrain the point. The node's own clip rect is not read:
 -- it is not set until 'NanoUI.Internal.Frame.Scroll.applyScrollOffsets' runs.
 {-# INLINE nodeInteractionHit #-}
 nodeInteractionHit :: Context -> NodeIdx -> Rect -> V2 -> IO Bool
-nodeInteractionHit ctx idx rect mouse =
-  pure (rectHit rect mouse) <&&> scrollViewportHit ctx idx mouse
-
--- | Whether @mouse@ is inside the previous frame's viewport of every scroll
--- container above node @idx@. A scroll container with no recorded viewport
--- does not constrain the point.
-scrollViewportHit :: Context -> NodeIdx -> V2 -> IO Bool
-scrollViewportHit ctx idx mouse
+nodeInteractionHit ctx idx rect mouse
+  | not (rectHit rect mouse) = pure False
   | idx <= 0 = pure True
   | otherwise = do
       p <- getParent na idx
