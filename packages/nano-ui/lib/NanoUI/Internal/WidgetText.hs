@@ -18,6 +18,7 @@ module NanoUI.Internal.WidgetText
   , comboTextClip
   , searchInputReserveW
   , searchInputTextClip
+  , textClipBetween
   , searchInputIconRects
   , selectDisplayText
   , selectChevronReserve
@@ -174,8 +175,8 @@ numericStepperW = 18
 -- of the stepper.
 numericTextClip :: FontMetrics -> Float -> Float -> Float -> Float -> Rect
 numericTextClip fm x y w h =
-  let (ix, iy) = widgetContentInset fm
-   in Rect (x + ix) (y + iy) (max 0 (w - 2 * ix - numericStepperW)) (max 0 (h - 2 * iy))
+  let (ix, _) = widgetContentInset fm
+   in textClipBetween fm ix (ix + numericStepperW) x y w h
 
 -- | The up and down halves of a numeric field's stepper.
 numericStepperRects :: Float -> Float -> Float -> Float -> (Rect, Rect)

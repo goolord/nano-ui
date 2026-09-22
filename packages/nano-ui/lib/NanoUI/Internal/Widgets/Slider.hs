@@ -14,7 +14,7 @@ import NanoUI.Internal.Context
   , intKey
   , registerFocusable
   )
-import NanoUI.Internal.Font (sliderHandleSlack, sliderTrackBounds)
+import NanoUI.Internal.Font (sliderHitBounds)
 import NanoUI.Internal.Frame.Hit (scrollHitRect)
 import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Monad (Ui, askContext, nextId, uiIO, withKey)
@@ -60,18 +60,7 @@ sliderWith' f minV maxV value = do
   resp <- addWidget wid NodeSlider "" frac (f (fillW defaultLayout))
   mrect <- uiIO (scrollHitRect ctx wid)
   let
-    track =
-      case mrect of
-        Just (Rect x y w h) ->
-          let
-            tr = sliderTrackBounds x y w h
-           in
-            Rect
-              (rectX tr)
-              (rectY tr - sliderHandleSlack)
-              (rectW tr)
-              (rectH tr + 2 * sliderHandleSlack)
-        Nothing -> Rect 0 0 0 0
+    track = maybe (Rect 0 0 0 0) (\(Rect x y w h) -> sliderHitBounds x y w h) mrect
   (dragged, dragging) <-
     withKey ("drag" :: Text) (useDrag1D DragAxisX minV maxV current track)
   holdActiveWhile wid dragging

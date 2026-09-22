@@ -4,7 +4,6 @@
 module NanoUI.Internal.Draw.Text
   ( drawTextBox
   , pushText
-  , pushTextStyled
   , pushPreparedTextStyled
   , emitDrawOps
   ) where
@@ -53,23 +52,7 @@ pushText da fm x y txt col = do
   external <- readIORef (daExternalText da)
   unless external $ pushPreparedTextQuads da prepared x y txt col
 
-{-# INLINE pushTextStyled #-}
-pushTextStyled ::
-  DrawArena ->
-  FontMetrics ->
-  FontWeight ->
-  FontStyle ->
-  TextDecoration ->
-  Float ->
-  Float ->
-  T.Text ->
-  Color ->
-  IO ()
-pushTextStyled da fm weight fstyle deco x y txt col = do
-  prepared <- prepareFontMetrics fm txt
-  pushPreparedTextStyled da prepared weight fstyle deco x y txt col
-
--- | 'pushTextStyled' with metrics already prepared for @txt@.
+-- | Styled text with metrics already prepared for @txt@.
 pushPreparedTextStyled ::
   DrawArena ->
   FontMetrics ->

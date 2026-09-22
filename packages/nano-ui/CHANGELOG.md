@@ -230,6 +230,11 @@
 
 ### Changed
 
+- `popupWith` honours the layout its caller shapes. It built the popup node
+  from the direction and size alone, so a minimum, maximum, alignment, grid or
+  font set through its `Layout -> Layout` argument was dropped; padding and gap
+  stay fixed at 6 and 4 as before.
+
 - A text change inside a scroller repaints the text, and the scroller's
   scrollbar only when the content's size changed. Every text change used to
   repaint the whole scroller.

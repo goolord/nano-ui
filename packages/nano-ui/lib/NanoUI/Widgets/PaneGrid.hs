@@ -635,12 +635,9 @@ axisLay :: GridAxis -> Sizing -> Layout
 axisLay AxisV s = sizingLay s (Grow 1)
 axisLay AxisH s = sizingLay (Grow 1) s
 
-minSized :: Layout -> Float -> Float -> Layout
-minSized l minW_ minH_ = l {layoutMinW = minW_, layoutMinH = minH_}
-
 -- | The pane content wrapper: fills its cell, never below one minimum pane.
 paneLay :: Float -> Layout
-paneLay m = minSized fillLay m m
+paneLay m = minW m (minH m fillLay)
 
 -- Percent of the main-axis extent, of positive length, taken by an A side of
 -- the given length.
@@ -729,8 +726,8 @@ renderNode env dividers = \case
             | pinA == pinB = (splitSideLay ax (splitPct avail dA), fillLay)
             | pinA = (pinnedSideLay ax dA, fillLay)
             | otherwise = (fillLay, pinnedSideLay ax (avail - dA - geGutter env))
-          aLay = minSized aSide wa ha
-          bLay = minSized bSide wb hb
+          aLay = minW wa (minH ha aSide)
+          bLay = minW wb (minH hb bSide)
           inner = do
             a' <- container NodeContainer aLay (renderNode env dividers a)
             dividerWidget env ax

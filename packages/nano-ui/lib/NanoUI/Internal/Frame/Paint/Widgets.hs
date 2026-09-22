@@ -50,7 +50,7 @@ import NanoUI.Internal.Frame.Chrome
   )
 import NanoUI.Internal.Frame.Node (resolveFontFor)
 import NanoUI.Internal.Frame.Paint.Types (PaintEnv (..), popupPanelRect)
-import NanoUI.Internal.Frame.Spans (computeWidgetTextPlacements, forWidgetTextPlacements_, selectableTextGeometry, textInputFg)
+import NanoUI.Internal.Frame.Spans (forWidgetTextPlacements_, plainFieldPen, selectableTextGeometry, textInputFg)
 import NanoUI.Internal.Frame.TextArea (drawTextAreaContentWith)
 import NanoUI.Internal.Frame.TextArea.Content (resolveTextAreaFont)
 import NanoUI.Internal.Frame.TextInput
@@ -58,7 +58,6 @@ import NanoUI.Internal.Frame.TextInput
   , drawTextInputCaret
   , drawTextInputSelection
   , readFieldEdit
-  , textInputScroll
   , syncTextInputScroll
   , textInputFieldRect
   , textInputFieldTextClip
@@ -124,15 +123,16 @@ paintTextInputNode env idx rect@(Rect x y w h) = do
         | otherwise = do
             let field = textInputFieldRect fm x y w h
             paintStyledRect da style field
-            placements <- computeWidgetTextPlacements ctx NodeTextInput idx x y w h
-            case placements of
-              (txt, fx, fy, _, _) : _ -> do
-                ffg <- textInputFg ctx style idx focus
-                -- The placement above settled the scroll, so read it back
-                -- rather than measure the caret again.
-                mEdit <- readFieldEdit ctx idx x y w h =<< textInputScroll ctx idx
-                paintClippedFieldText ctx da fm style idx mEdit (textInputFieldTextClip fm field) fx fy txt ffg
-              [] -> pure ()
+            fontSizeVal <- getNodeFontSize (peNodeArena env) idx
+            (ffm, _, _) <- resolveFontFor ctx NodeTextInput fontSizeVal si
+            -- Paint discards the measured text width that the span path needs,
+            -- so it takes the pen directly and skips the host measurement.
+            (txt, fx, fy, scrollX) <- plainFieldPen ctx idx si ffm x y w h
+            ffg <- textInputFg ctx style idx focus
+            -- 'plainFieldPen' settled the scroll, so use it rather than
+            -- measuring the caret again.
+            mEdit <- readFieldEdit ctx idx x y w h scrollX
+            paintClippedFieldText ctx da fm style idx mEdit (textInputFieldTextClip fm field) fx fy txt ffg
   paint
 
 -- | Multi-line text area.

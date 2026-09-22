@@ -857,43 +857,47 @@ storeKeyOwners na wanted = do
             if hashWidgetId wid == 0
               then go (i - 1) found m
               else do
-                let add (!c, !m') sk
+                let !k = intKey wid
+                    add (!c, !m') sk
                       | IS.member sk wanted && IM.notMember sk m' = (c + 1, IM.insert sk i m')
                       | otherwise = (c, m')
-                    (found', m'') = foldl' add (found, m) (ownerKeys (intKey wid))
+                    -- The widget's own key first, then each sub-slot spelling.
+                    (found', m'') =
+                      foldl' (\acc s -> add acc (slotKey s k)) (add (found, m) k) ownerSlots
                 go (i - 1) found' m''
   go (n - 1) (0 :: Int) IM.empty
-  where
-    -- The slots whose writes repaint from the store at paint time: carets and
-    -- anchors in text fields, a text area's document, buffer, history and
-    -- content extents, drag targets, a colour picker's opening colour, and
-    -- the seen/mode records a controlled edit co-writes.
-    ownerKeys k =
-      [ k
-      , slotKey SlotSeen k
-      , slotKey SlotCursor k
-      , slotKey SlotAnchor k
-      , slotKey SlotTextMode k
-      , slotKey SlotTextHistory k
-      , slotKey SlotSearchCommitted k
-      , slotKey SlotSearchAge k
-      , slotKey SlotTextAreaRow k
-      , slotKey SlotTextAreaCol k
-      , slotKey SlotTextAreaPrefCol k
-      , slotKey SlotTextAreaAnchorRow k
-      , slotKey SlotTextAreaAnchorCol k
-      , slotKey SlotTextAreaChanged k
-      , slotKey SlotTextAreaText k
-      , slotKey SlotTextAreaDocument k
-      , slotKey SlotTextAreaBuffer k
-      , slotKey SlotTextAreaContentW k
-      , slotKey SlotTextAreaContentH k
-      , slotKey SlotDrop k
-      , slotKey SlotNumericHeld k
-      , slotKey SlotNumericRepeat k
-      , slotKey SlotMenuOpen k
-      , slotKey SlotColorBase k
-      ]
+
+-- | The sub-slots whose writes repaint from the store at paint time: carets and
+-- anchors in text fields, a text area's document, buffer, history and content
+-- extents, drag targets, a colour picker's opening colour, and the seen/mode
+-- records a controlled edit co-writes. Shared, so resolving an owner does not
+-- build a key list per node per frame.
+ownerSlots :: [Slot]
+ownerSlots =
+  [ SlotSeen
+  , SlotCursor
+  , SlotAnchor
+  , SlotTextMode
+  , SlotTextHistory
+  , SlotSearchCommitted
+  , SlotSearchAge
+  , SlotTextAreaRow
+  , SlotTextAreaCol
+  , SlotTextAreaPrefCol
+  , SlotTextAreaAnchorRow
+  , SlotTextAreaAnchorCol
+  , SlotTextAreaChanged
+  , SlotTextAreaText
+  , SlotTextAreaDocument
+  , SlotTextAreaBuffer
+  , SlotTextAreaContentW
+  , SlotTextAreaContentH
+  , SlotDrop
+  , SlotNumericHeld
+  , SlotNumericRepeat
+  , SlotMenuOpen
+  , SlotColorBase
+  ]
 
 -- | Damage for the changed store keys that are not widget keys, through the
 -- widgets owning them ('storeKeyOwners'): each owner once, as a 'ReqWidget'

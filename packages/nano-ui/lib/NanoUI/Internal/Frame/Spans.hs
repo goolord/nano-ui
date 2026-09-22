@@ -6,6 +6,7 @@ module NanoUI.Internal.Frame.Spans
   , widgetNodeCount
   , widgetTextSpans
   , computeWidgetTextPlacements
+  , plainFieldPen
   , textInputFg
   , forWidgetTextPlacements_
   , selectableTextGeometry
@@ -424,6 +425,22 @@ selectableTextGeometry fm x y h =
   let lineH = fmLineHeight fm
    in (x, centeredTextY fm y h lineH, lineH)
 
+-- | A plain (non-selectable) field's drawn text, its pen position and the
+-- scroll offset that settled it. Paint needs exactly this; only the span path
+-- also needs the measured width, so the host measurement stays there.
+plainFieldPen ::
+  Context -> NodeIdx -> Int -> FontMetrics -> Float -> Float -> Float -> Float -> IO (T.Text, Float, Float, Float)
+plainFieldPen ctx idx si fm x y w h = do
+  let numeric = hasFlag textInputFlagNumeric si
+  ph <- if numeric then pure "" else getText (ctxNodeArena ctx) idx
+  value <- textInputValue ctx idx
+  focus <- textInputFocused ctx idx
+  let fieldTxt = textInputFieldText ph value focus
+      Rect _ fieldY _ fieldH = if numeric then Rect x y w h else textInputFieldRect fm x y w h
+      (ix, _) = widgetContentInset fm
+  scrollX <- syncTextInputScroll ctx idx x y w h
+  pure (fieldTxt, x + ix - scrollX, centeredTextY fm fieldY fieldH (fmLineHeight fm), scrollX)
+
 computeWidgetTextPlacements ::
   Context -> NodeType -> NodeIdx -> Float -> Float -> Float -> Float -> IO [(T.Text, Float, Float, Float, Float)]
 computeWidgetTextPlacements ctx nt idx x y w h = do
@@ -452,15 +469,9 @@ computeWidgetTextPlacements ctx nt idx x y w h = do
           (fw, _) <- measureTxt value
           pure [(value, penX, ty, fw, selLineH)]
       | otherwise -> do
-          let numeric = hasFlag textInputFlagNumeric si
-          ph <- if numeric then pure "" else getText (ctxNodeArena ctx) idx
-          value <- textInputValue ctx idx
-          focus <- textInputFocused ctx idx
-          let fieldTxt = textInputFieldText ph value focus
-              Rect _ fieldY _ fieldH = if numeric then Rect x y w h else textInputFieldRect fm x y w h
+          (fieldTxt, penX, penY, _) <- plainFieldPen ctx idx si fm x y w h
           (fw, _) <- measureTxt fieldTxt
-          scrollX <- syncTextInputScroll ctx idx x y w h
-          pure [(fieldTxt, x + ix - scrollX, centeredTextY fm fieldY fieldH lineH, fw, lineH)]
+          pure [(fieldTxt, penX, penY, fw, lineH)]
     NodeTextArea -> do
       lbl <- getText (ctxNodeArena ctx) idx
       value <- textInputValue ctx idx

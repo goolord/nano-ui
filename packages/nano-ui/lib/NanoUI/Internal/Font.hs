@@ -20,7 +20,6 @@ module NanoUI.Internal.Font
   , selectionSpans
   , monospaceMetrics
   , scaleFontMetrics
-  , measureTextWrappedIO
   , WrapResult (..)
   , wrapMeasure
   , wrapTextIO
@@ -58,6 +57,7 @@ module NanoUI.Internal.Font
   , ScrollBarSlot (..)
   , classifyScrollBar
   , scrollLayoutGutter
+  , sliderHitBounds
   , sliderTrackBounds
   , sliderTrackHeight
   , sliderHandleDiameter
@@ -395,6 +395,14 @@ sliderTrackBounds x y w h =
   let trackY = y + max 0 ((h - sliderTrackHeight) / 2)
    in Rect x trackY (max 0 w) sliderTrackHeight
 
+-- | The track grown by the handle's overhang: where a drag or a hover on the
+-- handle counts. The painter and the cursor must agree on this.
+{-# INLINE sliderHitBounds #-}
+sliderHitBounds :: Float -> Float -> Float -> Float -> Rect
+sliderHitBounds x y w h =
+  let Rect tx ty tw th = sliderTrackBounds x y w h
+   in Rect tx (ty - sliderHandleSlack) tw (th + 2 * sliderHandleSlack)
+
 -- | Thickness of a list or page scrollbar.
 scrollBarWidth :: Float
 scrollBarWidth = 8
@@ -562,9 +570,6 @@ lineWidth fm line
                   Nothing -> 0
   where
     step (!w, !prev) c = (w + kernedAdvance fm (Just prev) c, c)
-
-measureTextWrappedIO :: (Text -> IO Float) -> FontMetrics -> Text -> Float -> IO (Float, Float)
-measureTextWrappedIO lineW fm txt maxW = wrapMeasure fm maxW <$> wrapTextIO lineW txt maxW
 
 -- | The size of text wrapped to @maxW@ into the lines of @wrap@.
 wrapMeasure :: FontMetrics -> Float -> WrapResult -> (Float, Float)

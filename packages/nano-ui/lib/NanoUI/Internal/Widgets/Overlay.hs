@@ -22,7 +22,7 @@ import NanoUI.Internal.Context
 import NanoUI.Internal.Input
   ( inputWindowSize
   )
-import NanoUI.Internal.Layout.Arena (NodeType (..), addNode)
+import NanoUI.Internal.Layout.Arena (NodeType (..), addNodeFromLayout)
 import NanoUI.Internal.Monad
   ( Ui
   , askContext
@@ -156,22 +156,18 @@ overlay kind shape open title child = do
     seedW = case panelW of Fixed v -> v; _ -> minWidth
     seedH = case panelH of Fixed v -> v; _ -> minHeight
     addOverlayNode _ parent =
-      addNode
+      addNodeFromLayout
         (ctxNodeArena ctx)
         (if isModal then NodeModal else NodeWindow)
         parent
-        (layoutDirection panel)
-        panelW
-        panelH
-        (layoutPadding panel)
-        (layoutGap panel)
-        (min availW (layoutMinW panel))
-        (min availH (layoutMinH panel))
-        (min availW (layoutMaxW panel))
-        (min availH (layoutMaxH panel))
-        0
-        (layoutAlignX panel)
-        (layoutAlignY panel)
+        panel
+          { layoutWidth = panelW
+          , layoutHeight = panelH
+          , layoutMinW = min availW (layoutMinW panel)
+          , layoutMinH = min availH (layoutMinH panel)
+          , layoutMaxW = min availW (layoutMaxW panel)
+          , layoutMaxH = min availH (layoutMaxH panel)
+          }
     enter wid = do
       when isModal (beginModal ctx)
       seedFloatingPanel ctx wid =<< seedRect wid

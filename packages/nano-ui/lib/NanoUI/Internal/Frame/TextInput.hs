@@ -9,7 +9,6 @@ module NanoUI.Internal.Frame.TextInput
   , syncTextInputScroll
   , FieldEdit
   , readFieldEdit
-  , textInputScroll
   , drawTextInputSelection
   , drawTextInputCaret
   , drawTextCaret
@@ -76,6 +75,7 @@ import NanoUI.Internal.WidgetText
   , numericTextClip
   , searchInputIconRects
   , searchInputTextClip
+  , textClipBetween
   , textInputFlagNumeric
   , textInputFieldHeight
   , textInputFlagSearch
@@ -93,8 +93,8 @@ textInputFieldRect fm x y w h =
 
 textInputFieldTextClip :: FontMetrics -> Rect -> Rect
 textInputFieldTextClip fm (Rect fx fy fw fh) =
-  let (ix, iy) = widgetContentInset fm
-   in Rect (fx + ix) (fy + iy) (max 0 (fw - 2 * ix)) (max 0 (fh - 2 * iy))
+  let (ix, _) = widgetContentInset fm
+   in textClipBetween fm ix ix fx fy fw fh
 
 -- | Resolve the box a field paints/hits and the clip its text is confined to.
 -- Search fields are caption-less: the whole node rect is the box and text is
@@ -175,12 +175,6 @@ computeTextInputScroll fm viewportW value cursor oldScroll isFocused
             | caretRelX + 1 > oldScroll + viewportW = caretRelX + 1 - viewportW
             | otherwise = oldScroll
       pure (clamp 0 maxScroll s0)
-
--- | The scroll 'syncTextInputScroll' last settled for a field.
-textInputScroll :: Context -> NodeIdx -> IO Float
-textInputScroll ctx idx = do
-  wid <- getWidgetId (ctxNodeArena ctx) idx
-  findSlot fieldFloat 0 (slotKey SlotTextInputScroll (intKey wid)) <$> getStore ctx
 
 syncTextInputScroll :: Context -> NodeIdx -> Float -> Float -> Float -> Float -> IO Float
 syncTextInputScroll ctx idx x y w h = do

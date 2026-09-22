@@ -26,7 +26,7 @@ import NanoUI.Internal.Context
   , seedFloatingPanel
   )
 import NanoUI.Internal.Id (WidgetId, enterScope, scopeTag)
-import NanoUI.Internal.Layout.Arena (NodeIdx, NodeType (..), addNode)
+import NanoUI.Internal.Layout.Arena (NodeIdx, NodeType (..), addNodeFromLayout)
 import NanoUI.Internal.Monad
   ( Ui
   , askContext
@@ -38,9 +38,7 @@ import NanoUI.Internal.Monad
   , (<&&>)
   )
 import NanoUI.Internal.Style
-  ( AlignX (..)
-  , AlignY (..)
-  , Layout (..)
+  ( Layout (..)
   , Padding (..)
   , defaultLayout
   , tight
@@ -110,22 +108,11 @@ popupWith open cfg f child = do
     layout = f (tight defaultLayout)
     addPopupNode wid parent = do
       registerPopupConfig ctx wid (cfgAnchor cfg) (cfgPlacement cfg) (cfgOffset cfg)
-      addNode
+      addNodeFromLayout
         (ctxNodeArena ctx)
         NodePopup
         parent
-        (layoutDirection layout)
-        (layoutWidth layout)
-        (layoutHeight layout)
-        (Padding 6 6 6 6)
-        4
-        0
-        0
-        1e9
-        1e9
-        0
-        AlignStart
-        AlignTop
+        layout {layoutPadding = Padding 6 6 6 6, layoutGap = 4}
     seedFromPrev wid = getPrevRect ctx wid >>= mapM_ (seedFloatingPanel ctx wid)
   floatingOverlay open (cfgDismissable cfg) addPopupNode seedFromPrev ((,) False <$> child)
 

@@ -22,7 +22,7 @@ import NanoUI.Internal.Context
   , isDisabled
   , lookupCustomCursor
   )
-import NanoUI.Internal.Font (sliderHandleSlack, sliderTrackBounds)
+import NanoUI.Internal.Font (sliderHitBounds)
 import NanoUI.Internal.Frame.Hit
   ( nodePointVisible
   , scrollHitRect
@@ -216,11 +216,7 @@ sliderCursorKind ctx idx wid mouse inp = do
         case mrect of
           Nothing -> UiCursorDefault
           Just (Rect x y w h) ->
-            let
-              Rect tx ty tw th = sliderTrackBounds x y w h
-              hitRect = Rect tx (ty - sliderHandleSlack) tw (th + 2 * sliderHandleSlack)
-             in
-              grabDragKind (rectContains hitRect mouse) False inp
+            grabDragKind (rectContains (sliderHitBounds x y w h) mouse) False inp
 
 textInputCursorKind :: Context -> NodeIdx -> WidgetId -> V2 -> IO UiCursorKind
 textInputCursorKind ctx idx wid mouse = do

@@ -117,43 +117,45 @@ transformSubtree ctx idx scrollX scrollY parentClip = do
     !vx = lx + sx
     !vy = ly + sy
     within r = fromMaybe parentClip (rectIntersect parentClip r)
-  unless floating $ setRect na idx vx vy vw vh
-  (!childScrollX, !childScrollY, !childClip) <-
-    if isScrollNode nt
-      then do
-        (axes, viewport, range) <- scrollNodeGeometry ctx idx (Rect vx vy vw vh)
-        wid <- getWidgetId na idx
-        -- The only pass that sees a scroller's placed geometry. Everything
-        -- that scrolls one between frames reads it back from here.
-        cacheScrollMetrics ctx wid axes viewport range
-        -- An offset set outright before this layout, or left over from
-        -- content that has since shrunk, is held to the range the content
-        -- has now, on the axes this scroller owns.
-        cur@(V2 cx cy) <- getScrollOffsetIn ctx wid axes
-        let
-          V2 hx hy = clampScrollOffset range cur
-          held = case axes of
-            ScrollAxisY -> V2 cx hy
-            ScrollAxisX -> V2 hx cy
-            ScrollAxisXY -> V2 hx hy
-        when (held /= cur) $ setScrollOffsetIn ctx wid axes held
-        let
-          V2 dx dy = held
-        let
-          clip = within viewport
-        setClipRect na idx clip
-        pure (sx - dx, sy - dy, clip)
-      else do
-        clip <-
-          case nt of
-            NodePanel -> do
-              theme <- nodeTheme ctx idx
-              pure (within (borderContentClip (themePanel theme) (Rect vx vy vw vh)))
-            _ -> pure $! if floating then Rect vx vy vw vh else parentClip
-        setClipRect na idx clip
-        pure (sx, sy, clip)
-  forChildNodes_ na idx $ \ci ->
-    transformSubtree ctx ci childScrollX childScrollY childClip
+  -- With no offset on either axis the placed rect equals the laid-out one, so
+  -- the write is a no-op; a floating node always takes that path.
+  unless (sx == 0 && sy == 0) $ setRect na idx vx vy vw vh
+  -- Recursing from inside each branch keeps the child transform in registers;
+  -- returning it as a tuple allocated one box per node per frame.
+  let descend !cx !cy !clip = forChildNodes_ na idx $ \ci -> transformSubtree ctx ci cx cy clip
+  if isScrollNode nt
+    then do
+      (axes, viewport, range) <- scrollNodeGeometry ctx idx (Rect vx vy vw vh)
+      wid <- getWidgetId na idx
+      -- The only pass that sees a scroller's placed geometry. Everything
+      -- that scrolls one between frames reads it back from here.
+      cacheScrollMetrics ctx wid axes viewport range
+      -- An offset set outright before this layout, or left over from
+      -- content that has since shrunk, is held to the range the content
+      -- has now, on the axes this scroller owns.
+      cur@(V2 cx cy) <- getScrollOffsetIn ctx wid axes
+      let
+        V2 hx hy = clampScrollOffset range cur
+        held = case axes of
+          ScrollAxisY -> V2 cx hy
+          ScrollAxisX -> V2 hx cy
+          ScrollAxisXY -> V2 hx hy
+      when (held /= cur) $ setScrollOffsetIn ctx wid axes held
+      let
+        V2 dx dy = held
+      let
+        clip = within viewport
+      setClipRect na idx clip
+      descend (sx - dx) (sy - dy) clip
+    else do
+      clip <-
+        case nt of
+          NodePanel -> do
+            theme <- nodeTheme ctx idx
+            pure (within (borderContentClip (themePanel theme) (Rect vx vy vw vh)))
+          _ -> pure $! if floating then Rect vx vy vw vh else parentClip
+      setClipRect na idx clip
+      descend sx sy clip
 
 -- | Axes, content viewport and reachable offset range of the scroll container
 -- at @idx@ placed at @rect@, in window axes. The wheel, the programmatic
