@@ -468,12 +468,10 @@ data FlexScratch = FlexScratch
   -- percentage of the container's inner width.
   , fsH :: !(IOArr Float)
   -- ^ Height of each child before the sharing.
-  , fsOutW :: !(IOArr Float)
-  -- ^ Width of each child after the space is shared out. A column copies
-  -- 'fsW' through unchanged.
-  , fsOutH :: !(IOArr Float)
-  -- ^ Height of each child after the space is shared out. A row copies 'fsH'
-  -- through unchanged.
+  , fsOut :: !(IOArr Float)
+  -- ^ Size of each child along the main axis after the space is shared out.
+  , fsGrow :: !(IOArr Float)
+  -- ^ Working space for the sharing: each child's grow factor.
   }
 
 -- | A memo with one entry per node: a width, and two results computed for the
@@ -694,8 +692,8 @@ newFlexScratch fsCap = do
   fsIdx <- newPrimArray fsCap
   fsW <- newPrimArray fsCap
   fsH <- newPrimArray fsCap
-  fsOutW <- newPrimArray fsCap
-  fsOutH <- newPrimArray fsCap
+  fsOut <- newPrimArray fsCap
+  fsGrow <- newPrimArray fsCap
   pure FlexScratch {..}
 
 -- | Floats per node in 'wmSlots': the width and the two results.
@@ -1643,8 +1641,8 @@ growScratch na s needed = do
   fsIdx <- growPrimArrayCopy (fsIdx s) cap newCap (-1)
   fsW <- growPrimArrayCopy (fsW s) cap newCap 0
   fsH <- growPrimArrayCopy (fsH s) cap newCap 0
-  fsOutW <- growPrimArrayCopy (fsOutW s) cap newCap 0
-  fsOutH <- growPrimArrayCopy (fsOutH s) cap newCap 0
+  fsOut <- growPrimArrayCopy (fsOut s) cap newCap 0
+  fsGrow <- growPrimArrayCopy (fsGrow s) cap newCap 0
   let s' = FlexScratch {fsCap = newCap, ..}
   writeIORef (naScratch na) s'
   pure s'

@@ -30,7 +30,6 @@ import Data.Primitive.PrimArray
   , setPrimArray
   , writePrimArray
   )
-import Data.Primitive.Types (Prim)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Word (Word8, Word64)
@@ -1080,15 +1079,21 @@ loadChildrenScratch :: NodeArena -> NodeIdx -> (NodeIdx -> IO (Float, Float)) ->
 loadChildrenScratch na parent sizeOf = do
   cc <- getChildCount na parent
   FlexScratch {fsIdx = idxArr, fsW = wArr, fsH = hArr} <- ensureScratchCapacity na cc
+  -- The sibling links run from the last child to the first, so the children
+  -- fill the arrays from the end. Floating children leave room at the front,
+  -- which the copies close.
   let write !i ci = do
         (w, h) <- sizeOf ci
         writePrimArray idxArr i ci
         writePrimArray wArr i w
         writePrimArray hArr i h
-        pure (i + 1)
-  n <- foldFlowChildrenM na parent write 0
-  reverseScratchTriple idxArr wArr hArr (n - 1)
-  pure n
+        pure (i - 1)
+  lo <- (+ 1) <$> foldFlowChildrenM na parent write (cc - 1)
+  when (lo > 0) $ do
+    copyMutablePrimArray idxArr 0 idxArr lo (cc - lo)
+    copyMutablePrimArray wArr 0 wArr lo (cc - lo)
+    copyMutablePrimArray hArr 0 hArr lo (cc - lo)
+  pure (cc - lo)
 
 -- | Scratch size of a flow child: its measured box, with percent sizing
 -- resolved against the parent's inner box. With @refit@, a fit-height child
@@ -1409,8 +1414,7 @@ withAxisSnaps ::
   IO a
 withAxisSnaps na depth n availMain gapSum horizontal act = do
   distributeScratch na n availMain gapSum horizontal
-  FlexScratch {fsIdx = idxArr, fsOutW = outW, fsOutH = outH} <- readIORef (naScratch na)
-  let outArr = if horizontal then outW else outH
+  FlexScratch {fsIdx = idxArr, fsOut = outArr} <- readIORef (naScratch na)
   AxisSnapshot idxSnap outSnap <- ensureAxisSnapshot na depth n
   copyMutablePrimArray idxSnap 0 idxArr 0 n
   copyMutablePrimArray outSnap 0 outArr 0 n
@@ -1568,29 +1572,6 @@ positionColumnFromParent env@SolveEnv {seArena = na} depth parent gap chrome px 
               go (i + 1) (y + placedH + gapAfter)
     go 0 cy
 
--- | Reverse elements 0 through @hi@ of the three arrays together.
-{-# INLINE reverseScratchTriple #-}
-reverseScratchTriple :: IOArr Int -> IOArr Float -> IOArr Float -> Int -> IO ()
-reverseScratchTriple idxArr mainArr crossArr hi = do
-  let go !a !b
-        | a >= b = pure ()
-        | otherwise = do
-            swapPrim idxArr a b
-            swapPrim mainArr a b
-            swapPrim crossArr a b
-            go (a + 1) (b - 1)
-  go 0 hi
-
-{-# INLINE swapPrim #-}
-swapPrim :: (Prim a) => IOArr a -> Int -> Int -> IO ()
-swapPrim arr a b = do
-  x <- readPrimArray arr a
-  y <- readPrimArray arr b
-  writePrimArray arr a y
-  writePrimArray arr b x
-{-# SPECIALIZE swapPrim :: IOArr Int -> Int -> Int -> IO () #-}
-{-# SPECIALIZE swapPrim :: IOArr Float -> Int -> Int -> IO () #-}
-
 columnGapSumScratch :: NodeArena -> Bool -> Int -> Float -> IO Float
 columnGapSumScratch _ False _ _ = pure 0
 columnGapSumScratch na True n gap = do
@@ -1603,81 +1584,66 @@ columnGapSumScratch na True n gap = do
             go (i + 1) (acc + g)
   go 0 0
 
--- | Resolve the main-axis sizes of the first @n@ scratch children.
+-- | Share the main axis among the first @n@ scratch children: 'fsOut' gets
+-- each child's size along it, starting from its content size ('fsW' or
+-- 'fsH') and taking its part of the space the container has spare or lacks.
 distributeScratch :: NodeArena -> Int -> Float -> Float -> Bool -> IO ()
 distributeScratch na n avail gapSum horizontal = do
-  FlexScratch {fsIdx = idxArr, fsW = wArr, fsH = hArr, fsOutW = outW, fsOutH = outH} <- readIORef (naScratch na)
-  total <- sumScratchAxis wArr hArr horizontal 0 n 0
+  FlexScratch {fsIdx = idxArr, fsW = wArr, fsH = hArr, fsOut = out, fsGrow = gfArr} <- readIORef (naScratch na)
+  copyMutablePrimArray out 0 (if horizontal then wArr else hArr) 0 n
+  total <- foldUpTo n (\acc i -> (acc +) <$> readPrimArray out i) 0
   let slack = avail - (total + gapSum)
+      sizingAt i = readPrimArray idxArr i >>= \ci -> getAxisSizing na ci horizontal
   if slack > 0.001
     then do
-      growTotal <- sumFactors growFactor na idxArr horizontal n
-      if growTotal <= 0
-        then copyScratch wArr hArr outW outH n
-        else do
-          -- Grow children share the free space by factor, but no child is
-          -- squeezed below its content size (a min-content floor, like CSS
-          -- flex with min-width:auto): two fillW columns come out equal unless
-          -- one column's content needs more, and that one then takes exactly
-          -- what it needs while the rest re-share what is left.
-          --
-          -- Grow factors live in the cross output (0 once a child is not or
-          -- no longer growing): withAxisSnaps only consumes the main-axis
-          -- array, so it is free scratch here and is restored to real cross
-          -- sizes before returning. mainArr keeps the exact content size
-          -- throughout; no arithmetic on markers.
-          let mainArr = if horizontal then outW else outH
-              crossArr = if horizontal then outH else outW
-          markGrowFlags na idxArr wArr hArr mainArr crossArr horizontal 0 n
-          (free, gfSum) <- settleGrow mainArr crossArr avail gapSum n 0
-          applyGrowShares wArr hArr mainArr crossArr horizontal free gfSum 0 n
-    else
-      if slack < -0.001
-        then do
-          shrinkTotal <- sumFactors shrinkFactor na idxArr horizontal n
-          if shrinkTotal <= 0
-            then copyScratch wArr hArr outW outH n
-            else applyShrink na idxArr wArr hArr outW outH horizontal (negate slack) shrinkTotal 0 n
-        else copyScratch wArr hArr outW outH n
+      -- Grow children share the free space by factor, but no child is
+      -- squeezed below its content size (a min-content floor, like CSS
+      -- flex with min-width:auto): two fillW columns come out equal unless
+      -- one column's content needs more, and that one then takes exactly
+      -- what it needs while the rest re-share what is left.
+      --
+      -- 'fsGrow' holds each child's factor, 0 once it is not or no longer
+      -- growing, and 'fsOut' keeps the exact content size until the shares
+      -- are handed out.
+      growTotal <- foldUpTo n (\acc i -> do
+        (tag, val) <- sizingAt i
+        let gf = if tag == SizingGrow then val else 0
+        writePrimArray gfArr i (if gf > 0 then gf else 0)
+        pure (acc + gf)) 0
+      when (growTotal > 0) $ do
+        (free, gfSum) <- settleGrow out gfArr avail gapSum n 0
+        forUpTo_ n $ \i -> do
+          gf <- readPrimArray gfArr i
+          when (gf > 0) $ writePrimArray out i (max 0 (free * gf / gfSum))
+    else when (slack < -0.001) $ do
+      shrinkTotal <- foldUpTo n (\acc i -> (\(tag, val) -> acc + shrinkFactor tag val) <$> sizingAt i) 0
+      when (shrinkTotal > 0) $ forUpTo_ n $ \i -> do
+        ci <- readPrimArray idxArr i
+        (minW, minH, _, _) <- getMinMax na ci
+        (tag, val) <- getAxisSizing na ci horizontal
+        main <- readPrimArray out i
+        let delta = negate slack * shrinkFactor tag val / shrinkTotal
+        writePrimArray out i (max (if horizontal then minW else minH) (main - delta))
 
--- | @out[i] = (w[i], h[i])@ for the first @n@ children.
-copyScratch :: IOArr Float -> IOArr Float -> IOArr Float -> IOArr Float -> Int -> IO ()
-{-# INLINE copyScratch #-}
-copyScratch wArr hArr outW outH !n
-  | n <= 0 = pure ()
-  | otherwise = do
-      copyMutablePrimArray outW 0 wArr 0 n
-      copyMutablePrimArray outH 0 hArr 0 n
+-- | Strict left fold over @0 .. n - 1@.
+{-# INLINE foldUpTo #-}
+foldUpTo :: Int -> (a -> Int -> IO a) -> a -> IO a
+foldUpTo n f = go 0
+  where
+    go !i !acc
+      | i >= n = pure acc
+      | otherwise = f acc i >>= go (i + 1)
 
-{-# INLINE sumScratchAxis #-}
-sumScratchAxis :: IOArr Float -> IOArr Float -> Bool -> Int -> Int -> Float -> IO Float
-sumScratchAxis wArr hArr horizontal !i !end !acc
-  | i >= end = pure acc
-  | otherwise = do
-      v <- if horizontal then readPrimArray wArr i else readPrimArray hArr i
-      sumScratchAxis wArr hArr horizontal (i + 1) end (acc + v)
+-- | Run @f@ on @0 .. n - 1@ in order.
+{-# INLINE forUpTo_ #-}
+forUpTo_ :: Int -> (Int -> IO ()) -> IO ()
+forUpTo_ n f = foldUpTo n (\() i -> f i) ()
 
 -- | Sizing along the main axis: width when @horizontal@, else height.
 {-# INLINE getAxisSizing #-}
 getAxisSizing :: NodeArena -> NodeIdx -> Bool -> IO (SizingTag, Float)
 getAxisSizing na idx horizontal =
   if horizontal then getWidthSizing na idx else getHeightSizing na idx
-
--- | Sum a sizing-derived flex factor over the first @n@ scratch children.
-{-# INLINE sumFactors #-}
-sumFactors :: (SizingTag -> Float -> Float) -> NodeArena -> IOArr Int -> Bool -> Int -> IO Float
-sumFactors factor na idxArr horizontal n = go 0 0
-  where
-    go !i !acc
-      | i >= n = pure acc
-      | otherwise = do
-          ci <- readPrimArray idxArr i
-          (tag, val) <- getAxisSizing na ci horizontal
-          go (i + 1) (acc + factor tag val)
-
-{-# INLINE growFactor #-}
-growFactor :: SizingTag -> Float -> Float
-growFactor tag val = if tag == SizingGrow then val else 0
 
 {-# INLINE shrinkFactor #-}
 shrinkFactor :: SizingTag -> Float -> Float
@@ -1694,19 +1660,6 @@ shrinkFactor tag val =
     -- Fit stays content-sized. A pinned header must not squash when a Grow
     -- sibling (page scroll) is taller than the window.
     _ -> 0
-
-markGrowFlags :: NodeArena -> IOArr Int -> IOArr Float -> IOArr Float -> IOArr Float -> IOArr Float -> Bool -> Int -> Int -> IO ()
-markGrowFlags na idxArr wArr hArr mainArr crossArr horizontal !i !end
-  | i >= end = pure ()
-  | otherwise = do
-      ci <- readPrimArray idxArr i
-      iw <- readPrimArray wArr i
-      ih <- readPrimArray hArr i
-      (tag, val) <- getAxisSizing na ci horizontal
-      let gf = growFactor tag val
-      writePrimArray mainArr i (if horizontal then iw else ih)
-      writePrimArray crossArr i (if gf > 0 then gf else 0)
-      markGrowFlags na idxArr wArr hArr mainArr crossArr horizontal (i + 1) end
 
 -- One sweep: sum content of non-grow + already-locked children (factor 0) and
 -- grow factors of the still-unlocked.
@@ -1786,39 +1739,6 @@ waterFillGrow mainArr crossArr room n = do
       lockFrom _ _ _ = pure ()
   growing <- collect 0 []
   lockFrom (room - occupied) gfSum (sortOn (\(perUnit, _, _, _) -> Down perUnit) growing)
-
--- Hand shares to unlocked grow children and restore real cross sizes where
--- the factors clobbered them.
-applyGrowShares :: IOArr Float -> IOArr Float -> IOArr Float -> IOArr Float -> Bool -> Float -> Float -> Int -> Int -> IO ()
-applyGrowShares wArr hArr mainArr crossArr horizontal !free !gfSum !i !end
-  | i >= end = pure ()
-  | otherwise = do
-      iw <- readPrimArray wArr i
-      ih <- readPrimArray hArr i
-      gf <- readPrimArray crossArr i
-      when (gf > 0) $
-        writePrimArray mainArr i (max 0 (free * gf / gfSum))
-      writePrimArray crossArr i (if horizontal then ih else iw)
-      applyGrowShares wArr hArr mainArr crossArr horizontal free gfSum (i + 1) end
-
-applyShrink :: NodeArena -> IOArr Int -> IOArr Float -> IOArr Float -> IOArr Float -> IOArr Float -> Bool -> Float -> Float -> Int -> Int -> IO ()
-applyShrink na idxArr wArr hArr outW outH horizontal !overflow !shrinkTotal !i !end
-  | i >= end = pure ()
-  | otherwise = do
-      ci <- readPrimArray idxArr i
-      iw <- readPrimArray wArr i
-      ih <- readPrimArray hArr i
-      (minW, minH, _, _) <- getMinMax na ci
-      (tag, val) <- getAxisSizing na ci horizontal
-      let sf = shrinkFactor tag val
-          main = if horizontal then iw else ih
-          minMain = if horizontal then minW else minH
-          delta = overflow * sf / shrinkTotal
-          shrunk = max minMain (main - delta)
-      if horizontal
-        then writePrimArray outW i shrunk >> writePrimArray outH i ih
-        else writePrimArray outW i iw >> writePrimArray outH i shrunk
-      applyShrink na idxArr wArr hArr outW outH horizontal overflow shrinkTotal (i + 1) end
 
 alignX :: AlignX -> Float -> Float -> Float -> Float
 alignX AlignStart cx _ _ = cx
