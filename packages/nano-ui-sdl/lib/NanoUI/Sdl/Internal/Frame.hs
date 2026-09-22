@@ -36,16 +36,15 @@ import SDL3.Sys.Bindgen.Video (SDL_Window)
 import SDL3.Sys.Video qualified as SDL
 
 #if defined(mingw32_HOST_OS)
-import Control.Monad (unless, zipWithM_)
+import Control.Monad (unless)
 import Data.ByteString qualified as BS
 import Data.Int (Int32)
 import Data.Word (Word32)
 import Foreign.C.Types (CInt (..))
-import Foreign.Marshal.Alloc (alloca)
-import Foreign.Marshal.Array (allocaArray)
+import Foreign.Marshal.Array (withArray)
 import Foreign.Marshal.Utils (with)
 import Foreign.Ptr (castPtr, nullPtr)
-import Foreign.Storable (peek, pokeElemOff)
+import NanoUI.Sdl.Internal.Display (outPair)
 import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
 import SDL3.Sys.Bindgen.Video (sDL_PROP_WINDOW_WIN32_HWND_POINTER)
 import SDL3.Sys.Properties (getPointerProperty)
@@ -129,14 +128,14 @@ applyNativeFrame win on = do
     -- and along the top, where the client area reaches the edge of the
     -- window, it falls on the view's first row. The view draws its own
     -- border there, so the desktop's is taken off.
-    setBorderColor hwnd (if on then dwmwaColorNone else dwmwaColorDefault)
+    setWindowWord hwnd dwmwaBorderColor (if on then dwmwaColorNone else dwmwaColorDefault)
     -- And it rounds the window's corners. Those corners are the frame's, not
     -- the view's -- the view is held a frame's width inside them, so its own
     -- corners are square whatever the desktop does there, and a rounding
     -- that only shapes the shadow leaves the shadow round a window that is
     -- not. Square, the shadow follows the window it belongs to, and the
     -- corners are the view's to draw.
-    setCornerRounding hwnd (if on then dwmwcpDoNotRound else dwmwcpDefault)
+    setWindowWord hwnd dwmwaCornerPreference (if on then dwmwcpDoNotRound else dwmwcpDefault)
 
 applyWindowShadow win on = do
   hwnd <- windowHwnd win
@@ -145,22 +144,19 @@ applyWindowShadow win on = do
     -- not rendered with unless it is asked for. Off goes back to what the
     -- window's style says rather than to never, which would take the shadow
     -- and border from a window that has a frame of its own.
-    with (if on then dwmncrpEnabled else dwmncrpUseWindowStyle) $ \policy ->
-      void (dwmSetWindowAttribute hwnd dwmwaNcRenderingPolicy (castPtr policy) 4)
+    setWindowWord hwnd dwmwaNcRenderingPolicy (if on then dwmncrpEnabled else dwmncrpUseWindowStyle)
     -- A frame extended into the client area is what makes DWM treat the
     -- window as one that has a frame at all. One pixel along the top is the
     -- least that does, and the view paints over it.
-    allocaArray 4 $ \margins -> do
-      zipWithM_ (pokeElemOff margins) [0 ..] (if on then [0, 0, 1, 0] else [0, 0, 0, 0])
-      void (dwmExtendFrameIntoClientArea hwnd margins)
+    withArray (if on then [0, 0, 1, 0] else [0, 0, 0, 0]) (void . dwmExtendFrameIntoClientArea hwnd)
 
 nativeFrameOutset win = do
   hwnd <- windowHwnd win
   if hwnd == nullPtr
     then pure (0, 0)
-    else alloca $ \pa -> alloca $ \pd -> do
-      nanoUiNativeFrameOutset hwnd pa pd
-      (,) <$> (fromIntegral <$> peek pa) <*> (fromIntegral <$> peek pd)
+    else do
+      ((), across, down) <- outPair (nanoUiNativeFrameOutset hwnd)
+      pure (fromIntegral across, fromIntegral down)
 
 -- | Safe, not unsafe: this one puts the window procedure on and takes it off
 -- again, and Windows dispatches messages from inside both.
@@ -184,10 +180,6 @@ windowHwnd win = do
 setWindowWord :: Ptr () -> Word32 -> Word32 -> IO ()
 setWindowWord hwnd attribute value =
   with value $ \p -> void (dwmSetWindowAttribute hwnd attribute (castPtr p) 4)
-
-setBorderColor, setCornerRounding :: Ptr () -> Word32 -> IO ()
-setBorderColor hwnd = setWindowWord hwnd dwmwaBorderColor
-setCornerRounding hwnd = setWindowWord hwnd dwmwaCornerPreference
 
 -- | @DWMWA_BORDER_COLOR@ and the colour that says to draw no border, and
 -- @DWMWA_WINDOW_CORNER_PREFERENCE@ and the two roundings used here.

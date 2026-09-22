@@ -2,11 +2,11 @@
 
 -- | SDL window dimensions, display scale, refresh timing, and event-loop wake support.
 module NanoUI.Sdl.Internal.Display
-  ( defaultFontSize
-  , queryWindowPixelDensity
+  ( queryWindowPixelDensity
   , queryWindowRefreshHz
   , queryWindowLogicalSize
   , queryMouseWindowPos
+  , outPair
   , zoomWindow
   , installResizeWatch
   , refreshEventType
@@ -21,7 +21,7 @@ import GHC.IORef (atomicSwapIORef)
 import Foreign.C.Types (CBool (..), CInt (..))
 import Foreign.Marshal.Alloc (alloca, callocBytes)
 import Foreign.Ptr (FunPtr, Ptr, freeHaskellFunPtr)
-import Foreign.Storable (peek, poke, sizeOf)
+import Foreign.Storable (Storable, peek, poke, sizeOf)
 import Data.Word (Word32)
 import NanoUI (Size (..), V2 (..))
 import SDL3.Sys.Bindgen.Events (SDL_Event)
@@ -32,9 +32,6 @@ import SDL3.Sys.Mouse (getMouseState)
 import SDL3.Sys.Bindgen.Rect (SDL_Rect (..))
 import SDL3.Sys.Video (getDisplayForWindow, getDisplayUsableBounds, getWindowPixelDensity, getWindowSize, setWindowPosition, setWindowSize)
 import System.IO.Unsafe (unsafePerformIO)
-
-defaultFontSize :: Float
-defaultFontSize = 16
 
 -- | Backbuffer pixels per window coordinate: the factor the retained
 -- framebuffer, glyph rasterization and snapping need. This is not
@@ -60,29 +57,26 @@ queryWindowRefreshHz win = do
 -- Dividing by the display scale would shrink the logical size on DPI-scaled
 -- displays, making the retained framebuffer too small.
 queryWindowLogicalSize :: Ptr SDL_Window -> IO Size
-queryWindowLogicalSize win =
-  alloca $ \wp ->
-    alloca $ \hp -> do
-      ok <- getWindowSize win wp hp
-      if ok
-        then do
-          w <- peek wp
-          h <- peek hp
-          pure (Size (fromIntegral w) (fromIntegral h))
-        else pure (Size 0 0)
+queryWindowLogicalSize win = do
+  (ok, w, h) <- outPair (getWindowSize win)
+  pure (if ok then Size (fromIntegral w) (fromIntegral h) else Size 0 0)
 
 -- | Pointer position relative to the window with mouse focus, in window
 -- coordinates. Uses 'SDL_GetMouseState' rather than the global pointer +
 -- window position: the latter is unreliable on Wayland (window position is not
 -- exposed) and breaks hover/wheel targeting.
 queryMouseWindowPos :: IO V2
-queryMouseWindowPos =
-  alloca $ \xp ->
-    alloca $ \yp -> do
-      void (getMouseState xp yp)
-      x <- peek xp
-      y <- peek yp
-      pure (V2 (realToFrac x) (realToFrac y))
+queryMouseWindowPos = do
+  (_, x, y) <- outPair getMouseState
+  pure (V2 (realToFrac x) (realToFrac y))
+
+-- | Call a native function that answers through two out pointers, and return
+-- its result with both answers. The answers are not meaningful when the call
+-- reports a failure.
+outPair :: (Storable a, Storable b) => (Ptr a -> Ptr b -> IO r) -> IO (r, a, b)
+outPair f = alloca $ \pa -> alloca $ \pb -> do
+  r <- f pa pb
+  (r,,) <$> peek pa <*> peek pb
 
 -- Windows runs a modal loop while the user drags the border, so the app
 -- event watch does not run. SDL still delivers resize events to this watch.

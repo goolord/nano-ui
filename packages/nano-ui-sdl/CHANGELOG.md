@@ -68,6 +68,15 @@
 
 ### Changed
 
+- `SdlEnv` no longer has `sdlDialogState`: file dialogs are tracked per
+  process, and every dialog shares one native callback instead of a wrapper
+  apiece. `RenderDriver` is exported from `NanoUI.Backend.Sdl`, which
+  `sdlRenderDriver` needed. In `NanoUI.Sdl.Internal.Input`, the four
+  left/right press/release events are one `EvMouseButton`, `EvResize` and
+  `EvDisplayScale` are one `EvWindowChanged`, and `waitEvent` takes a
+  timeout (negative waits indefinitely) in place of `waitEventTimeout`.
+- Font variants other than `FontMono` share the sans font at a size instead
+  of each opening its own copy.
 - A line over 4096 bytes is cached like any other, counting one entry per
   4096 bytes against the shaping caches' limits, where it used to be shaped
   again on every paint. Glyphs outside the clip emit no quads. Repainting a

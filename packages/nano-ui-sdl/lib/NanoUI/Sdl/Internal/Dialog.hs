@@ -7,10 +7,10 @@
 -- poll the handle on later frames to observe completion.
 --
 -- Threading: SDL3 may invoke the dialog callback on a background thread, so
--- the callback here does little: it decodes the result, frees the
--- FFI buffers it owned, wakes the event loop, and records the outcome. All
--- UI-affecting work ('markDirty', releasing the callback 'FunPtr') is deferred
--- to the thread that polls the result.
+-- the callback here does little: it decodes the result, frees the FFI
+-- buffers the launch allocated, records the outcome, and wakes the event
+-- loop. All UI-affecting work ('markDirty', reclaiming focus) is deferred to
+-- the thread that polls the result.
 module NanoUI.Sdl.Internal.Dialog
   ( FileFilter (..)
   , FileDialogOptions (..)
@@ -22,45 +22,29 @@ module NanoUI.Sdl.Internal.Dialog
   , openFolderDialog
   , pollFileDialog
   , cancelFileDialog
-  , clearDialogState
   , askOpenFileDialog
   , askSaveFileDialog
   , askOpenFolderDialog
   , pollFileDialogUi
   ) where
 
-import Control.Monad (forM, forM_, unless, void)
+import Control.Monad (forM, unless, void)
 import Data.Int (Int32)
 import Data.IntMap.Strict qualified as IM
-import Data.IORef (atomicModifyIORef', readIORef)
+import Data.IORef (IORef, atomicModifyIORef', atomicWriteIORef, newIORef, readIORef)
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Effectful (Eff, type (:>))
-import Foreign.C.String (CString, newCString, peekCString)
-import Foreign.C.Types (CChar)
+import Foreign.C.String (newCString, peekCString)
 import Foreign.Marshal.Alloc (free)
-import Foreign.Marshal.Array (mallocArray, peekArray0)
+import Foreign.Marshal.Array (newArray, peekArray0)
 import Foreign.Ptr (FunPtr, Ptr, castFunPtr, castPtr, nullPtr)
-import Foreign.Storable (pokeElemOff)
-import NanoUI.Sdl.Internal.Dialog.Types
-  ( DialogCallback
-  , DialogCallbackFunPtr
-  , DialogState (..)
-  , FileDialogId (..)
-  , FileDialogResult (..)
-  , PendingDialog (..)
-  , clearDialogState
-  , drainRetired
-  , retireDialogCallback
-  )
+import Foreign.StablePtr (castPtrToStablePtr, castStablePtrToPtr, deRefStablePtr, freeStablePtr, newStablePtr)
 import NanoUI.Sdl.Internal.Display (pushRefreshEvent)
 import NanoUI.Sdl.Internal.Window (SdlEnv (..))
 import NanoUI.Testing (Ui, askHost, markDirty, uiIO)
-import SDL3.Sys.Bindgen.Dialog
-  ( SDL_DialogFileCallback (..)
-  , SDL_DialogFileCallback_Aux
-  , SDL_DialogFileFilter (..)
-  )
+import SDL3.Sys.Bindgen.Dialog (SDL_DialogFileCallback (..), SDL_DialogFileFilter (..))
 import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
 import SDL3.Sys.Dialog
   ( showOpenFileDialogSafe
@@ -69,6 +53,7 @@ import SDL3.Sys.Dialog
   )
 import SDL3.Sys.Video (raiseWindowSafe, restoreWindowSafe)
 import System.IO (hPutStrLn, stderr)
+import System.IO.Unsafe (unsafePerformIO)
 
 -- | A file type filter shown in open/save dialogs.
 data FileFilter = FileFilter
@@ -94,20 +79,46 @@ data FileDialogOptions = FileDialogOptions
 defaultFileDialogOptions :: FileDialogOptions
 defaultFileDialogOptions = FileDialogOptions [] Nothing False
 
+-- | Opaque handle returned by a non-blocking dialog launch. @0@ is never a
+-- valid handle.
+newtype FileDialogId = FileDialogId Int
+  deriving (Eq, Ord, Show)
+
+-- | Lifecycle state of a launched file dialog.
+data FileDialogResult
+  = FileDialogPending
+  -- ^ Still waiting for the user.
+  | FileDialogCancelled
+  -- ^ The user dismissed the dialog without choosing.
+  | FileDialogFailed
+  -- ^ SDL reported an error.
+  | FileDialogSelected [FilePath]
+  -- ^ The user chose one or more paths.
+  | FileDialogUnknown
+  -- ^ No dialog with this handle is being tracked. A handle becomes unknown
+  -- once its result has been delivered and consumed by 'pollFileDialog', or
+  -- after the dialog was abandoned via 'cancelFileDialog'. Never poll a
+  -- handle that returns 'FileDialogUnknown' again.
+  deriving (Eq, Show)
+
+-- | The last handle given out, and the tracked dialogs by handle: the cell
+-- each one's callback writes its result to. Native dialogs belong to the
+-- process, like the callback they share, rather than to a session.
+{-# NOINLINE dialogs #-}
+dialogs :: IORef (Int, IM.IntMap (IORef FileDialogResult))
+dialogs = unsafePerformIO (newIORef (0, IM.empty))
+
 -- | Launch an open-file dialog. Returns a handle to poll for completion.
 openFileDialog :: SdlEnv -> FileDialogOptions -> IO FileDialogId
-openFileDialog env opts =
-  launchDialog env OpenDialog (dialogFilters opts) (dialogDefaultLocation opts) (dialogAllowMany opts)
+openFileDialog env = launchDialog env OpenDialog
 
 -- | Launch a save-file dialog. Returns a handle to poll for completion.
 saveFileDialog :: SdlEnv -> FileDialogOptions -> IO FileDialogId
-saveFileDialog env opts =
-  launchDialog env SaveDialog (dialogFilters opts) (dialogDefaultLocation opts) (dialogAllowMany opts)
+saveFileDialog env = launchDialog env SaveDialog
 
 -- | Launch a folder-selection dialog. Returns a handle to poll for completion.
 openFolderDialog :: SdlEnv -> FileDialogOptions -> IO FileDialogId
-openFolderDialog env opts =
-  launchDialog env FolderDialog [] (dialogDefaultLocation opts) (dialogAllowMany opts)
+openFolderDialog env = launchDialog env FolderDialog
 
 -- | Poll a previously launched dialog without blocking.
 --
@@ -116,46 +127,38 @@ openFolderDialog env opts =
 -- handle, so later polls return 'FileDialogUnknown'.
 pollFileDialog :: SdlEnv -> FileDialogId -> IO FileDialogResult
 pollFileDialog env (FileDialogId did) = do
-  let st = sdlDialogState env
-  -- Callbacks retired by an earlier poll are now certainly returned.
-  drainRetired st
-  (mcb, result) <-
-    atomicModifyIORef' (dsPending st) $ \pending ->
-      case IM.lookup did pending of
-        Nothing -> (pending, (Nothing, FileDialogUnknown))
-        Just (PendingDialog FileDialogPending _) -> (pending, (Nothing, FileDialogPending))
-        Just (PendingDialog status cb) -> (IM.delete did pending, (Just cb, status))
+  result <- maybe (pure FileDialogUnknown) readIORef . IM.lookup did . snd =<< readIORef dialogs
   case result of
-    FileDialogPending -> pure ()
-    FileDialogUnknown -> pure ()
+    FileDialogPending -> pure result
+    FileDialogUnknown -> pure result
     _ -> do
-      -- Retire the callback for a later poll to free; the callback thread may
-      -- still be unwinding right now, and freeing a running wrapper is unsafe.
-      forM_ mcb (retireDialogCallback st)
-      -- The native dialog stole window focus; reclaim it so the app keeps
-      -- receiving hover/motion/wheel events without an extra click.
-      -- Restoration is a best-effort no-op when the window was never
-      -- minimized (its result is platform-dependent, so it is not a reliable
-      -- failure signal); only a failed raise means the window may still lack
-      -- focus and worth an audible warning.
-      void (restoreWindowSafe (sdlWindow env))
-      raised <- raiseWindowSafe (sdlWindow env)
-      unless raised $
-        hPutStrLn stderr "nano-ui: dialog completed but window raise failed; input may need a click"
-      -- The dialog finished; request a redraw so the caller can reflect the
-      -- result. Safe here: this runs on the polling (UI) thread.
-      ctx <- readIORef (sdlCachedCtx env)
-      markDirty ctx
-  pure result
+      -- Only the poll that takes the handle out delivers the result.
+      taken <- atomicModifyIORef' dialogs $ \(n, m) -> ((n, IM.delete did m), IM.member did m)
+      if not taken
+        then pure FileDialogUnknown
+        else do
+          -- The native dialog stole window focus; reclaim it so the app keeps
+          -- receiving hover/motion/wheel events without an extra click.
+          -- Restoration is a best-effort no-op when the window was never
+          -- minimized (its result is platform-dependent, so it is not a
+          -- reliable failure signal); only a failed raise means the window
+          -- may still lack focus and worth an audible warning.
+          void (restoreWindowSafe (sdlWindow env))
+          raised <- raiseWindowSafe (sdlWindow env)
+          unless raised $
+            hPutStrLn stderr "nano-ui: dialog completed but window raise failed; input may need a click"
+          -- The dialog finished; request a redraw so the caller can reflect
+          -- the result. Safe here: this runs on the polling (UI) thread.
+          markDirty =<< readIORef (sdlCachedCtx env)
+          pure result
 
 -- | Stop tracking a dialog handle without waiting for the native dialog to
 -- finish. The handle returns 'FileDialogUnknown' if polled afterwards.
 -- The native dialog keeps running until the user dismisses it; its result is
--- discarded. If a dialog is abandoned while still open, its small FFI
--- callback is left to be reclaimed at teardown or process exit.
+-- discarded.
 cancelFileDialog :: SdlEnv -> FileDialogId -> IO ()
-cancelFileDialog env (FileDialogId did) =
-  atomicModifyIORef' (dsPending (sdlDialogState env)) $ \m -> (IM.delete did m, ())
+cancelFileDialog _ (FileDialogId did) =
+  atomicModifyIORef' dialogs $ \(n, m) -> ((n, IM.delete did m), ())
 
 -- | Open-file dialog, usable from within 'NanoUI' widget code. Returns
 -- 'Nothing' when there is no SDL host to launch a dialog.
@@ -174,112 +177,76 @@ askOpenFolderDialog opts = askHost >>= traverse (uiIO . (`openFolderDialog` opts
 
 -- | Poll a dialog from within 'NanoUI' widget code.
 pollFileDialogUi :: Ui :> es => FileDialogId -> Eff es FileDialogResult
-pollFileDialogUi did = do
-  menv <- askHost
-  case menv of
-    Nothing -> pure FileDialogUnknown
-    Just env -> uiIO (pollFileDialog env did)
+pollFileDialogUi did = askHost >>= maybe (pure FileDialogUnknown) (uiIO . (`pollFileDialog` did))
 
 data DialogKind = OpenDialog | SaveDialog | FolderDialog
+  deriving (Eq)
 
-launchDialog ::
-  SdlEnv ->
-  DialogKind ->
-  [FileFilter] ->
-  Maybe FilePath ->
-  Bool ->
-  IO FileDialogId
-launchDialog env kind filters mDefault allowMany = do
-  (filtersPtr, filterStrs) <- allocFilters filters
-  (defaultPtr, defaultStr) <- allocDefault mDefault
-  let st = sdlDialogState env
-  -- Free callbacks from dialogs that finished earlier.
-  drainRetired st
-  did <- nextDialogId st
-  rawFp <- mkDialogCallback (onResult did st filterStrs filtersPtr defaultStr)
+launchDialog :: SdlEnv -> DialogKind -> FileDialogOptions -> IO FileDialogId
+launchDialog env kind opts = do
+  -- SDL reads the filters and the location until it runs the callback, which
+  -- frees them.
+  names <-
+    forM (if kind == FolderDialog then [] else dialogFilters opts) $ \(FileFilter name pattern_) ->
+      (,) <$> newCString (T.unpack name) <*> newCString (T.unpack pattern_)
+  filters <-
+    if null names
+      then pure nullPtr
+      else newArray [SDL_DialogFileFilter (PtrConst.unsafeFromPtr n) (PtrConst.unsafeFromPtr p) | (n, p) <- names]
+  location <- traverse newCString (dialogDefaultLocation opts)
+  result <- newIORef FileDialogPending
+  let release = do
+        mapM_ (\(n, p) -> free n >> free p) names
+        free filters
+        mapM_ free location
   -- Register the handle before showing: the callback may fire before this
-  -- function returns, and it must find its entry.
-  atomicModifyIORef' (dsPending st) $ \m ->
-    (IM.insert did (PendingDialog FileDialogPending rawFp) m, ())
-  let cb = SDL_DialogFileCallback (castFunPtr rawFp :: FunPtr SDL_DialogFileCallback_Aux)
-      filtersConst = PtrConst.unsafeFromPtr filtersPtr
-      nfilters = fromIntegral (length filters)
+  -- function returns, and its result must be found.
+  did <- atomicModifyIORef' dialogs $ \(n, m) -> ((n + 1, IM.insert (n + 1) result m), n + 1)
+  userdata <- castPtr . castStablePtrToPtr <$> newStablePtr (result, release)
+  let win = sdlWindow env
+      filtersConst = PtrConst.unsafeFromPtr filters
+      nfilters = fromIntegral (length names)
+      locationConst = PtrConst.unsafeFromPtr (fromMaybe nullPtr location)
   case kind of
     OpenDialog ->
-      showOpenFileDialogSafe cb nullPtr (sdlWindow env) filtersConst nfilters defaultPtr allowMany
+      showOpenFileDialogSafe dialogCallback userdata win filtersConst nfilters locationConst (dialogAllowMany opts)
     SaveDialog ->
-      showSaveFileDialogSafe cb nullPtr (sdlWindow env) filtersConst nfilters defaultPtr
+      showSaveFileDialogSafe dialogCallback userdata win filtersConst nfilters locationConst
     FolderDialog ->
-      showOpenFolderDialogSafe cb nullPtr (sdlWindow env) defaultPtr allowMany
+      showOpenFolderDialogSafe dialogCallback userdata win locationConst (dialogAllowMany opts)
   pure (FileDialogId did)
 
-nextDialogId :: DialogState -> IO Int
-nextDialogId st = atomicModifyIORef' (dsNextId st) $ \n -> (n + 1, n + 1)
+-- | The callback every dialog shares, made once a process. A launch's
+-- userdata carries its result cell and the release of its buffers, so there
+-- is no callback to free while SDL might still call it.
+{-# NOINLINE dialogCallback #-}
+dialogCallback :: SDL_DialogFileCallback
+dialogCallback = unsafePerformIO (SDL_DialogFileCallback . castFunPtr <$> mkDialogCallback onResult)
 
 -- | SDL invoked the callback: decode the file list, release the FFI buffers
--- this launch owned, record the outcome, and only then wake the (possibly idle)
--- event loop. The status must be visible before the wake, or the woken frame
--- polls 'FileDialogPending', skips, and the result waits for an unrelated
--- event.
-onResult ::
-  Int ->
-  DialogState ->
-  [CString] ->
-  Ptr SDL_DialogFileFilter ->
-  Maybe CString ->
-  Ptr () ->
-  Ptr () ->
-  Int32 ->
-  IO ()
-onResult did st filterStrs filtersPtr defaultStr _userdata filelistRaw _filterIdx = do
-  paths <- peekFileListRaw filelistRaw
-  let outcome =
-        case paths of
-          Nothing -> FileDialogFailed
-          Just [] -> FileDialogCancelled
-          Just ps -> FileDialogSelected ps
-  forM_ filterStrs free
-  free filtersPtr
-  forM_ defaultStr free
-  atomicModifyIORef' (dsPending st) $ \pending ->
-    (IM.adjust (\pl -> pl {pendingStatus = outcome}) did pending, ())
+-- the launch owned, record the outcome, and only then wake the (possibly
+-- idle) event loop. The status must be visible before the wake, or the woken
+-- frame polls 'FileDialogPending', skips, and the result waits for an
+-- unrelated event. A null list pointer means SDL hit an error; a null first
+-- entry means the user canceled.
+onResult :: Ptr () -> Ptr () -> Int32 -> IO ()
+onResult userdata filelist _filterIdx = do
+  let launch = castPtrToStablePtr userdata
+  (result, release) <- deRefStablePtr launch
+  freeStablePtr launch
+  paths <-
+    if filelist == nullPtr
+      then pure Nothing
+      else Just <$> (peekArray0 nullPtr (castPtr filelist) >>= traverse peekCString)
+  release
+  atomicWriteIORef result $ case paths of
+    Nothing -> FileDialogFailed
+    Just [] -> FileDialogCancelled
+    Just ps -> FileDialogSelected ps
   pushRefreshEvent
-
--- | Decode SDL's null-terminated file list into a plain list of paths.
---
--- A null list pointer means SDL hit an error; a null first entry means the
--- user canceled.
-peekFileListRaw :: Ptr () -> IO (Maybe [FilePath])
-peekFileListRaw filelistRaw
-  | filelistRaw == nullPtr = pure Nothing
-  | otherwise = Just <$> (peekArray0 nullPtr (castPtr filelistRaw) >>= traverse peekCString)
-
-allocFilters :: [FileFilter] -> IO (Ptr SDL_DialogFileFilter, [CString])
-allocFilters [] = pure (nullPtr, [])
-allocFilters fs = do
-  arr <- mallocArray (length fs)
-  strs <-
-    fmap concat $
-      forM (zip [0 ..] fs) $ \(i, FileFilter name pattern_) -> do
-        namePtr <- newCString (T.unpack name)
-        patternPtr <- newCString (T.unpack pattern_)
-        pokeElemOff
-          arr
-          i
-          ( SDL_DialogFileFilter
-              (PtrConst.unsafeFromPtr namePtr)
-              (PtrConst.unsafeFromPtr patternPtr)
-          )
-        pure [namePtr, patternPtr]
-  pure (arr, strs)
-
-allocDefault :: Maybe FilePath -> IO (PtrConst.PtrConst CChar, Maybe CString)
-allocDefault Nothing = pure (PtrConst.unsafeFromPtr nullPtr, Nothing)
-allocDefault (Just path) = do
-  cstr <- newCString path
-  pure (PtrConst.unsafeFromPtr cstr, Just cstr)
 
 -- SDL_DialogFileCallback is `void (*)(void *, const char * const *, int)`,
 -- flattened to `void *` pointers at the FFI boundary.
 foreign import ccall "wrapper"
-  mkDialogCallback :: DialogCallback -> IO DialogCallbackFunPtr
+  mkDialogCallback ::
+    (Ptr () -> Ptr () -> Int32 -> IO ()) -> IO (FunPtr (Ptr () -> Ptr () -> Int32 -> IO ()))

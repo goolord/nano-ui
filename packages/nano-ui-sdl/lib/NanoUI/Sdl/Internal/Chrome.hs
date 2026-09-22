@@ -60,21 +60,23 @@ import Data.Text.Foreign qualified as TextForeign
 import Effectful (Eff, type (:>))
 -- The constructor under 'SDL_HitTestResult', which the callback returns.
 import Foreign.C.Types (CUInt (..))
-import Foreign.Marshal.Alloc (alloca)
 import Foreign.Ptr (FunPtr, Ptr, castFunPtr, castPtr, nullFunPtr, nullPtr)
-import Foreign.Storable (peek, peekElemOff)
+import Foreign.Storable (peekElemOff)
 import NanoUI
   ( CaptionAction (..)
   , CaptionConfig (..)
   , Rect (..)
   , Size (..)
+  , V2 (..)
   , captionButtonsConfigured
   , defaultCaptionConfig
   , dragSpans
+  , rectContains
   , windowWidth
   )
 import NanoUI.Monad (Ui, askHost, uiIO)
 import NanoUI.Sdl.Internal.Chrome.Types
+import NanoUI.Sdl.Internal.Display (outPair)
 import NanoUI.Sdl.Internal.Frame
   ( WindowDecorations (..)
   , applyDecorations
@@ -232,22 +234,19 @@ hitTest st win area _ = do
   pure $
     if edge /= SDL.SDL_HITTEST_NORMAL
       then edge
-      else if any (holds x y) drag then SDL.SDL_HITTEST_DRAGGABLE else SDL.SDL_HITTEST_NORMAL
-  where
-    holds x y (Rect rx ry rw rh) = x >= rx && x < rx + rw && y >= ry && y < ry + rh
+      else if any (`rectContains` V2 x y) drag then SDL.SDL_HITTEST_DRAGGABLE else SDL.SDL_HITTEST_NORMAL
 
 -- | The edge or corner a point is near enough to take hold of, or
 -- @SDL_HITTEST_NORMAL@ for one in the window proper.
 windowEdge :: Ptr SDL_Window -> Float -> Float -> Float -> Float -> IO SDL_HitTestResult
-windowEdge win border top x y =
-  alloca $ \pw -> alloca $ \ph -> do
-    ok <- SDL.getWindowSize win pw ph
-    if not ok
-      then pure SDL.SDL_HITTEST_NORMAL
-      else do
-        w <- fromIntegral <$> peek pw
-        h <- fromIntegral <$> peek ph
-        pure (edgeHit (x < border) (x >= w - border) (y < top) (y >= h - border))
+windowEdge win border top x y = do
+  (ok, pw, ph) <- outPair (SDL.getWindowSize win)
+  let w = fromIntegral pw
+      h = fromIntegral ph
+  pure $
+    if ok
+      then edgeHit (x < border) (x >= w - border) (y < top) (y >= h - border)
+      else SDL.SDL_HITTEST_NORMAL
 
 -- | The @SDL_HitTestResult@ for an edge or corner, from the sides of the
 -- window the point is near.

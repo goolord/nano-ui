@@ -1,4 +1,5 @@
 {-# LANGUAGE CApiFFI #-}
+{-# LANGUAGE RecordWildCards #-}
 
 -- | SDL_ttf font handles, fallback selection, measurement snapshots, and glyph
 -- atlas caching. Native operations run on the owning display thread; pure
@@ -8,6 +9,7 @@ module NanoUI.Sdl.Internal.Font
   , GlyphAtlas
   , withTtf
   , fontSourceLabel
+  , embeddedFontSource
   , newGlyphAtlas
   , destroyGlyphAtlas
   , prepareGlyphAtlasForFrame
@@ -21,20 +23,23 @@ module NanoUI.Sdl.Internal.Font
   , withSdlFontCache
   ) where
 
-import Control.Exception (SomeException, bracket, catch, throwIO)
-import Control.Monad (forM, forM_, unless, void, when)
+import Control.Exception (SomeException, bracket_, catch, throwIO)
+import Control.Monad (foldM_, forM, forM_, unless, void, when, zipWithM_)
 import Data.Bits ((.&.), (.|.), shiftL)
+import Data.Foldable (traverse_)
+import Data.List (delete, elemIndex)
 import Foreign.Marshal.Alloc (alloca, allocaBytes)
-import Foreign.Marshal.Array (advancePtr, allocaArray)
+import Foreign.Marshal.Array (advancePtr, allocaArray, peekArray)
 import Data.Char (isPrint, isSpace, ord)
 import NanoUI.Bidi (BidiRun (..), bidiRuns, needsBidi)
+import NanoUI.Sdl.Internal.Font.Inter (fontInterBytes, fontInterLabel)
 import NanoUI.Sdl.Internal.Font.Search (searchFontFamilies)
 import System.IO.Unsafe (unsafePerformIO)
 import Data.ByteString (ByteString)
 import Data.ByteString.Unsafe (unsafeUseAsCStringLen)
 import Data.IORef (IORef, atomicModifyIORef', modifyIORef', newIORef, readIORef, writeIORef)
 import qualified Data.HashMap.Strict as HM
-import Data.Hashable (Hashable (..))
+import Data.Hashable (Hashable)
 import qualified Data.IntSet as IS
 import Data.Primitive.SmallArray
   ( SmallArray
@@ -44,28 +49,21 @@ import Data.Primitive.SmallArray
   )
 import Data.Primitive.PrimArray (PrimArray, indexPrimArray, newPrimArray, primArrayFromList, readPrimArray, setPrimArray, sizeofPrimArray, unsafeFreezePrimArray, writePrimArray)
 import Data.Int (Int32)
-import Data.Maybe (fromMaybe, listToMaybe)
-import Data.Word (Word64)
+import Data.Maybe (fromMaybe, listToMaybe, mapMaybe)
 import Data.Text (Text)
-import qualified Data.Sequence as Seq
 import qualified Data.Text as T
 import qualified Data.ByteString.Short as SBS
 import qualified GHC.Foreign as GHC
 import GHC.IO.Encoding (getFileSystemEncoding)
+import Data.Text.Internal.Encoding.Utf8 (utf8Length)
 import Data.Text.Unsafe (lengthWord8)
 import Foreign.C.String (CString, withCString)
 import Foreign.C.Types (CBool (..), CFloat (..), CInt (..), CSize (..), CUInt (..))
-import Foreign.Ptr (IntPtr (..), Ptr, castPtr, intPtrToPtr, nullPtr, plusPtr, ptrToIntPtr)
-import Foreign.Storable (peek, peekElemOff, poke, sizeOf)
+import Foreign.Ptr (Ptr, castPtr, nullPtr, plusPtr)
+import Foreign.Storable (peek, peekElemOff, poke)
 import Data.Unique (hashUnique, newUnique)
 import qualified Data.ByteString as BS
-import System.Directory (getTemporaryDirectory, removeFile)
-import System.IO (hClose, openTempFile)
-import NanoUI
-  ( FontStyle (..)
-  , FontVariant (..)
-  , FontWeight (..)
-  )
+import NanoUI (FontVariant (..))
 import NanoUI.Backend
   ( FontBackend (..)
   , FontMetrics (..)
@@ -80,7 +78,6 @@ import NanoUI.Testing
   , glyphAtlasPages
   , withFontMetrics
   , withFontResolver
-  , withMeasureText
   , withMonoFontMetrics
   , wrapMeasureCache
   )
@@ -89,12 +86,11 @@ import qualified Data.IntMap.Strict as IM
 import qualified Data.Text.Foreign as TF
 
 data SdlFont = SdlFont
-  { sfId :: !Word64
+  { sfId :: !Int
   , sfFont :: Ptr ()
   , sfLineSkip :: Float
   , sfAscent :: Float
   , sfSpaceAdvance :: Float
-  , sfTempPath :: !(Maybe FilePath)
   , sfAlive :: !(IORef Bool)
   , sfPointSize :: !Float
   -- ^ The size the font was opened at, which its fallbacks open at too.
@@ -107,11 +103,15 @@ data SdlFont = SdlFont
 data FontSource
   = FontFromPath !FilePath
   | FontFromMemory !ByteString !FilePath
-  deriving (Show)
+  deriving (Eq, Show)
 
 fontSourceLabel :: FontSource -> FilePath
 fontSourceLabel (FontFromPath p) = p
 fontSourceLabel (FontFromMemory _ label) = label
+
+-- | Bundled Inter, which a font that will not open falls back to.
+embeddedFontSource :: FontSource
+embeddedFontSource = FontFromMemory fontInterBytes fontInterLabel
 
 -- | Per-glyph atlas slot. UVs are normalised to [0,1] within the page, plus
 -- the page's number in u, as 'ShapedGlyphs' carries them.
@@ -124,7 +124,7 @@ data GlyphSlot = GlyphSlot
 
 data GlyphAtlas = GlyphAtlas
   { gaAtlas :: !(Ptr ())
-  , gaEpoch :: !(IORef Word64)
+  , gaEpoch :: !(IORef Int)
   , -- | An insertion failed (atlas out of space) during the last frame; the
     -- atlas must be reset at the next frame start, before any quad is
     -- recorded, so the reset can never wipe the texture underneath
@@ -138,25 +138,14 @@ data GlyphAtlas = GlyphAtlas
   , -- | Glyph slots by font id, then glyph index: what shaped text draws.
     -- Closing a font drops its inner map instead of scanning every glyph.
     gaIndexEntries :: !(IORef (IM.IntMap (IM.IntMap (Maybe GlyphSlot))))
-  , -- | Actions to run after every reset (re-warming the base fonts).
-    gaRewarmHooks :: !(IORef [IO ()])
   , gaAlive :: !(IORef Bool)
   }
 
-newFontId :: IO Word64
-newFontId = fromIntegral . hashUnique <$> newUnique
-
 -- Backend effects are confined to the owning SDL thread. Retained snapshots
 -- may outlive a window or a cache entry, but must never query a freed handle.
-ensureFontAlive :: SdlFont -> IO ()
-ensureFontAlive sf = do
-  alive <- readIORef (sfAlive sf)
-  unless alive (fail "font backend used after closeFont")
-
-ensureAtlasAlive :: GlyphAtlas -> IO ()
-ensureAtlasAlive ga = do
-  alive <- readIORef (gaAlive ga)
-  unless alive (fail "font backend used after destroyGlyphAtlas")
+ensureAlive :: String -> IORef Bool -> IO ()
+ensureAlive closer alive =
+  readIORef alive >>= (`unless` fail ("font backend used after " ++ closer))
 
 -- | Entries per generation of each shaped-run cache on a 'FontMetrics'.
 -- Dynamic, ever-changing text (FPS counters, timers, percentages, mouse
@@ -178,36 +167,13 @@ kernCacheCap = 4096
 textWeight :: Text -> Int
 textWeight txt = 1 + lengthWord8 txt `quot` 4096
 
--- | A hash map bounded by entry count: 'insertBounded' into a full cache evicts
--- the first key of 'bcOrder' and returns its value so the owner can release
--- it. Hashing a text key once beats comparing it at every level of a tree.
-data BoundedCache k v = BoundedCache
-  { bcEntries :: !(HM.HashMap k v)
-  , bcOrder :: !(Seq.Seq k)
-  -- ^ Each key once, oldest first. Its length is the entry count, which
-  -- 'HM.size' would have to count.
-  }
-
-emptyBounded :: BoundedCache k v
-emptyBounded = BoundedCache HM.empty Seq.empty
-
-insertBounded :: Hashable k => Int -> k -> v -> BoundedCache k v -> (BoundedCache k v, Maybe v)
-insertBounded cap k v (BoundedCache m order) =
-  case HM.alterF (\old -> (old, Just v)) k m of
-    (Just _, m') -> (BoundedCache m' order, Nothing)
-    (Nothing, m')
-      | Seq.length order >= cap
-      , victim Seq.:<| rest <- order ->
-          let (evicted, m'') = HM.alterF (\old -> (old, Nothing)) victim m'
-           in (BoundedCache m'' (rest Seq.|> k), evicted)
-      | otherwise -> (BoundedCache m' (order Seq.|> k), Nothing)
-
 -- | A hash map kept in two generations, a cheap stand-in for least recently
 -- used. Inserts go to the young map; a hit in the old map moves the entry up.
 -- When the young map fills it becomes the old one and the old one is dropped,
 -- so an entry survives while it is used once a generation, however many
 -- one-off keys (wrap probes, table cells) pass through. Plain insertion order
--- evicted the oldest key even when every frame used it.
+-- evicted the oldest key even when every frame used it. Hashing a text key
+-- once beats comparing it at every level of a tree.
 -- The fields are the young map, its size and the old map. The size is the sum
 -- of its entries' weights; an entry heavier than a whole generation is not
 -- kept.
@@ -223,66 +189,43 @@ insertGen cap w k v cache@(GenCache young n old)
   | n + w > cap = GenCache (HM.singleton k v) w young
   | otherwise = GenCache (HM.insert k v young) (n + w) old
 
--- | Look @k@ up, moving an old entry to the young map at weight @w k@.
-lookupGen :: Hashable k => Int -> (k -> Int) -> IORef (GenCache k v) -> k -> IO (Maybe v)
-lookupGen cap w ref k = do
+-- | The entry for @k@, or what @make@ returns, which is kept. Entries weigh
+-- @w k@; an old one used again moves to the young map. Inlined so a hit
+-- returns the stored value without boxing it in a 'Just' on the way: the SDL
+-- bench's warm-lookup gate measures exactly that.
+{-# INLINE cachedGen #-}
+cachedGen :: Hashable k => Int -> (k -> Int) -> IORef (GenCache k v) -> k -> IO v -> IO v
+cachedGen cap w ref k make = do
   cache@(GenCache young _ old) <- readIORef ref
   case HM.lookup k young of
-    Just v -> pure (Just v)
+    Just v -> pure v
     Nothing -> case HM.lookup k old of
       Just v -> do
         writeIORef ref $! insertGen cap (w k) k v cache
-        pure (Just v)
-      Nothing -> pure Nothing
+        pure v
+      Nothing -> do
+        v <- make
+        modifyIORef' ref (insertGen cap (w k) k v)
+        pure v
 
--- Native glyph measurements have one representation, shared by metric-only
--- preparation and atlas placement. Pixel bearings are unscaled here.
-data GlyphMetrics = GlyphMetrics
-  { gmMinX :: !Float
-  , gmMaxX :: !Float
-  , gmMinY :: !Float
-  , gmMaxY :: !Float
-  , gmAdvance :: !Float
-  }
+-- | A glyph's native measurements, shared by metric-only preparation and
+-- atlas placement, in unscaled pixels: min x, max x, min y, max y, advance.
+data GlyphMetrics = GlyphMetrics !Float !Float !Float !Float !Float
 
-getGlyphMetrics :: SdlFont -> CUInt -> IO (Maybe GlyphMetrics)
+getGlyphMetrics :: SdlFont -> Int -> IO (Maybe GlyphMetrics)
 getGlyphMetrics sf cp = allocaArray 5 $ \p -> do
-  ok <-
-    ttfGlyphMetrics
-      (sfFont sf)
-      cp
-      p
-      (p `advancePtr` 1)
-      (p `advancePtr` 2)
-      (p `advancePtr` 3)
-      (p `advancePtr` 4)
-  let
-    metric i = fromIntegral <$> peekElemOff p i
+  let at = advancePtr p
+      metric i = fromIntegral <$> peekElemOff p i
+  ok <- ttfGlyphMetrics (sfFont sf) (fromIntegral cp) p (at 1) (at 2) (at 3) (at 4)
   if ok
-    then
-      Just
-        <$> (GlyphMetrics <$> metric 0 <*> metric 1 <*> metric 2 <*> metric 3 <*> metric 4)
+    then Just <$> (GlyphMetrics <$> metric 0 <*> metric 1 <*> metric 2 <*> metric 3 <*> metric 4)
     else pure Nothing
 
-getGlyphAdvance :: SdlFont -> CUInt -> IO (Maybe Float)
-getGlyphAdvance sf cp = fmap gmAdvance <$> getGlyphMetrics sf cp
-
--- Metric-only geometry has no atlas lifetime and never rasterises a surface.
-getGlyphGeometry :: SdlFont -> Float -> Char -> IO (Maybe GlyphQuad)
-getGlyphGeometry sf inv c =
-  fmap (metricsGlyphQuad sf inv) <$> getGlyphMetrics sf (fromIntegral (ord c))
-
+-- | Metric-only geometry: no atlas lifetime, and no surface rasterised.
 metricsGlyphQuad :: SdlFont -> Float -> GlyphMetrics -> GlyphQuad
-metricsGlyphQuad sf inv metrics =
-  GlyphQuad
-    (gmMinX metrics / inv)
-    ((sfAscent sf - gmMaxY metrics) / inv)
-    ((gmMaxX metrics - gmMinX metrics) / inv)
-    ((gmMaxY metrics - gmMinY metrics) / inv)
-    0
-    0
-    0
-    0
+metricsGlyphQuad sf inv (GlyphMetrics minX maxX minY maxY _) =
+  GlyphQuad (minX / inv) ((sfAscent sf - maxY) / inv) ((maxX - minX) / inv) ((maxY - minY) / inv)
+    0 0 0 0
 
 newGlyphAtlas :: Ptr SDL_Renderer -> IO GlyphAtlas
 newGlyphAtlas ren = do
@@ -293,48 +236,12 @@ newGlyphAtlas ren = do
     <*> newIORef False
     <*> newIORef False
     <*> newIORef IM.empty
-    <*> newIORef []
     <*> newIORef True
 
 destroyGlyphAtlas :: GlyphAtlas -> IO ()
 destroyGlyphAtlas ga = do
   alive <- atomicModifyIORef' (gaAlive ga) (\open -> (False, open))
   when alive $ textAtlasDestroy (gaAtlas ga)
-
--- | Register an action to run after every atlas reset (DPI change, font
--- switch, exhaustion recovery). 'newSdlFontCache' registers one that re-warms
--- the base fonts' printable ASCII, so the next frame pays no cold glyph misses.
-registerGlyphAtlasRewarm :: GlyphAtlas -> IO () -> IO ()
-registerGlyphAtlasRewarm ga hook = modifyIORef' (gaRewarmHooks ga) (hook :)
-
-resetGlyphAtlas :: GlyphAtlas -> IO ()
-resetGlyphAtlas ga = do
-  modifyIORef' (gaEpoch ga) (+1)
-  writeIORef (gaIndexEntries ga) IM.empty
-  writeIORef (gaNeedsReset ga) False
-  textAtlasReset (gaAtlas ga)
-  hooks <- readIORef (gaRewarmHooks ga)
-  mapM_ id hooks
-  writeIORef (gaResetFlag ga) True
-
--- | An atlas insertion failed: the atlas is out of space. The reset is
--- deferred to the next frame start ('prepareGlyphAtlasForFrame') so quads
--- already recorded this frame keep sampling valid pixels, and the frame
--- itself is marked invalid so the runner drops it instead of presenting
--- text that could not be placed.
-markAtlasExhausted :: GlyphAtlas -> IO ()
-markAtlasExhausted ga = do
-  writeIORef (gaNeedsReset ga) True
-  writeIORef (gaResetFlag ga) True
-
--- | Frame-start atlas maintenance: reset the atlas if an insertion failed
--- during the previous frame, then clear the mid-frame reset flag. Must run
--- before the frame's UI pass records any quads.
-prepareGlyphAtlasForFrame :: GlyphAtlas -> IO ()
-prepareGlyphAtlasForFrame ga = do
-  needs <- readIORef (gaNeedsReset ga)
-  when needs $ resetGlyphAtlas ga
-  writeIORef (gaResetFlag ga) False
 
 -- | Test-and-clear the mid-frame reset flag. 'True' means the atlas was
 -- reset (or ran out of space) while the frame was being built, so quads
@@ -346,53 +253,59 @@ takeGlyphAtlasResetFlag ga = atomicModifyIORef' (gaResetFlag ga) (\v -> (False, 
 -- | Look up or insert a glyph by font and glyph index, the way shaped text
 -- names glyphs. Glyphs are keyed by the font's id, which is never reused, and
 -- rendered through its handle.
-lookupOrInsertGlyphIndex :: GlyphAtlas -> Int -> Int -> Int -> IO (Maybe GlyphSlot)
-lookupOrInsertGlyphIndex ga fontKey handle gi = do
+lookupOrInsertGlyph :: GlyphAtlas -> SdlFont -> Int -> IO (Maybe GlyphSlot)
+lookupOrInsertGlyph ga font gi = do
   entries <- readIORef (gaIndexEntries ga)
-  case IM.lookup fontKey entries >>= IM.lookup gi of
+  case IM.lookup (sfId font) entries >>= IM.lookup gi of
     Just mSlot -> pure mSlot
     Nothing -> do
-      mSlot <- placeGlyphImage ga (fmap (/= 0) . ttfRenderGlyphIndexSurface (intPtrToPtr (IntPtr handle)) (fromIntegral gi))
-      modifyIORef' (gaIndexEntries ga) (IM.insertWith IM.union fontKey (IM.singleton gi mSlot))
+      mSlot <- placeGlyphImage ga font gi
+      modifyIORef' (gaIndexEntries ga) (IM.insertWith IM.union (sfId font) (IM.singleton gi mSlot))
       pure mSlot
 
 -- | Render a glyph image into a surface and copy it into the atlas, on a new
 -- page once the last one is full. 'Nothing' when there is no image or no
 -- room on any page.
--- A full atlas is reset at the next frame start (see 'markAtlasExhausted'):
+-- A full atlas is reset at the next frame start ('prepareGlyphAtlasForFrame'):
 -- wiping the texture here would leave quads already recorded this frame
 -- sampling blank pixels. The glyph is unavailable for the rest of the frame,
--- which is dropped.
-placeGlyphImage :: GlyphAtlas -> (Ptr (Ptr ()) -> IO Bool) -> IO (Maybe GlyphSlot)
-placeGlyphImage ga render = do
+-- which is marked invalid so the runner drops it instead of presenting text
+-- that could not be placed.
+placeGlyphImage :: GlyphAtlas -> SdlFont -> Int -> IO (Maybe GlyphSlot)
+placeGlyphImage ga font gi = do
   surf <- alloca $ \sp -> do
     poke sp nullPtr
-    ok <- render sp
-    if ok then peek sp else pure nullPtr
+    ok <- ttfRenderGlyphIndexSurface (sfFont font) (fromIntegral gi) sp
+    if ok /= 0 then peek sp else pure nullPtr
   if surf == nullPtr
     then pure Nothing
-    else do
-      mPos <- tryInsert (gaAtlas ga) surf
+    else alloca $ \pagePtr -> allocaArray 4 $ \out -> do
+      -- The page, and the x, y, width and height in pixels on it.
+      let at = advancePtr out
+      placed <- textAtlasInsertSurface (gaAtlas ga) surf pagePtr out (at 1) (at 2) (at 3)
       freeSurface surf
-      case mPos of
-        Nothing -> do
-          markAtlasExhausted ga
+      if placed == 0
+        then do
+          writeIORef (gaNeedsReset ga) True
+          writeIORef (gaResetFlag ga) True
           pure Nothing
-        Just (page, px, py, tw, th) -> do
-          let !pageU = fromIntegral page
-              !slot =
-                GlyphSlot
-                  { gsU0 = pageU + px / glyphAtlasSize
-                  , gsV0 = py / glyphAtlasSize
-                  , gsU1 = pageU + (px + tw) / glyphAtlasSize
-                  , gsV1 = (py + th) / glyphAtlasSize
-                  }
-          pure (Just slot)
+        else do
+          page <- fromIntegral <$> peek pagePtr
+          [x, y, w, h] <- map ((/ glyphAtlasSize) . realToFrac) <$> peekArray 4 out
+          pure (Just (GlyphSlot (page + x) y (page + x + w) (y + h)))
 
 -- | Width and height of the glyph atlas texture; mirrors
 -- NANO_UI_TEXT_ATLAS_SIZE in nano_ui_text_atlas.c.
 glyphAtlasSize :: Float
 glyphAtlasSize = 2048
+
+-- | A UV point that always samples transparent pixels, for a glyph the atlas
+-- had no room for: column 4 sits right of the 4px white patch (columns 0..3)
+-- and left of the first slot (allocations start at x = 5), and the final row
+-- is never written because every slot keeps 1px of padding.
+deadU, deadV :: Float
+deadU = 4.5 / glyphAtlasSize
+deadV = (glyphAtlasSize - 0.5) / glyphAtlasSize
 
 -- | A line shaped by SDL_ttf: its layout for measuring and caret placement,
 -- its measured width and height, and per glyph nine numbers (glyph index, destination x y w h,
@@ -439,7 +352,7 @@ shapingRuns txt
 -- right-to-left one.
 shapeLine :: SdlFont -> Float -> Text -> IO Shaped
 shapeLine sf inv txt = do
-  ensureFontAlive sf
+  ensureAlive "closeFont" (sfAlive sf)
   fallbacks <- IM.elems <$> readIORef (sfFallbacks sf)
   let fontList = sf : fallbacks
       n = T.length txt
@@ -467,19 +380,11 @@ shapeLine sf inv txt = do
   allocaBytes (size * max 1 pieceCount) $ \outs -> do
     let resultOf p = outs `plusPtr` (p * size)
     -- Shape every piece first, so the output arrays are sized once.
-    let shapeAll !_ [] = pure ()
-        shapeAll !p ((start, end, dir) : rest) = do
-          withUtf8 (T.take (end - start) (T.drop start txt)) $ \cstr len -> do
-            ok <- (/= 0) <$> ttfShape (sfFont sf) cstr len dir (resultOf p)
-            unless ok $ ttfShapedFree (resultOf p)
-          shapeAll (p + 1) rest
-    shapeAll 0 runs
-    let countGlyphs !p !acc
-          | p >= pieceCount = pure acc
-          | otherwise = do
-              g <- ttfShapedInt (resultOf p) 2
-              countGlyphs (p + 1) (acc + fromIntegral g)
-    glyphCount <- countGlyphs 0 0
+    forM_ (zip [0 ..] runs) $ \(p, (start, end, dir)) ->
+      TF.useAsPtr (T.take (end - start) (T.drop start txt)) $ \ptr len -> do
+        ok <- ttfShape (sfFont sf) (castPtr ptr) (fromIntegral len) dir (resultOf p)
+        when (ok == 0) $ ttfShapedFree (resultOf p)
+    glyphCount <- sum <$> mapM (\p -> fromIntegral <$> ttfShapedInt (resultOf p) 2) [0 .. pieceCount - 1]
     glyphs <- newPrimArray (glyphCount * 9)
     fontIndices <- newPrimArray glyphCount
     -- Caret stops by character in raster pixels, NaN where no cluster
@@ -500,23 +405,15 @@ shapeLine sf inv txt = do
             clusterPtr <- castPtr <$> ttfShapedPtr result 2
             let glyphInt :: Int -> IO Int32
                 glyphInt k = fromIntegral <$> peekElemOff (glyphPtr :: Ptr CInt) k
-                fontIndex ptr = go 0 fontList
-                  where
-                    go !k (f : fs) = if sfFont f == ptr then k else go (k + 1) fs
-                    go !_ [] = 0
+                fontIndex ptr = maybe 0 fromIntegral (elemIndex ptr (map sfFont fontList))
                 -- SDL_ttf's ten numbers a glyph start with its text offset,
                 -- which carets take from the clusters instead.
                 copyGlyphs !i !ink
                   | i >= nGlyphs = pure ink
                   | otherwise = do
-                      let o = (g0 + i) * 9
-                          field !k
-                            | k > 9 = pure ()
-                            | otherwise = do
-                                v <- glyphInt (i * 10 + k)
-                                writePrimArray glyphs (o + k - 1) (if k == 2 then v + fromIntegral pen else v)
-                                field (k + 1)
-                      field 1
+                      forM_ [1 .. 9] $ \k -> do
+                        v <- glyphInt (i * 10 + k)
+                        writePrimArray glyphs ((g0 + i) * 9 + k - 1) (if k == 2 then v + fromIntegral pen else v)
                       x <- glyphInt (i * 10 + 2)
                       gw <- glyphInt (i * 10 + 4)
                       ptr <- peekElemOff (fontPtr :: Ptr (Ptr ())) i
@@ -529,11 +426,7 @@ shapeLine sf inv txt = do
                 placeClusters !i !end
                   | i >= nClusters = pure end
                   | otherwise = do
-                      off0 <- clusterInt (i * 5)
-                      len <- clusterInt (i * 5 + 1)
-                      x0 <- clusterInt (i * 5 + 2)
-                      cw <- clusterInt (i * 5 + 3)
-                      flags <- clusterInt (i * 5 + 4)
+                      [off0, len, x0, cw, flags] <- mapM (clusterInt . (i * 5 +)) [0 .. 4]
                       if len <= 0
                         then placeClusters (i + 1) end
                         else do
@@ -559,14 +452,11 @@ shapeLine sf inv txt = do
             fillPieces (p + 1) (pen + w) (max height h) (g0 + nGlyphs) ink end rest
     (total, height, inkEnd, endStop) <- fillPieces 0 0 (0 :: Int) 0 0 (0 / 0) runs
     carets <- newPrimArray (n + 1)
-    let fillCarets !i !prev
-          | i >= n = pure ()
-          | otherwise = do
-              v <- readPrimArray stops i
-              let v' = if isNaN v then prev else v / inv
-              writePrimArray carets i v'
-              fillCarets (i + 1) v'
-    fillCarets 0 0
+    let fillCaret prev i = do
+          v <- readPrimArray stops i
+          let v' = if isNaN v then prev else v / inv
+          v' <$ writePrimArray carets i v'
+    foldM_ fillCaret 0 [0 .. n - 1]
     writePrimArray carets n ((if isNaN endStop then fromIntegral total else endStop) / inv)
     caretArr <- unsafeFreezePrimArray carets
     glyphArr <- unsafeFreezePrimArray glyphs
@@ -574,12 +464,6 @@ shapeLine sf inv txt = do
     let !width = fromIntegral total / inv
         !measured = (width, fromIntegral height / inv)
     pure (Shaped (ShapedText width (fromIntegral inkEnd / inv) caretArr) measured glyphArr indexArr (smallArrayFromList fontList))
-  where
-    utf8Length c
-      | ord c < 0x80 = 1
-      | ord c < 0x800 = 2
-      | ord c < 0x10000 = 3
-      | otherwise = 4 :: Int
 
 -- | Open the fonts that cover what this one lacks, the first time a text
 -- has a character it cannot draw.
@@ -590,10 +474,7 @@ ensureCoverage sf txt =
       when (ord c >= 128 && isPrint c) $ do
         -- Whether the font or a fallback it already has draws the character.
         has <- ttfHasGlyph (sfFont sf) (fromIntegral (ord c))
-        unless has $
-          coverageSourceFor c >>= \case
-            Just (source, probe) -> attachFallback sf source probe
-            Nothing -> pure ()
+        unless has $ coverageSourceFor c >>= traverse_ (uncurry (attachFallback sf))
 
 -- | Open the coverage source @source@ at the font's size, sharing the
 -- source's stream with its probe, and attach it. Fallbacks stay in
@@ -605,7 +486,7 @@ attachFallback sf source probe = do
   unless (IM.member source attached) $ do
     copy <- ttfCopyFont probe (realToFrac (sfPointSize sf))
     unless (copy == nullPtr) $ do
-      fallback <- readSdlFont (sfPointSize sf) Nothing copy
+      fallback <- readSdlFont (sfPointSize sf) copy
       let attached' = IM.insert source fallback attached
       case IM.lookupMax attached of
         Just (lastSource, _) | lastSource > source -> do
@@ -635,37 +516,31 @@ coverageRef = unsafePerformIO (newIORef Nothing)
 -- search goes, once a session, whatever the number of font sizes.
 coverageSourceFor :: Char -> IO (Maybe (Int, Ptr ()))
 coverageSourceFor c = do
-  cov0 <-
-    readIORef coverageRef >>= \case
-      Just cov -> pure cov
-      Nothing -> do
-        files <- searchFontFamilies coverageFamilies `catch` \(_ :: SomeException) -> pure []
-        -- The file system encoding turns a path back into the bytes it was
-        -- read from, including bytes that are not valid in that encoding.
-        enc <- getFileSystemEncoding
-        sources <- forM files $ \path -> GHC.withCStringLen enc path $ \cstr -> SBS.toShort <$> BS.packCStringLen cstr
-        pure (Coverage (smallArrayFromList sources) IM.empty IM.empty)
+  cov <- readIORef coverageRef >>= maybe findSources pure
   let cp = ord c
-      probeOf cov i = case IM.lookup i (covProbes cov) of
-        Just probe -> pure (probe, cov)
-        Nothing -> do
-          probe <- SBS.useAsCString (indexSmallArray (covSources cov) i) $ \cpath -> ttfOpenFont cpath 12
-          pure (probe, cov {covProbes = IM.insert i probe (covProbes cov)})
-      search cov i
-        | i >= sizeofSmallArray (covSources cov) = pure (-1, cov)
+      -- Open probes down the list until one draws the character.
+      search probes i
+        | i >= sizeofSmallArray (covSources cov) = pure (-1, probes)
         | otherwise = do
-            (probe, cov') <- probeOf cov i
+            let open = SBS.useAsCString (indexSmallArray (covSources cov) i) (`ttfOpenFont` 12)
+            probe <- maybe open pure (IM.lookup i probes)
             has <- if probe == nullPtr then pure False else ttfHasGlyph probe (fromIntegral cp)
-            if has then pure (i, cov') else search cov' (i + 1)
-  (source, cov1) <- case IM.lookup cp (covChars cov0) of
-    Just known -> pure (known, cov0)
-    Nothing -> do
-      (found, cov') <- search cov0 0
-      pure (found, cov' {covChars = IM.insert cp found (covChars cov')})
-  writeIORef coverageRef (Just cov1)
-  pure $ case IM.lookup source (covProbes cov1) of
+            let probes' = IM.insert i probe probes
+            if has then pure (i, probes') else search probes' (i + 1)
+  (source, probes) <-
+    maybe (search (covProbes cov) 0) (pure . (,covProbes cov)) (IM.lookup cp (covChars cov))
+  writeIORef coverageRef (Just cov {covProbes = probes, covChars = IM.insert cp source (covChars cov)})
+  pure $ case IM.lookup source probes of
     Just probe | source >= 0 -> Just (source, probe)
     _ -> Nothing
+  where
+    findSources = do
+      files <- searchFontFamilies coverageFamilies `catch` \(_ :: SomeException) -> pure []
+      -- The file system encoding turns a path back into the bytes it was
+      -- read from, including bytes that are not valid in that encoding.
+      enc <- getFileSystemEncoding
+      sources <- forM files $ \path -> GHC.withCStringLen enc path (fmap SBS.toShort . BS.packCStringLen)
+      pure (Coverage (smallArrayFromList sources) IM.empty IM.empty)
 
 -- | Close the coverage probes, before SDL_ttf shuts down. Fallbacks copied
 -- from them keep their shared streams open until they close themselves.
@@ -703,20 +578,14 @@ coverageFamilies =
 buildGlyphFontMetrics :: GlyphAtlas -> SdlFont -> Float -> IO (FontMetrics, Text -> IO (Float, Float))
 buildGlyphFontMetrics ga sf scale = do
   let !inv = if scale > 0 then scale else 1
-      baseFm = ttfFontMetricsScaled sf scale
+      advanceOf = maybe (sfSpaceAdvance sf / inv) (\(GlyphMetrics _ _ _ _ adv) -> adv / inv)
 
   -- Query ASCII metrics once for both advances and geometry, without atlas rasterization.
-  asciiMetrics <- mapM (getGlyphMetrics sf) [0 .. 127 :: CUInt]
+  asciiMetrics <- mapM (getGlyphMetrics sf) [0 .. 127]
   -- Reuse fixed ASCII geometry across dynamic labels, so preparing a fresh
   -- counter string does not query native glyph metrics for each character.
   let !asciiGeometry = smallArrayFromList (map (fmap (metricsGlyphQuad sf inv)) asciiMetrics)
-      !asciiAdvances =
-        primArrayFromList
-          [ case metrics of
-              Nothing  -> sfSpaceAdvance sf / inv
-              Just m -> gmAdvance m / inv
-          | metrics <- asciiMetrics
-          ]
+      !asciiAdvances = primArrayFromList (map advanceOf asciiMetrics)
 
   -- Kerning pairs are sparse and each miss costs a shaped 2-glyph
   -- layout, so a pair cache keeps the hot pen loops off the FFI
@@ -729,38 +598,26 @@ buildGlyphFontMetrics ga sf scale = do
   -- line's layout is kept with its metric snapshot, which survives atlas
   -- resets; the glyph quads drawn from it hold atlas UVs, so their cache is
   -- dropped with the atlas epoch. Each cache keeps two generations of
--- 'runCacheCap' entries.
+  -- 'runCacheCap' entries.
   preparedRef <- newIORef emptyGen
   shapedRef <- newIORef emptyGen
   quadCacheRef <- newIORef emptyGen
-  initQuadEpoch <- readIORef (gaEpoch ga)
-  quadEpochRef <- newIORef initQuadEpoch
+  quadEpochRef <- newIORef =<< readIORef (gaEpoch ga)
 
   let
     {-# NOINLINE advanceLookup #-}
-    advanceLookup !c =
-      let !cp = ord c
-       in if (fromIntegral cp :: Word) < 128
-             then pure (indexPrimArray asciiAdvances cp)
-             else do
-              mAdv <- getGlyphAdvance sf (fromIntegral cp)
-              pure $! case mAdv of
-                Nothing  -> sfSpaceAdvance sf / inv
-                Just adv -> adv / inv
+    advanceLookup !c
+      | ord c < 128 = pure (indexPrimArray asciiAdvances (ord c))
+      | otherwise = getGlyphMetrics sf (ord c) >>= \m -> pure $! advanceOf m
 
     {-# NOINLINE kernLookup #-}
     kernLookup !prev !c = do
       -- The cache lives on this 'FontMetrics', so the font id is constant and
       -- the pair can be packed into a single Int key: no tuple on the hot path.
       let !pk = (ord prev `shiftL` 21) .|. ord c
-      cached <- lookupGen kernCacheCap (const 1) kernCacheRef pk
-      case cached of
-        Just k -> pure k
-        Nothing -> do
-          raw <- ttfGetKerning (sfFont sf) (fromIntegral (ord prev) :: CUInt) (fromIntegral (ord c) :: CUInt)
-          let !k = fromIntegral raw / inv
-          modifyIORef' kernCacheRef (insertGen kernCacheCap 1 pk k)
-          pure k
+      cachedGen kernCacheCap (const 1) kernCacheRef pk $ do
+        raw <- ttfGetKerning (sfFont sf) (fromIntegral (ord prev) :: CUInt) (fromIntegral (ord c) :: CUInt)
+        pure $! fromIntegral raw / inv
 
     -- The glyph quads of a shaped line, from the atlas. Quads are cached per
     -- text and dropped with the atlas epoch, when their UVs go stale.
@@ -768,90 +625,49 @@ buildGlyphFontMetrics ga sf scale = do
     shapedLookup !txt
       | T.null txt = pure Nothing
       | otherwise = do
-          ensureFontAlive sf
-          ensureAtlasAlive ga
+          ensureAlive "closeFont" (sfAlive sf)
+          ensureAlive "destroyGlyphAtlas" (gaAlive ga)
           ep <- readIORef (gaEpoch ga)
           quadEp <- readIORef quadEpochRef
           when (quadEp /= ep) $ do
             writeIORef quadEpochRef ep
             writeIORef quadCacheRef emptyGen
           -- Entries are kept wrapped so a hit returns them without allocating.
-          cached <- lookupGen runCacheCap textWeight quadCacheRef txt
-          case cached of
-            Just quads -> pure quads
-            Nothing -> do
-              shaped <- shapeOf txt
-              quads <- Just <$> placeGlyphs shaped
-              epAfter <- readIORef (gaEpoch ga)
-              when (epAfter == ep) $
-                modifyIORef' quadCacheRef (insertGen runCacheCap (textWeight txt) txt quads)
-              pure quads
+          -- Placing glyphs never resets the atlas (a full one resets at the
+          -- next frame start), so these quads belong to this epoch.
+          cachedGen runCacheCap textWeight quadCacheRef txt $
+            Just <$> (placeGlyphs =<< shapeOf txt)
 
     -- Put a shaped line's glyphs in the atlas. A glyph the atlas has no room
     -- for draws nothing, and the atlas resets before the next frame.
     placeGlyphs (Shaped _ _ glyphs fontIndices fonts) = do
       let !count = sizeofPrimArray fontIndices
       out <- newPrimArray (count * 8)
-      let go !i
-            | i >= count = pure ()
-            | otherwise = do
-                let g k = fromIntegral (indexPrimArray glyphs (i * 9 + k)) :: Float
-                    o = i * 8
-                    write k v = writePrimArray out (o + k) v
-                    font = indexSmallArray fonts (fromIntegral (indexPrimArray fontIndices i))
-                    IntPtr handle = ptrToIntPtr (sfFont font)
-                mSlot <- lookupOrInsertGlyphIndex ga (fromIntegral (sfId font)) handle (fromIntegral (indexPrimArray glyphs (i * 9)))
-                write 0 (g 1 / inv)
-                write 1 (g 2 / inv)
-                write 2 (g 3 / inv)
-                write 3 (g 4 / inv)
-                case mSlot of
-                  Just slot -> do
-                    -- A glyph drawn in part samples only its source rect.
-                    let sx = g 5
-                        sy = g 6
-                        sw = g 7
-                        sh = g 8
-                        u0 = gsU0 slot + sx / glyphAtlasSize
-                        v0 = gsV0 slot + sy / glyphAtlasSize
-                        u1 = if sw > 0 then u0 + sw / glyphAtlasSize else gsU1 slot
-                        v1 = if sh > 0 then v0 + sh / glyphAtlasSize else gsV1 slot
-                    write 4 u0
-                    write 5 v0
-                    write 6 u1
-                    write 7 v1
-                  Nothing -> do
-                    let (u, v, _, _) = deadUv
-                    write 4 u
-                    write 5 v
-                    write 6 u
-                    write 7 v
-                go (i + 1)
-      go 0
+      forM_ [0 .. count - 1] $ \i -> do
+        let g k = fromIntegral (indexPrimArray glyphs (i * 9 + k)) :: Float
+            write k = writePrimArray out (i * 8 + k)
+            font = indexSmallArray fonts (fromIntegral (indexPrimArray fontIndices i))
+        mSlot <- lookupOrInsertGlyph ga font (fromIntegral (indexPrimArray glyphs (i * 9)))
+        forM_ [0 .. 3] $ \k -> write k (g (k + 1) / inv)
+        case mSlot of
+          Just slot -> do
+            -- A glyph drawn in part samples only its source rect.
+            let u0 = gsU0 slot + g 5 / glyphAtlasSize
+                v0 = gsV0 slot + g 6 / glyphAtlasSize
+            write 4 u0
+            write 5 v0
+            write 6 (if g 7 > 0 then u0 + g 7 / glyphAtlasSize else gsU1 slot)
+            write 7 (if g 8 > 0 then v0 + g 8 / glyphAtlasSize else gsV1 slot)
+          Nothing -> zipWithM_ write [4 ..] [deadU, deadV, deadU, deadV]
       ShapedGlyphs <$> unsafeFreezePrimArray out
-
-    -- A UV rect that always samples transparent pixels: column 4 sits
-    -- right of the 4px white patch (columns 0..3) and left of the first
-    -- slot (allocations start at x = 5), and the final row is never
-    -- written because every slot keeps 1px of padding.
-    deadUv :: (Float, Float, Float, Float)
-    deadUv =
-      let !u = 4.5 / glyphAtlasSize
-          !v = (glyphAtlasSize - 0.5) / glyphAtlasSize
-       in (u, v, u, v)
 
     -- The shaped layout of a line, shared by measuring, preparing and
     -- drawing it. Fonts that cover characters this one lacks join it before
     -- the line is shaped.
-    shapeOf !txt = do
-      cached <- lookupGen runCacheCap textWeight shapedRef txt
-      case cached of
-        Just shaped -> pure shaped
-        Nothing -> do
-          ensureCoverage sf txt
-          shaped <- shapeLine sf inv txt
-          modifyIORef' shapedRef (insertGen runCacheCap (textWeight txt) txt shaped)
-          pure shaped
+    shapeOf !txt =
+      cachedGen runCacheCap textWeight shapedRef txt $ do
+        ensureCoverage sf txt
+        shapeLine sf inv txt
 
     -- The width shaping draws with, so layout and drawing agree.
     measure !txt
@@ -861,45 +677,42 @@ buildGlyphFontMetrics ga sf scale = do
 
     glyphGeometry c
       | ord c < 128 = pure (indexSmallArray asciiGeometry (ord c))
-      | otherwise = getGlyphGeometry sf inv c
+      | otherwise = fmap (metricsGlyphQuad sf inv) <$> getGlyphMetrics sf (ord c)
 
     backend = FontBackend prepareText shapedLookup
 
     prepareText txt = do
-      ensureFontAlive sf
-      cached <- lookupGen runCacheCap textWeight preparedRef txt
-      case cached of
-        Just fm -> pure fm
-        Nothing -> do
-          let insertChar m c = IM.insert (ord c) c m
-              chars = T.foldl' insertChar (T.foldl' insertChar IM.empty " HxM") txt
-          advances <- traverse advanceLookup chars
-          geometry <- traverse glyphGeometry chars
-          let gather !pairs !previous remaining = case T.uncons remaining of
-                Nothing -> pure pairs
-                Just (c, rest) -> do
-                  let key = (ord previous `shiftL` 21) .|. ord c
-                  pairs' <- if IM.member key pairs then pure pairs else do
-                    k <- kernLookup previous c
-                    pure $! IM.insert key k pairs
-                  gather pairs' c rest
-          seedKerns <- gather IM.empty ' ' "xM"
-          kerns <- gather seedKerns 'M' txt
-          shaped <- if T.null txt then pure Nothing else Just <$> shapeOf txt
-          let !layout = fmap shapedText shaped
-          let !fm = baseFm
-                { fmAdvance = \c ->
-                    let cp = ord c
-                     in if cp < 128 then indexPrimArray asciiAdvances cp
-                          else IM.findWithDefault (sfSpaceAdvance sf / inv) cp advances
-                , fmKerning = \a b -> IM.findWithDefault 0 ((ord a `shiftL` 21) .|. ord b) kerns
-                , fmGlyph = \c -> IM.findWithDefault Nothing (ord c) geometry
-                , fmShape = \t -> if t == txt then layout else Nothing
-                , fmBackend = Just backend
-                , fmSnapScale = inv
-                }
-          modifyIORef' preparedRef (insertGen runCacheCap (textWeight txt) txt fm)
-          pure fm
+      ensureAlive "closeFont" (sfAlive sf)
+      cachedGen runCacheCap textWeight preparedRef txt $ do
+        let insertChar m c = IM.insert (ord c) c m
+            chars = T.foldl' insertChar (T.foldl' insertChar IM.empty " HxM") txt
+        advances <- traverse advanceLookup chars
+        geometry <- traverse glyphGeometry chars
+        let gather !pairs !previous remaining = case T.uncons remaining of
+              Nothing -> pure pairs
+              Just (c, rest) -> do
+                let key = (ord previous `shiftL` 21) .|. ord c
+                pairs' <- if IM.member key pairs then pure pairs else do
+                  k <- kernLookup previous c
+                  pure $! IM.insert key k pairs
+                gather pairs' c rest
+        seedKerns <- gather IM.empty ' ' "xM"
+        kerns <- gather seedKerns 'M' txt
+        shaped <- if T.null txt then pure Nothing else Just <$> shapeOf txt
+        let !layout = fmap shapedText shaped
+        pure $!
+          (monospaceMetrics (sfLineSkip sf / inv))
+            { fmAscent = sfAscent sf / inv
+            , fmAdvance = \c ->
+                let cp = ord c
+                 in if cp < 128 then indexPrimArray asciiAdvances cp
+                      else IM.findWithDefault (sfSpaceAdvance sf / inv) cp advances
+            , fmKerning = \a b -> IM.findWithDefault 0 ((ord a `shiftL` 21) .|. ord b) kerns
+            , fmGlyph = \c -> IM.findWithDefault Nothing (ord c) geometry
+            , fmShape = \t -> if t == txt then layout else Nothing
+            , fmBackend = Just backend
+            , fmSnapScale = inv
+            }
 
   fm <- prepareText ""
   pure (fm, measure)
@@ -913,144 +726,48 @@ glyphAtlasTextures ga = do
 
 -- ---------------------------------------------------------------------------
 withTtf :: IO a -> IO a
-withTtf act =
-  bracket startup shutdown $ \_ -> act
-  where
-    startup = do
-      ok <- ttfInit
-      when (not ok) $ fail "TTF_Init failed"
-    shutdown _ = closeCoverageProbes >> ttfQuit
+withTtf =
+  bracket_
+    (ttfInit >>= (`unless` fail "TTF_Init failed"))
+    (closeCoverageProbes >> ttfQuit)
 
-openFont :: FilePath -> Float -> IO SdlFont
-openFont path ptsize =
-  withCString path $ \cpath -> do
-    font <- ttfOpenFont cpath (realToFrac ptsize)
-    when (font == nullPtr) $
-      fail ("TTF_OpenFont failed for " ++ path)
-    readSdlFont ptsize Nothing font
-
-openFontFromMemory :: ByteString -> FilePath -> Float -> IO SdlFont
-openFontFromMemory bs label ptsize =
-  unsafeUseAsCStringLen bs $ \(ptr, len) -> do
-    (fontPtr, mTemp) <-
-      ttfOpenFontMemory (castPtr ptr) (fromIntegral len) (realToFrac ptsize) >>= \f ->
-        if f /= nullPtr
-          then pure (f, Nothing)
-          else openFontFromMemoryTemp bs ptsize
-    when (fontPtr == nullPtr) $
-      fail ("TTF_OpenFont failed for in-memory font " ++ label)
-    readSdlFont ptsize mTemp fontPtr
-
-openFontFromMemoryTemp :: ByteString -> Float -> IO (Ptr (), Maybe FilePath)
-openFontFromMemoryTemp bs openPt = do
-  tmpDir <- getTemporaryDirectory
-  (path, h) <- openTempFile tmpDir "nano-ui-font-"
-  BS.hPut h bs
-  hClose h
-  withCString path $ \cpath -> do
-    font <- ttfOpenFont cpath (realToFrac openPt)
-    if font == nullPtr
-      then removeFile path >> pure (nullPtr, Nothing)
-      else pure (font, Just path)
-
--- | Wrap an open TTF font; @mTemp@ is a temp file to delete on close.
-readSdlFont :: Float -> Maybe FilePath -> Ptr () -> IO SdlFont
-readSdlFont ptsize mTemp font = do
-  fid <- newFontId
-  alive <- newIORef True
-  fallbacks <- newIORef IM.empty
-  lineSkip <- ttfLineSkip font
-  ascent <- ttfAscent font
-  spaceAdv <- ttfSpaceAdvance font
-  pure
-    SdlFont
-      { sfId = fid
-      , sfAlive = alive
-      , sfFont = font
-      , sfLineSkip = fromIntegral lineSkip
-      , sfAscent = fromIntegral ascent
-      , sfSpaceAdvance = realToFrac spaceAdv
-      , sfTempPath = mTemp
-      , sfPointSize = ptsize
-      , sfFallbacks = fallbacks
-      }
-
+-- | Open a font at a point size, or bundled Inter when it will not open.
 openFontSource :: FontSource -> Float -> IO SdlFont
-openFontSource (FontFromPath path) ptsize = openFont path ptsize
-openFontSource (FontFromMemory bs label) ptsize =
-  openFontFromMemory bs label ptsize
+openFontSource source ptsize =
+  open source `catch` \(e :: SomeException) ->
+    if source == embeddedFontSource
+      then throwIO e
+      else open embeddedFontSource `catch` \(_ :: SomeException) -> throwIO e
+  where
+    pt = realToFrac ptsize
+    open (FontFromPath path) = do
+      font <- withCString path (`ttfOpenFont` pt)
+      when (font == nullPtr) $ fail ("TTF_OpenFont failed for " ++ path)
+      readSdlFont ptsize font
+    open (FontFromMemory bs label) = do
+      -- SDL_ttf reads from its own copy of the bytes, so the font outlives
+      -- the ByteString's pinning.
+      font <- unsafeUseAsCStringLen bs $ \(ptr, len) -> ttfOpenFontMemory (castPtr ptr) (fromIntegral len) pt
+      when (font == nullPtr) $ fail ("TTF_OpenFont failed for in-memory font " ++ label)
+      readSdlFont ptsize font
 
-openFontSourceWithFallback :: FontSource -> FontSource -> Float -> IO SdlFont
-openFontSourceWithFallback primary fallback ptsize =
-  openFontSource primary ptsize
-    `catch` \(e :: SomeException) ->
-      if fontSourcesSame primary fallback
-        then throwIO e
-        else openFontSource fallback ptsize
-          `catch` \(_ :: SomeException) -> throwIO e
-
-fontSourcesSame :: FontSource -> FontSource -> Bool
-fontSourcesSame (FontFromPath a) (FontFromPath b) = a == b
-fontSourcesSame (FontFromMemory _ la) (FontFromMemory _ lb) = la == lb
-fontSourcesSame _ _ = False
+-- | Wrap an open TTF font.
+readSdlFont :: Float -> Ptr () -> IO SdlFont
+readSdlFont sfPointSize sfFont = do
+  sfId <- hashUnique <$> newUnique
+  sfAlive <- newIORef True
+  sfFallbacks <- newIORef IM.empty
+  sfLineSkip <- fromIntegral <$> ttfLineSkip sfFont
+  sfAscent <- fromIntegral <$> ttfAscent sfFont
+  sfSpaceAdvance <- realToFrac <$> ttfSpaceAdvance sfFont
+  pure SdlFont {..}
 
 closeFont :: SdlFont -> IO ()
 closeFont sf = do
   alive <- atomicModifyIORef' (sfAlive sf) (\open -> (False, open))
   when alive $ do
     ttfCloseFont (sfFont sf)
-    mapM_ removeFile (sfTempPath sf)
     readIORef (sfFallbacks sf) >>= mapM_ closeFont
-
--- | Install glyph-atlas-backed 'FontMetrics' (from 'buildGlyphFontMetrics')
--- so that 'pushText' emits per-glyph textured quads into the draw arena.
--- Text measurement uses the primary font's shaped lines.
-withTtfMeasureGlyph ::
-  Context ->
-  (Text -> IO (Float, Float)) -> -- ^ primary font measurement
-  FontMetrics -> -- ^ glyph-atlas fm for primary font
-  FontMetrics -> -- ^ glyph-atlas fm for mono font
-  Float ->
-  Context
-withTtfMeasureGlyph ctx measure fm monoFm scale =
-  let ctx1 =
-        withMeasureText
-          (withMonoFontMetrics (withFontMetrics ctx fm) monoFm)
-          measure
-   in wrapMeasureCache scale ctx1 measure
-
-ttfFontMetricsScaled :: SdlFont -> Float -> FontMetrics
-ttfFontMetricsScaled sf scale =
-  let inv = if scale > 0 then scale else 1
-   in (monospaceMetrics (sfLineSkip sf / inv))
-        { fmAscent = sfAscent sf / inv
-        , fmAdvance = const (sfSpaceAdvance sf / inv)
-        }
-
--- | Where the atlas put a surface: its page, and its x, y, width and height
--- in pixels on that page.
-tryInsert :: Ptr () -> Ptr () -> IO (Maybe (Int, Float, Float, Float, Float))
-tryInsert atlas surf =
-  alloca $ \pagePtr ->
-    allocaBytes (4 * sizeOf (0 :: CFloat)) $ \px -> do
-      let py = plusPtr px (sizeOf (0 :: CFloat))
-          tw = plusPtr py (sizeOf (0 :: CFloat))
-          th = plusPtr tw (sizeOf (0 :: CFloat))
-      ok <- (/= 0) <$> textAtlasInsertSurface atlas surf pagePtr px py tw th
-      if ok
-        then do
-          page <- fromIntegral <$> peek pagePtr
-          x <- realToFrac <$> peek px
-          y <- realToFrac <$> peek py
-          w <- realToFrac <$> peek tw
-          h <- realToFrac <$> peek th
-          pure (Just (page, x, y, w, h))
-        else pure Nothing
-
-withUtf8 :: Text -> (CString -> CSize -> IO a) -> IO a
-withUtf8 txt act =
-  TF.useAsPtr txt $ \ptr len ->
-    act (castPtr ptr) (fromIntegral len)
 
 -- Header-checked imports also adapt C bool to Haskell Bool at the ABI boundary.
 -- The ccall imports of nano-ui's own bool functions below return CBool: a C
@@ -1151,16 +868,8 @@ foreign import ccall unsafe "nano_ui_ttf_get_kerning"
   ttfGetKerning :: Ptr () -> CUInt -> CUInt -> IO CInt
 
 -- ---------------------------------------------------------------------------
--- Font cache: the base sans and mono faces, plus fonts opened per size and
--- variant on demand
-
--- | A font variant and its point size key, @round (targetPt * 2)@.
-data FontCacheKey = FontCacheKey !FontVariant !Int
-  deriving (Eq)
-
-instance Hashable FontCacheKey where
-  hashWithSalt s (FontCacheKey variant ptKey) =
-    s `hashWithSalt` fromEnum variant `hashWithSalt` ptKey
+-- Font cache: the base sans and mono faces, plus fonts opened per size on
+-- demand
 
 data CachedFontEntry = CachedFontEntry
   { cfeFont    :: !SdlFont
@@ -1169,84 +878,85 @@ data CachedFontEntry = CachedFontEntry
   }
 
 data SdlFontCache = SdlFontCache
-  { sfcPrimarySourceRef :: !(IORef FontSource)
-  , sfcFallbackSource :: !FontSource
-  , sfcMonoSource     :: !FontSource
-  , sfcMonoFallback   :: !FontSource
-  , sfcGlyphAtlas     :: !GlyphAtlas
+  { sfcGlyphAtlas     :: !GlyphAtlas
   , sfcBasePt         :: !Float
   , sfcScaleRef       :: !(IORef Float)
   -- ^ The window pixel density, owned by the window and read here.
+  , sfcMonoSource     :: !FontSource
+  , sfcSansSourceRef  :: !(IORef FontSource)
   , sfcBaseEntries    :: !(IORef (CachedFontEntry, CachedFontEntry))
-  , sfcDynamicCache   :: !(IORef (BoundedCache FontCacheKey CachedFontEntry))
+  , sfcDynamicCache   :: !(IORef (IM.IntMap CachedFontEntry, [Int]))
+  -- ^ Fonts at other sizes, and their keys, most recently used first.
   }
 
--- | Open the base sans and mono fonts at the pixel density, and re-warm them
--- into the glyph atlas after every atlas reset.
-newSdlFontCache ::
-  FontSource -> -- ^ primary font source
-  FontSource -> -- ^ fallback font source
-  FontSource -> -- ^ mono font source
-  FontSource -> -- ^ mono fallback font source
-  GlyphAtlas ->
-  Float ->      -- ^ base font size (pt)
-  IORef Float -> -- ^ pixel density
-  IO SdlFontCache
-newSdlFontCache primary fallback mono monoFb ga basePt scaleRef = do
+-- | Open the base sans and mono fonts at the pixel density, and warm them
+-- into the glyph atlas.
+newSdlFontCache :: FontSource -> FontSource -> GlyphAtlas -> Float -> IORef Float -> IO SdlFontCache
+newSdlFontCache sans mono ga basePt scaleRef = do
   scale <- readIORef scaleRef
-  primaryRef <- newIORef primary
-  sansEntry <- openCachedFont ga scale primary fallback basePt
-  monoEntry <- openCachedFont ga scale mono monoFb basePt
-  baseEntriesRef <- newIORef (sansEntry, monoEntry)
-  cacheRef <- newIORef emptyBounded
-  -- The hook reads the base entries when it runs, so a reset always warms the
-  -- live fonts, never ones already closed. Shaping a line places the glyphs
-  -- that drawing it reads.
-  let printableAscii = T.pack [' ' .. '~']
-      rewarm = do
-        (sans, monoBase) <- readIORef baseEntriesRef
-        forM_ [sans, monoBase] $ \e -> drawShaped (cfeFm e) printableAscii
-  registerGlyphAtlasRewarm ga rewarm
-  rewarm
-  pure
-    SdlFontCache
-      { sfcPrimarySourceRef = primaryRef
-      , sfcFallbackSource = fallback
-      , sfcMonoSource     = mono
-      , sfcMonoFallback   = monoFb
-      , sfcGlyphAtlas     = ga
-      , sfcBasePt         = basePt
-      , sfcScaleRef       = scaleRef
-      , sfcBaseEntries    = baseEntriesRef
-      , sfcDynamicCache   = cacheRef
-      }
+  base <- (,) <$> openCachedFont ga scale sans basePt <*> openCachedFont ga scale mono basePt
+  cache <-
+    SdlFontCache ga basePt scaleRef mono
+      <$> newIORef sans
+      <*> newIORef base
+      <*> newIORef (IM.empty, [])
+  warmBaseFonts cache
+  pure cache
 
--- | A font from a source (or its fallback) at a point size, rasterised at
+-- | A font from a source (or bundled Inter) at a point size, rasterised at
 -- the pixel density, with its glyph metrics.
-openCachedFont :: GlyphAtlas -> Float -> FontSource -> FontSource -> Float -> IO CachedFontEntry
-openCachedFont ga scale primary fallback pt = do
-  font <- openFontSourceWithFallback primary fallback (pt * scale)
-  (fm, measure) <- buildGlyphFontMetrics ga font scale
-  pure (CachedFontEntry font fm measure)
+openCachedFont :: GlyphAtlas -> Float -> FontSource -> Float -> IO CachedFontEntry
+openCachedFont ga scale source pt = do
+  font <- openFontSource source (pt * scale)
+  uncurry (CachedFontEntry font) <$> buildGlyphFontMetrics ga font scale
+
+-- | Shape printable ASCII in the base fonts, which places its glyphs, so a
+-- frame after an atlas reset pays no cold glyph misses. The base entries are
+-- read when this runs, so it warms the live fonts, never ones already closed.
+warmBaseFonts :: SdlFontCache -> IO ()
+warmBaseFonts cache = do
+  (sans, mono) <- readIORef (sfcBaseEntries cache)
+  forM_ [sans, mono] $ \e -> drawShaped (cfeFm e) (T.pack [' ' .. '~'])
+
+-- | Empty the glyph atlas (DPI change, font switch, exhaustion recovery) and
+-- warm the base fonts again.
+resetGlyphAtlas :: SdlFontCache -> IO ()
+resetGlyphAtlas cache = do
+  let ga = sfcGlyphAtlas cache
+  modifyIORef' (gaEpoch ga) (+ 1)
+  writeIORef (gaIndexEntries ga) IM.empty
+  writeIORef (gaNeedsReset ga) False
+  textAtlasReset (gaAtlas ga)
+  warmBaseFonts cache
+  writeIORef (gaResetFlag ga) True
+
+-- | Frame-start atlas maintenance: reset the atlas if an insertion failed
+-- during the previous frame, then clear the mid-frame reset flag. Must run
+-- before the frame's UI pass records any quads.
+prepareGlyphAtlasForFrame :: SdlFontCache -> IO ()
+prepareGlyphAtlasForFrame cache = do
+  needs <- readIORef (gaNeedsReset (sfcGlyphAtlas cache))
+  when needs $ resetGlyphAtlas cache
+  writeIORef (gaResetFlag (sfcGlyphAtlas cache)) False
 
 -- | The primary (sans) family's source, for the debug readout.
 sdlFontCacheSource :: SdlFontCache -> IO FontSource
-sdlFontCacheSource cache = readIORef (sfcPrimarySourceRef cache)
+sdlFontCacheSource cache = readIORef (sfcSansSourceRef cache)
 
 -- | Close fonts and drop their glyphs from the shared atlas index.
 closeCachedFonts :: GlyphAtlas -> [SdlFont] -> IO ()
 closeCachedFonts ga fonts = do
   fallbacks <- concat <$> mapM (fmap IM.elems . readIORef . sfFallbacks) fonts
-  let handles = IS.fromList [fromIntegral (sfId f) | f <- fonts ++ fallbacks]
+  let handles = IS.fromList (map sfId (fonts ++ fallbacks))
   mapM_ closeFont fonts
   modifyIORef' (gaIndexEntries ga) (`IM.withoutKeys` handles)
 
 -- | Close every open font, base and dynamic.
 destroySdlFontCache :: SdlFontCache -> IO ()
 destroySdlFontCache cache = do
-  dynamic <- atomicModifyIORef' (sfcDynamicCache cache) (\c -> (emptyBounded, c))
+  (dynamic, _) <- atomicModifyIORef' (sfcDynamicCache cache) (\c -> ((IM.empty, []), c))
   (sans, mono) <- readIORef (sfcBaseEntries cache)
-  closeCachedFonts (sfcGlyphAtlas cache) (cfeFont sans : cfeFont mono : map cfeFont (HM.elems (bcEntries dynamic)))
+  closeCachedFonts (sfcGlyphAtlas cache) (map cfeFont (sans : mono : IM.elems dynamic))
 
 -- | Reopen the base fonts from @source@ at the current pixel density, close
 -- every dynamic size, and reset the glyph atlas, which re-warms the new base
@@ -1254,97 +964,59 @@ destroySdlFontCache cache = do
 reloadSdlFontCache :: SdlFontCache -> FontSource -> IO ()
 reloadSdlFontCache cache source = do
   destroySdlFontCache cache
-  writeIORef (sfcPrimarySourceRef cache) source
+  writeIORef (sfcSansSourceRef cache) source
   scale <- readIORef (sfcScaleRef cache)
-  let ga = sfcGlyphAtlas cache
-  sansEntry <- openCachedFont ga scale source (sfcFallbackSource cache) (sfcBasePt cache)
-  monoEntry <- openCachedFont ga scale (sfcMonoSource cache) (sfcMonoFallback cache) (sfcBasePt cache)
-  writeIORef (sfcBaseEntries cache) (sansEntry, monoEntry)
-  resetGlyphAtlas ga
+  let open src = openCachedFont (sfcGlyphAtlas cache) scale src (sfcBasePt cache)
+  writeIORef (sfcBaseEntries cache) =<< (,) <$> open source <*> open (sfcMonoSource cache)
+  resetGlyphAtlas cache
 
 -- | Install the cache's base fonts as the context's measurement and glyph
--- metrics, and its sizes and variants as the font resolver.
+-- metrics, and its sizes and variants as the font resolver. Text measurement
+-- uses the sans font's shaped lines.
 withSdlFontCache :: SdlFontCache -> Context -> IO Context
 withSdlFontCache cache ctx = do
   scale <- readIORef (sfcScaleRef cache)
   (sans, mono) <- readIORef (sfcBaseEntries cache)
-  pure (withFontResolver (withTtfMeasureGlyph ctx (cfeMeasure sans) (cfeFm sans) (cfeFm mono) scale) (resolveSdlFont cache) (resolveSdlMeasure cache))
+  let metrics = withMonoFontMetrics (withFontMetrics ctx (cfeFm sans)) (cfeFm mono)
+  pure $
+    withFontResolver
+      (wrapMeasureCache scale metrics (cfeMeasure sans))
+      (\sz _ _ var -> (\e -> (cfeFm e, False)) <$> getOrLoadCachedFont cache sz var)
+      (\sz _ _ var txt -> getOrLoadCachedFont cache sz var >>= (`cfeMeasure` txt))
 
 -- | The open font for a size and variant. Weight and style pick nothing
 -- here: they are drawn synthetically over the regular face, because SDL_ttf's
 -- style flags change its layout boxes but not the glyph images shaped text
--- draws, so a styled face would not line up.
-getOrLoadCachedFont ::
-  SdlFontCache ->
-  Float ->
-  FontWeight ->
-  FontStyle ->
-  FontVariant ->
-  IO CachedFontEntry
-getOrLoadCachedFont cache sz _weight _style var = do
-  let basePt = sfcBasePt cache
-      rawPt = if sz > 0 then sz else basePt
-      -- Quantize dynamic sizes to 0.5 pt increments so dragging sliders
-      -- doesn't create hundreds of redundant TTF_Font instances.
-      targetPt = fromIntegral (round (rawPt * 2.0) :: Int) / 2.0
-      ptKey = round (targetPt * 2.0) :: Int
-      basePtKey = round (basePt * 2.0) :: Int
-      isBase =
-        ptKey == basePtKey
-  if isBase
-    then do
-      (sansEntry, monoEntry) <- readIORef (sfcBaseEntries cache)
-      pure (if var == FontMono then monoEntry else sansEntry)
-    else do
-      let key = FontCacheKey var ptKey
-      dynamic <- readIORef (sfcDynamicCache cache)
-      case HM.lookup key (bcEntries dynamic) of
+-- draws, so a styled face would not line up. Every variant but 'FontMono'
+-- is the sans face.
+getOrLoadCachedFont :: SdlFontCache -> Float -> FontVariant -> IO CachedFontEntry
+getOrLoadCachedFont cache sz var
+  | ptKey == round (sfcBasePt cache * 2) =
+      (if mono then snd else fst) <$> readIORef (sfcBaseEntries cache)
+  | otherwise = do
+      (entries, order) <- readIORef (sfcDynamicCache cache)
+      case IM.lookup key entries of
         Just entry -> do
-          -- Least recently used goes first: move a hit to the back of the
-          -- eviction order, so fonts drawn every frame are never closed.
-          case Seq.viewr (bcOrder dynamic) of
-            _ Seq.:> newest | newest == key -> pure ()
-            _ ->
-              -- Each key appears in the order once, and a hot key sits near
-              -- the back, so search from the right and delete that one entry.
-              let order = bcOrder dynamic
-               in writeIORef (sfcDynamicCache cache) $!
-                    dynamic {bcOrder = maybe order (`Seq.deleteAt` order) (Seq.elemIndexR key order) Seq.|> key}
+          -- Least recently used goes first: move a hit to the front, so
+          -- fonts drawn every frame are never closed. A hot key sits near the
+          -- front, so 'delete' copies little of the order.
+          case order of
+            newest : _ | newest == key -> pure ()
+            _ -> writeIORef (sfcDynamicCache cache) (entries, key : delete key order)
           pure entry
         Nothing -> do
           scale <- readIORef (sfcScaleRef cache)
-          primarySans <- readIORef (sfcPrimarySourceRef cache)
-          let (primary, fallback) =
-                if var == FontMono
-                  then (sfcMonoSource cache, sfcMonoFallback cache)
-                  else (primarySans, sfcFallbackSource cache)
+          source <- if mono then pure (sfcMonoSource cache) else readIORef (sfcSansSourceRef cache)
           -- Dynamic fonts are not warmed: they insert only glyphs drawn.
-          entry <- openCachedFont (sfcGlyphAtlas cache) scale primary fallback targetPt
+          entry <- openCachedFont (sfcGlyphAtlas cache) scale source (fromIntegral ptKey / 2)
           -- At most 48 dynamic sizes stay open.
-          let (dynamic', evicted) = insertBounded 48 key entry dynamic
-          writeIORef (sfcDynamicCache cache) $! dynamic'
-          mapM_ (closeCachedFonts (sfcGlyphAtlas cache) . pure . cfeFont) evicted
+          let (kept, evicted) = splitAt 48 (key : order)
+          writeIORef (sfcDynamicCache cache) (foldr IM.delete (IM.insert key entry entries) evicted, kept)
+          closeCachedFonts (sfcGlyphAtlas cache) (map cfeFont (mapMaybe (`IM.lookup` entries) evicted))
           pure entry
-
-resolveSdlFont ::
-  SdlFontCache ->
-  Float ->
-  FontWeight ->
-  FontStyle ->
-  FontVariant ->
-  IO (FontMetrics, Bool)
-resolveSdlFont cache sz weight style var = do
-  entry <- getOrLoadCachedFont cache sz weight style var
-  pure (cfeFm entry, False)
-
-resolveSdlMeasure ::
-  SdlFontCache ->
-  Float ->
-  FontWeight ->
-  FontStyle ->
-  FontVariant ->
-  Text ->
-  IO (Float, Float)
-resolveSdlMeasure cache sz weight style var txt = do
-  entry <- getOrLoadCachedFont cache sz weight style var
-  cfeMeasure entry txt
+  where
+    mono = var == FontMono
+    -- Sizes are quantized to 0.5 pt so dragging a slider does not open
+    -- hundreds of redundant TTF_Font instances.
+    ptKey = round ((if sz > 0 then sz else sfcBasePt cache) * 2) :: Int
+    key = ptKey * 2 + fromEnum mono

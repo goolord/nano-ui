@@ -4,7 +4,7 @@ module NanoUI.Sdl.Internal.Session
   ) where
 
 import Control.Exception (bracket)
-import Control.Monad (void, when)
+import Control.Monad (forM_, unless, void, when)
 import Data.IORef (newIORef, readIORef, writeIORef)
 import NanoUI.Backend (Input (..), clearEphemeral, emptyInput)
 import NanoUI.Sdl.Internal.Debug (SdlDebugSampler (..))
@@ -15,7 +15,7 @@ import NanoUI.Runner
   , shouldRedrawFrame
   , tryWithDrawingLock
   )
-import NanoUI.Testing (Context)
+import NanoUI.Testing (Context, newPixelContext, registerImage, withTheme)
 import NanoUI.Sdl.Internal.Cursor (syncPointerCursor)
 import NanoUI.Sdl.Internal.Input
   ( SdlEvent (..)
@@ -24,24 +24,23 @@ import NanoUI.Sdl.Internal.Input
   , isHardQuit
   , pollEvents
   , waitEvent
-  , waitEventTimeout
   )
 import NanoUI.Sdl.Internal.Display (installResizeWatch, pushRefreshEvent)
-import NanoUI.Sdl.Internal.Window (SdlEnv (..), SdlOptions (..), syncDisplay, withSdl)
+import NanoUI.Sdl.Internal.Window (RgbaImage (..), SdlEnv (..), SdlOptions (..), syncDisplay, withSdl)
 import SDL3.Sys.Bindgen.Blendmode (sDL_BLENDMODE_BLEND)
 import SDL3.Sys.Render (setRenderDrawBlendModeSafe, setRenderVSync)
 
-
-runSdlSession ::
-  SdlOptions ->
-  Context ->
-  (SdlEnv -> IO ()) ->
-  (Input -> Bool) ->
-  (Context -> SdlEnv -> Input -> Bool -> IO (Bool, Input)) ->
-  IO ()
-runSdlSession options ctx setup shouldQuit drawFn =
+-- | Open a window for the options, with their theme and images, and run the
+-- event loop until it closes or 'sdlAppShouldQuit' says so. @drawFn@ draws a
+-- frame; its flag forces a full repaint.
+runSdlSession :: SdlOptions -> (Context -> SdlEnv -> Input -> Bool -> IO (Bool, Input)) -> IO ()
+runSdlSession options drawFn = do
+  base <- newPixelContext
+  ctx <- maybe (pure base) (withTheme base) (sdlAppTheme options)
+  forM_ (sdlAppImages options) $ \(RgbaImage image w h pixels) -> do
+    ok <- registerImage ctx image w h pixels
+    unless ok $ fail "registerImage failed"
   withSdl options ctx $ \ctx0 env -> do
-    setup env
     void $ setRenderDrawBlendModeSafe (sdlRenderer env) (fromIntegral sDL_BLENDMODE_BLEND)
     ctxRef <- newIORef ctx0
     prev <- newIORef emptyInput
@@ -139,14 +138,11 @@ runSdlSession options ctx setup shouldQuit drawFn =
     let drv =
           SessionDriver
             { sdPollEvents    = pollEvents >>= noteWake
-            , sdWaitEvents    = \t -> do
+            , sdWaitEvents    = \t ->
                 -- Take the rest of the queue with the event that ended the
                 -- wait, so one pass sees a whole burst (a resize queues
                 -- several window events at once).
-                woke <- if t < 0 then waitEvent else waitEventTimeout t
-                case woke of
-                  Nothing -> pure []
-                  Just ev -> noteWake . (ev :) =<< pollEvents
+                waitEvent t >>= maybe (pure []) (\ev -> noteWake . (ev :) =<< pollEvents)
             , sdApplyEvent    = applyEvent
             , sdIsButtonEdge  = isButtonEdge
             , sdIsHardQuit    = isHardQuit
@@ -189,9 +185,7 @@ runSdlSession options ctx setup shouldQuit drawFn =
                   writeIORef wakeRef False
                   drawFn c env inpSynced (forceFull || sdlContinuous env)
                 case ms of
-                  Just (dirtyOut, s) -> do
-                    writeIORef prev s
-                    pure (dirtyOut, s)
+                  Just drawn@(_, s) -> drawn <$ writeIORef prev s
                   Nothing -> do
                     -- The wake's event is already off the queue: queue it
                     -- again for the pass after the lock is free.
@@ -200,7 +194,7 @@ runSdlSession options ctx setup shouldQuit drawFn =
                     pure (False, inpSynced)
             , sdOnCursor      = syncPointerCursor (sdlCursors env)
             , sdAlignSec      = sdlRefreshPeriod env
-            , sdShouldQuit    = shouldQuit
+            , sdShouldQuit    = sdlAppShouldQuit options
             }
     bracket (installResizeWatch onResize) id $ \_ ->
       runSessionLoop drv ctx2 synced1

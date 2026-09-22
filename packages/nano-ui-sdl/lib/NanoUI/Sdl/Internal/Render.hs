@@ -13,6 +13,7 @@ import Control.Exception (onException)
 import Control.Monad (void, when)
 import Data.Bits (shiftR, (.&.))
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.Maybe (fromMaybe)
 import Data.Vector.Unboxed qualified as U
 import Data.Word (Word8)
 import Foreign.C.Types (CFloat (..), CInt (..))
@@ -109,11 +110,9 @@ renderDrawDataPass batch ren mClear drawData images glyphTex damage =
           (cr, cg, cb, ca) = unpackColor clearColor
         void $ setRenderDrawColorSafe ren cr cg cb ca
         void $ renderClearSafe ren
-      (Just _clearColor, DamageClip r) ->
-        -- The draw list starts a clip frame with its own window backdrop,
-        -- so the clip needs no clear here.
-        applyClipState batch clipRef ren (toClipKey r)
-      (Nothing, DamageClip r) -> applyClipState batch clipRef ren (toClipKey r)
+      -- The draw list starts a clip frame with its own window backdrop, so
+      -- a clip needs no clear here.
+      (_, DamageClip r) -> applyClipState batch clipRef ren (toClipKey r)
       (Nothing, DamageFull) -> pure ()
     let
       clip = case damage of
@@ -168,10 +167,7 @@ drawCmd batch ren vp vc ip images glyphTex mDamage clipRef cmd = do
         tex <-
           if textureGlyphPage texId >= 0
             then pure (glyphTex (textureGlyphPage texId))
-            else
-              if texId > 0
-                then maybe nullPtr id <$> lookupImage images texId
-                else pure nullPtr
+            else fromMaybe nullPtr <$> lookupImage images texId
         let
           (hasDamage, dx, dy, dw, dh) = case mDamage of
             Nothing -> (0, 0, 0, 0, 0)
