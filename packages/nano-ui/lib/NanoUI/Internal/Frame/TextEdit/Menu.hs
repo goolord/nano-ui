@@ -1,9 +1,7 @@
--- | Text-field context menu (Cut / Copy / Paste / Select All): opening,
--- picking, painting, spans and cursor.
+-- | Text-field context menu (Undo / Redo / Cut / Copy / Paste / Select All):
+-- opening, picking, painting, spans and cursor.
 module NanoUI.Internal.Frame.TextEdit.Menu
-  ( textEditMenuWidth
-  , textEditMenuRectAt
-  , openTextEditMenu
+  ( openTextEditMenu
   , finalizeTextEditMenuPick
   , closeTextEditMenuOnOutsideClick
   , closeTextEditMenuOnEscape
@@ -11,12 +9,11 @@ module NanoUI.Internal.Frame.TextEdit.Menu
   , collectTextEditMenuSpans
   , textEditMenuCursorKind
   , textFieldWidgetAtMouse
-  , applyTextFieldMenuAction
   ) where
 
-import Control.Monad (forM, forM_, unless, when)
+import Control.Monad (forM_, when)
 import Data.IORef (writeIORef)
-import Data.Maybe (isJust)
+import Data.Maybe (catMaybes, isJust, listToMaybe)
 import qualified Data.Text as T
 import NanoUI.Internal.Context
   ( Context (..)
@@ -32,7 +29,8 @@ import NanoUI.Internal.Context
   )
 import NanoUI.Internal.Draw (pushRect, pushText)
 import NanoUI.Internal.Font
-  ( centeredTextY
+  ( FontMetrics
+  , centeredTextY
   , menuItemPadX
   , menuItemRowH
   , menuMinW
@@ -62,71 +60,38 @@ import NanoUI.Internal.Types (Color (..), Rect (..), Size (..), V2 (..), clamp, 
 import NanoUI.Internal.Widgets.TextEditor (EditorMode (..), TextCommand (..), canRedo, canUndo)
 import NanoUI.Internal.Widgets.TextField (applyTextFieldCommand, textFieldHasText, textFieldHistory, textFieldMode)
 
-data TextEditMenuRow
-  = TextEditMenuSep
-  | TextEditMenuItem Int T.Text
-
--- | The menu's commands, in row order; a row's index is its item number.
-textEditMenuCommands :: [TextCommand]
-textEditMenuCommands = [Undo, Redo, Cut, Copy, Paste, SelectAll]
-
-textEditMenuRows :: [TextEditMenuRow]
+-- | The menu's rows in order: a command and its label, or a separator.
+textEditMenuRows :: [Maybe (TextCommand, T.Text)]
 textEditMenuRows =
-  [ TextEditMenuItem 0 "Undo"
-  , TextEditMenuItem 1 "Redo"
-  , TextEditMenuSep
-  , TextEditMenuItem 2 "Cut"
-  , TextEditMenuItem 3 "Copy"
-  , TextEditMenuItem 4 "Paste"
-  , TextEditMenuSep
-  , TextEditMenuItem 5 "Select All"
+  [ Just (Undo, "Undo")
+  , Just (Redo, "Redo")
+  , Nothing
+  , Just (Cut, "Cut")
+  , Just (Copy, "Copy")
+  , Just (Paste, "Paste")
+  , Nothing
+  , Just (SelectAll, "Select All")
   ]
 
--- Use the same row metrics as generic popup menus.
-textEditMenuRowH :: TextEditMenuRow -> Float
-textEditMenuRowH = \case
-  TextEditMenuSep -> menuSepH
-  TextEditMenuItem {} -> menuItemRowH
-
-textEditMenuContentH :: Float
-textEditMenuContentH = sum (map textEditMenuRowH textEditMenuRows)
-
--- | Menu width in logical pixels, measured from command labels plus padding
--- and bounded below by the standard menu minimum.
-textEditMenuWidth :: Context -> IO Float
-textEditMenuWidth ctx = do
-  ws <- mapM (fmap fst . ctxMeasureText ctx) [lbl | TextEditMenuItem _ lbl <- textEditMenuRows]
-  pure (max menuMinW (maximum ws + 2 * menuItemPadX + 2 * menuOuterPad))
-
--- | Menu rect at the pointer, kept inside the window.
-textEditMenuRectAt :: Float -> Float -> Float -> Size -> Rect
-textEditMenuRectAt x y menuW (Size ww wh) =
-  let h = 2 * menuOuterPad + textEditMenuContentH
-   in Rect (clamp 0 (ww - menuW) x) (clamp 0 (wh - h) y) menuW h
-
-textEditMenuContentRect :: Rect -> Rect
-textEditMenuContentRect (Rect x y w _) =
-  Rect (x + menuOuterPad) (y + menuOuterPad) (w - 2 * menuOuterPad) textEditMenuContentH
+-- | Row heights, the same row metrics as generic popup menus.
+textEditMenuRowHeights :: [Float]
+textEditMenuRowHeights = map (maybe menuSepH (const menuItemRowH)) textEditMenuRows
 
 -- | Every row with its band spanning the full menu width.
-textEditMenuLayout :: Rect -> [(TextEditMenuRow, Rect)]
-textEditMenuLayout menuRect@(Rect mx _ mw _) =
-  let Rect _ top _ _ = textEditMenuContentRect menuRect
-      go _ [] = []
-      go relY (entry : rest) =
-        let h = textEditMenuRowH entry
-         in (entry, Rect mx (top + relY) mw h) : go (relY + h) rest
-   in go 0 textEditMenuRows
+textEditMenuLayout :: Rect -> [(Rect, Maybe (TextCommand, T.Text))]
+textEditMenuLayout (Rect mx my mw _) =
+  [ (Rect mx (my + menuOuterPad + relY) mw h, row)
+  | (relY, h, row) <- zip3 (scanl (+) 0 textEditMenuRowHeights) textEditMenuRowHeights textEditMenuRows
+  ]
 
-textEditMenuPickAction :: Rect -> V2 -> Maybe Int
-textEditMenuPickAction menuRect mouse@(V2 _ my) =
-  let Rect _ top _ _ = textEditMenuContentRect menuRect
-   in if my < top || my >= top + textEditMenuContentH
-        then Nothing
-        else
-          case [entry | (entry, row) <- textEditMenuLayout menuRect, rectContains row mouse] of
-            TextEditMenuItem action _ : _ -> Just action
-            _ -> Nothing
+-- | The command of the row under @mouse@, when that row is a command.
+textEditMenuPick :: Rect -> V2 -> Maybe TextCommand
+textEditMenuPick menuRect mouse =
+  listToMaybe [cmd | (band, Just (cmd, _)) <- textEditMenuLayout menuRect, rectContains band mouse]
+
+-- | Where the menu's labels start.
+textEditMenuLabelX :: FontMetrics -> Rect -> Float
+textEditMenuLabelX fm (Rect mx _ _ _) = mx + menuOuterPad + menuItemPadX + fst (widgetContentInset fm)
 
 textEditMenuItemFg :: Style -> Bool -> Color
 textEditMenuItemFg style enabled =
@@ -134,6 +99,8 @@ textEditMenuItemFg style enabled =
     then styleFg style
     else lerpColor (styleFg style) (styleBg style) 0.55
 
+-- | Open the menu at the pointer, kept inside the window, over the text field
+-- a right press lands on, and focus that field.
 openTextEditMenu :: Context -> Input -> IO ()
 openTextEditMenu ctx inp =
   when (inputMouseRightPressed inp) $ do
@@ -141,8 +108,12 @@ openTextEditMenu ctx inp =
     mWid <- textFieldWidgetAtMouse ctx mouse
     forM_ mWid $ \wid -> do
       writeIORef (ctxFocusId ctx) wid
-      menuW <- textEditMenuWidth ctx
-      let menuRect = textEditMenuRectAt mx my menuW (inputWindowSize inp)
+      -- As wide as the widest label plus padding, and no narrower than any menu.
+      labelWs <- mapM (fmap fst . ctxMeasureText ctx . snd) (catMaybes textEditMenuRows)
+      let menuW = max menuMinW (maximum labelWs + 2 * menuItemPadX + 2 * menuOuterPad)
+          menuH = 2 * menuOuterPad + sum textEditMenuRowHeights
+          Size ww wh = inputWindowSize inp
+          menuRect = Rect (clamp 0 (ww - menuW) mx) (clamp 0 (wh - menuH) my) menuW menuH
       modifyInteraction ctx (\s -> s {isTextInputMenu = Just (TextInputMenu wid menuRect)})
       markDirty ctx
 
@@ -162,21 +133,29 @@ textFieldWidgetAtMouse ctx mouse = do
           <&&> (if nt == NodeTextArea then not <$> isMouseOnTextAreaScrollBarAt ctx idx mouse else pure True)
   traverse (getWidgetId na) mIdx
 
+-- | A press on a command row runs it when it can run, recorded for the caller
+-- ('NanoUI.Internal.Context.takeTextEditLastAction'); a press elsewhere on the
+-- menu closes it.
 finalizeTextEditMenuPick :: Context -> Input -> IO ()
 finalizeTextEditMenuPick ctx inp =
   when (inputMousePressed inp) $ do
     mMenu <- getsInteraction ctx isTextInputMenu
     case mMenu of
-      Just menu
-        | rectContains (textInputMenuRect menu) (inputMousePos inp) ->
-            case textEditMenuPickAction (textInputMenuRect menu) (inputMousePos inp) of
-              Nothing -> modifyInteraction ctx (\s -> s {isTextInputMenu = Nothing})
-              Just action ->
+      Just (TextInputMenu wid menuRect)
+        | rectContains menuRect (inputMousePos inp) ->
+            case textEditMenuPick menuRect (inputMousePos inp) of
+              Nothing -> closeMenu
+              Just cmd ->
                 ifM
-                  (textFieldMenuActionEnabled ctx (textInputMenuWidget menu) action)
-                  (applyTextFieldMenuAction ctx (textInputMenuWidget menu) action)
-                  (modifyInteraction ctx (\s -> s {isTextInputMenu = Nothing}) >> markDirty ctx)
+                  (textFieldMenuEnabled ctx wid cmd)
+                  ( do
+                      modifyInteraction ctx (\s -> s {isTextEditLastAction = Just (wid, cmd)})
+                      applyTextFieldCommand ctx wid cmd
+                  )
+                  (closeMenu >> markDirty ctx)
       _ -> pure ()
+ where
+  closeMenu = modifyInteraction ctx (\s -> s {isTextInputMenu = Nothing})
 
 -- | A press anywhere but on the menu closes it. This watches the frame's
 -- input: the press it waits for is by definition not the menu's own.
@@ -199,10 +178,10 @@ textEditMenuCursorKind ctx inp = do
   mMenu <- getsInteraction ctx isTextInputMenu
   let mouse = inputMousePos inp
   case mMenu of
-    Just menu
-      | rectContains (textInputMenuRect menu) mouse
-      , Just action <- textEditMenuPickAction (textInputMenuRect menu) mouse -> do
-          enabled <- textFieldMenuActionEnabled ctx (textInputMenuWidget menu) action
+    Just (TextInputMenu wid menuRect)
+      | rectContains menuRect mouse
+      , Just cmd <- textEditMenuPick menuRect mouse -> do
+          enabled <- textFieldMenuEnabled ctx wid cmd
           pure (Just (if enabled then UiCursorPointer else UiCursorDefault))
     _ -> pure Nothing
 
@@ -210,11 +189,10 @@ textEditMenuCursorKind ctx inp = do
 withTextEditMenu :: Context -> a -> (WidgetId -> Rect -> Theme -> IO a) -> IO a
 withTextEditMenu ctx absent consume = getsInteraction ctx isTextInputMenu >>= \case
   Nothing -> pure absent
-  Just menu -> do
-    let wid = textInputMenuWidget menu
+  Just (TextInputMenu wid menuRect) ->
     ifM
       (widgetOverlayAllowed ctx wid)
-      (widgetTheme ctx wid >>= consume wid (textInputMenuRect menu))
+      (widgetTheme ctx wid >>= consume wid menuRect)
       (pure absent)
 
 drawTextEditMenuOverlays :: Context -> Input -> IO ()
@@ -222,53 +200,43 @@ drawTextEditMenuOverlays ctx inp = withTextEditMenu ctx () $ \wid menuRect theme
   let da = ctxDrawArena ctx
       fm = ctxFontMetrics ctx
       style = overlayMenuStyle theme
-      Rect contentX _ _ _ = textEditMenuContentRect menuRect
-      labelX = contentX + menuItemPadX + fst (widgetContentInset fm)
   paintMenuPanel da theme style menuRect
   forM_ (textEditMenuLayout menuRect) $ \case
-    (TextEditMenuSep, Rect rx ry rw rh) ->
+    (Rect rx ry rw rh, Nothing) ->
       pushRect da (Rect (rx + menuItemPadX) (ry + rh / 2) (rw - 2 * menuItemPadX) 1) (themeSeparator theme)
-    (TextEditMenuItem action lbl, row@(Rect _ ry _ rh)) -> do
-      enabled <- textFieldMenuActionEnabled ctx wid action
+    (row@(Rect _ ry _ rh), Just (cmd, lbl)) -> do
+      enabled <- textFieldMenuEnabled ctx wid cmd
       when (enabled && rectContains row (inputMousePos inp)) $ do
         pushRect da row (styleHoverBg style)
         paintMenuAccent da theme row
-      unless (T.null lbl) $ do
-        (_, th) <- ctxMeasureText ctx lbl
-        pushText da fm labelX (centeredTextY fm ry rh th) lbl (textEditMenuItemFg style enabled)
+      (_, th) <- ctxMeasureText ctx lbl
+      pushText da fm (textEditMenuLabelX fm menuRect) (centeredTextY fm ry rh th) lbl (textEditMenuItemFg style enabled)
 
 collectTextEditMenuSpans :: Context -> Input -> IO [(Rect, T.Text, Color, Color, Rect)]
 collectTextEditMenuSpans ctx inp = withTextEditMenu ctx [] $ \wid menuRect theme -> do
   let fm = ctxFontMetrics ctx
       style = overlayMenuStyle theme
-      Rect contentX _ _ _ = textEditMenuContentRect menuRect
-      labelX = contentX + menuItemPadX + fst (widgetContentInset fm)
-  fmap concat . forM (textEditMenuLayout menuRect) $ \case
-    (TextEditMenuSep, _) -> pure []
-    (TextEditMenuItem action lbl, row@(Rect _ ry _ rh)) -> do
-      enabled <- textFieldMenuActionEnabled ctx wid action
-      (tw, th) <- ctxMeasureText ctx lbl
-      let bg
-            | enabled && rectContains row (inputMousePos inp) = styleHoverBg style
-            | otherwise = styleBg style
-      pure [(Rect labelX (centeredTextY fm ry rh th) tw th, lbl, textEditMenuItemFg style enabled, bg, menuRect)]
+  sequence
+    [ do
+        enabled <- textFieldMenuEnabled ctx wid cmd
+        (tw, th) <- ctxMeasureText ctx lbl
+        let bg
+              | enabled && rectContains row (inputMousePos inp) = styleHoverBg style
+              | otherwise = styleBg style
+            labelRect = Rect (textEditMenuLabelX fm menuRect) (centeredTextY fm ry rh th) tw th
+        pure (labelRect, lbl, textEditMenuItemFg style enabled, bg, menuRect)
+    | (row@(Rect _ ry _ rh), Just (cmd, lbl)) <- textEditMenuLayout menuRect
+    ]
 
--- | Run a text-menu command by zero-based command index (separators excluded)
--- and record it for the caller. Indices past the end do nothing; callers must
--- supply a non-negative index and check whether the menu action is enabled.
-applyTextFieldMenuAction :: Context -> WidgetId -> Int -> IO ()
-applyTextFieldMenuAction ctx wid item =
-  forM_ (take 1 (drop item textEditMenuCommands)) $ \cmd -> do
-    modifyInteraction ctx (\s -> s {isTextEditLastAction = Just (wid, cmd)})
-    applyTextFieldCommand ctx wid cmd
-
-textFieldMenuActionEnabled :: Context -> WidgetId -> Int -> IO Bool
-textFieldMenuActionEnabled ctx wid item = do
+-- | Whether @cmd@ can run on field @wid@ now.
+textFieldMenuEnabled :: Context -> WidgetId -> TextCommand -> IO Bool
+textFieldMenuEnabled ctx wid cmd = do
   mMode <- textFieldMode ctx wid
   history <- textFieldHistory ctx wid
   hasText <- textFieldHasText ctx wid
-  case (mMode, drop item textEditMenuCommands) of
-    (Just mode, cmd : _) -> case cmd of
+  case mMode of
+    Nothing -> pure False
+    Just mode -> case cmd of
       Undo -> pure (modeEditable mode && canUndo history)
       Redo -> pure (modeEditable mode && canRedo history)
       Cut -> pure (modeEditable mode && modeCopyable mode && hasText)
@@ -277,4 +245,3 @@ textFieldMenuActionEnabled ctx wid item = do
         | modeEditable mode -> maybe False (not . T.null) <$> ctxClipboardGet ctx
         | otherwise -> pure False
       _ -> pure hasText
-    _ -> pure False
