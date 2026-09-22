@@ -78,7 +78,6 @@ import NanoUI.Backend
 import NanoUI.Testing
   ( Context
   , glyphAtlasPages
-  , withExternalText
   , withFontMetrics
   , withFontResolver
   , withMeasureText
@@ -1015,12 +1014,9 @@ withTtfMeasureGlyph ::
   Context
 withTtfMeasureGlyph ctx measure fm monoFm scale =
   let ctx1 =
-        withExternalText
-          ( withMeasureText
-              (withMonoFontMetrics (withFontMetrics ctx fm) monoFm)
-              measure
-          )
-          False
+        withMeasureText
+          (withMonoFontMetrics (withFontMetrics ctx fm) monoFm)
+          measure
    in wrapMeasureCache scale ctx1 measure
 
 ttfFontMetricsScaled :: SdlFont -> Float -> FontMetrics

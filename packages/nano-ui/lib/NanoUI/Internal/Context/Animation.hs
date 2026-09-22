@@ -48,7 +48,7 @@ import NanoUI.Internal.Types (DamageBounds (..), defaultDamageSlop, rectNonEmpty
 {-# INLINE anyAnimating #-}
 anyAnimating :: Context -> IO Bool
 anyAnimating ctx = do
-  anim <- asAnyAnimating <$> readIORef (ctxAnimationState ctx)
+  anim <- not . IM.null <$> getLiveAnimations ctx
   if anim
     then pure True
     else not . IM.null . ssGlides <$> readIORef (ctxScrollState ctx)
@@ -145,7 +145,6 @@ insertRunning key anim as =
   as
     { asAnimRest = IM.delete key (asAnimRest as)
     , asAnimations = IM.insert key anim (asAnimations as)
-    , asAnyAnimating = True
     }
 
 -- | How long a 'keepAnimationAlive' animation would run by itself: in effect
@@ -175,7 +174,7 @@ tickAnimations ctx dt =
   modifyIORef' (ctxAnimationState ctx) $ \as0 ->
     let as = lapseKeepAlive as0
      in if IM.null (asAnimations as)
-          then as {asAnyAnimating = False, asAnimSettled = False}
+          then as {asAnimSettled = False}
           else
             let stepped = IM.map (stepAnim dt) (asAnimations as)
                 (live, done) = IM.partition animInProgress stepped
@@ -183,7 +182,6 @@ tickAnimations ctx dt =
              in as
                   { asAnimations = live
                   , asAnimRest = rest'
-                  , asAnyAnimating = not (IM.null live)
                   , asAnimSettled = not (IM.null done)
                   }
 
@@ -231,10 +229,9 @@ settleKey ctx key val = do
         | otherwise = IM.insert key val rest
   -- A spring at rest settles every frame; write only what changes.
   case prevLive of
-    Just _ -> do
-      let anims' = IM.delete key (asAnimations as)
+    Just _ ->
       writeIORef (ctxAnimationState ctx) $!
-        as {asAnimations = anims', asAnimRest = rest', asAnyAnimating = not (IM.null anims')}
+        as {asAnimations = IM.delete key (asAnimations as), asAnimRest = rest'}
     Nothing -> when restChanged $ writeIORef (ctxAnimationState ctx) $! as {asAnimRest = rest'}
   when (maybe (not (approxEq prevRest val)) (not . approxEq val . animationValue) prevLive) $ do
     -- Covered: the key's widget paints from this value and its rect is

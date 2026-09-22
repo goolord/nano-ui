@@ -4,7 +4,6 @@
 -- scroll and drawing-cache state, theme scopes, and frame messages.
 module NanoUI.Internal.Context.Types
   ( Context (..)
-  , MeasureCacheKey
   , MeasureCache (..)
   , emptyMeasureCache
   , WrapCache (..)
@@ -128,17 +127,14 @@ reduceMessages update = foldl' (\model (FrameMsg x) -> maybe model (`update` mod
 reduceUpdates :: (Foldable f, Typeable model) => model -> f FrameMsg -> model
 reduceUpdates = reduceMessages ($)
 
--- | Text and measurement scale identifying a cached width/height result.
-type MeasureCacheKey = (Text, Float)
-
--- | Memoised measurements in two generations: the young map, its size, and
--- the old map. A full young map replaces the old one, so text that stops
--- being shown (a clock, a log) is dropped while text measured every
--- generation stays.
+-- | Memoised measurements by text and measurement scale, in two generations:
+-- the young map, its size, and the old map. A full young map replaces the old
+-- one, so text that stops being shown (a clock, a log) is dropped while text
+-- measured every generation stays.
 data MeasureCache = MeasureCache
-  !(HashMap MeasureCacheKey (Float, Float))
+  !(HashMap (Text, Float) (Float, Float))
   !Int
-  !(HashMap MeasureCacheKey (Float, Float))
+  !(HashMap (Text, Float) (Float, Float))
 
 emptyMeasureCache :: MeasureCache
 emptyMeasureCache = MeasureCache HashMap.empty 0 HashMap.empty
@@ -305,7 +301,6 @@ initialOverlayState = OverlayState
 data AnimationState = AnimationState
   { asAnimations :: !(IntMap Animation)
   , asAnimRest :: !(IntMap Float)
-  , asAnyAnimating :: {-# UNPACK #-} !Bool
   , asAnimSettled :: {-# UNPACK #-} !Bool
   , asRectless :: !(IntMap Int)
   , asKeepAlive :: !IntSet
@@ -321,7 +316,6 @@ initialAnimationState :: AnimationState
 initialAnimationState = AnimationState
   { asAnimations = IM.empty
   , asAnimRest = IM.empty
-  , asAnyAnimating = False
   , asAnimSettled = False
   , asRectless = IM.empty
   , asKeepAlive = IS.empty
@@ -649,7 +643,6 @@ data Context = Context
   -- texture, forced full, continuous present, or window expose). When False,
   -- a DamageClip frame culls the paint pass to the damaged region.
   , ctxPaintFull :: !(IORef Bool)
-  , ctxExternalText :: Bool
   , ctxTheme :: !(IORef Theme)
   -- ^ Base theme; scoped themes live in 'ctxThemeScopes'.
   , ctxThemeScopes :: !(IORef ThemeScopes)

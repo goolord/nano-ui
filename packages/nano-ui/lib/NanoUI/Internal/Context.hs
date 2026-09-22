@@ -6,7 +6,6 @@
 -- module; views normally only need "NanoUI".
 module NanoUI.Internal.Context
   ( Context (..)
-  , MeasureCacheKey
   , TextInputMenu (..)
   , TextInputDrag (..)
   , TextFieldClickCell (..)
@@ -14,22 +13,14 @@ module NanoUI.Internal.Context
   , WindowResizeDrag (..)
   , DamageState (..)
   , OverlayState (..)
-  , AnimationState (..)
   , DrawingCacheState (..)
   , DrawingEntry (..)
-  , DrawFitCache (..)
   , SpanCacheEntry (..)
   , SpanLines (..)
   , WidgetTextCacheEntry (..)
   , WidgetTextPlacement (..)
   , InteractionState (..)
   , PointerRoute (..)
-  , initialInteractionState
-  , initialDamageState
-  , initialOverlayState
-  , initialAnimationState
-  , initialScrollState
-  , initialDrawingCacheState
   , getsInteraction
   , modifyInteraction
   , getsOverlay
@@ -92,7 +83,6 @@ module NanoUI.Internal.Context
   , getStoreBool
   , writeStoreBool
   , isDisabled
-  , newThemeScopes
   , beginThemeScopes
   , pushThemeScope
   , themeScopesChanged
@@ -106,7 +96,6 @@ module NanoUI.Internal.Context
   , getScrollOffset2D
   , setScrollOffset2D
   , setScrollConfig
-  , defaultScrollConfig
   , linkScrollAxes
   , ScrollTuning (..)
   , defaultScrollTuning
@@ -135,7 +124,6 @@ module NanoUI.Internal.Context
   , scrollTargetOffset
   , scrollGliding
   , clampScrollOffset
-  , cancelScrollGlide
   , stepScrollGlides
   , getPrevRect
   , getPrevClipRect
@@ -154,7 +142,6 @@ module NanoUI.Internal.Context
   , clearMeasureCache
   , cachedWrapText
   , ensureMetricCaches
-  , withExternalText
   , withTheme
   , setTheme
   , getTheme
@@ -217,7 +204,6 @@ module NanoUI.Internal.Context
   , bumpMirror
   , slotKey
   , Slot (..)
-  , boolInt
   , intBool
   , anySelectOpen
   , isSelectOpen
@@ -232,7 +218,6 @@ module NanoUI.Internal.Context
   , applyEase
   , easeSameSpec
   , approxEq
-  , animInProgress
   )
 where
 
@@ -263,7 +248,6 @@ import NanoUI.Internal.Animation
   ( Animation (..)
   , Ease (..)
   , SpringParams (..)
-  , animInProgress
   , applyEase
   , approxEq
   , easeSameSpec
@@ -279,21 +263,18 @@ import NanoUI.Internal.Context.Drawing
 import NanoUI.Internal.Context.Overlay
 import NanoUI.Internal.Context.Scroll
 import NanoUI.Internal.Context.Types
-  ( AnimationState (..)
-  , Context (..)
+  ( Context (..)
   , CustomDrawBuild
   , CustomDrawContext (..)
   , CustomDrawingEntry (..)
   , CustomMeasureFn
   , DamageRequest (..)
   , DamageState (..)
-  , DrawFitCache (..)
   , DrawingCacheState (..)
   , DrawingEntry (..)
   , FrameMsg (..)
   , InteractionState (..)
   , MeasureCache (..)
-  , MeasureCacheKey
   , MetricSource (..)
   , WrapCache (..)
   , emptyMeasureCache
@@ -324,13 +305,11 @@ import NanoUI.Internal.Draw (newDrawArena)
 import NanoUI.Internal.Draw qualified as Draw
 import NanoUI.Internal.Font (FontMetrics, WrapResult (..), fmLineHeight, measureTextIO, monospaceMetrics, scaleFontMetrics, wrapTextIO)
 import NanoUI.Internal.Frame.SpanArena (newSpanArena)
-import NanoUI.Internal.Frame.Scroll.Geometry (defaultScrollConfig)
 import NanoUI.Internal.Id (WidgetId (..), initialIdContext)
 import NanoUI.Internal.Layout.Arena (getArenaScope, newNodeArena)
 import NanoUI.Internal.Store
   ( WidgetStore (..)
   , anySelectOpen
-  , boolInt
   , bumpMirror
   , closeSelects
   , emptyWidgetStore
@@ -560,11 +539,6 @@ clearMeasureCache ctx = do
   invalidateTextCaches ctx
   mapM_ (`writeIORef` emptyMeasureCache) (ctxMeasureCache ctx)
 
--- | Configure text spans for a host that paints text separately. Use the
--- returned context; this does not replace its font metrics.
-withExternalText :: Context -> Bool -> Context
-withExternalText ctx ext = ctx {ctxExternalText = ext}
-
 -- | Apply 'setTheme' and return the same context for configuration pipelines.
 withTheme :: Context -> Theme -> IO Context
 withTheme ctx theme = ctx <$ setTheme ctx theme
@@ -603,10 +577,7 @@ enableMeasureCache ctx =
 -- type; other host entries remain available. Does not wake the loop.
 {-# INLINE setHost #-}
 setHost :: forall a. (Typeable a) => Context -> a -> IO ()
-setHost ctx val = do
-  m <- readIORef (ctxHost ctx)
-  let k = typeOf val
-  writeIORef (ctxHost ctx) (Map.insert k (toDyn val) m)
+setHost ctx val = modifyIORef' (ctxHost ctx) (Map.insert (typeOf val) (toDyn val))
 
 -- | Set the device pixel scale used to snap geometry origins/endpoints to
 -- whole pixels. The SDL backend calls this when the window pixel density is synced.
@@ -712,20 +683,18 @@ newContext = do
         , ctxResolveMeasure = defaultResolveMeasure ctx
         , ctxMeasureCache = Nothing
         , ctxMetricSource = InitialMetricSource
-        , ctxExternalText = False
         , ctxClipboardGet = pure Nothing
         , ctxClipboardSet = \_ -> pure False
         , ..
         }
   pure ctx
 
--- | Headless context configured for external text, 16-unit monospace metrics,
--- and cached measurement. Used as a starting point by pixel-based hosts.
+-- | Headless context with 16-unit monospace metrics and cached measurement.
+-- Used as a starting point by pixel-based hosts.
 newPixelHostContext :: IO Context
 newPixelHostContext = do
-  ctx0 <- newContext
-  ctx <- enableMeasureCache ctx0
-  pure (withExternalText (withFontMetrics ctx (monospaceMetrics 16)) True)
+  ctx <- enableMeasureCache =<< newContext
+  pure (withFontMetrics ctx (monospaceMetrics 16))
 
 -- =============================================================================
 -- Focus

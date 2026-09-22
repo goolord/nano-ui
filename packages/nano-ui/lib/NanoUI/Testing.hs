@@ -47,7 +47,6 @@ module NanoUI.Testing
   , withMeasureText
   , withFontResolver
   , wrapMeasureCache
-  , withExternalText
   , enableMeasureCache
   , withTheme
   , setTheme
@@ -196,7 +195,6 @@ import NanoUI.Internal.Context
   , takeDamagePieces
   , textInputEditActive
   , withClipboard
-  , withExternalText
   , withFontMetrics
   , withMeasureText
   , withFontResolver
@@ -260,6 +258,6 @@ import NanoUI.Internal.Types (Damage (..), damageIsEmpty)
 import Effectful (Eff, IOE, runEff, type (:>))
 
 -- | A headless context for tests: 16px monospace metrics, the measure cache
--- on, text kept out of the vertex buffer, and the default theme.
+-- on, and the default theme.
 newPixelContext :: IO Context
 newPixelContext = newPixelHostContext
