@@ -5,7 +5,6 @@ module NanoUI.Sdl.Internal.Chrome.Types
   , defaultWindowChrome
   , defaultResizeBorder
   , HitTestCallback
-  , HitTestFunPtr
   , ChromeState (..)
   , newChromeState
   , clearChromeState
@@ -57,8 +56,6 @@ defaultResizeBorder = 6
 -- which is two ints), and the data the callback was registered with.
 type HitTestCallback = Ptr () -> Ptr CInt -> Ptr () -> IO SDL_HitTestResult
 
-type HitTestFunPtr = FunPtr HitTestCallback
-
 -- | A window's chrome as the hit test reads it. The desktop asks what is
 -- under the pointer from inside the event pump, before the press reaches
 -- anyone, so the answer cannot be passed in at the call: the frame leaves it
@@ -68,7 +65,7 @@ type HitTestFunPtr = FunPtr HitTestCallback
 -- set rather than on every question.
 data ChromeState = ChromeState
   { chromeRegions :: !(IORef WindowChrome)
-  , chromeCallback :: !(IORef (Maybe HitTestFunPtr))
+  , chromeCallback :: !(IORef (Maybe (FunPtr HitTestCallback)))
   }
 
 newChromeState :: IO ChromeState
@@ -81,4 +78,4 @@ clearChromeState :: ChromeState -> IO ()
 clearChromeState st = do
   cb <- readIORef (chromeCallback st)
   writeIORef (chromeCallback st) Nothing
-  maybe (pure ()) freeHaskellFunPtr cb
+  mapM_ freeHaskellFunPtr cb

@@ -67,9 +67,11 @@ import NanoUI
   , CaptionConfig (..)
   , Rect (..)
   , Size (..)
+  , V2 (..)
   , captionButtonsConfigured
   , defaultCaptionConfig
   , dragSpans
+  , rectContains
   , windowWidth
   )
 import NanoUI.Monad (Ui, askHost, uiIO)
@@ -232,9 +234,7 @@ hitTest st win area _ = do
   pure $
     if edge /= SDL.SDL_HITTEST_NORMAL
       then edge
-      else if any (holds x y) drag then SDL.SDL_HITTEST_DRAGGABLE else SDL.SDL_HITTEST_NORMAL
-  where
-    holds x y (Rect rx ry rw rh) = x >= rx && x < rx + rw && y >= ry && y < ry + rh
+      else if any (`rectContains` V2 x y) drag then SDL.SDL_HITTEST_DRAGGABLE else SDL.SDL_HITTEST_NORMAL
 
 -- | The edge or corner a point is near enough to take hold of, or
 -- @SDL_HITTEST_NORMAL@ for one in the window proper.
