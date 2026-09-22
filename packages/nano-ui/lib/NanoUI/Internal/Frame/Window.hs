@@ -43,14 +43,15 @@ import NanoUI.Internal.Frame.Scroll.Geometry (scrollChromeLane)
 import NanoUI.Internal.Id (WidgetId (..))
 import NanoUI.Internal.Input (Input (..), UiCursorKind (..), inputMouseDown, inputMousePos, inputMousePressed)
 import NanoUI.Internal.Layout.Arena
-  ( NodeIdx
+  ( AxisSizing (..)
+  , NodeIdx
   , NodeType (..)
   , findFloatingNodeRevM
   , floatingNodeCount
   , foldFloatingNodesM
   , getDirection
   , getFirstChild
-  , getMinMax
+  , getHeightSizing
   , getNextSibling
   , getNodeRect
   , getNodeType
@@ -58,6 +59,7 @@ import NanoUI.Internal.Layout.Arena
   , getPadding
   , getRect
   , getWidgetId
+  , getWidthSizing
   )
 import NanoUI.Internal.Layout.Solve (Measurers (..), placeWindowNode, windowBodyScroller)
 import NanoUI.Internal.Monad ((<&&>))
@@ -295,7 +297,8 @@ tryStartWindowResize ctx mouse@(V2 mx my) = do
     Nothing -> pure False
     Just (idx, Rect x y w h, edge) -> do
       wid <- getWidgetId (ctxNodeArena ctx) idx
-      (minW, minH, maxW, maxH) <- getMinMax (ctxNodeArena ctx) idx
+      AxisSizing _ _ minW maxW <- getWidthSizing (ctxNodeArena ctx) idx
+      AxisSizing _ _ minH maxH <- getHeightSizing (ctxNodeArena ctx) idx
       modifyInteraction ctx $ \s ->
         s
           { isWindowResize =

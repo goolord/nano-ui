@@ -89,11 +89,12 @@ module NanoUI.Internal.Layout.Arena
   , getGridMinColW
   , getScrollContentW
   , setScrollContentW
+  , AxisSizing (..)
+  , readAxisSizing
   , getWidthSizing
   , getHeightSizing
   , getPadding
   , getGap
-  , getMinMax
   , parentIsRow
   , getAlignX
   , getAlignY
@@ -1114,15 +1115,36 @@ setGridCols na idx c = do
   arenaArrays na >>= \a -> writeTree a idx treeGridCols c
   mixNodeInput na idx 0x4743 (fromIntegral c)
 
--- | Width sizing mode and its parameter; see 'styleWVal' for units.
-{-# INLINE getWidthSizing #-}
-getWidthSizing :: NodeArena -> NodeIdx -> IO (SizingTag, Float)
-getWidthSizing na idx = arenaArrays na >>= \a -> (,) <$> readTagEnum a idx tagWSizing <*> readStyle a idx styleWVal
+-- | One axis of a node's layout constraints: the sizing mode, its number (see
+-- 'styleWVal' for units), and the minimum and maximum size in logical pixels.
+data AxisSizing = AxisSizing
+  { axTag :: !SizingTag
+  , axVal :: !Float
+  , axMin :: !Float
+  , axMax :: !Float
+  }
 
--- | Height sizing mode and its parameter; see 'styleHVal' for units.
+-- | The width's 'AxisSizing' with @horizontal@, else the height's.
+{-# INLINE readAxisSizing #-}
+readAxisSizing :: NodeArenaArrays -> NodeIdx -> Bool -> IO AxisSizing
+readAxisSizing a idx horizontal = do
+  -- Each height column sits right after its width column.
+  let !o = if horizontal then 0 else 1
+  AxisSizing
+    <$> readTagEnum a idx (tagWSizing + o)
+    <*> readStyle a idx (styleWVal + o)
+    <*> readStyle a idx (styleMinW + o)
+    <*> readStyle a idx (styleMaxW + o)
+
+-- | The width's 'AxisSizing'.
+{-# INLINE getWidthSizing #-}
+getWidthSizing :: NodeArena -> NodeIdx -> IO AxisSizing
+getWidthSizing na idx = arenaArrays na >>= \a -> readAxisSizing a idx True
+
+-- | The height's 'AxisSizing'.
 {-# INLINE getHeightSizing #-}
-getHeightSizing :: NodeArena -> NodeIdx -> IO (SizingTag, Float)
-getHeightSizing na idx = arenaArrays na >>= \a -> (,) <$> readTagEnum a idx tagHSizing <*> readStyle a idx styleHVal
+getHeightSizing :: NodeArena -> NodeIdx -> IO AxisSizing
+getHeightSizing na idx = arenaArrays na >>= \a -> readAxisSizing a idx False
 
 -- | Insets in logical pixels, ordered left, right, top, bottom.
 {-# INLINE getPadding #-}
@@ -1135,13 +1157,6 @@ getPadding na idx = do
 {-# INLINE getGap #-}
 getGap :: NodeArena -> NodeIdx -> IO Float
 getGap na idx = arenaArrays na >>= \a -> readStyle a idx styleGap
-
--- | Minimum width, minimum height, maximum width, maximum height, in logical pixels.
-{-# INLINE getMinMax #-}
-getMinMax :: NodeArena -> NodeIdx -> IO (Float, Float, Float, Float)
-getMinMax na idx = do
-  a <- arenaArrays na
-  (,,,) <$> readStyle a idx styleMinW <*> readStyle a idx styleMinH <*> readStyle a idx styleMaxW <*> readStyle a idx styleMaxH
 
 -- | Solved horizontal content extent of a two-axis scroller, in logical pixels.
 {-# INLINE getScrollContentW #-}

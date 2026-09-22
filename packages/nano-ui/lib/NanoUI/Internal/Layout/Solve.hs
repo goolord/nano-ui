@@ -61,6 +61,7 @@ import NanoUI.Internal.Font
   )
 import NanoUI.Internal.Layout.Arena
   ( forFloatingNodes_
+  , AxisSizing (..)
   , DirTag (..)
   , FlexScratch (..)
   , IOArr
@@ -81,12 +82,6 @@ import NanoUI.Internal.Layout.Arena
   , geomY
   , geomW
   , geomH
-  , styleWVal
-  , styleHVal
-  , styleMinW
-  , styleMinH
-  , styleMaxW
-  , styleMaxH
   , stylePadL
   , stylePadR
   , stylePadT
@@ -97,9 +92,8 @@ import NanoUI.Internal.Layout.Arena
   , tagDirection
   , treeStyleIdx
   , treeGridCols
-  , tagWSizing
-  , tagHSizing
   , tagScrollBarSlot
+  , readAxisSizing
   , readGeom
   , writeTagEnum
   , writeGeom
@@ -117,7 +111,6 @@ import NanoUI.Internal.Layout.Arena
   , getGridCols
   , getGridMinColW
   , getHeightSizing
-  , getMinMax
   , getNodeType
   , getOptions
   , getParent
@@ -469,35 +462,29 @@ measureNode env@SolveEnv {seArena = na} idx = do
 
 measureCustomNode :: SolveEnv -> CustomMeasureFn -> NodeIdx -> IO ()
 measureCustomNode env@SolveEnv {seArena = na} measureFn idx = do
-  (minW, minH, maxW, maxH) <- getMinMax na idx
-  wSizing@(wTag, wVal) <- getWidthSizing na idx
-  hSizing@(hTag, hVal) <- getHeightSizing na idx
-  let ((mw, mh), record) = customMeasure (seFm env) measureFn wSizing hSizing maxW maxH
+  wAx <- getWidthSizing na idx
+  hAx <- getHeightSizing na idx
+  let ((mw, mh), record) = customMeasure (seFm env) measureFn wAx hAx
   forM_ (seMeasureLog env) $ \ref -> modifyIORef' ref (IM.insert idx record)
-  let w = case wTag of SizingFixed -> wVal; _ -> clamp minW maxW mw
-      h = case hTag of SizingFixed -> hVal; _ -> clamp minH maxH mh
-  setRect na idx 0 0 w h
+  setRect na idx 0 0 (fixedOr wAx mw) (fixedOr hAx mh)
 
 -- | Run a node's custom measure again, as the solve ran it, and return the
 -- record the layout cache keeps of the call. Layout-reuse validation compares
 -- it with the solve's.
 runCustomMeasure :: NodeArena -> FontMetrics -> CustomMeasureFn -> NodeIdx -> IO CustomMeasureRecord
 runCustomMeasure na fm measureFn idx = do
-  (_, _, maxW, maxH) <- getMinMax na idx
-  wSizing <- getWidthSizing na idx
-  hSizing <- getHeightSizing na idx
-  pure $! snd (customMeasure fm measureFn wSizing hSizing maxW maxH)
+  wAx <- getWidthSizing na idx
+  hAx <- getHeightSizing na idx
+  pure $! snd (customMeasure fm measureFn wAx hAx)
 
--- | A custom measure run on the space it is offered: its own fixed size, or
--- its finite maximum in either axis. Returns the size it asks for and the
--- record of the call, forced with the pair so the cache holds words rather
--- than the closure.
-customMeasure ::
-  FontMetrics -> CustomMeasureFn -> (SizingTag, Float) -> (SizingTag, Float) -> Float -> Float ->
-  ((Float, Float), CustomMeasureRecord)
-customMeasure fm measureFn (wTag, wVal) (hTag, hVal) maxW maxH =
-  let aw = case wTag of SizingFixed -> wVal; _ -> offeredExtent maxW
-      ah = case hTag of SizingFixed -> hVal; _ -> offeredExtent maxH
+-- | A custom measure run on the space it is offered ('offeredExtent').
+-- Returns the size it asks for and the record of the call, forced with the
+-- pair so the cache holds words rather than the closure.
+{-# INLINE customMeasure #-}
+customMeasure :: FontMetrics -> CustomMeasureFn -> AxisSizing -> AxisSizing -> ((Float, Float), CustomMeasureRecord)
+customMeasure fm measureFn wAx hAx =
+  let aw = offeredExtent wAx
+      ah = offeredExtent hAx
       (mw, mh) = measureFn fm (aw, ah)
       !aw' = castFloatToWord32 aw
       !ah' = castFloatToWord32 ah
@@ -505,20 +492,32 @@ customMeasure fm measureFn (wTag, wVal) (hTag, hVal) maxW maxH =
       !mh' = castFloatToWord32 mh
    in ((mw, mh), (aw', ah', mw', mh'))
 
--- | The space a custom measure is offered along an axis without a fixed
--- size: the node's maximum when it is finite (under 1e8), and 1e9 otherwise.
+-- | The space a custom measure is offered along an axis: its fixed size, or
+-- else its maximum when that is finite (under 1e8), and 1e9 otherwise.
 {-# INLINE offeredExtent #-}
-offeredExtent :: Float -> Float
-offeredExtent m = if m < 1e8 then m else 1e9
+offeredExtent :: AxisSizing -> Float
+offeredExtent (AxisSizing tag val _ m)
+  | tag == SizingFixed = val
+  | otherwise = if m < 1e8 then m else 1e9
 
--- | A measured drawing's height at width @w@, clamped to @minH@ and @maxH@,
--- or @fallback@ when its widget has no custom measure.
+-- | The axis's fixed size, or else @content@ within its limits.
+{-# INLINE fixedOr #-}
+fixedOr :: AxisSizing -> Float -> Float
+fixedOr (AxisSizing tag val lo hi) content = if tag == SizingFixed then val else clamp lo hi content
+
+-- | The axis's fixed size or else @content@, within its limits.
+{-# INLINE sizeWithin #-}
+sizeWithin :: AxisSizing -> Float -> Float
+sizeWithin (AxisSizing tag val lo hi) content = clamp lo hi (if tag == SizingFixed then val else content)
+
+-- | A measured drawing's height at width @w@, within its fit height's
+-- limits, or @fallback@ when its widget has no custom measure.
 {-# INLINE drawingHeightAt #-}
-drawingHeightAt :: SolveEnv -> NodeIdx -> Float -> Float -> Float -> Float -> IO Float
-drawingHeightAt SolveEnv {seArena = na, seFm = fm, seLookupMeasure = lookupMeasure} idx w minH maxH fallback = do
+drawingHeightAt :: SolveEnv -> NodeIdx -> Float -> AxisSizing -> Float -> IO Float
+drawingHeightAt SolveEnv {seArena = na, seFm = fm, seLookupMeasure = lookupMeasure} idx w hAx fallback = do
   wid <- getWidgetId na idx
   lookupMeasure wid >>= \case
-    Just measure -> pure (clamp minH maxH (snd (measure fm (w, offeredExtent maxH))))
+    Just measure -> pure (clamp (axMin hAx) (axMax hAx) (snd (measure fm (w, offeredExtent hAx))))
     Nothing -> pure fallback
 
 -- | The width a text node that is not a row's child wraps at, from its
@@ -542,8 +541,7 @@ findAncestorMaxW na idx = go idx 0
         else do
           pad <- getPadding na p
           let padAccum' = padAccum + padL pad + padR pad
-          (_, _, pMaxW, _) <- getMinMax na p
-          (pwTag, pwVal) <- getWidthSizing na p
+          AxisSizing pwTag pwVal _ pMaxW <- getWidthSizing na p
           if pwTag == SizingFixed
             then pure (max 0 (pwVal - padAccum'))
             else if pMaxW < 1e8
@@ -552,9 +550,8 @@ findAncestorMaxW na idx = go idx 0
 
 measureTextNode :: SolveEnv -> NodeIdx -> IO ()
 measureTextNode env@SolveEnv {seArena = na} idx = do
-  (minW, minH, maxW, maxH) <- getMinMax na idx
-  (wTag, _) <- getWidthSizing na idx
-  (hTag, hVal) <- getHeightSizing na idx
+  AxisSizing wTag _ minW maxW <- getWidthSizing na idx
+  hAx <- getHeightSizing na idx
   parentAssigns <- growParent na idx
   txt <- getText na idx
   isRowChild <- parentIsRow na idx
@@ -569,10 +566,7 @@ measureTextNode env@SolveEnv {seArena = na} idx = do
         if wTag == SizingGrow && parentAssigns
           then clamp minW maxW 0
           else clamp minW maxW tw
-  setRect na idx 0 0 reportedW $
-    case hTag of
-      SizingFixed -> clamp minH maxH hVal
-      _ -> clamp minH maxH (max lineH th)
+  setRect na idx 0 0 reportedW (sizeWithin hAx (max lineH th))
 
 -- | Whether a grow-width node's width is assigned from above rather than
 -- reported: its parent grows, and the nearest ancestor that does not grow is
@@ -586,7 +580,7 @@ growParent na idx = getParent na idx >>= go True
     go isParent p
       | p < 0 = pure (not isParent)
       | otherwise = do
-          (pwTag, _) <- getWidthSizing na p
+          pwTag <- axTag <$> getWidthSizing na p
           if pwTag == SizingGrow
             then getParent na p >>= go False
             else if isParent
@@ -595,23 +589,16 @@ growParent na idx = getParent na idx >>= go True
 
 measureImage :: NodeArena -> NodeIdx -> IO ()
 measureImage na idx = do
-  (minW, minH, maxW, maxH) <- getMinMax na idx
-  (wTag, wVal) <- getWidthSizing na idx
-  (hTag, hVal) <- getHeightSizing na idx
-  let w =
-        case wTag of
-          SizingFixed -> wVal
-          _ -> if minW > 0 then minW else 32
-      h =
-        case hTag of
-          SizingFixed -> hVal
-          _ -> if minH > 0 then minH else 32
-  setRect na idx 0 0 (clamp minW maxW w) (clamp minH maxH h)
+  wAx <- getWidthSizing na idx
+  hAx <- getHeightSizing na idx
+  -- Without a fixed size, an image takes its minimum, or 32 without one.
+  let orMin ax = if axMin ax > 0 then axMin ax else 32
+  setRect na idx 0 0 (sizeWithin wAx (orMin wAx)) (sizeWithin hAx (orMin hAx))
 
 measureSpacer :: NodeArena -> NodeIdx -> IO ()
 measureSpacer na idx = do
-  (wTag, wVal) <- getWidthSizing na idx
-  (hTag, hVal) <- getHeightSizing na idx
+  AxisSizing wTag wVal _ _ <- getWidthSizing na idx
+  AxisSizing hTag hVal _ _ <- getHeightSizing na idx
   -- Non-fixed spacers reserve the default 8px extent.
   let w = if wTag == SizingFixed then wVal else 8
       h = if hTag == SizingFixed then hVal else 8
@@ -635,43 +622,13 @@ measureMarkedWidget fm measure body leading = do
   (mw, mh) <- measure (if T.null body then " " else body)
   pure (mw, max mh (checkboxBoxSize fm), leading, 0)
 
-measureTextField ::
-  FontMetrics ->
-  (Text -> IO (Float, Float)) ->
-  Text ->
-  Bool ->
-  IO (Float, Float, Float, Float)
-measureTextField fm measure txt multiline = do
-  pw <- if multiline || T.null txt then pure 0 else fst <$> measure txt
-  let fieldH = if multiline then max 96 (textInputFieldHeight fm * 4) else textInputFieldHeight fm
-      contentW = max textInputMinWidth pw
-  pure (contentW, fieldH, 0, 0)
-
--- Caption-less search box: single row tall, icons counted in the width budget.
-measureSearchInput ::
-  FontMetrics ->
-  (Text -> IO (Float, Float)) ->
-  Text ->
-  IO (Float, Float, Float, Float)
-measureSearchInput fm measure txt = do
-  let lbl = if T.null txt then " " else txt
-  (lw, _) <- measure lbl
-  let contentW = max textInputMinWidth lw + searchInputReserveW fm
-  pure (contentW, textInputFieldHeight fm, 0, 0)
-
 measureWidget :: SolveEnv -> NodeIdx -> IO ()
 measureWidget env@SolveEnv {seArena = na, seArrays = a, seFm = fm, seMeasure = measure} idx = do
   nt <- readTagEnum a idx tagNodeType
   txt <- getText na idx
   si <- readTree a idx treeStyleIdx
-  minW <- readStyle a idx styleMinW
-  minH <- readStyle a idx styleMinH
-  maxW <- readStyle a idx styleMaxW
-  maxH <- readStyle a idx styleMaxH
-  wTag <- readTagEnum a idx tagWSizing
-  wVal <- readStyle a idx styleWVal
-  hTag <- readTagEnum a idx tagHSizing
-  hVal <- readStyle a idx styleHVal
+  wAx <- readAxisSizing a idx True
+  hAx <- readAxisSizing a idx False
   let (padX, padY) =
         case nt of
           NodeButton
@@ -685,8 +642,6 @@ measureWidget env@SolveEnv {seArena = na, seArrays = a, seFm = fm, seMeasure = m
             | otherwise -> buttonPadding fm
           NodeSelect -> selectPadding fm
           NodeTree -> treeItemPadding fm
-          NodeTextInput
-            | hasFlag textInputFlagSelectable si -> (0, 0)
           _
             | nt == NodeColorPicker
                 || nt == NodeSlider
@@ -726,10 +681,15 @@ measureWidget env@SolveEnv {seArena = na, seArrays = a, seFm = fm, seMeasure = m
         -- Numeric field: a short editable box and its stepper.
         | hasFlag textInputFlagNumeric si ->
             pure (56, textInputFieldHeight fm, numericStepperW, 0)
-        | hasFlag textInputFlagSearch si ->
-            measureSearchInput fm measure txt
-        | otherwise -> measureTextField fm measure txt False
-      NodeTextArea -> measureTextField fm measure txt True
+        -- Caption-less search box: single row tall, icons counted in the
+        -- width budget.
+        | hasFlag textInputFlagSearch si -> do
+            (lw, _) <- measure (if T.null txt then " " else txt)
+            pure (max textInputMinWidth lw + searchInputReserveW fm, textInputFieldHeight fm, 0, 0)
+        | otherwise -> do
+            pw <- if T.null txt then pure 0 else fst <$> measure txt
+            pure (max textInputMinWidth pw, textInputFieldHeight fm, 0, 0)
+      NodeTextArea -> pure (textInputMinWidth, max 96 (textInputFieldHeight fm * 4), 0, 0)
       _
         | nt == NodeCheckbox || nt == NodeRadio ->
             measureMarkedWidget fm measure txt (checkboxLeading fm)
@@ -740,37 +700,23 @@ measureWidget env@SolveEnv {seArena = na, seArrays = a, seFm = fm, seMeasure = m
                   | otherwise = txt
             (mw, mh) <- measure body
             pure (mw, mh, 0, 0)
-  let rawW = tw + padX + extraW
-      rawH = th + padY + extraH
-      w = case wTag of SizingFixed -> wVal; _ -> clamp minW maxW rawW
-      h = case hTag of SizingFixed -> hVal; _ -> clamp minH maxH rawH
-  setRect na idx 0 0 w h
+  setRect na idx 0 0 (fixedOr wAx (tw + padX + extraW)) (fixedOr hAx (th + padY + extraH))
 
 measureContainer :: SolveEnv -> NodeIdx -> IO ()
 measureContainer env@SolveEnv {seArena = na, seArrays = a} idx = do
   (pad, gap, dir) <- containerFlow a idx
   gCols <- readTree a idx treeGridCols
   minColW <- readStyle a idx styleGridMinColW
-  minW <- readStyle a idx styleMinW
-  minH <- readStyle a idx styleMinH
-  maxW <- readStyle a idx styleMaxW
-  maxH <- readStyle a idx styleMaxH
-  wTag <- readTagEnum a idx tagWSizing
-  wVal <- readStyle a idx styleWVal
-  hTag <- readTagEnum a idx tagHSizing
-  hVal <- readStyle a idx styleHVal
+  wAx@(AxisSizing wTag _ minW _) <- readAxisSizing a idx True
+  hAx <- readAxisSizing a idx False
   nt <- readTagEnum a idx tagNodeType
   let chrome = isChromeColumn nt dir
       padX = padL pad + padR pad
       padY = padT pad + padB pad
-      innerMaxW =
-        case wTag of
-          SizingFixed -> max 0 (wVal - padX)
-          _ -> max 0 (maxW - padX)
-      innerAvailH =
-        case hTag of
-          SizingFixed -> max 0 (hVal - padY)
-          _ -> max 0 (maxH - padY)
+      -- The room inside the fixed size, or else inside the maximum.
+      inner (AxisSizing tag val _ hi) p = max 0 ((if tag == SizingFixed then val else hi) - p)
+      innerMaxW = inner wAx padX
+      innerAvailH = inner hAx padY
   (contentW, contentH) <-
     if gCols > 0 || minColW > 0
       then measureGridScratch env idx gCols minColW innerMaxW innerAvailH gap
@@ -791,10 +737,7 @@ measureContainer env@SolveEnv {seArena = na, seArrays = a} idx = do
     if wTag == SizingGrow && minW > 0 && not (isFloatingNode nt)
       then growParent na idx
       else pure False
-  let h =
-        case hTag of
-          SizingFixed -> clamp minH maxH hVal
-          _ -> clamp minH maxH (contentH + padY)
+  let h = sizeWithin hAx (contentH + padY)
   -- A window or modal that fits its width to its content leaves room for its
   -- body's scrollbar when the body will scroll, or the bar's gutter narrows
   -- the content below its measured width and clips its right edge.
@@ -802,13 +745,7 @@ measureContainer env@SolveEnv {seArena = na, seArrays = a} idx = do
     if chrome && wTag /= SizingFixed
       then floatingBodyGutter na idx (contentH + padY - h)
       else pure 0
-  let w =
-        case wTag of
-          SizingFixed -> clamp minW maxW wVal
-          _
-            | minAssigned -> clamp minW maxW 0
-            | otherwise -> clamp minW maxW (contentW + padX + bodyGutter)
-  setRect na idx 0 0 w h
+  setRect na idx 0 0 (sizeWithin wAx (if minAssigned then 0 else contentW + padX + bodyGutter)) h
 
 -- | Width the scrollbar of window or modal @idx@'s body takes when the
 -- window is @overflow@ shorter than its content.
@@ -844,9 +781,8 @@ measureScrollContainer env@SolveEnv {seArena = na, seArrays = a} idx = do
   let padX = padL pad + padR pad
       padY = padT pad + padB pad
   si <- getStyleIdx na idx
-  (minW, minH, maxW, maxH) <- getMinMax na idx
-  (wTag, wVal) <- getWidthSizing na idx
-  (hTag, hVal) <- getHeightSizing na idx
+  wAx@(AxisSizing wTag _ _ _) <- getWidthSizing na idx
+  hAx@(AxisSizing hTag hVal _ _) <- getHeightSizing na idx
   (contentW, contentH) <- foldChildDimsFromParent env idx dir gap
   parent <- getParent na idx
   -- A modal's body scrolls like a window's: its bar sits just inside the
@@ -860,9 +796,7 @@ measureScrollContainer env@SolveEnv {seArena = na, seArrays = a} idx = do
   inPanel <- hasPanelAncestor na parent
   let slot = classifyScrollBar isWin (wTag == SizingGrow && hTag == SizingGrow && not inPanel)
   writeTagEnum a idx tagScrollBarSlot slot
-  let fullW = contentW + padX
-      fullH = contentH + padY
-      assignedInnerH =
+  let assignedInnerH =
         case hTag of
           SizingFixed -> max 0 (hVal - padY)
           _ -> contentH
@@ -874,20 +808,12 @@ measureScrollContainer env@SolveEnv {seArena = na, seArrays = a} idx = do
             case dir of
               DirColumn -> scrollAxisGutter (scrollPolicyY cfg) slot (padR pad) contentH assignedInnerH
               DirRow -> 0
-      viewportW =
-        case wTag of
-          SizingFixed -> wVal
-          _ -> fullW + fitGutterW
-      viewportH =
-        case hTag of
-          SizingFixed -> hVal
-          _ -> fullH
   if isScrollStyle2D si
     then do
       setNodeValue na idx contentH
       setScrollContentW na idx contentW
     else setNodeValue na idx (case dir of DirColumn -> contentH; DirRow -> contentW)
-  setRect na idx 0 0 (clamp minW maxW viewportW) (clamp minH maxH viewportH)
+  setRect na idx 0 0 (sizeWithin wAx (contentW + padX + fitGutterW)) (sizeWithin hAx (contentH + padY))
 
 foldChildDimsFromParent :: SolveEnv -> NodeIdx -> DirTag -> Float -> IO (Float, Float)
 foldChildDimsFromParent env@SolveEnv {seArena = na} idx dir gap = do
@@ -1018,9 +944,8 @@ recomputeFitHeightAtWidth env idx availW = do
 recomputeFitHeightAtWidthGo :: SolveEnv -> NodeIdx -> Float -> IO Float
 recomputeFitHeightAtWidthGo env@SolveEnv {seArena = na} idx availW = do
   nt <- getNodeType na idx
-  (minW, minH, maxW, maxH) <- getMinMax na idx
-  (wTag, wVal) <- getWidthSizing na idx
-  (hTag, _) <- getHeightSizing na idx
+  AxisSizing wTag wVal minW maxW <- getWidthSizing na idx
+  hAx@(AxisSizing hTag _ minH maxH) <- getHeightSizing na idx
   (_, _, _, oldH) <- getRect na idx
   let effW = case wTag of
         SizingPercent -> availW * wVal / 100
@@ -1042,7 +967,7 @@ recomputeFitHeightAtWidthGo env@SolveEnv {seArena = na} idx availW = do
 
     -- A measured drawing, like wrapped text, can be taller when narrower.
     NodeDrawing
-      | hTag == SizingFit -> drawingHeightAt env idx effW' minH maxH oldH
+      | hTag == SizingFit -> drawingHeightAt env idx effW' hAx oldH
       | otherwise -> pure oldH
 
     _ | (nt == NodeContainer || nt == NodePanel), hTag /= SizingFixed -> do
@@ -1054,8 +979,7 @@ recomputeFitHeightAtWidthGo env@SolveEnv {seArena = na} idx availW = do
               gap <- getGap na idx
               let innerW = max 0 (effW' - padL pad - padR pad)
                   step (FlowAcc count contentH _) ci = do
-                    (subWTag, subWVal) <- getWidthSizing na ci
-                    (_, _, subMaxW, _) <- getMinMax na ci
+                    AxisSizing subWTag subWVal _ subMaxW <- getWidthSizing na ci
                     let subW = case subWTag of
                           SizingPercent -> innerW * subWVal / 100
                           SizingFixed -> subWVal
@@ -1104,14 +1028,8 @@ flowChildSize env refit availW availH ci = do
   let a = seArrays env
   w <- readGeom a ci geomW
   h <- readGeom a ci geomH
-  wTag <- readTagEnum a ci tagWSizing
-  wVal <- readStyle a ci styleWVal
-  hTag <- readTagEnum a ci tagHSizing
-  hVal <- readStyle a ci styleHVal
-  minW <- readStyle a ci styleMinW
-  minH <- readStyle a ci styleMinH
-  maxW <- readStyle a ci styleMaxW
-  maxH <- readStyle a ci styleMaxH
+  AxisSizing wTag wVal minW maxW <- readAxisSizing a ci True
+  AxisSizing hTag hVal minH maxH <- readAxisSizing a ci False
   let w' =
         case wTag of
           SizingPercent -> clamp minW maxW (availW * wVal / 100)
@@ -1135,18 +1053,13 @@ positionNodeA ::
   Float ->
   IO ()
 positionNodeA env@SolveEnv {seArena = na, seArrays = a} depth idx x y availW availH = do
-  minW <- readStyle a idx styleMinW
-  minH <- readStyle a idx styleMinH
-  maxW <- readStyle a idx styleMaxW
-  maxH <- readStyle a idx styleMaxH
-  wTag <- readTagEnum a idx tagWSizing
-  wVal <- readStyle a idx styleWVal
-  hTag <- readTagEnum a idx tagHSizing
-  hVal <- readStyle a idx styleHVal
+  wAx <- readAxisSizing a idx True
+  hAx@(AxisSizing hTag _ minH maxH) <- readAxisSizing a idx False
   intrinsicW <- readGeom a idx geomW
   intrinsicH <- readGeom a idx geomH
   nt <- readTagEnum a idx tagNodeType
-  let w = clamp minW maxW (resolveSize wTag wVal intrinsicW availW minW maxW)
+  let !w = resolveSize wAx intrinsicW availW
+      !resolvedH = resolveSize hAx intrinsicH availH
   isRowChild <- parentIsRow na idx
   h <-
     if nt == NodeText && hTag /= SizingFixed && not isRowChild
@@ -1156,11 +1069,8 @@ positionNodeA env@SolveEnv {seArena = na, seArrays = a} depth idx x y availW ava
           then pure (clamp minH maxH 0)
           else do
             TextBox {tbWrapped, tbH, tbLineH} <-
-              measureTextNodeAt env idx txt w (wrapsNarrower (wTag /= SizingFit))
-            pure . clamp minH maxH $
-              if tbWrapped
-                then max tbLineH tbH
-                else resolveSize hTag hVal intrinsicH availH minH maxH
+              measureTextNodeAt env idx txt w (wrapsNarrower (axTag wAx /= SizingFit))
+            pure (if tbWrapped then clamp minH maxH (max tbLineH tbH) else resolvedH)
       else
         if (nt == NodeContainer || nt == NodePanel) && hTag == SizingFit
           then pure (clamp minH maxH (max intrinsicH availH))
@@ -1169,8 +1079,8 @@ positionNodeA env@SolveEnv {seArena = na, seArrays = a} depth idx x y availW ava
               then
                 -- A measured drawing laid out at another width than it was
                 -- measured at takes its height at the width it got.
-                drawingHeightAt env idx w minH maxH (clamp minH maxH (resolveSize hTag hVal intrinsicH availH minH maxH))
-              else pure (clamp minH maxH (resolveSize hTag hVal intrinsicH availH minH maxH))
+                drawingHeightAt env idx w hAx resolvedH
+              else pure resolvedH
   setRect na idx x y w h
   when (isContainerNode nt) $ do
     (pad, gap, dir) <- containerFlow a idx
@@ -1243,7 +1153,7 @@ positionScrollChildren env@SolveEnv {seArena = na} depth idx dir gap pad px py p
           gutterRow = scrollAxisGutter (scrollPolicyX cfg) slot (padB pad) contentSize innerW
       case dir of
         DirRow -> do
-          (wTag, _) <- getWidthSizing na idx
+          wTag <- axTag <$> getWidthSizing na idx
           let rowMain =
                 if wTag == SizingGrow
                   then max contentSize (innerW - gutterRow)
@@ -1332,7 +1242,7 @@ positionColumnScroll env@SolveEnv {seArena = na} depth parent gap cx cy innerW i
 {-# INLINE columnChildX #-}
 columnChildX :: NodeArena -> NodeIdx -> Float -> Float -> IO Float
 columnChildX na ci cx cw = do
-  (wTag, _) <- getWidthSizing na ci
+  wTag <- axTag <$> getWidthSizing na ci
   if wTag == SizingGrow || wTag == SizingPercent
     then pure cx
     else do
@@ -1340,13 +1250,16 @@ columnChildX na ci cx cw = do
       ax <- getAlignX na ci
       pure $! alignX ax cx cw iw
 
+-- | The size a node takes along an axis where @avail@ is offered, from its
+-- sizing, its measured size @intrinsic@ and its limits.
 {-# INLINE resolveSize #-}
-resolveSize :: SizingTag -> Float -> Float -> Float -> Float -> Float -> Float
-resolveSize SizingFixed v _ _ _ _ = v
-resolveSize SizingFit _ intrinsic avail minS maxS = clamp minS maxS (min intrinsic avail)
-resolveSize SizingShrink _ intrinsic avail minS maxS = clamp minS maxS (min intrinsic avail)
-resolveSize SizingGrow _ _ avail _ maxS = min avail maxS
-resolveSize SizingPercent _ _ avail _ maxS = min avail maxS
+resolveSize :: AxisSizing -> Float -> Float -> Float
+resolveSize (AxisSizing tag val lo hi) intrinsic avail =
+  clamp lo hi $ case tag of
+    SizingFixed -> val
+    SizingGrow -> min avail hi
+    SizingPercent -> min avail hi
+    _ -> min intrinsic avail
 
 positionChildren ::
   SolveEnv ->
@@ -1377,25 +1290,20 @@ positionChildren env@SolveEnv {seArena = na} depth idx dir gap pad px py pw ph =
 
 childRowCrossSize :: NodeArena -> NodeIdx -> Float -> IO Float
 childRowCrossSize na ci availCross = do
-  (hTag, hVal) <- getHeightSizing na ci
+  hAx@(AxisSizing hTag _ minH _) <- getHeightSizing na ci
   (_, _, _, intrinsic) <- getRect na ci
-  (_, minH, _, maxH) <- getMinMax na ci
-  let resolved = clamp minH maxH (resolveSize hTag hVal intrinsic availCross minH maxH)
-  case hTag of
-    SizingFixed -> pure (clamp minH maxH hVal)
-    SizingGrow -> pure resolved
-    SizingPercent -> pure resolved
-    _ ->
+  pure $
+    if hTag == SizingFit || hTag == SizingShrink
       -- Fit/Shrink keep the measured box. Do not use the wrap-line
       -- or row slot as availH: that stretches every child when leftover
       -- leaks into scratch `fh`.
-      pure (max minH intrinsic)
+      then max minH intrinsic
+      else resolveSize hAx intrinsic availCross
 
 -- Column leftover must not change Fixed step height.
 columnChildHeight :: NodeArena -> NodeIdx -> Float -> IO Float
 columnChildHeight na ci scratchH = do
-  (hTag, _) <- getHeightSizing na ci
-  (_, minH, _, maxH) <- getMinMax na ci
+  AxisSizing hTag _ minH maxH <- getHeightSizing na ci
   case hTag of
     SizingFixed -> do
       (_, _, _, ih) <- getRect na ci
@@ -1516,12 +1424,11 @@ positionGrid env@SolveEnv {seArena = na} depth parent gCols minColW gap cx cy cw
                               then pure ()
                               else do
                                 ci <- readPrimArray idxArr k
-                                (minW, minH, maxW, maxH) <- getMinMax na ci
-                                (wTag, wVal) <- getWidthSizing na ci
-                                (hTag, hVal) <- getHeightSizing na ci
+                                wAx <- getWidthSizing na ci
+                                hAx <- getHeightSizing na ci
                                 (_, _, iw, ih) <- getRect na ci
-                                let childW = clamp minW maxW (resolveSize wTag wVal iw colW minW maxW)
-                                    childH = clamp minH maxH (resolveSize hTag hVal ih rowH minH maxH)
+                                let childW = resolveSize wAx iw colW
+                                    childH = resolveSize hAx ih rowH
                                     itemX = cx + fromIntegral j * (colW + gap)
                                 ax <- getAlignX na ci
                                 ay <- getAlignY na ci
@@ -1590,10 +1497,11 @@ columnGapSumScratch na True n gap = do
 distributeScratch :: NodeArena -> Int -> Float -> Float -> Bool -> IO ()
 distributeScratch na n avail gapSum horizontal = do
   FlexScratch {fsIdx = idxArr, fsW = wArr, fsH = hArr, fsOut = out, fsGrow = gfArr} <- readIORef (naScratch na)
+  a <- arenaArrays na
   copyMutablePrimArray out 0 (if horizontal then wArr else hArr) 0 n
   total <- foldUpTo n (\acc i -> (acc +) <$> readPrimArray out i) 0
   let slack = avail - (total + gapSum)
-      sizingAt i = readPrimArray idxArr i >>= \ci -> getAxisSizing na ci horizontal
+      sizingAt i = readPrimArray idxArr i >>= \ci -> readAxisSizing a ci horizontal
   if slack > 0.001
     then do
       -- Grow children share the free space by factor, but no child is
@@ -1606,7 +1514,7 @@ distributeScratch na n avail gapSum horizontal = do
       -- growing, and 'fsOut' keeps the exact content size until the shares
       -- are handed out.
       growTotal <- foldUpTo n (\acc i -> do
-        (tag, val) <- sizingAt i
+        AxisSizing tag val _ _ <- sizingAt i
         let gf = if tag == SizingGrow then val else 0
         writePrimArray gfArr i (if gf > 0 then gf else 0)
         pure (acc + gf)) 0
@@ -1616,14 +1524,12 @@ distributeScratch na n avail gapSum horizontal = do
           gf <- readPrimArray gfArr i
           when (gf > 0) $ writePrimArray out i (max 0 (free * gf / gfSum))
     else when (slack < -0.001) $ do
-      shrinkTotal <- foldUpTo n (\acc i -> (\(tag, val) -> acc + shrinkFactor tag val) <$> sizingAt i) 0
+      shrinkTotal <- foldUpTo n (\acc i -> (acc +) . shrinkFactor <$> sizingAt i) 0
       when (shrinkTotal > 0) $ forUpTo_ n $ \i -> do
-        ci <- readPrimArray idxArr i
-        (minW, minH, _, _) <- getMinMax na ci
-        (tag, val) <- getAxisSizing na ci horizontal
+        ax <- sizingAt i
         main <- readPrimArray out i
-        let delta = negate slack * shrinkFactor tag val / shrinkTotal
-        writePrimArray out i (max (if horizontal then minW else minH) (main - delta))
+        let delta = negate slack * shrinkFactor ax / shrinkTotal
+        writePrimArray out i (max (axMin ax) (main - delta))
 
 -- | Strict left fold over @0 .. n - 1@.
 {-# INLINE foldUpTo #-}
@@ -1639,15 +1545,9 @@ foldUpTo n f = go 0
 forUpTo_ :: Int -> (Int -> IO ()) -> IO ()
 forUpTo_ n f = foldUpTo n (\() i -> f i) ()
 
--- | Sizing along the main axis: width when @horizontal@, else height.
-{-# INLINE getAxisSizing #-}
-getAxisSizing :: NodeArena -> NodeIdx -> Bool -> IO (SizingTag, Float)
-getAxisSizing na idx horizontal =
-  if horizontal then getWidthSizing na idx else getHeightSizing na idx
-
 {-# INLINE shrinkFactor #-}
-shrinkFactor :: SizingTag -> Float -> Float
-shrinkFactor tag val =
+shrinkFactor :: AxisSizing -> Float
+shrinkFactor (AxisSizing tag val _ _) =
   case tag of
     SizingShrink -> val
     -- Grow also gives space back when the window is smaller than content.
@@ -1783,8 +1683,7 @@ childBaseline env@SolveEnv {seArena = na, seArrays = a, seFm = defaultFm, seReso
                 if rowChild
                   then pure False
                   else do
-                    (_, _, maxW, _) <- getMinMax na ci
-                    (wTag, _) <- getWidthSizing na ci
+                    AxisSizing wTag _ _ maxW <- getWidthSizing na ci
                     (_, _, w, _) <- getRect na ci
                     effMaxW <- if maxW < 1e8 then pure maxW else findAncestorMaxW na ci
                     let cap = textWrapCap effMaxW wTag w
@@ -1870,7 +1769,8 @@ placeWindows na ms winW winH lookupPos lookupSize = do
 -- caps at intrinsic size; floating windows use an explicit frame size.
 placeWindowNode :: NodeArena -> Measurers -> Float -> Float -> NodeIdx -> Float -> Float -> (Float -> (Float, Float)) -> IO ()
 placeWindowNode na ms winW winH idx w0 h0 originFor = do
-  (minW, minH, maxW, maxH) <- getMinMax na idx
+  AxisSizing _ _ minW maxW <- getWidthSizing na idx
+  AxisSizing _ _ minH maxH <- getHeightSizing na idx
   let w = clamp minW (min maxW winW) w0
       h = clamp minH (min maxH winH) h0
       (x0, y0) = originFor w

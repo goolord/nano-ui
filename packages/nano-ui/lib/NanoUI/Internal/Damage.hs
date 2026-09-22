@@ -61,7 +61,8 @@ import NanoUI.Internal.Input
 import NanoUI.Internal.Frame.Hit (findNodeByKey)
 import NanoUI.Internal.Store (Slot (..), eqByPtr, mirrorStoresChanged, ptrEq, slotChangedKeys, slotKey)
 import NanoUI.Internal.Layout.Arena
-  ( NodeArena
+  ( AxisSizing (..)
+  , NodeArena
   , NodeIdx
   , NodeType (..)
   , SizingTag (..)
@@ -123,8 +124,8 @@ backdropRectFromNode ctx idx = walkAncestors (ctxNodeArena ctx) idx step
         then getNonzeroRect na i
         else case nt of
           NodeScrollContainer -> do
-            (wTag, _) <- getWidthSizing na i
-            (hTag, _) <- getHeightSizing na i
+            wTag <- axTag <$> getWidthSizing na i
+            hTag <- axTag <$> getHeightSizing na i
             si <- getStyleIdx na i
             if (wTag == SizingGrow && hTag == SizingGrow) || scrollBare (decodeScrollConfig si)
               then pure Nothing

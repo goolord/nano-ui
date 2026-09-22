@@ -91,7 +91,8 @@ import NanoUI.Internal.Frame.Scroll.Geometry
 import NanoUI.Internal.Frame.Spans (textNodeSpanEntry)
 import NanoUI.Internal.Id (hashWidgetId)
 import NanoUI.Internal.Layout.Arena
-  ( DirTag (..)
+  ( AxisSizing (..)
+  , DirTag (..)
   , NodeIdx
   , NodeType (..)
   , SizingTag (..)
@@ -330,8 +331,8 @@ paintScrollContainerNode env idx rect@(Rect x y w h) = do
   -- repaints the whole viewport.
   unless (scrollBare (snConfig sn)) $ do
     inFloating <- isJust <$> floatingAncestor ctx idx
-    (wTag, _) <- getWidthSizing arena idx
-    (hTag, _) <- getHeightSizing arena idx
+    wTag <- axTag <$> getWidthSizing arena idx
+    hTag <- axTag <$> getHeightSizing arena idx
     if wTag == SizingGrow && hTag == SizingGrow
       then pushRect da rect (if inFloating then styleBg (themeFloatingWindow tm) else themeWindow tm)
       else do
