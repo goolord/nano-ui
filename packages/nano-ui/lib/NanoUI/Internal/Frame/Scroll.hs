@@ -26,7 +26,6 @@ import NanoUI.Internal.Context
   , cacheScrollMetrics
   , clampScrollOffset
   , getsInteraction
-  , getScrollOffset
   , getScrollOffset2D
   , getScrollOffsetIn
   , modifyInteraction
@@ -72,6 +71,7 @@ import NanoUI.Internal.Input
   )
 import NanoUI.Internal.Layout.Arena
   ( DirTag (..)
+  , NodeArena
   , NodeIdx
   , NodeType (..)
   , arenaCount
@@ -136,15 +136,12 @@ transformSubtree ctx idx scrollX scrollY parentClip = do
       cur@(V2 cx cy) <- getScrollOffsetIn ctx wid axes
       let
         V2 hx hy = clampScrollOffset range cur
-        held = case axes of
+        held@(V2 dx dy) = case axes of
           ScrollAxisY -> V2 cx hy
           ScrollAxisX -> V2 hx cy
           ScrollAxisXY -> V2 hx hy
-      when (held /= cur) $ setScrollOffsetIn ctx wid axes held
-      let
-        V2 dx dy = held
-      let
         clip = within viewport
+      when (held /= cur) $ setScrollOffsetIn ctx wid axes held
       setClipRect na idx clip
       descend (sx - dx) (sy - dy) clip
     else do
@@ -167,21 +164,14 @@ scrollNodeGeometry ctx idx (Rect x y w h) = do
     readScrollNode (ctxNodeArena ctx) idx
   let
     viewport = scrollNodeViewport sn x y w h
+    rangeW content = scrollAxisRange content (rectW viewport) (padR pad)
     rangeH = scrollAxisRange contentMain (rectH viewport) (padB pad)
   pure $
     if sn2D sn
-      then
-        ( ScrollAxisXY
-        , viewport
-        , V2 (scrollAxisRange (snContentW sn) (rectW viewport) (padR pad)) rangeH
-        )
+      then (ScrollAxisXY, viewport, V2 (rangeW (snContentW sn)) rangeH)
       else case snDir sn of
         DirColumn -> (ScrollAxisY, viewport, V2 0 rangeH)
-        DirRow ->
-          ( ScrollAxisX
-          , viewport
-          , V2 (scrollAxisRange contentMain (rectW viewport) (padR pad)) 0
-          )
+        DirRow -> (ScrollAxisX, viewport, V2 (rangeW contentMain) 0)
 
 updateScrollWheel :: Context -> Input -> IO ()
 updateScrollWheel ctx inp = do
@@ -196,53 +186,37 @@ updateScrollWheel ctx inp = do
       applyScrollWheelDelta ctx wid scroll
       applyCrossAxisScroll ctx idx scroll
 
--- Nested 2D: apply the unused axis to a paired scroller in the same panel.
+-- Nested 2D: apply the unused axis to a paired scroller that runs the other
+-- way: the nearest one above in the same panel, else the first one inside.
 -- Do not walk past panel/window/modal into the page scroller.
 applyCrossAxisScroll :: Context -> NodeIdx -> V2 -> IO ()
 applyCrossAxisScroll ctx idx scroll = do
-  dir <- getDirection (ctxNodeArena ctx) idx
-  target <-
-    runMaybeT $
-      MaybeT (walkOppositeAncestor ctx idx dir)
-        <|> MaybeT (findOppositeScrollDescendant ctx idx dir)
+  dir <- getDirection na idx
+  let
+    crossWid i = do
+      nt <- getNodeType na i
+      hit <- pure (isScrollNode nt) <&&> ((/= dir) <$> getDirection na i)
+      if hit then Just <$> getWidgetId na i else pure Nothing
+    above i = do
+      nt <- getNodeType na i
+      if nt == NodePanel || nt == NodeWindow || nt == NodeModal
+        then pure (Just Nothing)
+        else fmap Just <$> crossWid i
+    inside i = firstChildJust na i $ \ci -> crossWid ci >>= maybe (inside ci) (pure . Just)
+  parent <- getParent na idx
+  up <- join <$> walkAncestors na parent above
+  target <- maybe (inside idx) (pure . Just) up
   forM_ target $ \wid -> applyScrollWheelDelta ctx wid scroll
-
-scrollCrossAxisStop :: NodeType -> Bool
-scrollCrossAxisStop nt =
-  nt == NodePanel || nt == NodeWindow || nt == NodeModal
-
-walkOppositeAncestor :: Context -> NodeIdx -> DirTag -> IO (Maybe WidgetId)
-walkOppositeAncestor ctx idx childDir = do
-  p <- getParent na idx
-  join <$> walkAncestors na p step
  where
   na = ctxNodeArena ctx
-  step i = do
-    nt <- getNodeType na i
-    if scrollCrossAxisStop nt
-      then pure (Just Nothing)
-      else
-        if not (isScrollNode nt)
-          then pure Nothing
-          else do
-            pdir <- getDirection na i
-            if pdir == childDir
-              then pure Nothing
-              else Just . Just <$> getWidgetId na i
 
-findOppositeScrollDescendant ::
-  Context -> NodeIdx -> DirTag -> IO (Maybe WidgetId)
-findOppositeScrollDescendant ctx idx childDir = goChildren idx
+-- | What @f@ finds for the first of @parent@'s children it finds anything for.
+firstChildJust :: NodeArena -> NodeIdx -> (NodeIdx -> IO (Maybe a)) -> IO (Maybe a)
+firstChildJust na parent f = getFirstChild na parent >>= go
  where
-  want = if childDir == DirColumn then DirRow else DirColumn
-  goChildren parent = getFirstChild (ctxNodeArena ctx) parent >>= go
   go ci
     | ci < 0 = pure Nothing
-    | otherwise = do
-        nt <- getNodeType (ctxNodeArena ctx) ci
-        hit <- pure (isScrollNode nt) <&&> ((== want) <$> getDirection (ctxNodeArena ctx) ci)
-        found <- if hit then Just <$> getWidgetId (ctxNodeArena ctx) ci else goChildren ci
-        maybe (getNextSibling (ctxNodeArena ctx) ci >>= go) (pure . Just) found
+    | otherwise = f ci >>= maybe (getNextSibling na ci >>= go) (pure . Just)
 
 -- | Node owning scroller @wid@: its text area, or the first scroll container
 -- with that id that the predicate does not rule out (table slave panes share
@@ -312,24 +286,16 @@ findScrollNodeUnderMouse ctx mouse = do
       let
         start = fromMaybe 0 top
       rect <- getNodeRect (ctxNodeArena ctx) start
-      queryScrollTarget ctx start mouse rect
+      queryScrollTarget ctx mouse rect start
 
-queryScrollTarget :: Context -> NodeIdx -> V2 -> Rect -> IO (Maybe NodeIdx)
-queryScrollTarget ctx idx mouse parentClip = runMaybeT $ do
+-- | The scroller under @mouse@ in the subtree at @idx@: its first child's,
+-- else @idx@ itself.
+queryScrollTarget :: Context -> V2 -> Rect -> NodeIdx -> IO (Maybe NodeIdx)
+queryScrollTarget ctx mouse parentClip idx = runMaybeT $ do
   nt <- liftIO $ getNodeType (ctxNodeArena ctx) idx
   clip <- MaybeT $ scrollHitClip ctx idx nt parentClip
-  MaybeT (walkScrollSiblings ctx idx mouse clip)
+  MaybeT (firstChildJust (ctxNodeArena ctx) idx (queryScrollTarget ctx mouse clip))
     <|> MaybeT (scrollHitSelf ctx idx nt mouse clip)
-
-walkScrollSiblings :: Context -> NodeIdx -> V2 -> Rect -> IO (Maybe NodeIdx)
-walkScrollSiblings ctx parent mouse clip = getFirstChild (ctxNodeArena ctx) parent >>= go
- where
-  go ci
-    | ci < 0 = pure Nothing
-    | otherwise =
-        runMaybeT $
-          MaybeT (queryScrollTarget ctx ci mouse clip)
-            <|> MaybeT (getNextSibling (ctxNodeArena ctx) ci >>= go)
 
 scrollHitSelf ::
   Context -> NodeIdx -> NodeType -> V2 -> Rect -> IO (Maybe NodeIdx)
@@ -374,47 +340,31 @@ scrollBarsFor ::
   Context -> NodeIdx -> WidgetId -> IO [(DirTag, ScrollBarLayout, Float -> IO ())]
 scrollBarsFor ctx idx wid = do
   nt <- getNodeType na idx
+  -- A 1D scroller's offset is its stored y, whichever way it runs.
+  V2 curX curY <- getScrollOffset2D ctx wid
+  let
+    setMain new = when (new /= curY) (setScrollOffset ctx wid new)
+    setX new = when (new /= curX) (setScrollOffset2D ctx wid (V2 new curY))
+    bar dir mLayout set = [(dir, layout, set) | Just layout <- [mLayout]]
+    bars2D mV mH = bar DirColumn mV setMain ++ bar DirRow mH setX
   if nt == NodeTextArea
     then do
       (fm, field, contentW, contentH) <- textAreaContentGeom ctx idx
-      cur@(V2 curX curY) <- getScrollOffset2D ctx wid
       let
         layouts = textAreaScrollBarLayouts fm field contentW contentH curX curY
-      pure (axes2D cur (tasbVertical layouts) (tasbHorizontal layouts))
+      pure (bars2D (tasbVertical layouts) (tasbHorizontal layouts))
     else do
       (x, y, w, h) <- getRect na idx
-      ScrollNode slot cfg native2D dir pad contentMain contentW <-
-        readScrollNode na idx
-      if native2D
-        then do
-          cur@(V2 offX offY) <- getScrollOffset2D ctx wid
-          let
-            (mV, mH) = scrollBarLayouts2D slot cfg x y w h pad contentW contentMain offX offY
-          pure (axes2D cur mV mH)
-        else
-          if scrollChromeSuppressed cfg dir
-            then pure []
-            else do
-              off <- getScrollOffset ctx wid
-              pure
-                [ (dir, layout, \new -> when (new /= off) (setScrollOffset ctx wid new))
-                | Just layout <- [scrollBarLayout slot dir x y w h pad contentMain off]
-                ]
+      ScrollNode slot cfg native2D dir pad contentMain contentW <- readScrollNode na idx
+      pure $
+        if native2D
+          then uncurry bars2D (scrollBarLayouts2D slot cfg x y w h pad contentW contentMain curX curY)
+          else
+            if scrollChromeSuppressed cfg dir
+              then []
+              else bar dir (scrollBarLayout slot dir x y w h pad contentMain curY) setMain
  where
   na = ctxNodeArena ctx
-  axes2D (V2 curX curY) mV mH =
-    [ ( DirColumn
-      , layout
-      , \new -> when (new /= curY) (setScrollOffset2D ctx wid (V2 curX new))
-      )
-    | Just layout <- [mV]
-    ]
-      ++ [ ( DirRow
-           , layout
-           , \new -> when (new /= curX) (setScrollOffset2D ctx wid (V2 new curY))
-           )
-         | Just layout <- [mH]
-         ]
 
 -- | Bars of scroller @wid@ a thumb drag can grab. A hidden bar has no lane
 -- to grab.
@@ -449,23 +399,13 @@ tryStartScrollDrag ctx inp = do
   forM_ mIdx $ \hitIdx -> do
     wid <- getWidgetId (ctxNodeArena ctx) hitIdx
     bars <- grabbableBars ctx wid
-    forM_
-      ( find
-          (\(_, l, _) -> rectContains (sbThumb l) mouse || rectContains (sbTrack l) mouse)
-          bars
-      ) $
-      \(dir, layout, setOffset) -> do
-        let
-          thumb = sbThumb layout
-          along (V2 mx my) = if dir == DirColumn then my else mx
-          Rect tx ty tw th = thumb
-        if rectContains thumb mouse
-          then
-            modifyInteraction
-              ctx
-              (\s -> s {isScrollDrag = Just (wid, dir, along mouse - along (V2 tx ty))})
-          else do
-            let
-              half = along (V2 tw th) / 2
-            setOffset (scrollOffsetFromThumb dir layout half mouse)
-            modifyInteraction ctx (\s -> s {isScrollDrag = Just (wid, dir, half)})
+    let
+      onBar (_, l, _) = rectContains (sbThumb l) mouse || rectContains (sbTrack l) mouse
+    forM_ (find onBar bars) $ \(dir, layout, setOffset) -> do
+      let
+        Rect tx ty tw th = sbThumb layout
+        along (V2 mx my) = if dir == DirColumn then my else mx
+        onThumb = rectContains (sbThumb layout) mouse
+        grab = if onThumb then along mouse - along (V2 tx ty) else along (V2 tw th) / 2
+      unless onThumb $ setOffset (scrollOffsetFromThumb dir layout grab mouse)
+      modifyInteraction ctx (\s -> s {isScrollDrag = Just (wid, dir, grab)})
