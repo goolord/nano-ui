@@ -300,10 +300,6 @@ textNodeFontStyle = decodeStyleEnum 12 0x03 FontStyleNormal
 textNodeTextDecoration :: Int -> TextDecoration
 textNodeTextDecoration = decodeStyleEnum 14 0x03 DecorationNone
 
-{-# INLINE textNodeStripe #-}
-textNodeStripe :: Int -> Int
-textNodeStripe si = (si `shiftR` 4) .&. 0x0F
-
 -- | Row fill for stripe code 1 (even rows) or 2 (odd rows); 0 is unstriped.
 {-# INLINE stripeColor #-}
 stripeColor :: Theme -> Int -> Maybe Color
@@ -312,8 +308,9 @@ stripeColor theme s = case s of
   2 -> Just (lerpColor (styleBg (themePanel theme)) (styleBg (themeButton theme)) 0.55)
   _ -> Nothing
 
+-- | The row fill a text node's style index asks for.
 tableStripeColor :: Theme -> Int -> Maybe Color
-tableStripeColor theme si = stripeColor theme (textNodeStripe si)
+tableStripeColor theme si = stripeColor theme ((si `shiftR` 4) .&. 0x0F)
 
 -- | Slot reserved in every header so the sort mark never changes column
 -- width: trailing, or leading ('tableSortReserveLead') in a right-aligned
@@ -330,10 +327,8 @@ tableHeaderLabel alignEnd hdr
   | alignEnd = tableSortReserveLead <> hdr
   | otherwise = hdr <> tableSortReserve
 
--- | Sort direction encoded for a table-header style. Lives in bits 16-17: the
--- low nibbles are the font fields, and a mark value of 1 or 2 in bit 0-1 used
--- to flip the header's font variant (heading / muted), which blanked the
--- arrow glyph.
+-- | Sort direction encoded for a table-header style, in bits 16-17: clear of
+-- the font fields in the low bits, which it would otherwise restyle.
 tableSortMarkOf :: Int -> Int
 tableSortMarkOf styleIdx = (styleIdx `shiftR` 16) .&. 0x03
 

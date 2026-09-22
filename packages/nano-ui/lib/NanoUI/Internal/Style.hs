@@ -526,15 +526,6 @@ data Theme = Theme
 -- Style and theme modifiers
 -- -----------------------------------------------------------------------------
 
--- $modifiers
--- Styles and themes change the way layouts do: through functions that
--- compose with @(.)@. A @Style -> Style@ edits one surface, and a
--- @Theme -> Theme@ edits the theme a part of the view is drawn with (see
--- @styled@ in "NanoUI"):
---
--- > styled (buttonStyle (cornerRadius 8) . accentColor teal) $ do ...
--- > styled primary (button "Save")
-
 -- | Set the resting background, retaining hover and pressed colours.
 background :: Color -> Style -> Style
 background c s = s {styleBg = c}
@@ -820,7 +811,7 @@ tomorrowNightMinDarkTheme =
               edgeCol
               (colorRGBA 29 30 33 255)
               (colorRGBA 19 20 22 255)
-        , themeSeparator = sepCol
+        , themeSeparator = colorRGBA 55 59 65 255      -- base.selection #373B41 (subtle divider)
         , themeMuted = colorRGBA 150 152 150 255       -- comment #969896
         , themeRed = colorRGBA 204 102 102 255         -- base.red #CC6666
         , themeOrange = colorRGBA 222 147 95 255       -- base.orange #DE935F
@@ -832,7 +823,6 @@ tomorrowNightMinDarkTheme =
         }
   where
   edgeCol    = colorRGBA 77 80 87 255              -- window #4D5057 (touch brighter crisp border)
-  sepCol = colorRGBA 55 59 65 255              -- base.selection #373B41 (subtle divider)
   accentCol    = colorRGBA 103 150 230 255           -- vscode.cornflower_blue #6796E6
 
 -- | Ported from "Tomorrow Min" in https://github.com/biaqat/tomorrow-min-theme-zed
@@ -904,7 +894,7 @@ tomorrowMidnightMinDarkTheme =
               edgeCol
               (colorRGBA 21 22 28 255)
               (colorRGBA 8 9 11 255)
-        , themeSeparator = sepCol
+        , themeSeparator = edgeCol
         , themeMuted = colorRGBA 128 132 150 255       -- #808496
         , themeRed = colorRGBA 213 78 83 255           -- bright.red #D54E53
         , themeOrange = colorRGBA 231 140 69 255       -- bright.orange #E78C45
@@ -917,7 +907,6 @@ tomorrowMidnightMinDarkTheme =
         }
   where
   edgeCol    = colorRGBA 48 52 70 255              -- #303446
-  sepCol = colorRGBA 48 52 70 255              -- #303446
   accentCol    = colorRGBA 140 182 226 255           -- #8CB6E2
 
 -- -----------------------------------------------------------------------------
