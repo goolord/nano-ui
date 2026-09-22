@@ -160,20 +160,8 @@ drawLineCaret da fm line col x y lineH fg = do
   pw <- caretXIO fm line col
   pushRect da (Rect (x + pw) (y + 1) 1 (max 4 (lineH - 2))) fg
 
-computeTextInputScroll :: FontMetrics -> Float -> Text -> Int -> Float -> Bool -> IO Float
-computeTextInputScroll fm viewportW value cursor oldScroll isFocused
-  | not isFocused = pure 0
-  | viewportW <= 0 = pure 0
-  | otherwise = do
-      caretRelX <- caretXIO fm value cursor
-      totalTextW <- lineWidthIO fm value
-      let maxScroll = max 0 (totalTextW + 1 - viewportW)
-          s0
-            | caretRelX < oldScroll = caretRelX
-            | caretRelX + 1 > oldScroll + viewportW = caretRelX + 1 - viewportW
-            | otherwise = oldScroll
-      pure (clamp 0 maxScroll s0)
-
+-- | The horizontal scroll that keeps field @idx@'s caret in view, zero while
+-- it is unfocused, stored as it changes.
 syncTextInputScroll :: Context -> NodeIdx -> Float -> Float -> Float -> Float -> IO Float
 syncTextInputScroll ctx idx x y w h = do
   si <- getStyleIdx (ctxNodeArena ctx) idx
@@ -183,20 +171,32 @@ syncTextInputScroll ctx idx x y w h = do
       wid <- getWidgetId (ctxNodeArena ctx) idx
       store <- getStore ctx
       let key = intKey wid
+          fm = ctxFontMetrics ctx
       value <- textInputValue ctx idx
       focus <- textInputFocused ctx idx
       (_, clip) <- nodeTextFieldGeom ctx idx x y w h
-      let cursor = findSlot fieldInt (T.length value) (slotKey SlotCursor key) store
+      let viewW = rectW clip
+          cursor = findSlot fieldInt (T.length value) (slotKey SlotCursor key) store
           oldScroll = findSlot fieldFloat 0 (slotKey SlotTextInputScroll key) store
-      newScroll <- computeTextInputScroll (ctxFontMetrics ctx) (rectW clip) value cursor oldScroll focus
+      newScroll <-
+        if not focus || viewW <= 0
+          then pure 0
+          else do
+            caretRelX <- caretXIO fm value cursor
+            totalTextW <- lineWidthIO fm value
+            let s0
+                  | caretRelX < oldScroll = caretRelX
+                  | caretRelX + 1 > oldScroll + viewW = caretRelX + 1 - viewW
+                  | otherwise = oldScroll
+            pure (clamp 0 (max 0 (totalTextW + 1 - viewW)) s0)
       when (newScroll /= oldScroll) $
         setStore ctx (insertSlot fieldFloat (slotKey SlotTextInputScroll key) newScroll store)
       pure newScroll
 
 -- | What a focused single-line field paints its selection and caret from: the
--- displayed value, cursor and anchor, the node font, the field box's top and
--- height, and the x its text starts at with the scroll applied.
-data FieldEdit = FieldEdit !Text !Int !Int !FontMetrics !Float !Float !Float
+-- displayed value, cursor and anchor, the node font, the top of its text row,
+-- and the x its text starts at with the scroll applied.
+data FieldEdit = FieldEdit !Text !Int !Int !FontMetrics !Float !Float
 
 -- | Editing state of field @idx@ at @x y w h@ scrolled by @scrollX@ (see
 -- 'syncTextInputScroll'), or Nothing while it is unfocused.
@@ -214,19 +214,17 @@ readFieldEdit ctx idx x y w h scrollX = do
       let key = intKey wid
           !cursor = findSlot fieldInt (T.length value) (slotKey SlotCursor key) store
           !anchor = findSlot fieldInt cursor (slotKey SlotAnchor key) store
-      pure $! Just (FieldEdit value cursor anchor fm boxY boxH (clipX - scrollX))
+      pure $! Just (FieldEdit value cursor anchor fm (centeredTextY fm boxY boxH (fmLineHeight fm)) (clipX - scrollX))
 
 drawTextInputSelection :: DrawArena -> Context -> NodeIdx -> FieldEdit -> IO ()
-drawTextInputSelection da ctx idx (FieldEdit value cursor anchor fm boxY boxH textX) =
+drawTextInputSelection da ctx idx (FieldEdit value cursor anchor fm rowY textX) =
   when (anchor /= cursor) $ do
     theme <- nodeTheme ctx idx
-    let lineH = fmLineHeight fm
-    drawLineSelection da fm value (min anchor cursor) (max anchor cursor) textX (centeredTextY fm boxY boxH lineH) lineH (themeSelection theme)
+    drawLineSelection da fm value (min anchor cursor) (max anchor cursor) textX rowY (fmLineHeight fm) (themeSelection theme)
 
 drawTextInputCaret :: DrawArena -> FieldEdit -> Color -> IO ()
-drawTextInputCaret da (FieldEdit value cursor _ fm boxY boxH textX) =
-  let lineH = fmLineHeight fm
-   in drawLineCaret da fm value cursor textX (centeredTextY fm boxY boxH lineH) lineH
+drawTextInputCaret da (FieldEdit value cursor _ fm rowY textX) =
+  drawLineCaret da fm value cursor textX rowY (fmLineHeight fm)
 
 data CharClass = WordChar | SpaceChar | OtherChar
   deriving (Eq)

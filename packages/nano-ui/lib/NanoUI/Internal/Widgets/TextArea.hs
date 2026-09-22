@@ -122,9 +122,6 @@ setTextAreaViewport :: (Double, Double) -> Double -> TextAreaState -> TextAreaSt
 setTextAreaViewport vp lh state =
   state {viewportSize = vp, lineHeight = lh}
 
-cursorOf :: TextAreaState -> TB.Cursor
-cursorOf state = TB.getCursor (buffer state)
-
 -- | Set anchor and cursor, in that order, and scroll vertically to reveal the caret.
 setTextAreaSelection :: TB.Cursor -> TB.Cursor -> TextAreaState -> TextAreaState
 setTextAreaSelection anchor cursor state =
@@ -304,7 +301,7 @@ textAreaCore f wid value = do
               | otherwise = current
             changed =
               textChanged
-                || cursorOf newState /= cursorOf oldState
+                || TB.getCursor newBuf /= TB.getCursor (buffer oldState)
                 || selectionAnchor newState /= selectionAnchor oldState
                 || scrollOffset newState /= scrollOffset oldState
                 || menuPulse
