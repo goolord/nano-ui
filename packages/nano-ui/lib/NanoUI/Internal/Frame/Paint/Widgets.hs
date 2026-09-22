@@ -53,7 +53,7 @@ import NanoUI.Internal.Frame.Chrome
   , textInputValue
   , widgetVisualStyle
   )
-import NanoUI.Internal.Frame.Node (resolveFontFor)
+import NanoUI.Internal.Frame.Node (nodeFontMetrics, resolveFontFor)
 import NanoUI.Internal.Frame.Spans (forWidgetTextPlacements_, plainFieldPen, selectableTextGeometry, textInputFg)
 import NanoUI.Internal.Frame.TextArea (drawTextAreaContentWith)
 import NanoUI.Internal.Frame.TextArea.Content (resolveTextAreaFont)
@@ -433,11 +433,8 @@ paintSelectableText :: PaintEnv -> Style -> NodeIdx -> Rect -> IO ()
 paintSelectableText env style idx rect@(Rect x y w h) = do
   let ctx = peContext env
       da = peDrawArena env
-      arena = peNodeArena env
-  si <- getStyleIdx arena idx
-  mFontColor <- getNodeFontColor arena idx
-  fontSize <- getNodeFontSize arena idx
-  (fm, _, _) <- resolveFontFor ctx NodeTextInput fontSize si
+  mFontColor <- getNodeFontColor (peNodeArena env) idx
+  fm <- nodeFontMetrics ctx idx
   value <- textInputValue ctx idx
   let (penX, ty, _) = selectableTextGeometry fm x y h
   mEdit <- readFieldEdit ctx idx x y w h 0
