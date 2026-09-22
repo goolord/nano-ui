@@ -20,7 +20,7 @@ module NanoUI.Internal.Frame.Select
 import Control.Monad (filterM, forM, forM_, unless, when)
 import Data.IORef (readIORef, writeIORef)
 import Data.List (sortOn)
-import Data.Maybe (catMaybes, fromMaybe, listToMaybe)
+import Data.Maybe (catMaybes, fromMaybe, listToMaybe, maybeToList)
 import qualified Data.Text as T
 import NanoUI.Internal.Context
   ( Context (..)
@@ -50,7 +50,7 @@ import NanoUI.Internal.Frame.Hit (widgetOverlayAllowed)
 import NanoUI.Internal.Frame.Scroll.Geometry (padTextClipRect)
 import NanoUI.Internal.Id (WidgetId (..))
 import NanoUI.Internal.Input (Input (..), Key (..), inputKeys, inputKeysElem, inputMousePos, inputMousePressed, inputPointerHeld)
-import NanoUI.Internal.Layout.Arena (NodeArena, NodeIdx, NodeType (NodeSelect, NodeTextInput), getNodeType, lookupNodeByKey, lookupNodeByWidgetId, getOptions, getRect, getWidgetId)
+import NanoUI.Internal.Layout.Arena (NodeIdx, NodeType (NodeSelect, NodeTextInput), getNodeType, lookupNodeByKey, lookupNodeByWidgetId, getOptions, getRect, getWidgetId)
 import NanoUI.Internal.Monad (whenM, (<&&>))
 import NanoUI.Internal.Store (Slot (..), fieldFloat, fieldInt, fieldText, findSlot, insertSlot, slotKey)
 import NanoUI.Internal.Style (Style (..), Theme (..), scrollBarThumbColor, scrollBarTrackColor, themeAccent, themeInput)
@@ -226,10 +226,9 @@ finalizeSelectKeyboard ctx inp = do
     store <- getStore ctx
     -- Arrows step the focused enabled select, open or not. Otherwise the keys
     -- go to the open select.
-    let enabledSelect _ idx =
-          ((== NodeSelect) <$> getNodeType na idx) <&&> (not <$> isDisabled ctx focus)
+    let enabledSelect idx = ((== NodeSelect) <$> getNodeType na idx) <&&> (not <$> isDisabled ctx focus)
     focused <-
-      if wantStep then keepNode ctx enabledSelect =<< lookupNodeByWidgetId na focus else pure Nothing
+      if wantStep then keepNode enabledSelect =<< lookupNodeByWidgetId na focus else pure Nothing
     target <- case focused of
       Just idx -> pure (Just (idx, isSelectOpen store (intKey focus)))
       Nothing -> fmap (,True) <$> openSelectNode ctx store
@@ -256,19 +255,22 @@ openSelectNode :: Context -> WidgetStore -> IO (Maybe NodeIdx)
 openSelectNode ctx store
   | not (anySelectOpen store) = pure Nothing
   | otherwise =
-      keepNode ctx (\na idx -> (== NodeSelect) <$> getNodeType na idx)
-        =<< lookupNodeByKey (ctxNodeArena ctx) (storeOpenSelect store)
+      keepNode (fmap (== NodeSelect) . getNodeType na) =<< lookupNodeByKey na (storeOpenSelect store)
+  where
+    na = ctxNodeArena ctx
 
 -- | The focused node when it is a combo (a text input carrying options),
 -- which owns an open dropdown for as long as it holds focus.
 focusedComboNode :: Context -> IO (Maybe NodeIdx)
 focusedComboNode ctx =
-  keepNode ctx (\na idx -> ((== NodeTextInput) <$> getNodeType na idx) <&&> (not . null <$> getOptions na idx))
-    =<< lookupNodeByWidgetId (ctxNodeArena ctx) =<< readIORef (ctxFocusId ctx)
+  keepNode (\idx -> ((== NodeTextInput) <$> getNodeType na idx) <&&> (not . null <$> getOptions na idx))
+    =<< lookupNodeByWidgetId na =<< readIORef (ctxFocusId ctx)
+  where
+    na = ctxNodeArena ctx
 
-keepNode :: Context -> (NodeArena -> NodeIdx -> IO Bool) -> Maybe NodeIdx -> IO (Maybe NodeIdx)
-keepNode _ _ Nothing = pure Nothing
-keepNode ctx p (Just idx) = (\ok -> if ok then Just idx else Nothing) <$> p (ctxNodeArena ctx) idx
+-- | The node, when it satisfies @p@.
+keepNode :: (NodeIdx -> IO Bool) -> Maybe NodeIdx -> IO (Maybe NodeIdx)
+keepNode p = fmap listToMaybe . filterM p . maybeToList
 
 finalizeSelectPick :: Context -> Input -> IO ()
 finalizeSelectPick ctx inp =
@@ -387,47 +389,43 @@ comboDropPickIndex (Rect _ dy _ _) itemH nOpts mouseY =
         then Nothing
         else Just (clamp 0 (nOpts - 1) (floor (rel / max itemH 1)))
 
+-- | Paint each open dropdown (select or combo). The combo list clips to its
+-- inner area (so x-shifted text and row fills stop at the scrollbar lanes)
+-- and gets vertical / horizontal scrollbars when the filtered rows or the
+-- widest row overflow the window.
 drawSelectOverlays :: Context -> Input -> IO ()
 drawSelectOverlays ctx inp = do
   dropdowns <- allowedDropdowns ctx
   forM_ dropdowns $ \dd -> do
     theme <- widgetTheme ctx (ddWidget dd)
-    drawDropdownMenu ctx inp theme dd
-
--- | Paint one open dropdown (select or combo). The combo list clips to its
--- inner area (so x-shifted text and row fills stop at the scrollbar lanes)
--- and gets vertical / horizontal scrollbars when the filtered rows or the
--- widest row overflow the window.
-drawDropdownMenu :: Context -> Input -> Theme -> Dropdown -> IO ()
-drawDropdownMenu ctx inp theme dd = do
-  let da = ctxDrawArena ctx
-      fm = ctxFontMetrics ctx
-      style = overlayMenuStyle theme
-      paintRows =
-        forM_ (dropdownRows fm (inputMousePos inp) dd) $ \row -> do
-          let picked = drIndex row == ddPicked dd
-              Rect _ ry _ rh = drRect row
-          if drHovered row
-            then do
-              pushRect da (drRect row) (styleHoverBg style)
-              paintMenuAccent da theme (drRect row)
-            else when picked $ pushRect da (drRect row) (styleActiveBg style)
-          unless (T.null (drOption row)) $ do
-            (_, th) <- ctxMeasureText ctx (drOption row)
-            pushText da fm (drTextX row) (centeredTextY fm ry rh th) (drOption row) $
-              if picked then themeAccent theme else styleFg style
-  paintMenuPanel da theme style (ddRect dd)
-  if ddCombo dd
-    then do
-      let (inner, vSb, hSb, _) = ddComboGeom dd
-          base = themeInput theme
-          drawBar (track, thumb) = do
-            pushRect da track (scrollBarTrackColor base theme)
-            pushRoundedRect da thumb 3 (scrollBarThumbColor base theme)
-      withClip da inner paintRows
-      mapM_ drawBar vSb
-      mapM_ drawBar hSb
-    else paintRows
+    let da = ctxDrawArena ctx
+        fm = ctxFontMetrics ctx
+        style = overlayMenuStyle theme
+        paintRows =
+          forM_ (dropdownRows fm (inputMousePos inp) dd) $ \row -> do
+            let picked = drIndex row == ddPicked dd
+                Rect _ ry _ rh = drRect row
+            if drHovered row
+              then do
+                pushRect da (drRect row) (styleHoverBg style)
+                paintMenuAccent da theme (drRect row)
+              else when picked $ pushRect da (drRect row) (styleActiveBg style)
+            unless (T.null (drOption row)) $ do
+              (_, th) <- ctxMeasureText ctx (drOption row)
+              pushText da fm (drTextX row) (centeredTextY fm ry rh th) (drOption row) $
+                if picked then themeAccent theme else styleFg style
+    paintMenuPanel da theme style (ddRect dd)
+    if ddCombo dd
+      then do
+        let (inner, vSb, hSb, _) = ddComboGeom dd
+            base = themeInput theme
+            drawBar (track, thumb) = do
+              pushRect da track (scrollBarTrackColor base theme)
+              pushRoundedRect da thumb 3 (scrollBarThumbColor base theme)
+        withClip da inner paintRows
+        mapM_ drawBar vSb
+        mapM_ drawBar hSb
+      else paintRows
 
 collectSelectDropdownSpans :: Context -> Input -> IO [(Rect, T.Text, Color, Color, Rect)]
 collectSelectDropdownSpans ctx inp = do
