@@ -83,6 +83,7 @@ import NanoUI.Testing
   , wrapMeasureCache
   )
 import SDL3.Sys.Bindgen.Render (SDL_Renderer, SDL_Texture)
+import SDL3.Sys.Surface (destroySurface)
 import qualified Data.IntMap.Strict as IM
 import qualified Data.Text.Foreign as TF
 
@@ -271,7 +272,7 @@ placeGlyphImage ga font gi = do
       -- The page, and the x, y, width and height in pixels on it.
       let at = advancePtr out
       placed <- textAtlasInsertSurface (gaAtlas ga) surf pagePtr out (at 1) (at 2) (at 3)
-      freeSurface surf
+      destroySurface (castPtr surf)
       if placed == 0
         then Nothing <$ writeIORef (gaFull ga) True
         else do
@@ -802,9 +803,6 @@ foreign import ccall unsafe "nano_ui_text_atlas_insert_surface"
     Ptr CFloat ->
     Ptr CFloat ->
     IO CBool
-
-foreign import ccall unsafe "SDL_DestroySurface"
-  freeSurface :: Ptr () -> IO ()
 
 foreign import capi unsafe "SDL3_ttf/SDL_ttf.h TTF_GetGlyphMetrics"
   ttfGlyphMetrics ::
