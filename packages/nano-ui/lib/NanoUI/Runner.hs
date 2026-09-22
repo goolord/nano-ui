@@ -45,7 +45,7 @@ import NanoUI.Internal.Debug
   , noteDebugLoop
   , noteDebugSkip
   )
-import NanoUI.Internal.Frame.Redraw (needsRedraw)
+import NanoUI.Internal.Frame.Input (needsRedraw)
 import NanoUI.Internal.Input
   ( Input (..)
   , clearEphemeral

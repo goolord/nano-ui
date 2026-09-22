@@ -42,8 +42,7 @@ import NanoUI.Internal.Frame.Hit
   , widgetIdInSubtree
   , withWidgetNode
   )
-import NanoUI.Internal.Frame.Input (PressTargets (..), targetsAt)
-import NanoUI.Internal.Frame.Redraw (probeHotId)
+import NanoUI.Internal.Frame.Input (PressTargets (..), probeHotId, targetsAt)
 import NanoUI.Internal.Frame.Scroll.Geometry (scrollChromeLane)
 import NanoUI.Internal.Id (WidgetId (..))
 import NanoUI.Internal.Input (Input (..), UiCursorKind (..), inputMouseDown, inputMousePos, inputMousePressed)

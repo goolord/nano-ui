@@ -133,7 +133,6 @@ library
         NanoUI.Internal.Frame.Chrome
         NanoUI.Internal.Frame.Paint
         NanoUI.Internal.Frame.Paint.Widgets
-        NanoUI.Internal.Frame.Redraw
         NanoUI.Internal.Frame.Scroll
         NanoUI.Internal.Frame.Scroll.Geometry
         NanoUI.Internal.Frame.Select

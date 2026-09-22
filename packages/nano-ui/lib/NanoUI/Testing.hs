@@ -228,7 +228,7 @@ import NanoUI.Internal.Widgets.ColorPicker
   )
 import NanoUI.Internal.Frame (runFrame, runFrameEff, runFrameReduce, runFrameReduceEff)
 import NanoUI.Internal.Frame.Cursor (UiCursorKind (..), cursorKindIs, pointerCursorWanted, uiCursorKind)
-import NanoUI.Internal.Frame.Redraw
+import NanoUI.Internal.Frame.Input
   ( debugPanelOpen
   , floatingPanelActive
   , needsRedraw

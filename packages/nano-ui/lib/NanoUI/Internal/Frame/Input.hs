@@ -3,7 +3,9 @@
 -- widgets, turning a release into a click, moving keyboard focus, and copying
 -- selection state from the store into the nodes that paint it. All but
 -- 'armPointerPress' run after layout, so their hit tests use this frame's
--- solved rects, where the view had only the previous frame's.
+-- solved rects, where the view had only the previous frame's. Also the checks
+-- the backend runs between frames: whether input needs a frame, and the
+-- gestures and panels in progress.
 module NanoUI.Internal.Frame.Input
   ( finalizeTabFocus
   , refreshHover
@@ -18,24 +20,38 @@ module NanoUI.Internal.Frame.Input
   , targetsAt
   , constrainFocusToModal
   , syncWidgetLabels
+  , needsRedraw
+  , pointerDragActive
+  , textFieldActive
+  , floatingPanelActive
+  , debugPanelOpen
+  , probeHotId
   ) where
 
 import Control.Applicative ((<|>))
 import Control.Monad (filterM, forM_, unless, when)
-import Data.IORef (newIORef, readIORef, writeIORef)
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Maybe (fromMaybe, isJust, isNothing, listToMaybe, maybeToList)
 import NanoUI.Internal.Context
   ( Context (..)
+  , CustomDrawingEntry (..)
+  , anyAnimating
+  , anySelectOpen
   , damageWidget
   , getFocusables
   , getStore
+  , getsInteraction
   , intBool
   , intKey
+  , isDirty
   , isDisabled
+  , lookupCustomDrawing
   , markDirty
   , markDirtyCovered
   , setAnimationValue
+  , modalActive
   , modifyInteraction
+  , pointerHeldOffLayers
   , startAnimation
   , tabConsumed
   , InteractionState (..)
@@ -44,19 +60,22 @@ import NanoUI.Internal.Frame.Hit
   ( nodeClippedHit
   , nodeInteractionHit
   , nodeOwnsPointer
+  , nodePointVisible
   , overlayHitAllowed
   , overlayHitRoot
   , scrollHitRect
+  , topmostFloating
   , widgetIdInSubtree
   , withWidgetNode
   )
-import NanoUI.Internal.Frame.Redraw (probeHotId)
+import NanoUI.Internal.Frame.Select (focusedComboNode, overlayMenuOwnerAt)
 import NanoUI.Internal.Frame.TextArea (collapseTextFieldSelection)
 import NanoUI.Internal.Frame.TextInput (nodeTextFieldGeom)
 import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Internal.Input
   ( Input (..)
   , Key (..)
+  , inputInteracted
   , inputKeysElem
   , inputModifiers
   , inputMousePos
@@ -64,6 +83,7 @@ import NanoUI.Internal.Input
   , inputMouseReleased
   , inputMouseRightPressed
   , inputMouseRightReleased
+  , inputPointerHeld
   , modShift
   )
 import NanoUI.Internal.Layout.Arena
@@ -72,6 +92,7 @@ import NanoUI.Internal.Layout.Arena
   , NodeIdx
   , NodeType (..)
   , findClassNodeM
+  , floatingNodeCount
   , foldNodesM
   , forClassNodes_
   , getNodeRect
@@ -83,7 +104,7 @@ import NanoUI.Internal.Layout.Arena
   , setNodeValue
   , topModalNode
   )
-import NanoUI.Internal.Monad (unlessM, whenM, (<&&>))
+import NanoUI.Internal.Monad (ifM, unlessM, whenM, (<&&>))
 import NanoUI.Internal.Store (fieldInt, findSlot, lookupSlot)
 import NanoUI.Internal.Types (DamageBounds (..), Rect (..), V2 (..), defaultDamageSlop, rectContains)
 import NanoUI.Internal.WidgetText (hasFlag, buttonFlagClose, buttonFlagMenuBar, buttonFlagMenu, treeDecodeStyle)
@@ -403,3 +424,99 @@ syncWidgetLabels ctx = do
       -- style index.
       NodeTree -> syncGroup (\si -> let (nodeIdx, _, _, _) = treeDecodeStyle si in nodeIdx)
       _ -> pure ()
+
+-- | Whether state or input changes require a frame. Arguments are previous
+-- and current input. Tests hover only after pointer motion; timed wake
+-- deadlines are handled separately by the session runner.
+needsRedraw :: Context -> Input -> Input -> IO Bool
+needsRedraw ctx prev inp = do
+  dirty <- isDirty ctx
+  anim <- anyAnimating ctx
+  drag <- getsInteraction ctx (\s -> isJust (isScrollDrag s) || isJust (isWindowDrag s))
+  overlay <- overlayMenuOpen ctx
+  let moved = inputMousePos prev /= inputMousePos inp
+  if dirty
+    || anim
+    || inputInteracted prev inp
+    || inputWindowRedraw inp
+    || inputPointerHeld inp
+    || drag
+    || (overlay && moved)
+    then pure True
+    else
+      -- Idle: hover can only change when the pointer moved since the frame
+      -- whose hover state we still hold. Skip the O(n) hot probe otherwise.
+      pure moved <&&> do
+        -- A widget that tracks the pointer wants every move over it;
+        -- one that does not wants only the move that leaves it.
+        lastHot <- readIORef (ctxLastHotId ctx)
+        tracked <-
+          if hashWidgetId lastHot == 0
+            then pure False
+            else maybe False cdrTracked <$> lookupCustomDrawing ctx lastHot
+        if tracked
+          then pure True
+          else (/= lastHot) <$> probeHotId ctx (inputMousePos inp)
+
+-- | Whether a window, scrollbar, resize, slider, or colour-picker gesture
+-- is active. Text-selection drags are tracked separately.
+pointerDragActive :: Context -> IO Bool
+pointerDragActive ctx = do
+  gesture <- getsInteraction ctx $ \s ->
+    isJust (isWindowDrag s) || isJust (isScrollDrag s) || isJust (isWindowResize s)
+  sliderOrPicker <- focusedNodeIs ctx ctxActiveId (\nt -> nt == NodeSlider || nt == NodeColorPicker)
+  pure (gesture || sliderOrPicker)
+
+-- | Whether the node of the widget id held in @ref@ satisfies @p@.
+focusedNodeIs :: Context -> (Context -> IORef WidgetId) -> (NodeType -> Bool) -> IO Bool
+focusedNodeIs ctx ref p = do
+  wid <- readIORef (ref ctx)
+  withWidgetNode ctx wid False $ \idx -> p <$> getNodeType (ctxNodeArena ctx) idx
+
+-- Select dropdown or text-input menu is open. Overlay hover is not a widget id,
+-- so while one is up every pointer move needs a frame. A focused combo (a
+-- search-style field carrying options) also owns an open dropdown.
+overlayMenuOpen :: Context -> IO Bool
+overlayMenuOpen ctx = do
+  store <- getStore ctx
+  menu <- getsInteraction ctx isTextInputMenu
+  if anySelectOpen store || isJust menu
+    then pure True
+    else isJust <$> focusedComboNode ctx
+
+-- | Focused text field or its context menu. Typing reaches it as input events,
+-- which wake the loop by themselves, so focus alone keeps nothing running.
+textFieldActive :: Context -> IO Bool
+textFieldActive ctx =
+  ifM (isJust <$> getsInteraction ctx isTextInputMenu) (pure True) $
+    focusedNodeIs ctx ctxFocusId (\nt -> nt == NodeTextInput || nt == NodeTextArea)
+
+-- | Whether modal state or the current arena contains a floating panel,
+-- including windows and popups.
+floatingPanelActive :: Context -> IO Bool
+floatingPanelActive ctx =
+  (||) <$> modalActive ctx <*> ((> 0) <$> floatingNodeCount (ctxNodeArena ctx))
+
+-- | Whether the arena contains any floating window. The name does not imply
+-- that its contents are a debug readout.
+debugPanelOpen :: Context -> IO Bool
+debugPanelOpen ctx = isJust <$> topmostFloating ctx (== NodeWindow) (const True)
+
+probeHotId :: Context -> V2 -> IO WidgetId
+probeHotId ctx mouse = do
+  -- A button that went down on a menu or dropdown keeps everything cold.
+  offLayers <- pointerHeldOffLayers ctx
+  if offLayers
+    then pure (WidgetId 0)
+    else do
+      mOverlay <- overlayMenuOwnerAt ctx mouse
+      case mOverlay of
+        Just wid -> pure wid
+        -- Earlier siblings paint over later ones, so the first hit wins.
+        Nothing -> do
+          top <- overlayHitRoot ctx mouse
+          let hits idx =
+                (isWidgetNode <$> getNodeType na idx) <&&> nodePointVisible ctx idx mouse <&&> overlayHitAllowed ctx top idx
+          maybe (pure (WidgetId 0)) (getWidgetId na) =<< findClassNodeM na PointerNodes hits
+  where
+    na = ctxNodeArena ctx
