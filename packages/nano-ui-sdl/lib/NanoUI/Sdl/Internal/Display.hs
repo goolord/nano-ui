@@ -20,6 +20,7 @@ import Data.IORef (IORef, newIORef)
 import GHC.IORef (atomicSwapIORef)
 import Foreign.C.Types (CBool (..), CInt (..))
 import Foreign.Marshal.Alloc (alloca, callocBytes)
+import Foreign.Marshal.Utils (with)
 import Foreign.Ptr (FunPtr, Ptr, freeHaskellFunPtr)
 import Foreign.Storable (Storable, peek, poke, sizeOf)
 import Data.Word (Word32)
@@ -152,14 +153,11 @@ foreign import ccall safe "nano_ui_remove_resize_watch"
 zoomWindow :: Ptr SDL_Window -> Size -> Float -> IO ()
 zoomWindow win (Size w h) zoom = do
   display <- getDisplayForWindow win
-  usable <- alloca $ \rp -> do
-    ok <- getDisplayUsableBounds display rp
-    if ok then Just <$> peek rp else pure Nothing
-  let fit want avail = case avail of
-        Just a | a > 0 -> min want (fromIntegral a)
-        _ -> want
-      zw = fit (w * zoom) ((.w) <$> usable)
-      zh = fit (h * zoom) ((.h) <$> usable)
+  -- Left empty, and so not a limit, when SDL cannot say.
+  usable <- with (SDL_Rect 0 0 0 0) $ \rp -> getDisplayUsableBounds display rp >> peek rp
+  let fit want avail = if avail > 0 then min want (fromIntegral avail) else want
+      zw = fit (w * zoom) usable.w
+      zh = fit (h * zoom) usable.h
       centred = 0x2FFF0000 -- SDL_WINDOWPOS_CENTERED
   void $ setWindowSize win (round zw) (round zh)
   void $ setWindowPosition win centred centred

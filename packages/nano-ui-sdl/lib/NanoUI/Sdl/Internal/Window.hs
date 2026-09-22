@@ -217,10 +217,6 @@ windowFlags opts =
   where
     flag field bit = if field opts then bit else 0
 
--- Hidden only. Do not combine with resizable for bench windows on Windows.
-sdlWindowHiddenFlag :: SDL_WindowFlags
-sdlWindowHiddenFlag = SDL_WindowFlags 0x0000000000000008
-
 scaleEpsilon :: Float
 scaleEpsilon = 0.001
 
@@ -462,7 +458,9 @@ startSdlWindow bench opts ctx guessedDriver fontSource monoSource = do
     mkAcquire
       ( retryWithoutRenderDriver guessedDriver $
           TextForeign.withCString (sdlWindowTitle opts) $ \titlePtr -> do
-            let flags = if bench then sdlWindowHiddenFlag else windowFlags opts
+            -- A bench window is hidden only: on Windows it must not be
+            -- resizable as well.
+            let flags = if bench then SDL_WindowFlags 0x0000000000000008 else windowFlags opts
             (ok, win, ren) <-
               outPair (createWindowAndRendererSafe (PtrConst.unsafeFromPtr titlePtr) (round w) (round h) flags)
             unless ok $ fail "SDL_CreateWindowAndRenderer failed"
