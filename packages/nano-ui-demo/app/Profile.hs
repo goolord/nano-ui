@@ -254,6 +254,10 @@ main = do
       modifyIORef' splitCounter (+ 1)
       void (runFrame ctx' (dividerAt k) benchSplit)
     void (runFrame ctx' inp {inputMouseReleased = True} benchSplit)
+    -- More glyphs than one atlas page holds, all painted every frame: ten
+    -- sizes of 280 characters each.
+    measureBench "Text: 10 sizes of 280 glyphs, > 1 atlas page" $
+      void (sdlDrawFrame ctx' benchGlyphSizes sdlEnv inp True)
     -- One small image changing every frame in an atlas holding 12 large
     -- ones, as a live thumbnail does: getting it to the GPU is the cost.
     void $ runFrame ctx' inp $ forM_ [1 .. 12 :: Int] $ \i -> do
@@ -467,6 +471,16 @@ benchWrap :: Float -> Int -> NanoUI ()
 benchWrap width k = columnWith (tight . gap 4 . fixedW width) $ do
   label (T.pack ("frame " <> show k))
   forM_ wrapParagraphs label
+
+-- | Printable ASCII and the Latin-1, Greek and Cyrillic letters at ten sizes
+-- from 30 to 120, in two columns.
+benchGlyphSizes :: NanoUI ()
+benchGlyphSizes = rowWith (tight . fillW) $
+  forM_ [[30, 50 .. 110], [40, 60 .. 120]] $ \sizes ->
+    columnWith (tight . fillW) $
+      forM_ sizes $ \s -> labelWith (fontSize s) glyphs
+  where
+    glyphs = T.pack (['!' .. '~'] ++ ['\192' .. '\255'] ++ ['\x391' .. '\x3C9'] ++ ['\x410' .. '\x44F'])
 
 -- | An image given new pixels every frame.
 benchLiveImage :: ImageId -> BS.ByteString -> NanoUI ()
