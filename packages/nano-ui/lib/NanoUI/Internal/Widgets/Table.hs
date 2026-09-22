@@ -232,12 +232,12 @@ columnMetrics ctx hdrs encoded = do
     writeSmallArray numeric c isNum
   (,) <$> unsafeFreezePrimArray widths <*> unsafeFreezeSmallArray numeric
 
-nextSortCol :: Int -> SortCol -> Int -> SortCol
-nextSortCol n cur clicked =
-  let clamped = clampSortCol n cur
-   in if clicked == sortColIndex clamped
-        then SortCol clicked (case sortColDir clamped of SortAsc -> SortDesc; SortDesc -> SortAsc)
-        else SortCol clicked SortAsc
+-- | The sort after a click on column @clicked@: the same column flips its
+-- direction, another sorts ascending.
+nextSortCol :: SortCol -> Int -> SortCol
+nextSortCol cur clicked
+  | clicked == sortColIndex cur = SortCol clicked (if sortColDir cur == SortAsc then SortDesc else SortAsc)
+  | otherwise = SortCol clicked SortAsc
 
 -- | Local sort state and setter. Call in a stable hook position each frame.
 useTableSort :: Ui :> es => SortCol -> Eff es (SortCol, SortCol -> Eff es ())
@@ -453,7 +453,6 @@ tableConfigured cfg f key cols inputRows curSort =
               (bodyBlock frozenIdx)
             pure hs
         unfrozenPane = do
-          let idxs = unfrozenIdx
           mPrevV <- lastRect vWid
           let totalH = fromIntegral scrollN * rowMinH
               -- Prev-frame decision, one frame behind the body scroller's live 2D
@@ -465,20 +464,20 @@ tableConfigured cfg f key cols inputRows curSort =
               -- time, and the body's live v-gutter is only known after this
               -- frame's solve. Known, accepted one-frame misalignment.
               hasVertBar = maybe (totalH > 100) (\r -> totalH > rectH r) mPrevV
-          column' (paneLay fillInner idxs) $ do
+          column' (paneLay fillInner unfrozenIdx) $ do
             hs <-
               row' (fillIf fillInner flatLayout) $ do
                 hs' <-
                   scrollAreaIdConfigured
                     hWid
-                    ((if fillInner then fillW else minW (minSum idxs)) flatLayout {layoutDirection = Row})
+                    ((if fillInner then fillW else minW (minSum unfrozenIdx)) flatLayout {layoutDirection = Row})
                     -- The header scroller is chrome-less: it follows the body's
                     -- horizontal offset (linkScrollAxes below) and clips the header
                     -- row at the pane edge. The horizontal scrollbar itself belongs
                     -- to the body scroller so it spans the full table width at the
                     -- table's bottom edge instead of sitting under the header.
                     scrollHorizontalHidden
-                    (column' (gridRowLay idxs) (headerBlock idxs))
+                    (column' (gridRowLay unfrozenIdx) (headerBlock unfrozenIdx))
                 -- The body scroller has no padding, so its whole lane is gutter.
                 when hasVertBar $ void (spacer (Fixed (scrollBarGutter ScrollBarList 0)) Fit)
                 pure hs'
@@ -491,7 +490,7 @@ tableConfigured cfg f key cols inputRows curSort =
               vWid
               (fillIf fillInner (fillH flatLayout))
               (ScrollConfig ScrollAuto ScrollAuto True False)
-              (bodyBlock idxs)
+              (bodyBlock unfrozenIdx)
             pure hs
     column' outerLayout $ do
       showAllResp <-
@@ -563,7 +562,7 @@ tableConfigured cfg f key cols inputRows curSort =
             if dragged || isJust mReorder || vis' /= vis || isResize || (isJust edgeCol && (inputMouseDown inp || inputMouseReleased inp))
               then Nothing
               else listToMaybe [i | (i, r) <- headerPairs, respClicked r]
-          nextSort = maybe sort0 (nextSortCol n sort0) sortClick
+          nextSort = maybe sort0 (nextSortCol sort0) sortClick
           hasChanged = nextSort /= sort0 || nextOrder /= order0 || nextHidden /= hidden0 || widths1 /= widths0
           widgetResp =
             setChanged hasChanged $
