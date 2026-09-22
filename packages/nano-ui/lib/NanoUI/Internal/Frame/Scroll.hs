@@ -37,26 +37,19 @@ import NanoUI.Internal.Context
   , setScrollOffsetIn
   )
 import NanoUI.Internal.Frame.Hit (topmostModalAtMouse, topmostOverlayAtMouse)
-import NanoUI.Internal.Frame.Node (ScrollNode (..), readScrollNode, scrollNodeViewport)
+import NanoUI.Internal.Frame.Node (ScrollNode (..), readScrollNode, scrollNodeBars, scrollNodeViewport)
 import NanoUI.Internal.Frame.Scroll.Geometry
   ( ScrollBarLayout (..)
   , ScrollConfig
   , borderContentClip
   , scrollAxisRange
   , scrollBarLayout
-  , scrollBarLayouts2D
   , scrollChromeLane
   , scrollChromeSuppressed
   , scrollOffsetFromThumb
   , scrollWheelSuppressed
   )
-import NanoUI.Internal.Frame.TextArea
-  ( TextAreaBars (..)
-  , TextAreaScrollBarLayouts (..)
-  , textAreaBars
-  , textAreaContentGeom
-  , textAreaScrollBarLayouts
-  )
+import NanoUI.Internal.Frame.TextArea (TextAreaBars (..), textAreaBarLayouts, textAreaScrollGeom)
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Monad ((<&&>))
 import NanoUI.Internal.Input
@@ -243,14 +236,7 @@ applyScrollWheelDelta ctx wid (V2 wheelX wheelY) = do
     nt <- getNodeType na idx
     (axes, range) <-
       if nt == NodeTextArea
-        then do
-          (fm, field, contentW, contentH) <- textAreaContentGeom ctx idx
-          let
-            bars = textAreaBars fm field contentW contentH
-          pure
-            ( ScrollAxisXY
-            , V2 (max 0 (contentW - tabViewW bars)) (max 0 (contentH - tabViewH bars))
-            )
+        then (ScrollAxisXY,) . tabRange . snd <$> textAreaScrollGeom ctx idx
         else do
           rect <- getNodeRect na idx
           (axes, _, range) <- scrollNodeGeometry ctx idx rect
@@ -295,10 +281,8 @@ scrollHitSelf ::
   Context -> NodeIdx -> NodeType -> V2 -> Rect -> IO (Maybe NodeIdx)
 scrollHitSelf ctx idx nt mouse clip
   | nt == NodeTextArea = do
-      (fm, field, contentW, contentH) <- textAreaContentGeom ctx idx
-      let
-        bars = textAreaBars fm field contentW contentH
-        hit = rectHit clip mouse && rectHit field mouse && (tabVertical bars || tabHorizontal bars)
+      (field, bars) <- textAreaScrollGeom ctx idx
+      let hit = rectHit clip mouse && rectHit field mouse && (tabVertical bars || tabHorizontal bars)
       pure (if hit then Just idx else Nothing)
   | isScrollNode nt && rectHit clip mouse = pure (Just idx)
   | otherwise = pure Nothing
@@ -338,23 +322,13 @@ scrollBarsFor ctx idx wid = do
     setMain new = when (new /= curY) (setScrollOffset ctx wid new)
     setX new = when (new /= curX) (setScrollOffset2D ctx wid (V2 new curY))
     bar dir mLayout set = [(dir, layout, set) | Just layout <- [mLayout]]
-    bars2D mV mH = bar DirColumn mV setMain ++ bar DirRow mH setX
+    bars twoD (mV, mH) = bar DirColumn mV setMain ++ bar DirRow mH (if twoD then setX else setMain)
   if nt == NodeTextArea
-    then do
-      (fm, field, contentW, contentH) <- textAreaContentGeom ctx idx
-      let
-        layouts = textAreaScrollBarLayouts fm field contentW contentH curX curY
-      pure (bars2D (tasbVertical layouts) (tasbHorizontal layouts))
+    then (\(field, tab) -> bars True (textAreaBarLayouts field tab curX curY)) <$> textAreaScrollGeom ctx idx
     else do
       (x, y, w, h) <- getRect na idx
-      ScrollNode slot cfg native2D dir pad contentMain contentW <- readScrollNode na idx
-      pure $
-        if native2D
-          then uncurry bars2D (scrollBarLayouts2D slot cfg x y w h pad contentW contentMain curX curY)
-          else
-            if scrollChromeSuppressed cfg dir
-              then []
-              else bar dir (scrollBarLayout slot dir x y w h pad contentMain curY) setMain
+      sn <- readScrollNode na idx
+      pure (bars (sn2D sn) (scrollNodeBars sn x y w h curX curY))
  where
   na = ctxNodeArena ctx
 
