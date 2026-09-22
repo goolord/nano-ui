@@ -57,7 +57,7 @@ import NanoUI.Internal.Layout.Arena (NodeClass (PointerNodes), NodeType (NodeTex
 import NanoUI.Internal.Monad (ifM, whenM, (<&&>))
 import NanoUI.Internal.Style (Style (..), Theme, themeSeparator)
 import NanoUI.Internal.Types (Color (..), Rect (..), Size (..), V2 (..), clamp, lerpColor, rectContains)
-import NanoUI.Internal.Widgets.TextEditor (Editor (..), EditorMode (..), TextCommand (..), canRedo, canUndo)
+import NanoUI.Widgets.TextEditor (Editor (..), EditorMode (..), TextCommand (..), canRedo, canUndo)
 import NanoUI.Internal.Widgets.TextField (applyTextFieldCommand, textFieldEditor)
 import NanoUI.Widgets.TextBuffer qualified as TB
 

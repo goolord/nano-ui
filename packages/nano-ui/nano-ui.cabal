@@ -110,7 +110,6 @@ library
         NanoUI.Internal.Widgets.SplitPane
         NanoUI.Internal.Widgets.TextArea
         NanoUI.Internal.Widgets.TextDocument
-        NanoUI.Internal.Widgets.TextEditor
         NanoUI.Internal.Widgets.TextField
     other-modules:
         NanoUI.Internal.Animatable

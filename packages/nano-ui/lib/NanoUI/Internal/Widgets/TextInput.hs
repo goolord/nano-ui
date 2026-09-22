@@ -78,7 +78,7 @@ import NanoUI.Internal.WidgetText (hasFlag, packTextNodeStyleFull, textInputFlag
 import NanoUI.Internal.Widgets.Behavior (keyboardFocused)
 import NanoUI.Internal.Widgets.Node (Response (..), addWidgetStyled, setChanged, setSubmitted)
 import NanoUI.Widgets.TextBuffer qualified as TB
-import NanoUI.Internal.Widgets.TextEditor
+import NanoUI.Widgets.TextEditor
   ( Editor (..)
   , EditorMode (..)
   , inputTextCommands

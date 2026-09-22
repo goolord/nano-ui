@@ -81,7 +81,7 @@ import NanoUI.Internal.Widgets.TextDocument
   , sameLines
   , textDocument
   )
-import NanoUI.Internal.Widgets.TextEditor
+import NanoUI.Widgets.TextEditor
   ( Editor (..)
   , EditHistory
   , TextCommand (..)

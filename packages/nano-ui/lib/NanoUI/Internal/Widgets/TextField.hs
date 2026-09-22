@@ -28,7 +28,7 @@ import NanoUI.Internal.Store (Slot (..), WidgetStore, fieldInt, insertSlot, look
 import NanoUI.Internal.Types (DamageBounds (..))
 import NanoUI.Internal.Widgets.TextArea (textAreaFieldEditor)
 import NanoUI.Internal.Widgets.TextDocument (sameLines)
-import NanoUI.Internal.Widgets.TextEditor
+import NanoUI.Widgets.TextEditor
   ( EditHistory
   , Editor (..)
   , EditorMode (..)
