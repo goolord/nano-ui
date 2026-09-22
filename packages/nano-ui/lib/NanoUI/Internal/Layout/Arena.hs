@@ -123,7 +123,6 @@ module NanoUI.Internal.Layout.Arena
   , AxisSnapshot (..)
   , ensureAxisSnapshot
   , memoizeWidth
-  , forNodes_
   , forFloatingNodes_
   , forChildNodes_
   , foldFlowChildrenM
@@ -135,7 +134,6 @@ module NanoUI.Internal.Layout.Arena
   , foldClassNodeRevM
   , forClassNodes_
   , walkFloatingAncestors
-  , foldNodeRevM
   , findNodeM
   , foldNodesM
   , findChildM
@@ -146,7 +144,6 @@ module NanoUI.Internal.Layout.Arena
   , captureLayoutCache
   , layoutCacheEligible
   , layoutSigMatches
-  , getInputSignature
   , computeSubtreeHashes
   , subtreeArrays
   , restoreLayoutCache
@@ -1689,16 +1686,6 @@ growScratch na s needed = do
   writeIORef (naScratch na) s'
   pure s'
 
--- | Visit live nodes in declaration order. The count is captured before traversal.
-{-# INLINE forNodes_ #-}
-forNodes_ :: NodeArena -> (NodeIdx -> IO ()) -> IO ()
-forNodes_ na f = do
-  n <- arenaCount na
-  let go !i
-        | i >= n = pure ()
-        | otherwise = f i >> go (i + 1)
-  go 0
-
 -- | Visit the nodes of a floating type (modal, window, popup) in arena
 -- order, looking only at the floating nodes.
 {-# INLINE forFloatingNodes_ #-}
@@ -1744,18 +1731,44 @@ foldFlowChildrenM na parentIdx f z = do
               else f acc ci >>= go ns
   go fc z
 
+-- | Strict fold over the nodes @at 0@ to @at (k - 1)@, or from the last to
+-- the first with @rev@.
+{-# INLINE foldSeqM #-}
+foldSeqM :: Bool -> Int -> (Int -> IO NodeIdx) -> (a -> NodeIdx -> IO a) -> a -> IO a
+foldSeqM rev k at f = go (if rev then k - 1 else 0)
+  where
+    go !i !acc
+      | i < 0 || i >= k = pure acc
+      | otherwise = at i >>= f acc >>= go (if rev then i - 1 else i + 1)
+
+-- | The first of the nodes @at 0@ to @at (k - 1)@, or the last with @rev@,
+-- that satisfies the predicate.
+{-# INLINE findSeqM #-}
+findSeqM :: Bool -> Int -> (Int -> IO NodeIdx) -> (NodeIdx -> IO Bool) -> IO (Maybe NodeIdx)
+findSeqM rev k at p = go (if rev then k - 1 else 0)
+  where
+    go !i
+      | i < 0 || i >= k = pure Nothing
+      | otherwise = do
+          idx <- at i
+          ok <- p idx
+          if ok then pure (Just idx) else go (if rev then i - 1 else i + 1)
+
+-- | First node, in arena order, satisfying the predicate.
+{-# INLINE findNodeM #-}
+findNodeM :: NodeArena -> (NodeIdx -> IO Bool) -> IO (Maybe NodeIdx)
+findNodeM na p = arenaCount na >>= \n -> findSeqM False n pure p
+
 -- | Find the last declared matching node, or 'Nothing'. Stops at the first match
 -- while scanning backwards.
 {-# INLINE findNodeRevM #-}
 findNodeRevM :: NodeArena -> (NodeIdx -> IO Bool) -> IO (Maybe NodeIdx)
-findNodeRevM na p = do
-  n <- arenaCount na
-  let go !i
-        | i < 0 = pure Nothing
-        | otherwise = do
-            ok <- p i
-            if ok then pure (Just i) else go (i - 1)
-  go (n - 1)
+findNodeRevM na p = arenaCount na >>= \n -> findSeqM True n pure p
+
+-- | Left fold over every node in arena order.
+{-# INLINE foldNodesM #-}
+foldNodesM :: NodeArena -> (a -> NodeIdx -> IO a) -> a -> IO a
+foldNodesM na f z = arenaCount na >>= \n -> foldSeqM False n pure f z
 
 -- | 'findNodeRevM' for a predicate that only floating nodes can satisfy. It
 -- visits only the floating nodes.
@@ -1763,9 +1776,10 @@ findNodeRevM na p = do
 findFloatingNodeRevM :: NodeArena -> (NodeIdx -> IO Bool) -> IO (Maybe NodeIdx)
 findFloatingNodeRevM na = findClassNodeRevM na FloatingNodes
 
--- | Where the list of class @c@ starts in 'naClassNodes', and its length.
+-- | The length of the list of class @c@ in 'naClassNodes', and a reader for
+-- its @i@th node.
 {-# INLINE classNodes #-}
-classNodes :: NodeArena -> NodeClass -> IO (IOArr Int, Int, Int)
+classNodes :: NodeArena -> NodeClass -> IO (Int, Int -> IO NodeIdx)
 classNodes na c = do
   let ci = fromEnum c
   arr <- readIORef (naClassNodes na)
@@ -1773,105 +1787,34 @@ classNodes na c = do
   k <- readPrimArray (naClassCounts na) ci
   -- Forced here: a lazy offset would be a thunk and a box on every walk.
   let !base = ci * cap
-  pure (arr, base, k)
+  pure (k, \i -> readPrimArray arr (base + i))
 
 -- | 'findNodeM' over the nodes of one class: the first in arena order that
 -- satisfies the predicate.
 {-# INLINE findClassNodeM #-}
 findClassNodeM :: NodeArena -> NodeClass -> (NodeIdx -> IO Bool) -> IO (Maybe NodeIdx)
-findClassNodeM na c p = do
-  (arr, base, k) <- classNodes na c
-  let go !i
-        | i >= k = pure Nothing
-        | otherwise = do
-            idx <- readPrimArray arr (base + i)
-            ok <- p idx
-            if ok then pure (Just idx) else go (i + 1)
-  go 0
+findClassNodeM na c p = classNodes na c >>= \(k, at) -> findSeqM False k at p
 
 -- | 'findNodeRevM' over the nodes of one class: the last in arena order that
 -- satisfies the predicate.
 {-# INLINE findClassNodeRevM #-}
 findClassNodeRevM :: NodeArena -> NodeClass -> (NodeIdx -> IO Bool) -> IO (Maybe NodeIdx)
-findClassNodeRevM na c p = do
-  (arr, base, k) <- classNodes na c
-  let go !i
-        | i < 0 = pure Nothing
-        | otherwise = do
-            idx <- readPrimArray arr (base + i)
-            ok <- p idx
-            if ok then pure (Just idx) else go (i - 1)
-  go (k - 1)
+findClassNodeRevM na c p = classNodes na c >>= \(k, at) -> findSeqM True k at p
 
 -- | 'foldNodesM' over the nodes of one class, in arena order.
 {-# INLINE foldClassNodesM #-}
 foldClassNodesM :: NodeArena -> NodeClass -> (a -> NodeIdx -> IO a) -> a -> IO a
-foldClassNodesM na c f z = do
-  (arr, base, k) <- classNodes na c
-  let go !i !acc
-        | i >= k = pure acc
-        | otherwise = do
-            idx <- readPrimArray arr (base + i)
-            acc' <- f acc idx
-            go (i + 1) acc'
-  go 0 z
+foldClassNodesM na c f z = classNodes na c >>= \(k, at) -> foldSeqM False k at f z
 
--- | 'foldNodeRevM' over the nodes of one class, from last declared to first.
+-- | 'foldClassNodesM' from last declared to first.
 {-# INLINE foldClassNodeRevM #-}
 foldClassNodeRevM :: NodeArena -> NodeClass -> (a -> NodeIdx -> IO a) -> a -> IO a
-foldClassNodeRevM na c f z = do
-  (arr, base, k) <- classNodes na c
-  let go !i !acc
-        | i < 0 = pure acc
-        | otherwise = do
-            idx <- readPrimArray arr (base + i)
-            acc' <- f acc idx
-            go (i - 1) acc'
-  go (k - 1) z
+foldClassNodeRevM na c f z = classNodes na c >>= \(k, at) -> foldSeqM True k at f z
 
--- | 'forNodes_' over the nodes of one class, in arena order.
+-- | Visit the nodes of one class in arena order.
 {-# INLINE forClassNodes_ #-}
 forClassNodes_ :: NodeArena -> NodeClass -> (NodeIdx -> IO ()) -> IO ()
 forClassNodes_ na c f = foldClassNodesM na c (\() idx -> f idx) ()
-
--- | Strict effectful fold over nodes from last declared to first.
-{-# INLINE foldNodeRevM #-}
-foldNodeRevM :: NodeArena -> (a -> NodeIdx -> IO a) -> a -> IO a
-foldNodeRevM na f z = do
-  n <- arenaCount na
-  let go !i !acc
-        | i < 0 = pure acc
-        | otherwise = do
-            acc' <- f acc i
-            go (i - 1) acc'
-  go (n - 1) z
-
--- ---------------------------------------------------------------------------
--- Frame traversal helpers: forward node scans and child searches, shaped like
--- 'forNodes_' and 'findNodeRevM'.
--- ---------------------------------------------------------------------------
-
--- | First node, in arena order, satisfying the predicate.
-{-# INLINE findNodeM #-}
-findNodeM :: NodeArena -> (NodeIdx -> IO Bool) -> IO (Maybe NodeIdx)
-findNodeM na p = do
-  n <- arenaCount na
-  let go !i
-        | i >= n = pure Nothing
-        | otherwise = do
-            ok <- p i
-            if ok then pure (Just i) else go (i + 1)
-  go 0
-
--- | Left fold over every node in arena order.
-{-# INLINE foldNodesM #-}
-foldNodesM :: NodeArena -> (a -> NodeIdx -> IO a) -> a -> IO a
-foldNodesM na f z = do
-  n <- arenaCount na
-  let go !i !acc
-        | i >= n = pure acc
-        | otherwise = f acc i >>= go (i + 1)
-  go 0 z
 
 -- | The first result @step@ finds walking up from @idx@, the node itself
 -- first.
