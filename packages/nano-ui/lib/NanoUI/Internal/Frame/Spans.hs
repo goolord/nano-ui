@@ -46,7 +46,7 @@ import NanoUI.Internal.Frame.Chrome (displayText, textInputFocused, textInputVal
 import NanoUI.Internal.Frame.Node (readScrollNode, resolveFontFor, scrollNodeViewport)
 import NanoUI.Internal.Frame.Scroll.Geometry (padContentClip, tagClippedSpans)
 import NanoUI.Internal.Frame.Select (collectSelectDropdownSpans, tagSelectClippedSpans)
-import NanoUI.Internal.Frame.SpanArena (SpanArena, pushSpan, resetSpanArena, spanArenaToList, spanArenaToListOccluded)
+import NanoUI.Internal.Frame.SpanArena (SpanArena, pushSpans, resetSpanArena, spanArenaToList)
 import NanoUI.Internal.Frame.TextEdit.Menu (collectTextEditMenuSpans)
 import NanoUI.Internal.Frame.TextInput (syncTextInputScroll, tagTextInputClippedSpans, textInputFieldRect)
 import NanoUI.Internal.Input (Input)
@@ -108,23 +108,20 @@ collectTextSpans ctx = do
   when (count > 0) $
     collectClippedSpans ctx 0 (Rect 0 0 1e9 1e9) arena
   panels <- floatingPanelRects ctx
-  spanArenaToListOccluded panels arena
+  spanArenaToList panels arena
 
 -- | Collect window, modal, popup, dropdown, and edit-menu text in paint order.
 -- Uses the same tuple format as 'collectTextSpans' and rebuilds the overlay arena.
 collectOverlayTextSpans :: Context -> Input -> IO [(Rect, T.Text, Color, Color, Rect)]
 collectOverlayTextSpans ctx inp = do
   let arena = ctxSpanOverlay ctx
-      push (r, t, fg, bg, c) = pushSpan arena r t fg bg c
   resetSpanArena arena
   collectFloatingSpansInto ctx NodeWindow arena
   collectFloatingSpansInto ctx NodeModal arena
   collectFloatingSpansInto ctx NodePopup arena
-  drops <- collectSelectDropdownSpans ctx inp
-  menu <- collectTextEditMenuSpans ctx inp
-  mapM_ push drops
-  mapM_ push menu
-  spanArenaToList arena
+  collectSelectDropdownSpans ctx inp >>= pushSpans arena
+  collectTextEditMenuSpans ctx inp >>= pushSpans arena
+  spanArenaToList IM.empty arena
 
 -- | Collect base and overlay text separately for a host that rasterises text itself.
 collectRasterSpans :: Context -> Input -> IO ([(Rect, T.Text, Color, Color, Rect)], [(Rect, T.Text, Color, Color, Rect)])
@@ -167,7 +164,7 @@ collectClippedSpans' ctx idx nt clip arena = do
                   then tagClippedSpans clipHere spans
                   else tagTextInputClippedSpans clipHere x y w h fm spans
         _ -> pure (tagClippedSpans clipHere spans)
-    mapM_ (\(r, t, fg, bg, c) -> pushSpan arena r t fg bg c) here
+    pushSpans arena here
     walkChildSpans ctx idx clipHere arena
 
 walkChildSpans :: Context -> NodeIdx -> Rect -> SpanArena -> IO ()

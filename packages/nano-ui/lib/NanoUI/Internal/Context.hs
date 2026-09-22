@@ -688,8 +688,8 @@ newContext = do
   let initCap = 64
   ctxFocusables <- newIORef =<< newPrimArray initCap
   ctxFocusablesCount <- newIORef 0
-  ctxSpanBase <- newSpanArena 64
-  ctxSpanOverlay <- newSpanArena 64
+  ctxSpanBase <- newSpanArena
+  ctxSpanOverlay <- newSpanArena
   ctxInteractionState <- newIORef initialInteractionState
   ctxCursorZones <- newIORef []
   ctxImageAtlas <- Atlas.newImageAtlas
