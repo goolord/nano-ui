@@ -42,7 +42,7 @@ import NanoUI.Internal.Frame.Hit
   , widgetIdInSubtree
   , withWidgetNode
   )
-import NanoUI.Internal.Frame.Input (findTopWidgetUnderMouse)
+import NanoUI.Internal.Frame.Input (PressTargets (..), targetsAt)
 import NanoUI.Internal.Frame.Redraw (probeHotId)
 import NanoUI.Internal.Frame.Scroll.Geometry (scrollChromeLane)
 import NanoUI.Internal.Id (WidgetId (..))
@@ -65,7 +65,6 @@ import NanoUI.Internal.Layout.Arena
   , getRect
   , getWidgetId
   , getWidthSizing
-  , isWidgetNode
   )
 import NanoUI.Internal.Layout.Solve (Measurers (..), placeWindowNode, windowBodyScroller)
 import NanoUI.Internal.Monad ((<&&>))
@@ -321,7 +320,7 @@ windowTitleRect ctx idx = do
 
 windowControlAt :: Context -> NodeIdx -> V2 -> IO Bool
 windowControlAt ctx idx mouse =
-  maybe (pure False) (widgetIdInSubtree ctx idx) =<< findTopWidgetUnderMouse ctx mouse isWidgetNode
+  maybe (pure False) (widgetIdInSubtree ctx idx) . ptInteractive =<< targetsAt ctx mouse
 
 -- | How the context measures text and custom widgets, for the solve and for
 -- placing floating nodes after it.

@@ -14,7 +14,8 @@ module NanoUI.Internal.Frame.Input
   , finalizePointerRelease
   , finalizeTextInputFocus
   , finalizeSelectFocus
-  , findTopWidgetUnderMouse
+  , PressTargets (..)
+  , targetsAt
   , constrainFocusToModal
   , syncWidgetLabels
   ) where
@@ -161,41 +162,47 @@ disarmPointerPress ctx inp = do
 
 -- | What a left press landed on, for the steps that act on it: the
 -- interactive widget, the text field or text area, and the select under the
--- pointer, each as 'findTopWidgetUnderMouse' would find it. All 'Nothing'
--- on a frame without a press.
+-- pointer. All 'Nothing' on a frame without a press.
 data PressTargets = PressTargets
   { ptInteractive :: !(Maybe WidgetId)
   , ptTextField :: !(Maybe WidgetId)
   , ptSelect :: !(Maybe WidgetId)
   }
 
--- | The 'PressTargets' of this frame's left press, found in one pass over the
--- arena instead of one per step. A node's hit test does not depend on which
--- step asks, so each node is tested at most once, and the pass stops once
--- every target is found. Runs after layout, like the steps.
+-- | The 'PressTargets' of this frame's left press ('targetsAt'). Runs after
+-- layout, like the steps.
 pressTargets :: Context -> Input -> IO PressTargets
 pressTargets ctx inp
   | not (inputMousePressed inp) = pure none
-  | otherwise = do
-      let na = ctxNodeArena ctx
-          mouse = inputMousePos inp
-      top <- overlayHitRoot ctx mouse
-      found <- newIORef none
-      _ <- findClassNodeM na PointerNodes $ \idx -> do
-        nt <- getNodeType na idx
-        PressTargets i t s <- readIORef found
-        let wantI = isNothing i && isWidgetNode nt
-            wantT = isNothing t && (nt == NodeTextInput || nt == NodeTextArea)
-            wantS = isNothing s && nt == NodeSelect
-        pure (wantI || wantT || wantS) <&&> widgetUnderMouse ctx top mouse nt idx <&&> do
-          wid <- getWidgetId na idx
-          let pick want cur = if want then Just wid else cur
-              !r = PressTargets (pick wantI i) (pick wantT t) (pick wantS s)
-          writeIORef found r
-          pure (isJust (ptInteractive r) && isJust (ptTextField r) && isJust (ptSelect r))
-      readIORef found
- where
-  none = PressTargets Nothing Nothing Nothing
+  | otherwise = targetsAt ctx (inputMousePos inp)
+
+-- | The widgets a press at @mouse@ would land on, found in one pass over the
+-- arena instead of one per step. A node's hit test does not depend on which
+-- step asks, so each node is tested at most once, and the pass stops once
+-- every target is found. Each is the first match in arena order, which is
+-- declaration order. The painter draws siblings from the last declared to the
+-- first, so where two overlap the earlier one is on top.
+targetsAt :: Context -> V2 -> IO PressTargets
+targetsAt ctx mouse = do
+  let na = ctxNodeArena ctx
+  top <- overlayHitRoot ctx mouse
+  found <- newIORef none
+  _ <- findClassNodeM na PointerNodes $ \idx -> do
+    nt <- getNodeType na idx
+    PressTargets i t s <- readIORef found
+    let wantI = isNothing i && isWidgetNode nt
+        wantT = isNothing t && (nt == NodeTextInput || nt == NodeTextArea)
+        wantS = isNothing s && nt == NodeSelect
+    pure (wantI || wantT || wantS) <&&> widgetUnderMouse ctx top mouse nt idx <&&> do
+      wid <- getWidgetId na idx
+      let pick want cur = if want then Just wid else cur
+          !r = PressTargets (pick wantI i) (pick wantT t) (pick wantS s)
+      writeIORef found r
+      pure (isJust (ptInteractive r) && isJust (ptTextField r) && isJust (ptSelect r))
+  readIORef found
+
+none :: PressTargets
+none = PressTargets Nothing Nothing Nothing
 
 -- | On a left press, make the interactive widget under the pointer the active
 -- widget, unless it is disabled. Runs after layout. 'pressTargets' searches
@@ -204,21 +211,6 @@ pressTargets ctx inp
 finalizePointerPress :: Context -> PressTargets -> IO ()
 finalizePointerPress ctx targets =
   enabledTarget ctx (ptInteractive targets) >>= mapM_ (writeIORef (ctxActiveId ctx))
-
--- | The widget under @mouse@ whose node type satisfies @wanted@, or 'Nothing'.
--- It is the first match in arena order, which is declaration order. The
--- painter draws siblings from the last declared to the first, so where two
--- overlap the earlier one is on top. Only pointer nodes ('PointerNodes') are
--- searched, so @wanted@ must reject every other type.
-findTopWidgetUnderMouse :: Context -> V2 -> (NodeType -> Bool) -> IO (Maybe WidgetId)
-findTopWidgetUnderMouse ctx mouse wanted = do
-  let na = ctxNodeArena ctx
-  top <- overlayHitRoot ctx mouse
-  mIdx <-
-    findClassNodeM na PointerNodes $ \idx -> do
-      nt <- getNodeType na idx
-      pure (wanted nt) <&&> widgetUnderMouse ctx top mouse nt idx
-  traverse (getWidgetId na) mIdx
 
 -- | Whether a press at @mouse@ lands on node @idx@ of type @nt@: the point is
 -- in its hit rect ('widgetHitRect') and in its clip, and the floating panels
