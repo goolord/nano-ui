@@ -93,7 +93,6 @@ module NanoUI.Internal.Context
   , setScrollOffset
   , getScrollOffset2D
   , setScrollOffset2D
-  , setScrollConfig
   , linkScrollAxes
   , ScrollTuning (..)
   , defaultScrollTuning

@@ -16,7 +16,7 @@ import NanoUI.Internal.Frame.Paint (walkChildren)
 import NanoUI.Internal.Layout.Arena (forFloatingNodes_, NodeIdx, NodeType (..), getNodeRect, getPadding)
 import NanoUI.Internal.Style (Padding (..), Style, Theme, themeOverlayDim, themeSeparator)
 import NanoUI.Internal.Types (Rect (..), Size (..))
-import NanoUI.Internal.Widgets.Chrome (titleBarChromeHFor, windowChromeSepH)
+import NanoUI.Internal.Widgets.Overlay (windowChromeSepH, windowTitleBarH)
 
 drawWindowOverlays :: Context -> IO ()
 drawWindowOverlays ctx =
@@ -24,7 +24,7 @@ drawWindowOverlays ctx =
     theme <- nodeTheme ctx idx
     drawFloatingPanel ctx theme idx (overlayWindowStyle theme) rect
     pad <- getPadding (ctxNodeArena ctx) idx
-    let sepY = y + padT pad + titleBarChromeHFor - windowChromeSepH
+    let sepY = y + padT pad + windowTitleBarH - windowChromeSepH
     pushRect
       (ctxDrawArena ctx)
       (Rect (x + padL pad) sepY (max 0 (w - padL pad - padR pad)) windowChromeSepH)

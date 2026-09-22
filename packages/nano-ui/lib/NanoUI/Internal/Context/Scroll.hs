@@ -1,4 +1,4 @@
--- | Scroll offsets, links and configuration kept in the widget store, the
+-- | Scroll offsets and links kept in the widget store, the
 -- wheel and glide tuning kept in the context, and the commands that move a
 -- scroller: to an offset, by a delta or page, or onto a widget.
 module NanoUI.Internal.Context.Scroll
@@ -6,7 +6,6 @@ module NanoUI.Internal.Context.Scroll
   , setScrollOffset
   , getScrollOffset2D
   , setScrollOffset2D
-  , setScrollConfig
   , linkScrollAxes
     -- * Tuning
   , ScrollTuning (..)
@@ -39,17 +38,15 @@ module NanoUI.Internal.Context.Scroll
   , scrollTargetOffset
   , scrollGliding
   , clampScrollOffset
-  , cancelScrollGlide
   , stepScrollGlides
   ) where
 
-import Control.Applicative ((<|>))
-import Control.Monad (unless, when)
+import Control.Monad (forM_, unless, when)
 import Data.IORef (modifyIORef', readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
 import Data.IntSet qualified as IS
 
-import NanoUI.Internal.Context.Core (damageWidget, getPrevRect, getStore, modifyStore, setStore, writeSlots)
+import NanoUI.Internal.Context.Core (damageWidget, getPrevRect, getStore, setStore, writeSlots)
 import NanoUI.Internal.Context.Types
   ( Context (..)
   , ScrollAxes (..)
@@ -60,15 +57,8 @@ import NanoUI.Internal.Context.Types
   , intKey
   )
 import NanoUI.Internal.Draw qualified as Draw
-import NanoUI.Internal.Frame.Scroll.Geometry
-  ( ScrollConfig
-  , decodeScrollConfig
-  , defaultScrollConfig
-  , encodeScrollConfig
-  , scrollConfigNative2D
-  )
 import NanoUI.Internal.Id (WidgetId)
-import NanoUI.Internal.Store (Slot (..), WidgetStore, fieldFloat, fieldInt, fieldPoint, findSlot, insertSlot, lookupSlot, slotKey, slotWrite, slotWriteOr)
+import NanoUI.Internal.Store (Slot (..), SlotWrites (..), WidgetStore, fieldFloat, fieldInt, fieldPoint, findSlot, insertSlot, lookupSlot, slotKey, slotWrite, slotWriteOr)
 import NanoUI.Internal.Types (DamageBounds (..), Rect (..), V2 (..), clamp, onGrid, v2Add, v2X, v2Y)
 
 {-# INLINE snapScrollOffset #-}
@@ -77,23 +67,23 @@ snapScrollOffset ctx v = do
   s <- Draw.getDrawSnapScale (ctxDrawArena ctx)
   pure (onGrid s v)
 
+-- | A scroller's stored offset. A text area keeps both axes in its own point
+-- slot. A scroll container keeps its main axis (the vertical one when it
+-- scrolls both) under its key and the other under 'SlotScrollCross', so a 1D
+-- scroller's offset reads @(cross, main)@ and a 2D one's @(x, y)@. Floats keep
+-- a scroll frame a 'storeFloat'-only change, which the damage pass clips.
+{-# INLINE storedScrollOffset #-}
+storedScrollOffset :: Int -> WidgetStore -> V2
+storedScrollOffset key s =
+  maybe
+    (V2 (findSlot fieldFloat 0 (slotKey SlotScrollCross key) s) (findSlot fieldFloat 0 key s))
+    (uncurry V2)
+    (lookupSlot fieldPoint (slotKey SlotTextAreaScroll key) s)
+
 -- | Pixel-snapped main-axis offset of a 1D scroller, or vertical offset of a
 -- text area/2D scroller. Defaults to zero before state exists.
 getScrollOffset :: Context -> WidgetId -> IO Float
-getScrollOffset ctx wid = do
-  s <- getStore ctx
-  let key = intKey wid
-      -- Text areas keep both axes in their own slot; native 2D scrollers keep
-      -- them in the offset slot, falling back to the main-axis float as
-      -- 'getScrollOffset2D' does.
-      off = case lookupSlot fieldPoint (slotKey SlotTextAreaScroll key) s of
-        Just (_, sy) -> sy
-        Nothing
-          | scrollConfigNative2D (storedScrollConfig key s)
-          , Just (_, y) <- lookupSlot fieldPoint (slotKey SlotScrollOff key) s ->
-              y
-          | otherwise -> findSlot fieldFloat 0 key s
-  snapScrollOffset ctx off
+getScrollOffset ctx wid = snapScrollOffset ctx . v2Y . storedScrollOffset (intKey wid) =<< getStore ctx
 
 -- | Move a scroller to an offset along its main axis. Cancels a glide in
 -- flight: whoever sets an offset outright owns it.
@@ -104,46 +94,15 @@ setScrollOffset ctx wid off = do
 
 writeScrollOffset :: Context -> WidgetId -> Float -> IO ()
 writeScrollOffset ctx wid off = do
-  store <- getStore ctx
-  let key = intKey wid
-      sKey = slotKey SlotTextAreaScroll key
-  case lookupSlot fieldPoint sKey store of
-    Just (sx, sy) ->
-      when (sy /= off) $ do
-        setStore ctx (insertSlot fieldPoint sKey (sx, off) store)
-        damageWidget ctx wid DamageSelf
-    Nothing
-      | scrollConfigNative2D (storedScrollConfig key store) -> do
-          cur <- getScrollOffset2D ctx wid
-          writeScrollOffset2D ctx wid (V2 (v2X cur) off)
-      | otherwise -> when (findSlot fieldFloat 0 key store /= off) $ do
-          let moved = insertSlot fieldFloat key off store
-              yKey = findSlot fieldInt 0 (slotKey SlotScrollLinkY key) store
-              prevY = findSlot fieldFloat 0 yKey moved
-          setStore ctx $
-            if yKey == 0
-              then moved
-              else
-                insertSlot fieldPoint (slotKey SlotScrollOff yKey) (off, prevY)
-                  . insertSlot fieldFloat yKey prevY
-                  . insertSlot fieldFloat (slotKey SlotScrollCross yKey) off
-                  $ moved
+  V2 x _ <- storedScrollOffset (intKey wid) <$> getStore ctx
+  writeScrollOffset2D ctx wid (V2 x off)
 
 -- | Pixel-snapped x/y offset for text areas and 2D scrollers. For a 1D
 -- scroller, the fallback stores cross-axis in x and main-axis in y.
 getScrollOffset2D :: Context -> WidgetId -> IO V2
 getScrollOffset2D ctx wid = do
-  s <- getStore ctx
-  let widKey = intKey wid
-      sKey = slotKey SlotTextAreaScroll widKey
-      v =
-        maybe
-          (V2 (findSlot fieldFloat 0 (slotKey SlotScrollCross widKey) s) (findSlot fieldFloat 0 widKey s))
-          (uncurry V2)
-          (lookupSlot fieldPoint sKey s <|> lookupSlot fieldPoint (slotKey SlotScrollOff widKey) s)
-  sx <- snapScrollOffset ctx (v2X v)
-  sy <- snapScrollOffset ctx (v2Y v)
-  pure (V2 sx sy)
+  V2 x y <- storedScrollOffset (intKey wid) <$> getStore ctx
+  V2 <$> snapScrollOffset ctx x <*> snapScrollOffset ctx y
 
 -- | Move a scroller to an offset on both axes. Cancels a glide in flight.
 setScrollOffset2D :: Context -> WidgetId -> V2 -> IO ()
@@ -152,32 +111,30 @@ setScrollOffset2D ctx wid off = do
   writeScrollOffset2D ctx wid off
 
 writeScrollOffset2D :: Context -> WidgetId -> V2 -> IO ()
-writeScrollOffset2D ctx wid off = do
+writeScrollOffset2D ctx wid (V2 x y) = do
   store <- getStore ctx
-  let widKey = intKey wid
-      sKey = slotKey SlotTextAreaScroll widKey
-      next = (v2X off, v2Y off)
+  let key = intKey wid
+      taKey = slotKey SlotTextAreaScroll key
+      -- A linked scroller ('linkScrollAxes') follows along: the header's
+      -- main axis is the body's cross axis.
+      mirror link to v =
+        let k = findSlot fieldInt 0 (slotKey link key) store
+         in if k == 0 then SlotWrites (const True) id else slotWriteOr fieldFloat 0 (to k) v
   -- Text areas only reach the first branch because `textAreaWith` seeds this
   -- slot at init; without the seed a freshly mounted editor falls through to
-  -- the container slots below and its offsets are never rendered.
-  case lookupSlot fieldPoint sKey store of
+  -- the container slots below and its offsets are never rendered. The scroll
+  -- offset damage only knows scroll nodes, so a text area damages itself.
+  case lookupSlot fieldPoint taKey store of
     Just cur ->
-      when (cur /= next) $ do
-        setStore ctx (insertSlot fieldPoint sKey next store)
+      when (cur /= (x, y)) $ do
+        setStore ctx (insertSlot fieldPoint taKey (x, y) store)
         damageWidget ctx wid DamageSelf
-    Nothing -> do
-      let offKey = slotKey SlotScrollOff widKey
-          crossKey = slotKey SlotScrollCross widKey
-          prevY = findSlot fieldFloat 0 widKey store
-          prevX = findSlot fieldFloat 0 crossKey store
-          xLink = findSlot fieldInt 0 (slotKey SlotScrollLinkX widKey) store
-      when (lookupSlot fieldPoint offKey store /= Just next || prevY /= v2Y off || prevX /= v2X off) $
-        setStore ctx $
-          insertSlot fieldPoint offKey next
-            . (if xLink == 0 then id else insertSlot fieldFloat xLink (v2X off))
-            . insertSlot fieldFloat widKey (v2Y off)
-            . insertSlot fieldFloat crossKey (v2X off)
-            $ store
+    Nothing ->
+      writeSlots ctx $
+        slotWriteOr fieldFloat 0 key y
+          <> slotWriteOr fieldFloat 0 (slotKey SlotScrollCross key) x
+          <> mirror SlotScrollLinkX id x
+          <> mirror SlotScrollLinkY (slotKey SlotScrollCross) y
 
 -- | Link a two-axis body with a separate horizontal scroller, such as a table
 -- header. Arguments are body id then horizontal id; synchronises their x offsets.
@@ -185,25 +142,15 @@ linkScrollAxes :: Context -> WidgetId -> WidgetId -> IO ()
 linkScrollAxes ctx yWid xWid = do
   let yKey = intKey yWid
       xKey = intKey xWid
-  modifyStore ctx $
-    insertSlot fieldInt (slotKey SlotScrollLinkX yKey) xKey
-      . insertSlot fieldInt (slotKey SlotScrollLinkY xKey) yKey
-  V2 x2 y <- getScrollOffset2D ctx yWid
-  x1 <- findSlot fieldFloat 0 xKey <$> getStore ctx
-  let x = if x2 == 0 && x1 /= 0 then x1 else x2
+  writeSlots ctx $
+    slotWrite fieldInt (slotKey SlotScrollLinkX yKey) xKey
+      <> slotWrite fieldInt (slotKey SlotScrollLinkY xKey) yKey
+  store <- getStore ctx
+  let V2 x2 y = storedScrollOffset yKey store
+      x1 = findSlot fieldFloat 0 xKey store
+      x = if x2 == 0 && x1 /= 0 then x1 else x2
   when (x /= x2 || x /= x1) $
     setScrollOffset2D ctx yWid (V2 x y)
-
--- | The scroll configuration stored under a widget key, or the default.
-storedScrollConfig :: Int -> WidgetStore -> ScrollConfig
-storedScrollConfig key =
-  decodeScrollConfig . findSlot fieldInt (encodeScrollConfig defaultScrollConfig) (slotKey SlotScrollCfg key)
-
--- | Store axis, clamping, and chrome policy for a scroller. Equal settings are a no-op.
-setScrollConfig :: Context -> WidgetId -> ScrollConfig -> IO ()
-setScrollConfig ctx wid cfg =
-  writeSlots ctx $
-    slotWriteOr fieldInt (encodeScrollConfig defaultScrollConfig) (slotKey SlotScrollCfg (intKey wid)) (encodeScrollConfig cfg)
 
 -- =============================================================================
 -- Tuning
@@ -267,7 +214,7 @@ getScrollMetrics ctx wid = do
       point slot = lookupSlot fieldPoint (slotKey slot key) s
   case (point SlotScrollViewPos, point SlotScrollViewSize, point SlotScrollRange) of
     (Just (vx, vy), Just (vw, vh), Just (mx, my)) -> do
-      let axes = decodeScrollAxes (findSlot fieldInt 0 (slotKey SlotScrollAxes key) s)
+      let axes = toEnum (findSlot fieldInt 0 (slotKey SlotScrollAxes key) s)
       off <- getScrollOffsetIn ctx wid axes
       pure $
         Just
@@ -292,44 +239,19 @@ beginScrollMetrics ctx =
 -- and its body share theirs, and letting both publish would rewrite the store
 -- every frame and hand the commands a viewport that alternates between panes.
 cacheScrollMetrics :: Context -> WidgetId -> ScrollAxes -> Rect -> V2 -> IO ()
-cacheScrollMetrics ctx wid axes viewport range = do
-  taken <- claimScrollMetrics ctx (intKey wid)
-  unless taken (writeScrollMetrics ctx wid axes viewport range)
-
--- | Whether this widget id has already published geometry this frame; marks
--- it published if not.
-claimScrollMetrics :: Context -> Int -> IO Bool
-claimScrollMetrics ctx key = do
-  st <- readIORef (ctxScrollState ctx)
-  if IS.member key (ssCached st)
-    then pure True
-    else do
-      writeIORef (ctxScrollState ctx) $! st {ssCached = IS.insert key (ssCached st)}
-      pure False
-
-writeScrollMetrics :: Context -> WidgetId -> ScrollAxes -> Rect -> V2 -> IO ()
-writeScrollMetrics ctx wid axes (Rect vx vy vw vh) range@(V2 mx my) = do
-  -- A range that just shrank (a filtered list, a narrower window) would leave
-  -- a glide heading past the new end.
-  clampScrollGlide ctx wid range
+cacheScrollMetrics ctx wid axes (Rect vx vy vw vh) range@(V2 mx my) = do
   let key = intKey wid
-  writeSlots ctx $
-    slotWrite fieldPoint (slotKey SlotScrollViewPos key) (vx, vy)
-      <> slotWrite fieldPoint (slotKey SlotScrollViewSize key) (vw, vh)
-      <> slotWrite fieldPoint (slotKey SlotScrollRange key) (mx, my)
-      <> slotWrite fieldInt (slotKey SlotScrollAxes key) (encodeScrollAxes axes)
-
-encodeScrollAxes :: ScrollAxes -> Int
-encodeScrollAxes = \case
-  ScrollAxisY -> 0
-  ScrollAxisX -> 1
-  ScrollAxisXY -> 2
-
-decodeScrollAxes :: Int -> ScrollAxes
-decodeScrollAxes = \case
-  1 -> ScrollAxisX
-  2 -> ScrollAxisXY
-  _ -> ScrollAxisY
+  st <- readIORef (ctxScrollState ctx)
+  unless (IS.member key (ssCached st)) $ do
+    writeIORef (ctxScrollState ctx) $! st {ssCached = IS.insert key (ssCached st)}
+    -- A range that just shrank (a filtered list, a narrower window) would
+    -- leave a glide heading past the new end.
+    clampScrollGlide ctx wid range
+    writeSlots ctx $
+      slotWrite fieldPoint (slotKey SlotScrollViewPos key) (vx, vy)
+        <> slotWrite fieldPoint (slotKey SlotScrollViewSize key) (vw, vh)
+        <> slotWrite fieldPoint (slotKey SlotScrollRange key) (mx, my)
+        <> slotWrite fieldInt (slotKey SlotScrollAxes key) (fromEnum axes)
 
 -- | A 1D row scroller keeps its offset in the main-axis slot, so window and
 -- stored axes are swapped for it and identical for everything else. The swap
@@ -351,11 +273,9 @@ setScrollOffsetIn ctx wid axes off = do
   writeScrollOffsetIn ctx wid axes off
 
 writeScrollOffsetIn :: Context -> WidgetId -> ScrollAxes -> V2 -> IO ()
-writeScrollOffsetIn ctx wid axes off =
-  case axes of
-    ScrollAxisXY -> writeScrollOffset2D ctx wid off
-    ScrollAxisY -> writeScrollOffset ctx wid (v2Y off)
-    ScrollAxisX -> writeScrollOffset ctx wid (v2X off)
+writeScrollOffsetIn ctx wid axes off
+  | axes == ScrollAxisXY = writeScrollOffset2D ctx wid off
+  | otherwise = writeScrollOffset ctx wid (v2Y (swapAxes axes off))
 
 -- =============================================================================
 -- Commands
@@ -380,28 +300,22 @@ data ScrollAlign
 
 -- | Scroll to an absolute offset, clamped to the scroller's range.
 scrollTo :: Context -> WidgetId -> V2 -> ScrollBehavior -> IO ()
-scrollTo ctx wid off behavior =
-  withScrollMetrics ctx wid $ \m ->
-    applyScrollTarget ctx wid (scrollAxes m) (clampScrollOffset (scrollRange m) off) behavior
+scrollTo ctx wid off = scrollToward ctx wid (\_ -> pure off)
 
 -- | Scroll by a delta in pixels. Deltas accumulate onto a glide already in
 -- flight, so repeated calls keep up rather than fighting each other.
 scrollBy :: Context -> WidgetId -> V2 -> ScrollBehavior -> IO ()
-scrollBy ctx wid delta behavior =
-  withScrollMetrics ctx wid $ \m -> scrollMetricsBy ctx wid m delta behavior
+scrollBy ctx wid delta = scrollToward ctx wid (\m -> headedBy ctx wid m delta)
 
 -- | Scroll by whole viewports: @V2 0 1@ is one page down, @V2 0 (-0.5)@ half
 -- a page up.
 scrollPages :: Context -> WidgetId -> V2 -> ScrollBehavior -> IO ()
-scrollPages ctx wid (V2 px py) behavior =
-  withScrollMetrics ctx wid $ \m -> do
-    let Rect _ _ vw vh = scrollViewport m
-    scrollMetricsBy ctx wid m (V2 (px * vw) (py * vh)) behavior
+scrollPages ctx wid (V2 px py) = scrollToward ctx wid $ \m ->
+  let Rect _ _ vw vh = scrollViewport m in headedBy ctx wid m (V2 (px * vw) (py * vh))
 
-scrollMetricsBy :: Context -> WidgetId -> ScrollMetrics -> V2 -> ScrollBehavior -> IO ()
-scrollMetricsBy ctx wid m delta behavior = do
-  base <- scrollTargetOffset ctx wid (scrollOffset m)
-  applyScrollTarget ctx wid (scrollAxes m) (clampScrollOffset (scrollRange m) (v2Add base delta)) behavior
+-- | Where the scroller is headed ('scrollTargetOffset'), moved by @delta@.
+headedBy :: Context -> WidgetId -> ScrollMetrics -> V2 -> IO V2
+headedBy ctx wid m delta = (`v2Add` delta) <$> scrollTargetOffset ctx wid (scrollOffset m)
 
 -- | Scroll back to the top (and left).
 scrollToStart :: Context -> WidgetId -> ScrollBehavior -> IO ()
@@ -409,9 +323,7 @@ scrollToStart ctx wid = scrollTo ctx wid (V2 0 0)
 
 -- | Scroll to the end of the content.
 scrollToEnd :: Context -> WidgetId -> ScrollBehavior -> IO ()
-scrollToEnd ctx wid behavior =
-  withScrollMetrics ctx wid $ \m ->
-    applyScrollTarget ctx wid (scrollAxes m) (scrollRange m) behavior
+scrollToEnd ctx wid = scrollTo ctx wid (V2 (1 / 0) (1 / 0)) -- clamped to the range
 
 -- | Scroll @target@ into the viewport of the scroller @wid@ it is built
 -- inside. Both widgets are read from the last frame's layout, so a widget
@@ -432,12 +344,10 @@ scrollIntoView ctx wid target align behavior = do
 -- coordinates: the origin is where the content starts, which is where the
 -- viewport shows it at offset @0@.
 scrollRectIntoView :: Context -> WidgetId -> Rect -> ScrollAlign -> ScrollBehavior -> IO ()
-scrollRectIntoView ctx wid (Rect rx ry rw rh) align behavior =
-  withScrollMetrics ctx wid $ \m -> do
-    let Rect _ _ vw vh = scrollViewport m
-        V2 ox oy = scrollOffset m
-        target = clampScrollOffset (scrollRange m) (V2 (alignAxis align vw rx rw ox) (alignAxis align vh ry rh oy))
-    applyScrollTarget ctx wid (scrollAxes m) target behavior
+scrollRectIntoView ctx wid (Rect rx ry rw rh) align = scrollToward ctx wid $ \m -> do
+  let Rect _ _ vw vh = scrollViewport m
+      V2 ox oy = scrollOffset m
+  pure (V2 (alignAxis align vw rx rw ox) (alignAxis align vh ry rh oy))
 
 -- | Offset that puts a span of the content where @align@ asks for it.
 alignAxis :: ScrollAlign -> Float -> Float -> Float -> Float -> Float
@@ -467,8 +377,14 @@ projectAxes axes (V2 x y) =
     ScrollAxisX -> V2 x 0
     ScrollAxisXY -> V2 x y
 
-withScrollMetrics :: Context -> WidgetId -> (ScrollMetrics -> IO ()) -> IO ()
-withScrollMetrics ctx wid act = getScrollMetrics ctx wid >>= mapM_ act
+-- | Send the scroller to the offset @pick@ chooses from its metrics, clamped
+-- to its range. Nothing happens before it has been laid out.
+scrollToward :: Context -> WidgetId -> (ScrollMetrics -> IO V2) -> ScrollBehavior -> IO ()
+scrollToward ctx wid pick behavior = do
+  mMetrics <- getScrollMetrics ctx wid
+  forM_ mMetrics $ \m -> do
+    target <- pick m
+    applyScrollTarget ctx wid (scrollAxes m) (clampScrollOffset (scrollRange m) target) behavior
 
 -- =============================================================================
 -- Glide
@@ -480,17 +396,14 @@ withScrollMetrics ctx wid act = getScrollMetrics ctx wid >>= mapM_ act
 applyScrollTarget :: Context -> WidgetId -> ScrollAxes -> V2 -> ScrollBehavior -> IO ()
 applyScrollTarget ctx wid axes target0 behavior = do
   st <- readIORef (ctxScrollState ctx)
-  let smooth = scrollSmoothTime (ssTuning st)
-      target = projectAxes axes target0
-  if behavior == ScrollInstant || smooth <= 0
+  cur <- getScrollOffsetIn ctx wid axes
+  let target = projectAxes axes target0
+      instant = behavior == ScrollInstant || scrollSmoothTime (ssTuning st) <= 0
+  if instant || nearOffset (projectAxes axes cur) target
     then setScrollOffsetIn ctx wid axes target
-    else do
-      cur <- getScrollOffsetIn ctx wid axes
-      if nearOffset (projectAxes axes cur) target
-        then setScrollOffsetIn ctx wid axes target
-        else
-          writeIORef (ctxScrollState ctx) $!
-            st {ssGlides = IM.insert (intKey wid) (ScrollGlide wid target axes) (ssGlides st)}
+    else
+      writeIORef (ctxScrollState ctx) $!
+        st {ssGlides = IM.insert (intKey wid) (ScrollGlide wid target axes) (ssGlides st)}
 
 -- | Where the scroller is headed: the glide's target if one is in flight, and
 -- @fallback@ (normally the current offset) if not. Deltas add onto this so
@@ -532,11 +445,8 @@ stepScrollGlides ctx dt = do
   st <- readIORef (ctxScrollState ctx)
   unless (IM.null (ssGlides st)) $ do
     let alpha = glideAlpha (scrollSmoothTime (ssTuning st)) dt
-    done <- mapM (stepGlide ctx alpha) (IM.toList (ssGlides st))
-    let settled = [k | (k, True) <- done]
-    unless (null settled) $
-      modifyIORef' (ctxScrollState ctx) $ \s ->
-        s {ssGlides = foldr IM.delete (ssGlides s) settled}
+    live <- IM.traverseMaybeWithKey (const (stepGlide ctx alpha)) (ssGlides st)
+    modifyIORef' (ctxScrollState ctx) $ \s -> s {ssGlides = live}
 
 -- | Fraction of the remaining distance a glide covers in @dt@ seconds.
 -- 'scrollSmoothTime' is the time to cover all but a twentieth of it.
@@ -545,12 +455,13 @@ glideAlpha smooth dt
   | smooth <= 0 || dt <= 0 = 1
   | otherwise = clamp 0 1 (1 - exp (negate (3 * dt / smooth)))
 
-stepGlide :: Context -> Float -> (Int, ScrollGlide) -> IO (Int, Bool)
-stepGlide ctx alpha (key, ScrollGlide wid target axes) = do
+-- | Move a glide one step, and drop it once it lands.
+stepGlide :: Context -> Float -> ScrollGlide -> IO (Maybe ScrollGlide)
+stepGlide ctx alpha g@(ScrollGlide wid target axes) = do
   cur <- projectAxes axes <$> getScrollOffsetIn ctx wid axes
   let next = V2 (stepAxis (v2X cur) (v2X target)) (stepAxis (v2Y cur) (v2Y target))
   writeScrollOffsetIn ctx wid axes next
-  pure (key, nearOffset next target)
+  pure (if nearOffset next target then Nothing else Just g)
   where
     stepAxis c t
       | abs (t - c) <= 1 = t

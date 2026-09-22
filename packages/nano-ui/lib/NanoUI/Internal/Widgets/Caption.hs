@@ -50,7 +50,7 @@ import NanoUI.Internal.Style
   , styleFg
   , tight
   )
-import NanoUI.Internal.Types (Color, Rect (..), V2 (..), lerpColor)
+import NanoUI.Internal.Types (Color, Rect (..), V2 (..), lerpColor, rectUnion)
 import NanoUI.Widgets.Custom
   ( CanvasM
   , CustomWidgetSpec (..)
@@ -172,9 +172,7 @@ captionButtonsConfigured cfg maximized = do
         | respClicked mid = Just CaptionToggleMaximize
         | respClicked close = Just CaptionClose
         | otherwise = Nothing
-  pure (action, spanOf (respRect mini) (respRect close))
-  where
-    spanOf a b = Rect (rectX a) (rectY a) (rectX b + rectW b - rectX a) (max (rectH a) (rectH b))
+  pure (action, rectUnion (respRect mini) (respRect close))
 
 --------------------------------------------------------------------------------
 -- The window's border
@@ -251,8 +249,9 @@ dragSpans (Rect rx ry rw rh) taken =
 -- pixels, so that a one-pixel line covers one pixel.
 glyphBox :: Float -> Rect -> Rect
 glyphBox s (Rect x y w h) = Rect (whole (x + (w - s) / 2)) (whole (y + (h - s) / 2)) s s
-  where
-    whole v = fromIntegral (round v :: Int)
+
+whole :: Float -> Float
+whole v = fromIntegral (round v :: Int)
 
 drawGlyph :: CaptionGlyph -> Rect -> Color -> CanvasM ()
 drawGlyph glyph box@(Rect x y w h) col = case glyph of
@@ -271,8 +270,6 @@ drawGlyph glyph box@(Rect x y w h) col = case glyph of
   GlyphClose -> do
     drawStrokeAA (V2 (x + 0.5) (y + 0.5)) (V2 (x + w - 0.5) (y + h - 0.5)) 1.2 col
     drawStrokeAA (V2 (x + w - 0.5) (y + 0.5)) (V2 (x + 0.5) (y + h - 0.5)) 1.2 col
-  where
-    whole v = fromIntegral (round v :: Int)
 
 -- | A one-pixel outline, as four fills: the canvas's stroked rectangle is a
 -- rounded one, and these are squares.

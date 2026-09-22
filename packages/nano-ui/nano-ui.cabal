@@ -148,7 +148,6 @@ library
         NanoUI.Internal.Types
         NanoUI.Internal.WidgetText
         NanoUI.Internal.Widgets.Node
-        NanoUI.Internal.Widgets.Chrome
         NanoUI.Internal.Widgets.Caption
         NanoUI.Internal.Widgets.Layout
         NanoUI.Internal.Widgets.Tabs
