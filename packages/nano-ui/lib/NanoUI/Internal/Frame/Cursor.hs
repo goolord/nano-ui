@@ -57,7 +57,7 @@ import NanoUI.Internal.Layout.Arena
   , getWidgetId
   , isScrollNode
   )
-import NanoUI.Internal.Monad ((<&&>))
+import NanoUI.Internal.Monad (ifM, (<&&>))
 import NanoUI.Internal.Types (Rect (..), V2 (..), rectContains)
 import NanoUI.Internal.WidgetText (hasFlag, numericStepperRects, textInputFlagNumeric)
 import NanoUI.Internal.Widgets.Custom (mkCustomDrawContext)
@@ -122,18 +122,13 @@ textFieldHoverCursorKind ctx inp = do
   mWid <- textFieldWidgetAtMouse ctx mouse
   forM mWid $ \wid -> do
     onClear <- searchClearHit ctx wid mouse
-    onStepper <- numericStepperHit ctx wid mouse
+    onStepper <- withWidgetNode ctx wid False $ \idx -> numericStepperHit ctx idx mouse
     pure (if onClear || onStepper then UiCursorPointer else UiCursorText)
 
 -- | Whether the pointer is over a numeric field's stepper, which takes the
 -- pointer cursor rather than the text cursor.
-numericStepperHit :: Context -> WidgetId -> V2 -> IO Bool
-numericStepperHit ctx wid mouse =
-  withWidgetNode ctx wid False $ \idx -> numericStepperHitAt ctx idx mouse
-
--- | 'numericStepperHit' for an already-resolved node.
-numericStepperHitAt :: Context -> NodeIdx -> V2 -> IO Bool
-numericStepperHitAt ctx idx mouse = do
+numericStepperHit :: Context -> NodeIdx -> V2 -> IO Bool
+numericStepperHit ctx idx mouse = do
   si <- getStyleIdx (ctxNodeArena ctx) idx
   if not (hasFlag textInputFlagNumeric si)
     then pure False
@@ -153,90 +148,53 @@ scrollThumbHit ctx mouse =
  where
   na = ctxNodeArena ctx
 
+-- | The cursor widget @wid@ asks for with the pointer at @mouse@: the default
+-- unless the pointer is on the visible part of its node, and a custom
+-- widget's own choice.
 cursorKindAt :: Context -> WidgetId -> V2 -> Input -> IO UiCursorKind
 cursorKindAt ctx wid mouse inp
   | hashWidgetId wid == 0 = pure UiCursorDefault
-  | otherwise = do
-      disabled <- isDisabled ctx wid
-      if disabled
-        then pure UiCursorDefault
-        else do
+  | otherwise =
+      ifM (isDisabled ctx wid) (pure UiCursorDefault) $
+        -- Resolve the node through the arena's id index rather than building
+        -- a type table of every widget for two lookups.
+        withWidgetNode ctx wid UiCursorDefault $ \idx -> do
+          visible <- nodePointVisible ctx idx mouse
+          -- The widget's hit rect, where the pointer is not clipped off it.
+          let hitRect = if visible then scrollHitRect ctx wid else pure Nothing
+              over kind r = if rectContains r mouse then kind else UiCursorDefault
+              whenVisible kind = pure (if visible then kind else UiCursorDefault)
           mCursorFn <- (>>= cdrCursor) <$> lookupCustomDrawing ctx wid
           case mCursorFn of
-            Just cursorFn -> do
-              visible <- widgetVisibleAt ctx wid mouse
-              if not visible
-                then pure UiCursorDefault
-                else cursorFn <$> mkCustomDrawContext ctx (ctxFontMetrics ctx) wid
-            Nothing -> do
-              -- Resolve the node through the arena's id index rather than
-              -- building a type table of every widget for two lookups.
-              withWidgetNode ctx wid UiCursorDefault $ \idx ->
-                getNodeType (ctxNodeArena ctx) idx >>= \case
-                  NodeButton -> widgetPointerCursor ctx idx mouse
-                  NodeCheckbox -> widgetPointerCursor ctx idx mouse
-                  NodeRadio -> widgetPointerCursor ctx idx mouse
-                  NodeTree -> widgetPointerCursor ctx idx mouse
-                  NodeSelect -> rectCursorKind UiCursorPointer ctx idx wid mouse
-                  NodeColorPicker -> pure UiCursorPointer
-                  NodeTextInput -> textInputCursorKind ctx idx wid mouse
-                  NodeTextArea -> textAreaCursorKind ctx idx wid mouse
-                  NodeSlider -> sliderCursorKind ctx idx wid mouse inp
-                  _ -> pure UiCursorDefault
-
--- | @kind@ over the widget's visible rect, the default cursor elsewhere.
-rectCursorKind :: UiCursorKind -> Context -> NodeIdx -> WidgetId -> V2 -> IO UiCursorKind
-rectCursorKind kind ctx idx wid mouse = do
-  mrect <- visibleHitRect ctx idx wid mouse
-  pure (if maybe False (`rectContains` mouse) mrect then kind else UiCursorDefault)
-
--- | The widget's hit rect, or 'Nothing' when the pointer is clipped off it.
-visibleHitRect :: Context -> NodeIdx -> WidgetId -> V2 -> IO (Maybe Rect)
-visibleHitRect ctx idx wid mouse = do
-  visible <- nodePointVisible ctx idx mouse
-  if visible then scrollHitRect ctx wid else pure Nothing
-
-widgetVisibleAt :: Context -> WidgetId -> V2 -> IO Bool
-widgetVisibleAt ctx wid mouse = do
-  withWidgetNode ctx wid False $ \idx -> nodePointVisible ctx idx mouse
-
-widgetPointerCursor :: Context -> NodeIdx -> V2 -> IO UiCursorKind
-widgetPointerCursor ctx idx mouse = do
-  visible <- nodePointVisible ctx idx mouse
-  pure (if visible then UiCursorPointer else UiCursorDefault)
-
-sliderCursorKind :: Context -> NodeIdx -> WidgetId -> V2 -> Input -> IO UiCursorKind
-sliderCursorKind ctx idx wid mouse inp = do
-  active <- readIORef (ctxActiveId ctx)
-  if active == wid && inputMouseDown inp
-    then pure UiCursorGrabbing
-    else do
-      mrect <- visibleHitRect ctx idx wid mouse
-      pure $
-        case mrect of
-          Nothing -> UiCursorDefault
-          Just (Rect x y w h) ->
-            grabDragKind (rectContains (sliderHitBounds x y w h) mouse) False inp
-
-textInputCursorKind :: Context -> NodeIdx -> WidgetId -> V2 -> IO UiCursorKind
-textInputCursorKind ctx idx wid mouse = do
-  mrect <- visibleHitRect ctx idx wid mouse
-  case mrect of
-    Just (Rect x y w h) -> do
-      (field, _) <- nodeTextFieldGeom ctx idx x y w h
-      onStepper <- numericStepperHitAt ctx idx mouse
-      pure $
-        if onStepper
-          then UiCursorPointer
-          else if rectContains field mouse then UiCursorText else UiCursorDefault
-    Nothing -> pure UiCursorDefault
-
-textAreaCursorKind :: Context -> NodeIdx -> WidgetId -> V2 -> IO UiCursorKind
-textAreaCursorKind ctx idx wid mouse = do
-  onScroll <- isMouseOnTextAreaScrollBarAt ctx idx mouse
-  if onScroll
-    then pure UiCursorDefault
-    else rectCursorKind UiCursorText ctx idx wid mouse
+            Just cursorFn
+              | visible -> cursorFn <$> mkCustomDrawContext ctx (ctxFontMetrics ctx) wid
+              | otherwise -> pure UiCursorDefault
+            Nothing ->
+              getNodeType (ctxNodeArena ctx) idx >>= \case
+                NodeButton -> whenVisible UiCursorPointer
+                NodeCheckbox -> whenVisible UiCursorPointer
+                NodeRadio -> whenVisible UiCursorPointer
+                NodeTree -> whenVisible UiCursorPointer
+                NodeSelect -> maybe UiCursorDefault (over UiCursorPointer) <$> hitRect
+                NodeColorPicker -> pure UiCursorPointer
+                NodeTextInput ->
+                  hitRect >>= \case
+                    Nothing -> pure UiCursorDefault
+                    Just (Rect x y w h) -> do
+                      (field, _) <- nodeTextFieldGeom ctx idx x y w h
+                      onStepper <- numericStepperHit ctx idx mouse
+                      pure (if onStepper then UiCursorPointer else over UiCursorText field)
+                NodeTextArea ->
+                  ifM (isMouseOnTextAreaScrollBarAt ctx idx mouse) (pure UiCursorDefault) $
+                    maybe UiCursorDefault (over UiCursorText) <$> hitRect
+                NodeSlider -> do
+                  active <- readIORef (ctxActiveId ctx)
+                  if active == wid && inputMouseDown inp
+                    then pure UiCursorGrabbing
+                    else do
+                      let onTrack (Rect x y w h) = rectContains (sliderHitBounds x y w h) mouse
+                      maybe UiCursorDefault (\r -> grabDragKind (onTrack r) False inp) <$> hitRect
+                _ -> pure UiCursorDefault
 
 -- | The cursor of the newest zone the view registered under the pointer
 -- ('ctxCursorZones'), or the resize arrow for a whole column-resize drag.
