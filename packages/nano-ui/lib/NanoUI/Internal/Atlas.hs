@@ -18,7 +18,6 @@ import Data.ByteString qualified as BS
 import Data.Functor ((<&>))
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
-import Data.Maybe (listToMaybe)
 import Data.Word (Word8)
 import Foreign.ForeignPtr (ForeignPtr, mallocForeignPtrBytes, withForeignPtr)
 import Foreign.Marshal.Utils (copyBytes, fillBytes)
@@ -58,14 +57,11 @@ data AtlasState = AtlasState
   -- ^ The last id 'freshImageId' returned.
   , asResizedGen :: {-# UNPACK #-} !Int
   -- ^ The generation that last gave the atlas a new size.
-  , asWrites :: [(Int, AtlasSlot)]
-  -- ^ The slot each recent generation wrote, newest first: at least the last
-  -- 'atlasWriteLog', and fewer than twice as many.
+  , asWrites :: [AtlasSlot]
+  -- ^ The slot each recent generation wrote (each writes one), newest first:
+  -- at least the last 'atlasWriteLog', and fewer than twice as many.
   , asWriteCount :: {-# UNPACK #-} !Int
   -- ^ The length of 'asWrites'.
-  , asWritesFrom :: {-# UNPACK #-} !Int
-  -- ^ The generation of the oldest write still in 'asWrites'; the ones
-  -- before it are forgotten.
   }
 
 newtype ImageAtlas = ImageAtlas (IORef AtlasState)
@@ -88,7 +84,6 @@ newImageAtlas = do
         , asResizedGen = 0
         , asWrites = []
         , asWriteCount = 0
-        , asWritesFrom = 1
         }
 
 registerImage :: ImageAtlas -> ImageId -> Int -> Int -> ByteString -> IO Bool
@@ -143,19 +138,12 @@ atlasWriteLog = 64
 -- no list.
 recordWrite :: AtlasSlot -> AtlasState -> AtlasState
 recordWrite slot st
-  | asWriteCount st + 1 < 2 * atlasWriteLog =
-      st {asGen = gen, asWrites = logged, asWriteCount = asWriteCount st + 1}
-  | otherwise =
-      let kept = take atlasWriteLog logged
-       in st
-            { asGen = gen
-            , asWrites = kept
-            , asWriteCount = atlasWriteLog
-            , asWritesFrom = maybe gen fst (listToMaybe (reverse kept))
-            }
+  | n < 2 * atlasWriteLog = st {asGen = gen, asWrites = logged, asWriteCount = n}
+  | otherwise = st {asGen = gen, asWrites = take atlasWriteLog logged, asWriteCount = atlasWriteLog}
   where
+    n = asWriteCount st + 1
     gen = asGen st + 1
-    logged = (gen, slot) : asWrites st
+    logged = slot : asWrites st
 
 -- | What a texture that holds the atlas as of some generation must upload to
 -- hold it as of now.
@@ -175,10 +163,11 @@ atlasChanges (ImageAtlas ref) since = do
   st <- readIORef ref
   let gen = asGen st
       upload
-        | since <= 0 || since > gen || since < asResizedGen st || since + 1 < asWritesFrom st = AtlasWhole
+        | since <= 0 || since > gen || since < asResizedGen st = AtlasWhole
+        -- The log holds one write a generation, newest first.
+        | gen - since > asWriteCount st = AtlasWhole
         | otherwise =
-            AtlasRegions
-              [(x, y, w, h) | (_, AtlasSlot x y w h) <- takeWhile ((> since) . fst) (asWrites st)]
+            AtlasRegions [(x, y, w, h) | AtlasSlot x y w h <- take (gen - since) (asWrites st)]
   pure $
     if gen == 0 || gen == since
       then Nothing
