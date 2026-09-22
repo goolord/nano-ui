@@ -82,7 +82,6 @@ library
         NanoUI.Sdl.Internal.Display
         NanoUI.Sdl.Internal.Font
         NanoUI.Sdl.Internal.Font.Inter
-        NanoUI.Sdl.Internal.Font.Resolve
         NanoUI.Sdl.Internal.Font.Search
         NanoUI.Sdl.Internal.Image
         NanoUI.Sdl.Internal.Render

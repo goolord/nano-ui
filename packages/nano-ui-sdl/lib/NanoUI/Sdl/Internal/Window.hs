@@ -1,9 +1,10 @@
+{-# LANGUAGE RecordWildCards #-}
+
 -- | SDL session resources, window options, font/display synchronisation, and screenshots.
 module NanoUI.Sdl.Internal.Window
   ( RgbaImage (..)
   , SdlEnv (..)
   , Retain (..)
-  , noRetain
   , SdlOptions (..)
   , WindowDecorations (..)
   , RenderDriver (..)
@@ -42,8 +43,7 @@ import NanoUI (ImageId, Input (..), Size (..), Theme, V2 (..))
 import NanoUI.Internal.Context (Context (..), setDrawSnapScale)
 import NanoUI.Testing (clearMeasureCache, damageFull, markDirty, setHost, setWakeLoop)
 import NanoUI.Sdl.Internal.Display
-  ( defaultFontSize
-  , initRefreshEvent
+  ( initRefreshEvent
   , pushRefreshEvent
   , queryMouseWindowPos
   , queryWindowPixelDensity
@@ -61,6 +61,7 @@ import NanoUI.Sdl.Internal.Font
   , SdlFontCache
   , destroyGlyphAtlas
   , destroySdlFontCache
+  , embeddedFontSource
   , newGlyphAtlas
   , newSdlFontCache
   , reloadSdlFontCache
@@ -68,11 +69,7 @@ import NanoUI.Sdl.Internal.Font
   , withSdlFontCache
   , withTtf
   )
-import NanoUI.Sdl.Internal.Font.Resolve
-  ( resolveNanoUIFont
-  , defaultFontSearch
-  , defaultFontSearchMono
-  )
+import NanoUI.Sdl.Internal.Font.Search (searchFonts)
 import NanoUI.Sdl.Internal.NanoUIFont (NanoUIFont (..))
 import NanoUI.Sdl.Internal.Debug (SdlDebugSampler, newSdlDebugSampler)
 import NanoUI.Sdl.Internal.Dialog.Types (DialogState (..), clearDialogState, newDialogState)
@@ -175,9 +172,24 @@ defaultSdlOptions =
     , sdlAppVsync = True
     , sdlRenderDriver = RenderDriverAuto
     , sdlAppContinuous = False
-    , sdlAppFont = defaultFontSearch
-    , sdlAppMonoFont = defaultFontSearchMono
-    , sdlAppFontSize = defaultFontSize
+    , sdlAppFont =
+        FontSearch
+          [ "Inter"
+          , "Montserrat"
+          , "Work Sans"
+          , "Roboto"
+          , "Open Sans"
+          , "Helvetica Neue"
+          ]
+    , sdlAppMonoFont =
+        FontSearch
+          [ "Consolas"
+          , "Courier New"
+          , "Liberation Mono"
+          , "DejaVu Sans Mono"
+          , "monospace"
+          ]
+    , sdlAppFontSize = 16
     , sdlAppTheme = Nothing
     , sdlAppShouldQuit = const False
     , sdlAppImages = mempty
@@ -258,9 +270,6 @@ data Retain = Retain
   , retainScale :: !Float
   }
 
-noRetain :: Retain
-noRetain = Retain nullPtr 0 0 0 0 0
-
 defaultWindowSize :: Size
 defaultWindowSize = Size 1280 800
 
@@ -286,7 +295,7 @@ windowZoom env = resolveZoom (sdlWindow env) =<< readIORef (sdlUiScaleRef env)
 syncDisplay :: Context -> SdlEnv -> Input -> IO (Context, Input)
 syncDisplay ctx env inp = do
   density <- maybe (queryWindowPixelDensity (sdlWindow env)) pure (sdlForcedScale env)
-  zoom <- resolveZoom (sdlWindow env) =<< readIORef (sdlUiScaleRef env)
+  zoom <- windowZoom env
   let scale = density * zoom
   oldScale <- readIORef (sdlScaleRef env)
   let scaleChanged = abs (scale - oldScale) > scaleEpsilon
@@ -316,14 +325,10 @@ syncDisplay ctx env inp = do
     damageFull ctx
     markDirty ctx
   queried <- queryWindowLogicalSize (sdlWindow env)
-  let unzoom (Size sw sh) = Size (sw / zoom) (sh / zoom)
-      winSize =
-        case unzoom queried of
-          Size 0 0 ->
-            case inputWindowSize inp of
-              Size 0 0 -> defaultWindowSize
-              s -> s
-          s -> s
+  let winSize = case (queried, inputWindowSize inp) of
+        (Size 0 0, Size 0 0) -> defaultWindowSize
+        (Size 0 0, s) -> s
+        (Size sw sh, _) -> Size (sw / zoom) (sh / zoom)
   V2 mx my <- queryMouseWindowPos
   let mouse = V2 (mx / zoom) (my / zoom)
   ctxMeasured <- readIORef (sdlCachedCtx env)
@@ -462,13 +467,13 @@ startSdlWindow bench opts ctx guessedDriver fontSource monoSource = do
   -- NANO_FORCE_SCALE: debug override of the pixel density.
   forcedEnv <- liftIO $ lookupEnv "NANO_FORCE_SCALE"
   let
-    forcedScale = case forcedEnv >>= readMaybe of
+    sdlForcedScale = case forcedEnv >>= readMaybe of
       Just s | s > 0 -> Just s
       _ -> Nothing
   -- Before the window, so that it is released after the window is gone: the
   -- window holds the hit test this frees.
-  chromeState <- mkAcquire newChromeState clearChromeState
-  (win, ren) <-
+  sdlChromeState <- mkAcquire newChromeState clearChromeState
+  (sdlWindow, sdlRenderer) <-
     mkAcquire
       ( retryWithoutRenderDriver guessedDriver $
           TextForeign.withCString (sdlWindowTitle opts) $ \titlePtr ->
@@ -489,84 +494,71 @@ startSdlWindow bench opts ctx guessedDriver fontSource monoSource = do
           destroyRendererSafe ren
           destroyWindowSafe win
       )
-  density <- liftIO $ queryWindowPixelDensity win
-  zoom <- liftIO $ resolveZoom win (sdlAppUiScale opts)
+  density <- liftIO $ queryWindowPixelDensity sdlWindow
+  zoom <- liftIO $ resolveZoom sdlWindow (sdlAppUiScale opts)
   -- The requested size is logical, so the window grows with the zoom.
-  liftIO $ when (abs (zoom - 1) > scaleEpsilon) $ zoomWindow win (sdlWindowSize opts) zoom
+  liftIO $ when (abs (zoom - 1) > scaleEpsilon) $ zoomWindow sdlWindow (sdlWindowSize opts) zoom
   -- After the zoom: SDL sizes a borderless window as though its view were
   -- the whole of it, so the desktop's frame goes on around a view that is
   -- already the size asked for, and the window grows by the frame.
-  liftIO $ when (sdlWindowDecorations opts /= DecorationsFull) (applyDecorations win (sdlWindowDecorations opts))
+  liftIO $ when (sdlWindowDecorations opts /= DecorationsFull) (applyDecorations sdlWindow (sdlWindowDecorations opts))
   let
     scale = density * zoom
   liftIO $ setDrawSnapScale ctx scale
-  refreshHz <- liftIO $ queryWindowRefreshHz win
-  rendererName <-
+  refreshHz <- liftIO $ queryWindowRefreshHz sdlWindow
+  sdlRendererName <-
     liftIO $
-      getRendererName ren >>= \name ->
+      getRendererName sdlRenderer >>= \name ->
         if PtrConst.unsafeToPtr name == nullPtr
           then pure "unknown"
           else TextForeign.peekCString (PtrConst.unsafeToPtr name)
-  scaleRef <- liftIO $ newIORef scale
-  uiScaleRef <- liftIO $ newIORef (sdlAppUiScale opts)
-  fontRequestRef <- liftIO $ newIORef (sdlAppFont opts)
-  fontAppliedRef <- liftIO $ newIORef (sdlAppFont opts)
-  glyphAtlas <- mkAcquire (newGlyphAtlas ren) destroyGlyphAtlas
-  images <- mkAcquire newImageAtlas destroyImageAtlas
-  cursors <- mkAcquire initCursors destroyCursors
-  debug <- liftIO newSdlDebugSampler
-  retain <- mkAcquire (newIORef noRetain) $ \ref -> do
+  sdlScaleRef <- liftIO $ newIORef scale
+  sdlUiScaleRef <- liftIO $ newIORef (sdlAppUiScale opts)
+  sdlFontRequestRef <- liftIO $ newIORef (sdlAppFont opts)
+  sdlFontAppliedRef <- liftIO $ newIORef (sdlAppFont opts)
+  sdlGlyphAtlas <- mkAcquire (newGlyphAtlas sdlRenderer) destroyGlyphAtlas
+  sdlImages <- mkAcquire newImageAtlas destroyImageAtlas
+  sdlCursors <- mkAcquire initCursors destroyCursors
+  sdlDebug <- liftIO newSdlDebugSampler
+  sdlRetain <- mkAcquire (newIORef (Retain nullPtr 0 0 0 0 0)) $ \ref -> do
     tex <- retainTexture <$> readIORef ref
     unless (tex == nullPtr) $ destroyTexture tex
-  fontCache <-
+  sdlFontCache <-
     mkAcquire
-      (newSdlFontCache fontSource monoSource glyphAtlas (sdlAppFontSize opts) scaleRef)
+      (newSdlFontCache fontSource monoSource sdlGlyphAtlas (sdlAppFontSize opts) sdlScaleRef)
       destroySdlFontCache
-  cachedCtx <-
-    liftIO $ newIORef . withSdlClipboard =<< withSdlFontCache fontCache ctx
+  sdlCachedCtx <-
+    liftIO $ newIORef . withSdlClipboard =<< withSdlFontCache sdlFontCache ctx
   let
-    refreshPeriod = if refreshHz > 0 then 1 / fromIntegral refreshHz else 1 / 60
+    sdlRefreshPeriod = if refreshHz > 0 then 1 / fromIntegral refreshHz else 1 / 60
+    sdlVsync = sdlAppVsync opts
+    sdlContinuous = sdlAppContinuous opts
   liftIO $ do
-    scaleOk <- setRenderScale ren 1 1
+    scaleOk <- setRenderScale sdlRenderer 1 1
     unless scaleOk $ fail "SDL_SetRenderScale failed"
   unless bench $
     mkAcquire
-      ( void (setRenderVSync ren (if sdlAppVsync opts then 1 else 0))
-          >> void (startTextInputSafe win)
+      ( void (setRenderVSync sdlRenderer (if sdlVsync then 1 else 0))
+          >> void (startTextInputSafe sdlWindow)
       )
-      (const (void (stopTextInputSafe win)))
-  dialogState <- mkAcquire newDialogState clearDialogState
-  lastPresented <- liftIO $ newIORef False
-  batch <- mkAcquire (newRenderBatch ren) destroyRenderBatch
+      (const (void (stopTextInputSafe sdlWindow)))
+  sdlDialogState <- mkAcquire newDialogState clearDialogState
+  sdlLastPresented <- liftIO $ newIORef False
+  sdlBatch <- mkAcquire (newRenderBatch sdlRenderer) destroyRenderBatch
   let
-    env =
-      SdlEnv
-        { sdlWindow = win
-        , sdlRenderer = ren
-        , sdlRendererName = rendererName
-        , sdlBatch = batch
-        , sdlFontRequestRef = fontRequestRef
-        , sdlFontAppliedRef = fontAppliedRef
-        , sdlForcedScale = forcedScale
-        , sdlScaleRef = scaleRef
-        , sdlUiScaleRef = uiScaleRef
-        , sdlGlyphAtlas = glyphAtlas
-        , sdlImages = images
-        , sdlCursors = cursors
-        , sdlDebug = debug
-        , sdlRetain = retain
-        , sdlLastPresented = lastPresented
-        , sdlVsync = sdlAppVsync opts
-        , sdlRefreshPeriod = refreshPeriod
-        , sdlContinuous = sdlAppContinuous opts
-        , sdlCachedCtx = cachedCtx
-        , sdlFontCache = fontCache
-        , sdlDialogState = dialogState
-        , sdlChromeState = chromeState
-        }
-  ctx' <- liftIO $ readIORef cachedCtx
+    env = SdlEnv {..}
+  ctx' <- liftIO $ readIORef sdlCachedCtx
   liftIO $ setHost ctx' env >> setWakeLoop ctx' pushRefreshEvent
   pure (ctx', env)
+
+-- | Resolve a font request. A search falls back to bundled Inter when no
+-- family matches; an explicit file path is passed through, and loading it can
+-- still fail later.
+resolveNanoUIFont :: NanoUIFont -> IO FontSource
+resolveNanoUIFont = \case
+  DefaultFont -> pure embeddedFontSource
+  FontFilePath path -> pure (FontFromPath path)
+  FontSearch names -> maybe embeddedFontSource FontFromPath <$> searchFonts names
 
 -- | Write the last presented frame to a BMP file. A retained session reads
 -- its retained texture, since SDL leaves the window backbuffer undefined

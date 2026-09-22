@@ -2,8 +2,7 @@
 
 -- | SDL window dimensions, display scale, refresh timing, and event-loop wake support.
 module NanoUI.Sdl.Internal.Display
-  ( defaultFontSize
-  , queryWindowPixelDensity
+  ( queryWindowPixelDensity
   , queryWindowRefreshHz
   , queryWindowLogicalSize
   , queryMouseWindowPos
@@ -32,9 +31,6 @@ import SDL3.Sys.Mouse (getMouseState)
 import SDL3.Sys.Bindgen.Rect (SDL_Rect (..))
 import SDL3.Sys.Video (getDisplayForWindow, getDisplayUsableBounds, getWindowPixelDensity, getWindowSize, setWindowPosition, setWindowSize)
 import System.IO.Unsafe (unsafePerformIO)
-
-defaultFontSize :: Float
-defaultFontSize = 16
 
 -- | Backbuffer pixels per window coordinate: the factor the retained
 -- framebuffer, glyph rasterization and snapping need. This is not
