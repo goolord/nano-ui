@@ -45,7 +45,7 @@ import NanoUI.Internal.Input
   , inputMousePressed
   , inputMouseReleased
   )
-import NanoUI.Internal.Layout.Arena (NodeIdx, NodeType (NodeTextArea), getNodeType, getRect, getWidgetId)
+import NanoUI.Internal.Layout.Arena (NodeIdx, NodeType (NodeTextArea), getNodeRect, getNodeType, getWidgetId)
 import NanoUI.Internal.Store (Slot (..), fieldInt, fieldPoint, findSlot, insertSlot, lookupSlot)
 import NanoUI.Internal.Style (Style (..), Theme, scrollBarThumbColor, scrollBarTrackColor, themePanel, themeSelection)
 import NanoUI.Internal.Types (Rect (..), V2 (..), clamp, onGrid, rectContains)
@@ -198,10 +198,9 @@ textAreaHitForWidget ctx wid = do
     if nt /= NodeTextArea
       then pure Nothing
       else do
-        (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+        field <- getNodeRect (ctxNodeArena ctx) idx
         fm <- resolveTextAreaFont ctx idx
-        let field = Rect x y w h
-            Rect clipX _ _ _ = textAreaFieldClip fm field
+        let Rect clipX _ _ _ = textAreaFieldClip fm field
         pure
           ( Just
               TextAreaHit

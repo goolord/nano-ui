@@ -80,7 +80,6 @@ import NanoUI.Internal.Layout.Arena
   , forChildNodes_
   , getDirection
   , getFirstChild
-  , getLayoutRect
   , getNextSibling
   , getNodeRect
   , getNodeType
@@ -92,7 +91,6 @@ import NanoUI.Internal.Layout.Arena
   , isScrollNode
   , setClipRect
   , setRect
-  , snapshotLayoutRects
   , walkAncestors
   )
 import NanoUI.Internal.Style (Padding (..), themePanel)
@@ -101,7 +99,6 @@ import NanoUI.Internal.Types (Rect (..), V2 (..), rectContains, rectHit, rectInt
 applyScrollOffsets :: Context -> IO ()
 applyScrollOffsets ctx = do
   beginScrollMetrics ctx
-  snapshotLayoutRects (ctxNodeArena ctx)
   -- A frame that added no widgets has no root to walk.
   count <- arenaCount (ctxNodeArena ctx)
   when (count > 0) $ do
@@ -113,20 +110,18 @@ transformSubtree ctx idx scrollX scrollY parentClip = do
   let
     na = ctxNodeArena ctx
   nt <- getNodeType na idx
-  (lx, ly, lw, lh) <- getLayoutRect na idx
+  (lx, ly, vw, vh) <- getRect na idx
   let
     floating = isFloatingNode nt
     (sx, sy) = if floating then (0, 0) else (scrollX, scrollY)
+    !vx = lx + sx
+    !vy = ly + sy
     within r = fromMaybe parentClip (rectIntersect parentClip r)
-  (vx, vy, vw, vh) <-
-    if floating
-      then getRect na idx
-      else pure (lx + sx, ly + sy, lw, lh)
   unless floating $ setRect na idx vx vy vw vh
   (!childScrollX, !childScrollY, !childClip) <-
     if isScrollNode nt
       then do
-        (axes, viewport, range) <- scrollNodeGeometry ctx idx (Rect vx vy lw lh)
+        (axes, viewport, range) <- scrollNodeGeometry ctx idx (Rect vx vy vw vh)
         wid <- getWidgetId na idx
         -- The only pass that sees a scroller's placed geometry. Everything
         -- that scrolls one between frames reads it back from here.

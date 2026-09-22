@@ -100,10 +100,8 @@ module NanoUI.Internal.Layout.Arena
   , getRect
   , getNodeRect
   , setRect
-  , getLayoutRect
   , getClipRect
   , setClipRect
-  , snapshotLayoutRects
   , getText
   , getOptions
   , setOptions
@@ -155,12 +153,12 @@ module NanoUI.Internal.Layout.Arena
   ) where
 
 import Control.Exception (bracket_)
-import Control.Monad (foldM, forM_, unless, when)
+import Control.Monad (forM_, unless, when)
 import Data.Bits (shiftL, shiftR, xor, (.&.), (.|.))
 import Data.HashTable.IO (BasicHashTable)
 import qualified Data.HashTable.IO as HT
 import Data.Hashable (Hashable, hash)
-import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IM
 import Data.IntSet (IntSet)
@@ -322,6 +320,9 @@ data NodeClass
   -- selection state in the store.
   | DrawingNodes
   -- ^ Widgets the application draws ('NodeDrawing').
+  | FloatingNodes
+  -- ^ Windows, modals and popups ('isFloatingNode'), so the passes that look
+  -- only at floating panels skip the rest of the arena.
   deriving (Eq, Enum, Bounded)
 
 -- | The constructor of a 'Sizing' without its number, as the arena stores it
@@ -451,10 +452,6 @@ data NodeArena = NodeArena
   -- ^ Index of the last modal node added this frame, or -1. Node types are
   -- fixed when a node is added and indices only grow until a reset, so this
   -- is the topmost modal without a scan.
-  , naFloatingNodes :: IORef [NodeIdx]
-  -- ^ Floating nodes (windows, modals, popups) added this frame, last added
-  -- first, so the passes that look only at floating panels skip the rest of
-  -- the arena.
   , naClassNodes :: IORef (IOArr Int)
   -- ^ The node lists of 'NodeClass', one after another: class @c@ keeps its
   -- @i@th node at element @fromEnum c * capacity + i@. A list never holds
@@ -527,24 +524,20 @@ initialCapacity = 256
 --   Its position pass then writes the placed rect. Last,
 --   'NanoUI.Internal.Frame.Scroll.applyScrollOffsets' moves the origin by the offsets
 --   of the scroll containers around the node.
--- * @geomLayoutX@, @geomLayoutY@: the origin the solver placed the node at,
---   before scrolling moved it. 'snapshotLayoutRects' fills them in.
-geomStride, geomX, geomY, geomW, geomH, geomLayoutX, geomLayoutY :: Int
-geomStride = 10
+geomStride, geomX, geomY, geomW, geomH :: Int
+geomStride = 8
 geomX = 0
 geomY = 1
 geomW = 2
 geomH = 3
-geomLayoutX = 4
-geomLayoutY = 5
 
 -- | Columns of 'naArrGeom' that hold the node's clip rect, in window
 -- coordinates. See 'getClipRect'.
 geomClipX, geomClipY, geomClipW, geomClipH :: Int
-geomClipX = 6
-geomClipY = 7
-geomClipW = 8
-geomClipH = 9
+geomClipX = 4
+geomClipY = 5
+geomClipW = 6
+geomClipH = 7
 
 -- | Columns of 'naArrStyle': the numbers the node was laid out with, in
 -- logical pixels unless stated. @styleStride@ is the width of a node's row.
@@ -761,7 +754,6 @@ newNodeArena = do
   naSubHash <- newIORef =<< newPrimArray cap
   naMeasured <- newIORef =<< newPrimArray (cap * 2)
   naTopModal <- newIORef (-1)
-  naFloatingNodes <- newIORef []
   naClassNodes <- newIORef =<< newPrimArray (cap * nodeClassCount)
   naClassCounts <- newPrimArray nodeClassCount
   setPrimArray naClassCounts 0 nodeClassCount 0
@@ -786,7 +778,6 @@ resetNodeArena na = do
   writeIORef (naScopeSig na) 0
   writePrimArray (naInputSig na) 0 0
   writeIORef (naTopModal na) (-1)
-  writeIORef (naFloatingNodes na) []
   setPrimArray (naClassCounts na) 0 nodeClassCount 0
   -- 0 marks a memo entry that was never written, so the tag wraps to 1.
   !ft <- readIORef (naFrameTag na)
@@ -832,7 +823,7 @@ mixNodeInput na idx tag v = do
 -- | Number of modal, window, and popup nodes added since the last reset.
 {-# INLINE floatingNodeCount #-}
 floatingNodeCount :: NodeArena -> IO Int
-floatingNodeCount na = length <$> readIORef (naFloatingNodes na)
+floatingNodeCount na = readPrimArray (naClassCounts na) (fromEnum FloatingNodes)
 
 -- | Live node count. Valid indices are 0 through count minus one.
 {-# INLINE arenaCount #-}
@@ -1044,7 +1035,7 @@ addNode na nt parent dir wSiz hSiz pad gap minW minH maxW maxH grow ax ay = do
     writeTree a parent treeChildCount (cc + 1)
   when (isFloatingNode nt) $ do
     when (nt == NodeModal) $ writeIORef (naTopModal na) idx
-    modifyIORef' (naFloatingNodes na) (idx :)
+    pushClassNode na FloatingNodes idx
   when (isWidgetNode nt || isScrollNode nt) $ do
     pushClassNode na PointerNodes idx
     when (nt == NodeCheckbox || nt == NodeRadio || nt == NodeTree) $
@@ -1241,14 +1232,6 @@ setRect na idx x y w h = do
   writeGeom a idx geomW w
   writeGeom a idx geomH h
 
--- | Saved pre-scroll origin with the current width and height. Requires
--- 'snapshotLayoutRects' after layout.
-{-# INLINE getLayoutRect #-}
-getLayoutRect :: NodeArena -> NodeIdx -> IO (Float, Float, Float, Float)
-getLayoutRect na idx = do
-  a <- arenaArrays na
-  (,,,) <$> readGeom a idx geomLayoutX <*> readGeom a idx geomLayoutY <*> readGeom a idx geomW <*> readGeom a idx geomH
-
 -- | Positive-area clip in logical window coordinates. 'Nothing' means the
 -- stored clip is empty or unset; those cases share the same representation.
 {-# INLINE getClipRect #-}
@@ -1271,15 +1254,6 @@ setClipRect na idx (Rect x y w h) = do
   writeGeom a idx geomClipY y
   writeGeom a idx geomClipW w
   writeGeom a idx geomClipH h
-
--- | Save each node's origin after layout and before scrolling shifts it.
-{-# INLINE snapshotLayoutRects #-}
-snapshotLayoutRects :: NodeArena -> IO ()
-snapshotLayoutRects na = do
-  a <- arenaArrays na
-  forNodes_ na $ \i -> do
-    readGeom a i geomX >>= writeGeom a i geomLayoutX
-    readGeom a i geomY >>= writeGeom a i geomLayoutY
 
 -- | Cached layout signature and solved geometry for whole-layout reuse. The
 -- backing arrays are reused; only cache misses capture a new solved frame.
@@ -1734,12 +1708,12 @@ forFloatingNodes_ na t f = foldFloatingNodesM na (\() idx -> getNodeType na idx 
 -- | Strict fold over the floating nodes in arena order.
 {-# INLINE foldFloatingNodesM #-}
 foldFloatingNodesM :: NodeArena -> (a -> NodeIdx -> IO a) -> a -> IO a
-foldFloatingNodesM na f z = readIORef (naFloatingNodes na) >>= foldM f z . reverse
+foldFloatingNodesM na = foldClassNodesM na FloatingNodes
 
 -- | Strict fold over the floating nodes from last declared to first.
 {-# INLINE foldFloatingNodeRevM #-}
 foldFloatingNodeRevM :: NodeArena -> (a -> NodeIdx -> IO a) -> a -> IO a
-foldFloatingNodeRevM na f z = readIORef (naFloatingNodes na) >>= foldM f z
+foldFloatingNodeRevM na = foldClassNodeRevM na FloatingNodes
 
 -- | Visit direct children in reverse declaration order, including floating nodes.
 {-# INLINE forChildNodes_ #-}
@@ -1787,10 +1761,7 @@ findNodeRevM na p = do
 -- visits only the floating nodes.
 {-# INLINE findFloatingNodeRevM #-}
 findFloatingNodeRevM :: NodeArena -> (NodeIdx -> IO Bool) -> IO (Maybe NodeIdx)
-findFloatingNodeRevM na p = readIORef (naFloatingNodes na) >>= go
-  where
-    go [] = pure Nothing
-    go (i : is) = p i >>= \ok -> if ok then pure (Just i) else go is
+findFloatingNodeRevM na = findClassNodeRevM na FloatingNodes
 
 -- | Where the list of class @c@ starts in 'naClassNodes', and its length.
 {-# INLINE classNodes #-}

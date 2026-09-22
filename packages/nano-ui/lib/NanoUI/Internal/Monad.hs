@@ -227,21 +227,18 @@ currentId = withContext (fmap idContextWidgetId . readIORef . ctxIdContext)
 -- so conditional calls need their own 'scope'.
 {-# INLINE nextId #-}
 nextId :: Ui :> es => Eff es WidgetId
-nextId = do
-  ctx <- askContext
-  uiIO $ do
-    ic <- readIORef (ctxIdContext ctx)
-    writeIORef (ctxIdContext ctx) $! ic {siblingId = siblingId ic + 1}
-    pure (idContextWidgetId ic)
+nextId = withContext $ \ctx -> do
+  ic <- readIORef (ctxIdContext ctx)
+  writeIORef (ctxIdContext ctx) $! ic {siblingId = siblingId ic + 1}
+  pure (idContextWidgetId ic)
 
 -- | Reserve @n@ sibling ids without returning them. Non-positive counts do nothing.
 {-# INLINE burstNextIds #-}
 burstNextIds :: Ui :> es => Int -> Eff es ()
 burstNextIds n
   | n <= 0 = pure ()
-  | otherwise = do
-      ctx <- askContext
-      uiIO $ modifyIORef' (ctxIdContext ctx) $ \ic ->
+  | otherwise = withContext $ \ctx ->
+      modifyIORef' (ctxIdContext ctx) $ \ic ->
         let !sid = siblingId ic + fromIntegral n
          in ic {siblingId = sid}
 
@@ -479,8 +476,7 @@ lastRect wid = withContext (\ctx -> getPrevRect ctx wid)
 holdFocus :: Ui :> es => WidgetId -> Eff es ()
 holdFocus wid = withContext $ \ctx -> do
   focus <- getFocusId ctx
-  behindModal <- pointerBlockedByModal ctx
-  unless behindModal $ do
+  unlessM (pointerBlockedByModal ctx) $ do
     markTabConsumed ctx
     when (focus /= wid) $ do
       writeIORef (ctxFocusId ctx) wid

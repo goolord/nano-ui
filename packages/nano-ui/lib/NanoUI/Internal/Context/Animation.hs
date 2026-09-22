@@ -40,8 +40,8 @@ import NanoUI.Internal.Animation
 import NanoUI.Internal.Context.Core (damageKey, getsDamage, markDirty, markDirtyCovered)
 import NanoUI.Internal.Context.Types (AnimationState (..), Context (..), DamageState (..), ScrollState (..), intKey)
 import NanoUI.Internal.Id (WidgetId)
-import NanoUI.Internal.Layout.Arena (getRect, lookupNodeByKey)
-import NanoUI.Internal.Types (DamageBounds (..), defaultDamageSlop)
+import NanoUI.Internal.Layout.Arena (getNodeRect, lookupNodeByKey)
+import NanoUI.Internal.Types (DamageBounds (..), defaultDamageSlop, rectNonEmpty)
 
 -- | Whether the frame loop has to keep drawing: an animation is running, or a
 -- scroller is still gliding onto its target.
@@ -212,13 +212,9 @@ markDirtyIfOrphan ctx key = do
   unless (hadRect || hasNow) (markDirty ctx)
 
 nodeHasKey :: Context -> Int -> IO Bool
-nodeHasKey ctx key = do
-  mIdx <- lookupNodeByKey (ctxNodeArena ctx) key
-  case mIdx of
-    Nothing -> pure False
-    Just idx -> do
-      (_, _, w, h) <- getRect (ctxNodeArena ctx) idx
-      pure (w > 0 && h > 0)
+nodeHasKey ctx key =
+  maybe (pure False) (fmap rectNonEmpty . getNodeRect (ctxNodeArena ctx))
+    =<< lookupNodeByKey (ctxNodeArena ctx) key
 
 settleKey :: Context -> Int -> Float -> IO ()
 settleKey ctx key val = do

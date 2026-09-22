@@ -9,6 +9,7 @@ module NanoUI.Internal.Context.Drawing
   , lookupDrawFitEnvelope
   , pruneDrawOpCache
   , registerCustomDrawing
+  , registerCustomEntry
   , lookupCustomDrawing
   , cachedCustomDrawingOps
   , refreshCustomDrawingOps
@@ -16,11 +17,8 @@ module NanoUI.Internal.Context.Drawing
   , registerCustomMeasure
   , lookupCustomMeasure
   , customMeasureHooks
-  , registerCustomCursor
   , lookupCustomCursor
-  , registerCustomDamageSlop
   , lookupCustomDamageSlop
-  , registerPointerTracked
   , isPointerTracked
   , resetDrawingScopeCache
   ) where
@@ -137,9 +135,8 @@ cachedDrawingOps ctx wid content rect build = do
         Just DrawOpCacheEntry {doeContent = c, doeBounds = r, doeOps = ops}
           | c == content && not animated -> Just (r, ops)
         _ -> Nothing
-  serveOps hit rect (build rect) $ \ops ->
-    modifyIORef' (ctxDrawingCache ctx) $ \s ->
-      s {dcsDrawOpCache = IM.insert k (DrawOpCacheEntry content rect ops) (dcsDrawOpCache s)}
+  serveOps hit rect (build rect) $
+    registerIn dcsDrawOpCache (\m dc -> dc {dcsDrawOpCache = m}) ctx wid . DrawOpCacheEntry content rect
 
 -- | Reuse a derived layout while envelope, font, content key, and caller layout match.
 cachedWidgetLayout ::
@@ -153,9 +150,9 @@ cachedWidgetLayout ::
   IO Layout ->
   IO Layout
 cachedWidgetLayout ctx wid dw dh lh content incoming compute = do
+  cached <- lookupIn dcsDrawFitCache ctx wid
   let k = intKey wid
-  dc <- readIORef (ctxDrawingCache ctx)
-  case IM.lookup k (dcsDrawFitCache dc) of
+  case cached of
     Just e
       | dfcDw e == dw
           && dfcDh e == dh
@@ -207,12 +204,19 @@ pruneDrawOpCache ctx = do
         , dcsDrawFitCache = dcsDrawFitCache dc `IM.intersection` live
         }
 
--- | Register an interaction-aware painter. A nonzero content key must cover
--- its external inputs; zero requests rebuilding and comparison each frame.
+-- | Register an interaction-aware painter with the default cursor and
+-- repaint margin. A nonzero content key must cover its external inputs; zero
+-- requests rebuilding and comparison each frame.
 {-# INLINE registerCustomDrawing #-}
 registerCustomDrawing :: Context -> WidgetId -> Int -> CustomDrawBuild -> IO ()
 registerCustomDrawing ctx wid content build =
-  registerIn dcsCustomDrawings (\m dc -> dc {dcsCustomDrawings = m}) ctx wid (CustomDrawingEntry content build)
+  registerCustomEntry ctx wid (CustomDrawingEntry content build Nothing 0 False)
+
+-- | Register a painter together with the cursor, repaint margin and pointer
+-- tracking it asks for.
+{-# INLINE registerCustomEntry #-}
+registerCustomEntry :: Context -> WidgetId -> CustomDrawingEntry -> IO ()
+registerCustomEntry = registerIn dcsCustomDrawings (\m dc -> dc {dcsCustomDrawings = m})
 
 -- | Current custom painter and content key, or 'Nothing'.
 {-# INLINE lookupCustomDrawing #-}
@@ -258,7 +262,6 @@ cachedCustomDrawingOps ::
   CustomDrawBuild ->
   IO (SmallArray DrawOp)
 cachedCustomDrawingOps ctx wid content rect newCdc build = do
-  let k = intKey wid
   gen <- readIORef (ctxMetricGen ctx)
   cached <- lookupIn dcsCustomDrawOpCache ctx wid
   case cached of
@@ -269,7 +272,7 @@ cachedCustomDrawingOps ctx wid content rect newCdc build = do
     _ -> do
       cdc <- newCdc
       let ops = build cdc rect
-      storeCustomDrawingOps ctx k content rect cdc gen ops
+      storeCustomDrawingOps ctx wid content rect cdc gen ops
       pure ops
 
 -- | Settle a custom widget's ops for this frame and cache them for paint,
@@ -296,7 +299,6 @@ refreshCustomDrawingOps ::
   CustomDrawBuild ->
   IO Bool
 refreshCustomDrawingOps ctx wid content rect cdc build = do
-  let k = intKey wid
   gen <- readIORef (ctxMetricGen ctx)
   cached <- lookupIn dcsCustomDrawOpCache ctx wid
   let keyed = content /= 0
@@ -312,23 +314,13 @@ refreshCustomDrawingOps ctx wid content rect cdc build = do
           changed = case cached of
             Just e | cdeBounds e == rect -> cdeOps e /= ops
             _ -> False
-      storeCustomDrawingOps ctx k content rect cdc gen ops
+      storeCustomDrawingOps ctx wid content rect cdc gen ops
       pure changed
 
-storeCustomDrawingOps :: Context -> Int -> Int -> Rect -> CustomDrawContext -> Int -> SmallArray DrawOp -> IO ()
-storeCustomDrawingOps ctx k content rect cdc gen ops =
-  modifyIORef' (ctxDrawingCache ctx) $ \s ->
-    let entry =
-          CustomDrawOpCacheEntry
-            content
-            rect
-            (cdcHovered cdc)
-            (cdcPressed cdc)
-            (cdcFocused cdc)
-            (cdcDisabled cdc)
-            gen
-            ops
-     in s {dcsCustomDrawOpCache = IM.insert k entry (dcsCustomDrawOpCache s)}
+storeCustomDrawingOps :: Context -> WidgetId -> Int -> Rect -> CustomDrawContext -> Int -> SmallArray DrawOp -> IO ()
+storeCustomDrawingOps ctx wid content rect cdc gen ops =
+  registerIn dcsCustomDrawOpCache (\m dc -> dc {dcsCustomDrawOpCache = m}) ctx wid $
+    CustomDrawOpCacheEntry content rect (cdcHovered cdc) (cdcPressed cdc) (cdcFocused cdc) (cdcDisabled cdc) gen ops
 
 -- | Whether a versioned drawing's cached ops are for another version at the
 -- same rect. Paint rebuilds them; the pixels they covered must repaint too,
@@ -354,37 +346,27 @@ lookupCustomMeasure = lookupIn dcsCustomMeasures
 customMeasureHooks :: Context -> IO IntSet
 customMeasureHooks ctx = IM.keysSet . dcsCustomMeasures <$> readIORef (ctxDrawingCache ctx)
 
--- | Register cursor selection from a custom widget's interaction state.
-{-# INLINE registerCustomCursor #-}
-registerCustomCursor :: Context -> WidgetId -> (CustomDrawContext -> UiCursorKind) -> IO ()
-registerCustomCursor = registerIn dcsCustomCursors (\m dc -> dc {dcsCustomCursors = m})
-
 -- | Registered cursor selector, or 'Nothing'.
 {-# INLINE lookupCustomCursor #-}
 lookupCustomCursor :: Context -> WidgetId -> IO (Maybe (CustomDrawContext -> UiCursorKind))
-lookupCustomCursor = lookupIn dcsCustomCursors
-
--- | Register extra logical-pixel repaint margin for a custom widget's overdraw.
-{-# INLINE registerCustomDamageSlop #-}
-registerCustomDamageSlop :: Context -> WidgetId -> Float -> IO ()
-registerCustomDamageSlop = registerIn dcsCustomDamageSlop (\m dc -> dc {dcsCustomDamageSlop = m})
+lookupCustomCursor ctx wid = (>>= cdrCursor) <$> lookupIn dcsCustomDrawings ctx wid
 
 -- | Registered repaint margin, or 'Nothing' when no override exists.
 {-# INLINE lookupCustomDamageSlop #-}
 lookupCustomDamageSlop :: Context -> WidgetId -> IO (Maybe Float)
-lookupCustomDamageSlop = lookupIn dcsCustomDamageSlop
+lookupCustomDamageSlop ctx wid = do
+  cached <- lookupIn dcsCustomDrawings ctx wid
+  pure $ case cached of
+    Just e | cdrDamageSlop e > 0 -> Just (cdrDamageSlop e)
+    _ -> Nothing
 
--- | Ask for a frame whenever the pointer moves over a widget, not only when
--- it crosses onto another one: for a widget that draws what is under the
--- pointer inside itself, such as the row of a self-drawn list.
-{-# INLINE registerPointerTracked #-}
-registerPointerTracked :: Context -> WidgetId -> IO ()
-registerPointerTracked ctx wid = registerIn dcsPointerTracked (\m dc -> dc {dcsPointerTracked = m}) ctx wid ()
-
--- | Whether a widget asked for a frame on every pointer move over it.
+-- | Whether a widget asked for a frame on every pointer move over it, rather
+-- than only when the pointer crosses onto another one: what a widget drawing
+-- what is under the pointer inside itself, such as the row of a self-drawn
+-- list, registers.
 {-# INLINE isPointerTracked #-}
 isPointerTracked :: Context -> WidgetId -> IO Bool
-isPointerTracked ctx wid = (== Just ()) <$> lookupIn dcsPointerTracked ctx wid
+isPointerTracked ctx wid = maybe False cdrTracked <$> lookupIn dcsCustomDrawings ctx wid
 
 -- | Clear per-pass registrations while retaining compiled ops and fitted
 -- layouts. Call before rebuilding the view, then prune caches against new registrations.
@@ -395,8 +377,5 @@ resetDrawingScopeCache ctx =
       { dcsDrawings = IM.empty
       , dcsPopupConfigs = IM.empty
       , dcsCustomMeasures = IM.empty
-      , dcsCustomCursors = IM.empty
       , dcsCustomDrawings = IM.empty
-      , dcsCustomDamageSlop = IM.empty
-      , dcsPointerTracked = IM.empty
       }

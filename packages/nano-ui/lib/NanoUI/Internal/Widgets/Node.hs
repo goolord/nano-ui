@@ -17,7 +17,7 @@ module NanoUI.Internal.Widgets.Node
   , setChanged
   , setSubmitted
   , inertResponse
-  , parentIdx
+  , currentParent
   , container
   , containerWithId
   , containerResponse
@@ -34,6 +34,7 @@ where
 
 import Control.Monad (when)
 import Data.IORef (readIORef, writeIORef)
+import Data.Functor ((<&>))
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Effectful (Eff, type (:>))
@@ -80,10 +81,12 @@ import NanoUI.Internal.Style
 import NanoUI.Internal.Types (Rect (..), rectContains, rectH, rectHit, rectUnion, rectW)
 import NanoUI.Internal.Frame.Hit (findNodeByWidgetId, nodeInteractionHit, scrollHitRect)
 
-parentIdx :: [Int] -> Int
-parentIdx = \case
-  [] -> -1
-  (p : _) -> p
+-- | The innermost open container, or @-1@ at the root.
+currentParent :: Context -> IO Int
+currentParent ctx =
+  readIORef (ctxContainerStack ctx) <&> \case
+    [] -> -1
+    (p : _) -> p
 
 -- | Anything that carries a widget 'Response' (composite widget results such
 -- as 'NanoUI.Internal.Widgets.Tabs.TabResponse'). The @resp*@ accessors work on all of them.
@@ -220,8 +223,8 @@ runContainer :: Ui :> es => NodeType -> Layout -> Maybe WidgetId -> Eff es a -> 
 runContainer nt layout mWid child = do
   ctx <- askContext
   idx <- uiIO $ do
-    stack <- readIORef (ctxContainerStack ctx)
-    idx <- addNodeFromLayout (ctxNodeArena ctx) nt (parentIdx stack) layout
+    parent <- currentParent ctx
+    idx <- addNodeFromLayout (ctxNodeArena ctx) nt parent layout
     mapM_ (setWidgetId (ctxNodeArena ctx) idx) mWid
     pure idx
   withContainerNode True idx child
@@ -260,8 +263,7 @@ floatingPanel wid addPanel enter body = do
   ctx <- askContext
   let arena = ctxNodeArena ctx
   idx <- uiIO $ do
-    stack <- readIORef (ctxContainerStack ctx)
-    idx <- addPanel =<< rootAttachParent arena (parentIdx stack)
+    idx <- addPanel =<< rootAttachParent arena =<< currentParent ctx
     setWidgetId arena idx wid
     pure idx
   withContainerNode True idx $ do
@@ -290,9 +292,7 @@ addSizingLeafNode ::
   -> Sizing
   -> IO Response
 addSizingLeafNode ctx inp wid nt dir wSiz hSiz = do
-  stack <- readIORef (ctxContainerStack ctx)
-  let
-    parent = parentIdx stack
+  parent <- currentParent ctx
   idx <-
     addNode
       (ctxNodeArena ctx)
@@ -365,9 +365,7 @@ addWidgetNode wid nt txt value layout initialize = do
   ctx <- askContext
   inp <- askInput
   uiIO $ do
-    stack <- readIORef (ctxContainerStack ctx)
-    let
-      parent = parentIdx stack
+    parent <- currentParent ctx
     idx <- addNodeFromLayout (ctxNodeArena ctx) nt parent layout
     setNodeText (ctxNodeArena ctx) idx txt
     setNodeValue (ctxNodeArena ctx) idx value
@@ -450,7 +448,5 @@ tagContainer :: Ui :> es => WidgetId -> Eff es ()
 tagContainer wid = do
   ctx <- askContext
   uiIO $ do
-    stack <- readIORef (ctxContainerStack ctx)
-    case stack of
-      (idx : _) -> setWidgetId (ctxNodeArena ctx) idx wid
-      [] -> pure ()
+    parent <- currentParent ctx
+    when (parent >= 0) $ setWidgetId (ctxNodeArena ctx) parent wid

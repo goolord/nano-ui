@@ -2,7 +2,6 @@
 module NanoUI.Internal.Widgets.Tree (TreeItem (..), tree, tree') where
 
 import Control.Applicative ((<|>))
-import Control.Monad (when)
 import Data.IORef (writeIORef)
 import Data.Foldable (fold, toList)
 import Data.Maybe (fromMaybe)
@@ -10,13 +9,13 @@ import Data.Text (Text)
 import Data.Primitive.SmallArray (SmallArray, indexSmallArray, mapSmallArray', sizeofSmallArray, smallArrayFromList)
 import Effectful (Eff, type (:>))
 import qualified Data.IntSet as IS
-import NanoUI.Internal.Context (Context (..), adoptSlot, getStore, intKey, registerFocusable, setStore, modifyStore)
+import NanoUI.Internal.Context (Context (..), adoptSlot, getStore, intKey, registerFocusable, setStore, writeSlots)
 import NanoUI.Internal.Font (treeChevronRect)
 import NanoUI.Internal.Frame.Hit (scrollHitRect)
 import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Internal.Input (inputMousePos)
 import NanoUI.Internal.Layout.Arena (NodeType (..))
-import NanoUI.Internal.Store (fieldInt, fieldIntSet, insertSlot, lookupSlot)
+import NanoUI.Internal.Store (fieldInt, fieldIntSet, insertSlot, lookupSlot, slotWrite)
 import NanoUI.Internal.Monad (Ui, askContext, askInput, focusedWidget, nextId, uiIO, withKey)
 import NanoUI.Internal.Style (defaultLayout, fillW, gap, tight)
 import NanoUI.Internal.Types (Rect (..), clamp, rectContains)
@@ -166,7 +165,6 @@ tree' key inputItems index =
       nav <- useKeyNav focus
       let (keySel, keyExp, mFocus) = treeKeyNav nav rows resps focus afterClickSel afterClickExp
       result <- finishInput fieldInt ctx groupId groupKey selected (fold resps) keySel
-      when (keyExp /= expandedSet) $ uiIO $
-        modifyStore ctx (insertSlot fieldIntSet groupKey keyExp)
+      uiIO (writeSlots ctx (slotWrite fieldIntSet groupKey keyExp))
       mapM_ (uiIO . writeIORef (ctxFocusId ctx)) mFocus
       pure result

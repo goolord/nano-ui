@@ -144,9 +144,8 @@ nodeOwnsPointer ctx idx =
   getPointerRoute ctx >>= \case
     RouteLayer routed -> do
       layer <- layerOf idx
-      if layer /= routed
-        then pure False
-        else maybe (not <$> modalActive ctx) (nodeInSubtree ctx idx) =<< topModalNode na
+      pure (layer == routed)
+        <&&> (maybe (not <$> modalActive ctx) (nodeInSubtree ctx idx) =<< topModalNode na)
     _ -> pure False
  where
   na = ctxNodeArena ctx
@@ -189,19 +188,14 @@ nodePointVisible ctx idx mouse = do
 -- previous frame.
 {-# INLINE nodeClippedHit #-}
 nodeClippedHit :: Context -> NodeIdx -> Rect -> V2 -> IO Bool
-nodeClippedHit ctx idx rect mouse = do
-  if not (rectHit rect mouse)
-    then pure False
-    else do
-      na <- pure (ctxNodeArena ctx)
-      mLive <- getClipRect na idx
-      mClip <-
-        case mLive of
-          Just r -> pure (Just r)
-          Nothing -> do
-            wid <- getWidgetId na idx
-            getPrevClipRect ctx wid
-      pure (maybe True (`rectContains` mouse) mClip)
+nodeClippedHit ctx idx rect mouse =
+  pure (rectHit rect mouse) <&&> do
+    let na = ctxNodeArena ctx
+    mLive <- getClipRect na idx
+    mClip <- case mLive of
+      Just _ -> pure mLive
+      Nothing -> getPrevClipRect ctx =<< getWidgetId na idx
+    pure (maybe True (`rectContains` mouse) mClip)
 
 -- | The hit test widgets use while the view runs, when this frame's layout is
 -- not solved. @rect@ is the widget's rect from the previous frame
@@ -211,10 +205,8 @@ nodeClippedHit ctx idx rect mouse = do
 -- it is not set until 'NanoUI.Internal.Frame.Scroll.applyScrollOffsets' runs.
 {-# INLINE nodeInteractionHit #-}
 nodeInteractionHit :: Context -> NodeIdx -> Rect -> V2 -> IO Bool
-nodeInteractionHit ctx idx rect mouse = do
-  if not (rectHit rect mouse)
-    then pure False
-    else scrollViewportHit ctx idx mouse
+nodeInteractionHit ctx idx rect mouse =
+  pure (rectHit rect mouse) <&&> scrollViewportHit ctx idx mouse
 
 -- | Whether @mouse@ is inside the previous frame's viewport of every scroll
 -- container above node @idx@. A scroll container with no recorded viewport

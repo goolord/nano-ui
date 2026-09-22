@@ -222,10 +222,11 @@ renderScrollableHeaders ctx styleVal hdrLay barLay groupId cur tabList = do
   let overBar = maybe False (\r -> rectContains r (inputMousePos inp)) mBar
       notches = if overBar then round (v2Y (inputScroll inp)) else 0 :: Int
       canLeft = overflow && off > 0.5
-  leftResp <-
-    if overflow
-      then Just <$> withKey ("tab-arrow-left" :: Text) (arrowButton hdrLay (not canLeft) leftGlyph)
-      else pure Nothing
+      -- A paging arrow, present only while the bar overflows.
+      arrowIf k disabled glyph
+        | overflow = Just <$> withKey (k :: Text) (arrowButton hdrLay disabled glyph)
+        | otherwise = pure Nothing
+  leftResp <- arrowIf "tab-arrow-left" (not canLeft) leftGlyph
   (tabResp, resps) <-
     if overflow
       then scrollAreaIdConfigured scrollWid scrollerLay scrollerCfg renderInner
@@ -252,10 +253,7 @@ renderScrollableHeaders ctx styleVal hdrLay barLay groupId cur tabList = do
       _ -> scrollAxisRange contentW viewW 0
     page = max 1 (viewW * 0.9)
     canRight = overflow && off < maxOff - 0.5
-  rightResp <-
-    if overflow
-      then Just <$> withKey ("tab-arrow-right" :: Text) (arrowButton hdrLay (not canRight) rightGlyph)
-      else pure Nothing
+  rightResp <- arrowIf "tab-arrow-right" (not canRight) rightGlyph
   uiIO (cacheScrollRange ctx rangeKey maxOff)
   -- One final offset per frame. The paged result folds the arrow pages, the
   -- wheel notches, and the end clamp (a stale offset that outlived a wider
@@ -343,16 +341,13 @@ renderSingleHeader hdrLay tabStyle cur t = do
       headerText = maybe (tabTitle t) (\b -> mconcat [tabTitle t, " (", b, ")"]) (tabBadge t)
       headerButton = buttonStyledEx (not (tabDisabled t))
       mainButton = headerButton headerText (if isActive then 1 else 0) hdrLay tabStyle
-  if tabClosable t
-    then do
-      (tabResp, closed) <- rowWith tight $ do
+  fmap (uncurry (Header (tabKey t))) $
+    if tabClosable t
+      then rowWith tight $ do
         resp <- mainButton
         closeResp <- headerButton "\215" 0 (hdrLay {layoutPadding = Padding 2 4 4 4}) buttonFlagClose
         pure (resp, respClicked closeResp)
-      pure (Header (tabKey t) tabResp closed)
-    else do
-      resp <- mainButton
-      pure (Header (tabKey t) resp False)
+      else (,False) <$> mainButton
 
 syncTabHeaderActive :: Eq a => Context -> a -> [Header a] -> IO ()
 syncTabHeaderActive ctx active resps =

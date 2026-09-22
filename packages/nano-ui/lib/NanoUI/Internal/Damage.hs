@@ -4,11 +4,13 @@ module NanoUI.Internal.Damage
   ( updatePrevRects
   , floatingPanelRects
   , FrameSnapshot (..)
+  , captureFrameSnapshot
   , writeDamage
   , damagePieces
   ) where
 
-import Control.Monad (filterM, forM_, unless, when)
+import Control.Exception (evaluate)
+import Control.Monad (filterM, forM_, unless, when, (>=>))
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
 import Data.IntMap.Strict qualified as IM
 import Data.IntSet qualified as IS
@@ -253,6 +255,29 @@ data FrameSnapshot = FrameSnapshot
   , fsAnimKeys :: !IS.IntSet
   }
 
+-- | Read the 'FrameSnapshot' before the UI pass, ahead of 'clearDirty'
+-- (which resets 'dsDirtyOpaque').
+captureFrameSnapshot :: Context -> IO FrameSnapshot
+captureFrameSnapshot ctx = do
+  hot <- readIORef (ctxLastHotId ctx)
+  active <- readIORef (ctxActiveId ctx)
+  focus <- readIORef (ctxFocusId ctx)
+  evaluate
+    =<< FrameSnapshot
+      <$> getsDamage ctx dsDirtyOpaque
+      <*> getsDamage ctx dsLastWindowSize
+      <*> getStore ctx
+      <*> pure hot
+      <*> pure active
+      <*> pure focus
+      <*> getPrevRect ctx hot
+      <*> getPrevRect ctx active
+      <*> getPrevRect ctx focus
+      <*> getsOverlay ctx osPrevFloatingRects
+      <*> getsDamage ctx dsPrevRects
+      <*> getsDamage ctx dsPrevNodeTexts
+      <*> (IM.keysSet <$> getLiveAnimations ctx)
+
 -- | What the finished frame looks like and what changed since the snapshot.
 -- Derived fields stay lazy: a frame that is already 'DamageFull' for a cheap
 -- reason never pays for them.
@@ -379,7 +404,7 @@ refreshCustomDrawings ctx = do
       rect <- getNodeRect na i
       mCustom <- lookupCustomDrawing ctx wid
       changed <- case mCustom of
-        Just (CustomDrawingEntry content build) -> do
+        Just (CustomDrawingEntry content build _ _ _) -> do
           cdc <- mkCustomDrawContext ctx (ctxFontMetrics ctx) wid
           refreshCustomDrawingOps ctx wid content rect cdc build
         Nothing -> do
@@ -469,20 +494,21 @@ clipDamage ctx snap d owners = do
   -- panel every frame, and once that union crosses half the window the frame
   -- degrades to DamageFull. The scissored replay redraws the backdrop fill
   -- inside the anim's own rect+slop, so no stale pixels remain.
-  let addBackdrop k =
-        unless (k == 0) $
-          findNodeByKey ctx k
-            >>= maybe (pure Nothing) (backdropRectFromNode ctx)
-            >>= mapM_ (addRect acc . clipRectToWindow winW winH)
-      addInteraction wid = do
-        when (hashWidgetId wid /= 0) $ do
-          newR <- getPrevRect ctx wid
-          slop <- fromMaybe defaultDamageSlop <$> lookupCustomDamageSlop ctx wid
-          clip <- keyViewportClip ctx (intKey wid)
-          let addSide = mapM_ (mapM_ (addRect acc) . clipKeyRect (intKey wid) clip . rectInflate slop)
-          addSide (oldOf wid)
-          addSide newR
-        addBackdrop (intKey wid)
+  let addNodeBackdrop =
+        maybe (pure Nothing) (backdropRectFromNode ctx)
+          >=> mapM_ (addRect acc . clipRectToWindow winW winH)
+      addBackdrop k = unless (k == 0) $ addNodeBackdrop =<< findNodeByKey ctx k
+      addInteraction wid = unless (k == 0) $ do
+        node <- findNodeByKey ctx k
+        newR <- getPrevRect ctx wid
+        slop <- fromMaybe defaultDamageSlop <$> lookupCustomDamageSlop ctx wid
+        clip <- maybe (pure Nothing) (getClipRect (ctxNodeArena ctx)) node
+        let addSide = mapM_ (mapM_ (addRect acc) . clipKeyRect k clip . rectInflate slop)
+        addSide (oldOf wid)
+        addSide newR
+        addNodeBackdrop node
+        where
+          k = intKey wid
       -- A parked pointer must not re-damage its hot widget every frame: only
       -- an id change (hover in/out, press, focus move) or a rect move
       -- repaints. Unchanged interaction rects kept the steady state at
@@ -712,7 +738,7 @@ rectDeltas ctx panelRects old new
         ( \k r rest -> do
             when (rectNonEmpty r) $ do
               when (IM.notMember k new || IM.notMember k old) $ note churn r
-              clipped <- clipDeltaToScrollViewport ctx k r
+              clipped <- (`clipToViewport` r) <$> keyViewportClip ctx k
               when (rectArea clipped >= layoutSettleMinArea) $ note settled clipped
             rest
         )
@@ -737,12 +763,8 @@ keyViewportClip ctx k = findNodeByKey ctx k >>= maybe (pure Nothing) (getClipRec
 clipToViewport :: Maybe Rect -> Rect -> Rect
 clipToViewport clip r = maybe r (fromMaybe (Rect 0 0 0 0) . rectIntersect r) clip
 
-clipDeltaToScrollViewport :: Context -> Int -> Rect -> IO Rect
-clipDeltaToScrollViewport ctx k r = (`clipToViewport` r) <$> keyViewportClip ctx k
-
 clipRectToWindow :: Float -> Float -> Rect -> Rect
-clipRectToWindow winW winH r =
-  fromMaybe (Rect 0 0 0 0) (rectIntersect r (Rect 0 0 winW winH))
+clipRectToWindow winW winH = clipToViewport (Just (Rect 0 0 winW winH))
 
 -- | A keyed rect clipped to its viewport ('keyViewportClip'), or 'Nothing'
 -- when nothing of it shows. Key 0 is not clipped.

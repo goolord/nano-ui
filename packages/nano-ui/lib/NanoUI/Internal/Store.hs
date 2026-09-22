@@ -149,23 +149,6 @@ instance Eq WidgetStore where
       && eqDynMap (storeDyn a) (storeDyn b)
       && eqByPtr (storeQuiet a) (storeQuiet b)
 
-instance Show WidgetStore where
-  show st =
-    "WidgetStore { "
-      ++ "storeMirrorGen = " ++ show (storeMirrorGen st)
-      ++ ", storeOpenSelect = " ++ show (storeOpenSelect st)
-      ++ ", storeInt = " ++ show (storeInt st)
-      ++ ", storeFloat = " ++ show (storeFloat st)
-      ++ ", storeDouble = " ++ show (storeDouble st)
-      ++ ", storePoint = " ++ show (storePoint st)
-      ++ ", storeText = " ++ show (storeText st)
-      ++ ", storeIntSet = " ++ show (storeIntSet st)
-      ++ ", storeFloatList = " ++ show (storeFloatList st)
-      ++ ", storeIntList = " ++ show (storeIntList st)
-      ++ ", storeDynCount = " ++ show (IM.size (storeDyn st))
-      ++ ", storeQuiet = " ++ show (storeQuiet st)
-      ++ " }"
-
 -- | One of the store's maps: how to read it, and how to put a new one back.
 -- The slot functions inline at the field they are given, so
 -- @insertSlot fieldInt k v@ compiles to the record update it stands for, and

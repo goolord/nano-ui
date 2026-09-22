@@ -35,7 +35,7 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Effectful (Eff, type (:>))
 import NanoUI.Internal.Atlas qualified as Atlas
-import NanoUI.Internal.Context (Context (..), askHostIO, registerImage, setHost)
+import NanoUI.Internal.Context (Context (..), hostOrInit, registerImage)
 import NanoUI.Internal.Draw (getDrawSnapScale)
 import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Monad (Ui, askContext, nextId, uiIO, uiTheme, withContext)
@@ -218,13 +218,9 @@ svgIconWith' f doc = do
 newtype SvgRasters = SvgRasters (IORef (Map.Map (Int, Int, Int, Word32) ImageId))
 
 svgRasterCache :: Context -> IO (IORef (Map.Map (Int, Int, Int, Word32) ImageId))
-svgRasterCache ctx =
-  askHostIO ctx >>= \case
-    Just (SvgRasters ref) -> pure ref
-    Nothing -> do
-      ref <- newIORef Map.empty
-      setHost ctx (SvgRasters ref)
-      pure ref
+svgRasterCache ctx = do
+  SvgRasters ref <- hostOrInit ctx (SvgRasters <$> newIORef Map.empty)
+  pure ref
 
 -- | A solid rectangle sized by the layout modifier.
 box :: Ui :> es => (Layout -> Layout) -> Color -> Eff es ()

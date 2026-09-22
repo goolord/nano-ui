@@ -57,7 +57,7 @@ import NanoUI.Internal.Layout.Arena
   , getStyleIdx
   , getWidgetId
   )
-import NanoUI.Internal.Monad (Ui, askContext, askInput, nextId, uiIO, withKey)
+import NanoUI.Internal.Monad (Ui, (<&&>), askContext, askInput, nextId, uiIO, withKey)
 import NanoUI.Internal.Store (Slot (..), fieldFloat, fieldInt, fieldPoint, findSlot, insertSlot, lookupSlot, slotKey, slotWriteOr)
 import NanoUI.Internal.Style
   ( Direction (..)
@@ -567,9 +567,8 @@ colorPickerCanvas parts initial svResp hueResp alphaResp = do
   hueFocus <- keyboardFocused (ppHue parts)
   alphaFocus <- if showAlpha then keyboardFocused (ppAlpha parts) else pure False
   keyMoved <-
-    if not (svFocus || hueFocus || alphaFocus)
-      then pure False
-      else uiIO (applyColorPickerKeys ctx wid initial inp svFocus hueFocus)
+    pure (svFocus || hueFocus || alphaFocus)
+      <&&> uiIO (applyColorPickerKeys ctx wid initial inp svFocus hueFocus)
   let releasedDrag = heldBefore && not dragging
   when (releasedDrag || keyMoved) $
     uiIO $ do

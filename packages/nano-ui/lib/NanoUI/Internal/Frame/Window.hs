@@ -15,7 +15,7 @@ import Control.Monad (guard, when)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Maybe (MaybeT (..))
 import Data.Functor ((<&>))
-import Data.Maybe (fromMaybe, isJust)
+import Data.Maybe (fromMaybe, isJust, isNothing)
 import NanoUI.Internal.Context
   ( Context (..)
   , cachedWrapText
@@ -109,26 +109,23 @@ persistWindowPositions ctx = floatingNodeCount na >>= \floating -> when (floatin
 -- | Start or continue a title-bar drag and save its position. Returns 'True'
 -- while a drag starts or is held; releases clear it. Resize gestures take priority.
 updateWindowDrag :: Context -> Input -> IO Bool
-updateWindowDrag ctx inp = do
-  resizing <- isJust <$> getWindowResize ctx
-  if resizing
-    then pure False
-    else do
-      drag <- getWindowDrag ctx
-      case drag of
-        Just (wid, gx, gy)
-          | inputMouseDown inp -> do
-              let V2 mx my = inputMousePos inp
-              modifyStore ctx (insertSlot fieldPoint (intKey wid) (mx - gx, my - gy))
-              damageWidget ctx wid (DamageInflated haloDamageSlop)
-              markDirty ctx
-              pure True
-          | otherwise -> do
-              modifyInteraction ctx (\s -> s {isWindowDrag = Nothing})
-              pure False
-        Nothing
-          | inputMousePressed inp -> tryStartWindowDrag ctx (inputMousePos inp)
-          | otherwise -> pure False
+updateWindowDrag ctx inp =
+  (isNothing <$> getWindowResize ctx) <&&> do
+    drag <- getWindowDrag ctx
+    case drag of
+      Just (wid, gx, gy)
+        | inputMouseDown inp -> do
+            let V2 mx my = inputMousePos inp
+            modifyStore ctx (insertSlot fieldPoint (intKey wid) (mx - gx, my - gy))
+            damageWidget ctx wid (DamageInflated haloDamageSlop)
+            markDirty ctx
+            pure True
+        | otherwise -> do
+            modifyInteraction ctx (\s -> s {isWindowDrag = Nothing})
+            pure False
+      Nothing
+        | inputMousePressed inp -> tryStartWindowDrag ctx (inputMousePos inp)
+        | otherwise -> pure False
 
 -- | How far the resize handles reach out past the window's edges.
 windowResizeHandleFor :: Float
@@ -343,25 +340,18 @@ resizeHaloBlocked ctx mouse winIdx = do
       withWidgetNode ctx hot False $ \hotIdx -> not <$> nodeInSubtree ctx hotIdx winIdx
 
 tryStartWindowDrag :: Context -> V2 -> IO Bool
-tryStartWindowDrag ctx mouse@(V2 mx my) = do
-  mTop <- topmostOverlayAtMouse ctx mouse
-  case mTop of
-    Nothing -> pure False
-    Just idx -> do
-      nt <- getNodeType (ctxNodeArena ctx) idx
-      mTitle <- if nt == NodeWindow then windowTitleRect ctx idx else pure Nothing
-      case mTitle of
-        Just title | rectContains title mouse -> do
-          overClose <- windowControlAt ctx idx mouse
-          if overClose
-            then pure False
-            else do
-              wid <- getWidgetId (ctxNodeArena ctx) idx
-              (wx, wy, _, _) <- getRect (ctxNodeArena ctx) idx
-              modifyInteraction ctx (\s -> s {isWindowDrag = Just (wid, mx - wx, my - wy)})
-              markDirty ctx
-              pure True
-        _ -> pure False
+tryStartWindowDrag ctx mouse@(V2 mx my) = fmap isJust . runMaybeT $ do
+  idx <- MaybeT (topmostOverlayAtMouse ctx mouse)
+  nt <- liftIO (getNodeType (ctxNodeArena ctx) idx)
+  guard (nt == NodeWindow)
+  title <- MaybeT (windowTitleRect ctx idx)
+  guard (rectContains title mouse)
+  guard . not =<< liftIO (windowControlAt ctx idx mouse)
+  liftIO $ do
+    wid <- getWidgetId (ctxNodeArena ctx) idx
+    Rect wx wy _ _ <- getNodeRect (ctxNodeArena ctx) idx
+    modifyInteraction ctx (\s -> s {isWindowDrag = Just (wid, mx - wx, my - wy)})
+    markDirty ctx
 
 -- | Title bar: the window's topmost child, stretched up to the window top.
 windowTitleRect :: Context -> NodeIdx -> IO (Maybe Rect)
@@ -376,9 +366,8 @@ windowTitleRect ctx idx = do
     go ci best
       | ci < 0 = pure best
       | otherwise = do
-          (x, y, w, h) <- getRect (ctxNodeArena ctx) ci
+          here@(Rect _ y _ _) <- getNodeRect (ctxNodeArena ctx) ci
           ns <- getNextSibling (ctxNodeArena ctx) ci
-          let here = Rect x y w h
           go ns $ case best of
             Just b@(Rect _ by _ _) | y >= by -> Just b
             _ -> Just here

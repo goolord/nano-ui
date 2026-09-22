@@ -70,19 +70,6 @@ import NanoUI.Internal.Widgets.Node
   , addWidgetStyled
   )
 
--- | True if the first n column sizes contain ColStretch.
-{-# INLINE tableStretchN #-}
-tableStretchN :: Int -> [ColSize] -> Bool
-tableStretchN n = any (== ColStretch) . take n
-
--- | Columns fill the table width when one stretches or the table grows.
-tableFillInner :: Bool -> Layout -> Bool
-tableFillInner hasStretch outer =
-  hasStretch
-    || case layoutWidth outer of
-      Grow _ -> True
-      _ -> False
-
 -- | Ascending or descending text order.
 data SortDir = SortAsc | SortDesc
   deriving (Eq, Show, Enum, Bounded)
@@ -157,9 +144,6 @@ sortRows cols sort inputRows =
    in case sortColDir sort of
         SortAsc -> sortOn enc rows
         SortDesc -> sortOn (Down . enc) rows
-
-columnCount :: Colonnade Headed row Text -> Int
-columnCount = V.length . Encode.getColonnade
 
 isNumericCell :: Text -> Bool
 isNumericCell txt =
@@ -366,7 +350,7 @@ tableConfigured cfg f key cols inputRows curSort =
     vWid <- nextId
     hWid <- nextId
     tableWid <- nextId
-    let n = columnCount cols
+    let n = V.length (Encode.getColonnade cols)
         sort0 = clampSortCol n curSort
         stateKey = intKey stateWid
     ctx <- askContext
@@ -392,7 +376,7 @@ tableConfigured cfg f key cols inputRows curSort =
           _ -> widths0
     when (widths1 /= widths0) $ uiIO $
       modifyStore ctx (insertSlot fieldFloatList stateKey widths1)
-    let hasStretch = tableStretchN n (tableColSizes cfg)
+    let hasStretch = any (== ColStretch) (take n (tableColSizes cfg))
         indexedWidths = primArrayFromList widths1
         vis = filter (`IS.notMember` hidden0) order0
         freezeN = clamp 0 (length vis) (tableFreezeCols cfg)
@@ -402,7 +386,12 @@ tableConfigured cfg f key cols inputRows curSort =
         pinnedN = clamp 0 nRows (tableFreezeRows cfg)
         scrollN = nRows - pinnedN
         rowMinH = 28
-        fillInner = tableFillInner hasStretch outerLayout
+        -- Columns fill the table width when one stretches or the table
+        -- grows.
+        fillInner =
+          hasStretch || case layoutWidth outerLayout of
+            Grow _ -> True
+            _ -> False
         mins = generatePrimArray n (resolvedWidth sizes contentWs indexedWidths)
         colBoxes = smallArrayFromList [colBoxLayout (colSizing fillInner hasStretch sizes contentWs indexedWidths i) (primAt mins i minColW) | i <- [0 .. n - 1]]
         colBox i = smallAt colBoxes i (tight defaultLayout)

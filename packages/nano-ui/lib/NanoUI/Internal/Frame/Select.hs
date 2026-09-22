@@ -50,7 +50,7 @@ import NanoUI.Internal.Frame.Chrome (menuPanelBounds, overlayMenuStyle, paintMen
 import NanoUI.Internal.Frame.Hit (widgetOverlayAllowed, withWidgetNode)
 import NanoUI.Internal.Frame.Scroll.Geometry (padTextClipRect)
 import NanoUI.Internal.Id (WidgetId (..))
-import NanoUI.Internal.Input (Input (..), Key (..), foldInputKeys, inputKeys, inputMousePos, inputMousePressed, inputPointerHeld)
+import NanoUI.Internal.Input (Input (..), Key (..), inputKeys, inputKeysElem, inputMousePos, inputMousePressed, inputPointerHeld)
 import NanoUI.Internal.Layout.Arena (NodeArena, NodeIdx, NodeType (NodeSelect, NodeTextInput), getNodeType, lookupNodeByKey, lookupNodeByWidgetId, getOptions, getRect, getWidgetId)
 import NanoUI.Internal.Monad (whenM, (<&&>))
 import NanoUI.Internal.Store (Slot (..), fieldFloat, fieldInt, fieldText, findSlot, insertSlot, slotKey)
@@ -218,18 +218,11 @@ closeSelectOnOutsideClick ctx inp =
 
 finalizeSelectKeyboard :: Context -> Input -> IO ()
 finalizeSelectKeyboard ctx inp = do
-  let (wantNext, wantPrev, wantEsc, wantEnter) =
-        foldInputKeys
-          ( \(n, p, e, r) k ->
-              ( n || k == KeyDown || k == KeyRight
-              , p || k == KeyUp || k == KeyLeft
-              , e || k == KeyEscape
-              , r || k == KeyEnter
-              )
-          )
-          (False, False, False, False)
-          (inputKeys inp)
-      wantStep = wantNext || wantPrev
+  let has k = inputKeysElem k (inputKeys inp)
+      wantNext = has KeyDown || has KeyRight
+      wantStep = wantNext || has KeyUp || has KeyLeft
+      wantEsc = has KeyEscape
+      wantEnter = has KeyEnter
   when (wantStep || wantEsc || wantEnter) $ do
     focus <- readIORef (ctxFocusId ctx)
     store <- getStore ctx

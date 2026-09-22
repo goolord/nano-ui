@@ -66,6 +66,7 @@ import NanoUI.Internal.Layout.Arena
   , getStyleIdx
   , getWidgetId
   )
+import NanoUI.Internal.Monad (ifM, (<&&>))
 import NanoUI.Internal.Store (fieldFloat, fieldInt, fieldText, findSlot, insertSlot, slotWriteOr)
 import NanoUI.Internal.Style (themeSelection)
 import NanoUI.Internal.Types (Color (..), Rect (..), V2 (..), clamp, rectContains, rectIntersect, rectOverlapArea, rectW)
@@ -122,16 +123,12 @@ searchClearHit ctx wid mouse = do
   withWidgetNode ctx wid False $ \idx -> do
     si <- getStyleIdx (ctxNodeArena ctx) idx
     opts <- getOptions (ctxNodeArena ctx) idx
-    if not (hasFlag textInputFlagSearch si) || not (null opts)
-      then pure False
-      else do
-        value <- textInputValue ctx idx
-        if T.null value
-          then pure False
-          else do
-            (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-            let (_, clearRect) = searchInputIconRects (ctxFontMetrics ctx) x y w h
-            pure (rectContains clearRect mouse)
+    pure (hasFlag textInputFlagSearch si && null opts)
+      <&&> (not . T.null <$> textInputValue ctx idx)
+      <&&> do
+        (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+        let (_, clearRect) = searchInputIconRects (ctxFontMetrics ctx) x y w h
+        pure (rectContains clearRect mouse)
 
 -- | Clear a search field. The debounced pulse picks the empty text up as an
 -- immediate (empty) commit on the next frame.
@@ -290,15 +287,11 @@ finalizeTextInputMouse ctx inp wid = do
             prepared <- prepareFontMetrics fm value
             pure (textIndexAtX prepared value (max 0 (mouseX - contentX)))
       if inputMousePressed inp && rectContains fieldRect mouse
-        then do
-          cleared <- searchClearHit ctx wid mouse
-          if cleared
-            then clearSearchInput ctx wid
-            else do
-              idx <- charAt
-              clicks <- normalizeTextFieldClicks ctx wid idx 0 0 False (max 1 (inputMouseClicks inp))
-              uncurry (updateTextInputSelection ctx wid) (textSelectionForDrag value idx idx clicks)
-              setTextInputDrag ctx (Just (TextInputDrag wid idx 0 0 False clicks))
+        then ifM (searchClearHit ctx wid mouse) (clearSearchInput ctx wid) $ do
+          idx <- charAt
+          clicks <- normalizeTextFieldClicks ctx wid idx 0 0 False (max 1 (inputMouseClicks inp))
+          uncurry (updateTextInputSelection ctx wid) (textSelectionForDrag value idx idx clicks)
+          setTextInputDrag ctx (Just (TextInputDrag wid idx 0 0 False clicks))
         else do
           mDrag <- getsInteraction ctx isTextInputDrag
           case mDrag of

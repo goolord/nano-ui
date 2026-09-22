@@ -39,8 +39,6 @@ import NanoUI.Internal.Context
   , clearWakeAt
   , decodeMessages
   , drainMessages
-  , getLiveAnimations
-  , getPrevRect
   , getStore
   , isDirty
   , lookupCustomMeasure
@@ -57,11 +55,9 @@ import NanoUI.Internal.Context
   , getsOverlay
   , modifyOverlay
   , OverlayState (..)
-  , getsDamage
-  , DamageState (..)
   )
 import NanoUI.Internal.Context (beginFrameModal)
-import NanoUI.Internal.Damage (FrameSnapshot (..), updatePrevRects, writeDamage)
+import NanoUI.Internal.Damage (FrameSnapshot (..), captureFrameSnapshot, updatePrevRects, writeDamage)
 import NanoUI.Internal.Draw
   ( DrawData
   , Layer (..)
@@ -209,22 +205,10 @@ runFrameEff ::
   -> IO (a, [FrameMsg], DrawData, Bool)
 runFrameEff unlift ctx frameInp ui = do
   ensureMetricCaches ctx
-  oldHot <- readIORef (ctxLastHotId ctx)
-  oldActive <- readIORef (ctxActiveId ctx)
-  oldFocus <- readIORef (ctxFocusId ctx)
-  oldHotRect <- getPrevRect ctx oldHot
-  oldActiveRect <- getPrevRect ctx oldActive
-  oldFocusRect <- getPrevRect ctx oldFocus
-  oldFloatingRects <- getsOverlay ctx osPrevFloatingRects
-  oldRects <- getsDamage ctx dsPrevRects
-  oldTexts <- getsDamage ctx dsPrevNodeTexts
-  oldSize <- getsDamage ctx dsLastWindowSize
-  oldStore <- getStore ctx
-  wasOpaque <- getsDamage ctx dsDirtyOpaque
+  snap <- captureFrameSnapshot ctx
   clearDirty ctx
   -- Timed wakes are re-requested by whatever is still built this frame.
   clearWakeAt ctx
-  animKeys <- IM.keysSet <$> getLiveAnimations ctx
   -- Decide what the pointer belongs to before anything reads it, against the
   -- frame the user saw. The view gets its input routed layer by layer, and
   -- each step below gets the input of what it serves, with no pointer in it
@@ -261,7 +245,7 @@ runFrameEff unlift ctx frameInp ui = do
   writeIORef (ctxClickedId ctx) (WidgetId 0)
   storeMid <- getStore ctx
   result <-
-    if mirrorStoresChanged oldStore storeMid
+    if mirrorStoresChanged (fsStore snap) storeMid
       then do
         resetUiBuild ctx
         unlift (runUi ctx (stripInteractionInput frameInp) ui)
@@ -333,22 +317,7 @@ runFrameEff unlift ctx frameInp ui = do
   unless (null menuRects && null prevMenuRects) $ do
     mapM_ (damageRect ctx) (menuRects ++ prevMenuRects)
     modifyOverlay ctx (\os -> os {osPrevMenuRects = menuRects})
-  writeDamage ctx frameInp
-    FrameSnapshot
-      { fsOpaqueFollow = wasOpaque
-      , fsSize = oldSize
-      , fsStore = oldStore
-      , fsHot = oldHot
-      , fsActive = oldActive
-      , fsFocus = oldFocus
-      , fsHotRect = oldHotRect
-      , fsActiveRect = oldActiveRect
-      , fsFocusRect = oldFocusRect
-      , fsFloatingRects = oldFloatingRects
-      , fsRects = oldRects
-      , fsTexts = oldTexts
-      , fsAnimKeys = animKeys
-      }
+  writeDamage ctx frameInp snap
   -- Clip frames repaint the damaged region of the retained texture, which
   -- preserves the other pixels. The region starts from the window backdrop,
   -- inflated by one

@@ -187,12 +187,14 @@ cursorKindAt ctx wid mouse inp
 -- | @kind@ over the widget's visible rect, the default cursor elsewhere.
 rectCursorKind :: UiCursorKind -> Context -> NodeIdx -> WidgetId -> V2 -> IO UiCursorKind
 rectCursorKind kind ctx idx wid mouse = do
+  mrect <- visibleHitRect ctx idx wid mouse
+  pure (if maybe False (`rectContains` mouse) mrect then kind else UiCursorDefault)
+
+-- | The widget's hit rect, or 'Nothing' when the pointer is clipped off it.
+visibleHitRect :: Context -> NodeIdx -> WidgetId -> V2 -> IO (Maybe Rect)
+visibleHitRect ctx idx wid mouse = do
   visible <- nodePointVisible ctx idx mouse
-  if not visible
-    then pure UiCursorDefault
-    else do
-      mrect <- scrollHitRect ctx wid
-      pure (if maybe False (`rectContains` mouse) mrect then kind else UiCursorDefault)
+  if visible then scrollHitRect ctx wid else pure Nothing
 
 widgetVisibleAt :: Context -> WidgetId -> V2 -> IO Bool
 widgetVisibleAt ctx wid mouse = do
@@ -209,37 +211,29 @@ sliderCursorKind ctx idx wid mouse inp = do
   if active == wid && inputMouseDown inp
     then pure UiCursorGrabbing
     else do
-      visible <- nodePointVisible ctx idx mouse
-      if not visible
-        then pure UiCursorDefault
-        else do
-          mrect <- scrollHitRect ctx wid
-          pure $
-            case mrect of
-              Nothing -> UiCursorDefault
-              Just (Rect x y w h) ->
-                let
-                  Rect tx ty tw th = sliderTrackBounds x y w h
-                  hitRect = Rect tx (ty - sliderHandleSlack) tw (th + 2 * sliderHandleSlack)
-                 in
-                  grabDragKind (rectContains hitRect mouse) False inp
+      mrect <- visibleHitRect ctx idx wid mouse
+      pure $
+        case mrect of
+          Nothing -> UiCursorDefault
+          Just (Rect x y w h) ->
+            let
+              Rect tx ty tw th = sliderTrackBounds x y w h
+              hitRect = Rect tx (ty - sliderHandleSlack) tw (th + 2 * sliderHandleSlack)
+             in
+              grabDragKind (rectContains hitRect mouse) False inp
 
 textInputCursorKind :: Context -> NodeIdx -> WidgetId -> V2 -> IO UiCursorKind
 textInputCursorKind ctx idx wid mouse = do
-  visible <- nodePointVisible ctx idx mouse
-  if not visible
-    then pure UiCursorDefault
-    else do
-      mrect <- scrollHitRect ctx wid
-      case mrect of
-        Just (Rect x y w h) -> do
-          (field, _) <- nodeTextFieldGeom ctx idx x y w h
-          onStepper <- numericStepperHitAt ctx idx mouse
-          pure $
-            if onStepper
-              then UiCursorPointer
-              else if rectContains field mouse then UiCursorText else UiCursorDefault
-        Nothing -> pure UiCursorDefault
+  mrect <- visibleHitRect ctx idx wid mouse
+  case mrect of
+    Just (Rect x y w h) -> do
+      (field, _) <- nodeTextFieldGeom ctx idx x y w h
+      onStepper <- numericStepperHitAt ctx idx mouse
+      pure $
+        if onStepper
+          then UiCursorPointer
+          else if rectContains field mouse then UiCursorText else UiCursorDefault
+    Nothing -> pure UiCursorDefault
 
 textAreaCursorKind :: Context -> NodeIdx -> WidgetId -> V2 -> IO UiCursorKind
 textAreaCursorKind ctx idx wid mouse = do

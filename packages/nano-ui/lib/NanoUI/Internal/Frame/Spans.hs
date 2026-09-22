@@ -13,7 +13,7 @@ module NanoUI.Internal.Frame.Spans
   , textNodeSpanEntry
   ) where
 
-import Control.Monad (forM, unless, when)
+import Control.Monad (forM, forM_, unless, when)
 import Data.IORef (readIORef, writeIORef)
 import qualified Data.IntMap.Strict as IM
 import Data.Maybe (fromMaybe, isJust)
@@ -150,26 +150,24 @@ collectClippedSpans' ctx idx nt clip arena = do
           Just live -> pure (rectIntersect clip live)
           Nothing -> (\sn -> rectIntersect clip (scrollNodeViewport sn x y w h)) <$> readScrollNode (ctxNodeArena ctx) idx
       else pure (if nt == NodePanel then rectIntersect clip (Rect x y w h) else Just clip)
-  case mClipChildren of
-    Nothing -> pure ()
-    Just clipHere -> do
-      let fm = ctxFontMetrics ctx
-      spans <- collectNodeTextSpans ctx idx
-      here <-
-        case nt of
-          NodeSelect -> pure (tagSelectClippedSpans clipHere x y w h fm spans)
-          NodeTextInput -> do
-            si <- getStyleIdx (ctxNodeArena ctx) idx
-            pure $
-              if hasFlag textInputFlagNumeric si
-                then maybe [] (`tagClippedSpans` spans) (rectIntersect clipHere (numericTextClip fm x y w h))
-                else
-                  if hasFlag textInputFlagSelectable si
-                    then tagClippedSpans clipHere spans
-                    else tagTextInputClippedSpans clipHere x y w h fm spans
-          _ -> pure (tagClippedSpans clipHere spans)
-      mapM_ (\(r, t, fg, bg, c) -> pushSpan arena r t fg bg c) here
-      walkChildSpans ctx idx clipHere arena
+  forM_ mClipChildren $ \clipHere -> do
+    let fm = ctxFontMetrics ctx
+    spans <- collectNodeTextSpans ctx idx
+    here <-
+      case nt of
+        NodeSelect -> pure (tagSelectClippedSpans clipHere x y w h fm spans)
+        NodeTextInput -> do
+          si <- getStyleIdx (ctxNodeArena ctx) idx
+          pure $
+            if hasFlag textInputFlagNumeric si
+              then maybe [] (`tagClippedSpans` spans) (rectIntersect clipHere (numericTextClip fm x y w h))
+              else
+                if hasFlag textInputFlagSelectable si
+                  then tagClippedSpans clipHere spans
+                  else tagTextInputClippedSpans clipHere x y w h fm spans
+        _ -> pure (tagClippedSpans clipHere spans)
+    mapM_ (\(r, t, fg, bg, c) -> pushSpan arena r t fg bg c) here
+    walkChildSpans ctx idx clipHere arena
 
 walkChildSpans :: Context -> NodeIdx -> Rect -> SpanArena -> IO ()
 walkChildSpans ctx idx clip arena = getFirstChild (ctxNodeArena ctx) idx >>= go
@@ -357,9 +355,8 @@ forWidgetTextPlacements_ ::
 forWidgetTextPlacements_ ctx nt idx x y w h emit
   | hasCenteredLabel nt = do
       placement <- cachedWidgetLabel ctx nt idx w h
-      case placement of
-        Nothing -> pure ()
-        Just (WidgetTextPlacement txt px py tw th) -> emit True txt (x + px) (y + py) tw th
+      forM_ placement $ \(WidgetTextPlacement txt px py tw th) ->
+        emit True txt (x + px) (y + py) tw th
   | otherwise = do
       placements <- computeWidgetTextPlacements ctx nt idx x y w h
       let go [] = pure ()

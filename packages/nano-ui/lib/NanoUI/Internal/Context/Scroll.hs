@@ -436,11 +436,7 @@ scrollRectIntoView ctx wid (Rect rx ry rw rh) align behavior =
   withScrollMetrics ctx wid $ \m -> do
     let Rect _ _ vw vh = scrollViewport m
         V2 ox oy = scrollOffset m
-        V2 mx my = scrollRange m
-        target =
-          V2
-            (clamp 0 mx (alignAxis align vw rx rw ox))
-            (clamp 0 my (alignAxis align vh ry rh oy))
+        target = clampScrollOffset (scrollRange m) (V2 (alignAxis align vw rx rw ox) (alignAxis align vh ry rh oy))
     applyScrollTarget ctx wid (scrollAxes m) target behavior
 
 -- | Offset that puts a span of the content where @align@ asks for it.
@@ -513,21 +509,19 @@ scrollGliding ctx wid =
 -- Without this a list filtered down mid-glide coasts past its new end and
 -- stops there, showing nothing, until something else scrolls it.
 clampScrollGlide :: Context -> WidgetId -> V2 -> IO ()
-clampScrollGlide ctx wid range =
-  modifyIORef' (ctxScrollState ctx) $ \st ->
-    if IM.null (ssGlides st)
-      then st
-      else st {ssGlides = IM.adjust clampGlide (intKey wid) (ssGlides st)}
+clampScrollGlide ctx wid range = modifyGlides ctx (IM.adjust clampGlide (intKey wid))
   where
     clampGlide g = g {sgTarget = projectAxes (sgAxes g) (clampScrollOffset range (sgTarget g))}
 
 -- | Remove the pending glide, leaving the current offset unchanged.
 cancelScrollGlide :: Context -> WidgetId -> IO ()
-cancelScrollGlide ctx wid =
+cancelScrollGlide ctx wid = modifyGlides ctx (IM.delete (intKey wid))
+
+-- | Edit the glides in flight, leaving the state untouched when there are none.
+modifyGlides :: Context -> (IM.IntMap ScrollGlide -> IM.IntMap ScrollGlide) -> IO ()
+modifyGlides ctx f =
   modifyIORef' (ctxScrollState ctx) $ \st ->
-    if IM.null (ssGlides st)
-      then st
-      else st {ssGlides = IM.delete (intKey wid) (ssGlides st)}
+    if IM.null (ssGlides st) then st else st {ssGlides = f (ssGlides st)}
 
 -- | Advance every glide by @dt@ seconds. Each one covers the same fraction of
 -- what is left every second, so a long throw starts fast and eases in, and at

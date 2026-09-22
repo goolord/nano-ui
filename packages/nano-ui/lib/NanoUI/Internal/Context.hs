@@ -76,6 +76,7 @@ module NanoUI.Internal.Context
   , CustomDrawContext (..)
   , CustomDrawBuild
   , registerCustomDrawing
+  , registerCustomEntry
   , lookupCustomDrawing
   , cachedCustomDrawingOps
   , refreshCustomDrawingOps
@@ -84,11 +85,8 @@ module NanoUI.Internal.Context
   , registerCustomMeasure
   , lookupCustomMeasure
   , customMeasureHooks
-  , registerCustomCursor
   , lookupCustomCursor
-  , registerCustomDamageSlop
   , lookupCustomDamageSlop
-  , registerPointerTracked
   , isPointerTracked
   , resetDrawingScopeCache
   , getStore
@@ -174,6 +172,7 @@ module NanoUI.Internal.Context
   , setDrawSquareGeometry
   , setDrawExternalText
   , askHostIO
+  , hostOrInit
   , pushMessage
   , drainMessages
   -- Constructors
@@ -367,11 +366,8 @@ registerImage ctx iid w h px = do
 -- | Register every image and return whether all succeeded. Successful earlier
 -- registrations remain in place if another image fails.
 registerImages :: Foldable f => Context -> f (ImageId, Int, Int, ByteString) -> IO Bool
-registerImages ctx = foldM register True
-  where
-    register ok (iid, w, h, px) = do
-      result <- registerImage ctx iid w h px
-      pure (ok && result)
+registerImages ctx =
+  foldM (\ok (iid, w, h, px) -> (ok &&) <$> registerImage ctx iid w h px) True
 
 -- | Current normalised atlas UV bounds, or 'Nothing' for an unknown image.
 -- Atlas growth can change these coordinates; do not cache them across uploads.
@@ -578,9 +574,7 @@ withExternalText ctx ext = ctx {ctxExternalText = ext}
 
 -- | Apply 'setTheme' and return the same context for configuration pipelines.
 withTheme :: Context -> Theme -> IO Context
-withTheme ctx theme = do
-  setTheme ctx theme
-  pure ctx
+withTheme ctx theme = ctx <$ setTheme ctx theme
 
 -- | Change the base theme, invalidate text/layout caches, and request a full
 -- repaint. An equal theme is a no-op.
@@ -643,6 +637,11 @@ setDrawExternalText ctx = Draw.setDrawExternalText (ctxDrawArena ctx)
 {-# INLINE askHostIO #-}
 askHostIO :: forall a. (Typeable a) => Context -> IO (Maybe a)
 askHostIO ctx = (fromDynamic <=< Map.lookup (typeRep (Proxy :: Proxy a))) <$> readIORef (ctxHost ctx)
+
+-- | The host value of the requested type, storing the one @new@ builds when
+-- there is none yet: how a widget keeps a cache of its own on the context.
+hostOrInit :: forall a. (Typeable a) => Context -> IO a -> IO a
+hostOrInit ctx new = askHostIO ctx >>= maybe (new >>= \v -> v <$ setHost ctx v) pure
 
 -- | Queue a message for this frame. 'drainMessages' restores emission order.
 {-# INLINE pushMessage #-}

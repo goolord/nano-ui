@@ -75,18 +75,16 @@ import NanoUI.Internal.Context
   , Context (..)
   , CustomDrawBuild
   , CustomDrawContext (..)
+  , CustomDrawingEntry (..)
   , CustomMeasureFn
   , getFocusId
   , getHotId
   , getStore
   , intKey
   , isDisabled
-  , registerCustomCursor
-  , registerCustomDamageSlop
-  , registerCustomDrawing
+  , registerCustomEntry
   , registerCustomMeasure
   , registerFocusable
-  , registerPointerTracked
   , widgetTheme
   , modifyStore
   )
@@ -358,11 +356,13 @@ customWidgetWithId wid spec = do
   uiIO $ do
     when (widgetFocusable spec) $ registerFocusable ctx wid
     mapM_ (registerCustomMeasure ctx wid) (widgetMeasure spec)
-    registerCustomDrawing ctx wid (widgetContent spec) (widgetDraw spec)
-    mapM_ (registerCustomCursor ctx wid) (widgetCursor spec)
-    when (widgetDamageSlop spec > 0) $
-      registerCustomDamageSlop ctx wid (widgetDamageSlop spec)
-    when (widgetTrackPointer spec) $ registerPointerTracked ctx wid
+    registerCustomEntry ctx wid $
+      CustomDrawingEntry
+        (widgetContent spec)
+        (widgetDraw spec)
+        (widgetCursor spec)
+        (widgetDamageSlop spec)
+        (widgetTrackPointer spec)
   resp0 <- addWidget wid NodeDrawing T.empty 0 (widgetLayout spec)
   cdc <- uiIO (customDrawContext ctx (ctxFontMetrics ctx) wid (respHovered resp0) (respPressed resp0))
   pure (widgetInteract spec resp0 cdc inp)

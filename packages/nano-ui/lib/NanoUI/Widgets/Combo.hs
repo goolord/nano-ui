@@ -26,7 +26,7 @@ import NanoUI.Internal.Context
   , markEscapeConsumed
   , modifyStore
   )
-import NanoUI.Internal.Font (FontMetrics, menuItemRowH)
+import NanoUI.Internal.Font (menuItemRowH)
 import NanoUI.Internal.Frame.Hit (findNodeByWidgetId)
 import NanoUI.Internal.Frame.Select (comboDropPickIndex, comboDropRect, comboScrollGeom)
 import NanoUI.Internal.Id (WidgetId (..))
@@ -93,7 +93,6 @@ data ComboInput = ComboInput
     -- ^ Width of the widest matching row.
   , ciField :: !Rect
     -- ^ The field's rect; empty before its first layout.
-  , ciMetrics :: !FontMetrics
   , ciMouse :: !V2
   , ciPressed :: !Bool
   , ciDown :: !Bool
@@ -198,18 +197,17 @@ comboStep ci cs0 =
     -- is looking at when a drag starts).
     (_, vSb, hSb, usableW) = comboScrollGeom dropRect n vis storedWin storedX contentW
     maxOffX = max 0 (contentW - usableW)
-    onVThumb = maybe False (\(_, th) -> rectContains th mouse) vSb
-    onVTrack = maybe False (\(t, _) -> rectContains t mouse) vSb
-    onHThumb = maybe False (\(_, th) -> rectContains th mouse) hSb
-    onHTrack = maybe False (\(t, _) -> rectContains t mouse) hSb
+    -- A missing scrollbar is an empty rect, which contains no point.
+    (vTrackR, vThumbR) = fromMaybe (Rect 0 0 0 0, Rect 0 0 0 0) vSb
+    (hTrackR, hThumbR) = fromMaybe (Rect 0 0 0 0, Rect 0 0 0 0) hSb
+    onVThumb = rectContains vThumbR mouse
+    onVTrack = rectContains vTrackR mouse
+    onHThumb = rectContains hThumbR mouse
+    onHTrack = rectContains hTrackR mouse
     pressed = isFocus && ciPressed ci
     down = isFocus && ciDown ci
     startV = pressed && overDrop && onVTrack
     startH = pressed && overDrop && not startV && onHTrack
-    vThumbR = maybe (Rect 0 0 0 0) snd vSb
-    vTrackR = maybe (Rect 0 0 0 0) fst vSb
-    hThumbR = maybe (Rect 0 0 0 0) snd hSb
-    hTrackR = maybe (Rect 0 0 0 0) fst hSb
     vGrab = if onVThumb then v2Y mouse - rectY vThumbR else rectH vThumbR / 2
     hGrab = if onHThumb then v2X mouse - rectX hThumbR else rectW hThumbR / 2
     drag1
@@ -309,7 +307,6 @@ comboBox' placeholder options value = do
             , ciRows = displayed
             , ciContentW = contentW
             , ciField = rawRespRect resp
-            , ciMetrics = ctxFontMetrics ctx
             , ciMouse = inputMousePos inp
             , ciPressed = inputMousePressed inp
             , ciDown = inputMouseDown inp

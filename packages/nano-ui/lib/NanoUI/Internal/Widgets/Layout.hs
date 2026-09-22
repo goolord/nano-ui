@@ -37,7 +37,6 @@ module NanoUI.Internal.Widgets.Layout
 where
 
 import Control.Monad (void)
-import Data.IORef (readIORef)
 import Data.Text (Text)
 import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context (Context (..), setScrollConfig)
@@ -77,7 +76,7 @@ import NanoUI.Internal.Widgets.Node
   , addWidget
   , container
 
-  , parentIdx
+  , currentParent
   , withContainerNode
   )
 
@@ -258,9 +257,7 @@ separator = void $ do
   ctx <- askContext
   inp <- askInput
   uiIO $ do
-    stack <- readIORef (ctxContainerStack ctx)
-    let
-      parent = parentIdx stack
+    parent <- currentParent ctx
     parentDir <-
       if parent < 0
         then pure DirColumn
@@ -317,8 +314,8 @@ scrollAreaIdConfigured wid layout cfg child = do
   -- Push a scroll container node carrying the config's style index and
   -- context scroll config, run the child inside it, then pop.
   idx <- uiIO $ do
-    stack <- readIORef (ctxContainerStack ctx)
-    idx <- addNodeFromLayout (ctxNodeArena ctx) NodeScrollContainer (parentIdx stack) layout
+    parent <- currentParent ctx
+    idx <- addNodeFromLayout (ctxNodeArena ctx) NodeScrollContainer parent layout
     setWidgetId (ctxNodeArena ctx) idx wid
     setStyleIdx (ctxNodeArena ctx) idx (encodeScrollConfig cfg)
     setScrollConfig ctx wid cfg

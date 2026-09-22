@@ -443,21 +443,16 @@ textDecoration d l = l {layoutTextDecoration = d}
 fontUnderline :: Layout -> Layout
 fontUnderline l = l {layoutTextDecoration = addUnderline (layoutTextDecoration l)}
 
--- | The decoration with an underline added, keeping any strikethrough.
+-- | The decoration with an underline added, keeping any strikethrough. The
+-- constructor order of 'TextDecoration' is the bit pattern it stands for:
+-- underline is bit 0, strikethrough bit 1.
 addUnderline :: TextDecoration -> TextDecoration
-addUnderline = \case
-  DecorationStrikethrough -> DecorationUnderlineStrike
-  DecorationUnderlineStrike -> DecorationUnderlineStrike
-  _ -> DecorationUnderline
+addUnderline d = toEnum (fromEnum d .|. 1)
 
 -- | Add a strikethrough while preserving any underline.
 fontStrike :: Layout -> Layout
 fontStrike l =
-  let newDeco = case layoutTextDecoration l of
-        DecorationUnderline -> DecorationUnderlineStrike
-        DecorationUnderlineStrike -> DecorationUnderlineStrike
-        _ -> DecorationStrikethrough
-   in l {layoutTextDecoration = newDeco}
+  l {layoutTextDecoration = toEnum (fromEnum (layoutTextDecoration l) .|. 2)}
 
 -- | Align to the left edge of the available space.
 alignStart :: Layout -> Layout

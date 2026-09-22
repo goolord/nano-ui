@@ -335,33 +335,20 @@ clampTreeRatio tree splitId region spacing minSize r0
        in splitLength spacing avail mA mB r0 / usable
   | otherwise = r0
 
--- | Which drop zone a pointer falls into for a target pane rect.
-data EdgeZone = ZoneCenter | ZoneLeft | ZoneRight | ZoneTop | ZoneBottom
-
--- | Classify a drop point into a zone of the target pane.
-edgeZone :: Rect -> V2 -> EdgeZone
-edgeZone r (V2 mx my)
-  | not (rectNonEmpty r) = ZoneCenter
-  | tx < 0.25 = ZoneLeft
-  | tx > 0.75 = ZoneRight
-  | ty < 0.25 = ZoneTop
-  | ty > 0.75 = ZoneBottom
-  | otherwise = ZoneCenter
-  where
-    tx = (mx - rectX r) / rectW r
-    ty = (my - rectY r) / rectH r
-
 -- | Classify a drop point on a target pane into the 'PaneDrop' the drop
 -- performs: the pane's center swaps the two panes, an edge zone splits the
 -- target along that edge's axis with the dragged pane on the near side.
 dropTargetForPane :: Rect -> V2 -> Word64 -> PaneDrop
-dropTargetForPane r mouse tgt =
-  case edgeZone r mouse of
-    ZoneCenter -> DropSwap tgt
-    ZoneLeft -> DropSplit tgt AxisV True
-    ZoneRight -> DropSplit tgt AxisV False
-    ZoneTop -> DropSplit tgt AxisH True
-    ZoneBottom -> DropSplit tgt AxisH False
+dropTargetForPane r (V2 mx my) tgt
+  | not (rectNonEmpty r) = DropSwap tgt
+  | tx < 0.25 = DropSplit tgt AxisV True
+  | tx > 0.75 = DropSplit tgt AxisV False
+  | ty < 0.25 = DropSplit tgt AxisH True
+  | ty > 0.75 = DropSplit tgt AxisH False
+  | otherwise = DropSwap tgt
+  where
+    tx = (mx - rectX r) / rectW r
+    ty = (my - rectY r) / rectH r
 
 -- | The laid-out pane whose region is closest to the point: the pane under
 -- it, or across a gutter the pane on the nearer side. A pointer crossing a

@@ -35,6 +35,7 @@ import NanoUI.Internal.Monad
   , nextId
   , uiIO
   , uiMousePos
+  , (<&&>)
   )
 import NanoUI.Internal.Style
   ( AlignX (..)
@@ -156,10 +157,7 @@ floatingOverlay open dismissable addPanel enter body = do
       (mouse, (closed, r)) <-
         floatingPanel wid (addPanel wid) (enter wid) ((,) <$> uiMousePos <*> body)
       panel <- fromMaybe (Rect 0 0 0 0) <$> lastRect wid
-      outside <-
-        if dismissable && rectNonEmpty panel
-          then useDismissable panel
-          else pure False
+      outside <- pure (dismissable && rectNonEmpty panel) <&&> useDismissable panel
       let dismissed = closed || outside
       pure
         ( mkResponse wid panel (rectHit panel mouse) dismissed dismissed

@@ -27,7 +27,7 @@ import NanoUI.Internal.Context
   , startAnimationEaseDelay
   , startSpring
   )
-import NanoUI.Internal.Monad (Ui, askContext, nextId, scope, uiIO, uiTime, withContext, withKey)
+import NanoUI.Internal.Monad (Ui, nextId, scope, uiTime, withContext, withKey)
 import NanoUI.Internal.Widgets.Node (HasResponse, respId)
 
 -- | How an animated value moves.
@@ -43,8 +43,7 @@ data Transition
 animate :: Ui :> es => Transition -> Float -> Float -> Eff es Float
 animate transition from to = do
   wid <- nextId
-  ctx <- askContext
-  uiIO $ do
+  withContext $ \ctx -> do
     case transition of
       Tween ease dur delay -> startAnimationEaseDelay ctx wid from to dur ease delay
       Spring params -> do
@@ -58,8 +57,7 @@ animate transition from to = do
 animateTo :: Ui :> es => Transition -> Float -> Eff es Float
 animateTo transition target = do
   wid <- nextId
-  ctx <- askContext
-  uiIO $ do
+  withContext $ \ctx -> do
     case transition of
       Tween ease dur delay -> do
         cur <- getAnimationValue ctx wid

@@ -476,6 +476,12 @@ type CustomDrawBuild = CustomDrawContext -> Rect -> SmallArray DrawOp
 data CustomDrawingEntry = CustomDrawingEntry
   { cdrContent :: {-# UNPACK #-} !Int
   , cdrBuild :: !CustomDrawBuild
+  , cdrCursor :: !(Maybe (CustomDrawContext -> UiCursorKind))
+  , cdrDamageSlop :: {-# UNPACK #-} !Float
+    -- ^ Repaint margin in logical pixels; anything but a positive value
+    -- leaves the default margin in place.
+  , cdrTracked :: !Bool
+    -- ^ Whether the widget wants a frame for every pointer move over it.
   }
 
 -- | A registered drawing: content version plus the op builder. The version
@@ -493,10 +499,6 @@ data DrawingCacheState = DrawingCacheState
   , dcsDrawings :: !(IntMap DrawingEntry)
   , dcsCustomDrawings :: !(IntMap CustomDrawingEntry)
   , dcsCustomMeasures :: !(IntMap CustomMeasureFn)
-  , dcsCustomCursors :: !(IntMap (CustomDrawContext -> UiCursorKind))
-  , dcsCustomDamageSlop :: !(IntMap Float)
-  , dcsPointerTracked :: !(IntMap ())
-    -- ^ Custom widgets that want a frame for every pointer move over them.
   , dcsDrawOpCache :: !(IntMap DrawOpCacheEntry)
   , dcsCustomDrawOpCache :: !(IntMap CustomDrawOpCacheEntry)
   , dcsDrawFitCache :: !(IntMap DrawFitCache)
@@ -538,9 +540,6 @@ initialDrawingCacheState = DrawingCacheState
   , dcsDrawings = IM.empty
   , dcsCustomDrawings = IM.empty
   , dcsCustomMeasures = IM.empty
-  , dcsCustomCursors = IM.empty
-  , dcsCustomDamageSlop = IM.empty
-  , dcsPointerTracked = IM.empty
   , dcsDrawOpCache = IM.empty
   , dcsCustomDrawOpCache = IM.empty
   , dcsDrawFitCache = IM.empty

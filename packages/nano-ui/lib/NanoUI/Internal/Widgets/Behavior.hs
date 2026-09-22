@@ -47,7 +47,7 @@ import NanoUI.Internal.Input
   , inputMouseReleased
   , inputMouseRightPressed
   )
-import NanoUI.Internal.Monad (Ui, askContext, askFrameInput, askInput, focusedWidget, nextId, uiIO, withContext)
+import NanoUI.Internal.Monad (Ui, (<&&>), askContext, askFrameInput, askInput, focusedWidget, nextId, uiIO, withContext)
 import NanoUI.Internal.Store (fieldFloat, fieldInt, findSlot, insertSlot, quietFlag, setQuietFlag)
 import NanoUI.Internal.Types (Rect (..), clamp01, rectHit, v2X, v2Y)
 import qualified Data.Text as T
@@ -62,13 +62,11 @@ data DragAxis = DragAxisX | DragAxisY
 -- | True when a prior keyed useDrag1D on this path is still held.
 -- Peeks the keyed first-id without enterKeyed bumping parent siblingId.
 keyedDragHeld :: (Hashable k, Ui :> es) => k -> Eff es Bool
-keyedDragHeld k = do
-  ctx <- askContext
-  uiIO $ do
-    old <- readIORef (ctxIdContext ctx)
-    let wid = idContextWidgetId (snd (enterKeyed (fromIntegral (hash k)) old))
-        dragK = slotKey SlotDrag (intKey wid)
-    quietFlag dragK <$> getStore ctx
+keyedDragHeld k = withContext $ \ctx -> do
+  old <- readIORef (ctxIdContext ctx)
+  let wid = idContextWidgetId (snd (enterKeyed (fromIntegral (hash k)) old))
+      dragK = slotKey SlotDrag (intKey wid)
+  quietFlag dragK <$> getStore ctx
 
 -- | Clamped 1D drag. Maps pointer position on @track@ into [lo, hi]. The drag
 -- starts with a press on the track and lasts until the button comes up; a
@@ -114,12 +112,10 @@ useDrag1D axis lo hi current track = do
 -- | Hold the active id for @wid@ while its drag lasts and let it go after, so
 -- the widget paints and takes the cursor as pressed wherever the pointer goes.
 holdActiveWhile :: (Ui :> es) => WidgetId -> Bool -> Eff es ()
-holdActiveWhile wid dragging = do
-  ctx <- askContext
-  uiIO $ do
-    active <- readIORef (ctxActiveId ctx)
-    when (dragging /= (active == wid)) $
-      writeIORef (ctxActiveId ctx) (if dragging then wid else WidgetId 0)
+holdActiveWhile wid dragging = withContext $ \ctx -> do
+  active <- readIORef (ctxActiveId ctx)
+  when (dragging /= (active == wid)) $
+    writeIORef (ctxActiveId ctx) (if dragging then wid else WidgetId 0)
 
 -- | Drag-and-drop reorder of a visible index list.
 useReorder ::
@@ -192,11 +188,9 @@ keyboardFocused wid
   | otherwise = do
       ctx <- askContext
       focus <- focusedWidget
-      if focus /= wid
-        then pure False
-        else uiIO $ do
-          disabled <- isDisabled ctx wid
-          if disabled then pure False else not <$> pointerBlockedByModal ctx
+      pure (focus == wid)
+        <&&> uiIO (not <$> isDisabled ctx wid)
+        <&&> uiIO (not <$> pointerBlockedByModal ctx)
 
 -- | Arrow / Enter / Space while @wid@ is focused and eligible for input.
 useKeyNav :: (Ui :> es) => WidgetId -> Eff es KeyNav

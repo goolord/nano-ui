@@ -187,9 +187,8 @@ pokeBandIndices ip iOff hasCore va vb = do
 
 {-# INLINE pushRoundedRect #-}
 pushRoundedRect :: DrawArena -> Rect -> Float -> Color -> IO ()
-pushRoundedRect da (Rect x y w h) radius col = do
-  s <- readIORef (daSnapScale da)
-  pushRoundedRectRaw da (Rect (onGrid s x) (onGrid s y) w h) radius col
+pushRoundedRect da rect radius col =
+  snapRectOrigin da rect >>= \r -> pushRoundedRectRaw da r radius col
 
 -- | Unsnapped variant used when the rect is already anchored to the snapped
 -- device pixel grid, e.g. a mark that must stay concentric with a border that
@@ -311,9 +310,8 @@ circleBox cx cy radius = Rect (cx - radius) (cy - radius) (2 * radius) (2 * radi
 
 {-# INLINE pushRoundedStroke #-}
 pushRoundedStroke :: DrawArena -> Rect -> Float -> Float -> Color -> IO ()
-pushRoundedStroke da (Rect x y w h) radius bw col = do
-  s <- readIORef (daSnapScale da)
-  pushRoundedStrokeRaw da (Rect (onGrid s x) (onGrid s y) w h) radius bw col
+pushRoundedStroke da rect radius bw col =
+  snapRectOrigin da rect >>= \r -> pushRoundedStrokeRaw da r radius bw col
 
 -- | 'pushRoundedStroke' without snapping the origin, for a rect already
 -- anchored to the grid; see 'pushRoundedRectRaw'.

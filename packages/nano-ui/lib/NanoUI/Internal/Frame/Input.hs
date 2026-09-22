@@ -19,7 +19,7 @@ module NanoUI.Internal.Frame.Input
   ) where
 
 import Control.Applicative ((<|>))
-import Control.Monad (forM_, when)
+import Control.Monad (when)
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Maybe (isJust, isNothing)
 import NanoUI.Internal.Context
@@ -74,7 +74,7 @@ import NanoUI.Internal.Layout.Arena
   , getStyleIdx
   , getWidgetId
   )
-import NanoUI.Internal.Monad (unlessM, whenM, (<&&>))
+import NanoUI.Internal.Monad (ifM, unlessM, whenM, (<&&>))
 import NanoUI.Internal.Types (DamageBounds (..), Rect (..), V2 (..), defaultDamageSlop, rectContains)
 import NanoUI.Internal.WidgetText (hasFlag, buttonFlagClose, buttonFlagMenuBar, buttonFlagMenu)
 
@@ -181,18 +181,12 @@ pressTargets ctx inp
         let wantI = isNothing i && isInteractiveNode nt
             wantT = isNothing t && isTextFieldNode nt
             wantS = isNothing s && nt == NodeSelect
-        if not (wantI || wantT || wantS)
-          then pure False
-          else do
-            hit <- widgetUnderMouse ctx top mouse nt idx
-            if not hit
-              then pure False
-              else do
-                wid <- getWidgetId na idx
-                let pick want cur = if want then Just wid else cur
-                    !r = PressTargets (pick wantI i) (pick wantT t) (pick wantS s)
-                writeIORef found r
-                pure (isJust (ptInteractive r) && isJust (ptTextField r) && isJust (ptSelect r))
+        pure (wantI || wantT || wantS) <&&> widgetUnderMouse ctx top mouse nt idx <&&> do
+          wid <- getWidgetId na idx
+          let pick want cur = if want then Just wid else cur
+              !r = PressTargets (pick wantI i) (pick wantT t) (pick wantS s)
+          writeIORef found r
+          pure (isJust (ptInteractive r) && isJust (ptTextField r) && isJust (ptSelect r))
       readIORef found
  where
   none = PressTargets Nothing Nothing Nothing
@@ -207,9 +201,7 @@ isTextFieldNode nt = nt == NodeTextInput || nt == NodeTextArea
 -- overlap both pick the one on top.
 finalizePointerPress :: Context -> PressTargets -> IO ()
 finalizePointerPress ctx targets =
-  forM_ (ptInteractive targets) $ \wid ->
-    whenM (not <$> isDisabled ctx wid) $
-      writeIORef (ctxActiveId ctx) wid
+  enabledTarget ctx (ptInteractive targets) >>= mapM_ (writeIORef (ctxActiveId ctx))
 
 -- | The widget under @mouse@ whose node type satisfies @wanted@, or 'Nothing'.
 -- It is the first match in arena order, which is declaration order. The
@@ -333,7 +325,7 @@ finalizeTextInputFocus :: Context -> Input -> PressTargets -> IO ()
 finalizeTextInputFocus ctx inp targets =
   when (inputMousePressed inp) $ do
     prevFocus <- readIORef (ctxFocusId ctx)
-    mFocused <- enabledTextField ctx (ptTextField targets)
+    mFocused <- enabledTarget ctx (ptTextField targets)
     case mFocused of
       Nothing -> do
         when (prevFocus /= WidgetId 0) $ markDirty ctx
@@ -348,8 +340,7 @@ finalizeTextInputFocus ctx inp targets =
 -- text field.
 finalizeSelectFocus :: Context -> PressTargets -> IO ()
 finalizeSelectFocus ctx targets =
-  forM_ (ptSelect targets) $ \wid ->
-    whenM (not <$> isDisabled ctx wid) $ focusWidget ctx wid
+  enabledTarget ctx (ptSelect targets) >>= mapM_ (focusWidget ctx)
 
 -- | Give @wid@ keyboard focus, repainting when focus moved.
 focusWidget :: Context -> WidgetId -> IO ()
@@ -358,13 +349,10 @@ focusWidget ctx wid = do
   writeIORef (ctxFocusId ctx) wid
   when (prev /= wid) $ markDirty ctx
 
--- | The text field or text area a press landed on, unless it is disabled.
-enabledTextField :: Context -> Maybe WidgetId -> IO (Maybe WidgetId)
-enabledTextField ctx mWid =
-  -- A disabled field counts as nothing here, so a press on it takes focus
-  -- away from the field that had it and gives it to no other.
-  case mWid of
-    Just wid -> do
-      disabled <- isDisabled ctx wid
-      pure (if disabled then Nothing else Just wid)
-    Nothing -> pure Nothing
+-- | The pressed widget, unless it is disabled. A disabled field counts as
+-- nothing here, so a press on it takes focus away from the field that had it
+-- and gives it to no other.
+enabledTarget :: Context -> Maybe WidgetId -> IO (Maybe WidgetId)
+enabledTarget ctx mWid = case mWid of
+  Just wid -> ifM (isDisabled ctx wid) (pure Nothing) (pure mWid)
+  Nothing -> pure Nothing

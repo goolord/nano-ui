@@ -58,7 +58,7 @@ import NanoUI.Internal.Input
   , inputWindowSize
   )
 import NanoUI.Internal.Layout.Arena (NodeClass (PointerNodes), NodeType (NodeTextArea, NodeTextInput), findClassNodeRevM, getNodeRect, getNodeType, getWidgetId)
-import NanoUI.Internal.Monad (whenM, (<&&>))
+import NanoUI.Internal.Monad (ifM, whenM, (<&&>))
 import NanoUI.Internal.Style (Style (..), Theme, themeSeparator)
 import NanoUI.Internal.Types (Color (..), Rect (..), Size (..), V2 (..), clamp, lerpColor, rectContains)
 import NanoUI.Internal.Widgets.TextEditor (EditorMode (..), TextCommand (..), canRedo, canUndo)
@@ -173,13 +173,11 @@ finalizeTextEditMenuPick ctx inp =
         | rectContains (textInputMenuRect menu) (inputMousePos inp) ->
             case textEditMenuPickAction (textInputMenuRect menu) (inputMousePos inp) of
               Nothing -> setTextInputMenu ctx Nothing
-              Just action -> do
-                enabled <- textFieldMenuActionEnabled ctx (textInputMenuWidget menu) action
-                if enabled
-                  then applyTextFieldMenuAction ctx (textInputMenuWidget menu) action
-                  else do
-                    setTextInputMenu ctx Nothing
-                    markDirty ctx
+              Just action ->
+                ifM
+                  (textFieldMenuActionEnabled ctx (textInputMenuWidget menu) action)
+                  (applyTextFieldMenuAction ctx (textInputMenuWidget menu) action)
+                  (setTextInputMenu ctx Nothing >> markDirty ctx)
       _ -> pure ()
 
 -- | A press anywhere but on the menu closes it. This watches the frame's
@@ -216,10 +214,10 @@ withTextEditMenu ctx absent consume = getTextInputMenu ctx >>= \case
   Nothing -> pure absent
   Just menu -> do
     let wid = textInputMenuWidget menu
-    allow <- widgetOverlayAllowed ctx wid
-    if allow
-      then widgetTheme ctx wid >>= consume wid (textInputMenuRect menu)
-      else pure absent
+    ifM
+      (widgetOverlayAllowed ctx wid)
+      (widgetTheme ctx wid >>= consume wid (textInputMenuRect menu))
+      (pure absent)
 
 drawTextEditMenuOverlays :: Context -> Input -> IO ()
 drawTextEditMenuOverlays ctx inp = withTextEditMenu ctx () $ \wid menuRect theme -> do

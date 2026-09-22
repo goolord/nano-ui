@@ -66,7 +66,7 @@ import NanoUI.Internal.Input
   , inputMousePos
   , inputMousePressed
   )
-import NanoUI.Internal.Monad (Ui, askContext, askInput, damageWidgetNow, focusedWidget, lastRect, nextId, releaseFocus, requestFrame, uiIO, withIdFrame, withKey)
+import NanoUI.Internal.Monad (Ui, (<&&>), askContext, askInput, damageWidgetNow, focusedWidget, lastRect, nextId, releaseFocus, requestFrame, uiIO, withIdFrame, withKey)
 import NanoUI.Internal.Id (IdContext (..), WidgetId, hashWidgetId)
 import NanoUI.Internal.Frame.Hit (nodeInteractionHit, scrollHitRect)
 import NanoUI.Internal.Frame.Input (isInteractiveNode)
@@ -327,8 +327,6 @@ data GridEnv es = GridEnv
   , geLeeway :: !Float
   , geRegions :: !(Map Word64 Rect)
     -- ^ Prev-frame pane regions; drives hit testing and 'pgcRect'.
-  , geBaseRect :: !Rect
-    -- ^ Prev-frame rect of the grid's root container.
   , geTree :: !GridNode
   , geSeed :: !Word64
     -- ^ Next fresh split / pane id ('SlotPaneNext'); strictly monotonic per
@@ -364,10 +362,6 @@ treeMaxId :: GridNode -> Word64
 treeMaxId = \case
   Pane p -> p
   Split sid _ _ a b -> maximum [sid, treeMaxId a, treeMaxId b]
-
--- | The grid's split tree persisted in the widget store, if seeded.
-lookupTree :: Int -> WidgetStore -> Maybe GridNode
-lookupTree = lookupDyn
 
 -- | A stored pane id that still exists in the tree, else 0.
 validPane :: GridNode -> Int -> Word64
@@ -410,7 +404,7 @@ paneGrid cfg = do
       edgeBand = max 0 (pgEdgeBand cfg)
       gutter = spacing + 2 * leeway
   st <- uiIO (getStore ctx)
-  (tree0, seed1) <- case lookupTree key st of
+  (tree0, seed1) <- case lookupDyn key st of
     Just t ->
       -- Init seeded the store before the tree existed, so the stored seed
       -- is already above every id in the tree.
@@ -459,22 +453,47 @@ paneGrid cfg = do
       (regions, dividers) = layoutNode minSize gutter tree baseRect
   changedRef <- uiIO (newIORef False)
   let mGrab = lookupSlot fieldPoint grabK st
-      dgi =
-        computeDragInfo
-          drag0
-          (flagSlot grabK st)
-          DragGeom
-            { dgMinSize = minSize
-            , dgGutter = gutter
-            , dgTree = tree
-            , dgBaseRect = baseRect
-            , dgBand = edgeBand
-            , dgRegions = regions
-            , dgSeed = seed1
-            , dgPreserveSize = pgPreserveDragSize cfg
-            }
-          mGrab
-          mouse
+      -- Pure drag-and-drop geometry for the current frame. Geometry is
+      -- computed for as long as the gesture id is armed (not just while the
+      -- button is held), so the drop zone is still resolvable on the frame the
+      -- button is released. 'baseRect' is the grid's own rect: its outer band
+      -- (thickness 'pgEdgeBand') is a top-level drop zone, and the pointer
+      -- there restructures the whole grid; otherwise the pane nearest the
+      -- pointer is the target, and a pointer outside the grid has none. Every
+      -- candidate is resolved through 'dropPreviewTreeSized', which simulates
+      -- the drop and lays the tree back out with the grid's real gutter and
+      -- minimum size, so the highlighted rect is the exact region the pane
+      -- lands in even when removing it reshapes the rest of a mixed-split grid.
+      --
+      -- Targets are hit-tested against the grid with the dragged pane
+      -- removed, never against the previewed layout on screen: the target is
+      -- then a function of the pointer alone, and showing a preview cannot
+      -- change which drop it is.
+      dgi
+        | drag0 <= 0 = DragInfo False False Nothing Nothing
+        | otherwise =
+            let pid = fromIntegral drag0
+                mFrom = M.lookup pid regions
+                (gx, gy) = fromMaybe (0, 0) mGrab
+                moved = flagSlot grabK st || case mFrom of
+                  Just (Rect px py _ _) ->
+                    let vx = v2X mouse - (px + gx)
+                        vy = v2Y mouse - (py + gy)
+                     in vx * vx + vy * vy > dragThresholdPx * dragThresholdPx
+                  Nothing -> False
+                ghost = case mFrom of
+                  Just _
+                    | moved -> Just (Rect (v2X mouse + 12) (v2Y mouse + 12) 112 28)
+                  _ -> Nothing
+                targetRegions = maybe M.empty (\t -> fst (layoutNode minSize gutter t baseRect)) (treeRemovePane pid tree)
+                preview = dropPreviewTreeSized (if pgPreserveDragSize cfg then mFrom else Nothing) minSize gutter tree pid seed1 baseRect
+                zone = case topLevelDropTarget edgeBand baseRect mouse of
+                  Just dt -> preview dt
+                  Nothing
+                    | rectHit baseRect mouse ->
+                        nearestPane targetRegions mouse >>= \(q, r) -> preview (dropTargetForPane r mouse q)
+                    | otherwise -> Nothing
+             in DragInfo True moved ghost zone
       dgiShown = dgiActive dgi && dgiMoved dgi && inputMouseDown inp
       -- The committed tree stays in the store for cancellation. The live
       -- layout shows the drop under the pointer as it will land: the post-drop
@@ -502,7 +521,6 @@ paneGrid cfg = do
           , geMinSize = minSize
           , geLeeway = leeway
           , geRegions = visibleRegions
-          , geBaseRect = baseRect
           , geTree = tree
           , geSeed = seed1
           , geDrag0 = drag0
@@ -528,7 +546,7 @@ paneGrid cfg = do
   container NodeContainer (gridRootLayout minSize (pgLayout cfg)) $ do
     tagContainer wid
     if maxPane /= 0
-      then void (renderMaxPane env maxPane)
+      then void (renderPane env maxPane baseRect False)
       else do
         rendered <- maybe (pure []) (renderNode env divMap) visibleTree
         runGestures env dividers rendered dgi
@@ -551,10 +569,8 @@ paneGrid cfg = do
     nav <- useKeyNav wid
     let ch = inputChars inp
         cur = focusedInit
-    when (knLeft nav) $ moveFocus env cur (-1, 0)
-    when (knRight nav) $ moveFocus env cur (1, 0)
-    when (knUp nav) $ moveFocus env cur (0, -1)
-    when (knDown nav) $ moveFocus env cur (0, 1)
+    forM_ [(knLeft, (-1, 0)), (knRight, (1, 0)), (knUp, (0, -1)), (knDown, (0, 1))] $
+      \(k, dir) -> when (k nav) (moveFocus env cur dir)
     when (knLeft nav || knRight nav || knUp nav || knDown nav) $
       damageWidgetNow wid (DamageInflated 0)
     when (T.any (== 'm') ch) $ maximizePane env cur
@@ -567,7 +583,7 @@ paneGrid cfg = do
 
   changed <- uiIO (readIORef changedRef)
   stEnd <- uiIO (getStore ctx)
-  let treeEnd = lookupTree key stEnd
+  let treeEnd = lookupDyn key stEnd
       maxEnd = maybe 0 (\t -> validPane t (findSlot fieldInt 0 maxK stEnd)) treeEnd
       focusEnd = maybe 0 (\t -> resolveFocus t maxEnd (fromIntegral (findSlot fieldInt 0 focusK stEnd))) treeEnd
   pure
@@ -635,10 +651,6 @@ splitPct avail d = d / avail * 100
 -- Rendering
 -- -----------------------------------------------------------------------------
 
-renderMaxPane :: (Ui :> es) => GridEnv es -> Word64 -> Eff es [RenderedPane]
-renderMaxPane env pid =
-  renderPane env pid (geBaseRect env) False
-
 -- | Enter a pane's grid-relative identity scope while leaving the split tree's
 -- layout scopes intact. Consume one sibling just as 'withKey' does.
 withPaneKey :: (Ui :> es) => GridEnv es -> Word64 -> Eff es a -> Eff es a
@@ -672,13 +684,10 @@ renderPane env pid rect dragging =
                 | idx >= end = pure False
                 | otherwise = do
                     nt <- getNodeType arena idx
-                    hit <-
-                      if isInteractiveNode nt
-                        then do
-                          child <- getWidgetId arena idx
-                          r <- scrollHitRect ctx child
-                          maybe (pure False) (\childRect -> nodeInteractionHit ctx idx childRect (inputMousePos inp)) r
-                        else pure False
+                    hit <- pure (isInteractiveNode nt) <&&> do
+                      child <- getWidgetId arena idx
+                      r <- scrollHitRect ctx child
+                      maybe (pure False) (\childRect -> nodeInteractionHit ctx idx childRect (inputMousePos inp)) r
                     if hit then pure True else hitFrom (idx + 1)
           hitFrom start
     pure [RenderedPane pid view controlHit]
@@ -828,67 +837,6 @@ drawOverlay theme title ghost zone =
 -- Gestures
 -- -----------------------------------------------------------------------------
 
--- | Grid geometry 'computeDragInfo' needs for the current frame.
-data DragGeom = DragGeom
-  { dgMinSize :: !Float
-    -- ^ Per-pane size floor used by the preview layout.
-  , dgGutter :: !Float
-    -- ^ Layout gutter between panes ('pgSpacing' + 2 * 'pgLeeway').
-  , dgTree :: !GridNode
-    -- ^ Current split tree.
-  , dgBaseRect :: !Rect
-    -- ^ Prev-frame rect of the grid's root container.
-  , dgBand :: !Float
-    -- ^ Thickness of the grid's outer top-level drop band.
-  , dgRegions :: !(Map Word64 Rect)
-    -- ^ Prev-frame pane regions.
-  , dgPreserveSize :: !Bool
-  , dgSeed :: !Word64
-    -- ^ Id the drop's new split takes ('geSeed').
-  }
-
--- | Pure drag-and-drop geometry for the current frame. Geometry is computed
--- for as long as the gesture id is armed (not just while the button is held),
--- so the drop zone is still resolvable on the frame the button is released.
--- 'dgBaseRect' is the grid's own rect: its outer band (thickness 'dgBand') is
--- a top-level drop zone, and the pointer there restructures the whole grid;
--- otherwise the pane nearest the pointer is the target, and a pointer outside
--- the grid has none. Every candidate is resolved through 'dropPreviewTreeSized',
--- which simulates the drop and lays the tree back out with the grid's real
--- 'dgGutter' and 'dgMinSize', so the highlighted rect is the exact region the
--- pane lands in even when removing it reshapes the rest of a mixed-split grid.
---
--- Targets are hit-tested against the grid with the dragged pane removed, never
--- against the previewed layout on screen: the target is then a function of
--- the pointer alone, and showing a preview cannot change which drop it is.
-computeDragInfo :: Int -> Bool -> DragGeom -> Maybe (Float, Float) -> V2 -> DragInfo
-computeDragInfo drag0 latched geom mGrab mouse
-  | drag0 <= 0 = DragInfo False False Nothing Nothing
-  | otherwise =
-      let DragGeom{dgMinSize = minSize, dgGutter = gutter, dgTree = tree, dgBaseRect = baseRect, dgBand = band, dgRegions = regions, dgSeed = seed} = geom
-          pid = fromIntegral drag0
-          mFrom = M.lookup pid regions
-          (gx, gy) = fromMaybe (0, 0) mGrab
-          moved = latched || case mFrom of
-            Just (Rect px py _ _) ->
-              let vx = v2X mouse - (px + gx)
-                  vy = v2Y mouse - (py + gy)
-               in vx * vx + vy * vy > dragThresholdPx * dragThresholdPx
-            Nothing -> False
-          ghost = case mFrom of
-            Just _
-              | moved -> Just (Rect (v2X mouse + 12) (v2Y mouse + 12) 112 28)
-            _ -> Nothing
-          targetRegions = maybe M.empty (\t -> fst (layoutNode minSize gutter t baseRect)) (treeRemovePane pid tree)
-          preview = dropPreviewTreeSized (if dgPreserveSize geom then mFrom else Nothing) minSize gutter tree pid seed baseRect
-          zone = case topLevelDropTarget band baseRect mouse of
-            Just dt -> preview dt
-            Nothing
-              | rectHit baseRect mouse ->
-                  nearestPane targetRegions mouse >>= \(q, r) -> preview (dropTargetForPane r mouse q)
-              | otherwise -> Nothing
-       in DragInfo True moved ghost zone
-
 -- | Apply resize / drag transitions, writing to the widget store.
 runGestures ::
   (Ui :> es) =>
@@ -898,7 +846,6 @@ runGestures ::
   DragInfo ->
   Eff es ()
 runGestures env dividers rendered dgi = do
-  ctx <- askContext
   inp <- askInput
   let regions = geRegions env
       mouse = inputMousePos inp
@@ -949,7 +896,7 @@ runGestures env dividers rendered dgi = do
   when (drag0 < 0 && down) $ do
     let sid = fromIntegral (negate drag0)
     forM_ (find ((== sid) . diSplitId) dividers) $ \d -> do
-      st <- uiIO (getStore ctx)
+      st <- uiIO (getStore (geCtx env))
       let (ratio0, main0) =
             findSlot fieldPoint (diRatio d, mouseMain d mouse) (slotKey SlotPaneResize (geKey env)) st
           -- The ratio shares out the region minus the divider gutter.
@@ -1037,7 +984,7 @@ splitPane env pid axis = do
   let splitId = geSeed env
       newPane = geSeed env + 1
   putTree env (Just (treeSplit pid splitId axis False newPane (geTree env)))
-  putSeed env (geSeed env + 2)
+  storeWrite env False (insertSlot fieldInt (slotKey SlotPaneNext (geKey env)) (fromIntegral (geSeed env + 2)))
   putPaneSlot False SlotPaneFocus env newPane
   pure newPane
 
@@ -1100,8 +1047,3 @@ putPaneSlot structural slot env v = do
   when (findSlot fieldInt 0 k st /= n) $ do
     storeWrite env True (insertSlot fieldInt k n)
     when structural (markChanged env)
-
--- | Advance the next-id seed ('SlotPaneNext').
-putSeed :: (Ui :> es) => GridEnv es -> Word64 -> Eff es ()
-putSeed env v =
-  storeWrite env False (insertSlot fieldInt (slotKey SlotPaneNext (geKey env)) (fromIntegral v))

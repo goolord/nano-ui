@@ -21,7 +21,7 @@ module NanoUI.Internal.Frame.Chrome
 
 import Control.Monad (when)
 import Data.IORef (readIORef)
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Read as TR
@@ -99,9 +99,7 @@ selectCurrentOption ctx idx = do
   opts <- getOptions (ctxNodeArena ctx) idx
   wid <- getWidgetId (ctxNodeArena ctx) idx
   let picked = findSlot fieldInt 0 (intKey wid) store
-  pure $ case drop picked opts of
-    (o : _) -> o
-    _ -> ""
+  pure (fromMaybe "" (listToMaybe (drop picked opts)))
 
 -- | The text a field displays: its stored value, masked one character per
 -- character for password inputs so caret and selection offsets still line up.
@@ -291,8 +289,7 @@ widgetVisualStyle ctx nt idx = do
           Just NodeModal | modalAware -> overlayMenuStyle theme
           _ -> base
       bg
-        | nt == NodeTextInput, isFocus = styleActiveBg widgetBase
-        | nt == NodeTextArea, isFocus = styleActiveBg widgetBase
+        | isFocus, nt == NodeTextInput || nt == NodeTextArea = styleActiveBg widgetBase
         | hashWidgetId wid == hashWidgetId active = styleActiveBg widgetBase
         | nt == NodeCheckbox || nt == NodeRadio || nt == NodeSlider || isClose = styleBg widgetBase
         | isMenu = if isHot then styleHoverBg widgetBase else styleBg widgetBase

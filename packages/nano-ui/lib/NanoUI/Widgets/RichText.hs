@@ -27,11 +27,10 @@ import Data.Text qualified as T
 import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context
   ( Context (..)
-  , askHostIO
+  , CustomDrawingEntry (..)
+  , hostOrInit
   , intKey
-  , setHost
-  , registerCustomCursor
-  , registerCustomDrawing
+  , registerCustomEntry
   , registerCustomMeasure
   )
 import NanoUI.Internal.Draw (DrawOp (..), TextFont (..))
@@ -159,14 +158,7 @@ richTextWith' f pieces = do
   theme <- uiTheme
   wid <- nextId
   let styled = [(txt, pieceFont l, pieceColor theme l target, target) | Inline txt style target <- pieces, let l = style base]
-  cacheRef <-
-    uiIO $
-      askHostIO ctx >>= \case
-        Just (Paragraphs ref) -> pure ref
-        Nothing -> do
-          ref <- newIORef IM.empty
-          setHost ctx (Paragraphs ref)
-          pure ref
+  Paragraphs cacheRef <- uiIO $ hostOrInit ctx (Paragraphs <$> newIORef IM.empty)
   gen <- uiIO (readIORef (ctxMetricGen ctx))
   let key =
         foldl'
@@ -261,8 +253,13 @@ richTextWith' f pieces = do
         IM.insert (intKey wid) para (if IM.size m > 4096 then IM.empty else m)
     registerCustomMeasure ctx wid $ \_ (availW, _) ->
       if availW >= 1e9 then paraNatural para else lineBoxes (linesAt availW)
-    registerCustomDrawing ctx wid (if drawKey == 0 then 1 else drawKey) draw
-    registerCustomCursor ctx wid (const (if isJust hoveredRun then UiCursorPointer else UiCursorDefault))
+    registerCustomEntry ctx wid $
+      CustomDrawingEntry
+        (if drawKey == 0 then 1 else drawKey)
+        draw
+        (Just (const (if isJust hoveredRun then UiCursorPointer else UiCursorDefault)))
+        0
+        False
   let clicked
         | respClicked resp = hoveredRun >>= runTarget . indexSmallArray runs
         | otherwise = Nothing
