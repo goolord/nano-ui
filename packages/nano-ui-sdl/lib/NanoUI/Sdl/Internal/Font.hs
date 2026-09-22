@@ -6,7 +6,6 @@
 -- snapshots remain usable after their font handles close.
 module NanoUI.Sdl.Internal.Font
   ( FontSource (..)
-  , GlyphAtlas
   , withTtf
   , fontSourceLabel
   , embeddedFontSource
@@ -238,8 +237,8 @@ destroyGlyphAtlas = textAtlasDestroy . gaAtlas
 -- Read after a frame's UI pass: 'prepareGlyphAtlasForFrame' reset the atlas
 -- before it, so 'True' means the frame holds text it could not place and the
 -- caller must not present it.
-glyphAtlasFull :: GlyphAtlas -> IO Bool
-glyphAtlasFull = readIORef . gaFull
+glyphAtlasFull :: SdlFontCache -> IO Bool
+glyphAtlasFull = readIORef . gaFull . sfcGlyphAtlas
 
 -- | Look up or insert a glyph by font and glyph index, the way shaped text
 -- names glyphs. Glyphs are keyed by the font's id, which is never reused, and
@@ -700,9 +699,9 @@ buildGlyphFontMetrics ga sf scale = do
 
 -- | The SDL_Textures of the glyph atlas's pages, by page, for passing to the
 -- renderer. A page never opened has a null texture.
-glyphAtlasTextures :: GlyphAtlas -> IO (Int -> Ptr SDL_Texture)
-glyphAtlasTextures ga = do
-  pages <- mapM (textAtlasTexture (gaAtlas ga) . fromIntegral) [0 .. glyphAtlasPages - 1]
+glyphAtlasTextures :: SdlFontCache -> IO (Int -> Ptr SDL_Texture)
+glyphAtlasTextures cache = do
+  pages <- mapM (textAtlasTexture (gaAtlas (sfcGlyphAtlas cache)) . fromIntegral) [0 .. glyphAtlasPages - 1]
   pure (\page -> fromMaybe nullPtr (listToMaybe (drop page pages)))
 
 -- ---------------------------------------------------------------------------
@@ -911,7 +910,7 @@ resetGlyphAtlas cache = do
 -- quads.
 prepareGlyphAtlasForFrame :: SdlFontCache -> IO ()
 prepareGlyphAtlasForFrame cache =
-  glyphAtlasFull (sfcGlyphAtlas cache) >>= (`when` resetGlyphAtlas cache)
+  glyphAtlasFull cache >>= (`when` resetGlyphAtlas cache)
 
 -- | The primary (sans) family's source, for the debug readout.
 sdlFontCacheSource :: SdlFontCache -> IO FontSource

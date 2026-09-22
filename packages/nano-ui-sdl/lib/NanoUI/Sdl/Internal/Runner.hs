@@ -137,7 +137,7 @@ drawFrameWith ctx env inp forceFull evaluateUi = do
   -- keeps the previous valid frame, 'damageFull' forces a full repaint, and
   -- 'prepareGlyphAtlasForFrame' resets the atlas before the next frame
   -- records any quads, so text never flickers or vanishes for a frame.
-  atlasReset <- glyphAtlasFull (sdlGlyphAtlas env)
+  atlasReset <- glyphAtlasFull (sdlFontCache env)
   if atlasReset || damageIsEmpty damage || lw <= 0 || lh <= 0
     then do
       when atlasReset $ do
@@ -151,7 +151,7 @@ drawFrameWith ctx env inp forceFull evaluateUi = do
       okScale <- setRenderScale ren scale scale
       unless (okBegin && okScale) $ fail "SDL_SetRenderTarget/Scale failed"
       theme <- readIORef (ctxTheme ctx)
-      glyphTex <- glyphAtlasTextures (sdlGlyphAtlas env)
+      glyphTex <- glyphAtlasTextures (sdlFontCache env)
       -- Persistent batch created once per session (sdlBatch): no C
       -- calloc/free pair per presented frame. Flush unconditionally so an
       -- aborted pass cannot leak pending geometry into the next frame.

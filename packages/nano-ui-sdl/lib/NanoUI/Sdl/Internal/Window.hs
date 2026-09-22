@@ -56,7 +56,6 @@ import NanoUI.Sdl.Internal.Frame (WindowDecorations (..), applyDecorations)
 import NanoUI.Sdl.Internal.Cursor (SdlCursors (..), destroyCursors, initCursors)
 import NanoUI.Sdl.Internal.Font
   ( FontSource (..)
-  , GlyphAtlas
   , SdlFontCache
   , destroyGlyphAtlas
   , destroySdlFontCache
@@ -235,7 +234,6 @@ data SdlEnv = SdlEnv
   -- ^ Backbuffer pixels per layout unit: the pixel density times the zoom.
   , sdlUiScaleRef :: !(IORef Float)
   -- ^ The requested UI scale; see 'sdlAppUiScale'.
-  , sdlGlyphAtlas :: GlyphAtlas
   , sdlImages :: ImageAtlas
   , sdlCursors :: SdlCursors
   , sdlDebug :: DebugSamplerRef
@@ -486,7 +484,7 @@ startSdlWindow bench opts ctx guessedDriver fontSource monoSource = do
   sdlUiScaleRef <- liftIO $ newIORef (sdlAppUiScale opts)
   sdlFontRequestRef <- liftIO $ newIORef (sdlAppFont opts)
   sdlFontAppliedRef <- liftIO $ newIORef (sdlAppFont opts)
-  sdlGlyphAtlas <- mkAcquire (newGlyphAtlas sdlRenderer) destroyGlyphAtlas
+  glyphAtlas <- mkAcquire (newGlyphAtlas sdlRenderer) destroyGlyphAtlas
   sdlImages <- mkAcquire newImageAtlas destroyImageAtlas
   sdlCursors <- mkAcquire initCursors destroyCursors
   sdlDebug <- liftIO newDebugSampler
@@ -496,7 +494,7 @@ startSdlWindow bench opts ctx guessedDriver fontSource monoSource = do
     unless (tex == nullPtr) $ destroyTexture tex
   sdlFontCache <-
     mkAcquire
-      (newSdlFontCache fontSource monoSource sdlGlyphAtlas (sdlAppFontSize opts) sdlScaleRef)
+      (newSdlFontCache fontSource monoSource glyphAtlas (sdlAppFontSize opts) sdlScaleRef)
       destroySdlFontCache
   sdlCachedCtx <-
     liftIO $ newIORef . withSdlClipboard =<< withSdlFontCache sdlFontCache ctx
