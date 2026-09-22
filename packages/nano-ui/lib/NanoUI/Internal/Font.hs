@@ -203,11 +203,9 @@ scaleFontMetrics :: Float -> FontMetrics -> FontMetrics
 scaleFontMetrics s fm
   | s == 1.0 = fm
   | otherwise =
-      FontMetrics
+      fm
         { fmLineHeight = fmLineHeight fm * s
         , fmAscent = fmAscent fm * s
-        -- Snap scale is a display property, not a font-size property.
-        , fmSnapScale = fmSnapScale fm
         , fmAdvance = \c -> fmAdvance fm c * s
         , fmKerning = \a b -> fmKerning fm a b * s
         , fmShape = \t -> fmap scaleShape (fmShape fm t)
