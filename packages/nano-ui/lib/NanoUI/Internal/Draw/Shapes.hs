@@ -317,34 +317,19 @@ pushRoundedStrokeRaw da (Rect px py w h) radius bw col
           !ibw = min bw (min (w * 0.5) (h * 0.5))
       if square
         then pushSquareStroke da px py w h ibw col
-        else if rad <= 0.5
-        then do
-          let !t = ibw
-              !ox = px + t / 2
-              !oy = py + t / 2
-              !ow = max 0 (w - t)
-              !oh = max 0 (h - t)
-              !doTB = ow >= 0.001
-              !doLR = oh >= 0.001
-              !stripCount = (if doTB then 2 else 0) + (if doLR then 2 else 0)
-          withVertsRaw da (stripCount * 8) (stripCount * 18) $ \vp ip base baseIdx -> do
-            let !(r, g, b, a) = unpackColorF col
-                !viLR = if doTB then 16 else 0
-                !iiLR = if doTB then 36 else 0
-            when doTB $ do
-              pokeStripAt vp ip base baseIdx 0 0 ox oy (ox + ow) oy t r g b a
-              pokeStripAt vp ip base baseIdx 8 18 ox (oy + oh) (ox + ow) (oy + oh) t r g b a
-            when doLR $ do
-              pokeStripAt vp ip base baseIdx viLR iiLR ox oy ox (oy + oh) t r g b a
-              pokeStripAt vp ip base baseIdx (viLR + 8) (iiLR + 18) (ox + ow) oy (ox + ow) (oy + oh) t r g b a
         else do
           let !n = cornerSegments
-          let !midW = max 0 (w - 2 * rad)
-              !midH = max 0 (h - 2 * rad)
+              -- Square corners run the sides' centre lines into each other;
+              -- rounded ones end the sides where the arcs start.
+              !corners = rad > 0.5
               !topY = py + ibw / 2
-              !botY = py + h - ibw / 2
               !leftX = px + ibw / 2
-              !rightX = px + w - ibw / 2
+              !x0 = if corners then px + rad else leftX
+              !y0 = if corners then py + rad else topY
+              !midW = max 0 (if corners then w - 2 * rad else w - ibw)
+              !midH = max 0 (if corners then h - 2 * rad else h - ibw)
+              !botY = if corners then py + h - ibw / 2 else topY + midH
+              !rightX = if corners then px + w - ibw / 2 else leftX + midW
               !cr = max 0.25 (rad - ibw / 2)
               !doTB = midW >= 0.001
               !doLR = midH >= 0.001
@@ -360,8 +345,8 @@ pushRoundedStrokeRaw da (Rect px py w h) radius bw col
               !arcIndices = if hasCore then 18 else 12
               !arcV = (n + 1) * arcStride
               !arcI = n * arcIndices
-              !needV = stripCount * 8 + 4 * arcV
-              !needI = stripCount * 18 + 4 * arcI
+              !needV = stripCount * 8 + (if corners then 4 * arcV else 0)
+              !needI = stripCount * 18 + (if corners then 4 * arcI else 0)
           withVertsRaw da needV needI $ \vp ip base baseIdx -> do
             let !(r, g, b, a) = unpackColorF col
                 pokeArc !vi !ii !ccx !ccy !q = do
@@ -381,15 +366,16 @@ pushRoundedStrokeRaw da (Rect px py w h) radius bw col
                 !viC = stripCount * 8
                 !iiC = stripCount * 18
             when doTB $ do
-              pokeStripAt vp ip base baseIdx 0 0 (px + rad) topY (px + rad + midW) topY ibw r g b a
-              pokeStripAt vp ip base baseIdx 8 18 (px + rad) botY (px + rad + midW) botY ibw r g b a
+              pokeStripAt vp ip base baseIdx 0 0 x0 topY (x0 + midW) topY ibw r g b a
+              pokeStripAt vp ip base baseIdx 8 18 x0 botY (x0 + midW) botY ibw r g b a
             when doLR $ do
-              pokeStripAt vp ip base baseIdx viLR iiLR leftX (py + rad) leftX (py + rad + midH) ibw r g b a
-              pokeStripAt vp ip base baseIdx (viLR + 8) (iiLR + 18) rightX (py + rad) rightX (py + rad + midH) ibw r g b a
-            pokeArc viC iiC (px + rad) (py + rad) 0
-            pokeArc (viC + arcV) (iiC + arcI) (px + w - rad) (py + rad) 1
-            pokeArc (viC + 2 * arcV) (iiC + 2 * arcI) (px + w - rad) (py + h - rad) 2
-            pokeArc (viC + 3 * arcV) (iiC + 3 * arcI) (px + rad) (py + h - rad) 3
+              pokeStripAt vp ip base baseIdx viLR iiLR leftX y0 leftX (y0 + midH) ibw r g b a
+              pokeStripAt vp ip base baseIdx (viLR + 8) (iiLR + 18) rightX y0 rightX (y0 + midH) ibw r g b a
+            when corners $ do
+              pokeArc viC iiC (px + rad) (py + rad) 0
+              pokeArc (viC + arcV) (iiC + arcI) (px + w - rad) (py + rad) 1
+              pokeArc (viC + 2 * arcV) (iiC + 2 * arcI) (px + w - rad) (py + h - rad) 2
+              pokeArc (viC + 3 * arcV) (iiC + 3 * arcI) (px + rad) (py + h - rad) 3
 
 -- | Border of four flat rects inside @(x, y, w, h)@, @t@ thick. The origin is
 -- already snapped by the caller; the texture is already selected.
