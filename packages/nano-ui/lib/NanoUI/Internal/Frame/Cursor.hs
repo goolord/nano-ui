@@ -110,8 +110,13 @@ scrollThumbCursorKind ctx inp = do
   if inputMouseDown inp && isJust mDrag
     then pure (Just UiCursorGrabbing)
     else do
-      onThumb <- scrollThumbHit ctx (inputMousePos inp)
-      pure (if onThumb then Just (grabHoverKind True inp) else Nothing)
+      let na = ctxNodeArena ctx
+      thumb <- findClassNodeM na PointerNodes $ \idx ->
+        ((\nt -> nt == NodeTextArea || isScrollNode nt) <$> getNodeType na idx) <&&> do
+          wid <- getWidgetId na idx
+          any (\(_, layout, _) -> rectContains (sbThumb layout) (inputMousePos inp))
+            <$> scrollBarsFor ctx idx wid
+      pure (grabHoverKind True inp <$ thumb)
 
 -- Field well, not the label. Independent of focus and hot. A search field's
 -- clear button raises the pointer cursor; everywhere else over a field is text.
@@ -137,16 +142,6 @@ numericStepperHit ctx idx mouse = do
       let
         (up, down) = numericStepperRects x y w h
       pure (rectContains up mouse || rectContains down mouse)
-
-scrollThumbHit :: Context -> V2 -> IO Bool
-scrollThumbHit ctx mouse =
-  fmap isJust . findClassNodeM na PointerNodes $ \idx ->
-    ((\nt -> nt == NodeTextArea || isScrollNode nt) <$> getNodeType na idx) <&&> do
-      wid <- getWidgetId na idx
-      any (\(_, layout, _) -> rectContains (sbThumb layout) mouse)
-        <$> scrollBarsFor ctx idx wid
- where
-  na = ctxNodeArena ctx
 
 -- | The cursor widget @wid@ asks for with the pointer at @mouse@: the default
 -- unless the pointer is on the visible part of its node, and a custom
