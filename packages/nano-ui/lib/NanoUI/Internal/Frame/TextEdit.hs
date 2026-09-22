@@ -1,85 +1,310 @@
--- | Text-field editing facade: single-line fields ("NanoUI.Internal.Frame.TextInput"),
--- text areas ("NanoUI.Internal.Frame.TextArea") and their context menu
--- ("NanoUI.Internal.Frame.TextEdit.Menu"), plus the dispatchers that pick between the
--- two field kinds.
+-- | Editing text fields from outside their frame: the commands an app or the
+-- context menu runs on a field by its id, and the context menu itself (Undo /
+-- Redo / Cut / Copy / Paste / Select All): opening, picking, painting, spans
+-- and cursor.
 module NanoUI.Internal.Frame.TextEdit
-  ( -- * Dispatch between field kinds
-    finalizeTextFieldMouse
-  , collapseTextFieldSelection
-    -- * Context menu
-  , applyTextFieldMenuAction
-  , textEditMenuRectAt
-  , textEditMenuWidth
-    -- * Shared field helpers
-  , normalizeTextFieldClicks
-  , textWordBounds
-    -- * Text areas
-  , TextAreaHit (..)
-  , TextAreaScrollBarLayouts (..)
-  , resolveTextAreaFont
-  , textAreaContentMetrics
-  , textAreaBarLane
-  , textAreaLineHeight
-  , textAreaHitForWidget
-  , textAreaScrollBarLayout
-  , textAreaHScrollBarLayout
-  , textAreaScrollBarLayouts
+  ( applyTextFieldCommand
+  , textFieldEditor
+  , openTextEditMenu
+  , finalizeTextEditMenuPick
+  , closeTextEditMenuOnOutsideClick
+  , closeTextEditMenuOnEscape
+  , drawTextEditMenuOverlays
+  , collectTextEditMenuSpans
+  , textEditMenuCursorKind
+  , textFieldWidgetAtMouse
   ) where
 
-import Control.Monad (forM_, unless, when)
-import Data.IORef (readIORef)
+import Control.Monad (forM_, when)
+import Data.IORef (writeIORef)
+import Data.Maybe (catMaybes, isJust, listToMaybe)
+import qualified Data.Text as T
 import NanoUI.Internal.Context
   ( Context (..)
-  , InteractionState (..)
-  , TextInputDrag (..)
+  , TextInputMenu (..)
+  , PointerRoute (..)
+  , damageWidget
+  , getStore
   , getsInteraction
-  , requestWakeAfter
+  , intKey
+  , isDisabled
+  , markDirty
+  , markEscapeConsumed
+  , modifyStore
+  , widgetTheme
+  , InteractionState (..)
   , modifyInteraction
   )
-import NanoUI.Internal.Frame.Hit (withWidgetNode)
-import NanoUI.Internal.Frame.TextArea
-import NanoUI.Internal.Frame.TextArea.Content (resolveTextAreaFont, textAreaContentMetrics)
-import NanoUI.Internal.Frame.TextArea.Geometry
-import NanoUI.Internal.Frame.TextEdit.Menu (applyTextFieldMenuAction, textEditMenuRectAt, textEditMenuWidth)
-import NanoUI.Internal.Frame.TextInput
-import NanoUI.Internal.Id (WidgetId, hashWidgetId)
-import NanoUI.Internal.Input (Input, inputMouseDown, inputMousePos, inputMouseReleased)
-import NanoUI.Internal.Layout.Arena (NodeType (NodeTextArea, NodeTextInput), getNodeRect, getNodeType)
-import NanoUI.Internal.Types (rectContains)
-import NanoUI.Internal.Widgets.TextCommon (textWordBounds)
+import NanoUI.Internal.Draw (pushRect, pushText)
+import NanoUI.Internal.Font
+  ( FontMetrics
+  , centeredTextY
+  , menuItemPadX
+  , menuItemRowH
+  , menuMinW
+  , menuOuterPad
+  , menuSepH
+  , widgetContentInset
+  )
+import NanoUI.Internal.Frame.Chrome (overlayMenuStyle, paintMenuAccent, paintMenuPanel)
+import NanoUI.Internal.Frame.Hit (findNodeByWidgetId, nodeClippedHit, overlayHitAllowed, overlayHitRoot, widgetOverlayAllowed)
+import NanoUI.Internal.Frame.TextArea (isMouseOnTextAreaScrollBarAt)
+import NanoUI.Internal.Id (WidgetId)
+import NanoUI.Internal.Input
+  ( Input (..)
+  , Key (..)
+  , UiCursorKind (..)
+  , inputKeys
+  , inputKeysElem
+  , inputMousePos
+  , inputMousePressed
+  , inputMouseRightPressed
+  , inputWindowSize
+  )
+import NanoUI.Internal.Layout.Arena
+  ( NodeClass (PointerNodes)
+  , NodeType (NodeTextArea, NodeTextInput)
+  , findClassNodeRevM
+  , getNodeRect
+  , getNodeType
+  , getStyleIdx
+  , getWidgetId
+  )
+import NanoUI.Internal.Monad (ifM, whenM, (<&&>))
+import NanoUI.Internal.Store (Slot (..), WidgetStore, fieldInt, insertSlot, lookupDyn, slotKey)
+import NanoUI.Internal.Style (Style (..), Theme, themeSeparator)
+import NanoUI.Internal.Types (Color (..), DamageBounds (..), Rect (..), Size (..), V2 (..), clamp, lerpColor, rectContains)
+import NanoUI.Internal.Widgets.TextArea (textAreaFieldEditor)
+import NanoUI.Internal.Widgets.TextDocument (sameLines)
+import NanoUI.Internal.Widgets.TextInput (textInputFieldEditor, textInputMode)
+import NanoUI.Widgets.TextBuffer qualified as TB
+import NanoUI.Widgets.TextEditor
+  ( Editor (..)
+  , EditorMode (..)
+  , TextCommand (..)
+  , canRedo
+  , canUndo
+  , multiLineMode
+  , runCommandIO
+  , sealHistory
+  )
 
--- | Mouse selection in the focused field, whichever kind it is. A release
--- ends any drag.
-finalizeTextFieldMouse :: Context -> Input -> IO ()
-finalizeTextFieldMouse ctx inp = do
-  focus <- readIORef (ctxFocusId ctx)
-  when (hashWidgetId focus /= 0) $ do
-    handled <- finalizeTextInputMouse ctx inp focus
-    unless handled $ finalizeTextAreaMouse ctx inp focus
-    keepDragScrolling ctx inp focus
-  when (inputMouseReleased inp) $
-    modifyInteraction ctx (\s -> s {isTextInputDrag = Nothing})
+-- | Run a command on the field with this id and focus it: the command comes
+-- from a menu or button that may not be over the field, and the caret,
+-- selection highlight and next keystroke belong to the field it edited. A
+-- change to the text pulses @respChanged@ on the field's next frame.
+applyTextFieldCommand :: Context -> WidgetId -> TextCommand -> IO ()
+applyTextFieldCommand ctx wid cmd =
+  textFieldEditor ctx wid >>= mapM_ (\(mode, ed0, save) -> do
+    ed <- runCommandIO ctx mode cmd ed0 {editorHistory = sealHistory (editorHistory ed0)}
+    let edited = not (sameLines (TB.bufferLines (editorBuffer ed)) (TB.bufferLines (editorBuffer ed0)))
+        pulse = if edited then insertSlot fieldInt (slotKey SlotTextAreaChanged (intKey wid)) 1 else id
+    modifyStore ctx (pulse . save ed)
+    -- Store damage is keyed on slots, not the widget: damage the widget so a
+    -- selection-only command (Select All) repaints this frame.
+    damageWidget ctx wid DamageSelf
+    markDirty ctx
+    writeIORef (ctxFocusId ctx) wid
+    modifyInteraction ctx (\s -> s {isTextInputMenu = Nothing}))
 
--- | A selection dragged past the field's edge scrolls a step a frame, as the
--- caret follows the pointer. A pointer held still out there sends no input to
--- run those frames, so ask for them while the drag lasts.
-keepDragScrolling :: Context -> Input -> WidgetId -> IO ()
-keepDragScrolling ctx inp focus =
-  when (inputMouseDown inp) $ do
-    mDrag <- getsInteraction ctx isTextInputDrag
-    forM_ mDrag $ \drag ->
-      when (textInputDragWidget drag == focus) $ do
-        withWidgetNode ctx focus () $ \idx -> do
-          rect <- getNodeRect (ctxNodeArena ctx) idx
-          unless (rectContains rect (inputMousePos inp)) $
-            requestWakeAfter ctx (1 / 60)
+-- | The field with this id as a command from outside its frame sees it: how
+-- it edits, its stored editor, and how to store an edited one. Its mode comes
+-- from its node when it has one this frame, or from what it recorded the last
+-- time it was declared.
+textFieldEditor :: Context -> WidgetId -> IO (Maybe (EditorMode, Editor, Editor -> WidgetStore -> WidgetStore))
+textFieldEditor ctx wid = do
+  store <- getStore ctx
+  let key = intKey wid
+  mMode <-
+    findNodeByWidgetId ctx wid >>= \case
+      Just idx ->
+        getNodeType (ctxNodeArena ctx) idx >>= \case
+          NodeTextInput -> Just . textInputMode <$> getStyleIdx (ctxNodeArena ctx) idx
+          NodeTextArea -> pure (Just multiLineMode)
+          _ -> pure Nothing
+      Nothing -> pure (lookupDyn (slotKey SlotTextMode key) store)
+  pure $ flip fmap mMode $ \mode ->
+    let (ed, save) = (if modeMultiLine mode then textAreaFieldEditor else textInputFieldEditor) store key
+     in (mode, ed, save)
 
--- | Collapse selection in a current single-line or multiline field. Zero,
--- missing, and non-text widget ids do nothing.
-collapseTextFieldSelection :: Context -> WidgetId -> IO ()
-collapseTextFieldSelection ctx wid =
-  withWidgetNode ctx wid () $ \idx ->
-    getNodeType (ctxNodeArena ctx) idx >>= \case
-      NodeTextInput -> collapseTextInputSelection ctx wid
-      NodeTextArea -> collapseTextAreaSelection ctx wid
+-- | The menu's rows in order: a command and its label, or a separator.
+textEditMenuRows :: [Maybe (TextCommand, T.Text)]
+textEditMenuRows =
+  [ Just (Undo, "Undo")
+  , Just (Redo, "Redo")
+  , Nothing
+  , Just (Cut, "Cut")
+  , Just (Copy, "Copy")
+  , Just (Paste, "Paste")
+  , Nothing
+  , Just (SelectAll, "Select All")
+  ]
+
+-- | Row heights, the same row metrics as generic popup menus.
+textEditMenuRowHeights :: [Float]
+textEditMenuRowHeights = map (maybe menuSepH (const menuItemRowH)) textEditMenuRows
+
+-- | Every row with its band spanning the full menu width.
+textEditMenuLayout :: Rect -> [(Rect, Maybe (TextCommand, T.Text))]
+textEditMenuLayout (Rect mx my mw _) =
+  [ (Rect mx (my + menuOuterPad + relY) mw h, row)
+  | (relY, h, row) <- zip3 (scanl (+) 0 textEditMenuRowHeights) textEditMenuRowHeights textEditMenuRows
+  ]
+
+-- | The command of the row under @mouse@, when that row is a command.
+textEditMenuPick :: Rect -> V2 -> Maybe TextCommand
+textEditMenuPick menuRect mouse =
+  listToMaybe [cmd | (band, Just (cmd, _)) <- textEditMenuLayout menuRect, rectContains band mouse]
+
+-- | Where the menu's labels start.
+textEditMenuLabelX :: FontMetrics -> Rect -> Float
+textEditMenuLabelX fm (Rect mx _ _ _) = mx + menuOuterPad + menuItemPadX + fst (widgetContentInset fm)
+
+textEditMenuItemFg :: Style -> Bool -> Color
+textEditMenuItemFg style enabled =
+  if enabled
+    then styleFg style
+    else lerpColor (styleFg style) (styleBg style) 0.55
+
+-- | Open the menu at the pointer, kept inside the window, over the text field
+-- a right press lands on, and focus that field.
+openTextEditMenu :: Context -> Input -> IO ()
+openTextEditMenu ctx inp =
+  when (inputMouseRightPressed inp) $ do
+    let mouse@(V2 mx my) = inputMousePos inp
+    mWid <- textFieldWidgetAtMouse ctx mouse
+    forM_ mWid $ \wid -> do
+      writeIORef (ctxFocusId ctx) wid
+      -- As wide as the widest label plus padding, and no narrower than any menu.
+      labelWs <- mapM (fmap fst . ctxMeasureText ctx . snd) (catMaybes textEditMenuRows)
+      let menuW = max menuMinW (maximum labelWs + 2 * menuItemPadX + 2 * menuOuterPad)
+          menuH = 2 * menuOuterPad + sum textEditMenuRowHeights
+          Size ww wh = inputWindowSize inp
+          menuRect = Rect (clamp 0 (ww - menuW) mx) (clamp 0 (wh - menuH) my) menuW menuH
+      modifyInteraction ctx (\s -> s {isTextInputMenu = Just (TextInputMenu wid menuRect)})
+      markDirty ctx
+
+textFieldWidgetAtMouse :: Context -> V2 -> IO (Maybe WidgetId)
+textFieldWidgetAtMouse ctx mouse = do
+  let na = ctxNodeArena ctx
+  top <- overlayHitRoot ctx mouse
+  mIdx <-
+    findClassNodeRevM na PointerNodes $ \idx -> do
+      nt <- getNodeType na idx
+      pure (nt == NodeTextInput || nt == NodeTextArea) <&&> do
+        wid <- getWidgetId na idx
+        rect <- getNodeRect na idx
+        (not <$> isDisabled ctx wid)
+          <&&> nodeClippedHit ctx idx rect mouse
+          <&&> overlayHitAllowed ctx top idx
+          <&&> (if nt == NodeTextArea then not <$> isMouseOnTextAreaScrollBarAt ctx idx mouse else pure True)
+  traverse (getWidgetId na) mIdx
+
+-- | A press on a command row runs it when it can run, recorded for the caller
+-- ('NanoUI.Internal.Context.takeTextEditLastAction'); a press elsewhere on the
+-- menu closes it.
+finalizeTextEditMenuPick :: Context -> Input -> IO ()
+finalizeTextEditMenuPick ctx inp =
+  when (inputMousePressed inp) $ do
+    mMenu <- getsInteraction ctx isTextInputMenu
+    case mMenu of
+      Just (TextInputMenu wid menuRect)
+        | rectContains menuRect (inputMousePos inp) ->
+            case textEditMenuPick menuRect (inputMousePos inp) of
+              Nothing -> closeMenu
+              Just cmd ->
+                ifM
+                  (textFieldMenuEnabled ctx wid cmd)
+                  ( do
+                      modifyInteraction ctx (\s -> s {isTextEditLastAction = Just (wid, cmd)})
+                      applyTextFieldCommand ctx wid cmd
+                  )
+                  (closeMenu >> markDirty ctx)
       _ -> pure ()
+ where
+  closeMenu = modifyInteraction ctx (\s -> s {isTextInputMenu = Nothing})
+
+-- | A press anywhere but on the menu closes it. This watches the frame's
+-- input: the press it waits for is by definition not the menu's own.
+closeTextEditMenuOnOutsideClick :: Context -> Input -> IO ()
+closeTextEditMenuOnOutsideClick ctx inp =
+  when (inputMousePressed inp || inputMouseRightPressed inp) $ do
+    route <- getsInteraction ctx isPointerRoute
+    when (route /= RouteTextMenu) $ modifyInteraction ctx (\s -> s {isTextInputMenu = Nothing})
+
+closeTextEditMenuOnEscape :: Context -> Input -> IO ()
+closeTextEditMenuOnEscape ctx inp =
+  when (inputKeysElem KeyEscape (inputKeys inp)) $
+    whenM (isJust <$> getsInteraction ctx isTextInputMenu) $ do
+      modifyInteraction ctx (\s -> s {isTextInputMenu = Nothing})
+      markEscapeConsumed ctx
+      markDirty ctx
+
+textEditMenuCursorKind :: Context -> Input -> IO (Maybe UiCursorKind)
+textEditMenuCursorKind ctx inp =
+  getsInteraction ctx isTextInputMenu >>= \case
+    Just (TextInputMenu wid menuRect)
+      | Just cmd <- textEditMenuPick menuRect (inputMousePos inp) -> do
+          enabled <- textFieldMenuEnabled ctx wid cmd
+          pure (Just (if enabled then UiCursorPointer else UiCursorDefault))
+    _ -> pure Nothing
+
+-- | Resolve the allowed menu once for either painting or complete span queries.
+withTextEditMenu :: Context -> a -> (WidgetId -> Rect -> Theme -> IO a) -> IO a
+withTextEditMenu ctx absent consume = getsInteraction ctx isTextInputMenu >>= \case
+  Nothing -> pure absent
+  Just (TextInputMenu wid menuRect) ->
+    ifM
+      (widgetOverlayAllowed ctx wid)
+      (widgetTheme ctx wid >>= consume wid menuRect)
+      (pure absent)
+
+drawTextEditMenuOverlays :: Context -> Input -> IO ()
+drawTextEditMenuOverlays ctx inp = withTextEditMenu ctx () $ \wid menuRect theme -> do
+  let da = ctxDrawArena ctx
+      fm = ctxFontMetrics ctx
+      style = overlayMenuStyle theme
+  paintMenuPanel da theme style menuRect
+  forM_ (textEditMenuLayout menuRect) $ \case
+    (Rect rx ry rw rh, Nothing) ->
+      pushRect da (Rect (rx + menuItemPadX) (ry + rh / 2) (rw - 2 * menuItemPadX) 1) (themeSeparator theme)
+    (row@(Rect _ ry _ rh), Just (cmd, lbl)) -> do
+      enabled <- textFieldMenuEnabled ctx wid cmd
+      when (enabled && rectContains row (inputMousePos inp)) $ do
+        pushRect da row (styleHoverBg style)
+        paintMenuAccent da theme row
+      (_, th) <- ctxMeasureText ctx lbl
+      pushText da fm (textEditMenuLabelX fm menuRect) (centeredTextY fm ry rh th) lbl (textEditMenuItemFg style enabled)
+
+collectTextEditMenuSpans :: Context -> Input -> IO [(Rect, T.Text, Color, Color, Rect)]
+collectTextEditMenuSpans ctx inp = withTextEditMenu ctx [] $ \wid menuRect theme -> do
+  let fm = ctxFontMetrics ctx
+      style = overlayMenuStyle theme
+  sequence
+    [ do
+        enabled <- textFieldMenuEnabled ctx wid cmd
+        (tw, th) <- ctxMeasureText ctx lbl
+        let bg
+              | enabled && rectContains row (inputMousePos inp) = styleHoverBg style
+              | otherwise = styleBg style
+            labelRect = Rect (textEditMenuLabelX fm menuRect) (centeredTextY fm ry rh th) tw th
+        pure (labelRect, lbl, textEditMenuItemFg style enabled, bg, menuRect)
+    | (row@(Rect _ ry _ rh), Just (cmd, lbl)) <- textEditMenuLayout menuRect
+    ]
+
+-- | Whether @cmd@ can run on field @wid@ now.
+textFieldMenuEnabled :: Context -> WidgetId -> TextCommand -> IO Bool
+textFieldMenuEnabled ctx wid cmd =
+  textFieldEditor ctx wid >>= \case
+    Nothing -> pure False
+    Just (mode, Editor buf _ history, _) -> case cmd of
+      Undo -> pure (modeEditable mode && canUndo history)
+      Redo -> pure (modeEditable mode && canRedo history)
+      Cut -> pure (modeEditable mode && modeCopyable mode && hasText)
+      Copy -> pure (modeCopyable mode && hasText)
+      Paste
+        | modeEditable mode -> maybe False (not . T.null) <$> ctxClipboardGet ctx
+        | otherwise -> pure False
+      _ -> pure hasText
+     where
+      hasText = TB.getLineCount buf > 1 || not (T.null (TB.lineAt 0 buf))

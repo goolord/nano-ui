@@ -28,7 +28,7 @@ import NanoUI.Internal.Types (Rect (..), clamp, rectContains)
 import NanoUI.Internal.WidgetText (numericStepperRects, textInputFlagNumeric)
 import NanoUI.Internal.Widgets.Behavior (keyboardFocused)
 import NanoUI.Internal.Widgets.Node (Response, addWidgetStyled, respHovered, respRect, setChanged, setSubmitted)
-import NanoUI.Internal.Widgets.TextEditor (singleLineMode)
+import NanoUI.Widgets.TextEditor (singleLineMode)
 import NanoUI.Internal.Widgets.TextInput (TextInputState (..), editTextInput, editorTextState, loadTextInputState, saveTextEditor, saveTextInputState)
 import Numeric (showFFloat, showHex)
 
