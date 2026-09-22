@@ -25,8 +25,6 @@ module NanoUI.Internal.WidgetText
   , selectChevronCenterX
   , colorPickerGap
   , colorPickerSvH
-  , colorPickerCurrentLabel
-  , colorPickerNewLabel
   , colorToHex
   , colorToHexA
   , colorFromHex
@@ -211,12 +209,6 @@ colorPickerGap = 4
 -- Height of a colour picker's field row; the field grows to a square this tall.
 colorPickerSvH :: Float
 colorPickerSvH = 250
-
-colorPickerCurrentLabel :: Text
-colorPickerCurrentLabel = "Current"
-
-colorPickerNewLabel :: Text
-colorPickerNewLabel = "New"
 
 -- | Lowercase @#rrggbb@ text. Discards alpha; use 'colorToHexA' to retain it.
 colorToHex :: Color -> Text

@@ -10,7 +10,6 @@ module NanoUI.Internal.Frame.Select
   , overlayMenuOwnerAt
   , overlayMenuRects
   , routePointer
-  , tagSelectClippedSpans
   , comboDropRect
   , comboDropPickIndex
   , comboScrollGeom
@@ -47,15 +46,13 @@ import NanoUI.Internal.Draw (pushRect, pushRoundedRect, pushText, withClip)
 import NanoUI.Internal.Font (FontMetrics, centeredTextY, menuItemPadX, menuItemRowH, menuOuterPad, widgetContentInset)
 import NanoUI.Internal.Frame.Chrome (menuPanelBounds, overlayMenuStyle, paintMenuAccent, paintMenuPanel)
 import NanoUI.Internal.Frame.Hit (widgetOverlayAllowed)
-import NanoUI.Internal.Frame.Scroll.Geometry (padTextClipRect)
 import NanoUI.Internal.Id (WidgetId (..))
 import NanoUI.Internal.Input (Input (..), Key (..), inputKeys, inputKeysElem, inputMousePos, inputMousePressed, inputPointerHeld)
 import NanoUI.Internal.Layout.Arena (NodeIdx, NodeType (NodeSelect, NodeTextInput), getNodeType, lookupNodeByKey, lookupNodeByWidgetId, getOptions, getRect, getWidgetId)
 import NanoUI.Internal.Monad (whenM, (<&&>))
 import NanoUI.Internal.Store (Slot (..), fieldFloat, fieldInt, fieldText, findSlot, insertSlot, slotKey)
 import NanoUI.Internal.Style (Style (..), Theme (..), scrollBarThumbColor, scrollBarTrackColor, themeAccent, themeInput)
-import NanoUI.Internal.Types (Color (..), Rect (..), V2 (..), clamp, rectContains, rectIntersect)
-import NanoUI.Internal.WidgetText (selectChevronReserve)
+import NanoUI.Internal.Types (Color (..), Rect (..), V2 (..), clamp, rectContains)
 
 -- | An open dropdown: a select with its open flag set, or a combo box (a
 -- search field carrying options) exactly while it holds focus.
@@ -442,12 +439,3 @@ collectSelectDropdownSpans ctx inp = do
       (tw, th) <- ctxMeasureText ctx (drOption row)
       let Rect _ ry _ rh = drRect row
       pure (Rect (drTextX row) (centeredTextY fm ry rh th) tw th, drOption row, drFg row, bg row, ddRect dd)
-
-tagSelectClippedSpans ::
-  Rect -> Float -> Float -> Float -> Float -> FontMetrics -> [(Rect, T.Text, Color, Color)] -> [(Rect, T.Text, Color, Color, Rect)]
-tagSelectClippedSpans parentClip x y w h fm spans =
-  let (ix, _) = widgetContentInset fm
-      textClip = padTextClipRect (Rect (x + ix) y (max 0 (w - ix - selectChevronReserve)) (max 0 h))
-   in case rectIntersect parentClip textClip of
-        Nothing -> []
-        Just clip -> [(rect, txt, fg, bg, clip) | (rect, txt, fg, bg) <- spans]

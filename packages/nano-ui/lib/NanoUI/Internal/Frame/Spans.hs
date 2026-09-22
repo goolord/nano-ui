@@ -41,8 +41,8 @@ import NanoUI.Internal.Font
   )
 import NanoUI.Internal.Frame.Chrome (displayText, textInputFocused, textInputValue, widgetVisualStyle)
 import NanoUI.Internal.Frame.Node (readScrollNode, resolveFontFor, scrollNodeViewport)
-import NanoUI.Internal.Frame.Scroll.Geometry (padContentClip, tagClippedSpans)
-import NanoUI.Internal.Frame.Select (collectSelectDropdownSpans, tagSelectClippedSpans)
+import NanoUI.Internal.Frame.Scroll.Geometry (padContentClip, padTextClipRect, tagClippedSpans)
+import NanoUI.Internal.Frame.Select (collectSelectDropdownSpans)
 import NanoUI.Internal.Frame.SpanArena (SpanArena, pushSpans, resetSpanArena, spanArenaToList)
 import NanoUI.Internal.Frame.TextEdit (collectTextEditMenuSpans)
 import NanoUI.Internal.Frame.TextInput (syncTextInputScroll, tagTextInputClippedSpans, textInputFieldRect)
@@ -79,8 +79,6 @@ import NanoUI.Internal.Widgets.ColorPicker (ColorPickerPart (..), colorPickerPar
 import NanoUI.Internal.WidgetText
   ( hasFlag
   , textNodeFontKey
-  , colorPickerCurrentLabel
-  , colorPickerNewLabel
   , buttonFlagClose
   , buttonFlagMenu
   , buttonFlagTable
@@ -152,7 +150,11 @@ collectClippedSpans ctx idx clip arena = do
           else if isWidgetNode nt then widgetTextSpans ctx nt idx x y w h else pure []
       here <-
         case nt of
-          NodeSelect -> pure (tagSelectClippedSpans clipHere x y w h fm spans)
+          -- A select's label shares one clip, short of its chevron.
+          NodeSelect -> do
+            let (ix, _) = widgetContentInset fm
+                label = padTextClipRect (Rect (x + ix) y (max 0 (w - ix - selectChevronReserve)) (max 0 h))
+            pure [(r, t, fg, bg, c) | Just c <- [rectIntersect clipHere label], (r, t, fg, bg) <- spans]
           NodeTextInput -> do
             si <- getStyleIdx (ctxNodeArena ctx) idx
             pure $
@@ -434,12 +436,9 @@ computeWidgetTextPlacements ctx nt idx x y w h = do
       | otherwise -> do
           band@(Rect bx _ _ _) <- colorPickerPartRect (ctxNodeArena ctx) idx (Rect x y w h)
           let (currentY, _, newY, _) = colorPickerPreviewGeom fm band
-          (cw, ch) <- measureTxt colorPickerCurrentLabel
-          (nw, nh) <- measureTxt colorPickerNewLabel
-          pure
-            [ (colorPickerCurrentLabel, bx, centeredTextY fm currentY lineH ch, cw, ch)
-            , (colorPickerNewLabel, bx, centeredTextY fm newY lineH nh, nw, nh)
-            ]
+          forM [("Current", currentY), ("New", newY)] $ \(lbl, ly) -> do
+            (lw, lh) <- measureTxt lbl
+            pure (lbl, bx, centeredTextY fm ly lineH lh, lw, lh)
     NodeTextInput
       | hasFlag textInputFlagSelectable si -> do
           value <- textInputValue ctx idx
