@@ -649,8 +649,7 @@ newContext = do
   ctxIdContext <- newIORef initialIdContext
   ctxContainerStack <- newIORef []
   ctxMessages <- newIORef []
-  let initCap = 64
-  ctxFocusables <- newIORef =<< newPrimArray initCap
+  ctxFocusables <- newIORef =<< newPrimArray 64
   ctxFocusablesCount <- newIORef 0
   ctxSpanBase <- newSpanArena 64
   ctxSpanOverlay <- newSpanArena 64

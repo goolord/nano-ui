@@ -13,11 +13,8 @@ module NanoUI.Internal.Animation
   , animationValue
   , easeSameSpec
   , stepAnim
-  , writeRest
   ) where
 
-import Data.IntMap.Strict (IntMap)
-import qualified Data.IntMap.Strict as IM
 import NanoUI.Internal.Types (clamp01)
 
 -- Cubic Bezier easing. X control points are clamped to [0, 1] (CSS-style).
@@ -242,12 +239,3 @@ stepAnim dt (SpringAnim pos vel target params) =
    in if abs (pos' - target) <= springEps && abs vel' <= springEps
         then SpringAnim target 0 target params
         else SpringAnim pos' vel' target params
-
-writeRest :: IntMap Float -> Int -> Animation -> IntMap Float
-writeRest rest key a =
-  let end = case a of
-        EaseAnim _ e _ _ _ _ _ -> e
-        SpringAnim _ _ t _ -> t
-   in if approxEq end 0
-        then IM.delete key rest
-        else IM.insert key end rest

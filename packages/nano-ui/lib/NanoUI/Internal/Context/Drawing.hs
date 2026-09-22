@@ -23,14 +23,14 @@ module NanoUI.Internal.Context.Drawing
   , resetDrawingScopeCache
   ) where
 
-import Control.Monad (when)
+import Control.Monad (mfilter, when)
 import Data.IORef (modifyIORef', readIORef, writeIORef)
 import Data.IntMap.Strict (IntMap)
 import Data.IntMap.Strict qualified as IM
 import Data.IntSet (IntSet)
 import Data.Primitive.SmallArray (SmallArray, mapSmallArray')
 
-import NanoUI.Internal.Context.Animation (isAnimatingKey)
+import NanoUI.Internal.Context.Animation (getLiveAnimations)
 import NanoUI.Internal.Context.Types
   ( Context (..)
   , CustomDrawBuild
@@ -93,20 +93,9 @@ registerDrawing ctx wid content build =
 lookupDrawing :: Context -> WidgetId -> IO (Maybe DrawingEntry)
 lookupDrawing = lookupIn dcsDrawings
 
--- | One draw-op cache step. @hit@ holds the bounds and ops of an entry whose
--- key still matches. A same-size hit is reused, translated if the widget
--- moved; a miss or a resize uses @rebuilt@. Ops that differ from the entry are
--- written back with @store@.
-serveOps ::
-  Maybe (Rect, SmallArray DrawOp) ->
-  Rect ->
-  SmallArray DrawOp ->
-  (SmallArray DrawOp -> IO ()) ->
-  IO (SmallArray DrawOp)
-serveOps hit rect rebuilt store =
-  case hit of
-    Just (r, ops) | rectW r == rectW rect && rectH r == rectH rect -> placeOps r rect ops store
-    _ -> store rebuilt >> pure rebuilt
+{-# INLINE sameSize #-}
+sameSize :: Rect -> Rect -> Bool
+sameSize a b = rectW a == rectW b && rectH a == rectH b
 
 -- | Ops built at @r@ for a same-size @rect@: as they are, or translated and
 -- written back with @store@ when the widget moved.
@@ -125,18 +114,17 @@ placeOps r rect ops store
 -- signal; versioned drawings are invalidated by their content key alone.
 cachedDrawingOps :: Context -> WidgetId -> Int -> Rect -> DrawingBuild -> IO (SmallArray DrawOp)
 cachedDrawingOps ctx wid content rect build = do
-  let k = intKey wid
   animated <-
     if content == 0
-      then isAnimatingKey ctx k
+      then IM.member (intKey wid) <$> getLiveAnimations ctx
       else pure False
   cached <- lookupIn dcsDrawOpCache ctx wid
-  let hit = case cached of
-        Just DrawOpCacheEntry {doeContent = c, doeBounds = r, doeOps = ops}
-          | c == content && not animated -> Just (r, ops)
-        _ -> Nothing
-  serveOps hit rect (build rect) $
-    registerIn dcsDrawOpCache (\m dc -> dc {dcsDrawOpCache = m}) ctx wid . DrawOpCacheEntry content rect
+  let store =
+        registerIn dcsDrawOpCache (\m dc -> dc {dcsDrawOpCache = m}) ctx wid . DrawOpCacheEntry content rect
+  case cached of
+    Just (DrawOpCacheEntry c r ops)
+      | c == content && not animated && sameSize r rect -> placeOps r rect ops store
+    _ -> let ops = build rect in ops <$ store ops
 
 -- | Reuse a derived layout while envelope, font, content key, and caller layout match.
 cachedWidgetLayout ::
@@ -240,8 +228,7 @@ customEntryMatches e content rect cdc gen =
 customEntrySized :: CustomDrawOpCacheEntry -> Int -> Rect -> Int -> Bool
 customEntrySized e content rect gen =
   cdeContent e == content
-    && rectW (cdeBounds e) == rectW rect
-    && rectH (cdeBounds e) == rectH rect
+    && sameSize (cdeBounds e) rect
     && cdeGen e == gen
 
 -- | Draw ops for a custom widget's paint: the ops 'refreshCustomDrawingOps'
@@ -354,11 +341,8 @@ lookupCustomCursor ctx wid = (>>= cdrCursor) <$> lookupIn dcsCustomDrawings ctx 
 -- | Registered repaint margin, or 'Nothing' when no override exists.
 {-# INLINE lookupCustomDamageSlop #-}
 lookupCustomDamageSlop :: Context -> WidgetId -> IO (Maybe Float)
-lookupCustomDamageSlop ctx wid = do
-  cached <- lookupIn dcsCustomDrawings ctx wid
-  pure $ case cached of
-    Just e | cdrDamageSlop e > 0 -> Just (cdrDamageSlop e)
-    _ -> Nothing
+lookupCustomDamageSlop ctx wid =
+  mfilter (> 0) . fmap cdrDamageSlop <$> lookupIn dcsCustomDrawings ctx wid
 
 -- | Whether a widget asked for a frame on every pointer move over it, rather
 -- than only when the pointer crosses onto another one: what a widget drawing

@@ -96,21 +96,13 @@ widgetId =
     hashSrcLoc loc
 
 hashSrcLoc :: SrcLoc -> WidgetId
-hashSrcLoc
-  ( SrcLoc
-      { srcLocPackage
-      , srcLocModule
-      , srcLocFile
-      , srcLocStartLine
-      , srcLocStartCol
-      }
-    ) =
-    WidgetId $
-      fnv1a srcLocPackage
-        `mixFnv` fnv1a srcLocModule
-        `mixFnv` fnv1a srcLocFile
-        `mixFnv` fromIntegral srcLocStartLine
-        `mixFnv` fromIntegral srcLocStartCol
+hashSrcLoc loc =
+  WidgetId $
+    fnv1a (srcLocPackage loc)
+      `mixFnv` fnv1a (srcLocModule loc)
+      `mixFnv` fnv1a (srcLocFile loc)
+      `mixFnv` fromIntegral (srcLocStartLine loc)
+      `mixFnv` fromIntegral (srcLocStartCol loc)
 
 -- | Unwrap the id's existing hash without hashing it again.
 {-# INLINE hashWidgetId #-}

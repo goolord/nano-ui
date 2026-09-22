@@ -2,7 +2,6 @@
 module NanoUI.Internal.Context.Animation
   ( anyAnimating
   , getLiveAnimations
-  , isAnimatingKey
   , takeAnimSettled
   , lookupAnimation
   , getAnimRectless
@@ -35,7 +34,6 @@ import NanoUI.Internal.Animation
   , easeSameSpec
   , springEps
   , stepAnim
-  , writeRest
   )
 import NanoUI.Internal.Context.Core (damageKey, getsDamage, markDirty, markDirtyCovered)
 import NanoUI.Internal.Context.Types (AnimationState (..), Context (..), DamageState (..), ScrollState (..), intKey)
@@ -59,11 +57,6 @@ anyAnimating ctx = do
 {-# INLINE getLiveAnimations #-}
 getLiveAnimations :: Context -> IO (IntMap Animation)
 getLiveAnimations ctx = asAnimations <$> readIORef (ctxAnimationState ctx)
-
--- | Whether the widget key has an animation in progress.
-{-# INLINE isAnimatingKey #-}
-isAnimatingKey :: Context -> Int -> IO Bool
-isAnimatingKey ctx key = IM.member key <$> getLiveAnimations ctx
 
 -- | Consecutive frames in which each animation has no visible widget bounds.
 -- The damage pass uses these counts to limit full-window repaint requests.
@@ -178,7 +171,8 @@ tickAnimations ctx dt =
           else
             let stepped = IM.map (stepAnim dt) (asAnimations as)
                 (live, done) = IM.partition animInProgress stepped
-                rest' = IM.foldlWithKey' writeRest (asAnimRest as) done
+                rest' =
+                  IM.foldlWithKey' (\r k a -> restAt k (animationValue a) r) (asAnimRest as) done
              in as
                   { asAnimations = live
                   , asAnimRest = rest'
@@ -223,10 +217,7 @@ settleKey ctx key val = do
       restChanged
         | approxEq val 0 = IM.member key rest
         | otherwise = prevRest /= val
-      rest'
-        | not restChanged = rest
-        | approxEq val 0 = IM.delete key rest
-        | otherwise = IM.insert key val rest
+      rest' = if restChanged then restAt key val rest else rest
   -- A spring at rest settles every frame; write only what changes.
   case prevLive of
     Just _ ->
@@ -239,6 +230,10 @@ settleKey ctx key val = do
     -- those repaint whole through 'markDirtyIfOrphan' while they run.
     damageKey ctx key (DamageInflated defaultDamageSlop)
     markDirtyCovered ctx
+
+-- | Record a settled value; one near zero is kept as no entry, which reads as zero.
+restAt :: Int -> Float -> IntMap Float -> IntMap Float
+restAt key v = if approxEq v 0 then IM.delete key else IM.insert key v
 
 -- | Current animated or settled value; zero when the id has neither.
 getAnimationValue :: Context -> WidgetId -> IO Float
