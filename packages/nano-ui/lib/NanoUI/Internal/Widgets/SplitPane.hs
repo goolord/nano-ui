@@ -15,31 +15,33 @@ module NanoUI.Internal.Widgets.SplitPane
   , PaneDrop (..)
   , treePanes
   , treeSize
+  , treeMaxId
   , paneExist
   , subtreeMin
-  , mainMins
+  , alongAxis
   , mainLen
-  , splitLength
   , layoutNode
   , DividerInfo (..)
+  , dividerLength
+  , clampRatio
   , treeSplit
   , treeSetRatio
   , pinnedSide
   , reflowFixed
   , treeRemovePane
-  , clampTreeRatio
   , DropPreview (..)
   , dropPreviewTreeSized
   , dropTargetForPane
   , nearestPane
+  , bestPane
   , topLevelDropTarget
   ) where
 
 import Control.Applicative ((<|>))
-import Data.List (find, minimumBy)
+import Data.List (find, sortOn)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as M
-import Data.Ord (comparing)
+import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Word (Word64)
 import NanoUI.Internal.Types (Rect (..), V2 (..), clamp, clamp01, rectH, rectHit, rectNonEmpty, rectW, rectX, rectY)
 
@@ -99,6 +101,10 @@ treePanes = foldGrid pure (\_ _ _ a b -> a <> b)
 treeSize :: GridNode -> Int
 treeSize = foldGrid (const 1) (\_ _ _ a b -> a + b)
 
+-- | The largest pane or split id in the tree.
+treeMaxId :: GridNode -> Word64
+treeMaxId = foldGrid id (\sid _ _ a b -> maximum [sid, a, b])
+
 -- | Does a pane with the given id exist?
 paneExist :: GridNode -> Word64 -> Bool
 paneExist t p = foldGrid (== p) (\_ _ _ a b -> a || b) t
@@ -115,21 +121,23 @@ subtreeMin minSize spacing = \case
           AxisV -> (wa + spacing + wb, max ha hb)
           AxisH -> (max wa wb, ha + spacing + hb)
 
+-- | A rect seen along a split's main axis: as it is for 'AxisV', with x and y
+-- (and width and height) swapped for 'AxisH', so per-axis geometry is written
+-- once, for a vertical divider. Its own inverse.
+alongAxis :: GridAxis -> Rect -> Rect
+alongAxis AxisV r = r
+alongAxis AxisH (Rect x y w h) = Rect y x h w
+
 -- | Extent of a region along a split's main axis.
 mainLen :: GridAxis -> Rect -> Float
-mainLen AxisV = rectW
-mainLen AxisH = rectH
+mainLen ax = rectW . alongAxis ax
 
--- | The subtree minima that apply along a split's main axis: widths for
+-- | The minima of a split's two subtrees along its main axis: widths for
 -- 'AxisV' (panes left/right), heights for 'AxisH' (panes stacked).
-mainMins :: GridAxis -> (Float, Float) -> (Float, Float) -> (Float, Float)
-mainMins AxisV (wa, _) (wb, _) = (wa, wb)
-mainMins AxisH (_, ha) (_, hb) = (ha, hb)
-
--- | 'mainMins' of a split's two subtrees.
 splitMins :: Float -> Float -> GridAxis -> GridNode -> GridNode -> (Float, Float)
-splitMins minSize spacing axis a b =
-  mainMins axis (subtreeMin minSize spacing a) (subtreeMin minSize spacing b)
+splitMins minSize spacing axis a b = (along a, along b)
+  where
+    along n = (if axis == AxisV then fst else snd) (subtreeMin minSize spacing n)
 
 -- | A-side extent for a split along its main axis, honouring the subtree
 -- minima. The ratio shares out the extent left after the gutter between the
@@ -147,29 +155,38 @@ splitLength spacing avail minA minB ratio
 
 -- | Carve a region at offset @d@ along the main axis into (A, B, divider band).
 splitBounds :: GridAxis -> Float -> Rect -> Float -> (Rect, Rect, Rect)
-splitBounds AxisV spacing r d =
-  let avail = rectW r
-   in ( r {rectW = d}
-      , r {rectX = rectX r + d + spacing, rectW = avail - d - spacing}
-      , Rect (rectX r + d) (rectY r) spacing (rectH r)
-      )
-splitBounds AxisH spacing r d =
-  let avail = rectH r
-   in ( r {rectH = d}
-      , r {rectY = rectY r + d + spacing, rectH = avail - d - spacing}
-      , Rect (rectX r) (rectY r + d) (rectW r) spacing
+splitBounds ax spacing r d =
+  let Rect x y w h = alongAxis ax r
+   in ( alongAxis ax (Rect x y d h)
+      , alongAxis ax (Rect (x + d + spacing) y (w - d - spacing) h)
+      , alongAxis ax (Rect (x + d) y spacing h)
       )
 
 -- | Per-split divider information: the split's own region (where the ratio
--- applies), the exact spacing band, and the axis / ratio / id.
+-- applies), the exact spacing band, the axis / ratio / id, and the minima
+-- its two sides keep along the axis.
 data DividerInfo = DividerInfo
   { diSplitId :: {-# UNPACK #-} !Word64
   , diAxis :: !GridAxis
   , diRegion :: !Rect
   , diBand :: !Rect
   , diRatio :: {-# UNPACK #-} !Float
+  , diMins :: !(Float, Float)
   }
   deriving (Eq, Show)
+
+-- | The A side's extent for a ratio in the divider's region ('splitLength').
+dividerLength :: Float -> DividerInfo -> Float -> Float
+dividerLength spacing d = uncurry (splitLength spacing (mainLen (diAxis d) (diRegion d))) (diMins d)
+
+-- | Clamp a proposed ratio for a divider so both of its sides keep at least
+-- their minimum size within its region.
+clampRatio :: Float -> DividerInfo -> Float -> Float
+clampRatio spacing d r0
+  | usable <= 0 = r0
+  | otherwise = dividerLength spacing d r0 / usable
+  where
+    usable = mainLen (diAxis d) (diRegion d) - spacing
 
 -- | Lay out a tree into per-pane regions and divider bands within 'Rect'.
 -- Dividers are reported parent-before-child so dragging a divider resizes its
@@ -179,9 +196,9 @@ layoutNode minSize spacing sp r =
   case sp of
     Pane pid -> (M.singleton pid r, [])
     Split sid axis ratio0 a b ->
-      let (mA, mB) = splitMins minSize spacing axis a b
-          (rA, rB, band) = splitBounds axis spacing r (splitLength spacing (mainLen axis r) mA mB ratio0)
-          self = DividerInfo sid axis r band ratio0
+      let mins = splitMins minSize spacing axis a b
+          (rA, rB, band) = splitBounds axis spacing r (uncurry (splitLength spacing (mainLen axis r)) mins ratio0)
+          self = DividerInfo sid axis r band ratio0 mins
           (regionsA, divsA) = layoutNode minSize spacing a rA
           (regionsB, divsB) = layoutNode minSize spacing b rB
        in (M.union regionsA regionsB, self : divsA <> divsB)
@@ -195,8 +212,14 @@ treeSplit targetPaneId splitId axis newOnA newPaneId = foldGrid onPane Split
   where
     onPane p
       | p /= targetPaneId = Pane p
-      | newOnA = Split splitId axis 0.5 (Pane newPaneId) (Pane p)
-      | otherwise = Split splitId axis 0.5 (Pane p) (Pane newPaneId)
+      | otherwise = splitBeside splitId axis newOnA newPaneId (Pane p)
+
+-- | A new even split of @node@ and the pane @newPane@, on the A side when
+-- @newOnA@.
+splitBeside :: Word64 -> GridAxis -> Bool -> Word64 -> GridNode -> GridNode
+splitBeside splitId axis newOnA newPane node
+  | newOnA = Split splitId axis 0.5 (Pane newPane) node
+  | otherwise = Split splitId axis 0.5 node (Pane newPane)
 
 -- | Set the raw ratio of a split (clamped to @[0,1]@).
 treeSetRatio :: Word64 -> Float -> GridNode -> GridNode
@@ -306,34 +329,8 @@ treeMovePane moved splitId dt tree
         DropSplit tgt axis onA
           | tgt == moved || not (paneExist tree tgt) -> Nothing
           | otherwise -> treeSplit tgt splitId axis onA moved <$> treeRemovePane moved tree
-        DropTop axis onA
-          | treeSize tree <= 1 -> Nothing
-          | otherwise -> do
-              t' <- treeRemovePane moved tree
-              Just
-                ( if onA
-                    then Split splitId axis 0.5 (Pane moved) t'
-                    else Split splitId axis 0.5 t' (Pane moved)
-                )
-
--- | Find the split node with a given id (or 'Nothing').
-findSplitNode :: GridNode -> Word64 -> Maybe GridNode
-findSplitNode (Pane _) _ = Nothing
-findSplitNode s@(Split sid0 _ _ a b) target
-  | sid0 == target = Just s
-  | otherwise = findSplitNode a target <|> findSplitNode b target
-
--- | Clamp a proposed ratio for a split so both subtrees keep at least their
--- minimum size within the given region.
-clampTreeRatio :: GridNode -> Word64 -> Rect -> Float -> Float -> Float -> Float
-clampTreeRatio tree splitId region spacing minSize r0
-  | Just (Split _ ax _ a b) <- findSplitNode tree splitId
-  , let avail = mainLen ax region
-        usable = avail - spacing
-  , not (usable <= 0) =
-      let (mA, mB) = splitMins minSize spacing ax a b
-       in splitLength spacing avail mA mB r0 / usable
-  | otherwise = r0
+        -- Removing the only pane leaves nothing to wrap.
+        DropTop axis onA -> splitBeside splitId axis onA moved <$> treeRemovePane moved tree
 
 -- | Classify a drop point on a target pane into the 'PaneDrop' the drop
 -- performs: the pane's center swaps the two panes, an edge zone splits the
@@ -356,15 +353,18 @@ dropTargetForPane r (V2 mx my) tgt
 -- point just outside a region as that region's near edge. 'Nothing' only when
 -- no pane has been laid out.
 nearestPane :: Map Word64 Rect -> V2 -> Maybe (Word64, Rect)
-nearestPane regions (V2 mx my) =
-  case [(dist r, (p, r)) | (p, r) <- M.toList regions, rectNonEmpty r] of
-    [] -> Nothing
-    scored -> Just (snd (minimumBy (comparing fst) scored))
+nearestPane regions (V2 mx my) = bestPane (Just . dist) regions
   where
     dist (Rect x y w h) =
       let dx = max 0 (max (x - mx) (mx - (x + w)))
           dy = max 0 (max (y - my) (my - (y + h)))
        in dx * dx + dy * dy
+
+-- | The laid-out pane with the least score, among those the scorer accepts;
+-- the first in id order on a tie.
+bestPane :: (Rect -> Maybe Float) -> Map Word64 Rect -> Maybe (Word64, Rect)
+bestPane score regions =
+  snd <$> listToMaybe (sortOn fst [(s, (p, r)) | (p, r) <- M.toList regions, rectNonEmpty r, Just s <- [score r]])
 
 -- | Classify a drop point against the grid's outer boundary. If the pointer
 -- sits inside the grid within @band@ px of an edge, return the 'DropTop'
@@ -435,10 +435,8 @@ dropPreviewTreeSized source minSize spacing tree moved splitId baseRect dt = do
           Just d
             | let usable = mainLen axis (diRegion d) - spacing
             , usable > 0 ->
-                let extent = mainLen (maybe axis id (sourceAxis tree)) r
-                    share = extent / usable
-                    ratio = if onA then share else 1 - share
-                 in treeSetRatio splitId (clampTreeRatio t splitId (diRegion d) spacing minSize ratio) t
+                let share = mainLen (fromMaybe axis (sourceAxis tree)) r / usable
+                 in treeSetRatio splitId (clampRatio spacing d (if onA then share else 1 - share)) t
           _ -> t
       (regions, dividers) = layoutNode minSize spacing sized baseRect
   r <- M.lookup moved regions
