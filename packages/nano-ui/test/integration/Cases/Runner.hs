@@ -16,6 +16,7 @@ tests :: [Spec]
 tests =
   [ spec "session-loop" runSessionLoopTest
   , spec "session-loop-wake" runSessionLoopWakeTest
+  , spec "session-loop-hard-quit" runSessionLoopHardQuitTest
   , spec "drawing-lock" runDrawingLockTest
   ]
 
@@ -28,7 +29,6 @@ quietDriver debug =
     , sdWaitEvents = \_ -> pure [3]
     , sdApplyEvent = \inp _ -> inp
     , sdIsButtonEdge = const False
-    , sdIsHardQuit = const False
     , sdIsSessionQuit = (== 3)
     , sdSyncDisplay = \c inp -> pure (c, inp)
     , sdDebug = debug
@@ -133,6 +133,38 @@ runSessionLoopWakeTest ctx failed = do
   runSessionLoop driver ctx emptyInput
   assertEq failed ["timed wait", "due True", "draw", "wait -1"] =<< readIORef logRef
   assertEq failed 0 =<< getWakeAt ctx
+
+-- Ctrl+C quits without a frame, even when a later event in the same batch
+-- releases Ctrl; typing c without Ctrl does not. Event 1 types c holding
+-- Ctrl, 2 releases Ctrl, and 4 types c alone.
+runSessionLoopHardQuitTest :: Context -> IORef Int -> IO ()
+runSessionLoopHardQuitTest ctx failed = do
+  debug <- newDebugSampler
+  let ctrl on inp = inp {inputModifiers = (inputModifiers inp) {modCtrl = on}}
+      typeC inp = inp {inputChars = inputChars inp <> "c"}
+      draws batches = do
+        queue <- newIORef batches
+        drawn <- newIORef (0 :: Int)
+        clearDirty ctx
+        runSessionLoop
+          (quietDriver debug)
+            { sdWaitEvents = \_ -> atomicModifyIORef' queue $ \bs -> case bs of
+                b : rest -> (rest, b)
+                [] -> ([], [3])
+            , sdApplyEvent = \inp ev -> case ev of
+                1 -> ctrl True (typeC inp)
+                2 -> ctrl False inp
+                4 -> typeC inp
+                _ -> inp
+            , sdShouldDraw = \_ _ _ _ _ -> pure True
+            , sdDraw = \_ inp _ -> (False, inp) <$ modifyIORef' drawn (+ 1)
+            }
+          ctx
+          emptyInput
+        readIORef drawn
+  assertEq failed 0 =<< draws [[1, 2]]
+  assertEq failed 0 =<< draws [[1]]
+  assertEq failed 1 =<< draws [[4, 2]]
 
 runDrawingLockTest :: Context -> IORef Int -> IO ()
 runDrawingLockTest _ failed = do

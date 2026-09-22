@@ -16,6 +16,7 @@ module NanoUI.Runner
 import Control.Concurrent (threadDelay)
 import Control.Exception (finally, mask)
 import Control.Monad (forM_, unless, when)
+import Data.List (scanl')
 import Data.Maybe (isJust)
 import Numeric (showFFloat)
 import System.Environment (lookupEnv)
@@ -149,8 +150,6 @@ data SessionDriver ev = SessionDriver
     -- ^ Fold an event into the 'Input' state.
   , sdIsButtonEdge  :: ev -> Bool
     -- ^ Predicate identifying click/press boundaries where the event stream should be split.
-  , sdIsHardQuit    :: ev -> Bool
-    -- ^ Predicate for immediate OS/SIGINT hard-quit signals (e.g. Ctrl+C).
   , sdIsSessionQuit :: ev -> Bool
     -- ^ Predicate for window close requests.
   , sdSyncDisplay   :: Context -> Input -> IO (Context, Input)
@@ -300,41 +299,42 @@ runSessionLoop drv ctx0 inp0 = do
                 pure (events, dueNow || wakeDue || hudDue)
 
         let (group, rest) = splitFrame (sdIsButtonEdge drv) pending
-        editActive <- textInputEditActive ctx
-        let hardQuitEv = any (sdIsHardQuit drv) group && not editActive
-            sessionQuitEv = any (sdIsSessionQuit drv) group
-        unless (hardQuitEv || sessionQuitEv) $ do
-          now <- getMonotonicTime
-          let !dt = min maxFrameDt (realToFrac (now - lastT))
+        now <- getMonotonicTime
+        let !dt = min maxFrameDt (realToFrac (now - lastT))
+            steps = scanl' (sdApplyEvent drv) (clearEphemeral inp {inputDeltaTime = dt}) group
+            -- Ctrl+C quits as the batch leaves it, and as each event typed it:
+            -- a later event in a busy batch may have released Ctrl.
+            quitChecks =
+              last steps : zipWith (\s -> sdApplyEvent drv s {inputChars = mempty}) steps group
+        -- Hard quit is ignored while a text editor is active.
+        hardQuit <-
+          if any isHardQuitInput quitChecks then not <$> textInputEditActive ctx else pure False
+        unless (hardQuit || any (sdIsSessionQuit drv) group) $ do
           noteDebugLoop (sdDebug drv) dt
-          let inpFolded = foldl' (sdApplyEvent drv) (clearEphemeral inp {inputDeltaTime = dt}) group
-          inpStamped <- stampClicks clickTracker inpFolded
+          inpStamped <- stampClicks clickTracker (last steps)
           (ctx', inpSynced) <- sdSyncDisplay drv ctx inpStamped
-          -- Hard quit (e.g. Ctrl+C) is ignored while a text editor is active.
-          editActiveSynced <- textInputEditActive ctx'
-          unless (isHardQuitInput inpSynced && not editActiveSynced) $ do
-            shouldDraw <- if pendingDirty
-              then pure True
-              else sdShouldDraw drv ctx' inp inpSynced wasAnim refreshDue
-            -- Force a full present only on the settle frame where an
-            -- animation just finished (wasAnim && not animNow), so running
-            -- animations keep clip damage.
-            animNow <- anyAnimating ctx'
-            (dirtyOut, synced) <- if shouldDraw
-              then sdDraw drv ctx' inpSynced (wasAnim && not animNow)
-              else do
-                noteDebugSkip (sdDebug drv)
-                pure (pendingDirty, inpSynced)
-            sdOnCursor drv ctx' synced
-            animAfter <- anyAnimating ctx'
-            traceLoopPass trace (length group) shouldDraw $
-              (if pendingDirty then "D" else "")
-                ++ (if wasAnim || animAfter then "A" else "")
-                ++ (if inputWindowRedraw inpSynced then "R" else "")
-                ++ (if refreshDue then "T" else "")
-            -- Open modals/overlays consume Escape/Quit before the app sees it.
-            overlayQuit <- overlayConsumesQuit ctx' synced
-            unless (sdShouldQuit drv synced && not overlayQuit) $
-              loop ctx' synced rest now dirtyOut animAfter
+          shouldDraw <- if pendingDirty
+            then pure True
+            else sdShouldDraw drv ctx' inp inpSynced wasAnim refreshDue
+          -- Force a full present only on the settle frame where an
+          -- animation just finished (wasAnim && not animNow), so running
+          -- animations keep clip damage.
+          animNow <- anyAnimating ctx'
+          (dirtyOut, synced) <- if shouldDraw
+            then sdDraw drv ctx' inpSynced (wasAnim && not animNow)
+            else do
+              noteDebugSkip (sdDebug drv)
+              pure (pendingDirty, inpSynced)
+          sdOnCursor drv ctx' synced
+          animAfter <- anyAnimating ctx'
+          traceLoopPass trace (length group) shouldDraw $
+            (if pendingDirty then "D" else "")
+              ++ (if wasAnim || animAfter then "A" else "")
+              ++ (if inputWindowRedraw inpSynced then "R" else "")
+              ++ (if refreshDue then "T" else "")
+          -- Open modals/overlays consume Escape/Quit before the app sees it.
+          overlayQuit <- overlayConsumesQuit ctx' synced
+          unless (sdShouldQuit drv synced && not overlayQuit) $
+            loop ctx' synced rest now dirtyOut animAfter
 
   loop ctx0 inp0 [] startT False False

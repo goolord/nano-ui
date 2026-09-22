@@ -8,7 +8,6 @@ module NanoUI.Sdl.Internal.Input
   , pollEvents
   , waitEvent
   , applyEvent
-  , isHardQuit
   , isButtonEdge
   ) where
 
@@ -260,10 +259,3 @@ isButtonEdge :: SdlEvent -> Bool
 isButtonEdge = \case
   EvMouseButton {} -> True
   _ -> False
-
--- | Ctrl+C text or an ETX character, independent of popup dismissal.
-isHardQuit :: SdlEvent -> Bool
-isHardQuit ev =
-  case ev of
-    EvText txt mods -> (txt == "c" && modCtrl mods) || txt == "\ETX"
-    _ -> False

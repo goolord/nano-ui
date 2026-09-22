@@ -308,7 +308,6 @@ runRgfwAppReduceCustom opts getThemeAndScale updateModel initialModel view = inB
                     pollRgfwEvents win evPtr scaleRef monScaleRef winSizeRef
                 , sdApplyEvent    = applyRgfwEvent
                 , sdIsButtonEdge  = isRgfwButtonEdge
-                , sdIsHardQuit    = \_ -> False
                 , sdIsSessionQuit = isRgfwSessionQuit
                 , sdSyncDisplay   = \c inp -> do
                     (curWinW, curWinH) <- R.windowSize win
