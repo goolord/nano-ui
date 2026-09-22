@@ -72,7 +72,7 @@ import NanoUI.Sdl.Internal.Font
 import NanoUI.Sdl.Internal.Font.Search (searchFonts)
 import NanoUI.Sdl.Internal.NanoUIFont (NanoUIFont (..))
 import NanoUI.Sdl.Internal.Debug (SdlDebugSampler, newSdlDebugSampler)
-import NanoUI.Sdl.Internal.Dialog.Types (DialogState (..), clearDialogState, newDialogState)
+import NanoUI.Sdl.Internal.Dialog.Types (DialogState (..), newDialogState)
 import NanoUI.Sdl.Internal.Image (ImageAtlas, destroyImageAtlas, newImageAtlas)
 import NanoUI.Sdl.Internal.Render (RenderBatch, destroyRenderBatch, newRenderBatch)
 import SDL3.Sys.Bindgen.Rect (SDL_Rect (..))
@@ -542,7 +542,7 @@ startSdlWindow bench opts ctx guessedDriver fontSource monoSource = do
           >> void (startTextInputSafe sdlWindow)
       )
       (const (void (stopTextInputSafe sdlWindow)))
-  sdlDialogState <- mkAcquire newDialogState clearDialogState
+  sdlDialogState <- liftIO newDialogState
   sdlLastPresented <- liftIO $ newIORef False
   sdlBatch <- mkAcquire (newRenderBatch sdlRenderer) destroyRenderBatch
   let

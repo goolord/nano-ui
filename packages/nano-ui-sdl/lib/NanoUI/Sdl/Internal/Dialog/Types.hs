@@ -3,21 +3,13 @@
 module NanoUI.Sdl.Internal.Dialog.Types
   ( FileDialogId (..)
   , FileDialogResult (..)
-  , PendingDialog (..)
-  , DialogCallback
-  , DialogCallbackFunPtr
   , DialogState (..)
   , newDialogState
-  , clearDialogState
-  , drainRetired
-  , retireDialogCallback
   ) where
 
-import Data.Int (Int32)
 import Data.IntMap.Strict (IntMap)
 import Data.IntMap.Strict qualified as IM
-import Data.IORef (IORef, atomicModifyIORef', newIORef, writeIORef)
-import Foreign.Ptr (FunPtr, Ptr, freeHaskellFunPtr)
+import Data.IORef (IORef, newIORef)
 
 -- | Opaque handle returned by a non-blocking dialog launch. @0@ is never a
 -- valid handle.
@@ -41,61 +33,13 @@ data FileDialogResult
   -- handle that returns 'FileDialogUnknown' again.
   deriving (Eq, Show)
 
--- | Shape of the SDL3 dialog callback, flattened to 'Ptr' at the FFI
--- boundary.
-type DialogCallback = Ptr () -> Ptr () -> Int32 -> IO ()
-
--- | A marshalled 'DialogCallback' allocated once per dialog launch.
-type DialogCallbackFunPtr = FunPtr DialogCallback
-
--- | A tracked dialog: its current status plus the FFI callback that owns its
--- completion. The callback is released only after the dialog completes and a
--- poll consumes the result, so it is never freed while SDL could still invoke
--- it.
-data PendingDialog = PendingDialog
-  { pendingStatus :: !FileDialogResult
-  , pendingCallback :: !DialogCallbackFunPtr
-  }
-
--- | Pending dialogs, keyed by 'FileDialogId'.
+-- | The session's tracked dialogs, keyed by 'FileDialogId': the cell each
+-- one's SDL callback writes its result to.
 data DialogState = DialogState
   { dsNextId :: !(IORef Int)
-  , dsPending :: !(IORef (IntMap PendingDialog))
-  , dsRetiredCur :: !(IORef [DialogCallbackFunPtr])
-  , dsRetiredPrev :: !(IORef [DialogCallbackFunPtr])
+  , dsPending :: !(IORef (IntMap (IORef FileDialogResult)))
   }
 
 -- | Create an empty dialog state.
 newDialogState :: IO DialogState
-newDialogState =
-  DialogState
-    <$> newIORef 0
-    <*> newIORef IM.empty
-    <*> newIORef []
-    <*> newIORef []
-
--- | Forget every pending dialog. Used during SDL teardown: dialogs still
--- open on the OS side keep running and their callbacks are left to the
--- process, but all handles become 'FileDialogUnknown'. Entries still in the
--- current retirement batch are not freed here: SDL may still be
--- unwinding their wrappers during teardown; they leak to process exit.
-clearDialogState :: DialogState -> IO ()
-clearDialogState st = do
-  writeIORef (dsPending st) IM.empty
-  drainRetired st
-
--- | Retire a consumed dialog callback for freeing on a later poll.
-retireDialogCallback :: DialogState -> DialogCallbackFunPtr -> IO ()
-retireDialogCallback st cb =
-  atomicModifyIORef' (dsRetiredCur st) (\cbs -> (cb : cbs, ()))
-
--- | Free callback 'FunPtr's retired before the previous poll. Retiring parks
--- them for one full poll first so the dialog callback thread has certainly
--- returned before 'freeHaskellFunPtr' runs (freeing a wrapper while it
--- executes is unsafe).
-drainRetired :: DialogState -> IO ()
-drainRetired st = do
-  cbs <- atomicModifyIORef' (dsRetiredPrev st) (\cbs -> ([], cbs))
-  mapM_ freeHaskellFunPtr cbs
-  cur <- atomicModifyIORef' (dsRetiredCur st) (\cur -> ([], cur))
-  writeIORef (dsRetiredPrev st) cur
+newDialogState = DialogState <$> newIORef 0 <*> newIORef IM.empty
