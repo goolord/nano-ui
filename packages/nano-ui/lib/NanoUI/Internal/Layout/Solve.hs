@@ -101,6 +101,7 @@ import NanoUI.Internal.Layout.Arena
   , readTree
   , treeParent
   , treeChildCount
+  , walkAncestors
   , getAlignX
   , getAlignY
   , getDirection
@@ -177,12 +178,7 @@ type FontResolver = Float -> FontWeight -> FontStyle -> FontVariant -> IO (FontM
 data SolveEnv = SolveEnv
   { seArena :: !NodeArena
   , seArrays :: !NodeArenaArrays
-  , seFm :: !FontMetrics
-  , seMonoFm :: !FontMetrics
-  , seMeasure :: !(Text -> IO (Float, Float))
-  , seResolveFont :: !FontResolver
-  , seLookupMeasure :: !(WidgetId -> IO (Maybe CustomMeasureFn))
-  , seWrap :: !TextWrapper
+  , seMs :: !Measurers
   , seSub :: !(IOArr Word64)
   -- ^ The arena's per-node subtree hashes, written by 'computeSubtreeHashes'
   -- for this frame and read by the measure pass.
@@ -217,13 +213,10 @@ data Measurers = Measurers
 type TextWrapper = Int -> (Text -> IO Float) -> Text -> Float -> IO WrapResult
 
 solveEnv :: NodeArena -> Measurers -> Maybe LayoutCache -> IO SolveEnv
-solveEnv na Measurers {msFm, msMonoFm, msMeasure, msResolveFont, msLookupMeasure, msWrap} mCache = do
+solveEnv na ms mCache = do
   a <- arenaArrays na
   (sub, measured) <- subtreeArrays na
-  pure $
-    SolveEnv na a msFm msMonoFm msMeasure msResolveFont msLookupMeasure msWrap sub measured
-      (mfilter ((> 0) . lcCount) mCache)
-      Nothing
+  pure (SolveEnv na a ms sub measured (mfilter ((> 0) . lcCount) mCache) Nothing)
 
 -- | Strict accumulator for flow-child folds: a child count and two running
 -- sums or extents. The strict fields keep the folds unboxed.
@@ -240,7 +233,7 @@ data TextMeasurer = TextMeasurer
   }
 
 textNodeMeasurer :: SolveEnv -> NodeIdx -> IO TextMeasurer
-textNodeMeasurer SolveEnv {seArena = na, seFm = fm, seMonoFm = monoFm, seMeasure = measure, seResolveFont = resolveFont} idx = do
+textNodeMeasurer SolveEnv {seArena = na, seMs = ms} idx = do
   si <- getStyleIdx na idx
   size <- getNodeFontSize na idx
   let variant = textNodeFontVariant si
@@ -248,8 +241,8 @@ textNodeMeasurer SolveEnv {seArena = na, seFm = fm, seMonoFm = monoFm, seMeasure
       style = textNodeFontStyle si
   (metrics, measureLine) <-
     if isDefaultNodeFont size weight style variant
-      then pure (if variant == FontMono then monoFm else fm, measure)
-      else resolveFont size weight style variant
+      then pure (if variant == FontMono then msMonoFm ms else msFm ms, msMeasure ms)
+      else msResolveFont ms size weight style variant
   pure (TextMeasurer metrics variant (textNodeFontKey size si) measureLine)
 
 -- Keep these operations as inline functions rather than allocating two
@@ -263,7 +256,7 @@ measureFontLine TextMeasurer {tmMetrics = metrics, tmVariant = variant, tmHostLi
 {-# INLINE measureFontWrapped #-}
 measureFontWrapped :: SolveEnv -> TextMeasurer -> Text -> Float -> IO (Float, Float)
 measureFontWrapped env TextMeasurer {tmMetrics = metrics, tmVariant = variant, tmFontKey = font, tmHostLine = hostLine} text width =
-  wrapMeasure metrics width <$> seWrap env font lineW text width
+  wrapMeasure metrics width <$> msWrap (seMs env) font lineW text width
   where
     lineW
       | variant == FontMono = lineWidthIO metrics
@@ -441,7 +434,7 @@ measureNode env@SolveEnv {seArena = na} idx = do
     NodeBox -> measureImage na idx
     NodeDrawing -> do
       wid <- getWidgetId na idx
-      mFn <- seLookupMeasure env wid
+      mFn <- msLookupMeasure (seMs env) wid
       case mFn of
         Just fn -> measureCustomNode env fn idx
         Nothing -> measureImage na idx
@@ -455,7 +448,7 @@ measureCustomNode :: SolveEnv -> CustomMeasureFn -> NodeIdx -> IO ()
 measureCustomNode env@SolveEnv {seArena = na} measureFn idx = do
   wAx <- getWidthSizing na idx
   hAx <- getHeightSizing na idx
-  let ((mw, mh), record) = customMeasure (seFm env) measureFn wAx hAx
+  let ((mw, mh), record) = customMeasure (msFm (seMs env)) measureFn wAx hAx
   forM_ (seMeasureLog env) $ \ref -> modifyIORef' ref (IM.insert idx record)
   setRect na idx 0 0 (fixedOr wAx mw) (fixedOr hAx mh)
 
@@ -505,7 +498,7 @@ sizeWithin (AxisSizing tag val lo hi) content = clamp lo hi (if tag == SizingFix
 -- limits, or @fallback@ when its widget has no custom measure.
 {-# INLINE drawingHeightAt #-}
 drawingHeightAt :: SolveEnv -> NodeIdx -> Float -> AxisSizing -> Float -> IO Float
-drawingHeightAt SolveEnv {seArena = na, seFm = fm, seLookupMeasure = lookupMeasure} idx w hAx fallback = do
+drawingHeightAt SolveEnv {seArena = na, seMs = Measurers {msFm = fm, msLookupMeasure = lookupMeasure}} idx w hAx fallback = do
   wid <- getWidgetId na idx
   lookupMeasure wid >>= \case
     Just measure -> pure (clamp (axMin hAx) (axMax hAx) (snd (measure fm (w, offeredExtent hAx))))
@@ -602,96 +595,83 @@ measureSeparator na idx = do
     DirRow -> setRect na idx 0 0 1 20
     DirColumn -> setRect na idx 0 0 20 1
 
+-- | A label beside a box or marker: the label, @leading@ and the padding
+-- @pad@ wide, and as tall as the label or the box, plus the padding.
 {-# INLINE measureMarkedWidget #-}
 measureMarkedWidget ::
   FontMetrics ->
   (Text -> IO (Float, Float)) ->
   Text ->
   Float ->
-  IO (Float, Float, Float, Float)
-measureMarkedWidget fm measure body leading = do
+  (Float, Float) ->
+  IO (Float, Float)
+measureMarkedWidget fm measure body leading (padX, padY) = do
   (mw, mh) <- measure (if T.null body then " " else body)
-  pure (mw, max mh (checkboxBoxSize fm), leading, 0)
+  pure (mw + padX + leading, max mh (checkboxBoxSize fm) + padY)
 
 measureWidget :: SolveEnv -> NodeIdx -> IO ()
-measureWidget env@SolveEnv {seArena = na, seArrays = a, seFm = fm, seMeasure = measure} idx = do
+measureWidget env@SolveEnv {seArena = na, seArrays = a, seMs = Measurers {msFm = fm, msMeasure = measure}} idx = do
   nt <- readTagEnum a idx tagNodeType
   txt <- getText na idx
   si <- readTree a idx treeStyleIdx
   wAx <- readAxisSizing a idx True
   hAx <- readAxisSizing a idx False
-  let (padX, padY) =
-        case nt of
-          NodeButton
-            | hasFlag buttonFlagTable si ->
-                (2 * tableCellInset, 0)
-            -- Menu rows reserve the same gutter the text-field context menu
-            -- paints (outer pad + item pad on each side of the label), so the
-            -- generic popup panel sizes identically.
-            | hasFlag buttonFlagMenu si ->
-                (2 * (menuOuterPad + menuItemPadX), snd (buttonPadding fm))
-            | otherwise -> buttonPadding fm
-          NodeSelect -> selectPadding fm
-          NodeTree -> treeItemPadding fm
-          _
-            | nt == NodeColorPicker
-                || nt == NodeSlider
-                || nt == NodeCheckbox
-                || nt == NodeRadio
-                || nt == NodeTextInput
-                || nt == NodeTextArea ->
-                (0, 0)
-            | otherwise -> widgetPadding fm
-  (tw, th, extraW, extraH) <-
+  -- The content with its padding and whatever sits beside the label.
+  (rawW, rawH) <-
     case nt of
-      NodeSlider -> do
-        let contentW = 60
-            contentH = max sliderHandleDiameter (sliderTrackHeight + 2 * sliderHandleSlack)
-        pure (contentW, contentH, 0, 0)
+      NodeSlider -> pure (60, max sliderHandleDiameter (sliderTrackHeight + 2 * sliderHandleSlack))
       NodeTree -> do
         let (_, depth, _, _) = treeDecodeStyle si
-        measureMarkedWidget fm measure txt (treeRowLeading fm depth)
+        measureMarkedWidget fm measure txt (treeRowLeading fm depth) (treeItemPadding fm)
       NodeSelect -> do
         opts <- getOptions na idx
         let choices = if null opts then [""] else opts
+            (padX, padY) = selectPadding fm
         (mw, mh) <-
           foldM
             (\(!mw, !mh) c -> (\(w, h) -> (max mw w, max mh h)) <$> measure (selectDisplayText txt c))
             (0, 0)
             choices
-        pure (mw, mh, selectChevronReserve, 0)
+        pure (mw + padX + selectChevronReserve, mh + padY)
       -- Picker parts carry fixed layouts; the field grows to its square.
-      NodeColorPicker -> pure (0, colorPickerSvH, 0, 0)
+      NodeColorPicker -> pure (0, colorPickerSvH)
       NodeTextInput
         | hasFlag textInputFlagSelectable si -> do
             -- Size with the node's own font (paint and span placement resolve
             -- it too); the ambient `measure` is the default font only.
             measurer <- textNodeMeasurer env idx
-            (mw, mh) <- measureFontLine measurer (if T.null txt then " " else txt)
-            pure (mw, mh, 0, 0)
+            measureFontLine measurer (if T.null txt then " " else txt)
         -- Numeric field: a short editable box and its stepper.
         | hasFlag textInputFlagNumeric si ->
-            pure (56, textInputFieldHeight fm, numericStepperW, 0)
+            pure (56 + numericStepperW, textInputFieldHeight fm)
         -- Caption-less search box: single row tall, icons counted in the
         -- width budget.
         | hasFlag textInputFlagSearch si -> do
             (lw, _) <- measure (if T.null txt then " " else txt)
-            pure (max textInputMinWidth lw + searchInputReserveW fm, textInputFieldHeight fm, 0, 0)
+            pure (max textInputMinWidth lw + searchInputReserveW fm, textInputFieldHeight fm)
         | otherwise -> do
             pw <- if T.null txt then pure 0 else fst <$> measure txt
-            pure (max textInputMinWidth pw, textInputFieldHeight fm, 0, 0)
-      NodeTextArea -> pure (textInputMinWidth, max 96 (textInputFieldHeight fm * 4), 0, 0)
+            pure (max textInputMinWidth pw, textInputFieldHeight fm)
+      NodeTextArea -> pure (textInputMinWidth, max 96 (textInputFieldHeight fm * 4))
       _
         | nt == NodeCheckbox || nt == NodeRadio ->
-            measureMarkedWidget fm measure txt (checkboxLeading fm)
+            measureMarkedWidget fm measure txt (checkboxLeading fm) (0, 0)
         | otherwise -> do
             let body
                   | T.null txt = " "
                   | hasFlag buttonFlagTable si = tableHeaderDisplayText txt
                   | otherwise = txt
+                (padX, padY)
+                  | nt /= NodeButton = widgetPadding fm
+                  | hasFlag buttonFlagTable si = (2 * tableCellInset, 0)
+                  -- Menu rows reserve the same gutter the text-field context
+                  -- menu paints (outer pad + item pad on each side of the
+                  -- label), so the generic popup panel sizes identically.
+                  | hasFlag buttonFlagMenu si = (2 * (menuOuterPad + menuItemPadX), snd (buttonPadding fm))
+                  | otherwise = buttonPadding fm
             (mw, mh) <- measure body
-            pure (mw, mh, 0, 0)
-  setRect na idx 0 0 (fixedOr wAx (tw + padX + extraW)) (fixedOr hAx (th + padY + extraH))
+            pure (mw + padX, mh + padY)
+  setRect na idx 0 0 (fixedOr wAx rawW) (fixedOr hAx rawH)
 
 measureContainer :: SolveEnv -> NodeIdx -> IO ()
 measureContainer env@SolveEnv {seArena = na, seArrays = a} idx = do
@@ -1162,16 +1142,12 @@ positionScrollChildren env@SolveEnv {seArena = na} depth idx dir gap pad px py p
 scrollBarSlotOf :: NodeArena -> NodeIdx -> IO ScrollBarSlot
 scrollBarSlotOf na idx = arenaArrays na >>= \a -> readTagEnum a idx tagScrollBarSlot
 
+-- | Whether @p@ or an ancestor below the nearest floating node is a panel.
 hasPanelAncestor :: NodeArena -> NodeIdx -> IO Bool
-hasPanelAncestor na = go
-  where
-    go p
-      | p < 0 = pure False
-      | otherwise = do
-          nt <- getNodeType na p
-          if nt == NodePanel
-            then pure True
-            else if isFloatingNode nt then pure False else getParent na p >>= go
+hasPanelAncestor na p =
+  fmap (fromMaybe False) . walkAncestors na p $ \i -> do
+    nt <- getNodeType na i
+    pure (if nt == NodePanel then Just True else if isFloatingNode nt then Just False else Nothing)
 
 -- | Left edge of column child @ci@ in a column of width @cw@ at @cx@. Grow and
 -- percent children already take the full width; alignment is for content
@@ -1579,7 +1555,7 @@ alignY AlignBaseline cy _ _ = cy
 --   row that has some, and otherwise its first child's.
 -- * anything else: its bottom edge.
 childBaseline :: SolveEnv -> NodeIdx -> Float -> IO Float
-childBaseline env@SolveEnv {seArena = na, seArrays = a, seFm = defaultFm, seResolveFont = resolveFont} ci h = do
+childBaseline env@SolveEnv {seArena = na, seArrays = a, seMs = ms} ci h = do
   nt <- getNodeType na ci
   si <- getStyleIdx na ci
   case nt of
@@ -1614,8 +1590,8 @@ childBaseline env@SolveEnv {seArena = na, seArrays = a, seFm = defaultFm, seReso
               variant = textNodeFontVariant 0
           fm <-
             if isDefaultNodeFont size weight style variant
-              then pure defaultFm
-              else fst <$> resolveFont size weight style variant
+              then pure (msFm ms)
+              else fst <$> msResolveFont ms size weight style variant
           pure (textBaseline fm h)
       | isContainerNode nt -> do
           -- Children are linked last first, so consing them up as they are
