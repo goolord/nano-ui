@@ -68,6 +68,11 @@
 
 ### Changed
 
+- A line over 4096 bytes is cached like any other, counting one entry per
+  4096 bytes against the shaping caches' limits, where it used to be shaped
+  again on every paint. Glyphs outside the clip emit no quads. Repainting a
+  text area that holds a 20,000-character line went from 6.1 ms and 8 MB
+  allocated a frame to 0.12 ms and 15 KB in `nano-ui-sdl-profile`.
 - `NanoUI.Sdl.Input` and `NanoUI.Sdl.NanoUIFont` are now
   `NanoUI.Sdl.Internal.Input` and `NanoUI.Sdl.Internal.NanoUIFont`.
   `NanoUIFont` is still exported from `NanoUI.Backend.Sdl`.

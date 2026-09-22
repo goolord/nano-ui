@@ -12,7 +12,7 @@ import Control.Monad (forM_, unless, when)
 import Data.IORef (readIORef)
 import qualified Data.Text as T
 import Data.Primitive.SmallArray (SmallArray, indexSmallArray, sizeofSmallArray)
-import Data.Primitive.PrimArray (indexPrimArray, sizeofPrimArray)
+import Data.Primitive.PrimArray (indexPrimArray, readPrimArray, sizeofPrimArray)
 import Data.Word (Word32, Word8)
 import Foreign.Ptr (Ptr)
 import NanoUI.Internal.Draw.Arena
@@ -85,32 +85,42 @@ pushPreparedTextQuads da fm x y txt col = do
     Nothing -> pushGlyphQuads da fm 0 px py txt col
 
 -- | A shaped line's glyph quads from pen @(px, py)@, sheared by @slant@
--- around the baseline like 'pushGlyphQuads'.
+-- around the baseline like 'pushGlyphQuads'. Glyphs wholly left or right of
+-- the current clip emit nothing, so a long line in a narrow view costs the
+-- glyphs it shows plus a test for each of the rest.
 pushShapedQuads :: DrawArena -> FontMetrics -> Float -> Float -> Float -> ShapedGlyphs -> Color -> IO ()
 pushShapedQuads da fm slant px py (ShapedGlyphs quads) col = do
   let !count = sizeofPrimArray quads `div` 8
   when (count > 0) $ do
+    cx <- readPrimArray (daCurrentClip da) 0
+    cw <- readPrimArray (daCurrentClip da) 2
     setTexture da glyphAtlasTextureId
     withVertsReserve da (count * 4) (count * 6) $ \vp ip base baseIdx commit -> do
       let !(r, g, b, a) = unpackColorF col
           !baselineY = py + fmAscent fm
+          -- A sheared glyph leans at most this far past its box.
+          !lean = abs slant * (fmLineHeight fm + abs (fmAscent fm))
+          !left = cx - lean
+          !right = cx + cw + lean
           at k = indexPrimArray quads k
-          go !q
-            | q >= count = pure ()
+          go !q !m
+            | q >= count = commit (m * 4) (m * 6)
             | otherwise = do
                 let !o = q * 8
                     !gx = px + at o
-                    !gy = py + at (o + 1)
                     !gw = at (o + 2)
-                    !gh = at (o + 3)
-                    !u0 = at (o + 4)
-                    !v0 = at (o + 5)
-                    !u1 = at (o + 6)
-                    !v1 = at (o + 7)
-                pokeGlyphQuad vp ip base baseIdx slant baselineY r g b a q gx gy gw gh u0 v0 u1 v1
-                go (q + 1)
-      go 0
-      commit (count * 4) (count * 6)
+                if gx + gw < left || gx > right
+                  then go (q + 1) m
+                  else do
+                    let !gy = py + at (o + 1)
+                        !gh = at (o + 3)
+                        !u0 = at (o + 4)
+                        !v0 = at (o + 5)
+                        !u1 = at (o + 6)
+                        !v1 = at (o + 7)
+                    pokeGlyphQuad vp ip base baseIdx slant baselineY r g b a m gx gy gw gh u0 v0 u1 v1
+                    go (q + 1) (m + 1)
+      go 0 0
 
 -- | Glyph quad @q@ of a text reservation whose vertices start at @base@ and
 -- indices at @baseIdx@. A non-zero @slant@ shears the quad around
