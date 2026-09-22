@@ -396,17 +396,14 @@ scrollToward ctx wid pick behavior = do
 applyScrollTarget :: Context -> WidgetId -> ScrollAxes -> V2 -> ScrollBehavior -> IO ()
 applyScrollTarget ctx wid axes target0 behavior = do
   st <- readIORef (ctxScrollState ctx)
-  let smooth = scrollSmoothTime (ssTuning st)
-      target = projectAxes axes target0
-  if behavior == ScrollInstant || smooth <= 0
+  cur <- getScrollOffsetIn ctx wid axes
+  let target = projectAxes axes target0
+      instant = behavior == ScrollInstant || scrollSmoothTime (ssTuning st) <= 0
+  if instant || nearOffset (projectAxes axes cur) target
     then setScrollOffsetIn ctx wid axes target
-    else do
-      cur <- getScrollOffsetIn ctx wid axes
-      if nearOffset (projectAxes axes cur) target
-        then setScrollOffsetIn ctx wid axes target
-        else
-          writeIORef (ctxScrollState ctx) $!
-            st {ssGlides = IM.insert (intKey wid) (ScrollGlide wid target axes) (ssGlides st)}
+    else
+      writeIORef (ctxScrollState ctx) $!
+        st {ssGlides = IM.insert (intKey wid) (ScrollGlide wid target axes) (ssGlides st)}
 
 -- | Where the scroller is headed: the glide's target if one is in flight, and
 -- @fallback@ (normally the current offset) if not. Deltas add onto this so
