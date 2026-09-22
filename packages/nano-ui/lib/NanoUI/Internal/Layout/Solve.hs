@@ -530,10 +530,7 @@ measureTextNode env@SolveEnv {seArena = na} idx = do
   let canWrap = not isRowChild && effMaxW < 1e8
   TextBox {tbW = tw, tbH = th, tbLineH = lineH} <-
     measureTextNodeAt env idx txt effMaxW (\_ lineW -> canWrap && effMaxW + 0.5 < lineW)
-  let reportedW =
-        if wTag == SizingGrow && parentAssigns
-          then clamp minW maxW 0
-          else clamp minW maxW tw
+  let reportedW = clamp minW maxW (if wTag == SizingGrow && parentAssigns then 0 else tw)
   setRect na idx 0 0 reportedW (sizeWithin hAx (max lineH th))
 
 -- | Whether a grow-width node's width is assigned from above rather than

@@ -1210,9 +1210,7 @@ getText na idx = do
 -- | Choices stored on a select node, or an empty list when none were assigned.
 {-# INLINE getOptions #-}
 getOptions :: NodeArena -> NodeIdx -> IO [Text]
-getOptions na idx = do
-  a <- arenaArrays na
-  readArray (naArrOptionsStore a) idx
+getOptions na idx = arenaArrays na >>= \a -> readArray (naArrOptionsStore a) idx
 
 -- | Replace a node's choice labels for this frame. Re-setting the same list
 -- object reuses its cached hash, like 'setNodeText'.
@@ -1301,9 +1299,8 @@ getNodeFontColor :: NodeArena -> NodeIdx -> IO (Maybe Color)
 getNodeFontColor na idx = do
   a <- arenaArrays na
   val <- readPrimArray (naArrFontColor a) idx
-  if (val .&. 0x100000000) /= 0
-    then pure (Just (Color (fromIntegral (val .&. 0xFFFFFFFF))))
-    else pure Nothing
+  let hasColor = (val .&. 0x100000000) /= 0
+  pure (if hasColor then Just (Color (fromIntegral (val .&. 0xFFFFFFFF))) else Nothing)
 
 -- | Packed paint scope: theme index above bit 0, disabled flag in bit 0.
 {-# INLINE getNodeScope #-}
