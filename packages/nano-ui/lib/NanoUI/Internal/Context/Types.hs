@@ -4,10 +4,10 @@
 -- scroll and drawing-cache state, theme scopes, and frame messages.
 module NanoUI.Internal.Context.Types
   ( Context (..)
-  , MeasureCache (..)
-  , emptyMeasureCache
+  , GenCache (..)
+  , emptyGenCache
+  , MeasureCache
   , WrapCache (..)
-  , emptyWrapCache
   , MetricSource (..)
   , TextInputMenu (..)
   , TextInputDrag (..)
@@ -127,30 +127,22 @@ reduceMessages update = foldl' (\model (FrameMsg x) -> maybe model (`update` mod
 reduceUpdates :: (Foldable f, Typeable model) => model -> f FrameMsg -> model
 reduceUpdates = reduceMessages ($)
 
--- | Memoised measurements by text and measurement scale, in two generations:
--- the young map, its size, and the old map. A full young map replaces the old
--- one, so text that stops being shown (a clock, a log) is dropped while text
--- measured every generation stays.
-data MeasureCache = MeasureCache
-  !(HashMap (Text, Float) (Float, Float))
-  !Int
-  !(HashMap (Text, Float) (Float, Float))
+-- | A memo table in two generations: the young map, its size, and the old
+-- map. A full young map replaces the old one, so an entry that stops being
+-- used (a clock's text, a log line) is dropped while one used every
+-- generation stays.
+data GenCache k v = GenCache !(HashMap k v) !Int !(HashMap k v)
 
-emptyMeasureCache :: MeasureCache
-emptyMeasureCache = MeasureCache HashMap.empty 0 HashMap.empty
+emptyGenCache :: GenCache k v
+emptyGenCache = GenCache HashMap.empty 0 HashMap.empty
+
+-- | Memoised measurements by text and measurement scale.
+type MeasureCache = GenCache (Text, Float) (Float, Float)
 
 -- | Wrapped text by text and font ('NanoUI.Internal.WidgetText.textNodeFontKey'),
--- each with the widths it holds for, newest first. The metric generation the
--- results were measured under, then two generations as in 'MeasureCache':
--- the young map, its size, and the old map.
-data WrapCache = WrapCache
-  !Int
-  !(HashMap (Text, Int) [WrapResult])
-  !Int
-  !(HashMap (Text, Int) [WrapResult])
-
-emptyWrapCache :: WrapCache
-emptyWrapCache = WrapCache 0 HashMap.empty 0 HashMap.empty
+-- each with the widths it holds for, newest first, under the metric generation
+-- the results were measured in.
+data WrapCache = WrapCache !Int !(GenCache (Text, Int) [WrapResult])
 
 -- | Identity of a font/measurement configuration. Pure Context modifiers
 -- replace this value; the next frame invalidates shared caches if its identity

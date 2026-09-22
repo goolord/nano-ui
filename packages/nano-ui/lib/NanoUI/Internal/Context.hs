@@ -225,6 +225,7 @@ import Control.Monad (foldM, forM, when, (<=<))
 import Data.Bits ((.&.))
 import Data.ByteString (ByteString)
 import Data.Dynamic (fromDynamic, toDyn)
+import Data.Hashable (Hashable)
 import Data.List (find)
 import Data.Maybe (fromMaybe, isJust)
 import Data.HashMap.Strict qualified as HashMap
@@ -273,12 +274,12 @@ import NanoUI.Internal.Context.Types
   , DrawingCacheState (..)
   , DrawingEntry (..)
   , FrameMsg (..)
+  , GenCache (..)
   , InteractionState (..)
-  , MeasureCache (..)
+  , MeasureCache
   , MetricSource (..)
   , WrapCache (..)
-  , emptyMeasureCache
-  , emptyWrapCache
+  , emptyGenCache
   , OverlayState (..)
   , PointerRoute (..)
   , SpanCacheEntry (..)
@@ -454,17 +455,24 @@ cacheMeasureText ::
   IO (Float, Float)
 cacheMeasureText ref scale base txt = do
   let key = (txt, scale)
-      remember sz (MeasureCache young n old)
-        | n >= measureCacheCap = MeasureCache (HashMap.singleton key sz) 1 young
-        | otherwise = MeasureCache (HashMap.insert key sz young) (n + 1) old
-  cache@(MeasureCache young _ old) <- readIORef ref
+  cache@(GenCache young _ old) <- readIORef ref
   case HashMap.lookup key young of
     Just sz -> pure sz
     Nothing -> do
       -- A hit in the old generation moves up to the young one.
       sz <- maybe (base txt) pure (HashMap.lookup key old)
-      writeIORef ref $! remember sz cache
+      writeIORef ref $! genInsert measureCacheCap False key sz cache
       pure sz
+
+-- | Store a value in the young generation: in place of the entry it holds
+-- for the key (@held@), or as one more, which starts a new generation once
+-- the young one has @cap@ entries.
+{-# INLINE genInsert #-}
+genInsert :: Hashable k => Int -> Bool -> k -> v -> GenCache k v -> GenCache k v
+genInsert cap held k v (GenCache young n old)
+  | held = GenCache (HashMap.insert k v young) n old
+  | n >= cap = GenCache (HashMap.singleton k v) 1 young
+  | otherwise = GenCache (HashMap.insert k v young) (n + 1) old
 
 -- | Measurements per generation of the measure cache.
 measureCacheCap :: Int
@@ -482,13 +490,12 @@ cachedWrapText ctx font lineW txt maxW
   | maxW <= 0 = wrapTextIO lineW txt maxW
   | otherwise = do
       gen <- readIORef (ctxMetricGen ctx)
-      WrapCache cachedGen young0 n0 old0 <- readIORef (ctxWrapCache ctx)
+      WrapCache cachedGen cache0 <- readIORef (ctxWrapCache ctx)
       let key = (txt, font)
           holds r = wrFitW r <= maxW && maxW < wrBreakW r
-          current = cachedGen == gen
-          young = if current then young0 else HashMap.empty
-          n = if current then n0 else 0
-          old = if current then old0 else HashMap.empty
+          cache@(GenCache young _ old)
+            | cachedGen == gen = cache0
+            | otherwise = emptyGenCache
           mine = HashMap.lookup key young
       case mine >>= find holds of
         Just r -> pure r
@@ -496,11 +503,8 @@ cachedWrapText ctx font lineW txt maxW
           -- A hit in the old generation moves up to the young one.
           r <- maybe (wrapTextIO lineW txt maxW) pure (HashMap.lookup key old >>= find holds)
           let entries = r : take (wrapsPerText - 1) (fromMaybe [] mine)
-              cache
-                | isJust mine = WrapCache gen (HashMap.insert key entries young) n old
-                | n >= wrapCacheCap = WrapCache gen (HashMap.singleton key entries) 1 young
-                | otherwise = WrapCache gen (HashMap.insert key entries young) (n + 1) old
-          writeIORef (ctxWrapCache ctx) $! cache
+          writeIORef (ctxWrapCache ctx) $!
+            WrapCache gen (genInsert wrapCacheCap (isJust mine) key entries cache)
           pure r
 
 -- | Texts per generation of the wrap cache.
@@ -537,7 +541,7 @@ clearMeasureCache ctx = do
   let !source = ctxMetricSource ctx
   writeIORef (ctxLastMetricSource ctx) (Just source)
   invalidateTextCaches ctx
-  mapM_ (`writeIORef` emptyMeasureCache) (ctxMeasureCache ctx)
+  mapM_ (`writeIORef` emptyGenCache) (ctxMeasureCache ctx)
 
 -- | Apply 'setTheme' and return the same context for configuration pipelines.
 withTheme :: Context -> Theme -> IO Context
@@ -570,7 +574,7 @@ enableMeasureCache ctx =
   case ctxMeasureCache ctx of
     Just _ -> pure ctx
     Nothing -> do
-      ref <- newIORef emptyMeasureCache
+      ref <- newIORef emptyGenCache
       pure ctx {ctxMeasureCache = Just ref, ctxMeasureText = cacheMeasureText ref 0 (ctxMeasureText ctx)}
 
 -- | Store one host value per runtime type. Replaces only the value of that
@@ -666,7 +670,7 @@ newContext = do
   ctxDerivedCache <- newIORef IM.empty
   ctxLayoutCache <- newIORef Nothing
   ctxMetricGen <- newIORef 0
-  ctxWrapCache <- newIORef emptyWrapCache
+  ctxWrapCache <- newIORef (WrapCache 0 emptyGenCache)
   ctxLastMetricSource <- newIORef Nothing
   ctxPaintFull <- newIORef True
   -- References above use their field names; font-dependent defaults stay
