@@ -3,7 +3,6 @@
 module NanoUI.Internal.Layout.Solve
   ( solveLayout
   , runCustomMeasure
-  , FontResolver
   , Measurers (..)
   , placeFloatingNodes
   , computePopupPosition
@@ -14,7 +13,7 @@ module NanoUI.Internal.Layout.Solve
   , textWrapCap
   ) where
 
-import Control.Monad (foldM, forM, forM_, mfilter, unless, when)
+import Control.Monad (filterM, foldM, forM_, mfilter, unless, when)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IM
@@ -746,11 +745,7 @@ measureScrollContainer env@SolveEnv {seArena = na, seArrays = a} idx = do
   -- A modal's body scrolls like a window's: its bar sits just inside the
   -- panel's edge, out in the panel padding.
   isWin <-
-    if parent < 0
-      then pure False
-      else do
-        pnt <- getNodeType na parent
-        pure (pnt == NodeWindow || pnt == NodeModal)
+    if parent < 0 then pure False else (`elem` [NodeWindow, NodeModal]) <$> getNodeType na parent
   inPanel <- hasPanelAncestor na parent
   let slot = classifyScrollBar isWin (wTag == SizingGrow && hTag == SizingGrow && not inPanel)
   writeTagEnum a idx TagScrollBarSlot slot
@@ -775,39 +770,31 @@ measureScrollContainer env@SolveEnv {seArena = na, seArrays = a} idx = do
 
 foldChildDimsFromParent :: SolveEnv -> NodeIdx -> DirTag -> Float -> IO (Float, Float)
 foldChildDimsFromParent env@SolveEnv {seArena = na} idx dir gap = do
-  FlowAcc count main cross <- foldFlowChildrenM na idx step (FlowAcc 0 0 0)
-  -- A row's baseline-aligned children stand on one line, so together they are
-  -- as tall as the most room any takes above it plus the most any takes below.
-  baseline <-
-    if dir == DirRow
-      then foldFlowChildrenM na idx baselineStep (0, 0)
-      else pure (0, 0)
-  pure
-    ( case dir of
-        DirRow ->
-          ( main + gap * fromIntegral (max 0 (count - 1))
-          , if count <= 0 then 0 else max cross (uncurry (+) baseline)
-          )
-        DirColumn ->
-          ( if count <= 0 then 0 else main
-          , cross + gap * fromIntegral (max 0 (count - 1))
-          )
-    )
+  -- Along the axis the children's sizes add up, and across it the largest counts.
+  FlowAcc count along across <- foldFlowChildrenM na idx step (FlowAcc 0 0 0)
+  let gaps = gap * fromIntegral (max 0 (count - 1))
+  case dir of
+    DirColumn -> pure (if count <= 0 then 0 else across, along + gaps)
+    DirRow -> do
+      -- A row's baseline-aligned children stand on one line, so together they
+      -- are as tall as the most room any takes above it plus the most any takes
+      -- below.
+      FlowAcc _ above below <- foldFlowChildrenM na idx baselineStep (FlowAcc 0 0 0)
+      pure (along + gaps, if count <= 0 then 0 else max across (above + below))
   where
-    step (FlowAcc count main cross) ci = do
+    step (FlowAcc count along across) ci = do
       (_, _, w, h) <- getRect na ci
-      pure $
-        case dir of
-          DirRow -> FlowAcc (count + 1) (main + w) (max cross h)
-          DirColumn -> FlowAcc (count + 1) (max main w) (cross + h)
-    baselineStep acc@(above, below) ci = do
+      pure $ case dir of
+        DirRow -> FlowAcc (count + 1) (along + w) (max across h)
+        DirColumn -> FlowAcc (count + 1) (along + h) (max across w)
+    baselineStep acc@(FlowAcc _ above below) ci = do
       ay <- getAlignY na ci
       if ay /= AlignBaseline
         then pure acc
         else do
           (_, _, _, h) <- getRect na ci
           b <- childBaseline env ci h
-          pure (max above b, max below (h - b))
+          pure (FlowAcc 0 (max above b) (max below (h - b)))
 
 isChromeColumn :: NodeType -> DirTag -> Bool
 isChromeColumn nt dir =
@@ -1112,16 +1099,13 @@ positionScrollChildren env@SolveEnv {seArena = na} depth idx dir gap pad px py p
     -- end still reveals it.
     let actualContentH = maxB - py - padT pad
         actualContentW = maxR - px - padL pad
+        raise get set v = get na idx >>= \old -> set na idx (max old v)
     if isScrollStyle2D si
       then do
-        oldH <- getNodeValue na idx
-        oldW <- getScrollContentW na idx
-        setNodeValue na idx (max oldH actualContentH)
-        setScrollContentW na idx (max oldW actualContentW)
-      else do
-        oldVal <- getNodeValue na idx
-        let actual = case dir of DirColumn -> actualContentH; DirRow -> actualContentW
-        setNodeValue na idx (max oldVal actual)
+        raise getNodeValue setNodeValue actualContentH
+        raise getScrollContentW setScrollContentW actualContentW
+      else raise getNodeValue setNodeValue $
+        case dir of DirColumn -> actualContentH; DirRow -> actualContentW
 
 -- | Where a scroll container's bar sits, as measurement stored it. Text
 -- areas and other nodes read 'ScrollBarList'.
@@ -1553,19 +1537,17 @@ childBaseline env@SolveEnv {seArena = na, seArrays = a, seMs = ms} ci h = do
         else do
           measurer@TextMeasurer {tmMetrics = fm} <- textNodeMeasurer env ci
           rowChild <- parentIsRow na ci
+          let newline = T.any (== '\n') raw
           wrapped <-
-            if T.any (== '\n') raw
-              then pure True
-              else
-                if rowChild
-                  then pure False
-                  else do
-                    AxisSizing wTag _ _ maxW <- getWidthSizing na ci
-                    (_, _, w, _) <- getRect na ci
-                    effMaxW <- if maxW < 1e8 then pure maxW else findAncestorMaxW na ci
-                    let cap = textWrapCap effMaxW wTag w
-                    (tw, _) <- measureFontLine measurer raw
-                    pure (cap < 1e8 && cap + 0.5 < tw)
+            if newline || rowChild
+              then pure newline
+              else do
+                AxisSizing wTag _ _ maxW <- getWidthSizing na ci
+                (_, _, w, _) <- getRect na ci
+                effMaxW <- if maxW < 1e8 then pure maxW else findAncestorMaxW na ci
+                let cap = textWrapCap effMaxW wTag w
+                (tw, _) <- measureFontLine measurer raw
+                pure (cap < 1e8 && cap + 0.5 < tw)
           pure (textBaseline fm (if wrapped then fmLineHeight fm else h))
     _
       | hasCenteredLabel nt && not (nt == NodeButton && hasFlag buttonFlagClose si) -> do
@@ -1590,13 +1572,9 @@ childBaseline env@SolveEnv {seArena = na, seArrays = a, seMs = ms} ci h = do
               (pad, _, dir) <- containerFlow a ci
               let innerH = max 0 (h - padT pad - padB pad)
                   heightOf k = (\(_, _, _, kh) -> kh) <$> getRect na k
-              grouped <-
-                if dir /= DirRow
-                  then pure []
-                  else
-                    fmap concat . forM kids $ \k -> do
-                      ay <- getAlignY na k
-                      if ay /= AlignBaseline then pure [] else (: []) <$> (heightOf k >>= childBaseline env k)
+              aligned <-
+                if dir == DirRow then filterM (fmap (== AlignBaseline) . getAlignY na) kids else pure []
+              grouped <- mapM (\k -> heightOf k >>= childBaseline env k) aligned
               (padT pad +) <$> case grouped of
                 _ : _ -> pure (maximum grouped)
                 [] -> do
