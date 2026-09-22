@@ -11,7 +11,7 @@ import Control.Monad (forM)
 import Control.Monad.Trans.Maybe (MaybeT (..))
 import Data.Foldable (asum, find)
 import Data.IORef (readIORef)
-import Data.Maybe (isJust)
+import Data.Maybe (fromMaybe, isJust)
 import NanoUI.Internal.Context
   ( Context (..)
   , InteractionState (..)
@@ -65,29 +65,23 @@ import NanoUI.Internal.Widgets.Custom (mkCustomDrawContext)
 -- | Cursor requested by current gestures and hit tests against the solved arena.
 -- The backend maps this result to a native cursor shape.
 uiCursorKind :: Context -> Input -> IO UiCursorKind
-uiCursorKind ctx inp = do
-  -- The first query with an opinion wins; later ones do not run.
-  mKind <-
-    runMaybeT . asum . map MaybeT $
-      [ textEditMenuCursorKind ctx inp
-      , selectDropdownCursorKind ctx inp
-      , windowResizeCursorKind ctx inp
-      , cursorZoneKind ctx inp
-      , scrollThumbCursorKind ctx inp
-      , textFieldHoverCursorKind ctx inp
-      ]
-  case mKind of
-    Just k -> pure k
-    Nothing -> do
-      let
-        mouse = inputMousePos inp
-      active <- readIORef (ctxActiveId ctx)
-      activeKind <- cursorKindAt ctx active mouse inp
-      if activeKind /= UiCursorDefault
-        then pure activeKind
-        else do
-          hot <- getHotId ctx
-          cursorKindAt ctx hot mouse inp
+uiCursorKind ctx inp =
+  -- The first query with an opinion wins; later ones do not run. The active
+  -- widget, then the hot one, has an opinion unless it asks for the default.
+  fmap (fromMaybe UiCursorDefault) . runMaybeT . asum . map MaybeT $
+    [ textEditMenuCursorKind ctx inp
+    , selectDropdownCursorKind ctx inp
+    , windowResizeCursorKind ctx inp
+    , cursorZoneKind ctx inp
+    , scrollThumbCursorKind ctx inp
+    , textFieldHoverCursorKind ctx inp
+    , widgetKind =<< readIORef (ctxActiveId ctx)
+    , widgetKind =<< getHotId ctx
+    ]
+  where
+    widgetKind wid = do
+      kind <- cursorKindAt ctx wid (inputMousePos inp) inp
+      pure (if kind == UiCursorDefault then Nothing else Just kind)
 
 selectDropdownCursorKind :: Context -> Input -> IO (Maybe UiCursorKind)
 selectDropdownCursorKind ctx inp = do
