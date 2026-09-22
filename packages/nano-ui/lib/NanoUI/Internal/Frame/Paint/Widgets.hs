@@ -12,7 +12,7 @@ module NanoUI.Internal.Frame.Paint.Widgets
   , paintTextAreaNode
   ) where
 
-import Control.Monad (unless, when)
+import Control.Monad (unless, void, when)
 import Data.IORef (readIORef)
 import Data.Maybe (fromMaybe)
 import Data.Primitive.PrimArray (PrimArray)
@@ -75,14 +75,12 @@ import NanoUI.Internal.Layout.Arena
   , getNodeFontColor
   , getNodeFontSize
   , getNodeRect
-  , getNodeType
   , getNodeValue
   , getOptions
-  , getParent
   , getStyleIdx
   , getText
   , getWidgetId
-  , walkAncestors
+  , walkFloatingAncestors
   )
 import NanoUI.Internal.Style (AlignX (..), Style, Theme, styleBg, styleBorder, styleFg, themeAccent, themeInput, themeOnAccent)
 import NanoUI.Internal.Types (Color (..), Rect (..), clamp, clamp01, colorA, lerpColor, onGrid, rectInflate, rectNonEmpty)
@@ -154,17 +152,6 @@ buildPaintEnv ctx occluders = do
     , pePieces = pieces
     }
 
--- | Rect of the nearest popup-panel ancestor of @idx@, if any. Menu rows use
--- it to paint hover fills edge-to-edge across the panel.
-popupPanelRect :: Context -> NodeIdx -> IO (Maybe Rect)
-popupPanelRect ctx idx = do
-  parent <- getParent na idx
-  walkAncestors na parent $ \p -> do
-    nt <- getNodeType na p
-    if nt == NodePopup then Just <$> getNodeRect na p else pure Nothing
-  where
-    na = ctxNodeArena ctx
-
 -- | Single-line text input: selectable, bare, search, combo or captioned field
 -- depending on the node's visual style.
 {-# NOINLINE paintTextInputNode #-}
@@ -177,13 +164,32 @@ paintTextInputNode env idx rect@(Rect x y w h) = do
   focus <- textInputFocused ctx idx
   si <- getStyleIdx (peNodeArena env) idx
   let paint
-        | hasFlag textInputFlagNumeric si = paintNumericField ctx da fm style idx focus rect
+        -- The box, its value clipped left of the stepper, and the stepper's up
+        -- and down arrows beside a rule.
+        | hasFlag textInputFlagNumeric si = do
+            let (up@(Rect ux _ _ _), down) = numericStepperRects x y w h
+                iconCol = lerpColor (styleFg style) (styleBg style) 0.4
+            void $ paintCaptionlessField env style idx focus rect (numericTextClip fm x y w h) False $ do
+              pushLine da ux (y + 4) ux (y + h - 4) 1 (lerpColor (styleBorder style) (styleBg style) 0.4)
+              drawStepArrow da True up iconCol
+              drawStepArrow da False down iconCol
         | hasFlag textInputFlagSelectable si = paintSelectableText env style idx rect
         | hasFlag textInputFlagSearch si = do
             opts <- getOptions (peNodeArena env) idx
+            let iconCol = lerpColor (styleFg style) (styleBg style) 0.45
+                (magRect, Rect cx cy cw ch) = searchInputIconRects fm x y w h
+                field clip = paintCaptionlessField env style idx focus rect clip True
             if null opts
-              then paintSearchInput ctx da fm style idx focus rect
-              else paintComboField ctx da fm style idx focus rect
+              -- A search field: a magnifier on the left and a clear (×) on the
+              -- right while there is text.
+              then do
+                value <- field (searchInputTextClip fm x y w h) (drawSearchMagnifier da magRect iconCol)
+                unless (T.null value) $
+                  drawCloseIcon da False cx cy cw ch iconCol
+              -- A combo box: a select chevron in the right reserve that flips up
+              -- while the dropdown is open (i.e. focused).
+              else void $ field (comboTextClip fm x y w h) $
+                drawSelectChevron da focus (x + w - selectChevronReserve) y selectChevronReserve h iconCol
         | otherwise = do
             let field = textInputFieldRect fm x y w h
             paintStyledRect da style field
@@ -225,7 +231,11 @@ paintWidget env idx nt rect@(Rect _ ry _ rh) = do
   -- span the panel width instead of the (padded) node rect.
   menuRowRect <-
     if nt == NodeButton && hasFlag buttonFlagMenu si
-      then maybe rect (\(Rect px _ pw _) -> Rect px ry pw rh) <$> popupPanelRect ctx idx
+      then do
+        let na = peNodeArena env
+        panel <- walkFloatingAncestors na idx $ \p pnt ->
+          if pnt == NodePopup then Just <$> getNodeRect na p else pure Nothing
+        pure (maybe rect (\(Rect px _ pw _) -> Rect px ry pw rh) panel)
       else pure rect
   paintWidgetBackground env idx nt style si menuRowRect value rect
   paintWidgetForeground env idx nt style si rect
@@ -374,10 +384,18 @@ paintClippedFieldText ctx da fm style idx mEdit clip penX penY txt fg =
       pushText da fm penX penY txt fg
     mapM_ (\edit -> drawTextInputCaret da edit (styleFg style)) mEdit
 
--- | A caption-less field's value, or @placeholder@ (dimmed) while empty and
--- unfocused, scrolled to keep the caret in @clip@.
-paintFieldValue :: Context -> DrawArena -> FontMetrics -> Style -> NodeIdx -> Bool -> Rect -> Rect -> T.Text -> T.Text -> IO ()
-paintFieldValue ctx da fm style idx focus (Rect x y w h) clip@(Rect clipX _ _ _) placeholder value = do
+-- | A caption-less field filling @box@: the box, @chrome@, then its value,
+-- or its label as a placeholder (dimmed) while empty and unfocused when it
+-- has one, scrolled to keep the caret in @clip@. Returns the value.
+paintCaptionlessField :: PaintEnv -> Style -> NodeIdx -> Bool -> Rect -> Rect -> Bool -> IO () -> IO T.Text
+paintCaptionlessField env style idx focus box@(Rect x y w h) clip@(Rect clipX _ _ _) hasPlaceholder chrome = do
+  let ctx = peContext env
+      da = peDrawArena env
+      fm = peFontMetrics env
+  paintStyledRect da style box
+  value <- textInputValue ctx idx
+  placeholder <- if hasPlaceholder then getText (ctxNodeArena ctx) idx else pure ""
+  chrome
   let display = textInputFieldText placeholder value focus
       baseFg = styleFg style
   scrollX <- syncTextInputScroll ctx idx x y w h
@@ -392,20 +410,7 @@ paintFieldValue ctx da fm style idx focus (Rect x y w h) clip@(Rect clipX _ _ _)
           )
   mEdit <- readFieldEdit ctx idx x y w h scrollX
   paintClippedFieldText ctx da fm style idx mEdit clip (clipX - scrollX) ty display fg
-
--- | Numeric field: the box, its value clipped left of the stepper, and the
--- stepper's up and down arrows beside a rule.
-paintNumericField :: Context -> DrawArena -> FontMetrics -> Style -> NodeIdx -> Bool -> Rect -> IO ()
-paintNumericField ctx da fm style idx focus box@(Rect x y w h) = do
-  paintStyledRect da style box
-  value <- textInputValue ctx idx
-  let (up@(Rect ux _ _ _), down) = numericStepperRects x y w h
-      iconCol = lerpColor (styleFg style) (styleBg style) 0.4
-      ruleCol = lerpColor (styleBorder style) (styleBg style) 0.4
-  pushLine da ux (y + 4) ux (y + h - 4) 1 ruleCol
-  drawStepArrow da True up iconCol
-  drawStepArrow da False down iconCol
-  paintFieldValue ctx da fm style idx focus box (numericTextClip fm x y w h) "" value
+  pure value
 
 -- | A stepper arrow in its half of the stepper, nudged toward the other half so
 -- the pair reads as one control.
@@ -422,21 +427,6 @@ drawStepArrow da up (Rect sx sy sw sh) col = do
 pushArrowhead :: DrawArena -> Float -> Float -> Float -> Float -> Color -> IO ()
 pushArrowhead da cx cy hw tip =
   pushFilledTriangle da (cx - hw) (cy - tip * 0.35) (cx + hw) (cy - tip * 0.35) cx (cy + tip)
-
--- | Caption-less search field: box fills the node rect, magnifier on the left,
--- clear (×) on the right when there is text, and the editable value / caret /
--- selection confined to the space between them.
-paintSearchInput :: Context -> DrawArena -> FontMetrics -> Style -> NodeIdx -> Bool -> Rect -> IO ()
-paintSearchInput ctx da fm style idx focus box@(Rect x y w h) = do
-  let (magRect, Rect cx cy cw ch) = searchInputIconRects fm x y w h
-      iconCol = lerpColor (styleFg style) (styleBg style) 0.45
-  paintStyledRect da style box
-  value <- textInputValue ctx idx
-  lbl <- getText (ctxNodeArena ctx) idx
-  drawSearchMagnifier da magRect iconCol
-  paintFieldValue ctx da fm style idx focus box (searchInputTextClip fm x y w h) lbl value
-  unless (T.null value) $
-    drawCloseIcon da False cx cy cw ch iconCol
 
 -- | Selectable text: chrome-less, border-less, naturally sized text field
 -- that supports mouse drag selection and text copying without an insertion caret.
@@ -468,24 +458,6 @@ drawSearchMagnifier da (Rect x y w h) col = do
       endOff = r0 * 0.7071 + s * 0.22
   pushRoundedStroke da (Rect (cx - r0) (cy - r0) (2 * r0) (2 * r0)) r0 t col
   pushLine da (cx + startOff) (cy + startOff) (cx + endOff) (cy + endOff) (t * 0.8) col
-
--- | Combo box field: the search field's full-rect editable box, but styled
--- like a dropdown: no magnifier or clear chrome, and a select chevron in the
--- right reserve that flips up while the dropdown is open (i.e. focused).
-paintComboField :: Context -> DrawArena -> FontMetrics -> Style -> NodeIdx -> Bool -> Rect -> IO ()
-paintComboField ctx da fm style idx focus box@(Rect x y w h) = do
-  paintStyledRect da style box
-  value <- textInputValue ctx idx
-  lbl <- getText (ctxNodeArena ctx) idx
-  drawSelectChevron
-    da
-    focus
-    (x + w - selectChevronReserve)
-    y
-    selectChevronReserve
-    h
-    (lerpColor (styleFg style) (styleBg style) 0.45)
-  paintFieldValue ctx da fm style idx focus box (comboTextClip fm x y w h) lbl value
 
 -- | The box of a checkbox (@isCheckbox@) or radio button at @x@, centred in
 -- a slot at most 4 pixels taller than it within @y h@. A checked checkbox is
