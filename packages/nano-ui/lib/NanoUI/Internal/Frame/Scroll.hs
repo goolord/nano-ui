@@ -304,10 +304,8 @@ scrollHitSelf ctx idx nt mouse clip
       (fm, field, contentW, contentH) <- textAreaContentGeom ctx idx
       let
         bars = textAreaBars fm field contentW contentH
-      pure $ case rectIntersect clip field of
-        Just fclip
-          | rectHit fclip mouse && (tabVertical bars || tabHorizontal bars) -> Just idx
-        _ -> Nothing
+        hit = rectHit clip mouse && rectHit field mouse && (tabVertical bars || tabHorizontal bars)
+      pure (if hit then Just idx else Nothing)
   | isScrollNode nt && rectHit clip mouse = pure (Just idx)
   | otherwise = pure Nothing
 

@@ -23,7 +23,6 @@ module NanoUI.Internal.Frame.Scroll.Geometry
   , scrollGutters2D
   , scrollChromeSuppressed
   , scrollWheelSuppressed
-  , scrollAxisOverflows
   , scrollChromeActive
   , isScrollStyle2D
   , tagClippedSpans
@@ -154,14 +153,6 @@ scrollChromeSuppressed cfg dir =
 scrollWheelSuppressed :: ScrollConfig -> Bool -> DirTag -> Bool
 scrollWheelSuppressed cfg native2D dir = not native2D && scrollPolicyFor cfg dir == ScrollNone
 
-scrollAxisOverflows :: ScrollPolicy -> Float -> Float -> Bool
-scrollAxisOverflows policy contentSize innerMain =
-  case policy of
-    ScrollNone -> False
-    ScrollHidden -> False
-    ScrollAlways -> True
-    ScrollAuto -> contentSize > innerMain + 0.5
-
 -- | Scroll range along one axis. Content that fits (modulo the trailing
 -- padding, which must not surface a bar by itself) does not scroll; genuine
 -- overflow extends the range past the last child by the trailing padding so
@@ -173,9 +164,14 @@ scrollAxisRange contentSize innerMain trailingPad
   | contentSize > innerMain + 0.5 = max 0 (contentSize + trailingPad - innerMain)
   | otherwise = 0
 
+-- | Whether the bar along @dir@ shows for content of @contentSize@ in
+-- @innerMain@.
 scrollChromeActive :: ScrollConfig -> DirTag -> Float -> Float -> Bool
 scrollChromeActive cfg dir contentSize innerMain =
-  scrollAxisOverflows (scrollPolicyFor cfg dir) contentSize innerMain
+  case scrollPolicyFor cfg dir of
+    ScrollAlways -> True
+    ScrollAuto -> contentSize > innerMain + 0.5
+    _ -> False
 
 -- | Logical window-space track/thumb bounds and the maximum scroll offset.
 data ScrollBarLayout = ScrollBarLayout
