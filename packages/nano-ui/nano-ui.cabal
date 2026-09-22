@@ -131,15 +131,12 @@ library
         NanoUI.Internal.Draw.Types
         NanoUI.Internal.Frame.Input
         NanoUI.Internal.Frame.Chrome
-        NanoUI.Internal.Frame.Focus
         NanoUI.Internal.Frame.Paint
         NanoUI.Internal.Frame.Paint.Widgets
-        NanoUI.Internal.Frame.Redraw
         NanoUI.Internal.Frame.Scroll
         NanoUI.Internal.Frame.Scroll.Geometry
         NanoUI.Internal.Frame.Select
         NanoUI.Internal.Frame.Node
-        NanoUI.Internal.Frame.Overlay
         NanoUI.Internal.Frame.Spans
         NanoUI.Internal.Frame.SpanArena
         NanoUI.Internal.Frame.TextEdit

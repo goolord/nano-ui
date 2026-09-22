@@ -15,7 +15,7 @@ module NanoUI.Runner
 
 import Control.Concurrent (threadDelay)
 import Control.Exception (finally, mask)
-import Control.Monad (unless, when)
+import Control.Monad (forM_, unless, when)
 import Data.Maybe (isJust)
 import Numeric (showFFloat)
 import System.Environment (lookupEnv)
@@ -45,7 +45,7 @@ import NanoUI.Internal.Debug
   , noteDebugLoop
   , noteDebugSkip
   )
-import NanoUI.Internal.Frame.Redraw (needsRedraw)
+import NanoUI.Internal.Frame.Input (needsRedraw)
 import NanoUI.Internal.Input
   ( Input (..)
   , clearEphemeral
@@ -84,32 +84,19 @@ alignFrameStart periodSec lastT = do
       now <- getMonotonicTime
       when (now < target) (fullSpin target)
 
--- | State for multi-click detection (double/triple click).
-data ClickTrack = ClickTrack
-  { ctTime :: !Double
-  , ctPos :: !V2
-  , ctCount :: !Int
-  }
-
 -- | Stamp multi-click counts into an 'Input' record: presses within 5 pixels
--- and 0.4 seconds of the previous one count up to a triple click.
-stampClicks :: IORef ClickTrack -> Input -> IO Input
+-- and 0.4 seconds of the previous one count up to a triple click. The ref
+-- holds the time, position and count of the previous press.
+stampClicks :: IORef (Double, V2, Int) -> Input -> IO Input
 stampClicks ref inp
   | not (inputMousePressed inp) = pure inp
   | otherwise = do
       now <- getMonotonicTime
-      prev <- readIORef ref
-      let t = ctTime prev
-          n = ctCount prev
-          V2 x y = inputMousePos inp
-          V2 px py = ctPos prev
-          dx = x - px
-          dy = y - py
-          distSq = dx * dx + dy * dy
-          close = distSq <= 25
-          quick = (now - t) <= 0.4
-          n' = if close && quick then min 3 (n + 1) else 1
-      writeIORef ref ClickTrack {ctTime = now, ctPos = inputMousePos inp, ctCount = n'}
+      (t, V2 px py, n) <- readIORef ref
+      let pos@(V2 x y) = inputMousePos inp
+          close = (x - px) * (x - px) + (y - py) * (y - py) <= 25
+          !n' = if close && now - t <= 0.4 then min 3 (n + 1) else 1
+      writeIORef ref (now, pos, n')
       pure (inp {inputMouseClicks = n'})
 
 -- | Concurrency lock for drawing vs async callbacks (e.g. resize watchers).
@@ -202,10 +189,7 @@ data SessionDriver ev = SessionDriver
 -- reasons are @D@ a dirty context, @A@ an animation, @R@ a window redraw
 -- request, and @T@ a timed wake or a debug readout refresh; a pass with none
 -- of them was caused by input.
-data LoopTrace = LoopTrace
-  { ltOn :: !Bool
-  , ltState :: !(IORef (Double, Int, Int, Int, [String]))
-  }
+type LoopTrace = Maybe (IORef (Double, Int, Int, Int, [String]))
 
 newLoopTrace :: Double -> IO LoopTrace
 newLoopTrace now = do
@@ -213,12 +197,12 @@ newLoopTrace now = do
   -- stderr is unbuffered by default, which writes a line a character at a
   -- time: enough system calls to show up in the measurement being taken.
   when on (hSetBuffering stderr LineBuffering)
-  LoopTrace on <$> newIORef (now, 0, 0, 0, [])
+  if on then Just <$> newIORef (now, 0, 0, 0, []) else pure Nothing
 
 traceLoopPass :: LoopTrace -> Int -> Bool -> String -> IO ()
-traceLoopPass lt nEvents drew why = when (ltOn lt) $ do
+traceLoopPass lt nEvents drew why = forM_ lt $ \ref -> do
   now <- getMonotonicTime
-  (t0, passes, draws, events, whys) <- readIORef (ltState lt)
+  (t0, passes, draws, events, whys) <- readIORef ref
   let passes' = passes + 1
       draws' = if drew then draws + 1 else draws
       events' = events + nEvents
@@ -229,8 +213,8 @@ traceLoopPass lt nEvents drew why = when (ltOn lt) $ do
         "LOOP " ++ showFFloat (Just 1) (now - t0) "s passes=" ++ show passes' ++ " draws=" ++ show draws'
           ++ " events=" ++ show events' ++ " why=" ++ unwords (reverse whys')
       hFlush stderr
-      writeIORef (ltState lt) (now, 0, 0, 0, [])
-    else writeIORef (ltState lt) (t0, passes', draws', events', whys')
+      writeIORef ref (now, 0, 0, 0, [])
+    else writeIORef ref (t0, passes', draws', events', whys')
 
 -- | Added to the wait for a timed wake, so the wait ends at or after the time
 -- asked for. An OS wait can return a millisecond or two early, and a backend
@@ -253,7 +237,7 @@ runSessionLoop ::
   Input ->
   IO ()
 runSessionLoop drv ctx0 inp0 = do
-  clickTracker <- newIORef ClickTrack {ctTime = 0, ctPos = V2 (-999) (-999), ctCount = 0}
+  clickTracker <- newIORef (0, V2 (-999) (-999), 0)
   startT <- getMonotonicTime
   trace <- newLoopTrace startT
 

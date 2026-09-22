@@ -5,26 +5,13 @@ module NanoUI.Internal.Frame
   , runFrameEff
   , runFrameReduce
   , runFrameReduceEff
-  , needsRedraw
-  , pointerDragActive
-  , textFieldActive
-  , floatingPanelActive
-  , debugPanelOpen
-  , collectTextSpans
-  , collectOverlayTextSpans
-  , collectRasterSpans
-  , widgetNodeCount
-  , pointerCursorWanted
-  , cursorKindIs
-  , uiCursorKind
-  , UiCursorKind (..)
   )
 where
 
 import Control.Monad (unless, when)
 import Data.IORef (modifyIORef', readIORef, writeIORef)
-import Data.Functor ((<&>))
 import Data.IntMap.Strict qualified as IM
+import Data.Maybe (isJust)
 import Data.Typeable (Typeable)
 import Effectful (Eff, IOE, runEff, type (:>))
 import NanoUI.Internal.Context
@@ -55,6 +42,7 @@ import NanoUI.Internal.Context
   , getsOverlay
   , modifyOverlay
   , OverlayState (..)
+  , nodeTheme
   )
 import NanoUI.Internal.Context (beginFrameModal)
 import NanoUI.Internal.Damage (FrameSnapshot (..), captureFrameSnapshot, updatePrevRects, writeDamage)
@@ -67,15 +55,11 @@ import NanoUI.Internal.Draw
   , resetDrawArena
   , setClip
   , setClipPieces
-  )
-import NanoUI.Internal.Frame.Cursor
-  ( UiCursorKind (..)
-  , cursorKindIs
-  , pointerCursorWanted
-  , uiCursorKind
+  , withClip
   )
 import NanoUI.Internal.Frame.Input
   ( armPointerPress
+  , constrainFocusToModal
   , disarmPointerPress
   , finalizePointerPress
   , finalizePointerRelease
@@ -84,16 +68,10 @@ import NanoUI.Internal.Frame.Input
   , finalizeTextInputFocus
   , pressTargets
   , refreshHover
+  , syncWidgetLabels
   )
-import NanoUI.Internal.Frame.Focus (constrainFocusToModal, syncWidgetLabels)
-import NanoUI.Internal.Frame.Paint (lowerShapes)
-import NanoUI.Internal.Frame.Redraw
-  ( debugPanelOpen
-  , floatingPanelActive
-  , needsRedraw
-  , pointerDragActive
-  , textFieldActive
-  )
+import NanoUI.Internal.Frame.Chrome (overlayMenuStyle, overlayWindowStyle, paintMenuPanel)
+import NanoUI.Internal.Frame.Paint (lowerShapes, walkChildren)
 import NanoUI.Internal.Frame.Scroll
   ( applyScrollOffsets
   , updateScrollDrag
@@ -107,13 +85,6 @@ import NanoUI.Internal.Frame.Select
   , overlayMenuRects
   , routePointer
   )
-import NanoUI.Internal.Frame.Spans
-  ( collectOverlayTextSpans
-  , collectRasterSpans
-  , collectTextSpans
-  , widgetNodeCount
-  )
-import NanoUI.Internal.Frame.Overlay (drawModalOverlays, drawPopupOverlays, drawWindowOverlays)
 import NanoUI.Internal.Frame.TextArea (finalizeTextFieldMouse)
 import NanoUI.Internal.Frame.TextEdit
   ( closeTextEditMenuOnEscape
@@ -133,26 +104,29 @@ import NanoUI.Internal.Frame.Window
 import NanoUI.Internal.Id (WidgetId (..), initialIdContext)
 import NanoUI.Internal.Input (Input (..), inputMousePressed, stripInteractionInput, withoutPointer)
 import NanoUI.Internal.Layout.Arena
-  ( CustomMeasureRecord
-  , LayoutCache (..)
-  , NodeIdx
+  ( LayoutCache (..)
   , NodeType (..)
   , arenaCount
   , captureLayoutCache
   , floatingNodeCount
+  , forFloatingNodes_
+  , getNodeRect
   , getNodeType
+  , getPadding
   , getWidgetId
   , layoutSigMatches
   , computeSubtreeHashes
   , newLayoutCache
   , resetNodeArena
   , restoreLayoutCache
+  , topModalNode
   )
 import NanoUI.Internal.Layout.Solve (placeFloatingNodes, runCustomMeasure, solveLayout)
-import NanoUI.Internal.Monad (NanoUI, Ui, runUi, unlessM, whenM)
+import NanoUI.Internal.Monad (NanoUI, Ui, runUi, whenM)
 import NanoUI.Internal.Store (mirrorStoresChanged)
-import NanoUI.Internal.Style (Theme (..))
-import NanoUI.Internal.Types (Damage (..), Rect, Size (..), rectInflate, rectNonEmpty)
+import NanoUI.Internal.Style (Padding (..), Theme (..), themeOverlayDim, themeSeparator)
+import NanoUI.Internal.Types (Damage (..), Rect (..), Size (..), rectInflate, rectNonEmpty)
+import NanoUI.Internal.Widgets.Overlay (windowChromeSepH, windowTitleBarH)
 
 -- | Build, lay out, resolve input, and paint one headless frame. Returns the
 -- view result, emitted messages, borrowed draw buffers, and whether state
@@ -233,10 +207,8 @@ runFrameEff unlift ctx frameInp ui = do
   -- the offset this frame renders at is the one virtualization must see.
   stepScrollGlides ctx (inputDeltaTime frameInp)
   updateScrollDrag ctx layerInp
-  beginThemeScopes ctx True
-  resetNodeArena (ctxNodeArena ctx)
   resetDrawArena (ctxDrawArena ctx)
-  resetUiBuildScopes ctx
+  resetUiBuild ctx True
   beginFrameModal ctx
   writeIORef (ctxReleaseClickedId ctx) (WidgetId 0)
   armPointerPress ctx frameInp
@@ -247,7 +219,7 @@ runFrameEff unlift ctx frameInp ui = do
   result <-
     if mirrorStoresChanged (fsStore snap) storeMid
       then do
-        resetUiBuild ctx
+        resetUiBuild ctx False
         unlift (runUi ctx (stripInteractionInput frameInp) ui)
       else pure result0
   -- The store this frame's arena was built from. A view run again after a
@@ -265,15 +237,13 @@ runFrameEff unlift ctx frameInp ui = do
   syncWidgetLabels ctx
   let
     size@(Size w h) = inputWindowSize frameInp
-  unlessM (tryReuseLayout ctx size) $
-    solveLayoutAndCapture ctx w h
+  layoutArena ctx size True
   movedResize <- updateWindowResize ctx layerInp w h
   movedWindow <- updateWindowDrag ctx layerInp
   -- A window moved or resized changes only where the floating panels go:
   -- the solve before placement stands, so place them again over it.
   when (movedResize || movedWindow) $
-    unlessM (replaceFloating ctx size) $
-      solveLayoutAndCapture ctx w h
+    layoutArena ctx size False
   persistWindowPositions ctx
   applyScrollOffsets ctx
   -- A press on a menu or dropdown leaves nothing active, whatever a release
@@ -301,8 +271,7 @@ runFrameEff unlift ctx frameInp ui = do
   -- stands unless the arena's inputs or a custom measure moved.
   when (mirrorStoresChanged storeBuilt storeAfter) $ do
     syncWidgetLabels ctx
-    unlessM (tryReuseLayout ctx size) $
-      solveLayoutAndCapture ctx w h
+    layoutArena ctx size True
     applyScrollOffsets ctx
   updatePrevRects ctx
   refreshHover ctx frameInp
@@ -330,9 +299,7 @@ runFrameEff unlift ctx frameInp ui = do
     paintDamageClip ctx damage =<< takeDamagePieces ctx
   lowerShapes ctx
   beginLayer (ctxDrawArena ctx) LayerOverlay
-  drawWindowOverlays ctx
-  drawModalOverlays ctx size
-  drawPopupOverlays ctx
+  drawFloatingPanels ctx size
   drawSelectOverlays ctx frameInp
   drawTextEditMenuOverlays ctx frameInp
   drawData <- finishDraw (ctxDrawArena ctx)
@@ -340,13 +307,45 @@ runFrameEff unlift ctx frameInp ui = do
   dirtyAfterUi <- isDirty ctx
   pure (result, msgs, drawData, dirtyAfterUi)
 
--- Second UI pass after mirror store write. Keeps ctxStore, animations, and
--- prev rects; only rebuilds node arena and id scopes.
-resetUiBuild :: Context -> IO ()
-resetUiBuild ctx = do
-  beginThemeScopes ctx False
+-- | Reset what a view run builds: the node arena, and the container, id,
+-- focus, hover, cursor-zone and drawing scopes. A second run after a mirror
+-- store write (@newFrame@ 'False') keeps the store, animations and prev rects,
+-- and the theme scopes it compares against.
+resetUiBuild :: Context -> Bool -> IO ()
+resetUiBuild ctx newFrame = do
+  beginThemeScopes ctx newFrame
   resetNodeArena (ctxNodeArena ctx)
-  resetUiBuildScopes ctx
+  writeIORef (ctxContainerStack ctx) []
+  writeIORef (ctxIdContext ctx) initialIdContext
+  writeIORef (ctxFocusablesCount ctx) 0
+  writeIORef (ctxHotId ctx) (WidgetId 0)
+  writeIORef (ctxCursorZones ctx) []
+  resetDrawingScopeCache ctx
+
+-- | Paint the floating panels over the page: windows with their title-bar
+-- separator, the modal backdrop and the modals, then popups. Each is a
+-- menu-style panel in its node's theme with its subtree clipped inside.
+drawFloatingPanels :: Context -> Size -> IO ()
+drawFloatingPanels ctx (Size ww wh) = do
+  let na = ctxNodeArena ctx
+      da = ctxDrawArena ctx
+      panels nt style after = forFloatingNodes_ na nt $ \idx -> do
+        rect <- getNodeRect na idx
+        theme <- nodeTheme ctx idx
+        paintMenuPanel da theme (style theme) rect
+        withClip da rect (walkChildren ctx idx)
+        after theme idx rect
+      plain _ _ _ = pure ()
+  panels NodeWindow overlayWindowStyle $ \theme idx (Rect x y w _) -> do
+    pad <- getPadding na idx
+    let sepY = y + padT pad + windowTitleBarH - windowChromeSepH
+        sepW = max 0 (w - padL pad - padR pad)
+    pushRect da (Rect (x + padL pad) sepY sepW windowChromeSepH) (themeSeparator theme)
+  whenM (isJust <$> topModalNode na) $ do
+    theme <- readIORef (ctxTheme ctx)
+    pushRect da (Rect 0 0 ww wh) (themeOverlayDim theme)
+    panels NodeModal overlayMenuStyle plain
+  panels NodePopup overlayMenuStyle plain
 
 -- | Start a clip frame from the window backdrop, as a full frame starts from a
 -- window-coloured clear. Widgets with a transparent fill, such as an idle
@@ -366,54 +365,45 @@ paintDamageClip ctx (DamageClip r) pieces = do
     theme <- readIORef (ctxTheme ctx)
     mapM_ (flip (pushRect da) (themeWindow theme)) backdrops
 
-resetUiBuildScopes :: Context -> IO ()
-resetUiBuildScopes ctx = do
-  writeIORef (ctxContainerStack ctx) []
-  writeIORef (ctxIdContext ctx) initialIdContext
-  writeIORef (ctxFocusablesCount ctx) 0
-  writeIORef (ctxHotId ctx) (WidgetId 0)
-  writeIORef (ctxCursorZones ctx) []
-  resetDrawingScopeCache ctx
-
--- | Solve and place everything, floating panels included, then snapshot the
--- result for the next frame to reuse. The solve measures only the nodes
--- whose restore keys changed since the cache's capture; the keys are folded
--- here, so frames that reuse the whole layout never compute them, and a
--- re-solve after the arena changed sees current ones. A cache taken under
--- other font metrics measured text differently, so none of it is restored.
-solveLayoutAndCapture :: Context -> Float -> Float -> IO ()
-solveLayoutAndCapture ctx w h = do
-  computeSubtreeHashes (ctxNodeArena ctx)
-  gen <- readIORef (ctxMetricGen ctx)
-  mCache <-
-    readIORef (ctxLayoutCache ctx) <&> \case
-      Just (c, _, cachedGen) | cachedGen == gen -> Just c
-      _ -> Nothing
-  measures <- solveLayout (ctxNodeArena ctx) (contextMeasurers ctx) w h mCache
-  captureLayout ctx (Size w h) measures
-  placeFloating ctx w h
-
--- | Place modals, windows and popups over a solved layout. Their places
--- depend on state outside the arena (window positions, popup anchors), so
--- they are placed every frame, including one whose solve was reused.
-placeFloating :: Context -> Float -> Float -> IO ()
-placeFloating ctx w h = do
+-- | Lay out the arena and place the floating panels over it. The cached solve
+-- is restored when it was taken at this size and font generation and @check@
+-- accepts it ('layoutReuseValid'); otherwise the arena is solved and the
+-- result, before placement, captured for the next frame. The solve measures
+-- only the nodes whose restore keys changed since the cache's capture; the
+-- keys are folded here, so frames that reuse the whole layout never compute
+-- them. A cache taken under other font metrics measured text differently, so
+-- none of it is restored. Floating panels depend on state outside the arena
+-- (window positions, popup anchors), so they are placed every time.
+layoutArena :: Context -> Size -> Bool -> IO ()
+layoutArena ctx size@(Size w h) check = do
   let na = ctxNodeArena ctx
       ms = contextMeasurers ctx
+  gen <- readIORef (ctxMetricGen ctx)
+  cached <- readIORef (ctxLayoutCache ctx)
+  reused <- case cached of
+    Just (c, cachedSize, cachedGen)
+      | cachedSize == size && cachedGen == gen -> do
+          ok <- if check then layoutReuseValid ctx c else pure True
+          when ok (restoreLayoutCache na c)
+          pure ok
+    _ -> pure False
+  unless reused $ do
+    computeSubtreeHashes na
+    measures <- solveLayout na ms w h $ case cached of
+      Just (c, _, cachedGen) | cachedGen == gen -> Just c
+      _ -> Nothing
+    n <- arenaCount na
+    if n <= 0
+      then writeIORef (ctxLayoutCache ctx) Nothing
+      else do
+        c <- captureLayoutCache na =<< maybe (newLayoutCache 64) (\(old, _, _) -> pure old) cached
+        -- The registered hooks, so reuse can tell when one appears or goes.
+        hooks <- customMeasureHooks ctx
+        let c' = c {lcMeasures = measures, lcMeasureHooks = hooks}
+        writeIORef (ctxLayoutCache ctx) (Just (c', size, gen))
   floating <- floatingNodeCount na
   when (floating > 0) $
     placeFloatingNodes na ms w h (lookupWindowPos ctx) (lookupWindowSize ctx) (lookupPopupConfig ctx)
-
--- | Put back this frame's solve, as captured before placement, and place the
--- floating panels again. 'False' when there is no such capture.
-replaceFloating :: Context -> Size -> IO Bool
-replaceFloating ctx size = restoreCachedLayout ctx size (\_ -> pure True)
-
--- | Reuse solved geometry for unchanged layout inputs, checked by the input
--- signature and by every custom measure still returning its recorded size.
--- Floating panels are placed again over the reused solve ('placeFloating').
-tryReuseLayout :: Context -> Size -> IO Bool
-tryReuseLayout ctx size = restoreCachedLayout ctx size (layoutReuseValid ctx)
 
 -- | Layout reuse is sound when the frame's layout inputs hash to what the
 -- cache captured, the same widgets register custom measures, and every custom
@@ -423,59 +413,20 @@ tryReuseLayout ctx size = restoreCachedLayout ctx size (layoutReuseValid ctx)
 -- running them again can check.
 layoutReuseValid :: Context -> LayoutCache -> IO Bool
 layoutReuseValid ctx lc = do
-  okSig <- layoutSigMatches (ctxNodeArena ctx) lc
+  let na = ctxNodeArena ctx
+  okSig <- layoutSigMatches na lc
   hooks <- customMeasureHooks ctx
   -- A matching signature means the same node count, so every recorded index
-  -- is in range. Each recorded measure runs again and must match.
-  let stable (idx, r) rest = customMeasureRecord ctx idx >>= \c -> if c == Just r then rest else pure False
+  -- is in range. Each recorded measure runs again and must match: the
+  -- drawing node's measure as 'runCustomMeasure' records it.
+  let measureOf idx = do
+        nt <- getNodeType na idx
+        if nt /= NodeDrawing
+          then pure Nothing
+          else do
+            mFn <- lookupCustomMeasure ctx =<< getWidgetId na idx
+            traverse (\fn -> runCustomMeasure na (ctxFontMetrics ctx) fn idx) mFn
+      stable (idx, r) rest = measureOf idx >>= \c -> if c == Just r then rest else pure False
   if not okSig || hooks /= lcMeasureHooks lc
     then pure False
     else foldr stable (pure True) (IM.toList (lcMeasures lc))
-
--- | A drawing node's custom measurement as the layout cache records it
--- ('runCustomMeasure'). 'Nothing' for any other node or a drawing with no
--- measure hook.
-customMeasureRecord :: Context -> NodeIdx -> IO (Maybe CustomMeasureRecord)
-customMeasureRecord ctx idx = do
-  let na = ctxNodeArena ctx
-  nt <- getNodeType na idx
-  if nt /= NodeDrawing
-    then pure Nothing
-    else
-      getWidgetId na idx >>= lookupCustomMeasure ctx >>= \case
-        Nothing -> pure Nothing
-        Just fn -> Just <$> runCustomMeasure na (ctxFontMetrics ctx) fn idx
-
--- | Restore the cached solve for this size and font generation when @valid@
--- accepts it, and place the floating panels over it.
-restoreCachedLayout :: Context -> Size -> (LayoutCache -> IO Bool) -> IO Bool
-restoreCachedLayout ctx size@(Size w h) valid = do
-  gen <- readIORef (ctxMetricGen ctx)
-  readIORef (ctxLayoutCache ctx) >>= \case
-    Just (c, cachedSize, cachedGen)
-      | cachedSize == size && cachedGen == gen -> do
-          ok <- valid c
-          when ok $ do
-            restoreLayoutCache (ctxNodeArena ctx) c
-            placeFloating ctx w h
-          pure ok
-    _ -> pure False
-
--- | Snapshot the solved layout, before floating placement, so the next frame
--- can reuse it.
-captureLayout :: Context -> Size -> IM.IntMap CustomMeasureRecord -> IO ()
-captureLayout ctx size measures = do
-  n <- arenaCount (ctxNodeArena ctx)
-  if n <= 0
-    then writeIORef (ctxLayoutCache ctx) Nothing
-    else do
-      gen <- readIORef (ctxMetricGen ctx)
-      mc <- readIORef (ctxLayoutCache ctx)
-      c0 <- case mc of
-        Just (c, _, _) -> pure c
-        Nothing -> newLayoutCache 64
-      c <- captureLayoutCache (ctxNodeArena ctx) c0
-      -- The registered hooks, so reuse can tell when one appears or goes.
-      hooks <- customMeasureHooks ctx
-      let c' = c {lcMeasures = measures, lcMeasureHooks = hooks}
-      writeIORef (ctxLayoutCache ctx) (Just (c', size, gen))

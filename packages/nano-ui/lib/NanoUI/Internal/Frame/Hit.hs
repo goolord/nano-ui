@@ -4,14 +4,13 @@
 module NanoUI.Internal.Frame.Hit
   ( findNodeByWidgetId
   , withWidgetNode
-  , findNodeByKey
-  , modalTreeOpen
   , nodeInSubtree
   , widgetIdInSubtree
   , overlayHitAllowed
   , overlayHitRoot
   , topmostOverlayAtMouse
   , topmostModalAtMouse
+  , topmostFloating
   , widgetOverlayAllowed
   , nodeOwnsPointer
   , scrollHitRect
@@ -46,7 +45,6 @@ import NanoUI.Internal.Layout.Arena
   , getNodeType
   , getParent
   , getWidgetId
-  , lookupNodeByKey
   , lookupNodeByWidgetId
   , topModalNode
   , walkAncestors
@@ -66,15 +64,6 @@ findNodeByWidgetId ctx wid = lookupNodeByWidgetId (ctxNodeArena ctx) wid
 {-# INLINE withWidgetNode #-}
 withWidgetNode :: Context -> WidgetId -> a -> (NodeIdx -> IO a) -> IO a
 withWidgetNode ctx wid def k = findNodeByWidgetId ctx wid >>= maybe (pure def) k
-
--- | 'findNodeByWidgetId' for a widget's 'Int' key ('intKey').
-findNodeByKey :: Context -> Int -> IO (Maybe NodeIdx)
-findNodeByKey ctx k = lookupNodeByKey (ctxNodeArena ctx) k
-
--- | Whether the arena holds a modal node, which it does when the view
--- declared an open modal.
-modalTreeOpen :: Context -> IO Bool
-modalTreeOpen ctx = isJust <$> topModalNode (ctxNodeArena ctx)
 
 -- | Whether node @idx@ is node @top@ or one of its descendants.
 nodeInSubtree :: Context -> NodeIdx -> NodeIdx -> IO Bool
@@ -116,23 +105,20 @@ overlayHitAllowed ctx top idx = maybe (pure True) (nodeInSubtree ctx idx) top
 -- rect holds the point.
 topmostOverlayAtMouse :: Context -> V2 -> IO (Maybe NodeIdx)
 topmostOverlayAtMouse ctx mouse =
-  topmostFloatingAtMouse ctx mouse (\nt -> nt == NodeWindow || nt == NodePopup)
+  topmostFloating ctx (\nt -> nt == NodeWindow || nt == NodePopup) (`rectHit` mouse)
 
 -- | The modal on top at @mouse@: the last one in arena order whose rect holds
 -- the point.
 topmostModalAtMouse :: Context -> V2 -> IO (Maybe NodeIdx)
-topmostModalAtMouse ctx mouse =
-  topmostFloatingAtMouse ctx mouse (== NodeModal)
+topmostModalAtMouse ctx mouse = topmostFloating ctx (== NodeModal) (`rectHit` mouse)
 
--- | The last node in arena order whose type satisfies @wanted@ and whose
--- non-empty rect holds @mouse@. The frame paints the panels of one type in
--- arena order, so among them the last one is on top.
-topmostFloatingAtMouse ::
-  Context -> V2 -> (NodeType -> Bool) -> IO (Maybe NodeIdx)
-topmostFloatingAtMouse ctx mouse wanted =
+-- | The last floating node in arena order whose type satisfies @wanted@ and
+-- whose rect satisfies @at@. The frame paints the panels of one type in arena
+-- order, so among them the last one is on top.
+topmostFloating :: Context -> (NodeType -> Bool) -> (Rect -> Bool) -> IO (Maybe NodeIdx)
+topmostFloating ctx wanted at =
   findClassNodeRevM (ctxNodeArena ctx) FloatingNodes $ \idx ->
-    (wanted <$> getNodeType (ctxNodeArena ctx) idx)
-      <&&> ((`rectHit` mouse) <$> getNodeRect (ctxNodeArena ctx) idx)
+    (wanted <$> getNodeType (ctxNodeArena ctx) idx) <&&> (at <$> getNodeRect (ctxNodeArena ctx) idx)
 
 -- | Whether the frame routed the pointer to node @idx@, which decides whether
 -- its widget saw the pointer while the view ran. The route must be the node's
@@ -203,18 +189,13 @@ nodeClippedHit ctx idx rect mouse =
 -- not solved. @rect@ is the widget's rect from the previous frame
 -- ('scrollHitRect'). The point must be inside it, and inside the previous
 -- frame's viewport of every scroll container above node @idx@, so content
--- scrolled out of view takes no input. The node's own clip rect is not read:
+-- scrolled out of view takes no input; a scroll container with no recorded
+-- viewport does not constrain the point. The node's own clip rect is not read:
 -- it is not set until 'NanoUI.Internal.Frame.Scroll.applyScrollOffsets' runs.
 {-# INLINE nodeInteractionHit #-}
 nodeInteractionHit :: Context -> NodeIdx -> Rect -> V2 -> IO Bool
-nodeInteractionHit ctx idx rect mouse =
-  pure (rectHit rect mouse) <&&> scrollViewportHit ctx idx mouse
-
--- | Whether @mouse@ is inside the previous frame's viewport of every scroll
--- container above node @idx@. A scroll container with no recorded viewport
--- does not constrain the point.
-scrollViewportHit :: Context -> NodeIdx -> V2 -> IO Bool
-scrollViewportHit ctx idx mouse
+nodeInteractionHit ctx idx rect mouse
+  | not (rectHit rect mouse) = pure False
   | idx <= 0 = pure True
   | otherwise = do
       p <- getParent na idx

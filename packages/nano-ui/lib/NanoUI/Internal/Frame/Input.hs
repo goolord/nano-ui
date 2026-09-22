@@ -1,58 +1,81 @@
 -- | The pointer and keyboard steps that 'NanoUI.Internal.Frame.runFrame' runs around
 -- the view: recording where a press landed, choosing the active and hot
--- widgets, turning a release into a click, and moving keyboard focus. All but
+-- widgets, turning a release into a click, moving keyboard focus, and copying
+-- selection state from the store into the nodes that paint it. All but
 -- 'armPointerPress' run after layout, so their hit tests use this frame's
--- solved rects, where the view had only the previous frame's.
+-- solved rects, where the view had only the previous frame's. Also the checks
+-- the backend runs between frames: whether input needs a frame, and the
+-- gestures and panels in progress.
 module NanoUI.Internal.Frame.Input
   ( finalizeTabFocus
   , refreshHover
   , armPointerPress
   , disarmPointerPress
-  , PressTargets
   , pressTargets
   , finalizePointerPress
   , finalizePointerRelease
   , finalizeTextInputFocus
   , finalizeSelectFocus
-  , findTopWidgetUnderMouse
-  , isInteractiveNode
+  , PressTargets (..)
+  , targetsAt
+  , constrainFocusToModal
+  , syncWidgetLabels
+  , needsRedraw
+  , pointerDragActive
+  , textFieldActive
+  , floatingPanelActive
+  , debugPanelOpen
+  , probeHotId
   ) where
 
 import Control.Applicative ((<|>))
-import Control.Monad (when)
-import Data.IORef (newIORef, readIORef, writeIORef)
-import Data.Maybe (isJust, isNothing)
+import Control.Monad (filterM, forM_, unless, when)
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.Maybe (fromMaybe, isJust, isNothing, listToMaybe, maybeToList)
 import NanoUI.Internal.Context
   ( Context (..)
+  , CustomDrawingEntry (..)
+  , anyAnimating
+  , anySelectOpen
   , damageWidget
   , getFocusables
+  , getStore
+  , getsInteraction
+  , intBool
+  , intKey
+  , isDirty
   , isDisabled
+  , lookupCustomDrawing
   , markDirty
   , markDirtyCovered
   , setAnimationValue
+  , modalActive
   , modifyInteraction
+  , pointerHeldOffLayers
   , startAnimation
   , tabConsumed
   , InteractionState (..)
   )
-import NanoUI.Internal.Frame.Focus (filterModalFocusables, tabNext, tabNextFocusables)
 import NanoUI.Internal.Frame.Hit
-  ( modalTreeOpen
-  , nodeClippedHit
+  ( nodeClippedHit
   , nodeInteractionHit
   , nodeOwnsPointer
+  , nodePointVisible
   , overlayHitAllowed
   , overlayHitRoot
   , scrollHitRect
+  , topmostFloating
+  , widgetIdInSubtree
   , withWidgetNode
   )
-import NanoUI.Internal.Frame.Redraw (probeHotId)
+import NanoUI.Internal.Frame.Select (focusedComboNode, overlayMenuOwnerAt)
 import NanoUI.Internal.Frame.TextArea (collapseTextFieldSelection)
 import NanoUI.Internal.Frame.TextInput (nodeTextFieldGeom)
 import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Internal.Input
   ( Input (..)
   , Key (..)
+  , inputInteracted
   , inputKeysElem
   , inputModifiers
   , inputMousePos
@@ -60,24 +83,31 @@ import NanoUI.Internal.Input
   , inputMouseReleased
   , inputMouseRightPressed
   , inputMouseRightReleased
+  , inputPointerHeld
   , modShift
   )
 import NanoUI.Internal.Layout.Arena
   ( isWidgetNode
-  , NodeClass (PointerNodes)
+  , NodeClass (PointerNodes, SelectionNodes)
   , NodeIdx
   , NodeType (..)
   , findClassNodeM
+  , floatingNodeCount
   , foldNodesM
+  , forClassNodes_
   , getNodeRect
   , getNodeType
+  , getParent
   , getRect
   , getStyleIdx
   , getWidgetId
+  , setNodeValue
+  , topModalNode
   )
 import NanoUI.Internal.Monad (ifM, unlessM, whenM, (<&&>))
+import NanoUI.Internal.Store (fieldInt, findSlot, lookupSlot)
 import NanoUI.Internal.Types (DamageBounds (..), Rect (..), V2 (..), defaultDamageSlop, rectContains)
-import NanoUI.Internal.WidgetText (hasFlag, buttonFlagClose, buttonFlagMenuBar, buttonFlagMenu)
+import NanoUI.Internal.WidgetText (hasFlag, buttonFlagClose, buttonFlagMenuBar, buttonFlagMenu, treeDecodeStyle)
 
 -- | Move keyboard focus when Tab was pressed, backwards with Shift held. Focus
 -- steps through the widgets that called 'NanoUI.Internal.Context.registerFocusable'
@@ -88,16 +118,13 @@ import NanoUI.Internal.WidgetText (hasFlag, buttonFlagClose, buttonFlagMenuBar, 
 finalizeTabFocus :: Context -> Input -> IO ()
 finalizeTabFocus ctx inp =
   whenM (pure (inputKeysElem KeyTab (inputKeys inp)) <&&> (not <$> tabConsumed ctx)) $ do
-    open <- modalTreeOpen ctx
-    let shift = modShift (inputModifiers inp)
     cur <- readIORef (ctxFocusId ctx)
-    next <-
-      if not open
-        then tabNextFocusables ctx cur shift
-        else do
-          focusables <- getFocusables ctx
-          ids <- filterModalFocusables ctx (filter (/= WidgetId 0) focusables)
-          pure (tabNext cur ids shift)
+    -- The modal's root is looked up once for the whole list. Each widget then
+    -- costs one walk up its ancestors.
+    top <- topModalNode (ctxNodeArena ctx)
+    let inModal w = maybe (pure True) (\modal -> widgetIdInSubtree ctx modal w) top
+    ids <- filterM inModal . filter (/= WidgetId 0) =<< getFocusables ctx
+    let next = tabNext cur ids (modShift (inputModifiers inp))
     when (hashWidgetId next /= 0) $ do
       -- Tab can reveal the focus ring without changing the focused rectangle.
       -- Damage that case explicitly; geometry comparison cannot detect it.
@@ -156,45 +183,47 @@ disarmPointerPress ctx inp = do
 
 -- | What a left press landed on, for the steps that act on it: the
 -- interactive widget, the text field or text area, and the select under the
--- pointer, each as 'findTopWidgetUnderMouse' would find it. All 'Nothing'
--- on a frame without a press.
+-- pointer. All 'Nothing' on a frame without a press.
 data PressTargets = PressTargets
   { ptInteractive :: !(Maybe WidgetId)
   , ptTextField :: !(Maybe WidgetId)
   , ptSelect :: !(Maybe WidgetId)
   }
 
--- | The 'PressTargets' of this frame's left press, found in one pass over the
--- arena instead of one per step. A node's hit test does not depend on which
--- step asks, so each node is tested at most once, and the pass stops once
--- every target is found. Runs after layout, like the steps.
+-- | The 'PressTargets' of this frame's left press ('targetsAt'). Runs after
+-- layout, like the steps.
 pressTargets :: Context -> Input -> IO PressTargets
 pressTargets ctx inp
   | not (inputMousePressed inp) = pure none
-  | otherwise = do
-      let na = ctxNodeArena ctx
-          mouse = inputMousePos inp
-      top <- overlayHitRoot ctx mouse
-      found <- newIORef none
-      _ <- findClassNodeM na PointerNodes $ \idx -> do
-        nt <- getNodeType na idx
-        PressTargets i t s <- readIORef found
-        let wantI = isNothing i && isInteractiveNode nt
-            wantT = isNothing t && isTextFieldNode nt
-            wantS = isNothing s && nt == NodeSelect
-        pure (wantI || wantT || wantS) <&&> widgetUnderMouse ctx top mouse nt idx <&&> do
-          wid <- getWidgetId na idx
-          let pick want cur = if want then Just wid else cur
-              !r = PressTargets (pick wantI i) (pick wantT t) (pick wantS s)
-          writeIORef found r
-          pure (isJust (ptInteractive r) && isJust (ptTextField r) && isJust (ptSelect r))
-      readIORef found
- where
-  none = PressTargets Nothing Nothing Nothing
+  | otherwise = targetsAt ctx (inputMousePos inp)
 
--- | Text fields and text areas, which a press focuses.
-isTextFieldNode :: NodeType -> Bool
-isTextFieldNode nt = nt == NodeTextInput || nt == NodeTextArea
+-- | The widgets a press at @mouse@ would land on, found in one pass over the
+-- arena instead of one per step. A node's hit test does not depend on which
+-- step asks, so each node is tested at most once, and the pass stops once
+-- every target is found. Each is the first match in arena order, which is
+-- declaration order. The painter draws siblings from the last declared to the
+-- first, so where two overlap the earlier one is on top.
+targetsAt :: Context -> V2 -> IO PressTargets
+targetsAt ctx mouse = do
+  let na = ctxNodeArena ctx
+  top <- overlayHitRoot ctx mouse
+  found <- newIORef none
+  _ <- findClassNodeM na PointerNodes $ \idx -> do
+    nt <- getNodeType na idx
+    PressTargets i t s <- readIORef found
+    let wantI = isNothing i && isWidgetNode nt
+        wantT = isNothing t && (nt == NodeTextInput || nt == NodeTextArea)
+        wantS = isNothing s && nt == NodeSelect
+    pure (wantI || wantT || wantS) <&&> widgetUnderMouse ctx top mouse nt idx <&&> do
+      wid <- getWidgetId na idx
+      let pick want cur = if want then Just wid else cur
+          !r = PressTargets (pick wantI i) (pick wantT t) (pick wantS s)
+      writeIORef found r
+      pure (isJust (ptInteractive r) && isJust (ptTextField r) && isJust (ptSelect r))
+  readIORef found
+
+none :: PressTargets
+none = PressTargets Nothing Nothing Nothing
 
 -- | On a left press, make the interactive widget under the pointer the active
 -- widget, unless it is disabled. Runs after layout. 'pressTargets' searches
@@ -203,21 +232,6 @@ isTextFieldNode nt = nt == NodeTextInput || nt == NodeTextArea
 finalizePointerPress :: Context -> PressTargets -> IO ()
 finalizePointerPress ctx targets =
   enabledTarget ctx (ptInteractive targets) >>= mapM_ (writeIORef (ctxActiveId ctx))
-
--- | The widget under @mouse@ whose node type satisfies @wanted@, or 'Nothing'.
--- It is the first match in arena order, which is declaration order. The
--- painter draws siblings from the last declared to the first, so where two
--- overlap the earlier one is on top. Only pointer nodes ('PointerNodes') are
--- searched, so @wanted@ must reject every other type.
-findTopWidgetUnderMouse :: Context -> V2 -> (NodeType -> Bool) -> IO (Maybe WidgetId)
-findTopWidgetUnderMouse ctx mouse wanted = do
-  let na = ctxNodeArena ctx
-  top <- overlayHitRoot ctx mouse
-  mIdx <-
-    findClassNodeM na PointerNodes $ \idx -> do
-      nt <- getNodeType na idx
-      pure (wanted nt) <&&> widgetUnderMouse ctx top mouse nt idx
-  traverse (getWidgetId na) mIdx
 
 -- | Whether a press at @mouse@ lands on node @idx@ of type @nt@: the point is
 -- in its hit rect ('widgetHitRect') and in its clip, and the floating panels
@@ -244,11 +258,6 @@ widgetHitRect ctx nt idx x y w h = case nt of
         then Rect (x - 8) (y - 4) (w + 10) (h + 4)
         else Rect x y w h
   _ -> pure (Rect x y w h)
-
--- | The node types a press can make active: the controls of 'isWidgetNode'
--- except the bare 'NodeWidget', which paints and takes nothing.
-isInteractiveNode :: NodeType -> Bool
-isInteractiveNode nt = nt /= NodeWidget && isWidgetNode nt
 
 -- | Resolve a left-button release against this frame's solved rects, and let
 -- go of the active widget. Runs after layout.
@@ -354,6 +363,160 @@ focusWidget ctx wid = do
 -- nothing here, so a press on it takes focus away from the field that had it
 -- and gives it to no other.
 enabledTarget :: Context -> Maybe WidgetId -> IO (Maybe WidgetId)
-enabledTarget ctx mWid = case mWid of
-  Just wid -> ifM (isDisabled ctx wid) (pure Nothing) (pure mWid)
-  Nothing -> pure Nothing
+enabledTarget ctx = fmap listToMaybe . filterM (fmap not . isDisabled ctx) . maybeToList
+
+-- | Next focus id, or previous with Shift, wrapping at both ends. An unknown
+-- current id selects the first entry; an empty list returns @WidgetId 0@.
+tabNext :: WidgetId -> [WidgetId] -> Bool -> WidgetId
+tabNext cur ids shift =
+  fromMaybe (WidgetId 0) . listToMaybe $ case break (== cur) ids of
+    (_, []) -> ids
+    (before, _ : after)
+      | shift -> reverse (if null before then ids else before)
+      | otherwise -> after ++ ids
+
+-- | While a modal is open, take keyboard focus away from a widget outside the
+-- top modal. The frame runs this after the pointer steps, which can move
+-- focus, and before 'finalizeTabFocus'.
+constrainFocusToModal :: Context -> IO ()
+constrainFocusToModal ctx = do
+  top <- topModalNode (ctxNodeArena ctx)
+  forM_ top $ \modal -> do
+    focus <- readIORef (ctxFocusId ctx)
+    when (hashWidgetId focus /= 0) $ do
+      ok <- widgetIdInSubtree ctx modal focus
+      unless ok $ writeIORef (ctxFocusId ctx) (WidgetId 0)
+
+-- | Copy selection state from the store into the node values the painter
+-- reads. A checkbox's value becomes its stored flag. A radio option or a tree
+-- row gets 1 when its group's stored selection names it, and 0 otherwise.
+-- The frame runs this after the view, before layout, and again after the
+-- input steps when they changed the store, so what is painted matches the
+-- store even when the change came after the widget was declared. It visits
+-- only the arena's 'SelectionNodes'.
+syncWidgetLabels :: Context -> IO ()
+syncWidgetLabels ctx = do
+  store <- getStore ctx
+  let na = ctxNodeArena ctx
+  forClassNodes_ na SelectionNodes $ \idx -> do
+    nt <- getNodeType na idx
+    wid <- getWidgetId na idx
+    let key = intKey wid
+        -- The group keeps its selection, as the index @ownOf@ reads from a
+        -- member's style index, in the Int slot of the parent node's widget
+        -- id.
+        syncGroup ownOf = do
+          parent <- getParent na idx
+          si <- getStyleIdx na idx
+          groupWid <- getWidgetId na parent
+          let own = ownOf si
+              selected = findSlot fieldInt own (intKey groupWid) store
+          setNodeValue na idx (if selected == own then 1 else 0)
+    case nt of
+      NodeCheckbox ->
+        -- A checkbox with no stored value keeps the value the view gave its
+        -- node.
+        forM_ (lookupSlot fieldInt key store) $ \v ->
+          setNodeValue na idx (if intBool v then 1 else 0)
+      -- A radio option's style index is its option index.
+      NodeRadio -> syncGroup id
+      -- A tree row packs its pre-order node index into the high bits of its
+      -- style index.
+      NodeTree -> syncGroup (\si -> let (nodeIdx, _, _, _) = treeDecodeStyle si in nodeIdx)
+      _ -> pure ()
+
+-- | Whether state or input changes require a frame. Arguments are previous
+-- and current input. Tests hover only after pointer motion; timed wake
+-- deadlines are handled separately by the session runner.
+needsRedraw :: Context -> Input -> Input -> IO Bool
+needsRedraw ctx prev inp = do
+  dirty <- isDirty ctx
+  anim <- anyAnimating ctx
+  drag <- getsInteraction ctx (\s -> isJust (isScrollDrag s) || isJust (isWindowDrag s))
+  overlay <- overlayMenuOpen ctx
+  let moved = inputMousePos prev /= inputMousePos inp
+  if dirty
+    || anim
+    || inputInteracted prev inp
+    || inputWindowRedraw inp
+    || inputPointerHeld inp
+    || drag
+    || (overlay && moved)
+    then pure True
+    else
+      -- Idle: hover can only change when the pointer moved since the frame
+      -- whose hover state we still hold. Skip the O(n) hot probe otherwise.
+      pure moved <&&> do
+        -- A widget that tracks the pointer wants every move over it;
+        -- one that does not wants only the move that leaves it.
+        lastHot <- readIORef (ctxLastHotId ctx)
+        tracked <-
+          if hashWidgetId lastHot == 0
+            then pure False
+            else maybe False cdrTracked <$> lookupCustomDrawing ctx lastHot
+        if tracked
+          then pure True
+          else (/= lastHot) <$> probeHotId ctx (inputMousePos inp)
+
+-- | Whether a window, scrollbar, resize, slider, or colour-picker gesture
+-- is active. Text-selection drags are tracked separately.
+pointerDragActive :: Context -> IO Bool
+pointerDragActive ctx = do
+  gesture <- getsInteraction ctx $ \s ->
+    isJust (isWindowDrag s) || isJust (isScrollDrag s) || isJust (isWindowResize s)
+  sliderOrPicker <- focusedNodeIs ctx ctxActiveId (\nt -> nt == NodeSlider || nt == NodeColorPicker)
+  pure (gesture || sliderOrPicker)
+
+-- | Whether the node of the widget id held in @ref@ satisfies @p@.
+focusedNodeIs :: Context -> (Context -> IORef WidgetId) -> (NodeType -> Bool) -> IO Bool
+focusedNodeIs ctx ref p = do
+  wid <- readIORef (ref ctx)
+  withWidgetNode ctx wid False $ \idx -> p <$> getNodeType (ctxNodeArena ctx) idx
+
+-- Select dropdown or text-input menu is open. Overlay hover is not a widget id,
+-- so while one is up every pointer move needs a frame. A focused combo (a
+-- search-style field carrying options) also owns an open dropdown.
+overlayMenuOpen :: Context -> IO Bool
+overlayMenuOpen ctx = do
+  store <- getStore ctx
+  menu <- getsInteraction ctx isTextInputMenu
+  if anySelectOpen store || isJust menu
+    then pure True
+    else isJust <$> focusedComboNode ctx
+
+-- | Focused text field or its context menu. Typing reaches it as input events,
+-- which wake the loop by themselves, so focus alone keeps nothing running.
+textFieldActive :: Context -> IO Bool
+textFieldActive ctx =
+  ifM (isJust <$> getsInteraction ctx isTextInputMenu) (pure True) $
+    focusedNodeIs ctx ctxFocusId (\nt -> nt == NodeTextInput || nt == NodeTextArea)
+
+-- | Whether modal state or the current arena contains a floating panel,
+-- including windows and popups.
+floatingPanelActive :: Context -> IO Bool
+floatingPanelActive ctx =
+  (||) <$> modalActive ctx <*> ((> 0) <$> floatingNodeCount (ctxNodeArena ctx))
+
+-- | Whether the arena contains any floating window. The name does not imply
+-- that its contents are a debug readout.
+debugPanelOpen :: Context -> IO Bool
+debugPanelOpen ctx = isJust <$> topmostFloating ctx (== NodeWindow) (const True)
+
+probeHotId :: Context -> V2 -> IO WidgetId
+probeHotId ctx mouse = do
+  -- A button that went down on a menu or dropdown keeps everything cold.
+  offLayers <- pointerHeldOffLayers ctx
+  if offLayers
+    then pure (WidgetId 0)
+    else do
+      mOverlay <- overlayMenuOwnerAt ctx mouse
+      case mOverlay of
+        Just wid -> pure wid
+        -- Earlier siblings paint over later ones, so the first hit wins.
+        Nothing -> do
+          top <- overlayHitRoot ctx mouse
+          let hits idx =
+                (isWidgetNode <$> getNodeType na idx) <&&> nodePointVisible ctx idx mouse <&&> overlayHitAllowed ctx top idx
+          maybe (pure (WidgetId 0)) (getWidgetId na) =<< findClassNodeM na PointerNodes hits
+  where
+    na = ctxNodeArena ctx

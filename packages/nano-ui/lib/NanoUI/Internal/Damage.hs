@@ -16,9 +16,7 @@ import Data.IntMap.Strict qualified as IM
 import Data.IntSet qualified as IS
 import Data.List (partition, tails)
 import Data.Maybe (fromMaybe, isJust, isNothing)
-import Data.Primitive.PrimArray (MutablePrimArray, newPrimArray, readPrimArray, writePrimArray)
 import Data.Text (Text)
-import GHC.Exts (RealWorld)
 import NanoUI.Internal.Context
   ( Animation
   , Context (..)
@@ -57,8 +55,7 @@ import NanoUI.Internal.Input
   ( Input (..)
   , inputWindowSize
   )
-import NanoUI.Internal.Frame.Hit (findNodeByKey)
-import NanoUI.Internal.Store (Slot (..), eqByPtr, mirrorStoresChanged, ptrEq, slotChangedKeys, slotKey)
+import NanoUI.Internal.Store (Slot (..), diffKeys, eqByPtr, mirrorStoresChanged, ptrEq, slotChangedKeys, slotKey)
 import NanoUI.Internal.Layout.Arena
   ( AxisSizing (..)
   , NodeArena
@@ -79,6 +76,7 @@ import NanoUI.Internal.Layout.Arena
   , getWidthSizing
   , isFloatingNode
   , isScrollNode
+  , lookupNodeByKey
   , walkAncestors
   , walkFloatingAncestors
   )
@@ -113,22 +111,18 @@ orphanEscalateFrames = 2
 -- Partial retain clears with themeWindow. Expand interaction clips to the painted
 -- panel/window backdrop so slop pixels get the correct fill, not window color.
 backdropRectFromNode :: Context -> Int -> IO (Maybe Rect)
-backdropRectFromNode ctx idx = walkAncestors (ctxNodeArena ctx) idx step
+backdropRectFromNode ctx idx = walkAncestors na idx $ \i -> do
+  nt <- getNodeType na i
+  paints <- case nt of
+    NodeScrollContainer -> do
+      wTag <- axTag <$> getWidthSizing na i
+      hTag <- axTag <$> getHeightSizing na i
+      si <- getStyleIdx na i
+      pure (not ((wTag == SizingGrow && hTag == SizingGrow) || scrollBare (decodeScrollConfig si)))
+    _ -> pure (nt == NodePanel || isFloatingNode nt)
+  if paints then getNonzeroRect na i else pure Nothing
   where
-    step i = do
-      let na = ctxNodeArena ctx
-      nt <- getNodeType na i
-      if nt == NodePanel || isFloatingNode nt
-        then getNonzeroRect na i
-        else case nt of
-          NodeScrollContainer -> do
-            wTag <- axTag <$> getWidthSizing na i
-            hTag <- axTag <$> getHeightSizing na i
-            si <- getStyleIdx na i
-            if (wTag == SizingGrow && hTag == SizingGrow) || scrollBare (decodeScrollConfig si)
-              then pure Nothing
-              else getNonzeroRect na i
-          _ -> pure Nothing
+    na = ctxNodeArena ctx
 
 {-# INLINE getNonzeroRect #-}
 getNonzeroRect :: NodeArena -> Int -> IO (Maybe Rect)
@@ -213,21 +207,16 @@ updatePrevRects ctx = do
       go oldRects 0 oldRects oldClips oldTexts 0 False
 
 floatingPanelsInOrder :: Context -> IO [(Int, Rect)]
-floatingPanelsInOrder ctx = do
-  foldClassNodeRevM na FloatingNodes step []
+floatingPanelsInOrder ctx = foldClassNodeRevM na FloatingNodes step []
   where
     na = ctxNodeArena ctx
     step acc idx = do
-      nt <- getNodeType na idx
-      if not (isFloatingNode nt)
+      wid <- getWidgetId na idx
+      if hashWidgetId wid == 0
         then pure acc
         else do
-          wid <- getWidgetId na idx
-          if hashWidgetId wid == 0
-            then pure acc
-            else do
-              rect <- getNodeRect na idx
-              pure ((intKey wid, rect) : acc)
+          rect <- getNodeRect na idx
+          pure ((intKey wid, rect) : acc)
 
 -- | Current floating-panel bounds keyed by widget id, in logical window coordinates.
 floatingPanelRects :: Context -> IO (IM.IntMap Rect)
@@ -486,8 +475,15 @@ clipDamage ctx snap d owners = do
         | wid == fsActive snap = fsActiveRect snap
         | wid == fsFocus snap = fsFocusRect snap
         | otherwise = Nothing
-  acc <- newPieceUnion
-  resolveDamageRequests ctx acc oldRects newRects (fdRequests d)
+  acc <- newIORef []
+  let resolveKey = resolveKeyDamage ctx acc oldRects newRects
+      resolveSlop k = resolveKey k (DamageInflated defaultDamageSlop)
+  forM_ (fdRequests d) $ \case
+    ReqFull -> pure ()
+    ReqRect r -> addRect acc r
+    ReqWidget wid bounds -> resolveKey (intKey wid) bounds
+    ReqKey k bounds -> resolveKey k bounds
+    ReqPeers wids bounds -> forM_ wids $ \wid -> resolveKey (intKey wid) bounds
   -- Backdrop expansion covers interaction slop (hover/press halos) and
   -- explicit damage requests. Animation keys must not expand to their panel
   -- backdrop: an animated widget inside a large panel would damage the whole
@@ -497,9 +493,9 @@ clipDamage ctx snap d owners = do
   let addNodeBackdrop =
         maybe (pure Nothing) (backdropRectFromNode ctx)
           >=> mapM_ (addRect acc . clipRectToWindow winW winH)
-      addBackdrop k = unless (k == 0) $ addNodeBackdrop =<< findNodeByKey ctx k
+      addBackdrop k = unless (k == 0) $ addNodeBackdrop =<< lookupNodeByKey (ctxNodeArena ctx) k
       addInteraction wid = unless (k == 0) $ do
-        node <- findNodeByKey ctx k
+        node <- lookupNodeByKey (ctxNodeArena ctx) k
         newR <- getPrevRect ctx wid
         slop <- fromMaybe defaultDamageSlop <$> lookupCustomDamageSlop ctx wid
         clip <- maybe (pure Nothing) (getClipRect (ctxNodeArena ctx)) node
@@ -525,10 +521,12 @@ clipDamage ctx snap d owners = do
     _ -> pure ()
   when (fdScrollChanged d || fdPointsChanged d) $
     scrollOffsetDamage ctx acc (fsStore snap) (fdStore d)
-  storeKeyDamage ctx acc oldRects newRects owners
-  let addAnim k =
-        unless (k == 0) $
-          resolveKeyDamage ctx acc oldRects newRects k (DamageInflated defaultDamageSlop)
+  -- The changed store keys that are not widget keys, through the widgets
+  -- owning them ('storeKeyOwners'): each owner once, as a 'ReqWidget' with the
+  -- standard slop would.
+  forM_ (IS.toList (IS.fromList (IM.elems owners))) $ \idx ->
+    resolveSlop . intKey =<< getWidgetId (ctxNodeArena ctx) idx
+  let addAnim k = unless (k == 0) $ resolveSlop k
   IS.foldr (\k rest -> addAnim k >> rest) (pure ()) (fsAnimKeys snap)
   IM.foldrWithKey
     (\k _ rest -> unless (IS.member k (fsAnimKeys snap)) (addAnim k) >> rest)
@@ -564,11 +562,13 @@ clipDamage ctx snap d owners = do
   let addFloating other k r rest = unless (IM.lookup k other == Just r) (addRect acc r) >> rest
   IM.foldrWithKey (addFloating (fdFloatingRects d)) (pure ()) (fsFloatingRects snap)
   IM.foldrWithKey (addFloating (fsFloatingRects snap)) (pure ()) (fdFloatingRects d)
-  base <- readRectUnion acc
-  added <- readAddedRects acc
-  let clip = clipRectToWindow winW winH base
+  added <- readIORef acc
+  let clip = clipRectToWindow winW winH (rectBounds added)
       winArea = winW * winH
-      pieces = maybe [] (damagePieces . map (clipRectToWindow winW winH)) added
+      -- A frame with more rects than this repaints their bounds.
+      pieces
+        | null (drop 64 added) = damagePieces (map (clipRectToWindow winW winH) added)
+        | otherwise = []
       area = if null pieces then rectArea clip else sum (map rectArea pieces)
   -- A live animation with an empty clip is not DamageFull: its
   -- key was either scroll-clipped out of view (nothing visible
@@ -617,23 +617,6 @@ damagePieces rects =
               (pair, rest) = partition (\(k, _) -> k == i || k == j) indexed
            in shrink (settle (foldr1 rectUnion (map snd pair) : map snd rest))
 
-resolveDamageRequests ::
-  Context ->
-  RectUnion ->
-  IM.IntMap Rect ->
-  IM.IntMap Rect ->
-  [DamageRequest] ->
-  IO ()
-resolveDamageRequests ctx acc oldRects newRects reqs =
-  forM_ reqs $ \case
-    ReqFull -> pure ()
-    ReqRect r -> addRect acc r
-    ReqWidget wid bounds -> resolveKey (intKey wid) bounds
-    ReqKey k bounds -> resolveKey k bounds
-    ReqPeers wids bounds -> forM_ wids $ \wid -> resolveKey (intKey wid) bounds
-  where
-    resolveKey = resolveKeyDamage ctx acc oldRects newRects
-
 -- | Damage key @k@'s old and new rects, resolved through @bounds@ and clipped
 -- to the key's viewport ('keyViewportClip').
 resolveKeyDamage :: Context -> RectUnion -> IM.IntMap Rect -> IM.IntMap Rect -> Int -> DamageBounds -> IO ()
@@ -644,71 +627,24 @@ resolveKeyDamage ctx acc oldRects newRects k bounds = do
       let clipped = clipToViewport clip (resolveDamageRect bounds r)
       when (rectNonEmpty clipped) $ addRect acc clipped
 
--- | A running union of rects, as @x0, y0, x1, y1@ followed by how many of
--- them lie outside every floating panel, and for a piece union the rects
--- themselves. The bounds start inverted, so the first rect sets them and an
--- empty union reads back as the zero rect.
-data RectUnion = RectUnion !(MutablePrimArray RealWorld Float) !(Maybe (IORef KeptRects))
-
--- | The rects a piece union holds, up to 'pieceRectLimit'.
-data KeptRects = Kept !Int [Rect] | TooMany
-
--- | A union that keeps only the bounds of its rects.
-newRectUnion :: IO RectUnion
-newRectUnion = newUnion Nothing
-
--- | A union that also keeps the first 'pieceRectLimit' rects, for
--- 'damagePieces'. A frame that adds more repaints their bounds.
-newPieceUnion :: IO RectUnion
-newPieceUnion = newUnion . Just =<< newIORef (Kept 0 [])
-
-pieceRectLimit :: Int
-pieceRectLimit = 64
-
-newUnion :: Maybe (IORef KeptRects) -> IO RectUnion
-newUnion kept = do
-  a <- newPrimArray 5
-  writePrimArray a 0 infinity
-  writePrimArray a 1 infinity
-  writePrimArray a 2 (-infinity)
-  writePrimArray a 3 (-infinity)
-  writePrimArray a 4 0
-  pure (RectUnion a kept)
-  where
-    infinity = 1 / 0
+-- | The rects damage gathers, newest first.
+type RectUnion = IORef [Rect]
 
 {-# INLINE addRect #-}
 addRect :: RectUnion -> Rect -> IO ()
-addRect (RectUnion a kept) r@(Rect x y w h) = do
-  x0 <- readPrimArray a 0
-  y0 <- readPrimArray a 1
-  x1 <- readPrimArray a 2
-  y1 <- readPrimArray a 3
-  writePrimArray a 0 (min x0 x)
-  writePrimArray a 1 (min y0 y)
-  writePrimArray a 2 (max x1 (x + w))
-  writePrimArray a 3 (max y1 (y + h))
-  forM_ kept $ \ref -> modifyIORef' ref $ \case
-    Kept n rs | n < pieceRectLimit -> Kept (n + 1) (r : rs)
-    _ -> TooMany
+addRect acc r = modifyIORef' acc (r :)
 
--- | The rects a piece union kept, or 'Nothing' if it kept none or more were
--- added than it keeps.
-readAddedRects :: RectUnion -> IO (Maybe [Rect])
-readAddedRects (RectUnion _ kept) = case kept of
-  Nothing -> pure Nothing
-  Just ref ->
-    readIORef ref >>= \case
-      Kept _ rs -> pure (Just rs)
-      TooMany -> pure Nothing
+-- | Edges of a running bounds: @x0, y0, x1, y1@.
+data Edges = Edges !Float !Float !Float !Float
 
-readRectUnion :: RectUnion -> IO Rect
-readRectUnion (RectUnion a _) = do
-  x0 <- readPrimArray a 0
-  y0 <- readPrimArray a 1
-  x1 <- readPrimArray a 2
-  y1 <- readPrimArray a 3
-  pure $! if x0 > x1 then Rect 0 0 0 0 else Rect x0 y0 (x1 - x0) (y1 - y0)
+-- | The bounds of @rects@, empty ones included, or the zero rect for none.
+rectBounds :: [Rect] -> Rect
+rectBounds rects
+  | x0 > x1 = Rect 0 0 0 0
+  | otherwise = Rect x0 y0 (x1 - x0) (y1 - y0)
+  where
+    grow (Edges a b c d) (Rect x y w h) = Edges (min a x) (min b y) (max c (x + w)) (max d (y + h))
+    Edges x0 y0 x1 y1 = foldl' grow (Edges (1 / 0) (1 / 0) (-1 / 0) (-1 / 0)) rects
 
 -- | A set of rects reduced to what damage needs from it.
 data RectGroup = RectGroup
@@ -728,37 +664,30 @@ rectDeltas :: Context -> [Rect] -> IM.IntMap Rect -> IM.IntMap Rect -> IO (RectG
 rectDeltas ctx panelRects old new
   | ptrEq old new = pure (emptyGroup, emptyGroup)
   | otherwise = do
-      settled <- newRectUnion
-      churn <- newRectUnion
-      let note acc@(RectUnion a _) r = do
-            addRect acc r
-            unless (any (rectFullyInside r) panelRects) $
-              readPrimArray a 4 >>= writePrimArray a 4 . (+ 1)
+      settled <- newIORef []
+      churn <- newIORef []
       IM.foldrWithKey
         ( \k r rest -> do
             when (rectNonEmpty r) $ do
-              when (IM.notMember k new || IM.notMember k old) $ note churn r
+              when (IM.notMember k new || IM.notMember k old) $ addRect churn r
               clipped <- (`clipToViewport` r) <$> keyViewportClip ctx k
-              when (rectArea clipped >= layoutSettleMinArea) $ note settled clipped
+              when (rectArea clipped >= layoutSettleMinArea) $ addRect settled clipped
             rest
         )
         (pure ())
         (IM.mergeWithKey (\_ a b -> if a /= b then Just (rectUnion a b) else Nothing) id id old new)
-      (,) <$> freeze settled <*> freeze churn
+      (,) <$> (group <$> readIORef settled) <*> (group <$> readIORef churn)
   where
     emptyGroup = RectGroup False False (Rect 0 0 0 0)
-    freeze acc@(RectUnion a _) = do
-      bounds <- readRectUnion acc
-      x0 <- readPrimArray a 0
-      x1 <- readPrimArray a 2
-      outside <- readPrimArray a 4
-      let !present = x0 <= x1
-      pure (RectGroup present (present && not (null panelRects) && outside == 0) bounds)
+    inPanels r = any (rectFullyInside r) panelRects
+    group rs = RectGroup (not (null rs)) (not (null rs || null panelRects) && all inPanels rs) (rectBounds rs)
 
 -- | The scroll-viewport clip of a keyed node. Look it up once per key and
 -- clip each of its rects with 'clipToViewport'.
 keyViewportClip :: Context -> Int -> IO (Maybe Rect)
-keyViewportClip ctx k = findNodeByKey ctx k >>= maybe (pure Nothing) (getClipRect (ctxNodeArena ctx))
+keyViewportClip ctx k = lookupNodeByKey na k >>= maybe (pure Nothing) (getClipRect na)
+  where
+    na = ctxNodeArena ctx
 
 clipToViewport :: Maybe Rect -> Rect -> Rect
 clipToViewport clip r = maybe r (fromMaybe (Rect 0 0 0 0) . rectIntersect r) clip
@@ -777,23 +706,18 @@ clipKeyRect k clip r
 
 scrollOffsetDamage :: Context -> RectUnion -> WidgetStore -> WidgetStore -> IO ()
 scrollOffsetDamage ctx acc oldStore newStore =
-  unless (IM.null changedKeys) $ do
+  unless (null changedKeys) $ do
     -- Every store key that holds a scroll node's offset, mapped to the first
     -- such node, and every scroll range, mapped to each node with that id.
     -- Built once, only on frames where an offset or range changed.
     owners <- foldClassNodeRevM na PointerNodes addOwner IM.empty
-    IM.foldrWithKey
-      ( \k _ rest -> do
-          forM_ (IM.findWithDefault [] k owners) $ \idx -> do
-            -- The scroll node's rect covers the content viewport AND the
-            -- scrollbar lane: offset changes move the thumb, which paints
-            -- outside the content clip.
-            getNonzeroRect na idx >>= mapM_ (addRect acc)
-            floatingAncestorRect ctx idx >>= mapM_ (addRect acc)
-          rest
-      )
-      (pure ())
-      changedKeys
+    forM_ changedKeys $ \k ->
+      forM_ (IM.findWithDefault [] k owners) $ \idx -> do
+        -- The scroll node's rect covers the content viewport AND the
+        -- scrollbar lane: offset changes move the thumb, which paints
+        -- outside the content clip.
+        getNonzeroRect na idx >>= mapM_ (addRect acc)
+        walkFloatingAncestors na idx (\i _ -> getNonzeroRect na i) >>= mapM_ (addRect acc)
   where
     na = ctxNodeArena ctx
     -- Floating-pane offsets live in storeFloat; wheel/keyboard offsets
@@ -805,12 +729,10 @@ scrollOffsetDamage ctx acc oldStore newStore =
     -- and repaints nothing here. Two scrollers can share an id (a table's
     -- frozen pane and body), and only the first publishes, so a range change
     -- repaints every scroller with the id.
+    (oldF, newF) = (storeFloat oldStore, storeFloat newStore)
     changedKeys =
-      changedKeysWith (fmap (const ()) . IM.filter (/= 0)) (storeFloat oldStore) (storeFloat newStore)
-        `IM.union` changedKeysWith (fmap (const ())) (storePoint oldStore) (storePoint newStore)
-    changedKeysWith :: Eq a => (IM.IntMap a -> IM.IntMap ()) -> IM.IntMap a -> IM.IntMap a -> IM.IntMap ()
-    changedKeysWith oneSided old new =
-      IM.mergeWithKey (\_ a b -> if a /= b then Just () else Nothing) oneSided oneSided old new
+      filter (\k -> IM.findWithDefault 0 k oldF /= IM.findWithDefault 0 k newF) (diffKeys oldF newF)
+        ++ diffKeys (storePoint oldStore) (storePoint newStore)
     addOwner m idx = do
       nt <- getNodeType na idx
       if not (isScrollNode nt)
@@ -825,10 +747,6 @@ scrollOffsetDamage ctx acc oldStore newStore =
                 IM.insert (slotKey SlotTextAreaScroll widKey) one $
                   IM.insertWith (++) (slotKey SlotScrollRange widKey) one m
 
-floatingAncestorRect :: Context -> Int -> IO (Maybe Rect)
-floatingAncestorRect ctx idx =
-  walkFloatingAncestors (ctxNodeArena ctx) idx (\i _ -> getNonzeroRect (ctxNodeArena ctx) i)
-
 -- | The store keys (outside the scroll offsets) whose value changed and that
 -- are not themselves widget keys, with the node each owns through a sub-slot
 -- spelling. Changed widget keys were already damaged by their 'ReqKey'
@@ -836,7 +754,7 @@ floatingAncestorRect ctx idx =
 storeKeyChanges :: Context -> WidgetStore -> WidgetStore -> IO ([Int], IM.IntMap NodeIdx)
 storeKeyChanges ctx oldStore newStore = do
   misses <-
-    filterM (\k -> isNothing <$> findNodeByKey ctx k) (slotChangedKeys oldStore newStore)
+    filterM (\k -> isNothing <$> lookupNodeByKey (ctxNodeArena ctx) k) (slotChangedKeys oldStore newStore)
   owners <-
     if null misses then pure IM.empty else storeKeyOwners (ctxNodeArena ctx) (IS.fromList misses)
   pure (misses, owners)
@@ -892,12 +810,3 @@ ownerSlots =
   , SlotMenuOpen
   , SlotColorBase
   ]
-
--- | Damage for the changed store keys that are not widget keys, through the
--- widgets owning them ('storeKeyOwners'): each owner once, as a 'ReqWidget'
--- with the standard slop would.
-storeKeyDamage :: Context -> RectUnion -> IM.IntMap Rect -> IM.IntMap Rect -> IM.IntMap NodeIdx -> IO ()
-storeKeyDamage ctx acc oldRects newRects owners =
-  forM_ (IS.toList (IS.fromList (IM.elems owners))) $ \idx -> do
-    wid <- getWidgetId (ctxNodeArena ctx) idx
-    resolveKeyDamage ctx acc oldRects newRects (intKey wid) (DamageInflated defaultDamageSlop)
