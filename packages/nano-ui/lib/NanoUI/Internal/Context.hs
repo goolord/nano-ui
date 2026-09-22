@@ -19,6 +19,7 @@ module NanoUI.Internal.Context
   , DrawingEntry (..)
   , DrawFitCache (..)
   , SpanCacheEntry (..)
+  , SpanLines (..)
   , WidgetTextCacheEntry (..)
   , WidgetTextPlacement (..)
   , InteractionState (..)
@@ -158,6 +159,7 @@ module NanoUI.Internal.Context
   , withFontResolver
   , wrapMeasureCache
   , clearMeasureCache
+  , cachedWrapText
   , ensureMetricCaches
   , withExternalText
   , withTheme
@@ -244,6 +246,8 @@ import Control.Monad (foldM, forM, when, (<=<))
 import Data.Bits ((.&.))
 import Data.ByteString (ByteString)
 import Data.Dynamic (fromDynamic, toDyn)
+import Data.List (find)
+import Data.Maybe (fromMaybe, isJust)
 import Data.HashMap.Strict qualified as HashMap
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
@@ -297,10 +301,13 @@ import NanoUI.Internal.Context.Types
   , MeasureCache (..)
   , MeasureCacheKey
   , MetricSource (..)
+  , WrapCache (..)
   , emptyMeasureCache
+  , emptyWrapCache
   , OverlayState (..)
   , PointerRoute (..)
   , SpanCacheEntry (..)
+  , SpanLines (..)
   , TextFieldClickCell (..)
   , TextInputDrag (..)
   , TextInputMenu (..)
@@ -321,7 +328,7 @@ import NanoUI.Internal.Context.Types
   )
 import NanoUI.Internal.Draw (newDrawArena)
 import NanoUI.Internal.Draw qualified as Draw
-import NanoUI.Internal.Font (FontMetrics, fmLineHeight, measureTextIO, monospaceMetrics, scaleFontMetrics)
+import NanoUI.Internal.Font (FontMetrics, WrapResult (..), fmLineHeight, measureTextIO, monospaceMetrics, scaleFontMetrics, wrapTextIO)
 import NanoUI.Internal.Frame.SpanArena (newSpanArena)
 import NanoUI.Internal.Frame.Scroll.Geometry (defaultScrollConfig)
 import NanoUI.Internal.Id (WidgetId (..), initialIdContext)
@@ -487,6 +494,47 @@ cacheMeasureText ref scale base txt = do
 measureCacheCap :: Int
 measureCacheCap = 4096
 
+-- | 'wrapTextIO' through the context's wrap cache ('ctxWrapCache'). @font@
+-- names the font @lineW@ measures in ('NanoUI.Internal.WidgetText.textNodeFontKey').
+-- A text keeps the results of the last few widths it was wrapped at, each
+-- with the widths it holds for, so wrapping it again at a width that breaks
+-- the same, as while a window or pane edge is dragged, measures nothing,
+-- and the solve and the text spans share one wrap. A change of font metrics
+-- ('ctxMetricGen') drops every result.
+cachedWrapText :: Context -> Int -> (Text -> IO Float) -> Text -> Float -> IO WrapResult
+cachedWrapText ctx font lineW txt maxW
+  | maxW <= 0 = wrapTextIO lineW txt maxW
+  | otherwise = do
+      gen <- readIORef (ctxMetricGen ctx)
+      WrapCache cachedGen young0 n0 old0 <- readIORef (ctxWrapCache ctx)
+      let key = (txt, font)
+          holds r = wrFitW r <= maxW && maxW < wrBreakW r
+          current = cachedGen == gen
+          young = if current then young0 else HashMap.empty
+          n = if current then n0 else 0
+          old = if current then old0 else HashMap.empty
+          mine = HashMap.lookup key young
+      case mine >>= find holds of
+        Just r -> pure r
+        Nothing -> do
+          -- A hit in the old generation moves up to the young one.
+          r <- maybe (wrapTextIO lineW txt maxW) pure (HashMap.lookup key old >>= find holds)
+          let entries = r : take (wrapsPerText - 1) (fromMaybe [] mine)
+              cache
+                | isJust mine = WrapCache gen (HashMap.insert key entries young) n old
+                | n >= wrapCacheCap = WrapCache gen (HashMap.singleton key entries) 1 young
+                | otherwise = WrapCache gen (HashMap.insert key entries young) (n + 1) old
+          writeIORef (ctxWrapCache ctx) $! cache
+          pure r
+
+-- | Texts per generation of the wrap cache.
+wrapCacheCap :: Int
+wrapCacheCap = 1024
+
+-- | Widths the wrap cache keeps for one text.
+wrapsPerText :: Int
+wrapsPerText = 8
+
 -- | Install measurement under a scale-specific cache key when caching is
 -- enabled. Otherwise install the callback directly.
 wrapMeasureCache :: Float -> Context -> (Text -> IO (Float, Float)) -> Context
@@ -647,6 +695,7 @@ newContext = do
   ctxDerivedCache <- newIORef IM.empty
   ctxLayoutCache <- newIORef Nothing
   ctxMetricGen <- newIORef 0
+  ctxWrapCache <- newIORef emptyWrapCache
   ctxLastMetricSource <- newIORef Nothing
   ctxPaintFull <- newIORef True
   -- References above use their field names; font-dependent defaults stay

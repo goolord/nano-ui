@@ -5,6 +5,7 @@ import Control.Exception (evaluate)
 import Data.ByteString qualified as BS
 import Foreign.ForeignPtr (withForeignPtr)
 import Foreign.Ptr (castPtr)
+import Data.Text qualified as T
 import NanoUI.Internal.Context (Context (..))
 import NanoUI.Internal.Layout.Arena
   ( NodeType (..), addNodeFromLayout, getRect, setNodeText
@@ -18,7 +19,39 @@ tests =
   , spec "widget-placement-cache" runWidgetPlacementCacheTest
   , spec "layout-cache-paint-state" runLayoutPaintStateTest
   , spec "partial-measure-ancestor-width" runPartialMeasureAncestorTest
+  , spec "wrap-width-bounds" runWrapBoundsTest
   ]
+
+-- | A wrap holds for every width from its widest fitting line up to, not
+-- including, its break width: the wrap cache hands it out for all of them.
+-- Characters of different widths, words broken by character, forced single
+-- characters, blank paragraphs and runs of spaces.
+runWrapBoundsTest :: Context -> IORef Int -> IO ()
+runWrapBoundsTest _ failed = do
+  let charW :: Char -> Float
+      charW c = case c of
+        ' ' -> 3
+        'i' -> 2
+        'l' -> 2.5
+        'm' -> 9
+        'W' -> 11
+        _ -> 5 + fromIntegral (fromEnum c `mod` 3)
+      lineW t = pure (sum (map charW (T.unpack t)))
+      texts =
+        [ "the quick brown fox jumps over the lazy dog"
+        , "a supercalifragilisticexpialidocious word among small ones"
+        , "two\n\nparagraphs, the second with Wide Words mmm www"
+        , "nospacesatalljustonelongrunoflettersWWWmmm"
+        , "  leading and  double spaced  words  "
+        ]
+  forM_ texts $ \txt -> forM_ [1, 3 .. 320 :: Float] $ \w -> do
+    r <- wrapTextIO lineW txt w
+    let hi = min (wrBreakW r) (w + 400)
+        probes = filter (\v -> v > 0 && v >= wrFitW r && v < wrBreakW r) [wrFitW r, w, (wrFitW r + hi) / 2, hi - 0.01]
+    assert failed (wrFitW r <= w && w < wrBreakW r)
+    forM_ probes $ \v -> do
+      again <- wrapTextLinesIO lineW txt v
+      assertEq failed (txt, w, v, wrLines r) (txt, w, v, again)
 
 -- Copy the mutable draw buffers before another frame can reuse them. Counts
 -- alone cannot detect stale geometry, colors or translated text.

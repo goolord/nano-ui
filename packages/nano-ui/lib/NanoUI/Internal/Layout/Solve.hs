@@ -45,7 +45,8 @@ import NanoUI.Internal.Font
   , classifyScrollBar
   , measureTextIO
   , lineWidthIO
-  , measureTextWrappedIO
+  , WrapResult
+  , wrapMeasure
   , tableCellInset
   , ScrollBarSlot (..)
   , widgetPadding
@@ -152,6 +153,7 @@ import NanoUI.Internal.Types (PopupAnchor (..), PopupPlacement (..), Rect (..), 
 import NanoUI.Internal.WidgetText
   ( hasFlag
   , colorPickerSvH
+  , textNodeFontKey
   , textNodeFontVariant
   , textNodeFontWeight
   , textNodeFontStyle
@@ -192,6 +194,7 @@ data SolveEnv = SolveEnv
   , seMeasure :: !(Text -> IO (Float, Float))
   , seResolveFont :: !FontResolver
   , seLookupMeasure :: !(WidgetId -> IO (Maybe CustomMeasureFn))
+  , seWrap :: !TextWrapper
   , seSub :: !(IOArr Word64)
   -- ^ The arena's per-node subtree hashes, written by 'computeSubtreeHashes'
   -- for this frame and read by the measure pass.
@@ -217,14 +220,20 @@ data Measurers = Measurers
   , msMeasure :: !(Text -> IO (Float, Float))
   , msResolveFont :: !FontResolver
   , msLookupMeasure :: !(WidgetId -> IO (Maybe CustomMeasureFn))
+  , msWrap :: !TextWrapper
   }
 
+-- | Wrap text in a font ('textNodeFontKey') with its line measure, as
+-- 'wrapTextIO' does. The context's shares results across frames and with
+-- the text spans ('NanoUI.Internal.Context.cachedWrapText').
+type TextWrapper = Int -> (Text -> IO Float) -> Text -> Float -> IO WrapResult
+
 solveEnv :: NodeArena -> Measurers -> Maybe LayoutCache -> IO SolveEnv
-solveEnv na Measurers {msFm, msMonoFm, msMeasure, msResolveFont, msLookupMeasure} mCache = do
+solveEnv na Measurers {msFm, msMonoFm, msMeasure, msResolveFont, msLookupMeasure, msWrap} mCache = do
   a <- arenaArrays na
   (sub, measured) <- subtreeArrays na
   pure $
-    SolveEnv na a msFm msMonoFm msMeasure msResolveFont msLookupMeasure sub measured
+    SolveEnv na a msFm msMonoFm msMeasure msResolveFont msLookupMeasure msWrap sub measured
       (mfilter ((> 0) . lcCount) mCache)
       Nothing
 
@@ -238,6 +247,7 @@ data FlowAcc = FlowAcc !Int !Float !Float
 data TextMeasurer = TextMeasurer
   { tmMetrics :: !FontMetrics
   , tmVariant :: !FontVariant
+  , tmFontKey :: !Int
   , tmHostLine :: Text -> IO (Float, Float)
   }
 
@@ -252,7 +262,7 @@ textNodeMeasurer SolveEnv {seArena = na, seFm = fm, seMonoFm = monoFm, seMeasure
     if isDefaultNodeFont size weight style variant
       then pure (if variant == FontMono then monoFm else fm, measure)
       else resolveFont size weight style variant
-  pure (TextMeasurer metrics variant measureLine)
+  pure (TextMeasurer metrics variant (textNodeFontKey size si) measureLine)
 
 -- Keep these operations as inline functions rather than allocating two
 -- closures for every resolved node, including nodes that never wrap.
@@ -263,10 +273,13 @@ measureFontLine TextMeasurer {tmMetrics = metrics, tmVariant = variant, tmHostLi
   | otherwise = hostLine text
 
 {-# INLINE measureFontWrapped #-}
-measureFontWrapped :: TextMeasurer -> Text -> Float -> IO (Float, Float)
-measureFontWrapped TextMeasurer {tmMetrics = metrics, tmVariant = variant, tmHostLine = hostLine} text width
-  | variant == FontMono = measureTextWrappedIO (lineWidthIO metrics) metrics text width
-  | otherwise = measureTextWrappedIO (fmap fst . hostLine) metrics text width
+measureFontWrapped :: SolveEnv -> TextMeasurer -> Text -> Float -> IO (Float, Float)
+measureFontWrapped env TextMeasurer {tmMetrics = metrics, tmVariant = variant, tmFontKey = font, tmHostLine = hostLine} text width =
+  wrapMeasure metrics width <$> seWrap env font lineW text width
+  where
+    lineW
+      | variant == FontMono = lineWidthIO metrics
+      | otherwise = fmap fst . hostLine
 
 -- | A measured text node: whether it wrapped, its content size, and the line
 -- height of its font.
@@ -289,7 +302,7 @@ measureTextNodeAt env idx txt outerW shouldWrap = do
       na = seArena env
   if T.any (== '\n') txt || shouldWrap wrapW tw0
     then do
-      (tw, th) <- memoizeWidth na (naWrapMemo na) idx wrapW (measureFontWrapped measurer txt wrapW)
+      (tw, th) <- memoizeWidth na (naWrapMemo na) idx wrapW (measureFontWrapped env measurer txt wrapW)
       pure (TextBox True tw th lineH)
     else pure (TextBox False tw0 th0 lineH)
 

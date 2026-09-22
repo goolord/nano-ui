@@ -21,6 +21,9 @@ module NanoUI.Internal.Font
   , monospaceMetrics
   , scaleFontMetrics
   , measureTextWrappedIO
+  , WrapResult (..)
+  , wrapMeasure
+  , wrapTextIO
   , wrapTextLinesIO
   , truncateTextIO
   , lineWidth
@@ -61,7 +64,9 @@ module NanoUI.Internal.Font
   , sliderHandleSlack
   ) where
 
+import Control.Monad (forM_, unless)
 import Data.Char (isSpace)
+import Data.IORef (modifyIORef', newIORef, readIORef)
 import qualified Data.Map.Strict as Map
 import Data.Primitive.PrimArray (PrimArray, imapPrimArray, indexPrimArray, mapPrimArray, sizeofPrimArray)
 import Data.Text (Text)
@@ -559,13 +564,32 @@ lineWidth fm line
     step (!w, !prev) c = (w + kernedAdvance fm (Just prev) c, c)
 
 measureTextWrappedIO :: (Text -> IO Float) -> FontMetrics -> Text -> Float -> IO (Float, Float)
-measureTextWrappedIO lineW fm txt maxW = do
-  textLines <- wrapTextLinesIO lineW txt maxW
-  ws <- mapM lineW textLines
+measureTextWrappedIO lineW fm txt maxW = wrapMeasure fm maxW <$> wrapTextIO lineW txt maxW
+
+-- | The size of text wrapped to @maxW@ into the lines of @wrap@.
+wrapMeasure :: FontMetrics -> Float -> WrapResult -> (Float, Float)
+wrapMeasure fm maxW wrap =
   let lineH = fmLineHeight fm
-  pure $ case textLines of
-    [] -> (0, lineH)
-    _ -> (min maxW (maximum ws), lineH * fromIntegral (length textLines))
+   in case wrLines wrap of
+        [] -> (0, lineH)
+        textLines -> (min maxW (wrWidest wrap), lineH * fromIntegral (length textLines))
+
+-- | Text wrapped to a width, and the widths it wraps the same at.
+data WrapResult = WrapResult
+  { wrLines :: [Text]
+  -- ^ The lines, as 'wrapTextLinesIO' gives them.
+  , wrWidest :: Float
+  -- ^ The widest line, which is wider than the width asked for when a
+  -- single character is.
+  , wrFitW :: Float
+  -- ^ The widest line that fit. At any width from here up to 'wrBreakW'
+  -- every such line still fits and none could take more, so the lines are
+  -- the same.
+  , wrBreakW :: Float
+  -- ^ The narrowest width at which some line would take another word or
+  -- character, or a paragraph would fit whole.
+  }
+  deriving (Eq, Show)
 
 -- | Wrap each paragraph to @maxW@ using the host line measure: whole words
 -- first, characters for words (or paragraphs) that cannot fit. Each line
@@ -573,78 +597,109 @@ measureTextWrappedIO lineW fm txt maxW = do
 -- host measure then confirms, so a paragraph costs a few host measures a line
 -- rather than one a word.
 wrapTextLinesIO :: (Text -> IO Float) -> Text -> Float -> IO [Text]
-wrapTextLinesIO lineW txt maxW = concat <$> mapM wrapParagraph (T.lines txt)
-  where
-    wrapParagraph para
-      | maxW <= 0 = pure []
-      | T.null para = pure [""]
-      | otherwise = do
-          w <- lineW para
-          let perLine = charsPerWidth w para maxW
-          if w <= maxW
-            then pure [para]
-            else if T.any (== ' ') para
-              then wrapWords perLine (singleSpaced para) []
-              else reverse <$> charLines perLine para []
-    -- Lines keep one space between words, whatever separated them.
-    singleSpaced para
-      | T.all (\c -> c == ' ' || not (isSpace c)) para
-          && not (" " `T.isPrefixOf` para || " " `T.isSuffixOf` para || "  " `T.isInfixOf` para) =
-          para
-      | otherwise = T.unwords (T.words para)
-    -- @rest@ is the paragraph from its next word on, one space between
-    -- words, so every candidate line is a slice of it and costs no copy.
-    wrapWords perLine = startLine
-      where
-        startLine rest acc
-          | T.null rest = pure (reverse acc)
-          | otherwise = do
-              let word = T.takeWhile (/= ' ') rest
-              width <- lineW word
-              if width <= maxW
-                then extend rest (T.length word) acc
-                else do
-                  -- The last piece of a broken word starts the next line.
-                  pieces <- charLines perLine word []
-                  case pieces of
-                    piece : done -> extend (T.drop (T.length word - T.length piece) rest) (T.length piece) (done ++ acc)
-                    [] -> startLine (T.drop (T.length word + 1) rest) acc
-        -- Append as many of the next words as fit to the line that starts
-        -- @fromLine@ and is @lineLen@ characters long. The line can end at
-        -- @lineLen@, before each later space, or at the paragraph's end; the
-        -- search starts from the last of those within @perLine@ characters
-        -- and steps a word at a time.
-        extend fromLine lineLen acc = do
-          let fits end = (<= maxW) <$> lineW (T.take end fromLine)
-              nextEnd end
-                | T.null (T.drop end fromLine) = Nothing
-                | otherwise = Just (end + 1 + T.length (T.takeWhile (/= ' ') (T.drop (end + 1) fromLine)))
-              prevEnd end = T.length (fst (T.breakOnEnd " " (T.take end fromLine))) - 1
-              guess
-                | T.compareLength fromLine perLine /= GT = T.length fromLine
-                | otherwise = max lineLen (prevEnd (perLine + 1))
-              up end = case nextEnd end of
-                Just end' -> fits end' >>= \ok -> if ok then up end' else pure end
-                Nothing -> pure end
-              down end
-                | end' <= lineLen = pure lineLen
-                | otherwise = fits end' >>= \ok -> if ok then pure end' else down end'
-                where
-                  end' = prevEnd end
-          end <-
-            if guess <= lineLen
-              then up lineLen
-              else fits guess >>= \ok -> if ok then up guess else down guess
-          let line = T.take end fromLine
-              rest = T.drop (end + 1) fromLine
-          if T.null rest then pure (reverse (line : acc)) else startLine rest (line : acc)
-    charLines perLine chunk acc
-      | T.null chunk = pure acc
-      | otherwise = do
-          (line, rest) <- takeWidth perLine lineW maxW chunk
-          if T.null line
-            then pure acc
-            else charLines perLine rest (line : acc)
+wrapTextLinesIO lineW txt maxW = wrLines <$> wrapTextIO lineW txt maxW
+
+-- | 'wrapTextLinesIO' with the widths its result holds for. Each line is the
+-- longest that fits, and text only gets wider as it gets longer, so a line
+-- is decided by its own width and by the width of it with one more word (or
+-- character). The widest of the first and the narrowest of the second bound
+-- the widths that wrap the same. Measuring each line with its next word is
+-- the extra cost, and the search has measured most of those already.
+wrapTextIO :: (Text -> IO Float) -> Text -> Float -> IO WrapResult
+wrapTextIO lineW txt maxW = do
+  widestRef <- newIORef 0
+  fitRef <- newIORef 0
+  breakRef <- newIORef (1 / 0)
+  let -- A line of the result, @w@ wide.
+      lineOf w = do
+        modifyIORef' widestRef (max w)
+        if w <= maxW then modifyIORef' fitRef (max w) else breakAt w
+      -- A width from which the result would differ.
+      breakAt w = modifyIORef' breakRef (min w)
+      wrapParagraph para
+        | T.null para = pure [""]
+        | otherwise = do
+            w <- lineW para
+            let perLine = charsPerWidth w para maxW
+            if w <= maxW
+              then [para] <$ lineOf w
+              else do
+                breakAt w
+                if T.any (== ' ') para
+                  then wrapWords perLine (singleSpaced para) []
+                  else reverse <$> charLines perLine para []
+      -- Lines keep one space between words, whatever separated them.
+      singleSpaced para
+        | T.all (\c -> c == ' ' || not (isSpace c)) para
+            && not (" " `T.isPrefixOf` para || " " `T.isSuffixOf` para || "  " `T.isInfixOf` para) =
+            para
+        | otherwise = T.unwords (T.words para)
+      -- @rest@ is the paragraph from its next word on, one space between
+      -- words, so every candidate line is a slice of it and costs no copy.
+      wrapWords perLine = startLine
+        where
+          startLine rest acc
+            | T.null rest = pure (reverse acc)
+            | otherwise = do
+                let word = T.takeWhile (/= ' ') rest
+                width <- lineW word
+                if width <= maxW
+                  then extend rest (T.length word) acc
+                  else do
+                    breakAt width
+                    -- The last piece of a broken word starts the next line.
+                    pieces <- charLines perLine word []
+                    case pieces of
+                      piece : done -> extend (T.drop (T.length word - T.length piece) rest) (T.length piece) (done ++ acc)
+                      [] -> startLine (T.drop (T.length word + 1) rest) acc
+          -- Append as many of the next words as fit to the line that starts
+          -- @fromLine@ and is @lineLen@ characters long. The line can end at
+          -- @lineLen@, before each later space, or at the paragraph's end; the
+          -- search starts from the last of those within @perLine@ characters
+          -- and steps a word at a time.
+          extend fromLine lineLen acc = do
+            let fits end = (<= maxW) <$> lineW (T.take end fromLine)
+                nextEnd end
+                  | T.null (T.drop end fromLine) = Nothing
+                  | otherwise = Just (end + 1 + T.length (T.takeWhile (/= ' ') (T.drop (end + 1) fromLine)))
+                prevEnd end = T.length (fst (T.breakOnEnd " " (T.take end fromLine))) - 1
+                guess
+                  | T.compareLength fromLine perLine /= GT = T.length fromLine
+                  | otherwise = max lineLen (prevEnd (perLine + 1))
+                up end = case nextEnd end of
+                  Just end' -> fits end' >>= \ok -> if ok then up end' else pure end
+                  Nothing -> pure end
+                down end
+                  | end' <= lineLen = pure lineLen
+                  | otherwise = fits end' >>= \ok -> if ok then pure end' else down end'
+                  where
+                    end' = prevEnd end
+            end <-
+              if guess <= lineLen
+                then up lineLen
+                else fits guess >>= \ok -> if ok then up guess else down guess
+            let line = T.take end fromLine
+                rest = T.drop (end + 1) fromLine
+            lineW line >>= lineOf
+            forM_ (nextEnd end) $ \end' -> lineW (T.take end' fromLine) >>= breakAt
+            if T.null rest then pure (reverse (line : acc)) else startLine rest (line : acc)
+      charLines perLine chunk acc
+        | T.null chunk = pure acc
+        | otherwise = do
+            (line, rest) <- takeWidth perLine lineW maxW chunk
+            if T.null line
+              then pure acc
+              else do
+                lineW line >>= lineOf
+                unless (T.null rest) $
+                  lineW (T.take (T.length line + 1) chunk) >>= breakAt
+                charLines perLine rest (line : acc)
+  if maxW <= 0
+    -- Nothing fits, and no other width wraps to nothing.
+    then pure (WrapResult [] 0 1 0)
+    else do
+      textLines <- concat <$> mapM wrapParagraph (T.lines txt)
+      WrapResult textLines <$> readIORef widestRef <*> readIORef fitRef <*> readIORef breakRef
 
 -- | About how many characters of @txt@, which the host measures @w@ wide,
 -- fit in @maxW@.

@@ -20,8 +20,10 @@ import qualified Data.Text as T
 import NanoUI.Internal.Context
   ( Context (..)
   , SpanCacheEntry (..)
+  , SpanLines (..)
   , WidgetTextCacheEntry (..)
   , WidgetTextPlacement (..)
+  , cachedWrapText
   , nodeTheme
   )
 import NanoUI.Internal.Damage (floatingPanelRects)
@@ -35,8 +37,8 @@ import NanoUI.Internal.Font
   , tableCellInset
   , treeRowLeading
   , truncateTextIO
+  , WrapResult (..)
   , widgetContentInset
-  , wrapTextLinesIO
   )
 import NanoUI.Internal.Frame.Chrome (displayText, textInputFocused, textInputValue, widgetVisualStyle)
 import NanoUI.Internal.Frame.Node (readScrollNode, resolveFontFor, scrollNodeViewport)
@@ -77,6 +79,7 @@ import NanoUI.Internal.Types (Color (..), Rect (..), lerpColor, onGrid, rectInte
 import NanoUI.Internal.Widgets.ColorPicker (ColorPickerPart (..), colorPickerPartOf, colorPickerPartRect, colorPickerPreviewGeom)
 import NanoUI.Internal.WidgetText
   ( hasFlag
+  , textNodeFontKey
   , colorPickerCurrentLabel
   , colorPickerNewLabel
   , buttonFlagClose
@@ -209,49 +212,34 @@ collectNodeTextSpans ctx idx = do
             _ -> styleFg (themePanel theme)
           fg = fromMaybe variantFg mCustomCol
           bg = fromMaybe (styleBg (themePanel theme)) mStripe
+          !ix = if isJust mStripe then tableCellInset else 0
+          -- What the lines depend on: everything but where the node is and
+          -- how tall, and the colours. Inlined at both uses, so a cache hit
+          -- allocates no closure for it.
+          {-# INLINE sameLines #-}
+          sameLines e =
+            sceText e == raw
+              && sceStyle e == si
+              && sceFontSize e == fontSize
+              && sceWidthTag e == fromEnum wTag
+              && rectW (sceRect e) == w
+              && sceEffMaxW e == effMaxW
+              && sceRowChild e == isRowChild
+              && sceInset e == ix
       cache <- readIORef (ctxSpanCache ctx)
       case IM.lookup idx cache of
         Just e
-          | sceText e == raw
+          | sameLines e
+              && sceRect e == rect
               && sceFg e == fg
               && sceBg e == bg
-              && sceStyle e == si
-              && sceFontSize e == fontSize
-              && sceAlign e == fromEnum ax
-              && sceWidthTag e == fromEnum wTag
-              && sceRect e == rect
-              && sceEffMaxW e == effMaxW
-              && sceRowChild e == isRowChild ->
+              && sceAlign e == fromEnum ax ->
               pure (sceSpans e)
-        _ -> do
-          placed <-
-            if T.null raw
-              then pure []
-              else do
-                (fm, _, measure) <- resolveFontFor ctx NodeText fontSize si
-                let ix = if isJust mStripe then tableCellInset else 0
-                    measureW = fmap fst . measure
-                    lineH = fmLineHeight fm
-                    contentW = max 0 (w - 2 * ix)
-                    wrapCap = textWrapCap effMaxW wTag w
-                tw <- measureW raw
-                if T.any (== '\n') raw || (not isRowChild && wrapCap < 1e8 && wrapCap + 0.5 < tw)
-                  then do
-                    textLines <- wrapTextLinesIO measureW raw (max 0 (wrapCap - 2 * ix))
-                    forM (zip [(0 :: Int) ..] textLines) $ \(i, line) -> do
-                      prepared <- prepareFontMetrics fm line
-                      let (tx, used) = alignedTextPen ax x w ix prepared line
-                          ty = centeredTextY fm (y + onGrid (fmSnapScale fm) (fromIntegral i * lineH)) lineH lineH
-                      pure (Rect tx ty used lineH, line)
-                  else do
-                    shown <-
-                      if tw > contentW && contentW > 0 && (wTag == SizingGrow || maxW < 1e8)
-                        then truncateTextIO measureW contentW raw
-                        else pure raw
-                    prepared <- prepareFontMetrics fm shown
-                    let (tx, used) = alignedTextPen ax x w ix prepared shown
-                    pure [(Rect tx (centeredTextY fm y h lineH) used lineH, shown)]
-          let spans = [(r, line, fg, bg) | (r, line) <- placed]
+        mEntry -> do
+          (fm, textLines) <- case mEntry of
+            Just e | sameLines e -> pure (sceFont e, sceLines e)
+            _ -> nodeTextLines ctx raw si fontSize wTag maxW effMaxW isRowChild ix w
+          let spans = [(r, line, fg, bg) | (r, line) <- placeSpanLines ax fm ix x y w h textLines]
           writeIORef (ctxSpanCache ctx) $
             IM.insert
               idx
@@ -266,10 +254,54 @@ collectNodeTextSpans ctx idx = do
                 , sceRect = rect
                 , sceEffMaxW = effMaxW
                 , sceRowChild = isRowChild
+                , sceInset = ix
+                , sceFont = fm
+                , sceLines = textLines
                 , sceSpans = spans
                 }
               cache
           pure spans
+
+-- | A text node's lines for width @w@ and the font they are set in: wrapped
+-- where the node wraps (through the context's wrap cache, which the solve
+-- shares), otherwise one line, truncated to fit a node that grows or has a
+-- maximum width.
+nodeTextLines ::
+  Context -> T.Text -> Int -> Float -> SizingTag -> Float -> Float -> Bool -> Float -> Float -> IO (FontMetrics, SpanLines)
+nodeTextLines ctx raw si fontSize wTag maxW effMaxW isRowChild ix w
+  | T.null raw = pure (ctxFontMetrics ctx, SpanWrapped [])
+  | otherwise = do
+      (fm, _, measure) <- resolveFontFor ctx NodeText fontSize si
+      let measureW = fmap fst . measure
+          contentW = max 0 (w - 2 * ix)
+          wrapCap = textWrapCap effMaxW wTag w
+      tw <- measureW raw
+      if T.any (== '\n') raw || (not isRowChild && wrapCap < 1e8 && wrapCap + 0.5 < tw)
+        then do
+          wrap <- cachedWrapText ctx (textNodeFontKey fontSize si) measureW raw (max 0 (wrapCap - 2 * ix))
+          prepared <- forM (wrLines wrap) $ \line -> (,) line <$> prepareFontMetrics fm line
+          pure (fm, SpanWrapped prepared)
+        else do
+          shown <-
+            if tw > contentW && contentW > 0 && (wTag == SizingGrow || maxW < 1e8)
+              then truncateTextIO measureW contentW raw
+              else pure raw
+          (,) fm . SpanSingle shown <$> prepareFontMetrics fm shown
+
+-- | Where the lines of a text node at @(x, y)@, @w@ by @h@, go.
+placeSpanLines :: AlignX -> FontMetrics -> Float -> Float -> Float -> Float -> Float -> SpanLines -> [(Rect, T.Text)]
+placeSpanLines ax fm ix x y w h = \case
+  SpanWrapped textLines ->
+    [ (Rect tx ty used lineH, line)
+    | (i, (line, prepared)) <- zip [(0 :: Int) ..] textLines
+    , let (tx, used) = alignedTextPen ax x w ix prepared line
+          ty = centeredTextY fm (y + onGrid (fmSnapScale fm) (fromIntegral i * lineH)) lineH lineH
+    ]
+  SpanSingle shown prepared ->
+    let (tx, used) = alignedTextPen ax x w ix prepared shown
+     in [(Rect tx (centeredTextY fm y h lineH) used lineH, shown)]
+  where
+    lineH = fmLineHeight fm
 
 widgetTextSpans ::
   Context -> NodeType -> NodeIdx -> Float -> Float -> Float -> Float -> IO [(Rect, T.Text, Color, Color)]

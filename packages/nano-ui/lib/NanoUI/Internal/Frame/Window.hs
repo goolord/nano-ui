@@ -18,6 +18,7 @@ import Data.Functor ((<&>))
 import Data.Maybe (fromMaybe, isJust)
 import NanoUI.Internal.Context
   ( Context (..)
+  , cachedWrapText
   , WindowResizeDrag (..)
   , WindowResizeEdge (..)
   , damageWidget
@@ -398,4 +399,5 @@ contextMeasurers ctx =
         (fm, _) <- ctxResolveFont ctx sz weight style var
         pure (fm, ctxResolveMeasure ctx sz weight style var)
     , msLookupMeasure = lookupCustomMeasure ctx
+    , msWrap = cachedWrapText ctx
     }

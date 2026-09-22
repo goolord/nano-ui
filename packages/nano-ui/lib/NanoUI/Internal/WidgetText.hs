@@ -41,6 +41,7 @@ module NanoUI.Internal.WidgetText
   , tableStripeColor
   , stripeColor
   , packTextNodeStyleFull
+  , textNodeFontKey
   , textNodeFontVariant
   , textNodeFontWeight
   , textNodeFontStyle
@@ -63,6 +64,7 @@ import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Lazy.Builder as TB
 import qualified Data.Text.Lazy.Builder.Int as TB
 import Data.Word (Word8)
+import GHC.Float (castFloatToWord32)
 import Numeric (showHex)
 import NanoUI.Internal.Font (FontMetrics (..), fmLineHeight, widgetContentInset)
 import NanoUI.Internal.Style (FontStyle (..), FontVariant (..), FontWeight (..), TextDecoration (..), Theme (..), styleBg, themeButton, themePanel, themeWindow)
@@ -280,6 +282,12 @@ decodeStyleEnum :: forall a. (Bounded a, Enum a) => Int -> Int -> a -> Int -> a
 decodeStyleEnum shift mask fallback si =
   let v = (si `shiftR` shift) .&. mask
    in if v >= fromEnum (minBound :: a) && v <= fromEnum (maxBound :: a) then toEnum v else fallback
+
+-- | The font a text node of font size @size@ and style index @si@ is measured
+-- in, as one key: the size and the variant, weight and slant bits of the
+-- style index.
+textNodeFontKey :: Float -> Int -> Int
+textNodeFontKey size si = fromIntegral (castFloatToWord32 size) `shiftL` 16 .|. (si .&. 0x3F0F)
 
 {-# INLINE textNodeFontVariant #-}
 textNodeFontVariant :: Int -> FontVariant

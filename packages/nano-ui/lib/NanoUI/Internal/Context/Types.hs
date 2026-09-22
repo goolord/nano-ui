@@ -7,6 +7,8 @@ module NanoUI.Internal.Context.Types
   , MeasureCacheKey
   , MeasureCache (..)
   , emptyMeasureCache
+  , WrapCache (..)
+  , emptyWrapCache
   , MetricSource (..)
   , TextInputMenu (..)
   , TextInputDrag (..)
@@ -34,6 +36,7 @@ module NanoUI.Internal.Context.Types
   , CustomDrawingEntry (..)
   , CustomDrawOpCacheEntry (..)
   , SpanCacheEntry (..)
+  , SpanLines (..)
   , WidgetTextCacheEntry (..)
   , WidgetTextPlacement (..)
   , initialDrawingCacheState
@@ -70,7 +73,7 @@ import GHC.Exts (RealWorld)
 import NanoUI.Internal.Animation (Animation)
 import NanoUI.Internal.Atlas (ImageAtlas)
 import NanoUI.Internal.Draw.Types (DrawArena, DrawOp, DrawingBuild)
-import NanoUI.Internal.Font (CustomMeasureFn, FontMetrics)
+import NanoUI.Internal.Font (CustomMeasureFn, FontMetrics, WrapResult)
 import NanoUI.Internal.Frame.SpanArena (SpanArena)
 import NanoUI.Internal.Id (IdContext, WidgetId, hashWidgetId)
 import NanoUI.Internal.Input (UiCursorKind)
@@ -140,6 +143,19 @@ data MeasureCache = MeasureCache
 
 emptyMeasureCache :: MeasureCache
 emptyMeasureCache = MeasureCache HashMap.empty 0 HashMap.empty
+
+-- | Wrapped text by text and font ('NanoUI.Internal.WidgetText.textNodeFontKey'),
+-- each with the widths it holds for, newest first. The metric generation the
+-- results were measured under, then two generations as in 'MeasureCache':
+-- the young map, its size, and the old map.
+data WrapCache = WrapCache
+  !Int
+  !(HashMap (Text, Int) [WrapResult])
+  !Int
+  !(HashMap (Text, Int) [WrapResult])
+
+emptyWrapCache :: WrapCache
+emptyWrapCache = WrapCache 0 HashMap.empty 0 HashMap.empty
 
 -- | Identity of a font/measurement configuration. Pure Context modifiers
 -- replace this value; the next frame invalidates shared caches if its identity
@@ -399,8 +415,21 @@ data SpanCacheEntry = SpanCacheEntry
   , sceRect :: !Rect
   , sceEffMaxW :: {-# UNPACK #-} !Float
   , sceRowChild :: {-# UNPACK #-} !Bool
+  , sceInset :: {-# UNPACK #-} !Float
+  , sceFont :: !FontMetrics
+  -- ^ The font the text is set in.
+  , sceLines :: !SpanLines
+  -- ^ The text laid out for the rect's width, before it is placed, so a node
+  -- that only moved places the same lines again.
   , sceSpans :: ![(Rect, Text, Color, Color)]
   }
+
+-- | A text node's lines for its width, with the metrics prepared for each.
+data SpanLines
+  = SpanWrapped ![(Text, FontMetrics)]
+  -- ^ Wrapped lines, stacked from the node's top.
+  | SpanSingle !Text !FontMetrics
+  -- ^ One line, possibly truncated, centred in the node's height.
 
 -- | A cacheable widget label is a single line (or absent for close buttons).
 -- Coordinates are relative to the node origin; paint translates them without
@@ -603,6 +632,9 @@ data Context = Context
   , ctxResolveFont :: !(Float -> FontWeight -> FontStyle -> FontVariant -> IO (FontMetrics, Bool))
   , ctxResolveMeasure :: !(Float -> FontWeight -> FontStyle -> FontVariant -> Text -> IO (Float, Float))
   , ctxMeasureCache :: Maybe (IORef MeasureCache)
+  , ctxWrapCache :: !(IORef WrapCache)
+  -- ^ Wrapped text, shared by the solve and the text spans across frames.
+  -- See 'NanoUI.Internal.Context.cachedWrapText'.
   , ctxSpanCache :: !(IORef (IntMap SpanCacheEntry))
   , ctxWidgetTextCache :: !(IORef (IntMap WidgetTextCacheEntry))
   -- | What widgets derive from their arguments and keep between frames
