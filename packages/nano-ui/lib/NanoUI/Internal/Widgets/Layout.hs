@@ -265,8 +265,6 @@ scrollArea = scrollAreaFrom (scrollDefault1D . layoutDirection)
 scrollAreaIdConfigured :: Ui :> es => WidgetId -> Layout -> ScrollConfig -> Eff es a -> Eff es a
 scrollAreaIdConfigured wid layout cfg child = do
   ctx <- askContext
-  -- Push a scroll container node carrying the config's style index and
-  -- context scroll config, run the child inside it, then pop.
   idx <- uiIO $ do
     parent <- currentParent ctx
     idx <- addNodeFromLayout (ctxNodeArena ctx) NodeScrollContainer parent layout
