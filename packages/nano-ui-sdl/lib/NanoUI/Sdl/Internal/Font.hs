@@ -516,26 +516,21 @@ coverageRef = unsafePerformIO (newIORef Nothing)
 -- search goes, once a session, whatever the number of font sizes.
 coverageSourceFor :: Char -> IO (Maybe (Int, Ptr ()))
 coverageSourceFor c = do
-  cov0 <- readIORef coverageRef >>= maybe findSources pure
+  cov <- readIORef coverageRef >>= maybe findSources pure
   let cp = ord c
-      probeOf cov i = case IM.lookup i (covProbes cov) of
-        Just probe -> pure (probe, cov)
-        Nothing -> do
-          probe <- SBS.useAsCString (indexSmallArray (covSources cov) i) $ \cpath -> ttfOpenFont cpath 12
-          pure (probe, cov {covProbes = IM.insert i probe (covProbes cov)})
-      search cov i
-        | i >= sizeofSmallArray (covSources cov) = pure (-1, cov)
+      -- Open probes down the list until one draws the character.
+      search probes i
+        | i >= sizeofSmallArray (covSources cov) = pure (-1, probes)
         | otherwise = do
-            (probe, cov') <- probeOf cov i
+            let open = SBS.useAsCString (indexSmallArray (covSources cov) i) (`ttfOpenFont` 12)
+            probe <- maybe open pure (IM.lookup i probes)
             has <- if probe == nullPtr then pure False else ttfHasGlyph probe (fromIntegral cp)
-            if has then pure (i, cov') else search cov' (i + 1)
-  (source, cov1) <- case IM.lookup cp (covChars cov0) of
-    Just known -> pure (known, cov0)
-    Nothing -> do
-      (found, cov') <- search cov0 0
-      pure (found, cov' {covChars = IM.insert cp found (covChars cov')})
-  writeIORef coverageRef (Just cov1)
-  pure $ case IM.lookup source (covProbes cov1) of
+            let probes' = IM.insert i probe probes
+            if has then pure (i, probes') else search probes' (i + 1)
+  (source, probes) <-
+    maybe (search (covProbes cov) 0) (pure . (,covProbes cov)) (IM.lookup cp (covChars cov))
+  writeIORef coverageRef (Just cov {covProbes = probes, covChars = IM.insert cp source (covChars cov)})
+  pure $ case IM.lookup source probes of
     Just probe | source >= 0 -> Just (source, probe)
     _ -> Nothing
   where
