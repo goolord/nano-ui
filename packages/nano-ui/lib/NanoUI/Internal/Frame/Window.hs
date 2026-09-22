@@ -13,7 +13,7 @@ module NanoUI.Internal.Frame.Window
 import Control.Monad (guard, when)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Maybe (MaybeT (..))
-import Data.Functor ((<&>))
+import Data.IORef (modifyIORef', newIORef, readIORef)
 import Data.List (find)
 import Data.Maybe (fromMaybe, isJust, isNothing)
 import NanoUI.Internal.Context
@@ -53,10 +53,9 @@ import NanoUI.Internal.Layout.Arena
   , NodeType (..)
   , floatingNodeCount
   , foldClassNodesM
+  , forChildNodes_
   , getDirection
-  , getFirstChild
   , getHeightSizing
-  , getNextSibling
   , getNodeRect
   , getNodeType
   , getNodeValue
@@ -301,21 +300,16 @@ tryStartWindowDrag ctx mouse@(V2 mx my) = fmap isJust . runMaybeT $ do
 -- | Title bar: the window's topmost child, stretched up to the window top.
 windowTitleRect :: Context -> NodeIdx -> IO (Maybe Rect)
 windowTitleRect ctx idx = do
-  (_, wy, _, _) <- getRect (ctxNodeArena ctx) idx
-  fc <- getFirstChild (ctxNodeArena ctx) idx
-  mBest <- go fc Nothing
-  pure $ mBest <&> \(Rect cx cy cw ch) ->
-    let topY = min wy cy
-     in Rect cx topY cw ((cy - topY) + ch)
-  where
-    go ci best
-      | ci < 0 = pure best
-      | otherwise = do
-          here@(Rect _ y _ _) <- getNodeRect (ctxNodeArena ctx) ci
-          ns <- getNextSibling (ctxNodeArena ctx) ci
-          go ns $ case best of
-            Just b@(Rect _ by _ _) | y >= by -> Just b
-            _ -> Just here
+  let na = ctxNodeArena ctx
+  (_, wy, _, _) <- getRect na idx
+  best <- newIORef Nothing
+  forChildNodes_ na idx $ \ci -> do
+    here@(Rect _ y _ _) <- getNodeRect na ci
+    modifyIORef' best $ \case
+      Just b@(Rect _ by _ _) | y >= by -> Just b
+      _ -> Just here
+  let stretch (Rect cx cy cw ch) = let topY = min wy cy in Rect cx topY cw (cy - topY + ch)
+  fmap stretch <$> readIORef best
 
 windowControlAt :: Context -> NodeIdx -> V2 -> IO Bool
 windowControlAt ctx idx mouse =
