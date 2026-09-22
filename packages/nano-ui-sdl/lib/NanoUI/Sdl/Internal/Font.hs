@@ -24,10 +24,10 @@ module NanoUI.Sdl.Internal.Font
   ) where
 
 import Control.Exception (SomeException, bracket_, catch, throwIO)
-import Control.Monad (forM, forM_, unless, void, when, zipWithM_)
+import Control.Monad (foldM_, forM, forM_, unless, void, when, zipWithM_)
 import Data.Bits ((.&.), (.|.), shiftL)
 import Data.Foldable (traverse_)
-import Data.List (delete)
+import Data.List (delete, elemIndex)
 import Foreign.Marshal.Alloc (alloca, allocaBytes)
 import Foreign.Marshal.Array (advancePtr, allocaArray, peekArray)
 import Data.Char (isPrint, isSpace, ord)
@@ -408,23 +408,15 @@ shapeLine sf inv txt = do
             clusterPtr <- castPtr <$> ttfShapedPtr result 2
             let glyphInt :: Int -> IO Int32
                 glyphInt k = fromIntegral <$> peekElemOff (glyphPtr :: Ptr CInt) k
-                fontIndex ptr = go 0 fontList
-                  where
-                    go !k (f : fs) = if sfFont f == ptr then k else go (k + 1) fs
-                    go !_ [] = 0
+                fontIndex ptr = maybe 0 fromIntegral (elemIndex ptr (map sfFont fontList))
                 -- SDL_ttf's ten numbers a glyph start with its text offset,
                 -- which carets take from the clusters instead.
                 copyGlyphs !i !ink
                   | i >= nGlyphs = pure ink
                   | otherwise = do
-                      let o = (g0 + i) * 9
-                          field !k
-                            | k > 9 = pure ()
-                            | otherwise = do
-                                v <- glyphInt (i * 10 + k)
-                                writePrimArray glyphs (o + k - 1) (if k == 2 then v + fromIntegral pen else v)
-                                field (k + 1)
-                      field 1
+                      forM_ [1 .. 9] $ \k -> do
+                        v <- glyphInt (i * 10 + k)
+                        writePrimArray glyphs ((g0 + i) * 9 + k - 1) (if k == 2 then v + fromIntegral pen else v)
                       x <- glyphInt (i * 10 + 2)
                       gw <- glyphInt (i * 10 + 4)
                       ptr <- peekElemOff (fontPtr :: Ptr (Ptr ())) i
@@ -437,11 +429,7 @@ shapeLine sf inv txt = do
                 placeClusters !i !end
                   | i >= nClusters = pure end
                   | otherwise = do
-                      off0 <- clusterInt (i * 5)
-                      len <- clusterInt (i * 5 + 1)
-                      x0 <- clusterInt (i * 5 + 2)
-                      cw <- clusterInt (i * 5 + 3)
-                      flags <- clusterInt (i * 5 + 4)
+                      [off0, len, x0, cw, flags] <- mapM (clusterInt . (i * 5 +)) [0 .. 4]
                       if len <= 0
                         then placeClusters (i + 1) end
                         else do
@@ -467,14 +455,11 @@ shapeLine sf inv txt = do
             fillPieces (p + 1) (pen + w) (max height h) (g0 + nGlyphs) ink end rest
     (total, height, inkEnd, endStop) <- fillPieces 0 0 (0 :: Int) 0 0 (0 / 0) runs
     carets <- newPrimArray (n + 1)
-    let fillCarets !i !prev
-          | i >= n = pure ()
-          | otherwise = do
-              v <- readPrimArray stops i
-              let v' = if isNaN v then prev else v / inv
-              writePrimArray carets i v'
-              fillCarets (i + 1) v'
-    fillCarets 0 0
+    let fillCaret prev i = do
+          v <- readPrimArray stops i
+          let v' = if isNaN v then prev else v / inv
+          v' <$ writePrimArray carets i v'
+    foldM_ fillCaret 0 [0 .. n - 1]
     writePrimArray carets n ((if isNaN endStop then fromIntegral total else endStop) / inv)
     caretArr <- unsafeFreezePrimArray carets
     glyphArr <- unsafeFreezePrimArray glyphs
