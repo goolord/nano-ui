@@ -417,12 +417,10 @@ data NodeArena = NodeArena
   -- than 0 since the reset. See 'getScopeSignature'.
   , naInputSig :: IOArr Word64
   -- ^ A hash over every layout input written since the reset, in one unboxed
-  -- slot so a mix allocates nothing: each node's
-  -- constraints and links as 'addNode' wrote them, and every later change
-  -- through the input setters ('setNodeText', 'setStyleIdx', 'setOptions',
-  -- 'setWidgetId', 'setGridCols', 'setGridMinColW', 'setNodeFontSize').
-  -- Solver outputs, paint state, and geometry are excluded. See
-  -- 'getInputSignature'.
+  -- slot so a mix allocates nothing: each node's layout and links as
+  -- 'addNode' wrote them, and every later change through the input setters
+  -- ('setNodeText', 'setStyleIdx', 'setOptions', 'setWidgetId'). Solver
+  -- outputs, paint state, and geometry are excluded. See 'getInputSignature'.
   , naTextHash :: IORef (IOArr Word64)
   -- ^ Per node, the hash of the text the last 'setNodeText' stored. A node
   -- re-set with the same 'Text' object keeps its hash, so a steady frame
@@ -549,15 +547,14 @@ stylePadB = 5
 -- * 'styleGap': the space between neighbouring children.
 -- * 'styleMinW', 'styleMinH', 'styleMaxW', 'styleMaxH': the size limits. A
 --   maximum of 1e8 or more means no limit, and the default layout uses 1e9.
--- * @styleGrow@: the @grow@ argument of 'addNode'. The solver does not read
---   it. A node's grow factor is the number of its 'Grow' sizing.
-styleGap, styleMinW, styleMinH, styleMaxW, styleMaxH, styleGrow :: Int
+--
+-- Column 11 is unused.
+styleGap, styleMinW, styleMinH, styleMaxW, styleMaxH :: Int
 styleGap = 6
 styleMinW = 7
 styleMinH = 8
 styleMaxW = 9
 styleMaxH = 10
-styleGrow = 11
 
 -- | The last columns of 'naArrStyle'. The first two are not layout inputs, so
 -- the layout cache does not compare them.
@@ -908,33 +905,17 @@ rootAttachParent na parent
       n <- arenaCount na
       pure (if n > 0 then 0 else -1)
 
--- | Append a node and link it at the head of its parent's child list. Parent
--- must be -1 or an existing node index. Arguments after padding are gap,
--- minimum width/height, maximum width/height, and a stored grow value; the
--- solver takes grow weights from the sizing arguments. Lengths use logical pixels.
+-- | Append a node laid out by the given 'Layout' and link it at the head of
+-- its parent's child list. The parent must be -1 or an existing node index.
+-- The caller assigns widget identity, text and type-specific style data.
 {-# INLINE addNode #-}
-addNode ::
-  NodeArena ->
-  NodeType ->
-  Int ->
-  Direction ->
-  Sizing ->
-  Sizing ->
-  Padding ->
-  Float ->
-  Float ->
-  Float ->
-  Float ->
-  Float ->
-  Float ->
-  AlignX ->
-  AlignY ->
-  IO NodeIdx
-addNode na nt parent dir wSiz hSiz pad gap minW minH maxW maxH grow ax ay = do
+addNode :: NodeArena -> NodeType -> Int -> Layout -> IO NodeIdx
+addNode na nt parent Layout {..} = do
   idx <- readIORef (naCount na)
   ensureCapacity na (idx + 1)
-  let (wTag, wVal) = sizingTag wSiz
-      (hTag, hVal) = sizingTag hSiz
+  let (wTag, wVal) = sizingTag layoutWidth
+      (hTag, hVal) = sizingTag layoutHeight
+      pad = layoutPadding
   a <- arenaArrays na
 
   setPrimArray (naArrGeom a) (idx * geomStride) geomStride 0
@@ -945,29 +926,31 @@ addNode na nt parent dir wSiz hSiz pad gap minW minH maxW maxH grow ax ay = do
   writeStyle a idx stylePadR (padR pad)
   writeStyle a idx stylePadT (padT pad)
   writeStyle a idx stylePadB (padB pad)
-  writeStyle a idx styleGap gap
-  writeStyle a idx styleMinW minW
-  writeStyle a idx styleMinH minH
-  writeStyle a idx styleMaxW maxW
-  writeStyle a idx styleMaxH maxH
-  writeStyle a idx styleGrow grow
+  writeStyle a idx styleGap layoutGap
+  writeStyle a idx styleMinW layoutMinW
+  writeStyle a idx styleMinH layoutMinH
+  writeStyle a idx styleMaxW layoutMaxW
+  writeStyle a idx styleMaxH layoutMaxH
   setPrimArray (naArrStyle a) (idx * styleStride + styleScrollContentW) (styleStride - styleScrollContentW) 0
+  writeStyle a idx styleGridMinColW layoutGridMinColW
+  writeStyle a idx styleFontSize layoutFontSize
 
   setPrimArray (naArrTags a) (idx * tagStride) tagStride 0
   writeTagEnum a idx tagNodeType nt
-  writeTagEnum a idx tagDirection $ case dir of
+  writeTagEnum a idx tagDirection $ case layoutDirection of
     Row -> DirRow
     Column -> DirColumn
   writeTagEnum a idx tagWSizing wTag
   writeTagEnum a idx tagHSizing hTag
-  writeTagEnum a idx tagAlignX ax
-  writeTagEnum a idx tagAlignY ay
+  writeTagEnum a idx tagAlignX layoutAlignX
+  writeTagEnum a idx tagAlignY layoutAlignY
 
   setPrimArray (naArrTree a) (idx * treeStride) treeStride 0
   writeTree a idx treeParent parent
   writeTree a idx treeFirstChild (-1)
   writeTree a idx treeNextSibling (-1)
   writeTree a idx treeTextIdx (-1)
+  writeTree a idx treeGridCols layoutGridCols
 
   -- Fold this node's creation inputs into the frame's input signature, the
   -- O(1) successor of comparing every column at reuse time. Values are the
@@ -977,7 +960,7 @@ addNode na nt parent dir wSiz hSiz pad gap minW minH maxW maxH grow ax ay = do
           (\acc (t, v) -> mixTagged acc t v)
           (fromIntegral idx `shiftL` 32 .|. fromIntegral (idx + 1) :: Word64)
           [ (0x4e54, fromIntegral (fromEnum nt))
-          , (0x4449, fromIntegral (fromEnum dir))
+          , (0x4449, fromIntegral (fromEnum layoutDirection))
           , (0x5754, fromIntegral (fromEnum wTag))
           , (0x5746, fromIntegral (castFloatToWord32 wVal))
           , (0x4854, fromIntegral (fromEnum hTag))
@@ -986,21 +969,26 @@ addNode na nt parent dir wSiz hSiz pad gap minW minH maxW maxH grow ax ay = do
           , (0x5052, fromIntegral (castFloatToWord32 (padR pad)))
           , (0x5054, fromIntegral (castFloatToWord32 (padT pad)))
           , (0x5042, fromIntegral (castFloatToWord32 (padB pad)))
-          , (0x4741, fromIntegral (castFloatToWord32 gap))
-          , (0x4d57, fromIntegral (castFloatToWord32 minW))
-          , (0x4d48, fromIntegral (castFloatToWord32 minH))
-          , (0x5857, fromIntegral (castFloatToWord32 maxW))
-          , (0x5848, fromIntegral (castFloatToWord32 maxH))
-          , (0x4752, fromIntegral (castFloatToWord32 grow))
-          , (0x4158, fromIntegral (fromEnum ax))
-          , (0x4159, fromIntegral (fromEnum ay))
+          , (0x4741, fromIntegral (castFloatToWord32 layoutGap))
+          , (0x4d57, fromIntegral (castFloatToWord32 layoutMinW))
+          , (0x4d48, fromIntegral (castFloatToWord32 layoutMinH))
+          , (0x5857, fromIntegral (castFloatToWord32 layoutMaxW))
+          , (0x5848, fromIntegral (castFloatToWord32 layoutMaxH))
+          , (0x4743, fromIntegral layoutGridCols)
+          , (0x474d, fromIntegral (castFloatToWord32 layoutGridMinColW))
+          , (0x4648, fromIntegral (castFloatToWord32 layoutFontSize))
+          , (0x4158, fromIntegral (fromEnum layoutAlignX))
+          , (0x4159, fromIntegral (fromEnum layoutAlignY))
           , (0x5041, fromIntegral (parent + 1))
           ]
   mixInputSig na 0x4e4f nodeSig
   ownA <- readIORef (naOwnHash na)
   writePrimArray ownA idx nodeSig
 
-  writePrimArray (naArrFontColor a) idx 0
+  -- The font colour is paint state, so the signature leaves it out.
+  writePrimArray (naArrFontColor a) idx $ case layoutFontColor of
+    Nothing -> 0
+    Just (Color w) -> 0x100000000 .|. fromIntegral w
   scope <- readIORef (naScope na)
   writePrimArray (naArrScope a) idx scope
   when (scope /= 0) $ do
@@ -1034,32 +1022,9 @@ pushClassNode na c idx = do
   writePrimArray arr (ci * cap + k) idx
   writePrimArray (naClassCounts na) ci (k + 1)
 
--- | Add a node using layout fields, including grid and font-size/colour options.
--- The caller assigns widget identity, text, and type-specific style data.
+-- | 'addNode' as a call instead of inlined, for the view's many call sites.
 addNodeFromLayout :: NodeArena -> NodeType -> Int -> Layout -> IO NodeIdx
-addNodeFromLayout na nt parent l = do
-  idx <-
-    addNode
-      na
-      nt
-      parent
-      (layoutDirection l)
-      (layoutWidth l)
-      (layoutHeight l)
-      (layoutPadding l)
-      (layoutGap l)
-      (layoutMinW l)
-      (layoutMinH l)
-      (layoutMaxW l)
-      (layoutMaxH l)
-      0
-      (layoutAlignX l)
-      (layoutAlignY l)
-  setGridCols na idx (layoutGridCols l)
-  setGridMinColW na idx (layoutGridMinColW l)
-  setNodeFontSize na idx (layoutFontSize l)
-  setNodeFontColor na idx (layoutFontColor l)
-  pure idx
+addNodeFromLayout na nt parent l = addNode na nt parent l
 
 -- | Assign text to a live node and mark its text slot as present. Re-setting
 -- the same 'Text' object reuses its cached hash, so a steady frame hashes no
@@ -1108,12 +1073,6 @@ getDirection na idx = arenaArrays na >>= \a -> readTagEnum a idx tagDirection
 {-# INLINE getGridCols #-}
 getGridCols :: NodeArena -> NodeIdx -> IO Int
 getGridCols na idx = arenaArrays na >>= \a -> readTree a idx treeGridCols
-
-{-# INLINE setGridCols #-}
-setGridCols :: NodeArena -> NodeIdx -> Int -> IO ()
-setGridCols na idx c = do
-  arenaArrays na >>= \a -> writeTree a idx treeGridCols c
-  mixNodeInput na idx 0x4743 (fromIntegral c)
 
 -- | One axis of a node's layout constraints: the sizing mode, its number (see
 -- 'styleWVal' for units), and the minimum and maximum size in logical pixels.
@@ -1172,12 +1131,6 @@ setScrollContentW na idx v = arenaArrays na >>= \a -> writeStyle a idx styleScro
 {-# INLINE getGridMinColW #-}
 getGridMinColW :: NodeArena -> NodeIdx -> IO Float
 getGridMinColW na idx = arenaArrays na >>= \a -> readStyle a idx styleGridMinColW
-
-{-# INLINE setGridMinColW #-}
-setGridMinColW :: NodeArena -> NodeIdx -> Float -> IO ()
-setGridMinColW na idx v = do
-  arenaArrays na >>= \a -> writeStyle a idx styleGridMinColW v
-  mixNodeInput na idx 0x474d (fromIntegral (castFloatToWord32 v))
 
 -- | Whether the parent has row direction. A root returns 'False'.
 {-# INLINE parentIsRow #-}
@@ -1459,12 +1412,6 @@ setNodeValue na idx v = arenaArrays na >>= \a -> writeStyle a idx styleNodeValue
 getNodeFontSize :: NodeArena -> NodeIdx -> IO Float
 getNodeFontSize na idx = arenaArrays na >>= \a -> readStyle a idx styleFontSize
 
-{-# INLINE setNodeFontSize #-}
-setNodeFontSize :: NodeArena -> NodeIdx -> Float -> IO ()
-setNodeFontSize na idx v = do
-  arenaArrays na >>= \a -> writeStyle a idx styleFontSize v
-  mixNodeInput na idx 0x4648 (fromIntegral (castFloatToWord32 v))
-
 -- | Explicit font colour, or 'Nothing' to use the theme. This is paint-only
 -- state and does not invalidate cached layout.
 {-# INLINE getNodeFontColor #-}
@@ -1475,15 +1422,6 @@ getNodeFontColor na idx = do
   if (val .&. 0x100000000) /= 0
     then pure (Just (Color (fromIntegral (val .&. 0xFFFFFFFF))))
     else pure Nothing
-
-{-# INLINE setNodeFontColor #-}
-setNodeFontColor :: NodeArena -> NodeIdx -> Maybe Color -> IO ()
-setNodeFontColor na idx mCol = do
-  a <- arenaArrays na
-  let val = case mCol of
-        Nothing -> 0
-        Just (Color w) -> 0x100000000 .|. fromIntegral w
-  writePrimArray (naArrFontColor a) idx val
 
 -- | Packed paint scope: theme index above bit 0, disabled flag in bit 0.
 {-# INLINE getNodeScope #-}
@@ -1507,11 +1445,10 @@ getScopeSignature :: NodeArena -> IO Word64
 getScopeSignature na = readIORef (naScopeSig na)
 
 -- | Hash over every layout input written since the reset: each node's
--- constraints and tree links as 'addNode' wrote them, plus every later change
--- through 'setNodeText', 'setOptions', 'setWidgetId', 'setStyleIdx',
--- 'setGridCols', 'setGridMinColW' and 'setNodeFontSize'. Solver outputs
--- ('setScrollContentW', 'tagScrollBarSlot', rects) and paint state
--- ('setNodeValue', 'setNodeFontColor') are excluded. Tree links need no mix
+-- layout and tree links as 'addNode' wrote them, plus every later change
+-- through 'setNodeText', 'setOptions', 'setWidgetId' and 'setStyleIdx'.
+-- Solver outputs ('setScrollContentW', 'tagScrollBarSlot', rects) and paint
+-- state ('setNodeValue', the font colour) are excluded. Tree links need no mix
 -- of their own: every node's index and parent are in its creation hash, and
 -- children are prepended in index order, so the child lists follow. The node
 -- count enters through the indices too; 'layoutSigMatches' also checks it
