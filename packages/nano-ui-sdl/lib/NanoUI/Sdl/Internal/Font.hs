@@ -63,8 +63,6 @@ import Foreign.Ptr (Ptr, castPtr, nullPtr, plusPtr)
 import Foreign.Storable (peek, peekElemOff, poke)
 import Data.Unique (hashUnique, newUnique)
 import qualified Data.ByteString as BS
-import System.Directory (getTemporaryDirectory, removeFile)
-import System.IO (hClose, openTempFile)
 import NanoUI (FontVariant (..))
 import NanoUI.Backend
   ( FontBackend (..)
@@ -93,7 +91,6 @@ data SdlFont = SdlFont
   , sfLineSkip :: Float
   , sfAscent :: Float
   , sfSpaceAdvance :: Float
-  , sfTempPath :: !(Maybe FilePath)
   , sfAlive :: !(IORef Bool)
   , sfPointSize :: !Float
   -- ^ The size the font was opened at, which its fallbacks open at too.
@@ -489,7 +486,7 @@ attachFallback sf source probe = do
   unless (IM.member source attached) $ do
     copy <- ttfCopyFont probe (realToFrac (sfPointSize sf))
     unless (copy == nullPtr) $ do
-      fallback <- readSdlFont (sfPointSize sf) Nothing copy
+      fallback <- readSdlFont (sfPointSize sf) copy
       let attached' = IM.insert source fallback attached
       case IM.lookupMax attached of
         Just (lastSource, _) | lastSource > source -> do
@@ -751,24 +748,17 @@ openFontSource source ptsize =
     open (FontFromPath path) = do
       font <- withCString path (`ttfOpenFont` pt)
       when (font == nullPtr) $ fail ("TTF_OpenFont failed for " ++ path)
-      readSdlFont ptsize Nothing font
+      readSdlFont ptsize font
     open (FontFromMemory bs label) = do
-      mem <- unsafeUseAsCStringLen bs $ \(ptr, len) -> ttfOpenFontMemory (castPtr ptr) (fromIntegral len) pt
-      (font, temp) <-
-        if mem /= nullPtr
-          then pure (mem, Nothing)
-          else do
-            (path, h) <- getTemporaryDirectory >>= (`openTempFile` "nano-ui-font-")
-            BS.hPut h bs
-            hClose h
-            font <- withCString path (`ttfOpenFont` pt)
-            if font == nullPtr then (nullPtr, Nothing) <$ removeFile path else pure (font, Just path)
+      -- SDL_ttf reads from its own copy of the bytes, so the font outlives
+      -- the ByteString's pinning.
+      font <- unsafeUseAsCStringLen bs $ \(ptr, len) -> ttfOpenFontMemory (castPtr ptr) (fromIntegral len) pt
       when (font == nullPtr) $ fail ("TTF_OpenFont failed for in-memory font " ++ label)
-      readSdlFont ptsize temp font
+      readSdlFont ptsize font
 
--- | Wrap an open TTF font; @sfTempPath@ is a temp file to delete on close.
-readSdlFont :: Float -> Maybe FilePath -> Ptr () -> IO SdlFont
-readSdlFont sfPointSize sfTempPath sfFont = do
+-- | Wrap an open TTF font.
+readSdlFont :: Float -> Ptr () -> IO SdlFont
+readSdlFont sfPointSize sfFont = do
   sfId <- hashUnique <$> newUnique
   sfAlive <- newIORef True
   sfFallbacks <- newIORef IM.empty
@@ -782,7 +772,6 @@ closeFont sf = do
   alive <- atomicModifyIORef' (sfAlive sf) (\open -> (False, open))
   when alive $ do
     ttfCloseFont (sfFont sf)
-    mapM_ removeFile (sfTempPath sf)
     readIORef (sfFallbacks sf) >>= mapM_ closeFont
 
 -- Header-checked imports also adapt C bool to Haskell Bool at the ABI boundary.
