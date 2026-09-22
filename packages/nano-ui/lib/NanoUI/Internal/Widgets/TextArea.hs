@@ -86,7 +86,6 @@ import NanoUI.Internal.Widgets.TextEditor
   , EditHistory
   , TextCommand (..)
   , inputTextCommands
-  , editorModeCode
   , emptyHistory
   , multiLineMode
   , runCommand
@@ -272,7 +271,7 @@ textAreaCore f wid value = do
       insertDyn seenKey value
         . adoptDocument
         . overField fieldPoint (IM.insertWith (\_ old -> old) (slotKey SlotTextAreaScroll key) (0, 0))
-        . insertSlot fieldInt (slotKey SlotTextMode key) (editorModeCode multiLineMode)
+        . insertDyn (slotKey SlotTextMode key) multiLineMode
         $ store0
   store <- uiIO (getStore ctx)
   let current = maybe value bufferDocument (lookupDyn bufKey store)

@@ -82,7 +82,6 @@ import NanoUI.Internal.Widgets.TextEditor
   ( Editor (..)
   , EditorMode (..)
   , inputTextCommands
-  , editorModeCode
   , emptyHistory
   , runCommandIO
   , singleLineMode
@@ -231,11 +230,11 @@ editTextField wid mode initial unfocusedText = do
     stored = lookupSlot fieldText key store
     s0 = loadTextInputState store key (fromMaybe initial stored)
     pulse = memberSlot fieldInt pulseKey store
-  when (isNothing stored || lookupSlot fieldInt modeKey store /= Just (editorModeCode mode) || pulse) $
+  when (isNothing stored || lookupDyn modeKey store /= Just mode || pulse) $
     uiIO . modifyStore ctx $
       (if isNothing stored then insertSlot fieldText key initial else id)
         . deleteSlot fieldInt pulseKey
-        . insertSlot fieldInt modeKey (editorModeCode mode)
+        . insertDyn modeKey mode
   isFocus <- keyboardFocused wid
   mEdited <- if isFocus then uiIO (editTextInput ctx mode inp store key s0) else pure Nothing
   let s1 = case mEdited of

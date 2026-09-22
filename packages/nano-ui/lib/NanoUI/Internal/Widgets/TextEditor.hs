@@ -1,5 +1,4 @@
--- | Implementation of "NanoUI.Widgets.TextEditor", plus the store encoding
--- of an 'EditorMode'.
+-- | Implementation of "NanoUI.Widgets.TextEditor".
 module NanoUI.Internal.Widgets.TextEditor
   ( -- * Commands
     TextCommand (..)
@@ -9,8 +8,6 @@ module NanoUI.Internal.Widgets.TextEditor
   , EditorMode (..)
   , singleLineMode
   , multiLineMode
-  , editorModeCode
-  , editorModeFromCode
   , editorFromBuffer
   , editorSelection
   , hasSelection
@@ -31,7 +28,6 @@ module NanoUI.Internal.Widgets.TextEditor
   ) where
 
 import Control.Monad (unless, void, when)
-import Data.Bits ((.&.), (.|.))
 import Data.Char (chr, isPrint, isSpace, ord, toLower)
 import Data.Text qualified as T
 import Data.Text.Short qualified as TS
@@ -58,27 +54,6 @@ singleLineMode = EditorMode {modeMultiLine = False, modeEditable = True, modeCop
 -- | Editable, copyable text with multiline commands enabled.
 multiLineMode :: EditorMode
 multiLineMode = singleLineMode {modeMultiLine = True}
-
--- | A mode as a store integer, so a command sent to a widget id between
--- frames knows what kind of field it edits.
-editorModeCode :: EditorMode -> Int
-editorModeCode m =
-  8
-    .|. (if modeMultiLine m then 1 else 0)
-    .|. (if modeEditable m then 0 else 2)
-    .|. (if modeCopyable m then 0 else 4)
-
--- | Decode a stored mode. 'Nothing' means the field-registration bit is absent.
-editorModeFromCode :: Int -> Maybe EditorMode
-editorModeFromCode code
-  | code .&. 8 == 0 = Nothing
-  | otherwise =
-      Just
-        EditorMode
-          { modeMultiLine = code .&. 1 /= 0
-          , modeEditable = code .&. 2 == 0
-          , modeCopyable = code .&. 4 == 0
-          }
 
 -- | A document with its selection (the cursor is the buffer's, the anchor
 -- the other end) and history.

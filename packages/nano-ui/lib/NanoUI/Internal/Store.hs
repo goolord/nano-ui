@@ -361,8 +361,8 @@ data Slot
   | -- | A text field's undo history with the text it was recorded against, in
     -- 'storeDyn'.
     SlotTextHistory
-  | -- | Which kind of text field a widget id is: 1 single-line, 2 multi-line.
-    -- Commands sent to the id between frames read it.
+  | -- | How the text field with this id edits (its editor mode, in
+    -- 'storeDyn'). Commands sent to the id between frames read it.
     SlotTextMode
   | -- | A text area's measured line widths and content extent, in 'storeDyn',
     -- kept in step with its lines so an edit remeasures only the lines it
