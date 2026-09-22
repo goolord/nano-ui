@@ -13,7 +13,6 @@ module NanoUI.Internal.Frame.Hit
   , topmostFloating
   , widgetOverlayAllowed
   , nodeOwnsPointer
-  , scrollHitRect
   , nodePointVisible
   , nodeClippedHit
   , nodeInteractionHit
@@ -28,7 +27,6 @@ import NanoUI.Internal.Context
   , PointerRoute (..)
   , getsInteraction
   , getPrevClipRect
-  , getPrevRect
   , intKey
   , modalActive
   , InteractionState (..)
@@ -147,14 +145,6 @@ widgetOverlayAllowed ctx wid = do
   top <- topModalNode (ctxNodeArena ctx)
   maybe (pure True) (\modal -> widgetIdInSubtree ctx modal wid) top
 
--- | The on-screen rect of widget @wid@ as 'NanoUI.Internal.Damage.updatePrevRects'
--- last recorded it: in window coordinates, with scroll offsets applied. While
--- the view runs, that is the rect from the previous frame, and it is the only
--- geometry a widget has then, because this frame's layout is not solved yet.
--- 'Nothing' when the widget had no node at that time, or an empty rect.
-scrollHitRect :: Context -> WidgetId -> IO (Maybe Rect)
-scrollHitRect = getPrevRect
-
 -- | Whether @mouse@ is on the visible part of node @idx@: inside its non-empty
 -- rect, and inside its clip rect when it has one. It reads this frame's
 -- solved geometry, which is complete once
@@ -187,7 +177,7 @@ nodeClippedHit ctx idx rect mouse =
 
 -- | The hit test widgets use while the view runs, when this frame's layout is
 -- not solved. @rect@ is the widget's rect from the previous frame
--- ('scrollHitRect'). The point must be inside it, and inside the previous
+-- ('NanoUI.Internal.Context.getPrevRect'). The point must be inside it, and inside the previous
 -- frame's viewport of every scroll container above node @idx@, so content
 -- scrolled out of view takes no input; a scroll container with no recorded
 -- viewport does not constrain the point. The node's own clip rect is not read:

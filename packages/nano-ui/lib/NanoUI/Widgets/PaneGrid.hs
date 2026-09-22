@@ -42,6 +42,7 @@ import NanoUI.Internal.Context
   , bumpMirror
   , getFocusId
   , getFocusVisible
+  , getPrevRect
   , getStore
   , intKey
   , markEscapeConsumed
@@ -64,7 +65,7 @@ import NanoUI.Internal.Input
   )
 import NanoUI.Internal.Monad (Ui, (<&&>), askContext, askInput, damageWidgetNow, focusedWidget, lastRect, nextId, releaseFocus, requestFrame, uiIO, withIdFrame, withKey)
 import NanoUI.Internal.Id (IdContext (..), WidgetId, hashWidgetId)
-import NanoUI.Internal.Frame.Hit (nodeInteractionHit, scrollHitRect)
+import NanoUI.Internal.Frame.Hit (nodeInteractionHit)
 import NanoUI.Internal.Store (insertDyn, lookupDyn)
 import NanoUI.Internal.Style
   ( AlignX (..)
@@ -604,7 +605,7 @@ renderPane env pid rect =
                     nt <- getNodeType arena idx
                     hit <- pure (isWidgetNode nt) <&&> do
                       child <- getWidgetId arena idx
-                      r <- scrollHitRect ctx child
+                      r <- getPrevRect ctx child
                       maybe (pure False) (\childRect -> nodeInteractionHit ctx idx childRect (inputMousePos inp)) r
                     if hit then pure True else hitFrom (idx + 1)
           hitFrom start

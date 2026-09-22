@@ -11,11 +11,11 @@ import Data.Text (Text)
 import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context
   ( adoptSlot
+  , getPrevRect
   , intKey
   , registerFocusable
   )
 import NanoUI.Internal.Font (sliderHitBounds)
-import NanoUI.Internal.Frame.Hit (scrollHitRect)
 import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Monad (Ui, askContext, nextId, uiIO, withKey)
 import NanoUI.Internal.Style (Layout, defaultLayout, fillW)
@@ -59,7 +59,7 @@ sliderWith' f minV maxV value = do
     range = maxV - minV
     frac = if range > 0 then (current - minV) / range else 0
   resp <- addWidget wid NodeSlider "" frac (f (fillW defaultLayout))
-  mrect <- uiIO (scrollHitRect ctx wid)
+  mrect <- uiIO (getPrevRect ctx wid)
   let
     track = maybe (Rect 0 0 0 0) (\(Rect x y w h) -> sliderHitBounds x y w h) mrect
   -- An idle drag hands back the value it was given.

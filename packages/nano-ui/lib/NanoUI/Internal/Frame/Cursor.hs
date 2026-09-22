@@ -17,6 +17,7 @@ import NanoUI.Internal.Context
   , InteractionState (..)
   , PointerRoute (..)
   , getHotId
+  , getPrevRect
   , getsInteraction
   , isDisabled
   , lookupCustomDrawing
@@ -25,7 +26,6 @@ import NanoUI.Internal.Context
 import NanoUI.Internal.Font (sliderHitBounds)
 import NanoUI.Internal.Frame.Hit
   ( nodePointVisible
-  , scrollHitRect
   , withWidgetNode
   )
 import NanoUI.Internal.Frame.Scroll (ScrollBarLayout (..), scrollBarsFor)
@@ -150,7 +150,7 @@ cursorKindAt ctx wid mouse inp
         withWidgetNode ctx wid UiCursorDefault $ \idx -> do
           visible <- nodePointVisible ctx idx mouse
           -- The widget's hit rect, where the pointer is not clipped off it.
-          let hitRect = if visible then scrollHitRect ctx wid else pure Nothing
+          let hitRect = if visible then getPrevRect ctx wid else pure Nothing
               over kind r = if rectContains r mouse then kind else UiCursorDefault
               whenVisible kind = pure (if visible then kind else UiCursorDefault)
           mCursorFn <- (>>= cdrCursor) <$> lookupCustomDrawing ctx wid
