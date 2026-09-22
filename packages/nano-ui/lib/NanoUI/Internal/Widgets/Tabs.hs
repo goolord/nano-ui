@@ -139,14 +139,14 @@ tabStrip (TabsConfig style orient) cur tabList mRenderBody = do
       headers = renderHeaders ctx (tabEncodeStyle (fromEnum style)) cur tabList
       barGap = if style == TabSegmented then 0 else 4
       contained = if style == TabContained then padTop 2 else id
+      barLay = contained . tight . fillW . fixedH (tabHeaderH + 4) . gap barGap $ defaultLayout
       headerBar
         | vertical = column' (padAll 2 . gap 2 . fillH $ defaultLayout) $ do
             tagContainer groupId
             fst <$> headers
-        | otherwise =
-            row' (contained . tight . fillW . fixedH (tabHeaderH + 4) . gap barGap $ defaultLayout) $ do
-              tagContainer groupId
-              scrollableHeaders ctx groupId barGap cur headers
+        | otherwise = row' barLay $ do
+            tagContainer groupId
+            scrollableHeaders ctx groupId barGap cur headers
   case mRenderBody of
     Nothing -> headerBar
     Just bodyRender ->
@@ -239,7 +239,8 @@ scrollableHeaders ctx groupId barGap cur headers = do
         | otherwise = off
       follow hr
         | rectX hr < viewX = max 0 (off - (viewX - rectX hr))
-        | rectX hr + rectW hr > viewX + viewW = min maxOff (off + (rectX hr + rectW hr - viewX - viewW))
+        | rectX hr + rectW hr > viewX + viewW =
+            min maxOff (off + (rectX hr + rectW hr - viewX - viewW))
         | otherwise = pagedOff
       finalOff
         | overflow, tabActive tabResp /= cur =
@@ -282,7 +283,8 @@ renderHeader tabStyle cur t = do
   if tabClosable t
     then rowWith tight $ do
       resp <- mainButton
-      closeResp <- headerButton "\215" 0 (tabHeaderLay {layoutPadding = Padding 2 4 4 4}) buttonFlagClose
+      closeResp <-
+        headerButton "\215" 0 (tabHeaderLay {layoutPadding = Padding 2 4 4 4}) buttonFlagClose
       pure (tabKey t, resp, respClicked closeResp)
     else (tabKey t,,False) <$> mainButton
 

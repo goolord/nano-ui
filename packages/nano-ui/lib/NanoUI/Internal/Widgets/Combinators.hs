@@ -2,7 +2,6 @@
 module NanoUI.Internal.Widgets.Combinators
   ( buttonStyled
   , buttonStyledEx
-  , selectableItem
   , withBoundedIndex
   , finishToggle
   , finishInput
@@ -58,17 +57,6 @@ buttonStyledEx enabled txt value layout styleIdx = do
       keyClick <- keyActivated wid
       pure (if keyClick then setClicked True resp else resp)
     else pure (inertResponse resp)
-
-selectableItem :: (Ui :> es) => NodeType -> Text -> Bool -> Layout -> Int -> Eff es Response
-selectableItem nt txt selected layout styleIdx = do
-  wid <- nextId
-  addWidgetStyled
-    wid
-    nt
-    txt
-    (if selected then 1 else 0)
-    layout
-    styleIdx
 
 -- | Finish a boolean control after its node has registered focus eligibility.
 -- Keyboard activation changes the value without inventing a pointer click.

@@ -359,7 +359,8 @@ resolveInteraction ctx inp wid = do
         pure (hovered && inputMouseRightReleased inp) <&&> startedHere (ctxRightPressPos ctx)
       when (released && wid == active) $
         writeIORef (ctxReleaseClickedId ctx) wid
-      pure $! Response wid rect hovered pressed (released || pending == wid) False False rightPressed rightClicked
+      let clicked = released || pending == wid
+      pure $! Response wid rect hovered pressed clicked False False rightPressed rightClicked
 
 -- | Stamp the current container with a widget id (a radio or tree group key),
 -- so store keys and damage requests under that id resolve to the container.

@@ -9,9 +9,11 @@ module NanoUI.Internal.Widgets.Radio
   )
 where
 
-import Control.Monad (foldM)
+import Control.Monad (zipWithM)
 import Data.Foldable (toList)
 import Data.Hashable (hash)
+import Data.List (findIndex)
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Effectful (Eff, type (:>))
@@ -22,16 +24,9 @@ import NanoUI.Internal.Monad (Ui, askContext, nextId, uiIO, withKey)
 import NanoUI.Internal.Style (Layout, defaultLayout, fillW, gap, tight)
 import NanoUI.Internal.Types (clamp)
 import NanoUI.Internal.Widgets.Behavior (KeyNav (..), useKeyNav)
-import NanoUI.Internal.Widgets.Combinators
-  ( finishInput
-  , selectableItem
-  , withBoundedIndex
-  )
+import NanoUI.Internal.Widgets.Combinators (finishInput, withBoundedIndex)
 import NanoUI.Internal.Widgets.Layout (column')
-import NanoUI.Internal.Widgets.Node
-  ( Response (..)
-  , tagContainer
-  )
+import NanoUI.Internal.Widgets.Node (Response (..), addWidgetStyled, tagContainer)
 
 radioLay :: Layout
 radioLay = tight (fillW defaultLayout)
@@ -68,29 +63,18 @@ radio' options index =
     uiIO $ registerFocusable ctx gid
     nav <- useKeyNav gid
     let
-      !navDelta =
-        (if knDown nav || knRight nav then 1 else 0 :: Int)
-          - (if knUp nav || knLeft nav then 1 else 0)
-      !selNav = if navDelta == 0 then sel else clamp 0 (len - 1) (sel + navDelta)
+      !navDelta = fromEnum (knDown nav || knRight nav) - fromEnum (knUp nav || knLeft nav)
+      !selNav = clamp 0 (len - 1) (sel + navDelta)
+      option i txt = do
+        wid <- nextId
+        addWidgetStyled wid NodeRadio txt (if selNav == i then 1 else 0) radioLay i
     column' radioGroupLay $ do
       tagContainer gid
-      (combinedResp, clickedIdx) <- addRadioOptions selNav opts
-      let
-        !finalSel = if clickedIdx >= 0 then clickedIdx else selNav
+      resps <- zipWithM option [0 ..] opts
       -- Compare with the caller's index, as 'NanoUI.Internal.Widgets.Select' does, so a
       -- selection stored between frames still reports a change.
-      finishInput fieldInt ctx gid key given combinedResp finalSel
-
--- Use the ordinary widget path for every option, including singleton groups.
--- It owns IDs, node construction, and scroll-aware interaction geometry.
-addRadioOptions :: Ui :> es => Int -> [Text] -> Eff es (Response, Int)
-addRadioOptions sel opts = foldM addOption (mempty, -1) (zip [0 ..] opts)
- where
-  addOption (!acc, !clickedIdx) (i, txt) = do
-    r <- selectableItem NodeRadio txt (sel == i) radioLay i
-    let
-      clickedIdx' = if rawRespClicked r && clickedIdx < 0 then i else clickedIdx
-    pure (acc <> r, clickedIdx')
+      let clicked = findIndex rawRespClicked resps
+      finishInput fieldInt ctx gid key given (mconcat resps) (fromMaybe selNav clicked)
 
 -- | Radio buttons for every value of a bounded enum, labelled by @encode@.
 {-# INLINE boundedRadio #-}
