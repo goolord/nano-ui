@@ -5,6 +5,7 @@ module Main (main) where
 
 import Control.Exception (bracket)
 import Control.Monad (forM_, replicateM_, unless, void)
+import Data.ByteString qualified as BS
 import Data.Primitive.PrimArray (primArrayFromList)
 import Data.Vector.Unboxed qualified as U
 import Data.Word (Word8)
@@ -16,8 +17,9 @@ import Foreign.Ptr (Ptr, castPtr, nullPtr, plusPtr)
 import Foreign.Storable (peekByteOff, pokeByteOff)
 import GHC.Clock (getMonotonicTimeNSec)
 import GHC.Conc (getAllocationCounter)
-import NanoUI (Color, Rect (..), colorRGBA)
-import NanoUI.Sdl.Internal.Image (destroyImageAtlas, newImageAtlas)
+import NanoUI (Color, ImageId (..), Rect (..), colorRGBA)
+import NanoUI.Internal.Context (lookupImageUv)
+import NanoUI.Sdl.Internal.Image (ImageAtlas, destroyImageAtlas, newImageAtlas, syncImageAtlas)
 import NanoUI.Sdl.Internal.Render
   ( destroyRenderBatch
   , flushRenderBatch
@@ -25,12 +27,15 @@ import NanoUI.Sdl.Internal.Render
   , renderDrawDataPass
   )
 import NanoUI.Testing
-  ( Damage (..)
+  ( Context
+  , Damage (..)
   , DrawCmd (..)
   , DrawData (..)
   , Layer (..)
+  , atlasTextureId
   , glyphAtlasTextureId
   , newPixelContext
+  , registerImage
   )
 import SDL3.Sys.Bindgen.Render (SDL_Renderer, SDL_Texture)
 import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
@@ -133,6 +138,40 @@ atlasChecks env draw = withGlyphSurface $ \surface ->
     resetAtlas atlas
     sample "white patch after reset" 0.5 0.5 (255, 0, 0)
     sample "old glyph cleared by reset" 6.5 2.5 (0, 0, 0)
+
+-- | Images reach the texture however they changed: written again in place
+-- and added beside the others, which upload only their rects, and added by
+-- growing the atlas, which remakes the texture. Each image is sampled at its
+-- centre through white vertices.
+imageChecks :: SdlEnv -> Context -> ImageAtlas -> (DrawData -> IO ()) -> IO ()
+imageChecks env ctx images draw = do
+  let solid w h (r, g, b) = BS.concat (replicate (w * h) (BS.pack [r, g, b, 255]))
+      register tid w h rgb = do
+        ok <- registerImage ctx (ImageId tid) w h (solid w h rgb)
+        unless ok (fail "image registration failed")
+      sample name tid expected = do
+        syncImageAtlas (sdlRenderer env) images ctx
+        (u0, v0, u1, v1) <- lookupImageUv ctx (ImageId tid) >>= maybe (fail "missing image") pure
+        dd0 <- geometry [(10, 10), (50, 10), (10, 50)]
+        let dd = dd0 {drawCommands = U.map (\cmd -> cmd {cmdTextureId = atlasTextureId}) (drawCommands dd0)}
+        withForeignPtr (drawVertices dd) $ \p -> forM_ [0 .. 2] $ \i -> do
+          forM_ [8, 12, 16, 20] $ \o -> pokeByteOff p (i * 32 + o) (CFloat 1)
+          pokeByteOff p (i * 32 + 24) (CFloat ((u0 + u1) / 2))
+          pokeByteOff p (i * 32 + 28) (CFloat ((v0 + v1) / 2))
+        draw dd
+        actual <- pixel env 20 20
+        unless (actual == expected) (fail (name ++ ": " ++ show actual))
+  register 1 4 4 (255, 0, 0)
+  register 2 4 4 (0, 255, 0)
+  sample "first upload" 1 (255, 0, 0)
+  register 1 4 4 (0, 0, 255)
+  sample "written in place" 1 (0, 0, 255)
+  sample "neighbour kept" 2 (0, 255, 0)
+  register 3 4 4 (255, 255, 0)
+  sample "added beside" 3 (255, 255, 0)
+  register 4 300 2 (0, 255, 255)
+  sample "added by growing" 4 (0, 255, 255)
+  sample "kept across growth" 1 (0, 0, 255)
 
 atlasBench :: SdlEnv -> IO ()
 atlasBench env = withGlyphSurface $ \surface ->
@@ -283,3 +322,5 @@ main = do
               putStrLn "SDL partial-damage triangle readback: ok"
               atlasChecks env (\tex dd -> drawWithGlyph tex dd DamageFull)
               putStrLn "SDL glyph upload, padding and reset readback: ok"
+              imageChecks env ctx images (`draw` DamageFull)
+              putStrLn "SDL image atlas upload readback: ok"

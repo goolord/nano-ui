@@ -153,6 +153,8 @@ module NanoUI.Internal.Context
   , registerImages
   , lookupImageUv
   , atlasSnapshot
+  , atlasChanges
+  , AtlasUpload (..)
   , withFontMetrics
   , withMonoFontMetrics
   , withMeasureText
@@ -277,7 +279,7 @@ import NanoUI.Internal.Animation
   , presetSmooth
   , presetStiff
   )
-import NanoUI.Internal.Atlas (atlasTextureId)
+import NanoUI.Internal.Atlas (AtlasUpload (..), atlasTextureId)
 import NanoUI.Internal.Atlas qualified as Atlas
 import NanoUI.Internal.Context.Animation
 import NanoUI.Internal.Context.Core
@@ -380,6 +382,12 @@ lookupImageUv ctx = Atlas.lookupImageUv (ctxImageAtlas ctx)
 -- | Atlas width, height, RGBA8 buffer, and revision for backend upload.
 -- 'Nothing' means no atlas pixels have been allocated. Treat the buffer as
 -- borrowed mutable storage and upload it before further image registration.
+-- | What a texture of the image atlas uploaded at generation @since@ (0 for
+-- none) needs, with the atlas's size, pixels and generation.
+{-# INLINE atlasChanges #-}
+atlasChanges :: Context -> Int -> IO (Maybe (Int, Int, ForeignPtr Word8, Int, AtlasUpload))
+atlasChanges ctx = Atlas.atlasChanges (ctxImageAtlas ctx)
+
 {-# INLINE atlasSnapshot #-}
 atlasSnapshot :: Context -> IO (Maybe (Int, Int, ForeignPtr Word8, Int))
 atlasSnapshot ctx = Atlas.atlasSnapshot (ctxImageAtlas ctx)

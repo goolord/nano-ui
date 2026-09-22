@@ -131,6 +131,7 @@ test-suite nano-ui-render-test
         ghc-options: -optl-mconsole
     build-depends:
         base ^>=4.22.0.0,
+        bytestring ^>=0.12,
         nano-ui,
         nano-ui-sdl,
         primitive ^>=0.9,

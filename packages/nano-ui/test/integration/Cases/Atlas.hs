@@ -10,7 +10,34 @@ import NanoUI.Internal.Context (lookupImageUv)
 tests :: [Spec]
 tests =
   [ spec "atlas-growth" runAtlasGrowthTest
+  , spec "atlas-changes" runAtlasChangesTest
   ]
+
+-- | A texture of the atlas uploads only what was written since, unless the
+-- atlas grew or the writes are too far back to know.
+runAtlasChangesTest :: Context -> IORef Int -> IO ()
+runAtlasChangesTest ctx failed = do
+  let insert tid w h = registerImage ctx (ImageId tid) w h (BS.replicate (w * h * 4) 7)
+      upload since = fmap (\(_, _, _, gen, u) -> (gen, u)) <$> atlasChanges ctx since
+  upload 0 >>= assertEq failed Nothing
+  insert 1 8 8 >>= assert failed
+  -- A texture that holds nothing takes the whole atlas.
+  upload 0 >>= assertEq failed (Just (1, AtlasWhole))
+  upload 1 >>= assertEq failed Nothing
+  -- Pixels written in place, and a new image that fits, are rects.
+  insert 1 8 8 >>= assert failed
+  upload 1 >>= assertEq failed (Just (2, AtlasRegions [(1, 1, 8, 8)]))
+  insert 2 4 4 >>= assert failed
+  upload 1 >>= assertEq failed (Just (3, AtlasRegions [(10, 1, 4, 4), (1, 1, 8, 8)]))
+  upload 2 >>= assertEq failed (Just (3, AtlasRegions [(10, 1, 4, 4)]))
+  -- An image wider than the atlas grows it: the texture must be remade.
+  insert 3 300 2 >>= assert failed
+  upload 3 >>= assertEq failed (Just (4, AtlasWhole))
+  upload 4 >>= assertEq failed Nothing
+  -- Past what the log keeps, the writes are not known.
+  forM_ [1 .. 200 :: Int] $ \_ -> insert 2 4 4
+  upload 4 >>= assertEq failed (Just (204, AtlasWhole))
+  upload 203 >>= assertEq failed (Just (204, AtlasRegions [(10, 1, 4, 4)]))
 
 runAtlasGrowthTest :: Context -> IORef Int -> IO ()
 runAtlasGrowthTest ctx failed = do

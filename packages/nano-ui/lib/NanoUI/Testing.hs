@@ -90,6 +90,8 @@ module NanoUI.Testing
   , registerImages
   , atlasTextureId
   , atlasSnapshot
+  , atlasChanges
+  , AtlasUpload (..)
     -- * Messages
   , FrameMsg (..)
   , decodeMessages
@@ -145,6 +147,8 @@ import NanoUI.Internal.Context
   ( Context (..)
   , FrameMsg (..)
   , anyAnimating
+  , AtlasUpload (..)
+  , atlasChanges
   , atlasSnapshot
   , atlasTextureId
   , clearDirty
