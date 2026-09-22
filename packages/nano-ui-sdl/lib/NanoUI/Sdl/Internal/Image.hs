@@ -10,7 +10,7 @@ where
 
 import Control.Exception (mask_)
 import Control.Monad (when)
-import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef, writeIORef)
 import Data.Word (Word8)
 import Foreign.ForeignPtr (ForeignPtr, withForeignPtr)
 import Foreign.Marshal.Utils (with)
@@ -35,10 +35,11 @@ newImageAtlas :: IO ImageAtlas
 newImageAtlas = ImageAtlas <$> newIORef Nothing
 
 destroyImageAtlas :: ImageAtlas -> IO ()
-destroyImageAtlas (ImageAtlas ref) = mask_ $ do
-  old <- readIORef ref
-  writeIORef ref Nothing
-  mapM_ (destroyTexture . atTexture) old
+destroyImageAtlas (ImageAtlas ref) = mask_ (publish ref Nothing)
+
+-- | Make a texture (or none) the atlas's, and destroy the one it replaces.
+publish :: IORef (Maybe AtlasTexture) -> Maybe AtlasTexture -> IO ()
+publish ref new = atomicModifyIORef' ref (\old -> (new, old)) >>= mapM_ (destroyTexture . atTexture)
 
 -- | Bring the texture up to the context's image atlas. Pixels written in
 -- place since the last upload go up as those rects only; a new texture is
@@ -83,10 +84,7 @@ uploadAtlas ren (ImageAtlas ref) w h pixels gen = mask_ $
           _ <- setTextureBlendMode tex (fromIntegral sDL_BLENDMODE_BLEND)
           uploaded <- updateTextureSafe tex (PtrConst.unsafeFromPtr nullPtr) (PtrConst.unsafeFromPtr (castPtr ptr)) (fromIntegral (w * 4))
           if uploaded then pure True else destroyTexture tex >> pure False
-    when ok $ do
-      old <- readIORef ref
-      writeIORef ref (Just (AtlasTexture tex gen))
-      mapM_ (destroyTexture . atTexture) old
+    when ok $ publish ref (Just (AtlasTexture tex gen))
 
 lookupImage :: ImageAtlas -> Int -> IO (Maybe (Ptr SDL_Texture))
 lookupImage (ImageAtlas ref) tid

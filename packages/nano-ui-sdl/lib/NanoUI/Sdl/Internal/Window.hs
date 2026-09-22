@@ -33,15 +33,16 @@ import System.Info (os)
 import Text.Read (readMaybe)
 import Data.Primitive.SmallArray (SmallArray)
 import Data.Text (Text)
+import Data.Text qualified as T
 import Data.Text.Foreign qualified as TextForeign
 import Foreign.C.String (withCString)
 import Foreign.Marshal.Alloc (alloca)
 import Foreign.Marshal.Utils (with)
-import Foreign.Ptr (Ptr, nullPtr)
+import Foreign.Ptr (Ptr, castPtr, nullPtr)
 import Foreign.Storable (peek)
 import NanoUI (ImageId, Input (..), Size (..), Theme, V2 (..))
 import NanoUI.Internal.Context (Context (..), setDrawSnapScale)
-import NanoUI.Testing (clearMeasureCache, damageFull, markDirty, setHost, setWakeLoop)
+import NanoUI.Testing (clearMeasureCache, damageFull, markDirty, setHost, setWakeLoop, withClipboard)
 import NanoUI.Sdl.Internal.Display
   ( initRefreshEvent
   , pushRefreshEvent
@@ -52,7 +53,6 @@ import NanoUI.Sdl.Internal.Display
   , zoomWindow
   )
 import NanoUI.Sdl.Internal.Chrome.Types (ChromeState, clearChromeState, newChromeState)
-import NanoUI.Sdl.Internal.Clipboard (withSdlClipboard)
 import NanoUI.Sdl.Internal.Frame (WindowDecorations (..), applyDecorations)
 import NanoUI.Sdl.Internal.Cursor (SdlCursors (..), destroyCursors, initCursors)
 import NanoUI.Sdl.Internal.Font
@@ -86,6 +86,7 @@ import SDL3.Sys.Bindgen.Render (SDL_Renderer, SDL_Texture)
 import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
 import SDL3.Sys.Bindgen.Video (SDL_Window, SDL_WindowFlags (..))
 import SDL3.Sys.Bindgen.Init (SDL_InitFlags (..), sDL_INIT_VIDEO)
+import SDL3.Sys.Clipboard (getClipboardText, setClipboardText)
 import SDL3.Sys.Hints (resetHint, setHint)
 import SDL3.Sys.Init (initSafe, quitSafe)
 import SDL3.Sys.Keyboard (startTextInputSafe, stopTextInputSafe)
@@ -99,6 +100,7 @@ import SDL3.Sys.Render
   , setRenderTarget
   , setRenderVSync
   )
+import SDL3.Sys.Stdinc (free)
 import SDL3.Sys.Surface (destroySurface, saveBMP)
 import SDL3.Sys.Video (destroyWindowSafe, getWindowDisplayScale)
 
@@ -559,6 +561,20 @@ resolveNanoUIFont = \case
   DefaultFont -> pure embeddedFontSource
   FontFilePath path -> pure (FontFromPath path)
   FontSearch names -> maybe embeddedFontSource FontFromPath <$> searchFonts names
+
+-- | Route the context's clipboard through SDL (UTF-8 text both ways).
+withSdlClipboard :: Context -> Context
+withSdlClipboard ctx = withClipboard ctx readClipboard writeClipboard
+  where
+    writeClipboard txt = TextForeign.withCString txt (setClipboardText . PtrConst.unsafeFromPtr)
+    readClipboard = do
+      ptr <- getClipboardText
+      if ptr == nullPtr
+        then pure Nothing
+        else do
+          txt <- TextForeign.peekCString ptr
+          free (castPtr ptr)
+          pure (if T.null txt then Nothing else Just txt)
 
 -- | Write the last presented frame to a BMP file. A retained session reads
 -- its retained texture, since SDL leaves the window backbuffer undefined

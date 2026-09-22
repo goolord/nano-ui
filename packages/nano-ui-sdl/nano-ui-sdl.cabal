@@ -71,7 +71,6 @@ library
     other-modules:
         NanoUI.Sdl.Internal.Session
         NanoUI.Sdl.Internal.Runner
-        NanoUI.Sdl.Internal.Clipboard
         NanoUI.Sdl.Internal.Cursor
         NanoUI.Sdl.Internal.Debug
         NanoUI.Sdl.Internal.Dialog
