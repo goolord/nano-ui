@@ -31,7 +31,7 @@ module NanoUI.Internal.Frame.Scroll.Geometry
   , borderContentClip
   ) where
 
-import Data.Bits ((.&.), shiftL, shiftR)
+import Data.Bits (shiftL, shiftR, testBit, (.&.), (.|.))
 import Data.Maybe (mapMaybe)
 import Data.Text (Text)
 import NanoUI.Internal.Font
@@ -58,73 +58,40 @@ data ScrollPolicy
 data ScrollConfig = ScrollConfig
   { scrollPolicyX :: !ScrollPolicy
   , scrollPolicyY :: !ScrollPolicy
-  , scrollClamp :: !Bool
   -- | Paint only clipped children, without a background or border. Scrollbar
   -- policies still apply; combine with 'ScrollHidden' to omit all chrome.
   , scrollBare :: !Bool
   }
   deriving (Eq, Show)
 
--- | Automatic bars on both axes, clamped offsets, and a painted background.
+-- | Automatic bars on both axes and a painted background.
 defaultScrollConfig :: ScrollConfig
-defaultScrollConfig =
-  ScrollConfig
-    { scrollPolicyX = ScrollAuto
-    , scrollPolicyY = ScrollAuto
-    , scrollClamp = True
-    , scrollBare = False
-    }
+defaultScrollConfig = ScrollConfig ScrollAuto ScrollAuto False
 
 scrollConfigNative2D :: ScrollConfig -> Bool
-scrollConfigNative2D cfg =
-  scrollAxisActive (scrollPolicyX cfg) && scrollAxisActive (scrollPolicyY cfg)
-  where
-    scrollAxisActive = \case
-      ScrollNone -> False
-      _ -> True
+scrollConfigNative2D cfg = scrollPolicyX cfg /= ScrollNone && scrollPolicyY cfg /= ScrollNone
 
+-- | A scroll node's style index. Bit 4 is always set, so that no scroll
+-- node's style index is 0.
 encodeScrollConfig :: ScrollConfig -> Int
-encodeScrollConfig cfg =
-  policyBits (scrollPolicyX cfg)
-    + shiftL (policyBits (scrollPolicyY cfg)) 2
-    + (if scrollClamp cfg then 16 else 0)
-    + (if scrollBare cfg then 32 else 0)
-  where
-    policyBits = \case
-      ScrollAuto -> 0
-      ScrollAlways -> 1
-      ScrollNone -> 2
-      ScrollHidden -> 3
+encodeScrollConfig (ScrollConfig px py bare) =
+  16 .|. fromEnum px .|. shiftL (fromEnum py) 2 .|. (if bare then 32 else 0)
 
 decodeScrollConfig :: Int -> ScrollConfig
-decodeScrollConfig bits =
-  ScrollConfig
-    { scrollPolicyX = decodePolicy (bits .&. 3)
-    , scrollPolicyY = decodePolicy (shiftR bits 2 .&. 3)
-    , scrollClamp = bits .&. 16 /= 0
-    , scrollBare = bits .&. 32 /= 0
-    }
-  where
-    decodePolicy 1 = ScrollAlways
-    decodePolicy 2 = ScrollNone
-    decodePolicy 3 = ScrollHidden
-    decodePolicy _ = ScrollAuto
+decodeScrollConfig bits = ScrollConfig (toEnum (bits .&. 3)) (toEnum (shiftR bits 2 .&. 3)) (testBit bits 5)
 
 scrollDefault1D :: Direction -> ScrollConfig
 scrollDefault1D Column = scrollVerticalAuto
-scrollDefault1D Row = scrollHorizontalAuto
+scrollDefault1D Row = ScrollConfig ScrollAuto ScrollNone False
 
 scrollVerticalAuto :: ScrollConfig
-scrollVerticalAuto = ScrollConfig ScrollNone ScrollAuto True False
-
-scrollHorizontalAuto :: ScrollConfig
-scrollHorizontalAuto = ScrollConfig ScrollAuto ScrollNone True False
+scrollVerticalAuto = ScrollConfig ScrollNone ScrollAuto False
 
 scrollVerticalHidden :: ScrollConfig
-scrollVerticalHidden = ScrollConfig ScrollNone ScrollHidden True False
+scrollVerticalHidden = ScrollConfig ScrollNone ScrollHidden False
 
 scrollHorizontalHidden :: ScrollConfig
-scrollHorizontalHidden = ScrollConfig ScrollHidden ScrollNone True False
+scrollHorizontalHidden = ScrollConfig ScrollHidden ScrollNone False
 
 -- | Cross-axis gutter for one bar. @trailPad@ is the scroller's padding on
 -- the bar's side (right for the vertical bar, bottom for the horizontal one).
@@ -172,15 +139,13 @@ scrollPolicyFor cfg = \case
   DirColumn -> scrollPolicyY cfg
   DirRow -> scrollPolicyX cfg
 
-scrollShowsChrome :: ScrollConfig -> DirTag -> Bool
-scrollShowsChrome cfg dir =
-  case scrollPolicyFor cfg dir of
-    ScrollAuto -> True
-    ScrollAlways -> True
-    _ -> False
-
+-- | Whether the bar along @dir@ is never painted or grabbed.
 scrollChromeSuppressed :: ScrollConfig -> DirTag -> Bool
-scrollChromeSuppressed cfg dir = not (scrollShowsChrome cfg dir)
+scrollChromeSuppressed cfg dir =
+  case scrollPolicyFor cfg dir of
+    ScrollAuto -> False
+    ScrollAlways -> False
+    _ -> True
 
 -- | Wheel eligibility is wider than chrome eligibility: a hidden bar never
 -- paints or drags, but it still scrolls. Only a dead axis ('ScrollNone')
@@ -307,13 +272,10 @@ scrollBarLayout ::
   Float ->
   Float ->
   Maybe ScrollBarLayout
-scrollBarLayout slot dir x y w h pad contentSize off =
-  let innerW = w - padL pad - padR pad
-      innerH = h - padT pad - padB pad
-      viewMain = case dir of
-        DirColumn -> innerH
-        DirRow -> innerW
-   in scrollBarLayoutIn slot dir x y w h pad viewMain contentSize off
+scrollBarLayout slot dir x y w h pad =
+  scrollBarLayoutIn slot dir x y w h pad $ case dir of
+    DirColumn -> h - padT pad - padB pad
+    DirRow -> w - padL pad - padR pad
 
 -- | 'scrollBarLayout' with an explicit visible main extent. A native 2D
 -- scroller passes the padding box minus the cross-axis lane (see
@@ -356,9 +318,9 @@ scrollBarLayoutIn slot dir x y w h pad viewMain contentSize off =
           (ScrollBarLayout (band trackStart trackSize) (band thumbStart thumbSize) maxOff)
 
 -- | Both-axis layouts for a native 2D scroller: (vertical, horizontal). Each
--- axis's visible main extent is reduced by the other axis's live gutter, so
--- the range and thumb are computed against the viewport minus the opposite
--- scrollbar lane.
+-- axis's visible main extent is its side of the viewport, which the other
+-- axis's live gutter has narrowed, so the range and thumb are computed
+-- against the viewport minus the opposite scrollbar lane.
 scrollBarLayouts2D ::
   ScrollBarSlot ->
   ScrollConfig ->
@@ -373,14 +335,10 @@ scrollBarLayouts2D ::
   Float ->
   (Maybe ScrollBarLayout, Maybe ScrollBarLayout)
 scrollBarLayouts2D slot cfg x y w h pad contentW contentH offX offY =
-  let innerW = w - padL pad - padR pad
-      innerH = h - padT pad - padB pad
-      (gutterW, gutterH) = scrollGutters2D slot cfg pad contentW contentH innerW innerH
-      viewW = max 0 (innerW - gutterW)
-      viewH = max 0 (innerH - gutterH)
-      v = scrollBarLayoutIn slot DirColumn x y w h pad viewH contentH offY
-      hr = scrollBarLayoutIn slot DirRow x y w h pad viewW contentW offX
-   in (v, hr)
+  let Rect _ _ viewW viewH = scrollViewportClip2D slot cfg x y w h pad contentW contentH
+   in ( scrollBarLayoutIn slot DirColumn x y w h pad viewH contentH offY
+      , scrollBarLayoutIn slot DirRow x y w h pad viewW contentW offX
+      )
 
 scrollOffsetFromThumb :: DirTag -> ScrollBarLayout -> Float -> V2 -> Float
 scrollOffsetFromThumb dir layout grabOff mouse =
