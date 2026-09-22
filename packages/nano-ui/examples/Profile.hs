@@ -11,7 +11,8 @@ import Data.Primitive.SmallArray (SmallArray)
 import NanoUI
 import NanoUI.Backend (emptyInput, inputKeysFromList)
 import NanoUI.Svg (rasterizeSvg)
-import NanoUI.Testing (newContext, runFrame)
+import NanoUI.Testing (newContext, runFrame, uiCursorKind)
+import GHC.Clock (getMonotonicTime)
 import System.Environment (getArgs)
 import System.IO.Unsafe (unsafePerformIO)
 
@@ -29,6 +30,17 @@ windowScene n = columnWith (fillW . fillH) $ do
   void $ window True "Tools" $ columnWith (tight . gap 4 . minW 200) $ do
     label "a floating window"
     void (button "ok")
+
+-- | @n@ rows of a label, a checkbox and a button in a scroll area, with a
+-- text field on top: a large arena for the pointer to move over.
+pointerScene :: Int -> NanoUI ()
+pointerScene n = columnWith (fillW . fillH) $ do
+  void (textInput "")
+  void $ scrollWith (fillW . fillH) $ columnWith (tight . fillW) $
+    forM_ [1 .. n] $ \i -> rowWith (tight . fillW) $ do
+      label (T.pack ("row " <> show i))
+      void (checkbox "c" False)
+      void (button (T.pack ("b" <> show i)))
 
 -- | A grid of buttons and labels: the ordinary widget path.
 widgetScene :: NanoUI ()
@@ -152,6 +164,32 @@ main = do
             step = inp {inputMousePos = V2 (gx - 100 + fromIntegral (i `mod` 2) * 6) (gy + 50), inputMouseDown = True}
         void (runFrame ctx (if drag then step else inp) ui)
       putStrLn ("profiled 300 window frames" ++ if drag then ", dragging" else "")
+    ("pointer" : _) -> do
+      -- The pointer sweeping down over 3000 rows, pressing and releasing
+      -- every tenth frame, with the cursor queried each frame as a backend
+      -- does: hover, press and cursor hit tests over a large arena.
+      let inp = emptyInput {inputWindowSize = Size 1280 800, inputDeltaTime = 0.016}
+          ui = pointerScene 3000
+          at i = inp {inputMousePos = V2 (fromIntegral (40 + (i * 7) `mod` 200)) (fromIntegral (40 + (i * 13) `mod` 740))}
+          frames = 2000 :: Int
+      replicateM_ 5 (void (runFrame ctx inp ui))
+      cursorTime <- newIORef 0
+      t0 <- getMonotonicTime
+      forM_ [1 .. frames] $ \i -> do
+        let base = at i
+            fi = case i `mod` 10 of
+              0 -> base {inputMouseDown = True, inputMousePressed = True}
+              1 -> base {inputMouseReleased = True}
+              _ -> base
+        void (runFrame ctx fi ui)
+        c0 <- getMonotonicTime
+        void (evaluate =<< uiCursorKind ctx fi)
+        c1 <- getMonotonicTime
+        modifyIORef' cursorTime (+ (c1 - c0))
+      t1 <- getMonotonicTime
+      ct <- readIORef cursorTime
+      let perFrame t = show (t * 1000 / fromIntegral frames) ++ " ms"
+      putStrLn ("profiled " ++ show frames ++ " pointer frames: " ++ perFrame (t1 - t0) ++ "/frame, cursor query " ++ perFrame ct)
     ("textarea" : _) -> do
       ref <- newIORef (textDocument longDocument)
       typeIntoMiddle (textAreaScene ref)
