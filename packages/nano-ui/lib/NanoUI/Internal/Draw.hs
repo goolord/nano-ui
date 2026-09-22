@@ -41,12 +41,9 @@ module NanoUI.Internal.Draw
   , pushRoundedRectRaw
   , pushRoundedStroke
   , pushCircle
-  , pushCircleStroke
   , pushLine
   , pushStrokeAA
-  , pushStroke
   , pushFilledTriangle
-  , pushPolygonAA
   , pushPolylineAA
   , points3
   , drawTextBox

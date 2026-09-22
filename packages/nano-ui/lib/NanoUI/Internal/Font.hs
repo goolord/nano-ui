@@ -38,8 +38,6 @@ module NanoUI.Internal.Font
   , menuItemRowH
   , menuSepH
   , menuMinW
-  , menuAccentW
-  , menuAccentInset
   , centeredTextY
   , alignedTextPen
   , textInkEnd
@@ -283,14 +281,6 @@ menuSepH = 9
 -- | Floor for the menu panel width.
 menuMinW :: Float
 menuMinW = 148
-
--- | Width of the hover accent marker painted at a menu row's left edge.
-menuAccentW :: Float
-menuAccentW = 2
-
--- | Gap between the hover accent marker and the row's top and bottom edges.
-menuAccentInset :: Float
-menuAccentInset = 3
 
 {-# INLINE centeredTextY #-}
 centeredTextY :: FontMetrics -> Float -> Float -> Float -> Float

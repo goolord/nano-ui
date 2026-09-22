@@ -33,7 +33,6 @@ import NanoUI.Internal.Context
   , nodeTheme
   )
 import NanoUI.Internal.Draw (DrawArena, pushRect, pushRoundedRect, pushRoundedStroke)
-import NanoUI.Internal.Font (menuAccentInset, menuAccentW)
 import NanoUI.Internal.Frame.Scroll.Geometry (ScrollBarLayout (..))
 import NanoUI.Internal.Id (hashWidgetId)
 import NanoUI.Internal.Layout.Arena
@@ -358,14 +357,11 @@ menuPanelBounds (Rect x y w h) = Rect (x - 1) (y - 1) (w + menuShadowOffset + 2)
 menuShadowOffset :: Float
 menuShadowOffset = 3
 
--- | Accent marker at a menu row's left edge, inset from its top and bottom.
+-- | Accent marker, 2 pixels wide, at a menu row's left edge, inset 3 pixels
+-- from its top and bottom.
 paintMenuAccent :: DrawArena -> Theme -> Rect -> IO ()
 paintMenuAccent da theme (Rect x y _ h) =
-  pushRoundedRect
-    da
-    (Rect x (y + menuAccentInset) menuAccentW (max 0 (h - 2 * menuAccentInset)))
-    1
-    (themeAccent theme)
+  pushRoundedRect da (Rect x (y + 3) 2 (max 0 (h - 6))) 1 (themeAccent theme)
 
 -- | Scrollbar track and thumb, each rounded to at most 4px.
 paintScrollBarLayout :: DrawArena -> Color -> Color -> ScrollBarLayout -> IO ()

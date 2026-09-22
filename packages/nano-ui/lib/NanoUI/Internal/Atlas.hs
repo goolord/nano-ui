@@ -184,13 +184,10 @@ atlasChanges (ImageAtlas ref) since = do
       then Nothing
       else Just (asW st, asH st, asPtr st, gen, upload)
 
--- Pinned pixel buffer. SDL uploads this pointer; do not copy to ByteString first.
+-- | The atlas's width, height, pinned pixels and generation; 'Nothing' while
+-- it holds no image. SDL uploads the pointer; do not copy to ByteString first.
 atlasSnapshot :: ImageAtlas -> IO (Maybe (Int, Int, ForeignPtr Word8, Int))
-atlasSnapshot (ImageAtlas ref) = do
-  st <- readIORef ref
-  if asGen st == 0
-    then pure Nothing
-    else pure (Just (asW st, asH st, asPtr st, asGen st))
+atlasSnapshot atlas = fmap (\(w, h, p, gen, _) -> (w, h, p, gen)) <$> atlasChanges atlas 0
 
 fitImage ::
   AtlasState -> Int -> Int -> Int -> ByteString -> IO (Maybe AtlasState)
@@ -205,7 +202,8 @@ fitImage st0 tid w h pixels =
         if resized
           then do
             buf <- allocPixels (asW placed) (asH placed)
-            copyAtlas (asPtr st0) (asW st0) (asH st0) buf (asW placed)
+            withForeignPtr (asPtr st0) $ \sp ->
+              withForeignPtr buf $ \dp -> copyRows dp (asW placed) 0 sp (asW st0) (asW st0) (asH st0)
             pure buf
           else pure (asPtr st0)
       blitPixels fp (asW placed) x y w h pixels
@@ -252,12 +250,6 @@ allocPixels w h = do
   fp <- mallocForeignPtrBytes n
   withForeignPtr fp $ \p -> fillBytes p 0 n
   pure fp
-
-copyAtlas :: ForeignPtr Word8 -> Int -> Int -> ForeignPtr Word8 -> Int -> IO ()
-copyAtlas src oldW oldH dst newW =
-  withForeignPtr src $ \sp ->
-    withForeignPtr dst $ \dp ->
-      copyRows dp newW 0 sp oldW oldW oldH
 
 blitPixels ::
   ForeignPtr Word8 -> Int -> Int -> Int -> Int -> Int -> ByteString -> IO ()

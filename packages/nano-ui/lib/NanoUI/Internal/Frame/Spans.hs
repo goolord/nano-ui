@@ -4,13 +4,10 @@ module NanoUI.Internal.Frame.Spans
   , collectOverlayTextSpans
   , collectRasterSpans
   , widgetNodeCount
-  , widgetTextSpans
-  , computeWidgetTextPlacements
   , plainFieldPen
   , textInputFg
   , forWidgetTextPlacements_
   , selectableTextGeometry
-  , collectNodeTextSpans
   , textNodeSpanEntry
   ) where
 
@@ -314,7 +311,15 @@ widgetTextSpans ::
   Context -> NodeType -> NodeIdx -> Float -> Float -> Float -> Float -> IO [(Rect, T.Text, Color, Color)]
 widgetTextSpans ctx nt idx x y w h = do
   style <- widgetVisualStyle ctx nt idx
-  placements <- widgetTextPlacements ctx nt idx x y w h
+  placements <-
+    -- A centred label's placement depends on its text, style, font, alignment
+    -- and size but not its origin, so it is cached. Field, picker and slider
+    -- text depends on their data.
+    if hasCenteredLabel nt
+      then do
+        placement <- cachedWidgetLabel ctx nt idx w h
+        pure [(txt, x + px, y + py, tw, th) | Just (WidgetTextPlacement txt px py tw th) <- [placement]]
+      else computeWidgetTextPlacements ctx nt idx x y w h
   let bg = styleBg style
   case nt of
     NodeTextInput -> do
@@ -332,17 +337,6 @@ textInputFg ctx style idx focus = do
   fg <- fromMaybe (styleFg style) <$> getNodeFontColor (ctxNodeArena ctx) idx
   value <- textInputValue ctx idx
   pure (if T.null value && not focus then lerpColor fg (styleBg style) 0.40 else fg)
-
-widgetTextPlacements ::
-  Context -> NodeType -> NodeIdx -> Float -> Float -> Float -> Float -> IO [(T.Text, Float, Float, Float, Float)]
-widgetTextPlacements ctx nt idx x y w h
-  -- A centred label's placement depends on its text, style, font, alignment
-  -- and size but not its origin, so it is cached. Field, picker and slider
-  -- text depends on their data.
-  | hasCenteredLabel nt = do
-      placement <- cachedWidgetLabel ctx nt idx w h
-      pure [(txt, x + px, y + py, tw, th) | Just (WidgetTextPlacement txt px py tw th) <- [placement]]
-  | otherwise = computeWidgetTextPlacements ctx nt idx x y w h
 
 -- | Runtime consumer API. The Bool marks the last placement (for table sort
 -- arrows); cached labels are translated directly into the consumer.
