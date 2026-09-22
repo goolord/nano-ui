@@ -70,7 +70,7 @@ import NanoUI.Internal.Layout.Arena
   , setWidgetId
   )
 import NanoUI.Internal.Monad (Ui, askContext, askFrameInput, askInput, localInput, nextId, uiIO, withContext)
-import NanoUI.Internal.WidgetText (packTextNodeStyleFull)
+import NanoUI.Internal.WidgetText (packTextNodeStyle)
 import NanoUI.Internal.Style
   ( AlignX (..)
   , AlignY (..)
@@ -339,13 +339,7 @@ addWidgetStyled wid nt txt value layout styleIdx =
   addWidgetNode wid nt txt value layout $ \arena idx ->
     let
       effectiveStyle
-        | nt == NodeText =
-            packTextNodeStyleFull
-              (layoutFontVariant layout)
-              (layoutFontWeight layout)
-              (layoutFontStyle layout)
-              (layoutTextDecoration layout)
-              styleIdx
+        | nt == NodeText = packTextNodeStyle layout styleIdx
         | otherwise = styleIdx
      in
       setStyleIdx arena idx effectiveStyle
