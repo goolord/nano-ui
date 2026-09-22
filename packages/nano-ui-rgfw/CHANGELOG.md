@@ -16,8 +16,8 @@
   not forced, resized or rescaled paints and uploads only the widgets and
   glyphs inside its damage. In `nano-ui-rgfw-profile`, a changing counter
   above a window of text went from 0.49 to 0.19 ms a frame, and from 1160 to
-  378 KB allocated. `renderArenaGl` takes the frame's `Damage` and returns
-  whether it kept the retained pixels, and `writeSpanQuads` clips to a box of
+  378 KB allocated. `renderArenaGl` takes the frame's `Damage`, and a frame
+  at a new size must be `DamageFull`; `writeSpanQuads` clips to a box of
   physical pixels instead of a framebuffer size.
 - `renderArenaGl` takes the frame's damage pieces and cuts text to each. Two
   labels changing in opposite corners of a window of text went from 0.41 to
