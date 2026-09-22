@@ -1,6 +1,7 @@
 -- | The pointer and keyboard steps that 'NanoUI.Internal.Frame.runFrame' runs around
 -- the view: recording where a press landed, choosing the active and hot
--- widgets, turning a release into a click, and moving keyboard focus. All but
+-- widgets, turning a release into a click, moving keyboard focus, and copying
+-- selection state from the store into the nodes that paint it. All but
 -- 'armPointerPress' run after layout, so their hit tests use this frame's
 -- solved rects, where the view had only the previous frame's.
 module NanoUI.Internal.Frame.Input
@@ -14,16 +15,21 @@ module NanoUI.Internal.Frame.Input
   , finalizeTextInputFocus
   , finalizeSelectFocus
   , findTopWidgetUnderMouse
+  , constrainFocusToModal
+  , syncWidgetLabels
   ) where
 
 import Control.Applicative ((<|>))
-import Control.Monad (filterM, when)
+import Control.Monad (filterM, forM_, unless, when)
 import Data.IORef (newIORef, readIORef, writeIORef)
-import Data.Maybe (isJust, isNothing)
+import Data.Maybe (fromMaybe, isJust, isNothing, listToMaybe)
 import NanoUI.Internal.Context
   ( Context (..)
   , damageWidget
   , getFocusables
+  , getStore
+  , intBool
+  , intKey
   , isDisabled
   , markDirty
   , markDirtyCovered
@@ -33,7 +39,6 @@ import NanoUI.Internal.Context
   , tabConsumed
   , InteractionState (..)
   )
-import NanoUI.Internal.Frame.Focus (tabNext)
 import NanoUI.Internal.Frame.Hit
   ( nodeClippedHit
   , nodeInteractionHit
@@ -62,21 +67,25 @@ import NanoUI.Internal.Input
   )
 import NanoUI.Internal.Layout.Arena
   ( isWidgetNode
-  , NodeClass (PointerNodes)
+  , NodeClass (PointerNodes, SelectionNodes)
   , NodeIdx
   , NodeType (..)
   , findClassNodeM
   , foldNodesM
+  , forClassNodes_
   , getNodeRect
   , getNodeType
+  , getParent
   , getRect
   , getStyleIdx
   , getWidgetId
+  , setNodeValue
   , topModalNode
   )
 import NanoUI.Internal.Monad (ifM, unlessM, whenM, (<&&>))
+import NanoUI.Internal.Store (fieldInt, findSlot, lookupSlot)
 import NanoUI.Internal.Types (DamageBounds (..), Rect (..), V2 (..), defaultDamageSlop, rectContains)
-import NanoUI.Internal.WidgetText (hasFlag, buttonFlagClose, buttonFlagMenuBar, buttonFlagMenu)
+import NanoUI.Internal.WidgetText (hasFlag, buttonFlagClose, buttonFlagMenuBar, buttonFlagMenu, treeDecodeStyle)
 
 -- | Move keyboard focus when Tab was pressed, backwards with Shift held. Focus
 -- steps through the widgets that called 'NanoUI.Internal.Context.registerFocusable'
@@ -344,3 +353,63 @@ enabledTarget :: Context -> Maybe WidgetId -> IO (Maybe WidgetId)
 enabledTarget ctx mWid = case mWid of
   Just wid -> ifM (isDisabled ctx wid) (pure Nothing) (pure mWid)
   Nothing -> pure Nothing
+
+-- | Next focus id, or previous with Shift, wrapping at both ends. An unknown
+-- current id selects the first entry; an empty list returns @WidgetId 0@.
+tabNext :: WidgetId -> [WidgetId] -> Bool -> WidgetId
+tabNext cur ids shift =
+  fromMaybe (WidgetId 0) . listToMaybe $ case break (== cur) ids of
+    (_, []) -> ids
+    (before, _ : after)
+      | shift -> reverse (if null before then ids else before)
+      | otherwise -> after ++ ids
+
+-- | While a modal is open, take keyboard focus away from a widget outside the
+-- top modal. The frame runs this after the pointer steps, which can move
+-- focus, and before 'finalizeTabFocus'.
+constrainFocusToModal :: Context -> IO ()
+constrainFocusToModal ctx = do
+  top <- topModalNode (ctxNodeArena ctx)
+  forM_ top $ \modal -> do
+    focus <- readIORef (ctxFocusId ctx)
+    when (hashWidgetId focus /= 0) $ do
+      ok <- widgetIdInSubtree ctx modal focus
+      unless ok $ writeIORef (ctxFocusId ctx) (WidgetId 0)
+
+-- | Copy selection state from the store into the node values the painter
+-- reads. A checkbox's value becomes its stored flag. A radio option or a tree
+-- row gets 1 when its group's stored selection names it, and 0 otherwise.
+-- The frame runs this after the view, before layout, and again after the
+-- input steps when they changed the store, so what is painted matches the
+-- store even when the change came after the widget was declared. It visits
+-- only the arena's 'SelectionNodes'.
+syncWidgetLabels :: Context -> IO ()
+syncWidgetLabels ctx = do
+  store <- getStore ctx
+  let na = ctxNodeArena ctx
+  forClassNodes_ na SelectionNodes $ \idx -> do
+    nt <- getNodeType na idx
+    wid <- getWidgetId na idx
+    let key = intKey wid
+        -- The group keeps its selection, as the index @ownOf@ reads from a
+        -- member's style index, in the Int slot of the parent node's widget
+        -- id.
+        syncGroup ownOf = do
+          parent <- getParent na idx
+          si <- getStyleIdx na idx
+          groupWid <- getWidgetId na parent
+          let own = ownOf si
+              selected = findSlot fieldInt own (intKey groupWid) store
+          setNodeValue na idx (if selected == own then 1 else 0)
+    case nt of
+      NodeCheckbox ->
+        -- A checkbox with no stored value keeps the value the view gave its
+        -- node.
+        forM_ (lookupSlot fieldInt key store) $ \v ->
+          setNodeValue na idx (if intBool v then 1 else 0)
+      -- A radio option's style index is its option index.
+      NodeRadio -> syncGroup id
+      -- A tree row packs its pre-order node index into the high bits of its
+      -- style index.
+      NodeTree -> syncGroup (\si -> let (nodeIdx, _, _, _) = treeDecodeStyle si in nodeIdx)
+      _ -> pure ()

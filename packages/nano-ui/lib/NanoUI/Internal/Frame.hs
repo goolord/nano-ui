@@ -59,6 +59,7 @@ import NanoUI.Internal.Draw
   )
 import NanoUI.Internal.Frame.Input
   ( armPointerPress
+  , constrainFocusToModal
   , disarmPointerPress
   , finalizePointerPress
   , finalizePointerRelease
@@ -67,8 +68,8 @@ import NanoUI.Internal.Frame.Input
   , finalizeTextInputFocus
   , pressTargets
   , refreshHover
+  , syncWidgetLabels
   )
-import NanoUI.Internal.Frame.Focus (constrainFocusToModal, syncWidgetLabels)
 import NanoUI.Internal.Frame.Chrome (overlayMenuStyle, overlayWindowStyle, paintMenuPanel)
 import NanoUI.Internal.Frame.Paint (lowerShapes, walkChildren)
 import NanoUI.Internal.Frame.Scroll
