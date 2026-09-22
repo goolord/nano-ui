@@ -60,7 +60,7 @@ import Data.Text.Foreign qualified as TextForeign
 import Effectful (Eff, type (:>))
 -- The constructor under 'SDL_HitTestResult', which the callback returns.
 import Foreign.C.Types (CUInt (..))
-import Foreign.Ptr (FunPtr, Ptr, castFunPtr, castPtr, nullFunPtr, nullPtr)
+import Foreign.Ptr (FunPtr, castFunPtr, castPtr, nullFunPtr, nullPtr)
 import Foreign.Storable (peekElemOff)
 import NanoUI
   ( CaptionAction (..)
@@ -85,7 +85,7 @@ import NanoUI.Sdl.Internal.Frame
   )
 import NanoUI.Sdl.Internal.Window (SdlEnv (..), windowZoom)
 import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
-import SDL3.Sys.Bindgen.Video (SDL_HitTest (..), SDL_HitTestResult (..), SDL_Window, SDL_WindowFlags)
+import SDL3.Sys.Bindgen.Video (SDL_HitTest (..), SDL_HitTestResult (..), SDL_WindowFlags)
 import SDL3.Sys.Video qualified as SDL
 
 --------------------------------------------------------------------------------
@@ -227,26 +227,17 @@ hitTest st win area _ = do
   x <- fromIntegral <$> peekElemOff area 0
   y <- fromIntegral <$> peekElemOff area 1
   WindowChrome drag border top <- readIORef (chromeRegions st)
-  edge <-
-    if border > 0 || top > 0
-      then windowEdge (castPtr win) border top x y
-      else pure SDL.SDL_HITTEST_NORMAL
+  (ok, pw, ph) <- outPair (SDL.getWindowSize (castPtr win))
+  let edge
+        -- With no edges at all, even a point in the desktop's frame outside
+        -- the view is answered as part of it.
+        | ok && (border > 0 || top > 0) =
+            edgeHit (x < border) (x >= fromIntegral pw - border) (y < top) (y >= fromIntegral ph - border)
+        | otherwise = SDL.SDL_HITTEST_NORMAL
   pure $
     if edge /= SDL.SDL_HITTEST_NORMAL
       then edge
       else if any (`rectContains` V2 x y) drag then SDL.SDL_HITTEST_DRAGGABLE else SDL.SDL_HITTEST_NORMAL
-
--- | The edge or corner a point is near enough to take hold of, or
--- @SDL_HITTEST_NORMAL@ for one in the window proper.
-windowEdge :: Ptr SDL_Window -> Float -> Float -> Float -> Float -> IO SDL_HitTestResult
-windowEdge win border top x y = do
-  (ok, pw, ph) <- outPair (SDL.getWindowSize win)
-  let w = fromIntegral pw
-      h = fromIntegral ph
-  pure $
-    if ok
-      then edgeHit (x < border) (x >= w - border) (y < top) (y >= h - border)
-      else SDL.SDL_HITTEST_NORMAL
 
 -- | The @SDL_HitTestResult@ for an edge or corner, from the sides of the
 -- window the point is near.
