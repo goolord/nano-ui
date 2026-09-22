@@ -23,7 +23,7 @@ module NanoUI.Internal.Frame.Input
 import Control.Applicative ((<|>))
 import Control.Monad (filterM, forM_, unless, when)
 import Data.IORef (newIORef, readIORef, writeIORef)
-import Data.Maybe (fromMaybe, isJust, isNothing, listToMaybe)
+import Data.Maybe (fromMaybe, isJust, isNothing, listToMaybe, maybeToList)
 import NanoUI.Internal.Context
   ( Context (..)
   , damageWidget
@@ -83,7 +83,7 @@ import NanoUI.Internal.Layout.Arena
   , setNodeValue
   , topModalNode
   )
-import NanoUI.Internal.Monad (ifM, unlessM, whenM, (<&&>))
+import NanoUI.Internal.Monad (unlessM, whenM, (<&&>))
 import NanoUI.Internal.Store (fieldInt, findSlot, lookupSlot)
 import NanoUI.Internal.Types (DamageBounds (..), Rect (..), V2 (..), defaultDamageSlop, rectContains)
 import NanoUI.Internal.WidgetText (hasFlag, buttonFlagClose, buttonFlagMenuBar, buttonFlagMenu, treeDecodeStyle)
@@ -342,9 +342,7 @@ focusWidget ctx wid = do
 -- nothing here, so a press on it takes focus away from the field that had it
 -- and gives it to no other.
 enabledTarget :: Context -> Maybe WidgetId -> IO (Maybe WidgetId)
-enabledTarget ctx mWid = case mWid of
-  Just wid -> ifM (isDisabled ctx wid) (pure Nothing) (pure mWid)
-  Nothing -> pure Nothing
+enabledTarget ctx = fmap listToMaybe . filterM (fmap not . isDisabled ctx) . maybeToList
 
 -- | Next focus id, or previous with Shift, wrapping at both ends. An unknown
 -- current id selects the first entry; an empty list returns @WidgetId 0@.
