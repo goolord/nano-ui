@@ -84,10 +84,21 @@ pushPreparedTextQuads da fm x y txt col = do
     Just glyphs -> pushShapedQuads da fm 0 px py glyphs col
     Nothing -> pushGlyphQuads da fm 0 px py txt col
 
+-- | How far a glyph's x may fall behind a glyph before it in a line, and how
+-- wide a glyph may be, in line heights. Pens only move right in visual order:
+-- a glyph lands left of an earlier one only by a negative bearing or as a
+-- mark over the glyph before it, and no glyph is wider than a few ems. The
+-- clip skips in 'pushShapedQuads' and 'pushGlyphQuads' rely on it.
+glyphSlackLines :: Float
+glyphSlackLines = 4
+
 -- | A shaped line's glyph quads from pen @(px, py)@, sheared by @slant@
 -- around the baseline like 'pushGlyphQuads'. Glyphs wholly left or right of
--- the current clip emit nothing, so a long line in a narrow view costs the
--- glyphs it shows plus a test for each of the rest.
+-- the current clip emit nothing. Glyph x offsets rise in visual order, to
+-- within 'glyphSlackLines', so a binary search finds the first glyph that
+-- can reach the clip and the walk stops at the first one that starts well
+-- past it: a long line in a narrow view costs the glyphs it shows plus a
+-- search.
 pushShapedQuads :: DrawArena -> FontMetrics -> Float -> Float -> Float -> ShapedGlyphs -> Color -> IO ()
 pushShapedQuads da fm slant px py (ShapedGlyphs quads) col = do
   let !count = sizeofPrimArray quads `div` 8
@@ -95,21 +106,36 @@ pushShapedQuads da fm slant px py (ShapedGlyphs quads) col = do
     cx <- readPrimArray (daCurrentClip da) 0
     cw <- readPrimArray (daCurrentClip da) 2
     setTexture da glyphAtlasTextureId
-    withVertsReserve da (count * 4) (count * 6) $ \vp ip base baseIdx commit -> do
+    let -- A sheared glyph leans at most this far past its box.
+        !lean = abs slant * (fmLineHeight fm + abs (fmAscent fm))
+        !left = cx - lean
+        !right = cx + cw + lean
+        !slack = glyphSlackLines * fmLineHeight fm
+        at k = indexPrimArray quads k
+        -- The first glyph in [lo, hi) whose x reaches @left - slack@. Every
+        -- glyph before it ends left of the clip.
+        firstReaching !lo !hi
+          | lo >= hi = lo
+          | otherwise =
+              let !mid = (lo + hi) `div` 2
+               in if px + at (mid * 8) < left - slack
+                    then firstReaching (mid + 1) hi
+                    else firstReaching lo mid
+        !start = firstReaching 0 count
+        !shown = count - start
+    withVertsReserve da (shown * 4) (shown * 6) $ \vp ip base baseIdx commit -> do
       let !(r, g, b, a) = unpackColorF col
           !baselineY = py + fmAscent fm
-          -- A sheared glyph leans at most this far past its box.
-          !lean = abs slant * (fmLineHeight fm + abs (fmAscent fm))
-          !left = cx - lean
-          !right = cx + cw + lean
-          at k = indexPrimArray quads k
           go !q !m
             | q >= count = commit (m * 4) (m * 6)
             | otherwise = do
                 let !o = q * 8
                     !gx = px + at o
                     !gw = at (o + 2)
-                if gx + gw < left || gx > right
+                if gx > right + slack
+                  -- This glyph and every later one start right of the clip.
+                  then commit (m * 4) (m * 6)
+                  else if gx + gw < left || gx > right
                   then go (q + 1) m
                   else do
                     let !gy = py + at (o + 1)
@@ -120,7 +146,7 @@ pushShapedQuads da fm slant px py (ShapedGlyphs quads) col = do
                         !v1 = at (o + 7)
                     pokeGlyphQuad vp ip base baseIdx slant baselineY r g b a m gx gy gw gh u0 v0 u1 v1
                     go (q + 1) (m + 1)
-      go 0 0
+      go start 0
 
 -- | Glyph quad @q@ of a text reservation whose vertices start at @base@ and
 -- indices at @baseIdx@. A non-zero @slant@ shears the quad around
@@ -168,31 +194,44 @@ pokeGlyphQuad vp ip base baseIdx slant baselineY r g b a q gx gy gw gh u0 v0 u1 
 -- relies on its sub-pixel pass offsets. Every quad shares one arena
 -- reservation. A non-zero @slant@ shears glyphs around the shared baseline for
 -- synthetic oblique, so stems stay parallel and descenders lean left. A glyph
--- the font lacks draws an upright advance box on the device grid.
+-- the font lacks draws an upright advance box on the device grid. As in
+-- 'pushShapedQuads', glyphs wholly outside the clip emit nothing, and the
+-- walk stops once the pen is well past it.
 pushGlyphQuads :: DrawArena -> FontMetrics -> Float -> Float -> Float -> T.Text -> Color -> IO ()
 pushGlyphQuads da fm slant px py txt col = do
   let !cap = T.length txt
   when (cap > 0) $ do
     scale <- readIORef (daSnapScale da)
+    cx <- readPrimArray (daCurrentClip da) 0
+    cw <- readPrimArray (daCurrentClip da) 2
     setTexture da glyphAtlasTextureId
     withVertsReserve da (cap * 4) (cap * 6) $ \vp ip base baseIdx commit -> do
       let !(r, g, b, a) = unpackColorF col
           !baselineY = py + fmAscent fm
+          !lean = abs slant * (fmLineHeight fm + abs (fmAscent fm))
+          !left = cx - lean
+          !right = cx + cw + lean
+          !stop = right + glyphSlackLines * fmLineHeight fm
+          outside gx gw = gx + gw < left || gx > right
           walk !q !ox !prev !t =
             case T.uncons t of
               Nothing -> pure q
-              Just (c, rest) -> do
-                let !adv = kernedAdvance fm prev c
-                    next !q' = walk q' (ox + adv) (Just c) rest
-                case fmGlyph fm c of
-                  Nothing
-                    | adv > 0 && c /= ' ' -> do
-                        pokeGlyphQuad vp ip base baseIdx 0 baselineY r g b a q (onGrid scale ox) (onGrid scale py) adv (fmLineHeight fm) whitePixelU whitePixelV whitePixelU whitePixelV
-                        next (q + 1)
-                    | otherwise -> next q
-                  Just gq -> do
-                    pokeGlyphQuad vp ip base baseIdx slant baselineY r g b a q (ox + gqX gq) (py + gqY gq) (gqW gq) (gqH gq) (gqU0 gq) (gqV0 gq) (gqU1 gq) (gqV1 gq)
-                    next (q + 1)
+              Just (c, rest)
+                | ox > stop -> pure q
+                | otherwise -> do
+                    let !adv = kernedAdvance fm prev c
+                        next !q' = walk q' (ox + adv) (Just c) rest
+                    case fmGlyph fm c of
+                      Nothing
+                        | adv > 0 && c /= ' ' && not (outside ox adv) -> do
+                            pokeGlyphQuad vp ip base baseIdx 0 baselineY r g b a q (onGrid scale ox) (onGrid scale py) adv (fmLineHeight fm) whitePixelU whitePixelV whitePixelU whitePixelV
+                            next (q + 1)
+                        | otherwise -> next q
+                      Just gq
+                        | outside (ox + gqX gq) (gqW gq) -> next q
+                        | otherwise -> do
+                            pokeGlyphQuad vp ip base baseIdx slant baselineY r g b a q (ox + gqX gq) (py + gqY gq) (gqW gq) (gqH gq) (gqU0 gq) (gqV0 gq) (gqU1 gq) (gqV1 gq)
+                            next (q + 1)
       !k <- walk 0 px Nothing txt
       commit (k * 4) (k * 6)
 
