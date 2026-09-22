@@ -224,17 +224,24 @@ insertGen cap w k v cache@(GenCache young n old)
   | n + w > cap = GenCache (HM.singleton k v) w young
   | otherwise = GenCache (HM.insert k v young) (n + w) old
 
--- | Look @k@ up, moving an old entry to the young map at weight @w k@.
-lookupGen :: Hashable k => Int -> (k -> Int) -> IORef (GenCache k v) -> k -> IO (Maybe v)
-lookupGen cap w ref k = do
+-- | The entry for @k@, or what @make@ returns, which is kept. Entries weigh
+-- @w k@; an old one used again moves to the young map. Inlined so a hit
+-- returns the stored value without boxing it in a 'Just' on the way: the SDL
+-- bench's warm-lookup gate measures exactly that.
+{-# INLINE cachedGen #-}
+cachedGen :: Hashable k => Int -> (k -> Int) -> IORef (GenCache k v) -> k -> IO v -> IO v
+cachedGen cap w ref k make = do
   cache@(GenCache young _ old) <- readIORef ref
   case HM.lookup k young of
-    Just v -> pure (Just v)
+    Just v -> pure v
     Nothing -> case HM.lookup k old of
       Just v -> do
         writeIORef ref $! insertGen cap (w k) k v cache
-        pure (Just v)
-      Nothing -> pure Nothing
+        pure v
+      Nothing -> do
+        v <- make
+        modifyIORef' ref (insertGen cap (w k) k v)
+        pure v
 
 -- Native glyph measurements have one representation, shared by metric-only
 -- preparation and atlas placement. Pixel bearings are unscaled here.
@@ -754,14 +761,9 @@ buildGlyphFontMetrics ga sf scale = do
       -- The cache lives on this 'FontMetrics', so the font id is constant and
       -- the pair can be packed into a single Int key: no tuple on the hot path.
       let !pk = (ord prev `shiftL` 21) .|. ord c
-      cached <- lookupGen kernCacheCap (const 1) kernCacheRef pk
-      case cached of
-        Just k -> pure k
-        Nothing -> do
-          raw <- ttfGetKerning (sfFont sf) (fromIntegral (ord prev) :: CUInt) (fromIntegral (ord c) :: CUInt)
-          let !k = fromIntegral raw / inv
-          modifyIORef' kernCacheRef (insertGen kernCacheCap 1 pk k)
-          pure k
+      cachedGen kernCacheCap (const 1) kernCacheRef pk $ do
+        raw <- ttfGetKerning (sfFont sf) (fromIntegral (ord prev) :: CUInt) (fromIntegral (ord c) :: CUInt)
+        pure $! fromIntegral raw / inv
 
     -- The glyph quads of a shaped line, from the atlas. Quads are cached per
     -- text and dropped with the atlas epoch, when their UVs go stale.
@@ -777,16 +779,10 @@ buildGlyphFontMetrics ga sf scale = do
             writeIORef quadEpochRef ep
             writeIORef quadCacheRef emptyGen
           -- Entries are kept wrapped so a hit returns them without allocating.
-          cached <- lookupGen runCacheCap textWeight quadCacheRef txt
-          case cached of
-            Just quads -> pure quads
-            Nothing -> do
-              shaped <- shapeOf txt
-              quads <- Just <$> placeGlyphs shaped
-              epAfter <- readIORef (gaEpoch ga)
-              when (epAfter == ep) $
-                modifyIORef' quadCacheRef (insertGen runCacheCap (textWeight txt) txt quads)
-              pure quads
+          -- Placing glyphs never resets the atlas (a full one resets at the
+          -- next frame start), so these quads belong to this epoch.
+          cachedGen runCacheCap textWeight quadCacheRef txt $
+            Just <$> (placeGlyphs =<< shapeOf txt)
 
     -- Put a shaped line's glyphs in the atlas. A glyph the atlas has no room
     -- for draws nothing, and the atlas resets before the next frame.
@@ -844,15 +840,10 @@ buildGlyphFontMetrics ga sf scale = do
     -- The shaped layout of a line, shared by measuring, preparing and
     -- drawing it. Fonts that cover characters this one lacks join it before
     -- the line is shaped.
-    shapeOf !txt = do
-      cached <- lookupGen runCacheCap textWeight shapedRef txt
-      case cached of
-        Just shaped -> pure shaped
-        Nothing -> do
-          ensureCoverage sf txt
-          shaped <- shapeLine sf inv txt
-          modifyIORef' shapedRef (insertGen runCacheCap (textWeight txt) txt shaped)
-          pure shaped
+    shapeOf !txt =
+      cachedGen runCacheCap textWeight shapedRef txt $ do
+        ensureCoverage sf txt
+        shapeLine sf inv txt
 
     -- The width shaping draws with, so layout and drawing agree.
     measure !txt
@@ -868,39 +859,35 @@ buildGlyphFontMetrics ga sf scale = do
 
     prepareText txt = do
       ensureFontAlive sf
-      cached <- lookupGen runCacheCap textWeight preparedRef txt
-      case cached of
-        Just fm -> pure fm
-        Nothing -> do
-          let insertChar m c = IM.insert (ord c) c m
-              chars = T.foldl' insertChar (T.foldl' insertChar IM.empty " HxM") txt
-          advances <- traverse advanceLookup chars
-          geometry <- traverse glyphGeometry chars
-          let gather !pairs !previous remaining = case T.uncons remaining of
-                Nothing -> pure pairs
-                Just (c, rest) -> do
-                  let key = (ord previous `shiftL` 21) .|. ord c
-                  pairs' <- if IM.member key pairs then pure pairs else do
-                    k <- kernLookup previous c
-                    pure $! IM.insert key k pairs
-                  gather pairs' c rest
-          seedKerns <- gather IM.empty ' ' "xM"
-          kerns <- gather seedKerns 'M' txt
-          shaped <- if T.null txt then pure Nothing else Just <$> shapeOf txt
-          let !layout = fmap shapedText shaped
-          let !fm = baseFm
-                { fmAdvance = \c ->
-                    let cp = ord c
-                     in if cp < 128 then indexPrimArray asciiAdvances cp
-                          else IM.findWithDefault (sfSpaceAdvance sf / inv) cp advances
-                , fmKerning = \a b -> IM.findWithDefault 0 ((ord a `shiftL` 21) .|. ord b) kerns
-                , fmGlyph = \c -> IM.findWithDefault Nothing (ord c) geometry
-                , fmShape = \t -> if t == txt then layout else Nothing
-                , fmBackend = Just backend
-                , fmSnapScale = inv
-                }
-          modifyIORef' preparedRef (insertGen runCacheCap (textWeight txt) txt fm)
-          pure fm
+      cachedGen runCacheCap textWeight preparedRef txt $ do
+        let insertChar m c = IM.insert (ord c) c m
+            chars = T.foldl' insertChar (T.foldl' insertChar IM.empty " HxM") txt
+        advances <- traverse advanceLookup chars
+        geometry <- traverse glyphGeometry chars
+        let gather !pairs !previous remaining = case T.uncons remaining of
+              Nothing -> pure pairs
+              Just (c, rest) -> do
+                let key = (ord previous `shiftL` 21) .|. ord c
+                pairs' <- if IM.member key pairs then pure pairs else do
+                  k <- kernLookup previous c
+                  pure $! IM.insert key k pairs
+                gather pairs' c rest
+        seedKerns <- gather IM.empty ' ' "xM"
+        kerns <- gather seedKerns 'M' txt
+        shaped <- if T.null txt then pure Nothing else Just <$> shapeOf txt
+        let !layout = fmap shapedText shaped
+        let !fm = baseFm
+              { fmAdvance = \c ->
+                  let cp = ord c
+                   in if cp < 128 then indexPrimArray asciiAdvances cp
+                        else IM.findWithDefault (sfSpaceAdvance sf / inv) cp advances
+              , fmKerning = \a b -> IM.findWithDefault 0 ((ord a `shiftL` 21) .|. ord b) kerns
+              , fmGlyph = \c -> IM.findWithDefault Nothing (ord c) geometry
+              , fmShape = \t -> if t == txt then layout else Nothing
+              , fmBackend = Just backend
+              , fmSnapScale = inv
+              }
+        pure fm
 
   fm <- prepareText ""
   pure (fm, measure)
