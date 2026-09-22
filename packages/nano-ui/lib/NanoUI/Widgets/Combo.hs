@@ -30,7 +30,7 @@ import NanoUI.Internal.Font (menuItemRowH)
 import NanoUI.Internal.Frame.Hit (findNodeByWidgetId)
 import NanoUI.Internal.Frame.Select (comboDropPickIndex, comboDropRect, comboScrollGeom)
 import NanoUI.Internal.Id (WidgetId (..))
-import NanoUI.Internal.Input (Key (..), inputKeys, inputMouseDown, inputMousePos, inputMousePressed, inputScroll)
+import NanoUI.Internal.Input (Input, Key (..), inputKeys, inputMouseDown, inputMousePos, inputMousePressed, inputScroll)
 import NanoUI.Internal.Layout.Arena (setOptions)
 import NanoUI.Internal.Monad (Ui, askContext, uiIO)
 import NanoUI.Internal.Store (Slot (..), boolInt, fieldFloat, fieldInt, fieldText, findSlot, flagSlot, insertSlot, slotKey)
@@ -93,14 +93,8 @@ data ComboInput = ComboInput
     -- ^ Width of the widest matching row.
   , ciField :: !Rect
     -- ^ The field's rect; empty before its first layout.
-  , ciMouse :: !V2
-  , ciPressed :: !Bool
-  , ciDown :: !Bool
-  , ciScroll :: !V2
-  , ciKeyUp :: !Bool
-  , ciKeyDown :: !Bool
-  , ciEnter :: !Bool
-  , ciEscape :: !Bool
+  , ciInput :: !Input
+    -- ^ The pointer, wheel and keys as the dropdown sees them.
   }
 
 -- | What one frame of the combo decided.
@@ -148,6 +142,8 @@ comboStep ci cs0 =
     }
   where
     isFocus = ciFocused ci
+    inp = ciInput ci
+    hasKey k = k `elem` inputKeys inp
     text = ciText ci
     displayed = ciRows ci
     contentW = ciContentW ci
@@ -164,8 +160,8 @@ comboStep ci cs0 =
     win0 = if ciEdited ci then 0 else storedWin
     nav
       | not isFocus || n <= 0 = 0 :: Int
-      | ciKeyDown ci = 1
-      | ciKeyUp ci = -1
+      | hasKey KeyDown = 1
+      | hasKey KeyUp = -1
       | otherwise = 0
     hi
       | nav == 0 = hi0
@@ -179,7 +175,7 @@ comboStep ci cs0 =
       | hi >= v + vis = hi - vis + 1
       | otherwise = clampWin v
     Rect rx ry rw rh = ciField ci
-    mouse = ciMouse ci
+    mouse = inputMousePos inp
     dropRect = comboDropRect rx ry rw rh (min vis n) n contentW
     overDrop = isFocus && rectNonEmpty (ciField ci) && rectContains dropRect mouse
     itemH = menuItemRowH
@@ -204,8 +200,8 @@ comboStep ci cs0 =
     onVTrack = rectContains vTrackR mouse
     onHThumb = rectContains hThumbR mouse
     onHTrack = rectContains hTrackR mouse
-    pressed = isFocus && ciPressed ci
-    down = isFocus && ciDown ci
+    pressed = isFocus && inputMousePressed inp
+    down = isFocus && inputMouseDown inp
     startV = pressed && overDrop && onVTrack
     startH = pressed && overDrop && not startV && onHTrack
     vGrab = if onVThumb then v2Y mouse - rectY vThumbR else rectH vThumbR / 2
@@ -221,9 +217,9 @@ comboStep ci cs0 =
     draggingH = down && drag1 == 2 && ((drag0 == 2 && not startH) || (startH && not onHThumb))
     dragWin = clampWin (round ((v2Y mouse - rectY vTrackR - dragOff0) / max 1 (rectH vTrackR - rectH vThumbR) * fromIntegral (n - vis)))
     dragX = clamp 0 maxOffX ((v2X mouse - rectX hTrackR - dragOff0) / max 1 (rectW hTrackR - rectW hThumbR) * maxOffX)
-    wheelRows = round (v2Y (ciScroll ci) * comboBoxRowsPerNotch) :: Int
+    wheelRows = round (v2Y (inputScroll inp) * comboBoxRowsPerNotch) :: Int
     wheelDelta = if overDrop then wheelRows else 0
-    xWheel = if overDrop then v2X (ciScroll ci) * 20 else 0
+    xWheel = if overDrop then v2X (inputScroll inp) * 20 else 0
     win
       | draggingV = dragWin
       | nav /= 0 = alignWin (win0 + wheelDelta)
@@ -234,10 +230,10 @@ comboStep ci cs0 =
     dragKind' = if down then drag1 else 0
     dragOff' | startV = vGrab | startH = hGrab | otherwise = dragOff0
     -- Enter commits only an explicitly highlighted row (hover or Up/Down).
-    picked = isFocus && n > 0 && hi' >= 0 && ciEnter ci
+    picked = isFocus && n > 0 && hi' >= 0 && hasKey KeyEnter
     -- Only read when 'picked', so @hi'@ is a row.
     pickedText = fromMaybe text (listToMaybe (drop hi' displayed))
-    escDismiss = isFocus && ciEscape ci
+    escDismiss = isFocus && hasKey KeyEscape
     -- Commit points: Enter, a row click (the frame-side pick lands as a
     -- frame-start text the widget did not produce), and losing focus (which
     -- the blur frame after the focus clear detects). Escape is a cancel: it
@@ -274,7 +270,6 @@ comboBox' placeholder options value = do
   inp <- dropdownInput (rawRespId resp)
   let wid = rawRespId resp
       key = intKey wid
-      keys = inputKeys inp
   isFocus <- keyboardFocused wid
   -- The dropdown only shows while the field is focused, so an unfocused
   -- combo steps with no rows. The matches stay lazy: the option window below
@@ -307,14 +302,7 @@ comboBox' placeholder options value = do
             , ciRows = displayed
             , ciContentW = contentW
             , ciField = rawRespRect resp
-            , ciMouse = inputMousePos inp
-            , ciPressed = inputMousePressed inp
-            , ciDown = inputMouseDown inp
-            , ciScroll = inputScroll inp
-            , ciKeyUp = KeyUp `elem` keys
-            , ciKeyDown = KeyDown `elem` keys
-            , ciEnter = KeyEnter `elem` keys
-            , ciEscape = KeyEscape `elem` keys
+            , ciInput = inp
             }
           cs0
       cs1 = stepState step
