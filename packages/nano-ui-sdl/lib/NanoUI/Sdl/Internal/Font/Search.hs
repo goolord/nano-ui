@@ -11,9 +11,9 @@ import Control.Exception (IOException, catch)
 import Data.Containers.ListUtils (nubOrd)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Char (isDigit, isLower, isSpace, isUpper, toLower)
-import Data.List (isInfixOf, minimumBy, sort, stripPrefix)
+import Data.List (isInfixOf, sort, sortOn, stripPrefix)
 import Data.Maybe (fromMaybe, listToMaybe, mapMaybe)
-import Data.Ord (Down (..), comparing)
+import Data.Ord (Down (..))
 import qualified Data.Set as Set
 import System.Directory (getHomeDirectory)
 import System.Directory.Recursive (getFilesRecursive)
@@ -59,18 +59,12 @@ listFontFamilies = do
 -- @NotoSansArabic@ reads as @Noto Sans Arabic@. Kept case-insensitively
 -- compatible with 'normalize'.
 prettyFamily :: String -> String
-prettyFamily = separateCamel . stripStyle
+prettyFamily file = concat (zipWith separate (' ' : stem) stem)
   where
-    stripStyle s = case break (== '-') s of
-      (base, _) -> base
-    separateCamel = go
-      where
-        go [] = []
-        go (c : cs) = c : goTail c cs
-        goTail _ [] = []
-        goTail prev (c : cs)
-          | isUpper c && (isLower prev || isDigit prev) = ' ' : c : goTail c cs
-          | otherwise = c : goTail c cs
+    stem = takeWhile (/= '-') file
+    separate prev c
+      | isUpper c && (isLower prev || isDigit prev) = [' ', c]
+      | otherwise = [c]
 
 -- ---------------------------------------------------------------------------
 -- Directory traversal
@@ -102,36 +96,16 @@ filesBelow root =
 defaultFontDirs :: IO [FilePath]
 defaultFontDirs =
   case os of
-    "darwin" -> macDirs
-    "mingw32" -> winDirs
-    _ -> linuxDirs
-  where
-    linuxDirs :: IO [FilePath]
-    linuxDirs = do
-      home <- getHomeDirectory
-      pure
-        [ home </> ".local/share/fonts"
-        , "/usr/local/share/fonts"
-        , "/usr/share/fonts"
-        ]
-
-    macDirs :: IO [FilePath]
-    macDirs = do
-      home <- getHomeDirectory
-      pure
-        [ home </> "Library/Fonts"
-        , "/Library/Fonts"
-        , "/System/Library/Fonts"
-        ]
-
-    winDirs :: IO [FilePath]
-    winDirs = do
+    "darwin" -> inHome "Library/Fonts" ["/Library/Fonts", "/System/Library/Fonts"]
+    "mingw32" -> do
       mRoot <- lookupEnv "SystemRoot"
-      let systemDir = fromMaybe "C:\\Windows" mRoot </> "Fonts"
       mLocal <- lookupEnv "LOCALAPPDATA"
-      let userDirs =
-            maybe [] (\l -> [l </> "Microsoft" </> "Windows" </> "Fonts"]) mLocal
-      pure (userDirs ++ [systemDir])
+      pure $
+        [local </> "Microsoft" </> "Windows" </> "Fonts" | Just local <- [mLocal]]
+          ++ [fromMaybe "C:\\Windows" mRoot </> "Fonts"]
+    _ -> inHome ".local/share/fonts" ["/usr/local/share/fonts", "/usr/share/fonts"]
+  where
+    inHome dir system = (: system) . (</> dir) <$> getHomeDirectory
 
 isFontFile :: FilePath -> Bool
 isFontFile path =
@@ -143,13 +117,10 @@ isFontFile path =
 -- | Pick the highest-scoring file for @norm@ (a normalised family name).
 bestMatch :: String -> [(String, FilePath)] -> Maybe FilePath
 bestMatch norm files =
-  case [(score, path) | (stem, path) <- files, Just score <- [maximum (Nothing : map (`matchScore` stem) candidates)]] of
-    [] -> Nothing
-    scored ->
-      -- minimumBy keeps the first tie; descending scores prefer the best face.
-      let (_, best) = minimumBy (comparing (Down . fst)) scored
-       in Just best
+  -- The sort is stable, so of equal scores the file found first wins.
+  snd <$> listToMaybe (sortOn (Down . fst) scored)
   where
+    scored = [(score, path) | (stem, path) <- files, Just score <- [maximum (Nothing : map (`matchScore` stem) candidates)]]
     candidates = norm : familyAliases norm
 
 matchScore :: String -> String -> Maybe Int
