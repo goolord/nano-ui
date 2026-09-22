@@ -16,10 +16,11 @@ module NanoUI.Sdl.Internal.Display
   ) where
 
 import Control.Monad (unless, void)
-import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.IORef (IORef, newIORef)
 import GHC.IORef (atomicSwapIORef)
 import Foreign.C.Types (CBool (..), CInt (..))
 import Foreign.Marshal.Alloc (alloca, callocBytes)
+import Foreign.Marshal.Utils (with)
 import Foreign.Ptr (FunPtr, Ptr, freeHaskellFunPtr)
 import Foreign.Storable (Storable, peek, poke, sizeOf)
 import Data.Word (Word32)
@@ -41,16 +42,7 @@ import System.IO.Unsafe (unsafePerformIO)
 -- framebuffer by the display scale rendered 1.56x the window's pixels and
 -- squeezed them back down on every present.
 queryWindowPixelDensity :: Ptr SDL_Window -> IO Float
-queryWindowPixelDensity win = do
-  s <- getWindowPixelDensity win
-  pure (if s > 0 then s else 1)
-
--- | Vertical refresh rate of the window's current display mode, in Hz
--- (0 when unavailable).
-queryWindowRefreshHz :: Ptr SDL_Window -> IO Int
-queryWindowRefreshHz win = do
-  hz <- windowRefreshRateC win
-  pure (max 0 (fromIntegral hz))
+queryWindowPixelDensity win = (\s -> if s > 0 then s else 1) <$> getWindowPixelDensity win
 
 -- | Window size in window (logical) coordinates; 0x0 when SDL cannot say.
 -- SDL_GetWindowSize already returns the window-coordinate size, not pixels.
@@ -89,30 +81,28 @@ installResizeWatch act = do
     removeResizeWatchC
     freeHaskellFunPtr fp
 
--- | The user event type that wakes the event loop, registered once per
--- process by 'initRefreshEvent'; 0 until then.
-{-# NOINLINE refreshEventType #-}
-refreshEventType :: IORef Word32
-refreshEventType = unsafePerformIO (newIORef 0)
-
 -- | The event 'pushRefreshEvent' sends, filled in once by 'initRefreshEvent'.
 -- The core wakes the loop on every 'markDirty', so a push must not allocate.
 {-# NOINLINE refreshEvent #-}
 refreshEvent :: Ptr SDL_Event
 refreshEvent = unsafePerformIO (callocBytes (sizeOf (undefined :: SDL_Event)))
 
+-- | The user event type that wakes the event loop, registered once per
+-- process by 'initRefreshEvent'; 0 until then.
+refreshEventType :: IO Word32
+refreshEventType = (\(Uint32 ty) -> ty) <$> peek refreshEvent.type'
+
 initRefreshEvent :: IO Bool
 initRefreshEvent = do
   -- A wake queued as the last session closed went down with SDL's queue.
   -- Left pending, it would stop this session from ever queuing one.
   takeRefreshEvent
-  registered <- readIORef refreshEventType
+  registered <- refreshEventType
   if registered /= 0
     then pure True
     else do
       ty <- registerEvents 1
       poke refreshEvent.type' (Uint32 ty)
-      writeIORef refreshEventType ty
       pure (ty /= 0)
 
 -- | Whether a refresh event is queued that the loop has not taken yet.
@@ -130,7 +120,7 @@ refreshPending = unsafePerformIO (newIORef False)
 -- before the frame that reads it.
 pushRefreshEvent :: IO ()
 pushRefreshEvent = do
-  ty <- readIORef refreshEventType
+  ty <- refreshEventType
   unless (ty == 0) $ do
     pending <- atomicSwapIORef refreshPending True
     unless pending $ do
@@ -141,8 +131,10 @@ pushRefreshEvent = do
 takeRefreshEvent :: IO ()
 takeRefreshEvent = void (atomicSwapIORef refreshPending False)
 
+-- | Vertical refresh rate of the window's current display mode, in Hz
+-- (0 when unavailable).
 foreign import ccall unsafe "nano_ui_window_refresh_rate"
-  windowRefreshRateC :: Ptr SDL_Window -> IO CInt
+  queryWindowRefreshHz :: Ptr SDL_Window -> IO CInt
 
 foreign import ccall "wrapper"
   mkResizeCb :: IO () -> IO (FunPtr (IO ()))
@@ -158,14 +150,11 @@ foreign import ccall safe "nano_ui_remove_resize_watch"
 zoomWindow :: Ptr SDL_Window -> Size -> Float -> IO ()
 zoomWindow win (Size w h) zoom = do
   display <- getDisplayForWindow win
-  usable <- alloca $ \rp -> do
-    ok <- getDisplayUsableBounds display rp
-    if ok then Just <$> peek rp else pure Nothing
-  let fit want avail = case avail of
-        Just a | a > 0 -> min want (fromIntegral a)
-        _ -> want
-      zw = fit (w * zoom) ((.w) <$> usable)
-      zh = fit (h * zoom) ((.h) <$> usable)
+  -- Left empty, and so not a limit, when SDL cannot say.
+  usable <- with (SDL_Rect 0 0 0 0) $ \rp -> getDisplayUsableBounds display rp >> peek rp
+  let fit want avail = if avail > 0 then min want (fromIntegral avail) else want
+      zw = fit (w * zoom) usable.w
+      zh = fit (h * zoom) usable.h
       centred = 0x2FFF0000 -- SDL_WINDOWPOS_CENTERED
   void $ setWindowSize win (round zw) (round zh)
   void $ setWindowPosition win centred centred

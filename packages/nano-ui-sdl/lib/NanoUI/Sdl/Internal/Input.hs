@@ -12,15 +12,17 @@ module NanoUI.Sdl.Internal.Input
   , isButtonEdge
   ) where
 
+import Control.Monad (mfilter)
 import Data.Bits ((.&.))
-import Data.IORef (readIORef)
 import qualified Data.Text as T
 import Data.Text (Text)
 import qualified Data.Text.Foreign as TF
 import Data.Word (Word32)
 import Foreign.C.Types (CFloat)
+import Data.Maybe (fromMaybe)
 import Foreign.Marshal.Alloc (alloca)
-import Foreign.Ptr (Ptr, nullPtr)
+import Foreign.Marshal.Utils (maybePeek)
+import Foreign.Ptr (Ptr)
 import Foreign.Storable (Storable (..))
 import GHC.Records.Compat (getField)
 import SDL3.Sys.Bindgen.Runtime.CBool qualified as CBool
@@ -105,7 +107,7 @@ data SdlEvent
 pollEvents :: IO [SdlEvent]
 pollEvents =
   alloca $ \(p :: Ptr SDL_Event) -> do
-    refreshTy <- readIORef refreshEventType
+    refreshTy <- refreshEventType
     let drain acc = do
           got <- pollEventSafe p
           if got
@@ -121,7 +123,7 @@ waitEvent :: Int -> IO (Maybe SdlEvent)
 waitEvent ms =
   alloca $ \p -> do
     got <- if ms < 0 then waitEventSafe p else waitEventTimeoutSafe p (fromIntegral ms)
-    if got then readIORef refreshEventType >>= \ty -> decodeEvent ty p else pure Nothing
+    if got then refreshEventType >>= \ty -> decodeEvent ty p else pure Nothing
 
 -- | Translate one SDL event, given the refresh event type; 'Nothing' for
 -- events the UI ignores.
@@ -196,12 +198,8 @@ textInput :: Ptr SDL_Event -> IO (Maybe SdlEvent)
 textInput p = do
   te <- peek p.text
   mods <- peekModifiers
-  let textPtr = PtrConst.unsafeToPtr (getField @"text" te)
-  if textPtr == nullPtr
-    then pure Nothing
-    else do
-      txt <- TF.peekCString textPtr
-      pure (if T.null txt then Nothing else Just (EvText txt mods))
+  txt <- maybePeek TF.peekCString (PtrConst.unsafeToPtr (getField @"text" te))
+  pure ((`EvText` mods) <$> mfilter (not . T.null) txt)
 
 mouseButton :: Ptr SDL_Event -> Bool -> IO (Maybe SdlEvent)
 mouseButton p down = do
@@ -214,12 +212,11 @@ mouseButton p down = do
 dropEvent :: Ptr SDL_Event -> DropType -> IO (Maybe SdlEvent)
 dropEvent p ty = do
   de <- peek p.drop
-  let dataPtr = PtrConst.unsafeToPtr (getField @"data'" de)
-      -- A drag entering or finishing has no position.
+  let -- A drag entering or finishing has no position.
       pos
         | ty == DropBegin || ty == DropComplete = Nothing
         | otherwise = Just (v2 (getField @"x" de) (getField @"y" de))
-  payload <- if dataPtr == nullPtr then pure "" else TF.peekCString dataPtr
+  payload <- fromMaybe "" <$> maybePeek TF.peekCString (PtrConst.unsafeToPtr (getField @"data'" de))
   pure (Just (EvDrop (DropEvent ty pos payload)))
 
 peekModifiers :: IO Modifiers

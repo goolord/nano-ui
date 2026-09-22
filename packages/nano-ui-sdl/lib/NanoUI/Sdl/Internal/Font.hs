@@ -13,7 +13,7 @@ module NanoUI.Sdl.Internal.Font
   , newGlyphAtlas
   , destroyGlyphAtlas
   , prepareGlyphAtlasForFrame
-  , takeGlyphAtlasResetFlag
+  , glyphAtlasFull
   , glyphAtlasTextures
   , SdlFontCache
   , newSdlFontCache
@@ -30,6 +30,7 @@ import Data.Foldable (traverse_)
 import Data.List (delete, elemIndex)
 import Foreign.Marshal.Alloc (alloca, allocaBytes)
 import Foreign.Marshal.Array (advancePtr, allocaArray, peekArray)
+import Foreign.Marshal.Utils (with)
 import Data.Char (isPrint, isSpace, ord)
 import NanoUI.Bidi (BidiRun (..), bidiRuns, needsBidi)
 import NanoUI.Sdl.Internal.Font.Inter (fontInterBytes, fontInterLabel)
@@ -60,7 +61,7 @@ import Data.Text.Unsafe (lengthWord8)
 import Foreign.C.String (CString, withCString)
 import Foreign.C.Types (CBool (..), CFloat (..), CInt (..), CSize (..), CUInt (..))
 import Foreign.Ptr (Ptr, castPtr, nullPtr, plusPtr)
-import Foreign.Storable (peek, peekElemOff, poke)
+import Foreign.Storable (peek, peekElemOff)
 import Data.Unique (hashUnique, newUnique)
 import qualified Data.ByteString as BS
 import NanoUI (FontVariant (..))
@@ -82,6 +83,7 @@ import NanoUI.Testing
   , wrapMeasureCache
   )
 import SDL3.Sys.Bindgen.Render (SDL_Renderer, SDL_Texture)
+import SDL3.Sys.Surface (destroySurface)
 import qualified Data.IntMap.Strict as IM
 import qualified Data.Text.Foreign as TF
 
@@ -125,27 +127,23 @@ data GlyphSlot = GlyphSlot
 data GlyphAtlas = GlyphAtlas
   { gaAtlas :: !(Ptr ())
   , gaEpoch :: !(IORef Int)
-  , -- | An insertion failed (atlas out of space) during the last frame; the
-    -- atlas must be reset at the next frame start, before any quad is
-    -- recorded, so the reset can never wipe the texture underneath
-    -- already-recorded text.
-    gaNeedsReset :: !(IORef Bool)
-  , -- | The atlas was reset (or ran out of space) since the flag was last
-    -- cleared at frame start. Observed by the runner after the UI pass: a
-    -- set flag means the frame being built holds stale-UV or unplaceable
-    -- text quads and must not be presented.
-    gaResetFlag :: !(IORef Bool)
+  , -- | An insertion failed (every page out of space) since the last reset.
+    -- The atlas is reset at the next frame start, before any quad is
+    -- recorded, so a reset can never wipe the texture underneath
+    -- already-recorded text; a frame built while this is set holds text it
+    -- could not place and must not be presented.
+    gaFull :: !(IORef Bool)
   , -- | Glyph slots by font id, then glyph index: what shaped text draws.
     -- Closing a font drops its inner map instead of scanning every glyph.
     gaIndexEntries :: !(IORef (IM.IntMap (IM.IntMap (Maybe GlyphSlot))))
-  , gaAlive :: !(IORef Bool)
   }
 
 -- Backend effects are confined to the owning SDL thread. Retained snapshots
 -- may outlive a window or a cache entry, but must never query a freed handle.
-ensureAlive :: String -> IORef Bool -> IO ()
-ensureAlive closer alive =
-  readIORef alive >>= (`unless` fail ("font backend used after " ++ closer))
+-- The session closes its fonts before the atlas, so a live font means a live
+-- atlas.
+ensureAlive :: SdlFont -> IO ()
+ensureAlive sf = readIORef (sfAlive sf) >>= (`unless` fail "font backend used after closeFont")
 
 -- | Entries per generation of each shaped-run cache on a 'FontMetrics'.
 -- Dynamic, ever-changing text (FPS counters, timers, percentages, mouse
@@ -231,24 +229,17 @@ newGlyphAtlas :: Ptr SDL_Renderer -> IO GlyphAtlas
 newGlyphAtlas ren = do
   atlas <- textAtlasCreate ren
   when (atlas == nullPtr) $ fail "nano_ui_text_atlas_create failed (glyph)"
-  GlyphAtlas atlas
-    <$> newIORef 0
-    <*> newIORef False
-    <*> newIORef False
-    <*> newIORef IM.empty
-    <*> newIORef True
+  GlyphAtlas atlas <$> newIORef 0 <*> newIORef False <*> newIORef IM.empty
 
 destroyGlyphAtlas :: GlyphAtlas -> IO ()
-destroyGlyphAtlas ga = do
-  alive <- atomicModifyIORef' (gaAlive ga) (\open -> (False, open))
-  when alive $ textAtlasDestroy (gaAtlas ga)
+destroyGlyphAtlas = textAtlasDestroy . gaAtlas
 
--- | Test-and-clear the mid-frame reset flag. 'True' means the atlas was
--- reset (or ran out of space) while the frame was being built, so quads
--- recorded before that point may hold stale UVs; the caller must not
--- present that frame.
-takeGlyphAtlasResetFlag :: GlyphAtlas -> IO Bool
-takeGlyphAtlasResetFlag ga = atomicModifyIORef' (gaResetFlag ga) (\v -> (False, v))
+-- | Whether a glyph could not be placed since the atlas was last reset.
+-- Read after a frame's UI pass: 'prepareGlyphAtlasForFrame' reset the atlas
+-- before it, so 'True' means the frame holds text it could not place and the
+-- caller must not present it.
+glyphAtlasFull :: GlyphAtlas -> IO Bool
+glyphAtlasFull = readIORef . gaFull
 
 -- | Look up or insert a glyph by font and glyph index, the way shaped text
 -- names glyphs. Glyphs are keyed by the font's id, which is never reused, and
@@ -273,22 +264,17 @@ lookupOrInsertGlyph ga font gi = do
 -- that could not be placed.
 placeGlyphImage :: GlyphAtlas -> SdlFont -> Int -> IO (Maybe GlyphSlot)
 placeGlyphImage ga font gi = do
-  surf <- alloca $ \sp -> do
-    poke sp nullPtr
-    ok <- ttfRenderGlyphIndexSurface (sfFont font) (fromIntegral gi) sp
-    if ok /= 0 then peek sp else pure nullPtr
+  -- The surface is left null when there is no image.
+  surf <- with nullPtr $ \sp -> ttfRenderGlyphIndexSurface (sfFont font) (fromIntegral gi) sp >> peek sp
   if surf == nullPtr
     then pure Nothing
     else alloca $ \pagePtr -> allocaArray 4 $ \out -> do
       -- The page, and the x, y, width and height in pixels on it.
       let at = advancePtr out
       placed <- textAtlasInsertSurface (gaAtlas ga) surf pagePtr out (at 1) (at 2) (at 3)
-      freeSurface surf
+      destroySurface (castPtr surf)
       if placed == 0
-        then do
-          writeIORef (gaNeedsReset ga) True
-          writeIORef (gaResetFlag ga) True
-          pure Nothing
+        then Nothing <$ writeIORef (gaFull ga) True
         else do
           page <- fromIntegral <$> peek pagePtr
           [x, y, w, h] <- map ((/ glyphAtlasSize) . realToFrac) <$> peekArray 4 out
@@ -352,7 +338,7 @@ shapingRuns txt
 -- right-to-left one.
 shapeLine :: SdlFont -> Float -> Text -> IO Shaped
 shapeLine sf inv txt = do
-  ensureAlive "closeFont" (sfAlive sf)
+  ensureAlive sf
   fallbacks <- IM.elems <$> readIORef (sfFallbacks sf)
   let fontList = sf : fallbacks
       n = T.length txt
@@ -625,8 +611,7 @@ buildGlyphFontMetrics ga sf scale = do
     shapedLookup !txt
       | T.null txt = pure Nothing
       | otherwise = do
-          ensureAlive "closeFont" (sfAlive sf)
-          ensureAlive "destroyGlyphAtlas" (gaAlive ga)
+          ensureAlive sf
           ep <- readIORef (gaEpoch ga)
           quadEp <- readIORef quadEpochRef
           when (quadEp /= ep) $ do
@@ -682,7 +667,7 @@ buildGlyphFontMetrics ga sf scale = do
     backend = FontBackend prepareText shapedLookup
 
     prepareText txt = do
-      ensureAlive "closeFont" (sfAlive sf)
+      ensureAlive sf
       cachedGen runCacheCap textWeight preparedRef txt $ do
         let insertChar m c = IM.insert (ord c) c m
             chars = T.foldl' insertChar (T.foldl' insertChar IM.empty " HxM") txt
@@ -740,15 +725,14 @@ openFontSource source ptsize =
       else open embeddedFontSource `catch` \(_ :: SomeException) -> throwIO e
   where
     pt = realToFrac ptsize
-    open (FontFromPath path) = do
-      font <- withCString path (`ttfOpenFont` pt)
-      when (font == nullPtr) $ fail ("TTF_OpenFont failed for " ++ path)
-      readSdlFont ptsize font
-    open (FontFromMemory bs label) = do
-      -- SDL_ttf reads from its own copy of the bytes, so the font outlives
-      -- the ByteString's pinning.
-      font <- unsafeUseAsCStringLen bs $ \(ptr, len) -> ttfOpenFontMemory (castPtr ptr) (fromIntegral len) pt
-      when (font == nullPtr) $ fail ("TTF_OpenFont failed for in-memory font " ++ label)
+    open src = do
+      font <- case src of
+        FontFromPath path -> withCString path (`ttfOpenFont` pt)
+        -- SDL_ttf reads from its own copy of the bytes, so the font outlives
+        -- the ByteString's pinning.
+        FontFromMemory bs _ ->
+          unsafeUseAsCStringLen bs $ \(ptr, len) -> ttfOpenFontMemory (castPtr ptr) (fromIntegral len) pt
+      when (font == nullPtr) $ fail ("TTF_OpenFont failed for " ++ fontSourceLabel src)
       readSdlFont ptsize font
 
 -- | Wrap an open TTF font.
@@ -819,9 +803,6 @@ foreign import ccall unsafe "nano_ui_text_atlas_insert_surface"
     Ptr CFloat ->
     Ptr CFloat ->
     IO CBool
-
-foreign import ccall unsafe "SDL_DestroySurface"
-  freeSurface :: Ptr () -> IO ()
 
 foreign import capi unsafe "SDL3_ttf/SDL_ttf.h TTF_GetGlyphMetrics"
   ttfGlyphMetrics ::
@@ -925,19 +906,16 @@ resetGlyphAtlas cache = do
   let ga = sfcGlyphAtlas cache
   modifyIORef' (gaEpoch ga) (+ 1)
   writeIORef (gaIndexEntries ga) IM.empty
-  writeIORef (gaNeedsReset ga) False
+  writeIORef (gaFull ga) False
   textAtlasReset (gaAtlas ga)
   warmBaseFonts cache
-  writeIORef (gaResetFlag ga) True
 
 -- | Frame-start atlas maintenance: reset the atlas if an insertion failed
--- during the previous frame, then clear the mid-frame reset flag. Must run
--- before the frame's UI pass records any quads.
+-- since the last reset. Must run before the frame's UI pass records any
+-- quads.
 prepareGlyphAtlasForFrame :: SdlFontCache -> IO ()
-prepareGlyphAtlasForFrame cache = do
-  needs <- readIORef (gaNeedsReset (sfcGlyphAtlas cache))
-  when needs $ resetGlyphAtlas cache
-  writeIORef (gaResetFlag (sfcGlyphAtlas cache)) False
+prepareGlyphAtlasForFrame cache =
+  glyphAtlasFull (sfcGlyphAtlas cache) >>= (`when` resetGlyphAtlas cache)
 
 -- | The primary (sans) family's source, for the debug readout.
 sdlFontCacheSource :: SdlFontCache -> IO FontSource

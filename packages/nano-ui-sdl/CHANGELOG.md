@@ -75,6 +75,11 @@
   left/right press/release events are one `EvMouseButton`, `EvResize` and
   `EvDisplayScale` are one `EvWindowChanged`, and `waitEvent` takes a
   timeout (negative waits indefinitely) in place of `waitEventTimeout`.
+- `sdlDrawFrame` answers only whether another frame is needed, not the input
+  it was given as well. `FileDialogId` holds the dialog's result cell rather
+  than a number: it keeps `Eq` and drops `Ord`, `Show` and the `Int`
+  constructor. `SdlEnv`'s `sdlDebug` is the core `DebugSamplerRef`, beside
+  `sdlDebugSnapshot` and `sdlFrameTrace`.
 - Font variants other than `FontMono` share the sans font at a size instead
   of each opening its own copy.
 - A line over 4096 bytes is cached like any other, counting one entry per

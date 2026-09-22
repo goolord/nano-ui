@@ -1,7 +1,7 @@
 -- | SDL3 draw path: retained damage updates or direct continuous presentation.
 module NanoUI.Sdl.Internal.Runner
   ( sdlDrawFrame
-  , drawReduceEff
+  , drawFrameWith
   , askSdlDebug
   , setSdlUiFont
   , setSdlUiScale
@@ -10,8 +10,7 @@ module NanoUI.Sdl.Internal.Runner
 import Control.Exception (finally, mask_)
 import Control.Monad (unless, void, when)
 import Data.Foldable (traverse_)
-import Data.IORef (IORef, readIORef, writeIORef)
-import Data.Typeable (Typeable)
+import Data.IORef (readIORef, writeIORef)
 import GHC.Clock (getMonotonicTime)
 import NanoUI
   ( Input (..)
@@ -20,7 +19,7 @@ import NanoUI
   , V2 (..)
   , themeWindow
   )
-import Effectful (Eff, IOE, type (:>))
+import Effectful (Eff, type (:>))
 import NanoUI.Testing
   ( Context
   , Damage (..)
@@ -33,16 +32,13 @@ import NanoUI.Testing
   , damageIsEmpty
   , drawCmdCount
   , markDirty
-  , runEff
-  , runFrameEff
-  , runFrameReduceEff
+  , runFrame
   , takeDamage
   , uiIO
   )
 import NanoUI.Internal.Debug (CoreDebugSnapshot (..), noteDebugPresent, noteDebugSkip, refreshDebugSnapshot)
 import NanoUI.Sdl.Internal.Debug
-  ( SdlDebugSampler (..)
-  , SdlDebugSnapshot (..)
+  ( SdlDebugSnapshot (..)
   , emptySdlDebug
   , traceFrame
   )
@@ -52,7 +48,7 @@ import NanoUI.Sdl.Internal.Font
   , glyphAtlasTextures
   , sdlFontCacheSource
   , prepareGlyphAtlasForFrame
-  , takeGlyphAtlasResetFlag
+  , glyphAtlasFull
   )
 import NanoUI.Sdl.Internal.NanoUIFont (NanoUIFont)
 import NanoUI.Sdl.Internal.Render (flushRenderBatch, renderDrawDataPass, snapDamage)
@@ -78,26 +74,54 @@ import SDL3.Sys.Render
   )
 
 -- | Build, draw, and present one frame on the display thread. The final flag
--- forces a full repaint. Returns whether another frame is needed and the
--- input state to retain. Use the context/input returned by @syncDisplay@.
-sdlDrawFrame :: Context -> NanoUI () -> SdlEnv -> Input -> Bool -> IO (Bool, Input)
+-- forces a full repaint. Returns whether another frame is needed. Use the
+-- context/input returned by @syncDisplay@.
+sdlDrawFrame :: Context -> NanoUI () -> SdlEnv -> Input -> Bool -> IO Bool
 sdlDrawFrame ctx ui env inp forceFull =
   drawFrameWith ctx env inp forceFull $ do
-    (_, _, drawData, dirtyAfterUi) <- runFrameEff runEff ctx inp ui
+    (_, _, drawData, dirtyAfterUi) <- runFrame ctx inp ui
     pure (drawData, dirtyAfterUi)
 
--- | Both application styles share atlas maintenance, retain preparation,
--- timing, and presentation. Only evaluation of the UI differs.
-drawFrameWith :: Context -> SdlEnv -> Input -> Bool -> IO (DrawData, Bool) -> IO (Bool, Input)
+-- | Draw and present a frame whose UI pass is the given action, which answers
+-- the draw data and whether the context needs another frame. Both
+-- application styles share atlas maintenance, retain preparation, timing,
+-- and presentation; only evaluation of the UI differs.
+drawFrameWith :: Context -> SdlEnv -> Input -> Bool -> IO (DrawData, Bool) -> IO Bool
 drawFrameWith ctx env inp forceFull evaluateUi = do
-  SdlImage.syncImageAtlas (sdlRenderer env) (sdlImages env) ctx
-  (tex, presentFull) <- prepareRetain ctx env inp forceFull
+  SdlImage.syncImageAtlas ren (sdlImages env) ctx
+  -- Glyph-atlas maintenance before any quad is recorded: if the atlas ran
+  -- out of space during the previous frame, reset it now (re-warming the
+  -- base fonts) so a reset can never wipe the texture underneath
+  -- already-recorded text mid-frame.
+  prepareGlyphAtlasForFrame (sdlFontCache env)
+  scale <- readIORef (sdlScaleRef env)
+  let Size lw lh = inputWindowSize inp
+      pw = max 1 (round (lw * scale))
+      ph = max 1 (round (lh * scale))
+  -- The render target and whether to repaint everything are chosen before
+  -- the UI pass, so paint can cull to damage for retained partial updates.
+  --
+  -- Continuous sessions repaint every pixel, so retaining and copying a
+  -- second framebuffer only adds a target switch and a full-window blit.
+  -- A null target selects the window backbuffer directly. Direct drawing is
+  -- equivalent to the retained blit only at the same pixel dimensions;
+  -- content scale and window pixel density can differ.
+  direct <-
+    if sdlContinuous env
+      then do
+        (ok, ow, oh) <- outPair (getRenderOutputSize ren)
+        pure (ok && fromIntegral ow == pw && fromIntegral oh == ph)
+      else pure False
+  (tex, retainNew) <-
+    if direct
+      then pure (nullPtr, False)
+      else ensureRetain env pw ph scale
+  let presentFull = forceFull || retainNew || sdlContinuous env || inputWindowRedraw inp
+  writeIORef (ctxPaintFull ctx) presentFull
   t0 <- getMonotonicTime
   (drawData, dirtyAfterUi) <- evaluateUi
   t1 <- getMonotonicTime
-  scale <- readIORef (sdlScaleRef env)
   dmg0 <- takeDamage ctx
-  let Size lw lh = inputWindowSize inp
   -- Frame damage from writeDamage is authoritative: a live animation whose
   -- key is out of view or scroll-clipped produces empty damage, and forcing
   -- DamageFull here would turn every skip frame into a full present. A
@@ -108,24 +132,23 @@ drawFrameWith ctx env inp forceFull evaluateUi = do
           then DamageFull
           else snapDamage scale dmg0
   writeIORef (sdlLastPresented env) False
-  -- A glyph-atlas reset or exhaustion during the UI pass means quads
-  -- recorded before that point hold stale (or unplaceable) UVs. Drop the
-  -- frame instead of presenting it: the screen keeps the previous valid
-  -- frame, 'damageFull' forces a full repaint, and
+  -- A glyph-atlas exhaustion during the UI pass means text quads the frame
+  -- could not place. Drop the frame instead of presenting it: the screen
+  -- keeps the previous valid frame, 'damageFull' forces a full repaint, and
   -- 'prepareGlyphAtlasForFrame' resets the atlas before the next frame
   -- records any quads, so text never flickers or vanishes for a frame.
-  atlasReset <- takeGlyphAtlasResetFlag (sdlGlyphAtlas env)
+  atlasReset <- glyphAtlasFull (sdlGlyphAtlas env)
   if atlasReset || damageIsEmpty damage || lw <= 0 || lh <= 0
     then do
       when atlasReset $ do
         damageFull ctx
         markDirty ctx
-      noteDebugSkip (sdsSampler (sdlDebug env))
-      pure (atlasReset || dirtyAfterUi, inp)
+      noteDebugSkip (sdlDebug env)
+      pure (atlasReset || dirtyAfterUi)
     else do
       -- A null texture draws full-repaint sessions straight to the window.
-      okBegin <- setRenderTarget (sdlRenderer env) tex
-      okScale <- setRenderScale (sdlRenderer env) scale scale
+      okBegin <- setRenderTarget ren tex
+      okScale <- setRenderScale ren scale scale
       unless (okBegin && okScale) $ fail "SDL_SetRenderTarget/Scale failed"
       theme <- readIORef (ctxTheme ctx)
       glyphTex <- glyphAtlasTextures (sdlGlyphAtlas env)
@@ -138,8 +161,8 @@ drawFrameWith ctx env inp forceFull evaluateUi = do
       let batch = sdlBatch env
       renderDrawDataPass
         batch
-        (sdlRenderer env)
-        (if damage == DamageFull then Just (themeWindow theme) else Nothing)
+        ren
+        (themeWindow theme)
         drawData
         (sdlImages env)
         glyphTex
@@ -152,75 +175,27 @@ drawFrameWith ctx env inp forceFull evaluateUi = do
       -- Retained sessions do this as part of their final texture copy.
       okBlit <-
         if tex == nullPtr
-          then setRenderScale (sdlRenderer env) 1 1
+          then setRenderScale ren 1 1
           else do
-            okTarget <- setRenderTarget (sdlRenderer env) nullPtr
-            okClip <- setRenderClipRect (sdlRenderer env) (PtrConst.unsafeFromPtr nullPtr)
-            void $ setRenderScale (sdlRenderer env) 1 1
+            okTarget <- setRenderTarget ren nullPtr
+            okClip <- setRenderClipRect ren (PtrConst.unsafeFromPtr nullPtr)
+            void $ setRenderScale ren 1 1
             -- The texture is larger than the window: copy only the used area.
             r <- readIORef (sdlRetain env)
             let src = SDL_FRect 0 0 (fromIntegral (retainW r)) (fromIntegral (retainH r))
             okCopy <- with src $ \srcP ->
-              renderTexture (sdlRenderer env) tex (PtrConst.unsafeFromPtr srcP) (PtrConst.unsafeFromPtr nullPtr)
+              renderTexture ren tex (PtrConst.unsafeFromPtr srcP) (PtrConst.unsafeFromPtr nullPtr)
             pure (okTarget && okClip && okCopy)
       unless okBlit $ fail "SDL window presentation preparation failed"
-      void $ renderPresentSafe (sdlRenderer env)
+      void $ renderPresentSafe ren
       t3 <- getMonotonicTime
       let ms a b = (b - a) * 1000
-      noteDebugPresent (sdsSampler (sdlDebug env)) (ms t0 t1) (ms t1 t2) (ms t2 t3) (ms t0 t3)
+      noteDebugPresent (sdlDebug env) (ms t0 t1) (ms t1 t2) (ms t2 t3) (ms t0 t3)
         (drawVertexCount drawData) (drawIndexCount drawData) (drawCmdCount drawData)
       writeIORef (sdlLastPresented env) True
-      pure (dirtyAfterUi, inp)
-
--- | Choose the render target and whether to repaint everything. Must run
--- before the frame so paint can cull to damage for retained partial updates.
-prepareRetain :: Context -> SdlEnv -> Input -> Bool -> IO (Ptr SDL_Texture, Bool)
-prepareRetain ctx env inp forceFull = do
-  -- Glyph-atlas maintenance before any quad is recorded: if the atlas ran
-  -- out of space during the previous frame, reset it now (re-warming the
-  -- base fonts) so a reset can never wipe the texture underneath
-  -- already-recorded text mid-frame.
-  prepareGlyphAtlasForFrame (sdlFontCache env)
-  scale <- readIORef (sdlScaleRef env)
-  let Size lw lh = inputWindowSize inp
-      pw = max 1 (round (lw * scale))
-      ph = max 1 (round (lh * scale))
-  -- Continuous sessions repaint every pixel, so retaining and copying a
-  -- second framebuffer only adds a target switch and a full-window blit.
-  -- A null target selects the window backbuffer directly. Direct drawing is
-  -- equivalent to the retained blit only at the same pixel dimensions;
-  -- content scale and window pixel density can differ.
-  direct <-
-    if sdlContinuous env
-      then do
-        (ok, ow, oh) <- outPair (getRenderOutputSize (sdlRenderer env))
-        pure (ok && fromIntegral ow == pw && fromIntegral oh == ph)
-      else pure False
-  (tex, retainNew) <-
-    if direct
-      then pure (nullPtr, False)
-      else ensureRetain env pw ph scale
-  let presentFull = forceFull || retainNew || sdlContinuous env || inputWindowRedraw inp
-  writeIORef (ctxPaintFull ctx) presentFull
-  pure (tex, presentFull)
-
-drawReduceEff ::
-  (IOE :> es, Typeable msg, Eq model) =>
-  (forall x. Eff es x -> IO x) ->
-  (msg -> model -> model) ->
-  IORef model ->
-  (model -> Eff (Ui : es) ()) ->
-  Context ->
-  SdlEnv ->
-  Input ->
-  Bool ->
-  IO (Bool, Input)
-drawReduceEff unlift update modelRef view ctx env inp forceFull =
-  drawFrameWith ctx env inp forceFull $ do
-    m <- readIORef modelRef
-    (_, m', _, drawData, dirtyAfterUi) <- runFrameReduceEff unlift update ctx inp m view
-    writeIORef modelRef m'
-    pure (drawData, dirtyAfterUi)
+      pure dirtyAfterUi
+  where
+    ren = sdlRenderer env
 
 -- | Pixels a retained texture is rounded up to, in each dimension.
 retainBlock :: Int
@@ -260,9 +235,8 @@ askSdlDebug :: Ui :> es => Eff es SdlDebugSnapshot
 askSdlDebug = askHost @SdlEnv >>= maybe (pure emptySdlDebug) (uiIO . sample)
   where
     sample env = do
-      let sampler = sdlDebug env
       -- The display is queried only when the snapshot refreshes.
-      refreshDebugSnapshot (sdsSampler sampler) (sdsSnapshot sampler) $ \core -> do
+      refreshDebugSnapshot (sdlDebug env) (sdlDebugSnapshot env) $ \core -> do
         scale <- readIORef (sdlScaleRef env)
         fontSource <- sdlFontCacheSource (sdlFontCache env)
         Size ww wh <- queryWindowLogicalSize (sdlWindow env)
@@ -276,18 +250,14 @@ askSdlDebug = askHost @SdlEnv >>= maybe (pure emptySdlDebug) (uiIO . sample)
                 , dbgVsync = sdlVsync env
                 , dbgRefreshHz = round (1 / sdlRefreshPeriod env)
                 }
-        when (sdsTrace sampler) (traceFrame snap)
+        when (sdlFrameTrace env) (traceFrame snap)
         pure snap
 
 -- | Request a UI font family. The SDL display thread resolves and applies it
 -- before the next frame (see 'NanoUI.Sdl.Internal.Window.syncDisplay'), rebuilding the
 -- glyph atlas and text resolver. A no-op on non-SDL hosts.
 setSdlUiFont :: Ui :> es => NanoUIFont -> Eff es ()
-setSdlUiFont font = askHost @SdlEnv >>= traverse_ (uiIO . request)
-  where
-    request env = do
-      cur <- readIORef (sdlFontRequestRef env)
-      when (cur /= font) $ writeIORef (sdlFontRequestRef env) font
+setSdlUiFont font = askHost >>= traverse_ (uiIO . (`writeIORef` font) . sdlFontRequestRef)
 
 -- | Set the UI scale (see 'NanoUI.Sdl.Internal.Window.sdlAppUiScale'): a zoom on top
 -- of the pixel density, or zero or less to follow the display. The display

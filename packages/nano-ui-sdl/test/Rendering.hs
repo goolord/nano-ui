@@ -277,7 +277,7 @@ main = do
     bracket (newRenderBatch (sdlRenderer env)) destroyRenderBatch $ \batch -> do
       let
         drawWithGlyph tex dd dmg = do
-          renderDrawDataPass batch (sdlRenderer env) (Just black) dd images tex dmg
+          renderDrawDataPass batch (sdlRenderer env) black dd images tex dmg
           flushRenderBatch batch
         draw = drawWithGlyph (const nullPtr)
         visible = [(10, 10), (50, 10), (10, 50)]
