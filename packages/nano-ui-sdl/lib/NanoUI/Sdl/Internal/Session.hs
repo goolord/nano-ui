@@ -138,14 +138,11 @@ runSdlSession options drawFn = do
     let drv =
           SessionDriver
             { sdPollEvents    = pollEvents >>= noteWake
-            , sdWaitEvents    = \t -> do
+            , sdWaitEvents    = \t ->
                 -- Take the rest of the queue with the event that ended the
                 -- wait, so one pass sees a whole burst (a resize queues
                 -- several window events at once).
-                woke <- waitEvent t
-                case woke of
-                  Nothing -> pure []
-                  Just ev -> noteWake . (ev :) =<< pollEvents
+                waitEvent t >>= maybe (pure []) (\ev -> noteWake . (ev :) =<< pollEvents)
             , sdApplyEvent    = applyEvent
             , sdIsButtonEdge  = isButtonEdge
             , sdIsHardQuit    = isHardQuit
@@ -188,9 +185,7 @@ runSdlSession options drawFn = do
                   writeIORef wakeRef False
                   drawFn c env inpSynced (forceFull || sdlContinuous env)
                 case ms of
-                  Just (dirtyOut, s) -> do
-                    writeIORef prev s
-                    pure (dirtyOut, s)
+                  Just drawn@(_, s) -> drawn <$ writeIORef prev s
                   Nothing -> do
                     -- The wake's event is already off the queue: queue it
                     -- again for the pass after the lock is free.
