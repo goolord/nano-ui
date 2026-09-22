@@ -129,27 +129,36 @@ openDropdowns ctx = do
 allowedDropdowns :: Context -> IO [Dropdown]
 allowedDropdowns ctx = filterM (widgetOverlayAllowed ctx . ddWidget) =<< openDropdowns ctx
 
--- | One placed row of an open dropdown.
+-- | One placed row of an open dropdown, with its colours.
 data DropdownRow = DropdownRow
-  { drIndex :: !Int
-  , drOption :: T.Text
+  { drOption :: T.Text
   , drRect :: !Rect
   , drTextX :: !Float
   , drHovered :: !Bool
+  , drFill :: !(Maybe Color)
+  -- ^ The hover highlight, else the picked row's tint.
+  , drFg :: !Color
   }
 
 -- | Rows of an open dropdown, shared by its painter and its text spans. Combo
 -- rows sit flush at the drop rect's top edge (no outer margin) and scroll
 -- horizontally; select rows keep their padded layout.
-dropdownRows :: FontMetrics -> V2 -> Dropdown -> [DropdownRow]
-dropdownRows fm mouse dd =
+dropdownRows :: FontMetrics -> Theme -> V2 -> Dropdown -> [DropdownRow]
+dropdownRows fm theme mouse dd =
   let Rect dx dy dw _ = ddRect dd
       top = if ddCombo dd then dy else dy + menuOuterPad
       textX0 = dx + menuItemPadX + fst (widgetContentInset fm)
       textX = if ddCombo dd then textX0 - ddComboScrollX dd else textX0
-   in [ DropdownRow i opt row textX (rectContains row mouse)
+      style = overlayMenuStyle theme
+   in [ DropdownRow opt row textX hovered fill (if picked then themeAccent theme else styleFg style)
       | (i, opt) <- zip [0 ..] (ddOptions dd)
       , let row = Rect dx (top + menuItemRowH * fromIntegral i) dw menuItemRowH
+            hovered = rectContains row mouse
+            picked = i == ddPicked dd
+            fill
+              | hovered = Just (styleHoverBg style)
+              | picked = Just (styleActiveBg style)
+              | otherwise = Nothing
       ]
 
 -- | The widget whose menu or dropdown is on top at @mouse@.
@@ -402,18 +411,13 @@ drawSelectOverlays ctx inp = do
         fm = ctxFontMetrics ctx
         style = overlayMenuStyle theme
         paintRows =
-          forM_ (dropdownRows fm (inputMousePos inp) dd) $ \row -> do
-            let picked = drIndex row == ddPicked dd
-                Rect _ ry _ rh = drRect row
-            if drHovered row
-              then do
-                pushRect da (drRect row) (styleHoverBg style)
-                paintMenuAccent da theme (drRect row)
-              else when picked $ pushRect da (drRect row) (styleActiveBg style)
+          forM_ (dropdownRows fm theme (inputMousePos inp) dd) $ \row -> do
+            mapM_ (pushRect da (drRect row)) (drFill row)
+            when (drHovered row) $ paintMenuAccent da theme (drRect row)
             unless (T.null (drOption row)) $ do
               (_, th) <- ctxMeasureText ctx (drOption row)
-              pushText da fm (drTextX row) (centeredTextY fm ry rh th) (drOption row) $
-                if picked then themeAccent theme else styleFg style
+              let Rect _ ry _ rh = drRect row
+              pushText da fm (drTextX row) (centeredTextY fm ry rh th) (drOption row) (drFg row)
     paintMenuPanel da theme style (ddRect dd)
     if ddCombo dd
       then do
@@ -433,21 +437,11 @@ collectSelectDropdownSpans ctx inp = do
   let fm = ctxFontMetrics ctx
   fmap concat . forM dropdowns $ \dd -> do
     theme <- widgetTheme ctx (ddWidget dd)
-    let style = overlayMenuStyle theme
-    fmap concat . forM (dropdownRows fm (inputMousePos inp) dd) $ \row ->
-      if T.null (drOption row)
-        then pure []
-        else do
-          (tw, th) <- ctxMeasureText ctx (drOption row)
-          let Rect _ ry _ rh = drRect row
-              picked = drIndex row == ddPicked dd
-              bg
-                | drHovered row = styleHoverBg style
-                | picked = styleActiveBg style
-                | otherwise = styleBg style
-              -- As painted: the picked row's text is in the accent colour.
-              fg = if picked then themeAccent theme else styleFg style
-          pure [(Rect (drTextX row) (centeredTextY fm ry rh th) tw th, drOption row, fg, bg, ddRect dd)]
+    let bg row = fromMaybe (styleBg (overlayMenuStyle theme)) (drFill row)
+    forM (filter (not . T.null . drOption) (dropdownRows fm theme (inputMousePos inp) dd)) $ \row -> do
+      (tw, th) <- ctxMeasureText ctx (drOption row)
+      let Rect _ ry _ rh = drRect row
+      pure (Rect (drTextX row) (centeredTextY fm ry rh th) tw th, drOption row, drFg row, bg row, ddRect dd)
 
 tagSelectClippedSpans ::
   Rect -> Float -> Float -> Float -> Float -> FontMetrics -> [(Rect, T.Text, Color, Color)] -> [(Rect, T.Text, Color, Color, Rect)]
