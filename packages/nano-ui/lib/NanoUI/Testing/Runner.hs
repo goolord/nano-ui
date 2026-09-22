@@ -4,8 +4,8 @@ module NanoUI.Testing.Runner
   ( runTests
   ) where
 
-import Control.Monad (forM_, unless, when)
-import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
+import Control.Monad (forM, unless, when)
+import Data.IORef (IORef, newIORef, readIORef)
 import NanoUI.Testing (Context)
 import System.Environment (getArgs)
 import System.IO (hFlush, stdout)
@@ -17,27 +17,21 @@ import System.IO (hFlush, stdout)
 runTests :: [(String, IO Context, Context -> IORef Int -> IO ())] -> IO ()
 runTests specs = do
   args <- getArgs
-  let
-    wantAll = null args
-    want name = wantAll || name `elem` args
-    names = [name | (name, _, _) <- specs]
-    unknown = filter (`notElem` names) args
+  let unknown = filter (`notElem` [name | (name, _, _) <- specs]) args
   unless (null unknown) $
     fail ("Unknown test names: " ++ unwords unknown)
   failed <- newIORef (0 :: Int)
-  failedTests <- newIORef (0 :: Int)
-  forM_ specs $ \(name, mkCtx, run) ->
-    when (want name) $ do
+  results <-
+    forM [s | s@(name, _, _) <- specs, null args || name `elem` args] $ \(name, mkCtx, run) -> do
       putStrLn ("RUN: " ++ name)
       hFlush stdout
       before <- readIORef failed
       ctx <- mkCtx
       run ctx failed
       after <- readIORef failed
-      when (after > before) $ do
-        modifyIORef' failedTests (+ 1)
-        putStrLn ("FAIL: " ++ name)
-  n <- readIORef failedTests
+      when (after > before) $ putStrLn ("FAIL: " ++ name)
+      pure (after > before)
+  let n = length (filter id results)
   if n == 0
     then putStrLn "All tests passed."
     else do

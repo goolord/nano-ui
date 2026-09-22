@@ -155,7 +155,7 @@ module NanoUI.Internal.Context
   , drainMessages
   -- Constructors
   , newContext
-  , newPixelHostContext
+  , newPixelContext
   -- Focus
   , getFocusId
   , getFocusVisible
@@ -690,10 +690,10 @@ newContext = do
         }
   pure ctx
 
--- | Headless context with 16-unit monospace metrics and cached measurement.
--- Used as a starting point by pixel-based hosts.
-newPixelHostContext :: IO Context
-newPixelHostContext = do
+-- | Headless context with 16-unit monospace metrics, cached measurement and
+-- the default theme: for tests, and the starting point of pixel-based hosts.
+newPixelContext :: IO Context
+newPixelContext = do
   ctx <- enableMeasureCache =<< newContext
   pure (withFontMetrics ctx (monospaceMetrics 16))
 

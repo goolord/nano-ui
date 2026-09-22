@@ -315,7 +315,7 @@ runPageWindowScrollTest _ failed = do
       [] -> assert failed False
       b0 : _ -> do
         let wheelAt = V2 (wx + ww / 2) (b0 + 2)
-        assertWheelTitlePinned failed ctx inp0 ui title line1 wheelAt Nothing
+        assertWheelTitlePinned failed ctx inp0 ui title line1 wheelAt
 
 runWindowScrollOnlyDamageTest :: Context -> IORef Int -> IO ()
 runWindowScrollOnlyDamageTest ctx failed = do
