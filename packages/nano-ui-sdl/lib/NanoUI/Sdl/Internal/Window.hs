@@ -71,7 +71,8 @@ import NanoUI.Sdl.Internal.Font
   )
 import NanoUI.Sdl.Internal.Font.Search (searchFonts)
 import NanoUI.Sdl.Internal.NanoUIFont (NanoUIFont (..))
-import NanoUI.Sdl.Internal.Debug (SdlDebugSampler, newSdlDebugSampler)
+import NanoUI.Internal.Debug (DebugSamplerRef, newDebugSampler)
+import NanoUI.Sdl.Internal.Debug (SdlDebugSnapshot, emptySdlDebug)
 import NanoUI.Sdl.Internal.Image (ImageAtlas, destroyImageAtlas, newImageAtlas)
 import NanoUI.Sdl.Internal.Render (RenderBatch, destroyRenderBatch, newRenderBatch)
 import SDL3.Sys.Bindgen.Rect (SDL_Rect (..))
@@ -243,7 +244,11 @@ data SdlEnv = SdlEnv
   , sdlGlyphAtlas :: GlyphAtlas
   , sdlImages :: ImageAtlas
   , sdlCursors :: SdlCursors
-  , sdlDebug :: SdlDebugSampler
+  , sdlDebug :: DebugSamplerRef
+  , sdlDebugSnapshot :: IORef SdlDebugSnapshot
+  -- ^ The debug readout last published.
+  , sdlFrameTrace :: !Bool
+  -- ^ Whether @NANO_FRAME_TRACE@ was set when the session opened.
   , sdlRetain :: IORef Retain
   , sdlLastPresented :: IORef Bool
   , sdlVsync :: !Bool
@@ -519,7 +524,9 @@ startSdlWindow bench opts ctx guessedDriver fontSource monoSource = do
   sdlGlyphAtlas <- mkAcquire (newGlyphAtlas sdlRenderer) destroyGlyphAtlas
   sdlImages <- mkAcquire newImageAtlas destroyImageAtlas
   sdlCursors <- mkAcquire initCursors destroyCursors
-  sdlDebug <- liftIO newSdlDebugSampler
+  sdlDebug <- liftIO newDebugSampler
+  sdlDebugSnapshot <- liftIO $ newIORef emptySdlDebug
+  sdlFrameTrace <- liftIO $ isJust <$> lookupEnv "NANO_FRAME_TRACE"
   sdlRetain <- mkAcquire (newIORef (Retain nullPtr 0 0 0 0 0)) $ \ref -> do
     tex <- retainTexture <$> readIORef ref
     unless (tex == nullPtr) $ destroyTexture tex

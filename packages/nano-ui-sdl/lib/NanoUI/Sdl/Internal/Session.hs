@@ -8,7 +8,6 @@ import Control.Monad (forM_, unless, void, when)
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Maybe (fromMaybe, isNothing)
 import NanoUI.Backend (Input (..), clearEphemeral, emptyInput)
-import NanoUI.Sdl.Internal.Debug (SdlDebugSampler (..))
 import NanoUI.Runner
   ( SessionDriver (..)
   , newDrawingLock
@@ -144,7 +143,7 @@ runSdlSession options drawFn = do
                 writeIORef ctxRef c'
                 writeIORef prev inp'
                 pure (c', inp')
-            , sdDebug         = sdsSampler (sdlDebug env)
+            , sdDebug         = sdlDebug env
             , sdContinuous    = sdlContinuous env
               -- With vsync on, presents throttle the loop. With vsync off a
               -- live animation would spin at max speed, so wait ~2 ms short

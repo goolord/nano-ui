@@ -38,8 +38,7 @@ import NanoUI.Testing
   )
 import NanoUI.Internal.Debug (CoreDebugSnapshot (..), noteDebugPresent, noteDebugSkip, refreshDebugSnapshot)
 import NanoUI.Sdl.Internal.Debug
-  ( SdlDebugSampler (..)
-  , SdlDebugSnapshot (..)
+  ( SdlDebugSnapshot (..)
   , emptySdlDebug
   , traceFrame
   )
@@ -144,7 +143,7 @@ drawFrameWith ctx env inp forceFull evaluateUi = do
       when atlasReset $ do
         damageFull ctx
         markDirty ctx
-      noteDebugSkip (sdsSampler (sdlDebug env))
+      noteDebugSkip (sdlDebug env)
       pure (atlasReset || dirtyAfterUi)
     else do
       -- A null texture draws full-repaint sessions straight to the window.
@@ -191,7 +190,7 @@ drawFrameWith ctx env inp forceFull evaluateUi = do
       void $ renderPresentSafe ren
       t3 <- getMonotonicTime
       let ms a b = (b - a) * 1000
-      noteDebugPresent (sdsSampler (sdlDebug env)) (ms t0 t1) (ms t1 t2) (ms t2 t3) (ms t0 t3)
+      noteDebugPresent (sdlDebug env) (ms t0 t1) (ms t1 t2) (ms t2 t3) (ms t0 t3)
         (drawVertexCount drawData) (drawIndexCount drawData) (drawCmdCount drawData)
       writeIORef (sdlLastPresented env) True
       pure dirtyAfterUi
@@ -236,9 +235,8 @@ askSdlDebug :: Ui :> es => Eff es SdlDebugSnapshot
 askSdlDebug = askHost @SdlEnv >>= maybe (pure emptySdlDebug) (uiIO . sample)
   where
     sample env = do
-      let sampler = sdlDebug env
       -- The display is queried only when the snapshot refreshes.
-      refreshDebugSnapshot (sdsSampler sampler) (sdsSnapshot sampler) $ \core -> do
+      refreshDebugSnapshot (sdlDebug env) (sdlDebugSnapshot env) $ \core -> do
         scale <- readIORef (sdlScaleRef env)
         fontSource <- sdlFontCacheSource (sdlFontCache env)
         Size ww wh <- queryWindowLogicalSize (sdlWindow env)
@@ -252,7 +250,7 @@ askSdlDebug = askHost @SdlEnv >>= maybe (pure emptySdlDebug) (uiIO . sample)
                 , dbgVsync = sdlVsync env
                 , dbgRefreshHz = round (1 / sdlRefreshPeriod env)
                 }
-        when (sdsTrace sampler) (traceFrame snap)
+        when (sdlFrameTrace env) (traceFrame snap)
         pure snap
 
 -- | Request a UI font family. The SDL display thread resolves and applies it
