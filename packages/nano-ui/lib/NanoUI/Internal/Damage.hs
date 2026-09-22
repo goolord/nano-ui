@@ -16,9 +16,7 @@ import Data.IntMap.Strict qualified as IM
 import Data.IntSet qualified as IS
 import Data.List (partition, tails)
 import Data.Maybe (fromMaybe, isJust, isNothing)
-import Data.Primitive.PrimArray (MutablePrimArray, newPrimArray, readPrimArray, writePrimArray)
 import Data.Text (Text)
-import GHC.Exts (RealWorld)
 import NanoUI.Internal.Context
   ( Animation
   , Context (..)
@@ -486,7 +484,7 @@ clipDamage ctx snap d owners = do
         | wid == fsActive snap = fsActiveRect snap
         | wid == fsFocus snap = fsFocusRect snap
         | otherwise = Nothing
-  acc <- newPieceUnion
+  acc <- newIORef []
   resolveDamageRequests ctx acc oldRects newRects (fdRequests d)
   -- Backdrop expansion covers interaction slop (hover/press halos) and
   -- explicit damage requests. Animation keys must not expand to their panel
@@ -564,11 +562,13 @@ clipDamage ctx snap d owners = do
   let addFloating other k r rest = unless (IM.lookup k other == Just r) (addRect acc r) >> rest
   IM.foldrWithKey (addFloating (fdFloatingRects d)) (pure ()) (fsFloatingRects snap)
   IM.foldrWithKey (addFloating (fsFloatingRects snap)) (pure ()) (fdFloatingRects d)
-  base <- readRectUnion acc
-  added <- readAddedRects acc
-  let clip = clipRectToWindow winW winH base
+  added <- readIORef acc
+  let clip = clipRectToWindow winW winH (rectBounds added)
       winArea = winW * winH
-      pieces = maybe [] (damagePieces . map (clipRectToWindow winW winH)) added
+      -- A frame with more rects than this repaints their bounds.
+      pieces
+        | null (drop 64 added) = damagePieces (map (clipRectToWindow winW winH) added)
+        | otherwise = []
       area = if null pieces then rectArea clip else sum (map rectArea pieces)
   -- A live animation with an empty clip is not DamageFull: its
   -- key was either scroll-clipped out of view (nothing visible
@@ -644,71 +644,24 @@ resolveKeyDamage ctx acc oldRects newRects k bounds = do
       let clipped = clipToViewport clip (resolveDamageRect bounds r)
       when (rectNonEmpty clipped) $ addRect acc clipped
 
--- | A running union of rects, as @x0, y0, x1, y1@ followed by how many of
--- them lie outside every floating panel, and for a piece union the rects
--- themselves. The bounds start inverted, so the first rect sets them and an
--- empty union reads back as the zero rect.
-data RectUnion = RectUnion !(MutablePrimArray RealWorld Float) !(Maybe (IORef KeptRects))
-
--- | The rects a piece union holds, up to 'pieceRectLimit'.
-data KeptRects = Kept !Int [Rect] | TooMany
-
--- | A union that keeps only the bounds of its rects.
-newRectUnion :: IO RectUnion
-newRectUnion = newUnion Nothing
-
--- | A union that also keeps the first 'pieceRectLimit' rects, for
--- 'damagePieces'. A frame that adds more repaints their bounds.
-newPieceUnion :: IO RectUnion
-newPieceUnion = newUnion . Just =<< newIORef (Kept 0 [])
-
-pieceRectLimit :: Int
-pieceRectLimit = 64
-
-newUnion :: Maybe (IORef KeptRects) -> IO RectUnion
-newUnion kept = do
-  a <- newPrimArray 5
-  writePrimArray a 0 infinity
-  writePrimArray a 1 infinity
-  writePrimArray a 2 (-infinity)
-  writePrimArray a 3 (-infinity)
-  writePrimArray a 4 0
-  pure (RectUnion a kept)
-  where
-    infinity = 1 / 0
+-- | The rects damage gathers, newest first.
+type RectUnion = IORef [Rect]
 
 {-# INLINE addRect #-}
 addRect :: RectUnion -> Rect -> IO ()
-addRect (RectUnion a kept) r@(Rect x y w h) = do
-  x0 <- readPrimArray a 0
-  y0 <- readPrimArray a 1
-  x1 <- readPrimArray a 2
-  y1 <- readPrimArray a 3
-  writePrimArray a 0 (min x0 x)
-  writePrimArray a 1 (min y0 y)
-  writePrimArray a 2 (max x1 (x + w))
-  writePrimArray a 3 (max y1 (y + h))
-  forM_ kept $ \ref -> modifyIORef' ref $ \case
-    Kept n rs | n < pieceRectLimit -> Kept (n + 1) (r : rs)
-    _ -> TooMany
+addRect acc r = modifyIORef' acc (r :)
 
--- | The rects a piece union kept, or 'Nothing' if it kept none or more were
--- added than it keeps.
-readAddedRects :: RectUnion -> IO (Maybe [Rect])
-readAddedRects (RectUnion _ kept) = case kept of
-  Nothing -> pure Nothing
-  Just ref ->
-    readIORef ref >>= \case
-      Kept _ rs -> pure (Just rs)
-      TooMany -> pure Nothing
+-- | Edges of a running bounds: @x0, y0, x1, y1@.
+data Edges = Edges !Float !Float !Float !Float
 
-readRectUnion :: RectUnion -> IO Rect
-readRectUnion (RectUnion a _) = do
-  x0 <- readPrimArray a 0
-  y0 <- readPrimArray a 1
-  x1 <- readPrimArray a 2
-  y1 <- readPrimArray a 3
-  pure $! if x0 > x1 then Rect 0 0 0 0 else Rect x0 y0 (x1 - x0) (y1 - y0)
+-- | The bounds of @rects@, empty ones included, or the zero rect for none.
+rectBounds :: [Rect] -> Rect
+rectBounds rects
+  | x0 > x1 = Rect 0 0 0 0
+  | otherwise = Rect x0 y0 (x1 - x0) (y1 - y0)
+  where
+    grow (Edges a b c d) (Rect x y w h) = Edges (min a x) (min b y) (max c (x + w)) (max d (y + h))
+    Edges x0 y0 x1 y1 = foldl' grow (Edges (1 / 0) (1 / 0) (-1 / 0) (-1 / 0)) rects
 
 -- | A set of rects reduced to what damage needs from it.
 data RectGroup = RectGroup
@@ -728,32 +681,23 @@ rectDeltas :: Context -> [Rect] -> IM.IntMap Rect -> IM.IntMap Rect -> IO (RectG
 rectDeltas ctx panelRects old new
   | ptrEq old new = pure (emptyGroup, emptyGroup)
   | otherwise = do
-      settled <- newRectUnion
-      churn <- newRectUnion
-      let note acc@(RectUnion a _) r = do
-            addRect acc r
-            unless (any (rectFullyInside r) panelRects) $
-              readPrimArray a 4 >>= writePrimArray a 4 . (+ 1)
+      settled <- newIORef []
+      churn <- newIORef []
       IM.foldrWithKey
         ( \k r rest -> do
             when (rectNonEmpty r) $ do
-              when (IM.notMember k new || IM.notMember k old) $ note churn r
+              when (IM.notMember k new || IM.notMember k old) $ addRect churn r
               clipped <- (`clipToViewport` r) <$> keyViewportClip ctx k
-              when (rectArea clipped >= layoutSettleMinArea) $ note settled clipped
+              when (rectArea clipped >= layoutSettleMinArea) $ addRect settled clipped
             rest
         )
         (pure ())
         (IM.mergeWithKey (\_ a b -> if a /= b then Just (rectUnion a b) else Nothing) id id old new)
-      (,) <$> freeze settled <*> freeze churn
+      (,) <$> (group <$> readIORef settled) <*> (group <$> readIORef churn)
   where
     emptyGroup = RectGroup False False (Rect 0 0 0 0)
-    freeze acc@(RectUnion a _) = do
-      bounds <- readRectUnion acc
-      x0 <- readPrimArray a 0
-      x1 <- readPrimArray a 2
-      outside <- readPrimArray a 4
-      let !present = x0 <= x1
-      pure (RectGroup present (present && not (null panelRects) && outside == 0) bounds)
+    inPanels r = any (rectFullyInside r) panelRects
+    group rs = RectGroup (not (null rs)) (not (null rs || null panelRects) && all inPanels rs) (rectBounds rs)
 
 -- | The scroll-viewport clip of a keyed node. Look it up once per key and
 -- clip each of its rects with 'clipToViewport'.
