@@ -170,7 +170,7 @@ runSdlSession options drawFn = do
                 -- the queue: queue it again for the pass after the lock is
                 -- free.
                 when (isNothing drawn) $ readIORef wakeRef >>= (`when` pushRefreshEvent)
-                pure (fromMaybe False drawn, inpSynced)
+                pure (fromMaybe False drawn)
             , sdOnCursor      = syncPointerCursor (sdlCursors env)
             , sdAlignSec      = sdlRefreshPeriod env
             , sdShouldQuit    = sdlAppShouldQuit options

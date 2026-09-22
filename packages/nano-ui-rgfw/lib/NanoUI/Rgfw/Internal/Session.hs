@@ -267,7 +267,7 @@ runRgfwAppReduceCustom opts getThemeAndScale updateModel initialModel view = inB
               if damageIsEmpty damage && not paintFull
                 then do
                   noteDebugSkip (rdsSampler debugSampler)
-                  pure (dirtyAfterUi, curInp)
+                  pure dirtyAfterUi
                 else do
                   tRenderStart <- getMonotonicTime
                   curMonScale <- readIORef monScaleRef
@@ -298,7 +298,7 @@ runRgfwAppReduceCustom opts getThemeAndScale updateModel initialModel view = inB
                       }
                   -- A reduced message that switched themes changed the model, so
                   -- the core marks the frame dirty and the next one applies it.
-                  pure (dirtyAfterUi, curInp)
+                  pure dirtyAfterUi
 
         let drv =
               SessionDriver
@@ -341,8 +341,8 @@ runRgfwAppReduceCustom opts getThemeAndScale updateModel initialModel view = inB
         -- context stays as that frame left it: if it asked for another by
         -- marking the context dirty, the loop draws it at once instead of
         -- blocking until some input happens along.
-        (_, inpStart) <- drawOne True ctx initInp
-        runSessionLoop drv ctx inpStart
+        _ <- drawOne True ctx initInp
+        runSessionLoop drv ctx initInp
 
 -- | An RGFW event translated for the input fold.
 data RgfwEvent

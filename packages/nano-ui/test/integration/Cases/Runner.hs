@@ -37,7 +37,7 @@ quietDriver debug =
     , sdPresentPaces = pure False
     , sdAlignSec = 0
     , sdShouldDraw = \_ _ _ _ _ -> pure False
-    , sdDraw = \_ inp _ -> pure (False, inp)
+    , sdDraw = \_ _ _ -> pure False
     , sdOnCursor = \_ _ -> pure ()
     , sdShouldQuit = const False
     }
@@ -69,10 +69,10 @@ runSessionLoopTest ctx failed = do
         , sdShouldDraw = \_ previous current _ _ -> do
             note ("decide " <> show (inputMousePos previous, inputMousePos current))
             pure (inputMousePos current == V2 1 0)
-        , sdDraw = \_ inp _ -> do
+        , sdDraw = \_ _ _ -> do
             n <- atomicModifyIORef' draws (\n -> (n + 1, n + 1))
             note "draw"
-            pure (n <= 2, inp {inputMousePos = V2 10 0})
+            pure (n <= 2)
         , sdOnCursor = \_ _ -> note "cursor"
         }
   -- A new context starts dirty, which would make the first wait immediate.
@@ -92,7 +92,7 @@ runSessionLoopTest ctx failed = do
     , "draw"
     , "cursor"
     , "wait -1"
-    , "decide " <> show (V2 10 0, V2 10 0)
+    , "decide " <> show (V2 2 0, V2 2 0)
     , "cursor"
     , "wait -1"
     ]
@@ -124,9 +124,9 @@ runSessionLoopWakeTest ctx failed = do
         , sdShouldDraw = \_ _ _ _ due -> do
             note ("due " <> show due)
             pure due
-        , sdDraw = \_ inp _ -> do
+        , sdDraw = \_ _ _ -> do
             note "draw"
-            pure (False, inp)
+            pure False
         }
   clearDirty ctx
   requestWakeAfter ctx 0.03
@@ -157,7 +157,7 @@ runSessionLoopHardQuitTest ctx failed = do
                 4 -> typeC inp
                 _ -> inp
             , sdShouldDraw = \_ _ _ _ _ -> pure True
-            , sdDraw = \_ inp _ -> (False, inp) <$ modifyIORef' drawn (+ 1)
+            , sdDraw = \_ _ _ -> False <$ modifyIORef' drawn (+ 1)
             }
           ctx
           emptyInput

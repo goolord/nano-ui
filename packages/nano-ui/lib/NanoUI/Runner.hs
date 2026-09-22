@@ -172,8 +172,8 @@ data SessionDriver ev = SessionDriver
   , sdShouldDraw    :: Context -> Input -> Input -> Bool -> Bool -> IO Bool
     -- ^ Decision predicate: (ctx, prevInp, curInp, wasAnimating, refreshDue) ->
     -- should this frame be rendered? Usually 'shouldRedrawFrame'.
-  , sdDraw          :: Context -> Input -> Bool -> IO (Bool, Input)
-    -- ^ Render frame: (ctx, curInp, forceFull) -> (dirtyAfterRender, syncedInput).
+  , sdDraw          :: Context -> Input -> Bool -> IO Bool
+    -- ^ Render frame: (ctx, curInp, forceFull) -> dirtyAfterRender.
   , sdOnCursor      :: Context -> Input -> IO ()
     -- ^ Sync the host cursor icon after every pass.
   , sdShouldQuit    :: Input -> Bool
@@ -320,12 +320,10 @@ runSessionLoop drv ctx0 inp0 = do
           -- animation just finished (wasAnim && not animNow), so running
           -- animations keep clip damage.
           animNow <- anyAnimating ctx'
-          (dirtyOut, synced) <- if shouldDraw
+          dirtyOut <- if shouldDraw
             then sdDraw drv ctx' inpSynced (wasAnim && not animNow)
-            else do
-              noteDebugSkip (sdDebug drv)
-              pure (pendingDirty, inpSynced)
-          sdOnCursor drv ctx' synced
+            else pendingDirty <$ noteDebugSkip (sdDebug drv)
+          sdOnCursor drv ctx' inpSynced
           animAfter <- anyAnimating ctx'
           traceLoopPass trace (length group) shouldDraw $
             (if pendingDirty then "D" else "")
@@ -333,8 +331,8 @@ runSessionLoop drv ctx0 inp0 = do
               ++ (if inputWindowRedraw inpSynced then "R" else "")
               ++ (if refreshDue then "T" else "")
           -- Open modals/overlays consume Escape/Quit before the app sees it.
-          overlayQuit <- overlayConsumesQuit ctx' synced
-          unless (sdShouldQuit drv synced && not overlayQuit) $
-            loop ctx' synced rest now dirtyOut animAfter
+          overlayQuit <- overlayConsumesQuit ctx' inpSynced
+          unless (sdShouldQuit drv inpSynced && not overlayQuit) $
+            loop ctx' inpSynced rest now dirtyOut animAfter
 
   loop ctx0 inp0 [] startT False False
