@@ -2,11 +2,8 @@
 -- counts, RTS statistics, draw counts, and the rows the debug windows show.
 module NanoUI.Internal.Debug
   ( debugRefreshSec
-  , blend
-  , RtsStatsSnapshot (..)
   , CoreDebugSnapshot (..)
   , emptyCoreDebugSnapshot
-  , DebugSampler (..)
   , DebugSamplerRef
   , newDebugSampler
   , noteDebugLoop
@@ -17,7 +14,6 @@ module NanoUI.Internal.Debug
   , refreshDebugSnapshot
   , formatFpsRows
   , formatDrawRows
-  , formatCoreRtsRows
   ) where
 
 import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef, writeIORef)
@@ -33,88 +29,17 @@ import Text.Printf (printf)
 debugRefreshSec :: Double
 debugRefreshSec = 0.25
 
--- | Exponential moving average with 15% weight on the sample. A non-positive
--- previous value starts a new average at the sample.
-blend :: Double -> Double -> Double
-blend prev sample
-  | prev <= 0 = sample
-  | otherwise = prev * 0.85 + sample * 0.15
-
--- | Fold the rate of an interval of @dt@ seconds into @ema@. Intervals outside
--- 0.0001-0.25 seconds leave it unchanged.
+-- | Fold the rate of an interval of @dt@ seconds into the exponential moving
+-- average @ema@, with 15% weight on the sample. A non-positive @ema@ starts
+-- over at the sample. Intervals outside 0.0001-0.25 seconds leave it unchanged.
 blendRate :: Double -> Double -> Double
 blendRate ema dt
-  | dt > 1e-4 && dt < 0.25 = blend ema (1 / dt)
+  | dt > 1e-4 && dt < 0.25 = if ema <= 0 then 1 / dt else ema * 0.85 + (1 / dt) * 0.15
   | otherwise = ema
 
--- | Runtime counters. Memory fields use MiB, GC duration uses milliseconds,
--- and GC percentage is elapsed GC time divided by elapsed runtime time.
-data RtsStatsSnapshot = RtsStatsSnapshot
-  { rtsEnabled :: !Bool
-  , rtsGcs :: !Word32
-  , rtsMajorGcs :: !Word32
-  , rtsAllocMb :: !Double
-  , rtsLiveMb :: !Double
-  , rtsMaxMemMb :: !Double
-  , rtsCopiedMb :: !Double
-  , rtsGcPct :: !Double
-  , rtsLastGcGen :: !Word32
-  , rtsLastGcMs :: !Double
-  , rtsCaps :: !Int
-  , rtsCpus :: !Int
-  }
-  deriving (Eq, Show)
-
-emptyRtsSnapshot :: RtsStatsSnapshot
-emptyRtsSnapshot =
-  RtsStatsSnapshot
-    { rtsEnabled = False
-    , rtsGcs = 0
-    , rtsMajorGcs = 0
-    , rtsAllocMb = 0
-    , rtsLiveMb = 0
-    , rtsMaxMemMb = 0
-    , rtsCopiedMb = 0
-    , rtsGcPct = 0
-    , rtsLastGcGen = 0
-    , rtsLastGcMs = 0
-    , rtsCaps = 0
-    , rtsCpus = 0
-    }
-
--- | Sample RTS statistics when enabled with @+RTS -T@. Otherwise report only
--- capability/processor counts and leave 'rtsEnabled' false.
-readRtsSnapshot :: IO RtsStatsSnapshot
-readRtsSnapshot = do
-  caps <- getNumCapabilities
-  cpus <- getNumProcessors
-  rtsOn <- getRTSStatsEnabled
-  if not rtsOn
-    then pure emptyRtsSnapshot {rtsCaps = caps, rtsCpus = cpus}
-    else do
-      st <- getRTSStats
-      let tot = elapsed_ns st
-          lastGc = gc st
-          bytesMb n = fromIntegral n / (1024 * 1024)
-      pure
-        RtsStatsSnapshot
-          { rtsEnabled = True
-          , rtsGcs = gcs st
-          , rtsMajorGcs = major_gcs st
-          , rtsAllocMb = bytesMb (allocated_bytes st)
-          , rtsLiveMb = bytesMb (gcdetails_live_bytes lastGc)
-          , rtsMaxMemMb = bytesMb (max_mem_in_use_bytes st)
-          , rtsCopiedMb = bytesMb (copied_bytes st)
-          , rtsGcPct =
-              if tot > 0 then 100 * fromIntegral (gc_elapsed_ns st) / fromIntegral tot else 0
-          , rtsLastGcGen = gcdetails_gen lastGc
-          , rtsLastGcMs = fromIntegral (gcdetails_elapsed_ns lastGc) / 1.0e6
-          , rtsCaps = caps
-          , rtsCpus = cpus
-          }
-
 -- | Published frame rates, latest phase durations in milliseconds, cumulative
--- present/skip counts, geometry counts, and backend-supplied window coordinates.
+-- present/skip counts, geometry counts, backend-supplied window coordinates,
+-- and runtime statistics.
 data CoreDebugSnapshot = CoreDebugSnapshot
   { dbgPresentFps :: !Double
   , dbgLoopFps    :: !Double
@@ -131,51 +56,61 @@ data CoreDebugSnapshot = CoreDebugSnapshot
   , dbgWinH       :: !Float
   , dbgMouseX     :: !Float
   , dbgMouseY     :: !Float
-  , dbgRts        :: !RtsStatsSnapshot
+  , dbgRts        :: ![(Text, Text)]
+  -- ^ Label/value rows of runtime statistics, or instructions to enable
+  -- @+RTS -T@ when they are off. Memory is in MiB, the last collection's
+  -- duration in milliseconds, and GC time is a share of elapsed run time.
   }
   deriving (Eq, Show)
 
 -- | Zeroed placeholder before a backend publishes a frame sample.
 emptyCoreDebugSnapshot :: CoreDebugSnapshot
-emptyCoreDebugSnapshot =
-  CoreDebugSnapshot
-    { dbgPresentFps = 0
-    , dbgLoopFps = 0
-    , dbgFrameMs = 0
-    , dbgUiMs = 0
-    , dbgRenderMs = 0
-    , dbgPresentMs = 0
-    , dbgPresents = 0
-    , dbgSkips = 0
-    , dbgVerts = 0
-    , dbgIndices = 0
-    , dbgCmds = 0
-    , dbgWinW = 0
-    , dbgWinH = 0
-    , dbgMouseX = 0
-    , dbgMouseY = 0
-    , dbgRts = emptyRtsSnapshot
-    }
+emptyCoreDebugSnapshot = CoreDebugSnapshot 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 []
 
--- | Mutable sampler contents. Timestamp fields use monotonic seconds; phase
--- durations use milliseconds. Backends update this through the @noteDebug*@ functions.
+-- | Sample the rows of 'dbgRts'.
+readRtsRows :: IO [(Text, Text)]
+readRtsRows = do
+  caps <- getNumCapabilities
+  cpus <- getNumProcessors
+  rtsOn <- getRTSStatsEnabled
+  let haskell = ("haskell", T.pack (printf "%2d cap / %2d cpu" caps cpus))
+  if not rtsOn
+    then pure [("rts", "stats off (need +RTS -T)"), haskell]
+    else do
+      st <- getRTSStats
+      let lastGc = gc st
+          count :: Word32 -> Text
+          count = T.pack . printf "%10d"
+          mb :: Word64 -> Text
+          mb n = T.pack (printf "%6.1f MiB" (fromIntegral n / (1024 * 1024) :: Double))
+          gcPct :: Double
+          gcPct
+            | elapsed_ns st > 0 = 100 * fromIntegral (gc_elapsed_ns st) / fromIntegral (elapsed_ns st)
+            | otherwise = 0
+          gcMs = fromIntegral (gcdetails_elapsed_ns lastGc) / 1.0e6 :: Double
+      pure
+        [ haskell
+        , ("gc total", count (gcs st))
+        , ("gc major", count (major_gcs st))
+        , ("last gen", count (gcdetails_gen lastGc))
+        , ("last gc", T.pack (printf "%7.2f ms" gcMs))
+        , ("heap live", mb (gcdetails_live_bytes lastGc))
+        , ("heap alloc", mb (allocated_bytes st))
+        , ("copied", mb (copied_bytes st))
+        , ("rss max", mb (max_mem_in_use_bytes st))
+        , ("gc time", T.pack (printf "%9.1f%%" gcPct))
+        ]
+
+-- | Mutable sampler contents. Timestamp fields use monotonic seconds. Backends
+-- update it through the @noteDebug*@ functions.
 data DebugSampler = DebugSampler
-  { smPresentEma   :: {-# UNPACK #-} !Double
-  , smLoopEma      :: {-# UNPACK #-} !Double
-  , smLastPresentT :: {-# UNPACK #-} !Double
-  , smLastDebugT   :: {-# UNPACK #-} !Double
-  , smLastQueryT   :: {-# UNPACK #-} !Double
-  , smPresents     :: {-# UNPACK #-} !Word64
-  , smSkips        :: {-# UNPACK #-} !Word64
-  , smUiMs         :: {-# UNPACK #-} !Double
-  , smRenderMs     :: {-# UNPACK #-} !Double
-  , smPresentMs    :: {-# UNPACK #-} !Double
-  , smFrameMs      :: {-# UNPACK #-} !Double
-  , smVerts        :: {-# UNPACK #-} !Int
-  , smIndices      :: {-# UNPACK #-} !Int
-  , smCmds         :: {-# UNPACK #-} !Int
-  , smRatePresents :: {-# UNPACK #-} !Word64
-  , smRateT        :: {-# UNPACK #-} !Double
+  { smCore :: !CoreDebugSnapshot
+  -- ^ The next snapshot, but for what a refresh samples: the present rate,
+  -- window coordinates and runtime statistics.
+  , smLastDebugT :: !Double
+  , smLastQueryT :: !Double
+  , smRatePresents :: !Word64
+  , smRateT :: !Double
   }
 
 -- | Session-owned sampler reference, updated atomically by sampling operations.
@@ -183,39 +118,20 @@ type DebugSamplerRef = IORef DebugSampler
 
 -- | Empty sampler with its rate interval starting at the current monotonic time.
 newDebugSampler :: IO DebugSamplerRef
-newDebugSampler = do
-  now <- getMonotonicTime
-  newIORef
-    DebugSampler
-      { smPresentEma = 0
-      , smLoopEma = 0
-      , smLastPresentT = now
-      , smLastDebugT = 0
-      , smLastQueryT = 0
-      , smPresents = 0
-      , smSkips = 0
-      , smUiMs = 0
-      , smRenderMs = 0
-      , smPresentMs = 0
-      , smFrameMs = 0
-      , smVerts = 0
-      , smIndices = 0
-      , smCmds = 0
-      , smRatePresents = 0
-      , smRateT = now
-      }
+newDebugSampler = newIORef . DebugSampler emptyCoreDebugSnapshot 0 0 0 =<< getMonotonicTime
+
+noteCore :: DebugSamplerRef -> (CoreDebugSnapshot -> CoreDebugSnapshot) -> IO ()
+noteCore ref f = atomicModifyIORef' ref $ \s -> (s {smCore = f (smCore s)}, ())
 
 -- | Record loop delta time in seconds. Intervals outside 0.0001-0.25 seconds
 -- do not contribute to the loop-rate moving average.
 noteDebugLoop :: DebugSamplerRef -> Float -> IO ()
 noteDebugLoop ref dt =
-  atomicModifyIORef' ref $ \s ->
-    (s {smLoopEma = blendRate (smLoopEma s) (realToFrac dt)}, ())
+  noteCore ref $ \c -> c {dbgLoopFps = blendRate (dbgLoopFps c) (realToFrac dt)}
 
 -- | Increment the count of loop passes that skipped presentation.
 noteDebugSkip :: DebugSamplerRef -> IO ()
-noteDebugSkip ref =
-  atomicModifyIORef' ref $ \s -> (s {smSkips = smSkips s + 1}, ())
+noteDebugSkip ref = noteCore ref $ \c -> c {dbgSkips = dbgSkips c + 1}
 
 -- | Debug HUD cadence is driven by actual snapshot consumption: a snapshot
 -- query ('refreshDebugSnapshot') refreshes 'smLastQueryT', so the 4 Hz refresh
@@ -241,23 +157,18 @@ snapshotDue now s = smLastDebugT s <= 0 || now - smLastDebugT s >= debugRefreshS
 -- | Record UI, render, present, and total frame durations in milliseconds,
 -- followed by vertex, index, and command counts. Increments the present count.
 noteDebugPresent :: DebugSamplerRef -> Double -> Double -> Double -> Double -> Int -> Int -> Int -> IO ()
-noteDebugPresent ref uiMs renderMs presentMs frameMs verts indices cmds = do
-  now <- getMonotonicTime
-  atomicModifyIORef' ref $ \s ->
-    ( s
-        { smPresentEma = blendRate (smPresentEma s) (now - smLastPresentT s)
-        , smLastPresentT = now
-        , smPresents = smPresents s + 1
-        , smUiMs = uiMs
-        , smRenderMs = renderMs
-        , smPresentMs = presentMs
-        , smFrameMs = frameMs
-        , smVerts = verts
-        , smIndices = indices
-        , smCmds = cmds
-        }
-    , ()
-    )
+noteDebugPresent ref uiMs renderMs presentMs frameMs verts indices cmds =
+  noteCore ref $ \c ->
+    c
+      { dbgPresents = dbgPresents c + 1
+      , dbgUiMs = uiMs
+      , dbgRenderMs = renderMs
+      , dbgPresentMs = presentMs
+      , dbgFrameMs = frameMs
+      , dbgVerts = verts
+      , dbgIndices = indices
+      , dbgCmds = cmds
+      }
 
 -- | The published snapshot, rebuilt at most every 'debugRefreshSec' and cached
 -- in between. A due query samples the core stats and hands them to @build@,
@@ -270,42 +181,22 @@ refreshDebugSnapshot ref cache build = do
   if not due
     then readIORef cache
     else do
-      rts <- readRtsSnapshot
+      rts <- readRtsRows
       core <- atomicModifyIORef' ref $ \cur ->
-        -- Actual presents per second since the previous refresh. Unlike the
-        -- per-present EMA this stays truthful when presents are sparse (idle
-        -- app: ~4/s with the HUD open, not the theoretical fps of one fast
-        -- frame).
+        -- Actual presents per second since the previous refresh, which stays
+        -- truthful when presents are sparse (idle app: ~4/s with the HUD
+        -- open, not the theoretical fps of one fast frame).
         let elapsed = now - smRateT cur
+            presents = dbgPresents (smCore cur)
             rate
-              | elapsed > 1e-3 = fromIntegral (smPresents cur - smRatePresents cur) / elapsed
+              | elapsed > 1e-3 = fromIntegral (presents - smRatePresents cur) / elapsed
               | otherwise = 0
-            cur' = cur {smLastDebugT = now, smRatePresents = smPresents cur, smRateT = now}
-         in (cur', (coreDebugSnapshot cur' rts) {dbgPresentFps = rate})
+         in ( cur {smLastDebugT = now, smRatePresents = presents, smRateT = now}
+            , (smCore cur) {dbgPresentFps = rate, dbgRts = rts}
+            )
       snap <- build core
       writeIORef cache snap
       pure snap
-
-coreDebugSnapshot :: DebugSampler -> RtsStatsSnapshot -> CoreDebugSnapshot
-coreDebugSnapshot s rts =
-  CoreDebugSnapshot
-    { dbgPresentFps = smPresentEma s
-    , dbgLoopFps = smLoopEma s
-    , dbgFrameMs = smFrameMs s
-    , dbgUiMs = smUiMs s
-    , dbgRenderMs = smRenderMs s
-    , dbgPresentMs = smPresentMs s
-    , dbgPresents = smPresents s
-    , dbgSkips = smSkips s
-    , dbgVerts = smVerts s
-    , dbgIndices = smIndices s
-    , dbgCmds = smCmds s
-    , dbgWinW = 0
-    , dbgWinH = 0
-    , dbgMouseX = 0
-    , dbgMouseY = 0
-    , dbgRts = rts
-    }
 
 -- | Label/value rows for frame rates, durations, and cumulative counts.
 formatFpsRows :: CoreDebugSnapshot -> [(Text, Text)]
@@ -327,25 +218,3 @@ formatDrawRows s =
   , ("indices", T.pack (printf "%10d" (dbgIndices s)))
   , ("commands", T.pack (printf "%10d" (dbgCmds s)))
   ]
-
--- | Runtime-stat rows, or instructions to enable @+RTS -T@ when statistics are off.
-formatCoreRtsRows :: CoreDebugSnapshot -> [(Text, Text)]
-formatCoreRtsRows core
-  | not (rtsEnabled s) =
-      [ ("rts", "stats off (need +RTS -T)")
-      , ("haskell", T.pack (printf "%2d cap / %2d cpu" (rtsCaps s) (rtsCpus s)))
-      ]
-  | otherwise =
-      [ ("haskell", T.pack (printf "%2d cap / %2d cpu" (rtsCaps s) (rtsCpus s)))
-      , ("gc total", T.pack (printf "%10d" (rtsGcs s)))
-      , ("gc major", T.pack (printf "%10d" (rtsMajorGcs s)))
-      , ("last gen", T.pack (printf "%10d" (rtsLastGcGen s)))
-      , ("last gc", T.pack (printf "%7.2f ms" (rtsLastGcMs s)))
-      , ("heap live", T.pack (printf "%6.1f MiB" (rtsLiveMb s)))
-      , ("heap alloc", T.pack (printf "%6.1f MiB" (rtsAllocMb s)))
-      , ("copied", T.pack (printf "%6.1f MiB" (rtsCopiedMb s)))
-      , ("rss max", T.pack (printf "%6.1f MiB" (rtsMaxMemMb s)))
-      , ("gc time", T.pack (printf "%9.1f%%" (rtsGcPct s)))
-      ]
-  where
-    s = dbgRts core

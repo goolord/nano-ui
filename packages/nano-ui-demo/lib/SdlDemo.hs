@@ -57,7 +57,7 @@ import Data.Primitive.SmallArray (SmallArray, smallArrayFromList)
 import Data.Word (Word64)
 import NanoUI
 import NanoUI.Backend.Sdl
-import NanoUI.Internal.Debug (CoreDebugSnapshot (..), formatCoreRtsRows)
+import NanoUI.Internal.Debug (CoreDebugSnapshot (..))
 import NanoUI.Diagrams
 import NanoUI.Internal.Monad (askContext)
 import NanoUI.Internal.Context (askHostIO, setHost)
@@ -986,7 +986,7 @@ debugText s = do
                 , dtFrame = frameRows s
                 , dtDraw = drawRows s
                 , dtDisplay = displayRows s
-                , dtRuntime = smallArrayFromList (formatCoreRtsRows c)
+                , dtRuntime = smallArrayFromList (dbgRts c)
                 }
         setHost ctx (CachedDebugText s text)
         pure text

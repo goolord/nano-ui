@@ -38,7 +38,6 @@ import NanoUI.Internal.Debug
   ( CoreDebugSnapshot (..)
   , DebugSamplerRef
   , emptyCoreDebugSnapshot
-  , formatCoreRtsRows
   , formatDrawRows
   , formatFpsRows
   , newDebugSampler
@@ -144,7 +143,7 @@ debugWindowBody snap = do
     case cached of
       Just (RgfwDebugRows shown rows) | shown == snap -> pure rows
       _ -> do
-        let rows = (formatFpsRows (dbgCore snap), layoutRows snap, displayRows snap, formatCoreRtsRows (dbgCore snap))
+        let rows = (formatFpsRows (dbgCore snap), layoutRows snap, displayRows snap, dbgRts (dbgCore snap))
         setHost ctx (RgfwDebugRows snap rows)
         pure rows
   heading "Frame"
