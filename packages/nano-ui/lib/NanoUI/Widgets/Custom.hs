@@ -471,40 +471,26 @@ knobWith' f diameter minV maxV value = do
               cx = x + w / 2
               cy = y + h / 2
               r = min (w / 2) (h / 2) - 2
-              theme = cdcTheme cdc
-              hover = cdcHovered cdc
-              pressed = cdcPressed cdc
+              button = themeButton (cdcTheme cdc)
               bgCol
-                | pressed = styleActiveBg (themeButton theme)
-                | hover = styleHoverBg (themeButton theme)
-                | otherwise = styleBg (themeButton theme)
-              accent = themeAccent theme
-              borderCol = styleBorder (themeButton theme)
+                | cdcPressed cdc = styleActiveBg button
+                | cdcHovered cdc = styleHoverBg button
+                | otherwise = styleBg button
               angle = (135 + frac * 270) * (pi / 180)
-              ix = cx + cos angle * (r * 0.75)
-              iy = cy + sin angle * (r * 0.75)
+              tip = V2 (cx + cos angle * (r * 0.75)) (cy + sin angle * (r * 0.75))
             drawCircle (V2 cx cy) r bgCol
-            drawStrokeCircle (V2 cx cy) r 1.5 borderCol
-            drawStrokeAA (V2 cx cy) (V2 ix iy) 2.5 accent
+            drawStrokeCircle (V2 cx cy) r 1.5 (styleBorder button)
+            drawStrokeAA (V2 cx cy) tip 2.5 (themeAccent (cdcTheme cdc))
         }
-  let
-    bounds = respRect resp
-  drag <- useDrag2D bounds
-  (_scrollX, scrollY) <- useWheelDelta bounds
+  -- A drag reports no movement while it is not held.
+  drag <- useDrag2D (respRect resp)
+  (_, scrollY) <- useWheelDelta (respRect resp)
   nav <- useKeyNav wid
   let
-    isDragging = dragActive drag
-    dy = if isDragging then -v2Y (dragDelta drag) else 0
-    dScroll = scrollY * 2.0
-    dKey = navStep nav
-    deltaNorm =
-      if range > 0
-        then (dy / 120.0) + (dScroll / 60.0) + fromIntegral dKey * 0.05
-        else 0
-    finalVal =
-      if deltaNorm /= 0
-        then clamp minV maxV (current + deltaNorm * range)
-        else current
+    deltaNorm = -v2Y (dragDelta drag) / 120 + scrollY * 2 / 60 + fromIntegral (navStep nav) * 0.05
+    finalVal
+      | range > 0 && deltaNorm /= 0 = clamp minV maxV (current + deltaNorm * range)
+      | otherwise = current
   finishInput fieldFloat ctx wid key current resp finalVal
 
 -- | On/off switch. Pass the current state; the result is the state after
@@ -544,20 +530,14 @@ toggleSwitchWith' f on = do
         , widgetCursor = Just (\_ -> UiCursorPointer)
         , widgetFocusable = True
         , widgetContent = contentKey [if current then 1 else 0]
-        , widgetDraw = \cdc (Rect x y w h) -> runCanvas $ do
+        , widgetDraw = \cdc rect@(Rect x y w h) -> runCanvas $ do
             let
               theme = cdcTheme cdc
               r = h / 2
-              accent = themeAccent theme
-              mutedCol = styleBg (themeButton theme)
-              bgCol = if current then accent else mutedCol
-              thumbR = r - 3
-              thumbX = if current then (x + w - r) else (x + r)
-              thumbY = y + r
-              thumbCol = themeOnAccent theme
-            drawRoundedRect (Rect x y w h) r bgCol
-            drawStrokeRoundedRect (Rect x y w h) r 1 (styleBorder (themeButton theme))
-            drawCircle (V2 thumbX thumbY) thumbR thumbCol
+              thumbX = if current then x + w - r else x + r
+            drawRoundedRect rect r (if current then themeAccent theme else styleBg (themeButton theme))
+            drawStrokeRoundedRect rect r 1 (styleBorder (themeButton theme))
+            drawCircle (V2 thumbX (y + r)) (r - 3) (themeOnAccent theme)
         }
   finishToggle ctx wid current resp
 
@@ -584,16 +564,13 @@ circularProgressWith' f diameter frac =
     , widgetMeasure = Just $ \_ _ -> (diameter, diameter)
     , widgetContent = contentKey [clamp01 frac]
     , widgetDraw = \cdc (Rect x y w h) -> runCanvas $ do
-        let cx = x + w / 2
-            cy = y + h / 2
+        let centre = V2 (x + w / 2) (y + h / 2)
             r = min (w / 2) (h / 2) - 2
             theme = cdcTheme cdc
-            trackCol = styleBorder (themeButton theme)
-            accent = themeAccent theme
             clampedFrac = clamp01 frac
-        drawStrokeCircle (V2 cx cy) r 2.0 trackCol
+        drawStrokeCircle centre r 2.0 (styleBorder (themeButton theme))
         when (clampedFrac > 0) $
-          drawCircle (V2 cx cy) (r * clampedFrac) accent
+          drawCircle centre (r * clampedFrac) (themeAccent theme)
     }
 
 -- | An indeterminate loading indicator: a short accent arc turning over a
@@ -671,19 +648,14 @@ progressBarWith' f height frac =
         , widgetContent = contentKey [clamp01 frac]
         , widgetDraw = \cdc (Rect x y w h) -> runCanvas $ do
             let theme = cdcTheme cdc
-                trackCol = styleBg (themeButton theme)
-                borderCol = styleBorder (themeButton theme)
-                fillCol = themeAccent theme
                 barW = max 0 w
                 barH' = max 0 h
                 rad = barH' / 2
-                clamped = clamp01 frac
-                fillWpx = barW * clamped
-                fillRad = if barH' <= 0 then 0 else min rad (fillWpx / 2)
-            drawRoundedRect (Rect x y barW barH') rad trackCol
-            when (clamped > 0 && fillWpx > 0) $
-              drawRoundedRect (Rect x y fillWpx barH') fillRad fillCol
-            drawStrokeRoundedRect (Rect x y barW barH') rad 1 borderCol
+                fillWpx = barW * clamp01 frac
+            drawRoundedRect (Rect x y barW barH') rad (styleBg (themeButton theme))
+            when (fillWpx > 0) $
+              drawRoundedRect (Rect x y fillWpx barH') (min rad (fillWpx / 2)) (themeAccent theme)
+            drawStrokeRoundedRect (Rect x y barW barH') rad 1 (styleBorder (themeButton theme))
         }
 
 -- | Default height and minimum content width for 'progressBar'.
@@ -713,11 +685,9 @@ sparklineWith' f prefW prefH values =
     { widgetLayout = fixedWH prefW prefH (f defaultLayout)
     , widgetMeasure = Just $ \_ _ -> (prefW, prefH)
     , widgetContent = contentKey values
-    , widgetDraw = \cdc (Rect x y rw rh) -> runCanvas $ do
-        let theme = cdcTheme cdc
-            accent = themeAccent theme
-            bg = styleBg (themePanel theme)
-        drawRoundedRect (Rect x y rw rh) 3.0 bg
+    , widgetDraw = \cdc rect@(Rect x y rw rh) -> runCanvas $ do
+        let accent = themeAccent (cdcTheme cdc)
+        drawRoundedRect rect 3.0 (styleBg (themePanel (cdcTheme cdc)))
         case values of
           [] -> pure ()
           [_] -> drawCircle (V2 (x + rw / 2) (y + rh / 2)) 2.0 accent
