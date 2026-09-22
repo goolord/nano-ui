@@ -46,28 +46,24 @@ data ClipState
       {-# UNPACK #-} !Int
   deriving Eq
 
+-- | The pixel edges of a rect at a scale, rounded outwards: left, top, right
+-- and bottom.
+{-# INLINE pixelEdges #-}
+pixelEdges :: Float -> Rect -> (Int, Int, Int, Int)
+pixelEdges s (Rect x y w h) =
+  (floor (x * s), floor (y * s), ceiling ((x + w) * s), ceiling ((y + h) * s))
+
 {-# INLINE snapDamage #-}
 snapDamage :: Float -> Damage -> Damage
 snapDamage _ DamageFull = DamageFull
-snapDamage scale (DamageClip (Rect x y w h)) =
-  let
-    px = fromIntegral (floor (x * scale) :: Int) / scale
-    py = fromIntegral (floor (y * scale) :: Int) / scale
-    pw = fromIntegral (ceiling ((x + w) * scale) :: Int) / scale - px
-    ph = fromIntegral (ceiling ((y + h) * scale) :: Int) / scale - py
-   in
-    DamageClip (Rect px py pw ph)
+snapDamage scale (DamageClip r) =
+  let (x0, y0, x1, y1) = pixelEdges scale r
+      at v = fromIntegral v / scale
+   in DamageClip (Rect (at x0) (at y0) (at x1 - at x0) (at y1 - at y0))
 
 {-# INLINE toClipKey #-}
 toClipKey :: Rect -> ClipState
-toClipKey (Rect x y w h) =
-  let
-    px = floor x :: Int
-    py = floor y :: Int
-    x1 = ceiling (x + w) :: Int
-    y1 = ceiling (y + h) :: Int
-   in
-    ClipKey px py (max 1 (x1 - px)) (max 1 (y1 - py))
+toClipKey r = let (x0, y0, x1, y1) = pixelEdges 1 r in ClipKey x0 y0 (max 1 (x1 - x0)) (max 1 (y1 - y0))
 
 applyClipState ::
   RenderBatch -> IORef ClipState -> Ptr SDL_Renderer -> ClipState -> IO ()
