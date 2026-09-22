@@ -412,11 +412,8 @@ withVerts da needV needI f =
 -- themselves instead of using one contiguous offset.
 {-# INLINE withVertsRaw #-}
 withVertsRaw :: DrawArena -> Int -> Int -> (Ptr Word8 -> Ptr Word8 -> Int -> Int -> IO ()) -> IO ()
-withVertsRaw da needV needI f = do
-  (vp, ip, base, baseIdx) <- ensureAndAlloc da needV needI
-  f vp ip base baseIdx
-  setCount da vertexCountSlot (base + needV)
-  setCount da indexCountSlot (baseIdx + needI)
+withVertsRaw da needV needI f =
+  withVertsReserve da needV needI $ \vp ip base baseIdx commit -> f vp ip base baseIdx >> commit needV needI
 
 -- | Reserve room for up to @maxV@ vertices / @maxI@ indices, hand the body a
 -- commit action, then record only the counts the body reports. Batches many
