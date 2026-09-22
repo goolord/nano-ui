@@ -266,6 +266,11 @@ runFrameEff unlift ctx frameInp ui = do
         resetUiBuild ctx
         unlift (runUi ctx (stripInteractionInput frameInp) ui)
       else pure result0
+  -- The store this frame's arena was built from. A view run again after a
+  -- local-hook write can write the same state again (a pane divider being
+  -- dragged stores the tree on every run), which is not a change the arena
+  -- missed.
+  storeBuilt <- getStore ctx
   -- Scopes only change how nodes look, which the rect and text diffs below
   -- cannot see, and custom widgets' cached ops hold the old theme's colours.
   whenM (themeScopesChanged ctx) $ do
@@ -308,10 +313,12 @@ runFrameEff unlift ctx frameInp ui = do
   finalizeSelectPick ctx dropInp
   closeSelectOnOutsideClick ctx frameInp
   storeAfter <- getStore ctx
-  let storeChanged = mirrorStoresChanged storeMid storeAfter
-  when storeChanged $ syncWidgetLabels ctx
-  when storeChanged $ do
-    solveLayoutAndCapture ctx w h
+  -- Node values follow the store, but no layout input does, so the solve
+  -- stands unless the arena's inputs or a custom measure moved.
+  when (mirrorStoresChanged storeBuilt storeAfter) $ do
+    syncWidgetLabels ctx
+    unlessM (tryReuseLayout ctx (Size w h)) $
+      solveLayoutAndCapture ctx w h
     applyScrollOffsets ctx
   updatePrevRects ctx
   refreshHover ctx frameInp
