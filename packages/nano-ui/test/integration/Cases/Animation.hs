@@ -8,6 +8,7 @@ import GHC.Clock (getMonotonicTime)
 tests :: [Spec]
 tests =
   [ spec "animation-settle" runAnimationSettleTest
+  , spec "animate-to-stays-settled" runAnimateToStaysSettledTest
   , spec "animation-damage" runAnimationDamageTest
   , spec "animation-stagger" runAnimationStaggerTest
   , spec "animation-bezier" runAnimationBezierTest
@@ -39,6 +40,32 @@ runAnimationSettleTest ctx failed = do
   assert failed (not needAfter)
   (_, _, _, dirty) <- runFrame ctx inp (label "settle")
   assert failed (not dirty)
+
+-- A settled 'animateTo' value holds its target for as long as the view reads
+-- it. Its key has no node, and resting values were once dropped after 300
+-- frames without a widget rect, so it read 0 again and animated back up. One
+-- the view skips for a few frames comes back settled; one no view reads for
+-- long enough is dropped, and animates in from 0 like a new one. The key
+-- keeps the label from taking the value's id while it is hidden, which would
+-- hold it through the label's rect.
+runAnimateToStaysSettledTest :: Context -> IORef Int -> IO ()
+runAnimateToStaysSettledTest ctx failed = do
+  let inp = withDelta 200 100 0.05
+      ui shown = do
+        t <- if shown then withKey ("fade" :: String) (animateTo (Tween EaseLinear 0.2 0) 1) else pure 0
+        label "rest"
+        pure t
+      near v x = abs (x - v) <= 0.001
+  replicateM_ 10 (runFrame ctx inp (ui True))
+  assert failed . not =<< anyAnimating ctx
+  vals <- replicateM 400 (evalUi ctx inp (ui True))
+  assert failed (all (near 1) vals)
+  assert failed . not =<< anyAnimating ctx
+  assert failed . not =<< needsRedraw ctx inp inp
+  replicateM_ 10 (runFrame ctx inp (ui False))
+  assert failed . near 1 =<< evalUi ctx inp (ui True)
+  replicateM_ 700 (runFrame ctx inp (ui False))
+  assert failed . near 0 =<< evalUi ctx inp (ui True)
 
 runAnimationDamageTest :: Context -> IORef Int -> IO ()
 runAnimationDamageTest _ failed = do

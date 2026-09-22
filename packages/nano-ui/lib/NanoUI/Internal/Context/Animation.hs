@@ -37,7 +37,7 @@ import NanoUI.Internal.Context.Core (damageKey, getsDamage, markDirty, markDirty
 import NanoUI.Internal.Context.Types (AnimationState (..), Context (..), DamageState (..), ScrollState (..), intKey)
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Layout.Arena (getNodeRect, lookupNodeByKey)
-import NanoUI.Internal.Types (DamageBounds (..), defaultDamageSlop, rectNonEmpty)
+import NanoUI.Internal.Types (DamageBounds (..), Rect, defaultDamageSlop, rectNonEmpty)
 
 -- | Read a projection of running and settled animations.
 {-# INLINE getsAnimation #-}
@@ -157,13 +157,15 @@ setAnimationValue :: Context -> WidgetId -> Float -> IO ()
 setAnimationValue ctx wid val = settleKey ctx (intKey wid) val
 
 -- | Advance animations by elapsed seconds, retain settled values, and expire
--- keep-alive requests that were not renewed in the view.
+-- keep-alive requests that were not renewed in the view and resting values
+-- that nothing held.
 tickAnimations :: Context -> Float -> IO ()
-tickAnimations ctx dt =
+tickAnimations ctx dt = do
+  rects <- getsDamage ctx dsPrevRects
   modifyIORef' (ctxAnimationState ctx) $ \as0 ->
-    let as = lapseKeepAlive as0
+    let as = lapseRest rects (lapseKeepAlive as0)
      in if IM.null (asAnimations as)
-          then as {asAnimSettled = False}
+          then if asAnimSettled as then as {asAnimSettled = False} else as
           else
             let stepped = IM.map (stepAnim dt) (asAnimations as)
                 (live, done) = IM.partition animInProgress stepped
@@ -172,8 +174,35 @@ tickAnimations ctx dt =
              in as
                   { asAnimations = live
                   , asAnimRest = rest'
+                  , asRestHeld = if IM.null done then asRestHeld as else asRestHeld as <> IM.keysSet done
                   , asAnimSettled = not (IM.null done)
                   }
+
+-- | Frames between sweeps of the resting values. A value unused for a whole
+-- period goes at the sweep that ends it, so within two periods of its last
+-- use; one used at least once a period stays.
+restLeaseFrames :: Int
+restLeaseFrames = 300
+
+-- | Count a frame toward the next sweep of the resting values and, once a
+-- period is up, sweep: keep the values held since the last sweep and those
+-- whose widget has a rect, drop the rest. A widget's own value (its hover)
+-- stays while the widget is laid out, since a clip frame need not paint it
+-- and read it. Frames without resting values do not count; they only drop
+-- leases left over from values that went back to zero.
+lapseRest :: IntMap Rect -> AnimationState -> AnimationState
+lapseRest rects as
+  | IM.null (asAnimRest as) =
+      if IS.null (asRestHeld as) then as else as {asRestHeld = IS.empty, asRestFrames = 0}
+  | asRestFrames as + 1 < restLeaseFrames = as {asRestFrames = asRestFrames as + 1}
+  | otherwise =
+      as
+        { asAnimRest = IM.filterWithKey (\k _ -> IS.member k held || IM.member k rects) (asAnimRest as)
+        , asRestHeld = IS.empty
+        , asRestFrames = 0
+        }
+  where
+    held = asRestHeld as
 
 -- | End the perpetual animations whose widget did not renew its lease this
 -- frame, and start the next frame's lease. A lapsed key leaves no resting
@@ -214,12 +243,17 @@ settleKey ctx key val = do
         | approxEq val 0 = IM.member key rest
         | otherwise = prevRest /= val
       rest' = if restChanged then restAt key val rest else rest
+      -- A value set is in use, like one read.
+      hold = not (approxEq val 0) && IS.notMember key (asRestHeld as)
+      held' = if hold then IS.insert key (asRestHeld as) else asRestHeld as
   -- A spring at rest settles every frame; write only what changes.
   case prevLive of
     Just _ ->
       writeIORef (ctxAnimationState ctx) $!
-        as {asAnimations = IM.delete key (asAnimations as), asAnimRest = rest'}
-    Nothing -> when restChanged $ writeIORef (ctxAnimationState ctx) $! as {asAnimRest = rest'}
+        as {asAnimations = IM.delete key (asAnimations as), asAnimRest = rest', asRestHeld = held'}
+    Nothing ->
+      when (restChanged || hold) $
+        writeIORef (ctxAnimationState ctx) $! as {asAnimRest = rest', asRestHeld = held'}
   when (maybe (not (approxEq prevRest val)) (not . approxEq val . animationValue) prevLive) $ do
     -- Covered: the key's widget paints from this value and its rect is
     -- damaged. 'animate' and 'animateTo' key a fresh id with no node, and
@@ -231,9 +265,17 @@ settleKey ctx key val = do
 restAt :: Int -> Float -> IntMap Float -> IntMap Float
 restAt key v = if approxEq v 0 then IM.delete key else IM.insert key v
 
--- | Current animated or settled value; zero when the id has neither.
+-- | Current animated or settled value; zero when the id has neither. Reading
+-- a settled value holds it through the next sweep ('lapseRest').
 getAnimationValue :: Context -> WidgetId -> IO Float
 getAnimationValue ctx wid = do
   let key = intKey wid
   as <- readIORef (ctxAnimationState ctx)
-  pure $! maybe (IM.findWithDefault 0 key (asAnimRest as)) animationValue (IM.lookup key (asAnimations as))
+  case IM.lookup key (asAnimations as) of
+    Just a -> pure $! animationValue a
+    Nothing -> do
+      -- 'restAt' keeps no zero, so a nonzero value is a stored one.
+      let v = IM.findWithDefault 0 key (asAnimRest as)
+      when (v /= 0 && IS.notMember key (asRestHeld as)) $
+        writeIORef (ctxAnimationState ctx) $! as {asRestHeld = IS.insert key (asRestHeld as)}
+      pure v

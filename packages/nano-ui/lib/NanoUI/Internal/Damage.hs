@@ -25,9 +25,6 @@ import NanoUI.Internal.Context
   , WidgetStore (..)
   , getHotId
   , getLiveAnimations
-  , getsAnimation
-  , modifyAnimation
-  , AnimationState (..)
   , getPrevRect
   , getStore
   , getsInteraction
@@ -100,14 +97,6 @@ import NanoUI.Internal.Types
 layoutSettleMinArea :: Float
 layoutSettleMinArea = 0.25
 
--- | Bound on how many consecutive rect-less frames a live animation may force a
--- full-window repaint. An animation whose widget is about to be laid out for the
--- first time gets a couple of frames of DamageFull cover; a perpetual animation
--- whose widget has left the arena (e.g. `keepAnimating` behind a tab switch)
--- must stop repainting the whole window once it is clearly gone.
-orphanEscalateFrames :: Int
-orphanEscalateFrames = 2
-
 -- Partial retain clears with themeWindow. Expand interaction clips to the painted
 -- panel/window backdrop so slop pixels get the correct fill, not window color.
 backdropRectFromNode :: Context -> Int -> IO (Maybe Rect)
@@ -132,34 +121,13 @@ getNonzeroRect arena i = do
 
 updatePrevRects :: Context -> IO ()
 updatePrevRects ctx = do
-  live <- getLiveAnimations ctx
-  prevRectless <- getsAnimation ctx asRectless
   oldRects <- getsDamage ctx dsPrevRects
   oldClips <- getsDamage ctx dsPrevClips
   oldTexts <- getsDamage ctx dsPrevNodeTexts
   let na = ctxNodeArena ctx
-      bump rects = do
-        rest <- getsAnimation ctx asAnimRest
-        -- Frames without a rect, for the live or resting keys that have none.
-        -- A key with a rect counts 0, which every reader takes as absent, so
-        -- a frame where every animated widget has a rect builds nothing.
-        let rectlessOf :: IM.IntMap v -> IM.IntMap Int
-            rectlessOf m = IM.mapWithKey (\k _ -> IM.findWithDefault 0 k prevRectless + 1) (m `IM.difference` rects)
-            restRectless = rectlessOf rest
-            rectless' = rectlessOf live `IM.union` restRectless
-            deadRest = IM.filter (> 300) restRectless
-        unless (IM.null deadRest) $
-          modifyAnimation ctx (\as -> as {asAnimRest = asAnimRest as `IM.difference` deadRest})
-        -- Every key is live or resting, so this drops exactly the dead resting
-        -- keys that are not live again.
-        unless (IM.null rectless' && IM.null prevRectless) $
-          modifyAnimation ctx $ \as ->
-            as {asRectless = rectless' `IM.difference` (deadRest `IM.difference` live)}
   count <- arenaCount na
   if count <= 0
-    then do
-      modifyDamage ctx (\ds -> ds {dsPrevRects = IM.empty, dsPrevClips = IM.empty, dsPrevNodeTexts = IM.empty})
-      bump IM.empty
+    then modifyDamage ctx (\ds -> ds {dsPrevRects = IM.empty, dsPrevClips = IM.empty, dsPrevNodeTexts = IM.empty})
     else do
       -- Walk the arena from base maps, touching only entries whose value
       -- changed. Seeded with last frame's maps, frames with stable rects
@@ -170,9 +138,7 @@ updatePrevRects ctx = do
             | i >= count =
                 if dropped || foundOld /= IM.size olds
                   then go IM.empty 0 IM.empty IM.empty IM.empty 0 False
-                  else do
-                    modifyDamage ctx (\ds -> ds {dsPrevRects = m, dsPrevClips = cm, dsPrevNodeTexts = tm})
-                    bump m
+                  else modifyDamage ctx (\ds -> ds {dsPrevRects = m, dsPrevClips = cm, dsPrevNodeTexts = tm})
             | otherwise = do
                 wid <- getWidgetId na i
                 if hashWidgetId wid == 0
@@ -278,7 +244,6 @@ data FrameDelta = FrameDelta
   , fdFloatingRects :: !(IM.IntMap Rect)
   , fdModalFlip :: !Bool
   , fdLiveAnims :: !(IM.IntMap Animation)
-  , fdRectless :: !(IM.IntMap Int)
   , fdWindowLive :: !Bool
   , fdRequests :: ![DamageRequest]
   , fdAnimLive :: Bool
@@ -306,7 +271,6 @@ writeDamage ctx inp snap = do
   modalFlip <- modalDamageFlip ctx
   liveAnims <- getLiveAnimations ctx
   settled <- takeAnimSettled ctx
-  rectless <- getsAnimation ctx asRectless
   winDragActive <- isJust <$> getsInteraction ctx isWindowDrag
   winResizeActive <- isJust <$> getsInteraction ctx isWindowResize
   requests <- getsDamage ctx dsRequests
@@ -325,7 +289,6 @@ writeDamage ctx inp snap = do
           , fdFloatingRects = newFloatingRects
           , fdModalFlip = modalFlip
           , fdLiveAnims = liveAnims
-          , fdRectless = rectless
           , fdWindowLive = winDragActive || winResizeActive
           , fdRequests = requests
           , fdAnimLive = not (IM.null liveAnims) || settled
@@ -441,15 +404,18 @@ needsFullDamage snap d =
     -- backdrop outside every widget rect was never painted.
     neverPainted = oldSize == Size 0 0
     sizeChanged = oldSize /= fdWinSize d
-    recentlyRectless k = IM.findWithDefault 0 k (fdRectless d) < orphanEscalateFrames
-    orphanAnim =
-      any (\k -> IM.notMember k newRects && recentlyRectless k) (IM.keys (fdLiveAnims d))
-    -- A live animation whose key has no rect this frame or last is not
-    -- clipped: the retain texture may never have shown it.
+    -- A live animation repaints whole on its first frame without a rect: its
+    -- widget just left, or it has none and started this frame. After that it
+    -- is clipped like the rest, so a perpetual animation whose widget has
+    -- left the arena (@keepAnimating@ behind a tab switch) stops repainting
+    -- the window.
+    firstRectless k =
+      IM.notMember k newRects && (IM.member k oldRects || IS.notMember k (fsAnimKeys snap))
+    orphanAnim = any firstRectless (IM.keys (fdLiveAnims d))
+    -- One with no rect last frame either is not clipped even when only a
+    -- scroller moved: the retain texture may never have shown it.
     missingAnim =
-      any
-        (\k -> k /= 0 && IM.notMember k oldRects && IM.notMember k newRects && recentlyRectless k)
-        (IS.toList (fsAnimKeys snap <> IM.keysSet (fdLiveAnims d)))
+      any (\k -> k /= 0 && IM.notMember k oldRects && firstRectless k) (IM.keys (fdLiveAnims d))
     keysChanged =
       not (IM.null oldRects)
         && rgAny (fdChurn d)

@@ -446,6 +446,12 @@
 
 ### Fixed
 
+- A settled `animateTo` value holds its target. Settled values were dropped
+  once their key had gone 300 frames without a widget rect, and an
+  `animateTo` key never has one, so about 300 frames after settling the value
+  read 0 and animated back up. A settled value now stays while a view reads
+  or sets it or its widget is laid out, and one nothing uses is dropped
+  within 300 to 600 frames.
 - Ctrl+Shift+Z redoes in text fields and areas when the backend delivers it
   as the control code for Z rather than the letter. It undid instead.
 - A click the view missed because the widget moved on the frame the button

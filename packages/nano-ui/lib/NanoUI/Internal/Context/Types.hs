@@ -283,16 +283,19 @@ initialOverlayState = OverlayState
   , osPrevMenuRects = []
   }
 
--- | Running animations, settled values, and per-frame keep-alive requests,
--- keyed by widget or animation id.
+-- | Running animations, settled values with their leases, and per-frame
+-- keep-alive requests, keyed by widget or animation id.
 data AnimationState = AnimationState
   { asAnimations :: !(IntMap Animation)
   , asAnimRest :: !(IntMap Float)
   -- ^ Settled nonzero values.
+  , asRestHeld :: !IntSet
+  -- ^ Resting keys read or set since the last sweep of 'asAnimRest'. The
+  -- sweep keeps these and those of laid-out widgets, drops the rest, and
+  -- starts the set again.
+  , asRestFrames :: {-# UNPACK #-} !Int
+  -- ^ Frames with resting values since the last sweep.
   , asAnimSettled :: {-# UNPACK #-} !Bool
-  , asRectless :: !(IntMap Int)
-  -- ^ Consecutive frames each animated key has had no visible widget bounds,
-  -- which the damage pass uses to limit full-window repaints.
   , asKeepAlive :: !IntSet
   -- ^ Keys whose perpetual animation a @keepAnimating@ call holds open.
   , asKeepTouched :: !IntSet
@@ -306,8 +309,9 @@ initialAnimationState :: AnimationState
 initialAnimationState = AnimationState
   { asAnimations = IM.empty
   , asAnimRest = IM.empty
+  , asRestHeld = IS.empty
+  , asRestFrames = 0
   , asAnimSettled = False
-  , asRectless = IM.empty
   , asKeepAlive = IS.empty
   , asKeepTouched = IS.empty
   }
