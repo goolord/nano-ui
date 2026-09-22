@@ -143,6 +143,7 @@ import NanoUI.Internal.Types
   , clamp01
   , defaultDamageSlop
   , rectContains
+  , v2Sub
   , v2X
   , v2Y
   )
@@ -394,11 +395,8 @@ useDrag2D bounds = do
   store <- uiIO (getStore ctx)
   let active0 = quietFlag dragK store
       active = inputMouseDown inp && (active0 || (inputMousePressed inp && rectContains bounds mouse))
-      (prevX, prevY) = findSlot fieldPoint (v2X mouse, v2Y mouse) dragK store
-      delta =
-        if active && active0
-          then V2 (v2X mouse - prevX) (v2Y mouse - prevY)
-          else V2 0 0
+      prev = uncurry V2 (findSlot fieldPoint (v2X mouse, v2Y mouse) dragK store)
+      delta = if active && active0 then v2Sub mouse prev else V2 0 0
       clampedMouse =
         V2
           (clamp (rectX bounds) (rectX bounds + rectW bounds) (v2X mouse))

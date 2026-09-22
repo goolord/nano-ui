@@ -323,14 +323,13 @@ treeMovePane moved splitId dt tree
   | not (paneExist tree moved) = Nothing
   | otherwise =
       case dt of
-        DropSwap tgt
-          | tgt == moved || not (paneExist tree tgt) -> Nothing
-          | otherwise -> Just (treeSwapPanes moved tgt tree)
-        DropSplit tgt axis onA
-          | tgt == moved || not (paneExist tree tgt) -> Nothing
-          | otherwise -> treeSplit tgt splitId axis onA moved <$> treeRemovePane moved tree
+        DropSwap tgt -> onTarget tgt (Just (treeSwapPanes moved tgt tree))
+        DropSplit tgt axis onA -> onTarget tgt (treeSplit tgt splitId axis onA moved <$> treeRemovePane moved tree)
         -- Removing the only pane leaves nothing to wrap.
         DropTop axis onA -> splitBeside splitId axis onA moved <$> treeRemovePane moved tree
+  where
+    -- A drop onto a pane needs another pane of the tree.
+    onTarget tgt r = if tgt /= moved && paneExist tree tgt then r else Nothing
 
 -- | Classify a drop point on a target pane into the 'PaneDrop' the drop
 -- performs: the pane's center swaps the two panes, an edge zone splits the
