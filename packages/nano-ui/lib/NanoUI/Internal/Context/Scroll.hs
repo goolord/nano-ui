@@ -41,7 +41,7 @@ module NanoUI.Internal.Context.Scroll
   , stepScrollGlides
   ) where
 
-import Control.Monad (unless, when)
+import Control.Monad (forM_, unless, when)
 import Data.IORef (modifyIORef', readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
 import Data.IntSet qualified as IS
@@ -300,28 +300,22 @@ data ScrollAlign
 
 -- | Scroll to an absolute offset, clamped to the scroller's range.
 scrollTo :: Context -> WidgetId -> V2 -> ScrollBehavior -> IO ()
-scrollTo ctx wid off behavior =
-  withScrollMetrics ctx wid $ \m ->
-    applyScrollTarget ctx wid (scrollAxes m) (clampScrollOffset (scrollRange m) off) behavior
+scrollTo ctx wid off = scrollToward ctx wid (\_ -> pure off)
 
 -- | Scroll by a delta in pixels. Deltas accumulate onto a glide already in
 -- flight, so repeated calls keep up rather than fighting each other.
 scrollBy :: Context -> WidgetId -> V2 -> ScrollBehavior -> IO ()
-scrollBy ctx wid delta behavior =
-  withScrollMetrics ctx wid $ \m -> scrollMetricsBy ctx wid m delta behavior
+scrollBy ctx wid delta = scrollToward ctx wid (\m -> headedBy ctx wid m delta)
 
 -- | Scroll by whole viewports: @V2 0 1@ is one page down, @V2 0 (-0.5)@ half
 -- a page up.
 scrollPages :: Context -> WidgetId -> V2 -> ScrollBehavior -> IO ()
-scrollPages ctx wid (V2 px py) behavior =
-  withScrollMetrics ctx wid $ \m -> do
-    let Rect _ _ vw vh = scrollViewport m
-    scrollMetricsBy ctx wid m (V2 (px * vw) (py * vh)) behavior
+scrollPages ctx wid (V2 px py) = scrollToward ctx wid $ \m ->
+  let Rect _ _ vw vh = scrollViewport m in headedBy ctx wid m (V2 (px * vw) (py * vh))
 
-scrollMetricsBy :: Context -> WidgetId -> ScrollMetrics -> V2 -> ScrollBehavior -> IO ()
-scrollMetricsBy ctx wid m delta behavior = do
-  base <- scrollTargetOffset ctx wid (scrollOffset m)
-  applyScrollTarget ctx wid (scrollAxes m) (clampScrollOffset (scrollRange m) (v2Add base delta)) behavior
+-- | Where the scroller is headed ('scrollTargetOffset'), moved by @delta@.
+headedBy :: Context -> WidgetId -> ScrollMetrics -> V2 -> IO V2
+headedBy ctx wid m delta = (`v2Add` delta) <$> scrollTargetOffset ctx wid (scrollOffset m)
 
 -- | Scroll back to the top (and left).
 scrollToStart :: Context -> WidgetId -> ScrollBehavior -> IO ()
@@ -350,12 +344,10 @@ scrollIntoView ctx wid target align behavior = do
 -- coordinates: the origin is where the content starts, which is where the
 -- viewport shows it at offset @0@.
 scrollRectIntoView :: Context -> WidgetId -> Rect -> ScrollAlign -> ScrollBehavior -> IO ()
-scrollRectIntoView ctx wid (Rect rx ry rw rh) align behavior =
-  withScrollMetrics ctx wid $ \m -> do
-    let Rect _ _ vw vh = scrollViewport m
-        V2 ox oy = scrollOffset m
-        target = clampScrollOffset (scrollRange m) (V2 (alignAxis align vw rx rw ox) (alignAxis align vh ry rh oy))
-    applyScrollTarget ctx wid (scrollAxes m) target behavior
+scrollRectIntoView ctx wid (Rect rx ry rw rh) align = scrollToward ctx wid $ \m -> do
+  let Rect _ _ vw vh = scrollViewport m
+      V2 ox oy = scrollOffset m
+  pure (V2 (alignAxis align vw rx rw ox) (alignAxis align vh ry rh oy))
 
 -- | Offset that puts a span of the content where @align@ asks for it.
 alignAxis :: ScrollAlign -> Float -> Float -> Float -> Float -> Float
@@ -385,8 +377,14 @@ projectAxes axes (V2 x y) =
     ScrollAxisX -> V2 x 0
     ScrollAxisXY -> V2 x y
 
-withScrollMetrics :: Context -> WidgetId -> (ScrollMetrics -> IO ()) -> IO ()
-withScrollMetrics ctx wid act = getScrollMetrics ctx wid >>= mapM_ act
+-- | Send the scroller to the offset @pick@ chooses from its metrics, clamped
+-- to its range. Nothing happens before it has been laid out.
+scrollToward :: Context -> WidgetId -> (ScrollMetrics -> IO V2) -> ScrollBehavior -> IO ()
+scrollToward ctx wid pick behavior = do
+  mMetrics <- getScrollMetrics ctx wid
+  forM_ mMetrics $ \m -> do
+    target <- pick m
+    applyScrollTarget ctx wid (scrollAxes m) (clampScrollOffset (scrollRange m) target) behavior
 
 -- =============================================================================
 -- Glide
