@@ -28,6 +28,7 @@ module NanoUI.Internal.Layout.Arena
   , isContainerNode
   , isScrollNode
   , isFloatingNode
+  , NodeClass (..)
   , SizingTag (..)
   , DirTag (..)
   , NodeArena (..)
@@ -130,6 +131,11 @@ module NanoUI.Internal.Layout.Arena
   , foldFlowChildrenM
   , findNodeRevM
   , findFloatingNodeRevM
+  , findClassNodeM
+  , findClassNodeRevM
+  , foldClassNodesM
+  , foldClassNodeRevM
+  , forClassNodes_
   , walkFloatingAncestors
   , foldNodeRevM
   , findNodeM
@@ -304,6 +310,20 @@ isScrollNode nt = nt == NodeScrollContainer
 isFloatingNode :: NodeType -> Bool
 isFloatingNode nt = nt == NodeModal || nt == NodeWindow || nt == NodePopup
 
+-- | A kind of node the arena lists as the view adds them, so that a pass
+-- interested only in that kind visits those nodes and not the whole arena.
+-- Each list is in arena order.
+data NodeClass
+  = PointerNodes
+  -- ^ The nodes a pointer hit test can want: the controls of 'isWidgetNode'
+  -- and the scroll containers ('isScrollNode').
+  | SelectionNodes
+  -- ^ Checkboxes, radio buttons and tree rows, whose node value mirrors
+  -- selection state in the store.
+  | DrawingNodes
+  -- ^ Widgets the application draws ('NodeDrawing').
+  deriving (Eq, Enum, Bounded)
+
 -- | The constructor of a 'Sizing' without its number, as the arena stores it
 -- in 'tagWSizing' and 'tagHSizing'. The number goes in 'styleWVal' or
 -- 'styleHVal'.
@@ -435,6 +455,12 @@ data NodeArena = NodeArena
   -- ^ Floating nodes (windows, modals, popups) added this frame, last added
   -- first, so the passes that look only at floating panels skip the rest of
   -- the arena.
+  , naClassNodes :: IORef (IOArr Int)
+  -- ^ The node lists of 'NodeClass', one after another: class @c@ keeps its
+  -- @i@th node at element @fromEnum c * capacity + i@. A list never holds
+  -- more nodes than the arena, so each has room for 'naCapacity' of them.
+  , naClassCounts :: IOArr Int
+  -- ^ Nodes in each list of 'naClassNodes', by 'fromEnum' of the class.
   }
 
 -- | The solver's buffers for the flow children of one container (its children
@@ -736,7 +762,13 @@ newNodeArena = do
   naMeasured <- newIORef =<< newPrimArray (cap * 2)
   naTopModal <- newIORef (-1)
   naFloatingNodes <- newIORef []
+  naClassNodes <- newIORef =<< newPrimArray (cap * nodeClassCount)
+  naClassCounts <- newPrimArray nodeClassCount
+  setPrimArray naClassCounts 0 nodeClassCount 0
   pure NodeArena {..}
+
+nodeClassCount :: Int
+nodeClassCount = fromEnum (maxBound :: NodeClass) + 1
 
 newZeroedPrimArray :: Int -> IO (IOArr Word64)
 newZeroedPrimArray n = do
@@ -755,6 +787,7 @@ resetNodeArena na = do
   writePrimArray (naInputSig na) 0 0
   writeIORef (naTopModal na) (-1)
   writeIORef (naFloatingNodes na) []
+  setPrimArray (naClassCounts na) 0 nodeClassCount 0
   -- 0 marks a memo entry that was never written, so the tag wraps to 1.
   !ft <- readIORef (naFrameTag na)
   writeIORef (naFrameTag na) (if ft == maxBound then 1 else ft + 1)
@@ -840,6 +873,14 @@ ensureCapacity na needed = do
     growRef (naOwnHash na) cap newCap
     growRef (naSubHash na) cap newCap
     growRef (naMeasured na) (cap * 2) (newCap * 2)
+    -- Each class list starts at a multiple of the capacity, so the lists move
+    -- apart as it grows.
+    oldClass <- readIORef (naClassNodes na)
+    newClass <- newPrimArray (newCap * nodeClassCount)
+    forM_ [0 .. nodeClassCount - 1] $ \c -> do
+      k <- readPrimArray (naClassCounts na) c
+      copyMutablePrimArray newClass (c * newCap) oldClass (c * cap) k
+    writeIORef (naClassNodes na) newClass
     readIORef (naArraysSnap na) >>= mapM_ (\_ -> writeIORef (naArraysSnap na) (Just newA))
     writeIORef (naCapacity na) newCap
 
@@ -1004,8 +1045,24 @@ addNode na nt parent dir wSiz hSiz pad gap minW minH maxW maxH grow ax ay = do
   when (isFloatingNode nt) $ do
     when (nt == NodeModal) $ writeIORef (naTopModal na) idx
     modifyIORef' (naFloatingNodes na) (idx :)
+  when (isWidgetNode nt || isScrollNode nt) $ do
+    pushClassNode na PointerNodes idx
+    when (nt == NodeCheckbox || nt == NodeRadio || nt == NodeTree) $
+      pushClassNode na SelectionNodes idx
+    when (nt == NodeDrawing) $ pushClassNode na DrawingNodes idx
   writeIORef (naCount na) (idx + 1)
   pure idx
+
+-- | Append node @idx@ to the list of class @c@. 'addNode' has made room.
+{-# INLINE pushClassNode #-}
+pushClassNode :: NodeArena -> NodeClass -> NodeIdx -> IO ()
+pushClassNode na c idx = do
+  let ci = fromEnum c
+  k <- readPrimArray (naClassCounts na) ci
+  cap <- readIORef (naCapacity na)
+  arr <- readIORef (naClassNodes na)
+  writePrimArray arr (ci * cap + k) idx
+  writePrimArray (naClassCounts na) ci (k + 1)
 
 -- | Add a node using layout fields, including grid and font-size/colour options.
 -- The caller assigns widget identity, text, and type-specific style data.
@@ -1734,6 +1791,69 @@ findFloatingNodeRevM na p = readIORef (naFloatingNodes na) >>= go
   where
     go [] = pure Nothing
     go (i : is) = p i >>= \ok -> if ok then pure (Just i) else go is
+
+-- | Where the list of class @c@ starts in 'naClassNodes', and its length.
+{-# INLINE classNodes #-}
+classNodes :: NodeArena -> NodeClass -> IO (IOArr Int, Int, Int)
+classNodes na c = do
+  let ci = fromEnum c
+  arr <- readIORef (naClassNodes na)
+  cap <- readIORef (naCapacity na)
+  k <- readPrimArray (naClassCounts na) ci
+  pure (arr, ci * cap, k)
+
+-- | 'findNodeM' over the nodes of one class: the first in arena order that
+-- satisfies the predicate.
+{-# INLINE findClassNodeM #-}
+findClassNodeM :: NodeArena -> NodeClass -> (NodeIdx -> IO Bool) -> IO (Maybe NodeIdx)
+findClassNodeM na c p = do
+  (arr, base, k) <- classNodes na c
+  let go !i
+        | i >= k = pure Nothing
+        | otherwise = do
+            idx <- readPrimArray arr (base + i)
+            ok <- p idx
+            if ok then pure (Just idx) else go (i + 1)
+  go 0
+
+-- | 'findNodeRevM' over the nodes of one class: the last in arena order that
+-- satisfies the predicate.
+{-# INLINE findClassNodeRevM #-}
+findClassNodeRevM :: NodeArena -> NodeClass -> (NodeIdx -> IO Bool) -> IO (Maybe NodeIdx)
+findClassNodeRevM na c p = do
+  (arr, base, k) <- classNodes na c
+  let go !i
+        | i < 0 = pure Nothing
+        | otherwise = do
+            idx <- readPrimArray arr (base + i)
+            ok <- p idx
+            if ok then pure (Just idx) else go (i - 1)
+  go (k - 1)
+
+-- | 'foldNodesM' over the nodes of one class, in arena order.
+{-# INLINE foldClassNodesM #-}
+foldClassNodesM :: NodeArena -> NodeClass -> (a -> NodeIdx -> IO a) -> a -> IO a
+foldClassNodesM na c f z = do
+  (arr, base, k) <- classNodes na c
+  let go !i !acc
+        | i >= k = pure acc
+        | otherwise = readPrimArray arr (base + i) >>= f acc >>= go (i + 1)
+  go 0 z
+
+-- | 'foldNodeRevM' over the nodes of one class, from last declared to first.
+{-# INLINE foldClassNodeRevM #-}
+foldClassNodeRevM :: NodeArena -> NodeClass -> (a -> NodeIdx -> IO a) -> a -> IO a
+foldClassNodeRevM na c f z = do
+  (arr, base, k) <- classNodes na c
+  let go !i !acc
+        | i < 0 = pure acc
+        | otherwise = readPrimArray arr (base + i) >>= f acc >>= go (i - 1)
+  go (k - 1) z
+
+-- | 'forNodes_' over the nodes of one class, in arena order.
+{-# INLINE forClassNodes_ #-}
+forClassNodes_ :: NodeArena -> NodeClass -> (NodeIdx -> IO ()) -> IO ()
+forClassNodes_ na c f = foldClassNodesM na c (\() idx -> f idx) ()
 
 -- | Strict effectful fold over nodes from last declared to first.
 {-# INLINE foldNodeRevM #-}

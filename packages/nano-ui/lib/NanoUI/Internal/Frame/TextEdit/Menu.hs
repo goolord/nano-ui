@@ -57,7 +57,7 @@ import NanoUI.Internal.Input
   , inputMouseRightPressed
   , inputWindowSize
   )
-import NanoUI.Internal.Layout.Arena (NodeType (NodeTextArea, NodeTextInput), findNodeRevM, getNodeRect, getNodeType, getWidgetId)
+import NanoUI.Internal.Layout.Arena (NodeClass (PointerNodes), NodeType (NodeTextArea, NodeTextInput), findClassNodeRevM, getNodeRect, getNodeType, getWidgetId)
 import NanoUI.Internal.Monad (whenM, (<&&>))
 import NanoUI.Internal.Style (Style (..), Theme, themeSeparator)
 import NanoUI.Internal.Types (Color (..), Rect (..), Size (..), V2 (..), clamp, lerpColor, rectContains)
@@ -155,7 +155,7 @@ textFieldWidgetAtMouse ctx mouse = do
   let na = ctxNodeArena ctx
   top <- overlayHitRoot ctx mouse
   mIdx <-
-    findNodeRevM na $ \idx -> do
+    findClassNodeRevM na PointerNodes $ \idx -> do
       nt <- getNodeType na idx
       pure (nt == NodeTextInput || nt == NodeTextArea) <&&> do
         wid <- getWidgetId na idx

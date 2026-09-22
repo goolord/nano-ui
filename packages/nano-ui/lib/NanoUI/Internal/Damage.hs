@@ -65,7 +65,8 @@ import NanoUI.Internal.Layout.Arena
   , SizingTag (..)
   , arenaCount
   , foldNodesM
-  , foldNodeRevM
+  , NodeClass (..)
+  , foldClassNodeRevM
   , foldFloatingNodeRevM
   , getClipRect
   , getHeightSizing
@@ -781,7 +782,7 @@ scrollOffsetDamage ctx acc oldStore newStore =
   unless (IM.null changedKeys) $ do
     -- Every store key that holds a scroll node's offset, mapped to the first
     -- such node. Built once, only on frames where an offset changed.
-    owners <- foldNodeRevM na addOwner IM.empty
+    owners <- foldClassNodeRevM na PointerNodes addOwner IM.empty
     IM.foldrWithKey
       ( \k _ rest -> do
           forM_ (IM.lookup k owners) $ \idx -> do

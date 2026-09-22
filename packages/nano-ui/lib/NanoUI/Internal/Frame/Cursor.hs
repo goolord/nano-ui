@@ -48,10 +48,11 @@ import NanoUI.Internal.Input
   )
 import NanoUI.Internal.Layout.Arena
   ( DirTag (..)
+  , NodeClass (PointerNodes)
   , NodeIdx
   , NodeType (..)
   , findChildM
-  , findNodeM
+  , findClassNodeM
   , getDirection
   , getNodeType
   , getParent
@@ -145,7 +146,7 @@ numericStepperHit ctx wid mouse =
 
 scrollThumbHit :: Context -> V2 -> IO Bool
 scrollThumbHit ctx mouse =
-  fmap isJust . findNodeM na $ \idx ->
+  fmap isJust . findClassNodeM na PointerNodes $ \idx ->
     ((\nt -> nt == NodeTextArea || isScrollNode nt) <$> getNodeType na idx) <&&> do
       wid <- getWidgetId na idx
       any (\(_, layout, _) -> rectContains (sbThumb layout) mouse)
@@ -259,7 +260,7 @@ tableColResizeCursorKind ctx inp = do
     then pure (Just UiCursorEwResize)
     else do
       mEdge <-
-        findNodeM na $ \idx ->
+        findClassNodeM na PointerNodes $ \idx ->
           ((== NodeButton) <$> getNodeType na idx)
             <&&> (hasFlag buttonFlagTable <$> getStyleIdx na idx)
             <&&> do

@@ -86,6 +86,7 @@ import NanoUI.Internal.Frame.Input
   , finalizeSelectFocus
   , finalizeTabFocus
   , finalizeTextInputFocus
+  , pressTargets
   , refreshHover
   )
 import NanoUI.Internal.Frame.Focus (constrainFocusToModal, syncWidgetLabels)
@@ -290,11 +291,12 @@ runFrameEff unlift ctx frameInp ui = do
   -- that never arrived left behind.
   when (inputMousePressed frameInp && not (inputMousePressed layerInp)) $
     writeIORef (ctxActiveId ctx) (WidgetId 0)
-  finalizePointerPress ctx layerInp
+  targets <- pressTargets ctx layerInp
+  finalizePointerPress ctx targets
   finalizePointerRelease ctx layerInp
   disarmPointerPress ctx frameInp
-  finalizeTextInputFocus ctx layerInp
-  finalizeSelectFocus ctx layerInp
+  finalizeTextInputFocus ctx layerInp targets
+  finalizeSelectFocus ctx targets
   finalizeTextFieldMouse ctx layerInp
   closeTextEditMenuOnOutsideClick ctx frameInp
   openTextEditMenu ctx layerInp

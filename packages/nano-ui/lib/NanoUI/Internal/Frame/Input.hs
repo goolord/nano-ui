@@ -8,6 +8,8 @@ module NanoUI.Internal.Frame.Input
   , refreshHover
   , armPointerPress
   , disarmPointerPress
+  , PressTargets
+  , pressTargets
   , finalizePointerPress
   , finalizePointerRelease
   , finalizeTextInputFocus
@@ -18,7 +20,8 @@ module NanoUI.Internal.Frame.Input
 
 import Control.Applicative ((<|>))
 import Control.Monad (forM_, when)
-import Data.IORef (readIORef, writeIORef)
+import Data.IORef (newIORef, readIORef, writeIORef)
+import Data.Maybe (isJust, isNothing)
 import NanoUI.Internal.Context
   ( Context (..)
   , damageWidget
@@ -61,9 +64,10 @@ import NanoUI.Internal.Input
   )
 import NanoUI.Internal.Layout.Arena
   ( isWidgetNode
+  , NodeClass (PointerNodes)
   , NodeIdx
   , NodeType (..)
-  , findNodeM
+  , findClassNodeM
   , foldNodesM
   , getNodeRect
   , getNodeType
@@ -152,36 +156,89 @@ disarmPointerPress ctx inp = do
   when (inputMouseReleased inp) $ writeIORef (ctxPressPos ctx) Nothing
   when (inputMouseRightReleased inp) $ writeIORef (ctxRightPressPos ctx) Nothing
 
+-- | What a left press landed on, for the steps that act on it: the
+-- interactive widget, the text field or text area, and the select under the
+-- pointer, each as 'findTopWidgetUnderMouse' would find it. All 'Nothing'
+-- on a frame without a press.
+data PressTargets = PressTargets
+  { ptInteractive :: !(Maybe WidgetId)
+  , ptTextField :: !(Maybe WidgetId)
+  , ptSelect :: !(Maybe WidgetId)
+  }
+
+-- | The 'PressTargets' of this frame's left press, found in one pass over the
+-- arena instead of one per step. A node's hit test does not depend on which
+-- step asks, so each node is tested at most once, and the pass stops once
+-- every target is found. Runs after layout, like the steps.
+pressTargets :: Context -> Input -> IO PressTargets
+pressTargets ctx inp
+  | not (inputMousePressed inp) = pure none
+  | otherwise = do
+      let na = ctxNodeArena ctx
+          mouse = inputMousePos inp
+      top <- overlayHitRoot ctx mouse
+      found <- newIORef none
+      _ <- findClassNodeM na PointerNodes $ \idx -> do
+        nt <- getNodeType na idx
+        PressTargets i t s <- readIORef found
+        let wantI = isNothing i && isInteractiveNode nt
+            wantT = isNothing t && isTextFieldNode nt
+            wantS = isNothing s && nt == NodeSelect
+        if not (wantI || wantT || wantS)
+          then pure False
+          else do
+            hit <- widgetUnderMouse ctx top mouse nt idx
+            if not hit
+              then pure False
+              else do
+                wid <- getWidgetId na idx
+                let pick want cur = if want then Just wid else cur
+                    !r = PressTargets (pick wantI i) (pick wantT t) (pick wantS s)
+                writeIORef found r
+                pure (isJust (ptInteractive r) && isJust (ptTextField r) && isJust (ptSelect r))
+      readIORef found
+ where
+  none = PressTargets Nothing Nothing Nothing
+
+-- | Text fields and text areas, which a press focuses.
+isTextFieldNode :: NodeType -> Bool
+isTextFieldNode nt = nt == NodeTextInput || nt == NodeTextArea
+
 -- | On a left press, make the interactive widget under the pointer the active
--- widget, unless it is disabled. Runs after layout. 'findTopWidgetUnderMouse'
--- searches the arena in the same order as hover ('refreshHover'), so where
--- widgets overlap both pick the one on top.
-finalizePointerPress :: Context -> Input -> IO ()
-finalizePointerPress ctx inp =
-  when (inputMousePressed inp) $ do
-    mWid <- findTopWidgetUnderMouse ctx (inputMousePos inp) isInteractiveNode
-    forM_ mWid $ \wid ->
-      whenM (not <$> isDisabled ctx wid) $
-        writeIORef (ctxActiveId ctx) wid
+-- widget, unless it is disabled. Runs after layout. 'pressTargets' searches
+-- the arena in the same order as hover ('refreshHover'), so where widgets
+-- overlap both pick the one on top.
+finalizePointerPress :: Context -> PressTargets -> IO ()
+finalizePointerPress ctx targets =
+  forM_ (ptInteractive targets) $ \wid ->
+    whenM (not <$> isDisabled ctx wid) $
+      writeIORef (ctxActiveId ctx) wid
 
 -- | The widget under @mouse@ whose node type satisfies @wanted@, or 'Nothing'.
 -- It is the first match in arena order, which is declaration order. The
 -- painter draws siblings from the last declared to the first, so where two
--- overlap the earlier one is on top. A match holds the point in its hit rect
--- ('widgetHitRect') and in its clip, and the floating panels and modals leave
--- it reachable there ('overlayHitAllowed').
+-- overlap the earlier one is on top. Only pointer nodes ('PointerNodes') are
+-- searched, so @wanted@ must reject every other type.
 findTopWidgetUnderMouse :: Context -> V2 -> (NodeType -> Bool) -> IO (Maybe WidgetId)
 findTopWidgetUnderMouse ctx mouse wanted = do
   let na = ctxNodeArena ctx
   top <- overlayHitRoot ctx mouse
   mIdx <-
-    findNodeM na $ \idx -> do
+    findClassNodeM na PointerNodes $ \idx -> do
       nt <- getNodeType na idx
-      pure (wanted nt) <&&> do
-        (x, y, w, h) <- getRect na idx
-        rect <- widgetHitRect ctx nt idx x y w h
-        nodeClippedHit ctx idx rect mouse <&&> overlayHitAllowed ctx top idx
+      pure (wanted nt) <&&> widgetUnderMouse ctx top mouse nt idx
   traverse (getWidgetId na) mIdx
+
+-- | Whether a press at @mouse@ lands on node @idx@ of type @nt@: the point is
+-- in its hit rect ('widgetHitRect') and in its clip, and the floating panels
+-- and modals leave it reachable there ('overlayHitAllowed', with @top@ from
+-- 'overlayHitRoot').
+{-# INLINE widgetUnderMouse #-}
+widgetUnderMouse :: Context -> Maybe NodeIdx -> V2 -> NodeType -> NodeIdx -> IO Bool
+widgetUnderMouse ctx top mouse nt idx = do
+  (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+  rect <- widgetHitRect ctx nt idx x y w h
+  nodeClippedHit ctx idx rect mouse <&&> overlayHitAllowed ctx top idx
 
 -- | The rect a press on node @idx@ must land in: a text field's box
 -- ('nodeTextFieldGeom'), a close button's padded target, or the node rect.
@@ -292,11 +349,11 @@ inUiClickHit ctx wid mouse = do
 -- A press elsewhere clears focus, collapses the prior selection, and closes
 -- its edit menu. Menu/dropdown presses are removed from the supplied layer
 -- input, preserving the owning field's focus until the pick is processed.
-finalizeTextInputFocus :: Context -> Input -> IO ()
-finalizeTextInputFocus ctx inp =
+finalizeTextInputFocus :: Context -> Input -> PressTargets -> IO ()
+finalizeTextInputFocus ctx inp targets =
   when (inputMousePressed inp) $ do
     prevFocus <- readIORef (ctxFocusId ctx)
-    mFocused <- findTextInputUnderMouse ctx (inputMousePos inp)
+    mFocused <- enabledTextField ctx (ptTextField targets)
     case mFocused of
       Nothing -> do
         when (prevFocus /= WidgetId 0) $ markDirty ctx
@@ -311,20 +368,17 @@ finalizeTextInputFocus ctx inp =
 -- focus, whether the press opens or closes it. Runs after
 -- 'finalizeTextInputFocus', which has cleared focus for a press outside every
 -- text field.
-finalizeSelectFocus :: Context -> Input -> IO ()
-finalizeSelectFocus ctx inp =
-  when (inputMousePressed inp) $ do
-    mWid <- findTopWidgetUnderMouse ctx (inputMousePos inp) (== NodeSelect)
-    forM_ mWid $ \wid ->
-      whenM (not <$> isDisabled ctx wid) $ do
-        prev <- readIORef (ctxFocusId ctx)
-        writeIORef (ctxFocusId ctx) wid
-        when (prev /= wid) $ markDirty ctx
+finalizeSelectFocus :: Context -> PressTargets -> IO ()
+finalizeSelectFocus ctx targets =
+  forM_ (ptSelect targets) $ \wid ->
+    whenM (not <$> isDisabled ctx wid) $ do
+      prev <- readIORef (ctxFocusId ctx)
+      writeIORef (ctxFocusId ctx) wid
+      when (prev /= wid) $ markDirty ctx
 
--- | The enabled text field or text area under @mouse@, if any.
-findTextInputUnderMouse :: Context -> V2 -> IO (Maybe WidgetId)
-findTextInputUnderMouse ctx mouse = do
-  mWid <- findTopWidgetUnderMouse ctx mouse (\nt -> nt == NodeTextInput || nt == NodeTextArea)
+-- | The text field or text area a press landed on, unless it is disabled.
+enabledTextField :: Context -> Maybe WidgetId -> IO (Maybe WidgetId)
+enabledTextField ctx mWid =
   -- A disabled field counts as nothing here, so a press on it takes focus
   -- away from the field that had it and gives it to no other.
   case mWid of

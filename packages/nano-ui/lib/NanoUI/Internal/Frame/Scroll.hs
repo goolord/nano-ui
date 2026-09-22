@@ -75,7 +75,8 @@ import NanoUI.Internal.Layout.Arena
   , NodeIdx
   , NodeType (..)
   , arenaCount
-  , findNodeM
+  , NodeClass (PointerNodes)
+  , findClassNodeM
   , forChildNodes_
   , getDirection
   , getFirstChild
@@ -257,7 +258,7 @@ scrollOwnerNode ::
   -> WidgetId
   -> IO (Maybe NodeIdx)
 scrollOwnerNode suppressed ctx wid =
-  findNodeM na $ \idx -> do
+  findClassNodeM na PointerNodes $ \idx -> do
     nt <- getNodeType na idx
     pure (nt == NodeTextArea || isScrollNode nt)
       <&&> ((== wid) <$> getWidgetId na idx)

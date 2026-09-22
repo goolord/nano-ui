@@ -31,7 +31,8 @@ import NanoUI.Internal.Input (Input (..), inputInteracted, inputMousePos, inputP
 import NanoUI.Internal.Layout.Arena
   ( NodeType (..)
   , findFloatingNodeRevM
-  , findNodeM
+  , NodeClass (PointerNodes)
+  , findClassNodeM
   , floatingNodeCount
   , getNodeType
   , getWidgetId
@@ -139,6 +140,6 @@ probeHotId ctx mouse = do
           top <- overlayHitRoot ctx mouse
           let hits idx =
                 (isWidgetNode <$> getNodeType na idx) <&&> nodePointVisible ctx idx mouse <&&> overlayHitAllowed ctx top idx
-          maybe (pure (WidgetId 0)) (getWidgetId na) =<< findNodeM na hits
+          maybe (pure (WidgetId 0)) (getWidgetId na) =<< findClassNodeM na PointerNodes hits
   where
     na = ctxNodeArena ctx
