@@ -235,6 +235,13 @@ main = do
       k <- readIORef resizeCounter
       modifyIORef' resizeCounter (+ 1)
       void (runFrame ctx' inp (benchWrap (400 + fromIntegral (k `mod` 200)) 0))
+    -- Two small changes in opposite corners: their bounding box is most of
+    -- the window, but they repaint little.
+    cornerCounter <- newIORef (0 :: Int)
+    measureBench "Wrap: 20 paragraphs, corner labels" $ do
+      k <- readIORef cornerCounter
+      modifyIORef' cornerCounter (+ 1)
+      void (sdlDrawFrame ctx' (benchCorners k) sdlEnv inp False)
     putStrLn ""
     putStrLn "================================================================================"
     putStrLn "Profiling complete."
@@ -429,6 +436,17 @@ benchWrap :: Float -> Int -> NanoUI ()
 benchWrap width k = columnWith (tight . gap 4 . fixedW width) $ do
   label (T.pack ("frame " <> show k))
   forM_ wrapParagraphs label
+
+-- | The paragraphs between a label in the top-left corner and one in the
+-- bottom-right, both changing every frame.
+benchCorners :: Int -> NanoUI ()
+benchCorners k = columnWith (tight . gap 4 . fillW . fillH) $ do
+  label (T.pack ("frame " <> show k))
+  forM_ wrapParagraphs label
+  flex
+  rowWith (tight . fillW) $ do
+    flex
+    label (T.pack ("frame " <> show k))
 
 -- | Twenty paragraphs of 120 words, each several lines at 400 to 600 pixels.
 wrapParagraphs :: [T.Text]

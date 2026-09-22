@@ -21,9 +21,12 @@ import NanoUI
   , Theme (..)
   , V2 (..)
   , columnWith
+  , fillH
   , fillW
+  , flex
   , gap
   , label
+  , rowWith
   , tight
   )
 import NanoUI.Backend (Damage (..), emptyInput)
@@ -138,12 +141,21 @@ main = do
         measure "Text wall, counter changes" $ do
           k <- tick wallRef
           void (present ctxWall False inp (textWall k))
+        -- Two small changes in opposite corners, whose bounding box is most
+        -- of the window.
+        ctxCorners <- newRgfwContext theme
+        _ <- present ctxCorners True inp (textCorners 0)
+        cornersRef <- newIORef (0 :: Int)
+        measure "Text wall, corner counters" $ do
+          k <- tick cornersRef
+          void (present ctxCorners False inp (textCorners k))
         ctxCheck <- fresh
         forM_ [60, 90 .. 700 :: Int] $ \y ->
           check ("hover at y=" ++ show y) ctxCheck inp {inputMousePos = V2 120 (fromIntegral y)} (appView m)
         forM_ [1 .. 5 :: Int] $ \k ->
           check ("counter " ++ show k) ctxCheck inp (appView m {counter = k})
         forM_ [1 .. 3 :: Int] $ \k -> check ("text wall " ++ show k) ctxWall inp (textWall k)
+        forM_ [1 .. 3 :: Int] $ \k -> check ("corners " ++ show k) ctxCorners inp (textCorners k)
         putStrLn "partial repaints match full ones"
         putStrLn ("profiled RGFW demo frames at " ++ show physW ++ "x" ++ show physH)
   where
@@ -155,9 +167,20 @@ textWall :: Int -> NanoUI ()
 textWall k = columnWith (tight . gap 4 . fillW) $ do
   label (T.pack ("frame " <> show k))
   forM_ paragraphs label
+
+-- | The text wall with a second counter in the bottom-right corner.
+textCorners :: Int -> NanoUI ()
+textCorners k = columnWith (tight . gap 4 . fillW . fillH) $ do
+  textWall k
+  flex
+  rowWith (tight . fillW) $ do
+    flex
+    label (T.pack ("frame " <> show k))
+
+paragraphs :: [T.Text]
+paragraphs =
+  [ T.unwords [ws !! ((i * 7 + j * 3) `mod` length ws) | j <- [0 .. 119 :: Int]]
+  | i <- [1 .. 16 :: Int]
+  ]
   where
     ws = T.words "the quick brown fox jumps over a lazy dog while seven wizards quietly hex bold nymphs and pack my box with five dozen liquor jugs"
-    paragraphs =
-      [ T.unwords [ws !! ((i * 7 + j * 3) `mod` length ws) | j <- [0 .. 119 :: Int]]
-      | i <- [1 .. 16 :: Int]
-      ]
