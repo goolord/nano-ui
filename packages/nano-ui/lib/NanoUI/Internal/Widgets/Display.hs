@@ -29,8 +29,9 @@ import Control.Exception (IOException, try)
 import Control.Monad (void, when)
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
-import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef)
+import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
 import Data.Map.Strict qualified as Map
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Effectful (Eff, type (:>))
@@ -157,11 +158,8 @@ registerImageRgba iid w h pixels = withContext (\ctx -> registerImage ctx iid w 
 
 -- | Read and parse an SVG file.
 loadSvg :: FilePath -> IO (Either String Svg)
-loadSvg path = do
-  result <- try (BS.readFile path)
-  pure $ case result of
-    Left (err :: IOException) -> Left (show err)
-    Right bytes -> parseSvg bytes
+loadSvg path =
+  either (\(err :: IOException) -> Left (show err)) parseSvg <$> try (BS.readFile path)
 
 -- | An SVG icon @size@ logical pixels square, drawn in the text colour where
 -- it is used: a one-colour document (every paint @currentColor@ or
@@ -191,7 +189,7 @@ svgIconWith' f doc = do
         _ -> dflt
       w = fixedOr (layoutWidth lay0) docW
       h = fixedOr (layoutHeight lay0) docH
-      color = maybe (styleFg (themePanel theme)) id (layoutFontColor lay0)
+      color = fromMaybe (styleFg (themePanel theme)) (layoutFontColor lay0)
       oneColour = svgMonochrome doc
       white = colorRGBA 255 255 255 255
       lay = lay0 {layoutWidth = Fixed w, layoutHeight = Fixed h, layoutFontColor = Just (if oneColour then color else white)}
@@ -203,24 +201,19 @@ svgIconWith' f doc = do
         -- shares it.
         rasterColor = if oneColour then white else color
         key = (svgKey doc, pw, ph, colorToWord32 rasterColor)
-    cache <- svgRasterCache ctx
+    SvgRasters cache <- hostOrInit ctx (SvgRasters <$> newIORef Map.empty)
     known <- Map.lookup key <$> readIORef cache
     case known of
       Just iid -> pure iid
       Nothing -> do
         iid <- Atlas.freshImageId (ctxImageAtlas ctx)
         ok <- registerImage ctx iid pw ph (rasterizeSvg pw ph rasterColor doc)
-        when ok $ atomicModifyIORef' cache (\m -> (Map.insert key iid m, ()))
+        when ok $ modifyIORef' cache (Map.insert key iid)
         pure (if ok then iid else ImageId 0)
   image' (const lay) iid
 
 -- | Rasterized SVG documents by document, pixel size and colour.
 newtype SvgRasters = SvgRasters (IORef (Map.Map (Int, Int, Int, Word32) ImageId))
-
-svgRasterCache :: Context -> IO (IORef (Map.Map (Int, Int, Int, Word32) ImageId))
-svgRasterCache ctx = do
-  SvgRasters ref <- hostOrInit ctx (SvgRasters <$> newIORef Map.empty)
-  pure ref
 
 -- | A solid rectangle sized by the layout modifier.
 box :: Ui :> es => (Layout -> Layout) -> Color -> Eff es ()

@@ -21,6 +21,7 @@ import Control.Monad (when)
 import Data.Hashable (Hashable, hash)
 import Data.IORef (readIORef, writeIORef)
 import Data.List (find)
+import Data.Maybe (fromMaybe)
 import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context
   ( Context (..)
@@ -83,31 +84,16 @@ useDrag1D axis lo hi current track = do
   wid <- nextId
   ctx <- askContext
   inp <- askInput
-  let key = intKey wid
-      dragK = slotKey SlotDrag key
-      trackLen = case axis of
-        DragAxisX -> rectW track
-        DragAxisY -> rectH track
-      origin = case axis of
-        DragAxisX -> rectX track
-        DragAxisY -> rectY track
-      mouse = case axis of
-        DragAxisX -> v2X (inputMousePos inp)
-        DragAxisY -> v2Y (inputMousePos inp)
-  store <- uiIO (getStore ctx)
-  let active0 = quietFlag dragK store
-      started = inputMousePressed inp && rectHit track (inputMousePos inp)
+  let dragK = slotKey SlotDrag (intKey wid)
+      (origin, trackLen, mouse) = case axis of
+        DragAxisX -> (rectX track, rectW track, v2X (inputMousePos inp))
+        DragAxisY -> (rectY track, rectH track, v2Y (inputMousePos inp))
+  active0 <- quietFlag dragK <$> uiIO (getStore ctx)
+  let started = inputMousePressed inp && rectHit track (inputMousePos inp)
       active = inputMouseDown inp && (active0 || started)
-      frac =
-        if trackLen <= 0
-          then 0
-          else clamp01 ((mouse - origin) / trackLen)
-      next =
-        if active
-          then lo + frac * (hi - lo)
-          else current
+      frac = if trackLen <= 0 then 0 else clamp01 ((mouse - origin) / trackLen)
   when (active /= active0) $ uiIO (modifyStore ctx (setQuietFlag dragK active))
-  pure (next, active)
+  pure (if active then lo + frac * (hi - lo) else current, active)
 
 -- | Hold the active id for @wid@ while its drag lasts and let it go after, so
 -- the widget paints and takes the cursor as pressed wherever the pointer goes.
@@ -131,29 +117,19 @@ useReorder order items = do
       dragK = slotKey SlotDrag key
       dragWK = slotKey SlotDragW key
       mouse = inputMousePos inp
-      down = inputMouseDown inp
       press = inputMousePressed inp
       release = inputMouseReleased inp
-      hit =
-        find
-          (\(_, r) -> rectHit r mouse)
-          items
+      hit = fst <$> find (\(_, r) -> rectHit r mouse) items
   store <- uiIO (getStore ctx)
   let from0 = findSlot fieldInt (-1) dragK store
       startX = findSlot fieldFloat 0 dragWK store
-      dragging = if press then maybe (-1) fst hit else from0
-      nextDrag =
-        if release || not down
-          then -1
-          else dragging
+      dragging = if press then fromMaybe (-1) hit else from0
+      nextDrag = if release || not (inputMouseDown inp) then -1 else dragging
       -- Resolve the drop using the held source before clearing it on release.
-      moved =
-        not press && dragging >= 0 && abs (v2X mouse - startX) > dragThresholdPx
-      dropTo = if moved then fmap fst hit else Nothing
-      nextOrder =
-        case dropTo of
-          Just toCol | release -> moveItem order dragging toCol
-          _ -> order
+      moved = not press && dragging >= 0 && abs (v2X mouse - startX) > dragThresholdPx
+      nextOrder = case hit of
+        Just toCol | release, moved -> moveItem order dragging toCol
+        _ -> order
   when (nextDrag /= from0 || (press && nextDrag >= 0)) $
     uiIO . modifyStore ctx $
       insertSlot fieldInt dragK nextDrag
@@ -233,10 +209,7 @@ keyActivated wid = do
 useDismissable :: (Ui :> es) => Rect -> Eff es Bool
 useDismissable panel = do
   inp <- askFrameInput
-  let mouse = inputMousePos inp
-      inside = rectHit panel mouse
-      esc = inputKeysElem KeyEscape (inputKeys inp)
-      backdrop = (inputMousePressed inp || inputMouseRightPressed inp) && not inside
-      dismissed = esc || backdrop
+  let esc = inputKeysElem KeyEscape (inputKeys inp)
+      pressed = inputMousePressed inp || inputMouseRightPressed inp
   when esc $ withContext markEscapeConsumed
-  pure dismissed
+  pure (esc || (pressed && not (rectHit panel (inputMousePos inp))))
