@@ -441,7 +441,6 @@ computeWidgetTextPlacements ctx nt idx x y w h = do
             [ (colorPickerCurrentLabel, bx, centeredTextY fm currentY lineH ch, cw, ch)
             , (colorPickerNewLabel, bx, centeredTextY fm newY lineH nh, nw, nh)
             ]
-    NodeSlider -> pure []
     NodeTextInput
       | hasFlag textInputFlagSelectable si -> do
           value <- textInputValue ctx idx
@@ -461,14 +460,9 @@ computeWidgetTextPlacements ctx nt idx x y w h = do
         [ (lbl, x, centeredTextY fm y lineH lh, lw, lh)
         , (value, x + ix, y + iy, fw, h)
         ]
-    NodeDrawing -> pure []
-    _ -> do
-      txt <- displayText ctx nt idx
-      ax <- getAlignX (ctxNodeArena ctx) idx
-      (_, th) <- measureTxt txt
-      prepared <- prepareFontMetrics fm txt
-      let (tx, used) = alignedTextPen ax x w ix prepared txt
-      pure [(txt, tx, centeredTextY fm y h th, used, th)]
+    -- Sliders, drawings and plain widgets carry no text; the other widgets
+    -- have centred labels ('cachedWidgetLabel').
+    _ -> pure []
 
 -- | Spans inside every floating panel of one kind, clipped to its content box.
 collectFloatingSpansInto :: Context -> NodeType -> SpanArena -> IO ()
