@@ -31,7 +31,7 @@ module NanoUI.Sdl.Internal.Dialog
 import Control.Monad (forM, unless, void)
 import Data.Int (Int32)
 import Data.IntMap.Strict qualified as IM
-import Data.IORef (atomicModifyIORef', atomicWriteIORef, newIORef, readIORef)
+import Data.IORef (IORef, atomicModifyIORef', atomicWriteIORef, newIORef, readIORef)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -41,11 +41,6 @@ import Foreign.Marshal.Alloc (free)
 import Foreign.Marshal.Array (newArray, peekArray0)
 import Foreign.Ptr (FunPtr, Ptr, castFunPtr, castPtr, nullPtr)
 import Foreign.StablePtr (castPtrToStablePtr, castStablePtrToPtr, deRefStablePtr, freeStablePtr, newStablePtr)
-import NanoUI.Sdl.Internal.Dialog.Types
-  ( DialogState (..)
-  , FileDialogId (..)
-  , FileDialogResult (..)
-  )
 import NanoUI.Sdl.Internal.Display (pushRefreshEvent)
 import NanoUI.Sdl.Internal.Window (SdlEnv (..))
 import NanoUI.Testing (Ui, askHost, markDirty, uiIO)
@@ -84,6 +79,35 @@ data FileDialogOptions = FileDialogOptions
 defaultFileDialogOptions :: FileDialogOptions
 defaultFileDialogOptions = FileDialogOptions [] Nothing False
 
+-- | Opaque handle returned by a non-blocking dialog launch. @0@ is never a
+-- valid handle.
+newtype FileDialogId = FileDialogId Int
+  deriving (Eq, Ord, Show)
+
+-- | Lifecycle state of a launched file dialog.
+data FileDialogResult
+  = FileDialogPending
+  -- ^ Still waiting for the user.
+  | FileDialogCancelled
+  -- ^ The user dismissed the dialog without choosing.
+  | FileDialogFailed
+  -- ^ SDL reported an error.
+  | FileDialogSelected [FilePath]
+  -- ^ The user chose one or more paths.
+  | FileDialogUnknown
+  -- ^ No dialog with this handle is being tracked. A handle becomes unknown
+  -- once its result has been delivered and consumed by 'pollFileDialog', or
+  -- after the dialog was abandoned via 'cancelFileDialog'. Never poll a
+  -- handle that returns 'FileDialogUnknown' again.
+  deriving (Eq, Show)
+
+-- | The last handle given out, and the tracked dialogs by handle: the cell
+-- each one's callback writes its result to. Native dialogs belong to the
+-- process, like the callback they share, rather than to a session.
+{-# NOINLINE dialogs #-}
+dialogs :: IORef (Int, IM.IntMap (IORef FileDialogResult))
+dialogs = unsafePerformIO (newIORef (0, IM.empty))
+
 -- | Launch an open-file dialog. Returns a handle to poll for completion.
 openFileDialog :: SdlEnv -> FileDialogOptions -> IO FileDialogId
 openFileDialog env = launchDialog env OpenDialog
@@ -103,14 +127,13 @@ openFolderDialog env = launchDialog env FolderDialog
 -- handle, so later polls return 'FileDialogUnknown'.
 pollFileDialog :: SdlEnv -> FileDialogId -> IO FileDialogResult
 pollFileDialog env (FileDialogId did) = do
-  let pending = dsPending (sdlDialogState env)
-  result <- maybe (pure FileDialogUnknown) readIORef . IM.lookup did =<< readIORef pending
+  result <- maybe (pure FileDialogUnknown) readIORef . IM.lookup did . snd =<< readIORef dialogs
   case result of
     FileDialogPending -> pure result
     FileDialogUnknown -> pure result
     _ -> do
       -- Only the poll that takes the handle out delivers the result.
-      taken <- atomicModifyIORef' pending $ \m -> (IM.delete did m, IM.member did m)
+      taken <- atomicModifyIORef' dialogs $ \(n, m) -> ((n, IM.delete did m), IM.member did m)
       if not taken
         then pure FileDialogUnknown
         else do
@@ -134,8 +157,8 @@ pollFileDialog env (FileDialogId did) = do
 -- The native dialog keeps running until the user dismisses it; its result is
 -- discarded.
 cancelFileDialog :: SdlEnv -> FileDialogId -> IO ()
-cancelFileDialog env (FileDialogId did) =
-  atomicModifyIORef' (dsPending (sdlDialogState env)) $ \m -> (IM.delete did m, ())
+cancelFileDialog _ (FileDialogId did) =
+  atomicModifyIORef' dialogs $ \(n, m) -> ((n, IM.delete did m), ())
 
 -- | Open-file dialog, usable from within 'NanoUI' widget code. Returns
 -- 'Nothing' when there is no SDL host to launch a dialog.
@@ -172,15 +195,13 @@ launchDialog env kind opts = do
       else newArray [SDL_DialogFileFilter (PtrConst.unsafeFromPtr n) (PtrConst.unsafeFromPtr p) | (n, p) <- names]
   location <- traverse newCString (dialogDefaultLocation opts)
   result <- newIORef FileDialogPending
-  let st = sdlDialogState env
-      release = do
+  let release = do
         mapM_ (\(n, p) -> free n >> free p) names
         free filters
         mapM_ free location
-  did <- atomicModifyIORef' (dsNextId st) $ \n -> (n + 1, n + 1)
   -- Register the handle before showing: the callback may fire before this
   -- function returns, and its result must be found.
-  atomicModifyIORef' (dsPending st) $ \m -> (IM.insert did result m, ())
+  did <- atomicModifyIORef' dialogs $ \(n, m) -> ((n + 1, IM.insert (n + 1) result m), n + 1)
   userdata <- castPtr . castStablePtrToPtr <$> newStablePtr (result, release)
   let win = sdlWindow env
       filtersConst = PtrConst.unsafeFromPtr filters

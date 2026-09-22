@@ -74,7 +74,6 @@ library
         NanoUI.Sdl.Internal.Cursor
         NanoUI.Sdl.Internal.Debug
         NanoUI.Sdl.Internal.Dialog
-        NanoUI.Sdl.Internal.Dialog.Types
         NanoUI.Sdl.Internal.Chrome
         NanoUI.Sdl.Internal.Chrome.Types
         NanoUI.Sdl.Internal.Frame

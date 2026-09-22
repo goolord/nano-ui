@@ -72,7 +72,6 @@ import NanoUI.Sdl.Internal.Font
 import NanoUI.Sdl.Internal.Font.Search (searchFonts)
 import NanoUI.Sdl.Internal.NanoUIFont (NanoUIFont (..))
 import NanoUI.Sdl.Internal.Debug (SdlDebugSampler, newSdlDebugSampler)
-import NanoUI.Sdl.Internal.Dialog.Types (DialogState (..), newDialogState)
 import NanoUI.Sdl.Internal.Image (ImageAtlas, destroyImageAtlas, newImageAtlas)
 import NanoUI.Sdl.Internal.Render (RenderBatch, destroyRenderBatch, newRenderBatch)
 import SDL3.Sys.Bindgen.Rect (SDL_Rect (..))
@@ -252,7 +251,6 @@ data SdlEnv = SdlEnv
   , sdlContinuous :: !Bool
   , sdlCachedCtx :: !(IORef Context)
   , sdlFontCache :: !SdlFontCache
-  , sdlDialogState :: !DialogState
   , sdlChromeState :: !ChromeState
   -- ^ What a borderless window's own title bar is for; see
   -- "NanoUI.Sdl.Internal.Chrome".
@@ -544,7 +542,6 @@ startSdlWindow bench opts ctx guessedDriver fontSource monoSource = do
           >> void (startTextInputSafe sdlWindow)
       )
       (const (void (stopTextInputSafe sdlWindow)))
-  sdlDialogState <- liftIO newDialogState
   sdlLastPresented <- liftIO $ newIORef False
   sdlBatch <- mkAcquire (newRenderBatch sdlRenderer) destroyRenderBatch
   let
