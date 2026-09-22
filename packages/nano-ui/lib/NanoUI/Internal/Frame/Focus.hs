@@ -15,8 +15,9 @@ import NanoUI.Internal.Context (Context (..), getStore, intBool, intKey)
 import NanoUI.Internal.Frame.Hit (widgetIdInSubtree)
 import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Internal.Layout.Arena
-  ( NodeType (NodeCheckbox, NodeRadio, NodeTree)
-  , forNodes_
+  ( NodeClass (SelectionNodes)
+  , NodeType (NodeCheckbox, NodeRadio, NodeTree)
+  , forClassNodes_
   , getNodeType
   , getParent
   , getStyleIdx
@@ -106,12 +107,13 @@ constrainFocusToModal ctx = do
 -- row gets 1 when its group's stored selection names it, and 0 otherwise.
 -- The frame runs this after the view, before layout, and again after the
 -- input steps when they changed the store, so what is painted matches the
--- store even when the change came after the widget was declared.
+-- store even when the change came after the widget was declared. It visits
+-- only the arena's 'SelectionNodes'.
 syncWidgetLabels :: Context -> IO ()
 syncWidgetLabels ctx = do
   store <- getStore ctx
   let na = ctxNodeArena ctx
-  forNodes_ na $ \idx -> do
+  forClassNodes_ na SelectionNodes $ \idx -> do
     nt <- getNodeType na idx
     wid <- getWidgetId na idx
     let key = intKey wid

@@ -64,8 +64,8 @@ import NanoUI.Internal.Layout.Arena
   , NodeType (..)
   , SizingTag (..)
   , arenaCount
-  , foldNodesM
   , NodeClass (..)
+  , foldClassNodesM
   , foldClassNodeRevM
   , foldFloatingNodeRevM
   , getClipRect
@@ -368,33 +368,29 @@ refreshCustomDrawings :: Context -> IO [Int]
 refreshCustomDrawings ctx = do
   dc <- readIORef (ctxDrawingCache ctx)
   -- A drawing with neither entry settles nothing, so a view without drawings
-  -- skips the walk.
+  -- skips the walk, and the walk visits only the drawing nodes.
   if IM.null (dcsDrawings dc) && IM.null (dcsCustomDrawings dc)
     then pure []
-    else foldNodesM na step []
+    else foldClassNodesM na DrawingNodes step []
   where
     na = ctxNodeArena ctx
     step acc i = do
-      nt <- getNodeType na i
-      if nt /= NodeDrawing
-        then pure acc
-        else do
-          wid <- getWidgetId na i
-          rect <- getNodeRect na i
-          mCustom <- lookupCustomDrawing ctx wid
-          changed <- case mCustom of
-            Just (CustomDrawingEntry content build) -> do
-              cdc <- mkCustomDrawContext ctx (ctxFontMetrics ctx) wid
-              refreshCustomDrawingOps ctx wid content rect cdc build
-            Nothing -> do
-              -- A versioned drawing rebuilds in paint once its version
-              -- changes, but the pixels it covered still need damage. An
-              -- unversioned one is cached by contract, so it stays put.
-              mDrawing <- lookupDrawing ctx wid
-              case mDrawing of
-                Just (DrawingEntry content _) | content /= 0 -> drawingOpsStale ctx wid content rect
-                _ -> pure False
-          pure (if changed then intKey wid : acc else acc)
+      wid <- getWidgetId na i
+      rect <- getNodeRect na i
+      mCustom <- lookupCustomDrawing ctx wid
+      changed <- case mCustom of
+        Just (CustomDrawingEntry content build) -> do
+          cdc <- mkCustomDrawContext ctx (ctxFontMetrics ctx) wid
+          refreshCustomDrawingOps ctx wid content rect cdc build
+        Nothing -> do
+          -- A versioned drawing rebuilds in paint once its version
+          -- changes, but the pixels it covered still need damage. An
+          -- unversioned one is cached by contract, so it stays put.
+          mDrawing <- lookupDrawing ctx wid
+          case mDrawing of
+            Just (DrawingEntry content _) | content /= 0 -> drawingOpsStale ctx wid content rect
+            _ -> pure False
+      pure (if changed then intKey wid : acc else acc)
 
 -- | Whether the frame repaints the whole window rather than a clip.
 --

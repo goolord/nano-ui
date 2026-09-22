@@ -1800,7 +1800,9 @@ classNodes na c = do
   arr <- readIORef (naClassNodes na)
   cap <- readIORef (naCapacity na)
   k <- readPrimArray (naClassCounts na) ci
-  pure (arr, ci * cap, k)
+  -- Forced here: a lazy offset would be a thunk and a box on every walk.
+  let !base = ci * cap
+  pure (arr, base, k)
 
 -- | 'findNodeM' over the nodes of one class: the first in arena order that
 -- satisfies the predicate.
@@ -1837,7 +1839,10 @@ foldClassNodesM na c f z = do
   (arr, base, k) <- classNodes na c
   let go !i !acc
         | i >= k = pure acc
-        | otherwise = readPrimArray arr (base + i) >>= f acc >>= go (i + 1)
+        | otherwise = do
+            idx <- readPrimArray arr (base + i)
+            acc' <- f acc idx
+            go (i + 1) acc'
   go 0 z
 
 -- | 'foldNodeRevM' over the nodes of one class, from last declared to first.
@@ -1847,7 +1852,10 @@ foldClassNodeRevM na c f z = do
   (arr, base, k) <- classNodes na c
   let go !i !acc
         | i < 0 = pure acc
-        | otherwise = readPrimArray arr (base + i) >>= f acc >>= go (i - 1)
+        | otherwise = do
+            idx <- readPrimArray arr (base + i)
+            acc' <- f acc idx
+            go (i - 1) acc'
   go (k - 1) z
 
 -- | 'forNodes_' over the nodes of one class, in arena order.
