@@ -346,19 +346,15 @@ shapeLine sf inv txt = do
       runs = shapingRuns txt
       pieceCount = length runs
       ascii = totalBytes == n
-  -- The byte each character starts at, and the character starting at each
-  -- byte (n inside a character and at the end). ASCII needs neither.
-  byteOfChar <- newPrimArray (if ascii then 0 else n + 1)
+  -- The character starting at each byte (n inside a character and at the
+  -- end). ASCII needs none.
   charOfByte <- newPrimArray (if ascii then 0 else totalBytes + 1)
-  let byteAt i = if ascii then pure i else readPrimArray byteOfChar i
-      charAt b = if ascii then pure (min n b) else readPrimArray charOfByte (min totalBytes b)
-      indexChars !i !b t = do
-        writePrimArray byteOfChar i b
-        case T.uncons t of
-          Nothing -> pure ()
-          Just (c, rest) -> do
-            writePrimArray charOfByte b i
-            indexChars (i + 1) (b + utf8Length c) rest
+  let charAt b = if ascii then pure (min n b) else readPrimArray charOfByte (min totalBytes b)
+      indexChars !i !b t = case T.uncons t of
+        Nothing -> pure ()
+        Just (c, rest) -> do
+          writePrimArray charOfByte b i
+          indexChars (i + 1) (b + utf8Length c) rest
   unless ascii $ do
     setPrimArray charOfByte 0 (totalBytes + 1) n
     indexChars 0 0 txt
@@ -381,7 +377,7 @@ shapeLine sf inv txt = do
           [] -> pure (pen, height, inkEnd, endStop)
           (start, _, _) : rest -> do
             let result = resultOf p
-            byteStart <- byteAt start
+                byteStart = lengthWord8 (T.take start txt)
             w <- fromIntegral <$> ttfShapedInt result 0
             h <- fromIntegral <$> ttfShapedInt result 1
             nGlyphs <- fromIntegral <$> ttfShapedInt result 2
