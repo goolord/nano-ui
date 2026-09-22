@@ -46,7 +46,7 @@ import NanoUI.Internal.Context
 import NanoUI.Internal.Draw (pushRect, pushRoundedRect, pushText, withClip)
 import NanoUI.Internal.Font (FontMetrics, centeredTextY, menuItemPadX, menuItemRowH, menuOuterPad, widgetContentInset)
 import NanoUI.Internal.Frame.Chrome (menuPanelBounds, overlayMenuStyle, paintMenuAccent, paintMenuPanel)
-import NanoUI.Internal.Frame.Hit (widgetOverlayAllowed, withWidgetNode)
+import NanoUI.Internal.Frame.Hit (widgetOverlayAllowed)
 import NanoUI.Internal.Frame.Scroll.Geometry (padTextClipRect)
 import NanoUI.Internal.Id (WidgetId (..))
 import NanoUI.Internal.Input (Input (..), Key (..), inputKeys, inputKeysElem, inputMousePos, inputMousePressed, inputPointerHeld)
@@ -68,10 +68,9 @@ data Dropdown = Dropdown
   , ddPicked :: !Int
   -- ^ Row shown as picked: the select's value, or the combo's keyboard
   -- highlight relative to its window (-1 highlights nothing).
-  , ddComboRows :: !Int
-  , ddComboWindow :: !Int
   , ddComboScrollX :: !Float
-  , ddComboContentW :: !Float
+  , ddComboGeom :: (Rect, Maybe (Rect, Rect), Maybe (Rect, Rect), Float)
+  -- ^ A combo's 'comboScrollGeom'.
   }
 
 -- | Painted bounds of every open dropdown and of the text-edit menu. The
@@ -105,25 +104,24 @@ openDropdowns ctx = do
           nOpts = length opts
           rows = slotInt SlotComboCount nOpts
           window = slotInt SlotComboScroll 0
+          scrollX = slotFloat SlotComboScrollX
           contentW = slotFloat SlotComboContentW
+          rect
+            | combo = comboDropRect x y w h nOpts rows contentW
+            | otherwise = selectDropRect x y w h nOpts
       pure
         Dropdown
           { ddWidget = wid
           , ddCombo = combo
           , ddOptions = opts
           , ddAnchor = Rect x y w h
-          , ddRect =
-              if combo
-                then comboDropRect x y w h nOpts rows contentW
-                else selectDropRect x y w h nOpts
+          , ddRect = rect
           , ddPicked =
               if combo
                 then slotInt SlotComboHighlight (-1) - window
                 else findSlot fieldInt 0 key store
-          , ddComboRows = rows
-          , ddComboWindow = window
-          , ddComboScrollX = slotFloat SlotComboScrollX
-          , ddComboContentW = contentW
+          , ddComboScrollX = scrollX
+          , ddComboGeom = comboScrollGeom rect rows nOpts window scrollX contentW
           }
 
 -- | The open dropdowns the modal state lets be drawn and picked from, in
@@ -223,10 +221,20 @@ finalizeSelectKeyboard ctx inp = do
       wantEsc = has KeyEscape
       wantEnter = has KeyEnter
   when (wantStep || wantEsc || wantEnter) $ do
+    let na = ctxNodeArena ctx
     focus <- readIORef (ctxFocusId ctx)
     store <- getStore ctx
-    mTarget <- pickSelectKeyboardTarget ctx focus store wantStep
-    forM_ mTarget $ \(wid, open) ->
+    -- Arrows step the focused enabled select, open or not. Otherwise the keys
+    -- go to the open select.
+    let enabledSelect _ idx =
+          ((== NodeSelect) <$> getNodeType na idx) <&&> (not <$> isDisabled ctx focus)
+    focused <-
+      if wantStep then keepNode ctx enabledSelect =<< lookupNodeByWidgetId na focus else pure Nothing
+    target <- case focused of
+      Just idx -> pure (Just (idx, isSelectOpen store (intKey focus)))
+      Nothing -> fmap (,True) <$> openSelectNode ctx store
+    forM_ target $ \(idx, open) -> do
+      wid <- getWidgetId na idx
       whenM (widgetOverlayAllowed ctx wid) $
         if wantEsc || wantEnter
           then when open $ do
@@ -234,33 +242,14 @@ finalizeSelectKeyboard ctx inp = do
             when wantEsc $ markEscapeConsumed ctx
             markDirty ctx
           else do
-            withWidgetNode ctx wid () $ \idx -> do
-              n <- length <$> getOptions (ctxNodeArena ctx) idx
-              when (n > 0) $ do
-                let key = intKey wid
-                    cur = findSlot fieldInt 0 key store
-                    next = clamp 0 (n - 1) (cur + if wantNext then 1 else -1)
-                when (next /= cur) $ do
-                  setStore ctx (insertSlot fieldInt key next store)
-                  markDirty ctx
-
-pickSelectKeyboardTarget :: Context -> WidgetId -> WidgetStore -> Bool -> IO (Maybe (WidgetId, Bool))
-pickSelectKeyboardTarget ctx focus store wantStep = do
-  mFocus <- if wantStep then selectWidgetIfAny ctx focus else pure Nothing
-  case mFocus of
-    Just wid -> pure (Just (wid, isSelectOpen store (intKey wid)))
-    Nothing -> fmap (,True) <$> findOpenSelectWidget ctx
-
-selectWidgetIfAny :: Context -> WidgetId -> IO (Maybe WidgetId)
-selectWidgetIfAny ctx wid =
-  withWidgetNode ctx wid Nothing $ \idx -> do
-    nt <- getNodeType (ctxNodeArena ctx) idx
-    disabled <- isDisabled ctx wid
-    pure (if nt == NodeSelect && not disabled then Just wid else Nothing)
-
-findOpenSelectWidget :: Context -> IO (Maybe WidgetId)
-findOpenSelectWidget ctx =
-  traverse (getWidgetId (ctxNodeArena ctx)) =<< openSelectNode ctx =<< getStore ctx
+            n <- length <$> getOptions na idx
+            when (n > 0) $ do
+              let key = intKey wid
+                  cur = findSlot fieldInt 0 key store
+                  next = clamp 0 (n - 1) (cur + if wantNext then 1 else -1)
+              when (next /= cur) $ do
+                setStore ctx (insertSlot fieldInt key next store)
+                markDirty ctx
 
 -- | The node of the select whose dropdown the store holds open.
 openSelectNode :: Context -> WidgetStore -> IO (Maybe NodeIdx)
@@ -353,44 +342,30 @@ comboScrollGeom ::
   Float ->
   (Rect, Maybe (Rect, Rect), Maybe (Rect, Rect), Float)
 comboScrollGeom (Rect dx dy dw dh) n vis win xOff contentW =
-  let
+  (Rect dx dy usableW usableH, vSb, hSb, usableW)
+  where
     vScroll = n > vis && vis > 0
-    vLaneW = if vScroll then comboSbW else 0
-    usableW = max 0 (dw - vLaneW)
+    usableW = max 0 (dw - if vScroll then comboSbW else 0)
     hScroll = contentW > usableW && contentW > 0
-    hLaneH = if hScroll then comboSbW else 0
-    usableH = max 0 (dh - hLaneH)
     -- Rows fill the drop rect from the top, stopping short of the lanes.
-    inner = Rect dx dy usableW usableH
-    -- Lanes sit flush against the dropdown border and share the corner.
-    vTrack = Rect (dx + dw - comboSbW) dy comboSbW usableH
-    hTrack = Rect dx (dy + dh - comboSbW) usableW comboSbW
-    vSb =
-      if vScroll
-        then
-          let Rect vx vy _ vh = vTrack
-              trackH = max 1 vh
-              thumbH = clamp (min comboSbMinThumb trackH) trackH (trackH * fromIntegral vis / fromIntegral n)
-              maxWin = max 1 (n - vis)
-              ty = vy + (trackH - thumbH) * fromIntegral (clamp 0 maxWin win) / fromIntegral maxWin
-           in Just (vTrack, Rect (vx + 2) ty (comboSbW - 4) thumbH)
-        else Nothing
-    hSb =
-      if hScroll
-        then
-          let Rect hx hy hw _ = hTrack
-              trackW = max 1 hw
-              thumbW = clamp (min comboSbMinThumb trackW) trackW (trackW * usableW / contentW)
-              maxOff = max 1 (contentW - usableW)
-              tx = hx + (trackW - thumbW) * clamp 0 maxOff xOff / maxOff
-           in Just (hTrack, Rect tx (hy + 2) thumbW (comboSbW - 4))
-        else Nothing
-   in (inner, vSb, hSb, usableW)
-
--- | 'comboScrollGeom' of an open combo dropdown.
-ddComboGeom :: Dropdown -> (Rect, Maybe (Rect, Rect), Maybe (Rect, Rect), Float)
-ddComboGeom dd =
-  comboScrollGeom (ddRect dd) (ddComboRows dd) (length (ddOptions dd)) (ddComboWindow dd) (ddComboScrollX dd) (ddComboContentW dd)
+    usableH = max 0 (dh - if hScroll then comboSbW else 0)
+    -- Lanes sit flush against the dropdown border and share the corner. A
+    -- thumb shows @num / den@ of its track, @off@ of @maxOff@ along it.
+    thumb track num den off maxOff =
+      let len = max 1 track
+          size = clamp (min comboSbMinThumb len) len (len * num / den)
+       in ((len - size) * clamp 0 maxOff off / maxOff, size)
+    vx = dx + dw - comboSbW
+    hy = dy + dh - comboSbW
+    (ty, thumbH) =
+      thumb usableH (fromIntegral vis) (fromIntegral n) (fromIntegral win) (fromIntegral (max 1 (n - vis)))
+    (tx, thumbW) = thumb usableW usableW contentW xOff (max 1 (contentW - usableW))
+    vSb
+      | vScroll = Just (Rect vx dy comboSbW usableH, Rect (vx + 2) (dy + ty) (comboSbW - 4) thumbH)
+      | otherwise = Nothing
+    hSb
+      | hScroll = Just (Rect dx hy usableW comboSbW, Rect (dx + tx) (hy + 2) thumbW (comboSbW - 4))
+      | otherwise = Nothing
 
 -- | Combo dropdown rect: like 'selectDropRect', but with no outer margin
 -- (rows start flush at the top), and the height reserves a flush bottom
