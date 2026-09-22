@@ -30,7 +30,7 @@ module NanoUI.Internal.Draw.Types
 where
 
 import Data.IORef (IORef)
-import Data.Primitive.PrimArray (MutablePrimArray, PrimArray, generatePrimArray, indexPrimArray, sizeofPrimArray)
+import Data.Primitive.PrimArray (MutablePrimArray, PrimArray, imapPrimArray, indexPrimArray)
 import qualified Data.Text as T
 import Data.Primitive.SmallArray (SmallArray)
 import Data.Word (Word32, Word8)
@@ -172,9 +172,7 @@ shiftDrawOp dx dy op =
 
 -- | Translate x/y pairs.
 shiftPoints :: Float -> Float -> PrimArray Float -> PrimArray Float
-shiftPoints dx dy pts =
-  generatePrimArray (sizeofPrimArray pts) $ \i ->
-    indexPrimArray pts i + (if even i then dx else dy)
+shiftPoints dx dy = imapPrimArray (\i v -> v + (if even i then dx else dy))
 
 -- | Pure painter from solved logical window bounds to draw operations.
 type DrawingBuild = Rect -> SmallArray DrawOp
