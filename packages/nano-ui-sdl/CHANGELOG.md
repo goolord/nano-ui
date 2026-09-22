@@ -79,8 +79,7 @@
   it was given as well. `FileDialogId` holds the dialog's result cell rather
   than a number: it keeps `Eq` and drops `Ord`, `Show` and the `Int`
   constructor. `SdlEnv`'s `sdlDebug` is the core `DebugSamplerRef`, beside
-  `sdlDebugSnapshot` and `sdlFrameTrace`. `NanoUI.Sdl.Internal.Input` no
-  longer has `isHardQuit`: the session loop's own Ctrl+C check covers it.
+  `sdlDebugSnapshot` and `sdlFrameTrace`.
 - Font variants other than `FontMono` share the sans font at a size instead
   of each opening its own copy.
 - A line over 4096 bytes is cached like any other, counting one entry per
