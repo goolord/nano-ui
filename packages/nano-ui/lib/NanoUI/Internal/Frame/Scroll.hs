@@ -42,8 +42,6 @@ import NanoUI.Internal.Frame.Scroll.Geometry
   ( ScrollBarLayout (..)
   , ScrollConfig
   , borderContentClip
-  , decodeScrollConfig
-  , isScrollStyle2D
   , scrollAxisRange
   , scrollBarLayout
   , scrollBarLayouts2D
@@ -85,7 +83,6 @@ import NanoUI.Internal.Layout.Arena
   , getNodeType
   , getParent
   , getRect
-  , getStyleIdx
   , getWidgetId
   , isFloatingNode
   , isScrollNode
@@ -235,10 +232,7 @@ scrollOwnerNode suppressed ctx wid =
       <&&> ((== wid) <$> getWidgetId na idx)
       <&&> if nt == NodeTextArea
         then pure True
-        else do
-          si <- getStyleIdx na idx
-          dir <- getDirection na idx
-          pure (not (suppressed (decodeScrollConfig si) (isScrollStyle2D si) dir))
+        else (\sn -> not (suppressed (snConfig sn) (sn2D sn) (snDir sn))) <$> readScrollNode na idx
  where
   na = ctxNodeArena ctx
 
