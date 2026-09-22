@@ -242,6 +242,17 @@ main = do
       k <- readIORef cornerCounter
       modifyIORef' cornerCounter (+ 1)
       void (sdlDrawFrame ctx' (benchCorners k) sdlEnv inp False)
+    -- Dragging the divider of two panes that each hold the paragraphs: every
+    -- frame shares the width out again and wraps both panes at new widths.
+    let dividerAt k = inp {inputMousePos = V2 (400 + fromIntegral (k `mod` 40 - 20)) 300, inputMouseDown = True}
+    replicateM_ 3 (void (runFrame ctx' inp benchSplit))
+    void (runFrame ctx' (dividerAt 20) {inputMousePressed = True} benchSplit)
+    splitCounter <- newIORef (1 :: Int)
+    measureBench "Wrap: split drag, 2x20 paragraphs" $ do
+      k <- readIORef splitCounter
+      modifyIORef' splitCounter (+ 1)
+      void (runFrame ctx' (dividerAt k) benchSplit)
+    void (runFrame ctx' inp {inputMouseReleased = True} benchSplit)
     -- The bound for one line: a text area holding a single long line, painted
     -- in full each frame as a horizontal scroll or a resize would.
     forM_ [4000, 20000 :: Int] $ \n -> do
@@ -442,6 +453,19 @@ benchWrap :: Float -> Int -> NanoUI ()
 benchWrap width k = columnWith (tight . gap 4 . fixedW width) $ do
   label (T.pack ("frame " <> show k))
   forM_ wrapParagraphs label
+
+-- | Two panes side by side, each holding the paragraphs.
+benchSplit :: NanoUI ()
+benchSplit =
+  void $
+    paneGrid
+      defaultPaneGridConfig
+        { pgLayout = fillW . fillH
+        , pgInitial = Just (Split 3 AxisV 0.5 (Pane 1) (Pane 2))
+        , pgViewPane = \_ _ -> do
+            columnWith (tight . gap 4 . fillW) (forM_ wrapParagraphs label)
+            pure (PaneView "P" False Nothing)
+        }
 
 -- | A text area holding one line.
 benchLongLine :: T.Text -> NanoUI ()
