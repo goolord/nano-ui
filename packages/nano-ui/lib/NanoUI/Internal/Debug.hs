@@ -135,8 +135,8 @@ noteDebugLoop ref dt =
 noteDebugSkip :: DebugSamplerRef -> IO ()
 noteDebugSkip ref = noteCore ref $ \c -> c {dbgSkips = dbgSkips c + 1}
 
--- | Whether the readout is active, and whether it is and its published
--- snapshot is older than 'debugRefreshSec'. Activity is driven by actual
+-- | Whether the readout is active, and whether it is active with a published
+-- snapshot older than 'debugRefreshSec'. Activity is driven by actual
 -- snapshot consumption: a snapshot query ('refreshDebugSnapshot') refreshes
 -- 'smLastQueryT', so the 4 Hz refresh loop only runs while a stats window is
 -- being built. An open window alone does not count as activity, or the event
