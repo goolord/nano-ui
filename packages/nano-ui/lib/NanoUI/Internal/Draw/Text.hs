@@ -17,7 +17,7 @@ import Data.Word (Word32, Word8)
 import Foreign.Ptr (Ptr)
 import NanoUI.Internal.Draw.Arena
 import NanoUI.Internal.Draw.Shapes
-import NanoUI.Internal.Draw.Types (DrawArena (..), DrawOp (..), TextFont (..), glyphAtlasTextureId, indexSize, vertexSize)
+import NanoUI.Internal.Draw.Types (DrawArena (..), DrawOp (..), TextFont (..), glyphAtlasTextureId, glyphPageTextureId, indexSize, vertexSize)
 import NanoUI.Internal.Font
   ( FontMetrics (..)
   , GlyphQuad (..)
@@ -98,14 +98,14 @@ glyphSlackLines = 4
 -- within 'glyphSlackLines', so a binary search finds the first glyph that
 -- can reach the clip and the walk stops at the first one that starts well
 -- past it: a long line in a narrow view costs the glyphs it shows plus a
--- search.
+-- search. Glyphs on another atlas page than the one before them start a new
+-- draw command on that page's texture.
 pushShapedQuads :: DrawArena -> FontMetrics -> Float -> Float -> Float -> ShapedGlyphs -> Color -> IO ()
 pushShapedQuads da fm slant px py (ShapedGlyphs quads) col = do
   let !count = sizeofPrimArray quads `div` 8
   when (count > 0) $ do
     cx <- readPrimArray (daCurrentClip da) 0
     cw <- readPrimArray (daCurrentClip da) 2
-    setTexture da glyphAtlasTextureId
     let -- A sheared glyph leans at most this far past its box.
         !lean = abs slant * (fmLineHeight fm + abs (fmAscent fm))
         !left = cx - lean
@@ -122,31 +122,39 @@ pushShapedQuads da fm slant px py (ShapedGlyphs quads) col = do
                     then firstReaching (mid + 1) hi
                     else firstReaching lo mid
         !start = firstReaching 0 count
-        !shown = count - start
-    withVertsReserve da (shown * 4) (shown * 6) $ \vp ip base baseIdx commit -> do
-      let !(r, g, b, a) = unpackColorF col
-          !baselineY = py + fmAscent fm
-          go !q !m
-            | q >= count = commit (m * 4) (m * 6)
-            | otherwise = do
-                let !o = q * 8
-                    !gx = px + at o
-                    !gw = at (o + 2)
-                if gx > right + slack
-                  -- This glyph and every later one start right of the clip.
-                  then commit (m * 4) (m * 6)
-                  else if gx + gw < left || gx > right
-                  then go (q + 1) m
-                  else do
-                    let !gy = py + at (o + 1)
-                        !gh = at (o + 3)
-                        !u0 = at (o + 4)
-                        !v0 = at (o + 5)
-                        !u1 = at (o + 6)
-                        !v1 = at (o + 7)
-                    pokeGlyphQuad vp ip base baseIdx slant baselineY r g b a m gx gy gw gh u0 v0 u1 v1
-                    go (q + 1) (m + 1)
-      go start 0
+        !(r, g, b, a) = unpackColorF col
+        !baselineY = py + fmAscent fm
+        -- The glyphs from @q0@ on that are on atlas page @page@, until one
+        -- that is not.
+        drawPage !q0 !page = do
+          setTexture da (glyphPageTextureId page)
+          let !shown = count - q0
+              !pageU = fromIntegral page
+          withVertsReserve da (shown * 4) (shown * 6) $ \vp ip base baseIdx commit -> do
+            let go !q !m
+                  | q >= count = commit (m * 4) (m * 6)
+                  | otherwise = do
+                      let !o = q * 8
+                          !gx = px + at o
+                          !gw = at (o + 2)
+                          !u0 = at (o + 4)
+                      if gx > right + slack
+                        -- This glyph and every later one start right of the clip.
+                        then commit (m * 4) (m * 6)
+                        else if gx + gw < left || gx > right
+                        then go (q + 1) m
+                        else if u0 < pageU || u0 >= pageU + 1
+                        then commit (m * 4) (m * 6) >> drawPage q (truncate u0)
+                        else do
+                          let !gy = py + at (o + 1)
+                              !gh = at (o + 3)
+                              !v0 = at (o + 5)
+                              !u1 = at (o + 6)
+                              !v1 = at (o + 7)
+                          pokeGlyphQuad vp ip base baseIdx slant baselineY r g b a m gx gy gw gh (u0 - pageU) v0 (u1 - pageU) v1
+                          go (q + 1) (m + 1)
+            go q0 0
+    drawPage start 0
 
 -- | Glyph quad @q@ of a text reservation whose vertices start at @base@ and
 -- indices at @baseIdx@. A non-zero @slant@ shears the quad around

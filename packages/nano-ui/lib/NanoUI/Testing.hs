@@ -111,6 +111,9 @@ module NanoUI.Testing
   , indexSize
   , backdropDimTextureId
   , glyphAtlasTextureId
+  , glyphAtlasPages
+  , glyphPageTextureId
+  , textureGlyphPage
   , Damage (..)
   , takeDamage
   , takeDamagePieces
@@ -212,6 +215,9 @@ import NanoUI.Internal.Draw
   , Layer (..)
   , backdropDimTextureId
   , glyphAtlasTextureId
+  , glyphAtlasPages
+  , glyphPageTextureId
+  , textureGlyphPage
   , drawCmdElems
   , forDrawCmdsInLayer_
   , drawCmdNull

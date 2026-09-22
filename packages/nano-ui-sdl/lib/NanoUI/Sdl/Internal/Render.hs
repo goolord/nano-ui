@@ -27,7 +27,7 @@ import NanoUI.Testing
   , DrawCmd (..)
   , DrawData (..)
   , damageIsEmpty
-  , glyphAtlasTextureId
+  , textureGlyphPage
   )
 import SDL3.Sys.Bindgen.Rect (SDL_Rect (..))
 import SDL3.Sys.Bindgen.Render (SDL_Renderer, SDL_Texture)
@@ -95,7 +95,8 @@ renderDrawDataPass ::
   -> Maybe Color
   -> DrawData
   -> ImageAtlas
-  -> Ptr SDL_Texture
+  -> (Int -> Ptr SDL_Texture)
+  -- ^ The glyph atlas's texture for each of its pages.
   -> Damage
   -> IO ()
 renderDrawDataPass batch ren mClear drawData images glyphTex damage =
@@ -140,7 +141,7 @@ drawCmd ::
   -> Int
   -> Ptr Word8
   -> ImageAtlas
-  -> Ptr SDL_Texture
+  -> (Int -> Ptr SDL_Texture)
   -> Maybe Rect
   -> IORef ClipState
   -> DrawCmd
@@ -165,8 +166,8 @@ drawCmd batch ren vp vc ip images glyphTex mDamage clipRef cmd = do
           !start = fromIntegral (cmdIndexOffset cmd)
           !texId = cmdTextureId cmd
         tex <-
-          if texId == glyphAtlasTextureId
-            then pure glyphTex
+          if textureGlyphPage texId >= 0
+            then pure (glyphTex (textureGlyphPage texId))
             else
               if texId > 0
                 then maybe nullPtr id <$> lookupImage images texId

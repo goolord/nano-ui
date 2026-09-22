@@ -31,6 +31,9 @@ module NanoUI.Internal.Draw
   , indexSize
   , backdropDimTextureId
   , glyphAtlasTextureId
+  , glyphAtlasPages
+  , glyphPageTextureId
+  , textureGlyphPage
   , pushRect
   , pushQuadGradient
   , pushImage

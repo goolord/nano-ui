@@ -11,10 +11,10 @@ import Data.Vector.Unboxed qualified as U
 import Data.Word (Word8)
 import Foreign.C.Types (CBool (..), CFloat (..), CInt (..), CUInt (..))
 import Foreign.ForeignPtr (mallocForeignPtrBytes, withForeignPtr)
-import Foreign.Marshal.Alloc (allocaBytes)
+import Foreign.Marshal.Alloc (alloca, allocaBytes)
 import Foreign.Marshal.Array (advancePtr, allocaArray, peekArray, pokeArray)
 import Foreign.Ptr (Ptr, castPtr, nullPtr, plusPtr)
-import Foreign.Storable (peekByteOff, pokeByteOff)
+import Foreign.Storable (peek, peekByteOff, pokeByteOff)
 import GHC.Clock (getMonotonicTimeNSec)
 import GHC.Conc (getAllocationCounter)
 import NanoUI (Color, ImageId (..), Rect (..), colorRGBA)
@@ -33,7 +33,7 @@ import NanoUI.Testing
   , DrawData (..)
   , Layer (..)
   , atlasTextureId
-  , glyphAtlasTextureId
+  , glyphPageTextureId
   , newPixelContext
   , registerImage
   )
@@ -79,12 +79,13 @@ foreign import ccall unsafe "nano_ui_text_atlas_reset"
   resetAtlas :: Ptr () -> IO ()
 
 foreign import ccall unsafe "nano_ui_text_atlas_texture"
-  atlasTexture :: Ptr () -> IO (Ptr SDL_Texture)
+  atlasTexture :: Ptr () -> CInt -> IO (Ptr SDL_Texture)
 
 foreign import ccall unsafe "nano_ui_text_atlas_insert_surface"
   insertAtlas ::
     Ptr ()
     -> Ptr ()
+    -> Ptr CInt
     -> Ptr CFloat
     -> Ptr CFloat
     -> Ptr CFloat
@@ -100,44 +101,59 @@ withGlyphSurface action = allocaBytes 64 $ \pixels ->
     unless (ok /= 0) (fail "glyph surface fill failed")
     action surface
 
-atlasChecks :: SdlEnv -> (Ptr SDL_Texture -> DrawData -> IO ()) -> IO ()
+-- | Insert a surface into the atlas: its page and pixel bounds, or 'Nothing'
+-- when no page has room.
+insertInto :: Ptr () -> Ptr () -> IO (Maybe (CInt, [CFloat]))
+insertInto atlas surface =
+  alloca $ \page -> allocaArray 4 $ \out -> do
+    ok <- insertAtlas atlas surface page out (advancePtr out 1) (advancePtr out 2) (advancePtr out 3)
+    if ok /= 0 then (\p b -> Just (p, b)) <$> peek page <*> peekArray 4 out else pure Nothing
+
+atlasChecks :: SdlEnv -> ((Int -> Ptr SDL_Texture) -> DrawData -> IO ()) -> IO ()
 atlasChecks env draw = withGlyphSurface $ \surface ->
-  bracket (newAtlas (sdlRenderer env)) freeAtlas $ \atlas -> allocaArray 4 $ \out -> do
+  bracket (newAtlas (sdlRenderer env)) freeAtlas $ \atlas -> do
     unless (atlas /= nullPtr) (fail "atlas creation failed")
-    ok <-
-      insertAtlas
-        atlas
-        surface
-        out
-        (advancePtr out 1)
-        (advancePtr out 2)
-        (advancePtr out 3)
-    unless (ok /= 0) (fail "glyph insertion failed")
-    bounds <- peekArray 4 out
+    placed <- insertInto atlas surface
     unless
-      (bounds == [5, 1, 3, 2])
-      (fail ("unexpected glyph bounds: " ++ show bounds))
-    texture <- atlasTexture atlas
-    dd0 <- geometry [(10, 10), (50, 10), (10, 50)]
-    let
-      dd =
-        dd0
-          { drawCommands =
-              U.map (\cmd -> cmd {cmdTextureId = glyphAtlasTextureId}) (drawCommands dd0)
-          }
-      sample name x y expected = do
-        withForeignPtr (drawVertices dd) $ \p -> forM_ [0 .. 2] $ \i -> do
-          pokeByteOff p (i * 32 + 24) (CFloat (x / 2048))
-          pokeByteOff p (i * 32 + 28) (CFloat (y / 2048))
-        draw texture dd
-        actual <- pixel env 20 20
-        unless (actual == expected) (fail (name ++ ": " ++ show actual))
+      (placed == Just (0, [5, 1, 3, 2]))
+      (fail ("unexpected glyph bounds: " ++ show placed))
+    let sampleOn page name x y expected = do
+          dd0 <- geometry [(10, 10), (50, 10), (10, 50)]
+          let dd =
+                dd0
+                  { drawCommands =
+                      U.map (\cmd -> cmd {cmdTextureId = glyphPageTextureId page}) (drawCommands dd0)
+                  }
+          withForeignPtr (drawVertices dd) $ \p -> forM_ [0 .. 2] $ \i -> do
+            pokeByteOff p (i * 32 + 24) (CFloat (x / 2048))
+            pokeByteOff p (i * 32 + 28) (CFloat (y / 2048))
+          textures <- mapM (atlasTexture atlas) [0 .. 3]
+          draw (\p -> textures !! p) dd
+          actual <- pixel env 20 20
+          unless (actual == expected) (fail (name ++ ": " ++ show actual))
+        sample = sampleOn 0
     sample "white patch" 0.5 0.5 (255, 0, 0)
     sample "glyph with padded source pitch" 6.5 2.5 (255, 0, 0)
     sample "transparent glyph padding" 8.5 2.5 (0, 0, 0)
+    -- A full page opens the next one rather than failing.
+    let fill n = do
+          r <- insertInto atlas surface
+          case r of
+            Just (0, _) -> fill (n + 1 :: Int)
+            other -> pure (n, other)
+    (_, next) <- fill 0
+    unless (fmap fst next == Just 1) (fail ("a full page did not open another: " ++ show next))
+    case next of
+      Just (_, [x, y, _, _]) -> do
+        let CFloat gx = x + 1.5
+            CFloat gy = y + 0.5
+        sampleOn 1 "glyph on the second page" gx gy (255, 0, 0)
+      _ -> fail "missing second-page bounds"
     resetAtlas atlas
     sample "white patch after reset" 0.5 0.5 (255, 0, 0)
     sample "old glyph cleared by reset" 6.5 2.5 (0, 0, 0)
+    after <- insertInto atlas surface
+    unless (after == Just (0, [5, 1, 3, 2])) (fail ("a reset atlas did not start on page 0: " ++ show after))
 
 -- | Images reach the texture however they changed: written again in place
 -- and added beside the others, which upload only their rects, and added by
@@ -175,7 +191,7 @@ imageChecks env ctx images draw = do
 
 atlasBench :: SdlEnv -> IO ()
 atlasBench env = withGlyphSurface $ \surface ->
-  bracket (newAtlas (sdlRenderer env)) freeAtlas $ \atlas -> allocaArray 4 $ \out -> do
+  bracket (newAtlas (sdlRenderer env)) freeAtlas $ \atlas -> alloca $ \page -> allocaArray 4 $ \out -> do
     unless (atlas /= nullPtr) (fail "atlas creation failed")
     let
       fill = replicateM_ 1024 $ do
@@ -183,6 +199,7 @@ atlasBench env = withGlyphSurface $ \surface ->
           insertAtlas
             atlas
             surface
+            page
             out
             (advancePtr out 1)
             (advancePtr out 2)
@@ -262,7 +279,7 @@ main = do
         drawWithGlyph tex dd dmg = do
           renderDrawDataPass batch (sdlRenderer env) (Just black) dd images tex dmg
           flushRenderBatch batch
-        draw = drawWithGlyph nullPtr
+        draw = drawWithGlyph (const nullPtr)
         visible = [(10, 10), (50, 10), (10, 50)]
         outside = [(100, 100), (120, 100), (100, 120)]
         damage = DamageClip (Rect 15 15 10 10)

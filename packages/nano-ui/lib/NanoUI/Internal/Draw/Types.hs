@@ -24,6 +24,9 @@ module NanoUI.Internal.Draw.Types
   , indexSize
   , backdropDimTextureId
   , glyphAtlasTextureId
+  , glyphAtlasPages
+  , glyphPageTextureId
+  , textureGlyphPage
   )
 where
 
@@ -292,3 +295,22 @@ backdropDimTextureId = 0x7ffffffe
 -- white-on-alpha so vertex color tints them at draw time.
 glyphAtlasTextureId :: Int
 glyphAtlasTextureId = 0x7ffffffd
+
+-- | Pages a glyph atlas can have. A glyph's page is the whole part of its
+-- u coordinates ('NanoUI.Internal.Font.ShapedGlyphs'), so page 0's UVs are
+-- the plain ones.
+glyphAtlasPages :: Int
+glyphAtlasPages = 4
+
+-- | The reserved texture id of glyph atlas page @page@: 'glyphAtlasTextureId'
+-- for page 0, and the ids below it for the others.
+{-# INLINE glyphPageTextureId #-}
+glyphPageTextureId :: Int -> Int
+glyphPageTextureId page = glyphAtlasTextureId - page
+
+-- | The glyph atlas page a texture id names, or -1 for any other texture.
+{-# INLINE textureGlyphPage #-}
+textureGlyphPage :: Int -> Int
+textureGlyphPage tex =
+  let page = glyphAtlasTextureId - tex
+   in if page >= 0 && page < glyphAtlasPages then page else -1

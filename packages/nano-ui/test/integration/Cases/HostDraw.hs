@@ -1,6 +1,8 @@
 module Cases.HostDraw (tests) where
 
 import Spec
+import Data.List (nub, sort)
+import Data.Primitive.PrimArray (primArrayFromList)
 import Data.Word (Word32, Word8)
 import Foreign.ForeignPtr (withForeignPtr)
 import Foreign.Ptr (Ptr)
@@ -12,7 +14,32 @@ tests =
   [ spec "draw-square-geometry" runSquareGeometryTest
   , spec "draw-external-text" runExternalTextTest
   , spec "draw-concentric-circles" runConcentricCirclesTest
+  , spec "draw-glyph-pages" runGlyphPagesTest
   ]
+
+-- | A shaped run with glyphs on two atlas pages draws each page's glyphs
+-- under that page's texture, with the page taken out of their u.
+runGlyphPagesTest :: Context -> IORef Int -> IO ()
+runGlyphPagesTest ctx failed = do
+  let glyph x page = [x, 0, 6, 10, page + 0.25, 0.5, page + 0.5, 0.75]
+      glyphs = ShapedGlyphs (primArrayFromList (concat [glyph 0 0, glyph 8 1, glyph 16 1]))
+      fm = (monospaceMetrics 12) {fmBackend = Just (FontBackend (\_ -> pure fm) (\_ -> pure (Just glyphs)))}
+  (_, _, dd, _) <- runFrame (withFontMetrics ctx fm) (withInput 300 200) (label "abc")
+  let onPage page = [c | c <- drawCmdElems dd, cmdTextureId c == glyphPageTextureId page, cmdIndexCount c > 0]
+      vertexUs cmd =
+        withForeignPtr (drawVertices dd) $ \vp ->
+          withForeignPtr (drawIndices dd) $ \ip ->
+            forM [cmdIndexOffset cmd .. cmdIndexOffset cmd + cmdIndexCount cmd - 1] $ \i -> do
+              vi <- peekByteOff ip (fromIntegral i * indexSize) :: IO Word32
+              peekByteOff vp (fromIntegral vi * vertexSize + 24) :: IO Float
+  case onPage 1 of
+    [cmd] -> do
+      assertEq failed 12 (cmdIndexCount cmd)
+      assertEq failed [0.25, 0.5] . nub . sort =<< vertexUs cmd
+    other -> assertEq failed 1 (length other)
+  -- The first glyph stays on page 0, drawn before the others.
+  firstUs <- concat <$> mapM vertexUs (onPage 0)
+  assert failed (0.25 `elem` firstUs && 0.5 `elem` firstUs)
 
 -- | Alpha of every vertex of every indexed triangle.
 triangleAlphas :: DrawData -> IO [(Float, Float, Float)]

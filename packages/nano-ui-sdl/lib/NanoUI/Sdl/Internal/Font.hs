@@ -12,7 +12,7 @@ module NanoUI.Sdl.Internal.Font
   , destroyGlyphAtlas
   , prepareGlyphAtlasForFrame
   , takeGlyphAtlasResetFlag
-  , glyphAtlasTexture
+  , glyphAtlasTextures
   , SdlFontCache
   , newSdlFontCache
   , destroySdlFontCache
@@ -44,6 +44,7 @@ import Data.Primitive.SmallArray
   )
 import Data.Primitive.PrimArray (PrimArray, indexPrimArray, newPrimArray, primArrayFromList, readPrimArray, setPrimArray, sizeofPrimArray, unsafeFreezePrimArray, writePrimArray)
 import Data.Int (Int32)
+import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Word (Word64)
 import Data.Text (Text)
 import qualified Data.Sequence as Seq
@@ -76,6 +77,7 @@ import NanoUI.Backend
   )
 import NanoUI.Testing
   ( Context
+  , glyphAtlasPages
   , withExternalText
   , withFontMetrics
   , withFontResolver
@@ -112,7 +114,8 @@ fontSourceLabel :: FontSource -> FilePath
 fontSourceLabel (FontFromPath p) = p
 fontSourceLabel (FontFromMemory _ label) = label
 
--- | Per-glyph atlas slot. UVs are normalised to [0,1] within the atlas texture.
+-- | Per-glyph atlas slot. UVs are normalised to [0,1] within the page, plus
+-- the page's number in u, as 'ShapedGlyphs' carries them.
 data GlyphSlot = GlyphSlot
   { gsU0 :: {-# UNPACK #-} !Float
   , gsV0 :: {-# UNPACK #-} !Float
@@ -354,8 +357,9 @@ lookupOrInsertGlyphIndex ga fontKey handle gi = do
       modifyIORef' (gaIndexEntries ga) (IM.insertWith IM.union fontKey (IM.singleton gi mSlot))
       pure mSlot
 
--- | Render a glyph image into a surface and copy it into the atlas.
--- 'Nothing' when there is no image or no room.
+-- | Render a glyph image into a surface and copy it into the atlas, on a new
+-- page once the last one is full. 'Nothing' when there is no image or no
+-- room on any page.
 -- A full atlas is reset at the next frame start (see 'markAtlasExhausted'):
 -- wiping the texture here would leave quads already recorded this frame
 -- sampling blank pixels. The glyph is unavailable for the rest of the frame,
@@ -375,12 +379,13 @@ placeGlyphImage ga render = do
         Nothing -> do
           markAtlasExhausted ga
           pure Nothing
-        Just (px, py, tw, th) -> do
-          let !slot =
+        Just (page, px, py, tw, th) -> do
+          let !pageU = fromIntegral page
+              !slot =
                 GlyphSlot
-                  { gsU0 = px / glyphAtlasSize
+                  { gsU0 = pageU + px / glyphAtlasSize
                   , gsV0 = py / glyphAtlasSize
-                  , gsU1 = (px + tw) / glyphAtlasSize
+                  , gsU1 = pageU + (px + tw) / glyphAtlasSize
                   , gsV1 = (py + th) / glyphAtlasSize
                   }
           pure (Just slot)
@@ -900,9 +905,12 @@ buildGlyphFontMetrics ga sf scale = do
   fm <- prepareText ""
   pure (fm, measure)
 
--- | Return the SDL_Texture backing the glyph atlas, for passing to the renderer.
-glyphAtlasTexture :: GlyphAtlas -> IO (Ptr SDL_Texture)
-glyphAtlasTexture ga = textAtlasTexture (gaAtlas ga)
+-- | The SDL_Textures of the glyph atlas's pages, by page, for passing to the
+-- renderer. A page never opened has a null texture.
+glyphAtlasTextures :: GlyphAtlas -> IO (Int -> Ptr SDL_Texture)
+glyphAtlasTextures ga = do
+  pages <- mapM (textAtlasTexture (gaAtlas ga) . fromIntegral) [0 .. glyphAtlasPages - 1]
+  pure (\page -> fromMaybe nullPtr (listToMaybe (drop page pages)))
 
 -- ---------------------------------------------------------------------------
 withTtf :: IO a -> IO a
@@ -1023,21 +1031,25 @@ ttfFontMetricsScaled sf scale =
         , fmAdvance = const (sfSpaceAdvance sf / inv)
         }
 
-tryInsert :: Ptr () -> Ptr () -> IO (Maybe (Float, Float, Float, Float))
+-- | Where the atlas put a surface: its page, and its x, y, width and height
+-- in pixels on that page.
+tryInsert :: Ptr () -> Ptr () -> IO (Maybe (Int, Float, Float, Float, Float))
 tryInsert atlas surf =
-  allocaBytes (4 * sizeOf (0 :: CFloat)) $ \px -> do
-    let py = plusPtr px (sizeOf (0 :: CFloat))
-        tw = plusPtr py (sizeOf (0 :: CFloat))
-        th = plusPtr tw (sizeOf (0 :: CFloat))
-    ok <- (/= 0) <$> textAtlasInsertSurface atlas surf px py tw th
-    if ok
-      then do
-        x <- realToFrac <$> peek px
-        y <- realToFrac <$> peek py
-        w <- realToFrac <$> peek tw
-        h <- realToFrac <$> peek th
-        pure (Just (x, y, w, h))
-      else pure Nothing
+  alloca $ \pagePtr ->
+    allocaBytes (4 * sizeOf (0 :: CFloat)) $ \px -> do
+      let py = plusPtr px (sizeOf (0 :: CFloat))
+          tw = plusPtr py (sizeOf (0 :: CFloat))
+          th = plusPtr tw (sizeOf (0 :: CFloat))
+      ok <- (/= 0) <$> textAtlasInsertSurface atlas surf pagePtr px py tw th
+      if ok
+        then do
+          page <- fromIntegral <$> peek pagePtr
+          x <- realToFrac <$> peek px
+          y <- realToFrac <$> peek py
+          w <- realToFrac <$> peek tw
+          h <- realToFrac <$> peek th
+          pure (Just (page, x, y, w, h))
+        else pure Nothing
 
 withUtf8 :: Text -> (CString -> CSize -> IO a) -> IO a
 withUtf8 txt act =
@@ -1082,12 +1094,13 @@ foreign import ccall unsafe "nano_ui_text_atlas_reset"
   textAtlasReset :: Ptr () -> IO ()
 
 foreign import ccall unsafe "nano_ui_text_atlas_texture"
-  textAtlasTexture :: Ptr () -> IO (Ptr SDL_Texture)
+  textAtlasTexture :: Ptr () -> CInt -> IO (Ptr SDL_Texture)
 
 foreign import ccall unsafe "nano_ui_text_atlas_insert_surface"
   textAtlasInsertSurface ::
     Ptr () ->
     Ptr () ->
+    Ptr CInt ->
     Ptr CFloat ->
     Ptr CFloat ->
     Ptr CFloat ->

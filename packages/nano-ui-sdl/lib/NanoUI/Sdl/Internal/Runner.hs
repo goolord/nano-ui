@@ -48,7 +48,7 @@ import NanoUI.Sdl.Internal.Debug
 import NanoUI.Sdl.Internal.Display (pushRefreshEvent, queryMouseWindowPos, queryWindowLogicalSize)
 import NanoUI.Sdl.Internal.Font
   ( fontSourceLabel
-  , glyphAtlasTexture
+  , glyphAtlasTextures
   , sdlFontCacheSource
   , prepareGlyphAtlasForFrame
   , takeGlyphAtlasResetFlag
@@ -188,7 +188,7 @@ finishDraw ctx env inp tex presentFull t0 t1 drawData dirtyAfterUi = do
       okScale <- setRenderScale (sdlRenderer env) scale scale
       unless (okBegin && okScale) $ fail "SDL_SetRenderTarget/Scale failed"
       theme <- readIORef (ctxTheme ctx)
-      glyphTex <- glyphAtlasTexture (sdlGlyphAtlas env)
+      glyphTex <- glyphAtlasTextures (sdlGlyphAtlas env)
       -- Persistent batch created once per session (sdlBatch): no C
       -- calloc/free pair per presented frame. Flush unconditionally so an
       -- aborted pass cannot leak pending geometry into the next frame.
