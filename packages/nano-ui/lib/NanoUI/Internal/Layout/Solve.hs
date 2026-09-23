@@ -1061,23 +1061,6 @@ columnChildHeight na ci scratchH = do
       pure (clamp minH maxH ih)
     _ -> pure (clamp minH maxH scratchH)
 
--- | Share out the main axis among the first @n@ scratch children
--- ('distributeScratch') and run @act@ on a snapshot of their indices and
--- shares ('withSnapshot').
-{-# INLINE withAxisSnaps #-}
-withAxisSnaps ::
-  NodeArena ->
-  Int ->
-  Int ->
-  Float ->
-  Float ->
-  Bool ->
-  (IOArr Int -> IOArr Float -> IO a) ->
-  IO a
-withAxisSnaps na depth n availMain gapSum horizontal act = do
-  distributeScratch na n availMain gapSum horizontal
-  withSnapshot na depth n fsOut act
-
 -- | Copy the first @n@ scratch child indices, and beside them the scratch
 -- array @sizes@ picks, to the snapshot for nesting depth @depth@, and run
 -- @act@ on the copies. Laying out a child reuses the scratch, so a container
@@ -1102,7 +1085,8 @@ positionRowFromParent ::
   IO ()
 positionRowFromParent env@SolveEnv {seArena = na} depth parent gap (Rect cx cy cw ch) = do
   n <- loadChildrenScratch (seArena env) parent (flowChildSize env False cw ch)
-  withAxisSnaps na depth n cw (gap * fromIntegral (max 0 (n - 1))) True $ \idxSnap outSnap -> do
+  distributeScratch na n cw (gap * fromIntegral (max 0 (n - 1))) True
+  withSnapshot na depth n fsOut $ \idxSnap outSnap -> do
     -- The shared baseline sits as low as the deepest one among the children
     -- aligned on it, so the child with the tallest ascent stays at the top.
     let lowestBaseline acc i = do
@@ -1193,7 +1177,8 @@ positionColumn env@SolveEnv {seArena = na} !depth !parent !gap chrome scrollCont
   -- overflow the column by them.
   gapSum <-
     if chrome then columnGapSumScratch na n gap else pure (gap * fromIntegral (max 0 (n - 1)))
-  withAxisSnaps na depth n (fromMaybe ch scrollContent) gapSum False $ \idxSnap outSnap -> do
+  distributeScratch na n (fromMaybe ch scrollContent) gapSum False
+  withSnapshot na depth n fsOut $ \idxSnap outSnap -> do
     let go !i !y = when (i < n) $ do
           ci <- readPrimArray idxSnap i
           fh <- readPrimArray outSnap i
