@@ -11,8 +11,10 @@ module NanoUI.Widgets.Combo
 where
 
 import Control.Monad (foldM, when, (<$!>))
+import Data.Dynamic (fromDynamic, toDyn)
 import Data.Foldable (toList)
-import Data.IORef (writeIORef)
+import Data.IORef (modifyIORef', readIORef, writeIORef)
+import Data.IntMap.Strict qualified as IM
 import Data.Maybe (fromMaybe, isJust, listToMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -25,7 +27,7 @@ import NanoUI.Internal.Id (WidgetId (..))
 import NanoUI.Internal.Input (Input, Key (..), inputKeys, inputMouseDown, inputMousePos, inputMousePressed, inputScroll)
 import NanoUI.Internal.Layout.Arena (setOptions)
 import NanoUI.Internal.Monad (Ui, askContext, uiIO)
-import NanoUI.Internal.Store (boolInt, fieldFloat, fieldInt, fieldText, findSlot, flagSlot, insertSlot, setFieldSelection)
+import NanoUI.Internal.Store (boolInt, ptrEq, fieldFloat, fieldInt, fieldText, findSlot, flagSlot, insertSlot, setFieldSelection)
 import NanoUI.Internal.Types (Rect (..), V2 (..), clamp, rectContains, rectNonEmpty, v2X, v2Y)
 import NanoUI.Internal.WidgetText (textInputFlagSearch)
 import NanoUI.Internal.Widgets.Behavior (keyboardFocused)
@@ -50,6 +52,29 @@ comboFiltered options q
         in filter (T.isInfixOf needle . T.toLower) opts
   where
     opts = toList options
+
+-- | A combo's matches for one query over one options list, with the widest
+-- match's width once a focused frame has measured it.
+data ComboMatches = ComboMatches ![Text] !Text [Text] !(Maybe Float)
+
+-- | 'comboFiltered', kept in 'ctxDerivedCache' under the combo's key while the
+-- options are the same list and the query the same text. A combo filters its
+-- options on every frame, focused or not, and a long list (a font picker's
+-- families) would otherwise lowercase every option each time.
+comboMatches :: Context -> Int -> [Text] -> Text -> IO ComboMatches
+comboMatches ctx key !opts q = do
+  cache <- readIORef (ctxDerivedCache ctx)
+  case IM.lookup key cache >>= fromDynamic of
+    Just m@(ComboMatches o q' _ _) | ptrEq o opts && q' == q -> pure m
+    _ -> do
+      let m = ComboMatches opts q (comboFiltered opts q) Nothing
+      m <$ writeComboMatches ctx key m
+
+-- | Replace a combo's cached matches. A combo that stops being built leaves
+-- its entry behind, so a cache grown past a few dozen entries starts over.
+writeComboMatches :: Context -> Int -> ComboMatches -> IO ()
+writeComboMatches ctx key m = modifyIORef' (ctxDerivedCache ctx) $ \cache ->
+  IM.insert key (toDyn m) (if IM.size cache >= 64 then IM.empty else cache)
 
 -- | A combo's state between frames.
 data ComboState = ComboState
@@ -266,8 +291,8 @@ comboBox' placeholder options value = do
   -- The dropdown only shows while the field is focused, so an unfocused
   -- combo steps with no rows. The matches stay lazy: the option window below
   -- forces only its rows, and the count is forced only on frames that store it.
-  let matches = comboFiltered options text
-      displayed = if isFocus then matches else []
+  ComboMatches opts query matches cachedW <- uiIO (comboMatches ctx key (toList options) text)
+  let displayed = if isFocus then matches else []
   store <- uiIO (getStore ctx)
   let cs0 =
         ComboState
@@ -282,9 +307,13 @@ comboBox' placeholder options value = do
           , csFocused = flagSlot (slotKey SlotComboFocus key) store
           }
   contentW <- uiIO $
-    if isFocus && not (null displayed)
-      then foldM (\widest t -> max widest . fst <$!> ctxMeasureText ctx t) 0 displayed
-      else pure (csContentW cs0)
+    case cachedW of
+      Just w | isFocus -> pure w
+      _
+        | isFocus && not (null displayed) -> do
+            w <- foldM (\widest t -> max widest . fst <$!> ctxMeasureText ctx t) 0 displayed
+            w <$ writeComboMatches ctx key (ComboMatches opts query matches (Just w))
+        | otherwise -> pure (csContentW cs0)
   let step =
         comboStep
           ComboInput

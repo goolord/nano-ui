@@ -239,6 +239,9 @@
 ### Changed
 
 - Builds with GHC 9.10 through 9.14 (`base >=4.20 && <4.23`).
+- `comboBox` filters its options only when the options list or the field
+  text changes, rather than on every frame, open or closed. It also measures
+  the matches' width only then. Pass the same list each frame to benefit.
 - `TextInputConfig` has a field `ticAdornments`, and is no longer `Eq`.
 - Checkboxes, radio options and tree rows are `NodeButton`s with a look of
   their own, as tab headers are; they look and behave as before.
