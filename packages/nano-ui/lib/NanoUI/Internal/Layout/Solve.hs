@@ -184,7 +184,7 @@ solveLayout na ms rootW rootH mCache =
         env0 <- solveEnv na ms mCache
         let env = env0 {seMeasureLog = Just measureLog}
         measurePass env count
-        positionNodeA env 0 0 0 0 rootW rootH
+        positionNodeA env 0 0 (Rect 0 0 rootW rootH)
         floatingCount <- floatingNodeCount na
         quantizeResultsA (seArrays env) count floatingCount (fmSnapScale (msFm ms))
         readIORef measureLog
@@ -843,12 +843,9 @@ positionNodeA ::
   SolveEnv ->
   Int ->
   NodeIdx ->
-  Float ->
-  Float ->
-  Float ->
-  Float ->
+  Rect ->
   IO ()
-positionNodeA env@SolveEnv {seArena = na, seArrays = a} !depth !idx !x !y !availW !availH = do
+positionNodeA env@SolveEnv {seArena = na, seArrays = a} !depth !idx (Rect x y availW availH) = do
   wAx <- readAxisSizing a idx True
   hAx@(AxisSizing hTag _ minH maxH) <- readAxisSizing a idx False
   intrinsicW <- readGeom a idx GeomW
@@ -881,8 +878,8 @@ positionNodeA env@SolveEnv {seArena = na, seArrays = a} !depth !idx !x !y !avail
   when (isContainerNode nt) $ do
     (pad, gap, dir) <- containerFlow a idx
     if isScrollNode nt
-      then positionScrollChildren env depth idx dir gap pad x y w h
-      else positionChildren env depth idx dir gap pad x y w h
+      then positionScrollChildren env depth idx dir gap pad (Rect x y w h)
+      else positionChildren env depth idx dir gap pad (Rect x y w h)
   when (hTag == SizingFit && isContainerNode nt && not (isScrollNode nt)) $
     adjustFitHeight na idx minH maxH x y w
 
@@ -919,12 +916,9 @@ positionScrollChildren ::
   DirTag ->
   Float ->
   Padding ->
-  Float ->
-  Float ->
-  Float ->
-  Float ->
+  Rect ->
   IO ()
-positionScrollChildren env@SolveEnv {seArena = na} depth idx dir gap pad px py pw ph = do
+positionScrollChildren env@SolveEnv {seArena = na} depth idx dir gap pad (Rect px py pw ph) = do
   si <- getStyleIdx na idx
   contentSize <- getNodeValue na idx
   slot <- scrollBarSlotOf na idx
@@ -943,7 +937,7 @@ positionScrollChildren env@SolveEnv {seArena = na} depth idx dir gap pad px py p
           layoutW = max contentW viewW
           layoutH = max contentSize viewH
       -- cx/cy and the layout box are already inside the padding.
-      positionChildren env depth idx DirColumn gap (Padding 0 0 0 0) cx cy layoutW layoutH
+      positionChildren env depth idx DirColumn gap (Padding 0 0 0 0) (Rect cx cy layoutW layoutH)
     else do
       let gutterCol = scrollAxisGutter (scrollPolicyY cfg) slot (padR pad) contentSize innerH
           gutterRow = scrollAxisGutter (scrollPolicyX cfg) slot (padB pad) contentSize innerW
@@ -954,10 +948,10 @@ positionScrollChildren env@SolveEnv {seArena = na} depth idx dir gap pad px py p
                 if wTag == SizingGrow
                   then max contentSize (innerW - gutterRow)
                   else contentSize
-          positionRowFromParent env depth idx gap cx cy rowMain (innerH - gutterRow)
+          positionRowFromParent env depth idx gap (Rect cx cy rowMain (innerH - gutterRow))
         DirColumn -> do
           let viewW = innerW - gutterCol
-          positionColumn env depth idx gap False (Just contentSize) cx viewW cx cy viewW innerH
+          positionColumn env depth idx gap False (Just contentSize) cx viewW (Rect cx cy viewW innerH)
   fc <- getFirstChild na idx
   when (fc >= 0) $ do
     let step (FlowAcc count maxB maxR) ci = do
@@ -1028,12 +1022,9 @@ positionChildren ::
   DirTag ->
   Float ->
   Padding ->
-  Float ->
-  Float ->
-  Float ->
-  Float ->
+  Rect ->
   IO ()
-positionChildren env@SolveEnv {seArrays = a} depth idx dir gap pad px py pw ph = do
+positionChildren env@SolveEnv {seArrays = a} depth idx dir gap pad (Rect px py pw ph) = do
   nt <- readTagEnum a idx TagNodeType
   gCols <- readTree a idx TreeGridCols
   minColW <- readStyle a idx StyleGridMinColW
@@ -1043,10 +1034,10 @@ positionChildren env@SolveEnv {seArrays = a} depth idx dir gap pad px py pw ph =
       cw = pw - padL pad - padR pad
       ch = ph - padT pad - padB pad
   if gCols > 0 || minColW > 0
-    then positionGrid env depth idx gCols minColW gap cx cy cw ch
+    then positionGrid env depth idx gCols minColW gap (Rect cx cy cw ch)
     else case dir of
-      DirRow -> positionRowFromParent env depth idx gap cx cy cw ch
-      DirColumn -> positionColumn env depth idx gap chrome Nothing px pw cx cy cw ch
+      DirRow -> positionRowFromParent env depth idx gap (Rect cx cy cw ch)
+      DirColumn -> positionColumn env depth idx gap chrome Nothing px pw (Rect cx cy cw ch)
 
 childRowCrossSize :: NodeArena -> NodeIdx -> Float -> IO Float
 childRowCrossSize na ci availCross = do
@@ -1107,12 +1098,9 @@ positionRowFromParent ::
   Int ->
   NodeIdx ->
   Float ->
-  Float ->
-  Float ->
-  Float ->
-  Float ->
+  Rect ->
   IO ()
-positionRowFromParent env@SolveEnv {seArena = na} depth parent gap cx cy cw ch = do
+positionRowFromParent env@SolveEnv {seArena = na} depth parent gap (Rect cx cy cw ch) = do
   n <- loadChildrenScratch (seArena env) parent (flowChildSize env False cw ch)
   withAxisSnaps na depth n cw (gap * fromIntegral (max 0 (n - 1))) True $ \idxSnap outSnap -> do
     -- The shared baseline sits as low as the deepest one among the children
@@ -1138,7 +1126,7 @@ positionRowFromParent env@SolveEnv {seArena = na} depth parent gap cx cy cw ch =
             if ay == AlignBaseline
               then (\b -> cy + rowBase - b) <$> childBaseline env ci crossH
               else pure (alignY ay cy ch crossH)
-          positionNodeA env (depth + 1) ci x fy fw crossH
+          positionNodeA env (depth + 1) ci (Rect x fy fw crossH)
           -- A grow child that its max width stopped short of its share
           -- hands the rest to the siblings after it instead of leaving a
           -- hole.
@@ -1153,12 +1141,9 @@ positionGrid ::
   Int ->
   Float ->
   Float ->
-  Float ->
-  Float ->
-  Float ->
-  Float ->
+  Rect ->
   IO ()
-positionGrid env@SolveEnv {seArena = na} depth parent gCols minColW gap cx cy cw ch = do
+positionGrid env@SolveEnv {seArena = na} depth parent gCols minColW gap (Rect cx cy cw ch) = do
   n <- loadChildrenScratch (seArena env) parent (flowChildSize env False cw ch)
   when (n > 0) $ do
     let cols = gridColumnCount gCols minColW cw gap
@@ -1182,7 +1167,7 @@ positionGrid env@SolveEnv {seArena = na} depth parent gCols minColW gap cx cy cw
               ay <- getAlignY na ci
               let fx = alignX ax itemX colW childW
                   fy = alignY ay curY rowH childH
-              positionNodeA env (depth + 1) ci fx fy colW rowH
+              positionNodeA env (depth + 1) ci (Rect fx fy colW rowH)
             goRows (r + 1) (curY + rowH + gap)
       goRows 0 cy
 
@@ -1200,12 +1185,9 @@ positionColumn ::
   Maybe Float ->
   Float ->
   Float ->
-  Float ->
-  Float ->
-  Float ->
-  Float ->
+  Rect ->
   IO ()
-positionColumn env@SolveEnv {seArena = na} !depth !parent !gap chrome scrollContent !px !pw !cx !cy !cw !ch = do
+positionColumn env@SolveEnv {seArena = na} !depth !parent !gap chrome scrollContent !px !pw (Rect cx cy cw ch) = do
   n <- loadChildrenScratch na parent (flowChildSize env True cw ch)
   -- The gaps come out of the height shared, as in a row, or grow children
   -- overflow the column by them.
@@ -1223,7 +1205,7 @@ positionColumn env@SolveEnv {seArena = na} !depth !parent !gap chrome scrollCont
           childH <- case scrollContent of
             Just _ -> pure (if isScrollNode nt then min fh (max 0 (ch - (y - cy))) else fh)
             Nothing -> columnChildHeight na ci fh
-          positionNodeA env (depth + 1) ci fx y nodeW childH
+          positionNodeA env (depth + 1) ci (Rect fx y nodeW childH)
           (_, _, _, placedH) <- getRect na ci
           gapAfter <-
             if i + 1 >= n
@@ -1475,7 +1457,7 @@ placeFloatingNodes na ms winW winH lookupPos lookupSize lookupAnchor = do
       NodeModal -> do
         let w = min iw (max 0 (winW - 2 * windowMargin))
             h = min ih (max 0 (winH - 2 * windowMargin))
-        positionNodeA env 0 idx (max 0 ((winW - w) / 2)) (max 0 ((winH - h) / 2)) w h
+        positionNodeA env 0 idx (Rect (max 0 ((winW - w) / 2)) (max 0 ((winH - h) / 2)) w h)
       NodeWindow -> do
         (w0, h0) <- fromMaybe (min iw winW, min ih winH) <$> lookupSize wid
         mpos <- lookupPos wid
@@ -1484,7 +1466,7 @@ placeFloatingNodes na ms winW winH lookupPos lookupSize lookupAnchor = do
         mcfg <- lookupAnchor wid
         let (anchor, placement, offset) = fromMaybe (AnchorPoint (V2 0 0), PlacementAuto, 4) mcfg
             (x, y) = computePopupPosition winW winH windowMargin iw ih anchor placement offset
-        positionNodeA env 0 idx x y iw ih
+        positionNodeA env 0 idx (Rect x y iw ih)
 
 -- | Lay out window @idx@ at size @w0 h0@, clamped to its min and max size and
 -- the screen, with its origin, given that size, clamped on screen. Fit sizing
@@ -1501,7 +1483,7 @@ placeWindowNode na ms winW winH idx w0 h0 originFor = do
   setRect na idx x y w h
   env <- solveEnv na ms Nothing
   (pad, gap, dir) <- containerFlow (seArrays env) idx
-  positionChildren env 0 idx dir gap pad x y w h
+  positionChildren env 0 idx dir gap pad (Rect x y w h)
 
 -- | Horizontal placement for a widget-anchored popup. Aligns the popup's left
 -- edge with the anchor even when the anchor sits inside the window margin (a
