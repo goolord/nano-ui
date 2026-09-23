@@ -30,19 +30,6 @@ import Data.Primitive.SmallArray (SmallArray, mapSmallArray')
 
 import NanoUI.Internal.Context.Animation (getLiveAnimations)
 import NanoUI.Internal.Context.Types
-  ( Context (..)
-  , CustomDrawBuild
-  , CustomDrawContext (..)
-  , CustomDrawOpCacheEntry (..)
-  , CustomDrawingEntry (..)
-  , CustomMeasureFn
-  , DrawFitCache (..)
-  , DrawOpCacheEntry (..)
-  , DrawingCacheState (..)
-  , DrawingEntry (..)
-  , PopupConfig (..)
-  , intKey
-  )
 import NanoUI.Internal.Draw (DrawOp, DrawingBuild, shiftDrawOp)
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Style (Layout)

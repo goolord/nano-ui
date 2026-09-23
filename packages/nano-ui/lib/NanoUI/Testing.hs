@@ -141,100 +141,14 @@ module NanoUI.Testing
   ) where
 
 import NanoUI.Internal.Context
-  ( Context (..)
-  , FrameMsg (..)
-  , anyAnimating
-  , AtlasUpload (..)
-  , atlasChanges
-  , atlasSnapshot
-  , atlasTextureId
-  , clearDirty
-  , clearMeasureCache
-  , ctxTheme
-  , DamageRequest (..)
-  , damageFull
-  , damageKey
-  , damagePeers
-  , damageRect
-  , damageWidget
-  , decodeMessages
-  , enableMeasureCache
-  , getAnimationValue
-  , getFocusId
-  , getHotId
-  , getPrevRect
-  , getPrevClipRect
-  , getScrollOffset
-  , setScrollOffset
-  , getStore
-  , isDirty
-  , markDirty
-  , modalActive
-  , overlayConsumesQuit
-  , reduceMessages
-  , reduceUpdates
-  , registerImage
-  , registerImages
-  , requestDamage
-  , setAnimationValue
-  , setHost
-  , setWakeLoop
-  , requestWakeAt
-  , requestWakeAfter
-  , getWakeAt
-  , startAnimation
-  , startAnimationEase
-  , startAnimationEaseDelay
-  , startSpring
-  , takeDamage
-  , takeDamagePieces
-  , textInputEditActive
-  , withClipboard
-  , withFontMetrics
-  , withMeasureText
-  , withFontResolver
-  , withMonoFontMetrics
-  , withTheme
-  , setTheme
-  , getTheme
-  , wrapMeasureCache
-  )
-import NanoUI.Internal.Context (newContext, newPixelContext)
 import NanoUI.Internal.Frame.SpanArena (SpanArena, foldSpanArena, spanArenaCount)
 import NanoUI.Internal.Draw
-  ( DrawCmd (..)
-  , DrawData (..)
-  , DrawOp (..)
-  , Layer (..)
-  , backdropDimTextureId
-  , glyphAtlasTextureId
-  , glyphAtlasPages
-  , glyphPageTextureId
-  , textureGlyphPage
-  , drawCmdElems
-  , forDrawCmdsInLayer_
-  , drawCmdNull
-  , drawCmdCount
-  , drawTextBox
-  , indexSize
-  , vertexSize
-  )
 import NanoUI.Internal.Damage (damagePieces, floatingPanelRects)
 import NanoUI.Internal.Font (WrapResult (..), caretX, lineWidth, selectionSpans, sliderTrackBounds, textIndexAtX, wrapTextIO, wrapTextLinesIO)
 import NanoUI.Internal.Widgets.ColorPicker
-  ( colorPickerSvSquare
-  , widgetStoreBaseColor
-  , widgetStoreColor
-  )
 import NanoUI.Internal.Frame (runFrame, runFrameEff, runFrameReduce, runFrameReduceEff)
 import NanoUI.Internal.Frame.Cursor (UiCursorKind (..), cursorKindIs, pointerCursorWanted, uiCursorKind)
 import NanoUI.Internal.Frame.Input
-  ( debugPanelOpen
-  , floatingPanelActive
-  , needsRedraw
-  , pointerDragActive
-  , textFieldActive
-  )
 import NanoUI.Internal.Frame.Spans (collectOverlayTextSpans, collectRasterSpans, collectTextSpans, widgetNodeCount)
 import NanoUI.Internal.Frame.Scroll (ScrollBarLayout (..), scrollBarLayout)
 import NanoUI.Internal.Layout.Solve (computePopupPosition)

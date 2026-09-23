@@ -41,51 +41,17 @@ import Data.Text qualified as T
 import Effectful (Eff, type (:>))
 import GHC.Clock (getMonotonicTime)
 import NanoUI.Internal.Context
-  ( recordSlot
-  , adoptSlot
-  , Context (..)
-  , getStore
-  , intKey
-  , registerFocusable
-  , requestWakeAt
-  , modifyStore
-  )
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Input
-  ( Input (..)
-  , Key (..)
-  , inputKeys
-  )
 import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Monad (Ui, askContext, askDefaultLayout, askInput, nextId, uiIO, withContext)
 import NanoUI.Internal.Store
-  ( Slot (..)
-  , WidgetStore
-  , deleteSlot
-  , fieldDouble
-  , fieldInt
-  , fieldText
-  , findSlot
-  , insertDyn
-  , insertSlot
-  , lookupDyn
-  , lookupSlot
-  , memberSlot
-  , slotKey
-  )
 import NanoUI.Internal.Style (Layout (..), defaultLayout, fillW, minW)
 import NanoUI.Internal.WidgetText (hasFlag, packTextNodeStyle, textInputFlagPassword, textInputFlagSearch, textInputFlagSelectable)
 import NanoUI.Internal.Widgets.Behavior (keyboardFocused)
 import NanoUI.Internal.Widgets.Node (Response (..), addWidgetStyled, setChanged, setSubmitted)
 import NanoUI.Widgets.TextBuffer qualified as TB
 import NanoUI.Widgets.TextEditor
-  ( Editor (..)
-  , EditorMode (..)
-  , inputTextCommands
-  , emptyHistory
-  , runCommandIO
-  , singleLineMode
-  )
 
 textInputLayout :: Layout
 textInputLayout = minW 160 (fillW defaultLayout)

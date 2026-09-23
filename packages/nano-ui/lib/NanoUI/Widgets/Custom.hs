@@ -74,88 +74,20 @@ import Data.Text qualified as T
 import Data.Primitive.SmallArray (SmallArray, emptySmallArray, smallArrayFromList)
 import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context
-  ( adoptSlot
-  , Context (..)
-  , CustomDrawBuild
-  , CustomDrawContext (..)
-  , CustomDrawingEntry (..)
-  , CustomMeasureFn
-  , getStore
-  , intKey
-  , registerCustomEntry
-  , registerCustomMeasure
-  , registerFocusable
-  , modifyStore
-  )
 import NanoUI.Internal.Draw (DrawOp (..))
 import Data.Word (Word64)
 import Data.Hashable (Hashable, hash)
 import GHC.Float (castFloatToWord32)
 import NanoUI.Internal.Id (WidgetId, mix64)
 import NanoUI.Internal.Input
-  ( Input (..)
-  , UiCursorKind (..)
-  , inputMouseDown
-  , inputMousePos
-  , inputMousePressed
-  , inputScroll
-  )
 import NanoUI.Internal.Layout.Arena (NodeType (NodeDrawing))
 import NanoUI.Internal.Monad (Ui, askContext, askInput, nextId, uiIO, uiTime)
 import NanoUI.Internal.Store
-  ( fieldInt
-  , Slot (..)
-  , boolInt
-  , deleteSlot
-  , fieldFloat
-  , fieldPoint
-  , findSlot
-  , insertSlot
-  , intBool
-  , quietFlag
-  , setQuietFlag
-  , slotKey
-  )
 import NanoUI.Internal.Style
-  ( AlignX (..)
-  , AlignY (..)
-  , Layout
-  , defaultLayout
-  , fillW
-  , fixedH
-  , fixedWH
-  , styleActiveBg
-  , styleBg
-  , styleBorder
-  , styleHoverBg
-  , themeAccent
-  , themeButton
-  , themePanel
-  , themeOnAccent
-  , fadeAlpha
-  )
 import NanoUI.Internal.Types
-  ( Color
-  , ImageId (..)
-  , Rect (..)
-  , V2 (..)
-  , clamp
-  , clamp01
-  , defaultDamageSlop
-  , rectContains
-  , v2Sub
-  , v2X
-  , v2Y
-  )
 import NanoUI.Internal.Widgets.Behavior (navStep, useKeyNav)
 import NanoUI.Internal.Widgets.Combinators (finishInput, finishToggle)
 import NanoUI.Internal.Widgets.Node
-  ( Response
-  , addWidget
-  , respHovered
-  , respPressed
-  , respRect
-  )
 import NanoUI.Internal.Widgets.Animate (keepAnimating)
 import NanoUI.Internal.Widgets.Custom (customDrawContext)
 

@@ -18,81 +18,13 @@ import Data.List (partition, tails)
 import Data.Maybe (fromMaybe, isJust, isNothing)
 import Data.Text (Text)
 import NanoUI.Internal.Context
-  ( Animation
-  , Context (..)
-  , DamageRequest (..)
-  , DrawingCacheState (..)
-  , WidgetStore (..)
-  , getHotId
-  , getLiveAnimations
-  , getPrevRect
-  , getStore
-  , getsInteraction
-  , InteractionState (..)
-  , intKey
-  , markDirtyCovered
-  , modalDamageFlip
-  , takeAnimSettled
-  , lookupCustomDamageSlop
-  , lookupCustomDrawing
-  , lookupDrawing
-  , refreshCustomDrawingOps
-  , drawingOpsStale
-  , CustomDrawingEntry (..)
-  , DrawingEntry (..)
-  , DamageState (..)
-  , OverlayState (..)
-  , getsDamage
-  , modifyDamage
-  , getsOverlay
-  , modifyOverlay
-  )
 import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Internal.Input
-  ( Input (..)
-  , inputWindowSize
-  )
-import NanoUI.Internal.Store (Slot (..), diffKeys, eqByPtr, mirrorStoresChanged, ptrEq, slotChangedKeys, slotKey)
+import NanoUI.Internal.Store (diffKeys, eqByPtr, mirrorStoresChanged, ptrEq, slotChangedKeys)
 import NanoUI.Internal.Layout.Arena
-  ( AxisSizing (..)
-  , NodeArena
-  , NodeIdx
-  , NodeType (..)
-  , SizingTag (..)
-  , arenaCount
-  , NodeClass (..)
-  , foldClassNodesM
-  , foldClassNodeRevM
-  , getClipRect
-  , getHeightSizing
-  , getNodeRect
-  , getNodeType
-  , getStyleIdx
-  , getText
-  , getWidgetId
-  , getWidthSizing
-  , isFloatingNode
-  , isScrollNode
-  , lookupNodeByKey
-  , walkAncestors
-  , walkFloatingAncestors
-  )
 import NanoUI.Internal.Frame.Scroll.Geometry (decodeScrollConfig, scrollBare)
 import NanoUI.Internal.Widgets.Custom (mkCustomDrawContext)
 import NanoUI.Internal.Types
-  ( Damage (..)
-  , DamageBounds (..)
-  , Rect (..)
-  , Size (..)
-  , defaultDamageSlop
-  , rectArea
-  , rectFullyInside
-  , rectInflate
-  , rectIntersect
-  , rectNonEmpty
-  , rectUnion
-  , resolveDamageRect
-  )
 
 layoutSettleMinArea :: Float
 layoutSettleMinArea = 0.25

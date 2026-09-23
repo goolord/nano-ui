@@ -63,26 +63,10 @@ import Foreign.C.Types (CUInt (..))
 import Foreign.Ptr (FunPtr, castFunPtr, castPtr, nullFunPtr, nullPtr)
 import Foreign.Storable (peekElemOff)
 import NanoUI
-  ( CaptionAction (..)
-  , CaptionConfig (..)
-  , Rect (..)
-  , Size (..)
-  , V2 (..)
-  , captionButtonsConfigured
-  , defaultCaptionConfig
-  , dragSpans
-  , rectContains
-  , windowWidth
-  )
-import NanoUI.Monad (Ui, askHost, uiIO)
+import NanoUI.Monad (askHost)
 import NanoUI.Sdl.Internal.Chrome.Types
 import NanoUI.Sdl.Internal.Display (outPair)
 import NanoUI.Sdl.Internal.Frame
-  ( WindowDecorations (..)
-  , applyDecorations
-  , applyWindowShadow
-  , nativeFrameOutset
-  )
 import NanoUI.Sdl.Internal.Window (SdlEnv (..), windowZoom)
 import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
 import SDL3.Sys.Bindgen.Video (SDL_HitTest (..), SDL_HitTestResult (..), SDL_WindowFlags)

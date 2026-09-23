@@ -24,98 +24,18 @@ import Data.Text (Text)
 import Data.Word (Word8)
 import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context
-  ( recordSlot
-  , Context (..)
-  , WidgetStore
-  , getStore
-  , intKey
-  , registerFocusable
-  , setStore
-  , modifyStore
-  , writeSlots
-  )
 import NanoUI.Internal.Draw
-  ( DrawArena
-  , pushQuadGradient
-  , pushRect
-  , pushRoundedRect
-  , pushRoundedStroke
-  )
 import NanoUI.Internal.Font
-  ( FontMetrics (..)
-  )
 import NanoUI.Internal.Id (WidgetId (..), mix64)
 import NanoUI.Internal.Input (Input (..), Key (..), inputKeys, inputKeysElem, inputModifiers, modShift)
 import NanoUI.Internal.Layout.Arena
-  ( NodeArena
-  , NodeIdx
-  , NodeType (..)
-  , firstChildJustM
-  , getNodeType
-  , getParent
-  , getRect
-  , getStyleIdx
-  , getWidgetId
-  )
 import NanoUI.Internal.Monad (Ui, (<&&>), askContext, askInput, nextId, uiIO, withKey)
-import NanoUI.Internal.Store (Slot (..), fieldFloat, fieldInt, fieldPoint, findSlot, insertSlot, lookupSlot, slotKey, slotWriteOr)
+import NanoUI.Internal.Store (fieldFloat, fieldInt, fieldPoint, findSlot, insertSlot, lookupSlot, slotWriteOr)
 import NanoUI.Internal.Style
-  ( Direction (..)
-  , Layout (..)
-  , Style (..)
-  , alignMid
-  , defaultLayout
-  , fadeAlpha
-  , fillW
-  , fixedH
-  , fixedW
-  , gap
-  , maxW
-  , minW
-  , percent
-  , tight
-  )
 import NanoUI.Internal.Types
-  ( Color (..)
-  , Rect (..)
-  , clamp
-  , clamp01
-  , colorA
-  , colorB
-  , colorFromWord32
-  , colorG
-  , colorR
-  , colorRGBA
-  , colorToWord32
-  , hsvToRgb
-  , rectH
-  , rectW
-  , rectX
-  , rectY
-  , rgbToHsv
-  )
 import NanoUI.Internal.WidgetText
-  ( colorPickerGap
-  , colorPickerParseHex
-  , colorPickerSvH
-  , colorToHex
-  , colorToHexA
-  )
 import NanoUI.Internal.Widgets.Behavior
-  ( DragAxis (..)
-  , holdActiveWhile
-  , keyboardFocused
-  , useDrag1D
-  )
 import NanoUI.Internal.Widgets.Node
-  ( Response (..)
-  , addWidget
-  , addWidgetStyled
-  , container
-  , respRect
-  , setChanged
-  , tagContainer
-  )
 import NanoUI.Internal.Widgets.NumericInput (NumericInputConfig (..), defaultNumericInputConfig, numericInputConfigured)
 import NanoUI.Widgets.TextEditor (singleLineMode)
 import NanoUI.Internal.Widgets.TextInput (editTextField)

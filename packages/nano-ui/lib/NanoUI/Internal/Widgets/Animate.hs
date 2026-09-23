@@ -14,19 +14,7 @@ import Control.Monad (when)
 import Data.Maybe (isNothing)
 import Effectful (Eff, type (:>))
 import NanoUI.Internal.Animatable (Animatable (..))
-import NanoUI.Internal.Animation (SpringParams)
 import NanoUI.Internal.Context
-  ( Ease (..)
-  , approxEq
-  , easeSameSpec
-  , getAnimationValue
-  , lookupAnimation
-  , setAnimationValue
-  , keepAnimationAlive
-  , requestWakeAfter
-  , startAnimationEaseDelay
-  , startSpring
-  )
 import NanoUI.Internal.Monad (Ui, nextId, scope, uiTime, withContext, withKey)
 import NanoUI.Internal.Widgets.Node (HasResponse, respId)
 

@@ -65,22 +65,7 @@ import Data.Unique (hashUnique, newUnique)
 import qualified Data.ByteString as BS
 import NanoUI (FontVariant (..))
 import NanoUI.Backend
-  ( FontBackend (..)
-  , FontMetrics (..)
-  , GlyphQuad (..)
-  , ShapedGlyphs (..)
-  , ShapedText (..)
-  , drawShaped
-  , monospaceMetrics
-  )
 import NanoUI.Testing
-  ( Context
-  , glyphAtlasPages
-  , withFontMetrics
-  , withFontResolver
-  , withMonoFontMetrics
-  , wrapMeasureCache
-  )
 import SDL3.Sys.Bindgen.Render (SDL_Renderer, SDL_Texture)
 import SDL3.Sys.Surface (destroySurface)
 import qualified Data.IntMap.Strict as IM

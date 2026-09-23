@@ -26,13 +26,6 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context
-  ( Context (..)
-  , CustomDrawingEntry (..)
-  , hostOrInit
-  , intKey
-  , registerCustomEntry
-  , registerCustomMeasure
-  )
 import NanoUI.Internal.Draw (DrawOp (..), TextFont (..))
 import NanoUI.Internal.Font (FontMetrics (..), lineWidthIO)
 import NanoUI.Internal.Frame.Node (resolveTextFont)
@@ -40,16 +33,6 @@ import NanoUI.Internal.Input (Input (..), UiCursorKind (..))
 import NanoUI.Internal.Layout.Arena (NodeType (NodeDrawing))
 import NanoUI.Internal.Monad (Ui, askContext, askDefaultLayout, askInput, nextId, uiIO, uiTheme)
 import NanoUI.Internal.Style
-  ( FontVariant (..)
-  , Layout (..)
-  , TextDecoration (..)
-  , Theme (..)
-  , addUnderline
-  , fontBold
-  , fontItalic
-  , fontMono
-  , styleFg
-  )
 import NanoUI.Internal.Types (Color (..), Rect (..), V2 (..))
 import NanoUI.Internal.Widgets.Node (Response, addWidget, respClicked, respHovered, respRect)
 

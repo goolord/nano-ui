@@ -10,10 +10,6 @@ where
 import Data.Text (Text)
 import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context
-  ( adoptSlot
-  , getPrevRect
-  , registerFocusable
-  )
 import NanoUI.Internal.Font (sliderHitBounds)
 import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Monad (Ui, askContext, nextId, uiIO, withKey)

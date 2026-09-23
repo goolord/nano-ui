@@ -28,16 +28,6 @@ import SDL3.Sys.Bindgen.Runtime.CBool qualified as CBool
 import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
 import NanoUI (V2 (..), v2Add)
 import NanoUI.Backend
-  ( DropEvent (..)
-  , DropType (..)
-  , Input (..)
-  , Key (..)
-  , Modifiers (..)
-  , MouseButton (..)
-  , appendDropEvent
-  , appendInputKey
-  , applyMouseButton
-  )
 import NanoUI.Sdl.Internal.Display (refreshEventType, takeRefreshEvent)
 import SDL3.Sys.Bindgen.Events
   ( SDL_Event (..)

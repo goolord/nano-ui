@@ -30,67 +30,20 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.IntMap.Strict as IM
 import Effectful (Eff, type (:>))
-import NanoUI.Internal.Context
-  ( Context (..)
-  , damageWidget
-  , getStore
-  , intKey
-  , registerFocusable
-  , setStore
-  , modifyInteraction
-  , modifyStore
-  , InteractionState (..)
-  )
+import NanoUI.Internal.Context hiding (scrollOffset)
 import NanoUI.Internal.Font (fmLineHeight)
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Input
-  ( Input (..)
-  , inputChars
-  , inputKeys
-  , inputKeysNull
-  )
 import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Monad (Ui, askContext, askInput, nextId, uiIO)
 import NanoUI.Internal.Store
-  ( Slot (..)
-  , WidgetStore
-  , deleteSlot
-  , fieldDyn
-  , fieldInt
-  , fieldPoint
-  , findSlot
-  , insertDyn
-  , insertSlot
-  , lookupDyn
-  , memberSlot
-  , overField
-  , slotKey
-  )
 import NanoUI.Internal.Style (FontStyle (..), FontVariant (..), FontWeight (..), Layout (..), defaultLayout, fillW, fixedH, minW)
 import NanoUI.Internal.Types (DamageBounds (..), clamp)
 import NanoUI.Internal.Widgets.Behavior (keyboardFocused)
 import NanoUI.Internal.Widgets.Node (Response, addWidget, setChanged)
 import qualified NanoUI.Widgets.TextBuffer as TB
 import NanoUI.Internal.Widgets.TextDocument
-  ( TextDocument
-  , bufferDocument
-  , documentBuffer
-  , documentLines
-  , documentText
-  , sameDocument
-  , sameLines
-  , textDocument
-  )
 import NanoUI.Widgets.TextEditor
-  ( Editor (..)
-  , EditHistory
-  , TextCommand (..)
-  , inputTextCommands
-  , emptyHistory
-  , multiLineMode
-  , runCommand
-  , runCommandIO
-  )
 
 -- | Editor buffer, selection anchor, viewport, scroll offsets, and undo history.
 -- Positions use zero-based character rows/columns; viewport and scrolling use

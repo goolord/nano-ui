@@ -35,36 +35,9 @@ import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Text (Text)
 import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context
-  ( Context (..)
-  , getPrevRect
-  , isDisabled
-  , intKey
-  , routedInput
-  , getsInteraction
-  , PointerRoute (..)
-  , InteractionState (..)
-  )
 import NanoUI.Internal.Id (WidgetId (..), enterScope, hashWidgetId, scopeTag)
 import NanoUI.Internal.Input
-  ( Input (..)
-  , inputMouseDown
-  , inputMousePos
-  , inputMouseReleased
-  , inputMouseRightDown
-  , inputMouseRightReleased
-  )
 import NanoUI.Internal.Layout.Arena
-  ( NodeArena
-  , NodeIdx
-  , NodeType (..)
-  , addNodeFromLayout
-  , rootAttachParent
-  , setNodeText
-  , setNodeValue
-  , setOptions
-  , setStyleIdx
-  , setWidgetId
-  )
 import NanoUI.Internal.Monad (Ui, (<&&>), askContext, askFrameInput, askInput, localInput, nextId, uiIO, withContext)
 import NanoUI.Internal.WidgetText (packTextNodeStyle)
 import NanoUI.Internal.Style (Layout (..))

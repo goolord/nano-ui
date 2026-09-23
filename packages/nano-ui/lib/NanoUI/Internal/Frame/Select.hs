@@ -22,26 +22,6 @@ import Data.List (sortOn)
 import Data.Maybe (catMaybes, fromMaybe, listToMaybe, maybeToList)
 import qualified Data.Text as T
 import NanoUI.Internal.Context
-  ( Context (..)
-  , TextInputMenu (..)
-  , WidgetStore (..)
-  , anySelectOpen
-  , closeSelects
-  , getStore
-  , intKey
-  , isSelectOpen
-  , markDirty
-  , markEscapeConsumed
-  , setSelectOpen
-  , setStore
-  , widgetTheme
-  , isDisabled
-  , InteractionState (..)
-  , PointerRoute (..)
-  , floatingLayerAt
-  , getsInteraction
-  , modifyInteraction
-  )
 import NanoUI.Internal.Draw (pushRect, pushRoundedRect, pushText, withClip)
 import NanoUI.Internal.Font (FontMetrics, centeredTextY, menuItemPadX, menuItemRowH, menuOuterPad, widgetContentInset)
 import NanoUI.Internal.Frame.Chrome (menuPanelBounds, overlayMenuStyle, paintMenuAccent, paintMenuPanel)
@@ -50,7 +30,7 @@ import NanoUI.Internal.Id (WidgetId (..))
 import NanoUI.Internal.Input (Input (..), Key (..), inputKeys, inputKeysElem, inputMousePos, inputMousePressed, inputPointerHeld)
 import NanoUI.Internal.Layout.Arena (NodeIdx, NodeType (NodeSelect, NodeTextInput), getNodeType, lookupNodeByKey, lookupNodeByWidgetId, getOptions, getRect, getWidgetId)
 import NanoUI.Internal.Monad (whenM, (<&&>))
-import NanoUI.Internal.Store (Slot (..), fieldFloat, fieldInt, fieldText, findSlot, insertSlot, slotKey)
+import NanoUI.Internal.Store (fieldFloat, fieldInt, fieldText, findSlot, insertSlot)
 import NanoUI.Internal.Style (Style (..), Theme (..), scrollBarThumbColor, scrollBarTrackColor, themeAccent, themeInput)
 import NanoUI.Internal.Types (Color (..), Rect (..), V2 (..), clamp, rectContains)
 

@@ -17,53 +17,13 @@ import Data.IORef (modifyIORef', newIORef, readIORef)
 import Data.List (find)
 import Data.Maybe (fromMaybe, isJust, isNothing)
 import NanoUI.Internal.Context
-  ( Context (..)
-  , cachedWrapText
-  , WindowResizeDrag (..)
-  , WindowResizeEdge (..)
-  , damageWidget
-  , getStore
-  , getsInteraction
-  , intKey
-  , markDirty
-  , modifyStore
-  , setStore
-  , slotKey
-  , Slot (..)
-  , InteractionState (..)
-  , modifyInteraction
-  , lookupCustomMeasure
-  )
 import NanoUI.Internal.Font (ScrollBarSlot (..))
 import NanoUI.Internal.Frame.Hit
-  ( nodeInSubtree
-  , topmostFloating
-  , topmostOverlayAtMouse
-  , widgetIdInSubtree
-  , withWidgetNode
-  )
 import NanoUI.Internal.Frame.Input (PressTargets (..), probeHotId, targetsAt)
 import NanoUI.Internal.Frame.Scroll.Geometry (scrollChromeLane)
 import NanoUI.Internal.Id (WidgetId (..))
 import NanoUI.Internal.Input (Input (..), UiCursorKind (..), inputMouseDown, inputMousePos, inputMousePressed)
 import NanoUI.Internal.Layout.Arena
-  ( AxisSizing (..)
-  , NodeClass (FloatingNodes)
-  , NodeIdx
-  , NodeType (..)
-  , floatingNodeCount
-  , foldClassNodesM
-  , forChildNodes_
-  , getDirection
-  , getHeightSizing
-  , getNodeRect
-  , getNodeType
-  , getNodeValue
-  , getPadding
-  , getRect
-  , getWidgetId
-  , getWidthSizing
-  )
 import NanoUI.Internal.Layout.Solve (Measurers (..), placeWindowNode, windowBodyScroller)
 import NanoUI.Internal.Monad ((<&&>))
 import NanoUI.Internal.Store (fieldPoint, insertSlot, lookupSlot, ptrEq)

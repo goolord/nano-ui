@@ -62,31 +62,9 @@ import GHC.Clock (getMonotonicTime)
 import GHC.Exts (RealWorld)
 
 import NanoUI.Internal.Context.Types
-  ( Context (..)
-  , DamageRequest (..)
-  , DamageState (..)
-  , InteractionState (..)
-  , PointerRoute (..)
-  , OverlayState
-  , ThemeScopes (..)
-  , intKey
-  )
 import NanoUI.Internal.Id (WidgetId, hashWidgetId)
 import NanoUI.Internal.Layout.Arena (NodeIdx, getArenaScope, getNodeScope, getScopeSignature, lookupNodeByWidgetId)
 import NanoUI.Internal.Store
-  ( Field
-  , Slot (..)
-  , SlotWrites (..)
-  , WidgetStore (..)
-  , boolInt
-  , diffKeys
-  , slotChangedKeys
-  , fieldInt
-  , findSlot
-  , insertSlot
-  , lookupSlot
-  , slotKey
-  )
 import NanoUI.Internal.Style (Theme, disabledTheme)
 import NanoUI.Internal.Types (Damage, DamageBounds (..), Rect, defaultDamageSlop, rectH, rectW)
 import NanoUI.Widgets.TextCommand (TextCommand)

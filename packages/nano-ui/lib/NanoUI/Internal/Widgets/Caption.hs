@@ -32,35 +32,12 @@ import Control.Monad (when)
 import Data.List (sortOn)
 import Data.Maybe (fromMaybe)
 import Effectful (Eff, type (:>))
-import NanoUI.Internal.Context (Context (..), CustomDrawContext (..), scopeRawTheme)
+import NanoUI.Internal.Context (Context (..), scopeRawTheme)
 import NanoUI.Internal.Layout.Arena (getArenaScope)
 import NanoUI.Internal.Monad (Ui, styled, themed, withContext)
 import NanoUI.Internal.Style
-  ( Theme (..)
-  , background
-  , borderColor
-  , borderWidth
-  , cornerRadius
-  , defaultLayout
-  , fixedWH
-  , gap
-  , grow
-  , padAll
-  , panelStyle
-  , styleFg
-  , tight
-  )
 import NanoUI.Internal.Types (Color, Rect (..), V2 (..), lerpColor, rectUnion)
 import NanoUI.Widgets.Custom
-  ( CanvasM
-  , CustomWidgetSpec (..)
-  , customWidget
-  , defaultCustomWidgetSpec
-  , drawRect
-  , drawRoundedRect
-  , drawStrokeAA
-  , runCanvas
-  )
 import NanoUI.Internal.Widgets.Layout (panelWith)
 import NanoUI.Internal.Widgets.Node (Response, respClicked, respRect)
 

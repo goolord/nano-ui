@@ -18,94 +18,18 @@ import Data.Primitive.PrimArray (PrimArray)
 import qualified Data.Text as T
 import NanoUI.Internal.Context (Context (..), getStore)
 import NanoUI.Internal.Draw
-  ( DrawArena (..)
-  , getClipPieces
-  , pushCircle
-  , pushFilledTriangle
-  , pushLine
-  , points3
-  , pushPolylineAA
-  , pushRoundedRect
-  , pushRoundedRectRaw
-  , pushRoundedStroke
-  , pushStrokeAA
-  , pushText
-  , withClip
-  )
 import NanoUI.Internal.Font
-  ( FontMetrics (..)
-  , centeredTextY
-  , checkboxBoxSize
-  , sliderHandleDiameter
-  , sliderTrackBounds
-  , tableCellInset
-  , treeChevronRect
-  )
 import NanoUI.Internal.Frame.Chrome
-  ( fillStyledRect
-  , paintMenuAccent
-  , paintTabHeader
-  , paintTableHeader
-  , strokeStyledRect
-  , paintStyledRect
-  , textInputFocused
-  , textInputValue
-  , widgetVisualStyle
-  )
 import NanoUI.Internal.Frame.Node (nodeFontMetrics, resolveFontFor)
 import NanoUI.Internal.Frame.Spans (forWidgetTextPlacements_, plainFieldPen, selectableTextGeometry, textInputFg)
 import NanoUI.Internal.Frame.TextArea (drawTextAreaContentWith)
 import NanoUI.Internal.Frame.TextArea (resolveTextAreaFont)
 import NanoUI.Internal.Frame.TextInput
-  ( FieldEdit
-  , drawTextInputCaret
-  , drawTextInputSelection
-  , readFieldEdit
-  , syncTextInputScroll
-  , textInputFieldRect
-  , textInputFieldTextClip
-  )
 import NanoUI.Internal.Id (WidgetId (..))
 import NanoUI.Internal.Layout.Arena
-  ( NodeArena
-  , NodeIdx
-  , NodeType (..)
-  , getAlignX
-  , getNodeFontColor
-  , getNodeFontSize
-  , getNodeRect
-  , getNodeValue
-  , getOptions
-  , getStyleIdx
-  , getText
-  , getWidgetId
-  , walkFloatingAncestors
-  )
 import NanoUI.Internal.Style (AlignX (..), Style, Theme, styleBg, styleBorder, styleFg, themeAccent, themeInput, themeOnAccent)
 import NanoUI.Internal.Types (Color (..), Rect (..), clamp, clamp01, colorA, lerpColor, onGrid, rectInflate, rectNonEmpty)
 import NanoUI.Internal.WidgetText
-  ( hasFlag
-  , buttonCloseTrailing
-  , buttonVisualStyle
-  , comboTextClip
-  , buttonFlagClose
-  , buttonFlagMenuBar
-  , buttonFlagMenu
-  , buttonFlagTab
-  , buttonFlagTable
-  , numericStepperRects
-  , numericTextClip
-  , searchInputIconRects
-  , searchInputTextClip
-  , selectChevronCenterX
-  , selectChevronReserve
-  , tableSortMarkOf
-  , textInputFlagNumeric
-  , textInputFieldText
-  , textInputFlagSearch
-  , textInputFlagSelectable
-  , treeDecodeStyle
-  )
 import NanoUI.Internal.Widgets.ColorPicker (drawColorPickerPart)
 
 -- | Context, arenas, fonts, and interaction state read once for a paint pass.

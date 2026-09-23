@@ -20,47 +20,14 @@ import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context
-  ( Context (..)
-  , getPrevRect
-  , registerPopupConfig
-  , seedFloatingPanel
-  )
 import NanoUI.Internal.Id (WidgetId, enterScope, scopeTag)
 import NanoUI.Internal.Layout.Arena (NodeIdx, NodeType (..), addNodeFromLayout)
 import NanoUI.Internal.Monad
-  ( Ui
-  , askContext
-  , askDefaultLayout
-  , lastRect
-  , nextId
-  , uiIO
-  , uiMousePos
-  , (<&&>)
-  )
 import NanoUI.Internal.Style
-  ( Layout (..)
-  , Padding (..)
-  , defaultLayout
-  , tight
-  )
 import NanoUI.Internal.Types
-  ( PopupAnchor (..)
-  , PopupPlacement (..)
-  , Rect (..)
-  , rectHit
-  , rectNonEmpty
-  )
 import NanoUI.Internal.Widgets.Behavior (useDismissable)
 import NanoUI.Internal.Widgets.Layout (label)
 import NanoUI.Internal.Widgets.Node
-  ( HasResponse
-  , Response (..)
-  , containerResponse
-  , floatingPanel
-  , mkResponse
-  , respHovered
-  , respRect
-  )
 
 -- | Anchor, preferred side, outside-click dismissal, and gap in logical pixels.
 -- Anchors use logical window coordinates.

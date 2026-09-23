@@ -147,72 +147,8 @@ where
 import NanoUI.Internal.Compact (Compact, askCompact, compactHost)
 import NanoUI.Internal.Draw (drawTextBox)
 import NanoUI.Internal.Font
-  ( FontBackend (..)
-  , FontMetrics (..)
-  , GlyphQuad (..)
-  , ScrollBarSlot (..)
-  , ShapedGlyphs (..)
-  , ShapedText (..)
-  , drawGlyph
-  , drawShaped
-  , lineWidth
-  , lineWidthIO
-  , measureTextIO
-  , monospaceMetrics
-  , prepareFontMetrics
-  , prepareFontMetricsMany
-  , scaleFontMetrics
-  , scrollBarGutter
-  , scrollBarWidth
-  , treeItemPadding
-  , widgetContentInset
-  , widgetPadding
-  )
 import NanoUI.Internal.Id
-  ( IdContext
-  , hashWidgetId
-  , initialIdContext
-  , mix64
-  , mixFnv
-  , widgetId
-  )
 import NanoUI.Internal.Input
-  ( DropEvent (..)
-  , DropType (..)
-  , Input (..)
-  , Key (..)
-  , Modifiers (..)
-  , MouseButton (..)
-  , appendDropEvent
-  , appendInputKey
-  , applyMouseButton
-  , clearEphemeral
-  , emptyDropEvents
-  , emptyInput
-  , emptyInputKeys
-  , foldInputKeys
-  , inputInteracted
-  , inputKeysFromList
-  , inputKeysNull
-  , inputPointerHeld
-  )
 import NanoUI.Internal.Monad
-  ( burstNextIds
-  , damageFullNow
-  , damageGroupNow
-  , damageKeyNow
-  , damageRectNow
-  , damageWidgetNow
-  , runNanoUI
-  , runUi
-  , uiFontMetrics
-  )
 import NanoUI.Internal.Style (windowMargin, windowPad)
 import NanoUI.Internal.Types
-  ( Damage (..)
-  , DamageBounds (..)
-  , defaultDamageSlop
-  , haloDamageSlop
-  , resolveDamageRect
-  , sliderDamageSlop
-  )

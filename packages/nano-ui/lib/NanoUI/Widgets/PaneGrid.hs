@@ -38,114 +38,19 @@ import Data.Text qualified as T
 import Data.Word (Word64)
 import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context
-  ( Context (..)
-  , bumpMirror
-  , getFocusId
-  , getFocusVisible
-  , getPrevRect
-  , getStore
-  , intKey
-  , markEscapeConsumed
-  , overlayConsumesQuit
-  , registerCustomDrawing
-  , registerFocusable
-  , setStore
-  , modifyStore
-  )
 import NanoUI.Internal.Input
-  ( Input (..)
-  , Key (..)
-  , UiCursorKind (..)
-  , inputChars
-  , inputKeys
-  , inputKeysElem
-  , inputMouseDown
-  , inputMousePos
-  , inputMousePressed
-  )
 import NanoUI.Internal.Monad (Ui, (<&&>), askContext, askInput, damageWidgetNow, focusedWidget, lastRect, nextId, releaseFocus, requestFrame, uiIO, withIdFrame, withKey)
 import NanoUI.Internal.Id (IdContext (..), WidgetId, hashWidgetId)
 import NanoUI.Internal.Frame.Hit (nodeInteractionHit)
 import NanoUI.Internal.Store (insertDyn, lookupDyn)
 import NanoUI.Internal.Style
-  ( AlignX (..)
-  , AlignY (..)
-  , Layout (..)
-  , Sizing (..)
-  , Style (..)
-  , Theme (..)
-  , defaultLayout
-  , gap
-  , minH
-  , minW
-  , tight
-  , fadeAlpha
-  , scrollBarTrackColor
-  )
 import NanoUI.Internal.Types
-  ( DamageBounds (..)
-  , Rect (..)
-  , V2 (..)
-  , clamp01
-  , lerpColor
-  , rectHit
-  , rectH
-  , rectInflate
-  , rectNonEmpty
-  , rectW
-  , rectX
-  , rectY
-  , v2Sub
-  , v2X
-  , v2Y
-  )
 import NanoUI.Internal.Widgets.Behavior (KeyNav (..), dragThresholdPx, useKeyNav)
 import NanoUI.Widgets.Custom
-  ( CustomWidgetSpec (..)
-  , CustomDrawContext (..)
-  , contentKey
-  , defaultCustomWidgetSpec
-  , customWidget
-  , drawRect
-  , drawRoundedRect
-  , drawStroke
-  , drawStrokeRoundedRect
-  , drawText
-  , runCanvas
-  )
 import NanoUI.Internal.Widgets.Layout (column', row')
 import NanoUI.Internal.Layout.Arena (NodeType (..), arenaCount, getNodeType, getWidgetId, isWidgetNode)
 import NanoUI.Internal.Widgets.Node
-  ( container
-  , containerResponse
-  , tagContainer
-  )
 import NanoUI.Internal.Widgets.SplitPane
-  ( DividerInfo (..)
-  , GridAxis (..)
-  , GridNode (..)
-  , alongAxis
-  , bestPane
-  , clampRatio
-  , dividerLength
-  , pinnedSide
-  , reflowFixed
-  , DropPreview (..)
-  , dropPreviewTreeSized
-  , dropTargetForPane
-  , layoutNode
-  , mainLen
-  , nearestPane
-  , paneExist
-  , subtreeMin
-  , topLevelDropTarget
-  , treeMaxId
-  , treePanes
-  , treeRemovePane
-  , treeSetRatio
-  , treeSize
-  , treeSplit
-  )
 
 -- -----------------------------------------------------------------------------
 -- Public API

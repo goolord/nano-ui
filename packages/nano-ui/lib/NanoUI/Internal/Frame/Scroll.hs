@@ -17,70 +17,14 @@ import Control.Monad.Trans.Maybe (MaybeT (..))
 import Data.Foldable (find)
 import Data.Maybe (fromMaybe)
 import NanoUI.Internal.Context
-  ( Context (..)
-  , InteractionState (..)
-  , ScrollAxes (..)
-  , ScrollBehavior (..)
-  , applyScrollTarget
-  , beginScrollMetrics
-  , cacheScrollMetrics
-  , clampScrollOffset
-  , getsInteraction
-  , getScrollOffset2D
-  , getScrollOffsetIn
-  , modifyInteraction
-  , nodeTheme
-  , resolveScrollStep
-  , scrollTargetOffset
-  , setScrollOffset
-  , setScrollOffset2D
-  , setScrollOffsetIn
-  )
 import NanoUI.Internal.Frame.Hit (topmostModalAtMouse, topmostOverlayAtMouse)
 import NanoUI.Internal.Frame.Node (ScrollNode (..), readScrollNode, scrollNodeBars, scrollNodeViewport)
 import NanoUI.Internal.Frame.Scroll.Geometry
-  ( ScrollBarLayout (..)
-  , ScrollConfig
-  , borderContentClip
-  , scrollAxisRange
-  , scrollBarLayout
-  , scrollChromeLane
-  , scrollChromeSuppressed
-  , scrollOffsetFromThumb
-  , scrollWheelSuppressed
-  )
 import NanoUI.Internal.Frame.TextArea (TextAreaBars (..), textAreaBarLayouts, textAreaScrollGeom)
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Monad ((<&&>))
 import NanoUI.Internal.Input
-  ( Input (..)
-  , inputMouseDown
-  , inputMousePos
-  , inputMousePressed
-  , inputMouseReleased
-  , inputScroll
-  )
 import NanoUI.Internal.Layout.Arena
-  ( DirTag (..)
-  , NodeIdx
-  , NodeType (..)
-  , arenaCount
-  , NodeClass (PointerNodes)
-  , findClassNodeM
-  , firstChildJustM
-  , forChildNodes_
-  , getDirection
-  , getNodeRect
-  , getNodeType
-  , getParent
-  , getRect
-  , getWidgetId
-  , isFloatingNode
-  , isScrollNode
-  , setClipRect
-  , setRect
-  , walkAncestors
-  )
 import NanoUI.Internal.Style (Padding (..), themePanel)
 import NanoUI.Internal.Types (Rect (..), V2 (..), rectContains, rectHit, rectIntersect, rectUnion)
 

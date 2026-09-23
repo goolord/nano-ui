@@ -13,43 +13,11 @@ import Data.Foldable (traverse_)
 import Data.IORef (readIORef, writeIORef)
 import GHC.Clock (getMonotonicTime)
 import NanoUI
-  ( Input (..)
-  , NanoUI
-  , Size (..)
-  , V2 (..)
-  , themeWindow
-  )
-import Effectful (Eff, type (:>))
 import NanoUI.Testing
-  ( Context
-  , Damage (..)
-  , DrawData (..)
-  , Ui
-  , askHost
-  , ctxPaintFull
-  , ctxTheme
-  , damageFull
-  , damageIsEmpty
-  , drawCmdCount
-  , markDirty
-  , runFrame
-  , takeDamage
-  , uiIO
-  )
 import NanoUI.Internal.Debug (CoreDebugSnapshot (..), noteDebugPresent, noteDebugSkip, refreshDebugSnapshot)
 import NanoUI.Sdl.Internal.Debug
-  ( SdlDebugSnapshot (..)
-  , emptySdlDebug
-  , traceFrame
-  )
 import NanoUI.Sdl.Internal.Display (outPair, pushRefreshEvent, queryMouseWindowPos, queryWindowLogicalSize)
 import NanoUI.Sdl.Internal.Font
-  ( fontSourceLabel
-  , glyphAtlasTextures
-  , sdlFontCacheSource
-  , prepareGlyphAtlasForFrame
-  , glyphAtlasFull
-  )
 import NanoUI.Sdl.Internal.NanoUIFont (NanoUIFont)
 import NanoUI.Sdl.Internal.Render (flushRenderBatch, renderDrawDataPass, snapDamage)
 import NanoUI.Sdl.Internal.Window (Retain (..), SdlEnv (..))

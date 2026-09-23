@@ -34,13 +34,6 @@ import Data.Bits (shiftL, shiftR, testBit, (.&.), (.|.))
 import Data.Maybe (mapMaybe)
 import Data.Text (Text)
 import NanoUI.Internal.Font
-  ( ScrollBarSlot (..)
-  , scrollBarGap
-  , scrollBarGeomFor
-  , scrollBarGutter
-  , scrollBarSideGap
-  , scrollLayoutGutter
-  )
 import NanoUI.Internal.Types (Color, Rect (..), V2 (..), clamp, rectH, rectIntersect, rectW, rectX, rectY, v2X, v2Y)
 import NanoUI.Internal.Layout.Arena (DirTag (..))
 import NanoUI.Internal.Style (Direction (..), Padding (..), Style (..), styleBorderWidth, windowPad)

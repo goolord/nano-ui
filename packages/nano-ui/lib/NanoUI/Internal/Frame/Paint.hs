@@ -38,95 +38,20 @@ import Data.Primitive.SmallArray (SmallArray)
 import qualified Data.Text as T
 import Data.Word (Word32)
 import NanoUI.Internal.Context
-  ( Context (..)
-  , CustomDrawingEntry (..)
-  , DrawingEntry (..)
-  , SpanCacheEntry (..)
-  , SpanLines (..)
-  , atlasTextureId
-  , cachedCustomDrawingOps
-  , cachedDrawingOps
-  , getScrollOffset2D
-  , lookupCustomDrawing
-  , lookupDrawing
-  , lookupImageUv
-  , nodeTheme
-  , scopeTheme
-  )
 import NanoUI.Internal.Draw
-  ( DrawOp
-  , Layer (..)
-  , beginLayer
-  , currentClip
-  , currentLayer
-  , emitDrawOps
-  , pushImage
-  , pushRect
-  , pushRoundedStroke
-  , pushPreparedTextStyled
-  , withClip
-  )
 import NanoUI.Internal.Font (ScrollBarSlot (..))
 import NanoUI.Internal.Frame.Chrome
-  ( floatingAncestor
-  , imageIdFromText
-  , overlayMenuStyle
-  , overlayWindowStyle
-  , paintScrollBarLayout
-  , paintStyledRect
-  )
 import NanoUI.Internal.Frame.Node (ScrollNode (..), nodeFontNative, readScrollNode, resolveTextFont, scrollNodeBars, scrollNodeViewport)
 import NanoUI.Internal.Frame.Paint.Widgets (PaintEnv (..), buildPaintEnv, paintTextAreaNode, paintTextInputNode, paintWidget)
 import NanoUI.Internal.Frame.Scroll.Geometry (borderContentClip, scrollBare)
 import NanoUI.Internal.Frame.Spans (textNodeSpanEntry)
 import NanoUI.Internal.Id (hashWidgetId)
 import NanoUI.Internal.Layout.Arena
-  ( AxisSizing (..)
-  , NodeClass (FloatingNodes)
-  , NodeIdx
-  , NodeType (..)
-  , SizingTag (..)
-  , arenaCount
-  , floatingNodeCount
-  , foldClassNodesM
-  , forChildNodes_
-  , getHeightSizing
-  , getNodeFontColor
-  , getNodeFontSize
-  , getNodeScope
-  , getNodeType
-  , getRect
-  , getStyleIdx
-  , getText
-  , getWidgetId
-  , getWidthSizing
-  )
-import NanoUI.Internal.Style
-  ( FontStyle (..)
-  , FontWeight (..)
-  , Style (..)
-  , Theme (..)
-  , scrollBarThumbColor
-  , scrollBarTrackColor
-  , themeAccent
-  , themeFloatingWindow
-  , themeInput
-  , themePanel
-  , themeSeparator
-  , themeWindow
-  , fadeAlpha
-  , themeDisabledFade
-  , themeFocusRing
-  )
+import NanoUI.Internal.Style hiding (fontSize)
 import NanoUI.Internal.Types (Color (..), ImageId (..), Rect (..), V2 (..), colorA, colorRGBA, rectInflate)
 import NanoUI.Internal.Widgets.ColorPicker (colorPickerPartRect)
 import NanoUI.Internal.Widgets.Custom (mkCustomDrawContext)
 import NanoUI.Internal.WidgetText
-  ( tableStripeColor
-  , textNodeFontStyle
-  , textNodeFontWeight
-  , textNodeTextDecoration
-  )
 
 lowerShapes :: Context -> IO ()
 lowerShapes ctx = do

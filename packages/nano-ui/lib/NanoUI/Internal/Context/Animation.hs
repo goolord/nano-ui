@@ -21,16 +21,6 @@ import Data.IntMap.Strict qualified as IM
 import Data.IntSet qualified as IS
 
 import NanoUI.Internal.Animation
-  ( Animation (..)
-  , Ease (..)
-  , SpringParams
-  , animInProgress
-  , animationValue
-  , approxEq
-  , easeSameSpec
-  , springEps
-  , stepAnim
-  )
 import NanoUI.Internal.Context.Core (damageKey, getsDamage, markDirty, markDirtyCovered)
 import NanoUI.Internal.Context.Types (AnimationState (..), Context (..), DamageState (..), ScrollState (..), intKey)
 import NanoUI.Internal.Id (WidgetId)

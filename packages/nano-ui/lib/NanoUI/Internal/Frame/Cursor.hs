@@ -13,50 +13,17 @@ import Data.Foldable (asum, find)
 import Data.IORef (readIORef)
 import Data.Maybe (fromMaybe, isJust)
 import NanoUI.Internal.Context
-  ( Context (..)
-  , InteractionState (..)
-  , PointerRoute (..)
-  , getHotId
-  , getPrevRect
-  , getsInteraction
-  , isDisabled
-  , lookupCustomDrawing
-  , CustomDrawingEntry (..)
-  )
 import NanoUI.Internal.Font (sliderHitBounds)
 import NanoUI.Internal.Frame.Hit
-  ( nodePointVisible
-  , withWidgetNode
-  )
 import NanoUI.Internal.Frame.Scroll (ScrollBarLayout (..), scrollBarsFor)
 import NanoUI.Internal.Frame.Select (overlayMenuOwnerAt)
 import NanoUI.Internal.Frame.TextArea (isMouseOnTextAreaScrollBarAt)
 import NanoUI.Internal.Frame.TextEdit
-  ( textEditMenuCursorKind
-  , textFieldWidgetAtMouse
-  )
 import NanoUI.Internal.Frame.TextInput (nodeTextFieldGeom, searchClearHit)
 import NanoUI.Internal.Frame.Window (windowResizeCursorKind)
 import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Internal.Input
-  ( Input (..)
-  , UiCursorKind (..)
-  , grabDragKind
-  , grabHoverKind
-  , inputMouseDown
-  , inputMousePos
-  )
 import NanoUI.Internal.Layout.Arena
-  ( NodeClass (PointerNodes)
-  , NodeIdx
-  , NodeType (..)
-  , findClassNodeM
-  , getNodeType
-  , getRect
-  , getStyleIdx
-  , getWidgetId
-  , isScrollNode
-  )
 import NanoUI.Internal.Monad (ifM, (<&&>))
 import NanoUI.Internal.Types (Rect (..), V2 (..), rectContains)
 import NanoUI.Internal.WidgetText (hasFlag, numericStepperRects, textInputFlagNumeric)

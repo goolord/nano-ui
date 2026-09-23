@@ -82,15 +82,6 @@ import NanoUI.Internal.Style (FontStyle, FontVariant, FontWeight, Layout, Theme)
 import NanoUI.Widgets.TextBuffer (Cursor)
 import NanoUI.Widgets.TextCommand (TextCommand)
 import NanoUI.Internal.Types
-  ( Color
-  , Damage (..)
-  , DamageBounds
-  , PopupAnchor
-  , PopupPlacement
-  , Rect
-  , Size (..)
-  , V2
-  )
 
 -- | Themes the view's @styled@ scopes pushed this frame, and last frame's, to
 -- tell whether a frame changed only how its scopes look. A node's scope holds

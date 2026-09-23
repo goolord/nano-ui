@@ -48,14 +48,6 @@ import Data.IntSet qualified as IS
 
 import NanoUI.Internal.Context.Core (damageWidget, getPrevRect, getStore, setStore, writeSlots)
 import NanoUI.Internal.Context.Types
-  ( Context (..)
-  , ScrollAxes (..)
-  , ScrollGlide (..)
-  , ScrollState (..)
-  , ScrollTuning (..)
-  , defaultScrollTuning
-  , intKey
-  )
 import NanoUI.Internal.Draw qualified as Draw
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Store (Slot (..), SlotWrites (..), WidgetStore, fieldFloat, fieldInt, fieldPoint, findSlot, insertSlot, lookupSlot, slotKey, slotWrite, slotWriteOr)

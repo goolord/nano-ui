@@ -22,30 +22,8 @@ import Data.List (find)
 import Data.Maybe (fromMaybe)
 import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context
-  ( Context (..)
-  , getStore
-  , intKey
-  , isDisabled
-  , markEscapeConsumed
-  , pointerBlockedByModal
-  , Slot (..)
-  , slotKey
-  , modifyStore
-  )
 import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Internal.Input
-  ( Input (..)
-  , Key (..)
-  , inputChars
-  , inputKeys
-  , inputKeysElem
-  , inputKeysNull
-  , inputMouseDown
-  , inputMousePos
-  , inputMousePressed
-  , inputMouseReleased
-  , inputMouseRightPressed
-  )
 import NanoUI.Internal.Monad (Ui, (<&&>), askContext, askFrameInput, askInput, focusedWidget, nextId, uiIO, withContext)
 import NanoUI.Internal.Store (fieldFloat, fieldInt, findSlot, insertSlot, quietFlag, setQuietFlag)
 import NanoUI.Internal.Types (Rect (..), clamp01, rectHit, v2X, v2Y)

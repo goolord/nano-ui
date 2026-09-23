@@ -32,31 +32,8 @@ import Data.Sequence (Seq)
 import qualified Data.Sequence as Seq
 import qualified Data.Text as T
 import NanoUI.Internal.Context
-  ( Context (..)
-  , InteractionState (..)
-  , TextInputDrag (..)
-  , clampScrollOffset
-  , getStore
-  , getsInteraction
-  , intKey
-  , markDirty
-  , modifyInteraction
-  , modifyStore
-  , nodeTheme
-  , requestWakeAfter
-  , slotKey
-  )
 import NanoUI.Internal.Draw (DrawArena, getDrawSnapScale, pushText, withClip)
 import NanoUI.Internal.Font
-  ( FontMetrics (..)
-  , ScrollBarSlot (..)
-  , lineWidthIO
-  , prepareFontMetrics
-  , scrollBarGeomFor
-  , scrollBarSideGap
-  , textIndexAtX
-  , widgetContentInset
-  )
 import NanoUI.Internal.Frame.Chrome (paintScrollBarLayout, textInputFocused)
 import NanoUI.Internal.Frame.Hit (withWidgetNode)
 import NanoUI.Internal.Frame.Scroll.Geometry (ScrollBarLayout (..), scrollBarLayout, scrollChromeLane)
@@ -64,26 +41,8 @@ import NanoUI.Internal.Frame.TextInput (FieldDoc (..), drawLineCaret, drawLineSe
 import NanoUI.Internal.Id (WidgetId, hashWidgetId)
 import NanoUI.Internal.Input (Input, inputMouseDown, inputMousePos, inputMousePressed, inputMouseReleased)
 import NanoUI.Internal.Layout.Arena
-  ( DirTag (..)
-  , NodeIdx
-  , NodeType (NodeTextArea, NodeTextInput)
-  , getNodeFontSize
-  , getNodeRect
-  , getNodeType
-  , getWidgetId
-  )
-import NanoUI.Internal.Store (Slot (..), fieldInt, fieldPoint, findSlot, insertDyn, insertSlot, lookupDyn, lookupSlot)
+import NanoUI.Internal.Store (fieldInt, fieldPoint, findSlot, insertDyn, insertSlot, lookupDyn, lookupSlot)
 import NanoUI.Internal.Style
-  ( FontStyle (..)
-  , FontVariant (..)
-  , FontWeight (..)
-  , Padding (..)
-  , Style (..)
-  , scrollBarThumbColor
-  , scrollBarTrackColor
-  , themePanel
-  , themeSelection
-  )
 import NanoUI.Internal.Types (Rect (..), V2 (..), clamp, onGrid, rectContains)
 import qualified NanoUI.Internal.Widgets.TextArea as TA
 import qualified NanoUI.Widgets.TextBuffer as TB

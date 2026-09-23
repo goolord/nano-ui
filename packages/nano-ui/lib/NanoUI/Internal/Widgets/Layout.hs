@@ -41,45 +41,13 @@ import Data.Text (Text)
 import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context (Context (..))
 import NanoUI.Internal.Frame.Scroll.Geometry
-  ( ScrollConfig (..)
-  , defaultScrollConfig
-  , encodeScrollConfig
-  , scrollDefault1D
-  )
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Layout.Arena
-  ( DirTag (..)
-  , NodeType (..)
-  , addNode
-  , addNodeFromLayout
-  , getDirection
-  , setStyleIdx
-  , setWidgetId
-  )
 import NanoUI.Internal.Monad (Ui, askContext, askDefaultLayout, nextId, styled, uiIO, windowWidth, withContext)
 import NanoUI.Internal.Style
-  ( Direction (..)
-  , Layout (..)
-  , Sizing (..)
-  , alignCenter
-  , alignMid
-  , defaultLayout
-  , fillW
-  , gap
-  , grow
-  , padXY
-  , panelStyle
-  , tight
-  )
 import NanoUI.Internal.Style qualified as Style
 import NanoUI.Internal.Types (Color (..), lerpColor)
 import NanoUI.Internal.Widgets.Node
-  ( Response
-  , addWidget
-  , container
-  , currentParent
-  , withContainerNode
-  )
 
 {-# INLINE withDefaultWith #-}
 withDefaultWith :: Ui :> es => (Layout -> Layout) -> (Layout -> Eff es a -> Eff es r) -> Eff es a -> Eff es r

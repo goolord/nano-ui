@@ -16,54 +16,19 @@ import Data.Maybe (fromMaybe, isJust, listToMaybe)
 import Data.Text (Text)
 import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context
-  ( Context (..)
-  , getScrollOffset
-  , getStore
-  , intKey
-  , modifyStore
-  , resolveScrollStep
-  , setScrollOffset
-  )
 import NanoUI.Internal.Frame.Hit (withWidgetNode)
 import NanoUI.Internal.Frame.Scroll.Geometry (scrollAxisRange, scrollBare, scrollHorizontalHidden)
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Input (inputMousePos, inputScroll)
 import NanoUI.Internal.Layout.Arena (setNodeValue)
 import NanoUI.Internal.Monad (Ui, askContext, askInput, lastRect, nextId, requestFrame, uiIO, uiTheme, withKey)
-import NanoUI.Internal.Store (Slot (..), fieldFloat, findSlot, insertSlot, slotKey)
+import NanoUI.Internal.Store (fieldFloat, findSlot, insertSlot)
 import NanoUI.Internal.Style
-  ( Direction (..)
-  , Layout (..)
-  , Padding (..)
-  , Sizing (..)
-  , alignCenter
-  , alignMid
-  , defaultLayout
-  , fillH
-  , fillW
-  , fixedH
-  , gap
-  , grow
-  , padAll
-  , padTop
-  , padXY
-  , themeMuted
-  , tight
-  )
 import NanoUI.Internal.Types (Rect (..), clamp, rectContains, rectW, v2Y)
 import NanoUI.Internal.WidgetText (buttonFlagClose, tabEncodeStyle)
 import NanoUI.Internal.Widgets.Combinators (buttonStyledEx)
 import NanoUI.Internal.Widgets.Layout (column', columnWith, row', rowWith, scrollAreaIdConfigured)
 import NanoUI.Internal.Widgets.Node
-  ( HasResponse (..)
-  , Response (..)
-  , respClicked
-  , respId
-  , respRect
-  , setChanged
-  , setClicked
-  , tagContainer
-  )
 
 -- | Visual treatment of the tab headers; does not change tab identity.
 data TabStyle = TabUnderline | TabPill | TabSegmented | TabContained

@@ -42,27 +42,6 @@ import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Monad (Ui, askContext, nextId, uiIO, uiTheme, withContext)
 import NanoUI.Svg (Svg, parseSvg, rasterizeSvg, svgKey, svgMonochrome, svgSize)
 import NanoUI.Internal.Style
-  ( Layout (..)
-  , Sizing (..)
-  , alignEnd
-  , alignMid
-  , defaultLayout
-  , fillW
-  , fixedWH
-  , fontBold
-  , fontDanger
-  , fontItalic
-  , fontMedium
-  , fontMono
-  , fontMuted
-  , fontUnderline
-  , gap
-  , minW
-  , padXY
-  , styleFg
-  , themePanel
-  , tight
-  )
 import Data.Word (Word32)
 import NanoUI.Internal.Types (Color (..), ImageId (..), colorRGBA, colorToWord32)
 import NanoUI.Internal.WidgetText (intValueText)

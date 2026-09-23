@@ -27,22 +27,6 @@ import Data.Sequence qualified as Seq
 import Data.Text (Text)
 import qualified Data.Text as T
 import NanoUI.Internal.Context
-  ( Context (..)
-  , TextFieldClickCell (..)
-  , TextInputDrag (..)
-  , getStore
-  , intKey
-  , markDirty
-  , modifyStore
-  , setStore
-  , writeSlots
-  , Slot (..)
-  , slotKey
-  , nodeTheme
-  , InteractionState (..)
-  , getsInteraction
-  , modifyInteraction
-  )
 import NanoUI.Internal.Draw (DrawArena, pushRect)
 import NanoUI.Internal.Font (FontMetrics (..), caretXIO, centeredTextY, lineWidthIO, prepareFontMetrics, selectionSpans, textIndexAtX, widgetContentInset)
 import NanoUI.Internal.Frame.Chrome (textInputFocused, textInputValue)
@@ -51,30 +35,12 @@ import NanoUI.Internal.Frame.Node (nodeFontMetrics)
 import NanoUI.Internal.Frame.Scroll.Geometry (padTextClipRect)
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Input
-  ( Input (..)
-  , inputMouseClicks
-  , inputMouseDown
-  , inputMousePos
-  , inputMousePressed
-  , inputMouseReleased
-  )
 import NanoUI.Internal.Layout.Arena (NodeIdx, getOptions, getRect, getStyleIdx, getWidgetId)
 import NanoUI.Internal.Monad (ifM, unlessM, (<&&>))
 import NanoUI.Internal.Store (fieldFloat, fieldInt, fieldText, findSlot, insertSlot, slotWriteOr)
 import NanoUI.Internal.Style (themeSelection)
 import NanoUI.Internal.Types (Color (..), Rect (..), V2 (..), clamp, rectContains, rectIntersect, rectOverlapArea, rectW)
 import NanoUI.Internal.WidgetText
-  ( hasFlag
-  , comboTextClip
-  , numericTextClip
-  , searchInputIconRects
-  , searchInputTextClip
-  , textClipBetween
-  , textInputFlagNumeric
-  , textInputFieldHeight
-  , textInputFlagSearch
-  , textInputFlagSelectable
-  )
 import NanoUI.Widgets.TextBuffer qualified as TB
 
 textInputFieldRect :: FontMetrics -> Float -> Float -> Float -> Float -> Rect

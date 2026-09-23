@@ -18,20 +18,12 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context
-  ( recordSlot
-  , adoptSlot
-  , Context (..)
-  , getStore
-  , intKey
-  , registerFocusable
-  , modifyStore
-  )
 import NanoUI.Internal.Font (menuItemRowH)
 import NanoUI.Internal.Frame.Select (selectDropPickIndex, selectDropRect)
 import NanoUI.Internal.Input (inputMousePos, inputMousePressed, inputMouseReleased)
 import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Monad (Ui, askContext, askInput, nextId, uiIO)
-import NanoUI.Internal.Store (fieldInt, insertSlot, isSelectOpen, setSelectOpen)
+import NanoUI.Internal.Store (fieldInt, insertSlot)
 import NanoUI.Internal.Style (Layout, defaultLayout)
 import NanoUI.Internal.Types (Rect (..), clamp, rectContains, rectHit, rectNonEmpty, v2Y)
 import NanoUI.Internal.Widgets.Combinators (withBoundedIndex)

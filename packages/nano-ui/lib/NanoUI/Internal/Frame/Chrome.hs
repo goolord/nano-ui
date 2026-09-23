@@ -26,56 +26,14 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Read as TR
 import NanoUI.Internal.Context
-  ( Context (..)
-  , getAnimationValue
-  , getStore
-  , intKey
-  , nodeTheme
-  )
 import NanoUI.Internal.Draw (DrawArena, pushRect, pushRoundedRect, pushRoundedStroke)
 import NanoUI.Internal.Frame.Scroll.Geometry (ScrollBarLayout (..))
 import NanoUI.Internal.Id (hashWidgetId)
 import NanoUI.Internal.Layout.Arena
-  ( NodeIdx
-  , NodeType (..)
-  , getNodeType
-  , getNodeValue
-  , getOptions
-  , getStyleIdx
-  , getText
-  , getWidgetId
-  , walkFloatingAncestors
-  )
 import NanoUI.Internal.Store (fieldInt, fieldText, findSlot)
 import NanoUI.Internal.Style
-  ( Style (..)
-  , Theme (..)
-  , themeAccent
-  , themeButton
-  , themeFloatingWindow
-  , themeInput
-  , themeMuted
-  , themePanel
-  , themeWindow
-  , themeOnAccent
-  , themeShadow
-  )
 import NanoUI.Internal.Types (Color (..), Rect (..), clamp, colorA, colorRGBA, lerpColor)
 import NanoUI.Internal.WidgetText
-  ( hasFlag
-  , buttonFlagClose
-  , buttonVisualStyle
-  , buttonFlagMenuBar
-  , buttonFlagMenu
-  , buttonFlagTab
-  , buttonFlagTable
-  , selectDisplayText
-  , stripeColor
-  , tableHeaderDisplayText
-  , textInputFieldText
-  , textInputFlagPassword
-  , treeDecodeStripe
-  )
 
 floatingAncestor :: Context -> NodeIdx -> IO (Maybe NodeType)
 floatingAncestor ctx idx = walkFloatingAncestors (ctxNodeArena ctx) idx (\_ nt -> pure (Just nt))

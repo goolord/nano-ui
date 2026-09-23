@@ -17,28 +17,8 @@ import qualified Data.IntMap.Strict as IM
 import Data.Maybe (fromMaybe, isJust)
 import qualified Data.Text as T
 import NanoUI.Internal.Context
-  ( Context (..)
-  , SpanCacheEntry (..)
-  , SpanLines (..)
-  , WidgetTextCacheEntry (..)
-  , WidgetTextPlacement (..)
-  , cachedWrapText
-  , nodeTheme
-  )
 import NanoUI.Internal.Damage (floatingPanelRects)
 import NanoUI.Internal.Font
-  ( FontMetrics (..)
-  , alignedTextPen
-  , centeredTextY
-  , checkboxLeading
-  , menuItemPadX
-  , prepareFontMetrics
-  , tableCellInset
-  , treeRowLeading
-  , truncateTextIO
-  , WrapResult (..)
-  , widgetContentInset
-  )
 import NanoUI.Internal.Frame.Chrome (displayText, textInputFocused, textInputValue, widgetVisualStyle)
 import NanoUI.Internal.Frame.Node (readScrollNode, resolveFontFor, scrollNodeViewport)
 import NanoUI.Internal.Frame.Scroll.Geometry (padContentClip, padTextClipRect, tagClippedSpans)
@@ -48,49 +28,11 @@ import NanoUI.Internal.Frame.TextEdit (collectTextEditMenuSpans)
 import NanoUI.Internal.Frame.TextInput (syncTextInputScroll, tagTextInputClippedSpans, textInputFieldRect)
 import NanoUI.Internal.Input (Input)
 import NanoUI.Internal.Layout.Arena
-  ( AxisSizing (..)
-  , forFloatingNodes_
-  , NodeIdx
-  , NodeType (..)
-  , SizingTag (..)
-  , arenaCount
-  , getAlignX
-  , getClipRect
-  , getFirstChild
-  , getNextSibling
-  , getNodeFontColor
-  , getNodeFontSize
-  , getNodeType
-  , getPadding
-  , getRect
-  , getStyleIdx
-  , getText
-  , getWidthSizing
-  , isFloatingNode
-  , isScrollNode
-  , hasCenteredLabel
-  , isWidgetNode
-  , parentIsRow
-  )
 import NanoUI.Internal.Layout.Solve (findAncestorMaxW, textWrapCap)
 import NanoUI.Internal.Style (AlignX (..), FontVariant (..), Style (..), Theme (..), themeAccent, themeMuted, themePanel)
 import NanoUI.Internal.Types (Color (..), Rect (..), lerpColor, onGrid, rectIntersect)
 import NanoUI.Internal.Widgets.ColorPicker (ColorPickerPart (..), colorPickerPartOf, colorPickerPartRect, colorPickerPreviewGeom)
 import NanoUI.Internal.WidgetText
-  ( hasFlag
-  , textNodeFontKey
-  , buttonFlagClose
-  , buttonFlagMenu
-  , buttonFlagTable
-  , numericTextClip
-  , selectChevronReserve
-  , tableStripeColor
-  , textInputFlagNumeric
-  , textInputFieldText
-  , textInputFlagSelectable
-  , textNodeFontVariant
-  , treeDecodeStyle
-  )
 
 -- | Collect page text after layout, omitting spans covered by opaque floating
 -- panels. Each tuple is bounds, text, foreground, background, clip; coordinates

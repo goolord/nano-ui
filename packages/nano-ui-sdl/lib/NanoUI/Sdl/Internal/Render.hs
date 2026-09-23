@@ -22,12 +22,6 @@ import Foreign.Storable (poke)
 import NanoUI (Color, Rect (..), colorA, colorB, colorG, colorR, rectIntersect)
 import NanoUI.Sdl.Internal.Image (ImageAtlas, lookupImage)
 import NanoUI.Testing
-  ( Damage (..)
-  , DrawCmd (..)
-  , DrawData (..)
-  , damageIsEmpty
-  , textureGlyphPage
-  )
 import SDL3.Sys.Bindgen.Rect (SDL_Rect (..))
 import SDL3.Sys.Bindgen.Render (SDL_Renderer, SDL_Texture)
 import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst

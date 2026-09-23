@@ -30,32 +30,9 @@ import Data.IORef
   )
 import GHC.Clock (getMonotonicTime)
 import NanoUI.Internal.Context
-  ( Context
-  , anyAnimating
-  , clearWakeAt
-  , getWakeAt
-  , isDirty
-  , overlayConsumesQuit
-  , textInputEditActive
-  )
 import NanoUI.Internal.Debug
-  ( DebugSamplerRef
-  , debugCadence
-  , debugRefreshSec
-  , noteDebugLoop
-  , noteDebugSkip
-  )
 import NanoUI.Internal.Frame.Input (needsRedraw)
 import NanoUI.Internal.Input
-  ( Input (..)
-  , clearEphemeral
-  , inputDeltaTime
-  , inputMouseClicks
-  , inputMousePos
-  , inputMousePressed
-  , isHardQuitInput
-  , splitFrame
-  )
 import NanoUI.Internal.Types (V2 (..))
 
 -- | Standard upper bound for single-frame delta-time (50ms).

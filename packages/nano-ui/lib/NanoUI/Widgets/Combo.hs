@@ -18,14 +18,6 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context
-  ( recordSlot
-  , Context (..)
-  , getStore
-  , intKey
-  , markDirty
-  , markEscapeConsumed
-  , modifyStore
-  )
 import NanoUI.Internal.Font (menuItemRowH)
 import NanoUI.Internal.Frame.Hit (findNodeByWidgetId)
 import NanoUI.Internal.Frame.Select (comboDropPickIndex, comboDropRect, comboScrollGeom)
@@ -33,7 +25,7 @@ import NanoUI.Internal.Id (WidgetId (..))
 import NanoUI.Internal.Input (Input, Key (..), inputKeys, inputMouseDown, inputMousePos, inputMousePressed, inputScroll)
 import NanoUI.Internal.Layout.Arena (setOptions)
 import NanoUI.Internal.Monad (Ui, askContext, uiIO)
-import NanoUI.Internal.Store (Slot (..), boolInt, fieldFloat, fieldInt, fieldText, findSlot, flagSlot, insertSlot, slotKey)
+import NanoUI.Internal.Store (boolInt, fieldFloat, fieldInt, fieldText, findSlot, flagSlot, insertSlot)
 import NanoUI.Internal.Types (Rect (..), V2 (..), clamp, rectContains, rectNonEmpty, v2X, v2Y)
 import NanoUI.Internal.WidgetText (textInputFlagSearch)
 import NanoUI.Internal.Widgets.Behavior (keyboardFocused)

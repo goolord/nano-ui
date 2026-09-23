@@ -67,49 +67,9 @@ import NanoUI (NanoUI)
 import NanoUI.Sdl.Internal.Runner (askSdlDebug, drawFrameWith, sdlDrawFrame, setSdlUiFont, setSdlUiScale)
 import NanoUI.Sdl.Internal.Session (runSdlSession)
 import NanoUI.Sdl.Internal.Debug (SdlDebugSnapshot (..))
-import NanoUI.Sdl.Internal.Window (RenderDriver (..), RgbaImage (..), SdlEnv (..), SdlOptions (..), WindowDecorations (..), defaultSdlOptions, saveScreenshot, syncDisplay, windowZoom, withSdl, withSdlBench)
+import NanoUI.Sdl.Internal.Window (RenderDriver (..), RgbaImage (..), SdlEnv (..), SdlOptions (..), defaultSdlOptions, saveScreenshot, syncDisplay, windowZoom, withSdl, withSdlBench)
 import NanoUI.Sdl.Internal.Dialog
-  ( FileDialogId (..)
-  , FileDialogOptions (..)
-  , FileDialogResult (..)
-  , FileFilter (..)
-  , askOpenFileDialog
-  , askOpenFolderDialog
-  , askSaveFileDialog
-  , defaultFileDialogOptions
-  , openFileDialog
-  , openFolderDialog
-  , pollFileDialog
-  , cancelFileDialog
-  , pollFileDialogUi
-  , saveFileDialog
-  )
 import NanoUI.Sdl.Internal.Chrome
-  ( WindowChrome (..)
-  , clearWindowChrome
-  , defaultResizeBorder
-  , defaultWindowChrome
-  , maximizeWindow
-  , minimizeWindow
-  , minimizeWindowUi
-  , restoreWindow
-  , setWindowChrome
-  , setWindowChromeUi
-  , setWindowSize
-  , setWindowTitle
-  , setWindowDecorations
-  , setWindowShadow
-  , setWindowTitleUi
-  , toggleMaximized
-  , toggleMaximizedUi
-  , CaptionOptions (..)
-  , defaultCaptionOptions
-  , windowCaption
-  , windowCaptionWith
-  , windowMaximized
-  , windowMaximizedUi
-  , windowResizable
-  )
 import NanoUI.Sdl.Internal.NanoUIFont (NanoUIFont (..))
 import NanoUI.Sdl.Internal.Font.Search (listFontFamilies)
 import NanoUI.Testing (runFrameReduce)

@@ -97,54 +97,10 @@ import Effectful.Dispatch.Static
   )
 import GHC.Clock (getMonotonicTime)
 import NanoUI.Internal.Context
-  ( Context (..)
-  , FrameMsg (..)
-  , askHostIO
-  , damageFull
-  , damageKey
-  , damagePeers
-  , damageRect
-  , damageWidget
-  , getFocusId
-  , getPrevRect
-  , getScrollMetrics
-  , getStore
-  , getsInteraction
-  , InteractionState (..)
-  , anySelectOpen
-  , markDirty
-  , markEscapeConsumed
-  , markTabConsumed
-  , overlayConsumesQuit
-  , scrollBy
-  , scrollPages
-  , scrollRectIntoView
-  , scrollTo
-  , setScrollOffset2D
-  , setScrollOffsetIn
-  , setScrollStep
-  , ScrollAlign
-  , ScrollBehavior
-  , ScrollMetrics (..)
-  , pointerBlockedByModal
-  , routedInput
-  , currentTheme
-  , pushMessage
-  , pushThemeScope
-  , scopeRawTheme
-  , setTheme
-  )
 import NanoUI.Internal.Draw.Types (TextFont (..))
 import NanoUI.Internal.Font (FontMetrics, lineWidthIO)
 import NanoUI.Internal.Frame.Node (resolveTextFont)
-import NanoUI.Internal.Id
-  ( IdContext (siblingId)
-  , WidgetId (..)
-  , enterKeyed
-  , enterScope
-  , idContextWidgetId
-  , scopeTag
-  )
+import NanoUI.Internal.Id hiding (currentId)
 import NanoUI.Internal.Layout.Arena (getArenaScope, setArenaScope)
 import NanoUI.Internal.Style (FontStyle, FontVariant, FontWeight, Layout, TextDecoration (DecorationNone), Theme, defaultLayout)
 import NanoUI.Internal.Input (Input (..), Key (KeyEscape), inputKeysElem, inputMousePos, inputWindowSize, stripInteractionInput)

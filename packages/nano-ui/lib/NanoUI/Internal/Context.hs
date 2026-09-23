@@ -239,16 +239,6 @@ import Data.Word (Word8)
 import Foreign.ForeignPtr (ForeignPtr)
 
 import NanoUI.Internal.Animation
-  ( Animation (..)
-  , Ease (..)
-  , SpringParams (..)
-  , applyEase
-  , approxEq
-  , easeSameSpec
-  , presetBouncy
-  , presetSmooth
-  , presetStiff
-  )
 import NanoUI.Internal.Atlas (AtlasUpload (..), atlasTextureId)
 import NanoUI.Internal.Atlas qualified as Atlas
 import NanoUI.Internal.Context.Animation
@@ -257,45 +247,6 @@ import NanoUI.Internal.Context.Drawing
 import NanoUI.Internal.Context.Overlay
 import NanoUI.Internal.Context.Scroll
 import NanoUI.Internal.Context.Types
-  ( AnimationState (..)
-  , Context (..)
-  , CustomDrawBuild
-  , CustomDrawContext (..)
-  , CustomDrawingEntry (..)
-  , CustomMeasureFn
-  , DamageRequest (..)
-  , DamageState (..)
-  , DrawingCacheState (..)
-  , DrawingEntry (..)
-  , FrameMsg (..)
-  , GenCache (..)
-  , InteractionState (..)
-  , MeasureCache
-  , MetricSource (..)
-  , WrapCache (..)
-  , emptyGenCache
-  , OverlayState (..)
-  , PointerRoute (..)
-  , SpanCacheEntry (..)
-  , SpanLines (..)
-  , TextFieldClickCell (..)
-  , TextInputDrag (..)
-  , TextInputMenu (..)
-  , WidgetTextCacheEntry (..)
-  , WidgetTextPlacement (..)
-  , WindowResizeDrag (..)
-  , WindowResizeEdge (..)
-  , decodeMessages
-  , initialAnimationState
-  , initialScrollState
-  , initialDamageState
-  , initialDrawingCacheState
-  , initialInteractionState
-  , initialOverlayState
-  , intKey
-  , reduceMessages
-  , reduceUpdates
-  )
 import NanoUI.Internal.Draw (newDrawArena)
 import NanoUI.Internal.Draw qualified as Draw
 import NanoUI.Internal.Font (FontMetrics, WrapResult (..), fmLineHeight, measureTextIO, monospaceMetrics, scaleFontMetrics, wrapTextIO)
@@ -303,18 +254,6 @@ import NanoUI.Internal.Frame.SpanArena (newSpanArena)
 import NanoUI.Internal.Id (WidgetId (..), initialIdContext)
 import NanoUI.Internal.Layout.Arena (getArenaScope, newNodeArena)
 import NanoUI.Internal.Store
-  ( WidgetStore (..)
-  , anySelectOpen
-  , bumpMirror
-  , closeSelects
-  , emptyWidgetStore
-  , intBool
-  , isSelectOpen
-  , ptrEq
-  , setSelectOpen
-  , Slot (..)
-  , slotKey
-  )
 import NanoUI.Internal.Style (FontStyle, FontVariant (..), FontWeight, Theme, defaultTheme)
 import NanoUI.Internal.Types (ImageId)
 

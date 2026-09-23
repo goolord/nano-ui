@@ -42,31 +42,10 @@ import NanoUI (ImageId, Input (..), Size (..), Theme, V2 (..))
 import NanoUI.Internal.Context (Context (..), setDrawSnapScale)
 import NanoUI.Testing (clearMeasureCache, damageFull, markDirty, setHost, setWakeLoop, withClipboard)
 import NanoUI.Sdl.Internal.Display
-  ( initRefreshEvent
-  , outPair
-  , pushRefreshEvent
-  , queryMouseWindowPos
-  , queryWindowPixelDensity
-  , queryWindowLogicalSize
-  , queryWindowRefreshHz
-  , zoomWindow
-  )
 import NanoUI.Sdl.Internal.Chrome.Types (ChromeState, clearChromeState, newChromeState)
 import NanoUI.Sdl.Internal.Frame (WindowDecorations (..), applyDecorations)
 import NanoUI.Sdl.Internal.Cursor (SdlCursors (..), destroyCursors, initCursors)
 import NanoUI.Sdl.Internal.Font
-  ( FontSource (..)
-  , SdlFontCache
-  , destroyGlyphAtlas
-  , destroySdlFontCache
-  , embeddedFontSource
-  , newGlyphAtlas
-  , newSdlFontCache
-  , reloadSdlFontCache
-  , sdlFontCacheSource
-  , withSdlFontCache
-  , withTtf
-  )
 import NanoUI.Sdl.Internal.Font.Search (searchFonts)
 import NanoUI.Sdl.Internal.NanoUIFont (NanoUIFont (..))
 import NanoUI.Internal.Debug (DebugSamplerRef, newDebugSampler)

@@ -20,57 +20,16 @@ import Data.IORef (writeIORef)
 import Data.Maybe (catMaybes, isJust, listToMaybe)
 import qualified Data.Text as T
 import NanoUI.Internal.Context
-  ( Context (..)
-  , TextInputMenu (..)
-  , PointerRoute (..)
-  , damageWidget
-  , getStore
-  , getsInteraction
-  , intKey
-  , isDisabled
-  , markDirty
-  , markEscapeConsumed
-  , modifyStore
-  , widgetTheme
-  , InteractionState (..)
-  , modifyInteraction
-  )
 import NanoUI.Internal.Draw (pushRect, pushText)
 import NanoUI.Internal.Font
-  ( centeredTextY
-  , menuItemPadX
-  , menuItemRowH
-  , menuMinW
-  , menuOuterPad
-  , menuSepH
-  , widgetContentInset
-  )
 import NanoUI.Internal.Frame.Chrome (overlayMenuStyle, paintMenuAccent, paintMenuPanel)
 import NanoUI.Internal.Frame.Hit (findNodeByWidgetId, nodeClippedHit, overlayHitAllowed, overlayHitRoot, widgetOverlayAllowed)
 import NanoUI.Internal.Frame.TextArea (isMouseOnTextAreaScrollBarAt)
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Input
-  ( Input (..)
-  , Key (..)
-  , UiCursorKind (..)
-  , inputKeys
-  , inputKeysElem
-  , inputMousePos
-  , inputMousePressed
-  , inputMouseRightPressed
-  , inputWindowSize
-  )
 import NanoUI.Internal.Layout.Arena
-  ( NodeClass (PointerNodes)
-  , NodeType (NodeTextArea, NodeTextInput)
-  , findClassNodeRevM
-  , getNodeRect
-  , getNodeType
-  , getStyleIdx
-  , getWidgetId
-  )
 import NanoUI.Internal.Monad (ifM, whenM, (<&&>))
-import NanoUI.Internal.Store (Slot (..), WidgetStore, fieldInt, insertSlot, lookupDyn, slotKey)
+import NanoUI.Internal.Store (fieldInt, insertSlot, lookupDyn)
 import NanoUI.Internal.Style (Style (..), Theme, themeSeparator)
 import NanoUI.Internal.Types (Color (..), DamageBounds (..), Rect (..), Size (..), V2 (..), clamp, lerpColor, rectContains)
 import NanoUI.Internal.Widgets.TextArea (textAreaFieldEditor)
@@ -78,15 +37,6 @@ import NanoUI.Internal.Widgets.TextDocument (sameLines)
 import NanoUI.Internal.Widgets.TextInput (textInputFieldEditor, textInputMode)
 import NanoUI.Widgets.TextBuffer qualified as TB
 import NanoUI.Widgets.TextEditor
-  ( Editor (..)
-  , EditorMode (..)
-  , TextCommand (..)
-  , canRedo
-  , canUndo
-  , multiLineMode
-  , runCommandIO
-  , sealHistory
-  )
 
 -- | Run a command on the field with this id and focus it: the command comes
 -- from a menu or button that may not be over the field, and the caret,

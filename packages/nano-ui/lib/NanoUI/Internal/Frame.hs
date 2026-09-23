@@ -15,112 +15,19 @@ import Data.Maybe (isJust)
 import Data.Typeable (Typeable)
 import Effectful (Eff, IOE, runEff, type (:>))
 import NanoUI.Internal.Context
-  ( Context (..)
-  , PointerRoute (..)
-  , beginThemeScopes
-  , damageFull
-  , damageRect
-  , themeScopesChanged
-  , FrameMsg (..)
-  , clearDirty
-  , clearWakeAt
-  , decodeMessages
-  , drainMessages
-  , getStore
-  , isDirty
-  , lookupCustomMeasure
-  , customMeasureHooks
-  , lookupPopupConfig
-  , markDirty
-  , pruneDrawOpCache
-  , resetDrawingScopeCache
-  , stepScrollGlides
-  , takeDamage
-  , takeDamagePieces
-  , tickAnimations
-  , ensureMetricCaches
-  , getsOverlay
-  , modifyOverlay
-  , OverlayState (..)
-  , nodeTheme
-  )
-import NanoUI.Internal.Context (beginFrameModal)
 import NanoUI.Internal.Damage (FrameSnapshot (..), captureFrameSnapshot, updatePrevRects, writeDamage)
 import NanoUI.Internal.Draw
-  ( DrawData
-  , Layer (..)
-  , beginLayer
-  , finishDraw
-  , pushRect
-  , resetDrawArena
-  , setClip
-  , setClipPieces
-  , withClip
-  )
 import NanoUI.Internal.Frame.Input
-  ( armPointerPress
-  , constrainFocusToModal
-  , disarmPointerPress
-  , finalizePointerPress
-  , finalizePointerRelease
-  , finalizeSelectFocus
-  , finalizeTabFocus
-  , finalizeTextInputFocus
-  , pressTargets
-  , refreshHover
-  , syncWidgetLabels
-  )
 import NanoUI.Internal.Frame.Chrome (overlayMenuStyle, overlayWindowStyle, paintMenuPanel)
 import NanoUI.Internal.Frame.Paint (lowerShapes, walkChildren)
 import NanoUI.Internal.Frame.Scroll
-  ( applyScrollOffsets
-  , updateScrollDrag
-  , updateScrollWheel
-  )
 import NanoUI.Internal.Frame.Select
-  ( closeSelectOnOutsideClick
-  , drawSelectOverlays
-  , finalizeSelectKeyboard
-  , finalizeSelectPick
-  , overlayMenuRects
-  , routePointer
-  )
 import NanoUI.Internal.Frame.TextArea (finalizeTextFieldMouse)
 import NanoUI.Internal.Frame.TextEdit
-  ( closeTextEditMenuOnEscape
-  , closeTextEditMenuOnOutsideClick
-  , drawTextEditMenuOverlays
-  , finalizeTextEditMenuPick
-  , openTextEditMenu
-  )
 import NanoUI.Internal.Frame.Window
-  ( contextMeasurers
-  , lookupWindowPos
-  , lookupWindowSize
-  , persistWindowPositions
-  , updateWindowDrag
-  , updateWindowResize
-  )
 import NanoUI.Internal.Id (WidgetId (..), initialIdContext)
 import NanoUI.Internal.Input (Input (..), inputMousePressed, stripInteractionInput, withoutPointer)
 import NanoUI.Internal.Layout.Arena
-  ( LayoutCache (..)
-  , NodeType (..)
-  , arenaCount
-  , captureLayoutCache
-  , floatingNodeCount
-  , forFloatingNodes_
-  , getNodeRect
-  , getNodeType
-  , getPadding
-  , getWidgetId
-  , layoutSigMatches
-  , computeSubtreeHashes
-  , newLayoutCache
-  , resetNodeArena
-  , restoreLayoutCache
-  , topModalNode
-  )
 import NanoUI.Internal.Layout.Solve (placeFloatingNodes, runCustomMeasure, solveLayout)
 import NanoUI.Internal.Monad (NanoUI, Ui, runUi, whenM)
 import NanoUI.Internal.Store (mirrorStoresChanged)

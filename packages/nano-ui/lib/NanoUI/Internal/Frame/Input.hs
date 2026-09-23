@@ -33,77 +33,13 @@ import Control.Monad (filterM, forM_, unless, when)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Maybe (fromMaybe, isJust, isNothing, listToMaybe, maybeToList)
 import NanoUI.Internal.Context
-  ( Context (..)
-  , CustomDrawingEntry (..)
-  , anyAnimating
-  , anySelectOpen
-  , damageWidget
-  , getFocusables
-  , getPrevRect
-  , getStore
-  , getsInteraction
-  , intBool
-  , intKey
-  , isDirty
-  , isDisabled
-  , lookupCustomDrawing
-  , markDirty
-  , markDirtyCovered
-  , setAnimationValue
-  , modalActive
-  , modifyInteraction
-  , pointerHeldOffLayers
-  , startAnimation
-  , tabConsumed
-  , InteractionState (..)
-  )
 import NanoUI.Internal.Frame.Hit
-  ( nodeClippedHit
-  , nodeInteractionHit
-  , nodeOwnsPointer
-  , nodePointVisible
-  , overlayHitAllowed
-  , overlayHitRoot
-  , topmostFloating
-  , widgetIdInSubtree
-  , withWidgetNode
-  )
 import NanoUI.Internal.Frame.Select (focusedComboNode, overlayMenuOwnerAt)
 import NanoUI.Internal.Frame.TextArea (collapseTextFieldSelection)
 import NanoUI.Internal.Frame.TextInput (nodeTextFieldGeom)
 import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Internal.Input
-  ( Input (..)
-  , Key (..)
-  , inputInteracted
-  , inputKeysElem
-  , inputModifiers
-  , inputMousePos
-  , inputMousePressed
-  , inputMouseReleased
-  , inputMouseRightPressed
-  , inputMouseRightReleased
-  , inputPointerHeld
-  , modShift
-  )
 import NanoUI.Internal.Layout.Arena
-  ( isWidgetNode
-  , NodeClass (PointerNodes, SelectionNodes)
-  , NodeIdx
-  , NodeType (..)
-  , findClassNodeM
-  , floatingNodeCount
-  , foldNodesM
-  , forClassNodes_
-  , getNodeRect
-  , getNodeType
-  , getParent
-  , getRect
-  , getStyleIdx
-  , getWidgetId
-  , setNodeValue
-  , topModalNode
-  )
 import NanoUI.Internal.Monad (ifM, unlessM, whenM, (<&&>))
 import NanoUI.Internal.Store (fieldInt, findSlot, lookupSlot)
 import NanoUI.Internal.Types (DamageBounds (..), Rect (..), V2 (..), defaultDamageSlop, rectContains)

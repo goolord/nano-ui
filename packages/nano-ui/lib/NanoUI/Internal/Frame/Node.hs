@@ -17,29 +17,7 @@ import NanoUI.Internal.Context (Context (..))
 import NanoUI.Internal.Draw.Types (TextFont (..))
 import NanoUI.Internal.Font (FontMetrics, ScrollBarSlot, isDefaultNodeFont, measureTextIO)
 import NanoUI.Internal.Frame.Scroll.Geometry
-  ( ScrollBarLayout
-  , ScrollConfig
-  , decodeScrollConfig
-  , scrollBarLayout
-  , scrollBarLayouts2D
-  , scrollChromeSuppressed
-  , scrollConfigNative2D
-  , scrollContentClip
-  , scrollViewportClip2D
-  )
 import NanoUI.Internal.Layout.Arena
-  ( DirTag (..)
-  , NodeArena
-  , NodeIdx
-  , NodeType (..)
-  , getDirection
-  , getNodeFontSize
-  , getNodeType
-  , getNodeValue
-  , getPadding
-  , getScrollContentW
-  , getStyleIdx
-  )
 import NanoUI.Internal.Layout.Solve (scrollBarSlotOf)
 import NanoUI.Internal.Style (FontVariant (..), Padding, TextDecoration (..))
 import NanoUI.Internal.Types (Rect)

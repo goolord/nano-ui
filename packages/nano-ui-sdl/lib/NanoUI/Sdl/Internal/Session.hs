@@ -9,21 +9,9 @@ import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Maybe (fromMaybe, isNothing)
 import NanoUI.Backend (Input (..), clearEphemeral, emptyInput)
 import NanoUI.Runner
-  ( SessionDriver (..)
-  , newDrawingLock
-  , runSessionLoop
-  , shouldRedrawFrame
-  , tryWithDrawingLock
-  )
 import NanoUI.Testing (Context, newPixelContext, registerImage, withTheme)
 import NanoUI.Sdl.Internal.Cursor (syncPointerCursor)
 import NanoUI.Sdl.Internal.Input
-  ( SdlEvent (..)
-  , applyEvent
-  , isButtonEdge
-  , pollEvents
-  , waitEvent
-  )
 import NanoUI.Sdl.Internal.Display (installResizeWatch, pushRefreshEvent)
 import NanoUI.Sdl.Internal.Window (RgbaImage (..), SdlEnv (..), SdlOptions (..), syncDisplay, withSdl)
 import SDL3.Sys.Bindgen.Blendmode (sDL_BLENDMODE_BLEND)

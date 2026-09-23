@@ -23,31 +23,8 @@ import Control.Applicative ((<|>))
 import Control.Monad.Trans.Maybe (MaybeT (..))
 import Data.Maybe (isJust, isNothing)
 import NanoUI.Internal.Context
-  ( Context (..)
-  , PointerRoute (..)
-  , getsInteraction
-  , getPrevClipRect
-  , intKey
-  , modalActive
-  , InteractionState (..)
-  )
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Layout.Arena
-  ( NodeClass (FloatingNodes)
-  , NodeIdx
-  , NodeType (NodeModal, NodePopup, NodeScrollContainer, NodeWindow)
-  , findClassNodeRevM
-  , floatingNodeCount
-  , getClipRect
-  , getNodeRect
-  , getNodeType
-  , getParent
-  , getWidgetId
-  , lookupNodeByWidgetId
-  , topModalNode
-  , walkAncestors
-  , walkFloatingAncestors
-  )
 import NanoUI.Internal.Monad ((<&&>))
 import NanoUI.Internal.Types (Rect (..), V2 (..), rectContains, rectHit)
 

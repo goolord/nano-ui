@@ -20,10 +20,6 @@ import Data.IORef (readIORef)
 import Data.IntMap.Strict qualified as IM
 
 import NanoUI.Internal.Context.Core
-  ( getsInteraction
-  , getsOverlay
-  , modifyOverlay
-  )
 import NanoUI.Internal.Context.Types (Context (..), InteractionState (..), OverlayState (..), PointerRoute (..), intKey)
 import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Internal.Input (Input, Key (KeyEscape), inputKeys, inputKeysElem, withoutPointer)

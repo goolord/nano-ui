@@ -29,11 +29,6 @@ import Foreign.Storable (pokeByteOff)
 import NanoUI.Internal.Draw.Arena
 import NanoUI.Internal.Draw.Types (DrawArena (..), glyphAtlasTextureId, indexSize, vertexSize)
 import NanoUI.Internal.SIMD
-  ( concentricOffsetsSIMD
-  , pokeQuadGradientSIMD
-  , pokeQuadSIMD
-  , pokeVertexSIMD
-  )
 import NanoUI.Internal.Types (Color (..), Rect (..), forUpTo_, onGrid)
 
 {-# INLINE pushRect #-}

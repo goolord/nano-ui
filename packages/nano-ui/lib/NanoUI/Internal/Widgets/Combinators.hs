@@ -11,14 +11,6 @@ import Control.Monad (when)
 import Data.Text (Text)
 import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context
-  ( Context
-  , intKey
-  , isDisabled
-  , recordSlot
-  , registerFocusable
-  , writeSlot
-  , writeStoreBool
-  )
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Store (fieldInt, Field, boolInt)
 import NanoUI.Internal.Layout.Arena (NodeType (..))
@@ -26,13 +18,6 @@ import NanoUI.Internal.Monad (Ui, askContext, nextId, uiIO)
 import NanoUI.Internal.Style (Layout (..))
 import NanoUI.Internal.Widgets.Behavior (keyActivated)
 import NanoUI.Internal.Widgets.Node
-  ( Response (..)
-  , addWidgetStyled
-  , inertResponse
-  , respClicked
-  , setChanged
-  , setClicked
-  )
 
 -- | A button, given whether it is enabled, its value, and a style index for
 -- active, sort, badge, or close chrome: the shared activation path for

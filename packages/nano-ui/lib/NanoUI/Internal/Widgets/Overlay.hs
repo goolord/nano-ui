@@ -14,62 +14,17 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context
-  ( Context (..)
-  , beginModal
-  , endModal
-  , getPrevRect
-  , getStore
-  , intKey
-  , seedFloatingPanel
-  )
 import NanoUI.Internal.Input
-  ( inputWindowSize
-  )
 import NanoUI.Internal.Layout.Arena (NodeType (..), addNodeFromLayout)
 import NanoUI.Internal.Monad
-  ( Ui
-  , askContext
-  , askInput
-  , uiIO
-  , withKey
-  )
-import NanoUI.Internal.Store (Slot (..), fieldPoint, lookupSlot, slotKey)
+import NanoUI.Internal.Store (fieldPoint, lookupSlot)
 import NanoUI.Internal.Style
-  ( AlignX (..)
-  , AlignY (..)
-  , Direction (..)
-  , Layout (..)
-  , Padding (..)
-  , Sizing (..)
-  , alignMid
-  , defaultLayout
-  , fillW
-  , fixedH
-  , fixedWH
-  , gap
-  , grow
-  , padB
-  , padT
-  , tight
-  , windowMargin
-  , windowPad
-  )
 import NanoUI.Internal.Types (Rect (..), Size (..), clamp, rectNonEmpty)
 import NanoUI.Internal.WidgetText (buttonCloseTrailing, buttonFlagClose)
 import NanoUI.Internal.Widgets.Combinators (buttonStyledEx)
 import NanoUI.Internal.Widgets.Popup (floatingOverlay)
-import NanoUI.Internal.Widgets.Layout
-  ( columnWith
-  , flex
-  , labelEx
-  , row'
-  , scrollWith
-  , separator
-  )
+import NanoUI.Internal.Widgets.Layout hiding (panel)
 import NanoUI.Internal.Widgets.Node
-  ( Response (..)
-  , respClicked
-  )
 
 -- | A window's chrome above its body: the title bar, the 10px above it and
 -- the rule under it, which the frame paints ('windowChromeSepH').

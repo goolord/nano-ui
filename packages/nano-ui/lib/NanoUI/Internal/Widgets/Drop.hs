@@ -18,17 +18,9 @@ import Control.Monad (when)
 import Data.Text (Text)
 import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context
-  ( getStore
-  , intKey
-  , modifyStore
-  )
 import NanoUI.Internal.Input
-  ( DropEvent (..)
-  , DropType (..)
-  , inputDrops
-  )
 import NanoUI.Internal.Monad (Ui, askContext, askDefaultLayout, askInput, nextId, uiIO)
-import NanoUI.Internal.Store (Slot (..), deleteSlot, fieldPoint, flagSlot, insertSlot, lookupSlot, setFlagSlot, slotKey)
+import NanoUI.Internal.Store (deleteSlot, fieldPoint, flagSlot, insertSlot, lookupSlot, setFlagSlot)
 import NanoUI.Internal.Style (Layout)
 import NanoUI.Internal.Types (Rect, V2 (..), rectContains)
 import NanoUI.Internal.Layout.Arena (NodeType (..))
