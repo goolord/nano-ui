@@ -1,4 +1,5 @@
--- | Controlled radio groups over zero-based option indices or bounded enum values.
+-- | Controlled radio groups over zero-based option indices or bounded enum
+-- values. Each option is a button in the choice look ('buttonFlagChoice').
 module NanoUI.Internal.Widgets.Radio
   ( radio
   , radio'
@@ -23,10 +24,11 @@ import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Monad (Ui, freshWidget, nextId, uiIO, withKey)
 import NanoUI.Internal.Style (Layout, defaultLayout, fillW, gap, tight)
 import NanoUI.Internal.Types (clamp)
+import NanoUI.Internal.WidgetText (buttonFlagChoice)
 import NanoUI.Internal.Widgets.Behavior (KeyNav (..), useKeyNav)
 import NanoUI.Internal.Widgets.Combinators (finishInput, withBoundedIndex)
 import NanoUI.Internal.Widgets.Layout (column')
-import NanoUI.Internal.Widgets.Node (Response (..), addWidgetStyled, tagContainer)
+import NanoUI.Internal.Widgets.Node (Response (..), addWidgetStyled, moveSelection, tagContainer)
 
 radioLay :: Layout
 radioLay = tight (fillW defaultLayout)
@@ -65,14 +67,16 @@ radio' options index =
       !selNav = clamp 0 (len - 1) (sel + navDelta)
       option i txt = do
         wid <- nextId
-        addWidgetStyled wid NodeRadio txt (if selNav == i then 1 else 0) radioLay i
+        -- Visual style 1 draws a ring.
+        addWidgetStyled wid NodeButton txt (if selNav == i then 1 else 0) radioLay (buttonFlagChoice + 1)
     column' radioGroupLay $ do
       tagContainer gid
       resps <- zipWithM option [0 ..] opts
+      let final = fromMaybe selNav (findIndex rawRespClicked resps)
+      uiIO (moveSelection ctx selNav final (zip [0 ..] resps))
       -- Compare with the caller's index, as 'NanoUI.Internal.Widgets.Select' does, so a
       -- selection stored between frames still reports a change.
-      let clicked = findIndex rawRespClicked resps
-      finishInput fieldInt ctx gid given (mconcat resps) (fromMaybe selNav clicked)
+      finishInput fieldInt ctx gid given (mconcat resps) final
 
 -- | Radio buttons for every value of a bounded enum, labelled by @encode@.
 {-# INLINE boundedRadio #-}

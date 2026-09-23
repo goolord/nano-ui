@@ -138,8 +138,8 @@ paintTextAreaNode PaintEnv {peContext = ctx, peDrawArena = da} idx (Rect x y w h
   paintStyledRect da style (Rect x y w h)
   drawTextAreaContentWith da ctx areaFm idx x y w h style
 
--- | Generic foreground / chrome widget (button, checkbox, radio, slider,
--- select, tree row, color swatch, table / tab header, ...). Splits into a
+-- | Generic foreground / chrome widget (button, checkbox, radio option, tree
+-- row, slider, select, color swatch, table / tab header, ...). Splits into a
 -- background pass and a label pass, both behind NOINLINE seams.
 {-# NOINLINE paintWidget #-}
 paintWidget :: PaintEnv -> NodeIdx -> NodeType -> Rect -> IO ()
@@ -178,16 +178,17 @@ paintWidgetBackground env idx nt style si menuRowRect value (Rect x y w h) = do
       !isTable = isButton && hasFlag buttonFlagTable si
       !isMenuItem = isButton && hasFlag buttonFlagMenu si
       !isMenu = isMenuItem || (isButton && hasFlag buttonFlagMenuBar si)
+      !isChoice = isButton && hasFlag buttonFlagChoice si
+      !isRow = isButton && hasFlag buttonFlagRow si
       !hasBg = colorA (styleBg style) > 0
       !opaqueBg
         | isMenu = hasBg
-        | isClose || isTab = False
-        | isTable || nt == NodeTree = hasBg
+        | isClose || isTab || isChoice = False
+        | isTable || isRow = hasBg
         | otherwise =
-            nt /= NodeCheckbox && nt /= NodeRadio && nt /= NodeSlider
-              && nt /= NodeTextInput && nt /= NodeTextArea && nt /= NodeColorPicker
+            nt /= NodeSlider && nt /= NodeTextInput && nt /= NodeTextArea && nt /= NodeColorPicker
   when opaqueBg $ fillStyledRect da style menuRowRect
-  when (opaqueBg && not (isTab || isTable || isMenu) && nt /= NodeTree) $
+  when (opaqueBg && not (isTab || isTable || isMenu || isRow)) $
     strokeStyledRect da style (Rect x y w h)
   when isMenuItem $ do
     wid <- getWidgetId (peNodeArena env) idx
@@ -199,13 +200,13 @@ paintWidgetBackground env idx nt style si menuRowRect value (Rect x y w h) = do
     paintTabHeader da theme (buttonVisualStyle si) (value > 0.5) style x y w h
   when isTable $
     paintTableHeader da theme (value > 0.5) style x y w h
+  when isChoice $
+    drawChoiceControl da fm style theme x y h value (buttonVisualStyle si == 0)
+  when isRow $ do
+    let (depth, hasKids, expanded) = treeDecodeStyle si
+    when hasKids $
+      drawTreeChevron da fm x y h depth expanded (styleFg style)
   case nt of
-    NodeCheckbox -> drawChoiceControl da fm style theme x y h value True
-    NodeRadio -> drawChoiceControl da fm style theme x y h value False
-    NodeTree -> do
-      let (_, depth, hasKids, expanded) = treeDecodeStyle si
-      when hasKids $
-        drawTreeChevron da fm x y h depth expanded (styleFg style)
     NodeSlider -> paintSliderBody env x y w h value
     NodeButton -> when isClose $ drawCloseIcon da (buttonVisualStyle si == buttonCloseTrailing) x y w h (styleFg style)
     NodeSelect -> drawSelectChevron da False x y w h (styleFg style)
@@ -374,7 +375,7 @@ drawSearchMagnifier da (Rect x y w h) col = do
   pushRoundedStroke da (Rect (cx - r0) (cy - r0) (2 * r0) (2 * r0)) r0 t col
   pushLine da (cx + startOff) (cy + startOff) (cx + endOff) (cy + endOff) (t * 0.8) col
 
--- | The box of a checkbox (@isCheckbox@) or radio button at @x@, centred in
+-- | The box of a checkbox (@isCheckbox@) or radio option at @x@, centred in
 -- a slot at most 4 pixels taller than it within @y h@. A checked checkbox is
 -- a solid accent box with a check mark; otherwise the box is a well, and a
 -- checked radio's has an accent ring and dot.

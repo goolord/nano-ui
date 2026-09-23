@@ -5,6 +5,8 @@ module Spec
   , spec
   , pixelSpec
   , arenaRects
+  , buttonValues
+  , widgetValue
   , withMonospaceFonts
   , module Control.Monad
   , module Data.IORef
@@ -24,7 +26,7 @@ import NanoUI.Testing
 import NanoUI.Testing.Assert
 import NanoUI.Testing.Harness
 import NanoUI.Internal.Context (Context (..))
-import NanoUI.Internal.Layout.Arena (arenaCount, getNodeRect)
+import NanoUI.Internal.Layout.Arena (NodeType (NodeButton), arenaCount, getNodeRect, getNodeType, getNodeValue, lookupNodeByWidgetId)
 
 -- | A test's name, the context it runs on, and the test, which bumps the
 -- failure counter for each failed check.
@@ -50,3 +52,18 @@ arenaRects :: Context -> IO [Rect]
 arenaRects ctx = do
   n <- arenaCount (ctxNodeArena ctx)
   mapM (getNodeRect (ctxNodeArena ctx)) [0 .. n - 1]
+
+-- | The value of every button in arena order: which of a group's options,
+-- rows or headers is marked selected, in a view of that group alone.
+buttonValues :: Context -> IO [Float]
+buttonValues ctx = do
+  let na = ctxNodeArena ctx
+  n <- arenaCount na
+  fmap concat . forM [0 .. n - 1] $ \i -> do
+    nt <- getNodeType na i
+    if nt == NodeButton then pure <$> getNodeValue na i else pure []
+
+-- | The value of widget @wid@'s node this frame, such as whether a checkbox
+-- is drawn checked.
+widgetValue :: Context -> WidgetId -> IO (Maybe Float)
+widgetValue ctx wid = lookupNodeByWidgetId (ctxNodeArena ctx) wid >>= traverse (getNodeValue (ctxNodeArena ctx))

@@ -346,16 +346,17 @@ computeWidgetLabel ctx nt txt si fontSizeVal ax w h
       let (ix, _) = widgetContentInset fm
           (tx, used) = case nt of
             NodeButton
+              | hasFlag buttonFlagChoice si -> (checkboxLeading fm, tw)
+              | hasFlag buttonFlagRow si ->
+                  let (depth, _, _) = treeDecodeStyle si
+                   in (treeRowLeading fm depth, tw)
               | hasFlag buttonFlagTable si -> alignedTextPen ax 0 w tableCellInset fm txt
               | hasFlag buttonFlagMenu si ->
                   let inset = menuItemPadX + ix
                    in (inset, min tw (max 0 (w - inset - ix)))
               | otherwise -> alignedTextPen ax 0 w 0 fm txt
-            NodeSelect -> (ix, min tw (w - ix - selectChevronReserve))
-            NodeTree ->
-              let (_, depth, _, _) = treeDecodeStyle si
-               in (treeRowLeading fm depth, tw)
-            _ -> (checkboxLeading fm, tw)
+            -- A select, the other widget with a centred label.
+            _ -> (ix, min tw (w - ix - selectChevronReserve))
       let !placement = WidgetTextPlacement txt tx (centeredTextY fm 0 h th) used th
       pure (Just placement)
 

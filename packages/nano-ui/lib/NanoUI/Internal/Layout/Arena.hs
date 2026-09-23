@@ -182,8 +182,8 @@ data NodeType
   -- ^ A one-pixel rule.
   | NodeButton
   -- ^ A button. Flags in its style index turn it into a close button, a tab,
-  -- a table header, a menu-bar title or a menu item.
-  | NodeCheckbox
+  -- a table header, a menu-bar title, a menu item, a checkbox or radio option
+  -- (its box or ring painted beside its label), or a tree row.
   | NodeSlider
   | NodeTextInput
   -- ^ A single-line text field. Flags in its style index turn it into a search
@@ -206,59 +206,44 @@ data NodeType
   -- ^ A window inside the application's window. Floating.
   | NodeBox
   -- ^ A solid rectangle. Its style index is the fill colour's 32-bit word.
-  | NodeRadio
-  -- ^ A radio button. Its style index is its option's index in the group.
   | NodeColorPicker
   -- ^ One part of a colour picker. Its style index says which part.
-  | NodeTree
-  -- ^ A row of a tree view. Its style index packs the row's depth and whether
-  -- it has children and is expanded.
   | NodePopup
   -- ^ A popup such as a menu or a tooltip. Floating.
   | NodeDrawing
   -- ^ A widget the application draws: a custom widget or a drawing.
   deriving (Eq, Show, Enum, Bounded)
 
--- | Whether the node is a control the pointer can hover: a button, checkbox,
--- radio button, slider, text field, text area, select, colour picker part,
--- tree row or drawing. Hover detection and the layout of widget labels use
--- it. Labels, images, boxes, spacers, separators and containers are not.
+-- | Whether the node is a control the pointer can hover: a button, slider,
+-- text field, text area, select, colour picker part or drawing. Hover
+-- detection and the layout of widget labels use it. Labels, images, boxes,
+-- spacers, separators and containers are not.
 isWidgetNode :: NodeType -> Bool
 isWidgetNode nt =
   case nt of
     NodeButton -> True
-    NodeCheckbox -> True
-    NodeRadio -> True
     NodeSlider -> True
     NodeTextInput -> True
     NodeTextArea -> True
     NodeSelect -> True
     NodeColorPicker -> True
-    NodeTree -> True
     NodeDrawing -> True
     _ -> False
 
 -- | Whether the node packs a font into its style index: a label or a text
--- field. Every other type keeps its own data there (a radio's option index, a
--- colour picker part, a tab's look), so its style must not be read as a font.
+-- field. Every other type keeps its own data there (a colour picker part, a
+-- tab's look), so its style must not be read as a font.
 {-# INLINE packsNodeFont #-}
 packsNodeFont :: NodeType -> Bool
 packsNodeFont nt = nt == NodeText || nt == NodeTextInput
 
 -- | Whether the node paints one line of label text centered vertically in its
--- box: a button, select, tree row, checkbox or radio button. The solver takes
--- that line's baseline as the node's baseline when a row aligns its children
--- on their baselines, and "NanoUI.Internal.Frame.Spans" caches where the label goes
+-- box: a button or select. The solver takes that line's baseline as the
+-- node's baseline when a row aligns its children on their baselines, and
+-- "NanoUI.Internal.Frame.Spans" caches where the label goes
 -- (@computeWidgetLabel@).
 hasCenteredLabel :: NodeType -> Bool
-hasCenteredLabel nt =
-  case nt of
-    NodeButton -> True
-    NodeSelect -> True
-    NodeTree -> True
-    NodeCheckbox -> True
-    NodeRadio -> True
-    _ -> False
+hasCenteredLabel nt = nt == NodeButton || nt == NodeSelect
 
 -- | Whether the node lays out children: a plain container, scroll container,
 -- panel, modal, window or popup.
@@ -292,9 +277,6 @@ data NodeClass
   = PointerNodes
   -- ^ The nodes a pointer hit test can want: the controls of 'isWidgetNode'
   -- and the scroll containers ('isScrollNode').
-  | SelectionNodes
-  -- ^ Checkboxes, radio buttons and tree rows, whose node value mirrors
-  -- selection state in the store.
   | DrawingNodes
   -- ^ Widgets the application draws ('NodeDrawing').
   | FloatingNodes
@@ -947,8 +929,6 @@ addNode na nt parent Layout {..} = do
   when (isFloatingNode nt) $ pushClassNode na FloatingNodes idx
   when (isWidgetNode nt || isScrollNode nt) $ do
     pushClassNode na PointerNodes idx
-    when (nt == NodeCheckbox || nt == NodeRadio || nt == NodeTree) $
-      pushClassNode na SelectionNodes idx
     when (nt == NodeDrawing) $ pushClassNode na DrawingNodes idx
   writeIORef (naCount na) (idx + 1)
   pure idx

@@ -139,9 +139,6 @@ runFrameEff unlift ctx frameInp ui = do
   whenM (themeScopesChanged ctx) $ do
     damageFull ctx
     modifyIORef' (ctxMetricGen ctx) (+ 1)
-  -- Sync widget node values (checkbox/radio/tree) from the store before measure
-  -- so labels and layout reflect the current state.
-  syncWidgetLabels ctx
   let
     size@(Size w h) = inputWindowSize frameInp
   layoutArena ctx size True
@@ -174,10 +171,9 @@ runFrameEff unlift ctx frameInp ui = do
   finalizeSelectPick ctx dropInp
   closeSelectOnOutsideClick ctx frameInp
   storeAfter <- getStore ctx
-  -- Node values follow the store, but no layout input does, so the solve
-  -- stands unless the arena's inputs or a custom measure moved.
+  -- No layout input follows the store, so the solve stands unless a custom
+  -- measure moved.
   when (mirrorStoresChanged storeBuilt storeAfter) $ do
-    syncWidgetLabels ctx
     layoutArena ctx size True
     applyScrollOffsets ctx
   updatePrevRects ctx

@@ -127,9 +127,6 @@ cursorKindAt ctx wid mouse inp
             Nothing ->
               getNodeType (ctxNodeArena ctx) idx >>= \case
                 NodeButton -> whenVisible UiCursorPointer
-                NodeCheckbox -> whenVisible UiCursorPointer
-                NodeRadio -> whenVisible UiCursorPointer
-                NodeTree -> whenVisible UiCursorPointer
                 NodeSelect -> maybe UiCursorDefault (over UiCursorPointer) <$> hitRect
                 NodeColorPicker -> pure UiCursorPointer
                 NodeTextInput ->

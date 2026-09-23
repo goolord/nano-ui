@@ -240,6 +240,13 @@
 
 - Builds with GHC 9.10 through 9.14 (`base >=4.20 && <4.23`).
 - `TextInputConfig` has a field `ticAdornments`, and is no longer `Eq`.
+- Checkboxes, radio options and tree rows are `NodeButton`s with a look of
+  their own, as tab headers are; they look and behave as before.
+  `NodeType` in `NanoUI.Internal.Layout.Arena` loses `NodeCheckbox`,
+  `NodeRadio` and `NodeTree`, and `NodeClass` loses `SelectionNodes`: a
+  group moves its selection to the click or key read after its members were
+  added, so the frame no longer copies selection state from the store into
+  the nodes after the view.
 - `SessionDriver` in `NanoUI.Runner`: the session loop checks every event for
   Ctrl+C itself, so `sdIsHardQuit` is gone, and `sdDraw` returns only whether
   another frame is due (`IO Bool`); no backend changed the input it was given.

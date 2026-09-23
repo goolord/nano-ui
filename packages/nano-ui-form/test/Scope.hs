@@ -33,7 +33,7 @@ import NanoUI.Form.Internal.Backend
   )
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Layout.Arena
-  ( NodeType (NodeCheckbox, NodeTextArea)
+  ( NodeType (NodeButton, NodeTextArea)
   , arenaCount
   , getNodeType
   , getRect
@@ -55,8 +55,9 @@ runScopeTests = do
   testResetWidgets
   testResetTextArea
 
+-- | A checkbox is a button, and these forms have no other buttons.
 checkboxes :: Context -> IO [(WidgetId, Rect)]
-checkboxes = controlsOf NodeCheckbox
+checkboxes = controlsOf NodeButton
 
 controlsOf :: NodeType -> Context -> IO [(WidgetId, Rect)]
 controlsOf wanted ctx = do

@@ -499,9 +499,6 @@ measureWidget env@SolveEnv {seArena = na, seArrays = a, seMs = Measurers {msFm =
   (rawW, rawH) <-
     case nt of
       NodeSlider -> pure (60, max sliderHandleDiameter (sliderTrackHeight + 2 * sliderHandleSlack))
-      NodeTree -> do
-        let (_, depth, _, _) = treeDecodeStyle si
-        measureMarkedWidget fm measure txt (treeRowLeading fm depth) (treeItemPadding fm)
       NodeSelect -> do
         opts <- getOptions na idx
         let choices = if null opts then [""] else opts
@@ -531,8 +528,11 @@ measureWidget env@SolveEnv {seArena = na, seArrays = a, seMs = Measurers {msFm =
       -- A text area resolves its own font as it draws ('resolveTextAreaFont').
       NodeTextArea -> pure (textInputMinWidth, max 96 (textInputFieldHeight baseFm * 4))
       _
-        | nt == NodeCheckbox || nt == NodeRadio ->
+        | nt == NodeButton && hasFlag buttonFlagChoice si ->
             measureMarkedWidget fm measure txt (checkboxLeading fm) (0, 0)
+        | nt == NodeButton && hasFlag buttonFlagRow si -> do
+            let (depth, _, _) = treeDecodeStyle si
+            measureMarkedWidget fm measure txt (treeRowLeading fm depth) (treeItemPadding fm)
         | otherwise -> do
             let body
                   | T.null txt = " "

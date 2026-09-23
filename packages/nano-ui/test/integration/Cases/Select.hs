@@ -15,6 +15,7 @@ tests =
   , spec "select-dropdown-span-colors" runSelectDropdownSpanColorsTest
   , spec "tree-select" runTreeSelectTest
   , spec "tree-keyboard" runTreeKeyboardTest
+  , spec "radio-click-marks" runRadioClickMarksTest
   ]
 
 runSliderCursorTest :: Context -> IORef Int -> IO ()
@@ -95,6 +96,25 @@ runTreeSelectTest ctx failed = do
   _ <- runFrame ctx press ui
   ((_, sel), _, _, _) <- runFrame ctx release ui
   assertEq failed sel 1
+  -- The click's frame draws the clicked row selected, though the rows were
+  -- added before the click was read.
+  assertEq failed [0, 1] =<< buttonValues ctx
+
+-- | A click moves a radio group's mark on the frame it lands.
+runRadioClickMarksTest :: Context -> IORef Int -> IO ()
+runRadioClickMarksTest ctx failed = do
+  selRef <- newIORef (0 :: Int)
+  let inp0 = withInput 200 120
+      ui = column (held selRef (radio' ["one", "two", "three"]))
+  _ <- warmup2 ctx inp0 ui
+  assertEq failed [1, 0, 0] =<< buttonValues ctx
+  spans <- collectTextSpans ctx
+  assertJust failed (spanRectOf "three" spans) $ \r -> do
+    let (press, release) = clickPair inp0 (spanCenter r)
+    _ <- runFrame ctx press ui
+    ((_, sel), _, _, _) <- runFrame ctx release ui
+    assertEq failed sel 2
+    assertEq failed [0, 0, 1] =<< buttonValues ctx
 
 -- A tree renders expanded, moves its selection with the arrow keys, and
 -- Enter collapses the selected parent.
@@ -110,6 +130,7 @@ runTreeKeyboardTest ctx failed = do
   _ <- runFrame ctx (tabInp inp0) ui
   ((_, sel1), _, _, _) <- runFrame ctx (keyInp KeyDown inp0) ui
   assertEq failed sel1 1
+  assertEq failed [0, 1, 0] =<< buttonValues ctx
   ((_, sel0), _, _, _) <- runFrame ctx (keyInp KeyUp inp0) ui
   assertEq failed sel0 0
   _ <- runFrame ctx (keyInp KeyDown inp0) ui

@@ -15,9 +15,6 @@ import NanoUI.Emit qualified as Emit
 import NanoUI.Internal.Layout.Arena
   ( NodeType (..)
   , arenaArrays
-  , foldNodesM
-  , getNodeType
-  , getNodeValue
   , TagCol (..)
   , TreeCol (..)
   , writeTagEnum
@@ -309,38 +306,29 @@ runHoverDamageTest ctx failed = do
   assertSmall =<< takeDamage ctx
 
 
--- | An unclicked checkbox must keep rendering its initial value; the frame's
--- post-UI value sync must not reset it to unchecked when no state is stored.
+-- | An unclicked checkbox must keep rendering its initial value when no state
+-- is stored, and a click must show at once.
 runCheckboxInitialTest :: Context -> IORef Int -> IO ()
 runCheckboxInitialTest ctx failed = do
   checkedRef <- newIORef True
   let inp0 = withInput 200 100
       ui = column (held checkedRef (checkbox' "Opt"))
   (resp, _) <- warmup2 ctx inp0 ui
-  assertCheckboxNodeValue failed ctx 1
+  let drawnAs v = assertEq failed (Just v) =<< widgetValue ctx (respId resp)
+  drawnAs 1
   let Rect rx ry _ _ = respRect resp
       (press, release) = clickPair inp0 (V2 (rx + 1) (ry + 0.5))
   _ <- runFrame ctx press ui
   ((_, checked), _, _, _) <- runFrame ctx release ui
   assert failed (not checked)
-  assertCheckboxNodeValue failed ctx 0
+  drawnAs 0
   -- The toggled value persists on an idle frame.
   ((_, idle), _, _, _) <- runFrame ctx inp0 ui
   assert failed (not idle)
   _ <- runFrame ctx press ui
   ((_, checked2), _, _, _) <- runFrame ctx release ui
   assert failed checked2
-  assertCheckboxNodeValue failed ctx 1
-
-assertCheckboxNodeValue :: IORef Int -> Context -> Float -> IO ()
-assertCheckboxNodeValue failed ctx expected = do
-  let na = ctxNodeArena ctx
-  vals <- foldNodesM na (\acc i -> do
-    nt <- getNodeType na i
-    if nt == NodeCheckbox then (: acc) <$> getNodeValue na i else pure acc) []
-  case vals of
-    [v] -> assertEq failed v expected
-    vs -> assert failed (vs == [expected])
+  drawnAs 1
 
 runSliderFillWidthTest :: Context -> IORef Int -> IO ()
 runSliderFillWidthTest ctx failed = do

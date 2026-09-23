@@ -9,18 +9,16 @@ module NanoUI.Internal.Widgets.Tabs
 where
 
 import Control.Applicative ((<|>))
-import Control.Monad (forM_, when, zipWithM)
+import Control.Monad (when, zipWithM)
 import Data.Foldable (toList)
 import Data.List (find)
 import Data.Maybe (fromMaybe, isJust, listToMaybe)
 import Data.Text (Text)
 import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context
-import NanoUI.Internal.Frame.Hit (withWidgetNode)
 import NanoUI.Internal.Frame.Scroll.Geometry (scrollAxisRange, scrollBare, scrollHorizontalHidden)
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Input (inputMousePos, inputScroll)
-import NanoUI.Internal.Layout.Arena (setNodeValue)
 import NanoUI.Internal.Monad (Ui, askInput, freshWidget, lastRect, nextId, requestFrame, uiIO, uiTheme, withKey)
 import NanoUI.Internal.Store (fieldFloat, findSlot, insertSlot)
 import NanoUI.Internal.Style
@@ -232,10 +230,7 @@ renderHeaders ctx tabStyle cur tabList = do
       hasChanged = nextTab /= cur
       resp = setChanged hasChanged (setClicked (not (null clickedKeys)) (foldMap snd keyed))
   when (hasChanged || isJust closedKey) requestFrame
-  -- The headers were built with the old selection: move it to the new one.
-  when hasChanged $ uiIO $ forM_ keyed $ \(k, r) ->
-    withWidgetNode ctx (respId r) () $ \i ->
-      setNodeValue (ctxNodeArena ctx) i (if k == nextTab then 1 else 0)
+  uiIO (moveSelection ctx cur nextTab keyed)
   pure (TabResponse resp closedKey nextTab, keyed)
 
 -- | One header: its key, its response, and whether its close button was clicked.

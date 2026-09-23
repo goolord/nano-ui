@@ -186,19 +186,18 @@ widgetVisualStyle ctx nt idx = do
   active <- readIORef (ctxActiveId ctx)
   focus <- readIORef (ctxFocusId ctx)
   animT <- getAnimationValue ctx wid
-  -- Only these node types consult the floating ancestor; skip the parent
-  -- walk for the common panel/text/button path.
-  let modalAware = nt == NodeCheckbox || nt == NodeRadio || nt == NodeTree || nt == NodeSlider
-  mFloat <- if modalAware then floatingAncestor ctx idx else pure Nothing
-  styleIdx <-
-    if nt == NodeButton || nt == NodeTree
-      then getStyleIdx (ctxNodeArena ctx) idx
-      else pure 0
+  styleIdx <- if nt == NodeButton then getStyleIdx (ctxNodeArena ctx) idx else pure 0
   let buttonFlag flag = nt == NodeButton && hasFlag flag styleIdx
       isClose = buttonFlag buttonFlagClose
       isTab = buttonFlag buttonFlagTab
       isTable = buttonFlag buttonFlagTable
       isMenu = buttonFlag buttonFlagMenu || buttonFlag buttonFlagMenuBar
+      isChoice = buttonFlag buttonFlagChoice
+      isRow = buttonFlag buttonFlagRow
+      -- Only these consult the floating ancestor; skip the parent walk for
+      -- the common panel/text/button path.
+      modalAware = isChoice || isRow || nt == NodeSlider
+  mFloat <- if modalAware then floatingAncestor ctx idx else pure Nothing
   theme <- nodeTheme ctx idx
   let isFocus = focus == wid
       isHot = wid == hot
@@ -210,24 +209,23 @@ widgetVisualStyle ctx nt idx = do
           NodeSelect -> focusBorder (themeButton theme)
           NodeColorPicker -> focusBorder (themeInput theme)
           NodeSlider -> clearStyle (themeInput theme)
-          NodeCheckbox -> clearStyle (themeButton theme)
-          NodeRadio -> clearStyle (themeButton theme)
-          NodeTree ->
-            let btn = themeButton theme
-                accent = themeAccent theme
-                unselectedBg = fromMaybe (styleBg (themePanel theme)) (stripeColor theme (treeDecodeStripe styleIdx))
-                treeStyle fill hoverT activeT =
-                  btn
-                    { styleBg = fill
-                    , styleHoverBg = lerpColor unselectedBg accent hoverT
-                    , styleActiveBg = lerpColor unselectedBg accent activeT
-                    , styleBorderWidth = 0
-                    , styleCornerRadius = 0
-                    }
-             in if val > 0.5
-                  then treeStyle (lerpColor unselectedBg accent 0.25) 0.35 0.45
-                  else treeStyle unselectedBg 0.12 0.22
           NodeButton
+            | isChoice -> clearStyle (themeButton theme)
+            | isRow ->
+                let btn = themeButton theme
+                    accent = themeAccent theme
+                    unselectedBg = fromMaybe (styleBg (themePanel theme)) (stripeColor theme (treeDecodeStripe styleIdx))
+                    rowStyle fill hoverT activeT =
+                      btn
+                        { styleBg = fill
+                        , styleHoverBg = lerpColor unselectedBg accent hoverT
+                        , styleActiveBg = lerpColor unselectedBg accent activeT
+                        , styleBorderWidth = 0
+                        , styleCornerRadius = 0
+                        }
+                 in if val > 0.5
+                      then rowStyle (lerpColor unselectedBg accent 0.25) 0.35 0.45
+                      else rowStyle unselectedBg 0.12 0.22
             | isMenu -> menuItemVisualStyle theme val
             | isClose -> closeButtonStyle theme isHot animT
             | isTab -> tabHeaderVisualStyle theme (buttonVisualStyle styleIdx) (val > 0.5)
@@ -247,7 +245,7 @@ widgetVisualStyle ctx nt idx = do
       bg
         | isFocus, nt == NodeTextInput || nt == NodeTextArea = styleActiveBg widgetBase
         | hashWidgetId wid == hashWidgetId active = styleActiveBg widgetBase
-        | nt == NodeCheckbox || nt == NodeRadio || nt == NodeSlider || isClose = styleBg widgetBase
+        | isChoice || isClose || nt == NodeSlider = styleBg widgetBase
         | isMenu = if isHot then styleHoverBg widgetBase else styleBg widgetBase
         | styleBg widgetBase == styleHoverBg widgetBase = styleBg widgetBase
         | otherwise = lerpColor (styleBg widgetBase) (styleHoverBg widgetBase) hotT

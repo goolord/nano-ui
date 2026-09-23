@@ -1,4 +1,5 @@
--- | Expandable tree rows with a controlled pre-order selection index.
+-- | Expandable tree rows with a controlled pre-order selection index. Each
+-- row is a button in the row look ('buttonFlagRow').
 module NanoUI.Internal.Widgets.Tree (TreeItem (..), tree, tree') where
 
 import Control.Monad (zipWithM)
@@ -22,7 +23,7 @@ import NanoUI.Internal.WidgetText (treeEncodeStyle)
 import NanoUI.Internal.Widgets.Behavior (KeyNav (..), useKeyNav)
 import NanoUI.Internal.Widgets.Combinators (finishInput)
 import NanoUI.Internal.Widgets.Layout (columnWith)
-import NanoUI.Internal.Widgets.Node (Response (..), addWidgetStyled, tagContainer)
+import NanoUI.Internal.Widgets.Node (Response (..), addWidgetStyled, moveSelection, tagContainer)
 
 -- | Label and child items for a tree row. An empty child list makes a leaf.
 data TreeItem = TreeItem {treeItemLabel :: !Text, treeItemChildren :: ![TreeItem]}
@@ -94,9 +95,9 @@ treeRow ::
 treeRow rowIdx (nodeIdx, depth, hasKids, lbl) selected expanded = do
   (wid, ctx) <- freshWidget
   inp <- askInput
-  let style = treeEncodeStyle nodeIdx depth hasKids (IS.member nodeIdx expanded) (odd rowIdx)
+  let style = treeEncodeStyle depth hasKids (IS.member nodeIdx expanded) (odd rowIdx)
       value = if selected == nodeIdx then 1 else 0
-  resp <- addWidgetStyled wid NodeTree lbl value (tight . fillW $ defaultLayout) style
+  resp <- addWidgetStyled wid NodeButton lbl value (tight . fillW $ defaultLayout) style
   uiIO $ registerFocusable ctx wid
   if not (rawRespClicked resp)
     then pure (resp, Nothing)
@@ -144,6 +145,7 @@ tree' key inputItems index =
       focus <- focusedWidget
       nav <- useKeyNav focus
       let (keySel, keyExp, mFocus) = treeKeyNav nav rows resps focus clickSel clickExp
+      uiIO (moveSelection ctx selected keySel [(i, r) | ((i, _, _, _), (r, _)) <- zip (toList rows) results])
       result <- finishInput fieldInt ctx groupId selected (fold resps) keySel
       uiIO (writeSlots ctx (slotWrite fieldIntSet groupKey keyExp))
       mapM_ (uiIO . writeIORef (ctxFocusId ctx)) mFocus

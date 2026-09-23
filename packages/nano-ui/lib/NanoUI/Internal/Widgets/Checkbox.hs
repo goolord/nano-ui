@@ -1,6 +1,7 @@
--- | Checkbox control.
+-- | Checkbox control: a button in the choice look ('buttonFlagChoice').
 module NanoUI.Internal.Widgets.Checkbox (checkbox, checkbox', checkboxWith, checkboxWith') where
 
+import Control.Monad (when)
 import Data.Text (Text)
 import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context (adoptSlot, registerFocusable)
@@ -8,8 +9,9 @@ import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Monad (Ui, freshWidget, uiIO)
 import NanoUI.Internal.Store (fieldInt, boolInt, intBool)
 import NanoUI.Internal.Style (Layout, defaultLayout)
+import NanoUI.Internal.WidgetText (buttonFlagChoice)
 import NanoUI.Internal.Widgets.Combinators (finishToggle)
-import NanoUI.Internal.Widgets.Node (Response, addWidget)
+import NanoUI.Internal.Widgets.Node (Response, addWidgetStyled, setWidgetValue)
 
 -- | Checkbox with a caption. Pass whether it is checked; the result is the
 -- state after this frame's click or Space/Enter.
@@ -34,5 +36,8 @@ checkboxWith' f txt checked = do
   (wid, ctx) <- freshWidget
   uiIO $ registerFocusable ctx wid
   current <- intBool <$> uiIO (adoptSlot fieldInt ctx wid (boolInt checked))
-  resp <- addWidget wid NodeCheckbox txt (if current then 1 else 0) (f defaultLayout)
-  finishToggle ctx wid current resp
+  resp <- addWidgetStyled wid NodeButton txt (if current then 1 else 0) (f defaultLayout) buttonFlagChoice
+  result@(_, value) <- finishToggle ctx wid current resp
+  -- The box shows this frame's click.
+  when (value /= current) $ uiIO (setWidgetValue ctx wid (if value then 1 else 0))
+  pure result

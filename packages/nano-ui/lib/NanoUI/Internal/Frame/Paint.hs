@@ -178,8 +178,8 @@ paintClippedChildren env idx rect = withClip (peDrawArena env) rect (walkChildre
 
 -- | Accent ring around the widget holding keyboard focus. Text fields and
 -- selects already swap in an accent border while focused, so they get none.
--- Tree rows fill their scroller edge to edge, so their ring sits just inside
--- the row; colour picker parts ring the square or bar they draw.
+-- Rows ('buttonFlagRow') fill their scroller edge to edge, so their ring sits
+-- just inside the row; colour picker parts ring the square or bar they draw.
 {-# NOINLINE paintFocusRing #-}
 paintFocusRing :: PaintEnv -> NodeIdx -> NodeType -> Rect -> IO ()
 paintFocusRing env idx nt rect = do
@@ -189,8 +189,9 @@ paintFocusRing env idx nt rect = do
       if nt == NodeColorPicker
         then colorPickerPartRect (peNodeArena env) idx rect
         else pure rect
+    isRow <- if nt == NodeButton then hasFlag buttonFlagRow <$> getStyleIdx (peNodeArena env) idx else pure False
     let (ring, radius)
-          | nt == NodeTree = (rectInflate (-1) target, 0)
+          | isRow = (rectInflate (-1) target, 0)
           | otherwise = (rectInflate 2 target, 4)
     pushRoundedStroke (peDrawArena env) ring radius 1.5 (themeFocusRing (peTheme env))
 

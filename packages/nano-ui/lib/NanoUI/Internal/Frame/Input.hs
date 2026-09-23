@@ -19,7 +19,6 @@ module NanoUI.Internal.Frame.Input
   , PressTargets (..)
   , targetsAt
   , constrainFocusToModal
-  , syncWidgetLabels
   , needsRedraw
   , pointerDragActive
   , textFieldActive
@@ -41,9 +40,8 @@ import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Monad (ifM, unlessM, whenM, (<&&>))
-import NanoUI.Internal.Store (fieldInt, findSlot, lookupSlot)
 import NanoUI.Internal.Types (DamageBounds (..), Rect (..), V2 (..), defaultDamageSlop, rectContains)
-import NanoUI.Internal.WidgetText (hasFlag, buttonFlagClose, buttonFlagMenuBar, buttonFlagMenu, treeDecodeStyle)
+import NanoUI.Internal.WidgetText (hasFlag, buttonFlagClose, buttonFlagMenuBar, buttonFlagMenu)
 
 -- | Move keyboard focus when Tab was pressed, backwards with Shift held. Focus
 -- steps through the widgets that called 'NanoUI.Internal.Context.registerFocusable'
@@ -209,8 +207,8 @@ widgetHitRect ctx nt idx x y w h = case nt of
 -- When the release is on the active widget and the view did not see it there,
 -- the widget's id goes into 'ctxClickedId', and the widget reports the click
 -- on the next frame, which this asks for. Only the node types in
--- 'postsLayoutClick' get one. A radio option or tab header reports it like any
--- other click, and its group picks it on that frame.
+-- 'postsLayoutClick' get one. A radio option, tree row or tab header reports
+-- it like any other click, and its group picks it on that frame.
 --
 -- A release on the widget also sets its hover animation to 1, so it paints as
 -- fully hovered at once.
@@ -247,8 +245,7 @@ finalizePointerRelease ctx@Context {ctxNodeArena = na} inp =
 -- | The node types for which 'finalizePointerRelease' turns a release the view
 -- missed into a click on the next frame.
 postsLayoutClick :: NodeType -> Bool
-postsLayoutClick nt =
-  nt == NodeButton || nt == NodeTree || nt == NodeSelect || nt == NodeCheckbox || nt == NodeRadio
+postsLayoutClick nt = nt == NodeButton || nt == NodeSelect
 
 -- | Whether the view's own hit test saw a release at @mouse@ on widget @wid@.
 -- It repeats the test of 'NanoUI.Internal.Widgets.Node.resolveInteraction': the widget
@@ -330,43 +327,6 @@ constrainFocusToModal ctx = do
     when (hashWidgetId focus /= 0) $ do
       ok <- widgetIdInSubtree ctx modal focus
       unless ok $ writeIORef (ctxFocusId ctx) (WidgetId 0)
-
--- | Copy selection state from the store into the node values the painter
--- reads. A checkbox's value becomes its stored flag. A radio option or a tree
--- row gets 1 when its group's stored selection names it, and 0 otherwise.
--- The frame runs this after the view, before layout, and again after the
--- input steps when they changed the store, so what is painted matches the
--- store even when the change came after the widget was declared. It visits
--- only the arena's 'SelectionNodes'.
-syncWidgetLabels :: Context -> IO ()
-syncWidgetLabels ctx@Context {ctxNodeArena = na} = do
-  store <- getStore ctx
-  forClassNodes_ na SelectionNodes $ \idx -> do
-    nt <- getNodeType na idx
-    wid <- getWidgetId na idx
-    let key = intKey wid
-        -- The group keeps its selection, as the index @ownOf@ reads from a
-        -- member's style index, in the Int slot of the parent node's widget
-        -- id.
-        syncGroup ownOf = do
-          parent <- getParent na idx
-          si <- getStyleIdx na idx
-          groupWid <- getWidgetId na parent
-          let own = ownOf si
-              selected = findSlot fieldInt own (intKey groupWid) store
-          setNodeValue na idx (if selected == own then 1 else 0)
-    case nt of
-      NodeCheckbox ->
-        -- A checkbox with no stored value keeps the value the view gave its
-        -- node.
-        forM_ (lookupSlot fieldInt key store) $ \v ->
-          setNodeValue na idx (if intBool v then 1 else 0)
-      -- A radio option's style index is its option index.
-      NodeRadio -> syncGroup id
-      -- A tree row packs its pre-order node index into the high bits of its
-      -- style index.
-      NodeTree -> syncGroup (\si -> let (nodeIdx, _, _, _) = treeDecodeStyle si in nodeIdx)
-      _ -> pure ()
 
 -- | Whether state or input changes require a frame. Arguments are previous
 -- and current input. Tests hover only after pointer motion; timed wake

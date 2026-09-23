@@ -36,6 +36,8 @@ module NanoUI.Internal.WidgetText
   , buttonFlagMenu
   , buttonFlagMenuBar
   , buttonFlagContent
+  , buttonFlagChoice
+  , buttonFlagRow
   , containerFlagInert
   , hasFlag
   , tableSortReserve
@@ -73,22 +75,20 @@ import qualified Data.Text as T
 intValueText :: Int -> Text
 intValueText = TL.toStrict . TB.toLazyText . TB.decimal
 
--- | styleIdx: nodeIdx in bits 11+, depth in 0-7, hasKids bit 8, expanded bit 9, stripeOdd bit 10.
-treeEncodeStyle :: Int -> Int -> Bool -> Bool -> Bool -> Int
-treeEncodeStyle nodeIdx depth hasKids expanded isOdd =
-  (nodeIdx `shiftL` 11)
+-- | A tree row's button style: 'buttonFlagRow', and its depth in bits 0-7,
+-- whether it has children in bit 8, is expanded in bit 9, and is an odd row
+-- in bit 10.
+treeEncodeStyle :: Int -> Bool -> Bool -> Bool -> Int
+treeEncodeStyle depth hasKids expanded isOdd =
+  buttonFlagRow
     .|. (if isOdd then 0x400 else 0)
     .|. (if expanded then 0x200 else 0)
     .|. (if hasKids then 0x100 else 0)
     .|. (depth .&. 0xff)
 
-treeDecodeStyle :: Int -> (Int, Int, Bool, Bool)
-treeDecodeStyle s =
-  ( s `shiftR` 11
-  , s .&. 0xff
-  , s .&. 0x100 /= 0
-  , s .&. 0x200 /= 0
-  )
+-- | A tree row's depth, and whether it has children and is expanded.
+treeDecodeStyle :: Int -> (Int, Bool, Bool)
+treeDecodeStyle s = (s .&. 0xff, s .&. 0x100 /= 0, s .&. 0x200 /= 0)
 
 -- | A tree row's stripe code for 'stripeColor', from its odd-row bit.
 treeDecodeStripe :: Int -> Int
@@ -369,8 +369,22 @@ buttonFlagMenuBar = 0x08000000
 buttonFlagContent :: Int
 buttonFlagContent = 0x04000000
 
+-- | A checkbox, or with visual style 1 a radio option: no fill, border or
+-- padding, its box or ring before its label, checked while its value is over
+-- a half.
+buttonFlagChoice :: Int
+buttonFlagChoice = 0x02000000
+
+-- | A tree row: square and borderless, its stripe's fill, or the accent's
+-- tint while its value is over a half. Its style packs the rest
+-- ('treeEncodeStyle').
+buttonFlagRow :: Int
+buttonFlagRow = 0x01000000
+
 buttonFlagMask :: Int
-buttonFlagMask = buttonFlagClose .|. buttonFlagTab .|. buttonFlagTable .|. buttonFlagMenu .|. buttonFlagMenuBar .|. buttonFlagContent
+buttonFlagMask =
+  buttonFlagClose .|. buttonFlagTab .|. buttonFlagTable .|. buttonFlagMenu .|. buttonFlagMenuBar .|. buttonFlagContent
+    .|. buttonFlagChoice .|. buttonFlagRow
 
 -- | Marks a @NodeContainer@ whose widgets are for display: the pointer passes
 -- through them to the widget they are drawn in

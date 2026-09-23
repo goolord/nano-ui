@@ -28,10 +28,12 @@ module NanoUI.Internal.Widgets.Node
   , addWidgetStyled
   , addWidgetWithOptions
   , tagContainer
+  , setWidgetValue
+  , moveSelection
   )
 where
 
-import Control.Monad (forM, when)
+import Control.Monad (forM, forM_, unless, when)
 import Data.IORef (readIORef, writeIORef)
 import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Text (Text)
@@ -44,7 +46,7 @@ import NanoUI.Internal.Monad (Ui, (<&&>), askContext, askFrameInput, askInput, l
 import NanoUI.Internal.WidgetText (containerFlagInert, packTextNodeStyle)
 import NanoUI.Internal.Style (Layout (..))
 import NanoUI.Internal.Types (Rect (..), rectContains, rectH, rectHit, rectUnion, rectW)
-import NanoUI.Internal.Frame.Hit (findNodeByWidgetId, nodeInteractionHit)
+import NanoUI.Internal.Frame.Hit (findNodeByWidgetId, nodeInteractionHit, withWidgetNode)
 
 -- | The innermost open container, or @-1@ at the root.
 currentParent :: Context -> IO Int
@@ -356,6 +358,19 @@ resolveInteraction ctx inp wid = do
         writeIORef (ctxReleaseClickedId ctx) wid
       let clicked = released || pending == wid
       pure $! Response wid rect hovered pressed clicked False False rightPressed rightClicked
+
+-- | Set the value of widget @wid@'s node, added this frame: a checkbox
+-- showing the click read after it was added.
+setWidgetValue :: Context -> WidgetId -> Float -> IO ()
+setWidgetValue ctx wid v = withWidgetNode ctx wid () (\i -> setNodeValue (ctxNodeArena ctx) i v)
+
+-- | Move a group's selection, which its members' values mark, from member
+-- @old@ to member @new@. The members were added with @old@ selected, since the
+-- click or key that moves it is read after them.
+moveSelection :: Eq k => Context -> k -> k -> [(k, Response)] -> IO ()
+moveSelection ctx old new members =
+  unless (old == new) $ forM_ members $ \(k, r) ->
+    when (k == old || k == new) $ setWidgetValue ctx (rawRespId r) (if k == new then 1 else 0)
 
 -- | Stamp the current container with a widget id (a radio or tree group key),
 -- so store keys and damage requests under that id resolve to the container.
