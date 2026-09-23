@@ -1,5 +1,5 @@
--- | Vertex and index writers for the draw buffers. Each vertex is written with
--- two 128-bit GHC SIMD stores (FloatX4#) instead of eight scalar stores.
+-- | Vertex and index writers for the draw buffers. They write with scalar
+-- stores, which measured no slower than packed 128-bit ones.
 module NanoUI.Internal.SIMD
   ( pokeVertexSIMD
   , pokeQuadSIMD
@@ -8,20 +8,11 @@ module NanoUI.Internal.SIMD
   , concentricOffsetsSIMD
   ) where
 
-import GHC.Ptr (Ptr (..))
+import Foreign.Ptr (Ptr)
 import Foreign.Storable (pokeByteOff)
-import GHC.Exts
-  ( Float (F#)
-  , Int (I#)
-  , packFloatX4#
-  , plusAddr#
-  , writeFloatOffAddrAsFloatX4#
-  )
-import GHC.IO (IO (..))
 import Data.Word (Word32, Word8)
 
--- | Writes one 32-byte Vertex (8 floats) into memory using two 128-bit SIMD stores
--- instead of 8 scalar stores.
+-- | Writes one 32-byte Vertex (8 floats: position, colour, uv) into memory.
 {-# INLINE pokeVertexSIMD #-}
 pokeVertexSIMD ::
   Ptr Word8 ->
@@ -35,20 +26,17 @@ pokeVertexSIMD ::
   Float ->
   Float ->
   IO ()
-pokeVertexSIMD (Ptr addr#) (I# byteOff#) (F# px#) (F# py#) (F# r#) (F# g#) (F# b#) (F# a#) (F# u#) (F# v#) = IO $ \s0 ->
-  -- Offsets are recomputed inline (the address add is a single lea) so the
-  -- simplified body stays free of let bindings; the inspection test guards
-  -- this with a NoAllocation obligation.
-  case packFloatX4# (# px#, py#, r#, g# #) of
-    v0# ->
-      case packFloatX4# (# b#, a#, u#, v# #) of
-        v1# ->
-          case writeFloatOffAddrAsFloatX4# (plusAddr# addr# byteOff#) 0# v0# s0 of
-            s1 -> case writeFloatOffAddrAsFloatX4# (plusAddr# (plusAddr# addr# byteOff#) 16#) 0# v1# s1 of
-              s2 -> (# s2, () #)
+pokeVertexSIMD vp off px py r g b a u v = do
+  pokeByteOff vp off px
+  pokeByteOff vp (off + 4) py
+  pokeByteOff vp (off + 8) r
+  pokeByteOff vp (off + 12) g
+  pokeByteOff vp (off + 16) b
+  pokeByteOff vp (off + 20) a
+  pokeByteOff vp (off + 24) u
+  pokeByteOff vp (off + 28) v
 
--- | Vectorized Quad Poking: writes 4 vertices (128 bytes total) and 6 indices (24 bytes total)
--- with SIMD vector stores.
+-- | Quad Poking: writes 4 vertices (128 bytes total) and 6 indices (24 bytes total).
 {-# INLINE pokeQuadSIMD #-}
 pokeQuadSIMD ::
   Ptr Word8 ->
