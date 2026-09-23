@@ -125,7 +125,8 @@ paintTextInputNode env idx rect@(Rect x y w h) = do
             -- 'plainFieldPen' settled the scroll, so use it rather than
             -- measuring the caret again.
             mEdit <- readFieldEdit ctx idx x y w h scrollX
-            paintClippedFieldText ctx da fm style idx mEdit (textInputFieldTextClip fm field) fx fy txt ffg
+            -- Glyphs in the field's own font, which placed the pen.
+            paintClippedFieldText ctx da ffm style idx mEdit (textInputFieldTextClip fm field) fx fy txt ffg
   paint
 
 -- | Multi-line text area.

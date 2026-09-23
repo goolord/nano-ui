@@ -464,6 +464,9 @@
 
 ### Fixed
 
+- A text field with its own font size draws its value in that font when the
+  draw arena draws text (RGFW, headless). Its pen and caret were placed in
+  that font, but the glyphs came from the base font.
 - Ctrl+C quits a session even when Ctrl is released later in the same batch
   of events. The loop looked only at the last event's modifiers, so RGFW
   missed it during a busy frame.

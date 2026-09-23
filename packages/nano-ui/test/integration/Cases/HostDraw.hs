@@ -15,7 +15,51 @@ tests =
   , spec "draw-external-text" runExternalTextTest
   , spec "draw-concentric-circles" runConcentricCirclesTest
   , spec "draw-glyph-pages" runGlyphPagesTest
+  , spec "draw-text-input-font" runTextInputFontTest
   ]
+
+-- | A text field set in a larger font draws its value's glyphs in that font:
+-- they cover what a label in the same font covers, and not what the base
+-- font's glyph covers.
+runTextInputFontTest :: Context -> IORef Int -> IO ()
+runTextInputFontTest base failed = do
+  let inp = withInput 400 200
+      -- Each font shapes any text to one glyph of its own size.
+      shapedFont size gw gh =
+        let fm = (monospaceMetrics size) {fmBackend = Just (FontBackend (\_ -> pure fm) (\_ -> pure (Just glyph)))}
+            glyph = ShapedGlyphs (primArrayFromList [0, 0, gw, gh, 0.25, 0.5, 0.5, 0.75])
+         in fm
+      small = shapedFont 12 6 10
+      large = shapedFont 32 16 26
+      ctx = withFontResolver (withFontMetrics base small) (\_ _ _ _ -> pure (large, False)) (\_ _ _ _ _ -> pure (32, 32))
+      big = fontSize 32
+      field = void (textInputConfigured defaultTextInputConfig {ticLayout = big (ticLayout defaultTextInputConfig)} "Hg")
+      extent ui = do
+        _ <- runFrame ctx inp (column ui)
+        (_, _, dd, _) <- runFrame ctx inp (column ui)
+        ps <- glyphVertices dd
+        let xs = map fst ps
+            ys = map snd ps
+        pure (if null ps then (0, 0) else (maximum xs - minimum xs, maximum ys - minimum ys))
+  (fieldW, fieldH) <- extent field
+  (labelW, labelH) <- extent (labelWith big "Hg")
+  assertEq failed (16, 26) (labelW, labelH)
+  assertEq failed (labelW, labelH) (fieldW, fieldH)
+
+-- | Position of every vertex of the glyph quads the fonts of
+-- 'runTextInputFontTest' draw: atlas vertices at that glyph's UV corners.
+glyphVertices :: DrawData -> IO [(Float, Float)]
+glyphVertices dd =
+  withForeignPtr (drawVertices dd) $ \vp ->
+    withForeignPtr (drawIndices dd) $ \ip ->
+      fmap concat . forM glyphCmds $ \cmd ->
+        fmap concat . forM [cmdIndexOffset cmd .. cmdIndexOffset cmd + cmdIndexCount cmd - 1] $ \i -> do
+          vi <- peekByteOff ip (fromIntegral i * indexSize) :: IO Word32
+          let at o = peekByteOff vp (fromIntegral vi * vertexSize + o) :: IO Float
+          (x, y, u, v) <- (,,,) <$> at 0 <*> at 4 <*> at 24 <*> at 28
+          pure [(x, y) | u `elem` [0.25, 0.5], v `elem` [0.5, 0.75]]
+  where
+    glyphCmds = [c | c <- drawCmdElems dd, cmdTextureId c == glyphAtlasTextureId, cmdIndexCount c > 0]
 
 -- | A shaped run with glyphs on two atlas pages draws each page's glyphs
 -- under that page's texture, with the page taken out of their u.
