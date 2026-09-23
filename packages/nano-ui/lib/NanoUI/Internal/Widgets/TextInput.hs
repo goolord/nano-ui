@@ -44,7 +44,7 @@ import NanoUI.Internal.Context
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena (NodeType (..))
-import NanoUI.Internal.Monad (Ui, askContext, askDefaultLayout, askInput, nextId, uiIO, withContext)
+import NanoUI.Internal.Monad (Ui, askContext, askDefaultLayout, askInput, freshWidget, nextId, uiIO, withContext)
 import NanoUI.Internal.Store
 import NanoUI.Internal.Style (Layout (..), defaultLayout, fillW, minW)
 import NanoUI.Internal.WidgetText (hasFlag, packTextNodeStyle, textInputFlagPassword, textInputFlagSearch, textInputFlagSelectable)
@@ -224,8 +224,7 @@ buildTextInput ::
   Maybe Float ->
   Eff es (Response, Text)
 buildTextInput styleIdx layout placeholder value mDebounceMs = do
-  wid <- nextId
-  ctx <- askContext
+  (wid, ctx) <- freshWidget
   let key = intKey wid
   _ <- uiIO $ adoptSlot fieldText ctx wid value
   -- Both modes are constants, so an idle field allocates no mode record.

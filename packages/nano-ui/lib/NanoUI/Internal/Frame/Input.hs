@@ -140,8 +140,7 @@ pressTargets ctx inp
 -- declaration order. The painter draws siblings from the last declared to the
 -- first, so where two overlap the earlier one is on top.
 targetsAt :: Context -> V2 -> IO PressTargets
-targetsAt ctx mouse = do
-  let na = ctxNodeArena ctx
+targetsAt ctx@Context {ctxNodeArena = na} mouse = do
   top <- overlayHitRoot ctx mouse
   found <- newIORef none
   _ <- findClassNodeM na PointerNodes $ \idx -> do
@@ -210,10 +209,9 @@ widgetHitRect ctx nt idx x y w h = case nt of
 -- A release on the widget also sets its hover animation to 1, so it paints as
 -- fully hovered at once.
 finalizePointerRelease :: Context -> Input -> IO ()
-finalizePointerRelease ctx inp =
+finalizePointerRelease ctx@Context {ctxNodeArena = na} inp =
   when (inputMouseReleased inp) $ do
     let mouse = inputMousePos inp
-        na = ctxNodeArena ctx
     active <- readIORef (ctxActiveId ctx)
     when (hashWidgetId active /= 0) $ do
       releasedClicked <- readIORef (ctxReleaseClickedId ctx)
@@ -331,9 +329,8 @@ constrainFocusToModal ctx = do
 -- store even when the change came after the widget was declared. It visits
 -- only the arena's 'SelectionNodes'.
 syncWidgetLabels :: Context -> IO ()
-syncWidgetLabels ctx = do
+syncWidgetLabels ctx@Context {ctxNodeArena = na} = do
   store <- getStore ctx
-  let na = ctxNodeArena ctx
   forClassNodes_ na SelectionNodes $ \idx -> do
     nt <- getNodeType na idx
     wid <- getWidgetId na idx
@@ -439,7 +436,7 @@ debugPanelOpen :: Context -> IO Bool
 debugPanelOpen ctx = isJust <$> topmostFloating ctx (== NodeWindow) (const True)
 
 probeHotId :: Context -> V2 -> IO WidgetId
-probeHotId ctx mouse = do
+probeHotId ctx@Context {ctxNodeArena = na} mouse = do
   -- A button that went down on a menu or dropdown keeps everything cold.
   offLayers <- pointerHeldOffLayers ctx
   if offLayers
@@ -454,5 +451,3 @@ probeHotId ctx mouse = do
           let hits idx =
                 (isWidgetNode <$> getNodeType na idx) <&&> nodePointVisible ctx idx mouse <&&> overlayHitAllowed ctx top idx
           maybe (pure (WidgetId 0)) (getWidgetId na) =<< findClassNodeM na PointerNodes hits
-  where
-    na = ctxNodeArena ctx

@@ -19,7 +19,7 @@ import Data.Text (Text)
 import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context
 import NanoUI.Internal.Input
-import NanoUI.Internal.Monad (Ui, askContext, askDefaultLayout, askInput, nextId, uiIO)
+import NanoUI.Internal.Monad (Ui, askDefaultLayout, askInput, freshWidget, uiIO)
 import NanoUI.Internal.Store (deleteSlot, fieldPoint, flagSlot, insertSlot, lookupSlot, setFlagSlot)
 import NanoUI.Internal.Style (Layout)
 import NanoUI.Internal.Types (Rect, V2 (..), rectContains)
@@ -55,8 +55,7 @@ data DropTarget = DropTarget
 -- signal for "which target is this drop over".
 useDrop :: Ui :> es => Rect -> Eff es DropTarget
 useDrop bounds = do
-  wid <- nextId
-  ctx <- askContext
+  (wid, ctx) <- freshWidget
   inp <- askInput
   let key = intKey wid
       activeK = slotKey SlotDrop key

@@ -41,9 +41,9 @@ import NanoUI.Internal.Context
 import NanoUI.Internal.Draw
 import NanoUI.Internal.Font (ScrollBarSlot (..))
 import NanoUI.Internal.Frame.Chrome
-import NanoUI.Internal.Frame.Node (ScrollNode (..), nodeFontNative, readScrollNode, resolveTextFont, scrollNodeBars, scrollNodeViewport)
+import NanoUI.Internal.Frame.Node (nodeFontNative, readScrollNode, resolveTextFont)
 import NanoUI.Internal.Frame.Paint.Widgets (PaintEnv (..), buildPaintEnv, paintTextAreaNode, paintTextInputNode, paintWidget)
-import NanoUI.Internal.Frame.Scroll.Geometry (borderContentClip, scrollBare)
+import NanoUI.Internal.Frame.Scroll.Geometry (ScrollNode (..), borderContentClip, scrollBare, scrollNodeBars, scrollNodeViewport)
 import NanoUI.Internal.Frame.Spans (textNodeSpanEntry)
 import NanoUI.Internal.Id (hashWidgetId)
 import NanoUI.Internal.Layout.Arena
@@ -64,14 +64,13 @@ lowerShapes ctx = do
 -- hide whatever lies fully behind them, as @x0, y0, x1, y1@ runs. Frames
 -- without floating nodes skip the arena walk.
 collectFloatingOccluders :: Context -> IO (PrimArray Float)
-collectFloatingOccluders ctx = do
-  let na = ctxNodeArena ctx
+collectFloatingOccluders ctx@Context {ctxNodeArena = na} = do
   floating <- floatingNodeCount na
   if floating <= 0
     then pure emptyPrimArray
     else do
       buf <- newPrimArray (floating * 4)
-      n <- foldClassNodesM na FloatingNodes (addOccluder na buf) 0
+      n <- foldClassNodesM na FloatingNodes (addOccluder buf) 0
       shrinkMutablePrimArray buf (n * 4)
       unsafeFreezePrimArray buf
   where
@@ -80,7 +79,7 @@ collectFloatingOccluders ctx = do
       NodeWindow -> isOpaque (overlayWindowStyle theme)
       nt | nt == NodeModal || nt == NodePopup -> isOpaque (overlayMenuStyle theme)
       _ -> False
-    addOccluder na buf !n idx = do
+    addOccluder buf !n idx = do
       nt <- getNodeType na idx
       opaque <- (`occludes` nt) <$> nodeTheme ctx idx
       if not opaque
@@ -184,9 +183,8 @@ paintFocusRing env idx nt rect = do
     pushRoundedStroke (peDrawArena env) ring radius 1.5 (themeFocusRing (peTheme env))
 
 paintContainerNode :: PaintEnv -> NodeIdx -> Rect -> IO ()
-paintContainerNode env idx rect = do
+paintContainerNode env@PaintEnv {peContext = ctx} idx rect = do
   walkChildrenWithOccluders env idx
-  let ctx = peContext env
   wid <- getWidgetId (peNodeArena env) idx
   mBuild <- lookupCustomDrawing ctx wid
   forM_ mBuild $ \(CustomDrawingEntry _ build _ _ _) -> do
@@ -195,14 +193,12 @@ paintContainerNode env idx rect = do
 
 -- | A drawing's ops clipped to its rect, in the env's default font.
 emitDrawingOps :: PaintEnv -> Rect -> SmallArray DrawOp -> IO ()
-emitDrawingOps env rect ops =
-  let da = peDrawArena env
-   in withClip da rect (emitDrawOps da (peFontMetrics env) (resolveTextFont (peContext env)) ops)
+emitDrawingOps env@PaintEnv {peDrawArena = da} rect ops =
+  withClip da rect (emitDrawOps da (peFontMetrics env) (resolveTextFont (peContext env)) ops)
 
 paintPanelNode :: PaintEnv -> NodeIdx -> Rect -> IO ()
-paintPanelNode env idx rect = do
-  let da = peDrawArena env
-      style = themePanel (peTheme env)
+paintPanelNode env@PaintEnv {peDrawArena = da} idx rect = do
+  let style = themePanel (peTheme env)
   paintStyledRect da style rect
   withClip da (borderContentClip style rect) $ walkChildrenWithOccluders env idx
 
@@ -239,9 +235,7 @@ paintScrollContainerNode env idx rect@(Rect x y w h) = do
 -- | A scroll container's scrollbars, drawn one layer above the content so
 -- they stay on top of it.
 paintScrollChrome :: PaintEnv -> NodeIdx -> ScrollNode -> Rect -> IO ()
-paintScrollChrome env idx sn (Rect x y w h) = do
-  let da = peDrawArena env
-      theme = peTheme env
+paintScrollChrome env@PaintEnv {peDrawArena = da, peTheme = theme} idx sn (Rect x y w h) = do
   wid <- getWidgetId (peNodeArena env) idx
   V2 offX offY <- getScrollOffset2D (peContext env) wid
   case scrollNodeBars sn x y w h offX offY of
@@ -261,9 +255,7 @@ paintScrollChrome env idx sn (Rect x y w h) = do
 -- for each line when it was laid out.
 {-# NOINLINE paintTextNode #-}
 paintTextNode :: PaintEnv -> NodeIdx -> Rect -> IO ()
-paintTextNode env idx rect@(Rect x y w h) = do
-  let arena = peNodeArena env
-      da = peDrawArena env
+paintTextNode env@PaintEnv {peNodeArena = arena, peDrawArena = da} idx rect@(Rect x y w h) = do
   si <- getStyleIdx arena idx
   forM_ (tableStripeColor (peTheme env) si) (pushRect da rect)
   raw <- getText arena idx
@@ -299,8 +291,7 @@ paintBoxNode env idx rect = do
   pushRect (peDrawArena env) rect (Color (fromIntegral si :: Word32))
 
 paintImageNode :: PaintEnv -> NodeIdx -> Rect -> IO ()
-paintImageNode env idx rect = do
-  let da = peDrawArena env
+paintImageNode env@PaintEnv {peDrawArena = da} idx rect = do
   tex <- imageIdFromText <$> getText (peNodeArena env) idx
   mUv <- lookupImageUv (peContext env) (ImageId tex)
   case mUv of
@@ -316,8 +307,7 @@ paintImageNode env idx rect = do
 
 {-# NOINLINE paintDrawingNode #-}
 paintDrawingNode :: PaintEnv -> NodeIdx -> Rect -> IO ()
-paintDrawingNode env idx rect = do
-  let ctx = peContext env
+paintDrawingNode env@PaintEnv {peContext = ctx} idx rect = do
   wid <- getWidgetId (peNodeArena env) idx
   mCustomBuild <- lookupCustomDrawing ctx wid
   case mCustomBuild of

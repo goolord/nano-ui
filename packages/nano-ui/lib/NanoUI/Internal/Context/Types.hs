@@ -220,16 +220,10 @@ data TextFieldClickCell = TextFieldClickCell
   }
   deriving (Eq, Show)
 
--- | Edge or corner captured by a floating-window resize gesture.
-data WindowResizeEdge
-  = ResizeN
-  | ResizeS
-  | ResizeE
-  | ResizeW
-  | ResizeNE
-  | ResizeNW
-  | ResizeSE
-  | ResizeSW
+-- | Edge or corner captured by a floating-window resize gesture, as the side
+-- of each axis it moves, horizontal then vertical: -1 the left or top, 1 the
+-- right or bottom, 0 neither.
+data WindowResizeEdge = WindowResizeEdge Int Int
   deriving (Eq, Show)
 
 -- | Resize gesture's initial pointer position, window bounds, and size limits.

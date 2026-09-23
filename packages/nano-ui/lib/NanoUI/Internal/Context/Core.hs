@@ -361,8 +361,7 @@ isDisabled ctx wid = do
 
 {-# NOINLINE scopeDisabled #-}
 scopeDisabled :: Context -> WidgetId -> IO Bool
-scopeDisabled ctx wid = do
-  let na = ctxNodeArena ctx
+scopeDisabled Context {ctxNodeArena = na} wid = do
   mIdx <- lookupNodeByWidgetId na wid
   scope <- maybe (getArenaScope na) (getNodeScope na) mIdx
   pure (scope .&. 1 /= 0)

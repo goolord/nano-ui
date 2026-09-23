@@ -240,6 +240,10 @@
   `NanoUI.Testing.Harness`, beside the press and release helpers it uses.
   `assertWheelTitlePinned` drops its trailing `Maybe Float`, which every
   caller passed as `Nothing`.
+- `WindowResizeEdge` in `NanoUI.Internal.Context.Types` is
+  `WindowResizeEdge Int Int`, the side of each axis the edge moves (-1 left
+  or top, 1 right or bottom, 0 neither), in place of the eight constructors
+  `ResizeN` to `ResizeSW`.
 - A 2D scroller's scroll changes only its offset, as a 1D scroller's did, so
   the damage pass repaints the scroller's clip instead of the whole window.
 - A pane grid's commands (`pgcClose`, `pgcSplit`, maximize and resize) act on

@@ -19,6 +19,7 @@ module NanoUI.Internal.Monad
   , scope
   , withIdFrame
   , nextId
+  , freshWidget
   , burstNextIds
   , currentId
   , askContext
@@ -184,6 +185,14 @@ nextId = withContext $ \ctx -> do
   ic <- readIORef (ctxIdContext ctx)
   writeIORef (ctxIdContext ctx) $! ic {siblingId = siblingId ic + 1}
   pure (idContextWidgetId ic)
+
+-- | The next sibling id ('nextId') and the view's 'Context', which a widget's body starts from.
+{-# INLINE freshWidget #-}
+freshWidget :: Ui :> es => Eff es (WidgetId, Context)
+freshWidget = do
+  wid <- nextId
+  ctx <- askContext
+  pure (wid, ctx)
 
 -- | Reserve @n@ sibling ids without returning them. Non-positive counts do nothing.
 {-# INLINE burstNextIds #-}

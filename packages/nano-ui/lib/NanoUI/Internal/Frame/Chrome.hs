@@ -61,8 +61,7 @@ selectCurrentOption ctx idx = do
 -- | The text a field displays: its stored value, masked one character per
 -- character for password inputs so caret and selection offsets still line up.
 textInputValue :: Context -> NodeIdx -> IO Text
-textInputValue ctx idx = do
-  let na = ctxNodeArena ctx
+textInputValue ctx@Context {ctxNodeArena = na} idx = do
   wid <- getWidgetId na idx
   nt <- getNodeType na idx
   si <- getStyleIdx na idx

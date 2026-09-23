@@ -14,7 +14,6 @@ import Control.Monad (guard, unless, when)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Maybe (MaybeT (..))
 import Data.IORef (modifyIORef', newIORef, readIORef)
-import Data.List (find)
 import Data.Maybe (fromMaybe, isJust, isNothing)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Font (ScrollBarSlot (..))
@@ -109,7 +108,7 @@ windowResizeCornerReach = 16
 -- side's padding inside it, and near a corner the handle takes both sides.
 windowResizeEdgeAt :: Padding -> Rect -> V2 -> Maybe WindowResizeEdge
 windowResizeEdgeAt pad (Rect x y w h) (V2 mx my)
-  | onSide || onEnd = find ((== (side west east, side north south)) . edgeSides) allEdges
+  | onSide || onEnd = Just (WindowResizeEdge (side west east) (side north south))
   | otherwise = Nothing
   where
     s = windowResizeHandleFor
@@ -129,35 +128,20 @@ windowResizeEdgeAt pad (Rect x y w h) (V2 mx my)
     west = onL || (onEnd && mx < x + reachW)
     east = onR || (onEnd && mx > x + w - reachW)
     side lo hi = if lo then -1 else if hi then 1 else 0
-    allEdges = [ResizeN, ResizeS, ResizeE, ResizeW, ResizeNE, ResizeNW, ResizeSE, ResizeSW]
-
--- | Which side of each axis an edge moves: -1 the left or top, 1 the right or
--- bottom, 0 neither.
-edgeSides :: WindowResizeEdge -> (Int, Int)
-edgeSides = \case
-  ResizeN -> (0, -1)
-  ResizeS -> (0, 1)
-  ResizeE -> (1, 0)
-  ResizeW -> (-1, 0)
-  ResizeNE -> (1, -1)
-  ResizeNW -> (-1, -1)
-  ResizeSE -> (1, 1)
-  ResizeSW -> (-1, 1)
 
 cursorForResizeEdge :: WindowResizeEdge -> UiCursorKind
-cursorForResizeEdge edge = case edgeSides edge of
-  (0, _) -> UiCursorNsResize
-  (_, 0) -> UiCursorEwResize
-  (sx, sy)
-    | sx == sy -> UiCursorNwseResize
-    | otherwise -> UiCursorNeswResize
+cursorForResizeEdge (WindowResizeEdge sx sy)
+  | sx == 0 = UiCursorNsResize
+  | sy == 0 = UiCursorEwResize
+  | sx == sy = UiCursorNwseResize
+  | otherwise = UiCursorNeswResize
 
 -- | Width, height, x and y of the held resize's window with the pointer at
 -- @mouse@, in a logical window of @winW@ by @winH@.
 resizeFromEdge :: WindowResizeDrag -> V2 -> Float -> Float -> (Float, Float, Float, Float)
 resizeFromEdge wrd (V2 mx my) winW winH = (w, h, x, y)
   where
-    (sx, sy) = edgeSides (wrdEdge wrd)
+    WindowResizeEdge sx sy = wrdEdge wrd
     (x, w) = axis sx (wrdStartX wrd) (wrdStartW wrd) (mx - wrdGrabX wrd) (wrdMinW wrd) (wrdMaxW wrd) winW
     (y, h) = axis sy (wrdStartY wrd) (wrdStartH wrd) (my - wrdGrabY wrd) (wrdMinH wrd) (wrdMaxH wrd) winH
     -- The moving side follows the pointer within the size limits, the other
@@ -190,9 +174,8 @@ updateWindowResize ctx inp winW winH =
 -- unless the halo is blocked or the pointer is on one of the window's
 -- controls. The top handle reaches over the title bar, which drags elsewhere.
 resizeEdgeTarget :: Context -> V2 -> IO (Maybe (NodeIdx, Rect, WindowResizeEdge))
-resizeEdgeTarget ctx mouse = runMaybeT $ do
-  let na = ctxNodeArena ctx
-      inHalo r = rectNonEmpty r && rectContains (rectInflate windowResizeHandleFor r) mouse
+resizeEdgeTarget ctx@Context {ctxNodeArena = na} mouse = runMaybeT $ do
+  let inHalo r = rectNonEmpty r && rectContains (rectInflate windowResizeHandleFor r) mouse
   idx <- MaybeT (topmostFloating ctx (== NodeWindow) inHalo)
   rect <- liftIO (getNodeRect na idx)
   -- The halo covers the window interior, so find the edge first and run the
@@ -222,10 +205,9 @@ resizeEdgeTarget ctx mouse = runMaybeT $ do
   pure (idx, rect, edge)
 
 tryStartWindowResize :: Context -> V2 -> IO Bool
-tryStartWindowResize ctx mouse@(V2 mx my) = fmap isJust . runMaybeT $ do
+tryStartWindowResize ctx@Context {ctxNodeArena = na} mouse@(V2 mx my) = fmap isJust . runMaybeT $ do
   (idx, Rect x y w h, edge) <- MaybeT (resizeEdgeTarget ctx mouse)
   liftIO $ do
-    let na = ctxNodeArena ctx
     wid <- getWidgetId na idx
     AxisSizing _ _ minW maxW <- getWidthSizing na idx
     AxisSizing _ _ minH maxH <- getHeightSizing na idx
@@ -259,8 +241,7 @@ tryStartWindowDrag ctx mouse@(V2 mx my) = fmap isJust . runMaybeT $ do
 
 -- | Title bar: the window's topmost child, stretched up to the window top.
 windowTitleRect :: Context -> NodeIdx -> IO (Maybe Rect)
-windowTitleRect ctx idx = do
-  let na = ctxNodeArena ctx
+windowTitleRect Context {ctxNodeArena = na} idx = do
   (_, wy, _, _) <- getRect na idx
   best <- newIORef Nothing
   forChildNodes_ na idx $ \ci -> do

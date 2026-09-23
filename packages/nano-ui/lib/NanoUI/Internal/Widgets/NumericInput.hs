@@ -21,7 +21,7 @@ import GHC.Clock (getMonotonicTime)
 import NanoUI.Internal.Context (getStore, intKey, registerFocusable, requestWakeAt, modifyStore)
 import NanoUI.Internal.Input (Key (..), inputKeys, inputKeysElem, inputModifiers, inputMouseDown, inputMousePos, inputMousePressed, modShift)
 import NanoUI.Internal.Layout.Arena (NodeType (..))
-import NanoUI.Internal.Monad (Ui, askContext, askInput, nextId, uiIO)
+import NanoUI.Internal.Monad (Ui, askInput, freshWidget, uiIO)
 import NanoUI.Internal.Store (Slot (..), deleteSlot, fieldDouble, fieldInt, fieldText, findSlot, insertSlot, lookupSlot, slotKey)
 import NanoUI.Internal.Style (Layout (..), Sizing (..), defaultLayout)
 import NanoUI.Internal.Types (Rect (..), clamp, rectContains)
@@ -89,8 +89,7 @@ numericInputConfigured cfg value = snd <$> numericInputConfigured' cfg value
 -- | 'numericInputConfigured' returning @(response, updatedValue)@.
 numericInputConfigured' :: Ui :> es => NumericInputConfig -> Double -> Eff es (Response, Double)
 numericInputConfigured' cfg value = do
-  wid <- nextId
-  ctx <- askContext
+  (wid, ctx) <- freshWidget
   inp <- askInput
   uiIO $ registerFocusable ctx wid
   store <- uiIO (getStore ctx)

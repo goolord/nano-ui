@@ -20,7 +20,7 @@ import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context (adoptSlot, registerFocusable)
 import NanoUI.Internal.Store (fieldInt)
 import NanoUI.Internal.Layout.Arena (NodeType (..))
-import NanoUI.Internal.Monad (Ui, askContext, nextId, uiIO, withKey)
+import NanoUI.Internal.Monad (Ui, freshWidget, nextId, uiIO, withKey)
 import NanoUI.Internal.Style (Layout, defaultLayout, fillW, gap, tight)
 import NanoUI.Internal.Types (clamp)
 import NanoUI.Internal.Widgets.Behavior (KeyNav (..), useKeyNav)
@@ -48,8 +48,7 @@ radio' ::
   (Foldable f, Ui :> es) => f Text -> Int -> Eff es (Response, Int)
 radio' options index =
   withKey radioSalt $ do
-    gid <- nextId
-    ctx <- askContext
+    (gid, ctx) <- freshWidget
     let
       opts = case toList options of
         [] -> [""]

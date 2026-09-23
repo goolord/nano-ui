@@ -39,7 +39,7 @@ import Data.Word (Word64)
 import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context
 import NanoUI.Internal.Input
-import NanoUI.Internal.Monad (Ui, (<&&>), askContext, askInput, damageWidgetNow, focusedWidget, lastRect, nextId, releaseFocus, requestFrame, uiIO, withIdFrame, withKey)
+import NanoUI.Internal.Monad (Ui, (<&&>), askInput, damageWidgetNow, focusedWidget, freshWidget, lastRect, releaseFocus, requestFrame, uiIO, withIdFrame, withKey)
 import NanoUI.Internal.Id (IdContext (..), WidgetId, hashWidgetId)
 import NanoUI.Internal.Frame.Hit (nodeInteractionHit)
 import NanoUI.Internal.Store (insertDyn, lookupDyn)
@@ -290,8 +290,7 @@ paneFocus tree g = (maxPane, focus)
 -- and maximisation through 'PaneGridCtx'.
 paneGrid :: (Ui :> es) => PaneGridConfig es -> Eff es PaneGridResponse
 paneGrid cfg = do
-  wid <- nextId
-  ctx <- askContext
+  (wid, ctx) <- freshWidget
   inp <- askInput
   -- A grid that is no Tab stop gives up any focus it still has, from a frame
   -- when it was one, so its ring does not stay drawn round a pane.

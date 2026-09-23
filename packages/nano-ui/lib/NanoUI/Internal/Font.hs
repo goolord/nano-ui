@@ -54,7 +54,6 @@ module NanoUI.Internal.Font
   , scrollBarGutter
   , ScrollBarSlot (..)
   , classifyScrollBar
-  , scrollLayoutGutter
   , sliderHitBounds
   , sliderTrackBounds
   , sliderTrackHeight
@@ -437,11 +436,6 @@ scrollBarGutter slot trailPad =
         ScrollBarList -> barW + 2 * gap - trailPad
         ScrollBarPage -> barW + scrollBarSideGap + gap - trailPad
         ScrollBarWindow -> barW + scrollBarSideGap
-
-scrollLayoutGutter :: ScrollBarSlot -> Float -> Float -> Float -> Float
-scrollLayoutGutter slot trailPad contentSize innerMain
-  | contentSize <= innerMain = 0
-  | otherwise = scrollBarGutter slot trailPad
 
 -- | The one policy for "does this node use the ambient base font, or does it
 -- need the host resolver?". A zero size with a plain weight/style and the

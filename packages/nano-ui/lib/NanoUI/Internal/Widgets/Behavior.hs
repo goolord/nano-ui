@@ -24,7 +24,7 @@ import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context
 import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Internal.Input
-import NanoUI.Internal.Monad (Ui, (<&&>), askContext, askFrameInput, askInput, focusedWidget, nextId, uiIO, withContext)
+import NanoUI.Internal.Monad (Ui, (<&&>), askContext, askFrameInput, askInput, focusedWidget, freshWidget, uiIO, withContext)
 import NanoUI.Internal.Store (fieldFloat, fieldInt, findSlot, insertSlot, quietFlag, setQuietFlag)
 import NanoUI.Internal.Types (Rect (..), clamp01, rectHit, v2X, v2Y)
 import qualified Data.Text as T
@@ -50,8 +50,7 @@ useDrag1D ::
   Rect ->
   Eff es (Float, Bool, Bool)
 useDrag1D axis lo hi current track = do
-  wid <- nextId
-  ctx <- askContext
+  (wid, ctx) <- freshWidget
   inp <- askInput
   let dragK = slotKey SlotDrag (intKey wid)
       (origin, trackLen, mouse) = case axis of
@@ -79,8 +78,7 @@ useReorder ::
   [(Int, Rect)] ->
   Eff es ([Int], Maybe Int)
 useReorder order items = do
-  wid <- nextId
-  ctx <- askContext
+  (wid, ctx) <- freshWidget
   inp <- askInput
   let key = intKey wid
       dragK = slotKey SlotDrag key

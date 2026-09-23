@@ -22,7 +22,7 @@ import NanoUI.Internal.Font (menuItemRowH)
 import NanoUI.Internal.Frame.Select (selectDropPickIndex, selectDropRect)
 import NanoUI.Internal.Input (inputMousePos, inputMousePressed, inputMouseReleased)
 import NanoUI.Internal.Layout.Arena (NodeType (..))
-import NanoUI.Internal.Monad (Ui, askContext, askInput, nextId, uiIO)
+import NanoUI.Internal.Monad (Ui, askInput, freshWidget, uiIO)
 import NanoUI.Internal.Store (fieldInt, insertSlot)
 import NanoUI.Internal.Style (Layout, defaultLayout)
 import NanoUI.Internal.Types (Rect (..), clamp, rectContains, rectHit, rectNonEmpty, v2Y)
@@ -53,8 +53,7 @@ selectWith' ::
   Int ->
   Eff es (Response, Int)
 selectWith' f options index = do
-  wid <- nextId
-  ctx <- askContext
+  (wid, ctx) <- freshWidget
   uiIO $ registerFocusable ctx wid
   let
     opts = case toList options of

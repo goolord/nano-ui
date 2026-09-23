@@ -1,26 +1,21 @@
 -- | Per-node queries shared by the paint, span, scroll and hit passes: the
--- font a node renders and measures in, and a scroll node's fields and content
--- viewport.
+-- font a node renders and measures in, and a scroll node's fields.
 module NanoUI.Internal.Frame.Node
   ( resolveFontFor
   , nodeFontNative
   , resolveTextFont
   , nodeFontMetrics
-  , ScrollNode (..)
   , readScrollNode
-  , scrollNodeViewport
-  , scrollNodeBars
   ) where
 
 import Data.Text (Text)
 import NanoUI.Internal.Context (Context (..))
 import NanoUI.Internal.Draw.Types (TextFont (..))
-import NanoUI.Internal.Font (FontMetrics, ScrollBarSlot, isDefaultNodeFont, measureTextIO)
+import NanoUI.Internal.Font (FontMetrics, isDefaultNodeFont, measureTextIO)
 import NanoUI.Internal.Frame.Scroll.Geometry
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Layout.Solve (scrollBarSlotOf)
-import NanoUI.Internal.Style (FontVariant (..), Padding, TextDecoration (..))
-import NanoUI.Internal.Types (Rect)
+import NanoUI.Internal.Style (FontVariant (..), TextDecoration (..))
 import NanoUI.Internal.WidgetText (textNodeFontStyle, textNodeFontVariant, textNodeFontWeight)
 
 -- | Font for a node of type @nt@ with an explicit size and packed style: the
@@ -79,20 +74,6 @@ nodeFontMetrics ctx idx = do
   (fm, _, _) <- resolveFontFor ctx nt size si
   pure fm
 
--- | What the scroll passes read off a scroll container: its bar slot, scroll
--- config, whether it scrolls natively in 2D, direction, padding, the content
--- extent along its main axis (the content height for 2D) and, for 2D, the
--- content width.
-data ScrollNode = ScrollNode
-  { snSlot :: !ScrollBarSlot
-  , snConfig :: !ScrollConfig
-  , sn2D :: !Bool
-  , snDir :: !DirTag
-  , snPad :: {-# UNPACK #-} !Padding
-  , snContentMain :: {-# UNPACK #-} !Float
-  , snContentW :: {-# UNPACK #-} !Float
-  }
-
 {-# INLINE readScrollNode #-}
 readScrollNode :: NodeArena -> NodeIdx -> IO ScrollNode
 readScrollNode na idx = do
@@ -104,25 +85,3 @@ readScrollNode na idx = do
   contentW <- getScrollContentW na idx
   let cfg = decodeScrollConfig si
   pure $! ScrollNode slot cfg (si /= 0 && scrollConfigNative2D cfg) dir pad contentMain contentW
-
--- | Content viewport of a scroll node placed at @x y w h@: its padding box
--- minus the live scrollbar gutters.
-scrollNodeViewport :: ScrollNode -> Float -> Float -> Float -> Float -> Rect
-scrollNodeViewport (ScrollNode slot cfg native2D dir pad contentMain contentW) x y w h
-  | native2D = scrollViewportClip2D slot cfg x y w h pad contentW contentMain
-  | otherwise = scrollContentClip slot cfg dir x y w h pad contentMain
-
--- | The vertical and the horizontal bar a scroll node placed at @x y w h@
--- shows at offsets @offX offY@ (a 1D scroller's offset is @offY@, whichever
--- way it runs). An axis whose chrome is suppressed shows none.
-scrollNodeBars ::
-  ScrollNode -> Float -> Float -> Float -> Float -> Float -> Float -> (Maybe ScrollBarLayout, Maybe ScrollBarLayout)
-scrollNodeBars (ScrollNode slot cfg native2D dir pad contentMain contentW) x y w h offX offY
-  | native2D =
-      let (mV, mH) = scrollBarLayouts2D slot cfg x y w h pad contentW contentMain offX offY
-       in (shown DirColumn mV, shown DirRow mH)
-  | dir == DirColumn = (shown dir bar, Nothing)
-  | otherwise = (Nothing, shown dir bar)
-  where
-    bar = scrollBarLayout slot dir x y w h pad contentMain offY
-    shown d l = if scrollChromeSuppressed cfg d then Nothing else l

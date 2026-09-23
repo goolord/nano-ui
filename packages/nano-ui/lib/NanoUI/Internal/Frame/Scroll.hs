@@ -18,7 +18,7 @@ import Data.Foldable (find)
 import Data.Maybe (fromMaybe)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Frame.Hit (topmostModalAtMouse, topmostOverlayAtMouse)
-import NanoUI.Internal.Frame.Node (ScrollNode (..), readScrollNode, scrollNodeBars, scrollNodeViewport)
+import NanoUI.Internal.Frame.Node (readScrollNode)
 import NanoUI.Internal.Frame.Scroll.Geometry
 import NanoUI.Internal.Frame.TextArea (TextAreaBars (..), textAreaBarLayouts, textAreaScrollGeom)
 import NanoUI.Internal.Id (WidgetId)
@@ -38,9 +38,7 @@ applyScrollOffsets ctx = do
     transformSubtree ctx 0 0 0 rect
 
 transformSubtree :: Context -> NodeIdx -> Float -> Float -> Rect -> IO ()
-transformSubtree ctx idx scrollX scrollY parentClip = do
-  let
-    na = ctxNodeArena ctx
+transformSubtree ctx@Context {ctxNodeArena = na} idx scrollX scrollY parentClip = do
   nt <- getNodeType na idx
   (lx, ly, vw, vh) <- getRect na idx
   let
@@ -122,7 +120,7 @@ updateScrollWheel ctx inp = do
 -- way: the nearest one above in the same panel, else the first one inside.
 -- Do not walk past panel/window/modal into the page scroller.
 applyCrossAxisScroll :: Context -> NodeIdx -> V2 -> IO ()
-applyCrossAxisScroll ctx idx scroll = do
+applyCrossAxisScroll ctx@Context {ctxNodeArena = na} idx scroll = do
   dir <- getDirection na idx
   let
     crossWid i = do
@@ -139,8 +137,6 @@ applyCrossAxisScroll ctx idx scroll = do
   up <- join <$> walkAncestors na parent above
   target <- maybe (inside idx) (pure . Just) up
   forM_ target $ \wid -> applyScrollWheelDelta ctx wid scroll
- where
-  na = ctxNodeArena ctx
 
 -- | Node owning scroller @wid@: its text area, or the first scroll container
 -- with that id that the predicate does not rule out (table slave panes share
@@ -152,7 +148,7 @@ scrollOwnerNode ::
   -> Context
   -> WidgetId
   -> IO (Maybe NodeIdx)
-scrollOwnerNode suppressed ctx wid =
+scrollOwnerNode suppressed Context {ctxNodeArena = na} wid =
   findClassNodeM na PointerNodes $ \idx -> do
     nt <- getNodeType na idx
     pure (nt == NodeTextArea || isScrollNode nt)
@@ -160,11 +156,9 @@ scrollOwnerNode suppressed ctx wid =
       <&&> if nt == NodeTextArea
         then pure True
         else (\sn -> not (suppressed (snConfig sn) (sn2D sn) (snDir sn))) <$> readScrollNode na idx
- where
-  na = ctxNodeArena ctx
 
 applyScrollWheelDelta :: Context -> WidgetId -> V2 -> IO ()
-applyScrollWheelDelta ctx wid (V2 wheelX wheelY) = do
+applyScrollWheelDelta ctx@Context {ctxNodeArena = na} wid (V2 wheelX wheelY) = do
   mIdx <- scrollOwnerNode scrollWheelSuppressed ctx wid
   forM_ mIdx $ \idx -> do
     nt <- getNodeType na idx
@@ -184,8 +178,6 @@ applyScrollWheelDelta ctx wid (V2 wheelX wheelY) = do
       next = clampScrollOffset range (V2 (baseX + wheelX * step) (baseY + wheelY * step))
     unless (next == base && next == cur) $
       applyScrollTarget ctx wid axes next ScrollSmooth
- where
-  na = ctxNodeArena ctx
 
 findScrollNodeUnderMouse :: Context -> V2 -> IO (Maybe NodeIdx)
 findScrollNodeUnderMouse ctx mouse = do
@@ -224,7 +216,7 @@ scrollHitSelf ctx idx nt mouse clip
 -- Same clip stack as the span walk: scroll viewport (plus its bar lanes),
 -- then panel bounds.
 scrollHitClip :: Context -> NodeIdx -> NodeType -> Rect -> IO (Maybe Rect)
-scrollHitClip ctx idx nt parentClip
+scrollHitClip Context {ctxNodeArena = na} idx nt parentClip
   | isScrollNode nt = do
       (x, y, w, h) <- getRect na idx
       sn <- readScrollNode na idx
@@ -239,8 +231,6 @@ scrollHitClip ctx idx nt parentClip
       rect <- getNodeRect na idx
       pure (rectIntersect parentClip rect)
   | otherwise = pure (Just parentClip)
- where
-  na = ctxNodeArena ctx
 
 -- | Scrollbar layouts of the scroller at @idx@ (id @wid@), each paired with a
 -- setter for that axis's offset that skips unchanged values. Covers text
@@ -248,7 +238,7 @@ scrollHitClip ctx idx nt parentClip
 -- chrome has none.
 scrollBarsFor ::
   Context -> NodeIdx -> WidgetId -> IO [(DirTag, ScrollBarLayout, Float -> IO ())]
-scrollBarsFor ctx idx wid = do
+scrollBarsFor ctx@Context {ctxNodeArena = na} idx wid = do
   nt <- getNodeType na idx
   -- A 1D scroller's offset is its stored y, whichever way it runs.
   V2 curX curY <- getScrollOffset2D ctx wid
@@ -263,8 +253,6 @@ scrollBarsFor ctx idx wid = do
       (x, y, w, h) <- getRect na idx
       sn <- readScrollNode na idx
       pure (bars (sn2D sn) (scrollNodeBars sn x y w h curX curY))
- where
-  na = ctxNodeArena ctx
 
 -- | Bars of scroller @wid@ a thumb drag can grab. A hidden bar has no lane
 -- to grab.

@@ -31,7 +31,7 @@ import NanoUI.Internal.Font (FontMetrics (..), lineWidthIO)
 import NanoUI.Internal.Frame.Node (resolveTextFont)
 import NanoUI.Internal.Input (Input (..), UiCursorKind (..))
 import NanoUI.Internal.Layout.Arena (NodeType (NodeDrawing))
-import NanoUI.Internal.Monad (Ui, askContext, askDefaultLayout, askInput, nextId, uiIO, uiTheme)
+import NanoUI.Internal.Monad (Ui, askDefaultLayout, askInput, freshWidget, uiIO, uiTheme)
 import NanoUI.Internal.Style
 import NanoUI.Internal.Types (Color (..), Rect (..), V2 (..))
 import NanoUI.Internal.Widgets.Node (Response, addWidget, respClicked, respHovered, respRect)
@@ -135,11 +135,10 @@ newtype Paragraphs = Paragraphs (IORef (IM.IntMap Paragraph))
 -- | 'richTextWith' returning the paragraph response and optional clicked link target.
 richTextWith' :: Ui :> es => (Layout -> Layout) -> [Inline] -> Eff es (Response, Maybe Text)
 richTextWith' f pieces = do
-  ctx <- askContext
+  (wid, ctx) <- freshWidget
   inp <- askInput
   base <- f <$> askDefaultLayout
   theme <- uiTheme
-  wid <- nextId
   let styled = [(txt, pieceFont l, pieceColor theme l target, target) | Inline txt style target <- pieces, let l = style base]
   Paragraphs cacheRef <- uiIO $ hostOrInit ctx (Paragraphs <$> newIORef IM.empty)
   gen <- uiIO (readIORef (ctxMetricGen ctx))

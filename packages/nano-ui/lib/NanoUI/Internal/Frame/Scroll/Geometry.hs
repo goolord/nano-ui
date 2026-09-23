@@ -4,11 +4,11 @@ module NanoUI.Internal.Frame.Scroll.Geometry
   , ScrollConfig (..)
   , defaultScrollConfig
   , ScrollBarLayout (..)
-  , scrollContentClip
-  , scrollViewportClip2D
+  , ScrollNode (..)
+  , scrollNodeViewport
+  , scrollNodeBars
   , scrollChromeLane
   , scrollBarLayout
-  , scrollBarLayouts2D
   , scrollAxisRange
   , scrollOffsetFromThumb
   , padContentClip
@@ -23,7 +23,6 @@ module NanoUI.Internal.Frame.Scroll.Geometry
   , scrollGutters2D
   , scrollChromeSuppressed
   , scrollWheelSuppressed
-  , scrollChromeActive
   , isScrollStyle2D
   , tagClippedSpans
   , padTextClipRect
@@ -98,7 +97,7 @@ scrollAxisGutter policy slot trailPad contentSize innerMain =
   case policy of
     ScrollNone -> 0
     ScrollHidden -> 0
-    ScrollAuto -> scrollLayoutGutter slot trailPad contentSize innerMain
+    ScrollAuto -> if contentSize <= innerMain then 0 else scrollBarGutter slot trailPad
     ScrollAlways -> scrollBarGutter slot trailPad
 
 -- Vertical bar takes width. Horizontal bar takes height. Second pass
@@ -157,15 +156,6 @@ scrollAxisRange contentSize innerMain trailingPad
   | contentSize > innerMain + 0.5 = max 0 (contentSize + trailingPad - innerMain)
   | otherwise = 0
 
--- | Whether the bar along @dir@ shows for content of @contentSize@ in
--- @innerMain@.
-scrollChromeActive :: ScrollConfig -> DirTag -> Float -> Float -> Bool
-scrollChromeActive cfg dir contentSize innerMain =
-  case scrollPolicyFor cfg dir of
-    ScrollAlways -> True
-    ScrollAuto -> contentSize > innerMain + 0.5
-    _ -> False
-
 -- | Logical window-space track/thumb bounds and the maximum scroll offset.
 data ScrollBarLayout = ScrollBarLayout
   { sbTrack :: Rect
@@ -182,49 +172,33 @@ padContentClip x y w h pad =
     (max 0 (w - padL pad - padR pad))
     (max 0 (h - padT pad - padB pad))
 
-scrollContentClip ::
-  ScrollBarSlot ->
-  ScrollConfig ->
-  DirTag ->
-  Float ->
-  Float ->
-  Float ->
-  Float ->
-  Padding ->
-  Float ->
-  Rect
-scrollContentClip slot cfg dir x y w h pad contentSize =
-  let base = padContentClip x y w h pad
-      innerMain =
-        case dir of
-          DirColumn -> rectH base
-          DirRow -> rectW base
-      trailPad =
-        case dir of
-          DirColumn -> padR pad
-          DirRow -> padB pad
-      gutter = scrollAxisGutter (scrollPolicyFor cfg dir) slot trailPad contentSize innerMain
-   in case dir of
-        DirColumn -> Rect (rectX base) (rectY base) (max 0 (rectW base - gutter)) (rectH base)
-        DirRow -> Rect (rectX base) (rectY base) (rectW base) (max 0 (rectH base - gutter))
+-- | What the scroll passes read off a scroll container: its bar slot, scroll
+-- config, whether it scrolls natively in 2D, direction, padding, the content
+-- extent along its main axis (the content height for 2D) and, for 2D, the
+-- content width.
+data ScrollNode = ScrollNode
+  { snSlot :: !ScrollBarSlot
+  , snConfig :: !ScrollConfig
+  , sn2D :: !Bool
+  , snDir :: !DirTag
+  , snPad :: {-# UNPACK #-} !Padding
+  , snContentMain :: {-# UNPACK #-} !Float
+  , snContentW :: {-# UNPACK #-} !Float
+  }
 
-scrollViewportClip2D ::
-  ScrollBarSlot ->
-  ScrollConfig ->
-  Float ->
-  Float ->
-  Float ->
-  Float ->
-  Padding ->
-  Float ->
-  Float ->
-  Rect
-scrollViewportClip2D slot cfg x y w h pad contentW contentH =
-  let base = padContentClip x y w h pad
-      innerW = rectW base
-      innerH = rectH base
-      (gutterW, gutterH) = scrollGutters2D slot cfg pad contentW contentH innerW innerH
-   in Rect (rectX base) (rectY base) (max 0 (innerW - gutterW)) (max 0 (innerH - gutterH))
+-- | Content viewport of a scroll node placed at @x y w h@: its padding box
+-- minus the live scrollbar gutters.
+scrollNodeViewport :: ScrollNode -> Float -> Float -> Float -> Float -> Rect
+scrollNodeViewport (ScrollNode slot cfg native2D dir pad contentMain contentW) x y w h
+  | native2D = Rect bx by (max 0 (innerW - gutterW)) (max 0 (innerH - gutterH))
+  | dir == DirColumn = Rect bx by (max 0 (innerW - gutter (padR pad) innerH)) innerH
+  | otherwise = Rect bx by innerW (max 0 (innerH - gutter (padB pad) innerW))
+  where
+    Rect bx by innerW innerH = padContentClip x y w h pad
+    (gutterW, gutterH) = scrollGutters2D slot cfg pad contentW contentMain innerW innerH
+    -- Strict, so its two calls pass unboxed floats (measured: boxing them
+    -- cost the pointer scene 100 kB).
+    gutter !trailPad !innerMain = scrollAxisGutter (scrollPolicyFor cfg dir) slot trailPad contentMain innerMain
 
 -- | The strip a bar sits in. A list bar sits one gap (see 'scrollBarGap')
 -- inside its well's edge. A page bar sits a side gap inside the page's edge,
@@ -262,7 +236,7 @@ scrollBarLayout ::
   Float ->
   Maybe ScrollBarLayout
 scrollBarLayout slot dir x y w h pad =
-  scrollBarLayoutIn slot dir x y w h pad $ case dir of
+  scrollBarLayoutIn slot dir (Rect x y w h) pad $ case dir of
     DirColumn -> h - padT pad - padB pad
     DirRow -> w - padL pad - padR pad
 
@@ -274,16 +248,13 @@ scrollBarLayout slot dir x y w h pad =
 scrollBarLayoutIn ::
   ScrollBarSlot
   -> DirTag
-  -> Float
-  -> Float
-  -> Float
-  -> Float
+  -> Rect
   -> Padding
   -> Float
   -> Float
   -> Float
   -> Maybe ScrollBarLayout
-scrollBarLayoutIn slot dir x y w h pad viewMain contentSize off =
+scrollBarLayoutIn slot dir (Rect x y w h) pad viewMain contentSize off =
   let
     (barW, barMargin) = scrollBarGeomFor slot
     minThumb = 16
@@ -306,28 +277,25 @@ scrollBarLayoutIn slot dir x y w h pad viewMain contentSize off =
         Just
           (ScrollBarLayout (band trackStart trackSize) (band thumbStart thumbSize) maxOff)
 
--- | Both-axis layouts for a native 2D scroller: (vertical, horizontal). Each
--- axis's visible main extent is its side of the viewport, which the other
--- axis's live gutter has narrowed, so the range and thumb are computed
--- against the viewport minus the opposite scrollbar lane.
-scrollBarLayouts2D ::
-  ScrollBarSlot ->
-  ScrollConfig ->
-  Float ->
-  Float ->
-  Float ->
-  Float ->
-  Padding ->
-  Float ->
-  Float ->
-  Float ->
-  Float ->
-  (Maybe ScrollBarLayout, Maybe ScrollBarLayout)
-scrollBarLayouts2D slot cfg x y w h pad contentW contentH offX offY =
-  let Rect _ _ viewW viewH = scrollViewportClip2D slot cfg x y w h pad contentW contentH
-   in ( scrollBarLayoutIn slot DirColumn x y w h pad viewH contentH offY
-      , scrollBarLayoutIn slot DirRow x y w h pad viewW contentW offX
-      )
+-- | The vertical and the horizontal bar a scroll node placed at @x y w h@
+-- shows at offsets @offX offY@ (a 1D scroller's offset is @offY@, whichever
+-- way it runs). An axis whose chrome is suppressed shows none. A native 2D
+-- scroller's axes each take their visible main extent from the viewport, which
+-- the other axis's live gutter has narrowed, so the range and thumb are
+-- computed against the viewport minus the opposite scrollbar lane.
+scrollNodeBars ::
+  ScrollNode -> Float -> Float -> Float -> Float -> Float -> Float -> (Maybe ScrollBarLayout, Maybe ScrollBarLayout)
+scrollNodeBars sn@(ScrollNode slot cfg native2D dir pad contentMain contentW) x y w h offX offY
+  | native2D =
+      let Rect _ _ viewW viewH = scrollNodeViewport sn x y w h
+       in ( shown DirColumn (scrollBarLayoutIn slot DirColumn (Rect x y w h) pad viewH contentMain offY)
+          , shown DirRow (scrollBarLayoutIn slot DirRow (Rect x y w h) pad viewW contentW offX)
+          )
+  | dir == DirColumn = (shown dir bar, Nothing)
+  | otherwise = (Nothing, shown dir bar)
+  where
+    bar = scrollBarLayout slot dir x y w h pad contentMain offY
+    shown d l = if scrollChromeSuppressed cfg d then Nothing else l
 
 scrollOffsetFromThumb :: DirTag -> ScrollBarLayout -> Float -> V2 -> Float
 scrollOffsetFromThumb dir layout grabOff mouse =

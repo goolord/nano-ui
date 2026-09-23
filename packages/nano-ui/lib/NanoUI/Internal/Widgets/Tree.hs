@@ -15,7 +15,7 @@ import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Internal.Input (inputMousePos)
 import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Store (fieldInt, fieldIntSet, lookupSlot, slotWrite)
-import NanoUI.Internal.Monad (Ui, askContext, askInput, focusedWidget, nextId, uiIO, withKey)
+import NanoUI.Internal.Monad (Ui, askInput, focusedWidget, freshWidget, uiIO, withKey)
 import NanoUI.Internal.Style (defaultLayout, fillW, gap, tight)
 import NanoUI.Internal.Types (Rect (..), clamp, rectContains)
 import NanoUI.Internal.WidgetText (treeEncodeStyle)
@@ -92,9 +92,8 @@ toggle idx s = if IS.member idx s then IS.delete idx s else IS.insert idx s
 treeRow ::
   (Ui :> es) => Int -> TreeRow -> Int -> IS.IntSet -> Eff es (Response, Maybe (Int, IS.IntSet))
 treeRow rowIdx (nodeIdx, depth, hasKids, lbl) selected expanded = do
-  ctx <- askContext
+  (wid, ctx) <- freshWidget
   inp <- askInput
-  wid <- nextId
   let style = treeEncodeStyle nodeIdx depth hasKids (IS.member nodeIdx expanded) (odd rowIdx)
       value = if selected == nodeIdx then 1 else 0
   resp <- addWidgetStyled wid NodeTree lbl value (tight . fillW $ defaultLayout) style
@@ -123,8 +122,7 @@ tree key items index = snd <$> tree' key items index
 tree' :: (Foldable f, Ui :> es) => Text -> f TreeItem -> Int -> Eff es (Response, Int)
 tree' key inputItems index =
   withKey ("tree:" <> key) $ do
-    groupId <- nextId
-    ctx <- askContext
+    (groupId, ctx) <- freshWidget
     let items = toList inputItems
         groupKey = intKey groupId
         total = forestSize items

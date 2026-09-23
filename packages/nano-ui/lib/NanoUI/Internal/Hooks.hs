@@ -19,7 +19,7 @@ import Data.Text (Text)
 import Data.Typeable (Typeable)
 import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context (getStore, intKey, setStore)
-import NanoUI.Internal.Monad (Ui, askContext, nextId, uiIO)
+import NanoUI.Internal.Monad (Ui, freshWidget, uiIO)
 import NanoUI.Internal.Store (WidgetStore, boolInt, bumpMirror, fieldFloat, fieldInt, fieldText, insertDyn, insertSlot, intBool, lookupDyn, lookupSlot)
 
 -- | Read local state and its setter. Keep the value type stable at this id.
@@ -33,8 +33,7 @@ useStored ::
   -> a
   -> Eff es (a, a -> Eff es ())
 useStored lookupValue update initial = do
-  wid <- nextId
-  ctx <- askContext
+  (wid, ctx) <- freshWidget
   let
     key = intKey wid
     valueIn = fromMaybe initial . lookupValue key
