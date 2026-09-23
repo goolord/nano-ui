@@ -21,6 +21,12 @@ NanoUiBatch *nano_ui_batch_create(SDL_Renderer *renderer)
         return NULL;
     }
     batch->renderer = renderer;
+#if SDL_VERSION_ATLEAST(3, 4, 0)
+    /* Every UV the batches submit lies in [0, 1]. Left on AUTO, SDL scans all
+     * of a call's vertices (the whole frame's buffer here) on every textured
+     * call to choose between clamp and wrap, which comes to clamp anyway. */
+    SDL_SetRenderTextureAddressMode(renderer, SDL_TEXTURE_ADDRESS_CLAMP, SDL_TEXTURE_ADDRESS_CLAMP);
+#endif
     return batch;
 }
 

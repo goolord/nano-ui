@@ -69,6 +69,10 @@
 ### Changed
 
 - Builds with GHC 9.10 through 9.14 (`base >=4.20 && <4.23`).
+- With SDL 3.4 or later, the renderer's texture address mode is set to clamp
+  when the session starts. Left on auto, SDL scans every UV in the frame's
+  vertex buffer on each draw call, which cost more than a quarter of a
+  full-window frame.
 - The text caches use the core's generational cache, so the package no longer
   depends on `hashable` or `unordered-containers`.
 - `SdlEnv` no longer has `sdlDialogState`: file dialogs are tracked per
