@@ -4,6 +4,7 @@
 
 ### Changed
 
+- Builds with GHC 9.10 through 9.14 (`base >=4.20 && <4.23`).
 - Plots and diagrams are anti-aliased. A filled path is one `FillPolygon`
   and a stroked one one `StrokePolyline`, instead of hard-edged
   `FillTriangle`s whose corners each snapped to the pixel grid, so lines

@@ -214,7 +214,7 @@ dialogCallback = unsafePerformIO (SDL_DialogFileCallback . castFunPtr <$> mkDial
 onResult :: Ptr () -> Ptr () -> Int32 -> IO ()
 onResult userdata filelist _filterIdx = do
   let launch = castPtrToStablePtr userdata
-  (result, release) <- deRefStablePtr launch
+  (result, release :: IO ()) <- deRefStablePtr launch
   freeStablePtr launch
   paths <- maybePeek (peekArray0 nullPtr >=> traverse peekCString) (castPtr filelist)
   release

@@ -25,9 +25,10 @@ import Foreign.Marshal.Utils (with)
 import Foreign.Ptr (Ptr, nullPtr)
 import qualified NanoUI.Sdl.Internal.Image as SdlImage
 import SDL3.Sys.Bindgen.Blendmode (sDL_BLENDMODE_NONE)
-import SDL3.Sys.Bindgen.Pixels (data SDL_PIXELFORMAT_RGBA32)
+import SDL3.Sys.Bindgen.Pixels qualified as Pixels
 import SDL3.Sys.Bindgen.Rect (SDL_FRect (..))
-import SDL3.Sys.Bindgen.Render (SDL_Texture, data SDL_TEXTUREACCESS_TARGET)
+import SDL3.Sys.Bindgen.Render (SDL_Texture)
+import SDL3.Sys.Bindgen.Render qualified as Render
 import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
 import SDL3.Sys.Render
   ( createTexture
@@ -187,7 +188,7 @@ ensureRetain env w h scale = do
       let cw = roundUp w
           ch = roundUp h
       -- Allocate before replacing: failure leaves the owned texture valid.
-      tex' <- createTexture (sdlRenderer env) SDL_PIXELFORMAT_RGBA32 SDL_TEXTUREACCESS_TARGET (fromIntegral cw) (fromIntegral ch)
+      tex' <- createTexture (sdlRenderer env) Pixels.SDL_PIXELFORMAT_RGBA32 Render.SDL_TEXTUREACCESS_TARGET (fromIntegral cw) (fromIntegral ch)
       when (tex' == nullPtr) $ fail "SDL_CreateTexture(retain) failed"
       void $ setTextureBlendMode tex' (fromIntegral sDL_BLENDMODE_NONE)
       writeIORef (sdlRetain env) (Retain tex' cw ch w h scale)

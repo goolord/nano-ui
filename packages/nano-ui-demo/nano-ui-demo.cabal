@@ -59,7 +59,7 @@ common rts-options
 common sdl-app
     import:           extensions
     import:           warnings
-    build-depends:    base ^>=4.22.0.0
+    build-depends:    base >=4.20 && <4.23
     if !flag(sdl)
         buildable: False
 

@@ -4,6 +4,7 @@
 
 ### Changed
 
+- Builds with GHC 9.10 through 9.14 (`base >=4.20 && <4.23`).
 - `NanoUI.Rgfw.Context`, `.Debug`, `.Gl`, `.Session` and `.Font.Cozette` are
   now under `NanoUI.Rgfw.Internal`. `NanoUI.Backend.Rgfw` is the API.
 - `RgfwOptions`'s `optTheme`, `newRgfwContext` and `applyRgfwTheme` take a

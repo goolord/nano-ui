@@ -61,7 +61,7 @@ common downstream
     import:           warnings
     ghc-options:      -Wunused-packages
     build-depends:
-        base ^>=4.22.0.0,
+        base >=4.20 && <4.23,
         nano-ui
 
 library
@@ -168,10 +168,10 @@ library
         NanoUI.Internal.Widgets.Select
         NanoUI.Internal.Widgets.Slider
     build-depends:
-        base ^>=4.22.0.0,
+        base >=4.20 && <4.23,
         bytestring ^>=0.12,
         colonnade ^>=1.2,
-        containers ^>=0.8,
+        containers >=0.7 && <0.9,
         effectful-core ^>=2.6,
         ghc-compact ^>=0.1,
         hashable ^>=1.5,

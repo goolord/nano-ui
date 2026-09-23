@@ -55,7 +55,7 @@ library
         NanoUI.Rgfw.Internal.Session
     c-sources:        cbits/nano_ui_gl.c
     build-depends:
-        base ^>=4.22.0.0,
+        base >=4.20 && <4.23,
         bytestring ^>=0.12,
         effectful-core ^>=2.6,
         file-embed ^>=0.0.16,
@@ -71,7 +71,7 @@ executable nano-ui-rgfw-demo
     main-is:          RgfwDemo.hs
     other-modules:    RgfwDemoCommon
     build-depends:
-        base ^>=4.22.0.0,
+        base >=4.20 && <4.23,
         nano-ui,
         nano-ui-rgfw,
         text ^>=2.1
@@ -84,7 +84,7 @@ executable nano-ui-rgfw-profile
     other-modules:    RgfwDemoCommon
     ghc-options:      -rtsopts "-with-rtsopts=-A64m -T -I0"
     build-depends:
-        base ^>=4.22.0.0,
+        base >=4.20 && <4.23,
         bytestring,
         nano-ui,
         nano-ui-rgfw,
@@ -101,7 +101,7 @@ test-suite nano-ui-rgfw-test
         NanoUI.Rgfw.Render
         NanoUI.Rgfw.Surface
     build-depends:
-        base ^>=4.22.0.0,
+        base >=4.20 && <4.23,
         nano-ui,
         nano-ui-rgfw,
         nano-ui-rgfw-bindings,

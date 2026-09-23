@@ -68,6 +68,7 @@
 
 ### Changed
 
+- Builds with GHC 9.10 through 9.14 (`base >=4.20 && <4.23`).
 - The text caches use the core's generational cache, so the package no longer
   depends on `hashable` or `unordered-containers`.
 - `SdlEnv` no longer has `sdlDialogState`: file dialogs are tracked per

@@ -33,24 +33,8 @@ import SDL3.Sys.Bindgen.Events
   ( SDL_Event (..)
   , SDL_EventType (..)
   , SDL_KeyboardEvent
-  , data SDL_EVENT_DROP_BEGIN
-  , data SDL_EVENT_DROP_COMPLETE
-  , data SDL_EVENT_DROP_FILE
-  , data SDL_EVENT_DROP_POSITION
-  , data SDL_EVENT_DROP_TEXT
-  , data SDL_EVENT_KEY_DOWN
-  , data SDL_EVENT_MOUSE_BUTTON_DOWN
-  , data SDL_EVENT_MOUSE_BUTTON_UP
-  , data SDL_EVENT_MOUSE_MOTION
-  , data SDL_EVENT_MOUSE_WHEEL
-  , data SDL_EVENT_QUIT
-  , data SDL_EVENT_TEXT_INPUT
-  , data SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED
-  , data SDL_EVENT_WINDOW_EXPOSED
-  , data SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED
-  , data SDL_EVENT_WINDOW_RESIZED
-  , data SDL_EVENT_WINDOW_RESTORED
   )
+import SDL3.Sys.Bindgen.Events qualified as Events
 import SDL3.Sys.Events (pollEventSafe, waitEventSafe, waitEventTimeoutSafe)
 import SDL3.Sys.Bindgen.Keycode
   ( SDL_Keycode (..)
@@ -122,30 +106,30 @@ decodeEvent refreshTy p = do
   if refreshTy /= 0 && w == refreshTy
     then Just EvRefresh <$ takeRefreshEvent
     else case SDL_EventType (fromIntegral w) of
-      SDL_EVENT_QUIT -> pure (Just EvQuit)
-      SDL_EVENT_WINDOW_RESIZED -> pure (Just EvWindowChanged)
-      SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED -> pure (Just EvWindowChanged)
-      SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED -> pure (Just EvWindowChanged)
+      Events.SDL_EVENT_QUIT -> pure (Just EvQuit)
+      Events.SDL_EVENT_WINDOW_RESIZED -> pure (Just EvWindowChanged)
+      Events.SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED -> pure (Just EvWindowChanged)
+      Events.SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED -> pure (Just EvWindowChanged)
       -- The window manager damaged our window surface (occlusion, compositor
       -- effects, restore). The backbuffer contents are gone; the next present
       -- must be full or stale regions flash.
-      SDL_EVENT_WINDOW_EXPOSED -> pure (Just EvWindowRedraw)
-      SDL_EVENT_WINDOW_RESTORED -> pure (Just EvWindowRedraw)
-      SDL_EVENT_KEY_DOWN -> keyDown <$> peek p.key
-      SDL_EVENT_TEXT_INPUT -> textInput p
-      SDL_EVENT_MOUSE_MOTION -> do
+      Events.SDL_EVENT_WINDOW_EXPOSED -> pure (Just EvWindowRedraw)
+      Events.SDL_EVENT_WINDOW_RESTORED -> pure (Just EvWindowRedraw)
+      Events.SDL_EVENT_KEY_DOWN -> keyDown <$> peek p.key
+      Events.SDL_EVENT_TEXT_INPUT -> textInput p
+      Events.SDL_EVENT_MOUSE_MOTION -> do
         me <- peek p.motion
         Just . EvMouseMotion (v2 (getField @"x" me) (getField @"y" me)) <$> peekModifiers
-      SDL_EVENT_MOUSE_BUTTON_DOWN -> mouseButton p True
-      SDL_EVENT_MOUSE_BUTTON_UP -> mouseButton p False
-      SDL_EVENT_MOUSE_WHEEL -> do
+      Events.SDL_EVENT_MOUSE_BUTTON_DOWN -> mouseButton p True
+      Events.SDL_EVENT_MOUSE_BUTTON_UP -> mouseButton p False
+      Events.SDL_EVENT_MOUSE_WHEEL -> do
         we <- peek p.wheel
         pure (Just (EvScroll (v2 (getField @"x" we) (negate (getField @"y" we)))))
-      SDL_EVENT_DROP_FILE -> dropEvent p DropFile
-      SDL_EVENT_DROP_TEXT -> dropEvent p DropText
-      SDL_EVENT_DROP_BEGIN -> dropEvent p DropBegin
-      SDL_EVENT_DROP_COMPLETE -> dropEvent p DropComplete
-      SDL_EVENT_DROP_POSITION -> dropEvent p DropPosition
+      Events.SDL_EVENT_DROP_FILE -> dropEvent p DropFile
+      Events.SDL_EVENT_DROP_TEXT -> dropEvent p DropText
+      Events.SDL_EVENT_DROP_BEGIN -> dropEvent p DropBegin
+      Events.SDL_EVENT_DROP_COMPLETE -> dropEvent p DropComplete
+      Events.SDL_EVENT_DROP_POSITION -> dropEvent p DropPosition
       _ -> pure Nothing
 
 v2 :: CFloat -> CFloat -> V2

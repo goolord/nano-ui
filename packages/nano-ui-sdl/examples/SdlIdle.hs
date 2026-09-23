@@ -38,7 +38,8 @@ import NanoUI
 import NanoUI.Backend.Sdl (SdlOptions (..), defaultSdlOptions, runSdlApp)
 import NanoUI.Internal.Context (Context (..))
 import NanoUI.Testing (askContext, markDirty)
-import SDL3.Sys.Bindgen.Events (SDL_Event, SDL_TextInputEvent (..), data SDL_EVENT_TEXT_INPUT)
+import SDL3.Sys.Bindgen.Events (SDL_Event, SDL_TextInputEvent (..))
+import SDL3.Sys.Bindgen.Events qualified as Events
 import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
 import SDL3.Sys.Bindgen.Stdinc (Uint32 (..), Uint64 (..))
 import SDL3.Sys.Bindgen.Video (SDL_WindowID (..))
@@ -131,7 +132,7 @@ pushTextInput str = do
   ev <- callocBytes (sizeOf (undefined :: SDL_Event)) :: IO (Ptr SDL_Event)
   poke ev.text
     SDL_TextInputEvent
-      { type' = SDL_EVENT_TEXT_INPUT
+      { type' = Events.SDL_EVENT_TEXT_INPUT
       , reserved = Uint32 0
       , timestamp = Uint64 0 -- SDL stamps an event pushed with none
       , windowID = SDL_WindowID (Uint32 0)

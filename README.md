@@ -152,8 +152,8 @@ suite checks that the vertex writers compile without dictionaries or tuples.
 
 ## Running the demos
 
-You need GHC 9.14 and Cabal. The SDL backend also needs SDL3, SDL3_ttf, and
-pkg-config. `nix develop` sets these up. `cabal.project` builds
+You need GHC 9.10 or newer (development uses 9.14) and Cabal. The SDL backend
+also needs SDL3, SDL3_ttf, and pkg-config. `nix develop` sets these up. `cabal.project` builds
 `nano-ui-form`'s ditto dependency from a checkout at `../ditto`, so clone
 [ditto](https://github.com/goolord/ditto) next to this repository first.
 

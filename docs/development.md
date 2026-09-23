@@ -2,8 +2,13 @@
 
 ## Setup
 
-You need GHC 9.14 and Cabal. `nix develop` provides both, along with SDL3,
-SDL3_ttf, and pkg-config.
+You need GHC 9.10 or newer and Cabal. Development uses GHC 9.14, which
+`nix develop` provides along with Cabal, SDL3, SDL3_ttf, and pkg-config. To
+check that the packages still build on 9.10, use a separate build directory:
+
+```sh
+cabal build all -w ghc-9.10.3 --builddir=dist-newstyle-910
+```
 
 `nano-ui-form` depends on ditto 0.5, which `cabal.project` builds from a
 checkout at `../ditto`. Clone [ditto](https://github.com/goolord/ditto) next to

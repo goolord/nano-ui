@@ -85,9 +85,9 @@ library
         NanoUI.Sdl.Internal.Render
         NanoUI.Sdl.Internal.Window
     build-depends:
-        base ^>=4.22.0.0,
+        base >=4.20 && <4.23,
         bytestring ^>=0.12,
-        containers ^>=0.8,
+        containers >=0.7 && <0.9,
         directory ^>=1.3,
         dir-traverse ^>=0.2.3.0,
         effectful-core ^>=2.6,
@@ -125,7 +125,7 @@ test-suite nano-ui-render-test
     if os(windows)
         ghc-options: -optl-mconsole
     build-depends:
-        base ^>=4.22.0.0,
+        base >=4.20 && <4.23,
         bytestring ^>=0.12,
         nano-ui,
         nano-ui-sdl,
@@ -142,8 +142,8 @@ test-suite nano-ui-font-search-test
     hs-source-dirs:   test, lib
     other-modules:    NanoUI.Sdl.Internal.Font.Search
     build-depends:
-        base ^>=4.22.0.0,
-        containers ^>=0.8,
+        base >=4.20 && <4.23,
+        containers >=0.7 && <0.9,
         directory ^>=1.3,
         dir-traverse ^>=0.2.3.0,
         filepath ^>=1.5
@@ -154,7 +154,7 @@ test-suite nano-ui-font-effects-test
     main-is:          FontEffects.hs
     hs-source-dirs:   test
     build-depends:
-        base ^>=4.22.0.0,
+        base >=4.20 && <4.23,
         nano-ui,
         nano-ui-sdl,
         primitive ^>=0.9,
@@ -168,7 +168,7 @@ executable nano-ui-sdl-anim
     import:           warnings
     main-is:          SdlAnim.hs
     build-depends:
-        base ^>=4.22.0.0,
+        base >=4.20 && <4.23,
         nano-ui,
         nano-ui-sdl,
         text ^>=2.1
@@ -184,7 +184,7 @@ executable nano-ui-sdl-idle
     import:           warnings
     main-is:          SdlIdle.hs
     build-depends:
-        base ^>=4.22.0.0,
+        base >=4.20 && <4.23,
         nano-ui,
         nano-ui-sdl,
         sdl3-bindgen-sys ^>=0.0.0.2,
@@ -203,7 +203,7 @@ benchmark nano-ui-sdl-bench
     type:             exitcode-stdio-1.0
     main-is:          SdlBench.hs
     build-depends:
-        base ^>=4.22.0.0,
+        base >=4.20 && <4.23,
         nano-ui,
         nano-ui-sdl,
         tasty-bench ^>=0.4

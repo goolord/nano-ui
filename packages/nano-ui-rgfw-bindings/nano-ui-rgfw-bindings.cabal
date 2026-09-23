@@ -41,7 +41,7 @@ library
     c-sources:        cbits/RGFW.c
     build-tool-depends: hsc2hs:hsc2hs
     build-depends:
-        base ^>=4.22.0.0,
+        base >=4.20 && <4.23,
         bytestring ^>=0.12,
         text ^>=2.1
     hs-source-dirs:   lib
@@ -60,6 +60,6 @@ test-suite nano-ui-rgfw-bindings-test
     main-is: Events.hs
     c-sources: test/Events.c
     include-dirs: cbits
-    build-depends: base ^>=4.22.0.0, nano-ui-rgfw-bindings
+    build-depends: base >=4.20 && <4.23, nano-ui-rgfw-bindings
     if os(windows)
         ghc-options: -optl-mconsole

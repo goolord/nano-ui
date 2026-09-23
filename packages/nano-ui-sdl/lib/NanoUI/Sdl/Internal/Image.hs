@@ -17,9 +17,10 @@ import Foreign.Marshal.Utils (with)
 import Foreign.Ptr (Ptr, castPtr, nullPtr, plusPtr)
 import NanoUI.Testing (AtlasUpload (..), Context, atlasChanges, atlasTextureId)
 import SDL3.Sys.Bindgen.Blendmode (sDL_BLENDMODE_BLEND)
-import SDL3.Sys.Bindgen.Pixels (data SDL_PIXELFORMAT_RGBA32)
+import SDL3.Sys.Bindgen.Pixels qualified as Pixels
 import SDL3.Sys.Bindgen.Rect (SDL_Rect (..))
-import SDL3.Sys.Bindgen.Render (SDL_Renderer, SDL_Texture, data SDL_TEXTUREACCESS_STATIC)
+import SDL3.Sys.Bindgen.Render (SDL_Renderer, SDL_Texture)
+import SDL3.Sys.Bindgen.Render qualified as Render
 import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
 import SDL3.Sys.Render (createTextureSafe, destroyTexture, setTextureBlendMode, updateTextureSafe)
 
@@ -75,7 +76,7 @@ updateRegions tex w pixels rects =
 uploadAtlas ::
   Ptr SDL_Renderer -> ImageAtlas -> Int -> Int -> ForeignPtr Word8 -> Int -> IO ()
 uploadAtlas ren (ImageAtlas ref) w h pixels gen = mask_ $ do
-  tex <- createTextureSafe ren SDL_PIXELFORMAT_RGBA32 SDL_TEXTUREACCESS_STATIC (fromIntegral w) (fromIntegral h)
+  tex <- createTextureSafe ren Pixels.SDL_PIXELFORMAT_RGBA32 Render.SDL_TEXTUREACCESS_STATIC (fromIntegral w) (fromIntegral h)
   unless (tex == nullPtr) $ do
     void $ setTextureBlendMode tex (fromIntegral sDL_BLENDMODE_BLEND)
     uploaded <- updateRegions tex w pixels [(0, 0, w, h)]

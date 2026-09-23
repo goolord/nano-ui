@@ -61,9 +61,9 @@ library
         NanoUI.Plot.Hit
         NanoUI.Plot.Widget
     build-depends:
-        base ^>=4.22.0.0,
+        base >=4.20 && <4.23,
         colour >=2.3.2 && <2.4,
-        containers ^>=0.8,
+        containers >=0.7 && <0.9,
         diagrams-core >=1.5 && <1.6,
         diagrams-lib >=1.6 && <1.7,
         dlist ^>=1.0,
@@ -82,7 +82,7 @@ test-suite nano-ui-diagrams-test
     type:             exitcode-stdio-1.0
     main-is:          Main.hs
     build-depends:
-        base ^>=4.22.0.0,
+        base >=4.20 && <4.23,
         colour >=2.3.2 && <2.4,
         diagrams-lib >=1.6 && <1.7,
         hspec ^>=2.11,

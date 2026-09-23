@@ -8,6 +8,7 @@
 
 ### Changed
 
+- Builds with GHC 9.10 through 9.14 (`base >=4.20 && <4.23`).
 - Event field access, event size, and constants are generated from the bundled
   header with `hsc2hs`. The Haskell API is unchanged; field reads no longer call
   separate C accessors. `hsc2hs` is a build-time tool, not a runtime dependency.

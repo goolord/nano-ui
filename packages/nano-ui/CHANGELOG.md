@@ -230,6 +230,7 @@
 
 ### Changed
 
+- Builds with GHC 9.10 through 9.14 (`base >=4.20 && <4.23`).
 - `SessionDriver` in `NanoUI.Runner`: the session loop checks every event for
   Ctrl+C itself, so `sdIsHardQuit` is gone, and `sdDraw` returns only whether
   another frame is due (`IO Bool`); no backend changed the input it was given.
