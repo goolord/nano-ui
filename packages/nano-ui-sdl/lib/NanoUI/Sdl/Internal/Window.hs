@@ -6,7 +6,6 @@ module NanoUI.Sdl.Internal.Window
   , SdlEnv (..)
   , Retain (..)
   , SdlOptions (..)
-  , WindowDecorations (..)
   , RenderDriver (..)
   , defaultSdlOptions
   , withSdl
