@@ -4,6 +4,7 @@ module NanoUI.Internal.SIMD
   ( pokeVertexSIMD
   , pokeQuadSIMD
   , pokeQuadGradientSIMD
+  , pokeQuadIndices
   , concentricOffsetsSIMD
   ) where
 
@@ -13,14 +14,11 @@ import GHC.Exts
   ( Float (F#)
   , Int (I#)
   , packFloatX4#
-  , packWord32X4#
   , plusAddr#
   , writeFloatOffAddrAsFloatX4#
-  , writeWord32OffAddrAsWord32X4#
   )
-import GHC.Word (Word32 (W32#))
 import GHC.IO (IO (..))
-import Data.Word (Word8)
+import Data.Word (Word32, Word8)
 
 -- | Writes one 32-byte Vertex (8 floats) into memory using two 128-bit SIMD stores
 -- instead of 8 scalar stores.
@@ -78,21 +76,19 @@ pokeQuadSIMD vertices vOffset indices iOffset x y w h u0 v0 u1 v1 r g b a baseId
   pokeVertexSIMD vertices (vOffset + 32) x1 y r g b a u1 v0
   pokeVertexSIMD vertices (vOffset + 64) x1 y1 r g b a u1 v1
   pokeVertexSIMD vertices (vOffset + 96) x y1 r g b a u0 v1
-  pokeQuadIndicesSIMD indices iOffset baseIdx
+  pokeQuadIndices indices iOffset baseIdx (baseIdx + 1) (baseIdx + 2) (baseIdx + 3)
 
--- Six indices form the same two triangles for both solid and gradient quads.
-{-# INLINE pokeQuadIndicesSIMD #-}
-pokeQuadIndicesSIMD :: Ptr Word8 -> Int -> Word32 -> IO ()
-pokeQuadIndicesSIMD (Ptr addr#) offset@(I# offset#) baseIdx = do
-  let !(W32# b0#) = baseIdx
-      !(W32# b1#) = baseIdx + 1
-      !(W32# b2#) = baseIdx + 2
-      !idxVec# = packWord32X4# (# b0#, b1#, b2#, b0# #)
-  IO $ \s0 ->
-    case writeWord32OffAddrAsWord32X4# (plusAddr# addr# offset#) 0# idxVec# s0 of
-      s1 -> (# s1, () #)
-  pokeByteOff (Ptr addr#) (offset + 16) (baseIdx + 2)
-  pokeByteOff (Ptr addr#) (offset + 20) (baseIdx + 3)
+-- | Writes the six indices of quad @a b c d@ (corners in order) as the two
+-- triangles @a b c@ and @a c d@, with scalar stores.
+{-# INLINE pokeQuadIndices #-}
+pokeQuadIndices :: Ptr Word8 -> Int -> Word32 -> Word32 -> Word32 -> Word32 -> IO ()
+pokeQuadIndices ip off a b c d = do
+  pokeByteOff ip off a
+  pokeByteOff ip (off + 4) b
+  pokeByteOff ip (off + 8) c
+  pokeByteOff ip (off + 12) a
+  pokeByteOff ip (off + 16) c
+  pokeByteOff ip (off + 20) d
 
 -- | Vectorized Quad with 4 distinct corner colors (top-left, top-right, bottom-right, bottom-left)
 {-# INLINE pokeQuadGradientSIMD #-}
@@ -123,7 +119,7 @@ pokeQuadGradientSIMD
   pokeVertexSIMD vertices (vOffset + 32) x1 y r1 g1 b1 a1 u v
   pokeVertexSIMD vertices (vOffset + 64) x1 y1 r2 g2 b2 a2 u v
   pokeVertexSIMD vertices (vOffset + 96) x y1 r3 g3 b3 a3 u v
-  pokeQuadIndicesSIMD indices iOffset baseIdx
+  pokeQuadIndices indices iOffset baseIdx (baseIdx + 1) (baseIdx + 2) (baseIdx + 3)
 
 -- | Evaluates 4 concentric arc positions:
 -- xs = cx + radii * ct

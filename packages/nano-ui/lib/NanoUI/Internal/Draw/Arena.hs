@@ -26,7 +26,6 @@ module NanoUI.Internal.Draw.Arena
   , pushQuad
   , snapRectOrigin
   , unpackColorF
-  , pokeQuadIndices
   , whitePixel
   ) where
 
@@ -53,7 +52,6 @@ import Foreign.ForeignPtr (mallocForeignPtrBytes, withForeignPtr)
 import Foreign.ForeignPtr.Unsafe (unsafeForeignPtrToPtr)
 import Foreign.Marshal.Array (copyArray)
 import Foreign.Ptr (Ptr)
-import Foreign.Storable (pokeByteOff)
 import GHC.Exts (RealWorld)
 import NanoUI.Internal.Draw.Types
 import NanoUI.Internal.SIMD (pokeQuadSIMD)
@@ -444,16 +442,6 @@ snapRectOrigin :: DrawArena -> Rect -> IO Rect
 snapRectOrigin da (Rect x y w h) = do
   s <- readIORef (daSnapScale da)
   pure (Rect (onGrid s x) (onGrid s y) w h)
-
-{-# INLINE pokeQuadIndices #-}
-pokeQuadIndices :: Ptr Word8 -> Int -> Word32 -> Word32 -> Word32 -> Word32 -> IO ()
-pokeQuadIndices ip off a b c d = do
-  pokeByteOff ip off a
-  pokeByteOff ip (off + 4) b
-  pokeByteOff ip (off + 8) c
-  pokeByteOff ip (off + 12) a
-  pokeByteOff ip (off + 16) c
-  pokeByteOff ip (off + 20) d
 
 -- | The u and v of the center of the 4x4 white pixel patch in the 1024x1024
 -- font atlas.

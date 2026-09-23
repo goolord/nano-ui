@@ -66,7 +66,7 @@ import NanoUI.Internal.Draw.Arena
 import NanoUI.Internal.Draw.Shapes
 import NanoUI.Internal.Draw.Types
 import NanoUI.Internal.Font
-import NanoUI.Internal.SIMD (pokeQuadSIMD, pokeVertexSIMD)
+import NanoUI.Internal.SIMD (pokeQuadIndices, pokeQuadSIMD, pokeVertexSIMD)
 import NanoUI.Internal.Style (FontStyle (..), FontWeight (..), TextDecoration (..))
 import NanoUI.Internal.Types (Color (..), Rect (..), forUpTo_, onGrid)
 
