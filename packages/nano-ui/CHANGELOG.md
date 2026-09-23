@@ -230,6 +230,24 @@
 
 ### Changed
 
+- `SessionDriver` in `NanoUI.Runner`: the session loop checks every event for
+  Ctrl+C itself, so `sdIsHardQuit` is gone, and `sdDraw` returns only whether
+  another frame is due (`IO Bool`); no backend changed the input it was given.
+- `ComboInput` in `NanoUI.Widgets.Combo` carries the dropdown's `Input` as
+  `ciInput`, in place of the eight fields (`ciMouse`, `ciPressed`, `ciDown`,
+  `ciScroll`, `ciKeyUp`, `ciKeyDown`, `ciEnter`, `ciEscape`) copied out of it.
+- `runClickReduce` moves from `NanoUI.Testing.Assert` to
+  `NanoUI.Testing.Harness`, beside the press and release helpers it uses.
+  `assertWheelTitlePinned` drops its trailing `Maybe Float`, which every
+  caller passed as `Nothing`.
+- A 2D scroller's scroll changes only its offset, as a 1D scroller's did, so
+  the damage pass repaints the scroller's clip instead of the whole window.
+- A pane grid's commands (`pgcClose`, `pgcSplit`, maximize and resize) act on
+  the grid's current state, so two splits in one frame get distinct ids; a
+  pane drag's threshold counts from the press point.
+- A context-menu command, or `runTextCommand`, on a single-line field repaints
+  that field, as it already did a text area.
+
 - `popupWith` honours the layout its caller shapes. It built the popup node
   from the direction and size alone, so a minimum, maximum, alignment, grid or
   font set through its `Layout -> Layout` argument was dropped; padding and gap
@@ -446,6 +464,9 @@
 
 ### Fixed
 
+- Ctrl+C quits a session even when Ctrl is released later in the same batch
+  of events. The loop looked only at the last event's modifiers, so RGFW
+  missed it during a busy frame.
 - Grow children of a column with a gap share the height left after the gaps,
   as a row's do. They shared the whole height, so the column's children ran
   past its bottom by the gaps between them.
@@ -587,6 +608,9 @@
 
 ### Removed
 
+- `withExternalText` from `NanoUI.Testing`: nothing read the flag it set.
+- `Compact`, `compactHost` and `askCompact` from `NanoUI.Testing`;
+  `NanoUI.Backend` exports them.
 - `fbDrawGlyph` from `FontBackend`. No backend drew per-character glyphs
   through it (every non-empty SDL line is shaped); `drawGlyph` now reads
   `fmGlyph` from the metrics snapshot.
