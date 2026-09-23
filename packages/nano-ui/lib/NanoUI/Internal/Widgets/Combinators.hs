@@ -14,7 +14,7 @@ import NanoUI.Internal.Context
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Store (fieldInt, Field, boolInt)
 import NanoUI.Internal.Layout.Arena (NodeType (..))
-import NanoUI.Internal.Monad (Ui, askContext, nextId, uiIO)
+import NanoUI.Internal.Monad (Ui, freshWidget, uiIO)
 import NanoUI.Internal.Style (Layout (..))
 import NanoUI.Internal.Widgets.Behavior (keyActivated)
 import NanoUI.Internal.Widgets.Node
@@ -28,8 +28,7 @@ import NanoUI.Internal.Widgets.Node
 {-# INLINE buttonStyledEx #-}
 buttonStyledEx :: (Ui :> es) => Bool -> Text -> Float -> Layout -> Int -> Eff es Response
 buttonStyledEx enabled txt value layout styleIdx = do
-  wid <- nextId
-  ctx <- askContext
+  (wid, ctx) <- freshWidget
   disabled <- uiIO (isDisabled ctx wid)
   let active = enabled && not disabled
   when active $ uiIO (registerFocusable ctx wid)

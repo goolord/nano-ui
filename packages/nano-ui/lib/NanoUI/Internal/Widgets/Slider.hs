@@ -12,7 +12,7 @@ import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context
 import NanoUI.Internal.Font (sliderHitBounds)
 import NanoUI.Internal.Layout.Arena (NodeType (..))
-import NanoUI.Internal.Monad (Ui, askContext, nextId, uiIO, withKey)
+import NanoUI.Internal.Monad (Ui, freshWidget, uiIO, withKey)
 import NanoUI.Internal.Style (Layout, defaultLayout, fillW)
 import NanoUI.Internal.Store (fieldFloat)
 import NanoUI.Internal.Types (Rect (..), clamp)
@@ -44,8 +44,7 @@ sliderWith' ::
   Ui :> es =>
   (Layout -> Layout) -> Float -> Float -> Float -> Eff es (Response, Float)
 sliderWith' f minV maxV value = do
-  wid <- nextId
-  ctx <- askContext
+  (wid, ctx) <- freshWidget
   uiIO $ registerFocusable ctx wid
   current <- uiIO $ adoptSlot fieldFloat ctx wid value
   let

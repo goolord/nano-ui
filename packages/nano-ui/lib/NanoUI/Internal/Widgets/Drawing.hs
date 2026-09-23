@@ -15,7 +15,7 @@ import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context (cachedWidgetLayout, registerDrawing)
 import NanoUI.Internal.Draw (DrawOp (..), DrawingBuild)
 import NanoUI.Internal.Layout.Arena (NodeType (NodeDrawing))
-import NanoUI.Internal.Monad (Ui, askContext, nextId, uiIO, withContext)
+import NanoUI.Internal.Monad (Ui, freshWidget, nextId, uiIO, withContext)
 import NanoUI.Internal.Style (Layout, defaultLayout)
 import NanoUI.Internal.Types (Rect)
 import NanoUI.Internal.Widgets.Node (Response, addWidget)
@@ -57,8 +57,7 @@ drawingCached ::
   DrawingBuild ->
   Eff es Response
 drawingCached dw dh lh content f compute build = do
-  wid <- nextId
-  ctx <- askContext
+  (wid, ctx) <- freshWidget
   layout <- uiIO (cachedWidgetLayout ctx wid dw dh lh content (f defaultLayout) compute)
   uiIO (registerDrawing ctx wid content build)
   addWidget wid NodeDrawing T.empty 0 layout

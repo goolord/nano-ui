@@ -29,7 +29,7 @@ import NanoUI.Internal.Font
 import NanoUI.Internal.Id (WidgetId (..), mix64)
 import NanoUI.Internal.Input (Input (..), Key (..), inputKeys, inputKeysElem, inputModifiers, modShift)
 import NanoUI.Internal.Layout.Arena
-import NanoUI.Internal.Monad (Ui, (<&&>), askContext, askInput, nextId, uiIO, withKey)
+import NanoUI.Internal.Monad (Ui, (<&&>), askContext, askInput, freshWidget, nextId, uiIO, withKey)
 import NanoUI.Internal.Store (fieldFloat, fieldInt, fieldPoint, findSlot, insertSlot, lookupSlot, slotWriteOr)
 import NanoUI.Internal.Style
 import NanoUI.Internal.Types
@@ -294,9 +294,8 @@ hsvChannels =
 colorPickerWith ::
   Ui :> es => Bool -> Color -> Eff es (Response, Color)
 colorPickerWith showAlpha value = do
-  ctx <- askContext
   -- The field's id keys the picker's state.
-  wid <- nextId
+  (wid, ctx) <- freshWidget
   hueWid <- nextId
   alphaWid <- nextId
   previewWid <- nextId

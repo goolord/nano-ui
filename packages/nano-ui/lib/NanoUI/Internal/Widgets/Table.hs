@@ -47,7 +47,7 @@ import NanoUI.Internal.Hooks (useInt)
 import NanoUI.Internal.Font (ScrollBarSlot (..), scrollBarGutter, tableCellInset, lineWidthIO)
 import NanoUI.Internal.Input (Input (..), UiCursorKind (..), inputMouseDown, inputMousePos, inputMousePressed, inputMouseReleased)
 import NanoUI.Internal.Layout.Arena (NodeType (..))
-import NanoUI.Internal.Monad (Ui, askContext, askInput, lastRect, nextId, uiIO, withKey)
+import NanoUI.Internal.Monad (Ui, askInput, freshWidget, lastRect, nextId, uiIO, withKey)
 import NanoUI.Internal.Store (Slot (..), SlotWrites (..), fieldFloat, fieldInt, fieldIntSet, findSlot, insertDyn, lookupDyn, slotKey, slotWrite)
 import NanoUI.Internal.Style (AlignX (..), AlignY (..), Direction (..), FontVariant (..), Layout (..), Sizing (..), defaultLayout, fillH, fillW, minW, tight)
 import Data.Bits ((.|.), shiftL)
@@ -324,14 +324,13 @@ tableConfigured ::
   Eff es TableResponse
 tableConfigured cfg f key cols inputRows curSort =
   withKey ("table:" <> key) $ do
-    stateWid <- nextId
+    (stateWid, ctx) <- freshWidget
     vWid <- nextId
     hWid <- nextId
     tableWid <- nextId
     let n = V.length (Encode.getColonnade cols)
         sort0 = clampSortCol n curSort
         stateKey = intKey stateWid
-    ctx <- askContext
     inp <- askInput
     st0 <- uiIO (getStore ctx)
     TableDerived {tdHeaders = hdrs, tdEncoded = encoded, tdWidths = contentWs, tdNumeric = numeric, tdOrder = sorted} <-

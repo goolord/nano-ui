@@ -81,7 +81,7 @@ import GHC.Float (castFloatToWord32)
 import NanoUI.Internal.Id (WidgetId, mix64)
 import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena (NodeType (NodeDrawing))
-import NanoUI.Internal.Monad (Ui, askContext, askInput, nextId, uiIO, uiTime)
+import NanoUI.Internal.Monad (Ui, askContext, askInput, freshWidget, nextId, uiIO, uiTime)
 import NanoUI.Internal.Store
 import NanoUI.Internal.Style
 import NanoUI.Internal.Types
@@ -322,8 +322,7 @@ useDrag2D ::
   Rect ->
   Eff es Drag2D
 useDrag2D bounds = do
-  wid <- nextId
-  ctx <- askContext
+  (wid, ctx) <- freshWidget
   inp <- askInput
   -- The drag flag lives in 'storeQuiet' (bookkeeping: the knob paints from
   -- its value and pressed state, which damage on their own) and the last
@@ -385,8 +384,7 @@ knobWith' ::
   -> Float
   -> Eff es (Response, Float)
 knobWith' f diameter minV maxV value = do
-  wid <- nextId
-  ctx <- askContext
+  (wid, ctx) <- freshWidget
   current <- uiIO $ adoptSlot fieldFloat ctx wid value
   let
     range = maxV - minV
@@ -445,8 +443,7 @@ toggleSwitchWith f on = snd <$> toggleSwitchWith' f on
 toggleSwitchWith' ::
   Ui :> es => (Layout -> Layout) -> Bool -> Eff es (Response, Bool)
 toggleSwitchWith' f on = do
-  wid <- nextId
-  ctx <- askContext
+  (wid, ctx) <- freshWidget
   current <- intBool <$> uiIO (adoptSlot fieldInt ctx wid (boolInt on))
   let
     pillW = 44.0

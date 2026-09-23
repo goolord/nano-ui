@@ -98,8 +98,7 @@ floatingOverlay ::
   Eff es (Bool, a) ->
   Eff es (Response, Maybe a)
 floatingOverlay open dismissable addPanel enter body = do
-  wid <- nextId
-  ctx <- askContext
+  (wid, ctx) <- freshWidget
   if not open
     then do
       uiIO (modifyIORef' (ctxIdContext ctx) (fst . enterScope scopeTag))

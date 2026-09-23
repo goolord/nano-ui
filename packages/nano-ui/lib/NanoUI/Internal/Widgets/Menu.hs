@@ -22,7 +22,7 @@ import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context (Context (..), getStore, intKey, modifyStore)
 import NanoUI.Internal.Font (menuItemPadX, menuItemRowH, menuMinW, menuOuterPad, menuSepH, widgetContentInset)
 import NanoUI.Internal.Input (inputMousePos, inputMouseReleased)
-import NanoUI.Internal.Monad (Ui, askContext, askDefaultLayout, askInput, nextId, uiIO)
+import NanoUI.Internal.Monad (Ui, askContext, askDefaultLayout, askInput, freshWidget, uiIO)
 import NanoUI.Internal.Store (Slot (..), fieldPoint, findSlot, flagSlot, insertSlot, setFlagSlot, slotKey)
 import NanoUI.Internal.Style (Layout (..), Padding (..), defaultLayout, fillW, fixedH, fontMuted, gap, minW, padXY, tight)
 import NanoUI.Internal.Types (PopupAnchor (..), PopupPlacement (..), V2 (..))
@@ -86,8 +86,7 @@ useContextMenu ::
   Ui :> es =>
   Eff es (Bool, V2, V2 -> Eff es (), Eff es ())
 useContextMenu = do
-  wid <- nextId
-  ctx <- askContext
+  (wid, ctx) <- freshWidget
   let key = intKey wid
       openK = slotKey SlotMenuOpen key
       posK = slotKey SlotMenuPos key

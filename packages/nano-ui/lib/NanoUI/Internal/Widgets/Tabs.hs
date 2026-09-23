@@ -21,7 +21,7 @@ import NanoUI.Internal.Frame.Scroll.Geometry (scrollAxisRange, scrollBare, scrol
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Input (inputMousePos, inputScroll)
 import NanoUI.Internal.Layout.Arena (setNodeValue)
-import NanoUI.Internal.Monad (Ui, askContext, askInput, lastRect, nextId, requestFrame, uiIO, uiTheme, withKey)
+import NanoUI.Internal.Monad (Ui, askInput, freshWidget, lastRect, nextId, requestFrame, uiIO, uiTheme, withKey)
 import NanoUI.Internal.Store (fieldFloat, findSlot, insertSlot)
 import NanoUI.Internal.Style
 import NanoUI.Internal.Types (Rect (..), clamp, rectContains, rectW, v2Y)
@@ -98,8 +98,7 @@ tabStrip ::
   Maybe (a -> Eff es ()) ->
   Eff es (TabResponse a)
 tabStrip (TabsConfig style orient) cur tabList mRenderBody = do
-  ctx <- askContext
-  groupId <- nextId
+  (groupId, ctx) <- freshWidget
   let vertical = orient == TabLeft || orient == TabRight
       headers = renderHeaders ctx (tabEncodeStyle (fromEnum style)) cur tabList
       barGap = if style == TabSegmented then 0 else 4

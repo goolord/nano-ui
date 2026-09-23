@@ -35,7 +35,7 @@ import NanoUI.Internal.Font (fmLineHeight)
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena (NodeType (..))
-import NanoUI.Internal.Monad (Ui, askContext, askInput, nextId, uiIO)
+import NanoUI.Internal.Monad (Ui, askContext, askInput, freshWidget, nextId, uiIO)
 import NanoUI.Internal.Store
 import NanoUI.Internal.Style (FontStyle (..), FontVariant (..), FontWeight (..), Layout (..), defaultLayout, fillW, fixedH, minW)
 import NanoUI.Internal.Types (DamageBounds (..), clamp)
@@ -145,8 +145,7 @@ textAreaWith f value = snd <$> textAreaWith' f value
 -- | 'textAreaWith' returning @(response, updatedText)@.
 textAreaWith' :: Ui :> es => (Layout -> Layout) -> Text -> Eff es (Response, Text)
 textAreaWith' f value = do
-  wid <- nextId
-  ctx <- askContext
+  (wid, ctx) <- freshWidget
   store <- uiIO (getStore ctx)
   let textKey = slotKey SlotTextAreaText (intKey wid)
       -- The text last passed or returned, and its document: passing it back
