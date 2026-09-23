@@ -198,10 +198,8 @@ tableDerived ctx key cols rows sort = do
 -- | Content width and numeric flag of each column, measured once over the
 -- encoded rows.
 columnMetrics :: Context -> V.Vector Text -> SmallArray (V.Vector Text) -> IO (PrimArray Float, SmallArray Bool)
-columnMetrics ctx hdrs encoded = do
-  let fm = ctxFontMetrics ctx
-      mono = ctxMonoFontMetrics ctx
-      cellPadX = 2 * tableCellInset
+columnMetrics Context {ctxFontMetrics = fm, ctxMonoFontMetrics = mono} hdrs encoded = do
+  let cellPadX = 2 * tableCellInset
       count = V.length hdrs
       nRows = sizeofSmallArray encoded
       cell r c = indexSmallArray encoded r V.! c

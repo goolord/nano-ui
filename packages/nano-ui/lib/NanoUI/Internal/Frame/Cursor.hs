@@ -66,12 +66,11 @@ selectDropdownCursorKind ctx inp = do
       (UiCursorPointer <$) <$> overlayMenuOwnerAt ctx (inputMousePos inp)
 
 scrollThumbCursorKind :: Context -> Input -> IO (Maybe UiCursorKind)
-scrollThumbCursorKind ctx inp = do
+scrollThumbCursorKind ctx@Context {ctxNodeArena = na} inp = do
   mDrag <- getsInteraction ctx isScrollDrag
   if inputMouseDown inp && isJust mDrag
     then pure (Just UiCursorGrabbing)
     else do
-      let na = ctxNodeArena ctx
       thumb <- findClassNodeM na PointerNodes $ \idx ->
         ((\nt -> nt == NodeTextArea || isScrollNode nt) <$> getNodeType na idx) <&&> do
           wid <- getWidgetId na idx

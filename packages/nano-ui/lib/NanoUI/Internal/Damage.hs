@@ -32,7 +32,7 @@ layoutSettleMinArea = 0.25
 -- Partial retain clears with themeWindow. Expand interaction clips to the painted
 -- panel/window backdrop so slop pixels get the correct fill, not window color.
 backdropRectFromNode :: Context -> Int -> IO (Maybe Rect)
-backdropRectFromNode ctx idx = walkAncestors na idx $ \i -> do
+backdropRectFromNode Context {ctxNodeArena = na} idx = walkAncestors na idx $ \i -> do
   nt <- getNodeType na i
   paints <- case nt of
     NodeScrollContainer -> do
@@ -42,8 +42,6 @@ backdropRectFromNode ctx idx = walkAncestors na idx $ \i -> do
       pure (not ((wTag == SizingGrow && hTag == SizingGrow) || scrollBare (decodeScrollConfig si)))
     _ -> pure (nt == NodePanel || isFloatingNode nt)
   if paints then getNonzeroRect na i else pure Nothing
-  where
-    na = ctxNodeArena ctx
 
 {-# INLINE getNonzeroRect #-}
 getNonzeroRect :: NodeArena -> Int -> IO (Maybe Rect)
@@ -52,11 +50,10 @@ getNonzeroRect arena i = do
   pure (if rectNonEmpty r then Just r else Nothing)
 
 updatePrevRects :: Context -> IO ()
-updatePrevRects ctx = do
+updatePrevRects ctx@Context {ctxNodeArena = na} = do
   oldRects <- getsDamage ctx dsPrevRects
   oldClips <- getsDamage ctx dsPrevClips
   oldTexts <- getsDamage ctx dsPrevNodeTexts
-  let na = ctxNodeArena ctx
   count <- arenaCount na
   if count <= 0
     then modifyDamage ctx (\ds -> ds {dsPrevRects = IM.empty, dsPrevClips = IM.empty, dsPrevNodeTexts = IM.empty})
@@ -105,9 +102,8 @@ updatePrevRects ctx = do
       go oldRects 0 oldRects oldClips oldTexts 0 False
 
 floatingPanelsInOrder :: Context -> IO [(Int, Rect)]
-floatingPanelsInOrder ctx = foldClassNodeRevM na FloatingNodes step []
+floatingPanelsInOrder Context {ctxNodeArena = na} = foldClassNodeRevM na FloatingNodes step []
   where
-    na = ctxNodeArena ctx
     step acc idx = do
       wid <- getWidgetId na idx
       if hashWidgetId wid == 0
@@ -277,7 +273,7 @@ writeDamage ctx inp snap = do
 -- replay the previous frame's ops for it. What this costs per widget is the
 -- widget's own choice: see 'refreshCustomDrawingOps'.
 refreshCustomDrawings :: Context -> IO [Int]
-refreshCustomDrawings ctx = do
+refreshCustomDrawings ctx@Context {ctxNodeArena = na} = do
   dc <- readIORef (ctxDrawingCache ctx)
   -- A drawing with neither entry settles nothing, so a view without drawings
   -- skips the walk, and the walk visits only the drawing nodes.
@@ -285,7 +281,6 @@ refreshCustomDrawings ctx = do
     then pure []
     else foldClassNodesM na DrawingNodes step []
   where
-    na = ctxNodeArena ctx
     step acc i = do
       wid <- getWidgetId na i
       rect <- getNodeRect na i
@@ -606,7 +601,7 @@ clipKeyRect k clip r
        in if rectNonEmpty clipped then Just clipped else Nothing
 
 scrollOffsetDamage :: Context -> RectUnion -> WidgetStore -> WidgetStore -> IO ()
-scrollOffsetDamage ctx acc oldStore newStore =
+scrollOffsetDamage Context {ctxNodeArena = na} acc oldStore newStore =
   unless (null changedKeys) $ do
     -- Every store key that holds a scroll node's offset, mapped to the first
     -- such node, and every scroll range, mapped to each node with that id.
@@ -620,7 +615,6 @@ scrollOffsetDamage ctx acc oldStore newStore =
         getNonzeroRect na idx >>= mapM_ (addRect acc)
         walkFloatingAncestors na idx (\i _ -> getNonzeroRect na i) >>= mapM_ (addRect acc)
   where
-    na = ctxNodeArena ctx
     -- Floating-pane offsets live in storeFloat; wheel/keyboard offsets
     -- live under the SlotTextAreaScroll slot in storePoint. Both move the
     -- scroller's content and its chrome. New or removed float offsets only

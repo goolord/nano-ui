@@ -233,10 +233,8 @@ resetUiBuild ctx newFrame = do
 -- separator, the modal backdrop and the modals, then popups. Each is a
 -- menu-style panel in its node's theme with its subtree clipped inside.
 drawFloatingPanels :: Context -> Size -> IO ()
-drawFloatingPanels ctx (Size ww wh) = do
-  let na = ctxNodeArena ctx
-      da = ctxDrawArena ctx
-      panels nt style after = forFloatingNodes_ na nt $ \idx -> do
+drawFloatingPanels ctx@Context {ctxNodeArena = na, ctxDrawArena = da} (Size ww wh) = do
+  let panels nt style after = forFloatingNodes_ na nt $ \idx -> do
         rect <- getNodeRect na idx
         theme <- nodeTheme ctx idx
         paintMenuPanel da theme (style theme) rect
@@ -261,9 +259,8 @@ drawFloatingPanels ctx (Size ww wh) = do
 -- in pieces paints a backdrop over each, and every command is cut to them.
 paintDamageClip :: Context -> Damage -> [Rect] -> IO ()
 paintDamageClip _ DamageFull _ = pure ()
-paintDamageClip ctx (DamageClip r) pieces = do
-  let da = ctxDrawArena ctx
-      clip = rectInflate 1 r
+paintDamageClip ctx@Context {ctxDrawArena = da} (DamageClip r) pieces = do
+  let clip = rectInflate 1 r
       pieceClips = map (rectInflate 1) pieces
       backdrops = if null pieces then [clip] else pieceClips
   setClip da clip
@@ -282,9 +279,8 @@ paintDamageClip ctx (DamageClip r) pieces = do
 -- none of it is restored. Floating panels depend on state outside the arena
 -- (window positions, popup anchors), so they are placed every time.
 layoutArena :: Context -> Size -> Bool -> IO ()
-layoutArena ctx size@(Size w h) check = do
-  let na = ctxNodeArena ctx
-      ms = contextMeasurers ctx
+layoutArena ctx@Context {ctxNodeArena = na} size@(Size w h) check = do
+  let ms = contextMeasurers ctx
   gen <- readIORef (ctxMetricGen ctx)
   cached <- readIORef (ctxLayoutCache ctx)
   reused <- case cached of
@@ -319,8 +315,7 @@ layoutArena ctx size@(Size w h) check = do
 -- what its closure reads is arena state, which only comparing the hooks and
 -- running them again can check.
 layoutReuseValid :: Context -> LayoutCache -> IO Bool
-layoutReuseValid ctx lc = do
-  let na = ctxNodeArena ctx
+layoutReuseValid ctx@Context {ctxNodeArena = na} lc = do
   okSig <- layoutSigMatches na lc
   hooks <- customMeasureHooks ctx
   -- A matching signature means the same node count, so every recorded index

@@ -131,9 +131,7 @@ paintTextInputNode env idx rect@(Rect x y w h) = do
 -- | Multi-line text area.
 {-# NOINLINE paintTextAreaNode #-}
 paintTextAreaNode :: PaintEnv -> NodeIdx -> Rect -> IO ()
-paintTextAreaNode env idx (Rect x y w h) = do
-  let ctx = peContext env
-      da = peDrawArena env
+paintTextAreaNode PaintEnv {peContext = ctx, peDrawArena = da} idx (Rect x y w h) = do
   style <- widgetVisualStyle ctx NodeTextArea idx
   areaFm <- resolveTextAreaFont ctx idx
   paintStyledRect da style (Rect x y w h)
@@ -144,8 +142,7 @@ paintTextAreaNode env idx (Rect x y w h) = do
 -- background pass and a label pass, both behind NOINLINE seams.
 {-# NOINLINE paintWidget #-}
 paintWidget :: PaintEnv -> NodeIdx -> NodeType -> Rect -> IO ()
-paintWidget env idx nt rect@(Rect _ ry _ rh) = do
-  let ctx = peContext env
+paintWidget env@PaintEnv {peContext = ctx} idx nt rect@(Rect _ ry _ rh) = do
   style <- widgetVisualStyle ctx nt idx
   value <- getNodeValue (peNodeArena env) idx
   si <- getStyleIdx (peNodeArena env) idx
@@ -218,10 +215,8 @@ paintWidgetBackground env idx nt style si menuRowRect value (Rect x y w h) = do
 
 {-# NOINLINE paintSliderBody #-}
 paintSliderBody :: PaintEnv -> Float -> Float -> Float -> Float -> Float -> IO ()
-paintSliderBody env x y w h value = do
-  let da = peDrawArena env
-      theme = peTheme env
-      track@(Rect tx ty tw th) = sliderTrackBounds x y w h
+paintSliderBody PaintEnv {peDrawArena = da, peTheme = theme} x y w h value = do
+  let track@(Rect tx ty tw th) = sliderTrackBounds x y w h
       trackR = 3
       fillW = max 0 (tw * clamp01 value)
       outline = styleBorder (themeInput theme)

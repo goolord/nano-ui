@@ -103,7 +103,7 @@ topmostFloating ctx wanted at =
 -- blocks every node, as it did while the view ran
 -- ('NanoUI.Internal.Context.pointerBlockedByModal').
 nodeOwnsPointer :: Context -> NodeIdx -> IO Bool
-nodeOwnsPointer ctx idx =
+nodeOwnsPointer ctx@Context {ctxNodeArena = na} idx =
   getsInteraction ctx isPointerRoute >>= \case
     RouteLayer routed -> do
       layer <- layerOf idx
@@ -111,7 +111,6 @@ nodeOwnsPointer ctx idx =
         <&&> (maybe (not <$> modalActive ctx) (nodeInSubtree ctx idx) =<< topModalNode na)
     _ -> pure False
  where
-  na = ctxNodeArena ctx
   layerOf i = maybe 0 intKey <$> walkFloatingAncestors na i (\j _ -> Just <$> getWidgetId na j)
 
 -- | Whether widget @wid@ may show and use a dropdown or menu of its own. With
@@ -143,9 +142,8 @@ nodePointVisible ctx idx mouse = do
 -- previous frame.
 {-# INLINE nodeClippedHit #-}
 nodeClippedHit :: Context -> NodeIdx -> Rect -> V2 -> IO Bool
-nodeClippedHit ctx idx rect mouse =
+nodeClippedHit ctx@Context {ctxNodeArena = na} idx rect mouse =
   pure (rectHit rect mouse) <&&> do
-    let na = ctxNodeArena ctx
     mLive <- getClipRect na idx
     mClip <- case mLive of
       Just _ -> pure mLive
@@ -161,14 +159,13 @@ nodeClippedHit ctx idx rect mouse =
 -- it is not set until 'NanoUI.Internal.Frame.Scroll.applyScrollOffsets' runs.
 {-# INLINE nodeInteractionHit #-}
 nodeInteractionHit :: Context -> NodeIdx -> Rect -> V2 -> IO Bool
-nodeInteractionHit ctx idx rect mouse
+nodeInteractionHit ctx@Context {ctxNodeArena = na} idx rect mouse
   | not (rectHit rect mouse) = pure False
   | idx <= 0 = pure True
   | otherwise = do
       p <- getParent na idx
       isNothing <$> walkAncestors na p outside
  where
-  na = ctxNodeArena ctx
   -- 'Just' at a scroll container whose recorded viewport misses the mouse.
   outside i = do
     nt <- getNodeType na i

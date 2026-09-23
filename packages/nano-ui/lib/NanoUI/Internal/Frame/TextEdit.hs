@@ -136,8 +136,7 @@ openTextEditMenu ctx inp =
       markDirty ctx
 
 textFieldWidgetAtMouse :: Context -> V2 -> IO (Maybe WidgetId)
-textFieldWidgetAtMouse ctx mouse = do
-  let na = ctxNodeArena ctx
+textFieldWidgetAtMouse ctx@Context {ctxNodeArena = na} mouse = do
   top <- overlayHitRoot ctx mouse
   mIdx <-
     findClassNodeRevM na PointerNodes $ \idx -> do

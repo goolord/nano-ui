@@ -61,7 +61,7 @@ overlayMenuRects ctx = do
 
 -- | Every open dropdown, in arena order.
 openDropdowns :: Context -> IO [Dropdown]
-openDropdowns ctx = do
+openDropdowns ctx@Context {ctxNodeArena = na} = do
   store <- getStore ctx
   -- Selects open only through the store flag and combos only while focused,
   -- so at most two nodes hold a dropdown, and both are looked up directly.
@@ -71,7 +71,6 @@ openDropdowns ctx = do
     wid <- getWidgetId na idx
     build store idx wid isCombo
   where
-    na = ctxNodeArena ctx
     build store idx wid combo = do
       opts <- getOptions na idx
       (x, y, w, h) <- getRect na idx
@@ -200,14 +199,13 @@ closeSelectOnOutsideClick ctx inp =
         setStore ctx (closeSelects store)
 
 finalizeSelectKeyboard :: Context -> Input -> IO ()
-finalizeSelectKeyboard ctx inp = do
+finalizeSelectKeyboard ctx@Context {ctxNodeArena = na} inp = do
   let has k = inputKeysElem k (inputKeys inp)
       wantNext = has KeyDown || has KeyRight
       wantStep = wantNext || has KeyUp || has KeyLeft
       wantEsc = has KeyEscape
       wantEnter = has KeyEnter
   when (wantStep || wantEsc || wantEnter) $ do
-    let na = ctxNodeArena ctx
     focus <- readIORef (ctxFocusId ctx)
     store <- getStore ctx
     -- Arrows step the focused enabled select, open or not. Otherwise the keys
@@ -238,21 +236,17 @@ finalizeSelectKeyboard ctx inp = do
 
 -- | The node of the select whose dropdown the store holds open.
 openSelectNode :: Context -> WidgetStore -> IO (Maybe NodeIdx)
-openSelectNode ctx store
+openSelectNode Context {ctxNodeArena = na} store
   | not (anySelectOpen store) = pure Nothing
   | otherwise =
       keepNode (fmap (== NodeSelect) . getNodeType na) =<< lookupNodeByKey na (storeOpenSelect store)
-  where
-    na = ctxNodeArena ctx
 
 -- | The focused node when it is a combo (a text input carrying options),
 -- which owns an open dropdown for as long as it holds focus.
 focusedComboNode :: Context -> IO (Maybe NodeIdx)
-focusedComboNode ctx =
+focusedComboNode ctx@Context {ctxNodeArena = na} =
   keepNode (\idx -> ((== NodeTextInput) <$> getNodeType na idx) <&&> (not . null <$> getOptions na idx))
     =<< lookupNodeByWidgetId na =<< readIORef (ctxFocusId ctx)
-  where
-    na = ctxNodeArena ctx
 
 -- | The node, when it satisfies @p@.
 keepNode :: (NodeIdx -> IO Bool) -> Maybe NodeIdx -> IO (Maybe NodeIdx)
@@ -380,13 +374,11 @@ comboDropPickIndex (Rect _ dy _ _) itemH nOpts mouseY =
 -- and gets vertical / horizontal scrollbars when the filtered rows or the
 -- widest row overflow the window.
 drawSelectOverlays :: Context -> Input -> IO ()
-drawSelectOverlays ctx inp = do
+drawSelectOverlays ctx@Context {ctxDrawArena = da, ctxFontMetrics = fm} inp = do
   dropdowns <- allowedDropdowns ctx
   forM_ dropdowns $ \dd -> do
     theme <- widgetTheme ctx (ddWidget dd)
-    let da = ctxDrawArena ctx
-        fm = ctxFontMetrics ctx
-        style = overlayMenuStyle theme
+    let style = overlayMenuStyle theme
         paintRows =
           forM_ (dropdownRows fm theme (inputMousePos inp) dd) $ \row -> do
             mapM_ (pushRect da (drRect row)) (drFill row)
@@ -409,9 +401,8 @@ drawSelectOverlays ctx inp = do
       else paintRows
 
 collectSelectDropdownSpans :: Context -> Input -> IO [(Rect, T.Text, Color, Color, Rect)]
-collectSelectDropdownSpans ctx inp = do
+collectSelectDropdownSpans ctx@Context {ctxFontMetrics = fm} inp = do
   dropdowns <- allowedDropdowns ctx
-  let fm = ctxFontMetrics ctx
   fmap concat . forM dropdowns $ \dd -> do
     theme <- widgetTheme ctx (ddWidget dd)
     let bg row = fromMaybe (styleBg (overlayMenuStyle theme)) (drFill row)

@@ -58,11 +58,10 @@ textInputFieldTextClip fm (Rect fx fy fw fh) =
 -- clipped around the magnifier / clear chrome. Combo boxes (search fields
 -- carrying dropdown options) clip to the left of the chevron instead.
 nodeTextFieldGeom :: Context -> NodeIdx -> Float -> Float -> Float -> Float -> IO (Rect, Rect)
-nodeTextFieldGeom ctx idx x y w h = do
+nodeTextFieldGeom ctx@Context {ctxFontMetrics = fm} idx x y w h = do
   si <- getStyleIdx (ctxNodeArena ctx) idx
   opts <- getOptions (ctxNodeArena ctx) idx
-  let fm = ctxFontMetrics ctx
-      box = Rect x y w h
+  let box = Rect x y w h
       field = textInputFieldRect fm x y w h
       geom
         | hasFlag textInputFlagSelectable si = (box, box)
@@ -129,7 +128,7 @@ drawLineCaret da fm line col x y lineH fg = do
 -- | The horizontal scroll that keeps field @idx@'s caret in view, zero while
 -- it is unfocused, stored as it changes.
 syncTextInputScroll :: Context -> NodeIdx -> Float -> Float -> Float -> Float -> IO Float
-syncTextInputScroll ctx idx x y w h = do
+syncTextInputScroll ctx@Context {ctxFontMetrics = fm} idx x y w h = do
   si <- getStyleIdx (ctxNodeArena ctx) idx
   if hasFlag textInputFlagSelectable si
     then pure 0
@@ -137,7 +136,6 @@ syncTextInputScroll ctx idx x y w h = do
       wid <- getWidgetId (ctxNodeArena ctx) idx
       store <- getStore ctx
       let key = intKey wid
-          fm = ctxFontMetrics ctx
       value <- textInputValue ctx idx
       focus <- textInputFocused ctx idx
       (_, clip) <- nodeTextFieldGeom ctx idx x y w h

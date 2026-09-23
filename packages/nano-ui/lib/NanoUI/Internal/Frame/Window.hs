@@ -174,9 +174,8 @@ updateWindowResize ctx inp winW winH =
 -- unless the halo is blocked or the pointer is on one of the window's
 -- controls. The top handle reaches over the title bar, which drags elsewhere.
 resizeEdgeTarget :: Context -> V2 -> IO (Maybe (NodeIdx, Rect, WindowResizeEdge))
-resizeEdgeTarget ctx mouse = runMaybeT $ do
-  let na = ctxNodeArena ctx
-      inHalo r = rectNonEmpty r && rectContains (rectInflate windowResizeHandleFor r) mouse
+resizeEdgeTarget ctx@Context {ctxNodeArena = na} mouse = runMaybeT $ do
+  let inHalo r = rectNonEmpty r && rectContains (rectInflate windowResizeHandleFor r) mouse
   idx <- MaybeT (topmostFloating ctx (== NodeWindow) inHalo)
   rect <- liftIO (getNodeRect na idx)
   -- The halo covers the window interior, so find the edge first and run the
@@ -206,10 +205,9 @@ resizeEdgeTarget ctx mouse = runMaybeT $ do
   pure (idx, rect, edge)
 
 tryStartWindowResize :: Context -> V2 -> IO Bool
-tryStartWindowResize ctx mouse@(V2 mx my) = fmap isJust . runMaybeT $ do
+tryStartWindowResize ctx@Context {ctxNodeArena = na} mouse@(V2 mx my) = fmap isJust . runMaybeT $ do
   (idx, Rect x y w h, edge) <- MaybeT (resizeEdgeTarget ctx mouse)
   liftIO $ do
-    let na = ctxNodeArena ctx
     wid <- getWidgetId na idx
     AxisSizing _ _ minW maxW <- getWidthSizing na idx
     AxisSizing _ _ minH maxH <- getHeightSizing na idx
@@ -243,8 +241,7 @@ tryStartWindowDrag ctx mouse@(V2 mx my) = fmap isJust . runMaybeT $ do
 
 -- | Title bar: the window's topmost child, stretched up to the window top.
 windowTitleRect :: Context -> NodeIdx -> IO (Maybe Rect)
-windowTitleRect ctx idx = do
-  let na = ctxNodeArena ctx
+windowTitleRect Context {ctxNodeArena = na} idx = do
   (_, wy, _, _) <- getRect na idx
   best <- newIORef Nothing
   forChildNodes_ na idx $ \ci -> do

@@ -38,9 +38,8 @@ import NanoUI.Internal.WidgetText
 -- panels. Each tuple is bounds, text, foreground, background, clip; coordinates
 -- are logical window coordinates. Rebuilds the context's base span arena.
 collectTextSpans :: Context -> IO [(Rect, T.Text, Color, Color, Rect)]
-collectTextSpans ctx = do
+collectTextSpans ctx@Context {ctxSpanBase = arena} = do
   count <- arenaCount (ctxNodeArena ctx)
-  let arena = ctxSpanBase ctx
   resetSpanArena arena
   when (count > 0) $
     collectClippedSpans ctx 0 (Rect 0 0 1e9 1e9) arena
@@ -50,8 +49,7 @@ collectTextSpans ctx = do
 -- | Collect window, modal, popup, dropdown, and edit-menu text in paint order.
 -- Uses the same tuple format as 'collectTextSpans' and rebuilds the overlay arena.
 collectOverlayTextSpans :: Context -> Input -> IO [(Rect, T.Text, Color, Color, Rect)]
-collectOverlayTextSpans ctx inp = do
-  let arena = ctxSpanOverlay ctx
+collectOverlayTextSpans ctx@Context {ctxSpanOverlay = arena} inp = do
   resetSpanArena arena
   mapM_ (\nt -> collectFloatingSpansInto ctx nt arena) [NodeWindow, NodeModal, NodePopup]
   collectSelectDropdownSpans ctx inp >>= pushSpans arena
@@ -69,7 +67,7 @@ widgetNodeCount ctx = arenaCount (ctxNodeArena ctx)
 -- | Spans of node @idx@ and its subtree inside @clip@, floating subtrees left
 -- out.
 collectClippedSpans :: Context -> NodeIdx -> Rect -> SpanArena -> IO ()
-collectClippedSpans ctx idx clip arena = do
+collectClippedSpans ctx@Context {ctxFontMetrics = fm} idx clip arena = do
   nt <- getNodeType (ctxNodeArena ctx) idx
   unless (isFloatingNode nt) $ do
     (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
@@ -81,7 +79,6 @@ collectClippedSpans ctx idx clip arena = do
             Nothing -> (\sn -> rectIntersect clip (scrollNodeViewport sn x y w h)) <$> readScrollNode (ctxNodeArena ctx) idx
         else pure (if nt == NodePanel then rectIntersect clip (Rect x y w h) else Just clip)
     forM_ mClipChildren $ \clipHere -> do
-      let fm = ctxFontMetrics ctx
       -- A text node's spans are cached per node until its inputs change.
       -- Placement uses glyph ink ('alignedTextPen'), not TTF_GetStringSize;
       -- wrapping still measures with the host so line breaks stay on the TTF
@@ -125,8 +122,7 @@ walkChildSpans ctx idx clip arena = getFirstChild (ctxNodeArena ctx) idx >>= go
 -- date: its spans, and the metrics prepared for each line, which paint draws
 -- with.
 textNodeSpanEntry :: Context -> NodeIdx -> Float -> Float -> Float -> Float -> IO SpanCacheEntry
-textNodeSpanEntry ctx idx x y w h = do
-  let arena = ctxNodeArena ctx
+textNodeSpanEntry ctx@Context {ctxNodeArena = arena} idx x y w h = do
   theme <- nodeTheme ctx idx
   raw <- getText arena idx
   si <- getStyleIdx arena idx
