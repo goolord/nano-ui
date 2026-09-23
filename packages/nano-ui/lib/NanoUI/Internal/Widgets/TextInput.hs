@@ -46,10 +46,12 @@ import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Monad (Ui, askContext, askDefaultLayout, askInput, freshWidget, nextId, uiIO, withContext)
 import NanoUI.Internal.Store
-import NanoUI.Internal.Style (Layout (..), defaultLayout, fillW, minW)
+import NanoUI.Internal.Style (Layout (..), Style (..), Theme (..), defaultLayout, fieldIconColor, fillW, minW)
+import NanoUI.Internal.Types (Color)
 import NanoUI.Internal.WidgetText (hasFlag, packTextNodeStyle, textInputFlagPassword, textInputFlagSearch, textInputFlagSelectable)
+import NanoUI.Internal.Widgets.Adornment (Adornments, adornWidget)
 import NanoUI.Internal.Widgets.Behavior (keyboardFocused)
-import NanoUI.Internal.Widgets.Node (Response (..), addWidgetStyled, setChanged, setSubmitted)
+import NanoUI.Internal.Widgets.Node (Response (..), addWidgetStyled, inertResponse, respId, setChanged, setSubmitted)
 import NanoUI.Widgets.TextBuffer qualified as TB
 import NanoUI.Widgets.TextEditor
 
@@ -68,21 +70,15 @@ data TextInputState = TextInputState
   }
   deriving (Eq, Show)
 
--- | A field's cursor and anchor for @text@; the cursor defaults to the end
--- and the anchor to the cursor. Both are clamped to the text, which can have
--- been replaced from outside the field with a shorter one.
+-- | A field's cursor and anchor for @text@ ('fieldSelection').
 loadTextInputState :: WidgetStore -> Int -> Text -> TextInputState
 loadTextInputState store key text =
-  let len = T.length text
-      cursor = min len (findSlot fieldInt len (slotKey SlotCursor key) store)
-      anchor = min len (findSlot fieldInt cursor (slotKey SlotAnchor key) store)
+  let (anchor, cursor) = fieldSelection store key text
    in TextInputState text cursor anchor
 
 saveTextInputState :: Int -> TextInputState -> WidgetStore -> WidgetStore
 saveTextInputState key s =
-  insertSlot fieldText key (tisText s)
-    . insertSlot fieldInt (slotKey SlotCursor key) (tisCursor s)
-    . insertSlot fieldInt (slotKey SlotAnchor key) (tisAnchor s)
+  insertSlot fieldText key (tisText s) . setFieldSelection key (tisAnchor s) (tisCursor s)
 
 -- | The editor for a field's state, with the undo history stored for it. A
 -- history recorded against other text (the caller replaced the value) is
@@ -131,22 +127,27 @@ textInputFieldEditor store key =
 -- Text fields
 -- -----------------------------------------------------------------------------
 
--- | Placeholder, password-display masking, and layout for a single-line field.
--- Masking affects display; the caller and widget store still hold the original text.
+-- | Placeholder, password-display masking, layout, and adornments
+-- ("NanoUI.Adornment", in a muted text colour) for a single-line field.
+-- Masking affects display; the caller and widget store still hold the
+-- original text.
 data TextInputConfig = TextInputConfig
   { ticPlaceholder :: !Text
   , ticPassword :: !Bool
   , ticLayout :: !Layout
+  , ticAdornments :: !Adornments
   }
-  deriving (Eq, Show)
+  deriving (Show)
 
--- | No placeholder, no password masking, and the standard text-input layout.
+-- | No placeholder, no password masking, the standard text-input layout, and
+-- no adornments.
 defaultTextInputConfig :: TextInputConfig
 defaultTextInputConfig =
   TextInputConfig
     { ticPlaceholder = ""
     , ticPassword = False
     , ticLayout = textInputLayout
+    , ticAdornments = mempty
     }
 
 -- | Single-line text field. Pass the current text; the result is the text
@@ -160,22 +161,34 @@ textInput value = snd <$> textInputConfigured' defaultTextInputConfig value
 textInput' :: Ui :> es => Text -> Eff es (Response, Text)
 textInput' = textInputConfigured' defaultTextInputConfig
 
--- | 'textInput' with a placeholder, password masking, or its own layout.
+-- | 'textInput' with a placeholder, password masking, its own layout, or
+-- adornments.
 --
 -- > secret' <- textInputConfigured defaultTextInputConfig {ticPassword = True} secret
+-- > weight' <- textInputConfigured defaultTextInputConfig {ticAdornments = A.trailing (A.affix "kg")} weight
 {-# INLINE textInputConfigured #-}
 textInputConfigured :: Ui :> es => TextInputConfig -> Text -> Eff es Text
 textInputConfigured cfg value = snd <$> textInputConfigured' cfg value
 
 -- | 'textInputConfigured' returning @(response, updatedText)@.
 textInputConfigured' :: Ui :> es => TextInputConfig -> Text -> Eff es (Response, Text)
-textInputConfigured' cfg value =
-  buildTextInput
-    (if ticPassword cfg then textInputFlagPassword else 0)
-    (ticLayout cfg)
-    (ticPlaceholder cfg)
-    value
-    Nothing
+textInputConfigured' (TextInputConfig placeholder password lay adorns) value = do
+  r@(resp, txt) <-
+    buildTextInput
+      (if password then textInputFlagPassword else 0)
+      lay
+      placeholder
+      value
+      Nothing
+  -- A control among the adornments holds the pointer: its press is its own.
+  taken <- adornWidget (respId resp) lay (fieldAdornmentColor lay) adorns
+  pure (if taken then (inertResponse resp, txt) else r)
+
+-- | The colour of a field's adornments, muted from its text colour.
+fieldAdornmentColor :: Layout -> Theme -> Color
+fieldAdornmentColor lay theme =
+  let s = themeInput theme
+   in fieldIconColor s {styleFg = fromMaybe (styleFg s) (layoutFontColor lay)}
 
 -- | One frame of a single-line field's text state: load the text (seeding
 -- @initial@ on first use) with its cursor and anchor, run the editor while

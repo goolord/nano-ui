@@ -29,7 +29,7 @@ module NanoUI.Internal.Frame.Input
   ) where
 
 import Control.Applicative ((<|>))
-import Control.Monad (filterM, forM_, unless, when)
+import Control.Monad (filterM, forM_, mfilter, unless, when, (<=<))
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Maybe (fromMaybe, isJust, isNothing, listToMaybe, maybeToList)
 import NanoUI.Internal.Context
@@ -119,11 +119,13 @@ disarmPointerPress ctx inp = do
 
 -- | What a left press landed on, for the steps that act on it: the
 -- interactive widget, the text field or text area, and the select under the
--- pointer. All 'Nothing' on a frame without a press.
+-- pointer, all 'Nothing' on a frame without a press; and whether the
+-- interactive widget is a control drawn inside the text field.
 data PressTargets = PressTargets
   { ptInteractive :: !(Maybe WidgetId)
   , ptTextField :: !(Maybe WidgetId)
   , ptSelect :: !(Maybe WidgetId)
+  , ptFieldControl :: !Bool
   }
 
 -- | The 'PressTargets' of this frame's left press ('targetsAt'). Runs after
@@ -138,27 +140,31 @@ pressTargets ctx inp
 -- step asks, so each node is tested at most once, and the pass stops once
 -- every target is found. Each is the first match in arena order, which is
 -- declaration order. The painter draws siblings from the last declared to the
--- first, so where two overlap the earlier one is on top.
+-- first, so where two overlap the earlier one is on top. A widget drawn inside
+-- the interactive one, such as a control among its adornments, is on top of
+-- it and takes the press ('innermostHit').
 targetsAt :: Context -> V2 -> IO PressTargets
 targetsAt ctx@Context {ctxNodeArena = na} mouse = do
   top <- overlayHitRoot ctx mouse
   found <- newIORef none
+  let under idx = getNodeType na idx >>= \nt -> widgetUnderMouse ctx top mouse nt idx
   _ <- findClassNodeM na PointerNodes $ \idx -> do
     nt <- getNodeType na idx
-    PressTargets i t s <- readIORef found
+    PressTargets i t s onControl <- readIORef found
     let wantI = isNothing i && isWidgetNode nt
         wantT = isNothing t && (nt == NodeTextInput || nt == NodeTextArea)
         wantS = isNothing s && nt == NodeSelect
     pure (wantI || wantT || wantS) <&&> widgetUnderMouse ctx top mouse nt idx <&&> do
       wid <- getWidgetId na idx
+      inner <- if wantI then getWidgetId na =<< innermostHit ctx under idx else pure wid
       let pick want cur = if want then Just wid else cur
-          !r = PressTargets (pick wantI i) (pick wantT t) (pick wantS s)
+          !r = PressTargets (if wantI then Just inner else i) (pick wantT t) (pick wantS s) (onControl || (wantT && inner /= wid))
       writeIORef found r
       pure (isJust (ptInteractive r) && isJust (ptTextField r) && isJust (ptSelect r))
   readIORef found
 
 none :: PressTargets
-none = PressTargets Nothing Nothing Nothing
+none = PressTargets Nothing Nothing Nothing False
 
 -- | On a left press, make the interactive widget under the pointer the active
 -- widget, unless it is disabled. Runs after layout. 'pressTargets' searches
@@ -265,11 +271,15 @@ inUiClickHit ctx wid mouse = do
 -- A press elsewhere clears focus, collapses the prior selection, and closes
 -- its edit menu. Menu/dropdown presses are removed from the supplied layer
 -- input, preserving the owning field's focus until the pick is processed.
+-- A press on a control drawn inside a text field keeps the focus as it was.
 finalizeTextInputFocus :: Context -> Input -> PressTargets -> IO ()
 finalizeTextInputFocus ctx inp targets =
   when (inputMousePressed inp) $ do
     prevFocus <- readIORef (ctxFocusId ctx)
-    mFocused <- enabledTarget ctx (ptTextField targets)
+    mFocused <-
+      if ptFieldControl targets
+        then pure (mfilter (== prevFocus) (ptTextField targets))
+        else enabledTarget ctx (ptTextField targets)
     case mFocused of
       Nothing -> do
         when (prevFocus /= WidgetId 0) $ markDirty ctx
@@ -450,4 +460,4 @@ probeHotId ctx@Context {ctxNodeArena = na} mouse = do
           top <- overlayHitRoot ctx mouse
           let hits idx =
                 (isWidgetNode <$> getNodeType na idx) <&&> nodePointVisible ctx idx mouse <&&> overlayHitAllowed ctx top idx
-          maybe (pure (WidgetId 0)) (getWidgetId na) =<< findClassNodeM na PointerNodes hits
+          maybe (pure (WidgetId 0)) (getWidgetId na <=< innermostHit ctx hits) =<< findClassNodeM na PointerNodes hits

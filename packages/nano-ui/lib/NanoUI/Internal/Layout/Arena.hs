@@ -24,6 +24,7 @@ module NanoUI.Internal.Layout.Arena
   , NodeType (..)
   , NodeArenaArrays (..)
   , isWidgetNode
+  , packsNodeFont
   , hasCenteredLabel
   , isContainerNode
   , isScrollNode
@@ -99,6 +100,9 @@ module NanoUI.Internal.Layout.Arena
   , forFloatingNodes_
   , forChildNodes_
   , foldFlowChildrenM
+  , flowChildrenInOrder
+  , AdornRows (..)
+  , adornRows
   , findNodeRevM
   , findClassNodeM
   , findClassNodeRevM
@@ -150,7 +154,7 @@ import qualified Data.Text as T
 import GHC.Float (castFloatToWord32)
 import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Internal.Store (ptrEq)
-import NanoUI.Internal.Style (AlignX, AlignY, Direction (..), Layout (..), Padding (..), Sizing (..))
+import NanoUI.Internal.Style (AlignX (..), AlignY, Direction (..), Layout (..), Padding (..), Sizing (..))
 import NanoUI.Internal.Types (Color (..), Rect (..))
 
 -- | A node's position in the arena's arrays. It is valid from the 'addNode'
@@ -233,6 +237,13 @@ isWidgetNode nt =
     NodeTree -> True
     NodeDrawing -> True
     _ -> False
+
+-- | Whether the node packs a font into its style index: a label or a text
+-- field. Every other type keeps its own data there (a radio's option index, a
+-- colour picker part, a tab's look), so its style must not be read as a font.
+{-# INLINE packsNodeFont #-}
+packsNodeFont :: NodeType -> Bool
+packsNodeFont nt = nt == NodeText || nt == NodeTextInput
 
 -- | Whether the node paints one line of label text centered vertically in its
 -- box: a button, select, tree row, checkbox or radio button. The solver takes
@@ -1508,6 +1519,30 @@ foldFlowChildrenM na parentIdx f z = do
               then go ns acc
               else f acc ci >>= go ns
   go fc z
+
+-- | A node's flow children in the order they were added. Siblings are linked
+-- last first, so consing them up as they are visited restores that order.
+flowChildrenInOrder :: NodeArena -> NodeIdx -> IO [NodeIdx]
+flowChildrenInOrder na parentIdx = foldFlowChildrenM na parentIdx (\acc ci -> pure (ci : acc)) []
+
+-- | A button's or text field's adornments, the rows it holds as children
+-- ("NanoUI.Internal.Widgets.Adornment"): its leading row and its trailing row
+-- (-1 for a side without one), each row's width, and the taller row's height.
+-- The leading row aligns to the start and the trailing one to the end.
+data AdornRows = AdornRows !NodeIdx !Float !NodeIdx !Float !Float
+
+adornRows :: NodeArena -> NodeIdx -> IO AdornRows
+adornRows na idx = do
+  a <- arenaArrays na
+  let add (AdornRows li lw ti tw rowH) ci = do
+        ax <- readTagEnum a ci TagAlignX
+        cw <- readGeom a ci GeomW
+        ch <- readGeom a ci GeomH
+        pure $
+          if ax == AlignEnd
+            then AdornRows li lw ci cw (max rowH ch)
+            else AdornRows ci cw ti tw (max rowH ch)
+  foldFlowChildrenM na idx add (AdornRows (-1) 0 (-1) 0 0)
 
 -- | Strict fold over the nodes @at 0@ to @at (k - 1)@, or from the last to
 -- the first with @rev@.

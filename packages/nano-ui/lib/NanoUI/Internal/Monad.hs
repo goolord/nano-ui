@@ -9,6 +9,7 @@ module NanoUI.Internal.Monad
   , Ui
   , runNanoUI
   , runUi
+  , embedNanoUI
   , uiIO
   , withContext
   , withUiResource
@@ -144,6 +145,14 @@ runUi ctx inp ui = do
 {-# INLINE runNanoUI #-}
 runNanoUI :: Context -> Input -> NanoUI a -> IO a
 runNanoUI ctx inp = runEff . runUi ctx inp
+
+-- | Run a 'NanoUI' view as part of a view in any effect row with 'Ui', where
+-- it declares its widgets as if written there: same context, input, layout
+-- defaults and widget ids.
+embedNanoUI :: Ui :> es => NanoUI a -> Eff es a
+embedNanoUI view = do
+  rep <- getStaticRep
+  unsafeEff_ (runEff (evalStaticRep rep view))
 
 -- | Perform IO while building a view. The action runs on every frame that
 -- reaches it; guard one-shot effects with a button or another event.

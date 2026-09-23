@@ -82,7 +82,10 @@ transformSubtree ctx@Context {ctxNodeArena = na} idx scrollX scrollY parentClip 
             pure (within (borderContentClip (themePanel theme) (Rect vx vy vw vh)))
           _ -> pure $! if floating then Rect vx vy vw vh else parentClip
       setClipRect na idx clip
-      descend sx sy clip
+      -- A widget's children, its adornments or content, are clipped to the
+      -- widget, as paint clips them, so none takes the pointer outside it.
+      kids <- if isWidgetNode nt then getFirstChild na idx else pure (-1)
+      descend sx sy (if kids < 0 then clip else within (Rect vx vy vw vh))
 
 -- | Axes, content viewport and reachable offset range of the scroll container
 -- at @idx@ placed at @rect@, in window axes. The wheel, the programmatic

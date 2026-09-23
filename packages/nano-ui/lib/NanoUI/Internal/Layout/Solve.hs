@@ -101,9 +101,19 @@ data TextMeasurer = TextMeasurer
   , tmHostLine :: Text -> IO (Float, Float)
   }
 
+-- | How node @idx@ measures its text: a text node or text field in its own
+-- font, and any other widget's label in its font size in the default face,
+-- as 'NanoUI.Internal.Frame.Node.resolveFontFor' draws them.
 textNodeMeasurer :: SolveEnv -> NodeIdx -> IO TextMeasurer
-textNodeMeasurer SolveEnv {seArena = na, seMs = ms} idx = do
+textNodeMeasurer env@SolveEnv {seArena = na} idx = do
+  nt <- getNodeType na idx
   si <- getStyleIdx na idx
+  nodeMeasurer env idx nt si
+
+-- | 'textNodeMeasurer' for a node whose type and style index the caller has.
+nodeMeasurer :: SolveEnv -> NodeIdx -> NodeType -> Int -> IO TextMeasurer
+nodeMeasurer SolveEnv {seArena = na, seMs = ms} idx nt nodeSi = do
+  let si = if packsNodeFont nt then nodeSi else 0
   size <- getNodeFontSize na idx
   let variant = textNodeFontVariant si
       weight = textNodeFontWeight si
@@ -474,13 +484,17 @@ measureMarkedWidget fm measure body leading (padX, padY) = do
   (mw, mh) <- measure (if T.null body then " " else body)
   pure (mw + padX + leading, max mh (checkboxBoxSize fm) + padY)
 
+-- | A widget's size from its content, measured in the font paint draws it
+-- in ('nodeMeasurer').
 measureWidget :: SolveEnv -> NodeIdx -> IO ()
-measureWidget env@SolveEnv {seArena = na, seArrays = a, seMs = Measurers {msFm = fm, msMeasure = measure}} idx = do
+measureWidget env@SolveEnv {seArena = na, seArrays = a, seMs = Measurers {msFm = baseFm}} idx = do
   nt <- readTagEnum a idx TagNodeType
   txt <- getText na idx
   si <- readTree a idx TreeStyleIdx
   wAx <- readAxisSizing a idx True
   hAx <- readAxisSizing a idx False
+  measurer@TextMeasurer {tmMetrics = fm} <- nodeMeasurer env idx nt si
+  let measure = measureFontLine measurer
   -- The content with its padding and whatever sits beside the label.
   (rawW, rawH) <-
     case nt of
@@ -501,23 +515,21 @@ measureWidget env@SolveEnv {seArena = na, seArrays = a, seMs = Measurers {msFm =
       -- Picker parts carry fixed layouts; the field grows to its square.
       NodeColorPicker -> pure (0, colorPickerSvH)
       NodeTextInput
-        | hasFlag textInputFlagSelectable si -> do
-            -- Size with the node's own font (paint and span placement resolve
-            -- it too); the ambient `measure` is the default font only.
-            measurer <- textNodeMeasurer env idx
-            measureFontLine measurer (if T.null txt then " " else txt)
+        | hasFlag textInputFlagSelectable si ->
+            measure (if T.null txt then " " else txt)
         -- Numeric field: a short editable box and its stepper.
         | hasFlag textInputFlagNumeric si ->
             pure (56 + numericStepperW, textInputFieldHeight fm)
         -- Caption-less search box: single row tall, icons counted in the
-        -- width budget.
+        -- width budget. Paint sizes the icons by the base font.
         | hasFlag textInputFlagSearch si -> do
             (lw, _) <- measure (if T.null txt then " " else txt)
-            pure (max textInputMinWidth lw + searchInputReserveW fm, textInputFieldHeight fm)
+            pure (max textInputMinWidth lw + searchInputReserveW baseFm, textInputFieldHeight fm)
         | otherwise -> do
             pw <- if T.null txt then pure 0 else fst <$> measure txt
             pure (max textInputMinWidth pw, textInputFieldHeight fm)
-      NodeTextArea -> pure (textInputMinWidth, max 96 (textInputFieldHeight fm * 4))
+      -- A text area resolves its own font as it draws ('resolveTextAreaFont').
+      NodeTextArea -> pure (textInputMinWidth, max 96 (textInputFieldHeight baseFm * 4))
       _
         | nt == NodeCheckbox || nt == NodeRadio ->
             measureMarkedWidget fm measure txt (checkboxLeading fm) (0, 0)
@@ -536,7 +548,60 @@ measureWidget env@SolveEnv {seArena = na, seArrays = a, seMs = Measurers {msFm =
                   | otherwise = buttonPadding fm
             (mw, mh) <- measure body
             pure (mw + padX, mh + padY)
-  setRect na idx 0 0 (fixedOr wAx rawW) (fixedOr hAx rawH)
+  -- A widget's children are its adornments ('measureAdorned').
+  kids <- readTree a idx TreeFirstChild
+  (w, h) <- if kids < 0 then pure (rawW, rawH) else measureAdorned env measurer idx nt si txt rawW rawH
+  setRect na idx 0 0 (fixedOr wAx w) (fixedOr hAx h)
+
+-- | The size of a button or text field with adornments ('adornRows'), from
+-- its size without them, @rawW@ by @rawH@. A field widens by each row and a
+-- gap. A button fits one group ('adornedButtonGroup'), padded as a label
+-- except an icon alone, which the vertical padding squares.
+measureAdorned :: SolveEnv -> TextMeasurer -> NodeIdx -> NodeType -> Int -> Text -> Float -> Float -> IO (Float, Float)
+measureAdorned SolveEnv {seArena = na, seArrays = a} measurer@TextMeasurer {tmMetrics = fm} idx nt si txt rawW rawH = do
+  gap <- readStyle a idx StyleGap
+  rows@(AdornRows li lw ti tw rowH) <- adornRows na idx
+  case nt of
+    NodeTextInput ->
+      let sides = fromIntegral (fromEnum (li >= 0) + fromEnum (ti >= 0))
+       in pure (rawW + lw + tw + gap * sides, max rawH (rowH + rawH - fmLineHeight fm))
+    _ -> do
+      (labelW, groupW) <- adornedButtonGroup measurer txt gap rows
+      let (padX, padY) = buttonPadding fm
+          sidePad = if labelW > 0 || hasFlag buttonFlagContent si then padX else padY
+      pure (groupW + sidePad, max rawH (rowH + padY))
+
+-- | A button's label width, in the font paint draws it in (0 without a
+-- label), and the width of the group the label and its adornment rows make,
+-- the node's gap apart.
+adornedButtonGroup :: TextMeasurer -> Text -> Float -> AdornRows -> IO (Float, Float)
+adornedButtonGroup measurer txt gap (AdornRows li lw ti tw _) = do
+  labelW <- if T.null txt then pure 0 else fst <$> measureFontLine measurer txt
+  let pieces = fromEnum (li >= 0) + fromEnum (labelW > 0) + fromEnum (ti >= 0)
+  pure (labelW, lw + labelW + tw + gap * fromIntegral (max 0 (pieces - 1)))
+
+-- | Place a widget's adornment rows ('adornRows'), each centred on its
+-- height: a field's at its content insets, a button's either side of its
+-- label in its centred group ('adornedButtonGroup').
+positionAdornments :: SolveEnv -> Int -> NodeIdx -> NodeType -> Rect -> IO ()
+positionAdornments env@SolveEnv {seArena = na, seArrays = a} depth idx nt (Rect x y w h) = do
+  rows@(AdornRows li lw ti tw _) <- adornRows na idx
+  measurer <- textNodeMeasurer env idx
+  (x0, x1) <- case nt of
+    NodeTextInput -> do
+      let (ix, _) = widgetContentInset (tmMetrics measurer)
+      pure (x + ix, x + w - ix)
+    _ -> do
+      gap <- readStyle a idx StyleGap
+      txt <- getText na idx
+      (_, groupW) <- adornedButtonGroup measurer txt gap rows
+      let x0 = alignX AlignCenter x w groupW
+      pure (x0, x0 + groupW)
+  let place ci cx cw = when (ci >= 0) $ do
+        ch <- readGeom a ci GeomH
+        positionNodeA env (depth + 1) ci (Rect cx (y + (h - ch) / 2) cw ch)
+  place li x0 lw
+  place ti (x1 - tw) tw
 
 measureContainer :: SolveEnv -> NodeIdx -> IO ()
 measureContainer env@SolveEnv {seArena = na, seArrays = a} idx = do
@@ -875,11 +940,15 @@ positionNodeA env@SolveEnv {seArena = na, seArrays = a} !depth !idx (Rect x y av
                 drawingHeightAt env idx w hAx resolvedH
               else pure resolvedH
   setRect na idx x y w h
-  when (isContainerNode nt) $ do
-    (pad, gap, dir) <- containerFlow a idx
-    if isScrollNode nt
-      then positionScrollChildren env depth idx dir gap pad (Rect x y w h)
-      else positionChildren env depth idx dir gap pad (Rect x y w h)
+  if isContainerNode nt
+    then do
+      (pad, gap, dir) <- containerFlow a idx
+      if isScrollNode nt
+        then positionScrollChildren env depth idx dir gap pad (Rect x y w h)
+        else positionChildren env depth idx dir gap pad (Rect x y w h)
+    else do
+      kids <- readTree a idx TreeFirstChild
+      when (kids >= 0) $ positionAdornments env depth idx nt (Rect x y w h)
   when (hTag == SizingFit && isContainerNode nt && not (isScrollNode nt)) $
     adjustFitHeight na idx minH maxH x y w
 
@@ -1357,7 +1426,7 @@ alignY AlignBaseline cy _ _ = cy
 --   row that has some, and otherwise its first child's.
 -- * anything else: its bottom edge.
 childBaseline :: SolveEnv -> NodeIdx -> Float -> IO Float
-childBaseline env@SolveEnv {seArena = na, seArrays = a, seMs = ms} ci h = do
+childBaseline env@SolveEnv {seArena = na, seArrays = a} ci h = do
   nt <- getNodeType na ci
   si <- getStyleIdx na ci
   case nt of
@@ -1382,21 +1451,11 @@ childBaseline env@SolveEnv {seArena = na, seArrays = a, seMs = ms} ci h = do
           pure (textBaseline fm (if wrapped then fmLineHeight fm else h))
     _
       | hasCenteredLabel nt && not (nt == NodeButton && hasFlag buttonFlagClose si) -> do
-          -- Widget labels take the node's font size in the default face
-          -- ('resolveFontFor').
-          size <- getNodeFontSize na ci
-          let weight = textNodeFontWeight 0
-              style = textNodeFontStyle 0
-              variant = textNodeFontVariant 0
-          fm <-
-            if isDefaultNodeFont size weight style variant
-              then pure (msFm ms)
-              else fst <$> msResolveFont ms size weight style variant
+          -- Widget labels take the node's font size in the default face.
+          fm <- tmMetrics <$> nodeMeasurer env ci nt si
           pure (textBaseline fm h)
       | isContainerNode nt -> do
-          -- Children are linked last first, so consing them up as they are
-          -- visited leaves the list in child order.
-          kids <- foldFlowChildrenM na ci (\acc k -> pure (k : acc)) []
+          kids <- flowChildrenInOrder na ci
           case kids of
             [] -> pure h
             first : _ -> do

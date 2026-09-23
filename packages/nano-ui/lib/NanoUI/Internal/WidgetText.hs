@@ -35,6 +35,8 @@ module NanoUI.Internal.WidgetText
   , buttonFlagTable
   , buttonFlagMenu
   , buttonFlagMenuBar
+  , buttonFlagContent
+  , containerFlagInert
   , hasFlag
   , tableSortReserve
   , tableStripeColor
@@ -362,8 +364,20 @@ buttonFlagMenu = 0x10000000
 buttonFlagMenuBar :: Int
 buttonFlagMenuBar = 0x08000000
 
+-- | A button whose content is a view of its own ('NanoUI.buttonContent'),
+-- padded as a labelled button is.
+buttonFlagContent :: Int
+buttonFlagContent = 0x04000000
+
 buttonFlagMask :: Int
-buttonFlagMask = buttonFlagClose .|. buttonFlagTab .|. buttonFlagTable .|. buttonFlagMenu .|. buttonFlagMenuBar
+buttonFlagMask = buttonFlagClose .|. buttonFlagTab .|. buttonFlagTable .|. buttonFlagMenu .|. buttonFlagMenuBar .|. buttonFlagContent
+
+-- | Marks a @NodeContainer@ whose widgets are for display: the pointer passes
+-- through them to the widget they are drawn in
+-- ('NanoUI.Internal.Frame.Hit.innermostHit'). Plain containers carry no
+-- other style.
+containerFlagInert :: Int
+containerFlagInert = 1
 
 -- | Whether the packed style index @si@ carries @flag@.
 {-# INLINE hasFlag #-}

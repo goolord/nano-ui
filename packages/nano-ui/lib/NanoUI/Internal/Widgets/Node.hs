@@ -19,7 +19,9 @@ module NanoUI.Internal.Widgets.Node
   , currentParent
   , container
   , containerResponse
+  , inertContainer
   , withContainerNode
+  , withWidgetChildren
   , floatingPanel
   , dropdownInput
   , addWidget
@@ -29,17 +31,17 @@ module NanoUI.Internal.Widgets.Node
   )
 where
 
-import Control.Monad (when)
+import Control.Monad (forM, when)
 import Data.IORef (readIORef, writeIORef)
 import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Text (Text)
 import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context
-import NanoUI.Internal.Id (WidgetId (..), enterScope, hashWidgetId, scopeTag)
+import NanoUI.Internal.Id (IdContext (..), WidgetId (..), enterScope, hashWidgetId, mix64, scopeTag)
 import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena
-import NanoUI.Internal.Monad (Ui, (<&&>), askContext, askFrameInput, askInput, localInput, nextId, uiIO, withContext)
-import NanoUI.Internal.WidgetText (packTextNodeStyle)
+import NanoUI.Internal.Monad (Ui, (<&&>), askContext, askFrameInput, askInput, localInput, nextId, uiIO, withContext, withIdFrame)
+import NanoUI.Internal.WidgetText (containerFlagInert, packTextNodeStyle)
 import NanoUI.Internal.Style (Layout (..))
 import NanoUI.Internal.Types (Rect (..), rectContains, rectH, rectHit, rectUnion, rectW)
 import NanoUI.Internal.Frame.Hit (findNodeByWidgetId, nodeInteractionHit)
@@ -167,6 +169,19 @@ container nt layout child = do
     addNodeFromLayout (ctxNodeArena ctx) nt parent layout
   withContainerNode True idx child
 
+-- | A container whose widgets are for display: they see no pointer, and a
+-- press passes through them to the widget they are drawn in
+-- ('NanoUI.Internal.Frame.Hit.innermostHit').
+inertContainer :: Ui :> es => Layout -> Eff es a -> Eff es a
+inertContainer layout child = do
+  ctx <- askContext
+  inp <- askInput
+  idx <- uiIO $ do
+    parent <- currentParent ctx
+    idx <- addNodeFromLayout (ctxNodeArena ctx) NodeContainer parent layout
+    idx <$ setStyleIdx (ctxNodeArena ctx) idx containerFlagInert
+  withContainerNode True idx (localInput (withoutPointer inp) child)
+
 -- | A 'container' tagged with a fresh id, and its interaction under that id.
 containerResponse :: Ui :> es => NodeType -> Layout -> Eff es a -> Eff es (a, Response)
 containerResponse nt layout child = do
@@ -195,6 +210,16 @@ withContainerNode scoped idx child = do
     writeIORef (ctxContainerStack ctx) stack
     when scoped $ writeIORef (ctxIdContext ctx) parentIds
   pure r
+
+-- | Run @child@ inside the node of widget @wid@, just added, in the id scope
+-- the widget's id opens, so its siblings' ids do not move; 'Nothing' when it
+-- has no node.
+withWidgetChildren :: Ui :> es => WidgetId -> Eff es a -> Eff es (Maybe a)
+withWidgetChildren wid@(WidgetId w) child = do
+  ctx <- askContext
+  mIdx <- uiIO (lookupNodeByWidgetId (ctxNodeArena ctx) wid)
+  forM mIdx $ \idx ->
+    withContainerNode False idx (withIdFrame (\ids -> (ids, IdContext (mix64 w scopeTag) 0)) child)
 
 -- | A floating panel (popup, modal, window): its node attaches to the root
 -- layer, and @body@ runs as a layer of its own, with the pointer when the

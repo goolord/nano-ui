@@ -25,7 +25,7 @@ import NanoUI.Internal.Id (WidgetId (..))
 import NanoUI.Internal.Input (Input, Key (..), inputKeys, inputMouseDown, inputMousePos, inputMousePressed, inputScroll)
 import NanoUI.Internal.Layout.Arena (setOptions)
 import NanoUI.Internal.Monad (Ui, askContext, uiIO)
-import NanoUI.Internal.Store (boolInt, fieldFloat, fieldInt, fieldText, findSlot, flagSlot, insertSlot)
+import NanoUI.Internal.Store (boolInt, fieldFloat, fieldInt, fieldText, findSlot, flagSlot, insertSlot, setFieldSelection)
 import NanoUI.Internal.Types (Rect (..), V2 (..), clamp, rectContains, rectNonEmpty, v2X, v2Y)
 import NanoUI.Internal.WidgetText (textInputFlagSearch)
 import NanoUI.Internal.Widgets.Behavior (keyboardFocused)
@@ -303,7 +303,7 @@ comboBox' placeholder options value = do
     uiIO $ do
       let len = T.length finalText
           caretToEnd
-            | stepPicked step = insertSlot fieldInt (slotKey SlotCursor key) len . insertSlot fieldInt (slotKey SlotAnchor key) len
+            | stepPicked step = setFieldSelection key len len
             | otherwise = id
       modifyStore ctx $
         caretToEnd

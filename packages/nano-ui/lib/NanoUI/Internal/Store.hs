@@ -30,6 +30,10 @@ module NanoUI.Internal.Store
   , insertDyn
   , slotKey
   , Slot (..)
+  , fieldSelection
+  , fieldSelectionWrite
+  , setFieldSelection
+  , collapseFieldSelection
   , boolInt
   , intBool
   , anySelectOpen
@@ -49,6 +53,7 @@ import Data.IntSet (IntSet)
 import Data.Text (Text)
 import Data.Word (Word64)
 import qualified Data.IntMap.Strict as IM
+import qualified Data.Text as T
 import GHC.Exts (isTrue#, reallyUnsafePtrEquality#)
 import NanoUI.Internal.Id (mix64)
 
@@ -276,6 +281,33 @@ bumpMirror st = st {storeMirrorGen = storeMirrorGen st + 1}
 {-# INLINE slotKey #-}
 slotKey :: Slot -> Int -> Int
 slotKey s k = fromIntegral (mix64 (fromIntegral k) (slotTag s))
+
+-- | Single-line field @key@'s @(anchor, cursor)@ over @text@, the one
+-- reading of its slots: an unstored cursor is at the end and an unstored
+-- anchor on the cursor, both clamped to the text.
+fieldSelection :: WidgetStore -> Int -> Text -> (Int, Int)
+fieldSelection store key text =
+  let len = T.length text
+      cursor = min len (findSlot fieldInt len (slotKey SlotCursor key) store)
+      anchor = min len (findSlot fieldInt cursor (slotKey SlotAnchor key) store)
+   in (anchor, cursor)
+
+-- | Store field @key@'s selection over @text@, a change only when it differs
+-- from what 'fieldSelection' reads.
+fieldSelectionWrite :: Int -> Text -> Int -> Int -> SlotWrites
+fieldSelectionWrite key text anchor cursor =
+  SlotWrites
+    (\st -> fieldSelection st key text == (anchor, cursor))
+    (setFieldSelection key anchor cursor)
+
+-- | Store field @key@'s anchor and cursor.
+setFieldSelection :: Int -> Int -> Int -> WidgetStore -> WidgetStore
+setFieldSelection key anchor cursor =
+  insertSlot fieldInt (slotKey SlotAnchor key) anchor . insertSlot fieldInt (slotKey SlotCursor key) cursor
+
+-- | Collapse field @key@'s selection onto its cursor ('fieldSelection').
+collapseFieldSelection :: Int -> WidgetStore -> WidgetStore
+collapseFieldSelection key = deleteSlot fieldInt (slotKey SlotAnchor key)
 
 -- | Every built-in slot.
 data Slot

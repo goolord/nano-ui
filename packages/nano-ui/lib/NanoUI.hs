@@ -164,6 +164,16 @@ module NanoUI
   , button'
   , buttonWith
   , buttonWith'
+  , iconButton
+  , iconButton'
+  , buttonContent
+  , buttonContent'
+  , buttonContentWith
+  , buttonContentWith'
+  , ButtonConfig (..)
+  , defaultButtonConfig
+  , buttonConfigured
+  , buttonConfigured'
   , menuButton
   , menuButton'
   , menuButtonWith

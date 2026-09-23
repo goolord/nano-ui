@@ -23,7 +23,7 @@ import NanoUI.Internal.Context
 import NanoUI.Internal.Draw (pushRect, pushText)
 import NanoUI.Internal.Font
 import NanoUI.Internal.Frame.Chrome (overlayMenuStyle, paintMenuAccent, paintMenuPanel)
-import NanoUI.Internal.Frame.Hit (findNodeByWidgetId, nodeClippedHit, overlayHitAllowed, overlayHitRoot, widgetOverlayAllowed)
+import NanoUI.Internal.Frame.Hit (findNodeByWidgetId, innermostHit, nodeClippedHit, nodePointVisible, overlayHitAllowed, overlayHitRoot, widgetOverlayAllowed)
 import NanoUI.Internal.Frame.TextArea (isMouseOnTextAreaScrollBarAt)
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Input
@@ -135,9 +135,14 @@ openTextEditMenu ctx inp =
       modifyInteraction ctx (\s -> s {isTextInputMenu = Just (TextInputMenu wid menuRect)})
       markDirty ctx
 
+-- | The enabled text field or text area the pointer at @mouse@ is on, which
+-- takes the text cursor and the right-click menu. Not one whose control, drawn
+-- inside it, has the pointer ('innermostHit').
 textFieldWidgetAtMouse :: Context -> V2 -> IO (Maybe WidgetId)
 textFieldWidgetAtMouse ctx@Context {ctxNodeArena = na} mouse = do
   top <- overlayHitRoot ctx mouse
+  let under d = nodePointVisible ctx d mouse <&&> overlayHitAllowed ctx top d
+      ownsPointer idx = (== idx) <$> innermostHit ctx under idx
   mIdx <-
     findClassNodeRevM na PointerNodes $ \idx -> do
       nt <- getNodeType na idx
@@ -148,7 +153,9 @@ textFieldWidgetAtMouse ctx@Context {ctxNodeArena = na} mouse = do
           <&&> nodeClippedHit ctx idx rect mouse
           <&&> overlayHitAllowed ctx top idx
           <&&> (if nt == NodeTextArea then not <$> isMouseOnTextAreaScrollBarAt ctx idx mouse else pure True)
-  traverse (getWidgetId na) mIdx
+  case mIdx of
+    Nothing -> pure Nothing
+    Just idx -> ifM (ownsPointer idx) (Just <$> getWidgetId na idx) (pure Nothing)
 
 -- | A press on a command row runs it when it can run, recorded for the caller
 -- ('NanoUI.Internal.Context.takeTextEditLastAction'); a press elsewhere on the

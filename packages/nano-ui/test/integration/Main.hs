@@ -14,6 +14,7 @@ import Cases.HostDraw qualified
 import Cases.RichText qualified
 import Cases.Shaping qualified
 import Cases.Svg qualified
+import Cases.Adornment qualified
 import Cases.Atlas qualified
 import Cases.Damage qualified
 import Cases.Tabs qualified
@@ -52,6 +53,7 @@ main =
     , Cases.RichText.tests
     , Cases.Shaping.tests
     , Cases.Svg.tests
+    , Cases.Adornment.tests
     , Cases.Atlas.tests
     , Cases.Damage.tests
     , Cases.Tabs.tests

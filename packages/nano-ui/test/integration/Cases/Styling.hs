@@ -1,6 +1,7 @@
 module Cases.Styling (tests) where
 
 import Spec
+import NanoUI.Adornment qualified as A
 import NanoUI.Internal.Context (Context (..))
 import Data.Text (Text)
 
@@ -12,6 +13,7 @@ tests =
   , spec "styled-paint" runStyledPaintTest
   , spec "styled-nesting" runStyledNestingTest
   , spec "styled-damage" runStyledDamageTest
+  , spec "font-size-label-fit" runFontSizeLabelFitTest
   ]
 
 -- | A pointer press, drag and typing on a disabled widget change nothing and
@@ -134,3 +136,33 @@ runStyledDamageTest ctx failed = do
     assertEq failed dmg DamageFull
     quads <- drawQuads draw
     assert failed (any ((== c) . snd) quads)
+
+-- | A widget with its own font size is laid out for its label in that font,
+-- which paint draws it in. With a 12 px base font and 24 px cells for the
+-- sized text, "Big" draws 72 px wide, and its button is those 72 px and two
+-- 24 px spaces of padding, where the base font would have made it 60 px and
+-- the label would spill out. A plain button keeps its 12 px size, and an icon
+-- beside the sized label adds just the icon and the gap.
+runFontSizeLabelFitTest :: Context -> IORef Int -> IO ()
+runFontSizeLabelFitTest base failed = do
+  doc <- either fail pure (parseSvg "<svg viewBox='0 0 24 24'><rect width='24' height='24'/></svg>")
+  let
+    ctx = withMonospaceFonts 12 24 base
+    inp = withInputOff 600 300
+    sized = fontSize 24 defaultLayout
+    ui = column $ do
+      big <- buttonWith' (fontSize 24) "Big"
+      plain <- button' "Big"
+      adorned <- buttonConfigured' defaultButtonConfig {bcLayout = sized, bcAdornments = A.leading (A.iconSized 16 doc)} "Big"
+      pure (big, plain, adorned)
+  (big, plain, adorned) <- warmup2 ctx inp ui
+  spans <- collectTextSpans ctx
+  case [r | (r, "Big", _, _, _) <- spans, covers (respRect big) r] of
+    [labelR] -> do
+      assertEq failed 72 (rectW labelR)
+      assertEq failed (72 + 2 * 24) (rectW (respRect big))
+    labels -> do
+      putStrLn ("font-size-label-fit: labels inside the sized button: " <> show labels)
+      assert failed False
+  assertEq failed (3 * 12 + 2 * 12) (rectW (respRect plain))
+  assertEq failed (rectW (respRect big) + 16 + 8) (rectW (respRect adorned))

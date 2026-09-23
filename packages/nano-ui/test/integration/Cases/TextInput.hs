@@ -50,6 +50,9 @@ tests =
   , spec "text-input-ff-caret" runTextInputFfCaretTest
   , pixelSpec "text-input-focus-sdl" runTextInputFocusSdlTest
   , pixelSpec "text-input-scroll" runTextInputScrollTest
+  , spec "text-input-font-scroll" runTextInputFontScrollTest
+  , spec "text-input-collapse-untouched" runTextInputCollapseUntouchedTest
+  , spec "text-input-font-inset" runTextInputFontInsetTest
   , spec "text-input-dirty" runTextInputDirtyTest
   , spec "text-input-drag-wake" runTextInputDragWakeTest
   , spec "text-area-cut-clears-selection" runTextAreaCutClearsSelectionTest
@@ -534,6 +537,73 @@ runTextInputScrollTest ctx failed = do
     let
       scrollHome = IM.findWithDefault 0 (slotKey SlotTextInputScroll key) (storeFloat storeHome)
     assertEq failed scrollHome 0
+
+-- | A field in its own, larger font scrolls its caret into view by that font's
+-- widths, which draw it: ten 32 px cells put the end caret 320 px in, past a
+-- 200 px field, where the 12 px base font would put it at 120 px and not scroll.
+runTextInputFontScrollTest :: Context -> IORef Int -> IO ()
+runTextInputFontScrollTest base failed = do
+  let
+    large = monospaceMetrics 32
+    ctx =
+      withFontResolver
+        (withFontMetrics base (monospaceMetrics 12))
+        (\_ _ _ _ -> pure (large, False))
+        (\_ _ _ _ txt -> pure (32 * fromIntegral (T.length txt), 32))
+    inp0 = withInput 400 200
+    cfg = defaultTextInputConfig {ticLayout = fontSize 32 (fixedW 200 (ticLayout defaultTextInputConfig))}
+    ui = column (textInputConfigured' cfg "HgHgHgHgHg")
+  (resp, _) <- warmup2 ctx inp0 ui
+  let
+    Rect rx ry _ rh = respRect resp
+    (press, release) = clickPair inp0 (V2 (rx + 20) (ry + rh / 2))
+  _ <- runFrame ctx press ui
+  _ <- runFrame ctx release ui
+  _ <- runFrame ctx (keyInp KeyEnd inp0) ui
+  store <- getStore ctx
+  let scrollX = IM.findWithDefault 0 (slotKey SlotTextInputScroll (intKey (respId resp))) (storeFloat store)
+  assert failed (scrollX >= 320 + 1 - 200)
+
+-- | A field focused without being edited or clicked, by Tab, stores no caret:
+-- its caret reads as the end of its text. A press elsewhere collapses its
+-- selection onto that caret, so Tab back and typing appends, where a collapse
+-- that read the missing caret as the start stored the whole text selected and
+-- the typing replaced it.
+runTextInputCollapseUntouchedTest :: Context -> IORef Int -> IO ()
+runTextInputCollapseUntouchedTest ctx failed = do
+  let
+    inp0 = withInputOff 400 200
+    ui = column (textInput' "hello")
+  _ <- warmup2 ctx inp0 ui
+  _ <- runFrame ctx (tabInp inp0) ui
+  _ <- runClick ctx inp0 ui (V2 390 190)
+  _ <- runFrame ctx (tabInp inp0) ui
+  ((_, typed), _, _, _) <- runFrame ctx (inp0 {inputChars = "X"}) ui
+  assertEq failed "helloX" typed
+
+-- | A field in its own, larger font starts its caret and hit-testing where it
+-- draws its glyphs: at the content inset of its font. In 24 px cells over a
+-- 12 px base font, "abcdef" draws from 30 px into the field. A press just past
+-- the start of the "c" puts the caret before it, where an inset taken from the
+-- base font would have put the caret one cell later.
+runTextInputFontInsetTest :: Context -> IORef Int -> IO ()
+runTextInputFontInsetTest base failed = do
+  let
+    ctx = withMonospaceFonts 12 24 base
+    inp0 = withInputOff 400 200
+    cfg = defaultTextInputConfig {ticLayout = fontSize 24 (fixedW 300 (ticLayout defaultTextInputConfig))}
+    ui = column (textInputConfigured' cfg "abcdef")
+  (resp, _) <- warmup2 ctx inp0 ui
+  spans <- collectTextSpans ctx
+  case [r | (r, "abcdef", _, _, _) <- spans] of
+    [Rect penX penY _ penH] -> do
+      assertEq failed (rectX (respRect resp) + 24 * 1.25) penX
+      _ <- runClick ctx inp0 ui (V2 (penX + 2 * 24 + 4) (penY + penH / 2))
+      ((_, typed), _, _, _) <- runFrame ctx (inp0 {inputChars = "X"}) ui
+      assertEq failed "abXcdef" typed
+    found -> do
+      putStrLn ("text-input-font-inset: value spans " <> show found)
+      assert failed False
 
 runTextAreaScrollWheelTest :: Context -> IORef Int -> IO ()
 runTextAreaScrollWheelTest ctx failed = do

@@ -56,6 +56,7 @@ import Data.Maybe (fromMaybe, isJust, listToMaybe)
 import Data.Primitive.SmallArray (SmallArray, smallArrayFromList)
 import Data.Word (Word64)
 import NanoUI
+import NanoUI.Adornment qualified as A
 import NanoUI.Backend.Sdl
 import NanoUI.Internal.Debug (CoreDebugSnapshot (..))
 import NanoUI.Diagrams
@@ -270,6 +271,10 @@ demoUi = do
   (lick, setLick) <- useState (Nothing :: Maybe (Either String (SmallArray ImageId))) -- GIF frames, once loaded
   (lickLoad, setLickLoad) <- useState (Nothing :: Maybe GifLoad) -- the GIF while it decodes
   (icons, setIcons) <- useState (Nothing :: Maybe [Either String Svg]) -- SVG icons, read on first show
+  (weight, setWeight) <- useText "" -- adorned textInput
+  (saving, toggleSaving) <- useToggle False -- content button showing a spinner
+  (secret, setSecret) <- useText "" -- password field with a show/hide control
+  (secretShown, toggleSecretShown) <- useToggle False
   (swatches, setSwatches) <- useState (Nothing :: Maybe [(ImageId, T.Text)]) -- generated images, registered on first show
   (folderDlg, setFolderDlg) <- useState (Nothing :: Maybe FileDialogId)
   (openPath, setOpenPath) <- useText ""
@@ -509,7 +514,7 @@ demoUi = do
               -- each size rasterizes once.
               case icons of
                 Nothing -> do
-                  paths <- liftIO (mapM (\icon -> getDataFileName ("data/icons/" <> icon <> ".svg")) ["clock", "check", "star", "face"])
+                  paths <- liftIO (mapM (\file -> getDataFileName ("data/icons/" <> file <> ".svg")) ["clock", "check", "star", "face"])
                   setIcons . Just =<< liftIO (mapM loadSvg paths)
                 Just loaded -> do
                   tint <- themeAccent <$> uiTheme
@@ -519,6 +524,41 @@ demoUi = do
                       Right doc -> do
                         svgIcon 20 doc
                         svgIconWith (fixedWH 32 32 . fontColor tint) doc
+                  -- Adornments: icons, short texts and views drawn inside a
+                  -- button beside its label, or inside a field before or after
+                  -- its value. A press on one is a press on the widget, except
+                  -- on a control, which takes its own. buttonContent lays out
+                  -- any view as a button's content, as iced's buttons do.
+                  case sequence loaded of
+                    Right [clock, check, star, _] ->
+                      rowWith (tight . gap gapInline . alignMid) $ do
+                        -- A spinner is a view like any other; it animates only
+                        -- while it is declared.
+                        whenM (buttonContent (if saving then spinnerWith id 14 >> label "Saving" else svgIcon 16 check >> label "Save")) $
+                          setClick "Save" >> toggleSaving
+                        whenM (buttonConfigured defaultButtonConfig {bcAdornments = A.trailing (A.icon star)} "Star") (setClick "Star")
+                        whenM (iconButton clock "") (setClick "Clock")
+                        setWeight
+                          =<< textInputConfigured
+                            defaultTextInputConfig
+                              { ticPlaceholder = "Weight"
+                              , ticAdornments = A.leading (A.icon clock) <> A.trailing (A.affix "kg")
+                              , ticLayout = fixedW 200 (ticLayout defaultTextInputConfig)
+                              }
+                            weight
+                        -- A control: the Show button takes its own presses, and
+                        -- the field keeps its focus and caret.
+                        setSecret
+                          =<< textInputConfigured
+                            defaultTextInputConfig
+                              { ticPlaceholder = "Password"
+                              , ticPassword = not secretShown
+                              , ticAdornments =
+                                  A.trailing (A.control (whenM (buttonWith tight (if secretShown then "Hide" else "Show")) toggleSecretShown))
+                              , ticLayout = fixedW 220 (ticLayout defaultTextInputConfig)
+                              }
+                            secret
+                    _ -> pure ()
               separator
               -- An animated GIF loaded from disk the first time this tab
               -- shows: loadGif decodes it in the background, and gifFrames

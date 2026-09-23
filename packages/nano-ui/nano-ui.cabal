@@ -72,6 +72,7 @@ library
     -- need more than the API, and change without notice.
     exposed-modules:
         NanoUI
+        NanoUI.Adornment
         NanoUI.Backend
         NanoUI.Bidi
         NanoUI.Emit
@@ -162,6 +163,7 @@ library
         NanoUI.Internal.Widgets.Behavior
         NanoUI.Internal.Widgets.Combinators
         NanoUI.Internal.Widgets.Drop
+        NanoUI.Internal.Widgets.Adornment
         NanoUI.Internal.Widgets.Button
         NanoUI.Internal.Widgets.Checkbox
         NanoUI.Internal.Widgets.Display
@@ -227,6 +229,7 @@ test-suite nano-ui-test
         Cases.Shaping
         Cases.Styling
         Cases.Svg
+        Cases.Adornment
         Cases.State
         Cases.Table
         Cases.Modal

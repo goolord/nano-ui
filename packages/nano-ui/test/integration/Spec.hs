@@ -5,6 +5,7 @@ module Spec
   , spec
   , pixelSpec
   , arenaRects
+  , withMonospaceFonts
   , module Control.Monad
   , module Data.IORef
   , module NanoUI
@@ -16,6 +17,7 @@ module Spec
 
 import Control.Monad
 import Data.IORef
+import Data.Text qualified as T
 import NanoUI
 import NanoUI.Backend
 import NanoUI.Testing
@@ -32,6 +34,16 @@ type Spec = (String, IO Context, Context -> IORef Int -> IO ())
 spec, pixelSpec :: String -> (Context -> IORef Int -> IO ()) -> Spec
 spec name run = (name, newContext, run)
 pixelSpec name run = (name, newPixelContext, run)
+
+-- | @base@ with a monospace base font of @baseCell@ px cells, and
+-- @sizedCell@ px cells for text given a font size of its own, so a test can
+-- tell which font measured or drew something.
+withMonospaceFonts :: Float -> Float -> Context -> Context
+withMonospaceFonts baseCell sizedCell base =
+  withFontResolver
+    (withFontMetrics base (monospaceMetrics baseCell))
+    (\_ _ _ _ -> pure (monospaceMetrics sizedCell, False))
+    (\_ _ _ _ txt -> pure (sizedCell * fromIntegral (T.length txt), sizedCell))
 
 -- | Every node's laid-out rect, in arena order.
 arenaRects :: Context -> IO [Rect]

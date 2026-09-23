@@ -11,6 +11,7 @@ module NanoUI.Internal.Style
   , Layout (..)
   , defaultLayout
   , Style (..)
+  , fieldIconColor
   , Theme (..)
   , defaultTheme
   , tomorrowNightMinDarkTheme
@@ -560,6 +561,11 @@ fillColor c s =
     , styleHoverBg = lerpColor c (styleFg s) 0.12
     , styleActiveBg = lerpColor c (colorRGBA 0 0 0 (colorA c)) 0.18
     }
+
+-- | The colour of the icons and adornments inside a field of this style: its
+-- text colour faded toward its background, so they read as part of the box.
+fieldIconColor :: Style -> Color
+fieldIconColor s = lerpColor (styleFg s) (styleBg s) 0.45
 
 -- | Modify the theme's button surface.
 buttonStyle :: (Style -> Style) -> Theme -> Theme

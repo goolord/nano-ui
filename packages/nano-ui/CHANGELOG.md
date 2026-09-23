@@ -4,6 +4,14 @@
 
 ### Added
 
+- `NanoUI.Adornment`, for qualified import: icons, texts and views drawn
+  before or after a text field's value (`ticAdornments`) or a button's label
+  (`buttonConfigured`, `iconButton`). `icon`, `iconSized`, `affix` and `view`
+  are for display; a `control` takes its own presses. Put them on a side with
+  `leading` or `trailing` and combine with `<>`. Adornments move no other
+  widget's id.
+- `buttonContent` and its variants: a button whose content is any view.
+- A widget drawn inside another is on top of it for hover and presses.
 - `FillPolygon` and `StrokePolyline` draw ops: a simple polygon, given with
   its triangulation, and a polyline with mitered joins, both anti-aliased
   along their outline only. A shape cut into `FillTriangle`s would show
@@ -231,6 +239,7 @@
 ### Changed
 
 - Builds with GHC 9.10 through 9.14 (`base >=4.20 && <4.23`).
+- `TextInputConfig` has a field `ticAdornments`, and is no longer `Eq`.
 - `SessionDriver` in `NanoUI.Runner`: the session loop checks every event for
   Ctrl+C itself, so `sdIsHardQuit` is gone, and `sdDraw` returns only whether
   another frame is due (`IO Bool`); no backend changed the input it was given.
@@ -475,6 +484,14 @@
 
 ### Fixed
 
+- A text field focused by Tab no longer has its whole text selected after a
+  press elsewhere.
+- A text field with its own font size puts its caret, selection and
+  hit-testing where it draws its glyphs.
+- A widget with its own font size, such as `buttonWith (fontSize 24)`, is
+  laid out for its label in that font, so the label no longer spills out.
+- The first press on a text field left of its text puts the caret at the
+  start, not the end.
 - A text field with its own font size draws its value in that font when the
   draw arena draws text (RGFW, headless). Its pen and caret were placed in
   that font, but the glyphs came from the base font.

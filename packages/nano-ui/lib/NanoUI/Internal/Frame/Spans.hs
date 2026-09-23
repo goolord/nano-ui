@@ -20,12 +20,12 @@ import NanoUI.Internal.Context
 import NanoUI.Internal.Damage (floatingPanelRects)
 import NanoUI.Internal.Font
 import NanoUI.Internal.Frame.Chrome (displayText, textInputFocused, textInputValue, widgetVisualStyle)
-import NanoUI.Internal.Frame.Node (readScrollNode, resolveFontFor)
+import NanoUI.Internal.Frame.Node (nodeAdornmentInsets, readScrollNode, resolveFontFor)
 import NanoUI.Internal.Frame.Scroll.Geometry (padContentClip, padTextClipRect, scrollNodeViewport, tagClippedSpans)
 import NanoUI.Internal.Frame.Select (collectSelectDropdownSpans)
 import NanoUI.Internal.Frame.SpanArena (SpanArena, pushSpans, resetSpanArena, spanArenaToList)
 import NanoUI.Internal.Frame.TextEdit (collectTextEditMenuSpans)
-import NanoUI.Internal.Frame.TextInput (syncTextInputScroll, tagTextInputClippedSpans, textInputFieldRect)
+import NanoUI.Internal.Frame.TextInput (nodeTextFieldGeom, syncTextInputScroll, tagTextInputClippedSpans)
 import NanoUI.Internal.Input (Input)
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Layout.Solve (findAncestorMaxW, textWrapCap)
@@ -96,16 +96,22 @@ collectClippedSpans ctx@Context {ctxFontMetrics = fm} idx clip arena = do
             pure [(r, t, fg, bg, c) | Just c <- [rectIntersect clipHere label], (r, t, fg, bg) <- spans]
           NodeTextInput -> do
             si <- getStyleIdx (ctxNodeArena ctx) idx
-            pure $
-              if hasFlag textInputFlagNumeric si
-                then maybe [] (`tagClippedSpans` spans) (rectIntersect clipHere (numericTextClip fm x y w h))
-                else
-                  if hasFlag textInputFlagSelectable si
-                    then tagClippedSpans clipHere spans
-                    else tagTextInputClippedSpans clipHere x y w h fm spans
+            if hasFlag textInputFlagSelectable si
+              then pure (tagClippedSpans clipHere spans)
+              else do
+                -- The text clip paint uses ('nodeTextFieldGeom').
+                (_, fieldClip) <- nodeTextFieldGeom ctx idx x y w h
+                pure $
+                  if hasFlag textInputFlagNumeric si
+                    then maybe [] (`tagClippedSpans` spans) (rectIntersect clipHere fieldClip)
+                    else tagTextInputClippedSpans clipHere fieldClip x y w fm spans
           _ -> pure (tagClippedSpans clipHere spans)
       pushSpans arena here
-      walkChildSpans ctx idx clipHere arena
+      kids <- getFirstChild (ctxNodeArena ctx) idx
+      -- A widget clips its children, as paint does.
+      unless (kids < 0) $
+        forM_ (if isWidgetNode nt then rectIntersect clipHere (Rect x y w h) else Just clipHere) $ \childClip ->
+          walkChildSpans ctx idx childClip arena
 
 walkChildSpans :: Context -> NodeIdx -> Rect -> SpanArena -> IO ()
 walkChildSpans ctx idx clip arena = getFirstChild (ctxNodeArena ctx) idx >>= go
@@ -245,8 +251,9 @@ widgetTextSpans ctx nt idx x y w h = do
     -- text depends on their data.
     if hasCenteredLabel nt
       then do
-        placement <- cachedWidgetLabel ctx nt idx w h
-        pure [(txt, x + px, y + py, tw, th) | Just (WidgetTextPlacement txt px py tw th) <- [placement]]
+        (lx, lw, ax) <- labelBox ctx nt idx x w
+        placement <- cachedWidgetLabel ctx nt idx ax lw h
+        pure [(txt, lx + px, y + py, tw, th) | Just (WidgetTextPlacement txt px py tw th) <- [placement]]
       else computeWidgetTextPlacements ctx nt idx x y w h
   let bg = styleBg style
   case nt of
@@ -274,9 +281,10 @@ forWidgetTextPlacements_ ::
   (Bool -> T.Text -> Float -> Float -> Float -> Float -> IO ()) -> IO ()
 forWidgetTextPlacements_ ctx nt idx x y w h emit
   | hasCenteredLabel nt = do
-      placement <- cachedWidgetLabel ctx nt idx w h
+      (lx, lw, ax) <- labelBox ctx nt idx x w
+      placement <- cachedWidgetLabel ctx nt idx ax lw h
       forM_ placement $ \(WidgetTextPlacement txt px py tw th) ->
-        emit True txt (x + px) (y + py) tw th
+        emit True txt (lx + px) (y + py) tw th
   | otherwise = do
       placements <- computeWidgetTextPlacements ctx nt idx x y w h
       let go [] = pure ()
@@ -284,15 +292,30 @@ forWidgetTextPlacements_ ctx nt idx x y w h emit
             emit (null rest) txt px py tw th >> go rest
       go placements
 
-cachedWidgetLabel :: Context -> NodeType -> NodeIdx -> Float -> Float -> IO (Maybe WidgetTextPlacement)
-cachedWidgetLabel ctx nt idx w h = do
+-- | The span of widget @idx@, at @x@ and @w@ wide, its label is placed in,
+-- and how a button's label aligns there: beside adornments, the room between
+-- them, the label kept to their side so it never runs into one.
+{-# INLINE labelBox #-}
+labelBox :: Context -> NodeType -> NodeIdx -> Float -> Float -> IO (Float, Float, AlignX)
+labelBox ctx nt idx x w
+  | nt /= NodeButton = pure (x, w, AlignCenter)
+  | otherwise = beside <$> nodeAdornmentInsets (ctxNodeArena ctx) idx x w
+  where
+    beside (lead, trail)
+      | lead > 0 = (x + lead, max 0 (w - lead - trail), AlignStart)
+      | trail > 0 = (x, max 0 (w - trail), AlignEnd)
+      | otherwise = (x, w, AlignCenter)
+
+-- | A widget's label placed across @w@, a button's aligned by @labelAlign@.
+cachedWidgetLabel :: Context -> NodeType -> NodeIdx -> AlignX -> Float -> Float -> IO (Maybe WidgetTextPlacement)
+cachedWidgetLabel ctx nt idx labelAlign w h = do
   fontSizeVal <- getNodeFontSize (ctxNodeArena ctx) idx
   si <- getStyleIdx (ctxNodeArena ctx) idx
   txt <- displayText ctx nt idx
   ax <-
     if nt == NodeButton && hasFlag buttonFlagTable si
       then getAlignX (ctxNodeArena ctx) idx
-      else pure AlignStart
+      else pure labelAlign
   let ntTag = fromEnum nt
   cache <- readIORef (ctxWidgetTextCache ctx)
   case IM.lookup idx cache of
@@ -327,7 +350,7 @@ computeWidgetLabel ctx nt txt si fontSizeVal ax w h
               | hasFlag buttonFlagMenu si ->
                   let inset = menuItemPadX + ix
                    in (inset, min tw (max 0 (w - inset - ix)))
-              | otherwise -> alignedTextPen AlignCenter 0 w 0 fm txt
+              | otherwise -> alignedTextPen ax 0 w 0 fm txt
             NodeSelect -> (ix, min tw (w - ix - selectChevronReserve))
             NodeTree ->
               let (_, depth, _, _) = treeDecodeStyle si
@@ -344,21 +367,20 @@ selectableTextGeometry fm x y h =
   let lineH = fmLineHeight fm
    in (x, centeredTextY fm y h lineH, lineH)
 
--- | A plain (non-selectable) field's drawn text, its pen position and the
--- scroll offset that settled it. Paint needs exactly this; only the span path
--- also needs the measured width, so the host measurement stays there.
+-- | A non-selectable field's drawn text, its pen position with the scroll
+-- applied, and the clip its text is confined to. The pen starts at the clip's
+-- left edge ('nodeTextFieldGeom'), where the caret, selection and
+-- hit-testing start too. Paint needs exactly this; only the span path also
+-- needs the measured width, so the host measurement stays there.
 plainFieldPen ::
-  Context -> NodeIdx -> Int -> FontMetrics -> Float -> Float -> Float -> Float -> IO (T.Text, Float, Float, Float)
+  Context -> NodeIdx -> Int -> FontMetrics -> Float -> Float -> Float -> Float -> IO (T.Text, Float, Float, Rect)
 plainFieldPen ctx idx si fm x y w h = do
-  let numeric = hasFlag textInputFlagNumeric si
-  ph <- if numeric then pure "" else getText (ctxNodeArena ctx) idx
+  ph <- if hasFlag textInputFlagNumeric si then pure "" else getText (ctxNodeArena ctx) idx
   value <- textInputValue ctx idx
   focus <- textInputFocused ctx idx
-  let fieldTxt = textInputFieldText ph value focus
-      Rect _ fieldY _ fieldH = if numeric then Rect x y w h else textInputFieldRect fm x y w h
-      (ix, _) = widgetContentInset fm
+  (Rect _ boxY _ boxH, clip@(Rect clipX _ _ _)) <- nodeTextFieldGeom ctx idx x y w h
   scrollX <- syncTextInputScroll ctx idx x y w h
-  pure (fieldTxt, x + ix - scrollX, centeredTextY fm fieldY fieldH (fmLineHeight fm), scrollX)
+  pure (textInputFieldText ph value focus, clipX - scrollX, centeredTextY fm boxY boxH (fmLineHeight fm), clip)
 
 computeWidgetTextPlacements ::
   Context -> NodeType -> NodeIdx -> Float -> Float -> Float -> Float -> IO [(T.Text, Float, Float, Float, Float)]

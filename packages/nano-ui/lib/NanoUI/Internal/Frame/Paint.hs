@@ -151,7 +151,7 @@ lowerNodeVisible env idx nt rect = do
     NodeScrollContainer -> paintScrollContainerNode env idx rect
     NodeText -> paintTextNode env idx rect
     NodeSeparator -> paintSeparatorNode env rect
-    NodeTextInput -> paintTextInputNode env idx rect
+    NodeTextInput -> paintTextInputNode env idx rect >> paintWidgetChildren env idx rect
     NodeTextArea -> paintTextAreaNode env idx rect
     NodeSpacer -> pure ()
     NodeModal -> pure ()
@@ -160,9 +160,21 @@ lowerNodeVisible env idx nt rect = do
     NodeBox -> paintBoxNode env idx rect
     NodeImage -> paintImageNode env idx rect
     NodeDrawing -> paintDrawingNode env idx rect
-    _ -> paintWidget env idx nt rect
+    _ -> paintWidget env idx nt rect >> paintWidgetChildren env idx rect
   unless (hashWidgetId (peFocusRing env) == 0) $
     paintFocusRing env idx nt rect
+
+-- | A widget's children, its adornments or content, clipped to it. Most
+-- widgets have none, so only that check is inlined.
+{-# INLINE paintWidgetChildren #-}
+paintWidgetChildren :: PaintEnv -> NodeIdx -> Rect -> IO ()
+paintWidgetChildren env idx rect = do
+  kids <- getFirstChild (peNodeArena env) idx
+  unless (kids < 0) $ paintClippedChildren env idx rect
+
+{-# NOINLINE paintClippedChildren #-}
+paintClippedChildren :: PaintEnv -> NodeIdx -> Rect -> IO ()
+paintClippedChildren env idx rect = withClip (peDrawArena env) rect (walkChildrenWithOccluders env idx)
 
 -- | Accent ring around the widget holding keyboard focus. Text fields and
 -- selects already swap in an accent border while focused, so they get none.

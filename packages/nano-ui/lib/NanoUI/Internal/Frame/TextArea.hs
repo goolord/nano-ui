@@ -41,21 +41,22 @@ import NanoUI.Internal.Frame.TextInput (FieldDoc (..), drawLineCaret, drawLineSe
 import NanoUI.Internal.Id (WidgetId, hashWidgetId)
 import NanoUI.Internal.Input (Input, inputMouseDown, inputMousePos, inputMousePressed, inputMouseReleased)
 import NanoUI.Internal.Layout.Arena
-import NanoUI.Internal.Store (fieldInt, fieldPoint, findSlot, insertDyn, insertSlot, lookupDyn, lookupSlot)
+import NanoUI.Internal.Store (collapseFieldSelection, fieldPoint, findSlot, insertDyn, insertSlot, lookupDyn, lookupSlot)
 import NanoUI.Internal.Style
 import NanoUI.Internal.Types (Rect (..), V2 (..), clamp, onGrid, rectContains)
 import qualified NanoUI.Internal.Widgets.TextArea as TA
 import qualified NanoUI.Widgets.TextBuffer as TB
 
 -- | Mouse selection in the focused field, whichever kind it is. A release
--- ends any drag.
-finalizeTextFieldMouse :: Context -> Input -> IO ()
-finalizeTextFieldMouse ctx inp = do
+-- ends any drag. @onControl@: this frame's press is on a control drawn inside
+-- the field ('NanoUI.Internal.Frame.Input.ptFieldControl').
+finalizeTextFieldMouse :: Context -> Input -> Bool -> IO ()
+finalizeTextFieldMouse ctx inp onControl = do
   focus <- readIORef (ctxFocusId ctx)
   when (hashWidgetId focus /= 0) $
     withWidgetNode ctx focus () $ \idx -> do
       getNodeType (ctxNodeArena ctx) idx >>= \case
-        NodeTextInput -> textInputMouse ctx inp focus idx
+        NodeTextInput -> textInputMouse ctx inp onControl focus idx
         -- An edited document is measured here, not in paint, whose cache
         -- write would damage and wake the next frame. Nothing else is read
         -- until the pointer acts.
@@ -83,8 +84,7 @@ collapseTextFieldSelection :: Context -> WidgetId -> IO ()
 collapseTextFieldSelection ctx wid =
   withWidgetNode ctx wid () $ \idx ->
     getNodeType (ctxNodeArena ctx) idx >>= \case
-      NodeTextInput -> modifyStore ctx $ \store ->
-        insertSlot fieldInt (slotKey SlotAnchor key) (findSlot fieldInt 0 (slotKey SlotCursor key) store) store
+      NodeTextInput -> modifyStore ctx (collapseFieldSelection key)
       NodeTextArea -> modifyStore ctx $ \store ->
         let state = TA.loadTextAreaState store key
          in TA.saveTextAreaState key state {TA.selectionAnchor = TB.getCursor (TA.buffer state)} store

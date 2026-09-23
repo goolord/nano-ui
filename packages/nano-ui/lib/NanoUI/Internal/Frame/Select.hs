@@ -30,7 +30,7 @@ import NanoUI.Internal.Id (WidgetId (..))
 import NanoUI.Internal.Input (Input (..), Key (..), inputKeys, inputKeysElem, inputMousePos, inputMousePressed, inputPointerHeld)
 import NanoUI.Internal.Layout.Arena (NodeIdx, NodeType (NodeSelect, NodeTextInput), getNodeType, lookupNodeByKey, lookupNodeByWidgetId, getOptions, getRect, getWidgetId)
 import NanoUI.Internal.Monad (whenM, (<&&>))
-import NanoUI.Internal.Store (fieldFloat, fieldInt, fieldText, findSlot, insertSlot)
+import NanoUI.Internal.Store (fieldFloat, fieldInt, fieldText, findSlot, insertSlot, setFieldSelection)
 import NanoUI.Internal.Style (Style (..), Theme (..), scrollBarThumbColor, scrollBarTrackColor, themeAccent, themeInput)
 import NanoUI.Internal.Types (Color (..), Rect (..), V2 (..), clamp, rectContains)
 
@@ -277,10 +277,7 @@ finalizeSelectPick ctx inp =
                 let txt = fromMaybe "" (listToMaybe (drop picked (ddOptions dd)))
                     len = T.length txt
                 setStore ctx $
-                  insertSlot fieldText key txt
-                    . insertSlot fieldInt (slotKey SlotCursor key) len
-                    . insertSlot fieldInt (slotKey SlotAnchor key) len
-                    $ st
+                  insertSlot fieldText key txt . setFieldSelection key len len $ st
                 writeIORef (ctxFocusId ctx) (WidgetId 0)
                 markDirty ctx
           else
