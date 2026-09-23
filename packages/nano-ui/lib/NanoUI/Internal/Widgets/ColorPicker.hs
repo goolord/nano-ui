@@ -17,7 +17,7 @@ module NanoUI.Internal.Widgets.ColorPicker
   )
 where
 
-import Control.Monad (forM_, void, when)
+import Control.Monad (forM_, guard, void, when)
 import Data.Bits ((.&.))
 import Data.Maybe (fromMaybe, isJust)
 import Data.Text (Text)
@@ -50,7 +50,7 @@ import NanoUI.Internal.Layout.Arena
   ( NodeArena
   , NodeIdx
   , NodeType (..)
-  , findChildM
+  , firstChildJustM
   , getNodeType
   , getParent
   , getRect
@@ -199,10 +199,10 @@ pickerSvNode na idx = do
   parent <- getParent na idx
   if parent < 0
     then pure idx
-    else fmap (fromMaybe idx) . findChildM na parent $ \ci -> do
+    else fmap (fromMaybe idx) . firstChildJustM na parent $ \ci -> do
       nt <- getNodeType na ci
       si <- getStyleIdx na ci
-      pure (nt == NodeColorPicker && colorPickerPartOf si == PickerSv)
+      pure (ci <$ guard (nt == NodeColorPicker && colorPickerPartOf si == PickerSv))
 
 -- | Where the part at @idx@ (laid out at @rect@) draws: the field's square, or
 -- the part's column cut to the square's height so the bars and the preview

@@ -108,7 +108,7 @@ module NanoUI.Internal.Layout.Arena
   , walkFloatingAncestors
   , findNodeM
   , foldNodesM
-  , findChildM
+  , firstChildJustM
   , walkAncestors
   , LayoutCache (..)
   , CustomMeasureRecord
@@ -1612,14 +1612,12 @@ walkFloatingAncestors na idx step = do
       nt <- getNodeType na i
       if isFloatingNode nt then step i nt else pure Nothing
 
--- | First direct child of @parentIdx@ satisfying the predicate.
-{-# INLINE findChildM #-}
-findChildM :: NodeArena -> NodeIdx -> (NodeIdx -> IO Bool) -> IO (Maybe NodeIdx)
-findChildM na parentIdx p = do
-  fc <- getFirstChild na parentIdx
-  let go !ci
-        | ci < 0 = pure Nothing
-        | otherwise = do
-            ok <- p ci
-            if ok then pure (Just ci) else getNextSibling na ci >>= go
-  go fc
+-- | What @f@ finds for the first direct child of @parentIdx@ it finds
+-- anything for.
+{-# INLINE firstChildJustM #-}
+firstChildJustM :: NodeArena -> NodeIdx -> (NodeIdx -> IO (Maybe a)) -> IO (Maybe a)
+firstChildJustM na parentIdx f = getFirstChild na parentIdx >>= go
+  where
+    go !ci
+      | ci < 0 = pure Nothing
+      | otherwise = f ci >>= maybe (getNextSibling na ci >>= go) (pure . Just)

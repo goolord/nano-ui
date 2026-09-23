@@ -62,16 +62,14 @@ import NanoUI.Internal.Input
   )
 import NanoUI.Internal.Layout.Arena
   ( DirTag (..)
-  , NodeArena
   , NodeIdx
   , NodeType (..)
   , arenaCount
   , NodeClass (PointerNodes)
   , findClassNodeM
+  , firstChildJustM
   , forChildNodes_
   , getDirection
-  , getFirstChild
-  , getNextSibling
   , getNodeRect
   , getNodeType
   , getParent
@@ -192,21 +190,13 @@ applyCrossAxisScroll ctx idx scroll = do
       if nt == NodePanel || nt == NodeWindow || nt == NodeModal
         then pure (Just Nothing)
         else fmap Just <$> crossWid i
-    inside i = firstChildJust na i $ \ci -> crossWid ci >>= maybe (inside ci) (pure . Just)
+    inside i = firstChildJustM na i $ \ci -> crossWid ci >>= maybe (inside ci) (pure . Just)
   parent <- getParent na idx
   up <- join <$> walkAncestors na parent above
   target <- maybe (inside idx) (pure . Just) up
   forM_ target $ \wid -> applyScrollWheelDelta ctx wid scroll
  where
   na = ctxNodeArena ctx
-
--- | What @f@ finds for the first of @parent@'s children it finds anything for.
-firstChildJust :: NodeArena -> NodeIdx -> (NodeIdx -> IO (Maybe a)) -> IO (Maybe a)
-firstChildJust na parent f = getFirstChild na parent >>= go
- where
-  go ci
-    | ci < 0 = pure Nothing
-    | otherwise = f ci >>= maybe (getNextSibling na ci >>= go) (pure . Just)
 
 -- | Node owning scroller @wid@: its text area, or the first scroll container
 -- with that id that the predicate does not rule out (table slave panes share
@@ -274,7 +264,7 @@ queryScrollTarget :: Context -> V2 -> Rect -> NodeIdx -> IO (Maybe NodeIdx)
 queryScrollTarget ctx mouse parentClip idx = runMaybeT $ do
   nt <- liftIO $ getNodeType (ctxNodeArena ctx) idx
   clip <- MaybeT $ scrollHitClip ctx idx nt parentClip
-  MaybeT (firstChildJust (ctxNodeArena ctx) idx (queryScrollTarget ctx mouse clip))
+  MaybeT (firstChildJustM (ctxNodeArena ctx) idx (queryScrollTarget ctx mouse clip))
     <|> MaybeT (scrollHitSelf ctx idx nt mouse clip)
 
 scrollHitSelf ::

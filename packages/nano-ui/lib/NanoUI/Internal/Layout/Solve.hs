@@ -13,7 +13,7 @@ module NanoUI.Internal.Layout.Solve
   , textWrapCap
   ) where
 
-import Control.Monad (filterM, foldM, forM_, mfilter, unless, when)
+import Control.Monad (filterM, foldM, forM_, guard, mfilter, unless, when)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IM
@@ -91,7 +91,7 @@ import NanoUI.Internal.Layout.Arena
   , getAlignX
   , getAlignY
   , getDirection
-  , findChildM
+  , firstChildJustM
   , getFirstChild
   , getHeightSizing
   , getNodeType
@@ -722,11 +722,11 @@ floatingBodyGutter na idx overflow = do
 -- | The scroll container holding window or modal @idx@'s body.
 windowBodyScroller :: NodeArena -> NodeIdx -> IO (Maybe NodeIdx)
 windowBodyScroller na idx =
-  findChildM na idx $ \ci -> do
+  firstChildJustM na idx $ \ci -> do
     nt <- getNodeType na ci
     if nt /= NodeScrollContainer
-      then pure False
-      else (== ScrollBarWindow) <$> scrollBarSlotOf na ci
+      then pure Nothing
+      else (\slot -> ci <$ guard (slot == ScrollBarWindow)) <$> scrollBarSlotOf na ci
 
 measureScrollContainer :: SolveEnv -> NodeIdx -> IO ()
 measureScrollContainer env@SolveEnv {seArena = na, seArrays = a} idx = do
