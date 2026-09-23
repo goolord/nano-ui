@@ -41,14 +41,12 @@ pushRect da rect col = do
 -- Quad with a color per corner. GPU interpolates across the two triangles.
 -- Corners: top-left, top-right, bottom-right, bottom-left.
 pushQuadGradient :: DrawArena -> Rect -> Color -> Color -> Color -> Color -> IO ()
-pushQuadGradient da (Rect x y w h) tl tr br bl
+pushQuadGradient da rect@(Rect _ _ w h) tl tr br bl
   | w <= 0 || h <= 0 = pure ()
   | otherwise = do
-      s <- readIORef (daSnapScale da)
+      Rect px py _ _ <- snapRectOrigin da rect
       setTexture da glyphAtlasTextureId
-      let !px = onGrid s x
-          !py = onGrid s y
-          !c0 = unpackColorF tl
+      let !c0 = unpackColorF tl
           !c1 = unpackColorF tr
           !c2 = unpackColorF br
           !c3 = unpackColorF bl
