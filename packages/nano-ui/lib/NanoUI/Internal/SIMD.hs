@@ -78,7 +78,7 @@ pokeQuadIndices ip off a b c d = do
   pokeByteOff ip (off + 16) c
   pokeByteOff ip (off + 20) d
 
--- | Vectorized Quad with 4 distinct corner colors (top-left, top-right, bottom-right, bottom-left)
+-- | Quad with 4 distinct corner colors (top-left, top-right, bottom-right, bottom-left)
 {-# INLINE pokeQuadGradientSIMD #-}
 pokeQuadGradientSIMD ::
   Ptr Word8 ->

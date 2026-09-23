@@ -25,8 +25,8 @@ import NanoUI
   )
 import NanoUI.Backend (FontMetrics, prepareFontMetricsMany, uiFontMetrics)
 import NanoUI.Internal.Context (Context (..), getStore, intKey, setStore)
-import NanoUI.Internal.Monad (askContext)
-import NanoUI.Monad (nextId, uiIO)
+import NanoUI.Internal.Monad (freshWidget)
+import NanoUI.Monad (uiIO)
 import NanoUI.Diagrams.Backend (B)
 import NanoUI.Diagrams.Widget (PlotStyle, diagramWithKeyAndEnvelope, uiPlotStyle)
 import NanoUI.Plot.Builder qualified as Builder
@@ -88,8 +88,7 @@ cachedChartDiagram ctx wid fm theme ps chart = do
 -- nearest data point under the pointer.
 plot :: Ui :> es => (Layout -> Layout) -> Chart -> Eff es PlotResponse
 plot f chart = do
-  wid <- nextId
-  ctx <- askContext
+  (wid, ctx) <- freshWidget
   fm <- uiFontMetrics
   theme <- uiTheme
   ps <- uiPlotStyle

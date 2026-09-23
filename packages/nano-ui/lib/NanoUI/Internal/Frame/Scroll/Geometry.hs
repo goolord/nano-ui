@@ -97,7 +97,7 @@ scrollAxisGutter policy slot trailPad contentSize innerMain =
   case policy of
     ScrollNone -> 0
     ScrollHidden -> 0
-    ScrollAuto -> if contentSize <= innerMain then 0 else scrollBarGutter slot trailPad
+    ScrollAuto -> if scrollOverflows contentSize innerMain then scrollBarGutter slot trailPad else 0
     ScrollAlways -> scrollBarGutter slot trailPad
 
 -- Vertical bar takes width. Horizontal bar takes height. Second pass
@@ -153,8 +153,15 @@ scrollWheelSuppressed cfg native2D dir = not native2D && scrollPolicyFor cfg dir
 -- back into the reachable range.
 scrollAxisRange :: Float -> Float -> Float -> Float
 scrollAxisRange contentSize innerMain trailingPad
-  | contentSize > innerMain + 0.5 = max 0 (contentSize + trailingPad - innerMain)
+  | scrollOverflows contentSize innerMain = max 0 (contentSize + trailingPad - innerMain)
   | otherwise = 0
+
+-- | Whether content of @contentSize@ overflows @innerMain@ by more than half
+-- a pixel, the rounding a fractional layout leaves. The range and the gutter
+-- both ask this, so an auto bar never reserves a lane it does not paint.
+{-# INLINE scrollOverflows #-}
+scrollOverflows :: Float -> Float -> Bool
+scrollOverflows contentSize innerMain = contentSize > innerMain + 0.5
 
 -- | Logical window-space track/thumb bounds and the maximum scroll offset.
 data ScrollBarLayout = ScrollBarLayout
