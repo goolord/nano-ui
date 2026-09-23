@@ -23,7 +23,7 @@ module NanoUI.Sdl.Internal.Font
   ) where
 
 import Control.Exception (SomeException, bracket_, catch, throwIO)
-import Control.Monad (foldM_, forM, forM_, unless, void, when, zipWithM_)
+import Control.Monad (foldM_, forM, forM_, unless, when, zipWithM_)
 import Data.Bits ((.&.), (.|.), shiftL)
 import Data.Foldable (traverse_)
 import Data.List (delete, elemIndex)
@@ -469,11 +469,8 @@ attachFallback sf source probe = do
     unless (copy == nullPtr) $ do
       fallback <- readSdlFont (sfPointSize sf) copy
       let attached' = IM.insert source fallback attached
-      case IM.lookupMax attached of
-        Just (lastSource, _) | lastSource > source -> do
-          forM_ attached $ \f -> ttfRemoveFallback (sfFont sf) (sfFont f)
-          forM_ attached' $ \f -> ttfAddFallback (sfFont sf) (sfFont f)
-        _ -> void (ttfAddFallback (sfFont sf) copy)
+      forM_ attached $ \f -> ttfRemoveFallback (sfFont sf) (sfFont f)
+      forM_ attached' $ \f -> ttfAddFallback (sfFont sf) (sfFont f)
       writeIORef (sfFallbacks sf) attached'
 
 -- | What the process knows about coverage fonts: the installed files, found
