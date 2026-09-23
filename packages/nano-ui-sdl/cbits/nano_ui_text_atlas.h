@@ -16,14 +16,13 @@ void nano_ui_text_atlas_destroy(NanoUiTextAtlas *atlas);
 /* The texture of page `page`, or NULL for a page never opened. */
 SDL_Texture *nano_ui_text_atlas_texture(NanoUiTextAtlas *atlas, int page);
 
+/* Copy a glyph surface into the atlas, on a new page once the last one is
+ * full, and write its u0, v0, u1 and v1: normalised to [0,1] within the page,
+ * plus the page's number in u. False when no page has room. */
 bool nano_ui_text_atlas_insert_surface(
     NanoUiTextAtlas *atlas,
     SDL_Surface *surface,
-    int *out_page,
-    float *out_x,
-    float *out_y,
-    float *out_w,
-    float *out_h);
+    float uv[4]);
 
 void nano_ui_text_atlas_reset(NanoUiTextAtlas *atlas);
 

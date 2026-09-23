@@ -148,13 +148,9 @@ SDL_Texture *nano_ui_text_atlas_texture(NanoUiTextAtlas *atlas, int page)
 bool nano_ui_text_atlas_insert_surface(
     NanoUiTextAtlas *atlas,
     SDL_Surface *surface,
-    int *out_page,
-    float *out_x,
-    float *out_y,
-    float *out_w,
-    float *out_h)
+    float uv[4])
 {
-    if (!atlas || !surface) {
+    if (!atlas || !surface || !uv) {
         return false;
     }
     int gw = surface->w;
@@ -178,21 +174,11 @@ bool nano_ui_text_atlas_insert_surface(
     if (gh > atlas->row_h) {
         atlas->row_h = gh;
     }
-    if (out_page) {
-        *out_page = page;
-    }
-    if (out_x) {
-        *out_x = (float)x;
-    }
-    if (out_y) {
-        *out_y = (float)y;
-    }
-    if (out_w) {
-        *out_w = (float)gw;
-    }
-    if (out_h) {
-        *out_h = (float)gh;
-    }
+    float s = (float)NANO_UI_TEXT_ATLAS_SIZE;
+    uv[0] = (float)page + (float)x / s;
+    uv[1] = (float)y / s;
+    uv[2] = uv[0] + (float)gw / s;
+    uv[3] = uv[1] + (float)gh / s;
     return true;
 }
 

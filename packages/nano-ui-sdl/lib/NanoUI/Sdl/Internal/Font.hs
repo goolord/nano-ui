@@ -27,7 +27,7 @@ import Control.Monad (foldM_, forM, forM_, unless, when, zipWithM_)
 import Data.Bits ((.&.), (.|.), shiftL)
 import Data.Foldable (traverse_)
 import Data.List (delete, elemIndex)
-import Foreign.Marshal.Alloc (alloca, allocaBytes)
+import Foreign.Marshal.Alloc (allocaBytes)
 import Foreign.Marshal.Array (advancePtr, allocaArray, peekArray)
 import Foreign.Marshal.Utils (with)
 import Data.Char (isPrint, isSpace, ord)
@@ -210,17 +210,15 @@ placeGlyphImage ga font gi = do
   surf <- with nullPtr $ \sp -> ttfRenderGlyphIndexSurface (sfFont font) (fromIntegral gi) sp >> peek sp
   if surf == nullPtr
     then pure Nothing
-    else alloca $ \pagePtr -> allocaArray 4 $ \out -> do
-      -- The page, and the x, y, width and height in pixels on it.
-      let at = advancePtr out
-      placed <- textAtlasInsertSurface (gaAtlas ga) surf pagePtr out (at 1) (at 2) (at 3)
+    else allocaArray 4 $ \uv -> do
+      -- The slot's u0, v0, u1 and v1, the page's number added to u.
+      placed <- textAtlasInsertSurface (gaAtlas ga) surf uv
       destroySurface (castPtr surf)
       if placed == 0
         then Nothing <$ writeIORef (gaFull ga) True
         else do
-          page <- fromIntegral <$> peek pagePtr
-          [x, y, w, h] <- map ((/ glyphAtlasSize) . realToFrac) <$> peekArray 4 out
-          pure (Just (GlyphSlot (page + x) y (page + x + w) (y + h)))
+          [u0, v0, u1, v1] <- map realToFrac <$> peekArray 4 uv
+          pure (Just (GlyphSlot u0 v0 u1 v1))
 
 -- | Width and height of the glyph atlas texture; mirrors
 -- NANO_UI_TEXT_ATLAS_SIZE in nano_ui_text_atlas.c.
@@ -732,10 +730,6 @@ foreign import ccall unsafe "nano_ui_text_atlas_insert_surface"
   textAtlasInsertSurface ::
     Ptr () ->
     Ptr () ->
-    Ptr CInt ->
-    Ptr CFloat ->
-    Ptr CFloat ->
-    Ptr CFloat ->
     Ptr CFloat ->
     IO CBool
 

@@ -11,10 +11,10 @@ import Data.Vector.Unboxed qualified as U
 import Data.Word (Word8)
 import Foreign.C.Types (CBool (..), CFloat (..), CInt (..), CUInt (..))
 import Foreign.ForeignPtr (mallocForeignPtrBytes, withForeignPtr)
-import Foreign.Marshal.Alloc (alloca, allocaBytes)
-import Foreign.Marshal.Array (advancePtr, allocaArray, peekArray, pokeArray)
+import Foreign.Marshal.Alloc (allocaBytes)
+import Foreign.Marshal.Array (allocaArray, peekArray, pokeArray)
 import Foreign.Ptr (Ptr, castPtr, nullPtr, plusPtr)
-import Foreign.Storable (peek, peekByteOff, pokeByteOff)
+import Foreign.Storable (peekByteOff, pokeByteOff)
 import GHC.Clock (getMonotonicTimeNSec)
 import GHC.Conc (getAllocationCounter)
 import NanoUI (Color, ImageId (..), Rect (..), colorRGBA)
@@ -85,10 +85,6 @@ foreign import ccall unsafe "nano_ui_text_atlas_insert_surface"
   insertAtlas ::
     Ptr ()
     -> Ptr ()
-    -> Ptr CInt
-    -> Ptr CFloat
-    -> Ptr CFloat
-    -> Ptr CFloat
     -> Ptr CFloat
     -> IO CBool
 
@@ -101,13 +97,19 @@ withGlyphSurface action = allocaBytes 64 $ \pixels ->
     unless (ok /= 0) (fail "glyph surface fill failed")
     action surface
 
--- | Insert a surface into the atlas: its page and pixel bounds, or 'Nothing'
--- when no page has room.
+-- | Insert a surface into the atlas: its page and pixel bounds, read back
+-- from the UVs it returns, or 'Nothing' when no page has room.
 insertInto :: Ptr () -> Ptr () -> IO (Maybe (CInt, [CFloat]))
 insertInto atlas surface =
-  alloca $ \page -> allocaArray 4 $ \out -> do
-    ok <- insertAtlas atlas surface page out (advancePtr out 1) (advancePtr out 2) (advancePtr out 3)
-    if ok /= 0 then (\p b -> Just (p, b)) <$> peek page <*> peekArray 4 out else pure Nothing
+  allocaArray 4 $ \uv -> do
+    ok <- insertAtlas atlas surface uv
+    if ok /= 0
+      then do
+        [u0, v0, u1, v1] <- peekArray 4 uv
+        let page = floor u0
+            px a = a * 2048
+        pure (Just (page, [px (u0 - fromIntegral page), px v0, px (u1 - u0), px (v1 - v0)]))
+      else pure Nothing
 
 atlasChecks :: SdlEnv -> ((Int -> Ptr SDL_Texture) -> DrawData -> IO ()) -> IO ()
 atlasChecks env draw = withGlyphSurface $ \surface ->
@@ -191,7 +193,7 @@ imageChecks env ctx images draw = do
 
 atlasBench :: SdlEnv -> IO ()
 atlasBench env = withGlyphSurface $ \surface ->
-  bracket (newAtlas (sdlRenderer env)) freeAtlas $ \atlas -> alloca $ \page -> allocaArray 4 $ \out -> do
+  bracket (newAtlas (sdlRenderer env)) freeAtlas $ \atlas -> allocaArray 4 $ \uv -> do
     unless (atlas /= nullPtr) (fail "atlas creation failed")
     let
       fill = replicateM_ 1024 $ do
@@ -199,11 +201,7 @@ atlasBench env = withGlyphSurface $ \surface ->
           insertAtlas
             atlas
             surface
-            page
-            out
-            (advancePtr out 1)
-            (advancePtr out 2)
-            (advancePtr out 3)
+            uv
         unless (ok /= 0) (fail "benchmark atlas insertion failed")
       action = resetAtlas atlas >> fill
     replicateM_ 5 action
