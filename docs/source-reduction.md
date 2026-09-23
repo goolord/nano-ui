@@ -512,3 +512,62 @@ Rejected, with the reason:
   that paid.
 - **Rounded rects as three quads, one text path for every single-line
   field.** Both change pixels.
+
+## Seventh pass
+
+Baseline `247b236`. Goal: zero-cost abstractions that cut the two libraries
+further. Seven read-only agents surveyed every module for repeated shapes
+across files. After six passes little repeats: they rejected about 130
+candidates, and what survived totals under 1%. Three agents implemented the
+accepted items in their own worktrees, merged into `loc7-int`.
+
+| | Before | After | Change |
+| --- | ---: | ---: | ---: |
+| `packages/nano-ui/lib` | 30,095 | 29,858 | -237 |
+| `packages/nano-ui-sdl/lib` | 3,961 | 3,912 | -49 |
+| `packages/nano-ui-sdl/cbits` | | | -15 |
+
+| Commit | Change | Lines |
+| --- | --- | ---: |
+| `8138510` | A scroll node's viewport and bars computed from the node; three 10-12 argument helpers, a dead one and a one-caller one gone | -79 |
+| `d22e9c8` | Record fields bound in function heads instead of alias lines | -70 |
+| `5a36e60` | Core and SDL share one `GenCache` insert and lookup; SDL drops `hashable` and `unordered-containers` | -25 |
+| `cc95794` | A window resize edge is the side of each axis it moves | -22 |
+| `b4ebfb8`, `7242c9e` | The position pass hands boxes down as a `Rect`; `withAxisSnaps` inlined | -33 |
+| `0f3e7da`, `e261968` | Scalar index and vertex stores in `NanoUI.Internal.SIMD` | -28 |
+| `2f27552` | `freshWidget` for the id and context 25 widget bodies start with | -16 |
+| `333263d`, `9710303`, `e7dd590` | The glyph atlas returns UVs; a dead SDL export; two draw loops through `foldUpTo`/`snapRectOrigin` | -13 |
+
+Headless allocation (bytes, `nano-ui-profile`) fell or held in every scene:
+
+| Scene | Before | After | Change |
+| --- | ---: | ---: | ---: |
+| widgets | 404,187,328 | 404,108,568 | -0.02% |
+| svg | 449,965,824 | 449,965,824 | 0 |
+| canvas | 539,008,488 | 538,929,240 | -0.01% |
+| canvas-keyed | 23,060,736 | 22,993,032 | -0.3% |
+| window | 1,518,883,256 | 1,517,268,552 | -0.1% |
+| window drag | 1,528,914,944 | 1,527,043,976 | -0.1% |
+| pointer | 13,034,713,224 | 13,033,298,536 | -0.01% |
+| grow | 15,803,642,888 | 14,595,963,496 | -7.6% |
+| textarea | 210,498,856 | 210,424,280 | -0.04% |
+| textarea-text | 7,057,601,064 | 7,057,535,424 | 0 |
+
+The `grow` drop comes from the `Rect` boxes in the position pass, whose
+strict head match unboxes them. The scalar vertex stores draw about 5% faster
+in `nano-ui-sdl-profile` (button, checkbox and slider microbenchmarks 15-19%),
+measured over eight alternating pinned rounds; GHC's NCG builds a packed
+`FloatX4#` from scalars with a long shuffle chain. The first scroll-node
+rewrite raised `pointer` by 108 KB: a local gutter helper boxed its Float
+arguments until they were made strict.
+
+Rejected, with the reason: `OrPatterns` (needs GHC 9.12; the libraries should
+build on 9.10); merging small internal modules (separate modules compile in
+parallel); the six all-empty state records built positionally (labelled
+fields); a widget-construction kit beyond `freshWidget` (the rest of each
+widget's start differs); per-emitter reservation or RGBA records in the draw
+code (they become free variables of the per-glyph loops).
+
+Found on the way and fixed separately (branch `fix-field-font`): a text field
+with its own font size drew its glyphs from the base font when the draw arena
+draws text.

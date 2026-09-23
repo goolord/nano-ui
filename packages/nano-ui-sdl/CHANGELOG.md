@@ -68,6 +68,8 @@
 
 ### Changed
 
+- The text caches use the core's generational cache, so the package no longer
+  depends on `hashable` or `unordered-containers`.
 - `SdlEnv` no longer has `sdlDialogState`: file dialogs are tracked per
   process, and every dialog shares one native callback instead of a wrapper
   apiece. `RenderDriver` is exported from `NanoUI.Backend.Sdl`, which

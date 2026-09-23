@@ -244,6 +244,12 @@
   `WindowResizeEdge Int Int`, the side of each axis the edge moves (-1 left
   or top, 1 right or bottom, 0 neither), in place of the eight constructors
   `ResizeN` to `ResizeSW`.
+- The exposed internal modules gain what the core and SDL now share:
+  `insertGen` and `cachedGen` for a `GenCache` (`NanoUI.Internal.Context.Types`),
+  `freshWidget`, the next id with the context (`NanoUI.Internal.Monad`), and
+  `pokeQuadIndices` (`NanoUI.Internal.SIMD`). `pokeVertexSIMD` writes a vertex
+  as eight scalar stores, which the SDL profile draws about 5% faster than the
+  packed ones.
 - A 2D scroller's scroll changes only its offset, as a 1D scroller's did, so
   the damage pass repaints the scroller's clip instead of the whole window.
 - A pane grid's commands (`pgcClose`, `pgcSplit`, maximize and resize) act on
