@@ -205,7 +205,7 @@ kerning settings. SDL 3.4.14 / SDL_ttf 3.2.2 produce:
 
 The existing backend preserves regular-face layout for seven synthetic
 weights and shears quads by exactly 0.18 around the baseline
-(`NanoUI/Internal/Draw/Text.hs`). Native bold is therefore not a behavior-preserving
+(the text emitters in `NanoUI/Internal/Draw.hs`). Native bold is therefore not a behavior-preserving
 substitute. Repeated upright native draws could emulate weights, but the
 renderer-engine API does not expose a custom shear or atlas draw geometry.
 `TTF_GetGPUTextDrawData` belongs to the separate SDL_GPU engine; it cannot
@@ -430,3 +430,85 @@ apparent duplication is deliberate, and those candidates were not landed:
 - **The text-area wheel test pair and the other packages' suites.** The two
   tests diverge after their first steps; the RGFW, forms, diagrams and SDL
   suites have no repeated registration to remove.
+
+## Sixth pass
+
+Baseline `4831382`. Goal: cut the two libraries hard, breaking changes
+allowed, keeping every feature and every exported helper an application
+could use. Ten agents each took one subsystem in its own worktree, then two
+more took the work that crosses subsystems (core) and the plumbing the core
+shares with the backends (core, SDL, RGFW). Their branches merged into
+`loc6-int`, and each merge was built, tested and profiled before the next.
+A last commit opens the libraries' multi-line imports of their own modules;
+it is separate so it can be reverted alone.
+
+| | Before | After | Change |
+| --- | ---: | ---: | ---: |
+| `packages/nano-ui/lib` | 35,690 | 30,095 | -5,595 (-15.7%) |
+| `packages/nano-ui-sdl/lib` | 5,067 | 3,961 | -1,106 (-21.8%) |
+| Both, non-comment non-blank lines | 30,166 | 23,865 | -6,301 (-20.9%) |
+| Both, comment lines | 7,611 | 7,520 | -91 |
+
+Of the -6,701 physical lines, the import commit accounts for -2,072 and the
+simplifications for -4,629. Per subsystem: layout -629, frame/damage/runner
+-641, SDL -910 (two passes), text editing -429, big widgets -408, paint and
+draw -366, scroll and overlays -304, small widgets -279, context core -188,
+types/style/testing -182, cross-cutting -180, backend plumbing -52.
+
+Headless allocation (bytes, `nano-ui-profile`) fell or held in every scene:
+
+| Scene | Before | After | Change |
+| --- | ---: | ---: | ---: |
+| widgets | 443,193,128 | 404,187,328 | -8.8% |
+| svg | 449,972,096 | 449,965,824 | 0 |
+| canvas | 540,878,712 | 539,008,488 | -0.3% |
+| canvas-keyed | 24,946,616 | 23,060,736 | -7.6% |
+| window | 1,632,184,712 | 1,518,883,256 | -6.9% |
+| window drag | 1,644,036,040 | 1,528,914,944 | -7.0% |
+| pointer | 14,182,503,048 | 13,034,713,904 | -8.1% |
+| grow | 19,637,229,312 | 15,803,642,888 | -19.5% |
+| textarea | 217,784,416 | 210,498,856 | -3.3% |
+| textarea-text | 7,065,295,160 | 7,057,601,064 | -0.1% |
+
+The largest wins came from strictness the rewrites exposed: strict
+placement arguments and the single-axis share-out in the solver (`grow`),
+a strict id-scope pair on container entry, and resolving every node font
+through one path (`widgets`). Candidates that raised allocation were
+reverted or reshaped before merging, among them plain text through the
+styled path (+18% on widgets), a lazy `<$>` over the view's static record
+(+1.8 to +5%), a closure shared by the hover tint (+9 MB on widgets) and
+publishing scroll metrics from one node per id, which broke virtualized
+lists (+5%).
+
+Public API changes are in the changelog. The notable ones: `SessionDriver`
+loses `sdIsHardQuit` (the loop checks each event for Ctrl+C) and `sdDraw`
+returns `IO Bool`; `ComboInput` carries `ciInput`; `runClickReduce` moves to
+`NanoUI.Testing.Harness`; `withExternalText` is gone. The exposed
+`NanoUI.Internal.*` modules changed widely.
+
+Bugs found and fixed on the way, each with a regression test: a settled
+`animateTo` value reset to zero after 300 frames; grow children of a plain
+column overflowed by its gaps; the picked row of an open dropdown had the
+wrong span colour; RGFW missed a Ctrl+C whose Ctrl was released within the
+same event batch; and the SDL bench's glyph-lookup gate failed at the
+baseline (16 B per warm lookup, now 0.003 B).
+
+Rejected, with the reason:
+
+- **Text area as a scroll node.** Its gutter geometry differs from a scroll
+  container's, moving its offset into the float slots changes damage
+  semantics, and `TextAreaState.scrollOffset` is public. The shared
+  scrollbar layout (`scrollNodeBars`, `textAreaBarLayouts`) took what the
+  two had in common.
+- **Deleting dead `Slot` constructors.** Slot keys come from `fromEnum`, so a
+  deletion reshuffles every later key; one measured +0.075% on textarea.
+- **Merging the plain and custom drawing registries.** They cache
+  differently (a plain drawing with key 0 is cached; a custom one is
+  rebuilt and compared every frame).
+- **Derived slot keys.** Keys nest, so additive schemes collide within one
+  widget.
+- **Sharing SDL and RGFW event translation through the core.** Lines moved
+  into the core count against it; the per-event Ctrl+C check was the part
+  that paid.
+- **Rounded rects as three quads, one text path for every single-line
+  field.** Both change pixels.
