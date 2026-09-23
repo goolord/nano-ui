@@ -18,7 +18,7 @@ import Data.Foldable (find)
 import Data.Maybe (fromMaybe)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Frame.Hit (topmostModalAtMouse, topmostOverlayAtMouse)
-import NanoUI.Internal.Frame.Node (ScrollNode (..), readScrollNode, scrollNodeBars, scrollNodeViewport)
+import NanoUI.Internal.Frame.Node (readScrollNode)
 import NanoUI.Internal.Frame.Scroll.Geometry
 import NanoUI.Internal.Frame.TextArea (TextAreaBars (..), textAreaBarLayouts, textAreaScrollGeom)
 import NanoUI.Internal.Id (WidgetId)

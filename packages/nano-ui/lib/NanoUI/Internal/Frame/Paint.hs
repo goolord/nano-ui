@@ -41,9 +41,9 @@ import NanoUI.Internal.Context
 import NanoUI.Internal.Draw
 import NanoUI.Internal.Font (ScrollBarSlot (..))
 import NanoUI.Internal.Frame.Chrome
-import NanoUI.Internal.Frame.Node (ScrollNode (..), nodeFontNative, readScrollNode, resolveTextFont, scrollNodeBars, scrollNodeViewport)
+import NanoUI.Internal.Frame.Node (nodeFontNative, readScrollNode, resolveTextFont)
 import NanoUI.Internal.Frame.Paint.Widgets (PaintEnv (..), buildPaintEnv, paintTextAreaNode, paintTextInputNode, paintWidget)
-import NanoUI.Internal.Frame.Scroll.Geometry (borderContentClip, scrollBare)
+import NanoUI.Internal.Frame.Scroll.Geometry (ScrollNode (..), borderContentClip, scrollBare, scrollNodeBars, scrollNodeViewport)
 import NanoUI.Internal.Frame.Spans (textNodeSpanEntry)
 import NanoUI.Internal.Id (hashWidgetId)
 import NanoUI.Internal.Layout.Arena
