@@ -218,7 +218,6 @@ import Control.Monad (foldM, forM, when, (<=<))
 import Data.Bits ((.&.))
 import Data.ByteString (ByteString)
 import Data.Dynamic (fromDynamic, toDyn)
-import Data.Hashable (Hashable)
 import Data.List (find)
 import Data.Maybe (fromMaybe, isJust)
 import Data.HashMap.Strict qualified as HashMap
@@ -386,26 +385,7 @@ cacheMeasureText ::
   (Text -> IO (Float, Float)) ->
   Text ->
   IO (Float, Float)
-cacheMeasureText ref scale base txt = do
-  let key = (txt, scale)
-  cache@(GenCache young _ old) <- readIORef ref
-  case HashMap.lookup key young of
-    Just sz -> pure sz
-    Nothing -> do
-      -- A hit in the old generation moves up to the young one.
-      sz <- maybe (base txt) pure (HashMap.lookup key old)
-      writeIORef ref $! genInsert measureCacheCap False key sz cache
-      pure sz
-
--- | Store a value in the young generation: in place of the entry it holds
--- for the key (@held@), or as one more, which starts a new generation once
--- the young one has @cap@ entries.
-{-# INLINE genInsert #-}
-genInsert :: Hashable k => Int -> Bool -> k -> v -> GenCache k v -> GenCache k v
-genInsert cap held k v (GenCache young n old)
-  | held = GenCache (HashMap.insert k v young) n old
-  | n >= cap = GenCache (HashMap.singleton k v) 1 young
-  | otherwise = GenCache (HashMap.insert k v young) (n + 1) old
+cacheMeasureText ref scale base txt = cachedGen measureCacheCap (const 1) ref (txt, scale) (base txt)
 
 -- | Measurements per generation of the measure cache.
 measureCacheCap :: Int
@@ -423,11 +403,11 @@ cachedWrapText ctx font lineW txt maxW
   | maxW <= 0 = wrapTextIO lineW txt maxW
   | otherwise = do
       gen <- readIORef (ctxMetricGen ctx)
-      WrapCache cachedGen cache0 <- readIORef (ctxWrapCache ctx)
+      WrapCache wrapGen cache0 <- readIORef (ctxWrapCache ctx)
       let key = (txt, font)
           holds r = wrFitW r <= maxW && maxW < wrBreakW r
           cache@(GenCache young _ old)
-            | cachedGen == gen = cache0
+            | wrapGen == gen = cache0
             | otherwise = emptyGenCache
           mine = HashMap.lookup key young
       case mine >>= find holds of
@@ -437,7 +417,7 @@ cachedWrapText ctx font lineW txt maxW
           r <- maybe (wrapTextIO lineW txt maxW) pure (HashMap.lookup key old >>= find holds)
           let entries = r : take (wrapsPerText - 1) (fromMaybe [] mine)
           writeIORef (ctxWrapCache ctx) $!
-            WrapCache gen (genInsert wrapCacheCap (isJust mine) key entries cache)
+            WrapCache gen (insertGen wrapCacheCap (if isJust mine then 0 else 1) key entries cache)
           pure r
 
 -- | Texts per generation of the wrap cache.

@@ -6,6 +6,8 @@ module NanoUI.Internal.Context.Types
   ( Context (..)
   , GenCache (..)
   , emptyGenCache
+  , insertGen
+  , cachedGen
   , MeasureCache
   , WrapCache (..)
   , MetricSource (..)
@@ -56,7 +58,8 @@ module NanoUI.Internal.Context.Types
 import Data.Dynamic (Dynamic)
 import Data.HashMap.Strict (HashMap)
 import Data.HashMap.Strict qualified as HashMap
-import Data.IORef (IORef)
+import Data.Hashable (Hashable)
+import Data.IORef (IORef, modifyIORef', readIORef, writeIORef)
 import Data.IntMap.Strict (IntMap)
 import Data.IntMap.Strict qualified as IM
 import Data.IntSet (IntSet)
@@ -122,11 +125,45 @@ reduceUpdates = reduceMessages ($)
 -- | A memo table in two generations: the young map, its size, and the old
 -- map. A full young map replaces the old one, so an entry that stops being
 -- used (a clock's text, a log line) is dropped while one used every
--- generation stays.
+-- generation stays. It is a cheap stand-in for least recently used: inserts
+-- go to the young map and a hit in the old map moves the entry up, so an
+-- entry survives however many one-off keys (wrap probes, table cells) pass
+-- through. Plain insertion order evicted the oldest key even when every frame
+-- used it. Hashing a text key once beats comparing it at every level of a
+-- tree.
 data GenCache k v = GenCache !(HashMap k v) !Int !(HashMap k v)
 
 emptyGenCache :: GenCache k v
 emptyGenCache = GenCache HashMap.empty 0 HashMap.empty
+
+-- | Insert an entry of weight @w@ into a cache of @cap@ per generation. The
+-- young map's size is the sum of its entries' weights; an entry heavier than
+-- a whole generation is not kept.
+{-# INLINE insertGen #-}
+insertGen :: Hashable k => Int -> Int -> k -> v -> GenCache k v -> GenCache k v
+insertGen cap w k v cache@(GenCache young n old)
+  | w > cap = cache
+  | n + w > cap = GenCache (HashMap.singleton k v) w young
+  | otherwise = GenCache (HashMap.insert k v young) (n + w) old
+
+-- | The entry for @k@, or what @make@ returns, which is kept. Entries weigh
+-- @w k@; an old one used again moves to the young map. Inlined so a hit
+-- returns the stored value without boxing it in a 'Just' on the way: the SDL
+-- bench's warm-lookup gate measures exactly that.
+{-# INLINE cachedGen #-}
+cachedGen :: Hashable k => Int -> (k -> Int) -> IORef (GenCache k v) -> k -> IO v -> IO v
+cachedGen cap w ref k make = do
+  cache@(GenCache young _ old) <- readIORef ref
+  case HashMap.lookup k young of
+    Just v -> pure v
+    Nothing -> case HashMap.lookup k old of
+      Just v -> do
+        writeIORef ref $! insertGen cap (w k) k v cache
+        pure v
+      Nothing -> do
+        v <- make
+        modifyIORef' ref (insertGen cap (w k) k v)
+        pure v
 
 -- | Memoised measurements by text and measurement scale.
 type MeasureCache = GenCache (Text, Float) (Float, Float)

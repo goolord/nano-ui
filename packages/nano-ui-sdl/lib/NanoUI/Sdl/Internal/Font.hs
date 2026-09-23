@@ -38,8 +38,6 @@ import System.IO.Unsafe (unsafePerformIO)
 import Data.ByteString (ByteString)
 import Data.ByteString.Unsafe (unsafeUseAsCStringLen)
 import Data.IORef (IORef, atomicModifyIORef', modifyIORef', newIORef, readIORef, writeIORef)
-import qualified Data.HashMap.Strict as HM
-import Data.Hashable (Hashable)
 import qualified Data.IntSet as IS
 import Data.Primitive.SmallArray
   ( SmallArray
@@ -65,6 +63,7 @@ import Data.Unique (hashUnique, newUnique)
 import qualified Data.ByteString as BS
 import NanoUI (FontVariant (..))
 import NanoUI.Backend
+import NanoUI.Internal.Context.Types (cachedGen, emptyGenCache)
 import NanoUI.Testing
 import SDL3.Sys.Bindgen.Render (SDL_Renderer, SDL_Texture)
 import SDL3.Sys.Surface (destroySurface)
@@ -148,47 +147,6 @@ kernCacheCap = 4096
 -- one scrolled sideways, is shaped once rather than every frame.
 textWeight :: Text -> Int
 textWeight txt = 1 + lengthWord8 txt `quot` 4096
-
--- | A hash map kept in two generations, a cheap stand-in for least recently
--- used. Inserts go to the young map; a hit in the old map moves the entry up.
--- When the young map fills it becomes the old one and the old one is dropped,
--- so an entry survives while it is used once a generation, however many
--- one-off keys (wrap probes, table cells) pass through. Plain insertion order
--- evicted the oldest key even when every frame used it. Hashing a text key
--- once beats comparing it at every level of a tree.
--- The fields are the young map, its size and the old map. The size is the sum
--- of its entries' weights; an entry heavier than a whole generation is not
--- kept.
-data GenCache k v = GenCache !(HM.HashMap k v) !Int !(HM.HashMap k v)
-
-emptyGen :: GenCache k v
-emptyGen = GenCache HM.empty 0 HM.empty
-
--- | Insert an entry of weight @w@ into a cache of @cap@ per generation.
-insertGen :: Hashable k => Int -> Int -> k -> v -> GenCache k v -> GenCache k v
-insertGen cap w k v cache@(GenCache young n old)
-  | w > cap = cache
-  | n + w > cap = GenCache (HM.singleton k v) w young
-  | otherwise = GenCache (HM.insert k v young) (n + w) old
-
--- | The entry for @k@, or what @make@ returns, which is kept. Entries weigh
--- @w k@; an old one used again moves to the young map. Inlined so a hit
--- returns the stored value without boxing it in a 'Just' on the way: the SDL
--- bench's warm-lookup gate measures exactly that.
-{-# INLINE cachedGen #-}
-cachedGen :: Hashable k => Int -> (k -> Int) -> IORef (GenCache k v) -> k -> IO v -> IO v
-cachedGen cap w ref k make = do
-  cache@(GenCache young _ old) <- readIORef ref
-  case HM.lookup k young of
-    Just v -> pure v
-    Nothing -> case HM.lookup k old of
-      Just v -> do
-        writeIORef ref $! insertGen cap (w k) k v cache
-        pure v
-      Nothing -> do
-        v <- make
-        modifyIORef' ref (insertGen cap (w k) k v)
-        pure v
 
 -- | A glyph's native measurements, shared by metric-only preparation and
 -- atlas placement, in unscaled pixels: min x, max x, min y, max y, advance.
@@ -554,7 +512,7 @@ buildGlyphFontMetrics ga sf scale = do
   -- layout, so a pair cache keeps the hot pen loops off the FFI
   -- boundary after first contact. Keyed by packed codepoint pair on this
   -- 'FontMetrics' (the font id is implicit).
-  kernCacheRef <- newIORef emptyGen
+  kernCacheRef <- newIORef emptyGenCache
 
   -- Shaped lines: SDL3_ttf lays each string out with its kerning,
   -- ligatures, contextual forms, fallback fonts and right-to-left runs. A
@@ -562,9 +520,9 @@ buildGlyphFontMetrics ga sf scale = do
   -- resets; the glyph quads drawn from it hold atlas UVs, so their cache is
   -- dropped with the atlas epoch. Each cache keeps two generations of
   -- 'runCacheCap' entries.
-  preparedRef <- newIORef emptyGen
-  shapedRef <- newIORef emptyGen
-  quadCacheRef <- newIORef emptyGen
+  preparedRef <- newIORef emptyGenCache
+  shapedRef <- newIORef emptyGenCache
+  quadCacheRef <- newIORef emptyGenCache
   quadEpochRef <- newIORef =<< readIORef (gaEpoch ga)
 
   let
@@ -593,7 +551,7 @@ buildGlyphFontMetrics ga sf scale = do
           quadEp <- readIORef quadEpochRef
           when (quadEp /= ep) $ do
             writeIORef quadEpochRef ep
-            writeIORef quadCacheRef emptyGen
+            writeIORef quadCacheRef emptyGenCache
           -- Entries are kept wrapped so a hit returns them without allocating.
           -- Placing glyphs never resets the atlas (a full one resets at the
           -- next frame start), so these quads belong to this epoch.
