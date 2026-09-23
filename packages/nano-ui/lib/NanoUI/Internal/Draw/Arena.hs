@@ -27,7 +27,6 @@ module NanoUI.Internal.Draw.Arena
   , snapRectOrigin
   , unpackColorF
   , pokeQuadIndices
-  , loopIO
   , whitePixel
   ) where
 
@@ -58,7 +57,7 @@ import Foreign.Storable (pokeByteOff)
 import GHC.Exts (RealWorld)
 import NanoUI.Internal.Draw.Types
 import NanoUI.Internal.SIMD (pokeQuadSIMD)
-import NanoUI.Internal.Types (Color (..), Rect (..), onGrid, rectIntersect)
+import NanoUI.Internal.Types (Color (..), Rect (..), forUpTo_, onGrid, rectIntersect)
 
 vertexCapacity :: Int
 vertexCapacity = 4096
@@ -365,7 +364,7 @@ groupCmdsByLayer src n = do
     layerAt i = fromEnum . cmdLayer <$> UM.unsafeRead src i
   cursors <- newPrimArray layers
   setPrimArray cursors 0 layers (0 :: Int)
-  loopIO 0 (n - 1) $ \i -> do
+  forUpTo_ n $ \i -> do
     l <- layerAt i
     readPrimArray cursors l >>= writePrimArray cursors l . (+ 1)
   offsets <- newPrimArray (layers + 1)
@@ -378,7 +377,7 @@ groupCmdsByLayer src n = do
         prefix (l + 1) (off + c)
   prefix 0 0
   dest <- UM.unsafeNew n
-  loopIO 0 (n - 1) $ \i -> do
+  forUpTo_ n $ \i -> do
     cmd <- UM.unsafeRead src i
     let
       l = fromEnum (cmdLayer cmd)
@@ -413,11 +412,8 @@ withVerts da needV needI f =
 -- themselves instead of using one contiguous offset.
 {-# INLINE withVertsRaw #-}
 withVertsRaw :: DrawArena -> Int -> Int -> (Ptr Word8 -> Ptr Word8 -> Int -> Int -> IO ()) -> IO ()
-withVertsRaw da needV needI f = do
-  (vp, ip, base, baseIdx) <- ensureAndAlloc da needV needI
-  f vp ip base baseIdx
-  setCount da vertexCountSlot (base + needV)
-  setCount da indexCountSlot (baseIdx + needI)
+withVertsRaw da needV needI f =
+  withVertsReserve da needV needI $ \vp ip base baseIdx commit -> f vp ip base baseIdx >> commit needV needI
 
 -- | Reserve room for up to @maxV@ vertices / @maxI@ indices, hand the body a
 -- commit action, then record only the counts the body reports. Batches many
@@ -435,15 +431,6 @@ withVertsReserve da maxV maxI f = do
   f vp ip base baseIdx $ \nv ni -> do
     setCount da vertexCountSlot (base + nv)
     setCount da indexCountSlot (baseIdx + ni)
-
--- | Strict numeric loop over inclusive bounds, without allocating a range list.
-{-# INLINE loopIO #-}
-loopIO :: Int -> Int -> (Int -> IO ()) -> IO ()
-loopIO !lo !hi f = go lo
-  where
-    go !i
-      | i > hi = pure ()
-      | otherwise = f i >> go (i + 1)
 
 {-# INLINE pushQuad #-}
 pushQuad :: DrawArena -> Rect -> Float -> Float -> Float -> Float -> Color -> IO ()

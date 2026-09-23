@@ -17,7 +17,7 @@ module NanoUI.Internal.Widgets.ColorPicker
   )
 where
 
-import Control.Monad (forM_, void, when)
+import Control.Monad (forM_, guard, void, when)
 import Data.Bits ((.&.))
 import Data.Maybe (fromMaybe, isJust)
 import Data.Text (Text)
@@ -50,7 +50,7 @@ import NanoUI.Internal.Layout.Arena
   ( NodeArena
   , NodeIdx
   , NodeType (..)
-  , findChildM
+  , firstChildJustM
   , getNodeType
   , getParent
   , getRect
@@ -105,7 +105,6 @@ import NanoUI.Internal.Widgets.Behavior
   ( DragAxis (..)
   , holdActiveWhile
   , keyboardFocused
-  , keyedDragHeld
   , useDrag1D
   )
 import NanoUI.Internal.Widgets.Node
@@ -200,10 +199,10 @@ pickerSvNode na idx = do
   parent <- getParent na idx
   if parent < 0
     then pure idx
-    else fmap (fromMaybe idx) . findChildM na parent $ \ci -> do
+    else fmap (fromMaybe idx) . firstChildJustM na parent $ \ci -> do
       nt <- getNodeType na ci
       si <- getStyleIdx na ci
-      pure (nt == NodeColorPicker && colorPickerPartOf si == PickerSv)
+      pure (ci <$ guard (nt == NodeColorPicker && colorPickerPartOf si == PickerSv))
 
 -- | Where the part at @idx@ (laid out at @rect@) draws: the field's square, or
 -- the part's column cut to the square's height so the bars and the preview
@@ -458,7 +457,6 @@ colorPickerCanvas (wid, svResp) (hueWid, hueResp) alphaPart initial = do
   ctx <- askContext
   inp <- askInput
   store0 <- uiIO (getStore ctx)
-  heldBefore <- or <$> mapM keyedDragHeld (["s", "v", "hue", "alpha"] :: [Text])
   let
     current0 = widgetStoreColor store0 wid initial
     (h0, s0, v0) = widgetStoreHsv store0 wid initial
@@ -470,10 +468,10 @@ colorPickerCanvas (wid, svResp) (hueWid, hueResp) alphaPart initial = do
     barHit resp =
       Rect (rectX (respRect resp) - 2) (rectY svSquare) (rectW (respRect resp) + 4) (rectH svSquare)
   -- An idle drag hands back the value it was given.
-  (s, sA) <- withKey ("s" :: Text) (useDrag1D DragAxisX 0 1 s0 svSquare)
-  (v, vA) <- withKey ("v" :: Text) (useDrag1D DragAxisY 1 0 v0 svSquare)
-  (h, hA) <- withKey ("hue" :: Text) (useDrag1D DragAxisY 0 360 h0 (barHit hueResp))
-  (a, aA) <-
+  (s, sA, sHeld) <- withKey ("s" :: Text) (useDrag1D DragAxisX 0 1 s0 svSquare)
+  (v, vA, vHeld) <- withKey ("v" :: Text) (useDrag1D DragAxisY 1 0 v0 svSquare)
+  (h, hA, hHeld) <- withKey ("hue" :: Text) (useDrag1D DragAxisY 0 360 h0 (barHit hueResp))
+  (a, aA, aHeld) <-
     withKey ("alpha" :: Text) $
       useDrag1D DragAxisY 0 255 (fromIntegral (colorA current0)) (maybe (Rect 0 0 0 0) (barHit . snd) alphaPart)
   let
@@ -491,7 +489,7 @@ colorPickerCanvas (wid, svResp) (hueWid, hueResp) alphaPart initial = do
   keyMoved <-
     pure (svFocus || hueFocus || alphaFocus)
       <&&> uiIO (applyColorPickerKeys ctx wid initial inp svFocus hueFocus)
-  let releasedDrag = heldBefore && not dragging
+  let releasedDrag = (sHeld || vHeld || hHeld || aHeld) && not dragging
   when (releasedDrag || keyMoved) $
     uiIO $ do
       st <- getStore ctx

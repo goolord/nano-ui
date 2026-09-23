@@ -12,10 +12,7 @@ module NanoUI.Internal.Store
   , fieldPoint
   , fieldText
   , fieldIntSet
-  , fieldFloatList
-  , fieldIntList
   , fieldDyn
-  , fieldQuiet
   , overField
   , lookupSlot
   , findSlot
@@ -100,19 +97,8 @@ slotChangedKeys old new =
   diffKeys (storeInt old) (storeInt new)
     ++ diffKeys (storeDouble old) (storeDouble new)
     ++ diffKeys (storeText old) (storeText new)
-    ++ diffKeys (storeFloatList old) (storeFloatList new)
-    ++ diffKeys (storeIntList old) (storeIntList new)
     ++ diffKeys (storeIntSet old) (storeIntSet new)
     ++ diffKeysBy ptrEq (storeDyn old) (storeDyn new)
-
--- | Dynamic values do not implement Eq, but we can verify equality via
--- pointer equality fast path followed by checking key structure and
--- pointer equality of each Dynamic element.
-{-# INLINE eqDynMap #-}
-eqDynMap :: IntMap Dynamic -> IntMap Dynamic -> Bool
-eqDynMap a b =
-  ptrEq a b
-    || (IM.size a == IM.size b && IM.isSubmapOfBy ptrEq a b)
 
 -- | Widget state for every widget, in maps by value type. Same-type fields
 -- that share a widget key use 'slotKey'.
@@ -125,29 +111,12 @@ data WidgetStore = WidgetStore
   , storePoint :: !(IntMap (Float, Float))
   , storeText :: !(IntMap Text)
   , storeIntSet :: !(IntMap IntSet)
-  , storeFloatList :: !(IntMap [Float])
-  , storeIntList :: !(IntMap [Int])
   , storeDyn :: !(IntMap Dynamic)
   , storeQuiet :: !(IntMap Int)
   -- ^ Interaction bookkeeping no paint reads, such as whether a drag hook's
   -- press is still held. Writes to it neither damage nor wake the loop: the
   -- visible effects of the interaction go through the widget's own slots.
   }
-
-instance Eq WidgetStore where
-  a == b =
-    storeMirrorGen a == storeMirrorGen b
-      && storeOpenSelect a == storeOpenSelect b
-      && eqByPtr (storeInt a) (storeInt b)
-      && eqByPtr (storeFloat a) (storeFloat b)
-      && eqByPtr (storeDouble a) (storeDouble b)
-      && eqByPtr (storePoint a) (storePoint b)
-      && eqByPtr (storeText a) (storeText b)
-      && eqByPtr (storeIntSet a) (storeIntSet b)
-      && eqByPtr (storeFloatList a) (storeFloatList b)
-      && eqByPtr (storeIntList a) (storeIntList b)
-      && eqDynMap (storeDyn a) (storeDyn b)
-      && eqByPtr (storeQuiet a) (storeQuiet b)
 
 -- | One of the store's maps: how to read it, and how to put a new one back.
 -- The slot functions inline at the field they are given, so
@@ -178,14 +147,6 @@ fieldText = Field storeText (\m st -> st {storeText = m})
 -- | Integer-set slots, such as expanded tree-node indices.
 fieldIntSet :: Field IntSet
 fieldIntSet = Field storeIntSet (\m st -> st {storeIntSet = m})
-
--- | Ordered float-list slots.
-fieldFloatList :: Field [Float]
-fieldFloatList = Field storeFloatList (\m st -> st {storeFloatList = m})
-
--- | Ordered integer-list slots.
-fieldIntList :: Field [Int]
-fieldIntList = Field storeIntList (\m st -> st {storeIntList = m})
 
 -- | Runtime-typed slots. Prefer 'lookupDyn' and 'insertDyn' for typed access.
 fieldDyn :: Field Dynamic
@@ -295,8 +256,6 @@ emptyWidgetStore =
     , storePoint = IM.empty
     , storeText = IM.empty
     , storeIntSet = IM.empty
-    , storeFloatList = IM.empty
-    , storeIntList = IM.empty
     , storeDyn = IM.empty
     , storeQuiet = IM.empty
     }

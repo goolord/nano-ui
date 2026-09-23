@@ -6,13 +6,13 @@ import Data.Text qualified as T
 import NanoUI.Internal.Context (intKey)
 import NanoUI.Internal.Frame.TextArea
   ( TextAreaHit (..)
-  , TextAreaScrollBarLayouts (..)
   , resolveTextAreaFont
   , textAreaContentMetrics
   , textAreaBarLane
+  , textAreaBarLayouts
+  , textAreaBars
   , textAreaLineHeight
   , textAreaHitForWidget
-  , textAreaScrollBarLayouts
   )
 import NanoUI.Internal.Store
   ( Slot (..)
@@ -633,8 +633,8 @@ textAreaThumbDragTest horizontal ctx failed = do
     assertEq failed off0 0
     let
       bar
-        | horizontal = tasbHorizontal (textAreaScrollBarLayouts fm field (lineWidth fm txt) 0 off0 0)
-        | otherwise = tasbVertical (textAreaScrollBarLayouts fm field 0 (40 * textAreaLineHeight fm) 0 off0)
+        | horizontal = snd (textAreaBarLayouts field (textAreaBars fm field (lineWidth fm txt) 0) off0 0)
+        | otherwise = fst (textAreaBarLayouts field (textAreaBars fm field 0 (40 * textAreaLineHeight fm)) 0 off0)
     assertJust failed bar $ \layout -> do
       let
         V2 cx cy = spanCenter (sbThumb layout)
@@ -687,7 +687,7 @@ runTextAreaCursorOnScrollBarTest ctx failed = do
       assertEq failed textKind UiCursorText
 
       -- Hover over scrollbar thumb -> UiCursorGrab
-      assertJust failed (tasbVertical (textAreaScrollBarLayouts fm field 0 contentH 0 0)) $ \layout -> do
+      assertJust failed (fst (textAreaBarLayouts field (textAreaBars fm field 0 contentH) 0 0)) $ \layout -> do
         let
           thumb = sbThumb layout
           thumbCenter = spanCenter thumb
@@ -748,7 +748,7 @@ runTextAreaHScrollWheelTest ctx failed = do
     V2 offX3 _ <- getScrollOffset2D ctx (respId resp)
     assertEq failed offX3 0
     -- The horizontal thumb shows the grab cursors.
-    assertJust failed (tasbHorizontal (textAreaScrollBarLayouts fm field (lineWidth fm longLine) 0 0 0)) $ \layout -> do
+    assertJust failed (snd (textAreaBarLayouts field (textAreaBars fm field (lineWidth fm longLine) 0) 0 0)) $ \layout -> do
       let
         thumb = sbThumb layout
         thumbHover = inp0 {inputMousePos = spanCenter thumb}
@@ -780,8 +780,8 @@ runTextArea2DScrollTest ctx failed = do
       contentW = maximum (0 : [lineWidth fm l | l <- lines2D])
       barLaneW = textAreaBarLane
       barLaneH = textAreaBarLane
-      layouts = textAreaScrollBarLayouts fm field contentW contentH 0 0
-    assertJust failed ((,) <$> tasbVertical layouts <*> tasbHorizontal layouts) $ \(vLayout, hLayout) -> do
+      (mV, mH) = textAreaBarLayouts field (textAreaBars fm field contentW contentH) 0 0
+    assertJust failed ((,) <$> mV <*> mH) $ \(vLayout, hLayout) -> do
         let
           vTrack = sbTrack vLayout
           hTrack = sbTrack hLayout

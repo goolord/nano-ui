@@ -9,6 +9,7 @@ module NanoUI.Internal.Frame.Node
   , ScrollNode (..)
   , readScrollNode
   , scrollNodeViewport
+  , scrollNodeBars
   ) where
 
 import Data.Text (Text)
@@ -16,14 +17,18 @@ import NanoUI.Internal.Context (Context (..))
 import NanoUI.Internal.Draw.Types (TextFont (..))
 import NanoUI.Internal.Font (FontMetrics, ScrollBarSlot, isDefaultNodeFont, measureTextIO)
 import NanoUI.Internal.Frame.Scroll.Geometry
-  ( ScrollConfig
+  ( ScrollBarLayout
+  , ScrollConfig
   , decodeScrollConfig
+  , scrollBarLayout
+  , scrollBarLayouts2D
+  , scrollChromeSuppressed
   , scrollConfigNative2D
   , scrollContentClip
   , scrollViewportClip2D
   )
 import NanoUI.Internal.Layout.Arena
-  ( DirTag
+  ( DirTag (..)
   , NodeArena
   , NodeIdx
   , NodeType (..)
@@ -128,3 +133,18 @@ scrollNodeViewport :: ScrollNode -> Float -> Float -> Float -> Float -> Rect
 scrollNodeViewport (ScrollNode slot cfg native2D dir pad contentMain contentW) x y w h
   | native2D = scrollViewportClip2D slot cfg x y w h pad contentW contentMain
   | otherwise = scrollContentClip slot cfg dir x y w h pad contentMain
+
+-- | The vertical and the horizontal bar a scroll node placed at @x y w h@
+-- shows at offsets @offX offY@ (a 1D scroller's offset is @offY@, whichever
+-- way it runs). An axis whose chrome is suppressed shows none.
+scrollNodeBars ::
+  ScrollNode -> Float -> Float -> Float -> Float -> Float -> Float -> (Maybe ScrollBarLayout, Maybe ScrollBarLayout)
+scrollNodeBars (ScrollNode slot cfg native2D dir pad contentMain contentW) x y w h offX offY
+  | native2D =
+      let (mV, mH) = scrollBarLayouts2D slot cfg x y w h pad contentW contentMain offX offY
+       in (shown DirColumn mV, shown DirRow mH)
+  | dir == DirColumn = (shown dir bar, Nothing)
+  | otherwise = (Nothing, shown dir bar)
+  where
+    bar = scrollBarLayout slot dir x y w h pad contentMain offY
+    shown d l = if scrollChromeSuppressed cfg d then Nothing else l

@@ -289,6 +289,12 @@ defaultCustomWidgetSpec = CustomWidgetSpec
   , widgetInteract   = \resp _ _ -> (resp, ())
   }
 
+-- | The default spec at a fixed @w@ by @h@, the caller's layout modifier
+-- applied, as the reference widgets below are built.
+fixedSizeSpec :: (Layout -> Layout) -> Float -> Float -> CustomWidgetSpec ()
+fixedSizeSpec f w h =
+  defaultCustomWidgetSpec {widgetLayout = fixedWH w h (f defaultLayout), widgetMeasure = Just $ \_ _ -> (w, h)}
+
 -- | A 'widgetContent' key for a drawing whose output follows these numbers.
 -- Pass every value the drawing reads; @0@ means "no key", so a hash that lands
 -- there becomes 1.
@@ -449,19 +455,15 @@ knobWith' ::
 knobWith' f diameter minV maxV value = do
   wid <- nextId
   ctx <- askContext
-  let
-    key = intKey wid
-  current <- uiIO $ adoptSlot fieldFloat ctx wid key value
+  current <- uiIO $ adoptSlot fieldFloat ctx wid value
   let
     range = maxV - minV
     frac = if range > 0 then clamp01 ((current - minV) / range) else 0
   (resp, ()) <-
     customWidgetWithId
       wid
-      defaultCustomWidgetSpec
-        { widgetLayout = fixedWH diameter diameter (f defaultLayout)
-        , widgetMeasure = Just $ \_ _ -> (diameter, diameter)
-        , widgetCursor = Just (\_ -> UiCursorNsResize)
+      (fixedSizeSpec f diameter diameter)
+        { widgetCursor = Just (\_ -> UiCursorNsResize)
         , widgetFocusable = True
         , widgetContent = contentKey [frac]
         , widgetDraw = \cdc (Rect x y w h) -> runCanvas $ do
@@ -489,7 +491,7 @@ knobWith' f diameter minV maxV value = do
     finalVal
       | range > 0 && deltaNorm /= 0 = clamp minV maxV (current + deltaNorm * range)
       | otherwise = current
-  finishInput fieldFloat ctx wid key current resp finalVal
+  finishInput fieldFloat ctx wid current resp finalVal
 
 -- | On/off switch. Pass the current state; the result is the state after
 -- this frame's click or Space/Enter.
@@ -513,19 +515,15 @@ toggleSwitchWith' ::
 toggleSwitchWith' f on = do
   wid <- nextId
   ctx <- askContext
-  let
-    key = intKey wid
-  current <- intBool <$> uiIO (adoptSlot fieldInt ctx wid key (boolInt on))
+  current <- intBool <$> uiIO (adoptSlot fieldInt ctx wid (boolInt on))
   let
     pillW = 44.0
     pillH = 24.0
   (resp, ()) <-
     customWidgetWithId
       wid
-      defaultCustomWidgetSpec
-        { widgetLayout = fixedWH pillW pillH (f defaultLayout)
-        , widgetMeasure = Just $ \_ _ -> (pillW, pillH)
-        , widgetCursor = Just (\_ -> UiCursorPointer)
+      (fixedSizeSpec f pillW pillH)
+        { widgetCursor = Just (\_ -> UiCursorPointer)
         , widgetFocusable = True
         , widgetContent = contentKey [if current then 1 else 0]
         , widgetDraw = \cdc rect@(Rect x y w h) -> runCanvas $ do
@@ -557,10 +555,8 @@ circularProgressWith f diameter frac = void (circularProgressWith' f diameter fr
 -- | 'circularProgressWith' returning its response.
 circularProgressWith' :: Ui :> es => (Layout -> Layout) -> Float -> Float -> Eff es Response
 circularProgressWith' f diameter frac =
-  fst <$> customWidget defaultCustomWidgetSpec
-    { widgetLayout = fixedWH diameter diameter (f defaultLayout)
-    , widgetMeasure = Just $ \_ _ -> (diameter, diameter)
-    , widgetContent = contentKey [clamp01 frac]
+  fst <$> customWidget (fixedSizeSpec f diameter diameter)
+    { widgetContent = contentKey [clamp01 frac]
     , widgetDraw = \cdc (Rect x y w h) -> runCanvas $ do
         let centre = V2 (x + w / 2) (y + h / 2)
             r = min (w / 2) (h / 2) - 2
@@ -597,10 +593,8 @@ spinnerWith' f diameter = do
       -- frames within a step reuse the ops.
       !step = floor (t * 48 / 0.8) `mod` 48 :: Int
   resp <-
-    fst <$> customWidget defaultCustomWidgetSpec
-      { widgetLayout = fixedWH d d (f defaultLayout)
-      , widgetMeasure = Just $ \_ _ -> (d, d)
-      , widgetContent = step + 1
+    fst <$> customWidget (fixedSizeSpec f d d)
+      { widgetContent = step + 1
       , widgetDraw = \cdc (Rect x y w h) -> runCanvas $ do
           let theme = cdcTheme cdc
               thick = max 1.5 (d / 9)
@@ -679,10 +673,8 @@ sparklineWith f prefW prefH values = void (sparklineWith' f prefW prefH values)
 -- | 'sparklineWith' returning its response.
 sparklineWith' :: Ui :> es => (Layout -> Layout) -> Float -> Float -> [Float] -> Eff es Response
 sparklineWith' f prefW prefH values =
-  fst <$> customWidget defaultCustomWidgetSpec
-    { widgetLayout = fixedWH prefW prefH (f defaultLayout)
-    , widgetMeasure = Just $ \_ _ -> (prefW, prefH)
-    , widgetContent = contentKey values
+  fst <$> customWidget (fixedSizeSpec f prefW prefH)
+    { widgetContent = contentKey values
     , widgetDraw = \cdc rect@(Rect x y rw rh) -> runCanvas $ do
         let accent = themeAccent (cdcTheme cdc)
         drawRoundedRect rect 3.0 (styleBg (themePanel (cdcTheme cdc)))

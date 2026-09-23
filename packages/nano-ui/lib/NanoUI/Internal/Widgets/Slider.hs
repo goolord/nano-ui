@@ -11,11 +11,10 @@ import Data.Text (Text)
 import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context
   ( adoptSlot
-  , intKey
+  , getPrevRect
   , registerFocusable
   )
 import NanoUI.Internal.Font (sliderHitBounds)
-import NanoUI.Internal.Frame.Hit (scrollHitRect)
 import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Monad (Ui, askContext, nextId, uiIO, withKey)
 import NanoUI.Internal.Style (Layout, defaultLayout, fillW)
@@ -52,22 +51,20 @@ sliderWith' f minV maxV value = do
   wid <- nextId
   ctx <- askContext
   uiIO $ registerFocusable ctx wid
-  let
-    key = intKey wid
-  current <- uiIO $ adoptSlot fieldFloat ctx wid key value
+  current <- uiIO $ adoptSlot fieldFloat ctx wid value
   let
     range = maxV - minV
     frac = if range > 0 then (current - minV) / range else 0
   resp <- addWidget wid NodeSlider "" frac (f (fillW defaultLayout))
-  mrect <- uiIO (scrollHitRect ctx wid)
+  mrect <- uiIO (getPrevRect ctx wid)
   let
     track = maybe (Rect 0 0 0 0) (\(Rect x y w h) -> sliderHitBounds x y w h) mrect
   -- An idle drag hands back the value it was given.
-  (dragged, dragging) <-
+  (dragged, dragging, _) <-
     withKey ("drag" :: Text) (useDrag1D DragAxisX minV maxV current track)
   holdActiveWhile wid dragging
   nav <- useKeyNav wid
   let
     step = if range > 0 then range / 100 else 0
     finalVal = clamp minV maxV (dragged + fromIntegral (navStep nav) * step)
-  finishInput fieldFloat ctx wid key current resp finalVal
+  finishInput fieldFloat ctx wid current resp finalVal

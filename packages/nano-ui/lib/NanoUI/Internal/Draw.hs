@@ -76,7 +76,7 @@ import NanoUI.Internal.Font
   )
 import NanoUI.Internal.SIMD (pokeQuadSIMD, pokeVertexSIMD)
 import NanoUI.Internal.Style (FontStyle (..), FontWeight (..), TextDecoration (..))
-import NanoUI.Internal.Types (Color (..), Rect (..), onGrid)
+import NanoUI.Internal.Types (Color (..), Rect (..), forUpTo_, onGrid)
 
 -- | Pixel box for a 'DrawText' using host advances. diagrams text has no
 -- envelope, so plot sizing uses this instead of `fontSizeL`.
@@ -328,11 +328,8 @@ pushPreparedTextStyledQuads da fm weight fstyle deco x y txt col
 -- | Emit ops with @fm@ as the default font and @resolve@ giving the font of
 -- styled text, and whether it draws its weight and slant natively.
 emitDrawOps :: DrawArena -> FontMetrics -> (TextFont -> IO (FontMetrics, Bool)) -> SmallArray DrawOp -> IO ()
-emitDrawOps da fm resolve ops = go 0
+emitDrawOps da fm resolve ops = forUpTo_ (sizeofSmallArray ops) (emitOne . indexSmallArray ops)
   where
-    go !i
-      | i >= sizeofSmallArray ops = pure ()
-      | otherwise = emitOne (indexSmallArray ops i) >> go (i + 1)
     emitOne (FillRect r c) = pushRect da r c
     emitOne (FillRoundedRect r radius c) = pushRoundedRect da r radius c
     emitOne (FillTriangle x0 y0 x1 y1 x2 y2 c) = pushFilledTriangle da x0 y0 x1 y1 x2 y2 c

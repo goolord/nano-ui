@@ -13,12 +13,11 @@ module NanoUI.Internal.Frame.TextArea
   , textAreaBarLane
   , TextAreaBars (..)
   , textAreaBars
-  , TextAreaScrollBarLayouts (..)
-  , textAreaScrollBarLayouts
+  , textAreaBarLayouts
     -- * Content
   , resolveTextAreaFont
   , textAreaContentMetrics
-  , textAreaContentGeom
+  , textAreaScrollGeom
   , isMouseOnTextAreaScrollBarAt
   , TextAreaHit (..)
   , textAreaHitForWidget
@@ -36,6 +35,7 @@ import NanoUI.Internal.Context
   ( Context (..)
   , InteractionState (..)
   , TextInputDrag (..)
+  , clampScrollOffset
   , getStore
   , getsInteraction
   , intKey
@@ -149,17 +149,18 @@ textAreaFieldClip fm (Rect fx fy fw fh) =
 textAreaBarLane :: Float
 textAreaBarLane = fst (scrollBarGeomFor ScrollBarList) + scrollBarSideGap
 
--- | Which scrollbars a text area shows for its content extent, the text
--- viewport they leave, and the paddings that place each bar's lane.
+-- | Which scrollbars a text area shows for its content extent, the offset
+-- each axis reaches, the paddings that place each bar's lane, and the extent.
 data TextAreaBars = TextAreaBars
   { tabVertical :: !Bool
   , tabHorizontal :: !Bool
-  , tabViewW :: !Float
-  , tabViewH :: !Float
+  , tabRange :: {-# UNPACK #-} !V2
   , tabPadV :: !Padding
   , tabPadH :: !Padding
+  , tabContent :: {-# UNPACK #-} !V2
   }
 
+{-# INLINE textAreaBars #-}
 textAreaBars :: FontMetrics -> Rect -> Float -> Float -> TextAreaBars
 textAreaBars fm (Rect _ _ fw fh) contentW contentH =
   let (ix, iy) = widgetContentInset fm
@@ -169,34 +170,30 @@ textAreaBars fm (Rect _ _ fw fh) contentW contentH =
       -- Either bar's lane can push the other axis into overflow.
       hasV = contentH > (if contentW > innerW then max 0 (innerH - lane) else innerH)
       hasH = contentW > (if contentH > innerH then max 0 (innerW - lane) else innerW)
+      viewW = if hasV then max 0 (innerW - lane) else innerW
+      viewH = if hasH then max 0 (innerH - lane) else innerH
    in TextAreaBars
         { tabVertical = hasV
         , tabHorizontal = hasH
-        , tabViewW = if hasV then max 0 (innerW - lane) else innerW
-        , tabViewH = if hasH then max 0 (innerH - lane) else innerH
+        , tabRange = V2 (max 0 (contentW - viewW)) (max 0 (contentH - viewH))
         , tabPadV = Padding 0 0 iy (if hasH then iy + lane else iy)
         , tabPadH = Padding ix (if hasV then ix + lane else ix) 0 0
+        , tabContent = V2 contentW contentH
         }
 
--- | Optional vertical and horizontal bars after accounting for their shared corner.
-data TextAreaScrollBarLayouts = TextAreaScrollBarLayouts
-  { tasbVertical :: !(Maybe ScrollBarLayout)
-  , tasbHorizontal :: !(Maybe ScrollBarLayout)
-  }
-  deriving (Eq, Show)
-
--- | Compute both bars from field bounds, content width/height, and x/y offsets,
--- all in logical pixels. Absent bars have 'Nothing' layouts.
-textAreaScrollBarLayouts :: FontMetrics -> Rect -> Float -> Float -> Float -> Float -> TextAreaScrollBarLayouts
-textAreaScrollBarLayouts fm field@(Rect x y w h) contentW contentH scrollX scrollY =
-  let bars = textAreaBars fm field contentW contentH
+-- | The vertical and the horizontal bar of the text area at @field@ at
+-- offsets @scrollX scrollY@, in logical pixels; 'Nothing' for a bar it does
+-- not show.
+{-# INLINE textAreaBarLayouts #-}
+textAreaBarLayouts :: Rect -> TextAreaBars -> Float -> Float -> (Maybe ScrollBarLayout, Maybe ScrollBarLayout)
+textAreaBarLayouts (Rect x y w h) bars scrollX scrollY =
+  let V2 contentW contentH = tabContent bars
       layout shown dir pad content off
         | shown = scrollBarLayout ScrollBarList dir x y w h pad content off
         | otherwise = Nothing
-   in TextAreaScrollBarLayouts
-        { tasbVertical = layout (tabVertical bars) DirColumn (tabPadV bars) contentH scrollY
-        , tasbHorizontal = layout (tabHorizontal bars) DirRow (tabPadH bars) contentW scrollX
-        }
+   in ( layout (tabVertical bars) DirColumn (tabPadV bars) contentH scrollY
+      , layout (tabHorizontal bars) DirRow (tabPadH bars) contentW scrollX
+      )
 
 -- | Font the text-area content is laid out and painted in. Honors the node's
 -- @layoutFontSize@ (set via 'fontSize' on the editor layout) so a single text
@@ -265,31 +262,28 @@ textAreaContentMetrics ctx idx = do
 -- content height.
 data LineWidths = LineWidths !Float !Int !(Seq Float) !Int !Float !Float
 
--- | Node font, field rect and content extent @(width, height)@ of a text area.
--- Zoom changes the node font, so scroll and hit math resolve it here rather
--- than using the base font, or the scroll range would clamp short.
-textAreaContentGeom :: Context -> NodeIdx -> IO (FontMetrics, Rect, Float, Float)
-textAreaContentGeom ctx idx = do
+-- | Field rect and scrollbars of a text area, for its node font and content
+-- extent. Zoom changes the node font, so scroll and hit math resolve it here
+-- rather than using the base font, or the scroll range would clamp short.
+textAreaScrollGeom :: Context -> NodeIdx -> IO (Rect, TextAreaBars)
+textAreaScrollGeom ctx idx = do
   fm <- resolveTextAreaFont ctx idx
-  rect <- getNodeRect (ctxNodeArena ctx) idx
+  field <- getNodeRect (ctxNodeArena ctx) idx
   (contentW, contentH) <- textAreaContentMetrics ctx idx
-  pure (fm, rect, contentW, contentH)
+  pure (field, textAreaBars fm field contentW contentH)
 
 -- | Whether @mouse@ is over a shown bar's lane or track. Uses the cached
--- content extent: this runs on every hover through the cursor query.
+-- content extent: this runs on every hover through the cursor query. Lanes
+-- and tracks stay put as the text scrolls, so any offset places them.
 isMouseOnTextAreaScrollBarAt :: Context -> NodeIdx -> V2 -> IO Bool
 isMouseOnTextAreaScrollBarAt ctx idx mouse = do
-  (fm, field@(Rect x y w h), contentW, contentH) <- textAreaContentGeom ctx idx
-  wid <- getWidgetId (ctxNodeArena ctx) idx
-  store <- getStore ctx
-  let (sx, sy) = findSlot fieldPoint (0, 0) (slotKey SlotTextAreaScroll (intKey wid)) store
-      bars = textAreaBars fm field contentW contentH
-      layouts = textAreaScrollBarLayouts fm field contentW contentH sx sy
+  (field@(Rect x y w h), bars) <- textAreaScrollGeom ctx idx
+  let (mV, mH) = textAreaBarLayouts field bars 0 0
       onBar dir pad =
         maybe False $ \layout ->
           rectContains (scrollChromeLane ScrollBarList dir x y w h pad) mouse
             || rectContains (sbTrack layout) mouse
-  pure (onBar DirColumn (tabPadV bars) (tasbVertical layouts) || onBar DirRow (tabPadH bars) (tasbHorizontal layouts))
+  pure (onBar DirColumn (tabPadV bars) mV || onBar DirRow (tabPadH bars) mH)
 
 -- | Solved text-area geometry: its node, field rect and resolved line height,
 -- in logical pixels. The node index is valid only this frame.
@@ -325,8 +319,7 @@ syncTextAreaViewport ctx idx key fm field = do
       bars = textAreaBars fm field contentW contentH
       scrollKey = slotKey SlotTextAreaScroll key
       (sx, sy) = findSlot fieldPoint (0, 0) scrollKey store
-      sx' = clamp 0 (max 0 (contentW - tabViewW bars)) sx
-      sy' = clamp 0 (max 0 (contentH - tabViewH bars)) sy
+      V2 sx' sy' = clampScrollOffset (tabRange bars) (V2 sx sy)
       viewportKey = slotKey SlotTextAreaViewport key
       clampScroll
         | sx' /= sx || sy' /= sy = insertSlot fieldPoint scrollKey (sx', sy')
@@ -365,13 +358,13 @@ drawTextAreaContentWith da ctx fm idx x y w h style = do
       cursor@(TB.Cursor caretRow caretCol) = TB.getCursor buf
       contentX = clipX - scrollXf
       rowY row = contentTop + fromIntegral row * lineH - scrollYf
-      layouts = textAreaScrollBarLayouts fm field contentW contentH scrollXf scrollYf
+      (mV, mH) = textAreaBarLayouts field (textAreaBars fm field contentW contentH) scrollXf scrollYf
       textClip =
         Rect
           clipX
           contentTop
-          (if isJust (tasbVertical layouts) then max 0 (clipW - textAreaBarLane) else clipW)
-          (if isJust (tasbHorizontal layouts) then max 0 (clipH - textAreaBarLane) else clipH)
+          (if isJust mV then max 0 (clipW - textAreaBarLane) else clipW)
+          (if isJust mH then max 0 (clipH - textAreaBarLane) else clipH)
       -- Only the rows in view are read, so painting costs the same however
       -- long the document is.
       rowAt py = floor ((py - contentTop + scrollYf) / max 1 lineH) :: Int
@@ -398,7 +391,7 @@ drawTextAreaContentWith da ctx fm idx x y w h style = do
   let base = themePanel theme
   mapM_
     (paintScrollBarLayout da (scrollBarTrackColor base theme) (scrollBarThumbColor base theme))
-    (catMaybes [tasbVertical layouts, tasbHorizontal layouts])
+    (catMaybes [mV, mH])
 
 -- | Mouse selection in text area @wid@ at @idx@ ('selectWithMouse'). Presses
 -- on its scrollbars are left to the scroller.

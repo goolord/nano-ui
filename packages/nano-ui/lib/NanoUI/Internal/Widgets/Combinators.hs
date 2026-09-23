@@ -78,15 +78,14 @@ finishInput ::
   Field a
   -> Context
   -> WidgetId
-  -> Int
   -> a
   -> Response
   -> a
   -> Eff es (Response, a)
-finishInput field ctx wid key original resp value = do
+finishInput field ctx wid original resp value = do
   uiIO $ do
-    writeSlot field ctx wid key value
-    recordSlot field ctx key value
+    writeSlot field ctx wid (intKey wid) value
+    recordSlot field ctx (intKey wid) value
   pure (setChanged (value /= original) resp, value)
 
 -- | Run an index-based picker over every value of a bounded enum. Indices

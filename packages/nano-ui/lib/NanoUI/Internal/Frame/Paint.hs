@@ -23,7 +23,7 @@ module NanoUI.Internal.Frame.Paint
 
 import Control.Monad (forM_, unless, when)
 import Data.Bits ((.&.))
-import Data.Maybe (catMaybes, fromMaybe, isJust)
+import Data.Maybe (fromMaybe, isJust)
 import Data.Primitive.PrimArray
   ( PrimArray
   , emptyPrimArray
@@ -46,7 +46,6 @@ import NanoUI.Internal.Context
   , atlasTextureId
   , cachedCustomDrawingOps
   , cachedDrawingOps
-  , getScrollOffset
   , getScrollOffset2D
   , lookupCustomDrawing
   , lookupDrawing
@@ -76,21 +75,13 @@ import NanoUI.Internal.Frame.Chrome
   , paintScrollBarLayout
   , paintStyledRect
   )
-import NanoUI.Internal.Frame.Node (ScrollNode (..), nodeFontNative, readScrollNode, resolveTextFont, scrollNodeViewport)
+import NanoUI.Internal.Frame.Node (ScrollNode (..), nodeFontNative, readScrollNode, resolveTextFont, scrollNodeBars, scrollNodeViewport)
 import NanoUI.Internal.Frame.Paint.Widgets (PaintEnv (..), buildPaintEnv, paintTextAreaNode, paintTextInputNode, paintWidget)
-import NanoUI.Internal.Frame.Scroll.Geometry
-  ( borderContentClip
-  , padContentClip
-  , scrollBare
-  , scrollBarLayout
-  , scrollBarLayouts2D
-  , scrollChromeActive
-  )
+import NanoUI.Internal.Frame.Scroll.Geometry (borderContentClip, scrollBare)
 import NanoUI.Internal.Frame.Spans (textNodeSpanEntry)
 import NanoUI.Internal.Id (hashWidgetId)
 import NanoUI.Internal.Layout.Arena
   ( AxisSizing (..)
-  , DirTag (..)
   , NodeClass (FloatingNodes)
   , NodeIdx
   , NodeType (..)
@@ -320,41 +311,26 @@ paintScrollContainerNode env idx rect@(Rect x y w h) = do
   withClip da (scrollNodeViewport sn x y w h) $ walkChildrenWithOccluders env idx
   paintScrollChrome env idx sn rect
 
--- | Scrollbars of a scroll container whose chrome is active, drawn one layer
--- above the content so they stay on top of it.
+-- | A scroll container's scrollbars, drawn one layer above the content so
+-- they stay on top of it.
 paintScrollChrome :: PaintEnv -> NodeIdx -> ScrollNode -> Rect -> IO ()
-paintScrollChrome env idx (ScrollNode slot cfg native2D dir pad contentMain contentW) (Rect x y w h) = do
-  let ctx = peContext env
-      da = peDrawArena env
+paintScrollChrome env idx sn (Rect x y w h) = do
+  let da = peDrawArena env
       theme = peTheme env
-      Rect _ _ innerW innerH = padContentClip x y w h pad
   wid <- getWidgetId (peNodeArena env) idx
-  bars <-
-    if native2D
-      then
-        if scrollChromeActive cfg DirColumn contentMain innerH || scrollChromeActive cfg DirRow contentW innerW
-          then do
-            V2 offX offY <- getScrollOffset2D ctx wid
-            let (mV, mH) = scrollBarLayouts2D slot cfg x y w h pad contentW contentMain offX offY
-            pure (catMaybes [mV, mH])
-          else pure []
-      else do
-        let innerMain = case dir of
-              DirColumn -> innerH
-              DirRow -> innerW
-        if scrollChromeActive cfg dir contentMain innerMain
-          then do
-            off <- getScrollOffset ctx wid
-            pure (catMaybes [scrollBarLayout slot dir x y w h pad contentMain off])
-          else pure []
-  unless (null bars) $ do
-    layer <- currentLayer da
-    beginLayer da (if layer == LayerOverlay then LayerChrome else LayerContent)
-    let base = case slot of
-          ScrollBarWindow -> themeFloatingWindow theme
-          _ -> themeInput theme
-    mapM_ (paintScrollBarLayout da (scrollBarTrackColor base theme) (scrollBarThumbColor base theme)) bars
-    beginLayer da layer
+  V2 offX offY <- getScrollOffset2D (peContext env) wid
+  case scrollNodeBars sn x y w h offX offY of
+    (Nothing, Nothing) -> pure ()
+    (mV, mH) -> do
+      layer <- currentLayer da
+      beginLayer da (if layer == LayerOverlay then LayerChrome else LayerContent)
+      let base = case snSlot sn of
+            ScrollBarWindow -> themeFloatingWindow theme
+            _ -> themeInput theme
+          paint = paintScrollBarLayout da (scrollBarTrackColor base theme) (scrollBarThumbColor base theme)
+      mapM_ paint mV
+      mapM_ paint mH
+      beginLayer da layer
 
 -- | A text node's lines, drawn with the metrics its span cache entry prepared
 -- for each line when it was laid out.

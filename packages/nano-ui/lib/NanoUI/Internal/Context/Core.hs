@@ -38,7 +38,6 @@ module NanoUI.Internal.Context.Core
   , writeSlot
   , adoptSlot
   , recordSlot
-  , getStoreBool
   , writeStoreBool
   , isDisabled
   -- Theme scopes
@@ -85,7 +84,6 @@ import NanoUI.Internal.Store
   , fieldInt
   , findSlot
   , insertSlot
-  , intBool
   , lookupSlot
   , slotKey
   )
@@ -350,12 +348,13 @@ writeStoreBool ctx owner v = writeSlot fieldInt ctx owner (intKey owner) (boolIn
 -- the widget last returned ('recordSlot'). An edit applied between frames,
 -- such as a menu cut, then survives a caller that passes the previous result
 -- back, while a value changed by the application still wins. Returns the
--- slot's value after adopting.
+-- value of the owner's slot after adopting.
 {-# INLINE adoptSlot #-}
-adoptSlot :: Eq a => Field a -> Context -> WidgetId -> Int -> a -> IO a
-adoptSlot field ctx owner k v = do
+adoptSlot :: Eq a => Field a -> Context -> WidgetId -> a -> IO a
+adoptSlot field ctx owner v = do
   st <- readIORef (ctxStore ctx)
-  let seenK = slotKey SlotSeen k
+  let k = intKey owner
+      seenK = slotKey SlotSeen k
   if lookupSlot field seenK st == Just v
     then pure $! findSlot field v k st
     else do
@@ -373,12 +372,6 @@ recordSlot field ctx k v = do
   let seenK = slotKey SlotSeen k
   when (lookupSlot field seenK st /= Just v) $
     writeIORef (ctxStore ctx) $! insertSlot field seenK v st
-
--- | Read the boolean at a widget's base integer key, using the supplied default.
-{-# INLINE getStoreBool #-}
-getStoreBool :: Context -> WidgetId -> Bool -> IO Bool
-getStoreBool ctx wid def =
-  intBool . findSlot fieldInt (boolInt def) (intKey wid) <$> getStore ctx
 
 -- | Whether @wid@ was declared inside a disabled scope. A widget asks before
 -- its node exists, while the scope it is declared in is still the arena's.

@@ -10,7 +10,7 @@ module NanoUI.Internal.Frame.Window
   , windowResizeCursorKind
   ) where
 
-import Control.Monad (guard, when)
+import Control.Monad (guard, unless, when)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Maybe (MaybeT (..))
 import Data.IORef (modifyIORef', newIORef, readIORef)
@@ -66,7 +66,7 @@ import NanoUI.Internal.Layout.Arena
   )
 import NanoUI.Internal.Layout.Solve (Measurers (..), placeWindowNode, windowBodyScroller)
 import NanoUI.Internal.Monad ((<&&>))
-import NanoUI.Internal.Store (fieldPoint, insertSlot, lookupSlot)
+import NanoUI.Internal.Store (fieldPoint, insertSlot, lookupSlot, ptrEq)
 import NanoUI.Internal.Style (Padding (..))
 import NanoUI.Internal.Types (DamageBounds (..), Rect (..), V2 (..), clamp, haloDamageSlop, rectContains, rectInflate, rectNonEmpty)
 
@@ -91,14 +91,14 @@ persistWindowPositions ctx = floatingNodeCount na >>= \floating -> when (floatin
             (x, y, w, h) <- getRect na idx
             let k = intKey wid
                 sizeKey = slotKey SlotWinSize k
-            -- Keep an unchanged map as is, so the store comparison below
-            -- short-circuits on pointer equality.
+            -- Keep an unchanged store as is: the write below is skipped
+            -- when it is the same object.
             pure $
               if lookupSlot fieldPoint k acc == Just (x, y) && lookupSlot fieldPoint sizeKey acc == Just (w, h)
                 then acc
                 else insertSlot fieldPoint k (x, y) (insertSlot fieldPoint sizeKey (w, h) acc)
   store1 <- foldClassNodesM na FloatingNodes record store0
-  when (store1 /= store0) $ setStore ctx store1
+  unless (ptrEq store1 store0) $ setStore ctx store1
  where
   na = ctxNodeArena ctx
 

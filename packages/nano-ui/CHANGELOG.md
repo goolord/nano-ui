@@ -446,6 +446,12 @@
 
 ### Fixed
 
+- Grow children of a column with a gap share the height left after the gaps,
+  as a row's do. They shared the whole height, so the column's children ran
+  past its bottom by the gaps between them.
+- The text spans of an open select dropdown give the picked row the accent
+  colour it is painted in. A host that draws text from the spans drew it in
+  the menu's text colour.
 - A settled `animateTo` value holds its target. Settled values were dropped
   once their key had gone 300 frames without a widget rect, and an
   `animateTo` key never has one, so about 300 frames after settling the value

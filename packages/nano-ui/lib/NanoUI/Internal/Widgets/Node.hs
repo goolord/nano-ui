@@ -36,6 +36,7 @@ import Data.Text (Text)
 import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context
   ( Context (..)
+  , getPrevRect
   , isDisabled
   , intKey
   , routedInput
@@ -68,7 +69,7 @@ import NanoUI.Internal.Monad (Ui, (<&&>), askContext, askFrameInput, askInput, l
 import NanoUI.Internal.WidgetText (packTextNodeStyle)
 import NanoUI.Internal.Style (Layout (..))
 import NanoUI.Internal.Types (Rect (..), rectContains, rectH, rectHit, rectUnion, rectW)
-import NanoUI.Internal.Frame.Hit (findNodeByWidgetId, nodeInteractionHit, scrollHitRect)
+import NanoUI.Internal.Frame.Hit (findNodeByWidgetId, nodeInteractionHit)
 
 -- | The innermost open container, or @-1@ at the root.
 currentParent :: Context -> IO Int
@@ -317,7 +318,7 @@ addWidgetWithOptions wid nt txt opts value layout =
 
 resolveInteraction :: Context -> Input -> WidgetId -> IO Response
 resolveInteraction ctx inp wid = do
-  mrect <- scrollHitRect ctx wid
+  mrect <- getPrevRect ctx wid
   active <- readIORef (ctxActiveId ctx)
   pending <- readIORef (ctxClickedId ctx)
   let

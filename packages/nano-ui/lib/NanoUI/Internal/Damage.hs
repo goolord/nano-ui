@@ -297,7 +297,10 @@ writeDamage ctx inp snap = do
           , fdPointsChanged = not (eqByPtr (storePoint oldStore) (storePoint newStore))
           , fdScrollOnly =
               scrollChanged
-                && oldStore == newStore {storeFloat = storeFloat oldStore, storeQuiet = storeQuiet oldStore}
+                && eqByPtr (storePoint oldStore) (storePoint newStore)
+                && storeMirrorGen oldStore == storeMirrorGen newStore
+                && storeOpenSelect oldStore == storeOpenSelect newStore
+                && null (slotChangedKeys oldStore newStore)
           , fdSettledMoved = settledMoved
           , fdChurn = churn
           , fdRedrawn = redrawn

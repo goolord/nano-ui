@@ -1,8 +1,6 @@
 -- | Per-widget animations: starting, ticking, settling and reading values.
 module NanoUI.Internal.Context.Animation
-  ( getsAnimation
-  , modifyAnimation
-  , anyAnimating
+  ( anyAnimating
   , getLiveAnimations
   , takeAnimSettled
   , lookupAnimation
@@ -43,11 +41,6 @@ import NanoUI.Internal.Types (DamageBounds (..), Rect, defaultDamageSlop, rectNo
 {-# INLINE getsAnimation #-}
 getsAnimation :: Context -> (AnimationState -> a) -> IO a
 getsAnimation ctx f = f <$> readIORef (ctxAnimationState ctx)
-
--- | Strictly update animation state. Does not request a frame or damage.
-{-# INLINE modifyAnimation #-}
-modifyAnimation :: Context -> (AnimationState -> AnimationState) -> IO ()
-modifyAnimation ctx = modifyIORef' (ctxAnimationState ctx)
 
 -- | Whether the frame loop has to keep drawing: an animation is running, or a
 -- scroller is still gliding onto its target.

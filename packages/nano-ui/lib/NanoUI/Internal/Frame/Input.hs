@@ -39,6 +39,7 @@ import NanoUI.Internal.Context
   , anySelectOpen
   , damageWidget
   , getFocusables
+  , getPrevRect
   , getStore
   , getsInteraction
   , intBool
@@ -63,7 +64,6 @@ import NanoUI.Internal.Frame.Hit
   , nodePointVisible
   , overlayHitAllowed
   , overlayHitRoot
-  , scrollHitRect
   , topmostFloating
   , widgetIdInSubtree
   , withWidgetNode
@@ -318,7 +318,7 @@ postsLayoutClick nt =
 inUiClickHit :: Context -> WidgetId -> V2 -> IO Bool
 inUiClickHit ctx wid mouse = do
   disabled <- isDisabled ctx wid
-  mrect <- scrollHitRect ctx wid
+  mrect <- getPrevRect ctx wid
   case mrect of
     Just r | not disabled ->
       -- The view saw the release only if the frame routed the pointer to

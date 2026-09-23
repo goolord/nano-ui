@@ -13,7 +13,23 @@ tests =
   , spec "stale-font-color" runStaleFontColorTest
   , pixelSpec "font-composition" runFontCompositionTest
   , pixelSpec "align-baseline" runAlignBaselineTest
+  , spec "column-gap-grow" runColumnGapGrowTest
   ]
+
+-- | Grow children of a column with a gap share the height left after the
+-- gaps, as they do in a row, rather than overflowing the column by them.
+runColumnGapGrowTest :: Context -> IORef Int -> IO ()
+runColumnGapGrowTest ctx failed = do
+  let red = colorRGBA 255 0 0 255
+      ui = columnWith (gap 10 . fixedH 200 . fixedW 100) (replicateM_ 3 (box fillH red))
+  _ <- runFrame ctx (withInput 800 400) ui
+  rs <- arenaRects ctx
+  case rs of
+    [Rect _ colY _ colH, a, b, c] -> do
+      assertEq failed (rectY b) (rectY a + rectH a + 10)
+      assertEq failed (rectY c) (rectY b + rectH b + 10)
+      assert failed (rectY c + rectH c <= colY + colH)
+    _ -> assertEq failed (length rs) 4
 
 spanOf :: T.Text -> [(Rect, T.Text, Color, Color, Rect)] -> Maybe (Rect, Color)
 spanOf txt spans =
