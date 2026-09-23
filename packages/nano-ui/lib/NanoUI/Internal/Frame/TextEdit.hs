@@ -37,8 +37,7 @@ import NanoUI.Internal.Context
   )
 import NanoUI.Internal.Draw (pushRect, pushText)
 import NanoUI.Internal.Font
-  ( FontMetrics
-  , centeredTextY
+  ( centeredTextY
   , menuItemPadX
   , menuItemRowH
   , menuMinW
@@ -156,15 +155,17 @@ textEditMenuPick :: Rect -> V2 -> Maybe TextCommand
 textEditMenuPick menuRect mouse =
   listToMaybe [cmd | (band, Just (cmd, _)) <- textEditMenuLayout menuRect, rectContains band mouse]
 
--- | Where the menu's labels start.
-textEditMenuLabelX :: FontMetrics -> Rect -> Float
-textEditMenuLabelX fm (Rect mx _ _ _) = mx + menuOuterPad + menuItemPadX + fst (widgetContentInset fm)
-
-textEditMenuItemFg :: Style -> Bool -> Color
-textEditMenuItemFg style enabled =
-  if enabled
-    then styleFg style
-    else lerpColor (styleFg style) (styleBg style) 0.55
+-- | A command row's label rect, whether the pointer is on it while the
+-- command can run, and its text colour, dimmed while it cannot. Shared by the
+-- painter and the spans.
+textEditMenuRow :: Context -> Input -> WidgetId -> Rect -> Style -> Rect -> TextCommand -> T.Text -> IO (Rect, Bool, Color)
+textEditMenuRow ctx inp wid (Rect mx _ _ _) style row@(Rect _ ry _ rh) cmd lbl = do
+  enabled <- textFieldMenuEnabled ctx wid cmd
+  (tw, th) <- ctxMeasureText ctx lbl
+  let fm = ctxFontMetrics ctx
+      labelX = mx + menuOuterPad + menuItemPadX + fst (widgetContentInset fm)
+      fg = if enabled then styleFg style else lerpColor (styleFg style) (styleBg style) 0.55
+  pure (Rect labelX (centeredTextY fm ry rh th) tw th, enabled && rectContains row (inputMousePos inp), fg)
 
 -- | Open the menu at the pointer, kept inside the window, over the text field
 -- a right press lands on, and focus that field.
@@ -268,28 +269,21 @@ drawTextEditMenuOverlays ctx inp = withTextEditMenu ctx () $ \wid menuRect theme
   forM_ (textEditMenuLayout menuRect) $ \case
     (Rect rx ry rw rh, Nothing) ->
       pushRect da (Rect (rx + menuItemPadX) (ry + rh / 2) (rw - 2 * menuItemPadX) 1) (themeSeparator theme)
-    (row@(Rect _ ry _ rh), Just (cmd, lbl)) -> do
-      enabled <- textFieldMenuEnabled ctx wid cmd
-      when (enabled && rectContains row (inputMousePos inp)) $ do
+    (row, Just (cmd, lbl)) -> do
+      (Rect tx ty _ _, hovered, fg) <- textEditMenuRow ctx inp wid menuRect style row cmd lbl
+      when hovered $ do
         pushRect da row (styleHoverBg style)
         paintMenuAccent da theme row
-      (_, th) <- ctxMeasureText ctx lbl
-      pushText da fm (textEditMenuLabelX fm menuRect) (centeredTextY fm ry rh th) lbl (textEditMenuItemFg style enabled)
+      pushText da fm tx ty lbl fg
 
 collectTextEditMenuSpans :: Context -> Input -> IO [(Rect, T.Text, Color, Color, Rect)]
 collectTextEditMenuSpans ctx inp = withTextEditMenu ctx [] $ \wid menuRect theme -> do
-  let fm = ctxFontMetrics ctx
-      style = overlayMenuStyle theme
+  let style = overlayMenuStyle theme
   sequence
     [ do
-        enabled <- textFieldMenuEnabled ctx wid cmd
-        (tw, th) <- ctxMeasureText ctx lbl
-        let bg
-              | enabled && rectContains row (inputMousePos inp) = styleHoverBg style
-              | otherwise = styleBg style
-            labelRect = Rect (textEditMenuLabelX fm menuRect) (centeredTextY fm ry rh th) tw th
-        pure (labelRect, lbl, textEditMenuItemFg style enabled, bg, menuRect)
-    | (row@(Rect _ ry _ rh), Just (cmd, lbl)) <- textEditMenuLayout menuRect
+        (rect, hovered, fg) <- textEditMenuRow ctx inp wid menuRect style row cmd lbl
+        pure (rect, lbl, fg, if hovered then styleHoverBg style else styleBg style, menuRect)
+    | (row, Just (cmd, lbl)) <- textEditMenuLayout menuRect
     ]
 
 -- | Whether @cmd@ can run on field @wid@ now.
