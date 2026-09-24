@@ -101,16 +101,26 @@ updatePrevRects ctx@Context {ctxNodeArena = na} = do
                         go olds (i + 1) m' cm' tm' (foundOld + if isOld then 1 else 0) dropped
       go oldRects 0 oldRects oldClips oldTexts 0 False
 
+-- | Floating panels in the order the frame paints them, bottom first: every
+-- window, then every modal, then every popup, each kind in arena order. The
+-- pointer's layer is the last of these that holds it.
 floatingPanelsInOrder :: Context -> IO [(Int, Rect)]
-floatingPanelsInOrder Context {ctxNodeArena = na} = foldClassNodeRevM na FloatingNodes step []
+floatingPanelsInOrder Context {ctxNodeArena = na} = do
+  tagged <- foldClassNodeRevM na FloatingNodes step []
+  pure [p | r <- [0, 1, 2 :: Int], (r', p) <- tagged, r' == r]
   where
+    rank nt = case nt of
+      NodeWindow -> 0
+      NodeModal -> 1
+      _ -> 2
     step acc idx = do
       wid <- getWidgetId na idx
       if hashWidgetId wid == 0
         then pure acc
         else do
+          nt <- getNodeType na idx
           rect <- getNodeRect na idx
-          pure ((intKey wid, rect) : acc)
+          pure ((rank nt, (intKey wid, rect)) : acc)
 
 -- | Current floating-panel bounds keyed by widget id, in logical window coordinates.
 floatingPanelRects :: Context -> IO (IM.IntMap Rect)
@@ -311,12 +321,14 @@ needsFullDamage :: FrameSnapshot -> FrameDelta -> Bool
 needsFullDamage snap d =
   ReqFull `elem` fdRequests d
     || neverPainted
+    -- Even when the frame's only store change is in 'storeFloat', which also
+    -- holds slider and knob values, not just scroll offsets.
+    || fsOpaqueFollow snap
     || not (fdScrollOnly d)
-      && ( fsOpaqueFollow snap
-             -- A local hook wrote state ('bumpMirror'). Its key names no
-             -- widget, and a float hook's key is not even in the store diff,
-             -- so nothing narrower than the window is known to cover it.
-             || mirrorStoresChanged (fsStore snap) (fdStore d)
+      && ( -- A local hook wrote state ('bumpMirror'). Its key names no
+           -- widget, and a float hook's key is not even in the store diff,
+           -- so nothing narrower than the window is known to cover it.
+           mirrorStoresChanged (fsStore snap) (fdStore d)
              || sizeChanged
              || fdModalFlip d
              || fdFloatingChanged d

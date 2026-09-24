@@ -78,11 +78,14 @@ overlayHitRoot ctx mouse = do
 overlayHitAllowed :: Context -> Maybe NodeIdx -> NodeIdx -> IO Bool
 overlayHitAllowed ctx top idx = maybe (pure True) (nodeInSubtree ctx idx) top
 
--- | The window or popup on top at @mouse@: the last one in arena order whose
--- rect holds the point.
+-- | The window or popup on top at @mouse@. The frame paints every popup over
+-- every window, so a popup whose rect holds the point wins; among panels of
+-- one kind, the last in arena order.
 topmostOverlayAtMouse :: Context -> V2 -> IO (Maybe NodeIdx)
 topmostOverlayAtMouse ctx mouse =
-  topmostFloating ctx (\nt -> nt == NodeWindow || nt == NodePopup) (`rectHit` mouse)
+  runMaybeT $
+    MaybeT (topmostFloating ctx (== NodePopup) (`rectHit` mouse))
+      <|> MaybeT (topmostFloating ctx (== NodeWindow) (`rectHit` mouse))
 
 -- | The modal on top at @mouse@: the last one in arena order whose rect holds
 -- the point.
@@ -158,21 +161,21 @@ nodeClippedHit ctx@Context {ctxNodeArena = na} idx rect mouse =
 -- frame's viewport of every scroll container above node @idx@, so content
 -- scrolled out of view takes no input; a scroll container with no recorded
 -- viewport does not constrain the point. A widget drawn inside another widget
--- takes no input outside that widget's previous rect either. The node's own
--- clip rect is not read: it is not set until
--- 'NanoUI.Internal.Frame.Scroll.applyScrollOffsets' runs.
+-- takes no input outside that widget's previous rect either. The walk stops
+-- at a floating panel, which is drawn and clipped by itself: nothing it is
+-- declared in bounds it. The node's own clip rect is not read: it is not set
+-- until 'NanoUI.Internal.Frame.Scroll.applyScrollOffsets' runs.
 {-# INLINE nodeInteractionHit #-}
 nodeInteractionHit :: Context -> NodeIdx -> Rect -> V2 -> IO Bool
 nodeInteractionHit ctx@Context {ctxNodeArena = na} idx rect mouse
   | not (rectHit rect mouse) = pure False
   | idx <= 0 = pure True
-  | otherwise = getParent na idx >>= inside True
+  | otherwise = getParent na idx >>= inside
  where
   -- Whether the mouse is inside the recorded viewport of every scroll
-  -- container from node @i@ up, and, while @byWidgets@, inside the previous
-  -- rect of every widget. A floating panel escapes the widget it is declared
-  -- in (the root can be one), so widgets above one do not bound it.
-  inside byWidgets i
+  -- container, and the previous rect of every widget, from node @i@ up to
+  -- the first floating panel.
+  inside i
     | i < 0 = pure True
     | otherwise = do
         nt <- getNodeType na i
@@ -180,12 +183,13 @@ nodeInteractionHit ctx@Context {ctxNodeArena = na} idx rect mouse
           if nt == NodeScrollContainer
             then getPrevClipRect ctx =<< getWidgetId na i
             else
-              if byWidgets && isWidgetNode nt
+              if isWidgetNode nt
                 then getPrevRect ctx =<< getWidgetId na i
                 else pure Nothing
         case bounds of
           Just r | not (rectContains r mouse) -> pure False
-          _ -> getParent na i >>= inside (byWidgets && not (isFloatingNode nt))
+          _ | isFloatingNode nt -> pure True
+            | otherwise -> getParent na i >>= inside
 
 -- | The widget a pointer hit on widget @idx@ lands on: its first enabled
 -- descendant widget that @hits@, painted over it, and so on inward, skipping

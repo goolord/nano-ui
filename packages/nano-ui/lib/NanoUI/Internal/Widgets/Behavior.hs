@@ -172,11 +172,22 @@ keyActivated wid = do
 
 -- | Escape and click-outside-rect dismiss. Consumes Escape when it fires. A
 -- press anywhere else dismisses, whoever it belongs to, so this watches the
--- frame's input rather than the pointer routed here.
+-- frame's input rather than the pointer routed here. A press on an open
+-- dropdown or text-edit menu, which may lie outside the panel it belongs to,
+-- does not; nor does an Escape that closes one, or that something declared
+-- earlier (a popup inside this one) already took.
 useDismissable :: (Ui :> es) => Rect -> Eff es Bool
 useDismissable panel = do
   inp <- askFrameInput
-  let esc = inputKeysElem KeyEscape (inputKeys inp)
-      pressed = inputMousePressed inp || inputMouseRightPressed inp
-  when esc $ withContext markEscapeConsumed
-  pure (esc || (pressed && not (rectHit panel (inputMousePos inp))))
+  withContext $ \ctx -> do
+    route <- getsInteraction ctx isPointerRoute
+    menu <- getsInteraction ctx isTextInputMenu
+    dropdown <- anySelectOpen <$> getStore ctx
+    taken <- overlayConsumesQuit ctx inp
+    let onMenu = case route of
+          RouteLayer _ -> False
+          _ -> True
+        esc = inputKeysElem KeyEscape (inputKeys inp) && not taken && null menu && not dropdown
+        pressed = (inputMousePressed inp || inputMouseRightPressed inp) && not onMenu
+    when esc (markEscapeConsumed ctx)
+    pure (esc || (pressed && not (rectHit panel (inputMousePos inp))))

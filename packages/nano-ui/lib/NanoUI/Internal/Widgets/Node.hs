@@ -350,8 +350,12 @@ resolveInteraction ctx inp wid = do
         pressed = hovered && inputMouseDown inp
         rightPressed = hovered && inputMouseRightDown inp
       -- The click belongs to whatever the press went down on: a release that
-      -- drifted here from a neighbouring widget is not this widget's click.
-      released <- pure (hovered && inputMouseReleased inp) <&&> startedHere (ctxPressPos ctx)
+      -- drifted here from a neighbouring widget is not this widget's click,
+      -- nor is one on a widget that moved under the pointer after another
+      -- widget took the press. A press and release in one frame have set no
+      -- active widget yet.
+      let ownsRelease = hashWidgetId active == 0 || active == wid || inputMousePressed inp
+      released <- pure (hovered && inputMouseReleased inp && ownsRelease) <&&> startedHere (ctxPressPos ctx)
       rightClicked <-
         pure (hovered && inputMouseRightReleased inp) <&&> startedHere (ctxRightPressPos ctx)
       when (released && wid == active) $
