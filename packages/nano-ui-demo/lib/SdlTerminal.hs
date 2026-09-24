@@ -27,6 +27,7 @@ import Foreign.C.Error
 import Foreign.C.Types (CInt (..))
 import GHC.IO.Exception (IOException (..))
 import NanoUI hiding (scrollBy)
+import NanoUI.Backend (emptyInput)
 import NanoUI.Backend.Sdl
 import NanoUI.Sdl.Internal.Input (SdlEvent (..), applyEvent, pollEvents)
 import NanoUI.Testing (newPixelContext)
