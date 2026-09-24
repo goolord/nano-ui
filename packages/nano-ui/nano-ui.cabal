@@ -246,6 +246,7 @@ test-suite nano-ui-test
         Cases.Tooltip
         Cases.ViewApi
         Cases.Window
+        Cases.ShrinkDamage
     build-depends:
         bytestring,
         containers,

@@ -34,6 +34,7 @@ import Cases.PointerRelease qualified
 import Cases.PointerOwnership qualified
 import Cases.Tooltip qualified
 import Cases.CustomWidget qualified
+import Cases.ShrinkDamage qualified
 import NanoUI.Testing.Runner (runTests)
 
 main :: IO ()
@@ -73,4 +74,5 @@ main =
     , Cases.PointerOwnership.tests
     , Cases.Tooltip.tests
     , Cases.CustomWidget.tests
+    , Cases.ShrinkDamage.tests
     ]

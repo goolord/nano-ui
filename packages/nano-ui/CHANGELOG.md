@@ -651,6 +651,12 @@
   within 16 px of a corner it resizes both ways. Before, only the right
   padding and a 6 px bottom strip resized from inside. The window's controls
   and its body's scrollbar still take their own presses.
+- A widget that shrinks under the pointer repaints the strip it vacated. The
+  damage for a moved or resized widget clipped its old rect to the viewport
+  it has now, and the root's viewport is its own rect, so a hovered
+  `drawing` or button at the root, or in a column that shrank with it, left
+  its old pixels on screen. Each rect is now clipped to the viewport it was
+  drawn in.
 
 ### Removed
 

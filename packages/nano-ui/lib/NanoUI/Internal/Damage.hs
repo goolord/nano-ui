@@ -144,6 +144,11 @@ data FrameSnapshot = FrameSnapshot
   , fsFocusRect :: !(Maybe Rect)
   , fsFloatingRects :: !(IM.IntMap Rect)
   , fsRects :: !(IM.IntMap Rect)
+  , fsClips :: !(IM.IntMap Rect)
+  -- ^ Last frame's viewport clips ('getClipRect') of the keys in 'fsRects'.
+  -- A rect from last frame is clipped by the viewport it was drawn in: the
+  -- viewport a key has now can be smaller (the root shrank with it) and would
+  -- cut the pixels it vacated out of the damage.
   , fsTexts :: !(IM.IntMap Text)
   , fsAnimKeys :: !IS.IntSet
   }
@@ -168,6 +173,7 @@ captureFrameSnapshot ctx = do
       <*> getPrevRect ctx focus
       <*> getsOverlay ctx osPrevFloatingRects
       <*> getsDamage ctx dsPrevRects
+      <*> getsDamage ctx dsPrevClips
       <*> getsDamage ctx dsPrevNodeTexts
       <*> (IM.keysSet <$> getLiveAnimations ctx)
 
@@ -216,7 +222,7 @@ writeDamage ctx inp snap = do
   let oldRects = fsRects snap
       oldStore = fsStore snap
       newFloatingRects = IM.fromList panels
-  (settledMoved, churn) <- rectDeltas ctx (map snd panels) oldRects newRects
+  (settledMoved, churn) <- rectDeltas ctx (map snd panels) (fsClips snap) oldRects newRects
   let scrollChanged = not (eqByPtr (storeFloat oldStore) (storeFloat newStore))
   let delta =
         FrameDelta
@@ -384,7 +390,7 @@ clipDamage ctx snap d owners = do
         | wid == fsFocus snap = fsFocusRect snap
         | otherwise = Nothing
   acc <- newIORef []
-  let resolveKey = resolveKeyDamage ctx acc oldRects newRects
+  let resolveKey = resolveKeyDamage ctx acc (fsClips snap) oldRects newRects
       resolveSlop k = resolveKey k (DamageInflated defaultDamageSlop)
   forM_ (fdRequests d) $ \case
     ReqFull -> pure ()
@@ -407,9 +413,9 @@ clipDamage ctx snap d owners = do
         newR <- getPrevRect ctx wid
         slop <- fromMaybe defaultDamageSlop <$> lookupCustomDamageSlop ctx wid
         clip <- maybe (pure Nothing) (getClipRect (ctxNodeArena ctx)) node
-        let addSide = mapM_ (mapM_ (addRect acc) . clipKeyRect k clip . rectInflate slop)
-        addSide (oldOf wid)
-        addSide newR
+        let addSide c = mapM_ (mapM_ (addRect acc) . clipKeyRect k c . rectInflate slop)
+        addSide (IM.lookup k (fsClips snap)) (oldOf wid)
+        addSide clip newR
         addNodeBackdrop node
         where
           k = intKey wid
@@ -525,14 +531,16 @@ damagePieces rects =
               (pair, rest) = partition (\(k, _) -> k == i || k == j) indexed
            in shrink (settle (foldr1 rectUnion (map snd pair) : map snd rest))
 
--- | Damage key @k@'s old and new rects, resolved through @bounds@ and clipped
--- to the key's viewport ('keyViewportClip').
-resolveKeyDamage :: Context -> RectUnion -> IM.IntMap Rect -> IM.IntMap Rect -> Int -> DamageBounds -> IO ()
-resolveKeyDamage ctx acc oldRects newRects k bounds = do
+-- | Damage key @k@'s old and new rects, resolved through @bounds@ and each
+-- clipped to the key's viewport in its own frame: @oldClips@ for the old
+-- rect, 'keyViewportClip' for the new one.
+resolveKeyDamage ::
+  Context -> RectUnion -> IM.IntMap Rect -> IM.IntMap Rect -> IM.IntMap Rect -> Int -> DamageBounds -> IO ()
+resolveKeyDamage ctx acc oldClips oldRects newRects k bounds = do
   clip <- keyViewportClip ctx k
-  forM_ [IM.lookup k oldRects, IM.lookup k newRects] $
-    mapM_ $ \r -> do
-      let clipped = clipToViewport clip (resolveDamageRect bounds r)
+  forM_ [(IM.lookup k oldClips, IM.lookup k oldRects), (clip, IM.lookup k newRects)] $ \(c, mr) ->
+    forM_ mr $ \r -> do
+      let clipped = clipToViewport c (resolveDamageRect bounds r)
       when (rectNonEmpty clipped) $ addRect acc clipped
 
 -- | The rects damage gathers, newest first.
@@ -566,10 +574,11 @@ addGroup :: RectUnion -> RectGroup -> IO ()
 addGroup acc g = when (rgAny g) $ addRect acc (rgBounds g)
 
 -- | One pass over the keys whose rect changed, reduced to the settled moves
--- (clipped to scroll viewports, above 'layoutSettleMinArea') and the keys
--- that left or joined the arena.
-rectDeltas :: Context -> [Rect] -> IM.IntMap Rect -> IM.IntMap Rect -> IO (RectGroup, RectGroup)
-rectDeltas ctx panelRects old new
+-- (each side clipped to the scroll viewport it had in its own frame, above
+-- 'layoutSettleMinArea') and the keys that left or joined the arena.
+rectDeltas ::
+  Context -> [Rect] -> IM.IntMap Rect -> IM.IntMap Rect -> IM.IntMap Rect -> IO (RectGroup, RectGroup)
+rectDeltas ctx panelRects oldClips old new
   | ptrEq old new = pure (emptyGroup, emptyGroup)
   | otherwise = do
       settled <- newIORef []
@@ -578,7 +587,12 @@ rectDeltas ctx panelRects old new
         ( \k r rest -> do
             when (rectNonEmpty r) $ do
               when (IM.notMember k new || IM.notMember k old) $ addRect churn r
-              clipped <- (`clipToViewport` r) <$> keyViewportClip ctx k
+              newClip <- keyViewportClip ctx k
+              let side clip = maybe (Rect 0 0 0 0) (clipToViewport clip)
+                  clipped =
+                    unionNonEmpty
+                      (side (IM.lookup k oldClips) (IM.lookup k old))
+                      (side newClip (IM.lookup k new))
               when (rectArea clipped >= layoutSettleMinArea) $ addRect settled clipped
             rest
         )
@@ -587,6 +601,10 @@ rectDeltas ctx panelRects old new
       (,) <$> (group <$> readIORef settled) <*> (group <$> readIORef churn)
   where
     emptyGroup = RectGroup False False (Rect 0 0 0 0)
+    unionNonEmpty a b
+      | not (rectNonEmpty a) = b
+      | not (rectNonEmpty b) = a
+      | otherwise = rectUnion a b
     inPanels r = any (rectFullyInside r) panelRects
     group rs = RectGroup (not (null rs)) (not (null rs || null panelRects) && all inPanels rs) (rectBounds rs)
 
