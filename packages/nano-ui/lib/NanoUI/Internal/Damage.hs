@@ -62,7 +62,11 @@ updatePrevRects ctx@Context {ctxNodeArena = na} = do
       -- changed. Seeded with last frame's maps, frames with stable rects
       -- (hover, text churn, animations) allocate nothing. The walk cannot
       -- delete keys that vanished from the arena, so when the key set changed
-      -- it reruns from empty maps, where no key counts as old.
+      -- it reruns from empty maps, where no key counts as old. Of nodes that
+      -- share a key (a table's frozen and scrolling panes) only the last,
+      -- the one 'lookupNodeByKey' finds, is walked ('getIdSuperseded'):
+      -- counting each would stand in for a key that went away, and writing
+      -- each would rewrite the maps every frame.
       let go olds !i !m !cm !tm !foundOld !dropped
             | i >= count =
                 if dropped || foundOld /= IM.size olds
@@ -70,7 +74,8 @@ updatePrevRects ctx@Context {ctxNodeArena = na} = do
                   else modifyDamage ctx (\ds -> ds {dsPrevRects = m, dsPrevClips = cm, dsPrevNodeTexts = tm})
             | otherwise = do
                 wid <- getWidgetId na i
-                if hashWidgetId wid == 0
+                superseded <- if hashWidgetId wid == 0 then pure True else getIdSuperseded na i
+                if superseded
                   then go olds (i + 1) m cm tm foundOld dropped
                   else do
                     let !k = intKey wid

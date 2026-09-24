@@ -496,6 +496,10 @@
   On the headless profiler, 3000 frames of a button grid with a pointer
   moving over it and a floating window allocate 1.46 GB instead of 1.64 GB,
   or 1.38 GB instead of 1.48 GB with a modal.
+- The node index by widget id is an unboxed table of the frame's ids, so
+  indexing a widget and looking one up allocate nothing, and `nano-ui` no
+  longer depends on `hashtables`. A view with 3000 rows allocates about 3%
+  less per frame.
 
 ### Fixed
 
@@ -660,6 +664,12 @@
   screen. Each rect is now clipped to the viewport it was drawn in, and the
   root to the window, so the overflow also takes the pointer where it is
   drawn.
+- A widget that goes away next to a table with frozen columns repaints where
+  it was. The table's frozen and scrolling panes share one widget id, and the
+  pass that keeps each widget's rect from the frame before counted it twice,
+  which hid one widget that had gone. While such a table was shown, the same
+  pass also rebuilt its maps every frame. Of nodes sharing an id, it now
+  takes only the last, the one a lookup by that id finds.
 
 ### Removed
 

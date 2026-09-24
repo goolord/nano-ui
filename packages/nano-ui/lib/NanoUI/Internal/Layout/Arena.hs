@@ -83,6 +83,7 @@ module NanoUI.Internal.Layout.Arena
   , setWidgetId
   , lookupNodeByWidgetId
   , lookupNodeByKey
+  , getIdSuperseded
   , getStyleIdx
   , setStyleIdx
   , getNodeValue
@@ -127,8 +128,6 @@ module NanoUI.Internal.Layout.Arena
 import Control.Exception (bracket_)
 import Control.Monad (forM_, unless, when)
 import Data.Bits (shiftL, shiftR, xor, (.&.), (.|.))
-import Data.HashTable.IO (BasicHashTable)
-import qualified Data.HashTable.IO as HT
 import Data.Hashable (Hashable, hash)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.IntMap.Strict (IntMap)
@@ -367,9 +366,8 @@ data NodeArena = NodeArena
   , naEpoch :: IORef Word32
   -- ^ The tag that marks the live entries of 'naIndex'. 'resetNodeArena'
   -- increments it. It is never 0.
-  , naIndex :: IORef (BasicHashTable WidgetId Word64)
-  -- ^ Node index by widget id, for 'lookupNodeByWidgetId'. A value packs the
-  -- epoch it was written in (high 32 bits) with the node index (low 32 bits).
+  , naIndex :: IORef IdIndex
+  -- ^ Node index by widget id, for 'lookupNodeByWidgetId'.
   , naScope :: IORef Int
   -- ^ The paint scope 'addNode' gives new nodes, encoded as in 'naArrScope'.
   , naScopeSig :: IORef Word64
@@ -522,9 +520,12 @@ data StyleCol
 --   scroll container's bar sits. The solver's measure pass writes it, so the
 --   input signature leaves it out and the layout cache restores it on a hit.
 -- * 'TagAlignX', 'TagAlignY': the 'AlignX' and the 'AlignY'.
+-- * 'TagIdSuperseded': whether a later node of this frame holds this node's
+--   widget id too, as a table's scrolling pane shares its frozen pane's
+--   ('setWidgetId', 'getIdSuperseded').
 data TagCol
   = TagNodeType | TagDirection | TagWSizing | TagHSizing
-  | TagScrollBarSlot | TagAlignX | TagAlignY
+  | TagScrollBarSlot | TagAlignX | TagAlignY | TagIdSuperseded
   deriving (Enum)
 
 -- | Columns of 'naArrTree'. A link that leads nowhere is -1.
@@ -646,7 +647,7 @@ newNodeArena = do
   naWrapMemo <- newIORef =<< newWidthMemo cap
   naFitMemo <- newIORef =<< newWidthMemo cap
   naEpoch <- newIORef 1
-  naIndex <- newIORef =<< HT.new
+  naIndex <- newIORef =<< newIdIndex 1024
   naScope <- newIORef 0
   naScopeSig <- newIORef 0
   naInputSig <- newPrimArray 1
@@ -685,12 +686,16 @@ resetNodeArena na = do
   -- 0 marks a memo entry that was never written, so the tag wraps to 1.
   !ft <- readIORef (naFrameTag na)
   writeIORef (naFrameTag na) (if ft == maxBound then 1 else ft + 1)
-  -- Lookups reject entries from other epochs. Replacing the table every 128
-  -- epochs bounds retained stale ids without allocating a table every frame.
+  -- The id index takes only entries of the current epoch, so the next epoch
+  -- empties it. Once the epoch wraps, entries left from that epoch's last use
+  -- would read as current, so the wrap clears the index.
   !ep <- readIORef (naEpoch na)
   let !ep' = ep + 1
-  writeIORef (naEpoch na) (if ep' == 0 then 1 else ep')
-  when (ep' .&. 0x7F == 0) $ writeIORef (naIndex na) =<< HT.new
+  IdIndex slots mask live <- readIORef (naIndex na)
+  writePrimArray live 0 0
+  if ep' == 0
+    then writeIORef (naEpoch na) 1 >> setPrimArray slots 0 (2 * (mask + 1)) 0
+    else writeIORef (naEpoch na) ep'
 
 -- | The topmost (last added) modal node, if any.
 {-# INLINE topModalNode #-}
@@ -1232,6 +1237,8 @@ getWidgetId na idx = arenaArrays na >>= \a -> WidgetId . fromIntegral <$> readTr
 
 -- | Assign a node's identity and index nonzero ids for lookup. Assign once per
 -- node: this does not remove a mapping previously stored under another id.
+-- The id's lookup moves to this node, and a node that held it earlier in the
+-- frame is marked superseded ('getIdSuperseded').
 {-# INLINE setWidgetId #-}
 setWidgetId :: NodeArena -> NodeIdx -> WidgetId -> IO ()
 setWidgetId na idx wid = do
@@ -1241,24 +1248,100 @@ setWidgetId na idx wid = do
   mixNodeInput na idx 0x5749 w
   when (hashWidgetId wid /= 0) $ do
     !ep <- readIORef (naEpoch na)
-    table <- readIORef (naIndex na)
-    HT.insert table wid (fromIntegral ep `shiftL` 32 .|. (fromIntegral idx .&. 0xFFFFFFFF))
+    prev <- indexWidgetId na ep w idx
+    when (prev >= 0 && prev /= idx) $ writeTagEnum a prev TagIdSuperseded True
+
+-- | Whether a later node of this frame holds this node's widget id too
+-- ('setWidgetId'). 'lookupNodeByWidgetId' finds the last node that holds an
+-- id, and a walk over the arena that keys its results by id takes that node
+-- alone.
+{-# INLINE getIdSuperseded #-}
+getIdSuperseded :: NodeArena -> NodeIdx -> IO Bool
+getIdSuperseded na idx = arenaArrays na >>= \a -> readTagEnum a idx TagIdSuperseded
 
 -- | Node most recently indexed under this id in the current frame. Returns
 -- 'Nothing' for zero, an unknown id, or an entry from an earlier frame.
 {-# INLINE lookupNodeByWidgetId #-}
 lookupNodeByWidgetId :: NodeArena -> WidgetId -> IO (Maybe NodeIdx)
-lookupNodeByWidgetId na wid
-  | hashWidgetId wid == 0 = pure Nothing
+lookupNodeByWidgetId na (WidgetId key)
+  | key == 0 = pure Nothing
   | otherwise = do
-      table <- readIORef (naIndex na)
-      mVal <- HT.lookup table wid
-      case mVal of
-        Nothing -> pure Nothing
-        Just val -> do
-          !ep <- readIORef (naEpoch na)
-          let !idx = fromIntegral (val .&. 0xFFFFFFFF)
-          pure (if val `shiftR` 32 == fromIntegral ep then Just idx else Nothing)
+      !ep <- readIORef (naEpoch na)
+      IdIndex slots mask _ <- readIORef (naIndex na)
+      let go !s = do
+            v <- readPrimArray slots (2 * s + 1)
+            if v `shiftR` 32 /= fromIntegral ep
+              then pure Nothing
+              else do
+                k <- readPrimArray slots (2 * s)
+                if k == key then pure (Just (fromIntegral (v .&. 0xFFFFFFFF))) else go ((s + 1) .&. mask)
+      go (homeSlot key mask)
+
+-- | Node index by widget id: open addressing over unboxed slots of two words,
+-- the id and a value that packs the epoch it was written in (high 32 bits)
+-- with the node index (low 32 bits). A slot written in another epoch is free,
+-- so a new epoch empties the index without touching it, and since a frame
+-- only adds entries, a probe ends at the first free slot. The fields are the
+-- slots, the slot count (a power of two) less one, and the number of entries
+-- written in the current epoch, in one slot.
+data IdIndex = IdIndex {-# UNPACK #-} !(IOArr Word64) {-# UNPACK #-} !Int {-# UNPACK #-} !(IOArr Int)
+
+-- | An empty index of @n@ slots, a power of two.
+newIdIndex :: Int -> IO IdIndex
+newIdIndex n = do
+  slots <- newZeroedPrimArray (2 * n)
+  live <- newPrimArray 1
+  writePrimArray live 0 0
+  pure (IdIndex slots (n - 1) live)
+
+-- | The slot a probe for @key@ starts at. Ids are hashes already; the multiply
+-- spreads their bits over the slots however few there are.
+{-# INLINE homeSlot #-}
+homeSlot :: Word64 -> Int -> Int
+homeSlot key mask = fromIntegral ((key * 0x9E3779B97F4A7C15) `shiftR` 32) .&. mask
+
+-- | Index node @idx@ under the nonzero id @key@ in epoch @ep@. Returns the
+-- node the id's entry of this epoch held before, or -1 for none: finding it
+-- costs nothing beyond the probe the insert makes.
+{-# INLINE indexWidgetId #-}
+indexWidgetId :: NodeArena -> Word32 -> Word64 -> Int -> IO Int
+indexWidgetId na ep key idx = do
+  ii@(IdIndex slots mask live) <- readIORef (naIndex na)
+  let !val = fromIntegral ep `shiftL` 32 .|. (fromIntegral idx .&. 0xFFFFFFFF)
+      go !s = do
+        v <- readPrimArray slots (2 * s + 1)
+        if v `shiftR` 32 /= fromIntegral ep
+          then do
+            writePrimArray slots (2 * s) key
+            writePrimArray slots (2 * s + 1) val
+            n <- readPrimArray live 0
+            writePrimArray live 0 (n + 1)
+            -- At most half the slots are taken, so probes stay short.
+            when (2 * (n + 1) > mask + 1) $ writeIORef (naIndex na) =<< growIdIndex ep ii
+            pure (-1)
+          else do
+            k <- readPrimArray slots (2 * s)
+            if k == key
+              then fromIntegral (v .&. 0xFFFFFFFF) <$ writePrimArray slots (2 * s + 1) val
+              else go ((s + 1) .&. mask)
+  go (homeSlot key mask)
+
+-- | Twice the slots, holding the entries of epoch @ep@.
+growIdIndex :: Word32 -> IdIndex -> IO IdIndex
+growIdIndex ep (IdIndex slots mask live) = do
+  new@(IdIndex slots' mask' live') <- newIdIndex (2 * (mask + 1))
+  writePrimArray live' 0 =<< readPrimArray live 0
+  forM_ [0 .. mask] $ \s -> do
+    v <- readPrimArray slots (2 * s + 1)
+    when (v `shiftR` 32 == fromIntegral ep) $ do
+      k <- readPrimArray slots (2 * s)
+      let place !t = do
+            v' <- readPrimArray slots' (2 * t + 1)
+            if v' == 0
+              then writePrimArray slots' (2 * t) k >> writePrimArray slots' (2 * t + 1) v
+              else place ((t + 1) .&. mask')
+      place (homeSlot k mask')
+  pure new
 
 -- | 'lookupNodeByWidgetId' using the id's integer store key.
 {-# INLINE lookupNodeByKey #-}
