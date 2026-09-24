@@ -182,6 +182,8 @@ typedef struct NanoUIShaped {
     int *clusters;
     /* Bytes of the caller's text; anything after is the sentinel. */
     int text_len;
+    /* The sentinel's character when it takes up width, else 0. */
+    Uint32 sentinel_advance_cp;
 } NanoUIShaped;
 
 static bool SDLCALL nano_ui_capture_text(void *userdata, TTF_Text *text)
@@ -209,7 +211,9 @@ static bool SDLCALL nano_ui_capture_text(void *userdata, TTF_Text *text)
         TTF_SubString *c = &d->clusters[i];
         if (c->offset >= out->text_len && c->length > 0) {
             int advance = 0;
-            TTF_GetGlyphMetrics(d->font, '|', NULL, NULL, NULL, NULL, &advance);
+            if (out->sentinel_advance_cp != 0) {
+                TTF_GetGlyphMetrics(d->font, out->sentinel_advance_cp, NULL, NULL, NULL, NULL, &advance);
+            }
             out->w = d->w - advance;
             if ((c->flags & TTF_SUBSTRING_DIRECTION_MASK) == TTF_DIRECTION_RTL) {
                 shift = advance;
@@ -264,34 +268,28 @@ static void SDLCALL nano_ui_release_text(void *userdata, TTF_Text *text)
     (void)text;
 }
 
-/* Shape one line with the font and its fallbacks, in a direction (0 lets
- * SDL_ttf pick, TTF_DIRECTION_LTR or TTF_DIRECTION_RTL). The caller frees
- * the result with nano_ui_ttf_shaped_free.
- *
- * The line is shaped with a '|' after it, whose glyph and cluster are then
- * dropped. SDL_ttf 3.2 cuts a fallback span that ends the text one character
- * past its last cluster, losing a vowel sign merged into that cluster, and
- * trims the width of trailing spaces. */
-bool nano_ui_ttf_shape(TTF_Font *font, const char *text, size_t len, int direction, NanoUIShaped *out)
+void nano_ui_ttf_shaped_free(NanoUIShaped *shaped);
+
+/* Shape @len@ bytes of @text@ followed by @sentinel_len@ bytes of
+ * @sentinel@, as 'nano_ui_ttf_shape' describes. */
+static bool shape_with_sentinel(TTF_Font *font, const char *text, size_t len, const char *sentinel,
+                                size_t sentinel_len, Uint32 advance_cp, int direction, NanoUIShaped *out)
 {
     SDL_zerop(out);
-    if (!font || !text || len == 0) {
-        return font != NULL;
-    }
     TTF_TextEngine engine;
     SDL_INIT_INTERFACE(&engine);
     engine.userdata = out;
     engine.CreateText = nano_ui_capture_text;
     engine.DestroyText = nano_ui_release_text;
     out->text_len = (int)len;
-    bool sentinel = TTF_FontHasGlyph(font, '|');
-    char *padded = SDL_malloc(len + 1);
+    out->sentinel_advance_cp = advance_cp;
+    char *padded = SDL_malloc(len + sentinel_len);
     if (!padded) {
         return false;
     }
     SDL_memcpy(padded, text, len);
-    padded[len] = '|';
-    TTF_Text *t = TTF_CreateText(&engine, font, padded, sentinel ? len + 1 : len);
+    SDL_memcpy(padded + len, sentinel, sentinel_len);
+    TTF_Text *t = TTF_CreateText(&engine, font, padded, len + sentinel_len);
     SDL_free(padded);
     if (!t) {
         return false;
@@ -307,6 +305,36 @@ bool nano_ui_ttf_shape(TTF_Font *font, const char *text, size_t len, int directi
     }
     TTF_DestroyText(t);
     return ok;
+}
+
+/* Shape one line with the font and its fallbacks, in a direction (0 lets
+ * SDL_ttf pick, TTF_DIRECTION_LTR or TTF_DIRECTION_RTL). The caller frees
+ * the result with nano_ui_ttf_shaped_free.
+ *
+ * The line is shaped with a sentinel after it, whose glyph and cluster are
+ * then dropped. SDL_ttf 3.2 cuts a fallback span that ends the text one
+ * character past its last cluster, losing a vowel sign merged into that
+ * cluster, and trims the width of trailing spaces. The sentinel is U+2060
+ * WORD JOINER: HarfBuzz skips default-ignorable characters when it matches
+ * a lookup's context, so the line shapes as though nothing followed it. A
+ * visible sentinel would be context: Inter 4 turns up to five punctuation
+ * marks before a '|' into their capital-height forms.
+ *
+ * SDL_ttf lays out nothing for a line with no visible glyph, such as one of
+ * only spaces, so such a line takes a '|' instead: there is nothing in it for
+ * the '|' to change. */
+bool nano_ui_ttf_shape(TTF_Font *font, const char *text, size_t len, int direction, NanoUIShaped *out)
+{
+    if (!font || !text || len == 0) {
+        SDL_zerop(out);
+        return font != NULL;
+    }
+    if (shape_with_sentinel(font, text, len, "\xE2\x81\xA0", 3, 0, direction, out)) {
+        return true;
+    }
+    nano_ui_ttf_shaped_free(out);
+    bool bar = TTF_FontHasGlyph(font, '|');
+    return shape_with_sentinel(font, text, len, "|", bar ? 1 : 0, bar ? '|' : 0, direction, out);
 }
 
 void nano_ui_ttf_shaped_free(NanoUIShaped *shaped)
