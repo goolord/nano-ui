@@ -9,6 +9,7 @@ module NanoUI.Internal.Context.Animation
   , startAnimationEaseDelay
   , startSpring
   , keepAnimationAlive
+  , repaintIfOrphan
   , setAnimationValue
   , tickAnimations
   , getAnimationValue
@@ -21,7 +22,7 @@ import Data.IntMap.Strict qualified as IM
 import Data.IntSet qualified as IS
 
 import NanoUI.Internal.Animation
-import NanoUI.Internal.Context.Core (damageKey, getsDamage, markDirty, markDirtyCovered)
+import NanoUI.Internal.Context.Core (damageFull, damageKey, getsDamage, markDirtyCovered)
 import NanoUI.Internal.Context.Types (AnimationState (..), Context (..), DamageState (..), ScrollState (..), intKey)
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Layout.Arena (getNodeRect, lookupNodeByKey)
@@ -87,7 +88,7 @@ startAnimationEaseDelay ctx wid start end dur ease delay
         Just a@(EaseAnim aStart _ _ _ _ _ _) | approxEq aStart start && easeSameSpec a ease dur req end -> pure ()
         _ ->
           writeIORef (ctxAnimationState ctx) $! insertRunning key (EaseAnim start end dur 0 ease req req) as
-      markDirtyIfOrphan ctx key
+      repaintIfOrphan ctx key
   where
     key = intKey wid
 
@@ -98,7 +99,7 @@ startSpring ctx wid params target = do
   let key = intKey wid
   as <- readIORef (ctxAnimationState ctx)
   case IM.lookup key (asAnimations as) of
-    Just (SpringAnim _ _ t p) | t == target && p == params -> markDirtyIfOrphan ctx key
+    Just (SpringAnim _ _ t p) | t == target && p == params -> repaintIfOrphan ctx key
     running -> do
       let (pos, vel) = case running of
             Just (SpringAnim p v _ _) -> (p, v)
@@ -108,7 +109,7 @@ startSpring ctx wid params target = do
         then settleKey ctx key target
         else do
           writeIORef (ctxAnimationState ctx) $! insertRunning key (SpringAnim pos vel target params) as
-          markDirtyIfOrphan ctx key
+          repaintIfOrphan ctx key
 
 -- | Run @anim@ at @key@ in place of the key's resting value, if any.
 {-# INLINE insertRunning #-}
@@ -205,11 +206,16 @@ lapseKeepAlive as
                 IM.filterWithKey (\k a -> not (IS.member k lapsed && perpetual a)) (asAnimations as)
        in as {asAnimations = anims, asKeepAlive = asKeepTouched as, asKeepTouched = IS.empty}
 
-markDirtyIfOrphan :: Context -> Int -> IO ()
-markDirtyIfOrphan ctx key = do
+-- | Repaint the whole frame for a running animation whose key names no
+-- widget ('NanoUI.Internal.Widgets.Animate.animate' and 'animateTo' key a
+-- fresh id): no rect says what its value moves, so the frame that draws the
+-- new value repaints whole. The running animation keeps frames coming at the
+-- paced rate; marking the context dirty would schedule them unpaced.
+repaintIfOrphan :: Context -> Int -> IO ()
+repaintIfOrphan ctx key = do
   hadRect <- IM.member key <$> getsDamage ctx dsPrevRects
   hasNow <- nodeHasKey ctx key
-  unless (hadRect || hasNow) (markDirty ctx)
+  unless (hadRect || hasNow) (damageFull ctx)
 
 nodeHasKey :: Context -> Int -> IO Bool
 nodeHasKey ctx key =
@@ -240,7 +246,7 @@ settleKey ctx key val = do
   when (maybe (not (approxEq prevRest val)) (not . approxEq val . animationValue) prevLive) $ do
     -- Covered: the key's widget paints from this value and its rect is
     -- damaged. 'animate' and 'animateTo' key a fresh id with no node, and
-    -- those repaint whole through 'markDirtyIfOrphan' while they run.
+    -- those repaint whole through 'repaintIfOrphan' while they run.
     damageKey ctx key (DamageInflated defaultDamageSlop)
     markDirtyCovered ctx
 

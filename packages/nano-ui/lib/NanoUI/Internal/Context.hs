@@ -186,6 +186,7 @@ module NanoUI.Internal.Context
   , startAnimationEaseDelay
   , startSpring
   , keepAnimationAlive
+  , repaintIfOrphan
   , setAnimationValue
   , tickAnimations
   , getAnimationValue
