@@ -385,7 +385,9 @@ knobWith' ::
   -> Eff es (Response, Float)
 knobWith' f diameter minV maxV value = do
   (wid, ctx) <- freshWidget
-  current <- uiIO $ adoptSlot fieldFloat ctx wid value
+  -- NaN never equals the value adopted last frame, so it would be adopted
+  -- (and the frame dirtied) again on every frame.
+  current <- uiIO $ adoptSlot fieldFloat ctx wid (if isNaN value then minV else value)
   let
     range = maxV - minV
     frac = if range > 0 then clamp01 ((current - minV) / range) else 0

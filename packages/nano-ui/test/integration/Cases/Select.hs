@@ -16,7 +16,57 @@ tests =
   , spec "tree-select" runTreeSelectTest
   , spec "tree-keyboard" runTreeKeyboardTest
   , spec "radio-click-marks" runRadioClickMarksTest
+  , spec "sliders-drag-apart" runSlidersDragApartTest
+  , spec "radio-groups-apart" runRadioGroupsApartTest
+  , spec "slider-out-of-range-settles" runSliderOutOfRangeSettlesTest
   ]
+
+-- | Sibling sliders keep separate drags: dragging the second leaves the
+-- first where it was.
+runSlidersDragApartTest :: Context -> IORef Int -> IO ()
+runSlidersDragApartTest ctx failed = do
+  let inp0 = withInput 300 120
+      ui = column ((,) <$> slider' 0 100 20 <*> slider' 0 100 20)
+  (_, (second, _)) <- warmup2 ctx inp0 ui
+  let Rect rx ry rw rh = respRect second
+      Rect tx ty tw th = sliderTrackBounds rx ry rw rh
+      press = pressAt inp0 (V2 (tx + tw * 0.25) (ty + th / 2))
+      drag = press {inputMousePressed = False, inputMousePos = V2 (tx + tw * 0.75) (ty + th / 2)}
+  _ <- runFrame ctx press ui
+  (((_, v1), (_, v2)), _, _, _) <- runFrame ctx drag ui
+  assertEq failed v1 20
+  assertGt failed v2 50
+
+-- | Radio groups declared side by side keep separate selections, and a
+-- steady frame leaves nothing to redraw.
+runRadioGroupsApartTest :: Context -> IORef Int -> IO ()
+runRadioGroupsApartTest ctx failed = do
+  aRef <- newIORef (0 :: Int)
+  bRef <- newIORef (2 :: Int)
+  let inp0 = withInput 200 240
+      ui = column ((,) <$> held aRef (radio' ["x", "y"]) <*> held bRef (radio' ["p", "q", "r"]))
+  _ <- warmup2 ctx inp0 ui
+  (_, _, _, dirty) <- runFrame ctx inp0 ui
+  assert failed (not dirty)
+  spans <- collectTextSpans ctx
+  assertJust failed (spanRectOf "q" spans) $ \r -> do
+    let (press, release) = clickPair inp0 (spanCenter r)
+    _ <- runFrame ctx press ui
+    _ <- runFrame ctx release ui
+    assertEq failed 0 =<< readIORef aRef
+    assertEq failed 1 =<< readIORef bRef
+
+-- | A slider given a value outside its range shows it clamped and settles,
+-- rather than adopting the value afresh on every frame.
+runSliderOutOfRangeSettlesTest :: Context -> IORef Int -> IO ()
+runSliderOutOfRangeSettlesTest ctx failed = do
+  let inp0 = withInput 300 80
+      ui = column (slider' 0 1 1.2)
+  _ <- warmup2 ctx inp0 ui
+  ((resp, v), _, _, dirty) <- runFrame ctx inp0 ui
+  assertEq failed v 1
+  assert failed (not (respChanged resp))
+  assert failed (not dirty)
 
 runSliderCursorTest :: Context -> IORef Int -> IO ()
 runSliderCursorTest ctx failed = do

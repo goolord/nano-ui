@@ -17,6 +17,7 @@ tests =
   , pixelSpec "tabs-disabled" runTabsDisabledTest
   , spec "tabs-scroll" runTabsScrollTest
   , spec "tabs-state-persistence" runTabsStatePersistenceTest
+  , spec "tabs-bodies-apart" runTabsBodiesApartTest
   , spec "tabs-damage" runTabsDamageTest
   , spec "tab-response-forwarding" runTabResponseForwardingTest
   ]
@@ -163,6 +164,26 @@ runTabsDisabledTest _ failed = forM_ [TabTop, TabLeft] $ \orientation -> do
   assertJust failed (spanRectOf "Disabled" spansEnabled) $ \r -> do
     response <- runClick ctx inp (ui False) (spanCenter r)
     assertEq failed (tabActive response) TabB
+
+-- | Bodies of different tabs keep separate state, even at the same position.
+runTabsBodiesApartTest :: Context -> IORef Int -> IO ()
+runTabsBodiesApartTest ctx failed = do
+  let inp0 = withInput 300 100
+      body name = do
+        (flag, setFlag) <- useFlag False
+        whenM (button ("Toggle" <> name)) (setFlag (not flag))
+        label (name <> if flag then "On" else "Off")
+      ui curTab = tabs curTab [tab TabA "A" (body "A"), tab TabB "B" (body "B")]
+  _ <- warmup2 ctx inp0 (ui TabA)
+  spans <- collectTextSpans ctx
+  assertJust failed (spanRectOf "ToggleA" spans) $ \r -> do
+    _ <- runClick ctx inp0 (ui TabA) (spanCenter r)
+    _ <- warmup2 ctx inp0 (ui TabA)
+    spansA <- collectTextSpans ctx
+    assert failed (hasText "AOn" spansA)
+    _ <- warmup2 ctx inp0 (ui TabB)
+    spansB <- collectTextSpans ctx
+    assert failed (hasText "BOff" spansB)
 
 runTabsStatePersistenceTest :: Context -> IORef Int -> IO ()
 runTabsStatePersistenceTest ctx failed = do

@@ -12,7 +12,6 @@ where
 
 import Control.Monad (zipWithM)
 import Data.Foldable (toList)
-import Data.Hashable (hash)
 import Data.List (findIndex)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
@@ -21,7 +20,7 @@ import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context (adoptSlot, registerFocusable)
 import NanoUI.Internal.Store (fieldInt)
 import NanoUI.Internal.Layout.Arena (NodeType (..))
-import NanoUI.Internal.Monad (Ui, freshWidget, nextId, uiIO, withKey)
+import NanoUI.Internal.Monad (Ui, freshWidget, nextId, scope, uiIO)
 import NanoUI.Internal.Style (Layout, defaultLayout, fillW, gap, tight)
 import NanoUI.Internal.Types (clamp)
 import NanoUI.Internal.WidgetText (buttonFlagChoice)
@@ -36,9 +35,6 @@ radioLay = tight (fillW defaultLayout)
 radioGroupLay :: Layout
 radioGroupLay = tight (gap 4 (fillW defaultLayout))
 
-radioSalt :: Int
-radioSalt = hash ("radio" :: Text)
-
 -- | A column of radio buttons over @options@ in fold order. Pass the selected
 -- index; the result is the index after this frame's click or arrow keys.
 {-# INLINE radio #-}
@@ -49,7 +45,8 @@ radio options index = snd <$> radio' options index
 radio' ::
   (Foldable f, Ui :> es) => f Text -> Int -> Eff es (Response, Int)
 radio' options index =
-  withKey radioSalt $ do
+  -- A positional scope: groups declared side by side keep separate ids.
+  scope $ do
     (gid, ctx) <- freshWidget
     let
       opts = case toList options of

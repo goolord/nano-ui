@@ -269,8 +269,14 @@ tabsConfigured' cfg active inputTabs = tabStrip cfg active ts (Just body)
   where
     ts = toList inputTabs
     -- Only the active tab's body runs, or the first tab's when none matches.
+    -- Each tab's body is keyed by its place in the list, so bodies at the same
+    -- position in different tabs do not share widget ids and state.
     body k =
-      columnWith (tight . fillW) $ mapM_ tabBody (find ((== k) . tabKey) ts <|> listToMaybe ts)
+      columnWith (tight . fillW) $
+        mapM_
+          (\(i, t) -> withKey (i :: Int) (tabBody t))
+          (find ((== k) . tabKey . snd) its <|> listToMaybe its)
+    its = zip [0 ..] ts
 
 -- | Tab headers only; the caller renders the body.
 {-# INLINE tabBar #-}

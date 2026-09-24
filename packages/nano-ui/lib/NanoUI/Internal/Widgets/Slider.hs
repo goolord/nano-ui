@@ -7,12 +7,11 @@ module NanoUI.Internal.Widgets.Slider
   )
 where
 
-import Data.Text (Text)
 import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context
 import NanoUI.Internal.Font (sliderHitBounds)
 import NanoUI.Internal.Layout.Arena (NodeType (..))
-import NanoUI.Internal.Monad (Ui, freshWidget, uiIO, withKey)
+import NanoUI.Internal.Monad (Ui, freshWidget, scope, uiIO)
 import NanoUI.Internal.Style (Layout, defaultLayout, fillW)
 import NanoUI.Internal.Store (fieldFloat)
 import NanoUI.Internal.Types (Rect (..), clamp)
@@ -46,7 +45,10 @@ sliderWith' ::
 sliderWith' f minV maxV value = do
   (wid, ctx) <- freshWidget
   uiIO $ registerFocusable ctx wid
-  current <- uiIO $ adoptSlot fieldFloat ctx wid value
+  -- Adopt the value the slider can show, so one outside the range (or NaN)
+  -- is not adopted afresh, and written back clamped, on every frame.
+  let given = if isNaN value then minV else clamp minV maxV value
+  current <- uiIO $ adoptSlot fieldFloat ctx wid given
   let
     range = maxV - minV
     frac = if range > 0 then (current - minV) / range else 0
@@ -54,9 +56,9 @@ sliderWith' f minV maxV value = do
   mrect <- uiIO (getPrevRect ctx wid)
   let
     track = maybe (Rect 0 0 0 0) (\(Rect x y w h) -> sliderHitBounds x y w h) mrect
-  -- An idle drag hands back the value it was given.
-  (dragged, dragging, _) <-
-    withKey ("drag" :: Text) (useDrag1D DragAxisX minV maxV current track)
+  -- An idle drag hands back the value it was given. Its scope follows this
+  -- slider's position, so sibling sliders keep separate drags.
+  (dragged, dragging, _) <- scope (useDrag1D DragAxisX minV maxV current track)
   holdActiveWhile wid dragging
   nav <- useKeyNav wid
   let
