@@ -11,11 +11,14 @@ import NanoUI.Internal.Context (ctxNodeArena, setDrawSnapScale)
 import NanoUI.Internal.Layout.Arena
   ( NodeType (..)
   , findNodeM
+  , getClipBounds
+  , getClipRect
   , getNodeValue
   , getNodeType
   , getRect
   , getScrollContentW
   , getWidgetId
+  , lookupNodeByWidgetId
   )
 
 tests :: [Spec]
@@ -41,6 +44,7 @@ tests =
   , pixelSpec "scroll-metrics" runScrollMetricsTest
   , pixelSpec "scroll-into-view" runScrollIntoViewTest
   , pixelSpec "scroll-glide-clamp" runScrollGlideClampTest
+  , spec "scroll-disjoint-viewport-hit" runDisjointViewportHitTest
   ]
 
 runScrollThumbCursorTest :: Context -> IORef Int -> IO ()
@@ -741,3 +745,43 @@ runScroll2DGrowMinWidthTest ctx failed = do
   assertGt failed narrow 0
   wrapped <- rangeX (withInput 400 200) (rows (columnWith (grow . tight) (rowWith (fixedW 600 . tight) (label (T.pack "wide")))))
   assertGt failed wrapped 0
+
+-- | A scroller below the fold of the one it sits in has an empty viewport:
+-- nothing it holds takes the pointer, even where its content has scrolled
+-- into the outer viewport's rect. Scrolled by 100, the inner scroller's first
+-- button lies about 50 px down the window, inside the outer viewport but
+-- above the inner one, which is itself below the fold. Nothing paints it
+-- there, so it neither hovers nor clicks.
+runDisjointViewportHitTest :: Context -> IORef Int -> IO ()
+runDisjointViewportHitTest ctx failed = do
+  let inp0 = withInputOff 300 200
+      filler h = spacer (Fixed 10) (Fixed h)
+      ui = fmap snd . scrollArea (fixedH 100 . fillW) . column $ do
+        filler 150
+        inner <- scrollArea (fixedH 30 . fillW) . column $ do
+          deep <- button' "Deep"
+          filler 200
+          pure deep
+        filler 100
+        pure inner
+  (sid, _) <- warmup2 ctx inp0 ui
+  setScrollOffset ctx sid 100
+  (_, deep) <- warmup2 ctx inp0 ui
+  let Rect bx by bw bh = respRect deep
+      centre = V2 (bx + bw / 2) (by + bh / 2)
+      hover = inp0 {inputMousePos = centre}
+  -- The button sits inside the outer viewport's rect, not below it, and its
+  -- clip is empty rather than unset.
+  assert failed (by >= 0 && by + bh < 100)
+  let na = ctxNodeArena ctx
+  assertJustM failed (lookupNodeByWidgetId na (respId deep)) $ \idx -> do
+    assertEq failed Nothing =<< getClipRect na idx
+    assert failed . maybe False (\(Rect _ _ w h) -> w == 0 && h == 0) =<< getClipBounds na idx
+  (_, hovered) <- warmup2 ctx hover ui
+  assert failed (not (respHovered hovered))
+  let (press, release) = clickPair hover centre
+  (_, pressed) <- evalUi ctx press ui
+  assert failed (not (respPressed pressed))
+  (_, clicked) <- evalUi ctx release ui
+  assert failed (not (respClicked clicked))
+

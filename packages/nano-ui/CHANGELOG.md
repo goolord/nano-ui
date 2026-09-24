@@ -670,6 +670,11 @@
   which hid one widget that had gone. While such a table was shown, the same
   pass also rebuilt its maps every frame. Of nodes sharing an id, it now
   takes only the last, the one a lookup by that id finds.
+- Content of a scroller wholly outside the viewport around it, such as an
+  inner scroller below the fold of an outer one, takes no pointer. Its clip
+  fell back to the outer viewport, so content scrolled up into that
+  viewport's rect, which nothing draws there, still hovered and clicked. The
+  clip is now empty, and hit tests tell an empty clip from one not yet set.
 
 ### Removed
 

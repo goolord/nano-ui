@@ -89,7 +89,7 @@ updatePrevRects ctx@Context {ctxNodeArena = na} = do
                             tm' = if IM.member k tm then IM.delete k tm else tm
                          in go olds (i + 1) m' cm' tm' foundOld dropped'
                       Just r -> do
-                        mClip <- getClipRect na i
+                        mClip <- getClipBounds na i
                         nt <- getNodeType na i
                         let !m' = if IM.lookup k m == Just r then m else IM.insert k r m
                             !cm' = case mClip of
@@ -150,7 +150,7 @@ data FrameSnapshot = FrameSnapshot
   , fsFloatingRects :: !(IM.IntMap Rect)
   , fsRects :: !(IM.IntMap Rect)
   , fsClips :: !(IM.IntMap Rect)
-  -- ^ Last frame's viewport clips ('getClipRect') of the keys in 'fsRects'.
+  -- ^ Last frame's viewport clips ('getClipBounds') of the keys in 'fsRects'.
   -- A rect from last frame is clipped by the viewport it was drawn in: the
   -- viewport a key has now can be smaller (a widget or scroller around it
   -- shrank with it) and would cut the pixels it vacated out of the damage.
@@ -417,7 +417,7 @@ clipDamage ctx snap d owners = do
         node <- lookupNodeByKey (ctxNodeArena ctx) k
         newR <- getPrevRect ctx wid
         slop <- fromMaybe defaultDamageSlop <$> lookupCustomDamageSlop ctx wid
-        clip <- maybe (pure Nothing) (getClipRect (ctxNodeArena ctx)) node
+        clip <- maybe (pure Nothing) (getClipBounds (ctxNodeArena ctx)) node
         let addSide c = mapM_ (mapM_ (addRect acc) . clipKeyRect k c . rectInflate slop)
         addSide (IM.lookup k (fsClips snap)) (oldOf wid)
         addSide clip newR
@@ -618,7 +618,7 @@ rectDeltas ctx panelRects oldClips old new
 -- | The scroll-viewport clip of a keyed node. Look it up once per key and
 -- clip each of its rects with 'clipToViewport'.
 keyViewportClip :: Context -> Int -> IO (Maybe Rect)
-keyViewportClip ctx k = lookupNodeByKey na k >>= maybe (pure Nothing) (getClipRect na)
+keyViewportClip ctx k = lookupNodeByKey na k >>= maybe (pure Nothing) (getClipBounds na)
   where
     na = ctxNodeArena ctx
 

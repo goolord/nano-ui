@@ -127,8 +127,9 @@ widgetOverlayAllowed ctx wid = do
   maybe (pure True) (\modal -> widgetIdInSubtree ctx modal wid) top
 
 -- | Whether @mouse@ is on the visible part of node @idx@: inside its non-empty
--- rect, and inside its clip rect when it has one. It reads this frame's
--- solved geometry, which is complete once
+-- rect, and inside its clip rect when it has one. An empty clip, a viewport
+-- outside the one around it, holds no point. It reads this frame's solved
+-- geometry, which is complete once
 -- 'NanoUI.Internal.Frame.Scroll.applyScrollOffsets' has run.
 {-# INLINE nodePointVisible #-}
 nodePointVisible :: Context -> NodeIdx -> V2 -> IO Bool
@@ -137,19 +138,19 @@ nodePointVisible ctx idx mouse = do
   if not (rectHit vis mouse)
     then pure False
     else do
-      mClip <- getClipRect (ctxNodeArena ctx) idx
+      mClip <- getClipBounds (ctxNodeArena ctx) idx
       pure (maybe True (`rectContains` mouse) mClip)
 
 -- | 'nodePointVisible' with the rect supplied by the caller, for a widget
--- whose hit rect differs from its node's rect. A node with no clip rect of
--- its own, as before 'NanoUI.Internal.Frame.Scroll.applyScrollOffsets' has run in a
+-- whose hit rect differs from its node's rect. A node whose clip is unset, as
+-- before 'NanoUI.Internal.Frame.Scroll.applyScrollOffsets' has run in a
 -- frame, is tested against the clip recorded for its widget id on the
--- previous frame.
+-- previous frame. An empty clip, set or recorded, holds no point.
 {-# INLINE nodeClippedHit #-}
 nodeClippedHit :: Context -> NodeIdx -> Rect -> V2 -> IO Bool
 nodeClippedHit ctx@Context {ctxNodeArena = na} idx rect mouse =
   pure (rectHit rect mouse) <&&> do
-    mLive <- getClipRect na idx
+    mLive <- getClipBounds na idx
     mClip <- case mLive of
       Just _ -> pure mLive
       Nothing -> getPrevClipRect ctx =<< getWidgetId na idx
@@ -159,8 +160,9 @@ nodeClippedHit ctx@Context {ctxNodeArena = na} idx rect mouse =
 -- not solved. @rect@ is the widget's rect from the previous frame
 -- ('NanoUI.Internal.Context.getPrevRect'). The point must be inside it, and inside the previous
 -- frame's viewport of every scroll container above node @idx@, so content
--- scrolled out of view takes no input; a scroll container with no recorded
--- viewport does not constrain the point. A widget drawn inside another widget
+-- scrolled out of view takes no input, nor does content of a scroller whose
+-- viewport was empty; a scroll container with no recorded viewport does not
+-- constrain the point. A widget drawn inside another widget
 -- takes no input outside that widget's previous rect either. The walk stops
 -- at a floating panel, which is drawn and clipped by itself: nothing it is
 -- declared in bounds it. The node's own clip rect is not read: it is not set

@@ -75,6 +75,7 @@ module NanoUI.Internal.Layout.Arena
   , getNodeRect
   , setRect
   , getClipRect
+  , getClipBounds
   , setClipRect
   , getText
   , getOptions
@@ -1080,7 +1081,7 @@ setRect na idx x y w h = do
   writeGeom a idx GeomH h
 
 -- | Positive-area clip in logical window coordinates. 'Nothing' means the
--- stored clip is empty or unset; those cases share the same representation.
+-- stored clip is empty or unset: 'getClipBounds' tells those apart.
 {-# INLINE getClipRect #-}
 getClipRect :: NodeArena -> NodeIdx -> IO (Maybe Rect)
 getClipRect na idx = do
@@ -1091,15 +1092,35 @@ getClipRect na idx = do
   h <- readGeom a idx GeomClipH
   pure (if w > 0 && h > 0 then Just (Rect x y w h) else Nothing)
 
--- | Store a clip in logical window coordinates. Empty clips read back as 'Nothing'.
+-- | Store a clip in logical window coordinates. An empty clip, one without
+-- area, is kept as empty rather than unset, which 'addNode' leaves the clip:
+-- 'getClipRect' reads both as 'Nothing', 'getClipBounds' does not.
 {-# INLINE setClipRect #-}
 setClipRect :: NodeArena -> NodeIdx -> Rect -> IO ()
 setClipRect na idx (Rect x y w h) = do
   a <- arenaArrays na
+  let empty = not (w > 0 && h > 0)
   writeGeom a idx GeomClipX x
   writeGeom a idx GeomClipY y
-  writeGeom a idx GeomClipW w
-  writeGeom a idx GeomClipH h
+  writeGeom a idx GeomClipW (if empty then -1 else w)
+  writeGeom a idx GeomClipH (if empty then -1 else h)
+
+-- | The stored clip in logical window coordinates, empty or not: a zero-size
+-- rect, which holds no point, for an empty clip, and 'Nothing' only while the
+-- clip is unset, before 'NanoUI.Internal.Frame.Scroll.applyScrollOffsets'
+-- runs in a frame.
+{-# INLINE getClipBounds #-}
+getClipBounds :: NodeArena -> NodeIdx -> IO (Maybe Rect)
+getClipBounds na idx = do
+  a <- arenaArrays na
+  x <- readGeom a idx GeomClipX
+  y <- readGeom a idx GeomClipY
+  w <- readGeom a idx GeomClipW
+  h <- readGeom a idx GeomClipH
+  pure $
+    if w > 0 && h > 0
+      then Just (Rect x y w h)
+      else if w < 0 then Just (Rect x y 0 0) else Nothing
 
 -- | Cached layout signature and solved geometry for whole-layout reuse. The
 -- backing arrays are reused; only cache misses capture a new solved frame.

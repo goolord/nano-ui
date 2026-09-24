@@ -49,7 +49,9 @@ transformSubtree ctx@Context {ctxNodeArena = na} idx scrollX scrollY parentClip 
     (sx, sy) = if floating then (0, 0) else (scrollX, scrollY)
     !vx = lx + sx
     !vy = ly + sy
-    within r = fromMaybe parentClip (rectIntersect parentClip r)
+    -- A rect outside the clip around it leaves nothing: its clip is empty,
+    -- not the clip around it.
+    within r = fromMaybe (Rect (rectX r) (rectY r) 0 0) (rectIntersect parentClip r)
   -- With no offset on either axis the placed rect equals the laid-out one, so
   -- the write is a no-op; a floating node always takes that path.
   unless (sx == 0 && sy == 0) $ setRect na idx vx vy vw vh
@@ -325,7 +327,7 @@ probeScrollBarHover ctx@Context {ctxNodeArena = na} inp = do
                     -- A scroller's own clip is its viewport, short of its
                     -- bars; the clip around it is its parent's.
                     owner <- if isScrollNode nt then getParent na idx else pure idx
-                    if owner < 0 then pure True else maybe True (`rectContains` mouse) <$> getClipRect na owner
+                    if owner < 0 then pure True else maybe True (`rectContains` mouse) <$> getClipBounds na owner
                   <&&> (isJust <$> barAt idx)
                   <&&> overlayHitAllowed ctx top idx
               barAt idx = do
