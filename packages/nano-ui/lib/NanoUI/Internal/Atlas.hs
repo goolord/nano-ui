@@ -183,7 +183,7 @@ fitImage ::
 fitImage st0 tid w h pixels =
   -- Plan the shelf position before allocating or copying the atlas. A full
   -- atlas must reject an image without repeatedly allocating doomed growth.
-  case cursorFor st0 w h <|> cursorFor grown w h of
+  case cursorFor st0 w h <|> firstGrowth <|> secondGrowth of
     Nothing -> pure Nothing
     Just (x, y, placed) -> do
       let resized = asW placed /= asW st0 || asH placed /= asH st0
@@ -209,11 +209,16 @@ fitImage st0 tid w h pixels =
             , asResizedGen = if resized then asGen written else asResizedGen placed
             }
  where
-  grown =
-    st0
-      { asW = growDim (asW st0) (w + 2 * atlasPad)
-      , asH = growDim (asH st0) (asY st0 + asRowH st0 + h + 2 * atlasPad)
-      }
+  -- Grow the shorter side first. Widening gives the current shelf room on
+  -- its right and later shelves the full width; growing only taller would
+  -- stack narrow images in one column until the height limit, with the rest
+  -- of the allowed area unused.
+  wider = st0 {asW = growDim (asW st0) (max (w + 2 * atlasPad) (asX st0 + w + atlasPad))}
+  taller = st0 {asH = growDim (asH st0) (asY st0 + asRowH st0 + h + 2 * atlasPad)}
+  both = taller {asW = asW wider}
+  (firstGrowth, secondGrowth)
+    | asW st0 <= asH st0 = (cursorFor wider w h, cursorFor taller w h <|> cursorFor both w h)
+    | otherwise = (cursorFor taller w h, cursorFor wider w h <|> cursorFor both w h)
 
 cursorFor :: AtlasState -> Int -> Int -> Maybe (Int, Int, AtlasState)
 cursorFor st w h

@@ -14,7 +14,23 @@ tests =
   , pixelSpec "font-composition" runFontCompositionTest
   , pixelSpec "align-baseline" runAlignBaselineTest
   , spec "column-gap-grow" runColumnGapGrowTest
+  , spec "grid-in-column-height" runGridInColumnHeightTest
   ]
+
+-- | A fill-width grid inside a column is as tall as its rows, not as all of
+-- its cells stacked: the column's refit at the offered width knows grids.
+runGridInColumnHeightTest :: Context -> IORef Int -> IO ()
+runGridInColumnHeightTest ctx failed = do
+  let inp0 = withInput 400 400
+      ui = column $ do
+        gridWith 3 fillW (replicateM_ 9 (button "x"))
+        label "after"
+  _ <- warmup2 ctx inp0 ui
+  spans <- collectTextSpans ctx
+  let cellBottoms = [rectY r + rectH r | (r, t, _, _, _) <- spans, t == "x"]
+  assertEq failed (length cellBottoms) 9
+  assertJust failed (fst <$> spanOf "after" spans) $ \after ->
+    assert failed (rectY after < maximum cellBottoms + 30)
 
 -- | Grow children of a column with a gap share the height left after the
 -- gaps, as they do in a row, rather than overflowing the column by them.

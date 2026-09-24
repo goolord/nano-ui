@@ -11,7 +11,21 @@ tests :: [Spec]
 tests =
   [ spec "atlas-growth" runAtlasGrowthTest
   , spec "atlas-changes" runAtlasChangesTest
+  , spec "atlas-fills-width" runAtlasFillsWidthTest
   ]
+
+-- | Narrow images spread across the atlas's allowed width instead of
+-- stacking in one strip until the height limit.
+runAtlasFillsWidthTest :: Context -> IORef Int -> IO ()
+runAtlasFillsWidthTest ctx failed = do
+  let px = BS.replicate (100 * 100 * 4) 9
+      go n
+        | n > 1000 = pure n
+        | otherwise = do
+            ok <- registerImage ctx (ImageId n) 100 100 px
+            if ok then go (n + 1) else pure n
+  placed <- go 1
+  assertGt failed placed 900
 
 -- | A texture of the atlas uploads only what was written since, unless the
 -- atlas grew or the writes are too far back to know.

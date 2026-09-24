@@ -838,22 +838,35 @@ recomputeFitHeightAtWidth env@SolveEnv {seArena = na, seArrays = a} idx availW =
 
       _ | (nt == NodeContainer || nt == NodePanel), hTag /= SizingFixed -> do
             (pad, gap, dir) <- containerFlow a idx
-            if dir == DirRow
-              then pure oldH
-              else do
-                let innerW = max 0 (effW' - padL pad - padR pad)
-                    step (FlowAcc count contentH _) ci = do
-                      subAx <- getWidthSizing na ci
-                      let subW = widthOf subAx innerW
-                          subW' = if axMax subAx < 1e8 then min subW (axMax subAx) else subW
-                      subH <- recomputeFitHeightAtWidth env ci subW'
-                      pure (FlowAcc (count + 1) (contentH + subH) 0)
-                FlowAcc count contentH _ <- foldFlowChildrenM na idx step (FlowAcc 0 0 0)
-                let totalH =
-                      if count <= 0
-                        then 0
-                        else contentH + gap * fromIntegral (count - 1)
-                pure (clamp minH maxH (totalH + padT pad + padB pad))
+            gCols <- readTree a idx TreeGridCols
+            minColW <- readStyle a idx StyleGridMinColW
+            let innerW = max 0 (effW' - padL pad - padR pad)
+                -- A child's height when @w@ is offered to it, kept to its max width.
+                childH w ci = do
+                  subAx <- getWidthSizing na ci
+                  let subW = widthOf subAx w
+                  recomputeFitHeightAtWidth env ci (if axMax subAx < 1e8 then min subW (axMax subAx) else subW)
+                padded h = pure (clamp minH maxH (h + padT pad + padB pad))
+            if gCols > 0 || minColW > 0
+              then do
+                -- A grid stacks rows, each as tall as its tallest cell at the
+                -- column width, not every cell.
+                let cols = gridColumnCount gCols minColW innerW gap
+                    colW = max 0 ((innerW - gap * fromIntegral (cols - 1)) / fromIntegral cols)
+                    rows [] = []
+                    rows hs = let (r, rest) = splitAt cols hs in r : rows rest
+                hs <- mapM (childH colW) =<< flowChildrenInOrder na idx
+                let rowHs = map (foldl' max 0) (rows hs)
+                padded (if null rowHs then 0 else sum rowHs + gap * fromIntegral (length rowHs - 1))
+              else
+                if dir == DirRow
+                  then pure oldH
+                  else do
+                    let step (FlowAcc count contentH _) ci = do
+                          subH <- childH innerW ci
+                          pure (FlowAcc (count + 1) (contentH + subH) 0)
+                    FlowAcc count contentH _ <- foldFlowChildrenM na idx step (FlowAcc 0 0 0)
+                    padded (if count <= 0 then 0 else contentH + gap * fromIntegral (count - 1))
 
       _ -> pure oldH
 
