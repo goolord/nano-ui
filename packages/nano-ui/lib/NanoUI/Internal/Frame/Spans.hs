@@ -24,6 +24,7 @@ import NanoUI.Internal.Frame.Node (nodeAdornmentInsets, readScrollNode, resolveF
 import NanoUI.Internal.Frame.Scroll.Geometry (padContentClip, padTextClipRect, scrollNodeViewport, tagClippedSpans)
 import NanoUI.Internal.Frame.Select (collectSelectDropdownSpans)
 import NanoUI.Internal.Frame.SpanArena (SpanArena, pushSpans, resetSpanArena, spanArenaToList)
+import NanoUI.Internal.Frame.TextArea (textAreaTextPlacements)
 import NanoUI.Internal.Frame.TextEdit (collectTextEditMenuSpans)
 import NanoUI.Internal.Frame.TextInput (nodeTextFieldGeom, syncTextInputScroll, tagTextInputClippedSpans)
 import NanoUI.Internal.Input (Input)
@@ -105,6 +106,10 @@ collectClippedSpans ctx@Context {ctxFontMetrics = fm} idx clip arena = do
                   if hasFlag textInputFlagNumeric si
                     then maybe [] (`tagClippedSpans` spans) (rectIntersect clipHere fieldClip)
                     else tagTextInputClippedSpans clipHere fieldClip x y w fm spans
+          -- Rows are clipped as paint clips them, short of the scrollbars.
+          NodeTextArea -> do
+            (textClip, _) <- textAreaTextPlacements ctx idx (Rect x y w h)
+            pure (maybe [] (`tagClippedSpans` spans) (rectIntersect clipHere textClip))
           _ -> pure (tagClippedSpans clipHere spans)
       pushSpans arena here
       kids <- getFirstChild (ctxNodeArena ctx) idx
@@ -389,8 +394,7 @@ computeWidgetTextPlacements ctx nt idx x y w h = do
   fontSizeVal <- getNodeFontSize (ctxNodeArena ctx) idx
   si <- getStyleIdx (ctxNodeArena ctx) idx
   (fm, _, measureTxt) <- resolveFontFor ctx nt fontSizeVal si
-  let (ix, iy) = widgetContentInset fm
-      lineH = fmLineHeight fm
+  let lineH = fmLineHeight fm
   case nt of
     NodeColorPicker
       | colorPickerPartOf si /= PickerPreview -> pure []
@@ -410,15 +414,8 @@ computeWidgetTextPlacements ctx nt idx x y w h = do
           (fieldTxt, penX, penY, _) <- plainFieldPen ctx idx si fm x y w h
           (fw, _) <- measureTxt fieldTxt
           pure [(fieldTxt, penX, penY, fw, lineH)]
-    NodeTextArea -> do
-      lbl <- getText (ctxNodeArena ctx) idx
-      value <- textInputValue ctx idx
-      (lw, lh) <- measureTxt lbl
-      (fw, _) <- measureTxt (if T.null value then " " else value)
-      pure
-        [ (lbl, x, centeredTextY fm y lineH lh, lw, lh)
-        , (value, x + ix, y + iy, fw, h)
-        ]
+    -- The document lives in the text area's buffer: its rows in view.
+    NodeTextArea -> snd <$> textAreaTextPlacements ctx idx (Rect x y w h)
     -- Sliders, drawings and plain widgets carry no text; the other widgets
     -- have centred labels ('cachedWidgetLabel').
     _ -> pure []

@@ -150,10 +150,16 @@ record kind before edit after (EditHistory undos _ depth open) =
       let depth' = depth + 1
           group = EditGroup kind [stored] before after
        in if depth' > maxHistoryDepth + 50
-            then EditHistory (take maxHistoryDepth (group : undos)) [] maxHistoryDepth True
+            then
+              -- Walk the kept spine now: a lazy 'take' would hold every
+              -- dropped group, and the trim before it, for good.
+              let kept = take maxHistoryDepth (group : undos)
+               in length kept `seq` EditHistory kept [] maxHistoryDepth True
             else EditHistory (group : undos) [] depth' True
   where
-    stored = StoredEdit (editAt edit) (TS.fromText (editRemoved edit)) (TS.fromText (editInserted edit))
+    -- Built now, so the list keeps the compact copies and not the edit,
+    -- whose texts are slices of the whole line.
+    !stored = StoredEdit (editAt edit) (TS.fromText (editRemoved edit)) (TS.fromText (editInserted edit))
     joins g =
       open
         && kind /= EditOther

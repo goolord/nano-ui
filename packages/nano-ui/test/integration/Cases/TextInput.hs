@@ -37,6 +37,7 @@ tests =
   , spec "text-undo" runTextUndoTest
   , spec "text-area-width-tracking" runTextAreaWidthTrackingTest
   , spec "text-area-document" runTextAreaDocumentTest
+  , spec "text-area-spans" runTextAreaSpansTest
   , spec "text-input-cursor" runTextInputCursorTest
   , spec "text-input-batch" runTextInputBatchTest
   , spec "text-input-selection" runTextInputSelectionTest
@@ -106,6 +107,14 @@ runTextInputBatchTest ctx failed = do
 
 -- | Caption-less text area with a separate label above it (the old labelled
 -- field kept the label span and geometry the tests assert against).
+-- | A text area's rows are text spans, for hosts that draw text themselves.
+runTextAreaSpansTest :: Context -> IORef Int -> IO ()
+runTextAreaSpansTest ctx failed = do
+  let ui = column (labeledArea "Notes" "alpha\nbeta")
+  _ <- warmup2 ctx (withInput 400 300) ui
+  spans <- collectTextSpans ctx
+  assert failed (hasText "alpha" spans && hasText "beta" spans)
+
 labeledArea :: T.Text -> T.Text -> NanoUI (Response, T.Text)
 labeledArea lbl initial = do
   label lbl

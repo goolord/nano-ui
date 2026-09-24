@@ -23,9 +23,10 @@ module NanoUI.Internal.Frame.TextArea
   , textAreaHitForWidget
     -- * Painting
   , drawTextAreaContentWith
+  , textAreaTextPlacements
   ) where
 
-import Control.Monad (forM_, unless, when)
+import Control.Monad (forM, forM_, unless, when)
 import Data.IORef (readIORef, writeIORef)
 import Data.Maybe (catMaybes, isJust)
 import Data.Sequence (Seq)
@@ -318,12 +319,7 @@ drawTextAreaContentWith da ctx fm idx x y w h style = do
       contentX = clipX - scrollXf
       rowY row = contentTop + fromIntegral row * lineH - scrollYf
       (mV, mH) = textAreaBarLayouts field (textAreaBars fm field contentW contentH) scrollXf scrollYf
-      textClip =
-        Rect
-          clipX
-          contentTop
-          (if isJust mV then max 0 (clipW - textAreaBarLane) else clipW)
-          (if isJust mH then max 0 (clipH - textAreaBarLane) else clipH)
+      textClip = textClipBeside (Rect clipX contentTop clipW clipH) mV mH
       -- Only the rows in view are read, so painting costs the same however
       -- long the document is.
       rowAt py = floor ((py - contentTop + scrollYf) / max 1 lineH) :: Int
@@ -351,6 +347,37 @@ drawTextAreaContentWith da ctx fm idx x y w h style = do
   mapM_
     (paintScrollBarLayout da (scrollBarTrackColor base theme) (scrollBarThumbColor base theme))
     (catMaybes [mV, mH])
+
+-- | The clip a text area's rows are painted in: its content clip, short of
+-- the lane of each scrollbar that shows.
+textClipBeside :: Rect -> Maybe a -> Maybe b -> Rect
+textClipBeside (Rect clipX contentTop clipW clipH) mV mH =
+  Rect
+    clipX
+    contentTop
+    (if isJust mV then max 0 (clipW - textAreaBarLane) else clipW)
+    (if isJust mH then max 0 (clipH - textAreaBarLane) else clipH)
+
+-- | Text area @idx@'s rows in view as text placements @(text, x, y, width,
+-- height)@, and the clip they are painted in: what 'drawTextAreaContentWith'
+-- draws, for hosts that draw text themselves. Empty rows are left out.
+textAreaTextPlacements :: Context -> NodeIdx -> Rect -> IO (Rect, [(T.Text, Float, Float, Float, Float)])
+textAreaTextPlacements ctx idx field@(Rect _ y _ h) = do
+  fm <- resolveTextAreaFont ctx idx
+  key <- intKey <$> getWidgetId (ctxNodeArena ctx) idx
+  (contentW, contentH) <- textAreaContentMetrics ctx idx
+  state <- (`TA.loadTextAreaState` key) <$> getStore ctx
+  (scrollXf, scrollYf) <- textAreaScrollSnapped (ctxDrawArena ctx) state
+  let lineH = textAreaLineHeight fm
+      clip@(Rect clipX contentTop _ _) = textAreaFieldClip fm field
+      (mV, mH) = textAreaBarLayouts field (textAreaBars fm field contentW contentH) scrollXf scrollYf
+      buf = TA.buffer state
+      rowAt py = floor ((py - contentTop + scrollYf) / max 1 lineH) :: Int
+      rows = [max 0 (rowAt y) .. min (TB.getLineCount buf - 1) (rowAt (y + h))]
+  placements <- forM [(row, line) | row <- rows, let line = TB.lineAt row buf, not (T.null line)] $ \(row, line) -> do
+    lw <- lineWidthIO fm line
+    pure (line, clipX - scrollXf, contentTop + fromIntegral row * lineH - scrollYf, lw, lineH)
+  pure (textClipBeside clip mV mH, placements)
 
 -- | Mouse selection in text area @wid@ at @idx@ ('selectWithMouse'). Presses
 -- on its scrollbars are left to the scroller.

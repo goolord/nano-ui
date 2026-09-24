@@ -218,7 +218,11 @@ editTextField wid mode initial unfocusedText = do
   mEdited <- if isFocus then uiIO (editTextInput ctx mode inp store key s0) else pure Nothing
   let s1 = case mEdited of
         Just ed -> editorTextState ed
-        Nothing -> maybe s0 (\t -> s0 {tisText = t}) unfocusedText
+        Nothing
+          -- A focused field keeps what the user typed, or a command run
+          -- between frames stored, until it loses focus.
+          | isFocus -> s0
+          | otherwise -> maybe s0 (\t -> s0 {tisText = t}) unfocusedText
   when (s1 /= s0) $
     uiIO $ modifyStore ctx (maybe (saveTextInputState key s1) (saveTextEditor key) mEdited)
   pure (tisText s0, tisText s1, isFocus, pulse)
