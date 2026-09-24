@@ -30,14 +30,15 @@ import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Style (Padding (..), themePanel)
 import NanoUI.Internal.Types (Rect (..), Size (..), V2 (..), rectContains, rectHit, rectInflate, rectIntersect, rectUnion)
 
-applyScrollOffsets :: Context -> IO ()
-applyScrollOffsets ctx = do
+-- | Move every node by the offsets of the scroll containers around it, and
+-- give each its clip. The root is clipped to the window, as paint clips it:
+-- a root smaller than its content still draws the overflow.
+applyScrollOffsets :: Context -> Size -> IO ()
+applyScrollOffsets ctx (Size w h) = do
   beginScrollMetrics ctx
   -- A frame that added no widgets has no root to walk.
   count <- arenaCount (ctxNodeArena ctx)
-  when (count > 0) $ do
-    rect <- getNodeRect (ctxNodeArena ctx) 0
-    transformSubtree ctx 0 0 0 rect
+  when (count > 0) $ transformSubtree ctx 0 0 0 (Rect 0 0 w h)
 
 transformSubtree :: Context -> NodeIdx -> Float -> Float -> Rect -> IO ()
 transformSubtree ctx@Context {ctxNodeArena = na} idx scrollX scrollY parentClip = do

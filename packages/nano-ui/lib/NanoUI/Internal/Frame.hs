@@ -149,7 +149,7 @@ runFrameEff unlift ctx frameInp ui = do
   when (movedResize || movedWindow) $
     layoutArena ctx size False
   persistWindowPositions ctx
-  applyScrollOffsets ctx
+  applyScrollOffsets ctx size
   -- A press on a menu or dropdown leaves nothing active, whatever a release
   -- that never arrived left behind.
   when (inputMousePressed frameInp && not (inputMousePressed layerInp)) $
@@ -175,7 +175,7 @@ runFrameEff unlift ctx frameInp ui = do
   -- measure moved.
   when (mirrorStoresChanged storeBuilt storeAfter) $ do
     layoutArena ctx size True
-    applyScrollOffsets ctx
+    applyScrollOffsets ctx size
   updatePrevRects ctx
   refreshHover ctx frameInp
   refreshScrollBarHover ctx layerInp

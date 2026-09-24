@@ -147,8 +147,8 @@ data FrameSnapshot = FrameSnapshot
   , fsClips :: !(IM.IntMap Rect)
   -- ^ Last frame's viewport clips ('getClipRect') of the keys in 'fsRects'.
   -- A rect from last frame is clipped by the viewport it was drawn in: the
-  -- viewport a key has now can be smaller (the root shrank with it) and would
-  -- cut the pixels it vacated out of the damage.
+  -- viewport a key has now can be smaller (a widget or scroller around it
+  -- shrank with it) and would cut the pixels it vacated out of the damage.
   , fsTexts :: !(IM.IntMap Text)
   , fsAnimKeys :: !IS.IntSet
   }
@@ -588,11 +588,13 @@ rectDeltas ctx panelRects oldClips old new
             when (rectNonEmpty r) $ do
               when (IM.notMember k new || IM.notMember k old) $ addRect churn r
               newClip <- keyViewportClip ctx k
-              let side clip = maybe (Rect 0 0 0 0) (clipToViewport clip)
-                  clipped =
-                    unionNonEmpty
-                      (side (IM.lookup k oldClips) (IM.lookup k old))
-                      (side newClip (IM.lookup k new))
+              let oldClip = IM.lookup k oldClips
+                  side clip = maybe (Rect 0 0 0 0) (clipToViewport clip)
+                  -- Most moves keep their viewport (a list scrolling), and
+                  -- clipping the union once covers both sides.
+                  clipped
+                    | oldClip == newClip = clipToViewport newClip r
+                    | otherwise = unionNonEmpty (side oldClip (IM.lookup k old)) (side newClip (IM.lookup k new))
               when (rectArea clipped >= layoutSettleMinArea) $ addRect settled clipped
             rest
         )

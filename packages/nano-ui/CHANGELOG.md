@@ -653,10 +653,13 @@
   and its body's scrollbar still take their own presses.
 - A widget that shrinks under the pointer repaints the strip it vacated. The
   damage for a moved or resized widget clipped its old rect to the viewport
-  it has now, and the root's viewport is its own rect, so a hovered
-  `drawing` or button at the root, or in a column that shrank with it, left
-  its old pixels on screen. Each rect is now clipped to the viewport it was
-  drawn in.
+  it has now, which is smaller once the widget around it shrank, and the
+  root was clipped to its own rect although paint clips it to the window. A
+  hovered `drawing` or button at the root, or in a column that shrank with
+  it, and content overflowing a root smaller than it, left old pixels on
+  screen. Each rect is now clipped to the viewport it was drawn in, and the
+  root to the window, so the overflow also takes the pointer where it is
+  drawn.
 
 ### Removed
 
