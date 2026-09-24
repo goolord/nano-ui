@@ -21,6 +21,7 @@ import NanoUI.Internal.Layout.Arena
 tests :: [Spec]
 tests =
   [ spec "scroll-thumb-cursor" runScrollThumbCursorTest
+  , spec "scroll-thumb-hover" runScrollThumbHoverTest
   , pixelSpec "scroll-bar-gutter" runScrollBarGutterTest
   , spec "scroll-damage" runScrollDamageTest
   , spec "scroll-text-damage" runScrollTextDamageTest
@@ -58,6 +59,36 @@ runScrollThumbCursorTest ctx failed = do
       _ <- runFrame ctx press ui
       grabbing <- cursorKindIs ctx press UiCursorGrabbing
       assert failed grabbing
+
+-- The pointer on a scrollbar brightens its thumb, and so does dragging it
+-- off the bar. Moving onto or off the bar wakes a frame that repaints the bar
+-- alone; moving along it wakes none.
+runScrollThumbHoverTest :: Context -> IORef Int -> IO ()
+runScrollThumbHoverTest ctx failed = do
+  let off = withInputOff 200 120
+      ui = scrollArea (fillW . fixedH 80) (column (replicateM_ 8 (label "scroll line")))
+  (sid, ()) <- warmup2 ctx off ui
+  theme <- readIORef (ctxTheme ctx)
+  let rest = scrollBarThumbColor (themeInput theme) theme
+      hovered = scrollBarThumbHoverColor (themeInput theme) theme
+      thumbIs inp want = do
+        (_, _, dd, _) <- runFrame ctx inp ui
+        colors <- map snd <$> drawQuads dd
+        assert failed (want `elem` colors && notElem (if want == rest then hovered else rest) colors)
+  assertJustM failed (getPrevRect ctx sid) $ \(Rect rx ry rw rh) -> do
+    let at y = off {inputMousePos = V2 (rx + rw - scrollBarGutter ScrollBarList 0 / 2) y}
+        over = at (ry + rh / 2)
+    assert failed =<< needsRedraw ctx off over
+    thumbIs over hovered
+    damage <- takeDamage ctx
+    assert failed (case damage of DamageClip r -> rectW r < 30; DamageFull -> False)
+    assert failed . not =<< needsRedraw ctx over (at (ry + rh / 2 + 4))
+    assert failed =<< needsRedraw ctx over off
+    thumbIs off rest
+    -- A drag keeps its thumb bright wherever the pointer goes.
+    thumbIs over {inputMouseDown = True, inputMousePressed = True} hovered
+    thumbIs off {inputMousePos = V2 20 (ry + rh / 2), inputMouseDown = True} hovered
+    thumbIs off {inputMouseReleased = True} rest
 
 -- The scroll content's right edge stops at the scrollbar gutter, one gap
 -- before the bar. The gap matches the scroller's right padding and is never

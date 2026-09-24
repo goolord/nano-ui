@@ -575,6 +575,9 @@ data PointerRoute
 -- | Pointer route and active drag/menu gestures shared by the view and frame passes.
 data InteractionState = InteractionState
   { isScrollDrag :: !(Maybe (WidgetId, DirTag, Float))
+  -- | The scrollbar under the pointer, or whose thumb is being dragged: its
+  -- scroller's id, its axis and its track. Its thumb paints brighter.
+  , isScrollHover :: !(Maybe (WidgetId, DirTag, Rect))
   , isTextInputDrag :: !(Maybe TextInputDrag)
   , isTextFieldClickCell :: !(Maybe TextFieldClickCell)
   , isTextInputMenu :: !(Maybe TextInputMenu)
@@ -594,6 +597,7 @@ data InteractionState = InteractionState
 initialInteractionState :: InteractionState
 initialInteractionState = InteractionState
   { isScrollDrag = Nothing
+  , isScrollHover = Nothing
   , isTextInputDrag = Nothing
   , isTextFieldClickCell = Nothing
   , isTextInputMenu = Nothing

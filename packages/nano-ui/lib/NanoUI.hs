@@ -639,6 +639,7 @@ module NanoUI
   , themeSeries
   , scrollBarTrackColor
   , scrollBarThumbColor
+  , scrollBarThumbHoverColor
 
     -- * Geometry and colour
   , V2 (..)

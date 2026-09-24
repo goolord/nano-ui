@@ -31,7 +31,7 @@ import NanoUI.Internal.Input (Input (..), Key (..), inputKeys, inputKeysElem, in
 import NanoUI.Internal.Layout.Arena (NodeIdx, NodeType (NodeSelect, NodeTextInput), getNodeType, lookupNodeByKey, lookupNodeByWidgetId, getOptions, getRect, getWidgetId)
 import NanoUI.Internal.Monad (whenM, (<&&>))
 import NanoUI.Internal.Store (fieldFloat, fieldInt, fieldText, findSlot, insertSlot, setFieldSelection)
-import NanoUI.Internal.Style (Style (..), Theme (..), scrollBarThumbColor, scrollBarTrackColor, themeAccent, themeInput)
+import NanoUI.Internal.Style (Style (..), Theme (..), scrollBarThumbColor, scrollBarThumbHoverColor, scrollBarTrackColor, themeAccent, themeInput)
 import NanoUI.Internal.Types (Color (..), Rect (..), V2 (..), clamp, rectContains)
 
 -- | An open dropdown: a select with its open flag set, or a combo box (a
@@ -48,6 +48,9 @@ data Dropdown = Dropdown
   , ddComboScrollX :: !Float
   , ddComboGeom :: (Rect, Maybe (Rect, Rect), Maybe (Rect, Rect), Float)
   -- ^ A combo's 'comboScrollGeom'.
+  , ddComboDrag :: !Int
+  -- ^ The combo scrollbar whose thumb is being dragged: 0 none, 1 vertical,
+  -- 2 horizontal.
   }
 
 -- | Painted bounds of every open dropdown and of the text-edit menu. The
@@ -98,6 +101,7 @@ openDropdowns ctx@Context {ctxNodeArena = na} = do
                 else findSlot fieldInt 0 key store
           , ddComboScrollX = scrollX
           , ddComboGeom = comboScrollGeom rect rows nOpts window scrollX contentW
+          , ddComboDrag = slotInt SlotComboDrag 0
           }
 
 -- | The open dropdowns the modal state lets be drawn and picked from, in
@@ -389,12 +393,18 @@ drawSelectOverlays ctx@Context {ctxDrawArena = da, ctxFontMetrics = fm} inp = do
       then do
         let (inner, vSb, hSb, _) = ddComboGeom dd
             base = themeInput theme
-            drawBar (track, thumb) = do
+            mouse = inputMousePos inp
+            drag = ddComboDrag dd
+            -- As a scroller's bar: brighter under the pointer or while dragged.
+            hot kind (track, thumb) =
+              drag == kind || drag == 0 && (rectContains track mouse || rectContains thumb mouse)
+            drawBar kind bar@(track, thumb) = do
               pushRect da track (scrollBarTrackColor base theme)
-              pushRoundedRect da thumb 3 (scrollBarThumbColor base theme)
+              let thumbColor = if hot kind bar then scrollBarThumbHoverColor else scrollBarThumbColor
+              pushRoundedRect da thumb 3 (thumbColor base theme)
         withClip da inner paintRows
-        mapM_ drawBar vSb
-        mapM_ drawBar hSb
+        mapM_ (drawBar 1) vSb
+        mapM_ (drawBar 2) hSb
       else paintRows
 
 collectSelectDropdownSpans :: Context -> Input -> IO [(Rect, T.Text, Color, Color, Rect)]

@@ -28,14 +28,14 @@ module NanoUI.Internal.Frame.TextArea
 
 import Control.Monad (forM, forM_, unless, when)
 import Data.IORef (readIORef, writeIORef)
-import Data.Maybe (catMaybes, isJust)
+import Data.Maybe (isJust)
 import Data.Sequence (Seq)
 import qualified Data.Sequence as Seq
 import qualified Data.Text as T
 import NanoUI.Internal.Context
 import NanoUI.Internal.Draw (DrawArena, getDrawSnapScale, pushText, withClip)
 import NanoUI.Internal.Font
-import NanoUI.Internal.Frame.Chrome (paintScrollBarLayout, textInputFocused)
+import NanoUI.Internal.Frame.Chrome (paintScrollBars, textInputFocused)
 import NanoUI.Internal.Frame.Hit (withWidgetNode)
 import NanoUI.Internal.Frame.Scroll.Geometry (ScrollBarLayout (..), scrollBarLayout, scrollChromeLane)
 import NanoUI.Internal.Frame.TextInput (FieldDoc (..), drawLineCaret, drawLineSelection, selectWithMouse, textInputMouse, textWordBounds)
@@ -304,8 +304,9 @@ textAreaScrollSnapped da state = do
 -- that also needs it (for the field frame) resolves it once.
 drawTextAreaContentWith :: DrawArena -> Context -> FontMetrics -> NodeIdx -> Float -> Float -> Float -> Float -> Style -> IO ()
 drawTextAreaContentWith da ctx fm idx x y w h style = do
-  key <- intKey <$> getWidgetId (ctxNodeArena ctx) idx
-  let field = Rect x y w h
+  wid <- getWidgetId (ctxNodeArena ctx) idx
+  let key = intKey wid
+      field = Rect x y w h
   (contentW, contentH) <- syncTextAreaViewport ctx idx key fm field
   focus <- textInputFocused ctx idx
   theme <- nodeTheme ctx idx
@@ -343,10 +344,7 @@ drawTextAreaContentWith da ctx fm idx x y w h style = do
         pushText da fm contentX (rowY row) line fg
     when focus $
       drawLineCaret da fm (TB.lineAt caretRow buf) caretCol contentX (rowY caretRow) lineH fg
-  let base = themePanel theme
-  mapM_
-    (paintScrollBarLayout da (scrollBarTrackColor base theme) (scrollBarThumbColor base theme))
-    (catMaybes [mV, mH])
+  paintScrollBars ctx da theme (themePanel theme) wid mV mH
 
 -- | The clip a text area's rows are painted in: its content clip, short of
 -- the lane of each scrollbar that shows.

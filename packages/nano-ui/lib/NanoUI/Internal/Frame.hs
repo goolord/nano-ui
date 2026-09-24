@@ -178,6 +178,7 @@ runFrameEff unlift ctx frameInp ui = do
     applyScrollOffsets ctx
   updatePrevRects ctx
   refreshHover ctx frameInp
+  refreshScrollBarHover ctx layerInp
   tickAnimations ctx (inputDeltaTime frameInp)
   pruneDrawOpCache ctx
   -- Dropdowns and the text-edit menu are not in the arena, so nothing in the

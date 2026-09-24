@@ -33,6 +33,7 @@ import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Maybe (fromMaybe, isJust, isNothing, listToMaybe, maybeToList)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Frame.Hit
+import NanoUI.Internal.Frame.Scroll (probeScrollBarHover)
 import NanoUI.Internal.Frame.Select (focusedComboNode, overlayMenuOwnerAt)
 import NanoUI.Internal.Frame.TextArea (collapseTextFieldSelection)
 import NanoUI.Internal.Frame.TextInput (nodeTextFieldGeom)
@@ -357,9 +358,13 @@ needsRedraw ctx prev inp = do
           if hashWidgetId lastHot == 0
             then pure False
             else maybe False cdrTracked <$> lookupCustomDrawing ctx lastHot
-        if tracked
-          then pure True
-          else (/= lastHot) <$> probeHotId ctx (inputMousePos inp)
+        hotMoved <- if tracked then pure True else (/= lastHot) <$> probeHotId ctx (inputMousePos inp)
+        -- A scrollbar is not a widget, and brightens as the pointer enters it.
+        if hotMoved then pure True else scrollBarHoverMoved
+  where
+    bar = fmap (\(wid, dir, _) -> (wid, dir))
+    scrollBarHoverMoved =
+      (/=) <$> (bar <$> getsInteraction ctx isScrollHover) <*> (bar <$> probeScrollBarHover ctx inp)
 
 -- | Whether a window, scrollbar, resize, slider, or colour-picker gesture
 -- is active. Text-selection drags are tracked separately.

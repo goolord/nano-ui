@@ -55,6 +55,7 @@ module NanoUI.Internal.Style
   , themeSeries
   , scrollBarTrackColor
   , scrollBarThumbColor
+  , scrollBarThumbHoverColor
   , fadeAlpha
   , windowPad
   , windowMargin
@@ -781,6 +782,14 @@ scrollBarThumbColor :: Style -> Theme -> Color
 scrollBarThumbColor base theme =
   let solid = lerpColor (themeSeparator theme) (styleFg base) 0.58
    in fadeAlpha solid 130
+
+-- | The thumb of a scrollbar under the pointer or being dragged: the
+-- 'scrollBarThumbColor' mix taken further toward the foreground, with alpha
+-- 180.
+scrollBarThumbHoverColor :: Style -> Theme -> Color
+scrollBarThumbHoverColor base theme =
+  let solid = lerpColor (themeSeparator theme) (styleFg base) 0.72
+   in fadeAlpha solid 180
 
 -- | Replaces the alpha channel of a color.
 fadeAlpha :: Color -> Word8 -> Color

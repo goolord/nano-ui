@@ -4,6 +4,8 @@ module NanoUI.Internal.Frame.Scroll
   ( applyScrollOffsets
   , updateScrollWheel
   , updateScrollDrag
+  , refreshScrollBarHover
+  , probeScrollBarHover
   , scrollBarsFor
   , scrollBarLayout
   , ScrollBarLayout (..)
@@ -15,9 +17,9 @@ import Control.Monad (forM_, join, unless, when)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Maybe (MaybeT (..))
 import Data.Foldable (find)
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, isJust)
 import NanoUI.Internal.Context
-import NanoUI.Internal.Frame.Hit (topmostModalAtMouse, topmostOverlayAtMouse)
+import NanoUI.Internal.Frame.Hit (overlayHitAllowed, overlayHitRoot, topmostModalAtMouse, topmostOverlayAtMouse)
 import NanoUI.Internal.Frame.Node (readScrollNode)
 import NanoUI.Internal.Frame.Scroll.Geometry
 import NanoUI.Internal.Frame.TextArea (TextAreaBars (..), textAreaBarLayouts, textAreaScrollGeom)
@@ -26,7 +28,7 @@ import NanoUI.Internal.Monad ((<&&>))
 import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Style (Padding (..), themePanel)
-import NanoUI.Internal.Types (Rect (..), V2 (..), rectContains, rectHit, rectIntersect, rectUnion)
+import NanoUI.Internal.Types (Rect (..), Size (..), V2 (..), rectContains, rectHit, rectInflate, rectIntersect, rectUnion)
 
 applyScrollOffsets :: Context -> IO ()
 applyScrollOffsets ctx = do
@@ -300,3 +302,50 @@ tryStartScrollDrag ctx inp = do
         grab = if onThumb then along mouse - along (V2 tx ty) else along (V2 tw th) / 2
       unless onThumb $ setOffset (scrollOffsetFromThumb dir layout grab mouse)
       modifyInteraction ctx (\s -> s {isScrollDrag = Just (wid, dir, grab)})
+
+-- | The scrollbar whose thumb is being dragged, else the one under the
+-- pointer, as 'isScrollHover' holds it. While the button is down for any
+-- other gesture there is none. The search visits only the pointer nodes, as
+-- the cursor's thumb test does, so a frame pays no walk of the whole tree.
+probeScrollBarHover :: Context -> Input -> IO (Maybe (WidgetId, DirTag, Rect))
+probeScrollBarHover ctx@Context {ctxNodeArena = na} inp = do
+  mDrag <- getsInteraction ctx isScrollDrag
+  case mDrag of
+    Just (wid, dir, _) -> barWhere wid (\(d, _, _) -> d == dir) <$> grabbableBars ctx wid
+    Nothing
+      | inputMouseDown inp || not (rectContains (Rect 0 0 winW winH) mouse) -> pure Nothing
+      | otherwise -> do
+          top <- overlayHitRoot ctx mouse
+          let candidate idx = do
+                nt <- getNodeType na idx
+                pure (nt == NodeTextArea || isScrollNode nt)
+                  <&&> (rectHit <$> getNodeRect na idx <*> pure mouse)
+                  <&&> do
+                    -- A scroller's own clip is its viewport, short of its
+                    -- bars; the clip around it is its parent's.
+                    owner <- if isScrollNode nt then getParent na idx else pure idx
+                    if owner < 0 then pure True else maybe True (`rectContains` mouse) <$> getClipRect na owner
+                  <&&> (isJust <$> barAt idx)
+                  <&&> overlayHitAllowed ctx top idx
+              barAt idx = do
+                wid <- getWidgetId na idx
+                barWhere wid (\(_, l, _) -> onBar l) <$> scrollBarsFor ctx idx wid
+          findClassNodeM na PointerNodes candidate >>= maybe (pure Nothing) barAt
+  where
+    mouse = inputMousePos inp
+    Size winW winH = inputWindowSize inp
+    onBar l = rectContains (sbThumb l) mouse || rectContains (sbTrack l) mouse
+    barWhere wid p bars = (\(dir, l, _) -> (wid, dir, sbTrack l)) <$> find p bars
+
+-- | Record the scrollbar the pointer is on ('probeScrollBarHover') and
+-- repaint the bars it left and entered. Runs after layout.
+refreshScrollBarHover :: Context -> Input -> IO ()
+refreshScrollBarHover ctx inp = do
+  old <- getsInteraction ctx isScrollHover
+  new <- probeScrollBarHover ctx inp
+  unless (new == old) $ do
+    let bar (wid, dir, _) = (wid, dir)
+        -- The track's antialiased edge reaches a pixel past it.
+        damageBar (_, _, track) = damageRect ctx (rectInflate 1 track)
+    when (fmap bar old /= fmap bar new) $ mapM_ damageBar old >> mapM_ damageBar new
+    modifyInteraction ctx (\s -> s {isScrollHover = new})

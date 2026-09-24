@@ -11,6 +11,11 @@
   `leading` or `trailing` and combine with `<>`. Adornments move no other
   widget's id.
 - `buttonContent` and its variants: a button whose content is any view.
+- A scrollbar's thumb brightens while the pointer is on the bar or dragging
+  it, on scrollers, text areas and combo dropdowns. The colour,
+  `scrollBarThumbHoverColor`, comes from the same surface style as the
+  resting thumb, so an `inputStyle` or `windowStyle` that restyles one
+  restyles both.
 - A widget drawn inside another is on top of it for hover and presses.
 - `FillPolygon` and `StrokePolyline` draw ops: a simple polygon, given with
   its triangulation, and a polyline with mitered joins, both anti-aliased

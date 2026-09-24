@@ -259,9 +259,7 @@ paintScrollChrome env@PaintEnv {peDrawArena = da, peTheme = theme} idx sn (Rect 
       let base = case snSlot sn of
             ScrollBarWindow -> themeFloatingWindow theme
             _ -> themeInput theme
-          paint = paintScrollBarLayout da (scrollBarTrackColor base theme) (scrollBarThumbColor base theme)
-      mapM_ paint mV
-      mapM_ paint mH
+      paintScrollBars (peContext env) da theme base wid mV mH
       beginLayer da layer
 
 -- | A text node's lines, drawn with the metrics its span cache entry prepared

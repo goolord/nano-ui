@@ -13,7 +13,7 @@ module NanoUI.Internal.Frame.Chrome
   , paintMenuPanel
   , menuPanelBounds
   , paintMenuAccent
-  , paintScrollBarLayout
+  , paintScrollBars
   , imageIdFromText
   , paintTabHeader
   , paintTableHeader
@@ -28,7 +28,7 @@ import qualified Data.Text.Read as TR
 import NanoUI.Internal.Context
 import NanoUI.Internal.Draw (DrawArena, pushRect, pushRoundedRect, pushRoundedStroke)
 import NanoUI.Internal.Frame.Scroll.Geometry (ScrollBarLayout (..))
-import NanoUI.Internal.Id (hashWidgetId)
+import NanoUI.Internal.Id (WidgetId, hashWidgetId)
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Store (fieldInt, fieldText, findSlot)
 import NanoUI.Internal.Style
@@ -313,6 +313,20 @@ menuShadowOffset = 3
 paintMenuAccent :: DrawArena -> Theme -> Rect -> IO ()
 paintMenuAccent da theme (Rect x y _ h) =
   pushRoundedRect da (Rect x (y + 3) 2 (max 0 (h - 6))) 1 (themeAccent theme)
+
+-- | The vertical and horizontal bars of scroller @wid@ on surface @base@.
+-- The one under the pointer or being dragged ('isScrollHover') paints its
+-- thumb in 'scrollBarThumbHoverColor'.
+paintScrollBars ::
+  Context -> DrawArena -> Theme -> Style -> WidgetId -> Maybe ScrollBarLayout -> Maybe ScrollBarLayout -> IO ()
+paintScrollBars ctx da theme base wid mV mH = do
+  hover <- getsInteraction ctx isScrollHover
+  let paint dir = mapM_ (paintScrollBarLayout da (scrollBarTrackColor base theme) (thumb dir))
+      thumb dir = case hover of
+        Just (hw, hd, _) | hw == wid && hd == dir -> scrollBarThumbHoverColor base theme
+        _ -> scrollBarThumbColor base theme
+  paint DirColumn mV
+  paint DirRow mH
 
 -- | Scrollbar track and thumb, each rounded to at most 4px.
 paintScrollBarLayout :: DrawArena -> Color -> Color -> ScrollBarLayout -> IO ()
