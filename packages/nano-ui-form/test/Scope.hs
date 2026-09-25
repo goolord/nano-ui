@@ -1,7 +1,7 @@
 module Scope (check, runScopeTests) where
 
 import Control.Exception (IOException, try)
-import Control.Monad (forM, forM_, unless, void)
+import Control.Monad (filterM, forM, forM_, unless, void)
 import Data.IORef (writeIORef)
 import Data.Map.Strict qualified as Map
 import Data.Text (Text)
@@ -36,11 +36,11 @@ import NanoUI.Internal.Layout.Arena
   ( NodeType (NodeButton, NodeTextArea)
   , arenaCount
   , getNodeType
-  , getRect
+  , getNodeRect
   , getWidgetId
   )
 import NanoUI.Testing (Context, clearDirty, isDirty, newPixelContext, runFrame)
-import NanoUI.Testing.Harness (clickPair, spanCenter, warmup2, withInputOff)
+import NanoUI.Testing.Harness (runClick, spanCenter, warmup2, withInputOff)
 
 check :: String -> Bool -> IO ()
 check message ok = unless ok (fail message)
@@ -64,26 +64,26 @@ controlsOf wanted ctx = do
   let
     arena = ctxNodeArena ctx
   count <- arenaCount arena
-  concat
-    <$> forM
-      [0 .. count - 1]
-      ( \index -> do
-          nodeType <- getNodeType arena index
-          if nodeType /= wanted
-            then pure []
-            else do
-              wid <- getWidgetId arena index
-              (x, y, w, h) <- getRect arena index
-              pure [(wid, Rect x y w h)]
-      )
+  matching <- filterM (fmap (== wanted) . getNodeType arena) [0 .. count - 1]
+  forM matching $ \index -> do
+    wid <- getWidgetId arena index
+    Rect x y w h <- getNodeRect arena index
+    pure (wid, Rect x y w h)
+
+-- | Event-free input for a 400 by 240 window.
+input :: Input
+input = withInputOff 400 240
+
+-- | Click the middle of a control.
+clickOn :: Context -> NanoUI a -> Rect -> IO ()
+clickOn ctx ui rect = void (runClick ctx input ui (spanCenter rect))
 
 enabledForm :: Form Text Bool
 enabledForm = inputCheckbox "enabled" False
 
 readEnabled :: Context -> Text -> IO Bool
 readEnabled ctx prefix = do
-  (_, result) <-
-    runNanoUI ctx (withInputOff 400 240) (runNanoForm prefix enabledForm)
+  (_, result) <- runNanoUI ctx input (runNanoForm prefix enabledForm)
   case result of
     Ditto.Ok (Ditto.Proved _ value) -> pure value
     Ditto.Error _ -> fail "checkbox form unexpectedly failed validation"
@@ -92,7 +92,6 @@ testDeferredViews :: IO ()
 testDeferredViews = do
   ctx <- newPixelContext
   let
-    input = withInputOff 400 240
     ui :: NanoUI ()
     ui = columnWith fillW $ do
       (left, _) <- runNanoForm "left" enabledForm
@@ -105,10 +104,7 @@ testDeferredViews = do
       check
         "same-named fields in different forms share a widget ID"
         (leftId /= rightId)
-      let
-        (press, release) = clickPair input (spanCenter leftRect)
-      void (runFrame ctx press ui)
-      void (runFrame ctx release ui)
+      clickOn ctx ui leftRect
       _ <- warmup2 ctx input ui
       check "deferred view wrote to the wrong form" =<< readEnabled ctx "left"
       check "editing one form changed another form" . not =<< readEnabled ctx "right"
@@ -119,7 +115,6 @@ testNestedViews = do
   ctx <- newPixelContext
   setActiveFormPrefix ctx "host"
   let
-    input = withInputOff 400 240
     nested = Ditto.view (FormView (void (nanoFormLive "inner" enabledForm)))
     outer = nested *> enabledForm
     ui = nanoFormLive "outer" outer
@@ -127,10 +122,7 @@ testNestedViews = do
   controls <- checkboxes ctx
   case controls of
     [_, (_, outerRect)] -> do
-      let
-        (press, release) = clickPair input (spanCenter outerRect)
-      void (runFrame ctx press ui)
-      void (runFrame ctx release ui)
+      clickOn ctx ui outerRect
       _ <- warmup2 ctx input ui
       check "field following a nested form lost its owner" =<< readEnabled ctx "outer"
       check "outer field wrote to the nested form" . not =<< readEnabled ctx "inner"
@@ -141,8 +133,6 @@ testNestedViews = do
 testPrefixRestoration :: IO ()
 testPrefixRestoration = do
   ctx <- newPixelContext
-  let
-    input = withInputOff 400 240
   result <-
     try
       ( runNanoUI ctx input $ withFormPrefix "outer" $ withFormPrefix "inner" $ do
@@ -179,7 +169,6 @@ testSubmitPulse :: IO ()
 testSubmitPulse = do
   ctx <- newPixelContext
   let
-    input = withInputOff 400 240
     ui = nanoFormSubmit "submit" "Save" (pure (42 :: Int))
   initial <- warmup2 ctx input ui
   check "form submitted before activation" (initial == Nothing)
@@ -193,7 +182,6 @@ testResetWidgets :: IO ()
 testResetWidgets = do
   ctx <- newPixelContext
   let
-    input = withInputOff 400 240
     ui =
       columnWith fillW $
         (,)
@@ -203,11 +191,7 @@ testResetWidgets = do
   controls <- checkboxes ctx
   case controls of
     [(_, leftRect), (rightId, rightRect)] -> do
-      forM_ [leftRect, rightRect] $ \rect -> do
-        let
-          (press, release) = clickPair input (spanCenter rect)
-        void (runFrame ctx press ui)
-        void (runFrame ctx release ui)
+      forM_ [leftRect, rightRect] (clickOn ctx ui)
       edited <- warmup2 ctx input ui
       check "checkboxes did not retain their edits" (edited == (Just True, Just True))
       runNanoUI ctx input (resetForm "reset-left")
@@ -230,7 +214,6 @@ testResetTextArea :: IO ()
 testResetTextArea = do
   ctx <- newPixelContext
   let
-    input = withInputOff 400 240
     ui = nanoFormLive "reset-editor" (inputTextArea "notes" "initial")
   _ <- warmup2 ctx input ui
   controls <- controlsOf NodeTextArea ctx

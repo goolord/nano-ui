@@ -71,7 +71,7 @@ collectClippedSpans :: Context -> NodeIdx -> Rect -> SpanArena -> IO ()
 collectClippedSpans ctx@Context {ctxFontMetrics = fm} idx clip arena = do
   nt <- getNodeType (ctxNodeArena ctx) idx
   unless (isFloatingNode nt) $ do
-    (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+    Rect x y w h <- getNodeRect (ctxNodeArena ctx) idx
     mClipChildren <-
       if isScrollNode nt
         then
@@ -424,6 +424,6 @@ computeWidgetTextPlacements ctx nt idx x y w h = do
 collectFloatingSpansInto :: Context -> NodeType -> SpanArena -> IO ()
 collectFloatingSpansInto ctx wanted arena =
   forFloatingNodes_ (ctxNodeArena ctx) wanted $ \idx -> do
-    (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+    Rect x y w h <- getNodeRect (ctxNodeArena ctx) idx
     clip <- padContentClip x y w h <$> getPadding (ctxNodeArena ctx) idx
     walkChildSpans ctx idx clip arena

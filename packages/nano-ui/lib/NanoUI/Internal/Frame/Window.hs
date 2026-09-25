@@ -47,7 +47,7 @@ persistWindowPositions ctx = floatingNodeCount na >>= \floating -> when (floatin
           then pure acc
           else do
             wid <- getWidgetId na idx
-            (x, y, w, h) <- getRect na idx
+            Rect x y w h <- getNodeRect na idx
             let k = intKey wid
                 sizeKey = slotKey SlotWinSize k
             -- Keep an unchanged store as is: the write below is skipped
@@ -165,7 +165,7 @@ updateWindowResize ctx inp winW winH =
       modifyStore ctx (insertSlot fieldPoint (slotKey SlotWinSize key) (nw, nh) . insertSlot fieldPoint key (nx, ny))
       withWidgetNode ctx wid () $ \idx -> do
         mpos <- lookupWindowPos ctx wid
-        (x, y, _, _) <- getRect (ctxNodeArena ctx) idx
+        Rect x y _ _ <- getNodeRect (ctxNodeArena ctx) idx
         let ms = contextMeasurers ctx
         placeWindowNode (ctxNodeArena ctx) ms winW winH idx nw nh (const (fromMaybe (x, y) mpos))
       pure wid
@@ -187,7 +187,7 @@ resizeEdgeTarget ctx@Context {ctxNodeArena = na} mouse = runMaybeT $ do
     onLane <- liftIO $ windowBodyScroller na idx >>= \case
       Nothing -> pure False
       Just ci -> do
-        (x, y, w, h) <- getRect na ci
+        Rect x y w h <- getNodeRect na ci
         bodyPad <- getPadding na ci
         contentSize <- getNodeValue na ci
         dir <- getDirection na ci
@@ -242,7 +242,7 @@ tryStartWindowDrag ctx mouse@(V2 mx my) = fmap isJust . runMaybeT $ do
 -- | Title bar: the window's topmost child, stretched up to the window top.
 windowTitleRect :: Context -> NodeIdx -> IO (Maybe Rect)
 windowTitleRect Context {ctxNodeArena = na} idx = do
-  (_, wy, _, _) <- getRect na idx
+  Rect _ wy _ _ <- getNodeRect na idx
   best <- newIORef Nothing
   forChildNodes_ na idx $ \ci -> do
     here@(Rect _ y _ _) <- getNodeRect na ci

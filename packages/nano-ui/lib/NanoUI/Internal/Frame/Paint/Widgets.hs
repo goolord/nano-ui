@@ -22,8 +22,7 @@ import NanoUI.Internal.Font
 import NanoUI.Internal.Frame.Chrome
 import NanoUI.Internal.Frame.Node (nodeFontMetrics, resolveFontFor)
 import NanoUI.Internal.Frame.Spans (forWidgetTextPlacements_, plainFieldPen, selectableTextGeometry, textInputFg)
-import NanoUI.Internal.Frame.TextArea (drawTextAreaContentWith)
-import NanoUI.Internal.Frame.TextArea (resolveTextAreaFont)
+import NanoUI.Internal.Frame.TextArea (drawTextAreaContentWith, resolveTextAreaFont)
 import NanoUI.Internal.Frame.TextInput
 import NanoUI.Internal.Id (WidgetId (..))
 import NanoUI.Internal.Layout.Arena

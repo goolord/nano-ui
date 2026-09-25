@@ -9,7 +9,6 @@ module NanoUI.Internal.Frame.Hit
   , overlayHitAllowed
   , overlayHitRoot
   , topmostOverlayAtMouse
-  , topmostModalAtMouse
   , topmostFloating
   , widgetOverlayAllowed
   , nodeOwnsPointer
@@ -33,6 +32,8 @@ import NanoUI.Internal.WidgetText (containerFlagInert, hasFlag)
 -- | The node that carries widget id @wid@ in this frame's arena. 'Nothing' for
 -- @WidgetId 0@ and for a widget the view has not declared this frame. When
 -- several nodes carry the id, this is the one most recently indexed under it.
+-- Calling this rather than 'lookupNodeByWidgetId' in a widget's interaction
+-- code keeps the lookup out of line there, which allocates less per widget.
 findNodeByWidgetId :: Context -> WidgetId -> IO (Maybe NodeIdx)
 findNodeByWidgetId ctx wid = lookupNodeByWidgetId (ctxNodeArena ctx) wid
 
@@ -87,11 +88,6 @@ topmostOverlayAtMouse ctx mouse =
     MaybeT (topmostFloating ctx (== NodePopup) (`rectHit` mouse))
       <|> MaybeT (topmostFloating ctx (== NodeWindow) (`rectHit` mouse))
 
--- | The modal on top at @mouse@: the last one in arena order whose rect holds
--- the point.
-topmostModalAtMouse :: Context -> V2 -> IO (Maybe NodeIdx)
-topmostModalAtMouse ctx mouse = topmostFloating ctx (== NodeModal) (`rectHit` mouse)
-
 -- | The last floating node in arena order whose type satisfies @wanted@ and
 -- whose rect satisfies @at@. The frame paints the panels of one type in arena
 -- order, so among them the last one is on top.
@@ -118,9 +114,9 @@ nodeOwnsPointer ctx@Context {ctxNodeArena = na} idx =
  where
   layerOf i = maybe 0 intKey <$> walkFloatingAncestors na i (\j _ -> Just <$> getWidgetId na j)
 
--- | Whether widget @wid@ may show and use a dropdown or menu of its own. With
--- no modal open it always may. While one is open, only a widget inside the
--- top modal may.
+-- | Whether widget @wid@ is reachable past the modals: with no modal open
+-- every widget is, and while one is open, only those inside the top modal.
+-- Only such a widget shows a dropdown or menu of its own, or takes focus.
 widgetOverlayAllowed :: Context -> WidgetId -> IO Bool
 widgetOverlayAllowed ctx wid = do
   top <- topModalNode (ctxNodeArena ctx)

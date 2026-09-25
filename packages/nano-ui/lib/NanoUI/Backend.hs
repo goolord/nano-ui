@@ -55,13 +55,12 @@ module NanoUI.Backend
   , clearEphemeral
   , appendInputKey
   , appendDropEvent
-  , emptyDropEvents
   , inputInteracted
   , inputPointerHeld
-  , emptyInputKeys
   , inputKeysFromList
   , inputKeysNull
   , foldInputKeys
+  , modifiersFromBits
 
     -- * Fonts
 

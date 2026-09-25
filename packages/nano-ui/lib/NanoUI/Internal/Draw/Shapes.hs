@@ -452,12 +452,8 @@ pushStroke da x1 y1 x2 y2 thickness col
               !hy = dx * invLen
           withVerts da 4 6 $ \vp ip vOff iOff baseIdxWord -> do
             let !(r, g, b, a) = unpackColorF col
-                poke off px py = pokeVertexSIMD vp off px py r g b a whitePixel whitePixel
-            poke vOff (px1 + hx) (py1 + hy)
-            poke (vOff + 32) (px2 + hx) (py2 + hy)
-            poke (vOff + 64) (px2 - hx) (py2 - hy)
-            poke (vOff + 96) (px1 - hx) (py1 - hy)
-            pokeQuadIndices ip iOff baseIdxWord (baseIdxWord + 1) (baseIdxWord + 2) (baseIdxWord + 3)
+                !u = whitePixel
+            pokeQuadCornersSIMD vp vOff ip iOff (px1 + hx) (py1 + hy) (px2 + hx) (py2 + hy) (px2 - hx) (py2 - hy) (px1 - hx) (py1 - hy) u u u u r g b a baseIdxWord
 
 -- | A lone filled triangle with anti-aliased edges; see 'pushPolygonAA'. It
 -- moves to put the middle of its width, not its first corner, on the grid,

@@ -1,21 +1,13 @@
--- Paint traversal for NanoUI. This module owns the node walk and the
--- structural painters; widget chrome painting lives in sibling
--- NanoUI.Internal.Frame.Paint.Widgets.
---
--- The module is shaped for GHC's optimizer: the recursive walker
---
---   paintNodeWithEnv -> lowerNodeVisible (explicit dispatch)
---         -> per-node painters (containers recurse via walkChildrenWithOccluders)
---
--- sits on top of {-# NOINLINE #-} seams, and the heavyweight painters (widget
--- chrome, text, scroll containers, drawings) stay out of line, so no single
--- binding carries the whole painting body inside the recursive loop. That
--- stops the simplifier / SpecConstr from seeing one monolithic binding in the
--- loop, which is what blew up compilation under -fspecialise-aggressively +
--- LLVM; hence the guard flags below.
+-- The recursive walk (paintNodeWithEnv -> lowerNodeVisible -> the per-node
+-- painters, containers recursing through walkChildrenWithOccluders) runs
+-- through NOINLINE seams, and the heavy painters stay out of line, so no one
+-- binding carries the whole paint body inside the loop: that blew up
+-- compilation under -fspecialise-aggressively and LLVM, as the flags below
+-- also guard against.
 {-# OPTIONS_GHC -fasm -fno-specialise-aggressively #-}
 
--- | Walk solved nodes and emit geometry, respecting clips, layers, and paint scopes.
+-- | Walk solved nodes and emit geometry, respecting clips, layers, and paint
+-- scopes. Widget chrome is painted in "NanoUI.Internal.Frame.Paint.Widgets".
 module NanoUI.Internal.Frame.Paint
   ( lowerShapes
   , walkChildren
@@ -85,7 +77,7 @@ collectFloatingOccluders ctx@Context {ctxNodeArena = na} = do
       if not opaque
         then pure n
         else do
-          (x, y, w, h) <- getRect na idx
+          Rect x y w h <- getNodeRect na idx
           if not (w > 6 && h > 6)
             then pure n
             else do
@@ -106,7 +98,7 @@ collectFloatingOccluders ctx@Context {ctxNodeArena = na} = do
 {-# NOINLINE paintNodeWithEnv #-}
 paintNodeWithEnv :: PaintEnv -> NodeIdx -> IO ()
 paintNodeWithEnv env idx = do
-  (x, y, w, h) <- getRect (peNodeArena env) idx
+  Rect x y w h <- getNodeRect (peNodeArena env) idx
   Rect cx cy cw ch <- currentClip (peDrawArena env)
   let !l = max (x - paintOverhang) cx
       !t = max (y - paintOverhang) cy

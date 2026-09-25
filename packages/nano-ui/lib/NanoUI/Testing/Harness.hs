@@ -24,9 +24,11 @@ module NanoUI.Testing.Harness
   , spanRectOf
   , covers
   , clipCovers
+  , damageCovers
   , assertScrollGutterPad
   , assertWheelTitlePinned
   , findGrabHover
+  , cursorOver
   , dragWindowEdge
   , vertUv
   , checkLabelAlignEndInk
@@ -255,11 +257,7 @@ held ref widget = do
 -- | Run a press frame and a release frame at @pos@ ('clickPair'), returning
 -- the release frame's result.
 runClick :: Context -> Input -> NanoUI a -> V2 -> IO a
-runClick ctx inp0 ui pos =
-  let
-    (press, release) = clickPair inp0 pos
-   in
-    warmup ctx press ui >> evalUi ctx release ui
+runClick ctx inp0 ui pos = let (press, release) = clickPair inp0 pos in warmup ctx press ui >> evalUi ctx release ui
 
 -- | Run left press and release frames ('clickPair') through a reducer. Returns
 -- the final model, release-frame messages, and release-frame dirty flag.
@@ -299,6 +297,11 @@ covers (Rect cx cy cw ch) (Rect x y w h) =
 clipCovers :: Damage -> Rect -> Bool
 clipCovers (DamageClip clip) rect = covers clip rect
 clipCovers DamageFull _ = False
+
+-- | Whether a frame's damage covers @rect@, the whole window included.
+damageCovers :: Damage -> Rect -> Bool
+damageCovers DamageFull _ = True
+damageCovers dmg rect = clipCovers dmg rect
 
 -- | Y origins of spans whose unmodified text exactly matches the label.
 spanYOf :: T.Text -> [(Rect, T.Text, a, b, c)] -> [Float]
@@ -350,6 +353,13 @@ assertWheelTitlePinned failed ctx inp0 ui title line1 wheelAt = do
       forM_ (listToMaybe (spanYOf line1 spans1)) $ \b1 -> assertLt failed b1 b0
     _ -> assert failed False
 
+-- | Run a frame with the pointer at @pos@ and return the cursor it asks for.
+cursorOver :: Context -> Input -> NanoUI a -> V2 -> IO UiCursorKind
+cursorOver ctx inp ui pos = do
+  let hover = inp {inputMousePos = pos}
+  _ <- runFrame ctx hover ui
+  uiCursorKind ctx hover
+
 -- | Probe candidate y positions at a fixed x, running a frame for each, and
 -- return the first input that produces a grab cursor.
 findGrabHover ::
@@ -358,11 +368,8 @@ findGrabHover ctx ui inp0 thumbX = go
  where
   go [] = pure Nothing
   go (y : ys) = do
-    let
-      hover = inp0 {inputMousePos = V2 thumbX y}
-    _ <- runFrame ctx hover ui
-    kind <- uiCursorKind ctx hover
-    if kind == UiCursorGrab then pure (Just hover) else go ys
+    kind <- cursorOver ctx inp0 ui (V2 thumbX y)
+    if kind == UiCursorGrab then pure (Just inp0 {inputMousePos = V2 thumbX y}) else go ys
 
 -- | Press and move a resize handle, then run two button-up frames. Returns
 -- the window's recorded bounds, or 'Nothing' if its node is absent.

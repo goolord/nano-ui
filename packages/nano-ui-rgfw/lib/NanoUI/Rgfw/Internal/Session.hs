@@ -15,9 +15,11 @@ module NanoUI.Rgfw.Internal.Session
 import Control.Concurrent (rtsSupportsBoundThreads, runInBoundThread)
 import Control.Exception (bracket)
 import Control.Monad (void, when)
-import Data.Bits ((.&.))
+import Data.Bits ((.|.))
 import Data.Char (chr, isPrint, ord)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.List (find)
+import Data.Maybe (fromMaybe)
 import qualified Data.Text as T
 import Data.Typeable (Typeable)
 import Data.Word (Word8, Word32)
@@ -40,6 +42,7 @@ import NanoUI.Backend
   , appendInputKey
   , applyMouseButton
   , emptyInput
+  , modifiersFromBits
   )
 import NanoUI.Internal.Context
   ( Context (..)
@@ -122,14 +125,7 @@ mapRgfwKey k
 
 -- | Decode RGFW key modifier bits. Super (Cmd) counts as Ctrl.
 modsFromRgfw :: Word8 -> Modifiers
-modsFromRgfw m =
-  Modifiers
-    { modShift = has R.rgfw_modShift
-    , modCtrl = has R.rgfw_modControl || has R.rgfw_modSuper
-    , modAlt = has R.rgfw_modAlt
-    }
-  where
-    has bit = m .&. bit /= 0
+modsFromRgfw m = modifiersFromBits m R.rgfw_modShift (R.rgfw_modControl .|. R.rgfw_modSuper) R.rgfw_modAlt
 
 mapRgfwCursor :: UiCursorKind -> Word8
 mapRgfwCursor kind = case kind of
@@ -188,25 +184,19 @@ runRgfwAppReduceCustom opts getThemeAndScale updateModel initialModel view = inB
       let !initMonScale = if monScaleInit > 0.0 then monScaleInit else 1.0
       monScaleRef <- newIORef initMonScale
 
-      let resolveScale !userScale !monScale =
-            if userScale > 0.0
-              then userScale
-              else if optScale opts > 0.0
-                then optScale opts
-                else if monScale > 0.0
-                  then monScale
-                  else 1.0
-
-      let (initTheme, initScaleChoice) = getThemeAndScale initialModel
+      -- The model's scale, else the options', else the monitor's.
+      let resolveScale userScale monScale = fromMaybe 1 (find (> 0) [userScale, optScale opts, monScale])
+          -- A size in native pixels in layout units at a scale.
+          logicalSize (pw, ph) scale = Size (units pw) (units ph)
+            where
+              units v = fromIntegral (max 1 (round (fromIntegral v / scale) :: Int))
+          (initTheme, initScaleChoice) = getThemeAndScale initialModel
           !initScale = resolveScale initScaleChoice initMonScale
-          !initPhysW = optWidth opts
-          !initPhysH = optHeight opts
-          !initLogW = max 1 (round (fromIntegral initPhysW / initScale) :: Int)
-          !initLogH = max 1 (round (fromIntegral initPhysH / initScale) :: Int)
+          initPhys = (optWidth opts, optHeight opts)
 
       modelRef <- newIORef initialModel
       scaleRef <- newIORef initScale
-      winSizeRef <- newIORef (initPhysW, initPhysH)
+      winSizeRef <- newIORef initPhys
       -- The theme last applied, before squaring: comparing it with the
       -- model's theme skips rebuilding the squared theme on every frame.
       themeRef <- newIORef initTheme
@@ -221,10 +211,7 @@ runRgfwAppReduceCustom opts getThemeAndScale updateModel initialModel view = inB
       debugSampler <- newRgfwDebugSampler
       setHost ctx (RgfwDebugHost debugSampler)
       let font = getCozetteFont
-          initInp =
-            emptyInput
-              { inputWindowSize = Size (fromIntegral initLogW) (fromIntegral initLogH)
-              }
+          initInp = emptyInput {inputWindowSize = logicalSize initPhys initScale}
           -- Set the pointer shape only when the wanted kind changes.
           syncCursor c inp = do
             want <- uiCursorKind c inp
@@ -262,7 +249,6 @@ runRgfwAppReduceCustom opts getThemeAndScale updateModel initialModel view = inB
                 runFrameReduceEff runEff updateModel c curInp curModel view
               writeIORef modelRef newModel
               tUiEnd <- getMonotonicTime
-              let !uiMs = (tUiEnd - tUiStart) * 1000.0
               damage <- takeDamage c
               if damageIsEmpty damage && not paintFull
                 then do
@@ -276,17 +262,13 @@ runRgfwAppReduceCustom opts getThemeAndScale updateModel initialModel view = inB
                   renderArenaGl renderer font curScale pw ph (themeWindow frameTheme)
                       (if paintFull then DamageFull else damage) pieces drawData baseSpans overlaySpans
                   writeIORef presentedRef $! (pw, ph, curScale)
-                  tRenderEnd <- getMonotonicTime
-                  let !renderMs = (tRenderEnd - tRenderStart) * 1000.0
-
                   tSwapStart <- getMonotonicTime
                   R.swapBuffersGL win
                   tSwapEnd <- getMonotonicTime
-                  let !swapMs = (tSwapEnd - tSwapStart) * 1000.0
-                      !frameMs = (tSwapEnd - tUiStart) * 1000.0
-
                   nodes <- arenaCount (ctxNodeArena c)
-                  noteDebugPresent (rdsSampler debugSampler) uiMs renderMs swapMs frameMs
+                  let ms a b = (b - a) * 1000
+                  noteDebugPresent (rdsSampler debugSampler) (ms tUiStart tUiEnd) (ms tRenderStart tSwapStart)
+                    (ms tSwapStart tSwapEnd) (ms tUiStart tSwapEnd)
                     (drawVertexCount drawData) (drawIndexCount drawData) (drawCmdCount drawData)
                   writeIORef (rdsFrame debugSampler)
                     RgfwFrameStats
@@ -307,8 +289,8 @@ runRgfwAppReduceCustom opts getThemeAndScale updateModel initialModel view = inB
                     R.waitForEvent t
                     pollRgfwEvents win evPtr scaleRef monScaleRef winSizeRef
                 , sdApplyEvent    = applyRgfwEvent
-                , sdIsButtonEdge  = isRgfwButtonEdge
-                , sdIsSessionQuit = isRgfwSessionQuit
+                , sdIsButtonEdge  = \case RgfwEvButton {} -> True; _ -> False
+                , sdIsSessionQuit = \case RgfwEvClose -> True; _ -> False
                 , sdSyncDisplay   = \c inp -> do
                     (curWinW, curWinH) <- R.windowSize win
                     (pw0, ph0) <- readIORef winSizeRef
@@ -319,9 +301,7 @@ runRgfwAppReduceCustom opts getThemeAndScale updateModel initialModel view = inB
                     let (_, userScale) = getThemeAndScale curModel
                         !newScale = resolveScale userScale curMonScale
                     writeIORef scaleRef newScale
-                    let !lw = max 1 (round (fromIntegral pw / newScale) :: Int)
-                        !lh = max 1 (round (fromIntegral ph / newScale) :: Int)
-                    pure (c, inp { inputWindowSize = Size (fromIntegral lw) (fromIntegral lh) })
+                    pure (c, inp {inputWindowSize = logicalSize (pw, ph) newScale})
                 , sdDebug         = rdsSampler debugSampler
                 , sdContinuous    = False
                   -- Presents are unthrottled (swap interval 0, no vsync), so a
@@ -441,11 +421,3 @@ applyRgfwEvent inp ev = case ev of
       , inputModifiers = modsFromRgfw m
       }
   RgfwEvKeyRelease m -> inp {inputModifiers = modsFromRgfw m}
-
-isRgfwButtonEdge :: RgfwEvent -> Bool
-isRgfwButtonEdge (RgfwEvButton {}) = True
-isRgfwButtonEdge _ = False
-
-isRgfwSessionQuit :: RgfwEvent -> Bool
-isRgfwSessionQuit RgfwEvClose = True
-isRgfwSessionQuit _ = False

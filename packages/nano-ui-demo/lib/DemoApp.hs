@@ -1,12 +1,14 @@
 -- | What the SDL demo executables and their self-tests share: file-dialog
--- polling and a hidden window to drive a UI on.
+-- polling, image registration, and a hidden window to drive a UI on.
 module DemoApp
   ( useFileDialog
+  , registerRgba
   , withHiddenWindow
   ) where
 
+import Data.ByteString qualified as BS
 import Data.Foldable (for_)
-import NanoUI (Input (..), NanoUI, Size (..), V2 (..))
+import NanoUI (ImageId, Input (..), NanoUI, Size (..), V2 (..), freshImageId, registerImageRgba)
 import NanoUI.Backend (emptyInput)
 import NanoUI.Backend.Sdl
   ( FileDialogId
@@ -33,6 +35,14 @@ useFileDialog mdid clear onPaths =
       FileDialogPending -> pure ()
       FileDialogSelected paths -> onPaths paths >> clear Nothing
       _done -> clear Nothing
+
+-- | Register a @w@ by @h@ RGBA image under a fresh id, or 'Nothing' when the
+-- image atlas refuses it.
+registerRgba :: Int -> Int -> BS.ByteString -> NanoUI (Maybe ImageId)
+registerRgba w h pixels = do
+  iid <- freshImageId
+  ok <- registerImageRgba iid w h pixels
+  pure (if ok then Just iid else Nothing)
 
 -- | Run @k@ on a hidden, fixed @w@ by @h@ SDL window over a pixel-snapped
 -- context, with @opts@ applied to the window options. @k@ also gets the

@@ -1,7 +1,6 @@
 -- | Scrollbar geometry: gutters, viewport clips, and track and thumb layout.
 module NanoUI.Internal.Frame.Scroll.Geometry
-  ( ScrollPolicy (..)
-  , ScrollConfig (..)
+  ( ScrollConfig (..)
   , defaultScrollConfig
   , ScrollBarLayout (..)
   , ScrollNode (..)
@@ -11,6 +10,7 @@ module NanoUI.Internal.Frame.Scroll.Geometry
   , scrollBarLayout
   , scrollAxisRange
   , scrollOffsetFromThumb
+  , onScrollBar
   , padContentClip
   , encodeScrollConfig
   , decodeScrollConfig
@@ -33,7 +33,7 @@ import Data.Bits (shiftL, shiftR, testBit, (.&.), (.|.))
 import Data.Maybe (mapMaybe)
 import Data.Text (Text)
 import NanoUI.Internal.Font
-import NanoUI.Internal.Types (Color, Rect (..), V2 (..), clamp, rectH, rectIntersect, rectW, rectX, rectY, v2X, v2Y)
+import NanoUI.Internal.Types (Color, Rect (..), V2 (..), clamp, rectContains, rectH, rectIntersect, rectW, rectX, rectY, v2X, v2Y)
 import NanoUI.Internal.Layout.Arena (DirTag (..))
 import NanoUI.Internal.Style (Direction (..), Padding (..), Style (..), styleBorderWidth, windowPad)
 
@@ -303,6 +303,10 @@ scrollNodeBars sn@(ScrollNode slot cfg native2D dir pad contentMain contentW) x 
   where
     bar = scrollBarLayout slot dir x y w h pad contentMain offY
     shown d l = if scrollChromeSuppressed cfg d then Nothing else l
+
+-- | Whether @mouse@ is on a bar's thumb or track.
+onScrollBar :: V2 -> ScrollBarLayout -> Bool
+onScrollBar mouse l = rectContains (sbThumb l) mouse || rectContains (sbTrack l) mouse
 
 scrollOffsetFromThumb :: DirTag -> ScrollBarLayout -> Float -> V2 -> Float
 scrollOffsetFromThumb dir layout grabOff mouse =

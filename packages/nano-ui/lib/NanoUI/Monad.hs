@@ -14,7 +14,6 @@ module NanoUI.Monad
 
     -- * Widget ids
   , withKey
-  , keyed
   , keyedTag
   , scope
   , nextId

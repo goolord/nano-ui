@@ -15,7 +15,7 @@ import NanoUI.Internal.Layout.Arena
   , getClipRect
   , getNodeValue
   , getNodeType
-  , getRect
+  , getNodeRect
   , getScrollContentW
   , getWidgetId
   , lookupNodeByWidgetId
@@ -547,7 +547,7 @@ scrollNodeState ctx wid is2D = do
       if is2D
         then getScrollContentW na i
         else getNodeValue na i
-    (_, _, rw, rh) <- getRect na i
+    Rect _ _ rw rh <- getNodeRect na i
     pure (contentMain, if is2D then rw - padTestBoth else rh - padTestBoth)
 
 -- The other side of the pad fix: a padded 2D scroller whose child really is
@@ -784,4 +784,3 @@ runDisjointViewportHitTest ctx failed = do
   assert failed (not (respPressed pressed))
   (_, clicked) <- evalUi ctx release ui
   assert failed (not (respClicked clicked))
-

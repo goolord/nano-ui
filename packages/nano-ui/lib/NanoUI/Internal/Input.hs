@@ -5,10 +5,10 @@
 module NanoUI.Internal.Input
   ( Key (..)
   , Modifiers (..)
+  , modifiersFromBits
   , Input (..)
   , DropType (..)
   , DropEvent (..)
-  , emptyDropEvents
   , emptyInput
   , inputInteracted
   , inputPointerHeld
@@ -20,7 +20,6 @@ module NanoUI.Internal.Input
   , inputKeysElem
   , foldInputKeys
   , inputKeysFromList
-  , emptyInputKeys
   , stripInteractionInput
   , withoutPointer
   , UiCursorKind (..)
@@ -31,9 +30,10 @@ module NanoUI.Internal.Input
   , splitFrame
   ) where
 
+import Data.Bits (Bits, zeroBits, (.&.))
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Primitive.SmallArray (SmallArray, copySmallArray, emptySmallArray, newSmallArray, runSmallArray, sizeofSmallArray, smallArrayFromList)
+import Data.Primitive.SmallArray (SmallArray, copySmallArray, newSmallArray, runSmallArray, sizeofSmallArray, smallArrayFromList)
 import NanoUI.Internal.Types (Size (..), V2 (..))
 
 -- | Navigation and editing key presses. Printable text belongs in 'inputChars'.
@@ -58,6 +58,14 @@ data Modifiers = Modifiers
   , modAlt :: !Bool
   }
   deriving (Eq, Show)
+
+-- | The modifiers held in a backend's bit mask, given its bits for Shift,
+-- Ctrl and Alt.
+{-# INLINE modifiersFromBits #-}
+modifiersFromBits :: Bits a => a -> a -> a -> a -> Modifiers
+modifiersFromBits m shift ctrl alt = Modifiers (has shift) (has ctrl) (has alt)
+  where
+    has bit = m .&. bit /= zeroBits
 
 -- | OS-level drag-and-drop event kind, mirroring @SDL_EventType@ drop codes.
 data DropType
@@ -114,12 +122,12 @@ emptyInput =
     , inputMouseRightReleased = False
     , inputMouseClicks = 1
     , inputScroll = V2 0 0
-    , inputKeys = emptyInputKeys
+    , inputKeys = mempty
     , inputChars = ""
     , inputModifiers = Modifiers False False False
     , inputWindowSize = Size 800 600
     , inputDeltaTime = 0
-    , inputDrops = emptyDropEvents
+    , inputDrops = mempty
     , inputWindowRedraw = False
     }
 
@@ -202,14 +210,6 @@ applyMouseButton MouseRight False inp = inp {inputMouseRightDown = False, inputM
 inputKeysFromList :: [Key] -> SmallArray Key
 inputKeysFromList = smallArrayFromList
 
--- | Shared empty key-event array.
-emptyInputKeys :: SmallArray Key
-emptyInputKeys = emptySmallArray
-
--- | Shared empty drop-event array.
-emptyDropEvents :: SmallArray DropEvent
-emptyDropEvents = emptySmallArray
-
 -- | Whether the frame contains no key events.
 {-# INLINE inputKeysNull #-}
 inputKeysNull :: SmallArray Key -> Bool
@@ -247,10 +247,10 @@ stripInteractionInput inp =
     , inputMouseReleased = False
     , inputMouseRightPressed = False
     , inputMouseRightReleased = False
-    , inputKeys = emptyInputKeys
+    , inputKeys = mempty
     , inputChars = ""
     , inputScroll = V2 0 0
-    , inputDrops = emptyDropEvents
+    , inputDrops = mempty
     }
 
 -- | The frame as it looks from somewhere the pointer does not reach: under a

@@ -61,25 +61,19 @@ keyedTag = 0xC2B2AE3D27D4EB4F
 -- sibling position and the supplied tag.
 {-# INLINE enterScope #-}
 enterScope :: Word64 -> IdContext -> (IdContext, IdContext)
-enterScope tag parent =
-  let
-    IdContext pid sib = parent
-    child = IdContext (mix64 (mix64 pid sib) tag) 0
-    parent' = parent {siblingId = sib + 1}
-   in
-    (parent', child)
+enterScope tag parent = enterChild (siblingId parent) tag parent
 
 -- | Return the advanced parent and a child path derived from the key, not the
 -- sibling position. Keys must be unique within the parent.
 {-# INLINE enterKeyed #-}
 enterKeyed :: Word64 -> IdContext -> (IdContext, IdContext)
-enterKeyed tag parent =
-  let
-    IdContext pid sid = parent
-    child = IdContext (mix64 (mix64 pid tag) keyedTag) 0
-    parent' = parent {siblingId = sid + 1}
-   in
-    (parent', child)
+enterKeyed tag = enterChild tag keyedTag
+
+-- | The parent advanced past one child, and that child's context, hashed
+-- from the parent's path, @seed@ and @tag@.
+{-# INLINE enterChild #-}
+enterChild :: Word64 -> Word64 -> IdContext -> (IdContext, IdContext)
+enterChild seed tag (IdContext pid sib) = (IdContext pid (sib + 1), IdContext (mix64 (mix64 pid seed) tag) 0)
 
 -- | Hash the call site's package, module, file, line, and column. Repeated
 -- calls at one source location return the same id; this is not a list-item key.

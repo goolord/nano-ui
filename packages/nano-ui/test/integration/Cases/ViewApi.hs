@@ -61,8 +61,7 @@ runHoldFocusTest ctx failed = do
         (,) wid <$> focusedWidget
   (wid, focused) <- warmup2 ctx inp ui
   assertEq failed focused wid
-  ring <- readIORef (ctxFocusVisible ctx)
-  assertEq failed ring False
+  assertEq failed False =<< readIORef (ctxFocusVisible ctx)
   writeIORef holding False
   (_, released) <- warmup2 ctx inp ui
   assertEq failed released (WidgetId 0)
@@ -124,8 +123,7 @@ runClipboardTest ctx0 failed = do
       inp = withInput 400 300
   ((empty, _), _, _, _) <- runFrame ctx inp ((,) <$> getClipboard <*> setClipboard "copied")
   assertEq failed empty Nothing
-  stored <- readIORef board
-  assertEq failed stored (Just "copied")
+  assertEq failed (Just "copied") =<< readIORef board
   ((pasted, _), _, _, _) <- runFrame ctx inp ((,) <$> getClipboard <*> pure ())
   assertEq failed pasted (Just "copied")
 
@@ -148,12 +146,9 @@ runPointerTrackTest ctx failed = do
         void (warmup2 ctx from ui)
         settle from 50
         needsRedraw ctx from to
-  overTracked <- needsAfter (at 20 50) (at 30 50)
-  assert failed overTracked
-  overPlain <- needsAfter (at 120 50) (at 130 50)
-  assertEq failed overPlain False
-  crossing <- needsAfter (at 120 50) (at 20 50)
-  assert failed crossing
+  assert failed =<< needsAfter (at 20 50) (at 30 50)
+  assertEq failed False =<< needsAfter (at 120 50) (at 130 50)
+  assert failed =<< needsAfter (at 120 50) (at 20 50)
 
 -- | 'contentKeyOf' tells apart what 'contentKey' would round together, keeps
 -- the order of its parts, and never gives the "no key" 0.
@@ -204,15 +199,13 @@ runPaneGridInitialTest ctx failed = do
               liftIO (forM_ laid (modifyIORef' firstLaid . IM.insertWith (\_ old -> old) (fromIntegral pid)))
               _ <- customWidgetWithId body defaultCustomWidgetSpec {widgetLayout = fillW (fillH defaultLayout)}
               wantSplit <- liftIO (readIORef splitIt)
-              if wantSplit && pid == 20
-                then do
-                  liftIO (writeIORef splitIt False)
-                  void (pgcSplit pctx AxisH)
-                else pure ()
+              when (wantSplit && pid == 20) $ do
+                liftIO (writeIORef splitIt False)
+                void (pgcSplit pctx AxisH)
               pure (PaneView "P" False Nothing)
           }
       ui = paneGrid cfg
-      frames inp n = forM_ [1 .. n :: Int] $ \_ -> void (runFrame ctx inp ui)
+      frames inp n = replicateM_ n (runFrame ctx inp ui)
       widthOf p want = do
         ms <- readIORef rects
         assertJust failed (IM.lookup p ms) $ \r ->
@@ -260,7 +253,7 @@ runPaneGridInitialOnceTest ctx failed = do
   PaneGridResponse {pgrPanes = start} <- warmup2 ctx inp ui
   assertEq failed start [10, 20]
   writeIORef closing True
-  forM_ [1 .. 3 :: Int] $ \_ -> void (runFrame ctx inp ui)
+  replicateM_ 3 (runFrame ctx inp ui)
   writeIORef closing False
   (PaneGridResponse {pgrPanes = after}, _, _, _) <- runFrame ctx inp ui
   (PaneGridResponse {pgrPanes = again}, _, _, _) <- runFrame ctx inp ui
@@ -278,8 +271,7 @@ runPaneGridUnfocusableTest ctx failed = do
         pure (resp, focus)
   _ <- warmup2 ctx inp (ui False)
   _ <- runFrame ctx (tabInp inp) (ui False)
-  ((_, notFocused), _, _, _) <- runFrame ctx inp (ui False)
-  assertEq failed notFocused (WidgetId 0)
+  assertEq failed (WidgetId 0) . snd =<< evalUi ctx inp (ui False)
   _ <- runFrame ctx (tabInp inp) (ui True)
   ((_, focused), _, _, _) <- runFrame ctx inp (ui True)
   assert failed (focused /= WidgetId 0)
@@ -300,7 +292,7 @@ runScrollUiTest ctx failed = do
           void (customWidget defaultCustomWidgetSpec {widgetLayout = fixedWH 180 1000 defaultLayout})
         m <- getScrollMetricsUi sid'
         pure (sid == sid', m)
-      settle = forM_ [1 .. 3 :: Int] $ \_ -> void (runFrame ctx inp ui)
+      settle = replicateM_ 3 (runFrame ctx inp ui)
       offsetNow = do
         ((_, m), _, _, _) <- runFrame ctx inp ui
         pure (fmap (v2Y . scrollOffset) m)
@@ -310,13 +302,11 @@ runScrollUiTest ctx failed = do
   -- A row at 500..520 comes into view at the viewport's foot.
   writeIORef command (Just (\sid -> scrollRectIntoViewUi sid (Rect 0 500 1 20) ScrollNearest ScrollInstant))
   settle
-  near <- offsetNow
-  assertJust failed near $ \y -> assert failed (y >= 320 && y <= 500)
+  assertJustM failed offsetNow $ \y -> assert failed (y >= 320 && y <= 500)
   -- Past the end: held to the range.
   writeIORef command (Just (\sid -> setScrollOffsetUi sid (V2 0 5000)))
   settle
-  end <- offsetNow
-  assertJust failed end $ \y -> assert failed (y <= 1000 - 150)
+  assertJustM failed offsetNow $ \y -> assert failed (y <= 1000 - 150)
   -- Half a page back up.
   before <- offsetNow
   writeIORef command (Just (\sid -> scrollPagesUi sid (V2 0 (-0.5)) ScrollInstant))
@@ -341,9 +331,7 @@ runTakeEscapeTest ctx failed = do
   assertEq failed (first, again) (True, False)
   -- Open the field's right-click menu: that Escape closes the menu instead.
   let (press, release) = rightClickPair inp (centerOf resp)
-  _ <- runFrame ctx press ui
-  _ <- runFrame ctx release ui
-  _ <- runFrame ctx inp ui
+  mapM_ (\i -> runFrame ctx i ui) [press, release, inp]
   ((_, forMenu, _), _, _, _) <- runFrame ctx esc ui
   assertEq failed forMenu False
 

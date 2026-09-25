@@ -23,7 +23,7 @@ import Data.IntSet qualified as IS
 
 import NanoUI.Internal.Animation
 import NanoUI.Internal.Context.Core (damageFull, damageKey, getsDamage, markDirtyCovered)
-import NanoUI.Internal.Context.Types (AnimationState (..), Context (..), DamageState (..), ScrollState (..), intKey)
+import NanoUI.Internal.Context.Types (AnimationState (..), Context (..), DamageState (..), PrevFrame (..), ScrollState (..), intKey)
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Layout.Arena (getNodeRect, lookupNodeByKey)
 import NanoUI.Internal.Types (DamageBounds (..), Rect, defaultDamageSlop, rectNonEmpty)
@@ -145,7 +145,7 @@ setAnimationValue ctx wid val = settleKey ctx (intKey wid) val
 -- that nothing held.
 tickAnimations :: Context -> Float -> IO ()
 tickAnimations ctx dt = do
-  rects <- getsDamage ctx dsPrevRects
+  rects <- getsDamage ctx (pfRects . dsPrev)
   modifyIORef' (ctxAnimationState ctx) $ \as0 ->
     let as = lapseRest rects (lapseKeepAlive as0)
      in if IM.null (asAnimations as)
@@ -213,7 +213,7 @@ lapseKeepAlive as
 -- paced rate; marking the context dirty would schedule them unpaced.
 repaintIfOrphan :: Context -> Int -> IO ()
 repaintIfOrphan ctx key = do
-  hadRect <- IM.member key <$> getsDamage ctx dsPrevRects
+  hadRect <- getsDamage ctx (IM.member key . pfRects . dsPrev)
   hasNow <- nodeHasKey ctx key
   unless (hadRect || hasNow) (damageFull ctx)
 

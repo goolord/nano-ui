@@ -30,32 +30,26 @@ runModalOverlayTest ctx failed = do
   assert failed (not (respClicked dlgClosed))
   assert failed (case mInsideClosed of Nothing -> True; _ -> False)
   closedSpans <- collectOverlayTextSpans ctx inp0
-  assert failed (not (any (\(_, txt, _, _, _) -> "Title" `T.isInfixOf` txt) closedSpans))
+  assert failed (not (hasText "Title" closedSpans))
 
   (_, _, mInside0) <- warmup2 ctx inp0 ui
   overlays <- collectOverlayTextSpans ctx inp0
-  assert failed (any (\(_, txt, _, _, _) -> "Title" `T.isInfixOf` txt) overlays)
-  assert failed (any (\(_, txt, _, _, _) -> "Inside" `T.isInfixOf` txt) overlays)
+  assert failed (hasText "Title" overlays && hasText "Inside" overlays)
   assert failed (not (any (\(_, txt, _, _, _) -> T.strip txt == "X") overlays))
 
   assertJust failed mInside0 $ \inside -> do
-    let (pressIn, releaseIn) = clickPair inp0 (centerOf inside)
-    _ <- runFrame ctx pressIn ui
-    ((_, _, mClicked), _, _, _) <- runFrame ctx releaseIn ui
+    (_, _, mClicked) <- runClick ctx inp0 ui (centerOf inside)
     assert failed (maybe False respClicked mClicked)
 
-    let (backdrop, _) = clickPair inp0 (V2 4 4)
-    ((_, dlgHit, _), _, _, _) <- runFrame ctx backdrop ui
+    (_, dlgHit, _) <- evalUi ctx (pressAt inp0 (V2 4 4)) ui
     assert failed (respClicked dlgHit)
 
     let esc = keyInp KeyEscape inp0
     ((_, dlgEsc, _), _, _, _) <- runFrame ctx esc ui
     assert failed (respClicked dlgEsc)
-    consumed <- overlayConsumesQuit ctx esc
-    assert failed consumed
+    assert failed =<< overlayConsumesQuit ctx esc
     _ <- runFrame ctx esc closedUi
-    leftover <- overlayConsumesQuit ctx esc
-    assert failed (not leftover)
+    assert failed . not =<< overlayConsumesQuit ctx esc
 
   let tallUi = modal True "Tall" $ do
         forM_ [1 .. 40 :: Int] (\i -> label (T.pack ("Row " <> show i)))
@@ -100,8 +94,7 @@ runModalCloseDamageTest ctx failed = do
   -- Opening: the click frame runs the view a second time with the flag set,
   -- builds the modal, and repaints the whole window (floating panel change).
   _ <- runClick ctx inp0 ui (centerOf resp)
-  dmgOpen <- takeDamage ctx
-  assertEq failed dmgOpen DamageFull
+  assertEq failed DamageFull =<< takeDamage ctx
   -- The idle frame after only settles the button's release, as a clip: the
   -- store write behind the open is damaged per key, not whole-window.
   _ <- runFrame ctx idle ui
@@ -110,8 +103,7 @@ runModalCloseDamageTest ctx failed = do
   assert failed (not (damageIsEmpty dmgIdle))
   -- Closing: the escape frame removes the modal and repaints the whole window.
   _ <- runFrame ctx esc ui
-  dmgEsc <- takeDamage ctx
-  assertEq failed dmgEsc DamageFull
+  assertEq failed DamageFull =<< takeDamage ctx
 
 -- At fractional display scales, fixed-size content must fit a content-sized
 -- modal without accumulating rounding error through nested containers.
@@ -142,12 +134,10 @@ runModalFractionalScaleNoScrollTest _ failed =
           spans1 <- collectOverlayTextSpans c wheel
           assert failed (not (null (spanYOf "Field 1" spans0)))
           pure (spanYOf "Field 1" spans1 /= spanYOf "Field 1" spans0)
-    fits <- scrolls ctx inp
-    assertEq failed fits False
+    assertEq failed False =<< scrolls ctx inp
     -- The same body in a short window does scroll, so the check can fail.
     short <- newContext
-    clipped <- scrolls (withFontMetrics short ((monospaceMetrics 12) {fmSnapScale = scale})) (withInputOff 1000 300)
-    assertEq failed clipped True
+    assertEq failed True =<< scrolls (withFontMetrics short ((monospaceMetrics 12) {fmSnapScale = scale})) (withInputOff 1000 300)
 
 -- A modal widens for a filling label so it stays on one line when space permits.
 runModalFitsTextTest :: Context -> IORef Int -> IO ()

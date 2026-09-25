@@ -35,26 +35,9 @@ runNoThunksTest ctx failed = do
   checkAll failed "storePoint" (storePoint store)
   checkAll failed "storeQuiet" (storeQuiet store)
   where
-    checkAll ::
-      NoThunks v => IORef Int -> String -> IM.IntMap v -> IO ()
+    checkAll :: NoThunks v => IORef Int -> String -> IM.IntMap v -> IO ()
     checkAll failed' what m =
-      IM.foldlWithKey'
-        (\acc !k !v -> acc >> checkOne failed' what k v)
-        (pure ())
-        m
-
-    checkOne :: NoThunks v => IORef Int -> String -> Int -> v -> IO ()
-    checkOne failed' what k v = do
-      result <- noThunks [] v
-      case result of
-        Nothing -> pure ()
-        Just info -> do
-          putStrLn
-            ( "thunks retained in "
-                ++ what
-                ++ " at key "
-                ++ show k
-                ++ ": "
-                ++ show info
-            )
-          assert failed' False
+      forM_ (IM.toList m) $ \(k, !v) ->
+        noThunks [] v >>= mapM_ (\info -> do
+          putStrLn ("thunks retained in " ++ what ++ " at key " ++ show k ++ ": " ++ show info)
+          assert failed' False)

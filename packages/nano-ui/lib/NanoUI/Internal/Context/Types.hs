@@ -19,6 +19,8 @@ module NanoUI.Internal.Context.Types
   , DamageRequest (..)
   , DamageState (..)
   , initialDamageState
+  , PrevFrame (..)
+  , emptyPrevFrame
   , OverlayState (..)
   , initialOverlayState
   , AnimationState (..)
@@ -259,14 +261,25 @@ data DamageState = DamageState
   -- and the clip is the one piece.
   , dsRequests :: ![DamageRequest]
   , dsLastWindowSize :: !Size
-  , dsPrevRects :: !(IntMap Rect)
-  , dsPrevClips :: !(IntMap Rect)
-  , dsPrevOuterClips :: !(IntMap Rect)
-  -- ^ For scroll containers and panels, the clip each is painted in: the one
-  -- around it, where 'dsPrevClips' holds the smaller one it gives its
-  -- content. Damage clips a node's own rect by it.
-  , dsPrevNodeTexts :: !(IntMap Text)
+  , dsPrev :: !PrevFrame
   }
+
+-- | What the last finished frame laid out, by widget key
+-- ('NanoUI.Internal.Damage.updatePrevRects'), for the next frame's damage to
+-- diff against.
+data PrevFrame = PrevFrame
+  { pfRects :: !(IntMap Rect)
+  , pfClips :: !(IntMap Rect)
+  -- ^ The viewport clip of each key in 'pfRects' that has one.
+  , pfOuterClips :: !(IntMap Rect)
+  -- ^ For scroll containers and panels, the clip each is painted in: the one
+  -- around it, where 'pfClips' holds the smaller one it gives its content.
+  , pfTexts :: !(IntMap Text)
+  -- ^ The text of text and image nodes.
+  }
+
+emptyPrevFrame :: PrevFrame
+emptyPrevFrame = PrevFrame IM.empty IM.empty IM.empty IM.empty
 
 -- | Require a first frame and full repaint, with no previous geometry.
 initialDamageState :: DamageState
@@ -277,10 +290,7 @@ initialDamageState = DamageState
   , dsDamagePieces = []
   , dsRequests = []
   , dsLastWindowSize = Size 0 0
-  , dsPrevRects = IM.empty
-  , dsPrevClips = IM.empty
-  , dsPrevOuterClips = IM.empty
-  , dsPrevNodeTexts = IM.empty
+  , dsPrev = emptyPrevFrame
   }
 
 -- | Current modal nesting and previous floating-panel bounds/order used for

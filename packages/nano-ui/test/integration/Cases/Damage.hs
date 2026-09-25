@@ -3,6 +3,7 @@ module Cases.Damage (tests) where
 import Spec
 import Data.Maybe (listToMaybe)
 import Data.Text qualified as T
+import Data.Primitive.SmallArray (smallArrayFromList)
 
 tests :: [Spec]
 tests =
@@ -18,6 +19,16 @@ tests =
   , spec "damage-pieces-far-labels" runFarLabelsDamagePiecesTest
   , spec "damage-hook-paint-change" runHookPaintChangeDamageTest
   , spec "damage-float-hook-paint-change" runFloatHookPaintChangeDamageTest
+  , spec "panel-shrink-damage-hovered" (runPanelResizeDamageTest True 100 60)
+  , spec "panel-shrink-damage" (runPanelResizeDamageTest False 100 60)
+  , spec "panel-grow-damage" (runPanelResizeDamageTest False 60 100)
+  , spec "scroller-shrink-damage" (runScrollerResizeDamageTest 100 60)
+  , spec "scroller-grow-damage" (runScrollerResizeDamageTest 60 100)
+  , spec "panel-steady-no-damage" runPanelSteadyNoDamageTest
+  , spec "drawing-shrink-damage" runDrawingShrinkDamageTest
+  , spec "hovered-button-shrink-damage" runHoveredButtonShrinkDamageTest
+  , spec "root-overflow-grow-damage" (runRootOverflowDamageTest 40 20)
+  , spec "root-overflow-shrink-damage" (runRootOverflowDamageTest 20 30)
   ]
 
 -- | Far-apart rects stay apart, near ones merge, and a frame never has more
@@ -299,3 +310,60 @@ runFloatHookPaintChangeDamageTest ctx failed = do
   _ <- runClick ctx inp0 ui (centerOf resp)
   dmg <- takeDamage ctx
   assertEq failed dmg DamageFull
+
+-- | Run @warm@ frames of @ui from@ and one of @ui to@, which lay out a node at
+-- @rect from@ and @rect to@ (as @holds@ checks): the last repaints both rects.
+widthChange :: Int -> (Rect -> [Rect] -> Bool) -> Input -> (Float -> NanoUI a) -> (Float -> Rect) -> Float -> Float -> Context -> IORef Int -> IO ()
+widthChange warm holds inp ui rect from to ctx failed = do
+  replicateM_ warm (runFrame ctx inp (ui from))
+  assert failed . holds (rect from) =<< arenaRects ctx
+  _ <- takeDamage ctx
+  _ <- runFrame ctx inp (ui to)
+  assert failed . holds (rect to) =<< arenaRects ctx
+  assert failed . (`damageCovers` rect (max from to)) =<< takeDamage ctx
+
+-- | A panel, which paints but has no widget id, repaints its old and new rects,
+-- with the pointer on its button (whose hover fade keeps the frame clipped) or away.
+runPanelResizeDamageTest :: Bool -> Float -> Float -> Context -> IORef Int -> IO ()
+runPanelResizeDamageTest hovered =
+  widthChange 2 elem (withInput 300 200) {inputMousePos = if hovered then V2 10 10 else V2 (-10) (-10)}
+    (\w -> panelWith (fixedWH w 40) (void (buttonWith (fixedWH 30 20) ""))) (\w -> Rect 0 0 w 40)
+
+-- | A scroller repaints its old and new rects whole, well and bar lane included,
+-- not only the viewport it clips its hovered content to.
+runScrollerResizeDamageTest :: Float -> Float -> Context -> IORef Int -> IO ()
+runScrollerResizeDamageTest =
+  widthChange 2 elem (withInput 300 200) {inputMousePos = V2 10 10}
+    (\w -> column (scrollWith (fixedWH w 60) (replicateM_ 6 (buttonWith (fixedWH 30 20) "")))) (\w -> Rect 3 3 w 60)
+
+-- | A panel that stays put adds no damage to a frame where nothing changed.
+runPanelSteadyNoDamageTest :: Context -> IORef Int -> IO ()
+runPanelSteadyNoDamageTest ctx failed = do
+  let ui = column (panelWith (fixedWH 100 40) (void (buttonWith (fixedWH 30 20) "")) >> panelWith (fixedWH 80 40) (label "second"))
+  _ <- warmup2 ctx (withInputOff 300 200) ui >> takeDamage ctx
+  _ <- runFrame ctx (withInputOff 300 200) ui
+  assertEq failed (DamageClip (Rect 0 0 0 0)) =<< takeDamage ctx
+
+-- | A shrinking root drawing repaints the strip it vacated, not clipping its old
+-- rect to its new one; the pointer's hover fade keeps the frame clipped.
+runDrawingShrinkDamageTest :: Context -> IORef Int -> IO ()
+runDrawingShrinkDamageTest =
+  widthChange 1 (\r -> (== [r])) (withInput 200 100) (`redDrawing` 20) (\w -> Rect 0 0 w 20) 40 20
+
+-- | So does a hovered button shrinking with its column.
+runHoveredButtonShrinkDamageTest :: Context -> IORef Int -> IO ()
+runHoveredButtonShrinkDamageTest =
+  widthChange 2 elem (withInput 200 100) {inputMousePos = V2 5 5} (\w -> column (buttonWith (fixedWH w 20) "")) (\w -> Rect 3 3 w 20) 40 20
+
+-- | A drawing overflowing a short root repaints all it drew when it shrinks to
+-- @dh@ and the root goes to @h@: the root clips to the window, not its own rect.
+runRootOverflowDamageTest :: Float -> Float -> Context -> IORef Int -> IO ()
+runRootOverflowDamageTest h dh ctx failed = do
+  let inp = (withInput 200 100) {inputMousePos = V2 1 1}
+      ui rootH drawH = columnWith (fixedWH 40 rootH . padAll 0) (redDrawing 40 drawH)
+  _ <- warmup2 ctx inp (ui 20 40) >> takeDamage ctx
+  _ <- runFrame ctx inp (ui h dh)
+  assert failed . (`damageCovers` Rect 0 0 40 40) =<< takeDamage ctx
+
+redDrawing :: Float -> Float -> NanoUI ()
+redDrawing w h = void (drawing (fixedWH w h) (\r -> smallArrayFromList [FillRect r (colorRGBA 255 0 0 255)]))

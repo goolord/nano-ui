@@ -19,7 +19,7 @@ import Control.Monad.Trans.Maybe (MaybeT (..))
 import Data.Foldable (find)
 import Data.Maybe (fromMaybe, isJust)
 import NanoUI.Internal.Context
-import NanoUI.Internal.Frame.Hit (overlayHitAllowed, overlayHitRoot, topmostModalAtMouse, topmostOverlayAtMouse)
+import NanoUI.Internal.Frame.Hit (overlayHitAllowed, overlayHitRoot, topmostFloating, topmostOverlayAtMouse)
 import NanoUI.Internal.Frame.Node (readScrollNode)
 import NanoUI.Internal.Frame.Scroll.Geometry
 import NanoUI.Internal.Frame.TextArea (TextAreaBars (..), textAreaBarLayouts, textAreaScrollGeom)
@@ -43,7 +43,7 @@ applyScrollOffsets ctx (Size w h) = do
 transformSubtree :: Context -> NodeIdx -> Float -> Float -> Rect -> IO ()
 transformSubtree ctx@Context {ctxNodeArena = na} idx scrollX scrollY parentClip = do
   nt <- getNodeType na idx
-  (lx, ly, vw, vh) <- getRect na idx
+  Rect lx ly vw vh <- getNodeRect na idx
   let
     floating = isFloatingNode nt
     (sx, sy) = if floating then (0, 0) else (scrollX, scrollY)
@@ -193,12 +193,12 @@ findScrollNodeUnderMouse ctx mouse = do
   if count <= 0
     then pure Nothing
     else do
+      -- The modal on top at the pointer, else the window or popup there.
       top <-
         runMaybeT $
-          MaybeT (topmostModalAtMouse ctx mouse)
+          MaybeT (topmostFloating ctx (== NodeModal) (`rectHit` mouse))
             <|> MaybeT (topmostOverlayAtMouse ctx mouse)
-      let
-        start = fromMaybe 0 top
+      let start = fromMaybe 0 top
       rect <- getNodeRect (ctxNodeArena ctx) start
       queryScrollTarget ctx mouse rect start
 
@@ -226,7 +226,7 @@ scrollHitSelf ctx idx nt mouse clip
 scrollHitClip :: Context -> NodeIdx -> NodeType -> Rect -> IO (Maybe Rect)
 scrollHitClip Context {ctxNodeArena = na} idx nt parentClip
   | isScrollNode nt = do
-      (x, y, w, h) <- getRect na idx
+      Rect x y w h <- getNodeRect na idx
       sn <- readScrollNode na idx
       let
         lane d = scrollChromeLane (snSlot sn) d x y w h (snPad sn)
@@ -258,7 +258,7 @@ scrollBarsFor ctx@Context {ctxNodeArena = na} idx wid = do
   if nt == NodeTextArea
     then (\(field, tab) -> bars True (textAreaBarLayouts field tab curX curY)) <$> textAreaScrollGeom ctx idx
     else do
-      (x, y, w, h) <- getRect na idx
+      Rect x y w h <- getNodeRect na idx
       sn <- readScrollNode na idx
       pure (bars (sn2D sn) (scrollNodeBars sn x y w h curX curY))
 
@@ -295,9 +295,7 @@ tryStartScrollDrag ctx inp = do
   forM_ mIdx $ \hitIdx -> do
     wid <- getWidgetId (ctxNodeArena ctx) hitIdx
     bars <- grabbableBars ctx wid
-    let
-      onBar (_, l, _) = rectContains (sbThumb l) mouse || rectContains (sbTrack l) mouse
-    forM_ (find onBar bars) $ \(dir, layout, setOffset) -> do
+    forM_ (find (\(_, l, _) -> onScrollBar mouse l) bars) $ \(dir, layout, setOffset) -> do
       let
         Rect tx ty tw th = sbThumb layout
         along (V2 mx my) = if dir == DirColumn then my else mx
@@ -332,12 +330,11 @@ probeScrollBarHover ctx@Context {ctxNodeArena = na} inp = do
                   <&&> overlayHitAllowed ctx top idx
               barAt idx = do
                 wid <- getWidgetId na idx
-                barWhere wid (\(_, l, _) -> onBar l) <$> scrollBarsFor ctx idx wid
+                barWhere wid (\(_, l, _) -> onScrollBar mouse l) <$> scrollBarsFor ctx idx wid
           findClassNodeM na PointerNodes candidate >>= maybe (pure Nothing) barAt
   where
     mouse = inputMousePos inp
     Size winW winH = inputWindowSize inp
-    onBar l = rectContains (sbThumb l) mouse || rectContains (sbTrack l) mouse
     barWhere wid p bars = (\(dir, l, _) -> (wid, dir, sbTrack l)) <$> find p bars
 
 -- | Record the scrollbar the pointer is on ('probeScrollBarHover') and

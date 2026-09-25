@@ -2,8 +2,8 @@ module Main (main) where
 
 import Control.Monad (forM, forM_, replicateM_, unless, void, when)
 import Control.Monad.IO.Class (liftIO)
-import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
-import Data.Primitive.SmallArray (SmallArray, indexSmallArray, sizeofSmallArray, smallArrayFromList)
+import Data.IORef (atomicModifyIORef', newIORef, readIORef)
+import Data.Primitive.SmallArray (indexSmallArray, sizeofSmallArray, smallArrayFromList)
 import GHC.Clock (getMonotonicTimeNSec)
 import GHC.Stats (RTSStats (..), getRTSStats)
 import System.IO (hSetBuffering, stdout, BufferMode(LineBuffering))
@@ -16,16 +16,11 @@ import qualified Data.Text as T
 
 import NanoUI
 import NanoUI.Backend (Damage (..), emptyInput)
-import NanoUI.Backend.Sdl
-  ( SdlEnv (..)
-  , sdlDrawFrame
-  , syncDisplay
-  , withSdlBench
-  )
+import NanoUI.Backend.Sdl (sdlDrawFrame, syncDisplay, withSdlBench)
 import NanoUI.Internal.Debug (debugCadence, newDebugSampler, refreshDebugSnapshot)
 import NanoUI.Diagrams
 import NanoUI.Internal.Context (ctxNodeArena)
-import NanoUI.Internal.Layout.Arena (NodeType (NodeButton), findNodeRevM, getNodeType, getRect, getText)
+import NanoUI.Internal.Layout.Arena (NodeType (NodeButton), findNodeRevM, getNodeType, getNodeRect, getText)
 import NanoUI.Testing
   ( Context
   , newPixelContext
@@ -48,6 +43,7 @@ import DemoData
   , sineCosineChart
   , weeklyBars
   )
+import DemoApp (registerRgba)
 import SdlDemo (demoUi)
 
 iterations :: Int
@@ -106,18 +102,14 @@ main = do
       (drawVertexCount dd) (drawIndexCount dd) (drawCmdCount dd)
 
     putStrLn "--- 1b. DEMO UI WITH DEBUG WINDOW OPEN ---"
+    -- Live stats can move the toolbar between workloads, so find the button
+    -- after them.
     spansLatest <- collectTextSpans ctx'
     case findExact "Debug" spansLatest of
       Nothing -> putStrLn "  Debug button not found\n"
-      Just _ -> do
+      Just pos -> do
         alreadyOpen <- debugPanelOpen ctx'
-        -- Live stats can move the toolbar between workloads, so find the
-        -- button again before clicking it.
-        unless alreadyOpen $ do
-          currentSpans <- collectTextSpans ctx'
-          case findExact "Debug" currentSpans of
-            Nothing -> fail "Debug button missing during profiling"
-            Just pos -> Harness.clickPos drawDemo inp pos
+        unless alreadyOpen (Harness.clickPos drawDemo inp pos)
         opened <- debugPanelOpen ctx'
         unless opened (fail "Debug Open workload did not open the debug window")
         measureBench "Full DemoUi (Debug Open, SDL Present)" (drawDemo inp)
@@ -131,16 +123,17 @@ main = do
         measureBench "Debug Open, ForceFull replay" $
           void (sdlDrawFrame ctx' demoUi sdlEnv inp True)
         churnCtx <- newPixelContext
-        churnCounter <- newIORef (0 :: Int)
+        nextChurn <- newCounter 0
+        let churnFrame = nextChurn >>= \k -> void (runFrame churnCtx inp (churnWindowUi k))
         void (runFrame churnCtx inp (churnWindowUi 0))
-        (f0, c0, e0) <- countDamageKinds churnCtx iterations (churnFrame churnCtx inp churnCounter)
+        (f0, c0, e0) <- countDamageKinds churnCtx iterations churnFrame
         printf "  -> Churn damage over %d frames: Full=%d Clip=%d Empty=%d\n"
           iterations f0 c0 e0
-        measureBench "Win content churn (text 1..9ch)" $
-          churnFrame churnCtx inp churnCounter
-        sweepCounter <- newIORef (0 :: Int)
-        measureBench "Debug Open, hover sweep" $
-          hoverSweepFrame ctx' demoUi sdlEnv inp sweepCounter
+        measureBench "Win content churn (text 1..9ch)" churnFrame
+        nextSweep <- newCounter 0
+        measureBench "Debug Open, hover sweep" $ do
+          i <- nextSweep
+          void (sdlDrawFrame ctx' demoUi sdlEnv inp {inputMousePos = V2 1130 (110 + fromIntegral (i `mod` 300))} False)
         putStrLn "--- 5b. IDLE CADENCE (debug gating) ---"
         cadRef <- newDebugSampler
         let cadence = do
@@ -161,7 +154,7 @@ main = do
         case closeNode of
           Nothing -> fail "Debug close button missing during profiling"
           Just i -> do
-            (x, y, w, h) <- getRect arena i
+            Rect x y w h <- getNodeRect arena i
             Harness.clickPos drawDemo inp (Harness.spanCenter (Rect x y w h))
         stillOpen <- debugPanelOpen ctx'
         when stillOpen (fail "Debug window did not close after profiling")
@@ -184,26 +177,33 @@ main = do
     putStrLn ""
 
     (images, _, _, _) <- runFrame ctx' inp $
-      fmap smallArrayFromList $ forM demoSwatches $ \(_, pixels) -> do
-        iid <- freshImageId
-        ok <- registerImageRgba iid 32 32 pixels
-        unless ok (liftIO (fail "registerImageRgba failed"))
-        pure iid
+      smallArrayFromList <$> forM demoSwatches (\(_, pixels) -> registered (registerRgba 32 32 pixels))
 
     putStrLn "--- 3. WIDGET MICROBENCHMARKS (100 widgets in container, runFrame) ---"
     runFrames
-      [ ("100x Button", benchButtons)
-      , ("100x Checkbox", benchCheckboxes)
-      , ("100x Slider", benchSliders)
-      , ("100x Radio Button", benchRadios)
-      , ("100x Select (Dropdown)", benchSelects)
-      , ("100x TextInput", benchTextInputs)
-      , ("20x TextArea", benchTextAreas)
-      , ("20x ColorPicker", benchColorPickers)
-      , ("100x Label (Plain Text)", benchLabels)
-      , ("100x Box (Solid Rects)", benchBoxes)
-      , ("100x Images (Atlas Quads)", benchImages images)
-      , ("50x Nested Rows & Cols", benchContainers)
+      [ ("100x Button", repeated 2 100 $ \i -> void $ button (numbered "Button " i))
+      , ("100x Checkbox", repeated 2 100 $ \i -> void $ checkbox (numbered "Checkbox " i) (even i))
+      , ("100x Slider", repeated 2 100 $ \i -> label (numbered "Slider " i) >> void (slider 0 100 (fromIntegral i)))
+      , ("100x Radio Button", repeated 2 100 $ \i -> muted (numbered "Radio " i) >> void (radio ["A", "B", "C"] (i `mod` 3)))
+      , ( "100x Select (Dropdown)"
+        , repeated 2 100 $ \i -> label (numbered "Select " i) >> void (select ["Option 1", "Option 2", "Option 3"] (i `mod` 3))
+        )
+      , ("100x TextInput", repeated 2 100 $ \i -> muted (numbered "Input " i) >> void (textInput "Hello World"))
+      , ("20x TextArea", repeated 4 20 $ \_ -> void $ textArea "Line 1\nLine 2\nLine 3")
+      , ("20x ColorPicker", repeated 4 20 $ \_ -> label "Pick" >> void (colorPicker (colorRGBA 100 150 200 255)))
+      , ("100x Label (Plain Text)", repeated 2 100 $ \i -> label (numbered "This is label text number " i))
+      , ( "100x Box (Solid Rects)"
+        , gridWith 10 (tight . gap 2 . fillW) $
+            forM_ [1 .. 100 :: Int] $ \i -> box (fixedWH 20 20) (colorRGBA (fromIntegral (i * 2)) 120 200 255)
+        )
+      , ( "100x Images (Atlas Quads)"
+        , gridWith 10 (tight . gap 2 . fillW) $
+            forM_ [1 .. 100 :: Int] $ \i -> image (fixedWH 24 24) (indexSmallArray images (i `mod` sizeofSmallArray images))
+        )
+      , ( "50x Nested Rows & Cols"
+        , repeated 2 50 $ \_ -> rowWith (tight . gap 2 . fillW) $
+            forM_ [colorRGBA 255 0 0 255, colorRGBA 0 255 0 255, colorRGBA 0 0 255 255] (box (fixedWH 10 10))
+        )
       ]
     putStrLn ""
 
@@ -222,35 +222,27 @@ main = do
       void (runFrame ctx' inp (benchTable "freshTable" (tablePeople n)))
     -- A label that changes every frame misses the whole-layout cache, so the
     -- paragraphs beside it are wrapped again each frame.
-    wrapCounter <- newIORef (0 :: Int)
-    measureBench "Wrap: 20 paragraphs, live label" $ do
-      k <- readIORef wrapCounter
-      modifyIORef' wrapCounter (+ 1)
-      void (runFrame ctx' inp (benchWrap 480 k))
+    nextWrap <- newCounter 0
+    measureBench "Wrap: 20 paragraphs, live label" $
+      nextWrap >>= \k -> void (runFrame ctx' inp (benchWrap 480 k))
     -- A width that changes every frame, as when dragging a window's edge:
     -- every candidate line is new text to measure.
-    resizeCounter <- newIORef (0 :: Int)
-    measureBench "Wrap: 20 paragraphs, resizing" $ do
-      k <- readIORef resizeCounter
-      modifyIORef' resizeCounter (+ 1)
-      void (runFrame ctx' inp (benchWrap (400 + fromIntegral (k `mod` 200)) 0))
+    nextResize <- newCounter 0
+    measureBench "Wrap: 20 paragraphs, resizing" $
+      nextResize >>= \k -> void (runFrame ctx' inp (benchWrap (400 + fromIntegral (k `mod` 200)) 0))
     -- Two small changes in opposite corners: their bounding box is most of
     -- the window, but they repaint little.
-    cornerCounter <- newIORef (0 :: Int)
-    measureBench "Wrap: 20 paragraphs, corner labels" $ do
-      k <- readIORef cornerCounter
-      modifyIORef' cornerCounter (+ 1)
-      void (sdlDrawFrame ctx' (benchCorners k) sdlEnv inp False)
+    nextCorner <- newCounter 0
+    measureBench "Wrap: 20 paragraphs, corner labels" $
+      nextCorner >>= \k -> void (sdlDrawFrame ctx' (benchCorners k) sdlEnv inp False)
     -- Dragging the divider of two panes that each hold the paragraphs: every
     -- frame shares the width out again and wraps both panes at new widths.
     let dividerAt k = inp {inputMousePos = V2 (400 + fromIntegral (k `mod` 40 - 20)) 300, inputMouseDown = True}
     replicateM_ 3 (void (runFrame ctx' inp benchSplit))
     void (runFrame ctx' (dividerAt 20) {inputMousePressed = True} benchSplit)
-    splitCounter <- newIORef (1 :: Int)
-    measureBench "Wrap: split drag, 2x20 paragraphs" $ do
-      k <- readIORef splitCounter
-      modifyIORef' splitCounter (+ 1)
-      void (runFrame ctx' (dividerAt k) benchSplit)
+    nextSplit <- newCounter 1
+    measureBench "Wrap: split drag, 2x20 paragraphs" $
+      nextSplit >>= \k -> void (runFrame ctx' (dividerAt k) benchSplit)
     void (runFrame ctx' inp {inputMouseReleased = True} benchSplit)
     -- More glyphs than one atlas page holds, all painted every frame: ten
     -- sizes of 280 characters each.
@@ -258,17 +250,13 @@ main = do
       void (sdlDrawFrame ctx' benchGlyphSizes sdlEnv inp True)
     -- One small image changing every frame in an atlas holding 12 large
     -- ones, as a live thumbnail does: getting it to the GPU is the cost.
-    void $ runFrame ctx' inp $ forM_ [1 .. 12 :: Int] $ \i -> do
-      iid <- freshImageId
-      ok <- registerImageRgba iid 1024 256 (BS.replicate (1024 * 256 * 4) (fromIntegral i))
-      unless ok (liftIO (fail "registerImageRgba failed"))
+    void $ runFrame ctx' inp $ forM_ [1 .. 12 :: Int] $ \i ->
+      registered (registerRgba 1024 256 (BS.replicate (1024 * 256 * 4) (fromIntegral i)))
     (liveImage, _, _, _) <- runFrame ctx' inp freshImageId
     let livePixels k = BS.replicate (64 * 64 * 4) (if even k then 40 else 200)
-    liveCounter <- newIORef (0 :: Int)
-    measureBench "Images: one 64x64 changing, 12 1024x256" $ do
-      k <- readIORef liveCounter
-      modifyIORef' liveCounter (+ 1)
-      void (sdlDrawFrame ctx' (benchLiveImage liveImage (livePixels k)) sdlEnv inp False)
+    nextLive <- newCounter 0
+    measureBench "Images: one 64x64 changing, 12 1024x256" $
+      nextLive >>= \k -> void (sdlDrawFrame ctx' (benchLiveImage liveImage (livePixels k)) sdlEnv inp False)
     -- The bound for one line: a text area holding a single long line, painted
     -- in full each frame as a horizontal scroll or a resize would.
     forM_ [4000, 20000 :: Int] $ \n -> do
@@ -287,19 +275,11 @@ churnWindowUi k = do
     label "static row"
     )
 
-churnFrame :: Context -> Input -> IORef Int -> IO ()
-churnFrame ctx ninp counter = do
-  k <- readIORef counter
-  modifyIORef' counter (+1)
-  void (runFrame ctx ninp (churnWindowUi k))
-
-hoverSweepFrame :: Context -> NanoUI () -> SdlEnv -> Input -> IORef Int -> IO ()
-hoverSweepFrame ctx ui env ninp counter = do
-  i <- readIORef counter
-  modifyIORef' counter (+1)
-  let m = V2 1130 (110 + fromIntegral (i `mod` 300))
-  _ <- sdlDrawFrame ctx ui env ninp { inputMousePos = m } False
-  pure ()
+-- | Each run of the action returns the next number, counting from @k0@.
+newCounter :: Int -> IO (IO Int)
+newCounter k0 = do
+  ref <- newIORef k0
+  pure (atomicModifyIORef' ref (\k -> (k + 1, k)))
 
 countDamageKinds :: Context -> Int -> IO () -> IO (Int, Int, Int)
 countDamageKinds ctx n act = go n (0, 0, 0)
@@ -386,73 +366,16 @@ tabDiagnosticsUi = columnWith (tight . gap 4 . fillW) $ do
 -- Widget Microbenchmarks
 --------------------------------------------------------------------------------
 
-benchButtons :: NanoUI ()
-benchButtons = columnWith (tight . gap 2 . fillW) $
-  forM_ [1 .. 100 :: Int] $ \i ->
-    void $ button (T.pack ("Button " <> show i))
+-- | @n@ widgets, numbered from 1, in a column with the given gap.
+repeated :: Float -> Int -> (Int -> NanoUI ()) -> NanoUI ()
+repeated g n widget = columnWith (tight . gap g . fillW) (forM_ [1 .. n] widget)
 
-benchCheckboxes :: NanoUI ()
-benchCheckboxes = columnWith (tight . gap 2 . fillW) $
-  forM_ [1 .. 100 :: Int] $ \i ->
-    void $ checkbox (T.pack ("Checkbox " <> show i)) (even i)
+numbered :: String -> Int -> T.Text
+numbered prefix i = T.pack (prefix <> show i)
 
-benchSliders :: NanoUI ()
-benchSliders = columnWith (tight . gap 2 . fillW) $
-  forM_ [1 .. 100 :: Int] $ \i -> do
-    label (T.pack ("Slider " <> show i))
-    void $ slider 0 100 (fromIntegral i)
-
-benchRadios :: NanoUI ()
-benchRadios = columnWith (tight . gap 2 . fillW) $
-  forM_ [1 .. 100 :: Int] $ \i -> do
-    muted (T.pack ("Radio " <> show i))
-    void $ radio ["A", "B", "C"] (i `mod` 3)
-
-benchSelects :: NanoUI ()
-benchSelects = columnWith (tight . gap 2 . fillW) $
-  forM_ [1 .. 100 :: Int] $ \i -> do
-    label (T.pack ("Select " <> show i))
-    void $ select ["Option 1", "Option 2", "Option 3"] (i `mod` 3)
-
-benchTextInputs :: NanoUI ()
-benchTextInputs = columnWith (tight . gap 2 . fillW) $
-  forM_ [1 .. 100 :: Int] $ \i -> do
-    muted (T.pack ("Input " <> show i))
-    void $ textInput "Hello World"
-
-benchTextAreas :: NanoUI ()
-benchTextAreas = columnWith (tight . gap 4 . fillW) $
-  forM_ [1 .. 20 :: Int] $ \_ ->
-    void $ textArea "Line 1\nLine 2\nLine 3"
-
-benchColorPickers :: NanoUI ()
-benchColorPickers = columnWith (tight . gap 4 . fillW) $
-  forM_ [1 .. 20 :: Int] $ \_ -> do
-    label "Pick"
-    void $ colorPicker (colorRGBA 100 150 200 255)
-
-benchLabels :: NanoUI ()
-benchLabels = columnWith (tight . gap 2 . fillW) $
-  forM_ [1 .. 100 :: Int] $ \i ->
-    label (T.pack ("This is label text number " <> show i))
-
-benchBoxes :: NanoUI ()
-benchBoxes = gridWith 10 (tight . gap 2 . fillW) $
-  forM_ [1 .. 100 :: Int] $ \i ->
-    box (fixedWH 20 20) (colorRGBA (fromIntegral (i * 2)) 120 200 255)
-
-benchImages :: SmallArray ImageId -> NanoUI ()
-benchImages images = gridWith 10 (tight . gap 2 . fillW) $
-  forM_ [1 .. 100 :: Int] $ \i ->
-    image (fixedWH 24 24) (indexSmallArray images (i `mod` sizeofSmallArray images))
-
-benchContainers :: NanoUI ()
-benchContainers = columnWith (tight . gap 2 . fillW) $
-  forM_ [1 .. 50 :: Int] $ \_ ->
-    rowWith (tight . gap 2 . fillW) $ do
-      box (fixedWH 10 10) (colorRGBA 255 0 0 255)
-      box (fixedWH 10 10) (colorRGBA 0 255 0 255)
-      box (fixedWH 10 10) (colorRGBA 0 0 255 255)
+-- | Fail unless the image was registered.
+registered :: NanoUI (Maybe ImageId) -> NanoUI ImageId
+registered = (maybe (liftIO (fail "registerImageRgba failed")) pure =<<)
 
 --------------------------------------------------------------------------------
 -- Scaling Benchmarks

@@ -11,7 +11,6 @@ module NanoUI.Internal.Types
   , colorG
   , colorB
   , colorA
-  , colorFromWord32
   , rgbToHsv
   , hsvToRgb
   , clamp
@@ -118,11 +117,6 @@ colorB (Color w) = fromIntegral ((w `shiftR` 8) .&. 0xFF)
 {-# INLINE colorA #-}
 colorA :: Color -> Word8
 colorA (Color w) = fromIntegral (w .&. 0xFF)
-
--- | Interpret a packed @0xRRGGBBAA@ word without conversion.
-{-# INLINE colorFromWord32 #-}
-colorFromWord32 :: Word32 -> Color
-colorFromWord32 = Color
 
 -- | Restrict a value to inclusive lower and upper bounds, which must be ordered.
 {-# INLINE clamp #-}

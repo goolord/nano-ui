@@ -28,7 +28,7 @@ import NanoUI.Internal.Frame.Chrome (menuPanelBounds, overlayMenuStyle, paintMen
 import NanoUI.Internal.Frame.Hit (widgetOverlayAllowed)
 import NanoUI.Internal.Id (WidgetId (..))
 import NanoUI.Internal.Input (Input (..), Key (..), inputKeys, inputKeysElem, inputMousePos, inputMousePressed, inputPointerHeld)
-import NanoUI.Internal.Layout.Arena (NodeIdx, NodeType (NodeSelect, NodeTextInput), getNodeType, lookupNodeByKey, lookupNodeByWidgetId, getOptions, getRect, getWidgetId)
+import NanoUI.Internal.Layout.Arena (NodeIdx, NodeType (NodeSelect, NodeTextInput), getNodeType, lookupNodeByKey, lookupNodeByWidgetId, getOptions, getNodeRect, getWidgetId)
 import NanoUI.Internal.Monad (whenM, (<&&>))
 import NanoUI.Internal.Store (fieldFloat, fieldInt, fieldText, findSlot, insertSlot, setFieldSelection)
 import NanoUI.Internal.Style (Style (..), Theme (..), scrollBarThumbColor, scrollBarThumbHoverColor, scrollBarTrackColor, themeAccent, themeInput)
@@ -76,7 +76,7 @@ openDropdowns ctx@Context {ctxNodeArena = na} = do
   where
     build store idx wid combo = do
       opts <- getOptions na idx
-      (x, y, w, h) <- getRect na idx
+      Rect x y w h <- getNodeRect na idx
       let key = intKey wid
           slotInt slot def = findSlot fieldInt def (slotKey slot key) store
           slotFloat slot = findSlot fieldFloat 0 (slotKey slot key) store

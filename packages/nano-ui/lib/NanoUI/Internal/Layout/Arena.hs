@@ -8,7 +8,7 @@
 -- as 'GeomX' or 'TreeParent' names a slot in the row: node @idx@ keeps
 -- geometry column @col@ at element @idx * geomStride + fromEnum col@ of
 -- 'naArrGeom'. 'NodeArenaArrays' lists the arrays, and accessors such as
--- 'getRect' and 'getParent' hide the arithmetic.
+-- 'getNodeRect' and 'getParent' hide the arithmetic.
 --
 -- The widgets ("NanoUI.Internal.Widgets.Node") fill the arena while the view runs,
 -- "NanoUI.Internal.Layout.Solve" writes every node's rect into it, and the frame's
@@ -40,7 +40,6 @@ module NanoUI.Internal.Layout.Arena
   , topModalNode
   , floatingNodeCount
   , arenaArrays
-  , withArenaArraysSnap
   , GeomCol (..)
   , StyleCol (..)
   , TagCol (..)
@@ -71,7 +70,6 @@ module NanoUI.Internal.Layout.Arena
   , parentIsRow
   , getAlignX
   , getAlignY
-  , getRect
   , getNodeRect
   , setRect
   , getClipRect
@@ -127,8 +125,7 @@ module NanoUI.Internal.Layout.Arena
   , restoreLayoutCache
   ) where
 
-import Control.Exception (bracket_)
-import Control.Monad (forM_, unless, when)
+import Control.Monad (forM_, mfilter, unless, when)
 import Data.Bits (shiftL, shiftR, xor, (.&.), (.|.))
 import Data.Hashable (Hashable, hash)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
@@ -156,7 +153,7 @@ import GHC.Float (castFloatToWord32)
 import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Internal.Store (ptrEq)
 import NanoUI.Internal.Style (AlignX (..), AlignY, Direction (..), Layout (..), Padding (..), Sizing (..))
-import NanoUI.Internal.Types (Color (..), Rect (..))
+import NanoUI.Internal.Types (Color (..), Rect (..), rectNonEmpty)
 
 -- | A node's position in the arena's arrays. It is valid from the 'addNode'
 -- that returned it until the next 'resetNodeArena'. Where an index names an
@@ -348,9 +345,6 @@ data NodeArena = NodeArena
   -- ^ Nodes the arrays have room for.
   , naArrays :: IORef NodeArenaArrays
   -- ^ The current arrays. Read them through 'arenaArrays'.
-  , naArraysSnap :: IORef (Maybe NodeArenaArrays)
-  -- ^ The current arrays again while 'withArenaArraysSnap' runs, and 'Nothing'
-  -- the rest of the time.
   , naScratch :: IORef FlexScratch
   -- ^ The solver's buffers for the container it is working on.
   , naSnapLevels :: IORef (MutableArray RealWorld AxisSnapshot)
@@ -380,18 +374,12 @@ data NodeArena = NodeArena
   -- ^ A hash over the index and scope of every node added under a scope other
   -- than 0 since the reset. See 'getScopeSignature'.
   , naInputSig :: IOArr Word64
-  -- ^ A hash over every layout input written since the reset, in one unboxed
-  -- slot so a mix allocates nothing: each node's layout and links as
-  -- 'addNode' wrote them, and every later change through the input setters
-  -- ('setNodeText', 'setStyleIdx', 'setOptions', 'setWidgetId'). Solver
-  -- outputs, paint state, and geometry are excluded. See 'getInputSignature'.
+  -- ^ The frame's input signature ('getInputSignature'), in one unboxed slot
+  -- so a mix allocates nothing.
   , naTextHash :: IORef (IOArr Word64)
-  -- ^ Per node, the hash of the text the last 'setNodeText' stored. A node
-  -- re-set with the same 'Text' object keeps its hash, so a steady frame
-  -- hashes no text bytes.
+  -- ^ Per node, the hash of the text the last 'setNodeText' stored.
   , naOptionsHash :: IORef (IOArr Word64)
-  -- ^ Per node, the hash of the option list the last 'setOptions' stored,
-  -- reused the same way as 'naTextHash'.
+  -- ^ Per node, the hash of the option list the last 'setOptions' stored.
   , naOwnHash :: IORef (IOArr Word64)
   -- ^ Per node, the hash of the node's own creation inputs, as 'addNode'
   -- wrote it. 'computeSubtreeHashes' folds these into 'naSubHash'.
@@ -632,8 +620,7 @@ memoStride = 3
 -- never 0, so a lookup cannot hit an entry that was never written.
 newWidthMemo :: Int -> IO WidthMemo
 newWidthMemo cap = do
-  wmTags <- newPrimArray cap
-  setPrimArray wmTags 0 cap 0
+  wmTags <- newZeroedPrimArray cap
   wmSlots <- newPrimArray (cap * memoStride)
   pure WidthMemo {..}
 
@@ -646,7 +633,6 @@ newNodeArena = do
   naCount <- newIORef 0
   naCapacity <- newIORef cap
   naArrays <- newIORef =<< newNodeArenaArrays cap
-  naArraysSnap <- newIORef Nothing
   naScratch <- newIORef =<< newFlexScratch 64
   naSnapLevels <- newIORef =<< newArray 256 =<< newAxisSnapshot 0
   naFrameTag <- newIORef 1
@@ -656,8 +642,7 @@ newNodeArena = do
   naIndex <- newIORef =<< newIdIndex 1024
   naScope <- newIORef 0
   naScopeSig <- newIORef 0
-  naInputSig <- newPrimArray 1
-  writePrimArray naInputSig 0 0
+  naInputSig <- newZeroedPrimArray 1
   -- Zeroed: the stores start as the shared 'T.empty' and '[]', which pass the
   -- same-object check, and 0 marks a hash that was never taken.
   naTextHash <- newIORef =<< newZeroedPrimArray cap
@@ -666,18 +651,16 @@ newNodeArena = do
   naSubHash <- newIORef =<< newPrimArray cap
   naMeasured <- newIORef =<< newPrimArray (cap * 2)
   naClassNodes <- newIORef =<< newPrimArray (cap * nodeClassCount)
-  naClassCounts <- newPrimArray nodeClassCount
-  setPrimArray naClassCounts 0 nodeClassCount 0
+  naClassCounts <- newZeroedPrimArray nodeClassCount
   pure NodeArena {..}
 
 nodeClassCount :: Int
 nodeClassCount = fromEnum (maxBound :: NodeClass) + 1
 
-newZeroedPrimArray :: Int -> IO (IOArr Word64)
+newZeroedPrimArray :: (Prim a, Num a) => Int -> IO (IOArr a)
 newZeroedPrimArray n = do
   arr <- newPrimArray n
-  setPrimArray arr 0 n 0
-  pure arr
+  arr <$ setPrimArray arr 0 n 0
 
 -- | Begin an empty frame while retaining array capacity. Invalidates node
 -- indices, width memos, and widget-id lookups, and resets paint-scope and
@@ -745,20 +728,7 @@ arenaCount na = readIORef (naCount na)
 -- | Current backing arrays. Do not retain them across arena growth or reset.
 {-# INLINE arenaArrays #-}
 arenaArrays :: NodeArena -> IO NodeArenaArrays
-arenaArrays na = do
-  m <- readIORef (naArraysSnap na)
-  case m of
-    Just a -> pure a
-    Nothing -> readIORef (naArrays na)
-
--- | Cache the current array references during a pass. This does not pin memory
--- for FFI use; it avoids rereading 'naArrays' in each accessor. Do not nest calls.
-withArenaArraysSnap :: NodeArena -> IO a -> IO a
-withArenaArraysSnap na act =
-  bracket_
-    (readIORef (naArrays na) >>= writeIORef (naArraysSnap na) . Just)
-    (writeIORef (naArraysSnap na) Nothing)
-    act
+arenaArrays na = readIORef (naArrays na)
 
 {-# NOINLINE ensureCapacity #-}
 ensureCapacity :: NodeArena -> Int -> IO ()
@@ -784,7 +754,6 @@ ensureCapacity na needed = do
       k <- readPrimArray (naClassCounts na) c
       copyMutablePrimArray newClass (c * newCap) oldClass (c * cap) k
     writeIORef (naClassNodes na) newClass
-    readIORef (naArraysSnap na) >>= mapM_ (\_ -> writeIORef (naArraysSnap na) (Just newA))
     writeIORef (naCapacity na) newCap
 
 -- | Copy of @a@ with room for @newCap@ nodes; new slots are zero or empty.
@@ -887,9 +856,7 @@ addNode na nt parent Layout {..} = do
   writeTree a idx TreeTextIdx (-1)
   writeTree a idx TreeGridCols layoutGridCols
 
-  -- Fold this node's creation inputs into the frame's input signature, the
-  -- O(1) successor of comparing every column at reuse time. Values are the
-  -- ones already in registers above.
+  -- Fold this node's creation inputs into the frame's input signature.
   let !nodeSig =
         foldl'
           (\acc (t, v) -> mixTagged acc t v)
@@ -1063,13 +1030,6 @@ getAlignY na idx = arenaArrays na >>= \a -> readTagEnum a idx TagAlignY
 
 -- | Current x, y, width, height in logical pixels. After scroll offsets are
 -- applied, the origin is in window coordinates; before layout it is unset.
-{-# INLINE getRect #-}
-getRect :: NodeArena -> NodeIdx -> IO (Float, Float, Float, Float)
-getRect na idx = do
-  a <- arenaArrays na
-  (,,,) <$> readGeom a idx GeomX <*> readGeom a idx GeomY <*> readGeom a idx GeomW <*> readGeom a idx GeomH
-
--- | 'getRect' as a 'Rect'.
 {-# INLINE getNodeRect #-}
 getNodeRect :: NodeArena -> NodeIdx -> IO Rect
 getNodeRect na idx = do
@@ -1090,13 +1050,7 @@ setRect na idx x y w h = do
 -- stored clip is empty or unset: 'getClipBounds' tells those apart.
 {-# INLINE getClipRect #-}
 getClipRect :: NodeArena -> NodeIdx -> IO (Maybe Rect)
-getClipRect na idx = do
-  a <- arenaArrays na
-  x <- readGeom a idx GeomClipX
-  y <- readGeom a idx GeomClipY
-  w <- readGeom a idx GeomClipW
-  h <- readGeom a idx GeomClipH
-  pure (if w > 0 && h > 0 then Just (Rect x y w h) else Nothing)
+getClipRect na idx = mfilter rectNonEmpty <$> getClipBounds na idx
 
 -- | Store a clip in logical window coordinates. An empty clip, one without
 -- area, is kept as empty rather than unset, which 'addNode' leaves the clip:
@@ -1295,14 +1249,7 @@ lookupNodeByWidgetId na (WidgetId key)
   | otherwise = do
       !ep <- readIORef (naEpoch na)
       IdIndex slots mask _ <- readIORef (naIndex na)
-      let go !s = do
-            v <- readPrimArray slots (2 * s + 1)
-            if v `shiftR` 32 /= fromIntegral ep
-              then pure Nothing
-              else do
-                k <- readPrimArray slots (2 * s)
-                if k == key then pure (Just (fromIntegral (v .&. 0xFFFFFFFF))) else go ((s + 1) .&. mask)
-      go (homeSlot key mask)
+      probeSlot slots mask ep key (\_ -> pure Nothing) (\_ v -> pure (Just (slotNode v)))
 
 -- | Node index by widget id: open addressing over unboxed slots of two words,
 -- the id and a value that packs the epoch it was written in (high 32 bits)
@@ -1317,15 +1264,29 @@ data IdIndex = IdIndex {-# UNPACK #-} !(IOArr Word64) {-# UNPACK #-} !Int {-# UN
 newIdIndex :: Int -> IO IdIndex
 newIdIndex n = do
   slots <- newZeroedPrimArray (2 * n)
-  live <- newPrimArray 1
-  writePrimArray live 0 0
+  live <- newZeroedPrimArray 1
   pure (IdIndex slots (n - 1) live)
 
--- | The slot a probe for @key@ starts at. Ids are hashes already; the multiply
--- spreads their bits over the slots however few there are.
-{-# INLINE homeSlot #-}
-homeSlot :: Word64 -> Int -> Int
-homeSlot key mask = fromIntegral ((key * 0x9E3779B97F4A7C15) `shiftR` 32) .&. mask
+-- | Probe the index for @key@ in epoch @ep@: @found s v@ at the slot @s@
+-- holding it with its value @v@, or @free s@ at the free slot the probe ends
+-- at. A probe starts at a slot the key's bits pick: ids are hashes already,
+-- and the multiply spreads their bits over the slots however few there are.
+{-# INLINE probeSlot #-}
+probeSlot :: IOArr Word64 -> Int -> Word32 -> Word64 -> (Int -> IO r) -> (Int -> Word64 -> IO r) -> IO r
+probeSlot slots mask ep key free found = go (fromIntegral ((key * 0x9E3779B97F4A7C15) `shiftR` 32) .&. mask)
+  where
+    go !s = do
+      v <- readPrimArray slots (2 * s + 1)
+      if v `shiftR` 32 /= fromIntegral ep
+        then free s
+        else do
+          k <- readPrimArray slots (2 * s)
+          if k == key then found s v else go ((s + 1) .&. mask)
+
+-- | The node index in a slot's value.
+{-# INLINE slotNode #-}
+slotNode :: Word64 -> Int
+slotNode v = fromIntegral (v .&. 0xFFFFFFFF)
 
 -- | Index node @idx@ under the nonzero id @key@ in epoch @ep@. Returns the
 -- node the id's entry of this epoch held before, or -1 for none: finding it
@@ -1335,23 +1296,17 @@ indexWidgetId :: NodeArena -> Word32 -> Word64 -> Int -> IO Int
 indexWidgetId na ep key idx = do
   ii@(IdIndex slots mask live) <- readIORef (naIndex na)
   let !val = fromIntegral ep `shiftL` 32 .|. (fromIntegral idx .&. 0xFFFFFFFF)
-      go !s = do
-        v <- readPrimArray slots (2 * s + 1)
-        if v `shiftR` 32 /= fromIntegral ep
-          then do
-            writePrimArray slots (2 * s) key
-            writePrimArray slots (2 * s + 1) val
-            n <- readPrimArray live 0
-            writePrimArray live 0 (n + 1)
-            -- At most half the slots are taken, so probes stay short.
-            when (2 * (n + 1) > mask + 1) $ writeIORef (naIndex na) =<< growIdIndex ep ii
-            pure (-1)
-          else do
-            k <- readPrimArray slots (2 * s)
-            if k == key
-              then fromIntegral (v .&. 0xFFFFFFFF) <$ writePrimArray slots (2 * s + 1) val
-              else go ((s + 1) .&. mask)
-  go (homeSlot key mask)
+  probeSlot slots mask ep key
+    ( \s -> do
+        writePrimArray slots (2 * s) key
+        writePrimArray slots (2 * s + 1) val
+        n <- readPrimArray live 0
+        writePrimArray live 0 (n + 1)
+        -- At most half the slots are taken, so probes stay short.
+        when (2 * (n + 1) > mask + 1) $ writeIORef (naIndex na) =<< growIdIndex ep ii
+        pure (-1)
+    )
+    (\s v -> slotNode v <$ writePrimArray slots (2 * s + 1) val)
 
 -- | Twice the slots, holding the entries of epoch @ep@.
 growIdIndex :: Word32 -> IdIndex -> IO IdIndex
@@ -1362,12 +1317,10 @@ growIdIndex ep (IdIndex slots mask live) = do
     v <- readPrimArray slots (2 * s + 1)
     when (v `shiftR` 32 == fromIntegral ep) $ do
       k <- readPrimArray slots (2 * s)
-      let place !t = do
-            v' <- readPrimArray slots' (2 * t + 1)
-            if v' == 0
-              then writePrimArray slots' (2 * t) k >> writePrimArray slots' (2 * t + 1) v
-              else place ((t + 1) .&. mask')
-      place (homeSlot k mask')
+      -- The keys are distinct, so the probe ends at a free slot.
+      probeSlot slots' mask' ep k
+        (\t -> writePrimArray slots' (2 * t) k >> writePrimArray slots' (2 * t + 1) v)
+        (\_ _ -> pure ())
   pure new
 
 -- | 'lookupNodeByWidgetId' using the id's integer store key.

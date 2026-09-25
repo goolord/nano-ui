@@ -43,6 +43,7 @@ tests =
   , spec "deep-nesting" runDeepNestingTest
   , spec "grow-split" runGrowSplitTest
   , spec "percent-gap-shrink" runPercentGapShrinkTest
+  , spec "shrink-shortfall" runShrinkShortfallTest
   , spec "aspect-layout" runAspectLayoutTest
   , pixelSpec "label-align-end" runLabelAlignEndTest
   , pixelSpec "responsive-wrap" runResponsiveWrapTest
@@ -69,7 +70,7 @@ runIdKeyedListTest :: Context -> IORef Int -> IO ()
 runIdKeyedListTest ctx failed = do
   let inp = withInput 200 200
       keyedIds :: [String] -> IO ([WidgetId], [FrameMsg], DrawData, Bool)
-      keyedIds keys = runFrame ctx inp (column (mapM (\k -> keyed k nextId) keys))
+      keyedIds keys = runFrame ctx inp (column (mapM (\k -> withKey k nextId) keys))
       idFor :: String -> [String] -> [WidgetId] -> Maybe WidgetId
       idFor key keys ids = lookup key (zip keys ids)
   (idsA, _, _, _) <- keyedIds ["a", "b", "c"]
@@ -363,6 +364,27 @@ runPercentGapShrinkTest ctx failed = do
       Rect xb _ wb _ = respRect b
   assert failed (abs (wa - 100) <= 0.5 && abs (wb - 100) <= 0.5)
   assert failed (abs (xb - (xa + wa + 6)) <= 0.5)
+
+-- | A row too short for its children takes what it lacks from those that
+-- shrink, none past its minimum: a shrinking label beside a spacer gives up
+-- all of it, so what follows stays in the row, and of two shrinking labels
+-- the longer gives what the shorter cannot.
+runShrinkShortfallTest :: Context -> IORef Int -> IO ()
+runShrinkShortfallTest ctx failed = do
+  let inp = withInput 400 200
+      shrink l = l {layoutWidth = Shrink 1}
+  (lbl, btn) <- warmup2 ctx inp $ rowWith (fixedW 100 . tight . gap 0) $ do
+    l <- labelWith' (shrink . tight) "abcdefghijkl"
+    spacer (Grow 1) (Fixed 5)
+    b <- buttonWith' tight "X"
+    pure (l, b)
+  assertEq failed (rectW (respRect lbl)) 64
+  assertEq failed (rectX (respRect btn) + rectW (respRect btn)) 100
+  long <- warmup2 ctx inp $ rowWith (fixedW 100 . tight . gap 0) $ do
+    l <- labelWith' (shrink . tight) "abcdefghijkl"
+    labelWith (shrink . tight) "ab"
+    pure l
+  assertEq failed (rectW (respRect long)) 100
 
 -- | Grow children split the free space by factor with a min-content floor
 -- (fixed-width rows, 12px per char in this context):

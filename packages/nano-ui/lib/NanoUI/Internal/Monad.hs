@@ -15,7 +15,6 @@ module NanoUI.Internal.Monad
   , withUiResource
   , emit
   , withKey
-  , keyed
   , keyedTag
   , scope
   , withIdFrame
@@ -237,21 +236,18 @@ withIdFrame enter m = do
 scope :: Ui :> es => Eff es a -> Eff es a
 scope = withIdFrame (enterScope scopeTag)
 
--- | Stable child path from @tag@. Keys must be unique among siblings in the same scope.
-{-# INLINE keyed #-}
-keyed :: (Hashable k, Ui :> es) => k -> Eff es a -> Eff es a
-keyed k = keyedTag (fromIntegral (hash k))
+-- | Run the action under a key, so its widgets keep their ids and state
+-- whatever comes before them. Keys must be unique among siblings in the same
+-- scope; use a stable item key when a list can be reordered.
+{-# INLINE withKey #-}
+withKey :: (Hashable k, Ui :> es) => k -> Eff es a -> Eff es a
+withKey k = keyedTag (fromIntegral (hash k))
 
 -- | A keyed child scope using a precomputed 64-bit tag. Tags must be unique
 -- among siblings; use 'withKey' to hash an application key.
 {-# INLINE keyedTag #-}
 keyedTag :: Ui :> es => Word64 -> Eff es a -> Eff es a
 keyedTag tag = withIdFrame (enterKeyed tag)
-
--- | Alias for 'keyed'. Use a stable item key when a list can be reordered.
-{-# INLINE withKey #-}
-withKey :: (Hashable k, Ui :> es) => k -> Eff es a -> Eff es a
-withKey = keyed
 
 -- | The mutable context for this view. It belongs to the current UI session.
 {-# INLINE askContext #-}
@@ -338,7 +334,11 @@ disabledWhen True m =
     (\r -> r {repInput = inert (repInput r), repFrame = inert (repFrame r)})
     (withPaintScope enter m)
   where
-    inert i = (stripInteractionInput i) {inputMouseDown = False, inputMouseRightDown = False}
+    inert i =
+      (stripInteractionInput i)
+        { inputMouseDown = False
+        , inputMouseRightDown = False
+        }
     enter ctx outer
       | outer .&. 1 /= 0 = pure outer
       | otherwise = pushThemeScope ctx True =<< scopeRawTheme ctx outer

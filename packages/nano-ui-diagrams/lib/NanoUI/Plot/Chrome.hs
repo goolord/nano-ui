@@ -256,8 +256,6 @@ plotLbl ps ax ay s =
 renderSeries :: PlotStyle -> Color -> Domain -> Domain -> Series -> U.Vector (Double, Double) -> Diagram B
 renderSeries ps c xDom yDom s pts =
   let ink = colourOf c
-      fillCol = lerpColor c (plotFrameBg ps) 0.18
-      fill = colourOf fillCol
       toP (x, y) = p2 (domainToPlot xDom x, domainToPlot yDom y)
    in case seriesKind s of
         LineSeries w _ ->
@@ -266,10 +264,17 @@ renderSeries ps c xDom yDom s pts =
           U.foldl' (\acc p -> acc <> markShape mk w ink (toP p)) mempty pts
         BarSeries frac ->
           renderBars ink frac pts
-        AreaSeries baseline ->
-          areaPath baseline xDom yDom pts # fc fill # lw none
+        AreaSeries baseline
+          | U.null pts -> mempty
+          | otherwise ->
+              -- The top in order, then the baseline back: a left fold yields
+              -- it reversed without a reversed copy of the points.
+              let top = U.foldr (\p acc -> toP p : acc) [] pts
+                  base = U.foldl' (\acc (x, _) -> toP (x, baseline) : acc) [] pts
+               in closedPoly (top ++ base) # fc (colourOf (lerpColor c (plotFrameBg ps) 0.18)) # lw none
         StepSeries w ->
-          fromVertices (stepPoints pts xDom yDom) # lc ink # lwO (plotStroke w)
+          let steps = U.foldr (\((x0, y0), (x1, _)) acc -> toP (x0, y0) : toP (x1, y0) : acc) [] (U.zip pts (U.drop 1 pts))
+           in fromVertices steps # lc ink # lwO (plotStroke w)
 
 -- | Points used for drawing and hit tests. Numeric data may be decimated;
 -- categories become zero-based x positions paired with their values.
@@ -288,52 +293,17 @@ decimateK n = min n (max 64 (min 2000 (n `div` 2)))
 renderBars :: Colour Double -> Float -> U.Vector (Double, Double) -> Diagram B
 renderBars fill frac pts
   | U.null pts = mempty
-  | otherwise =
-      let !len  = U.length pts
-          !n    = fromIntegral len :: Double
-          !w    = realToFrac frac / n
-          !invN = 1.0 / n
-          !xOff = 0.5 * invN
-
-          -- Single-pass strict fold for maxY (avoids allocating a list or intermediate vector)
-          !maxY = U.foldl' (\ !acc (_, y) -> max acc (abs y)) 1e-9 pts
-          !invMaxY = 1.0 / maxY
-
-          drawBar (x, y) =
-            let !absY = abs y
-                !h    = absY * invMaxY
-                !posX = x * invN + xOff
-                !posY = signum y * h * 0.5
-             in rect w h
-                  # fc fill
-                  # lw none
-                  # translate (posX ^& posY)
-       in U.foldl' (\acc p -> acc <> drawBar p) mempty pts
-
-areaPath :: Double -> Domain -> Domain -> U.Vector (Double, Double) -> Diagram B
-areaPath baseline xDom yDom pts
-  | U.null pts = mempty
-  | otherwise =
-      let !baseY = domainToPlot yDom baseline
-          toTop (!x, !y) = p2 (domainToPlot xDom x, domainToPlot yDom y)
-          toBase (!x, !_) = p2 (domainToPlot xDom x, baseY)
-
-          -- Forward traversal builds `top` in order
-          top = U.foldr (\p acc -> toTop p : acc) [] pts
-          -- Left fold naturally yields reverse order without allocating an intermediate reversed vector
-          base = U.foldl' (\acc p -> toBase p : acc) [] pts
-       in closedPoly (top ++ base)
+  | otherwise = U.foldl' (\acc p -> acc <> drawBar p) mempty pts
+  where
+    n = fromIntegral (U.length pts) :: Double
+    invN = 1.0 / n
+    invMaxY = 1.0 / U.foldl' (\acc (_, y) -> max acc (abs y)) 1e-9 pts
+    drawBar (x, y) =
+      let h = abs y * invMaxY
+       in rect (realToFrac frac / n) h # fc fill # lw none # translate ((x * invN + 0.5 * invN) ^& (signum y * h * 0.5))
 
 closedPoly :: [P2 Double] -> Diagram B
 closedPoly pts = fromVertices pts # closeTrail # strokeTrail
-
-stepPoints :: U.Vector (Double, Double) -> Domain -> Domain -> [P2 Double]
-stepPoints pts xDom yDom =
-  let toP (x, y) = p2 (domainToPlot xDom x, domainToPlot yDom y)
-   in U.foldr
-        (\((x0, y0), (x1, _)) acc -> toP (x0, y0) : toP (x1, y0) : acc)
-        []
-        (U.zip pts (U.drop 1 pts))
 
 markShape :: MarkShape -> Float -> Colour Double -> P2 Double -> Diagram B
 markShape shape w c p = moveTo p $ case shape of

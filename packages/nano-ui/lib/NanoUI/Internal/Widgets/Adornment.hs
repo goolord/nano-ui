@@ -105,7 +105,7 @@ affix = AdornText
 -- | Any view, for display, such as a spinner while a field's value is
 -- checked. A press on it is a press on the widget.
 --
--- > trailing (view (spinnerWith id 14))
+-- > trailing (view (void (spinnerWith' id 14)))
 view :: NanoUI () -> Adornment
 view = AdornView
 

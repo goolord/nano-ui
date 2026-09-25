@@ -9,6 +9,7 @@ module NanoUI.Diagrams.Backend
   )
 where
 
+import Control.Applicative ((<|>))
 import Control.Lens (Lens', (^.), (^?))
 import Data.Colour (AlphaColour, alphaChannel, black, over)
 import Data.Colour.SRGB (RGB (..), toSRGB)
@@ -126,13 +127,7 @@ textOps (Text tr align str) sty
           case align of
             BaselineText -> (0, -1)
             BoxAlignedText bx by -> (toF bx, toF by)
-        col =
-          case solidColour (sty ^? (_fillTexture . _AC)) of
-            Just c -> c
-            Nothing ->
-              fromMaybe
-                (themeMuted defaultTheme)
-                (solidColour (sty ^? (_lineTexture . _AC)))
+        col = fromMaybe (themeMuted defaultTheme) (fillColour sty <|> lineColour sty)
        in
         DL.singleton (DrawText (toF x) (toF y) ax ay (T.pack str) col)
 
@@ -153,8 +148,8 @@ trailOps sty lt =
           | w <= 0 -> 0
           | w < 1 -> 1
           | otherwise -> w
-    fillC = solidColour (sty ^? (_fillTexture . _AC))
-    lineC = solidColour (sty ^? (_lineTexture . _AC))
+    fillC = fillColour sty
+    lineC = lineColour sty
     closed = isLoop (unLoc lt)
     fills =
       case fillC of
@@ -189,6 +184,11 @@ sampleSeg (FCubic p0 c1 c2 p1) =
 
 pointFloats :: Real n => P2 n -> (Float, Float)
 pointFloats p = let (x, y) = unp2 p in (toF x, toF y)
+
+-- | A style's solid fill and line colours, if they are visible.
+fillColour, lineColour :: (Typeable n, Floating n) => DiaCore.Style V2 n -> Maybe Color
+fillColour sty = solidColour (sty ^? (_fillTexture . _AC))
+lineColour sty = solidColour (sty ^? (_lineTexture . _AC))
 
 solidColour :: Maybe (AlphaColour Double) -> Maybe Color
 solidColour mc = do

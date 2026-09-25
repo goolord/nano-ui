@@ -183,47 +183,33 @@ runCommand mode cmd ed@(Editor buf anchor hist) =
     InsertText raw
       | modeEditable mode ->
           let txt = singleLine raw
-              kind
-                | T.length txt == 1 && txt /= "\n" = EditTyping
-                | otherwise = EditOther
-           in if T.null txt && not (hasSelection ed) then ed else replaceSelection kind txt
+           in replaceSelection (if T.length txt == 1 && txt /= "\n" then EditTyping else EditOther) txt
     Delete motion
       | modeEditable mode ->
           if hasSelection ed
             then replaceSelection EditDeleting T.empty
-            else
-              let target = motionTarget motion
-               in if target == cursor
-                    then ed
-                    else edit EditDeleting (TB.replaceEdit T.empty cursor target buf)
+            else edit EditDeleting (TB.replaceEdit T.empty cursor (motionTarget motion) buf)
     Move motion extend ->
       let moved = moveBuffer motion
        in Editor moved (if extend then anchor else TB.getCursor moved) (sealHistory hist)
-    SelectAll ->
-      let end = TB.documentEnd buf
-       in Editor (TB.withCursor end buf) (Cursor 0 0) (sealHistory hist)
+    SelectAll -> runCommand mode (Select (Cursor 0 0) (TB.documentEnd buf)) ed
     Select a c ->
       Editor (TB.withCursor c buf) (TB.clampCursor buf a) (sealHistory hist)
     Replace a b txt
       | modeEditable mode -> edit EditOther (TB.replaceEdit (singleLine txt) a b buf)
-    ReplaceAll txt
-      | modeEditable mode ->
-          edit EditOther (TB.replaceEdit (singleLine txt) (Cursor 0 0) (TB.documentEnd buf) buf)
-    Undo -> case historyUndo hist of
-      g : rest ->
-        let buf' = foldl (\b e -> TB.applyEdit (TB.invertEdit (replayed e)) b) buf (groupEdits g)
-            (a, c) = groupBefore g
-         in Editor (TB.withCursor c buf') a hist {historyUndo = rest, historyRedo = g : historyRedo hist, historyDepth = historyDepth hist - 1, historyOpen = False}
-      [] -> ed
-    Redo -> case historyRedo hist of
-      g : rest ->
-        let buf' = foldr (TB.applyEdit . replayed) buf (groupEdits g)
-            (a, c) = groupAfter g
-         in Editor (TB.withCursor c buf') a hist {historyUndo = g : historyUndo hist, historyRedo = rest, historyDepth = historyDepth hist + 1, historyOpen = False}
-      [] -> ed
+    ReplaceAll txt -> runCommand mode (Replace (Cursor 0 0) (TB.documentEnd buf) txt) ed
+    Undo
+      | g : rest <- historyUndo hist ->
+          restore (groupBefore g) (foldl (\b e -> TB.applyEdit (TB.invertEdit (replayed e)) b) buf (groupEdits g)) $
+            hist {historyUndo = rest, historyRedo = g : historyRedo hist, historyDepth = historyDepth hist - 1}
+    Redo
+      | g : rest <- historyRedo hist ->
+          restore (groupAfter g) (foldr (TB.applyEdit . replayed) buf (groupEdits g)) $
+            hist {historyUndo = g : historyUndo hist, historyRedo = rest, historyDepth = historyDepth hist + 1}
     _ -> ed
   where
     cursor = TB.getCursor buf
+    restore (a, c) buf' h = Editor (TB.withCursor c buf') a h {historyOpen = False}
     replayed (StoredEdit at removed inserted) = TextEdit at (TS.toText removed) (TS.toText inserted)
     singleLine = (if modeMultiLine mode then id else T.filter (/= '\n')) . TB.insertableText
     replaceSelection kind txt = edit kind (TB.replaceEdit txt anchor cursor buf)

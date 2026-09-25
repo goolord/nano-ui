@@ -1,13 +1,8 @@
--- | The chrome a window with no frame of its own has to draw for itself: the
--- three caption buttons, the border around the whole window, and the
--- geometry that says what the rest of the title bar is for.
---
--- Doing what any of it says is the backend's, since only it holds the window
--- ('NanoUI.Sdl.Internal.Chrome.windowCaption' in @nano-ui-sdl@ draws the buttons and
--- acts on them in one call).
---
--- The glyphs are drawn rather than written: a UI font has no characters for
--- them, and axis-aligned fills at whole pixels stay crisp at any size.
+-- | The chrome a frameless window draws for itself: the three caption
+-- buttons, the border around the window, and the title bar's drag regions.
+-- Acting on them is the backend's ('NanoUI.Sdl.Internal.Chrome.windowCaption'
+-- in @nano-ui-sdl@). The glyphs are drawn as whole-pixel fills, which stay
+-- crisp at any size.
 module NanoUI.Internal.Widgets.Caption
   ( -- * Buttons
     CaptionGlyph (..)
@@ -67,18 +62,13 @@ data CaptionConfig = CaptionConfig
   , capGlyphSize :: !Float
   -- ^ The side of the square a glyph is drawn in, centred in the button.
   , capCloseColor :: !(Maybe Color)
-  -- ^ What the close button lights up in, or the theme's red when unset. It
-  -- is the one hue a window's chrome spends, so an application that has a
-  -- red of its own for the one button that cannot be taken back says so
-  -- here.
+  -- ^ What the close button lights up in, or the theme's red when unset.
   , capCornerRadius :: !Float
-  -- ^ How far the close button's top right is rounded. That is the one
-  -- corner of the three buttons that reaches a corner of the window, so it
-  -- takes the window's own rounding with it; zero leaves it square.
+  -- ^ How far the close button's top right, the window's corner, is rounded.
   }
 
--- | 44 by 'captionBarHeight', with a ten-pixel glyph and a corner rounded by
--- eight, which is what the desktop rounds a window by.
+-- | 44 by 'captionBarHeight', a ten-pixel glyph, and a corner rounded by
+-- eight, as the desktop rounds a window.
 defaultCaptionConfig :: CaptionConfig
 defaultCaptionConfig =
   CaptionConfig
@@ -94,12 +84,9 @@ defaultCaptionConfig =
 captionBarHeight :: Float
 captionBarHeight = 30
 
--- | One caption button. It lights up under the pointer: 'GlyphClose' in the
--- theme's red, since closing is the one of the three that cannot be undone,
--- and the others a step up from the window's own colour.
---
--- The close button's lit background is rounded at the top right by
--- 'capCornerRadius', since that corner of it is a corner of the window.
+-- | One caption button. It lights up under the pointer: 'GlyphClose' in red
+-- (rounded at the top right by 'capCornerRadius'), the others a step up from
+-- the window's colour.
 captionButton :: Ui :> es => CaptionConfig -> CaptionGlyph -> Eff es Response
 captionButton cfg glyph = do
   (resp, _) <-
@@ -118,9 +105,7 @@ captionButton cfg glyph = do
         }
   pure resp
 
--- | A fill whose top right is rounded and whose other three corners are
--- square: a rounded rectangle, and the two rectangles that square the rest of
--- it off again.
+-- | A fill rounded only at its top right.
 cornerRect :: Float -> Rect -> Color -> CanvasM ()
 cornerRect radius r@(Rect x y w h) col
   | radius <= 0 || radius > w || radius > h = drawRect r col
@@ -129,12 +114,9 @@ cornerRect radius r@(Rect x y w h) col
       drawRect (Rect x (y + radius) w (h - radius)) col
       drawRect (Rect x y (w - radius) radius) col
 
--- | The three buttons in a row, at their default size: what they were asked
--- to do, and the rectangle all three take up, which is a rectangle the
--- window cannot be dragged by. It runs from the first button's left edge to
--- the last one's right, so whatever the row puts between them is in it too.
--- Pass whether the window is maximized, which decides what the middle button
--- shows.
+-- | The three buttons in a row: what they were asked to do, and the
+-- rectangle they span, which the window cannot be dragged by. Pass whether
+-- the window is maximized, which decides the middle button's glyph.
 captionButtons :: Ui :> es => Bool -> Eff es (Maybe CaptionAction, Rect)
 captionButtons = captionButtonsConfigured defaultCaptionConfig
 
@@ -158,31 +140,20 @@ captionButtonsConfigured cfg maximized = do
 -- | The border a window with no frame of its own draws around itself.
 data WindowFrame = WindowFrame
   { frameWidth :: !Float
-  -- ^ How thick the line is, and the inset the view is drawn at, so that
-  -- nothing inside paints over it. Zero draws no border at all.
+  -- ^ The line's thickness, and the view's inset. Zero draws no border.
   , frameRadius :: !Float
-  -- ^ How far its corners are rounded. This wants to be what the desktop
-  -- rounds the window by, or the line is cut off where the two part company.
+  -- ^ Corner rounding, which should match the desktop's for the window.
   , frameColor :: !Color
   }
 
--- | A one-pixel border rounded by eight, which is what the desktop rounds a
--- window by.
+-- | A one-pixel border rounded by eight.
 defaultWindowFrame :: Color -> WindowFrame
 defaultWindowFrame col = WindowFrame {frameWidth = 1, frameRadius = 8, frameColor = col}
 
--- | Draw a border around the whole window, with the view inside it.
---
--- A window with no frame of its own has no outline, and this is what tells
--- it from whatever is behind it.
---
--- A width of zero draws none, which is what a maximized window wants: its
--- edges are the screen's. The container is there either way, so the widgets
--- inside keep their ids, and their state, when the border comes and goes.
---
--- The frame's style is its own panel's and goes no further: the view inside
--- is drawn in the theme around the frame, not with the window's border on
--- every panel, card and menu in it.
+-- | Draw a border around the whole window, with the view inside it. A width
+-- of zero (for a maximized window) draws none but keeps the container, so
+-- the widgets inside keep their ids. The border style stays on the frame's
+-- own panel; the view inside uses the surrounding theme.
 windowFrame :: Ui :> es => WindowFrame -> Eff es a -> Eff es a
 windowFrame frame body = do
   outer <- withContext $ \ctx -> scopeRawTheme ctx =<< getArenaScope (ctxNodeArena ctx)
@@ -200,13 +171,10 @@ windowFrame frame body = do
 -- Geometry
 --------------------------------------------------------------------------------
 
--- | What is left of a title bar to drag the window by: the row, minus
--- everything in it that takes a click of its own (menu buttons, tabs, the
--- caption buttons). Rectangles outside the row are ignored, and only the
--- horizontal is cut, since a title bar is a row.
---
--- Hand the result to the backend as the window's drag region
--- (@setWindowChrome@ in @nano-ui-sdl@).
+-- | What is left of a title bar row to drag the window by, minus the
+-- rectangles in it that take clicks of their own (cut horizontally only).
+-- Hand it to the backend as the drag region (@setWindowChrome@ in
+-- @nano-ui-sdl@).
 dragSpans :: Rect -> [Rect] -> [Rect]
 dragSpans (Rect rx ry rw rh) taken =
   filter (\r -> rectW r > 0) (go rx (sortOn rectX (filter overlaps taken)))
@@ -222,8 +190,7 @@ dragSpans (Rect rx ry rw rh) taken =
 -- The glyphs
 --------------------------------------------------------------------------------
 
--- | The square a glyph is drawn in: centred in the button and put on whole
--- pixels, so that a one-pixel line covers one pixel.
+-- | The square a glyph is drawn in, centred on whole pixels.
 glyphBox :: Float -> Rect -> Rect
 glyphBox s (Rect x y w h) = Rect (whole (x + (w - s) / 2)) (whole (y + (h - s) / 2)) s s
 
@@ -236,20 +203,17 @@ drawGlyph glyph box@(Rect x y w h) col = case glyph of
   GlyphMinimize -> drawRect (Rect x (y + whole (h / 2)) w 1) col
   -- A window: one square.
   GlyphMaximize -> strokeBox box col
-  -- Two windows, one behind the other. Only the top and right edges of the
-  -- one behind show past the one in front.
+  -- Two windows, the top and right edges of the one behind showing.
   GlyphRestore -> do
     drawRect (Rect (x + 2) y (w - 2) 1) col
     drawRect (Rect (x + w - 1) y 1 (h - 2)) col
     strokeBox (Rect x (y + 2) (w - 2) (h - 2)) col
-  -- A cross: the one glyph that is not axis-aligned, so the one drawn with a
-  -- smoothed line rather than filled pixels.
+  -- A cross, the one glyph drawn with smoothed lines.
   GlyphClose -> do
     drawStrokeAA (V2 (x + 0.5) (y + 0.5)) (V2 (x + w - 0.5) (y + h - 0.5)) 1.2 col
     drawStrokeAA (V2 (x + w - 0.5) (y + 0.5)) (V2 (x + 0.5) (y + h - 0.5)) 1.2 col
 
--- | A one-pixel outline, as four fills: the canvas's stroked rectangle is a
--- rounded one, and these are squares.
+-- | A square one-pixel outline, as four fills.
 strokeBox :: Rect -> Color -> CanvasM ()
 strokeBox (Rect x y w h) col = do
   drawRect (Rect x y w 1) col

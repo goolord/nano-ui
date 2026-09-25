@@ -9,6 +9,7 @@ module NanoUI.Form.Runner
   ) where
 
 import Control.Monad (when)
+import Data.Foldable (for_)
 import Data.Text (Text)
 import qualified Ditto.Core as Ditto
 import qualified Ditto.Types as Ditto
@@ -104,11 +105,8 @@ nanoFormEx cfg prefix form = do
           FormOnSubmit -> submittedBefore
     column $ do
       renderResult showErrors view' res
-      case fcSubmitButton cfg of
-        Just lbl ->
-          whenM (button lbl) $
-            uiIO (markFormSubmitted ctx prefix True)
-        Nothing -> pure ()
+      for_ (fcSubmitButton cfg) $ \lbl ->
+        whenM (button lbl) (uiIO (markFormSubmitted ctx prefix True))
     pure $ case res of
       Ditto.Ok (Ditto.Proved _ a) -> FormValid a
       Ditto.Error errs -> FormInvalid errs

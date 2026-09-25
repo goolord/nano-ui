@@ -38,8 +38,7 @@ runComboFilterTest ctx failed = do
   overlays <- collectOverlayTextSpans ctx inp0
   assert failed (hasText "Gamma Mono" overlays)
   assert failed (not (hasText "Alpha Sans" overlays))
-  ((_, t), _, _, _) <- runFrame ctx (keyInp KeyEnter inp0) ui
-  assertEq failed t "ga"
+  assertEq failed "ga" . snd =<< evalUi ctx (keyInp KeyEnter inp0) ui
 
 -- Up/Down move the keyboard highlight (Down from nothing selects the first
 -- row), and Enter commits it.
@@ -65,17 +64,13 @@ runComboMousePickTest ctx failed = do
   _ <- runFrame ctx inp0 ui
   overlays <- collectOverlayTextSpans ctx inp0
   assertJust failed (spanRect "Beta Serif" overlays) $ \rowRect -> do
-    let cx = rectX rowRect + rectW rowRect / 2
-        cy = rectY rowRect + rectH rowRect / 2
-        (press, release) = clickPair inp0 (V2 cx cy)
-    _ <- runFrame ctx press ui
-    ((r, t), _, _, _) <- runFrame ctx release ui
+    let release = snd (clickPair inp0 (spanCenter rowRect))
+    (r, t) <- runClick ctx inp0 ui (spanCenter rowRect)
     assert failed (respChanged r)
     assertEq failed t "Beta Serif"
     -- Picking defocuses the field: the dropdown is visible exactly while
     -- focused, so the menu disappears with the pick.
-    focus <- getFocusId ctx
-    assertEq failed focus (WidgetId 0)
+    assertEq failed (WidgetId 0) =<< getFocusId ctx
     overlaysClosed <- collectOverlayTextSpans ctx release
     assert failed (not (hasText "Alpha Sans" overlaysClosed))
 
@@ -89,17 +84,13 @@ runComboHoverHighlightTest ctx failed = do
   _ <- runFrame ctx inp0 ui
   overlays <- collectOverlayTextSpans ctx inp0
   assertJust failed (spanRect "Delta Round" overlays) $ \rowRect -> do
-    let hover =
-          inp0
-            { inputMousePos = spanCenter rowRect
-            }
+    let hover = inp0 {inputMousePos = spanCenter rowRect}
     _ <- runFrame ctx hover ui
     -- Hover alone must not commit anything.
     ((r0, t0), _, _, _) <- runFrame ctx hover ui
     assert failed (not (respChanged r0) && T.null t0)
     -- Menu rows show the pointer cursor while hovered.
-    ptr <- cursorKindIs ctx hover UiCursorPointer
-    assert failed ptr
+    assert failed =<< cursorKindIs ctx hover UiCursorPointer
     -- The hovered row carries the hover background, the others do not.
     overlaysHover <- collectOverlayTextSpans ctx hover
     let bgFor needle = [bg | (_, txt, _, bg, _) <- overlaysHover, needle `T.isInfixOf` txt]
@@ -189,8 +180,7 @@ runComboEscapeRevertTest ctx failed = do
   ((r, t), _, _, _) <- runFrame ctx (keyInp KeyEscape inp0) ui
   assert failed (not (respChanged r))
   assertEq failed t "Inter"
-  focus <- getFocusId ctx
-  assertEq failed focus (WidgetId 0)
+  assertEq failed (WidgetId 0) =<< getFocusId ctx
   overlays <- collectOverlayTextSpans ctx inp0
   assert failed (not (hasText "Alpha Sans" overlays))
 

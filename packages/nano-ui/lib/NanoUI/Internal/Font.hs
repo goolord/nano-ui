@@ -399,12 +399,9 @@ scrollBarSideGap = 3
 
 -- | Bar width and end margin for a slot.
 scrollBarGeomFor :: ScrollBarSlot -> (Float, Float)
-scrollBarGeomFor slot =
-  case slot of
-    ScrollBarList -> (scrollBarWidth, scrollBarMargin)
-    ScrollBarPage -> (scrollBarWidth, scrollBarMargin)
-    -- Window bar: side gaps only. No end inset.
-    ScrollBarWindow -> (scrollBarSlimWidth, 0)
+-- Window bar: side gaps only. No end inset.
+scrollBarGeomFor ScrollBarWindow = (scrollBarSlimWidth, 0)
+scrollBarGeomFor _ = (scrollBarWidth, scrollBarMargin)
 
 -- | The layout arena stores a scroller's slot as its 'Enum' value, and every
 -- other node reads a zero there, so 'ScrollBarList' comes first.

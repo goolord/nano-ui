@@ -83,13 +83,7 @@ inputTextArea = textField textArea'
 textField ::
   FormError FormInput err =>
   (Text -> NUI.NanoUI (NUI.Response, Text)) -> FieldName -> Text -> Form err Text
-textField widget name =
-  inputWidget
-    (fieldKey name)
-    (Right . formInputToText)
-    respChanged
-    FormInputText
-    (labelled (fieldLabel name) widget)
+textField widget name = captioned name formInputToText FormInputText widget
 
 -- | Checkbox toggle input.
 inputCheckbox :: FormError FormInput err => FieldName -> Bool -> Form err Bool
@@ -107,26 +101,14 @@ inputSlider ::
   FormError FormInput err =>
   FieldName -> Float -> Float -> Float -> Form err Float
 inputSlider name minV maxV initial =
-  inputWidget
-    (fieldKey name)
-    (Right . decodeFloatInput initial)
-    respChanged
-    FormInputFloat
-    (labelled (fieldLabel name) (slider' minV maxV))
-    initial
+  captioned name (decodeFloatInput initial) FormInputFloat (slider' minV maxV) initial
 
 -- | Dropdown selection in fold order (returns selected index).
 inputSelect ::
   (Foldable f, FormError FormInput err) =>
   FieldName -> f Text -> Int -> Form err Int
 inputSelect name options initial =
-  inputWidget
-    (fieldKey name)
-    (Right . decodeInt initial)
-    respChanged
-    FormInputInt
-    (labelled (fieldLabel name) (select' options))
-    initial
+  captioned name (decodeInt initial) FormInputInt (select' options) initial
 
 -- | Dropdown selection for any bounded enumeration type.
 inputEnumSelect ::
@@ -140,13 +122,7 @@ inputRadio ::
   (Foldable f, FormError FormInput err) =>
   FieldName -> f Text -> Int -> Form err Int
 inputRadio name options initial =
-  inputWidget
-    (fieldKey name)
-    (Right . decodeInt initial)
-    respChanged
-    FormInputInt
-    (labelled (fieldLabel name) (radio' options))
-    initial
+  captioned name (decodeInt initial) FormInputInt (radio' options) initial
 
 -- | Radio button group for any bounded enumeration type.
 inputEnumRadio ::
@@ -157,17 +133,19 @@ inputEnumRadio name = enumField (inputRadio name)
 
 -- | Color picker input.
 inputColor :: FormError FormInput err => FieldName -> Color -> Form err Color
-inputColor name initial =
-  inputWidget
-    (fieldKey name)
-    ( \case
-        FormInputText t -> Right (fromMaybe initial (colorFromHex t))
-        _ -> Right initial
-    )
-    respChanged
-    (FormInputText . colorToHex)
-    (labelled (fieldLabel name) colorPicker')
-    initial
+inputColor name initial = captioned name decode (FormInputText . colorToHex) colorPicker' initial
+  where
+    decode = \case
+      FormInputText t -> fromMaybe initial (colorFromHex t)
+      _ -> initial
+
+-- | A field whose caption, if it has one, is drawn above its control, which
+-- reports an edit as a change.
+captioned ::
+  (Eq a, FormError FormInput err) =>
+  FieldName -> (FormInput -> a) -> (a -> FormInput) -> (a -> NUI.NanoUI (NUI.Response, a)) -> a -> Form err a
+captioned name decode encode widget =
+  inputWidget (fieldKey name) (Right . decode) respChanged encode (labelled (fieldLabel name) widget)
 
 -- | Static label inside a form.
 label :: Text -> Form err ()

@@ -192,10 +192,8 @@ runFrameEff unlift ctx frameInp ui = do
     modifyOverlay ctx (\os -> os {osPrevMenuRects = menuRects})
   writeDamage ctx frameInp snap
   -- Clip frames repaint the damaged region of the retained texture, which
-  -- preserves the other pixels. The region starts from the window backdrop,
-  -- inflated by one
-  -- logical pixel to cover the runner's outward pixel snap. Full-present
-  -- frames (fresh retain, forced full, continuous) paint everything.
+  -- preserves the other pixels ('paintDamageClip'). Full-present frames
+  -- (fresh retain, forced full, continuous) paint everything.
   paintFull <- readIORef (ctxPaintFull ctx)
   beginLayer (ctxDrawArena ctx) LayerBackground
   unless paintFull $ do
@@ -254,6 +252,7 @@ drawFloatingPanels ctx@Context {ctxNodeArena = na, ctxDrawArena = da} (Size ww w
 -- menu-bar title, draw nothing over the pixels they covered, so without the
 -- backdrop a hover that just ended would stay in the retain texture. Damage
 -- in pieces paints a backdrop over each, and every command is cut to them.
+-- Each is inflated by a logical pixel to cover the runner's outward snap.
 paintDamageClip :: Context -> Damage -> [Rect] -> IO ()
 paintDamageClip _ DamageFull _ = pure ()
 paintDamageClip ctx@Context {ctxDrawArena = da} (DamageClip r) pieces = do

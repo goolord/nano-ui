@@ -96,14 +96,9 @@ useContextMenu = do
       close = uiIO (modifyStore ctx (setFlagSlot openK False))
   pure (flagSlot openK store, V2 px py, openAt, close)
 
--- | Render a menu row, with an optional shortcut hint after the label,
--- returning its full 'Response'. A disabled row is a muted label, not a
--- disabled button: hover tracking does not know a button's enabled flag and
--- would still highlight it. Text nodes ignore padding, so the
--- label sits in a container that reproduces an enabled row's geometry: the
--- 'menuItemRowH' height and 'menuMinW' width, the label inset 'menuItemPadX'
--- plus the button's content inset, and the same total horizontal gutter the
--- solver reserves for menu buttons. Its response never reports interaction.
+-- | A menu row, with an optional shortcut hint after the label. A disabled
+-- row is a muted label (hover would still light a disabled button) in a
+-- container padded to an enabled row's geometry, and reports no interaction.
 menuItemWith :: Ui :> es => Text -> Maybe Text -> Bool -> Eff es Response
 menuItemWith lbl hint enabled
   | enabled = buttonStyledEx True text 0 menuRowLayout buttonFlagMenu
@@ -143,9 +138,7 @@ menuItemShortcut txt hint = respClicked <$> menuItemWith txt (Just hint) True
 menuItemDisabled :: Ui :> es => Text -> Eff es ()
 menuItemDisabled txt = void (menuItemWith txt Nothing False)
 
--- | Row layout shared by menu items, matching the text-field context menu:
--- 28px rows and a 148px minimum menu width (@menuItemRowH@ and @menuMinW@ in
--- @NanoUI.Internal.Font@).
+-- | Row layout shared by menu items, matching the text-field context menu.
 menuRowLayout :: Layout
 menuRowLayout = minW menuMinW . fixedH menuItemRowH . tight . fillW $ defaultLayout
 
@@ -171,14 +164,9 @@ menuButtonWith' :: Ui :> es => (Layout -> Layout) -> Text -> Bool -> Eff es Resp
 menuButtonWith' f txt open =
   buttonStyledEx True txt (if open then 1 else 0) (f (tight defaultLayout)) buttonFlagMenuBar
 
--- | Separator line inside a context menu, matching the text-field context
--- menu painter exactly: a 1px rule inset 'menuItemPadX' from the panel edge
--- (the popup already contributes 'menuOuterPad', the row adds the remainder)
--- centered in a 'menuSepH' band (@lineY = bandY + h\/2@ via 4.5px vertical
--- padding around a zero-height content box). The rule sits in a 'tight'
--- column so it stays horizontal ('separator' adapts to its parent's
--- direction and would grow vertically inside the padded row) and so the
--- default 3px container padding does not inset or stretch it.
+-- | Separator line inside a context menu, as the text-field context menu
+-- paints it: a 1px rule inset 'menuItemPadX' from the panel edge, centred in
+-- a 'menuSepH' band. The tight column keeps the rule horizontal.
 menuSeparator :: Ui :> es => Eff es ()
 menuSeparator = do
   rowWith (fixedH menuSepH . padXY (menuItemPadX - menuOuterPad) 4.5 . fillW) $

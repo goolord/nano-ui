@@ -73,7 +73,7 @@ packColor = fromIntegral . colorToWord32
 
 storeColorAt :: WidgetStore -> Int -> Color -> Color
 storeColorAt store key fallback =
-  colorFromWord32 (fromIntegral (findSlot fieldInt (packColor fallback) key store))
+  Color (fromIntegral (findSlot fieldInt (packColor fallback) key store))
 
 -- | Picker's current stored colour, or the supplied fallback if absent.
 widgetStoreColor :: WidgetStore -> WidgetId -> Color -> Color
@@ -133,7 +133,7 @@ colorPickerPartRect na idx rect@(Rect x _ w _) = do
   case colorPickerPartOf si of
     PickerSv -> pure (colorPickerSvSquare rect)
     _ -> do
-      (sx, sy0, sw, sh) <- pickerSvNode na idx >>= getRect na
+      Rect sx sy0 sw sh <- pickerSvNode na idx >>= getNodeRect na
       let Rect _ sy _ side = colorPickerSvSquare (Rect sx sy0 sw sh)
       pure (Rect x sy w side)
 

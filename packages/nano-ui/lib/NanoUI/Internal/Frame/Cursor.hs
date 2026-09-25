@@ -98,7 +98,7 @@ numericStepperHit ctx idx mouse = do
   if not (hasFlag textInputFlagNumeric si)
     then pure False
     else do
-      (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+      Rect x y w h <- getNodeRect (ctxNodeArena ctx) idx
       let
         (up, down) = numericStepperRects x y w h
       pure (rectContains up mouse || rectContains down mouse)

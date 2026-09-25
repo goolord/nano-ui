@@ -66,7 +66,7 @@ import NanoUI.Internal.Draw.Arena
 import NanoUI.Internal.Draw.Shapes
 import NanoUI.Internal.Draw.Types
 import NanoUI.Internal.Font
-import NanoUI.Internal.SIMD (pokeQuadIndices, pokeQuadSIMD, pokeVertexSIMD)
+import NanoUI.Internal.SIMD (pokeQuadCornersSIMD, pokeQuadSIMD)
 import NanoUI.Internal.Style (FontStyle (..), FontWeight (..), TextDecoration (..))
 import NanoUI.Internal.Types (Color (..), Rect (..), forUpTo_, onGrid)
 
@@ -230,11 +230,7 @@ pokeGlyphQuad vp ip base baseIdx slant baselineY r g b a q gx gy gw gh u0 v0 u1 
       let !gy1 = gy + gh
           !topDx = slant * (baselineY - gy)
           !botDx = slant * (baselineY - gy1)
-      pokeVertexSIMD vp vb (gx + topDx) gy r g b a u0 v0
-      pokeVertexSIMD vp (vb + 32) (gx + gw + topDx) gy r g b a u1 v0
-      pokeVertexSIMD vp (vb + 64) (gx + gw + botDx) gy1 r g b a u1 v1
-      pokeVertexSIMD vp (vb + 96) (gx + botDx) gy1 r g b a u0 v1
-      pokeQuadIndices ip ib i0 (i0 + 1) (i0 + 2) (i0 + 3)
+      pokeQuadCornersSIMD vp vb ip ib (gx + topDx) gy (gx + gw + topDx) gy (gx + gw + botDx) gy1 (gx + botDx) gy1 u0 v0 u1 v1 r g b a i0
 
 -- | Glyph quads for one line from pen @(px, py)@, used as given: synthetic bold
 -- relies on its sub-pixel pass offsets. Every quad shares one arena

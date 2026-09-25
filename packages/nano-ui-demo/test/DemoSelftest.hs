@@ -43,35 +43,19 @@ import SdlDemo (demoUi)
 -- widget interactions, failing loudly on any regression.
 selftest :: Bool -> IO ()
 selftest continuous = do
-  withHiddenWindow 1280 800 (V2 (-10) (-10)) (\o -> o {sdlAppContinuous = continuous}) $ \ctx env _ -> do
-    -- Shaped-run font measurement must match SDL3_ttf string measurement.
-    (fmNorm16, _) <- ctxResolveFont ctx 16.0 WeightNormal FontStyleNormal FontRegular
-    (fmItal16, _) <- ctxResolveFont ctx 16.0 WeightNormal FontStyleItalic FontRegular
-    (wNorm, _) <- ctxResolveMeasure ctx 16.0 WeightNormal FontStyleNormal FontRegular "Slanted synthetic italic font style."
-    (wItal, _) <- ctxResolveMeasure ctx 16.0 WeightNormal FontStyleItalic FontRegular "Slanted synthetic italic font style."
-    runNorm <- lineWidthIO fmNorm16 "Slanted synthetic italic font style."
-    runItal <- lineWidthIO fmItal16 "Slanted synthetic italic font style."
-    when (abs (runNorm - wNorm) > 0.01) $
-      fail $ printf "selftest: shaped width mismatch for normal sentence: measure=%.2f, shaped=%.2f" wNorm runNorm
-    when (abs (runItal - wItal) > 0.01) $
-      fail $ printf "selftest: shaped width mismatch for italic sentence: measure=%.2f, shaped=%.2f" wItal runItal
-    putStrLn $ printf "MEASURE string: norm=%.1f, ital=%.1f" wNorm wItal
-    -- The shaped path (fmShape / pushText) must match SDL3_ttf measurement;
-    -- include GPOS kerning and ligatures for pairs like To, AV, and fi.
-    (fmNorm20, _) <- ctxResolveFont ctx 20.0 WeightNormal FontStyleNormal FontRegular
-    (fmItal20, _) <- ctxResolveFont ctx 20.0 WeightNormal FontStyleItalic FontRegular
-    let checkRun :: String -> FontMetrics -> FontStyle -> String -> IO ()
-        checkRun tag fm st pair = do
-          (wab, _) <- ctxResolveMeasure ctx 20.0 WeightNormal st FontRegular (T.pack pair)
-          runW <- lineWidthIO fm (T.pack pair)
-          when (abs (runW - wab) > 0.01) $
-            fail $ printf "selftest: %s shaped width mismatch for '%s': measure=%.2f, shaped=%.2f" tag pair wab runW
-    checkRun "norm" fmNorm20 FontStyleNormal "To"
-    checkRun "ital" fmItal20 FontStyleItalic "To"
-    checkRun "norm" fmNorm20 FontStyleNormal "AV"
-    checkRun "ital" fmItal20 FontStyleItalic "AV"
-    checkRun "norm" fmNorm20 FontStyleNormal "fi"
-    checkRun "ital" fmItal20 FontStyleItalic "fi"
+  withHiddenWindow 1280 800 (V2 640 400) (\o -> o {sdlAppContinuous = continuous}) $ \ctx env idle -> do
+    -- The shaped path (fmShape / pushText) must measure runs as SDL3_ttf
+    -- does, GPOS kerning and ligatures included, for pairs like To, AV and fi.
+    let checkRun :: Float -> FontStyle -> String -> IO ()
+        checkRun size st run = do
+          (fm, _) <- ctxResolveFont ctx size WeightNormal st FontRegular
+          (measured, _) <- ctxResolveMeasure ctx size WeightNormal st FontRegular (T.pack run)
+          shaped <- lineWidthIO fm (T.pack run)
+          when (abs (shaped - measured) > 0.01) $
+            fail $ printf "selftest: %s shaped width mismatch for '%s': measure=%.2f, shaped=%.2f" (show st) run measured shaped
+    for_ [FontStyleNormal, FontStyleItalic] $ \st -> do
+      checkRun 16 st "Slanted synthetic italic font style."
+      mapM_ (checkRun 20 st) ["To", "AV", "fi"]
     -- Shaped text draws glyph by glyph, so a line wider than the 2048px glyph
     -- atlas still gets quads and a width, and a short line gets one quad a
     -- glyph.
@@ -86,61 +70,51 @@ selftest continuous = do
       fail "selftest: a line wider than the atlas lost its width"
     when (maybe True (\(ShapedGlyphs q) -> sizeofPrimArray q /= 4 * 8) shortGlyphs) $
       fail "selftest: a short shaped line did not draw one quad a glyph"
-    let idle =
-          emptyInput
-            { inputWindowSize = Size 1280 800
-            , inputMousePos = V2 640 400
-            }
     (ctx', base) <- syncDisplay ctx env idle
     let drawWith frameUi inp = void (sdlDrawFrame ctx' frameUi env inp False)
         drawOnce = drawWith demoUi
         clickPos = Harness.clickPos drawOnce base
         dragPos = Harness.dragPos drawOnce base
         clickTab = Harness.clickTab collectTextSpans drawOnce ctx' base
+        pressKey k = mapM_ drawOnce [Harness.keyInp k base, base]
+        -- The frame's text spans, failing with @msg@ unless one holds @needle@.
+        spansWith msg needle = do
+          spans <- collectTextSpans ctx'
+          spans <$ expectText msg needle spans
+        expect msg needle = void (spansWith msg needle)
+        expectOverlay msg needle = expectText msg needle =<< collectOverlayTextSpans ctx' base
     void (sdlDrawFrame ctx' demoUi env base True)
-    spans0 <- collectTextSpans ctx'
-    expectText "selftest: Controls body missing" "Feature" spans0
+    spans0 <- spansWith "selftest: Controls body missing" "Feature"
     -- A field value wider than the glyph atlas draws glyph by glyph, and the
     -- text drawn before and after it in the frame survives.
     nameLbl <- requireSpan "selftest: Name label" (findRightmost "Name" spans0)
     clickPos (V2 (v2X nameLbl + 80) (v2Y nameLbl))
     drawOnce (base {inputChars = T.replicate 400 "f"})
     drawOnce base
-    spansLong <- collectTextSpans ctx'
-    expectText "selftest: long field text lost the tab content" "Feature" spansLong
+    spansLong <- spansWith "selftest: long field text lost the tab content" "Feature"
     unless (length spansLong >= length spans0 - 1) $
       fail "selftest: long field text collapsed the span set"
     clickTab "Table"
-    spansTable <- collectTextSpans ctx'
-    expectText "selftest: table body missing after Table tab" "David" spansTable
-    hdr <- requireSpan "selftest: Name header" (findHeader "Name" spansTable)
-    clickPos hdr
-    spansSorted <- collectTextSpans ctx'
-    expectText "selftest: header click did not toggle sort" "descending" spansSorted
+    spansTable <- spansWith "selftest: table body missing after Table tab" "David"
+    clickPos =<< requireSpan "selftest: Name header" (findHeader "Name" spansTable)
+    spansSorted <- spansWith "selftest: header click did not toggle sort" "descending"
     dept <- requireSpan "selftest: Dept header" (findHeader "Dept" spansSorted)
     dragPos dept (V2 (v2X dept + 180) (v2Y dept))
-    spansDrag <- collectTextSpans ctx'
-    expectText "selftest: table missing after header drag" "Sonia" spansDrag
+    expect "selftest: table missing after header drag" "Sonia"
     clickTab "List"
-    spansTree <- collectTextSpans ctx'
-    expectText "selftest: tree missing after List tab" "src" spansTree
-    readme <- requireSpan "selftest: README.md" (findExact "README.md" spansTree)
-    clickPos readme
-    spansSel <- collectTextSpans ctx'
-    expectText "selftest: tree click did not select README.md" "7" spansSel
+    spansTree <- spansWith "selftest: tree missing after List tab" "src"
+    clickPos =<< requireSpan "selftest: README.md" (findExact "README.md" spansTree)
+    expect "selftest: tree click did not select README.md" "7"
     clickTab "Typography"
-    spansType <- collectTextSpans ctx'
-    expectText "selftest: typography missing after Typography tab" "Live Playground" spansType
+    spansType <- spansWith "selftest: typography missing after Typography tab" "Live Playground"
     drawOnce (base {inputScroll = V2 0 (-350)})
     drawOnce base
     sizeSpan <- requireSpan "selftest: Size slider" (findRightmost "Size" spansType)
     for_ [20, 60, 100, 140, 180, 50, 120, -60, -100, 0 :: Float] $ \dx ->
       dragPos sizeSpan (V2 (v2X sizeSpan + dx) (v2Y sizeSpan))
-    spansTypeAfter <- collectTextSpans ctx'
-    expectText "selftest: typography missing after size changes" "Live Playground" spansTypeAfter
+    expect "selftest: typography missing after size changes" "Live Playground"
     clickTab "Panes"
-    spansPane0 <- collectTextSpans ctx'
-    expectText "selftest: pane grid missing after Panes tab" "Pane 1" spansPane0
+    spansPane0 <- spansWith "selftest: pane grid missing after Panes tab" "Pane 1"
     -- Pane titles, left to right.
     let titles ss =
           sortOn
@@ -155,26 +129,21 @@ selftest continuous = do
             ]
         paneCount = length . titles
         titleCenter = Harness.spanCenter . fst
+        -- Click the button labelled @name@ in @spans@, and return the spans
+        -- after it.
+        press name spans = do
+          clickPos =<< requireSpan ("selftest: button " <> T.unpack name) (findExact name spans)
+          collectTextSpans ctx'
     unless (paneCount spansPane0 == 1) $ fail "selftest: expected exactly one pane initially"
-    plus <- requireSpan "selftest: split button" (findExact "+" spansPane0)
-    clickPos plus
-    spansPane1 <- collectTextSpans ctx'
+    spansPane1 <- press "+" spansPane0
     unless (paneCount spansPane1 == 2) $ fail "selftest: split did not create a second pane"
-    maxBtn <- requireSpan "selftest: maximize button" (findExact "M" spansPane1)
-    clickPos maxBtn
-    spansPaneMax <- collectTextSpans ctx'
+    spansPaneMax <- press "M" spansPane1
     expectText "selftest: maximize did not fill the grid" "maximized" spansPaneMax
-    restoreBtn <- requireSpan "selftest: restore button" (findExact "R" spansPaneMax)
-    clickPos restoreBtn
-    spansPane2 <- collectTextSpans ctx'
+    spansPane2 <- press "R" spansPaneMax
     unless (paneCount spansPane2 == 2) $ fail "selftest: restore lost a pane"
-    closeBtn <- requireSpan "selftest: close button" (findExact "x" spansPane2)
-    clickPos closeBtn
-    spansPane3 <- collectTextSpans ctx'
+    spansPane3 <- press "x" spansPane2
     unless (paneCount spansPane3 == 1) $ fail "selftest: close did not remove a pane"
-    plus2 <- requireSpan "selftest: split button after close" (findExact "+" spansPane3)
-    clickPos plus2
-    spansPane4 <- collectTextSpans ctx'
+    spansPane4 <- press "+" spansPane3
     [leftTitle4, rightTitle4] <- pure (titles spansPane4)
     -- Edge drop: grab the right pane and drop it on the left pane's left edge.
     -- The dragged pane must become the new leftmost pane.
@@ -193,9 +162,7 @@ selftest continuous = do
     -- to the grid's outer left edge. The grid must restructure at the top level
     -- into one pane on the left and the other two side-by-side on the right
     -- half, rather than a flat third column.
-    plus3 <- requireSpan "selftest: split button for three panes" (findExact "+" spansPane5)
-    clickPos plus3
-    spansPane3c <- collectTextSpans ctx'
+    spansPane3c <- press "+" spansPane5
     [leftT3, midT3, _] <- pure (titles spansPane3c)
     dragPos
       (V2 (v2X (titleCenter midT3) + 70) (v2Y (titleCenter midT3) + 100))
@@ -211,36 +178,28 @@ selftest continuous = do
     unless (gapLeft > gapRight + 10) $ fail "selftest: top-level drop did not collapse the remaining panes onto one side"
     -- Pane headers are optional: turn them off and the titles vanish but the
     -- panes (and their content) remain.
-    hdrBtn <- requireSpan "selftest: headers checkbox" (findExact "Pane headers" spansTop)
-    clickPos hdrBtn
-    spansPane6 <- collectTextSpans ctx'
+    spansPane6 <- press "Pane headers" spansTop
     unless (paneCount spansPane6 == 0) $ fail "selftest: disabling pane headers did not hide them"
     expectText "selftest: headerless panes lost their content" "Contents of" spansPane6
     clickTab "Controls"
-    spansCtl <- collectTextSpans ctx'
-    expectText "selftest: Controls missing after tab back" "Feature" spansCtl
+    spansCtl <- spansWith "selftest: Controls missing after tab back" "Feature"
     feat0 <- requireSpan "selftest: Feature checkbox" (findRightmost "Feature" spansCtl)
     clickPos feat0
-    spansOn <- collectTextSpans ctx'
-    expectText "selftest: checkbox did not turn Feature on" "on" spansOn
+    expect "selftest: checkbox did not turn Feature on" "on"
     clickPos feat0
-    spansOff <- collectTextSpans ctx'
-    expectText "selftest: checkbox did not turn Feature off" "off" spansOff
+    expect "selftest: checkbox did not turn Feature off" "off"
     clickPos feat0
-    spansOn2 <- collectTextSpans ctx'
-    expectText "selftest: checkbox did not turn Feature on again" "on" spansOn2
+    spansOn2 <- spansWith "selftest: checkbox did not turn Feature on again" "on"
     -- Theme is a radio fieldset: all options stay visible in the plain spans;
     -- click "Tomorrow Light" directly (the state card shows the old value).
     lightOpt <- requireSpan "selftest: Tomorrow Light option" (findExact "Tomorrow Light" spansOn2)
     clickPos lightOpt
-    spansTheme <- collectTextSpans ctx'
-    expectText "selftest: radio did not pick Tomorrow Light" "Tomorrow Light" spansTheme
+    spansTheme <- spansWith "selftest: radio did not pick Tomorrow Light" "Tomorrow Light"
     th <- getTheme ctx'
     unless (th == tomorrowMinLightTheme) $ fail "selftest: context theme was not updated to Tomorrow Light"
     vol <- requireSpan "selftest: Volume slider" (findRightmost "Volume" spansTheme)
     clickPos (V2 (v2X vol + 80) (v2Y vol))
-    about <- requireSpan "selftest: About button" (findExact "About" spansTheme)
-    clickPos about
+    clickPos =<< requireSpan "selftest: About button" (findExact "About" spansTheme)
     spansModal <- collectOverlayTextSpans ctx' base
     expectText "selftest: About modal missing" "Immediate-mode" spansModal
     -- Font metrics can make the body overflow the modal's initial viewport.
@@ -249,18 +208,13 @@ selftest continuous = do
       bodyPos <- requireSpan "selftest: About body" (findExact "nano-ui" spansModal)
       drawOnce (base {inputMousePos = bodyPos, inputScroll = V2 0 10})
       drawOnce base
-    spansModalFooter <- collectOverlayTextSpans ctx' base
-    expectText "selftest: About Close button unreachable" "Close" spansModalFooter
-    drawOnce (Harness.keyInp KeyEscape base)
-    drawOnce base
+    expectOverlay "selftest: About Close button unreachable" "Close"
+    pressKey KeyEscape
     spansClosed <- collectOverlayTextSpans ctx' base
     when (hasText "Immediate-mode" spansClosed) $ fail "selftest: Escape did not dismiss About"
-    spansLatest <- collectTextSpans ctx'
-    debugBtn <- requireSpan "selftest: Debug button" (findExact "Debug" spansLatest)
-    clickPos debugBtn
-    spansDebug <- collectOverlayTextSpans ctx' base
-    expectText "selftest: Debug window missing" "Frame" spansDebug
-    expectText "selftest: Debug Runtime section missing" "Runtime" spansDebug
+    void . press "Debug" =<< collectTextSpans ctx'
+    expectOverlay "selftest: Debug window missing" "Frame"
+    expectOverlay "selftest: Debug Runtime section missing" "Runtime"
     -- Formatted rows may be reused between samples, but must track the next
     -- backend refresh rather than freezing the first snapshot in the cache.
     sampledDraws <- newIORef 0

@@ -43,7 +43,7 @@ import Graphics.NanoSvg
   , parseSvg
   , transformPoint
   )
-import NanoUI.Internal.Types (Color, clamp, colorA, colorB, colorFromWord32, colorG, colorR)
+import NanoUI.Internal.Types (Color (..), clamp, colorA, colorB, colorG, colorR)
 
 -- | A parsed SVG document, as @nano-svg@ returns it.
 type Svg = Document
@@ -391,7 +391,7 @@ rasterizeSvg width height current svg
             paintColor p = case p of
               PaintNone -> Nothing
               PaintCurrent -> Just current
-              PaintColor col -> Just (colorFromWord32 (rgbaToWord32 col))
+              PaintColor col -> Just (Color (rgbaToWord32 col))
             -- An unspecified fill paints black, or the current colour in a
             -- monochrome document, so an icon without paints tints.
             fill = fromMaybe (if documentMonochrome svg then PaintCurrent else PaintColor black) (styleFill style)

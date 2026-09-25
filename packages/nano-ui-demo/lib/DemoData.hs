@@ -5,6 +5,7 @@
 module DemoData
   ( DemoPerson (..)
   , demoPeople
+  , peopleColumns
   , colPeople
   , demoTree
   , sineCosineChart
@@ -44,16 +45,18 @@ demoPeople =
   , DemoPerson "Ruth" "Ops" 47 "Boston" "Staff"
   ]
 
--- | Table columns: one headed cell per field.
+-- | The table's columns: each header with its field's text.
+peopleColumns :: [(T.Text, DemoPerson -> T.Text)]
+peopleColumns =
+  [ ("Name", demoPersonName)
+  , ("Dept", demoPersonDept)
+  , ("Age", T.pack . show . demoPersonAge)
+  , ("City", demoPersonCity)
+  , ("Role", demoPersonRole)
+  ]
+
 colPeople :: Colonnade Headed DemoPerson T.Text
-colPeople =
-  mconcat
-    [ headed "Name" demoPersonName
-    , headed "Dept" demoPersonDept
-    , headed "Age" (T.pack . show . demoPersonAge)
-    , headed "City" demoPersonCity
-    , headed "Role" demoPersonRole
-    ]
+colPeople = foldMap (uncurry headed) peopleColumns
 
 demoTree :: [TreeItem]
 demoTree =
@@ -94,42 +97,24 @@ weeklyBars =
   , ("Fri", 3)
   ]
 
--- | Captioned 32x32 RGBA images, rows top to bottom.
+-- | Captioned 32x32 RGBA images.
 demoSwatches :: [(T.Text, BS.ByteString)]
 demoSwatches =
-  [ ( "Swatch"
-    , BS.pack
-        [ chan
-        | y <- [0 .. 31] :: [Int]
-        , x <- [0 .. 31] :: [Int]
-        , chan <-
-            [ fromIntegral (x * 255 `div` 31)
-            , fromIntegral (y * 255 `div` 31)
-            , 180
-            , 255
-            ]
-        ]
-    )
-  , ( "Checker"
-    , BS.pack
-        [ chan
-        | y <- [0 .. 31] :: [Int]
-        , x <- [0 .. 31] :: [Int]
-        , chan <-
-            if (x `div` 8 + y `div` 8) `mod` 2 == 0
-              then [240, 200, 80, 255]
-              else [40, 50, 70, 255]
-        ]
-    )
-  , ( "Stripe"
-    , BS.pack
-        [ chan
-        | _y <- [0 .. 31] :: [Int]
-        , x <- [0 .. 31] :: [Int]
-        , chan <-
-            if (x `div` 4) `mod` 2 == 0
-              then [80, 160, 220, 255]
-              else [30, 40, 60, 255]
-        ]
-    )
+  [ ("Swatch", square (\x y -> (x * 255 `div` 31, y * 255 `div` 31, 180)))
+  , ("Checker", square (\x y -> if even (x `div` 8 + y `div` 8) then (240, 200, 80) else (40, 50, 70)))
+  , ("Stripe", square (\x _ -> if even (x `div` 4) then (80, 160, 220) else (30, 40, 60)))
   ]
+  where
+    square = opaqueImage 32 32
+
+-- | A @w@ by @h@ opaque RGBA image, rows top to bottom, from each pixel's
+-- red, green and blue.
+opaqueImage :: Int -> Int -> (Int -> Int -> (Int, Int, Int)) -> BS.ByteString
+opaqueImage w h pixel =
+  BS.pack
+    [ chan
+    | y <- [0 .. h - 1]
+    , x <- [0 .. w - 1]
+    , let (r, g, b) = pixel x y
+    , chan <- [fromIntegral r, fromIntegral g, fromIntegral b, 255]
+    ]

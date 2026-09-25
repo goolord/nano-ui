@@ -24,20 +24,17 @@ where
 import Colonnade (Colonnade, Headed (..), headed, headless)
 import Colonnade.Encode qualified as Encode
 import Control.Monad (forM, forM_, unless, void, when)
-import Control.Monad.ST (runST)
 import Data.Char (isDigit)
-import Data.Dynamic (fromDynamic, toDyn)
 import Data.Foldable (toList)
-import Data.IORef (modifyIORef', readIORef, writeIORef)
-import Data.IntMap.Strict qualified as IM
+import Data.IORef (modifyIORef')
 import Data.IntSet (IntSet)
 import Data.IntSet qualified as IS
-import Data.List (find, sortOn)
+import Data.List (find, sortBy, sortOn)
 import Data.Maybe (fromMaybe, isJust, listToMaybe)
-import Data.Ord (Down (..))
+import Data.Ord (Down (..), comparing)
 import Data.Text (Text)
 import Data.Text qualified as T
-import Data.Primitive.PrimArray (PrimArray, indexPrimArray, newPrimArray, primArrayFromList, readPrimArray, sizeofPrimArray, unsafeFreezePrimArray, writePrimArray)
+import Data.Primitive.PrimArray (PrimArray, indexPrimArray, newPrimArray, primArrayFromList, sizeofPrimArray, unsafeFreezePrimArray, writePrimArray)
 import Data.Primitive.SmallArray (SmallArray, indexSmallArray, mapSmallArray', newSmallArray, sizeofSmallArray, smallArrayFromList, unsafeFreezeSmallArray, writeSmallArray)
 import Data.Primitive.Types (Prim)
 import Data.Vector qualified as V
@@ -55,7 +52,7 @@ import GHC.Exts (isTrue#, reallyUnsafePtrEquality#)
 import NanoUI.Internal.Types (Rect (..), clamp, rectH, rectW, v2X, V2 (..), rectContains)
 import NanoUI.Internal.WidgetText (buttonFlagTable, tableHeaderLabel, tableSortReserve)
 import NanoUI.Internal.Widgets.Behavior (dragThresholdPx, useReorder)
-import NanoUI.Internal.Widgets.Combinators (buttonStyledEx)
+import NanoUI.Internal.Widgets.Combinators (buttonStyledEx, readDerived, writeDerived)
 import NanoUI.Internal.Widgets.Layout (column', panel', row', scrollAreaIdConfigured, separator, spacer)
 import NanoUI.Internal.Frame.Scroll.Geometry (defaultScrollConfig, scrollHorizontalHidden, scrollVerticalAuto, scrollVerticalHidden)
 import NanoUI.Internal.Widgets.Node
@@ -113,9 +110,8 @@ unpackSort n = SortCol (n `div` 2) (toEnum (n `mod` 2))
 clampSortCol :: Int -> SortCol -> SortCol
 clampSortCol n (SortCol idx dir) = SortCol (clamp 0 (max 0 (n - 1)) idx) dir
 
--- Sort mark in bits 16-17 (see tableSortMarkOf): the low nibbles are the
--- font fields and a mark of 1 or 2 in bit 0-1 flips the header's font
--- variant, which blanks the arrow glyph.
+-- The sort mark sits in bits 16-17 (see tableSortMarkOf), clear of the font
+-- fields in the low bits.
 sortMarkStyle :: SortCol -> Int -> Int
 sortMarkStyle sort idx
   | sortColIndex sort /= idx = 0
@@ -142,11 +138,10 @@ isNumericCell txt =
         _ -> s
    in not (T.null digits) && T.all isDigit digits
 
--- | What a table derives from its rows each frame: the cells as text, each
--- column's content width and numeric flag, and the row order for a sort.
--- Kept between frames in 'ctxDerivedCache' with the rows and columns it was
--- derived from, so a frame whose rows are the same value, or encode to the
--- same text, measures and sorts nothing.
+-- | What a table derives from its rows: the cells as text, each column's
+-- content width and numeric flag, and the row order for a sort. Kept in
+-- 'ctxDerivedCache', so a frame whose rows are the same value, or encode to
+-- the same text, measures and sorts nothing.
 data TableDerived = TableDerived
   { tdRows :: !Opaque
   , tdCols :: !Opaque
@@ -168,11 +163,9 @@ samePtr (Opaque a) b = isTrue# (reallyUnsafePtrEquality# a b)
 -- rows and columns are the ones it was derived from or encode to its text.
 tableDerived :: Foldable f => Context -> Int -> Colonnade Headed row Text -> f row -> SortCol -> IO TableDerived
 tableDerived ctx key cols rows sort = do
-  cache <- readIORef (ctxDerivedCache ctx)
-  let cached = IM.lookup key cache >>= fromDynamic
-      hdrs = Encode.header id cols
-      -- Each row is encoded once and shared by measuring, sorting and the
-      -- cells; the sort orders row indices.
+  cached <- readDerived ctx key
+  let hdrs = Encode.header id cols
+      -- Each row is encoded once, for measuring, sorting and the cells.
       encoded = smallArrayFromList [Encode.row id cols r | r <- toList rows]
       orderFor cells = sortIndices (sortColDir sort) (mapSmallArray' (\row -> fromMaybe T.empty (row V.!? sortColIndex sort)) cells)
   derived <- case cached of
@@ -188,11 +181,7 @@ tableDerived ctx key cols rows sort = do
         | otherwise = derived {tdSort = sort, tdOrder = orderFor (tdEncoded derived)}
   case cached of
     Just d | samePtr (Opaque d) resorted -> pure ()
-    _ ->
-      -- A table that stops being built leaves its entry behind, so a cache
-      -- grown past a few dozen tables starts over.
-      writeIORef (ctxDerivedCache ctx) $!
-        IM.insert key (toDyn resorted) (if IM.size cache >= 64 then IM.empty else cache)
+    _ -> writeDerived ctx key resorted
   pure resorted
 
 -- | Content width and numeric flag of each column, measured once over the
@@ -250,8 +239,7 @@ unpackHeaderDrag n
   | n <= -1000 = HeaderResize (-1000 - n)
   | otherwise = HeaderIdle
 
--- Metadata is indexed by original column id after reordering/hiding. Keep
--- it indexed throughout layout, rather than walking a list for each cell.
+-- Column metadata by source column index, with a fallback out of range.
 {-# INLINE primAt #-}
 primAt :: Prim a => PrimArray a -> Int -> a -> a
 primAt xs i fallback = if i >= 0 && i < sizeofPrimArray xs then indexPrimArray xs i else fallback
@@ -260,9 +248,8 @@ primAt xs i fallback = if i >= 0 && i < sizeofPrimArray xs then indexPrimArray x
 smallAt :: SmallArray a -> Int -> a -> a
 smallAt xs i fallback = if i >= 0 && i < sizeofSmallArray xs then indexSmallArray xs i else fallback
 
--- Width floor a column cannot shrink under: its declared fixed width, else
--- its content minimum. Shared by the column boxes and the resize-drag clamp
--- so a dragged or stored width never wraps the cell text.
+-- Width floor a column cannot shrink under, dragged or not: its declared
+-- fixed width, else its content minimum, so its cells never wrap.
 colFloor :: SmallArray ColSize -> PrimArray Float -> Int -> Float
 colFloor sizes contentWs i = case smallAt sizes i ColContent of
   ColFixed f -> max minColW f
@@ -343,9 +330,6 @@ tableConfigured cfg f key cols inputRows curSort =
         dragX0 = findSlot fieldFloat 0 stateKey st0
         dragW0 = findSlot fieldFloat 0 (slotKey SlotDragW stateKey) st0
         mx = v2X (inputMousePos inp)
-        -- A drag cannot push a column under its colFloor: the column reserved
-        -- that much space for its text, and going under it wraps the cell and
-        -- drags the whole row taller.
         widths1 = case drag0 of
           HeaderResize c
             | inputMouseDown inp ->
@@ -393,8 +377,7 @@ tableConfigured cfg f key cols inputRows curSort =
           | fill = fillW (fillH flatLayout)
           | otherwise = (fillH flatLayout) {layoutMinW = minSum idxs}
         gridRowLay idxs = fillIf fillInner flatLayout {layoutMinW = minSum idxs}
-        -- Header row, its rule, the pinned rows and their rule: the same in both
-        -- panes.
+        -- Header row, its rule, the pinned rows and their rule, in either pane.
         headerBlock idxs = do
           hs <- row' (gridRowLay idxs) $
             forM (zip [0 :: Int ..] idxs) $ \(k, i) -> do
@@ -442,14 +425,8 @@ tableConfigured cfg f key cols inputRows curSort =
         unfrozenPane = do
           mPrevV <- lastRect vWid
           let totalH = fromIntegral scrollN * rowMinH
-              -- Prev-frame decision, one frame behind the body scroller's live 2D
-              -- gutter: on the frame the vertical bar first appears (or vanishes)
-              -- the header spacer disagrees with the body's reserved lane for one
-              -- frame. The horizontal side dodges this class of lag by owning its
-              -- bar inside the body scroller; the vertical lane cannot do that
-              -- because the header must narrow by exactly the lane width at build
-              -- time, and the body's live v-gutter is only known after this
-              -- frame's solve. Known, accepted one-frame misalignment.
+              -- Decided from last frame, so the header's lane spacer lags the
+              -- body's vertical bar by one frame when the bar comes or goes.
               hasVertBar = maybe (totalH > 100) (\r -> totalH > rectH r) mPrevV
           column' (paneLay fillInner unfrozenIdx) $ do
             hs <-
@@ -458,21 +435,15 @@ tableConfigured cfg f key cols inputRows curSort =
                   scrollAreaIdConfigured
                     hWid
                     ((if fillInner then fillW else minW (minSum unfrozenIdx)) flatLayout {layoutDirection = Row})
-                    -- The header scroller is chrome-less: it follows the body's
-                    -- horizontal offset (linkScrollAxes below) and clips the header
-                    -- row at the pane edge. The horizontal scrollbar itself belongs
-                    -- to the body scroller so it spans the full table width at the
-                    -- table's bottom edge instead of sitting under the header.
+                    -- A bare scroller that follows the body's horizontal
+                    -- offset (linkScrollAxes below) and clips the header row.
                     scrollHorizontalHidden
                     (column' (gridRowLay unfrozenIdx) (headerBlock unfrozenIdx))
                 -- The body scroller has no padding, so its whole lane is gutter.
                 when hasVertBar $ void (spacer (Fixed (scrollBarGutter ScrollBarList 0)) Fit)
                 pure hs'
             uiIO (linkScrollAxes ctx vWid hWid)
-            -- The body owns both bars: the vertical one on the right, and the
-            -- horizontal one at the bottom of the table. Its live 2D gutter logic
-            -- reserves the lane exactly while the columns overflow, so the bar
-            -- cannot flicker the way the prev-frame header lane did.
+            -- The body owns both scrollbars.
             scrollAreaIdConfigured
               vWid
               (fillIf fillInner (fillH flatLayout))
@@ -500,8 +471,7 @@ tableConfigured cfg f key cols inputRows curSort =
       mBodyRect <- lastRect vWid
       let mouse = inputMousePos inp
           headerRects = [(i, rawRespRect r) | (i, r) <- headerPairs]
-          -- The same rects are the resize cursor's zones, so the two cannot
-          -- drift apart.
+          -- Also the resize cursor's zones.
           edgeZones = headerEdgeZones 4 mBodyRect headerRects
           hitCol zones = fst <$> find (\(_, r) -> rectContains r mouse) zones
           edgeCol = hitCol edgeZones
@@ -554,16 +524,14 @@ tableConfigured cfg f key cols inputRows curSort =
           widgetResp =
             setChanged hasChanged $
               setClicked (hasChanged && isJust sortClick) (mconcat (map snd headerPairs ++ maybe [] pure showAllResp))
-      -- Compare the five slots, not the whole store: rewriting the store only
-      -- when a slot moved keeps an idle table from diffing every map each frame.
+      -- Compare the five slots, so an idle table writes nothing.
       uiIO . writeSlots ctx $
         SlotWrites (\st -> lookupDyn stateKey st == Just (nextOrder, widths1)) (insertDyn stateKey (nextOrder, widths1))
           <> slotWrite fieldIntSet stateKey nextHidden
           <> slotWrite fieldInt (slotKey SlotDrag stateKey) (packHeaderDrag nextDrag)
           <> slotWrite fieldFloat stateKey nextDragX
           <> slotWrite fieldFloat (slotKey SlotDragW stateKey) nextDragW
-      -- The cursor shows the resize arrow for the whole drag, wherever the
-      -- pointer goes; letting go clears it.
+      -- The resize cursor lasts the whole drag, wherever the pointer goes.
       case nextDrag of
         HeaderResize _ | inputMouseDown inp -> uiIO (modifyInteraction ctx (\s -> s {isColumnResize = True}))
         _ -> pure ()
@@ -581,40 +549,11 @@ gridColumnsLay lay keys layouts cells =
     go False moreKeys moreLayouts moreCells
   go _ _ _ _ = pure ()
 
--- | Indices of @keys@ stably sorted by key: a bottom-up merge sort between
--- two index buffers.
+-- | Indices of @keys@ stably sorted by key.
 sortIndices :: SortDir -> SmallArray Text -> PrimArray Int
-sortIndices dir keys = runST $ do
-  let n = sizeofSmallArray keys
-      before l r = case compare (indexSmallArray keys l) (indexSmallArray keys r) of
-        LT -> dir == SortAsc
-        GT -> dir == SortDesc
-        EQ -> True
-  start <- newPrimArray n
-  let fill !i = when (i < n) (writePrimArray start i i >> fill (i + 1))
-  fill 0
-  spare <- newPrimArray n
-  let pass !src !dst !width
-        | width >= n = unsafeFreezePrimArray src
-        | otherwise = do
-            let mergeFrom !lo = when (lo < n) $ do
-                  let !mid = min n (lo + width)
-                      !hi = min n (lo + 2 * width)
-                      takeLeft !i !j !k = readPrimArray src i >>= writePrimArray dst k >> go (i + 1) j (k + 1)
-                      takeRight !i !j !k = readPrimArray src j >>= writePrimArray dst k >> go i (j + 1) (k + 1)
-                      go !i !j !k
-                        | k >= hi = pure ()
-                        | i >= mid = takeRight i j k
-                        | j >= hi = takeLeft i j k
-                        | otherwise = do
-                            l <- readPrimArray src i
-                            r <- readPrimArray src j
-                            if before l r then takeLeft i j k else takeRight i j k
-                  go lo mid lo
-                  mergeFrom hi
-            mergeFrom 0
-            pass dst src (2 * width)
-  pass start spare 1
+sortIndices dir keys =
+  let byKey = comparing (indexSmallArray keys)
+   in primArrayFromList (sortBy (if dir == SortAsc then byKey else flip byKey) [0 .. sizeofSmallArray keys - 1])
 
 -- | First and last visible item index for a uniform-height list, or
 -- @(0, -1)@ when nothing is visible.
@@ -649,11 +588,9 @@ rebuildOrder hidden newVis old =
 minColW :: Float
 minColW = 40
 
--- | Each column's resize edge zone: @pad@ either side of its header's right
--- edge, from the top of the header band down to the bottom of the body
--- scroller's rect (the previous frame's, readable at build time), so a column
--- can be resized by its boundary line anywhere down the table, not just on
--- the header cell. Before the body has a rect, the header band alone.
+-- | Each column's resize zone: @pad@ either side of its header's right edge,
+-- from the header band's top down to the bottom of the body's last-frame
+-- rect, or of the header band before the body has one.
 headerEdgeZones :: Float -> Maybe Rect -> [(Int, Rect)] -> [(Int, Rect)]
 headerEdgeZones pad mBody hdrs =
   [(i, Rect (x + w - pad) top (2 * pad) (bot - top)) | (i, Rect x _ w h) <- hdrs, w > 0 && h > 0]

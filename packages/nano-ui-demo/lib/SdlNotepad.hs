@@ -111,9 +111,7 @@ notepadUi = do
 
     saveDocument forceDialog =
       if forceDialog || T.null docPath
-        then do
-          mHandle <- askSaveFileDialog defaultFileDialogOptions
-          setSaveDlg mHandle
+        then setSaveDlg =<< askSaveFileDialog defaultFileDialogOptions
         else do
           saved <- writeDocument (T.unpack docPath) doc
           if saved
@@ -122,49 +120,44 @@ notepadUi = do
               setStatusMsg ("Saved " <> docPath)
             else setStatusMsg ("Could not save " <> docPath)
 
-    editAction cmd = do
-      setOpenMenu ""
-      runTextCommand editorId cmd
+    zoomIn = setZoom (min 4.0 (zoom * 1.1))
+    zoomOut = setZoom (max 0.5 (zoom / 1.1))
+
+    -- A menu row and what it does; running it closes the menu.
+    item menuRow action = whenM menuRow (setOpenMenu "" >> action)
+    editItem name chord cmd = item (menuItemShortcut name chord) (runTextCommand editorId cmd)
 
     fileMenu = do
-      whenM (menuItem "New") (setOpenMenu "" >> newDocument)
-      whenM (menuItem "Open...") $ do
-        setOpenMenu ""
-        askOpenFileDialog defaultFileDialogOptions >>= setOpenDlg
-      whenM (menuItem "Save") (setOpenMenu "" >> saveDocument False)
-      whenM (menuItemShortcut "Save As..." "Ctrl+Shift+S") (setOpenMenu "" >> saveDocument True)
+      item (menuItem "New") newDocument
+      item (menuItem "Open...") (setOpenDlg =<< askOpenFileDialog defaultFileDialogOptions)
+      item (menuItem "Save") (saveDocument False)
+      item (menuItemShortcut "Save As..." "Ctrl+Shift+S") (saveDocument True)
       menuSeparator
-      whenM (menuItemShortcut "Exit" "Esc") (setOpenMenu "" >> liftIO exitSuccess)
+      item (menuItemShortcut "Exit" "Esc") (liftIO exitSuccess)
 
     editMenu = do
       canUndo <- textCanUndo editorId
       canRedo <- textCanRedo editorId
-      if canUndo
-        then whenM (menuItemShortcut "Undo" "Ctrl+Z") (editAction Undo)
-        else menuItemDisabled "Undo"
-      if canRedo
-        then whenM (menuItemShortcut "Redo" "Ctrl+Shift+Z") (editAction Redo)
-        else menuItemDisabled "Redo"
+      if canUndo then editItem "Undo" "Ctrl+Z" Undo else menuItemDisabled "Undo"
+      if canRedo then editItem "Redo" "Ctrl+Shift+Z" Redo else menuItemDisabled "Redo"
       menuSeparator
-      whenM (menuItemShortcut "Cut" "Ctrl+X") (editAction Cut)
-      whenM (menuItemShortcut "Copy" "Ctrl+C") (editAction Copy)
-      whenM (menuItemShortcut "Paste" "Ctrl+V") (editAction Paste)
+      editItem "Cut" "Ctrl+X" Cut
+      editItem "Copy" "Ctrl+C" Copy
+      editItem "Paste" "Ctrl+V" Paste
       menuSeparator
-      whenM (menuItemShortcut "Select All" "Ctrl+A") (editAction SelectAll)
+      editItem "Select All" "Ctrl+A" SelectAll
 
     viewMenu = do
-      whenM
-        (menuItem (if showStatus then "Hide Status Bar" else "Show Status Bar"))
-        (setOpenMenu "" >> setShowStatus (not showStatus))
+      item (menuItem (if showStatus then "Hide Status Bar" else "Show Status Bar")) (setShowStatus (not showStatus))
       menuSeparator
-      whenM (menuItemShortcut "Zoom In" "Ctrl++") (setOpenMenu "" >> setZoom (min 4.0 (zoom * 1.1)))
-      whenM (menuItemShortcut "Zoom Out" "Ctrl+-") (setOpenMenu "" >> setZoom (max 0.5 (zoom / 1.1)))
-      whenM (menuItemShortcut "Reset Zoom" "Ctrl+0") (setOpenMenu "" >> setZoom 1.0)
+      item (menuItemShortcut "Zoom In" "Ctrl++") zoomIn
+      item (menuItemShortcut "Zoom Out" "Ctrl+-") zoomOut
+      item (menuItemShortcut "Reset Zoom" "Ctrl+0") (setZoom 1.0)
       menuSeparator
-      whenM (menuItem "Document Statistics") (setOpenMenu "" >> setStatusMsg (documentStats (documentText doc)))
+      item (menuItem "Document Statistics") (setStatusMsg (documentStats (documentText doc)))
 
     helpMenu = do
-      whenM (menuItem "About nano-ui Notepad") (setOpenMenu "" >> setAboutOpen True)
+      item (menuItem "About nano-ui Notepad") (setAboutOpen True)
       menuItemDisabled "nano-ui on GitHub"
 
   --------------------------------------------------------------- layout ---
@@ -180,7 +173,7 @@ notepadUi = do
     separator
 
     (editorResp, editorDoc) <-
-      keyed docGen $
+      withKey docGen $
         textAreaDocumentWith'
           (grow . minW 240 . minH 160 . fontSizeScale zoom)
           doc
@@ -217,19 +210,11 @@ menuBar :: Text -> (Text -> NanoUI ()) -> [(Text, NanoUI ())] -> NanoUI ()
 menuBar openMenu setOpen entries = do
   rowWith (tight . fillW . fixedH 28) $ do
     for_ entries $ \(menuLabel, body) -> do
-      let
-        isOpen = openMenu == menuLabel
+      let isOpen = openMenu == menuLabel
       btn <- menuButton' menuLabel isOpen
-      let
-        cfg =
-          (defaultPopupConfig (AnchorRect (respRect btn)))
-            { cfgPlacement = PlacementBelow
-            , cfgOffset = 0
-            }
       when (respClicked btn) (setOpen (if isOpen then "" else menuLabel))
-      when
-        (not isOpen && not (T.null openMenu) && respHovered btn)
-        (setOpen menuLabel)
+      when (not isOpen && not (T.null openMenu) && respHovered btn) (setOpen menuLabel)
+      let cfg = (defaultPopupConfig (AnchorRect (respRect btn))) {cfgPlacement = PlacementBelow, cfgOffset = 0}
       (popupResp, _) <- popup isOpen cfg (columnWith (tight . gap 0) body)
       when (respClicked popupResp) (setOpen "")
     flex

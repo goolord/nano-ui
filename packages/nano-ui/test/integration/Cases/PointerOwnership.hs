@@ -152,7 +152,7 @@ victims = do
         (shown (slider' 0 100 50))
         (hotAt (\(Rect x y w h) -> V2 (x + w * 0.8) (y + h / 2)))
         noProbe
-    , Victim "knob" (shown (knob' 0 100 50)) (hotAt spanCenter) noProbe
+    , Victim "knob" (shown (knobWith' id 36 0 100 50)) (hotAt spanCenter) noProbe
     , Victim
         "color-picker"
         (shown (colorPicker' (colorRGBA 200 40 40 255)))

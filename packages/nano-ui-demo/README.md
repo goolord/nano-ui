@@ -28,6 +28,8 @@ cabal test nano-ui-demo-test
 cabal test nano-ui-terminal-test
 ```
 
+`nano-ui-sdl-demo --help` lists the demo's options.
+
 `nano-ui-demo-test` drives the demo, notepad, and log viewer in hidden windows
 and fails if a check does not hold.
 
@@ -44,8 +46,8 @@ which also covers the sibling ditto checkout used by the form package.
 ## Reading the examples
 
 - `lib/SdlDemo.hs` builds the widget tour; `lib/DemoData.hs` supplies its data.
-- `app/Notepad.hs` shows text-document state, menus, and asynchronous file dialogs.
-- `app/Logs.hs` shows a bounded log buffer and scroll-follow behaviour.
+- `lib/SdlNotepad.hs` shows text-document state, menus, and asynchronous file dialogs.
+- `lib/SdlLogs.hs` shows a bounded log buffer and scroll-follow behaviour.
 - `lib/SdlTerminal.hs` contains the terminal parser and PTY integration.
 
 The terminal executable and its test are not built on Windows. The other

@@ -12,7 +12,6 @@ module NanoUI.Sdl.Internal.Input
   ) where
 
 import Control.Monad (mfilter)
-import Data.Bits ((.&.))
 import qualified Data.Text as T
 import Data.Text (Text)
 import qualified Data.Text.Foreign as TF
@@ -196,13 +195,7 @@ peekModifiers :: IO Modifiers
 peekModifiers = modFromKeymod <$> getModState
 
 modFromKeymod :: SDL_Keymod -> Modifiers
-modFromKeymod km =
-  let m = word32 km
-   in Modifiers
-        { modShift = m .&. word32 sDL_KMOD_SHIFT /= 0
-        , modCtrl = m .&. word32 sDL_KMOD_CTRL /= 0
-        , modAlt = m .&. word32 sDL_KMOD_ALT /= 0
-        }
+modFromKeymod km = modifiersFromBits (word32 km) (word32 sDL_KMOD_SHIFT) (word32 sDL_KMOD_CTRL) (word32 sDL_KMOD_ALT)
 
 word32 :: Integral a => a -> Word32
 word32 = fromIntegral

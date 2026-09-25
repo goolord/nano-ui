@@ -11,10 +11,8 @@ module NanoUI.Widgets.Combo
 where
 
 import Control.Monad (foldM, when, (<$!>))
-import Data.Dynamic (fromDynamic, toDyn)
 import Data.Foldable (toList)
-import Data.IORef (modifyIORef', readIORef, writeIORef)
-import Data.IntMap.Strict qualified as IM
+import Data.IORef (writeIORef)
 import Data.Maybe (fromMaybe, isJust, listToMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -31,6 +29,7 @@ import NanoUI.Internal.Store (boolInt, ptrEq, fieldFloat, fieldInt, fieldText, f
 import NanoUI.Internal.Types (Rect (..), V2 (..), clamp, rectContains, rectNonEmpty, v2X, v2Y)
 import NanoUI.Internal.WidgetText (textInputFlagSearch)
 import NanoUI.Internal.Widgets.Behavior (keyboardFocused)
+import NanoUI.Internal.Widgets.Combinators (readDerived, writeDerived)
 import NanoUI.Internal.Widgets.Node (Response (..), dropdownInput, setChanged)
 import NanoUI.Internal.Widgets.TextInput (buildTextInput, searchInputLayout)
 
@@ -62,19 +61,12 @@ data ComboMatches = ComboMatches ![Text] !Text [Text] !(Maybe Float)
 -- options on every frame, focused or not, and a long list (a font picker's
 -- families) would otherwise lowercase every option each time.
 comboMatches :: Context -> Int -> [Text] -> Text -> IO ComboMatches
-comboMatches ctx key !opts q = do
-  cache <- readIORef (ctxDerivedCache ctx)
-  case IM.lookup key cache >>= fromDynamic of
+comboMatches ctx key !opts q =
+  readDerived ctx key >>= \case
     Just m@(ComboMatches o q' _ _) | ptrEq o opts && q' == q -> pure m
     _ -> do
       let m = ComboMatches opts q (comboFiltered opts q) Nothing
-      m <$ writeComboMatches ctx key m
-
--- | Replace a combo's cached matches. A combo that stops being built leaves
--- its entry behind, so a cache grown past a few dozen entries starts over.
-writeComboMatches :: Context -> Int -> ComboMatches -> IO ()
-writeComboMatches ctx key m = modifyIORef' (ctxDerivedCache ctx) $ \cache ->
-  IM.insert key (toDyn m) (if IM.size cache >= 64 then IM.empty else cache)
+      m <$ writeDerived ctx key m
 
 -- | A combo's state between frames.
 data ComboState = ComboState
@@ -312,7 +304,7 @@ comboBox' placeholder options value = do
       _
         | isFocus && not (null displayed) -> do
             w <- foldM (\widest t -> max widest . fst <$!> ctxMeasureText ctx t) 0 displayed
-            w <$ writeComboMatches ctx key (ComboMatches opts query matches (Just w))
+            w <$ writeDerived ctx key (ComboMatches opts query matches (Just w))
         | otherwise -> pure (csContentW cs0)
   let step =
         comboStep

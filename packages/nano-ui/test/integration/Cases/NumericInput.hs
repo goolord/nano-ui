@@ -23,23 +23,17 @@ runNumericInputTest ctx failed = do
       key k = inp {inputKeys = inputKeysFromList [k]}
   (resp, _) <- warmup2 ctx inp ui
   _ <- step (key KeyTab)
-  stepped <- step (key KeyUp)
-  assertEq failed stepped 13
-  steppedTen <- step ((key KeyUp) {inputModifiers = Modifiers True False False})
-  assertEq failed steppedTen 23
-  rejected <- step (inp {inputChars = "4x"})
-  assertEq failed rejected 23
-  clamped <- step (inp {inputChars = "4"})
-  assertEq failed clamped 100
+  assertEq failed 13 =<< step (key KeyUp)
+  assertEq failed 23 =<< step ((key KeyUp) {inputModifiers = Modifiers True False False})
+  assertEq failed 23 =<< step (inp {inputChars = "4x"})
+  assertEq failed 100 =<< step (inp {inputChars = "4"})
   assert failed =<< spanShown ctx "234"
   _ <- step (key KeyEnter)
   assert failed =<< spanShown ctx "100"
   let Rect x y w h = respRect resp
       press = pressAt inp (V2 (x + w - 4) (y + h * 0.75))
-  pressed <- step press
-  assertEq failed pressed 99
-  released <- step (releaseAt press)
-  assertEq failed released 99
+  assertEq failed 99 =<< step press
+  assertEq failed 99 =<< step (releaseAt press)
 
 -- Hexadecimal mode shows upper-case digits, takes hexadecimal typing but no
 -- decimal point, and steps like decimal mode.
@@ -54,12 +48,9 @@ runNumericInputHexTest ctx failed = do
   _ <- warmup2 ctx inp ui
   assert failed =<< spanShown ctx "FF"
   _ <- step (key KeyTab)
-  typed <- step (inp {inputChars = "a"})
-  assertEq failed typed 0xFFA
-  point <- step (inp {inputChars = "."})
-  assertEq failed point 0xFFA
-  stepped <- step (key KeyUp)
-  assertEq failed stepped 0xFFB
+  assertEq failed 0xFFA =<< step (inp {inputChars = "a"})
+  assertEq failed 0xFFA =<< step (inp {inputChars = "."})
+  assertEq failed 0xFFB =<< step (key KeyUp)
   assert failed =<< spanShown ctx "FFB"
 
 spanShown :: Context -> T.Text -> IO Bool

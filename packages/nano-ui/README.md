@@ -41,9 +41,10 @@ opens no window. A backend package runs the view:
 [nano-ui-diagrams](https://hackage.haskell.org/package/nano-ui-diagrams) adds
 charts and [diagrams](https://diagrams.github.io/) drawings, and
 [nano-ui-form](https://hackage.haskell.org/package/nano-ui-form) adds validated
-forms. In this package, `NanoUI.Testing` runs frames headlessly on scripted
-input, for tests, and `NanoUI.Backend` has what a window backend is built
-from. Writing a GUI needs neither: everything for that is in `NanoUI`.
+forms. In this package, `NanoUI.Testing` runs frames
+headlessly on scripted input, for tests, and `NanoUI.Backend` has what a window
+backend is built from. Writing a GUI needs neither: everything for that is in
+`NanoUI`.
 
 ## Inputs are controlled
 

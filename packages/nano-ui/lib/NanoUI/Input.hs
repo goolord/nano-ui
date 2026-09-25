@@ -15,7 +15,6 @@ module NanoUI.Input
   , MouseButton (..)
   , applyMouseButton
   , appendInputKey
-  , emptyInputKeys
   , inputKeysFromList
   , inputKeysNull
   , inputKeysElem
@@ -24,7 +23,6 @@ module NanoUI.Input
     -- * File drops
   , DropType (..)
   , DropEvent (..)
-  , emptyDropEvents
   , appendDropEvent
 
     -- * Cursors

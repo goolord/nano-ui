@@ -247,12 +247,12 @@ takeDamagePieces ctx = getsDamage ctx dsDamagePieces
 -- applied. 'Nothing' means the damage pass recorded no bounds for this id.
 {-# INLINE getPrevRect #-}
 getPrevRect :: Context -> WidgetId -> IO (Maybe Rect)
-getPrevRect ctx wid = getsDamage ctx (IM.lookup (intKey wid) . dsPrevRects)
+getPrevRect ctx wid = getsDamage ctx (IM.lookup (intKey wid) . pfRects . dsPrev)
 
 -- | Last recorded widget clip in logical window coordinates, or 'Nothing'.
 {-# INLINE getPrevClipRect #-}
 getPrevClipRect :: Context -> WidgetId -> IO (Maybe Rect)
-getPrevClipRect ctx wid = getsDamage ctx (IM.lookup (intKey wid) . dsPrevClips)
+getPrevClipRect ctx wid = getsDamage ctx (IM.lookup (intKey wid) . pfClips . dsPrev)
 
 -- =============================================================================
 -- Store

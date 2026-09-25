@@ -55,6 +55,7 @@ data Term = Term
   , history :: V.Vector Cell
   , back :: Float
   }
+  deriving (Eq)
 
 -- | Scrollback keeps at most 2000 rows.
 historyCells :: Int
@@ -310,8 +311,18 @@ withPty action = bracket boot close (action . fst)
     signalProcess sigKILL pid `catch` \(_ :: IOException) -> pure ()
     void (getProcessStatus True False pid)
 
-isE :: [Errno] -> IOException -> Bool
-isE es = maybe False (`elem` es) . fmap Errno . ioe_errno
+-- | Run a read or write on the PTY: @busy@ when it would block, @gone@ when
+-- the shell has exited.
+onPty :: IO a -> (a -> b) -> b -> b -> IO b
+onPty io done busy gone =
+  try io >>= \case
+    Right a -> pure (done a)
+    Left e
+      | isE [eAGAIN, eWOULDBLOCK] -> pure busy
+      | isE [eIO] -> pure gone
+      | otherwise -> throwIO e
+      where
+        isE es = maybe False ((`elem` es) . Errno) (ioe_errno e)
 
 -- | Feed up to four 1024-byte reads into the terminal. The flag is set when
 -- the shell has exited.
@@ -320,25 +331,12 @@ drain fd t = S.fold feed t id (S.unfoldr readChunk (4 :: Int))
  where
   readChunk 0 = pure (Left False)
   readChunk n =
-    try (P.fdRead fd 1024) >>= \case
-      Right b -> pure (if B.null b then Left True else Right (b, n - 1))
-      Left e
-        | isE [eAGAIN, eWOULDBLOCK] e -> pure (Left False)
-        | isE [eIO] e -> pure (Left True)
-        | otherwise -> throwIO e
+    onPty (P.fdRead fd 1024) (\b -> if B.null b then Left True else Right (b, n - 1)) (Left False) (Left True)
 
 -- | Write what the PTY accepts and return the rest.
 send :: Fd -> B.ByteString -> IO B.ByteString
 send _ b | B.null b = pure b
-send fd b =
-  (flip B.drop b . fromIntegral <$> P.fdWrite fd b)
-    `catch` \e ->
-      if isE [eAGAIN, eWOULDBLOCK] e
-        then pure b
-        else
-          if isE [eIO] e
-            then pure B.empty
-            else throwIO e
+send fd b = onPty (P.fdWrite fd b) (\n -> B.drop (fromIntegral n) b) b B.empty
 
 keys :: Input -> B.ByteString
 keys inp = E.encodeUtf8 (foldMap key (inputKeys inp) <> prefix <> text)

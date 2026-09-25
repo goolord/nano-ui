@@ -41,7 +41,7 @@ runKeyboardDisabledTest _ctx failed = do
   check (checkbox' "Disabled" False) (keyInp KeyEnter inp)
   check (checkbox' "Disabled" False) (spaceInp inp)
   check (slider' 0 100 50) (keyInp KeyRight inp)
-  check (toggleSwitch' False) (spaceInp inp)
+  check (toggleSwitchWith' id False) (spaceInp inp)
   check (textInput' "initial") (inp {inputChars = "x"})
   check (textArea' "initial") (inp {inputChars = "x"})
   check (searchInput' "Search" "initial") (inp {inputChars = "x"})
@@ -147,7 +147,7 @@ runKeyboardToggleTest :: Context -> IORef Int -> IO ()
 runKeyboardToggleTest ctx failed = do
   onRef <- newIORef False
   let inp0 = withInputOff 200 100
-      ui = column (held onRef toggleSwitch')
+      ui = column (held onRef (toggleSwitchWith' id))
   (resp0, v0) <- warmup2 ctx inp0 ui
   assert failed (not v0)
   _ <- runFrame ctx (tabInp inp0) ui

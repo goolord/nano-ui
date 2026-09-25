@@ -74,10 +74,9 @@ runReleaseElsewhereTest ctx failed = do
 
   (a, b, cb, _) <- warmup2 ctx inp0 ui
   let at r = inp0 {inputMousePos = centerOf r}
-      pressOn r = (at r) {inputMouseDown = True, inputMousePressed = True}
-      dragTo r p = p {inputMousePos = centerOf r, inputMousePressed = False}
-      releaseOn r p = (dragTo r p) {inputMouseDown = False, inputMouseReleased = True}
-
+      pressOn r = pressAt inp0 (centerOf r)
+      dragTo r p = holdAt p (centerOf r)
+      releaseOn r p = releaseAt (dragTo r p)
   -- Button to button.
   _ <- runFrame ctx (pressOn a) ui
   ((_, bDrag, _, _), _, _, _) <- runFrame ctx (dragTo b (pressOn a)) ui
@@ -113,20 +112,8 @@ runRightReleaseElsewhereTest ctx failed = do
           contextMenuArea (fixedH 60 . fillW) (label' "Area") (const (menuItem "Cut"))
         pure (a, lbl, menu)
   (a, lbl, _) <- warmup2 ctx inp0 ui
-  let rightPressOn r =
-        inp0
-          { inputMousePos = centerOf r
-          , inputMouseRightDown = True
-          , inputMouseRightPressed = True
-          }
-      rightReleaseOn r p =
-        p
-          { inputMousePos = centerOf r
-          , inputMouseRightPressed = False
-          , inputMouseRightDown = False
-          , inputMouseRightReleased = True
-          }
-
+  let rightPressOn r = fst (rightClickPair inp0 (centerOf r))
+      rightReleaseOn r p = snd (rightClickPair p (centerOf r))
   -- Right press on the button, release over the menu area: no menu.
   _ <- runFrame ctx (rightPressOn a) ui
   ((aUp, _, menuUp), _, _, _) <- runFrame ctx (rightReleaseOn lbl (rightPressOn a)) ui
@@ -148,11 +135,9 @@ runReleaseReturnsTest ctx failed = do
         b <- button' "Beta"
         pure (a, b)
   (a, b) <- warmup2 ctx inp0 ui
-  let at r = inp0 {inputMousePos = centerOf r}
-      pressOn r = (at r) {inputMouseDown = True, inputMousePressed = True}
-      moveTo r p = p {inputMousePos = centerOf r, inputMousePressed = False}
-      releaseOn r p = (moveTo r p) {inputMouseDown = False, inputMouseReleased = True}
-
+  let pressOn r = pressAt inp0 (centerOf r)
+      moveTo r p = holdAt p (centerOf r)
+      releaseOn r p = releaseAt (moveTo r p)
   -- Straight click.
   _ <- runFrame ctx (pressOn a) ui
   ((aUp, _), _, _, _) <- runFrame ctx (releaseOn a (pressOn a)) ui

@@ -75,13 +75,11 @@ runCustomWidgetCursorTest ctx failed = do
   let Rect rx ry rw rh = respRect resp
       hoverInp = inp0 { inputMousePos = centerOf resp }
   _ <- runFrame ctx hoverInp ui
-  hoverOk <- cursorKindIs ctx hoverInp UiCursorNsResize
-  assert failed hoverOk
+  assert failed =<< cursorKindIs ctx hoverInp UiCursorNsResize
 
   let outInp = inp0 { inputMousePos = V2 (rx + rw + 50) (ry + rh + 50) }
   _ <- runFrame ctx outInp ui
-  outOk <- cursorKindIs ctx outInp UiCursorNsResize
-  assert failed (not outOk)
+  assert failed . not =<< cursorKindIs ctx outInp UiCursorNsResize
 
 -- | Verifies interaction state propagation (hover, press, click) and CustomDrawContext.
 runCustomWidgetInteractionTest :: Context -> IORef Int -> IO ()
@@ -93,11 +91,7 @@ runCustomWidgetInteractionTest ctx failed = do
           , widgetInteract = \resp cdc _ -> (resp, (cdcHovered cdc, cdcPressed cdc))
           }
   (resp0, _) <- warmup2 ctx inp0 ui
-  let pos = centerOf resp0
-      (pressInp, releaseInp) = clickPair inp0 pos
-
-  _ <- runFrame ctx pressInp ui
-  ((respClick, (hovered, pressed)), _, _, _) <- runFrame ctx releaseInp ui
+  (respClick, (hovered, pressed)) <- runClick ctx inp0 ui (centerOf resp0)
   assert failed (respClicked respClick)
   assert failed hovered
   assert failed (not pressed)
@@ -117,29 +111,35 @@ runCustomWidgetQueuedClickTest ctx failed = do
     (resps, _, _, _) <- runFrame ctx inp0 ui
     assert failed (map respClicked resps == [j == i | j <- [0 .. length resps - 1]])
 
+-- | A label, then an 80 by 40 custom widget with this content key and drawing.
+afterLabel :: Int -> CustomDrawBuild -> NanoUI Response
+afterLabel key draw = column $ do
+  label "Other"
+  fst <$> customWidget defaultCustomWidgetSpec {widgetLayout = fixedWH 80 40 defaultLayout, widgetContent = key, widgetDraw = draw}
+
+-- | Run a frame and decode the quads it drew.
+frameQuads :: Context -> Input -> NanoUI a -> IO [(Rect, Color)]
+frameQuads ctx inp ui = runFrame ctx inp ui >>= \(_, _, draw, _) -> drawQuads draw
+
+red, blue :: Color
+red = colorRGBA 255 0 0 255
+blue = colorRGBA 0 0 255 255
+
 -- | An unkeyed custom drawing repaints when captured state changes, even
 -- while its rectangle and hover/press state remain unchanged.
 runCustomWidgetContentDamageTest :: Context -> IORef Int -> IO ()
 runCustomWidgetContentDamageTest ctx failed = do
   let inp = withInputOff 400 300
-      red = colorRGBA 255 0 0 255
-      blue = colorRGBA 0 0 255 255
-      ui on = column $ do
-        label "Other"
-        fst <$> customWidget defaultCustomWidgetSpec
-          { widgetLayout = fixedWH 80 40 defaultLayout
-          , widgetDraw = \_ r -> runCanvas (drawRect r (if on then red else blue))
-          }
+      ui on = afterLabel 0 (\_ r -> runCanvas (drawRect r (if on then red else blue)))
   resp <- warmup2 ctx inp (ui False)
   _ <- takeDamage ctx
-  (_, _, draw, _) <- runFrame ctx inp (ui True)
+  quads <- frameQuads ctx inp (ui True)
   dmg <- takeDamage ctx
   assert failed (clipCovers dmg (respRect resp))
-  quads <- drawQuads draw
   assert failed (any ((== red) . snd) quads)
   assert failed (not (any ((== blue) . snd) quads))
   -- The built-in progress bar captures its fraction the same way.
-  let bar frac = column (progressBar' frac)
+  let bar frac = column (progressBarWith' id 12 frac)
   barResp <- warmup2 ctx inp (bar 0.2)
   _ <- takeDamage ctx
   _ <- runFrame ctx inp (bar 0.8)
@@ -153,31 +153,21 @@ runCustomWidgetContentDamageTest ctx failed = do
 runCustomWidgetContentKeyTest :: Context -> IORef Int -> IO ()
 runCustomWidgetContentKeyTest ctx failed = do
   let inp = withInputOff 400 300
-      red = colorRGBA 255 0 0 255
-      blue = colorRGBA 0 0 255 255
-      ui key on = column $ do
-        label "Other"
-        fst <$> customWidget defaultCustomWidgetSpec
-          { widgetLayout = fixedWH 80 40 defaultLayout
-          , widgetContent = key
-          , widgetDraw = \_ r -> runCanvas (drawRect r (if on then red else blue))
-          }
+      ui key on = afterLabel key (\_ r -> runCanvas (drawRect r (if on then red else blue)))
   resp <- warmup2 ctx inp (ui 1 False)
   _ <- takeDamage ctx
 
   -- Same key, different captured state: the ops it already has stand.
-  (_, _, keptDraw, _) <- runFrame ctx inp (ui 1 True)
+  keptQuads <- frameQuads ctx inp (ui 1 True)
   keptDmg <- takeDamage ctx
-  keptQuads <- drawQuads keptDraw
   assert failed (any ((== blue) . snd) keptQuads)
   case keptDmg of
     DamageClip clip -> assert failed (not (covers clip (respRect resp)))
     DamageFull -> assert failed False
 
   -- A new key rebuilds and repaints.
-  (_, _, freshDraw, _) <- runFrame ctx inp (ui 2 True)
+  freshQuads <- frameQuads ctx inp (ui 2 True)
   freshDmg <- takeDamage ctx
-  freshQuads <- drawQuads freshDraw
   assert failed (any ((== red) . snd) freshQuads)
   assert failed (clipCovers freshDmg (respRect resp))
 
@@ -194,9 +184,8 @@ runCustomWidgetContentKeyTest ctx failed = do
   disabledCtx <- newContext
   dresp <- warmup2 disabledCtx inp (dimmable False)
   _ <- takeDamage disabledCtx
-  (_, _, disabledDraw, _) <- runFrame disabledCtx inp (dimmable True)
+  disabledQuads <- frameQuads disabledCtx inp (dimmable True)
   disabledDmg <- takeDamage disabledCtx
-  disabledQuads <- drawQuads disabledDraw
   assert failed (any ((== grey) . snd) disabledQuads)
   case disabledDmg of
     DamageClip clip -> assert failed (covers clip (respRect dresp))
@@ -214,52 +203,38 @@ runCustomWidgetContentKeyTest ctx failed = do
   settled <- warmup2 ctx inp (moved 40)
   let Rect _ my _ _ = respRect settled
   _ <- warmup2 ctx inp (moved 10)
-  (_, _, movedDraw, _) <- runFrame ctx inp (moved 40)
-  movedQuads <- drawQuads movedDraw
+  movedQuads <- frameQuads ctx inp (moved 40)
   assert failed (any (\(Rect _ qy _ _, c) -> c == red && abs (qy - my) < 0.5) movedQuads)
 
   -- Swapping the theme rebuilds a keyed widget that draws from the theme,
   -- through either theme entry point.
   let accent2 = colorRGBA 7 8 9 255
       accent3 = colorRGBA 11 12 13 255
-      themedUi = column $ do
-        label "Other"
-        fst <$> customWidget defaultCustomWidgetSpec
-          { widgetLayout = fixedWH 80 40 defaultLayout
-          , widgetContent = 3
-          , widgetDraw = \cdc r -> runCanvas (drawRect r (themeAccent (cdcTheme cdc)))
-          }
+      themedUi = afterLabel 3 (\cdc r -> runCanvas (drawRect r (themeAccent (cdcTheme cdc))))
   _ <- warmup2 ctx inp themedUi
   theme0 <- getTheme ctx
   setTheme ctx theme0 {themeAccent = accent2}
-  (_, _, themedDraw, _) <- runFrame ctx inp themedUi
-  themedQuads <- drawQuads themedDraw
-  assert failed (any ((== accent2) . snd) themedQuads)
+  assert failed . any ((== accent2) . snd) =<< frameQuads ctx inp themedUi
   ctx3 <- withTheme ctx theme0 {themeAccent = accent3}
-  (_, _, withThemeDraw, _) <- runFrame ctx3 inp themedUi
-  withThemeQuads <- drawQuads withThemeDraw
-  assert failed (any ((== accent3) . snd) withThemeQuads)
+  assert failed . any ((== accent3) . snd) =<< frameQuads ctx3 inp themedUi
   setTheme ctx theme0
 
 -- | Verifies the reference rotary knob widget.
 runReferenceKnobTest :: Context -> IORef Int -> IO ()
 runReferenceKnobTest ctx failed = do
   let inp0 = withInput 300 300
-      ui = column $ knob' 0 100 25
+      ui = column $ knobWith' id 36 0 100 25
   (resp0, val0) <- warmup2 ctx inp0 ui
   assert failed (val0 == 25)
 
-  let pos = centerOf resp0
-      dragStart = inp0 { inputMousePos = pos, inputMouseDown = True, inputMousePressed = True }
-      -- Drag upward (negative dy in screen coords) to increase knob value
-      dragUp = inp0 { inputMousePos = V2 (v2X pos) (v2Y pos - 30), inputMouseDown = True, inputMousePressed = False }
-      release = inp0 { inputMousePos = V2 (v2X pos) (v2Y pos - 30), inputMouseDown = False, inputMouseReleased = True }
-
-  _ <- runFrame ctx dragStart ui
-  ((respDragged, valDragged), _, _, _) <- runFrame ctx dragUp ui
+  let V2 x y = centerOf resp0
+      -- Dragging up raises the value.
+      dragUp = holdAt inp0 (V2 x (y - 30))
+  _ <- runFrame ctx (pressAt inp0 (V2 x y)) ui
+  (respDragged, valDragged) <- evalUi ctx dragUp ui
   assert failed (valDragged > 25)
   assert failed (respChanged respDragged)
-  void $ runFrame ctx release ui
+  void $ runFrame ctx (releaseAt dragUp) ui
 
 -- | Verifies the composable drag-and-drop hook: hover, file, text, and bounds.
 runDropTargetTest :: Context -> IORef Int -> IO ()

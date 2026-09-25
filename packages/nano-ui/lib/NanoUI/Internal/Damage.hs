@@ -11,7 +11,7 @@ module NanoUI.Internal.Damage
 
 import Control.Applicative ((<|>))
 import Control.Exception (evaluate)
-import Control.Monad (filterM, forM_, unless, when, (>=>))
+import Control.Monad (filterM, forM_, unless, when, (<$!>), (>=>))
 import Data.Bits (xor)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
 import Data.IntMap.Strict qualified as IM
@@ -19,7 +19,6 @@ import Data.IntSet qualified as IS
 import Data.List (partition, tails)
 import Data.Maybe (fromMaybe, isJust, isNothing)
 import Data.Hashable (hashWithSalt)
-import Data.Text (Text)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Internal.Input
@@ -97,14 +96,11 @@ getNonzeroRect arena i = do
 
 updatePrevRects :: Context -> Size -> IO ()
 updatePrevRects ctx@Context {ctxNodeArena = na} size@(Size winW winH) = do
-  oldRects <- getsDamage ctx dsPrevRects
-  oldClips <- getsDamage ctx dsPrevClips
-  oldOuters <- getsDamage ctx dsPrevOuterClips
-  oldTexts <- getsDamage ctx dsPrevNodeTexts
+  PrevFrame oldRects oldClips oldOuters oldTexts <- getsDamage ctx dsPrev
   count <- arenaCount na
-  let clearMaps = modifyDamage ctx (\ds -> ds {dsPrevRects = IM.empty, dsPrevClips = IM.empty, dsPrevOuterClips = IM.empty, dsPrevNodeTexts = IM.empty})
+  let setPrev p = modifyDamage ctx (\ds -> ds {dsPrev = p})
   if count <= 0
-    then clearMaps
+    then setPrev emptyPrevFrame
     else do
       -- Scroll containers and panels ('BackdropNodes'), and no other nodes,
       -- first: the clip each is painted in, and, for one that paints and has
@@ -131,13 +127,13 @@ updatePrevRects ctx@Context {ctxNodeArena = na} size@(Size winW winH) = do
                       Nothing ->
                         containers (j + 1)
                           (if isOld then IM.delete k m else m)
-                          (if IM.member k om then IM.delete k om else om)
+                          (dropKey k om)
                           foundOld foundOuter (dropped || isOld)
                       Just r -> do
                         o <- outerClip na window idx
-                        let !m' = if not keyless || IM.lookup k m == Just r then m else IM.insert k r m
-                            !om' = if IM.lookup k om == Just o then om else IM.insert k o om
-                        containers (j + 1) m' om'
+                        containers (j + 1)
+                          (if keyless then putNew k r m else m)
+                          (putNew k o om)
                           (foundOld + if isOld then 1 else 0)
                           (foundOuter + if IM.member k oldOuters then 1 else 0)
                           dropped
@@ -155,8 +151,10 @@ updatePrevRects ctx@Context {ctxNodeArena = na} size@(Size winW winH) = do
       let go !i !m !cm !tm !foundOld !dropped
             | i >= count =
                 if dropped || foundOld /= IM.size oldRects || foundOuter /= IM.size oldOuters
-                  then clearMaps >> updatePrevRects ctx size
-                  else modifyDamage ctx (\ds -> ds {dsPrevRects = m, dsPrevClips = cm, dsPrevOuterClips = om, dsPrevNodeTexts = tm})
+                  then setPrev emptyPrevFrame >> updatePrevRects ctx size
+                  else
+                    unless (ptrEq m oldRects && ptrEq cm oldClips && ptrEq om oldOuters && ptrEq tm oldTexts) $
+                      setPrev (PrevFrame m cm om tm)
             | otherwise = do
                 wid <- getWidgetId na i
                 superseded <- if hashWidgetId wid == 0 then pure True else getIdSuperseded na i
@@ -168,28 +166,28 @@ updatePrevRects ctx@Context {ctxNodeArena = na} size@(Size winW winH) = do
                     mRect <- getNonzeroRect na i
                     case mRect of
                       Nothing ->
-                        let dropped' = dropped || isOld
-                            m' = if isOld then IM.delete k m else m
-                            cm' = if IM.member k cm then IM.delete k cm else cm
-                            tm' = if IM.member k tm then IM.delete k tm else tm
-                         in go (i + 1) m' cm' tm' foundOld dropped'
+                        go (i + 1) (if isOld then IM.delete k m else m) (dropKey k cm) (dropKey k tm) foundOld (dropped || isOld)
                       Just r -> do
                         mClip <- getClipBounds na i
                         nt <- getNodeType na i
-                        let !m' = if IM.lookup k m == Just r then m else IM.insert k r m
-                            !cm' = case mClip of
-                              Just c -> if IM.lookup k cm == Just c then cm else IM.insert k c cm
-                              Nothing -> if IM.member k cm then IM.delete k cm else cm
                         -- Text nodes, and images, whose text is their image
                         -- id: switching an image repaints it like new text.
                         tm' <-
                           if nt == NodeText || nt == NodeImage
-                            then do
-                              txt <- getText na i
-                              pure $! if IM.lookup k tm == Just txt then tm else IM.insert k txt tm
-                            else pure $! if IM.member k tm then IM.delete k tm else tm
-                        go (i + 1) m' cm' tm' (foundOld + if isOld then 1 else 0) dropped
+                            then (\txt -> putNew k txt tm) <$!> getText na i
+                            else pure $! dropKey k tm
+                        go (i + 1) (putNew k r m) (maybe (dropKey k cm) (\c -> putNew k c cm) mClip) tm' (foundOld + if isOld then 1 else 0) dropped
       go 0 m0 oldClips oldTexts foundContainers droppedContainer
+
+-- | @m@ with @k@ mapped to @v@: @m@ itself when it already is.
+{-# INLINE putNew #-}
+putNew :: Eq a => Int -> a -> IM.IntMap a -> IM.IntMap a
+putNew k v m = if IM.lookup k m == Just v then m else IM.insert k v m
+
+-- | @m@ without @k@: @m@ itself when it has no @k@.
+{-# INLINE dropKey #-}
+dropKey :: Int -> IM.IntMap a -> IM.IntMap a
+dropKey k m = if IM.member k m then IM.delete k m else m
 
 -- | Floating panels in the order the frame paints them, bottom first: every
 -- window, then every modal, then every popup, each kind in arena order. The
@@ -229,19 +227,8 @@ data FrameSnapshot = FrameSnapshot
   , fsHot :: !WidgetId
   , fsActive :: !WidgetId
   , fsFocus :: !WidgetId
-  , fsHotRect :: !(Maybe Rect)
-  , fsActiveRect :: !(Maybe Rect)
-  , fsFocusRect :: !(Maybe Rect)
   , fsFloatingRects :: !(IM.IntMap Rect)
-  , fsRects :: !(IM.IntMap Rect)
-  , fsClips :: !(IM.IntMap Rect)
-  -- ^ Last frame's viewport clips ('getClipBounds') of the keys in 'fsRects'.
-  -- A rect from last frame is clipped by the viewport it was drawn in: the
-  -- viewport a key has now can be smaller (a widget or scroller around it
-  -- shrank with it) and would cut the pixels it vacated out of the damage.
-  , fsOuterClips :: !(IM.IntMap Rect)
-  -- ^ Last frame's 'dsPrevOuterClips'. See 'oldOwnClip'.
-  , fsTexts :: !(IM.IntMap Text)
+  , fsPrev :: !PrevFrame
   , fsAnimKeys :: !IS.IntSet
   }
 
@@ -249,25 +236,15 @@ data FrameSnapshot = FrameSnapshot
 -- (which resets 'dsDirtyOpaque').
 captureFrameSnapshot :: Context -> IO FrameSnapshot
 captureFrameSnapshot ctx = do
-  hot <- readIORef (ctxLastHotId ctx)
-  active <- readIORef (ctxActiveId ctx)
-  focus <- readIORef (ctxFocusId ctx)
+  ds <- readIORef (ctxDamageState ctx)
   evaluate
-    =<< FrameSnapshot
-      <$> getsDamage ctx dsDirtyOpaque
-      <*> getsDamage ctx dsLastWindowSize
-      <*> getStore ctx
-      <*> pure hot
-      <*> pure active
-      <*> pure focus
-      <*> getPrevRect ctx hot
-      <*> getPrevRect ctx active
-      <*> getPrevRect ctx focus
+    =<< FrameSnapshot (dsDirtyOpaque ds) (dsLastWindowSize ds)
+      <$> getStore ctx
+      <*> readIORef (ctxLastHotId ctx)
+      <*> readIORef (ctxActiveId ctx)
+      <*> readIORef (ctxFocusId ctx)
       <*> getsOverlay ctx osPrevFloatingRects
-      <*> getsDamage ctx dsPrevRects
-      <*> getsDamage ctx dsPrevClips
-      <*> getsDamage ctx dsPrevOuterClips
-      <*> getsDamage ctx dsPrevNodeTexts
+      <*> pure (dsPrev ds)
       <*> (IM.keysSet <$> getLiveAnimations ctx)
 
 -- | What the finished frame looks like and what changed since the snapshot.
@@ -276,10 +253,8 @@ captureFrameSnapshot ctx = do
 data FrameDelta = FrameDelta
   { fdWinSize :: !Size
   , fdStore :: !WidgetStore
-  , fdRects :: !(IM.IntMap Rect)
-  , fdOuterClips :: !(IM.IntMap Rect)
-  -- ^ This frame's 'dsPrevOuterClips'. See 'ownClipNow'.
-  , fdTexts :: !(IM.IntMap Text)
+  , fdPrev :: !PrevFrame
+  -- ^ This frame's 'dsPrev'.
   , fdFloatingRects :: !(IM.IntMap Rect)
   , fdModalFlip :: !Bool
   , fdLiveAnims :: !(IM.IntMap Animation)
@@ -305,40 +280,35 @@ writeDamage :: Context -> Input -> FrameSnapshot -> IO ()
 writeDamage ctx inp snap = do
   newStore <- getStore ctx
   panels <- floatingPanelsInOrder ctx
-  newRects <- getsDamage ctx dsPrevRects
-  newOuters <- getsDamage ctx dsPrevOuterClips
-  newTexts <- getsDamage ctx dsPrevNodeTexts
+  new <- getsDamage ctx dsPrev
   modalFlip <- modalDamageFlip ctx
   liveAnims <- getLiveAnimations ctx
   settled <- takeAnimSettled ctx
-  winDragActive <- isJust <$> getsInteraction ctx isWindowDrag
-  winResizeActive <- isJust <$> getsInteraction ctx isWindowResize
+  windowLive <- getsInteraction ctx (\s -> isJust (isWindowDrag s) || isJust (isWindowResize s))
   requests <- getsDamage ctx dsRequests
   redrawn <- refreshCustomDrawings ctx
-  let oldRects = fsRects snap
-      oldStore = fsStore snap
+  let oldStore = fsStore snap
       newFloatingRects = IM.fromList panels
-  (settledMoved, churn) <- rectDeltas ctx (map snd panels) (oldOwnClip snap) newOuters oldRects newRects
+  (settledMoved, churn) <- rectDeltas (map snd panels) (fsPrev snap) new
   let scrollChanged = not (eqByPtr (storeFloat oldStore) (storeFloat newStore))
+      pointsChanged = not (eqByPtr (storePoint oldStore) (storePoint newStore))
   let delta =
         FrameDelta
           { fdWinSize = inputWindowSize inp
           , fdStore = newStore
-          , fdRects = newRects
-          , fdOuterClips = newOuters
-          , fdTexts = newTexts
+          , fdPrev = new
           , fdFloatingRects = newFloatingRects
           , fdModalFlip = modalFlip
           , fdLiveAnims = liveAnims
-          , fdWindowLive = winDragActive || winResizeActive
+          , fdWindowLive = windowLive
           , fdRequests = requests
           , fdAnimLive = not (IM.null liveAnims) || settled
           , fdFloatingChanged = fsFloatingRects snap /= newFloatingRects
           , fdScrollChanged = scrollChanged
-          , fdPointsChanged = not (eqByPtr (storePoint oldStore) (storePoint newStore))
+          , fdPointsChanged = pointsChanged
           , fdScrollOnly =
               scrollChanged
-                && eqByPtr (storePoint oldStore) (storePoint newStore)
+                && not pointsChanged
                 && storeMirrorGen oldStore == storeMirrorGen newStore
                 && storeOpenSelect oldStore == storeOpenSelect newStore
                 && null (slotChangedKeys oldStore newStore)
@@ -442,8 +412,8 @@ needsFullDamage snap d =
          )
     || (missingAnim && fdAnimLive d)
   where
-    oldRects = fsRects snap
-    newRects = fdRects d
+    oldRects = pfRects (fsPrev snap)
+    newRects = pfRects (fdPrev d)
     oldSize = fsSize snap
     -- Before any frame there is nothing to diff against, and the window
     -- backdrop outside every widget rect was never painted.
@@ -478,16 +448,17 @@ needsFullDamage snap d =
 clipDamage ::
   Context -> FrameSnapshot -> FrameDelta -> IM.IntMap NodeIdx -> IO (Damage, [Rect])
 clipDamage ctx snap d owners = do
-  let oldRects = fsRects snap
-      newRects = fdRects d
+  let old = fsPrev snap
+      new = fdPrev d
       Size winW winH = fdWinSize d
-      oldOf wid
-        | wid == fsHot snap = fsHotRect snap
-        | wid == fsActive snap = fsActiveRect snap
-        | wid == fsFocus snap = fsFocusRect snap
-        | otherwise = Nothing
+      rectIn p wid = IM.lookup (intKey wid) (pfRects p)
   acc <- newIORef []
-  let resolveKey = resolveKeyDamage ctx acc (oldOwnClip snap) (fsOuterClips snap) (fdOuterClips d) oldRects newRects
+  -- Key @k@'s old and new rects, each grown by @grow@ and clipped in its own
+  -- frame ('addKeyDamage').
+  let damageKeyBy k grow = do
+        forM_ (IM.lookup k (pfRects old)) $ \r -> addKeyDamage acc old k r (grow r)
+        forM_ (IM.lookup k (pfRects new)) $ \r -> addKeyDamage acc new k r (grow r)
+      resolveKey k = damageKeyBy k . resolveDamageRect
       resolveSlop k = resolveKey k (DamageInflated defaultDamageSlop)
   forM_ (fdRequests d) $ \case
     ReqFull -> pure ()
@@ -505,15 +476,14 @@ clipDamage ctx snap d owners = do
         maybe (pure Nothing) (backdropRectFromNode ctx)
           >=> mapM_ (addRect acc . clipRectToWindow winW winH)
       addBackdrop k = unless (k == 0) $ addNodeBackdrop =<< lookupNodeByKey (ctxNodeArena ctx) k
+      -- A widget that held a role last frame repaints its old rect too.
+      hadRole wid = wid == fsHot snap || wid == fsActive snap || wid == fsFocus snap
       addInteraction wid = unless (k == 0) $ do
-        node <- lookupNodeByKey (ctxNodeArena ctx) k
-        newR <- getPrevRect ctx wid
         slop <- fromMaybe defaultDamageSlop <$> lookupCustomDamageSlop ctx wid
-        clip <- ownClipNow ctx (fdOuterClips d) k
-        let addSide outers c = mapM_ (\r -> mapM_ (addRect acc) (clipKeyRect k c (containerBound outers k r (rectInflate slop r))))
-        addSide (fsOuterClips snap) (oldOwnClip snap k) (oldOf wid)
-        addSide (fdOuterClips d) clip newR
-        addNodeBackdrop node
+        let side p mr = forM_ mr $ \r -> addKeyDamage acc p k r (rectInflate slop r)
+        side old (if hadRole wid then rectIn old wid else Nothing)
+        side new (rectIn new wid)
+        addNodeBackdrop =<< lookupNodeByKey (ctxNodeArena ctx) k
         where
           k = intKey wid
       -- A parked pointer must not re-damage its hot widget every frame: only
@@ -521,12 +491,10 @@ clipDamage ctx snap d owners = do
       -- repaints. Unchanged interaction rects kept the steady state at
       -- DamageFull whenever the hot widget sat inside a panel whose backdrop
       -- covered over half the window.
-      role oldW oldR newW = do
-        newR <- getPrevRect ctx newW
-        when (oldR /= newR) $ addInteraction oldW >> addInteraction newW
-  role (fsHot snap) (fsHotRect snap) =<< getHotId ctx
-  role (fsActive snap) (fsActiveRect snap) =<< readIORef (ctxActiveId ctx)
-  role (fsFocus snap) (fsFocusRect snap) =<< readIORef (ctxFocusId ctx)
+      role oldW newW = when (rectIn old oldW /= rectIn new newW) $ addInteraction oldW >> addInteraction newW
+  role (fsHot snap) =<< getHotId ctx
+  role (fsActive snap) =<< readIORef (ctxActiveId ctx)
+  role (fsFocus snap) =<< readIORef (ctxFocusId ctx)
   forM_ (fdRequests d) $ \case
     ReqKey k _ -> addBackdrop k
     _ -> pure ()
@@ -548,19 +516,17 @@ clipDamage ctx snap d owners = do
   -- New text keys inside floating panels also land here; outside panels the
   -- keysChanged predicate already forces full damage. updatePrevRects keeps
   -- last frame's map when no text changed.
-  let addText k = mapM_ (addRect acc) (IM.lookup k newRects)
-  unless (ptrEq (fdTexts d) (fsTexts snap)) $
+  let addText k = mapM_ (addRect acc) (IM.lookup k (pfRects new))
+  unless (ptrEq (pfTexts new) (pfTexts old)) $
     IM.foldrWithKey (\k _ rest -> addText k >> rest) (pure ()) $
       IM.differenceWith
-        (\new old -> if new /= old then Just new else Nothing)
-        (fdTexts d)
-        (fsTexts snap)
+        (\n o -> if n /= o then Just n else Nothing)
+        (pfTexts new)
+        (pfTexts old)
   -- Drawings redrawn in place repaint their own rects, like a text change
   -- that keeps its rect.
   forM_ (fdRedrawn d) $ \k ->
-    forM_ (IM.lookup k newRects) $ \r -> do
-      clip <- ownClipNow ctx (fdOuterClips d) k
-      mapM_ (addRect acc) (clipKeyRect k clip r)
+    forM_ (IM.lookup k (pfRects new)) $ \r -> addKeyDamage acc new k r r
   unless (fdScrollOnly d) $ addGroup acc (fdSettledMoved d)
   -- Keys that left repaint as the current backdrop over their old rects. Keys
   -- that arrived must repaint inside their new rects too: the retain texture
@@ -628,36 +594,16 @@ damagePieces rects =
               (pair, rest) = partition (\(k, _) -> k == i || k == j) indexed
            in shrink (settle (foldr1 rectUnion (map snd pair) : map snd rest))
 
--- | Damage key @k@'s old and new rects, resolved through @bounds@ and each
--- clipped to the clip it is painted in, in its own frame: @oldClipOf@ for the
--- old rect ('oldOwnClip'), 'ownClipNow' for the new one.
-resolveKeyDamage ::
-  Context ->
-  RectUnion ->
-  (Int -> Maybe Rect) ->
-  IM.IntMap Rect ->
-  IM.IntMap Rect ->
-  IM.IntMap Rect ->
-  IM.IntMap Rect ->
-  Int ->
-  DamageBounds ->
-  IO ()
-resolveKeyDamage ctx acc oldClipOf oldOuters newOuters oldRects newRects k bounds = do
-  clip <- ownClipNow ctx newOuters k
-  forM_ [(oldOuters, oldClipOf k, IM.lookup k oldRects), (newOuters, clip, IM.lookup k newRects)] $ \(outers, c, mr) ->
-    forM_ mr $ \r -> do
-      let clipped = clipToViewport c (containerBound outers k r (resolveDamageRect bounds r))
-      when (rectNonEmpty clipped) $ addRect acc clipped
-
--- | Damage @d@ resolved around key @k@'s rect @r@, kept inside @r@ when @k@
--- is a scroll container or panel (it has an entry in @outers@, a frame's
--- 'dsPrevOuterClips'): the slop around a widget's rect is for its halo,
--- which those have none of, and the clip around them would let it spill.
-{-# INLINE containerBound #-}
-containerBound :: IM.IntMap Rect -> Int -> Rect -> Rect -> Rect
-containerBound outers k r d
-  | IM.member k outers = clipToViewport (Just r) d
-  | otherwise = d
+-- | Damage @d@ around key @k@'s rect @r@ in frame @p@, clipped to the clip
+-- the rect is painted in there ('ownClip'), and kept inside @r@ when @k@ is a
+-- scroll container or panel (it has an entry in 'pfOuterClips'): the slop
+-- around a widget's rect is for its halo, which those have none of, and the
+-- clip around them would let it spill.
+addKeyDamage :: RectUnion -> PrevFrame -> Int -> Rect -> Rect -> IO ()
+addKeyDamage acc p k r d =
+  when (rectNonEmpty clipped) $ addRect acc clipped
+  where
+    clipped = clipToViewport (ownClip p k) (if IM.member k (pfOuterClips p) then clipToViewport (Just r) d else d)
 
 -- | The rects damage gathers, newest first.
 type RectUnion = IORef [Rect]
@@ -692,9 +638,8 @@ addGroup acc g = when (rgAny g) $ addRect acc (rgBounds g)
 -- | One pass over the keys whose rect changed, reduced to the settled moves
 -- (each side clipped to the scroll viewport it had in its own frame, above
 -- 'layoutSettleMinArea') and the keys that left or joined the arena.
-rectDeltas ::
-  Context -> [Rect] -> (Int -> Maybe Rect) -> IM.IntMap Rect -> IM.IntMap Rect -> IM.IntMap Rect -> IO (RectGroup, RectGroup)
-rectDeltas ctx panelRects oldClipOf newOuters old new
+rectDeltas :: [Rect] -> PrevFrame -> PrevFrame -> IO (RectGroup, RectGroup)
+rectDeltas panelRects oldP newP
   | ptrEq old new = pure (emptyGroup, emptyGroup)
   | otherwise = do
       settled <- newIORef []
@@ -703,8 +648,8 @@ rectDeltas ctx panelRects oldClipOf newOuters old new
         ( \k r rest -> do
             when (rectNonEmpty r) $ do
               when (IM.notMember k new || IM.notMember k old) $ addRect churn r
-              newClip <- ownClipNow ctx newOuters k
-              let oldClip = oldClipOf k
+              let oldClip = ownClip oldP k
+                  newClip = ownClip newP k
                   side clip = maybe (Rect 0 0 0 0) (clipToViewport clip)
                   -- Most moves keep their viewport (a list scrolling), and
                   -- clipping the union once covers both sides.
@@ -718,6 +663,8 @@ rectDeltas ctx panelRects oldClipOf newOuters old new
         (IM.mergeWithKey (\_ a b -> if a /= b then Just (rectUnion a b) else Nothing) id id old new)
       (,) <$> (group <$> readIORef settled) <*> (group <$> readIORef churn)
   where
+    old = pfRects oldP
+    new = pfRects newP
     emptyGroup = RectGroup False False (Rect 0 0 0 0)
     unionNonEmpty a b
       | not (rectNonEmpty a) = b
@@ -726,38 +673,20 @@ rectDeltas ctx panelRects oldClipOf newOuters old new
     inPanels r = any (rectFullyInside r) panelRects
     group rs = RectGroup (not (null rs)) (not (null rs || null panelRects) && all inPanels rs) (rectBounds rs)
 
--- | The clip key @k@'s own rect is painted in this frame: for a scroll
--- container or a panel the one around it, as this frame wrote it to
--- 'dsPrevOuterClips', and otherwise the key's viewport clip.
-{-# INLINE ownClipNow #-}
-ownClipNow :: Context -> IM.IntMap Rect -> Int -> IO (Maybe Rect)
-ownClipNow ctx outers k = maybe (keyViewportClip ctx k) (pure . Just) (IM.lookup k outers)
-
--- | 'ownClipNow' for last frame, from the snapshot.
-oldOwnClip :: FrameSnapshot -> Int -> Maybe Rect
-oldOwnClip snap k = IM.lookup k (fsOuterClips snap) <|> IM.lookup k (fsClips snap)
-
--- | The scroll-viewport clip of a keyed node. Look it up once per key and
--- clip each of its rects with 'clipToViewport'.
-keyViewportClip :: Context -> Int -> IO (Maybe Rect)
-keyViewportClip ctx k = lookupNodeByKey na k >>= maybe (pure Nothing) (getClipBounds na)
-  where
-    na = ctxNodeArena ctx
+-- | The clip key @k@'s own rect is painted in, in frame @p@: for a scroll
+-- container or a panel the one around it, and otherwise its viewport clip.
+-- Each rect is clipped in its own frame: the viewport a key has now can be
+-- smaller than the one it had (a widget or scroller around it shrank with
+-- it), and would cut the pixels it vacated out of the damage.
+{-# INLINE ownClip #-}
+ownClip :: PrevFrame -> Int -> Maybe Rect
+ownClip p k = IM.lookup k (pfOuterClips p) <|> IM.lookup k (pfClips p)
 
 clipToViewport :: Maybe Rect -> Rect -> Rect
 clipToViewport clip r = maybe r (fromMaybe (Rect 0 0 0 0) . rectIntersect r) clip
 
 clipRectToWindow :: Float -> Float -> Rect -> Rect
 clipRectToWindow winW winH = clipToViewport (Just (Rect 0 0 winW winH))
-
--- | A keyed rect clipped to its viewport ('keyViewportClip'), or 'Nothing'
--- when nothing of it shows. Key 0 is not clipped.
-clipKeyRect :: Int -> Maybe Rect -> Rect -> Maybe Rect
-clipKeyRect k clip r
-  | k == 0 = Just r
-  | otherwise =
-      let clipped = clipToViewport clip r
-       in if rectNonEmpty clipped then Just clipped else Nothing
 
 scrollOffsetDamage :: Context -> RectUnion -> WidgetStore -> WidgetStore -> IO ()
 scrollOffsetDamage Context {ctxNodeArena = na} acc oldStore newStore =

@@ -240,6 +240,8 @@
   window. `DamageClip` is still the bounding box; `takeDamagePieces` in
   `NanoUI.Testing` gives the pieces, which a backend that draws text outside
   the draw commands must clip it to, and `damagePieces` is how they are made.
+- `NanoUI.Backend` has what a backend needs for the above:
+  `modifiersFromBits`.
 
 ### Changed
 
@@ -349,9 +351,8 @@
   `sfc`.
 - `NanoUI` no longer exports the backend surface; import `NanoUI.Backend` for
   it. The names that moved are `runUi`, `runNanoUI`; `emptyInput`,
-  `appendInputKey`, `appendDropEvent`, `emptyDropEvents`, `emptyInputKeys`,
-  `inputKeysFromList`, `inputKeysNull`, `foldInputKeys`, `inputInteracted`,
-  `inputPointerHeld`; `FontBackend`, `prepareFontMetrics`,
+  `appendInputKey`, `appendDropEvent`, `inputKeysFromList`, `inputKeysNull`,
+  `foldInputKeys`, `inputInteracted`, `inputPointerHeld`; `FontBackend`, `prepareFontMetrics`,
   `prepareFontMetricsMany`, `scaleFontMetrics`, `monospaceMetrics`,
   `uiFontMetrics`, `measureTextIO`, `lineWidthIO`, `drawShaped`,
   `drawGlyph`, `drawTextBox`, `GlyphQuad`, `ShapedText`, `ShapedGlyphs`, and
@@ -496,10 +497,9 @@
   On the headless profiler, 3000 frames of a button grid with a pointer
   moving over it and a floating window allocate 1.46 GB instead of 1.64 GB,
   or 1.38 GB instead of 1.48 GB with a modal.
-- The node index by widget id is an unboxed table of the frame's ids, so
-  indexing a widget and looking one up allocate nothing, and `nano-ui` no
-  longer depends on `hashtables`. A view with 3000 rows allocates about 3%
-  less per frame.
+- The node index by widget id is an unboxed table, so indexing and looking
+  up a widget allocate nothing, and `nano-ui` no longer depends on
+  `hashtables`.
 
 ### Fixed
 
@@ -655,34 +655,14 @@
   within 16 px of a corner it resizes both ways. Before, only the right
   padding and a 6 px bottom strip resized from inside. The window's controls
   and its body's scrollbar still take their own presses.
-- A widget that shrinks under the pointer repaints the strip it vacated. The
-  damage for a moved or resized widget clipped its old rect to the viewport
-  it has now, which is smaller once the widget around it shrank, and the
-  root was clipped to its own rect although paint clips it to the window. A
-  hovered `drawing` or button at the root, or in a column that shrank with
-  it, and content overflowing a root smaller than it, left old pixels on
-  screen. Each rect is now clipped to the viewport it was drawn in, and the
-  root to the window, so the overflow also takes the pointer where it is
-  drawn.
+- A widget that shrinks under the pointer repaints the strip it vacated, and
+  content overflowing the root takes the pointer where it is drawn.
 - A widget that goes away next to a table with frozen columns repaints where
-  it was. The table's frozen and scrolling panes share one widget id, and the
-  pass that keeps each widget's rect from the frame before counted it twice,
-  which hid one widget that had gone. While such a table was shown, the same
-  pass also rebuilt its maps every frame. Of nodes sharing an id, it now
-  takes only the last, the one a lookup by that id finds.
+  it was.
 - Content of a scroller wholly outside the viewport around it, such as an
-  inner scroller below the fold of an outer one, takes no pointer. Its clip
-  fell back to the outer viewport, so content scrolled up into that
-  viewport's rect, which nothing draws there, still hovered and clicked. The
-  clip is now empty, and hit tests tell an empty clip from one not yet set.
+  inner scroller below the fold, takes no pointer.
 - A panel or a scroller that changes size repaints where it was and where it
-  is. A panel, like any container without a widget id, was invisible to the
-  rect diffs, so one that shrank left its background and border behind. A
-  scroller's own rect was clipped to its viewport, the clip it gives its
-  content, which left its old bar lane and well edge on screen or did not
-  paint its new ones. A container that paints is now tracked under a key of
-  its own, and a scroller's or panel's rect is clipped to the clip it is
-  painted in.
+  is.
 - A row or column too short for its children takes the room it lacks from
   the others that shrink once one reaches its minimum, instead of overflowing.
 
@@ -721,6 +701,13 @@
   `textAreaBarLanes` from `NanoUI.Frame.TextEdit` (which exports
   `textAreaBarLane` and `textAreaLineHeight`), and `resizeFromEdge` and `windowResizeEdgeAt`
   from `NanoUI.Frame.Window`.
+- `keyed`, an alias of `withKey`.
+- The `x'` and `xWith` forms of `knob`, `toggleSwitch`, `circularProgress`,
+  `spinner`, `progressBar` and `sparkline`. Each keeps `x`, at its default
+  size, and `xWith'`, which takes a layout modifier and a size and returns
+  the `Response` too.
+- `emptyInputKeys` and `emptyDropEvents` from `NanoUI.Backend` and
+  `NanoUI.Input`; use `mempty`.
 
 ## 0.1.0.0
 

@@ -8,7 +8,7 @@ import Foreign.Ptr (castPtr)
 import Data.Text qualified as T
 import NanoUI.Internal.Context (Context (..))
 import NanoUI.Internal.Layout.Arena
-  ( NodeType (..), addNodeFromLayout, getRect, setNodeText
+  ( NodeType (..), addNodeFromLayout, getNodeRect, setNodeText
   , setNodeValue, setStyleIdx, setWidgetId
   )
 import System.Mem.StableName (makeStableName)
@@ -68,7 +68,7 @@ runMetricCacheInvalidationTest ctx failed = do
   let inp = withInputOff 400 300
       width c = do
         void $ runFrame c inp (button "ABC")
-        (_, _, w, _) <- getRect (ctxNodeArena c) 0
+        Rect _ _ w _ <- getNodeRect (ctxNodeArena c) 0
         pure w
       a = withMeasureText ctx (\_ -> pure (200, 20))
       b = withMeasureText ctx (\_ -> pure (80, 12))
@@ -97,8 +97,7 @@ runMetricCacheInvalidationTest ctx failed = do
       spans <- collectTextSpans configured
       fresh <- configure <$> newContext
       (_, _, coldDraw, _) <- runFrame fresh inp ui
-      expected <- snapshotDraw coldDraw
-      assertEq failed actual expected
+      assertEq failed actual =<< snapshotDraw coldDraw
       assertEq failed spans =<< collectTextSpans fresh
 
 -- A table header's width and style stay fixed while alignment and its parent

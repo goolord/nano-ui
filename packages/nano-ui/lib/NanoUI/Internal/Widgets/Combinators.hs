@@ -1,14 +1,20 @@
--- | Button and selection helpers shared by the widget modules.
+-- | Button, selection and cache helpers shared by the widget modules.
 module NanoUI.Internal.Widgets.Combinators
   ( buttonStyledEx
   , withBoundedIndex
   , finishToggle
   , finishInput
+  , readDerived
+  , writeDerived
   )
 where
 
-import Control.Monad (when)
+import Control.Monad (when, (>=>))
+import Data.Dynamic (fromDynamic, toDyn)
+import Data.IORef (modifyIORef', readIORef)
+import Data.IntMap.Strict qualified as IM
 import Data.Text (Text)
+import Data.Typeable (Typeable)
 import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context
 import NanoUI.Internal.Id (WidgetId)
@@ -71,6 +77,16 @@ finishInput field ctx wid original resp value = do
     writeSlot field ctx wid (intKey wid) value
     recordSlot field ctx (intKey wid) value
   pure (setChanged (value /= original) resp, value)
+
+-- | What widget @key@ derived and kept in 'ctxDerivedCache', if it is there.
+readDerived :: Typeable a => Context -> Int -> IO (Maybe a)
+readDerived ctx key = (IM.lookup key >=> fromDynamic) <$> readIORef (ctxDerivedCache ctx)
+
+-- | Keep what widget @key@ derived. Entries of widgets no longer built
+-- linger, so a cache grown past a few dozen entries starts over.
+writeDerived :: Typeable a => Context -> Int -> a -> IO ()
+writeDerived ctx key v = modifyIORef' (ctxDerivedCache ctx) $ \cache ->
+  IM.insert key (toDyn v) (if IM.size cache >= 64 then IM.empty else cache)
 
 -- | Run an index-based picker over every value of a bounded enum. Indices
 -- are offset by @fromEnum minBound@, so enums that do not start at 0 map

@@ -28,7 +28,7 @@ module NanoUI.Internal.Frame.Input
   ) where
 
 import Control.Applicative ((<|>))
-import Control.Monad (filterM, forM_, mfilter, unless, when, (<=<))
+import Control.Monad (filterM, mfilter, when, (<=<))
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Maybe (fromMaybe, isJust, isNothing, listToMaybe, maybeToList)
 import NanoUI.Internal.Context
@@ -180,7 +180,7 @@ finalizePointerPress ctx targets =
 {-# INLINE widgetUnderMouse #-}
 widgetUnderMouse :: Context -> Maybe NodeIdx -> V2 -> NodeType -> NodeIdx -> IO Bool
 widgetUnderMouse ctx top mouse nt idx = do
-  (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+  Rect x y w h <- getNodeRect (ctxNodeArena ctx) idx
   rect <- widgetHitRect ctx nt idx x y w h
   nodeClippedHit ctx idx rect mouse <&&> overlayHitAllowed ctx top idx
 
@@ -322,12 +322,9 @@ tabNext cur ids shift =
 -- focus, and before 'finalizeTabFocus'.
 constrainFocusToModal :: Context -> IO ()
 constrainFocusToModal ctx = do
-  top <- topModalNode (ctxNodeArena ctx)
-  forM_ top $ \modal -> do
-    focus <- readIORef (ctxFocusId ctx)
-    when (hashWidgetId focus /= 0) $ do
-      ok <- widgetIdInSubtree ctx modal focus
-      unless ok $ writeIORef (ctxFocusId ctx) (WidgetId 0)
+  focus <- readIORef (ctxFocusId ctx)
+  when (hashWidgetId focus /= 0) $
+    unlessM (widgetOverlayAllowed ctx focus) $ writeIORef (ctxFocusId ctx) (WidgetId 0)
 
 -- | Whether state or input changes require a frame. Arguments are previous
 -- and current input. Tests hover only after pointer motion; timed wake

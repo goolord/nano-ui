@@ -84,11 +84,10 @@ module NanoUI
     -- A widget that runs on some frames and not others moves the ids of the
     -- siblings after it. Put the conditional part inside 'scope', which takes
     -- one id whether or not its body adds anything. For a list whose items
-    -- are added, removed or reordered, run each item under 'withKey' (or
-    -- 'keyed') with a key unique among its siblings, so the item's state
-    -- follows its key instead of its position.
+    -- are added, removed or reordered, run each item under 'withKey' with a
+    -- key unique among its siblings, so the item's state follows its key
+    -- instead of its position.
   , scope
-  , keyed
   , keyedTag
   , withKey
   , nextId

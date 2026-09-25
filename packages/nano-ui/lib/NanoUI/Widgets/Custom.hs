@@ -5,7 +5,10 @@
 -- and damage slop.
 -- 'canvas' is the short form for drawing into a laid-out rectangle with
 -- 'CanvasM'. 'useDrag2D' and 'useWheelDelta' are gesture hooks for your own
--- controls; 'knob' and 'toggleSwitch' show how they fit together.
+-- controls; 'knob' and 'toggleSwitch' show how they fit together. Each
+-- reference widget comes as @x@, at its default size, and as @xWith'@, which
+-- takes a layout modifier and a size and also returns the widget's
+-- 'Response'.
 module NanoUI.Widgets.Custom
   ( -- * Custom widgets
     CustomWidgetSpec (..)
@@ -42,28 +45,16 @@ module NanoUI.Widgets.Custom
   , useWheelDelta
     -- * Reference widgets
   , knob
-  , knob'
-  , knobWith
   , knobWith'
   , toggleSwitch
-  , toggleSwitch'
-  , toggleSwitchWith
   , toggleSwitchWith'
   , circularProgress
-  , circularProgress'
-  , circularProgressWith
   , circularProgressWith'
   , spinner
-  , spinner'
-  , spinnerWith
   , spinnerWith'
   , progressBar
-  , progressBar'
-  , progressBarWith
   , progressBarWith'
   , sparkline
-  , sparkline'
-  , sparklineWith
   , sparklineWith'
   ) where
 
@@ -177,15 +168,12 @@ data CustomWidgetSpec a = CustomWidgetSpec
     -- ^ Vector drawing procedure receiving interaction context and layout rect.
   , widgetContent    :: !Int
     -- ^ Content key: a number that changes whenever 'widgetDraw' would draw
-    -- something different from the state it reads (a value, a flag, a model
-    -- revision; 'contentKey' hashes numbers into one). A frame whose key,
-    -- size, interaction state and metrics are unchanged neither rebuilds the
-    -- ops nor repaints the widget (a widget that only moved has its ops
-    -- translated), so key a drawing whose ops are expensive to build. The default 0 means no key: the ops are rebuilt every frame and
-    -- compared, which repaints correctly whatever the drawing reads but pays
-    -- for the rebuild. A stale key draws stale pixels, so derive it from
-    -- everything the drawing reads, an animated value included: a key is
-    -- believed while the widget animates, as a versioned drawing's version is.
+    -- something different ('contentKey' hashes numbers into one). A frame
+    -- whose key, size, interaction state and metrics are unchanged neither
+    -- rebuilds the ops nor repaints. The default 0 means no key: the ops are
+    -- rebuilt and compared every frame. A stale key draws stale pixels, so
+    -- derive it from everything the drawing reads: it is believed even while
+    -- the widget animates.
   , widgetCursor     :: !(Maybe (CustomDrawContext -> UiCursorKind))
     -- ^ Optional custom mouse cursor when pointer is over the widget.
   , widgetFocusable  :: !Bool
@@ -193,18 +181,12 @@ data CustomWidgetSpec a = CustomWidgetSpec
   , widgetDamageSlop :: !Float
     -- ^ Padding added to dirty rectangles (for shadows, glow, or drag handles).
   , widgetTrackPointer :: !Bool
-    -- ^ Run a frame for every pointer move over the widget (default 'False').
-    -- A frame is otherwise run for a pointer that only moved when it crosses
-    -- onto another widget, which is all a widget whose look follows its own
-    -- hover needs. One that draws what is under the pointer inside itself --
-    -- the hovered row of a list that draws its own rows -- sets this, and
-    -- keys its drawing on that row, so a move within one row repaints
-    -- nothing.
+    -- ^ Run a frame for every pointer move over the widget, for one that
+    -- draws what is under the pointer inside itself (default 'False': only
+    -- moves onto another widget run a frame).
   , widgetInteract   :: !(Response -> CustomDrawContext -> Input -> (Response, a))
-    -- ^ Interaction hook. It receives the widget's resolved 'Response' (hover,
-    -- press, right-click, and clicks including one queued from a previous
-    -- frame), the draw context and the input, and returns the final response
-    -- and value.
+    -- ^ Interaction hook: from the resolved 'Response', the draw context and
+    -- the input, the final response and value.
   }
 
 -- | Default configuration for a custom widget with standard hover/press/click behavior.
@@ -234,14 +216,11 @@ fixedSizeSpec f w h =
 contentKey :: [Float] -> Int
 contentKey vs = contentKeyOf [KeyPart (fromIntegral (castFloatToWord32 v)) | v <- vs]
 
--- | A 'widgetContent' key over values of any 'Hashable' types:
+-- | A 'widgetContent' key over values of any 'Hashable' types, mixed in
+-- order; an 'Int' or a 'Double' is hashed whole where 'contentKey' would
+-- round it to a 'Float'.
 --
 -- > widgetContent = contentKeyOf [keyPart version, keyPart scrollY, keyPart query, keyPart selected]
---
--- Pass every value the drawing reads, as with 'contentKey'. The parts are
--- mixed in order, so two lists of the same values in another order make
--- another key, and an 'Int' or a 'Double' is hashed whole where
--- 'contentKey' would round it to a 'Float'.
 {-# INLINE contentKeyOf #-}
 contentKeyOf :: [KeyPart] -> Int
 contentKeyOf parts =
@@ -279,14 +258,6 @@ customWidgetWithId wid spec = do
   pure (widgetInteract spec resp0 cdc inp)
 
 -- | Instantiates a custom widget from a 'CustomWidgetSpec'.
---
--- Connects the widget into:
--- - The two-pass layout arena (respecting 'widgetMeasure' or layout constraints).
--- - Off-heap vector drawing pipeline. Without a 'widgetContent' key the draw
---   function runs once a frame and the widget repaints when its ops change, so
---   it may read anything; with one, an unchanged key skips both.
--- - Interactive hit-testing, focus management, and custom cursor resolution.
--- - Accurate damage region tracking with 'widgetDamageSlop'.
 customWidget :: (Ui :> es) => CustomWidgetSpec a -> Eff es (Response, a)
 customWidget spec = do
   wid <- nextId
@@ -324,9 +295,8 @@ useDrag2D ::
 useDrag2D bounds = do
   (wid, ctx) <- freshWidget
   inp <- askInput
-  -- The drag flag lives in 'storeQuiet' (bookkeeping: the knob paints from
-  -- its value and pressed state, which damage on their own) and the last
-  -- pointer position in 'storePoint', both under the widget's drag slot.
+  -- The drag flag is quiet bookkeeping; the last pointer position is a point
+  -- slot.
   let dragK = slotKey SlotDrag (intKey wid)
       mouse = inputMousePos inp
   store <- uiIO (getStore ctx)
@@ -348,10 +318,8 @@ useDrag2D bounds = do
 useWheelDelta :: (Ui :> es) => Rect -> Eff es (Float, Float)
 useWheelDelta bounds = do
   inp <- askInput
-  let mouse = inputMousePos inp
-  if rectContains bounds mouse
-    then pure (v2X (inputScroll inp), v2Y (inputScroll inp))
-    else pure (0, 0)
+  let V2 x y = inputScroll inp
+  pure (if rectContains bounds (inputMousePos inp) then (x, y) else (0, 0))
 
 -- -----------------------------------------------------------------------------
 -- Reference Custom Widgets
@@ -364,17 +332,8 @@ useWheelDelta bounds = do
 knob :: Ui :> es => Float -> Float -> Float -> Eff es Float
 knob minV maxV value = snd <$> knobWith' id 36 minV maxV value
 
-{-# INLINE knob' #-}
--- | 'knob' returning @(response, updatedValue)@.
-knob' :: Ui :> es => Float -> Float -> Float -> Eff es (Response, Float)
-knob' = knobWith' id 36
-
--- | 'knob' with a layout modifier and a diameter in pixels.
-{-# INLINE knobWith #-}
-knobWith :: Ui :> es => (Layout -> Layout) -> Float -> Float -> Float -> Float -> Eff es Float
-knobWith f diameter minV maxV value = snd <$> knobWith' f diameter minV maxV value
-
--- | 'knobWith' returning the response and updated value.
+-- | 'knob' with a layout modifier and a diameter in pixels, returning the
+-- response and the updated value.
 knobWith' ::
   Ui :> es =>
   (Layout -> Layout)
@@ -385,8 +344,7 @@ knobWith' ::
   -> Eff es (Response, Float)
 knobWith' f diameter minV maxV value = do
   (wid, ctx) <- freshWidget
-  -- NaN never equals the value adopted last frame, so it would be adopted
-  -- (and the frame dirtied) again on every frame.
+  -- NaN would be adopted afresh, dirtying the frame, every frame.
   current <- uiIO $ adoptSlot fieldFloat ctx wid (if isNaN value then minV else value)
   let
     range = maxV - minV
@@ -431,17 +389,8 @@ knobWith' f diameter minV maxV value = do
 toggleSwitch :: Ui :> es => Bool -> Eff es Bool
 toggleSwitch on = snd <$> toggleSwitchWith' id on
 
-{-# INLINE toggleSwitch' #-}
--- | 'toggleSwitch' returning @(response, enabled)@.
-toggleSwitch' :: Ui :> es => Bool -> Eff es (Response, Bool)
-toggleSwitch' = toggleSwitchWith' id
-
--- | 'toggleSwitch' with a layout modifier.
-{-# INLINE toggleSwitchWith #-}
-toggleSwitchWith :: Ui :> es => (Layout -> Layout) -> Bool -> Eff es Bool
-toggleSwitchWith f on = snd <$> toggleSwitchWith' f on
-
--- | 'toggleSwitchWith' returning the response and updated flag.
+-- | 'toggleSwitch' with a layout modifier, returning the response and the
+-- updated flag.
 toggleSwitchWith' ::
   Ui :> es => (Layout -> Layout) -> Bool -> Eff es (Response, Bool)
 toggleSwitchWith' f on = do
@@ -473,17 +422,8 @@ toggleSwitchWith' f on = do
 circularProgress :: Ui :> es => Float -> Eff es ()
 circularProgress frac = void (circularProgressWith' id 32 frac)
 
-{-# INLINE circularProgress' #-}
--- | 'circularProgress' with a response for geometry and hover information.
-circularProgress' :: Ui :> es => Float -> Eff es Response
-circularProgress' = circularProgressWith' id 32
-
--- | 'circularProgress' with a layout modifier and a diameter in pixels.
-{-# INLINE circularProgressWith #-}
-circularProgressWith :: Ui :> es => (Layout -> Layout) -> Float -> Float -> Eff es ()
-circularProgressWith f diameter frac = void (circularProgressWith' f diameter frac)
-
--- | 'circularProgressWith' returning its response.
+-- | 'circularProgress' with a layout modifier and a diameter in pixels,
+-- returning its response.
 circularProgressWith' :: Ui :> es => (Layout -> Layout) -> Float -> Float -> Eff es Response
 circularProgressWith' f diameter frac =
   fst <$> customWidget (fixedSizeSpec f diameter diameter)
@@ -498,24 +438,14 @@ circularProgressWith' f diameter frac =
           drawCircle centre (r * clampedFrac) (themeAccent theme)
     }
 
--- | An indeterminate loading indicator: a short accent arc turning over a
--- faint ring, 18 px across. It keeps the frame loop running while it is on
--- screen and repaints only its own rect.
+-- | An indeterminate loading indicator, 18 px across: an accent arc turning
+-- over a faint ring. It keeps frames coming while on screen.
 {-# INLINE spinner #-}
 spinner :: Ui :> es => Eff es ()
 spinner = void (spinnerWith' id 18)
 
-{-# INLINE spinner' #-}
--- | 'spinner' returning its response. Requests animation frames while declared.
-spinner' :: Ui :> es => Eff es Response
-spinner' = spinnerWith' id 18
-
--- | 'spinner' with a layout modifier and a diameter in pixels.
-{-# INLINE spinnerWith #-}
-spinnerWith :: Ui :> es => (Layout -> Layout) -> Float -> Eff es ()
-spinnerWith f diameter = void (spinnerWith' f diameter)
-
--- | 'spinnerWith' returning its response.
+-- | 'spinner' with a layout modifier and a diameter in pixels, returning its
+-- response. It requests animation frames while declared.
 spinnerWith' :: Ui :> es => (Layout -> Layout) -> Float -> Eff es Response
 spinnerWith' f diameter = do
   t <- uiTime
@@ -551,17 +481,8 @@ spinnerWith' f diameter = do
 progressBar :: Ui :> es => Float -> Eff es ()
 progressBar frac = void (progressBarWith' id progressBarDefaultHeight frac)
 
-{-# INLINE progressBar' #-}
--- | 'progressBar' with a response for geometry and hover information.
-progressBar' :: Ui :> es => Float -> Eff es Response
-progressBar' = progressBarWith' id progressBarDefaultHeight
-
--- | 'progressBar' with a layout modifier and a bar height in pixels.
-{-# INLINE progressBarWith #-}
-progressBarWith :: Ui :> es => (Layout -> Layout) -> Float -> Float -> Eff es ()
-progressBarWith f height frac = void (progressBarWith' f height frac)
-
--- | 'progressBarWith' returning its response.
+-- | 'progressBar' with a layout modifier and a height in pixels, returning
+-- its response.
 progressBarWith' :: Ui :> es => (Layout -> Layout) -> Float -> Float -> Eff es Response
 progressBarWith' f height frac =
   let !barH = max 0 height
@@ -591,17 +512,8 @@ progressBarDefaultWidth = 120.0
 sparkline :: Ui :> es => [Float] -> Eff es ()
 sparkline values = void (sparklineWith' id 80 24 values)
 
-{-# INLINE sparkline' #-}
--- | 'sparkline' with a response for geometry and hover information.
-sparkline' :: Ui :> es => [Float] -> Eff es Response
-sparkline' = sparklineWith' id 80 24
-
--- | 'sparkline' with a layout modifier and a width and height in pixels.
-{-# INLINE sparklineWith #-}
-sparklineWith :: Ui :> es => (Layout -> Layout) -> Float -> Float -> [Float] -> Eff es ()
-sparklineWith f prefW prefH values = void (sparklineWith' f prefW prefH values)
-
--- | 'sparklineWith' returning its response.
+-- | 'sparkline' with a layout modifier and a preferred size, returning its
+-- response.
 sparklineWith' :: Ui :> es => (Layout -> Layout) -> Float -> Float -> [Float] -> Eff es Response
 sparklineWith' f prefW prefH values =
   fst <$> customWidget (fixedSizeSpec f prefW prefH)

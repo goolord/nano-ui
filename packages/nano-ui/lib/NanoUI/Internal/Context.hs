@@ -6,12 +6,19 @@
 -- module; views normally only need "NanoUI".
 module NanoUI.Internal.Context
   ( Context (..)
+  , module NanoUI.Internal.Context.Core
+  , module NanoUI.Internal.Context.Scroll
+  , module NanoUI.Internal.Context.Animation
+  , module NanoUI.Internal.Context.Drawing
+  , module NanoUI.Internal.Context.Overlay
   , TextInputMenu (..)
   , TextInputDrag (..)
   , TextFieldClickCell (..)
   , WindowResizeEdge (..)
   , WindowResizeDrag (..)
   , DamageState (..)
+  , PrevFrame (..)
+  , emptyPrevFrame
   , OverlayState (..)
   , DrawingCacheState (..)
   , DrawingEntry (..)
@@ -21,108 +28,12 @@ module NanoUI.Internal.Context
   , WidgetTextPlacement (..)
   , InteractionState (..)
   , PointerRoute (..)
-  , getsInteraction
-  , modifyInteraction
-  , getsOverlay
-  , modifyOverlay
-  , getsDamage
-  , modifyDamage
-  , takeTextEditLastAction
-  , pointerHeldOffLayers
   , intKey
-  , markDirty
-  , markDirtyCovered
-  , clearDirty
-  , isDirty
-  , setWakeLoop
-  , requestWakeAt
-  , requestWakeAfter
-  , getWakeAt
-  , clearWakeAt
-  , takeDamage
-  , takeDamagePieces
   , DamageRequest (..)
-  , requestDamage
-  , damageWidget
-  , damageKey
-  , damageRect
-  , damagePeers
-  , damageFull
-  , registerPopupConfig
-  , lookupPopupConfig
-  , registerDrawing
-  , lookupDrawing
-  , cachedDrawingOps
-  , cachedWidgetLayout
-  , lookupDrawFitEnvelope
-  , pruneDrawOpCache
   , CustomMeasureFn
   , CustomDrawContext (..)
   , CustomDrawBuild
-  , registerCustomDrawing
-  , registerCustomEntry
-  , lookupCustomDrawing
-  , cachedCustomDrawingOps
-  , refreshCustomDrawingOps
-  , drawingOpsStale
   , CustomDrawingEntry (..)
-  , registerCustomMeasure
-  , lookupCustomMeasure
-  , customMeasureHooks
-  , lookupCustomDamageSlop
-  , resetDrawingScopeCache
-  , getStore
-  , setStore
-  , modifyStore
-  , writeSlots
-  , writeSlot
-  , adoptSlot
-  , recordSlot
-  , writeStoreBool
-  , isDisabled
-  , beginThemeScopes
-  , pushThemeScope
-  , themeScopesChanged
-  , scopeTheme
-  , scopeRawTheme
-  , currentTheme
-  , nodeTheme
-  , widgetTheme
-  , getScrollOffset
-  , setScrollOffset
-  , getScrollOffset2D
-  , setScrollOffset2D
-  , linkScrollAxes
-  , ScrollTuning (..)
-  , defaultScrollTuning
-  , getScrollTuning
-  , setScrollTuning
-  , getScrollStep
-  , setScrollStep
-  , resolveScrollStep
-  , ScrollAxes (..)
-  , ScrollMetrics (..)
-  , getScrollMetrics
-  , cacheScrollMetrics
-  , beginScrollMetrics
-  , getScrollOffsetIn
-  , setScrollOffsetIn
-  , ScrollBehavior (..)
-  , ScrollAlign (..)
-  , scrollTo
-  , scrollBy
-  , scrollPages
-  , scrollToStart
-  , scrollToEnd
-  , scrollIntoView
-  , scrollRectIntoView
-  , applyScrollTarget
-  , scrollTargetOffset
-  , scrollGliding
-  , clampScrollOffset
-  , stepScrollGlides
-  , getPrevRect
-  , getPrevClipRect
   , atlasTextureId
   , registerImage
   , registerImages
@@ -160,36 +71,7 @@ module NanoUI.Internal.Context
   , getHotId
   , registerFocusable
   , getFocusables
-  -- Modal & Overlay
-  , textInputEditActive
-  , modalActive
-  , overlayConsumesQuit
-  , markEscapeConsumed
-  , markTabConsumed
-  , tabConsumed
-  , pointerBlockedByModal
-  , routedInput
-  , floatingLayerAt
-  , seedFloatingPanel
-  , beginModal
-  , endModal
-  , beginFrameModal
-  , modalDamageFlip
-  -- Animation
   , AnimationState (..)
-  , anyAnimating
-  , getLiveAnimations
-  , takeAnimSettled
-  , lookupAnimation
-  , startAnimation
-  , startAnimationEase
-  , startAnimationEaseDelay
-  , startSpring
-  , keepAnimationAlive
-  , repaintIfOrphan
-  , setAnimationValue
-  , tickAnimations
-  , getAnimationValue
   , FrameMsg (..)
   , decodeMessages
   , reduceMessages

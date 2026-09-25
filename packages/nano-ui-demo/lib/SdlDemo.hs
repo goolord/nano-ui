@@ -51,17 +51,17 @@ import Control.Exception (SomeException, displayException, evaluate, try)
 import Control.Monad (forM, forM_, unless, void, when)
 import Control.Monad.IO.Class (liftIO)
 import Data.Foldable (for_, toList)
-import Data.List (elemIndex)
-import Data.Maybe (fromMaybe, isJust, listToMaybe)
-import Data.Primitive.SmallArray (SmallArray, smallArrayFromList)
+import Data.List (elemIndex, intersperse)
+import Data.Maybe (catMaybes, fromMaybe, isJust, listToMaybe, mapMaybe)
+import Data.Primitive.SmallArray (SmallArray, indexSmallArray, sizeofSmallArray, smallArrayFromList)
 import Data.Word (Word64)
 import NanoUI
 import NanoUI.Adornment qualified as A
 import NanoUI.Backend.Sdl
 import NanoUI.Internal.Debug (CoreDebugSnapshot (..))
 import NanoUI.Diagrams
-import NanoUI.Internal.Monad (askContext)
-import NanoUI.Internal.Context (askHostIO, setHost)
+import NanoUI.Internal.Monad (withContext)
+import NanoUI.Internal.Context (askHostIO, hostOrInit, setHost)
 import Paths_nano_ui_demo (getDataFileName)
 import Diagrams.Prelude
   ( Diagram
@@ -89,17 +89,17 @@ import qualified Codec.Picture as JP
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Internal as BSI
 import qualified Data.Text as T
-import Data.Primitive.SmallArray (indexSmallArray, sizeofSmallArray)
 import qualified Data.Vector.Storable as VS
 import qualified SdlRecord
 
-import DemoApp (useFileDialog)
+import DemoApp (registerRgba, useFileDialog)
 import DemoData
   ( DemoPerson (..)
   , colPeople
   , demoPeople
   , demoSwatches
   , demoTree
+  , peopleColumns
   , sineCosineChart
   , weeklyBars
   )
@@ -160,10 +160,8 @@ gifFrames (GifLoad done) =
   liftIO (tryTakeMVar done) >>= traverse (either (pure . Left) (register []))
   where
     register ids [] = pure (Right (smallArrayFromList (reverse ids)))
-    register ids ((w, h, pixels) : rest) = do
-      iid <- freshImageId
-      ok <- registerImageRgba iid w h pixels
-      if ok then register (iid : ids) rest else pure (Left "the image atlas is full")
+    register ids ((w, h, pixels) : rest) =
+      registerRgba w h pixels >>= maybe (pure (Left "the image atlas is full")) (\iid -> register (iid : ids) rest)
 
 -- | Demo accent used across the state readout and pane headers.
 demoAccent :: Color
@@ -196,42 +194,27 @@ data DemoTheme
   | TomorrowMidnightMin
   deriving (Bounded, Enum, Eq, Ord, Read, Show)
 
-themeDisplayName :: DemoTheme -> T.Text
-themeDisplayName ThemeDefault = "Default"
-themeDisplayName TomorrowNightMin = "Tomorrow Night Min"
-themeDisplayName TomorrowLight = "Tomorrow Light"
-themeDisplayName TomorrowMidnightMin = "Tomorrow at Midnight Min"
+-- | A theme choice's name and theme.
+themeChoice :: DemoTheme -> (T.Text, Theme)
+themeChoice = \case
+  ThemeDefault -> ("Default", defaultTheme)
+  TomorrowNightMin -> ("Tomorrow Night Min", tomorrowNightMinDarkTheme)
+  TomorrowLight -> ("Tomorrow Light", tomorrowMinLightTheme)
+  TomorrowMidnightMin -> ("Tomorrow at Midnight Min", tomorrowMidnightMinDarkTheme)
 
-themeForChoice :: DemoTheme -> Theme
-themeForChoice ThemeDefault = defaultTheme
-themeForChoice TomorrowNightMin = tomorrowNightMinDarkTheme
-themeForChoice TomorrowLight = tomorrowMinLightTheme
-themeForChoice TomorrowMidnightMin = tomorrowMidnightMinDarkTheme
-
--- | Font families offered by the Controls-tab font combo box, straight from
--- the SDL backend's system font-directory scan ('listFontFamilies'; cached
--- once per context). The chosen family is pushed to the backend through
--- 'setSdlUiFont' and re-rendered on the next frame. The fallback list only
--- kicks in on systems where the scan finds no font files.
+-- | What the demo reads once per context: the font families offered by the
+-- Controls-tab font combo box, from the SDL backend's system font scan
+-- ('listFontFamilies'), or a fallback list where the scan finds no font
+-- files; and whether @NANO_DEBUG_OPEN@ starts it with the Debug window open.
+-- The chosen family goes to the backend through 'setSdlUiFont'.
 data DemoSettings = DemoSettings ![T.Text] !Bool
 
 demoSettings :: NanoUI DemoSettings
-demoSettings = do
-  ctx <- askContext
-  liftIO $ do
-    cached <- askHostIO ctx
-    case cached of
-      Just settings -> pure settings
-      Nothing -> do
-        families <- map T.pack <$> listFontFamilies
-        debugOpen <- isJust <$> lookupEnv "NANO_DEBUG_OPEN"
-        let settings = DemoSettings
-              (if null families
-                then ["Inter", "Noto Sans", "Adwaita Sans", "Cantarell", "Liberation Sans", "FreeSans"]
-                else families)
-              debugOpen
-        setHost ctx settings
-        pure settings
+demoSettings = withContext $ \ctx -> hostOrInit ctx $ do
+  families <- map T.pack <$> listFontFamilies
+  debugOpen <- isJust <$> lookupEnv "NANO_DEBUG_OPEN"
+  let fallback = ["Inter", "Noto Sans", "Adwaita Sans", "Cantarell", "Liberation Sans", "FreeSans"]
+  pure (DemoSettings (if null families then fallback else families) debugOpen)
 
 ------------------------------------------------------------------------------
 -- §3  The showcase UI
@@ -257,7 +240,7 @@ demoUi = do
   (vol, setVol) <- useFloat 50 -- slider
   (quality, setQuality) <- useText "Medium" -- select
   (accent, setAccent) <- useState demoAccent -- colorPickerRGBA
-  (themeChoice, setThemeChoice) <- useEnum ThemeDefault -- boundedRadio
+  (themeSel, setThemeSel) <- useEnum ThemeDefault -- boundedRadio
   (fontChoice, setFontChoice) <- useText "Inter" -- comboBox
   (name, setName) <- useText "" -- textInput
   (notes, setNotes) <- useText "Edit me.\nSecond line." -- textArea
@@ -280,12 +263,9 @@ demoUi = do
   (openPath, setOpenPath) <- useText ""
   (savePath, setSavePath) <- useText ""
   (folderPath, setFolderPath) <- useText ""
-  useFileDialog openDlg setOpenDlg $ \paths ->
-    setOpenPath (T.intercalate ", " (map T.pack paths))
-  useFileDialog saveDlg setSaveDlg $ \paths ->
-    setSavePath (maybe "" T.pack (listToMaybe paths))
-  useFileDialog folderDlg setFolderDlg $ \paths ->
-    setFolderPath (maybe "" T.pack (listToMaybe paths))
+  useFileDialog openDlg setOpenDlg (setOpenPath . T.intercalate ", " . map T.pack)
+  useFileDialog saveDlg setSaveDlg (setSavePath . maybe "" T.pack . listToMaybe)
+  useFileDialog folderDlg setFolderDlg (setFolderPath . maybe "" T.pack . listToMaybe)
   -- List tab.
   (searchText, setSearchText) <- useText "" -- live searchInput text
   (searchQuery, setSearchQuery) <- useText "" -- committed searchInput value
@@ -305,11 +285,12 @@ demoUi = do
   -- Diagnostics tab: last raw drop event (files/text/paths).
   (dropRaw, setDropRaw) <- useText ""
   rawInp <- askInput
+  dbg <- debugText =<< askSdlDebug
   let wideWorkspace = sizeW (inputWindowSize rawInp) >= 1000
       inspectorWidth = if wideWorkspace then fixedW 280 else fillW
       volText = T.pack (show (round vol :: Int))
   let rawDrop = T.intercalate " | " [T.pack (show (dropEventType ev)) <> " " <> dropEventData ev | ev <- toList (inputDrops rawInp)]
-  when (not (T.null rawDrop)) (setDropRaw rawDrop)
+  unless (T.null rawDrop) (setDropRaw rawDrop)
 
   -------------------------------------------------------------- toolbar ---
   -- The page padding matches the gap between cards. The page scrollbar sits
@@ -323,9 +304,8 @@ demoUi = do
             labelWith (tight . alignMid . fontMuted) "SDL3 / Widget cookbook"
           when (sizeW (inputWindowSize rawInp) >= 960) flex
           -- Live frame stats + the shared header buttons.
-          fpsText <- dtFps <$> (debugText =<< askSdlDebug)
-          unless (T.null fpsText) $
-            labelWith (tight . alignMid . fontMono . fontMuted) fpsText
+          unless (T.null (dtFps dbg)) $
+            labelWith (tight . alignMid . fontMono . fontMuted) (dtFps dbg)
           rowWith (tight . gap gapMicro . alignMid) $ do
             whenM (button "OK") (setClick "OK")
             whenM (button "Cancel") (setClick "Cancel")
@@ -359,7 +339,7 @@ demoUi = do
                 box (alignMid . fixedWH 14 14) accent
                 labelWith (tight . alignMid) (colorToHexA accent)
               separator
-              kv "Theme" (themeDisplayName themeChoice)
+              kv "Theme" (fst (themeChoice themeSel))
               kv "Font" fontChoice
               kv "Name" (orDash name)
               kv "Notes" (orDash notes)
@@ -401,30 +381,22 @@ demoUi = do
                   setQuality (qualities !! qualityIdx)
                   separator
                   heading "Text input"
-                  nVal <- demoField "Name" $
-                    textInputConfigured defaultTextInputConfig {ticPlaceholder = "Enter name"} name
-                  setName nVal
-                  notesVal <- demoField "Notes" $
-                    textArea notes
-                  setNotes notesVal
+                  setName =<< demoField "Name" (textInputConfigured defaultTextInputConfig {ticPlaceholder = "Enter name"} name)
+                  setNotes =<< demoField "Notes" (textArea notes)
                   separator
                   heading "Numbers"
                   -- Arrow keys or the stepper step the value; Shift steps by ten.
                   rowWith (tight . gap gapInline . fillW) $ do
-                    countVal <- demoField "Count (0-100)" $
-                      numericInputConfigured defaultNumericInputConfig {nicMin = 0, nicMax = 100} count
-                    setCount countVal
-                    maskVal <- demoField "Mask (hex)" $
-                      numericInputConfigured defaultNumericInputConfig {nicMin = 0, nicMax = 0xFFFF, nicHex = True} mask
-                    setMask maskVal
+                    setCount =<< demoField "Count (0-100)"
+                      (numericInputConfigured defaultNumericInputConfig {nicMin = 0, nicMax = 100} count)
+                    setMask =<< demoField "Mask (hex)"
+                      (numericInputConfigured defaultNumericInputConfig {nicMin = 0, nicMax = 0xFFFF, nicHex = True} mask)
                 columnWith (tight . gap 10 . fillW) $ do
                   heading "Appearance"
-                  tVal <- demoField "Theme" $
-                    boundedRadio themeDisplayName themeChoice
-                  setThemeChoice tVal
-                  setUiTheme (themeForChoice tVal)
-                  (fResp, fVal) <- demoField "Font" $
-                    comboBox' "Font" demoFontFamilies fontChoice
+                  picked <- demoField "Theme" (boundedRadio (fst . themeChoice) themeSel)
+                  setThemeSel picked
+                  setUiTheme (snd (themeChoice picked))
+                  (fResp, fVal) <- demoField "Font" (comboBox' "Font" demoFontFamilies fontChoice)
                   tooltip fResp "Type to filter; Enter applies, Esc reverts."
                   setFontChoice fVal
                   when (respChanged fResp && not (T.null fVal)) $
@@ -453,15 +425,10 @@ demoUi = do
               -- it every frame via useFileDialog.
               heading "File Dialogs"
               rowWith (tight . gap gapInline . fillW) $ do
-                whenM (button "Open File…") $ do
-                  mdid <- askOpenFileDialog defaultFileDialogOptions { dialogAllowMany = True }
-                  setOpenDlg mdid
-                whenM (button "Save File…") $ do
-                  mdid <- askSaveFileDialog defaultFileDialogOptions
-                  setSaveDlg mdid
-                whenM (button "Browse Folder…") $ do
-                  mdid <- askOpenFolderDialog defaultFileDialogOptions
-                  setFolderDlg mdid
+                whenM (button "Open File…") $
+                  setOpenDlg =<< askOpenFileDialog defaultFileDialogOptions {dialogAllowMany = True}
+                whenM (button "Save File…") (setSaveDlg =<< askSaveFileDialog defaultFileDialogOptions)
+                whenM (button "Browse Folder…") (setFolderDlg =<< askOpenFolderDialog defaultFileDialogOptions)
               separator
               -- Drag & drop: dropZone returns a target; dropReceived reports its
               -- files and texts. dropHovering mirrors the hover state for styling.
@@ -478,7 +445,7 @@ demoUi = do
                       if dropHovering
                         then "Release to accept dropped files or text."
                         else "Files land here; text lands here too."
-                    when (not (T.null dropLog)) $ do
+                    unless (T.null dropLog) $ do
                       separator
                       labelWith (tight . fontMono . fillW) dropLog
               when (dropReceived dropTgt) $ do
@@ -486,8 +453,7 @@ demoUi = do
                       [ "file:  " <> (if T.length f <= 60 then f else "…" <> T.takeEnd 59 f) | f <- dropFiles dropTgt ]
                         ++ [ "text:  " <> (if T.length t <= 60 then t else T.take 59 t <> "…") | t <- dropTexts dropTgt ]
                 setDropLog (if null droppedLines then dropLog else T.intercalate "\n" droppedLines)
-              when (dropHovered dropTgt && not dropHovering) (setDropHovering True)
-              when (not (dropHovered dropTgt) && dropHovering) (setDropHovering False)
+              when (dropHovered dropTgt /= dropHovering) (setDropHovering (dropHovered dropTgt))
 
             ----------------------------------------------- Graphics ---------
             Graphics -> do
@@ -496,12 +462,9 @@ demoUi = do
               -- Generated RGBA images, registered under fresh ids the first
               -- time this tab shows.
               case swatches of
-                Nothing -> do
-                  registered <- forM demoSwatches $ \(caption, pixels) -> do
-                    iid <- freshImageId
-                    ok <- registerImageRgba iid 32 32 pixels
-                    pure [(iid, caption) | ok]
-                  setSwatches (Just (concat registered))
+                Nothing ->
+                  setSwatches . Just . catMaybes
+                    =<< forM demoSwatches (\(caption, pixels) -> fmap (,caption) <$> registerRgba 32 32 pixels)
                 Just registered ->
                   rowWith (tight . gap gapInline . fillW) $
                     for_ registered $ \(iid, caption) ->
@@ -534,7 +497,7 @@ demoUi = do
                       rowWith (tight . gap gapInline . alignMid) $ do
                         -- A spinner is a view like any other; it animates only
                         -- while it is declared.
-                        whenM (buttonContent (if saving then spinnerWith id 14 >> label "Saving" else svgIcon 16 check >> label "Save")) $
+                        whenM (buttonContent (if saving then spinnerWith' id 14 >> label "Saving" else svgIcon 16 check >> label "Save")) $
                           setClick "Save" >> toggleSaving
                         whenM (buttonConfigured defaultButtonConfig {bcAdornments = A.trailing (A.icon star)} "Star") (setClick "Star")
                         whenM (iconButton clock "") (setClick "Clock")
@@ -584,7 +547,7 @@ demoUi = do
               -- A plain response-driven bar. pulse provides a smooth
               -- clock-driven 0-1 sweep and keepAnimating holds it live.
               muted "A single rounded bar, smoothly oscillating 0-100%."
-              progResp <- progressBar' =<< pulse 6
+              progResp <- progressBarWith' id 12 =<< pulse 6
               keepAnimating progResp
               rowWith (tight . gap gapInline . alignMid) $ do
                 spinner
@@ -610,29 +573,20 @@ demoUi = do
                 kv "Size" (T.pack (printf "%.0f px" typeSize))
                 setTypeSize =<< slider 12 40 typeSize
               -- Font styles are ordinary style combinators; fold the toggles in.
-              let applyWeight = if typeBold then fontBold else id
-                  applyItalic = if typeItalic then fontItalic else id
-                  applyDeco
-                    | typeUnderline && typeStrike = fontUnderline . fontStrike
-                    | typeUnderline = fontUnderline
-                    | typeStrike = fontStrike
-                    | otherwise = id
-                  customStyle = fontSize typeSize . applyWeight . applyItalic . applyDeco . fillW
+              let on flag style = if flag then style else id
+                  customStyle =
+                    fontSize typeSize . on typeBold fontBold . on typeItalic fontItalic
+                      . on typeUnderline fontUnderline . on typeStrike fontStrike . fillW
                   previewTxt = if T.null sampleText then "Type specimen preview..." else sampleText
               panelWith (padAll 10 . fillW) $
                 labelWith customStyle previewTxt
-              separator
-              heading "Type Scale"
-              typeScale
-              separator
-              heading "Weights & Styles"
-              weightsStyles
-              separator
-              heading "Color & Highlights"
-              colorHighlights
-              separator
-              heading "Rich Text"
-              richTextSample
+              for_
+                [ ("Type Scale", typeScale)
+                , ("Weights & Styles", weightsStyles)
+                , ("Color & Highlights", colorHighlights)
+                , ("Rich Text", richTextSample)
+                ]
+                $ \(title, body) -> separator >> heading title >> body
 
             ----------------------------------------------------- List ---------
             List -> do
@@ -651,10 +605,7 @@ demoUi = do
               rowWith (tight . gap gapInline . fillW . alignMid) $ do
                 muted ("Committed: " <> (if T.null searchQuery then "(none)" else searchQuery))
                 flex
-                muted
-                  ( "Matches: "
-                      <> T.pack (show (length peopleMatches))
-                  )
+                muted ("Matches: " <> T.pack (show (length peopleMatches)))
               scroll2DWith (padAll 6 . fixedH 168 . fillW) $
                 columnWith (tight . gap gapMicro . fillW) $
                   if null peopleMatches
@@ -670,13 +621,7 @@ demoUi = do
               muted "Drag a header edge to resize. Right-click a header to hide."
               -- tableWith re-renders every frame; keep the sort state in a hook
               -- (useTableSort) and mirror changes back into it.
-              tableResp <-
-                tableWith
-                  (fixedH 280)
-                  "people"
-                  colPeople
-                  demoPeople
-                  tableSortVal
+              tableResp <- tableWith (fixedH 280) "people" colPeople demoPeople tableSortVal
               let nextSort = tableSort tableResp
               when (respChanged tableResp) (setTableSort nextSort)
               separator
@@ -703,36 +648,24 @@ demoUi = do
               muted "Auto ticks, shared scales, and decimation."
               -- chart data lives in "DemoData" (plus the §Plots section below).
               responsiveRowCol 760 (tight . gap 16 . fillW) $ do
-                columnWith (tight . gap gapMicro . fillW) $ do
-                  muted "Sine + cosine"
-                  void $ plot (minH 240 . fillW) sineCosineChart
-                columnWith (tight . gap gapMicro . fillW) $ do
-                  muted "Weekly counts"
-                  void $ barChart (minH 240 . fillW) weeklyBars
+                captioned "Sine + cosine" (plot (minH 240 . fillW) sineCosineChart)
+                captioned "Weekly counts" (barChart (minH 240 . fillW) weeklyBars)
               responsiveRowCol 760 (tight . gap 16 . fillW) $ do
-                columnWith (tight . gap gapMicro . fillW) $ do
-                  muted "Sleep vs focus"
-                  void $ plot (minH 240 . fillW) sleepFocusChart
-                columnWith (tight . gap gapMicro . fillW) $ do
-                  muted "Area"
-                  void $ areaChart (minH 240 . fillW) areaDemo
-              columnWith (tight . gap gapMicro . fillW) $ do
-                muted "Drawing"
-                ps <- uiPlotStyle
-                void $ diagram (fillW . maxH 200) (drawingSample ps)
+                captioned "Sleep vs focus" (plot (minH 240 . fillW) sleepFocusChart)
+                captioned "Area" (areaChart (minH 240 . fillW) areaDemo)
+              captioned "Drawing" (diagram (fillW . maxH 200) . drawingSample =<< uiPlotStyle)
 
             ------------------------------------------- Diagnostics ---------
             Diagnostics -> do
               heading "Diagnostics"
-              mapM_ (uncurry kv) . dtSummary =<< debugText =<< askSdlDebug
+              mapM_ (uncurry kv) (dtSummary dbg)
               kv "Last drop event" (orDash dropRaw)
           setActiveTab newTab
 
   -------------------------------------------------------------- overlays ---
   -- Debug window: a plain draggable window opened by the toolbar toggle.
   when debugOpen $ do
-    rows <- debugText =<< askSdlDebug
-    (win, _) <- window True "Debug" (debugBody rows)
+    (win, _) <- window True "Debug" (debugBody dbg)
     when (respClicked win) (setDebug False)
   -- About modal: modal gives (response, _); clicking anywhere or pressing Esc
   -- sets respClicked on the response, which closes it.
@@ -756,6 +689,10 @@ demoField caption widget =
   columnWith (tight . gap 4 . fillW) $ do
     labelWith (tight . fontMuted . fillW) caption
     widget
+
+-- | A caption over a chart or drawing.
+captioned :: T.Text -> NanoUI a -> NanoUI ()
+captioned caption body = columnWith (tight . gap gapMicro . fillW) (muted caption >> void body)
 
 -- | Dashed-out empty values in the State readout.
 orDash :: T.Text -> T.Text
@@ -842,58 +779,28 @@ colorHighlights =
 -- §6  List & Table demo data
 ------------------------------------------------------------------------------
 
--- | Case-folded haystack used to filter 'demoPeople'.
-personSearchText :: DemoPerson -> T.Text
-personSearchText p =
-  T.toCaseFold $
-    T.intercalate
-      " "
-      [ demoPersonName p
-      , demoPersonDept p
-      , demoPersonCity p
-      , demoPersonRole p
-      ]
-
--- | Filter the people list on a committed search query. Callers memoize the
--- result (see the Searchable list demo) so the fold is not re-run every frame.
+-- | Filter the people list on a committed search query, case-folded. Callers
+-- memoize the result (see the Searchable list demo) so the fold is not re-run
+-- every frame.
 peopleMatching :: T.Text -> [DemoPerson]
-peopleMatching raw
-  | T.null raw = demoPeople
-  | otherwise =
-      let q = T.toCaseFold raw
-       in filter (\p -> q `T.isInfixOf` personSearchText p) demoPeople
+peopleMatching raw = filter (T.isInfixOf (T.toCaseFold raw) . haystack) demoPeople
+  where
+    haystack p = T.toCaseFold (T.unwords [demoPersonName p, demoPersonDept p, demoPersonCity p, demoPersonRole p])
 
 personRowLabel :: DemoPerson -> T.Text
 personRowLabel p =
-  demoPersonName p
-    <> " - "
-    <> demoPersonRole p
-    <> ", "
-    <> demoPersonCity p
-    <> " ("
-    <> T.pack (show (demoPersonAge p))
-    <> ")"
+  demoPersonName p <> " - " <> demoPersonRole p <> ", " <> demoPersonCity p <> " (" <> T.pack (show (demoPersonAge p)) <> ")"
 
--- | Column names for human-readable sort / hidden readouts.
-demoTableColumnLabels :: [T.Text]
-demoTableColumnLabels = ["Name", "Dept", "Age", "City", "Role"]
+-- | A table column's header, for the sort and hidden readouts.
+columnName :: Int -> Maybe T.Text
+columnName i = if i < 0 then Nothing else fst <$> listToMaybe (drop i peopleColumns)
 
 tableHiddenLabel :: [Int] -> T.Text
 tableHiddenLabel [] = "none"
-tableHiddenLabel hidden =
-  T.intercalate
-    ", "
-    [ demoTableColumnLabels !! i
-    | i <- hidden
-    , i >= 0 && i < length demoTableColumnLabels
-    ]
+tableHiddenLabel hidden = T.intercalate ", " (mapMaybe columnName hidden)
 
 tableColumnLabel :: SortCol -> T.Text
-tableColumnLabel s =
-  let idx = sortColIndex s
-   in if idx >= 0 && idx < length demoTableColumnLabels
-        then demoTableColumnLabels !! idx
-        else "-"
+tableColumnLabel = fromMaybe "-" . columnName . sortColIndex
 
 tableSortDirText :: SortCol -> T.Text
 tableSortDirText s =
@@ -990,7 +897,7 @@ drawingSample ps =
 -- §9  Debug window content
 ------------------------------------------------------------------------------
 
-type DebugRows = SmallArray (T.Text, T.Text)
+type DebugRows = [(T.Text, T.Text)]
 
 -- | A debug sample formatted for the toolbar, the Diagnostics tab and the
 -- Debug window.
@@ -1008,98 +915,63 @@ data DebugText = DebugText
 data CachedDebugText = CachedDebugText !SdlDebugSnapshot !DebugText
 
 debugText :: SdlDebugSnapshot -> NanoUI DebugText
-debugText s = do
-  ctx <- askContext
-  liftIO $ do
-    cached <- askHostIO ctx
-    case cached of
-      Just (CachedDebugText previous text) | previous == s -> pure text
-      _ -> do
-        let c = dbgCore s
-            text =
-              DebugText
-                { dtFps =
-                    if dbgPresentFps c > 0
-                      then T.pack (printf "%4.0f FPS / %5.2f ms" (dbgPresentFps c) (dbgFrameMs c))
-                      else ""
-                , dtSummary = summaryRows s
-                , dtFrame = frameRows s
-                , dtDraw = drawRows s
-                , dtDisplay = displayRows s
-                , dtRuntime = smallArrayFromList (dbgRts c)
-                }
-        setHost ctx (CachedDebugText s text)
-        pure text
+debugText s =
+  withContext $ \ctx ->
+    askHostIO ctx >>= \case
+      Just (CachedDebugText previous cached) | previous == s -> pure cached
+      _ -> text <$ setHost ctx (CachedDebugText s text)
+  where
+    c = dbgCore s
+    haskellMs = dbgUiMs c + dbgRenderMs c
+    text =
+      DebugText
+        { dtFps =
+            if dbgPresentFps c > 0
+              then T.pack (printf "%4.0f FPS / %5.2f ms" (dbgPresentFps c) (dbgFrameMs c))
+              else ""
+        , dtSummary =
+            [ ("Present FPS", T.pack (printf "%.1f fps" (dbgPresentFps c)))
+            , ("Display", T.pack (printf "%d Hz" (dbgRefreshHz s)))
+            , ("Loop FPS", T.pack (printf "%.1f fps" (dbgLoopFps c)))
+            , ("Frame Time", T.pack (printf "%.2f ms" (dbgFrameMs c)))
+            , ("Haskell Time", T.pack (printf "%.2f ms (UI: %.2f, Render: %.2f)" haskellMs (dbgUiMs c) (dbgRenderMs c)))
+            , ("SDL Present", T.pack (printf "%.2f ms" (dbgPresentMs c)))
+            , ("Draw Calls", T.pack (show (dbgCmds c)))
+            , ("Vertices / Indices", T.pack (printf "%d / %d" (dbgVerts c) (dbgIndices c)))
+            , ("Renderer", dbgRenderer s <> if dbgVsync s then " (vsync on)" else " (vsync off)")
+            ]
+        , dtFrame =
+            [ ("present", T.pack (printf "%6.1f fps" (dbgPresentFps c)))
+            , ("loop", T.pack (printf "%6.1f fps" (dbgLoopFps c)))
+            , ("frame cpu", T.pack (printf "%7.2f ms" (dbgFrameMs c)))
+            , ("haskell", T.pack (printf "%7.2f ms" haskellMs))
+            , ("  ui", T.pack (printf "%7.2f ms" (dbgUiMs c)))
+            , ("  render", T.pack (printf "%7.2f ms" (dbgRenderMs c)))
+            , ("sdl present", T.pack (printf "%7.2f ms" (dbgPresentMs c)))
+            , ("draws", T.pack (printf "%10d" (dbgPresents c)))
+            , ("skips", T.pack (printf "%10d" (dbgSkips c)))
+            ]
+        , dtDraw =
+            [ ("verts", T.pack (printf "%10d" (dbgVerts c)))
+            , ("indices", T.pack (printf "%10d" (dbgIndices c)))
+            , ("cmds", T.pack (printf "%10d" (dbgCmds c)))
+            ]
+        , dtDisplay =
+            [ ("window", T.pack (printf "%4.0fx%-5.0f" (dbgWinW c) (dbgWinH c)))
+            , ("scale", T.pack (printf "%10.2f" (dbgScale s)))
+            , ("mouse", T.pack (printf "%4.0f, %-4.0f" (dbgMouseX c) (dbgMouseY c)))
+            , ("renderer", dbgRenderer s <> if dbgVsync s then "  vsync on" else "  vsync off")
+            , ("font", T.pack (dbgFontPath s))
+            ]
+        , dtRuntime = dbgRts c
+        }
 
 debugBody :: DebugText -> NanoUI ()
 debugBody text =
-  columnWith (tight . gap 4 . minW 300 . fillW) $ do
-    debugSection "Frame" (dtFrame text)
-    separator
-    debugSection "Draw" (dtDraw text)
-    separator
-    debugSection "Display" (dtDisplay text)
-    separator
-    debugSection "Runtime" (dtRuntime text)
-
-debugSection :: T.Text -> DebugRows -> NanoUI ()
-debugSection title rows = do
-  heading title
-  mapM_ (\(k, v) -> kvMono k v) rows
-
-summaryRows :: SdlDebugSnapshot -> DebugRows
-summaryRows s =
-  let c = dbgCore s
-      haskellMs = dbgUiMs c + dbgRenderMs c
-   in smallArrayFromList
-        [ ("Present FPS", T.pack (printf "%.1f fps" (dbgPresentFps c)))
-        , ("Display", T.pack (printf "%d Hz" (dbgRefreshHz s)))
-        , ("Loop FPS", T.pack (printf "%.1f fps" (dbgLoopFps c)))
-        , ("Frame Time", T.pack (printf "%.2f ms" (dbgFrameMs c)))
-        , ("Haskell Time", T.pack (printf "%.2f ms (UI: %.2f, Render: %.2f)" haskellMs (dbgUiMs c) (dbgRenderMs c)))
-        , ("SDL Present", T.pack (printf "%.2f ms" (dbgPresentMs c)))
-        , ("Draw Calls", T.pack (show (dbgCmds c)))
-        , ("Vertices / Indices", T.pack (printf "%d / %d" (dbgVerts c) (dbgIndices c)))
-        , ("Renderer", dbgRenderer s <> if dbgVsync s then " (vsync on)" else " (vsync off)")
-        ]
-
-frameRows :: SdlDebugSnapshot -> DebugRows
-frameRows s =
-  let c = dbgCore s
-      haskellMs = dbgUiMs c + dbgRenderMs c
-   in smallArrayFromList
-        [ ("present", T.pack (printf "%6.1f fps" (dbgPresentFps c)))
-        , ("loop", T.pack (printf "%6.1f fps" (dbgLoopFps c)))
-        , ("frame cpu", T.pack (printf "%7.2f ms" (dbgFrameMs c)))
-        , ("haskell", T.pack (printf "%7.2f ms" haskellMs))
-        , ("  ui", T.pack (printf "%7.2f ms" (dbgUiMs c)))
-        , ("  render", T.pack (printf "%7.2f ms" (dbgRenderMs c)))
-        , ("sdl present", T.pack (printf "%7.2f ms" (dbgPresentMs c)))
-        , ("draws", T.pack (printf "%10d" (dbgPresents c)))
-        , ("skips", T.pack (printf "%10d" (dbgSkips c)))
-        ]
-
-drawRows :: SdlDebugSnapshot -> DebugRows
-drawRows s =
-  let c = dbgCore s
-   in smallArrayFromList
-        [ ("verts", T.pack (printf "%10d" (dbgVerts c)))
-        , ("indices", T.pack (printf "%10d" (dbgIndices c)))
-        , ("cmds", T.pack (printf "%10d" (dbgCmds c)))
-        ]
-
-displayRows :: SdlDebugSnapshot -> DebugRows
-displayRows s =
-  let c = dbgCore s
-   in smallArrayFromList
-        [ ("window", T.pack (printf "%4.0fx%-5.0f" (dbgWinW c) (dbgWinH c)))
-        , ("scale", T.pack (printf "%10.2f" (dbgScale s)))
-        , ("mouse", T.pack (printf "%4.0f, %-4.0f" (dbgMouseX c) (dbgMouseY c)))
-        , ( "renderer"
-          , dbgRenderer s <> if dbgVsync s then "  vsync on" else "  vsync off"
-          )
-        , ("font", T.pack (dbgFontPath s))
-        ]
+  columnWith (tight . gap 4 . minW 300 . fillW) . sequence_ . intersperse separator $
+    [ heading title >> mapM_ (uncurry kvMono) (rows text)
+    | (title, rows) <- [("Frame", dtFrame), ("Draw", dtDraw), ("Display", dtDisplay), ("Runtime", dtRuntime)]
+    ]
 
 ------------------------------------------------------------------------------
 -- §10  CLI plumbing

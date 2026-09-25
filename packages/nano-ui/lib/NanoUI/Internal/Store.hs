@@ -320,8 +320,6 @@ data Slot
   | SlotWinSize
   | SlotMenuOpen
   | SlotMenuPos
-  | SlotScrollCfg
-  | SlotScrollOff
   | SlotScrollCross
   | SlotScrollLinkX
   | SlotScrollLinkY

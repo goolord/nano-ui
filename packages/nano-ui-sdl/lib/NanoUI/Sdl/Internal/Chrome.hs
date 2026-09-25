@@ -202,10 +202,6 @@ foreign import ccall "wrapper"
 -- the window rather than reaching whatever is drawn there. That is the
 -- bargain a window with its own chrome makes, and the reason
 -- 'NanoUI.captionBarHeight' leaves room for it.
---
--- What is draggable is the title bar as far as the desktop is concerned, so
--- a drag region also snaps the window to the sides of the screen, maximizes
--- it on a double click, and hangs the window menu off the right button.
 hitTest :: ChromeState -> HitTestCallback
 hitTest st win area _ = do
   x <- fromIntegral <$> peekElemOff area 0
@@ -273,17 +269,10 @@ data CaptionOptions = CaptionOptions
   -- ^ How the three buttons are drawn.
   , capResizeBorder :: !Float
   -- ^ How far in from the left, right and bottom edges takes hold of one to
-  -- resize the window. A window given the desktop's frame
-  -- ('DecorationsFrame') has the frame's width outside those three to take
-  -- hold of as well, so a reach as deep as the border the window draws is
-  -- enough; one without has only what is inside, and an edge that reaches no
-  -- further in than a hairline is an edge that has to be aimed at. Zero
-  -- leaves those three to the frame, if the window has one.
+  -- resize the window ('chromeResizeBorder'). Zero leaves those three to the
+  -- desktop's frame, if the window has one.
   , capResizeTop :: !Float
-  -- ^ How far in from the top edge does. The top is on its own: the frame
-  -- does not cover it, whether or not the window has one, so this is all the
-  -- top edge ever has. With this and 'capResizeBorder' both zero the window
-  -- has no edges at all, the frame's included.
+  -- ^ How far in from the top edge does ('chromeResizeTop').
   }
 
 -- | 'defaultCaptionConfig' buttons and 'defaultResizeBorder' edges.

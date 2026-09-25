@@ -18,7 +18,6 @@ module NanoUI.Rgfw.Internal.Gl
   , freeGlRenderer
   , renderArenaGl
   , readRetainedPixels
-  , damageBox
   , GlyphAtlas (..)
   , glyphAtlasFor
   , atlasCell
@@ -26,7 +25,6 @@ module NanoUI.Rgfw.Internal.Gl
   , writeSpanQuads
   , toPhysRect
   , physClip
-  , physClipIn
   ) where
 
 import Control.Exception (bracket)

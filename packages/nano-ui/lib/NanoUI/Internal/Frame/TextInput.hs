@@ -34,7 +34,7 @@ import NanoUI.Internal.Frame.Node (nodeAdornmentInsets, nodeFontMetrics)
 import NanoUI.Internal.Frame.Scroll.Geometry (padTextClipRect)
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Input
-import NanoUI.Internal.Layout.Arena (NodeIdx, getOptions, getRect, getStyleIdx, getWidgetId)
+import NanoUI.Internal.Layout.Arena (NodeIdx, getOptions, getNodeRect, getStyleIdx, getWidgetId)
 import NanoUI.Internal.Monad (ifM, unlessM, (<&&>))
 import NanoUI.Internal.Store (fieldFloat, fieldSelection, fieldSelectionWrite, fieldText, findSlot, insertSlot, setFieldSelection)
 import NanoUI.Internal.Style (themeSelection)
@@ -86,7 +86,7 @@ searchClearHit ctx wid mouse = do
     pure (hasFlag textInputFlagSearch si && null opts)
       <&&> (not . T.null <$> textInputValue ctx idx)
       <&&> do
-        (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+        Rect x y w h <- getNodeRect (ctxNodeArena ctx) idx
         let (_, clearRect) = searchInputIconRects (ctxFontMetrics ctx) x y w h
         pure (rectContains clearRect mouse)
 
@@ -262,7 +262,7 @@ dragSelection buf anchor@(TB.Cursor ar ac) pos@(TB.Cursor r c) clicks
 -- field (@onControl@) is the control's, and leaves the caret alone.
 textInputMouse :: Context -> Input -> Bool -> WidgetId -> NodeIdx -> IO ()
 textInputMouse ctx inp onControl wid idx = do
-  (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+  Rect x y w h <- getNodeRect (ctxNodeArena ctx) idx
   (box, Rect clipX _ _ _) <- nodeTextFieldGeom ctx idx x y w h
   scrollX <- syncTextInputScroll ctx idx x y w h
   let mouse@(V2 mouseX _) = inputMousePos inp

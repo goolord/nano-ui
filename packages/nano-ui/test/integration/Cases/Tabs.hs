@@ -6,7 +6,7 @@ import Data.Text qualified as T
 import Data.Sequence qualified as Seq
 import NanoUI.Internal.Context (Context (..))
 import NanoUI.Emit qualified as Emit
-import NanoUI.Internal.Layout.Arena (arenaCount, findNodeM, getRect, getText, getWidgetId)
+import NanoUI.Internal.Layout.Arena (arenaCount, findNodeM, getNodeRect, getText, getWidgetId)
 
 tests :: [Spec]
 tests =
@@ -25,11 +25,6 @@ tests =
 data DummyTab = TabA | TabB | TabC
   deriving (Eq, Show)
 
-fullWindowRect :: Input -> Rect
-fullWindowRect inp =
-  let Size w h = inputWindowSize inp
-   in Rect 0 0 w h
-
 -- Content replacement inside a floating window must repaint every pixel of
 -- the new body: a clip that skipped any incoming row would leave the pane
 -- rendering stale pixels from the previous body ("ghosting"). The stable
@@ -46,15 +41,10 @@ runPanelBodySwapDamageTest ctx failed = do
   _ <- runFrame ctx inp0 uiB
   dmg <- takeDamage ctx
   assert failed (not (damageIsEmpty dmg))
-  let dmgR = case dmg of
-        DamageFull -> fullWindowRect inp0
-        DamageClip r -> r
-      Rect ddx ddy ddw ddh = dmgR
   spans <- collectOverlayTextSpans ctx inp0
-  let rows = [(r, t) | (r, t, _, _, _) <- spans, "row line" `T.isInfixOf` t]
+  let rows = [r | (r, t, _, _, _) <- spans, "row line" `T.isInfixOf` t]
   assert failed (length rows == 5)
-  forM_ rows $ \(Rect rx ry rw rh, _) -> do
-    assert failed (rx >= ddx && ry >= ddy && rx + rw <= ddx + ddw && ry + rh <= ddy + ddh)
+  forM_ rows $ \r -> assert failed (damageCovers dmg r)
 
 runTabsLazinessTest :: Context -> IORef Int -> IO ()
 runTabsLazinessTest ctx failed = do
@@ -68,12 +58,7 @@ runTabsLazinessTest ctx failed = do
         , tab TabC "C" (uiIO (modifyIORef' evalCountC (+ 1)) >> label "Body C")
         ]
   _ <- runFrame ctx inp ui
-  cntA <- readIORef evalCountA
-  cntB <- readIORef evalCountB
-  cntC <- readIORef evalCountC
-  assertEq failed cntA 0
-  assertEq failed cntB 1
-  assertEq failed cntC 0
+  assertEq failed [0, 1, 0] =<< mapM readIORef [evalCountA, evalCountB, evalCountC]
 
 data TabMsg = MsgSelect DummyTab | MsgClose DummyTab
   deriving (Eq, Show)
@@ -96,8 +81,7 @@ runTabsEmitTest ctx failed = do
   _ <- runFrame ctx inp0 (ui TabA)
   spans <- collectTextSpans ctx
   assertJust failed (spanRect "Beta" spans) $ \r -> do
-    let
-      (press, release) = clickPair inp0 (spanCenter r)
+    let (press, release) = clickPair inp0 (spanCenter r)
     _ <- runFrame ctx press (ui TabA)
     (_, msgs, _, _) <- runFrame ctx release (ui TabA)
     assertEq failed (decodeMessages msgs :: [TabMsg]) [MsgSelect TabB]
@@ -128,9 +112,7 @@ findCloseButtonRect :: Context -> IO (Maybe Rect)
 findCloseButtonRect ctx = do
   let na = ctxNodeArena ctx
   found <- findNodeM na (fmap ("\215" `T.isInfixOf`) . getText na)
-  forM found $ \i -> do
-    (x, y, w, h) <- getRect na i
-    pure (Rect x y w h)
+  traverse (getNodeRect na) found
 
 -- The public disabled flag covers both the header and its close control,
 -- including retained keyboard focus when an enabled tab becomes disabled.
@@ -221,9 +203,6 @@ runTabsDamageTest ctx failed = do
         [ tab TabA "Alpha" (label "Body A with some text")
         , tab TabB "Beta" (label "Body B different widgets")
         ]
-      repaints dmg (Rect rx ry rw rh) = case dmg of
-        DamageFull -> True
-        DamageClip (Rect dx dy dw dh) -> rx >= dx && ry >= dy && rx + rw <= dx + dw && ry + rh <= dy + dh
   _ <- runFrame ctx inp0 (ui TabA)
   _ <- takeDamage ctx
   _ <- runFrame ctx inp0 (ui TabA)
@@ -234,22 +213,20 @@ runTabsDamageTest ctx failed = do
 
   spans <- collectTextSpans ctx
   assertJust failed (spanRect "Beta" spans) $ \beta -> do
-    let (press, release) = clickPair inp0 (spanCenter beta)
-    _ <- runFrame ctx press (ui TabA)
-    (resp, _, _, _) <- runFrame ctx release (ui TabA)
+    resp <- runClick ctx inp0 (ui TabA) (spanCenter beta)
     assert failed (respChanged resp && tabActive resp == TabB)
     spansSwitch <- collectTextSpans ctx
     assertSpansHas failed "Body B" spansSwitch
     assert failed (not (hasText "Body A" spansSwitch))
     let bodyB = [r | (r, txt, _, _, _) <- spansSwitch, "Body B" `T.isInfixOf` txt]
     dSwitch <- takeDamage ctx
-    assert failed (not (null bodyB) && all (repaints dSwitch) bodyB)
+    assert failed (not (null bodyB) && all (damageCovers dSwitch) bodyB)
 
     -- The switch asks for the frame that shows the caller's new tab, which
     -- repaints it whole: the new body may differ from the old in paint alone.
     _ <- runFrame ctx inp0 (ui TabB)
     dTabB <- takeDamage ctx
-    assert failed (all (repaints dTabB) bodyB)
+    assert failed (all (damageCovers dTabB) bodyB)
 
     _ <- runFrame ctx inp0 (ui TabB)
     dSettled <- takeDamage ctx

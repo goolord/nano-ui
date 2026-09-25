@@ -63,6 +63,7 @@ gradientQuadProbe vp ip offset x base =
     (x, 0, 0, 1) (0, x, 0, 1) (0, 0, x, 1) (x, x, x, 1) base
 
 inspect $ 'solidQuadProbe `doesNotUse` 'SIMD.pokeQuadSIMD
+inspect $ 'solidQuadProbe `doesNotUse` 'SIMD.pokeQuadCornersSIMD
 inspect $ 'solidQuadProbe `doesNotUse` 'SIMD.pokeVertexSIMD
 inspect $ hasNoTypeClasses 'solidQuadProbe
 inspect $ 'solidQuadProbe `hasNoType` ''[]

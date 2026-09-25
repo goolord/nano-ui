@@ -43,6 +43,7 @@ import NanoUI.Plot.Chrome
   , seriesPoints
   )
 import NanoUI.Plot.Decimate (lttb, minMaxDecimate)
+import NanoUI.Plot.Builder qualified as Builder
 import NanoUI.Plot.Hit (nearestPlotHover)
 import NanoUI.Plot.Scale (formatTick, mergeDomains, niceTicks)
 import NanoUI.Plot.Series
@@ -98,16 +99,7 @@ main = hspec $ do
 
 -- | A chart of the given series with no legend, grid or decimation.
 bareChart :: [Series] -> Chart
-bareChart ss =
-  Chart
-    { chartTitle = Nothing
-    , chartXTitle = Nothing
-    , chartYTitle = Nothing
-    , chartSeries = ss
-    , chartLegend = LegendNone
-    , chartGrid = GridNone
-    , chartDecimate = False
-    }
+bareChart ss = (Builder.chart ss) {chartLegend = LegendNone, chartGrid = GridNone, chartDecimate = False}
 
 chartDia :: FontMetrics -> Chart -> Diagram B
 chartDia fm c = chartDiagram fm defaultTheme defaultPlotStyle (seriesDomains c) (map (seriesPoints c) (chartSeries c)) c
@@ -154,16 +146,10 @@ testChartCache = do
 
 testRendering :: Context -> Input -> IO ()
 testRendering ctx inp = do
-  let
-    ok d = drawIndexCount d > 0 && not (drawCmdNull d)
-  (_, _, filled, _) <-
-    runFrame ctx inp $
-      diagram (fixedWH 200 80) (circle 1 # fc coral # lw none)
-  check "diagram produced no draw commands" (ok filled)
-  (_, _, filledAgain, _) <-
-    runFrame ctx inp $
-      diagram (fixedWH 200 80) (circle 1 # fc coral # lw none)
-  check "cached diagram produced no draw commands" (ok filledAgain)
+  -- The second frame draws from the cache.
+  forM_ ["diagram", "cached diagram"] $ \what -> do
+    (_, _, dd, _) <- runFrame ctx inp (diagram (fixedWH 200 80) (circle 1 # fc coral # lw none))
+    check (what <> " produced no draw commands") (drawIndexCount dd > 0 && not (drawCmdNull dd))
 
 linePlotDiag :: FontMetrics -> [(Double, Double)] -> Diagram B
 linePlotDiag fm pts =
@@ -324,36 +310,22 @@ testLabelFit fm = do
     botOps = diagramOps 400 240 (chartDia fm botChart)
     tickText t =
       T.all (\c -> c == '-' || c == '.' || c >= '0' && c <= '9') t && not (T.null t)
-    overlapTitleTick chart w h drawOps =
+    -- Whether a label that @picks@ overlaps a tick label.
+    overlapsTicks picks drawOps =
       let
-        ts =
-          [(drawTextBox fm x y ax ay t, t) | DrawText x y ax ay t _ <- toList drawOps]
-        titles =
-          [ b
-          | (b@(Rect bx by _ _), t) <- ts
-          , (chartXTitle chart == Just t && by < h * 0.45)
-              || (chartYTitle chart == Just t && bx < w * 0.4)
-          ]
-        ticks = [b | (b, t) <- ts, tickText t]
+        ts = [(drawTextBox fm x y ax ay t, t) | DrawText x y ax ay t _ <- toList drawOps]
        in
-        or [rectsOverlap a b | a <- titles, b <- ticks]
-    overlapLegendTick chart w h drawOps =
-      let
-        names = map seriesName (chartSeries chart)
-        ts =
-          [(drawTextBox fm x y ax ay t, t) | DrawText x y ax ay t _ <- toList drawOps]
-        legends =
-          [ b
-          | (b@(Rect bx by _ _), t) <- ts
-          , t `elem` names
-          , case chartLegend chart of
-              LegendRight -> bx > w * 0.55
-              LegendBottom -> by < h * 0.45
-              _ -> False
-          ]
-        ticks = [b | (b, t) <- ts, tickText t]
-       in
-        or [rectsOverlap a b | a <- legends, b <- ticks]
+        or [rectsOverlap a b | (a, t) <- ts, picks a t, (b, t') <- ts, tickText t']
+    overlapTitleTick c w h =
+      overlapsTicks $ \(Rect bx by _ _) t ->
+        (chartXTitle c == Just t && by < h * 0.45) || (chartYTitle c == Just t && bx < w * 0.4)
+    overlapLegendTick c w h =
+      overlapsTicks $ \(Rect bx by _ _) t ->
+        t `elem` map seriesName (chartSeries c)
+          && case chartLegend c of
+            LegendRight -> bx > w * 0.55
+            LegendBottom -> by < h * 0.45
+            _ -> False
   check "axis titles overlap ticks" (not (overlapTitleTick sleepChart 400 240 legendOps))
   check "legend overlaps ticks" (not (overlapLegendTick sleepChart 400 240 legendOps))
   check "axis titles overlap ticks on a small plot" (not (overlapTitleTick sleepChart 220 150 tightOps))

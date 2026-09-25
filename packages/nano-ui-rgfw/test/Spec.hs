@@ -2,75 +2,58 @@ module Main (main) where
 
 import Control.Exception (IOException, bracket, try)
 import Control.Monad (forM_)
-import Data.Bits ((.&.))
-import System.Exit (exitFailure)
-
+import Data.Either (isLeft)
 import Data.Vector.Unboxed qualified as U
-import NanoUI.Internal.Layout.Arena
-  ( NodeType (..)
-  , arenaCount
-  , getNodeType
-  , getRect
-  )
-import NanoUI
-  ( DrawOp (..)
-  , Rect (..)
-  , Size (..)
-  , V2 (..)
-  , box
-  , button
-  , checkbox
-  , colorRGBA
-  , column
-  , drawing
-  , fixedWH
-  , grow
-  , label
-  , Style (..)
-  , Theme (..)
-  , tomorrowNightMinDarkTheme
-  , window
-  )
+import Data.Word (Word32)
 import Foreign.Marshal.Alloc (allocaBytes, callocBytes, free)
 import Foreign.Storable (peekByteOff, peekElemOff)
+import NanoUI
+  ( DrawOp (..), NanoUI, Rect (..), Style (..), Theme (..)
+  , V2 (..), box, button, checkbox, colorRGBA, column, drawing
+  , fixedWH, grow, label, tomorrowNightMinDarkTheme, window
+  )
 import NanoUI.Input (Input (..), Modifiers (..), emptyInput)
 import NanoUI.Internal.Context (Context (..), setDrawSquareGeometry)
-import NanoUI.Testing
-  ( DrawCmd (..)
-  , DrawData (..)
-  , collectRasterSpans
-  , newPixelContext
-  , runFrame
-  )
-import NanoUI.Rgfw.Internal.Font.Cozette
-  ( CozetteFont (..)
-  , charToGlyphId
-  , cozetteGlyphBit
-  , getCozetteFont
-  , renderGlyphScaledToBuffer
-  )
+import NanoUI.Internal.Layout.Arena (NodeType (..), arenaCount, getNodeRect, getNodeType)
 import NanoUI.Rgfw.Internal.Context (newRgfwContext)
+import NanoUI.Rgfw.Internal.Font.Cozette (CozetteFont (..), charToGlyphId, cozetteGlyphBit, getCozetteFont, renderGlyphScaledToBuffer)
 import NanoUI.Rgfw.Internal.Gl (GlyphAtlas (..), atlasCell, bakeGlyphAtlas, glyphAtlasFor, toPhysRect, writeSpanQuads)
-import NanoUI.Rgfw.Render (renderArena)
 import NanoUI.Rgfw.Internal.Session (applyRgfwEvent, decodeRgfwEvents)
+import NanoUI.Rgfw.Render (renderArena)
+import NanoUI.Rgfw.Surface (clearScreen, fillRect, freeRgfwSurface, newOffscreenRgfwSurface, packColor, sBuffer, sHeight, sWidth)
+import NanoUI.Testing (DrawCmd (..), DrawData (..), collectRasterSpans, newPixelContext, runFrame)
+import NanoUI.Testing.Assert (run2Frames, withInput)
+import NanoUI.Testing.Harness (DemoSpan, withInputOff)
 import RGFW (Event (..))
-import NanoUI.Rgfw.Surface
-  ( clearScreen
-  , fillRect
-  , freeRgfwSurface
-  , newOffscreenRgfwSurface
-  , packColor
-  , sBuffer
-  , sWidth
-  , sHeight
-  )
-import qualified RGFW.Raw as R
+import RGFW.Raw qualified as R
+import System.Exit (exitFailure)
 
 assert :: String -> Bool -> IO ()
-assert name True  = putStrLn ("[PASS] " ++ name)
-assert name False = do
-  putStrLn ("[FAIL] " ++ name)
-  exitFailure
+assert name True = putStrLn ("[PASS] " ++ name)
+assert name False = putStrLn ("[FAIL] " ++ name) >> exitFailure
+
+-- | Draw a view's second frame, with the pointer off the window, onto a
+-- software surface of the window's size cleared to @bg@; then look at it.
+raster :: Context -> Int -> Int -> Word32 -> NanoUI a -> (a -> ([DemoSpan], [DemoSpan]) -> (Int -> Int -> IO Word32) -> IO b) -> IO b
+raster ctx w h bg ui k = do
+  let inp = withInputOff (fromIntegral w) (fromIntegral h)
+  (a, _, draw, _) <- run2Frames ctx inp ui
+  (base, overlay) <- collectRasterSpans ctx inp
+  bracket (newOffscreenRgfwSurface w h) freeRgfwSurface $ \surf -> do
+    clearScreen surf bg
+    renderArena surf getCozetteFont 1 draw base overlay
+    k a (base, overlay) (\x y -> peekElemOff (sBuffer surf) (y * w + x))
+
+-- | The rects of the frame's layout nodes of a type, in arena order.
+nodesOf :: NodeType -> Context -> IO [Rect]
+nodesOf t ctx = do
+  let na = ctxNodeArena ctx
+  n <- arenaCount na
+  map snd . filter ((== t) . fst) <$> mapM (\i -> (,) <$> getNodeType na i <*> getNodeRect na i) [0 .. n - 1]
+
+-- | The input a batch of RGFW events adds up to.
+applied :: [Event] -> Input
+applied = foldl' applyRgfwEvent emptyInput . decodeRgfwEvents 1
 
 testPackColor :: IO ()
 testPackColor =
@@ -85,11 +68,8 @@ testSurfaceAllocation = do
     assert "Minimum surface buffer can be cleared" (pixel == 0x12345678)
   -- This product wraps to zero on machine Int arithmetic. Reject it before
   -- allocating a tiny buffer for what claims to be a huge surface.
-  oversized <- try (bracket
-    (newOffscreenRgfwSurface (maxBound `div` 2 + 1) 2)
-    freeRgfwSurface
-    (const (pure ()))) :: IO (Either IOException ())
-  assert "Surface dimensions cannot overflow the buffer allocation" (either (const True) (const False) oversized)
+  oversized <- try (bracket (newOffscreenRgfwSurface (maxBound `div` 2 + 1) 2) freeRgfwSurface (const (pure ())))
+  assert "Surface dimensions cannot overflow the buffer allocation" (isLeft (oversized :: Either IOException ()))
   -- Odd row strides and short spans exercise the shared fill kernel's aligned
   -- pairs and scalar tails. Clearing must cover the entire buffer exactly.
   forM_ [1 .. 19] $ \w ->
@@ -97,112 +77,58 @@ testSurfaceAllocation = do
       clearScreen surface 0x12345678
       fillRect surface 1 1 (max 0 (w - 2)) 1 0xABCDEF01
       pixels <- mapM (peekElemOff (sBuffer surface)) [0 .. w * 3 - 1]
-      let expected =
-            [ if y == 1 && x >= 1 && x < w - 1 then 0xABCDEF01 else 0x12345678
-            | y <- [0 .. 2 :: Int], x <- [0 .. w - 1]
-            ]
+      let expected = [if y == 1 && x >= 1 && x < w - 1 then 0xABCDEF01 else 0x12345678 | y <- [0 .. 2 :: Int], x <- [0 .. w - 1]]
       assert ("Shared pixel fill handles stride " ++ show w) (pixels == expected)
 
--- | Reference EPX (Scale2x). Given width W, height H and a pixel query
--- (col -> row -> Bool), returns the query for the 2W x 2H result.
-scale2x :: Int -> Int -> (Int -> Int -> Bool) -> (Int -> Int -> Bool)
-scale2x !w !h getPixel = \ !c2 !r2 ->
-  if c2 < 0 || c2 >= w * 2 || r2 < 0 || r2 >= h * 2
-    then False
-    else
-      let !c = c2 `div` 2
-          !r = r2 `div` 2
-          at x y = x >= 0 && x < w && y >= 0 && y < h && getPixel x y
-          above = at c (r - 1)
-          left = at (c - 1) r
-          e = getPixel c r
-          right = at (c + 1) r
-          below = at c (r + 1)
-          (tl, tr, bl, br)
-            | above /= below && left /= right =
-                ( if left == above then left else e
-                , if above == right then right else e
-                , if left == below then left else e
-                , if below == right then right else e
-                )
-            | otherwise = (e, e, e, e)
-       in case (c2 .&. 1, r2 .&. 1) of
-            (0, 0) -> tl
-            (1, 0) -> tr
-            (0, 1) -> bl
-            _ -> br
+-- | Reference EPX (Scale2x): given width W, height H and a pixel query
+-- (col -> row -> Bool), the query for the 2W x 2H result. Where a pixel's
+-- opposite neighbours differ both ways, a quarter takes the value its nearer
+-- vertical and horizontal neighbours share; otherwise it is the pixel's.
+scale2x :: Int -> Int -> (Int -> Int -> Bool) -> Int -> Int -> Bool
+scale2x w h get c2 r2
+  | c2 < 0 || c2 >= w * 2 || r2 < 0 || r2 >= h * 2 = False
+  | above /= below && left /= right && vertical == horizontal = vertical
+  | otherwise = get c r
+  where
+    (c, r) = (c2 `div` 2, r2 `div` 2)
+    at x y = x >= 0 && x < w && y >= 0 && y < h && get x y
+    (above, below, left, right) = (at c (r - 1), at c (r + 1), at (c - 1) r, at (c + 1) r)
+    vertical = if even r2 then above else below
+    horizontal = if even c2 then left else right
 
+-- | The 14x26 table is Scale2x of the 7x13 glyphs, and the 28x52 one Scale2x
+-- of the 14x26 table.
 testScale2xGlyphTables :: IO ()
-testScale2xGlyphTables = do
-  let font = getCozetteFont
-      testGlyphs = [1, 2, 34, 36, 65, 95]
-  forM_ testGlyphs $ \gid -> do
-    let expectedBit2x = scale2x 7 13 (cozetteGlyphBit font 1 gid)
-        matches2x = and [ cozetteGlyphBit font 2 gid x y == expectedBit2x x y
-                        | y <- [0 .. 25]
-                        , x <- [0 .. 13]
-                        ]
-    assert ("Scale2x 14x26 precomputed table matches pure scale2x for glyph " ++ show gid) matches2x
-
-  forM_ testGlyphs $ \gid -> do
-    let expectedBit4x = scale2x 14 26 (cozetteGlyphBit font 2 gid)
-        matches4x = and [ cozetteGlyphBit font 4 gid x y == expectedBit4x x y
-                        | y <- [0 .. 51]
-                        , x <- [0 .. 27]
-                        ]
-    assert ("Scale4x 28x52 precomputed table matches double scale2x for glyph " ++ show gid) matches4x
+testScale2xGlyphTables =
+  forM_ [(2, 1, 7, 13), (4, 2, 14, 26)] $ \(scale, from, w, h) -> forM_ [1, 2, 34, 36, 65, 95] $ \gid ->
+    assert ("Scale" ++ show scale ++ "x precomputed table matches scale2x for glyph " ++ show gid) $
+      and [cozetteGlyphBit font scale gid x y == scale2x w h (cozetteGlyphBit font from gid) x y | y <- [0 .. 2 * h - 1], x <- [0 .. 2 * w - 1]]
+  where
+    font = getCozetteFont
 
 testFractionalDpiCalculations :: IO ()
 testFractionalDpiCalculations = do
-  let (px0, py0, pw0, ph0) = toPhysRect 1.5 0 0 100 50
-  assert "toPhysRect 1.5x at origin" (px0 == 0 && py0 == 0 && pw0 == 150 && ph0 == 75)
-
-  let scale = 1.33 :: Float
-      (w1_x0, _, w1_w, _) = toPhysRect scale 0 0 63.7 30
-      (w2_x0, _, _, _) = toPhysRect scale 63.7 0 63.7 30
+  assert "toPhysRect 1.5x at origin" (toPhysRect 1.5 0 0 100 50 == (0, 0, 150, 75))
+  let (w1_x0, _, w1_w, _) = toPhysRect 1.33 0 0 63.7 30
+      (w2_x0, _, _, _) = toPhysRect 1.33 63.7 0 63.7 30
   assert "Adjacent widgets at fractional scale have zero gap/overlap" (w1_x0 + w1_w == w2_x0)
 
+-- | A floating window, which placeFloatingNodes pins to the top-right
+-- corner, paints over in-flow content: probe its title bar centre and a
+-- bottom-left box pixel far from it.
 testZOrderRenderArena :: IO ()
 testZOrderRenderArena = do
   ctx <- newPixelContext
-  let inp = emptyInput {inputWindowSize = Size 100 100}
-      boxCol = colorRGBA 0x11 0x22 0x33 255
-      ui = do
-        box grow boxCol
-        window True "Z" (label "hi")
-  (_, _, draw, _) <- runFrame ctx inp ui
-  (baseSpans, overlaySpans) <- collectRasterSpans ctx inp
-
-  surf <- newOffscreenRgfwSurface 100 100
-  clearScreen surf 0
-  renderArena surf (getCozetteFont) 1.0 draw baseSpans overlaySpans
-
-  -- placeFloatingNodes pins floating windows to the top-right corner; probe its
-  -- title bar center and a bottom-left box pixel far from the window.
-  let na = ctxNodeArena ctx
-  nNodes <- arenaCount na
-  let findWindow !i
-        | i >= nNodes = pure Nothing
-        | otherwise = do
-            nt <- getNodeType na i
-            if nt == NodeWindow
-              then do
-                (x, y, w, h) <- getRect na i
-                pure (Just (x, y, w, h))
-              else findWindow (i + 1)
-  mWin <- findWindow 0
-  assert "Overlay text spans collected for floating window chrome" (not (null overlaySpans))
-  case mWin of
-    Nothing -> assert "Floating window node present in arena" False
-    Just (wx, wy, ww, _wh) -> do
-      let !winProbeX = round (wx + ww / 2)
-          !winProbeY = round wy + 4
-      cWin <- peekElemOff (sBuffer surf) (winProbeY * 100 + winProbeX)
-      assert "Window paints above in-flow content" (cWin /= 0 && cWin /= packColor boxCol)
-      cBox <- peekElemOff (sBuffer surf) (95 * 100 + 5)
-      assert "In-flow box painted beneath the window layer" (cBox == packColor boxCol)
-
-  freeRgfwSurface surf
+  let boxCol = colorRGBA 0x11 0x22 0x33 255
+  raster ctx 100 100 0 (box grow boxCol >> window True "Z" (label "hi")) $ \_ (_, overlay) px -> do
+    assert "Overlay text spans collected for floating window chrome" (not (null overlay))
+    nodesOf NodeWindow ctx >>= \case
+      Rect wx wy ww _ : _ -> do
+        cWin <- px (round (wx + ww / 2)) (round wy + 4)
+        assert "Window paints above in-flow content" (cWin /= 0 && cWin /= packColor boxCol)
+      [] -> assert "Floating window node present in arena" False
+    cBox <- px 5 95
+    assert "In-flow box painted beneath the window layer" (cBox == packColor boxCol)
 
 -- Check coverage and clipping pixel-for-pixel, including empty iteration
 -- bounds and reversed winding in the numeric raster loops. Square geometry
@@ -211,43 +137,27 @@ testZOrderRenderArena = do
 testTriangleRaster :: IO ()
 testTriangleRaster =
   bracket (newOffscreenRgfwSurface 8 8) freeRgfwSurface $ \surf -> do
-    let
-      full = Rect 0 0 8 8
-      clipped = Rect 2 0 3 4
-      triangle = (1, 1, 5, 1, 1, 5)
-      reversed = (1, 5, 5, 1, 1, 1)
-      inside x y = x >= 1 && y >= 1 && x + y <= 5
-      red = packColor (colorRGBA 255 0 0 255)
-      cases =
-        [ ("normal", full, triangle, inside)
-        , ("reversed", full, reversed, inside)
-        , ("clipped", clipped, triangle, \x y -> inside x y && x >= 2 && x < 5 && y < 4)
-        , ("outside", Rect 6 6 2 2, triangle, \_ _ -> False)
-        , ("empty clip", Rect 0 0 0 0, triangle, \_ _ -> False)
-        , ("degenerate", full, (1, 1, 3, 3, 5, 5), \_ _ -> False)
-        ]
-    forM_ cases $ \(name, clip, (ax, ay, bx, by, cx, cy), covered) -> do
+    let full = Rect 0 0 8 8
+        triangle = (1, 1, 5, 1, 1, 5)
+        inside x y = x >= 1 && y >= 1 && x + y <= 5
+        red = colorRGBA 255 0 0 255
+        cases =
+          [ ("normal", full, triangle, inside)
+          , ("reversed", full, (1, 5, 5, 1, 1, 1), inside)
+          , ("clipped", Rect 2 0 3 4, triangle, \x y -> inside x y && x >= 2 && x < 5 && y < 4)
+          , ("outside", Rect 6 6 2 2, triangle, \_ _ -> False)
+          , ("empty clip", Rect 0 0 0 0, triangle, \_ _ -> False)
+          , ("degenerate", full, (1, 1, 3, 3, 5, 5), \_ _ -> False)
+          ]
+    forM_ cases $ \(name, Rect clipX clipY clipW clipH, (ax, ay, bx, by, cx, cy), covered) -> do
       clearScreen surf 0
       ctx <- newPixelContext
       setDrawSquareGeometry ctx True
-      (_, _, draw, _) <- runFrame ctx (emptyInput {inputWindowSize = Size 8 8}) $
-        drawing (fixedWH 8 8) $ \_ ->
-          pure (FillTriangle ax ay bx by cx cy (colorRGBA 255 0 0 255))
-      let
-        Rect clipX clipY clipW clipH = clip
-        clippedDraw =
-          draw
-            { drawCommands =
-                U.map
-                  ( \cmd -> cmd {cmdClipX = clipX, cmdClipY = clipY, cmdClipW = clipW, cmdClipH = clipH}
-                  )
-                  (drawCommands draw)
-            }
-      renderArena surf getCozetteFont 1 clippedDraw [] []
+      (_, _, draw, _) <- runFrame ctx (withInput 8 8) (drawing (fixedWH 8 8) (\_ -> pure (FillTriangle ax ay bx by cx cy red)))
+      let clip cmd = cmd {cmdClipX = clipX, cmdClipY = clipY, cmdClipW = clipW, cmdClipH = clipH}
+      renderArena surf getCozetteFont 1 draw {drawCommands = U.map clip (drawCommands draw)} [] []
       pixels <- mapM (peekElemOff (sBuffer surf)) [0 .. 63]
-      let
-        expected = [if covered x y then red else 0 | y <- [0 .. 7 :: Int], x <- [0 .. 7]]
-      assert ("triangle raster " ++ name) (pixels == expected)
+      assert ("triangle raster " ++ name) (pixels == [if covered x y then packColor red else 0 | y <- [0 .. 7 :: Int], x <- [0 .. 7]])
 
 -- | An RGFW context renders square, themed widgets: button corners are the
 -- border colour, fills come from the theme, and label text is stamped
@@ -255,41 +165,22 @@ testTriangleRaster =
 testSquareThemedRaster :: IO ()
 testSquareThemedRaster = do
   let theme = tomorrowNightMinDarkTheme
-      w = 240
-      h = 120
-      inp = emptyInput {inputWindowSize = Size (fromIntegral w) (fromIntegral h), inputMousePos = V2 (-100) (-100)}
-      ui = column $ do
-        _ <- button "Button"
-        _ <- checkbox "Checkbox label" True
-        pure ()
   ctx <- newRgfwContext theme
-  (_, _, draw, _) <- runFrame ctx inp ui
-  (baseSpans, overlaySpans) <- collectRasterSpans ctx inp
-  surf <- newOffscreenRgfwSurface w h
-  clearScreen surf (packColor (themeWindow theme))
-  renderArena surf getCozetteFont 1.0 draw baseSpans overlaySpans
-  let na = ctxNodeArena ctx
-      pixel x y = peekElemOff (sBuffer surf) (y * w + x)
-  n <- arenaCount na
-  rects <- mapM (\i -> (,) <$> getNodeType na i <*> getRect na i) [0 .. n - 1]
-  case [r | (NodeButton, r) <- rects] of
-    ((bx, by, bw, bh) : _) -> do
-      let x0 = round bx
-          y0 = round by
-          x1 = round (bx + bw) - 1
-          y1 = round (by + bh) - 1
-      corners <- mapM (uncurry pixel) [(x0, y0), (x1, y0), (x0, y1), (x1, y1)]
-      assert "Button corners are square (border colour)" (all (== packColor (styleBorder (themeButton theme))) corners)
-      fillPx <- pixel (x0 + 2) (y0 + 2)
-      assert "Button fill uses the theme" (fillPx == packColor (styleBg (themeButton theme)))
-    [] -> assert "Button node present" False
-  case [(r, fg) | (r, t, fg, _, _) <- baseSpans, t == "Checkbox label"] of
-    ((Rect sx sy sw sh, fg) : _) -> do
-      px <- sequence [pixel x y | y <- [round sy .. round (sy + sh) - 1], x <- [round sx .. round (sx + sw) - 1]]
-      let lit = length (filter (== packColor fg) px)
-      assert "Checkbox label is glyphs, not solid boxes" (lit > 0 && lit * 2 < length px)
-    [] -> assert "Checkbox label span collected" False
-  freeRgfwSurface surf
+  raster ctx 240 120 (packColor (themeWindow theme)) (column (button "Button" >> checkbox "Checkbox label" True)) $ \_ (base, _) px -> do
+    nodesOf NodeButton ctx >>= \case
+      Rect bx by bw bh : _ -> do
+        let (x0, y0, x1, y1) = (round bx, round by, round (bx + bw) - 1, round (by + bh) - 1)
+        corners <- mapM (uncurry px) [(x0, y0), (x1, y0), (x0, y1), (x1, y1)]
+        assert "Button corners are square (border colour)" (all (== packColor (styleBorder (themeButton theme))) corners)
+        fillPx <- px (x0 + 2) (y0 + 2)
+        assert "Button fill uses the theme" (fillPx == packColor (styleBg (themeButton theme)))
+      [] -> assert "Button node present" False
+    case [(r, fg) | (r, t, fg, _, _) <- base, t == "Checkbox label"] of
+      (Rect sx sy sw sh, fg) : _ -> do
+        ps <- sequence [px x y | y <- [round sy .. round (sy + sh) - 1], x <- [round sx .. round (sx + sw) - 1]]
+        let lit = length (filter (== packColor fg) ps)
+        assert "Checkbox label is glyphs, not solid boxes" (lit > 0 && lit * 2 < length ps)
+      [] -> assert "Checkbox label span collected" False
 
 -- | The OpenGL glyph atlas holds every glyph exactly as the software blitter
 -- stamps it at that scale: the grid fits the font, and a cell equals a
@@ -312,8 +203,7 @@ testGlyphAtlas = do
           renderGlyphScaledToBuffer solo cw 0 0 cw ch scale 0 0 0xFFFFFFFF font (fromIntegral gid)
           cell <- mapM (\(x, y) -> peekElemOff atlas ((ay + y) * gaWidth ga + ax + x)) [(x, y) | y <- [0 .. ch - 1], x <- [0 .. cw - 1]]
           expected <- mapM (peekElemOff solo) [0 .. cw * ch - 1]
-          assert ("glyph atlas cell " ++ show c ++ " matches the blitter" ++ label')
-            (cell == expected && any (/= 0) expected)
+          assert ("glyph atlas cell " ++ show c ++ " matches the blitter" ++ label') (cell == expected && any (/= 0) expected)
 
 -- | Span glyph quads land on the software pen positions (spaces skipped,
 -- newlines reset the column) and clipping trims positions and UVs together.
@@ -344,9 +234,8 @@ testSpanQuads = do
 -- events RGFW queues first.
 testRgfwTyping :: IO ()
 testRgfwTyping = do
-  let typed = foldl' applyRgfwEvent emptyInput . decodeRgfwEvents 1
-      chars = inputChars . typed
-      ctrlHeld = modCtrl . inputModifiers . typed
+  let chars = inputChars . applied
+      ctrlHeld = modCtrl . inputModifiers . applied
       keyL = fromIntegral (fromEnum 'l')
       plainL = [EventKeyChar 'l', EventKeyPress keyL 0]
       ctrlLCharFirst = [EventKeyChar '\x0c', EventKeyPress keyL R.rgfw_modControl]
@@ -361,9 +250,8 @@ testRgfwTyping = do
 
 -- | Wheel events queued in one batch add up rather than keeping the last.
 testRgfwScroll :: IO ()
-testRgfwScroll = do
-  let scrolled = inputScroll (foldl' applyRgfwEvent emptyInput (decodeRgfwEvents 1 [EventMouseScroll 0 1, EventMouseScroll 0.5 2]))
-  assert "RGFW scroll: a batch of wheel events accumulates" (scrolled == V2 0.5 3)
+testRgfwScroll =
+  assert "RGFW scroll: a batch of wheel events accumulates" (inputScroll (applied [EventMouseScroll 0 1, EventMouseScroll 0.5 2]) == V2 0.5 3)
 
 main :: IO ()
 main = do
