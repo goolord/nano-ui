@@ -1322,12 +1322,40 @@ distributeScratch na n avail gapSum horizontal = do
           gf <- readPrimArray gfArr i
           when (gf > 0) $ writePrimArray out i (max 0 (free * gf / gfSum))
     else when (slack < -0.001) $ do
-      shrinkTotal <- foldUpTo n (\acc i -> (acc +) . shrinkFactor <$> sizingAt i) 0
-      when (shrinkTotal > 0) $ forUpTo_ n $ \i -> do
-        ax <- sizingAt i
-        main <- readPrimArray out i
-        let delta = negate slack * shrinkFactor ax / shrinkTotal
-        writePrimArray out i (max (axMin ax) (main - delta))
+      -- Children give back the room the container lacks by factor, none
+      -- below its minimum ('shrinkScratch'), with 'fsGrow' holding each
+      -- child's factor.
+      forUpTo_ n $ \i -> sizingAt i >>= writePrimArray gfArr i . shrinkFactor
+      shrinkScratch out gfArr (fmap axMin . sizingAt) n (negate slack)
+
+-- | Take @need@ from the first @n@ scratch children's sizes in @mainArr@ by
+-- their factors in @factorArr@ (0 for a child that keeps its size), none
+-- below its minimum @minAt@: a child its share would take below it stops
+-- there, its factor cleared, and the others share what it could not give,
+-- so a short row fits once its children do.
+shrinkScratch :: IOArr Float -> IOArr Float -> (Int -> IO Float) -> Int -> Float -> IO ()
+shrinkScratch mainArr factorArr minAt n !need = do
+  total <- foldUpTo n (\acc i -> (acc +) <$> readPrimArray factorArr i) 0
+  when (total > 0) $ do
+    let stop (!given, !stopped) i = do
+          f <- readPrimArray factorArr i
+          if f <= 0
+            then pure (given, stopped)
+            else do
+              lo <- minAt i
+              main <- readPrimArray mainArr i
+              if main - need * f / total < lo
+                then do
+                  writePrimArray mainArr i lo
+                  writePrimArray factorArr i 0
+                  pure (given + main - lo, stopped + 1)
+                else pure (given, stopped)
+    (given, stopped) <- foldUpTo n stop (0, 0 :: Int)
+    if stopped > 0
+      then shrinkScratch mainArr factorArr minAt n (need - given)
+      else forUpTo_ n $ \i -> do
+        f <- readPrimArray factorArr i
+        when (f > 0) $ readPrimArray mainArr i >>= \main -> writePrimArray mainArr i (main - need * f / total)
 
 {-# INLINE shrinkFactor #-}
 shrinkFactor :: AxisSizing -> Float

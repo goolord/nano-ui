@@ -683,6 +683,8 @@
   paint its new ones. A container that paints is now tracked under a key of
   its own, and a scroller's or panel's rect is clipped to the clip it is
   painted in.
+- A row or column too short for its children takes the room it lacks from
+  the others that shrink once one reaches its minimum, instead of overflowing.
 
 ### Removed
 
