@@ -675,6 +675,14 @@
   fell back to the outer viewport, so content scrolled up into that
   viewport's rect, which nothing draws there, still hovered and clicked. The
   clip is now empty, and hit tests tell an empty clip from one not yet set.
+- A panel or a scroller that changes size repaints where it was and where it
+  is. A panel, like any container without a widget id, was invisible to the
+  rect diffs, so one that shrank left its background and border behind. A
+  scroller's own rect was clipped to its viewport, the clip it gives its
+  content, which left its old bar lane and well edge on screen or did not
+  paint its new ones. A container that paints is now tracked under a key of
+  its own, and a scroller's or panel's rect is clipped to the clip it is
+  painted in.
 
 ### Removed
 

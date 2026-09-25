@@ -176,7 +176,7 @@ runFrameEff unlift ctx frameInp ui = do
   when (mirrorStoresChanged storeBuilt storeAfter) $ do
     layoutArena ctx size True
     applyScrollOffsets ctx size
-  updatePrevRects ctx
+  updatePrevRects ctx size
   refreshHover ctx frameInp
   refreshScrollBarHover ctx layerInp
   tickAnimations ctx (inputDeltaTime frameInp)

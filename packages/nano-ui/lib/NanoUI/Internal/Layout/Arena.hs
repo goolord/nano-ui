@@ -109,6 +109,7 @@ module NanoUI.Internal.Layout.Arena
   , findClassNodeM
   , findClassNodeRevM
   , foldClassNodesM
+  , classNodes
   , foldClassNodeRevM
   , forClassNodes_
   , walkFloatingAncestors
@@ -282,6 +283,10 @@ data NodeClass
   | FloatingNodes
   -- ^ Windows, modals and popups ('isFloatingNode'), so the passes that look
   -- only at floating panels skip the rest of the arena.
+  | BackdropNodes
+  -- ^ Panels and scroll containers, which paint a backdrop and hand their
+  -- content a clip of their own, for the damage pass that tracks them
+  -- ('NanoUI.Internal.Damage.updatePrevRects').
   deriving (Eq, Enum, Bounded)
 
 -- | The constructor of a 'Sizing' without its number, as the arena stores it
@@ -933,6 +938,7 @@ addNode na nt parent Layout {..} = do
     cc <- readTree a parent TreeChildCount
     writeTree a parent TreeChildCount (cc + 1)
   when (isFloatingNode nt) $ pushClassNode na FloatingNodes idx
+  when (nt == NodePanel || nt == NodeScrollContainer) $ pushClassNode na BackdropNodes idx
   when (isWidgetNode nt || isScrollNode nt) $ do
     pushClassNode na PointerNodes idx
     when (nt == NodeDrawing) $ pushClassNode na DrawingNodes idx

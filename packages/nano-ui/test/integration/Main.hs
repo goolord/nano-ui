@@ -36,6 +36,7 @@ import Cases.Tooltip qualified
 import Cases.CustomWidget qualified
 import Cases.ShrinkDamage qualified
 import Cases.WidgetIdIndex qualified
+import Cases.ContainerDamage qualified
 import NanoUI.Testing.Runner (runTests)
 
 main :: IO ()
@@ -77,4 +78,5 @@ main =
     , Cases.CustomWidget.tests
     , Cases.ShrinkDamage.tests
     , Cases.WidgetIdIndex.tests
+    , Cases.ContainerDamage.tests
     ]

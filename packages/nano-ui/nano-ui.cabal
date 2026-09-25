@@ -247,6 +247,7 @@ test-suite nano-ui-test
         Cases.Window
         Cases.ShrinkDamage
         Cases.WidgetIdIndex
+        Cases.ContainerDamage
     build-depends:
         bytestring,
         containers,

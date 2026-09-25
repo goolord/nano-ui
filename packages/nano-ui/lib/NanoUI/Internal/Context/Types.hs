@@ -261,6 +261,10 @@ data DamageState = DamageState
   , dsLastWindowSize :: !Size
   , dsPrevRects :: !(IntMap Rect)
   , dsPrevClips :: !(IntMap Rect)
+  , dsPrevOuterClips :: !(IntMap Rect)
+  -- ^ For scroll containers and panels, the clip each is painted in: the one
+  -- around it, where 'dsPrevClips' holds the smaller one it gives its
+  -- content. Damage clips a node's own rect by it.
   , dsPrevNodeTexts :: !(IntMap Text)
   }
 
@@ -275,6 +279,7 @@ initialDamageState = DamageState
   , dsLastWindowSize = Size 0 0
   , dsPrevRects = IM.empty
   , dsPrevClips = IM.empty
+  , dsPrevOuterClips = IM.empty
   , dsPrevNodeTexts = IM.empty
   }
 
