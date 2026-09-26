@@ -260,8 +260,9 @@ runRgfwAppReduceCustom opts getThemeAndScale updateModel initialModel view = inB
     inBoundThread act = if rtsSupportsBoundThreads then runInBoundThread act else act
     -- The model's scale, else the options', else the monitor's.
     resolveScale userScale monScale = fromMaybe 1 (find (> 0) [userScale, optScale opts, monScale])
-    -- The window's size in native pixels at a scale.
-    pixelSize scale = let Size w h = wsSize settings in (max 1 (round (w * scale)), max 1 (round (h * scale)))
+    -- A window size in native pixels at a scale, and the settings' own.
+    pixelsAt scale (Size w h) = (max 1 (round (w * scale)), max 1 (round (h * scale)))
+    pixelSize scale = pixelsAt scale (wsSize settings)
     runWindow win = do
       let !refreshHz = if optRefreshHz opts > 0 then optRefreshHz opts else 60
           !refreshSec = 1.0 / fromIntegral refreshHz :: Double
@@ -318,7 +319,7 @@ runRgfwAppReduceCustom opts getThemeAndScale updateModel initialModel view = inB
               Hidden -> R.hideWindow win
           , hostMove = R.moveWindow win
           , hostCenter = R.centerWindow win
-          , hostResize = \(Size w h) -> join (R.resizeWindow win <$> pixels w <*> pixels h)
+          , hostResize = \s -> readIORef scaleRef >>= \scale -> uncurry (R.resizeWindow win) (pixelsAt scale s)
           , hostMinimize = R.minimizeWindow win
           , hostMaximize = R.maximizeWindow win
           , hostRestore = R.restoreWindow win
