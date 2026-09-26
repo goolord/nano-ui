@@ -26,7 +26,7 @@ import NanoUI.Internal.Frame.Select (collectSelectDropdownSpans)
 import NanoUI.Internal.Frame.SpanArena (SpanArena, pushSpans, resetSpanArena, spanArenaToList)
 import NanoUI.Internal.Frame.TextArea (textAreaTextPlacements)
 import NanoUI.Internal.Frame.TextEdit (collectTextEditMenuSpans)
-import NanoUI.Internal.Frame.TextInput (nodeTextFieldGeom, syncTextInputScroll, tagTextInputClippedSpans)
+import NanoUI.Internal.Frame.TextInput (fieldEditLine, nodeTextFieldGeom, syncTextInputScroll, tagTextInputClippedSpans)
 import NanoUI.Internal.Input (Input)
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Layout.Solve (findAncestorMaxW, textWrapCap)
@@ -382,7 +382,8 @@ plainFieldPen ::
   Context -> NodeIdx -> Int -> FontMetrics -> Float -> Float -> Float -> Float -> IO (T.Text, Float, Float, Rect)
 plainFieldPen ctx idx si fm x y w h = do
   ph <- if hasFlag textInputFlagNumeric si then pure "" else getText (ctxNodeArena ctx) idx
-  value <- textInputValue ctx idx
+  -- The value, with an input method's composition in it while one shows.
+  (value, _, _, _) <- fieldEditLine ctx idx
   focus <- textInputFocused ctx idx
   (Rect _ boxY _ boxH, clip@(Rect clipX _ _ _)) <- nodeTextFieldGeom ctx idx x y w h
   scrollX <- syncTextInputScroll ctx idx x y w h

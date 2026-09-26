@@ -55,7 +55,7 @@ counter = do
   of mixed styles and links, as in
   `richText ["Read ", strong "the guide", " or ", hyperlink "faq" "the FAQ"]`.
 - Text fields with undo and redo, driven by `TextCommand` values that code
-  can run too.
+  can run too, and input-method composition in the SDL backend.
 - Images with a content fit, opacity and rotation (`imageConfigured`), SVG
   icons (`loadSvg`, `svgIcon`) and a `spinner`.
 - Backends block on input when no animation or timed update needs a frame.

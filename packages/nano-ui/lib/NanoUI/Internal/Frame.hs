@@ -25,9 +25,10 @@ import NanoUI.Internal.Frame.Scroll
 import NanoUI.Internal.Frame.Select
 import NanoUI.Internal.Frame.TextArea (finalizeTextFieldMouse)
 import NanoUI.Internal.Frame.TextEdit
+import NanoUI.Internal.Frame.TextInput (claimComposition)
 import NanoUI.Internal.Frame.Window
 import NanoUI.Internal.Id (WidgetId (..), initialIdContext)
-import NanoUI.Internal.Input (Input (..), inputMousePressed, stripInteractionInput, withoutPointer)
+import NanoUI.Internal.Input (Input (..), Key (..), inputKeysElem, inputKeysNull, inputMousePressed, stripInteractionInput, withoutPointer)
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Layout.Solve (placeFloatingNodes, runCustomMeasure, solveLayout)
 import NanoUI.Internal.Monad (NanoUI, Ui, runUi, whenM)
@@ -86,12 +87,15 @@ runFrameEff ::
   -> Input
   -> Eff (Ui : es) a
   -> IO (a, [FrameMsg], DrawData, Bool)
-runFrameEff unlift ctx frameInp ui = do
+runFrameEff unlift ctx rawInp ui = do
   ensureMetricCaches ctx
   snap <- captureFrameSnapshot ctx
   clearDirty ctx
   -- Timed wakes are re-requested by whatever is still built this frame.
   clearWakeAt ctx
+  -- An input method's composition goes to the field that has the focus, and
+  -- while it shows there, the keys are the input method's.
+  (frameInp, imeKeys) <- claimComposition ctx rawInp
   -- Decide what the pointer belongs to before anything reads it, against the
   -- frame the user saw. The view gets its input routed layer by layer, and
   -- each step below gets the input of what it serves, with no pointer in it
@@ -119,10 +123,13 @@ runFrameEff unlift ctx frameInp ui = do
   stepScrollGlides ctx (inputDeltaTime frameInp)
   updateScrollDrag ctx layerInp
   -- Read from the last frame's nodes, before the build resets them.
-  recordFocusKind ctx
+  recordFocusKind ctx imeKeys
   resetDrawArena (ctxDrawArena ctx)
   resetUiBuild ctx True
   beginFrameModal ctx
+  -- Nor does an Escape the input method took quit the app.
+  when (inputKeysNull (inputKeys frameInp) && inputKeysElem KeyEscape (inputKeys rawInp)) $
+    markEscapeConsumed ctx
   writeIORef (ctxReleaseClickedId ctx) (WidgetId 0)
   armPointerPress ctx frameInp
   result0 <- unlift (runUi ctx frameInp ui)

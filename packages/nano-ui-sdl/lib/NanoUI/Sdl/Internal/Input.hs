@@ -1,8 +1,9 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE NoFieldSelectors #-}
 
--- | SDL3 event polling and waiting, and translation of SDL events into
--- 'NanoUI.Input.Input'.
+-- | SDL3 event polling and waiting, translation of SDL events into
+-- 'NanoUI.Input.Input', and keeping SDL's text input in step with the
+-- focused text field.
 module NanoUI.Sdl.Internal.Input
   ( SdlEvent (..)
   , pollEvents
@@ -10,26 +11,33 @@ module NanoUI.Sdl.Internal.Input
   , applyEvent
   , isButtonEdge
   , sdlKey
+  , TextInputSync
+  , newTextInputSync
+  , syncTextInput
   ) where
 
-import Control.Monad (mfilter)
+import Control.Monad (mfilter, void, when)
 import Data.Bits ((.&.))
 import Data.Char (chr, isPrint, toLower)
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import qualified Data.Text as T
 import Data.Text (Text)
 import qualified Data.Text.Foreign as TF
 import Data.Word (Word32)
 import Foreign.C.Types (CFloat, CUInt)
-import Data.Maybe (fromMaybe)
+import Data.Foldable (for_)
+import Data.Int (Int32)
+import Data.Maybe (fromMaybe, isJust)
 import Foreign.Marshal.Alloc (alloca)
-import Foreign.Marshal.Utils (maybePeek)
+import Foreign.Marshal.Utils (maybePeek, with)
 import Foreign.Ptr (Ptr)
 import Foreign.Storable (Storable (..))
 import GHC.Records.Compat (getField)
 import SDL3.Sys.Bindgen.Runtime.CBool qualified as CBool
 import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
-import NanoUI (V2 (..), v2Add)
+import NanoUI (Rect (..), V2 (..), WidgetId (..), v2Add)
 import NanoUI.Backend
+import NanoUI.Testing (Context, TextInputArea (..), getFocusId, textInputArea)
 import NanoUI.Sdl.Internal.Display (refreshEventType, takeRefreshEvent)
 import SDL3.Sys.Bindgen.Events
   ( SDL_Event (..)
@@ -92,8 +100,10 @@ import SDL3.Sys.Bindgen.Keycode
   , sDL_KMOD_SHIFT
   )
 import SDL3.Sys.Bindgen.Mouse (sDL_BUTTON_LEFT, sDL_BUTTON_MIDDLE, sDL_BUTTON_RIGHT, sDL_BUTTON_X1, sDL_BUTTON_X2)
+import SDL3.Sys.Bindgen.Rect (SDL_Rect (..))
 import SDL3.Sys.Bindgen.Stdinc (Uint32 (..))
-import SDL3.Sys.Keyboard (getModState)
+import SDL3.Sys.Bindgen.Video (SDL_Window)
+import SDL3.Sys.Keyboard (getModState, setTextInputAreaSafe, startTextInputSafe, stopTextInputSafe)
 
 -- | Copied SDL event data. Pointer positions use SDL window coordinates until
 -- display synchronisation converts them to nano-ui's logical coordinates.
@@ -116,6 +126,10 @@ data SdlEvent
   | EvDrop DropEvent
   | EvRefresh
   | EvWindowRedraw
+  | EvEditing Text Int Int
+  -- ^ The input method's composition changed: its text, and where its caret
+  -- or selection starts and how long that is ('applyComposition'). Empty
+  -- text ends it.
   deriving (Eq, Show)
 
 -- | Drain every pending event, oldest first.
@@ -160,6 +174,11 @@ decodeEvent refreshTy p = do
       Events.SDL_EVENT_KEY_DOWN -> keyDown <$> peek p.key
       Events.SDL_EVENT_KEY_UP -> Just . keyUp <$> peek p.key
       Events.SDL_EVENT_TEXT_INPUT -> textInput p
+      Events.SDL_EVENT_TEXT_EDITING -> textEditing p
+      -- SDL stops text input while the window is in the background, which
+      -- drops the input method's composition without always saying so. End
+      -- it here, or a field would go on showing it and giving it its keys.
+      Events.SDL_EVENT_WINDOW_FOCUS_LOST -> pure (Just (EvEditing "" 0 0))
       Events.SDL_EVENT_MOUSE_MOTION -> do
         me <- peek p.motion
         Just . EvMouseMotion (v2 (getField @"x" me) (getField @"y" me)) <$> peekModifiers
@@ -260,6 +279,16 @@ textInput p = do
   txt <- maybePeek TF.peekCString (PtrConst.unsafeToPtr (getField @"text" te))
   pure ((`EvText` mods) <$> mfilter (not . T.null) txt)
 
+-- | The input method's composition. With @SDL_HINT_IME_IMPLEMENTED_UI@ set
+-- to @composition@, which the session sets, SDL sends it rather than letting
+-- the input method draw it over the window.
+textEditing :: Ptr SDL_Event -> IO (Maybe SdlEvent)
+textEditing p = do
+  ee <- peek p.edit
+  txt <- fromMaybe "" <$> maybePeek TF.peekCString (PtrConst.unsafeToPtr (getField @"text" ee))
+  let int v = fromIntegral v :: Int
+  pure (Just (EvEditing txt (int (getField @"start" ee)) (int (getField @"length" ee))))
+
 mouseButton :: Ptr SDL_Event -> Bool -> IO (Maybe SdlEvent)
 mouseButton p down = do
   be <- peek p.button
@@ -310,6 +339,7 @@ applyEvent inp ev =
       (applyMouseButton btn down inp) {inputMousePos = pos, inputModifiers = mods}
     EvScroll delta -> inp {inputScroll = v2Add (inputScroll inp) delta}
     EvDrop dropEv -> inp {inputDrops = appendDropEvent dropEv (inputDrops inp)}
+    EvEditing txt start len -> applyComposition txt start len inp
     EvWindowRedraw -> inp {inputWindowRedraw = True}
     -- A wake asks for a frame, not a repaint: the session runs one, and its
     -- damage decides what is presented, if anything.
@@ -322,3 +352,41 @@ isButtonEdge :: SdlEvent -> Bool
 isButtonEdge = \case
   EvMouseButton {} -> True
   _ -> False
+
+-- | What SDL's text input last heard: the widget that had the keyboard
+-- focus, and the text input area, in window coordinates.
+newtype TextInputSync = TextInputSync (IORef (WidgetId, Maybe (SDL_Rect, Int32)))
+
+-- | A sync that has told SDL nothing yet.
+newTextInputSync :: IO TextInputSync
+newTextInputSync = TextInputSync <$> newIORef (WidgetId 0, Nothing)
+
+-- | Bring SDL's text input up to date after a frame drawn with @inp@ in
+-- window @win@, whose window coordinates are @zoom@ layout units: hand the
+-- input method the focused field's 'TextInputArea', so its candidate window
+-- sits by the caret, and when the focus moved while it was composing,
+-- restart text input, which drops the composition rather than letting it
+-- carry over into the next field. Text input itself stays on while no field
+-- has the focus: views read typed text outside text fields too. Says whether
+-- it restarted text input. Every frame the backend draws calls it.
+syncTextInput :: TextInputSync -> Ptr SDL_Window -> Float -> Context -> Input -> IO Bool
+syncTextInput (TextInputSync ref) win zoom ctx inp = do
+  focus <- getFocusId ctx
+  area <- textInputArea ctx
+  (lastFocus, lastArea) <- readIORef ref
+  let restart = focus /= lastFocus && isJust (inputComposition inp)
+  when restart $ do
+    void (stopTextInputSafe win)
+    void (startTextInputSafe win)
+  let native = toWindow <$> area
+  for_ native $ \(r, cursor) ->
+    when (native /= lastArea) $
+      -- A safe call: the input method may take a round trip to answer.
+      with r $ \rp -> void (setTextInputAreaSafe win (PtrConst.unsafeFromPtr rp) cursor)
+  writeIORef ref (focus, maybe lastArea Just native)
+  pure restart
+  where
+    toWindow (TextInputArea (Rect x y w h) cursor) =
+      let at :: Integral b => Float -> b
+          at v = round (v * zoom)
+       in (SDL_Rect (at x) (at y) (max 1 (at w)) (max 1 (at h)), at cursor)

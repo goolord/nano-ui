@@ -220,6 +220,11 @@ menu is open; for the closed menu, bind it with `shortcut` too, declared
 first. `keyPressed`, `keyReleased` and `keyHeld` read a key whatever has the
 keyboard.
 
+Text fields and text areas work with input methods by themselves: the
+focused field draws the composition (`inputComposition`) at its caret and
+changes its value only on commit. Meanwhile the frame drops the keys, so no
+shortcut fires.
+
 A middle click is `respMiddleClicked`, routed like a right click; a closable
 tab closes on one.
 
@@ -308,7 +313,9 @@ wake-ups. The two backends in this repository,
 `NanoUI.Backend.Sdl` and `NanoUI.Backend.Rgfw`, are the worked examples.
 
 Fold keys in with `applyKey` (a typing key as the `KeyChar` it types
-unmodified, with its text in `inputChars` too).
+unmodified, with its text in `inputChars` too) and input-method updates with
+`applyComposition`. After a frame, `textInputArea` from
+`NanoUI.Testing` says where the candidate window goes.
 
 ## Headless tests
 

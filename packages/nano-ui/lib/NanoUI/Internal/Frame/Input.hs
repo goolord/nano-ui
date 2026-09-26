@@ -378,18 +378,21 @@ constrainFocusToModal ctx = do
 
 -- | Note in 'isFocusKind' what kind of widget has the keyboard, from the
 -- last frame's nodes. Runs before the view, which rebuilds them, so that a
--- shortcut declared ahead of the focused widget knows about it too.
-recordFocusKind :: Context -> IO ()
-recordFocusKind ctx = do
+-- shortcut declared ahead of the focused widget knows about it too. @ime@:
+-- an input method has the focused field's keys this frame
+-- ('NanoUI.Internal.Frame.TextInput.claimComposition').
+recordFocusKind :: Context -> Bool -> IO ()
+recordFocusKind ctx ime = do
   focus <- readIORef (ctxFocusId ctx)
-  kind <-
-    if hashWidgetId focus == 0
-      then pure FocusNone
-      else withWidgetNode ctx focus FocusNone $ \idx ->
-        getNodeType (ctxNodeArena ctx) idx <&> \case
-          NodeTextInput -> FocusTextField False
-          NodeTextArea -> FocusTextField True
-          _ -> FocusControl
+  kind <- case () of
+    _
+      | hashWidgetId focus == 0 -> pure FocusNone
+      | ime -> pure FocusComposing
+      | otherwise -> withWidgetNode ctx focus FocusNone $ \idx ->
+          getNodeType (ctxNodeArena ctx) idx <&> \case
+            NodeTextInput -> FocusTextField False
+            NodeTextArea -> FocusTextField True
+            _ -> FocusControl
   was <- getsInteraction ctx isFocusKind
   when (kind /= was) $ modifyInteraction ctx (\s -> s {isFocusKind = kind})
 

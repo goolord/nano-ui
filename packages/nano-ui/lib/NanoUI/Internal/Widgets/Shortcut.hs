@@ -55,7 +55,9 @@ keyIn field k = do
 --   Home and End, and a text field also the keys that type, the keys it
 --   moves and deletes with, and its shortcuts such as Ctrl+A and Ctrl+Z,
 --   though a multi-line one leaves Ctrl+Enter and Alt+Enter, which it does
---   not act on. A custom widget that holds the keyboard counts as a control;
+--   not act on. While an input method composes in the field, and in the
+--   frame it commits text into it, the field takes every key. A custom
+--   widget that holds the keyboard counts as a control;
 -- * for Escape, when 'NanoUI.takeEscape' would not take it, which it takes
 --   as well.
 --
@@ -96,7 +98,10 @@ shortcut (Shortcut (Just pressedKey) mods) = do
 -- Shift, or with AltGr, which is Ctrl+Alt, or on macOS with Option), and
 -- its editing keys and shortcuts ('NanoUI.Widgets.TextEditor.keyCommand'),
 -- except that a multi-line field takes Enter only when it breaks the line,
--- so Ctrl+Enter can send what was typed.
+-- so Ctrl+Enter can send what was typed. A field an input method composes
+-- in, or commits into this frame, takes every key: those keys are the input
+-- method's, and a chord that ends a composition commits its text rather than
+-- also running a shortcut.
 focusTakesChord :: FocusKind -> Modifiers -> Key -> Bool
 focusTakesChord kind mods k =
   case kind of
@@ -106,6 +111,7 @@ focusTakesChord kind mods k =
       (navigation && not (multi && k == KeyEnter))
         || typing
         || isJust (keyCommand (if multi then multiLineMode else singleLineMode) mods k)
+    FocusComposing -> True
   where
     command = modCtrl mods || modAlt mods || modSuper mods
     navigation =

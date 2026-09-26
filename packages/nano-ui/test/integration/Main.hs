@@ -44,6 +44,7 @@ import Cases.Visibility qualified
 import Cases.Cursors qualified
 import Cases.Explain qualified
 import Cases.Shortcut qualified
+import Cases.Ime qualified
 import Cases.PointerExtra qualified
 import NanoUI.Testing.Runner (runTests)
 
@@ -94,5 +95,6 @@ main =
     , Cases.Cursors.tests
     , Cases.Explain.tests
     , Cases.Shortcut.tests
+    , Cases.Ime.tests
     , Cases.PointerExtra.tests
     ]

@@ -52,9 +52,11 @@ rendering. OpenGL operations must run on the OS thread where the context is
 current, and native resources must be closed on that thread.
 
 Layout and input use logical coordinates; `optScale` controls their mapping
-to physical pixels. The bitmap font does not provide the SDL backend's
-installed-font lookup or HarfBuzz shaping. Choose the SDL backend when those
-text features are required.
+to physical pixels. RGFW reports no input-method composition: an input
+method draws its own composition.
+The bitmap font does not provide the SDL backend's installed-font lookup or
+HarfBuzz shaping. Choose the SDL backend when those text features are
+required.
 
 See the [development guide](https://github.com/goolord/nano-ui/blob/main/docs/development.md)
 for headless tests and native rendering checks.

@@ -312,9 +312,11 @@ paintCaptionlessField env style idx focus box@(Rect x y w h) clip@(Rect clipX _ 
       fm = peFontMetrics env
   paintStyledRect da style box
   value <- textInputValue ctx idx
+  -- The value, with an input method's composition in it while one shows.
+  (shown, _, _, _) <- fieldEditLine ctx idx
   placeholder <- if hasPlaceholder then getText (ctxNodeArena ctx) idx else pure ""
   chrome
-  let display = textInputFieldText placeholder value focus
+  let display = textInputFieldText placeholder shown focus
       baseFg = styleFg style
   scrollX <- syncTextInputScroll ctx idx x y w h
   (ty, fg) <-

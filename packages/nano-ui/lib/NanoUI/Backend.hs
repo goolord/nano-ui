@@ -71,6 +71,19 @@ module NanoUI.Backend
   , noModifiers
   , modifiersFromBits
 
+    -- * Input methods
+
+    -- | An input method (IME) composes text before it commits it, such as
+    -- the reading of Japanese before it is converted to kanji. Fold each
+    -- update of that composition into the input with 'applyComposition': it
+    -- is held, like a button, until the next update ends or replaces it, and
+    -- the focused text field draws it at its caret. The text the input
+    -- method commits arrives as typed text in 'inputChars'. After a frame,
+    -- @textInputArea@ in "NanoUI.Testing" says where the input method should
+    -- put its candidate window.
+  , Composition (..)
+  , applyComposition
+
     -- * Cursors
   , cursorFallback
 

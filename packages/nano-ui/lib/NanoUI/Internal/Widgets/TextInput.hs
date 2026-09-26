@@ -8,6 +8,7 @@ module NanoUI.Internal.Widgets.TextInput
   , editorTextState
   , saveTextEditor
   , editTextInput
+  , fieldTextCommands
   , textInputMode
   , textInputFieldEditor
     -- * Text fields
@@ -35,6 +36,7 @@ where
 
 import Control.Monad (foldM, void, when)
 import Data.Bits ((.|.))
+import Data.Char (isPrint)
 import Data.Maybe (fromMaybe, isNothing)
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -105,9 +107,24 @@ saveTextEditor key ed =
 -- | Run this frame's commands on a field, or 'Nothing' when it had none.
 editTextInput :: Context -> EditorMode -> Input -> WidgetStore -> Int -> TextInputState -> IO (Maybe Editor)
 editTextInput ctx mode inp store key s0 =
-  case inputTextCommands mode inp of
+  fieldTextCommands ctx mode inp >>= \case
     [] -> pure Nothing
     cmds -> Just <$> foldM (flip (runCommandIO ctx mode)) (textInputEditor store key s0) cmds
+
+-- | The frame's typing and keys as the commands of the focused text field
+-- ('inputTextCommands'). While an input method has the field's keys
+-- ('FocusComposing'), the typed text is what it commits, and goes in
+-- whatever modifiers are held: a chord that ends a composition must not
+-- lose it.
+fieldTextCommands :: Context -> EditorMode -> Input -> IO [TextCommand]
+fieldTextCommands ctx mode inp = do
+  kind <- getsInteraction ctx isFocusKind
+  pure $
+    if kind == FocusComposing
+      then
+        [InsertText (T.singleton c) | c <- T.unpack (inputChars inp), isPrint c]
+          ++ inputTextCommands mode inp {inputChars = T.empty}
+      else inputTextCommands mode inp
 
 -- | The editor mode of a single-line field with these style flags.
 textInputMode :: Int -> EditorMode

@@ -4,6 +4,7 @@
 module Main (main) where
 
 import DemoSelftest qualified as Demo
+import ImeSelftest qualified as Ime
 import LogsSelftest qualified as Logs
 import NotepadSelftest qualified as Notepad
 
@@ -13,3 +14,4 @@ main = do
   Demo.selftest True
   Notepad.selftest
   Logs.selftest
+  Ime.selftest

@@ -1,5 +1,11 @@
 -- | The RGFW window session: options, the runners, and translation of RGFW
 -- events into 'NanoUI.Input.Input'.
+--
+-- RGFW reports no input-method composition: on X11 its input context leaves
+-- the text being composed to the input method to draw, as Windows' does, and
+-- the text an input method commits arrives as key-char events. So
+-- 'NanoUI.Input.inputComposition' stays 'Nothing', and fields take the
+-- committed text as typing.
 module NanoUI.Rgfw.Internal.Session
   ( RgfwOptions (..)
   , defaultRgfwOptions

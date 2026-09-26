@@ -37,7 +37,7 @@ fails the build instead of swapping.
 | `nano-ui-sdl-pointer-test` | SDL mouse buttons, through SDL's event queue |
 | `nano-ui-diagrams-test` | Diagram conversion, tessellation, and charts |
 | `nano-ui-form-test` | Form scopes, validation, reset, and submission |
-| `nano-ui-demo-test` | The SDL demo, notepad, and log viewer, driven in hidden windows |
+| `nano-ui-demo-test` | The SDL demo, notepad, log viewer, and input-method composition, driven in hidden windows |
 | `nano-ui-terminal-test` | The terminal demo's escape-sequence parser and PTY |
 
 Run one suite with `cabal test nano-ui-test --test-show-details=failures`.

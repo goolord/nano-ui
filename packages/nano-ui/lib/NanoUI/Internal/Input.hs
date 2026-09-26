@@ -36,6 +36,8 @@ module NanoUI.Internal.Input
   , clearEphemeral
   , isHardQuitInput
   , splitFrame
+  , Composition (..)
+  , applyComposition
   ) where
 
 import Data.Bits (Bits, zeroBits, (.&.))
@@ -143,8 +145,9 @@ data DropEvent = DropEvent
 
 -- | Input for one frame. Positions and window sizes use logical pixels;
 -- scroll values use wheel steps and delta time uses seconds. Held flags and
--- held keys persist between frames; press/release flags, text, key presses
--- and releases, and drops are events consumed once. Backends clear those
+-- held keys and the input method's composition persist between frames;
+-- press/release flags, text, key presses and releases, and drops are events
+-- consumed once. Backends clear those
 -- events with 'clearEphemeral'.
 data Input = Input
   { inputMousePos :: {-# UNPACK #-} !V2
@@ -176,6 +179,9 @@ data Input = Input
   , inputDeltaTime :: {-# UNPACK #-} !Float
   , inputDrops :: SmallArray DropEvent
   , inputWindowRedraw :: {-# UNPACK #-} !Bool
+  , inputComposition :: !(Maybe Composition)
+  -- ^ What an input method is composing, held until it changes or ends it
+  -- ('applyComposition'). The text it commits arrives in 'inputChars'.
   }
   deriving (Eq, Show)
 
@@ -207,6 +213,7 @@ emptyInput =
     , inputDeltaTime = 0
     , inputDrops = mempty
     , inputWindowRedraw = False
+    , inputComposition = Nothing
     }
 
 -- | Backend-independent cursor shape requested by a hovered control. The
@@ -300,7 +307,8 @@ grabDragKind onTarget dragging inp
   | otherwise = UiCursorDefault
 
 -- | Clear one-shot events and the redraw flag, retaining held buttons and
--- keys, pointer position, modifiers, window size, and delta time.
+-- keys, pointer position, modifiers, window size, delta time, and the
+-- composition.
 clearEphemeral :: Input -> Input
 clearEphemeral inp = (stripInteractionInput inp) {inputMouseClicks = 1, inputWindowRedraw = False}
 
@@ -430,7 +438,7 @@ inputPointerHeld inp =
 
 -- | Remove one-shot interaction events for a repeated view pass. Retains
 -- pointer position, held buttons and held keys so hover and drag state remain
--- available.
+-- available, and the composition, which the focused field still shows.
 stripInteractionInput :: Input -> Input
 stripInteractionInput inp =
   inp
@@ -470,3 +478,36 @@ withoutPointer inp =
     , inputMouseForwardPressed = False
     , inputScroll = V2 0 0
     }
+
+-- | Text an input method (IME) is composing and has not committed, such as
+-- the reading of Chinese or Japanese typed before it is converted. The
+-- focused text field draws it at its caret, underlined, but its value does
+-- not change until the input method commits the text, which arrives as typed
+-- text.
+data Composition = Composition
+  { compositionText :: !Text
+  -- ^ The text being composed. Empty text counts as no composition.
+  , compositionCursor :: !Int
+  -- ^ Where the input method's caret, or the start of its selection, is in
+  -- 'compositionText', in characters.
+  , compositionSelection :: !Int
+  -- ^ How many characters from 'compositionCursor' the input method has
+  -- selected, such as the clause it is converting; 0 for a plain caret.
+  }
+  deriving (Eq, Show)
+
+-- | Apply an input method's composition update, as SDL's
+-- @SDL_EVENT_TEXT_EDITING@ reports one: the text being composed, where its
+-- caret or selection starts and how long the selection is, both in
+-- characters. Empty text ends the composition. A position that is negative
+-- (unset) or past the text is clamped into it: an unset caret sits at the
+-- end.
+applyComposition :: Text -> Int -> Int -> Input -> Input
+applyComposition txt start len inp
+  | T.null txt = inp {inputComposition = Nothing}
+  | otherwise =
+      let n = T.length txt
+          cursor = if start < 0 then n else min n start
+       in inp {inputComposition = Just (Composition txt cursor (clamp0 (n - cursor) len))}
+  where
+    clamp0 hi v = max 0 (min hi v)

@@ -84,7 +84,7 @@ import NanoUI.Internal.Draw.Types (DrawArena, DrawOp, DrawingBuild)
 import NanoUI.Internal.Font (CustomMeasureFn, FontMetrics, WrapResult)
 import NanoUI.Internal.Frame.SpanArena (SpanArena)
 import NanoUI.Internal.Id (IdContext, WidgetId, hashWidgetId)
-import NanoUI.Internal.Input (UiCursorKind)
+import NanoUI.Internal.Input (Composition, UiCursorKind)
 import NanoUI.Internal.Layout.Arena (DirTag, LayoutCache, NodeArena)
 import NanoUI.Internal.Store (WidgetStore)
 import NanoUI.Internal.Style (FontStyle, FontVariant, FontWeight, Layout, Padding, Theme)
@@ -657,6 +657,10 @@ data InteractionState = InteractionState
   , isColumnResize :: {-# UNPACK #-} !Bool
   -- | What had the keyboard as the frame began.
   , isFocusKind :: !FocusKind
+  -- | The frame's input-method composition and the text field it shows in,
+  -- widget id 0 while it belongs to none. See
+  -- 'NanoUI.Internal.Frame.TextInput.claimComposition'.
+  , isComposition :: !(Maybe (Composition, WidgetId))
   }
   deriving (Eq, Show)
 
@@ -671,6 +675,11 @@ data FocusKind
   | -- | A text field, multi-line when 'True'. It takes typing and its
     -- editing keys and shortcuts.
     FocusTextField !Bool
+  | -- | A text field an input method composes in, or commits into this
+    -- frame. Its keys are the input method's, or come with its commit, so it
+    -- takes every key, and its typed text, the commit, whatever modifiers
+    -- are held.
+    FocusComposing
   deriving (Eq, Show)
 
 -- | Pointer routed to the page, with no held gesture, menu, or pending edit command.
@@ -688,6 +697,7 @@ initialInteractionState = InteractionState
   , isWindowResize = Nothing
   , isColumnResize = False
   , isFocusKind = FocusNone
+  , isComposition = Nothing
   }
 
 -- | Mutable state for one UI session. Construct with @newContext@ and use it

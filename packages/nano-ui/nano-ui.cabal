@@ -264,6 +264,7 @@ test-suite nano-ui-test
         Cases.Cursors
         Cases.Explain
         Cases.Shortcut
+        Cases.Ime
         Cases.PointerExtra
     build-depends:
         bytestring,

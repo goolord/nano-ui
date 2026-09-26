@@ -788,13 +788,19 @@ module NanoUI
 
     -- | The input a view reads: where the pointer is, which keys came in
     -- this frame, and what was typed. A backend fills one of these in every
-    -- frame with the functions in "NanoUI.Backend".
+    -- frame with the functions in "NanoUI.Backend". While an input method
+    -- composes text ('inputComposition'), the focused text field draws the
+    -- 'Composition' at its caret and the keys go to the input method: the
+    -- frame drops the keys pressed, released and held ('inputKeys',
+    -- 'inputKeysReleased', 'inputKeysHeld') until the text is committed or
+    -- cancelled, so no shortcut fires on them.
   , Input (..)
   , Key (..)
   , Modifiers (..)
   , inputKeysElem
   , foldInputKeys
   , takeEscape
+  , Composition (..)
 
     -- * Keyboard
 

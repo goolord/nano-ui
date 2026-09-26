@@ -72,6 +72,11 @@
   paging, Insert, Space, PrintScreen, Pause, the lock and menu keys, the
   keypad, and a typing key as the `KeyChar` it types in the current layout.
   The GUI key is `modSuper`.
+- Input methods compose inside the text fields, with the candidate window by
+  the caret. A widget of your own that takes typed text, such as a terminal,
+  now gets the composition only as `inputComposition`;
+  `SDL_IME_IMPLEMENTED_UI=none` in the environment lets the input method draw
+  it again.
 - The middle mouse button, and the side buttons as back and forward.
 
 ### Changed

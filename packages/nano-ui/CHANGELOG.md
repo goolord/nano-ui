@@ -279,13 +279,17 @@
   together with `<>`, with `shortcutLabel` and `shortcutIn`, and
   `parseShortcut` reads one written as xmonad's EZConfig writes it (`C-s`,
   `M-S-p`, `A-<Enter>`, `<F5>`). `Modifiers` is a `Monoid`.
+- Input-method composition (`inputComposition`): the focused text field or
+  text area draws it at its caret until it is committed, and the frame drops
+  the keys meanwhile, so no shortcut fires. `textInputArea` in
+  `NanoUI.Testing` says where the input method's candidate window goes.
 - The middle and side mouse buttons: `respMiddleClicked`, `respMiddlePressed`
   and `inputMouseMiddleDown` and its siblings, routed like a right click (a
   middle click closes a closable tab), and `inputMouseBackPressed` and
   `inputMouseForwardPressed`.
 - `NanoUI.Backend` has what a backend needs for the above: `applyKey`,
   `keyRepeats`, `keypadKey`, `modifiersFromBits`, `noModifiers`,
-  `cursorFallback` and `setExplainLayout`.
+  `applyComposition`, `cursorFallback` and `setExplainLayout`.
 - `NanoUI.Testing.Harness` has `chordInp`, `keyUpInp` and `middleClickPair`.
 
 ### Changed

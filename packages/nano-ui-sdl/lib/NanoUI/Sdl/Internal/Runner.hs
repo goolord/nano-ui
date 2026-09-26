@@ -18,9 +18,10 @@ import NanoUI.Internal.Debug (CoreDebugSnapshot (..), noteDebugPresent, noteDebu
 import NanoUI.Sdl.Internal.Debug
 import NanoUI.Sdl.Internal.Display (outPair, pushRefreshEvent, queryMouseWindowPos, queryWindowLogicalSize)
 import NanoUI.Sdl.Internal.Font
+import NanoUI.Sdl.Internal.Input (syncTextInput)
 import NanoUI.Sdl.Internal.NanoUIFont (NanoUIFont)
 import NanoUI.Sdl.Internal.Render (flushRenderBatch, renderDrawDataPass, snapDamage)
-import NanoUI.Sdl.Internal.Window (Retain (..), SdlEnv (..))
+import NanoUI.Sdl.Internal.Window (Retain (..), SdlEnv (..), windowZoom)
 import Foreign.Marshal.Utils (with)
 import Foreign.Ptr (Ptr, nullPtr)
 import qualified NanoUI.Sdl.Internal.Image as SdlImage
@@ -90,6 +91,11 @@ drawFrameWith ctx env inp forceFull evaluateUi = do
   t0 <- getMonotonicTime
   (drawData, dirtyAfterUi) <- evaluateUi
   t1 <- getMonotonicTime
+  -- Tell SDL's text input where the focus and the caret went. One frame
+  -- missed would look to the next like a focus moved while composing, and
+  -- drop the composition.
+  zoom <- windowZoom env
+  _ <- syncTextInput (sdlTextInput env) (sdlWindow env) zoom ctx inp
   dmg0 <- takeDamage ctx
   -- Frame damage from writeDamage is authoritative: a live animation whose
   -- key is out of view or scroll-clipped produces empty damage, and forcing

@@ -49,10 +49,12 @@ import NanoUI.Sdl.Internal.Font.Search (searchFonts)
 import NanoUI.Sdl.Internal.NanoUIFont (NanoUIFont (..))
 import NanoUI.Internal.Debug (DebugSamplerRef, newDebugSampler)
 import NanoUI.Sdl.Internal.Image (ImageAtlas, destroyImageAtlas, newImageAtlas)
+import NanoUI.Sdl.Internal.Input (TextInputSync, newTextInputSync)
 import NanoUI.Sdl.Internal.Render (RenderBatch, destroyRenderBatch, newRenderBatch)
 import SDL3.Sys.Bindgen.Rect (SDL_Rect (..))
 import SDL3.Sys.Bindgen.Hints
   ( sDL_HINT_ASSERT
+  , sDL_HINT_IME_IMPLEMENTED_UI
   , sDL_HINT_RENDER_DRIVER
   , sDL_HINT_RENDER_VSYNC
   , sDL_HINT_VIDEO_DRIVER
@@ -231,6 +233,9 @@ data SdlEnv = SdlEnv
   , sdlChromeState :: !ChromeState
   -- ^ What a borderless window's own title bar is for; see
   -- "NanoUI.Sdl.Internal.Chrome".
+  , sdlTextInput :: !TextInputSync
+  -- ^ What SDL's text input last heard of the focused field, which every
+  -- frame drawn brings up to date.
   }
 
 -- | The retained framebuffer. The texture is allocated in blocks larger than
@@ -374,6 +379,11 @@ withSdlWindow bench opts ctx act =
         setSdlHint sDL_HINT_RENDER_VSYNC "0"
       else do
         setSdlHint sDL_HINT_RENDER_VSYNC (if sdlAppVsync opts then "1" else "0")
+        -- The text fields draw what an input method is composing at their
+        -- caret, so SDL sends it (SDL_EVENT_TEXT_EDITING) rather than the
+        -- input method drawing it over the window. Its candidate list stays
+        -- the input method's own, placed by SDL_SetTextInputArea.
+        setSdlHint sDL_HINT_IME_IMPLEMENTED_UI "composition"
         -- SDL3 only auto-picks Wayland when the compositor has the fifo-v1 /
         -- commit-timing-v1 protocols. Without them (sway, wlroots, many
         -- others) it selects X11/XWayland, giving a scale-1 window on a
@@ -492,6 +502,7 @@ startSdlWindow bench opts ctx guessedDriver fontSource monoSource = do
       )
       (const (void (stopTextInputSafe sdlWindow)))
   sdlLastPresented <- liftIO $ newIORef False
+  sdlTextInput <- liftIO newTextInputSync
   sdlBatch <- mkAcquire (newRenderBatch sdlRenderer) destroyRenderBatch
   let
     env = SdlEnv {..}

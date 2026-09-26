@@ -10,6 +10,8 @@ module NanoUI.Testing
   , needsRedraw
   , pointerDragActive
   , textFieldActive
+  , textInputArea
+  , TextInputArea (..)
   , floatingPanelActive
   , floatingPanelRects
   , debugPanelOpen
@@ -151,6 +153,7 @@ import NanoUI.Internal.Frame.Cursor (UiCursorKind (..), cursorKindIs, pointerCur
 import NanoUI.Internal.Frame.Input
 import NanoUI.Internal.Frame.Spans (collectOverlayTextSpans, collectRasterSpans, collectTextSpans, widgetNodeCount)
 import NanoUI.Internal.Frame.Scroll (ScrollBarLayout (..), scrollBarLayout)
+import NanoUI.Internal.Frame.TextArea (TextInputArea (..), textInputArea)
 import NanoUI.Internal.Layout.Solve (computePopupPosition)
 import NanoUI.Internal.Monad (Ui, askContext, askHost, askInput, uiIO)
 import NanoUI.Internal.WidgetText (textNodeFontStyle, textNodeFontWeight, textNodeTextDecoration)
