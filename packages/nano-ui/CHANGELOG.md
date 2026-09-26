@@ -279,8 +279,10 @@
   `useVisibility` report a `Visibility` (`visVisible`, `visRect`,
   `becameVisible`, `becameHidden`).
 - More cursor shapes from CSS's set, from `UiCursorNotAllowed` to the one-way
-  resize arrows. `withCursorShape` shows a `CursorShape` over part of a view
-  where its widgets pick none.
+  resize arrows, and `UiCursorHidden`, which the SDL and RGFW backends show
+  by hiding the pointer. `withCursorShape` shows a `UiCursorKind` over part of
+  a view where its widgets pick none; `UiCursorDefault` from a widget picks
+  nothing, and from a scope picks the arrow.
 - A layout overlay, like iced's `explain`: `explainLayout` outlines every
   layout node and highlights the one under the pointer, which `explainedNode`
   describes; `explainingLayout` says whether it is on.
@@ -343,6 +345,10 @@
 
 ### Changed
 
+- `widgetCursor` takes the widget's rect and the pointer as well as its draw
+  context, so parts of a custom widget can show different shapes, and it is
+  asked through a drag that went down on the widget wherever the pointer
+  goes: a `knob` keeps its resize arrows while dragged off it.
 - Builds with GHC 9.10 through 9.14 (`base >=4.20 && <4.23`).
 - `comboBox` filters its options only when the options list or the field
   text changes, rather than on every frame, open or closed. It also measures

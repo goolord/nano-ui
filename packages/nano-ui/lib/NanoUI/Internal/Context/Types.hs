@@ -544,7 +544,8 @@ type CustomDrawBuild = CustomDrawContext -> Rect -> SmallArray DrawOp
 data CustomDrawingEntry = CustomDrawingEntry
   { cdrContent :: {-# UNPACK #-} !Int
   , cdrBuild :: !CustomDrawBuild
-  , cdrCursor :: !(Maybe (CustomDrawContext -> UiCursorKind))
+  , cdrCursor :: !(Maybe (CustomDrawContext -> Rect -> V2 -> UiCursorKind))
+    -- ^ The widget's cursor, given its rect and the pointer.
   , cdrDamageSlop :: {-# UNPACK #-} !Float
     -- ^ Repaint margin in logical pixels; anything but a positive value
     -- leaves the default margin in place.

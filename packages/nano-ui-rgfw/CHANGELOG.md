@@ -10,6 +10,7 @@
   misc buttons past them as `MouseOther 6` to `MouseOther 8`.
 - The pointer leaving the window moves it off every widget, so nothing stays
   hovered.
+- `UiCursorHidden` hides the pointer.
 - Window options `optIcon`, `optMinSize` and `optMaxSize` (in native
   pixels). The core's window setters and `requestScreenshot` work from a
   view, but for `setWindowOpacityUi`, which does nothing: RGFW windows do not

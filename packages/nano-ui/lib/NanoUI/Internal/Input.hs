@@ -51,7 +51,6 @@ module NanoUI.Internal.Input
   , stripInteractionInput
   , withoutPointer
   , UiCursorKind (..)
-  , CursorShape
   , cursorFallback
   , grabHoverKind
   , grabDragKind
@@ -276,7 +275,11 @@ emptyInput =
 -- cursor of that name. Where the platform has none, it shows the closest
 -- one it has: the SDL and RGFW backends show the 'cursorFallback'.
 data UiCursorKind
-  = UiCursorDefault
+  = -- | From a widget ('NanoUI.Widgets.Custom.widgetCursor'), no opinion:
+    -- the 'NanoUI.withCursorShape' scope around it, if any, picks, and the
+    -- arrow shows where none does. As a scope's shape
+    -- (@withCursorShape UiCursorDefault@), the arrow.
+    UiCursorDefault
   | UiCursorPointer
   | UiCursorText
   | UiCursorGrab
@@ -326,13 +329,9 @@ data UiCursorKind
   | UiCursorSwResize
   | UiCursorWResize
   | UiCursorNwResize
+  | -- | No pointer shown, as over a video or a canvas that draws its own.
+    UiCursorHidden
   deriving (Eq, Show, Enum, Bounded)
-
--- | The pointer shape a view asks for while the pointer is over part of it
--- ('NanoUI.withCursorShape', 'NanoUI.Widgets.Custom.widgetCursor'):
--- 'UiCursorKind' under the name the view API uses.
-type CursorShape = UiCursorKind
-
 
 -- | The shape a backend shows for a kind when it has only the cursors SDL
 -- and RGFW have: the grab hands and all-scroll are the move arrows, a cell

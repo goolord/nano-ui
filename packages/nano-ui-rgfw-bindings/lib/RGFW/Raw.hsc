@@ -9,6 +9,7 @@ module RGFW.Raw
   , c_RGFW_stopCheckEvents
   , c_rgfw_create_window_gl
   , c_RGFW_window_swapBuffers_OpenGL
+  , c_RGFW_window_showMouse
   , c_rgfw_event_type
   , c_rgfw_event_mouse_x
   , c_rgfw_event_mouse_y
@@ -174,6 +175,10 @@ foreign import ccall "RGFW_stopCheckEvents"
 -- Returns null on failure; the resulting context is current on this OS thread.
 foreign import ccall "rgfw_create_window_gl"
   c_rgfw_create_window_gl :: CString -> CInt -> CInt -> CInt -> CInt -> CUInt -> CInt -> CInt -> IO (Ptr RGFW_window)
+
+-- | Show the pointer over the window (non-zero) or hide it.
+foreign import ccall "RGFW_window_showMouse"
+  c_RGFW_window_showMouse :: Ptr RGFW_window -> CUChar -> IO ()
 
 -- | Present the window's OpenGL back buffer on the context's owning thread.
 foreign import ccall "RGFW_window_swapBuffers_OpenGL"

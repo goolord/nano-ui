@@ -55,7 +55,6 @@ module NanoUI.Input
 
     -- * Cursors
   , UiCursorKind (..)
-  , CursorShape
   , grabHoverKind
   , grabDragKind
 

@@ -80,7 +80,7 @@
 - The middle mouse button, the side buttons as back and forward, and any
   further button as a `MouseOther` of its SDL number. The pointer leaving
   the window (`EvMouseLeave`) moves it off every widget, so nothing stays
-  hovered.
+  hovered. `UiCursorHidden` hides the pointer.
 - The desktop's light or dark setting reaches `systemAppearance`, and a change
   arrives as `EvSystemThemeChanged`. `sdlAppFollowSystemTheme` takes a light
   and a dark theme to switch between.

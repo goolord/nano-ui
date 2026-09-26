@@ -536,7 +536,7 @@ dividerWidget env axis =
             drawRect (alongAxis axis (Rect (x + leeway) y thickness h)) (scrollBarTrackColor panel theme)
             when (cdcHovered cdc || cdcPressed cdc) $
               drawStroke (V2 lx ly) (V2 (lx + lw) (ly + lh)) 2 line
-        , widgetCursor = Just (const (if axis == AxisV then UiCursorEwResize else UiCursorNsResize))
+        , widgetCursor = Just (\_ _ _ -> if axis == AxisV then UiCursorEwResize else UiCursorNsResize)
         }
   where
     thickness = geThickness env

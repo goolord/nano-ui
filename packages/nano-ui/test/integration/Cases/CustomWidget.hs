@@ -67,20 +67,30 @@ runCustomWidgetMeasureParentTest ctx failed = do
 runCustomWidgetCursorTest :: Context -> IORef Int -> IO ()
 runCustomWidgetCursorTest ctx failed = do
   let inp0 = withInput 300 300
-      ui = column $ do
+      -- The right edge resizes, and the rest has no opinion but the scope's.
+      ui = withCursorShape UiCursorHidden . column $ do
         fst <$> customWidget defaultCustomWidgetSpec
           { widgetLayout = fixedWH 80 80 defaultLayout
-          , widgetCursor = Just (\_ -> UiCursorNsResize)
+          , widgetCursor = Just $ \_ (Rect x _ w _) (V2 px _) ->
+              if px > x + w - 10 then UiCursorEwResize else UiCursorDefault
           }
   resp <- warmup2 ctx inp0 ui
   let Rect rx ry rw rh = respRect resp
-      hoverInp = inp0 { inputMousePos = centerOf resp }
-  _ <- runFrame ctx hoverInp ui
-  assert failed =<< cursorKindIs ctx hoverInp UiCursorNsResize
-
-  let outInp = inp0 { inputMousePos = V2 (rx + rw + 50) (ry + rh + 50) }
-  _ <- runFrame ctx outInp ui
-  assert failed . not =<< cursorKindIs ctx outInp UiCursorNsResize
+      at p = inp0 {inputMousePos = p}
+      onEdge = V2 (rx + rw - 4) (ry + rh / 2)
+  cursorOver ctx inp0 ui onEdge >>= assertEq failed UiCursorEwResize
+  cursorOver ctx inp0 ui (centerOf resp) >>= assertEq failed UiCursorHidden
+  -- A drag that went down on the edge keeps its shape off the widget, and
+  -- leaves it once let go.
+  let away = V2 (rx + rw + 50) (ry + rh + 50)
+      dragged = holdAt inp0 away
+  _ <- runFrame ctx (pressAt inp0 onEdge) ui
+  _ <- runFrame ctx dragged ui
+  uiCursorKind ctx dragged >>= assertEq failed UiCursorEwResize
+  _ <- runFrame ctx (releaseAt dragged) ui
+  _ <- runFrame ctx (at away) ui
+  uiCursorKind ctx (at away) >>= assertEq failed UiCursorDefault
+  assertEq failed UiCursorHidden (cursorFallback UiCursorHidden)
 
 -- | Verifies interaction state propagation (hover, press, click) and CustomDrawContext.
 runCustomWidgetInteractionTest :: Context -> IORef Int -> IO ()

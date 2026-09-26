@@ -332,14 +332,17 @@ runRgfwAppReduceCustom opts getThemeAndScale updateModel initialModel view = inB
           unless pending R.stopWaitForEvent
       let font = getCozetteFont
           initInp = emptyInput {inputWindowSize = logicalSize initPhys initScale}
-          -- Set the pointer shape only when the wanted kind changes.
+          -- Set the pointer shape only when the wanted kind changes, and
+          -- hide the pointer for 'UiCursorHidden' until another is wanted.
           syncCursor c inp = do
             want <- uiCursorKind c inp
             cur <- readIORef cursorRef
             when (want /= cur) $ do
               writeIORef cursorRef want
-              let icon = mapRgfwCursor want
-              void $
+              let hidden = want == UiCursorHidden
+                  icon = mapRgfwCursor want
+              when (hidden /= (cur == UiCursorHidden)) $ R.showMouse win (not hidden)
+              unless hidden . void $
                 if icon == R.rgfw_mouseArrow
                   then R.setMouseDefault win
                   else R.setMouseStandard win icon

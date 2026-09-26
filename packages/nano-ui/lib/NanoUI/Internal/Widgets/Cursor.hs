@@ -8,7 +8,7 @@ import Control.Monad (when)
 import Data.IORef (modifyIORef')
 import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context (Context (..))
-import NanoUI.Internal.Input (CursorShape)
+import NanoUI.Internal.Input (UiCursorKind)
 import NanoUI.Internal.Layout.Arena (arenaCount)
 import NanoUI.Internal.Monad (Ui, askContext, uiIO)
 
@@ -16,8 +16,11 @@ import NanoUI.Internal.Monad (Ui, askContext, uiIO)
 -- over the empty space in the containers declared inside; the gaps of the
 -- container around the scope keep their cursor. A widget with a cursor of its
 -- own keeps it, so a button inside still shows the pointer and a text field
--- the I-beam. The innermost scope around a widget wins, so an inner
--- @withCursorShape UiCursorDefault@ gives its part the arrow back. Disabled
+-- the I-beam; a custom widget whose 'NanoUI.Widgets.Custom.widgetCursor'
+-- answers 'UiCursorDefault' has no opinion, and shows the scope's. The
+-- innermost scope around a widget wins, so an inner
+-- @withCursorShape UiCursorDefault@ gives its part the arrow back, and
+-- 'UiCursorHidden' hides the pointer over its part. Disabled
 -- widgets have none of their own, so a scope around a 'NanoUI.disabledWhen'
 -- shows its shape over them:
 --
@@ -28,7 +31,7 @@ import NanoUI.Internal.Monad (Ui, askContext, uiIO)
 -- view in it moves no ids and changes no layout. Windows and popups declared
 -- inside show the shape too. Only the pointer's position counts: a drag that
 -- leaves the widgets leaves the shape behind.
-withCursorShape :: Ui :> es => CursorShape -> Eff es a -> Eff es a
+withCursorShape :: Ui :> es => UiCursorKind -> Eff es a -> Eff es a
 withCursorShape !shape body = do
   ctx <- askContext
   let na = ctxNodeArena ctx

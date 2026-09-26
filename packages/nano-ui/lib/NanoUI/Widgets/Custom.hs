@@ -290,8 +290,16 @@ data CustomWidgetSpec a = CustomWidgetSpec
     -- rebuilt and compared every frame. A stale key draws stale pixels, so
     -- derive it from everything the drawing reads: it is believed even while
     -- the widget animates.
-  , widgetCursor     :: !(Maybe (CustomDrawContext -> UiCursorKind))
-    -- ^ Optional custom mouse cursor when pointer is over the widget.
+  , widgetCursor     :: !(Maybe (CustomDrawContext -> Rect -> V2 -> UiCursorKind))
+    -- ^ The pointer's shape over the widget, from its draw context, its rect
+    -- and where the pointer is, so parts of the widget can show different
+    -- shapes. It is asked while the pointer is on the widget, and while a
+    -- drag that went down on it goes on elsewhere, so a drag keeps its
+    -- shape. 'UiCursorDefault' is no opinion: the 'NanoUI.withCursorShape'
+    -- around the widget picks, or the arrow shows.
+    --
+    -- > widgetCursor = Just $ \_ (Rect x _ w _) (V2 px _) ->
+    -- >   if px > x + w - 6 then UiCursorEwResize else UiCursorDefault
   , widgetFocusable  :: !Bool
     -- ^ Whether this widget accepts tab/keyboard focus.
   , widgetDamageSlop :: !Float
@@ -501,7 +509,7 @@ knobWith' f diameter minV maxV value = do
     customWidgetWithId
       wid
       (fixedSizeSpec f diameter diameter)
-        { widgetCursor = Just (\_ -> UiCursorNsResize)
+        { widgetCursor = Just (\_ _ _ -> UiCursorNsResize)
         , widgetFocusable = True
         , widgetContent = contentKey [frac]
         , widgetDraw = \cdc (Rect x y w h) -> runCanvasFor cdc $ do
@@ -551,7 +559,7 @@ toggleSwitchWith' f on = do
     customWidgetWithId
       wid
       (fixedSizeSpec f pillW pillH)
-        { widgetCursor = Just (\_ -> UiCursorPointer)
+        { widgetCursor = Just (\_ _ _ -> UiCursorPointer)
         , widgetFocusable = True
         , widgetContent = contentKey [if current then 1 else 0]
         , widgetDraw = \cdc rect@(Rect x y w h) -> runCanvasFor cdc $ do

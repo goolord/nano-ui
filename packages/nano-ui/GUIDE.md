@@ -210,9 +210,12 @@ it. Focus moves as Tab would, from the next frame; a widget Tab would skip,
 such as one disabled or behind a modal, refuses it.
 
 `withCursorShape` sets the pointer's shape over a subtree wherever the
-widgets inside pick none, such as `UiCursorCrosshair` over a canvas, or
-`UiCursorNotAllowed` around disabled widgets. A custom widget picks its own
-with `widgetCursor`. A backend shows the nearest shape the platform has.
+widgets inside pick none, such as `UiCursorCrosshair` over a canvas,
+`UiCursorNotAllowed` around disabled widgets, or `UiCursorHidden` over a
+video. A custom widget picks its own with `widgetCursor`, from its rect and
+the pointer, so a part of it can show another shape, and keeps it through a
+drag that leaves it; its `UiCursorDefault` leaves the choice to the scope
+around it. A backend shows the nearest shape the platform has.
 
 Keys arrive in `inputKeys`, `inputKeysReleased` and `inputKeysHeld`, and the
 text they type in `inputChars`. A key that types is a `KeyChar` of what it

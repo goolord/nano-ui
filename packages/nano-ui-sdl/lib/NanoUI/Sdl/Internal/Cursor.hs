@@ -21,7 +21,9 @@ import SDL3.Sys.Mouse
   ( createSystemCursorSafe
   , destroyCursorSafe
   , getDefaultCursorSafe
+  , hideCursorSafe
   , setCursorSafe
+  , showCursorSafe
   )
 
 data SdlCursors = SdlCursors
@@ -100,9 +102,15 @@ syncPointerCursor cursors ctx inp = do
       hPutStrLn stderr ("cursor: " ++ show want ++ " at " ++ show (inputMousePos inp))
     showCursorKind cursors want
 
--- | Show the cursor for @kind@. Where even the default arrow is NULL,
+-- | Show the cursor for @kind@, or hide it for 'UiCursorHidden' until
+-- another kind is shown. Where even the default arrow is NULL,
 -- SDL_SetCursor(NULL) redraws the cursor already shown.
 showCursorKind :: SdlCursors -> UiCursorKind -> IO ()
 showCursorKind cursors kind = do
-  void . setCursorSafe =<< cursorFor cursors kind
+  hidden <- (== UiCursorHidden) <$> readIORef (scCurrent cursors)
+  if kind == UiCursorHidden
+    then void hideCursorSafe
+    else do
+      when hidden (void showCursorSafe)
+      void . setCursorSafe =<< cursorFor cursors kind
   writeIORef (scCurrent cursors) kind
