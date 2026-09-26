@@ -9,6 +9,8 @@ module NanoUI.Internal.Input
   , modifiersFromBits
   , modPrimary
   , primaryModifiers
+  , modJump
+  , modMacCommand
   , onMac
   , isCommandKey
   , shiftAtMost
@@ -151,6 +153,16 @@ primaryModifiers :: Modifiers
 primaryModifiers
   | onMac = noModifiers {modSuper = True}
   | otherwise = noModifiers {modCtrl = True}
+
+-- | Whether the modifier that widens a caret motion or a deletion to a word
+-- is held: Option ('modAlt') on macOS and Ctrl elsewhere, as iced's @jump@.
+modJump :: Modifiers -> Bool
+modJump = if onMac then modAlt else modCtrl
+
+-- | Whether Command ('modSuper') is held on macOS, where it takes a caret
+-- motion or a deletion to the line's end. Never elsewhere.
+modMacCommand :: Modifiers -> Bool
+modMacCommand m = onMac && modSuper m
 
 -- | Whether this is macOS, whose keys differ: Command is the command
 -- modifier, and Option types.

@@ -937,6 +937,8 @@ module NanoUI
   , noModifiers
   , modPrimary
   , primaryModifiers
+  , modJump
+  , modMacCommand
 
     -- * Debugging
 

@@ -295,8 +295,10 @@
   layout node and highlights the one under the pointer, which `explainedNode`
   describes; `explainingLayout` says whether it is on.
 - Every key as a `Key`: `KeyF n`, paging, Insert, Space, the lock and menu
-  keys, and a `KeyChar` of what a typing key types unmodified. `modSuper`, and
-  `modPrimary` for the platform's command key (Command on macOS, else Ctrl).
+  keys, and a `KeyChar` of what a typing key types unmodified. `modSuper`,
+  `modPrimary` for the platform's command key (Command on macOS, else Ctrl),
+  `modJump` for its word-motion key (Option on macOS, else Ctrl) and
+  `modMacCommand` for Command on macOS alone.
   A view reads keys with `keyPressed`, `keyReleased` and `keyHeld`. Every key
   auto-repeats while held, each repeat a press in `inputKeys`, and
   `inputKeysNew` has the presses that are not repeats: holding Enter breaks
@@ -682,7 +684,14 @@
   frame, with no checks of its own for a Ctrl let go later.
 - A key chord is a key, not typed text: Ctrl+C is `KeyChar 'c'` with `modCtrl`
   in `inputKeys` and nothing in `inputChars`, so look for it with `shortcut`
-  or in `inputKeys`. Text fields take Command as well as Ctrl on macOS.
+  or in `inputKeys`. Text fields edit with iced's bindings: the command key
+  (Command on macOS, else Ctrl) with A, C, X, V, Z and Y selects, copies,
+  cuts, pastes, undoes and redoes, and the word key (Option on macOS, else
+  Ctrl; no longer Alt as well) moves and deletes by word. On macOS, Command
+  moves and deletes to a line's ends, and Ctrl alone moves and deletes as in
+  Emacs (A, E, B, F, H, D, K and U); elsewhere Ctrl+Shift with Backspace or
+  Delete deletes to a line's ends, and Ctrl with K, U or E does nothing in a
+  text area, where it deleted or moved as on macOS.
 - `Key` is `Ord` and no longer `Enum`, and `Modifiers` is `Ord`.
 - `Input` holds the mouse buttons as sets, `inputButtonsHeld`,
   `inputButtonsPressed` and `inputButtonsReleased` (`MouseButtons`, read with

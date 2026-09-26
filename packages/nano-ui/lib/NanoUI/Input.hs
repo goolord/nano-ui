@@ -46,6 +46,8 @@ module NanoUI.Input
   , noModifiers
   , modPrimary
   , primaryModifiers
+  , modJump
+  , modMacCommand
 
     -- * File drops
   , DropType (..)
