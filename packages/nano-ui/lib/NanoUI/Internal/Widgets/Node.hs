@@ -375,7 +375,13 @@ pointerOnWidget :: Context -> Maybe NodeIdx -> WidgetId -> Rect -> V2 -> IO Bool
 pointerOnWidget ctx mIdx wid rect mouse =
   (not <$> pointerCovered ctx wid)
     <&&> (not <$> maybe (pure False) (passesPointer (ctxNodeArena ctx)) mIdx)
-    <&&> maybe (pure (rectContains rect mouse)) (\idx -> nodeInteractionHit ctx idx rect mouse) mIdx
+    <&&> widgetHit ctx mIdx rect mouse
+
+-- | Whether point @p@ is on the part of a widget laid out at @rect@ last
+-- frame that the scrollers around its node @mIdx@ leave in view
+-- ('nodeInteractionHit'); on @rect@ for a widget without a node.
+widgetHit :: Context -> Maybe NodeIdx -> Rect -> V2 -> IO Bool
+widgetHit ctx mIdx rect p = maybe (pure (rectContains rect p)) (\idx -> nodeInteractionHit ctx idx rect p) mIdx
 
 resolveInteraction :: Context -> Input -> WidgetId -> IO Response
 resolveInteraction ctx inp wid = do
@@ -392,11 +398,10 @@ resolveInteraction ctx inp wid = do
       mIdx <- findNodeByWidgetId ctx wid
       presses <- readIORef (ctxPressPos ctx)
       let
-        hitAt p = maybe (pure (rectContains rect p)) (\idx -> nodeInteractionHit ctx idx rect p) mIdx
         -- Whether the button went down on this widget. A press the frame
         -- never saw (synthesized input, or one swallowed before it arrived)
         -- leaves the gesture unowned, so nobody is ruled out.
-        startedHere b = maybe (pure True) hitAt (M.lookup b presses)
+        startedHere b = maybe (pure True) (widgetHit ctx mIdx rect) (M.lookup b presses)
       -- A held left button belongs to whatever it went down on. Another
       -- widget the drag passes over is not hovered, so it neither lights up
       -- nor reports a press of its own.

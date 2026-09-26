@@ -148,7 +148,9 @@ pressTargets ctx inp
 -- first, so where two overlap the earlier one is on top, except where a stack
 -- or a pinned child draws a later match over it ('topmostHit'). A widget
 -- drawn inside the interactive one, such as a control among its adornments,
--- is on top of it and takes the press ('innermostHit').
+-- is on top of it and takes the press ('innermostHit'). Where a stack or a
+-- pinned node can draw a node given 'PointerBlock' over them, a pass before
+-- finds whether one takes the press, and then there are none.
 targetsAt :: Context -> V2 -> IO PressTargets
 targetsAt ctx@Context {ctxNodeArena = na} mouse = do
   top <- overlayHitRoot ctx mouse

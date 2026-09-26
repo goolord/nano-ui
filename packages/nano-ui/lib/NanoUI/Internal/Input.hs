@@ -450,8 +450,9 @@ data MouseButton
   | MouseOther !Int
   -- ^ Any other button, by its number: buttons count from 1 as SDL numbers
   -- them, left, middle, right, back and forward first, so the first button
-  -- past those is @MouseOther 6@. 'MouseButtons' tracks the buttons up to
-  -- 32.
+  -- past those is @MouseOther 6@ ('mouseButtonNumber'). A set holds
+  -- @MouseOther 1@ to @MouseOther 5@ as the buttons named above, and tracks
+  -- the buttons up to 32.
   deriving (Eq, Ord, Show)
 
 -- | The button with a number, counting left, middle, right, back and
