@@ -32,6 +32,8 @@ import NanoUI.Internal.Widgets.Layout (columnWith, labelEx, rowWith, separator)
 import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Widgets.Node (HasResponse, Response (..), containerResponse, inertResponse, respClicked, respHovered, respRightClicked)
 import NanoUI.Internal.Widgets.Popup (PopupConfig (..), defaultPopupConfig, popup)
+import NanoUI.Internal.Widgets.Shortcut (shortcut)
+import NanoUI.Internal.Shortcut (Shortcut, shortcutLabel)
 
 -- | A context menu for any widget response, opened by right-clicking it.
 -- Returns the menu body's result while the menu is open.
@@ -127,12 +129,17 @@ menuItem txt = respClicked <$> menuItem' txt
 menuItem' :: Ui :> es => Text -> Eff es Response
 menuItem' txt = menuItemWith txt Nothing True
 
--- | Menu row with a shortcut hint after the label. The hint is only text;
--- handle the key itself elsewhere.
+-- | Menu row bound to a shortcut, with the chord after the label, as its
+-- 'shortcutLabel'. 'True' on the frame it is clicked or, while its menu is
+-- open, its chord is pressed ('shortcut'). Bind the chord with 'shortcut'
+-- outside the menu for it to work while the menu is closed.
 --
--- > whenM (menuItemShortcut "Save" "Ctrl+S") saveFile
-menuItemShortcut :: Ui :> es => Text -> Text -> Eff es Bool
-menuItemShortcut txt hint = respClicked <$> menuItemWith txt (Just hint) True
+-- > whenM (menuItemShortcut "Save" (ctrl <> key 's')) saveFile
+menuItemShortcut :: Ui :> es => Text -> Shortcut -> Eff es Bool
+menuItemShortcut txt chord = do
+  clicked <- respClicked <$> menuItemWith txt (Just (shortcutLabel chord)) True
+  pressed <- shortcut chord
+  pure (clicked || pressed)
 
 -- | Dimmed menu row that cannot be clicked.
 menuItemDisabled :: Ui :> es => Text -> Eff es ()

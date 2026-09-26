@@ -81,7 +81,8 @@ backends' reducer runners fold them into the model.
 - Row, column, grid, and stacked (`stack`) layout with scrolling, wrapping
   (`wrap`), and pinned children (`pinAt`). Layout options are
   `Layout -> Layout` modifiers, as in `columnWith (gap 8 . padAll 12)`.
-- Keyboard focus and navigation for every control.
+- Keyboard focus and navigation for every control, and shortcuts, as in
+  `shortcut (ctrl <> key 's')`.
 - Themes, including ones built from Base16 schemes, changed for part of a view
   with `styled`, as in
   `styled (primary . buttonStyle (cornerRadius 6)) (button "Save")`.

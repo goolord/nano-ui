@@ -33,7 +33,7 @@ fails the build instead of swapping.
 | `nano-ui-rgfw-test` | RGFW input translation, the glyph atlas, and frames drawn by a software rasteriser kept in the test suite |
 | `nano-ui-rgfw-bindings-test` | Native event union layouts, key width, modifiers, and constant values |
 | `nano-ui-font-search-test`, `nano-ui-font-effects-test` | SDL font discovery, measurement, and handle lifetimes |
-| `nano-ui-render-test` | SDL cursor translation; native SDL readback of partial-damage triangles and clipping, and images |
+| `nano-ui-render-test` | SDL key and cursor translation; native SDL readback of partial-damage triangles and clipping, and images |
 | `nano-ui-sdl-pointer-test` | SDL mouse buttons, through SDL's event queue |
 | `nano-ui-diagrams-test` | Diagram conversion, tessellation, and charts |
 | `nano-ui-form-test` | Form scopes, validation, reset, and submission |

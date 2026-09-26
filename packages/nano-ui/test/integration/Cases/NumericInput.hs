@@ -24,7 +24,7 @@ runNumericInputTest ctx failed = do
   (resp, _) <- warmup2 ctx inp ui
   _ <- step (key KeyTab)
   assertEq failed 13 =<< step (key KeyUp)
-  assertEq failed 23 =<< step ((key KeyUp) {inputModifiers = Modifiers True False False})
+  assertEq failed 23 =<< step ((key KeyUp) {inputModifiers = Modifiers True False False False})
   assertEq failed 23 =<< step (inp {inputChars = "4x"})
   assertEq failed 100 =<< step (inp {inputChars = "4"})
   assert failed =<< spanShown ctx "234"

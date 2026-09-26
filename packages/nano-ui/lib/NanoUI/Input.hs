@@ -19,6 +19,10 @@ module NanoUI.Input
   , inputKeysNull
   , inputKeysElem
   , foldInputKeys
+  , applyKey
+  , noModifiers
+  , modPrimary
+  , primaryModifiers
 
     -- * File drops
   , DropType (..)

@@ -79,6 +79,7 @@ module NanoUI
     -- from the next ('NanoUI.Monad.focusedWidget' says which has it):
     --
     -- > (resp, query') <- searchInput' "Find" query
+    -- > findPressed <- shortcut (ctrl <> key 'f')
     -- > when findPressed (requestFocus (respId resp))
   , holdFocus
   , requestFocus
@@ -795,6 +796,30 @@ module NanoUI
   , foldInputKeys
   , takeEscape
 
+    -- * Keyboard
+
+    -- | A view listens for a key with 'keyPressed', 'keyReleased' and
+    -- 'keyHeld', and binds a command to a chord with 'shortcut'. A chord is
+    -- modifiers and a key put together with '<>', from "NanoUI.Shortcut":
+    --
+    -- > whenM (shortcut (ctrl <> key 's')) save
+    -- > whenM (shortcut (cmdOrCtrl <> shift <> key 'p')) (setPaletteOpen True)
+    --
+    -- A shortcut fires once per press, with exactly its modifiers held, for
+    -- the first shortcut declared for the chord. It stays quiet behind a
+    -- modal and for a chord the widget with the keyboard acts on itself, so
+    -- Ctrl+A in a focused text field selects its text rather than running a
+    -- shortcut bound to Ctrl+A ('shortcut' has the rules). A
+    -- 'menuItemShortcut' row binds its chord the same way while its menu is
+    -- open.
+  , keyPressed
+  , keyReleased
+  , keyHeld
+  , shortcut
+  , noModifiers
+  , modPrimary
+  , primaryModifiers
+
     -- * Debugging
 
     -- | 'explainLayout' shows how a view was laid out: it outlines every
@@ -845,6 +870,7 @@ import NanoUI.Internal.Widgets.Radio
 import NanoUI.Widgets.RichText
 import NanoUI.Internal.Widgets.Select
 import NanoUI.Internal.Widgets.Sensor
+import NanoUI.Internal.Widgets.Shortcut
 import NanoUI.Internal.Widgets.Slider
 import NanoUI.Internal.Widgets.Table
 import NanoUI.Internal.Widgets.Tabs

@@ -46,7 +46,8 @@ counter = do
   and `scrollIntoView`. `getScrollMetrics` gives a virtualized list the
   viewport and offset it needs to pick its rows, and `sensor` says when a
   widget scrolls into view.
-- Keyboard focus and navigation for every control, and focus from code.
+- Keyboard focus and navigation for every control, focus from code, and
+  shortcuts, as in `shortcut (ctrl <> key 's')`.
 - Middle and side mouse buttons, cursor shapes, and tooltips with a hover
   delay.
 - Shaped text in the SDL backend, with fallback fonts for other scripts and

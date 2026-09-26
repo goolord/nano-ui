@@ -20,6 +20,7 @@ module NanoUI.Internal.Frame.Input
   , PressTargets (..)
   , targetsAt
   , constrainFocusToModal
+  , recordFocusKind
   , needsRedraw
   , pointerDragActive
   , textFieldActive
@@ -32,6 +33,7 @@ module NanoUI.Internal.Frame.Input
 import Control.Applicative ((<|>))
 import Control.Monad (filterM, mfilter, unless, when)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.Functor ((<&>))
 import Data.IntSet qualified as IS
 import Data.Maybe (fromMaybe, isJust, isNothing, listToMaybe, maybeToList)
 import NanoUI.Internal.Context
@@ -373,6 +375,23 @@ constrainFocusToModal ctx = do
   focus <- readIORef (ctxFocusId ctx)
   when (hashWidgetId focus /= 0) $
     unlessM (widgetOverlayAllowed ctx focus) $ writeIORef (ctxFocusId ctx) (WidgetId 0)
+
+-- | Note in 'isFocusKind' what kind of widget has the keyboard, from the
+-- last frame's nodes. Runs before the view, which rebuilds them, so that a
+-- shortcut declared ahead of the focused widget knows about it too.
+recordFocusKind :: Context -> IO ()
+recordFocusKind ctx = do
+  focus <- readIORef (ctxFocusId ctx)
+  kind <-
+    if hashWidgetId focus == 0
+      then pure FocusNone
+      else withWidgetNode ctx focus FocusNone $ \idx ->
+        getNodeType (ctxNodeArena ctx) idx <&> \case
+          NodeTextInput -> FocusTextField False
+          NodeTextArea -> FocusTextField True
+          _ -> FocusControl
+  was <- getsInteraction ctx isFocusKind
+  when (kind /= was) $ modifyInteraction ctx (\s -> s {isFocusKind = kind})
 
 -- | Whether state or input changes require a frame. Arguments are previous
 -- and current input. Tests hover only after pointer motion; timed wake

@@ -14,10 +14,12 @@ module NanoUI.Internal.Context.Overlay
   , endModal
   , beginFrameModal
   , modalDamageFlip
+  , takeKeyPress
   ) where
 
 import Data.IORef (readIORef)
 import Data.IntMap.Strict qualified as IM
+import Data.IntSet qualified as IS
 
 import NanoUI.Internal.Context.Core
 import NanoUI.Internal.Context.Types (Context (..), InteractionState (..), OverlayState (..), PointerRoute (..), intKey)
@@ -105,8 +107,8 @@ endModal :: Context -> IO ()
 endModal ctx =
   modifyOverlay ctx (\os -> os {osModalDepth = max 0 (osModalDepth os - 1)})
 
--- | Save the previous modal flag, then clear current depth and Escape and Tab
--- consumption.
+-- | Save the previous modal flag, then clear current depth and Escape, Tab
+-- and key consumption.
 beginFrameModal :: Context -> IO ()
 beginFrameModal ctx =
   modifyOverlay ctx $ \os ->
@@ -116,7 +118,17 @@ beginFrameModal ctx =
       , osModalDepth = 0
       , osEscapeConsumed = False
       , osTabConsumed = False
+      , osKeysTaken = IS.empty
       }
+
+-- | Take the key press at position @i@ of the frame's keys for a shortcut.
+-- 'False' when one already took it.
+takeKeyPress :: Context -> Int -> IO Bool
+takeKeyPress ctx i = do
+  taken <- getsOverlay ctx (IS.member i . osKeysTaken)
+  if taken
+    then pure False
+    else True <$ modifyOverlay ctx (\os -> os {osKeysTaken = IS.insert i (osKeysTaken os)})
 
 -- | Whether modal presence changed since the preceding frame.
 modalDamageFlip :: Context -> IO Bool

@@ -162,6 +162,7 @@ test-suite nano-ui-terminal-test
     hs-source-dirs:   test
     build-depends:
         bytestring ^>=0.12,
+        nano-ui ^>=0.1,
         nano-ui-demo:demo-common,
         streaming ^>=0.2,
         text ^>=2.1,

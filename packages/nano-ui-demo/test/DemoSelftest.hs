@@ -212,6 +212,10 @@ selftest continuous = do
     pressKey KeyEscape
     spansClosed <- collectOverlayTextSpans ctx' base
     when (hasText "Immediate-mode" spansClosed) $ fail "selftest: Escape did not dismiss About"
+    -- F1 is the About button's shortcut.
+    pressKey (KeyF 1)
+    expectOverlay "selftest: F1 did not open About" "Immediate-mode"
+    pressKey KeyEscape
     void . press "Debug" =<< collectTextSpans ctx'
     expectOverlay "selftest: Debug window missing" "Frame"
     expectOverlay "selftest: Debug Runtime section missing" "Runtime"

@@ -6,6 +6,8 @@ import Data.ByteString qualified as B
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as E
 import Data.Vector.Unboxed qualified as V
+import NanoUI (Input (..), Key (..), Modifiers (..), noModifiers)
+import NanoUI.Backend (emptyInput, inputKeysFromList)
 import SdlTerminal hiding (main)
 import Streaming (Of (..))
 import System.Timeout (timeout)
@@ -78,6 +80,11 @@ main = do
     V.length (history capped) <= 2000 * 80
       && floor (back capped) * 80 == V.length (history capped)
       && V.length (viewport capped) == V.length (screen blank)
+  let
+    pressed mods k = keys emptyInput {inputKeys = inputKeysFromList [k], inputModifiers = mods}
+  check "function keys and Shift+Tab send xterm's sequences" $
+    map (pressed noModifiers) [KeyF 1, KeyF 5, KeyF 12, KeyTab] == ["\ESCOP", "\ESC[15~", "\ESC[24~", "\t"]
+      && pressed noModifiers {modShift = True} KeyTab == "\ESC[Z"
 
   result <- timeout 8000000 $ withPty $ \fd -> do
     let

@@ -4,6 +4,7 @@ import Control.Exception (IOException, bracket, try)
 import Control.Monad (forM_)
 import Data.ByteString qualified as BS
 import Data.Either (isLeft)
+import Data.Foldable (toList)
 import Data.List (nub)
 import Data.Vector.Unboxed qualified as U
 import Data.Word (Word32)
@@ -14,7 +15,7 @@ import NanoUI
   , UiCursorKind (..), V2 (..), box, button, checkbox, colorRGBA, column, defaultImageConfig, defaultLayout, drawing
   , fixedWH, grow, imageConfigured', label, respRect, tomorrowNightMinDarkTheme, window
   )
-import NanoUI.Input (Input (..), Modifiers (..), emptyInput)
+import NanoUI.Input (Input (..), Key (..), Modifiers (..), emptyInput, noModifiers)
 import NanoUI.Internal.Context (Context (..), setDrawSquareGeometry)
 import NanoUI.Internal.Layout.Arena (NodeType (..), arenaCount, getNodeRect, getNodeType)
 import NanoUI.Rgfw.Internal.Context (newRgfwContext)
@@ -231,24 +232,39 @@ testSpanQuads = do
   (n3, _) <- quads "A" (Rect 150 80 10 10)
   assert "span quads: clip outside the framebuffer emits nothing" (n3 == 0)
 
--- | RGFW keyboard translation: repeated letters all type, and one Ctrl+letter
--- keystroke types its letter once, whichever of its key-char and key-press
--- events RGFW queues first.
+-- | RGFW keyboard translation: repeated letters all type, one Ctrl+letter
+-- keystroke is a key chord that types nothing, whichever of its key-char and
+-- key-press events RGFW queues first, and keys come up and repeat as they
+-- should.
 testRgfwTyping :: IO ()
 testRgfwTyping = do
   let chars = inputChars . applied
-      ctrlHeld = modCtrl . inputModifiers . applied
+      keys = toList . inputKeys . applied
       keyL = fromIntegral (fromEnum 'l')
       plainL = [EventKeyChar 'l', EventKeyPress keyL 0]
       ctrlLCharFirst = [EventKeyChar '\x0c', EventKeyPress keyL R.rgfw_modControl]
       ctrlLPressFirst = [EventKeyPress keyL R.rgfw_modControl, EventKeyChar '\x0c']
+      chord evs = chars evs == "" && keys evs == [KeyChar 'l'] && modCtrl (inputModifiers (applied evs))
+      released = applied [EventKeyPress keyL 0, EventKeyRelease keyL 0]
   assert "RGFW typing: repeated key-char events all type" (chars [EventKeyChar 'l', EventKeyChar 'l'] == "ll")
   assert "RGFW typing: repeated keystrokes all type" (chars (plainL ++ plainL) == "ll")
-  assert "RGFW typing: Ctrl+L queued char-first types once" (chars ctrlLCharFirst == "l" && ctrlHeld ctrlLCharFirst)
-  assert "RGFW typing: Ctrl+L queued press-first types once" (chars ctrlLPressFirst == "l" && ctrlHeld ctrlLPressFirst)
-  assert "RGFW typing: a Ctrl+L press without a char types" (chars [EventKeyPress keyL R.rgfw_modControl] == "l")
-  assert "RGFW typing: Ctrl+L twice types twice"
-    (chars (ctrlLCharFirst ++ ctrlLCharFirst) == "ll" && chars (ctrlLPressFirst ++ ctrlLPressFirst) == "ll")
+  assert "RGFW typing: a keystroke is its character key as well" (keys plainL == [KeyChar 'l'])
+  assert "RGFW typing: Ctrl+L queued char-first is a chord" (chord ctrlLCharFirst)
+  assert "RGFW typing: Ctrl+L queued press-first is a chord" (chord ctrlLPressFirst)
+  assert "RGFW typing: Ctrl+L twice presses twice" (keys (ctrlLCharFirst ++ ctrlLPressFirst) == [KeyChar 'l', KeyChar 'l'])
+  assert "RGFW keys: a release is reported and leaves nothing held"
+    (toList (inputKeysReleased released) == [KeyChar 'l'] && null (inputKeysHeld released))
+  assert "RGFW keys: a held key is held" (toList (inputKeysHeld (applied [EventKeyPress keyL 0])) == [KeyChar 'l'])
+  assert "RGFW keys: letters repeat, Enter does not" $
+    keys [EventKeyPress keyL 0, EventKeyRepeat keyL 0] == [KeyChar 'l', KeyChar 'l']
+      && keys [EventKeyPress R.rgfw_keyReturn 0, EventKeyRepeat R.rgfw_keyReturn 0] == [KeyEnter]
+  assert "RGFW keys: function keys, paging and Super" $
+    keys [EventKeyPress (R.rgfw_keyF1 + 4) 0, EventKeyPress R.rgfw_keyPageDown 0] == [KeyF 5, KeyPageDown]
+      && inputModifiers (applied [EventKeyPress keyL R.rgfw_modSuper]) == noModifiers {modSuper = True}
+  assert "RGFW keys: the keypad types with Num Lock and navigates without" $
+    keys [EventKeyPress (R.rgfw_keyPad1 + 1) R.rgfw_modNumLock] == [KeyChar '2']
+      && keys [EventKeyPress (R.rgfw_keyPad1 + 1) 0] == [KeyDown]
+      && keys [EventKeyPress R.rgfw_keyPadReturn 0] == [KeyEnter]
 
 -- | Wheel events queued in one batch add up rather than keeping the last.
 -- The middle button is held and clicks like the others; the side buttons

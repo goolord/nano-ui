@@ -7,6 +7,8 @@ module NanoUI.Testing.Harness
   , holdAt
   , releaseAt
   , keyInp
+  , chordInp
+  , keyUpInp
   , tabInp
   , withInputOff
   , withDelta
@@ -67,6 +69,7 @@ import NanoUI
 import NanoUI.Backend
 import NanoUI.Internal.Font (alignedTextPen, textInkEnd)
 import NanoUI.Internal.Types (clamp)
+import NanoUI.Shortcut (Shortcut (..))
 import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, assertJustM, assertLt, bump, evalUi, run2Frames, withInput)
 
@@ -216,6 +219,16 @@ releaseAt press = applyMouseButton MouseLeft False press {inputMousePressed = Fa
 -- | A single key-down frame.
 keyInp :: Key -> Input -> Input
 keyInp k inp = inp {inputKeys = inputKeysFromList [k]}
+
+-- | A frame pressing a chord, such as @ctrl <> key 'a'@: its key goes down
+-- with exactly the chord's modifiers held.
+chordInp :: Shortcut -> Input -> Input
+chordInp (Shortcut k mods) inp =
+  (maybe id (`applyKey` True) k inp {inputKeys = mempty}) {inputModifiers = mods}
+
+-- | A frame releasing a key, which leaves the held keys.
+keyUpInp :: Key -> Input -> Input
+keyUpInp k inp = applyKey k False inp {inputKeys = mempty, inputKeysReleased = mempty}
 
 -- | Step the tab focus to the next focusable.
 tabInp :: Input -> Input

@@ -12,10 +12,10 @@ main :: IO ()
 main = hspec spec
 
 noMods :: Modifiers
-noMods = Modifiers False False False
+noMods = Modifiers False False False False
 
 ctrlMods :: Modifiers
-ctrlMods = Modifiers False True False
+ctrlMods = Modifiers False True False False
 
 -- | One frame's typed text and keys, with modifiers held.
 frameInput :: Modifiers -> T.Text -> [Key] -> Input
@@ -200,24 +200,22 @@ spec = do
       let
         s0 = TA.initTextAreaState ""
         typed = foldl' (\s c -> typeArea noMods (T.singleton c) [] s) s0 ("one two" :: String)
-        undone = typeArea ctrlMods "z" [] typed
-        redone = typeArea (Modifiers True True False) "z" [] undone
+        undone = typeArea ctrlMods "" [KeyChar 'z'] typed
+        redone = typeArea (Modifiers True True False False) "" [KeyChar 'z'] undone
       TB.toText (TA.buffer undone) `shouldBe` "one "
       TB.toText (TA.buffer redone) `shouldBe` "one two"
-      -- Some backends deliver Ctrl+letter as its control code.
-      TE.inputTextCommands TE.singleLineMode (frameInput (Modifiers True True False) "\x1a" [])
-        `shouldBe` [TE.Redo]
-      TE.inputTextCommands TE.singleLineMode (frameInput ctrlMods "\x1a\x19" [])
+      -- A chord is its key; characters typed with Ctrl held are not typed.
+      TE.inputTextCommands TE.singleLineMode (frameInput ctrlMods "z\x1a" [KeyChar 'z', KeyChar 'y'])
         `shouldBe` [TE.Undo, TE.Redo]
 
     it "Ctrl+Alt types characters (AltGr) while Ctrl alone runs shortcuts" $ do
       let
         s0 = typeArea noMods "" [KeyEnd] (TA.initTextAreaState "ab")
-        altGr = Modifiers False True True
+        altGr = Modifiers False True True False
       TB.toText (TA.buffer (typeArea altGr "@€" [] s0)) `shouldBe` "ab@€"
-      TE.inputTextCommands TE.singleLineMode (frameInput altGr "@" [])
+      TE.inputTextCommands TE.singleLineMode (frameInput altGr "@" [KeyChar 'q'])
         `shouldBe` [TE.InsertText "@"]
-      TE.inputTextCommands TE.singleLineMode (frameInput ctrlMods "a" [KeyLeft])
+      TE.inputTextCommands TE.singleLineMode (frameInput ctrlMods "" [KeyChar 'a', KeyLeft])
         `shouldBe` [TE.SelectAll, TE.Move TE.WordLeft False]
 
     it
@@ -248,7 +246,7 @@ spec = do
             TB.getCursor (TA.buffer right) `shouldBe` TB.Cursor 0 3
             TB.getCursor (TA.buffer left) `shouldBe` TB.Cursor 0 0
         )
-        [ctrlMods, Modifiers False False True]
+        [ctrlMods, Modifiers False False True False]
 
     it "scrolls the caret into a one-line viewport" $ do
       let
@@ -262,8 +260,8 @@ spec = do
       let
         s0 = TA.initTextAreaState "hello"
         atEnd = typeArea noMods "" [KeyEnd] s0
-        fromLower = typeArea ctrlMods "a" [] atEnd
-        fromUpper = typeArea ctrlMods "A" [] atEnd
+        fromLower = typeArea ctrlMods "" [KeyChar 'a'] atEnd
+        fromUpper = typeArea ctrlMods "" [KeyChar 'A'] atEnd
       TB.getCursor (TA.buffer fromLower) `shouldBe` TB.Cursor 0 5
       TA.selectionAnchor fromLower `shouldBe` TB.Cursor 0 0
       TB.getCursor (TA.buffer fromUpper) `shouldBe` TB.Cursor 0 5

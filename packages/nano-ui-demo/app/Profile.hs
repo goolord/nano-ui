@@ -21,6 +21,7 @@ import NanoUI.Internal.Debug (debugCadence, newDebugSampler, refreshDebugSnapsho
 import NanoUI.Diagrams
 import NanoUI.Internal.Context (ctxNodeArena)
 import NanoUI.Internal.Layout.Arena (NodeType (NodeButton), findNodeRevM, getNodeType, getNodeRect, getText)
+import NanoUI.Shortcut
 import NanoUI.Testing
   ( Context
   , newPixelContext
@@ -322,9 +323,9 @@ tabControlsUi = columnWith (tight . gap 8 . fillW) $ do
     btnMenu <- button' "Right-click Menu"
     void $ contextMenu btnMenu $ do
       menuHeader "Context Menu"
-      void $ menuItemShortcut "Cut" "Ctrl+X"
-      void $ menuItemShortcut "Copy" "Ctrl+C"
-      void $ menuItemShortcut "Paste" "Ctrl+V"
+      void $ menuItemShortcut "Cut" (ctrl <> key 'x')
+      void $ menuItemShortcut "Copy" (ctrl <> key 'c')
+      void $ menuItemShortcut "Paste" (ctrl <> key 'v')
 
 tabListUi :: NanoUI ()
 tabListUi = columnWith (tight . gap 8 . fillW) $ do
@@ -383,7 +384,7 @@ registered = (maybe (liftIO (fail "registerImageRgba failed")) pure =<<)
 
 -- | A sortable table. Build the rows outside the frame.
 benchTable :: T.Text -> [DemoPerson] -> NanoUI ()
-benchTable key rows = void $ tableWith (fixedH 400 . gap 8) key colPeople rows (SortCol 0 SortAsc)
+benchTable tableKey rows = void $ tableWith (fixedH 400 . gap 8) tableKey colPeople rows (SortCol 0 SortAsc)
 
 tablePeople :: Int -> [DemoPerson]
 tablePeople n = [DemoPerson (T.pack ("Name " <> show i)) (T.pack ("Dept " <> show (i `mod` 5))) (20 + i) "City" "Role" | i <- [1 .. n]]

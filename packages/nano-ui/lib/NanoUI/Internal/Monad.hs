@@ -343,6 +343,7 @@ disabledWhen True m =
         { inputMouseDown = False
         , inputMouseRightDown = False
         , inputMouseMiddleDown = False
+        , inputKeysHeld = mempty
         }
     enter ctx outer
       | outer .&. 1 /= 0 = pure outer
@@ -465,6 +466,7 @@ focusedWidget = withContext getFocusId
 -- whatever has it. For a search box that Ctrl+F sends the keys to:
 --
 -- > (resp, query') <- searchInput' "Find" query
+-- > findPressed <- shortcut (ctrl <> key 'f')
 -- > when findPressed (requestFocus (respId resp))
 --
 -- The request is carried out at the end of the frame, against the frame's

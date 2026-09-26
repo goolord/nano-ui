@@ -20,6 +20,7 @@ import Foreign.Ptr (Ptr, castPtr, nullPtr, plusPtr)
 import Foreign.Storable (peekByteOff, pokeByteOff)
 import GHC.Clock (getMonotonicTimeNSec)
 import GHC.Conc (getAllocationCounter)
+import Keyboard (keyboardTranslation)
 import NanoUI
   ( Color, ImageConfig (..), ImageId (..), Rect (..), Rotation (..), colorRGBA, column, defaultImageConfig, defaultLayout
   , fixedWH, imageConfigured', respRect
@@ -240,6 +241,7 @@ main = do
   unless (bench || native) $ do
     setEnv "SDL_VIDEODRIVER" "dummy"
     setEnv "SDL_RENDER_DRIVER" "software"
+  unless bench keyboardTranslation
   ctx <- newPixelContext
   withSdlBench ctx $ \_ env -> bracket newImageAtlas destroyImageAtlas $ \images ->
     bracket (newRenderBatch (sdlRenderer env)) destroyRenderBatch $ \batch -> do

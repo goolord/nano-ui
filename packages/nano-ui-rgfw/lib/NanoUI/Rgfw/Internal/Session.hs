@@ -17,11 +17,11 @@ module NanoUI.Rgfw.Internal.Session
 import Control.Concurrent (rtsSupportsBoundThreads, runInBoundThread)
 import Control.Exception (bracket)
 import Control.Monad (void, when)
-import Data.Bits ((.|.))
-import Data.Char (chr, isPrint, ord)
+import Data.Bits ((.&.))
+import Data.Char (chr, isDigit, isPrint, toLower)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.List (find)
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, mapMaybe)
 import qualified Data.Text as T
 import Data.Typeable (Typeable)
 import Data.Word (Word8, Word32)
@@ -41,10 +41,12 @@ import NanoUI.Backend
   , Key (..)
   , Modifiers (..)
   , MouseButton (..)
-  , appendInputKey
+  , applyKey
   , applyMouseButton
   , cursorFallback
   , emptyInput
+  , keyRepeats
+  , keypadKey
   , modifiersFromBits
   , setExplainLayout
   )
@@ -116,24 +118,57 @@ defaultRgfwOptions =
     , optExplainLayout = False
     }
 
-mapRgfwKey :: Word32 -> Maybe Key
-mapRgfwKey k
-  | k == R.rgfw_keyBackSpace = Just KeyBackspace
-  | k == R.rgfw_keyDelete = Just KeyDelete
-  | k == R.rgfw_keyReturn = Just KeyEnter
-  | k == R.rgfw_keyEscape = Just KeyEscape
-  | k == R.rgfw_keyTab = Just KeyTab
-  | k == R.rgfw_keyUp = Just KeyUp
-  | k == R.rgfw_keyDown = Just KeyDown
-  | k == R.rgfw_keyLeft = Just KeyLeft
-  | k == R.rgfw_keyRight = Just KeyRight
-  | k == R.rgfw_keyEnd = Just KeyEnd
-  | k == R.rgfw_keyHome = Just KeyHome
+-- | The key an RGFW key code names, given the modifier bits it came with.
+mapRgfwKey :: Word32 -> Word8 -> Maybe Key
+mapRgfwKey k m
+  | Just named <- lookup k namedRgfwKeys = Just named
+  | Just c <- lookup k keypadRgfwKeys = keypadKey (m .&. R.rgfw_modNumLock /= 0) c
+  | k >= R.rgfw_keyF1 && k <= R.rgfw_keyF24 = Just (KeyF (fromIntegral (k - R.rgfw_keyF1) + 1))
+  -- Below 128 the key codes are the ASCII characters the keys type unshifted
+  -- in a US layout.
+  | k > 32 && k < 127 = Just (KeyChar (toLower (chr (fromIntegral k))))
   | otherwise = Nothing
 
--- | Decode RGFW key modifier bits. Super (Cmd) counts as Ctrl.
+namedRgfwKeys :: [(Word32, Key)]
+namedRgfwKeys =
+  [ (R.rgfw_keyEscape, KeyEscape)
+  , (R.rgfw_keyReturn, KeyEnter)
+  , (R.rgfw_keyPadReturn, KeyEnter)
+  , (R.rgfw_keyTab, KeyTab)
+  , (R.rgfw_keyBackSpace, KeyBackspace)
+  , (R.rgfw_keyDelete, KeyDelete)
+  , (R.rgfw_keyLeft, KeyLeft)
+  , (R.rgfw_keyRight, KeyRight)
+  , (R.rgfw_keyUp, KeyUp)
+  , (R.rgfw_keyDown, KeyDown)
+  , (R.rgfw_keyHome, KeyHome)
+  , (R.rgfw_keyEnd, KeyEnd)
+  , (R.rgfw_keyPageUp, KeyPageUp)
+  , (R.rgfw_keyPageDown, KeyPageDown)
+  , (R.rgfw_keyInsert, KeyInsert)
+  , (R.rgfw_keySpace, KeySpace)
+  , (R.rgfw_keyPrintScreen, KeyPrintScreen)
+  , (R.rgfw_keyPause, KeyPause)
+  , (R.rgfw_keyCapsLock, KeyCapsLock)
+  , (R.rgfw_keyNumLock, KeyNumLock)
+  , (R.rgfw_keyScrollLock, KeyScrollLock)
+  , (R.rgfw_keyMenu, KeyMenu)
+  , (R.rgfw_keyPadSlash, KeyChar '/')
+  , (R.rgfw_keyPadMultiply, KeyChar '*')
+  , (R.rgfw_keyPadMinus, KeyChar '-')
+  , (R.rgfw_keyPadPlus, KeyChar '+')
+  , (R.rgfw_keyPadEqual, KeyChar '=')
+  ]
+
+-- | The keypad digits and point, by the character each types ('keypadKey').
+keypadRgfwKeys :: [(Word32, Char)]
+keypadRgfwKeys =
+  zip
+    [R.rgfw_keyPad0, R.rgfw_keyPad1, R.rgfw_keyPad2, R.rgfw_keyPad3, R.rgfw_keyPad4, R.rgfw_keyPad5, R.rgfw_keyPad6, R.rgfw_keyPad7, R.rgfw_keyPad8, R.rgfw_keyPad9, R.rgfw_keyPadPeriod]
+    "0123456789."
+
 modsFromRgfw :: Word8 -> Modifiers
-modsFromRgfw m = modifiersFromBits m R.rgfw_modShift (R.rgfw_modControl .|. R.rgfw_modSuper) R.rgfw_modAlt
+modsFromRgfw m = modifiersFromBits m R.rgfw_modShift R.rgfw_modControl R.rgfw_modAlt R.rgfw_modSuper
 
 -- | The RGFW standard cursor that shows a cursor kind, or its
 -- 'cursorFallback'. 'R.rgfw_mouseArrow' selects the platform's default arrow.
@@ -354,11 +389,13 @@ data RgfwEvent
   | RgfwEvMotion !Float !Float
   | RgfwEvButton !Word8 !Bool
   | RgfwEvScroll !Float !Float
-  | RgfwEvChar !Char !Bool -- ^ typed character; True when a Ctrl chord typed it
-  | RgfwEvKeyPress !Word32 !Word8
-  | RgfwEvKeyRelease !Word8
+  | RgfwEvChar !Char -- ^ typed character
+  | RgfwEvKeyPress !Word32 !Word8 !Bool -- ^ key, modifiers, and whether an auto-repeat
+  | RgfwEvKeyRelease !Word32 !Word8
 
 -- | Drain the RGFW queue, recording size and scale changes for the next sync.
+-- A key that types a character is reported by what it types in the current
+-- layout ('layoutKey').
 pollRgfwEvents :: R.Window -> Ptr R.RGFW_event -> IORef Float -> IORef Float -> IORef (Int, Int) -> IO [RgfwEvent]
 pollRgfwEvents win evPtr scaleRef monScaleRef winSizeRef = do
   raw <- drain []
@@ -375,51 +412,36 @@ pollRgfwEvents win evPtr scaleRef monScaleRef winSizeRef = do
         R.EventScaleUpdate sx _ -> do
           writeIORef monScaleRef (if sx > 0 then sx else 1)
           drain (ev : acc)
+        R.EventKeyPress k m -> layoutKey k >>= \k' -> drain (R.EventKeyPress k' m : acc)
+        R.EventKeyRepeat k m -> layoutKey k >>= \k' -> drain (R.EventKeyRepeat k' m : acc)
+        R.EventKeyRelease k m -> layoutKey k >>= \k' -> drain (R.EventKeyRelease k' m : acc)
         _ -> drain (ev : acc)
-
--- | What the previous event typed. One keystroke can queue both a key-char
--- and a Ctrl+letter key-press event, in either order (X11 queues the char
--- first), and must type its letter once.
-data Typed = TypedNothing | TypedByChar !Char | TypedByChord !Char
-  deriving (Eq)
+    -- RGFW names a physical key by what it types in a US layout. A letter or
+    -- punctuation key takes what it types in the current one when that is
+    -- ASCII; the digit row keeps its digits, as some layouts type symbols
+    -- there unshifted.
+    layoutKey k
+      | k > 32 && k < 127 && not (isDigit (chr (fromIntegral k))) =
+          maybe k (\mapped -> if mapped > 32 && mapped < 127 then mapped else k) <$> R.physicalToMappedKey k
+      | otherwise = pure k
 
 -- | Translate a batch of raw events in queue order. Pointer positions are
--- divided by the logical scale. A Ctrl+letter press types its letter unless
--- the adjacent key-char event of the same keystroke already did, and a
--- key-char event right after such a press is dropped.
+-- divided by the logical scale. A character event types its character
+-- unless it is a control code: Ctrl+letter comes as one on some platforms,
+-- and is a key chord, which the key event reports.
 decodeRgfwEvents :: Float -> [R.Event] -> [RgfwEvent]
-decodeRgfwEvents scale = go TypedNothing
-  where
-    go _ [] = []
-    go typed (ev : rest) = case ev of
-      R.EventKeyPress k m
-        | modCtrl (modsFromRgfw m) && k >= R.rgfw_keyA && k <= R.rgfw_keyZ ->
-            let c = chr (fromIntegral k)
-             in RgfwEvKeyPress k m
-                  : if typed == TypedByChar c
-                      then go TypedNothing rest
-                      else RgfwEvChar c True : go (TypedByChord c) rest
-      -- Control codes \x01..\x1a are Ctrl+letter chords; backspace and delete
-      -- are keys, not text.
-      R.EventKeyChar ch
-        | ch /= '\b' && ch /= '\DEL' && (isPrint ch || chord) ->
-            let c = if chord then chr (ord ch + 96) else ch
-             in if typed == TypedByChord c
-                  then go TypedNothing rest
-                  else RgfwEvChar c chord : go (TypedByChar c) rest
-        where
-          chord = ch >= '\x01' && ch <= '\x1a'
-      _ -> maybe id (:) (untyped ev) (go TypedNothing rest)
-    untyped ev = case ev of
-      R.EventWindowClose -> Just RgfwEvClose
-      R.EventWindowResize _ _ -> Just RgfwEvResize
-      R.EventScaleUpdate _ _ -> Just RgfwEvResize
-      R.EventMouseMotion x y -> Just (RgfwEvMotion (fromIntegral x / scale) (fromIntegral y / scale))
-      R.EventMouseButton btn down -> Just (RgfwEvButton btn down)
-      R.EventMouseScroll dx dy -> Just (RgfwEvScroll dx dy)
-      R.EventKeyPress k m -> Just (RgfwEvKeyPress k m)
-      R.EventKeyRelease _ m -> Just (RgfwEvKeyRelease m)
-      _ -> Nothing
+decodeRgfwEvents scale = mapMaybe $ \case
+  R.EventWindowClose -> Just RgfwEvClose
+  R.EventWindowResize _ _ -> Just RgfwEvResize
+  R.EventScaleUpdate _ _ -> Just RgfwEvResize
+  R.EventMouseMotion x y -> Just (RgfwEvMotion (fromIntegral x / scale) (fromIntegral y / scale))
+  R.EventMouseButton btn down -> Just (RgfwEvButton btn down)
+  R.EventMouseScroll dx dy -> Just (RgfwEvScroll dx dy)
+  R.EventKeyPress k m -> Just (RgfwEvKeyPress k m False)
+  R.EventKeyRepeat k m -> Just (RgfwEvKeyPress k m True)
+  R.EventKeyRelease k m -> Just (RgfwEvKeyRelease k m)
+  R.EventKeyChar ch | isPrint ch -> Just (RgfwEvChar ch)
+  _ -> Nothing
 
 -- | Accumulate a decoded event into frame input. The caller handles close
 -- and resize events separately; motion coordinates are already scaled by decoding.
@@ -436,14 +458,11 @@ applyRgfwEvent inp ev = case ev of
     | btn == R.rgfw_mouseMisc2 -> applyMouseButton MouseForward down inp
     | otherwise -> inp
   RgfwEvScroll dx dy -> inp {inputScroll = v2Add (inputScroll inp) (V2 dx dy)}
-  RgfwEvChar c chord ->
-    inp
-      { inputChars = T.snoc (inputChars inp) c
-      , inputModifiers = if chord then (inputModifiers inp) {modCtrl = True} else inputModifiers inp
-      }
-  RgfwEvKeyPress k m ->
-    inp
-      { inputKeys = maybe id appendInputKey (mapRgfwKey k) (inputKeys inp)
-      , inputModifiers = modsFromRgfw m
-      }
-  RgfwEvKeyRelease m -> inp {inputModifiers = modsFromRgfw m}
+  RgfwEvChar c -> inp {inputChars = T.snoc (inputChars inp) c}
+  RgfwEvKeyPress k m repeated ->
+    let keyed = case mapRgfwKey k m of
+          Just key | keyRepeats key || not repeated -> applyKey key True inp
+          _ -> inp
+     in keyed {inputModifiers = modsFromRgfw m}
+  RgfwEvKeyRelease k m ->
+    (maybe inp (\key -> applyKey key False inp) (mapRgfwKey k m)) {inputModifiers = modsFromRgfw m}

@@ -64,6 +64,7 @@ import NanoUI.Internal.Debug (CoreDebugSnapshot (..), formatExplainRows)
 import NanoUI.Diagrams
 import NanoUI.Internal.Monad (withContext)
 import NanoUI.Internal.Context (askHostIO, hostOrInit, setHost)
+import NanoUI.Shortcut
 import Paths_nano_ui_demo (getDataFileName)
 import Diagrams.Prelude
   ( Diagram
@@ -315,8 +316,9 @@ demoUi = do
           rowWith (tight . gap gapMicro . alignMid) $ do
             whenM (button "OK") (setClick "OK")
             whenM (button "Cancel") (setClick "Cancel")
-            whenM (button "About") (setAbout True)
-            whenM (button "Debug") (setDebug (not debugOpen))
+            -- F1 and F12 do what the buttons do; a shortcut takes no id.
+            whenM ((||) <$> button "About" <*> shortcut (key (KeyF 1))) (setAbout True)
+            whenM ((||) <$> button "Debug" <*> shortcut (key (KeyF 12))) (setDebug (not debugOpen))
 
       ----------------------------------------------------------- body ----
       responsiveRowCol 1000 (tight . gap gapLayout . fillW) $ do
@@ -423,9 +425,9 @@ demoUi = do
                 void $ contextMenu btnMenu $ do
                   menuHeader "Context Menu"
                   menuSeparator
-                  whenM (menuItemShortcut "Cut" "Ctrl+X") (setClick "Cut")
-                  whenM (menuItemShortcut "Copy" "Ctrl+C") (setClick "Copy")
-                  whenM (menuItemShortcut "Paste" "Ctrl+V") (setClick "Paste")
+                  whenM (menuItemShortcut "Cut" (ctrl <> key 'x')) (setClick "Cut")
+                  whenM (menuItemShortcut "Copy" (ctrl <> key 'c')) (setClick "Copy")
+                  whenM (menuItemShortcut "Paste" (ctrl <> key 'v')) (setClick "Paste")
                   menuSeparator
                   menuItemDisabled "Disabled Option"
               separator
@@ -641,8 +643,9 @@ demoUi = do
               heading "Searchable list"
               muted "Type to filter, or press Ctrl+F to jump here. The debounced search commits on a pause; the filtered list is cached and only recomputed when the committed query changes."
               (qResp, qVal) <- searchInput' "Filter people (name, role, city…)" searchText
-              -- Ctrl+F sends the keyboard to the filter.
-              when (modCtrl (inputModifiers rawInp) && T.any (`T.elem` "fF\x06") (inputChars rawInp)) (requestFocus (respId qResp))
+              -- Ctrl+F sends the keyboard to the filter. A shortcut takes no id.
+              findPressed <- shortcut (ctrl <> key 'f')
+              when findPressed (requestFocus (respId qResp))
               setSearchText qVal
               when (respChanged qResp) $ do
                 setSearchQuery qVal

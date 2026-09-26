@@ -4,6 +4,7 @@ import Spec
 import Data.Maybe (isJust)
 import NanoUI.Internal.Context (InteractionState (..), getFocusVisible, getsInteraction, intKey)
 import NanoUI.Internal.Store (anySelectOpen, fieldSelection, fieldText, findSlot)
+import NanoUI.Shortcut
 
 tests :: [Spec]
 tests =
@@ -69,9 +70,9 @@ runFocusRequestTabOrderTest :: Context -> IORef Int -> IO ()
 runFocusRequestTabOrderTest ctx failed = do
   (ui, ask) <- asking ctx $ \req -> column (mapM (fmap respId . button') ["A", "B", "C"] <* req)
   [a, b, c] <- warmup2 ctx inp ui
-  forM_ [(False, c), (True, a)] $ \(shift, next) -> do
+  forM_ [(key KeyTab, c), (shift <> key KeyTab, a)] $ \(chord, next) -> do
     assertEq failed b . snd =<< ask [b] inp
-    _ <- runFrame ctx (tabInp inp) {inputModifiers = Modifiers shift False False} ui
+    _ <- runFrame ctx (chordInp chord inp) ui
     assertEq failed next =<< getFocusId ctx
 
 -- | Asking for @WidgetId 0@ takes the keyboard off the field, and the loop can sleep.
@@ -130,7 +131,7 @@ runFocusRequestBlursPreviousTest ctx failed = do
   (typed, _) <- evalUi ctx inp {inputChars = "abc"} ui
   assertEq failed "abc" =<< readIORef queryRef
   assert failed (not (respChanged typed))
-  _ <- runFrame ctx inp {inputChars = "a", inputModifiers = Modifiers False True False} ui
+  _ <- runFrame ctx (chordInp (ctrl <> key 'a') inp) ui
   assertEq failed (0, 3) =<< selection
   _ <- ask [other] inp
   assertEq failed (3, 3) =<< selection

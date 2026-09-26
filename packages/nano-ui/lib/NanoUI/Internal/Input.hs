@@ -5,7 +5,10 @@
 module NanoUI.Internal.Input
   ( Key (..)
   , Modifiers (..)
+  , noModifiers
   , modifiersFromBits
+  , modPrimary
+  , primaryModifiers
   , Input (..)
   , DropType (..)
   , DropEvent (..)
@@ -13,6 +16,9 @@ module NanoUI.Internal.Input
   , inputInteracted
   , inputPointerHeld
   , appendInputKey
+  , applyKey
+  , keyRepeats
+  , keypadKey
   , appendDropEvent
   , MouseButton (..)
   , applyMouseButton
@@ -33,16 +39,25 @@ module NanoUI.Internal.Input
   ) where
 
 import Data.Bits (Bits, zeroBits, (.&.))
+import Data.Foldable (toList)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Primitive.SmallArray (SmallArray, copySmallArray, newSmallArray, runSmallArray, sizeofSmallArray, smallArrayFromList)
 import NanoUI.Internal.Types (Size (..), V2 (..))
+import System.Info (os)
 
--- | Navigation and editing key presses. Printable text belongs in 'inputChars'.
+-- | A key on the keyboard. Named keys have a constructor each; a key that
+-- types a character is a 'KeyChar' of the character it types with no
+-- modifier held: lower case for a letter, and the unshifted symbol otherwise,
+-- so Shift+1 is @KeyChar \'1\'@ with 'modShift' set. The backend reads it
+-- from the keyboard layout where it can. A key reports its press and release
+-- ('inputKeys', 'inputKeysReleased') whatever modifiers are held, and the
+-- text it types, if any, arrives in 'inputChars' as well.
 data Key
   = KeyBackspace
   | KeyDelete
   | KeyEnter
+  -- ^ Return, and Enter on the keypad.
   | KeyEscape
   | KeyTab
   | KeyLeft
@@ -51,23 +66,63 @@ data Key
   | KeyDown
   | KeyHome
   | KeyEnd
-  deriving (Eq, Show, Enum)
+  | KeyPageUp
+  | KeyPageDown
+  | KeyInsert
+  | KeySpace
+  | KeyF !Int
+  -- ^ A function key, @KeyF 1@ to @KeyF 24@.
+  | KeyPrintScreen
+  | KeyPause
+  | KeyCapsLock
+  | KeyNumLock
+  | KeyScrollLock
+  | KeyMenu
+  -- ^ The context-menu (application) key.
+  | KeyChar !Char
+  -- ^ A key that types a character; see 'Key'.
+  deriving (Eq, Ord, Show)
 
 -- | Modifier keys held while the frame's input is processed.
 data Modifiers = Modifiers
   { modShift :: !Bool
   , modCtrl :: !Bool
   , modAlt :: !Bool
+  -- ^ Alt, which macOS calls Option.
+  , modSuper :: !Bool
+  -- ^ Command on macOS, the Windows key on Windows, Super elsewhere.
   }
-  deriving (Eq, Show)
+  deriving (Eq, Ord, Show)
+
+-- | Both sets of modifiers held.
+instance Semigroup Modifiers where
+  Modifiers s c a u <> Modifiers s' c' a' u' = Modifiers (s || s') (c || c') (a || a') (u || u')
+
+instance Monoid Modifiers where
+  mempty = noModifiers
+
+-- | No modifier held.
+noModifiers :: Modifiers
+noModifiers = Modifiers False False False False
 
 -- | The modifiers held in a backend's bit mask, given its bits for Shift,
--- Ctrl and Alt.
+-- Ctrl, Alt and Super.
 {-# INLINE modifiersFromBits #-}
-modifiersFromBits :: Bits a => a -> a -> a -> a -> Modifiers
-modifiersFromBits m shift ctrl alt = Modifiers (has shift) (has ctrl) (has alt)
+modifiersFromBits :: Bits a => a -> a -> a -> a -> a -> Modifiers
+modifiersFromBits m shift ctrl alt super = Modifiers (has shift) (has ctrl) (has alt) (has super)
   where
     has bit = m .&. bit /= zeroBits
+
+-- | Whether the platform's command modifier is held: Command ('modSuper') on
+-- macOS and Ctrl elsewhere. A chord's @M-@ ('NanoUI.parseShortcut') is it.
+modPrimary :: Modifiers -> Bool
+modPrimary = if os == "darwin" then modSuper else modCtrl
+
+-- | The platform's command modifier alone ('modPrimary').
+primaryModifiers :: Modifiers
+primaryModifiers
+  | os == "darwin" = noModifiers {modSuper = True}
+  | otherwise = noModifiers {modCtrl = True}
 
 -- | OS-level drag-and-drop event kind, mirroring @SDL_EventType@ drop codes.
 data DropType
@@ -87,9 +142,10 @@ data DropEvent = DropEvent
   deriving (Eq, Show)
 
 -- | Input for one frame. Positions and window sizes use logical pixels;
--- scroll values use wheel steps and delta time uses seconds. Held flags
--- persist between frames; press/release flags, text, keys, and drops are
--- events consumed once. Backends clear those events with 'clearEphemeral'.
+-- scroll values use wheel steps and delta time uses seconds. Held flags and
+-- held keys persist between frames; press/release flags, text, key presses
+-- and releases, and drops are events consumed once. Backends clear those
+-- events with 'clearEphemeral'.
 data Input = Input
   { inputMousePos :: {-# UNPACK #-} !V2
   , inputMouseDown :: {-# UNPACK #-} !Bool
@@ -108,6 +164,12 @@ data Input = Input
   , inputMouseClicks :: {-# UNPACK #-} !Int
   , inputScroll :: {-# UNPACK #-} !V2
   , inputKeys :: SmallArray Key
+  -- ^ Keys pressed this frame in event order, with a held key's auto-repeats.
+  , inputKeysReleased :: SmallArray Key
+  -- ^ Keys released this frame, in event order.
+  , inputKeysHeld :: SmallArray Key
+  -- ^ Keys down as the frame's events leave them, each once, in the order
+  -- they went down.
   , inputChars :: !Text
   , inputModifiers :: !Modifiers
   , inputWindowSize :: {-# UNPACK #-} !Size
@@ -137,8 +199,10 @@ emptyInput =
     , inputMouseClicks = 1
     , inputScroll = V2 0 0
     , inputKeys = mempty
+    , inputKeysReleased = mempty
+    , inputKeysHeld = mempty
     , inputChars = ""
-    , inputModifiers = Modifiers False False False
+    , inputModifiers = noModifiers
     , inputWindowSize = Size 800 600
     , inputDeltaTime = 0
     , inputDrops = mempty
@@ -235,16 +299,20 @@ grabDragKind onTarget dragging inp
   | onTarget = UiCursorGrab
   | otherwise = UiCursorDefault
 
--- | Clear one-shot events and the redraw flag, retaining held buttons,
--- pointer position, modifiers, window size, and delta time.
+-- | Clear one-shot events and the redraw flag, retaining held buttons and
+-- keys, pointer position, modifiers, window size, and delta time.
 clearEphemeral :: Input -> Input
 clearEphemeral inp = (stripInteractionInput inp) {inputMouseClicks = 1, inputWindowRedraw = False}
 
--- | Whether Ctrl+C or Ctrl+ETX requests an unconditional quit.
+-- | Whether Ctrl+C requests an unconditional quit: the C key pressed with
+-- Ctrl, or a @c@ or ETX typed with it.
 isHardQuitInput :: Input -> Bool
 isHardQuitInput inp =
   modCtrl (inputModifiers inp)
-    && (T.elem 'c' (inputChars inp) || T.elem '\ETX' (inputChars inp))
+    && ( inputKeysElem (KeyChar 'c') (inputKeys inp)
+          || T.elem 'c' (inputChars inp)
+          || T.elem '\ETX' (inputChars inp)
+       )
 
 -- | Split after the first event satisfying the predicate. Including that edge
 -- in the first batch keeps separate press/release transitions in separate frames.
@@ -259,6 +327,26 @@ splitFrame isEdge events =
 appendInputKey :: Key -> SmallArray Key -> SmallArray Key
 appendInputKey k ks = snocSmallArray ks k
 
+-- | Apply a key going down ('True') or up: a press joins 'inputKeys' and,
+-- unless the key is already down, 'inputKeysHeld'; a release joins
+-- 'inputKeysReleased' and leaves the held keys.
+applyKey :: Key -> Bool -> Input -> Input
+applyKey k True inp =
+  inp
+    { inputKeys = appendInputKey k (inputKeys inp)
+    , inputKeysHeld = if inputKeysElem k held then held else appendInputKey k held
+    }
+  where
+    held = inputKeysHeld inp
+applyKey k False inp =
+  inp
+    { inputKeysReleased = appendInputKey k (inputKeysReleased inp)
+    , inputKeysHeld =
+        if inputKeysElem k held then smallArrayFromList (filter (/= k) (toList held)) else held
+    }
+  where
+    held = inputKeysHeld inp
+
 -- | The drops with one more at the end.
 {-# INLINE appendDropEvent #-}
 appendDropEvent :: DropEvent -> SmallArray DropEvent -> SmallArray DropEvent
@@ -271,6 +359,23 @@ snocSmallArray xs x = runSmallArray $ do
   out <- newSmallArray (n + 1) x
   copySmallArray out 0 xs 0 n
   pure out
+
+-- | Whether a held key's auto-repeats count as presses: they do for the
+-- keys that type, move the caret or delete, and not for Enter, Escape, Tab,
+-- Insert, the function keys, the lock keys and the like. A backend drops the
+-- repeats of a key that does not repeat.
+keyRepeats :: Key -> Bool
+keyRepeats = \case
+  KeyChar _ -> True
+  k -> k `elem` [KeyBackspace, KeyDelete, KeyLeft, KeyRight, KeyUp, KeyDown, KeyHome, KeyEnd, KeyPageUp, KeyPageDown, KeySpace]
+
+-- | The key a keypad digit or point (@'0'@ to @'9'@, @'.'@) is: with Num
+-- Lock on, the character it types; off, the navigation key printed on it,
+-- which 5 has none of.
+keypadKey :: Bool -> Char -> Maybe Key
+keypadKey True c = Just (KeyChar c)
+keypadKey False c =
+  lookup c [('0', KeyInsert), ('1', KeyEnd), ('2', KeyDown), ('3', KeyPageDown), ('4', KeyLeft), ('6', KeyRight), ('7', KeyHome), ('8', KeyUp), ('9', KeyPageUp), ('.', KeyDelete)]
 
 -- | Mouse buttons tracked by 'Input'. 'MouseBack' and 'MouseForward' are the
 -- side buttons (X1 and X2) a browser navigates with.
@@ -324,7 +429,8 @@ inputPointerHeld inp =
   inputMouseDown inp || inputMouseRightDown inp || inputMouseMiddleDown inp
 
 -- | Remove one-shot interaction events for a repeated view pass. Retains
--- pointer position and held buttons so hover and drag state remain available.
+-- pointer position, held buttons and held keys so hover and drag state remain
+-- available.
 stripInteractionInput :: Input -> Input
 stripInteractionInput inp =
   inp
@@ -337,6 +443,7 @@ stripInteractionInput inp =
     , inputMouseBackPressed = False
     , inputMouseForwardPressed = False
     , inputKeys = mempty
+    , inputKeysReleased = mempty
     , inputChars = ""
     , inputScroll = V2 0 0
     , inputDrops = mempty

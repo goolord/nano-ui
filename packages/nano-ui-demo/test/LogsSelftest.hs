@@ -11,8 +11,9 @@ import Data.Text qualified as T
 import NanoUI
 import NanoUI.Backend.Sdl
 import NanoUI.Internal.Context (Context (..), getPrevRect)
+import NanoUI.Shortcut
 import NanoUI.Testing (collectTextSpans)
-import NanoUI.Testing.Harness (clickPos, expectText, findExact, hasText, keyInp, requireSpan)
+import NanoUI.Testing.Harness (chordInp, clickPos, expectText, findExact, hasText, keyInp, requireSpan)
 import DemoApp (withHiddenWindow)
 import SdlLogs (AppState (..), appendEntries, logsApp, newAppState)
 
@@ -83,7 +84,7 @@ selftest = do
       unless (hasText "ALL LOGS SELECTED" spansSelected || hasText "Deselect All" spansSelected) $
         fail "selftest: Select All failed to select all logs"
 
-      drawFrame baseInput {inputChars = "\ETX", inputModifiers = Modifiers False True False}
+      drawFrame (chordInp (ctrl <> key 'c') baseInput)
       mClip <- ctxClipboardGet ctx
       case mClip of
         Nothing -> fail "selftest: Ctrl+C after Select All failed to copy to clipboard"

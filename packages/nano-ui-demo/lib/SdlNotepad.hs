@@ -24,6 +24,7 @@ import Data.Text.IO qualified as TIO
 import DemoApp (useFileDialog)
 import NanoUI
 import NanoUI.Backend.Sdl
+import NanoUI.Shortcut
 import System.Exit (exitSuccess)
 
 --------------------------------------------------------------------------------
@@ -60,19 +61,6 @@ notepadUi = do
   (openDlg, setOpenDlg) <- useState (Nothing :: Maybe FileDialogId)
   (saveDlg, setSaveDlg) <- useState (Nothing :: Maybe FileDialogId)
   (zoom, setZoom) <- useFloat 1.0
-
-  ---------------------------------------------------------------- zoom ---
-  inp <- askInput
-  let
-    ctrlDown = modCtrl (inputModifiers inp)
-    typed = inputChars inp
-  when
-    (ctrlDown && (T.any (== '+') typed || T.any (== '=') typed))
-    (setZoom (min 4.0 (zoom * 1.1)))
-  when
-    (ctrlDown && (T.any (== '-') typed || T.any (== '_') typed))
-    (setZoom (max 0.5 (zoom / 1.1)))
-  when (ctrlDown && T.any (== '0') typed) (setZoom 1.0)
 
   ----------------------------------------------------------- file dialogs ---
   useFileDialog openDlg setOpenDlg $ \chosenPaths ->
@@ -127,38 +115,59 @@ notepadUi = do
     item menuRow action = whenM menuRow (setOpenMenu "" >> action)
     editItem name chord cmd = item (menuItemShortcut name chord) (runTextCommand editorId cmd)
 
+    -- The commands with a chord that works with every menu closed: each is
+    -- bound below, and its row shows the chord.
+    newCmd = ("New", ctrl <> key 'n', newDocument)
+    openCmd = ("Open...", ctrl <> key 'o', setOpenDlg =<< askOpenFileDialog defaultFileDialogOptions)
+    saveCmd = ("Save", ctrl <> key 's', saveDocument False)
+    saveAsCmd = ("Save As...", ctrl <> shift <> key 's', saveDocument True)
+    exitCmd = ("Exit", ctrl <> key 'q', liftIO exitSuccess)
+    zoomInCmd = ("Zoom In", ctrl <> key '=', zoomIn)
+    zoomOutCmd = ("Zoom Out", ctrl <> key '-', zoomOut)
+    resetZoomCmd = ("Reset Zoom", ctrl <> key '0', setZoom 1.0)
+    commandItem (name, chord, action) = item (menuItemShortcut name chord) action
+
     fileMenu = do
-      item (menuItem "New") newDocument
-      item (menuItem "Open...") (setOpenDlg =<< askOpenFileDialog defaultFileDialogOptions)
-      item (menuItem "Save") (saveDocument False)
-      item (menuItemShortcut "Save As..." "Ctrl+Shift+S") (saveDocument True)
+      commandItem newCmd
+      commandItem openCmd
+      commandItem saveCmd
+      commandItem saveAsCmd
       menuSeparator
-      item (menuItemShortcut "Exit" "Esc") (liftIO exitSuccess)
+      commandItem exitCmd
 
     editMenu = do
       canUndo <- textCanUndo editorId
       canRedo <- textCanRedo editorId
-      if canUndo then editItem "Undo" "Ctrl+Z" Undo else menuItemDisabled "Undo"
-      if canRedo then editItem "Redo" "Ctrl+Shift+Z" Redo else menuItemDisabled "Redo"
+      if canUndo then editItem "Undo" (ctrl <> key 'z') Undo else menuItemDisabled "Undo"
+      if canRedo then editItem "Redo" (ctrl <> shift <> key 'z') Redo else menuItemDisabled "Redo"
       menuSeparator
-      editItem "Cut" "Ctrl+X" Cut
-      editItem "Copy" "Ctrl+C" Copy
-      editItem "Paste" "Ctrl+V" Paste
+      editItem "Cut" (ctrl <> key 'x') Cut
+      editItem "Copy" (ctrl <> key 'c') Copy
+      editItem "Paste" (ctrl <> key 'v') Paste
       menuSeparator
-      editItem "Select All" "Ctrl+A" SelectAll
+      editItem "Select All" (ctrl <> key 'a') SelectAll
 
     viewMenu = do
       item (menuItem (if showStatus then "Hide Status Bar" else "Show Status Bar")) (setShowStatus (not showStatus))
       menuSeparator
-      item (menuItemShortcut "Zoom In" "Ctrl++") zoomIn
-      item (menuItemShortcut "Zoom Out" "Ctrl+-") zoomOut
-      item (menuItemShortcut "Reset Zoom" "Ctrl+0") (setZoom 1.0)
+      commandItem zoomInCmd
+      commandItem zoomOutCmd
+      commandItem resetZoomCmd
       menuSeparator
       item (menuItem "Document Statistics") (setStatusMsg (documentStats (documentText doc)))
 
     helpMenu = do
       item (menuItem "About nano-ui Notepad") (setAboutOpen True)
       menuItemDisabled "nano-ui on GitHub"
+
+  ------------------------------------------------------------- shortcuts ---
+  -- A menu row's chord works only while its menu is open, so the commands'
+  -- chords are bound here, ahead of the rows, to work with every menu closed.
+  -- The editor takes its own editing chords. Ctrl++ is Ctrl+Shift+= on a US
+  -- layout, and the keypad's plus.
+  for_ [newCmd, openCmd, saveCmd, saveAsCmd, exitCmd, zoomInCmd, zoomOutCmd, resetZoomCmd] $
+    \(_, chord, action) -> whenM (shortcut chord) action
+  whenM (or <$> traverse shortcut [ctrl <> shift <> key '=', ctrl <> key '+']) zoomIn
 
   --------------------------------------------------------------- layout ---
   columnWith (grow . gap 0) $ do

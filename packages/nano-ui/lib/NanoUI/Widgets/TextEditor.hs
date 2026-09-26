@@ -30,11 +30,11 @@ module NanoUI.Widgets.TextEditor
   ) where
 
 import Control.Monad (unless, void, when)
-import Data.Char (chr, isPrint, isSpace, ord, toLower)
+import Data.Char (isPrint, isSpace, toLower)
 import Data.Text qualified as T
 import Data.Text.Short qualified as TS
 import NanoUI.Internal.Context (Context (..))
-import NanoUI.Internal.Input (Input (..), Key (..), Modifiers (..))
+import NanoUI.Internal.Input (Input (..), Key (..), Modifiers (..), modPrimary)
 import NanoUI.Widgets.TextBuffer (Cursor (..), TextBuffer, TextEdit (..))
 import NanoUI.Widgets.TextCommand (TextCommand (..), TextMotion (..))
 import NanoUI.Widgets.TextBuffer qualified as TB
@@ -262,7 +262,10 @@ runCommandIO ctx mode cmd ed =
       unless (T.null txt) $ void (ctxClipboardSet ctx txt)
 
 -- | The command a key runs. Ctrl or Alt turns character and deletion keys
--- into word motions, and Shift extends the selection.
+-- into word motions, and Shift extends the selection. A character key held
+-- with Ctrl (or Command on macOS) runs a shortcut: A selects all, C, X and V
+-- copy, cut and paste, Z undoes (redoes with Shift) and Y redoes, and a
+-- multi-line field also takes K, U and E.
 keyCommand :: EditorMode -> Modifiers -> Key -> Maybe TextCommand
 keyCommand mode mods key =
   case key of
@@ -275,37 +278,40 @@ keyCommand mode mods key =
     KeyUp | multi && not word -> move LineUp
     KeyDown | multi && not word -> move LineDown
     KeyEnter | multi && not word -> Just (InsertText "\n")
+    KeyChar c | chordModifiers mods -> chordCommand mode mods c
     _ -> Nothing
   where
     multi = modeMultiLine mode
     word = modCtrl mods || modAlt mods
     move m = Just (Move m (modShift mods))
 
--- | This frame's typing and keys as commands, typed characters first. Ctrl
--- turns characters into shortcuts. Ctrl with Alt is AltGr on many layouts, so
--- its characters are typed like plain ones.
+-- | This frame's typing and keys as commands, typed characters first.
+-- Characters typed while a shortcut modifier is held ('chordModifiers') are
+-- not typed: those keystrokes are commands, which come in as keys. Ctrl with
+-- Alt is AltGr on many layouts, so its characters are typed like plain ones.
 inputTextCommands :: EditorMode -> Input -> [TextCommand]
 inputTextCommands mode inp = T.foldr char keys (inputChars inp)
   where
     mods = inputModifiers inp
-    shortcut = modCtrl mods && not (modAlt mods)
     char c rest
-      | shortcut = maybe rest (: rest) (ctrlCharCommand mode mods c)
-      | isPrint c = InsertText (T.singleton c) : rest
+      | isPrint c && not (chordModifiers mods) = InsertText (T.singleton c) : rest
       | otherwise = rest
     keys = foldr (\k rest -> maybe rest (: rest) (keyCommand mode mods k)) [] (inputKeys inp)
 
--- | The command a character typed with Ctrl runs. Letters may arrive as the
--- letter or as their control code (1 for A to 26 for Z), which is read as the
--- letter, so Ctrl+Shift+Z redoes whichever way it arrives.
-ctrlCharCommand :: EditorMode -> Modifiers -> Char -> Maybe TextCommand
-ctrlCharCommand mode mods c =
-  case toLower letter of
+-- | Whether held modifiers make a character key a shortcut rather than
+-- typing: Ctrl, or Command on macOS, without Alt.
+chordModifiers :: Modifiers -> Bool
+chordModifiers mods = (modCtrl mods || modPrimary mods) && not (modAlt mods)
+
+-- | The command a character key held with a shortcut modifier runs.
+chordCommand :: EditorMode -> Modifiers -> Char -> Maybe TextCommand
+chordCommand mode mods c =
+  case toLower c of
     'a' -> Just SelectAll
     'c' -> Just Copy
     'x' -> Just Cut
     'v' -> Just Paste
-    'z' | modShift mods || letter == 'Z' -> Just Redo
+    'z' | modShift mods -> Just Redo
     'z' -> Just Undo
     'y' -> Just Redo
     'k' | multi -> Just (Delete LineEnd)
@@ -314,6 +320,3 @@ ctrlCharCommand mode mods c =
     _ -> Nothing
   where
     multi = modeMultiLine mode
-    letter
-      | c >= '\x01' && c <= '\x1a' = chr (ord c + 0x60)
-      | otherwise = c

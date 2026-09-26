@@ -31,6 +31,10 @@
   0.11 ms a frame, since they no longer repaint everything between them.
 - The new cursor shapes show RGFW's standard cursors or the nearest it has,
   and the grab hands show the move arrows instead of the arrow.
+- Super (Command) is `modSuper` rather than Ctrl, and Ctrl+letter is a key
+  chord rather than typed text. Every key RGFW reports comes in as a `Key`,
+  with its release and held state, and Enter, Escape, Tab, Insert, the
+  function and lock keys no longer auto-repeat.
 
 ### Fixed
 

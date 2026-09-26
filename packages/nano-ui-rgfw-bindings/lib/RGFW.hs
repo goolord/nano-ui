@@ -10,6 +10,7 @@ module RGFW
   , pollEvent
   , waitForEvent
   , withEventBuffer
+  , physicalToMappedKey
   , windowSize
   , windowScale
   , setMouseStandard
@@ -41,11 +42,14 @@ import RGFW.Raw
 newtype Window = Window (Ptr RGFW_window)
   deriving (Eq, Show)
 
--- | A copied native event. Key events carry RGFW key codes and modifier bits;
+-- | A copied native event. Key events carry RGFW key codes of physical keys
+-- ('physicalToMappedKey' maps them to the layout) and modifier bits;
 -- motion/resize coordinates are native window pixels, not nano-ui logical units.
 data Event
   = EventNone
   | EventKeyPress !Word32 !Word8
+  | EventKeyRepeat !Word32 !Word8
+  -- ^ The auto-repeat of a held key.
   | EventKeyRelease !Word32 !Word8
   | EventKeyChar !Char
   | EventMouseButton !Word8 !Bool -- Button, Pressed
@@ -110,7 +114,12 @@ pollEvent (Window win) evPtr = do
           | t == rgfw_keyPressed || t == rgfw_keyReleased -> do
               CUInt val <- c_rgfw_event_key_value evPtr
               CUChar m <- c_rgfw_event_key_mod evPtr
-              pure ((if t == rgfw_keyPressed then EventKeyPress else EventKeyRelease) val m)
+              CUChar rep <- c_rgfw_event_key_repeat evPtr
+              let ctor
+                    | t == rgfw_keyReleased = EventKeyRelease
+                    | rep /= 0 = EventKeyRepeat
+                    | otherwise = EventKeyPress
+              pure (ctor val m)
           | t == rgfw_keyChar -> do
               CUInt val <- c_rgfw_event_keyChar_value evPtr
               let
@@ -147,6 +156,16 @@ pollEvent (Window win) evPtr = do
               pure EventWindowClose
           | otherwise ->
               pure (EventOther t)
+
+-- | The key code a physical key has in the current keyboard layout: on an
+-- AZERTY layout the key in QWERTY's Q place is 'rgfw_keyA'. 'Nothing' when
+-- the layout gives it none that RGFW names. Needs an open window.
+physicalToMappedKey :: Word32 -> IO (Maybe Word32)
+physicalToMappedKey key
+  | key > 0xFF = pure Nothing
+  | otherwise = do
+      CUChar mapped <- c_RGFW_physicalToMappedKey (CUChar (fromIntegral key))
+      pure (if mapped == 0 then Nothing else Just (fromIntegral mapped))
 
 -- | Current native window width and height in pixels.
 windowSize :: Window -> IO (Int, Int)

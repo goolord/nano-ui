@@ -68,6 +68,10 @@
 - The new cursor shapes, as SDL's system cursors or the nearest it has; help,
   zoom, copy, alias and context-menu show the arrow.
 - `sdlExplainLayout` opens a window with the layout overlay on.
+- Every key comes in as a `Key`, with its release and held state: F1 to F24,
+  paging, Insert, Space, PrintScreen, Pause, the lock and menu keys, the
+  keypad, and a typing key as the `KeyChar` it types in the current layout.
+  The GUI key is `modSuper`.
 - The middle mouse button, and the side buttons as back and forward.
 
 ### Changed
@@ -139,6 +143,8 @@
 - The retained framebuffer is allocated in 256 pixel blocks and reused while
   the window fits, so a resize drag no longer creates a new render target
   for every pixel the border moves.
+- A key held with Ctrl is a key chord (`KeyChar` with `modCtrl`) instead of
+  its symbol typed into `inputChars`.
 
 ### Fixed
 

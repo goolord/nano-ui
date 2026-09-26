@@ -280,10 +280,10 @@ runSessionLoop drv ctx0 inp0 = do
         now <- getMonotonicTime
         let !dt = min maxFrameDt (realToFrac (now - lastT))
             steps = scanl' (sdApplyEvent drv) (clearEphemeral inp {inputDeltaTime = dt}) group
-            -- Ctrl+C quits as the batch leaves it, and as each event typed it:
-            -- a later event in a busy batch may have released Ctrl.
+            -- Ctrl+C quits as the batch leaves it, and as each event pressed
+            -- or typed it: a later event in a busy batch may have released Ctrl.
             quitChecks =
-              last steps : zipWith (\s -> sdApplyEvent drv s {inputChars = mempty}) steps group
+              last steps : zipWith (\s -> sdApplyEvent drv s {inputChars = mempty, inputKeys = mempty}) steps group
         -- Hard quit is ignored while a text editor is active.
         hardQuit <-
           if any isHardQuitInput quitChecks then not <$> textInputEditActive ctx else pure False

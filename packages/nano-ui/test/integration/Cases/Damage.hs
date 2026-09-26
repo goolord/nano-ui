@@ -1,6 +1,7 @@
 module Cases.Damage (tests) where
 
 import Spec
+import NanoUI.Shortcut
 import Data.Maybe (listToMaybe)
 import Data.Text qualified as T
 import Data.Primitive.SmallArray (smallArrayFromList)
@@ -270,7 +271,7 @@ runTextAreaSelectAllDamageTest ctx failed = do
   _ <- runClick ctx inp0 ui (centerOf area)
   _ <- warmup2 ctx inp0 ui
   _ <- takeDamage ctx
-  _ <- runFrame ctx inp0 {inputChars = "a", inputModifiers = Modifiers False True False} ui
+  _ <- runFrame ctx (chordInp (ctrl <> key 'a') inp0) ui
   dmg <- takeDamage ctx
   assert failed (clipCovers dmg (respRect area))
 

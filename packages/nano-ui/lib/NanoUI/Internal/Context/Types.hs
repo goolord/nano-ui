@@ -48,6 +48,7 @@ module NanoUI.Internal.Context.Types
   , initialDrawingCacheState
   , InteractionState (..)
   , PointerRoute (..)
+  , FocusKind (..)
   , initialInteractionState
   , CustomMeasureFn
   , CustomDrawContext (..)
@@ -304,13 +305,16 @@ data OverlayState = OverlayState
   , osModalDepth :: {-# UNPACK #-} !Int
   , osEscapeConsumed :: {-# UNPACK #-} !Bool
   , osTabConsumed :: {-# UNPACK #-} !Bool
+  -- | The positions in the frame's 'NanoUI.Internal.Input.inputKeys' that a
+  -- shortcut took, so no other shortcut acts on the same press.
+  , osKeysTaken :: !IntSet
   , osPrevFloatingRects :: !(IntMap Rect)
   , osPrevFloatingOrder :: ![Int]
   -- | Painted bounds of the open dropdowns and text-edit menu last frame.
   , osPrevMenuRects :: ![Rect]
   }
 
--- | No modals, floating panels, or consumed Escape or Tab event.
+-- | No modals, floating panels, or consumed Escape, Tab or other key event.
 initialOverlayState :: OverlayState
 initialOverlayState = OverlayState
   { osModalWasActive = False
@@ -318,6 +322,7 @@ initialOverlayState = OverlayState
   , osModalDepth = 0
   , osEscapeConsumed = False
   , osTabConsumed = False
+  , osKeysTaken = IS.empty
   , osPrevFloatingRects = IM.empty
   , osPrevFloatingOrder = []
   , osPrevMenuRects = []
@@ -650,7 +655,22 @@ data InteractionState = InteractionState
   -- | A table header is resizing a column. Set by the table on the frames it
   -- does, cleared when the pointer is let go.
   , isColumnResize :: {-# UNPACK #-} !Bool
+  -- | What had the keyboard as the frame began.
+  , isFocusKind :: !FocusKind
   }
+  deriving (Eq, Show)
+
+-- | The kind of widget holding keyboard focus, which the frame reads from the
+-- last frame's nodes before the view runs. A shortcut leaves that widget the
+-- keys it acts on ('NanoUI.Internal.Widgets.Shortcut').
+data FocusKind
+  = FocusNone
+  | -- | A control that is not a text field. It takes Enter, Space and the
+    -- navigation keys.
+    FocusControl
+  | -- | A text field, multi-line when 'True'. It takes typing and its
+    -- editing keys and shortcuts.
+    FocusTextField !Bool
   deriving (Eq, Show)
 
 -- | Pointer routed to the page, with no held gesture, menu, or pending edit command.
@@ -667,6 +687,7 @@ initialInteractionState = InteractionState
   , isWindowDrag = Nothing
   , isWindowResize = Nothing
   , isColumnResize = False
+  , isFocusKind = FocusNone
   }
 
 -- | Mutable state for one UI session. Construct with @newContext@ and use it

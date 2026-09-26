@@ -118,6 +118,8 @@ runFrameEff unlift ctx frameInp ui = do
   -- the offset this frame renders at is the one virtualization must see.
   stepScrollGlides ctx (inputDeltaTime frameInp)
   updateScrollDrag ctx layerInp
+  -- Read from the last frame's nodes, before the build resets them.
+  recordFocusKind ctx
   resetDrawArena (ctxDrawArena ctx)
   resetUiBuild ctx True
   beginFrameModal ctx

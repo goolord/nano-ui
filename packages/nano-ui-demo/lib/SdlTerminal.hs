@@ -1,5 +1,5 @@
 -- | Minimal 80x24 PTY terminal with ANSI colors. Run with @cabal run nano-ui-sdl-terminal@.
-module SdlTerminal (main, Term (..), blank, feed, scrollBy, viewport, withPty, drain, send) where
+module SdlTerminal (main, Term (..), blank, feed, scrollBy, viewport, withPty, drain, send, keys) where
 
 import Control.Concurrent (threadDelay)
 import Control.Exception (bracket, bracketOnError, catch, throwIO, try)
@@ -8,6 +8,7 @@ import Control.Monad.ST (ST, runST)
 import Data.Bits ((.&.))
 import Data.ByteString qualified as B
 import Data.Char (chr, isPrint, ord, toUpper)
+import Data.Maybe (fromMaybe)
 import Data.Ord (clamp)
 import Data.Primitive.PrimArray (PrimArray, indexPrimArray, primArrayFromList)
 import Data.STRef (STRef, modifySTRef', newSTRef, readSTRef, writeSTRef)
@@ -342,12 +343,18 @@ keys :: Input -> B.ByteString
 keys inp = E.encodeUtf8 (foldMap key (inputKeys inp) <> prefix <> text)
  where
   mods = inputModifiers inp
-  ctrlChar = chr . (.&. 31) . ord . toUpper
-  text = (if modCtrl mods then T.map ctrlChar else id) (inputChars inp)
+  -- Ctrl with a key sends its control code; what Ctrl typed, if anything,
+  -- is not sent as well.
+  ctrl = modCtrl mods && not (modAlt mods)
+  ctrlChar = T.singleton . chr . (.&. 31) . ord . toUpper
+  text = if ctrl then "" else inputChars inp
   prefix = if modAlt mods && not (T.null text) then "\ESC" else ""
   key = \case
+    KeyChar c | ctrl -> ctrlChar c
+    KeySpace | ctrl -> "\NUL"
     KeyEnter -> "\r"
     KeyBackspace -> "\DEL"
+    KeyTab | modShift mods -> "\ESC[Z"
     KeyTab -> "\t"
     KeyEscape -> "\ESC"
     KeyUp -> "\ESC[A"
@@ -357,6 +364,16 @@ keys inp = E.encodeUtf8 (foldMap key (inputKeys inp) <> prefix <> text)
     KeyHome -> "\ESC[H"
     KeyEnd -> "\ESC[F"
     KeyDelete -> "\ESC[3~"
+    KeyPageUp -> "\ESC[5~"
+    KeyPageDown -> "\ESC[6~"
+    KeyInsert -> "\ESC[2~"
+    KeyF n -> fromMaybe "" (lookup n functionKeys)
+    _ -> ""
+
+-- | What xterm sends for F1 to F12.
+functionKeys :: [(Int, T.Text)]
+functionKeys =
+  zip [1 ..] (map ("\ESCO" <>) ["P", "Q", "R", "S"] ++ [T.pack ("\ESC[" ++ show c ++ "~") | c <- [15, 17, 18, 19, 20, 21, 23, 24 :: Int]])
 
 main :: IO ()
 main = withPty $ \fd -> do

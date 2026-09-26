@@ -191,6 +191,35 @@ widgets inside pick none, such as `UiCursorCrosshair` over a canvas, or
 `UiCursorNotAllowed` around disabled widgets. A custom widget picks its own
 with `widgetCursor`. A backend shows the nearest shape the platform has.
 
+Keys arrive in `inputKeys`, `inputKeysReleased` and `inputKeysHeld`, and the
+text they type in `inputChars`. A key that types is a `KeyChar` of what it
+types unmodified, so Ctrl+S is `KeyChar 's'` with `modCtrl` set and types
+nothing. Bind a chord with `shortcut`. A chord is the modifiers `ctrl`,
+`shift`, `alt`, `super` and `cmdOrCtrl` (Command on macOS, else Ctrl) and a
+`key`, a character or a `Key`, put together with `<>`. These short names
+come from `NanoUI.Shortcut`, which `NanoUI` leaves out; import it where
+chords are written, or qualified:
+
+```haskell
+import NanoUI.Shortcut
+
+whenM (shortcut (ctrl <> key 's')) save
+whenM (shortcut (cmdOrCtrl <> shift <> key 'p')) (setPaletteOpen True)
+whenM (shortcut (key (KeyF 5))) refresh
+```
+
+A chord with no key, such as `ctrl <> shift` alone, is never pressed.
+`parseShortcut` reads a chord written as text, such as one from a settings
+file: `C-s`, `M-S-p`, `A-<Enter>`, `<F5>`.
+
+A shortcut fires once per press, for the first `shortcut` declared for the
+chord. It stays quiet behind a modal, inside `disabledWhen`, and for keys the
+focused widget uses, such as a text field's typing and Ctrl+A.
+`menuItemShortcut "Save" (ctrl <> key 's')` binds its chord only while its
+menu is open; for the closed menu, bind it with `shortcut` too, declared
+first. `keyPressed`, `keyReleased` and `keyHeld` read a key whatever has the
+keyboard.
+
 A middle click is `respMiddleClicked`, routed like a right click; a closable
 tab closes on one.
 
@@ -277,6 +306,9 @@ The context from `NanoUI.Testing`'s `newContext` or `newPixelContext` holds the
 state that outlives a frame, and `NanoUI.Runner` sequences events, redraws and
 wake-ups. The two backends in this repository,
 `NanoUI.Backend.Sdl` and `NanoUI.Backend.Rgfw`, are the worked examples.
+
+Fold keys in with `applyKey` (a typing key as the `KeyChar` it types
+unmodified, with its text in `inputChars` too).
 
 ## Headless tests
 

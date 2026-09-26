@@ -31,6 +31,7 @@ main = withEventBuffer $ \event -> do
   fixture 0 rgfw_keyPressed
   check "key width excludes repeat/mod/state bytes" (fromIntegral rgfw_keyHome) (c_rgfw_event_key_value event)
   check "modifiers" (fromIntegral (rgfw_modControl .|. rgfw_modShift)) (c_rgfw_event_key_mod event)
+  check "repeat" 1 (c_rgfw_event_key_repeat event)
   fixture 1 rgfw_keyChar
   check "Unicode character" 0x1f600 (c_rgfw_event_keyChar_value event)
   fixture 2 rgfw_mouseMotion
@@ -43,6 +44,9 @@ main = withEventBuffer $ \event -> do
   check "resize" (643, 481) (pair c_rgfw_event_update_w c_rgfw_event_update_h)
   fixture 6 rgfw_scaleUpdated
   check "scale" (1.25, 1.5) (pair c_rgfw_event_scale_x c_rgfw_event_scale_y)
+  -- The ranges "RGFW.Raw" says are consecutive.
+  check "function keys are consecutive" (23 :: Int) (pure (fromIntegral (rgfw_keyF24 - rgfw_keyF1)))
+  check "keypad digits are consecutive" (8 :: Int) (pure (fromIntegral (rgfw_keyPad9 - rgfw_keyPad1)))
   args <- getArgs
   if args == ["--bench"]
     then do

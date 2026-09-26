@@ -28,6 +28,7 @@ module NanoUI.Internal.Context
   , WidgetTextPlacement (..)
   , InteractionState (..)
   , PointerRoute (..)
+  , FocusKind (..)
   , intKey
   , DamageRequest (..)
   , CustomMeasureFn

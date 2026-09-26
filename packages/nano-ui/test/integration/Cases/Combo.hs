@@ -1,6 +1,7 @@
 module Cases.Combo (tests) where
 
 import Spec
+import NanoUI.Shortcut
 import Data.Text qualified as T
 
 tests :: [Spec]
@@ -145,7 +146,7 @@ runComboBlurCommitTest ctx failed = do
   assertEq failed tB "No"
   assert failed (not (respChanged rB))
   _ <- runFrame ctx (inp0 {inputChars = " bar"}) ui
-  _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyBackspace], inputModifiers = Modifiers False True False}) ui
+  _ <- runFrame ctx (chordInp (ctrl <> key KeyBackspace) inp0) ui
   ((rW, tW), _, _, _) <- runFrame ctx inp0 ui
   assertEq failed tW "No "
   assert failed (not (respChanged rW))

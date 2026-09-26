@@ -4,6 +4,7 @@ import Spec
 import Data.Text qualified as T
 import NanoUI.Internal.Context (Context (..))
 import NanoUI.Internal.Layout.Arena (NodeType (..), arenaCount, getNodeRect, getNodeType)
+import NanoUI.Shortcut
 
 tests :: [Spec]
 tests =
@@ -291,16 +292,16 @@ runColorPickerBarKeysTest ctx failed = do
   let inp0 = withInput 440 460
       ui = held colorRef colorPickerRGBA'
       frame inp = snd <$> evalUi ctx inp ui
-      key k = keyInp k inp0
+      press k = keyInp k inp0
   _ <- warmup2 ctx inp0 ui
-  _ <- frame (key KeyTab)
-  _ <- frame (key KeyTab)
-  shifted <- frame ((key KeyDown) {inputModifiers = Modifiers True False False})
+  _ <- frame (press KeyTab)
+  _ <- frame (press KeyTab)
+  shifted <- frame (chordInp (shift <> key KeyDown) inp0)
   assert failed (colorG shifted > colorG initial + 10)
-  home <- frame (key KeyHome)
+  home <- frame (press KeyHome)
   assert failed (colorG home <= colorG initial + 1)
-  _ <- frame (key KeyTab)
-  opaque <- frame (key KeyEnd)
+  _ <- frame (press KeyTab)
+  opaque <- frame (press KeyEnd)
   assertEq failed (colorA opaque) 255
-  lowered <- frame (key KeyUp)
+  lowered <- frame (press KeyUp)
   assertEq failed (colorA lowered) 254

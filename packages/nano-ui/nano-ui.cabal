@@ -80,6 +80,7 @@ library
         NanoUI.Monad
         NanoUI.Path
         NanoUI.Runner
+        NanoUI.Shortcut
         NanoUI.Svg
         NanoUI.Testing
         NanoUI.Testing.Assert
@@ -175,6 +176,8 @@ library
         NanoUI.Internal.Widgets.Slider
         NanoUI.Internal.Widgets.Image
         NanoUI.Internal.Widgets.Sensor
+        NanoUI.Internal.Shortcut
+        NanoUI.Internal.Widgets.Shortcut
     build-depends:
         base >=4.20 && <4.23,
         bytestring ^>=0.12,
@@ -260,6 +263,7 @@ test-suite nano-ui-test
         Cases.Visibility
         Cases.Cursors
         Cases.Explain
+        Cases.Shortcut
         Cases.PointerExtra
     build-depends:
         bytestring,

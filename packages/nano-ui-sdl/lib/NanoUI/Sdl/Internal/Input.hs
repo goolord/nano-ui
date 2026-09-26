@@ -9,14 +9,17 @@ module NanoUI.Sdl.Internal.Input
   , waitEvent
   , applyEvent
   , isButtonEdge
+  , sdlKey
   ) where
 
 import Control.Monad (mfilter)
+import Data.Bits ((.&.))
+import Data.Char (chr, isPrint, toLower)
 import qualified Data.Text as T
 import Data.Text (Text)
 import qualified Data.Text.Foreign as TF
 import Data.Word (Word32)
-import Foreign.C.Types (CFloat)
+import Foreign.C.Types (CFloat, CUInt)
 import Data.Maybe (fromMaybe)
 import Foreign.Marshal.Alloc (alloca)
 import Foreign.Marshal.Utils (maybePeek)
@@ -38,19 +41,54 @@ import SDL3.Sys.Events (pollEventSafe, waitEventSafe, waitEventTimeoutSafe)
 import SDL3.Sys.Bindgen.Keycode
   ( SDL_Keycode (..)
   , SDL_Keymod (..)
+  , sDLK_APPLICATION
   , sDLK_BACKSPACE
+  , sDLK_CAPSLOCK
   , sDLK_DELETE
   , sDLK_DOWN
   , sDLK_END
   , sDLK_ESCAPE
+  , sDLK_F1
+  , sDLK_F12
+  , sDLK_F13
+  , sDLK_F24
   , sDLK_HOME
+  , sDLK_INSERT
+  , sDLK_KP_0
+  , sDLK_KP_1
+  , sDLK_KP_2
+  , sDLK_KP_3
+  , sDLK_KP_4
+  , sDLK_KP_5
+  , sDLK_KP_6
+  , sDLK_KP_7
+  , sDLK_KP_8
+  , sDLK_KP_9
+  , sDLK_KP_DIVIDE
+  , sDLK_KP_ENTER
+  , sDLK_KP_EQUALS
+  , sDLK_KP_MINUS
+  , sDLK_KP_MULTIPLY
+  , sDLK_KP_PERIOD
+  , sDLK_KP_PLUS
   , sDLK_LEFT
+  , sDLK_MENU
+  , sDLK_NUMLOCKCLEAR
+  , sDLK_PAGEDOWN
+  , sDLK_PAGEUP
+  , sDLK_PAUSE
+  , sDLK_PRINTSCREEN
   , sDLK_RETURN
   , sDLK_RIGHT
+  , sDLK_SCANCODE_MASK
+  , sDLK_SCROLLLOCK
+  , sDLK_SPACE
   , sDLK_TAB
   , sDLK_UP
   , sDL_KMOD_ALT
   , sDL_KMOD_CTRL
+  , sDL_KMOD_GUI
+  , sDL_KMOD_NUM
   , sDL_KMOD_SHIFT
   )
 import SDL3.Sys.Bindgen.Mouse (sDL_BUTTON_LEFT, sDL_BUTTON_MIDDLE, sDL_BUTTON_RIGHT, sDL_BUTTON_X1, sDL_BUTTON_X2)
@@ -65,6 +103,11 @@ data SdlEvent
   -- ^ The window's size or pixel density changed; display synchronisation
   -- reads both again.
   | EvKey Key Modifiers
+  -- ^ A key went down, or repeated while held.
+  | EvKeyUp Key Modifiers
+  | EvModifiers Modifiers
+  -- ^ A key nano-ui has no 'Key' for, a modifier key among them, went down
+  -- or up; only the modifiers it leaves held are kept.
   | EvText Text Modifiers
   | EvMouseMotion V2 Modifiers
   | EvMouseButton MouseButton Bool V2 Modifiers
@@ -115,6 +158,7 @@ decodeEvent refreshTy p = do
       Events.SDL_EVENT_WINDOW_EXPOSED -> pure (Just EvWindowRedraw)
       Events.SDL_EVENT_WINDOW_RESTORED -> pure (Just EvWindowRedraw)
       Events.SDL_EVENT_KEY_DOWN -> keyDown <$> peek p.key
+      Events.SDL_EVENT_KEY_UP -> Just . keyUp <$> peek p.key
       Events.SDL_EVENT_TEXT_INPUT -> textInput p
       Events.SDL_EVENT_MOUSE_MOTION -> do
         me <- peek p.motion
@@ -134,37 +178,80 @@ decodeEvent refreshTy p = do
 v2 :: CFloat -> CFloat -> V2
 v2 x y = V2 (realToFrac x) (realToFrac y)
 
+-- | A key press. A held key's auto-repeats are presses too, for the keys
+-- that repeat ('keyRepeats').
 keyDown :: SDL_KeyboardEvent -> Maybe SdlEvent
 keyDown ke =
-  case lookup code specialKeys of
-    Just (k, repeatable)
-      | repeatable || not (CBool.toBool (getField @"repeat" ke)) -> Just (EvKey k mods)
+  case sdlKey (keyCode ke) (keyMods ke) of
+    Just k
+      | keyRepeats k || not (CBool.toBool (getField @"repeat" ke)) -> Just (EvKey k mods)
       | otherwise -> Nothing
-    Nothing
-      -- Ctrl chords produce no text-input event; report the printable key
-      -- symbol (SDL folds Shift into it, so Ctrl+Shift+= arrives as '+').
-      | modCtrl mods && code >= 32 && code <= 126 ->
-          Just (EvText (T.singleton (toEnum (fromIntegral code))) mods)
-      | otherwise -> Nothing
+    Nothing -> Just (EvModifiers mods)
   where
-    mods = modFromKeymod (getField @"mod" ke)
-    code = fromIntegral (getField @"key" ke :: SDL_Keycode) :: Word32
+    mods = modFromKeymod (keyMods ke)
 
--- | The keys the UI takes by name, and whether holding one down repeats it.
-specialKeys :: [(Word32, (Key, Bool))]
-specialKeys =
-  [ (word32 sDLK_ESCAPE, (KeyEscape, False))
-  , (word32 sDLK_RETURN, (KeyEnter, False))
-  , (word32 sDLK_TAB, (KeyTab, False))
-  , (word32 sDLK_BACKSPACE, (KeyBackspace, True))
-  , (word32 sDLK_DELETE, (KeyDelete, True))
-  , (word32 sDLK_LEFT, (KeyLeft, True))
-  , (word32 sDLK_RIGHT, (KeyRight, True))
-  , (word32 sDLK_UP, (KeyUp, True))
-  , (word32 sDLK_DOWN, (KeyDown, True))
-  , (word32 sDLK_HOME, (KeyHome, True))
-  , (word32 sDLK_END, (KeyEnd, True))
+keyUp :: SDL_KeyboardEvent -> SdlEvent
+keyUp ke = maybe (EvModifiers mods) (`EvKeyUp` mods) (sdlKey (keyCode ke) (keyMods ke))
+  where
+    mods = modFromKeymod (keyMods ke)
+
+keyCode :: SDL_KeyboardEvent -> CUInt
+keyCode ke = fromIntegral (getField @"key" ke :: SDL_Keycode)
+
+keyMods :: SDL_KeyboardEvent -> SDL_Keymod
+keyMods ke = getField @"mod" ke
+
+-- | The key an SDL keycode names, given the modifier state it came with. SDL
+-- reports a key that types a character by the character it types unmodified
+-- in the current layout (with Latin letters on a non-Latin layout), which is
+-- the 'KeyChar'.
+sdlKey :: CUInt -> SDL_Keymod -> Maybe Key
+sdlKey code km
+  | Just named <- lookup code namedKeys = Just named
+  | Just typed <- lookup code keypadKeys = keypadKey (word32 km .&. word32 sDL_KMOD_NUM /= 0) typed
+  | code >= sDLK_F1 && code <= sDLK_F12 = Just (KeyF (fromIntegral (code - sDLK_F1) + 1))
+  | code >= sDLK_F13 && code <= sDLK_F24 = Just (KeyF (fromIntegral (code - sDLK_F13) + 13))
+  | code .&. sDLK_SCANCODE_MASK == 0 && code <= 0x10FFFF, isPrint c = Just (KeyChar (toLower c))
+  | otherwise = Nothing
+  where
+    c = chr (fromIntegral code)
+
+namedKeys :: [(CUInt, Key)]
+namedKeys =
+  [ (sDLK_ESCAPE, KeyEscape)
+  , (sDLK_RETURN, KeyEnter)
+  , (sDLK_TAB, KeyTab)
+  , (sDLK_BACKSPACE, KeyBackspace)
+  , (sDLK_DELETE, KeyDelete)
+  , (sDLK_LEFT, KeyLeft)
+  , (sDLK_RIGHT, KeyRight)
+  , (sDLK_UP, KeyUp)
+  , (sDLK_DOWN, KeyDown)
+  , (sDLK_HOME, KeyHome)
+  , (sDLK_END, KeyEnd)
+  , (sDLK_PAGEUP, KeyPageUp)
+  , (sDLK_PAGEDOWN, KeyPageDown)
+  , (sDLK_INSERT, KeyInsert)
+  , (sDLK_SPACE, KeySpace)
+  , (sDLK_PRINTSCREEN, KeyPrintScreen)
+  , (sDLK_PAUSE, KeyPause)
+  , (sDLK_CAPSLOCK, KeyCapsLock)
+  , (sDLK_NUMLOCKCLEAR, KeyNumLock)
+  , (sDLK_SCROLLLOCK, KeyScrollLock)
+  , (sDLK_APPLICATION, KeyMenu)
+  , (sDLK_MENU, KeyMenu)
+  , (sDLK_KP_ENTER, KeyEnter)
+  , (sDLK_KP_DIVIDE, KeyChar '/')
+  , (sDLK_KP_MULTIPLY, KeyChar '*')
+  , (sDLK_KP_MINUS, KeyChar '-')
+  , (sDLK_KP_PLUS, KeyChar '+')
+  , (sDLK_KP_EQUALS, KeyChar '=')
   ]
+
+-- | The keypad digits and point, by the character each types ('keypadKey').
+keypadKeys :: [(CUInt, Char)]
+keypadKeys =
+  zip [sDLK_KP_0, sDLK_KP_1, sDLK_KP_2, sDLK_KP_3, sDLK_KP_4, sDLK_KP_5, sDLK_KP_6, sDLK_KP_7, sDLK_KP_8, sDLK_KP_9, sDLK_KP_PERIOD] "0123456789."
 
 textInput :: Ptr SDL_Event -> IO (Maybe SdlEvent)
 textInput p = do
@@ -202,7 +289,7 @@ peekModifiers :: IO Modifiers
 peekModifiers = modFromKeymod <$> getModState
 
 modFromKeymod :: SDL_Keymod -> Modifiers
-modFromKeymod km = modifiersFromBits (word32 km) (word32 sDL_KMOD_SHIFT) (word32 sDL_KMOD_CTRL) (word32 sDL_KMOD_ALT)
+modFromKeymod km = modifiersFromBits (word32 km) (word32 sDL_KMOD_SHIFT) (word32 sDL_KMOD_CTRL) (word32 sDL_KMOD_ALT) (word32 sDL_KMOD_GUI)
 
 word32 :: Integral a => a -> Word32
 word32 = fromIntegral
@@ -212,7 +299,9 @@ word32 = fromIntegral
 applyEvent :: Input -> SdlEvent -> Input
 applyEvent inp ev =
   case ev of
-    EvKey k mods -> inp {inputKeys = appendInputKey k (inputKeys inp), inputModifiers = mods}
+    EvKey k mods -> (applyKey k True inp) {inputModifiers = mods}
+    EvKeyUp k mods -> (applyKey k False inp) {inputModifiers = mods}
+    EvModifiers mods -> inp {inputModifiers = mods}
     EvText txt mods ->
       inp {inputChars = inputChars inp <> txt, inputModifiers = mods}
     EvMouseMotion pos mods ->

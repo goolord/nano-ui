@@ -16,6 +16,8 @@ module RGFW.Raw
   , c_rgfw_event_delta_y
   , c_rgfw_event_key_value
   , c_rgfw_event_key_mod
+  , c_rgfw_event_key_repeat
+  , c_RGFW_physicalToMappedKey
   , c_rgfw_event_keyChar_value
   , c_rgfw_event_update_w
   , c_rgfw_event_update_h
@@ -62,6 +64,35 @@ module RGFW.Raw
   , rgfw_keyRight
   , rgfw_keyEnd
   , rgfw_keyHome
+  , rgfw_keySpace
+  , rgfw_keyInsert
+  , rgfw_keyPageUp
+  , rgfw_keyPageDown
+  , rgfw_keyMenu
+  , rgfw_keyF1
+  , rgfw_keyF24
+  , rgfw_keyCapsLock
+  , rgfw_keyNumLock
+  , rgfw_keyScrollLock
+  , rgfw_keyPrintScreen
+  , rgfw_keyPause
+  , rgfw_keyPad0
+  , rgfw_keyPad1
+  , rgfw_keyPad2
+  , rgfw_keyPad3
+  , rgfw_keyPad4
+  , rgfw_keyPad5
+  , rgfw_keyPad6
+  , rgfw_keyPad7
+  , rgfw_keyPad8
+  , rgfw_keyPad9
+  , rgfw_keyPadPeriod
+  , rgfw_keyPadSlash
+  , rgfw_keyPadMultiply
+  , rgfw_keyPadMinus
+  , rgfw_keyPadPlus
+  , rgfw_keyPadEqual
+  , rgfw_keyPadReturn
   -- Key modifier bits
   , rgfw_modCapsLock
   , rgfw_modNumLock
@@ -168,6 +199,15 @@ c_rgfw_event_key_value p = fromIntegral <$> (#{peek RGFW_event, key.value} p :: 
 c_rgfw_event_key_mod :: Ptr RGFW_event -> IO CUChar
 c_rgfw_event_key_mod = #{peek RGFW_event, key.mod}
 
+-- | Nonzero when a key press is the auto-repeat of a held key.
+c_rgfw_event_key_repeat :: Ptr RGFW_event -> IO CUChar
+c_rgfw_event_key_repeat p = fromIntegral <$> (#{peek RGFW_event, key.repeat} p :: IO #{type RGFW_bool})
+
+-- | The key a physical key code types in the current keyboard layout, as an
+-- RGFW key code; 'RGFW_keyNULL' (0) when it has none. Needs an open window.
+foreign import ccall unsafe "RGFW_physicalToMappedKey"
+  c_RGFW_physicalToMappedKey :: CUChar -> IO CUChar
+
 -- | Code point from a character event. Validate it before converting to 'Char'.
 c_rgfw_event_keyChar_value :: Ptr RGFW_event -> IO CUInt
 c_rgfw_event_keyChar_value = #{peek RGFW_event, keyChar.value}
@@ -267,6 +307,43 @@ rgfw_keyLeft      = #{const RGFW_keyLeft}
 rgfw_keyRight     = #{const RGFW_keyRight}
 rgfw_keyEnd       = #{const RGFW_keyEnd}
 rgfw_keyHome      = #{const RGFW_keyHome}
+
+-- | Further named key codes carried by key events. The function keys
+-- 'rgfw_keyF1' to 'rgfw_keyF24' are consecutive, as are the keypad digits
+-- 'rgfw_keyPad1' to 'rgfw_keyPad9'.
+rgfw_keySpace, rgfw_keyInsert, rgfw_keyPageUp, rgfw_keyPageDown, rgfw_keyMenu, rgfw_keyF1, rgfw_keyF24 :: Word32
+rgfw_keyCapsLock, rgfw_keyNumLock, rgfw_keyScrollLock, rgfw_keyPrintScreen, rgfw_keyPause :: Word32
+rgfw_keyPad0, rgfw_keyPad1, rgfw_keyPad2, rgfw_keyPad3, rgfw_keyPad4, rgfw_keyPad5, rgfw_keyPad6, rgfw_keyPad7, rgfw_keyPad8, rgfw_keyPad9 :: Word32
+rgfw_keyPadPeriod, rgfw_keyPadSlash, rgfw_keyPadMultiply, rgfw_keyPadMinus, rgfw_keyPadPlus, rgfw_keyPadEqual, rgfw_keyPadReturn :: Word32
+rgfw_keySpace       = #{const RGFW_keySpace}
+rgfw_keyInsert      = #{const RGFW_keyInsert}
+rgfw_keyPageUp      = #{const RGFW_keyPageUp}
+rgfw_keyPageDown    = #{const RGFW_keyPageDown}
+rgfw_keyMenu        = #{const RGFW_keyMenu}
+rgfw_keyF1          = #{const RGFW_keyF1}
+rgfw_keyF24         = #{const RGFW_keyF24}
+rgfw_keyCapsLock    = #{const RGFW_keyCapsLock}
+rgfw_keyNumLock     = #{const RGFW_keyNumLock}
+rgfw_keyScrollLock  = #{const RGFW_keyScrollLock}
+rgfw_keyPrintScreen = #{const RGFW_keyPrintScreen}
+rgfw_keyPause       = #{const RGFW_keyPause}
+rgfw_keyPad0        = #{const RGFW_keyPad0}
+rgfw_keyPad1        = #{const RGFW_keyPad1}
+rgfw_keyPad2        = #{const RGFW_keyPad2}
+rgfw_keyPad3        = #{const RGFW_keyPad3}
+rgfw_keyPad4        = #{const RGFW_keyPad4}
+rgfw_keyPad5        = #{const RGFW_keyPad5}
+rgfw_keyPad6        = #{const RGFW_keyPad6}
+rgfw_keyPad7        = #{const RGFW_keyPad7}
+rgfw_keyPad8        = #{const RGFW_keyPad8}
+rgfw_keyPad9        = #{const RGFW_keyPad9}
+rgfw_keyPadPeriod   = #{const RGFW_keyPadPeriod}
+rgfw_keyPadSlash    = #{const RGFW_keyPadSlash}
+rgfw_keyPadMultiply = #{const RGFW_keyPadMultiply}
+rgfw_keyPadMinus    = #{const RGFW_keyPadMinus}
+rgfw_keyPadPlus     = #{const RGFW_keyPadPlus}
+rgfw_keyPadEqual    = #{const RGFW_keyPadEqual}
+rgfw_keyPadReturn   = #{const RGFW_keyPadReturn}
 
 -- | Independent modifier bits, combined with bitwise OR in key events.
 rgfw_modCapsLock, rgfw_modNumLock, rgfw_modControl, rgfw_modAlt, rgfw_modShift, rgfw_modSuper, rgfw_modScrollLock :: Word8

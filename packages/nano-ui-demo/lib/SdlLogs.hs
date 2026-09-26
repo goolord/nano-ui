@@ -28,6 +28,7 @@ import NanoUI.Internal.Context
   , takeTextEditLastAction
   )
 import NanoUI.Internal.Monad (askContext)
+import NanoUI.Shortcut
 import Text.Printf (printf)
 
 data LogLevel
@@ -235,13 +236,15 @@ logsApp stateRef = do
   (allSelected, setAllSelected) <- withKey ("log-all-selected" :: Text) (useFlag False)
 
   -- Ctrl+A and Ctrl+C, or Select All and Copy from a row's context menu.
+  -- The chords act on every row even while a row has the keyboard, which
+  -- 'shortcut' would leave to the row, so they are matched with 'shortcutIn'.
   menuAction <- fmap snd <$> liftIO (takeTextEditLastAction ctx)
-  let chosen typed cmd =
-        menuAction == Just cmd || (modCtrl (inputModifiers inp) && T.any (`T.elem` typed) (inputChars inp))
+  let chosen c cmd = menuAction == Just cmd || shortcutIn (ctrl <> key c) inp
 
-  when (chosen "aA\x01" SelectAll) $ setAllSelected True
+  when (chosen 'a' SelectAll) $ setAllSelected True
 
-  when (allSelected && inputKeysElem KeyEscape (inputKeys inp)) $
+  escape <- keyPressed KeyEscape
+  when (allSelected && escape) $
     setAllSelected False
 
   -- A left click on a selectable row clears the Select-All highlight. The
@@ -268,7 +271,7 @@ logsApp stateRef = do
     let copyAll = liftIO $ do
           rows <- forM [0 .. asShownCount st - 1] (fmap leLine . shownEntry st)
           void (ctxClipboardSet ctx (T.unlines rows))
-    when (allSelected && chosen "cC\ETX" Copy) copyAll
+    when (allSelected && chosen 'c' Copy) copyAll
 
     separator
     renderStatusBar (asCount st) (asShownCount st) allSelected
@@ -418,8 +421,6 @@ main = do
       , sdlWindowSize = Size 1050 720
       , sdlAppTheme = Just tomorrowNightMinDarkTheme
       -- ESC clears the selection (handled in logsApp); quit is Ctrl+Q.
-      , sdlAppShouldQuit = \inp ->
-          modCtrl (inputModifiers inp)
-            && T.any (`T.elem` ("qQ" :: Text)) (inputChars inp)
+      , sdlAppShouldQuit = shortcutIn (ctrl <> key 'q')
       }
     (logsApp appStateRef)

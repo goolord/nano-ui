@@ -9,9 +9,11 @@ import Control.Monad (void, when)
 import Data.Text qualified as T
 import NanoUI
 import NanoUI.Backend.Sdl
+import NanoUI.Shortcut
 import NanoUI.Testing (collectOverlayTextSpans, collectTextSpans)
 import NanoUI.Testing.Harness
-  ( clickPos
+  ( chordInp
+  , clickPos
   , findExact
   , findRightmost
   , expectText
@@ -28,7 +30,7 @@ selftest = do
         drawFrame inp = void (sdlDrawFrame ctx notepadUi env inp False)
         click = clickPos drawFrame base
         clickOn name spans = click =<< requireSpan ("selftest: " <> T.unpack name) (findExact name spans)
-        chord c = drawFrame base {inputChars = c, inputModifiers = Modifiers False True False} >> drawFrame base
+        chord c = drawFrame (chordInp c base) >> drawFrame base
         overlay = collectOverlayTextSpans ctx base
 
       mapM_ drawFrame [base, base]
@@ -39,7 +41,7 @@ selftest = do
       clickOn "File" spans0
       spansFile <- overlay
       expectText "selftest: File menu did not open" "Save As..." spansFile
-      clickOn "New" spansFile
+      click =<< requireSpan "selftest: New item" (findRightmost "New" spansFile)
       baseSpansNew <- collectTextSpans ctx
       overlaySpansNew <- overlay
       when (hasText "Save As..." overlaySpansNew) $
@@ -62,9 +64,9 @@ selftest = do
         fail "selftest: typed text was not replaced"
 
       -- Ctrl+= / Ctrl+- zoom the editor font only; the status bar tracks it.
-      chord "="
+      chord (ctrl <> key '=')
       expectText "selftest: Ctrl+= did not zoom in" "Zoom: 110%" =<< collectTextSpans ctx
-      chord "-"
+      chord (ctrl <> key '-')
       expectText "selftest: Ctrl+- did not zoom out" "Zoom: 100%" =<< collectTextSpans ctx
 
       -- The File menu offers Exit; activating it terminates the process (via

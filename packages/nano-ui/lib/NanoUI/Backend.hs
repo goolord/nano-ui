@@ -41,9 +41,14 @@ module NanoUI.Backend
     -- what is held (buttons, pointer, modifiers, window size), then folds the
     -- window's new events into it. Starting from 'emptyInput' every frame
     -- instead forgets a held button and the pointer between events. Keys
-    -- arrive through 'appendInputKey', mouse buttons through
-    -- 'applyMouseButton' and dropped files through 'appendDropEvent'; typed
-    -- characters belong in 'inputChars' rather than as keys.
+    -- arrive through 'applyKey', which records presses, releases and held
+    -- keys, mouse buttons through 'applyMouseButton' and dropped files
+    -- through 'appendDropEvent'. Every key goes in as a 'Key' whatever the
+    -- modifiers, a key that types a character as the 'KeyChar' it types
+    -- with no modifier held; the text typed goes in 'inputChars' as well, and
+    -- a chord such as Ctrl+C types none. A held key's auto-repeats go in
+    -- only for the keys 'keyRepeats' says repeat, and 'keypadKey' says what
+    -- a keypad key is.
   , Input (..)
   , Key (..)
   , Modifiers (..)
@@ -60,6 +65,10 @@ module NanoUI.Backend
   , inputKeysFromList
   , inputKeysNull
   , foldInputKeys
+  , applyKey
+  , keyRepeats
+  , keypadKey
+  , noModifiers
   , modifiersFromBits
 
     -- * Cursors

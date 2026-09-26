@@ -24,6 +24,7 @@ import NanoUI.Internal.Widgets.TextArea
   , loadTextAreaState
   , selectionAnchor
   )
+import NanoUI.Shortcut
 import NanoUI.Widgets.TextBuffer
   ( fromText
   , getCursor
@@ -81,13 +82,13 @@ runTextInputBatchTest ctx failed = do
   (resp, _) <- warmup2 ctx inp ui
   _ <- step (tabInp inp)
   _ <- step left
-  replicateM_ 3 (step (left {inputModifiers = Modifiers True False False}))
+  replicateM_ 3 (step (left {inputModifiers = Modifiers True False False False}))
   let
     checkSelection cursor anchor = do
       ints <- storeInt <$> getStore ctx
-      let key = intKey (respId resp)
-      assertEq failed (IM.lookup (slotKey SlotCursor key) ints) (Just cursor)
-      assertEq failed (IM.lookup (slotKey SlotAnchor key) ints) (Just anchor)
+      let slot = intKey (respId resp)
+      assertEq failed (IM.lookup (slotKey SlotCursor slot) ints) (Just cursor)
+      assertEq failed (IM.lookup (slotKey SlotAnchor slot) ints) (Just anchor)
   checkSelection 1 4
   -- An event filtered to nothing must not delete the current selection.
   ((_, unchanged), _, _, _) <- step (inp {inputChars = "\n\t"})
@@ -144,8 +145,8 @@ runTextInputCutClearsSelectionTest ctx failed = do
     inp0 = withInput 320 120
     ui = column (held textRef textInput')
   warmupFocused ctx' inp0 ui
-  _ <- runFrame ctx' (keyInp KeyLeft inp0) {inputModifiers = Modifiers True False False} ui
-  _ <- runFrame ctx' (ctrlInp "x" inp0) ui
+  _ <- runFrame ctx' (chordInp (shift <> key KeyLeft) inp0) ui
+  _ <- runFrame ctx' (chordInp (ctrl <> key 'x') inp0) ui
   assertEq failed (Just "o") =<< readIORef clipRef
   assertEq failed "hellz" . snd =<< evalUi ctx' (inp0 {inputChars = "z"}) ui
 
@@ -157,17 +158,17 @@ runTextInputWordKeysTest ctx failed = do
   let
     inp0 = withInput 320 120
     ui = column (held textRef textInput')
-    -- The key's frame with Ctrl held, then the text on the frame after it.
-    chordThen key next = runFrame ctx (keyInp key inp0) {inputModifiers = Modifiers False True False} ui >> snd <$> evalUi ctx next ui
+    -- The chord's frame, then the text on the frame after it.
+    chordThen chord next = runFrame ctx (chordInp chord inp0) ui >> snd <$> evalUi ctx next ui
   warmupFocused ctx inp0 ui
   -- Ctrl+Backspace deletes the word before the cursor ("world").
-  assertEq failed "hello " =<< chordThen KeyBackspace inp0
+  assertEq failed "hello " =<< chordThen (ctrl <> key KeyBackspace) inp0
   -- Nothing right of the cursor at end of text: Ctrl+Delete is a no-op.
-  assertEq failed "hello " =<< chordThen KeyDelete inp0
+  assertEq failed "hello " =<< chordThen (ctrl <> key KeyDelete) inp0
   -- Ctrl+Left jumps to the start; typing there proves the cursor moved.
-  assertEq failed "Xhello " =<< chordThen KeyLeft inp0 {inputChars = "X"}
+  assertEq failed "Xhello " =<< chordThen (ctrl <> key KeyLeft) inp0 {inputChars = "X"}
   -- Ctrl+Delete removes the word after the cursor ("hello").
-  assertEq failed "X " =<< chordThen KeyDelete inp0
+  assertEq failed "X " =<< chordThen (ctrl <> key KeyDelete) inp0
 
 runTextAreaCutClearsSelectionTest :: Context -> IORef Int -> IO ()
 runTextAreaCutClearsSelectionTest ctx failed = do
@@ -177,8 +178,8 @@ runTextAreaCutClearsSelectionTest ctx failed = do
     inp0 = withInput 320 220
     ui = column (label "Notes" >> held textRef textArea')
   warmupFocused ctx' inp0 ui
-  _ <- runFrame ctx' (ctrlInp "a" inp0) ui
-  (_, cutVal) <- evalUi ctx' (ctrlInp "x" inp0) ui
+  _ <- runFrame ctx' (chordInp (ctrl <> key 'a') inp0) ui
+  (_, cutVal) <- evalUi ctx' (chordInp (ctrl <> key 'x') inp0) ui
   assertEq failed (Just "hello") =<< readIORef clipRef
   assertEq failed cutVal ""
   assertEq failed "z" . snd =<< evalUi ctx' (inp0 {inputChars = "z"}) ui
@@ -191,13 +192,13 @@ runTextInputSelectionTest ctx failed = do
     ui = column (button "Other" >> held textRef textInput')
   warmupFocused ctx inp0 ui
   _ <- runFrame ctx (tabInp inp0) ui
-  _ <- warmup2 ctx (keyInp KeyLeft inp0) {inputModifiers = Modifiers True False False} ui
+  _ <- warmup2 ctx (chordInp (shift <> key KeyLeft) inp0) ui
   assertEq failed "helX" . snd =<< evalUi ctx (inp0 {inputChars = "X"}) ui
-  -- Ctrl+A selects all whether it arrives as 'a' or as the \x01 control char.
-  forM_ ["\x01", "a"] $ \selectAll -> do
-    _ <- runFrame ctx (inp0 {inputChars = "abc"}) ui
-    _ <- runFrame ctx (ctrlInp selectAll inp0) ui
-    assertEq failed "" . snd =<< evalUi ctx (keyInp KeyBackspace inp0) ui
+  -- Ctrl+A selects all, and the letter held with Ctrl types nothing even
+  -- where a backend also delivers it as text.
+  _ <- runFrame ctx (inp0 {inputChars = "abc"}) ui
+  _ <- runFrame ctx ((chordInp (ctrl <> key 'a') inp0) {inputChars = "a"}) ui
+  assertEq failed "" . snd =<< evalUi ctx (keyInp KeyBackspace inp0) ui
 
 runTextInputMouseSelectionTest :: Context -> IORef Int -> IO ()
 runTextInputMouseSelectionTest ctx failed = do
@@ -240,11 +241,11 @@ runTextInputClipboardTest ctx failed = do
     inp0 = withInput 320 120
     ui = column (held textRef textInput')
   warmupFocused ctx' inp0 ui
-  let chord c = runFrame ctx' (ctrlInp c inp0) ui
-  _ <- chord "a" >> chord "c"
+  let chord c = runFrame ctx' (chordInp c inp0) ui
+  _ <- chord (ctrl <> key 'a') >> chord (ctrl <> key 'c')
   assertEq failed (Just "hello") =<< readIORef clipRef
-  _ <- chord "a" >> runFrame ctx' (keyInp KeyBackspace inp0) ui
-  assertEq failed "hello" . snd =<< evalUi ctx' (ctrlInp "v" inp0) ui
+  _ <- chord (ctrl <> key 'a') >> runFrame ctx' (keyInp KeyBackspace inp0) ui
+  assertEq failed "hello" . snd =<< evalUi ctx' (chordInp (ctrl <> key 'v') inp0) ui
 
 -- A password field displays one mask character per character, and Ctrl+C
 -- leaves the clipboard untouched while the field keeps its real value.
@@ -259,8 +260,8 @@ runTextInputPasswordTest ctx failed = do
   assert failed (not (hasText "hunter2" spans))
   assertSpansHas failed "*******" spans
   _ <- runFrame ctx' (tabInp inp0) ui
-  _ <- runFrame ctx' (ctrlInp "a" inp0) ui
-  (_, val) <- evalUi ctx' (ctrlInp "c" inp0) ui
+  _ <- runFrame ctx' (chordInp (ctrl <> key 'a') inp0) ui
+  (_, val) <- evalUi ctx' (chordInp (ctrl <> key 'c') inp0) ui
   assertEq failed Nothing =<< readIORef clipRef
   assertEq failed val "hunter2"
 
@@ -765,13 +766,13 @@ runTextUndoTest ctx failed = do
   assertEq failed "red fox" =<< readIORef ref
   (_, canUndo) <- frame inp
   assert failed canUndo
-  _ <- frame (ctrlInp "z" inp)
+  _ <- frame (chordInp (ctrl <> key 'z') inp)
   assertEq failed "red " =<< readIORef ref
-  _ <- frame (ctrlInp "z" inp)
+  _ <- frame (chordInp (ctrl <> key 'z') inp)
   assertEq failed "" =<< readIORef ref
-  _ <- frame inp {inputChars = "z", inputModifiers = Modifiers True True False}
+  _ <- frame (chordInp (ctrl <> shift <> key 'z') inp)
   assertEq failed "red " =<< readIORef ref
-  _ <- frame (ctrlInp "y" inp)
+  _ <- frame (chordInp (ctrl <> key 'y') inp)
   assertEq failed "red fox" =<< readIORef ref
   -- A command from outside the field's frame edits it and pulses it once.
   writeIORef commands [InsertText "!"]
@@ -823,7 +824,7 @@ runTextAreaDocumentTest ctx failed = do
   assert failed undoable
   (againIn, _, againOut, _) <- frame inp
   assert failed (sameDocument againIn againOut)
-  _ <- frame (ctrlInp "z" inp)
+  _ <- frame (chordInp (ctrl <> key 'z') inp)
   undone <- readIORef ref
   assertEq failed (documentText undone) original
   -- Replacing the document drops the history recorded against the old one.
@@ -872,11 +873,11 @@ runTextAreaWidthTrackingTest ctx failed = do
   check
   -- Delete the widest line itself.
   mapM_ (\_ -> frame (keyInp KeyDown inp)) [1 .. 190 :: Int]
-  _ <- frame inp {inputKeys = inputKeysFromList [KeyHome, KeyEnd], inputModifiers = Modifiers True False False}
+  _ <- frame inp {inputKeys = inputKeysFromList [KeyHome, KeyEnd], inputModifiers = Modifiers True False False False}
   _ <- frame (keyInp KeyBackspace inp)
   check
   -- Undo brings it back.
-  _ <- frame (ctrlInp "z" inp)
+  _ <- frame (chordInp (ctrl <> key 'z') inp)
   check
 
 -- | The context with a clipboard kept in memory, starting with @initial@, and
@@ -912,7 +913,3 @@ runTextAreaMenuSelectAllTest ctx failed = do
       let st = loadTextAreaState store (intKey (respId resp))
       assertEq failed (selectionAnchor st) (Cursor 0 0)
       assertEq failed (getCursor (buffer st)) (Cursor lastRow (T.length lastLine))
-
--- | A frame typing @c@ with Ctrl held, as a backend delivers a Ctrl chord.
-ctrlInp :: T.Text -> Input -> Input
-ctrlInp c inp = inp {inputChars = c, inputModifiers = Modifiers False True False}

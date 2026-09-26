@@ -268,13 +268,25 @@
 - A layout overlay, like iced's `explain`: `explainLayout` outlines every
   layout node and highlights the one under the pointer, which `explainedNode`
   describes; `explainingLayout` says whether it is on.
+- Every key as a `Key`: `KeyF n`, paging, Insert, Space, the lock and menu
+  keys, and a `KeyChar` of what a typing key types unmodified. `modSuper`, and
+  `modPrimary` for the platform's command key (Command on macOS, else Ctrl).
+  A view reads keys with `keyPressed`, `keyReleased` and `keyHeld`.
+- Shortcuts: `shortcut (ctrl <> key 's')` is `True` once on the frame the
+  chord is pressed, unless a modal, `disabledWhen` or the focused widget
+  takes it. The new module `NanoUI.Shortcut` has chords: a `Shortcut` is
+  modifiers (`ctrl`, `shift`, `alt`, `super`, `cmdOrCtrl`) and a `key` put
+  together with `<>`, with `shortcutLabel` and `shortcutIn`, and
+  `parseShortcut` reads one written as xmonad's EZConfig writes it (`C-s`,
+  `M-S-p`, `A-<Enter>`, `<F5>`). `Modifiers` is a `Monoid`.
 - The middle and side mouse buttons: `respMiddleClicked`, `respMiddlePressed`
   and `inputMouseMiddleDown` and its siblings, routed like a right click (a
   middle click closes a closable tab), and `inputMouseBackPressed` and
   `inputMouseForwardPressed`.
-- `NanoUI.Backend` has what a backend needs for the above:
-  `modifiersFromBits`, `cursorFallback` and `setExplainLayout`.
-- `NanoUI.Testing.Harness` has `middleClickPair`.
+- `NanoUI.Backend` has what a backend needs for the above: `applyKey`,
+  `keyRepeats`, `keypadKey`, `modifiersFromBits`, `noModifiers`,
+  `cursorFallback` and `setExplainLayout`.
+- `NanoUI.Testing.Harness` has `chordInp`, `keyUpInp` and `middleClickPair`.
 
 ### Changed
 
@@ -536,7 +548,13 @@
 - Tooltips open once the pointer has rested on the target for half a second
   (`defaultTooltipConfig`), or at once just after another, and shut while a
   button is held. `tooltipAt PlacementAtCursor` follows the pointer.
-- `Input`, `MouseButton`, `Response`, `Layout`,
+- `menuItemShortcut` is also `True` when its chord is pressed while its menu
+  is open, and shows the chord as its `shortcutLabel`.
+- A key chord is a key, not typed text: Ctrl+C is `KeyChar 'c'` with `modCtrl`
+  in `inputKeys` and nothing in `inputChars`, so look for it with `shortcut`
+  or in `inputKeys`. Text fields take Command as well as Ctrl on macOS.
+- `Key` is `Ord` and no longer `Enum`, and `Modifiers` is `Ord`.
+- `Input`, `Modifiers` (`modSuper`), `MouseButton`, `Response`, `Layout`,
   `DrawOp` and `UiCursorKind` have new fields or constructors, for the
   additions above.
 

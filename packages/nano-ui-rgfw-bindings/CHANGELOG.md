@@ -5,8 +5,12 @@
 ### Added
 
 - `rgfw_windowHide` in `RGFW.Raw`.
-- `rgfw_mouseNotAllowed`, `rgfw_mouseWait`, `rgfw_mouseProgress`, and the
-  side buttons `rgfw_mouseMisc1` and `rgfw_mouseMisc2`, in `RGFW.Raw`.
+- `rgfw_mouseNotAllowed`, `rgfw_mouseWait`, `rgfw_mouseProgress`, the side
+  buttons `rgfw_mouseMisc1` and `rgfw_mouseMisc2`, and the key codes of Space,
+  Insert, PrintScreen, Pause and the function, paging, lock, menu and keypad
+  keys, in `RGFW.Raw`.
+- `EventKeyRepeat`, a held key's auto-repeat, which `EventKeyPress` no longer
+  reports, and `physicalToMappedKey`.
 
 ### Changed
 
