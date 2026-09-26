@@ -482,10 +482,12 @@
 - `NanoUI.Monad` and `NanoUI.Input` keep what a view or custom widget uses.
   `runUi`, `runNanoUI`, `askContext`, `withContext`, `withIdFrame`,
   `burstNextIds`, `FrameMsg`, `decodeMessages`, `reduceMessages`,
-  `reduceUpdates`, `stripInteractionInput`, `withoutPointer`,
-  `isHardQuitInput` and `splitFrame` moved to `NanoUI.Internal.Monad` and
+  `reduceUpdates`, `stripInteractionInput`, `withoutPointer` and
+  `isHardQuitInput` moved to `NanoUI.Internal.Monad` and
   `NanoUI.Internal.Input`; `NanoUI.Backend` and `NanoUI.Testing` still export
-  the ones they did.
+  the ones they did. `splitFrame` gave way to `NanoUI.Internal.Input`'s
+  `takeFrame`, which folds a batch of events into a frame as far as the
+  frame may take them.
 - `NanoUI.Widgets.Custom`, `.TextArea`, `.TextDocument`, `.TextEditor` and
   `.TextField` no longer export the helpers the frame uses
   (`mkCustomDrawContext`, `loadTextAreaState`, `loadTextAreaStateWithBuffer`,
@@ -658,6 +660,16 @@
   nothing drawn over it, so it can say why it is off.
 - `menuItemShortcut` is also `True` when its chord is pressed while its menu
   is open, and shows the chord as its `shortcutLabel`.
+- A frame keeps the order of what was typed. `runSessionLoop` ends a frame
+  after a command key (a named key but Space, or a chord, as
+  `NanoUI.Internal.Input.isCommandKey` says) when text, another key or a
+  change of modifiers comes next, so a frame's text comes before its one
+  command key and its modifiers are those the key went down with: "ls" and
+  Enter typed within one frame reach a text field or a terminal as "ls" and
+  then Enter, and Ctrl+S released within the frame still fires its
+  shortcut. A burst of typing takes a frame more for each such key, and
+  steady typing or a key's auto-repeats none. The Ctrl+C quit reads the
+  frame, with no checks of its own for a Ctrl let go later.
 - A key chord is a key, not typed text: Ctrl+C is `KeyChar 'c'` with `modCtrl`
   in `inputKeys` and nothing in `inputChars`, so look for it with `shortcut`
   or in `inputKeys`. Text fields take Command as well as Ctrl on macOS.

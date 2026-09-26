@@ -21,7 +21,6 @@ import NanoUI.Internal.Input
 import NanoUI.Internal.Monad (Ui, askInput, takeEscape, withContext)
 import NanoUI.Internal.Shortcut
 import NanoUI.Widgets.TextEditor (keyCommand, multiLineMode, singleLineMode)
-import System.Info (os)
 
 -- | Whether the key went down this frame, auto-repeats included, whatever
 -- the modifiers and whatever has the keyboard. 'False' behind an open modal
@@ -137,11 +136,4 @@ focusTakesChord kind mods k =
     navigation =
       k `elem` [KeyEnter, KeyLeft, KeyRight, KeyUp, KeyDown, KeyHome, KeyEnd]
         || (k == KeySpace && not command)
-    typing =
-      case k of
-        KeyChar _ -> typingModifiers
-        KeySpace -> typingModifiers
-        _ -> False
-    typingModifiers =
-      not (modSuper mods)
-        && if os == "darwin" then not (modCtrl mods) else modCtrl mods == modAlt mods
+    typing = not (isCommandKey mods k)

@@ -9,6 +9,8 @@ module NanoUI.Internal.Input
   , modifiersFromBits
   , modPrimary
   , primaryModifiers
+  , onMac
+  , isCommandKey
   , Input (..)
   , Pressable (..)
   , buttonHeld
@@ -57,7 +59,7 @@ module NanoUI.Internal.Input
   , grabDragKind
   , clearEphemeral
   , isHardQuitInput
-  , splitFrame
+  , takeFrame
   , Composition (..)
   , applyComposition
   ) where
@@ -66,7 +68,7 @@ import Data.Bits (Bits, clearBit, countTrailingZeros, setBit, testBit, zeroBits,
 import Data.Foldable (toList)
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Primitive.SmallArray (SmallArray, copySmallArray, newSmallArray, runSmallArray, sizeofSmallArray, smallArrayFromList)
+import Data.Primitive.SmallArray (SmallArray, copySmallArray, indexSmallArray, newSmallArray, runSmallArray, sizeofSmallArray, smallArrayFromList)
 import Data.Word (Word32)
 import NanoUI.Internal.Types (Size (..), V2 (..))
 import System.Info (os)
@@ -141,13 +143,33 @@ modifiersFromBits m shift ctrl alt super = Modifiers (has shift) (has ctrl) (has
 -- | Whether the platform's command modifier is held: Command ('modSuper') on
 -- macOS and Ctrl elsewhere. A chord's @M-@ ('NanoUI.parseShortcut') is it.
 modPrimary :: Modifiers -> Bool
-modPrimary = if os == "darwin" then modSuper else modCtrl
+modPrimary = if onMac then modSuper else modCtrl
 
 -- | The platform's command modifier alone ('modPrimary').
 primaryModifiers :: Modifiers
 primaryModifiers
-  | os == "darwin" = noModifiers {modSuper = True}
+  | onMac = noModifiers {modSuper = True}
   | otherwise = noModifiers {modCtrl = True}
+
+-- | Whether this is macOS, whose keys differ: Command is the command
+-- modifier, and Option types.
+onMac :: Bool
+onMac = os == "darwin"
+{-# NOINLINE onMac #-}
+
+-- | Whether a key pressed with these modifiers is a command rather than
+-- typing: every named key but Space, and a key that types ('KeyChar',
+-- Space) held with modifiers that make a chord of it. A character key types
+-- alone, with Shift, and with AltGr, which is Ctrl+Alt, or on macOS with
+-- Option; Super (Command), Ctrl, and elsewhere than macOS Alt alone, make a
+-- chord of it.
+isCommandKey :: Modifiers -> Key -> Bool
+isCommandKey mods = \case
+  KeyChar _ -> chord
+  KeySpace -> chord
+  _ -> True
+  where
+    chord = modSuper mods || if onMac then modCtrl mods else modCtrl mods /= modAlt mods
 
 -- | OS-level drag-and-drop event kind, mirroring @SDL_EventType@ drop codes.
 data DropType
@@ -186,6 +208,10 @@ data Input = Input
   , inputScroll :: {-# UNPACK #-} !V2
   , inputKeys :: SmallArray Key
   -- ^ Keys pressed this frame in event order, with a held key's auto-repeats.
+  -- A frame the session runner ('takeFrame') batches has at most one
+  -- command key ('isCommandKey'), and it comes last, perhaps repeating: the
+  -- frame's text came before it, and 'inputModifiers' are what it went down
+  -- with.
   , inputKeysNew :: SmallArray Key
   -- ^ The presses of 'inputKeys' that are not auto-repeats: keys that went
   -- down this frame while up, in event order.
@@ -422,13 +448,42 @@ isHardQuitInput inp =
           || T.elem '\ETX' (inputChars inp)
        )
 
--- | Split after the first event satisfying the predicate. Including that edge
--- in the first batch keeps separate press/release transitions in separate frames.
-splitFrame :: (a -> Bool) -> [a] -> ([a], [a])
-splitFrame isEdge events =
-  case break isEdge events of
-    (before, edge : rest) -> (before ++ [edge], rest)
-    (before, []) -> (before, [])
+-- | Fold a batch of events into a frame's input, from @start@, as far as one
+-- frame may take them: the frame's input, the events it took, and the rest,
+-- for the frames after. A frame ends after an edge (@isEdge@, a mouse
+-- button going down or up), so each press and release has a frame. It also
+-- ends after a command key ('isCommandKey') when text, another key or a
+-- change of modifiers comes next: within a frame the order of text, keys and
+-- modifiers is lost, so a frame's text comes before its one command key,
+-- and its modifiers are those the key went down with. Auto-repeats of the
+-- key stay in its frame, so a burst takes extra frames and steady typing
+-- none.
+takeFrame :: (Input -> e -> Input) -> (e -> Bool) -> Input -> [e] -> (Input, [e], [e])
+takeFrame apply isEdge = go []
+  where
+    go taken !inp = \case
+      [] -> (inp, reverse taken, [])
+      events@(e : rest)
+        | commandEnds inp next -> (inp, reverse taken, events)
+        | isEdge e -> (next, reverse (e : taken), rest)
+        | otherwise -> go (e : taken) next rest
+        where
+          next = apply inp e
+
+-- | Whether the event that took a frame's input from @cur@ to @next@ must
+-- wait for the next frame: @cur@'s last key press is a command key, and the
+-- event typed text, pressed another key or changed the modifiers.
+commandEnds :: Input -> Input -> Bool
+commandEnds cur next
+  | n == 0 || not (isCommandKey mods k) = False
+  | otherwise =
+      inputModifiers next /= mods
+        || inputChars next /= inputChars cur
+        || (sizeofSmallArray (inputKeys next) > n && indexSmallArray (inputKeys next) n /= k)
+  where
+    n = sizeofSmallArray (inputKeys cur)
+    k = indexSmallArray (inputKeys cur) (n - 1)
+    mods = inputModifiers cur
 
 -- | Append a key in event order. Copies the small array.
 {-# INLINE appendInputKey #-}

@@ -339,8 +339,10 @@ send :: Fd -> B.ByteString -> IO B.ByteString
 send _ b | B.null b = pure b
 send fd b = onPty (P.fdWrite fd b) (\n -> B.drop (fromIntegral n) b) b B.empty
 
+-- | What a frame's keys and typing send to the shell: its text, then its
+-- keys, the order the session runner leaves them in ('inputKeys').
 keys :: Input -> B.ByteString
-keys inp = E.encodeUtf8 (foldMap key (inputKeys inp) <> prefix <> text)
+keys inp = E.encodeUtf8 (prefix <> text <> foldMap key (inputKeys inp))
  where
   mods = inputModifiers inp
   -- Ctrl with a key sends its control code; what Ctrl typed, if anything,

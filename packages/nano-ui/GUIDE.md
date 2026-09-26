@@ -225,7 +225,11 @@ Keys arrive in `inputKeys`, `inputKeysReleased` and `inputKeysHeld`, and the
 text they type in `inputChars`. A key that types is a `KeyChar` of what it
 types unmodified, so Ctrl+S is `KeyChar 's'` with `modCtrl` set and types
 nothing. A key held down auto-repeats, and each repeat is a press in
-`inputKeys`; `inputKeysNew` has the presses that are not repeats.
+`inputKeys`; `inputKeysNew` has the presses that are not repeats. A frame
+does not keep the order of what came in, so the runner ends a frame after a
+command key (a named key but Space, or a chord) that text, another key or
+other modifiers follow: a frame's text comes before its one command key,
+which went down with the frame's modifiers.
 `pressedIn`, `pressedOnceIn`, `releasedIn` and `heldIn` read one key, or one
 mouse button, in an `Input`: `sdlAppShouldQuit = pressedOnceIn KeyEscape`.
 Bind a chord with `shortcut`. A chord is the modifiers `ctrl`,
@@ -494,7 +498,9 @@ Fold keys in with `applyKey` (a typing key as the `KeyChar` it types
 unmodified, with its text in `inputChars` too, and every auto-repeat as a
 press) and input-method updates with `applyComposition`. When the window
 loses the keyboard, `releaseAllKeys` lets go of the keys held, whose
-releases go elsewhere. After a frame, `textInputArea` from
+releases go elsewhere. `runSessionLoop` batches events into frames so that
+a frame's text comes before its one command key; a loop of your own should
+do the same. After a frame, `textInputArea` from
 `NanoUI.Testing` says where the candidate window goes. Open the window from
 the `WindowSettings` with their title, size, mode, resizability and
 transparency. Before the first frame, install a `WindowHost` with

@@ -52,7 +52,11 @@ module NanoUI.Backend
     -- in as a press, which 'applyKey' keeps out of 'inputKeysNew', and
     -- 'keypadKey' says what a keypad key is. When the window loses the
     -- keyboard, 'releaseAllKeys' lets go of what was held, whose releases
-    -- go elsewhere.
+    -- go elsewhere. A frame does not keep the order of its text, keys and
+    -- modifiers, so 'NanoUI.Runner.runSessionLoop' ends one after a command
+    -- key that text, another key or other modifiers follow: a frame's text
+    -- comes before its one command key ('inputKeys'). A loop of the
+    -- backend's own should batch its events the same way.
   , Input (..)
   , Key (..)
   , Modifiers (..)
