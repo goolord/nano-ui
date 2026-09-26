@@ -55,17 +55,14 @@ explainFrame ctx@Context {ctxNodeArena = na} inp = do
           Just c -> foldPlacedChildrenM na idx (\acc ci -> outlines (depth + 1) c ci acc) rest
         pure (if inScope idx then (rect, clip, depth) : below else below)
       -- The innermost node under the pointer from @idx@ down: the child
-      -- drawn on top with a node under it ('childrenTopFirst': an earlier
-      -- sibling over a later one, but a later layer over an earlier
+      -- drawn on top with a node under it ('firstChildOnTopJustM': an
+      -- earlier sibling over a later one, but a later layer over an earlier
       -- one, and a pinned child over the rest), or else @idx@ itself. A child
       -- can paint outside a row or column, so each is searched.
       nodeAt !depth clip idx = do
         rect <- getNodeRect na idx
         inner <- childClip ctx idx clip rect
-        kids <- childrenTopFirst na idx
-        let firstHit c =
-              foldr (\ci rest -> nodeAt (depth + 1) c ci >>= maybe rest (pure . Just)) (pure Nothing) kids
-        deeper <- maybe (pure Nothing) firstHit inner
+        deeper <- maybe (pure Nothing) (firstChildOnTopJustM na idx . nodeAt (depth + 1)) inner
         case deeper of
           Just _ -> pure deeper
           Nothing
@@ -151,7 +148,7 @@ childClip ctx@Context {ctxNodeArena = na} idx clip rect@(Rect x y w h) =
 describeNode :: NodeArena -> Int -> NodeIdx -> IO ExplainedNode
 describeNode na depth idx = do
   a <- arenaArrays na
-  kind <- nodeKind na idx
+  nt <- readTagEnum a idx TagNodeType
   wid <- getWidgetId na idx
   rect <- getNodeRect na idx
   pad <- getPadding na idx
@@ -163,9 +160,10 @@ describeNode na depth idx = do
   pinned <- readTagEnum a idx TagPinned
   pin <- if pinned then Just <$> (V2 <$> readStyle a idx StylePinX <*> readStyle a idx StylePinY) else pure Nothing
   mode <- readTagEnum a idx TagPointer
+  let direction = case dir of DirRow -> Row; DirColumn -> Column
   pure
     ExplainedNode
-      { explainedKind = kind
+      { explainedKind = nodeKind nt direction flow
       , explainedWidget = if hashWidgetId wid == 0 then Nothing else Just wid
       , explainedDepth = depth
       , explainedRect = rect
@@ -175,7 +173,7 @@ describeNode na depth idx = do
       , explainedMin = V2 (axMin wAx) (axMin hAx)
       , explainedMax = V2 (axMax wAx) (axMax hAx)
       , explainedGap = gap
-      , explainedDirection = case dir of DirRow -> Row; DirColumn -> Column
+      , explainedDirection = direction
       , explainedFlow = flow
       , explainedPin = pin
       , explainedPointer = mode
@@ -184,20 +182,16 @@ describeNode na depth idx = do
 -- | A node's type without its @Node@ prefix, and how a container lays out
 -- its children: its direction, @layered@ for layers, and @wrap@ after the
 -- direction of a container that wraps.
-nodeKind :: NodeArena -> NodeIdx -> IO T.Text
-nodeKind na idx = do
-  nt <- getNodeType na idx
-  let kind = T.pack (drop 4 (show nt))
-      direction dir = T.toLower (T.pack (drop 3 (show dir)))
-  if isContainerNode nt
-    then do
-      dir <- getDirection na idx
-      flow <- getFlow na idx
-      pure $ kind <> ", " <> case flow of
-        Layered -> "layered"
-        Wrap -> direction dir <> ", wrap"
-        Line -> direction dir
-    else pure kind
+nodeKind :: NodeType -> Direction -> Flow -> T.Text
+nodeKind nt dir flow
+  | not (isContainerNode nt) = kind
+  | otherwise = kind <> ", " <> case flow of
+      Layered -> "layered"
+      Wrap -> direction <> ", wrap"
+      Line -> direction
+  where
+    kind = T.pack (drop 4 (show nt))
+    direction = T.toLower (T.pack (show dir))
 
 -- | The outline colour at a depth: the theme's series colours in turn.
 depthColor :: Theme -> Int -> Color
