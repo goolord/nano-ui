@@ -767,7 +767,10 @@ convexRing vs = go 0 0 0 0 0 0
 
 {-# INLINE pointAt #-}
 pointAt :: PrimArray Float -> Int -> (Float, Float)
-pointAt vs i = (indexPrimArray vs (2 * i), indexPrimArray vs (2 * i + 1))
+pointAt vs i =
+  let !x = indexPrimArray vs (2 * i)
+      !y = indexPrimArray vs (2 * i + 1)
+   in (x, y)
 
 -- | The shoelace area of the points of @vs@ that @ix@ lists, in order:
 -- positive for a ring clockwise on screen.
@@ -821,10 +824,16 @@ earClip vs ix = primArrayFromList [indexPrimArray ix k | (a, b, c) <- clipped, k
       forM_ [0 .. n - 1] $ \i -> do
         writePrimArray prevs i ((i - 1 + n) `mod` n)
         writePrimArray nexts i ((i + 1) `mod` n)
-      let triangle i = do
+      -- An ear's corners, read strictly: returned lazily they are thunks,
+      -- two for every corner of every ear tried.
+      let {-# INLINE triangle #-}
+          triangle i = do
             p <- readPrimArray prevs i
             q <- readPrimArray nexts i
-            pure (p, q, (at p, at i, at q))
+            let !a = at p
+                !b = at i
+                !c = at q
+            pure (p, q, (a, b, c))
           isEarAt first count i p q (a, b, c)
             | not (isConvex ccw a b c) = pure False
             | otherwise = outside first count
@@ -1193,6 +1202,10 @@ splitTriangles g vs pts tris = (primArrayFromList (primArrayToList pts ++ concat
 -- long so that its caps have a direction. 'Nothing' for a solid line: no
 -- pattern, or one with a negative or infinite length or all zero, or one
 -- that would cut the line into more than 'maxDashes' dashes.
+--
+-- Kept out of line: inlined, its bindings are allocated for every stroke,
+-- dashed or not.
+{-# NOINLINE dashes #-}
 dashes :: [Float] -> Float -> Bool -> PrimArray Float -> Maybe [PrimArray Float]
 dashes pattern0 offset closed pts
   | null pattern0 || any (\v -> not (v >= 0) || isInfinite v) pattern0 || not (period > 0) || isInfinite period = Nothing
