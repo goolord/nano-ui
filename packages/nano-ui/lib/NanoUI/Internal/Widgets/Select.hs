@@ -80,7 +80,7 @@ selectWith' f options index = do
     finalIdx = maybe current (clamp 0 (n - 1)) picked
   -- Opening, closing or picking changes the store, which wakes the loop.
   uiIO $ do
-    -- Not a press on a widget layers or a pinned node draw over it.
+    -- Ignore presses where layers or a pinned node cover the widget.
     pressed <- pure (rectHit rect mouse && pressedIn MouseLeft inp) <&&> (not <$> pointerCovered ctx wid)
     when pressed $ do
       modifyStore ctx (\st -> setSelectOpen st key (not open))

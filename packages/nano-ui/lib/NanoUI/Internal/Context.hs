@@ -172,9 +172,9 @@ registerImage ctx iid w h px = do
   when ok (damageFull ctx >> markDirty ctx)
   pure ok
 
--- | Take an image out of the atlas: its id no longer draws, and its room
--- goes to the next images registered that fit it. Whatever still names the
--- id draws the placeholder for an unknown image.
+-- | Remove an image from the atlas and free its space for later
+-- registrations. Anything still using the id draws the unknown-image
+-- placeholder.
 {-# INLINE releaseImage #-}
 releaseImage :: Context -> ImageId -> IO ()
 releaseImage ctx = Atlas.releaseImage (ctxImageAtlas ctx)
@@ -191,7 +191,7 @@ registerImages ctx =
 lookupImageUv :: Context -> ImageId -> IO (Maybe (Float, Float, Float, Float))
 lookupImageUv ctx = Atlas.lookupImageUv (ctxImageAtlas ctx)
 
--- | The size in pixels of a registered image, or 'Nothing' for an unknown one.
+-- | A registered image's size in pixels, or 'Nothing' if unknown.
 {-# INLINE lookupImageSize #-}
 lookupImageSize :: Context -> ImageId -> IO (Maybe (Int, Int))
 lookupImageSize ctx = Atlas.lookupImageSize (ctxImageAtlas ctx)
@@ -245,15 +245,14 @@ withFontResolver ctx rf rm = trackMetricSource ctx {ctxResolveFont = rf, ctxReso
 
 -- | Replace base metrics and rebuild default measurement/resolution callbacks.
 -- Returns a configured context sharing the original session state. The
--- default resolver sets a font size as the line height it gives, so the
--- default size becomes the metrics' line height ('withFontSize').
+-- default resolver treats a font size as a line height, so the default size
+-- becomes the metrics' line height ('withFontSize').
 withFontMetrics :: Context -> FontMetrics -> Context
 withFontMetrics ctx fm =
   withDefaultResolvers ctx {ctxFontMetrics = fm, ctxMeasureText = measureTextIO fm, ctxFontSize = fmLineHeight fm}
 
--- | Set the size text is set in when its layout names none, in the units
--- the context's font resolver takes sizes in: a backend whose base font is
--- another size than its line height says what it is.
+-- | Set the default text size, in the font resolver's units. Backends whose
+-- base font size differs from its line height call this.
 withFontSize :: Context -> Float -> Context
 withFontSize ctx size = ctx {ctxFontSize = size}
 
@@ -385,9 +384,8 @@ withTheme :: Context -> Theme -> IO Context
 withTheme ctx theme = ctx <$ setTheme ctx theme
 
 -- | Set a fixed base theme, invalidate text/layout caches, and request a
--- full repaint. The same theme again changes nothing, so a view may set it
--- every frame. It replaces a theme that follows the system's appearance
--- ('followSystemTheme'), which is the base theme too.
+-- full repaint. Setting the same theme is a no-op. Stops
+-- 'followSystemTheme'.
 setTheme :: Context -> Theme -> IO ()
 setTheme ctx th = do
   writeIORef (ctxThemeFor ctx) Nothing
@@ -401,26 +399,23 @@ applyBaseTheme ctx th = do
     writeIORef (ctxTheme ctx) th
     repaintForTheme ctx
 
--- | What a new base theme needs: text caches dropped, the whole window
--- repainted, and a frame.
+-- | Drop text caches, repaint the whole window and request a frame.
 repaintForTheme :: Context -> IO ()
 repaintForTheme ctx = do
   invalidateTextCaches ctx
   damageFull ctx
   markDirty ctx
 
--- | 'setTheme' from a view: what the view reads after it sees the theme
--- at once, and the frame repaints once the view is built if it ends with
--- another theme than it began with ('settleViewTheme'). So a view that sets
--- the theme every frame, even two themes a frame, repaints only when the
--- theme it ends with changes.
+-- | 'setTheme' from a view. The new theme is visible immediately, but the
+-- repaint waits until the view is built ('settleViewTheme') and happens only
+-- if the frame ends on a different theme than it began with. A view can set
+-- the theme every frame, even twice, without repainting.
 setThemeInView :: Context -> Theme -> IO ()
 setThemeInView ctx th = do
   writeIORef (ctxThemeFor ctx) Nothing
   writeIORef (ctxTheme ctx) th
 
--- | Repaint for the base theme a view set ('setThemeInView'), if it is not
--- the one the frame began with.
+-- | Repaint if a view changed the base theme ('setThemeInView') this frame.
 settleViewTheme :: Context -> Theme -> IO ()
 settleViewTheme ctx before = do
   now <- readIORef (ctxTheme ctx)
@@ -430,10 +425,9 @@ settleViewTheme ctx before = do
 getTheme :: Context -> IO Theme
 getTheme ctx = readIORef (ctxTheme ctx)
 
--- | Turn the layout overlay on or off: a one-pixel outline just inside every
--- layout node, coloured by depth, and a tint on the node under the pointer
--- ("NanoUI.Internal.Frame.Explain"). A change repaints the whole window and
--- wakes the loop; setting what is already set does nothing.
+-- | Toggle the layout overlay ("NanoUI.Internal.Frame.Explain"): a one-pixel
+-- outline inside every layout node, coloured by depth, and a tint on the
+-- hovered node. A change repaints the window and wakes the loop.
 setExplainLayout :: Context -> Bool -> IO ()
 setExplainLayout ctx on = do
   cur <- getExplainLayout ctx
@@ -447,19 +441,16 @@ setExplainLayout ctx on = do
 getExplainLayout :: Context -> IO Bool
 getExplainLayout ctx = esOn <$> readIORef (ctxExplain ctx)
 
--- | The node the pointer was over at the end of the last frame while the
--- layout overlay is on. 'Nothing' while it is off, or with the pointer over
--- no node.
+-- | The node under the pointer at the end of the last frame, while the layout
+-- overlay is on. 'Nothing' when it is off or no node is hovered.
 getExplainedNode :: Context -> IO (Maybe ExplainedNode)
 getExplainedNode ctx = fmap fst . esHover <$> readIORef (ctxExplain ctx)
 
--- | Make the base theme a function of the system's appearance, which the
--- backend reports ('Nothing' when it cannot tell), as
--- @'NanoUI.Internal.Style.lightDark' light dark@ picks one of two themes.
--- It applies the theme for the appearance now, like 'setTheme', and again
--- whenever 'setSystemAppearance' reports a change, until 'setTheme' sets a
--- fixed theme in its place. A view that picks its theme itself sets it
--- each frame instead:
+-- | Derive the base theme from the system appearance ('Nothing' when the
+-- backend cannot tell), e.g. with @'NanoUI.Internal.Style.lightDark' light
+-- dark@. Applies now and on every 'setSystemAppearance' change, until
+-- 'setTheme' sets a fixed theme. A view can instead pick the theme itself
+-- each frame:
 --
 -- > setUiTheme . lightDark defaultLightTheme defaultTheme =<< systemAppearance
 followSystemTheme :: Context -> (Maybe Appearance -> Theme) -> IO ()
@@ -467,23 +458,21 @@ followSystemTheme ctx pick = do
   writeIORef (ctxThemeFor ctx) (Just pick)
   applyBaseTheme ctx . pick =<< readIORef (ctxSystemAppearance ctx)
 
--- | Record the system's light or dark preference, 'Nothing' when the
--- platform does not say. For backends, on the UI thread: the SDL backend
--- reports it at startup and when the system switches; RGFW has no way to
--- ask. A change repaints the whole window and wakes the loop, and a context
--- following the system switches its base theme. The same value again is a
--- no-op.
+-- | Record the system's light or dark preference ('Nothing' if unknown).
+-- Backends call this on the UI thread; SDL reports at startup and on change,
+-- RGFW cannot ask. A change repaints the window, wakes the loop, and updates
+-- a theme set by 'followSystemTheme'. The same value again is a no-op.
 setSystemAppearance :: Context -> Maybe Appearance -> IO ()
 setSystemAppearance ctx appearance = do
   cur <- readIORef (ctxSystemAppearance ctx)
   when (cur /= appearance) $ do
     writeIORef (ctxSystemAppearance ctx) appearance
     readIORef (ctxThemeFor ctx) >>= mapM_ (\pick -> applyBaseTheme ctx (pick appearance))
-    -- A view can read the appearance itself.
+    -- Repaint even without followSystemTheme: views may read the appearance.
     damageFull ctx
     markDirty ctx
 
--- | The system's light or dark preference as the backend last reported it.
+-- | The system appearance the backend last reported.
 getSystemAppearance :: Context -> IO (Maybe Appearance)
 getSystemAppearance ctx = readIORef (ctxSystemAppearance ctx)
 
@@ -671,18 +660,16 @@ registerFocusable ctx wid = do
     writePrimArray arr' idx wid
     writeIORef (ctxFocusablesCount ctx) (idx + 1)
 
--- | Take text from the input method this frame for @wid@, which has the
--- keyboard: its caret in window coordinates ('Nothing' for a text field,
--- whose caret the frame works out) and what it takes. The frame after gives
--- @wid@ the input method's composition ('fieldComposition'), and a backend
--- reads where it takes text ('NanoUI.Internal.Frame.TextArea.textInputArea').
--- A build that asks for none leaves the input method off. The last request
--- of a build wins.
+-- | Enable the input method this frame for the focused widget @wid@, with its
+-- caret in window coordinates ('Nothing' for a text field; the frame finds
+-- its caret) and the input purpose. Next frame @wid@ gets the composition
+-- ('fieldComposition'); backends read the text area from
+-- 'NanoUI.Internal.Frame.TextArea.textInputArea'. With no request the input
+-- method stays off; the last request of a build wins.
 requestInputMethod :: Context -> WidgetId -> Maybe Rect -> InputPurpose -> IO ()
 requestInputMethod ctx wid caret purpose = writeIORef (ctxInputMethod ctx) $! Just (InputMethodRequest wid caret purpose)
 
--- | The composition showing in widget @wid@: the frame's, while @wid@ has
--- the focus and the composition belongs to it
+-- | The frame's composition, if @wid@ has focus and owns it
 -- ('NanoUI.Internal.Frame.TextInput.claimComposition').
 fieldComposition :: Context -> WidgetId -> IO (Maybe Composition)
 fieldComposition ctx wid = do

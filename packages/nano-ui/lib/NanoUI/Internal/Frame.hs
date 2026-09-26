@@ -95,11 +95,11 @@ runFrameEff unlift ctx rawInp ui = do
   clearDirty ctx
   -- Timed wakes are re-requested by whatever is still built this frame.
   clearWakeAt ctx
-  -- What a thread changed before it woke the loop, the view is about to
-  -- read: repaint whole.
+  -- A thread may have changed what the view reads before waking the loop,
+  -- so repaint in full.
   takeThreadWake ctx
-  -- An input method's composition goes to the field that has the focus, and
-  -- while it shows there, the keys are the input method's.
+  -- The focused field gets any IME composition, and while one shows, the IME
+  -- owns the keys.
   (frameInp, imeKeys) <- claimComposition ctx rawInp
   -- Decide what the pointer belongs to before anything reads it, against the
   -- frame the user saw. The view gets its input routed layer by layer, and
@@ -111,7 +111,7 @@ runFrameEff unlift ctx rawInp ui = do
   -- to, is for what watches the whole window: a press anywhere else closing
   -- a menu, hover, and what the overlays paint.
   route <- routePointer ctx frameInp
-  -- Where one widget is drawn over another, the one under it has no pointer.
+  -- A widget covered by another gets no pointer.
   recordCoveredWidgets ctx route frameInp
   let routedIf mine = if mine then frameInp else withoutPointer frameInp
       layerInp = routedIf (case route of RouteLayer _ -> True; _ -> False)
@@ -132,7 +132,7 @@ runFrameEff unlift ctx rawInp ui = do
   resetDrawArena (ctxDrawArena ctx)
   resetUiBuild ctx True
   beginFrameModal ctx
-  -- Nor does an Escape the input method took quit the app.
+  -- An Escape the IME consumed must not also quit the app.
   when (inputKeysNull (inputKeys frameInp) && pressedIn KeyEscape rawInp) $
     markEscapeConsumed ctx
   writeIORef (ctxReleaseClickedId ctx) (WidgetId 0)
@@ -198,7 +198,7 @@ runFrameEff unlift ctx rawInp ui = do
   when (mirrorStoresChanged storeBuilt storeAfter) $ do
     layoutArena ctx size True
     applyScrollOffsets ctx size
-  -- The layout is final: what the sensors see now is what the next view reads.
+  -- Layout is final, so the sensors record what the next view reads.
   updateSensors ctx size
   updatePrevRects ctx size
   refreshHover ctx frameInp
@@ -215,8 +215,8 @@ runFrameEff unlift ctx rawInp ui = do
   unless (null menuRects && null prevMenuRects) $ do
     mapM_ (damageRect ctx) (menuRects ++ prevMenuRects)
     modifyOverlay ctx (\os -> os {osPrevMenuRects = menuRects})
-  -- The layout overlay damages its own outlines: the rect diffs below do not
-  -- cover a row or column that moved.
+  -- The layout overlay damages its own outlines, since the rect diffs below
+  -- miss rows and columns that moved.
   explain <- getExplainLayout ctx
   when explain (explainFrame ctx frameInp)
   writeDamage ctx frameInp snap
@@ -229,7 +229,7 @@ runFrameEff unlift ctx rawInp ui = do
     damage <- takeDamage ctx
     paintDamageClip ctx damage =<< takeDamagePieces ctx
   lowerShapes ctx
-  -- Over the page's scrollbars, and under every floating panel.
+  -- Page outlines go above the page's scrollbars and below floating panels.
   when explain $ do
     beginLayer (ctxDrawArena ctx) LayerContent
     paintExplainPage ctx
@@ -243,10 +243,10 @@ runFrameEff unlift ctx rawInp ui = do
   dirtyAfterUi <- isDirty ctx
   pure (result, msgs, drawData, dirtyAfterUi)
 
--- | Reset what a view run builds: the node arena, the sensors, the input
--- method's request, and the container, id, focus, hover, cursor-zone,
--- drawing and layout-overlay scopes. A second run after a mirror store write
--- (@newFrame@ 'False') keeps the store, animations and prev rects, and the
+-- | Reset what a view run builds: the node arena, sensors, input method
+-- request, and the container, id, focus, hover, cursor-zone, drawing and
+-- layout-overlay scopes. A second run after a mirror store write
+-- (@newFrame@ 'False') keeps the store, animations, prev rects, and the
 -- theme scopes it compares against.
 resetUiBuild :: Context -> Bool -> IO ()
 resetUiBuild ctx newFrame = do
@@ -255,7 +255,7 @@ resetUiBuild ctx newFrame = do
   writeIORef (ctxContainerStack ctx) []
   writeIORef (ctxIdContext ctx) initialIdContext
   writeIORef (ctxFocusablesCount ctx) 0
-  -- The view asks for the input method afresh, while a widget still takes text.
+  -- The view re-requests the input method each run while a widget takes text.
   readIORef (ctxInputMethod ctx) >>= mapM_ (\_ -> writeIORef (ctxInputMethod ctx) Nothing)
   writeIORef (ctxHotId ctx) (WidgetId 0)
   writeIORef (ctxCursorZones ctx) []
@@ -268,8 +268,8 @@ resetUiBuild ctx newFrame = do
 
 -- | Paint the floating panels over the page: windows with their title-bar
 -- separator, the modal backdrop and the modals, then popups. Each is a
--- menu-style panel in its node's theme with its subtree clipped inside, and
--- with @explain@, the layout overlay's outlines over it.
+-- menu-style panel in its node's theme with its subtree clipped inside.
+-- With @explain@, the layout overlay's outlines are drawn over each.
 drawFloatingPanels :: Context -> Size -> Bool -> IO ()
 drawFloatingPanels ctx@Context {ctxNodeArena = na, ctxDrawArena = da} (Size ww wh) explain = do
   let panels nt style after = forFloatingNodes_ na nt $ \idx -> do

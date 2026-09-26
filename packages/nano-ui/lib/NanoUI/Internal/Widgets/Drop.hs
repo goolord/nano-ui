@@ -42,9 +42,9 @@ data DropTarget = DropTarget
   deriving (Eq, Show)
 
 -- | The drop state for a rectangle from this frame's drop events. Hover
--- persists while the OS drag holds still; payloads are reported on the frame
--- they arrive. A payload lands where the last 'DropPosition' put the drag,
--- not at its own coordinates, which SDL reports as (0,0) when it saw none.
+-- persists while the OS drag is still; payloads are reported on the frame
+-- they arrive. A payload lands at the last 'DropPosition', not its own
+-- coordinates, which SDL reports as (0,0) when it has none.
 useDrop :: Ui :> es => Rect -> Eff es DropTarget
 useDrop bounds = do
   (wid, ctx) <- freshWidget
@@ -55,8 +55,8 @@ useDrop bounds = do
   store <- uiIO (getStore ctx)
   let active0 = flagSlot activeK store
       lastPos0 = uncurry V2 <$> lookupSlot fieldPoint posK store
-      -- A drag is active from 'DropBegin' until 'DropComplete'; a payload
-      -- goes to the position at its point in the sequence.
+      -- A drag is active from 'DropBegin' until 'DropComplete'. A payload
+      -- uses the position current at its point in the sequence.
       step (active, pos, fs, ts) ev = case dropEventType ev of
         DropBegin -> (True, pos, fs, ts)
         DropPosition -> (active, dropEventPos ev <|> pos, fs, ts)

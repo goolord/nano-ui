@@ -1,8 +1,7 @@
--- | What a view may do to the window -- its title, icon, size limits,
--- opacity, mode, position and size, maximizing and minimizing -- as the
--- context's 'WindowHost', and the window's state as views read it
--- ('queryWindowState'). "NanoUI.Sdl.Internal.Window" installs the host as a
--- window opens, which applies the settings it did not open with.
+-- | The context's 'WindowHost' for an SDL window (title, icon, size limits,
+-- opacity, mode, position, size, maximize and minimize), and the window state
+-- views read ('queryWindowState'). "NanoUI.Sdl.Internal.Window" installs the
+-- host when a window opens, applying the settings it did not open with.
 module NanoUI.Sdl.Internal.WindowOptions
   ( windowHostFor
   , queryWindowState
@@ -25,12 +24,12 @@ import SDL3.Sys.Bindgen.Video (SDL_Window)
 import SDL3.Sys.Surface (createSurfaceFrom, destroySurface)
 import SDL3.Sys.Video qualified as SDL
 
--- Everything that changes the window goes through the safe bindings, as in
--- "NanoUI.Sdl.Internal.Chrome": on Windows each of these runs the window's
--- procedure before it returns, which can reach the Haskell hit test.
+-- Window changes use the safe bindings, as in "NanoUI.Sdl.Internal.Chrome":
+-- on Windows each call runs the window procedure before returning, which can
+-- call back into the Haskell hit test.
 
--- | What views may do to the window, at the zoom it is at when they ask:
--- the window coordinates a layout unit is worth.
+-- | The window host for @win@. @zoom@ gives the window coordinates per layout
+-- unit, read at each call.
 windowHostFor :: Ptr SDL_Window -> IO Float -> WindowHost
 windowHostFor win zoom =
   WindowHost
@@ -51,21 +50,20 @@ windowHostFor win zoom =
     , hostRestore = void (SDL.restoreWindowSafe win)
     }
   where
-    -- A size in window coordinates at the zoom, with the desktop's frame
-    -- on a 'NanoUI.Sdl.Internal.Frame.DecorationsFrame' window added, as the
-    -- window opened with it, so the size is the view's. An axis of zero
-    -- stays zero, which is no limit.
+    -- A view size in window coordinates at the current zoom, plus the
+    -- desktop frame on a 'NanoUI.Sdl.Internal.Frame.DecorationsFrame' window
+    -- (as at open). A zero axis stays zero, meaning no limit.
     viewSize (Size w h) = do
       z <- zoom
       (across, down) <- nativeFrameOutset win
       let axis v outset = if v <= 0 then 0 else fromIntegral (round (v * z) + outset) :: Int32
       pure (axis w across, axis h down)
-    -- SDL resizes a window already past the limit.
+    -- SDL resizes a window that is already past the limit.
     sizeLimit :: (Ptr SDL_Window -> Int32 -> Int32 -> IO Bool) -> Maybe Size -> IO ()
     sizeLimit set limit = viewSize (fromMaybe (Size 0 0) limit) >>= \(w, h) -> void (set win w h)
 
--- | Give the window an icon. SDL keeps a copy; a video driver without icons
--- leaves it be.
+-- | Set the window icon. SDL keeps a copy; video drivers without icons
+-- ignore it.
 setIcon :: Ptr SDL_Window -> RgbaPixels -> IO ()
 setIcon win px =
   BSU.unsafeUseAsCString (rgbaBytes px) $ \p -> do
@@ -73,9 +71,9 @@ setIcon win px =
     unless (surface == nullPtr) $
       void (SDL.setWindowIconSafe win surface) >> destroySurface surface
 
--- | The window's state for views, at a scale: its position as the desktop
--- last said (Wayland does not say), and its focus and mode from its flags.
--- Two reads of what SDL keeps, cheap enough for every frame.
+-- | The window state for views: the position the desktop last reported
+-- (Wayland never does), and focus and mode from the window flags. Two reads
+-- of SDL's cached state, cheap enough for every frame.
 queryWindowState :: Ptr SDL_Window -> Float -> IO WindowState
 queryWindowState win scale = do
   flags <- SDL.getWindowFlags win

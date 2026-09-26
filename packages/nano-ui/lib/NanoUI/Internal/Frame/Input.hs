@@ -51,9 +51,8 @@ import NanoUI.Internal.Monad (ifM, unlessM, whenM, (<&&>))
 import NanoUI.Internal.Types (DamageBounds (..), Rect (..), V2 (..), defaultDamageSlop, rectContains)
 import NanoUI.Internal.WidgetText (hasFlag, buttonFlagClose, buttonFlagMenuBar, buttonFlagMenu, buttonFlagRow)
 
--- | Move keyboard focus when Tab was pressed, backwards with Shift held, to
--- the widget 'tabTarget' names. Focus moved this way shows the focus ring. A
--- Tab taken by the widget holding the keyboard
+-- | On Tab (Shift+Tab goes backwards), move keyboard focus to 'tabTarget'
+-- and show the focus ring. A Tab consumed by the focused widget
 -- ('NanoUI.Internal.Context.markTabConsumed') moves nothing.
 finalizeTabFocus :: Context -> Input -> IO ()
 finalizeTabFocus ctx inp =
@@ -70,16 +69,15 @@ finalizeTabFocus ctx inp =
       writeIORef (ctxFocusVisible ctx) True
       markDirty ctx
 
--- | Where Tab moves focus from @cur@, backwards with @back@: focus steps
--- through the 'tabStops' and wraps at both ends. @WidgetId 0@ when there
--- are none.
+-- | Where Tab moves focus from @cur@ (backwards when @back@), stepping
+-- through 'tabStops' and wrapping at both ends. @WidgetId 0@ if there are
+-- none.
 tabTarget :: Context -> WidgetId -> Bool -> IO WidgetId
 tabTarget ctx cur back = (\stops -> tabNext cur stops back) <$> tabStops ctx
 
--- | The widgets Tab stops at, in order: those that called
--- 'NanoUI.Internal.Context.registerFocusable' during the view, in
--- declaration order, and while a modal is open, only those inside the top
--- modal.
+-- | Tab stops in declaration order: the widgets that called
+-- 'NanoUI.Internal.Context.registerFocusable' during the view. While a
+-- modal is open, only those inside the top modal.
 tabStops :: Context -> IO [WidgetId]
 tabStops ctx = do
   -- The modal's root is looked up once for the whole list. Each widget then
@@ -113,12 +111,11 @@ refreshHover ctx inp = do
     when (hashWidgetId prevHot /= 0 && not prevMenu) $ startAnimation ctx prevHot 1 0 0.12
     when (hashWidgetId newHot /= 0 && not newMenu) $ startAnimation ctx newHot 0 1 0.12
 
--- | Record where each button that went down this frame did, in
--- 'ctxPressPos'. Runs before the view. A widget counts a release as its
--- click, and a held button as held on it, only when the press point is on
--- it as well, so a press that drifts onto a neighbouring widget before the
--- button comes up clicks nothing. 'disarmPointerPress' forgets the point
--- once the button is up.
+-- | Record in 'ctxPressPos' where each button pressed this frame went down.
+-- Runs before the view. A widget treats a release as its click, or a held
+-- button as held on it, only if the press point is also on it, so a press
+-- that drifts onto a neighbour clicks nothing. 'disarmPointerPress' clears
+-- the point on release.
 armPointerPress :: Context -> Input -> IO ()
 armPointerPress ctx inp =
   when (anyButtonPressed inp) $ do
@@ -157,19 +154,19 @@ pressTargets ctx inp
 -- step asks, so each node is tested at most once, and the pass stops once
 -- every target is found. Each is the first match in arena order, which is
 -- declaration order. The painter draws siblings from the last declared to the
--- first, so where two overlap the earlier one is on top, except where a stack
--- or a pinned child draws a later match over it ('topmostHit'). A widget
--- drawn inside the interactive one, such as a control among its adornments,
--- is on top of it and takes the press ('innermostHit'). Where a stack or a
--- pinned node can draw a node given 'PointerBlock' over them, a pass before
--- finds whether one takes the press, and then there are none.
+-- first, so where two overlap the earlier one is on top, unless a stack or
+-- pinned child draws a later match over it ('topmostHit'). A widget drawn
+-- inside the interactive one, such as a control among its adornments, is on
+-- top of it and takes the press ('innermostHit'). When a stack or pinned
+-- node could draw a 'PointerBlock' node on top, a first pass checks whether
+-- it takes the press; if so there are no targets.
 targetsAt :: Context -> V2 -> IO PressTargets
 targetsAt ctx@Context {ctxNodeArena = na} mouse = do
   top <- overlayHitRoot ctx mouse
   let under idx = getNodeType na idx >>= \nt -> widgetUnderMouse ctx top mouse nt idx
-  -- A node given 'PointerBlock' drawn over the rest, with no widget of its
-  -- own under the press, takes it: nothing beneath is pressed or focused.
-  -- Only a stack or a pinned node draws one node over another.
+  -- A 'PointerBlock' node on top with no widget of its own under the press
+  -- swallows it: nothing beneath is pressed or focused. Only stacks and
+  -- pinned nodes draw one node over another.
   layered <- layeredNodeCount na
   let takerUnder idx = takesPointer na idx <&&> under idx
       blocking idx = not . isWidgetNode <$> getNodeType na idx
@@ -179,7 +176,7 @@ targetsAt ctx@Context {ctxNodeArena = na} mouse = do
       else maybe (pure False) blocking =<< reachedHit ctx takerUnder
   if blocked then pure none else pressTargetsAt ctx under
 
--- | 'targetsAt' past a node that blocks the press, with @under@ the press's
+-- | 'targetsAt' once no blocking node took the press. @under@ is the press
 -- hit test.
 pressTargetsAt :: Context -> (NodeIdx -> IO Bool) -> IO PressTargets
 pressTargetsAt ctx@Context {ctxNodeArena = na} under = do
@@ -220,9 +217,9 @@ finalizePointerPress ctx targets =
   enabledTarget ctx (ptInteractive targets) >>= mapM_ (writeIORef (ctxActiveId ctx))
 
 -- | Whether a press at @mouse@ lands on node @idx@ of type @nt@: the point is
--- in its hit rect ('widgetHitRect') and in its clip, the floating panels and
--- modals leave it reachable there ('overlayHitAllowed', with @top@ from
--- 'overlayHitRoot'), and the node does not let the pointer through
+-- in its hit rect ('widgetHitRect') and clip, floating panels and modals
+-- leave it reachable ('overlayHitAllowed', with @top@ from
+-- 'overlayHitRoot'), and the node does not pass the pointer through
 -- ('passesPointer').
 {-# INLINE widgetUnderMouse #-}
 widgetUnderMouse :: Context -> Maybe NodeIdx -> V2 -> NodeType -> NodeIdx -> IO Bool
@@ -301,8 +298,8 @@ postsLayoutClick nt = nt == NodeButton || nt == NodeSelect
 -- It repeats the test of 'NanoUI.Internal.Widgets.Node.resolveInteraction': the widget
 -- is enabled, the frame routed the pointer to its layer, and the point is
 -- inside its rect from the previous frame and inside the scroll viewports
--- above it. A widget something was drawn over there ('ctxPointerCovered')
--- passes too: the view saw the release and found it was not the widget's.
+-- above it. A covered widget ('ctxPointerCovered') also passes: the view
+-- already saw that release and rejected it.
 inUiClickHit :: Context -> WidgetId -> V2 -> IO Bool
 inUiClickHit ctx wid mouse = do
   disabled <- isDisabled ctx wid
@@ -344,21 +341,20 @@ finalizeSelectFocus :: Context -> PressTargets -> IO ()
 finalizeSelectFocus ctx targets =
   enabledTarget ctx (ptSelect targets) >>= mapM_ (focusWidget ctx)
 
--- | Move keyboard focus where the view last asked this frame with
--- 'NanoUI.Internal.Monad.requestFocus', 'NanoUI.Internal.Monad.focusNext',
--- 'NanoUI.Internal.Monad.focusPrevious' or
--- 'NanoUI.Internal.Monad.clearFocus'. Runs after the pointer steps and
+-- | Apply the view's last focus request this frame
+-- ('NanoUI.Internal.Monad.requestFocus', 'NanoUI.Internal.Monad.focusNext',
+-- 'NanoUI.Internal.Monad.focusPrevious',
+-- 'NanoUI.Internal.Monad.clearFocus'). Runs after the pointer steps and
 -- before 'constrainFocusToModal' and 'finalizeTabFocus', so a Tab in the
--- same frame goes on from the widget focused here.
+-- same frame continues from the newly focused widget.
 --
--- Focus goes nowhere for 'FocusNowhere', where Tab would go for 'FocusNext'
--- and 'FocusPrevious' ('tabTarget'), and otherwise only where Tab could take
--- it this frame: to one of the 'tabStops', which a disabled widget is not.
--- Otherwise the request is dropped. When focus moves it moves as a press
--- elsewhere moves it off a field: the field that had it collapses its
--- selection, and the text-field menu and an open dropdown close. The widget
--- focused shows the ring, as Tab's does. A request for the widget that has
--- focus already changes nothing, the ring included.
+-- 'FocusNowhere' clears focus, and 'FocusNext' and 'FocusPrevious' go where
+-- Tab would ('tabTarget'). 'FocusOn' succeeds only for one of the
+-- 'tabStops', never a disabled widget; otherwise the request is dropped.
+-- Moving focus behaves like a press elsewhere: the old field collapses its
+-- selection, and the text-field menu and any open dropdown close. The new
+-- widget shows the focus ring. Requesting the focused widget changes
+-- nothing, including the ring.
 finalizeFocusRequest :: Context -> IO ()
 finalizeFocusRequest ctx =
   readIORef (ctxFocusRequest ctx) >>= mapM_ (\req -> do
@@ -413,11 +409,11 @@ constrainFocusToModal ctx = do
   when (hashWidgetId focus /= 0) $
     unlessM (widgetOverlayAllowed ctx focus) $ writeIORef (ctxFocusId ctx) (WidgetId 0)
 
--- | Note in 'isFocusKind' what kind of widget has the keyboard, and the keys
--- it takes ('KeyClaim'), from the last frame's nodes. Runs before the view,
--- which rebuilds them, so that a shortcut declared ahead of the focused
--- widget knows about it too. @ime@: an input method has the focused field's
--- keys this frame ('NanoUI.Internal.Frame.TextInput.claimComposition').
+-- | Record in 'isFocusKind' what kind of widget has the keyboard and which
+-- keys it claims ('KeyClaim'), from last frame's nodes. Runs before the
+-- view rebuilds them, so a shortcut declared before the focused widget
+-- still sees it. @ime@: an input method owns the focused field's keys this
+-- frame ('NanoUI.Internal.Frame.TextInput.claimComposition').
 recordFocusKind :: Context -> Bool -> IO ()
 recordFocusKind ctx ime = do
   focus <- readIORef (ctxFocusId ctx)
@@ -470,9 +466,9 @@ needsRedraw ctx prev inp = do
             then pure False
             else maybe False cdrTracked <$> lookupCustomDrawing ctx lastHot
         hotMoved <- if tracked then pure True else (/= lastHot) <$> probeHotId ctx (inputMousePos inp)
-        -- A scrollbar is not a widget, and brightens as the pointer enters
-        -- it. Nor need a tooltip's target be one, and a tooltip that follows
-        -- the pointer moves with it over its target.
+        -- A scrollbar is not a widget but brightens on hover. A tooltip
+        -- target need not be a widget either, and a tooltip that follows
+        -- the pointer moves with it.
         if hotMoved
           then pure True
           else ifM scrollBarHoverMoved (pure True) (hoverZoneCrossed ctx (inputMousePos prev) (inputMousePos inp))
@@ -537,19 +533,18 @@ probeHotId ctx@Context {ctxNodeArena = na} mouse = do
         Just wid -> pure wid
         Nothing -> maybe (pure (WidgetId 0)) (getWidgetId na) =<< reachedWidgetAt ctx mouse
 
--- | Note in 'ctxPointerReach' what the pointer reaches in the frame the user
--- saw: where a stack or a pinned node draws one node over another, the node
--- on top at the pointer that takes it, as hover finds it ('reachedAt'), and
--- the nodes that one is inside. Every other node under the pointer is
--- covered there, a label or a container as much as a widget. Runs before
--- the view, against the last frame's layout: while the view runs, each
--- widget tests the pointer against its rect in that layout
--- ('NanoUI.Internal.Widgets.Node.resolveInteraction'), and one covered takes
--- neither hover nor presses. Nothing is covered while the pointer is on a
--- menu or dropdown, which routes it away from every layer, nor where nothing
--- under it takes the pointer, nor in a layout with no stack or pinned node
--- ('layeredNodeCount'), where a node is drawn over nothing but the nodes it
--- is inside.
+-- | Record in 'ctxPointerReach' which nodes the pointer reaches in the frame
+-- the user saw: where stacks or pinned nodes overlap, the topmost node under
+-- the pointer that takes it ('reachedAt', as hover finds it) and its
+-- ancestors. Every other node under the pointer, widget or not, is covered.
+--
+-- Runs before the view, against last frame's layout. During the view each
+-- widget hit-tests its rect in that layout
+-- ('NanoUI.Internal.Widgets.Node.resolveInteraction'), and a covered one
+-- gets neither hover nor presses. Nothing is covered when the pointer is on
+-- a menu or dropdown (which routes it away from every layer), when nothing
+-- under it takes the pointer, or when the layout has no stack or pinned node
+-- ('layeredNodeCount'), since then nodes only overlap their ancestors.
 recordCoveredWidgets :: Context -> PointerRoute -> Input -> IO ()
 recordCoveredWidgets ctx@Context {ctxNodeArena = na} route inp = do
   layered <- layeredNodeCount na
@@ -562,8 +557,8 @@ recordCoveredWidgets ctx@Context {ctxNodeArena = na} route inp = do
     writeIORef (ctxPointerReach ctx) $! reach
  where
   mouse = inputMousePos inp
-  -- The ids of node @i@ and every node it is inside. A node sharing an id
-  -- with one of them is not covered either.
+  -- Ids of node @i@ and its ancestors. A node sharing one of these ids is
+  -- not covered either.
   idsUpFrom !acc i
     | i < 0 = pure acc
     | otherwise = do

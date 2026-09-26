@@ -17,16 +17,16 @@ static int32_t rgfw_init(const char* name) {
         int32_t res = RGFW_init_ptr(name ? name : "nano-ui", 0, &s_rgfw_info);
         if (res == 0) s_rgfw_initialized = 1;
 #ifdef RGFW_UNIX
-        /* The pipe RGFW_stopCheckEvents writes to. RGFW_waitForEvent makes it
-           on its first wait, and a wake from another thread before that
-           would write to descriptor 0. */
+        /* Create RGFW_stopCheckEvents' pipe now. RGFW_waitForEvent would
+           create it on its first wait, and a wake from another thread before
+           then would write to descriptor 0. */
         if (res == 0 && _RGFW->eventWait_forceStop[1] == 0) {
             if (pipe(_RGFW->eventWait_forceStop) == -1) {
                 _RGFW->eventWait_forceStop[0] = 0;
                 _RGFW->eventWait_forceStop[1] = 0;
             } else {
-                /* Non-blocking: a stop never blocks its thread on a full pipe,
-                   and the wait's drain never blocks on an empty one. */
+                /* Non-blocking, so a stop never blocks on a full pipe and a
+                   drain never blocks on an empty one. */
                 for (int i = 0; i < 2; i++)
                     fcntl(_RGFW->eventWait_forceStop[i], F_SETFL, fcntl(_RGFW->eventWait_forceStop[i], F_GETFL, 0) | O_NONBLOCK);
             }

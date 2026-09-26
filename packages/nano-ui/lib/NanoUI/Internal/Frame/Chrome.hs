@@ -86,7 +86,8 @@ transparentColor = colorRGBA 0 0 0 0
 clearStyle :: Style -> Style
 clearStyle s = s {styleBg = transparentColor, styleHoverBg = transparentColor, styleActiveBg = transparentColor, styleBorderWidth = 0}
 
--- | A close button, its cross fading in from muted by @hotT@.
+-- | Close button style; the cross goes from muted to full colour as @hotT@
+-- goes from 0 to 1.
 closeButtonStyle :: Theme -> Float -> Style
 closeButtonStyle theme hotT =
   let btn = themeButton theme

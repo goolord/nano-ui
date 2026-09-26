@@ -110,8 +110,7 @@ unpackSort n = SortCol (n `div` 2) (toEnum (n `mod` 2))
 clampSortCol :: Int -> SortCol -> SortCol
 clampSortCol n (SortCol idx dir) = SortCol (clamp 0 (max 0 (n - 1)) idx) dir
 
--- The sort mark sits in bits 16-17 (see tableSortMarkOf), clear of the font
--- fields in the low bits.
+-- The sort mark uses bits 16-17 (see tableSortMarkOf), above the font fields.
 sortMarkStyle :: SortCol -> Int -> Int
 sortMarkStyle sort idx
   | sortColIndex sort /= idx = 0
@@ -138,10 +137,10 @@ isNumericCell txt =
         _ -> s
    in not (T.null digits) && T.all isDigit digits
 
--- | What a table derives from its rows: the cells as text, each column's
--- content width and numeric flag, and the row order for a sort. Kept in
--- 'ctxDerivedCache', so a frame whose rows are the same value, or encode to
--- the same text, measures and sorts nothing.
+-- | Data derived from a table's rows: cell text, each column's content width
+-- and numeric flag, and the sorted row order. Cached in 'ctxDerivedCache', so
+-- a frame whose rows are the same value, or encode to the same text, skips
+-- measuring and sorting.
 data TableDerived = TableDerived
   { tdRows :: !Opaque
   , tdCols :: !Opaque
@@ -165,7 +164,7 @@ tableDerived :: Foldable f => Context -> Int -> Colonnade Headed row Text -> f r
 tableDerived ctx key cols rows sort = do
   cached <- readDerived ctx key
   let hdrs = Encode.header id cols
-      -- Each row is encoded once, for measuring, sorting and the cells.
+      -- Encode each row once; measuring, sorting and the cells share it.
       encoded = smallArrayFromList [Encode.row id cols r | r <- toList rows]
       orderFor cells = sortIndices (sortColDir sort) (mapSmallArray' (\row -> fromMaybe T.empty (row V.!? sortColIndex sort)) cells)
   derived <- case cached of
@@ -239,7 +238,7 @@ unpackHeaderDrag n
   | n <= -1000 = HeaderResize (-1000 - n)
   | otherwise = HeaderIdle
 
--- Column metadata by source column index, with a fallback out of range.
+-- Column metadata by source column index, or the fallback when out of range.
 {-# INLINE primAt #-}
 primAt :: Prim a => PrimArray a -> Int -> a -> a
 primAt xs i fallback = if i >= 0 && i < sizeofPrimArray xs then indexPrimArray xs i else fallback
@@ -248,8 +247,8 @@ primAt xs i fallback = if i >= 0 && i < sizeofPrimArray xs then indexPrimArray x
 smallAt :: SmallArray a -> Int -> a -> a
 smallAt xs i fallback = if i >= 0 && i < sizeofSmallArray xs then indexSmallArray xs i else fallback
 
--- Width floor a column cannot shrink under, dragged or not: its declared
--- fixed width, else its content minimum, so its cells never wrap.
+-- Minimum column width, even when dragged: the declared fixed width, else the
+-- content minimum so cells never wrap.
 colFloor :: SmallArray ColSize -> PrimArray Float -> Int -> Float
 colFloor sizes contentWs i = case smallAt sizes i ColContent of
   ColFixed f -> max minColW f
@@ -377,7 +376,7 @@ tableConfigured cfg f key cols inputRows curSort =
           | fill = fillW (fillH flatLayout)
           | otherwise = (fillH flatLayout) {layoutMinW = minSum idxs}
         gridRowLay idxs = fillIf fillInner flatLayout {layoutMinW = minSum idxs}
-        -- Header row, its rule, the pinned rows and their rule, in either pane.
+        -- Header row and pinned rows, each followed by a rule. Used by both panes.
         headerBlock idxs = do
           hs <- row' (gridRowLay idxs) $
             forM (zip [0 :: Int ..] idxs) $ \(k, i) -> do
@@ -425,8 +424,8 @@ tableConfigured cfg f key cols inputRows curSort =
         unfrozenPane = do
           mPrevV <- lastRect vWid
           let totalH = fromIntegral scrollN * rowMinH
-              -- Decided from last frame, so the header's lane spacer lags the
-              -- body's vertical bar by one frame when the bar comes or goes.
+              -- Uses last frame's rect, so the header's spacer lags the body's
+              -- vertical bar by one frame when the bar appears or disappears.
               hasVertBar = maybe (totalH > 100) (\r -> totalH > rectH r) mPrevV
           column' (paneLay fillInner unfrozenIdx) $ do
             hs <-
@@ -435,7 +434,7 @@ tableConfigured cfg f key cols inputRows curSort =
                   scrollAreaIdConfigured
                     hWid
                     ((if fillInner then fillW else minW (minSum unfrozenIdx)) flatLayout {layoutDirection = Row})
-                    -- A bare scroller that follows the body's horizontal
+                    -- Bar-less scroller that follows the body's horizontal
                     -- offset (linkScrollAxes below) and clips the header row.
                     scrollHorizontalHidden
                     (column' (gridRowLay unfrozenIdx) (headerBlock unfrozenIdx))
@@ -471,7 +470,7 @@ tableConfigured cfg f key cols inputRows curSort =
       mBodyRect <- lastRect vWid
       let mouse = inputMousePos inp
           headerRects = [(i, rawRespRect r) | (i, r) <- headerPairs]
-          -- Also the resize cursor's zones.
+          -- Also used as the resize cursor's zones.
           edgeZones = headerEdgeZones 4 mBodyRect headerRects
           hitCol zones = fst <$> find (\(_, r) -> rectContains r mouse) zones
           edgeCol = hitCol edgeZones
@@ -524,14 +523,14 @@ tableConfigured cfg f key cols inputRows curSort =
           widgetResp =
             setChanged hasChanged $
               setClicked (hasChanged && isJust sortClick) (mconcat (map snd headerPairs ++ maybe [] pure showAllResp))
-      -- Compare the five slots, so an idle table writes nothing.
+      -- Compare before writing, so an idle table writes nothing.
       uiIO . writeSlots ctx $
         SlotWrites (\st -> lookupDyn stateKey st == Just (nextOrder, widths1)) (insertDyn stateKey (nextOrder, widths1))
           <> slotWrite fieldIntSet stateKey nextHidden
           <> slotWrite fieldInt (slotKey SlotDrag stateKey) (packHeaderDrag nextDrag)
           <> slotWrite fieldFloat stateKey nextDragX
           <> slotWrite fieldFloat (slotKey SlotDragW stateKey) nextDragW
-      -- The resize cursor lasts the whole drag, wherever the pointer goes.
+      -- Keep the resize cursor for the whole drag, wherever the pointer is.
       case nextDrag of
         HeaderResize _ | heldIn MouseLeft inp -> uiIO (modifyInteraction ctx (\s -> s {isColumnResize = True}))
         _ -> pure ()
@@ -589,8 +588,8 @@ minColW :: Float
 minColW = 40
 
 -- | Each column's resize zone: @pad@ either side of its header's right edge,
--- from the header band's top down to the bottom of the body's last-frame
--- rect, or of the header band before the body has one.
+-- from the top of the header band to the bottom of the body's last-frame
+-- rect (or of the header band, before the body has a rect).
 headerEdgeZones :: Float -> Maybe Rect -> [(Int, Rect)] -> [(Int, Rect)]
 headerEdgeZones pad mBody hdrs =
   [(i, Rect (x + w - pad) top (2 * pad) (bot - top)) | (i, Rect x _ w h) <- hdrs, w > 0 && h > 0]

@@ -107,7 +107,7 @@ runTextAreaSpansTest ctx failed = do
   spans <- collectTextSpans ctx
   assert failed (hasText "alpha" spans && hasText "beta" spans)
 
--- | A text area, or a text input, under a separate label.
+-- | A text area under a separate label ('labeledInput' for a text input).
 labeledArea :: T.Text -> T.Text -> NanoUI (Response, T.Text)
 labeledArea lbl initial = label lbl >> textArea' initial
 
@@ -158,7 +158,7 @@ runTextInputWordKeysTest ctx failed = do
   let
     inp0 = withInput 320 120
     ui = column (held textRef textInput')
-    -- The chord's frame, then the text on the frame after it.
+    -- Run the chord's frame, then return the text a frame later.
     chordThen chord next = runFrame ctx (chordInp chord inp0) ui >> snd <$> evalUi ctx next ui
   warmupFocused ctx inp0 ui
   -- Ctrl+Backspace deletes the word before the cursor ("world").
@@ -194,8 +194,8 @@ runTextInputSelectionTest ctx failed = do
   _ <- runFrame ctx (tabInp inp0) ui
   _ <- warmup2 ctx (chordInp (shift <> key KeyLeft) inp0) ui
   assertEq failed "helX" . snd =<< evalUi ctx (inp0 {inputChars = "X"}) ui
-  -- Ctrl+A selects all, and the letter held with Ctrl types nothing even
-  -- where a backend also delivers it as text.
+  -- Ctrl+A selects all and types nothing, even when the backend also sends
+  -- the letter as text.
   _ <- runFrame ctx (inp0 {inputChars = "abc"}) ui
   _ <- runFrame ctx ((chordInp (ctrl <> key 'a') inp0) {inputChars = "a"}) ui
   assertEq failed "" . snd =<< evalUi ctx (keyInp KeyBackspace inp0) ui
@@ -457,7 +457,7 @@ runTextAreaScrollWheelTest ctx failed = do
     inp0 = withInput 320 220
     ui = column (labeledArea "Notes" fortyLines)
     uiShort = column (withKey (1 :: Int) (labeledArea "Short" "Line 1\nLine 2"))
-    -- Wheel notches over the field, then its scroll offset.
+    -- Scroll by @notches@ over the field; return its scroll offset.
     wheel view resp r notches = do
       _ <- runFrame ctx (inp0 {inputMousePos = spanCenter r, inputScroll = V2 0 notches}) view
       getScrollOffset ctx (respId resp)
@@ -561,8 +561,8 @@ runTextAreaCursorOnScrollBarTest ctx failed = do
         checkThumbGrab failed ctx inp0 ui
     _ -> assert failed False
 
--- | A scrollbar's thumb shows the grab cursor under the pointer, and the
--- grabbing one once pressed.
+-- | A scrollbar thumb shows the grab cursor on hover and grabbing when
+-- pressed.
 checkThumbGrab :: IORef Int -> Context -> Input -> NanoUI a -> ScrollBarLayout -> IO ()
 checkThumbGrab failed ctx inp ui layout = do
   let thumb = spanCenter (sbThumb layout)
@@ -643,8 +643,8 @@ runTextAreaScrollCursorLeavesViewportTest ctx failed = do
       offset = getScrollOffset ctx (respId resp)
     assertEq failed (Cursor 0 0) =<< caret
     assertEq failed 0 =<< offset
-    -- The wheel scrolls a focused area without moving its caret, and an idle
-    -- frame does not snap it back.
+    -- The wheel scrolls a focused area without moving the caret, and an idle
+    -- frame does not snap back.
     _ <- runFrame ctx inp0 {inputMousePos = spanCenter field, inputScroll = V2 0 5} ui
     off1 <- offset
     assertGt failed off1 0
@@ -692,8 +692,8 @@ runTextAreaMenuPulseTest ctx failed = do
     _ <- runFrame ctx menuOpen ui
     overlays <- collectOverlayTextSpans ctx menuOpen
     assertJust failed (spanRectOf "Cut" overlays) $ \r -> do
-      -- The Cut runs on the press frame; the release frame delivers the
-      -- pulse and the emptied text, then the field goes quiet again.
+      -- Cut runs on the press frame; the release frame reports the change
+      -- and the emptied text, then the field goes quiet.
       (resp, val) <- runClick ctx inp0 ui (spanCenter r)
       assert failed (respChanged resp)
       assertEq failed val ""
@@ -727,9 +727,9 @@ runTextAreaRemountScrollTest ctx failed = do
   _ <- warmup2 ctx inp0 (mkUi (1 :: Int))
   (resp, _) <- warmup2 ctx inp0 (mkUi (2 :: Int))
   assertJustM failed (textAreaHitForWidget ctx (respId resp)) $ \hit -> do
-    -- Park the pointer over the editor, a second a frame so hover animations
-    -- settle, so the wheel frame does not also change the hot widget (whose
-    -- damage would mask a missing scroll repaint).
+    -- Park the pointer over the editor with 1 s frames so hover animations
+    -- settle; otherwise a hot-widget change on the wheel frame would damage
+    -- the area and mask a missing scroll repaint.
     let hover = inp0 {inputMousePos = spanCenter (tahFieldRect hit), inputDeltaTime = 1}
     replicateM_ 4 (runFrame ctx hover (mkUi (2 :: Int)))
     dmgIdle <- takeDamage ctx

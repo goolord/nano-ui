@@ -93,9 +93,9 @@ import SDL3.Sys.Surface (convertSurface, destroySurface, saveBMP)
 import SDL3.Sys.Video (destroyWindowSafe, getWindowDisplayScale)
 import SDL3.Sys.Video qualified as SDL
 
--- | An image to register before the first frame ('sdlAppImages'), under the
--- id 'NanoUI.image' draws it by: a positive width and height, and tightly
--- packed RGBA8 bytes, four a pixel in rows from the top.
+-- | An image registered before the first frame ('sdlAppImages') under the id
+-- 'NanoUI.image' draws it by. Width and height are positive; pixels are
+-- tightly packed RGBA8, top row first.
 data RgbaImage = RgbaImage
   { rgbaImageId :: !ImageId
   , rgbaImageWidth :: !Int
@@ -107,17 +107,16 @@ data RgbaImage = RgbaImage
 -- | Application-owned SDL settings.
 data SdlOptions = SdlOptions
   { sdlWindowSettings :: !WindowSettings
-  -- ^ The window: its title, size, position, size limits, icon, mode,
-  -- transparency and opacity, and whether it closes by itself (default:
-  -- 'defaultWindowSettings'). Sizes are in layout units, converted at the
-  -- zoom the window opens at: a later 'NanoUI.Backend.Sdl.setSdlUiScale'
-  -- leaves them where they were. A 'WindowPositionDefault' window opens
-  -- where the desktop puts it, or centred when 'sdlAppUiScale' grows it. A
-  -- transparent window ('wsTransparent') repaints in full when anything in
-  -- it changes; where translucent colours overlap, the alpha depends on the
-  -- render driver: most keep the more opaque one, SDL's OpenGL renderer
-  -- weighs the colour drawn by its own alpha, and the software renderer adds
-  -- them up.
+  -- ^ Title, size, position, size limits, icon, mode, transparency,
+  -- opacity and close behaviour (default: 'defaultWindowSettings'). Sizes
+  -- are layout units converted at the opening zoom; a later
+  -- 'NanoUI.Backend.Sdl.setSdlUiScale' does not resize the window. A
+  -- 'WindowPositionDefault' window opens where the desktop puts it, or
+  -- centred when 'sdlAppUiScale' enlarges it. A transparent window
+  -- ('wsTransparent') repaints fully on any change. Where translucent
+  -- colours overlap, the resulting alpha depends on the render driver: most
+  -- keep the larger alpha, SDL's OpenGL renderer weights the new alpha by
+  -- itself, and the software renderer adds them.
   , sdlWindowDecorations :: !WindowDecorations
   -- ^ How much of the desktop's title bar and frame the window keeps
   -- (default: 'DecorationsFull'). 'DecorationsFrame' is for a view that
@@ -133,8 +132,8 @@ data SdlOptions = SdlOptions
   , sdlAppContinuous :: !Bool
   -- ^ Continuous unthrottled rendering without waiting for events (default: 'False').
   , sdlExplainLayout :: !Bool
-  -- ^ Start with the layout overlay on, which outlines every layout node
-  -- (default: 'False'). A view turns it on and off with @explainLayout@.
+  -- ^ Start with the layout overlay on (default: 'False'). A view toggles
+  -- it with @explainLayout@.
   , sdlAppFont :: !NanoUIFont
   -- ^ UI font (default: installed sans-serif search, falling back to bundled Inter).
   , sdlAppMonoFont :: !NanoUIFont
@@ -144,9 +143,9 @@ data SdlOptions = SdlOptions
   , sdlAppTheme :: !(Maybe Theme)
   -- ^ Initial UI theme override (default: 'Nothing').
   , sdlAppThemeFor :: !(Maybe (Maybe Appearance -> Theme))
-  -- ^ The theme for the desktop's light or dark setting, followed as it
-  -- changes, such as @'NanoUI.lightDark' light dark@ (default: 'Nothing').
-  -- Set, it replaces 'sdlAppTheme'; see 'NanoUI.followSystemTheme'.
+  -- ^ Picks the theme from the desktop's light or dark setting and follows
+  -- its changes, e.g. @'NanoUI.lightDark' light dark@ (default: 'Nothing').
+  -- Overrides 'sdlAppTheme' when set; see 'NanoUI.followSystemTheme'.
   , sdlAppShouldQuit :: !(Input -> Bool)
   -- ^ Predicate on user input to trigger application exit (default: @const False@).
   , sdlAppImages :: !(SmallArray RgbaImage)
@@ -246,17 +245,17 @@ data SdlEnv = SdlEnv
   , sdlRefreshPeriod :: !Double
   , sdlContinuous :: !Bool
   , sdlTransparent :: !(Maybe (SDL_BlendMode, SDL_BlendMode))
-  -- ^ For a transparent window ('wsTransparent'), the blend modes
-  -- frames draw with and the retained frame goes to the window with;
-  -- 'Nothing' for an opaque one. See 'transparentBlends'.
+  -- ^ For a transparent window, the blend modes for drawing and for
+  -- presenting the retained frame; 'Nothing' when opaque. See
+  -- 'transparentBlends'.
   , sdlCachedCtx :: !(IORef Context)
   , sdlFontCache :: !SdlFontCache
   , sdlChromeState :: !ChromeState
   -- ^ What a borderless window's own title bar is for; see
   -- "NanoUI.Sdl.Internal.Chrome".
   , sdlTextInput :: !TextInputSync
-  -- ^ What SDL's text input last heard of the focused field, which every
-  -- frame drawn brings up to date.
+  -- ^ The focused-field state last sent to SDL's text input; updated each
+  -- drawn frame.
   }
 
 -- | The retained framebuffer. The texture is allocated in blocks larger than
@@ -323,8 +322,8 @@ syncDisplay ctx env inp = do
     -- Glyphs change under rects and texts that may not: repaint everything.
     damageFull ctx
     markDirty ctx
-  -- The desktop's light or dark setting. SDL updates it before queueing
-  -- its theme event, which wakes the loop for this; reading it is free.
+  -- SDL updates the appearance before queueing the theme event that wakes
+  -- us, and the query is free.
   setSystemAppearance ctx =<< querySystemAppearance
   reportWindowState ctx =<< queryWindowState (sdlWindow env) scale
   queried <- queryWindowLogicalSize (sdlWindow env)
@@ -400,10 +399,9 @@ withSdlWindow bench opts ctx act =
         setSdlHint sDL_HINT_RENDER_VSYNC "0"
       else do
         setSdlHint sDL_HINT_RENDER_VSYNC (if sdlAppVsync opts then "1" else "0")
-        -- The text fields draw what an input method is composing at their
-        -- caret, so SDL sends it (SDL_EVENT_TEXT_EDITING) rather than the
-        -- input method drawing it over the window. Its candidate list stays
-        -- the input method's own, placed by SDL_SetTextInputArea.
+        -- Text fields draw IME composition at their caret, so ask SDL for
+        -- SDL_EVENT_TEXT_EDITING instead of letting the IME draw it. The
+        -- candidate list stays the IME's, placed by SDL_SetTextInputArea.
         setSdlHint sDL_HINT_IME_IMPLEMENTED_UI "composition"
         -- SDL3 only auto-picks Wayland when the compositor has the fifo-v1 /
         -- commit-timing-v1 protocols. Without them (sway, wlroots, many
@@ -522,8 +520,8 @@ startSdlWindow bench opts ctx guessedDriver fontSource monoSource = do
         then Just <$> transparentBlends sdlRenderer
         else pure Nothing
   liftIO $ setRenderScale sdlRenderer 1 1 >>= (`unless` fail "SDL_SetRenderScale failed")
-  -- Text input runs while a widget takes text ('syncTextInput'), and stops
-  -- with the session.
+  -- Text input runs only while a widget takes text ('syncTextInput'); this
+  -- stops it when the session ends.
   unless bench $
     mkAcquire
       (void (setRenderVSync sdlRenderer (if sdlVsync then 1 else 0)))
@@ -534,36 +532,35 @@ startSdlWindow bench opts ctx guessedDriver fontSource monoSource = do
   let
     env = SdlEnv {..}
   ctx' <- liftIO $ readIORef sdlCachedCtx
-  -- Before the wake action: the first frame is drawn in the right theme and
-  -- needs no wake for it.
+  -- Before the wake action, so the first frame has the right theme without
+  -- a wake.
   liftIO $ setSystemAppearance ctx' =<< querySystemAppearance
   liftIO $ setHost ctx' env
-  -- The jobs the view's background hooks started end with the session and
-  -- before SDL does, also where a host runs frames itself inside 'withSdl'.
+  -- Background hook jobs are cancelled with the session, before SDL quits,
+  -- including when a host drives frames itself inside 'withSdl'.
   mkAcquire (setWakeLoop ctx' pushRefreshEvent) (const (cancelTasks ctx'))
-  -- After the decorations, whose frame the size limits leave room for, and
-  -- after the zoom, which centres the window it grows: the rest of the
-  -- settings, applied through the host as a view would.
+  -- The remaining settings go through the host, as from a view. This runs
+  -- after the decorations (size limits account for the frame) and after the
+  -- zoom (which centres the enlarged window).
   liftIO $ installWindowHost ctx' settings (windowHostFor sdlWindow (windowZoom env))
   liftIO $ reportWindowState ctx' =<< queryWindowState sdlWindow scale
   pure (ctx', env)
 
--- | The blend modes a transparent window draws with and is presented with.
+-- | The blend modes a transparent window draws and presents with.
 --
--- A frame paints the window colour more than once in places: the backdrop,
--- then a page-sized scroller over it. Over a translucent colour, ordinary
--- blending adds up the alpha each time. Colour blends as usual here, but
--- alpha keeps the larger of the two, so the window colour painted over
--- itself stays the window colour and the retained frame holds straight
--- alpha, which a screenshot reads. The copy to the window premultiplies it,
--- which is what compositors take.
+-- A frame can paint the window colour several times (the backdrop, then a
+-- page-sized scroller), and ordinary blending accumulates translucent
+-- alpha. Here colour blends normally but alpha takes the maximum, so the
+-- window colour over itself is unchanged and the retained frame holds
+-- straight alpha for screenshots. Presenting premultiplies, as compositors
+-- expect.
 --
--- SDL's OpenGL renderer blends colour and alpha with one operation, so it
--- cannot keep the larger alpha. It weighs the alpha drawn by itself
--- instead, which keeps the window colour over itself too, and leaves a
--- translucent pixel over a more opaque one a little more transparent than
--- either. The software renderer has neither, and draws as for an opaque
--- window: its alpha adds up where translucent colours overlap.
+-- SDL's OpenGL renderer uses one operation for colour and alpha, so it
+-- cannot take the maximum. It weights the new alpha by itself instead:
+-- the window colour over itself is still unchanged, but a translucent pixel
+-- over a more opaque one ends slightly more transparent than either. The
+-- software renderer supports neither and blends as for an opaque window,
+-- so overlapping alpha accumulates.
 transparentBlends :: Ptr SDL_Renderer -> IO (SDL_BlendMode, SDL_BlendMode)
 transparentBlends ren = do
   let straightColour =
@@ -617,23 +614,21 @@ saveScreenshot env path = do
       destroySurface surface
       pure ok
 
--- | The last presented frame, read as 'saveScreenshot' reads it, as a view's
--- 'NanoUI.requestScreenshot' is answered: the window's pixels (its logical
--- size times the display scale), with the alpha the frame was drawn with,
--- which is the theme's window colour's wherever nothing covers it.
+-- | The last presented frame, as 'NanoUI.requestScreenshot' returns it:
+-- window pixels (logical size times display scale) with the drawn alpha,
+-- which is the theme's window colour's alpha where nothing covers it.
 -- 'Nothing' when SDL cannot read the frame back.
 --
--- A direct-to-window session ('sdlAppContinuous') has a frame to read only
--- between drawing and presenting it: from a view, use
--- 'NanoUI.requestScreenshot', which reads it then.
+-- A direct-to-window session ('sdlAppContinuous') has a readable frame only
+-- between drawing and presenting, so from a view use
+-- 'NanoUI.requestScreenshot', which reads it at that point.
 captureScreenshot :: SdlEnv -> IO (Maybe Screenshot)
 captureScreenshot env = do
   scale <- readIORef (sdlScaleRef env)
   fmap (`Screenshot` scale) <$> (captureFrame env . retainTexture =<< readIORef (sdlRetain env))
 
--- | The pixels of the frame drawn to a target: the retained texture, or null
--- for the window backbuffer, which is only worth reading before the frame
--- is presented.
+-- | The frame's pixels from the retained texture, or from the window
+-- backbuffer when the target is null (valid only before presenting).
 captureFrame :: SdlEnv -> Ptr SDL_Texture -> IO (Maybe RgbaPixels)
 captureFrame env target = do
   surface <- readFrame env target
@@ -655,8 +650,8 @@ captureFrame env target = do
           destroySurface rgba
           pure (rgbaPixels w h bytes)
 
--- | Read a frame back into a new surface: the used area of the retained
--- texture, or with a null target the window backbuffer. Null on failure.
+-- | Read the used area of the retained texture, or the backbuffer for a null
+-- target, into a new surface. Null on failure.
 readFrame :: SdlEnv -> Ptr SDL_Texture -> IO (Ptr SDL_Surface)
 readFrame env tex = do
   r <- readIORef (sdlRetain env)

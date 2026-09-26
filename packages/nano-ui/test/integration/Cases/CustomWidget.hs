@@ -67,7 +67,7 @@ runCustomWidgetMeasureParentTest ctx failed = do
 runCustomWidgetCursorTest :: Context -> IORef Int -> IO ()
 runCustomWidgetCursorTest ctx failed = do
   let inp0 = withInput 300 300
-      -- The right edge resizes, and the rest has no opinion but the scope's.
+      -- The right edge asks for a resize cursor; elsewhere the scope's shape applies.
       ui = withCursorShape UiCursorHidden . column $ do
         fst <$> customWidget defaultCustomWidgetSpec
           { widgetLayout = fixedWH 80 80 defaultLayout
@@ -80,8 +80,8 @@ runCustomWidgetCursorTest ctx failed = do
       onEdge = V2 (rx + rw - 4) (ry + rh / 2)
   cursorOver ctx inp0 ui onEdge >>= assertEq failed UiCursorEwResize
   cursorOver ctx inp0 ui (centerOf resp) >>= assertEq failed UiCursorHidden
-  -- A drag that went down on the edge keeps its shape off the widget, and
-  -- leaves it once let go.
+  -- A drag started on the edge keeps the resize cursor off the widget until
+  -- release.
   let away = V2 (rx + rw + 50) (ry + rh + 50)
       dragged = holdAt inp0 away
   _ <- runFrame ctx (pressAt inp0 onEdge) ui
@@ -122,7 +122,7 @@ runCustomWidgetQueuedClickTest ctx failed = do
     (resps, _, _, _) <- runFrame ctx inp0 ui
     assert failed (map respClicked resps == [j == i | j <- [0 .. length resps - 1]])
 
--- | A label, then an 80 by 40 custom widget with this content key and drawing.
+-- | A label, then an 80x40 custom widget with this content key and drawing.
 afterLabel :: Int -> CustomDrawBuild -> NanoUI Response
 afterLabel key draw = column $ do
   label "Other"
@@ -247,9 +247,9 @@ runReferenceKnobTest ctx failed = do
   assert failed (respChanged respDragged)
   void $ runFrame ctx (releaseAt dragUp) ui
 
--- | A knob under a button pinned over it neither drags nor turns there:
--- 'useDrag2DOn' and 'useWheelDeltaOn' go by the knob's response, not its
--- rect. Beside the button, both work.
+-- | Under a pinned button a knob neither drags nor scrolls, because
+-- 'useDrag2DOn' and 'useWheelDeltaOn' use the knob's response, not its rect.
+-- Beside the button both work.
 runKnobCoveredTest :: Context -> IORef Int -> IO ()
 runKnobCoveredTest ctx failed = do
   valueRef <- newIORef (0 :: Float)

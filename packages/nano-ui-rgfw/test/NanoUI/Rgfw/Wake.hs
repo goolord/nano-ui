@@ -1,4 +1,4 @@
--- | The RGFW session's wake: another thread ends the loop's event wait.
+-- | The RGFW session's wake: another thread can interrupt the loop's event wait.
 module NanoUI.Rgfw.Wake (testRgfwWake) where
 
 import Control.Concurrent (forkIO, getNumCapabilities, newEmptyMVar, setNumCapabilities, takeMVar, threadDelay, tryPutMVar, yield)
@@ -18,19 +18,18 @@ import System.Timeout (timeout)
 
 foreign import ccall "exit" c_exit :: CInt -> IO ()
 
--- | A background job's result shows while the loop waits for events, woken
--- by the job, and once a stream faster than frames stops, the loop waits
--- again rather than spinning. 'quitUi' then ends the session. Needs an X display, and is skipped without
--- one. A loop the wake never reaches would wait for good, so a failed check
--- ends the process.
+-- | A background job's wake shows its result while the loop waits for
+-- events; after a stream faster than frames stops, the loop idles instead of
+-- spinning; 'quitUi' ends the session. Skipped without an X display. A missed
+-- wake would block forever, so a failed check exits the process.
 testRgfwWake :: IO ()
 testRgfwWake = do
   display <- lookupEnv "DISPLAY"
   if os /= "linux" || maybe True null display
     then putStrLn "[SKIP] RGFW wake: no X display"
     else do
-      -- The producer emits while the loop draws, as it would on more than
-      -- one core, so its wakes come while the loop is not waiting.
+      -- Two capabilities let the producer wake the loop while it is drawing,
+      -- not only while it waits.
       caps <- getNumCapabilities
       when (caps < 2) (setNumCapabilities 2)
       passes <- newIORef (0 :: Int)
@@ -42,9 +41,8 @@ testRgfwWake = do
       let failNow msg = putStrLn ("[FAIL] RGFW wake: " ++ msg) >> hFlush stdout >> c_exit 1
           await what signal = timeout 5000000 (takeMVar signal) >>= maybe (failNow (what ++ " never showed")) pure
           next p = writeIORef phase p >> join (readIORef wakeRef)
-          -- A stream faster than frames, as an app builds one: each value
-          -- written where the view reads it, then a wake, for half a second,
-          -- then a last value that says it stopped.
+          -- For half a second, write each value where the view reads it and
+          -- wake, faster than frames; then write -1 to mark the end.
           produce wake = do
             t0 <- getMonotonicTime
             let go i = do

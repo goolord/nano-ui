@@ -162,24 +162,20 @@ data Sizing
   deriving (Eq, Show)
 
 -- | Main axis for laying out a container's children: left to right, or top
--- to bottom. Its 'Flow' says whether they go in one line, wrap onto more, or
--- are layered with no axis at all.
+-- to bottom. 'Flow' decides whether they stay in one line, wrap, or layer.
 data Direction = Row | Column
   deriving (Eq, Show, Enum, Bounded)
 
--- | How a container places its children ('layoutFlow'). A scroll container
--- and a grid place theirs their own way, whatever this says: put a wrapping
--- or layered column inside the scroll container.
+-- | How a container places its children ('layoutFlow'). Scroll containers
+-- and grids ignore it; put a wrapping or layered column inside them instead.
 data Flow
-  = -- | One after another in one line along its 'Direction': a row or a
-    -- column. The default.
+  = -- | A single row or column along the 'Direction'. The default.
     Line
-  | -- | In lines along its 'Direction', a new one started where the next
-    -- child would overflow the main axis ('wrap').
+  | -- | Starts a new line where the next child would overflow the main axis
+    -- ('wrap').
     Wrap
-  | -- | Each over the whole content box, placed in it by its own alignment,
-    -- and drawn over the children declared before it ('layered'). The
-    -- direction does not matter.
+  | -- | Every child covers the content box, placed by its own alignment and
+    -- drawn over earlier siblings ('layered'). 'Direction' is ignored.
     Layered
   deriving (Eq, Show, Enum, Bounded)
 
@@ -212,10 +208,10 @@ windowPad = Padding 10 10 0 10
 windowMargin :: Float
 windowMargin = 14
 
--- | Semantic font choice. The backend selects a face; a heading's text takes
--- the theme's accent colour. 'FontMuted' and 'FontDanger' are the regular
--- face in the 'Muted' and 'Danger' tones: 'fontMuted' and 'fontDanger' set
--- the tone ('fontTone'), which combines with any face.
+-- | Semantic font choice. The backend selects a face; headings use the
+-- theme's accent colour. 'FontMuted' and 'FontDanger' are the regular face in
+-- the 'Muted' and 'Danger' tones. The 'fontMuted' and 'fontDanger' modifiers
+-- set a tone ('fontTone') instead, so they combine with any face.
 data FontVariant
   = FontRegular
   | FontHeading
@@ -224,19 +220,19 @@ data FontVariant
   | FontDanger
   deriving (Eq, Show, Enum, Bounded, Ord)
 
--- | A status colour from the theme ('toneColor'), for text ('fontTone') and
--- buttons ('tone').
+-- | A semantic theme colour ('toneColor') for text ('fontTone') and buttons
+-- ('tone').
 data Tone
   = Accent
-  -- ^ The accent: what a view is for ('primary').
+  -- ^ The view's main action ('primary').
   | Muted
   -- ^ Secondary text.
   | Success
-  -- ^ Something went well ('themeSuccess').
+  -- ^ 'themeSuccess'.
   | Warning
-  -- ^ Something needs care ('themeWarning').
+  -- ^ 'themeWarning': needs care.
   | Danger
-  -- ^ Something failed or cannot be undone ('themeDanger').
+  -- ^ 'themeDanger': failed or irreversible.
   deriving (Eq, Show, Enum, Bounded, Ord)
 
 -- | Requested font weight. Available faces and synthetic weights depend on the backend.
@@ -271,13 +267,10 @@ type LayoutModifier = Layout -> Layout
 
 -- | Layout and text options for a node. Lengths use logical pixels. Font size
 -- 0 selects the backend default; 'Nothing' for font colour uses the theme.
--- Grid column count 0 leaves the count to grid sizing. A container whose
--- 'layoutFlow' is 'Wrap' starts a new line where the next child would
--- overflow it, 'layoutLineGap' apart (a negative gap takes 'layoutGap'), and
--- places each line along its main axis by 'layoutLineAlign'. A node with
--- 'layoutPin' sits at that offset from its parent's content box instead of
--- in its flow. A positive 'layoutAspect' is the width over the height that
--- a 'Fit' height keeps ('aspect'), and 0 is none.
+-- Grid column count 0 leaves the count to grid sizing. A negative
+-- 'layoutLineGap' means 'layoutGap'. 'layoutAspect' 0 means no ratio
+-- ('aspect'). A node with 'layoutPin' is placed at that offset instead of in
+-- its parent's flow ('pinAt').
 data Layout = Layout
   { layoutDirection :: !Direction
   , layoutWidth :: !Sizing
@@ -285,9 +278,9 @@ data Layout = Layout
   , layoutPadding :: !Padding
   , layoutGap :: {-# UNPACK #-} !Float
   , layoutPointer :: {-# UNPACK #-} !PointerMode
-  -- ^ Beside 'layoutGap', whose word it shares.
+  -- ^ Placed next to 'layoutGap' so both share one word.
   , layoutLineAlign :: {-# UNPACK #-} !LineAlign
-  -- ^ In the same word.
+  -- ^ Also in the 'layoutGap' word.
   , layoutAlignX :: !AlignX
   , layoutAlignY :: !AlignY
   , layoutMinW :: {-# UNPACK #-} !Float
@@ -302,8 +295,8 @@ data Layout = Layout
   , layoutAspect :: {-# UNPACK #-} !Float
   , layoutFontColor :: !(Maybe Color)
   , layoutFontTone :: !(Maybe Tone)
-  -- ^ The tone text takes its colour from, unless 'layoutFontColor' gives
-  -- one ('fontTone'). It leaves the face alone.
+  -- ^ Text colour tone, overridden by 'layoutFontColor' ('fontTone'). Does
+  -- not change the face.
   , layoutFontWeight :: !FontWeight
   , layoutFontStyle :: !FontStyle
   , layoutTextDecoration :: !TextDecoration
@@ -436,28 +429,26 @@ percent p l = l {layoutWidth = Percent p}
 gridMinColW :: Float -> Layout -> Layout
 gridMinColW w l = l {layoutGridMinColW = max 0 w}
 
--- | Fixed width and width/height ratio: both sides fixed, the height
--- worked out from the ratio. The ratio must be positive. 'aspect' keeps a
--- ratio at a width the layout gives.
+-- | Fixed width and width/height ratio; the height is derived. The ratio
+-- must be positive. Use 'aspect' to keep a ratio at a layout-given width.
 fixedAspectW :: Float -> Float -> Layout -> Layout
 fixedAspectW w ratio = fixedWH w (w / ratio)
 
--- | Fixed height and width/height ratio: both sides fixed, the width worked
--- out from the ratio. The ratio must be positive.
+-- | Fixed height and width/height ratio; the width is derived. The ratio
+-- must be positive.
 fixedAspectH :: Float -> Float -> Layout -> Layout
 fixedAspectH h ratio = fixedWH (h * ratio) h
 
--- | Keep the width over the height at @ratio@: a 'Fit' height is the width
--- the node is given over the ratio, within its height limits, so a picture
--- that fills its column keeps its shape at any width:
+-- | Keep width / height at @ratio@. A 'Fit' height becomes the given width
+-- divided by the ratio (within height limits), so a full-width picture keeps
+-- its shape:
 --
 -- > panelWith (fillW . aspect (16 / 9)) video
 --
--- A 'Fit' width beside a fixed height is the height times the ratio. The
--- height is the ratio's whatever the node holds, so a container's children
--- can overflow it, as they can a 'fixedH'. A ratio that is not positive
--- turns it off. A configured image ('NanoUI.imageConfigured') keeps its own
--- ratio unless its layout gives one.
+-- With a fixed height, a 'Fit' width becomes height times ratio. The ratio
+-- ignores content, so children can overflow as with 'fixedH'. A non-positive
+-- ratio turns it off. 'NanoUI.imageConfigured' uses the image's own ratio
+-- unless the layout sets one.
 aspect :: Float -> Layout -> Layout
 aspect ratio l = l {layoutAspect = if ratio > 0 && not (isInfinite ratio) then ratio else 0}
 
@@ -485,13 +476,12 @@ fontMono l = l {layoutFontVariant = FontMono}
 fontDanger :: Layout -> Layout
 fontDanger = fontTone Danger
 
--- | Text in a tone's colour, in whatever face the layout picks, so it
--- combines with the others:
+-- | Colour text with a tone. The face is unchanged, so it combines with other
+-- font modifiers:
 --
 -- > labelWith (fontMono . fontTone Warning) "unsaved"
 --
--- A 'fontColor' wins over it. Colour alone does not change how text is
--- measured, so a label in a tone keeps the base font's metrics.
+-- 'fontColor' takes precedence. Text metrics are unaffected.
 fontTone :: Tone -> Layout -> Layout
 fontTone t l = l {layoutFontTone = Just t}
 
@@ -500,8 +490,8 @@ fontSize :: Float -> Layout -> Layout
 fontSize sz l = l {layoutFontSize = max 0 sz}
 
 -- | Multiply an explicit font size, or 16 when none is set, by a scale factor.
--- This uses 16 rather than querying the backend's default size; set that
--- ('NanoUI.Internal.Monad.uiFontSize') with 'fontSize' first to scale it.
+-- It does not query the backend default; to scale that, apply 'fontSize'
+-- with 'NanoUI.Internal.Monad.uiFontSize' first.
 fontSizeScale :: Float -> Layout -> Layout
 fontSizeScale s l = fontSize ((if layoutFontSize l > 0 then layoutFontSize l else 16) * s) l
 
@@ -590,58 +580,51 @@ alignBottom l = l {layoutAlignY = AlignBottom}
 alignBaseline :: Layout -> Layout
 alignBaseline l = l {layoutAlignY = AlignBaseline}
 
--- | Flow a row's children onto a new line below, or a column's into a new
--- column to the right, where the next child would overflow the main axis, as
--- a list of tags or chips does ('Wrap'). A child longer than a whole line
--- takes one to itself. Children keep their gap within a line, and lines are
--- 'lineGap' apart, each at the start of the main axis unless 'lineAlign'
--- moves it. Grow children share the space left on their own line, and a
--- child's cross-axis alignment places it within its line. A row wraps at the
--- width it is given; a column needs a bounded height ('fixedH', 'maxH') to
--- wrap. Grids and scroll containers ignore it.
+-- | Start a new line when the next child would overflow the main axis, as
+-- for tags or chips ('Wrap'). Rows wrap downward, columns wrap to the right.
+-- A child longer than a line gets its own line. Lines are 'lineGap' apart and
+-- placed by 'lineAlign'. Grow children share the space left on their line,
+-- and cross-axis alignment places a child within its line. A column only
+-- wraps with a bounded height ('fixedH', 'maxH'). Grids and scroll containers
+-- ignore it.
 wrap :: Layout -> Layout
 wrap l = l {layoutFlow = Wrap}
 
--- | Layer a container's children in its content box instead of laying them
--- out in a line ('Layered'): each is placed by its own alignment, and later
--- ones are drawn over earlier ones. 'NanoUI.layers' is a container with it;
--- this gives it to a panel or a card:
+-- | Stack children in the content box instead of a line ('Layered'). Each is
+-- placed by its own alignment and drawn over earlier siblings. 'NanoUI.layers'
+-- is a plain container with this set; use 'layered' on a panel or card:
 --
 -- > panelWith (layered . fixedWH 240 160) $ do
 -- >   image grow cover
 -- >   labelWith (alignEnd . alignBottom) caption
 --
 -- A grow child fills the box on that axis. Grids and scroll containers
--- ignore it: layer a column inside the scroll container.
+-- ignore it; layer a column inside them instead.
 layered :: Layout -> Layout
 layered l = l {layoutFlow = Layered}
 
--- | Set the space between a wrapping container's lines in logical pixels. By
--- default lines are the 'gap' apart.
+-- | Space between a wrapping container's lines, in logical pixels. Defaults
+-- to the 'gap'.
 lineGap :: Float -> Layout -> Layout
 lineGap n l = l {layoutLineGap = max 0 n}
 
--- | Where a wrapping container's lines sit along its main axis where they
--- are shorter than it: at its start (the default), centred, or at its end.
--- For chips centred under a heading, or right-aligned:
+-- | Position of a wrapping container's short lines along the main axis:
+-- start (the default), centre, or end.
 --
 -- > rowWith (wrap . lineAlign LinesCenter . fillW) (mapM_ chip tags)
 --
--- A line with a grow child fills the axis, so this moves only lines that
--- leave room.
+-- Lines with a grow child already fill the axis and are unaffected.
 lineAlign :: LineAlign -> Layout -> Layout
 lineAlign a l = l {layoutLineAlign = a}
 
--- | Where a wrapping container's lines sit along its main axis
--- ('lineAlign'): 'LinesStart', 'LinesCenter' or 'LinesEnd', left, centre and
--- right in a row, top, middle and bottom in a column.
+-- | Line position for 'lineAlign': 'LinesStart', 'LinesCenter' or
+-- 'LinesEnd'.
 --
--- A byte, so that it shares a word of 'Layout' with 'layoutGap' and a layout
--- costs no more for it.
+-- A byte so it packs into the 'layoutGap' word of 'Layout'.
 newtype LineAlign = LineAlign Word8
   deriving newtype (Eq, Enum)
 
--- | At the start of the main axis: the left of a row, the top of a column.
+-- | Left of a row, top of a column.
 pattern LinesStart :: LineAlign
 pattern LinesStart = LineAlign 0
 
@@ -649,7 +632,7 @@ pattern LinesStart = LineAlign 0
 pattern LinesCenter :: LineAlign
 pattern LinesCenter = LineAlign 1
 
--- | At the end of the main axis: the right of a row, the bottom of a column.
+-- | Right of a row, bottom of a column.
 pattern LinesEnd :: LineAlign
 pattern LinesEnd = LineAlign 2
 
@@ -665,73 +648,62 @@ instance Bounded LineAlign where
   minBound = LinesStart
   maxBound = LinesEnd
 
--- | How far along the room a line leaves it starts: 0 at the start, a half
--- centred, 1 at the end.
+-- | Fraction of a line's free space placed before it: 0, 0.5 or 1.
 lineAlignFraction :: LineAlign -> Float
 lineAlignFraction = \case
   LinesStart -> 0
   LinesCenter -> 0.5
   _ -> 1
 
--- | Take the node out of its parent's flow and place it over its siblings in
--- the parent's content box (inside its padding), where its alignment puts it
--- and then @x@ right and @y@ down. With the default top-left alignment the
--- offset is from the top-left corner; aligned to the end or the bottom, the
--- node is anchored to that edge:
+-- | Take the node out of its parent's flow and draw it over its siblings in
+-- the parent's content box. Its alignment picks the anchor corner, then it
+-- moves @x@ right and @y@ down:
 --
 -- > buttonWith (pinAt (-16) (-16) . alignEnd . alignBottom) "+"   -- 16 in from the bottom-right corner
 -- > box (pinAt 6 (-6) . alignEnd . alignTop . fixedWH 12 12) red   -- overhanging the top-right corner
 --
--- The siblings lay out as if it were absent, and it does not count towards
--- the parent's size, but it is clipped and scrolled with them. It keeps its
--- own size: a content or fixed size as usual, even past the parent's edge, a
--- grow size fills the content box from the offset to the edge it is not
--- aligned to, and a percentage is of the content box. Windows, modals and
--- popups place themselves and ignore it.
+-- Siblings lay out as if it were absent and it does not size the parent,
+-- but it is clipped and scrolled with them. Fixed and content sizes apply as
+-- usual, even past the parent's edge. A grow size fills from the offset to
+-- the opposite edge; a percentage is of the content box. Windows, modals and
+-- popups ignore it.
 --
--- @pinAt 0 0 . grow@ is an overlay over the parent's whole content box that
--- does not size the parent: a scrim, a drop highlight, a veil over a form
--- while it saves. In 'NanoUI.layers' the overlay would count towards the
--- size, and a large one would stretch the box it is meant to cover:
+-- @pinAt 0 0 . grow@ covers the whole content box without sizing the parent,
+-- for a scrim or a veil over a saving form. Inside 'NanoUI.layers' a large
+-- overlay would instead stretch the box it covers:
 --
 -- > columnWith (padAll 12) $ do
 -- >   form
 -- >   when saving $ box (pinAt 0 0 . grow . pointer PointerBlock) veil
 --
--- A control pinned over its siblings takes the pointer from them where it is
--- drawn over them; a panel, label or image lets it through to the controls
--- beneath unless it is given @'pointer' 'PointerBlock'@.
+-- A pinned control takes the pointer from siblings beneath it; a pinned
+-- panel, label or image passes it through unless given
+-- @'pointer' 'PointerBlock'@.
 pinAt :: Float -> Float -> Layout -> Layout
 pinAt x y l = l {layoutPin = Just (V2 x y)}
 
--- | How a node takes the pointer where layers or a pinned node draw it over
--- others ('pointer'). A node never takes the pointer from the nodes it is
--- inside.
+-- | Pointer handling where a node overlaps others, through layers or
+-- 'pinAt' ('pointer'). A node never takes the pointer from its ancestors.
+-- Values are 'PointerAuto', 'PointerBlock' and 'PointerPass'.
 --
--- A byte, so that it shares a word of 'Layout' with 'layoutGap' and a layout
--- costs no more for it: 'PointerAuto', 'PointerBlock' and 'PointerPass' are
--- its values.
+-- A byte so it packs into the 'layoutGap' word of 'Layout'.
 newtype PointerMode = PointerMode Word8
   deriving newtype (Eq, Enum)
 
--- | The default. A control (a button, slider, text field, drawing and the
--- like) takes the pointer from whatever it is drawn over; a container,
--- label, image or box lets it through to the controls beneath. What it lets
--- through to is its hover and presses, so a label or container drawn under
--- a control gets no hover there either.
+-- | The default. Controls (buttons, sliders, text fields, drawings) take the
+-- pointer from what they cover; containers, labels, images and boxes pass it
+-- to controls beneath. Nodes under a control get no hover there.
 pattern PointerAuto :: PointerMode
 pattern PointerAuto = PointerMode 0
 
--- | The node's box takes the pointer from whatever it is drawn over,
--- whatever the node is: a press or a wheel turn on it reaches nothing
--- beneath, and nothing beneath is hovered. The controls inside it take the
--- pointer as usual. For a card, a panel or a scrim over other controls.
+-- | The node's box blocks presses, wheel and hover from reaching anything
+-- beneath. Controls inside it work as usual. For cards, panels or scrims
+-- over other controls.
 pattern PointerBlock :: PointerMode
 pattern PointerBlock = PointerMode 1
 
--- | The node and everything inside it let the pointer through: they take no
--- hover or presses and cover nothing, as a decorative drawing or an image
--- laid over controls should.
+-- | The node and its descendants ignore the pointer entirely, for
+-- decorative drawings or images laid over controls.
 pattern PointerPass :: PointerMode
 pattern PointerPass = PointerMode 2
 
@@ -747,7 +719,7 @@ instance Bounded PointerMode where
   minBound = PointerAuto
   maxBound = PointerPass
 
--- | Set how the node takes the pointer where it is drawn over others:
+-- | Set how the node handles the pointer where it overlaps others:
 --
 -- > layers $ do
 -- >   list
@@ -786,12 +758,12 @@ data Theme = Theme
   , themeGreen :: {-# UNPACK #-} !Color
   , themePurple :: {-# UNPACK #-} !Color
   , themeSuccess :: {-# UNPACK #-} !Color
-  -- ^ The 'Success' tone: the green that reads on the window colour.
+  -- ^ 'Success' tone: a green readable on 'themeWindow'.
   , themeWarning :: {-# UNPACK #-} !Color
-  -- ^ The 'Warning' tone: an amber that reads on the window colour.
+  -- ^ 'Warning' tone: an amber readable on 'themeWindow'.
   , themeDanger :: {-# UNPACK #-} !Color
-  -- ^ The 'Danger' tone: the red that reads on the window colour, for
-  -- 'danger' labels, 'fontDanger' text and 'destructive' buttons.
+  -- ^ 'Danger' tone: a red readable on 'themeWindow', used by 'danger',
+  -- 'fontDanger' and 'destructive'.
   , themeOverlayDim :: {-# UNPACK #-} !Color
   , themeOnAccent :: {-# UNPACK #-} !Color
   -- ^ Text and marks drawn on an accent fill: a checked box, an active tab,
@@ -809,17 +781,16 @@ data Theme = Theme
   }
   deriving (Eq, Show)
 
--- | Whether the system asks apps for light or dark colours. See
--- @systemAppearance@ and @followSystemTheme@ in "NanoUI".
+-- | The system's light or dark preference. See @systemAppearance@ and
+-- @followSystemTheme@ in "NanoUI".
 data Appearance
   = AppearanceLight
   | AppearanceDark
   deriving (Eq, Show, Enum, Bounded, Ord)
 
--- | The light theme for a light appearance and the dark one otherwise,
--- including when the system cannot tell ('Nothing'), as nano-ui's own
--- default theme is dark. Hand it to @followSystemTheme@, or pick with it
--- each frame:
+-- | Pick the light theme for 'AppearanceLight', otherwise the dark one
+-- (including 'Nothing', since nano-ui defaults to dark). Pass it to
+-- @followSystemTheme@ or call it each frame:
 --
 -- > setUiTheme . lightDark defaultLightTheme defaultTheme =<< systemAppearance
 lightDark :: Theme -> Theme -> Maybe Appearance -> Theme
@@ -830,8 +801,8 @@ lightDark _ dark _ = dark
 defaultThemeFor :: Maybe Appearance -> Theme
 defaultThemeFor = lightDark defaultLightTheme defaultTheme
 
--- | Whether a theme is a light or a dark one, by its window colour: dark
--- where white text would read better on it than black.
+-- | Classify a theme by its window colour: dark if white text reads better
+-- on it than black.
 themeAppearance :: Theme -> Appearance
 themeAppearance t = if darkColor (themeWindow t) then AppearanceDark else AppearanceLight
 
@@ -839,9 +810,8 @@ themeAppearance t = if darkColor (themeWindow t) then AppearanceDark else Appear
 darkColor :: Color -> Bool
 darkColor c = colorLuminance c < 0.179
 
--- | A colour taken toward white on a dark window or black on a light one, a
--- twentieth at a time, until it reads on the window at 4.5:1. The themes'
--- tones are made readable so.
+-- | Blend a colour toward white (dark window) or black (light window) in 5%
+-- steps until it reaches 4.5:1 contrast with the window.
 readableTone :: Color -> Color -> Color
 readableTone window c0 =
   fromMaybe (lerpColor c0 toward 0.95) $
@@ -858,9 +828,9 @@ toneColor t = \case
   Warning -> themeWarning t
   Danger -> themeDanger t
 
--- | The colour text in a face and a tone takes, when no 'fontColor' says:
--- the tone's ('fontTone'), else the one 'FontMuted' or 'FontDanger' stands
--- for, a heading's accent, or the panel's text colour.
+-- | Text colour when no 'fontColor' is set: the 'fontTone', else the tone
+-- implied by 'FontMuted' or 'FontDanger', else the accent for headings, else
+-- the panel foreground.
 textToneColor :: Theme -> FontVariant -> Maybe Tone -> Color
 textToneColor theme variant t = case t <|> variantTone variant of
   Just t' -> toneColor theme t'
@@ -868,15 +838,14 @@ textToneColor theme variant t = case t <|> variantTone variant of
     | variant == FontHeading -> themeAccent theme
     | otherwise -> styleFg (themePanel theme)
 
--- | The face a variant draws in: the colour-only variants are the regular
--- face, which draws with the base font's metrics.
+-- | The face a variant draws in. Colour-only variants use the regular face.
 variantFace :: FontVariant -> FontVariant
 variantFace = \case
   FontMuted -> FontRegular
   FontDanger -> FontRegular
   v -> v
 
--- | The tone a colour-only variant stands for.
+-- | The tone implied by a colour-only variant.
 variantTone :: FontVariant -> Maybe Tone
 variantTone = \case
   FontMuted -> Just Muted
@@ -998,14 +967,13 @@ tinted pick t =
         )
         t
 
--- | Buttons in a tone's colour, under a label that reads on it:
+-- | Fill buttons with a tone's colour and pick a readable label colour:
 --
 -- > styled (tone Danger) (button "Delete")
 tone :: Tone -> Theme -> Theme
 tone t = tinted (`toneColor` t)
 
--- | Buttons in the accent colour, for the action a view is for: 'tone'
--- 'Accent'.
+-- | Buttons in the accent colour, for a view's main action: 'tone' 'Accent'.
 primary :: Theme -> Theme
 primary = tone Accent
 
@@ -1017,8 +985,8 @@ destructive = tone Danger
 success :: Theme -> Theme
 success = tone Success
 
--- | Buttons in the warning amber, for an action that needs care but is not
--- destructive: 'tone' 'Warning'.
+-- | Buttons in the warning colour, for risky but non-destructive actions:
+-- 'tone' 'Warning'.
 warning :: Theme -> Theme
 warning = tone Warning
 
@@ -1139,9 +1107,7 @@ defaultTheme =
         , themeDisabledFade = 0.55
         }
 
--- | 'defaultTheme' in light: off-white surfaces, near-black text, and a
--- deeper blue accent that reads on white. The two make a pair for
--- @followSystemTheme@.
+-- | Light counterpart of 'defaultTheme', for use with @followSystemTheme@.
 defaultLightTheme :: Theme
 defaultLightTheme =
   let panelSurface =
@@ -1419,9 +1385,7 @@ themeFromBase16Mode dark b =
         edgeCol
         (pick (lerpColor panelBg (base02 b) 0.5) (lerpColor panelBg (base00 b) 0.4))
         (lerpColor panelBg (pick (base00 b) (base02 b)) 0.4)
-    -- The tones are the scheme's green, red, and yellow on a dark
-    -- background or orange on a light one, where yellow rarely reads, each
-    -- taken toward white or black until it reads on the window.
+    -- Warning uses orange on light schemes, where yellow rarely reads.
     readable = readableTone (base00 b)
    in
     (accentColor (base0D b) defaultTheme)

@@ -878,8 +878,8 @@ reloadSdlFontCache cache source = do
   resetGlyphAtlas cache
 
 -- | Install the cache's base fonts as the context's measurement and glyph
--- metrics, their size as its default, and its sizes and variants as the font
--- resolver. Text measurement uses the sans font's shaped lines.
+-- metrics and default size, and its sizes and variants as the font resolver.
+-- Text measurement uses the sans font's shaped lines.
 withSdlFontCache :: SdlFontCache -> Context -> IO Context
 withSdlFontCache cache ctx = do
   scale <- readIORef (sfcScaleRef cache)

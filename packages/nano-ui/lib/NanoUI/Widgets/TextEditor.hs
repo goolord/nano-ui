@@ -261,17 +261,14 @@ runCommandIO ctx mode cmd ed =
           txt = if a /= c then TB.selectedText a c buf else TB.toText buf
       unless (T.null txt) $ void (ctxClipboardSet ctx txt)
 
--- | The command a key runs, with iced's bindings. The word modifier
--- ('modJump': Option on macOS, Ctrl elsewhere) turns a character motion or
--- deletion into a word one, and Home and End in a multi-line field into the
--- document's ends. On macOS, Command takes the arrows and deletions to the
--- line's ends, and elsewhere Ctrl+Shift takes Backspace and Delete there.
--- Shift extends the selection. A character key held with the command
--- modifier ('modPrimary') runs a shortcut: A selects all, C, X and V copy,
--- cut and paste, Z undoes (redoes with Shift) and Y redoes. On macOS, Ctrl
--- alone moves and deletes as in Emacs and Cocoa: A and E to the line's
--- start and end, B and F a character, H and D delete one, and K and U
--- delete to the line's end and start.
+-- | The command a key runs, following iced's bindings. 'modJump' (Option on
+-- macOS, Ctrl elsewhere) makes motions and deletions work by word, and
+-- Home/End in a multi-line field go to the document's ends. Command on
+-- macOS, or Ctrl+Shift with Backspace/Delete elsewhere, goes to the line's
+-- ends. Shift extends the selection. With 'modPrimary': A select all, C/X/V
+-- copy/cut/paste, Z undo, Shift+Z or Y redo. On macOS, Ctrl alone gives the
+-- Emacs keys: A/E line start/end, B/F move, H/D delete, K/U delete to line
+-- end/start.
 keyCommand :: EditorMode -> Modifiers -> Key -> Maybe TextCommand
 keyCommand mode mods key =
   case key of
@@ -281,7 +278,7 @@ keyCommand mode mods key =
     KeyRight -> move (reach LineEnd WordRight CharRight)
     KeyHome -> move (if jump && multi then DocumentStart else LineStart)
     KeyEnd -> move (if jump && multi then DocumentEnd else LineEnd)
-    -- Ctrl or Alt with Enter or a vertical arrow is a chord, for a shortcut.
+    -- Leave Ctrl/Alt with Enter or a vertical arrow to shortcuts.
     KeyUp | multi && not chorded -> move LineUp
     KeyDown | multi && not chorded -> move LineDown
     KeyEnter | multi && not chorded -> Just (InsertText "\n")
@@ -293,8 +290,8 @@ keyCommand mode mods key =
     multi = modeMultiLine mode
     jump = modJump mods
     chorded = modCtrl mods || modAlt mods
-    -- How far an arrow goes, and a deletion, which Ctrl+Shift also takes to
-    -- the line's end off macOS.
+    -- Extent of an arrow or deletion; 'widen' adds Ctrl+Shift deletions to
+    -- the line's ends off macOS.
     reach line word char
       | modMacCommand mods = line
       | jump = word
@@ -305,9 +302,9 @@ keyCommand mode mods key =
     move m = Just (Move m (modShift mods))
 
 -- | This frame's typing and keys as commands, typed characters first.
--- Characters typed while a shortcut modifier is held ('chordModifiers') are
--- not typed: those keystrokes are commands, which come in as keys. Ctrl with
--- Alt is AltGr on many layouts, so its characters are typed like plain ones.
+-- Characters typed under a shortcut modifier ('chordModifiers') are dropped,
+-- since those keystrokes arrive as key commands. Ctrl+Alt is AltGr on many
+-- layouts, so its characters are typed normally.
 inputTextCommands :: EditorMode -> Input -> [TextCommand]
 inputTextCommands mode inp = T.foldr char keys (inputChars inp)
   where
@@ -317,13 +314,11 @@ inputTextCommands mode inp = T.foldr char keys (inputChars inp)
       | otherwise = rest
     keys = foldr (\k rest -> maybe rest (: rest) (keyCommand mode mods k)) [] (inputKeys inp)
 
--- | Whether held modifiers make a character key a shortcut rather than
--- typing: the command modifier ('modPrimary': Command on macOS, Ctrl
--- elsewhere) without Alt.
+-- | Whether a character key is a shortcut rather than typing: 'modPrimary'
+-- (Command on macOS, Ctrl elsewhere) without Alt.
 chordModifiers :: Modifiers -> Bool
 chordModifiers mods = modPrimary mods && not (modAlt mods)
 
--- | The command a character key held with a shortcut modifier runs.
 chordCommand :: Modifiers -> Char -> Maybe TextCommand
 chordCommand mods c =
   case toLower c of
@@ -336,7 +331,7 @@ chordCommand mods c =
     'y' -> Just Redo
     _ -> Nothing
 
--- | The command a character key held with Ctrl alone runs on macOS.
+-- | Emacs-style Ctrl bindings, used on macOS.
 emacsCommand :: Char -> Maybe TextCommand
 emacsCommand = \case
   'a' -> Just (Move LineStart False)

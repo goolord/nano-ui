@@ -15,9 +15,9 @@ tests =
   , spec "atlas-release-reuse" runAtlasReleaseReuseTest
   ]
 
--- | A released image draws no more, and the next image that fits takes its
--- room, with the padding round it cleared and uploaded; one that does not
--- fit goes on the shelves. Its id is not handed out again.
+-- | A released image stops drawing and its slot is reused by the next image
+-- that fits, with the surrounding padding cleared and uploaded. Images that
+-- do not fit go on the shelves. Released ids are not reused.
 runAtlasReleaseReuseTest :: Context -> IORef Int -> IO ()
 runAtlasReleaseReuseTest ctx failed = do
   let insert tid w h v = registerImage ctx (ImageId tid) w h (BS.replicate (w * h * 4) v)
@@ -32,7 +32,7 @@ runAtlasReleaseReuseTest ctx failed = do
   sizeBefore <- fmap (\(w, h, _, _) -> (w, h)) <$> atlasSnapshot ctx
   releaseImage ctx (ImageId 1)
   lookupImageUv ctx (ImageId 1) >>= assertEq failed Nothing
-  -- A smaller image takes the room, its padding cleared of the old pixels.
+  -- A smaller image takes the slot; its padding is cleared of old pixels.
   insert 3 6 6 50 >>= assert failed
   origin 3 >>= assertEq failed (Just (x, y))
   fmap (\(w, h, _, _) -> (w, h)) <$> atlasSnapshot ctx >>= assertEq failed sizeBefore
@@ -40,10 +40,10 @@ runAtlasReleaseReuseTest ctx failed = do
   pixelAt (x + 5) (y + 5) >>= assertEq failed (BS.replicate 4 50)
   fmap (\(_, _, _, _, u) -> u) <$> (atlasChanges ctx . subtract 1 =<< maybe 0 (\(_, _, _, g) -> g) <$> atlasSnapshot ctx)
     >>= assertEq failed (Just (AtlasRegions [(x - 1, y - 1, 8, 8)]))
-  -- What is left beside it is too thin for a 4 by 4 image, which goes on the shelves.
+  -- The leftover strip is too thin for a 4x4 image, so it goes on a shelf.
   insert 4 4 4 60 >>= assert failed
   origin 4 >>= assert failed . (/= Just (x, y))
-  -- Released, an id is not handed out again.
+  -- A released id is not handed out again.
   releaseImage ctx (ImageId 4)
   fresh <- evalUi ctx (withInput 100 100) freshImageId
   assert failed (fresh > ImageId 4)

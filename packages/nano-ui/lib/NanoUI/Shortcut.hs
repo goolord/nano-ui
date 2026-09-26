@@ -1,5 +1,5 @@
--- | Key chords for 'NanoUI.shortcut' and 'NanoUI.menuItemShortcut': the
--- modifiers and a key, put together with '<>'.
+-- | Key chords for 'NanoUI.shortcut' and 'NanoUI.menuItemShortcut', built
+-- from modifiers and a key with '<>'.
 --
 -- > import NanoUI.Shortcut
 -- >
@@ -8,10 +8,10 @@
 -- > whenM (shortcut (alt <> key KeyEnter)) toggleFullscreen
 -- > whenM (shortcut (key (KeyF 5))) refresh
 --
--- Its short names are meant to be imported where chords are written, or
--- qualified (@K.ctrl <> K.key 's'@). A chord is checked when it is built, so
--- it cannot be misspelled; 'parseShortcut' reads one written as text, such
--- as one from a settings file.
+-- The short names are meant for unqualified import where chords are
+-- written, or qualified (@K.ctrl <> K.key 's'@). Chords are typed values, so
+-- they cannot be misspelled; 'parseShortcut' reads one from text, such as a
+-- settings file.
 module NanoUI.Shortcut
   ( -- * Chords
     Shortcut (..)

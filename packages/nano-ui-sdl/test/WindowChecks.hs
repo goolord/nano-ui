@@ -1,8 +1,7 @@
 {-# LANGUAGE PackageImports #-}
 
--- | Window options as SDL reports them back, screenshots read back from
--- sessions that draw retained and straight to the window, and the alpha a
--- transparent window keeps.
+-- | Window options as SDL reports them, screenshots from retained and
+-- continuous sessions, and transparent-window alpha.
 module WindowChecks (windowChecks) where
 
 import Control.Monad (unless, void, when)
@@ -24,9 +23,9 @@ import SDL3.Sys.Video (getWindowFlags, getWindowMaximumSize, getWindowMinimumSiz
 import SDL3.Sys.Video qualified as SDL
 import "nano-ui-sdl" NanoUI.Backend.Sdl
 
--- | The checks on the drivers named; @gpu@ says they are a display's, with a
--- GPU renderer, which have what the dummy driver lacks: icons, opacity, the
--- position, and custom blend modes for a transparent window.
+-- | Run all checks. @gpu@ means a real display with a GPU renderer, which
+-- adds checks the dummy driver cannot support: icon, opacity, position, and
+-- custom blend modes for transparency.
 windowChecks :: String -> Bool -> IO ()
 windowChecks drivers gpu = do
   mapM_ (optionChecks gpu) [1, 2]
@@ -34,8 +33,7 @@ windowChecks drivers gpu = do
   transparencyChecks gpu
   putStrLn ("SDL window options, screenshots and transparency (" ++ drivers ++ "): ok")
 
--- | A small hidden window with the bundled font at scale 1, so a layout
--- unit is a pixel.
+-- | Small hidden window, bundled font, scale 1 (one layout unit per pixel).
 options :: SdlOptions
 options =
   defaultSdlOptions
@@ -43,18 +41,16 @@ options =
     , sdlAppFont = DefaultFont, sdlAppMonoFont = DefaultFont, sdlAppVsync = False, sdlAppUiScale = 1
     }
 
--- | @options@ with other window settings.
 withWindow :: (WindowSettings -> WindowSettings) -> SdlOptions
 withWindow f = options {sdlWindowSettings = f (sdlWindowSettings options)}
 
--- | A session whose theme has a window colour of @backdrop@.
+-- | A session with window colour @backdrop@.
 session :: SdlOptions -> Color -> (Context -> SdlEnv -> IO a) -> IO a
 session opts backdrop act = do
   ctx <- newPixelContext >>= (`withTheme` windowColor backdrop defaultTheme)
   withSdl opts ctx act
 
--- | Draw one frame of a view; @full@ forces a full repaint. Returns what the
--- view did.
+-- | Draw one frame; @full@ forces a full repaint. Returns the view's result.
 frame :: Context -> SdlEnv -> Bool -> NanoUI a -> IO a
 frame ctx env full ui = do
   (ctx', inp) <- syncDisplay ctx env emptyInput {inputWindowSize = Size 200 100}
@@ -62,8 +58,7 @@ frame ctx env full ui = do
   void (sdlDrawFrame ctx' (ui >>= uiIO . writeIORef out . Just) env inp full)
   maybe (fail "the view did not run") pure =<< readIORef out
 
--- | Draw a frame of a view that asks for a screenshot, and the one screenshot
--- it is answered with.
+-- | Draw a frame that requests a screenshot; fail unless exactly one arrives.
 shoot :: String -> Context -> SdlEnv -> Bool -> NanoUI () -> IO Screenshot
 shoot name ctx env full ui = do
   shots <- newIORef []
@@ -78,10 +73,9 @@ check name ok = unless ok (fail name)
 expect :: (Eq a, Show a) => String -> a -> a -> IO ()
 expect name want got = unless (want == got) (fail (name ++ ": wanted " ++ show want ++ ", got " ++ show got))
 
--- | Size limits at creation and from a view, in layout units: at a zoom of 2
--- each is twice as many window coordinates. The title, the scale views read,
--- a resize and the mode. On a display, the opacity, the icon and the
--- position too.
+-- | Size limits (in layout units, so doubled in window coordinates at zoom
+-- 2) at creation and from a view, title, scale, resize and mode. With @gpu@,
+-- also opacity, icon and position.
 optionChecks :: Bool -> Int -> IO ()
 optionChecks gpu zoom =
   session
@@ -109,7 +103,7 @@ optionChecks gpu zoom =
       maximal "maximum width alone from a view" (ui (setWindowMaxSizeUi (Just (Size 600 0)))) (600, 0)
       after "the title from a view" (ui (setWindowTitleUi "renamed")) title "renamed"
       after "the scale a view reads" (pure ()) (winScale <$> askedWindow) (fromIntegral zoom)
-      -- X11 resizes a window when the server gets to it.
+      -- X11 resizes asynchronously; sync before reading the size.
       after "a resize from a view" (ui (resizeWindowUi (Size 300 150))) (SDL.syncWindowSafe (sdlWindow env) >> pair getWindowSize) (zoomed (300, 150))
       after "a hidden window" (pure ()) hidden True
       after "shown from a view" (ui (setWindowModeUi Windowed)) hidden False
@@ -126,14 +120,14 @@ optionChecks gpu zoom =
 red :: Color
 red = colorRGBA 200 30 60 255
 
--- | The RGBA bytes of a pixel of a screenshot.
+-- | RGBA bytes of one screenshot pixel.
 pixelAt :: Screenshot -> Int -> Int -> [Int]
 pixelAt shot x y =
   [fromIntegral (BS.index (rgbaBytes img) ((y * rgbaWidth img + x) * 4 + c)) | c <- [0 .. 3]]
   where
     img = screenshotPixels shot
 
--- | The alphas of the pixels whose red, green and blue are a colour's.
+-- | Alphas of all pixels whose RGB matches the colour.
 alphasOf :: Color -> Screenshot -> [Int]
 alphasOf c shot =
   [p !! 3 | y <- [0 .. rgbaHeight img - 1], x <- [0 .. rgbaWidth img - 1], let p = pixelAt shot x y, take 3 p == rgb]
@@ -141,14 +135,13 @@ alphasOf c shot =
     img = screenshotPixels shot
     rgb = map fromIntegral [colorR c, colorG c, colorB c]
 
--- | A 40 x 20 box of a colour, versioned by it so that a new colour
--- repaints it.
+-- | A 40x20 box, versioned by its colour so a colour change repaints it.
 solidBox :: Color -> NanoUI ()
 solidBox c = void (drawingVersioned (fromIntegral (colorToWord32 c)) (fixedWH 40 20) (\r -> smallArrayFromList [FillRect r c]))
 
--- | A view's screenshot is answered once its frame is drawn, with its pixels
--- (a skipped frame's with the frame on screen), and the answer asks for a frame
--- after. A continuous session's frame is read before it is presented.
+-- | A screenshot is answered after its frame is drawn (a skipped frame
+-- returns what is on screen), and answering requests another frame. In a
+-- continuous session the frame is read before it is presented.
 screenshotChecks :: Bool -> IO ()
 screenshotChecks continuous =
   session options {sdlAppContinuous = continuous} (colorRGBA 12 34 56 255) $ \ctx env -> do
@@ -163,17 +156,16 @@ screenshotChecks continuous =
       captureScreenshot env >>= check (name "captureScreenshot reads the same frame") . (== Just img)
       shoot (name "a skipped frame") ctx env False (solidBox red) >>= check (name "a skipped frame's screenshot") . (== img)
 
--- | A transparent window's frames keep the window colour's alpha, a partial
--- repaint comes out as a full one would, and a GPU renderer keeps the alpha
--- where the window colour is painted over itself.
+-- | A transparent window keeps the window colour's alpha, a partial repaint
+-- matches a full one, and a GPU renderer keeps the alpha where the window
+-- colour is painted over itself.
 transparencyChecks :: Bool -> IO ()
 transparencyChecks gpu =
   session (withWindow (\w -> w {wsTransparent = True})) backdrop $ \ctx env -> do
-    -- The software renderer has no custom blend modes and draws as for an
-    -- opaque window.
+    -- The software renderer lacks custom blend modes and draws as if opaque.
     let exact = maybe False ((/= Blend.SDL_BLENDMODE_BLEND) . fst) (sdlTransparent env)
-        -- An opaque box, a translucent one of a tint, and the window colour
-        -- twice over, as a page's scroller paints it over the backdrop.
+        -- An opaque box, a translucent tinted box, and the window colour
+        -- painted twice, as a page scroller paints over the backdrop.
         shot full tint = shoot "transparent" ctx env full . column $ do
           solidBox red
           solidBox tint
@@ -185,8 +177,8 @@ transparencyChecks gpu =
     expect "transparent: the window's colour" [10, 20, 30, 128] (pixelAt first 199 99)
     check "transparent: the backdrop keeps its alpha" (keepsAlpha first)
     expect "transparent: an opaque box stays opaque" (replicate 800 255) (alphasOf red first)
-    -- Repainting the translucent box alone must not blend the backdrop under
-    -- it over the old box or the old backdrop.
+    -- Repainting only the translucent box must not blend over the old box
+    -- or old backdrop.
     second <- shot False (colorRGBA 0 0 200 100)
     check "transparent: the change was drawn" (second /= first)
     shot True (colorRGBA 0 0 200 100) >>= check "transparent: a change comes out as a full repaint does" . (== second)

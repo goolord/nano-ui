@@ -70,17 +70,16 @@ runRichTextLinkTest ctx failed = do
   plainCursor <- cursorKindIs ctx inp0 {inputMousePos = onText} UiCursorPointer
   assert failed (not plainCursor)
 
--- | A paragraph's lines, wrapped or not, sit in its box as its alignment
--- says: each ends at the box's right edge for 'alignEnd', and is centred in
--- it for 'alignCenter'. One as wide as its text sits in its column as the
--- same alignment says, at the width it wraps to there, so its lines land
--- where a full-width one's do.
+-- | Each line of a paragraph, wrapped or not, aligns within its box: flush
+-- right for 'alignEnd', centred for 'alignCenter'. A fit-width paragraph is
+-- placed in its column by the same alignment at its wrapped width, so its
+-- lines land where a full-width paragraph's do.
 runRichTextAlignTest :: Context -> IORef Int -> IO ()
 runRichTextAlignTest ctx failed = do
   let inp = withInput 400 400
       fm = ctxFontMetrics ctx
       paragraph = [inlineText "a few words of different lengths ", strong "wrapping", " over several lines here"]
-      -- Each drawn line's left and right edges, and the paragraph's box.
+      -- The paragraph's box and each drawn line's left and right edges.
       linesOf width align = do
         resp <- warmup2 ctx inp (columnWith (fixedW 200) (fst <$> richTextWith' (width . align) paragraph))
         let wid = respId resp
@@ -99,16 +98,16 @@ runRichTextAlignTest ctx failed = do
       assertEq failed (round (rx + at * rw) :: Int) (round (x0 + at * (x1 - x0)))
     assertEq failed full fitted
 
--- | Past the cache's bound, a view that draws more paragraphs than it keeps
--- them all: a frame that changes nothing measures nothing.
+-- | A view with more paragraphs than the cache bound still keeps them all:
+-- an unchanged frame measures nothing.
 runRichTextManyTest :: Context -> IORef Int -> IO ()
 runRichTextManyTest base failed = do
   measured <- newIORef (0 :: Int)
   recording <- newIORef False
   let fm = ctxFontMetrics base
       prepare _ = readIORef recording >>= \on -> fm <$ when on (modifyIORef' measured (+ 1))
-  -- Bound in IO, so that every frame gets this one context, and with it the
-  -- same metrics source.
+  -- Evaluated once in IO so every frame shares this context and its metrics
+  -- source.
   ctx <- evaluate (withFontMetrics base fm {fmBackend = Just (FontBackend prepare (const (pure Nothing)))})
   let inp = withInput 400 400
       ui = column (forM_ [1 .. 4500 :: Int] (\i -> richText [inlineText (T.pack (show i))]))
@@ -118,9 +117,9 @@ runRichTextManyTest base failed = do
   replicateM_ 2 frame
   assertEq failed 0 =<< readIORef measured
 
--- | A piece's background is painted under its words, across the spaces
--- between them but not those at its ends, once for each line it is on; a
--- change of colour is a change of paragraph.
+-- | A piece's background is painted under its words, spanning inner spaces
+-- but not leading or trailing ones, once per line. Changing the colour
+-- counts as a new paragraph.
 runRichTextBackgroundTest :: Context -> IORef Int -> IO ()
 runRichTextBackgroundTest ctx failed = do
   let inp = withInput 400 400
@@ -140,7 +139,7 @@ runRichTextBackgroundTest ctx failed = do
   assertEq failed 1 (length fills)
   forM_ fills $ \(Rect x _ w h) ->
     assert failed (abs (x - (rx + prefixW)) < 0.5 && abs (w - codeW) < 0.5 && h > 0)
-  -- Under the words: before the first of them.
+  -- Under the words: the fill comes before the first text op.
   assert failed (firstText >= 1)
   (_, plain) <- opsOf (colorRGBA 9 9 9 255)
   assertEq failed [] [r | FillRect r c <- plain, c == tint]

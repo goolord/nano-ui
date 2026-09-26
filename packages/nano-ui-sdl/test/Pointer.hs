@@ -1,8 +1,8 @@
 {-# LANGUAGE DisambiguateRecordFields #-}
 
--- | SDL pointer translation: the middle, side and extra buttons, the
--- mouse's motion, and the pointer leaving the window. Events go through
--- SDL's own queue, on the dummy video driver.
+-- | SDL pointer translation: middle, side and extra buttons, mouse motion,
+-- and the pointer leaving the window. Events go through SDL's own queue on
+-- the dummy video driver.
 module Main (main) where
 
 import Control.Monad (forM_, unless)
@@ -27,7 +27,7 @@ check name ok = do
   putStrLn ((if ok then "[PASS] " else "[FAIL] ") <> name)
   unless ok exitFailure
 
--- | Queue an event of SDL's and take back what the backend makes of the queue.
+-- | Push a raw SDL event and return what the backend decodes from the queue.
 through :: Storable e => e -> IO [SdlEvent]
 through ev = alloca $ \p -> do
   poke (castPtr p) ev

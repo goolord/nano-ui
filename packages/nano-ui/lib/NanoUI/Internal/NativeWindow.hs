@@ -1,14 +1,13 @@
--- | The native window a view runs in: how it opens ('WindowSettings'), what
--- a view reads of it ('askWindow'), what a view asks of it while it runs --
--- a title, an icon, limits on its size, a mode, a move, a screenshot, the
--- end of the session -- and the pixels it takes and gives back.
+-- | The native window a view runs in: its opening settings
+-- ('WindowSettings'), its state each frame ('askWindow'), the requests a view
+-- makes of it (title, icon, size limits, mode, position, screenshots,
+-- quitting), and the RGBA pixels used for icons and screenshots.
 --
--- A backend opens its window from a 'WindowSettings', installs a
--- 'WindowHost' that says what it does with each request, and reports the
--- window's state once a frame. A view asks through the functions here, which
--- do nothing without a host, as under a test context: 'requestScreenshot'
--- answers 'Nothing', and 'askWindow' describes a focused window the size of
--- the frame's input.
+-- A backend opens the window from a 'WindowSettings', installs a
+-- 'WindowHost' that carries out requests, and reports the window's state
+-- once a frame. Without a host, as under a test context, requests do
+-- nothing, 'requestScreenshot' answers 'Nothing', and 'askWindow' describes
+-- a focused window the size of the frame's input.
 module NanoUI.Internal.NativeWindow
   ( -- * Pixels
     RgbaPixels
@@ -73,95 +72,84 @@ import NanoUI.Internal.Monad (Ui, windowSize, withContext)
 import NanoUI.Internal.Tasks (useTask)
 import NanoUI.Internal.Types (Size (..))
 
---------------------------------------------------------------------------------
--- Pixels
---------------------------------------------------------------------------------
-
--- | Pixels as RGBA8: a positive width and height, and tightly packed bytes,
--- four a pixel (red, green, blue, straight alpha), in rows from the top. A
--- window takes them as its icon, and a screenshot comes back as them. Made
--- with 'rgbaPixels', which checks that the bytes are as many as the size
--- says, so nothing that takes them has to.
+-- | RGBA8 pixels: rows from the top, tightly packed, four bytes a pixel,
+-- straight alpha. Used for window icons and screenshots. Build them with
+-- 'rgbaPixels', which checks the byte count against the size.
 data RgbaPixels = RgbaPixels
   { rgbaWidth :: !Int
   , rgbaHeight :: !Int
   , rgbaBytes :: !ByteString
-  -- ^ Exactly @4 * width * height@ of them.
+  -- ^ Exactly @4 * width * height@ bytes.
   }
   deriving (Eq)
 
--- | The size alone: the bytes are too many to show.
+-- | Shows the size only.
 instance Show RgbaPixels where
   showsPrec d (RgbaPixels w h _) =
     showParen (d > 10) (showString "RgbaPixels " . shows w . showString "x" . shows h)
 
 -- | Pixels @width@ by @height@, or 'Nothing' when either is not positive or
--- the bytes are not four a pixel. Register them to draw them with
--- @registerImageRgba iid (rgbaWidth p) (rgbaHeight p) (rgbaBytes p)@.
+-- the byte count is not @4 * width * height@. To draw them, register them
+-- with @registerImageRgba iid (rgbaWidth p) (rgbaHeight p) (rgbaBytes p)@.
 rgbaPixels :: Int -> Int -> ByteString -> Maybe RgbaPixels
 rgbaPixels w h bytes
   | w > 0 && h > 0 && BS.length bytes == w * h * 4 = Just (RgbaPixels w h bytes)
   | otherwise = Nothing
 
--- | A frame as it went to the window: its pixels, at the size the window's
--- pixels are, with the alpha the frame was drawn with, which is the theme's
--- window colour's wherever nothing covers it; and how many of them a layout
--- unit is, so the pixels are @screenshotScale@ times 'NanoUI.windowSize'.
+-- | A frame as presented, at the window's pixel size. Alpha is as drawn, so
+-- where nothing covers the background it is the alpha of the theme's window
+-- colour. 'screenshotScale' is pixels per layout unit: the pixel size is
+-- @screenshotScale@ times 'NanoUI.windowSize'.
 data Screenshot = Screenshot
   { screenshotPixels :: !RgbaPixels
   , screenshotScale :: !Float
   }
   deriving (Eq, Show)
 
---------------------------------------------------------------------------------
--- Settings
---------------------------------------------------------------------------------
-
--- | How a window opens, for any backend: the SDL backend's @sdlWindowSettings@
--- and the RGFW backend's @optWindow@. Sizes are in layout units, the units
--- of 'NanoUI.windowSize', which the backend converts at the scale the window
--- opens at.
+-- | How a window opens, for any backend (the SDL backend's
+-- @sdlWindowSettings@, the RGFW backend's @optWindow@). Sizes are in layout
+-- units, as for 'NanoUI.windowSize'; the backend converts them at the scale
+-- the window opens at.
 data WindowSettings = WindowSettings
   { wsTitle :: !Text
-  -- ^ What the title bar, the taskbar and the window switcher show
-  -- (default: @"nano-ui"@). 'setWindowTitleUi' changes it.
+  -- ^ Shown in the title bar, taskbar and window switcher (default:
+  -- @"nano-ui"@). See 'setWindowTitleUi'.
   , wsSize :: !Size
-  -- ^ The view's size (default: 1280x800). 'resizeWindowUi' changes it.
+  -- ^ The view's size (default: 1280x800). See 'resizeWindowUi'.
   , wsPosition :: !WindowPosition
   -- ^ Where the window opens (default: 'WindowPositionDefault').
   , wsMinSize :: !(Maybe Size)
-  -- ^ The smallest the user may make the window (default: no limit). An
-  -- axis of zero has no limit. 'setWindowMinSizeUi' changes it.
+  -- ^ The smallest size the user can resize to (default: no limit). A zero
+  -- axis is unlimited. See 'setWindowMinSizeUi'.
   , wsMaxSize :: !(Maybe Size)
-  -- ^ The largest the user may make the window (default: no limit).
+  -- ^ The largest size the user can resize to (default: no limit).
   , wsIcon :: !(Maybe RgbaPixels)
-  -- ^ The window's icon (default: the desktop's). 32 or 64 pixels square
-  -- suits most desktops, which scale it to the sizes they show.
+  -- ^ The window icon (default: the desktop's). 32 or 64 pixels square suits
+  -- most desktops.
   , wsResizable :: !Bool
   -- ^ Whether the user may resize the window (default: 'True').
   , wsMode :: !WindowMode
   -- ^ Windowed, fullscreen or hidden (default: 'Windowed').
-  -- 'setWindowModeUi' changes it.
+  -- See 'setWindowModeUi'.
   , wsTransparent :: !Bool
   -- ^ Let the desktop show through where the theme's window colour
-  -- ('NanoUI.windowColor') is translucent (default: 'False'). The SDL
-  -- backend's windows can, given a compositor; RGFW's are always opaque.
+  -- ('NanoUI.windowColor') is translucent (default: 'False'). Works on the
+  -- SDL backend with a compositor; RGFW windows are always opaque.
   , wsOpacity :: !Float
-  -- ^ Fade the whole window, frame and all, from 0 to 1 (default: 1), where
-  -- the backend and the desktop allow: the SDL backend's windows fade, and
-  -- RGFW's do not. 'setWindowOpacityUi' changes it.
+  -- ^ Opacity of the whole window, decorations included, from 0 to 1
+  -- (default: 1). The SDL backend supports it; RGFW does not.
+  -- See 'setWindowOpacityUi'.
   , wsExitOnCloseRequest :: !Bool
-  -- ^ Whether the session ends when the window is asked to close, by its
-  -- close button, the window manager or the platform asking the app to quit
-  -- (default: 'True'). With 'False' the view is told instead
-  -- ('winCloseRequested') and decides, with 'quitUi' to end it: to ask
-  -- about unsaved work first, say.
+  -- ^ End the session when the window is asked to close, by its close
+  -- button, the window manager or a platform quit request (default:
+  -- 'True'). With 'False' the view sees 'winCloseRequested' instead and
+  -- calls 'quitUi' when ready, for example after asking about unsaved work.
   }
   deriving (Eq, Show)
 
--- | A resizable 1280x800 window titled @"nano-ui"@, where the desktop puts
--- it, with no size limits, the desktop's icon, opaque, ending the session
--- when it is closed.
+-- | A resizable, opaque 1280x800 window titled @"nano-ui"@, placed by the
+-- desktop, with no size limits and the desktop's icon. Closing it ends the
+-- session.
 defaultWindowSettings :: WindowSettings
 defaultWindowSettings =
   WindowSettings
@@ -181,44 +169,37 @@ defaultWindowSettings =
 -- | Where a window opens ('wsPosition').
 data WindowPosition
   = WindowPositionDefault
-  -- ^ Where the desktop puts a new window. RGFW cannot ask the desktop and
-  -- centres it.
+  -- ^ Where the desktop puts new windows. RGFW cannot ask the desktop, so it
+  -- centres the window.
   | WindowPositionCentered
   -- ^ Centred on the display.
   | WindowPositionAt !Int !Int
-  -- ^ The window's top-left corner, in the desktop's coordinates
-  -- ('moveWindowUi').
+  -- ^ The top-left corner, in desktop coordinates (see 'moveWindowUi').
   deriving (Eq, Show)
 
--- | Whether a window is in a window of its own, fills its display, or is not
--- shown at all.
+-- | Windowed, filling the display, or not shown.
 data WindowMode = Windowed | Fullscreen | Hidden
   deriving (Eq, Show, Enum, Bounded)
 
---------------------------------------------------------------------------------
--- State
---------------------------------------------------------------------------------
-
--- | The window as it is this frame ('askWindow').
+-- | The window as of this frame ('askWindow').
 data WindowState = WindowState
   { winSize :: !Size
-  -- ^ The view's size in layout units: 'NanoUI.windowSize'.
+  -- ^ The view's size in layout units ('NanoUI.windowSize').
   , winScale :: !Float
-  -- ^ The window's pixels a layout unit: its pixel density times the UI
-  -- scale.
+  -- ^ Pixels per layout unit: pixel density times UI scale.
   , winPosition :: !(Maybe (Int, Int))
-  -- ^ The window's top-left corner in the desktop's coordinates, as far as
-  -- the desktop says: Wayland does not.
+  -- ^ The top-left corner in desktop coordinates, when the desktop reports
+  -- it (Wayland does not).
   , winFocused :: !Bool
-  -- ^ Whether the window has the keyboard.
+  -- ^ Whether the window has keyboard focus.
   , winMaximized :: !Bool
   , winMinimized :: !Bool
   , winFullscreen :: !Bool
   , winCloseRequested :: !Bool
-  -- ^ Whether the window was asked to close since the last frame, which
-  -- only a window with 'wsExitOnCloseRequest' off is told; the session goes
-  -- on until the view calls 'quitUi'. It is set for one frame, like a
-  -- click, so keep what it asks for in state of your own:
+  -- ^ Whether the window was asked to close since the last frame. Only set
+  -- when 'wsExitOnCloseRequest' is off; the session continues until the
+  -- view calls 'quitUi'. It lasts one frame, like a click, so keep any
+  -- follow-up in your own state:
   --
   -- > (confirming, setConfirming) <- useFlag False
   -- > closing <- winCloseRequested <$> askWindow
@@ -227,9 +208,8 @@ data WindowState = WindowState
   }
   deriving (Eq, Show)
 
--- | What a view reads without a window, as under a test context: a focused
--- window of scale 1 in no known place, in no special mode. Its size is the
--- frame's.
+-- | The state without a window, as under a test context: focused, scale 1,
+-- unknown position, no special mode. 'askWindow' fills in the frame's size.
 defaultWindowState :: WindowState
 defaultWindowState =
   WindowState
@@ -243,10 +223,10 @@ defaultWindowState =
     , winCloseRequested = False
     }
 
--- | The window as the backend reported it as this frame began, and whether
--- it was asked to close. 'NanoUI.windowSize' is its 'winSize'. A view that
--- reads it gets a frame when it changes, a window's focus say; one that
--- never does pays nothing for it.
+-- | The window as the backend reported it at the start of this frame, plus
+-- whether it was asked to close. Its 'winSize' is 'NanoUI.windowSize'. Once
+-- a view reads it, a change (in focus, say) triggers a frame; a view that
+-- never reads it pays nothing.
 askWindow :: Ui :> es => Eff es WindowState
 askWindow = do
   size <- windowSize
@@ -257,18 +237,13 @@ askWindow = do
         writeIORef (nwStateRead nw) True
         (\st -> st {winSize = size}) <$> readIORef (nwState nw)
 
---------------------------------------------------------------------------------
--- The host
---------------------------------------------------------------------------------
-
--- | What a backend does with what a view asks of its window. Each runs on
--- the UI thread in the middle of a view. The sizes are in layout units,
--- which the backend converts at the scale its window is at; an axis of zero,
--- or no size at all, has no limit.
+-- | How a backend carries out a view's window requests. Each field runs on
+-- the UI thread, in the middle of a view. Sizes are in layout units,
+-- converted at the window's current scale; a zero axis, or 'Nothing', means
+-- no limit.
 --
--- Build one from 'defaultWindowHost', whose every field does nothing, with a
--- record update of the fields the backend can do, so a field added later
--- does nothing on it rather than break it:
+-- Build one by updating 'defaultWindowHost', whose fields do nothing, so a
+-- field added later is a no-op for existing backends:
 --
 -- > installWindowHost ctx settings
 -- >   defaultWindowHost {hostSetTitle = setTitle win, hostMove = moveWindow win}
@@ -276,21 +251,19 @@ data WindowHost = WindowHost
   { hostSetTitle :: Text -> IO ()
   , hostSetIcon :: RgbaPixels -> IO ()
   , hostSetMinSize :: Maybe Size -> IO ()
-  -- ^ Limit how small the user may make the window, or take the limit off.
   , hostSetMaxSize :: Maybe Size -> IO ()
   , hostSetOpacity :: Float -> IO ()
-  -- ^ Fade the whole window, from 0 (invisible) to 1 (opaque).
+  -- ^ From 0 (invisible) to 1 (opaque).
   , hostSetMode :: WindowMode -> IO ()
   , hostMove :: Int -> Int -> IO ()
-  -- ^ Put the window's top-left corner at a point of the desktop.
+  -- ^ The top-left corner, in desktop coordinates.
   , hostCenter :: IO ()
-  -- ^ Centre the window on its display.
   , hostResize :: Size -> IO ()
-  -- ^ Make the view this size.
+  -- ^ The view's size, excluding the desktop's decorations.
   , hostMinimize :: IO ()
   , hostMaximize :: IO ()
   , hostRestore :: IO ()
-  -- ^ Give a maximized or minimized window back its size.
+  -- ^ Undo a maximize or minimize.
   }
 
 -- | A host that does nothing.
@@ -311,10 +284,10 @@ defaultWindowHost =
     , hostRestore = pure ()
     }
 
--- | The installed host, and what goes with it: the settings as the window
--- has them now, so that a view asking every frame for what it has costs a
--- comparison; the state the backend reported; whether a view has read it;
--- whether a view asked to quit; and the screenshots waiting, newest first.
+-- | The installed host and its state: the window's current settings (so a
+-- view setting the same value every frame costs a comparison), the state the
+-- backend last reported, whether a view has read that state, whether a view
+-- called 'quitUi', and pending screenshot requests, newest first.
 data NativeWindow = NativeWindow
   { nwHost :: !WindowHost
   , nwSettings :: !(IORef WindowSettings)
@@ -324,13 +297,12 @@ data NativeWindow = NativeWindow
   , nwShots :: !(IORef [Maybe Screenshot -> IO ()])
   }
 
--- | Say what the context's window does with a view's requests, once the
--- backend has opened it from @settings@: with their title and size, in their
--- mode, and resizable and transparent as they say. This applies the rest
--- through the host, as a view would: the size limits, the icon, the opacity
--- and then the position. A backend calls this once, before the first frame;
--- a later call replaces the host and answers the screenshots waiting on the
--- old one with 'Nothing'.
+-- | Install the host for the context's window. The backend has already
+-- opened the window from @settings@ with its title, size, mode,
+-- resizability and transparency; this applies the size limits, icon,
+-- opacity and position through the host, in that order. Call it once before
+-- the first frame. A later call replaces the host and answers the old one's
+-- pending screenshots with 'Nothing'.
 installWindowHost :: Context -> WindowSettings -> WindowHost -> IO ()
 installWindowHost ctx settings host = do
   answerScreenshots ctx (pure Nothing)
@@ -351,10 +323,10 @@ installWindowHost ctx settings host = do
     WindowPositionCentered -> hostCenter host
     WindowPositionAt x y -> hostMove host x y
 
--- | Report the window's state, once a frame before the view runs: the
--- backend's part of 'WindowState'. Its 'winSize' is the frame input's and its
--- 'winCloseRequested' the session loop's, so what is passed for them does
--- not matter. A change asks for a frame, if a view reads the state.
+-- | Report the window's state once a frame, before the view runs. The
+-- 'winSize' and 'winCloseRequested' passed in are ignored; they come from
+-- the frame input and the session loop. A change triggers a frame if a view
+-- reads the state.
 reportWindowState :: Context -> WindowState -> IO ()
 reportWindowState ctx st =
   withHost ctx $ \nw -> do
@@ -365,10 +337,10 @@ reportWindowState ctx st =
       read' <- readIORef (nwStateRead nw)
       when read' (markDirtyCovered ctx)
 
--- | For a session loop, when the window is asked to close: 'True' when the
--- session should end ('wsExitOnCloseRequest', or no window installed).
--- Otherwise the frame after sees 'winCloseRequested', which asks for one;
--- call 'clearWindowClose' once it has run.
+-- | For the session loop when the window is asked to close. Returns 'True'
+-- when the session should end ('wsExitOnCloseRequest' set, or no host).
+-- Otherwise sets 'winCloseRequested' and requests a frame; call
+-- 'clearWindowClose' after that frame runs.
 requestWindowClose :: Context -> IO Bool
 requestWindowClose ctx =
   askHostIO ctx >>= \case
@@ -380,12 +352,12 @@ requestWindowClose ctx =
         markDirtyCovered ctx
       pure exits
 
--- | End what 'requestWindowClose' began, after the frame that saw it.
+-- | Clear 'winCloseRequested' after the frame that saw it.
 clearWindowClose :: Context -> IO ()
 clearWindowClose ctx = withHost ctx $ \nw -> modifyIORef' (nwState nw) (\s -> s {winCloseRequested = False})
 
--- | Whether a view called 'quitUi': a session loop checks after each frame
--- and ends.
+-- | Whether a view called 'quitUi'. The session loop checks after each
+-- frame.
 quitRequested :: Context -> IO Bool
 quitRequested ctx = maybe (pure False) (readIORef . nwQuit) =<< askHostIO ctx
 
@@ -395,11 +367,8 @@ withHost ctx act = askHostIO ctx >>= traverse_ act
 withNativeWindow :: Ui :> es => (NativeWindow -> IO ()) -> Eff es ()
 withNativeWindow act = withContext (`withHost` act)
 
---------------------------------------------------------------------------------
--- From a view
---------------------------------------------------------------------------------
-
--- | Change a setting the window keeps, when it is not what the window has.
+-- | Apply a setting through the host only when it differs from the current
+-- one.
 setting :: Eq a => (WindowSettings -> a) -> (a -> WindowSettings -> WindowSettings) -> (WindowHost -> a -> IO ()) -> NativeWindow -> a -> IO ()
 setting get put apply nw v = do
   s <- readIORef (nwSettings nw)
@@ -415,38 +384,36 @@ setIcon nw = setting wsIcon (\v s -> s {wsIcon = v}) (traverse_ . hostSetIcon) n
 setOpacity :: NativeWindow -> Float -> IO ()
 setOpacity nw = setting wsOpacity (\v s -> s {wsOpacity = v}) hostSetOpacity nw . max 0 . min 1
 
--- | Set the window's title ('wsTitle').
+-- | Set the window title ('wsTitle').
 --
--- This and the other setters below act only when the value is not what the
--- window has, whether it opened with it or a view set it, so a view may call
--- them every frame with what it wants for the cost of a comparison.
+-- This and the setters below do nothing when the value matches what the
+-- window already has, so calling them every frame costs only a comparison.
 setWindowTitleUi :: Ui :> es => Text -> Eff es ()
 setWindowTitleUi t = withNativeWindow (\nw -> setting wsTitle (\v s -> s {wsTitle = v}) hostSetTitle nw t)
 
--- | Set the window's icon ('wsIcon').
+-- | Set the window icon ('wsIcon').
 setWindowIconUi :: Ui :> es => RgbaPixels -> Eff es ()
 setWindowIconUi icon = withNativeWindow (`setIcon` icon)
 
--- | Keep the window from being resized smaller than a size in layout units,
--- or take the limit off with 'Nothing'. An axis of zero has no limit. The
--- backend converts the size at the UI scale in effect when it changes, and
--- a later change of scale does not convert it again.
+-- | Set the smallest size, in layout units, the user can resize the window
+-- to, or remove the limit with 'Nothing'. A zero axis is unlimited. The size
+-- is converted at the UI scale when the limit is set, and not again if the
+-- scale changes later.
 setWindowMinSizeUi :: Ui :> es => Maybe Size -> Eff es ()
 setWindowMinSizeUi s = withNativeWindow (`setMinSize` s)
 
--- | Keep the window from being resized larger than a size in layout units,
--- or take the limit off with 'Nothing', as for 'setWindowMinSizeUi'.
+-- | Set the largest size the user can resize the window to, as for
+-- 'setWindowMinSizeUi'.
 setWindowMaxSizeUi :: Ui :> es => Maybe Size -> Eff es ()
 setWindowMaxSizeUi s = withNativeWindow (`setMaxSize` s)
 
--- | Fade the whole window, frame and all, from 0 (invisible) to 1 (opaque),
--- where the backend and the desktop allow ('wsOpacity'). This is not
--- transparency, for which see 'wsTransparent'.
+-- | Set the opacity of the whole window, decorations included, from 0
+-- (invisible) to 1 (opaque), clamped, where the backend and desktop support
+-- it ('wsOpacity'). For a see-through background use 'wsTransparent'.
 setWindowOpacityUi :: Ui :> es => Float -> Eff es ()
 setWindowOpacityUi o = withNativeWindow (`setOpacity` o)
 
--- | Put the window in a window of its own, fill its display with it, or hide
--- it ('wsMode').
+-- | Make the window windowed, fullscreen or hidden ('wsMode').
 --
 -- > (fullscreen, toggleFullscreen) <- useToggle False
 -- > whenM (shortcut (key (KeyF 11))) toggleFullscreen
@@ -454,14 +421,13 @@ setWindowOpacityUi o = withNativeWindow (`setOpacity` o)
 setWindowModeUi :: Ui :> es => WindowMode -> Eff es ()
 setWindowModeUi m = withNativeWindow (\nw -> setting wsMode (\v s -> s {wsMode = v}) hostSetMode nw m)
 
--- | Move the window's top-left corner to a point of the desktop: the SDL
--- backend's window coordinates, RGFW's pixels.
+-- | Move the window's top-left corner to a desktop point: window coordinates
+-- on SDL, pixels on RGFW.
 --
--- This and the other commands below act on every call, since the user
--- moves, resizes, maximizes and restores the window too: call them when the
--- window should change, from an event, not every frame. A desktop may not
--- let a window place itself (Wayland does not), and a maximized or
--- fullscreen window stays put.
+-- This and the commands below act on every call, because the user can also
+-- move, resize, maximize and restore the window. Call them from an event,
+-- not every frame. Some desktops ignore placement (Wayland does), and a
+-- maximized or fullscreen window stays put.
 moveWindowUi :: Ui :> es => Int -> Int -> Eff es ()
 moveWindowUi x y = withNativeWindow (\nw -> hostMove (nwHost nw) x y)
 
@@ -469,61 +435,59 @@ moveWindowUi x y = withNativeWindow (\nw -> hostMove (nwHost nw) x y)
 centerWindowUi :: Ui :> es => Eff es ()
 centerWindowUi = withNativeWindow (hostCenter . nwHost)
 
--- | Make the view a size in layout units, whatever frame the desktop keeps
--- around it.
+-- | Resize the view to a size in layout units, excluding the desktop's
+-- decorations.
 resizeWindowUi :: Ui :> es => Size -> Eff es ()
 resizeWindowUi s = withNativeWindow (\nw -> hostResize (nwHost nw) s)
 
--- | Put the window away to the taskbar.
+-- | Minimize the window to the taskbar.
 minimizeWindowUi :: Ui :> es => Eff es ()
 minimizeWindowUi = withNativeWindow (hostMinimize . nwHost)
 
--- | Fill the screen with the window, keeping the desktop's panels.
+-- | Maximize the window, leaving the desktop's panels visible.
 maximizeWindowUi :: Ui :> es => Eff es ()
 maximizeWindowUi = withNativeWindow (hostMaximize . nwHost)
 
--- | Give a maximized or minimized window back the size it had.
+-- | Return a maximized or minimized window to its previous size.
 restoreWindowUi :: Ui :> es => Eff es ()
 restoreWindowUi = withNativeWindow (hostRestore . nwHost)
 
--- | Maximize a window that is not, restore one that is: which it is comes
--- from 'winMaximized', since the desktop maximizes a window by itself when
--- its title bar is double-clicked.
+-- | Maximize the window, or restore it if it is maximized. Reads
+-- 'winMaximized', since the desktop can maximize the window itself (on a
+-- title bar double-click, say).
 toggleMaximizedUi :: Ui :> es => Eff es ()
 toggleMaximizedUi = withNativeWindow $ \nw -> do
   maxed <- winMaximized <$> readIORef (nwState nw)
   (if maxed then hostRestore else hostMaximize) (nwHost nw)
 
--- | End the session once this frame is drawn: the backend's runner closes
--- the window and returns. For a window that does not close by itself
--- ('wsExitOnCloseRequest' off), this is how it closes.
+-- | End the session after this frame is drawn; the backend's runner closes
+-- the window and returns. With 'wsExitOnCloseRequest' off, this is how the
+-- window closes.
 quitUi :: Ui :> es => Eff es ()
 quitUi = withNativeWindow (\nw -> writeIORef (nwQuit nw) True)
 
--- | Ask for a screenshot of the window: the frame this view is building,
--- once it is on screen. The action gets it after that frame is presented,
--- on the UI thread, before the next frame starts. It gets 'Nothing' when the
--- backend cannot capture, which is straight away when the view is not
--- running in a window.
+-- | Request a screenshot of the frame this view is building. The action runs
+-- on the UI thread after that frame is presented and before the next one
+-- starts. It gets 'Nothing' when the backend cannot capture, immediately if
+-- there is no window.
 --
--- Each call is answered once, so ask from an event, such as a click, rather
--- than every frame: a view that asks every frame gets a frame and a capture
--- after every frame. Keep the action short (a write to an 'IORef', a
--- 'Control.Concurrent.forkIO' of the encoding), since the next frame waits
--- on it; the frame after the answer runs by itself, for a view that shows
--- what came back. 'useScreenshot' hands the view the screenshot itself.
+-- Each call is answered once. Request from an event such as a click, not
+-- every frame, or the view never stops redrawing and capturing. Keep the
+-- action short (an 'IORef' write, a 'Control.Concurrent.forkIO' of the
+-- encoding), since the next frame waits on it. A frame follows each answer,
+-- so the view can show the result. 'useScreenshot' returns the screenshot to
+-- the view directly.
 requestScreenshot :: Ui :> es => (Maybe Screenshot -> IO ()) -> Eff es ()
 requestScreenshot answer = withContext $ \ctx -> askHostIO ctx >>= maybe (answer Nothing) (`queueScreenshot` answer)
 
--- | Add an answer to the screenshots waiting ('answerScreenshots').
+-- | Queue an answer for 'answerScreenshots'.
 queueScreenshot :: NativeWindow -> (Maybe Screenshot -> IO ()) -> IO ()
 queueScreenshot nw answer = atomicModifyIORef' (nwShots nw) (\waiting -> (answer : waiting, ()))
 
--- | An action for another thread, such as a 'NanoUI.useTaskStatus' job, that
--- waits for the next frame to be on screen and returns a screenshot of it,
--- as 'requestScreenshot' answers. It wakes the loop for that frame. Without
--- a window it returns 'Nothing' at once. Run on the UI thread, it would wait
--- for a frame that cannot come.
+-- | An action for another thread, such as a 'NanoUI.useTaskStatus' job. It
+-- wakes the loop, waits for the next frame to be presented, and returns a
+-- screenshot of it, as 'requestScreenshot' does. Without a window it returns
+-- 'Nothing' at once. On the UI thread it deadlocks.
 --
 -- > shoot <- askScreenshot
 -- > saved <- useTaskStatus shots (shoot >>= traverse_ (savePng "shot.png"))
@@ -536,11 +500,10 @@ askScreenshot = withContext $ \ctx -> maybe (pure Nothing) (shoot ctx) <$> askHo
       wakeFromThread ctx
       takeMVar box
 
--- | A screenshot of the window for each key: the first frame with a key
--- asks for one, which comes a frame or two later, as 'useTask' returns its
--- job's result (and until then the last key's screenshot). Bump the key to
--- take another; like any hook, call it on some frames and not others only
--- inside 'NanoUI.scope'.
+-- | A screenshot per key. The first frame with a new key requests one, which
+-- arrives a frame or two later; until then it returns the previous key's
+-- screenshot, as 'useTask' does. Change the key to take another. Like any
+-- hook, call it conditionally only inside 'NanoUI.scope'.
 --
 -- > (shots, setShots) <- useInt 0
 -- > whenM (button "Screenshot") (setShots (shots + 1))
@@ -548,15 +511,13 @@ askScreenshot = withContext $ \ctx -> maybe (pure Nothing) (shoot ctx) <$> askHo
 useScreenshot :: (Eq k, Typeable k, Ui :> es) => k -> Eff es (Maybe Screenshot)
 useScreenshot k = join <$> (useTask k =<< askScreenshot)
 
--- | Answer the screenshots views have asked for since the last answer, with
--- one run of @capture@, in the order they were asked; with none waiting
--- @capture@ does not run. A backend calls this once a frame is on screen,
--- with a capture of that frame, and leaves the requests waiting when it has
--- no frame to capture yet. The screenshot's scale is the one it last
--- reported ('reportWindowState').
+-- | Answer every screenshot request since the last call, in request order,
+-- with one run of @capture@, which does not run when none are pending. A
+-- backend calls this once a frame is presented, and not while it has no
+-- frame to capture. The scale is the last one given to 'reportWindowState'.
 --
--- The answers are views' own code, and they generally change what a view
--- reads, so this asks for another frame when it answers any.
+-- Answers are view code that usually changes what a view reads, so
+-- answering any requests a frame.
 answerScreenshots :: Context -> IO (Maybe RgbaPixels) -> IO ()
 answerScreenshots ctx capture =
   withHost ctx $ \nw -> do

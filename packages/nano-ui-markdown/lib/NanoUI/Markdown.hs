@@ -7,7 +7,7 @@
 --
 -- Markdown drawn with nano-ui's rich text and layout. Parse a document once,
 -- keep it in your model, and draw it every frame. 'markdown' returns the
--- destination of a link clicked this frame:
+-- link clicked this frame, if any:
 --
 -- > view :: MarkdownDoc -> NanoUI ()
 -- > view doc = do
@@ -16,25 +16,22 @@
 -- >   for_ clicked setLastLink
 -- >   unless (T.null lastLink) $ label ("Clicked " <> lastLink)
 --
--- A reply that streams in grows with 'appendMarkdown'. One that arrives on
--- a thread of its own streams in with nano-ui's @useStream@, which appends
--- each token on that thread:
+-- Grow a streamed reply with 'appendMarkdown'. When tokens arrive on a
+-- worker thread, nano-ui's @useStream@ can append each one there:
 --
 -- > doc <- useStream replyId emptyMarkdown $ \update ->
 -- >   onToken client (\token -> update (appendMarkdown token))
 --
--- On the UI thread, append the tokens that arrived in a frame at once:
+-- On the UI thread, append a frame's tokens in one call:
 --
 -- > onTokens :: [Text] -> MarkdownDoc -> MarkdownDoc
 -- > onTokens tokens = appendMarkdown (T.concat tokens)
 --
--- Appending keeps the blocks that the new text cannot change and parses
--- again only the rest: the last top-level block, or less when the text ends
--- inside a list, a table, fenced code or a block quote, down to its last
--- item, row, line or block. "NanoUI.Markdown.Document" says when more is
--- parsed again.
+-- Appending reparses only the last top-level block, or less when the text
+-- ends inside a list, table, fenced code or block quote.
+-- "NanoUI.Markdown.Document" describes when more is reparsed.
 --
--- 'mdBlock' draws blocks your own way, at any depth, given the widget's own
+-- 'mdBlock' overrides block drawing at any depth, given the widget's own
 -- drawing to fall back to or wrap:
 --
 -- > highlighted :: MarkdownConfig NanoUIEs
@@ -42,9 +39,9 @@
 -- >   CodeBlock "haskell" code -> Nothing <$ panel (richText (highlight code))
 -- >   b -> own b}
 --
--- The @commonmark@ library parses the text, with GitHub's tables, task lists
--- (in bullet lists), strikethrough and bare web and email links from
--- @commonmark-extensions@. Raw HTML stays text, without its comments.
+-- Parsing uses @commonmark@ with GitHub tables, task lists (in bullet
+-- lists), strikethrough and autolinks from @commonmark-extensions@. Raw HTML
+-- is shown as text, with comments removed.
 module NanoUI.Markdown
   ( -- * Documents
     MarkdownDoc

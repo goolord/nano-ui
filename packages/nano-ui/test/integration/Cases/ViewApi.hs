@@ -30,9 +30,8 @@ tests =
   , spec "font-size" runFontSizeTest
   ]
 
--- | 'uiFontSize' is the size the default resolver sets text in when its
--- layout names none, its metrics' line height, until a backend says
--- otherwise.
+-- | 'uiFontSize' is the text size used when a layout sets none: the font
+-- metrics' line height, until overridden.
 runFontSizeTest :: Context -> IORef Int -> IO ()
 runFontSizeTest ctx failed = do
   let inp = withInput 200 200

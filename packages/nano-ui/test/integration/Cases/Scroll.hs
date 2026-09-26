@@ -748,12 +748,11 @@ runScroll2DGrowMinWidthTest ctx failed = do
   wrapped <- rangeX (withInput 400 200) (rows (columnWith (grow . tight) (rowWith (fixedW 600 . tight) (label (T.pack "wide")))))
   assertGt failed wrapped 0
 
--- | A scroller below the fold of the one it sits in has an empty viewport:
--- nothing it holds takes the pointer, even where its content has scrolled
--- into the outer viewport's rect. Scrolled by 100, the inner scroller's first
--- button lies about 50 px down the window, inside the outer viewport but
--- above the inner one, which is itself below the fold. Nothing paints it
--- there, so it neither hovers nor clicks.
+-- | A scroller below its parent's fold has an empty viewport, so its content
+-- takes no pointer input even where it has scrolled into the outer
+-- viewport's rect. Scrolled by 100, the inner scroller's button sits about
+-- 50 px down, inside the outer viewport but above the inner one. It is not
+-- painted there, so it neither hovers nor clicks.
 runDisjointViewportHitTest :: Context -> IORef Int -> IO ()
 runDisjointViewportHitTest ctx failed = do
   let inp0 = withInputOff 300 200
@@ -772,8 +771,8 @@ runDisjointViewportHitTest ctx failed = do
   let Rect bx by bw bh = respRect deep
       centre = V2 (bx + bw / 2) (by + bh / 2)
       hover = inp0 {inputMousePos = centre}
-  -- The button sits inside the outer viewport's rect, not below it, and its
-  -- clip is empty rather than unset.
+  -- The button is inside the outer viewport's rect, and its clip is empty
+  -- rather than unset.
   assert failed (by >= 0 && by + bh < 100)
   let na = ctxNodeArena ctx
   assertJustM failed (lookupNodeByWidgetId na (respId deep)) $ \idx -> do
@@ -787,11 +786,11 @@ runDisjointViewportHitTest ctx failed = do
   (_, clicked) <- evalUi ctx release ui
   assert failed (not (respClicked clicked))
 
--- | Stacked buttons and one pinned over them, in a scroller scrolled out of
--- the outer viewport, have an empty clip and take no pointer
--- ('NanoUI.Internal.Frame.Hit.topmostHit' chooses only among reachable
--- widgets). In view, the pinned one takes the pointer over the layers, and
--- the top layer's button beside it.
+-- | Layered buttons and a pinned one in a scroller outside the outer
+-- viewport have an empty clip and take no pointer input
+-- ('NanoUI.Internal.Frame.Hit.topmostHit' only picks reachable widgets). In
+-- view, the pinned button wins over the layers, and the top layer's button
+-- wins beside it.
 runDisjointViewportLayersTest :: Context -> IORef Int -> IO ()
 runDisjointViewportLayersTest ctx failed = do
   let inp0 = withInputOff 300 200
@@ -806,7 +805,7 @@ runDisjointViewportLayersTest ctx failed = do
         filler 100
         pure inner
       buttons = fmap (snd . snd) ui
-      -- The top layer's button left of the pinned one, and the pinned one.
+      -- A point on the top layer's button left of the pinned one, and on the pinned one.
       targets bs = [(1 :: Int, V2 (rectX (respRect (bs !! 1)) + 10) (v2Y (centerOf (bs !! 1)))), (2, centerOf (bs !! 2))]
   (outer, (inner, _)) <- warmup2 ctx inp0 ui
   setScrollOffset ctx inner 100
@@ -832,11 +831,10 @@ runDisjointViewportLayersTest ctx failed = do
     clicked <- runClick ctx inp0 {inputMousePos = pos} buttons pos
     assertEq failed [j == i | j <- [0 .. 2]] (map respClicked clicked)
 
--- | The wheel goes to the scroller drawn on top at the pointer: one pinned
--- over another takes it though declared before it, and a panel pinned over
--- the scroller beneath takes it with 'PointerBlock' and lets it through
--- without. Beside what is pinned, the scroller beneath takes it, and a
--- blocking card inside a scroller leaves it that scroller's.
+-- | The wheel goes to the topmost scroller under the pointer, even one pinned
+-- over another but declared first. A pinned panel over the lower scroller
+-- blocks the wheel with 'PointerBlock' and passes it through otherwise. A
+-- blocking card inside a scroller does not stop that scroller.
 runWheelPaintOrderTest :: Context -> IORef Int -> IO ()
 runWheelPaintOrderTest ctx failed = do
   let inp0 = withInputOff 400 300
@@ -846,7 +844,7 @@ runWheelPaintOrderTest ctx failed = do
         (under, ()) <- scrollArea (fixedWH 360 240) (rows 60)
         panelWith (pointer mode . pinAt 200 20 . fixedWH 100 80) (pure ())
         pure (top, under)
-      -- Which of the two scrollers a wheel turn at @p@ moves.
+      -- Which scrollers a wheel turn at @p@ moves.
       moved mode p = do
         (top, under) <- warmup2 ctx inp0 (ui mode)
         setScrollOffset ctx top 0
@@ -858,8 +856,8 @@ runWheelPaintOrderTest ctx failed = do
   moved PointerAuto (V2 250 60) >>= assertEq failed (False, True)
   moved PointerBlock (V2 250 60) >>= assertEq failed (False, False)
   moved PointerBlock (V2 250 200) >>= assertEq failed (False, True)
-  -- A blocking card inside a scroller covers nothing the scroller is under:
-  -- the wheel over it scrolls the scroller it is in.
+  -- A blocking card blocks only what lies under its own scroller, so the
+  -- wheel over it scrolls that scroller.
   let inside = columnWith tight $ do
         (sid, ()) <- scrollArea (fixedWH 300 200) . column $ do
           panelWith (pointer PointerBlock . fixedWH 200 60) (pure ())

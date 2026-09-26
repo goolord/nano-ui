@@ -30,9 +30,9 @@ import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Style (Flow (..), Padding (..), PointerMode (..), themePanel)
 import NanoUI.Internal.Types (Rect (..), Size (..), V2 (..), rectContains, rectHit, rectInflate, rectIntersect, rectUnion)
 
--- | Move every node by the offsets of the scroll containers around it, and
--- give each its clip. The root is clipped to the window, as paint clips it:
--- a root smaller than its content still draws the overflow.
+-- | Offset every node by its enclosing scrollers and set its clip. The root
+-- clips to the window, as in paint, so a root smaller than its content still
+-- draws the overflow.
 applyScrollOffsets :: Context -> Size -> IO ()
 applyScrollOffsets ctx (Size w h) = do
   beginScrollMetrics ctx
@@ -49,8 +49,8 @@ transformSubtree ctx@Context {ctxNodeArena = na} idx scrollX scrollY parentClip 
     (sx, sy) = if floating then (0, 0) else (scrollX, scrollY)
     !vx = lx + sx
     !vy = ly + sy
-    -- A rect outside the clip around it leaves nothing: its clip is empty,
-    -- not the clip around it.
+    -- A rect entirely outside the parent clip gets an empty clip, not the
+    -- parent's.
     within r = fromMaybe (Rect (rectX r) (rectY r) 0 0) (rectIntersect parentClip r)
   -- With no offset on either axis the placed rect equals the laid-out one, so
   -- the write is a no-op; a floating node always takes that path.
@@ -193,7 +193,7 @@ findScrollNodeUnderMouse ctx mouse = do
   if count <= 0
     then pure Nothing
     else do
-      -- The modal on top at the pointer, else the window or popup there.
+      -- Start at the topmost modal under the pointer, else the window or popup.
       top <-
         runMaybeT $
           MaybeT (topmostFloating ctx (== NodeModal) (`rectHit` mouse))
@@ -208,22 +208,19 @@ findScrollNodeUnderMouse ctx mouse = do
 -- | What a subtree does with the wheel at the pointer.
 data WheelHit
   = WheelMiss
-  -- ^ Nothing in it takes the wheel there.
+  -- ^ Nothing in the subtree takes the wheel here.
   | WheelBlocked
-  -- ^ A node given 'PointerBlock' is on top there with no scroller of its
-  -- own: nothing drawn beneath it takes the wheel, though a scroller it is
-  -- inside still does.
+  -- ^ A 'PointerBlock' node without a scroller is on top here. Nodes
+  -- beneath it do not get the wheel, but an enclosing scroller still does.
   | WheelTo !NodeIdx
-  -- ^ This scroller takes it.
+  -- ^ This scroller takes the wheel.
 
--- | What the subtree at @idx@ does with the wheel at @mouse@: the answer of
--- the child drawn on top there, else @idx@ itself if it is a scroller under
--- the pointer. Where layers or a pinned node draw one child over another
--- (@layered@, and this node layered or above a pinned node), the children
--- are asked in the order paint draws them, the one on top first
--- ('firstChildOnTopJustM'), so a scroller pinned over another takes the
--- wheel; elsewhere children do not overlap, and are asked in the arena's
--- sibling order.
+-- | The wheel target at @mouse@ in the subtree at @idx@: the topmost child's
+-- answer, else @idx@ itself if it is a scroller under the pointer. Where
+-- children can overlap (@layered@ is set and this node is 'Layered' or has a
+-- pinned descendant), they are asked topmost first ('firstChildOnTopJustM'),
+-- so a scroller pinned over another wins. Otherwise children cannot overlap
+-- and are asked in arena sibling order.
 queryScrollTarget :: Context -> Bool -> V2 -> Rect -> NodeIdx -> IO WheelHit
 queryScrollTarget ctx@Context {ctxNodeArena = na} layered mouse parentClip idx = do
   nt <- getNodeType na idx
@@ -248,9 +245,9 @@ queryScrollTarget ctx@Context {ctxNodeArena = na} layered mouse parentClip idx =
               <&&> pure (rectHit clip mouse)
           pure (if blocks then WheelBlocked else inner)
 
--- | Whether node @idx@ is a scroller that takes the wheel at @mouse@: a
--- scroll container whose viewport or bar lanes hold it, or a text area with
--- something to scroll. Not one that lets the pointer through ('PointerPass').
+-- | Whether node @idx@ takes the wheel at @mouse@: a scroll container whose
+-- viewport or bar lanes contain it, or a text area with something to scroll.
+-- A 'PointerPass' node never does.
 scrollHitSelf :: Context -> NodeIdx -> NodeType -> V2 -> Rect -> IO Bool
 scrollHitSelf ctx@Context {ctxNodeArena = na} idx nt mouse clip
   | nt == NodeTextArea =

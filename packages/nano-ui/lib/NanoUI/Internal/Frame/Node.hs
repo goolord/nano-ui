@@ -1,6 +1,6 @@
 -- | Per-node queries shared by the paint, span, scroll and hit passes: the
--- font a node renders and measures in, a scroll node's fields, the clip a
--- node's children paint in, and the room a widget's adornments take.
+-- font a node renders and measures in, a scroll node's fields, the clip for
+-- a node's children, and the room a widget's adornments take.
 module NanoUI.Internal.Frame.Node
   ( resolveFontFor
   , nodeFontNative
@@ -92,11 +92,10 @@ readScrollNode na idx = do
   let cfg = decodeScrollConfig si
   pure $! ScrollNode slot cfg (si /= 0 && scrollConfigNative2D cfg) dir pad contentMain contentW
 
--- | The rect node @idx@, of type @nt@ and placed at @rect@, clips its
--- children to, as "NanoUI.Internal.Frame.Paint" clips them: a scroller's
--- viewport, the inside of a panel's border, and any other node's rect but a
--- plain container's (a row, column or grid), which clips nothing
--- ('Nothing').
+-- | The clip for the children of node @idx@ (type @nt@, placed at @rect@),
+-- matching "NanoUI.Internal.Frame.Paint": a scroller's viewport, a panel's
+-- inside-border rect, or the node's own rect. Plain containers (row, column,
+-- grid) do not clip and return 'Nothing'.
 childPaintClip :: Context -> NodeIdx -> NodeType -> Rect -> IO (Maybe Rect)
 childPaintClip ctx idx nt rect@(Rect x y w h) = case nt of
   NodeContainer -> pure Nothing

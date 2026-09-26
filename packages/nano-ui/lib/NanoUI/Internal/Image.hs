@@ -1,7 +1,6 @@
--- | Images drawn fitted, aligned, cropped, zoomed, faded and turned: the
--- options an image takes ('ImageConfig'), what paint draws an image node
--- with ('ImageLook', 'lookDraw'), the canvas's image record ('ImageDraw'),
--- and the geometry behind them ('fitRect'). Everything here is pure.
+-- | Pure image geometry: fit, alignment, crop, zoom, opacity and rotation.
+-- Covers the user options ('ImageConfig'), the per-node paint data
+-- ('ImageLook', 'lookDraw') and the canvas image record ('ImageDraw').
 module NanoUI.Internal.Image
   ( ContentFit (..)
   , Rotation (..)
@@ -24,36 +23,33 @@ import NanoUI.Internal.Draw.Types (DrawOp (..))
 import NanoUI.Internal.Style (AlignX (..), AlignY (..), Layout, fadeAlpha)
 import NanoUI.Internal.Types (Color, ImageId (..), Rect (..), clamp, clamp01, colorA, colorRGBA, finite, rectIntersect)
 
--- | How an image fills the rect its layout gives it, as CSS's @object-fit@
--- does. The image keeps its own shape under every fit but 'FitFill'.
+-- | How an image fills its layout rect, like CSS @object-fit@. Every fit but
+-- 'FitFill' keeps the image's aspect ratio.
 data ContentFit
-  = -- | As large as fits inside the rect. Where the shapes differ, part of
-    -- the rect stays empty.
+  = -- | Largest size that fits inside the rect; may leave empty space.
     FitContain
-  | -- | As small as covers the rect, and cropped to it.
+  | -- | Smallest size that covers the rect, cropped to it.
     FitCover
   | -- | Stretched to the rect.
     FitFill
-  | -- | At its own size, and cropped to the rect.
+  | -- | Natural size, cropped to the rect.
     FitNone
   | -- | 'FitNone' when the image fits, else 'FitContain'.
     FitScaleDown
   deriving (Eq, Show, Enum, Bounded)
 
--- | How far an image is turned, in radians, clockwise on screen about the
--- centre of where it is drawn, and whether the turn takes room.
+-- | Clockwise rotation in radians about the centre of the drawn image, and
+-- whether the rotation affects layout.
 data Rotation
-  = -- | Fitted to its rect as if it were not turned, then turned: its layout
-    -- stays what it was, and a corner that leaves the rect is cropped. For an
-    -- icon that spins.
+  = -- | Fitted as if unrotated, then rotated. Layout is unchanged and corners
+    -- outside the rect are cropped. For spinning icons.
     RotateFloating !Float
-  | -- | Fitted by its turned bounding box, so the whole image stays inside
-    -- its rect (unless 'FitCover' or 'FitNone' crops it), and an axis the
-    -- layout leaves unsized takes the turned image's extent.
+  | -- | Fitted by the rotated bounding box, so the whole image stays inside
+    -- its rect (unless 'FitCover' or 'FitNone' crops it). An unsized axis
+    -- takes the rotated extent.
     RotateSolid !Float
   deriving (Eq, Show)
 
--- | The angle of a rotation, in radians.
 rotationAngle :: Rotation -> Float
 rotationAngle (RotateFloating a) = a
 rotationAngle (RotateSolid a) = a
@@ -61,37 +57,32 @@ rotationAngle (RotateSolid a) = a
 -- | Options for 'NanoUI.imageConfigured'.
 data ImageConfig = ImageConfig
   { icLayout :: Layout -> Layout
-  -- ^ The image's layout, a modifier of the default layout. An axis left at
-  -- 'NanoUI.Fit', the default, takes the image's own size: one pixel of the
-  -- image a logical pixel, of the part 'icCrop' keeps, turned by a solid
-  -- rotation. A fit height follows the width the layout gives the image in
-  -- the image's shape, and a fit width a fixed height, as 'NanoUI.aspect'
-  -- makes them, unless the modifier gives an aspect of its own: @fillW@
-  -- fills the width and keeps the shape. 'NanoUI.fontColor' tints the
+  -- ^ Layout modifier. A 'NanoUI.Fit' axis (the default) takes the image's
+  -- size: one image pixel per logical pixel, after 'icCrop' and any solid
+  -- rotation. The image's ratio acts as 'NanoUI.aspect' unless the modifier
+  -- sets one, so @fillW@ keeps the shape. 'NanoUI.fontColor' tints the
   -- image, as it does an SVG icon.
   , icFit :: !ContentFit
   -- ^ How the image fills its rect.
   , icAlignX :: !AlignX
-  -- ^ Where the fitted image sits across its rect when it does not fill
-  -- it, and which part of it a crop keeps.
+  -- ^ Horizontal placement when the image does not fill its rect, and which
+  -- side survives cropping.
   , icAlignY :: !AlignY
-  -- ^ The same, up and down. 'AlignBaseline' is 'AlignTop'.
+  -- ^ Vertical counterpart of 'icAlignX'. 'AlignBaseline' acts as 'AlignTop'.
   , icOpacity :: !Float
-  -- ^ From 0, invisible, to 1, opaque.
+  -- ^ 0 (invisible) to 1 (opaque).
   , icRotation :: !Rotation
   , icCrop :: !(Maybe Rect)
-  -- ^ The part of the image to draw, in the image's pixels from its
-  -- top-left corner, kept within the image: the image is drawn as if it
-  -- were only that part, which its size, fit, alignment and rotation are
-  -- of. 'Nothing', the default, draws all of it.
+  -- ^ Sub-rectangle to draw, in image pixels from the top-left, clamped to
+  -- the image. Size, fit, alignment and rotation apply to this part only.
+  -- 'Nothing' (the default) draws the whole image.
   , icScale :: !Float
-  -- ^ How much larger than its fit the image is drawn, about the centre of
-  -- where the fit puts it, and cut to its rect: above 1 zooms in, below 1
-  -- out, as a zoom that animates. It takes no room of its own. 1 by default.
+  -- ^ Zoom about the fitted image's centre, clipped to its rect: above 1
+  -- zooms in, below 1 out. Does not affect layout. Default 1.
   }
 
--- | The default layout, stretched to it as 'NanoUI.image' is, centred,
--- opaque, not turned, not cropped and not zoomed.
+-- | Default layout, 'FitFill' (as 'NanoUI.image'), centred, opaque, with no
+-- rotation, crop or zoom.
 defaultImageConfig :: ImageConfig
 defaultImageConfig =
   ImageConfig
@@ -105,10 +96,9 @@ defaultImageConfig =
     , icScale = 1
     }
 
--- | Where content @w@ by @h@ goes in @box@ under a fit: the whole of it,
--- placed where the fit leaves room, or where it overflows the box ('FitCover',
--- 'FitNone'), by the alignment, as CSS's @object-position@ does. What reaches
--- past the box is for the caller to crop.
+-- | Rect of content @w@ by @h@ fitted into @box@ and aligned like CSS
+-- @object-position@. The result may overflow the box ('FitCover',
+-- 'FitNone'); the caller crops it.
 --
 -- > fitRect FitContain AlignCenter AlignMiddle (40, 20) (Rect 0 0 100 80) == Rect 0 15 100 50
 fitRect :: ContentFit -> AlignX -> AlignY -> (Float, Float) -> Rect -> Rect
@@ -132,8 +122,7 @@ fitRect fit ax ay (w, h) (Rect bx by bw bh) = Rect (bx + (bw - dw) * fx) (by + (
       AlignBottom -> 1
       _ -> 0
 
--- | The room an image of this size takes turned: its bounding box under a
--- solid rotation, else the size itself.
+-- | Bounding size after a solid rotation; floating rotations keep the size.
 turnedSize :: Rotation -> (Float, Float) -> (Float, Float)
 turnedSize (RotateSolid angle) (w, h) =
   let c = abs (cos angle)
@@ -141,12 +130,11 @@ turnedSize (RotateSolid angle) (w, h) =
    in (w * c + h * s, w * s + h * c)
 turnedSize (RotateFloating _) size = size
 
--- | Where an image @iw@ by @ih@ is drawn in @box@, before it turns about
--- the rect's centre: fitted and aligned by its turned bounds under a solid
--- rotation, and as if not turned under a floating one. 'FitFill' under a
--- solid rotation stretches the image so that its turned bounds are the box,
--- except at an odd multiple of an eighth turn, or where the box's shape is
--- out of the turn's reach, where it fits as 'FitContain' does.
+-- | Unrotated draw rect of an @iw@ by @ih@ image in @box@; rotation is then
+-- about its centre. Solid rotations fit by the rotated bounds. 'FitFill'
+-- with a solid rotation stretches so the rotated bounds fill the box, falling
+-- back to 'FitContain' at odd multiples of 45 degrees or when no stretch can
+-- match the box's shape.
 turnedRect :: ContentFit -> AlignX -> AlignY -> Rotation -> (Float, Float) -> Rect -> Rect
 turnedRect fit ax ay rot (iw, ih) box@(Rect _ _ bw bh) = Rect (px + (pw - dw) / 2) (py + (ph - dh) / 2) dw dh
   where
@@ -166,8 +154,8 @@ turnedRect fit ax ay rot (iw, ih) box@(Rect _ _ bw bh) = Rect (px + (pw - dw) / 
     Rect px py pw ph = fitRect fit' ax ay (rw, rh) box
     (dw, dh) = fromMaybe (if rw > 0 && rh > 0 then (iw * pw / rw, ih * ph / rh) else (0, 0)) solidFill
 
--- | The part of an image @iw@ by @ih@ pixels that a crop keeps, within the
--- image and at least a pixel each way: all of it without one.
+-- | Crop rect clamped to an @iw@ by @ih@ image, at least one pixel each way.
+-- The whole image when there is no crop.
 cropRegion :: Maybe Rect -> (Int, Int) -> Rect
 cropRegion crop (iw, ih) = case crop of
   Nothing -> Rect 0 0 w h
@@ -179,10 +167,9 @@ cropRegion crop (iw, ih) = case crop of
     w = fromIntegral iw
     h = fromIntegral ih
 
--- | How an image node draws its image, beside its id: what an
--- 'ImageConfig' says of it, and its tint. Paint draws a node that has one
--- ('lookDraw'), and the frame's damage repaints a node whose look changes
--- where it stands.
+-- | Paint settings for an image node: its 'ImageConfig' fields plus tint.
+-- Paint draws it with 'lookDraw'; damage repaints a node when its look
+-- changes.
 data ImageLook = ImageLook
   { lookFit :: !ContentFit
   , lookAlignX :: !AlignX
@@ -195,9 +182,8 @@ data ImageLook = ImageLook
   }
   deriving (Eq, Show)
 
--- | The look of an image drawn by a configuration in a tint. An opacity or
--- a scale that is not a number, and a turn that is not finite, are taken as
--- none.
+-- | Build a look from a config and tint. NaN opacity or scale and
+-- non-finite rotation fall back to their defaults.
 imageLook :: ImageConfig -> Color -> ImageLook
 imageLook cfg =
   ImageLook
@@ -209,29 +195,26 @@ imageLook cfg =
     (icCrop cfg)
     (if icScale cfg > 0 && finite (icScale cfg) then icScale cfg else 1)
 
--- | An opacity kept within 0 and 1, one that is not a number taken as 1.
+-- | Clamp to [0, 1], NaN to 1.
 unitOpacity :: Float -> Float
 unitOpacity o = if isNaN o then 1 else clamp01 o
 
--- | A colour faded by an opacity from 0 to 1: its alpha scaled by it.
+-- | Scale a colour's alpha by an opacity in [0, 1].
 fadeBy :: Float -> Color -> Color
 fadeBy o c
   | o >= 1 = c
   | otherwise = fadeAlpha c (round (fromIntegral (colorA c) * o))
 
--- | The size an image node with this look takes where its layout leaves an
--- axis unsized, its image @iw@ by @ih@ pixels: the part its crop keeps,
--- turned by a solid rotation.
+-- | Natural size of an image node for unsized axes: the cropped image size,
+-- rotated if the rotation is solid.
 lookSize :: ImageLook -> (Int, Int) -> (Float, Float)
 lookSize look size =
   let Rect _ _ w h = cropRegion (lookCrop look) size in turnedSize (lookRotation look) (w, h)
 
--- | What an image node with this look draws of image @iid@, @iw@ by @ih@
--- pixels, in @box@, its opacity scaled by @fade@ (below 1 for a disabled
--- node): the part its crop keeps, fitted and aligned in the box, scaled
--- about its centre, and turned. An unturned image is cut to the box by its
--- UVs; a turned one reaches past the box, and its caller clips it there.
--- 'Nothing' when nothing of it shows.
+-- | Draw record for image @iid@ (@iw@ by @ih@ pixels) in @box@, with
+-- opacity scaled by @fade@ (below 1 when disabled). An unrotated image is
+-- cut to the box by adjusting its UVs; a rotated one can extend past the
+-- box and the caller must clip it. 'Nothing' when nothing is visible.
 lookDraw :: ImageLook -> (Int, Int) -> ImageId -> Float -> Rect -> Maybe ImageDraw
 lookDraw look size@(iw, ih) iid fade box
   | lookOpacity look * fade <= 0 || colorA (lookTint look) == 0 = Nothing
@@ -239,7 +222,7 @@ lookDraw look size@(iw, ih) iid fade box
   | otherwise = case rectIntersect dest box of
       Just (Rect x y w h)
         | dw > 0 && dh > 0 && w > 0 && h > 0 ->
-            -- The part of the UVs that the part of the rect in the box shows.
+            -- Shrink the UVs to match the visible part of the rect.
             let Rect u v uw vh = uvCrop
              in Just draw {imageRect = Rect x y w h, imageUV = Rect (u + (x - dx) / dw * uw) (v + (y - dy) / dh * vh) (w / dw * uw) (h / dh * vh)}
       _ -> Nothing
@@ -254,36 +237,35 @@ lookDraw look size@(iw, ih) iid fade box
     dest@(Rect dx dy dw dh) = Rect (fx + fw * (1 - k) / 2) (fy + fh * (1 - k) / 2) (fw * k) (fh * k)
     draw = ImageDraw dest iid uvCrop (if turned then angle else 0) (lookTint look) (lookOpacity look * fade)
 
--- | An image for the canvas to draw ('NanoUI.Widgets.Custom.drawImageWith'),
--- built from 'imageDraw' with the fields that differ changed:
+-- | An image for 'NanoUI.Widgets.Custom.drawImageWith'. Start from
+-- 'imageDraw' and override fields:
 --
 -- > drawImageWith (imageDraw r photo) {imageAngle = t, imageOpacity = 0.5}
 data ImageDraw = ImageDraw
   { imageRect :: !Rect
-  -- ^ Where the image goes, before it turns.
+  -- ^ Destination rect, before rotation.
   , imageId :: !ImageId
-  -- ^ The image, registered with the context.
+  -- ^ An image registered with the context.
   , imageUV :: !Rect
-  -- ^ The part of the image drawn over the rect, in UVs, which run from 0
-  -- to 1 across the image: @Rect 0 0 1 1@ for all of it, and
-  -- @Rect 0.5 0 0.5 1@ for its right half.
+  -- ^ Source region in UVs (0 to 1): @Rect 0 0 1 1@ is the whole image,
+  -- @Rect 0.5 0 0.5 1@ its right half.
   , imageAngle :: !Float
-  -- ^ How far it turns about the rect's centre, in radians clockwise on
-  -- screen. 0 snaps it to the pixel grid, as a rect is.
+  -- ^ Clockwise rotation in radians about the rect's centre. At 0 the image
+  -- snaps to the pixel grid like a rect.
   , imageTint :: !Color
-  -- ^ The colour its pixels are multiplied by: white leaves them as they
-  -- are, and a one-colour image drawn in white takes the tint's colour.
+  -- ^ Multiplied into each pixel. White leaves the image unchanged; a
+  -- single-colour white image takes the tint's colour.
   , imageOpacity :: !Float
-  -- ^ From 0, invisible, to 1, the tint's own alpha.
+  -- ^ 0 (invisible) to 1 (the tint's own alpha).
   }
   deriving (Eq, Show)
 
--- | All of image @iid@ over @r@, unturned, untinted and opaque.
+-- | The whole image @iid@ over @r@: unrotated, untinted, opaque.
 imageDraw :: Rect -> ImageId -> ImageDraw
 imageDraw r iid = ImageDraw r iid (Rect 0 0 1 1) 0 (colorRGBA 255 255 255 255) 1
 
--- | The draw op for an image: its opacity folded into its tint's alpha, and
--- a turn that is not finite taken as none. 'Nothing' for an invisible one.
+-- | Draw op with opacity folded into the tint alpha and a non-finite angle
+-- treated as 0. 'Nothing' when invisible.
 imageDrawOp :: ImageDraw -> Maybe DrawOp
 imageDrawOp (ImageDraw r (ImageId tid) (Rect u v uw vh) angle tint opacity)
   | colorA tint' == 0 = Nothing

@@ -1,15 +1,14 @@
 {-# LANGUAGE StrictData #-}
 
--- | Visibility sensors: whether a widget is on screen, and the frame it
--- scrolls into view or out of it.
+-- | Visibility sensors: whether a widget is on screen, and when it scrolls
+-- into or out of view.
 --
--- A sensor is a watch the view registers each build ('sensorConfigured',
--- 'useVisibility'), keyed by the sensor's own widget id and naming the widget
--- it watches. The frame measures every watched widget once its layout is
--- final ('updateSensors') and keeps the result for the next build to read, so
--- a view sees the visibility of the last layout, as 'NanoUI.Internal.Widgets.Node.respRect'
--- sees its rect. A change of visibility asks for a follow-up frame, where the
--- view reads it; a sensor that is not built is forgotten.
+-- The view registers a watch each build ('sensorConfigured', 'useVisibility'),
+-- keyed by the sensor's widget id. After layout, 'updateSensors' measures each
+-- target and stores the result for the next build, so like
+-- 'NanoUI.Internal.Widgets.Node.respRect' the view sees last frame's layout.
+-- A visibility change requests a follow-up frame. Sensors not built in a
+-- pass are dropped.
 module NanoUI.Internal.Widgets.Sensor
   ( Visibility (..)
   , VisibilityEvent (..)
@@ -44,27 +43,23 @@ import NanoUI.Internal.Widgets.Node (container, tagContainer)
 -- | Whether a widget was on screen when the last frame was laid out.
 data Visibility = Visibility
   { visVisible :: !Bool
-    -- ^ The widget overlapped the window and the inside of every scroller,
-    -- panel and floating panel around it, each grown by the sensor's
-    -- anticipate margin: it was painted, or would have been with that much
-    -- more room; and it had for the sensor's delay. A widget of zero width or
-    -- height counts as the line or point it sits at.
+    -- ^ The widget overlapped the window and every enclosing scroller and
+    -- panel, each grown by 'sensorAnticipate', for at least 'sensorDelay'.
+    -- A zero-width or zero-height widget counts as a line or point.
   , visEvent :: !(Maybe VisibilityEvent)
-    -- ^ How 'visVisible' changed at the last layout. Reported once: to the
+    -- ^ How 'visVisible' changed at the last layout. Reported only to the
     -- first view pass that reads the sensor after the change.
   , visRect :: !Rect
-    -- ^ The part of the widget on screen at the last layout, in logical
-    -- window coordinates, without the anticipate margin; empty when no part
-    -- is. Like 'NanoUI.Internal.Widgets.Node.respRect' it is last frame's,
-    -- and moving alone asks for no frame.
+    -- ^ The on-screen part of the widget, in logical window coordinates,
+    -- ignoring the anticipate margin; empty when off screen. Movement alone
+    -- does not request a frame.
   , visBounds :: !Rect
-    -- ^ The whole widget at the last layout, in logical window coordinates,
-    -- on screen or not; empty when it had no node. 'visRect' is its part on
-    -- screen.
+    -- ^ The whole widget in logical window coordinates, on screen or not;
+    -- empty when it had no node.
   }
   deriving (Eq, Show)
 
--- | A widget coming into view or going out of it.
+-- | A widget entering or leaving view.
 data VisibilityEvent
   = BecameVisible
   | BecameHidden
@@ -78,26 +73,24 @@ becameVisible v = visEvent v == Just BecameVisible
 becameHidden :: Visibility -> Bool
 becameHidden v = visEvent v == Just BecameHidden
 
--- | When a sensor counts its widget as visible, and how a
--- 'sensorConfigured' sensor lays out its body.
+-- | When a sensor counts its widget as visible, and how 'sensorConfigured'
+-- lays out its body.
 data SensorConfig = SensorConfig
   { sensorAnticipate :: Float
-    -- ^ Logical pixels the window, and every scroller, panel and floating
-    -- panel around the widget, grow by for it: a sensor with a margin of 200
-    -- reports its widget visible while it is still up to 200 pixels outside
-    -- the viewport, in time to start loading it. Negative margins count as 0.
+    -- ^ Logical pixels to grow the window and every enclosing clip by. With
+    -- 200, the widget counts as visible up to 200 pixels before it scrolls
+    -- in, in time to start loading it. Negative values count as 0.
   , sensorDelay :: Double
     -- ^ Seconds the widget must stay in view before it counts as visible,
-    -- so a list flung past does not load every row it shows for a frame. 0
-    -- counts it at once. Going out of view counts at once, and restarts the
-    -- wait. The sensor wakes the loop when the wait is over, as a tooltip
-    -- does, so waiting draws nothing.
+    -- so a fast fling does not load every row it passes. Leaving view is
+    -- immediate and restarts the wait. Waiting schedules a wake-up rather
+    -- than drawing frames.
   , sensorLayout :: Layout -> Layout
-    -- ^ Modifies a 'sensorConfigured' sensor's container: a column without
-    -- padding. 'useVisibility' has no container and ignores it.
+    -- ^ Modifies the 'sensorConfigured' container, a column without padding.
+    -- Ignored by 'useVisibility'.
   }
 
--- | No margin, no delay, and the body in a column without padding.
+-- | No margin, no delay, unpadded column.
 defaultSensorConfig :: SensorConfig
 defaultSensorConfig = SensorConfig {sensorAnticipate = 0, sensorDelay = 0, sensorLayout = id}
 
@@ -115,14 +108,12 @@ sensor = sensorConfigured defaultSensorConfig
 sensorWith :: Ui :> es => (Layout -> Layout) -> Eff es a -> Eff es (Visibility, a)
 sensorWith f = sensorConfigured defaultSensorConfig {sensorLayout = f}
 
--- | 'sensor' with an anticipate margin and a delay as well as layout. The
--- container takes one widget id, like a
--- 'NanoUI.Internal.Widgets.Layout.column', and its body runs in an id scope
--- of its own.
+-- | 'sensor' with a full 'SensorConfig'. Like
+-- 'NanoUI.Internal.Widgets.Layout.column', the container takes one widget id
+-- and runs its body in its own id scope.
 sensorConfigured :: Ui :> es => SensorConfig -> Eff es a -> Eff es (Visibility, a)
 sensorConfigured cfg body = do
-  -- The id the container takes as it opens its scope, which no other widget
-  -- has: the sensor is keyed by it, and the container carries it.
+  -- The container's own id, unique to it; the sensor is keyed by it.
   wid <- currentId
   ctx <- askContext
   base <- askDefaultLayout
@@ -131,11 +122,9 @@ sensorConfigured cfg body = do
   vis <- uiIO (watchSensor ctx wid (Watch wid cfg))
   pure (vis, a)
 
--- | The 'Visibility' of the widget with id @target@, such as @respId resp@ of
--- a widget built before it, with the anticipate margin and delay of the
--- config ('sensorAnticipate', 'sensorDelay'). A hook: it takes the next
--- widget id, so call it on every frame, like the other hooks. A target with
--- no node this frame is hidden.
+-- | The 'Visibility' of the widget @target@, such as @respId resp@ of an
+-- earlier widget. This is a hook: it takes the next widget id, so call it
+-- every frame. A target with no node is hidden.
 --
 -- > resp <- image' (fixedWH 96 96) thumb
 -- > vis <- useVisibility defaultSensorConfig {sensorAnticipate = 200} (respId resp)
@@ -144,28 +133,25 @@ useVisibility cfg target = do
   (wid, ctx) <- freshWidget
   uiIO (watchSensor ctx wid (Watch target cfg))
 
--- | Sensors on a context: those built this pass, and what each one measured
--- at the last layout, both by the sensor's own key. Kept as a host value
--- ('hostOrInit'), which a context without sensors never allocates.
+-- | Per-context sensor state, stored as a host value ('hostOrInit') so a
+-- context without sensors never allocates it.
 newtype Sensors = Sensors (IORef SensorState)
 
--- | The sensors built this pass, and what each one saw at the last layout.
+-- | Watches built this pass and results from the last layout, by sensor key.
 data SensorState = SensorState (IntMap Watch) (IntMap Seen)
 
--- | The widget a sensor watches, and when it counts it as visible.
 data Watch = Watch WidgetId SensorConfig
 
--- | What a sensor saw at the last layout, and when its widget came into view
--- while it waits out its 'sensorDelay': the monotonic time, or 0.
+-- | Last result, plus the monotonic time the widget entered view while the
+-- 'sensorDelay' runs (0 otherwise).
 data Seen = Seen Visibility Double
 
--- | What a sensor new this pass has seen: a hidden widget without a node.
+-- | Initial state for a new sensor: hidden, no node.
 unseen :: Seen
 unseen = Seen (Visibility False Nothing (Rect 0 0 0 0) (Rect 0 0 0 0)) 0
 
--- | Register sensor @wid@ with its watch for this pass, and return what it
--- saw at the last layout. Reading an event consumes it, so a second view pass
--- in the same frame sees the state without the event.
+-- | Register a watch for this pass and return the last result. Reading
+-- consumes the event, so a second view pass in the frame sees none.
 watchSensor :: Context -> WidgetId -> Watch -> IO Visibility
 watchSensor ctx wid watch = do
   Sensors ref <- hostOrInit ctx (Sensors <$> newIORef (SensorState IM.empty IM.empty))
@@ -176,17 +162,15 @@ watchSensor ctx wid watch = do
   writeIORef ref $! SensorState (IM.insert k watch watched) seen'
   pure vis
 
--- | Forget the sensors the last view pass built: the view is about to run
--- again and build its own.
+-- | Clear the last pass's watches before the view reruns.
 beginSensors :: Context -> IO ()
 beginSensors ctx =
   askHostIO ctx >>= mapM_ (\(Sensors ref) -> modifyIORef' ref (\(SensorState _ seen) -> SensorState IM.empty seen))
 
--- | Measure every sensor the view built against the final layout of a
--- window of @size@. A sensor not built is dropped with what it saw. A change
--- of visibility marks the context dirty, so a follow-up frame shows it to the
--- view; whatever the view does about it can change paint state no diff
--- describes, so the follow-up repaints as a model change does.
+-- | Measure every watch against the final layout. Sensors not built this
+-- pass are dropped. A visibility change marks the context dirty: the view's
+-- reaction may change paint state no diff describes, so the follow-up frame
+-- repaints like a model change.
 updateSensors :: Context -> Size -> IO ()
 updateSensors ctx size =
   askHostIO ctx >>= mapM_ (\(Sensors ref) -> do
@@ -196,10 +180,8 @@ updateSensors ctx size =
       writeIORef ref $! SensorState watched seen'
       when (any (\(Seen v _) -> isJust (visEvent v)) seen') (markDirty ctx))
 
--- | What sensor @watch@ sees at this layout, given what it saw before. A
--- widget in view counts as visible once it has been in view for the
--- sensor's delay; until then the sensor asks for a frame when it will have
--- been, as 'NanoUI.Internal.Widgets.Popup.tooltipTimer' does.
+-- | Measure one watch. While 'sensorDelay' runs, request a wake-up for when
+-- it ends, as 'NanoUI.Internal.Widgets.Popup.tooltipTimer' does.
 measureSensor :: Context -> Size -> Seen -> Watch -> IO Seen
 measureSensor ctx@Context {ctxNodeArena = na} size (Seen before since0) (Watch target cfg) = do
   mIdx <- lookupNodeByWidgetId na target
@@ -211,8 +193,7 @@ measureSensor ctx@Context {ctxNodeArena = na} size (Seen before since0) (Watch t
       pure (maybe False (overlaps rect) grown, rect, exact >>= rectIntersect rect)
   let was = visVisible before
       delay = sensorDelay cfg
-  -- The time the widget came into view, kept while it stays in view and has
-  -- not counted as visible yet.
+  -- @since@ is kept only while the widget is in view but not yet visible.
   (shown, since) <-
     if not inView || was || delay <= 0
       then pure (inView, 0)
@@ -229,14 +210,11 @@ measureSensor ctx@Context {ctxNodeArena = na} size (Seen before since0) (Watch t
         | otherwise = Just BecameHidden
   pure (Seen (Visibility shown event (fromMaybe (Rect 0 0 0 0) onScreen) bounds) since)
 
--- | The part of a window of @size@ node @idx@ is painted within, and the part
--- it would be with every clip grown by @margin@: 'Nothing' when paint does not
--- reach it. Paint clips a node to the viewport of every scroller around it,
--- the inside of every panel and the rect of every widget, and skips a node
--- outside its clip, or empty, with everything inside it, except that it
--- still walks a plain container with a pinned node below it. A floating panel
--- paints over the page clipped to itself alone, so what it is declared in
--- does not matter.
+-- | The clip node @idx@ is painted within, exactly and with every clip grown
+-- by @margin@; 'Nothing' when paint never reaches it. Mirrors paint: clip to
+-- each enclosing scroller viewport, panel interior and widget rect, and skip
+-- subtrees that are empty or outside their clip, except plain containers with
+-- a pinned node below. Floating panels clip only to themselves.
 paintClips :: Context -> Size -> Float -> NodeIdx -> IO (Maybe Rect, Maybe Rect)
 paintClips ctx@Context {ctxNodeArena = na} (Size ww wh) margin idx = do
   floating <- isFloatingNode <$> getNodeType na idx
@@ -244,8 +222,7 @@ paintClips ctx@Context {ctxNodeArena = na} (Size ww wh) margin idx = do
   let window = Rect 0 0 ww wh
   foldM enter (Just window, Just (rectInflate margin window)) chain
   where
-    -- The node's ancestors up to the root or the first floating panel,
-    -- outermost first.
+    -- Ancestors up to the root or first floating panel, outermost first.
     outward acc i
       | i < 0 = pure acc
       | otherwise = do
@@ -256,9 +233,8 @@ paintClips ctx@Context {ctxNodeArena = na} (Size ww wh) margin idx = do
       nt <- getNodeType na i
       rect <- getNodeRect na i
       cut <- childPaintClip ctx i nt rect
-      -- Paint still walks a plain container it would skip when a pinned node
-      -- is below it: the container clips nothing, so the pinned node can show
-      -- outside it, even when it has no size or is off screen.
+      -- A plain container clips nothing, so a pinned descendant can show
+      -- even when the container is empty or off screen.
       walked <- if nt == NodeContainer then hasPinnedBelow na i else pure False
       let within grow clip = do
             c <- clip
@@ -266,8 +242,7 @@ paintClips ctx@Context {ctxNodeArena = na} (Size ww wh) margin idx = do
             maybe (Just c) (rectIntersect c . grow) cut
       pure (within id exact, within (rectInflate margin) grown)
 
--- | Whether @r@ overlaps @clip@, with an empty extent of @r@ counting as the
--- line or point it sits at.
+-- | Whether @r@ overlaps @clip@. An empty extent counts as a line or point.
 overlaps :: Rect -> Rect -> Bool
 overlaps (Rect x y w h) (Rect cx cy cw ch) = along x w cx cw && along y h cy ch
   where

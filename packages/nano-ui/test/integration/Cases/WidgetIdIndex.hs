@@ -18,7 +18,7 @@ tests =
 inp :: Input
 inp = withInputOff 320 300
 
--- | A label that goes away after a table repaints where it was and leaves the
+-- | A label removed after a table repaints its old area and drops out of the
 -- previous rects, with or without a frozen column (two panes under one id).
 runSharedKeyVanishDamageTest :: Int -> Context -> IORef Int -> IO ()
 runSharedKeyVanishDamageTest freeze ctx failed = do
@@ -31,7 +31,7 @@ runSharedKeyVanishDamageTest freeze ctx failed = do
     assert failed . (`damageCovers` old) =<< takeDamage ctx
     assertEq failed Nothing =<< getPrevRect ctx (respId resp)
 
--- | With such a table up, a frame where nothing changed keeps last frame's rect map.
+-- | With such a table shown, an unchanged frame reuses last frame's rect map.
 runSharedKeySteadyPrevRectsTest :: Context -> IORef Int -> IO ()
 runSharedKeySteadyPrevRectsTest ctx failed = do
   let frameRects = runFrame ctx inp (tableAndLabel 1 True) >> getsDamage ctx (pfRects . dsPrev)
@@ -39,8 +39,8 @@ runSharedKeySteadyPrevRectsTest ctx failed = do
   !after <- frameRects
   assert failed (not (null before) && ptrEq before after)
 
--- | Every widget resolves to its own node, past the index's first size, and
--- one the next frame leaves out to nothing.
+-- | Every widget resolves to its own node, beyond the index's initial size,
+-- and a widget left out next frame resolves to nothing.
 runWidgetIdIndexLookupsTest :: Context -> IORef Int -> IO ()
 runWidgetIdIndexLookupsTest ctx failed = do
   let na = ctxNodeArena ctx
@@ -53,7 +53,7 @@ runWidgetIdIndexLookupsTest ctx failed = do
   assert failed . and =<< mapM resolvesToItself (take 10 resps)
   assert failed . all null =<< mapM (lookupNodeByWidgetId na . respId) (drop 10 resps)
 
--- | A wrapping frame epoch does not bring back entries from its last lap.
+-- | A wrapping frame epoch does not revive entries from the previous lap.
 runWidgetIdIndexEpochWrapTest :: Context -> IORef Int -> IO ()
 runWidgetIdIndexEpochWrapTest ctx failed = do
   let na = ctxNodeArena ctx

@@ -112,10 +112,10 @@ card = panelWith (minW 300 . padXY 12 10 . gap 8 . fillW)
 toolbar :: Ui :> es => Eff es a -> Eff es a
 toolbar = rowWith (tight . gap 8 . alignMid . fillW)
 
--- | An image registered with the host, stretched over the rect the layout
--- modifier gives it; an axis the modifier leaves unsized takes 32 pixels.
--- 'NanoUI.imageConfigured' takes the image's own size and fits, aligns,
--- crops, fades and turns it instead.
+-- | An image registered with the host, stretched to the rect the layout
+-- modifier gives it; an unsized axis is 32 pixels. 'NanoUI.imageConfigured'
+-- instead uses the image's own size and can fit, align, crop, fade and
+-- rotate it.
 image :: Ui :> es => (Layout -> Layout) -> ImageId -> Eff es ()
 image f iid = void (image' f iid)
 
@@ -161,9 +161,9 @@ svgIconWith f doc = void (svgIconWith' f doc)
 svgIconWith' :: Ui :> es => (Layout -> Layout) -> Svg -> Eff es Response
 svgIconWith' f = svgIconConfigured' defaultImageConfig {icLayout = f}
 
--- | An SVG document drawn as 'NanoUI.imageConfigured' draws an image,
--- faded, turned, fitted and aligned in its rect, which is as 'svgIconWith'
--- sizes it: a fixed width and height from 'icLayout', or else the
+-- | An SVG document drawn like 'NanoUI.imageConfigured' draws an image:
+-- faded, rotated, fitted and aligned in its rect. The rect is sized as in
+-- 'svgIconWith': a fixed width and height from 'icLayout', or else the
 -- document's own size.
 --
 -- > svgIconConfigured defaultImageConfig {icLayout = fixedWH 24 24, icRotation = RotateFloating turn} spinnerIcon

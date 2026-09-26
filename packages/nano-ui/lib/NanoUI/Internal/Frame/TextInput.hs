@@ -1,7 +1,7 @@
 -- | Single-line text fields: field geometry, horizontal scroll, caret and
 -- selection painting, and mouse selection. Also holds the line painting, word
--- bounds and mouse selection the text area shares, and an input method's
--- composition, which both show.
+-- bounds and mouse selection the text area shares, and input-method
+-- composition for both.
 module NanoUI.Internal.Frame.TextInput
   ( textInputFieldRect
   , nodeTextFieldGeom
@@ -138,13 +138,11 @@ drawLineCaret da fm line col x y lineH fg = do
   pw <- caretXIO fm line col
   pushRect da (Rect (x + pw) (y + 1) 1 (max 4 (lineH - 2))) fg
 
--- | An input method's composition over the line it is shown in
--- ('preeditLine'), whose pen starts at @x@, on a row at @y@ of height
--- @lineH@: the composition underlined as text decoration is, and the input
--- method's caret when it selects nothing. What it selects is highlighted
--- behind the text instead ('drawLineSelection'). The underline follows the
--- text's direction runs, so a composition in right-to-left text is
--- underlined where it is drawn.
+-- | Underline the composition in 'preeditLine' (pen at @x@, row at @y@ of
+-- height @lineH@) and draw the input method's caret when it has no
+-- selection; a selection is drawn separately ('drawLineSelection'). The
+-- underline follows bidi runs, so right-to-left compositions are underlined
+-- where they are drawn.
 drawLinePreedit :: DrawArena -> FontMetrics -> Preedit -> Float -> Float -> Float -> Color -> IO ()
 drawLinePreedit da fm p x y lineH fg = do
   let line = preeditLine p
@@ -176,8 +174,7 @@ syncTextInputScroll ctx idx x y w h = do
           then pure 0
           else do
             fm <- nodeFontMetrics ctx idx
-            -- A composition shows in the field's text, and it is the input
-            -- method's caret that stays in view.
+            -- Keep the input method's caret in view, composition included.
             (value, cursor, _, _) <- fieldEditLine ctx idx
             caretRelX <- caretXIO fm value cursor
             totalTextW <- lineWidthIO fm value
@@ -192,8 +189,7 @@ syncTextInputScroll ctx idx x y w h = do
 
 -- | What a focused single-line field paints its selection and caret from: the
 -- displayed value, cursor and anchor, the node font, the top of its text row,
--- the x its text starts at with the scroll applied, and the composition an
--- input method shows in it.
+-- the x its text starts at with the scroll applied, and any composition.
 data FieldEdit = FieldEdit !Text !Int !Int !FontMetrics !Float !Float !(Maybe Preedit)
 
 -- | Editing state of field @idx@, whose box is @box@ ('nodeTextFieldGeom')
@@ -209,24 +205,22 @@ readFieldEdit ctx idx (Rect _ boxY _ boxH) penX = do
       fm <- nodeFontMetrics ctx idx
       pure $! Just (FieldEdit value cursor anchor fm (centeredTextY fm boxY boxH (fmLineHeight fm)) penX preedit)
 
--- | The line single-line field @idx@ shows, its displayed value
--- ('textInputValue'), with its cursor and anchor in it. While an input
--- method composes in the field ('fieldComposition'), the composition takes
--- the place of the selection, which is what committing it replaces, and the
--- cursor and anchor are the input method's caret and the end of its
--- selection.
+-- | The line field @idx@ displays ('textInputValue') with its cursor and
+-- anchor. During composition ('fieldComposition') the composition replaces
+-- the selection (which a commit will replace), and cursor and anchor are the
+-- input method's caret and selection end.
 fieldEditLine :: Context -> NodeIdx -> IO (Text, Int, Int, Maybe Preedit)
 fieldEditLine ctx idx = do
   value <- textInputValue ctx idx
   wid <- getWidgetId (ctxNodeArena ctx) idx
   store <- getStore ctx
-  -- Lazy: a caller after the text alone reads no selection.
+  -- Lazy so callers that only need the text skip the selection lookup.
   let (anchor, cursor) = fieldSelection store (intKey wid) value
   fieldComposition ctx wid >>= \case
     Nothing -> pure (value, cursor, anchor, Nothing)
     Just c -> do
       si <- getStyleIdx (ctxNodeArena ctx) idx
-      -- A password field masks what is composed as it masks its value.
+      -- Password fields mask the composition too.
       let shown
             | hasFlag textInputFlagPassword si = c {compositionText = T.replicate (T.length (compositionText c)) "*"}
             | otherwise = c
@@ -239,8 +233,8 @@ drawTextInputSelection da ctx idx (FieldEdit value cursor anchor fm rowY textX _
     theme <- nodeTheme ctx idx
     drawLineSelection da fm value (min anchor cursor) (max anchor cursor) textX rowY (fmLineHeight fm) (themeSelection theme)
 
--- | The field's caret, or while an input method composes in it, the
--- composition's underline and the input method's caret ('drawLinePreedit').
+-- | The field's caret, or the composition underline and input-method caret
+-- while composing ('drawLinePreedit').
 drawTextInputCaret :: DrawArena -> FieldEdit -> Color -> IO ()
 drawTextInputCaret da (FieldEdit value cursor _ fm rowY textX preedit) fg =
   case preedit of
@@ -325,8 +319,7 @@ textInputMouse ctx inp onControl wid idx = do
   selectWithMouse ctx inp wid box (if onControl then pure True else clearPress) $ do
     fm <- nodeFontMetrics ctx idx
     value <- textInputValue ctx idx
-    -- The pointer is over the text shown, composition and all, and lands in
-    -- the value around it.
+    -- Hit-test the displayed text, then map back to a position in the value.
     (shown, _, _, preedit) <- fieldEditLine ctx idx
     prepared <- prepareFontMetrics fm shown
     let atX = textIndexAtX prepared shown (max 0 (mouseX - (clipX - scrollX)))
@@ -334,22 +327,21 @@ textInputMouse ctx inp onControl wid idx = do
     pure $ FieldDoc pos (TB.fromLines (Seq.singleton value)) $ \(TB.Cursor _ anchor) (TB.Cursor _ cursor) ->
       writeSlots ctx (fieldSelectionWrite key value anchor cursor)
 
--- | Settle which widget the frame's composition ('inputComposition') shows
--- in, before the view runs: the one that took text from the input method in
--- the view before ('requestInputMethod'), a text field while it is focused,
--- enabled and editable, and had the focus when the composition last
--- changed, while it keeps the focus. A composition the focus left shows in
--- no widget until the input method changes it, so it never turns up in the
--- next one. Repaints the widget it leaves and the one it reaches.
+-- | Before the view runs, decide which widget shows the frame's composition
+-- ('inputComposition'). The owner must be focused and must have requested
+-- the input method last view ('requestInputMethod'). A composition keeps its
+-- owner while unchanged; if focus leaves, it shows nowhere until the input
+-- method updates it, so it never jumps to the next widget. Damages the old
+-- and new owners.
 --
--- Returns the input the frame runs on, and whether the input method has the
--- focused widget's keys ('FocusComposing'). While the composition shows, they
--- are the input method's: the frame drops them, pressed, released and held,
--- so none edits the field or fires a shortcut. Its commit still arrives as
--- typed text. In the frame it commits, the keys it passes on, such as an
--- arrow after a Korean syllable, reach the field but fire no shortcut.
+-- Returns the frame's input and whether the input method owns the focused
+-- widget's keys ('FocusComposing'). While a composition shows, all key
+-- state is dropped so nothing edits the field or fires a shortcut; the
+-- commit still arrives as typed text. On the commit frame, keys the input
+-- method passes on (an arrow after a Korean syllable) reach the field but
+-- fire no shortcut.
 --
--- Inlined into the one frame step that runs it, which then builds no pair.
+-- Inlined into its single caller so the result pair is never allocated.
 {-# INLINE claimComposition #-}
 claimComposition :: Context -> Input -> IO (Input, Bool)
 claimComposition ctx !inp = do
@@ -357,8 +349,7 @@ claimComposition ctx !inp = do
   held <- getsInteraction ctx isComposition
   taker <- maybe (WidgetId 0) imrWidget <$> readIORef (ctxInputMethod ctx)
   let new = mfilter (not . T.null . compositionText) (inputComposition inp)
-      -- An unchanged composition stays with its widget, a new one goes to
-      -- the focused widget.
+      -- An unchanged composition keeps its owner; a new one goes to focus.
       claimant = case held of
         Just (old, o) | Just old == new -> if o == focus then o else WidgetId 0
         _ -> focus
@@ -375,13 +366,11 @@ claimComposition ctx !inp = do
       then (inp {inputKeys = mempty, inputKeysNew = mempty, inputKeysReleased = mempty, inputKeysHeld = mempty}, True)
       else (inp, committing)
 
--- | Keep the input method's request with the keyboard at the end of a frame
--- whose focus moved: off the widget that asked ('requestInputMethod'), or,
--- when none asked, off the widget that had it as the view began
--- (@before@). The request then passes to the text field focus moved to,
--- which asks for itself from its next view on, or goes. A backend takes
--- text for the field from this frame on, and the input method's next
--- composition is the field's.
+-- | At the end of a frame, move the input-method request to follow focus if
+-- focus left the requesting widget ('requestInputMethod'), or left @before@
+-- when nobody asked. The newly focused text field gets a request (or none
+-- if it is not a field) until it asks for itself next view, so the backend
+-- routes text and the next composition to it from this frame on.
 settleInputMethod :: Context -> WidgetId -> IO ()
 settleInputMethod ctx@Context {ctxNodeArena = na} before = do
   focus <- readIORef (ctxFocusId ctx)
@@ -401,24 +390,22 @@ settleInputMethod ctx@Context {ctxNodeArena = na} before = do
           _ -> pure Nothing
     writeIORef (ctxInputMethod ctx) field
 
--- | A line of text with a composition in place of some of its characters:
--- what a field shows while an input method composes in it. Positions count
--- characters of 'preeditLine'.
+-- | A line with a composition spliced in, as shown while composing.
+-- Positions are character indices into 'preeditLine'.
 data Preedit = Preedit
   { preeditLine :: !Text
   , preeditStart :: !Int
   , preeditEnd :: !Int
-  -- ^ Where the composition starts and ends.
+  -- ^ Composition span.
   , preeditCaret :: !Int
   , preeditSelectionEnd :: !Int
-  -- ^ The input method's caret, or its selection from the caret to here.
+  -- ^ Input-method caret; the selection runs from the caret to here.
   , preeditReplaced :: !Int
-  -- ^ How many characters of the original line the composition stands in for.
+  -- ^ Number of original characters the composition replaces.
   }
 
--- | @line@ with composition @c@ in place of its characters @lo@ to @hi@:
--- the selection a commit replaces, or the caret with none. The positions are
--- clamped into the line.
+-- | Splice a composition into @line@ over characters @lo@ to @hi@ (the
+-- selection, or an empty span at the caret). Positions are clamped.
 splicePreedit :: Composition -> Text -> Int -> Int -> Preedit
 splicePreedit (Composition txt cursor sel) line lo0 hi0 =
   let n = T.length line
@@ -435,8 +422,8 @@ splicePreedit (Composition txt cursor sel) line lo0 hi0 =
         , preeditReplaced = hi - lo
         }
 
--- | The position in the original line of position @i@ in the shown one. A
--- position inside the composition is where the composition starts.
+-- | Map a position in the displayed line back to the original line.
+-- Positions inside the composition map to its start.
 preeditSourceIndex :: Preedit -> Int -> Int
 preeditSourceIndex p i
   | i <= preeditStart p = i

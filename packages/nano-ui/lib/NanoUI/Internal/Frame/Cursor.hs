@@ -35,7 +35,7 @@ uiCursorKind :: Context -> Input -> IO UiCursorKind
 uiCursorKind ctx inp =
   -- The first query with an opinion wins; later ones do not run. The active
   -- widget, then the hot one, has an opinion unless it asks for the default.
-  -- A 'withCursorShape' scope only fills in where nothing had one.
+  -- 'withCursorShape' scopes apply only when nothing else has an opinion.
   fmap (fromMaybe UiCursorDefault) . runMaybeT . asum . map MaybeT $
     [ textEditMenuCursorKind ctx inp
     , selectDropdownCursorKind ctx inp
@@ -107,8 +107,7 @@ numericStepperHit ctx idx mouse = do
 
 -- | The cursor widget @wid@ asks for with the pointer at @mouse@: the default
 -- unless the pointer is on the visible part of its node, and a custom
--- widget's own choice for its rect and the pointer, which it makes too while
--- a drag of it goes on off it.
+-- widget's own choice, which also applies while it is dragged off its node.
 cursorKindAt :: Context -> WidgetId -> V2 -> Input -> IO UiCursorKind
 cursorKindAt ctx wid mouse inp
   | hashWidgetId wid == 0 = pure UiCursorDefault
@@ -169,8 +168,8 @@ cursorZoneKind ctx inp = do
 
 -- | The shape of the innermost
 -- 'NanoUI.Internal.Widgets.Cursor.withCursorShape' scope ('ctxCursorRegions')
--- that declared the node on top at the pointer ('nodeOnTopAt'), among the
--- nodes of the floating panel the pointer is confined to when there is one.
+-- containing the topmost node under the pointer ('nodeOnTopAt'), searching
+-- only the floating panel the pointer is confined to, if any.
 cursorRegionKind :: Context -> Input -> IO (Maybe UiCursorKind)
 cursorRegionKind ctx inp =
   readIORef (ctxCursorRegions ctx) >>= \case
@@ -179,19 +178,16 @@ cursorRegionKind ctx inp =
       let mouse = inputMousePos inp
       top <- overlayHitRoot ctx mouse
       mIdx <- nodeOnTopAt ctx top mouse
-      -- A scope comes before the scopes inside it, so the last one holding
-      -- the node is the innermost.
+      -- Outer scopes are listed first, so the last match is innermost.
       pure $ mIdx >>= \idx ->
         foldl' (\found (from, to, kind) -> if from <= idx && idx < to then Just kind else found) Nothing regions
 
--- | The node paint draws last among those whose visible part holds @mouse@:
--- in the floating panel @top@ when the pointer is confined to one, else on
--- the page, whose top-level nodes count in the order they were declared.
--- Paint draws a node's children over the node, in 'forChildrenInPaintOrder_'
--- (a layered container's later children and every pinned child over the rest), and each
--- floating panel as a layer of its own, over the page: windows, then modals,
--- then popups. A node other than a plain container clips its children to
--- itself, so where it misses the pointer none of them is looked at.
+-- | The last-painted node whose visible part contains @mouse@, searching the
+-- floating panel @top@ if the pointer is confined to one, else the page.
+-- Mirrors paint order: children over parents via 'forChildrenInPaintOrder_'
+-- (later layered children and pinned children on top), and floating panels
+-- as separate layers over the page (windows, then modals, then popups).
+-- Non-container nodes clip their children, so a miss skips the subtree.
 nodeOnTopAt :: Context -> Maybe NodeIdx -> V2 -> IO (Maybe NodeIdx)
 nodeOnTopAt ctx@Context {ctxNodeArena = na} top mouse = do
   found <- newIORef Nothing
@@ -201,17 +197,15 @@ nodeOnTopAt ctx@Context {ctxNodeArena = na} top mouse = do
         nt <- getNodeType na i
         when (hit || nt == NodeContainer) $
           forChildrenInPaintOrder_ na i visitLayer
-      -- A floating panel is a layer of its own, not part of the one around it.
+      -- Floating panels are separate layers, not part of their parent's.
       visitLayer i = do
         floating <- isFloatingNode <$> getNodeType na i
         unless floating (visit i)
   case top of
     Just panel -> do
       visit panel
-      -- The panels declared inside it, such as a menu opened in a modal, are
-      -- drawn over it, in the order the frame paints panels. Only a modal
-      -- confines the pointer while another panel is under it, so most frames
-      -- find none.
+      -- Panels declared inside it (a menu in a modal) paint over it in panel
+      -- order. Only modals confine the pointer, so this is usually empty.
       forM_ [NodeWindow, NodeModal, NodePopup] $ \nt ->
         forFloatingNodes_ na nt $ \i ->
           when (i > panel) $ whenM (nodeInSubtree ctx i panel) (visit i)

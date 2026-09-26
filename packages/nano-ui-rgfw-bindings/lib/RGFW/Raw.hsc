@@ -237,8 +237,8 @@ c_rgfw_event_key_mod = #{peek RGFW_event, key.mod}
 c_rgfw_event_key_repeat :: Ptr RGFW_event -> IO CUChar
 c_rgfw_event_key_repeat p = fromIntegral <$> (#{peek RGFW_event, key.repeat} p :: IO #{type RGFW_bool})
 
--- | The key a physical key code types in the current keyboard layout, as an
--- RGFW key code; 'RGFW_keyNULL' (0) when it has none. Needs an open window.
+-- | Map a physical key code to the RGFW key code it produces in the current
+-- layout, or 0 (@RGFW_keyNULL@) if none. Needs an open window.
 foreign import ccall unsafe "RGFW_physicalToMappedKey"
   c_RGFW_physicalToMappedKey :: CUChar -> IO CUChar
 
@@ -344,9 +344,8 @@ rgfw_keyRight     = #{const RGFW_keyRight}
 rgfw_keyEnd       = #{const RGFW_keyEnd}
 rgfw_keyHome      = #{const RGFW_keyHome}
 
--- | Further named key codes carried by key events. The function keys
--- 'rgfw_keyF1' to 'rgfw_keyF24' are consecutive, as are the keypad digits
--- 'rgfw_keyPad1' to 'rgfw_keyPad9'.
+-- | More named key codes. 'rgfw_keyF1' to 'rgfw_keyF24' are consecutive, as
+-- are 'rgfw_keyPad1' to 'rgfw_keyPad9'.
 rgfw_keySpace, rgfw_keyInsert, rgfw_keyPageUp, rgfw_keyPageDown, rgfw_keyMenu, rgfw_keyF1, rgfw_keyF24 :: Word32
 rgfw_keyCapsLock, rgfw_keyNumLock, rgfw_keyScrollLock, rgfw_keyPrintScreen, rgfw_keyPause :: Word32
 rgfw_keyPad0, rgfw_keyPad1, rgfw_keyPad2, rgfw_keyPad3, rgfw_keyPad4, rgfw_keyPad5, rgfw_keyPad6, rgfw_keyPad7, rgfw_keyPad8, rgfw_keyPad9 :: Word32
@@ -396,9 +395,9 @@ rgfw_windowCenter, rgfw_windowHide :: Word32
 rgfw_windowCenter = #{const RGFW_windowCenter}
 rgfw_windowHide   = #{const RGFW_windowHide}
 
--- | Window creation flags for a window the user cannot resize and one that
--- opens fullscreen. Fullscreen, maximized and minimized are also the bits
--- 'c_RGFW_window_getFlags' reports the window's state in.
+-- | Window creation flags: not user-resizable, and fullscreen. The
+-- fullscreen, maximize and minimize bits also report state in
+-- 'c_RGFW_window_getFlags'.
 rgfw_windowNoResize, rgfw_windowFullscreen, rgfw_windowMaximize, rgfw_windowMinimize :: Word32
 rgfw_windowNoResize   = #{const RGFW_windowNoResize}
 rgfw_windowFullscreen = #{const RGFW_windowFullscreen}
@@ -406,18 +405,16 @@ rgfw_windowMaximize   = #{const RGFW_windowMaximize}
 rgfw_windowMinimize   = #{const RGFW_windowMinimize}
 
 -- Window options
--- | Set the window and taskbar icon from pixels of a format, @w@ by @h@.
--- RGFW copies them. Returns zero on failure.
+-- | Set the window and taskbar icon from @w@ by @h@ pixels in the given
+-- format. RGFW copies the pixels. Returns zero on failure.
 foreign import ccall "RGFW_window_setIcon"
   c_RGFW_window_setIcon :: Ptr RGFW_window -> Ptr Word8 -> CInt -> CInt -> CUChar -> IO CUChar
 
--- | Smallest size the user may resize the window to, in native pixels;
--- zero is no limit.
+-- | Minimum user-resize size in native pixels; zero means no limit.
 foreign import ccall "RGFW_window_setMinSize"
   c_RGFW_window_setMinSize :: Ptr RGFW_window -> CInt -> CInt -> IO ()
 
--- | Largest size the user may resize the window to, in native pixels; zero
--- is no limit.
+-- | Maximum user-resize size in native pixels; zero means no limit.
 foreign import ccall "RGFW_window_setMaxSize"
   c_RGFW_window_setMaxSize :: Ptr RGFW_window -> CInt -> CInt -> IO ()
 
@@ -429,8 +426,7 @@ foreign import ccall "RGFW_window_move"
 foreign import ccall "RGFW_window_center"
   c_RGFW_window_center :: Ptr RGFW_window -> IO ()
 
--- | Set the window's title from a NUL-terminated UTF-8 string, which RGFW
--- copies.
+-- | Set the window title from a NUL-terminated UTF-8 string. RGFW copies it.
 foreign import ccall "RGFW_window_setName"
   c_RGFW_window_setName :: Ptr RGFW_window -> CString -> IO ()
 
@@ -456,17 +452,17 @@ foreign import ccall "RGFW_window_show"
 foreign import ccall "RGFW_window_hide"
   c_RGFW_window_hide :: Ptr RGFW_window -> IO ()
 
--- | The window's top-left corner on the desktop as RGFW last heard. Reads
--- fields RGFW keeps; returns non-zero.
+-- | The window's top-left desktop position, as cached by RGFW from events.
+-- Always returns non-zero.
 foreign import ccall unsafe "RGFW_window_getPosition"
   c_RGFW_window_getPosition :: Ptr RGFW_window -> Ptr CInt -> Ptr CInt -> IO CUChar
 
--- | The window's flags as RGFW keeps them from its events, among them
+-- | The window's flags as cached by RGFW from events, including
 -- 'rgfw_windowFullscreen', 'rgfw_windowMaximize' and 'rgfw_windowMinimize'.
 foreign import ccall unsafe "RGFW_window_getFlags"
   c_RGFW_window_getFlags :: Ptr RGFW_window -> IO CUInt
 
--- | Whether the window has the keyboard, as RGFW keeps it from its events.
+-- | Whether the window has keyboard focus, as cached by RGFW from events.
 foreign import ccall unsafe "RGFW_window_isInFocus"
   c_RGFW_window_isInFocus :: Ptr RGFW_window -> IO CUChar
 
@@ -491,8 +487,7 @@ rgfw_mouseResizeEW, rgfw_mouseResizeNS, rgfw_mouseResizeNWSE, rgfw_mouseResizeNE
 rgfw_mouseResizeNW, rgfw_mouseResizeN, rgfw_mouseResizeNE, rgfw_mouseResizeE :: Word8
 -- | Directional resize cursor codes: southeast, south, southwest, west, and all directions.
 rgfw_mouseResizeSE, rgfw_mouseResizeS, rgfw_mouseResizeSW, rgfw_mouseResizeW, rgfw_mouseResizeAll :: Word8
--- | Standard cursor codes for a forbidden action, a busy application, and one
--- busy in the background.
+-- | Standard cursor codes: not allowed, busy, and busy in the background.
 rgfw_mouseNotAllowed, rgfw_mouseWait, rgfw_mouseProgress :: Word8
 
 rgfw_mouseNormal       = #{const RGFW_mouseNormal}

@@ -116,10 +116,10 @@ atlasChecks env draw = withGlyphSurface $ \surface ->
     sample "old glyph cleared by reset" 6.5 2.5 (0, 0, 0)
     firstGlyph "a reset atlas did not start on page 0"
 
--- | Images reach the texture however they changed: written in place, added
--- beside the others, and added by growing the atlas; each is sampled at its
--- centre through white vertices. Then a view's images: a quarter turn clockwise
--- puts the left half on top, and a half-opaque image lets half the backdrop through.
+-- | Images reach the atlas texture however they change: rewritten in place,
+-- added beside others, or added by growing the atlas. Each is sampled at its
+-- centre through white vertices. Then a view's images: a clockwise quarter
+-- turn puts the left half on top, and a half-opaque image shows half the backdrop.
 imageChecks :: SdlEnv -> Context -> ImageAtlas -> (DrawData -> IO ()) -> IO ()
 imageChecks env ctx images draw = do
   let register tid w h px = registerImage ctx (ImageId tid) w h px >>= \ok -> unless ok (fail "image registration failed")
@@ -155,10 +155,9 @@ imageChecks env ctx images draw = do
   half@(r, g, b) <- at faded 10 20
   unless (r >= 120 && r <= 136 && g == 0 && b == 0) (fail ("half-opaque image: " ++ show half))
 
--- | Canvas paths as SDL draws them: a ring's hole left unfilled by the
--- even-odd rule; a translucent line as even at its round caps and join as
--- along it, which a cap drawn over its end would darken; and a dashed
--- line's gaps.
+-- | Canvas paths as SDL draws them: an even-odd ring leaves its hole
+-- unfilled; a translucent line has even alpha across its round caps and join
+-- (a cap drawn over the line's end would darken it); a dashed line has gaps.
 pathChecks :: SdlEnv -> Context -> (DrawData -> IO ()) -> IO ()
 pathChecks env ctx draw = do
   let white = colorRGBA 255 255 255 255
@@ -192,8 +191,8 @@ atlasBench env = withGlyphSurface $ \surface ->
     benchmark "atlas-reset-1024-glyphs" 5 100 . (resetAtlas atlas >>) . replicateM_ 1024 $
       insertAtlas atlas surface uv >>= \ok -> unless (ok /= 0) (fail "benchmark atlas insertion failed")
 
--- | Run an action to warm it up, then @n@ times, and print the time and
--- allocation of each run.
+-- | Run an action @warm@ times, then @n@ times, and print the mean time and
+-- allocation per run.
 benchmark :: String -> Int -> Int -> IO () -> IO ()
 benchmark name warm n action = do
   replicateM_ warm action
@@ -207,9 +206,10 @@ benchmark name warm n action = do
       perRun x = fromIntegral x / fromIntegral n
   printf "%s: %.6f ms/frame | %.1f B/frame\n" name (perRun (t1 - t0) / 1e6) (perRun (bytes0 - bytes1))
 
--- | Every cursor kind asks for a system cursor SDL declares (SDL 3.2 does not
--- check), the kinds SDL has a cursor for each get their own, and showing every
--- kind twice creates each system cursor once, NULL ones (this driver's) too.
+-- | Every cursor kind maps to a system cursor SDL declares (SDL 3.2 does not
+-- check), each kind SDL has a cursor for gets a distinct one, and showing
+-- every kind twice creates each system cursor once, NULL ones (this driver's)
+-- included.
 cursorChecks :: IO ()
 cursorChecks = do
   let kinds = [minBound .. maxBound] :: [UiCursorKind]
@@ -256,9 +256,8 @@ geometry points = do
   withForeignPtr indices $ \p -> pokeArray (castPtr p) [0 .. fromIntegral n - 1 :: CInt]
   pure (DrawData vertices n indices n (U.singleton (DrawCmd 0 0 800 600 0 0 (fromIntegral n) LayerContent)) (primArrayFromList [0, 0, 1, 1, 1]))
 
--- | A triangle over the pixel at (20, 20) drawn from a texture, with floats
--- written at byte offsets of each vertex: its colour at 8 to 20, its UV at
--- 24 and 28.
+-- | A triangle covering pixel (20, 20) that samples @texture@, with floats
+-- written at each vertex's byte offsets: colour at 8 to 20, UV at 24 and 28.
 texturedTriangle :: Int -> [(Int, Float)] -> IO DrawData
 texturedTriangle texture writes = do
   dd <- geometry [(10, 10), (50, 10), (10, 50)]
@@ -275,16 +274,16 @@ pixel env x y =
       unless (ok /= 0) (fail "SDL pixel read failed")
       (,,) <$> peekByteOff p 0 <*> peekByteOff p 1 <*> peekByteOff p 2
 
--- | Fail unless the pixel at (20, 20) is the colour expected.
+-- | Fail unless pixel (20, 20) has the expected colour.
 expectPixel :: SdlEnv -> String -> (Word8, Word8, Word8) -> IO ()
 expectPixel env name expected = pixel env 20 20 >>= \actual -> unless (actual == expected) (fail (name ++ ": " ++ show actual))
 
--- | SDL's theme-change event reaches the loop as 'EvSystemThemeChanged', and
--- display synchronisation hands the context what SDL reports, switching a
--- context that follows the system.
+-- | SDL's theme-change event reaches the loop as 'EvSystemThemeChanged', and a
+-- display sync passes SDL's appearance to the context, switching the theme of
+-- a context that follows the system.
 systemThemeChecks :: SdlEnv -> Context -> IO ()
 systemThemeChecks env ctx = do
-  -- SDL_EVENT_SYSTEM_THEME_CHANGED, an event with nothing but its type.
+  -- SDL_EVENT_SYSTEM_THEME_CHANGED; only the type field is set.
   pushed <- alloca $ \ev -> pokeByteOff ev 0 (0x108 :: Word32) >> pushEvent ev
   unless pushed (fail "SDL_PushEvent failed")
   events <- pollEvents
@@ -294,8 +293,8 @@ systemThemeChecks env ctx = do
       Video.SDL_SYSTEM_THEME_LIGHT -> Just AppearanceLight
       Video.SDL_SYSTEM_THEME_DARK -> Just AppearanceDark
       _ -> Nothing
-  -- The context starts out believing the opposite of what SDL says, so a
-  -- sync that did not report would leave it, and its theme, stale.
+  -- Start the context with the opposite appearance, so a sync that did not
+  -- report would leave the appearance and theme stale.
   setSystemAppearance ctx (Just (if want == Just AppearanceDark then AppearanceLight else AppearanceDark))
   followSystemTheme ctx (lightDark defaultLightTheme defaultTheme)
   (synced, _) <- syncDisplay ctx env emptyInput
@@ -333,8 +332,8 @@ main = do
           forM_ [("sparse-partial", sparse, damage), ("mixed-partial", mixed, damage), ("dense-partial", dense, damage), ("dense-full", dense, DamageFull)] $
             \(name, dd, dmg) -> benchmark name 30 iterations (draw dd dmg >> void (renderPresentSafe (sdlRenderer env)))
         _ -> do
-          -- A six-index group can contain independent triangles, and a command
-          -- can end in three indices. Neither may be discarded as an offscreen quad.
+          -- A six-index group can hold independent triangles, and a command can
+          -- end in three indices. Neither may be culled as an offscreen quad.
           step "partial-damage triangle readback" $ do
             let visible = [(10, 10), (50, 10), (10, 50)]
                 outside = [(100, 100), (120, 100), (100, 120)]
@@ -354,10 +353,10 @@ main = do
           step "system theme event" (systemThemeChecks env ctx)
   unless bench $ do
     windowChecks (if native then "native drivers" else "dummy video, software renderer") False
-    -- With a display, again on its GPU renderers, which give a transparent
-    -- window custom blend modes: OpenGL's blends alpha with the colour's
-    -- operation, and OpenGL ES's keeps the larger alpha. A renderer the
-    -- display does not have is skipped.
+    -- With a display, repeat on the GPU renderers, which give a transparent
+    -- window custom blend modes: OpenGL blends alpha with the colour's
+    -- operation, and OpenGL ES keeps the larger alpha. Missing renderers are
+    -- skipped.
     display <- lookupEnv "DISPLAY"
     when (isJust display && not native) $
       forM_ ["opengl", "opengles2"] $ \renderer -> do

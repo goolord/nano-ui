@@ -75,8 +75,8 @@ instance HasResponse (TabResponse a) where
 tab :: a -> Text -> body -> Tab a body
 tab key title body = Tab key title False False Nothing body
 
--- | Enabled tab with a close button, reported through 'tabClosed', as is a
--- middle click on its header.
+-- | Enabled tab with a close button. A click on it, or a middle click on the
+-- header, is reported through 'tabClosed'.
 closableTab :: a -> Text -> body -> Tab a body
 closableTab key title body = Tab key title True False Nothing body
 
@@ -222,9 +222,9 @@ renderHeaders ctx tabStyle cur tabList = do
   uiIO (moveSelection ctx cur nextTab keyed)
   pure (TabResponse resp closedKey nextTab, keyed)
 
--- | One header: its key, its response, and whether its close button was
--- clicked, or the header or its close button middle-clicked, as a browser
--- closes a tab.
+-- | One header: its key, its response, and whether it was closed (close
+-- button clicked, or header or close button middle-clicked, as in a
+-- browser).
 renderHeader :: (Eq a, Ui :> es) => Int -> a -> Tab a body -> Eff es (a, Response, Bool)
 renderHeader tabStyle cur t = do
   let headerText = maybe (tabTitle t) (\b -> mconcat [tabTitle t, " (", b, ")"]) (tabBadge t)

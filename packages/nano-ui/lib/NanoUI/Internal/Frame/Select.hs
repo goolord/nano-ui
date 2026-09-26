@@ -209,8 +209,7 @@ finalizeSelectKeyboard ctx@Context {ctxNodeArena = na} inp = do
       wantStep = wantNext || has KeyUp || has KeyLeft
       wantEsc = pressedOnceIn KeyEscape inp
       wantEnter = pressedOnceIn KeyEnter inp
-  -- With Ctrl, Alt or Super held, an arrow or Enter is a chord, for a
-  -- shortcut.
+  -- With Ctrl, Alt or Super held, arrows and Enter are left to shortcuts.
   when (wantEsc || ((wantStep || wantEnter) && shiftAtMost (inputModifiers inp))) $ do
     focus <- readIORef (ctxFocusId ctx)
     store <- getStore ctx

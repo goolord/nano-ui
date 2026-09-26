@@ -96,29 +96,25 @@ collapseTextFieldSelection ctx wid =
  where
   key = intKey wid
 
--- | Where the focused widget is taking text, for an input method to put its
--- candidate window by, in logical window coordinates, and what it takes. See
--- 'textInputArea'.
+-- | Where the focused widget takes text, in logical window coordinates, so
+-- the input method can place its candidate window. See 'textInputArea'.
 data TextInputArea = TextInputArea
   { textInputAreaRect :: !Rect
-  -- ^ The text being composed, from where it starts to where it ends on its
-  -- row, or a caret-wide rect at the caret while nothing is.
+  -- ^ The composed text's extent on its row, or a caret-wide rect when
+  -- nothing is composed.
   , textInputAreaCursor :: !Float
-  -- ^ How far right of the rect's left edge the caret is.
+  -- ^ Caret offset from the rect's left edge.
   , textInputAreaPurpose :: !InputPurpose
-  -- ^ What the widget takes: an on-screen keyboard shows the keys for it.
+  -- ^ Kind of input, which selects an on-screen keyboard layout.
   }
   deriving (Eq, Show)
 
--- | Where the widget that took text from the input method in the last view
--- takes it ('TextInputArea'), or 'Nothing' while none did: a text field
--- does while it has the focus, and a widget of the app's own with
--- 'NanoUI.useInputMethod'. A backend reads it after a frame, takes text
--- input while it is there and stops it while it is not, and passes it on
--- to the input method (SDL's @SDL_SetTextInputArea@), which puts its
--- candidate window beside it rather than over the text. In a text field it
--- follows the field's scroll and the input method's composition, and a
--- composition in right-to-left text covers its runs as they are drawn.
+-- | The text input area of the widget that requested the input method last
+-- view, or 'Nothing'. Focused text fields request it, as do custom widgets
+-- via 'NanoUI.useInputMethod'. Backends read it after each frame to start or
+-- stop text input and pass it on (SDL's @SDL_SetTextInputArea@) so the
+-- candidate window sits beside the text, not over it. For text fields it
+-- tracks scroll and composition, including right-to-left runs.
 textInputArea :: Context -> IO (Maybe TextInputArea)
 textInputArea ctx@Context {ctxNodeArena = na} =
   readIORef (ctxInputMethod ctx) >>= \case
@@ -132,7 +128,7 @@ textInputArea ctx@Context {ctxNodeArena = na} =
           Rect x y w h <- getNodeRect na idx
           (Rect _ boxY _ boxH, Rect clipX _ _ _) <- nodeTextFieldGeom ctx idx x y w h
           fm <- nodeFontMetrics ctx idx
-          -- The scroll the frame settled; reading it writes nothing.
+          -- Read the scroll the frame already settled, without writing it.
           let scrollX = findSlot fieldFloat 0 (slotKey SlotTextInputScroll key) store
           (line, caret, _, preedit) <- fieldEditLine ctx idx
           Just <$> lineInputArea fm line caret preedit (clipX - scrollX) (centeredTextY fm boxY boxH (fmLineHeight fm)) (fmLineHeight fm) purpose
@@ -152,8 +148,8 @@ textInputArea ctx@Context {ctxNodeArena = na} =
           Just <$> lineInputArea fm line caret (snd <$> preedit) (clipX - scrollXf) (contentTop + fromIntegral row * lineH - scrollYf) lineH purpose
         _ -> pure Nothing
 
--- | The 'TextInputArea' of @line@, whose pen starts at @penX@, on a row at
--- @rowY@ of height @lineH@, with its caret before character @caret@.
+-- | 'TextInputArea' for @line@ drawn from @penX@ on a row at @rowY@ of
+-- height @lineH@, caret before character @caret@.
 lineInputArea :: FontMetrics -> T.Text -> Int -> Maybe Preedit -> Float -> Float -> Float -> InputPurpose -> IO TextInputArea
 lineInputArea fm line caret preedit penX rowY lineH purpose = do
   prepared <- prepareFontMetrics fm line
@@ -406,8 +402,8 @@ drawTextAreaContentWith da ctx fm idx x y w h style = do
       forM_ [max (TB.cursorRow lo) firstRow .. min (TB.cursorRow hi) lastRow] $ \row -> do
         let line = TB.lineAt row buf
             clampCol c = clamp 0 (T.length line) c
-            -- On its row the composition takes the place of the selection,
-            -- and the input method's selection shows instead.
+            -- On the composition row, show the input method's selection
+            -- instead of the field's.
             (shown, startCol, endCol) = case preedit of
               Just (prow, p) | prow == row -> (preeditLine p, preeditCaret p, preeditSelectionEnd p)
               _ ->
@@ -427,10 +423,10 @@ drawTextAreaContentWith da ctx fm idx x y w h style = do
         Nothing -> drawLineCaret da fm (TB.lineAt caretRow buf) caretCol contentX (rowY caretRow) lineH fg
   paintScrollBars ctx da theme (themePanel theme) wid mV mH
 
--- | The composition an input method shows in text area @wid@
--- ('fieldComposition'): its row, and that row with the composition in place
--- of the selected part of it ('splicePreedit'). A selection over more rows
--- stays highlighted on the others, as committing replaces it all.
+-- | Text area @wid@'s composition ('fieldComposition'): its row, and that
+-- row with the composition spliced over the selection ('splicePreedit'). A
+-- multi-row selection stays highlighted on other rows, since a commit
+-- replaces all of it.
 textAreaPreedit :: Context -> WidgetId -> TA.TextAreaState -> IO (Maybe (Int, Preedit))
 textAreaPreedit ctx wid state = do
   composition <- fieldComposition ctx wid
@@ -441,8 +437,8 @@ textAreaPreedit ctx wid state = do
       endCol = if TB.cursorRow hi == row then TB.cursorCol hi else T.length line
   pure $ (\c -> (row, splicePreedit c line (TB.cursorCol lo) endCol)) <$> composition
 
--- | Row @row@ of a text area's document as it shows, with the composition in
--- it on its row ('textAreaPreedit'), and where a column of it is in the row.
+-- | Row @row@ as displayed, composition included ('textAreaPreedit'), with
+-- a map from displayed columns to document columns.
 shownRow :: Maybe (Int, Preedit) -> TB.TextBuffer -> Int -> (T.Text, Int -> Int)
 shownRow (Just (prow, p)) _ row | prow == row = (preeditLine p, preeditSourceIndex p)
 shownRow _ buf row = (TB.lineAt row buf, id)
@@ -500,8 +496,7 @@ textAreaMouse ctx inp wid idx = do
     (scrollXf, scrollYf) <- textAreaScrollSnapped (ctxDrawArena ctx) state
     preedit <- textAreaPreedit ctx wid state
     let row = clamp 0 (TB.getLineCount buf - 1) (floor ((mouseY - (fieldY + iy) + scrollYf) / max 1 lineH))
-        -- The pointer is over the row shown, composition and all, and lands
-        -- in the text around it.
+        -- Hit-test the displayed row, then map back to a document column.
         (line, toSource) = shownRow preedit buf row
     prepared <- prepareFontMetrics fm line
     let pos = TB.Cursor row (toSource (textIndexAtX prepared line (max 0 (mouseX - (clipX - scrollXf)))))

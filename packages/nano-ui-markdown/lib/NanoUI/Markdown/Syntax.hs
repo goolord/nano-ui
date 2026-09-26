@@ -1,6 +1,6 @@
--- | The parsed form of a Markdown document: blocks, and the inline spans in
--- their text. "NanoUI.Markdown" draws it; an application can also walk it,
--- for a table of contents or a plain-text copy.
+-- | Parsed Markdown: blocks and their inline spans. "NanoUI.Markdown" draws
+-- it; applications can also walk it, for a table of contents or a
+-- plain-text copy.
 module NanoUI.Markdown.Syntax
   ( Block (..)
   , Span (..)
@@ -17,25 +17,23 @@ import GHC.Generics (Generic)
 
 -- | A block of a document.
 data Block
-  = -- | A paragraph of inline text, or a raw HTML block as its text without
-    -- its comments. An HTML block that is only comments is left out.
+  = -- | Inline text. Raw HTML blocks also become paragraphs, with comments
+    -- removed; a block of only comments is dropped.
     Paragraph ![Span]
-  | -- | A heading of level 1 to 6: @# Title@, or a paragraph underlined with
-    -- @===@ (level 1) or @---@ (level 2).
+  | -- | Level 1 to 6: @# Title@, or a line underlined with @===@ (1) or
+    -- @---@ (2).
     Heading !Int ![Span]
   | -- | A horizontal rule: @---@, @***@ or @___@.
     ThematicBreak
-  | -- | Code, fenced with backticks or tildes or indented by four spaces:
-    -- the fence's info string (empty for indented code) and the code, its
-    -- lines joined by newlines without a final one.
+  | -- | Fenced or four-space-indented code: the info string (empty for
+    -- indented code) and the code, without a trailing newline.
     CodeBlock !Text !Text
   | -- | Blocks quoted with @>@.
     BlockQuote ![Block]
-  | -- | A list: its kind, whether it is tight (no blank line between its
-    -- items or inside one), and its items.
+  | -- | Kind, tightness (no blank lines between or inside items), items.
     List !ListType !Bool ![ListItem]
-  | -- | A GitHub table: each column's alignment, the header cells, and the
-    -- rows, each with one cell a column.
+  | -- | GitHub table: column alignments, header cells, and rows with one
+    -- cell per column.
     Table ![CellAlign] ![[Span]] ![[[Span]]]
   deriving (Eq, Show, Generic)
 
@@ -43,10 +41,10 @@ instance NFData Block
 
 -- | Inline content.
 data Span
-  = -- | Plain text, escapes and entities decoded. Raw HTML stays text, but
-    -- an HTML comment is left out.
+  = -- | Plain text with escapes and entities decoded. Inline raw HTML stays
+    -- as text; HTML comments are dropped.
     Str !Text
-  | -- | A line break inside a paragraph that is not a hard break.
+  | -- | A plain line break inside a paragraph.
     SoftBreak
   | -- | A line ending in two spaces or a backslash.
     HardBreak
@@ -58,20 +56,19 @@ data Span
     Strike ![Span]
   | -- | @\`code\`@.
     Code !Text
-  | -- | A link: its destination, its title (empty when it has none), and its
-    -- text. Inline links, reference links, @\<https://...\>@, and bare web
-    -- and email addresses all parse to one.
+  | -- | Destination, title (empty if none), text. Covers inline and
+    -- reference links, autolinks (@\<https://...\>@), and bare web and
+    -- email addresses.
     Link !Text !Text ![Span]
-  | -- | An image: its source, its title, and its alt text.
+  | -- | Source, title, alt text.
     Image !Text !Text ![Span]
   deriving (Eq, Show, Generic)
 
 instance NFData Span
 
--- | A bullet list with its bullet character (@-@, @+@ or @*@), or an ordered
--- list with its first number and delimiter (@.@ or @)@). A list ends where
--- an item starts with another bullet or delimiter, or where items with task
--- check boxes and items without meet.
+-- | A bullet list's character (@-@, @+@ or @*@), or an ordered list's start
+-- number and delimiter (@.@ or @)@). A list ends when the bullet or
+-- delimiter changes, or where task and non-task items meet.
 data ListType
   = Bullet !Char
   | Ordered !Int !Char
@@ -79,26 +76,24 @@ data ListType
 
 instance NFData ListType
 
--- | A list item: its task-list check box, if it starts with @[ ]@ or
--- @[x]@, and its blocks. Only a bullet list's items have check boxes:
--- @1. [x] a@ is an ordered item with the text @[x] a@.
+-- | A list item. Only bullet items can be tasks: @1. [x] a@ is an ordered
+-- item with the text @[x] a@.
 data ListItem = ListItem
   { itemTask :: !(Maybe Bool)
-  -- ^ 'Just' whether it is checked, for a task-list item.
+  -- ^ For task items (@[ ]@ or @[x]@), whether checked.
   , itemBlocks :: ![Block]
   }
   deriving (Eq, Show, Generic)
 
 instance NFData ListItem
 
--- | A table column's alignment, from the colons in its delimiter row.
+-- | Column alignment, from the colons in the delimiter row.
 data CellAlign = CellDefault | CellLeft | CellCenter | CellRight
   deriving (Eq, Show, Enum, Bounded, Generic)
 
 instance NFData CellAlign
 
--- | The text of some spans without their formatting: breaks become spaces
--- and images their alt text.
+-- | Spans as plain text: breaks become spaces, images their alt text.
 spansText :: [Span] -> Text
 spansText = T.concat . map go
   where

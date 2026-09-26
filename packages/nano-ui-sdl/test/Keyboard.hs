@@ -1,7 +1,7 @@
 {-# LANGUAGE PackageImports #-}
 
--- | SDL keyboard translation: which 'Key' an SDL keycode is, how key events
--- fold into 'Input', auto-repeats among them, and losing the keyboard.
+-- | SDL keyboard translation: SDL keycodes to 'Key', key events folded into
+-- 'Input' (auto-repeats included), and losing keyboard focus.
 module Keyboard (keyboardTranslation) where
 
 import Control.Monad (unless)

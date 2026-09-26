@@ -215,8 +215,8 @@ data NodeType
   | NodeModal
   -- ^ A modal dialog. Floating: see 'isFloatingNode'.
   | NodeImage
-  -- ^ An image. The node's text is the image id in decimal, and its style
-  -- index says how it is drawn ('getImageNode').
+  -- ^ An image. The node's text is the image id in decimal. The style index
+  -- selects its look ('getImageNode').
   | NodePanel
   -- ^ A container that paints the theme's panel background and border, and
   -- clips its children to the inside of the border.
@@ -229,8 +229,8 @@ data NodeType
   | NodePopup
   -- ^ A popup such as a menu or a tooltip. Floating.
   | NodeDrawing
-  -- ^ A widget the application draws: a custom widget or a drawing. Its
-  -- style index is the keys a custom widget takes
+  -- ^ A custom widget or drawing that the application paints. The style
+  -- index holds the custom widget's keys
   -- ('NanoUI.Internal.Context.drawingKeyClaim').
   deriving (Eq, Show, Enum, Bounded)
 
@@ -295,22 +295,21 @@ isFloatingNode nt = nt == NodeModal || nt == NodeWindow || nt == NodePopup
 -- Each list is in arena order.
 data NodeClass
   = PointerNodes
-  -- ^ The nodes a pointer hit test can want: the controls of 'isWidgetNode',
-  -- the scroll containers ('isScrollNode') and the nodes given
-  -- 'PointerBlock', which take the pointer too.
+  -- ^ Nodes a pointer hit test may stop at: controls ('isWidgetNode'),
+  -- scroll containers ('isScrollNode') and nodes with 'PointerBlock'.
   | DrawingNodes
   -- ^ Widgets the application draws ('NodeDrawing').
   | FloatingNodes
   -- ^ Windows, modals and popups ('isFloatingNode'), so the passes that look
   -- only at floating panels skip the rest of the arena.
   | BackdropNodes
-  -- ^ Panels and scroll containers, which paint a backdrop and hand their
-  -- content a clip of their own, for the damage pass that tracks them
+  -- ^ Panels and scroll containers. Each paints a backdrop and clips its
+  -- content, so the damage pass tracks them
   -- ('NanoUI.Internal.Damage.updatePrevRects').
   | LayeredNodes
-  -- ^ Layered containers and pinned nodes, the only places where paint draws
-  -- a node over one declared before it ('forChildrenInPaintOrder_'), so that
-  -- the pointer over two widgets can be on the later one ('layeredNodeCount').
+  -- ^ Layered containers and pinned nodes. Only here does paint draw a node
+  -- over an earlier sibling ('forChildrenInPaintOrder_'), so only here can
+  -- the later of two overlapping widgets get the pointer ('layeredNodeCount').
   deriving (Eq, Enum, Bounded)
 
 -- | The constructor of a 'Sizing' without its number, as the arena stores it
@@ -327,9 +326,8 @@ data SizingTag
 -- | A 'Direction' as the arena stores it in 'TagDirection'. On a container
 -- it is the axis the children are laid out along. A separator carries its
 -- parent's direction, which decides whether the rule is horizontal or
--- vertical. A layered container's ('TagFlow') is 'DirColumn', so whatever
--- reads the direction as an axis (a separator, a text wrap) treats it as a
--- column.
+-- vertical. A layered container ('TagFlow') stores 'DirColumn', so code that
+-- reads the direction as an axis (a separator, a text wrap) sees a column.
 data DirTag = DirRow | DirColumn
   deriving (Eq, Show, Enum, Bounded)
 
@@ -403,8 +401,8 @@ data NodeArena = NodeArena
   -- ^ A hash over the index and scope of every node added under a scope other
   -- than 0 since the reset. See 'getScopeSignature'.
   , naInputSig :: IOArr Word64
-  -- ^ The frame's input signature ('getInputSignature'), in one unboxed slot
-  -- so a mix allocates nothing.
+  -- ^ The frame's input signature ('getInputSignature'). An unboxed slot, so
+  -- mixing into it allocates nothing.
   , naTextHash :: IORef (IOArr Word64)
   -- ^ Per node, the hash of the text the last 'setNodeText' stored.
   , naOptionsHash :: IORef (IOArr Word64)
@@ -431,18 +429,17 @@ data NodeArena = NodeArena
   , naClassCounts :: IOArr Int
   -- ^ Nodes in each list of 'naClassNodes', by 'fromEnum' of the class.
   , naImages :: IORef (MutableArray RealWorld ImageNode)
-  -- ^ The looks of the image nodes that draw their image fitted, faded or
-  -- turned, in the order they were added ('setImageNode'): the first
-  -- 'naImageCount' of them are this frame's. It grows as a frame needs.
+  -- ^ Looks of the image nodes that are not plain (fitted, faded, rotated
+  -- and so on), in 'setImageNode' order. The first 'naImageCount' belong to
+  -- this frame. Grows on demand.
   , naImageCount :: IOArr Int
-  -- ^ How many of 'naImages' this frame has, in one slot.
+  -- ^ Entries of 'naImages' used this frame, in one slot.
   }
 
--- | An image node's look ('ImageLook'), and the width and height it takes
--- on an axis its layout leaves unsized, which is the image's own size. A
--- plain image node has none: it stretches its image, and an unsized axis
--- takes its minimum or 32. The node's style index is its place in
--- 'naImages' plus one, and 0 for a plain image.
+-- | An image node's look ('ImageLook') and the image's natural size, used on
+-- an axis the layout leaves unsized. A plain image node has no entry: it
+-- stretches the image, and an unsized axis takes its minimum or 32. The
+-- node's style index is its 'naImages' position plus one, or 0 when plain.
 data ImageNode = ImageNode
   { inLook :: !ImageLook
   , inWidth :: {-# UNPACK #-} !Float
@@ -543,7 +540,7 @@ data GeomCol
 -- * 'StyleLineGap': the space between a wrapping container's lines.
 -- * 'StylePinX', 'StylePinY': a pinned node's offset from its parent's
 --   content box.
--- * 'StyleAspect': the width over the height a fit height keeps
+-- * 'StyleAspect': width over height for a fit height
 --   ('NanoUI.Internal.Style.aspect'), or 0 for none.
 --
 -- The layout cache does not compare 'StyleScrollContentW' and
@@ -566,19 +563,18 @@ data StyleCol
 --   scroll container's bar sits. The solver's measure pass writes it, so the
 --   input signature leaves it out and the layout cache restores it on a hit.
 -- * 'TagAlignX', 'TagAlignY': the 'AlignX' and the 'AlignY'.
--- * 'TagIdSuperseded': whether a later node of this frame holds this node's
---   widget id too, as a table's scrolling pane shares its frozen pane's
+-- * 'TagIdSuperseded': whether a later node this frame reuses this node's
+--   widget id, as a table's scrolling pane reuses its frozen pane's
 --   ('setWidgetId', 'getIdSuperseded').
--- * 'TagFlow': the 'Flow': 'Line' for a scroll container, a grid and a
---   node that is not a container.
+-- * 'TagFlow': the 'Flow'. Always 'Line' for scroll containers, grids and
+--   non-containers.
 -- * 'TagLineAlign': a wrapping container's
 --   'NanoUI.Internal.Style.LineAlign'.
 -- * 'TagPinned': whether the node is pinned ('isPinnedNode'), as a 'Bool'.
--- * 'TagPinnedBelow': whether a node below this one is pinned, as a 'Bool',
---   written when the pinned node is added ('hasPinnedBelow'). The solver,
---   paint and hit tests look for pinned children only under such a node.
--- * 'TagPointer': the 'PointerMode' the node takes the pointer with: its
---   own, or 'PointerPass' inside a node that passes it ('getPointerMode').
+-- * 'TagPinnedBelow': whether some descendant is pinned, as a 'Bool', set
+--   when that node is added ('hasPinnedBelow'). The solver, paint and hit
+--   tests look for pinned children only under such a node.
+-- * 'TagPointer': the node's effective 'PointerMode' ('getPointerMode').
 data TagCol
   = TagNodeType | TagDirection | TagWSizing | TagHSizing
   | TagScrollBarSlot | TagAlignX | TagAlignY | TagIdSuperseded
@@ -741,9 +737,8 @@ resetNodeArena na = do
   -- 0 marks a memo entry that was never written, so the tag wraps to 1.
   !ft <- readIORef (naFrameTag na)
   writeIORef (naFrameTag na) (if ft == maxBound then 1 else ft + 1)
-  -- The id index takes only entries of the current epoch, so the next epoch
-  -- empties it. Once the epoch wraps, entries left from that epoch's last use
-  -- would read as current, so the wrap clears the index.
+  -- Bumping the epoch empties the id index. On wrap-around, stale entries
+  -- from the previous use of that epoch would read as live, so clear it.
   !ep <- readIORef (naEpoch na)
   let !ep' = ep + 1
   IdIndex slots mask live <- readIORef (naIndex na)
@@ -787,8 +782,8 @@ floatingNodeCount :: NodeArena -> IO Int
 floatingNodeCount na = readPrimArray (naClassCounts na) (fromEnum FloatingNodes)
 
 -- | Number of layered containers and pinned nodes added since the last reset
--- ('LayeredNodes'). While it is 0, of two overlapping nodes the one declared
--- first is drawn on top.
+-- ('LayeredNodes'). While it is 0, the earlier of two overlapping nodes is
+-- drawn on top.
 {-# INLINE layeredNodeCount #-}
 layeredNodeCount :: NodeArena -> IO Int
 layeredNodeCount na = readPrimArray (naClassCounts na) (fromEnum LayeredNodes)
@@ -863,7 +858,7 @@ growBoxedStoreCopy emptyVal arr oldCap newCap = do
   copyMutableArray newArr 0 arr 0 oldCap
   pure newArr
 
--- | The 'Sizing' an axis was given, from what the arena stored of it.
+-- | Rebuild an axis's 'Sizing' from its stored tag and value.
 axisSizing :: AxisSizing -> Sizing
 axisSizing (AxisSizing tag val _ _) = case tag of
   SizingFixed -> Fixed val
@@ -901,18 +896,18 @@ addNode na nt parent Layout {..} = do
   let (wTag, wVal) = sizingTag layoutWidth
       (hTag, hVal) = sizingTag layoutHeight
       pad = layoutPadding
-      -- A scroll container or a grid lays its children out its own way, and
-      -- paint and hit tests take them in a line's order too.
+      -- Scroll containers and grids have their own layout, and paint and hit
+      -- tests visit their children in line order.
       !flow
         | not (isContainerNode nt) || isScrollNode nt || layoutGridCols > 0 || layoutGridMinColW > 0 = Line
         | otherwise = layoutFlow
       !lineGap = if layoutLineGap < 0 then layoutGap else layoutLineGap
-      -- A floating node is placed on its own, and a root has nothing to be
-      -- pinned in.
+      -- Floating nodes are placed separately, and a root has no parent to
+      -- pin to.
       !pinned = isJust layoutPin && parent >= 0 && not (isFloatingNode nt)
       !(V2 pinX pinY) = fromMaybe (V2 0 0) layoutPin
   a <- arenaArrays na
-  -- Whatever is inside a node that passes the pointer passes it too.
+  -- 'PointerPass' is inherited by all descendants.
   !pointerMode <-
     if parent < 0 || layoutPointer == PointerPass
       then pure layoutPointer
@@ -961,7 +956,6 @@ addNode na nt parent Layout {..} = do
   writeTree a idx TreeTextIdx (-1)
   writeTree a idx TreeGridCols layoutGridCols
 
-  -- Fold this node's creation inputs into the frame's input signature.
   let !nodeSig =
         foldl'
           (\acc (t, v) -> mixTagged acc t v)
@@ -1015,7 +1009,7 @@ addNode na nt parent Layout {..} = do
     writeTree a parent TreeFirstChild idx
     cc <- readTree a parent TreeChildCount
     writeTree a parent TreeChildCount (cc + 1)
-    -- Mark the ancestors, up to one already marked.
+    -- Mark ancestors, stopping at the first one already marked.
     let markPinnedBelow p = when (p >= 0) $ do
           marked <- readTagEnum a p TagPinnedBelow
           unless marked $ writeTagEnum a p TagPinnedBelow True >> readTree a p TreeParent >>= markPinnedBelow
@@ -1156,15 +1150,15 @@ getFlow na idx = arenaArrays na >>= \a -> readTagEnum a idx TagFlow
 isPinnedNode :: NodeArena -> NodeIdx -> IO Bool
 isPinnedNode na idx = arenaArrays na >>= \a -> readTagEnum a idx TagPinned
 
--- | Whether a node below this one, a child or further down, is pinned. A
--- pinned node can sit outside its parent, so paint looks for it below a
--- container it otherwise skips as out of view.
+-- | Whether any descendant is pinned. A pinned node can sit outside its
+-- parent, so paint searches for it even under a container it would skip as
+-- out of view.
 {-# INLINE hasPinnedBelow #-}
 hasPinnedBelow :: NodeArena -> NodeIdx -> IO Bool
 hasPinnedBelow na idx = arenaArrays na >>= \a -> readTagEnum a idx TagPinnedBelow
 
--- | How the node takes the pointer: its own 'PointerMode', or 'PointerPass'
--- when a node it is inside passes the pointer.
+-- | The node's own 'PointerMode', or 'PointerPass' when an ancestor passes
+-- the pointer.
 {-# INLINE getPointerMode #-}
 getPointerMode :: NodeArena -> NodeIdx -> IO PointerMode
 getPointerMode na idx = arenaArrays na >>= \a -> readTagEnum a idx TagPointer
@@ -1188,14 +1182,14 @@ setRect na idx x y w h = do
   writeGeom a idx GeomH h
 
 -- | Positive-area clip in logical window coordinates. 'Nothing' means the
--- stored clip is empty or unset: 'getClipBounds' tells those apart.
+-- stored clip is empty or unset; 'getClipBounds' tells them apart.
 {-# INLINE getClipRect #-}
 getClipRect :: NodeArena -> NodeIdx -> IO (Maybe Rect)
 getClipRect na idx = mfilter rectNonEmpty <$> getClipBounds na idx
 
--- | Store a clip in logical window coordinates. An empty clip, one without
--- area, is kept as empty rather than unset, which 'addNode' leaves the clip:
--- 'getClipRect' reads both as 'Nothing', 'getClipBounds' does not.
+-- | Store a clip in logical window coordinates. A clip without area is
+-- stored as empty, which differs from the unset clip 'addNode' leaves.
+-- 'getClipRect' reads both as 'Nothing'; 'getClipBounds' does not.
 {-# INLINE setClipRect #-}
 setClipRect :: NodeArena -> NodeIdx -> Rect -> IO ()
 setClipRect na idx (Rect x y w h) = do
@@ -1206,10 +1200,9 @@ setClipRect na idx (Rect x y w h) = do
   writeGeom a idx GeomClipW (if empty then -1 else w)
   writeGeom a idx GeomClipH (if empty then -1 else h)
 
--- | The stored clip in logical window coordinates, empty or not: a zero-size
--- rect, which holds no point, for an empty clip, and 'Nothing' only while the
--- clip is unset, before 'NanoUI.Internal.Frame.Scroll.applyScrollOffsets'
--- runs in a frame.
+-- | The stored clip in logical window coordinates. An empty clip reads as a
+-- zero-size rect. 'Nothing' means unset, as before
+-- 'NanoUI.Internal.Frame.Scroll.applyScrollOffsets' runs in a frame.
 {-# INLINE getClipBounds #-}
 getClipBounds :: NodeArena -> NodeIdx -> IO (Maybe Rect)
 getClipBounds na idx = do
@@ -1323,8 +1316,8 @@ getText na idx = do
     then pure T.empty
     else readArray (naArrTextStore a) ti
 
--- | Give image node @idx@ its look and the size it takes unsized. The size
--- is a layout input, and joins the node's.
+-- | Set image node @idx@'s look and natural size. The size is a layout
+-- input, so it is mixed into the node's hash.
 setImageNode :: NodeArena -> NodeIdx -> ImageNode -> IO ()
 setImageNode na idx node@ImageNode {inWidth = w, inHeight = h} = do
   k <- readPrimArray (naImageCount na) 0
@@ -1342,16 +1335,16 @@ setImageNode na idx node@ImageNode {inWidth = w, inHeight = h} = do
   writeTree a idx TreeStyleIdx (k + 1)
   mixNodeInput na idx 0x494d (fromIntegral (castFloatToWord32 w) `shiftL` 32 .|. fromIntegral (castFloatToWord32 h))
 
--- | Image node @idx@'s look and unsized size, or 'Nothing' for a plain
--- image. Only for a 'NodeImage': another node's style index means
--- something else.
+-- | Image node @idx@'s look and natural size, or 'Nothing' for a plain
+-- image. Only valid on a 'NodeImage'; other nodes use the style index
+-- differently.
 {-# INLINE getImageNode #-}
 getImageNode :: NodeArena -> NodeIdx -> IO (Maybe ImageNode)
 getImageNode na idx = do
   si <- arenaArrays na >>= \a -> readTree a idx TreeStyleIdx
   if si <= 0 then pure Nothing else Just <$> (readIORef (naImages na) >>= \arr -> readArray arr (si - 1))
 
--- | What fills the unused slots of 'naImages'.
+-- | Filler for unused slots of 'naImages'.
 noImageNode :: ImageNode
 noImageNode = ImageNode (imageLook defaultImageConfig (Color 0xFFFFFFFF)) 0 0
 
@@ -1391,8 +1384,8 @@ getWidgetId na idx = arenaArrays na >>= \a -> WidgetId . fromIntegral <$> readTr
 
 -- | Assign a node's identity and index nonzero ids for lookup. Assign once per
 -- node: this does not remove a mapping previously stored under another id.
--- The id's lookup moves to this node, and a node that held it earlier in the
--- frame is marked superseded ('getIdSuperseded').
+-- Lookups of the id now find this node, and an earlier node with the same id
+-- is marked superseded ('getIdSuperseded').
 {-# INLINE setWidgetId #-}
 setWidgetId :: NodeArena -> NodeIdx -> WidgetId -> IO ()
 setWidgetId na idx wid = do
@@ -1405,10 +1398,9 @@ setWidgetId na idx wid = do
     prev <- indexWidgetId na ep w idx
     when (prev >= 0 && prev /= idx) $ writeTagEnum a prev TagIdSuperseded True
 
--- | Whether a later node of this frame holds this node's widget id too
--- ('setWidgetId'). 'lookupNodeByWidgetId' finds the last node that holds an
--- id, and a walk over the arena that keys its results by id takes that node
--- alone.
+-- | Whether a later node this frame reuses this node's widget id
+-- ('setWidgetId'). 'lookupNodeByWidgetId' returns the last such node, and
+-- arena walks that key results by id should skip superseded nodes.
 {-# INLINE getIdSuperseded #-}
 getIdSuperseded :: NodeArena -> NodeIdx -> IO Bool
 getIdSuperseded na idx = arenaArrays na >>= \a -> readTagEnum a idx TagIdSuperseded
@@ -1424,13 +1416,14 @@ lookupNodeByWidgetId na (WidgetId key)
       IdIndex slots mask _ <- readIORef (naIndex na)
       probeSlot slots mask ep key (\_ -> pure Nothing) (\_ v -> pure (Just (slotNode v)))
 
--- | Node index by widget id: open addressing over unboxed slots of two words,
--- the id and a value that packs the epoch it was written in (high 32 bits)
--- with the node index (low 32 bits). A slot written in another epoch is free,
--- so a new epoch empties the index without touching it, and since a frame
--- only adds entries, a probe ends at the first free slot. The fields are the
--- slots, the slot count (a power of two) less one, and the number of entries
--- written in the current epoch, in one slot.
+-- | Node index by widget id, as an open-addressing table. Each slot is two
+-- words: the id, and a value packing the epoch (high 32 bits) with the node
+-- index (low 32 bits). A slot from another epoch counts as free, so bumping
+-- the epoch empties the table without touching it. Entries are never
+-- removed within a frame, so a probe can stop at the first free slot.
+--
+-- Fields: the slots, the slot count (a power of two) minus one, and the
+-- live entry count for the current epoch in one slot.
 data IdIndex = IdIndex {-# UNPACK #-} !(IOArr Word64) {-# UNPACK #-} !Int {-# UNPACK #-} !(IOArr Int)
 
 -- | An empty index of @n@ slots, a power of two.
@@ -1440,10 +1433,10 @@ newIdIndex n = do
   live <- newZeroedPrimArray 1
   pure (IdIndex slots (n - 1) live)
 
--- | Probe the index for @key@ in epoch @ep@: @found s v@ at the slot @s@
--- holding it with its value @v@, or @free s@ at the free slot the probe ends
--- at. A probe starts at a slot the key's bits pick: ids are hashes already,
--- and the multiply spreads their bits over the slots however few there are.
+-- | Probe for @key@ in epoch @ep@. Calls @found s v@ with the matching slot
+-- and its value, or @free s@ with the free slot where the probe stopped.
+-- Ids are already hashes; the multiply spreads their bits so even a small
+-- table uses them all.
 {-# INLINE probeSlot #-}
 probeSlot :: IOArr Word64 -> Int -> Word32 -> Word64 -> (Int -> IO r) -> (Int -> Word64 -> IO r) -> IO r
 probeSlot slots mask ep key free found = go (fromIntegral ((key * 0x9E3779B97F4A7C15) `shiftR` 32) .&. mask)
@@ -1462,8 +1455,8 @@ slotNode :: Word64 -> Int
 slotNode v = fromIntegral (v .&. 0xFFFFFFFF)
 
 -- | Index node @idx@ under the nonzero id @key@ in epoch @ep@. Returns the
--- node the id's entry of this epoch held before, or -1 for none: finding it
--- costs nothing beyond the probe the insert makes.
+-- node previously indexed under @key@ this epoch, or -1. The insert's probe
+-- finds it for free.
 {-# INLINE indexWidgetId #-}
 indexWidgetId :: NodeArena -> Word32 -> Word64 -> Int -> IO Int
 indexWidgetId na ep key idx = do
@@ -1475,13 +1468,13 @@ indexWidgetId na ep key idx = do
         writePrimArray slots (2 * s + 1) val
         n <- readPrimArray live 0
         writePrimArray live 0 (n + 1)
-        -- At most half the slots are taken, so probes stay short.
+        -- Keep the load factor at or below one half so probes stay short.
         when (2 * (n + 1) > mask + 1) $ writeIORef (naIndex na) =<< growIdIndex ep ii
         pure (-1)
     )
     (\s v -> slotNode v <$ writePrimArray slots (2 * s + 1) val)
 
--- | Twice the slots, holding the entries of epoch @ep@.
+-- | Double the table, keeping only entries of epoch @ep@.
 growIdIndex :: Word32 -> IdIndex -> IO IdIndex
 growIdIndex ep (IdIndex slots mask live) = do
   new@(IdIndex slots' mask' live') <- newIdIndex (2 * (mask + 1))
@@ -1490,7 +1483,7 @@ growIdIndex ep (IdIndex slots mask live) = do
     v <- readPrimArray slots (2 * s + 1)
     when (v `shiftR` 32 == fromIntegral ep) $ do
       k <- readPrimArray slots (2 * s)
-      -- The keys are distinct, so the probe ends at a free slot.
+      -- Keys are distinct, so the probe always ends at a free slot.
       probeSlot slots' mask' ep k
         (\t -> writePrimArray slots' (2 * t) k >> writePrimArray slots' (2 * t + 1) v)
         (\_ _ -> pure ())
@@ -1721,20 +1714,20 @@ forChildNodes_ na parentIdx f = do
   go fc
 
 -- | Fold over a node's children in sibling order, skipping floating
--- (modal, window, popup) children, which are placed outside the flow, and
--- pinned children, which sit where they are pinned ('foldPlacedChildrenM').
+-- (modal, window, popup) and pinned children, neither of which is part of
+-- the flow ('foldPlacedChildrenM' includes pinned ones).
 {-# INLINE foldFlowChildrenM #-}
 foldFlowChildrenM :: NodeArena -> NodeIdx -> (acc -> NodeIdx -> IO acc) -> acc -> IO acc
 foldFlowChildrenM na = foldChildrenInBoxM na True
 
--- | 'foldFlowChildrenM' with the pinned children too: every child placed
--- inside the node, as its content.
+-- | 'foldFlowChildrenM' including pinned children: every child placed
+-- inside the node's box.
 {-# INLINE foldPlacedChildrenM #-}
 foldPlacedChildrenM :: NodeArena -> NodeIdx -> (acc -> NodeIdx -> IO acc) -> acc -> IO acc
 foldPlacedChildrenM na = foldChildrenInBoxM na False
 
--- | Fold over the children that are not floating, skipping the pinned ones
--- too with @skipPinned@.
+-- | Fold over the non-floating children, also skipping pinned ones when
+-- @skipPinned@ is set.
 {-# INLINE foldChildrenInBoxM #-}
 foldChildrenInBoxM :: NodeArena -> Bool -> NodeIdx -> (acc -> NodeIdx -> IO acc) -> acc -> IO acc
 foldChildrenInBoxM na skipPinned parentIdx f z = do
@@ -1755,20 +1748,19 @@ foldChildrenInBoxM na skipPinned parentIdx f z = do
 flowChildrenInOrder :: NodeArena -> NodeIdx -> IO [NodeIdx]
 flowChildrenInOrder na parentIdx = foldFlowChildrenM na parentIdx (\acc ci -> pure (ci : acc)) []
 
--- | Visit a node's children, floating ones included, in the order paint draws
--- them, so that each is drawn over the ones visited before it. A layered
--- container draws the children that are not pinned in declaration order,
--- later children on top. Any other node draws them from the last declared to
--- the first, so where two overlap the earlier one is on top. Either then
--- draws its pinned children, in declaration order, over all of those.
+-- | Visit a node's children, floating ones included, in paint order: each is
+-- drawn over those visited before it. A layered container visits unpinned
+-- children in declaration order, so later ones end up on top. Other nodes
+-- visit them last to first, so the earlier of two overlapping children is on
+-- top. Pinned children come after the rest, in declaration order.
 {-# INLINE forChildrenInPaintOrder_ #-}
 forChildrenInPaintOrder_ :: NodeArena -> NodeIdx -> (NodeIdx -> IO ()) -> IO ()
 forChildrenInPaintOrder_ na parentIdx f = do
   flow <- getFlow na parentIdx
   pinnedBelow <- hasPinnedBelow na parentIdx
   fc <- getFirstChild na parentIdx
-  -- The sibling links run from the last child to the first, so a child
-  -- visited after the rest of the list is visited in declaration order.
+  -- Sibling links run last to first, so recursing before visiting yields
+  -- declaration order.
   let inOrderIf pinned !ci = when (ci >= 0) $ do
         getNextSibling na ci >>= inOrderIf pinned
         isPinnedNode na ci >>= \p -> when (p == pinned) (f ci)
@@ -1782,9 +1774,9 @@ forChildrenInPaintOrder_ na parentIdx f = do
       | pinnedBelow -> pinnedLast fc
       | otherwise -> forChildNodes_ na parentIdx f
 
--- | A node's children but the floating ones, which paint draws as layers of
--- their own, from the one drawn on top to the one drawn first
--- ('forChildrenInPaintOrder_').
+-- | A node's non-floating children, topmost first (the reverse of
+-- 'forChildrenInPaintOrder_'). Floating children are painted as separate
+-- layers.
 childrenTopFirst :: NodeArena -> NodeIdx -> IO [NodeIdx]
 childrenTopFirst na parentIdx = do
   acc <- newIORef []
@@ -1793,23 +1785,22 @@ childrenTopFirst na parentIdx = do
     unless (isFloatingNode nt) $ modifyIORef' acc (ci :)
   readIORef acc
 
--- | What @f@ finds for the first child of @parentIdx@ it finds anything for,
--- asking the children in 'childrenTopFirst' order: 'firstChildJustM' where
--- one child can be drawn over another.
+-- | The first 'Just' that @f@ returns over @parentIdx@'s children in
+-- 'childrenTopFirst' order. Use it instead of 'firstChildJustM' where
+-- children can overlap.
 {-# INLINE firstChildOnTopJustM #-}
 firstChildOnTopJustM :: NodeArena -> NodeIdx -> (NodeIdx -> IO (Maybe a)) -> IO (Maybe a)
 firstChildOnTopJustM na parentIdx f =
   foldr (\ci rest -> f ci >>= maybe rest (pure . Just)) (pure Nothing) =<< childrenTopFirst na parentIdx
 
--- | Whether paint draws node @b@ over node @a@, declared before it: whether,
--- of the two children of the node where their branches meet,
--- 'forChildrenInPaintOrder_' visits @b@'s side last. Not when @b@ is inside
--- @a@, nor when they are in different trees.
+-- | Whether paint draws node @b@ over the earlier node @a@. At their common
+-- ancestor, this checks whether 'forChildrenInPaintOrder_' visits @b@'s
+-- branch last. False when @b@ is inside @a@ or they are in different trees.
 drawnOver :: NodeArena -> NodeIdx -> NodeIdx -> IO Bool
 drawnOver na b a = climb a b (-1) (-1)
   where
-    -- A parent's index is lower than its children's, so the later of @x@ and
-    -- @y@ climbs until they meet, each side keeping the node it came from.
+    -- Parents have lower indices, so climb from the higher of @x@ and @y@
+    -- until they meet, remembering the child each side came from.
     climb !x !y !ca !cb
       | x > y = getParent na x >>= \p -> climb p y x cb
       | x < y = getParent na y >>= \p -> climb x p ca y

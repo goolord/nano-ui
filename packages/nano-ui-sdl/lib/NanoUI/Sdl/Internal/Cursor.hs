@@ -30,9 +30,9 @@ data SdlCursors = SdlCursors
   { scDefault :: Ptr Mouse.SDL_Cursor
   -- ^ The platform's default arrow, which SDL owns.
   , scSystem :: IORef [(Mouse.SDL_SystemCursor, Ptr Mouse.SDL_Cursor)]
-  -- ^ The system cursors shown so far, each created the first time it is
-  -- wanted. A NULL cursor is one the platform could not create (headless and
-  -- dummy video drivers have none), so it is not asked for again.
+  -- ^ System cursors created so far, each on first use. A NULL entry is one
+  -- the platform could not create (headless and dummy video drivers have
+  -- none) and is not retried.
   , scCurrent :: IORef UiCursorKind
   , scTrace :: Bool
   }
@@ -52,9 +52,9 @@ destroyCursors :: SdlCursors -> IO ()
 destroyCursors SdlCursors {scSystem} =
   mapM_ destroyCursorSafe . filter (/= nullPtr) . map snd =<< readIORef scSystem
 
--- | The SDL system cursor that shows @kind@, or its 'cursorFallback';
--- 'Nothing' for the platform's default arrow. SDL itself shows the one-way
--- resize arrows as two-way ones on platforms without them.
+-- | The SDL system cursor for @kind@ (or its 'cursorFallback'); 'Nothing'
+-- for the default arrow. Platforms without one-way resize arrows show
+-- two-way ones; SDL handles that.
 sdlSystemCursor :: UiCursorKind -> Maybe Mouse.SDL_SystemCursor
 sdlSystemCursor kind = case cursorFallback kind of
   UiCursorPointer -> Just Mouse.SDL_SYSTEM_CURSOR_POINTER
@@ -78,8 +78,8 @@ sdlSystemCursor kind = case cursorFallback kind of
   UiCursorNwResize -> Just Mouse.SDL_SYSTEM_CURSOR_NW_RESIZE
   _ -> Nothing
 
--- | The cursor that shows @kind@: its 'sdlSystemCursor', created the first
--- time it is wanted, or the default arrow where the platform has none.
+-- | The cursor for @kind@: its 'sdlSystemCursor', created on first use, or
+-- the default arrow if the platform lacks it.
 cursorFor :: SdlCursors -> UiCursorKind -> IO (Ptr Mouse.SDL_Cursor)
 cursorFor SdlCursors {scDefault, scSystem} kind = case sdlSystemCursor kind of
   Nothing -> pure scDefault
@@ -103,8 +103,8 @@ syncPointerCursor cursors ctx inp = do
     showCursorKind cursors want
 
 -- | Show the cursor for @kind@, or hide it for 'UiCursorHidden' until
--- another kind is shown. Where even the default arrow is NULL,
--- SDL_SetCursor(NULL) redraws the cursor already shown.
+-- another kind is shown. If even the default arrow is NULL,
+-- SDL_SetCursor(NULL) just redraws the current cursor.
 showCursorKind :: SdlCursors -> UiCursorKind -> IO ()
 showCursorKind cursors kind = do
   hidden <- (== UiCursorHidden) <$> readIORef (scCurrent cursors)

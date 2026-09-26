@@ -62,10 +62,10 @@ alignFrameStart periodSec lastT = do
       now <- getMonotonicTime
       when (now < target) (fullSpin target)
 
--- | Stamp multi-click counts into an 'Input' record: presses of the same
--- button within 5 pixels and 0.4 seconds of the previous one count up to a
--- triple click. The ref holds the time, position, buttons and count of the
--- previous press.
+-- | Stamp multi-click counts into an 'Input'. A press of the same buttons
+-- within 5 pixels and 0.4 seconds of the previous press counts up, to a
+-- triple click at most. The ref holds the previous press's time, position,
+-- buttons and count.
 stampClicks :: IORef (Double, V2, MouseButtons, Int) -> Input -> IO Input
 stampClicks ref inp
   | not (anyButtonPressed inp) = pure inp
@@ -125,12 +125,12 @@ data SessionDriver ev = SessionDriver
     -- ^ Fold an event into the 'Input' state.
   , sdIsButtonEdge  :: ev -> Bool
     -- ^ Predicate identifying click/press boundaries where the event stream
-    -- should be split. The loop also splits it after a command key where
-    -- order would be lost ('NanoUI.Internal.Input.takeFrame').
+    -- should be split. 'NanoUI.Internal.Input.takeFrame' also splits after a
+    -- command key whose order relative to other input matters.
   , sdIsSessionQuit :: ev -> Bool
-    -- ^ Predicate for window close requests. One ends the session, or, for a
-    -- window whose settings say not to ('NanoUI.wsExitOnCloseRequest'), is
-    -- shown to the next frame ('NanoUI.winCloseRequested').
+    -- ^ Predicate for window close requests. A request ends the session
+    -- unless 'NanoUI.wsExitOnCloseRequest' is off, in which case the next
+    -- frame sees it through 'NanoUI.winCloseRequested'.
   , sdSyncDisplay   :: Context -> Input -> IO (Context, Input)
     -- ^ Backend-specific display synchronization (window dimensions, DPI scale).
   , sdDebug         :: DebugSamplerRef
@@ -210,7 +210,8 @@ debugHudTimeout = round (debugRefreshSec * 1000)
 
 -- | Run an event-driven session loop until the window is closed, Ctrl+C is
 -- pressed outside a text field, a view calls 'NanoUI.quitUi', or
--- 'sdShouldQuit' says so. The background jobs the view started end with it.
+-- 'sdShouldQuit' returns 'True'. Background tasks started by the view are
+-- cancelled on exit.
 runSessionLoop ::
   SessionDriver ev ->
   Context ->
@@ -284,7 +285,7 @@ runSessionLoop drv ctx0 inp0 = do
         -- Hard quit is ignored while a text editor is active.
         hardQuit <-
           if isHardQuitInput frameInp then not <$> textInputEditActive ctx else pure False
-        -- A close request ends the session, or asks the view.
+        -- A close request ends the session, or is passed to the view.
         let closing = any (sdIsSessionQuit drv) group
         closeNow <- if closing && not hardQuit then requestWindowClose ctx else pure False
         unless (hardQuit || closeNow) $ do

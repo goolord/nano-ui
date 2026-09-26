@@ -46,7 +46,7 @@ demoPeople =
   , DemoPerson "Ruth" "Ops" 47 "Boston" "Staff"
   ]
 
--- | The table's columns: each header with its field's text.
+-- | Table columns as header and field text.
 peopleColumns :: [(T.Text, DemoPerson -> T.Text)]
 peopleColumns =
   [ ("Name", demoPersonName)
@@ -108,8 +108,8 @@ demoSwatches =
   where
     square = opaqueImage 32 32
 
--- | A 96 by 48 landscape, wide and lopsided enough to tell each content fit
--- and turn apart: a sky over hills, and a sun to the right.
+-- | A 96x48 landscape (sky, hills, sun on the right). It is wide and
+-- asymmetric so each content fit and rotation looks different.
 demoLandscape :: BS.ByteString
 demoLandscape = opaqueImage 96 48 pixel
   where
@@ -121,8 +121,8 @@ demoLandscape = opaqueImage 96 48 pixel
         hill = 30 + round (6 * sin (fromIntegral x / 9 :: Double))
         sun = (x - 70) ^ (2 :: Int) + (y - 14) ^ (2 :: Int) < 64
 
--- | A @w@ by @h@ opaque RGBA image, rows top to bottom, from each pixel's
--- red, green and blue.
+-- | A @w@ x @h@ opaque RGBA image, rows top to bottom, built from a per-pixel
+-- RGB function.
 opaqueImage :: Int -> Int -> (Int -> Int -> (Int, Int, Int)) -> BS.ByteString
 opaqueImage w h pixel =
   BS.pack

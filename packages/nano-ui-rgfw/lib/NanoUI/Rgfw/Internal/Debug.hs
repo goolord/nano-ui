@@ -1,5 +1,5 @@
 -- | RGFW frame statistics and the debug window body that shows them with the
--- core debug rows, and the layout overlay's toggle.
+-- core debug rows and the layout overlay toggle.
 module NanoUI.Rgfw.Internal.Debug
   ( RgfwDebugSnapshot (..)
   , RgfwFrameStats (..)
@@ -137,10 +137,9 @@ data RgfwDebugRows = RgfwDebugRows !RgfwDebugSnapshot !(Rows, Rows, Rows, Rows)
 
 type Rows = [(Text, Text)]
 
--- | Draw timing, geometry, display, and RTS rows for a snapshot, and a
--- checkbox for the layout overlay, with the node under the pointer while it
--- is on. Place this inside a window or panel; it does not create its own
--- container.
+-- | Draw timing, geometry, display, and RTS rows for a snapshot, plus a
+-- layout overlay checkbox that, when on, shows the node under the pointer.
+-- Place this inside a window or panel; it creates no container.
 debugWindowBody :: Ui :> es => RgfwDebugSnapshot -> Eff es ()
 debugWindowBody snap = do
   ctx <- askContext

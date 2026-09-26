@@ -23,8 +23,8 @@ tests =
   , spec "wrap-keeps-spaces" runWrapKeepsSpacesTest
   ]
 
--- | A line ends at a run of spaces and drops it; an indent and the runs of
--- spaces inside a line stay, as code needs.
+-- | Wrapping drops the run of spaces at a line break but keeps indentation
+-- and runs of spaces inside a line, which code needs.
 runWrapKeepsSpacesTest :: Context -> IORef Int -> IO ()
 runWrapKeepsSpacesTest _ failed = do
   let lineW t = pure (fromIntegral (T.length t))

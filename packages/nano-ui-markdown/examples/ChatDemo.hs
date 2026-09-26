@@ -1,5 +1,5 @@
--- | A chat reply streamed into a Markdown widget a few characters at a time,
--- the way a language model's answer arrives, with 'useStream'.
+-- | A chat reply streamed into a Markdown widget a few characters at a time
+-- with 'useStream', as a language model's answer arrives.
 module ChatDemo (chatDemoUi) where
 
 import Control.Concurrent (threadDelay)
@@ -44,7 +44,7 @@ import NanoUI
   )
 import NanoUI.Markdown
 
--- | The reply, cut into tokens of a few characters.
+-- | The reply in 4-character tokens.
 tokens :: [Text]
 tokens = T.chunksOf 4 reply
 
@@ -53,17 +53,15 @@ tokensPerSecond = 60
 
 chatDemoUi :: NanoUI ()
 chatDemoUi = do
-  -- The reply streams in on a thread of its own, as a language model's
-  -- answer would from the network: each token is appended there, and the
-  -- view reads how many have arrived and the document they make. Replay
-  -- starts the stream again under a new key.
+  -- A worker thread appends tokens; the view reads the token count and the
+  -- document so far. Replay restarts the stream under a new key.
   (replays, setReplays) <- useInt 0
   (arrived, doc) <- useStream replays (0 :: Int, emptyMarkdown) $ \update ->
     forM_ tokens $ \token -> do
       threadDelay (1000000 `div` tokensPerSecond)
       update (\(n, d) -> (n + 1, appendMarkdown token d))
   let streaming = arrived < length tokens
-  -- How many tokens the last frame showed, to follow the reply as it grows.
+  -- Token count shown last frame, used to detect growth.
   (shown, setShown) <- useInt 0
   let grew = arrived /= shown
   when grew (setShown arrived)
@@ -76,7 +74,7 @@ chatDemoUi = do
       whenM (button "Replay") (setReplays (replays + 1))
     sid <- currentId
     metrics <- getScrollMetricsUi sid
-    -- Follow the reply as text arrives, unless it has been scrolled up.
+    -- Stick to the bottom as text arrives, unless scrolled up.
     for_ metrics $ \m ->
       when (grew && v2Y (scrollOffset m) >= v2Y (scrollRange m) - 24) $
         setScrollOffsetUi sid (V2 0 1e9)

@@ -20,8 +20,8 @@ tests =
 inp :: Input
 inp = withInput 200 100
 
--- | Install a window host that records what it is asked, newest first, for
--- a window opened from @settings@.
+-- | Install a window host for a window opened with @settings@. It records
+-- its calls, newest first.
 recordingHost :: WindowSettings -> Context -> IO (IORef [String])
 recordingHost settings ctx = do
   calls <- newIORef []
@@ -50,8 +50,9 @@ asked ctx calls v = warmup ctx inp v >> reverse <$> readIORef calls <* writeIORe
 solid :: Int -> Int -> RgbaPixels
 solid w h = fromJust (rgbaPixels w h (BS.replicate (w * h * 4) 255))
 
--- | Without a window a screenshot is answered at once with nothing, requests
--- do nothing, and the window is the frame's size, focused and ordinary.
+-- | Without a window, a screenshot is answered at once with nothing,
+-- requests do nothing, and the window reports the frame's size, focused and
+-- in its normal state.
 runWithoutHostTest :: Context -> IORef Int -> IO ()
 runWithoutHostTest ctx failed = do
   answers <- newIORef []
@@ -73,7 +74,7 @@ runWithoutHostTest ctx failed = do
   -- A close request ends a session with no window to ask.
   assert failed =<< requestWindowClose ctx
 
--- | Pixels are made only with four bytes a pixel of a positive size.
+-- | Pixels are built only from 4 bytes per pixel and a positive size.
 runPixelsTest :: Context -> IORef Int -> IO ()
 runPixelsTest _ failed = do
   let bytes n = BS.replicate n 7
@@ -81,8 +82,9 @@ runPixelsTest _ failed = do
     map isJust [rgbaPixels 2 3 (bytes 24), rgbaPixels 2 3 (bytes 23), rgbaPixels 2 3 (bytes 25), rgbaPixels 0 3 (bytes 0), rgbaPixels (-2) (-3) (bytes 24)]
   assertEq failed (Just (2, 3, 24)) ((\p -> (rgbaWidth p, rgbaHeight p, BS.length (rgbaBytes p))) <$> rgbaPixels 2 3 (bytes 24))
 
--- | Screenshots wait for the backend, after their frame, and are answered once,
--- in order, from one capture at the scale last reported, which asks for a frame.
+-- | Screenshots wait for the backend until after their frame, then are
+-- answered once, in order, from a single capture at the last reported scale.
+-- Answering requests a frame.
 runScreenshotRequestsTest :: Context -> IORef Int -> IO ()
 runScreenshotRequestsTest ctx failed = do
   calls <- recordingHost defaultWindowSettings ctx
@@ -116,9 +118,9 @@ runScreenshotRequestsTest ctx failed = do
   -- Nothing was asked of the window itself.
   assertEq failed [] =<< readIORef calls
 
--- | Installing a host applies what a window does not open with through it:
--- the size limits, the icon, the opacity and the position. Setters then act
--- only on what differs from the settings the window opened with.
+-- | Installing a host applies, through it, the settings a window does not
+-- open with: size limits, icon, opacity and position. Setters then act only
+-- on values that differ from the opening settings.
 runInstallTest :: Context -> IORef Int -> IO ()
 runInstallTest ctx failed = do
   let settings =
@@ -154,8 +156,8 @@ runSettersTest ctx failed = do
     ]
     $ \(v, expect) -> assertEq failed expect =<< asked ctx calls (view v)
 
--- | Commands act on every call; toggling maximizes or restores as the
--- backend last reported the window.
+-- | Commands act on every call; toggling maximizes or restores based on the
+-- window state the backend last reported.
 runCommandsTest :: Context -> IORef Int -> IO ()
 runCommandsTest ctx failed = do
   calls <- recordingHost defaultWindowSettings ctx
@@ -168,7 +170,7 @@ runCommandsTest ctx failed = do
   assertEq failed ["restore"] =<< asked ctx calls toggleMaximizedUi
 
 -- | A view reads the state the backend reported, at the frame's size. A
--- change asks for a frame once a view has read the state, and not before.
+-- change requests a frame only once a view has read the state.
 runStateTest :: Context -> IORef Int -> IO ()
 runStateTest ctx failed = do
   _ <- recordingHost defaultWindowSettings ctx
@@ -179,8 +181,8 @@ runStateTest ctx failed = do
   assertEq failed False =<< changed reported
   assertEq failed True =<< changed reported {winFocused = True}
 
--- | A screenshot asked for from a click is asked once, though the click's hook
--- write runs the view again.
+-- | A screenshot requested from a click is requested once, even though the
+-- click's hook write reruns the view.
 runScreenshotFromClickTest :: Context -> IORef Int -> IO ()
 runScreenshotFromClickTest ctx failed = do
   _ <- recordingHost defaultWindowSettings ctx
@@ -201,8 +203,9 @@ runScreenshotFromClickTest ctx failed = do
   answerScreenshots ctx (pure (Just (solid 1 1)))
   assertEq failed 1 =<< readIORef answers
 
--- | 'useScreenshot' waits on a thread of its own for the next frame on
--- screen, wakes the loop for it, and returns it; the same key asks no more.
+-- | 'useScreenshot' waits in a background task for the next frame on screen,
+-- wakes the loop, and returns the screenshot. The same key captures only
+-- once.
 runUseScreenshotTest :: Context -> IORef Int -> IO ()
 runUseScreenshotTest ctx failed = do
   _ <- recordingHost defaultWindowSettings ctx
@@ -210,8 +213,8 @@ runUseScreenshotTest ctx failed = do
   captures <- newIORef (0 :: Int)
   let capture = Just (solid 4 4) <$ modifyIORef' captures (+ 1)
       ui = fmap (rgbaWidth . screenshotPixels) <$> useScreenshot ("shot" :: String)
-      -- Frames, each answered as a backend would, until the view has its
-      -- screenshot.
+      -- Run frames, answering each as a backend would, until the view has
+      -- its screenshot.
       go :: Int -> IO (Maybe Int)
       go n = do
         shot <- evalUi ctx inp ui

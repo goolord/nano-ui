@@ -1,4 +1,4 @@
--- | Appending text parses to what parsing the whole text does.
+-- | Appending text gives the same parse as parsing the whole text.
 module Incremental (spec) where
 
 import Data.List (inits, sort)
@@ -8,11 +8,10 @@ import NanoUI.Markdown
 import Test.Hspec
 import Test.QuickCheck
 
--- | A document built from lines that exercise the parser: container markers
--- in front of block starts and lines that start a block only in some places,
--- inline text full of delimiters, brackets and links, link reference
--- definitions, HTML, and blank or indented lines, each line with its own
--- ending.
+-- | A document of parser-stressing lines, each with its own line ending:
+-- container markers before block starts, lines that start a block only in
+-- some contexts, inline text dense with delimiters, brackets and links, link
+-- reference definitions, HTML, and blank or indented lines.
 newtype Doc = Doc [(Text, Text)]
 
 instance Show Doc where
@@ -50,7 +49,7 @@ genLine = do
       ]
   pure (T.concat prefixes <> indent <> body)
 
--- | Up to @k@ of a generator's values.
+-- | Between 0 and @k@ generated values.
 upTo :: Int -> Gen a -> Gen [a]
 upTo k g = chooseInt (0, k) >>= (`vectorOf` g)
 
@@ -68,7 +67,7 @@ genToken =
     , (1, elements ["  ", "\\"] >>= \end -> pure (end <> "\n"))
     ]
 
--- | A document and the places it is cut at, which shrink with it.
+-- | A document and its cut positions; both shrink.
 data Cut = Cut Doc [Int]
 
 instance Show Cut where
@@ -80,22 +79,22 @@ instance Arbitrary Cut where
     Cut d <$> upTo 12 (chooseInt (0, T.length (docText d)))
   shrink (Cut d cuts) = [Cut d cuts' | cuts' <- shrinkList shrink cuts] ++ [Cut d' cuts | d' <- shrink d]
 
--- | The text cut at the given places, those past its end at its end, empty
--- pieces included.
+-- | Split the text at the given positions (clamped to its length), keeping
+-- empty pieces.
 chunksAt :: [Int] -> Text -> [Text]
 chunksAt cuts t = zipWith (\from to -> T.take (to - from) (T.drop from t)) bounds (drop 1 bounds)
   where
     bounds = 0 : sort (map (min (T.length t)) cuts) ++ [T.length t]
 
--- | The document after each piece is appended, the empty one first.
+-- | The document after each append, starting with the empty one.
 streams :: [Text] -> [MarkdownDoc]
 streams = scanl (flip appendMarkdown) emptyMarkdown
 
 appendAll :: [Text] -> MarkdownDoc
 appendAll = last . streams
 
--- | Streamed a character at a time, the document has the blocks of the text
--- so far at every step.
+-- | Streaming one character at a time, every step's blocks match a full
+-- parse of the text so far.
 streamsLikeWhole :: Text -> Expectation
 streamsLikeWhole t =
   map markdownBlocks (streams (T.chunksOf 1 t)) `shouldBe` map parseMarkdownBlocks (T.inits t)
@@ -115,9 +114,9 @@ spec = do
          in length (show (parseMarkdownBlocks t)) `seq` markdownBlocks (appendMarkdown t (parseMarkdown t)) === parseMarkdownBlocks (t <> t)
 
   describe "a line right under a paragraph" $ do
-    -- Such a line can continue the paragraph, underline it, make it a
-    -- table's header, or fail to interrupt it, where alone it would start
-    -- a block: the paragraph is parsed again with it.
+    -- Such a line may underline the paragraph, make it a table header, or
+    -- fail to interrupt it where it would otherwise start a block, so the
+    -- paragraph must be reparsed with it.
     let underParagraph name a b = it name $ do
           markdownBlocks (appendMarkdown b (parseMarkdown a)) `shouldBe` parseMarkdownBlocks (a <> b)
           streamsLikeWhole (a <> b)
@@ -135,7 +134,7 @@ spec = do
           whole = parseMarkdownBlocks msg
           streamed = streams (T.chunksOf 3 msg)
       markdownBlocks (last streamed) `shouldBe` whole
-      -- Once a block is closed it stays as it is while the rest streams in.
+      -- A closed block stays unchanged while the rest streams in.
       let settled = [length (takeWhile id (zipWith (==) (markdownBlocks p) whole)) | p <- streamed]
       settled `shouldBe` sort settled
     it "continues an open code block, list, table and block quote" $
@@ -177,8 +176,8 @@ spec = do
     it "shows as the parse of its text" $
       show (appendMarkdown "b" (parseMarkdown "*a*\n")) `shouldBe` "parseMarkdown \"*a*\\nb\""
     it "keeps every token in a store that skips equal documents" $ do
-      -- As nano-ui's useState does: a line ending changes no block yet, but
-      -- the text after it does.
+      -- The store mimics nano-ui's useState. A line ending changes no block
+      -- yet, but the doc must still differ or the text after it is lost.
       let tokens = ["Hello", "\n", "\n", "- one", "\n", "- two", "\n", "\n", "```", "\n", "x", "\n", "```"]
           store old new = if new == old then old else new
           kept = scanl (\doc tok -> store doc (appendMarkdown tok doc)) emptyMarkdown tokens

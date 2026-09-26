@@ -63,9 +63,9 @@ pokeQuadSIMD vertices vOffset indices iOffset x y w h =
       y1 = y + h
    in pokeQuadCornersSIMD vertices vOffset indices iOffset x y x1 y x1 y1 x y1
 
--- | Quad with corners of its own, for one that is not axis-aligned: 4
--- vertices and 6 indices. The corners take the texture's top-left,
--- top-right, bottom-right and bottom-left in turn.
+-- | Quad with arbitrary corners, for non-axis-aligned quads: 4 vertices and
+-- 6 indices. The corners map to the texture's top-left, top-right,
+-- bottom-right and bottom-left, in that order.
 {-# INLINE pokeQuadCornersSIMD #-}
 pokeQuadCornersSIMD ::
   Ptr Word8 ->

@@ -79,7 +79,7 @@ inspect $ 'gradientQuadProbe `doesNotUse` 'SIMD.pokeVertexSIMD
 inspect $ hasNoTypeClasses 'gradientQuadProbe
 inspect $ 'gradientQuadProbe `hasNoType` ''(,,,)
 
--- The turned image quad's writer, with a corner of its own at each vertex.
+-- The rotated image quad writer, which takes each corner explicitly.
 cornerQuadProbe :: Ptr Word8 -> Ptr Word8 -> Int -> Float -> Word32 -> IO ()
 cornerQuadProbe vp ip offset x base =
   SIMD.pokeQuadCornersSIMD vp offset ip offset x 0 x x 0 x 0 0 0 0 1 1 x x x 1 base
@@ -148,8 +148,8 @@ inspect $ hasNoTypeClasses 'commandWriteProbe
 inspect $ 'commandReadProbe `doesNotUse` 'U.fromURepr
 inspect $ 'commandWriteProbe `doesNotUse` 'U.toURepr
 
--- A block that draws no curve and asks for no draw context builds neither
--- the curve tolerance nor the context.
+-- A block with no curves and no draw-context use must build neither the
+-- curve tolerance nor the context.
 canvasProbe :: CustomDrawContext -> Float -> Color -> SmallArray DrawOp
 canvasProbe cdc x color = runCanvasFor cdc $ do
   drawRect (Rect x 2 3 4) color

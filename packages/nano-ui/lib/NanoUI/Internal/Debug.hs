@@ -1,6 +1,6 @@
 -- | Debug readout sampling shared by the backends: frame timing and skip
--- counts, RTS statistics, draw counts, and the rows the debug windows show,
--- the layout overlay's among them.
+-- counts, RTS statistics, draw counts, and the rows shown by the debug
+-- windows and the layout overlay.
 module NanoUI.Internal.Debug
   ( debugRefreshSec
   , CoreDebugSnapshot (..)
@@ -222,13 +222,10 @@ formatDrawRows s =
   , ("commands", T.pack (printf "%10d" (dbgCmds s)))
   ]
 
--- | Label/value rows for the node under the pointer while the layout overlay
--- is on ('NanoUI.Internal.Context.getExplainedNode'): what it is, its widget
--- id, how deep, where, its padding (left, right, top, bottom) and the content
--- box that leaves, what its layout asked for (the width and height with
--- their limits, and the gap), and, where they are not the defaults, where it
--- is pinned and how it takes the pointer. One row saying there is none
--- otherwise.
+-- | Label/value rows describing the node under the pointer while the layout
+-- overlay is on ('NanoUI.Internal.Context.getExplainedNode'). Padding is
+-- printed left, right, top, bottom. The pin and pointer rows appear only when
+-- they differ from the defaults.
 formatExplainRows :: Maybe ExplainedNode -> [(Text, Text)]
 formatExplainRows Nothing = [("node", "none under the pointer")]
 formatExplainRows (Just node) =
@@ -251,8 +248,8 @@ formatExplainRows (Just node) =
     V2 minW minH = explainedMin node
     V2 maxW maxH = explainedMax node
 
--- | A sizing and the limits beside it that are not the defaults (none below,
--- and none above at 1e8 or more).
+-- | A sizing plus any non-default limits. A min of 0 or a max of 1e8 or more
+-- counts as no limit.
 sizingText :: Sizing -> Float -> Float -> Text
 sizingText sizing lo hi =
   T.pack (base <> (if lo > 0 then printf ", min %.1f" lo else "") <> (if hi < 1e8 then printf ", max %.1f" hi else ""))

@@ -35,24 +35,23 @@ inp0 = withInput 400 300
 ctrlHeld :: Modifiers
 ctrlHeld = noModifiers {modCtrl = True}
 
--- | The view @mk note@, and an action running a frame that returns the names
--- @note@ recorded in it, newest first.
+-- | Build the view @mk note@ and a frame runner returning what @note@
+-- recorded that frame, newest first.
 noting :: Context -> ((T.Text -> NanoUI ()) -> NanoUI a) -> IO (NanoUI a, Input -> IO [T.Text])
 noting ctx mk = do
   fired <- newIORef []
   let ui = mk (\c -> uiIO (modifyIORef' fired (c :)))
   pure (ui, \i -> writeIORef fired [] >> runFrame ctx i ui >> readIORef fired)
 
--- | Bind each chord to recording its label.
 binds :: (T.Text -> NanoUI ()) -> [Shortcut] -> NanoUI ()
 binds note = mapM_ (\c -> whenM (shortcut c) (note (shortcutLabel c)))
 
--- | Press each chord in a frame of its own: it fires just itself, or nothing.
+-- | Press each chord in its own frame and expect only it to fire, or nothing.
 fires :: IORef Int -> (Input -> IO [T.Text]) -> Bool -> [Shortcut] -> IO ()
 fires failed press yes = mapM_ (\c -> let l = shortcutLabel c in assertEq failed (l, [l | yes]) . (l,) =<< press (chordInp c inp0))
 
--- | Chords read from text are the chords put together with '<>', every key
--- and modifier among them, and the labels a menu shows for them.
+-- | Parsed chords equal the '<>'-built ones for every key and modifier, and
+-- labels match what a menu shows.
 runShortcutParseTest :: Context -> IORef Int -> IO ()
 runShortcutParseTest _ failed = do
   forM_
@@ -63,11 +62,11 @@ runShortcutParseTest _ failed = do
     , ("<", key '<'), ("C-<", ctrl <> key '<'), ("<Escape>", key KeyEscape), ("C-=", ctrl <> key '=')
     ]
     $ \(txt, sc) -> assertEq failed (txt, Right sc) (txt, parseShortcut txt)
-  -- The key is the last one given; modifiers add up, and none is a chord no key presses.
+  -- The last key wins and modifiers accumulate; a chord without a key never fires.
   assertEq failed (shift <> ctrl <> key 'b') (ctrl <> key 'a' <> shift <> key 'b')
   assertEq failed "Ctrl+Shift" (shortcutLabel (ctrl <> shift))
   assertEq failed [] (filter (isRight . parseShortcut) ["", "C-", "C-S-", "X-p", "<F25>", "<F0>", "C-<Bogus>", "ab", "<Enter"])
-  -- Every key, under every set of modifiers, reads back from its chord.
+  -- Round-trip every key under every modifier combination.
   let keys = [KeyBackspace, KeyDelete, KeyEnter, KeyEscape, KeyTab, KeyLeft, KeyRight, KeyUp, KeyDown, KeyHome, KeyEnd, KeyPageUp, KeyPageDown, KeyInsert, KeySpace, KeyPrintScreen, KeyPause, KeyCapsLock, KeyNumLock, KeyScrollLock, KeyMenu] ++ map KeyF [1 .. 24] ++ map KeyChar "a1=+-<>,."
       chordText (Shortcut k m) = T.concat ([p | (True, p) <- zip [modCtrl m, modShift m, modAlt m, modSuper m] ["C-", "S-", "A-", "s-"]] ++ foldMap (pure . keyText) k)
       keyText = \case
@@ -77,7 +76,7 @@ runShortcutParseTest _ failed = do
   forM_ [("S-C-p", "Ctrl+Shift+P"), ("C-+", "Ctrl++"), ("<Escape>", "Escape"), ("<PageDown>", "PageDown"), ("<F11>", "F11")] $ \(txt, lbl) ->
     assertEq failed (Right lbl) (shortcutLabel <$> parseShortcut txt)
 
--- | A chord fires only with exactly its modifiers; typed text or a release is no press.
+-- | A chord needs exactly its modifiers; typed text and releases do not fire it.
 runShortcutExactModifiersTest :: Context -> IORef Int -> IO ()
 runShortcutExactModifiersTest ctx failed = do
   (ui, press) <- noting ctx $ \note -> column (binds note [ctrl <> key 's', ctrl <> shift <> key 's', key 's'] >> label "view")
@@ -88,8 +87,8 @@ runShortcutExactModifiersTest ctx failed = do
     assertEq failed [] =<< press i
   assertEq failed [True, False] [shortcutIn (ctrl <> key 's') (chordInp k inp0) | k <- [ctrl <> key 's', ctrl <> shift <> key 's']]
 
--- | A press fires once, not in the pass its hook write reruns nor for a later
--- binding of the chord, even when the key auto-repeated within the frame.
+-- | A press fires once: not again in the rerun pass after a hook write, not
+-- for a second binding, and not for repeats within the frame.
 runShortcutOncePerPressTest :: Context -> IORef Int -> IO ()
 runShortcutOncePerPressTest ctx failed = do
   (ui, press) <- noting ctx $ \note -> column $ do
@@ -105,7 +104,7 @@ runShortcutOncePerPressTest ctx failed = do
   assertEq failed ["pass"] =<< press inp0
   assertSpansHas failed "2" =<< collectTextSpans ctx
 
--- | Behind an open modal only the shortcuts inside it fire; a raw key listener hears nothing.
+-- | With a modal open only its own shortcuts fire, and raw key listeners hear nothing.
 runShortcutModalTest :: Context -> IORef Int -> IO ()
 runShortcutModalTest ctx failed = do
   openRef <- newIORef True
@@ -124,8 +123,8 @@ runShortcutModalTest ctx failed = do
   assertEq failed ["raw", "Ctrl+E"] =<< press (chordInp (ctrl <> key 'e') inp0)
   fires failed press False [ctrl <> key 'd']
 
--- | A focused text field keeps what it types and edits with, even from an
--- earlier shortcut; the other chords still fire.
+-- | A focused text field keeps its typing and editing keys, even when a
+-- shortcut was bound first; other chords still fire.
 runShortcutFocusedFieldTest :: Context -> IORef Int -> IO ()
 runShortcutFocusedFieldTest ctx failed = do
   textRef <- newIORef "hello"
@@ -142,10 +141,9 @@ runShortcutFocusedFieldTest ctx failed = do
   writeIORef (ctxFocusId ctx) (WidgetId 0)
   fires failed press True [ctrl <> key 'a', key 'j', key KeyEnter]
 
--- | A focused button keeps Enter and Space, alone or with Shift, and a
--- slider the arrows too; a chord of them, such as Ctrl+Enter or Alt+Left,
--- is a shortcut's, and the control does not act on it. A custom widget
--- keeps what it claims: here every key.
+-- | A focused button keeps Enter and Space (plain or with Shift), a slider
+-- also the arrows. Ctrl+Enter, Alt+Left and similar go to shortcuts instead.
+-- A custom widget keeps the keys it claims, here all of them.
 runShortcutFocusedControlTest :: Context -> IORef Int -> IO ()
 runShortcutFocusedControlTest ctx failed = do
   let chords = [key KeyEnter, shift <> key KeyEnter, ctrl <> key KeyEnter, key KeyRight, shift <> key KeyRight, alt <> key KeyLeft, key 's']
@@ -172,8 +170,8 @@ runShortcutFocusedControlTest ctx failed = do
   warmupFocused c inp0 customUi
   fires failed pressC False chords
 
--- | An Escape shortcut takes Escape, so the app does not quit on it, and a Tab
--- shortcut keeps focus where it is.
+-- | An Escape shortcut consumes Escape so the app does not quit, and a Tab
+-- shortcut does not move focus.
 runShortcutEscapeTabTest :: Context -> IORef Int -> IO ()
 runShortcutEscapeTabTest ctx failed = do
   (ui, press) <- noting ctx $ \note -> column $ do
@@ -189,8 +187,8 @@ runShortcutEscapeTabTest ctx failed = do
   fires failed press True [ctrl <> key KeyTab]
   assertEq failed a =<< getFocusId ctx
 
--- | A menu row binds its chord only while its menu is open, which shows the
--- chord's label, and a chord with no key shows its modifiers and binds nothing.
+-- | A menu row binds its chord only while the menu is open and shows its
+-- label. A keyless chord shows its modifiers and binds nothing.
 runShortcutMenuItemTest :: Context -> IORef Int -> IO ()
 runShortcutMenuItemTest ctx failed = do
   (ui, press) <- noting ctx $ \note -> column $ do
@@ -208,8 +206,8 @@ runShortcutMenuItemTest ctx failed = do
   fires failed press False [key 's', ctrl <> key 'd']
   fires failed press True [ctrl <> key 's']
 
--- | Key releases and held keys reach the view, and 'clearEphemeral' treats a
--- release as it treats a press.
+-- | Releases and held keys reach the view; 'clearEphemeral' clears releases
+-- like presses.
 runKeyReleaseTest :: Context -> IORef Int -> IO ()
 runKeyReleaseTest ctx failed = do
   let keys = sequence [keyPressed KeySpace, keyReleased KeySpace, keyHeld KeySpace]
@@ -220,13 +218,13 @@ runKeyReleaseTest ctx failed = do
   warmup ctx inp0 ui
   forM_ [(down, [True, False, True]), (holding, [False, False, True]), (up, [False, True, False]), (clearEphemeral up, [False, False, False])] $ \(i, seen) ->
     assertEq failed seen =<< evalUi ctx i ui
-  -- An auto-repeat lists a held key once.
+  -- A repeated key appears once in the held set.
   assertEq failed ([KeySpace], [], [KeySpace]) (toList (inputKeysHeld holding), toList (inputKeysReleased (clearEphemeral up)), toList (inputKeysHeld (applyKey KeySpace True down)))
   assert failed (inputInteracted holding up)
   assertEq failed [False, False, False] =<< evalUi ctx down (disabledWhen True keys)
 
--- | The key listeners hear only the keys the focused widget leaves: a text
--- field's Delete is its own, and F2 the view's; the input has both.
+-- | Key listeners hear only keys the focused widget does not claim: a text
+-- field keeps Delete, F2 reaches the view. The raw input still has both.
 runKeyListenersFocusTest :: Context -> IORef Int -> IO ()
 runKeyListenersFocusTest ctx failed = do
   textRef <- newIORef "hello"
@@ -240,9 +238,9 @@ runKeyListenersFocusTest ctx failed = do
   _ <- runFrame ctx inp0 ui
   assertEq failed [(True, True), (True, True)] =<< evalUi ctx pressBoth ui
 
--- | A held key's auto-repeats are presses that are not new: 'shortcut' and
--- 'keyPressed' fire on them, 'shortcutOnce' and 'keyPressedOnce' do not,
--- and a 'shortcutOnce' that does not fire leaves them to a later 'shortcut'.
+-- | Auto-repeats are presses but not new ones: 'shortcut' and 'keyPressed'
+-- fire on them, 'shortcutOnce' and 'keyPressedOnce' do not. A 'shortcutOnce'
+-- that does not fire leaves the repeat to a later 'shortcut'.
 runKeyRepeatsTest :: Context -> IORef Int -> IO ()
 runKeyRepeatsTest ctx failed = do
   (ui, press) <- noting ctx $ \note -> column $ do
@@ -254,17 +252,16 @@ runKeyRepeatsTest ctx failed = do
   warmup ctx inp0 ui
   let down c = chordInp (ctrl <> key c) inp0
       repeated c = (applyKey (KeyChar c) True (clearEphemeral (down c)))
-  -- The key pressed down, then auto-repeating while held.
   assertEq failed ["pressed once", "pressed", "k"] =<< press (down 'k')
   assertEq failed ["pressed", "k"] =<< press (repeated 'k')
   assertEq failed ["j once"] =<< press (down 'j')
   assertEq failed ["j"] =<< press (repeated 'j')
-  -- Backends pass every repeat in; the key held is listed once.
+  -- Backends pass every repeat; the held set lists the key once.
   let r = repeated 'k'
   assertEq failed ([KeyChar 'k'], [], [KeyChar 'k']) (toList (inputKeys r), toList (inputKeysNew r), toList (inputKeysHeld r))
 
--- | Holding Enter types a line break on every repeat in a text area, but
--- presses a focused button once, and submits a text field once.
+-- | Held Enter repeats line breaks in a text area but clicks a button and
+-- submits a text field only once.
 runKeyRepeatsWidgetsTest :: Context -> IORef Int -> IO ()
 runKeyRepeatsWidgetsTest ctx failed = do
   areaRef <- newIORef ""
@@ -282,8 +279,8 @@ runKeyRepeatsWidgetsTest ctx failed = do
   warmupFocused f inp0 field
   assertEq failed [True, False] . map (respSubmitted . fst) =<< mapM (\i -> evalUi f i field) [keyInp KeyEnter inp0, keyRepeatInp KeyEnter inp0]
 
--- | Keys and mouse buttons read alike from an input; a window that loses
--- the keyboard lets go of the keys and modifiers held.
+-- | Keys and mouse buttons share one query API; losing keyboard focus
+-- releases held keys and modifiers.
 runKeyPressableTest :: Context -> IORef Int -> IO ()
 runKeyPressableTest _ failed = do
   let down = applyMouseButton MouseMiddle True (applyKey KeyEnter True inp0)
@@ -295,12 +292,12 @@ runKeyPressableTest _ failed = do
   let blurred = releaseAllKeys (clearEphemeral (chordInp (ctrl <> key 's') inp0))
   assertEq failed ([], [KeyChar 's'], noModifiers) (toList (inputKeysHeld blurred), toList (inputKeysReleased blurred), inputModifiers blurred)
 
--- | Ctrl+C quits from its key as it did from its typed letter.
+-- | Ctrl+C is a hard quit when it arrives as a key, not just as text.
 runKeyHardQuitTest :: Context -> IORef Int -> IO ()
 runKeyHardQuitTest _ failed =
   assertEq failed [True, False, False] [isHardQuitInput (chordInp c inp0) | c <- [ctrl <> key 'c', key 'c', ctrl <> shift <> key 'x']]
 
--- | A focused text area keeps Enter and leaves Ctrl+Enter and Alt+Enter to a shortcut.
+-- | A focused text area keeps Enter and Shift+Enter; Ctrl+Enter and Alt+Enter go to shortcuts.
 runShortcutFocusedTextAreaTest :: Context -> IORef Int -> IO ()
 runShortcutFocusedTextAreaTest ctx failed = do
   textRef <- newIORef "hi"
@@ -311,8 +308,8 @@ runShortcutFocusedTextAreaTest ctx failed = do
   fires failed press True [ctrl <> key KeyEnter, alt <> key KeyEnter]
   assertEq failed 2 . T.count "\n" =<< readIORef textRef
 
--- | Ctrl+F moves the keyboard from code to a search box, which takes the next
--- frame's typing; the chord types nothing into the field it left.
+-- | Ctrl+F focuses a search box from code. The next frame's typing goes there
+-- and the chord types nothing into the previous field.
 runShortcutFocusFromCodeTest :: Context -> IORef Int -> IO ()
 runShortcutFocusFromCodeTest ctx failed = do
   refs <- mapM newIORef ["notes", ""]

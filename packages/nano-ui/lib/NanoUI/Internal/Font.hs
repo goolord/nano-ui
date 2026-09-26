@@ -323,7 +323,7 @@ widgetPadding fm =
   let (cx, cy) = widgetContentInset fm
    in (2 * cx, 2 * cy)
 
--- | The side of a checkbox's box, for its label's font.
+-- | Side length of a checkbox's box, sized from its label's font.
 {-# INLINE checkboxBoxSize #-}
 checkboxBoxSize :: FontMetrics -> Float
 checkboxBoxSize fm = clamp 18 22 (fmLineHeight fm * 1.15)
@@ -435,11 +435,10 @@ scrollBarGutter slot trailPad =
         ScrollBarWindow -> barW + scrollBarSideGap
 
 -- | The one policy for "does this node use the ambient base font, or does it
--- need the host resolver?". A zero size with a plain weight/style and the
--- regular or mono face resolves to the pre-read base metrics; everything
--- else (a heading, bold, italic, explicit size) defers to the host. Colour
--- is not part of it: a tone ('NanoUI.Internal.Style.fontTone') keeps the
--- base metrics.
+-- need the host resolver?". Size 0 with plain weight and style and the
+-- regular or mono face uses the pre-read base metrics. Anything else (a
+-- heading, bold, italic, explicit size) goes to the host. Colour does not
+-- matter: a tone ('NanoUI.Internal.Style.fontTone') keeps the base metrics.
 -- Layout, paint, span placement and hit testing all share this so they cannot
 -- pick different faces for the same node.
 {-# INLINE isDefaultNodeFont #-}
@@ -569,12 +568,11 @@ data WrapResult = WrapResult
   deriving (Eq, Show)
 
 -- | Wrap each paragraph to @maxW@ using the host line measure: whole words
--- first, characters for words (or paragraphs) that cannot fit. A line ends
--- at a run of spaces, which it drops; the spaces inside a line, and those a
--- paragraph starts with, stay. Each line starts from a guess at the
--- paragraph's average character width, which the host measure then
--- confirms, so a paragraph costs a few host measures a line rather than one
--- a word.
+-- first, then characters for words (or paragraphs) that cannot fit. Lines
+-- break at a run of spaces, which is dropped; spaces inside a line and a
+-- paragraph's leading spaces are kept. Each line starts from a guess based
+-- on the paragraph's average character width, which the host measure then
+-- confirms, so a line costs a few measures rather than one per word.
 wrapTextLinesIO :: (Text -> IO Float) -> Text -> Float -> IO [Text]
 wrapTextLinesIO lineW txt maxW = wrLines <$> wrapTextIO lineW txt maxW
 
@@ -607,10 +605,10 @@ wrapTextIO lineW txt maxW = do
                 if T.any (== ' ') para
                   then wrapWords perLine para []
                   else reverse <$> charLines perLine para []
-      -- A line breaks at a run of spaces, which it drops; the runs inside a
-      -- line and the paragraph's indent stay, so wrapped code keeps its
-      -- layout. @rest@ is the paragraph from the start of its next line on,
-      -- so every candidate line is a slice of it and costs no copy.
+      -- Break at a run of spaces and drop it. Spaces inside a line and the
+      -- paragraph's indent stay, so wrapped code keeps its layout. @rest@ is
+      -- the paragraph from the next line on, so every candidate line is a
+      -- slice of it and costs no copy.
       wrapWords perLine = startLine
         where
           startLine rest acc
@@ -627,11 +625,11 @@ wrapTextIO lineW txt maxW = do
                     case pieces of
                       piece : done -> extend (T.drop (T.length word - T.length piece) rest) (T.length piece) (done ++ acc)
                       [] -> startLine (T.dropWhile (== ' ') (T.drop (T.length word) rest)) acc
-          -- Append as many of the next words as fit to the line that starts
-          -- @fromLine@ and is @lineLen@ characters long. The line can end at
-          -- @lineLen@, at the end of each later word, or at the paragraph's
-          -- last word; the search starts from the last of those within
-          -- @perLine@ characters and steps a word at a time.
+          -- Extend the line at @fromLine@, currently @lineLen@ characters,
+          -- with as many following words as fit. Candidate ends are
+          -- @lineLen@ and the end of each later word. The search starts at
+          -- the last candidate within @perLine@ characters and steps one
+          -- word at a time.
           extend fromLine lineLen acc = do
             let fits end = (<= maxW) <$> lineW (T.take end fromLine)
                 nextEnd end
@@ -660,7 +658,7 @@ wrapTextIO lineW txt maxW = do
             lineW line >>= lineOf
             forM_ (nextEnd end) $ \end' -> lineW (T.take end' fromLine) >>= breakAt
             if T.null rest then pure (reverse (line : acc)) else startLine rest (line : acc)
-      -- The length of the spaces a text starts with and the word after them.
+      -- Length of a text's leading spaces plus the word after them.
       wordEnd t = let (spaces, rest) = T.span (== ' ') t in T.length spaces + T.length (T.takeWhile (/= ' ') rest)
       charLines perLine chunk acc
         | T.null chunk = pure acc

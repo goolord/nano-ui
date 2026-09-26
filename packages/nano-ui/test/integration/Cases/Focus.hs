@@ -30,16 +30,16 @@ tests =
 inp :: Input
 inp = withInputOff 400 400
 
--- | The view @mk req@, where @req@ requests focus for the queued ids, and an
--- action that queues ids and runs a frame, returning its dirty flag and focus.
+-- | The view @mk req@, where @req@ requests focus for queued ids, and an
+-- action that queues ids, runs a frame, and returns the dirty flag and focus.
 asking :: Context -> (NanoUI () -> NanoUI a) -> IO (NanoUI a, [WidgetId] -> Input -> IO (Bool, WidgetId))
 asking ctx mk = do
   q <- newIORef []
   let ui = mk (mapM_ requestFocus =<< uiIO (atomicModifyIORef' q ([],)))
   pure (ui, \ids i -> writeIORef q ids >> runFrame ctx i ui >>= \(_, _, _, dirty) -> (dirty,) <$> getFocusId ctx)
 
--- | A field focused from code shows the ring, and types from the next frame
--- on (which the request asks for), not in the frame that asks.
+-- | A field focused from code shows the ring and accepts typing from the
+-- next frame, not the requesting one.
 runFocusRequestTypesTest :: Context -> IORef Int -> IO ()
 runFocusRequestTypesTest ctx failed = do
   refs <- replicateM 2 (newIORef "")
@@ -51,7 +51,7 @@ runFocusRequestTypesTest ctx failed = do
   _ <- runFrame ctx inp {inputChars = "x"} ui
   assertEq failed ["", "x"] =<< mapM readIORef refs
 
--- | Every kind of control Tab stops at takes the keyboard by its response's id.
+-- | Every Tab-stop control kind can be focused by its response id.
 runFocusRequestKindsTest :: Context -> IORef Int -> IO ()
 runFocusRequestKindsTest _ failed =
   forM_ kinds $ \(name, widget) -> do
@@ -70,7 +70,7 @@ runFocusRequestKindsTest _ failed =
       , ("color picker", fst <$> colorPicker' (colorRGBA 200 40 40 255))
       ]
 
--- | Tab goes on from the widget focused from code, both ways.
+-- | Tab and Shift+Tab continue from the widget focused from code.
 runFocusRequestTabOrderTest :: Context -> IORef Int -> IO ()
 runFocusRequestTabOrderTest ctx failed = do
   (ui, ask) <- asking ctx $ \req -> column (mapM (fmap respId . button') ["A", "B", "C"] <* req)
@@ -80,7 +80,7 @@ runFocusRequestTabOrderTest ctx failed = do
     _ <- runFrame ctx (chordInp chord inp) ui
     assertEq failed next =<< getFocusId ctx
 
--- | Asking for @WidgetId 0@ takes the keyboard off the field, and the loop can sleep.
+-- | Requesting @WidgetId 0@ unfocuses the field, and the loop can sleep.
 runFocusRequestNoneTest :: Context -> IORef Int -> IO ()
 runFocusRequestNoneTest ctx failed = do
   textRef <- newIORef ""
@@ -97,7 +97,8 @@ runFocusRequestNoneTest ctx failed = do
   assert failed . not =<< needsRedraw ctx inp inp
   assertEq failed 0 =<< getWakeAt ctx
 
--- | A disabled field, a label and an unknown id refuse the keyboard, asking for no frame.
+-- | A disabled field, a label and an unknown id refuse focus without
+-- requesting a frame.
 runFocusRequestRefusedTest :: Context -> IORef Int -> IO ()
 runFocusRequestRefusedTest ctx failed = do
   (ui, ask) <- asking ctx $ \req -> column $ do
@@ -108,7 +109,8 @@ runFocusRequestRefusedTest ctx failed = do
   assertEq failed field =<< getFocusId ctx
   forM_ [off, lbl, WidgetId 987654321] $ \w -> assertEq failed (False, field) =<< ask [w] inp
 
--- | While a modal is up, a widget in it takes the keyboard and one behind it refuses it.
+-- | With a modal open, widgets inside it can be focused and widgets behind it
+-- cannot.
 runFocusRequestModalTest :: Context -> IORef Int -> IO ()
 runFocusRequestModalTest ctx failed = do
   (ui, ask) <- asking ctx $ \req -> column $ do
@@ -121,8 +123,8 @@ runFocusRequestModalTest ctx failed = do
     assertEq failed r =<< getFocusId ctx
     assertEq failed (False, r) =<< ask [page] inp
 
--- | The field that loses the keyboard to a request collapses its selection, and
--- a search field commits the query it was holding back, as on a click elsewhere.
+-- | Losing focus to a request collapses a field's selection, and a search
+-- field commits its debounced query, as with a click elsewhere.
 runFocusRequestBlursPreviousTest :: Context -> IORef Int -> IO ()
 runFocusRequestBlursPreviousTest ctx failed = do
   queryRef <- newIORef ""
@@ -144,7 +146,7 @@ runFocusRequestBlursPreviousTest ctx failed = do
   assert failed (respChanged blurred)
   assertEq failed other =<< getFocusId ctx
 
--- | The request's frame repaints the old and the new focus, in a clip.
+-- | The request's frame repaints the old and new focus as clipped damage.
 runFocusRequestDamageTest :: Context -> IORef Int -> IO ()
 runFocusRequestDamageTest ctx failed = do
   (ui, ask) <- asking ctx $ \req ->
@@ -158,7 +160,7 @@ runFocusRequestDamageTest ctx failed = do
   assert failed (all (clipCovers dmg . respRect) [a, b])
   assert failed (null pieces || all (\r -> any (`covers` respRect r) pieces) [a, b])
 
--- | A request in a view pass that a hook write runs again is carried out.
+-- | A request from a view pass that a hook write reruns still takes effect.
 runFocusRequestFirstPassTest :: Context -> IORef Int -> IO ()
 runFocusRequestFirstPassTest ctx failed = do
   r <- evalUi ctx inp . column $ do
@@ -167,8 +169,8 @@ runFocusRequestFirstPassTest ctx failed = do
     r <$ unless asked (requestFocus r >> setAsked True)
   assertEq failed r =<< getFocusId ctx
 
--- | Asking every frame for the focused widget costs no frames, and a click on
--- it hides the ring for good.
+-- | Requesting the already focused widget every frame costs no frames. A
+-- click on it hides the ring, and later requests do not bring it back.
 runFocusRequestIdleTest :: Context -> IORef Int -> IO ()
 runFocusRequestIdleTest ctx failed = do
   let ui = column (fst <$> textInput' "" >>= \r -> r <$ requestFocus (respId r))
@@ -183,8 +185,8 @@ runFocusRequestIdleTest ctx failed = do
   assert failed . not =<< getFocusVisible ctx
   assertEq failed (respId r0) =<< getFocusId ctx
 
--- | A request can name a widget declared after it, the last request of a frame
--- wins, the field types at its end, and a Tab in the frame goes on from it.
+-- | A request can name a later widget, the frame's last request wins, typing
+-- lands after the frame ends, and a Tab in that frame continues from it.
 runFocusRequestOrderTest :: Context -> IORef Int -> IO ()
 runFocusRequestOrderTest ctx failed = do
   textRef <- newIORef "hello"
@@ -199,7 +201,8 @@ runFocusRequestOrderTest ctx failed = do
   assertEq failed a =<< focusAfter inp [WidgetId 0, b, a]
   assertEq failed a =<< focusAfter (tabInp inp) [field]
 
--- | Focus from code closes an open dropdown and the focused field's context menu.
+-- | Focusing from code closes an open dropdown and the focused field's
+-- context menu.
 runFocusRequestClosesMenusTest :: Context -> IORef Int -> IO ()
 runFocusRequestClosesMenusTest ctx failed = do
   (ui, ask) <- asking ctx $ \req ->
@@ -217,10 +220,9 @@ runFocusRequestClosesMenusTest ctx failed = do
   assertEq failed (respId field) =<< getFocusId ctx
   closes (isJust <$> getsInteraction ctx isTextInputMenu)
 
--- | 'focusNext' and 'focusPrevious' move the keyboard as Tab and Shift+Tab
--- do, at the end of the frame, wrapping at both ends; 'isFocused' says
--- which widget has it. 'requestFocus' with 'currentId' names the widget
--- declared next.
+-- | 'focusNext' and 'focusPrevious' act like Tab and Shift+Tab at the end of
+-- the frame, wrapping at both ends; 'isFocused' reports the focused widget.
+-- 'requestFocus' with 'currentId' targets the next declared widget.
 runFocusNextPreviousTest :: Context -> IORef Int -> IO ()
 runFocusNextPreviousTest ctx failed = do
   move <- newIORef (pure ())
@@ -239,9 +241,8 @@ runFocusNextPreviousTest ctx failed = do
   assertEq failed [True, False, False] =<< step (requestFocus =<< currentId)
   assertEq failed a =<< getFocusId ctx
 
--- | 'clearFocus' takes the keyboard off at the end of the frame, collapsing
--- the field's selection; 'releaseFocus' takes it off at once, in the view,
--- and leaves the selection as it was.
+-- | 'clearFocus' unfocuses at the end of the frame and collapses the field's
+-- selection; 'releaseFocus' unfocuses immediately and keeps the selection.
 runFocusClearReleaseTest :: Context -> IORef Int -> IO ()
 runFocusClearReleaseTest ctx failed = do
   act <- newIORef (const (pure ()))
@@ -268,8 +269,8 @@ runFocusClearReleaseTest ctx failed = do
   assertEq failed (field, WidgetId 0) =<< evalUi ctx inp ui
   assertEq failed (0, 5) =<< selection field
 
--- | A command run on a field from code focuses it as 'requestFocus' does: at
--- the end of the frame, with the ring, and not for a disabled field.
+-- | A text command run from code focuses the field like 'requestFocus': at
+-- the end of the frame, with the ring, and never when disabled.
 runFocusTextCommandTest :: Context -> IORef Int -> IO ()
 runFocusTextCommandTest ctx failed = do
   offRef <- newIORef False

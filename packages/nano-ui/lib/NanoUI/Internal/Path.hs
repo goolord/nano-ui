@@ -1,9 +1,8 @@
--- | Paths and affine transforms, and the geometry that turns them into what
--- the draw ops take: curves flattened into rings of points, the centre form
--- of an SVG arc, rings nested into polygons with holes and triangulated for
--- 'FillPolygon', dashes, miters and gradients. The canvas ("NanoUI.Path",
--- "NanoUI.Widgets.Custom"), the SVG rasterizer ("NanoUI.Svg") and
--- nano-ui-diagrams share it.
+-- | Paths, affine transforms, and the geometry that turns them into draw ops:
+-- curve flattening, SVG arc conversion, nesting rings into polygons with
+-- holes, triangulation for 'FillPolygon', dashes, miters and gradients.
+-- Shared by the canvas ("NanoUI.Path", "NanoUI.Widgets.Custom"), the SVG
+-- rasterizer ("NanoUI.Svg") and nano-ui-diagrams.
 module NanoUI.Internal.Path
   ( -- * Paths
     Path (..)
@@ -92,15 +91,15 @@ import NanoUI.Internal.Types (Color (..), Rect (..), V2 (..), finite, lerpColor)
 -- Paths
 --------------------------------------------------------------------------------
 
--- | Subpaths of lines, curves and arcs, in the coordinates of whatever
--- draws them. Paths join with '<>', one after the other.
+-- | A sequence of subpaths made of lines, curves and arcs, in the drawing's
+-- coordinates. Paths concatenate with '<>'.
 newtype Path = Path [Segment]
   deriving (Eq, Show)
   deriving newtype (Semigroup, Monoid)
 
--- | One step of a 'Path'. A line, curve or 'SegArcTo' with no subpath open
--- starts one at the current point: where the last subpath closed, or the
--- origin.
+-- | One step of a 'Path'. A line, curve or 'SegArcTo' with no open subpath
+-- starts one at the current point (where the last subpath closed, or the
+-- origin).
 data Segment
   = SegMove {-# UNPACK #-} !Float {-# UNPACK #-} !Float
   -- ^ Start a subpath at a point.
@@ -128,9 +127,9 @@ data Segment
       {-# UNPACK #-} !Float
       {-# UNPACK #-} !Float
       {-# UNPACK #-} !Float
-  -- ^ An elliptical arc by its centre: centre, radii, the ellipse's
-  -- rotation, start angle and sweep, in radians. With a subpath open a line
-  -- runs to its start; otherwise a subpath starts there.
+  -- ^ An elliptical arc in centre form: centre, radii, rotation, start angle
+  -- and sweep, in radians. With a subpath open, a line joins the arc's
+  -- start; otherwise the arc starts a new subpath.
   | SegArcTo
       {-# UNPACK #-} !Float
       {-# UNPACK #-} !Float
@@ -139,8 +138,8 @@ data Segment
       !Bool
       {-# UNPACK #-} !Float
       {-# UNPACK #-} !Float
-  -- ^ An SVG arc to a point: radii, the ellipse's rotation in radians, the
-  -- large-arc and sweep flags, end.
+  -- ^ An SVG arc to a point: radii, rotation in radians, large-arc and sweep
+  -- flags, end.
   | SegClose
   -- ^ Close the subpath back to where it started.
   deriving (Eq, Show)
@@ -153,37 +152,36 @@ moveTo (V2 x y) = Path [SegMove x y]
 lineTo :: V2 -> Path
 lineTo (V2 x y) = Path [SegLine x y]
 
--- | A quadratic Bezier curve to a point: its control point, then its end.
+-- | A quadratic Bezier curve: control point, then end point.
 quadTo :: V2 -> V2 -> Path
 quadTo (V2 qx qy) (V2 x y) = Path [SegQuad qx qy x y]
 
--- | A cubic Bezier curve to a point: its two control points, then its end.
+-- | A cubic Bezier curve: two control points, then end point.
 cubicTo :: V2 -> V2 -> V2 -> Path
 cubicTo (V2 x1 y1) (V2 x2 y2) (V2 x y) = Path [SegCubic x1 y1 x2 y2 x y]
 
--- | A circular arc: its centre, radius, start angle and sweep. With a
--- subpath open a line runs from its current point to the arc's start;
--- otherwise the arc starts one. A sweep of a whole turn or more draws the
--- whole circle, and a negative one turns anticlockwise. A negative radius
--- counts as its size.
+-- | A circular arc: centre, radius, start angle and sweep. With a subpath
+-- open, a line joins the current point to the arc's start; otherwise the arc
+-- starts a new subpath. A sweep of a full turn or more draws the whole
+-- circle, and a negative sweep goes anticlockwise. A negative radius is
+-- treated as its absolute value.
 --
 -- > P.moveTo c <> P.arc c r 0 (pi / 3) <> P.close  -- a pie slice
 arc :: V2 -> Float -> Float -> Float -> Path
 arc c r = ellipticalArc c (V2 r r) 0
 
--- | An arc of an ellipse: its centre, its x and y radii, how far the
--- ellipse is rotated, and the start angle and sweep around it, which are
--- angles before the ellipse is stretched and rotated. Joins its subpath as
--- 'arc' does.
+-- | An elliptical arc: centre, x and y radii, the ellipse's rotation, start
+-- angle and sweep. The angles are measured before the ellipse is stretched
+-- and rotated. Joins the current subpath like 'arc'.
 ellipticalArc :: V2 -> V2 -> Float -> Float -> Float -> Path
 ellipticalArc (V2 cx cy) (V2 rx ry) rot start sweep = Path [SegArc cx cy rx ry rot start sweep]
 
--- | An arc to a point, as SVG's @A@ command draws one: the ellipse's x and
--- y radii and rotation, whether to take the larger of the two arcs that
--- fit, whether to go clockwise (on screen) from the current point, and the
--- end. Radii too small to reach the end grow until they do; a zero radius
--- draws a straight line. It is not HTML canvas's @arcTo@, which rounds the
--- corner between two lines: draw that with 'arc' about the corner's centre.
+-- | An arc to a point, like SVG's @A@ command: x and y radii, the ellipse's
+-- rotation, whether to take the larger of the two possible arcs, whether to
+-- go clockwise on screen, and the end point. Radii too small to reach the
+-- end are scaled up; a zero radius draws a straight line. This is not HTML
+-- canvas's @arcTo@, which rounds the corner between two lines; draw that
+-- with 'arc' around the corner's centre.
 arcTo :: V2 -> Float -> Bool -> Bool -> V2 -> Path
 arcTo (V2 rx ry) rot large clockwise (V2 x y) = Path [SegArcTo rx ry rot large clockwise x y]
 
@@ -201,15 +199,15 @@ rect :: Rect -> Path
 rect (Rect x y w h) =
   Path [SegMove x y, SegLine (x + w) y, SegLine (x + w) (y + h), SegLine x (y + h), SegClose]
 
--- | A rounded rectangle's outline and its corner radius, kept within half
--- the shorter side, clockwise on screen from the top left corner's end.
+-- | A rectangle with rounded corners, the radius clamped to half the shorter
+-- side. Runs clockwise on screen from the end of the top left corner.
 roundedRect :: Rect -> Float -> Path
 roundedRect box radius = roundedRectCorners box radius radius radius radius
 
--- | A rectangle with a radius for each corner: top left, top right, bottom
--- right and bottom left, as CSS's @border-radius@ lists them. Where two
--- corners on a side would overlap, every radius shrinks by the same factor
--- until they meet, as CSS shrinks them; a negative radius is square.
+-- | A rectangle with a radius per corner, in CSS @border-radius@ order: top
+-- left, top right, bottom right, bottom left. If two corners on a side would
+-- overlap, all radii shrink by the same factor, as in CSS. A negative radius
+-- gives a square corner.
 roundedRectCorners :: Rect -> Float -> Float -> Float -> Float -> Path
 roundedRectCorners box@(Rect x y w h) tl0 tr0 br0 bl0
   | tl <= 0 && tr <= 0 && br <= 0 && bl <= 0 = rect box
@@ -226,7 +224,7 @@ roundedRectCorners box@(Rect x y w h) tl0 tr0 br0 bl0
     positive r = if r > 0 then r else 0
     aw = abs w
     ah = abs h
-    -- How far a side's two radii shrink to fit along it.
+    -- The factor that fits a side's two radii within its length.
     fitSide side a b = let both = positive a + positive b in if both > side then side / both else 1
     shrink = min (min (fitSide aw tl0 tr0) (fitSide ah tr0 br0)) (min (fitSide aw br0 bl0) (fitSide ah bl0 tl0))
     fit r = positive r * shrink
@@ -234,7 +232,7 @@ roundedRectCorners box@(Rect x y w h) tl0 tr0 br0 bl0
     tr = fit tr0
     br = fit br0
     bl = fit bl0
-    -- A quarter turn round a corner's centre, or a line to its point.
+    -- A quarter arc about the corner's centre, or a line for a square corner.
     corner cx cy r a0
       | r > 0 = SegArc cx cy r r 0 a0 (pi / 2)
       | otherwise = SegLine cx cy
@@ -243,8 +241,8 @@ roundedRectCorners box@(Rect x y w h) tl0 tr0 br0 bl0
 circle :: V2 -> Float -> Path
 circle c r = ellipse c (V2 r r)
 
--- | An ellipse: its centre and its x and y radii. Rotate one with
--- 'NanoUI.Path.ellipticalArc' or a transform.
+-- | An axis-aligned ellipse: centre and x and y radii. For a rotated one use
+-- 'ellipticalArc' or a transform.
 ellipse :: V2 -> V2 -> Path
 ellipse (V2 cx cy) (V2 rx ry) = Path [SegMove (cx + abs rx) cy, SegArc cx cy rx ry 0 0 (2 * pi), SegClose]
 
@@ -261,42 +259,42 @@ polyline (V2 x y : rest) = Path (SegMove x y : [SegLine px py | V2 px py <- rest
 -- Strokes, fills and paints
 --------------------------------------------------------------------------------
 
--- | How to stroke a path: 'stroke' with its width, and a record update for
--- the rest.
+-- | Stroke settings. Start from 'stroke' and change the rest with a record
+-- update:
 --
 -- > (P.stroke 3) {P.strokeCap = P.RoundCap, P.strokeDash = [6, 4]}
 data Stroke = StrokeStyle
   { strokeWidth :: !Float
-  -- ^ The line's width. A transform scales it, as it scales the path.
+  -- ^ Line width. A transform scales it along with the path.
   , strokeCap :: !LineCap
-  -- ^ How an open subpath's ends, and every dash's, are capped (default
+  -- ^ Cap for the ends of open subpaths and of every dash (default
   -- 'ButtCap').
   , strokeJoin :: !LineJoin
-  -- ^ How its corners are joined (default 'MiterJoin').
+  -- ^ Corner join (default 'MiterJoin').
   , strokeMiterLimit :: !Float
-  -- ^ How long a miter may be, as a multiple of the width, before its
-  -- corner is beveled instead (default 4, as SVG's @stroke-miterlimit@).
+  -- ^ Longest allowed miter, as a multiple of the width; longer corners are
+  -- beveled (default 4, like SVG's @stroke-miterlimit@).
   , strokeDash :: ![Float]
-  -- ^ Lengths of dash and gap, one after the other, repeated along each
-  -- subpath; an odd number of them is repeated twice over (default @[]@, a
-  -- solid line). A zero-length dash with round or square caps is a dot.
-  -- Lengths that are negative, or all zero, draw a solid line, and so does
-  -- a pattern that would cut a subpath into more than 4096 dashes. A
-  -- transform scales them as it scales the width.
+  -- ^ Alternating dash and gap lengths, repeated along each subpath. An odd
+  -- count is repeated twice (default @[]@, solid). A zero-length dash with
+  -- round or square caps draws a dot. Negative or all-zero lengths draw a
+  -- solid line, as does a pattern that would cut a subpath into more than
+  -- 4096 dashes. A transform scales the lengths along with the width.
   , strokeDashOffset :: !Float
-  -- ^ How far into the dash pattern each subpath starts (default 0).
+  -- ^ Distance into the dash pattern at which each subpath starts
+  -- (default 0).
   }
   deriving (Eq, Show)
 
--- | A solid stroke this wide, cut square at open ends, with miter joins.
+-- | A solid stroke of the given width, with butt caps and miter joins.
 stroke :: Float -> Stroke
 stroke w = StrokeStyle w ButtCap MiterJoin 4 [] 0
 
--- | The miter at a corner between two edges with unit normals @(ax, ay)@
--- and @(bx, by)@: the offset along which moving the corner by one moves
--- both edges by one. Its length is the miter's length over the line's
--- width; past @limit@ the corner is beveled and there is 'Nothing'. The
--- canvas's strokes and the SVG rasterizer join corners by it.
+-- | The miter at a corner between edges with unit normals @(ax, ay)@ and
+-- @(bx, by)@: moving the corner by this offset moves both edges out by one.
+-- Its length is the miter length relative to the line width. 'Nothing' past
+-- @limit@, where the corner is beveled. Used by canvas strokes and the SVG
+-- rasterizer.
 {-# INLINE miterOffset #-}
 miterOffset :: Float -> Float -> Float -> Float -> Float -> Maybe (Float, Float)
 miterOffset limit ax ay bx by
@@ -307,47 +305,45 @@ miterOffset limit ax ay bx by
     my = (ay + by) / 2
     d2 = mx * mx + my * my
 
--- | Which points a fill covers, by how many times the path winds round
--- them, counting a turn one way as 1 and the other as -1.
+-- | Which points a fill covers, based on the path's winding number around
+-- them (+1 for each turn one way, -1 for the other).
 data FillRule
   = NonZero
-  -- ^ Every point it winds round other than as many times one way as the
-  -- other: a subpath inside another is filled over, unless it runs the
-  -- other way, which cuts it out.
+  -- ^ Points with a nonzero winding number. A subpath inside another is
+  -- filled too, unless it runs the opposite way, which cuts it out.
   | EvenOdd
-  -- ^ Every point it winds round an odd number of times: a subpath inside
-  -- another is cut out of it, and one inside that filled again.
+  -- ^ Points with an odd winding number. A subpath inside another is cut
+  -- out, and one inside that is filled again.
   deriving (Eq, Show, Enum, Bounded)
 
--- | Whether a point a path winds round @w@ times is inside its fill. The
--- canvas's fills and the SVG rasterizer both count by it.
+-- | Whether a point with winding number @w@ is inside the fill. Used by
+-- canvas fills and the SVG rasterizer.
 {-# INLINE fillsWinding #-}
 fillsWinding :: FillRule -> Int -> Bool
 fillsWinding NonZero w = w /= 0
 fillsWinding EvenOdd w = odd w
 
--- | What a fill or a stroke is painted with.
+-- | The paint for a fill or stroke.
 data Paint
   = Solid !Color
   -- ^ One colour.
   | Linear !V2 !V2 ![(Float, Color)]
-  -- ^ A linear gradient from its first point, where it is at 0, to its
-  -- second, where it is at 1, and colour stops at offsets along it. Past
-  -- the first and last stops it keeps their colours. Offsets are kept
-  -- within 0 and 1, and one less than the one before counts as that one,
-  -- so two stops at one offset change colour sharply there. It is laid out
-  -- in the coordinates of the block that draws it, so it turns and scales
-  -- with a transform. A stroke takes the colour at its centre line across
-  -- its width.
+  -- ^ A linear gradient from its first point (offset 0) to its second
+  -- (offset 1), with colour stops at offsets. Beyond the first and last
+  -- stops it keeps their colours. Offsets are clamped to 0..1, and an
+  -- offset below the previous one is raised to it, so two stops at the same
+  -- offset give a hard edge. The gradient is in drawing coordinates, so
+  -- transforms rotate and scale it. A stroke uses the colour at its centre
+  -- line across its whole width.
   deriving (Eq, Show)
 
 --------------------------------------------------------------------------------
 -- Transforms
 --------------------------------------------------------------------------------
 
--- | An affine map of the plane, as SVG's @matrix(a b c d e f)@: @(x, y)@
--- goes to @(a x + c y + e, b x + d y + f)@. @s <> t@ applies @t@ first, as
--- function composition does, and 'mempty' is the identity.
+-- | An affine transform, laid out like SVG's @matrix(a b c d e f)@: @(x, y)@
+-- maps to @(a x + c y + e, b x + d y + f)@. @s <> t@ applies @t@ first, like
+-- function composition; 'mempty' is the identity.
 data Transform
   = Transform
       {-# UNPACK #-} !Float
@@ -380,35 +376,34 @@ applyTransform (Transform a b c d e f) x y = (a * x + c * y + e, b * x + d * y +
 translate :: Float -> Float -> Transform
 translate dx dy = Transform 1 0 0 1 dx dy
 
--- | Turn about the origin, clockwise on screen for a positive angle.
+-- | Rotate about the origin. A positive angle turns clockwise on screen.
 rotate :: Float -> Transform
 rotate a =
   let s = sin a
       c = cos a
    in Transform c s (negate s) c 0 0
 
--- | Turn about a point.
+-- | Rotate about a point.
 rotateAround :: V2 -> Float -> Transform
 rotateAround (V2 x y) a = translate x y <> rotate a <> translate (negate x) (negate y)
 
--- | Scale about the origin, x and y by their own factors. A negative one
+-- | Scale about the origin by separate x and y factors. A negative factor
 -- flips that axis.
 scale :: Float -> Float -> Transform
 scale sx sy = Transform sx 0 0 sy 0 0
 
--- | A transform by its matrix, as SVG's @matrix(a b c d e f)@ gives it:
--- @(x, y)@ goes to @(a x + c y + e, b x + d y + f)@.
+-- | A transform from its matrix entries, in SVG @matrix(a b c d e f)@
+-- order: @(x, y)@ maps to @(a x + c y + e, b x + d y + f)@.
 affine :: Float -> Float -> Float -> Float -> Float -> Float -> Transform
 affine = Transform
 
--- | Where a transform takes a point.
+-- | Apply a transform to a point.
 transformPoint :: Transform -> V2 -> V2
 transformPoint t (V2 x y) = let (x', y') = applyTransform t x y in V2 x' y'
 
--- | The transform that undoes this one, as for taking a point under the
--- pointer back into a drawing's own coordinates. 'Nothing' for one that
--- flattens the plane onto a line or a point, or has an entry that is not a
--- number.
+-- | The inverse transform, e.g. to map a pointer position back into a
+-- drawing's coordinates. 'Nothing' if the transform collapses the plane to
+-- a line or point, or has a NaN or infinite entry.
 invert :: Transform -> Maybe Transform
 invert (Transform a b c d e f)
   | det == 0 || not (transformFinite inv) = Nothing
@@ -417,20 +412,20 @@ invert (Transform a b c d e f)
     det = a * d - b * c
     inv = Transform (d / det) (negate b / det) (negate c / det) (a / det) ((c * f - d * e) / det) ((b * e - a * f) / det)
 
--- | Every entry is a number: neither NaN nor infinite.
+-- | No entry is NaN or infinite.
 transformFinite :: Transform -> Bool
 transformFinite (Transform a b c d e f) = all finite [a, b, c, d, e, f]
 
--- | The most a transform lengthens anything: the larger singular value of
--- its linear part.
+-- | The most the transform lengthens any vector: the larger singular value
+-- of its linear part.
 maxStretch :: Transform -> Float
 maxStretch (Transform a b c d _ _) =
   let s = a * a + b * b + c * c + d * d
       det = a * d - b * c
    in sqrt ((s + sqrt (max 0 (s * s - 4 * det * det))) / 2)
 
--- | The square root of the transform's area scale: the scale of a uniform
--- one, and a geometric mean of the axes' scales otherwise.
+-- | The square root of the transform's area scale. For a uniform scale this
+-- is the scale factor; in general, the geometric mean of the singular values.
 averageStretch :: Transform -> Float
 averageStretch (Transform a b c d _ _) = sqrt (abs (a * d - b * c))
 
@@ -438,17 +433,18 @@ averageStretch (Transform a b c d _ _) = sqrt (abs (a * d - b * c))
 -- Rings
 --------------------------------------------------------------------------------
 
--- | Point lists in flat arrays: ring @i@ is points @starts[i]@ up to
--- @starts[i + 1]@, stored x then y, with a number the builder tagged it with.
+-- | Rings of points in flat arrays: interleaved x/y coordinates, start
+-- offsets (ring @i@ is points @starts[i]@ up to @starts[i + 1]@), and one
+-- builder-assigned tag per ring.
 data Rings = Rings !(PrimArray Float) !(PrimArray Int) !(PrimArray Int)
 
--- | How many rings there are.
+-- | The number of rings.
 ringCount :: Rings -> Int
 ringCount (Rings _ starts _) = sizeofPrimArray starts - 1
 
--- | Rings from a walk that calls @point x y@ for each point and @end tag@
--- after each ring's last. The walk runs twice, to size the arrays and then
--- to fill them, so it must visit the same points both times.
+-- | Build 'Rings' from a walk that calls @point x y@ per point and @end tag@
+-- after each ring. The walk runs twice (once to size the arrays, once to
+-- fill them), so both runs must emit the same points.
 {-# INLINE buildRings #-}
 buildRings :: (forall s. (Float -> Float -> ST s ()) -> (Int -> ST s ()) -> ST s ()) -> Rings
 buildRings walk = runST $ do
@@ -482,21 +478,19 @@ buildRings walk = runST $ do
 -- Flattening
 --------------------------------------------------------------------------------
 
--- | How far a flattened curve may stray from the true one, in logical
--- pixels, for a display of @scale@ device pixels to the logical one: a
--- quarter of a device pixel.
+-- | Flattening tolerance in logical pixels for a display with @s@ device
+-- pixels per logical pixel: a quarter of a device pixel.
 curveTolerance :: Float -> Float
 curveTolerance s
   | s > 0 && s < 1 / 0 = 0.25 / s
   | otherwise = 0.25
 
--- | Flatten a path through a transform into rings of points, each tagged 1
--- when 'SegClose' ended it. Curves are split until they are within @tol@ of
--- their chords once transformed, so a scaled-up curve gets more points and
--- a scaled-down one fewer; an arc is cut into @steps r sweep@ chords, @r@
--- its larger radius once transformed ('arcSteps' for the canvas). A segment
--- with a coordinate that is NaN or infinite is skipped, and a transform with
--- one gives no rings.
+-- | Flatten a path through a transform into rings, tagging a ring 1 if
+-- 'SegClose' ended it. Curves are subdivided until they are within @tol@ of
+-- their chords after transforming, so scaled-up curves get more points. An
+-- arc gets @steps r sweep@ chords, where @r@ is its larger transformed
+-- radius (the canvas passes 'arcSteps'). Segments with a NaN or infinite
+-- coordinate are skipped; a transform with one yields no rings.
 flattenPath :: Float -> (Float -> Float -> Int) -> Transform -> Path -> Rings
 flattenPath tol steps t (Path segs)
   | transformFinite t = buildRings (pathWalk tol steps t segs)
@@ -511,8 +505,8 @@ pathWalk tol steps t segs0 point end = go segs0 False 0 0 0 0
     -- A drawing segment with no subpath open starts one at the current point.
     begin open cx cy = unless open (emit cx cy)
     stretch = maxStretch t
-    -- The points after the start of an elliptical arc, the last its end
-    -- @(x1, y1)@ exactly, so a whole turn closes on its start.
+    -- An elliptical arc's points after its start. The last is exactly
+    -- @(x1, y1)@, so a full turn closes on its start.
     arcPoints ax ay rx ry rot a0 sweep x1 y1 = do
       let n = steps (stretch * max (abs rx) (abs ry)) sweep
       forM_ [1 .. n - 1] $ \i ->
@@ -532,8 +526,8 @@ pathWalk tol steps t segs0 point end = go segs0 False 0 0 0 0
           SegLine x y -> begin open cx cy >> emit x y >> go rest True x y sx sy
           SegQuad qx qy x y -> do
             begin open cx cy
-            -- The quadratic as a cubic, its control points two thirds of
-            -- the way from each end to the quadratic's.
+            -- The quadratic as a cubic: each control point is two thirds of
+            -- the way from an end to the quadratic's control point.
             cubic cx cy (cx + 2 / 3 * (qx - cx)) (cy + 2 / 3 * (qy - cy)) (x + 2 / 3 * (qx - x)) (y + 2 / 3 * (qy - y)) x y
             go rest True x y sx sy
           SegCubic x1 y1 x2 y2 x y -> do
@@ -559,7 +553,7 @@ pathWalk tol steps t segs0 point end = go segs0 False 0 0 0 0
             go rest True x y sx sy
           SegClose -> finish open True >> go rest False sx sy sx sy
 
--- | Every coordinate of the segment is a number.
+-- | No coordinate of the segment is NaN or infinite.
 segmentFinite :: Segment -> Bool
 segmentFinite seg = case seg of
   SegMove x y -> finite x && finite y
@@ -570,8 +564,8 @@ segmentFinite seg = case seg of
   SegArcTo a b c _ _ x y -> all finite [a, b, c, x, y]
   SegClose -> True
 
--- | The point at angle @a@ on an ellipse: centre, radii (a negative one
--- counting as its size) and rotation.
+-- | The point at angle @a@ on an ellipse with the given centre, radii
+-- (negative ones taken as absolute) and rotation.
 {-# INLINE ellipsePoint #-}
 ellipsePoint :: Float -> Float -> Float -> Float -> Float -> Float -> (Float, Float)
 ellipsePoint cx cy rx ry rot a =
@@ -581,9 +575,9 @@ ellipsePoint cx cy rx ry rot a =
       sr = sin rot
    in (cx + cr * ex - sr * ey, cy + sr * ex + cr * ey)
 
--- | Chords for @sweep@ radians of an ellipse whose larger radius is @r@
--- once transformed, each within @tol@ of the curve: at least one a quarter
--- turn, at most 'maxArcSteps'.
+-- | The number of chords for @sweep@ radians of an ellipse with larger
+-- transformed radius @r@, so each chord stays within @tol@ of the curve. At
+-- least one per quarter turn, at most 'maxArcSteps'.
 arcSteps :: Float -> Float -> Float -> Int
 arcSteps tol r sweep
   | not (abs sweep <= 4 * pi) = maxArcSteps
@@ -592,20 +586,20 @@ arcSteps tol r sweep
   | otherwise = quarters
   where
     quarters = max 1 (ceiling (abs sweep / (pi / 2)))
-    -- A chord of angle @da@ strays @r (1 - cos (da / 2))@, which is
-    -- @2 r sin (da / 4) ^ 2@, from the circle. Solved in that form, since
-    -- @1 - tol / r@ rounds to 1 for a radius millions of times the
-    -- tolerance, and a nearly straight arc would get every chord allowed.
+    -- A chord of angle @da@ strays @r (1 - cos (da / 2)) = 2 r sin (da / 4) ^ 2@
+    -- from the circle. Solved in the sine form because @1 - tol / r@ rounds
+    -- to 1 for huge radii, which would give a nearly straight arc
+    -- 'maxArcSteps' chords.
     ideal = abs sweep / (4 * asin (sqrt (tol / (2 * r))))
 
--- | The most chords one arc is cut into.
+-- | The most chords one arc is split into.
 maxArcSteps :: Int
 maxArcSteps = 1024
 
--- | The points after the start of a cubic Bezier from @(x0, y0)@, with
--- control points @(x1, y1)@ and @(x2, y2)@, to @(x3, y3)@. The curve is split
--- in halves until each piece's control points bound it within @tol@ of its
--- chord, at most ten times over.
+-- | Emit the points after the start of a cubic Bezier from @(x0, y0)@ via
+-- @(x1, y1)@ and @(x2, y2)@ to @(x3, y3)@. Splits in halves until each
+-- piece's control points keep it within @tol@ of its chord, at most ten
+-- levels deep.
 {-# INLINE cubicPoints #-}
 cubicPoints :: Monad m => Float -> (Float -> Float -> m ()) -> Float -> Float -> Float -> Float -> Float -> Float -> Float -> Float -> m ()
 cubicPoints tol point = go (0 :: Int)
@@ -634,14 +628,12 @@ cubicPoints tol point = go (0 :: Int)
         vy = 3 * y2 - 2 * y3 - y0
         flat = max (ux * ux) (vx * vx) + max (uy * uy) (vy * vy) <= 16 * tol * tol
 
--- | The centre form of an SVG arc from @(x1, y1)@ to @(x2, y2)@ with radii
--- @rx@ and @ry@, the ellipse rotated @phi@ radians, by the conversion in the
--- SVG specification: its centre, radii (scaled up if they cannot reach),
--- start angle and sweep. 'Nothing' when a radius is zero or the ends
--- coincide, for which SVG draws a straight line or nothing, and when radii
--- too large or too small for a 'Float' give a centre that is not a number,
--- which callers draw as a straight line too: an arc on a huge radius is
--- nearly one.
+-- | Convert an SVG arc from @(x1, y1)@ to @(x2, y2)@ (radii @rx0@ and @ry0@,
+-- rotation @phi@) to centre form, per the SVG specification: centre, radii
+-- (scaled up if too small to reach), start angle and sweep. 'Nothing' when a
+-- radius is zero or the ends coincide (SVG draws a line or nothing), or when
+-- extreme radii make the centre NaN or infinite. Callers draw 'Nothing' as a
+-- straight line, which a huge-radius arc nearly is.
 arcCentre :: Float -> Float -> Float -> Float -> Float -> Bool -> Bool -> Float -> Float -> Maybe (Float, Float, Float, Float, Float, Float)
 arcCentre x1 y1 rx0 ry0 phi large sweep x2 y2
   | rx0 == 0 || ry0 == 0 || (x1 == x2 && y1 == y2) = Nothing
@@ -659,8 +651,7 @@ arcCentre x1 y1 rx0 ry0 phi large sweep x2 y2
     rx = abs rx0 * grow
     ry = abs ry0 * grow
     -- The specification's (rx² ry² - rx² y1'² - ry² x1'²) / (rx² y1'² +
-    -- ry² x1'²), divided through by rx² ry² so that a large radius does not
-    -- overflow it.
+    -- ry² x1'²), divided through by rx² ry² so large radii don't overflow.
     reach = (x1' / rx) * (x1' / rx) + (y1' / ry) * (y1' / ry)
     coef = (if large == sweep then -1 else 1) * sqrt (max 0 (1 / reach - 1))
     cx' = coef * rx * y1' / ry
@@ -679,11 +670,11 @@ arcCentre x1 y1 rx0 ry0 phi large sweep x2 y2
 -- Triangulation
 --------------------------------------------------------------------------------
 
--- | Index triples, three a triangle, into the points of a simple polygon
--- (x/y pairs, in either winding, the first point not repeated) that cover
--- it. A convex polygon is fanned from its first point and any other ear
--- clipped. Fewer than three points give none; holes and self-intersections
--- are unsupported and may leave part of the polygon uncovered.
+-- | Triangle index triples covering a simple polygon given as x/y pairs
+-- (either winding, first point not repeated). Convex polygons are fanned
+-- from the first point; others are ear clipped. Fewer than three points give
+-- no triangles. Holes and self-intersections are unsupported and may leave
+-- gaps.
 triangulate :: PrimArray Float -> PrimArray Int
 triangulate vs
   | n < 3 = emptyPrimArray
@@ -696,15 +687,14 @@ triangulate vs
       1 -> k `div` 3 + 1
       _ -> k `div` 3 + 2
 
--- | Index triples that cover a polygon with holes: @vs@ holds its rings'
--- points, one ring after another, and @rings@ where each ring starts and
--- the last ends. The first ring is its outline, and the rest are holes
--- inside it that touch neither it nor each other. A lone outline may wind
--- either way; with holes, the outline winds with a positive 'ringArea' and
--- the holes negative, as 'fillPathOps' winds them. Each hole is joined to
--- the outline by a cut to a point it can see, as in Eberly's
--- \"Triangulation by Ear Clipping\" and mapbox's earcut, and the one ring
--- that makes is ear clipped.
+-- | Triangle index triples covering a polygon with holes. @vs@ holds every
+-- ring's points back to back; @rings@ holds each ring's start plus the end
+-- of the last. The first ring is the outline; the rest are holes inside it
+-- that touch neither it nor each other. A lone outline may wind either way.
+-- With holes, the outline must have a positive 'ringArea' and the holes a
+-- negative one, as 'fillPathOps' produces. Each hole is bridged to a visible
+-- outline point (as in Eberly's \"Triangulation by Ear Clipping\" and
+-- mapbox's earcut), and the merged ring is ear clipped.
 triangulateRings :: PrimArray Float -> PrimArray Int -> PrimArray Int
 triangulateRings vs rings
   | sizeofPrimArray rings <= 2 = triangulate vs
@@ -713,14 +703,14 @@ triangulateRings vs rings
     ringAt r = [indexPrimArray rings r .. indexPrimArray rings (r + 1) - 1]
 
 -- | The outline's point indices with each hole spliced in, leftmost hole
--- first: from the outline point a cut from the hole's leftmost point can
--- reach, round the hole and back along the cut. A hole with no such point
--- is left out.
+-- first. A splice runs from the outline point bridged to the hole's leftmost
+-- point, around the hole, and back along the bridge. A hole with no visible
+-- outline point is dropped.
 bridgeHoles :: PrimArray Float -> [Int] -> [[Int]] -> [Int]
 bridgeHoles vs outline holes = foldl' join outline (map snd (sortOn fst (map leftmostFirst (filter (not . null) holes))))
   where
     at = pointAt vs
-    -- The hole from its leftmost point, and that point.
+    -- The hole rotated to start at its leftmost point, keyed by that point.
     leftmostFirst h =
       let (p, m) = minimum [(at i, k) | (k, i) <- zip [0 :: Int ..] h]
        in (p, drop m h ++ take m h)
@@ -730,11 +720,10 @@ bridgeHoles vs outline holes = foldl' join outline (map snd (sortOn fst (map lef
         let (before, after) = splitAt (k + 1) ring
          in before ++ h ++ [hi, ring !! k] ++ after
     join ring [] = ring
-    -- The position in the ring of the point a cut from @(hx, hy)@ goes to:
-    -- a ray to the left meets the ring's nearest edge, and the cut goes to
-    -- that edge's left end, or to the point of the ring inside the triangle
-    -- that makes with the ray at the least angle to it, which the ray
-    -- cannot otherwise see past.
+    -- The ring position to bridge @(hx, hy)@ to. A ray cast left hits the
+    -- nearest edge, and the bridge goes to that edge's left end, unless
+    -- ring points inside the triangle it forms with the ray block the view;
+    -- then it goes to the one at the smallest angle to the ray.
     bridgeFrom ring (hx, hy) =
       let n = length ring
           ix = primArrayFromListN n ring
@@ -760,8 +749,8 @@ bridgeHoles vs outline holes = foldl' join outline (map snd (sortOn fst (map lef
                      in (cx - px) * (ay - py) >= (ax - px) * (cy - py)
                           && (ax - px) * (my - py) >= (mx - px) * (ay - py)
                           && (mx - px) * (cy - py) >= (cx - px) * (my - py)
-                  -- The cut from the hole's point to point @k@ leaves the
-                  -- ring's corner there on its inside.
+                  -- The bridge from the hole point to ring point @k@ enters
+                  -- the ring's interior at that corner.
                   locallyInside k =
                     let a = pt k
                         prev = pt (k - 1)
@@ -779,14 +768,14 @@ bridgeHoles vs outline holes = foldl' join outline (map snd (sortOn fst (map lef
                           else (tanBest, kBest)
                in if qx == hx then Just m else Just (snd (foldl' better (1 / 0, m) [0 .. n - 1]))
 
--- | Twice the signed area of a triangle, in earcut's sense: negative where
--- it turns as a ring with a positive 'signedArea' turns at a convex corner.
+-- | Twice a triangle's signed area, with earcut's sign: negative at a convex
+-- corner of a ring with positive 'signedArea'.
 turn :: (Float, Float) -> (Float, Float) -> (Float, Float) -> Float
 turn (px, py) (qx, qy) (rx, ry) = (qy - py) * (rx - qx) - (qx - px) * (ry - qy)
 
--- | Whether the ring turns one way at every corner, straight on aside, and
--- goes round once: its x and y directions each reverse at most twice, which
--- a star that turns one way but winds twice does not.
+-- | Whether the ring is convex: every corner turns the same way (straight
+-- ones aside) and it winds once. Winding once is checked by the x and y
+-- directions each reversing at most twice, which a doubly wound star fails.
 convexRing :: PrimArray Float -> Bool
 convexRing vs = go 0 0 0 0 0 0
   where
@@ -817,8 +806,8 @@ pointAt vs i =
       !y = indexPrimArray vs (2 * i + 1)
    in (x, y)
 
--- | The shoelace area of the points of @vs@ that @ix@ lists, in order:
--- positive for a ring clockwise on screen.
+-- | The shoelace area of the points of @vs@ listed by @ix@, in order.
+-- Positive for a ring clockwise on screen.
 signedArea :: PrimArray Float -> PrimArray Int -> Float
 signedArea vs ix = shoelace (sizeofPrimArray ix) (pointAt vs . indexPrimArray ix)
 
@@ -826,9 +815,8 @@ signedArea vs ix = shoelace (sizeofPrimArray ix) (pointAt vs . indexPrimArray ix
 ringArea :: PrimArray Float -> Float
 ringArea vs = shoelace (sizeofPrimArray vs `div` 2) (pointAt vs)
 
--- | The shoelace area of @n@ points, the @k@th at @at k@: positive for a
--- ring clockwise on screen. The polygon emitter tells a ring's winding by
--- it.
+-- | The shoelace area of @n@ points, point @k@ being @at k@. Positive for a
+-- ring clockwise on screen; the polygon emitter uses the sign for winding.
 {-# INLINE shoelace #-}
 shoelace :: Int -> (Int -> (Float, Float)) -> Float
 shoelace n at = go 0 0
@@ -857,23 +845,23 @@ pointInTri p a b c =
       d3 = sign (p, c, a)
    in not ((d1 < 0 || d2 < 0 || d3 < 0) && (d1 > 0 || d2 > 0 || d3 > 0))
 
--- | Index triples into the points of @vs@ covering the ring that @ix@ lists
--- by their indices, which a cut to a hole lists twice over. A point on one
--- of an ear's corners does not stop it being cut off.
+-- | Triangle index triples into @vs@ covering the ring listed by @ix@. A
+-- hole bridge lists its end points twice, so a point on an ear's corner does
+-- not block the ear.
 earClip :: PrimArray Float -> PrimArray Int -> PrimArray Int
 earClip vs ix = primArrayFromList [indexPrimArray ix k | (a, b, c) <- clipped, k <- [a, b, c]]
   where
     clipped = runST $ do
       let !ccw = signedArea vs ix >= 0
-      -- Coordinates never move. Remove an ear by relinking two neighbours,
-      -- instead of copying the remaining coordinates at every step.
+      -- Remove an ear by relinking its neighbours instead of copying the
+      -- remaining points at every step.
       prevs <- newPrimArray n
       nexts <- newPrimArray n
       forM_ [0 .. n - 1] $ \i -> do
         writePrimArray prevs i ((i - 1 + n) `mod` n)
         writePrimArray nexts i ((i + 1) `mod` n)
-      -- An ear's corners, read strictly: returned lazily they are thunks,
-      -- two for every corner of every ear tried.
+      -- Corners are forced here; returned lazily they cost two thunks per
+      -- corner of every ear tried.
       let {-# INLINE triangle #-}
           triangle i = do
             p <- readPrimArray prevs i
@@ -892,8 +880,8 @@ earClip vs ix = primArrayFromList [indexPrimArray ix k | (a, b, c) <- clipped, k
                 | otherwise = do
                     next <- readPrimArray nexts j
                     outside next (left - 1)
-              -- A point inside the ear stops it, unless it is on a corner:
-              -- the other end of a cut to a hole.
+              -- A point inside the ear blocks it, unless it sits on a corner
+              -- (the other end of a hole bridge).
               blocks pj = pointInTri pj a b c && pj /= a && pj /= b && pj /= c
           convex !_ 0 = pure True
           convex !i !left = do
@@ -935,10 +923,10 @@ earClip vs ix = primArrayFromList [indexPrimArray ix k | (a, b, c) <- clipped, k
 -- Draw ops
 --------------------------------------------------------------------------------
 
--- | Each ring's points with repeats dropped, and whether it closed, for the
--- rings with nothing but numbers in them. A point within a ten-thousandth
--- of a pixel of the one before it repeats it; with @closing@, or when the
--- ring closed, so does a last point on the first.
+-- | Each ring's points with near-duplicates dropped, and whether it was
+-- closed. Rings with a NaN or infinite coordinate are skipped. A point
+-- within 1e-4 px of the previous one is a duplicate; with @closing@, or for
+-- a closed ring, so is a last point on the first.
 cleanRings :: Bool -> Rings -> [(PrimArray Float, Bool)]
 cleanRings closing rings@(Rings pts starts tags) =
   [ (kept, closed)
@@ -978,11 +966,11 @@ cleanRings closing rings@(Rings pts starts tags) =
       shrinkMutablePrimArray out (2 * m')
       pure out
 
--- | The ops that fill a path flattened through @t@ within @tol@, by the
--- fill rule: a 'FillPolygon' for each outline, closed or not, with the
--- holes cut out of it that the rule makes. A subpath is a hole in the one
--- round it when the rule leaves it unfilled; subpaths that cross each other
--- fill on their own, and one that crosses itself may fill only in part.
+-- | Draw ops that fill a path, flattened through @t@ within @tol@: one
+-- 'FillPolygon' per outline (open subpaths are filled as closed), with the
+-- holes the fill rule makes cut out. A subpath is a hole when the rule
+-- leaves it unfilled. Crossing subpaths fill independently, and a
+-- self-intersecting one may fill only partly.
 fillPathOps :: Float -> Transform -> FillRule -> Path -> Paint -> [DrawOp]
 fillPathOps tol t rule path paint = concatMap polygonOp (fillComponents rule rings)
   where
@@ -1000,9 +988,8 @@ fillPathOps tol t rule path paint = concatMap polygonOp (fillComponents rule rin
                 tris = triangulateRings pts starts
              in [FillPolygon pts starts tris (Flat col) | nonEmpty tris]
       DeviceRamp ramp ->
-        -- Each ring gets a point where it crosses a stop, and each triangle
-        -- is cut along the stops, so every piece's colour is a blend of its
-        -- corners'.
+        -- Split ring edges and triangles at every stop, so each piece's
+        -- colour interpolates linearly between its corners.
         let rs = map (\r -> splitEdges (rampAt ramp) (rampSplits ramp) True r) (outline : holes)
             outlinePts = concatPoints rs
             starts = ringStarts rs
@@ -1010,9 +997,9 @@ fillPathOps tol t rule path paint = concatMap polygonOp (fillComponents rule rin
          in [FillPolygon pts starts tris (Shaded (rampShades ramp pts)) | nonEmpty tris]
     nonEmpty a = sizeofPrimArray a > 0
 
--- | The ops that stroke a path flattened through @t@ within @tol@, as the
--- 'Stroke' says, its width and dashes scaled by the transform's
--- 'averageStretch': a 'StrokePolyline' for each subpath, or each dash of it.
+-- | Draw ops that stroke a path, flattened through @t@ within @tol@: one
+-- 'StrokePolyline' per subpath or per dash. Width and dash lengths scale by
+-- the transform's 'averageStretch'.
 strokePathOps :: Float -> Transform -> Stroke -> Path -> Paint -> [DrawOp]
 strokePathOps tol t st path paint
   | not (width > 0) = []
@@ -1037,7 +1024,7 @@ strokePathOps tol t st path paint
         let pts' = splitEdges (rampAt ramp) (rampSplits ramp) closed pts
          in StrokePolyline pts' width closed cap (strokeJoin st) (strokeMiterLimit st) (Shaded (rampShades ramp pts'))
 
--- | Rings' points one ring after another.
+-- | All rings' points, back to back.
 concatPoints :: [PrimArray Float] -> PrimArray Float
 concatPoints [r] = r
 concatPoints rs = primArrayFromList (concatMap primArrayToList rs)
@@ -1051,15 +1038,14 @@ ringStarts [r] = runPrimArray $ do
   pure starts
 ringStarts rs = primArrayFromList (scanl (+) 0 [sizeofPrimArray r `div` 2 | r <- rs])
 
--- | The rings' outlines, each with the holes the fill rule cuts in it:
--- where there are holes, the outline wound with a positive 'ringArea' and
--- the holes the other way. A ring is inside another when all of its points
--- are; the path winds round the points just inside a ring once more, one
--- way or the other by the ring's winding, than round those just outside,
--- and the rule says which of them it fills. A filled ring with nothing
--- filled round it is an outline, and an unfilled ring inside one, or inside
--- filled rings inside one, a hole in it. Rings that cross, being neither
--- inside nor outside each other, each fill on their own.
+-- | Group rings into outlines with their holes under the fill rule. Where
+-- there are holes, the outline gets a positive 'ringArea' and the holes a
+-- negative one. A ring is inside another when all its points are. Crossing
+-- a ring inward changes the winding number by one, with the sign of the
+-- ring's orientation, and the rule decides which regions fill. A filled
+-- ring with no filled parent is an outline. An unfilled ring directly inside
+-- it, or inside filled rings within it, is one of its holes. Crossing rings
+-- are not nested, so each fills on its own.
 fillComponents :: FillRule -> [PrimArray Float] -> [(PrimArray Float, [PrimArray Float])]
 fillComponents _ [r] = [(r, [])]
 fillComponents rule rs = [(orient True i, map (orient False) (holesOf i)) | i <- ids, outline i]
@@ -1072,15 +1058,15 @@ fillComponents rule rs = [(orient True i, map (orient False) (holesOf i)) | i <-
     areaOf i = indexPrimArray areas i
     boxes = smallArrayFromListN count (map bounds rs)
     boxOf = indexSmallArray boxes
-    -- The smallest ring round ring @i@.
+    -- The smallest ring enclosing ring @i@.
     parents = primArrayFromListN count (map parentOf ids)
     parentOf i =
       case [(abs (areaOf j), j) | j <- ids, j /= i, abs (areaOf j) > abs (areaOf i), boxInside (boxOf i) (boxOf j), all (inside (ring j)) (points (ring i))] of
         [] -> -1
         cs -> snd (minimum cs)
     parent i = let p = indexPrimArray parents i in if p < 0 then Nothing else Just p
-    -- How many times the path winds round the points just inside ring @i@.
-    -- Boxed and lazy: a ring's winding is its parent's and one more.
+    -- The winding number just inside ring @i@: its parent's plus or minus
+    -- one. Boxed and lazy so each ring can read its parent's.
     windings = smallArrayFromListN count (map windingOf ids)
     windingOf i = maybe 0 (indexSmallArray windings) (parent i) + (if areaOf i > 0 then 1 else -1) :: Int
     filled i = fillsWinding rule (indexSmallArray windings i)
@@ -1096,7 +1082,7 @@ fillComponents rule rs = [(orient True i, map (orient False) (holesOf i)) | i <-
           ys = [y | (_, y) <- points r]
        in (minimum xs, minimum ys, maximum xs, maximum ys)
     boxInside (ax0, ay0, ax1, ay1) (bx0, by0, bx1, by1) = ax0 >= bx0 && ay0 >= by0 && ax1 <= bx1 && ay1 <= by1
-    -- Whether a point is inside a ring, by the rays it crosses.
+    -- Point-in-ring test by ray crossing parity.
     inside r (px, py) =
       let m = sizeofPrimArray r `div` 2
           crosses k =
@@ -1105,7 +1091,7 @@ fillComponents rule rs = [(orient True i, map (orient False) (holesOf i)) | i <-
              in (ay > py) /= (by > py) && px < ax + (py - ay) * (bx - ax) / (by - ay)
        in odd (length (filter crosses [0 .. m - 1]))
 
--- | A ring's points in the other order.
+-- | A ring's points in reverse order.
 reversePoints :: PrimArray Float -> PrimArray Float
 reversePoints r =
   let m = sizeofPrimArray r `div` 2
@@ -1115,18 +1101,18 @@ reversePoints r =
 -- Gradients
 --------------------------------------------------------------------------------
 
--- | A paint where it lands on the display.
+-- | A paint in device coordinates.
 data DevicePaint
   = DeviceSolid !Color
   | DeviceRamp !Ramp
 
--- | A linear gradient where it lands: its value at @(x, y)@ is
--- @gx x + gy y + g0@, and its stops' offsets rise within 0 and 1.
+-- | A linear gradient in device coordinates: its value at @(x, y)@ is
+-- @gx x + gy y + g0@. Stop offsets are non-decreasing within 0..1.
 data Ramp = Ramp !Float !Float !Float ![(Float, Color)]
 
--- | A paint laid out in the coordinates a transform takes to the display's.
--- A gradient's value at a point is its value where the transform's inverse
--- takes the point back, which is again a linear function of the point.
+-- | Map a paint from drawing coordinates to device coordinates. A
+-- gradient's device value at a point is its value at the inverse-transformed
+-- point, which is still linear in the point.
 devicePaint :: Transform -> Paint -> DevicePaint
 devicePaint _ (Solid c) = DeviceSolid c
 devicePaint t@(Transform a b c d _ _) (Linear (V2 x0 y0) (V2 x1 y1) stops0) = case stops of
@@ -1155,7 +1141,8 @@ devicePaint t@(Transform a b c d _ _) (Linear (V2 x0 y0) (V2 x1 y1) stops0) = ca
 rampAt :: Ramp -> Float -> Float -> Float
 rampAt (Ramp gx gy g0 _) x y = gx * x + gy * y + g0
 
--- | The values a gradient's colour bends at: its stops' offsets.
+-- | The gradient values where the colour changes slope: its distinct stop
+-- offsets.
 rampSplits :: Ramp -> [Float]
 rampSplits (Ramp _ _ _ stops) = dedupe (map fst stops)
   where
@@ -1171,7 +1158,7 @@ rampShades ramp@(Ramp _ _ _ stops) pts =
         Color w = rampColor stops (rampAt ramp x y)
      in w
 
--- | The colour at a value among rising stops.
+-- | The colour at a gradient value, given stops in non-decreasing order.
 rampColor :: [(Float, Color)] -> Float -> Color
 rampColor stops v = case stops of
   (o0, c0) : _ | v <= o0 -> c0
@@ -1183,8 +1170,9 @@ rampColor stops v = case stops of
     go [(_, c)] = c
     go [] = Color 0
 
--- | The points of a polyline, @closed@ or not, with a point added wherever
--- an edge crosses a value of @g@ in @vs@, in order along the edge.
+-- | A polyline's points with a point inserted wherever an edge crosses a
+-- value in @vs@ of @g@, in order along the edge. With @closed@, the closing
+-- edge is split too.
 splitEdges :: (Float -> Float -> Float) -> [Float] -> Bool -> PrimArray Float -> PrimArray Float
 splitEdges g vs closed pts = primArrayFromList (concat [x : y : cuts i | i <- [0 .. m - 1], let (x, y) = pointAt pts i])
   where
@@ -1199,11 +1187,11 @@ splitEdges g vs closed pts = primArrayFromList (concat [x : y : cuts i | i <- [0
               us = sortOn id [(v - ga) / (gb - ga) | v <- vs, min ga gb < v, v < max ga gb]
            in concat [[ax + u * (bx - ax), ay + u * (by - ay)] | u <- us]
 
--- | Triangles cut along the lines where @g@ takes a value in @vs@ (rising),
--- so that no piece crosses one: the points with the corners the cuts add
--- after them, and the pieces' index triples. A cut through an edge is
--- worked out from the edge's lower-numbered end, so the two triangles
--- either side of it put the corner in the same place.
+-- | Cut triangles along the lines where @g@ equals each value in @vs@
+-- (ascending), so no piece straddles one. Returns the points with the new
+-- corners appended, and the pieces' index triples. A cut point is computed
+-- from its edge's lower-indexed end, so both triangles sharing the edge put
+-- it in exactly the same place.
 splitTriangles :: (Float -> Float -> Float) -> [Float] -> PrimArray Float -> PrimArray Int -> (PrimArray Float, PrimArray Int)
 splitTriangles g vs pts tris = (primArrayFromList (primArrayToList pts ++ concat [[x, y] | (x, y) <- reverse added]), primArrayFromList (reverse out))
   where
@@ -1216,7 +1204,7 @@ splitTriangles g vs pts tris = (primArrayFromList (primArrayToList pts ++ concat
           cutsHere = [v | v <- vs, minimum gs < v, v < maximum gs]
           (acc', rest) = foldl' cut (acc, poly) cutsHere
        in fanOut acc' rest
-    -- The part of the polygon below the value is done; the part above goes on.
+    -- Fan out the part below the value; the part above goes to the next cut.
     cut ((next, adds, tris'), poly) v =
       let edges = zip poly (drop 1 poly ++ take 1 poly)
           step (nx, ads, lower, upper) (p@(_, _, _, gp), q@(_, _, _, gq))
@@ -1246,14 +1234,14 @@ splitTriangles g vs pts tris = (primArrayFromList (primArrayToList pts ++ concat
 -- Dashes
 --------------------------------------------------------------------------------
 
--- | The dashes of a polyline, @closed@ or not, for a dash pattern and how far
--- into it the line starts: each an open polyline, a zero-length one a hair
--- long so that its caps have a direction. 'Nothing' for a solid line: no
--- pattern, or one with a negative or infinite length or all zero, or one
--- that would cut the line into more than 'maxDashes' dashes.
+-- | Split a polyline into dashes for a pattern and start offset. Each dash
+-- is an open polyline; a zero-length dash gets a hair of length so its caps
+-- have a direction. 'Nothing' means draw solid: an empty pattern, one with a
+-- negative or infinite length or all zeros, a non-finite offset, or more
+-- than 'maxDashes' dashes.
 --
--- Kept out of line: inlined, its bindings are allocated for every stroke,
--- dashed or not.
+-- NOINLINE: inlined, its bindings are allocated for every stroke, dashed or
+-- not.
 {-# NOINLINE dashes #-}
 dashes :: [Float] -> Float -> Bool -> PrimArray Float -> Maybe [PrimArray Float]
 dashes pattern0 offset closed pts
@@ -1272,20 +1260,20 @@ dashes pattern0 offset closed pts
     path = [pointAt pts i | i <- [0 .. m - 1]] ++ [pointAt pts 0 | closed]
     total = sum (zipWith dist path (drop 1 path))
     dist (ax, ay) (bx, by) = sqrt ((bx - ax) * (bx - ax) + (by - ay) * (by - ay))
-    -- The entry the line starts in, and how much of it is left. A dash of
-    -- no length at the very start is kept, as a dot.
+    -- The pattern entry the line starts in and how much of it remains. A
+    -- zero-length dash at the very start is kept as a dot.
     (k0, left0) = skip 0 (offset - period * fromIntegral (floor (offset / period) :: Int))
     skip k o
       | k < 2 * plen && o >= entry k && (entry k > 0 || o > 0) = skip (k + 1) (o - entry k)
       | otherwise = (k, entry k - o)
-    -- In entry @k@ with @left@ of it to go, at point @p@ heading along
-    -- direction @dir@, with the dash so far reversed in @cur@ while in one.
+    -- In entry @k@ with @left@ remaining, at point @p@ heading along @dir@.
+    -- Inside a dash, @cur@ holds its points so far, reversed.
     walk :: Int -> Float -> [(Float, Float)] -> (Float, Float) -> (Float, Float) -> [(Float, Float)] -> [[(Float, Float)]]
     walk k left cur dir p qs = case qs of
       []
         | even k -> [dash dir cur | not (null cur)]
-        -- A gap that ends with the line, before a dash of no length: a dot
-        -- at the end.
+        -- A gap ending exactly at the line's end, followed by a zero-length
+        -- dash: a dot at the end.
         | left <= 0 && entry (k + 1) == 0 -> [dash dir [p]]
         | otherwise -> []
       q : rest
@@ -1299,8 +1287,8 @@ dashes pattern0 offset closed pts
         where
           len = dist p q
           dir' = if len > 0 then ((fst q - fst p) / len, (snd q - snd p) / len) else dir
-    -- A dash's points in order, repeats dropped; a single point gets a
-    -- second a hair along the way the line runs.
+    -- A dash's points in order without repeats. A lone point gets a second
+    -- one a hair further along the line.
     dash (dx, dy) ds = case dropRepeats (reverse ds) of
       [(x, y)] -> [(x, y), (x + 1e-3 * dx, y + 1e-3 * dy)]
       kept -> kept
@@ -1309,7 +1297,7 @@ dashes pattern0 offset closed pts
       | otherwise = a : dropRepeats (b : rest)
     dropRepeats xs = xs
 
--- | The most dashes a subpath is cut into; past that it is drawn solid.
+-- | The most dashes per subpath; past that it is drawn solid.
 maxDashes :: Int
 maxDashes = 4096
 
@@ -1317,23 +1305,27 @@ maxDashes = 4096
 -- Ops under a transform
 --------------------------------------------------------------------------------
 
--- | An op drawn under transform @t@, flattening what it has to within
--- @tol@. A rect keeps its op under a transform that keeps its sides level
--- and upright (a scale, a flip, a quarter turn), and a rounded rect under
--- one of those that scales both ways alike; a circle keeps its op under a
--- transform that keeps it round. Otherwise they become polygons. Lines,
--- polygons and triangles move their points, their widths scaled by the
--- transform's 'averageStretch'. A gradient keeps its op under a transform
--- that keeps rects, filling the transformed rect, its corners taking the
--- colours of the corners that land nearest them; under any other it is a
--- polygon with a colour at each corner, drawn as it would be unturned. An
--- unturned image keeps its rect under a transform with no rotation or skew,
--- turning over with a flip, and otherwise turns, as a turned image always
--- does: its centre moves, it scales and it turns with the transform. Text
--- moves its anchor, and a transform that scales it (by its
--- 'averageStretch') scales its font; its glyphs do not turn. A clip is the
--- bounding box of its transformed rect. A transform with a NaN or infinite
--- entry draws nothing, as does a rounded rect or circle with no size.
+-- | An op drawn under transform @t@, flattening within @tol@ where needed.
+--
+-- Rects keep their op under transforms that keep sides axis-aligned (scale,
+-- flip, quarter turn). Rounded rects also need a uniform scale, and circles
+-- a transform that keeps them round. Otherwise they become polygons. Lines,
+-- polygons and triangles transform their points, with widths scaled by
+-- 'averageStretch'.
+--
+-- A quad gradient under an axis-aligned transform fills the transformed
+-- rect, each corner taking the colour of the nearest transformed corner.
+-- Otherwise it becomes a polygon with per-corner colours, triangulated as
+-- the untransformed quad is.
+--
+-- An unrotated image stays a rect under a transform without rotation or
+-- skew, flipping its UVs for a flip. Otherwise it is rotated: its centre
+-- moves and it scales and turns with the transform. Text moves its anchor
+-- and scales its font by 'averageStretch'; glyphs are not rotated. A clip
+-- becomes the bounding box of its transformed rect.
+--
+-- A transform with a NaN or infinite entry draws nothing, as does an empty
+-- rounded rect or circle.
 transformOp :: Float -> Transform -> DrawOp -> [DrawOp]
 transformOp tol t@(Transform a b c d _ _) op
   | not (transformFinite t) = []
@@ -1375,8 +1367,8 @@ transformOp tol t@(Transform a b c d _ _) op
       StrokePolyline pts w closed cap join limit sh -> [StrokePolyline (points pts) (w * k) closed cap join limit sh]
       FillQuadGradient r tl tr br bl
         | not keepsRects ->
-            -- Its corners where the transform takes them, in the order
-            -- and with the two triangles the unturned quad is drawn with.
+            -- The transformed corners, with the same order and two
+            -- triangles the untransformed quad uses.
             let quad = primArrayFromList (concat [[x, y] | (x, y) <- corners r])
              in [ FillPolygon quad (primArrayFromListN 2 [0, 4]) (primArrayFromListN 6 [0, 1, 2, 0, 2, 3]) (Shaded (primArrayFromListN 4 [w | Color w <- [tl, tr, br, bl]]))
                 | abs (a * d - b * c) > 0
@@ -1414,10 +1406,10 @@ transformOp tol t@(Transform a b c d _ _) op
       PopClip -> [PopClip]
   where
     k = averageStretch t
-    -- Text keeps its size under a transform that barely scales it, as a
-    -- rotation's rounding does, so that it keeps its font.
+    -- Ignore scale within rounding error (as from a rotation), so text
+    -- keeps its font.
     scaled = abs (k - 1) > 1e-3
-    -- A rect with no size, for which a rounded rect's own op draws nothing.
+    -- A zero-size rect, for which the rounded rect ops draw nothing.
     empty (Rect _ _ w h) = not (w > 0 && h > 0)
     -- Zero but for rounding: a half turn's sine is not quite 0.
     rounding = 1e-6 * maximum (map abs [a, b, c, d])
@@ -1435,8 +1427,7 @@ transformOp tol t@(Transform a b c d _ _) op
     points pts = generatePrimArray (sizeofPrimArray pts) $ \i ->
       let (x, y) = applyTransform t (indexPrimArray pts (i - i `mod` 2)) (indexPrimArray pts (i - i `mod` 2 + 1))
        in if even i then x else y
-    -- The rect's corners, top left and on clockwise, where the transform
-    -- takes them.
+    -- The rect's transformed corners, clockwise from the top left.
     corners (Rect x y w h) = [applyTransform t px py | (px, py) <- [(x, y), (x + w, y), (x + w, y + h), (x, y + h)]]
     -- The bounding box of the rect's transformed corners.
     box r =
@@ -1445,13 +1436,12 @@ transformOp tol t@(Transform a b c d _ _) op
           ys = map snd cs
        in Rect (minimum xs) (minimum ys) (maximum xs - minimum xs) (maximum ys - minimum ys)
     minimumOn f = foldr1 (\p q -> if f p <= f q then p else q)
-    -- An image turned by @angle@ about its rect's centre, under the
-    -- transform: the centre goes where the transform takes it, each side
-    -- stretches as the transform stretches the turned image's axis along it,
-    -- and the image turns as its x axis does, over on its v axis when the
-    -- transform flips. That is exact while the transform keeps the turned
-    -- axes square, as a rotation, a uniform scale and a flip do; under a
-    -- skew the image stays a rect rather than a parallelogram.
+    -- An image rotated by @angle@ about its centre, under the transform.
+    -- The centre is transformed, each side scales by how much the transform
+    -- stretches the rotated image's axis along it, and the rotation follows
+    -- the image's x axis, flipping v when the transform flips. Exact for
+    -- rotations, uniform scales and flips; under a skew the image stays a
+    -- rect rather than a parallelogram.
     turnedImage (Rect x y w h) angle tex u0 v0 u1 v1 col =
       let (cx, cy) = applyTransform t (x + w / 2) (y + h / 2)
           cs = cos angle

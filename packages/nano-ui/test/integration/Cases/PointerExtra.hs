@@ -1,6 +1,6 @@
--- | The middle, side and other mouse buttons: a click of any button but the
--- left is reported apart from a click, and every button held or clicked
--- belongs to the widget it went down on.
+-- | Middle, side and other mouse buttons. A non-left click is reported
+-- separately from a plain click, and a held or clicked button belongs to the
+-- widget it was pressed on.
 module Cases.PointerExtra (tests) where
 
 import Spec
@@ -37,11 +37,11 @@ frames ctx ui = mapM (\inp -> evalUi ctx inp ui)
 middleAt :: Context -> NanoUI a -> V2 -> IO [a]
 middleAt ctx ui pos = let (press, release) = clickPairWith MouseMiddle win pos in frames ctx ui [press, release]
 
--- | Whether a fresh loop, idle since input @i@, draws a frame for @i@ again.
+-- | Whether an idle loop that already saw input @i@ redraws for it again.
 redrawsAgain :: Input -> IO Bool
 redrawsAgain i = newContext >>= \idle -> shouldRedrawFrame idle i i False False False
 
--- | Whether a response saw no middle press or click.
+-- | Whether a response saw no middle hold or click.
 noMiddle :: Response -> Bool
 noMiddle r = not (respHeldWith MouseMiddle r || respClickedWith MouseMiddle r)
 
@@ -53,7 +53,7 @@ runMiddleClickTest ctx failed = do
       flags r = (respHeldWith MouseMiddle r, respClickedWith MouseMiddle r, respClicked r || respPressed r)
   rs <- frames ctx (button' "Middle") [press, release, clearEphemeral release]
   assertEq failed [(True, False, False), (False, True, False), (False, False, False)] (map flags rs)
-  -- A held middle button keeps frames coming, and a repeated press gets a frame.
+  -- A held middle button counts as a held pointer, and a press frame redraws.
   assert failed (inputPointerHeld press && not (inputPointerHeld release))
   assert failed =<< redrawsAgain press
   assertEq failed [False, False] =<< middleAt ctx (button "Middle") (centerOf btn)
@@ -78,8 +78,8 @@ runMiddleCoveredTest ctx failed = do
   rs <- middleAt ctx (ui True) (V2 (x + 4) (y + 4))
   assert failed (all (\r -> noMiddle r && not (respHovered r)) rs)
 
--- | A middle click on a closable tab's header or close button asks to close it,
--- without selecting it; a tab without a close button stays.
+-- | A middle click on a closable tab's header or close button requests a close
+-- without selecting the tab. A tab without a close button stays.
 runMiddleTabCloseTest :: Context -> IORef Int -> IO ()
 runMiddleTabCloseTest ctx failed = do
   let ui = tabBar' (0 :: Int) [closableTab 0 "Alpha" (), closableTab 1 "Beta" (), tab 2 "Gamma" ()]
@@ -100,8 +100,8 @@ runMiddleDismissTest ctx failed = do
   dismissed <- forM [centerOf shown, V2 380 280] $ \p -> respClicked <$> evalUi ctx (fst (clickPairWith MouseMiddle win p)) ui
   assertEq failed [False, True] dismissed
 
--- | The side buttons are held and released like the others, and a covered
--- layer sees none of it.
+-- | Side buttons press, hold and release like the others. A layer under a
+-- modal sees none of them.
 runSideButtonsTest :: Context -> IORef Int -> IO ()
 runSideButtonsTest ctx failed = do
   let side b = applyMouseButton b True win {inputMousePos = V2 20 20}
@@ -126,8 +126,8 @@ runMiddleDisabledTest ctx failed = do
   rs <- middleAt ctx ui . centerOf =<< warmup2 ctx win ui
   assert failed (all noMiddle rs)
 
--- | A middle press shuts a tooltip, with no wait while held and a new one on
--- release; a side button's press shuts it and waits again.
+-- | A middle press hides a tooltip. No reopen timer runs while the button is
+-- held; release starts one. A side button press also hides it until the delay.
 runMiddleTooltipTest :: Context -> IORef Int -> IO ()
 runMiddleTooltipTest ctx failed = do
   let ui = button' "Help" >>= \b -> b <$ tooltipConfigured defaultTooltipConfig {tooltipDelay = 0.05, tooltipGrace = 0} b "Mouse tip"
@@ -148,9 +148,8 @@ runMiddleTooltipTest ctx failed = do
   waitOut >> tip True hover
   forM_ [MouseBack, MouseForward] $ \b -> tip False (applyMouseButton b True hover) >> open
 
--- | Sets of buttons: every button, the extra ones by number, goes down and
--- up through one set, and a press and release come in the set of the frame
--- they happen in.
+-- | Button sets track every button, extras by number. Presses and releases
+-- appear only in the frame they happen in.
 runButtonSetsTest :: Context -> IORef Int -> IO ()
 runButtonSetsTest _ failed = do
   let every = [MouseLeft, MouseRight, MouseMiddle, MouseBack, MouseForward, MouseOther 6, MouseOther 32]
@@ -158,7 +157,7 @@ runButtonSetsTest _ failed = do
   assertEq failed (buttonsFromList every) (inputButtonsHeld down)
   assertEq failed (buttonsFromList every) (inputButtonsPressed down)
   assert failed (all (`heldIn` down) every && all (`pressedIn` down) every)
-  -- The list comes back in number order, the named buttons by their names.
+  -- Lists come back in button-number order; numbers 1 to 5 are the named buttons.
   assertEq failed [MouseLeft, MouseMiddle, MouseRight, MouseBack, MouseForward, MouseOther 6, MouseOther 32] (buttonsToList (inputButtonsHeld down))
   assertEq failed [MouseLeft, MouseMiddle, MouseRight, MouseBack, MouseForward, MouseOther 6] (map mouseButtonNumber [1 .. 6])
   -- A button past 32 is not tracked.
@@ -171,9 +170,9 @@ runButtonSetsTest _ failed = do
   assertEq failed (inputButtonsHeld down) (inputButtonsHeld (clearEphemeral down))
   assert failed (buttonsNull (inputButtonsPressed (clearEphemeral down)))
 
--- | A button held or clicked is the widget's only where it went down on the
--- widget: a right or middle drag from one button across another holds and
--- clicks neither, and an extra button is reported like the others.
+-- | A held or clicked button belongs to the widget it was pressed on. A
+-- right, middle or extra-button drag from one button onto another holds and
+-- clicks neither.
 runHeldOwnershipTest :: Context -> IORef Int -> IO ()
 runHeldOwnershipTest ctx failed = do
   let ui = row ((,) <$> button' "Alpha" <*> button' "Beta")
@@ -192,8 +191,8 @@ runHeldOwnershipTest ctx failed = do
     assertEq failed (False, True) (respClickedWith btn (fst clickedB), respClickedWith btn (snd clickedB))
     assert failed (not (respClicked (snd clickedB)))
 
--- | 'mousePressed', 'mouseReleased' and 'mouseHeld' hear a button anywhere on
--- the view's layer, and nothing behind a modal or inside 'disabledWhen'.
+-- | 'mousePressed', 'mouseReleased' and 'mouseHeld' see a button anywhere on
+-- the view's layer, but not behind a modal or inside 'disabledWhen'.
 runMouseListenersTest :: Context -> IORef Int -> IO ()
 runMouseListenersTest ctx failed = do
   let listen = (,,) <$> mousePressed MouseBack <*> mouseHeld MouseBack <*> mouseReleased MouseBack
@@ -209,11 +208,11 @@ runMouseListenersTest ctx failed = do
   _ <- warmup2 ctx win covered
   assertEq failed [(False, False, False)] =<< frames ctx covered [back]
 
--- | A mouse area reports hover and every button over it and all inside it: a
--- middle click or a right press on its label is the area's, and so is a left
--- click beside its button, while a click on the button is the button's. What
--- the area reveals while hovered stays revealed with the pointer on it, even
--- where a pinned node elsewhere turns covering on.
+-- | A mouse area reports hover and every button over it, including over its
+-- children. A middle click or right press on its label, or a left click
+-- beside its button, goes to the area; a click on the button goes to the
+-- button. Content revealed on hover stays while the pointer is on it, even
+-- when a pinned node elsewhere turns on pointer covering.
 runMouseAreaTest :: Context -> IORef Int -> IO ()
 runMouseAreaTest ctx failed = do
   hoveredRef <- newIORef False

@@ -1,12 +1,10 @@
 -- | The layout overlay ('NanoUI.Internal.Context.setExplainLayout'): a
--- one-pixel outline just inside every layout node, coloured by how deep the
--- node is, and a tint over the node under the pointer with its content box
--- outlined. Each layer's outlines are drawn over that layer, the page's over
--- the page and a floating panel's over the panel, so a window hides the
--- outlines of what it covers as it hides those nodes. Where the view marked
--- parts of itself ('esScopes'), only the nodes of those parts are outlined
--- and explained. The overlay only paints: layout and hit tests never see it,
--- and a frame with it off runs none of this.
+-- one-pixel outline just inside every layout node, coloured by depth, and a
+-- tint over the node under the pointer with its content box outlined. Each
+-- layer's outlines are drawn in that layer, so a floating window hides the
+-- outlines of the nodes it covers. If the view marked scopes ('esScopes'),
+-- only nodes in them are shown. The overlay only paints; layout and hit tests
+-- never see it, and none of this runs while it is off.
 module NanoUI.Internal.Frame.Explain
   ( explainFrame
   , paintExplainPage
@@ -28,24 +26,22 @@ import NanoUI.Internal.Id (hashWidgetId)
 import NanoUI.Internal.Style (Direction (..), Flow (..), Padding (..), Theme, fadeAlpha, themeSeries)
 import NanoUI.Internal.Types (Color, Rect (..), Size (..), V2 (..), rectContains, rectHit, rectIntersect)
 
--- | Work out what the overlay draws this frame, and repaint where that
--- changed: the outlines of every layer, and the highlight under the pointer.
--- The frame's own rect diffs follow widgets only, and a row or column moves
--- without one, so the outlines keep their own. A new node under the pointer
--- also asks for a frame, whose view sees it ('getExplainedNode'). Runs after
--- layout and before the frame's damage is written.
+-- | Compute what the overlay draws this frame and damage what changed: every
+-- layer's outlines and the hover highlight. The frame's rect diffs track only
+-- widgets, and rows and columns can move without one, so the outlines are
+-- diffed here. A new hovered node also requests a frame so the view sees it
+-- ('getExplainedNode'). Runs after layout, before damage is written.
 explainFrame :: Context -> Input -> IO ()
 explainFrame ctx@Context {ctxNodeArena = na} inp = do
   scopes <- esScopes <$> readIORef (ctxExplain ctx)
   let mouse = inputMousePos inp
       Size w h = inputWindowSize inp
       window = Rect 0 0 w h
-      -- Whether node @idx@ is one the overlay shows: in a scope, if the view
-      -- marked any.
+      -- Whether the overlay shows node @idx@: it is in a scope, or there are none.
       inScope idx = null scopes || any (\(from, below) -> idx >= from && idx < below) scopes
-      -- Node @idx@'s outline and those inside it, in declaration order, ahead
-      -- of @rest@. The children, pinned ones included, are visited last
-      -- declared first.
+      -- Outlines of node @idx@ and its descendants in declaration order,
+      -- prepended to @rest@. Children, pinned ones included, are visited in
+      -- reverse so the result comes out in order.
       outlines !depth !clip idx rest = do
         !rect <- getNodeRect na idx
         inner <- childClip ctx idx clip rect
@@ -53,11 +49,11 @@ explainFrame ctx@Context {ctxNodeArena = na} inp = do
           Nothing -> pure rest
           Just c -> foldPlacedChildrenM na idx (\acc ci -> outlines (depth + 1) c ci acc) rest
         pure (if inScope idx then (rect, clip, depth) : below else below)
-      -- The innermost node under the pointer from @idx@ down: the child
-      -- drawn on top with a node under it ('firstChildOnTopJustM': an
-      -- earlier sibling over a later one, but a later layer over an earlier
-      -- one, and a pinned child over the rest), or else @idx@ itself. A child
-      -- can paint outside a row or column, so each is searched.
+      -- The innermost node under the pointer from @idx@ down: search the
+      -- topmost child first ('firstChildOnTopJustM': earlier siblings over
+      -- later ones, but later layers over earlier ones, and pinned children
+      -- over the rest), else @idx@ itself. A child can paint outside its row
+      -- or column, so every child is searched.
       nodeAt !depth clip idx = do
         rect <- getNodeRect na idx
         inner <- childClip ctx idx clip rect
@@ -69,9 +65,9 @@ explainFrame ctx@Context {ctxNodeArena = na} inp = do
                 Just . (,clip) <$> describeNode na depth idx
             | otherwise -> pure Nothing
   count <- arenaCount na
-  -- The layers in the order the frame paints them: the page, then the
-  -- windows, the modals and the popups, each kind in arena order. The page's
-  -- root is node 0, unless the view has no page and that is a panel.
+  -- Layers in paint order: the page, then windows, modals and popups, each
+  -- kind in arena order. The page root is node 0, unless the view has no
+  -- page and node 0 is a panel.
   floating <-
     foldClassNodeRevM na FloatingNodes (\acc idx -> (: acc) . (,idx) <$> getNodeType na idx) []
   page <- if count > 0 then not . isFloatingNode <$> getNodeType na 0 else pure False
@@ -81,10 +77,10 @@ explainFrame ctx@Context {ctxNodeArena = na} inp = do
   layers <- mapM (\(key, root) -> (key,) <$> outlines (0 :: Int) window root []) roots
   route <- getsInteraction ctx isPointerRoute
   hover <- case route of
-    -- A dropdown or the text-edit menu is over the pointer, and no node is.
     RouteLayer _ | count > 0 -> do
       let panelAt nt rest = topmostFloating ctx (== nt) (`rectHit` mouse) >>= maybe rest pure
       nodeAt (0 :: Int) window =<< foldr panelAt (pure 0) [NodePopup, NodeModal, NodeWindow]
+    -- Any other route means a dropdown or the text-edit menu has the pointer.
     _ -> pure Nothing
   ExplainState {esLayers = prevLayers, esHover = prevHover} <- readIORef (ctxExplain ctx)
   let changed (a : as) (b : bs)
@@ -100,8 +96,8 @@ explainFrame ctx@Context {ctxNodeArena = na} inp = do
     markDirtyCovered ctx
   modifyIORef' (ctxExplain ctx) (\es -> es {esOn = True, esLayers = layers, esHover = hover})
 
--- | The key 'esLayers' files the page's outlines under. No node has it, and
--- node 0 can be a floating panel's root, whose outlines go over the panel.
+-- | The 'esLayers' key for the page's outlines. It cannot be 0, since node 0
+-- can be a floating panel's root.
 pageLayer :: Int
 pageLayer = -1
 
@@ -109,16 +105,15 @@ pageLayer = -1
 paintExplainPage :: Context -> IO ()
 paintExplainPage ctx = paintExplainLayer ctx pageLayer
 
--- | Draw the outlines 'explainFrame' found for the floating panel at node
--- @root@.
+-- | Draw the outlines 'explainFrame' found for the floating panel rooted at @root@.
 paintExplainLayer :: Context -> NodeIdx -> IO ()
 paintExplainLayer ctx@Context {ctxDrawArena = da} root = do
   colour <- depthColor <$> getTheme ctx
   layers <- esLayers <$> readIORef (ctxExplain ctx)
   forM_ (lookup root layers) $ mapM_ $ \(rect, clip, depth) -> outline da clip rect (colour depth)
 
--- | Tint the node under the pointer and outline its content box, over
--- everything else the frame draws.
+-- | Tint the node under the pointer and outline its content box, above
+-- everything else.
 paintExplainHover :: Context -> IO ()
 paintExplainHover ctx@Context {ctxDrawArena = da} = do
   hover <- esHover <$> readIORef (ctxExplain ctx)
@@ -129,14 +124,14 @@ paintExplainHover ctx@Context {ctxDrawArena = da} = do
     when (l > 0 || r > 0 || t > 0 || b > 0) $
       outline da clip (Rect (x + l) (y + t) (w - l - r) (h - t - b)) col
 
--- | The clip node @idx@'s children paint in, when it paints in @clip@ at
--- @rect@ ('childPaintClip'). 'Nothing' when nothing inside shows.
+-- | The clip node @idx@'s children paint in, given the node paints in @clip@
+-- at @rect@ ('childPaintClip'). 'Nothing' when no child can show.
 childClip :: Context -> NodeIdx -> Rect -> Rect -> IO (Maybe Rect)
 childClip ctx idx clip rect = do
   nt <- getNodeType (ctxNodeArena ctx) idx
   maybe (Just clip) (rectIntersect clip) <$> childPaintClip ctx idx nt rect
 
--- | What the overlay says of node @idx@, @depth@ deep in its layer.
+-- | The overlay's description of node @idx@, at @depth@ in its layer.
 describeNode :: NodeArena -> Int -> NodeIdx -> IO ExplainedNode
 describeNode na depth idx = do
   a <- arenaArrays na
@@ -171,9 +166,8 @@ describeNode na depth idx = do
       , explainedPointer = mode
       }
 
--- | A node's type without its @Node@ prefix, and how a container lays out
--- its children: its direction, @layered@ for layers, and @wrap@ after the
--- direction of a container that wraps.
+-- | A node's type without the @Node@ prefix, plus a container's flow: its
+-- direction, @layered@, or its direction followed by @wrap@.
 nodeKind :: NodeType -> Direction -> Flow -> T.Text
 nodeKind nt dir flow
   | not (isContainerNode nt) = kind
@@ -185,7 +179,7 @@ nodeKind nt dir flow
     kind = T.pack (drop 4 (show nt))
     direction = T.toLower (T.pack (show dir))
 
--- | The outline colour at a depth: the theme's series colours in turn.
+-- | Outline colour for a depth, cycling through the theme's series colours.
 depthColor :: Theme -> Int -> Color
 depthColor theme = \depth -> series !! (depth `rem` length series)
   where

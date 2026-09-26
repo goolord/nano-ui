@@ -40,9 +40,10 @@ import NanoUI.Widgets.TextEditor
 
 -- | Run a command on the field with this id and focus it: the command comes
 -- from a menu or button that may not be over the field, and the caret,
--- selection highlight and next keystroke belong to the field it edited. The
--- focus moves as 'NanoUI.Internal.Monad.requestFocus' moves it, at the end
--- of the frame, so a disabled field or one behind a modal refuses it. A
+-- selection highlight and next keystroke belong to the field it edited.
+-- Focus moves at the end of the frame, as with
+-- 'NanoUI.Internal.Monad.requestFocus', so a disabled field or one behind a
+-- modal refuses it. A
 -- change to the text pulses @respChanged@ on the field's next frame.
 applyTextFieldCommand :: Context -> WidgetId -> TextCommand -> IO ()
 applyTextFieldCommand ctx wid cmd =
@@ -138,9 +139,9 @@ openTextEditMenu ctx inp =
       markDirty ctx
 
 -- | The enabled text field or text area the pointer at @mouse@ is on, which
--- takes the text cursor and the right-click menu. Not one under a widget a
--- stack or a pinned node draws over it there ('topmostHit'), nor one whose
--- control, drawn inside it, has the pointer ('innermostHit').
+-- takes the text cursor and the right-click menu. Excludes a field covered
+-- there by a stack or pinned node ('topmostHit') and one whose inner
+-- control has the pointer ('innermostHit').
 textFieldWidgetAtMouse :: Context -> V2 -> IO (Maybe WidgetId)
 textFieldWidgetAtMouse ctx@Context {ctxNodeArena = na} mouse = do
   top <- overlayHitRoot ctx mouse
@@ -156,7 +157,7 @@ textFieldWidgetAtMouse ctx@Context {ctxNodeArena = na} mouse = do
           <&&> (if nt == NodeTextArea then not <$> isMouseOnTextAreaScrollBarAt ctx idx mouse else pure True)
   case mIdx of
     Nothing -> pure Nothing
-    -- The widget the pointer lands on, as hover finds it.
+    -- Accept it only if hover would land on it too.
     Just idx -> ifM ((== Just idx) <$> reachedWidgetAt ctx mouse) (Just <$> getWidgetId na idx) (pure Nothing)
 
 -- | A press on a command row runs it when it can run, recorded for the caller

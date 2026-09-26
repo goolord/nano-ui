@@ -34,7 +34,7 @@ main :: IO ()
 main =
   runSdlApp
     defaultSdlOptions
-      { -- Closing the window asks the view, which asks about unsaved changes.
+      { -- A close request goes to the view, which may ask about unsaved changes.
         sdlWindowSettings = defaultWindowSettings {wsTitle = "nano-ui Notepad", wsSize = Size 1000 720, wsExitOnCloseRequest = False}
       , sdlAppTheme = Just tomorrowNightMinDarkTheme
       , sdlAppShouldQuit = pressedOnceIn KeyEscape
@@ -111,17 +111,17 @@ notepadUi = do
     zoomIn = setZoom (min 4.0 (zoom * 1.1))
     zoomOut = setZoom (max 0.5 (zoom / 1.1))
 
-    -- A menu row and what it does; running it closes the menu.
+    -- A menu row and its action; running it closes the menu.
     item menuRow action = whenM menuRow (setOpenMenu "" >> action)
     editItem name chord cmd = item (menuItemShortcut name chord) (runTextCommand editorId cmd)
 
-    -- The commands with a chord that works with every menu closed: each is
-    -- bound below, and its row shows the chord.
+    -- Commands whose chords work with every menu closed. They are bound
+    -- below, and their rows show the chord.
     newCmd = ("New", ctrl <> key 'n', newDocument)
     openCmd = ("Open...", ctrl <> key 'o', setOpenDlg =<< askOpenFileDialog defaultFileDialogOptions)
     saveCmd = ("Save", ctrl <> key 's', saveDocument False)
     saveAsCmd = ("Save As...", ctrl <> shift <> key 's', saveDocument True)
-    -- Ends the session, unless there are changes to ask about first.
+    -- Quit, or ask first when there are unsaved changes.
     exitApp = if docDirty then setConfirmExit True else quitUi
     exitCmd = ("Exit", ctrl <> key 'q', exitApp)
     zoomInCmd = ("Zoom In", ctrl <> key '=', zoomIn)
@@ -164,16 +164,15 @@ notepadUi = do
 
   ------------------------------------------------------------- shortcuts ---
   -- A menu row's chord works only while its menu is open, so the commands'
-  -- chords are bound here, ahead of the rows, to work with every menu closed.
-  -- The editor takes its own editing chords. Ctrl++ is Ctrl+Shift+= on a US
-  -- layout, and the keypad's plus.
+  -- chords are also bound here, ahead of the rows. The editor handles its own
+  -- editing chords. Ctrl++ is Ctrl+Shift+= on a US layout, or keypad plus.
   for_ [newCmd, openCmd, saveCmd, saveAsCmd, exitCmd, zoomInCmd, zoomOutCmd, resetZoomCmd] $
     \(_, chord, action) -> whenM (shortcut chord) action
   whenM (or <$> traverse shortcut [ctrl <> shift <> key '=', ctrl <> key '+']) zoomIn
 
   -------------------------------------------------------------- the window ---
   whenM (winCloseRequested <$> askWindow) exitApp
-  -- Set every frame; the window changes only when the title does.
+  -- Cheap to set every frame: the window updates only when the title changes.
   setWindowTitleUi $
     (if T.null docPath then "Untitled" else docPath) <> (if docDirty then " *" else "") <> " - nano-ui Notepad"
 

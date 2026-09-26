@@ -38,10 +38,10 @@ data DragAxis = DragAxisX | DragAxisY
 
 -- | Clamped 1D drag on a track of widget @owner@. Maps pointer position on
 -- @track@ into [lo, hi]. The drag starts with a press on the track and lasts
--- until the button comes up; a button held from elsewhere and moved onto the
--- track drags nothing, nor does a press where layers or a pinned node draw
--- another widget over the owner ('pointerCovered'). Returns the value,
--- whether the drag is held, and whether it was held before this frame.
+-- until the button comes up. A button held from elsewhere and moved onto the
+-- track drags nothing, nor does a press where another widget covers the
+-- owner ('pointerCovered'). Returns the value, whether the drag is held, and
+-- whether it was held before this frame.
 useDrag1D ::
   (Ui :> es) =>
   DragAxis ->
@@ -137,18 +137,18 @@ keyboardFocused wid
         <&&> uiIO (not <$> isDisabled ctx wid)
         <&&> uiIO (not <$> pointerBlockedByModal ctx)
 
--- | Take text from the input method (IME) for the widget with this id, as
--- iced's @request_input_method@ does: the widget that has the keyboard asks
--- every frame it takes text, with its caret in window coordinates and what
--- it takes, as the text fields ask for themselves. While the input method
--- composes for it, this answers the 'Composition', which the widget draws at
--- its caret, and the frame drops the keys, which are the input method's;
--- the text it commits arrives as typed text ('inputChars'). The backend
--- puts the input method's candidate window by the caret, and takes text
--- input at all only while a widget asks: a widget of its own that reads
--- 'inputChars', such as a terminal, asks here. A widget without the
--- keyboard, or disabled, or behind a modal, asks nothing and gets
--- 'Nothing'.
+-- | Request input method (IME) text for widget @wid@, like iced's
+-- @request_input_method@. Call it every frame the widget accepts text,
+-- passing its caret in window coordinates and the input purpose; text fields
+-- do this themselves.
+--
+-- While the IME is composing, this returns the 'Composition' for the widget
+-- to draw at its caret, and the frame drops the IME's keys. Committed text
+-- arrives as 'inputChars'. The backend places the candidate window at the
+-- caret and enables text input only while some widget requests it, so a
+-- custom widget reading 'inputChars' (a terminal, say) must call this.
+-- Returns 'Nothing' and requests nothing when the widget is unfocused,
+-- disabled or behind a modal.
 --
 -- > wid <- nextId
 -- > Rect x y _ _ <- fromMaybe (Rect 0 0 0 0) <$> lastRect wid
@@ -163,11 +163,10 @@ useInputMethod wid purpose caret = do
       requestInputMethod ctx wid (Just caret) purpose
       fieldComposition ctx wid
 
--- | Arrow / Enter / Space while @wid@ is focused and eligible for input, each
--- alone or with Shift ('shiftAtMost'): with Ctrl, Alt or Super it is a
--- chord, for a shortcut. An arrow held down steps again on each
--- auto-repeat; Enter and Space, which activate, count only when they go
--- down.
+-- | Arrow / Enter / Space while @wid@ is focused and eligible for input,
+-- bare or with Shift only ('shiftAtMost'); other modifiers leave them to
+-- shortcuts. Arrows repeat with key auto-repeat; Enter and Space count only
+-- on the initial press.
 useKeyNav :: (Ui :> es) => WidgetId -> Eff es KeyNav
 useKeyNav wid = do
   inp <- askInput

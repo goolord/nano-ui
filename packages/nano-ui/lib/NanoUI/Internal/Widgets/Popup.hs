@@ -128,23 +128,21 @@ floatingOverlay open dismissable addPanel enter body = do
 -- | When a tooltip opens, and where.
 data TooltipConfig = TooltipConfig
   { tooltipDelay :: !Double
-  -- ^ Seconds the pointer rests on the target before the tooltip opens; 0
-  -- opens it at once. Moving over the target does not restart the wait.
+  -- ^ Seconds the pointer must rest on the target before the tooltip
+  -- opens; 0 opens it at once. Moving within the target does not restart it.
   , tooltipGrace :: !Double
-  -- ^ Seconds after a tooltip was last up in which this one opens without
-  -- its delay, so the pointer can run along a toolbar reading each tooltip.
+  -- ^ Seconds after the last tooltip closed during which this one skips its
+  -- delay, so the pointer can sweep along a toolbar reading each tooltip.
   , tooltipPlacement :: !PopupPlacement
-  -- ^ The side of the target the tooltip opens on. 'PlacementAtCursor' puts
-  -- it below the pointer instead, above it when there is no room, and moves
-  -- it with the pointer.
+  -- ^ The side of the target to open on. 'PlacementAtCursor' instead puts
+  -- it below the pointer (above if there is no room) and follows it.
   , tooltipGap :: !Float
-  -- ^ Logical pixels between the tooltip and its target, or the pointer it
-  -- follows.
+  -- ^ Logical pixels between the tooltip and its target or the pointer.
   }
   deriving (Eq, Show)
 
--- | Below the target, 4 pixels from it, after the pointer has rested on it
--- for half a second, or at once within 0.3 seconds of another tooltip.
+-- | 4 pixels below the target, after a 0.5 s rest, or at once within 0.3 s
+-- of another tooltip.
 defaultTooltipConfig :: TooltipConfig
 defaultTooltipConfig =
   TooltipConfig
@@ -154,8 +152,8 @@ defaultTooltipConfig =
     , tooltipGap = 4
     }
 
--- | Attach a rich tooltip widget to any target response, displayed once the
--- pointer has rested on it ('defaultTooltipConfig').
+-- | Attach a rich tooltip widget to any target response, shown once the
+-- pointer rests on it ('defaultTooltipConfig').
 tooltipWidget ::
   (Ui :> es, HasResponse r) =>
   r ->
@@ -163,10 +161,10 @@ tooltipWidget ::
   Eff es (Maybe a)
 tooltipWidget = tooltipWidgetConfigured defaultTooltipConfig
 
--- | 'tooltipWidget' with its delay, placement and gap. The pointer is on the
--- target where the view's routed pointer is on its visible part with nothing
--- drawn over it ('pointerOnWidget'), whether or not the target takes input:
--- a disabled button has its tooltip, to say why it is off.
+-- | 'tooltipWidget' with a configured delay, placement and gap. The target
+-- counts as hovered when the routed pointer is on its visible, uncovered
+-- part ('pointerOnWidget'), even if it takes no input, so a disabled button
+-- can still explain why it is off.
 tooltipWidgetConfigured ::
   (Ui :> es, HasResponse r) =>
   TooltipConfig ->
@@ -174,8 +172,8 @@ tooltipWidgetConfigured ::
   Eff es a ->
   Eff es (Maybe a)
 tooltipWidgetConfigured cfg target child = do
-  -- The id 'popup' takes next. The timer is kept under it, so it costs no
-  -- sibling id of its own.
+  -- The id 'popup' takes next; the timer is keyed on it to avoid using a
+  -- sibling id.
   wid <- currentId
   ctx <- askContext
   frame <- askFrameInput
@@ -188,36 +186,33 @@ tooltipWidgetConfigured cfg target child = do
     if rectHit rect routed
       then uiIO (findNodeByWidgetId ctx tid >>= \mIdx -> pointerOnWidget ctx mIdx tid rect routed)
       else pure False
-  -- The pointer is still on the target while the tooltip itself is in front
-  -- of it there, as one following the pointer is for the frame before it
-  -- moves out from under it.
+  -- The tooltip covering the target still counts as hovering it, as when a
+  -- pointer-following tooltip lags one frame behind the pointer.
   onTip <- uiIO ((== RouteLayer (intKey wid)) <$> getsInteraction ctx isPointerRoute)
   let hovered = onTarget || (onTip && rectHit rect mouse)
   open <- uiIO (tooltipTimer ctx cfg (intKey wid) hovered frame)
-  -- The pointer coming onto the target starts the wait, and leaving it shuts
-  -- the tooltip, even where the target is a label or a container; while one
-  -- that follows the pointer is up, every move over the target moves it.
+  -- Request a frame when the pointer enters or leaves the target, even a
+  -- label or container, and on every move while a following tooltip is open.
   uiIO (registerHoverZone ctx (open && follow) rect)
   let (anchor, placement)
         | follow = (AnchorRect (Rect mx my 0 pointerClearance), PlacementBelow)
         | otherwise = (AnchorRect rect, tooltipPlacement cfg)
   snd <$> popup open ((defaultPopupConfig anchor) {cfgPlacement = placement, cfgDismissable = False, cfgOffset = tooltipGap cfg}) child
 
--- | How far below the pointer's hot spot a tooltip following the pointer
--- starts, before the popup gap: an arrow pointer's height, so the pointer
--- does not cover the tooltip.
+-- | Offset below the pointer's hot spot for a following tooltip, before the
+-- gap: roughly an arrow cursor's height, so the cursor does not cover it.
 pointerClearance :: Float
 pointerClearance = 16
 
--- | Whether the tooltip with store key @k@ is open this frame, given whether
--- its target is @hovered@. The wait starts when the pointer comes onto the
--- target and runs out 'tooltipDelay' later, or at once within 'tooltipGrace'
--- of the last tooltip going away. A button held down keeps the tooltip shut,
--- and letting it go starts the wait again; a wheel turn restarts it. Either
--- one also ends the grace period. The times live in the bookkeeping slots,
--- which neither damage nor wake: a tooltip opening or closing repaints as a
--- floating panel, and the frame it opens on is asked for with
--- 'requestWakeAt', so an app waiting on one draws nothing until then.
+-- | Whether the tooltip with store key @k@ is open this frame. The delay
+-- starts when the target becomes @hovered@ and ends after 'tooltipDelay', or
+-- at once within 'tooltipGrace' of the last tooltip closing. A held button
+-- keeps the tooltip shut and restarts the delay on release; a wheel turn
+-- restarts it. Both also end the grace period.
+--
+-- The times live in quiet store slots, which neither damage nor wake.
+-- Opening and closing repaint as a floating panel, and the opening frame is
+-- scheduled with 'requestWakeAt', so an idle app draws nothing while waiting.
 tooltipTimer :: Context -> TooltipConfig -> Int -> Bool -> Input -> IO Bool
 tooltipTimer ctx cfg k hovered inp = do
   store <- getStore ctx
@@ -227,7 +222,7 @@ tooltipTimer ctx cfg k hovered inp = do
       lastUp0 = findSlot fieldQuiet 0 lastK store
       held = inputPointerHeld inp
       interrupted = anyButtonPressed inp || inputScroll inp /= V2 0 0
-  -- Most tooltips belong to targets the pointer is nowhere near.
+  -- Fast path: most targets are not near the pointer.
   if not hovered && showAt0 == 0 && (lastUp0 == 0 || not interrupted)
     then pure False
     else do
@@ -236,12 +231,12 @@ tooltipTimer ctx cfg k hovered inp = do
           nowUs = micros now
           delayUs = micros (max 0 (tooltipDelay cfg))
           graceUs = micros (tooltipGrace cfg)
-          -- Nothing draws while a tooltip rests open, so the frame it goes
-          -- away on is the last it was up.
+          -- No frames run while a tooltip sits open, so the closing frame
+          -- counts as the last one it was up.
           wasUp = showAt0 > 0 && nowUs >= showAt0
           starting = hovered && not held && not interrupted && showAt0 == 0
-          -- One up in the frame before whose call comes after this one has
-          -- not recorded going away yet.
+          -- A tooltip open last frame whose call comes after this one has
+          -- not yet recorded closing.
           otherUp = any (\k' -> k' /= k && findSlot fieldQuiet 0 (slotKey SlotTooltipShow k') store > 0) . IM.keys
       warm <-
         if not starting || graceUs <= 0 || lastUp0 == 0
@@ -286,7 +281,7 @@ tooltipAt ::
   Eff es ()
 tooltipAt placement = tooltipConfigured defaultTooltipConfig {tooltipPlacement = placement}
 
--- | 'tooltip' with its delay and placement.
+-- | 'tooltip' with a configured delay and placement.
 --
 -- > tooltipConfigured defaultTooltipConfig {tooltipPlacement = PlacementAtCursor} swatch name
 tooltipConfigured ::
@@ -297,7 +292,7 @@ tooltipConfigured ::
   Eff es ()
 tooltipConfigured cfg target txt = void (tooltipWidgetConfigured cfg target (label txt))
 
--- | Text shown below a widget once the pointer has rested on it for half a
+-- | Text shown below a widget after the pointer rests on it for half a
 -- second, until it leaves or a button is pressed ('defaultTooltipConfig').
 --
 -- > save <- button' "Save"

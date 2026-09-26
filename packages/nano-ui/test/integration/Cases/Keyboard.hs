@@ -64,7 +64,7 @@ runKeyboardModalEligibilityTest ctx failed = do
     ((_, after), _, _, _) <- runFrame ctx (keyInp KeyEnter inp) ui
     assert failed (maybe False snd after)
 
--- | A frame pressing Space, which types a space as well.
+-- | A Space press, which also types a space.
 spaceInp :: Input -> Input
 spaceInp inp = (keyInp KeySpace inp) {inputChars = " "}
 

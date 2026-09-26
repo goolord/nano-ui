@@ -111,11 +111,9 @@ editTextInput ctx mode inp store key s0 =
     [] -> pure Nothing
     cmds -> Just <$> foldM (flip (runCommandIO ctx mode)) (textInputEditor store key s0) cmds
 
--- | The frame's typing and keys as the commands of the focused text field
--- ('inputTextCommands'). While an input method has the field's keys
--- ('FocusComposing'), the typed text is what it commits, and goes in
--- whatever modifiers are held: a chord that ends a composition must not
--- lose it.
+-- | This frame's edit commands for the focused field ('inputTextCommands').
+-- Under 'FocusComposing' the typed text is the IME commit and is inserted
+-- regardless of modifiers, so a chord that ends a composition keeps it.
 fieldTextCommands :: Context -> EditorMode -> Input -> IO [TextCommand]
 fieldTextCommands ctx mode inp = do
   kind <- getsInteraction ctx isFocusKind
@@ -232,7 +230,8 @@ editTextField wid mode initial unfocusedText = do
         . deleteSlot fieldInt pulseKey
         . insertDyn modeKey mode
   isFocus <- keyboardFocused wid
-  -- A password's input method neither shows nor learns what it types.
+  -- Password fields request 'InputSecure' so the IME neither shows nor
+  -- learns their text.
   when (isFocus && modeEditable mode) $
     uiIO (requestInputMethod ctx wid Nothing (if modeCopyable mode then InputNormal else InputSecure))
   mEdited <- if isFocus then uiIO (editTextInput ctx mode inp store key s0) else pure Nothing

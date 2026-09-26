@@ -1,8 +1,8 @@
 -- | The chrome a frameless window draws for itself: the three caption
 -- buttons, the border around the window, and the title bar's drag regions.
 -- Acting on them is the backend's ('NanoUI.Sdl.Internal.Chrome.windowCaption'
--- in @nano-ui-sdl@). The glyphs are drawn as whole-pixel fills, which stay
--- crisp at any size.
+-- in @nano-ui-sdl@). The glyphs are drawn rather than typeset, mostly as
+-- whole-pixel fills that stay crisp at any size.
 module NanoUI.Internal.Widgets.Caption
   ( -- * Buttons
     CaptionGlyph (..)
@@ -63,13 +63,14 @@ data CaptionConfig = CaptionConfig
   , capGlyphSize :: !Float
   -- ^ The side of the square a glyph is drawn in, centred in the button.
   , capCloseColor :: !(Maybe Color)
-  -- ^ What the close button lights up in, or the theme's red when unset.
+  -- ^ The close button's hover colour; the theme's red when unset.
   , capCornerRadius :: !Float
-  -- ^ How far the close button's top right, the window's corner, is rounded.
+  -- ^ Rounding of the close button's top-right corner, which is also the
+  -- window's corner.
   }
 
--- | 44 by 'captionBarHeight', a ten-pixel glyph, and a corner rounded by
--- eight, as the desktop rounds a window.
+-- | 44 by 'captionBarHeight' buttons, a ten-pixel glyph, and an 8-pixel
+-- corner matching the desktop's window rounding.
 defaultCaptionConfig :: CaptionConfig
 defaultCaptionConfig =
   CaptionConfig
@@ -169,9 +170,9 @@ windowFrame frame body = do
 -- Geometry
 --------------------------------------------------------------------------------
 
--- | What is left of a title bar row to drag the window by, minus the
--- rectangles in it that take clicks of their own (cut horizontally only).
--- Hand it to the backend as the drag region (@setWindowChrome@ in
+-- | The parts of a title bar row that drag the window: the row minus the
+-- rectangles that take their own clicks, cut horizontally only. Pass the
+-- result to the backend as the drag region (@setWindowChrome@ in
 -- @nano-ui-sdl@).
 dragSpans :: Rect -> [Rect] -> [Rect]
 dragSpans (Rect rx ry rw rh) taken =
@@ -201,7 +202,7 @@ drawGlyph glyph box@(Rect x y w h) col = case glyph of
   GlyphMinimize -> drawRect (Rect x (y + whole (h / 2)) w 1) col
   -- A window: one square.
   GlyphMaximize -> strokeBox box col
-  -- Two windows, the top and right edges of the one behind showing.
+  -- Two windows; the back one shows only its top and right edges.
   GlyphRestore -> do
     drawRect (Rect (x + 2) y (w - 2) 1) col
     drawRect (Rect (x + w - 1) y 1 (h - 2)) col

@@ -1,9 +1,8 @@
--- The recursive walk (paintNodeWithEnv -> lowerNodeVisible -> the per-node
--- painters, containers recursing through walkChildrenWithOccluders) runs
--- through NOINLINE seams, and the heavy painters stay out of line, so no one
--- binding carries the whole paint body inside the loop: that blew up
--- compilation under -fspecialise-aggressively and LLVM, as the flags below
--- also guard against.
+-- The recursive walk (paintNodeWithEnv -> lowerNodeVisible -> per-node
+-- painters -> walkChildrenWithOccluders) goes through NOINLINE seams, and
+-- heavy painters stay out of line, so no single binding holds the whole
+-- paint body inside the loop. That blew up compilation under
+-- -fspecialise-aggressively with LLVM; the flags below also guard against it.
 {-# OPTIONS_GHC -fasm -fno-specialise-aggressively #-}
 
 -- | Walk solved nodes and emit geometry, respecting clips, layers, and paint
@@ -122,10 +121,10 @@ paintNodeWithEnv env idx = do
           theme <- scopeTheme (peContext env) scope
           lowerNodeVisible env {peTheme = theme, peScope = scope} idx nt (Rect x y w h)
 
--- | The children of a skipped plain container, when a pinned node is below
--- it. A plain container draws nothing of its own and does not clip, so a
--- pinned node can show outside it, even when it has no size at all. Every
--- other container clips its children to itself.
+-- | Paint a skipped plain container's children when a pinned node is below
+-- it. Plain containers draw nothing and do not clip, so a pinned node can
+-- show outside one, even one with no size. Other containers clip their
+-- children.
 {-# NOINLINE paintPinnedBelow #-}
 paintPinnedBelow :: PaintEnv -> NodeIdx -> IO ()
 paintPinnedBelow env idx = do
@@ -210,22 +209,21 @@ paintContainerNode env@PaintEnv {peContext = ctx} idx rect = do
     cdc <- mkCustomDrawContext ctx (peFontMetrics env) wid
     emitDrawingOps env rect (build cdc rect)
 
--- | A drawing's ops clipped to its rect, in the env's default font. An image
--- op naming a registered 'ImageId' draws that image from the atlas.
+-- | A drawing's ops clipped to its rect, in the env's default font. Image
+-- ops naming a registered 'ImageId' draw from the atlas.
 emitDrawingOps :: PaintEnv -> Rect -> SmallArray DrawOp -> IO ()
 emitDrawingOps env rect ops = withClip (peDrawArena env) rect (emitOps env ops)
 
--- | Ops in the env's default font, where they are, unclipped. Kept out of
--- line: inlined into its one caller, the clip's action captures its
--- arguments, which allocates more each drawing.
+-- | Ops in the env's default font, unclipped. NOINLINE: inlined into its
+-- caller, the clip action would capture these arguments and allocate more
+-- per drawing.
 {-# NOINLINE emitOps #-}
 emitOps :: PaintEnv -> SmallArray DrawOp -> IO ()
 emitOps env@PaintEnv {peDrawArena = da} = emitDrawOps da (peFontMetrics env) (ctxFontSize ctx) (resolveTextFont ctx) (atlasImageUv ctx)
   where
     ctx = peContext env
 
--- | The atlas texture and UV bounds of a registered image, for an image op
--- that names it.
+-- | The atlas texture and UV bounds of a registered image.
 atlasImageUv :: Context -> Int -> IO (Maybe (Int, (Float, Float, Float, Float)))
 atlasImageUv ctx tid = fmap (atlasTextureId,) <$> lookupImageUv ctx (ImageId tid)
 
@@ -321,11 +319,11 @@ paintBoxNode env idx rect = do
   -- styleIdx holds RGBA Word32 bits; see `box` in NanoUI.Widgets.
   pushRect (peDrawArena env) rect (Color (fromIntegral si :: Word32))
 
--- | An image node: stretched over its rect in its font colour's tint, or,
--- with a look ('getImageNode'), fitted, cropped, zoomed, faded and turned
--- ('lookDraw'), a turned one clipped to its rect. A disabled image fades
--- the way disabled widget colours do, and one not registered paints the
--- accent.
+-- | An image node. Without a look it is stretched over its rect, tinted by
+-- its font colour. With a look ('getImageNode') it is fitted, cropped,
+-- zoomed, faded and rotated ('lookDraw'), and clipped to its rect when
+-- rotated. Disabled images fade like disabled widget colours; unregistered
+-- ones paint the accent.
 paintImageNode :: PaintEnv -> NodeIdx -> Rect -> IO ()
 paintImageNode env@PaintEnv {peDrawArena = da} idx rect = do
   let na = peNodeArena env
@@ -364,8 +362,8 @@ paintDrawingNode env@PaintEnv {peContext = ctx} idx rect = do
         ops <- cachedDrawingOps ctx wid content rect build
         emitDrawingOps env rect ops
 
--- | Lower the children of @idx@ with the current paint env, the one on top
--- last ('forChildrenInPaintOrder_'). NOINLINE keeps this recursive call out
+-- | Lower the children of @idx@ with the current paint env, topmost last
+-- ('forChildrenInPaintOrder_'). NOINLINE keeps this recursive call out
 -- of the simplifier's loop analysis, so the whole walker stays a call to
 -- opaque seams rather than one inlined monster.
 {-# NOINLINE walkChildrenWithOccluders #-}

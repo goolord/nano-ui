@@ -117,9 +117,9 @@ canvasScene key =
         , widgetDraw = countedCanvasOps
         }
 
--- | Paths built every frame: 64 filled circles and stroked rounded rects,
--- then, turned by @turn@, a star an ear clip triangulates and a 400-point
--- polyline. The path counterpart of 'canvasOps'.
+-- | Path counterpart of 'canvasOps': 64 filled circles and 64 stroked
+-- rounded rects, then, rotated by @turn@, a star (ear-clip triangulated) and
+-- a 400-point polyline.
 pathOps :: Float -> CustomDrawContext -> Rect -> SmallArray DrawOp
 pathOps turn cdc (Rect x y w h) = runCanvasFor cdc $ do
   let accent = themeAccent (cdcTheme cdc)
@@ -136,8 +136,8 @@ pathOps turn cdc (Rect x y w h) = runCanvasFor cdc $ do
     drawPath (P.polygon star) accent
     drawStrokePath (P.polyline wave) 3 ink
 
--- | A custom widget that builds 'pathOps' every frame, turned a little
--- further each time so every frame repaints them too.
+-- | A custom widget that builds 'pathOps' every frame, rotated a little more
+-- each time so every frame also repaints.
 pathScene :: NanoUI ()
 pathScene =
   void $
@@ -209,7 +209,7 @@ main = do
               void (evaluate (rasterizeSvg (128 + i `mod` 2) 128 white doc))
       putStrLn "profiled 1000 rasterizations of two icons at 16 and 128 px"
     ("canvas-paths-build" : _) -> do
-      -- 'pathOps' built 3000 times without a frame: the ops alone.
+      -- Build 'pathOps' with no frame around it, timing the ops alone.
       let cdc = CustomDrawContext False False False False False defaultTheme (monospaceMetrics 16)
       forM_ [1 .. iterations] $ \i ->
         mapM_ evaluate (toList (pathOps (fromIntegral i * 0.01) cdc (Rect 0 0 512 512)))

@@ -30,31 +30,33 @@ inp = withInputOff 640 480
 shapesAt :: IORef Int -> Context -> NanoUI a -> [(V2, UiCursorKind)] -> IO ()
 shapesAt failed ctx ui = mapM_ $ \(p, want) -> cursorOver ctx inp ui p >>= assertEq failed want
 
--- | Warm the view up, then check the cursor at point @at@ of each response it returns.
+-- | Warm up the view, then check the cursor at @at@ of each returned response.
 shapesOver :: IORef Int -> Context -> (Response -> V2) -> NanoUI [Response] -> [UiCursorKind] -> IO [Response]
 shapesOver failed ctx at ui wants = do
   rs <- warmup2 ctx inp ui
   assertEq failed (length wants) (length rs)
   rs <$ shapesAt failed ctx ui (zip (map at rs) wants)
 
--- | The scope's shape shows over its widgets only, also over the solved arena without a frame.
+-- | A scope's shape shows only over its widgets, including when read from
+-- the solved arena without running a frame.
 runCursorShapeScopeTest :: Context -> IORef Int -> IO ()
 runCursorShapeScopeTest ctx failed = do
   let ui = column (sequence [withCursorShape UiCursorCrosshair (plainArea 120 80), plainArea 120 80])
   rs <- shapesOver failed ctx centerOf ui [UiCursorCrosshair, UiCursorDefault]
   forM_ (zip rs [UiCursorCrosshair, UiCursorDefault]) $ \(r, want) ->
     uiCursorKind ctx inp {inputMousePos = centerOf r} >>= assertEq failed want
-  -- A frame without the scope drops its shape.
+  -- A frame without the scope drops the shape.
   shapesAt failed ctx (column (plainArea 120 80 >> plainArea 120 80)) [(centerOf r, UiCursorDefault) | r <- take 1 rs]
 
--- | Widgets inside keep their own cursors; the scope fills in the rest, container gaps included.
+-- | Widgets keep their own cursors; the scope covers the rest, including
+-- container gaps.
 runCursorShapeInnerWidgetsTest :: Context -> IORef Int -> IO ()
 runCursorShapeInnerWidgetsTest ctx failed = do
   let ui = withCursorShape UiCursorMove . columnWith (gap 24) $ sequence [button' "Press", fst <$> textInput' "text", plainArea 120 60]
   rs <- shapesOver failed ctx centerOf ui [UiCursorPointer, UiCursorText, UiCursorMove]
   shapesAt failed ctx ui [(V2 (bx + 4) (by + bh + 12), UiCursorMove) | Rect bx by _ bh <- map respRect (take 1 rs)]
 
--- | The innermost scope around a widget wins, the default arrow included.
+-- | The innermost scope wins, even when it sets the default arrow.
 runCursorShapeNestedTest :: Context -> IORef Int -> IO ()
 runCursorShapeNestedTest ctx failed =
   void . shapesOver failed ctx centerOf ui $ [UiCursorMove, UiCursorCrosshair, UiCursorMove, UiCursorCell, UiCursorDefault]
@@ -63,7 +65,7 @@ runCursorShapeNestedTest ctx failed =
     a = plainArea 100 50
     s = withCursorShape
 
--- | A disabled widget has no cursor of its own, so the scope's shows over it.
+-- | A disabled widget has no cursor of its own, so the scope's shape shows.
 runCursorShapeDisabledTest :: Context -> IORef Int -> IO ()
 runCursorShapeDisabledTest ctx failed =
   forM_ [(True, [UiCursorNotAllowed, UiCursorNotAllowed]), (False, [UiCursorPointer, UiCursorText])] $ \(off, wants) ->
@@ -71,7 +73,8 @@ runCursorShapeDisabledTest ctx failed =
   where
     ui off = withCursorShape UiCursorNotAllowed . disabledWhen off . column $ sequence [button' "Delete", fst <$> textInput' "name"]
 
--- | The scope takes no id and adds no node: widgets keep their ids, state and layout.
+-- | A scope takes no id and adds no node, so widget ids, state and layout are
+-- unchanged.
 runCursorShapeIdsLayoutTest :: Context -> IORef Int -> IO ()
 runCursorShapeIdsLayoutTest ctx failed = do
   let ui scoped = row $ do
@@ -88,7 +91,8 @@ runCursorShapeIdsLayoutTest ctx failed = do
   rects1 <- arenaRects ctx
   assertEq failed (ids (a1, b1), rects1, n1, n2) (ids (a0, b0), rects0, 1, 1)
 
--- | A floating panel over the scope's widgets hides the shape, unless declared inside the scope.
+-- | A floating panel over the scope hides its shape, unless the panel is
+-- declared inside the scope.
 runCursorShapeFloatingTest :: Context -> IORef Int -> IO ()
 runCursorShapeFloatingTest ctx failed = do
   let tools = fst <$> window True "Tools" (label "Body")
@@ -106,7 +110,8 @@ runCursorShapeFloatingTest ctx failed = do
     void (warmup2 ctx inp within)
     shapesAt failed ctx within [(body, UiCursorMove)]
 
--- | A scope's widget scrolled out of its viewport shows no shape where it would lie.
+-- | A scoped widget scrolled out of the viewport shows no shape where it
+-- would be.
 runCursorShapeClippedTest :: Context -> IORef Int -> IO ()
 runCursorShapeClippedTest ctx failed = do
   let ui = column . scrollWith (fixedH 100 . fixedW 200) . column $
@@ -114,7 +119,7 @@ runCursorShapeClippedTest ctx failed = do
   Rect dx dy dw dh <- respRect <$> warmup2 ctx inp ui
   shapesAt failed ctx ui [(V2 (dx + dw / 2) (dy + 4), UiCursorMove), (V2 (dx + dw / 2) (dy + dh - 4), UiCursorDefault)]
 
--- | Only the scopes of a frame's last view pass count.
+-- | Only scopes from the frame's last view pass count.
 runCursorShapeRepeatedPassTest :: Context -> IORef Int -> IO ()
 runCursorShapeRepeatedPassTest ctx failed = do
   let ui = do
@@ -127,14 +132,15 @@ runCursorShapeRepeatedPassTest ctx failed = do
   assertJustM failed (getPrevRect ctx (respId d)) $ \r ->
     uiCursorKind ctx inp {inputMousePos = spanCenter r} >>= assertEq failed UiCursorDefault
 
--- | The view API's names are the cursor kinds the backends map.
+-- | 'UiCursorKind' covers the cursor kinds the backends map.
 runCursorShapeNamesTest :: Context -> IORef Int -> IO ()
 runCursorShapeNamesTest _ failed =
   assertEq failed (33, True) (length shapes, all (`elem` shapes) [UiCursorNotAllowed, UiCursorCrosshair, UiCursorMove, UiCursorWait, UiCursorNwResize, UiCursorHidden])
   where
     shapes = [minBound .. maxBound] :: [UiCursorKind]
 
--- | While a modal is open only scopes in it show, and a popup in it covers a scope there.
+-- | With a modal open only scopes inside it apply, and a popup in the modal
+-- covers a scope beneath it.
 runCursorShapeModalTest :: Context -> IORef Int -> IO ()
 runCursorShapeModalTest ctx failed = do
   let ui open anchor = do
@@ -147,14 +153,14 @@ runCursorShapeModalTest ctx failed = do
   (page, _) <- warmup2 ctx inp (ui False (V2 0 0))
   let corner = V2 (rectX (respRect page) + 8) (rectY (respRect page) + 8)
   shapesAt failed ctx (ui False (V2 0 0)) [(corner, UiCursorMove)]
-  -- Where the scope is, to anchor the popup in it.
+  -- Find the scope's rect to anchor the popup inside it.
   assertJustM failed (fmap (respRect . fst) . snd <$> warmup2 ctx inp (ui True (V2 0 0))) $ \(Rect ax ay aw ah) -> do
     let view = ui True (V2 (ax + aw / 2) (ay + 10))
     assertJustM failed ((>>= sequence) . snd <$> warmup2 ctx inp view) $ \(area, body) -> do
       assert failed (not (rectContains (rectInflate 8 (respRect area)) corner) && rectContains (respRect area) (centerOf body))
       shapesAt failed ctx view [(corner, UiCursorDefault), (centerOf body, UiCursorDefault), (V2 (ax + aw - 8) (ay + ah - 8), UiCursorCrosshair)]
 
--- | A scope in a window's body shows over its widgets, not over the title bar.
+-- | A scope in a window body applies to its widgets, not the title bar.
 runCursorShapeInWindowTest :: Context -> IORef Int -> IO ()
 runCursorShapeInWindowTest ctx failed = do
   let ui = window True "Tools" (withCursorShape UiCursorCrosshair (plainArea 160 80))
@@ -162,7 +168,7 @@ runCursorShapeInWindowTest ctx failed = do
   assertJust failed mInner $ \inner -> assertJustM failed (getPrevRect ctx (respId w)) $ \(Rect wx wy ww _) ->
     shapesAt failed ctx ui [(centerOf inner, UiCursorCrosshair), (V2 (wx + ww / 2) (wy + 12), UiCursorDefault)]
 
--- | The shape follows the node drawn on top: a pinned one, or a later layer.
+-- | The shape follows the topmost node: a pinned one, or a later layer.
 runCursorShapeLayersAndPinTest :: Context -> IORef Int -> IO ()
 runCursorShapeLayersAndPinTest ctx failed = do
   let pinned = drawing (pinAt 20 20 . fixedWH 60 40) (const mempty)

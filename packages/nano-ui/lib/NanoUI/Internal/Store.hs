@@ -396,8 +396,8 @@ data Slot
     -- seconds.
     SlotNumericRepeat
   | -- | When a tooltip opens, in monotonic microseconds ('storeQuiet', keyed
-    -- by the tooltip's id): absent while its target is not hovered. Under key
-    -- 0, when any tooltip was last up, which opens the next one at once.
+    -- by tooltip id); absent while its target is not hovered. Key 0 holds
+    -- when any tooltip was last open, for the grace period.
     SlotTooltipShow
   deriving (Enum)
 

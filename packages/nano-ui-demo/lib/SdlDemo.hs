@@ -27,9 +27,9 @@
 --                   boundedRadio, colorPicker, textInput, textArea,
 --                   numericInput,
 --                   button + tooltip, contextMenu, file dialogs, dropZone
---   * Graphics:     image gallery, content fits, a turned and faded image,
---                   an animated GIF that a sensor pauses off screen, and a
---                   progressBar driven by a pulsing value
+--   * Graphics:     image gallery, content fits, rotated and faded images,
+--                   an animated GIF paused off screen, and a pulsing
+--                   progressBar
 --   * Typography:   label / labelWith + the @font*@ style combinators
 --   * List:         tree, searchInput
 --   * Table:        tableWith (needs useTableSort)
@@ -127,9 +127,9 @@ main = do
 -- §2  Assets & shared look
 ------------------------------------------------------------------------------
 
--- | Read and decode an animated GIF with JuicyPixels: each frame's width,
--- height and RGBA pixels, or why the file could not be used. The demo runs it
--- with 'useTask', on a thread of its own, so no frame waits for it.
+-- | Decode an animated GIF with JuicyPixels into each frame's width, height
+-- and RGBA pixels, or an error message. The demo runs it through 'useTask'
+-- so no frame waits on it.
 decodeGif :: FilePath -> IO (Either String [(Int, Int, BS.ByteString)])
 decodeGif path = do
   decoded <- try $ do
@@ -139,7 +139,7 @@ decodeGif path = do
     forM frames $ \frame -> do
       let rgba = JP.convertRGBA8 frame
           (fp, n) = VS.unsafeToForeignPtr0 (JP.imageData rgba)
-      -- Decode and convert here, so registering the frames only copies.
+      -- Force decoding here, on the worker thread, so registering only copies.
       pixels <- evaluate (BSI.fromForeignPtr0 fp n)
       pure (JP.imageWidth rgba, JP.imageHeight rgba, pixels)
   pure (either (\e -> Left (displayException (e :: SomeException))) Right decoded)
@@ -183,10 +183,9 @@ data DemoTheme
   | ThemeSystem
   deriving (Bounded, Enum, Eq, Ord, Read, Show)
 
--- | A theme choice's name, and how it sets the session theme each frame: a
--- fixed theme, or the default theme in light or dark as the desktop is set,
--- picked from the system's appearance. Setting the same theme again costs
--- nothing.
+-- | A theme choice's label and the action that applies it each frame: a
+-- fixed theme, or the default theme matching the system's light/dark
+-- appearance. Re-setting the same theme is free.
 themeChoice :: DemoTheme -> (T.Text, NanoUI ())
 themeChoice = \case
   ThemeDefault -> ("Default", setUiTheme defaultTheme)
@@ -195,11 +194,10 @@ themeChoice = \case
   TomorrowMidnightMin -> ("Tomorrow at Midnight Min", setUiTheme tomorrowMidnightMinDarkTheme)
   ThemeSystem -> ("Follow system", setUiTheme . defaultThemeFor =<< systemAppearance)
 
--- | What the demo reads once per context: the font families offered by the
--- Controls-tab font combo box, from the SDL backend's system font scan
--- ('listFontFamilies'), or a fallback list where the scan finds no font
--- files; and whether @NANO_DEBUG_OPEN@ starts it with the Debug window open.
--- The chosen family goes to the backend through 'setSdlUiFont'.
+-- | Settings read once per context: the font families for the Controls-tab
+-- combo box (from 'listFontFamilies', or a fallback list if the scan finds
+-- none), and whether @NANO_DEBUG_OPEN@ opens the Debug window at start. The
+-- chosen family is applied with 'setSdlUiFont'.
 data DemoSettings = DemoSettings ![T.Text] !Bool
 
 demoSettings :: NanoUI DemoSettings
@@ -303,12 +301,11 @@ demoUi = do
           rowWith (tight . gap gapMicro . alignMid) $ do
             whenM (button "OK") (setClick "OK")
             whenM (button "Cancel") (setClick "Cancel")
-            -- F1 and F12 do what the buttons do; a shortcut takes no id.
+            -- F1 and F12 mirror the buttons. Shortcuts take no widget id.
             whenM ((||) <$> button "About" <*> shortcut (key (KeyF 1))) (setAbout True)
             whenM ((||) <$> button "Debug" <*> shortcut (key (KeyF 12))) (setDebug (not debugOpen))
-            -- Each click takes a screenshot on a thread of its own, once the
-            -- next frame is on screen, and saves it there; the label says
-            -- how that went.
+            -- Each click captures the next presented frame and saves it on a
+            -- worker thread; the label shows the result.
             (shots, setShots) <- useInt 0
             whenM (button "Screenshot") (setShots (shots + 1))
             shoot <- askScreenshot
@@ -467,13 +464,11 @@ demoUi = do
             Graphics -> do
               heading "Graphics"
               separator
-              -- Generated RGBA images, registered while this tab shows and
-              -- let go when it does not, which frees their room in the
-              -- image atlas.
+              -- Generated RGBA images, registered only while this tab shows
+              -- so their atlas space is freed otherwise.
               swatches <- catMaybes <$> forM demoSwatches (\(caption, pixels) -> fmap (,caption) <$> useImageRgba caption 32 32 pixels)
-              -- A wrapping row flows the swatches onto new lines in a narrow
-              -- window, each line centred, and layers lay a badge over each
-              -- image's corner.
+              -- A wrapping row with centred lines holds the swatches; layers
+              -- put a badge on each image's corner.
               rowWith (wrap . lineAlign LinesCenter . tight . gap gapInline . fillW) $
                 for_ swatches $ \(iid, caption) ->
                   columnWith (tight . gap gapMicro) $ do
@@ -483,10 +478,10 @@ demoUi = do
                         labelWith (tight . fontMono . fontSize 11) "32px"
                     muted caption
               separator
-              -- A wide image in each content fit, cropped, turned, faded and
-              -- zoomed, and filling the width in its own shape. The scope
-              -- keeps the widgets after it on their ids whether or not the
-              -- image is registered.
+              -- A wide image in each content fit, cropped, rotated, faded,
+              -- zoomed, and filling the width at its own aspect. The scope
+              -- keeps later widget ids stable whether or not the image is
+              -- registered.
               landscape <- useImageRgba ("landscape" :: T.Text) 96 48 demoLandscape
               scope $ for_ landscape $ \iid -> columnWith (tight . gap gapText . fillW) $ do
                 rowWith (wrap . tight . gap gapInline . fillW) $ do
@@ -567,16 +562,12 @@ demoUi = do
                             secret
                     _ -> pure ()
               separator
-              -- An animated GIF loaded from disk the first time this tab
-              -- shows: useTask decodes it on a thread of its own while the
-              -- loop sleeps, and the frame the result wakes keeps its frames.
-              -- The hook is called only until then. Each frame is its own
-              -- image, registered while this tab shows (useImageRgba, keyed
-              -- by its place), and the clock picks which one to show; every
-              -- frame of this GIF lasts 100 ms. keepAnimating keeps frames
-              -- coming while it plays; the sensor round it holds the frames
-              -- only while it is on screen, so off screen the GIF asks for
-              -- none.
+              -- An animated GIF, decoded by useTask the first time this tab
+              -- shows. The result is stored in state and the hook is no
+              -- longer called. Each GIF frame is its own image (useImageRgba,
+              -- keyed by index) registered while the tab shows; the clock
+              -- picks the frame at 100 ms each. The sensor limits
+              -- keepAnimating to while the GIF is on screen.
               scope . when (isNothing lick) $ do
                 decoded <- useTask ("lick.gif" :: T.Text) (decodeGif =<< getDataFileName "data/lick.gif")
                 mapM_ (setLick . Just) decoded
@@ -649,7 +640,7 @@ demoUi = do
               heading "Searchable list"
               muted "Type to filter, or press Ctrl+F to jump here. The debounced search commits on a pause; the filtered list is cached and only recomputed when the committed query changes."
               (qResp, qVal) <- searchInput' "Filter people (name, role, city…)" searchText
-              -- Ctrl+F sends the keyboard to the filter. A shortcut takes no id.
+              -- Ctrl+F focuses the filter. Shortcuts take no widget id.
               findPressed <- shortcut (ctrl <> key 'f')
               when findPressed (requestFocus (respId qResp))
               setSearchText qVal
@@ -702,7 +693,7 @@ demoUi = do
               muted "Auto ticks, shared scales, and decimation."
               -- chart data lives in "DemoData" (plus the §Plots section below).
               responsiveRowCol 760 (tight . gap 16 . fillW) $ do
-                -- The crosshair over the plot, for reading values off it.
+                -- A crosshair cursor for reading values off the plot.
                 captioned "Sine + cosine" $
                   withCursorShape UiCursorCrosshair (plot (minH 240 . fillW) sineCosineChart)
                 captioned "Weekly counts" (barChart (minH 240 . fillW) weeklyBars)
@@ -710,10 +701,8 @@ demoUi = do
                 captioned "Sleep vs focus" (plot (minH 240 . fillW) sleepFocusChart)
                 captioned "Area" (areaChart (minH 240 . fillW) areaDemo)
               captioned "Drawing" (diagram (fillW . maxH 200) . drawingSample =<< uiPlotStyle)
-              -- Drawing without diagrams: paths on a canvas, built with
-              -- NanoUI.Path. Their curves flatten for the display the
-              -- canvas is on, withTransform turns and moves them, and a
-              -- fill rule, a gradient, joins, caps and dashes paint them.
+              -- NanoUI.Path paths on a plain canvas, without diagrams:
+              -- transforms, fill rules, a gradient, joins, caps and dashes.
               captioned "Canvas paths" (canvas (fixedWH 360 120) . pathSample =<< uiTheme)
 
             ------------------------------------------- Diagnostics ---------
@@ -840,9 +829,9 @@ colorHighlights =
 -- §6  List & Table demo data
 ------------------------------------------------------------------------------
 
--- | Filter the people list on a committed search query, case-folded. Callers
--- memoize the result (see the Searchable list demo) so the fold is not re-run
--- every frame.
+-- | Filter the people list by a committed, case-folded query. Callers
+-- memoize the result (see the Searchable list demo) to avoid refolding every
+-- frame.
 peopleMatching :: T.Text -> [DemoPerson]
 peopleMatching raw = filter (T.isInfixOf (T.toCaseFold raw) . haystack) demoPeople
   where
@@ -852,7 +841,7 @@ personRowLabel :: DemoPerson -> T.Text
 personRowLabel p =
   demoPersonName p <> " - " <> demoPersonRole p <> ", " <> demoPersonCity p <> " (" <> T.pack (show (demoPersonAge p)) <> ")"
 
--- | A table column's header, for the sort and hidden readouts.
+-- | A table column's header, for the sort and hidden-column readouts.
 columnName :: Int -> Maybe T.Text
 columnName i = if i < 0 then Nothing else fst <$> listToMaybe (drop i peopleColumns)
 
@@ -954,9 +943,8 @@ drawingSample ps =
     <> (circle 0.28 # fc (plotInk ps) # lw none)
     <> (fromVertices [p2 (-0.5, -0.5), p2 (0.5, 0.5)] # lc (plotGrid ps) # lwO 1.5)
 
--- | A pie chart of arcs; a star turned by a transform, a round hole cut out
--- of it by the even-odd rule, filled with a gradient and outlined with round
--- corners; and a dashed curve with round ends.
+-- | A pie chart; a transformed star with an even-odd hole, a gradient fill and
+-- a round-joined outline; and a dashed curve with round caps.
 pathSample :: Theme -> Rect -> CanvasM ()
 pathSample theme (Rect x y _ h) = do
   let r = h / 2 - 8
@@ -965,7 +953,7 @@ pathSample theme (Rect x y _ h) = do
       starts = scanl (+) (-pi / 2) (map (* (2 * pi)) shares)
   forM_ (zip3 starts shares (themeSeries theme)) $ \(a0, share, col) ->
     drawPath (P.moveTo centre <> P.arc centre r a0 (2 * pi * share) <> P.close) col
-  -- The star is drawn about the origin, then turned and moved into place.
+  -- The star is built around the origin, then rotated and moved into place.
   let star =
         P.polygon
           [ V2 (k * cos a) (k * sin a)
@@ -1064,8 +1052,8 @@ debugBody text =
       heading title
       mapM_ (uncurry kvMono) (rows text)
       separator
-    -- The layout overlay outlines every node; the rows name the one under
-    -- the pointer.
+    -- The overlay outlines every layout node; the rows describe the one
+    -- under the pointer.
     heading "Layout"
     explain <- checkbox "Outline layout nodes" =<< explainingLayout
     explainLayout explain

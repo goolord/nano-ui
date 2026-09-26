@@ -64,30 +64,27 @@ module NanoUI
 
     -- * Focus
 
-    -- | Tab moves the keyboard between focusable widgets, and a click on a
-    -- text field or a select gives it to that; a click anywhere else takes
-    -- it off the field that had it. A view that decides for itself where
-    -- typing goes -- an editor that keeps the keyboard while its find bar is
-    -- shut -- says so with 'holdFocus' each frame it should, and gets that
-    -- frame's Tab.
+    -- | Tab moves focus between focusable widgets. Clicking a text field or
+    -- select focuses it; clicking anywhere else unfocuses the current field.
+    -- A view that routes typing itself (an editor that keeps the keyboard
+    -- while its find bar is shut) calls 'holdFocus' on each frame it wants
+    -- the keyboard, and receives that frame's Tab.
     --
-    -- A view sends the keyboard somewhere once with 'requestFocus', naming
-    -- the widget by the 'respId' of its response, or by 'currentId' just
-    -- before declaring it; on with 'focusNext' and 'focusPrevious', as Tab
-    -- and Shift+Tab; or nowhere with 'clearFocus'. Focus moves as Tab would
-    -- move it: the widget shows the focus ring, a text field takes the keys
-    -- with its caret where it left it, the field that had them drops its
-    -- selection and commits, and the next Tab goes on from there. A disabled
-    -- widget, or one behind an open modal, refuses it. The move happens at
-    -- the end of the frame, and the widget has the keyboard from the next
-    -- ('isFocused' says whether it has):
+    -- 'requestFocus' focuses a widget, named by its response's 'respId' or
+    -- by 'currentId' just before declaring it. 'focusNext' and
+    -- 'focusPrevious' act like Tab and Shift+Tab, and 'clearFocus' unfocuses.
+    -- These moves behave like Tab: the widget shows the focus ring, a text
+    -- field keeps its old caret, the field losing focus drops its selection
+    -- and commits, and the next Tab continues from the new widget. Disabled
+    -- widgets and widgets behind an open modal refuse focus. The move applies
+    -- at the end of the frame; check it with 'isFocused' on the next frame:
     --
     -- > (resp, query') <- searchInput' "Find" query
     -- > findPressed <- shortcut (ctrl <> key 'f')
     -- > when findPressed (requestFocus (respId resp))
     --
-    -- 'NanoUI.Monad.releaseFocus' takes the keyboard off a widget at once,
-    -- in the middle of the view, and changes nothing else.
+    -- 'NanoUI.Monad.releaseFocus' unfocuses a widget immediately, mid-view,
+    -- and changes nothing else.
   , holdFocus
   , requestFocus
   , focusNext
@@ -352,13 +349,13 @@ module NanoUI
   , tooltipWidget
   , withTooltip
 
-    -- | A tooltip opens once the pointer has rested on its target for
-    -- 'tooltipDelay', and opens at once when another was up moments before.
-    -- It shuts when the pointer leaves the target or a button goes down, and
-    -- a wheel turn starts the wait again. Waiting costs nothing: the frame the
-    -- tooltip opens on is a timed wake. 'PlacementAtCursor' keeps it just below
-    -- the pointer as the pointer moves ('tooltipGap' away). A disabled widget
-    -- has its tooltip too, to say why it is off.
+    -- | A tooltip opens after the pointer rests on its target for
+    -- 'tooltipDelay', or immediately if another tooltip was open moments
+    -- before. It closes when the pointer leaves or a button goes down; a
+    -- wheel turn restarts the delay. The delay costs no frames: the loop
+    -- sleeps until a timed wake. 'PlacementAtCursor' keeps the tooltip
+    -- 'tooltipGap' below the moving pointer. Disabled widgets show their
+    -- tooltips too, so they can say why they are off.
   , TooltipConfig (..)
   , defaultTooltipConfig
   , tooltipConfigured
@@ -416,10 +413,9 @@ module NanoUI
   , drawingVersioned
   , drawingCached
     -- | A drawing's ops are 'DrawOp' values in window coordinates. Build
-    -- them with a canvas ('canvas', 'runCanvasFor'), which fills and
-    -- strokes paths, clips, and draws through transforms, rather than by
-    -- hand: the constructors past 'DrawTextStyled' are what the canvas
-    -- builds those from, and change with it.
+    -- them with a canvas ('canvas', 'runCanvasFor') rather than by hand. The
+    -- constructors after 'DrawTextStyled' are the canvas's internal encoding
+    -- of paths, clips and transforms, and may change.
   , DrawOp (..)
   , TextFont (..)
   , defaultTextFont
@@ -428,19 +424,17 @@ module NanoUI
 
     -- * Image fit, opacity and rotation
 
-    -- | 'imageConfigured' draws an image fitted to its rect the way CSS's
-    -- @object-fit@ does ('ContentFit'), aligned where the fit leaves room,
-    -- cropped to a part of it, zoomed, faded, and turned ('Rotation').
-    -- Unlike 'image', an axis its layout leaves unsized takes the image's own
-    -- size, and a fit height follows the width in the image's shape:
+    -- | 'imageConfigured' fits an image to its rect like CSS @object-fit@
+    -- ('ContentFit'), with alignment, cropping, zoom, opacity and
+    -- 'Rotation'. Unlike 'image', an axis the layout leaves unsized takes
+    -- the image's own size, and a fit height keeps the image's aspect ratio:
     --
     -- > imageConfigured defaultImageConfig {icFit = FitContain, icLayout = fixedWH 200 120} photo
     -- > imageConfigured defaultImageConfig {icRotation = RotateSolid (pi / 2), icOpacity = 0.5} photo
     -- > imageConfigured defaultImageConfig {icLayout = fillW, icCrop = Just (Rect 0 0 64 64)} sheet
     --
-    -- 'svgIconConfigured' draws an SVG icon the same way, and 'fitRect' is
-    -- the placement a fit makes, for a canvas that draws images of its own
-    -- ('drawImageWith').
+    -- 'svgIconConfigured' does the same for SVG icons. 'fitRect' computes a
+    -- fit's placement, for canvases that draw images with 'drawImageWith'.
   , ContentFit (..)
   , Rotation (..)
   , rotationAngle
@@ -459,11 +453,10 @@ module NanoUI
     -- 'FontMetrics'; 'lineWidth' and 'fmLineHeight' size text with them.
     -- 'widgetCursor' picks the pointer shown over the widget.
     --
-    -- The paths 'drawPath' and 'drawStrokePath' draw, the transforms
-    -- 'withTransform' takes, and the fill rules, strokes and paints
-    -- 'drawPathWith' and 'drawStrokePathWith' take, are built with
-    -- "NanoUI.Path", imported qualified, which keeps names such as @circle@,
-    -- @rotate@ and @stroke@ out of this module.
+    -- Paths, transforms, fill rules, strokes and paints for 'drawPath',
+    -- 'drawStrokePath', 'drawPathWith', 'drawStrokePathWith' and
+    -- 'withTransform' come from "NanoUI.Path". Import it qualified; it
+    -- exports short names such as @circle@, @rotate@ and @stroke@.
   , module NanoUI.Widgets.Custom
   , FontMetrics (fmLineHeight, fmAscent)
   , lineWidth
@@ -475,18 +468,17 @@ module NanoUI
 
     -- * Cursors
 
-    -- | Widgets pick the pointer shape shown over them: the pointing hand over
-    -- a button, the I-beam over a text field, and a custom widget what its
-    -- 'widgetCursor' answers for the part of it under the pointer.
-    -- 'withCursorShape' asks for a shape over any part of a view, where the
-    -- widgets inside do not pick one:
+    -- | Widgets choose the pointer shape shown over them: a hand over a
+    -- button, an I-beam over a text field, and for a custom widget whatever
+    -- its 'widgetCursor' returns. 'withCursorShape' sets a shape over part of
+    -- a view, used where no widget inside chooses one:
     --
     -- > withCursorShape UiCursorMove (drawing (fixedWH 320 200) board)
     --
-    -- 'UiCursorDefault' from a widget picks nothing, and from a scope picks
-    -- the arrow; 'UiCursorHidden' hides the pointer. Disabled widgets keep
-    -- the arrow; wrap them in @withCursorShape UiCursorNotAllowed@ to show
-    -- that they are off.
+    -- 'UiCursorDefault' means no preference from a widget, and the arrow
+    -- from 'withCursorShape'. 'UiCursorHidden' hides the pointer. Disabled
+    -- widgets show the arrow; wrap them in @withCursorShape UiCursorNotAllowed@
+    -- to show they are off.
   , withCursorShape
 
     -- * Drag and drop
@@ -507,23 +499,23 @@ module NanoUI
 
     -- ** Background work
 
-    -- | Work that should not hold up a frame runs on a thread of its own.
-    -- 'useTaskStatus' runs an action there and says whether it is running,
-    -- done or failed; 'useTask' returns its result once there is one. The
-    -- loop sleeps while a job runs and wakes when it ends. A job starts the
-    -- first frame its hook is called with a key, is replaced when the key
-    -- changes, and is killed once the view stops calling its hook:
+    -- | These hooks run slow work on a background thread. 'useTaskStatus'
+    -- reports whether the job is running, done or failed; 'useTask' returns
+    -- its result once available. The loop sleeps while a job runs and wakes
+    -- when it ends. A job starts on the first frame its hook sees a key,
+    -- restarts when the key changes, and is killed when the view stops
+    -- calling the hook:
     --
     -- > (query, setQuery) <- useText ""
     -- > setQuery =<< textInput query
     -- > hits <- useTask query (searchIndex index query)
     -- > mapM_ (label . hitTitle) (fromMaybe [] hits)
     --
-    -- While a new key's job runs, 'useTask' goes on returning the last
-    -- key's result, so the list above does not flicker empty as the query
-    -- changes. 'useStream' runs a producer that updates a state the view
-    -- reads, for a stream of values, and 'askWake' hands the view an action
-    -- any thread may call to run it again.
+    -- While a new key's job runs, 'useTask' keeps returning the previous
+    -- result, so the list above does not flash empty as the query changes.
+    -- 'useStream' runs a producer that pushes a stream of values into state
+    -- the view reads. 'askWake' returns an action any thread can call to
+    -- schedule another frame.
   , TaskStatus (..)
   , useTaskStatus
   , useTask
@@ -601,30 +593,28 @@ module NanoUI
 
     -- * Visibility
 
-    -- | A sensor reports whether a widget is on screen: whether it overlaps
-    -- the window and the inside of every scroller, panel and floating panel
-    -- around it. 'sensor' runs part of the view in a container that watches
-    -- itself, and 'useVisibility' watches a widget already built, by its id.
+    -- | A sensor reports whether a widget is on screen, meaning it overlaps
+    -- the window and every enclosing scroller, panel and floating panel.
+    -- 'sensor' wraps part of the view in a watched container;
+    -- 'useVisibility' watches an existing widget by id.
     --
-    -- Layout is solved after the view runs, so a sensor reports what the
-    -- last frame's layout showed, as 'respRect' does. A layout that changes
-    -- what a sensor sees (a scroll, a resize, content growing above it)
-    -- makes the loop run one more frame, whose view reads the change in
-    -- 'visEvent'. The event goes to the first view pass that reads the
-    -- sensor, not to the pass a hook write in reaction to it runs again.
-    -- While nothing moves, sensors cost no frames. A sensor that is not
-    -- built on some frame, in a tab that is not shown or a 'scope' that left
-    -- it out, is forgotten, and reports 'BecameVisible' again once it is
-    -- built and seen.
+    -- Layout is solved after the view runs, so like 'respRect' a sensor
+    -- reports the previous frame's layout. When layout changes what a sensor
+    -- sees (a scroll, a resize, content growing above it), the loop runs one
+    -- more frame and the view reads the change in 'visEvent'. The event goes
+    -- to the first view pass that reads the sensor, not to a rerun caused by
+    -- a hook write reacting to it. Sensors cost no frames while nothing
+    -- moves. A sensor skipped on some frame (in a hidden tab, or a 'scope'
+    -- that left it out) is forgotten, and reports 'BecameVisible' again once
+    -- it is rebuilt and seen.
     --
-    -- An anticipate margin ('sensorAnticipate') counts a widget as visible
-    -- while it is still that far outside, which gives lazy loading a head
-    -- start, and a delay ('sensorDelay') only once it has stayed in view
-    -- that long, so a list flung past loads none of the rows it shows for a
-    -- moment. 'visRect' is the part of the widget on screen, and 'visBounds'
-    -- all of it. A thumbnail that decodes its picture the first time it comes
-    -- within 200 pixels of the viewport (@decodeRgba@ stands for an image
-    -- decoder):
+    -- 'sensorAnticipate' counts a widget as visible while it is still that
+    -- far outside, giving lazy loading a head start. 'sensorDelay' requires
+    -- it to stay in view that long, so a list flung past loads none of the
+    -- rows that flash by. 'visRect' is the on-screen part of the widget and
+    -- 'visBounds' all of it. A thumbnail that decodes its image when it
+    -- first comes within 200 pixels of the viewport (@decodeRgba@ stands for
+    -- an image decoder):
     --
     -- > thumbnail :: FilePath -> NanoUI ()
     -- > thumbnail path = do
@@ -665,22 +655,22 @@ module NanoUI
 
     -- * Layout
 
-    -- | A container lays its children out along a 'Row' or a 'Column', one
-    -- after another in a 'Line', or in lines that 'Wrap' where the next child
-    -- would overflow, as a list of tags does ('wrap', with 'lineGap' between
-    -- the lines and 'lineAlign' placing each), or it layers them over one
-    -- another ('Layered'), later children on top: 'layers' is such a
-    -- container, and 'layered' makes a panel or a card one. 'pinAt' takes a
-    -- child out of its parent's flow to sit at an offset in the parent, over
-    -- its siblings, from the corner its alignment picks, as a badge or a
-    -- floating button does, and @pinAt 0 0 . grow@ covers the parent without
-    -- sizing it. 'aspect' keeps a fit height at a ratio to the width.
+    -- | A container lays its children out along a 'Row' or 'Column', either
+    -- in a single 'Line' or in lines that 'Wrap' when the next child would
+    -- overflow, like a list of tags ('wrap'; 'lineGap' spaces the lines and
+    -- 'lineAlign' aligns each). A 'Layered' container stacks its children
+    -- instead, later ones on top: 'layers' is one, and 'layered' turns a
+    -- panel or card into one. 'pinAt' takes a child out of the flow and
+    -- places it at an offset from the corner its alignment picks, over its
+    -- siblings, as for a badge or floating button; @pinAt 0 0 . grow@ covers
+    -- the parent without affecting its size. 'aspect' keeps a fit height at
+    -- a ratio to the width.
     --
-    -- Where layers or a pinned node draw one node over another, a control
-    -- on top takes the pointer from what is beneath, and anything else lets it
-    -- through to the controls beneath. 'pointer' changes that for a node and
-    -- what is inside it: 'PointerBlock' makes a card or scrim take the pointer
-    -- over its whole box, and 'PointerPass' makes a decoration let it through.
+    -- Where nodes overlap, a control on top takes the pointer and anything
+    -- else lets it through to controls beneath. 'pointer' overrides this for
+    -- a node and its contents: 'PointerBlock' makes a card or scrim take the
+    -- pointer over its whole box, and 'PointerPass' makes a decoration let it
+    -- through.
   , Layout (..)
   , LayoutModifier
   , Sizing (..)
@@ -844,23 +834,21 @@ module NanoUI
 
     -- ** Following the system
 
-    -- | Where the platform says whether the desktop is set to light or dark
-    -- colours, the backend reports it and 'systemAppearance' reads it: the
-    -- SDL backend does, RGFW cannot tell and reports 'Nothing'. The theme
-    -- for an appearance is a function, such as 'lightDark', which picks the
-    -- dark theme when the system cannot tell, as nano-ui's default theme is
-    -- dark. A view picks its theme each frame, which costs nothing while it
-    -- is the same:
+    -- | 'systemAppearance' reads whether the desktop uses light or dark
+    -- colours. The SDL backend reports it; RGFW cannot and reports 'Nothing'.
+    -- 'lightDark' maps an appearance to a theme and picks the dark one when
+    -- the appearance is unknown, matching nano-ui's dark default. Setting
+    -- the theme every frame is free while it does not change:
     --
     -- > setUiTheme . lightDark defaultLightTheme defaultTheme =<< systemAppearance
     --
-    -- or the context follows the system with 'followSystemTheme', or the
-    -- backend's @sdlAppThemeFor@ or @optThemeFor@ option from the start:
+    -- Alternatively, 'followSystemTheme' makes the context track the system,
+    -- as do the backends' @sdlAppThemeFor@ and @optThemeFor@ options:
     --
     -- > followSystemTheme ctx (lightDark defaultLightTheme defaultTheme)
     --
-    -- A switch repaints the whole window; 'setTheme' goes back to a fixed
-    -- theme.
+    -- A theme switch repaints the whole window. 'setTheme' returns to a
+    -- fixed theme.
   , defaultLightTheme
   , Appearance (..)
   , lightDark
@@ -896,17 +884,15 @@ module NanoUI
 
     -- | The input a view reads: where the pointer is, which keys came in
     -- this frame, and what was typed. A backend fills one of these in every
-    -- frame with the functions in "NanoUI.Backend". While an input method
-    -- composes text ('inputComposition'), the focused text field draws the
-    -- 'Composition' at its caret and the keys go to the input method: the
-    -- frame drops the keys pressed, released and held ('inputKeys',
-    -- 'inputKeysReleased', 'inputKeysHeld') until the text is committed or
-    -- cancelled, so no shortcut fires on them. A widget of the app's own
-    -- that takes text asks for the input method with 'useInputMethod', and
-    -- draws the composition it answers. 'pressedIn', 'releasedIn'
-    -- and 'heldIn' ask about one key or mouse button in it, as it stands,
-    -- and 'pressedOnceIn' about a press that is not a held key's
-    -- auto-repeat:
+    -- frame with the functions in "NanoUI.Backend".
+    --
+    -- While an input method is composing text ('inputComposition'), the
+    -- focused text field draws the 'Composition' at its caret, and the frame
+    -- drops the keys in 'inputKeys', 'inputKeysReleased' and 'inputKeysHeld'
+    -- until the text is committed or cancelled, so no shortcut fires. A custom text
+    -- widget requests the input method with 'useInputMethod' and draws the
+    -- composition it returns. 'pressedIn', 'releasedIn' and 'heldIn' query
+    -- one key or mouse button; 'pressedOnceIn' ignores auto-repeat:
     --
     -- > runSdlApp defaultSdlOptions {sdlAppShouldQuit = pressedOnceIn KeyEscape} view
   , Input (..)
@@ -922,17 +908,15 @@ module NanoUI
 
     -- * Mouse buttons
 
-    -- | A widget's 'Response' says which buttons went down on it and are
-    -- held ('respHeldWith') and which clicked it ('respClickedWith'), and
-    -- 'mousePressed', 'mouseReleased' and 'mouseHeld' listen for a button
-    -- anywhere on the part of the view being declared, as 'keyPressed' does
-    -- for a key:
+    -- | 'respHeldWith' and 'respClickedWith' say which buttons are held on a
+    -- widget and which clicked it. 'mousePressed', 'mouseReleased' and
+    -- 'mouseHeld' listen for a button anywhere in the part of the view being
+    -- declared, like 'keyPressed' for keys:
     --
     -- > whenM (mousePressed MouseBack) goBack
     --
-    -- An 'Input' holds the buttons held, pressed and released as
-    -- 'MouseButtons' sets, which 'pressedIn', 'releasedIn' and 'heldIn'
-    -- read, as they read a key's.
+    -- An 'Input' stores held, pressed and released buttons as 'MouseButtons'
+    -- sets, which 'pressedIn', 'releasedIn' and 'heldIn' also read.
   , MouseButton (..)
   , mousePressed
   , mouseReleased
@@ -955,29 +939,26 @@ module NanoUI
 
     -- * Keyboard
 
-    -- | A view listens for a key with 'keyPressed', 'keyReleased' and
-    -- 'keyHeld', and binds a command to a chord with 'shortcut'. A chord is
-    -- modifiers and a key put together with '<>', from "NanoUI.Shortcut":
+    -- | 'keyPressed', 'keyReleased' and 'keyHeld' listen for a key, and
+    -- 'shortcut' binds a command to a chord. Chords combine modifiers and a
+    -- key with '<>', using "NanoUI.Shortcut":
     --
     -- > whenM (shortcut (ctrl <> key 's')) save
     -- > whenM (shortcut (cmdOrCtrl <> shift <> key 'p')) (setPaletteOpen True)
     --
-    -- A shortcut fires once per press, with exactly its modifiers held, for
-    -- the first shortcut declared for the chord. It stays quiet behind a
-    -- modal and for a chord the widget with the keyboard acts on itself, so
-    -- Ctrl+A in a focused text field selects its text rather than running a
-    -- shortcut bound to Ctrl+A ('shortcut' has the rules), and the key
-    -- listeners are quiet for those keys too: a view hears the keys no
-    -- widget took. A focused control takes the keys it acts on alone or
-    -- with Shift, so a chord of them, such as Alt+Left, is a shortcut's; a
-    -- custom widget says which keys it takes with 'widgetKeys'. A
-    -- 'menuItemShortcut' row binds its chord the same way while its menu is
-    -- open.
+    -- A shortcut fires once per press, only with exactly its modifiers held,
+    -- and only for the first shortcut declared for that chord. It is silent
+    -- behind a modal and for chords the focused widget handles itself, so
+    -- Ctrl+A in a focused text field selects its text ('shortcut' has the
+    -- full rules). Key listeners skip those keys too: a view hears only keys
+    -- no widget took. A focused control takes its keys alone or with Shift,
+    -- so a chord such as Alt+Left still reaches shortcuts. A custom widget
+    -- declares the keys it takes with 'widgetKeys'. A 'menuItemShortcut' row
+    -- binds its chord the same way while its menu is open.
     --
-    -- A key held down auto-repeats, and each repeat is a press: holding
-    -- Ctrl+Z undoes step after step. 'keyPressedOnce' and 'shortcutOnce' see
-    -- the key go down and not its repeats, for what should happen once however
-    -- long the key is held, such as a toggle.
+    -- Auto-repeat counts as a press, so holding Ctrl+Z undoes repeatedly.
+    -- 'keyPressedOnce' and 'shortcutOnce' ignore repeats, for actions such
+    -- as toggles that should happen once per press.
   , keyPressed
   , keyPressedOnce
   , keyReleased
@@ -992,13 +973,12 @@ module NanoUI
 
     -- * Debugging
 
-    -- | 'explainLayout' shows how a view was laid out: it outlines every
-    -- layout node, coloured by how deep the node is, and tints the node under
-    -- the pointer, which 'explainedNode' describes: its widget id (to match a
-    -- 'respId'), rect and padding, and what its layout asked for, its sizing,
-    -- gap, flow, pin and pointer mode. 'explainScope' narrows the overlay to
-    -- part of a view. Put the toggle in a debug panel; the overlay changes
-    -- nothing else, and with it off a frame costs what it did.
+    -- | 'explainLayout' outlines every layout node, coloured by depth, and
+    -- tints the node under the pointer. 'explainedNode' describes that node:
+    -- its widget id (to match a 'respId'), rect, padding, sizing, gap, flow,
+    -- pin and pointer mode. 'explainScope' limits the overlay to part of a
+    -- view. The overlay changes nothing else and costs nothing when off, so
+    -- its toggle can live in a debug panel.
   , explainLayout
   , explainingLayout
   , explainedNode
@@ -1007,20 +987,19 @@ module NanoUI
 
     -- * The native window
 
-    -- | What a window opens with is a 'WindowSettings', the same for every
-    -- backend: @sdlWindowSettings@ in @SdlOptions@, @optWindow@ in
-    -- @RgfwOptions@. A view reads the window with 'askWindow', changes it
-    -- with the setters and commands below, asks for a screenshot, and ends
-    -- the session with 'quitUi'. The backend does what it can with each; a
-    -- view that is not running in a window, as under a test context, gets
-    -- nothing done, and 'requestScreenshot' answers 'Nothing'.
+    -- | A window opens with a 'WindowSettings', shared by all backends
+    -- (@sdlWindowSettings@ in @SdlOptions@, @optWindow@ in @RgfwOptions@).
+    -- A view reads the window with 'askWindow', changes it with the setters
+    -- and commands below, and ends the session with 'quitUi'. Backends
+    -- support what they can. Without a window, as in a test context, these
+    -- do nothing and 'requestScreenshot' returns 'Nothing'.
     --
-    -- The setters ('setWindowTitleUi', 'setWindowModeUi' and the rest) act
-    -- only on a change and so can run every frame; the commands
-    -- ('moveWindowUi', 'resizeWindowUi', 'maximizeWindowUi' and the rest)
-    -- act on every call, from an event. A window that should not close by
-    -- itself turns 'wsExitOnCloseRequest' off, reads 'winCloseRequested',
-    -- and calls 'quitUi' when it is ready:
+    -- Setters ('setWindowTitleUi', 'setWindowModeUi', ...) act only on a
+    -- change, so they can run every frame. Commands ('moveWindowUi',
+    -- 'resizeWindowUi', 'maximizeWindowUi', ...) act on every call, so run
+    -- them from events. To confirm before closing, turn
+    -- 'wsExitOnCloseRequest' off, watch 'winCloseRequested', and call
+    -- 'quitUi' when ready:
     --
     -- > editor :: NanoUI ()
     -- > editor = do

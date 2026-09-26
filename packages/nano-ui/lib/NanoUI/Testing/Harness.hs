@@ -198,8 +198,8 @@ dragPos drawFrame base from to = do
 clickPair :: Input -> V2 -> (Input, Input)
 clickPair = clickPairWith MouseLeft
 
--- | A press and a release of the button at a point, retaining other
--- base-input fields.
+-- | Press and release frames for the button at @pos@, keeping the base
+-- input's other fields.
 clickPairWith :: MouseButton -> Input -> V2 -> (Input, Input)
 clickPairWith b inp pos = let press = pressWith b inp pos in (press, releaseWith b press)
 
@@ -211,7 +211,7 @@ rightClickPair = clickPairWith MouseRight
 pressAt :: Input -> V2 -> Input
 pressAt = pressWith MouseLeft
 
--- | The button down at @pos@ this frame, and not released.
+-- | A frame where the button goes down at @pos@ and is not released.
 pressWith :: MouseButton -> Input -> V2 -> Input
 pressWith b inp pos =
   applyMouseButton b True inp {inputMousePos = pos, inputButtonsReleased = buttonsDelete b (inputButtonsReleased inp)}
@@ -224,31 +224,31 @@ holdAt inp pos = unpress MouseLeft (pressAt inp pos)
 releaseAt :: Input -> Input
 releaseAt = releaseWith MouseLeft
 
--- | The button up at the pointer this frame, not pressed in it.
+-- | A frame where the button comes up at the pointer, with no press.
 releaseWith :: MouseButton -> Input -> Input
 releaseWith b = applyMouseButton b False . unpress b
 
--- | The frame without the button's press.
+-- | Remove the button from the frame's presses.
 unpress :: MouseButton -> Input -> Input
 unpress b inp = inp {inputButtonsPressed = buttonsDelete b (inputButtonsPressed inp)}
 
--- | A single key-down frame: the key goes down, not as an auto-repeat.
+-- | A frame where the key goes down (not an auto-repeat).
 keyInp :: Key -> Input -> Input
 keyInp k inp = inp {inputKeys = ks, inputKeysNew = ks}
   where
     ks = inputKeysFromList [k]
 
--- | A frame with one auto-repeat of a held key: a press that is not new.
+-- | A frame with one auto-repeat of a held key (pressed, but not new).
 keyRepeatInp :: Key -> Input -> Input
 keyRepeatInp k inp = inp {inputKeys = inputKeysFromList [k], inputKeysNew = mempty}
 
--- | A frame pressing a chord, such as @ctrl <> key 'a'@: its key goes down
--- with exactly the chord's modifiers held.
+-- | A frame pressing a chord such as @ctrl <> key 'a'@, with exactly the
+-- chord's modifiers held.
 chordInp :: Shortcut -> Input -> Input
 chordInp (Shortcut k mods) inp =
   (maybe id (`applyKey` True) k inp {inputKeys = mempty, inputKeysNew = mempty}) {inputModifiers = mods}
 
--- | A frame releasing a key, which leaves the held keys.
+-- | A frame releasing a key, which drops it from the held keys.
 keyUpInp :: Key -> Input -> Input
 keyUpInp k inp = applyKey k False inp {inputKeys = mempty, inputKeysNew = mempty, inputKeysReleased = mempty}
 
@@ -475,12 +475,11 @@ runDragFrom :: Context -> Input -> NanoUI a -> V2 -> V2 -> IO ()
 runDragFrom ctx inp0 ui grab dest =
   forM_ [pressAt inp0 grab, holdAt inp0 dest] $ \inp -> runFrame ctx inp ui
 
--- | Install a wake action on a headless context, and return a wait on it:
--- @wait us@ takes the wake that came since the last wait, blocking up to @us@
--- microseconds for one, and says whether there was one. A background job
--- wakes the loop when it has something new, which is what a test of one
--- waits for; a frame wakes it too when it asks for another, so take those
--- with @wait 0@ before starting what the test waits on.
+-- | Install a wake action on a headless context and return a wait for it.
+-- @wait us@ consumes a wake since the last wait, blocking up to @us@
+-- microseconds, and says whether one came. A frame that requests another
+-- also wakes the loop, so drain those with @wait 0@ before starting the
+-- background job the test waits on.
 newWakeSignal :: Context -> IO (Int -> IO Bool)
 newWakeSignal ctx = do
   signal <- newEmptyMVar

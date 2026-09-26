@@ -1,8 +1,8 @@
 -- | OpenGL presentation for the RGFW host.
 --
 -- Geometry goes to the GPU straight from the core's shared 'DrawData'
--- buffers, one scissored draw per command; a command on the image atlas
--- samples the texture 'syncImagesGl' keeps up to date. Text comes from the collected
+-- buffers, one scissored draw per command; image-atlas commands sample the
+-- texture 'syncImagesGl' maintains. Text comes from the collected
 -- spans: every glyph is a quad sampled from an atlas that the Cozette
 -- software blitter bakes at the current scale, so glyph pixels match what the
 -- blitter stamps.
@@ -114,7 +114,7 @@ data GlRenderer = GlRenderer
   { glHandle :: !(Ptr NanoUiGl)
   , glAtlas  :: !(IORef (Maybe GlyphAtlas))
   , glText   :: !(IORef (Ptr Word8, Int)) -- ^ glyph vertex scratch, capacity in vertices
-  , glImages :: !(IORef Int) -- ^ the image atlas generation the texture holds, 0 for none
+  , glImages :: !(IORef Int) -- ^ image atlas generation uploaded, 0 for none
   }
 
 -- | Build the renderer on the calling thread's current OpenGL context.
@@ -177,9 +177,9 @@ renderArenaGl r font !scale !fbW !fbH bg damage pieces drawData baseSpans overla
     (c_drawText h (fromIntegral nBase) (fromIntegral (nAll - nBase)))
   c_present h
 
--- | Bring the image texture up to the context's image atlas: the rects
--- written since the last upload, or all of it when it was resized or never
--- uploaded. Call it before 'renderArenaGl', with the context current.
+-- | Upload image atlas changes since the last sync: dirty rects, or the
+-- whole atlas after a resize or on first use. Call before 'renderArenaGl'
+-- with the GL context current.
 syncImagesGl :: GlRenderer -> Context -> IO ()
 syncImagesGl r ctx = do
   since <- readIORef (glImages r)
@@ -192,7 +192,7 @@ syncImagesGl r ctx = do
     ok <- case upload of
       AtlasWhole -> put 1 (0, 0, w, h)
       AtlasRegions rects -> and <$> mapM (put 0) rects
-    -- A rect with no texture to go into leaves the next frame to upload all.
+    -- A failed rect upload (no texture yet) forces a full upload next frame.
     writeIORef (glImages r) (if ok then gen else 0)
 
 -- | The retained frame's pixels, for checking what frames drew: RGBA rows,
@@ -201,16 +201,15 @@ readRetainedPixels :: GlRenderer -> Int -> Int -> IO BS.ByteString
 readRetainedPixels r w h =
   BSI.create (w * h * 4) (c_readRetained (glHandle r))
 
--- | What the last present put in the window's back buffer, read as
--- 'readRetainedPixels' reads the retained frame: for checking the present,
--- before the swap, after which the back buffer is undefined.
+-- | The window back buffer after the last present, in the same layout as
+-- 'readRetainedPixels'. For tests; read before the swap, after which the
+-- back buffer is undefined.
 readWindowPixels :: GlRenderer -> Int -> Int -> IO BS.ByteString
 readWindowPixels r w h =
   BSI.create (w * h * 4) (c_readWindow (glHandle r))
 
--- | The retained frame's pixels, rows from the top: what a screenshot of the
--- window is. The frame must be the last one's size, w x h, which the
--- renderer takes to be at least 1 x 1.
+-- | The retained frame as a top-down screenshot. @w@ x @h@ must be the last
+-- frame's size; each is clamped to at least 1.
 retainedPixels :: GlRenderer -> Int -> Int -> IO (Maybe RgbaPixels)
 retainedPixels r w0 h0 = do
   let w = max 1 w0

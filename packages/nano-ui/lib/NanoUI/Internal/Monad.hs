@@ -250,9 +250,9 @@ withIdFrame enter m = do
 scope :: Ui :> es => Eff es a -> Eff es a
 scope = withIdFrame (enterScope scopeTag)
 
--- | Run the action under a key, so its widgets keep their ids and state
--- whatever comes before them. Keys must be unique among siblings in the same
--- scope; use a stable item key when a list can be reordered.
+-- | Run the action under a key so its widgets keep their ids and state when
+-- earlier siblings change. Keys must be unique among siblings in the same
+-- scope; use a stable item key for a list that can be reordered.
 {-# INLINE withKey #-}
 withKey :: (Hashable k, Ui :> es) => k -> Eff es a -> Eff es a
 withKey k = keyedTag (fromIntegral (hash k))
@@ -283,10 +283,9 @@ withDefaultLayout f = localStaticRep (\r -> r {repLayout = f (repLayout r)})
 uiFontMetrics :: Ui :> es => Eff es FontMetrics
 uiFontMetrics = fmap ctxFontMetrics askContext
 
--- | The size text is set in when its layout names none: the backend's
--- default font size. Set it with 'NanoUI.Internal.Style.fontSize' to scale
--- text from it, which 'NanoUI.Internal.Style.fontSizeScale' alone does from
--- 16.
+-- | The backend's default font size, used when a layout sets none. To scale
+-- text relative to it, pass a multiple to 'NanoUI.Internal.Style.fontSize';
+-- 'NanoUI.Internal.Style.fontSizeScale' alone scales from 16.
 {-# INLINE uiFontSize #-}
 uiFontSize :: Ui :> es => Eff es Float
 uiFontSize = fmap ctxFontSize askContext
@@ -379,20 +378,18 @@ withPaintScope enter m = do
     (setArenaScope na)
     m
 
--- | Set the session's base theme, repainting when it changes. Use 'styled'
--- for a change limited to part of the view. Setting the same theme again
--- changes nothing, so a view may pick its theme every frame, as from the
--- system's appearance:
+-- | Set the session's base theme, repainting if it changed. Use 'styled' for
+-- a change limited to part of the view. Setting the same theme again is a
+-- no-op, so a view can pick its theme every frame:
 --
 -- > setUiTheme . lightDark defaultLightTheme defaultTheme =<< systemAppearance
 --
--- It replaces a theme that follows the system's appearance
--- ('NanoUI.Internal.Context.followSystemTheme').
+-- This replaces a theme set by 'NanoUI.Internal.Context.followSystemTheme'.
 {-# INLINE setUiTheme #-}
 setUiTheme :: Ui :> es => Theme -> Eff es ()
 setUiTheme th = withContext (\ctx -> setThemeInView ctx th)
 
--- | Whether the system asks for light or dark colours, 'Nothing' when the
+-- | Whether the system prefers light or dark colours, or 'Nothing' when the
 -- backend cannot tell (RGFW never can). A change repaints the whole window.
 {-# INLINE systemAppearance #-}
 systemAppearance :: Ui :> es => Eff es (Maybe Appearance)
@@ -404,24 +401,22 @@ systemAppearance = withContext getSystemAppearance
 uiMousePos :: Ui :> es => Eff es V2
 uiMousePos = fmap inputMousePos askInput
 
--- | Whether the button went down this frame with the pointer on the part of
--- the view being declared, whatever widget it is on. 'False' behind an open
--- modal, under a menu or panel drawn in front, and inside 'disabledWhen',
--- where the view has no pointer. A press on a widget is the widget's
--- 'NanoUI.respClickedWith' and 'NanoUI.respHeldWith'; @mousePressed@ is
--- for a press anywhere:
+-- | Whether the button went down this frame with the pointer over the part of
+-- the view being declared, on any widget. 'False' behind an open modal, under
+-- a menu or panel drawn in front, and inside 'disabledWhen'. For a press on a
+-- particular widget, use its 'NanoUI.respClickedWith' or 'NanoUI.respHeldWith'.
 --
 -- > whenM (mousePressed MouseBack) goBack
 {-# INLINE mousePressed #-}
 mousePressed :: Ui :> es => MouseButton -> Eff es Bool
 mousePressed b = pressedIn b <$> askInput
 
--- | Whether the button came up this frame, as 'mousePressed' for a release.
+-- | Like 'mousePressed', for a button that came up this frame.
 {-# INLINE mouseReleased #-}
 mouseReleased :: Ui :> es => MouseButton -> Eff es Bool
 mouseReleased b = releasedIn b <$> askInput
 
--- | Whether the button is down, as 'mousePressed' for a button held.
+-- | Like 'mousePressed', for a button that is down.
 {-# INLINE mouseHeld #-}
 mouseHeld :: Ui :> es => MouseButton -> Eff es Bool
 mouseHeld b = heldIn b <$> askInput
@@ -448,8 +443,8 @@ askFrameInput = do
 localInput :: Ui :> es => Input -> Eff es a -> Eff es a
 localInput inp = localStaticRep (\r -> r {repInput = inp})
 
--- | The application window's content size in logical pixels: the
--- 'NanoUI.winSize' of 'NanoUI.askWindow', read without the rest.
+-- | The window's content size in logical pixels ('NanoUI.winSize' of
+-- 'NanoUI.askWindow').
 {-# INLINE windowSize #-}
 windowSize :: Ui :> es => Eff es Size
 windowSize = fmap inputWindowSize askInput
@@ -497,11 +492,9 @@ holdFocus wid = withContext $ \ctx -> do
       writeIORef (ctxFocusVisible ctx) False
 
 -- | Take the keyboard off a widget, if it has it; nothing then has focus.
--- It happens at once, in the middle of the view: a widget declared after
--- the call sees no focus. Nothing else changes: a text field keeps its
--- selection and its menu, as it does when a 'holdFocus' elsewhere takes the
--- keyboard. 'clearFocus' moves it off as Tab or a click would, at the end of
--- the frame.
+-- This takes effect immediately, so widgets declared after the call see no
+-- focus. A text field keeps its selection and menu. To drop focus the way a
+-- click elsewhere does, at the end of the frame, use 'clearFocus'.
 releaseFocus :: Ui :> es => WidgetId -> Eff es ()
 releaseFocus wid = withContext $ \ctx -> do
   focus <- getFocusId ctx
@@ -515,52 +508,47 @@ focusedWidget = withContext getFocusId
 isFocused :: Ui :> es => WidgetId -> Eff es Bool
 isFocused wid = (\focus -> hashWidgetId wid /= 0 && focus == wid) <$> focusedWidget
 
--- | Move the keyboard to the widget with this id, as Tab moving onto it
--- would: a text field starts taking keys with its caret where it last left
--- it (at the end of one not yet edited), the widget shows the focus ring,
--- and Tab goes on from it. The field that had the keyboard drops its
--- selection and menu, an open dropdown closes, and the field sees on its
--- next frame that it lost the keyboard, as it does when a click lands
--- elsewhere (a combo box or a search field commits then). For a search box
--- that Ctrl+F sends the keys to:
+-- | Move the keyboard to the widget with this id, as Tab would. A text field
+-- resumes with its caret where it was (at the end if never edited), the
+-- widget shows the focus ring, and Tab continues from it. The previously
+-- focused field drops its selection and menu, an open dropdown closes, and on
+-- its next frame the field sees it lost focus (a combo box or search field
+-- commits then).
 --
 -- > (resp, query') <- searchInput' "Find" query
 -- > findPressed <- shortcut (ctrl <> key 'f')
 -- > when findPressed (requestFocus (respId resp))
 --
--- The request is carried out at the end of the frame, against the frame's
--- layout, so a widget declared after the call can be named too, as the next
--- widget is by 'currentId', the id it will take:
+-- The request is applied at the end of the frame, against that frame's
+-- layout, so it can name a widget declared later, such as the next one via
+-- 'currentId':
 --
 -- > whenM (shortcut (ctrl <> key 'l')) (requestFocus =<< currentId)
 -- > address' <- textInput address
 --
--- The widget has the keyboard from the next frame, which the request asks
--- for. The last request of a frame wins ('focusNext', 'focusPrevious' and
--- 'clearFocus' are requests too). A widget that Tab would not stop at this
--- frame refuses it and focus stays where it was: one that is disabled, one
--- behind an open 'NanoUI.Internal.Widgets.Overlay.modal', one not declared
--- this frame, or a radio group's last option, which its response names.
--- Asking for the widget that already has the keyboard changes nothing, so a
--- view can ask on every frame a condition holds. @'WidgetId' 0@, no widget,
--- is 'clearFocus'.
+-- Focus moves on the next frame, which the request schedules. The last
+-- request in a frame wins ('focusNext', 'focusPrevious' and 'clearFocus' are
+-- requests too). The request is ignored for a widget Tab would not stop at
+-- this frame: one that is disabled, behind an open
+-- 'NanoUI.Internal.Widgets.Overlay.modal', or not declared this frame. A radio
+-- group's response names its last option, which is not a Tab stop.
+-- Requesting the widget that already has focus is a no-op, so a view can
+-- request it every frame. @'WidgetId' 0@ means 'clearFocus'.
 requestFocus :: Ui :> es => WidgetId -> Eff es ()
 requestFocus wid = askFocus (if hashWidgetId wid == 0 then FocusNowhere else FocusOn wid)
 
--- | Move the keyboard on to the next widget Tab stops at, as Tab does, at
--- the end of the frame ('requestFocus').
+-- | Move focus to the next Tab stop at the end of the frame ('requestFocus').
 focusNext :: Ui :> es => Eff es ()
 focusNext = askFocus FocusNext
 
--- | Move the keyboard back to the previous widget Tab stops at, as
--- Shift+Tab does, at the end of the frame ('requestFocus').
+-- | Move focus to the previous Tab stop at the end of the frame
+-- ('requestFocus').
 focusPrevious :: Ui :> es => Eff es ()
 focusPrevious = askFocus FocusPrevious
 
--- | Take the keyboard off whatever has it, as a click on no text field or
--- select does, at the end of the frame ('requestFocus'): the field that had
--- it drops its selection and menu. 'releaseFocus' takes it off one widget
--- at once and leaves the rest as it is.
+-- | Drop focus at the end of the frame ('requestFocus'), as a click outside
+-- any text field or select does. The focused field drops its selection and
+-- menu. 'releaseFocus' instead acts at once on one widget.
 clearFocus :: Ui :> es => Eff es ()
 clearFocus = askFocus FocusNowhere
 
@@ -607,18 +595,17 @@ takeEscape = do
       when ours (markEscapeConsumed ctx)
       pure ours
 
--- | Turn the layout overlay on or off: a one-pixel outline just inside every
--- layout node, coloured by its depth, over the layer the node is in, and a
--- tint on the node under the pointer with its content box outlined. It is
--- for seeing how a view was laid out; layout and input never see it. Turning
--- it on or off repaints the whole window, and calling this with what is
--- already set does nothing, so a view can call it every frame:
+-- | Turn the layout overlay on or off. It outlines every layout node one pixel
+-- inside its edge, coloured by depth and drawn in the node's layer, and tints
+-- the node under the pointer with its content box outlined. It does not
+-- affect layout or input. A change repaints the whole window; setting the
+-- current value is a no-op, so a view can call this every frame:
 --
 -- > explainLayout =<< checkbox "Outline layout nodes" =<< explainingLayout
 --
--- A backend's options can turn it on from the start (@sdlExplainLayout@,
--- @optExplainLayout@), and 'setExplainLayout' in "NanoUI.Backend" on a
--- context of your own.
+-- Backend options can enable it at startup (@sdlExplainLayout@,
+-- @optExplainLayout@); on your own context use 'setExplainLayout' from
+-- "NanoUI.Backend".
 explainLayout :: Ui :> es => Bool -> Eff es ()
 explainLayout on = withContext (\ctx -> setExplainLayout ctx on)
 
@@ -626,18 +613,17 @@ explainLayout on = withContext (\ctx -> setExplainLayout ctx on)
 explainingLayout :: Ui :> es => Eff es Bool
 explainingLayout = withContext getExplainLayout
 
--- | The node under the pointer while the layout overlay is on, as the last
--- frame laid it out: what it is, where, and its padding. 'Nothing' with the
--- overlay off or the pointer over no node. A debug panel shows it; a change
--- asks for a frame of its own, so the panel keeps up with the pointer.
+-- | The node under the pointer while the layout overlay is on, as laid out
+-- last frame: its kind, rect and padding. 'Nothing' when the overlay is off
+-- or the pointer is over no node. A change requests a frame, so a debug panel
+-- showing it keeps up with the pointer.
 explainedNode :: Ui :> es => Eff es (Maybe ExplainedNode)
 explainedNode = withContext getExplainedNode
 
--- | Narrow the layout overlay ('explainLayout') to what the body adds: its
--- nodes and everything inside them are outlined and explained, and the rest
--- of the view is not. Several scopes show all their parts; a view with none
--- shows everything. With the overlay off it runs the body and nothing else,
--- so it can stay in a view:
+-- | Limit the layout overlay ('explainLayout') to the nodes the body adds and
+-- their descendants. With several scopes, all of them are shown; with none,
+-- the whole view is. With the overlay off this just runs the body, so it can
+-- stay in a view:
 --
 -- > explainScope (settingsPanel model)
 explainScope :: Ui :> es => Eff es a -> Eff es a
@@ -651,8 +637,8 @@ explainScope body = do
       from <- count
       a <- body
       below <- count
-      -- A subtree follows its root in the arena, so the range holds the
-      -- whole of everything the body added.
+      -- A subtree follows its root in the arena, so this range covers
+      -- everything the body added.
       uiIO (modifyIORef' (ctxExplain ctx) (\es -> es {esScopes = (from, below) : esScopes es}))
       pure a
 

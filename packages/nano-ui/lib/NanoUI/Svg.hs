@@ -70,8 +70,8 @@ svgMonochrome = documentMonochrome
 
 -- | Flatten segments through a transform into contours in device pixels,
 -- each tagged 1 when closed. Curves are split until they are within a
--- quarter pixel of their chords, and an arc into steps of at most a
--- sixteenth of a half turn, four at least.
+-- quarter pixel of their chords. Arcs use steps of at most pi/16, and at
+-- least four steps.
 flatten :: Matrix -> SmallArray Segment -> Rings
 flatten (Matrix a b c d e f) segs =
   P.flattenPath 0.25 arcSteps (P.Transform a b c d e f) (P.Path (map segment (toList segs)))
@@ -94,8 +94,8 @@ flatten (Matrix a b c d e f) segs =
 strokePolygons :: Float -> LineCap -> LineJoin -> Float -> Rings -> Rings
 strokePolygons w cap join miterLimit contours = buildRings (strokeWalk w cap join miterLimit (cleanRings False contours))
 
--- | The walk 'strokePolygons' builds from, over contours without repeated
--- points.
+-- | The outline walk behind 'strokePolygons'. Contours must have no
+-- repeated points.
 {-# INLINE strokeWalk #-}
 strokeWalk :: Float -> LineCap -> LineJoin -> Float -> [(PrimArray Float, Bool)] -> (Float -> Float -> ST s ()) -> (Int -> ST s ()) -> ST s ()
 strokeWalk w cap join miterLimit contours point end =

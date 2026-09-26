@@ -321,12 +321,11 @@ pushPreparedTextStyledQuads da fm weight fstyle deco x y txt col
           DecorationUnderlineStrike -> underline >> strike
           DecorationNone -> pure ()
 
--- | Emit ops with @fm@ as the default font, @size@ the size it is, and
--- @resolve@ giving the font of styled text, and whether it draws its
--- weight and slant natively. @imageUv@ gives the texture and UV bounds of
--- an image id an image op names, or 'Nothing' when the id is a texture of
--- its own. A 'PushClip' clips the ops up to its 'PopClip' inside the clip
--- they are drawn in, and one left open ends with the ops.
+-- | Emit ops with @fm@ as the default font, at @size@. @resolve@ gives the
+-- font for styled text and whether it renders weight and slant natively.
+-- @imageUv@ maps an image op's id to an atlas texture and UV bounds, or
+-- 'Nothing' when the id is itself a texture. A 'PushClip' intersects the
+-- current clip until its 'PopClip'; an unclosed one ends with the ops.
 emitDrawOps ::
   DrawArena
   -> FontMetrics
@@ -338,7 +337,7 @@ emitDrawOps ::
 emitDrawOps da fm size resolve imageUv ops = go 0 []
   where
     !n = sizeofSmallArray ops
-    -- The clips the open 'PushClip's replaced, innermost first.
+    -- Clips saved by open 'PushClip's, innermost first.
     go !i saved
       | i >= n = unless (null saved) (setClip da (last saved))
       | otherwise = case indexSmallArray ops i of
@@ -367,7 +366,7 @@ emitDrawOps da fm size resolve imageUv ops = go 0 []
       let Rect px py _ _ = drawTextBox prepared x y ax ay t
       styled px py font' t c
     emitOne op = pushShapeOp da op
-    -- Text in a font of its own, its line box's top left corner at (x, y).
+    -- Styled text with its line box's top-left corner at (x, y).
     styled x y font t c = do
       (styledFm, native) <- resolve font
       let weight = if native then WeightNormal else textFontWeight font
@@ -375,11 +374,9 @@ emitDrawOps da fm size resolve imageUv ops = go 0 []
       prepared <- prepareFontMetrics styledFm t
       pushPreparedTextStyledQuads da prepared weight fstyle (textFontDecoration font) x y t c
 
--- | Paint an image op ('DrawImage'), @imageUv@ giving the texture and UV
--- bounds of the image id it names, or 'Nothing' when the id is a texture of
--- its own; any other op paints nothing. The op's UVs run 0 to 1 over the
--- image. An unturned image keeps the snapped quad; only a turned one needs
--- its corners worked out.
+-- | Paint a 'DrawImage' op; other ops paint nothing. @imageUv@ is as for
+-- 'emitDrawOps', and the op's UVs span 0 to 1 over the image. Unrotated
+-- images use the snapped quad; only rotated ones compute their corners.
 {-# INLINE pushImageOp #-}
 pushImageOp :: DrawArena -> (Int -> IO (Maybe (Int, (Float, Float, Float, Float)))) -> DrawOp -> IO ()
 pushImageOp da imageUv = \case
@@ -393,9 +390,9 @@ pushImageOp da imageUv = \case
           Nothing -> draw tex u0 v0 u1 v1
   _ -> pure ()
 
--- | Paint an op that needs no font or image: a fill, stroke, line or
--- gradient. Text, image and clip ops paint nothing here ('emitDrawOps'
--- paints them). Inlined, so an op built only to be painted costs nothing.
+-- | Paint a fill, stroke, line or gradient op. Text, image and clip ops
+-- paint nothing here ('emitDrawOps' handles them). Inlined so that an op
+-- built only to be painted is optimized away.
 {-# INLINE pushShapeOp #-}
 pushShapeOp :: DrawArena -> DrawOp -> IO ()
 pushShapeOp da = \case
@@ -412,11 +409,11 @@ pushShapeOp da = \case
   FillQuadGradient r c0 c1 c2 c3 -> pushQuadGradient da r c0 c1 c2 c3
   _ -> pure ()
 
--- | A checkbox's box, @box@ wide with its top-left corner at @(x, y)@, as
--- the checkbox widget paints it, an op at a time through @op@: the theme's
--- accent with a check mark when @checked@, otherwise an input well outlined
--- in @border@. The widget paints the ops as they come ('pushShapeOp'); a
--- canvas collects them ('NanoUI.Widgets.Custom.drawCheckbox').
+-- | The checkbox widget's box, @box@ wide with its top-left corner at
+-- @(x, y)@, passed op by op to @op@: the theme accent with a check mark when
+-- @checked@, else an input well outlined in @border@. The widget paints the
+-- ops directly ('pushShapeOp'); a canvas collects them
+-- ('NanoUI.Widgets.Custom.drawCheckbox').
 {-# INLINE checkboxOps #-}
 checkboxOps :: Applicative f => (DrawOp -> f ()) -> Theme -> Color -> Float -> Float -> Float -> Bool -> f ()
 checkboxOps op theme border x y box checked
@@ -445,7 +442,6 @@ checkboxOps op theme border x y box checked
     x2 = x + box * 0.78
     y2 = y + box * 0.28
     stroke ax ay bx by = op (StrokeLineAA ax ay bx by t mark)
-    -- Caps snap their centres, as the strokes snap their ends; snapping a
-    -- cap's corner lands it up to a pixel off the stroke at a fractional
-    -- scale.
+    -- Caps snap their centres, like the stroke ends. Snapping a cap's corner
+    -- instead can land it a pixel off the stroke at fractional scales.
     cap cx cy = op (FillCircle cx cy (t / 2) mark)

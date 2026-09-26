@@ -253,9 +253,9 @@ colorFromHex txt = do
   pure (colorRGBA r g b (fromMaybe 255 ma))
 
 -- | A text node's style index: the layout's font face, weight, slant and
--- decoration, a row stripe code (see 'stripeColor') in bits 4-7, and its
--- tone in bits 18-20, one more than the 'Tone', 0 for none. A colour-only
--- variant packs as the regular face and its tone, so it is measured in the
+-- decoration, a row stripe code (see 'stripeColor') in bits 4-7, and the
+-- tone in bits 18-20 (the 'Tone' plus one, or 0 for none). A colour-only
+-- variant packs as the regular face plus its tone, so it is measured in the
 -- base font.
 {-# INLINE packTextNodeStyle #-}
 packTextNodeStyle :: Layout -> Int -> Int
@@ -285,7 +285,7 @@ textNodeFontKey size si = fromIntegral (castFloatToWord32 size) `shiftL` 16 .|. 
 textNodeFontVariant :: Int -> FontVariant
 textNodeFontVariant = decodeStyleEnum 0 0x0F FontRegular
 
--- | The tone packed in a text node's style bits, if any.
+-- | The tone packed in a text node's style index, if any.
 {-# INLINE textNodeFontTone #-}
 textNodeFontTone :: Int -> Maybe Tone
 textNodeFontTone si = case (si `shiftR` 18) .&. 0x07 of

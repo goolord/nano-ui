@@ -40,7 +40,7 @@ frames n ctx ui = do
   (a, _, draw, _) <- runFrame ctx inp ui
   (,,) a <$> drawQuads draw <*> collectTextSpans ctx
 
--- | Warning text takes the theme's warning colour, as danger text its danger colour, and fades disabled.
+-- | Warning and danger text use the theme's warning and danger colours, and fade when disabled.
 runWarningTextTest :: Context -> IORef Int -> IO ()
 runWarningTextTest ctx failed = do
   theme <- getTheme ctx
@@ -51,7 +51,7 @@ runWarningTextTest ctx failed = do
   assertEq failed (map (`spanFg` spans) ["Careful", "Broken", "Faded"]) (map Just [amber, themeDanger theme, themeWarning (disabledTheme theme)])
   assert failed (amber `notElem` [themeDanger theme, themeWarning (disabledTheme theme)])
 
--- | 'warning' fills buttons with the warning colour, under a label that reads on it.
+-- | 'warning' fills buttons with the warning colour, with a label readable on it.
 runWarningButtonTest :: Context -> IORef Int -> IO ()
 runWarningButtonTest ctx failed = do
   theme <- getTheme ctx
@@ -79,8 +79,8 @@ builtInThemes =
   zip ["default", "default light", "tomorrow night", "tomorrow light", "tomorrow midnight", "base16 night", "base16 light"]
     [defaultTheme, defaultLightTheme, tomorrowNightMinDarkTheme, tomorrowMinLightTheme, tomorrowMidnightMinDarkTheme, themeFromBase16 base16TomorrowNight, themeFromBase16 base16TomorrowLight]
 
--- | Each built-in theme's success, warning and danger colours read on its
--- window at 4.5:1, and a label reads on its warning colour as well.
+-- | Each built-in theme's success, warning and danger colours reach 4.5:1
+-- contrast on its window colour, and a label reaches it on the warning colour.
 runToneContrastTest :: Context -> IORef Int -> IO ()
 runToneContrastTest _ failed =
   forM_ builtInThemes $ \(name, t) -> do
@@ -88,7 +88,7 @@ runToneContrastTest _ failed =
         readable c = contrastRatio c (themeWindow t) >= 4.5
     assertEq failed (name, True, True, True, True) (name, all readable [themeSuccess t, amber, themeDanger t], contrastRatio (readableOn t amber) amber >= 4.5, amber /= themeDanger t, themeSuccess t /= themeDanger t)
 
--- | Each tone's colour is a theme's, and its buttons are the tinted ones the old names give.
+-- | Each tone's colour comes from the theme, and its buttons match the old tinted button names.
 runTonesTest :: Context -> IORef Int -> IO ()
 runTonesTest _ failed = do
   let t = tomorrowMinLightTheme
@@ -99,8 +99,8 @@ runTonesTest _ failed = do
   -- Fading a theme fades its tones.
   assert failed (and [toneColor (disabledTheme t) c /= toneColor t c | c <- [Success, Warning, Danger]])
 
--- | A tone combines with a face, a colour-only variant is the regular face,
--- and neither costs the base font: the node's face is packed as it draws.
+-- | A tone combines with a face in either order, and a colour-only variant
+-- keeps the regular face: the node stores face and tone separately.
 runToneWithFaceTest :: Context -> IORef Int -> IO ()
 runToneWithFaceTest ctx failed = do
   theme <- getTheme ctx
@@ -118,14 +118,14 @@ runToneWithFaceTest ctx failed = do
   let faces = [(textNodeFontVariant si, textNodeFontTone si) | (NodeText, si) <- styles]
   assertEq failed [(FontMono, Just Warning), (FontMono, Just Warning), (FontRegular, Just Muted), (FontRegular, Just Danger), (FontRegular, Just Danger)] faces
 
--- | A theme is light or dark by its window colour, and 'lightDark' picks the dark theme when the system cannot tell.
+-- | A theme is light or dark by its window colour; 'lightDark' picks dark when the system appearance is unknown.
 runThemeAppearanceTest :: Context -> IORef Int -> IO ()
 runThemeAppearanceTest _ failed = do
   assertEq failed [AppearanceDark, AppearanceLight, AppearanceDark, AppearanceLight, AppearanceDark, AppearanceDark, AppearanceLight] (map (themeAppearance . snd) builtInThemes)
   assertEq failed [defaultLightTheme, defaultTheme, defaultTheme] (map (lightDark defaultLightTheme defaultTheme) [Just AppearanceLight, Just AppearanceDark, Nothing])
   assert failed (all (\a -> defaultThemeFor a == lightDark defaultLightTheme defaultTheme a) [Nothing, Just AppearanceLight, Just AppearanceDark])
 
--- | Following the system switches theme on a change, waking and repainting; a repeat is free.
+-- | Following the system switches theme on a change, waking the loop and repainting; a repeated report does nothing.
 runFollowSystemThemeTest :: Context -> IORef Int -> IO ()
 runFollowSystemThemeTest ctx failed = do
   let ui = column (button' "Go")
@@ -147,11 +147,11 @@ runFollowSystemThemeTest ctx failed = do
   setSystemAppearance ctx (Just AppearanceDark)
   isDirty ctx >>= assert failed . not
   readIORef wakes >>= assertEq failed 0
-  -- Back to light, and to a system that cannot tell, for which 'lightDark' picks dark.
+  -- Back to light, then to an unknown appearance, for which 'lightDark' picks dark.
   forM_ [([Just AppearanceLight], defaultLightTheme), ([Just AppearanceLight, Nothing], defaultTheme)] $ \(reports, want) ->
     mapM_ (setSystemAppearance ctx) reports >> getTheme ctx >>= assertEq failed want
 
--- | After 'setTheme' a system switch keeps the theme, but still repaints.
+-- | After 'setTheme', a system switch keeps the theme but still repaints.
 runSetThemeStopsFollowingTest :: Context -> IORef Int -> IO ()
 runSetThemeStopsFollowingTest ctx failed = do
   let ui = column (label "x")
@@ -164,7 +164,7 @@ runSetThemeStopsFollowingTest ctx failed = do
   getTheme ctx >>= assertEq failed tomorrowMidnightMinDarkTheme
   checkIdleFullDamage failed ctx inp inp ui
 
--- | A view reads the appearance, and sees a change on the frame after it.
+-- | A view reads the appearance and sees a change on the next frame.
 runSystemAppearanceViewTest :: Context -> IORef Int -> IO ()
 runSystemAppearanceViewTest ctx failed = do
   let ui = column (systemAppearance >>= label . maybe "unknown" (\a -> if a == AppearanceDark then "dark" else "light"))
@@ -175,10 +175,10 @@ runSystemAppearanceViewTest ctx failed = do
   warmup ctx inp ui
   collectTextSpans ctx >>= assertSpansHas failed "dark"
 
--- | A view that picks its theme from the system's appearance every frame
--- settles, and switches on the frame after the system does; one that sets
--- two themes a frame settles too, on the last, and so does a view setting
--- a theme over a context that follows the system.
+-- | A view that sets its theme from the system appearance every frame
+-- settles, switching one frame after the system does. So does a view that
+-- sets two themes per frame (the last wins), and one that sets a theme over
+-- a context that follows the system.
 runViewPicksThemeTest :: Context -> IORef Int -> IO ()
 runViewPicksThemeTest ctx failed = do
   let picking extra = column ((setUiTheme . lightDark defaultLightTheme defaultTheme =<< systemAppearance) >> extra >> button "Go")
@@ -187,7 +187,7 @@ runViewPicksThemeTest ctx failed = do
         isDirty ctx >>= assert failed . not
         takeDamage ctx >>= assert failed . damageIsEmpty
   setSystemAppearance ctx (Just AppearanceLight)
-  -- The frame that switches the theme asks for a full repaint after it.
+  -- The frame that switches theme requests a full repaint after it.
   _ <- warmup2 ctx inp (picking (pure ()))
   getTheme ctx >>= assertEq failed defaultLightTheme
   settles (picking (pure ()))
@@ -195,11 +195,11 @@ runViewPicksThemeTest ctx failed = do
   _ <- warmup2 ctx inp (picking (pure ()))
   getTheme ctx >>= assertEq failed defaultTheme
   settles (picking (pure ()))
-  -- Two themes a frame: the last one stands, and repaints once.
+  -- Two themes per frame: the last wins, with one repaint.
   _ <- warmup2 ctx inp (picking (setUiTheme tomorrowMinLightTheme))
   getTheme ctx >>= assertEq failed tomorrowMinLightTheme
   settles (picking (setUiTheme tomorrowMinLightTheme))
-  -- A view's theme replaces one that follows the system.
+  -- A view's theme overrides following the system.
   followSystemTheme ctx (lightDark defaultLightTheme defaultTheme)
   _ <- warmup2 ctx inp (setUiTheme tomorrowMinLightTheme >> button "Go")
   setSystemAppearance ctx (Just AppearanceLight)

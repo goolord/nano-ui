@@ -377,7 +377,7 @@ plainFieldPen ::
   Context -> NodeIdx -> Int -> FontMetrics -> Float -> Float -> Float -> Float -> IO (T.Text, Float, Float, Rect)
 plainFieldPen ctx idx si fm x y w h = do
   ph <- if hasFlag textInputFlagNumeric si then pure "" else getText (ctxNodeArena ctx) idx
-  -- The value, with an input method's composition in it while one shows.
+  -- The value, including any input method composition in progress.
   (value, _, _, _) <- fieldEditLine ctx idx
   focus <- textInputFocused ctx idx
   (Rect _ boxY _ boxH, clip@(Rect clipX _ _ _)) <- nodeTextFieldGeom ctx idx x y w h

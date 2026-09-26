@@ -98,9 +98,9 @@ useContextMenu = do
       close = uiIO (modifyStore ctx (setFlagSlot openK False))
   pure (flagSlot openK store, V2 px py, openAt, close)
 
--- | A menu row, with an optional shortcut hint after the label. A disabled
--- row is a muted label (hover would still light a disabled button) in a
--- container padded to an enabled row's geometry, and reports no interaction.
+-- | A menu row with an optional shortcut hint after the label. A disabled
+-- row is a muted label, not a button (hover would still light a disabled
+-- button), padded to match an enabled row. It reports no interaction.
 menuItemWith :: Ui :> es => Text -> Maybe Text -> Bool -> Eff es Response
 menuItemWith lbl hint enabled
   | enabled = buttonStyledEx True text 0 menuRowLayout buttonFlagMenu
@@ -129,10 +129,10 @@ menuItem txt = respClicked <$> menuItem' txt
 menuItem' :: Ui :> es => Text -> Eff es Response
 menuItem' txt = menuItemWith txt Nothing True
 
--- | Menu row bound to a shortcut, with the chord after the label, as its
--- 'shortcutLabel'. 'True' on the frame it is clicked or, while its menu is
--- open, its chord is pressed ('shortcut'). Bind the chord with 'shortcut'
--- outside the menu for it to work while the menu is closed.
+-- | Menu row bound to a shortcut, showing the chord's 'shortcutLabel' after
+-- the label. 'True' on the frame it is clicked, or when its chord is pressed
+-- while the menu is open ('shortcut'). For the chord to work while the menu
+-- is closed, also bind it with 'shortcut' outside the menu.
 --
 -- > whenM (menuItemShortcut "Save" (ctrl <> key 's')) saveFile
 menuItemShortcut :: Ui :> es => Text -> Shortcut -> Eff es Bool
@@ -171,9 +171,9 @@ menuButtonWith' :: Ui :> es => (Layout -> Layout) -> Text -> Bool -> Eff es Resp
 menuButtonWith' f txt open =
   buttonStyledEx True txt (if open then 1 else 0) (f (tight defaultLayout)) buttonFlagMenuBar
 
--- | Separator line inside a context menu, as the text-field context menu
--- paints it: a 1px rule inset 'menuItemPadX' from the panel edge, centred in
--- a 'menuSepH' band. The tight column keeps the rule horizontal.
+-- | Separator line inside a context menu, matching the text-field context
+-- menu: a 1px rule inset 'menuItemPadX' from the panel edge, centred in a
+-- 'menuSepH' band. The tight column keeps the rule horizontal.
 menuSeparator :: Ui :> es => Eff es ()
 menuSeparator = do
   rowWith (fixedH menuSepH . padXY (menuItemPadX - menuOuterPad) 4.5 . fillW) $

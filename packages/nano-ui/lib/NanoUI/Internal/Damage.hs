@@ -39,8 +39,8 @@ backdropRectFromNode Context {ctxNodeArena = na} idx = walkAncestors na idx $ \i
   paints <- if isFloatingNode nt then pure True else containerPaints na i nt
   if paints then getNonzeroRect na i else pure Nothing
 
--- | Whether a container paints a backdrop of its own: a panel, or a scroll
--- container with a well, which a bare one and one that grows both ways lack.
+-- | Whether a container paints its own backdrop: a panel, or a scroll
+-- container with a well (one that is not bare and does not grow on both axes).
 {-# INLINE containerPaints #-}
 containerPaints :: NodeArena -> NodeIdx -> NodeType -> IO Bool
 containerPaints na i nt = case nt of
@@ -51,11 +51,10 @@ containerPaints na i nt = case nt of
     pure (not ((wTag == SizingGrow && hTag == SizingGrow) || scrollBare (decodeScrollConfig si)))
   _ -> pure (nt == NodePanel)
 
--- | The key a painting container without a widget id is walked under: its
--- nearest keyed ancestor's key mixed with how far past that ancestor it was
--- added. It holds while nothing is added or dropped ahead of it inside that
--- ancestor, and otherwise changes, which damage takes as one container going
--- and another arriving.
+-- | Damage key for a painting container with no widget id: its nearest keyed
+-- ancestor's key mixed with its arena offset from that ancestor. It is stable
+-- while nothing before it in that ancestor is added or removed. Otherwise it
+-- changes, and damage sees one container leave and another arrive.
 containerKey :: NodeArena -> NodeIdx -> IO Int
 containerKey na idx = go idx
   where
@@ -66,13 +65,13 @@ containerKey na idx = go idx
         else do
           w <- getWidgetId na p
           if hashWidgetId w /= 0 then pure (mix (intKey w) (idx - p)) else go p
-    -- Key 0 names nothing.
+    -- Key 0 means no widget.
     mix k off = let h = hashWithSalt k off `xor` 0x3C6EF372FE94F82A in if h == 0 then 1 else h
 
--- | The clip node @idx@ is painted in: the one its parent hands its content
+-- | The clip node @idx@ is painted in: its parent's content clip
 -- ('NanoUI.Internal.Frame.Scroll.applyScrollOffsets'). For a scroll container
--- or a panel it is wider than the node's own clip, which is what it hands
--- its own content: its viewport, or its inside.
+-- or panel this is wider than the node's own clip, which is the clip it gives
+-- its content (its viewport or inside).
 outerClip :: NodeArena -> Rect -> NodeIdx -> IO Rect
 outerClip na window idx = do
   p <- getParent na idx
@@ -81,7 +80,7 @@ outerClip na window idx = do
     else do
       clip <- fromMaybe window <$> getClipBounds na p
       pt <- getNodeType na p
-      -- A widget's content is clipped to the widget as well.
+      -- A widget also clips its content to its own rect.
       if isWidgetNode pt
         then do
           r <- getNodeRect na p
@@ -102,11 +101,10 @@ updatePrevRects ctx@Context {ctxNodeArena = na} size@(Size winW winH) = do
   if count <= 0
     then setPrev emptyPrevFrame
     else do
-      -- Scroll containers and panels ('BackdropNodes'), and no other nodes,
-      -- first: the clip each is painted in, and, for one that paints and has
-      -- no widget id, such as a panel, its rect under a key of its own
-      -- ('containerKey'), so that one that moves or changes size repaints
-      -- where it was.
+      -- First pass, scroll containers and panels ('BackdropNodes') only:
+      -- record the clip each is painted in. A painting container with no
+      -- widget id (such as a panel) also records its rect under
+      -- 'containerKey', so moving or resizing it repaints where it was.
       (containerCount, containerAt) <- classNodes na BackdropNodes
       let window = Rect 0 0 winW winH
           containers !j !m !om !foundOld !foundOuter !dropped
@@ -138,16 +136,15 @@ updatePrevRects ctx@Context {ctxNodeArena = na} size@(Size winW winH) = do
                           (foundOuter + if IM.member k oldOuters then 1 else 0)
                           dropped
       (m0, om, foundContainers, foundOuter, droppedContainer) <- containers 0 oldRects oldOuters 0 0 False
-      -- Then every node with a widget id. Walk the arena from base maps,
-      -- touching only entries whose value changed. Seeded with last frame's
-      -- maps, frames with stable rects (hover, text churn, animations)
-      -- allocate nothing. The walk cannot delete keys that vanished from the
-      -- arena, so when the key set changed it clears the maps and walks again
-      -- from empty ones, where no key counts as old. Of nodes that share a
-      -- key (a table's frozen and scrolling panes) only the last, the one
-      -- 'lookupNodeByKey' finds, is walked ('getIdSuperseded'): counting each
-      -- would stand in for a key that went away, and writing each would
-      -- rewrite the maps every frame.
+      -- Second pass, every node with a widget id. Seeded with last frame's
+      -- maps and touching only changed entries, so frames with stable rects
+      -- (hover, text churn, animations) allocate nothing. The walk cannot
+      -- delete keys that left the arena, so when the key set changed it
+      -- clears the maps and walks again from empty ones, where no key counts
+      -- as old. Of nodes sharing a key (a table's frozen and scrolling panes)
+      -- only the last, the one 'lookupNodeByKey' finds, is walked
+      -- ('getIdSuperseded'). Counting each would mask a key that went away,
+      -- and writing each would rewrite the maps every frame.
       let go !i !m !cm !tm !lm !foundOld !dropped
             | i >= count =
                 if dropped || foundOld /= IM.size oldRects || foundOuter /= IM.size oldOuters
@@ -171,8 +168,8 @@ updatePrevRects ctx@Context {ctxNodeArena = na} size@(Size winW winH) = do
                         mClip <- getClipBounds na i
                         nt <- getNodeType na i
                         -- Text nodes, and images, whose text is their image
-                        -- id: switching an image repaints it like new text,
-                        -- and so does changing how it is drawn.
+                        -- id: switching an image, or how it is drawn,
+                        -- repaints it like new text.
                         tm' <-
                           if nt == NodeText || nt == NodeImage
                             then (\txt -> putNew k txt tm) <$!> getText na i
@@ -184,12 +181,13 @@ updatePrevRects ctx@Context {ctxNodeArena = na} size@(Size winW winH) = do
                         go (i + 1) (putNew k r m) (maybe (dropKey k cm) (\c -> putNew k c cm) mClip) tm' lm' (foundOld + if isOld then 1 else 0) dropped
       go 0 m0 oldClips oldTexts oldLooks foundContainers droppedContainer
 
--- | @m@ with @k@ mapped to @v@: @m@ itself when it already is.
+-- | Insert, returning @m@ itself when @k@ already maps to @v@, so pointer
+-- equality survives an unchanged frame.
 {-# INLINE putNew #-}
 putNew :: Eq a => Int -> a -> IM.IntMap a -> IM.IntMap a
 putNew k v m = if IM.lookup k m == Just v then m else IM.insert k v m
 
--- | @m@ without @k@: @m@ itself when it has no @k@.
+-- | Delete, returning @m@ itself when @k@ is absent.
 {-# INLINE dropKey #-}
 dropKey :: Int -> IM.IntMap a -> IM.IntMap a
 dropKey k m = if IM.member k m then IM.delete k m else m
@@ -458,8 +456,8 @@ clipDamage ctx snap d owners = do
       Size winW winH = fdWinSize d
       rectIn p wid = IM.lookup (intKey wid) (pfRects p)
   acc <- newIORef []
-  -- Key @k@'s old and new rects, each grown by @grow@ and clipped in its own
-  -- frame ('addKeyDamage').
+  -- Damage key @k@'s old and new rects, each grown by @grow@ and clipped in
+  -- its own frame ('addKeyDamage').
   let damageKeyBy k grow = do
         forM_ (IM.lookup k (pfRects old)) $ \r -> addKeyDamage acc old k r (grow r)
         forM_ (IM.lookup k (pfRects new)) $ \r -> addKeyDamage acc new k r (grow r)
@@ -528,8 +526,7 @@ clipDamage ctx snap d owners = do
         (\n o -> if n /= o then Just n else Nothing)
         (pfTexts new)
         (pfTexts old)
-  -- An image drawn another way at the same rect, or no longer drawn its
-  -- own way, repaints as a text change does.
+  -- An image whose look changed repaints like a text change.
   unless (ptrEq (pfLooks new) (pfLooks old)) $
     forM_ (IM.keys (IM.union (pfLooks new) (pfLooks old))) $ \k ->
       unless (IM.lookup k (pfLooks new) == IM.lookup k (pfLooks old)) (addText k)
@@ -604,11 +601,10 @@ damagePieces rects =
               (pair, rest) = partition (\(k, _) -> k == i || k == j) indexed
            in shrink (settle (foldr1 rectUnion (map snd pair) : map snd rest))
 
--- | Damage @d@ around key @k@'s rect @r@ in frame @p@, clipped to the clip
--- the rect is painted in there ('ownClip'), and kept inside @r@ when @k@ is a
--- scroll container or panel (it has an entry in 'pfOuterClips'): the slop
--- around a widget's rect is for its halo, which those have none of, and the
--- clip around them would let it spill.
+-- | Add damage @d@ for key @k@'s rect @r@ in frame @p@, clipped to the clip
+-- @r@ is painted in there ('ownClip'). For a scroll container or panel (a key
+-- in 'pfOuterClips') @d@ is also kept inside @r@: slop is for a widget's
+-- halo, which those lack, and their wider outer clip would let it spill.
 addKeyDamage :: RectUnion -> PrevFrame -> Int -> Rect -> Rect -> IO ()
 addKeyDamage acc p k r d =
   when (rectNonEmpty clipped) $ addRect acc clipped
@@ -645,9 +641,9 @@ data RectGroup = RectGroup
 addGroup :: RectUnion -> RectGroup -> IO ()
 addGroup acc g = when (rgAny g) $ addRect acc (rgBounds g)
 
--- | One pass over the keys whose rect changed, reduced to the settled moves
--- (each side clipped to the scroll viewport it had in its own frame, above
--- 'layoutSettleMinArea') and the keys that left or joined the arena.
+-- | One pass over keys whose rect changed, split into settled moves (each
+-- side clipped to its viewport in its own frame, kept above
+-- 'layoutSettleMinArea') and keys that left or joined the arena.
 rectDeltas :: [Rect] -> PrevFrame -> PrevFrame -> IO (RectGroup, RectGroup)
 rectDeltas panelRects oldP newP
   | ptrEq old new = pure (emptyGroup, emptyGroup)
@@ -661,7 +657,7 @@ rectDeltas panelRects oldP newP
               let oldClip = ownClip oldP k
                   newClip = ownClip newP k
                   side clip = maybe (Rect 0 0 0 0) (clipToViewport clip)
-                  -- Most moves keep their viewport (a list scrolling), and
+                  -- Most moves keep their viewport (a scrolling list), so
                   -- clipping the union once covers both sides.
                   clipped
                     | oldClip == newClip = clipToViewport newClip r
@@ -683,11 +679,11 @@ rectDeltas panelRects oldP newP
     inPanels r = any (rectFullyInside r) panelRects
     group rs = RectGroup (not (null rs)) (not (null rs || null panelRects) && all inPanels rs) (rectBounds rs)
 
--- | The clip key @k@'s own rect is painted in, in frame @p@: for a scroll
--- container or a panel the one around it, and otherwise its viewport clip.
--- Each rect is clipped in its own frame: the viewport a key has now can be
--- smaller than the one it had (a widget or scroller around it shrank with
--- it), and would cut the pixels it vacated out of the damage.
+-- | The clip key @k@'s rect is painted in, in frame @p@: the outer clip for a
+-- scroll container or panel, otherwise its viewport clip. Each rect uses its
+-- own frame's clip because the current viewport can be smaller than the old
+-- one (an enclosing widget or scroller shrank), which would cut the vacated
+-- pixels out of the damage.
 {-# INLINE ownClip #-}
 ownClip :: PrevFrame -> Int -> Maybe Rect
 ownClip p k = IM.lookup k (pfOuterClips p) <|> IM.lookup k (pfClips p)

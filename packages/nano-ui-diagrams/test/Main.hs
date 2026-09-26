@@ -234,8 +234,8 @@ testFillRule = do
   let ringsOf d = [sizeofPrimArray rings - 1 | FillPolygon _ rings _ _ <- toList (diagramOps 100 100 (d # fc coral # lw none))]
       annulus :: D.Path D.V2 Double
       annulus = D.circle 2 <> D.circle 1
-  -- A path's loops fill together: the inner circle is a hole by the even-odd
-  -- rule, or by winding when it goes the other way, and filled over when not.
+  -- A path's loops fill together. The inner circle is a hole under even-odd,
+  -- or under winding when reversed; with the same direction it is filled.
   check "even-odd annulus lost its hole" (ringsOf (D.strokeP annulus # D.fillRule D.EvenOdd) == [2])
   check "winding annulus lost its hole" (ringsOf (D.strokeP (D.circle 2 <> D.reversePath (D.circle 1))) == [2])
   check "winding annulus cut a hole" (ringsOf (D.strokeP annulus) == [1])
@@ -357,7 +357,7 @@ testLabelFit fm = do
     botOps = diagramOps 400 240 (chartDia fm botChart)
     tickText t =
       T.all (\c -> c == '-' || c == '.' || c >= '0' && c <= '9') t && not (T.null t)
-    -- Whether a label that @picks@ overlaps a tick label.
+    -- Whether a label selected by @picks@ overlaps a tick label.
     overlapsTicks picks drawOps =
       let
         ts = [(drawTextBox fm x y ax ay t, t) | DrawText x y ax ay t _ <- toList drawOps]

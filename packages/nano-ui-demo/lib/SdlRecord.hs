@@ -126,7 +126,6 @@ ease s = if s < 0.5 then 4 * s * s * s else 1 - (-2 * s + 2) ** 3 / 2
 lerpV :: V2 -> V2 -> Float -> V2
 lerpV (V2 ax ay) (V2 bx by) s = V2 (ax + (bx - ax) * s) (ay + (by - ay) * s)
 
--- | The left button alone.
 left :: MouseButtons
 left = buttonsFromList [MouseLeft]
 

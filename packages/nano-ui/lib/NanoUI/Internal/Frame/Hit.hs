@@ -40,8 +40,8 @@ import NanoUI.Internal.WidgetText (containerFlagInert, hasFlag)
 -- | The node that carries widget id @wid@ in this frame's arena. 'Nothing' for
 -- @WidgetId 0@ and for a widget the view has not declared this frame. When
 -- several nodes carry the id, this is the one most recently indexed under it.
--- Calling this rather than 'lookupNodeByWidgetId' in a widget's interaction
--- code keeps the lookup out of line there, which allocates less per widget.
+-- Widget interaction code calls this rather than 'lookupNodeByWidgetId':
+-- keeping the lookup out of line allocates less per widget.
 findNodeByWidgetId :: Context -> WidgetId -> IO (Maybe NodeIdx)
 findNodeByWidgetId ctx wid = lookupNodeByWidgetId (ctxNodeArena ctx) wid
 
@@ -122,18 +122,18 @@ nodeOwnsPointer ctx@Context {ctxNodeArena = na} idx =
  where
   layerOf i = maybe 0 intKey <$> walkFloatingAncestors na i (\j _ -> Just <$> getWidgetId na j)
 
--- | Whether widget @wid@ is reachable past the modals: with no modal open
--- every widget is, and while one is open, only those inside the top modal.
--- Only such a widget shows a dropdown or menu of its own, or takes focus.
+-- | Whether widget @wid@ is reachable past modals: always with no modal
+-- open, otherwise only inside the top modal. Only a reachable widget shows
+-- its own dropdown or menu, or takes focus.
 widgetOverlayAllowed :: Context -> WidgetId -> IO Bool
 widgetOverlayAllowed ctx wid = do
   top <- topModalNode (ctxNodeArena ctx)
   maybe (pure True) (\modal -> widgetIdInSubtree ctx modal wid) top
 
 -- | Whether @mouse@ is on the visible part of node @idx@: inside its non-empty
--- rect, and inside its clip rect when it has one. An empty clip, a viewport
--- outside the one around it, holds no point. It reads this frame's solved
--- geometry, which is complete once
+-- rect, and inside its clip rect when it has one. An empty clip (a viewport
+-- entirely outside its parent's) contains no point. It reads this frame's
+-- solved geometry, which is complete once
 -- 'NanoUI.Internal.Frame.Scroll.applyScrollOffsets' has run.
 {-# INLINE nodePointVisible #-}
 nodePointVisible :: Context -> NodeIdx -> V2 -> IO Bool
@@ -149,7 +149,7 @@ nodePointVisible ctx idx mouse = do
 -- whose hit rect differs from its node's rect. A node whose clip is unset, as
 -- before 'NanoUI.Internal.Frame.Scroll.applyScrollOffsets' has run in a
 -- frame, is tested against the clip recorded for its widget id on the
--- previous frame. An empty clip, set or recorded, holds no point.
+-- previous frame. An empty clip, live or recorded, contains no point.
 {-# INLINE nodeClippedHit #-}
 nodeClippedHit :: Context -> NodeIdx -> Rect -> V2 -> IO Bool
 nodeClippedHit ctx@Context {ctxNodeArena = na} idx rect mouse =
@@ -197,9 +197,9 @@ nodeInteractionHit ctx@Context {ctxNodeArena = na} idx rect mouse
           _ | isFloatingNode nt -> pure True
             | otherwise -> getParent na i >>= inside
 
--- | Whether node @idx@ takes the pointer where it is drawn on top
--- ('PointerMode'): a control, or a node given 'PointerBlock', unless it
--- passes the pointer.
+-- | Whether node @idx@ takes the pointer when drawn on top ('PointerMode'):
+-- widgets do by default, 'PointerBlock' nodes always, 'PointerPass' nodes
+-- never.
 {-# INLINE takesPointer #-}
 takesPointer :: NodeArena -> NodeIdx -> IO Bool
 takesPointer na idx =
@@ -208,25 +208,23 @@ takesPointer na idx =
     PointerBlock -> pure True
     PointerPass -> pure False
 
--- | Whether node @idx@ lets the pointer through, being given 'PointerPass'
--- or inside a node that was: it takes no hover or presses.
+-- | Whether node @idx@ passes the pointer through ('PointerPass', set on it
+-- or on an ancestor). Such a node takes no hover or presses.
 {-# INLINE passesPointer #-}
 passesPointer :: NodeArena -> NodeIdx -> IO Bool
 passesPointer na idx = (== PointerPass) <$> getPointerMode na idx
 
--- | Whether the pointer at @mouse@ is on node @idx@, which takes the pointer
--- ('takesPointer'): on its visible part ('nodePointVisible'), where the
--- floating panels leave it reachable ('overlayHitAllowed', with @top@ from
--- 'overlayHitRoot').
+-- | Whether node @idx@ takes the pointer ('takesPointer') and @mouse@ is on
+-- its visible part ('nodePointVisible'), where floating panels leave it
+-- reachable ('overlayHitAllowed', with @top@ from 'overlayHitRoot').
 pointerHitAt :: Context -> Maybe NodeIdx -> V2 -> NodeIdx -> IO Bool
 pointerHitAt ctx@Context {ctxNodeArena = na} top mouse idx =
   takesPointer na idx
     <&&> nodePointVisible ctx idx mouse
     <&&> overlayHitAllowed ctx top idx
 
--- | The node the pointer at @mouse@ reaches, as hover finds it: where it
--- lands ('reachedHit') among the nodes under it that take the pointer
--- ('pointerHitAt').
+-- | The node the pointer at @mouse@ reaches, as hover finds it:
+-- 'reachedHit' over the nodes there that take the pointer ('pointerHitAt').
 {-# INLINE reachedAt #-}
 reachedAt :: Context -> V2 -> IO (Maybe NodeIdx)
 reachedAt ctx mouse = do
@@ -234,19 +232,18 @@ reachedAt ctx mouse = do
   reachedHit ctx (pointerHitAt ctx top mouse)
 
 -- | The widget node the pointer at @mouse@ reaches ('reachedAt'). 'Nothing'
--- where that is a node given 'PointerBlock' with no widget of its own there.
+-- if it reaches a 'PointerBlock' node with no widget of its own there.
 reachedWidgetAt :: Context -> V2 -> IO (Maybe NodeIdx)
 reachedWidgetAt ctx@Context {ctxNodeArena = na} mouse = maybe (pure Nothing) widget =<< reachedAt ctx mouse
  where
   widget idx = (\nt -> if isWidgetNode nt then Just idx else Nothing) <$> getNodeType na idx
 
--- | The node a pointer hit lands on: of the nodes that @hits@, the first in
--- arena order, unless layers or a pinned node draw a later one over it
--- ('topmostHit'), and then the widget drawn innermost inside that one
--- ('innermostHit'). A node given 'PointerBlock' without a widget of its own
--- under the pointer is itself what it lands on. 'Nothing' when nothing hits.
--- Inlined, so that the search over the pointer nodes calls a known @hits@,
--- which boxes no node index.
+-- | The node a pointer hit lands on: the first node in arena order that
+-- @hits@, or a later one that layers or a pinned node draw over it
+-- ('topmostHit'), then the innermost widget inside that ('innermostHit'). A
+-- 'PointerBlock' node with no widget of its own under the pointer is itself
+-- the result. 'Nothing' if nothing hits. Inlined so the search calls a known
+-- @hits@ and does not box node indices.
 {-# INLINE reachedHit #-}
 reachedHit :: Context -> (NodeIdx -> IO Bool) -> IO (Maybe NodeIdx)
 reachedHit ctx hits =
@@ -271,11 +268,11 @@ innermostHit ctx@Context {ctxNodeArena = na} hits idx =
           (pure (Just d))
           (firstHitIn d)
 
--- | The node drawn on top among those that @hits@, given @first@, the first
--- of them in arena order. Paint draws an earlier sibling over a later one, so
--- that is @first@, unless layers or a pinned node draw a later hit over it
--- ('drawnOver'), which only an arena with one of them can do. A hit inside
--- another does not count as over it here ('innermostHit').
+-- | The topmost node among those that @hits@, given @first@, the first hit
+-- in arena order. Paint draws earlier siblings over later ones, so this is
+-- @first@ unless layers or a pinned node draw a later hit over it
+-- ('drawnOver'). A hit nested inside another does not count as over it
+-- here; see 'innermostHit'.
 topmostHit :: Context -> (NodeIdx -> IO Bool) -> NodeIdx -> IO NodeIdx
 topmostHit Context {ctxNodeArena = na} hits first = do
   layered <- layeredNodeCount na

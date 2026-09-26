@@ -365,10 +365,10 @@ runPercentGapShrinkTest ctx failed = do
   assert failed (abs (wa - 100) <= 0.5 && abs (wb - 100) <= 0.5)
   assert failed (abs (xb - (xa + wa + 6)) <= 0.5)
 
--- | A row too short for its children takes what it lacks from those that
--- shrink, none past its minimum: a shrinking label beside a spacer gives up
--- all of it, so what follows stays in the row, and of two shrinking labels
--- the longer gives what the shorter cannot.
+-- | A row too short for its children takes the shortfall from shrinkable
+-- children, none below its minimum. A shrinking label beside a spacer gives
+-- up all of it, keeping later children in the row; of two shrinking labels,
+-- the longer covers what the shorter cannot.
 runShrinkShortfallTest :: Context -> IORef Int -> IO ()
 runShrinkShortfallTest ctx failed = do
   let inp = withInput 400 200

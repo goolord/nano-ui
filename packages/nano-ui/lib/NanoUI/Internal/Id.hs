@@ -69,8 +69,8 @@ enterScope tag parent = enterChild (siblingId parent) tag parent
 enterKeyed :: Word64 -> IdContext -> (IdContext, IdContext)
 enterKeyed tag = enterChild tag keyedTag
 
--- | The parent advanced past one child, and that child's context, hashed
--- from the parent's path, @seed@ and @tag@.
+-- | Advance the parent's sibling counter and derive a child path from the
+-- parent path, @seed@ and @tag@.
 {-# INLINE enterChild #-}
 enterChild :: Word64 -> Word64 -> IdContext -> (IdContext, IdContext)
 enterChild seed tag (IdContext pid sib) = (IdContext pid (sib + 1), IdContext (mix64 (mix64 pid seed) tag) 0)

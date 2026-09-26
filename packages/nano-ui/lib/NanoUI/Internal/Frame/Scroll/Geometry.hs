@@ -304,7 +304,6 @@ scrollNodeBars sn@(ScrollNode slot cfg native2D dir pad contentMain contentW) x 
     bar = scrollBarLayout slot dir x y w h pad contentMain offY
     shown d l = if scrollChromeSuppressed cfg d then Nothing else l
 
--- | Whether @mouse@ is on a bar's thumb or track.
 onScrollBar :: V2 -> ScrollBarLayout -> Bool
 onScrollBar mouse l = rectContains (sbThumb l) mouse || rectContains (sbTrack l) mouse
 

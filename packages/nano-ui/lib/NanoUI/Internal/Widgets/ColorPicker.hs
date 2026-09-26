@@ -458,7 +458,7 @@ applyColorPickerKeys :: Context -> WidgetId -> Color -> Input -> Bool -> Bool ->
 applyColorPickerKeys ctx wid fallback inp svFocus hueFocus = do
   store <- getStore ctx
   let
-    -- With Ctrl, Alt or Super held, an arrow is a chord, for a shortcut.
+    -- Arrows with Ctrl, Alt or Super are left to shortcuts.
     down k = shiftAtMost (inputModifiers inp) && pressedIn k inp
     step = if modShift (inputModifiers inp) then 10 else 1
     along neg pos = (if down pos then 1 else 0) - (if down neg then 1 else 0) :: Float

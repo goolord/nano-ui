@@ -133,9 +133,9 @@ textOps (Text tr align str) sty
 instance (Typeable n, RealFloat n) => Renderable (Text n) NanoUIBackend where
   render _ t = NRenderFull (const (textOps t))
 
--- | A path's ops: its loops filled together by the style's fill rule, so
--- a loop inside another can be a hole in it, then every trail stroked with
--- the style's caps, joins and dashes.
+-- | A path's ops: all loops filled together under the style's fill rule (so
+-- an inner loop can be a hole), then every trail stroked with the style's
+-- caps, joins and dashes.
 pathOps ::
   (Typeable n, RealFloat n) =>
   DiaCore.Style V2 n -> [Located (Trail V2 n)] -> [DrawOp]
@@ -173,7 +173,7 @@ pathOps sty trails = fills ++ strokes
       Just c | colorA c > 0 && lineW > 0 -> P.strokePathOps curveTol mempty lineStroke (mconcat (map snd paths)) (P.Solid c)
       _ -> []
 
--- | How far a flattened curve may stray from the true one, in logical pixels.
+-- | Maximum distance of a flattened curve from the true one, in logical pixels.
 curveTol :: Float
 curveTol = 0.5
 
@@ -191,8 +191,8 @@ trailPath closed segs@(s0 : _) = P.Path (start s0 : map seg segs ++ [P.SegClose 
        in at (P.SegCubic ax ay bx by) p
     at f p = uncurry f (pointFloats p)
 
--- | A filled axis-aligned rectangle, what bar charts are made of, as a rect
--- op: it draws without the seams a polygon's triangles can show.
+-- | Turn a flat-filled axis-aligned rectangle (a chart bar) into a rect op,
+-- which avoids the seams a polygon's triangles can show.
 rectOp :: DrawOp -> DrawOp
 rectOp op@(FillPolygon pts _ _ (P.Flat col)) = case primArrayToList pts of
   [x0, y0, x1, y1, x2, y2, x3, y3]
@@ -200,7 +200,7 @@ rectOp op@(FillPolygon pts _ _ (P.Flat col)) = case primArrayToList pts of
         FillRect (Rect (min x0 x2) (min y0 y2) (abs (x2 - x0)) (abs (y2 - y0))) col
   _ -> op
   where
-    -- Edges along one axis, then the other, alternately.
+    -- Edges alternate between the two axes.
     level ax ay bx by cx cy dx dy = near ay by && near bx cx && near cy dy && near dx ax
     near a b = abs (a - b) <= 1e-3
 rectOp op = op

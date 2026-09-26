@@ -29,14 +29,14 @@ tests =
 inp :: Input
 inp = withInputOff 300 200
 
--- | Run a frame: the view's result, and whether it asked for a follow-up frame.
+-- | Run a frame; return the view's result and whether it asked for a follow-up frame.
 step :: Context -> Input -> NanoUI a -> IO (a, Bool)
 step ctx i ui = (\(a, _, _, follow) -> (a, follow)) <$> runFrame ctx i ui
 
 settle :: Context -> Input -> NanoUI a -> Int -> IO ()
 settle ctx i ui n = replicateM_ n (step ctx i ui)
 
--- | What a sensor reports: whether it is visible, and its event.
+-- | A sensor's visibility and event.
 type State = (Bool, Maybe VisibilityEvent)
 
 off, on, cameIn, wentOut :: State
@@ -48,7 +48,7 @@ wentOut = (False, Just BecameHidden)
 hidden :: Visibility
 hidden = Visibility False Nothing (Rect 0 0 0 0) (Rect 0 0 0 0)
 
--- | A report without its bounds, which a hidden widget still has.
+-- | A report minus 'visBounds', which a hidden widget still has.
 reported :: Visibility -> (Bool, Maybe VisibilityEvent, Rect)
 reported v = (visVisible v, visEvent v, visRect v)
 
@@ -58,7 +58,7 @@ expectVis failed want vs = do
   assertEq failed want [(visVisible v, visEvent v) | v <- vs]
   forM_ vs $ \v -> unless (visVisible v) (assertEq failed (Rect 0 0 0 0) (visRect v))
 
--- | Run a frame per expected report of sensor @sel@ and follow-up request; return the results.
+-- | Run one frame per expected (report, follow-up) pair, checking sensor @sel@.
 frames :: HasCallStack => IORef Int -> Context -> Input -> NanoUI a -> (a -> Visibility) -> [(State, Bool)] -> IO [a]
 frames failed ctx i ui sel = mapM $ \(want, wantFollow) -> do
   (a, follow) <- step ctx i ui
@@ -76,17 +76,17 @@ bar = box (fixedH 40 . fillW) grey
 scrollCol :: Float -> NanoUI a -> NanoUI (WidgetId, a)
 scrollCol h = scrollArea (fixedH h . fillW) . columnWith (tight . gap 0 . fillW)
 
--- | Twenty rows in a 100-pixel scroller; row 10, 400 pixels down, is a sensor.
+-- | Twenty rows in a 100-pixel scroller; row 10 (400 pixels down) is a sensor.
 rows :: NanoUI (WidgetId, Visibility)
 rows = scrollCol 100 (replicateM_ 10 bar *> (fst <$> sensorWith fillW bar) <* replicateM_ 9 bar)
 
--- A sensor on screen reports it once, on the follow-up frame the first one asks for.
+-- An on-screen sensor reports once, on the follow-up frame the first frame requests.
 runInitialTest :: Context -> IORef Int -> IO ()
 runInitialTest ctx failed = do
   [_, v, _] <- frames failed ctx inp (column (fst <$> sensor (label "watched"))) id [(off, True), (cameIn, False), (on, False)]
   assert failed (rectW (visRect v) > 0 && rectH (visRect v) > 0)
 
--- Scrolling a row in and out reports each change once; 'visRect' is its part in the viewport.
+-- Scrolling a row in and out reports each change once; 'visRect' is its visible part.
 runScrollTest :: Context -> IORef Int -> IO ()
 runScrollTest ctx failed = do
   let go = frames failed ctx inp rows snd
@@ -94,12 +94,12 @@ runScrollTest ctx failed = do
   -- Row 10 now starts 70 pixels down the 100-pixel viewport.
   setScrollOffset ctx sid 330
   [_, (_, v2)] <- go [(off, True), (cameIn, False)]
-  -- The view may have changed anything on seeing it: that frame repaints whole.
+  -- The view may react to the event arbitrarily, so that frame repaints fully.
   takeDamage ctx >>= assertEq failed DamageFull
   assert failed (rectH (visRect v2) > 0 && rectH (visRect v2) < 40)
   assertJustM failed (getPrevRect ctx sid) $ \viewport ->
     assertEq failed (rectIntersect viewport (visRect v2)) (Just (visRect v2))
-  -- Moved within view, the rect follows on the next frame, which is not asked for.
+  -- Moving within view updates the rect next frame without requesting one.
   setScrollOffset ctx sid 320
   [_, (_, v4)] <- go [(on, False), (on, False)]
   assertEq failed (rectY (visRect v4)) (rectY (visRect v2) + 10)
@@ -110,7 +110,7 @@ runScrollTest ctx failed = do
   [_, (_, v)] <- go [(off, True), (cameIn, False)]
   assertEq failed 40 (rectH (visRect v))
 
--- A row in an inner scroller shows only when inside both viewports, even disjoint ones.
+-- A row in an inner scroller is visible only inside both viewports, even disjoint ones.
 runNestedScrollTest :: Context -> IORef Int -> IO ()
 runNestedScrollTest ctx failed = do
   let ui = scrollCol 100 $ do
@@ -119,12 +119,12 @@ runNestedScrollTest ctx failed = do
         inner <$ box (fixedH 300 . fillW) grey
       go = void . frames failed ctx inp ui (snd . snd)
   (outer, (inner, _)) <- evalUi ctx inp ui
-  -- Scrolled, the row is in the outer viewport but above the inner; unscrolled, below the outer.
+  -- Inner scrolled: row is above the inner viewport. Unscrolled: below the outer.
   forM_ [100, 0] $ \y -> setScrollOffset ctx inner y >> settle ctx inp ui 3 >> go [(off, False)]
   setScrollOffset ctx outer 150 >> go [(off, True), (cameIn, False)]
   setScrollOffset ctx inner 100 >> go [(on, True), (wentOut, False)]
 
--- A panel clips its overflow, and paint skips an empty container whose content overflows it.
+-- Sensors clipped by a panel, or in a zero-height container, are hidden.
 runClippedTest :: Context -> IORef Int -> IO ()
 runClippedTest ctx failed = do
   let ui = column $ do
@@ -137,7 +137,7 @@ runClippedTest ctx failed = do
   (vs, follow) <- step ctx inp ui
   expectVis failed [off, off, on] vs >> assert failed (not follow)
 
--- An anticipate margin shows a row before it scrolls in; a zero-height marker shows in view.
+-- An anticipate margin reports a row visible before it scrolls in; a zero-height marker in view is visible.
 runAnticipateTest :: Context -> IORef Int -> IO ()
 runAnticipateTest ctx failed = do
   let ui = scrollCol 100 $ do
@@ -154,7 +154,7 @@ runAnticipateTest ctx failed = do
   setScrollOffset ctx sid 30 >> settle ctx inp ui 1
   expectVis failed [wentOut, on, cameIn] . snd =<< evalUi ctx inp ui
 
--- A sensor not built is forgotten: no frames while gone, a new report when back, stable ids.
+-- An unbuilt sensor is forgotten: no frames while gone, a fresh report on return, stable ids.
 runRemovedTest :: Context -> IORef Int -> IO ()
 runRemovedTest ctx failed = do
   shownRef <- newIORef True
@@ -187,7 +187,7 @@ runTabsTest ctx failed = do
   writeIORef activeRef 0 >> settle ctx inp ui 3
   readIORef eventsRef >>= assertEq failed [BecameVisible, BecameVisible]
 
--- A hook write on the event reruns the view, which sees no event; a message is sent once.
+-- A hook write on the event reruns the view without the event; the message is sent once.
 runTwoPassesTest :: Context -> IORef Int -> IO ()
 runTwoPassesTest ctx failed = do
   seenRef <- newIORef (0 :: Int)
@@ -202,7 +202,7 @@ runTwoPassesTest ctx failed = do
   seen <- readIORef seenRef
   assertEq failed ((True, on), 1, 1) (second, seen, model5)
 
--- 'useVisibility' watches a widget built before it, takes one id, and reports it gone once.
+-- 'useVisibility' watches an earlier widget, takes one id, and reports its removal once.
 runUseVisibilityTest :: Context -> IORef Int -> IO ()
 runUseVisibilityTest ctx failed = do
   shownRef <- newIORef True
@@ -225,7 +225,7 @@ runUseVisibilityTest ctx failed = do
   writeIORef shownRef False
   void $ go [(on, True), (wentOut, False)]
 
--- A sensor takes the one id a column takes, so swapping one for the other moves no sibling.
+-- A sensor takes as many ids as a column, so swapping them keeps sibling ids.
 runIdsTest :: Context -> IORef Int -> IO ()
 runIdsTest ctx failed = do
   let after enclose n = column $ do
@@ -234,7 +234,7 @@ runIdsTest ctx failed = do
   plain <- evalUi ctx inp (after column 2)
   forM_ [0, 2, 5] $ \n -> evalUi ctx inp (after (fmap snd . sensor) n) >>= assertEq failed plain
 
--- A sensor in a window declared in a scroller's scrolled-out content is on screen.
+-- A sensor in a window declared inside scrolled-out content is still visible.
 runFloatingTest :: Context -> IORef Int -> IO ()
 runFloatingTest ctx failed = do
   let wide = withInput 400 300
@@ -246,7 +246,7 @@ runFloatingTest ctx failed = do
   ((_, (inWindow, below)), follow) <- step ctx wide ui
   assertEq failed (visVisible <$> inWindow, reported below, follow) (Just True, reported hidden, False)
 
--- A resize hides a sensor on the follow-up frame it asks for; growing back shows it.
+-- Shrinking the window hides a sensor on the follow-up frame; growing back shows it.
 runResizeTest :: Context -> IORef Int -> IO ()
 runResizeTest ctx failed = do
   let ui = column (box (fixedH 150 . fillW) grey >> fst <$> sensorWith fillW bar)
@@ -272,7 +272,7 @@ runLayoutShiftTest ctx failed = do
   expectVis failed [on, on, wentOut, wentOut] (before ++ after)
   assertEq failed [False, True, False] [follow1, follow2, follow3]
 
--- A button outside an inner viewport but in the outer's rect is hidden and inert; in both, live.
+-- A button outside the inner viewport but inside the outer is hidden and inert; inside both, live.
 runDisjointViewportHitTest :: Context -> IORef Int -> IO ()
 runDisjointViewportHitTest ctx failed = do
   let filler h = spacer (Fixed 10) (Fixed h)
@@ -281,7 +281,7 @@ runDisjointViewportHitTest ctx failed = do
         inner <- scrollArea (fixedH 30 . fillW) . column $ sensor (button' "Deep") <* filler 200
         inner <$ filler 100
       look i = snd . snd <$> evalUi ctx i ui
-      -- The sensor's report, and whether the button hovers, presses and clicks.
+      -- The sensor report, and whether the button hovers, presses and clicks.
       probe = do
         (vis, deep) <- look inp
         let over = inp {inputMousePos = centerOf deep}
@@ -295,12 +295,12 @@ runDisjointViewportHitTest ctx failed = do
   (vis1, Rect _ by _ bh, flags1) <- probe
   assert failed (by >= 0 && by + bh < 100)
   assertEq failed (reported hidden, [False, False, False]) (reported vis1, flags1)
-  -- The outer scroller brings the inner one up, which shows its top.
+  -- Scroll the outer to the inner scroller, and the inner to its top.
   setScrollOffset ctx outer 150 >> setScrollOffset ctx inner 0 >> settle ctx inp ui 3
   (vis2, _, flags2) <- probe
   assertEq failed (True, [True, True, True]) (visVisible vis2, flags2)
 
--- A sensor pinned into view from a sizeless or scrolled-out container is drawn and visible.
+-- A sensor pinned out of a sizeless or scrolled-out container is drawn and visible.
 runPinnedTest :: Context -> IORef Int -> IO ()
 runPinnedTest ctx failed = do
   let (red, blue) = (colorRGBA 200 40 40 255, colorRGBA 40 40 200 255)
@@ -311,7 +311,7 @@ runPinnedTest ctx failed = do
             <* box (fixedH 400 . fillW) grey
         pure (sid, [inStack, hanging])
   (sid, _) <- evalUi ctx inp ui
-  -- The strip is above the viewport, the box it pins 50 pixels down it.
+  -- The strip is above the viewport; its pinned box is 50 pixels into it.
   setScrollOffset ctx sid 100 >> settle ctx inp ui 3
   ((_, vs), _, draw, follow) <- runFrame ctx inp ui
   colours <- map snd <$> drawQuads draw
@@ -319,8 +319,8 @@ runPinnedTest ctx failed = do
   expectVis failed [on, on] vs
   assertEq failed [(20, 20), (20, 20)] [(w, h) | Rect _ _ w h <- map visRect vs]
 
--- 'visBounds' is the whole widget, 'visRect' its part on screen: half a row
--- scrolled into view has both, and a row scrolled out its bounds alone.
+-- 'visBounds' is the whole widget, 'visRect' its on-screen part. A scrolled-out
+-- row keeps its bounds and has an empty rect.
 runBoundsTest :: Context -> IORef Int -> IO ()
 runBoundsTest ctx failed = do
   (sid, _) <- evalUi ctx inp rows
@@ -332,9 +332,8 @@ runBoundsTest ctx failed = do
   (_, gone) <- evalUi ctx inp rows
   assertEq failed (False, 40, Rect 0 0 0 0) (visVisible gone, rectH (visBounds gone), visRect gone)
 
--- A sensor with a delay reports its widget visible only once it has stayed
--- in view that long, waking the loop for it rather than asking for frames
--- meanwhile; out of view it is hidden at once.
+-- With a delay, a sensor reports visible only after staying in view that
+-- long, using a wake-up rather than follow-up frames. Hiding is immediate.
 runDelayTest :: Context -> IORef Int -> IO ()
 runDelayTest ctx failed = do
   let cfg = defaultSensorConfig {sensorDelay = 0.1}
@@ -344,13 +343,13 @@ runDelayTest ctx failed = do
         pure (visVisible v, visEvent v)
   (sid, _) <- evalUi ctx inp ui
   settle ctx inp ui 2
-  -- Row 10 scrolled into view is seen, but not yet for long enough.
+  -- Row 10 is in view, but not yet for long enough.
   setScrollOffset ctx sid 380
   settle ctx inp ui 2
   report >>= assertEq failed off
   assert failed . (> 0) =<< getWakeAt ctx
   threadDelay 150000
-  -- The frame the wake asks for measures it visible, and the next reads it.
+  -- The woken frame measures it visible; the next frame reports it.
   _ <- step ctx inp ui
   report >>= assertEq failed cameIn
   setScrollOffset ctx sid 0

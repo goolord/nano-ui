@@ -139,8 +139,8 @@ inputColor name initial = captioned name decode (FormInputText . colorToHex) col
       FormInputText t -> fromMaybe initial (colorFromHex t)
       _ -> initial
 
--- | A field whose caption, if it has one, is drawn above its control, which
--- reports an edit as a change.
+-- | A field with its optional caption drawn above the control. Edits to the
+-- control count as changes.
 captioned ::
   (Eq a, FormError FormInput err) =>
   FieldName -> (FormInput -> a) -> (a -> FormInput) -> (a -> NUI.NanoUI (NUI.Response, a)) -> a -> Form err a

@@ -25,10 +25,10 @@ module NanoUI.Backend.Sdl
   , pollFileDialogUi
     -- * The window
 
-    -- | 'WindowSettings' and the view's window functions are the core's
-    -- ("NanoUI"): 'NanoUI.askWindow', 'NanoUI.setWindowTitleUi',
-    -- 'NanoUI.moveWindowUi', 'NanoUI.quitUi' and the rest. What is here is
-    -- the SDL window's own.
+    -- | 'WindowSettings' and the view-side window functions come from the
+    -- core ("NanoUI"): 'NanoUI.askWindow', 'NanoUI.setWindowTitleUi',
+    -- 'NanoUI.moveWindowUi', 'NanoUI.quitUi' and others. The rest of this
+    -- section is specific to SDL.
   , WindowSettings (..)
   , defaultWindowSettings
   , WindowPosition (..)

@@ -2,9 +2,9 @@
  *
  * Geometry is the core's shared draw buffer uploaded as-is (32-byte vertices:
  * position, RGBA, UV; 32-bit indices) and drawn per command under a scissor.
- * Commands on the core's image atlas sample it, tinted by their vertex
- * colours; the rest are flat. Text is pre-clipped glyph quads in physical
- * pixels, sampled from an R8 coverage atlas.
+ * Image-atlas commands sample it tinted by vertex colour; other geometry is
+ * flat. Text is pre-clipped glyph quads in physical pixels, sampled from an
+ * R8 coverage atlas.
  *
  * Frames draw into a retained offscreen framebuffer, which keeps the pixels
  * outside a frame's damage, and every present copies it to the window: the
@@ -153,7 +153,7 @@ typedef struct nano_ui_gl {
   GLuint geomVao, geomVbo, geomEbo;
   GLuint textVao, textVbo;
   GLuint atlas;
-  GLuint images; /* the core's RGBA image atlas, on texture unit 1 */
+  GLuint images; /* the core's RGBA image atlas, texture unit 1 */
   int32_t imagesW, imagesH;
   GLuint retainFbo, retainTex;
   int32_t retainCapW, retainCapH; /* texture size, the window rounded up */
@@ -356,10 +356,10 @@ int32_t nano_ui_gl_upload_atlas(nano_ui_gl* r, const uint32_t* pixels, int32_t w
   return 1;
 }
 
-/* Bring the image texture up to the core's image atlas, atlasW x atlasH RGBA
- * pixels: all of it when whole is set, which remakes the texture at that
- * size, else the x, y, w, h rect of it into the texture there is. Returns 0
- * when a rect has no texture of that size to go into. */
+/* Sync the image texture with the core's atlasW x atlasH RGBA image atlas.
+ * With whole set, reallocate the texture at that size and upload everything;
+ * otherwise upload only the x, y, w, h rect. Returns 0 if a rect upload finds
+ * no texture of the atlas's size. */
 int32_t nano_ui_gl_upload_images(nano_ui_gl* r, const uint8_t* pixels, int32_t atlasW, int32_t atlasH,
                                  int32_t x, int32_t y, int32_t w, int32_t h, int32_t whole) {
   ngl_api* gl = &r->gl;
@@ -479,9 +479,8 @@ void nano_ui_gl_read_retained(nano_ui_gl* r, uint8_t* out) {
   gl->BindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
-/* Read what the last present put in the window's back buffer, before the
- * swap that leaves it undefined, as nano_ui_gl_read_retained reads the
- * retained frame. For tests of the present. */
+/* Read the window's back buffer after present and before the swap, which
+ * leaves it undefined. Used by tests of the present. */
 void nano_ui_gl_read_window(nano_ui_gl* r, uint8_t* out) {
   ngl_api* gl = &r->gl;
   gl->BindFramebuffer(GL_READ_FRAMEBUFFER, 0);
@@ -522,7 +521,7 @@ void nano_ui_gl_upload_text(nano_ui_gl* r, const void* vertices, int32_t vertexC
                  vertexCount > 0 ? vertices : NULL, GL_STREAM_DRAW);
 }
 
-/* Draw one command's index range, sampling the image texture when image is
+/* Draw one command's index range, sampling the image texture if image is
  * set. The clip is in top-left physical pixels, already intersected with the
  * framebuffer; vertices are logical and scaled in the vertex shader by the
  * frame's scale. */

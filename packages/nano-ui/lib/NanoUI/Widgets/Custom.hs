@@ -3,16 +3,14 @@
 -- 'customWidget' takes a 'CustomWidgetSpec': a layout, optional measurement,
 -- drawing that sees hover and press state, an optional content key, a cursor,
 -- and damage slop.
--- 'canvas' is the short form for drawing into a laid-out rectangle with
--- 'CanvasM', which fills and strokes paths from "NanoUI.Path" as well as
--- rects, circles, lines, images and text, clips, and draws through
--- transforms; 'canvasConfigured' adds a content key, a cursor and pointer
--- tracking, and 'drawContext' hands the drawing hover and press state.
--- 'useDrag2DOn' and 'useWheelDeltaOn' are gesture hooks for your own
--- controls, fed the widget's 'Response'; 'knob' and 'toggleSwitch' show how
--- they fit together. Each reference
--- widget comes as @x@, at its default size, and as @xWith'@, which takes a
--- layout modifier and a size and also returns the widget's 'Response'.
+-- 'canvas' is the short form: it draws into a laid-out rectangle with
+-- 'CanvasM' (rects, circles, lines, images, text, "NanoUI.Path" paths, clips
+-- and transforms). 'canvasConfigured' adds a content key, a cursor and
+-- pointer tracking; 'drawContext' gives the drawing hover and press state.
+-- 'useDrag2DOn' and 'useWheelDeltaOn' are gesture hooks that take the
+-- widget's 'Response'; 'knob' and 'toggleSwitch' show them in use. Each
+-- reference widget comes as @x@ at its default size, and as @xWith'@, which
+-- takes a layout modifier and a size and also returns the 'Response'.
 module NanoUI.Widgets.Custom
   ( -- * Custom widgets
     CustomWidgetSpec (..)
@@ -125,39 +123,36 @@ data CustomWidgetSpec a = CustomWidgetSpec
     -- ^ Vector drawing procedure receiving interaction context and layout rect.
   , widgetContent    :: !Int
     -- ^ Content key: a number that changes whenever 'widgetDraw' would draw
-    -- something different ('contentKey' hashes numbers into one). A frame
-    -- whose key, size, interaction state and metrics are unchanged neither
-    -- rebuilds the ops nor repaints. The default 0 means no key: the ops are
+    -- something different ('contentKey' hashes numbers into one). If the key,
+    -- size, interaction state and metrics are unchanged, the frame skips
+    -- rebuilding the ops and repainting. The default 0 means no key: ops are
     -- rebuilt and compared every frame. A stale key draws stale pixels, so
-    -- derive it from everything the drawing reads: it is believed even while
-    -- the widget animates.
+    -- derive it from everything the drawing reads. The key is trusted even
+    -- while the widget animates.
   , widgetCursor     :: !(Maybe (CustomDrawContext -> Rect -> V2 -> UiCursorKind))
-    -- ^ The pointer's shape over the widget, from its draw context, its rect
-    -- and where the pointer is, so parts of the widget can show different
-    -- shapes. It is asked while the pointer is on the widget, and while a
-    -- drag that went down on it goes on elsewhere, so a drag keeps its
-    -- shape. 'UiCursorDefault' is no opinion: the 'NanoUI.withCursorShape'
-    -- around the widget picks, or the arrow shows.
+    -- ^ Pointer shape over the widget, given the draw context, the widget's
+    -- rect and the pointer position, so different parts can show different
+    -- shapes. It is also queried during a drag that started on the widget,
+    -- so the drag keeps its shape. 'UiCursorDefault' defers to an enclosing
+    -- 'NanoUI.withCursorShape', or the arrow.
     --
     -- > widgetCursor = Just $ \_ (Rect x _ w _) (V2 px _) ->
     -- >   if px > x + w - 6 then UiCursorEwResize else UiCursorDefault
   , widgetFocusable  :: !Bool
     -- ^ Whether this widget accepts tab/keyboard focus.
   , widgetKeys       :: !KeyClaim
-    -- ^ The keys the widget acts on itself while it has the keyboard, which
-    -- shortcuts and 'NanoUI.keyPressed' then leave to it: by default
-    -- ('KeysNavigate') Enter, Space and the arrows, each alone or with
-    -- Shift. A terminal or an editor with chords of its own takes
-    -- 'KeysAll'.
+    -- ^ Keys the widget handles itself while focused; shortcuts and
+    -- 'NanoUI.keyPressed' ignore them. Default 'KeysNavigate'. A terminal or
+    -- an editor with its own chords uses 'KeysAll'.
   , widgetDamageSlop :: !Float
     -- ^ Padding added to dirty rectangles (for shadows, glow, or drag handles).
   , widgetTrackPointer :: !Bool
-    -- ^ Run a frame for every pointer move over the widget, for one that
-    -- draws what is under the pointer inside itself (default 'False': only
-    -- moves onto another widget run a frame).
+    -- ^ Run a frame on every pointer move over the widget, for drawings that
+    -- depend on the pointer position. Default 'False': a move runs a frame
+    -- only when it crosses onto another widget.
   , widgetInteract   :: !(Response -> CustomDrawContext -> Input -> (Response, a))
-    -- ^ Interaction hook: from the resolved 'Response', the draw context and
-    -- the input, the final response and value.
+    -- ^ Interaction hook: maps the resolved 'Response', draw context and
+    -- input to the final response and value.
   }
 
 -- | Default configuration for a custom widget with standard hover/press/click behavior.
@@ -188,9 +183,8 @@ fixedSizeSpec f w h =
 contentKey :: [Float] -> Int
 contentKey vs = contentKeyOf [KeyPart (fromIntegral (castFloatToWord32 v)) | v <- vs]
 
--- | A 'widgetContent' key over values of any 'Hashable' types, mixed in
--- order; an 'Int' or a 'Double' is hashed whole where 'contentKey' would
--- round it to a 'Float'.
+-- | A 'widgetContent' key over 'Hashable' values, mixed in order. Unlike
+-- 'contentKey', an 'Int' or 'Double' is hashed whole, not rounded to 'Float'.
 --
 -- > widgetContent = contentKeyOf [keyPart version, keyPart scrollY, keyPart query, keyPart selected]
 {-# INLINE contentKeyOf #-}
@@ -235,32 +229,26 @@ customWidget spec = do
   wid <- nextId
   customWidgetWithId wid spec
 
--- | Draw into a rectangle sized by the layout modifier, curves flattened
--- for the display it is on ('runCanvasFor'). Its ops are rebuilt and
--- compared every frame; 'canvasConfigured' takes a content key that saves
--- that, and a cursor.
+-- | Draw into a rectangle sized by the layout modifier. Curves are flattened
+-- for the current display ('runCanvasFor'). Ops are rebuilt and compared
+-- every frame; use 'canvasConfigured' for a content key or a cursor.
 canvas :: (Ui :> es) => (Layout -> Layout) -> (Rect -> CanvasM ()) -> Eff es Response
 canvas f = canvasConfigured defaultCanvasConfig {canvasLayout = f defaultLayout}
 
--- | What 'canvasConfigured' draws with besides its drawing.
+-- | Options for 'canvasConfigured'.
 data CanvasConfig = CanvasConfig
   { canvasLayout :: !Layout
-    -- ^ Its size and place, as a custom widget's 'widgetLayout' (default
-    -- 'defaultLayout').
+    -- ^ As 'widgetLayout' (default 'defaultLayout').
   , canvasContent :: !Int
-    -- ^ A content key, as 'widgetContent': a number that changes whenever
-    -- the drawing would draw something different, made with 'contentKey'
-    -- or 'contentKeyOf' (default 0, no key: the drawing runs every frame).
+    -- ^ As 'widgetContent'; build it with 'contentKey' or 'contentKeyOf'.
+    -- Default 0 (no key): the drawing runs every frame.
   , canvasTrackPointer :: !Bool
-    -- ^ A frame for every pointer move over it, for a drawing of what is
-    -- under the pointer ('widgetTrackPointer'; default 'False').
+    -- ^ As 'widgetTrackPointer' (default 'False').
   , canvasCursor :: !(Maybe (CustomDrawContext -> Rect -> V2 -> UiCursorKind))
-    -- ^ The pointer's shape over it, from its rect and the pointer
-    -- ('widgetCursor'; default 'Nothing').
+    -- ^ As 'widgetCursor' (default 'Nothing').
   }
 
--- | A canvas laid out by 'defaultLayout', with no content key, cursor or
--- pointer tracking.
+-- | 'defaultLayout', with no content key, cursor or pointer tracking.
 defaultCanvasConfig :: CanvasConfig
 defaultCanvasConfig =
   CanvasConfig
@@ -270,8 +258,8 @@ defaultCanvasConfig =
     , canvasCursor = Nothing
     }
 
--- | 'canvas' as a 'CanvasConfig' says. The drawing reads its hover and
--- press state and theme with 'drawContext':
+-- | 'canvas' with a 'CanvasConfig'. The drawing reads hover, press state and
+-- theme with 'drawContext':
 --
 -- > canvasConfigured defaultCanvasConfig {canvasLayout = fixedWH 120 24 defaultLayout, canvasContent = contentKey [level]} $ \r -> do
 -- >   cdc <- drawContext
@@ -301,12 +289,12 @@ data Drag2D = Drag2D
   }
   deriving (Eq, Show)
 
--- | A drag of the left button that starts with a press on the widget, and
--- lasts until the button comes up wherever the pointer goes, for a colour
--- picker, a joystick or a panned canvas. The position is clamped to the
--- widget's rect. The press is the widget's own ('respPressed'), so a press
--- on something drawn over it, or on the part a scroller has clipped off, or
--- on it disabled, starts nothing. Call it every frame, after the widget:
+-- | A left-button drag that starts with a press on the widget and lasts
+-- until release, wherever the pointer goes. For colour pickers, joysticks or
+-- panned canvases. The position is clamped to the widget's rect. Only the
+-- widget's own press ('respPressed') starts a drag, so nothing starts when
+-- the press lands on an overlay, a scrolled-off part, or a disabled widget.
+-- Call it every frame, after the widget:
 --
 -- > (resp, ()) <- customWidget spec
 -- > drag <- useDrag2DOn resp
@@ -314,20 +302,20 @@ data Drag2D = Drag2D
 useDrag2DOn :: (Ui :> es, HasResponse r) => r -> Eff es Drag2D
 useDrag2DOn r = drag2DFrom (respRect r) (respPressed r)
 
--- | 'useDrag2DOn' over a rect: the drag starts with a press anywhere in it,
--- whatever is drawn there.
+-- | 'useDrag2DOn' over a rect: a press anywhere in it starts the drag, even
+-- on something drawn over it.
 useDrag2D :: (Ui :> es) => Rect -> Eff es Drag2D
 useDrag2D bounds = drag2DFrom bounds . rectContains bounds . inputMousePos =<< askInput
 {-# DEPRECATED useDrag2D "Use useDrag2DOn with the widget's Response, which respects what is drawn over it" #-}
 
--- | A drag of the left button that started before, or starts with a press
--- this frame where @onIt@, clamped to @bounds@.
+-- | A left-button drag already under way, or starting with a press this
+-- frame when @onIt@; the position is clamped to @bounds@.
 drag2DFrom :: (Ui :> es) => Rect -> Bool -> Eff es Drag2D
 drag2DFrom bounds onIt = do
   (wid, ctx) <- freshWidget
   inp <- askInput
-  -- The drag flag is quiet bookkeeping; the last pointer position is a point
-  -- slot.
+  -- The drag flag is quiet bookkeeping (it causes no damage); the last
+  -- pointer position goes in a point slot.
   let dragK = slotKey SlotDrag (intKey wid)
       mouse = inputMousePos inp
   store <- uiIO (getStore ctx)
@@ -345,18 +333,17 @@ drag2DFrom bounds onIt = do
         . (if active then insertSlot fieldPoint dragK (v2X mouse, v2Y mouse) else deleteSlot fieldPoint dragK)
   pure Drag2D { dragPosition = clampedMouse, dragActive = active, dragDelta = delta }
 
--- | This frame's wheel turn while the pointer is on the widget
--- ('respHovered'): not where something is drawn over it, nor where a
--- scroller has clipped it off, nor while it is disabled.
+-- | This frame's wheel delta while the widget is hovered ('respHovered').
+-- Overlays, scrolled-off parts and a disabled widget get none.
 useWheelDeltaOn :: (Ui :> es, HasResponse r) => r -> Eff es (Float, Float)
 useWheelDeltaOn r = wheelIf (respHovered r)
 
--- | 'useWheelDeltaOn' over a rect: the wheel wherever the pointer is in it.
+-- | 'useWheelDeltaOn' over a rect, regardless of what is drawn over it.
 useWheelDelta :: (Ui :> es) => Rect -> Eff es (Float, Float)
 useWheelDelta bounds = wheelIf . rectContains bounds . inputMousePos =<< askInput
 {-# DEPRECATED useWheelDelta "Use useWheelDeltaOn with the widget's Response, which respects what is drawn over it" #-}
 
--- | This frame's wheel turn when @on@, else none.
+-- | This frame's wheel delta when @on@, else zero.
 wheelIf :: (Ui :> es) => Bool -> Eff es (Float, Float)
 wheelIf on = do
   V2 x y <- inputScroll <$> askInput
@@ -385,7 +372,7 @@ knobWith' ::
   -> Eff es (Response, Float)
 knobWith' f diameter minV maxV value = do
   (wid, ctx) <- freshWidget
-  -- NaN would be adopted afresh, dirtying the frame, every frame.
+  -- NaN never equals itself, so it would be re-adopted, dirtying every frame.
   current <- uiIO $ adoptSlot fieldFloat ctx wid (if isNaN value then minV else value)
   let
     range = maxV - minV
@@ -481,7 +468,7 @@ circularProgressWith' f diameter frac =
     }
 
 -- | An indeterminate loading indicator, 18 px across: an accent arc turning
--- over a faint ring. It keeps frames coming while on screen.
+-- over a faint ring. It keeps the frame loop running while on screen.
 {-# INLINE spinner #-}
 spinner :: Ui :> es => Eff es ()
 spinner = void (spinnerWith' id 18)

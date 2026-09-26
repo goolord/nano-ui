@@ -44,8 +44,8 @@ import SdlDemo (demoUi)
 selftest :: Bool -> IO ()
 selftest continuous = do
   withHiddenWindow 1280 800 (V2 640 400) (\o -> o {sdlAppContinuous = continuous}) $ \ctx env idle -> do
-    -- The shaped path (fmShape / pushText) must measure runs as SDL3_ttf
-    -- does, GPOS kerning and ligatures included, for pairs like To, AV and fi.
+    -- The shaped path (fmShape / pushText) must match SDL3_ttf's run widths,
+    -- including GPOS kerning and ligatures (To, AV, fi).
     let checkRun :: Float -> FontStyle -> String -> IO ()
         checkRun size st run = do
           (fm, _) <- ctxResolveFont ctx size WeightNormal st FontRegular
@@ -77,7 +77,7 @@ selftest continuous = do
         dragPos = Harness.dragPos drawOnce base
         clickTab = Harness.clickTab collectTextSpans drawOnce ctx' base
         pressKey k = mapM_ drawOnce [Harness.keyInp k base, base]
-        -- The frame's text spans, failing with @msg@ unless one holds @needle@.
+        -- The frame's text spans; fails with @msg@ unless one contains @needle@.
         spansWith msg needle = do
           spans <- collectTextSpans ctx'
           spans <$ expectText msg needle spans
@@ -113,11 +113,10 @@ selftest continuous = do
     for_ [20, 60, 100, 140, 180, 50, 120, -60, -100, 0 :: Float] $ \dx ->
       dragPos sizeSpan (V2 (v2X sizeSpan + dx) (v2Y sizeSpan))
     expect "selftest: typography missing after size changes" "Live Playground"
-    -- The Graphics tab decodes its GIF with useTask, on a thread of its own,
-    -- and shows it on a frame after the job is done. The GIF is below the
-    -- fold, under the image gallery and viewer, so each wait turns the wheel
-    -- a notch over the tab's right side, clear of the viewer, which takes
-    -- the wheel itself. The tab goes back to its top afterwards.
+    -- The Graphics tab decodes its GIF in a useTask worker and shows it a
+    -- frame later. The GIF is below the fold, so each wait scrolls a notch
+    -- over the tab's right side, away from the image viewer (which consumes
+    -- wheel events). The tab is scrolled back to the top afterwards.
     clickTab "Graphics"
     let wheelAt notches = base {inputMousePos = V2 1100 400, inputScroll = V2 0 notches}
         awaitGif :: Int -> IO ()
@@ -147,8 +146,7 @@ selftest continuous = do
             ]
         paneCount = length . titles
         titleCenter = Harness.spanCenter . fst
-        -- Click the button labelled @name@ in @spans@, and return the spans
-        -- after it.
+        -- Click the button labelled @name@ and return the resulting spans.
         press name spans = do
           clickPos =<< requireSpan ("selftest: button " <> T.unpack name) (findExact name spans)
           collectTextSpans ctx'
@@ -215,8 +213,8 @@ selftest continuous = do
     spansTheme <- spansWith "selftest: radio did not pick Tomorrow Light" "Tomorrow Light"
     th <- getTheme ctx'
     unless (th == tomorrowMinLightTheme) $ fail "selftest: context theme was not updated to Tomorrow Light"
-    -- Following the system gives the default theme in light or dark, as SDL
-    -- reports the desktop.
+    -- "Follow system" picks the light or dark default theme per SDL's
+    -- reported desktop appearance.
     systemOpt <- requireSpan "selftest: Follow system option" (findExact "Follow system" spansTheme)
     clickPos systemOpt
     appearance <- getSystemAppearance ctx'

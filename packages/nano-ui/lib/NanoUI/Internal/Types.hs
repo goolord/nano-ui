@@ -129,7 +129,7 @@ clamp lo hi x = max lo (min hi x)
 clamp01 :: Float -> Float
 clamp01 x = clamp 0 1 x
 
--- | A number: neither NaN nor infinite.
+-- | Neither NaN nor infinite.
 {-# INLINE finite #-}
 finite :: Float -> Bool
 finite v = not (isNaN v || isInfinite v)
@@ -408,10 +408,9 @@ data PopupPlacement
   | PlacementRight
   | PlacementLeft
   | PlacementAtCursor
-  -- ^ For a tooltip ('NanoUI.tooltipPlacement'), just below the pointer,
-  -- following it as it moves. For a popup or a context menu, at the anchor
-  -- point itself, its top-left corner there, where the menu opens at the
-  -- pointer of the click that opened it and stays.
+  -- ^ For a tooltip ('NanoUI.tooltipPlacement'): just below the pointer,
+  -- following it. For a popup or context menu: top-left corner at the
+  -- anchor point, so a menu opens where it was clicked and stays there.
   | PlacementAuto
   deriving (Eq, Show)
 

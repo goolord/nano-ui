@@ -1,5 +1,4 @@
--- | Paths, transforms and the ways to paint them, for canvas drawing and
--- for qualified import:
+-- | Paths, transforms and paints for canvas drawing. Import qualified:
 --
 -- > import NanoUI.Path qualified as P
 -- >
@@ -16,28 +15,30 @@
 -- >       (P.rect (Rect (x + 10) (y + 10) 40 40))
 -- >       (P.Linear (V2 x y) (V2 (x + 60) y) [(0, colorRGBA 30 30 30 255), (1, colorRGBA 60 120 220 255)])
 --
--- A 'Path' is a list of steps joined with '<>'. 'moveTo' starts a subpath;
--- 'lineTo', 'quadTo', 'cubicTo', 'arc' and 'arcTo' extend it from its
--- current point, and 'close' runs a line back to its start. A step with no
--- subpath open starts one where the last one closed, or at the origin. The
--- shapes ('rect', 'roundedRect', 'circle', 'ellipse', 'polygon', 'polyline')
--- are subpaths of their own, so they join onto nothing before them.
+-- A 'Path' is a sequence of steps joined with '<>'. 'moveTo' starts a
+-- subpath; 'lineTo', 'quadTo', 'cubicTo', 'arc' and 'arcTo' extend it from
+-- the current point; 'close' draws a line back to its start. A step with no
+-- open subpath starts one where the last subpath closed, or at the origin.
+-- Shapes ('rect', 'roundedRect', 'circle', 'ellipse', 'polygon', 'polyline')
+-- are separate subpaths and never join onto what precedes them.
 --
--- Angles are in radians, and with y pointing down a positive angle turns
--- clockwise on screen.
+-- Angles are in radians. Since y points down, positive angles turn clockwise
+-- on screen.
 --
 -- 'NanoUI.Widgets.Custom.drawPath' and 'NanoUI.Widgets.Custom.drawPathWith'
--- fill a path, and 'NanoUI.Widgets.Custom.drawStrokePath' and
--- 'NanoUI.Widgets.Custom.drawStrokePathWith' stroke it, flattening its
--- curves to within a quarter of a device pixel. A fill closes every subpath
--- and fills what its 'FillRule' says is inside: a subpath inside another is
--- a hole in it where the rule leaves it unfilled, as the inner circle of a
--- ring drawn with 'EvenOdd', or with 'NonZero' and the two circles going
--- opposite ways. Subpaths that cross each other each fill on their own, and
--- one that crosses itself (a pentagram drawn in one line) may fill only in
--- part: a fill does not work out where paths cross. A stroke is centred on
--- its path, as 'Stroke' says: its width, how its ends are capped, how its
--- corners join, and its dashes.
+-- fill a path; 'NanoUI.Widgets.Custom.drawStrokePath' and
+-- 'NanoUI.Widgets.Custom.drawStrokePathWith' stroke it. Curves are flattened
+-- to within a quarter of a device pixel.
+--
+-- A fill closes every subpath and fills the inside given by its 'FillRule'.
+-- A nested subpath is a hole when the rule leaves it unfilled: with
+-- 'EvenOdd', or with 'NonZero' when the two subpaths wind in opposite
+-- directions. Intersections are not resolved: crossing subpaths fill
+-- independently, and a self-intersecting one (a pentagram in one line) may
+-- fill only partly.
+--
+-- A stroke is centred on its path; 'Stroke' sets its width, caps, joins and
+-- dashes.
 module NanoUI.Path
   ( -- * Paths
     Path

@@ -24,7 +24,7 @@ selftest = do
       let drawFrame inp = void (sdlDrawFrame ctx (logsApp appStateRef) env inp False)
           click = clickPos drawFrame baseInput
           append n = readIORef appStateRef >>= (`appendEntries` n) >>= writeIORef appStateRef
-          -- The frame's text spans, failing with @msg@ unless one holds @needle@.
+          -- The frame's text spans; fails with @msg@ unless one contains @needle@.
           spansWith msg needle = do
             spans <- collectTextSpans ctx
             spans <$ expectText msg needle spans

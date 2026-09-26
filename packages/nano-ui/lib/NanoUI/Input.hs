@@ -1,7 +1,7 @@
 -- | The per-frame 'Input' record backends fill in and views read: pointer
 -- state, keys and modifiers, typed characters, scroll, window size, file
--- drops and an input method's composition, with the cursor kinds a widget
--- can ask for.
+-- drops and input-method composition, plus the cursor kinds a widget can
+-- request.
 module NanoUI.Input
   ( -- * Input
     Input (..)

@@ -78,12 +78,12 @@ finishInput field ctx wid original resp value = do
     recordSlot field ctx (intKey wid) value
   pure (setChanged (value /= original) resp, value)
 
--- | What widget @key@ derived and kept in 'ctxDerivedCache', if it is there.
+-- | The value widget @key@ cached in 'ctxDerivedCache', if present.
 readDerived :: Typeable a => Context -> Int -> IO (Maybe a)
 readDerived ctx key = (IM.lookup key >=> fromDynamic) <$> readIORef (ctxDerivedCache ctx)
 
--- | Keep what widget @key@ derived. Entries of widgets no longer built
--- linger, so a cache grown past a few dozen entries starts over.
+-- | Cache a value derived by widget @key@. Entries of widgets no longer
+-- built are never removed one by one, so a full cache is cleared instead.
 writeDerived :: Typeable a => Context -> Int -> a -> IO ()
 writeDerived ctx key v = modifyIORef' (ctxDerivedCache ctx) $ \cache ->
   IM.insert key (toDyn v) (if IM.size cache >= 64 then IM.empty else cache)

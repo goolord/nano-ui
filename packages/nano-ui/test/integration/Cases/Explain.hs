@@ -22,7 +22,7 @@ tests =
 inp :: Input
 inp = withInputOff 480 360
 
--- | Every node's rect and depth in its layer: 0 at the page's root and each floating panel.
+-- | Every node's rect and depth within its layer; the page root and each floating panel are depth 0.
 layerDepths :: Context -> IO [(Rect, Int)]
 layerDepths ctx = do
   let na = ctxNodeArena ctx
@@ -41,19 +41,19 @@ depthColor theme depth = themeSeries theme !! (depth `rem` length (themeSeries t
 edge :: Theme -> Int -> Rect -> (Rect, Color)
 edge theme d (Rect x y w _) = (Rect x y w 1, depthColor theme d)
 
--- | Whether two quads match, give or take float rounding in the decoded vertices.
+-- | Quad equality, tolerating float rounding in the decoded vertices.
 sameQuad :: (Rect, Color) -> (Rect, Color) -> Bool
 sameQuad (Rect x y w h, c) (Rect x' y' w' h', c') =
   c == c' && all ((< 0.01) . abs) [x - x', y - y', w - w', h - h']
 
--- | Where in the draw order a quad like this was drawn first.
+-- | Draw-order index of the first quad matching this one.
 drawnIndex :: [(Rect, Color)] -> (Rect, Color) -> Maybe Int
 drawnIndex quads q = findIndex (sameQuad q) quads
 
 drawnAt :: [(Rect, Color)] -> (Rect, Color) -> Bool
 drawnAt quads = isJust . drawnIndex quads
 
--- | Where a floating window's background was drawn first.
+-- | Draw-order index of the first floating-window background quad.
 windowFill :: Theme -> [(Rect, Color)] -> Maybe Int
 windowFill theme = findIndex ((== styleBg (themeFloatingWindow theme)) . snd)
 
@@ -61,14 +61,14 @@ windowFill theme = findIndex ((== styleBg (themeFloatingWindow theme)) . snd)
 outlining :: Context -> IO Theme
 outlining ctx = setDrawSquareGeometry ctx True >> setExplainLayout ctx True >> getTheme ctx
 
--- | The second of two frames: the view's result and the quads it drew.
+-- | Run two frames; return the second frame's result and quads.
 quadsOf :: Context -> Input -> NanoUI a -> IO (a, [(Rect, Color)])
 quadsOf ctx i ui = warmupDraw ctx i ui >>= traverse drawQuads
 
 damageOf :: Context -> Input -> NanoUI a -> IO Damage
 damageOf ctx i ui = runFrame ctx i ui >> takeDamage ctx
 
--- | The overlay outlines every node in its depth's colour, changing no layout or hit test.
+-- | The overlay outlines every node in its depth's colour without changing layout or hit testing.
 runExplainOutlinesTest :: Context -> IORef Int -> IO ()
 runExplainOutlinesTest ctx failed = do
   setDrawSquareGeometry ctx True
@@ -89,14 +89,14 @@ runExplainOutlinesTest ctx failed = do
   (_, quadsOffAgain) <- quadsOf ctx inp ui
   assert failed (not (any (drawnAt quadsOffAgain) edges))
 
--- | An outline is cut to the clip its node paints in.
+-- | Outlines are clipped like the node they outline.
 runExplainClipTest :: Context -> IORef Int -> IO ()
 runExplainClipTest ctx failed = do
   theme <- outlining ctx
   (_, quads) <- quadsOf ctx inp . columnWith (padAll 10) $
     scrollArea (fixedWH 120 50) (column (replicateM_ 10 (labelWith (fixedWH 80 20) "row")))
   nodes <- layerDepths ctx
-  -- The rows are the deepest nodes, and nothing else is as deep.
+  -- The rows, and only the rows, are at the deepest level.
   let rowDepth = maximum (map snd nodes)
       rows = [r | (r, d) <- nodes, d == rowDepth]
       rowEdge = edge theme rowDepth
@@ -107,7 +107,7 @@ runExplainClipTest ctx failed = do
     assert failed (any (drawnAt quads . rowEdge) (take 1 rows))
     assert failed (all (covers scroller) [r | (r, c) <- quads, c == depthColor theme rowDepth])
 
--- | Toggling the overlay, from outside the view or inside, repaints everything; re-setting, nothing.
+-- | Toggling the overlay (from outside or inside the view) repaints everything; re-setting it repaints nothing.
 runExplainToggleDamageTest :: Context -> IORef Int -> IO ()
 runExplainToggleDamageTest ctx failed = do
   writeIORef (ctxPaintFull ctx) False
@@ -127,7 +127,7 @@ runExplainToggleDamageTest ctx failed = do
   evalUi ctx inp (explainLayout True >> explainingLayout <* ui) >>= assert failed
   takeDamage ctx >>= assertEq failed DamageFull
 
--- | An outlined column, which has no id for a rect diff, repaints where its outline was and is.
+-- | A column without an id (so no rect diff) repaints its old and new outline.
 runExplainMovedNodeDamageTest :: Context -> IORef Int -> IO ()
 runExplainMovedNodeDamageTest ctx failed = do
   writeIORef (ctxPaintFull ctx) False
@@ -144,7 +144,7 @@ runExplainMovedNodeDamageTest ctx failed = do
   assertEq failed (1, 1) (length before, length after)
   assert failed (all (clipCovers dmg) (before ++ after))
 
--- | The node under the pointer is tinted and reported; only a move to another node repaints.
+-- | The node under the pointer is tinted and reported; only moving to another node repaints.
 runExplainHoverTest :: Context -> IORef Int -> IO ()
 runExplainHoverTest ctx failed = do
   setDrawSquareGeometry ctx True
@@ -157,7 +157,7 @@ runExplainHoverTest ctx failed = do
       overB = inp {inputMousePos = centerOf b}
       tint = depthColor theme 1
       Rect ax ay aw _ = respRect a
-  -- Labels take no hover, so with the overlay off a move between them needs no frame.
+  -- Labels ignore hover, so with the overlay off moving between them needs no frame.
   needsRedraw ctx overA overB >>= assert failed . not
   setExplainLayout ctx True
   _ <- warmup2 ctx inp ui
@@ -168,7 +168,7 @@ runExplainHoverTest ctx failed = do
   assert failed (again && drawnAt quads (respRect a, colorRGBA (colorR tint) (colorG tint) (colorB tint) 0x40))
   assertJustM failed (getExplainedNode ctx) $ \node -> do
     assertEq failed (respRect a, "Text", 1) (explainedRect node, explainedKind node, explainedDepth node)
-    -- The content box, inside the label's padding, is outlined over the tint.
+    -- The content box (inside the label's padding) is outlined over the tint.
     let Padding l r t _ = explainedPadding node
     assert failed (l > 0 && t > 0 && drawnAt quads (Rect (ax + l) (ay + t) (aw - l - r) 1, tint))
   evalUi ctx overA (explainedNode <* ui) >>= assertEq failed (Just (respRect a)) . fmap explainedRect
@@ -184,7 +184,7 @@ runExplainHoverTest ctx failed = do
   assert failed (againB && clipCovers dmg (respRect a) && clipCovers dmg (respRect b))
   assertJustM failed (getExplainedNode ctx) $ assertEq failed (respRect b) . explainedRect
 
--- | A window's outlines are drawn over it, after the page's, and its nodes' depths count from it.
+-- | A window's outlines draw over it, after the page's, and its node depths restart from its root.
 runExplainWindowLayerTest :: Context -> IORef Int -> IO ()
 runExplainWindowLayerTest ctx failed = do
   theme <- outlining ctx
@@ -200,14 +200,14 @@ runExplainWindowLayerTest ctx failed = do
         \(p, w, i) -> assert failed (p < w && w < i)
       assertJustM failed (getExplainedNode ctx) $ \node ->
         assertEq failed (respRect inner, depth) (explainedRect node, explainedDepth node)
-  -- A view that is one window has no page: node 0 is the window's root, outlined once over it.
+  -- A view that is only a window has no page: node 0 is the window root, outlined once over its fill.
   (_, quads) <- quadsOf ctx inp (window True "Win" (labelWith' (fixedWH 60 20) "inside"))
   assertJustM failed (listToMaybe <$> layerDepths ctx) $ \(r, depth) -> do
     let e = edge theme depth r
     assertEq failed (0, 1) (depth, length (filter (sameQuad e) quads))
     assertJust failed ((,) <$> windowFill theme quads <*> drawnIndex quads e) $ \(f, i) -> assert failed (f < i)
 
--- | Pinned nodes are outlined, the one drawn on top is explained, and containers are named.
+-- | Pinned nodes are outlined, the topmost node is explained, and containers are named.
 runExplainLayersAndPinTest :: Context -> IORef Int -> IO ()
 runExplainLayersAndPinTest ctx failed = do
   theme <- outlining ctx
@@ -219,10 +219,10 @@ runExplainLayersAndPinTest ctx failed = do
       farCorner r = let Rect x y w h = respRect r in V2 (x + w - 5) (y + h - 5)
   (rs, quads) <- quadsOf ctx inp ui
   assert failed (any (drawnAt quads . edge theme 1 . respRect) (take 1 rs))
-  -- The pinned area, the one it covers, the upper and lower layers.
+  -- The pinned area, the area it covers, and the upper and lower layers.
   forM_ (zip rs [centerOf, farCorner, farCorner, centerOf]) $ \(r, at) ->
     explainedAt (void ui) (at r) >>= assertEq failed (Just (respRect r)) . fmap explainedRect
-  -- In the padding of layers and of a wrapping row, the container itself.
+  -- Pointing into a container's padding explains the container.
   let square = void (area (fixedWH 10 10))
       kinds = columnWith (tight . gap 0) $ do
         layersWith (padAll 20 . fixedWH 200 100) square
@@ -232,9 +232,9 @@ runExplainLayersAndPinTest ctx failed = do
   forM_ [(80, "Container, layered"), (180, "Container, row, wrap"), (280, "Container, column")] $ \(y, kind) ->
     explainedAt kinds (V2 150 y) >>= assertEq failed (Just kind) . fmap explainedKind
 
--- | The explained node says what its layout asked for: its widget's id, its
--- sizing with limits, gap, direction and flow, where it is pinned and how it
--- takes the pointer; a container without an id has none.
+-- | The explained node reports its layout request: widget id, sizing and
+-- limits, gap, direction, flow, pin and pointer mode. A container without an
+-- id reports no widget id.
 runExplainNodeFieldsTest :: Context -> IORef Int -> IO ()
 runExplainNodeFieldsTest ctx failed = do
   _ <- outlining ctx
@@ -249,7 +249,7 @@ runExplainNodeFieldsTest ctx failed = do
       failed
       (Just (respId pinned), Grow 1, Fixed 30, V2 0 0, V2 120 1e9, Just (V2 10 50), PointerBlock, Line)
       (explainedWidget node, explainedWidth node, explainedHeight node, explainedMin node, explainedMax node, explainedPin node, explainedPointer node, explainedFlow node)
-  -- The wrapping row, in its padding beside the chip.
+  -- The wrapping row, hit in its padding beside the chip.
   let Rect cx cy _ ch = respRect chip
   assertJustM failed (explainedAt (V2 (cx - 1) (cy + ch / 2))) $ \node ->
     assertEq
@@ -257,9 +257,9 @@ runExplainNodeFieldsTest ctx failed = do
       (Nothing, Fixed 300, Fit, V2 300 40, 6, Row, Wrap, Nothing, PointerAuto)
       (explainedWidget node, explainedWidth node, explainedHeight node, explainedMin node, explainedGap node, explainedDirection node, explainedFlow node, explainedPin node, explainedPointer node)
 
--- | 'explainScope' narrows the overlay to what its body adds: those nodes
--- are outlined and explained, the rest are not, and a view without a scope
--- shows every node again. With the overlay off it records nothing.
+-- | 'explainScope' limits outlining and explaining to its body's nodes;
+-- without a scope every node shows again. With the overlay off it records
+-- nothing.
 runExplainScopeTest :: Context -> IORef Int -> IO ()
 runExplainScopeTest ctx failed = do
   theme <- outlining ctx
@@ -272,7 +272,7 @@ runExplainScopeTest ctx failed = do
   ((outside, a, b), quads) <- quadsOf ctx inp (ui True)
   mapM (outlined quads . respRect) [a, b] >>= assertEq failed [True, True]
   outlined quads (respRect outside) >>= assert failed . not
-  -- Nor is the root column.
+  -- The root column is not outlined either.
   assertJustM failed (listToMaybe <$> arenaRects ctx) $ \root -> outlined quads root >>= assert failed . not
   getExplainedNode ctx >>= assert failed . isNothing
   runFrame ctx inp {inputMousePos = centerOf outside} (ui True) >> getExplainedNode ctx >>= assert failed . isNothing

@@ -90,17 +90,16 @@ drawFrameWith ctx env inp forceFull evaluateUi = do
       then pure (nullPtr, False)
       else ensureRetain env pw ph scale
   let presentFull = forceFull || retainNew || sdlContinuous env || inputWindowRedraw inp
-      -- A transparent window paints whatever changes in full. A clip
-      -- frame's backdrop is blended over the pixels it repaints, and over a
-      -- translucent window colour the old pixels would show through it.
+      -- A transparent window repaints in full on any change: a clip frame
+      -- blends its backdrop over the old pixels, which would show through a
+      -- translucent window colour.
       transparent = isJust (sdlTransparent env)
   writeIORef (ctxPaintFull ctx) (presentFull || transparent)
   t0 <- getMonotonicTime
   (drawData, dirtyAfterUi) <- evaluateUi
   t1 <- getMonotonicTime
-  -- Tell SDL's text input where the focus and the caret went. One frame
-  -- missed would look to the next like a focus moved while composing, and
-  -- drop the composition.
+  -- Sync SDL text input with the focus and caret every frame. A skipped
+  -- frame would look like a focus change mid-composition and drop it.
   zoom <- windowZoom env
   _ <- syncTextInput (sdlTextInput env) (sdlWindow env) zoom ctx inp
   dmg0 <- takeDamage ctx
@@ -128,7 +127,7 @@ drawFrameWith ctx env inp forceFull evaluateUi = do
       noteDebugSkip (sdlDebug env)
       -- With nothing to repaint, the retained frame on screen is this one.
       -- A dropped frame's screenshots wait for the next frame, which the
-      -- reset asked for.
+      -- reset requested.
       when (not atlasReset && damageIsEmpty damage && tex /= nullPtr) $
         answerScreenshots ctx (captureFrame env tex)
       pure (atlasReset || dirtyAfterUi)
@@ -139,9 +138,8 @@ drawFrameWith ctx env inp forceFull evaluateUi = do
       unless (okBegin && okScale) $ fail "SDL_SetRenderTarget/Scale failed"
       theme <- readIORef (ctxTheme ctx)
       glyphTex <- glyphAtlasTextures (sdlFontCache env)
-      -- A transparent window draws the atlases' textures with its own blend
-      -- mode. Both atlases can make a texture during the UI pass, so this is
-      -- set after it.
+      -- A transparent window draws atlas textures with its own blend mode.
+      -- Set it after the UI pass, which can create atlas textures.
       for_ (sdlTransparent env) $ \(blend, _) -> do
         imageTex <- SdlImage.lookupImage (sdlImages env) atlasTextureId
         for_ (imageTex : map glyphTex [0 .. glyphAtlasPages - 1]) $ \t ->
@@ -181,8 +179,8 @@ drawFrameWith ctx env inp forceFull evaluateUi = do
               renderTexture ren tex (PtrConst.unsafeFromPtr srcP) (PtrConst.unsafeFromPtr nullPtr)
             pure (okTarget && okClip && okCopy)
       unless okBlit $ fail "SDL window presentation preparation failed"
-      -- The window backbuffer is undefined once presented, so a frame drawn
-      -- straight to it is read for screenshots before.
+      -- The backbuffer is undefined after present, so capture a frame drawn
+      -- straight to it before presenting.
       when (tex == nullPtr) $ answerScreenshots ctx (captureFrame env tex)
       void $ renderPresentSafe ren
       t3 <- getMonotonicTime

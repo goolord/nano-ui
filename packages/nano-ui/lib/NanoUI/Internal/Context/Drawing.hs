@@ -67,16 +67,16 @@ lookupPopupConfig ctx wid =
   fmap (\(PopupConfig anchor placement offset) -> (anchor, placement, offset))
     <$> lookupIn dcsPopupConfigs ctx wid
 
--- | Ask for a frame when the pointer comes onto @rect@ or leaves it, for this
--- pass: a tooltip's target, which can be a label or a container that the
--- hover probe does not find. A @tracked@ rect asks for one on every move over
--- it too: the target of an open tooltip that follows the pointer.
+-- | Request a frame when the pointer enters or leaves @rect@ this pass. Used
+-- for tooltip targets, which may be labels or containers the hover probe
+-- does not find. A @tracked@ rect also requests one on every move over it,
+-- for an open tooltip that follows the pointer.
 registerHoverZone :: Context -> Bool -> Rect -> IO ()
 registerHoverZone ctx tracked rect =
   modifyIORef' (ctxDrawingCache ctx) $ \dc -> dc {dcsHoverZones = HoverZone rect tracked : dcsHoverZones dc}
 
--- | Whether the pointer moving from @from@ to @to@ comes onto or leaves a
--- rect registered this pass, or moves over a tracked one ('registerHoverZone').
+-- | Whether a pointer move from @from@ to @to@ enters or leaves a rect
+-- registered this pass, or moves over a tracked one ('registerHoverZone').
 hoverZoneCrossed :: Context -> V2 -> V2 -> IO Bool
 hoverZoneCrossed ctx from to =
   any crossed . dcsHoverZones <$> readIORef (ctxDrawingCache ctx)

@@ -192,7 +192,7 @@ green = colorRGBA 163 190 140 255
 status :: Color -> Text -> NanoUI ()
 status c = labelWith (fontMono . fontBold . fontColor c . tight)
 
--- | A panel in its own background and border colours.
+-- | A panel with custom background and border colours.
 tintedPanel :: Color -> Color -> (Layout -> Layout) -> NanoUI a -> NanoUI a
 tintedPanel bg border f = styled (panelStyle (background bg . borderColor border)) . panelWith f
 
@@ -235,9 +235,8 @@ logsApp stateRef = do
 
   (allSelected, setAllSelected) <- withKey ("log-all-selected" :: Text) (useFlag False)
 
-  -- Ctrl+A and Ctrl+C, or Select All and Copy from a row's context menu.
-  -- The chords act on every row even while a row has the keyboard, which
-  -- 'shortcut' would leave to the row, so they are matched with 'shortcutIn'.
+  -- Ctrl+A / Ctrl+C, or Select All / Copy from a row's context menu. Uses
+  -- 'shortcutIn' because 'shortcut' would yield to a focused row.
   menuAction <- fmap snd <$> liftIO (takeTextEditLastAction ctx)
   let chosen c cmd = menuAction == Just cmd || shortcutIn (ctrl <> key c) inp
 

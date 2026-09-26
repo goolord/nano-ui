@@ -21,35 +21,36 @@ tests =
 inp0 :: Input
 inp0 = withInput 400 300
 
--- | A button with a tooltip, and the id of a button after it (kept unless the
--- tooltip shifts its siblings).
+-- | A button with a tooltip, and the id of the next button (which changes if
+-- the tooltip shifts sibling ids).
 tipView :: TooltipConfig -> NanoUI (Response, WidgetId)
 tipView cfg = column $ do
   target <- button' "Tip Target"
   tooltipConfigured cfg target "Tip text"
   (target,) . respId <$> button' "After"
 
--- | Buttons Alpha, Bravo and Charlie with tooltips "Alpha tip" and so on.
+-- | Buttons Alpha, Bravo and Charlie with tooltips "Alpha tip", etc.
 tipRow :: [TooltipConfig] -> NanoUI [Response]
 tipRow cfgs = row . forM (zip ["Alpha", "Bravo", "Charlie"] cfgs) $ \(name, cfg) -> do
   r <- button' name
   r <$ tooltipConfigured cfg r (name <> " tip")
 
--- | Run a frame and return the texts of the tooltips it drew.
+-- | Run a frame and return the text of each tooltip drawn.
 tipsAfter :: Context -> NanoUI a -> Input -> IO [T.Text]
 tipsAfter ctx ui i = do
   _ <- runFrame ctx i ui
   spans <- collectOverlayTextSpans ctx i
   pure (filter (`hasText` spans) ["Tip text", "Alpha tip", "Bravo tip", "Charlie tip", "Label tip", "Box tip"])
 
--- | Every floating panel's rect: the tooltips that are up.
+-- | Rects of all floating panels, i.e. the open tooltips.
 tipRects :: Context -> IO [Rect]
 tipRects ctx = IM.elems <$> floatingPanelRects ctx
 
--- | Hover the target of 'tipView' with delay @d@ (a long frame time finishes
--- its own hover animation): the tooltip waits, asking only for a wake at the
--- delay (within @slack@). Returns the view, the hover, the wake time and a
--- check that hovering on settles: not dirty, no frame, the sibling's id kept.
+-- | Hover the 'tipView' target with delay @d@ (the long frame time finishes
+-- the hover animation). The tooltip stays closed and only schedules a wake at
+-- the delay, within @slack@. Returns the view, the hover input, the wake time,
+-- and a check that continued hovering settles: not dirty, no frame, sibling
+-- id unchanged.
 waitFor :: Context -> IORef Int -> Double -> Double -> IO (NanoUI (Response, WidgetId), Input, Double, IO ())
 waitFor ctx failed d slack = do
   let ui = tipView defaultTooltipConfig {tooltipDelay = d}
@@ -76,7 +77,8 @@ runTooltipDelayWaitTest ctx failed = do
   assertEq failed [] =<< tipsAfter ctx ui hover {inputMousePos = V2 (cx + 6) (cy + 2)}
   assertEq failed wakeAt =<< getWakeAt ctx
 
--- | The frame after the delay opens and repaints the tooltip; then nothing is asked for.
+-- | The first frame after the delay opens and repaints the tooltip; after
+-- that no wake is requested.
 runTooltipDelayOpenTest :: Context -> IORef Int -> IO ()
 runTooltipDelayOpenTest ctx failed = do
   (ui, hover, _, settles) <- waitFor ctx failed 0.05 0.95
@@ -89,8 +91,8 @@ runTooltipDelayOpenTest ctx failed = do
   settles
   assert failed . hasText "Tip text" =<< collectOverlayTextSpans ctx hover
 
--- | Leaving the target shuts the tooltip, repainting it, and coming back waits
--- again; a press shuts it with no wait while down, as does a wheel turn.
+-- | Leaving the target closes and repaints the tooltip; returning waits
+-- again. A press closes it with no wake while held, and so does a wheel turn.
 runTooltipDelayResetTest :: Context -> IORef Int -> IO ()
 runTooltipDelayResetTest ctx failed = do
   let ui = tipView defaultTooltipConfig {tooltipDelay = 0.05, tooltipGrace = 0}
@@ -119,8 +121,8 @@ runTooltipDelayResetTest ctx failed = do
   waking True
   opens
 
--- | Within its grace period after another was up a tooltip opens at once;
--- without, or after a press, it waits.
+-- | A tooltip opens immediately within its grace period after another one
+-- closes; without a grace period, or after a press, it waits.
 runTooltipGraceTest :: Context -> IORef Int -> IO ()
 runTooltipGraceTest ctx failed = do
   let slow = defaultTooltipConfig {tooltipDelay = 10, tooltipGrace = 5}
@@ -131,14 +133,14 @@ runTooltipGraceTest ctx failed = do
   forM_ [(at a, ["Alpha tip"]), (at c, []), (at a, ["Alpha tip"]), (at b, ["Bravo tip"]), (at a, ["Alpha tip"]), (pressAt (at a) (centerOf a), []), (hold, []), (releaseAt hold, [])] $ \(i, tips) ->
     assertEq failed tips =<< tipsAfter ctx ui i
 
--- | The grace period runs from when a tooltip goes away, whether the next one's
--- call comes after its or before; once it runs out the next one waits again.
+-- | The grace period starts when a tooltip closes, whether the next tooltip
+-- is declared before or after it. Once it expires, the next one waits again.
 runTooltipGraceAfterRestTest :: Context -> IORef Int -> IO ()
 runTooltipGraceAfterRestTest ctx failed = do
   let quick = defaultTooltipConfig {tooltipDelay = 0.05, tooltipGrace = 0.3}
       ui = tipRow [quick {tooltipDelay = 10}, quick, quick {tooltipDelay = 10}]
       tips expect i = assertEq failed expect =<< tipsAfter ctx ui i
-      -- Longer than the grace period, with no frame drawn.
+      -- Longer than the grace period, with no frames run.
       rest = threadDelay 500000
   [a, b, c] <- warmup2 ctx inp0 ui
   let at r = inp0 {inputMousePos = centerOf r}
@@ -151,8 +153,9 @@ runTooltipGraceAfterRestTest ctx failed = do
   rest >> tips [] (at a)
   assert failed . (> 0) =<< getWakeAt ctx
 
--- | Onto a label or container with a tooltip, and off it, needs a frame
--- (though the hover probe finds no widget); moving over it needs none.
+-- | Entering or leaving a label or container with a tooltip needs a frame,
+-- even though the hover probe finds no widget there; moving within it does
+-- not.
 runTooltipTargetNotWidgetTest :: Context -> IORef Int -> IO ()
 runTooltipTargetNotWidgetTest ctx failed = do
   let ui = column $ do
@@ -180,14 +183,15 @@ runTooltipTargetNotWidgetTest ctx failed = do
     tips ["Box tip"] onBox
     redraws True onBox inp0
 
--- | A large button whose tooltip opens at once, placed at the pointer.
+-- | A large button with an immediate tooltip placed at the pointer.
 followView :: NanoUI Response
 followView = column $ do
   target <- buttonWith' (fixedW 360 . fixedH 240) "Canvas"
   target <$ tooltipConfigured defaultTooltipConfig {tooltipDelay = 0, tooltipPlacement = PlacementAtCursor} target "Follow tip"
 
--- | A tooltip at the pointer sits below it and follows it (moves need frames),
--- repainting both places, and stays in the window, above the pointer at the bottom.
+-- | A pointer-placed tooltip sits below the pointer and follows it (moves
+-- need frames), repainting old and new rects. Near the bottom it flips above
+-- the pointer to stay in the window.
 runTooltipFollowCursorTest :: Context -> IORef Int -> IO ()
 runTooltipFollowCursorTest ctx failed = do
   let win = withInput 400 260
@@ -207,8 +211,8 @@ runTooltipFollowCursorTest ctx failed = do
   [Rect x3 y3 w3 h3] <- tipAt (V2 (tx + tw - 2) (ty + th - 2))
   assert failed (x3 >= 0 && x3 + w3 <= 400 && y3 >= 0 && y3 + h3 <= ty + th - 2)
 
--- | A pointer that lands on the following tooltip is still over the target:
--- the tooltip stays up and moves out from under it.
+-- | A pointer on the following tooltip still counts as over the target: the
+-- tooltip stays open and moves out from under it.
 runTooltipFollowCoveredTest :: Context -> IORef Int -> IO ()
 runTooltipFollowCoveredTest ctx failed = do
   let tipAt p = runFrame ctx inp0 {inputMousePos = p} followView >> tipRects ctx

@@ -121,8 +121,8 @@ beginFrameModal ctx =
       , osKeysTaken = IS.empty
       }
 
--- | Take the key press at position @i@ of the frame's keys for a shortcut.
--- 'False' when one already took it.
+-- | Claim the key press at index @i@ of this frame's keys for a shortcut.
+-- Returns 'False' if another shortcut already claimed it.
 takeKeyPress :: Context -> Int -> IO Bool
 takeKeyPress ctx i = do
   taken <- getsOverlay ctx (IS.member i . osKeysTaken)

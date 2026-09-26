@@ -40,23 +40,26 @@ module NanoUI.Backend
     -- one-shot events (keys, typed text, clicks, scroll, drops) and keeps
     -- what is held (buttons, pointer, modifiers, window size), then folds the
     -- window's new events into it. Starting from 'emptyInput' every frame
-    -- instead forgets a held button and the pointer between events. Keys
-    -- arrive through 'applyKey', which records presses, releases and held
-    -- keys, mouse buttons through 'applyMouseButton' (a backend numbers
-    -- them with 'mouseButtonNumber') and dropped files through
-    -- 'appendDropEvent'. When the pointer leaves the window,
-    -- 'applyPointerLeave' moves it off every widget. Every key goes in as a
-    -- 'Key' whatever the modifiers, a key that types a character as the
-    -- 'KeyChar' it types with no modifier held; the text typed goes in 'inputChars' as well, and
-    -- a chord such as Ctrl+C types none. Every auto-repeat of a held key goes
-    -- in as a press, which 'applyKey' keeps out of 'inputKeysNew', and
-    -- 'keypadKey' says what a keypad key is. When the window loses the
-    -- keyboard, 'releaseAllKeys' lets go of what was held, whose releases
-    -- go elsewhere. A frame does not keep the order of its text, keys and
-    -- modifiers, so 'NanoUI.Runner.runSessionLoop' ends one after a command
-    -- key that text, another key or other modifiers follow: a frame's text
-    -- comes before its one command key ('inputKeys'). A loop of the
-    -- backend's own should batch its events the same way.
+    -- instead forgets a held button and the pointer between events.
+    --
+    -- Keys go through 'applyKey', which tracks presses, releases and held
+    -- keys; mouse buttons through 'applyMouseButton' (numbered with
+    -- 'mouseButtonNumber'); dropped files through 'appendDropEvent'. When the
+    -- pointer leaves the window, 'applyPointerLeave' moves it off every
+    -- widget. When the window loses keyboard focus, 'releaseAllKeys' releases
+    -- the held keys, whose release events go elsewhere.
+    --
+    -- Every key goes in as a 'Key' whatever the modifiers; a key that types a
+    -- character is the 'KeyChar' it types with no modifier held. The typed
+    -- text also goes in 'inputChars'; a chord such as Ctrl+C types none.
+    -- Auto-repeats go in as presses, which 'applyKey' keeps out of
+    -- 'inputKeysNew'. 'keypadKey' maps keypad keys.
+    --
+    -- A frame does not keep the order of its text, keys and modifiers, so
+    -- 'NanoUI.Runner.runSessionLoop' ends a frame after a command key when
+    -- text, another key or a modifier change follows. A frame's text thus
+    -- comes before its one command key ('inputKeys'). A backend's own loop
+    -- should batch events the same way.
   , Input (..)
   , Key (..)
   , Modifiers (..)
@@ -91,19 +94,19 @@ module NanoUI.Backend
 
     -- * Input methods
 
-    -- | An input method (IME) composes text before it commits it, such as
-    -- the reading of Japanese before it is converted to kanji. Fold each
-    -- update of that composition into the input with 'applyComposition': it
-    -- is held, like a button, until the next update ends or replaces it, and
-    -- the focused text field draws it at its caret. The text the input
-    -- method commits arrives as typed text in 'inputChars'. After a frame,
-    -- 'textInputArea' says whether a widget takes text, where the input
-    -- method should put its candidate window and what the widget takes
-    -- ('InputPurpose'): a backend takes text input while it is there and
-    -- stops it while it is not, so no input method composes where nothing
-    -- shows it and no on-screen keyboard stays up. 'getFocusId' says which
-    -- widget has the keyboard; a composition going on as it moves is best
-    -- dropped.
+    -- | An input method (IME) composes text before committing it, such as
+    -- Japanese kana before conversion to kanji. Fold each composition update
+    -- into the input with 'applyComposition'. The composition is held, like
+    -- a button, until the next update ends or replaces it, and the focused
+    -- text field draws it at its caret. Committed text arrives as typed text
+    -- in 'inputChars'.
+    --
+    -- After a frame, 'textInputArea' says whether a widget takes text, where
+    -- to put the candidate window, and what kind of text it takes
+    -- ('InputPurpose'). Enable the platform's text input only while it is
+    -- 'Just', so no IME composes where nothing shows it and no on-screen
+    -- keyboard stays up. 'getFocusId' gives the focused widget; drop any
+    -- composition in progress when focus moves.
   , Composition (..)
   , applyComposition
   , InputPurpose (..)
@@ -195,40 +198,39 @@ module NanoUI.Backend
 
     -- * Debugging
 
-    -- | The layout overlay a view turns on with @explainLayout@, for a
-    -- backend option or a harness that turns it on from outside the view.
+    -- | Control the @explainLayout@ overlay from outside the view, for a
+    -- backend option or a test harness.
   , setExplainLayout
   , getExplainLayout
   , getExplainedNode
 
     -- * System appearance
 
-    -- | A backend that can ask the platform whether the desktop is set to
-    -- light or dark colours reports it with 'setSystemAppearance' before the
-    -- first frame and again when it changes. A view reads it with
-    -- @systemAppearance@, and a context following it (@followSystemTheme@)
-    -- switches to the theme its function gives for it.
+    -- | A backend that can read the desktop's light or dark setting reports
+    -- it with 'setSystemAppearance' before the first frame and whenever it
+    -- changes. Views read it with @systemAppearance@; a context set up with
+    -- @followSystemTheme@ switches theme to match.
   , Appearance (..)
   , setSystemAppearance
   , getSystemAppearance
 
     -- * The native window
 
-    -- | A backend opens its window from a 'NanoUI.WindowSettings', with its
-    -- title, size, mode, resizability and transparency, then installs a
-    -- 'WindowHost' ('installWindowHost'), which says what it does with what
-    -- a view asks of the window ('NanoUI.setWindowTitleUi',
-    -- 'NanoUI.moveWindowUi' and the rest) and applies the rest of the
-    -- settings through it. Build the host from 'defaultWindowHost' with a
-    -- record update, so a field added later does nothing rather than break
-    -- the backend. Once a frame, before the view runs, report the window's
-    -- scale, position, focus and mode with 'reportWindowState', which views
-    -- read with 'NanoUI.askWindow'; once a frame is on screen, call
+    -- | A backend opens its window from a 'NanoUI.WindowSettings' with its
+    -- title, size, mode, resizability and transparency, then calls
+    -- 'installWindowHost', which applies the remaining settings through the
+    -- 'WindowHost'. The host carries out view requests such as
+    -- 'NanoUI.setWindowTitleUi' and 'NanoUI.moveWindowUi'. Build it by
+    -- updating 'defaultWindowHost', so fields added later are no-ops.
+    --
+    -- Each frame, before the view runs, report the window's scale, position,
+    -- focus and mode with 'reportWindowState' (views read it with
+    -- 'NanoUI.askWindow'). Once the frame is on screen, call
     -- 'answerScreenshots' with a capture of it.
     --
     -- @runSessionLoop@ in "NanoUI.Runner" handles closing: a close request
-    -- ends the session or, if the settings say, is shown to the view, and
-    -- 'NanoUI.quitUi' ends it. A loop of the backend's own does the same with
+    -- either ends the session or, per the settings, is passed to the view,
+    -- and 'NanoUI.quitUi' ends it. A backend's own loop does the same with
     -- 'requestWindowClose', 'clearWindowClose' and 'quitRequested'.
   , WindowHost (..)
   , defaultWindowHost
@@ -243,17 +245,16 @@ module NanoUI.Backend
 
     -- * Background work
 
-    -- | A view's @useTaskStatus@, @useTask@ and @useStream@ jobs, and any
-    -- thread that calls the action @askWake@ returns, wake the loop through
-    -- the wake action the backend installs with 'setWakeLoop' before the
-    -- first frame: an action any thread may call that ends the loop's wait
-    -- for events, such as pushing an event of the backend's own onto the
-    -- platform's queue. A loop that blocks with no wake action installed
-    -- shows a job's result only once other input comes along. The jobs run
-    -- until their hooks stop being called. @runSessionLoop@ in
-    -- "NanoUI.Runner" ends the rest as its loop returns; a host that runs
-    -- frames itself ends them with 'cancelTasks' when it closes the
-    -- context's session.
+    -- | Background jobs (@useTaskStatus@, @useTask@, @useStream@) and
+    -- threads calling the action from @askWake@ wake the loop through the
+    -- action installed with 'setWakeLoop' before the first frame. It must be
+    -- callable from any thread and end the loop's wait for events, for
+    -- example by pushing a custom event onto the platform queue. Without it,
+    -- a blocking loop shows a job's result only when other input arrives.
+    --
+    -- Jobs run until their hooks stop being called. @runSessionLoop@ in
+    -- "NanoUI.Runner" cancels the rest when it returns; a host that runs
+    -- frames itself calls 'cancelTasks' when it closes the session.
   , setWakeLoop
   , cancelTasks
   )

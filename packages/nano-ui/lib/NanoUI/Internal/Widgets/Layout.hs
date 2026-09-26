@@ -115,18 +115,18 @@ columnWith = (`withDefaultWith` column')
 column' :: Ui :> es => Layout -> Eff es a -> Eff es a
 column' layout = container NodeContainer (layout {layoutDirection = Column})
 
--- | Layer children over one another in the same box, later ones on top, as
--- for a badge on an icon or a caption over an image. The box is as large as
--- its largest child, and each child sits in it where its alignment puts it:
--- @alignEnd . alignTop@ for a corner badge, @alignCenter . alignMid@ to
--- centre it. A child that grows ('fillW', 'grow') fills the box on that
--- axis. The pointer goes to the child on top: where a widget covers another,
--- hover highlights, presses and focus go to it, and the widget under it is
--- neither hovered nor pressed there, nor shows its tooltip.
+-- | Stack children in the same box, later ones on top, such as a badge on
+-- an icon or a caption over an image. The box is as large as its largest
+-- child, and each child is placed by its alignment: @alignEnd . alignTop@
+-- for a corner badge, @alignCenter . alignMid@ to centre it. A growing
+-- child ('fillW', 'grow') fills the box on that axis. The pointer goes to
+-- the child on top: where one widget covers another, hover, presses and
+-- focus go to the top one, and the one underneath shows no hover or tooltip
+-- there.
 --
--- It is a container with the 'layered' flow, which a panel or a card takes
--- too. An overlay that should cover a container without sizing it is pinned
--- instead ('pinAt').
+-- This is a container with the 'layered' flow, which panels and cards can
+-- also use. To cover a container without affecting its size, pin the
+-- overlay instead ('pinAt').
 {-# INLINE layers #-}
 layers :: Ui :> es => Eff es a -> Eff es a
 layers = layersWith id

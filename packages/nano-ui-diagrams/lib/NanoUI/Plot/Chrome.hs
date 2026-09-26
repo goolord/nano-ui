@@ -267,8 +267,8 @@ renderSeries ps c xDom yDom s pts =
         AreaSeries baseline
           | U.null pts -> mempty
           | otherwise ->
-              -- The top in order, then the baseline back: a left fold yields
-              -- it reversed without a reversed copy of the points.
+              -- Top edge in order, then the baseline in reverse; the left
+              -- fold builds it reversed without copying the points.
               let top = U.foldr (\p acc -> toP p : acc) [] pts
                   base = U.foldl' (\acc (x, _) -> toP (x, baseline) : acc) [] pts
                in closedPoly (top ++ base) # fc (colourOf (lerpColor c (plotFrameBg ps) 0.18)) # lw none

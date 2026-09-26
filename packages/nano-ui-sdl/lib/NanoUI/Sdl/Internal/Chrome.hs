@@ -1,7 +1,7 @@
--- | What a window that draws its own title bar has to do in the desktop's
--- place. The title, size, mode, maximizing and the rest are the core's, for
--- any backend: 'NanoUI.setWindowTitleUi', 'NanoUI.resizeWindowUi',
--- 'NanoUI.toggleMaximizedUi' and so on.
+-- | Support for windows that draw their own title bar. Title, size, mode and
+-- maximizing work on any backend and live in the core
+-- ('NanoUI.setWindowTitleUi', 'NanoUI.resizeWindowUi',
+-- 'NanoUI.toggleMaximizedUi', ...).
 --
 -- A window without the desktop's title bar ('DecorationsFrame' or
 -- 'DecorationsNone') has no buttons and no title of its own. 'windowCaption'
@@ -65,10 +65,9 @@ import SDL3.Sys.Video qualified as SDL
 
 -- Everything here that makes Windows dispatch messages goes through the safe
 -- binding rather than the unsafe one, as in "NanoUI.Sdl.Internal.WindowOptions".
--- Changing the decorations or the hit test runs the window's procedure before
--- it returns, and the procedure reaches the hit test below; a callback into
--- the runtime from inside an unsafe call has nowhere to run and wedges the
--- message pump.
+-- Changing the decorations or the hit test runs the window procedure
+-- synchronously, which calls the hit test below. A callback into the runtime
+-- from inside an unsafe call cannot run and wedges the message pump.
 
 -- | Whether the window may be resized at all.
 windowResizable :: SdlEnv -> IO Bool
@@ -216,7 +215,7 @@ data CaptionOptions = CaptionOptions
   -- resize the window ('chromeResizeBorder'). Zero leaves those three to the
   -- desktop's frame, if the window has one.
   , capResizeTop :: !Float
-  -- ^ How far in from the top edge does ('chromeResizeTop').
+  -- ^ The same reach for the top edge ('chromeResizeTop').
   }
 
 -- | 'defaultCaptionConfig' buttons and 'defaultResizeBorder' edges.

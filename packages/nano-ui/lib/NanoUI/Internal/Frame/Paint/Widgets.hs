@@ -312,7 +312,7 @@ paintCaptionlessField env style idx focus box@(Rect x y w h) clip@(Rect clipX _ 
       fm = peFontMetrics env
   paintStyledRect da style box
   value <- textInputValue ctx idx
-  -- The value, with an input method's composition in it while one shows.
+  -- The value, including any input-method composition in progress.
   (shown, _, _, _) <- fieldEditLine ctx idx
   placeholder <- if hasPlaceholder then getText (ctxNodeArena ctx) idx else pure ""
   chrome
@@ -377,9 +377,9 @@ drawSearchMagnifier da (Rect x y w h) col = do
   pushLine da (cx + startOff) (cy + startOff) (cx + endOff) (cy + endOff) (t * 0.8) col
 
 -- | The box of a checkbox (@isCheckbox@) or radio option at @x@, centred in
--- a slot at most 4 pixels taller than it within @y h@. A checkbox is drawn
--- as 'checkboxOps' draws one; a radio option's box is a well, which a
--- checked one gives an accent ring and dot.
+-- a slot at most 4 pixels taller than the box within @y h@. A checkbox draws
+-- like 'checkboxOps'; a radio box is a well, with an accent ring and dot when
+-- checked.
 drawChoiceControl :: DrawArena -> FontMetrics -> Style -> Theme -> Float -> Float -> Float -> Float -> Bool -> IO ()
 drawChoiceControl da fm style theme x y h value isCheckbox = do
   let box = checkboxBoxSize fm

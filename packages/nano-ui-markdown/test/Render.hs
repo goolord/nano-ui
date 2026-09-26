@@ -31,13 +31,12 @@ import NanoUI.Testing.Assert (withInput)
 import NanoUI.Testing.Harness (covers, hasText, runClick, spanCenter, spanRect, spanRectOf, warmup, warmup2)
 import Test.Hspec
 
--- | A word of rich text as drawn: its widget, where its line box starts, its
--- font size, its text and its colour.
+-- | A drawn rich-text word: widget, line box origin, font size, text and
+-- colour.
 data Word' = Word' {wWidget :: WidgetId, wPos :: V2, wSize :: Float, wText :: Text, wColor :: Color}
   deriving (Show)
 
--- | The frame's layout nodes of a type: their ids and rects, in document
--- order.
+-- | Ids and rects of the frame's nodes of one type, in document order.
 nodesOf :: NodeType -> Context -> IO [(WidgetId, Rect)]
 nodesOf wanted ctx = do
   let na = ctxNodeArena ctx
@@ -45,8 +44,8 @@ nodesOf wanted ctx = do
   matching <- filterM (fmap (== wanted) . getNodeType na) [0 .. n - 1]
   forM matching $ \i -> (,) <$> getWidgetId na i <*> getNodeRect na i
 
--- | The frame's custom drawings, rich text and canvases: each one's id,
--- content key and ops, in document order.
+-- | The frame's custom drawings (rich text and canvases) as id, content key
+-- and ops, in document order.
 drawings :: Context -> IO [(WidgetId, Int, [DrawOp])]
 drawings ctx = do
   nodes <- nodesOf NodeDrawing ctx
@@ -61,7 +60,7 @@ drawnWords ctx = do
   ds <- drawings ctx
   pure [Word' wid (V2 tx ty) (textFontSize font) t c | (wid, _, ops) <- ds, DrawTextStyled tx ty font t c <- ops]
 
--- | The frame's list markers, in document order: the drawings with no text.
+-- | The frame's list markers (drawings with no text), in document order.
 markers :: Context -> IO [(WidgetId, Int, [DrawOp])]
 markers ctx = filter (\(_, _, ops) -> not (any isText ops)) <$> drawings ctx
   where
@@ -70,14 +69,14 @@ markers ctx = filter (\(_, _, ops) -> not (any isText ops)) <$> drawings ctx
 wordNamed :: Text -> [Word'] -> Maybe Word'
 wordNamed t = find ((== t) . wText)
 
--- | The rectangles the frame's rich-text widgets fill in a colour: their
--- pieces' backgrounds and decorations.
+-- | Rects that rich-text widgets fill in a colour: backgrounds and
+-- decorations.
 drawnFills :: Color -> Context -> IO [Rect]
 drawnFills c ctx = do
   ds <- drawings ctx
   pure [rect | (_, _, ops) <- ds, FillRect rect c' <- ops, c' == c]
 
--- | Whether a frame, painted in full, draws anything in a colour.
+-- | Whether a fully painted frame draws anything in the colour.
 paints :: Color -> NanoUI a -> IO Bool
 paints c ui = do
   ctx <- drawn 600 400 ui
@@ -88,13 +87,13 @@ paints c ui = do
       rgba <- forM [2 .. 5] $ \k -> peekByteOff vp (i * 32 + 4 * k) :: IO Float
       pure (map (round . (* 255)) rgba == map (fromIntegral :: Word8 -> Int) [colorR c, colorG c, colorB c, colorA c])
 
--- | A fresh context that has drawn a view twice in a window @w@ by @h@.
+-- | A fresh context that has drawn the view twice in a @w@ by @h@ window.
 drawn :: Float -> Float -> NanoUI a -> IO Context
 drawn w h ui = newContext >>= \ctx -> ctx <$ warmup2 ctx (withInput w h) ui
 
--- | Draw a document, append text to it and draw it again: each pair's first
--- word, drawn before, keeps its id as the second after, and the new words
--- are drawn.
+-- | Draw a document, append text and draw again. For each pair, the first
+-- word's id before must equal the second word's id after. The @new@ words
+-- must be drawn.
 idsAcross :: Text -> Text -> [(Text, Text)] -> [Text] -> Expectation
 idsAcross start more same new = do
   let doc = parseMarkdown start
@@ -109,8 +108,7 @@ idsAcross start more same new = do
 view :: MarkdownDoc -> NanoUI (Maybe Text)
 view doc = columnWith (fixedW 500 . padAll 10) (markdown doc)
 
--- | Click a drawn word of a view in a 600 by 400 window, and return the
--- link the view reports.
+-- | Click a drawn word in a 600 by 400 window and return the reported link.
 clickWord :: NanoUI (Maybe Text) -> Text -> IO (Maybe Text)
 clickWord ui w = do
   let inp = withInput 600 400
@@ -120,12 +118,12 @@ clickWord ui w = do
   warmup ctx inp {inputMousePos = pos} ui
   runClick ctx inp ui pos
 
--- | Draws cat.png at 40 by 30 and no other image.
+-- | Resolves only cat.png, at 40 by 30.
 catImages :: MarkdownConfig es
 catImages = defaultMarkdownConfig {mdImage = \src -> if src == "cat.png" then Just (ImageId 7, Size 40 30) else Nothing}
 
--- | Draws a code block in Haskell as a label of its own, and every other
--- block as the widget does.
+-- | Draws Haskell code blocks as a plain label, and every other block as the
+-- default widget does.
 customCode :: MarkdownConfig NanoUIEs
 customCode =
   defaultMarkdownConfig
@@ -144,7 +142,7 @@ spec = do
         \```hs\ncode here\n```\n\n---\n\n![alt text](missing.png)"
     ws <- map wText <$> drawnWords ctx
     mapM_ (\w -> ws `shouldContain` [w]) ["Title", "Hello", "world", "docs", "one", "two", "first", "quoted", "h1", "c2", "alt", "text"]
-    -- Code is a label, so it is among the frame's text spans.
+    -- Code is a label, so it shows up in the text spans.
     spans <- collectTextSpans ctx
     map (`hasText` spans) ["code here", "hs"] `shouldBe` [True, True]
 
@@ -154,14 +152,14 @@ spec = do
     size "Big" `shouldSatisfy` (> max 16 (size "small"))
 
   it "scales headings and small text from the backend's default font size" $ do
-    -- The default resolver's text is as tall as its size: this one's is 20.
+    -- Text height equals font size in this resolver; the body size is 20.
     ctx <- (`withFontMetrics` monospaceMetrics 20) <$> newContext
     _ <- warmup2 ctx (withInput 600 800) . view . parseMarkdown $
       "# h1\n\n## h2\n\n### h3\n\n#### h4\n\n##### h5\n\n###### h6\n\nbody\n\n```\ncode\n```"
     ws <- drawnWords ctx
     let size w = maybe 0 wSize (wordNamed w ws)
     map (round . (* 100) . size) ["body", "h1", "h2", "h3", "h4", "h5", "h6"] `shouldBe` [2000, 3200, 2700, 2400, 2100, 2000, 1800 :: Int]
-    -- The copy button's text is 0.8 of the body text's.
+    -- The copy button's text is 0.8 times the body size.
     fmap (\(Rect _ _ _ h) -> h) . spanRect "Copy" <$> collectTextSpans ctx `shouldReturn` Just 16
 
   it "returns the destination of a clicked link" $ do
@@ -171,12 +169,12 @@ spec = do
     clickWord ui "Read" `shouldReturn` Nothing
 
   it "keeps earlier blocks' ids while text streams in" $
-    -- The block that grew keeps its id too.
+    -- The growing block keeps its id too.
     idsAcross "para one\n\n- item two\n\nstrea" "ming on\n\n# new block" [("one", "one"), ("two", "two"), ("strea", "streaming")] ["new"]
 
   it "keeps the ids of the items and paragraphs inside a growing list or quote" $ do
-    -- A list gains a nested list and an item while its second item grows; a
-    -- quote's second paragraph grows, and a third follows.
+    -- A list's second item grows and gains a nested list and a sibling. A
+    -- quote's second paragraph grows and a third follows.
     idsAcross "- first\n- sec" "ond\n  - nested\n- third" [("first", "first"), ("sec", "second")] ["nested", "third"]
     idsAcross "> quoted\n>\n> gro" "wing\n>\n> after" [("quoted", "quoted"), ("gro", "growing")] ["after"]
 
@@ -184,8 +182,8 @@ spec = do
     base <- newContext
     measured <- newIORef []
     inView <- newIORef False
-    -- The body font records every text measured in it while the view runs,
-    -- which is when rich text lays its words out; painting comes after.
+    -- Record texts measured while the view runs. Rich text lays out its words
+    -- then; painting comes later.
     let fm = ctxFontMetrics base
         prepare t = readIORef inView >>= \recording -> fm <$ when recording (modifyIORef' measured (t :))
         ctx = withFontMetrics base fm {fmBackend = Just (FontBackend prepare (const (pure Nothing)))}
@@ -202,12 +200,12 @@ spec = do
     words' <- measuring doc2
     words' `shouldContain` ["delta"]
     mapM_ (\w -> words' `shouldNotContain` [w]) ["first", "alpha", "second", "beta"]
-    -- The damage covers the line that grew and neither line before it.
+    -- The damage covers only the line that grew.
     damage <- takeDamage ctx
     ws <- drawnWords ctx
     let hit w = [isJust (rectIntersect r (Rect 0 y 600 (fmLineHeight fm))) | DamageClip r <- [damage], Word' _ (V2 _ y) _ _ _ <- toList (wordNamed w ws)]
     map hit ["alpha", "beta", "gamma"] `shouldBe` [[False], [False], [True]]
-    -- Drawing the same document again measures nothing.
+    -- Redrawing the same document measures nothing.
     measuring doc2 `shouldReturn` []
 
   it "copies a code block's code" $ do
@@ -226,7 +224,7 @@ spec = do
 
   it "wraps a code line wider than the document and shows all of it" $ do
     let long = "a_long_identifier_much_wider_than_the_column_it_is_drawn_in"
-    -- No ancestor has a fixed width: the column fills the window.
+    -- No fixed-width ancestor: the column fills the window.
     ctx <- drawn 400 400 (columnWith (fillW . padAll 10) (markdown (parseMarkdown ("```\nfirst\n" <> long <> "\nlast\n```"))))
     spans <- collectTextSpans ctx
     let code = [(r, t, clip) | (r, t, _, _, clip) <- spans, t /= "Copy"]
@@ -235,7 +233,7 @@ spec = do
     mapM_ (\t -> texts `shouldContain` [t]) ["first", "last"]
     T.concat middle `shouldBe` long
     length middle `shouldSatisfy` (> 1)
-    -- Every line is inside the window and inside what the block shows.
+    -- Every line lies inside the window and inside the block's clip.
     mapM_ (\(r@(Rect x _ w _), t, clip) -> (t, x + w <= 390, covers clip r) `shouldBe` (t, True, True)) code
 
   it "keeps a wrapped code line's indent and the spaces inside it" $ do
@@ -245,7 +243,7 @@ spec = do
     let code = filter (/= "Copy") texts
     length code `shouldSatisfy` (> 1)
     take 1 code `shouldSatisfy` all ("    x  =  " `T.isPrefixOf`)
-    -- Each line is a piece of the source line, spaces and all.
+    -- Each line is a substring of the source line, spaces included.
     mapM_ (\t -> (t, t `T.isInfixOf` line) `shouldBe` (t, True)) code
 
   it "lets the wheel over a code block scroll the page" $ do
@@ -271,7 +269,7 @@ spec = do
         (w, h) `shouldBe` (40, 30)
         runClick ctx (withInput 600 400) ui (spanCenter r) `shouldReturn` Just "cat.png"
       _ -> expectationFailure ("expected one image, got " <> show images)
-    -- The image without one shows its alt text.
+    -- The unresolved image shows its alt text.
     ws <- map wText <$> drawnWords ctx
     ws `shouldContain` ["dog"]
     ws `shouldNotContain` ["cat"]
@@ -284,7 +282,7 @@ spec = do
     let over = inp {inputMousePos = spanCenter r}
     warmup ctx over ui
     hasText "All about cats" <$> collectOverlayTextSpans ctx over `shouldReturn` False
-    -- Rest on it past the tooltip's delay.
+    -- Hover past the tooltip delay.
     threadDelay 600000
     warmup ctx over ui
     hasText "All about cats" <$> collectOverlayTextSpans ctx over `shouldReturn` True
@@ -308,7 +306,7 @@ spec = do
     clickWord ui "diagram" `shouldReturn` Just "diagram.png"
 
   it "sizes an ordered list's markers by its widest number" $ do
-    -- A font whose "1" is narrow, so "10." is wider than "11.", the last.
+    -- "1" is narrow, so "10." is wider than the last marker, "11.".
     base <- newContext
     let fm = (monospaceMetrics 16) {fmAdvance = \c -> case c of '1' -> 2; 'x' -> 7; _ -> 8}
         ctx = withFontMetrics base fm
@@ -320,7 +318,7 @@ spec = do
         row = "| " <> T.intercalate " | " (replicate 3 cellText) <> " |"
     ctx <- drawn 400 600 (columnWith (fixedW 380 . padAll 10) (markdown (parseMarkdown ("| l | r | c |\n|---|--:|:-:|\n" <> row))))
     ws <- drawnWords ctx
-    -- The monospace test font's characters are all 12 wide.
+    -- The monospace test font is 12 wide per character.
     let extent w = let V2 x _ = wPos w in (x, x + 12 * fromIntegral (T.length (wText w)))
         cells = sortOn (map (fst . extent) . take 1) (filter (any ((== "narrow") . wText)) (groupBy ((==) `on` wWidget) ws))
         lineExtents cell = [(minimum (map (fst . extent) l), maximum (map (snd . extent) l)) | l <- groupBy ((==) `on` (\w -> let V2 _ y = wPos w in y)) cell]
@@ -361,7 +359,7 @@ spec = do
         "```hs\ntop\n```\n\n> ```hs\n> quoted\n> ```\n\n- item\n\n  ```hs\n  listed\n  ```\n\n```py\nother\n```\n\nafter"
     spans <- collectTextSpans ctx
     map (`hasText` spans) ["custom top", "custom quoted", "custom listed", "other", "py"] `shouldBe` replicate 5 True
-    -- Only the Python block is the widget's own, with its copy button.
+    -- Only the Python block uses the default widget, with its copy button.
     length [() | (_, "Copy", _, _, _) <- spans] `shouldBe` 1
     map wText <$> drawnWords ctx `shouldReturn` ["item", "after"]
 
@@ -376,7 +374,7 @@ spec = do
         ui = columnWith (fixedW 500) (markdownConfigured cfg (parseMarkdown "See [the docs](/docs).\n\n> Quoted [link](/quoted)."))
     clickWord ui "docs" `shouldReturn` Just "/docs"
     clickWord ui "link" `shouldReturn` Just "/quoted"
-    -- The quoted paragraph is drawn as in the quote: muted.
+    -- The quoted paragraph keeps the quote's muted colour.
     ctx <- drawn 600 400 ui
     theme <- readIORef (ctxTheme ctx)
     fmap wColor . wordNamed "Quoted" <$> drawnWords ctx `shouldReturn` Just (themeMuted theme)
@@ -399,7 +397,7 @@ spec = do
     theme <- readIORef (ctxTheme ctx)
     map (fmap wColor . (`wordNamed` ws)) ["build", "quoted", "cell", "head", "Run"]
       `shouldBe` map Just [codeInk, quoteInk, cellInk, styleFgOf theme, styleFgOf theme]
-    -- The background is under the code alone.
+    -- The background covers only the code.
     Just code <- pure (wordNamed "build" ws)
     [Rect x _ _ _] <- drawnFills tint ctx
     x `shouldBe` let V2 cx _ = wPos code in cx

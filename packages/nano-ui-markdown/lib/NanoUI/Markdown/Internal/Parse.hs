@@ -1,8 +1,8 @@
--- | Markdown text to "NanoUI.Markdown.Syntax", parsed by the @commonmark@
--- library with GitHub's tables, task lists, strikethrough and bare links from
--- @commonmark-extensions@, and what "NanoUI.Markdown.Document" needs to parse
--- again only the end of a text: the lines each block is on, what is inside
--- it, and the link reference definitions.
+-- | Parse Markdown into "NanoUI.Markdown.Syntax" using @commonmark@ plus the
+-- GitHub extensions from @commonmark-extensions@ (tables, task lists,
+-- strikethrough, autolinks). Also records what "NanoUI.Markdown.Document"
+-- needs to reparse only a text's tail: each block's lines, its children and
+-- its link reference definitions.
 module NanoUI.Markdown.Internal.Parse
   ( Parsed (..)
   , Node (..)
@@ -40,58 +40,55 @@ import Data.Text qualified as T
 import NanoUI.Markdown.Syntax
 import Text.Parsec (updateState)
 
--- | A text, parsed.
 data Parsed = Parsed
   { parsedText :: !Text
-  -- ^ The text with its line endings made @\\n@, as parsed.
+  -- ^ The parsed text, with line endings normalised to @\\n@.
   , parsedComplete :: !Int
-  -- ^ How many of its lines are complete: all but a last one without a line
-  -- ending.
+  -- ^ Number of complete lines: all but a final unterminated one.
   , parsedNodes :: !(Maybe [Node])
-  -- ^ Its top-level blocks, or 'Nothing' if commonmark failed.
+  -- ^ Top-level blocks, or 'Nothing' if commonmark failed.
   }
 
--- | A block, with the lines it is on and what is inside it.
+-- | A block with its source lines and children.
 data Node = Node
   { nodeLines :: !(Int, Int)
-  -- ^ Its first and last line, counted from 1.
+  -- ^ First and last line, 1-based.
   , nodeBlock :: !(Maybe Block)
-  -- ^ The block, or 'Nothing' for link reference definitions and HTML
-  -- comments, which show nothing.
+  -- ^ 'Nothing' for link reference definitions and HTML comments, which
+  -- render nothing.
   , nodeRefs :: !Refs
-  -- ^ The link reference definitions in it.
+  -- ^ Link reference definitions inside the block.
   , nodeShape :: !Shape
   }
   deriving (Show)
 
--- | What parsing again from inside a block needs to know about it.
+-- | What a reparse starting inside a block needs to know about it.
 data Shape
-  = -- | A paragraph, or the link reference definitions a paragraph starts
-    -- with: a line right under it can continue it.
+  = -- | A paragraph or its leading link reference definitions; the next line
+    -- may continue it.
     Para
-  | -- | Code with its line endings, the last line's too.
+  | -- | Code including the final line ending.
     CodeLines !Text
-  | -- | A list's items, each its blocks, which have the item's lines.
+  | -- | Each list item's blocks. They carry the item's line range.
     Items ![[Node]]
   | -- | A block quote's blocks.
     Quote ![Node]
   | Other
   deriving (Show)
 
--- | Link reference definitions: each label, as commonmark compares them, with
--- its destination and title. The first definition of a label wins, which is
--- what the union of two maps keeps.
+-- | Link reference definitions: normalised label to destination and title.
+-- The first definition of a label wins, matching left-biased 'M.union'.
 type Refs = Map Text (Text, Text)
 
--- | Parse a text, with the link reference definitions of the text before it.
--- Raw HTML stays text, without its comments.
+-- | Parse a text, given the link reference definitions from the text before
+-- it. Raw HTML is kept as text, minus comments.
 parseLines :: Refs -> Text -> Parsed
 parseLines before src = Parsed unix (T.count "\n" unix) nodes
   where
-    -- Line endings become @\\n@, which numbers the lines as commonmark does
-    -- and keeps @\\r@ out of code, and the last line gets one: without it
-    -- commonmark ends no table row there, and adds an empty paragraph after a
-    -- heading or a closing fence. 'splitLines' knows the same line endings.
+    -- Normalise to @\\n@ so line numbers match commonmark's and code has no
+    -- @\\r@. Terminate the last line: otherwise commonmark drops a final
+    -- table row and adds an empty paragraph after a heading or closing fence.
+    -- 'splitLines' accepts the same line endings.
     unix = unixLines src
     text = if "\n" `T.isSuffixOf` unix then unix else T.snoc unix '\n'
     nodes = case runIdentity (C.commonmarkWith syntax "" text) of
@@ -99,24 +96,24 @@ parseLines before src = Parsed unix (T.count "\n" unix) nodes
       Left _ -> Nothing
     syntax = extensions <> mempty {C.syntaxFinalParsers = [defined before]}
 
--- | A text with its line endings, @\\r\\n@ or @\\r@, made @\\n@.
+-- | Normalise @\\r\\n@ and @\\r@ line endings to @\\n@.
 unixLines :: Text -> Text
 unixLines = T.replace "\r" "\n" . T.replace "\r\n" "\n"
 
--- | CommonMark with GitHub's extensions, built once rather than at every
--- parse: task items before the core list items, tables after the core blocks.
+-- | CommonMark with GitHub extensions, built once rather than per parse. Task
+-- items must precede core list items and tables follow core blocks.
 extensions :: C.SyntaxSpec Identity Spans Blocks
 extensions = taskListSpec <> strikethroughSpec <> autolinkSpec <> C.defaultSyntaxSpec <> pipeTableSpec
 
--- | Adds link reference definitions made before the text to the text's own,
--- ahead of them, before commonmark parses the inline text that uses them.
+-- | Merge definitions from earlier text into the reference map, taking
+-- priority, before commonmark parses inlines.
 defined :: Monad m => Refs -> BlockParser m Spans Blocks Blocks
 defined before = mempty <$ updateState add
   where
     add st = st {referenceMap = ReferenceMap (M.unionWith (++) refs (unReferenceMap (referenceMap st)))}
     refs = M.map (\(url, title) -> [toDyn (LinkInfo url title [] Nothing)]) before
 
--- | A text split after its first @n@ lines, each ended by @\\n@, @\\r\\n@ or
+-- | Split after the first @n@ lines, each ended by @\\n@, @\\r\\n@ or
 -- @\\r@.
 splitLines :: Int -> Text -> (Text, Text)
 splitLines n t = (T.dropEnd (T.length rest) t, rest)
@@ -128,12 +125,10 @@ splitLines n t = (T.dropEnd (T.length rest) t, rest)
       where
         r = T.dropWhile (\c -> c /= '\n' && c /= '\r') s
 
--- | Blocks as commonmark builds them.
 newtype Blocks = Blocks [Node]
   deriving newtype (Semigroup, Monoid, Show)
 
--- | One block. commonmark gives each block its lines with 'C.ranged' right
--- after making it.
+-- | One block. Its lines are filled in by 'C.ranged' after construction.
 node :: Maybe Block -> Refs -> Shape -> Blocks
 node b refs shape = Blocks [Node (0, 0) b refs shape]
 
@@ -146,15 +141,14 @@ blocks (Blocks ns) = mapMaybe nodeBlock ns
 refsIn :: Blocks -> Refs
 refsIn (Blocks ns) = foldMap nodeRefs ns
 
--- | Spans as a difference list: the inline parser adds them to the end one
--- at a time.
+-- | Difference list, since the inline parser appends spans one at a time.
 newtype Spans = Spans (Endo [Span])
   deriving newtype (Semigroup, Monoid)
 
 instance Show Spans where
   showsPrec d = showsPrec d . spans
 
--- | The spans, adjacent text joined.
+-- | The spans with adjacent 'Str's merged.
 spans :: Spans -> [Span]
 spans (Spans f) = go (appEndo f [])
   where
@@ -172,18 +166,18 @@ one x = Spans (Endo (x :))
 wrap :: ([Span] -> Span) -> Spans -> Spans
 wrap f = one . f . spans
 
--- | Code without the line ending after its last line.
+-- | Drop one trailing line ending.
 chomp :: Text -> Text
 chomp t = fromMaybe t (T.stripSuffix "\n" t)
 
--- | Raw HTML without its comments, which a browser would not show. A comment
--- that does not end runs to the end.
+-- | Strip HTML comments, as a browser hides them. An unterminated comment
+-- runs to the end.
 uncomment :: Text -> Text
 uncomment t = case T.breakOn "<!--" t of
   (before, "") -> before
   (before, comment) -> before <> uncomment (T.drop 3 (snd (T.breakOn "-->" (T.drop 4 comment))))
 
--- | A list; its items with their task check boxes.
+-- | A list whose items may carry task check boxes.
 listOf :: C.ListType -> C.ListSpacing -> [(Maybe Bool, Blocks)] -> Blocks
 listOf ty spacing items =
   node
@@ -196,12 +190,12 @@ listOf ty spacing items =
       C.OrderedList start _ delim -> Ordered start (if delim == C.Period then '.' else ')')
 
 instance C.Rangeable Blocks where
-  -- A setext heading or a table lists the line that made it first, so the
-  -- first line is the least one. A range ends before its end position. An
-  -- item's blocks get the item's lines after their own. The link reference
-  -- definitions a paragraph starts with get their own lines, and then none;
-  -- the rest of the paragraph starts on their first line, where the
-  -- paragraph does, so the rest of a text never starts between them.
+  -- Setext headings and tables list their defining line first, hence the
+  -- minimum. End positions are exclusive. commonmark ranges an item's blocks
+  -- again with the item's range, overwriting their own. Leading link
+  -- reference definitions keep their own lines (their second range is
+  -- empty), and the rest of the paragraph starts on the first definition's
+  -- line, so a reparse never starts between them.
   ranged (C.SourceRange r) (Blocks ns) = case r of
     [] -> Blocks ns
     _ -> Blocks [n {nodeLines = (first, lst)} | n <- ns]

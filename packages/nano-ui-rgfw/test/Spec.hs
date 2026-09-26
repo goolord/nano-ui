@@ -37,8 +37,8 @@ assert :: String -> Bool -> IO ()
 assert name True = putStrLn ("[PASS] " ++ name)
 assert name False = putStrLn ("[FAIL] " ++ name) >> exitFailure
 
--- | Draw a view's second frame, with the pointer off the window, onto a
--- software surface of the window's size cleared to @bg@; then look at it.
+-- | Draw a view's second frame (pointer outside the window) onto a software
+-- surface cleared to @bg@, then pass a pixel reader to @k@.
 raster :: Context -> Int -> Int -> Word32 -> NanoUI a -> (a -> ([DemoSpan], [DemoSpan]) -> (Int -> Int -> IO Word32) -> IO b) -> IO b
 raster ctx w h bg ui k = do
   let inp = withInputOff (fromIntegral w) (fromIntegral h)
@@ -49,14 +49,14 @@ raster ctx w h bg ui k = do
     renderArena surf getCozetteFont 1 draw base overlay
     k a (base, overlay) (\x y -> peekElemOff (sBuffer surf) (y * w + x))
 
--- | The rects of the frame's layout nodes of a type, in arena order.
+-- | Rects of the frame's nodes of one type, in arena order.
 nodesOf :: NodeType -> Context -> IO [Rect]
 nodesOf t ctx = do
   let na = ctxNodeArena ctx
   n <- arenaCount na
   map snd . filter ((== t) . fst) <$> mapM (\i -> (,) <$> getNodeType na i <*> getNodeRect na i) [0 .. n - 1]
 
--- | The input a batch of RGFW events adds up to.
+-- | Fold a batch of RGFW events into one 'Input'.
 applied :: [Event] -> Input
 applied = foldl' applyRgfwEvent emptyInput . decodeRgfwEvents 1
 
@@ -85,10 +85,11 @@ testSurfaceAllocation = do
       let expected = [if y == 1 && x >= 1 && x < w - 1 then 0xABCDEF01 else 0x12345678 | y <- [0 .. 2 :: Int], x <- [0 .. w - 1]]
       assert ("Shared pixel fill handles stride " ++ show w) (pixels == expected)
 
--- | Reference EPX (Scale2x): given width W, height H and a pixel query
--- (col -> row -> Bool), the query for the 2W x 2H result. Where a pixel's
--- opposite neighbours differ both ways, a quarter takes the value its nearer
--- vertical and horizontal neighbours share; otherwise it is the pixel's.
+-- | Reference EPX (Scale2x). Given width W, height H and a pixel query
+-- (col -> row -> Bool), returns the query for the 2W x 2H result. When both
+-- pairs of opposite neighbours differ, each quarter takes the value shared
+-- by its nearer vertical and horizontal neighbours, if they agree;
+-- otherwise it copies the source pixel.
 scale2x :: Int -> Int -> (Int -> Int -> Bool) -> Int -> Int -> Bool
 scale2x w h get c2 r2
   | c2 < 0 || c2 >= w * 2 || r2 < 0 || r2 >= h * 2 = False
@@ -101,8 +102,8 @@ scale2x w h get c2 r2
     vertical = if even r2 then above else below
     horizontal = if even c2 then left else right
 
--- | The 14x26 table is Scale2x of the 7x13 glyphs, and the 28x52 one Scale2x
--- of the 14x26 table.
+-- | The 14x26 table is Scale2x of the 7x13 glyphs, and the 28x52 table is
+-- Scale2x of the 14x26 one.
 testScale2xGlyphTables :: IO ()
 testScale2xGlyphTables =
   forM_ [(2, 1, 7, 13), (4, 2, 14, 26)] $ \(scale, from, w, h) -> forM_ [1, 2, 34, 36, 65, 95] $ \gid ->
@@ -118,9 +119,9 @@ testFractionalDpiCalculations = do
       (w2_x0, _, _, _) = toPhysRect 1.33 63.7 0 63.7 30
   assert "Adjacent widgets at fractional scale have zero gap/overlap" (w1_x0 + w1_w == w2_x0)
 
--- | A floating window, which placeFloatingNodes pins to the top-right
--- corner, paints over in-flow content: probe its title bar centre and a
--- bottom-left box pixel far from it.
+-- | A floating window (placed top-right by placeFloatingNodes) paints over
+-- in-flow content. Probes its title bar centre and a far bottom-left box
+-- pixel.
 testZOrderRenderArena :: IO ()
 testZOrderRenderArena = do
   ctx <- newPixelContext
@@ -234,10 +235,10 @@ testSpanQuads = do
   (n3, _) <- quads "A" (Rect 150 80 10 10)
   assert "span quads: clip outside the framebuffer emits nothing" (n3 == 0)
 
--- | RGFW keyboard translation: repeated letters all type, one Ctrl+letter
--- keystroke is a key chord that types nothing, whichever of its key-char and
--- key-press events RGFW queues first, and keys come up and repeat as they
--- should.
+-- | RGFW keyboard translation. Repeated letters all type. A Ctrl+letter
+-- keystroke is a chord that types nothing, whichever of its key-char and
+-- key-press events RGFW queues first. Releases and repeats are reported
+-- correctly.
 testRgfwTyping :: IO ()
 testRgfwTyping = do
   let chars = inputChars . applied
@@ -275,9 +276,9 @@ testRgfwTyping = do
       && keys [EventKeyPress R.rgfw_keyPadReturn 0] == [KeyEnter]
 
 -- | Wheel events queued in one batch add up rather than keeping the last.
--- The middle button is held and clicks like the others; the side buttons
--- are back and forward, and the misc buttons past them are the extra ones.
--- The pointer leaving the window moves it off every widget.
+-- The middle button holds and clicks like the others. Misc 1 and 2 are back
+-- and forward; later misc buttons map to the extra buttons. Leaving the
+-- window moves the pointer off every widget.
 testRgfwPointer :: IO ()
 testRgfwPointer = do
   let middle = applied [EventMouseButton R.rgfw_mouseMiddle True]
@@ -293,9 +294,10 @@ testRgfwPointer = do
   assert "RGFW buttons: misc 3 to 5 are the next buttons" (concatMap pressedBy [R.rgfw_mouseMisc2 + 1 .. R.rgfw_mouseMisc2 + 3] == map MouseOther [6, 7, 8])
   assert "RGFW pointer: leaving the window moves the pointer off it" (let V2 x y = inputMousePos gone in x < -1000 && y < -1000)
 
--- | A turned image reaches the rasteriser as a turned quad, clipped to its
--- widget: turned an eighth, a 40 by 20 image covers its rect's top-left and
--- bottom-right corners and leaves the other two, which unturned it covers.
+-- | A rotated image reaches the rasteriser as a rotated quad, clipped to its
+-- widget. Rotated 45 degrees, a 40 by 20 image covers the top-left and
+-- bottom-right corners of its rect but not the other two, which it covers
+-- unrotated.
 testTurnedImageRaster :: IO ()
 testTurnedImageRaster = do
   let probe angle = do
@@ -311,8 +313,8 @@ testTurnedImageRaster = do
   flat <- probe 0
   assert "Unturned image covers its whole rect" (and flat)
 
--- | Each cursor kind RGFW has a cursor for shows that cursor, no two of them
--- the same one, and every other kind shows the nearest one RGFW has.
+-- | Each cursor kind with a native RGFW cursor shows its own distinct
+-- cursor. Every other kind falls back to the nearest native one.
 testRgfwCursors :: IO ()
 testRgfwCursors = do
   let native =
@@ -330,8 +332,8 @@ testRgfwCursors = do
         , (UiCursorCell, R.rgfw_mouseCrosshair), (UiCursorColResize, R.rgfw_mouseResizeEW), (UiCursorRowResize, R.rgfw_mouseResizeNS)
         ]
           ++ map (,R.rgfw_mouseArrow) [UiCursorHelp, UiCursorCopy, UiCursorAlias, UiCursorContextMenu, UiCursorZoomIn, UiCursorZoomOut]
-      -- The session hides the pointer for this kind rather than showing an
-      -- icon; the arrow is what the mapping gives it.
+      -- The session hides the pointer for this kind; the mapping just
+      -- returns the arrow.
       hidden = [(UiCursorHidden, R.rgfw_mouseArrow)]
       shows' = all (\(k, icon) -> mapRgfwCursor k == icon)
   assert "RGFW cursors: each native shape shows its own cursor" (shows' native && length (nub (map snd native)) == length native)

@@ -46,7 +46,7 @@ main = withEventBuffer $ \event -> do
   check "resize" (643, 481) (pair c_rgfw_event_update_w c_rgfw_event_update_h)
   fixture 6 rgfw_scaleUpdated
   check "scale" (1.25, 1.5) (pair c_rgfw_event_scale_x c_rgfw_event_scale_y)
-  -- The ranges "RGFW.Raw" says are consecutive.
+  -- Key ranges that "RGFW.Raw" documents as consecutive.
   check "function keys are consecutive" (23 :: Int) (pure (fromIntegral (rgfw_keyF24 - rgfw_keyF1)))
   check "keypad digits are consecutive" (8 :: Int) (pure (fromIntegral (rgfw_keyPad9 - rgfw_keyPad1)))
   args <- getArgs
@@ -67,10 +67,10 @@ main = withEventBuffer $ \event -> do
       putStrLn "RGFW native event ABI: ok"
       stopWaitCheck event
 
--- | A stop from another thread ends a wait, one made before a wait makes it
--- return at once, and stops that piled up while nothing waited are drained
--- by the next wait, so the wait after that waits again rather than returning
--- at once for good. Needs an X display, and is skipped without one.
+-- | A stop from another thread ends a wait, and a stop issued before a wait
+-- makes it return at once. Stops that pile up while nothing waits are
+-- drained by the next wait, so later waits block again instead of returning
+-- immediately forever. Skipped without an X display.
 stopWaitCheck :: Ptr RGFW_event -> IO ()
 stopWaitCheck event = do
   display <- lookupEnv "DISPLAY"
@@ -83,7 +83,7 @@ stopWaitCheck event = do
           let drain = pollEvent win event >>= \case
                 EventNone -> pure ()
                 _ -> drain
-              -- Seconds a wait of up to @ms@ took, with no events queued before it.
+              -- Seconds a wait of up to @ms@ took, starting with an empty queue.
               timedWait ms = do
                 drain
                 t0 <- getMonotonicTime
@@ -96,7 +96,7 @@ stopWaitCheck event = do
           endsWithin 2 "a stop from another thread" (void (forkIO (threadDelay 100000 >> stopWaitForEvent)))
           endsWithin 1 "a stop before the wait" stopWaitForEvent
           endsWithin 1 "piled-up stops" (replicateM_ 100 stopWaitForEvent)
-          -- An event can end a wait early; one of three waiting is enough.
+          -- A stray event can end a wait early, so one full wait in three suffices.
           waited <- mapM (const (timedWait 200)) [1 .. 3 :: Int]
           unless (any (>= 0.15) waited) (fail ("RGFW stop wait: the waits after the drain returned at once: " ++ show waited))
           closeWindow win

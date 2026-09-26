@@ -27,8 +27,8 @@ tests =
 inp :: Input
 inp = withDelta 200 100 0.016
 
--- | Run frames, each after a wake, until the result passes @ok@: 'Nothing' once
--- two seconds pass without a wake, as for a job that never woke the loop.
+-- | Run a frame after each wake until the result passes @ok@. 'Nothing' if
+-- two seconds pass without a wake.
 frameUntil :: (Int -> IO Bool) -> Context -> NanoUI a -> (a -> Bool) -> IO (Maybe a)
 frameUntil wait ctx ui ok = go (50 :: Int)
   where
@@ -40,17 +40,17 @@ frameUntil wait ctx ui ok = go (50 :: Int)
           woke <- wait 2000000
           if woke && n > 0 then go (n - 1) else pure Nothing
 
--- | Whether the count comes to @n@ within two seconds, as threads run.
+-- | Whether the counter reaches @n@ within two seconds.
 reaches :: IORef Int -> Int -> IO Bool
 reaches ref n = isJust <$> timeout 2000000 (fix (\go -> readIORef ref >>= \v -> unless (v == n) (threadDelay 10000 >> go)))
 
 tick :: IORef Int -> IO ()
 tick ref = atomicModifyIORef' ref (\n -> (n + 1, ()))
 
--- | A job that sleeps until killed, a wait until it has started, and a
--- wait of up to @us@ for its kill. A job killed before its thread first runs
--- ends without running at all, its handler with it, so a test that kills a
--- job at once waits for it to start first.
+-- | A job that sleeps until killed, an action that waits for it to start,
+-- and a wait of up to @us@ for its kill. A job killed before its thread first
+-- runs never runs its handler, so a test that kills a job immediately must
+-- wait for it to start.
 sleeper :: IO (IO (), IO (), Int -> IO Bool)
 sleeper = do
   started <- newEmptyMVar
@@ -61,18 +61,19 @@ sleeper = do
     , \us -> isJust <$> timeout us (takeMVar killed)
     )
 
--- | A box whose colour alone shows @on@, so no rect or text diff sees it change.
+-- | A box that shows @on@ only through its colour, so rect and text diffs
+-- miss the change.
 lamp :: Bool -> NanoUI ()
 lamp on = box (fixedWH 20 20) (if on then colorRGBA 40 200 80 255 else colorRGBA 90 90 90 255)
 
--- | A frame shows @v@ and asks for no other.
+-- | The next frame shows @v@ and requests no further frame.
 settled :: (Eq a, Show a) => Context -> IORef Int -> NanoUI a -> a -> IO ()
 settled ctx failed ui v = do
   (a, _, _, dirty) <- runFrame ctx inp ui
   assertEq failed (v, False) (a, dirty)
 
--- | The frame that takes a job's news shows @v@ and repaints whole, since
--- nothing says which widgets show it; the frame after is idle again.
+-- | The frame that picks up a job's result shows @v@ and repaints fully,
+-- since nothing says which widgets depend on it. The next frame is idle.
 takesNews :: (Eq a, Show a) => Context -> IORef Int -> NanoUI a -> a -> IO ()
 takesNews ctx failed ui v = do
   assertEq failed v =<< evalUi ctx inp ui
@@ -80,8 +81,8 @@ takesNews ctx failed ui v = do
   settled ctx failed ui v
   assert failed . damageIsEmpty =<< takeDamage ctx
 
--- | The hook reads 'Nothing' while its job runs, which neither keeps frames
--- coming nor wakes the loop until it ends.
+-- | The hook returns 'Nothing' while the job runs. A running job neither
+-- requests frames nor wakes the loop until it ends.
 runTaskResultTest :: Context -> IORef Int -> IO ()
 runTaskResultTest ctx failed = do
   wait <- newWakeSignal ctx
@@ -96,8 +97,8 @@ runTaskResultTest ctx failed = do
   assert failed =<< wait 2000000
   takesNews ctx failed ui (Just 42)
 
--- | A new key kills the old key's job and starts its own, whose result the
--- hook returns; until then it returns the last key's result.
+-- | A new key kills the old job and starts a new one. Until it finishes, the
+-- hook returns the previous key's result.
 runTaskKeyChangeTest :: Context -> IORef Int -> IO ()
 runTaskKeyChangeTest ctx failed = do
   wait <- newWakeSignal ctx
@@ -118,8 +119,8 @@ runTaskKeyChangeTest ctx failed = do
   putMVar gate ()
   assertEq failed (Just (Just 30)) =<< frameUntil wait ctx ui (== Just 30)
 
--- | A job lives while the view calls its hook: the first frame without the call
--- kills it (asking for no frame), and a later call starts a new job.
+-- | A job lives while the view calls its hook. The first frame without the
+-- call kills it without requesting a frame; a later call starts a new job.
 runTaskLeaseTest :: Context -> IORef Int -> IO ()
 runTaskLeaseTest ctx failed = do
   starts <- newIORef 0
@@ -148,9 +149,9 @@ runTaskTwoPassTest ctx failed = do
   assertEq failed 1 =<< readIORef starts
   cancelTasks ctx
 
--- | A job that throws, or returns a value that throws, fails with its
--- exception and wakes the loop; none reaches the uncaught handler, and the
--- hook's result stays the last one.
+-- | A job that throws, or returns a value that throws when forced, fails
+-- with that exception and wakes the loop. Nothing reaches the uncaught
+-- handler, and 'useTask' keeps its last result.
 runTaskFailureTest :: Context -> IORef Int -> IO ()
 runTaskFailureTest ctx failed = do
   wait <- newWakeSignal ctx
@@ -178,8 +179,8 @@ runTaskFailureTest ctx failed = do
     threadDelay 20000
     assertEq failed 0 =<< readIORef uncaught
 
--- | A job runs, then is done; one for a new key runs with the last key's
--- result, and fails with it.
+-- | A job goes from running to done. A job for a new key reports running,
+-- then failed, carrying the previous key's result.
 runTaskStatusTest :: Context -> IORef Int -> IO ()
 runTaskStatusTest ctx failed = do
   wait <- newWakeSignal ctx
@@ -218,7 +219,7 @@ runTaskRetryTest ctx failed = do
   assertEq failed (Just (Just 2)) =<< frameUntil wait ctx ui (== Just 2)
   assertEq failed 2 =<< readIORef starts
 
--- | 'cancelTasks', which ends a session, kills the jobs still running.
+-- | 'cancelTasks' (run at session end) kills jobs still running.
 runTaskShutdownTest :: Context -> IORef Int -> IO ()
 runTaskShutdownTest ctx failed = do
   (sleep, started, killedIn) <- sleeper
@@ -227,9 +228,9 @@ runTaskShutdownTest ctx failed = do
   cancelTasks ctx
   assert failed =<< killedIn 2000000
 
--- | A thread of the app's own streaming values and waking the loop with
--- 'askWake' costs, for a burst faster than frames, the one frame that shows
--- the last value.
+-- | An app thread that streams values and wakes the loop with 'askWake'
+-- costs one frame for a burst faster than the frame rate, showing the last
+-- value.
 runWakeFromThreadTest :: Context -> IORef Int -> IO ()
 runWakeFromThreadTest ctx failed = do
   wait <- newWakeSignal ctx
@@ -255,8 +256,8 @@ runWakeFromThreadTest ctx failed = do
   takesNews ctx failed ui 1000
   cancelTasks ctx
 
--- | A stream's updates fold into the hook's state, and a burst faster than
--- frames costs the one frame that shows where it ended.
+-- | Stream updates fold into the hook's state. A burst faster than the frame
+-- rate costs one frame, showing the final state.
 runStreamTest :: Context -> IORef Int -> IO ()
 runStreamTest ctx failed = do
   wait <- newWakeSignal ctx
@@ -279,8 +280,8 @@ runStreamTest ctx failed = do
   takesNews ctx failed ui 500500
   cancelTasks ctx
 
--- | A new key kills the old producer and starts again from the initial
--- state; the old one's late updates do not reach the view.
+-- | A new key kills the old producer and restarts from the initial state.
+-- Late updates from the old producer are dropped.
 runStreamKeyChangeTest :: Context -> IORef Int -> IO ()
 runStreamKeyChangeTest ctx failed = do
   wait <- newWakeSignal ctx
@@ -292,7 +293,7 @@ runStreamKeyChangeTest ctx failed = do
   _ <- wait 0
   assertEq failed (Just [1]) =<< frameUntil wait ctx ui (not . null)
   writeIORef keyRef 2
-  -- The new producer may already have run by the time the view reads it.
+  -- The new producer may already have run before the view reads it.
   assert failed . (`elem` [[], [2]]) =<< evalUi ctx inp ui
   assert failed =<< killedIn 2000000
   assertEq failed (Just [2]) =<< frameUntil wait ctx ui (not . null)

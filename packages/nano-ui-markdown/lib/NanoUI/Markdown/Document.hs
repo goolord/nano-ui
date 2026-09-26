@@ -1,24 +1,23 @@
--- | A parsed Markdown document that text can be appended to, for a chat
--- message arriving a few tokens at a time.
+-- | An incrementally parsed Markdown document, for chat messages that arrive
+-- a few tokens at a time.
 --
--- Appending gives the blocks that parsing the whole text would:
+-- Appending gives the same blocks as parsing the whole text:
 --
 -- > markdownBlocks (appendMarkdown b (parseMarkdown a)) == markdownBlocks (parseMarkdown (a <> b))
 --
--- A document keeps the blocks that appended text cannot change, and parses
--- again only the rest of its text, from the last complete line that starts
--- the same way parsed alone: a top-level block that is not right under a
--- paragraph, or, inside a top-level block, an item of a list after the first,
--- a row of a table or a line of fenced code (parsed again after the table's
--- header or the fence), or a block of a block quote after the first that is
--- not right under a paragraph. So an append costs the new text and that
--- rest: the last list item, table row, line of code or block of a quote when
--- the text ends in one, or else the last block.
+-- The document keeps the blocks that appended text cannot change and reparses
+-- only the rest. The rest starts at the last complete line that parses the
+-- same way on its own: a top-level block not directly under a paragraph, or,
+-- inside a top-level block, a list item after the first, a table row, a line
+-- of fenced code (reparsed after the table header or the fence), or a block
+-- quote's block after the first that is not directly under a paragraph. So an
+-- append costs the new text plus the last list item, table row, code line or
+-- quote block, or otherwise the last block.
 --
--- The rest is parsed with the link reference definitions before it. The
--- whole text is parsed again when the rest defines a label the closed blocks
--- were not parsed with, or defines it otherwise, as they may use it: at each
--- append to a definition at the end of a message.
+-- The rest is parsed with the link reference definitions before it. If the
+-- rest's new definitions differ from those the closed blocks were parsed
+-- with, the whole text is reparsed, since those blocks may use them. This
+-- happens on every append while a message ends in a definition.
 module NanoUI.Markdown.Document
   ( MarkdownDoc
   , emptyMarkdown
@@ -46,27 +45,26 @@ import GHC.Generics (Generic)
 import NanoUI.Markdown.Internal.Parse
 import NanoUI.Markdown.Syntax
 
--- | A document: its text, the blocks that appending to it cannot change,
--- and the rest, parsed again when text is appended. Two documents are equal
--- when their texts are.
+-- | A parsed document. It keeps the blocks that appending cannot change and
+-- reparses the rest on append. Documents are equal when their texts are.
 data MarkdownDoc = MarkdownDoc
   { docLength :: !Int
-  -- ^ The length of the text.
+  -- ^ Length of the text.
   , docDone :: ![Text]
-  -- ^ The text of the blocks that cannot change, in pieces, the last first.
+  -- ^ Text of the closed blocks, in pieces, newest first.
   , docClosed :: !(Seq Block)
-  -- ^ Those blocks.
+  -- ^ The closed blocks.
   , docOpen :: !Open
-  -- ^ The block that the rest starts inside, up to the rest.
+  -- ^ The block the rest starts inside, up to where the rest begins.
   , docKnown :: !Refs
-  -- ^ The link reference definitions before the rest.
+  -- ^ Link reference definitions before the rest.
   , docPending :: !Refs
-  -- ^ Those in the rest with a label not defined before it, which the closed
-  -- blocks were parsed with.
+  -- ^ Definitions in the rest whose labels are not defined before it. The
+  -- closed blocks were parsed with these.
   , docRest :: !Text
-  -- ^ The rest of the text.
+  -- ^ The text after the closed blocks.
   , docLast :: ![Block]
-  -- ^ Its blocks, the first continuing 'docOpen'.
+  -- ^ Blocks of the rest; the first continues 'docOpen'.
   }
 
 instance Eq MarkdownDoc where
@@ -79,24 +77,23 @@ instance Show MarkdownDoc where
 pieces :: MarkdownDoc -> [Text]
 pieces doc = reverse (docRest doc : docDone doc)
 
--- | The part of a block before the rest of the text, which starts inside
--- it.
+-- | The part of a block before the rest, when the rest starts inside it.
 data Open
-  = -- | None: the rest starts with a block.
+  = -- | The rest starts at a block boundary.
     Fresh
-  | -- | A list's items, and whether they keep it tight.
+  | -- | A list's items so far, and whether they keep it tight.
     InList !ListType !Bool ![ListItem]
   | -- | A block quote's blocks.
     InQuote ![Block]
-  | -- | A fenced code block's first line, and its code, with line endings.
+  | -- | A fenced code block's opening fence line, and its code so far with line endings.
     InCode !Text !Text
-  | -- | A table's header and delimiter rows, and its rows.
+  | -- | A table's header and delimiter lines, and its rows so far.
     InTable !Text ![[[Span]]]
   deriving (Generic)
 
 instance NFData Open
 
--- | The lines the rest is parsed after, which start the block again.
+-- | Lines prepended to the rest when parsing it, to restart the block.
 reopen :: Open -> Text
 reopen = \case
   InCode fence _ -> fence
@@ -113,20 +110,20 @@ parseMarkdown :: Text -> MarkdownDoc
 parseMarkdown t = fromMaybe unparsed (resume new t)
   where
     new = emptyMarkdown {docLength = T.length t}
-    -- If commonmark failed, the text would show as it is.
+    -- If commonmark fails, show the text as is.
     unparsed = new {docRest = t, docLast = [Paragraph [Str (chomp (unixLines t))]]}
 
 -- | The blocks of a document.
 markdownBlocks :: MarkdownDoc -> [Block]
 markdownBlocks doc = toList (docClosed doc) ++ docLast doc
 
--- | A document's text, parsed or appended: what '==' compares.
+-- | The document's full text, which '==' compares.
 markdownSource :: MarkdownDoc -> Text
 markdownSource = T.concat . pieces
 
--- | The sources of a document's images, each once, in the order they first
--- appear, in quotes, lists, tables and links as well: for loading them
--- before they come into view.
+-- | Image sources in the document, without duplicates, in order of first
+-- appearance, including those in quotes, lists, tables and links. Useful for
+-- loading images before they scroll into view.
 markdownImages :: MarkdownDoc -> [Text]
 markdownImages = nubOrd . concatMap blockImages . markdownBlocks
   where
@@ -149,10 +146,10 @@ markdownImages = nubOrd . concatMap blockImages . markdownBlocks
 parseMarkdownBlocks :: Text -> [Block]
 parseMarkdownBlocks = markdownBlocks . parseMarkdown
 
--- | Add text to the end of a document. It costs the new text and the rest
--- of the document after its closed blocks (see "NanoUI.Markdown.Document"),
--- or the whole text when the rest changes a link reference definition. Append
--- the tokens that arrived in a frame at once, rather than one at a time.
+-- | Append text to a document. This costs the new text plus the rest after
+-- the closed blocks (see "NanoUI.Markdown.Document"), or the whole text when
+-- the rest changes a link reference definition. Append a frame's tokens in
+-- one call rather than one at a time.
 appendMarkdown :: Text -> MarkdownDoc -> MarkdownDoc
 appendMarkdown new doc
   | T.null new = doc
@@ -161,11 +158,10 @@ appendMarkdown new doc
         (parseMarkdown (markdownSource doc <> new))
         (resume doc {docLength = docLength doc + T.length new} (docRest doc <> new))
 
--- | A document with a new rest, parsed after its closed blocks, or 'Nothing'
--- if the whole text must be parsed again: when the rest changes a link
--- reference definition that the closed blocks were parsed with, as they may
--- use it, when a table it continues gets too big for 'fits', or when
--- commonmark fails.
+-- | Parse a new rest after the document's closed blocks. 'Nothing' means the
+-- whole text must be reparsed: the rest changed a link reference definition
+-- the closed blocks were parsed with, a continued table outgrew 'fits', or
+-- commonmark failed.
 resume :: MarkdownDoc -> Text -> Maybe MarkdownDoc
 resume doc rest = do
   let open = docOpen doc
@@ -200,15 +196,13 @@ resume doc rest = do
               }
     _ -> doc {docRest = rest, docPending = refs, docLast = spine (mapMaybe nodeBlock nodes)}
 
--- | A list with its spine and elements evaluated, so that it holds on to no
--- parse.
+-- | Force a list's spine and elements so it retains nothing of the parse.
 spine :: [a] -> [a]
 spine xs = foldr seq () xs `seq` xs
 
--- | The first block of the rest, which starts inside the open block, joined
--- to the open block's part before the rest: 'Nothing' if the table it
--- continues gets too big for 'fits' (or if it continued no open block, which
--- it always does).
+-- | Join the rest's first block onto the open block's earlier part. 'Nothing'
+-- if a continued table outgrows 'fits', or if the block does not continue the
+-- open one (which should not happen).
 continue :: Open -> Node -> Maybe Node
 continue open n = case (open, nodeBlock n, nodeShape n) of
   (Fresh, _, _) -> Just n
@@ -221,26 +215,27 @@ continue open n = case (open, nodeBlock n, nodeShape n) of
   where
     joined b = b `seq` Just n {nodeBlock = Just b}
 
--- | Whether a table is small enough that commonmark-extensions keeps all its
--- rows. It ends a table once it has filled in 200000 missing cells, which
--- a table parsed in parts would count apart.
+-- | Whether commonmark-extensions keeps all of a table's rows. It ends a table
+-- after filling in 200000 missing cells, and a table parsed in parts would
+-- count those per part.
 fits :: [CellAlign] -> [[[Span]]] -> Bool
 fits aligns rows = length rows * length aligns <= 200000
 
--- | A line the rest of a text can start on.
+-- | A line where the rest can start.
 data Cut
   = Cut
       !Int
-      -- ^ The line, in the parsed text.
+      -- ^ Line number in the parsed text.
       !Int
-      -- ^ How many of the text's blocks close before it.
+      -- ^ Number of blocks closed before the line.
       Refs
-      -- ^ The link reference definitions in the next block before the line.
+      -- ^ Link reference definitions in the next block, before the line.
       (Maybe Open)
-      -- ^ That block's part before the line, if the rest can start there.
+      -- ^ The next block's part before the line, or 'Nothing' if the rest
+      -- cannot start there.
 
--- | Where the rest of a parsed text can start, the last line first: where
--- a block after the first starts, and inside a block.
+-- | Lines where the rest can start, last first: at each block after the
+-- first, and inside blocks.
 cuts :: Text -> Open -> [Node] -> [Cut]
 cuts input open nodes =
   concat
@@ -248,10 +243,9 @@ cuts input open nodes =
     | (k, prev, n) <- reverse (withPrev nodes)
     ]
 
--- | Where the rest can start inside a block, the last line first: at a list
--- item after the first, a line of fenced code, a table row, or a block
--- after the first in a block quote, in a parsed text. The block continues
--- @before@.
+-- | Lines inside a block where the rest can start, last first: a list item
+-- after the first, a fenced code line, a table row, or a block quote's block
+-- after the first. The block continues @before@.
 inside :: Text -> Open -> Int -> Node -> [Cut]
 inside input before k n = case (nodeBlock n, nodeShape n) of
   (Just (List ty _ items), Items own) ->
@@ -261,7 +255,7 @@ inside input before k n = case (nodeBlock n, nodeShape n) of
     | (i, Node {nodeLines = (line, _)} : _) <- reverse (drop 1 (zip [0 ..] own))
     ]
   (Just CodeBlock {}, CodeLines code)
-    -- Fenced code is on more lines than its code: the fence's.
+    -- Fenced code spans more lines than its code, counting the fences.
     | size <- T.count "\n" code
     , end - first >= size ->
         [ Cut line k mempty (Just (InCode (linesAt first 1) (codeBefore <> fst (splitLines (line - first - 1) code))))
@@ -282,7 +276,7 @@ inside input before k n = case (nodeBlock n, nodeShape n) of
   where
     (first, end) = nodeLines n
     linesAt from count = fst (splitLines count (snd (splitLines (from - 1) input)))
-    -- Whether a list's items before the one on a line keep it tight: parsed
+    -- Whether the items before the one on @line@ keep the list tight. Parsed
     -- up to that line, the list ends with that item, one line long.
     tightTo line = case parsedNodes (parseLines mempty (fst (splitLines line input))) >>= listToMaybe . reverse of
       Just Node {nodeBlock = Just (List _ tight _)} -> Just tight
@@ -294,13 +288,13 @@ inside input before k n = case (nodeBlock n, nodeShape n) of
       InCode _ code -> code
       _ -> ""
 
--- | Whether a block starts as it would alone, after the block before it:
--- the rest of a text can start there. A line right under a paragraph can
--- continue it, underline it into a heading (@===@, @---@), make it a table's
--- header (a delimiter row), or fail to interrupt it (an ordered item not
--- numbered 1, a task item with nothing after its box, HTML of type 7), so
--- a paragraph must end before the line above. Any other block before it
--- has ended by then, or is a list, which only an item continues.
+-- | Whether a block parses the same on its own, given the block before it, so
+-- the rest can start there. A line directly under a paragraph may continue
+-- it, turn it into a heading (@===@, @---@) or a table header (a delimiter
+-- row), or fail to interrupt it (an ordered item not numbered 1, an empty
+-- task item, HTML of type 7). So the paragraph must end before the line
+-- above. Any other previous block has ended by then, or is a list, which only
+-- an item continues.
 opens :: Maybe Node -> Node -> Bool
 opens prev n = case prev of
   Just Node {nodeShape = Para, nodeLines = (_, end)} -> end < start n - 1
@@ -309,6 +303,6 @@ opens prev n = case prev of
 start :: Node -> Int
 start = fst . nodeLines
 
--- | Blocks counted from 0, each with the one before it.
+-- | Blocks numbered from 0, each paired with the one before it.
 withPrev :: [Node] -> [(Int, Maybe Node, Node)]
 withPrev ns = zip3 [0 ..] (Nothing : map Just ns) ns

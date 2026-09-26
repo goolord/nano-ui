@@ -86,9 +86,8 @@ withBaseline b s =
     AreaSeries _ -> s {seriesKind = AreaSeries b}
     _ -> s
 
--- | Vector form of 'line'. Numeric series retain unboxed coordinates:
--- unboxed inputs are shared, and boxed or storable inputs are converted once
--- at the construction boundary.
+-- | Vector form of 'line'. Coordinates are stored unboxed: unboxed inputs
+-- are shared, and boxed or storable ones are converted once.
 {-# INLINE lineVec #-}
 lineVec :: G.Vector v (Double, Double) => Text -> v (Double, Double) -> Series
 lineVec = pointSeries (LineSeries 1.5 Nothing)

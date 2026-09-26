@@ -205,7 +205,7 @@ spec = do
         redone = typeArea (Modifiers True True False False) "" [KeyChar 'z'] undone
       TB.toText (TA.buffer undone) `shouldBe` "one "
       TB.toText (TA.buffer redone) `shouldBe` "one two"
-      -- A chord is its key; characters typed with Ctrl held are not typed.
+      -- Chords come from key events; characters typed with Ctrl held are ignored.
       TE.inputTextCommands TE.singleLineMode (frameInput ctrlMods "z\x1a" [KeyChar 'z', KeyChar 'y'])
         `shouldBe` [TE.Undo, TE.Redo]
 

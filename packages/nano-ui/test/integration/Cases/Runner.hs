@@ -104,8 +104,8 @@ runSessionLoopTest ctx failed = do
     actual
   assertEq failed 3 =<< readIORef draws
 
--- Presses of one button close together count up to a triple click, and a
--- press of another button starts the count over.
+-- Quick presses of one button count up to a triple click; a press of
+-- another button restarts the count.
 runSessionLoopClicksTest :: Context -> IORef Int -> IO ()
 runSessionLoopClicksTest ctx failed = do
   clicks <- newIORef []
@@ -196,12 +196,12 @@ runSessionLoopHardQuitTest ctx failed = do
   assertEq failed 0 =<< draws [[1]]
   assertEq failed 1 =<< draws [[4, 2]]
 
--- | A batch keeps its text, keys and modifiers in order: a frame ends after a
--- command key that text, another key or other modifiers follow, so its text
--- comes before its one command key, pressed with the modifiers it has, while
--- the key's repeats and typing stay in one frame. Events: 1 types "l" with
--- its key, 2 presses Enter, 3 types "x", 4 holds Ctrl, 5 presses S, 6
--- releases S, 7 lets go of Ctrl.
+-- | A batch keeps its text, keys and modifiers in order. A frame ends after
+-- a command key followed by text, another key or a modifier change, so its
+-- text precedes its one command key and that key sees its own modifiers.
+-- Repeats and typing share a frame. Events: 1 types "l" with its key, 2
+-- presses Enter, 3 types "x", 4 holds Ctrl, 5 presses S, 6 releases S, 7
+-- releases Ctrl.
 runSessionLoopKeyOrderTest :: Context -> IORef Int -> IO ()
 runSessionLoopKeyOrderTest ctx failed = do
   debug <- newDebugSampler
@@ -233,19 +233,19 @@ runSessionLoopKeyOrderTest ctx failed = do
         readIORef frames
   assertEq failed [("ll", [KeyChar 'l', KeyChar 'l', KeyEnter, KeyEnter], False), ("x", [KeyChar 's'], True), ("", [], False)]
     =<< run [[1, 1, 2, 2, 3, 4, 5, 6, 7]]
-  -- One event a batch, as steady typing comes, takes no extra frame.
+  -- One event per batch, as in steady typing, adds no frames.
   assertEq failed 7 . length =<< run (map pure [1, 2, 3, 4, 5, 6, 7])
 
--- | Batches of events for a driver's waits, one a wait; past the last the
--- loop has gone on too long, and the test fails rather than hang.
+-- | One batch of events per driver wait. A wait past the last batch throws,
+-- so a runaway loop fails the test instead of hanging.
 batchedWaits :: [[Int]] -> IO (Int -> IO [Int])
 batchedWaits batches = do
   queue <- newIORef batches
   pure $ \_ -> atomicModifyIORef' queue (\case b : rest -> (rest, Just b); [] -> ([], Nothing))
     >>= maybe (throwIO (userError "the loop went on past its last events")) pure
 
--- | A window that closes by itself ends the session at its close request,
--- without a frame.
+-- | With 'wsExitOnCloseRequest' on, a close request ends the session
+-- without another frame.
 runSessionLoopCloseTest :: Context -> IORef Int -> IO ()
 runSessionLoopCloseTest ctx failed = do
   debug <- newDebugSampler
@@ -263,9 +263,8 @@ runSessionLoopCloseTest ctx failed = do
     emptyInput
   assertEq failed 1 =<< readIORef drawn
 
--- | A window whose settings keep it open shows each close request to the
--- next frame, for that frame alone, and the session ends once the view calls
--- 'quitUi', after that frame.
+-- | With 'wsExitOnCloseRequest' off, each close request is visible to the
+-- next frame only, and the session ends after the frame that calls 'quitUi'.
 runSessionLoopCloseAskTest :: Context -> IORef Int -> IO ()
 runSessionLoopCloseAskTest ctx failed = do
   debug <- newDebugSampler

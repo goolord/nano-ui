@@ -94,7 +94,7 @@ numericInputConfigured' cfg value = do
   uiIO $ registerFocusable ctx wid
   store <- uiIO (getStore ctx)
   isFocus <- keyboardFocused wid
-  -- A hexadecimal number takes letters too.
+  -- Hex input needs letters, so it gets the normal text keyboard.
   when isFocus $ uiIO (requestInputMethod ctx wid Nothing (if nicHex cfg then InputNormal else InputNumeric))
   let
     key = intKey wid

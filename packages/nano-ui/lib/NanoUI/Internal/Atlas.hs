@@ -1,6 +1,5 @@
 -- | Context-owned RGBA image atlas with shelf packing and versioned pixel
--- snapshots. Room an image lets go ('releaseImage') is reused for the next
--- images that fit it.
+-- snapshots. Space freed by 'releaseImage' is reused by later images that fit.
 module NanoUI.Internal.Atlas
   ( ImageAtlas
   , newImageAtlas
@@ -67,8 +66,8 @@ data AtlasState = AtlasState
   , asWriteCount :: {-# UNPACK #-} !Int
   -- ^ The length of 'asWrites'.
   , asFree :: [AtlasSlot]
-  -- ^ Room that released images let go, each with the padding after it,
-  -- which a new image that fits takes before the shelves ('takeFree').
+  -- ^ Space freed by released images, including each one's trailing padding.
+  -- 'takeFree' tries these before the shelves.
   }
 
 newtype ImageAtlas = ImageAtlas (IORef AtlasState)
@@ -114,10 +113,9 @@ registerImage (ImageAtlas ref) (ImageId tid) w h pixels
             fitImage st0 tid w h pixels
               >>= maybe (pure False) (\st1 -> True <$ writeIORef ref st1)
 
--- | Take an image out of the atlas: its id no longer draws, and its room
--- goes to the next images that fit it. Its pixels stay where they were
--- until one does, and 'freshImageId' does not hand its id out again. An id
--- that is not registered is left alone.
+-- | Remove an image. Its id stops drawing and its space goes on the free
+-- list. The old pixels stay until another image overwrites them, and
+-- 'freshImageId' never returns the id again. Unregistered ids are ignored.
 releaseImage :: ImageAtlas -> ImageId -> IO ()
 releaseImage (ImageAtlas ref) (ImageId tid) = do
   st <- readIORef ref
@@ -130,11 +128,10 @@ releaseImage (ImageAtlas ref) (ImageId tid) = do
         , asLastFresh = max tid (asLastFresh st)
         }
 
--- | Where the first free room an image @w@ by @h@ fits in, with its
--- padding, puts it, and the atlas with the rest of that room still free:
--- the part right of the image, as tall as the image and its padding, and
--- the part below, as wide as the room. A part too thin for any image is
--- dropped.
+-- | Find the first free slot that fits a @w@ x @h@ image plus padding, and
+-- return the image position and the updated state. The leftover space is
+-- split into a strip to the right (image height plus padding) and a strip
+-- below (full slot width). Strips too thin for any image are dropped.
 takeFree :: AtlasState -> Int -> Int -> Maybe (Int, Int, AtlasState)
 takeFree st w h = go [] (asFree st)
   where
@@ -146,10 +143,10 @@ takeFree st w h = go [] (asFree st)
            in Just (fx, fy, st {asFree = foldl' (flip (:)) (right ++ below ++ rest) seen})
       | otherwise = go (slot : seen) rest
 
--- | Put an image in room another let go, at @x@ @y@, and clear the
--- padding round it: the image before may have drawn there, and a texture
--- filtered at the image's edge reads it. The write covers the padding, so
--- a texture takes it too.
+-- | Write an image into freed space at @x@ @y@ and zero the padding around
+-- it. The previous image may have drawn there, and texture filtering at the
+-- edge samples the padding. The recorded write includes the padding so the
+-- upload clears it on the GPU too.
 placeInFree :: AtlasState -> Int -> Int -> Int -> Int -> Int -> ByteString -> IO AtlasState
 placeInFree st tid x y w h pixels = do
   blitPixels (asPtr st) (asW st) x y w h pixels
@@ -189,7 +186,7 @@ lookupImageUv (ImageAtlas ref) (ImageId tid) = do
           !v1 = fromIntegral (y + h) / fh
        in Just (u0, v0, u1, v1)
 
--- | The width and height in pixels of the image registered under an id.
+-- | Pixel width and height of a registered image.
 lookupImageSize :: ImageAtlas -> ImageId -> IO (Maybe (Int, Int))
 lookupImageSize (ImageAtlas ref) (ImageId tid) = do
   st <- readIORef ref

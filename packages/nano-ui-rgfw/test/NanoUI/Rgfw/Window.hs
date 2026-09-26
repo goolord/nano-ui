@@ -1,8 +1,7 @@
--- | A frame the OpenGL renderer draws into a hidden window, read back as a
--- screenshot is: the window is opaque, even where a translucent window
--- colour is painted over itself, and the screenshot's rows run from the
--- top. And a session's window, sized in layout units. Skipped without a
--- display to open a window on.
+-- | Window tests, skipped without a display. The OpenGL renderer draws into
+-- a hidden window and the frame is read back as a screenshot: the window
+-- stays opaque even where a translucent window colour is painted twice, and
+-- rows run top to bottom. A session window is sized in layout units.
 module NanoUI.Rgfw.Window (testGlWindow, testSessionWindow) where
 
 import Control.Exception (bracket)
@@ -37,8 +36,8 @@ testGlWindow assert =
         let theme = windowColor backdrop tomorrowNightMinDarkTheme
             inp = withInput (fromIntegral w) (fromIntegral h)
             opsBox ops = void (drawing (fixedWH 40 20) (smallArrayFromList . ops))
-            -- An opaque box, and the window colour twice over, as a page's
-            -- scroller paints it over the backdrop.
+            -- An opaque box, then the window colour painted twice, as a
+            -- page's scroller paints over the backdrop.
             view = columnWith tight (opsBox (\r -> [FillRect r red]) >> opsBox (\r -> [FillRect r backdrop, FillRect r backdrop]))
         ctx <- newRgfwContext theme
         writeIORef (ctxPaintFull ctx) True
@@ -54,9 +53,9 @@ testGlWindow assert =
         assert (name "the window colour, opaque") (at (w - 1) (h - 1) == rgb backdrop ++ [255])
         assert (name "the window colour stays opaque, painted twice") (and [p !! 3 == 255 | (_, p) <- pixels, take 3 p == rgb backdrop])
         assert (name "an opaque box") (length reds == 800 && all (< 20) reds)
-        -- The present, read from the window's back buffer before any swap,
-        -- copies the retained frame. Colour only: the window's visual may
-        -- have no alpha.
+        -- The present copies the retained frame; read it from the back
+        -- buffer before any swap. Compare colour only, since the window's
+        -- visual may have no alpha.
         win <- readWindowPixels renderer w h
         let shown x y = [fromIntegral (BS.index win (((h - 1 - y) * w + x) * 4 + c)) | c <- [0 .. 2]]
             near want got = and (zipWith (\a b -> abs (a - b) <= 2) want got)
@@ -69,8 +68,8 @@ testGlWindow assert =
     red = colorRGBA 200 30 60 255
     rgb c = map fromIntegral [colorR c, colorG c, colorB c] :: [Int]
 
--- | A session's window opens at its size in layout units, at the scale asked
--- for, which views read, takes a title from a view, and closes when the
+-- | A session window opens at its layout-unit size and requested scale (both
+-- visible to the view), accepts a title from the view, and closes when the
 -- view quits.
 testSessionWindow :: (String -> Bool -> IO ()) -> IO ()
 testSessionWindow assert =

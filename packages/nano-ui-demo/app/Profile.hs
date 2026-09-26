@@ -101,8 +101,8 @@ main = do
       (drawVertexCount dd) (drawIndexCount dd) (drawCmdCount dd)
 
     putStrLn "--- 1b. DEMO UI WITH DEBUG WINDOW OPEN ---"
-    -- Live stats can move the toolbar between workloads, so find the button
-    -- after them.
+    -- Live stats can shift the toolbar during the workloads above, so look
+    -- up the button after them.
     spansLatest <- collectTextSpans ctx'
     case findExact "Debug" spansLatest of
       Nothing -> putStrLn "  Debug button not found\n"
@@ -274,7 +274,7 @@ churnWindowUi k = do
     label "static row"
     )
 
--- | Each run of the action returns the next number, counting from @k0@.
+-- | An action returning @k0@, @k0 + 1@, ... on successive calls.
 newCounter :: Int -> IO (IO Int)
 newCounter k0 = do
   ref <- newIORef k0
@@ -372,8 +372,7 @@ repeated g n widget = columnWith (tight . gap g . fillW) (forM_ [1 .. n] widget)
 numbered :: String -> Int -> T.Text
 numbered prefix i = T.pack (prefix <> show i)
 
--- | Register a @w@ by @h@ RGBA image under a fresh id for the rest of the
--- run, as a benchmark's setup does.
+-- | Register a @w@ x @h@ RGBA image under a fresh id for the rest of the run.
 registerFresh :: Int -> Int -> BS.ByteString -> NanoUI ImageId
 registerFresh w h pixels = do
   iid <- freshImageId

@@ -28,8 +28,8 @@ tests =
 -- | One corner of a drawn quad: x, y, u, v and alpha.
 type Corner = (Float, Float, Float, Float, Float)
 
--- | Two frames of @ui@ in a column: its result, the draw data, and each atlas quad's corners,
--- with UVs within image @iid@'s own 0-1 UVs.
+-- | Run @ui@ in a column for two frames; return its result, the draw data, and each atlas
+-- quad's corners with UVs normalized to image @iid@'s 0-1 range.
 frame :: Context -> ImageId -> NanoUI a -> IO (a, DrawData, [[Corner]])
 frame ctx iid ui = do
   (a, _, dd, _) <- run2Frames ctx (withInput 400 400) (column ui)
@@ -37,14 +37,14 @@ frame ctx iid ui = do
   fmap ((,,) a dd . concat) . withForeignPtr (drawVertices dd) $ \vp -> withForeignPtr (drawIndices dd) $ \ip ->
     forM [c | c <- drawCmdElems dd, cmdTextureId c == atlasTextureId] $ \cmd -> do
       let off = fromIntegral (cmdIndexOffset cmd)
-      -- Each quad's indices run a b c a c d.
+      -- Quad indices are a b c a c d.
       forM [off, off + 6 .. off + fromIntegral (cmdIndexCount cmd) - 6] $ \q ->
         forM [q, q + 1, q + 2, q + 5] $ \ii -> do
           vi <- fromIntegral <$> (peekByteOff ip (ii * indexSize) :: IO Word32)
           let at o = peekByteOff vp (vi * vertexSize + o) :: IO Float
           (\x y u v alpha -> (x, y, (u - a0) / (a1 - a0), (v - b0) / (b1 - b0), alpha)) <$> at 0 <*> at 4 <*> at 24 <*> at 28 <*> at 20
 
--- | Each quad's x and y from @o@, its width and height, and its UV bounds.
+-- | Each quad's position relative to @o@, its size, and its UV bounds.
 bounds :: V2 -> [[Corner]] -> [[Float]]
 bounds (V2 ox oy) quads =
   [ [x0 - ox, y0 - oy, maximum xs - x0, maximum ys - y0, minimum us, minimum vs, maximum us, maximum vs]
@@ -59,15 +59,15 @@ topLeft r = V2 (rectX (respRect r)) (rectY (respRect r))
 near :: Float -> Float -> Bool
 near a b = abs (a - b) < 1.0e-3
 
--- | Require lists of the same length whose numbers are near, showing both otherwise.
+-- | Assert equal-length lists of nearly equal numbers; on failure show both.
 assertNear :: IORef Int -> [Float] -> [Float] -> IO ()
 assertNear failed want got = unless (length want == length got && and (zipWith near want got)) (assertEq failed want got)
 
--- | Register a white image of @w@ by @h@ pixels under @n@.
+-- | Register a white @w@ x @h@ image under id @n@.
 whiteImage :: Context -> Int -> Int -> Int -> IO ImageId
 whiteImage ctx n w h = ImageId n <$ registerImage ctx (ImageId n) w h (BS.replicate (w * h * 4) 255)
 
--- | Each fit places wide and tall images in wide and tall boxes, cropping by UVs, not past the box.
+-- | Each fit places wide and tall images in wide and tall boxes, cropping via UVs, never past the box.
 runImageFitTest :: Context -> IORef Int -> IO ()
 runImageFitTest ctx failed = do
   wide <- whiteImage ctx 1 40 20
@@ -81,7 +81,7 @@ runImageFitTest ctx failed = do
     , (big, wb, FitNone, mid, [0, 0, 100, 80, 0.25, 0.1, 0.75, 0.9]), (wide, tb, FitContain, mid, [0, 45, 60, 30] ++ full)
     , (wide, tb, FitCover, mid, [0, 0, 60, 120, 0.375, 0, 0.625, 1]), (tall, wb, FitContain, mid, [30, 0, 40, 80] ++ full)
     , (tall, wb, FitCover, mid, [0, 0, 100, 80, 0, 0.3, 1, 0.7]), (tall, tb, FitContain, mid, [0, 0, 60, 120] ++ full)
-      -- Alignment places what the fit leaves room around, and picks what a crop keeps.
+      -- Alignment positions a contained image and picks which part a cover crop keeps.
     , (wide, tb, FitContain, (AlignStart, AlignTop), [0, 0, 60, 30] ++ full), (wide, tb, FitContain, (AlignEnd, AlignBottom), [0, 90, 60, 30] ++ full)
     , (wide, wb, FitCover, (AlignEnd, AlignMiddle), [0, 0, 100, 80, 0.375, 0, 1, 1]), (tall, wb, FitCover, (AlignStart, AlignTop), [0, 0, 100, 80, 0, 0, 1, 0.4])
     ]
@@ -89,22 +89,22 @@ runImageFitTest ctx failed = do
       let cfg = defaultImageConfig {icLayout = fixedWH bw bh, icFit = fit, icAlignX = ax, icAlignY = ay}
       (resp, _, quads) <- frame ctx iid (imageConfigured' cfg iid)
       assertNear failed want (concat (bounds (topLeft resp) quads))
-  -- The default configuration stretches the image over its rect, as 'image' does.
+  -- The default config stretches the image over its rect, like 'image'.
   let drawn ui = (\(_, _, quads) -> bounds (V2 0 0) quads) <$> frame ctx wide ui
   plain <- drawn (image (fixedWH 100 80) wide)
   drawn (imageConfigured defaultImageConfig {icLayout = fixedWH 100 80} wide) >>= assertEq failed plain
 
--- | An unsized axis takes the image's size, keeps its shape beside a fixed axis, and obeys limits.
+-- | An unsized axis takes the image's size, keeps its aspect beside a fixed axis, and obeys limits.
 runImageNaturalSizeTest :: Context -> IORef Int -> IO ()
 runImageNaturalSizeTest ctx failed = do
   wide <- whiteImage ctx 1 40 20
-  -- An image not registered takes what 'image' does.
+  -- An unregistered image gets the same size as with 'image'.
   forM_ [(id, wide, (40, 20)), (fixedW 80, wide, (80, 40)), (fixedH 10, wide, (20, 10)), (maxW 20, wide, (20, 10)), (fixedWH 30 30, wide, (30, 30)), (id, ImageId 99, (32, 32))] $
     \(f, iid, want) -> do
       Rect _ _ w h <- respRect <$> warmup2 ctx (withInput 400 400) (column (imageConfigured' defaultImageConfig {icLayout = f} iid))
       assertEq failed want (w, h)
 
--- | Opacity scales the tint's alpha; disabling fades it further, and nothing is drawn at 0.
+-- | Opacity scales the tint's alpha, disabling fades further, and 0 draws nothing.
 runImageOpacityTest :: Context -> IORef Int -> IO ()
 runImageOpacityTest ctx failed = do
   iid <- whiteImage ctx 1 10 10
@@ -118,7 +118,7 @@ runImageOpacityTest ctx failed = do
   assert failed (length faded == 4 && all (< 128 / 255) faded)
   alphas (imageConfigured cfg {icOpacity = 0} iid) >>= assertEq failed []
 
--- | A solid rotation reserves the turned image's bounds; a floating one keeps the layout, clipped.
+-- | A solid rotation reserves the rotated bounds; a floating one keeps the layout and is clipped.
 runImageRotationTest :: Context -> IORef Int -> IO ()
 runImageRotationTest ctx failed = do
   wide <- whiteImage ctx 1 40 20
@@ -126,32 +126,32 @@ runImageRotationTest ctx failed = do
       sizeOf rot = (\(r, _, _) -> [rectW (respRect r), rectH (respRect r)]) <$> frame ctx wide (turned rot)
   sizeOf (RotateFloating (pi / 2)) >>= assertEq failed [40, 20]
   sizeOf (RotateSolid (pi / 2)) >>= assertNear failed [20, 40]
-  -- Layout sizes a widget in whole pixels.
+  -- Layout rounds widget sizes to whole pixels.
   [dw, dh] <- sizeOf (RotateSolid (pi / 4))
   assert failed (abs (dw - 60 / sqrt 2) < 1 && dw == dh)
-  -- A quarter turn fills the 20 by 40 box it reserved, the image's top-left at its top right.
+  -- A quarter turn fills its reserved 20x40 box, with the image's top-left at the box's top-right.
   (solid, _, solidQuads) <- frame ctx wide (turned (RotateSolid (pi / 2)))
   let Rect bx by bw bh = respRect solid
   assertNear failed [0, 0, bw, bh, 0, 0, 1, 1] (concat (bounds (topLeft solid) solidQuads))
   assert failed (or [near x (bx + bw) && near y by | (x, y, u, v, _) <- concat solidQuads, near u 0, near v 0])
-  -- Turned an eighth, a floating image leaves its rect, which clips it.
+  -- A floating image turned 45 degrees overflows its rect, which clips it.
   (floating, floatDraw, floatQuads) <- frame ctx wide (turned (RotateFloating (pi / 4)))
   let Rect _ _ fw fh = respRect floating
   case bounds (topLeft floating) floatQuads of
     [x : y : w : h : _] -> assert failed (x < 0 && y < 0 && x + w > fw && y + h > fh)
     other -> assertEq failed 1 (length other)
   assertEq failed [respRect floating] [Rect (cmdClipX c) (cmdClipY c) (cmdClipW c) (cmdClipH c) | c <- drawCmdElems floatDraw, cmdTextureId c == atlasTextureId]
-  -- A turn that changes, as an animated one does, repaints the image.
+  -- A changed angle (as in an animation) repaints the image.
   _ <- runFrame ctx (withInput 400 400) (column (turned (RotateFloating (pi / 3))))
   takeDamage ctx >>= assert failed . (`clipCovers` respRect floating)
-  -- A turned image that only moves keeps its ops, moved with it.
+  -- A rotated image that only moves keeps its ops, translated.
   let at top = (\(_, _, quads) -> bounds (V2 0 top) quads) <$> frame ctx wide (box (fixedWH 10 top) (colorRGBA 0 0 0 0) >> turned (RotateFloating (pi / 3)))
   high <- at 10
   low <- at 30
   assertEq failed 1 (length low)
   assertNear failed (concat high) (concat low)
 
--- | A drawing's image ops draw registered images from the atlas, turned ones turned.
+-- | A drawing's image ops draw registered images from the atlas, including rotated ones.
 runImageDrawingOpsTest :: Context -> IORef Int -> IO ()
 runImageDrawingOpsTest ctx failed = do
   iid <- whiteImage ctx 1 16 8
@@ -159,15 +159,15 @@ runImageDrawingOpsTest ctx failed = do
       drawn paint = (\(r, _, quads) -> concat (bounds (topLeft r) quads)) <$> frame ctx iid (canvas (fixedWH 40 40) paint)
   drawn (\(Rect x y _ _) -> drawImage (Rect (x + 10) (y + 5) 16 8) iid white) >>= assertNear failed [10, 5, 16, 8, 0, 0, 1, 1]
   drawn (\(Rect x y _ _) -> drawImageWith (imageDraw (Rect (x + 10) (y + 10) 16 8) iid) {imageAngle = pi / 2}) >>= assertNear failed [14, 6, 8, 16, 0, 0, 1, 1]
-  -- A part of the image, faded; an invisible one draws nothing.
+  -- A sub-rect of the image, then faded; opacity 0 draws nothing.
   drawn (\(Rect x y _ _) -> drawImageWith (imageDraw (Rect x y 8 8) iid) {imageUV = Rect 0.5 0 0.5 1}) >>= assertNear failed [0, 0, 8, 8, 0.5, 0, 1, 1]
   let alphas paint = (\(_, _, quads) -> [a | (_, _, _, _, a) <- concat quads]) <$> frame ctx iid (canvas (fixedWH 40 40) paint)
   alphas (\r -> drawImageWith (imageDraw r iid) {imageOpacity = 0.5}) >>= assertNear failed (replicate 4 (128 / 255))
   alphas (\r -> drawImageWith (imageDraw r iid) {imageOpacity = 0}) >>= assertEq failed []
 
--- | A registered image keeps its own shape where the layout sizes one axis:
--- filling a column's width, its height follows. An aspect of the layout's
--- own wins, and a plain 'image' keeps its 32 pixels.
+-- | When the layout sizes one axis, a registered image keeps its aspect
+-- ratio (filling a column's width sets its height). A layout 'aspect'
+-- overrides it, and a plain 'image' stays 32 pixels high.
 runImageOwnAspectTest :: Context -> IORef Int -> IO ()
 runImageOwnAspectTest ctx failed = do
   wide <- whiteImage ctx 1 40 20
@@ -175,27 +175,26 @@ runImageOwnAspectTest ctx failed = do
   sized (imageConfigured' defaultImageConfig {icLayout = fillW} wide) >>= assertEq failed (300, 150)
   sized (imageConfigured' defaultImageConfig {icLayout = fillW . aspect 1} wide) >>= assertEq failed (300, 300)
   sized (image' fillW wide) >>= assertEq failed (300, 32)
-  -- In a row that shares its width out, at the width it gets.
+  -- In a row that splits its width, the height follows the share it gets.
   sized (rowWith (tight . gap 0 . fillW) (imageConfigured' defaultImageConfig {icLayout = fillW} wide <* box (fixedWH 100 10) (colorRGBA 0 0 0 0)))
     >>= assertEq failed (200, 100)
 
--- | A crop draws a part of the image as if it were the whole, its size and
--- its fit that part's, and a scale zooms the fitted image about its centre,
--- cut to the rect.
+-- | A crop treats part of the image as the whole image for size and fit. A
+-- scale zooms the fitted image about its centre, clipped to the rect.
 runImageCropScaleTest :: Context -> IORef Int -> IO ()
 runImageCropScaleTest ctx failed = do
   wide <- whiteImage ctx 1 40 20
   let drawnWith cfg = (\(r, _, quads) -> (rectW (respRect r), rectH (respRect r), concat (bounds (topLeft r) quads))) <$> frame ctx wide (imageConfigured' cfg wide)
       check cfg want = drawnWith cfg >>= \(w, h, got) -> assertNear failed want (w : h : got)
   check defaultImageConfig {icCrop = Just (Rect 10 0 20 20)} [20, 20, 0, 0, 20, 20, 0.25, 0, 0.75, 1]
-  -- A crop past the image is kept within it.
+  -- A crop past the image edge is clamped to it.
   check defaultImageConfig {icCrop = Just (Rect 30 10 100 100)} [10, 10, 0, 0, 10, 10, 0.75, 0.5, 1, 1]
   check defaultImageConfig {icLayout = fixedWH 100 80, icScale = 2} [100, 80, 0, 0, 100, 80, 0.25, 0.25, 0.75, 0.75]
   check defaultImageConfig {icLayout = fixedWH 100 80, icScale = 0.5} [100, 80, 25, 20, 50, 40, 0, 0, 1, 1]
   check defaultImageConfig {icLayout = fixedWH 100 80, icCrop = Just (Rect 0 0 20 20), icScale = 2} [100, 80, 0, 0, 100, 80, 0.125, 0.25, 0.375, 0.75]
   check defaultImageConfig {icLayout = fixedWH 100 80, icCrop = Just (Rect 0 0 20 20), icFit = FitContain} [100, 80, 10, 0, 80, 80, 0, 0, 0.5, 1]
 
--- | 'fitRect' places content by each fit and alignment, reaching past the box where the fit overflows it.
+-- | 'fitRect' places content for each fit and alignment, extending past the box when the fit overflows.
 runImageFitRectTest :: Context -> IORef Int -> IO ()
 runImageFitRectTest _ failed = do
   let box0 = Rect 10 10 100 80
@@ -211,8 +210,8 @@ runImageFitRectTest _ failed = do
     , at FitContain AlignStart AlignTop (0, 10)
     ]
 
--- | A configured image drawn another way at the same rect repaints, as a
--- fade that animates does, and one drawn the same way does not.
+-- | Changing how a configured image draws at the same rect (e.g. an
+-- animated fade) repaints it; drawing it unchanged does not.
 runImageLookDamageTest :: Context -> IORef Int -> IO ()
 runImageLookDamageTest ctx failed = do
   writeIORef (ctxPaintFull ctx) False
@@ -227,8 +226,8 @@ runImageLookDamageTest ctx failed = do
   takeDamage ctx >>= assert failed . damageIsEmpty
   writeIORef (ctxPaintFull ctx) True
 
--- | An SVG icon drawn with a configuration fades and turns as an image does,
--- and the default draws what 'svgIconWith' draws.
+-- | A configured SVG icon fades like an image, and the default config draws
+-- the same as 'svgIconWith'.
 runSvgIconConfiguredTest :: Context -> IORef Int -> IO ()
 runSvgIconConfiguredTest ctx failed = do
   doc <- either fail pure (parseSvg "<svg viewBox='0 0 24 24'><rect x='2' y='2' width='20' height='20'/></svg>")
@@ -239,10 +238,10 @@ runSvgIconConfiguredTest ctx failed = do
   quadsOf (svgIconConfigured defaultImageConfig {icLayout = fixedWH 16 16 . fontColor (white 255), icOpacity = 0.5} doc)
     >>= assert failed . any ((== white 128) . snd)
 
--- | 'useImageRgba' registers once per key and hands back the same id while
--- the view calls it; a new key registers anew and lets the old image go, and
--- a frame that does not call it lets its image go, whose room the next image
--- takes.
+-- | 'useImageRgba' registers once per key and returns the same id while
+-- called. A new key registers a new image and frees the old one. A frame
+-- that skips the hook frees its image, and the next image reuses that
+-- atlas space.
 runUseImageRgbaTest :: Context -> IORef Int -> IO ()
 runUseImageRgbaTest ctx failed = do
   let px v = BS.replicate (8 * 8 * 4) v
@@ -254,20 +253,19 @@ runUseImageRgbaTest ctx failed = do
   frameOf (hook ("a" :: T.Text)) >>= assertEq failed (Just a)
   lookupImageSize ctx a >>= assertEq failed (Just (8, 8))
   aAt <- originOf a
-  -- Another key: a new image in the old one's room, the old one gone.
+  -- A new key: the old image is freed and the new one takes its space.
   Just b <- frameOf (hook ("b" :: T.Text))
   assert failed (b /= a)
   lookupImageSize ctx a >>= assertEq failed Nothing
   originOf b >>= assertEq failed aAt
-  -- A frame without the hook lets its image go, and the next image that
-  -- fits takes its room.
+  -- A frame without the hook frees its image; the next image reuses the space.
   frameOf (pure ())
   lookupImageSize ctx b >>= assertEq failed Nothing
   Just c <- frameOf (hook (1 :: Int))
   originOf c >>= assertEq failed aAt
   assert failed (c /= a && c /= b)
-  -- A hook in a scope keeps its image while shown, and lets it go when not,
-  -- and the hook before it keeps its own.
+  -- A hook in a scope keeps its image while the scope is shown and frees it
+  -- when not; the preceding hook keeps its own.
   let shown on = (,) <$> hook (1 :: Int) <*> scope (if on then hook ("s" :: T.Text) else pure Nothing)
   (c1, s) <- frameOf (shown True)
   assertEq failed (Just c) c1

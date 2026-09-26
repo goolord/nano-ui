@@ -312,8 +312,8 @@ withPty action = bracket boot close (action . fst)
     signalProcess sigKILL pid `catch` \(_ :: IOException) -> pure ()
     void (getProcessStatus True False pid)
 
--- | Run a read or write on the PTY: @busy@ when it would block, @gone@ when
--- the shell has exited.
+-- | Run a PTY read or write, returning @busy@ if it would block and @gone@
+-- if the shell has exited.
 onPty :: IO a -> (a -> b) -> b -> b -> IO b
 onPty io done busy gone =
   try io >>= \case
@@ -339,14 +339,13 @@ send :: Fd -> B.ByteString -> IO B.ByteString
 send _ b | B.null b = pure b
 send fd b = onPty (P.fdWrite fd b) (\n -> B.drop (fromIntegral n) b) b B.empty
 
--- | What a frame's keys and typing send to the shell: its text, then its
--- keys, the order the session runner leaves them in ('inputKeys').
+-- | Bytes a frame's input sends to the shell: typed text, then keys, the
+-- order the session runner leaves them in ('inputKeys').
 keys :: Input -> B.ByteString
 keys inp = E.encodeUtf8 (prefix <> text <> foldMap key (inputKeys inp))
  where
   mods = inputModifiers inp
-  -- Ctrl with a key sends its control code; what Ctrl typed, if anything,
-  -- is not sent as well.
+  -- Ctrl+key sends the control code, so text typed with Ctrl is dropped.
   ctrl = modCtrl mods && not (modAlt mods)
   ctrlChar = T.singleton . chr . (.&. 31) . ord . toUpper
   text = if ctrl then "" else inputChars inp
@@ -397,8 +396,8 @@ main = withPty $ \fd -> do
           events <- pollEvents
           let
             inputs = fmap (applyEvent emptyInput) events
-            -- Each event's bytes, in order. While the input method composes,
-            -- the keys are its own, and only the text it commits is sent.
+            -- Each event's bytes, in order. While the input method is
+            -- composing, it owns the keys and only committed text is sent.
             (inp', typed) = foldl' typeEvent (clearEphemeral inp, B.empty) (zip events inputs)
             typeEvent (i, out) (ev, one) =
               (applyEvent i ev, out <> if isJust (inputComposition i) then E.encodeUtf8 (inputChars one) else keys one)
@@ -417,9 +416,9 @@ main = withPty $ \fd -> do
         . S.takeWhile (\(_, _, _, ended, _) -> not ended)
         $ S.iterateM advance (pure (blank, B.empty, emptyInput, False, True))
 
--- | The terminal holds the keyboard, every key its own, and takes typed text
--- from the input method, whose composition it draws at the cursor, where
--- the input method's candidate window goes too.
+-- | The terminal claims every key and takes typed text from the input
+-- method. It draws the composition at the cursor and places the candidate
+-- window there too.
 view :: Term -> NanoUI ()
 view t = do
   wid <- nextId
@@ -455,7 +454,7 @@ drawTerm t preedit (Rect x y w h) = do
     curX = x + 8 + fromIntegral (min 79 cx) * 10
     curY = y + 29 + fromIntegral cy * 24
   when (back t < 1) $ drawRect (Rect curX curY 10 2) 0x81A1C1FF
-  -- The composition, underlined, over the cells from the cursor on.
+  -- The composition, underlined, over the cells starting at the cursor.
   forM_ preedit $ \c -> do
     let comp = compositionText c
         compW = fromIntegral (T.length comp) * 10

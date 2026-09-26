@@ -1,5 +1,5 @@
--- | The blocks and spans the commonmark library's parse becomes. CommonMark
--- itself is the library's to get right.
+-- | How the commonmark library's parse maps to our blocks and spans.
+-- CommonMark conformance itself is the library's concern.
 module Parse (spec) where
 
 import NanoUI.Markdown
@@ -68,8 +68,7 @@ spec = do
     it "decodes escapes and entities into one piece of text" $
       "\\*a\\* &amp; &ouml; &#65; &bogus;" `inlineOf` [Str "*a* & \246 A &bogus;"]
   where
-    -- The one block a text parses to, and the spans of the one paragraph it
-    -- parses to.
+    -- The single block a text parses to, or the spans of its single paragraph.
     parsesTo src b = parseMarkdownBlocks src `shouldBe` [b]
     inlineOf src spans = parsesTo src (Paragraph spans)
     para t = Paragraph [Str t]

@@ -162,14 +162,12 @@ zoomWindow win (Size w h) zoom = do
   void $ setWindowSize win (round zw) (round zh)
   void $ setWindowPosition win windowPosCentered windowPosCentered
 
--- | SDL_WINDOWPOS_CENTERED, a window position that centres the window on the
--- display it is on: the centring mask with display 0.
+-- | SDL_WINDOWPOS_CENTERED: the centring mask with display 0.
 windowPosCentered :: Int32
 windowPosCentered = fromIntegral Video.sDL_WINDOWPOS_CENTERED_MASK
 
--- | Whether the desktop is set to light or dark colours, 'Nothing' when SDL
--- cannot tell. SDL keeps the value its theme-change event reports, so this
--- only reads it.
+-- | The desktop's light or dark setting, or 'Nothing' if SDL cannot tell.
+-- Cheap: SDL caches the value from its theme-change event.
 querySystemAppearance :: IO (Maybe Appearance)
 querySystemAppearance =
   getSystemTheme >>= \case

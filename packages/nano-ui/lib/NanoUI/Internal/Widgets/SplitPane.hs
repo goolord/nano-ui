@@ -1,7 +1,7 @@
--- | The pure tree model and geometry behind "NanoUI.Widgets.PaneGrid": a
--- binary split tree of panes, each split with an axis, a ratio in @[0,1]@
--- for its first (A) side, and two subtrees. Panes and splits have unique
--- 'Word64' ids, so pane state is keyed by id wherever the pane moves.
+-- | Pure tree model and geometry for "NanoUI.Widgets.PaneGrid". A
+-- 'GridNode' is a binary split tree. Each split has an axis, a ratio in
+-- @[0,1]@ for its first (A) side, and two subtrees. Panes and splits have
+-- unique 'Word64' ids, so pane state stays keyed to a pane as it moves.
 module NanoUI.Internal.Widgets.SplitPane
   ( GridAxis (..)
   , GridNode (..)
@@ -71,7 +71,7 @@ data PaneDrop
       -- the A (left/top) side, 'False' on the B (right/bottom) side.
   | DropTop GridAxis Bool
       -- ^ Drop on the grid's outer edge: the whole tree is wrapped in a new
-      -- top-level split with the dragged pane on the A side for 'True'.
+      -- top-level split. 'True' puts the dragged pane on the A side.
   deriving (Eq, Show)
 
 -- | Fold a tree bottom-up: @onPane@ for each pane id, @onSplit@ for each
@@ -152,8 +152,8 @@ splitBounds ax spacing r d =
       , alongAxis ax (Rect (x + d) y spacing h)
       )
 
--- | A split's divider: its id, axis and ratio, the split's region, the
--- spacing band, and the minima its two sides keep along the axis.
+-- | A split's divider: id, axis, ratio, the split's region, the spacing
+-- band, and each side's minimum extent along the axis.
 data DividerInfo = DividerInfo
   { diSplitId :: {-# UNPACK #-} !Word64
   , diAxis :: !GridAxis
@@ -215,16 +215,16 @@ treeSetRatio :: Word64 -> Float -> GridNode -> GridNode
 treeSetRatio splitId r =
   foldGrid Pane (\sid ax r0 -> Split sid ax (if sid == splitId then clamp01 r else r0))
 
--- | Whether this side of a split is itself a pinned pane. A pin fixes a
--- pane's extent only along the split it hangs directly off.
+-- | Whether this side of a split is itself a pinned pane. A pin only fixes
+-- a pane's extent along its direct parent split's axis.
 pinnedSide :: (Word64 -> Bool) -> GridNode -> Bool
 pinnedSide isFixed = \case
   Pane p -> isFixed p
   Split{} -> False
 
--- | The A-side ratio that gives a split of this region the extent @d@ within
--- the subtree minima: the inverse of 'splitLength', clamped to what the
--- split can really do. Zero for a region with no room beside the gutter.
+-- | The A-side ratio that gives this region's split an A extent of @d@. The
+-- inverse of 'splitLength', clamped to the subtree minima so the ratio
+-- matches the real split. Zero when the region has no room beside the gutter.
 lengthRatio :: Float -> Float -> Float -> Float -> Float -> Float
 lengthRatio spacing avail minA minB d
   | usable <= 0 = 0
@@ -232,12 +232,12 @@ lengthRatio spacing avail minA minB d
   where
     usable = avail - spacing
 
--- | Re-ratio a tree for a region that changed size, so the panes the
--- predicate picks keep their extent along their parent split's axis: the
--- other side of that split ('pinnedSide') takes the difference, and every
--- other split keeps its ratio. A split pinned on both sides or neither, or
--- with no room beside the gutter, keeps its ratio. A pinned pane squeezed
--- below its extent stays at the smaller one when the region grows back.
+-- | Re-ratio a tree for a resized region so the panes the predicate selects
+-- keep their extent along their parent split's axis. The other side of that
+-- split ('pinnedSide') absorbs the change. All other splits keep their
+-- ratio, including splits pinned on both sides or neither and splits with no
+-- room beside the gutter. A pinned pane squeezed below its extent keeps the
+-- smaller extent when the region grows back.
 reflowFixed :: (Word64 -> Bool) -> Float -> Float -> Rect -> Rect -> GridNode -> GridNode
 reflowFixed isFixed minSize spacing = go
   where
@@ -251,9 +251,9 @@ reflowFixed isFixed minSize spacing = go
         dOld = splitLength spacing oldAvail mA mB ratio
         fixedA = pinnedSide isFixed a
         fixedB = pinnedSide isFixed b
-        -- The A-side extent that keeps the pinned side's. That extent is
-        -- rounded to a whole unit, or a reflow on every frame of a resize
-        -- would walk it off through ratio round trips.
+        -- A-side extent that preserves the pinned side. The pinned extent is
+        -- rounded to a whole unit so per-frame reflows during a resize don't
+        -- drift through ratio round trips.
         wanted
           | fixedA = whole dOld
           | otherwise = (newAvail - spacing) - whole (oldAvail - spacing - dOld)
@@ -356,14 +356,16 @@ data DropPreview = DropPreview
   }
   deriving (Eq, Show)
 
--- | The drop simulated ('treeMovePane') and laid out ('layoutNode') in the
--- grid rect, so 'dpRect' is exactly where the dragged pane lands, however the
--- rest of the tree reshapes; draw the rest of the grid from 'dpTree' too.
--- @spacing@ must be the gutter really laid out between panes. The drop's new
--- split, if any, takes @splitId@. With a @source@ rect (from the committed
+-- | Preview a drop by simulating it ('treeMovePane') and laying out the
+-- result ('layoutNode') in the grid rect. 'dpRect' is exactly where the
+-- dragged pane lands. Other panes move too, so draw the rest of the grid
+-- from 'dpTree'.
+--
+-- @spacing@ must be the gutter actually laid out between panes. The new
+-- split, if any, gets @splitId@. With a @source@ rect (from the committed
 -- layout) the pane keeps its extent along its old parent split's axis,
--- within the destination's minima; center swaps ignore it. 'Nothing' when
--- the drop cannot be made.
+-- clamped to the destination's minima; center swaps ignore it. 'Nothing'
+-- when the drop is impossible.
 dropPreviewTreeSized :: Maybe Rect -> Float -> Float -> GridNode -> Word64 -> Word64 -> Rect -> PaneDrop -> Maybe DropPreview
 dropPreviewTreeSized source minSize spacing tree moved splitId baseRect dt = do
   t' <- treeMovePane moved splitId dt tree

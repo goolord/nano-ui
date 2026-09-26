@@ -208,18 +208,17 @@ isDirty ctx = getsDamage ctx dsDirty
 setWakeLoop :: Context -> IO () -> IO ()
 setWakeLoop ctx wake = writeIORef (ctxWakeLoop ctx) (Just wake)
 
--- | Wake the loop from any thread, after changing something the view reads.
--- The frame that runs next repaints the whole window ('takeThreadWake'),
--- since nothing says which widgets show the change. Publish the change
--- before waking.
+-- | Wake the loop from any thread after changing state the view reads.
+-- Publish the change first. The next frame repaints the whole window
+-- ('takeThreadWake'), since the affected widgets are unknown.
 wakeFromThread :: Context -> IO ()
 wakeFromThread ctx = do
   atomicWriteIORef (ctxWoken ctx) True
   readIORef (ctxWakeLoop ctx) >>= sequence_
 
--- | As a frame starts, before its view reads anything: queue a whole-window
--- repaint for the 'wakeFromThread' calls since the last frame. A call made
--- while the view runs is left for the frame it wakes.
+-- | At frame start, before the view runs: queue a full repaint if
+-- 'wakeFromThread' was called since the last frame. Calls made while the
+-- view runs are left for the frame they wake.
 {-# INLINE takeThreadWake #-}
 takeThreadWake :: Context -> IO ()
 takeThreadWake ctx = do
@@ -232,7 +231,7 @@ takeThreadWake ctx = do
 -- arrives. The earliest request wins. Each frame starts with none pending, so
 -- a widget that still needs a later frame asks again as it is built; one that
 -- is gone stops asking, and the loop sleeps. Call it from the UI thread: a
--- background thread wakes the loop with 'wakeFromThread' instead.
+-- background thread uses 'wakeFromThread' instead.
 requestWakeAt :: Context -> Double -> IO ()
 requestWakeAt ctx t = do
   cur <- readIORef (ctxWakeAt ctx)
@@ -273,12 +272,11 @@ takeDamagePieces ctx = getsDamage ctx dsDamagePieces
 getPrevRect :: Context -> WidgetId -> IO (Maybe Rect)
 getPrevRect ctx wid = getsDamage ctx (IM.lookup (intKey wid) . pfRects . dsPrev)
 
--- | For a widget @wid@ the pointer is over in the frame the user saw, whether
--- a stack or a pinned node draws something that takes the pointer over it
--- there, which has the pointer instead ('ctxPointerReach'). Ask it only of a
--- widget the pointer is over: it answers for where the pointer is. A widget
--- that tests a press against a rect of its own, not through its
--- 'NanoUI.Internal.Widgets.Node.Response', asks this too.
+-- | Whether a pointer-taking node drawn over @wid@ (by layers or a pin) has
+-- the pointer instead, in the frame the user saw ('ctxPointerReach'). Only
+-- meaningful for a widget under the pointer. Widgets that hit-test presses
+-- against their own rect, rather than via
+-- 'NanoUI.Internal.Widgets.Node.Response', must check this too.
 {-# INLINE pointerCovered #-}
 pointerCovered :: Context -> WidgetId -> IO Bool
 pointerCovered ctx wid = maybe False (not . IS.member (intKey wid)) <$> readIORef (ctxPointerReach ctx)

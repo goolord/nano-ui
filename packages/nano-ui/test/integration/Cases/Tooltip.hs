@@ -12,16 +12,16 @@ tests =
   , spec "tooltip-gap" runTooltipGapTest
   ]
 
--- | Rest the pointer where @inp@ has it until the default tooltip delay has
--- run out, and return the frame after.
+-- | Hold the pointer still past the default tooltip delay, then return the
+-- next frame's result.
 restOn :: Context -> Input -> NanoUI a -> IO a
 restOn ctx inp ui = do
   _ <- runFrame ctx inp ui
   threadDelay (round (tooltipDelay defaultTooltipConfig * 1e6) + 50000)
   evalUi ctx inp ui
 
--- Resting on a target shows its text tooltip, and a widget tooltip only
--- evaluates its body while it is up.
+-- Resting on a target shows its text tooltip. A widget tooltip evaluates its
+-- body only while shown.
 runTooltipHoverTest :: Context -> IORef Int -> IO ()
 runTooltipHoverTest ctx failed = do
   let inp0 = withInput 640 480
@@ -42,7 +42,7 @@ runTooltipHoverTest ctx failed = do
   assert failed (not (hasText "Helpful advice" spans0))
   assert failed (case body0 of Nothing -> True; _ -> False)
 
-  -- Hovered: no tooltip until the pointer has rested, then the overlay
+  -- Hovered: no tooltip until the pointer rests
   let hoverHelp = inp0 {inputMousePos = centerOf help}
   _ <- runFrame ctx hoverHelp ui
   assert failed . not . hasText "Helpful advice" =<< collectOverlayTextSpans ctx hoverHelp
@@ -97,8 +97,8 @@ runTooltipScrollPosTest ctx failed = do
         assert failed (abs (tipY - visualBottom) <= 16)
         assert failed (abs (tipY - visualBottom) < abs (tipY - layoutBottom))
 
--- | A disabled widget has its tooltip, where the pointer is on it and
--- nothing is drawn over it, though it takes no hover.
+-- | A disabled widget shows its tooltip where the pointer is on it and
+-- nothing covers it, even though it reports no hover.
 runTooltipDisabledTargetTest :: Context -> IORef Int -> IO ()
 runTooltipDisabledTargetTest ctx failed = do
   let inp0 = withInputOff 400 200
@@ -118,7 +118,7 @@ runTooltipDisabledTargetTest ctx failed = do
   tipAt (V2 170 20) >>= assertEq failed (False, False)
   tipAt (V2 300 150) >>= assertEq failed (False, False)
 
--- | 'tooltipGap' is the space between the tooltip and its target.
+-- | 'tooltipGap' sets the space between the tooltip and its target.
 runTooltipGapTest :: Context -> IORef Int -> IO ()
 runTooltipGapTest ctx failed = do
   let inp0 = withInputOff 400 300

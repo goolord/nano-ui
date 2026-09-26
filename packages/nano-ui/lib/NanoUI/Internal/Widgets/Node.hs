@@ -83,16 +83,15 @@ respRect = rawRespRect . toResponse
 respHovered :: HasResponse r => r -> Bool
 respHovered = rawRespHovered . toResponse
 
--- | Whether the left button went down on the widget and is held over it
--- ('respHeldWith' 'MouseLeft'). This is a held state, not a one-frame
--- button-down event.
+-- | 'respHeldWith' 'MouseLeft'. A held state, not a one-frame button-down
+-- event.
 {-# INLINE respPressed #-}
 respPressed :: HasResponse r => r -> Bool
 respPressed = respHeldWith MouseLeft
 
--- | Whether the widget reports activation on this frame: a left click on
--- it, or Enter or Space while it has the keyboard, whatever activates it.
--- 'respClickedWith' is a click of one button alone.
+-- | Whether the widget was activated this frame: a left click, or whatever
+-- key activates it while focused (usually Enter or Space). For clicks of a
+-- specific button only, use 'respClickedWith'.
 {-# INLINE respClicked #-}
 respClicked :: HasResponse r => r -> Bool
 respClicked = rawRespClicked . toResponse
@@ -108,7 +107,7 @@ respSubmitted :: HasResponse r => r -> Bool
 respSubmitted = rawRespSubmitted . toResponse
 
 -- | Whether the button went down on the widget and is held over it. A
--- button held from elsewhere and dragged over the widget does not count.
+-- button pressed elsewhere and dragged over does not count.
 --
 -- > (_, area) <- mouseArea id (label "Pan me")
 -- > when (respHeldWith MouseMiddle area) (pan =<< uiMousePos)
@@ -116,10 +115,9 @@ respSubmitted = rawRespSubmitted . toResponse
 respHeldWith :: HasResponse r => MouseButton -> r -> Bool
 respHeldWith b = buttonsMember b . rawRespHeld . toResponse
 
--- | Whether a click of the button completed on the widget this frame: the
--- button went down on the widget and came up on it. A click of any button
--- but the left is only this; what it does is up to the view, such as a
--- middle click closing a tab. A left click is also 'respClicked'.
+-- | Whether the button was pressed and released on the widget this frame.
+-- Non-left clicks are reported only here, for the view to handle (a middle
+-- click closing a tab, say). Left clicks also set 'respClicked'.
 {-# INLINE respClickedWith #-}
 respClickedWith :: HasResponse r => MouseButton -> r -> Bool
 respClickedWith b = buttonsMember b . rawRespClickedWith . toResponse
@@ -145,11 +143,9 @@ data Response = Response
   , rawRespChanged :: !Bool
   , rawRespSubmitted :: !Bool
   , rawRespHeld :: {-# UNPACK #-} !MouseButtons
-  -- ^ The buttons that went down on the widget and are held over it
-  -- ('respHeldWith').
+  -- ^ See 'respHeldWith'.
   , rawRespClickedWith :: {-# UNPACK #-} !MouseButtons
-  -- ^ The buttons whose click completed on the widget this frame
-  -- ('respClickedWith').
+  -- ^ See 'respClickedWith'.
   }
   deriving (Eq, Show)
 
@@ -222,15 +218,12 @@ containerResponse nt layout child = do
   resp <- withContext (\ctx -> resolveInteraction ctx inp wid)
   pure (r, resp)
 
--- | A column without padding, laid out by the modifier, that reports the
--- pointer over it and everything in it, as iced's @mouse_area@ does: whether
--- it is hovered ('respHovered'), which buttons went down on it and are held
--- ('respHeldWith') and which clicked it ('respClickedWith', and
--- 'respClicked' for the left one). A widget inside keeps what it takes for
--- itself, so a click on a button inside is the button's; any other button,
--- and a click beside the widgets, is the area's. Nothing inside covers the
--- area, so what the area shows while hovered stays shown while the pointer
--- is on it:
+-- | An unpadded column that reports pointer activity over itself and its
+-- contents, like iced's @mouse_area@: 'respHovered', 'respHeldWith',
+-- 'respClickedWith' and 'respClicked'. Children keep the input they handle
+-- (a click on an inner button belongs to the button); other buttons and
+-- clicks between children go to the area. Children do not cover the area,
+-- so hover stays true while the pointer is over them:
 --
 -- > (hovered, setHovered) <- useFlag False
 -- > (_, item) <- mouseArea (fillW . gap 6) $ do
@@ -366,21 +359,18 @@ addWidgetWithOptions wid nt txt opts value layout =
     setOptions arena idx opts
     setStyleIdx arena idx 0
 
--- | Whether the pointer at @mouse@ is on widget @wid@ laid out at @rect@
--- last frame, with @mIdx@ its node: on the part of it scrollers leave in
--- view ('nodeInteractionHit'), with nothing that takes the pointer drawn over
--- it there ('pointerCovered'), and the widget not letting the pointer
--- through ('passesPointer'). Whether the widget takes the pointer, being
--- enabled and not dragged over, is its hover's business.
+-- | Whether @mouse@ is on widget @wid@ (last frame's @rect@, node @mIdx@):
+-- inside its scroll-visible part ('nodeInteractionHit'), not covered by
+-- another pointer-taking node ('pointerCovered'), and not 'passesPointer'.
+-- Disabled and drag-capture checks are left to the caller.
 pointerOnWidget :: Context -> Maybe NodeIdx -> WidgetId -> Rect -> V2 -> IO Bool
 pointerOnWidget ctx mIdx wid rect mouse =
   (not <$> pointerCovered ctx wid)
     <&&> (not <$> maybe (pure False) (passesPointer (ctxNodeArena ctx)) mIdx)
     <&&> widgetHit ctx mIdx rect mouse
 
--- | Whether point @p@ is on the part of a widget laid out at @rect@ last
--- frame that the scrollers around its node @mIdx@ leave in view
--- ('nodeInteractionHit'); on @rect@ for a widget without a node.
+-- | Whether @p@ is inside the scroll-visible part of @rect@
+-- ('nodeInteractionHit'), or inside @rect@ when there is no node.
 widgetHit :: Context -> Maybe NodeIdx -> Rect -> V2 -> IO Bool
 widgetHit ctx mIdx rect p = maybe (pure (rectContains rect p)) (\idx -> nodeInteractionHit ctx idx rect p) mIdx
 
@@ -400,23 +390,19 @@ resolveInteraction ctx inp wid = do
       presses <- readIORef (ctxPressPos ctx)
       let
         -- Whether the button went down on this widget. A press the frame
-        -- never saw (synthesized input, or one swallowed before it arrived)
-        -- leaves the gesture unowned, so nobody is ruled out.
+        -- never saw (synthesized or swallowed input) rules nobody out.
         startedHere b = maybe (pure True) (widgetHit ctx mIdx rect) (M.lookup b presses)
-      -- A held left button belongs to whatever it went down on. Another
-      -- widget the drag passes over is not hovered, so it neither lights up
-      -- nor reports a press of its own.
+      -- A held left button belongs to the widget it went down on; others
+      -- the drag passes over are not hovered.
       captured <-
         pure (heldIn MouseLeft inp)
           <&&> if hashWidgetId active /= 0 && active /= wid
             then pure True
             else not <$> startedHere MouseLeft
-      -- Where layers or a pinned node draw something that takes the
-      -- pointer over this one, the pointer is that one's; and a node that
-      -- lets the pointer through ('PointerPass') takes none of it.
+      -- Covered widgets and 'PointerPass' nodes get no hover.
       hovered <- pure (not (disabled || captured)) <&&> pointerOnWidget ctx mIdx wid rect mouse
-      -- Every other button, held or released, is the widget's only when it
-      -- went down on it; a hovered widget owns a held left button already.
+      -- Other buttons count only if pressed here. A hovered widget already
+      -- owns a held left button.
       let ownedHere bs = if hovered then buttonsFilterM startedHere bs else pure noButtons
           leftHeld = if hovered && heldIn MouseLeft inp then buttonsInsert MouseLeft noButtons else noButtons
       held <- (leftHeld <>) <$> ownedHere (buttonsDelete MouseLeft (inputButtonsHeld inp))

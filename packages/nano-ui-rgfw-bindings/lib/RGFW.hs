@@ -69,7 +69,7 @@ data Event
   = EventNone
   | EventKeyPress !Word32 !Word8
   | EventKeyRepeat !Word32 !Word8
-  -- ^ The auto-repeat of a held key.
+  -- ^ Auto-repeat of a held key.
   | EventKeyRelease !Word32 !Word8
   | EventKeyChar !Char
   | EventMouseButton !Word8 !Bool -- Button, Pressed
@@ -114,9 +114,8 @@ closeWindow (Window ptr) = c_RGFW_window_close ptr
 waitForEvent :: Int -> IO ()
 waitForEvent t = c_RGFW_waitForEvent (fromIntegral t)
 
--- | End a 'waitForEvent' that is waiting, or make the next one return at
--- once: how another thread wakes a loop blocked on events. Safe to call from
--- any thread once a window exists.
+-- | Wake a blocked 'waitForEvent', or make the next one return at once. Safe
+-- to call from any thread once a window exists.
 stopWaitForEvent :: IO ()
 stopWaitForEvent = c_RGFW_stopCheckEvents
 
@@ -183,9 +182,9 @@ pollEvent (Window win) evPtr = do
           | otherwise ->
               pure (EventOther t)
 
--- | The key code a physical key has in the current keyboard layout: on an
--- AZERTY layout the key in QWERTY's Q place is 'rgfw_keyA'. 'Nothing' when
--- the layout gives it none that RGFW names. Needs an open window.
+-- | Map a physical key code to its code in the current keyboard layout: on
+-- AZERTY, the key in QWERTY's Q position gives 'rgfw_keyA'. 'Nothing' when
+-- RGFW has no code for the result. Needs an open window.
 physicalToMappedKey :: Word32 -> IO (Maybe Word32)
 physicalToMappedKey key
   | key > 0xFF = pure Nothing
@@ -209,7 +208,7 @@ setMouseStandard (Window win) icon = (/= 0) <$> c_rgfw_window_set_mouse_standard
 setMouseDefault :: Window -> IO Bool
 setMouseDefault (Window win) = (/= 0) <$> c_rgfw_window_set_mouse_default win
 
--- | Show the pointer over the window, or hide it ('False').
+-- | Show or hide the pointer over the window.
 showMouse :: Window -> Bool -> IO ()
 showMouse (Window win) visible = c_RGFW_window_showMouse win (if visible then 1 else 0)
 
@@ -233,9 +232,9 @@ writeClipboardText txt =
   TF.withCStringLen txt $ \(ptr, len) ->
     (/= 0) <$> c_rgfw_write_clipboard_text ptr (fromIntegral len)
 
--- | Give the window (and its taskbar entry) an icon: @w@ by @h@ pixels of
--- tightly packed RGBA bytes, rows from the top. RGFW copies them. 'False'
--- when the size is not positive, the bytes are too few, or RGFW refuses.
+-- | Set the window and taskbar icon from @w@ by @h@ tightly packed RGBA
+-- pixels, top row first. RGFW copies the data. 'False' for a non-positive
+-- size, too few bytes, or an RGFW failure.
 setWindowIcon :: Window -> Int -> Int -> ByteString -> IO Bool
 setWindowIcon (Window win) w h pixels
   | w <= 0 || h <= 0 || BS.length pixels < w * h * 4 = pure False
@@ -243,17 +242,17 @@ setWindowIcon (Window win) w h pixels
       unsafeUseAsCString pixels $ \p ->
         (/= 0) <$> c_RGFW_window_setIcon win (castPtr p) (fromIntegral w) (fromIntegral h) (CUChar rgfw_formatRGBA8)
 
--- | The smallest size the user may give the window, in native pixels; an
--- axis of zero has no limit.
+-- | Minimum size the user can resize to, in native pixels; 0 on an axis
+-- means no limit.
 setWindowMinSize :: Window -> Int -> Int -> IO ()
 setWindowMinSize (Window win) w h = c_RGFW_window_setMinSize win (fromIntegral w) (fromIntegral h)
 
--- | The largest size the user may give the window, in native pixels; an
--- axis of zero has no limit.
+-- | Maximum size the user can resize to, in native pixels; 0 on an axis
+-- means no limit.
 setWindowMaxSize :: Window -> Int -> Int -> IO ()
 setWindowMaxSize (Window win) w h = c_RGFW_window_setMaxSize win (fromIntegral w) (fromIntegral h)
 
--- | Move the window's top-left corner to a point on the desktop, in pixels.
+-- | Move the window's top-left corner to a desktop position in pixels.
 moveWindow :: Window -> Int -> Int -> IO ()
 moveWindow (Window win) x y = c_RGFW_window_move win (fromIntegral x) (fromIntegral y)
 
@@ -261,7 +260,7 @@ moveWindow (Window win) x y = c_RGFW_window_move win (fromIntegral x) (fromInteg
 centerWindow :: Window -> IO ()
 centerWindow (Window win) = c_RGFW_window_center win
 
--- | Set the window's title, which the title bar and the taskbar show.
+-- | Set the window title shown in the title bar and taskbar.
 setWindowName :: Window -> Text -> IO ()
 setWindowName (Window win) name = TF.withCString name (c_RGFW_window_setName win)
 
@@ -273,11 +272,11 @@ resizeWindow (Window win) w h = c_RGFW_window_resize win (fromIntegral w) (fromI
 maximizeWindow :: Window -> IO ()
 maximizeWindow (Window win) = c_RGFW_window_maximize win
 
--- | Put the window away.
+-- | Minimize the window.
 minimizeWindow :: Window -> IO ()
 minimizeWindow (Window win) = c_RGFW_window_minimize win
 
--- | Give a maximized or minimized window back its size.
+-- | Restore a maximized or minimized window.
 restoreWindow :: Window -> IO ()
 restoreWindow (Window win) = c_RGFW_window_restore win
 
@@ -293,20 +292,20 @@ showWindow (Window win) = c_RGFW_window_show win
 hideWindow :: Window -> IO ()
 hideWindow (Window win) = c_RGFW_window_hide win
 
--- | The window's top-left corner on the desktop, in pixels, as RGFW last
--- heard from the desktop.
+-- | The window's top-left corner on the desktop in pixels, as last reported
+-- to RGFW.
 windowPosition :: Window -> IO (Int, Int)
 windowPosition (Window win) =
   alloca $ \px -> alloca $ \py -> do
     _ <- c_RGFW_window_getPosition win px py
     liftA2 ((,) `on` fromIntegral) (peek px) (peek py)
 
--- | The window's flags as RGFW keeps them from its events: test them for
+-- | The window flags RGFW tracks from events; test them for
 -- 'rgfw_windowFullscreen', 'rgfw_windowMaximize' and 'rgfw_windowMinimize'.
--- A read of a field, cheap enough for every frame.
+-- A field read, cheap enough for every frame.
 windowFlags :: Window -> IO Word32
 windowFlags (Window win) = fromIntegral <$> c_RGFW_window_getFlags win
 
--- | Whether the window has the keyboard.
+-- | Whether the window has keyboard focus.
 windowFocused :: Window -> IO Bool
 windowFocused (Window win) = (/= 0) <$> c_RGFW_window_isInFocus win
