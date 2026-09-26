@@ -448,8 +448,6 @@ needsRedraw ctx prev inp = do
   anim <- anyAnimating ctx
   drag <- getsInteraction ctx (\s -> isJust (isScrollDrag s) || isJust (isWindowDrag s))
   overlay <- overlayMenuOpen ctx
-  -- A tooltip placed at the pointer moves with it.
-  follow <- popupFollowsPointer ctx
   -- The layout overlay highlights whatever node the pointer is over.
   explain <- getExplainLayout ctx
   let moved = inputMousePos prev /= inputMousePos inp
@@ -459,7 +457,7 @@ needsRedraw ctx prev inp = do
     || inputWindowRedraw inp
     || inputPointerHeld inp
     || drag
-    || ((overlay || follow) && moved)
+    || (overlay && moved)
     || (explain && moved)
     then pure True
     else
@@ -475,7 +473,8 @@ needsRedraw ctx prev inp = do
             else maybe False cdrTracked <$> lookupCustomDrawing ctx lastHot
         hotMoved <- if tracked then pure True else (/= lastHot) <$> probeHotId ctx (inputMousePos inp)
         -- A scrollbar is not a widget, and brightens as the pointer enters
-        -- it. Nor need a tooltip's target be one.
+        -- it. Nor need a tooltip's target be one, and a tooltip that follows
+        -- the pointer moves with it over its target.
         if hotMoved
           then pure True
           else ifM scrollBarHoverMoved (pure True) (hoverZoneCrossed ctx (inputMousePos prev) (inputMousePos inp))

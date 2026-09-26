@@ -10,7 +10,6 @@ where
 import Control.Monad (forM, forM_, unless, when)
 import Control.Monad.Trans.Maybe (MaybeT (..))
 import Data.Foldable (asum, find)
-import Data.List (sortOn)
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Maybe (fromMaybe, isJust)
 import NanoUI.Internal.Context
@@ -25,7 +24,7 @@ import NanoUI.Internal.Frame.Window (windowResizeCursorKind)
 import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena
-import NanoUI.Internal.Monad (ifM, (<&&>))
+import NanoUI.Internal.Monad (ifM, whenM, (<&&>))
 import NanoUI.Internal.Types (Rect (..), V2 (..), rectContains)
 import NanoUI.Internal.WidgetText (hasFlag, numericStepperRects, textInputFlagNumeric)
 import NanoUI.Internal.Widgets.Custom (mkCustomDrawContext)
@@ -210,28 +209,18 @@ nodeOnTopAt ctx@Context {ctxNodeArena = na} top mouse = do
     Just panel -> do
       visit panel
       -- The panels declared inside it, such as a menu opened in a modal, are
-      -- drawn over it. Only a modal confines the pointer while another panel
-      -- is under it, so most frames find none.
-      inner <- foldClassNodeRevM na FloatingNodes (\acc i ->
-        if i <= panel
-          then pure acc
-          else do
-            inside <- nodeInSubtree ctx i panel
-            rank <- floatingRank <$> getNodeType na i
-            pure (if inside then (rank, i) : acc else acc)) []
-      forM_ (sortOn fst inner) (visit . snd)
+      -- drawn over it, in the order the frame paints panels. Only a modal
+      -- confines the pointer while another panel is under it, so most frames
+      -- find none.
+      forM_ [NodeWindow, NodeModal, NodePopup] $ \nt ->
+        forFloatingNodes_ na nt $ \i ->
+          when (i > panel) $ whenM (nodeInSubtree ctx i panel) (visit i)
     Nothing -> do
       count <- arenaCount na
       forM_ [0 .. count - 1] $ \i -> do
         parent <- getParent na i
         when (parent < 0) (visitLayer i)
   readIORef found
-  where
-    floatingRank :: NodeType -> Int
-    floatingRank = \case
-      NodeWindow -> 0
-      NodeModal -> 1
-      _ -> 2
 
 -- | Whether 'uiCursorKind' requests the link/button pointer cursor.
 pointerCursorWanted :: Context -> Input -> IO Bool
