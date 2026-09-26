@@ -49,7 +49,7 @@ import NanoUI.Internal.Monad (Ui, (<&&>), askContext, askFrameInput, askInput, l
 import NanoUI.Internal.WidgetText (containerFlagInert, packTextNodeStyle)
 import NanoUI.Internal.Style (Layout (..))
 import NanoUI.Internal.Types (Rect (..), rectContains, rectH, rectHit, rectUnion, rectW)
-import NanoUI.Internal.Frame.Hit (findNodeByWidgetId, nodeInteractionHit, withWidgetNode)
+import NanoUI.Internal.Frame.Hit (findNodeByWidgetId, nodeInteractionHit, passesPointer, withWidgetNode)
 
 -- | The innermost open container, or @-1@ at the root.
 currentParent :: Context -> IO Int
@@ -372,10 +372,12 @@ resolveInteraction ctx inp wid = do
           <&&> if hashWidgetId active /= 0 && active /= wid
             then pure True
             else not <$> startedHere MouseLeft
-      -- Where a stack or a pinned node draws another widget over this one,
-      -- the pointer is that widget's.
+      -- Where a stack or a pinned node draws something that takes the
+      -- pointer over this one, the pointer is that one's; and a node that
+      -- lets the pointer through ('PointerPass') takes none of it.
       covered <- pointerCovered ctx wid
-      hovered <- pure (not (disabled || captured || covered)) <&&> hitAt mouse
+      passes <- maybe (pure False) (passesPointer (ctxNodeArena ctx)) mIdx
+      hovered <- pure (not (disabled || captured || covered || passes)) <&&> hitAt mouse
       -- Every other button, held or released, is the widget's only when it
       -- went down on it; a hovered widget owns a held left button already.
       let ownedHere bs = if hovered then buttonsFilterM startedHere bs else pure noButtons

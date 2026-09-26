@@ -125,13 +125,27 @@ growing children; `minW` and `maxW` constrain width. `percent 50` requests
 half the available width. `tight` removes padding but keeps the child gap.
 
 `stack` layers its children in one box as large as the largest, each placed
-by its alignment; a later child draws over the earlier ones and takes the
-pointer from them. The `wrap` modifier flows a row onto a new line where the
-next child would not fit, as in
-`rowWith (wrap . gap 6 . lineGap 4) (mapM_ chip tags)`; inside a container
-that sizes itself to its content, bound the row with `maxW` or `fixedW`.
-`pinAt x y` places a node at that offset in its parent's content box, over
-its siblings and out of their flow.
+by its alignment; a later child draws over the earlier ones. The `wrap`
+modifier flows a row onto a new line where the next child would not fit, as
+in `rowWith (wrap . gap 6 . lineGap 4) (mapM_ chip tags)`; inside a
+container that sizes itself to its content, bound the row with `maxW` or
+`fixedW`. `pinAt x y` places a node at that offset in its parent's content
+box, over its siblings and out of their flow.
+
+Where a stack or a pinned node draws one node over another, a control on
+top (a button, field, slider or drawing) takes the pointer from whatever is
+beneath it, while a panel, label, image or container lets the pointer
+through to the controls beneath. `pointer PointerBlock` makes a node take
+the pointer over its whole box, as a card or a scrim over a list must, and
+`pointer PointerPass` makes a node and everything in it let the pointer
+through, as a decorative drawing laid over controls should. A node never
+takes the pointer from what it is inside:
+
+```haskell
+stack $ do
+  list
+  panelWith (pointer PointerBlock . alignEnd . fixedW 240) details
+```
 
 Give a scroller a bounded viewport, for example
 `scrollWith (fixedH 240 . fillW) body`. `scrollArea` also returns its id for

@@ -78,6 +78,7 @@ module NanoUI.Internal.Layout.Arena
   , getAlignY
   , getFlow
   , hasPinnedBelow
+  , getPointerMode
   , getNodeRect
   , setRect
   , getClipRect
@@ -165,7 +166,7 @@ import qualified Data.Text as T
 import GHC.Float (castFloatToWord32)
 import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Internal.Store (ptrEq)
-import NanoUI.Internal.Style (AlignX (..), AlignY, Direction (..), Layout (..), Padding (..), Sizing (..))
+import NanoUI.Internal.Style (AlignX (..), AlignY, Direction (..), Layout (..), Padding (..), PointerMode (..), Sizing (..))
 import NanoUI.Internal.Types (Color (..), Rect (..), V2 (..), rectNonEmpty)
 
 -- | A node's position in the arena's arrays. It is valid from the 'addNode'
@@ -286,8 +287,9 @@ isFloatingNode nt = nt == NodeModal || nt == NodeWindow || nt == NodePopup
 -- Each list is in arena order.
 data NodeClass
   = PointerNodes
-  -- ^ The nodes a pointer hit test can want: the controls of 'isWidgetNode'
-  -- and the scroll containers ('isScrollNode').
+  -- ^ The nodes a pointer hit test can want: the controls of 'isWidgetNode',
+  -- the scroll containers ('isScrollNode') and the nodes given
+  -- 'PointerBlock', which take the pointer too.
   | DrawingNodes
   -- ^ Widgets the application draws ('NodeDrawing').
   | FloatingNodes
@@ -557,10 +559,12 @@ data StyleCol
 -- * 'TagPinnedBelow': whether a node below this one is pinned, as a 'Bool',
 --   written when the pinned node is added ('hasPinnedBelow'). The solver,
 --   paint and hit tests look for pinned children only under such a node.
+-- * 'TagPointer': the 'PointerMode' the node takes the pointer with: its
+--   own, or 'PointerPass' inside a node that passes it ('getPointerMode').
 data TagCol
   = TagNodeType | TagDirection | TagWSizing | TagHSizing
   | TagScrollBarSlot | TagAlignX | TagAlignY | TagIdSuperseded
-  | TagFlow | TagPinned | TagPinnedBelow
+  | TagFlow | TagPinned | TagPinnedBelow | TagPointer
   deriving (Enum, Bounded)
 
 -- | Columns of 'naArrTree'. A link that leads nowhere is -1.
@@ -880,6 +884,11 @@ addNode na nt parent Layout {..} = do
       !pinned = isJust layoutPin && parent >= 0 && not (isFloatingNode nt)
       !(V2 pinX pinY) = fromMaybe (V2 0 0) layoutPin
   a <- arenaArrays na
+  -- Whatever is inside a node that passes the pointer passes it too.
+  !pointerMode <-
+    if parent < 0 || layoutPointer == PointerPass
+      then pure layoutPointer
+      else (\p -> if p == PointerPass then p else layoutPointer) <$> readTagEnum a parent TagPointer
 
   setPrimArray (naArrGeom a) (idx * geomStride) geomStride 0
 
@@ -914,6 +923,7 @@ addNode na nt parent Layout {..} = do
   writeTagEnum a idx TagAlignY layoutAlignY
   writeTagEnum a idx TagFlow flow
   writeTagEnum a idx TagPinned pinned
+  writeTagEnum a idx TagPointer pointerMode
 
   setPrimArray (naArrTree a) (idx * treeStride) treeStride 0
   writeTree a idx TreeParent parent
@@ -983,9 +993,9 @@ addNode na nt parent Layout {..} = do
   when (isFloatingNode nt) $ pushClassNode na FloatingNodes idx
   when (nt == NodePanel || nt == NodeScrollContainer) $ pushClassNode na BackdropNodes idx
   when (flow == FlowStack || pinned) $ pushClassNode na LayeredNodes idx
-  when (isWidgetNode nt || isScrollNode nt) $ do
+  when (isWidgetNode nt || isScrollNode nt || pointerMode == PointerBlock) $
     pushClassNode na PointerNodes idx
-    when (nt == NodeDrawing) $ pushClassNode na DrawingNodes idx
+  when (nt == NodeDrawing) $ pushClassNode na DrawingNodes idx
   writeIORef (naCount na) (idx + 1)
   pure idx
 
@@ -1122,6 +1132,12 @@ isPinnedNode na idx = arenaArrays na >>= \a -> readTagEnum a idx TagPinned
 {-# INLINE hasPinnedBelow #-}
 hasPinnedBelow :: NodeArena -> NodeIdx -> IO Bool
 hasPinnedBelow na idx = arenaArrays na >>= \a -> readTagEnum a idx TagPinnedBelow
+
+-- | How the node takes the pointer: its own 'PointerMode', or 'PointerPass'
+-- when a node it is inside passes the pointer.
+{-# INLINE getPointerMode #-}
+getPointerMode :: NodeArena -> NodeIdx -> IO PointerMode
+getPointerMode na idx = arenaArrays na >>= \a -> readTagEnum a idx TagPointer
 
 -- | Current x, y, width, height in logical pixels. After scroll offsets are
 -- applied, the origin is in window coordinates; before layout it is unset.

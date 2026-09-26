@@ -273,14 +273,15 @@ takeDamagePieces ctx = getsDamage ctx dsDamagePieces
 getPrevRect :: Context -> WidgetId -> IO (Maybe Rect)
 getPrevRect ctx wid = getsDamage ctx (IM.lookup (intKey wid) . pfRects . dsPrev)
 
--- | Whether the pointer is over widget @wid@ in the frame the user saw, but
--- a stack or a pinned node draws another widget over it there, which has the
--- pointer instead ('ctxPointerCovered'). A widget that tests a press against
--- a rect of its own, not through its 'NanoUI.Internal.Widgets.Node.Response',
--- asks this too.
+-- | For a widget @wid@ the pointer is over in the frame the user saw, whether
+-- a stack or a pinned node draws something that takes the pointer over it
+-- there, which has the pointer instead ('ctxPointerReach'). Ask it only of a
+-- widget the pointer is over: it answers for where the pointer is. A widget
+-- that tests a press against a rect of its own, not through its
+-- 'NanoUI.Internal.Widgets.Node.Response', asks this too.
 {-# INLINE pointerCovered #-}
 pointerCovered :: Context -> WidgetId -> IO Bool
-pointerCovered ctx wid = IS.member (intKey wid) <$> readIORef (ctxPointerCovered ctx)
+pointerCovered ctx wid = maybe False (not . IS.member (intKey wid)) <$> readIORef (ctxPointerReach ctx)
 
 -- | Last recorded widget clip in logical window coordinates, or 'Nothing'.
 {-# INLINE getPrevClipRect #-}

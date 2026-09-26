@@ -21,6 +21,8 @@ tests =
   , spec "scroll-ignores-flow" runScrollIgnoresFlowTest
   , spec "arena-columns-fit-strides" runArenaColumnsFitStridesTest
   , spec "covered-widget-no-pointer" runCoveredWidgetNoPointerTest
+  , spec "pointer-modes" runPointerModesTest
+  , spec "pointer-covers-any-id" runPointerCoversAnyIdTest
   ]
 
 red, green, blue, yellow :: Color
@@ -346,3 +348,80 @@ runCoveredWidgetNoPointerTest ctx failed = do
     ((under2, _), (_, chip3)) <- pressThrough layered (spanCenter xR)
     assert failed (not (respHovered under2 || respPressed under2) && not (respClicked chip3))
     readIORef removes >>= assertEq failed 1
+
+-- | 'pointer' decides what a node drawn over others does with the pointer. A
+-- pinned panel lets it through to the button beneath by default, and takes
+-- it with 'PointerBlock': the button is neither hovered nor clicked, and
+-- nothing is hot, while a control inside the panel still takes its presses
+-- and the button beside the panel its own. A text field under a blocking
+-- panel is not focused by a press on the panel, nor shows the text cursor
+-- there. A drawing pinned over a
+-- button takes the pointer by default and lets it through with
+-- 'PointerPass', taking no hover itself.
+runPointerModesTest :: Context -> IORef Int -> IO ()
+runPointerModesTest ctx failed = do
+  let over mode = columnWith tight $ do
+        b <- buttonWith' (fixedWH 200 100) "under"
+        inner <- panelWith (pointer mode . pinAt 10 10 . fixedWH 120 60) (buttonWith' (fixedWH 40 20) "in")
+        pure (b, inner)
+      onPanel = V2 100 60
+      at p = input0 {inputMousePos = p}
+      clickAt ui p = runClick ctx (at p) ui p
+  forM_ [(PointerAuto, True), (PointerBlock, False)] $ \(mode, through) -> do
+    (b0, inner0) <- warmup2 ctx input0 (over mode)
+    warmup ctx (at onPanel) (over mode)
+    (b1, _) <- evalUi ctx (at onPanel) (over mode)
+    assertEq failed through (respHovered b1)
+    getHotId ctx >>= assertEq failed (if through then respId b0 else WidgetId 0)
+    (b2, _) <- clickAt (over mode) onPanel
+    assertEq failed through (respClicked b2)
+    (_, inner2) <- clickAt (over mode) (centerOf inner0)
+    assert failed (respClicked inner2)
+    (b3, _) <- clickAt (over mode) (V2 190 90)
+    assert failed (respClicked b3)
+  -- A press on a blocking panel over a text field leaves it unfocused.
+  let field mode = columnWith tight $ do
+        f <- fst <$> textInputConfigured' defaultTextInputConfig {ticLayout = fixedW 200 (ticLayout defaultTextInputConfig)} "text"
+        panelWith (pointer mode . pinAt 60 0 . fixedWH 80 20) (pure ())
+        pure f
+  forM_ [(PointerAuto, True), (PointerBlock, False)] $ \(mode, focused) -> do
+    f0 <- warmup2 ctx input0 (field mode)
+    let Rect fx fy _ _ = respRect f0
+        p = V2 (fx + 100) (fy + 10)
+    cursorOver ctx input0 (field mode) p >>= assertEq failed focused . (== UiCursorText)
+    _ <- runClick ctx (at p) (field mode) p
+    getFocusId ctx >>= assertEq failed (if focused then respId f0 else WidgetId 0)
+    _ <- runClick ctx (at (V2 390 290)) (field mode) (V2 390 290)
+    pure ()
+  -- A drawing over a button: it takes the pointer, or lets it through.
+  let drawn mode = columnWith tight $ do
+        b <- buttonWith' (fixedWH 200 100) "under"
+        d <- drawing (pointer mode . pinAt 20 20 . fixedWH 100 50) (const mempty)
+        pure (b, d)
+      onDrawing = V2 60 40
+  forM_ [(PointerAuto, False), (PointerPass, True)] $ \(mode, through) -> do
+    _ <- warmup2 ctx input0 (drawn mode)
+    warmup ctx (at onDrawing) (drawn mode)
+    (b1, d1) <- evalUi ctx (at onDrawing) (drawn mode)
+    assertEq failed (through, not through) (respHovered b1, respHovered d1)
+    (b2, d2) <- clickAt (drawn mode) onDrawing
+    assertEq failed (through, not through) (respClicked b2, respClicked d2)
+
+-- | Where a control is drawn over a node with an id that is not a control,
+-- such as a label, that node is covered too: no hover there, and its
+-- tooltip stays shut.
+runPointerCoversAnyIdTest :: Context -> IORef Int -> IO ()
+runPointerCoversAnyIdTest ctx failed = do
+  let ui = columnWith tight $ do
+        l <- labelWith' (fixedWH 200 40) "Covered text"
+        tooltipConfigured defaultTooltipConfig {tooltipDelay = 0} l "Label tip"
+        _ <- buttonWith' (pinAt 100 0 . fixedWH 60 30) "on top"
+        pure l
+      at p = input0 {inputMousePos = p}
+  _ <- warmup2 ctx input0 ui
+  forM_ [(V2 130 15, False), (V2 40 15, True)] $ \(p, uncovered) -> do
+    warmup ctx (at p) ui
+    l <- evalUi ctx (at p) ui
+    assertEq failed uncovered (respHovered l)
+    warmup ctx (at p) ui
+    assertEq failed uncovered . hasText "Label tip" =<< collectOverlayTextSpans ctx (at p)

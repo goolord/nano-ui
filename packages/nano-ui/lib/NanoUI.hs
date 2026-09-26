@@ -631,6 +631,12 @@ module NanoUI
     -- would overflow it, as a list of tags does, and 'pinAt' takes a child out
     -- of its parent's flow to sit at an offset in the parent, over its
     -- siblings, as a badge or a floating button does.
+    --
+    -- Where a stack or a pinned node draws one node over another, a control
+    -- on top takes the pointer from what is beneath, and anything else lets it
+    -- through to the controls beneath. 'pointer' changes that for a node and
+    -- what is inside it: 'PointerBlock' makes a card or scrim take the pointer
+    -- over its whole box, and 'PointerPass' makes a decoration let it through.
   , Layout (..)
   , LayoutModifier
   , Sizing (..)
@@ -675,6 +681,8 @@ module NanoUI
   , wrap
   , lineGap
   , pinAt
+  , PointerMode (..)
+  , pointer
 
     -- * Text style
   , FontVariant (..)

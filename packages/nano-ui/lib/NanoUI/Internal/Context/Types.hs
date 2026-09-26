@@ -708,12 +708,14 @@ data Context = Context
   , ctxDrawArena :: DrawArena
   , ctxHotId :: IORef WidgetId
   , ctxLastHotId :: IORef WidgetId
-  -- | The widgets, by 'intKey', that the pointer is over
-  -- in the frame the user saw but does not reach, since a stack or a pinned
-  -- node draws another widget over them there
-  -- ('NanoUI.Internal.Frame.Input.recordCoveredWidgets'). Found before the
-  -- view runs, which then gives them no pointer.
-  , ctxPointerCovered :: !(IORef IntSet)
+  -- | Where a stack or a pinned node can draw one node over another, the
+  -- ids, by 'intKey', of the node on top at the pointer that takes it and of
+  -- every node that one is inside, in the frame the user saw
+  -- ('NanoUI.Internal.Frame.Input.recordCoveredWidgets'). Every other node
+  -- under the pointer is covered there. Found before the view runs, which
+  -- then gives the covered ones no pointer ('pointerCovered'). 'Nothing'
+  -- when nothing is covered.
+  , ctxPointerReach :: !(IORef (Maybe IntSet))
   , ctxActiveId :: IORef WidgetId
   , ctxClickedId :: IORef WidgetId
   , ctxReleaseClickedId :: IORef WidgetId

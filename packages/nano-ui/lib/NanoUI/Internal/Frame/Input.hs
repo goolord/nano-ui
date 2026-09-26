@@ -31,7 +31,7 @@ module NanoUI.Internal.Frame.Input
   ) where
 
 import Control.Applicative ((<|>))
-import Control.Monad (filterM, mfilter, unless, when)
+import Control.Monad (filterM, mfilter, unless, when, (<=<))
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.Map.Strict qualified as M
 import Data.Functor ((<&>))
@@ -152,15 +152,33 @@ pressTargets ctx inp
 targetsAt :: Context -> V2 -> IO PressTargets
 targetsAt ctx@Context {ctxNodeArena = na} mouse = do
   top <- overlayHitRoot ctx mouse
-  found <- newIORef none
   let under idx = getNodeType na idx >>= \nt -> widgetUnderMouse ctx top mouse nt idx
+  -- A node given 'PointerBlock' drawn over the rest, with no widget of its
+  -- own under the press, takes it: nothing beneath is pressed or focused.
+  -- Only a stack or a pinned node draws one node over another.
+  layered <- layeredNodeCount na
+  let takerUnder idx = (takesPointer na idx =<< getNodeType na idx) <&&> under idx
+  blocked <-
+    if layered == 0
+      then pure False
+      else
+        findClassNodeM na PointerNodes takerUnder >>= \case
+          Nothing -> pure False
+          Just first -> not . isWidgetNode <$> (getNodeType na =<< reachedHit ctx takerUnder first)
+  if blocked then pure none else pressTargetsAt ctx under
+
+-- | 'targetsAt' past a node that blocks the press, with @under@ the press's
+-- hit test.
+pressTargetsAt :: Context -> (NodeIdx -> IO Bool) -> IO PressTargets
+pressTargetsAt ctx@Context {ctxNodeArena = na} under = do
+  found <- newIORef none
   _ <- findClassNodeM na PointerNodes $ \idx -> do
     nt <- getNodeType na idx
     PressTargets i t s onControl <- readIORef found
     let wantI = isNothing i && isWidgetNode nt
         wantT = isNothing t && (nt == NodeTextInput || nt == NodeTextArea)
         wantS = isNothing s && nt == NodeSelect
-    pure (wantI || wantT || wantS) <&&> widgetUnderMouse ctx top mouse nt idx <&&> do
+    pure (wantI || wantT || wantS) <&&> under idx <&&> do
       wid <- getWidgetId na idx
       let topmost kind = topmostHit ctx (\d -> (kind <$> getNodeType na d) <&&> under d) idx
           topmostId want kind = if want then getWidgetId na =<< topmost kind else pure wid
@@ -190,15 +208,18 @@ finalizePointerPress ctx targets =
   enabledTarget ctx (ptInteractive targets) >>= mapM_ (writeIORef (ctxActiveId ctx))
 
 -- | Whether a press at @mouse@ lands on node @idx@ of type @nt@: the point is
--- in its hit rect ('widgetHitRect') and in its clip, and the floating panels
--- and modals leave it reachable there ('overlayHitAllowed', with @top@ from
--- 'overlayHitRoot').
+-- in its hit rect ('widgetHitRect') and in its clip, the floating panels and
+-- modals leave it reachable there ('overlayHitAllowed', with @top@ from
+-- 'overlayHitRoot'), and the node does not let the pointer through
+-- ('passesPointer').
 {-# INLINE widgetUnderMouse #-}
 widgetUnderMouse :: Context -> Maybe NodeIdx -> V2 -> NodeType -> NodeIdx -> IO Bool
 widgetUnderMouse ctx top mouse nt idx = do
   Rect x y w h <- getNodeRect (ctxNodeArena ctx) idx
   rect <- widgetHitRect ctx nt idx x y w h
-  nodeClippedHit ctx idx rect mouse <&&> overlayHitAllowed ctx top idx
+  nodeClippedHit ctx idx rect mouse
+    <&&> overlayHitAllowed ctx top idx
+    <&&> (not <$> passesPointer (ctxNodeArena ctx) idx)
 
 -- | The rect a press on node @idx@ must land in: a text field's box
 -- ('nodeTextFieldGeom'), a close button's padded target, or the node rect.
@@ -496,38 +517,33 @@ probeHotId ctx@Context {ctxNodeArena = na} mouse = do
         Just wid -> pure wid
         Nothing -> maybe (pure (WidgetId 0)) (getWidgetId na) =<< reachedWidgetAt ctx mouse
 
--- | Note in 'ctxPointerCovered' the widgets the pointer is over in the frame
--- the user saw but does not reach. Where a stack or a pinned node draws one
--- widget over another, the pointer reaches the one on top, as hover finds it
--- ('probeHotId'), and the widgets that one is inside; every other widget
--- under the pointer is covered there. Runs before the view, against the last
--- frame's layout: while the view runs, each widget tests the pointer against
--- its rect in that layout ('NanoUI.Internal.Widgets.Node.resolveInteraction'),
--- and one covered takes neither hover nor presses. Nothing is covered while
--- the pointer is on a menu or dropdown, which routes it away from every
--- layer, nor in a layout with no stack or pinned node ('layeredNodeCount'),
--- where the widget declared first is on top wherever two overlap.
+-- | Note in 'ctxPointerReach' what the pointer reaches in the frame the user
+-- saw: where a stack or a pinned node draws one node over another, the node
+-- on top at the pointer that takes it ('reachedHit'), as hover finds it
+-- ('probeHotId'), and the nodes that one is inside. Every other node under
+-- the pointer is covered there, a label or a container as much as a widget.
+-- Runs before the view, against the last frame's layout: while the view
+-- runs, each widget tests the pointer against its rect in that layout
+-- ('NanoUI.Internal.Widgets.Node.resolveInteraction'), and one covered takes
+-- neither hover nor presses. Nothing is covered while the pointer is on a
+-- menu or dropdown, which routes it away from every layer, nor where nothing
+-- under it takes the pointer, nor in a layout with no stack or pinned node
+-- ('layeredNodeCount'), where a node is drawn over nothing but the nodes it
+-- is inside.
 recordCoveredWidgets :: Context -> PointerRoute -> Input -> IO ()
 recordCoveredWidgets ctx@Context {ctxNodeArena = na} route inp = do
   layered <- layeredNodeCount na
-  covered <- case route of
+  reach <- case route of
     RouteLayer _ | layered > 0 -> do
       top <- overlayHitRoot ctx mouse
-      let hits = widgetHitAt ctx top mouse
-      -- Every widget under the pointer, the last in arena order first.
-      under <- foldClassNodesM na PointerNodes (\acc idx -> ifM (hits idx) (pure (idx : acc)) (pure acc)) []
-      case reverse under of
-        first : _ : _ -> do
-          keep <- idsUpFrom IS.empty =<< reachedHit ctx hits first
-          ids <- mapM (getWidgetId na) under
-          pure $ IS.fromList [k | wid <- ids, hashWidgetId wid /= 0, let k = intKey wid, not (IS.member k keep)]
-        -- One widget under the pointer covers nothing.
-        _ -> pure IS.empty
-    _ -> pure IS.empty
+      let hits = pointerHitAt ctx top mouse
+      first <- findClassNodeM na PointerNodes hits
+      traverse (idsUpFrom IS.empty <=< reachedHit ctx hits) first
+    _ -> pure Nothing
   -- Most frames have nothing covered before or after, and write nothing.
-  old <- readIORef (ctxPointerCovered ctx)
-  unless (IS.null old && IS.null covered) $
-    writeIORef (ctxPointerCovered ctx) $! covered
+  old <- readIORef (ctxPointerReach ctx)
+  unless (isNothing old && isNothing reach) $
+    writeIORef (ctxPointerReach ctx) $! reach
  where
   mouse = inputMousePos inp
   -- The ids of node @i@ and every node it is inside. A node sharing an id

@@ -249,6 +249,14 @@
 - `stack` and `stackWith` layer their children in one box. The `wrap`
   modifier flows a row onto new lines, or a column into new columns, `lineGap`
   apart, and `pinAt x y` places a node at an offset over its siblings.
+- `pointer`, a layout modifier for what a node drawn over others by a stack
+  or a pin does with the pointer: by default (`PointerAuto`) a control on top
+  takes it and anything else lets it through to the controls beneath;
+  `PointerBlock` makes a node, such as a card or a scrim, take it over its
+  whole box, so nothing beneath is hovered, pressed or focused, and
+  `PointerPass` makes a node and all inside it let it through. A label, an
+  image or a container with an id under a control on top is covered like a
+  control, taking no hover or tooltip there.
 - `imageConfigured` and `imageConfigured'` take an `ImageConfig`: a
   `ContentFit` like CSS's `object-fit`, an alignment, an opacity and a
   `Rotation`. The `DrawImageRotated` op and the canvas's `drawImageRotated`
