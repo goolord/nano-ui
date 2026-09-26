@@ -225,6 +225,15 @@ demoUi = do
   (aboutOpen, setAbout) <- useFlag False
   (debugOpen, setDebug) <- useFlag debugOpenFromEnv
   (inspectorOpen, setInspectorOpen) <- useFlag False -- compact-window readout
+  -- Each Screenshot click captures the next presented frame and saves it on
+  -- a worker thread; the toolbar label shows the result.
+  (shots, setShots) <- useInt 0
+  shoot <- askScreenshot
+  saved <-
+    scope $
+      if shots == 0
+        then pure Nothing
+        else Just <$> useTaskStatus shots (shoot >>= maybe (ioError (userError "no frame to capture")) (savePng "nano-ui-demo.png"))
   (activeTab, setActiveTab) <- useEnum Controls -- tabs
   -- Controls tab.
   (checked, setChecked) <- useFlag False -- checkbox
@@ -304,16 +313,11 @@ demoUi = do
             -- F1 and F12 mirror the buttons. Shortcuts take no widget id.
             whenM ((||) <$> button "About" <*> shortcut (key (KeyF 1))) (setAbout True)
             whenM ((||) <$> button "Debug" <*> shortcut (key (KeyF 12))) (setDebug (not debugOpen))
-            -- Each click captures the next presented frame and saves it on a
-            -- worker thread; the label shows the result.
-            (shots, setShots) <- useInt 0
             whenM (button "Screenshot") (setShots (shots + 1))
-            shoot <- askScreenshot
-            scope $ when (shots > 0) $
-              useTaskStatus shots (shoot >>= maybe (ioError (userError "no frame to capture")) (savePng "nano-ui-demo.png")) >>= \case
-                TaskRunning _ -> labelWith (tight . alignMid . fontMuted) "Saving..."
-                TaskDone () -> labelWith (tight . alignMid . fontMuted) "Saved nano-ui-demo.png"
-                TaskFailed e _ -> labelWith (tight . alignMid . fontDanger) (T.pack (displayException e))
+            scope $ for_ saved $ \case
+              TaskRunning _ -> labelWith (tight . alignMid . fontMuted) "Saving..."
+              TaskDone () -> labelWith (tight . alignMid . fontMuted) "Saved nano-ui-demo.png"
+              TaskFailed e _ -> labelWith (tight . alignMid . fontDanger) (T.pack (displayException e))
 
       ----------------------------------------------------------- body ----
       responsiveRowCol 1000 (tight . gap gapLayout . fillW) $ do
