@@ -323,6 +323,7 @@ widgetPadding fm =
   let (cx, cy) = widgetContentInset fm
    in (2 * cx, 2 * cy)
 
+-- | The side of a checkbox's box, for its label's font.
 {-# INLINE checkboxBoxSize #-}
 checkboxBoxSize :: FontMetrics -> Float
 checkboxBoxSize fm = clamp 18 22 (fmLineHeight fm * 1.15)

@@ -8,3 +8,4 @@ Each package keeps its own changelog, which ships in its source distribution:
 - [nano-ui-rgfw-bindings](packages/nano-ui-rgfw-bindings/CHANGELOG.md)
 - [nano-ui-diagrams](packages/nano-ui-diagrams/CHANGELOG.md)
 - [nano-ui-form](packages/nano-ui-form/CHANGELOG.md)
+- [nano-ui-markdown](packages/nano-ui-markdown/CHANGELOG.md)

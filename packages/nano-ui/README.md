@@ -39,9 +39,11 @@ opens no window. A backend package runs the view:
 | [nano-ui-rgfw](https://github.com/goolord/nano-ui/tree/main/packages/nano-ui-rgfw) | RGFW and OpenGL 3.2, with a bundled bitmap font and no system dependencies beyond windowing |
 
 [nano-ui-diagrams](https://hackage.haskell.org/package/nano-ui-diagrams) adds
-charts and [diagrams](https://diagrams.github.io/) drawings, and
+charts and [diagrams](https://diagrams.github.io/) drawings,
 [nano-ui-form](https://hackage.haskell.org/package/nano-ui-form) adds validated
-forms. In this package, `NanoUI.Testing` runs frames
+forms, and
+[nano-ui-markdown](https://github.com/goolord/nano-ui/tree/main/packages/nano-ui-markdown)
+draws Markdown as it streams in. In this package, `NanoUI.Testing` runs frames
 headlessly on scripted input, for tests, and `NanoUI.Backend` has what a window
 backend is built from. Writing a GUI needs neither: everything for that is in
 `NanoUI`.

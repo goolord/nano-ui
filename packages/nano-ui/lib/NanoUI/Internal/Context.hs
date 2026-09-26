@@ -45,6 +45,7 @@ module NanoUI.Internal.Context
   , AtlasUpload (..)
   , withFontMetrics
   , withMonoFontMetrics
+  , withFontSize
   , withMeasureText
   , withFontResolver
   , wrapMeasureCache
@@ -226,10 +227,18 @@ withFontResolver ::
 withFontResolver ctx rf rm = trackMetricSource ctx {ctxResolveFont = rf, ctxResolveMeasure = rm}
 
 -- | Replace base metrics and rebuild default measurement/resolution callbacks.
--- Returns a configured context sharing the original session state.
+-- Returns a configured context sharing the original session state. The
+-- default resolver sets a font size as the line height it gives, so the
+-- default size becomes the metrics' line height ('withFontSize').
 withFontMetrics :: Context -> FontMetrics -> Context
 withFontMetrics ctx fm =
-  withDefaultResolvers ctx {ctxFontMetrics = fm, ctxMeasureText = measureTextIO fm}
+  withDefaultResolvers ctx {ctxFontMetrics = fm, ctxMeasureText = measureTextIO fm, ctxFontSize = fmLineHeight fm}
+
+-- | Set the size text is set in when its layout names none, in the units
+-- the context's font resolver takes sizes in: a backend whose base font is
+-- another size than its line height says what it is.
+withFontSize :: Context -> Float -> Context
+withFontSize ctx size = ctx {ctxFontSize = size}
 
 -- | Replace monospace metrics and rebuild default font-resolution callbacks.
 withMonoFontMetrics :: Context -> FontMetrics -> Context
@@ -561,6 +570,7 @@ newContext = do
         , ctxDrawArena = drawArena
         , ctxFontMetrics = fm0
         , ctxMonoFontMetrics = fm0
+        , ctxFontSize = fmLineHeight fm0
         , ctxMeasureText = measureTextIO fm0
         , ctxResolveFont = defaultResolveFont ctx
         , ctxResolveMeasure = defaultResolveMeasure ctx

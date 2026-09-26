@@ -440,6 +440,7 @@ module NanoUI
   , lineWidth
   , lineWidthUi
   , uiFontMetrics
+  , uiFontSize
   , resolveFontUi
   , UiCursorKind (..)
 

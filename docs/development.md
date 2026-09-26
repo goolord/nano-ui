@@ -37,6 +37,7 @@ fails the build instead of swapping.
 | `nano-ui-sdl-pointer-test` | SDL mouse buttons, through SDL's event queue |
 | `nano-ui-diagrams-test` | Diagram conversion, tessellation, and charts |
 | `nano-ui-form-test` | Form scopes, validation, reset, and submission |
+| `nano-ui-markdown-test` | Markdown parsing, appending against whole-text parsing (QuickCheck), and drawing |
 | `nano-ui-demo-test` | The SDL demo, notepad, log viewer, and input-method composition, driven in hidden windows |
 | `nano-ui-terminal-test` | The terminal demo's escape-sequence parser and PTY |
 
@@ -64,8 +65,8 @@ comment box and put the `user-attachments` URL GitHub gives back in
 
 `cabal.project` turns on these flags:
 
-- `nano-ui-sdl:sdl` builds the SDL backend. `nano-ui-demo` and `nano-ui-form`
-  have their own `sdl` flag for the executables that need it.
+- `nano-ui-sdl:sdl` builds the SDL backend. `nano-ui-demo`, `nano-ui-form` and
+  `nano-ui-markdown` have their own `sdl` flag for the executables that need it.
 
 ## Repository layout
 
@@ -75,6 +76,7 @@ comment box and put the `user-attachments` URL GitHub gives back in
 | `packages/nano-ui-sdl`, `packages/nano-ui-rgfw` | Window backends |
 | `packages/nano-ui-rgfw-bindings` | RGFW bindings, with the C source |
 | `packages/nano-ui-diagrams`, `packages/nano-ui-form` | Charts and diagrams, and forms |
+| `packages/nano-ui-markdown` | Markdown parsing and drawing |
 | `packages/nano-ui-demo` | Example applications |
 | `scripts/` | Font subsetting (`prune_inter.py`, `prune_cozette.py`) and profiling helpers |
 
@@ -83,7 +85,7 @@ The core's modules, under `packages/nano-ui/lib`. A module outside
 `NanoUI/Internal/`; some of those modules are exposed for backends, tests and
 tools that need more than the API, but they can change at any time. The other
 packages follow the same rule with `NanoUI.Sdl.Internal`, `NanoUI.Rgfw.Internal`,
-`NanoUI.Diagrams.Internal` and `NanoUI.Form.Internal`.
+`NanoUI.Diagrams.Internal`, `NanoUI.Form.Internal` and `NanoUI.Markdown.Internal`.
 
 | Path | Contents |
 | --- | --- |

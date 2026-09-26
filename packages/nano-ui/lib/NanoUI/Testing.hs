@@ -48,6 +48,7 @@ module NanoUI.Testing
   , withMonoFontMetrics
   , withMeasureText
   , withFontResolver
+  , withFontSize
   , wrapMeasureCache
   , enableMeasureCache
   , withTheme

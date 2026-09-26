@@ -42,6 +42,8 @@ module NanoUI.Widgets.Custom
   , drawImageUV
   , drawImageRotated
   , drawText
+  , drawCheckbox
+  , checkboxBoxSize
     -- * Paths and transforms
 
     -- | Build a path with "NanoUI.Path", imported qualified, and fill or
@@ -79,12 +81,12 @@ import Data.Text qualified as T
 import Data.Primitive.SmallArray (SmallArray, emptySmallArray, smallArrayFromList)
 import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context
-import NanoUI.Internal.Draw (DrawOp (..))
+import NanoUI.Internal.Draw (DrawOp (..), checkboxOps)
 import Data.Word (Word64)
 import Data.Hashable (Hashable, hash)
 import Data.Maybe (fromMaybe)
 import GHC.Float (castFloatToWord32)
-import NanoUI.Internal.Font (FontMetrics (fmSnapScale))
+import NanoUI.Internal.Font (FontMetrics (fmSnapScale), checkboxBoxSize)
 import NanoUI.Internal.Id (WidgetId, mix64)
 import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena (NodeType (NodeDrawing))
@@ -216,6 +218,13 @@ drawText (V2 x y) alignX alignY txt col =
   let ax = case alignX of AlignStart -> 0; AlignCenter -> 0.5; AlignEnd -> 1
       ay = case alignY of AlignTop -> 1; AlignMiddle -> 0.5; AlignBottom -> 0; AlignBaseline -> -1
    in emitOp (DrawText x y ax ay txt col)
+
+-- | A checkbox's box as the checkbox widget draws it, in the square at the
+-- rect's top-left corner as wide as the rect's shorter side: the theme's
+-- accent with a check mark when checked, otherwise an input well with the
+-- theme's button border. The widget draws it 'checkboxBoxSize' wide.
+drawCheckbox :: Theme -> Rect -> Bool -> CanvasM ()
+drawCheckbox theme (Rect x y w h) = checkboxOps emitOp theme (styleBorder (themeButton theme)) x y (min w h)
 
 -- | Fill a path built with "NanoUI.Path". Each subpath fills on its own,
 -- as if closed, as one anti-aliased 'FillPolygon': one inside another is

@@ -27,7 +27,20 @@ tests =
   , spec "scroll-ui" runScrollUiTest
   , spec "take-escape" runTakeEscapeTest
   , spec "modal-with" runModalWithTest
+  , spec "font-size" runFontSizeTest
   ]
+
+-- | 'uiFontSize' is the size the default resolver sets text in when its
+-- layout names none, its metrics' line height, until a backend says
+-- otherwise.
+runFontSizeTest :: Context -> IORef Int -> IO ()
+runFontSizeTest ctx failed = do
+  let inp = withInput 200 200
+      sized c = evalUi c inp uiFontSize
+  assertEq failed (fmLineHeight (ctxFontMetrics ctx)) =<< sized ctx
+  let big = withFontMetrics ctx (monospaceMetrics 20)
+  assertEq failed 20 =<< sized big
+  assertEq failed 15 =<< sized (withFontSize big 15)
 
 -- | 'lastRect' is nothing before a widget's first frame and the rect it was
 -- laid out in after it.

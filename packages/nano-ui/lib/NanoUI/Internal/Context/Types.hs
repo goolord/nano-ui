@@ -743,6 +743,9 @@ data Context = Context
   , ctxFontMetrics :: FontMetrics
   -- ^ Base proportional-font metrics used by layout and drawing.
   , ctxMonoFontMetrics :: FontMetrics
+  , ctxFontSize :: !Float
+  -- ^ The size text is set in when its layout names none: the backend's
+  -- default, in the units 'NanoUI.Internal.Style.fontSize' takes.
   , ctxMeasureText :: Text -> IO (Float, Float)
   , ctxResolveFont :: !(Float -> FontWeight -> FontStyle -> FontVariant -> IO (FontMetrics, Bool))
   , ctxResolveMeasure :: !(Float -> FontWeight -> FontStyle -> FontVariant -> Text -> IO (Float, Float))

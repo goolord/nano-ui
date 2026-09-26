@@ -54,6 +54,8 @@ module NanoUI.Internal.Draw
   , pushText
   , pushPreparedTextStyled
   , emitDrawOps
+  , pushShapeOp
+  , checkboxOps
   ) where
 
 import Control.Monad (forM_, unless, when)
@@ -68,8 +70,8 @@ import NanoUI.Internal.Draw.Shapes
 import NanoUI.Internal.Draw.Types
 import NanoUI.Internal.Font
 import NanoUI.Internal.SIMD (pokeQuadCornersSIMD, pokeQuadSIMD)
-import NanoUI.Internal.Style (FontStyle (..), FontWeight (..), TextDecoration (..))
-import NanoUI.Internal.Types (Color (..), Rect (..), forUpTo_, onGrid)
+import NanoUI.Internal.Style (FontStyle (..), FontWeight (..), TextDecoration (..), Theme (..), styleBg)
+import NanoUI.Internal.Types (Color (..), Rect (..), forUpTo_, onGrid, rectInflate)
 
 -- | Pixel box for a 'DrawText' using host advances. diagrams text has no
 -- envelope, so plot sizing uses this instead of `fontSizeL`.
@@ -333,17 +335,6 @@ emitDrawOps da fm resolve imageUv ops = forUpTo_ (sizeofSmallArray ops) (emitOne
         Just (atlas, (a0, b0, a1, b1)) ->
           draw atlas (a0 + u0 * (a1 - a0)) (b0 + v0 * (b1 - b0)) (a0 + u1 * (a1 - a0)) (b0 + v1 * (b1 - b0))
         Nothing -> draw tex u0 v0 u1 v1
-    emitOne (FillRect r c) = pushRect da r c
-    emitOne (FillRoundedRect r radius c) = pushRoundedRect da r radius c
-    emitOne (FillTriangle x0 y0 x1 y1 x2 y2 c) = pushFilledTriangle da x0 y0 x1 y1 x2 y2 c
-    emitOne (FillCircle cx cy radius c) = pushCircle da cx cy radius c
-    emitOne (Stroke x0 y0 x1 y1 t c) = pushStroke da x0 y0 x1 y1 t c
-    emitOne (StrokeRoundedRect r radius bw c) = pushRoundedStroke da r radius bw c
-    emitOne (StrokeCircle cx cy radius bw c) = pushCircleStroke da cx cy radius bw c
-    emitOne (StrokeLineAA x0 y0 x1 y1 bw c) = pushStrokeAA da x0 y0 x1 y1 bw c
-    emitOne (FillPolygon pts tris c) = pushPolygonAA da pts tris c
-    emitOne (StrokePolyline pts w closed c) = pushPolylineAA da pts w closed c
-    emitOne (FillQuadGradient r c0 c1 c2 c3) = pushQuadGradient da r c0 c1 c2 c3
     emitOne (DrawImageRect r tex u0 v0 u1 v1 c) =
       image tex u0 v0 u1 v1 (\t a0 b0 a1 b1 -> pushImage da r t a0 b0 a1 b1 c)
     emitOne (DrawImageRotated r angle tex u0 v0 u1 v1 c) =
@@ -360,3 +351,61 @@ emitDrawOps da fm resolve imageUv ops = forUpTo_ (sizeofSmallArray ops) (emitOne
           fstyle = if native then FontStyleNormal else textFontStyle font
       prepared <- prepareFontMetrics styledFm t
       pushPreparedTextStyledQuads da prepared weight fstyle (textFontDecoration font) x y t c
+    emitOne op = pushShapeOp da op
+
+-- | Paint an op that needs no font or image: a fill, stroke, line or
+-- gradient. Text and image ops paint nothing here ('emitDrawOps' paints
+-- them). Inlined, so an op built only to be painted costs nothing.
+{-# INLINE pushShapeOp #-}
+pushShapeOp :: DrawArena -> DrawOp -> IO ()
+pushShapeOp da = \case
+  FillRect r c -> pushRect da r c
+  FillRoundedRect r radius c -> pushRoundedRect da r radius c
+  FillTriangle x0 y0 x1 y1 x2 y2 c -> pushFilledTriangle da x0 y0 x1 y1 x2 y2 c
+  FillCircle cx cy radius c -> pushCircle da cx cy radius c
+  Stroke x0 y0 x1 y1 t c -> pushStroke da x0 y0 x1 y1 t c
+  StrokeRoundedRect r radius bw c -> pushRoundedStroke da r radius bw c
+  StrokeCircle cx cy radius bw c -> pushCircleStroke da cx cy radius bw c
+  StrokeLineAA x0 y0 x1 y1 bw c -> pushStrokeAA da x0 y0 x1 y1 bw c
+  FillPolygon pts tris c -> pushPolygonAA da pts tris c
+  StrokePolyline pts w closed c -> pushPolylineAA da pts w closed c
+  FillQuadGradient r c0 c1 c2 c3 -> pushQuadGradient da r c0 c1 c2 c3
+  _ -> pure ()
+
+-- | A checkbox's box, @box@ wide with its top-left corner at @(x, y)@, as
+-- the checkbox widget paints it, an op at a time through @op@: the theme's
+-- accent with a check mark when @checked@, otherwise an input well outlined
+-- in @border@. The widget paints the ops as they come ('pushShapeOp'); a
+-- canvas collects them ('NanoUI.Widgets.Custom.drawCheckbox').
+{-# INLINE checkboxOps #-}
+checkboxOps :: Applicative f => (DrawOp -> f ()) -> Theme -> Color -> Float -> Float -> Float -> Bool -> f ()
+checkboxOps op theme border x y box checked
+  | checked =
+      op (FillRoundedRect outer r accent)
+        *> op (StrokeRoundedRect outer r bw accent)
+        *> stroke x0 y0 x1 y1
+        *> stroke x1 y1 x2 y2
+        *> cap x0 y0
+        *> cap x1 y1
+        *> cap x2 y2
+  | otherwise =
+      op (FillRoundedRect (rectInflate (-bw) outer) (max 0 (r - bw)) (styleBg (themeInput theme)))
+        *> op (StrokeRoundedRect outer r bw border)
+  where
+    outer = Rect x y box box
+    r = min 6 (box / 3.5)
+    bw = 1.5
+    accent = themeAccent theme
+    mark = themeOnAccent theme
+    t = max 1.6 (box * 0.11)
+    x0 = x + box * 0.22
+    y0 = y + box * 0.52
+    x1 = x + box * 0.42
+    y1 = y + box * 0.72
+    x2 = x + box * 0.78
+    y2 = y + box * 0.28
+    stroke ax ay bx by = op (StrokeLineAA ax ay bx by t mark)
+    -- Caps snap their centres, as the strokes snap their ends; snapping a
+    -- cap's corner lands it up to a pixel off the stroke at a fractional
+    -- scale.
+    cap cx cy = op (FillCircle cx cy (t / 2) mark)

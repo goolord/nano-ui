@@ -377,24 +377,21 @@ drawSearchMagnifier da (Rect x y w h) col = do
   pushLine da (cx + startOff) (cy + startOff) (cx + endOff) (cy + endOff) (t * 0.8) col
 
 -- | The box of a checkbox (@isCheckbox@) or radio option at @x@, centred in
--- a slot at most 4 pixels taller than it within @y h@. A checked checkbox is
--- a solid accent box with a check mark; otherwise the box is a well, and a
--- checked radio's has an accent ring and dot.
+-- a slot at most 4 pixels taller than it within @y h@. A checkbox is drawn
+-- as 'checkboxOps' draws one; a radio option's box is a well, which a
+-- checked one gives an accent ring and dot.
 drawChoiceControl :: DrawArena -> FontMetrics -> Style -> Theme -> Float -> Float -> Float -> Float -> Bool -> IO ()
 drawChoiceControl da fm style theme x y h value isCheckbox = do
   let box = checkboxBoxSize fm
-      !r = if isCheckbox then min 6 (box / 3.5) else box / 2
-      !bw = if isCheckbox then 1.5 else 2
       by = y + max 0 ((min h (box + 4) - box) / 2)
-      outer = Rect x by box box
       checked = value >= 0.5
-      accent = themeAccent theme
-  if checked && isCheckbox
-    then do
-      pushRoundedRect da outer r accent
-      pushRoundedStroke da outer r bw accent
-      drawCheckboxMark da x by box (themeOnAccent theme)
+  if isCheckbox
+    then checkboxOps (pushShapeOp da) theme (styleBorder style) x by box checked
     else do
+      let !r = box / 2
+          !bw = 2
+          outer = Rect x by box box
+          accent = themeAccent theme
       pushRoundedRect da (rectInflate (-bw) outer) (max 0 (r - bw)) (styleBg (themeInput theme))
       pushRoundedStroke da outer r bw (if checked then accent else styleBorder style)
       when checked $ do
@@ -403,25 +400,6 @@ drawChoiceControl da fm style theme x y h value isCheckbox = do
             !dx = onGrid s x + (box - dot) / 2
             !dy = onGrid s by + (box - dot) / 2
         pushRoundedRectRaw da (Rect dx dy dot dot) (dot / 2) accent
-
-drawCheckboxMark :: DrawArena -> Float -> Float -> Float -> Color -> IO ()
-drawCheckboxMark da bx by box markCol = do
-  let t = max 1.6 (box * 0.11)
-      x0 = bx + box * 0.22
-      y0 = by + box * 0.52
-      x1 = bx + box * 0.42
-      y1 = by + box * 0.72
-      x2 = bx + box * 0.78
-      y2 = by + box * 0.28
-      -- Caps snap their centres, as the strokes snap their ends; snapping a
-      -- cap's corner lands it up to a pixel off the stroke at a fractional
-      -- scale.
-      cap cx cy = pushCircle da cx cy (t / 2) markCol
-  pushStrokeAA da x0 y0 x1 y1 t markCol
-  pushStrokeAA da x1 y1 x2 y2 t markCol
-  cap x0 y0
-  cap x1 y1
-  cap x2 y2
 
 -- | A cross centered in the box, or against its right edge when @trailing@.
 drawCloseIcon :: DrawArena -> Bool -> Float -> Float -> Float -> Float -> Color -> IO ()

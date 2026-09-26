@@ -30,6 +30,7 @@ module NanoUI.Internal.Monad
   , withDefaultLayout
   , askHost
   , uiFontMetrics
+  , uiFontSize
   , resolveFontUi
   , lineWidthUi
   , uiTime
@@ -274,6 +275,14 @@ withDefaultLayout f = localStaticRep (\r -> r {repLayout = f (repLayout r)})
 {-# INLINE uiFontMetrics #-}
 uiFontMetrics :: Ui :> es => Eff es FontMetrics
 uiFontMetrics = fmap ctxFontMetrics askContext
+
+-- | The size text is set in when its layout names none: the backend's
+-- default font size. Set it with 'NanoUI.Internal.Style.fontSize' to scale
+-- text from it, which 'NanoUI.Internal.Style.fontSizeScale' alone does from
+-- 16.
+{-# INLINE uiFontSize #-}
+uiFontSize :: Ui :> es => Eff es Float
+uiFontSize = fmap ctxFontSize askContext
 
 -- | Metrics for text at a size, weight, style and variant, resolved through
 -- the backend's fonts: what a custom widget measures and places its text by

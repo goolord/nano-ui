@@ -35,6 +35,7 @@ module NanoUI.Monad
   , askDefaultLayout
   , withDefaultLayout
   , uiFontMetrics
+  , uiFontSize
   , resolveFontUi
   , lineWidthUi
   , uiTheme

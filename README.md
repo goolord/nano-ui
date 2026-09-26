@@ -158,6 +158,7 @@ suite checks that the vertex writers compile without dictionaries or tuples.
 | `nano-ui-rgfw-bindings` | Haskell bindings to RGFW |
 | `nano-ui-diagrams` | Line, bar, scatter, and area charts, and drawing with [diagrams](https://diagrams.github.io/) |
 | `nano-ui-form` | Validated forms built on [ditto](https://hackage.haskell.org/package/ditto) |
+| `nano-ui-markdown` | Markdown documents drawn with rich text, parsed incrementally for streamed chat replies |
 | `nano-ui-demo` | Example applications |
 
 ## Running the demos
@@ -173,6 +174,7 @@ cabal run nano-ui-sdl-notepad    # text editor with menus and file dialogs
 cabal run nano-ui-sdl-logs       # streaming log viewer
 cabal run nano-ui-sdl-terminal   # terminal on /bin/sh (Linux and macOS)
 cabal run nano-ui-rgfw-demo      # the RGFW backend
+cabal run nano-ui-markdown-example  # a Markdown chat reply streaming in
 ```
 
 ## Documentation

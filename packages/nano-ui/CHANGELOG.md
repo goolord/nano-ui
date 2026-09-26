@@ -307,6 +307,9 @@
   `installWindowHost`, `answerScreenshots`, `setWakeLoop` and `cancelTasks`.
 - `NanoUI.Testing.Harness` has `chordInp`, `keyUpInp`, `middleClickPair`,
   and `newWakeSignal` for a test to wait on a job's wake.
+- `uiFontSize`, the size text takes when its layout sets none, and
+  `withFontSize` in `NanoUI.Testing`; the SDL backend reports its base size.
+  `drawCheckbox` and `checkboxBoxSize` draw nano-ui's checkbox on a canvas.
 
 ### Changed
 

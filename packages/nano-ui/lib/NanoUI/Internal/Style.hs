@@ -413,7 +413,8 @@ fontSize :: Float -> Layout -> Layout
 fontSize sz l = l {layoutFontSize = max 0 sz}
 
 -- | Multiply an explicit font size, or 16 when none is set, by a scale factor.
--- This uses 16 rather than querying the backend's default size.
+-- This uses 16 rather than querying the backend's default size; set that
+-- ('NanoUI.Internal.Monad.uiFontSize') with 'fontSize' first to scale it.
 fontSizeScale :: Float -> Layout -> Layout
 fontSizeScale s l = fontSize ((if layoutFontSize l > 0 then layoutFontSize l else 16) * s) l
 
