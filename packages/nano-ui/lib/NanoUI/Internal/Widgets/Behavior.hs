@@ -136,14 +136,16 @@ keyboardFocused wid
         <&&> uiIO (not <$> isDisabled ctx wid)
         <&&> uiIO (not <$> pointerBlockedByModal ctx)
 
--- | Arrow / Enter / Space while @wid@ is focused and eligible for input. An
--- arrow held down steps again on each auto-repeat; Enter and Space, which
--- activate, count only when they go down.
+-- | Arrow / Enter / Space while @wid@ is focused and eligible for input, each
+-- alone or with Shift ('shiftAtMost'): with Ctrl, Alt or Super it is a
+-- chord, for a shortcut. An arrow held down steps again on each
+-- auto-repeat; Enter and Space, which activate, count only when they go
+-- down.
 useKeyNav :: (Ui :> es) => WidgetId -> Eff es KeyNav
 useKeyNav wid = do
   inp <- askInput
   let none = KeyNav False False False False False False
-  if hashWidgetId wid == 0 || inputKeysNull (inputKeys inp)
+  if hashWidgetId wid == 0 || inputKeysNull (inputKeys inp) || not (shiftAtMost (inputModifiers inp))
     then pure none
     else do
       eligible <- keyboardFocused wid

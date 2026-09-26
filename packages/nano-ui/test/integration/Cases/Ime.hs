@@ -305,7 +305,7 @@ runImeShortcutsTest ctx failed = do
   let heldS = comp {inputKeysHeld = inputKeysFromList [KeyChar 's']}
   forM_ (map (`chordInp` comp) [ctrl <> key 's', ctrl <> key 'd', key KeyEscape, ctrl <> key KeyEnter] ++ [keyUpInp (KeyChar 's') comp, heldS]) $ \i ->
     assertEq failed ("ab", [], []) =<< frame i
-  assertEq failed ("ab漢字", [], ["held", "pressed"]) =<< frame (chordInp (ctrl <> key 's') (commit "漢字" inp))
+  assertEq failed ("ab漢字", [], []) =<< frame (chordInp (ctrl <> key 's') (commit "漢字" inp))
   _ <- frame comp
   assertEq failed ("ab漢字かな", []) =<< valueFired (chordInp (ctrl <> key 'd') (commit "かな" inp))
   _ <- frame comp

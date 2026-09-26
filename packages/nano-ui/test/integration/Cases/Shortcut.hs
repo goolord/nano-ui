@@ -20,6 +20,7 @@ tests =
   , spec "shortcut-escape-tab" runShortcutEscapeTabTest
   , spec "shortcut-menu-item" runShortcutMenuItemTest
   , spec "key-release-held" runKeyReleaseTest
+  , spec "key-listeners-focus" runKeyListenersFocusTest
   , spec "key-repeats" runKeyRepeatsTest
   , spec "key-repeats-widgets" runKeyRepeatsWidgetsTest
   , spec "key-pressable" runKeyPressableTest
@@ -141,15 +142,28 @@ runShortcutFocusedFieldTest ctx failed = do
   writeIORef (ctxFocusId ctx) (WidgetId 0)
   fires failed press True [ctrl <> key 'a', key 'j', key KeyEnter]
 
--- | A focused control keeps Enter and the arrows, whatever the modifiers.
+-- | A focused button keeps Enter and Space, alone or with Shift, and a
+-- slider the arrows too; a chord of them, such as Ctrl+Enter or Alt+Left,
+-- is a shortcut's, and the control does not act on it. A custom widget
+-- keeps what it claims: here every key.
 runShortcutFocusedControlTest :: Context -> IORef Int -> IO ()
 runShortcutFocusedControlTest ctx failed = do
+  let chords = [key KeyEnter, shift <> key KeyEnter, ctrl <> key KeyEnter, key KeyRight, shift <> key KeyRight, alt <> key KeyLeft, key 's']
   (ui, press) <- noting ctx $ \note ->
-    column (binds note [key KeyEnter, ctrl <> key KeyEnter, key KeyRight, key 's'] >> whenM (button "Go") (note "button"))
+    column (binds note chords >> whenM (button "Go") (note "button"))
   warmupFocused ctx inp0 ui
-  forM_ [key KeyEnter, ctrl <> key KeyEnter] $ \c -> assertEq failed ["button"] =<< press (chordInp c inp0)
-  fires failed press False [key KeyRight]
-  fires failed press True [key 's']
+  forM_ [key KeyEnter, shift <> key KeyEnter] $ \c -> assertEq failed ["button"] =<< press (chordInp c inp0)
+  fires failed press True [ctrl <> key KeyEnter, key KeyRight, shift <> key KeyRight, alt <> key KeyLeft, key 's']
+  s <- newContext
+  (sliderUi, pressS) <- noting s $ \note -> column (binds note chords >> void (slider 0 10 5))
+  warmupFocused s inp0 sliderUi
+  fires failed pressS False [key KeyEnter, key KeyRight, shift <> key KeyRight]
+  fires failed pressS True [ctrl <> key KeyEnter, alt <> key KeyLeft, key 's']
+  c <- newContext
+  (customUi, pressC) <- noting c $ \note ->
+    column (binds note chords >> void (customWidget defaultCustomWidgetSpec {widgetFocusable = True, widgetKeys = KeysAll}))
+  warmupFocused c inp0 customUi
+  fires failed pressC False chords
 
 -- | An Escape shortcut takes Escape, so the app does not quit on it, and a Tab
 -- shortcut keeps focus where it is.
@@ -203,6 +217,21 @@ runKeyReleaseTest ctx failed = do
   assertEq failed ([KeySpace], [], [KeySpace]) (toList (inputKeysHeld holding), toList (inputKeysReleased (clearEphemeral up)), toList (inputKeysHeld (applyKey KeySpace True down)))
   assert failed (inputInteracted holding up)
   assertEq failed [False, False, False] =<< evalUi ctx down (disabledWhen True keys)
+
+-- | The key listeners hear only the keys the focused widget leaves: a text
+-- field's Delete is its own, and F2 the view's; the input has both.
+runKeyListenersFocusTest :: Context -> IORef Int -> IO ()
+runKeyListenersFocusTest ctx failed = do
+  textRef <- newIORef "hello"
+  let listen = mapM (\k -> (,) <$> keyPressed k <*> keyHeld k) [KeyDelete, KeyF 2]
+      ui = column (listen <* held textRef textInput')
+      pressBoth = applyKey (KeyF 2) True (applyKey KeyDelete True inp0)
+  warmupFocused ctx inp0 ui
+  assertEq failed [(False, False), (True, True)] =<< evalUi ctx pressBoth ui
+  assert failed (pressedIn KeyDelete pressBoth && heldIn KeyDelete pressBoth)
+  writeIORef (ctxFocusId ctx) (WidgetId 0)
+  _ <- runFrame ctx inp0 ui
+  assertEq failed [(True, True), (True, True)] =<< evalUi ctx pressBoth ui
 
 -- | A held key's auto-repeats are presses that are not new: 'shortcut' and
 -- 'keyPressed' fire on them, 'shortcutOnce' and 'keyPressedOnce' do not,

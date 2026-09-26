@@ -916,7 +916,11 @@ module NanoUI
     -- the first shortcut declared for the chord. It stays quiet behind a
     -- modal and for a chord the widget with the keyboard acts on itself, so
     -- Ctrl+A in a focused text field selects its text rather than running a
-    -- shortcut bound to Ctrl+A ('shortcut' has the rules). A
+    -- shortcut bound to Ctrl+A ('shortcut' has the rules), and the key
+    -- listeners are quiet for those keys too: a view hears the keys no
+    -- widget took. A focused control takes the keys it acts on alone or
+    -- with Shift, so a chord of them, such as Alt+Left, is a shortcut's; a
+    -- custom widget says which keys it takes with 'widgetKeys'. A
     -- 'menuItemShortcut' row binds its chord the same way while its menu is
     -- open.
     --

@@ -27,7 +27,7 @@ import NanoUI.Internal.Font (FontMetrics, centeredTextY, menuItemPadX, menuItemR
 import NanoUI.Internal.Frame.Chrome (menuPanelBounds, overlayMenuStyle, paintMenuAccent, paintMenuPanel)
 import NanoUI.Internal.Frame.Hit (widgetOverlayAllowed)
 import NanoUI.Internal.Id (WidgetId (..))
-import NanoUI.Internal.Input (Input (..), Key (..), MouseButton (..), Pressable (..), anyButtonPressed, anyButtonReleased, buttonPressed, buttonReleased, inputPointerHeld)
+import NanoUI.Internal.Input (Input (..), Key (..), MouseButton (..), Pressable (..), anyButtonPressed, anyButtonReleased, buttonPressed, buttonReleased, inputPointerHeld, shiftAtMost)
 import NanoUI.Internal.Layout.Arena (NodeIdx, NodeType (NodeSelect, NodeTextInput), getNodeType, lookupNodeByKey, lookupNodeByWidgetId, getOptions, getNodeRect, getWidgetId)
 import NanoUI.Internal.Monad (whenM, (<&&>))
 import NanoUI.Internal.Store (fieldFloat, fieldInt, fieldText, findSlot, insertSlot, setFieldSelection)
@@ -204,11 +204,14 @@ closeSelectOnOutsideClick ctx inp =
 
 finalizeSelectKeyboard :: Context -> Input -> IO ()
 finalizeSelectKeyboard ctx@Context {ctxNodeArena = na} inp = do
-  let has k = pressedIn k inp
+  -- With Ctrl, Alt or Super held, an arrow or Enter is a chord, for a
+  -- shortcut.
+  let plain = shiftAtMost (inputModifiers inp)
+      has k = plain && pressedIn k inp
       wantNext = has KeyDown || has KeyRight
       wantStep = wantNext || has KeyUp || has KeyLeft
       wantEsc = pressedOnceIn KeyEscape inp
-      wantEnter = pressedOnceIn KeyEnter inp
+      wantEnter = plain && pressedOnceIn KeyEnter inp
   when (wantStep || wantEsc || wantEnter) $ do
     focus <- readIORef (ctxFocusId ctx)
     store <- getStore ctx

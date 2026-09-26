@@ -29,6 +29,8 @@ module NanoUI.Internal.Context
   , InteractionState (..)
   , PointerRoute (..)
   , FocusKind (..)
+  , KeyClaim (..)
+  , drawingKeyClaim
   , intKey
   , DamageRequest (..)
   , CustomMeasureFn

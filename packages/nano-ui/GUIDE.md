@@ -252,12 +252,17 @@ file: `C-s`, `M-S-p`, `A-<Enter>`, `<F5>`.
 
 A shortcut fires once per press, auto-repeats included, for the first
 `shortcut` declared for the chord; `shortcutOnce` and `keyPressedOnce` leave
-the repeats out, for a chord that toggles. It stays quiet behind a modal, inside `disabledWhen`, and for keys the
-focused widget uses, such as a text field's typing and Ctrl+A.
+the repeats out, for a chord that toggles. It stays quiet behind a modal,
+inside `disabledWhen`, and for keys the focused widget uses, such as a text
+field's typing and Ctrl+A, and so do `keyPressed`, `keyReleased` and
+`keyHeld`: a view hears the keys no widget took, and `askInput` has them
+all. A focused control uses the keys it acts on alone or with Shift, so
+Ctrl+Enter or Alt+Left still reaches a shortcut: a button Enter and Space,
+and a slider or a list the arrows too. A custom widget says which keys it
+uses with `widgetKeys`; a terminal takes `KeysAll`.
 `menuItemShortcut "Save" (ctrl <> key 's')` binds its chord only while its
 menu is open; for the closed menu, bind it with `shortcut` too, declared
-first. `keyPressed`, `keyReleased` and `keyHeld` read a key whatever has the
-keyboard.
+first.
 
 Text fields and text areas work with input methods by themselves: the
 focused field draws the composition (`inputComposition`) at its caret and

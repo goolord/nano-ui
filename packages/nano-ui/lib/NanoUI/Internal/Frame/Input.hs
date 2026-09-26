@@ -48,7 +48,7 @@ import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Monad (ifM, unlessM, whenM, (<&&>))
 import NanoUI.Internal.Types (DamageBounds (..), Rect (..), V2 (..), defaultDamageSlop, rectContains)
-import NanoUI.Internal.WidgetText (hasFlag, buttonFlagClose, buttonFlagMenuBar, buttonFlagMenu)
+import NanoUI.Internal.WidgetText (hasFlag, buttonFlagClose, buttonFlagMenuBar, buttonFlagMenu, buttonFlagRow)
 
 -- | Move keyboard focus when Tab was pressed, backwards with Shift held. Focus
 -- steps through the widgets that called 'NanoUI.Internal.Context.registerFocusable'
@@ -398,8 +398,8 @@ constrainFocusToModal ctx = do
   when (hashWidgetId focus /= 0) $
     unlessM (widgetOverlayAllowed ctx focus) $ writeIORef (ctxFocusId ctx) (WidgetId 0)
 
--- | Note in 'isFocusKind' what kind of widget has the keyboard, from the
--- last frame's nodes. Runs before the view, which rebuilds them, so that a
+-- | Note in 'isFocusKind' what kind of widget has the keyboard, and the keys
+-- it takes ('KeyClaim'), from the last frame's nodes. Runs before the view, which rebuilds them, so that a
 -- shortcut declared ahead of the focused widget knows about it too. @ime@:
 -- an input method has the focused field's keys this frame
 -- ('NanoUI.Internal.Frame.TextInput.claimComposition').
@@ -410,11 +410,15 @@ recordFocusKind ctx ime = do
     _
       | hashWidgetId focus == 0 -> pure FocusNone
       | ime -> pure FocusComposing
-      | otherwise -> withWidgetNode ctx focus FocusNone $ \idx ->
-          getNodeType (ctxNodeArena ctx) idx <&> \case
-            NodeTextInput -> FocusTextField False
-            NodeTextArea -> FocusTextField True
-            _ -> FocusControl
+      | otherwise -> withWidgetNode ctx focus FocusNone $ \idx -> do
+          let si = getStyleIdx (ctxNodeArena ctx) idx
+          getNodeType (ctxNodeArena ctx) idx >>= \case
+            NodeTextInput -> pure (FocusTextField False)
+            NodeTextArea -> pure (FocusTextField True)
+            -- A tree row moves with the arrows; any other button activates.
+            NodeButton -> si <&> \s -> FocusControl (if hasFlag buttonFlagRow s then KeysNavigate else KeysActivate)
+            NodeDrawing -> FocusControl . drawingKeyClaim <$> si
+            _ -> pure (FocusControl KeysNavigate)
   was <- getsInteraction ctx isFocusKind
   when (kind /= was) $ modifyInteraction ctx (\s -> s {isFocusKind = kind})
 

@@ -23,9 +23,12 @@ import NanoUI.Internal.Shortcut
 import NanoUI.Widgets.TextEditor (keyCommand, multiLineMode, singleLineMode)
 
 -- | Whether the key went down this frame, auto-repeats included, whatever
--- the modifiers and whatever has the keyboard. 'False' behind an open modal
--- and inside 'NanoUI.disabledWhen'. For a command bound to a key, use
--- 'shortcut'.
+-- the modifiers. 'False' behind an open modal, inside 'NanoUI.disabledWhen',
+-- and for a key the widget that has the keyboard acts on itself
+-- ('focusTakesChord'), as the Delete a focused text field deletes with: like
+-- iced's @keyboard::listen@, a view hears only the keys no widget took. The
+-- input itself has them all ('pressedIn'). For a command bound to a key,
+-- use 'shortcut'.
 keyPressed :: Ui :> es => Key -> Eff es Bool
 keyPressed = keyIn inputKeys
 
@@ -46,8 +49,17 @@ keyIn :: Ui :> es => (Input -> SmallArray Key) -> Key -> Eff es Bool
 keyIn field k = do
   inp <- askInput
   if inputKeysElem k (field inp)
-    then withContext (fmap not . pointerBlockedByModal)
+    then withContext (\ctx -> keyFree ctx (inputModifiers inp) k)
     else pure False
+
+-- | Whether a key pressed with these modifiers is the view's: no modal is
+-- in front of it, and the widget that has the keyboard does not act on it
+-- ('focusTakesChord').
+keyFree :: Context -> Modifiers -> Key -> IO Bool
+keyFree ctx mods k = do
+  blocked <- pointerBlockedByModal ctx
+  kind <- getsInteraction ctx isFocusKind
+  pure (not blocked && not (focusTakesChord kind mods k))
 
 -- | 'True' on a frame that presses the chord, with exactly its modifiers
 -- held; a held key's auto-repeats press it again. Only the first shortcut
@@ -57,13 +69,14 @@ keyIn field k = do
 --
 -- * behind an open modal, or inside 'NanoUI.disabledWhen';
 -- * when the widget that has the keyboard acts on it itself
---   ('focusTakesChord'): a focused control keeps Enter, Space, the arrows,
---   Home and End, and a text field also the keys that type, the keys it
---   moves and deletes with, and its shortcuts such as Ctrl+A and Ctrl+Z,
---   though a multi-line one leaves Ctrl+Enter and Alt+Enter, which it does
---   not act on. While an input method composes in the field, and in the
---   frame it commits text into it, the field takes every key. A custom
---   widget that holds the keyboard counts as a control;
+--   ('focusTakesChord'): a focused button keeps Enter and Space, a slider
+--   or a list the arrows too, each alone or with Shift, and a text field
+--   the keys that type, the keys it moves and deletes with, and its
+--   shortcuts such as Ctrl+A and Ctrl+Z, though a multi-line one leaves
+--   Ctrl+Enter and Alt+Enter, which it does not act on. While an input
+--   method composes in the field, and in the frame it commits text into
+--   it, the field takes every key. A custom widget keeps what its
+--   'NanoUI.Widgets.Custom.widgetKeys' says;
 -- * for Escape, when 'NanoUI.takeEscape' would not take it, which it takes
 --   as well.
 --
@@ -95,10 +108,7 @@ chordShortcut once (Shortcut (Just pressedKey) mods) = do
   if null presses || inputModifiers inp /= mods || (once && not (pressedOnceIn pressedKey inp))
     then pure False
     else do
-      free <- withContext $ \ctx -> do
-        blocked <- pointerBlockedByModal ctx
-        kind <- getsInteraction ctx isFocusKind
-        pure (not blocked && not (focusTakesChord kind mods pressedKey))
+      free <- withContext (\ctx -> keyFree ctx mods pressedKey)
       -- Escape is also the key that closes whatever is open, which takes it first.
       ours <- if free && pressedKey == KeyEscape then takeEscape else pure free
       if not ours
@@ -110,30 +120,36 @@ chordShortcut once (Shortcut (Just pressedKey) mods) = do
           when (took && pressedKey == KeyTab) (markTabConsumed ctx)
           pure took
 
--- | Whether the widget holding the keyboard acts on the chord itself, which
--- keeps a shortcut for it quiet. A control takes Enter, the arrows, Home and
--- End whatever the modifiers, and Space with no Ctrl, Alt or Super held. A
--- text field takes those, the keys that type (a character key alone, with
--- Shift, or with AltGr, which is Ctrl+Alt, or on macOS with Option), and
--- its editing keys and shortcuts ('NanoUI.Widgets.TextEditor.keyCommand'),
--- except that a multi-line field takes Enter only when it breaks the line,
--- so Ctrl+Enter can send what was typed. A field an input method composes
--- in, or commits into this frame, takes every key: those keys are the input
--- method's, and a chord that ends a composition commits its text rather than
--- also running a shortcut.
+-- | Whether the widget holding the keyboard acts on the key itself, pressed
+-- with these modifiers, which keeps a shortcut and the key listeners quiet
+-- for it. A control takes only the keys it acts on, alone or with Shift
+-- ('shiftAtMost'), so a chord such as Alt+Left or Ctrl+Enter still reaches
+-- a shortcut: a button or a checkbox Enter and Space ('KeysActivate'), and
+-- a slider, a select, a list or a pane grid the arrows, Home, End, Page Up
+-- and Page Down as well ('KeysNavigate'). A custom widget takes what its
+-- 'NanoUI.Widgets.Custom.widgetKeys' says. A text field takes the arrows,
+-- Home and End whatever the modifiers, and Enter in a single-line one, the
+-- keys that type ('isCommandKey'), and its editing keys and shortcuts
+-- ('NanoUI.Widgets.TextEditor.keyCommand'), so a multi-line field leaves
+-- Ctrl+Enter and Alt+Enter, which it does not act on, to send what was
+-- typed. A field an input method composes in, or commits into this frame,
+-- takes every key: those keys are the input method's, and a chord that ends
+-- a composition commits its text rather than also running a shortcut.
 focusTakesChord :: FocusKind -> Modifiers -> Key -> Bool
 focusTakesChord kind mods k =
   case kind of
     FocusNone -> False
-    FocusControl -> navigation
-    FocusTextField multi ->
-      (navigation && not (multi && k == KeyEnter))
-        || typing
-        || isJust (keyCommand (if multi then multiLineMode else singleLineMode) mods k)
+    FocusControl KeysActivate -> activates
+    FocusControl KeysNavigate -> activates || moves
+    FocusControl KeysType -> fieldTakes True
+    FocusControl KeysAll -> True
+    FocusTextField multi -> fieldTakes multi
     FocusComposing -> True
   where
-    command = modCtrl mods || modAlt mods || modSuper mods
-    navigation =
-      k `elem` [KeyEnter, KeyLeft, KeyRight, KeyUp, KeyDown, KeyHome, KeyEnd]
-        || (k == KeySpace && not command)
-    typing = not (isCommandKey mods k)
+    activates = shiftAtMost mods && (k == KeyEnter || k == KeySpace)
+    moves = shiftAtMost mods && k `elem` [KeyLeft, KeyRight, KeyUp, KeyDown, KeyHome, KeyEnd, KeyPageUp, KeyPageDown]
+    fieldTakes multi =
+      k `elem` [KeyLeft, KeyRight, KeyUp, KeyDown, KeyHome, KeyEnd]
+        || (k == KeyEnter && not multi)
+        || not (isCommandKey mods k)
+        || isJust (keyCommand (if multi then multiLineMode else singleLineMode) mods k)

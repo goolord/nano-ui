@@ -11,6 +11,7 @@ module NanoUI.Internal.Input
   , primaryModifiers
   , onMac
   , isCommandKey
+  , shiftAtMost
   , Input (..)
   , Pressable (..)
   , buttonHeld
@@ -156,6 +157,11 @@ primaryModifiers
 onMac :: Bool
 onMac = os == "darwin"
 {-# NOINLINE onMac #-}
+
+-- | Whether no modifier but Shift is held: a key a control acts on, such as
+-- an arrow on a slider, is its own pressed so, and a chord otherwise.
+shiftAtMost :: Modifiers -> Bool
+shiftAtMost m = not (modCtrl m || modAlt m || modSuper m)
 
 -- | Whether a key pressed with these modifiers is a command rather than
 -- typing: every named key but Space, and a key that types ('KeyChar',

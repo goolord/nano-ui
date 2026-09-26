@@ -49,6 +49,8 @@ module NanoUI.Internal.Context.Types
   , InteractionState (..)
   , PointerRoute (..)
   , FocusKind (..)
+  , KeyClaim (..)
+  , drawingKeyClaim
   , initialInteractionState
   , CustomMeasureFn
   , CustomDrawContext (..)
@@ -670,9 +672,8 @@ data InteractionState = InteractionState
 -- keys it acts on ('NanoUI.Internal.Widgets.Shortcut').
 data FocusKind
   = FocusNone
-  | -- | A control that is not a text field. It takes Enter, Space and the
-    -- navigation keys.
-    FocusControl
+  | -- | A control that is not a text field, and the keys it takes.
+    FocusControl !KeyClaim
   | -- | A text field, multi-line when 'True'. It takes typing and its
     -- editing keys and shortcuts.
     FocusTextField !Bool
@@ -682,6 +683,32 @@ data FocusKind
     -- are held.
     FocusComposing
   deriving (Eq, Show)
+
+-- | Which keys a focused control acts on itself, so that shortcuts and the
+-- key listeners ('NanoUI.keyPressed') leave them to it. A control takes
+-- Enter, Space and the arrows only alone or with Shift
+-- ('NanoUI.Internal.Input.shiftAtMost'): with Ctrl, Alt or Super they are
+-- chords, for a shortcut.
+data KeyClaim
+  = -- | Enter and Space, and the arrows, Home, End, Page Up and Page Down:
+    -- a slider, a list, a select.
+    KeysNavigate
+  | -- | Enter and Space: a button, a checkbox, a switch.
+    KeysActivate
+  | -- | What a multi-line text field takes: the keys that type, and its
+    -- editing keys and shortcuts, whatever the modifiers.
+    KeysType
+  | -- | Every key: a terminal, or an editor with chords of its own.
+    KeysAll
+  deriving (Eq, Show, Enum, Bounded)
+
+-- | The 'KeyClaim' a drawing node's style index holds, which a custom widget
+-- sets to the claim's 'fromEnum': a drawing that sets none, such as a
+-- canvas, takes the navigation keys.
+drawingKeyClaim :: Int -> KeyClaim
+drawingKeyClaim si
+  | si > 0 && si <= fromEnum (maxBound :: KeyClaim) = toEnum si
+  | otherwise = KeysNavigate
 
 -- | Pointer routed to the page, with no held gesture, menu, or pending edit command.
 initialInteractionState :: InteractionState

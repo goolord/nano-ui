@@ -310,7 +310,17 @@
 - Shortcuts: `shortcut (ctrl <> key 's')` is `True` once on the frame the
   chord is pressed, and again on each auto-repeat, unless a modal,
   `disabledWhen` or the focused widget takes it; `shortcutOnce` is not
-  `True` on the repeats, for a chord that toggles. The new module `NanoUI.Shortcut` has chords: a `Shortcut` is
+  `True` on the repeats, for a chord that toggles. The key listeners hear
+  only the keys the focused widget leaves too, as iced's `keyboard::listen`
+  hears what no widget captured: `keyPressed KeyDelete` is `False` while a
+  focused field deletes with it. A focused control takes the keys it acts
+  on alone or with Shift, so a chord of them is a shortcut's: a button or
+  a checkbox Enter and Space, and a slider, select, radio group, tree or
+  pane grid the arrows, Home, End and the paging keys as well.
+  `widgetKeys` on a custom widget says which it takes (`KeyClaim`): those
+  of a control that navigates by default, a button's, a multi-line text
+  field's, or every key, for a terminal or an editor with chords of its
+  own. The new module `NanoUI.Shortcut` has chords: a `Shortcut` is
   modifiers (`ctrl`, `shift`, `alt`, `super`, `cmdOrCtrl`) and a `key` put
   together with `<>`, with `shortcutLabel` and `shortcutIn`, and
   `parseShortcut` reads one written as xmonad's EZConfig writes it (`C-s`,
