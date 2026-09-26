@@ -2,13 +2,13 @@
 module NanoUI.Rgfw.Wake (testRgfwWake) where
 
 import Control.Concurrent (forkIO, getNumCapabilities, newEmptyMVar, setNumCapabilities, takeMVar, threadDelay, tryPutMVar, yield)
-import Control.Exception (ErrorCall (..), throwIO, try)
+import Control.Exception (SomeException, try)
 import Control.Monad (join, void, when)
 import Control.Monad.IO.Class (liftIO)
 import Data.IORef (atomicModifyIORef', atomicWriteIORef, newIORef, readIORef, writeIORef)
 import Foreign.C.Types (CInt (..))
 import GHC.Clock (getMonotonicTime)
-import NanoUI (askWake, label, useTask)
+import NanoUI (Size (..), WindowSettings (..), askWake, defaultWindowSettings, label, quitUi, useTask)
 import NanoUI.Backend.Rgfw (RgfwOptions (..), defaultRgfwOptions, runRgfwApp)
 import System.CPUTime (getCPUTime)
 import System.Environment (lookupEnv)
@@ -20,7 +20,7 @@ foreign import ccall "exit" c_exit :: CInt -> IO ()
 
 -- | A background job's result shows while the loop waits for events, woken
 -- by the job, and once a stream faster than frames stops, the loop waits
--- again rather than spinning. Needs an X display, and is skipped without
+-- again rather than spinning. 'quitUi' then ends the session. Needs an X display, and is skipped without
 -- one. A loop the wake never reaches would wait for good, so a failed check
 -- ends the process.
 testRgfwWake :: IO ()
@@ -66,7 +66,7 @@ testRgfwWake = do
                 v <- liftIO (readIORef latest)
                 when (v == -1) (liftIO (void (tryPutMVar streamed ())))
                 label "stream"
-              _ -> liftIO (throwIO (ErrorCall "quit"))
+              _ -> quitUi
       _ <- forkIO $ do
         await "the job's result" shown
         next 1
@@ -81,7 +81,9 @@ testRgfwWake = do
         when (cpu > 0.3 || f1 /= f0) $
           failNow ("after the stream the loop used " ++ show cpu ++ " s of CPU and ran " ++ show (f1 - f0) ++ " passes in a second")
         next 2
-      try (runRgfwApp defaultRgfwOptions {optWidth = 200, optHeight = 150} view) >>= \case
-        Left (ErrorCall "quit") -> putStrLn "[PASS] RGFW wake: a job's result and a stream show, and the loop idles after"
-        Left e -> failNow ("the session ended with " ++ show e)
-        Right () -> failNow "the session ended by itself"
+      try (runRgfwApp defaultRgfwOptions {optWindow = defaultWindowSettings {wsSize = Size 200 150}} view) >>= \case
+        Right () ->
+          readIORef phase >>= \case
+            2 -> putStrLn "[PASS] RGFW wake: a job's result and a stream show, the loop idles after, and quitUi ends it"
+            _ -> failNow "the session ended by itself"
+        Left (e :: SomeException) -> failNow ("the session ended with " ++ show e)

@@ -11,8 +11,13 @@
   keys, in `RGFW.Raw`.
 - `EventKeyRepeat`, a held key's auto-repeat, which `EventKeyPress` no longer
   reports, and `physicalToMappedKey`.
-- `setWindowIcon`, `setWindowMinSize`, `setWindowMaxSize`, `moveWindow` and
-  `centerWindow`.
+- `setWindowIcon`, `setWindowMinSize`, `setWindowMaxSize`, `moveWindow`,
+  `centerWindow`, `setWindowName`, `resizeWindow`, `maximizeWindow`,
+  `minimizeWindow`, `restoreWindow`, `setWindowFullscreen`, `showWindow` and
+  `hideWindow`; `windowPosition`, `windowFlags` and `windowFocused`, which
+  read what RGFW keeps of the window's state; and the window flags
+  `rgfw_windowNoResize`, `rgfw_windowFullscreen`, `rgfw_windowMaximize` and
+  `rgfw_windowMinimize`.
 - `stopWaitForEvent`, which ends a `waitForEvent` from another thread. On X11
   the bundled RGFW's wait now watches its stop pipe too.
 

@@ -426,7 +426,8 @@ askFrameInput = do
 localInput :: Ui :> es => Input -> Eff es a -> Eff es a
 localInput inp = localStaticRep (\r -> r {repInput = inp})
 
--- | The application window's content size in logical pixels.
+-- | The application window's content size in logical pixels: the
+-- 'NanoUI.winSize' of 'NanoUI.askWindow', read without the rest.
 {-# INLINE windowSize #-}
 windowSize :: Ui :> es => Eff es Size
 windowSize = fmap inputWindowSize askInput

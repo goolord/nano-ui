@@ -33,6 +33,7 @@ import NanoUI.Internal.Context
 import NanoUI.Internal.Debug
 import NanoUI.Internal.Frame.Input (needsRedraw)
 import NanoUI.Internal.Input
+import NanoUI.Internal.NativeWindow (clearWindowClose, quitRequested, requestWindowClose)
 import NanoUI.Internal.Tasks (cancelTasks)
 import NanoUI.Internal.Types (V2 (..))
 
@@ -132,7 +133,9 @@ data SessionDriver ev = SessionDriver
   , sdIsButtonEdge  :: ev -> Bool
     -- ^ Predicate identifying click/press boundaries where the event stream should be split.
   , sdIsSessionQuit :: ev -> Bool
-    -- ^ Predicate for window close requests.
+    -- ^ Predicate for window close requests. One ends the session, or, for a
+    -- window whose settings say not to ('NanoUI.wsExitOnCloseRequest'), is
+    -- shown to the next frame ('NanoUI.winCloseRequested').
   , sdSyncDisplay   :: Context -> Input -> IO (Context, Input)
     -- ^ Backend-specific display synchronization (window dimensions, DPI scale).
   , sdDebug         :: DebugSamplerRef
@@ -210,8 +213,9 @@ wakePadMs = 2
 debugHudTimeout :: Int
 debugHudTimeout = round (debugRefreshSec * 1000)
 
--- | Run an event-driven session loop until a termination event or user quit
--- condition. The background jobs the view started end with it.
+-- | Run an event-driven session loop until the window is closed, Ctrl+C is
+-- pressed outside a text field, a view calls 'NanoUI.quitUi', or
+-- 'sdShouldQuit' says so. The background jobs the view started end with it.
 runSessionLoop ::
   SessionDriver ev ->
   Context ->
@@ -289,7 +293,10 @@ runSessionLoop drv ctx0 inp0 = do
         -- Hard quit is ignored while a text editor is active.
         hardQuit <-
           if any isHardQuitInput quitChecks then not <$> textInputEditActive ctx else pure False
-        unless (hardQuit || any (sdIsSessionQuit drv) group) $ do
+        -- A close request ends the session, or asks the view.
+        let closing = any (sdIsSessionQuit drv) group
+        closeNow <- if closing && not hardQuit then requestWindowClose ctx else pure False
+        unless (hardQuit || closeNow) $ do
           noteDebugLoop (sdDebug drv) dt
           inpStamped <- stampClicks clickTracker (last steps)
           (ctx', inpSynced) <- sdSyncDisplay drv ctx inpStamped
@@ -304,6 +311,7 @@ runSessionLoop drv ctx0 inp0 = do
             then sdDraw drv ctx' inpSynced (wasAnim && not animNow)
             else pendingDirty <$ noteDebugSkip (sdDebug drv)
           sdOnCursor drv ctx' inpSynced
+          when closing (clearWindowClose ctx')
           animAfter <- anyAnimating ctx'
           traceLoopPass trace (length group) shouldDraw $
             (if pendingDirty then "D" else "")
@@ -315,7 +323,8 @@ runSessionLoop drv ctx0 inp0 = do
           -- The next pass was animating if this frame was, even when this
           -- frame's tick finished the animation: its view read the value
           -- before that tick, so one more (settle) frame draws the end value.
-          unless (sdShouldQuit drv inpSynced && not overlayQuit) $
+          quit <- quitRequested ctx'
+          unless (quit || (sdShouldQuit drv inpSynced && not overlayQuit)) $
             loop ctx' inpSynced rest now dirtyOut animNow
 
   loop ctx0 inp0 [] startT False False `finally` cancelTasks ctx0

@@ -382,9 +382,7 @@ main = withPty $ \fd -> do
     monoFont = FontSearch ["Input Mono", "JetBrains Mono", "Menlo", "monospace"]
   withSdl
     defaultSdlOptions
-      { sdlWindowTitle = "nano-ui Terminal"
-      , sdlWindowSize = Size 816 592
-      , sdlWindowResizable = False
+      { sdlWindowSettings = defaultWindowSettings {wsTitle = "nano-ui Terminal", wsSize = Size 816 592, wsResizable = False}
       , sdlAppFontSize = 16
       , sdlAppFont = monoFont
       , sdlAppMonoFont = monoFont

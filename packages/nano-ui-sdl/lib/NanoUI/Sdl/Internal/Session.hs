@@ -7,7 +7,7 @@ import Control.Exception (bracket)
 import Control.Monad (forM_, unless, void, when)
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Maybe (fromMaybe, isNothing)
-import NanoUI (followSystemTheme)
+import NanoUI (WindowSettings (..), followSystemTheme)
 import NanoUI.Backend (Input (..), clearEphemeral, emptyInput, setExplainLayout)
 import NanoUI.Runner
 import NanoUI.Testing (Context, newPixelContext, registerImage, withTheme)
@@ -78,7 +78,7 @@ runSdlSession options drawFn = do
     let startupFrame c inp = do
           writeIORef wakeRef False
           void (drawFn c env inp True)
-    (ctx1, inp0) <- settle ctx0 emptyInput {inputWindowSize = sdlWindowSize options}
+    (ctx1, inp0) <- settle ctx0 emptyInput {inputWindowSize = wsSize (sdlWindowSettings options)}
     scale0 <- readIORef (sdlScaleRef env)
     startupFrame ctx1 inp0
     -- First present can apply DPI. Prev rects are empty on that frame.

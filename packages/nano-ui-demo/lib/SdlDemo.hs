@@ -46,11 +46,10 @@ module SdlDemo
     , demoUi
     ) where
 
-import Control.Concurrent (forkIO)
 import Control.Exception (SomeException, displayException, evaluate, try)
 import Control.Monad (forM, forM_, unless, void, when, (<=<))
 import Control.Monad.IO.Class (liftIO)
-import Data.Foldable (for_, toList, traverse_)
+import Data.Foldable (for_, toList)
 import Data.List (elemIndex)
 import Data.Maybe (catMaybes, fromMaybe, isJust, isNothing, listToMaybe, mapMaybe)
 import Data.Primitive.SmallArray (SmallArray, indexSmallArray, sizeofSmallArray, smallArrayFromList)
@@ -146,10 +145,11 @@ decodeGif path = do
   pure (either (\e -> Left (displayException (e :: SomeException))) Right decoded)
 
 -- | Save a screenshot as a PNG with JuicyPixels.
-savePng :: FilePath -> RgbaImage -> IO ()
-savePng path (RgbaImage _ w h pixels) =
-  let (fp, n) = BSI.toForeignPtr0 pixels
-   in JP.writePng path (JP.Image w h (VS.unsafeFromForeignPtr0 fp n) :: JP.Image JP.PixelRGBA8)
+savePng :: FilePath -> Screenshot -> IO ()
+savePng path shot =
+  let px = screenshotPixels shot
+      (fp, n) = BSI.toForeignPtr0 (rgbaBytes px)
+   in JP.writePng path (JP.Image (rgbaWidth px) (rgbaHeight px) (VS.unsafeFromForeignPtr0 fp n) :: JP.Image JP.PixelRGBA8)
 
 -- | Register a decoded GIF's frames under fresh ids, in order, or say why the
 -- file could not be used. Registering stops at the first frame the atlas
@@ -315,10 +315,17 @@ demoUi = do
             -- F1 and F12 do what the buttons do; a shortcut takes no id.
             whenM ((||) <$> button "About" <*> shortcut (key (KeyF 1))) (setAbout True)
             whenM ((||) <$> button "Debug" <*> shortcut (key (KeyF 12))) (setDebug (not debugOpen))
-            whenM (button "Screenshot") $ do
-              -- Taken once this frame is on screen, and saved off the UI thread.
-              requestScreenshot (traverse_ (forkIO . savePng "nano-ui-demo.png"))
-              setClick "Screenshot: nano-ui-demo.png"
+            -- Each click takes a screenshot on a thread of its own, once the
+            -- next frame is on screen, and saves it there; the label says
+            -- how that went.
+            (shots, setShots) <- useInt 0
+            whenM (button "Screenshot") (setShots (shots + 1))
+            shoot <- askScreenshot
+            scope $ when (shots > 0) $
+              useTaskStatus shots (shoot >>= maybe (ioError (userError "no frame to capture")) (savePng "nano-ui-demo.png")) >>= \case
+                TaskRunning _ -> labelWith (tight . alignMid . fontMuted) "Saving..."
+                TaskDone () -> labelWith (tight . alignMid . fontMuted) "Saved nano-ui-demo.png"
+                TaskFailed e _ -> labelWith (tight . alignMid . fontDanger) (T.pack (displayException e))
 
       ----------------------------------------------------------- body ----
       responsiveRowCol 1000 (tight . gap gapLayout . fillW) $ do
@@ -1069,8 +1076,7 @@ demoOptions =
   defaultSdlOptions
     { sdlAppShouldQuit = \inp -> inputKeysElem KeyEscape (inputKeys inp)
     , sdlAppTheme = Just defaultTheme
-    , sdlWindowSize = Size 1280 800
-    , sdlWindowMinSize = Just (Size 480 360)
+    , sdlWindowSettings = defaultWindowSettings {wsSize = Size 1280 800, wsMinSize = Just (Size 480 360)}
     }
 
 -- | Each option's change to 'demoOptions'; 'Nothing' asks for the help text.
@@ -1079,7 +1085,7 @@ options =
   [ Option ['v'] ["vsync"] (ReqArg (\s -> Just $ \o -> o {sdlAppVsync = s `elem` ["true", "True", "1"]}) "BOOL") "Enable or disable vsync (true/false, default: true)"
   , Option ['c', 'b', 'f'] ["continuous", "benchmark", "fps"] (NoArg (Just $ \o -> o {sdlAppContinuous = True, sdlAppVsync = False})) "Continuous unthrottled rendering, to show uncapped FPS (disables vsync)"
   , Option [] ["explain"] (NoArg (Just $ \o -> o {sdlExplainLayout = True})) "Start with the layout overlay on, which outlines every layout node"
-  , Option ['F'] ["fullscreen"] (NoArg (Just $ \o -> o {sdlWindowFullscreen = True})) "Launch window in fullscreen mode"
+  , Option ['F'] ["fullscreen"] (NoArg (Just $ withWindow (\w -> w {wsMode = Fullscreen}))) "Launch window in fullscreen mode"
   , Option [] ["borderless"] (NoArg (Just $ \o -> o {sdlWindowDecorations = DecorationsFrame})) "Launch borderless window"
   , Option ['t'] ["always-on-top"] (NoArg (Just $ \o -> o {sdlWindowAlwaysOnTop = True})) "Keep window always on top"
   , Option ['W'] ["width"] (ReqArg (\s -> size (\w sz -> sz {sizeW = w}) s) "PX") "Initial window width in pixels (default: 1280)"
@@ -1087,4 +1093,5 @@ options =
   , Option ['h', '?'] ["help"] (NoArg Nothing) "Show help and command-line options"
   ]
   where
-    size f s = Just $ \o -> maybe o (\px -> o {sdlWindowSize = f px (sdlWindowSize o)}) (readMaybe s)
+    size f s = Just $ maybe id (\px -> withWindow (\w -> w {wsSize = f px (wsSize w)})) (readMaybe s)
+    withWindow f o = o {sdlWindowSettings = f (sdlWindowSettings o)}

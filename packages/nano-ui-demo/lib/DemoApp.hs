@@ -8,7 +8,7 @@ module DemoApp
 
 import Data.ByteString qualified as BS
 import Data.Foldable (for_)
-import NanoUI (ImageId, Input (..), NanoUI, Size (..), V2 (..), freshImageId, registerImageRgba)
+import NanoUI (ImageId, Input (..), NanoUI, Size (..), V2 (..), WindowMode (..), WindowSettings (..), defaultWindowSettings, freshImageId, registerImageRgba)
 import NanoUI.Backend (emptyInput)
 import NanoUI.Backend.Sdl
   ( FileDialogId
@@ -56,6 +56,6 @@ withHiddenWindow ::
   IO a
 withHiddenWindow w h mouse opts k = do
   ctx0 <- newPixelContext
-  let base = defaultSdlOptions {sdlWindowHidden = True, sdlWindowSize = Size w h, sdlWindowResizable = False}
+  let base = defaultSdlOptions {sdlWindowSettings = defaultWindowSettings {wsMode = Hidden, wsSize = Size w h, wsResizable = False}}
   withSdl (opts base) ctx0 $ \ctx env ->
     k ctx env emptyInput {inputWindowSize = Size w h, inputMousePos = mouse}

@@ -417,8 +417,7 @@ main = do
   appStateRef <- newIORef =<< newAppState 120 True
   runSdlApp
     defaultSdlOptions
-      { sdlWindowTitle = "nano-ui Log Viewer"
-      , sdlWindowSize = Size 1050 720
+      { sdlWindowSettings = defaultWindowSettings {wsTitle = "nano-ui Log Viewer", wsSize = Size 1050 720}
       , sdlAppTheme = Just tomorrowNightMinDarkTheme
       -- ESC clears the selection (handled in logsApp); quit is Ctrl+Q.
       , sdlAppShouldQuit = shortcutIn (ctrl <> key 'q')

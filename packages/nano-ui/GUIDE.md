@@ -357,18 +357,66 @@ explainLayout =<< checkbox "Outline layout nodes" =<< explainingLayout
 
 ## The window
 
-`SdlOptions` and `RgfwOptions` set the window's size, position, icon and size
-limits, and `SdlOptions` its opacity and transparency. A view changes them
-with `setWindowIconUi`, `setWindowMinSizeUi`, `setWindowMaxSizeUi` and
-`setWindowOpacityUi`, which act only on a change and so can run every frame,
-and `setWindowPositionUi`, which moves the window on every call. A
-transparent window (`sdlWindowTransparent`) shows the desktop, given a
-compositor, where the theme's `windowColor` is translucent. An RGFW window is
-opaque and does not fade, so `setWindowOpacityUi` does nothing there.
+A `WindowSettings` says how the window opens, the same for every backend:
+`sdlWindowSettings` in `SdlOptions`, `optWindow` in `RgfwOptions`. Its sizes
+are in layout units, the units of `windowSize`, which the backend converts at
+the scale the window opens at.
 
-`requestScreenshot` hands its action the frame as an `RgbaImage` once it is on
-screen, or `Nothing` outside a window. Ask from an event, and keep the action
-short or fork it, since the next frame waits for it.
+```haskell
+main :: IO ()
+main =
+  runSdlApp
+    defaultSdlOptions
+      { sdlWindowSettings =
+          defaultWindowSettings {wsTitle = "Notes", wsSize = Size 900 600, wsMinSize = Just (Size 480 320)}
+      }
+    notesView
+```
+
+`askWindow` reads the window as this frame began: its size and scale, where
+it is, whether it has the keyboard, and whether it is maximized, minimized or
+fullscreen. A view that reads it gets a frame when it changes; one that never
+does pays nothing for it. The setters `setWindowTitleUi`, `setWindowIconUi`,
+`setWindowMinSizeUi`, `setWindowMaxSizeUi`, `setWindowOpacityUi` and
+`setWindowModeUi` act only when the value differs from what the window has,
+so a view can call them every frame with what it wants. The commands
+`moveWindowUi`, `centerWindowUi`, `resizeWindowUi`, `minimizeWindowUi`,
+`maximizeWindowUi`, `restoreWindowUi` and `toggleMaximizedUi` act on every
+call, since the user moves and resizes the window too; call them from an
+event. A transparent window (`wsTransparent`, SDL only) shows the desktop,
+given a compositor, where the theme's `windowColor` is translucent. An RGFW
+window is opaque and does not fade, so `wsOpacity` and `setWindowOpacityUi`
+do nothing there.
+
+A window closes when asked, by its close button or the platform. With
+`wsExitOnCloseRequest = False` it asks the view instead: `winCloseRequested`
+is set for the frame after the request, and the session goes on until the
+view calls `quitUi`, which ends it once that frame is drawn:
+
+```haskell
+(asking, setAsking) <- useFlag False
+whenM (winCloseRequested <$> askWindow) $
+  if unsaved then setAsking True else quitUi
+_ <- modal asking "Discard your changes?" $ do
+  whenM (button "Discard") quitUi
+  whenM (button "Keep editing") (setAsking False)
+```
+
+`requestScreenshot` hands its action a `Screenshot` once the frame is on
+screen, or `Nothing` outside a window: the frame's `RgbaPixels` and how many
+of them a layout unit is. Ask from an event, and keep the action short or
+fork it, since the next frame waits for it. `askScreenshot` gives a
+background job an action that waits for the next frame's screenshot, so a
+job can take and save one and say how that went:
+
+```haskell
+shoot <- askScreenshot
+saved <- useTaskStatus shots (shoot >>= traverse_ (savePng "shot.png"))
+```
+
+`useScreenshot key` returns a screenshot for each key, for a view that shows
+it. Make `RgbaPixels` for an icon with `rgbaPixels`, which checks that the
+bytes are four a pixel.
 
 ## Writing a backend
 
@@ -388,11 +436,19 @@ wake-ups. The two backends in this repository,
 Fold keys in with `applyKey` (a typing key as the `KeyChar` it types
 unmodified, with its text in `inputChars` too) and input-method updates with
 `applyComposition`. After a frame, `textInputArea` from
-`NanoUI.Testing` says where the candidate window goes. Before the first frame,
-install a `WindowHost` (`installWindowHost`) and a wake action any thread may
-call (`setWakeLoop`), and report the desktop's light or dark setting with
-`setSystemAppearance`, again on each change. Once a frame is on screen, call
-`answerScreenshots` with a capture of it, or `pure Nothing`.
+`NanoUI.Testing` says where the candidate window goes. Open the window from
+the `WindowSettings` with their title, size, mode, resizability and
+transparency. Before the first frame, install a `WindowHost` with
+`installWindowHost`, which applies the rest of the settings through it; build
+the host from `defaultWindowHost` with a record update, so a field added later
+does nothing on your backend rather than break it. Install a wake action any
+thread may call (`setWakeLoop`), and report the desktop's light or dark
+setting with `setSystemAppearance`, again on each change. Once a frame, before
+the view runs, report the window's scale, position, focus and mode with
+`reportWindowState`. Once a frame is on screen, call `answerScreenshots` with
+a capture of it, or `pure Nothing`. `runSessionLoop` handles close requests
+and `quitUi`; a loop of your own does with `requestWindowClose`,
+`clearWindowClose` and `quitRequested`.
 
 ## Headless tests
 

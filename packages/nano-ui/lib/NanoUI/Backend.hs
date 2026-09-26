@@ -15,8 +15,8 @@
 -- Writing a GUI needs none of it: "NanoUI" has the widgets, layout, styling
 -- and state, and a backend's own runner (@runSdlApp@, @runRgfwApp@) starts
 -- the loop. Nothing here shadows a name in "NanoUI": the names the two
--- share (the input types, 'FontMetrics', 'lineWidth' and 'Appearance') are
--- the same entities in both, so importing both is safe.
+-- share (the input types, 'FontMetrics', 'lineWidth', 'Appearance' and
+-- 'WindowState') are the same entities in both, so importing both is safe.
 --
 -- A backend's frame is: collect events into an 'Input', run the view with
 -- "NanoUI.Runner" or "NanoUI.Testing", take the 'Damage' and present the
@@ -187,13 +187,32 @@ module NanoUI.Backend
 
     -- * The native window
 
-    -- | What a backend does with what a view asks of its window
-    -- ('NanoUI.requestScreenshot', 'NanoUI.setWindowIconUi' and the other
-    -- setters). Install a 'WindowHost' once, before the first frame, and
-    -- call 'answerScreenshots' with a capture once each frame is on screen.
+    -- | A backend opens its window from a 'NanoUI.WindowSettings', with its
+    -- title, size, mode, resizability and transparency, then installs a
+    -- 'WindowHost' ('installWindowHost'), which says what it does with what
+    -- a view asks of the window ('NanoUI.setWindowTitleUi',
+    -- 'NanoUI.moveWindowUi' and the rest) and applies the rest of the
+    -- settings through it. Build the host from 'defaultWindowHost' with a
+    -- record update, so a field added later does nothing rather than break
+    -- the backend. Once a frame, before the view runs, report the window's
+    -- scale, position, focus and mode with 'reportWindowState', which views
+    -- read with 'NanoUI.askWindow'; once a frame is on screen, call
+    -- 'answerScreenshots' with a capture of it.
+    --
+    -- @runSessionLoop@ in "NanoUI.Runner" handles closing: a close request
+    -- ends the session or, if the settings say, is shown to the view, and
+    -- 'NanoUI.quitUi' ends it. A loop of the backend's own does the same with
+    -- 'requestWindowClose', 'clearWindowClose' and 'quitRequested'.
   , WindowHost (..)
+  , defaultWindowHost
   , installWindowHost
+  , WindowState (..)
+  , defaultWindowState
+  , reportWindowState
   , answerScreenshots
+  , requestWindowClose
+  , clearWindowClose
+  , quitRequested
 
     -- * Background work
 
@@ -220,7 +239,18 @@ import NanoUI.Internal.Font
 import NanoUI.Internal.Id
 import NanoUI.Internal.Input
 import NanoUI.Internal.Monad
-import NanoUI.Internal.NativeWindow (WindowHost (..), answerScreenshots, installWindowHost)
+import NanoUI.Internal.NativeWindow
+  ( WindowHost (..)
+  , WindowState (..)
+  , answerScreenshots
+  , clearWindowClose
+  , defaultWindowHost
+  , defaultWindowState
+  , installWindowHost
+  , quitRequested
+  , reportWindowState
+  , requestWindowClose
+  )
 import NanoUI.Internal.Style (Appearance (..), windowMargin, windowPad)
 import NanoUI.Internal.Tasks (cancelTasks)
 import NanoUI.Internal.Types

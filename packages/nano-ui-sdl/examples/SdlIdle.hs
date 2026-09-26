@@ -60,9 +60,12 @@ main = do
   typedAt <- newIORef (0 :: Double)
   runSdlApp
     defaultSdlOptions
-      { sdlWindowTitle = "nano-ui idle: " <> T.pack scene
-      , sdlWindowSize = Size 900 600
-      , sdlWindowHidden = "hidden" `elem` drop 1 args
+      { sdlWindowSettings =
+          defaultWindowSettings
+            { wsTitle = "nano-ui idle: " <> T.pack scene
+            , wsSize = Size 900 600
+            , wsMode = if "hidden" `elem` drop 1 args then Hidden else Windowed
+            }
       , sdlAppShouldQuit = \inp -> inputKeysElem KeyEscape (inputKeys inp)
       }
     (idleUi scene frames started typedAt)

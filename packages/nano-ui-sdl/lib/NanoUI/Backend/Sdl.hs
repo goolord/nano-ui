@@ -23,40 +23,33 @@ module NanoUI.Backend.Sdl
   , askSaveFileDialog
   , askOpenFolderDialog
   , pollFileDialogUi
+    -- * The window
+
+    -- | 'WindowSettings' and the view's window functions are the core's
+    -- ("NanoUI"): 'NanoUI.askWindow', 'NanoUI.setWindowTitleUi',
+    -- 'NanoUI.moveWindowUi', 'NanoUI.quitUi' and the rest. What is here is
+    -- the SDL window's own.
+  , WindowSettings (..)
+  , defaultWindowSettings
+  , WindowPosition (..)
+  , WindowMode (..)
+  , windowZoom
+  , windowResizable
+  , WindowDecorations (..)
+  , setWindowDecorations
+  , setWindowShadow
+
     -- * Window chrome
   , WindowChrome (..)
   , defaultWindowChrome
   , defaultResizeBorder
   , setWindowChrome
   , clearWindowChrome
-  , setWindowTitle
-  , setWindowSize
-  , minimizeWindow
-  , maximizeWindow
-  , restoreWindow
-  , toggleMaximized
-  , windowMaximized
-  , windowResizable
-  , windowZoom
-  , WindowDecorations (..)
-  , setWindowDecorations
-  , setWindowShadow
-  , setWindowIcon
-  , setWindowMinSize
-  , setWindowMaxSize
-  , WindowPosition (..)
-  , setWindowPosition
-  , windowPosition
-  , setWindowOpacity
   , CaptionOptions (..)
   , defaultCaptionOptions
   , windowCaption
   , windowCaptionWith
-  , setWindowTitleUi
   , setWindowChromeUi
-  , minimizeWindowUi
-  , toggleMaximizedUi
-  , windowMaximizedUi
   , NanoUIFont (..)
   , listFontFamilies
   , runSdlApp
@@ -71,7 +64,7 @@ module NanoUI.Backend.Sdl
 
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Typeable (Typeable)
-import NanoUI (NanoUI, WindowPosition (..))
+import NanoUI (NanoUI, WindowMode (..), WindowPosition (..), WindowSettings (..), defaultWindowSettings)
 import NanoUI.Sdl.Internal.Runner (askSdlDebug, drawFrameWith, sdlDrawFrame, setSdlUiFont, setSdlUiScale)
 import NanoUI.Sdl.Internal.Session (runSdlSession)
 import NanoUI.Sdl.Internal.Debug (SdlDebugSnapshot (..))

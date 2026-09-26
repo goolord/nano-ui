@@ -40,8 +40,8 @@ import Foreign.C.String (withCString)
 import Foreign.Marshal.Utils (copyBytes, maybePeek, with)
 import Foreign.Storable (peek)
 import Foreign.Ptr (Ptr, castPtr, nullPtr, plusPtr)
-import NanoUI (ImageId (..), Input (..), RgbaImage (..), Size (..), Theme, V2 (..), WindowPosition (..))
-import NanoUI.Backend (cancelTasks, installWindowHost, setSystemAppearance, setWakeLoop)
+import NanoUI (Input (..), RgbaImage (..), RgbaPixels, Screenshot (..), Size (..), Theme, V2 (..), WindowMode (..), WindowSettings (..), defaultWindowSettings, rgbaPixels)
+import NanoUI.Backend (cancelTasks, installWindowHost, reportWindowState, setSystemAppearance, setWakeLoop)
 import NanoUI.Internal.Context (Context (..), setDrawSnapScale)
 import NanoUI.Testing (clearMeasureCache, damageFull, markDirty, setHost, withClipboard)
 import NanoUI.Sdl.Internal.Display
@@ -94,14 +94,18 @@ import SDL3.Sys.Video (destroyWindowSafe, getWindowDisplayScale)
 
 -- | Application-owned SDL settings.
 data SdlOptions = SdlOptions
-  { sdlWindowTitle :: !Text
-  -- ^ Window title (default: @"nano-ui"@).
-  , sdlWindowSize :: !Size
-  -- ^ Initial window size in logical units (default: 1280x800).
-  , sdlWindowResizable :: !Bool
-  -- ^ Allow the window to be resized (default: 'True').
-  , sdlWindowFullscreen :: !Bool
-  -- ^ Open the window in fullscreen mode (default: 'False').
+  { sdlWindowSettings :: !WindowSettings
+  -- ^ The window: its title, size, position, size limits, icon, mode,
+  -- transparency and opacity, and whether it closes by itself (default:
+  -- 'defaultWindowSettings'). Sizes are in layout units, converted at the
+  -- zoom the window opens at: a later 'NanoUI.Backend.Sdl.setSdlUiScale'
+  -- leaves them where they were. A 'WindowPositionDefault' window opens
+  -- where the desktop puts it, or centred when 'sdlAppUiScale' grows it. A
+  -- transparent window ('wsTransparent') repaints in full when anything in
+  -- it changes; where translucent colours overlap, the alpha depends on the
+  -- render driver: most keep the more opaque one, SDL's OpenGL renderer
+  -- weighs the colour drawn by its own alpha, and the software renderer adds
+  -- them up.
   , sdlWindowDecorations :: !WindowDecorations
   -- ^ How much of the desktop's title bar and frame the window keeps
   -- (default: 'DecorationsFull'). 'DecorationsFrame' is for a view that
@@ -109,34 +113,6 @@ data SdlOptions = SdlOptions
   -- 'NanoUI.Backend.Sdl.setWindowDecorations' changes it afterwards.
   , sdlWindowAlwaysOnTop :: !Bool
   -- ^ Keep the window on top of other windows (default: 'False').
-  , sdlWindowHidden :: !Bool
-  -- ^ Start the window hidden (default: 'False').
-  , sdlWindowPosition :: !WindowPosition
-  -- ^ Where the window opens (default: 'WindowPositionDefault', which is
-  -- where the desktop puts it, or centred when 'sdlAppUiScale' grows it).
-  -- 'NanoUI.Backend.Sdl.setWindowPosition' moves it afterwards.
-  , sdlWindowMinSize :: !(Maybe Size)
-  -- ^ The smallest the user may make the window, in logical units like
-  -- 'sdlWindowSize' (default: no limit). An axis of zero has no limit. Like
-  -- the size, it is converted at the zoom the window opens at: a later
-  -- 'NanoUI.Backend.Sdl.setSdlUiScale' leaves it where it was.
-  , sdlWindowMaxSize :: !(Maybe Size)
-  -- ^ The largest the user may make the window (default: no limit).
-  , sdlWindowIcon :: !(Maybe RgbaImage)
-  -- ^ The window's icon (default: the desktop's). Its image id is not used.
-  , sdlWindowTransparent :: !Bool
-  -- ^ Let the desktop show through the window where the theme's window
-  -- colour is translucent (default: 'False'). Give the theme a window
-  -- colour with an alpha under 255 ('NanoUI.windowColor'); widgets drawn
-  -- over it keep their own alpha, and the desktop needs a compositor to
-  -- show through. A transparent window repaints in full when anything in
-  -- it changes. Where translucent colours overlap, the alpha depends on the
-  -- render driver: most keep the more opaque one, SDL's OpenGL renderer
-  -- weighs the colour drawn by its own alpha, and the software renderer
-  -- adds them up.
-  , sdlWindowOpacity :: !Float
-  -- ^ Fade the whole window, frame and all, from 0 to 1 (default: 1),
-  -- where the desktop allows.
   , sdlAppVsync :: !Bool
   -- ^ Enable vertical synchronization (default: 'True').
   , sdlRenderDriver :: !RenderDriver
@@ -175,19 +151,9 @@ data SdlOptions = SdlOptions
 defaultSdlOptions :: SdlOptions
 defaultSdlOptions =
   SdlOptions
-    { sdlWindowTitle = "nano-ui"
-    , sdlWindowSize = defaultWindowSize
-    , sdlWindowResizable = True
-    , sdlWindowFullscreen = False
+    { sdlWindowSettings = defaultWindowSettings
     , sdlWindowDecorations = DecorationsFull
     , sdlWindowAlwaysOnTop = False
-    , sdlWindowHidden = False
-    , sdlWindowPosition = WindowPositionDefault
-    , sdlWindowMinSize = Nothing
-    , sdlWindowMaxSize = Nothing
-    , sdlWindowIcon = Nothing
-    , sdlWindowTransparent = False
-    , sdlWindowOpacity = 1
     , sdlAppVsync = True
     , sdlRenderDriver = RenderDriverAuto
     , sdlAppContinuous = False
@@ -229,14 +195,15 @@ windowFlags :: SdlOptions -> SDL_WindowFlags
 windowFlags opts =
   SDL_WindowFlags $
     0x0000000000002000
-      .|. flag sdlWindowResizable 0x0000000000000020
-      .|. flag sdlWindowFullscreen 0x0000000000000001
-      .|. flag ((/= DecorationsFull) . sdlWindowDecorations) 0x0000000000000010
-      .|. flag sdlWindowAlwaysOnTop 0x0000000000010000
-      .|. flag sdlWindowHidden 0x0000000000000008
-      .|. flag sdlWindowTransparent 0x0000000040000000
+      .|. flag (wsResizable settings) 0x0000000000000020
+      .|. flag (wsMode settings == Fullscreen) 0x0000000000000001
+      .|. flag (sdlWindowDecorations opts /= DecorationsFull) 0x0000000000000010
+      .|. flag (sdlWindowAlwaysOnTop opts) 0x0000000000010000
+      .|. flag (wsMode settings == Hidden) 0x0000000000000008
+      .|. flag (wsTransparent settings) 0x0000000040000000
   where
-    flag field bit = if field opts then bit else 0
+    settings = sdlWindowSettings opts
+    flag on bit = if on then bit else 0
 
 scaleEpsilon :: Float
 scaleEpsilon = 0.001
@@ -268,7 +235,7 @@ data SdlEnv = SdlEnv
   , sdlRefreshPeriod :: !Double
   , sdlContinuous :: !Bool
   , sdlTransparent :: !(Maybe (SDL_BlendMode, SDL_BlendMode))
-  -- ^ For a transparent window ('sdlWindowTransparent'), the blend modes
+  -- ^ For a transparent window ('wsTransparent'), the blend modes
   -- frames draw with and the retained frame goes to the window with;
   -- 'Nothing' for an opaque one. See 'transparentBlends'.
   , sdlCachedCtx :: !(IORef Context)
@@ -294,9 +261,6 @@ data Retain = Retain
   -- ^ The pixel size the last frame used.
   , retainScale :: !Float
   }
-
-defaultWindowSize :: Size
-defaultWindowSize = Size 1280 800
 
 -- | The zoom a UI scale setting asks for: the setting itself, or for zero or
 -- less the display's content scale beyond the pixel density.
@@ -351,9 +315,10 @@ syncDisplay ctx env inp = do
   -- The desktop's light or dark setting. SDL updates it before queueing
   -- its theme event, which wakes the loop for this; reading it is free.
   setSystemAppearance ctx =<< querySystemAppearance
+  reportWindowState ctx =<< queryWindowState (sdlWindow env) scale
   queried <- queryWindowLogicalSize (sdlWindow env)
   let winSize = case (queried, inputWindowSize inp) of
-        (Size 0 0, Size 0 0) -> defaultWindowSize
+        (Size 0 0, Size 0 0) -> wsSize defaultWindowSettings
         (Size 0 0, s) -> s
         (Size sw sh, _) -> Size (sw / zoom) (sh / zoom)
   V2 mx my <- queryMouseWindowPos
@@ -374,8 +339,7 @@ withSdlBench =
   withSdlWindow
     True
     defaultSdlOptions
-      { sdlWindowTitle = "nano-ui-bench"
-      , sdlWindowSize = Size 800 600
+      { sdlWindowSettings = defaultWindowSettings {wsTitle = "nano-ui-bench", wsSize = Size 800 600}
       , sdlAppVsync = False
       , sdlAppContinuous = True
       , sdlAppFont = DefaultFont
@@ -481,7 +445,8 @@ startSdlWindow bench opts ctx guessedDriver fontSource monoSource = do
     (const quitSafe)
   liftIO $ initRefreshEvent >>= (`unless` fail "SDL_RegisterEvents failed for refresh wake")
   let
-    Size w h = sdlWindowSize opts
+    settings = sdlWindowSettings opts
+    Size w h = wsSize settings
   -- NANO_FORCE_SCALE: debug override of the pixel density.
   sdlForcedScale <- liftIO $ mfilter (> 0) . (>>= readMaybe) <$> lookupEnv "NANO_FORCE_SCALE"
   -- Before the window, so that it is released after the window is gone: the
@@ -490,7 +455,7 @@ startSdlWindow bench opts ctx guessedDriver fontSource monoSource = do
   (sdlWindow, sdlRenderer) <-
     mkAcquire
       ( retryWithoutRenderDriver guessedDriver $
-          TextForeign.withCString (sdlWindowTitle opts) $ \titlePtr -> do
+          TextForeign.withCString (wsTitle settings) $ \titlePtr -> do
             -- A bench window is hidden only: on Windows it must not be
             -- resizable as well.
             let flags = if bench then SDL_WindowFlags 0x0000000000000008 else windowFlags opts
@@ -507,19 +472,11 @@ startSdlWindow bench opts ctx guessedDriver fontSource monoSource = do
   density <- liftIO $ queryWindowPixelDensity sdlWindow
   zoom <- liftIO $ resolveZoom sdlWindow (sdlAppUiScale opts)
   -- The requested size is logical, so the window grows with the zoom.
-  liftIO $ when (abs (zoom - 1) > scaleEpsilon) $ zoomWindow sdlWindow (sdlWindowSize opts) zoom
+  liftIO $ when (abs (zoom - 1) > scaleEpsilon) $ zoomWindow sdlWindow (wsSize settings) zoom
   -- After the zoom: SDL sizes a borderless window as though its view were
   -- the whole of it, so the desktop's frame goes on around a view that is
   -- already the size asked for, and the window grows by the frame.
   liftIO $ when (sdlWindowDecorations opts /= DecorationsFull) (applyDecorations sdlWindow (sdlWindowDecorations opts))
-  -- After the decorations, whose frame the size limits leave room for, and
-  -- after the zoom, which centres the window it grows.
-  liftIO $ do
-    for_ (sdlWindowMinSize opts) (applyWindowMinSize sdlWindow zoom . Just)
-    for_ (sdlWindowMaxSize opts) (applyWindowMaxSize sdlWindow zoom . Just)
-    applyWindowPosition sdlWindow (sdlWindowPosition opts)
-    for_ (sdlWindowIcon opts) (void . applyWindowIcon sdlWindow)
-    when (sdlWindowOpacity opts < 1) (applyWindowOpacity sdlWindow (sdlWindowOpacity opts))
   let
     scale = density * zoom
   liftIO $ setDrawSnapScale ctx scale
@@ -550,7 +507,7 @@ startSdlWindow bench opts ctx guessedDriver fontSource monoSource = do
     sdlContinuous = sdlAppContinuous opts
   sdlTransparent <-
     liftIO $
-      if sdlWindowTransparent opts && not bench
+      if wsTransparent settings && not bench
         then Just <$> transparentBlends sdlRenderer
         else pure Nothing
   liftIO $ setRenderScale sdlRenderer 1 1 >>= (`unless` fail "SDL_SetRenderScale failed")
@@ -573,7 +530,11 @@ startSdlWindow bench opts ctx guessedDriver fontSource monoSource = do
   -- The jobs the view's background hooks started end with the session and
   -- before SDL does, also where a host runs frames itself inside 'withSdl'.
   mkAcquire (setWakeLoop ctx' pushRefreshEvent) (const (cancelTasks ctx'))
-  liftIO $ installWindowHost ctx' (windowHostFor sdlWindow (windowZoom env))
+  -- After the decorations, whose frame the size limits leave room for, and
+  -- after the zoom, which centres the window it grows: the rest of the
+  -- settings, applied through the host as a view would.
+  liftIO $ installWindowHost ctx' settings (windowHostFor sdlWindow (windowZoom env))
+  liftIO $ reportWindowState ctx' =<< queryWindowState sdlWindow scale
   pure (ctx', env)
 
 -- | The blend modes a transparent window draws with and is presented with.
@@ -645,22 +606,24 @@ saveScreenshot env path = do
       destroySurface surface
       pure ok
 
--- | The last presented frame's pixels, read as 'saveScreenshot' reads them:
--- the window's pixels (its logical size times the display scale), with the
--- alpha the frame was drawn with, which is the theme's window colour's
--- wherever nothing covers it. Its image id is @ImageId 0@. 'Nothing' when
--- SDL cannot read the frame back.
+-- | The last presented frame, read as 'saveScreenshot' reads it, as a view's
+-- 'NanoUI.requestScreenshot' is answered: the window's pixels (its logical
+-- size times the display scale), with the alpha the frame was drawn with,
+-- which is the theme's window colour's wherever nothing covers it.
+-- 'Nothing' when SDL cannot read the frame back.
 --
 -- A direct-to-window session ('sdlAppContinuous') has a frame to read only
 -- between drawing and presenting it: from a view, use
 -- 'NanoUI.requestScreenshot', which reads it then.
-captureScreenshot :: SdlEnv -> IO (Maybe RgbaImage)
-captureScreenshot env = captureFrame env . retainTexture =<< readIORef (sdlRetain env)
+captureScreenshot :: SdlEnv -> IO (Maybe Screenshot)
+captureScreenshot env = do
+  scale <- readIORef (sdlScaleRef env)
+  fmap (`Screenshot` scale) <$> (captureFrame env . retainTexture =<< readIORef (sdlRetain env))
 
--- | 'captureScreenshot' of the frame drawn to a target: the retained
--- texture, or null for the window backbuffer, which is only worth reading
--- before the frame is presented.
-captureFrame :: SdlEnv -> Ptr SDL_Texture -> IO (Maybe RgbaImage)
+-- | The pixels of the frame drawn to a target: the retained texture, or null
+-- for the window backbuffer, which is only worth reading before the frame
+-- is presented.
+captureFrame :: SdlEnv -> Ptr SDL_Texture -> IO (Maybe RgbaPixels)
 captureFrame env target = do
   surface <- readFrame env target
   if surface == nullPtr
@@ -679,7 +642,7 @@ captureFrame env target = do
             for_ [0 .. h - 1] $ \y ->
               copyBytes (dst `plusPtr` (y * rowBytes)) (castPtr pixels `plusPtr` (y * fromIntegral pitch)) rowBytes
           destroySurface rgba
-          pure (Just (RgbaImage (ImageId 0) w h bytes))
+          pure (rgbaPixels w h bytes)
 
 -- | Read a frame back into a new surface: the used area of the retained
 -- texture, or with a null target the window backbuffer. Null on failure.

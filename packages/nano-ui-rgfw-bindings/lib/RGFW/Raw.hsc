@@ -105,6 +105,10 @@ module RGFW.Raw
   -- Window flags
   , rgfw_windowCenter
   , rgfw_windowHide
+  , rgfw_windowNoResize
+  , rgfw_windowFullscreen
+  , rgfw_windowMaximize
+  , rgfw_windowMinimize
   -- Window options
   , c_RGFW_window_setIcon
   , c_RGFW_window_setMinSize
@@ -112,6 +116,18 @@ module RGFW.Raw
   , c_RGFW_window_move
   , c_RGFW_window_center
   , rgfw_formatRGBA8
+  , c_RGFW_window_setName
+  , c_RGFW_window_resize
+  , c_RGFW_window_maximize
+  , c_RGFW_window_minimize
+  , c_RGFW_window_restore
+  , c_RGFW_window_setFullscreen
+  , c_RGFW_window_show
+  , c_RGFW_window_hide
+  -- Window state
+  , c_RGFW_window_getPosition
+  , c_RGFW_window_getFlags
+  , c_RGFW_window_isInFocus
   -- Mouse cursors
   , c_rgfw_window_set_mouse_standard
   , c_rgfw_window_set_mouse_default
@@ -372,6 +388,15 @@ rgfw_windowCenter, rgfw_windowHide :: Word32
 rgfw_windowCenter = #{const RGFW_windowCenter}
 rgfw_windowHide   = #{const RGFW_windowHide}
 
+-- | Window creation flags for a window the user cannot resize and one that
+-- opens fullscreen. Fullscreen, maximized and minimized are also the bits
+-- 'c_RGFW_window_getFlags' reports the window's state in.
+rgfw_windowNoResize, rgfw_windowFullscreen, rgfw_windowMaximize, rgfw_windowMinimize :: Word32
+rgfw_windowNoResize   = #{const RGFW_windowNoResize}
+rgfw_windowFullscreen = #{const RGFW_windowFullscreen}
+rgfw_windowMaximize   = #{const RGFW_windowMaximize}
+rgfw_windowMinimize   = #{const RGFW_windowMinimize}
+
 -- Window options
 -- | Set the window and taskbar icon from pixels of a format, @w@ by @h@.
 -- RGFW copies them. Returns zero on failure.
@@ -395,6 +420,47 @@ foreign import ccall "RGFW_window_move"
 -- | Centre the window on its monitor.
 foreign import ccall "RGFW_window_center"
   c_RGFW_window_center :: Ptr RGFW_window -> IO ()
+
+-- | Set the window's title from a NUL-terminated UTF-8 string, which RGFW
+-- copies.
+foreign import ccall "RGFW_window_setName"
+  c_RGFW_window_setName :: Ptr RGFW_window -> CString -> IO ()
+
+-- | Resize the window to a size in native pixels.
+foreign import ccall "RGFW_window_resize"
+  c_RGFW_window_resize :: Ptr RGFW_window -> CInt -> CInt -> IO ()
+
+-- | Maximize, minimize, or restore the window.
+foreign import ccall "RGFW_window_maximize"
+  c_RGFW_window_maximize :: Ptr RGFW_window -> IO ()
+foreign import ccall "RGFW_window_minimize"
+  c_RGFW_window_minimize :: Ptr RGFW_window -> IO ()
+foreign import ccall "RGFW_window_restore"
+  c_RGFW_window_restore :: Ptr RGFW_window -> IO ()
+
+-- | Make the window fullscreen (non-zero) or windowed.
+foreign import ccall "RGFW_window_setFullscreen"
+  c_RGFW_window_setFullscreen :: Ptr RGFW_window -> CUChar -> IO ()
+
+-- | Show or hide the window.
+foreign import ccall "RGFW_window_show"
+  c_RGFW_window_show :: Ptr RGFW_window -> IO ()
+foreign import ccall "RGFW_window_hide"
+  c_RGFW_window_hide :: Ptr RGFW_window -> IO ()
+
+-- | The window's top-left corner on the desktop as RGFW last heard. Reads
+-- fields RGFW keeps; returns non-zero.
+foreign import ccall unsafe "RGFW_window_getPosition"
+  c_RGFW_window_getPosition :: Ptr RGFW_window -> Ptr CInt -> Ptr CInt -> IO CUChar
+
+-- | The window's flags as RGFW keeps them from its events, among them
+-- 'rgfw_windowFullscreen', 'rgfw_windowMaximize' and 'rgfw_windowMinimize'.
+foreign import ccall unsafe "RGFW_window_getFlags"
+  c_RGFW_window_getFlags :: Ptr RGFW_window -> IO CUInt
+
+-- | Whether the window has the keyboard, as RGFW keeps it from its events.
+foreign import ccall unsafe "RGFW_window_isInFocus"
+  c_RGFW_window_isInFocus :: Ptr RGFW_window -> IO CUChar
 
 -- | Pixel format of tightly packed RGBA bytes, for 'c_RGFW_window_setIcon'.
 rgfw_formatRGBA8 :: Word8

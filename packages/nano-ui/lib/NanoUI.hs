@@ -887,20 +887,61 @@ module NanoUI
 
     -- * The native window
 
-    -- | What a view can ask of the window it runs in: a screenshot of it,
-    -- an icon, limits on its size, a position and an opacity. The backend
-    -- does what it can with each; a view that is not running in a window,
-    -- as under a test context, gets nothing done, and 'requestScreenshot'
-    -- answers 'Nothing'. What a window opens with is the backend's options
-    -- record: @SdlOptions@ or @RgfwOptions@.
-  , RgbaImage (..)
+    -- | What a window opens with is a 'WindowSettings', the same for every
+    -- backend: @sdlWindowSettings@ in @SdlOptions@, @optWindow@ in
+    -- @RgfwOptions@. A view reads the window with 'askWindow', changes it
+    -- with the setters and commands below, asks for a screenshot, and ends
+    -- the session with 'quitUi'. The backend does what it can with each; a
+    -- view that is not running in a window, as under a test context, gets
+    -- nothing done, and 'requestScreenshot' answers 'Nothing'.
+    --
+    -- The setters ('setWindowTitleUi', 'setWindowModeUi' and the rest) act
+    -- only on a change and so can run every frame; the commands
+    -- ('moveWindowUi', 'resizeWindowUi', 'maximizeWindowUi' and the rest)
+    -- act on every call, from an event. A window that should not close by
+    -- itself turns 'wsExitOnCloseRequest' off, reads 'winCloseRequested',
+    -- and calls 'quitUi' when it is ready:
+    --
+    -- > editor :: NanoUI ()
+    -- > editor = do
+    -- >   (asking, setAsking) <- useFlag False
+    -- >   closing <- winCloseRequested <$> askWindow
+    -- >   when closing (setAsking True)
+    -- >   _ <- modal asking "Discard your changes?" $ do
+    -- >     whenM (button "Discard") quitUi
+    -- >     whenM (button "Keep editing") (setAsking False)
+  , WindowSettings (..)
+  , defaultWindowSettings
   , WindowPosition (..)
-  , requestScreenshot
+  , WindowMode (..)
+  , WindowState (..)
+  , askWindow
+  , setWindowTitleUi
   , setWindowIconUi
   , setWindowMinSizeUi
   , setWindowMaxSizeUi
-  , setWindowPositionUi
   , setWindowOpacityUi
+  , setWindowModeUi
+  , moveWindowUi
+  , centerWindowUi
+  , resizeWindowUi
+  , minimizeWindowUi
+  , maximizeWindowUi
+  , restoreWindowUi
+  , toggleMaximizedUi
+  , quitUi
+
+    -- ** Pixels and screenshots
+  , RgbaPixels
+  , rgbaPixels
+  , rgbaWidth
+  , rgbaHeight
+  , rgbaBytes
+  , RgbaImage (..)
+  , Screenshot (..)
+  , requestScreenshot
+  , askScreenshot
+  , useScreenshot
   )
 where
 

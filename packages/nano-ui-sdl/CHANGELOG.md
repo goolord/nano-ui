@@ -20,11 +20,10 @@
   so a drag region also snaps the window to the sides of the screen,
   maximizes it on a double click, and hangs the window menu off the right
   button.
-- `setWindowTitle`, `setWindowSize` (the size of the view, whatever frame
-  the desktop keeps around it), `minimizeWindow`, `maximizeWindow`,
-  `restoreWindow`, `toggleMaximized`, `windowMaximized` and `windowResizable`,
-  with `setWindowTitleUi`, `minimizeWindowUi`, `toggleMaximizedUi`,
-  `windowMaximizedUi` and `setWindowChromeUi` for calling them from a view.
+- `windowResizable`, and `setWindowChromeUi` for handing over chrome regions
+  from a view. The title, size, mode, maximizing and minimizing are the
+  core's, for any backend (`setWindowTitleUi`, `resizeWindowUi`,
+  `toggleMaximizedUi` and the rest); `windowCaption`'s buttons use them.
 - `WindowDecorations`: `DecorationsFull`, `DecorationsFrame` or
   `DecorationsNone`, how much of the desktop's title bar and frame a window
   keeps. `sdlWindowDecorations` picks it when the window opens and
@@ -36,7 +35,7 @@
   frame back, the sizing frame's width in on every side and no caption, so
   the frame stays where it always is -- invisible, outside the window you can
   see, what the desktop resizes the window by, and what carries its shadow.
-  The window is made that much larger, so `sdlWindowSize` is still the size
+  The window is made that much larger, so `wsSize` is still the size
   of the view. Two things go with it. The desktop's own border line is taken
   off, since with no caption that line falls on the view's first row, over
   the border the view draws there. And the desktop's rounding is turned off:
@@ -81,11 +80,15 @@
 - The desktop's light or dark setting reaches `systemAppearance`, and a change
   arrives as `EvSystemThemeChanged`. `sdlAppFollowSystemTheme` takes a light
   and a dark theme to switch between.
-- Window options `sdlWindowIcon`, `sdlWindowMinSize`, `sdlWindowMaxSize`,
-  `sdlWindowPosition`, `sdlWindowOpacity` and `sdlWindowTransparent`, changed
-  in a session by `setWindowIcon`, `setWindowMinSize`, `setWindowMaxSize`,
-  `setWindowPosition` and `setWindowOpacity`; `windowPosition` says where it is.
-- `captureScreenshot`, the last presented frame as an `RgbaImage`, and
+- The core's window, in full: the window opens from `sdlWindowSettings`, a
+  core `WindowSettings`, which adds a position, size limits, an icon, a
+  mode, transparency, opacity and whether a close request ends the session.
+  Views change it with the core's setters and commands (`setWindowTitleUi`,
+  `setWindowModeUi`, `moveWindowUi`, `resizeWindowUi` and the rest), read it
+  with `askWindow`, and end the session with `quitUi`. A transparent window
+  (`wsTransparent`) shows the desktop where the theme's window colour is
+  translucent.
+- `captureScreenshot`, the last presented frame as a `Screenshot`, and
   answers to the core's `requestScreenshot`.
 - The jobs a view's `useTask` hooks started end with the session.
 
@@ -126,6 +129,13 @@
 
 - `sdlWindowBorderless` is replaced by `sdlWindowDecorations`:
   `DecorationsFull` for `False`, and `DecorationsNone` for what `True` did.
+- `sdlWindowTitle`, `sdlWindowSize`, `sdlWindowResizable`,
+  `sdlWindowFullscreen` and `sdlWindowHidden` are replaced by
+  `sdlWindowSettings`, the core `WindowSettings` both backends open their
+  windows from: `sdlWindowSettings = defaultWindowSettings {wsTitle = t,
+  wsSize = s, wsResizable = r}`, and `wsMode = Fullscreen` or `wsMode =
+  Hidden` for the two flags. `sdlWindowDecorations` and
+  `sdlWindowAlwaysOnTop` stay, as the SDL window's own.
 
 - Windows windows render through OpenGL rather than D3D11. D3D11 presents
   through a flip-model swap chain, so a present blocks for about a refresh

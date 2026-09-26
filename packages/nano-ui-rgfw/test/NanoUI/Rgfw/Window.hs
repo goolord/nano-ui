@@ -1,23 +1,27 @@
 -- | A frame the OpenGL renderer draws into a hidden window, read back as a
 -- screenshot is: the window is opaque, even where a translucent window
 -- colour is painted over itself, and the screenshot's rows run from the
--- top. Skipped without a display to open a window on.
-module NanoUI.Rgfw.Window (testGlWindow) where
+-- top. And a session's window, sized in layout units. Skipped without a
+-- display to open a window on.
+module NanoUI.Rgfw.Window (testGlWindow, testSessionWindow) where
 
 import Control.Exception (bracket)
 import Control.Monad (void)
 import Data.ByteString qualified as BS
-import Data.IORef (writeIORef)
+import Control.Monad.IO.Class (liftIO)
+import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Primitive.SmallArray (smallArrayFromList)
 import NanoUI
-  ( DrawOp (..), RgbaImage (..), Theme (..), colorB, colorG, colorR, colorRGBA, columnWith, drawing, fixedWH, tight
+  ( DrawOp (..), Size (..), Theme (..), WindowMode (..), WindowSettings (..), WindowState (..), askWindow, defaultWindowSettings
+  , quitUi, rgbaBytes, rgbaHeight, rgbaWidth, setWindowTitleUi, windowSize, colorB, colorG, colorR, colorRGBA, columnWith, drawing, fixedWH, tight
   , tomorrowNightMinDarkTheme, windowColor
   )
 import NanoUI.Backend (Damage (..))
+import NanoUI.Backend.Rgfw (RgfwOptions (..), defaultRgfwOptions, runRgfwApp)
 import NanoUI.Internal.Context (Context (..))
 import NanoUI.Rgfw.Internal.Context (newRgfwContext)
 import NanoUI.Rgfw.Internal.Font.Cozette (getCozetteFont)
-import NanoUI.Rgfw.Internal.Gl (freeGlRenderer, newGlRenderer, readWindowPixels, renderArenaGl, retainedImage)
+import NanoUI.Rgfw.Internal.Gl (freeGlRenderer, newGlRenderer, readWindowPixels, renderArenaGl, retainedPixels)
 import NanoUI.Testing (collectRasterSpans, runFrame)
 import NanoUI.Testing.Assert (withInput)
 import RGFW qualified as R
@@ -41,12 +45,12 @@ testGlWindow assert =
         (_, _, draw, _) <- runFrame ctx inp view
         (base, overlay) <- collectRasterSpans ctx inp
         renderArenaGl renderer getCozetteFont 1 w h (themeWindow theme) DamageFull [] draw base overlay
-        img <- retainedImage renderer w h
+        img <- maybe (fail "OpenGL window: no screenshot") pure =<< retainedPixels renderer w h
         let name s = "OpenGL window: " ++ s
-            at x y = [fromIntegral (BS.index (rgbaImagePixels img) ((y * w + x) * 4 + c)) | c <- [0 .. 3]]
+            at x y = [fromIntegral (BS.index (rgbaBytes img) ((y * w + x) * 4 + c)) | c <- [0 .. 3]]
             pixels = [(y, at x y) | y <- [0 .. h - 1], x <- [0 .. w - 1]]
             reds = [y | (y, p) <- pixels, take 3 p == rgb red]
-        assert (name "screenshot size") (rgbaImageWidth img == w && rgbaImageHeight img == h)
+        assert (name "screenshot size") (rgbaWidth img == w && rgbaHeight img == h)
         assert (name "the window colour, opaque") (at (w - 1) (h - 1) == rgb backdrop ++ [255])
         assert (name "the window colour stays opaque, painted twice") (and [p !! 3 == 255 | (_, p) <- pixels, take 3 p == rgb backdrop])
         assert (name "an opaque box") (length reds == 800 && all (< 20) reds)
@@ -64,3 +68,23 @@ testGlWindow assert =
     backdrop = colorRGBA 10 20 30 128
     red = colorRGBA 200 30 60 255
     rgb c = map fromIntegral [colorR c, colorG c, colorB c] :: [Int]
+
+-- | A session's window opens at its size in layout units, at the scale asked
+-- for, which views read, takes a title from a view, and closes when the
+-- view quits.
+testSessionWindow :: (String -> Bool -> IO ()) -> IO ()
+testSessionWindow assert =
+  lookupEnv "DISPLAY" >>= \case
+    Nothing -> putStrLn "[SKIP] RGFW session window: no display"
+    Just _ -> do
+      seen <- newIORef Nothing
+      let view = do
+            size <- windowSize
+            st <- askWindow
+            setWindowTitleUi "renamed"
+            liftIO (writeIORef seen (Just (size, winScale st)))
+            quitUi
+      runRgfwApp defaultRgfwOptions {optScale = 2, optWindow = defaultWindowSettings {wsSize = Size 200 150, wsMode = Hidden}} view
+      readIORef seen >>= \case
+        Nothing -> putStrLn "[SKIP] RGFW session window: no OpenGL 3.2 window"
+        Just got -> assert "RGFW session window: its size in layout units at its scale" (got == (Size 200 150, 2))

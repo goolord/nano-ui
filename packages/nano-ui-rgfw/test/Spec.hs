@@ -25,7 +25,7 @@ import NanoUI.Rgfw.Internal.Session (applyRgfwEvent, decodeRgfwEvents, mapRgfwCu
 import NanoUI.Rgfw.Render (renderArena)
 import NanoUI.Rgfw.Surface (clearScreen, fillRect, freeRgfwSurface, newOffscreenRgfwSurface, packColor, sBuffer, sHeight, sWidth)
 import NanoUI.Rgfw.Wake (testRgfwWake)
-import NanoUI.Rgfw.Window (testGlWindow)
+import NanoUI.Rgfw.Window (testGlWindow, testSessionWindow)
 import NanoUI.Testing (DrawCmd (..), DrawData (..), collectRasterSpans, newPixelContext, registerImage, runFrame)
 import NanoUI.Testing.Assert (run2Frames, withInput)
 import NanoUI.Testing.Harness (DemoSpan, withInputOff)
@@ -342,5 +342,6 @@ main = do
   testSpanQuads
   testTurnedImageRaster
   testGlWindow assert
+  testSessionWindow assert
   testRgfwWake
   putStrLn "=== All tests passed successfully! ==="

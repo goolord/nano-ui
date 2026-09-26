@@ -6,16 +6,22 @@
 module WindowChecks (windowChecks) where
 
 import Control.Monad (unless, void, when)
+import Data.Bits (zeroBits, (.&.))
 import Data.ByteString qualified as BS
-import Data.IORef (modifyIORef', newIORef, readIORef)
+import Data.IORef (modifyIORef', newIORef, readIORef, writeIORef)
+import Data.Maybe (fromJust)
 import Data.Primitive.SmallArray (smallArrayFromList)
+import Foreign.C.String (peekCString)
 import Foreign.Marshal.Alloc (alloca)
+import Foreign.Ptr (castPtr)
 import Foreign.Storable (peek)
 import NanoUI
 import NanoUI.Backend (emptyInput)
 import NanoUI.Testing (Context, isDirty, newPixelContext)
 import SDL3.Sys.Blendmode qualified as Blend
-import SDL3.Sys.Video (getWindowMaximumSize, getWindowMinimumSize, getWindowOpacity)
+import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
+import SDL3.Sys.Video (getWindowFlags, getWindowMaximumSize, getWindowMinimumSize, getWindowOpacity, getWindowSize, getWindowTitle)
+import SDL3.Sys.Video qualified as SDL
 import "nano-ui-sdl" NanoUI.Backend.Sdl
 
 -- | The checks on the drivers named; @gpu@ says they are a display's, with a
@@ -33,9 +39,13 @@ windowChecks drivers gpu = do
 options :: SdlOptions
 options =
   defaultSdlOptions
-    { sdlWindowHidden = True, sdlWindowSize = Size 200 100, sdlAppFont = DefaultFont, sdlAppMonoFont = DefaultFont
-    , sdlAppVsync = False, sdlAppUiScale = 1
+    { sdlWindowSettings = defaultWindowSettings {wsMode = Hidden, wsSize = Size 200 100}
+    , sdlAppFont = DefaultFont, sdlAppMonoFont = DefaultFont, sdlAppVsync = False, sdlAppUiScale = 1
     }
+
+-- | @options@ with other window settings.
+withWindow :: (WindowSettings -> WindowSettings) -> SdlOptions
+withWindow f = options {sdlWindowSettings = f (sdlWindowSettings options)}
 
 -- | A session whose theme has a window colour of @backdrop@.
 session :: SdlOptions -> Color -> (Context -> SdlEnv -> IO a) -> IO a
@@ -43,15 +53,18 @@ session opts backdrop act = do
   ctx <- newPixelContext >>= (`withTheme` windowColor backdrop defaultTheme)
   withSdl opts ctx act
 
--- | Draw one frame of a view; @full@ forces a full repaint.
-frame :: Context -> SdlEnv -> Bool -> NanoUI () -> IO ()
+-- | Draw one frame of a view; @full@ forces a full repaint. Returns what the
+-- view did.
+frame :: Context -> SdlEnv -> Bool -> NanoUI a -> IO a
 frame ctx env full ui = do
   (ctx', inp) <- syncDisplay ctx env emptyInput {inputWindowSize = Size 200 100}
-  void (sdlDrawFrame ctx' ui env inp full)
+  out <- newIORef Nothing
+  void (sdlDrawFrame ctx' (ui >>= uiIO . writeIORef out . Just) env inp full)
+  maybe (fail "the view did not run") pure =<< readIORef out
 
 -- | Draw a frame of a view that asks for a screenshot, and the one screenshot
 -- it is answered with.
-shoot :: String -> Context -> SdlEnv -> Bool -> NanoUI () -> IO RgbaImage
+shoot :: String -> Context -> SdlEnv -> Bool -> NanoUI () -> IO Screenshot
 shoot name ctx env full ui = do
   shots <- newIORef []
   frame ctx env full (requestScreenshot (\s -> modifyIORef' shots (s :)) >> ui)
@@ -65,59 +78,67 @@ check name ok = unless ok (fail name)
 expect :: (Eq a, Show a) => String -> a -> a -> IO ()
 expect name want got = unless (want == got) (fail (name ++ ": wanted " ++ show want ++ ", got " ++ show got))
 
--- | Size limits at creation, from a session and from a view, in layout units:
--- at a zoom of 2 each is twice as many window coordinates. On a display, the
--- opacity, the icon and the position too.
+-- | Size limits at creation and from a view, in layout units: at a zoom of 2
+-- each is twice as many window coordinates. The title, the scale views read,
+-- a resize and the mode. On a display, the opacity, the icon and the
+-- position too.
 optionChecks :: Bool -> Int -> IO ()
 optionChecks gpu zoom =
   session
-    options
-      { sdlAppUiScale = fromIntegral zoom, sdlWindowMinSize = Just (Size 150 80), sdlWindowMaxSize = Just (Size 900 700)
-      , sdlWindowOpacity = 0.5, sdlWindowPosition = WindowPositionAt 30 20
-      }
+    (withWindow (\w -> w {wsMinSize = Just (Size 150 80), wsMaxSize = Just (Size 900 700), wsOpacity = 0.5, wsPosition = WindowPositionAt 30 20}))
+      { sdlAppUiScale = fromIntegral zoom }
     (colorRGBA 0 0 0 255)
     $ \ctx env -> do
       let after :: (Eq a, Show a) => String -> IO () -> IO a -> a -> IO ()
           after name act get want = act >> get >>= expect (name ++ " at zoom " ++ show zoom) want
           ui v = frame ctx env True (v >> label "window")
-          limits get = alloca $ \pw -> alloca $ \ph -> do
-            get (sdlWindow env) pw ph >>= check "SDL did not report the window's size limits"
+          pair get = alloca $ \pw -> alloca $ \ph -> do
+            get (sdlWindow env) pw ph >>= check "SDL did not report a size of the window"
             (,) <$> (fromIntegral <$> peek pw) <*> (fromIntegral <$> peek ph)
-          minimal name act (w, h) = after name act (limits getWindowMinimumSize) (zoom * w, zoom * h)
-          maximal name act (w, h) = after name act (limits getWindowMaximumSize) (zoom * w, zoom * h)
+          zoomed (w, h) = (zoom * w, zoom * h)
+          minimal name act = after name act (pair getWindowMinimumSize) . zoomed
+          maximal name act = after name act (pair getWindowMaximumSize) . zoomed
+          flags = getWindowFlags (sdlWindow env)
+          hidden = (\f -> f .&. SDL.SDL_WINDOW_HIDDEN /= zeroBits) <$> flags
+          title = getWindowTitle (sdlWindow env) >>= peekCString . castPtr . PtrConst.unsafeToPtr
+          askedWindow = frame ctx env True askWindow
       minimal "minimum size at creation" (pure ()) (150, 80)
       maximal "maximum size at creation" (pure ()) (900, 700)
-      minimal "minimum width alone" (setWindowMinSize env (Just (Size 120 0))) (120, 0)
-      maximal "maximum size taken off" (setWindowMaxSize env Nothing) (0, 0)
       minimal "minimum size from a view" (ui (setWindowMinSizeUi (Just (Size 170 90)))) (170, 90)
       minimal "minimum size taken off from a view" (ui (setWindowMinSizeUi Nothing)) (0, 0)
       maximal "maximum width alone from a view" (ui (setWindowMaxSizeUi (Just (Size 600 0)))) (600, 0)
-      let icon = RgbaImage (ImageId 0) 2 2 (BS.pack (concat (replicate 4 [200, 30, 60, 255])))
-      setWindowIcon env icon {rgbaImagePixels = BS.take 12 (rgbaImagePixels icon)}
-        >>= check "an icon with too few pixels is refused" . not
+      after "the title from a view" (ui (setWindowTitleUi "renamed")) title "renamed"
+      after "the scale a view reads" (pure ()) (winScale <$> askedWindow) (fromIntegral zoom)
+      -- X11 resizes a window when the server gets to it.
+      after "a resize from a view" (ui (resizeWindowUi (Size 300 150))) (SDL.syncWindowSafe (sdlWindow env) >> pair getWindowSize) (zoomed (300, 150))
+      after "a hidden window" (pure ()) hidden True
+      after "shown from a view" (ui (setWindowModeUi Windowed)) hidden False
+      after "hidden from a view" (ui (setWindowModeUi Hidden)) hidden True
       when gpu $ do
         let opacity = round . (* 100) <$> getWindowOpacity (sdlWindow env) :: IO Int
-            moved name act at = after name act (windowPosition env) (Just at)
+            moved name act at = after name act (winPosition <$> askedWindow) (Just at)
         after "the opacity at creation" (pure ()) opacity 50
         after "the opacity from a view" (ui (setWindowOpacityUi 0.75)) opacity 75
-        setWindowIcon env icon >>= check "an icon"
+        ui (setWindowIconUi (fromJust (rgbaPixels 2 2 (BS.pack (concat (replicate 4 [200, 30, 60, 255]))))))
         moved "the position at creation" (pure ()) (30, 20)
-        moved "the position from a session" (setWindowPosition env (WindowPositionAt 40 50)) (40, 50)
-        moved "the position from a view" (ui (setWindowPositionUi (WindowPositionAt 60 70))) (60, 70)
+        moved "the position from a view" (ui (moveWindowUi 60 70)) (60, 70)
 
 red :: Color
 red = colorRGBA 200 30 60 255
 
--- | The RGBA bytes of a pixel of an image.
-pixelAt :: RgbaImage -> Int -> Int -> [Int]
-pixelAt img x y =
-  [fromIntegral (BS.index (rgbaImagePixels img) ((y * rgbaImageWidth img + x) * 4 + c)) | c <- [0 .. 3]]
+-- | The RGBA bytes of a pixel of a screenshot.
+pixelAt :: Screenshot -> Int -> Int -> [Int]
+pixelAt shot x y =
+  [fromIntegral (BS.index (rgbaBytes img) ((y * rgbaWidth img + x) * 4 + c)) | c <- [0 .. 3]]
+  where
+    img = screenshotPixels shot
 
 -- | The alphas of the pixels whose red, green and blue are a colour's.
-alphasOf :: Color -> RgbaImage -> [Int]
-alphasOf c img =
-  [p !! 3 | y <- [0 .. rgbaImageHeight img - 1], x <- [0 .. rgbaImageWidth img - 1], let p = pixelAt img x y, take 3 p == rgb]
+alphasOf :: Color -> Screenshot -> [Int]
+alphasOf c shot =
+  [p !! 3 | y <- [0 .. rgbaHeight img - 1], x <- [0 .. rgbaWidth img - 1], let p = pixelAt shot x y, take 3 p == rgb]
   where
+    img = screenshotPixels shot
     rgb = map fromIntegral [colorR c, colorG c, colorB c]
 
 -- | A 40 x 20 box of a colour, versioned by it so that a new colour
@@ -134,7 +155,7 @@ screenshotChecks continuous =
     let name s = (if continuous then "continuous: " else "retained: ") ++ s
     frame ctx env True (solidBox (colorRGBA 0 0 255 255))
     img <- shoot (name "a frame that repaints the box") ctx env False (solidBox red)
-    expect (name "screenshot size") (200, 100) (rgbaImageWidth img, rgbaImageHeight img)
+    expect (name "screenshot size") (200, 100, 1) (rgbaWidth (screenshotPixels img), rgbaHeight (screenshotPixels img), screenshotScale img)
     expect (name "the box's pixels") (replicate 800 255) (alphasOf red img)
     expect (name "the window's colour") [12, 34, 56, 255] (pixelAt img 199 99)
     isDirty ctx >>= check (name "an answered screenshot asks for another frame")
@@ -147,7 +168,7 @@ screenshotChecks continuous =
 -- where the window colour is painted over itself.
 transparencyChecks :: Bool -> IO ()
 transparencyChecks gpu =
-  session options {sdlWindowTransparent = True} backdrop $ \ctx env -> do
+  session (withWindow (\w -> w {wsTransparent = True})) backdrop $ \ctx env -> do
     -- The software renderer has no custom blend modes and draws as for an
     -- opaque window.
     let exact = maybe False ((/= Blend.SDL_BLENDMODE_BLEND) . fst) (sdlTransparent env)

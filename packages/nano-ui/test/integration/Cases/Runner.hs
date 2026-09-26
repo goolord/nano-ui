@@ -17,6 +17,8 @@ tests =
   [ spec "session-loop" runSessionLoopTest
   , spec "session-loop-wake" runSessionLoopWakeTest
   , spec "session-loop-hard-quit" runSessionLoopHardQuitTest
+  , spec "session-loop-close-request" runSessionLoopCloseTest
+  , spec "session-loop-close-asks-the-view" runSessionLoopCloseAskTest
   , spec "drawing-lock" runDrawingLockTest
   ]
 
@@ -165,6 +167,57 @@ runSessionLoopHardQuitTest ctx failed = do
   assertEq failed 0 =<< draws [[1, 2]]
   assertEq failed 0 =<< draws [[1]]
   assertEq failed 1 =<< draws [[4, 2]]
+
+-- | Batches of events for a driver's waits, one a wait; past the last the
+-- loop has gone on too long, and the test fails rather than hang.
+batchedWaits :: [[Int]] -> IO (Int -> IO [Int])
+batchedWaits batches = do
+  queue <- newIORef batches
+  pure $ \_ -> atomicModifyIORef' queue (\case b : rest -> (rest, Just b); [] -> ([], Nothing))
+    >>= maybe (throwIO (userError "the loop went on past its last events")) pure
+
+-- | A window that closes by itself ends the session at its close request,
+-- without a frame.
+runSessionLoopCloseTest :: Context -> IORef Int -> IO ()
+runSessionLoopCloseTest ctx failed = do
+  debug <- newDebugSampler
+  installWindowHost ctx defaultWindowSettings defaultWindowHost
+  waits <- batchedWaits [[], [3]]
+  drawn <- newIORef (0 :: Int)
+  clearDirty ctx
+  runSessionLoop
+    (quietDriver debug)
+      { sdWaitEvents = waits
+      , sdShouldDraw = \_ _ _ _ _ -> pure True
+      , sdDraw = \_ _ _ -> False <$ modifyIORef' drawn (+ 1)
+      }
+    ctx
+    emptyInput
+  assertEq failed 1 =<< readIORef drawn
+
+-- | A window whose settings keep it open shows each close request to the
+-- next frame, for that frame alone, and the session ends once the view calls
+-- 'quitUi', after that frame.
+runSessionLoopCloseAskTest :: Context -> IORef Int -> IO ()
+runSessionLoopCloseAskTest ctx failed = do
+  debug <- newDebugSampler
+  installWindowHost ctx defaultWindowSettings {wsExitOnCloseRequest = False} defaultWindowHost
+  waits <- batchedWaits [[3], [], [3]]
+  seen <- newIORef []
+  let view = do
+        closing <- winCloseRequested <$> askWindow
+        n <- uiIO (atomicModifyIORef' seen (\s -> (s <> [closing], length (filter id s))))
+        when (closing && n == 1) quitUi
+  clearDirty ctx
+  runSessionLoop
+    (quietDriver debug)
+      { sdWaitEvents = waits
+      , sdShouldDraw = \_ _ _ _ _ -> pure True
+      , sdDraw = \c inp _ -> False <$ evalUi c inp view
+      }
+    ctx
+    emptyInput
+  assertEq failed [True, False, True] =<< readIORef seen
 
 runDrawingLockTest :: Context -> IORef Int -> IO ()
 runDrawingLockTest _ failed = do

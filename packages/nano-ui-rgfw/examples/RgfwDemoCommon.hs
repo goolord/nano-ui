@@ -53,9 +53,11 @@ import NanoUI.Monad (askInput)
 import NanoUI.Shortcut (ctrl, key)
 import NanoUI.Backend.Rgfw
   ( RgfwOptions (..)
+  , WindowSettings (..)
   , askRgfwDebug
   , debugWindowBody
   , defaultRgfwOptions
+  , defaultWindowSettings
   , runRgfwAppReduceCustom
   )
 import NanoUI.Emit qualified as Emit
@@ -443,9 +445,7 @@ main :: IO ()
 main = do
   let opts =
         defaultRgfwOptions
-          { optTitle  = "nano-ui RGFW demo"
-          , optWidth  = 1680
-          , optHeight = 1040
+          { optWindow = defaultWindowSettings {wsTitle = "nano-ui RGFW demo"}
           , optTheme  = tomorrowNightMinDarkTheme
           , optScale  = 0.0 -- 0.0 uses the DPI reported by the OS by default
           }

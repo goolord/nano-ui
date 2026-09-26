@@ -292,11 +292,25 @@
 - Following the system's light or dark setting: `followSystemTheme ctx light
   dark` or `followSystemThemeUi`, with `defaultLightTheme` as the light theme.
   `systemAppearance` reads the setting.
-- Window control from a view, on any backend: `requestScreenshot` hands an
-  action the frame as an `RgbaImage`, and `setWindowIconUi`,
-  `setWindowMinSizeUi`, `setWindowMaxSizeUi`, `setWindowPositionUi` and
-  `setWindowOpacityUi` change the window. `RgbaImage` moved here from
-  `nano-ui-sdl`, which still exports it, and `WindowPosition` is new.
+- The native window, the same on every backend. `WindowSettings`
+  (`defaultWindowSettings`) is what a window opens with, sized in layout
+  units: its title, size, position, size limits, icon, whether it resizes,
+  its `WindowMode` (windowed, fullscreen or hidden), transparency, opacity,
+  and whether a close request ends the session (`wsExitOnCloseRequest`).
+  `askWindow` reads the `WindowState`: size, scale, position, focus,
+  maximized, minimized, fullscreen, and `winCloseRequested`, the close
+  request a window that does not close by itself hands its view. From a
+  view, setters that act only on a change (`setWindowTitleUi`,
+  `setWindowIconUi`, `setWindowMinSizeUi`, `setWindowMaxSizeUi`,
+  `setWindowOpacityUi`, `setWindowModeUi`), commands that act on every call
+  (`moveWindowUi`, `centerWindowUi`, `resizeWindowUi`, `minimizeWindowUi`,
+  `maximizeWindowUi`, `restoreWindowUi`, `toggleMaximizedUi`), and `quitUi`,
+  which ends the session once the frame is drawn. `requestScreenshot` hands
+  an action a `Screenshot`, the frame's `RgbaPixels` and its scale;
+  `askScreenshot` gives another thread an action that waits for one, and
+  `useScreenshot` takes one per key. `RgbaPixels` come from `rgbaPixels`,
+  which checks that the bytes fit the size. `RgbaImage` moved here from
+  `nano-ui-sdl`, which still exports it.
 - Background work: `useTaskStatus` runs an action on its own thread and says
   whether it is running, done, or failed with the exception it threw, which
   wakes the loop too; while a new key's job runs it keeps the last key's
@@ -309,8 +323,14 @@
 - `NanoUI.Backend` has what a backend needs for the above: `applyKey`,
   `keyRepeats`, `keypadKey`, `modifiersFromBits`, `noModifiers`,
   `applyComposition`, `cursorFallback`, `setExplainLayout`,
-  `setSystemAppearance`, `WindowHost`,
-  `installWindowHost`, `answerScreenshots`, `setWakeLoop` and `cancelTasks`.
+  `setSystemAppearance`, `WindowHost` with `defaultWindowHost` (every field
+  a no-op, to build a host from by record update), `installWindowHost`,
+  which also applies the settings a window does not open with,
+  `reportWindowState`, `answerScreenshots`, `requestWindowClose`,
+  `clearWindowClose` and `quitRequested` for a loop of the backend's own,
+  `setWakeLoop` and `cancelTasks`. `runSessionLoop` ends the session when a
+  view calls `quitUi`, and hands a close request to the view when the
+  window's settings say to.
 - `NanoUI.Testing.Harness` has `chordInp`, `keyUpInp`, `middleClickPair`,
   and `newWakeSignal` for a test to wait on a job's wake.
 - `uiFontSize`, the size text takes when its layout sets none, and

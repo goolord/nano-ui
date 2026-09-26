@@ -25,7 +25,6 @@ import DemoApp (useFileDialog)
 import NanoUI
 import NanoUI.Backend.Sdl
 import NanoUI.Shortcut
-import System.Exit (exitSuccess)
 
 --------------------------------------------------------------------------------
 -- Application entry point
@@ -35,8 +34,8 @@ main :: IO ()
 main =
   runSdlApp
     defaultSdlOptions
-      { sdlWindowTitle = "nano-ui Notepad"
-      , sdlWindowSize = Size 1000 720
+      { -- Closing the window asks the view, which asks about unsaved changes.
+        sdlWindowSettings = defaultWindowSettings {wsTitle = "nano-ui Notepad", wsSize = Size 1000 720, wsExitOnCloseRequest = False}
       , sdlAppTheme = Just tomorrowNightMinDarkTheme
       , sdlAppShouldQuit = \inp -> inputKeysElem KeyEscape (inputKeys inp)
       }
@@ -57,6 +56,7 @@ notepadUi = do
   (statusMsg, setStatusMsg) <- useText "Ready"
   (showStatus, setShowStatus) <- useFlag True
   (aboutOpen, setAboutOpen) <- useFlag False
+  (confirmExit, setConfirmExit) <- useFlag False
   (editorId, setEditorId) <- useState (WidgetId 0)
   (openDlg, setOpenDlg) <- useState (Nothing :: Maybe FileDialogId)
   (saveDlg, setSaveDlg) <- useState (Nothing :: Maybe FileDialogId)
@@ -121,7 +121,9 @@ notepadUi = do
     openCmd = ("Open...", ctrl <> key 'o', setOpenDlg =<< askOpenFileDialog defaultFileDialogOptions)
     saveCmd = ("Save", ctrl <> key 's', saveDocument False)
     saveAsCmd = ("Save As...", ctrl <> shift <> key 's', saveDocument True)
-    exitCmd = ("Exit", ctrl <> key 'q', liftIO exitSuccess)
+    -- Ends the session, unless there are changes to ask about first.
+    exitApp = if docDirty then setConfirmExit True else quitUi
+    exitCmd = ("Exit", ctrl <> key 'q', exitApp)
     zoomInCmd = ("Zoom In", ctrl <> key '=', zoomIn)
     zoomOutCmd = ("Zoom Out", ctrl <> key '-', zoomOut)
     resetZoomCmd = ("Reset Zoom", ctrl <> key '0', setZoom 1.0)
@@ -169,6 +171,12 @@ notepadUi = do
     \(_, chord, action) -> whenM (shortcut chord) action
   whenM (or <$> traverse shortcut [ctrl <> shift <> key '=', ctrl <> key '+']) zoomIn
 
+  -------------------------------------------------------------- the window ---
+  whenM (winCloseRequested <$> askWindow) exitApp
+  -- Set every frame; the window changes only when the title does.
+  setWindowTitleUi $
+    (if T.null docPath then "Untitled" else docPath) <> (if docDirty then " *" else "") <> " - nano-ui Notepad"
+
   --------------------------------------------------------------- layout ---
   columnWith (grow . gap 0) $ do
     menuBar
@@ -207,6 +215,14 @@ notepadUi = do
         flex
         whenM (button "Close") (setAboutOpen False)
   when (respClicked aboutResp) (setAboutOpen False)
+  (confirmResp, _) <-
+    modal confirmExit "Unsaved changes" $ do
+      label "Discard the changes to this document and exit?"
+      rowWith fillW $ do
+        flex
+        whenM (button "Discard") quitUi
+        whenM (button "Cancel") (setConfirmExit False)
+  when (respClicked confirmResp) (setConfirmExit False)
 
 --------------------------------------------------------------------------------
 -- Local menu-bar widget

@@ -21,7 +21,7 @@ module NanoUI.Rgfw.Internal.Gl
   , syncImagesGl
   , readRetainedPixels
   , readWindowPixels
-  , retainedImage
+  , retainedPixels
   , GlyphAtlas (..)
   , glyphAtlasFor
   , atlasCell
@@ -48,7 +48,7 @@ import Foreign.Marshal.Alloc (callocBytes, free, reallocBytes)
 import Foreign.Marshal.Utils (copyBytes)
 import Foreign.Ptr (Ptr, nullPtr, plusPtr)
 import Foreign.Storable (pokeByteOff)
-import NanoUI (Color (..), ImageId (..), Rect (..), RgbaImage (..), rectInflate, roundHalfUp)
+import NanoUI (Color (..), Rect (..), RgbaPixels, rectInflate, rgbaPixels, roundHalfUp)
 import NanoUI.Backend (Damage (..))
 import NanoUI.Rgfw.Internal.Context (TextSpan, paintInLayerOrder)
 import NanoUI.Rgfw.Internal.Font.Cozette
@@ -208,11 +208,11 @@ readWindowPixels :: GlRenderer -> Int -> Int -> IO BS.ByteString
 readWindowPixels r w h =
   BSI.create (w * h * 4) (c_readWindow (glHandle r))
 
--- | The retained frame as an image, rows from the top, with image id 0:
--- what a screenshot of the window is. The frame must be the last one's
--- size, w x h, which the renderer takes to be at least 1 x 1.
-retainedImage :: GlRenderer -> Int -> Int -> IO RgbaImage
-retainedImage r w0 h0 = do
+-- | The retained frame's pixels, rows from the top: what a screenshot of the
+-- window is. The frame must be the last one's size, w x h, which the
+-- renderer takes to be at least 1 x 1.
+retainedPixels :: GlRenderer -> Int -> Int -> IO (Maybe RgbaPixels)
+retainedPixels r w0 h0 = do
   let w = max 1 w0
       h = max 1 h0
       row = w * 4
@@ -220,7 +220,7 @@ retainedImage r w0 h0 = do
   pixels <- BSI.create (h * row) $ \dst ->
     BSU.unsafeUseAsCString bottomUp $ \src ->
       mapM_ (\y -> copyBytes (dst `plusPtr` (y * row)) (src `plusPtr` ((h - 1 - y) * row)) row) [0 .. h - 1]
-  pure (RgbaImage (ImageId 0) w h pixels)
+  pure (rgbaPixels w h pixels)
 
 -- | The physical pixels a damage rect repaints, as @(x0, y0, x1, y1)@ within
 -- a w x h framebuffer. The core paints a clip frame's backdrop one logical

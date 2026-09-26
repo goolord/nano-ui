@@ -1,6 +1,6 @@
 -- | Haskell wrappers over the RGFW C API used by nano-ui-rgfw: OpenGL windows,
--- event polling and waiting, window size and scale, cursors, and the
--- clipboard. Re-exports "RGFW.Raw".
+-- event polling and waiting, window size, scale, options and state, cursors,
+-- and the clipboard. Re-exports "RGFW.Raw".
 module RGFW
   ( Window (..)
   , Event (..)
@@ -23,6 +23,17 @@ module RGFW
   , setWindowMaxSize
   , moveWindow
   , centerWindow
+  , setWindowName
+  , resizeWindow
+  , maximizeWindow
+  , minimizeWindow
+  , restoreWindow
+  , setWindowFullscreen
+  , showWindow
+  , hideWindow
+  , windowPosition
+  , windowFlags
+  , windowFocused
   -- Re-exports
   , module RGFW.Raw
   )
@@ -244,3 +255,53 @@ moveWindow (Window win) x y = c_RGFW_window_move win (fromIntegral x) (fromInteg
 -- | Centre the window on its monitor.
 centerWindow :: Window -> IO ()
 centerWindow (Window win) = c_RGFW_window_center win
+
+-- | Set the window's title, which the title bar and the taskbar show.
+setWindowName :: Window -> Text -> IO ()
+setWindowName (Window win) name = TF.withCString name (c_RGFW_window_setName win)
+
+-- | Resize the window to a size in native pixels.
+resizeWindow :: Window -> Int -> Int -> IO ()
+resizeWindow (Window win) w h = c_RGFW_window_resize win (fromIntegral w) (fromIntegral h)
+
+-- | Maximize the window.
+maximizeWindow :: Window -> IO ()
+maximizeWindow (Window win) = c_RGFW_window_maximize win
+
+-- | Put the window away.
+minimizeWindow :: Window -> IO ()
+minimizeWindow (Window win) = c_RGFW_window_minimize win
+
+-- | Give a maximized or minimized window back its size.
+restoreWindow :: Window -> IO ()
+restoreWindow (Window win) = c_RGFW_window_restore win
+
+-- | Make the window fullscreen, or windowed again.
+setWindowFullscreen :: Window -> Bool -> IO ()
+setWindowFullscreen (Window win) full = c_RGFW_window_setFullscreen win (if full then 1 else 0)
+
+-- | Show a hidden window.
+showWindow :: Window -> IO ()
+showWindow (Window win) = c_RGFW_window_show win
+
+-- | Hide the window.
+hideWindow :: Window -> IO ()
+hideWindow (Window win) = c_RGFW_window_hide win
+
+-- | The window's top-left corner on the desktop, in pixels, as RGFW last
+-- heard from the desktop.
+windowPosition :: Window -> IO (Int, Int)
+windowPosition (Window win) =
+  alloca $ \px -> alloca $ \py -> do
+    _ <- c_RGFW_window_getPosition win px py
+    liftA2 ((,) `on` fromIntegral) (peek px) (peek py)
+
+-- | The window's flags as RGFW keeps them from its events: test them for
+-- 'rgfw_windowFullscreen', 'rgfw_windowMaximize' and 'rgfw_windowMinimize'.
+-- A read of a field, cheap enough for every frame.
+windowFlags :: Window -> IO Word32
+windowFlags (Window win) = fromIntegral <$> c_RGFW_window_getFlags win
+
+-- | Whether the window has the keyboard.
+windowFocused :: Window -> IO Bool
+windowFocused (Window win) = (/= 0) <$> c_RGFW_window_isInFocus win

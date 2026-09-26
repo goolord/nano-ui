@@ -72,7 +72,10 @@ counter = do
   `styled (primary . buttonStyle (cornerRadius 6)) (button "Save")`.
   `disabledWhen` switches widgets off, and `followSystemTheme` follows the
   desktop's light or dark setting.
-- Window options and screenshots (`requestScreenshot`).
+- One `WindowSettings` for every backend, a view that reads its window
+  (`askWindow`), changes it (`setWindowTitleUi`, `moveWindowUi`,
+  `setWindowModeUi`), takes screenshots (`requestScreenshot`) and decides
+  when it closes (`quitUi`).
 - `NanoUI.Testing` runs frames headlessly on scripted input, for tests, and
   `NanoUI.Backend` has the font, input and damage plumbing a window backend
   is written against. `NanoUI` itself is only what writing a GUI needs.
