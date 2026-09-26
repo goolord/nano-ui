@@ -117,11 +117,14 @@ module NanoUI.Internal.Style
   , alignTop
   , alignBottom
   , alignBaseline
+  , wrap
+  , lineGap
+  , pinAt
   ) where
 
 import Data.Bits ((.&.), (.|.))
 import Data.Word (Word8)
-import NanoUI.Internal.Types (Color (..), colorA, colorLuminance, colorRGBA, contrastRatio, lerpColor)
+import NanoUI.Internal.Types (Color (..), V2 (..), colorA, colorLuminance, colorRGBA, contrastRatio, lerpColor)
 
 -- | Size along one axis. Fixed sizes use logical pixels; grow/shrink values
 -- are relative weights, and percentages use 100 for the full available size.
@@ -133,8 +136,11 @@ data Sizing
   | Percent Float
   deriving (Eq, Show)
 
--- | Main axis for laying out a container's children.
-data Direction = Row | Column
+-- | Main axis for laying out a container's children. A 'Stack' has none:
+-- each of its children takes the whole content box, placed in it by its own
+-- alignment, and is drawn over the children declared before it. A scroll
+-- container lays out a 'Stack' as a 'Column', and a grid ignores it.
+data Direction = Row | Column | Stack
   deriving (Eq, Show, Enum, Bounded)
 
 -- | Horizontal alignment: left, centre, or right.
@@ -208,7 +214,10 @@ type LayoutModifier = Layout -> Layout
 
 -- | Layout and text options for a node. Lengths use logical pixels. Font size
 -- 0 selects the backend default; 'Nothing' for font colour uses the theme.
--- Grid column count 0 leaves the count to grid sizing.
+-- Grid column count 0 leaves the count to grid sizing. A row or column with
+-- 'layoutWrap' starts a new line where the next child would overflow it,
+-- 'layoutLineGap' apart ('Nothing' takes the gap). A node with 'layoutPin'
+-- sits at that offset from its parent's content box instead of in its flow.
 data Layout = Layout
   { layoutDirection :: !Direction
   , layoutWidth :: !Sizing
@@ -229,6 +238,9 @@ data Layout = Layout
   , layoutFontWeight :: !FontWeight
   , layoutFontStyle :: !FontStyle
   , layoutTextDecoration :: !TextDecoration
+  , layoutWrap :: !Bool
+  , layoutLineGap :: !(Maybe Float)
+  , layoutPin :: !(Maybe V2)
   }
   deriving (Eq, Show)
 
@@ -256,6 +268,9 @@ defaultLayout =
     , layoutFontWeight = WeightNormal
     , layoutFontStyle = FontStyleNormal
     , layoutTextDecoration = DecorationNone
+    , layoutWrap = False
+    , layoutLineGap = Nothing
+    , layoutPin = Nothing
     }
 
 -- | Set all four padding edges in logical pixels.
@@ -474,6 +489,33 @@ alignBottom l = l {layoutAlignY = AlignBottom}
 -- font's deeper descent lifts its baseline above the smaller one's.
 alignBaseline :: Layout -> Layout
 alignBaseline l = l {layoutAlignY = AlignBaseline}
+
+-- | Flow a row's children onto a new line below, or a column's into a new
+-- column to the right, where the next child would overflow the main axis, as
+-- a list of tags or chips does. A child longer than a whole line takes one to
+-- itself. Children keep their gap within a line, and lines are 'lineGap'
+-- apart. Grow children share the space left on their own line, and a child's
+-- cross-axis alignment places it within its line. A row wraps at the width it
+-- is given; a column needs a bounded height ('fixedH', 'maxH') to wrap. Grids
+-- and scroll containers ignore it.
+wrap :: Layout -> Layout
+wrap l = l {layoutWrap = True}
+
+-- | Set the space between a wrapping container's lines in logical pixels. By
+-- default lines are the 'gap' apart.
+lineGap :: Float -> Layout -> Layout
+lineGap n l = l {layoutLineGap = Just (max 0 n)}
+
+-- | Take the node out of its parent's flow and place it @x@ right and @y@ down
+-- from the parent's content box (inside its padding), over its siblings,
+-- taking the pointer from them where it covers them. The siblings lay out as
+-- if it were absent, and it does not count towards the parent's size, but it
+-- is clipped and scrolled with them. It keeps its own
+-- size: a content or fixed size as usual, even past the parent's edge, a
+-- grow size fills the content box past the offset, and a percentage is of
+-- the content box. Windows, modals and popups place themselves and ignore it.
+pinAt :: Float -> Float -> Layout -> Layout
+pinAt x y l = l {layoutPin = Just (V2 x y)}
 
 -- | Surface colours and border geometry. Border width and corner radius use
 -- logical pixels and affect painting, not layout size.

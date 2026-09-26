@@ -78,7 +78,8 @@ backends' reducer runners fold them into the model.
   context menus, modals, floating windows, pane grids, colour pickers, progress
   bars, sparklines, rich text, SVG icons, and drag and drop. `customWidget` and
   a canvas API cover anything else.
-- Row, column, and grid layout with scrolling. Layout options are
+- Row, column, grid, and stacked (`stack`) layout with scrolling, wrapping
+  (`wrap`), and pinned children (`pinAt`). Layout options are
   `Layout -> Layout` modifiers, as in `columnWith (gap 8 . padAll 12)`.
 - Keyboard focus and navigation for every control.
 - Themes, including ones built from Base16 schemes, changed for part of a view

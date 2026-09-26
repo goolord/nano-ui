@@ -632,6 +632,12 @@ data Context = Context
   , ctxDrawArena :: DrawArena
   , ctxHotId :: IORef WidgetId
   , ctxLastHotId :: IORef WidgetId
+  -- | The widgets, by 'intKey', that the pointer is over
+  -- in the frame the user saw but does not reach, since a stack or a pinned
+  -- node draws another widget over them there
+  -- ('NanoUI.Internal.Frame.Input.recordCoveredWidgets'). Found before the
+  -- view runs, which then gives them no pointer.
+  , ctxPointerCovered :: !(IORef IntSet)
   , ctxActiveId :: IORef WidgetId
   , ctxClickedId :: IORef WidgetId
   , ctxReleaseClickedId :: IORef WidgetId

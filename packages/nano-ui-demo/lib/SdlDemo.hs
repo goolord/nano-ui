@@ -466,11 +466,17 @@ demoUi = do
                 Nothing ->
                   setSwatches . Just . catMaybes
                     =<< forM demoSwatches (\(caption, pixels) -> fmap (,caption) <$> registerRgba 32 32 pixels)
+                -- A wrapping row flows the swatches onto a new line in a
+                -- narrow window, and a stack lays a badge over each image's
+                -- corner.
                 Just registered ->
-                  rowWith (tight . gap gapInline . fillW) $
+                  rowWith (wrap . tight . gap gapInline . fillW) $
                     for_ registered $ \(iid, caption) ->
                       columnWith (tight . gap gapMicro) $ do
-                        image (fixedWH 88 88) iid
+                        stackWith tight $ do
+                          image (fixedWH 88 88) iid
+                          panelWith (alignEnd . alignTop . padXY 4 1) $
+                            labelWith (tight . fontMono . fontSize 11) "32px"
                         muted caption
               separator
               -- SVG icons read from disk the first time this tab shows. A

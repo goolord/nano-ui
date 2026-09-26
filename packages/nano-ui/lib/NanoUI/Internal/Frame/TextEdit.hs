@@ -23,7 +23,7 @@ import NanoUI.Internal.Context
 import NanoUI.Internal.Draw (pushRect, pushText)
 import NanoUI.Internal.Font
 import NanoUI.Internal.Frame.Chrome (overlayMenuStyle, paintMenuAccent, paintMenuPanel)
-import NanoUI.Internal.Frame.Hit (findNodeByWidgetId, innermostHit, nodeClippedHit, nodePointVisible, overlayHitAllowed, overlayHitRoot, widgetOverlayAllowed)
+import NanoUI.Internal.Frame.Hit (findNodeByWidgetId, nodeClippedHit, overlayHitAllowed, overlayHitRoot, reachedWidgetAt, widgetOverlayAllowed)
 import NanoUI.Internal.Frame.TextArea (isMouseOnTextAreaScrollBarAt)
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Input
@@ -136,13 +136,12 @@ openTextEditMenu ctx inp =
       markDirty ctx
 
 -- | The enabled text field or text area the pointer at @mouse@ is on, which
--- takes the text cursor and the right-click menu. Not one whose control, drawn
--- inside it, has the pointer ('innermostHit').
+-- takes the text cursor and the right-click menu. Not one under a widget a
+-- stack or a pinned node draws over it there ('topmostHit'), nor one whose
+-- control, drawn inside it, has the pointer ('innermostHit').
 textFieldWidgetAtMouse :: Context -> V2 -> IO (Maybe WidgetId)
 textFieldWidgetAtMouse ctx@Context {ctxNodeArena = na} mouse = do
   top <- overlayHitRoot ctx mouse
-  let under d = nodePointVisible ctx d mouse <&&> overlayHitAllowed ctx top d
-      ownsPointer idx = (== idx) <$> innermostHit ctx under idx
   mIdx <-
     findClassNodeRevM na PointerNodes $ \idx -> do
       nt <- getNodeType na idx
@@ -155,7 +154,8 @@ textFieldWidgetAtMouse ctx@Context {ctxNodeArena = na} mouse = do
           <&&> (if nt == NodeTextArea then not <$> isMouseOnTextAreaScrollBarAt ctx idx mouse else pure True)
   case mIdx of
     Nothing -> pure Nothing
-    Just idx -> ifM (ownsPointer idx) (Just <$> getWidgetId na idx) (pure Nothing)
+    -- The widget the pointer lands on, as hover finds it.
+    Just idx -> ifM ((== Just idx) <$> reachedWidgetAt ctx mouse) (Just <$> getWidgetId na idx) (pure Nothing)
 
 -- | A press on a command row runs it when it can run, recorded for the caller
 -- ('NanoUI.Internal.Context.takeTextEditLastAction'); a press elsewhere on the

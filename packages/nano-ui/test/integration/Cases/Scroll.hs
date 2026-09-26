@@ -45,6 +45,7 @@ tests =
   , pixelSpec "scroll-into-view" runScrollIntoViewTest
   , pixelSpec "scroll-glide-clamp" runScrollGlideClampTest
   , spec "scroll-disjoint-viewport-hit" runDisjointViewportHitTest
+  , spec "scroll-disjoint-viewport-layers" runDisjointViewportLayersTest
   ]
 
 runScrollThumbCursorTest :: Context -> IORef Int -> IO ()
@@ -784,3 +785,48 @@ runDisjointViewportHitTest ctx failed = do
   assert failed (not (respPressed pressed))
   (_, clicked) <- evalUi ctx release ui
   assert failed (not (respClicked clicked))
+
+-- | Stacked buttons and one pinned over them, in a scroller scrolled out of
+-- the outer viewport, have an empty clip and take no pointer
+-- ('NanoUI.Internal.Frame.Hit.topmostHit' chooses only among reachable
+-- widgets). In view, the pinned one takes the pointer over the stack, and
+-- the stack's top button beside it.
+runDisjointViewportLayersTest :: Context -> IORef Int -> IO ()
+runDisjointViewportLayersTest ctx failed = do
+  let inp0 = withInputOff 300 200
+      filler h = spacer (Fixed 10) (Fixed h)
+      ui = scrollArea (fixedH 100 . fillW) . column $ do
+        filler 150
+        inner <- scrollArea (fixedH 30 . fillW) . column $ do
+          layered <- stack (mapM (buttonWith' (fixedWH 100 20)) ["Under", "Over"])
+          pinned <- buttonWith' (pinAt 60 0 . fixedWH 40 20) "Pin"
+          filler 200
+          pure (layered ++ [pinned])
+        filler 100
+        pure inner
+      buttons = fmap (snd . snd) ui
+      -- The stack's top button left of the pinned one, and the pinned one.
+      targets bs = [(1 :: Int, V2 (rectX (respRect (bs !! 1)) + 10) (v2Y (centerOf (bs !! 1)))), (2, centerOf (bs !! 2))]
+  (outer, (inner, _)) <- warmup2 ctx inp0 ui
+  setScrollOffset ctx inner 100
+  hidden <- warmup2 ctx inp0 buttons
+  forM_ hidden $ \b ->
+    assertJustM failed (lookupNodeByWidgetId (ctxNodeArena ctx) (respId b)) $ \idx ->
+      assert failed . maybe False (\(Rect _ _ w h) -> w == 0 && h == 0) =<< getClipBounds (ctxNodeArena ctx) idx
+  forM_ (targets hidden) $ \(_, pos) -> do
+    assert failed (v2Y pos > 0 && v2Y pos < 100)
+    _ <- warmup2 ctx inp0 {inputMousePos = pos} buttons
+    assert failed . (`notElem` map respId hidden) =<< getHotId ctx
+    let (press, release) = clickPair inp0 pos
+    pressed <- evalUi ctx press buttons
+    assert failed (not (any (\r -> respHovered r || respPressed r) pressed))
+    clicked <- evalUi ctx release buttons
+    assert failed (not (any respClicked clicked))
+  setScrollOffset ctx inner 0
+  setScrollOffset ctx outer 140
+  shown <- warmup2 ctx inp0 buttons
+  forM_ (targets shown) $ \(i, pos) -> do
+    _ <- warmup2 ctx inp0 {inputMousePos = pos} buttons
+    assertEq failed (respId (shown !! i)) =<< getHotId ctx
+    clicked <- runClick ctx inp0 {inputMousePos = pos} buttons pos
+    assertEq failed [j == i | j <- [0 .. 2]] (map respClicked clicked)

@@ -100,6 +100,8 @@ runFrameEff unlift ctx frameInp ui = do
   -- to, is for what watches the whole window: a press anywhere else closing
   -- a menu, hover, and what the overlays paint.
   route <- routePointer ctx frameInp
+  -- Where one widget is drawn over another, the one under it has no pointer.
+  recordCoveredWidgets ctx route frameInp
   let routedIf mine = if mine then frameInp else withoutPointer frameInp
       layerInp = routedIf (case route of RouteLayer _ -> True; _ -> False)
       menuInp = routedIf (route == RouteTextMenu)

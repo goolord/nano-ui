@@ -345,7 +345,10 @@ resolveInteraction ctx inp wid = do
           <&&> if hashWidgetId active /= 0 && active /= wid
             then pure True
             else not <$> startedHere (ctxPressPos ctx)
-      hovered <- pure (not (disabled || captured)) <&&> hitAt mouse
+      -- Where a stack or a pinned node draws another widget over this one,
+      -- the pointer is that widget's.
+      covered <- pointerCovered ctx wid
+      hovered <- pure (not (disabled || captured || covered)) <&&> hitAt mouse
       let
         pressed = hovered && inputMouseDown inp
         rightPressed = hovered && inputMouseRightDown inp

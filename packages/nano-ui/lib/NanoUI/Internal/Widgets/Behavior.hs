@@ -36,20 +36,22 @@ dragThresholdPx = 8
 data DragAxis = DragAxisX | DragAxisY
   deriving (Eq, Show)
 
--- | Clamped 1D drag. Maps pointer position on @track@ into [lo, hi]. The drag
--- starts with a press on the track and lasts until the button comes up; a
--- button held from elsewhere and moved onto the track drags nothing. Returns
--- the value, whether the drag is held, and whether it was held before this
--- frame.
+-- | Clamped 1D drag on a track of widget @owner@. Maps pointer position on
+-- @track@ into [lo, hi]. The drag starts with a press on the track and lasts
+-- until the button comes up; a button held from elsewhere and moved onto the
+-- track drags nothing, nor does a press where a stack or a pinned node draws
+-- another widget over the owner ('pointerCovered'). Returns the value,
+-- whether the drag is held, and whether it was held before this frame.
 useDrag1D ::
   (Ui :> es) =>
   DragAxis ->
+  WidgetId ->
   Float ->
   Float ->
   Float ->
   Rect ->
   Eff es (Float, Bool, Bool)
-useDrag1D axis lo hi current track = do
+useDrag1D axis owner lo hi current track = do
   (wid, ctx) <- freshWidget
   inp <- askInput
   let dragK = slotKey SlotDrag (intKey wid)
@@ -57,8 +59,8 @@ useDrag1D axis lo hi current track = do
         DragAxisX -> (rectX track, rectW track, v2X (inputMousePos inp))
         DragAxisY -> (rectY track, rectH track, v2Y (inputMousePos inp))
   active0 <- quietFlag dragK <$> uiIO (getStore ctx)
-  let started = inputMousePressed inp && rectHit track (inputMousePos inp)
-      active = inputMouseDown inp && (active0 || started)
+  started <- pure (inputMousePressed inp && rectHit track (inputMousePos inp)) <&&> (not <$> uiIO (pointerCovered ctx owner))
+  let active = inputMouseDown inp && (active0 || started)
       frac = if trackLen <= 0 then 0 else clamp01 ((mouse - origin) / trackLen)
   when (active /= active0) $ uiIO (modifyStore ctx (setQuietFlag dragK active))
   pure (if active then lo + frac * (hi - lo) else current, active, active0)

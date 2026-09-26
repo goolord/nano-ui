@@ -37,7 +37,8 @@ counter = do
   modals, floating windows, pane grids, colour pickers, progress bars,
   sparklines, and drag and drop. `customWidget` and a canvas API, with curves
   and transforms (`NanoUI.Path`), cover anything else.
-- Row, column, and grid layout with scrolling. Layout options are
+- Row, column, grid, and stacked (`stack`) layout with scrolling, wrapping
+  (`wrap`), and pinned children (`pinAt`). Layout options are
   `Layout -> Layout` modifiers, as in `columnWith (gap 8 . padAll 12)`.
 - Scrollers take a wheel step and a glide time (`setScrollTuning`,
   `setScrollStep`), and move from code: `scrollTo`, `scrollBy`, `scrollPages`,

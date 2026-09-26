@@ -32,6 +32,7 @@ module NanoUI.Internal.Layout.Arena
   , NodeClass (..)
   , SizingTag (..)
   , DirTag (..)
+  , FlowTag (..)
   , NodeArena (..)
   , FlexScratch (..)
   , newNodeArena
@@ -39,11 +40,16 @@ module NanoUI.Internal.Layout.Arena
   , arenaCount
   , topModalNode
   , floatingNodeCount
+  , layeredNodeCount
   , arenaArrays
   , GeomCol (..)
   , StyleCol (..)
   , TagCol (..)
   , TreeCol (..)
+  , geomStride
+  , styleStride
+  , tagStride
+  , treeStride
   , readGeom
   , writeGeom
   , readStyle
@@ -70,6 +76,8 @@ module NanoUI.Internal.Layout.Arena
   , parentIsRow
   , getAlignX
   , getAlignY
+  , getFlow
+  , hasPinnedBelow
   , getNodeRect
   , setRect
   , getClipRect
@@ -101,6 +109,10 @@ module NanoUI.Internal.Layout.Arena
   , forChildNodes_
   , foldFlowChildrenM
   , flowChildrenInOrder
+  , foldPlacedChildrenM
+  , forChildrenInPaintOrder_
+  , childrenTopFirst
+  , drawnOver
   , AdornRows (..)
   , adornRows
   , findNodeRevM
@@ -128,11 +140,12 @@ module NanoUI.Internal.Layout.Arena
 import Control.Monad (forM_, mfilter, unless, when)
 import Data.Bits (shiftL, shiftR, xor, (.&.), (.|.))
 import Data.Hashable (Hashable, hash)
-import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IM
 import Data.IntSet (IntSet)
 import qualified Data.IntSet as IS
+import Data.Maybe (fromMaybe, isJust)
 import Data.Primitive.Array (MutableArray, copyMutableArray, newArray, readArray, sizeofMutableArray, writeArray)
 import Data.Primitive.PrimArray
   ( MutablePrimArray
@@ -153,7 +166,7 @@ import GHC.Float (castFloatToWord32)
 import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Internal.Store (ptrEq)
 import NanoUI.Internal.Style (AlignX (..), AlignY, Direction (..), Layout (..), Padding (..), Sizing (..))
-import NanoUI.Internal.Types (Color (..), Rect (..), rectNonEmpty)
+import NanoUI.Internal.Types (Color (..), Rect (..), V2 (..), rectNonEmpty)
 
 -- | A node's position in the arena's arrays. It is valid from the 'addNode'
 -- that returned it until the next 'resetNodeArena'. Where an index names an
@@ -284,6 +297,10 @@ data NodeClass
   -- ^ Panels and scroll containers, which paint a backdrop and hand their
   -- content a clip of their own, for the damage pass that tracks them
   -- ('NanoUI.Internal.Damage.updatePrevRects').
+  | LayeredNodes
+  -- ^ Stacks and pinned nodes, the only places where paint draws a node over
+  -- one declared before it ('forChildrenInPaintOrder_'), so that the pointer
+  -- over two widgets can be on the later one ('layeredNodeCount').
   deriving (Eq, Enum, Bounded)
 
 -- | The constructor of a 'Sizing' without its number, as the arena stores it
@@ -304,6 +321,20 @@ data SizingTag
 data DirTag = DirRow | DirColumn
   deriving (Eq, Show, Enum, Bounded)
 
+-- | How a container lays out its flow children, as the arena stores it in
+-- 'TagFlow'. A stack's 'TagDirection' is 'DirColumn', so whatever reads the
+-- direction as an axis (a separator, a text wrap) treats it as a column.
+data FlowTag
+  = FlowLine
+  -- ^ One line along its direction: a row or a column.
+  | FlowWrap
+  -- ^ Lines along its direction, a new one started where the next child
+  -- would overflow the main axis ('NanoUI.Internal.Style.layoutWrap').
+  | FlowStack
+  -- ^ Every child over the whole content box, later ones drawn on top
+  -- ('NanoUI.Internal.Style.Stack').
+  deriving (Eq, Show, Enum, Bounded)
+
 -- | The arena's per-node arrays. The first four are strided: node @idx@ owns
 -- the half-open range @idx * stride@ to @(idx + 1) * stride@, and the columns
 -- ('GeomCol', 'StyleCol', 'TagCol', 'TreeCol') name the slots of that row.
@@ -313,10 +344,10 @@ data NodeArenaArrays = NodeArenaArrays
   { naArrGeom :: !(IOArr Float)
   -- ^ Rects, 8 floats per node. See 'GeomCol'.
   , naArrStyle :: !(IOArr Float)
-  -- ^ Layout inputs and a few other numbers, 16 floats per node. See
+  -- ^ Layout inputs and a few other numbers, 20 floats per node. See
   -- 'StyleCol'.
   , naArrTags :: !(IOArr Word8)
-  -- ^ Enum values, 8 bytes per node. See 'TagCol'.
+  -- ^ Enum values, 16 bytes per node. See 'TagCol'.
   , naArrTree :: !(IOArr Int)
   -- ^ Tree links and other integers, 8 per node. See 'TreeCol'.
   , naArrTextStore :: !(MutableArray RealWorld Text)
@@ -458,8 +489,8 @@ initialCapacity = 256
 -- 'StyleCol', 'TagCol' and 'TreeCol', and the columns past those are unused.
 geomStride, styleStride, tagStride, treeStride :: Int
 geomStride = 8
-styleStride = 16
-tagStride = 8
+styleStride = 20
+tagStride = 16
 treeStride = 8
 
 -- | Columns of 'naArrGeom', in logical pixels and window coordinates.
@@ -474,7 +505,7 @@ treeStride = 8
 data GeomCol
   = GeomX | GeomY | GeomW | GeomH
   | GeomClipX | GeomClipY | GeomClipW | GeomClipH
-  deriving (Enum)
+  deriving (Enum, Bounded)
 
 -- | Columns of 'naArrStyle': the numbers the node was laid out with, in
 -- logical pixels unless stated.
@@ -494,6 +525,9 @@ data GeomCol
 -- * 'StyleGridMinColW': the least column width of a grid that fits as many
 --   columns as it can, or 0.
 -- * 'StyleFontSize': the font size, or 0 for the default ('getNodeFontSize').
+-- * 'StyleLineGap': the space between a wrapping container's lines.
+-- * 'StylePinX', 'StylePinY': a pinned node's offset from its parent's
+--   content box.
 --
 -- The layout cache does not compare 'StyleScrollContentW' and
 -- 'StyleNodeValue', which are not layout inputs.
@@ -502,7 +536,8 @@ data StyleCol
   | StylePadL | StylePadR | StylePadT | StylePadB
   | StyleGap | StyleMinW | StyleMinH | StyleMaxW | StyleMaxH
   | StyleScrollContentW | StyleNodeValue | StyleGridMinColW | StyleFontSize
-  deriving (Enum)
+  | StyleLineGap | StylePinX | StylePinY
+  deriving (Enum, Bounded)
 
 -- | Columns of 'naArrTags'. Each holds one enum value as a 'Word8', written
 -- with 'writeTagEnum'.
@@ -517,10 +552,16 @@ data StyleCol
 -- * 'TagIdSuperseded': whether a later node of this frame holds this node's
 --   widget id too, as a table's scrolling pane shares its frozen pane's
 --   ('setWidgetId', 'getIdSuperseded').
+-- * 'TagFlow': the 'FlowTag'.
+-- * 'TagPinned': whether the node is pinned ('isPinnedNode'), as a 'Bool'.
+-- * 'TagPinnedBelow': whether a node below this one is pinned, as a 'Bool',
+--   written when the pinned node is added ('hasPinnedBelow'). The solver,
+--   paint and hit tests look for pinned children only under such a node.
 data TagCol
   = TagNodeType | TagDirection | TagWSizing | TagHSizing
   | TagScrollBarSlot | TagAlignX | TagAlignY | TagIdSuperseded
-  deriving (Enum)
+  | TagFlow | TagPinned | TagPinnedBelow
+  deriving (Enum, Bounded)
 
 -- | Columns of 'naArrTree'. A link that leads nowhere is -1.
 --
@@ -538,7 +579,7 @@ data TagCol
 data TreeCol
   = TreeParent | TreeFirstChild | TreeNextSibling | TreeChildCount
   | TreeWidgetId | TreeStyleIdx | TreeTextIdx | TreeGridCols
-  deriving (Enum)
+  deriving (Enum, Bounded)
 
 -- | Read geometry column @col@ of node @idx@. Like the other raw accessors
 -- below, it takes the arrays so that a loop can fetch them once with
@@ -720,6 +761,13 @@ mixNodeInput na idx tag v = do
 floatingNodeCount :: NodeArena -> IO Int
 floatingNodeCount na = readPrimArray (naClassCounts na) (fromEnum FloatingNodes)
 
+-- | Number of stacks and pinned nodes added since the last reset
+-- ('LayeredNodes'). While it is 0, of two overlapping nodes the one declared
+-- first is drawn on top.
+{-# INLINE layeredNodeCount #-}
+layeredNodeCount :: NodeArena -> IO Int
+layeredNodeCount na = readPrimArray (naClassCounts na) (fromEnum LayeredNodes)
+
 -- | Live node count. Valid indices are 0 through count minus one.
 {-# INLINE arenaCount #-}
 arenaCount :: NodeArena -> IO Int
@@ -819,6 +867,18 @@ addNode na nt parent Layout {..} = do
   let (wTag, wVal) = sizingTag layoutWidth
       (hTag, hVal) = sizingTag layoutHeight
       pad = layoutPadding
+      -- A scroll container or a grid lays its children out its own way, and
+      -- paint and hit tests take them in a line's order too.
+      !flow
+        | isScrollNode nt || layoutGridCols > 0 || layoutGridMinColW > 0 = FlowLine
+        | layoutDirection == Stack = FlowStack
+        | layoutWrap = FlowWrap
+        | otherwise = FlowLine
+      !lineGap = fromMaybe layoutGap layoutLineGap
+      -- A floating node is placed on its own, and a root has nothing to be
+      -- pinned in.
+      !pinned = isJust layoutPin && parent >= 0 && not (isFloatingNode nt)
+      !(V2 pinX pinY) = fromMaybe (V2 0 0) layoutPin
   a <- arenaArrays na
 
   setPrimArray (naArrGeom a) (idx * geomStride) geomStride 0
@@ -838,16 +898,22 @@ addNode na nt parent Layout {..} = do
   setPrimArray (naArrStyle a) (idx * styleStride + valuesOff) (styleStride - valuesOff) 0
   writeStyle a idx StyleGridMinColW layoutGridMinColW
   writeStyle a idx StyleFontSize layoutFontSize
+  writeStyle a idx StyleLineGap lineGap
+  writeStyle a idx StylePinX pinX
+  writeStyle a idx StylePinY pinY
 
   setPrimArray (naArrTags a) (idx * tagStride) tagStride 0
   writeTagEnum a idx TagNodeType nt
   writeTagEnum a idx TagDirection $ case layoutDirection of
     Row -> DirRow
     Column -> DirColumn
+    Stack -> DirColumn
   writeTagEnum a idx TagWSizing wTag
   writeTagEnum a idx TagHSizing hTag
   writeTagEnum a idx TagAlignX layoutAlignX
   writeTagEnum a idx TagAlignY layoutAlignY
+  writeTagEnum a idx TagFlow flow
+  writeTagEnum a idx TagPinned pinned
 
   setPrimArray (naArrTree a) (idx * treeStride) treeStride 0
   writeTree a idx TreeParent parent
@@ -881,6 +947,11 @@ addNode na nt parent Layout {..} = do
           , (0x4648, fromIntegral (castFloatToWord32 layoutFontSize))
           , (0x4158, fromIntegral (fromEnum layoutAlignX))
           , (0x4159, fromIntegral (fromEnum layoutAlignY))
+          , (0x464c, fromIntegral (fromEnum flow))
+          , (0x4c47, fromIntegral (castFloatToWord32 lineGap))
+          , (0x5049, fromIntegral (fromEnum pinned))
+          , (0x5058, fromIntegral (castFloatToWord32 pinX))
+          , (0x5059, fromIntegral (castFloatToWord32 pinY))
           , (0x5041, fromIntegral (parent + 1))
           ]
   mixInputSig na 0x4e4f nodeSig
@@ -904,8 +975,14 @@ addNode na nt parent Layout {..} = do
     writeTree a parent TreeFirstChild idx
     cc <- readTree a parent TreeChildCount
     writeTree a parent TreeChildCount (cc + 1)
+    -- Mark the ancestors, up to one already marked.
+    let markPinnedBelow p = when (p >= 0) $ do
+          marked <- readTagEnum a p TagPinnedBelow
+          unless marked $ writeTagEnum a p TagPinnedBelow True >> readTree a p TreeParent >>= markPinnedBelow
+    when pinned $ markPinnedBelow parent
   when (isFloatingNode nt) $ pushClassNode na FloatingNodes idx
   when (nt == NodePanel || nt == NodeScrollContainer) $ pushClassNode na BackdropNodes idx
+  when (flow == FlowStack || pinned) $ pushClassNode na LayeredNodes idx
   when (isWidgetNode nt || isScrollNode nt) $ do
     pushClassNode na PointerNodes idx
     when (nt == NodeDrawing) $ pushClassNode na DrawingNodes idx
@@ -1027,6 +1104,24 @@ getAlignX na idx = arenaArrays na >>= \a -> readTagEnum a idx TagAlignX
 {-# INLINE getAlignY #-}
 getAlignY :: NodeArena -> NodeIdx -> IO AlignY
 getAlignY na idx = arenaArrays na >>= \a -> readTagEnum a idx TagAlignY
+
+-- | How the node lays out its flow children.
+{-# INLINE getFlow #-}
+getFlow :: NodeArena -> NodeIdx -> IO FlowTag
+getFlow na idx = arenaArrays na >>= \a -> readTagEnum a idx TagFlow
+
+-- | Whether the node is pinned: out of its parent's flow, at an offset from
+-- the parent's content box ('StylePinX', 'StylePinY').
+{-# INLINE isPinnedNode #-}
+isPinnedNode :: NodeArena -> NodeIdx -> IO Bool
+isPinnedNode na idx = arenaArrays na >>= \a -> readTagEnum a idx TagPinned
+
+-- | Whether a node below this one, a child or further down, is pinned. A
+-- pinned node can sit outside its parent, so paint looks for it below a
+-- container it otherwise skips as out of view.
+{-# INLINE hasPinnedBelow #-}
+hasPinnedBelow :: NodeArena -> NodeIdx -> IO Bool
+hasPinnedBelow na idx = arenaArrays na >>= \a -> readTagEnum a idx TagPinnedBelow
 
 -- | Current x, y, width, height in logical pixels. After scroll offsets are
 -- applied, the origin is in window coordinates; before layout it is unset.
@@ -1548,17 +1643,31 @@ forChildNodes_ na parentIdx f = do
   go fc
 
 -- | Fold over a node's children in sibling order, skipping floating
--- (modal, window, popup) children, which are placed outside the flow.
+-- (modal, window, popup) children, which are placed outside the flow, and
+-- pinned children, which sit where they are pinned ('foldPlacedChildrenM').
 {-# INLINE foldFlowChildrenM #-}
 foldFlowChildrenM :: NodeArena -> NodeIdx -> (acc -> NodeIdx -> IO acc) -> acc -> IO acc
-foldFlowChildrenM na parentIdx f z = do
+foldFlowChildrenM na = foldChildrenInBoxM na True
+
+-- | 'foldFlowChildrenM' with the pinned children too: every child placed
+-- inside the node, as its content.
+{-# INLINE foldPlacedChildrenM #-}
+foldPlacedChildrenM :: NodeArena -> NodeIdx -> (acc -> NodeIdx -> IO acc) -> acc -> IO acc
+foldPlacedChildrenM na = foldChildrenInBoxM na False
+
+-- | Fold over the children that are not floating, skipping the pinned ones
+-- too with @skipPinned@.
+{-# INLINE foldChildrenInBoxM #-}
+foldChildrenInBoxM :: NodeArena -> Bool -> NodeIdx -> (acc -> NodeIdx -> IO acc) -> acc -> IO acc
+foldChildrenInBoxM na skipPinned parentIdx f z = do
   fc <- getFirstChild na parentIdx
   let go !ci !acc
         | ci < 0 = pure acc
         | otherwise = do
             nt <- getNodeType na ci
             ns <- getNextSibling na ci
-            if isFloatingNode nt
+            pinned <- if skipPinned then isPinnedNode na ci else pure False
+            if isFloatingNode nt || pinned
               then go ns acc
               else f acc ci >>= go ns
   go fc z
@@ -1567,6 +1676,62 @@ foldFlowChildrenM na parentIdx f z = do
 -- last first, so consing them up as they are visited restores that order.
 flowChildrenInOrder :: NodeArena -> NodeIdx -> IO [NodeIdx]
 flowChildrenInOrder na parentIdx = foldFlowChildrenM na parentIdx (\acc ci -> pure (ci : acc)) []
+
+-- | Visit a node's children, floating ones included, in the order paint draws
+-- them, so that each is drawn over the ones visited before it. A stack draws
+-- the children that are not pinned in declaration order, later children on
+-- top. Any other node draws them from the last declared to the first, so
+-- where two overlap the earlier one is on top. Either then draws its pinned
+-- children, in declaration order, over all of those.
+{-# INLINE forChildrenInPaintOrder_ #-}
+forChildrenInPaintOrder_ :: NodeArena -> NodeIdx -> (NodeIdx -> IO ()) -> IO ()
+forChildrenInPaintOrder_ na parentIdx f = do
+  flow <- getFlow na parentIdx
+  pinnedBelow <- hasPinnedBelow na parentIdx
+  fc <- getFirstChild na parentIdx
+  -- The sibling links run from the last child to the first, so a child
+  -- visited after the rest of the list is visited in declaration order.
+  let inOrderIf pinned !ci = when (ci >= 0) $ do
+        getNextSibling na ci >>= inOrderIf pinned
+        isPinnedNode na ci >>= \p -> when (p == pinned) (f ci)
+      pinnedLast !ci = when (ci >= 0) $ do
+        ns <- getNextSibling na ci
+        pinned <- isPinnedNode na ci
+        if pinned then pinnedLast ns >> f ci else f ci >> pinnedLast ns
+  case flow of
+    FlowStack -> inOrderIf False fc >> when pinnedBelow (inOrderIf True fc)
+    _
+      | pinnedBelow -> pinnedLast fc
+      | otherwise -> forChildNodes_ na parentIdx f
+
+-- | A node's children but the floating ones, which paint draws as layers of
+-- their own, from the one drawn on top to the one drawn first
+-- ('forChildrenInPaintOrder_').
+childrenTopFirst :: NodeArena -> NodeIdx -> IO [NodeIdx]
+childrenTopFirst na parentIdx = do
+  acc <- newIORef []
+  forChildrenInPaintOrder_ na parentIdx $ \ci -> do
+    nt <- getNodeType na ci
+    unless (isFloatingNode nt) $ modifyIORef' acc (ci :)
+  readIORef acc
+
+-- | Whether paint draws node @b@ over node @a@, declared before it: whether,
+-- of the two children of the node where their branches meet,
+-- 'forChildrenInPaintOrder_' visits @b@'s side last. Not when @b@ is inside
+-- @a@, nor when they are in different trees.
+drawnOver :: NodeArena -> NodeIdx -> NodeIdx -> IO Bool
+drawnOver na b a = climb a b (-1) (-1)
+  where
+    -- A parent's index is lower than its children's, so the later of @x@ and
+    -- @y@ climbs until they meet, each side keeping the node it came from.
+    climb !x !y !ca !cb
+      | x > y = getParent na x >>= \p -> climb p y x cb
+      | x < y = getParent na y >>= \p -> climb x p ca y
+      | x < 0 || ca < 0 = pure False
+      | otherwise = do
+          lastSide <- newIORef ca
+          forChildrenInPaintOrder_ na x $ \ci -> when (ci == ca || ci == cb) (writeIORef lastSide ci)
+          (== cb) <$> readIORef lastSide
 
 -- | A button's or text field's adornments, the rows it holds as children
 -- ("NanoUI.Internal.Widgets.Adornment"): its leading row and its trailing row

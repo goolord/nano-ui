@@ -11,6 +11,9 @@ module NanoUI.Internal.Widgets.Layout
   , column
   , columnWith
   , column'
+  , stack
+  , stackWith
+  , stack'
   , hstack
   , vstack
   , label
@@ -111,6 +114,27 @@ columnWith = (`withDefaultWith` column')
 {-# INLINE column' #-}
 column' :: Ui :> es => Layout -> Eff es a -> Eff es a
 column' layout = container NodeContainer (layout {layoutDirection = Column})
+
+-- | Layer children over one another in the same box, later ones on top, as
+-- for a badge on an icon or a caption over an image. The stack is as large as
+-- its largest child, and each child sits in it where its alignment puts it:
+-- @alignEnd . alignTop@ for a corner badge, @alignCenter . alignMid@ to
+-- centre it. A child that grows ('fillW', 'grow') fills the stack on that
+-- axis. The pointer goes to the child on top: where a widget covers another,
+-- hover highlights, presses and focus go to it, and the widget under it is
+-- neither hovered nor pressed there, nor shows its tooltip.
+{-# INLINE stack #-}
+stack :: Ui :> es => Eff es a -> Eff es a
+stack = stackWith id
+
+-- | 'stack' with modified layout defaults.
+{-# INLINE stackWith #-}
+stackWith :: Ui :> es => (Layout -> Layout) -> Eff es a -> Eff es a
+stackWith = (`withDefaultWith` stack')
+
+{-# INLINE stack' #-}
+stack' :: Ui :> es => Layout -> Eff es a -> Eff es a
+stack' layout = container NodeContainer (layout {layoutDirection = Stack})
 
 -- | Run a collection of widgets side by side, as in @hstack (map label names)@.
 {-# INLINE hstack #-}

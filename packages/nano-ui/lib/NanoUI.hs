@@ -137,6 +137,8 @@ module NanoUI
   , separator
   , spacer
   , flex
+  , stack
+  , stackWith
 
     -- * Text
   , label
@@ -499,6 +501,13 @@ module NanoUI
   , presetStiff
 
     -- * Layout
+
+    -- | A container lays its children out along a 'Row' or a 'Column', one
+    -- after another, or layers them in a 'Stack' ('stack'), later children on
+    -- top. 'wrap' breaks a row or column into lines where the next child
+    -- would overflow it, as a list of tags does, and 'pinAt' takes a child out
+    -- of its parent's flow to sit at an offset in the parent, over its
+    -- siblings, as a badge or a floating button does.
   , Layout (..)
   , LayoutModifier
   , Sizing (..)
@@ -540,6 +549,9 @@ module NanoUI
   , gridCols
   , fixedAspectW
   , fixedAspectH
+  , wrap
+  , lineGap
+  , pinAt
 
     -- * Text style
   , FontVariant (..)

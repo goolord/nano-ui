@@ -25,11 +25,13 @@ module NanoUI.Internal.Frame.Input
   , floatingPanelActive
   , debugPanelOpen
   , probeHotId
+  , recordCoveredWidgets
   ) where
 
 import Control.Applicative ((<|>))
-import Control.Monad (filterM, mfilter, when, (<=<))
+import Control.Monad (filterM, mfilter, unless, when)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.IntSet qualified as IS
 import Data.Maybe (fromMaybe, isJust, isNothing, listToMaybe, maybeToList)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Frame.Hit
@@ -139,9 +141,10 @@ pressTargets ctx inp
 -- step asks, so each node is tested at most once, and the pass stops once
 -- every target is found. Each is the first match in arena order, which is
 -- declaration order. The painter draws siblings from the last declared to the
--- first, so where two overlap the earlier one is on top. A widget drawn inside
--- the interactive one, such as a control among its adornments, is on top of
--- it and takes the press ('innermostHit').
+-- first, so where two overlap the earlier one is on top, except where a stack
+-- or a pinned child draws a later match over it ('topmostHit'). A widget
+-- drawn inside the interactive one, such as a control among its adornments,
+-- is on top of it and takes the press ('innermostHit').
 targetsAt :: Context -> V2 -> IO PressTargets
 targetsAt ctx@Context {ctxNodeArena = na} mouse = do
   top <- overlayHitRoot ctx mouse
@@ -155,9 +158,18 @@ targetsAt ctx@Context {ctxNodeArena = na} mouse = do
         wantS = isNothing s && nt == NodeSelect
     pure (wantI || wantT || wantS) <&&> widgetUnderMouse ctx top mouse nt idx <&&> do
       wid <- getWidgetId na idx
-      inner <- if wantI then getWidgetId na =<< innermostHit ctx under idx else pure wid
-      let pick want cur = if want then Just wid else cur
-          !r = PressTargets (if wantI then Just inner else i) (pick wantT t) (pick wantS s) (onControl || (wantT && inner /= wid))
+      let topmost kind = topmostHit ctx (\d -> (kind <$> getNodeType na d) <&&> under d) idx
+          topmostId want kind = if want then getWidgetId na =<< topmost kind else pure wid
+      inner <- if wantI then getWidgetId na =<< innermostHit ctx under =<< topmost isWidgetNode else pure wid
+      fieldWid <- topmostId wantT (\k -> k == NodeTextInput || k == NodeTextArea)
+      selectWid <- topmostId wantS (== NodeSelect)
+      let pick want hit cur = if want then Just hit else cur
+          !r =
+            PressTargets
+              (if wantI then Just inner else i)
+              (pick wantT fieldWid t)
+              (pick wantS selectWid s)
+              (onControl || (wantI && wantT && inner /= fieldWid))
       writeIORef found r
       pure (isJust (ptInteractive r) && isJust (ptTextField r) && isJust (ptSelect r))
   readIORef found
@@ -252,7 +264,8 @@ postsLayoutClick nt = nt == NodeButton || nt == NodeSelect
 -- It repeats the test of 'NanoUI.Internal.Widgets.Node.resolveInteraction': the widget
 -- is enabled, the frame routed the pointer to its layer, and the point is
 -- inside its rect from the previous frame and inside the scroll viewports
--- above it.
+-- above it. A widget something was drawn over there ('ctxPointerCovered')
+-- passes too: the view saw the release and found it was not the widget's.
 inUiClickHit :: Context -> WidgetId -> V2 -> IO Bool
 inUiClickHit ctx wid mouse = do
   disabled <- isDisabled ctx wid
@@ -417,9 +430,47 @@ probeHotId ctx@Context {ctxNodeArena = na} mouse = do
       mOverlay <- overlayMenuOwnerAt ctx mouse
       case mOverlay of
         Just wid -> pure wid
-        -- Earlier siblings paint over later ones, so the first hit wins.
-        Nothing -> do
-          top <- overlayHitRoot ctx mouse
-          let hits idx =
-                (isWidgetNode <$> getNodeType na idx) <&&> nodePointVisible ctx idx mouse <&&> overlayHitAllowed ctx top idx
-          maybe (pure (WidgetId 0)) (getWidgetId na <=< innermostHit ctx hits) =<< findClassNodeM na PointerNodes hits
+        Nothing -> maybe (pure (WidgetId 0)) (getWidgetId na) =<< reachedWidgetAt ctx mouse
+
+-- | Note in 'ctxPointerCovered' the widgets the pointer is over in the frame
+-- the user saw but does not reach. Where a stack or a pinned node draws one
+-- widget over another, the pointer reaches the one on top, as hover finds it
+-- ('probeHotId'), and the widgets that one is inside; every other widget
+-- under the pointer is covered there. Runs before the view, against the last
+-- frame's layout: while the view runs, each widget tests the pointer against
+-- its rect in that layout ('NanoUI.Internal.Widgets.Node.resolveInteraction'),
+-- and one covered takes neither hover nor presses. Nothing is covered while
+-- the pointer is on a menu or dropdown, which routes it away from every
+-- layer, nor in a layout with no stack or pinned node ('layeredNodeCount'),
+-- where the widget declared first is on top wherever two overlap.
+recordCoveredWidgets :: Context -> PointerRoute -> Input -> IO ()
+recordCoveredWidgets ctx@Context {ctxNodeArena = na} route inp = do
+  layered <- layeredNodeCount na
+  covered <- case route of
+    RouteLayer _ | layered > 0 -> do
+      top <- overlayHitRoot ctx mouse
+      let hits = widgetHitAt ctx top mouse
+      -- Every widget under the pointer, the last in arena order first.
+      under <- foldClassNodesM na PointerNodes (\acc idx -> ifM (hits idx) (pure (idx : acc)) (pure acc)) []
+      case reverse under of
+        first : _ : _ -> do
+          keep <- idsUpFrom IS.empty =<< reachedHit ctx hits first
+          ids <- mapM (getWidgetId na) under
+          pure $ IS.fromList [k | wid <- ids, hashWidgetId wid /= 0, let k = intKey wid, not (IS.member k keep)]
+        -- One widget under the pointer covers nothing.
+        _ -> pure IS.empty
+    _ -> pure IS.empty
+  -- Most frames have nothing covered before or after, and write nothing.
+  old <- readIORef (ctxPointerCovered ctx)
+  unless (IS.null old && IS.null covered) $
+    writeIORef (ctxPointerCovered ctx) $! covered
+ where
+  mouse = inputMousePos inp
+  -- The ids of node @i@ and every node it is inside. A node sharing an id
+  -- with one of them is not covered either.
+  idsUpFrom !acc i
+    | i < 0 = pure acc
+    | otherwise = do
+        wid <- getWidgetId na i
+        let acc' = if hashWidgetId wid == 0 then acc else IS.insert (intKey wid) acc
+        getParent na i >>= idsUpFrom acc'

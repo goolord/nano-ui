@@ -246,6 +246,9 @@
 - `withTransform` draws a canvas block through a `Transform` (`translate`,
   `rotate`, `scale`, `affine`, composed with `<>`), and `runCanvasFor` runs a
   custom widget's canvas with its curves flattened for its display.
+- `stack` and `stackWith` layer their children in one box. The `wrap`
+  modifier flows a row onto new lines, or a column into new columns, `lineGap`
+  apart, and `pinAt x y` places a node at an offset over its siblings.
 - `NanoUI.Backend` has what a backend needs for the above:
   `modifiersFromBits`.
 
@@ -506,6 +509,7 @@
 - The node index by widget id is an unboxed table, so indexing and looking
   up a widget allocate nothing, and `nano-ui` no longer depends on
   `hashtables`.
+- `Layout` has new fields, for the additions above.
 
 ### Fixed
 

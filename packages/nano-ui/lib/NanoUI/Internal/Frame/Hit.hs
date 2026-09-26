@@ -15,17 +15,22 @@ module NanoUI.Internal.Frame.Hit
   , nodePointVisible
   , nodeClippedHit
   , nodeInteractionHit
+  , widgetHitAt
+  , reachedWidgetAt
+  , reachedHit
   , innermostHit
+  , topmostHit
   )
 where
 
 import Control.Applicative ((<|>))
+import Control.Monad ((<=<))
 import Control.Monad.Trans.Maybe (MaybeT (..))
 import Data.Maybe (isJust)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Layout.Arena
-import NanoUI.Internal.Monad ((<&&>))
+import NanoUI.Internal.Monad (ifM, (<&&>))
 import NanoUI.Internal.Types (Rect (..), V2 (..), rectContains, rectHit)
 import NanoUI.Internal.WidgetText (containerFlagInert, hasFlag)
 
@@ -189,6 +194,31 @@ nodeInteractionHit ctx@Context {ctxNodeArena = na} idx rect mouse
           _ | isFloatingNode nt -> pure True
             | otherwise -> getParent na i >>= inside
 
+-- | Whether the pointer at @mouse@ is on widget node @idx@: on its visible
+-- part ('nodePointVisible'), where the floating panels leave it reachable
+-- ('overlayHitAllowed', with @top@ from 'overlayHitRoot').
+widgetHitAt :: Context -> Maybe NodeIdx -> V2 -> NodeIdx -> IO Bool
+widgetHitAt ctx top mouse idx =
+  (isWidgetNode <$> getNodeType (ctxNodeArena ctx) idx)
+    <&&> nodePointVisible ctx idx mouse
+    <&&> overlayHitAllowed ctx top idx
+
+-- | The widget node the pointer at @mouse@ reaches, as hover finds it: of the
+-- widgets under it ('widgetHitAt'), the first in arena order, unless a stack
+-- or a pinned child draws a later one over it, and then any widget drawn
+-- inside that one ('reachedHit').
+reachedWidgetAt :: Context -> V2 -> IO (Maybe NodeIdx)
+reachedWidgetAt ctx mouse = do
+  top <- overlayHitRoot ctx mouse
+  let hits = widgetHitAt ctx top mouse
+  traverse (reachedHit ctx hits) =<< findClassNodeM (ctxNodeArena ctx) PointerNodes hits
+
+-- | The node a pointer hit lands on, given @first@, the first node in arena
+-- order that @hits@: the hit drawn on top ('topmostHit'), then the widget
+-- drawn innermost inside it ('innermostHit').
+reachedHit :: Context -> (NodeIdx -> IO Bool) -> NodeIdx -> IO NodeIdx
+reachedHit ctx hits = innermostHit ctx hits <=< topmostHit ctx hits
+
 -- | The widget a pointer hit on widget @idx@ lands on: its first enabled
 -- descendant widget that @hits@, painted over it, and so on inward, skipping
 -- inert containers ('containerFlagInert').
@@ -196,8 +226,8 @@ innermostHit :: Context -> (NodeIdx -> IO Bool) -> NodeIdx -> IO NodeIdx
 innermostHit ctx@Context {ctxNodeArena = na} hits idx =
   maybe (pure idx) (innermostHit ctx hits) =<< firstHitIn idx
  where
-  -- Depth first in declaration order, past widgets that miss.
-  firstHitIn i = flowChildrenInOrder na i >>= firstJust
+  -- Depth first from the child drawn on top, past widgets that miss.
+  firstHitIn i = childrenTopFirst na i >>= firstJust
   firstJust [] = pure Nothing
   firstJust (d : ds) = do
     nt <- getNodeType na d
@@ -212,3 +242,17 @@ innermostHit ctx@Context {ctxNodeArena = na} hits idx =
               <&&> (not <$> (isDisabled ctx =<< getWidgetId na d))
           if here then pure (Just d) else firstHitIn d
     maybe (firstJust ds) (pure . Just) found
+
+-- | The node drawn on top among those that @hits@, given @first@, the first
+-- of them in arena order. Paint draws an earlier sibling over a later one, so
+-- that is @first@, unless a stack or a pinned node draws a later hit over it
+-- ('drawnOver'), which only an arena with one of them can do. A hit inside
+-- another does not count as over it here ('innermostHit').
+topmostHit :: Context -> (NodeIdx -> IO Bool) -> NodeIdx -> IO NodeIdx
+topmostHit Context {ctxNodeArena = na} hits first = do
+  layered <- layeredNodeCount na
+  if layered == 0 then pure first else foldClassNodesM na PointerNodes over first
+ where
+  over top i
+    | i <= first = pure top
+    | otherwise = ifM (hits i <&&> drawnOver na i top) (pure i) (pure top)

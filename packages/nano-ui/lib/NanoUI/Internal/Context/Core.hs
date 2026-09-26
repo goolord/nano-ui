@@ -29,6 +29,7 @@ module NanoUI.Internal.Context.Core
   , damagePeers
   , damageFull
   , getPrevRect
+  , pointerCovered
   , getPrevClipRect
   -- Store
   , getStore
@@ -58,6 +59,7 @@ import Data.Bits (shiftL, shiftR, (.&.), (.|.))
 import Data.IORef (modifyIORef', readIORef, writeIORef)
 import Data.Primitive.SmallArray (SmallMutableArray, copySmallMutableArray, newSmallArray, readSmallArray, getSizeofSmallMutableArray, writeSmallArray)
 import Data.IntMap.Strict qualified as IM
+import Data.IntSet qualified as IS
 import GHC.Clock (getMonotonicTime)
 import GHC.Exts (RealWorld)
 
@@ -248,6 +250,15 @@ takeDamagePieces ctx = getsDamage ctx dsDamagePieces
 {-# INLINE getPrevRect #-}
 getPrevRect :: Context -> WidgetId -> IO (Maybe Rect)
 getPrevRect ctx wid = getsDamage ctx (IM.lookup (intKey wid) . pfRects . dsPrev)
+
+-- | Whether the pointer is over widget @wid@ in the frame the user saw, but
+-- a stack or a pinned node draws another widget over it there, which has the
+-- pointer instead ('ctxPointerCovered'). A widget that tests a press against
+-- a rect of its own, not through its 'NanoUI.Internal.Widgets.Node.Response',
+-- asks this too.
+{-# INLINE pointerCovered #-}
+pointerCovered :: Context -> WidgetId -> IO Bool
+pointerCovered ctx wid = IS.member (intKey wid) <$> readIORef (ctxPointerCovered ctx)
 
 -- | Last recorded widget clip in logical window coordinates, or 'Nothing'.
 {-# INLINE getPrevClipRect #-}

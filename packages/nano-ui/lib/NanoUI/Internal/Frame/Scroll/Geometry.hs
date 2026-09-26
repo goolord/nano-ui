@@ -74,6 +74,7 @@ decodeScrollConfig bits = ScrollConfig (toEnum (bits .&. 3)) (toEnum (shiftR bit
 scrollDefault1D :: Direction -> ScrollConfig
 scrollDefault1D Column = scrollVerticalAuto
 scrollDefault1D Row = ScrollConfig ScrollAuto ScrollNone False
+scrollDefault1D Stack = scrollVerticalAuto
 
 scrollVerticalAuto :: ScrollConfig
 scrollVerticalAuto = ScrollConfig ScrollNone ScrollAuto False

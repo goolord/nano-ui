@@ -124,6 +124,15 @@ the leftmost wins. `fillW` and `fillH` share available space with other
 growing children; `minW` and `maxW` constrain width. `percent 50` requests
 half the available width. `tight` removes padding but keeps the child gap.
 
+`stack` layers its children in one box as large as the largest, each placed
+by its alignment; a later child draws over the earlier ones and takes the
+pointer from them. The `wrap` modifier flows a row onto a new line where the
+next child would not fit, as in
+`rowWith (wrap . gap 6 . lineGap 4) (mapM_ chip tags)`; inside a container
+that sizes itself to its content, bound the row with `maxW` or `fixedW`.
+`pinAt x y` places a node at that offset in its parent's content box, over
+its siblings and out of their flow.
+
 Give a scroller a bounded viewport, for example
 `scrollWith (fixedH 240 . fillW) body`. `scrollArea` also returns its id for
 commands such as `scrollToEnd`. Use `getScrollMetrics` to obtain the visible

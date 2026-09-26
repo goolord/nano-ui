@@ -387,12 +387,12 @@ colorPickerCanvas (wid, svResp) (hueWid, hueResp) alphaPart initial = do
     barHit resp =
       Rect (rectX (respRect resp) - 2) (rectY svSquare) (rectW (respRect resp) + 4) (rectH svSquare)
   -- An idle drag hands back the value it was given.
-  (s, sA, sHeld) <- withKey ("s" :: Text) (useDrag1D DragAxisX 0 1 s0 svSquare)
-  (v, vA, vHeld) <- withKey ("v" :: Text) (useDrag1D DragAxisY 1 0 v0 svSquare)
-  (h, hA, hHeld) <- withKey ("hue" :: Text) (useDrag1D DragAxisY 0 360 h0 (barHit hueResp))
+  (s, sA, sHeld) <- withKey ("s" :: Text) (useDrag1D DragAxisX wid 0 1 s0 svSquare)
+  (v, vA, vHeld) <- withKey ("v" :: Text) (useDrag1D DragAxisY wid 1 0 v0 svSquare)
+  (h, hA, hHeld) <- withKey ("hue" :: Text) (useDrag1D DragAxisY hueWid 0 360 h0 (barHit hueResp))
   (a, aA, aHeld) <-
     withKey ("alpha" :: Text) $
-      useDrag1D DragAxisY 0 255 (fromIntegral (colorA current0)) (maybe (Rect 0 0 0 0) (barHit . snd) alphaPart)
+      useDrag1D DragAxisY (maybe wid fst alphaPart) 0 255 (fromIntegral (colorA current0)) (maybe (Rect 0 0 0 0) (barHit . snd) alphaPart)
   let
     dragging = sA || vA || hA || aA
     alpha = fromIntegral (clamp 0 255 (round a :: Int))

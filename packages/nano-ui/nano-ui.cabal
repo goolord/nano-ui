@@ -249,6 +249,7 @@ test-suite nano-ui-test
         Cases.Window
         Cases.WidgetIdIndex
         Cases.Paths
+        Cases.LayoutFlow
     build-depends:
         bytestring,
         containers,

@@ -110,14 +110,27 @@ paintNodeWithEnv env idx = do
       missesPieces =
         sizeofPrimArray (pePieces env) > 0
           && not (anyRun (pePieces env) $ \x0 y0 x1 y1 -> l < x1 && t < y1 && r > x0 && b > y0)
-  unless (w <= 0 || h <= 0 || r <= l || b <= t || occluded || missesPieces) $ do
-    nt <- getNodeType (peNodeArena env) idx
-    scope <- getNodeScope (peNodeArena env) idx
-    if scope == peScope env
-      then lowerNodeVisible env idx nt (Rect x y w h)
-      else do
-        theme <- scopeTheme (peContext env) scope
-        lowerNodeVisible env {peTheme = theme, peScope = scope} idx nt (Rect x y w h)
+  if w <= 0 || h <= 0 || r <= l || b <= t || occluded || missesPieces
+    then paintPinnedBelow env idx
+    else do
+      nt <- getNodeType (peNodeArena env) idx
+      scope <- getNodeScope (peNodeArena env) idx
+      if scope == peScope env
+        then lowerNodeVisible env idx nt (Rect x y w h)
+        else do
+          theme <- scopeTheme (peContext env) scope
+          lowerNodeVisible env {peTheme = theme, peScope = scope} idx nt (Rect x y w h)
+
+-- | The children of a skipped plain container, when a pinned node is below
+-- it. A plain container draws nothing of its own and does not clip, so a
+-- pinned node can show outside it, even when it has no size at all. Every
+-- other container clips its children to itself.
+{-# NOINLINE paintPinnedBelow #-}
+paintPinnedBelow :: PaintEnv -> NodeIdx -> IO ()
+paintPinnedBelow env idx = do
+  pinnedBelow <- hasPinnedBelow (peNodeArena env) idx
+  nt <- getNodeType (peNodeArena env) idx
+  when (pinnedBelow && nt == NodeContainer) $ walkChildrenWithOccluders env idx
 
 -- | Whether @p@ holds for any of the @x0, y0, x1, y1@ runs of @rects@.
 {-# INLINE anyRun #-}
@@ -323,13 +336,14 @@ paintDrawingNode env@PaintEnv {peContext = ctx} idx rect = do
         ops <- cachedDrawingOps ctx wid content rect build
         emitDrawingOps env rect ops
 
--- | Lower the children of @idx@ with the current paint env. NOINLINE keeps
--- this recursive call out of the simplifier's loop analysis, so the whole
--- walker stays a call to opaque seams rather than one inlined monster.
+-- | Lower the children of @idx@ with the current paint env, the one on top
+-- last ('forChildrenInPaintOrder_'). NOINLINE keeps this recursive call out
+-- of the simplifier's loop analysis, so the whole walker stays a call to
+-- opaque seams rather than one inlined monster.
 {-# NOINLINE walkChildrenWithOccluders #-}
 walkChildrenWithOccluders :: PaintEnv -> NodeIdx -> IO ()
 walkChildrenWithOccluders env idx =
-  forChildNodes_ (peNodeArena env) idx (paintNodeWithEnv env)
+  forChildrenInPaintOrder_ (peNodeArena env) idx (paintNodeWithEnv env)
 
 -- | Children walk for callers painting a subtree inside their own clip
 -- (floating overlays); builds a fresh env without occluders.
