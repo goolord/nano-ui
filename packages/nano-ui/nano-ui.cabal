@@ -255,6 +255,7 @@ test-suite nano-ui-test
         Cases.Paths
         Cases.LayoutFlow
         Cases.Images
+        Cases.Focus
         Cases.TooltipDelay
         Cases.Visibility
         Cases.Cursors

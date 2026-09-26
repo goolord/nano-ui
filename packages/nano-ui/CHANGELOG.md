@@ -253,6 +253,8 @@
   `ContentFit` like CSS's `object-fit`, an alignment, an opacity and a
   `Rotation`. The `DrawImageRotated` op and the canvas's `drawImageRotated`
   draw an image turned about its centre.
+- Focus from code: `requestFocus` gives a widget the keyboard by its `respId`
+  as Tab would, or with `WidgetId 0` takes it away.
 - `tooltipConfigured` and `tooltipWidgetConfigured` take a `TooltipConfig`:
   the hover delay (`tooltipDelay`), the grace after another tooltip
   (`tooltipGrace`) and the placement (`tooltipPlacement`).

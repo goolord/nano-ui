@@ -639,8 +639,10 @@ demoUi = do
                 setTreeSel =<< tree "demo" demoTree treeSel
               separator
               heading "Searchable list"
-              muted "Type to filter. The debounced search commits on a pause; the filtered list is cached and only recomputed when the committed query changes."
+              muted "Type to filter, or press Ctrl+F to jump here. The debounced search commits on a pause; the filtered list is cached and only recomputed when the committed query changes."
               (qResp, qVal) <- searchInput' "Filter people (name, role, city…)" searchText
+              -- Ctrl+F sends the keyboard to the filter.
+              when (modCtrl (inputModifiers rawInp) && T.any (`T.elem` "fF\x06") (inputChars rawInp)) (requestFocus (respId qResp))
               setSearchText qVal
               when (respChanged qResp) $ do
                 setSearchQuery qVal

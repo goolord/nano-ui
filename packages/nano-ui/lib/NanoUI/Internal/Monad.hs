@@ -46,6 +46,7 @@ module NanoUI.Internal.Monad
   , holdFocus
   , releaseFocus
   , focusedWidget
+  , requestFocus
   , getClipboard
   , setClipboard
   , requestFrame
@@ -454,6 +455,29 @@ releaseFocus wid = withContext $ \ctx -> do
 -- | The widget that has the keyboard, or @'WidgetId' 0@ for none.
 focusedWidget :: Ui :> es => Eff es WidgetId
 focusedWidget = withContext getFocusId
+
+-- | Move the keyboard to the widget with this id, as Tab moving onto it
+-- would: a text field starts taking keys with its caret where it last left
+-- it (at the end of one not yet edited), the widget shows the focus ring,
+-- and Tab goes on from it. The field that had the keyboard drops its
+-- selection and menu, and commits on its next frame, as it does when a click
+-- lands elsewhere. @'WidgetId' 0@, no widget, takes the keyboard off
+-- whatever has it. For a search box that Ctrl+F sends the keys to:
+--
+-- > (resp, query') <- searchInput' "Find" query
+-- > when findPressed (requestFocus (respId resp))
+--
+-- The request is carried out at the end of the frame, against the frame's
+-- layout, so a widget declared after the call can be named too; the widget
+-- has the keyboard from the next frame, which the request asks for. The
+-- last request of a frame wins. A widget that Tab would not stop at this
+-- frame refuses it and focus stays where it was: one that is disabled, one
+-- behind an open 'NanoUI.Internal.Widgets.Overlay.modal', one not declared
+-- this frame, or a radio group's last option, which its response names.
+-- Asking for the widget that already has the keyboard changes nothing, so a
+-- view can ask on every frame a condition holds.
+requestFocus :: Ui :> es => WidgetId -> Eff es ()
+requestFocus wid = withContext (\ctx -> writeIORef (ctxFocusRequest ctx) (Just wid))
 
 -- | The clipboard's text, through whatever clipboard the backend installed.
 -- 'Nothing' for an empty clipboard or none at all.

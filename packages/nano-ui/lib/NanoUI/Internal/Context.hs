@@ -475,6 +475,7 @@ newContext = do
   ctxMiddlePressPos <- newIORef Nothing
   ctxFocusId <- newIORef (WidgetId 0)
   ctxFocusVisible <- newIORef False
+  ctxFocusRequest <- newIORef Nothing
   ctxStore <- newIORef emptyWidgetStore
   ctxDamageState <- newIORef initialDamageState
   ctxOverlayState <- newIORef initialOverlayState

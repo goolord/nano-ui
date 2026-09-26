@@ -68,7 +68,20 @@ module NanoUI
     -- to the widget clicked. A view that decides for itself where typing goes
     -- -- an editor that keeps the keyboard while its find bar is shut -- says
     -- so with 'holdFocus' each frame it should, and gets that frame's Tab.
+    --
+    -- A view sends the keyboard somewhere once with 'requestFocus', naming
+    -- the widget by the 'respId' of its response, or nowhere with
+    -- @'WidgetId' 0@. Focus moves as Tab would move it: the widget shows the
+    -- focus ring, a text field takes the keys with its caret where it left
+    -- it, the field that had them commits, and the next Tab goes on from
+    -- there. A disabled widget, or one behind an open modal, refuses it. The
+    -- move happens at the end of the frame, and the widget has the keyboard
+    -- from the next ('NanoUI.Monad.focusedWidget' says which has it):
+    --
+    -- > (resp, query') <- searchInput' "Find" query
+    -- > when findPressed (requestFocus (respId resp))
   , holdFocus
+  , requestFocus
 
     -- * Clipboard
   , getClipboard

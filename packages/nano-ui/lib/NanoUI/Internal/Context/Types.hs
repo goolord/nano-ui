@@ -694,9 +694,14 @@ data Context = Context
   , ctxRightPressPos :: IORef (Maybe V2)
   , ctxMiddlePressPos :: IORef (Maybe V2)
   , ctxFocusId :: IORef WidgetId
-  -- | Focus last moved by keyboard, so the focused widget shows its ring. A
-  -- pointer press hides it again.
+  -- | Focus last moved by keyboard or from code, so the focused widget shows
+  -- its ring. A pointer press hides it again.
   , ctxFocusVisible :: IORef Bool
+  -- | Where the view asked the keyboard to go this frame
+  -- ('NanoUI.Internal.Monad.requestFocus'; @WidgetId 0@ for nowhere). The
+  -- frame moves focus there after layout
+  -- ('NanoUI.Internal.Frame.Input.finalizeFocusRequest').
+  , ctxFocusRequest :: IORef (Maybe WidgetId)
   , ctxStore :: IORef WidgetStore
   , ctxDamageState :: IORef DamageState
   , ctxOverlayState :: IORef OverlayState

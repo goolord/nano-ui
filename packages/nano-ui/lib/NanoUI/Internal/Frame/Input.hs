@@ -16,6 +16,7 @@ module NanoUI.Internal.Frame.Input
   , finalizePointerRelease
   , finalizeTextInputFocus
   , finalizeSelectFocus
+  , finalizeFocusRequest
   , PressTargets (..)
   , targetsAt
   , constrainFocusToModal
@@ -308,6 +309,38 @@ finalizeTextInputFocus ctx inp targets =
 finalizeSelectFocus :: Context -> PressTargets -> IO ()
 finalizeSelectFocus ctx targets =
   enabledTarget ctx (ptSelect targets) >>= mapM_ (focusWidget ctx)
+
+-- | Move keyboard focus where the view last asked this frame with
+-- 'NanoUI.Internal.Monad.requestFocus'. Runs after the pointer steps and
+-- before 'constrainFocusToModal' and 'finalizeTabFocus', so a Tab in the
+-- same frame goes on from the widget focused here.
+--
+-- Focus goes nowhere for @WidgetId 0@, and otherwise only where Tab could
+-- take it this frame: to a widget that called
+-- 'NanoUI.Internal.Context.registerFocusable' (a disabled one does not),
+-- inside the top modal while one is open. Otherwise the request is dropped.
+-- When focus moves it moves as a press elsewhere moves it off a field: the
+-- field that had it collapses its selection, and the text-field menu and an
+-- open dropdown close. The widget focused shows the ring, as Tab's does. A
+-- request for the widget that has focus already changes nothing, the ring
+-- included.
+finalizeFocusRequest :: Context -> IO ()
+finalizeFocusRequest ctx =
+  readIORef (ctxFocusRequest ctx) >>= mapM_ (\wid -> do
+    writeIORef (ctxFocusRequest ctx) Nothing
+    prev <- readIORef (ctxFocusId ctx)
+    let tabStop
+          | hashWidgetId wid == 0 = pure True
+          | otherwise = ((wid `elem`) <$> getFocusables ctx) <&&> widgetOverlayAllowed ctx wid
+    whenM (pure (wid /= prev) <&&> tabStop) $ do
+      collapseTextFieldSelection ctx prev
+      modifyInteraction ctx (\s -> s {isTextInputMenu = Nothing})
+      store <- getStore ctx
+      when (anySelectOpen store) $ setStore ctx (closeSelects store)
+      -- The damage pass repaints both widgets, since the focused id moved.
+      writeIORef (ctxFocusId ctx) wid
+      when (hashWidgetId wid /= 0) $ writeIORef (ctxFocusVisible ctx) True
+      markDirty ctx)
 
 -- | Give @wid@ keyboard focus, repainting when focus moved.
 focusWidget :: Context -> WidgetId -> IO ()

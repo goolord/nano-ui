@@ -47,6 +47,7 @@ module NanoUI.Monad
   , holdFocus
   , releaseFocus
   , focusedWidget
+  , requestFocus
   , getClipboard
   , setClipboard
 

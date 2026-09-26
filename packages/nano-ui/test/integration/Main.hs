@@ -38,6 +38,7 @@ import Cases.WidgetIdIndex qualified
 import Cases.Paths qualified
 import Cases.LayoutFlow qualified
 import Cases.Images qualified
+import Cases.Focus qualified
 import Cases.TooltipDelay qualified
 import Cases.Visibility qualified
 import Cases.Cursors qualified
@@ -86,6 +87,7 @@ main =
     , Cases.Paths.tests
     , Cases.LayoutFlow.tests
     , Cases.Images.tests
+    , Cases.Focus.tests
     , Cases.TooltipDelay.tests
     , Cases.Visibility.tests
     , Cases.Cursors.tests

@@ -180,6 +180,12 @@ no pointer. `askFrameInput` is for window-wide handling, such as dismissing
 a popup after an outside click; using it for an ordinary control bypasses
 pointer routing.
 
+To move keyboard focus from the view, name the widget by its response:
+`when findPressed (requestFocus (respId resp))` focuses a search box on
+Ctrl+F, and `requestFocus (WidgetId 0)` takes the keyboard off whatever has
+it. Focus moves as Tab would, from the next frame; a widget Tab would skip,
+such as one disabled or behind a modal, refuses it.
+
 `withCursorShape` sets the pointer's shape over a subtree wherever the
 widgets inside pick none, such as `UiCursorCrosshair` over a canvas, or
 `UiCursorNotAllowed` around disabled widgets. A custom widget picks its own

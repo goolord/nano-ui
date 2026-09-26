@@ -169,6 +169,7 @@ runFrameEff unlift ctx frameInp ui = do
   openTextEditMenu ctx layerInp
   finalizeTextEditMenuPick ctx menuInp
   closeTextEditMenuOnEscape ctx frameInp
+  finalizeFocusRequest ctx
   constrainFocusToModal ctx
   finalizeTabFocus ctx frameInp
   finalizeSelectKeyboard ctx frameInp
