@@ -20,7 +20,7 @@ runNumericInputTest ctx failed = do
       cfg = defaultNumericInputConfig {nicMin = 0, nicMax = 100}
       ui = column (held valueRef (numericInputConfigured' cfg))
       step event = (\((_, v), _, _, _) -> v) <$> runFrame ctx event ui
-      key k = inp {inputKeys = inputKeysFromList [k]}
+      key k = keyInp k inp
   (resp, _) <- warmup2 ctx inp ui
   _ <- step (key KeyTab)
   assertEq failed 13 =<< step (key KeyUp)
@@ -44,7 +44,7 @@ runNumericInputHexTest ctx failed = do
       cfg = defaultNumericInputConfig {nicMin = 0, nicHex = True, nicDecimals = 2}
       ui = column (held valueRef (numericInputConfigured' cfg))
       step event = (\((_, v), _, _, _) -> v) <$> runFrame ctx event ui
-      key k = inp {inputKeys = inputKeysFromList [k]}
+      key k = keyInp k inp
   _ <- warmup2 ctx inp ui
   assert failed =<< spanShown ctx "FF"
   _ <- step (key KeyTab)

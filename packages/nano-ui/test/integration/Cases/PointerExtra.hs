@@ -107,11 +107,11 @@ runSideButtonsTest ctx failed = do
   let side b = applyMouseButton b True win {inputMousePos = V2 20 20}
       back = side MouseBack
       backUp = applyMouseButton MouseBack False (clearEphemeral back)
-      sides i = (buttonPressed MouseBack i, buttonPressed MouseForward i)
+      sides i = (pressedIn MouseBack i, pressedIn MouseForward i)
   assertEq failed [(True, False), (False, True), (False, False), (False, False)] $
     map sides [back, side MouseForward, backUp, clearEphemeral back]
-  assert failed (buttonHeld MouseBack (clearEphemeral back) && inputPointerHeld back)
-  assert failed (buttonReleased MouseBack backUp && not (buttonHeld MouseBack backUp))
+  assert failed (heldIn MouseBack (clearEphemeral back) && inputPointerHeld back)
+  assert failed (releasedIn MouseBack backUp && not (heldIn MouseBack backUp))
   assert failed =<< redrawsAgain back
   assert failed =<< redrawsAgain backUp
   assertEq failed (True, False) =<< evalUi ctx back (sides <$> askInput)
@@ -157,14 +157,14 @@ runButtonSetsTest _ failed = do
       down = foldr (`applyMouseButton` True) win every
   assertEq failed (buttonsFromList every) (inputButtonsHeld down)
   assertEq failed (buttonsFromList every) (inputButtonsPressed down)
-  assert failed (all (`buttonHeld` down) every && all (`buttonPressed` down) every)
+  assert failed (all (`heldIn` down) every && all (`pressedIn` down) every)
   -- The list comes back in number order, the named buttons by their names.
   assertEq failed [MouseLeft, MouseMiddle, MouseRight, MouseBack, MouseForward, MouseOther 6, MouseOther 32] (buttonsToList (inputButtonsHeld down))
   assertEq failed [MouseLeft, MouseMiddle, MouseRight, MouseBack, MouseForward, MouseOther 6] (map mouseButtonNumber [1 .. 6])
   -- A button past 32 is not tracked.
   assert failed (buttonsNull (inputButtonsHeld (applyMouseButton (MouseOther 33) True win)))
   let up = applyMouseButton (MouseOther 6) False (clearEphemeral down)
-  assert failed (buttonReleased (MouseOther 6) up && not (buttonHeld (MouseOther 6) up) && buttonHeld MouseLeft up)
+  assert failed (releasedIn (MouseOther 6) up && not (heldIn (MouseOther 6) up) && heldIn MouseLeft up)
   assert failed (anyButtonReleased up && not (anyButtonPressed up))
   assertEq failed (buttonsFromList [MouseLeft, MouseRight]) (buttonsFromList [MouseLeft] <> buttonsFromList [MouseRight])
   -- The next frame keeps what is held and drops the presses.

@@ -48,9 +48,15 @@ module NanoUI.Backend
     -- 'applyPointerLeave' moves it off every widget. Every key goes in as a 'Key' whatever the
     -- modifiers, a key that types a character as the 'KeyChar' it types
     -- with no modifier held; the text typed goes in 'inputChars' as well, and
-    -- a chord such as Ctrl+C types none. A held key's auto-repeats go in
-    -- only for the keys 'keyRepeats' says repeat, and 'keypadKey' says what
-    -- a keypad key is.
+    -- a chord such as Ctrl+C types none. Every auto-repeat of a held key goes
+    -- in as a press, which 'applyKey' keeps out of 'inputKeysNew', and
+    -- 'keypadKey' says what a keypad key is. When the window loses the
+    -- keyboard, 'releaseAllKeys' lets go of what was held, whose releases
+    -- go elsewhere. A frame does not keep the order of its text, keys and
+    -- modifiers, so 'NanoUI.Runner.runSessionLoop' ends one after a command
+    -- key that text, another key or other modifiers follow: a frame's text
+    -- comes before its one command key ('inputKeys'). A loop of the
+    -- backend's own should batch its events the same way.
   , Input (..)
   , Key (..)
   , Modifiers (..)
@@ -78,7 +84,7 @@ module NanoUI.Backend
   , inputKeysNull
   , foldInputKeys
   , applyKey
-  , keyRepeats
+  , releaseAllKeys
   , keypadKey
   , noModifiers
   , modifiersFromBits
@@ -91,10 +97,19 @@ module NanoUI.Backend
     -- is held, like a button, until the next update ends or replaces it, and
     -- the focused text field draws it at its caret. The text the input
     -- method commits arrives as typed text in 'inputChars'. After a frame,
-    -- @textInputArea@ in "NanoUI.Testing" says where the input method should
-    -- put its candidate window.
+    -- 'textInputArea' says whether a widget takes text, where the input
+    -- method should put its candidate window and what the widget takes
+    -- ('InputPurpose'): a backend takes text input while it is there and
+    -- stops it while it is not, so no input method composes where nothing
+    -- shows it and no on-screen keyboard stays up. 'getFocusId' says which
+    -- widget has the keyboard; a composition going on as it moves is best
+    -- dropped.
   , Composition (..)
   , applyComposition
+  , InputPurpose (..)
+  , TextInputArea (..)
+  , textInputArea
+  , getFocusId
 
     -- * Cursors
   , cursorFallback
@@ -245,7 +260,8 @@ module NanoUI.Backend
 where
 
 import NanoUI.Internal.Compact (Compact, askCompact, compactHost)
-import NanoUI.Internal.Context (getExplainLayout, getExplainedNode, getSystemAppearance, setExplainLayout, setSystemAppearance, setWakeLoop)
+import NanoUI.Internal.Context (getExplainLayout, getExplainedNode, getFocusId, getSystemAppearance, setExplainLayout, setSystemAppearance, setWakeLoop)
+import NanoUI.Internal.Frame.TextArea (TextInputArea (..), textInputArea)
 import NanoUI.Internal.Draw (drawTextBox)
 import NanoUI.Internal.Font
 import NanoUI.Internal.Id

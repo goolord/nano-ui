@@ -2,7 +2,8 @@ module Main (main) where
 
 import Data.Text qualified as T
 import NanoUI.Internal.Frame.TextArea (textWordBounds)
-import NanoUI.Input (Input (..), Key (..), Modifiers (..), emptyInput, inputKeysFromList)
+import NanoUI.Input (Input (..), Key (..), Modifiers (..), emptyInput, inputKeysFromList, primaryModifiers)
+import NanoUI.Internal.Input (onMac)
 import NanoUI.Widgets.TextArea as TA
 import NanoUI.Widgets.TextBuffer as TB
 import NanoUI.Widgets.TextEditor as TE
@@ -233,20 +234,35 @@ spec = do
       TB.getCursor (TA.buffer entered) `shouldBe` TB.Cursor 1 0
       TA.selectionAnchor entered `shouldBe` TB.Cursor 1 0
 
-    it "Ctrl and Alt edit and move by word" $ do
+    it "the word modifier edits and moves by word, the other of Ctrl and Alt by character" $ do
       let
         s0 = TA.initTextAreaState "foo bar"
-      mapM_
-        ( \mods -> do
-            let
-              deleted = typeArea mods "" [KeyDelete] s0
-              right = typeArea mods "" [KeyRight] s0
-              left = typeArea mods "" [KeyLeft] right
-            TB.toText (TA.buffer deleted) `shouldBe` " bar"
-            TB.getCursor (TA.buffer right) `shouldBe` TB.Cursor 0 3
-            TB.getCursor (TA.buffer left) `shouldBe` TB.Cursor 0 0
-        )
-        [ctrlMods, Modifiers False False True False]
+        altMods = Modifiers False False True False
+        (word, other) = if onMac then (altMods, ctrlMods) else (ctrlMods, altMods)
+        motions mods =
+          let
+            deleted = typeArea mods "" [KeyDelete] s0
+            right = typeArea mods "" [KeyRight] s0
+            left = typeArea mods "" [KeyLeft] right
+           in (TB.toText (TA.buffer deleted), TB.getCursor (TA.buffer right), TB.getCursor (TA.buffer left))
+      motions word `shouldBe` (" bar", TB.Cursor 0 3, TB.Cursor 0 0)
+      motions other `shouldBe` ("oo bar", TB.Cursor 0 1, TB.Cursor 0 0)
+
+    it "Command, or elsewhere Ctrl+Shift, edits and moves to the line's ends" $ do
+      let
+        s0 = typeArea noMods "" [KeyEnd] (TA.initTextAreaState "foo bar\nbaz")
+        line = if onMac then Modifiers False False False True else Modifiers True True False False
+      TB.toText (TA.buffer (typeArea line "" [KeyBackspace] s0)) `shouldBe` "\nbaz"
+      if onMac
+        then TB.getCursor (TA.buffer (typeArea line "" [KeyLeft] s0)) `shouldBe` TB.Cursor 0 0
+        else TB.getCursor (TA.buffer (typeArea ctrlMods "" [KeyLeft] s0)) `shouldBe` TB.Cursor 0 4
+
+    it "Ctrl alone moves and deletes as in Emacs on macOS, and is no command elsewhere" $ do
+      let
+        s0 = typeArea noMods "" [KeyEnd] (TA.initTextAreaState "foo bar")
+        emacs k = TA.buffer (typeArea ctrlMods "" [KeyChar k] s0)
+      map (TB.getCursor . emacs) "ab" `shouldBe` if onMac then [TB.Cursor 0 0, TB.Cursor 0 6] else [TB.Cursor 0 7, TB.Cursor 0 7]
+      map (TB.toText . emacs) "hu" `shouldBe` if onMac then ["foo ba", ""] else ["foo bar", "foo bar"]
 
     it "scrolls the caret into a one-line viewport" $ do
       let
@@ -256,12 +272,12 @@ spec = do
         s1 = typeArea noMods "" [KeyDown] s0
       TA.scrollOffset s1 `shouldBe` (0, 16)
 
-    it "Ctrl+A and Ctrl+a both select all" $ do
+    it "Ctrl+A and Ctrl+a (Command on macOS) both select all" $ do
       let
         s0 = TA.initTextAreaState "hello"
         atEnd = typeArea noMods "" [KeyEnd] s0
-        fromLower = typeArea ctrlMods "" [KeyChar 'a'] atEnd
-        fromUpper = typeArea ctrlMods "" [KeyChar 'A'] atEnd
+        fromLower = typeArea primaryModifiers "" [KeyChar 'a'] atEnd
+        fromUpper = typeArea primaryModifiers "" [KeyChar 'A'] atEnd
       TB.getCursor (TA.buffer fromLower) `shouldBe` TB.Cursor 0 5
       TA.selectionAnchor fromLower `shouldBe` TB.Cursor 0 0
       TB.getCursor (TA.buffer fromUpper) `shouldBe` TB.Cursor 0 5

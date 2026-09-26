@@ -64,9 +64,9 @@ runKeyboardModalEligibilityTest ctx failed = do
     ((_, after), _, _, _) <- runFrame ctx (keyInp KeyEnter inp) ui
     assert failed (maybe False snd after)
 
--- | A space key-down frame (space arrives as a character, not a Key).
+-- | A frame pressing Space, which types a space as well.
 spaceInp :: Input -> Input
-spaceInp inp = inp {inputChars = " "}
+spaceInp inp = (keyInp KeySpace inp) {inputChars = " "}
 
 -- | Plain buttons activate with Enter and Space while focused.
 runKeyboardButtonTest :: Context -> IORef Int -> IO ()

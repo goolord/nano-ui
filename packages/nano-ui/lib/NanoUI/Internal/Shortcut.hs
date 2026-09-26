@@ -22,7 +22,6 @@ import Data.Char (toLower, toUpper)
 import Data.Text (Text)
 import Data.Text qualified as T
 import NanoUI.Internal.Input
-import System.Info (os)
 import Text.ParserCombinators.ReadP (choice, eof, get, many, readP_to_S, string, (+++))
 
 -- | A key chord: a key pressed while exactly these modifiers are held, so
@@ -135,12 +134,11 @@ shortcutLabel :: Shortcut -> Text
 shortcutLabel (Shortcut k mods) =
   T.intercalate "+" ([name | (True, name) <- held] ++ maybe [] (pure . keyLabel) k)
   where
-    mac = os == "darwin"
     held =
       [ (modCtrl mods, "Ctrl")
-      , (modAlt mods, if mac then "Option" else "Alt")
+      , (modAlt mods, if onMac then "Option" else "Alt")
       , (modShift mods, "Shift")
-      , (modSuper mods, if mac then "Cmd" else "Super")
+      , (modSuper mods, if onMac then "Cmd" else "Super")
       ]
 
 -- | A key's name: a letter in upper case, another character as itself, and a

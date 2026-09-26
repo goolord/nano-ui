@@ -76,7 +76,7 @@ import SDL3.Sys.Hints (resetHint, setHint)
 import SDL3.Sys.Blendmode (SDL_BlendMode, composeCustomBlendMode)
 import SDL3.Sys.Blendmode qualified as Blend
 import SDL3.Sys.Init (initSafe, quitSafe)
-import SDL3.Sys.Keyboard (startTextInputSafe, stopTextInputSafe)
+import SDL3.Sys.Keyboard (stopTextInputSafe)
 import SDL3.Sys.Render
   ( createWindowAndRendererSafe
   , destroyRendererSafe
@@ -511,11 +511,11 @@ startSdlWindow bench opts ctx guessedDriver fontSource monoSource = do
         then Just <$> transparentBlends sdlRenderer
         else pure Nothing
   liftIO $ setRenderScale sdlRenderer 1 1 >>= (`unless` fail "SDL_SetRenderScale failed")
+  -- Text input runs while a widget takes text ('syncTextInput'), and stops
+  -- with the session.
   unless bench $
     mkAcquire
-      ( void (setRenderVSync sdlRenderer (if sdlVsync then 1 else 0))
-          >> void (startTextInputSafe sdlWindow)
-      )
+      (void (setRenderVSync sdlRenderer (if sdlVsync then 1 else 0)))
       (const (void (stopTextInputSafe sdlWindow)))
   sdlLastPresented <- liftIO $ newIORef False
   sdlTextInput <- liftIO newTextInputSync

@@ -2,6 +2,7 @@ module Cases.Runner (tests) where
 
 import Spec
 import Control.Concurrent (threadDelay)
+import Data.Foldable (toList)
 import Control.Exception
   ( IOException
   , MaskingState (Unmasked)
@@ -17,6 +18,7 @@ tests =
   [ spec "session-loop" runSessionLoopTest
   , spec "session-loop-wake" runSessionLoopWakeTest
   , spec "session-loop-hard-quit" runSessionLoopHardQuitTest
+  , spec "session-loop-key-order" runSessionLoopKeyOrderTest
   , spec "session-loop-close-request" runSessionLoopCloseTest
   , spec "session-loop-close-asks-the-view" runSessionLoopCloseAskTest
   , spec "session-loop-clicks" runSessionLoopClicksTest
@@ -162,13 +164,14 @@ runSessionLoopWakeTest ctx failed = do
   assertEq failed 0 =<< getWakeAt ctx
 
 -- Ctrl+C quits without a frame, even when a later event in the same batch
--- releases Ctrl; typing c without Ctrl does not. Event 1 types c holding
+-- releases Ctrl; typing c without Ctrl does not. Event 1 presses C holding
 -- Ctrl, 2 releases Ctrl, and 4 types c alone.
 runSessionLoopHardQuitTest :: Context -> IORef Int -> IO ()
 runSessionLoopHardQuitTest ctx failed = do
   debug <- newDebugSampler
   let ctrl on inp = inp {inputModifiers = (inputModifiers inp) {modCtrl = on}}
       typeC inp = inp {inputChars = inputChars inp <> "c"}
+      pressC = applyKey (KeyChar 'c') True
       draws batches = do
         queue <- newIORef batches
         drawn <- newIORef (0 :: Int)
@@ -179,7 +182,7 @@ runSessionLoopHardQuitTest ctx failed = do
                 b : rest -> (rest, b)
                 [] -> ([], [3])
             , sdApplyEvent = \inp ev -> case ev of
-                1 -> ctrl True (typeC inp)
+                1 -> ctrl True (pressC inp)
                 2 -> ctrl False inp
                 4 -> typeC inp
                 _ -> inp
@@ -192,6 +195,46 @@ runSessionLoopHardQuitTest ctx failed = do
   assertEq failed 0 =<< draws [[1, 2]]
   assertEq failed 0 =<< draws [[1]]
   assertEq failed 1 =<< draws [[4, 2]]
+
+-- | A batch keeps its text, keys and modifiers in order: a frame ends after a
+-- command key that text, another key or other modifiers follow, so its text
+-- comes before its one command key, pressed with the modifiers it has, while
+-- the key's repeats and typing stay in one frame. Events: 1 types "l" with
+-- its key, 2 presses Enter, 3 types "x", 4 holds Ctrl, 5 presses S, 6
+-- releases S, 7 lets go of Ctrl.
+runSessionLoopKeyOrderTest :: Context -> IORef Int -> IO ()
+runSessionLoopKeyOrderTest ctx failed = do
+  debug <- newDebugSampler
+  frames <- newIORef []
+  let ctrlOn on inp = inp {inputModifiers = noModifiers {modCtrl = on}}
+      apply inp = \case
+        1 -> (applyKey (KeyChar 'l') True inp) {inputChars = inputChars inp <> "l"}
+        2 -> applyKey KeyEnter True inp
+        3 -> inp {inputChars = inputChars inp <> "x"}
+        4 -> ctrlOn True inp
+        5 -> applyKey (KeyChar 's') True inp
+        6 -> applyKey (KeyChar 's') False inp
+        7 -> ctrlOn False inp
+        _ -> inp
+      run batches = do
+        writeIORef frames []
+        waits <- batchedWaits (batches ++ [[0]])
+        clearDirty ctx
+        runSessionLoop
+          (quietDriver debug)
+            { sdWaitEvents = waits
+            , sdApplyEvent = apply
+            , sdIsSessionQuit = (== 0)
+            , sdShouldDraw = \_ _ _ _ _ -> pure True
+            , sdDraw = \_ inp _ -> False <$ modifyIORef' frames (<> [(inputChars inp, toList (inputKeys inp), modCtrl (inputModifiers inp))])
+            }
+          ctx
+          emptyInput
+        readIORef frames
+  assertEq failed [("ll", [KeyChar 'l', KeyChar 'l', KeyEnter, KeyEnter], False), ("x", [KeyChar 's'], True), ("", [], False)]
+    =<< run [[1, 1, 2, 2, 3, 4, 5, 6, 7]]
+  -- One event a batch, as steady typing comes, takes no extra frame.
+  assertEq failed 7 . length =<< run (map pure [1, 2, 3, 4, 5, 6, 7])
 
 -- | Batches of events for a driver's waits, one a wait; past the last the
 -- loop has gone on too long, and the test fails rather than hang.

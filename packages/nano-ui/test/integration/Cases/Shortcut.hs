@@ -20,6 +20,10 @@ tests =
   , spec "shortcut-escape-tab" runShortcutEscapeTabTest
   , spec "shortcut-menu-item" runShortcutMenuItemTest
   , spec "key-release-held" runKeyReleaseTest
+  , spec "key-listeners-focus" runKeyListenersFocusTest
+  , spec "key-repeats" runKeyRepeatsTest
+  , spec "key-repeats-widgets" runKeyRepeatsWidgetsTest
+  , spec "key-pressable" runKeyPressableTest
   , spec "key-hard-quit" runKeyHardQuitTest
   , spec "shortcut-focused-text-area" runShortcutFocusedTextAreaTest
   , spec "shortcut-focus-from-code" runShortcutFocusFromCodeTest
@@ -138,15 +142,35 @@ runShortcutFocusedFieldTest ctx failed = do
   writeIORef (ctxFocusId ctx) (WidgetId 0)
   fires failed press True [ctrl <> key 'a', key 'j', key KeyEnter]
 
--- | A focused control keeps Enter and the arrows, whatever the modifiers.
+-- | A focused button keeps Enter and Space, alone or with Shift, and a
+-- slider the arrows too; a chord of them, such as Ctrl+Enter or Alt+Left,
+-- is a shortcut's, and the control does not act on it. A custom widget
+-- keeps what it claims: here every key.
 runShortcutFocusedControlTest :: Context -> IORef Int -> IO ()
 runShortcutFocusedControlTest ctx failed = do
+  let chords = [key KeyEnter, shift <> key KeyEnter, ctrl <> key KeyEnter, key KeyRight, shift <> key KeyRight, alt <> key KeyLeft, key 's']
   (ui, press) <- noting ctx $ \note ->
-    column (binds note [key KeyEnter, ctrl <> key KeyEnter, key KeyRight, key 's'] >> whenM (button "Go") (note "button"))
+    column (binds note chords >> whenM (button "Go") (note "button"))
   warmupFocused ctx inp0 ui
-  forM_ [key KeyEnter, ctrl <> key KeyEnter] $ \c -> assertEq failed ["button"] =<< press (chordInp c inp0)
-  fires failed press False [key KeyRight]
-  fires failed press True [key 's']
+  forM_ [key KeyEnter, shift <> key KeyEnter] $ \c -> assertEq failed ["button"] =<< press (chordInp c inp0)
+  fires failed press True [ctrl <> key KeyEnter, key KeyRight, shift <> key KeyRight, alt <> key KeyLeft, key 's']
+  s <- newContext
+  (sliderUi, pressS) <- noting s $ \note -> column (binds note chords >> void (slider 0 10 5))
+  warmupFocused s inp0 sliderUi
+  fires failed pressS False [key KeyEnter, key KeyRight, shift <> key KeyRight]
+  fires failed pressS True [ctrl <> key KeyEnter, alt <> key KeyLeft, key 's']
+  sel <- newContext
+  selRef <- newIORef 0
+  (selUi, pressSel) <- noting sel $ \note -> column (binds note [ctrl <> key KeyDown] >> void (held selRef (select' ["a", "b", "c"])))
+  warmupFocused sel inp0 selUi
+  let chosenAfter c = pressSel (chordInp c inp0) >> pressSel inp0 >> readIORef selRef
+  assertEq failed 0 =<< chosenAfter (ctrl <> key KeyDown)
+  assertEq failed 1 =<< chosenAfter (key KeyDown)
+  c <- newContext
+  (customUi, pressC) <- noting c $ \note ->
+    column (binds note chords >> void (customWidget defaultCustomWidgetSpec {widgetFocusable = True, widgetKeys = KeysAll}))
+  warmupFocused c inp0 customUi
+  fires failed pressC False chords
 
 -- | An Escape shortcut takes Escape, so the app does not quit on it, and a Tab
 -- shortcut keeps focus where it is.
@@ -200,6 +224,76 @@ runKeyReleaseTest ctx failed = do
   assertEq failed ([KeySpace], [], [KeySpace]) (toList (inputKeysHeld holding), toList (inputKeysReleased (clearEphemeral up)), toList (inputKeysHeld (applyKey KeySpace True down)))
   assert failed (inputInteracted holding up)
   assertEq failed [False, False, False] =<< evalUi ctx down (disabledWhen True keys)
+
+-- | The key listeners hear only the keys the focused widget leaves: a text
+-- field's Delete is its own, and F2 the view's; the input has both.
+runKeyListenersFocusTest :: Context -> IORef Int -> IO ()
+runKeyListenersFocusTest ctx failed = do
+  textRef <- newIORef "hello"
+  let listen = mapM (\k -> (,) <$> keyPressed k <*> keyHeld k) [KeyDelete, KeyF 2]
+      ui = column (listen <* held textRef textInput')
+      pressBoth = applyKey (KeyF 2) True (applyKey KeyDelete True inp0)
+  warmupFocused ctx inp0 ui
+  assertEq failed [(False, False), (True, True)] =<< evalUi ctx pressBoth ui
+  assert failed (pressedIn KeyDelete pressBoth && heldIn KeyDelete pressBoth)
+  writeIORef (ctxFocusId ctx) (WidgetId 0)
+  _ <- runFrame ctx inp0 ui
+  assertEq failed [(True, True), (True, True)] =<< evalUi ctx pressBoth ui
+
+-- | A held key's auto-repeats are presses that are not new: 'shortcut' and
+-- 'keyPressed' fire on them, 'shortcutOnce' and 'keyPressedOnce' do not,
+-- and a 'shortcutOnce' that does not fire leaves them to a later 'shortcut'.
+runKeyRepeatsTest :: Context -> IORef Int -> IO ()
+runKeyRepeatsTest ctx failed = do
+  (ui, press) <- noting ctx $ \note -> column $ do
+    whenM (shortcut (ctrl <> key 'k')) (note "k")
+    whenM (shortcutOnce (ctrl <> key 'j')) (note "j once")
+    whenM (shortcut (ctrl <> key 'j')) (note "j")
+    whenM (keyPressed (KeyChar 'k')) (note "pressed")
+    whenM (keyPressedOnce (KeyChar 'k')) (note "pressed once")
+  warmup ctx inp0 ui
+  let down c = chordInp (ctrl <> key c) inp0
+      repeated c = (applyKey (KeyChar c) True (clearEphemeral (down c)))
+  -- The key pressed down, then auto-repeating while held.
+  assertEq failed ["pressed once", "pressed", "k"] =<< press (down 'k')
+  assertEq failed ["pressed", "k"] =<< press (repeated 'k')
+  assertEq failed ["j once"] =<< press (down 'j')
+  assertEq failed ["j"] =<< press (repeated 'j')
+  -- Backends pass every repeat in; the key held is listed once.
+  let r = repeated 'k'
+  assertEq failed ([KeyChar 'k'], [], [KeyChar 'k']) (toList (inputKeys r), toList (inputKeysNew r), toList (inputKeysHeld r))
+
+-- | Holding Enter types a line break on every repeat in a text area, but
+-- presses a focused button once, and submits a text field once.
+runKeyRepeatsWidgetsTest :: Context -> IORef Int -> IO ()
+runKeyRepeatsWidgetsTest ctx failed = do
+  areaRef <- newIORef ""
+  let area = column (held areaRef textArea')
+  warmupFocused ctx inp0 area
+  mapM_ (\i -> runFrame ctx i area) [keyInp KeyEnter inp0, keyRepeatInp KeyEnter inp0, keyRepeatInp KeyEnter inp0]
+  assertEq failed "\n\n\n" =<< readIORef areaRef
+  c <- newContext
+  let buttons = column (button' "Go")
+  warmupFocused c inp0 buttons
+  assertEq failed [True, False] . map respClicked =<< mapM (\i -> evalUi c i buttons) [keyInp KeyEnter inp0, keyRepeatInp KeyEnter inp0]
+  f <- newContext
+  fieldRef <- newIORef "x"
+  let field = column (held fieldRef textInput')
+  warmupFocused f inp0 field
+  assertEq failed [True, False] . map (respSubmitted . fst) =<< mapM (\i -> evalUi f i field) [keyInp KeyEnter inp0, keyRepeatInp KeyEnter inp0]
+
+-- | Keys and mouse buttons read alike from an input; a window that loses
+-- the keyboard lets go of the keys and modifiers held.
+runKeyPressableTest :: Context -> IORef Int -> IO ()
+runKeyPressableTest _ failed = do
+  let down = applyMouseButton MouseMiddle True (applyKey KeyEnter True inp0)
+      up = applyMouseButton MouseMiddle False (applyKey KeyEnter False (clearEphemeral down))
+      queries i = [pressedIn KeyEnter i, pressedOnceIn KeyEnter i, releasedIn KeyEnter i, heldIn KeyEnter i, pressedIn MouseMiddle i, pressedOnceIn MouseMiddle i, releasedIn MouseMiddle i, heldIn MouseMiddle i]
+  assertEq failed [True, True, False, True, True, True, False, True] (queries down)
+  assertEq failed [False, False, False, True, False, False, False, True] (queries (clearEphemeral down))
+  assertEq failed [False, False, True, False, False, False, True, False] (queries up)
+  let blurred = releaseAllKeys (clearEphemeral (chordInp (ctrl <> key 's') inp0))
+  assertEq failed ([], [KeyChar 's'], noModifiers) (toList (inputKeysHeld blurred), toList (inputKeysReleased blurred), inputModifiers blurred)
 
 -- | Ctrl+C quits from its key as it did from its typed letter.
 runKeyHardQuitTest :: Context -> IORef Int -> IO ()

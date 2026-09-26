@@ -64,25 +64,36 @@ module NanoUI
 
     -- * Focus
 
-    -- | Tab moves the keyboard between focusable widgets, and a click gives it
-    -- to the widget clicked. A view that decides for itself where typing goes
-    -- -- an editor that keeps the keyboard while its find bar is shut -- says
-    -- so with 'holdFocus' each frame it should, and gets that frame's Tab.
+    -- | Tab moves the keyboard between focusable widgets, and a click on a
+    -- text field or a select gives it to that; a click anywhere else takes
+    -- it off the field that had it. A view that decides for itself where
+    -- typing goes -- an editor that keeps the keyboard while its find bar is
+    -- shut -- says so with 'holdFocus' each frame it should, and gets that
+    -- frame's Tab.
     --
     -- A view sends the keyboard somewhere once with 'requestFocus', naming
-    -- the widget by the 'respId' of its response, or nowhere with
-    -- @'WidgetId' 0@. Focus moves as Tab would move it: the widget shows the
-    -- focus ring, a text field takes the keys with its caret where it left
-    -- it, the field that had them commits, and the next Tab goes on from
-    -- there. A disabled widget, or one behind an open modal, refuses it. The
-    -- move happens at the end of the frame, and the widget has the keyboard
-    -- from the next ('NanoUI.Monad.focusedWidget' says which has it):
+    -- the widget by the 'respId' of its response, or by 'currentId' just
+    -- before declaring it; on with 'focusNext' and 'focusPrevious', as Tab
+    -- and Shift+Tab; or nowhere with 'clearFocus'. Focus moves as Tab would
+    -- move it: the widget shows the focus ring, a text field takes the keys
+    -- with its caret where it left it, the field that had them drops its
+    -- selection and commits, and the next Tab goes on from there. A disabled
+    -- widget, or one behind an open modal, refuses it. The move happens at
+    -- the end of the frame, and the widget has the keyboard from the next
+    -- ('isFocused' says whether it has):
     --
     -- > (resp, query') <- searchInput' "Find" query
     -- > findPressed <- shortcut (ctrl <> key 'f')
     -- > when findPressed (requestFocus (respId resp))
+    --
+    -- 'NanoUI.Monad.releaseFocus' takes the keyboard off a widget at once,
+    -- in the middle of the view, and changes nothing else.
   , holdFocus
   , requestFocus
+  , focusNext
+  , focusPrevious
+  , clearFocus
+  , isFocused
 
     -- * Clipboard
   , getClipboard
@@ -890,14 +901,24 @@ module NanoUI
     -- 'Composition' at its caret and the keys go to the input method: the
     -- frame drops the keys pressed, released and held ('inputKeys',
     -- 'inputKeysReleased', 'inputKeysHeld') until the text is committed or
-    -- cancelled, so no shortcut fires on them.
+    -- cancelled, so no shortcut fires on them. A widget of the app's own
+    -- that takes text asks for the input method with 'useInputMethod', and
+    -- draws the composition it answers. 'pressedIn', 'releasedIn'
+    -- and 'heldIn' ask about one key or mouse button in it, as it stands,
+    -- and 'pressedOnceIn' about a press that is not a held key's
+    -- auto-repeat:
+    --
+    -- > runSdlApp defaultSdlOptions {sdlAppShouldQuit = pressedOnceIn KeyEscape} view
   , Input (..)
+  , Pressable (..)
   , Key (..)
   , Modifiers (..)
   , inputKeysElem
   , foldInputKeys
   , takeEscape
   , Composition (..)
+  , InputPurpose (..)
+  , useInputMethod
 
     -- * Mouse buttons
 
@@ -910,8 +931,8 @@ module NanoUI
     -- > whenM (mousePressed MouseBack) goBack
     --
     -- An 'Input' holds the buttons held, pressed and released as
-    -- 'MouseButtons' sets, which 'buttonHeld', 'buttonPressed' and
-    -- 'buttonReleased' read.
+    -- 'MouseButtons' sets, which 'pressedIn', 'releasedIn' and 'heldIn'
+    -- read, as they read a key's.
   , MouseButton (..)
   , mousePressed
   , mouseReleased
@@ -922,9 +943,6 @@ module NanoUI
   , buttonsNull
   , buttonsToList
   , buttonsFromList
-  , buttonHeld
-  , buttonPressed
-  , buttonReleased
   , anyButtonPressed
   , anyButtonReleased
   , inputPointerHeld
@@ -948,16 +966,29 @@ module NanoUI
     -- the first shortcut declared for the chord. It stays quiet behind a
     -- modal and for a chord the widget with the keyboard acts on itself, so
     -- Ctrl+A in a focused text field selects its text rather than running a
-    -- shortcut bound to Ctrl+A ('shortcut' has the rules). A
+    -- shortcut bound to Ctrl+A ('shortcut' has the rules), and the key
+    -- listeners are quiet for those keys too: a view hears the keys no
+    -- widget took. A focused control takes the keys it acts on alone or
+    -- with Shift, so a chord of them, such as Alt+Left, is a shortcut's; a
+    -- custom widget says which keys it takes with 'widgetKeys'. A
     -- 'menuItemShortcut' row binds its chord the same way while its menu is
     -- open.
+    --
+    -- A key held down auto-repeats, and each repeat is a press: holding
+    -- Ctrl+Z undoes step after step. 'keyPressedOnce' and 'shortcutOnce' see
+    -- the key go down and not its repeats, for what should happen once however
+    -- long the key is held, such as a toggle.
   , keyPressed
+  , keyPressedOnce
   , keyReleased
   , keyHeld
   , shortcut
+  , shortcutOnce
   , noModifiers
   , modPrimary
   , primaryModifiers
+  , modJump
+  , modMacCommand
 
     -- * Debugging
 
@@ -1050,6 +1081,7 @@ import NanoUI.Svg
 import NanoUI.Internal.Types
 import NanoUI.Internal.WidgetText
 import NanoUI.Internal.Widgets.Animate
+import NanoUI.Internal.Widgets.Behavior (useInputMethod)
 import NanoUI.Internal.Widgets.Button
 import NanoUI.Internal.Widgets.Caption
 import NanoUI.Internal.Widgets.Checkbox

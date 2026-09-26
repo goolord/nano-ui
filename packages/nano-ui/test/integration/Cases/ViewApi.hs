@@ -332,7 +332,7 @@ runScrollUiTest ctx failed = do
 runTakeEscapeTest :: Context -> IORef Int -> IO ()
 runTakeEscapeTest ctx failed = do
   let inp = withInput 400 300
-      esc = inp {inputKeys = inputKeysFromList [KeyEscape]}
+      esc = keyInp KeyEscape inp
       ui = do
         (resp, _) <- textInput' ("query" :: Text)
         first <- takeEscape

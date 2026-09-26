@@ -47,8 +47,9 @@
   and the grab hands show the move arrows instead of the arrow.
 - Super (Command) is `modSuper` rather than Ctrl, and Ctrl+letter is a key
   chord rather than typed text. Every key RGFW reports comes in as a `Key`,
-  with its release and held state, and Enter, Escape, Tab, Insert, the
-  function and lock keys no longer auto-repeat.
+  with its release and held state, and each auto-repeat of a held key as a
+  press, which `inputKeysNew` leaves out. Losing the keyboard (RGFW's
+  focus-out event) lets go of the keys held.
 - `optTitle`, `optWidth`, `optHeight` and `optCenter` are replaced by
   `optWindow`, the core `WindowSettings` both backends open their windows
   from: `optWindow = defaultWindowSettings {wsTitle = t, wsSize = s}`. Its

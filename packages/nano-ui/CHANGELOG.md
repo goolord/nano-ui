@@ -329,7 +329,14 @@
   view stops calling it, as `useTask` does a job; the image atlas gives the
   room of an image let go to the next image that fits it.
 - Focus from code: `requestFocus` gives a widget the keyboard by its `respId`
-  as Tab would, or with `WidgetId 0` takes it away.
+  as Tab would, or by `currentId` just before declaring it; `focusNext` and
+  `focusPrevious` move it on as Tab and Shift+Tab do; `clearFocus` takes it
+  away (as `requestFocus (WidgetId 0)` does), and `isFocused` says whether a
+  widget has it. Each moves the keyboard at the end of the frame, as Tab or
+  a click would, where `releaseFocus` takes it off one widget at once and
+  changes nothing else. A command run on a text field from code
+  (`runTextCommand`) focuses it the same way, so a disabled field or one
+  behind a modal refuses it, and the field shows the focus ring.
 - `tooltipConfigured` and `tooltipWidgetConfigured` take a `TooltipConfig`:
   the hover delay (`tooltipDelay`), the grace after another tooltip
   (`tooltipGrace`), the placement (`tooltipPlacement`) and the space between
@@ -355,20 +362,49 @@
   `ExplainedNode`. `explainingLayout` says whether it is on, and
   `explainScope` narrows it to the nodes a part of the view adds.
 - Every key as a `Key`: `KeyF n`, paging, Insert, Space, the lock and menu
-  keys, and a `KeyChar` of what a typing key types unmodified. `modSuper`, and
-  `modPrimary` for the platform's command key (Command on macOS, else Ctrl).
-  A view reads keys with `keyPressed`, `keyReleased` and `keyHeld`.
+  keys, and a `KeyChar` of what a typing key types unmodified. `modSuper`,
+  `modPrimary` for the platform's command key (Command on macOS, else Ctrl),
+  `modJump` for its word-motion key (Option on macOS, else Ctrl) and
+  `modMacCommand` for Command on macOS alone.
+  A view reads keys with `keyPressed`, `keyReleased` and `keyHeld`. Every key
+  auto-repeats while held, each repeat a press in `inputKeys`, and
+  `inputKeysNew` has the presses that are not repeats: holding Enter breaks
+  a text area's line again and again, while Enter and Space activate a
+  focused button, Enter submits a field and Escape closes only as they go
+  down. `keyPressedOnce` hears that press alone. Space activates by its key,
+  not by the space it types.
+- `pressedIn`, `pressedOnceIn`, `releasedIn` and `heldIn` (the `Pressable`
+  class) read a key or a mouse button in an `Input` alike, as `shortcutIn`
+  reads a chord: `sdlAppShouldQuit = pressedOnceIn KeyEscape`.
 - Shortcuts: `shortcut (ctrl <> key 's')` is `True` once on the frame the
-  chord is pressed, unless a modal, `disabledWhen` or the focused widget
-  takes it. The new module `NanoUI.Shortcut` has chords: a `Shortcut` is
+  chord is pressed, and again on each auto-repeat, unless a modal,
+  `disabledWhen` or the focused widget takes it; `shortcutOnce` is not
+  `True` on the repeats, for a chord that toggles. The key listeners hear
+  only the keys the focused widget leaves too, as iced's `keyboard::listen`
+  hears what no widget captured: `keyPressed KeyDelete` is `False` while a
+  focused field deletes with it. A focused control takes the keys it acts
+  on alone or with Shift, so a chord of them is a shortcut's: a button or
+  a checkbox Enter and Space, and a slider, select, radio group, tree or
+  pane grid the arrows, Home, End and the paging keys as well.
+  `widgetKeys` on a custom widget says which it takes (`KeyClaim`): those
+  of a control that navigates by default, a button's, a multi-line text
+  field's, or every key, for a terminal or an editor with chords of its
+  own. The new module `NanoUI.Shortcut` has chords: a `Shortcut` is
   modifiers (`ctrl`, `shift`, `alt`, `super`, `cmdOrCtrl`) and a `key` put
   together with `<>`, with `shortcutLabel` and `shortcutIn`, and
   `parseShortcut` reads one written as xmonad's EZConfig writes it (`C-s`,
   `M-S-p`, `A-<Enter>`, `<F5>`). `Modifiers` is a `Monoid`.
 - Input-method composition (`inputComposition`): the focused text field or
   text area draws it at its caret until it is committed, and the frame drops
-  the keys meanwhile, so no shortcut fires. `textInputArea` in
-  `NanoUI.Testing` says where the input method's candidate window goes.
+  the keys meanwhile, so no shortcut fires. `useInputMethod`, iced's
+  `request_input_method`, lets a widget of the app's own do the same: called
+  every frame from the widget with the keyboard, with its caret and an
+  `InputPurpose` (`InputNormal`, `InputSecure`, `InputNumeric`), it answers
+  the composition to draw; the text fields ask this way too, a password
+  field for `InputSecure` and a numeric one for `InputNumeric`.
+  `textInputArea` says whether a widget takes text, where the input
+  method's candidate window goes and what the widget takes;
+  `NanoUI.Backend` exports it with `TextInputArea` and `getFocusId`.
 - Every mouse button: `MouseButton` has `MouseMiddle`, the side buttons
   `MouseBack` and `MouseForward`, and `MouseOther n` for any other, which
   the SDL and RGFW backends report by number (`mouseButtonNumber`). Each is
@@ -432,7 +468,9 @@
   hook. `askWake` gives the view an action any thread may call to run it
   again.
 - `NanoUI.Backend` has what a backend needs for the above: `applyKey`,
-  `keyRepeats`, `keypadKey`, `modifiersFromBits`, `noModifiers`,
+  `releaseAllKeys`, which the SDL and RGFW backends call as their window
+  loses the keyboard, so no key stays held, `keypadKey`, `modifiersFromBits`,
+  `noModifiers`,
   `applyComposition`, `cursorFallback`, `setExplainLayout`,
   `setSystemAppearance`, `WindowHost` with `defaultWindowHost` (every field
   a no-op, to build a host from by record update), `installWindowHost`,
@@ -442,7 +480,8 @@
   `setWakeLoop` and `cancelTasks`. `runSessionLoop` ends the session when a
   view calls `quitUi`, and hands a close request to the view when the
   window's settings say to.
-- `NanoUI.Testing.Harness` has `chordInp`, `keyUpInp`, `clickPairWith`,
+- `NanoUI.Testing.Harness` has `chordInp`, `keyUpInp`, `keyRepeatInp`,
+  `clickPairWith`,
   `pressWith` and `releaseWith` for any mouse button, and `newWakeSignal`
   for a test to wait on a job's wake.
 - `uiFontSize`, the size text takes when its layout sets none, and
@@ -541,10 +580,12 @@
 - `NanoUI.Monad` and `NanoUI.Input` keep what a view or custom widget uses.
   `runUi`, `runNanoUI`, `askContext`, `withContext`, `withIdFrame`,
   `burstNextIds`, `FrameMsg`, `decodeMessages`, `reduceMessages`,
-  `reduceUpdates`, `stripInteractionInput`, `withoutPointer`,
-  `isHardQuitInput` and `splitFrame` moved to `NanoUI.Internal.Monad` and
+  `reduceUpdates`, `stripInteractionInput`, `withoutPointer` and
+  `isHardQuitInput` moved to `NanoUI.Internal.Monad` and
   `NanoUI.Internal.Input`; `NanoUI.Backend` and `NanoUI.Testing` still export
-  the ones they did.
+  the ones they did. `splitFrame` gave way to `NanoUI.Internal.Input`'s
+  `takeFrame`, which folds a batch of events into a frame as far as the
+  frame may take them.
 - `NanoUI.Widgets.Custom`, `.TextArea`, `.TextDocument`, `.TextEditor` and
   `.TextField` no longer export the helpers the frame uses
   (`mkCustomDrawContext`, `loadTextAreaState`, `loadTextAreaStateWithBuffer`,
@@ -717,13 +758,30 @@
   nothing drawn over it, so it can say why it is off.
 - `menuItemShortcut` is also `True` when its chord is pressed while its menu
   is open, and shows the chord as its `shortcutLabel`.
+- A frame keeps the order of what was typed. `runSessionLoop` ends a frame
+  after a command key (a named key but Space, or a chord, as
+  `NanoUI.Internal.Input.isCommandKey` says) when text, another key or a
+  change of modifiers comes next, so a frame's text comes before its one
+  command key and its modifiers are those the key went down with: "ls" and
+  Enter typed within one frame reach a text field or a terminal as "ls" and
+  then Enter, and Ctrl+S released within the frame still fires its
+  shortcut. A burst of typing takes a frame more for each such key, and
+  steady typing or a key's auto-repeats none. The Ctrl+C quit reads the
+  frame, with no checks of its own for a Ctrl let go later.
 - A key chord is a key, not typed text: Ctrl+C is `KeyChar 'c'` with `modCtrl`
   in `inputKeys` and nothing in `inputChars`, so look for it with `shortcut`
-  or in `inputKeys`. Text fields take Command as well as Ctrl on macOS.
+  or in `inputKeys`. Text fields edit with iced's bindings: the command key
+  (Command on macOS, else Ctrl) with A, C, X, V, Z and Y selects, copies,
+  cuts, pastes, undoes and redoes, and the word key (Option on macOS, else
+  Ctrl; no longer Alt as well) moves and deletes by word. On macOS, Command
+  moves and deletes to a line's ends, and Ctrl alone moves and deletes as in
+  Emacs (A, E, B, F, H, D, K and U); elsewhere Ctrl+Shift with Backspace or
+  Delete deletes to a line's ends, and Ctrl with K, U or E does nothing in a
+  text area, where it deleted or moved as on macOS.
 - `Key` is `Ord` and no longer `Enum`, and `Modifiers` is `Ord`.
 - `Input` holds the mouse buttons as sets, `inputButtonsHeld`,
   `inputButtonsPressed` and `inputButtonsReleased` (`MouseButtons`, read with
-  `buttonHeld`, `buttonPressed` and `buttonReleased`), in place of a field
+  `heldIn`, `pressedIn` and `releasedIn`), in place of a field
   for each button and edge; an `Input` is 128 bytes rather than 200. Fold
   events in with `applyMouseButton`. `inputMouseDown`, `inputMousePressed`,
   `inputMouseReleased` and their `Right` forms remain as deprecated functions.

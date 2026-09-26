@@ -85,8 +85,9 @@ backends' reducer runners fold them into the model.
   (`wrap`, `lineAlign`), pinned children (`pinAt`) and aspect ratios
   (`aspect`). Layout options are
   `Layout -> Layout` modifiers, as in `columnWith (gap 8 . padAll 12)`.
-- Keyboard focus and navigation for every control, and shortcuts, as in
-  `shortcut (ctrl <> key 's')`.
+- Keyboard focus and navigation for every control, focus from code, and
+  shortcuts, as in `shortcut (ctrl <> key 's')`. Input methods compose in
+  the text fields, and in a widget of your own with `useInputMethod`.
 - Background work with `useTaskStatus` and `useTask`, streams with
   `useStream`, and `askWake` for any thread to wake the loop.
 - Themes, including ones built from Base16 schemes, changed for part of a view

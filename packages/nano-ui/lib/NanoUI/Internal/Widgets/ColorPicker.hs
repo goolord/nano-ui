@@ -27,7 +27,7 @@ import NanoUI.Internal.Context
 import NanoUI.Internal.Draw
 import NanoUI.Internal.Font
 import NanoUI.Internal.Id (WidgetId (..), mix64)
-import NanoUI.Internal.Input (Input (..), Key (..), inputKeys, inputKeysElem, inputModifiers, modShift)
+import NanoUI.Internal.Input (Input (..), Key (..), Pressable (..), inputModifiers, modShift, shiftAtMost)
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Monad (Ui, (<&&>), askContext, askInput, freshWidget, nextId, uiIO, withKey)
 import NanoUI.Internal.Store (fieldFloat, fieldInt, fieldPoint, findSlot, insertSlot, lookupSlot, slotWriteOr)
@@ -458,8 +458,8 @@ applyColorPickerKeys :: Context -> WidgetId -> Color -> Input -> Bool -> Bool ->
 applyColorPickerKeys ctx wid fallback inp svFocus hueFocus = do
   store <- getStore ctx
   let
-    keys = inputKeys inp
-    down k = inputKeysElem k keys
+    -- With Ctrl, Alt or Super held, an arrow is a chord, for a shortcut.
+    down k = shiftAtMost (inputModifiers inp) && pressedIn k inp
     step = if modShift (inputModifiers inp) then 10 else 1
     along neg pos = (if down pos then 1 else 0) - (if down neg then 1 else 0) :: Float
     dx = along KeyLeft KeyRight

@@ -20,7 +20,7 @@ import NanoUI.Backend (clearEphemeral)
 import NanoUI.Backend.Sdl
 import NanoUI.Sdl.Internal.Input (SdlEvent (..), applyEvent, newTextInputSync, pollEvents, syncTextInput)
 import NanoUI.Testing (TextInputArea (..), collectTextSpans, textInputArea)
-import NanoUI.Testing.Harness (hasText, held, tabInp)
+import NanoUI.Testing.Harness (hasText, held, pressAt, releaseAt, tabInp)
 import DemoApp (withHiddenWindow)
 import SDL3.Sys.Bindgen.Events (SDL_Event, SDL_EventType (..), SDL_TextEditingEvent (..), SDL_TextInputEvent (..))
 import SDL3.Sys.Bindgen.Events qualified as Events
@@ -51,22 +51,25 @@ selftest =
     (evs, composing) <- editing "かな" 2 0 (step base)
     check (EvEditing "かな" 2 0 `elem` evs && inputComposition composing == Just (Composition "かな" 2 0))
       ("composition not applied: " <> show evs)
-    -- The frames drawn told SDL of the focused field: nothing restarts, and it shows.
+    -- The frames drawn told SDL of the focused field: text input runs, nothing
+    -- restarts, and the composition shows.
     restartedInField <- sync (sdlTextInput env) composing
     drawFrame composing
     drawn <- hasText "abかな" <$> collectTextSpans ctx
     value <- readIORef ref
-    check (not restartedInField && drawn && value == "ab") ("in the field: " <> show (restartedInField, drawn, value))
-    -- A sync that heard of no focus restarts text input, which must be on again.
-    restarted <- newTextInputSync >>= (`sync` composing)
+    running <- textInputActive (sdlWindow env)
+    check (running && not restartedInField && drawn && value == "ab") ("in the field: " <> show (running, restartedInField, drawn, value))
+    -- A sync that has told SDL nothing starts text input for the field.
+    started <- newTextInputSync >>= (`sync` composing)
     active <- textInputActive (sdlWindow env)
-    check (restarted && active) "text input not restarted, or left off, when the focus moved while composing"
+    check (started && active) "text input not started for the focused field"
     -- The caret's area reaches SDL, in window coordinates.
     area <- textInputArea ctx
     native <- alloca $ \cursorP -> with (SDL_Rect 0 0 0 0) $ \rectP ->
       getTextInputArea (sdlWindow env) rectP cursorP >> (,) <$> peek rectP <*> peek cursorP
     let at v = round (v * zoom)
-        want (TextInputArea (Rect x y w h) cursor) = (SDL_Rect (at x) (at y) (max 1 (at w)) (max 1 (at h)), at cursor)
+        want TextInputArea {textInputAreaRect = Rect x y w h, textInputAreaCursor = cursor} =
+          (SDL_Rect (at x) (at y) (max 1 (at w)) (max 1 (at h)), at cursor)
     check (fmap want area == Just native) ("text input area " <> show native <> ", wanted " <> show (want <$> area))
     -- Committed text arrives as typing, and the composition ends.
     (_, committed) <- typed "仮名" (editing "" 0 0 (step composing))
@@ -77,6 +80,10 @@ selftest =
     (_, again) <- editing "か" 1 0 (step committed)
     (_, blurred) <- focusLost (step again)
     check (isJust (inputComposition again) && isNothing (inputComposition blurred)) "losing the window's focus did not end the composition"
+    -- With no widget taking text, text input stops.
+    mapM_ drawFrame [pressAt blurred (V2 470 190), releaseAt (pressAt blurred (V2 470 190)), clearEphemeral blurred]
+    stopped <- not <$> textInputActive (sdlWindow env)
+    check stopped "text input left running with no widget taking text"
   where
     editing txt start len = queue txt $ \p c ->
       poke p.edit (SDL_TextEditingEvent Events.SDL_EVENT_TEXT_EDITING 0 0 0 c (fromIntegral (start :: Int)) (fromIntegral (len :: Int)))

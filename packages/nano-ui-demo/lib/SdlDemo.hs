@@ -1078,7 +1078,7 @@ debugBody text =
 demoOptions :: SdlOptions
 demoOptions =
   defaultSdlOptions
-    { sdlAppShouldQuit = \inp -> inputKeysElem KeyEscape (inputKeys inp)
+    { sdlAppShouldQuit = pressedOnceIn KeyEscape
     , sdlAppTheme = Just defaultTheme
     , sdlWindowSettings = defaultWindowSettings {wsSize = Size 1280 800, wsMinSize = Just (Size 480 360)}
     }

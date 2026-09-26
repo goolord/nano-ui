@@ -102,7 +102,7 @@ frame r f = do
   unless ok $ fail "record: could not read back the frame"
   writeIORef (recLast r) t
   writeIORef (recFrame r) (n + 1)
-  modifyIORef' (recLog r) ((inputMousePos inp, buttonHeld MouseLeft inp, t - recStart r) :)
+  modifyIORef' (recLog r) ((inputMousePos inp, heldIn MouseLeft inp, t - recStart r) :)
 
 frames :: Double -> Int
 frames secs = max 1 (round (secs * fps))

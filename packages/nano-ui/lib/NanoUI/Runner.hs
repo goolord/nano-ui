@@ -16,7 +16,6 @@ module NanoUI.Runner
 import Control.Concurrent (threadDelay)
 import Control.Exception (finally, mask)
 import Control.Monad (forM_, unless, when)
-import Data.List (scanl')
 import Data.Maybe (isJust)
 import Numeric (showFFloat)
 import System.Environment (lookupEnv)
@@ -125,7 +124,9 @@ data SessionDriver ev = SessionDriver
   , sdApplyEvent    :: Input -> ev -> Input
     -- ^ Fold an event into the 'Input' state.
   , sdIsButtonEdge  :: ev -> Bool
-    -- ^ Predicate identifying click/press boundaries where the event stream should be split.
+    -- ^ Predicate identifying click/press boundaries where the event stream
+    -- should be split. The loop also splits it after a command key where
+    -- order would be lost ('NanoUI.Internal.Input.takeFrame').
   , sdIsSessionQuit :: ev -> Bool
     -- ^ Predicate for window close requests. One ends the session, or, for a
     -- window whose settings say not to ('NanoUI.wsExitOnCloseRequest'), is
@@ -276,23 +277,19 @@ runSessionLoop drv ctx0 inp0 = do
                 let hudDue = timeout == debugHudTimeout && debugActive && null events
                 pure (events, dueNow || wakeDue || hudDue)
 
-        let (group, rest) = splitFrame (sdIsButtonEdge drv) pending
         now <- getMonotonicTime
         let !dt = min maxFrameDt (realToFrac (now - lastT))
-            steps = scanl' (sdApplyEvent drv) (clearEphemeral inp {inputDeltaTime = dt}) group
-            -- Ctrl+C quits as the batch leaves it, and as each event pressed
-            -- or typed it: a later event in a busy batch may have released Ctrl.
-            quitChecks =
-              last steps : zipWith (\s -> sdApplyEvent drv s {inputChars = mempty, inputKeys = mempty}) steps group
+            (frameInp, group, rest) =
+              takeFrame (sdApplyEvent drv) (sdIsButtonEdge drv) (clearEphemeral inp {inputDeltaTime = dt}) pending
         -- Hard quit is ignored while a text editor is active.
         hardQuit <-
-          if any isHardQuitInput quitChecks then not <$> textInputEditActive ctx else pure False
+          if isHardQuitInput frameInp then not <$> textInputEditActive ctx else pure False
         -- A close request ends the session, or asks the view.
         let closing = any (sdIsSessionQuit drv) group
         closeNow <- if closing && not hardQuit then requestWindowClose ctx else pure False
         unless (hardQuit || closeNow) $ do
           noteDebugLoop (sdDebug drv) dt
-          inpStamped <- stampClicks clickTracker (last steps)
+          inpStamped <- stampClicks clickTracker frameInp
           (ctx', inpSynced) <- sdSyncDisplay drv ctx inpStamped
           shouldDraw <- if pendingDirty
             then pure True

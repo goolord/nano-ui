@@ -49,7 +49,8 @@ counter = do
   viewport and offset it needs to pick its rows, and `sensor` says when a
   widget scrolls into view.
 - Keyboard focus and navigation for every control, focus from code, and
-  shortcuts, as in `shortcut (ctrl <> key 's')`.
+  shortcuts, as in `shortcut (ctrl <> key 's')`. Input methods compose in
+  the text fields, and in a widget of your own with `useInputMethod`.
 - Every mouse button, held and clicked per widget (`respClickedWith
   MouseMiddle`), cursor shapes, and tooltips with a hover delay.
 - Shaped text in the SDL backend, with fallback fonts for other scripts and

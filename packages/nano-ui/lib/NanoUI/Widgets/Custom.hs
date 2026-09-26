@@ -16,6 +16,7 @@
 module NanoUI.Widgets.Custom
   ( -- * Custom widgets
     CustomWidgetSpec (..)
+  , KeyClaim (..)
   , defaultCustomWidgetSpec
   , customWidget
   , customWidgetWithId
@@ -142,6 +143,12 @@ data CustomWidgetSpec a = CustomWidgetSpec
     -- >   if px > x + w - 6 then UiCursorEwResize else UiCursorDefault
   , widgetFocusable  :: !Bool
     -- ^ Whether this widget accepts tab/keyboard focus.
+  , widgetKeys       :: !KeyClaim
+    -- ^ The keys the widget acts on itself while it has the keyboard, which
+    -- shortcuts and 'NanoUI.keyPressed' then leave to it: by default
+    -- ('KeysNavigate') Enter, Space and the arrows, each alone or with
+    -- Shift. A terminal or an editor with chords of its own takes
+    -- 'KeysAll'.
   , widgetDamageSlop :: !Float
     -- ^ Padding added to dirty rectangles (for shadows, glow, or drag handles).
   , widgetTrackPointer :: !Bool
@@ -162,6 +169,7 @@ defaultCustomWidgetSpec = CustomWidgetSpec
   , widgetContent    = 0
   , widgetCursor     = Nothing
   , widgetFocusable  = False
+  , widgetKeys       = KeysNavigate
   , widgetDamageSlop = defaultDamageSlop
   , widgetTrackPointer = False
   , widgetInteract   = \resp _ _ -> (resp, ())
@@ -217,7 +225,7 @@ customWidgetWithId wid spec = do
         (widgetCursor spec)
         (widgetDamageSlop spec)
         (widgetTrackPointer spec)
-  resp0 <- addWidget wid NodeDrawing T.empty 0 (widgetLayout spec)
+  resp0 <- addWidgetStyled wid NodeDrawing T.empty 0 (widgetLayout spec) (fromEnum (widgetKeys spec))
   cdc <- uiIO (customDrawContext ctx (ctxFontMetrics ctx) wid (respHovered resp0) (respPressed resp0))
   pure (widgetInteract spec resp0 cdc inp)
 
@@ -442,6 +450,7 @@ toggleSwitchWith' f on = do
       (fixedSizeSpec f pillW pillH)
         { widgetCursor = Just (\_ _ _ -> UiCursorPointer)
         , widgetFocusable = True
+        , widgetKeys = KeysActivate
         , widgetContent = contentKey [if current then 1 else 0]
         , widgetDraw = \cdc rect@(Rect x y w h) -> runCanvasFor cdc $ do
             let

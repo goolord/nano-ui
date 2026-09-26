@@ -18,8 +18,7 @@ import NanoUI
   , NanoUI
   , button
   , column
-  , inputKeys
-  , inputKeysElem
+  , Pressable (..)
   , uiIO
   , whenM
   )
@@ -85,7 +84,7 @@ nanoFormSubmit prefix submitLabel form = do
     btnClicked <- column $ do
       renderResult submittedBefore view' res
       button submitLabel
-    let enterPressed = inputKeysElem KeyEnter (inputKeys inp)
+    let enterPressed = pressedOnceIn KeyEnter inp
         clickedSubmit = btnClicked || enterPressed
     when clickedSubmit $
       uiIO (markFormSubmitted ctx prefix True)

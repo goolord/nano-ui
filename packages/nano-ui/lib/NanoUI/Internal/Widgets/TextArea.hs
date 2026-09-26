@@ -230,6 +230,7 @@ textAreaCore f wid value = do
       -- gets its respChanged pulse, then cleared in the state write below.
       menuPulse = memberSlot fieldInt changedSlotKey store
   isFocus <- keyboardFocused wid
+  when isFocus $ uiIO (requestInputMethod ctx wid Nothing InputNormal)
   (newDoc, stateChanged) <-
     if isFocus
       then do
