@@ -263,6 +263,8 @@ runTransformOpsTest _ failed = do
   let (blue, green, white) = (colorRGBA 0 0 255 255, colorRGBA 0 255 0 255, colorRGBA 255 255 255 255)
       under t block = opsAt 1 (withTransform t block)
       r0 = Rect 10 20 10 20
+      -- The only op, if it is a turned image: its centre, size, angle and UVs.
+      turned block = [([V2 (x + w / 2) (y + h / 2), V2 w h], angle, (u0, v0, u1, v1)) | [DrawImageRotated (Rect x y w h) angle _ u0 v0 u1 v1 _] <- [block]]
   -- A flip keeps a rect's size positive, and turns gradients and images over.
   assertEq failed [] . map fst . filter (not . snd) . zip [0 :: Int ..] $
     [ [FillRect (Rect 15 25 10 20) red] == under (P.translate 5 5) (drawRect r0 red)
@@ -291,6 +293,15 @@ runTransformOpsTest _ failed = do
   single failed (fills (under (P.scale 2 1) (drawCircle (V2 10 10) 5 red))) $ assert failed . all (onEllipse (V2 20 10) 10 5) . fst
   single failed (strokes (under (P.scale 1 2) (drawStrokeCircle (V2 0 0) 10 2 red))) $ \(pts, closed) ->
     assert failed (closed && all (onEllipse (V2 0 0) 9 18) pts)
+  -- A turning transform turns an image, a turned one further, and a flip turns it over.
+  forM_
+    [ (under (P.translate 30 0 <> P.rotate (pi / 2)) (drawImage (Rect 0 0 20 10) (ImageId 7) red), [V2 25 10, V2 20 10], pi / 2, (0, 0, 1, 1))
+    , (under (P.rotate 0.3 <> P.scale 2 2) (drawImageRotated (Rect 0 0 10 10) 0.2 (ImageId 7) red), [V2 (10 * cos 0.3 - 10 * sin 0.3) (10 * sin 0.3 + 10 * cos 0.3), V2 20 20], 0.5, (0, 0, 1, 1))
+    , (under (P.scale (-1) 1) (drawImageRotated (Rect 0 0 10 10) 0.2 (ImageId 7) red), [V2 (-5) 5, V2 10 10], pi - 0.2, (0, 1, 1, 0))
+    ]
+    $ \(block, want, wantAngle, uvs) -> single failed (turned block) $ \(got, angle, uv) -> do
+      assertNear failed 1e-3 want got
+      assert failed (abs (angle - wantAngle) < 1e-5 && uv == uvs)
 
 -- | Degenerate paths draw nothing or only their sound parts, never NaN, infinite or unbounded.
 runDegenerateTest :: Context -> IORef Int -> IO ()

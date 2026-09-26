@@ -171,6 +171,7 @@ library
         NanoUI.Internal.Widgets.Display
         NanoUI.Internal.Widgets.Select
         NanoUI.Internal.Widgets.Slider
+        NanoUI.Internal.Widgets.Image
     build-depends:
         base >=4.20 && <4.23,
         bytestring ^>=0.12,
@@ -250,6 +251,7 @@ test-suite nano-ui-test
         Cases.WidgetIdIndex
         Cases.Paths
         Cases.LayoutFlow
+        Cases.Images
     build-depends:
         bytestring,
         containers,

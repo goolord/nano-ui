@@ -198,6 +198,24 @@ Backends receive borrowed `DrawData` buffers. Draw or copy them before the
 next frame reuses the arena. Native font and renderer handles must not outlive
 their backend session.
 
+## Images
+
+Register an image's RGBA pixels once with `registerImageRgba`, under an id
+from `freshImageId`. `image` stretches it over its rect. `imageConfigured`
+takes an `ImageConfig`: a `ContentFit` like CSS's `object-fit`, an alignment,
+an opacity, and a rotation (`RotateSolid` fits the turned image in its rect,
+`RotateFloating` keeps the unturned layout and crops). An axis the layout
+leaves unsized takes the image's own size. A canvas draws images with
+`drawImage`, `drawImageUV` and `drawImageRotated`.
+
+```haskell
+thumbnail :: ImageId -> NanoUI ()
+thumbnail photo =
+  imageConfigured
+    defaultImageConfig {icLayout = fixedWH 120 90 defaultLayout, icFit = FitCover}
+    photo
+```
+
 ## Writing a backend
 
 `NanoUI` is the view API. What a backend is written against is in

@@ -209,10 +209,14 @@ paintContainerNode env@PaintEnv {peContext = ctx} idx rect = do
     cdc <- mkCustomDrawContext ctx (peFontMetrics env) wid
     emitDrawingOps env rect (build cdc rect)
 
--- | A drawing's ops clipped to its rect, in the env's default font.
+-- | A drawing's ops clipped to its rect, in the env's default font. An image
+-- op naming a registered 'ImageId' draws that image from the atlas.
 emitDrawingOps :: PaintEnv -> Rect -> SmallArray DrawOp -> IO ()
 emitDrawingOps env@PaintEnv {peDrawArena = da} rect ops =
-  withClip da rect (emitDrawOps da (peFontMetrics env) (resolveTextFont (peContext env)) ops)
+  withClip da rect (emitDrawOps da (peFontMetrics env) (resolveTextFont ctx) imageUv ops)
+  where
+    ctx = peContext env
+    imageUv tid = fmap (atlasTextureId,) <$> lookupImageUv ctx (ImageId tid)
 
 paintPanelNode :: PaintEnv -> NodeIdx -> Rect -> IO ()
 paintPanelNode env@PaintEnv {peDrawArena = da} idx rect = do

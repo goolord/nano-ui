@@ -27,8 +27,9 @@
 --                   boundedRadio, colorPicker, textInput, textArea,
 --                   numericInput,
 --                   button + tooltip, contextMenu, file dialogs, dropZone
---   * Graphics:     image gallery, an animated GIF, and a progressBar driven
---                   by a pulsing value
+--   * Graphics:     image gallery, content fits, a turned and faded image,
+--                   an animated GIF, and a progressBar driven by a pulsing
+--                   value
 --   * Typography:   label / labelWith + the @font*@ style combinators
 --   * List:         tree, searchInput
 --   * Table:        tableWith (needs useTableSort)
@@ -97,6 +98,7 @@ import DemoApp (registerRgba, useFileDialog)
 import DemoData
   ( DemoPerson (..)
   , colPeople
+  , demoLandscape
   , demoPeople
   , demoSwatches
   , demoTree
@@ -260,6 +262,9 @@ demoUi = do
   (secret, setSecret) <- useText "" -- password field with a show/hide control
   (secretShown, toggleSecretShown) <- useToggle False
   (swatches, setSwatches) <- useState (Nothing :: Maybe [(ImageId, T.Text)]) -- generated images, registered on first show
+  (landscape, setLandscape) <- useState (Nothing :: Maybe ImageId) -- wide generated image, registered on first show
+  (imageTurn, setImageTurn) <- useFloat 30 -- imageConfigured rotation, in degrees
+  (imageFade, setImageFade) <- useFloat 1 -- imageConfigured opacity
   (folderDlg, setFolderDlg) <- useState (Nothing :: Maybe FileDialogId)
   (openPath, setOpenPath) <- useText ""
   (savePath, setSavePath) <- useText ""
@@ -478,6 +483,32 @@ demoUi = do
                           panelWith (alignEnd . alignTop . padXY 4 1) $
                             labelWith (tight . fontMono . fontSize 11) "32px"
                         muted caption
+              separator
+              -- A wide image in each content fit, turned and faded. The scope
+              -- keeps the widgets after it on their ids once the image is
+              -- registered.
+              scope $ case landscape of
+                Nothing -> mapM_ (setLandscape . Just) =<< registerRgba 96 48 demoLandscape
+                Just iid -> columnWith (tight . gap gapText . fillW) $ do
+                  rowWith (tight . gap gapInline . fillW) $
+                    for_ [minBound .. maxBound] $ \fit ->
+                      columnWith (tight . gap gapMicro) $ do
+                        imageConfigured defaultImageConfig {icLayout = fixedWH 72 72 defaultLayout, icFit = fit} iid
+                        muted (T.drop 3 (T.pack (show fit)))
+                  rowWith (tight . gap gapInline . alignMid . fillW) $ do
+                    imageConfigured
+                      defaultImageConfig
+                        { icLayout = fixedWH 96 96 defaultLayout
+                        , icFit = FitContain
+                        , icRotation = RotateSolid (imageTurn * pi / 180)
+                        , icOpacity = imageFade
+                        }
+                      iid
+                    columnWith (tight . gap gapText . fillW) $ do
+                      kv "Turn" (T.pack (printf "%.0f deg" imageTurn))
+                      setImageTurn =<< slider 0 360 imageTurn
+                      kv "Opacity" (T.pack (printf "%.2f" imageFade))
+                      setImageFade =<< slider 0 1 imageFade
               separator
               -- SVG icons read from disk the first time this tab shows. A
               -- one-colour icon takes the text colour (or a fontColor), and

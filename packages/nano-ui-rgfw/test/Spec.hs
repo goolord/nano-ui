@@ -2,15 +2,16 @@ module Main (main) where
 
 import Control.Exception (IOException, bracket, try)
 import Control.Monad (forM_)
+import Data.ByteString qualified as BS
 import Data.Either (isLeft)
 import Data.Vector.Unboxed qualified as U
 import Data.Word (Word32)
 import Foreign.Marshal.Alloc (allocaBytes, callocBytes, free)
 import Foreign.Storable (peekByteOff, peekElemOff)
 import NanoUI
-  ( DrawOp (..), NanoUI, Rect (..), Style (..), Theme (..)
-  , V2 (..), box, button, checkbox, colorRGBA, column, drawing
-  , fixedWH, grow, label, tomorrowNightMinDarkTheme, window
+  ( DrawOp (..), ImageConfig (..), ImageId (..), NanoUI, Rect (..), Rotation (..), Style (..), Theme (..)
+  , V2 (..), box, button, checkbox, colorRGBA, column, defaultImageConfig, defaultLayout, drawing
+  , fixedWH, grow, imageConfigured', label, respRect, tomorrowNightMinDarkTheme, window
   )
 import NanoUI.Input (Input (..), Modifiers (..), emptyInput)
 import NanoUI.Internal.Context (Context (..), setDrawSquareGeometry)
@@ -21,7 +22,7 @@ import NanoUI.Rgfw.Internal.Gl (GlyphAtlas (..), atlasCell, bakeGlyphAtlas, glyp
 import NanoUI.Rgfw.Internal.Session (applyRgfwEvent, decodeRgfwEvents)
 import NanoUI.Rgfw.Render (renderArena)
 import NanoUI.Rgfw.Surface (clearScreen, fillRect, freeRgfwSurface, newOffscreenRgfwSurface, packColor, sBuffer, sHeight, sWidth)
-import NanoUI.Testing (DrawCmd (..), DrawData (..), collectRasterSpans, newPixelContext, runFrame)
+import NanoUI.Testing (DrawCmd (..), DrawData (..), collectRasterSpans, newPixelContext, registerImage, runFrame)
 import NanoUI.Testing.Assert (run2Frames, withInput)
 import NanoUI.Testing.Harness (DemoSpan, withInputOff)
 import RGFW (Event (..))
@@ -253,6 +254,24 @@ testRgfwScroll :: IO ()
 testRgfwScroll =
   assert "RGFW scroll: a batch of wheel events accumulates" (inputScroll (applied [EventMouseScroll 0 1, EventMouseScroll 0.5 2]) == V2 0.5 3)
 
+-- | A turned image reaches the rasteriser as a turned quad, clipped to its
+-- widget: turned an eighth, a 40 by 20 image covers its rect's top-left and
+-- bottom-right corners and leaves the other two, which unturned it covers.
+testTurnedImageRaster :: IO ()
+testTurnedImageRaster = do
+  let probe angle = do
+        ctx <- newRgfwContext tomorrowNightMinDarkTheme
+        _ <- registerImage ctx (ImageId 1) 8 4 (BS.replicate (8 * 4 * 4) 255)
+        let cfg = defaultImageConfig {icLayout = fixedWH 40 20 defaultLayout, icRotation = RotateFloating angle}
+        raster ctx 60 40 0 (column (imageConfigured' cfg (ImageId 1))) $ \resp _ px -> do
+          let Rect x y w h = respRect resp
+              white (u, v) = (== packColor (colorRGBA 255 255 255 255)) <$> px (round u) (round v)
+          mapM white [(x + w / 2, y + h / 2), (x + 1, y + 1), (x + w - 2, y + 1), (x + 1, y + h - 2), (x + w - 2, y + h - 2)]
+  turned <- probe (pi / 4)
+  assert "Turned image covers its centre and the corners its long axis reaches" (turned == [True, True, False, False, True])
+  flat <- probe 0
+  assert "Unturned image covers its whole rect" (and flat)
+
 main :: IO ()
 main = do
   putStrLn "=== Running nano-ui-rgfw Unit Tests ==="
@@ -267,4 +286,5 @@ main = do
   testSquareThemedRaster
   testGlyphAtlas
   testSpanQuads
+  testTurnedImageRaster
   putStrLn "=== All tests passed successfully! ==="

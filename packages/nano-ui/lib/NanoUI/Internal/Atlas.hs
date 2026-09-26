@@ -6,6 +6,7 @@ module NanoUI.Internal.Atlas
   , registerImage
   , freshImageId
   , lookupImageUv
+  , lookupImageSize
   , atlasSnapshot
   , AtlasUpload (..)
   , atlasChanges
@@ -127,6 +128,11 @@ lookupImageUv (ImageAtlas ref) (ImageId tid) = do
       , fromIntegral (x + w) / fw
       , fromIntegral (y + h) / fh
       )
+
+-- | The width and height in pixels of the image registered under an id.
+lookupImageSize :: ImageAtlas -> ImageId -> IO (Maybe (Int, Int))
+lookupImageSize (ImageAtlas ref) (ImageId tid) =
+  fmap (\slot -> (slotW slot, slotH slot)) . IM.lookup tid . asSlots <$> readIORef ref
 
 -- | Writes 'asWrites' keeps: enough for a few frames of a few changing
 -- images between two uploads.

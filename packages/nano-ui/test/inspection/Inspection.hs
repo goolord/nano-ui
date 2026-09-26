@@ -9,6 +9,7 @@ module Main
   ( main
   , solidQuadProbe
   , gradientQuadProbe
+  , cornerQuadProbe
   , storeWriteProbe
   , storeWriteByHand
   , storeReadProbe
@@ -76,6 +77,16 @@ inspect $ 'gradientQuadProbe `doesNotUse` 'SIMD.pokeQuadGradientSIMD
 inspect $ 'gradientQuadProbe `doesNotUse` 'SIMD.pokeVertexSIMD
 inspect $ hasNoTypeClasses 'gradientQuadProbe
 inspect $ 'gradientQuadProbe `hasNoType` ''(,,,)
+
+-- The turned image quad's writer, with a corner of its own at each vertex.
+cornerQuadProbe :: Ptr Word8 -> Ptr Word8 -> Int -> Float -> Word32 -> IO ()
+cornerQuadProbe vp ip offset x base =
+  SIMD.pokeQuadCornersSIMD vp offset ip offset x 0 x x 0 x 0 0 0 0 1 1 x x x 1 base
+
+inspect $ 'cornerQuadProbe `doesNotUse` 'SIMD.pokeQuadCornersSIMD
+inspect $ 'cornerQuadProbe `doesNotUse` 'SIMD.pokeVertexSIMD
+inspect $ hasNoTypeClasses 'cornerQuadProbe
+inspect $ 'cornerQuadProbe `hasNoType` ''(,)
 
 -- The store's slot functions take the map they work on as a 'Field'. They
 -- must compile to the record code they stand for, with no 'Field' left, so

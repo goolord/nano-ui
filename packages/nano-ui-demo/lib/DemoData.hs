@@ -11,6 +11,7 @@ module DemoData
   , sineCosineChart
   , weeklyBars
   , demoSwatches
+  , demoLandscape
   ) where
 
 import NanoUI
@@ -106,6 +107,19 @@ demoSwatches =
   ]
   where
     square = opaqueImage 32 32
+
+-- | A 96 by 48 landscape, wide and lopsided enough to tell each content fit
+-- and turn apart: a sky over hills, and a sun to the right.
+demoLandscape :: BS.ByteString
+demoLandscape = opaqueImage 96 48 pixel
+  where
+    pixel x y
+      | sun = (255, 214, 92)
+      | y >= hill = (60 + x, 140 - (y - hill) * 2, 70)
+      | otherwise = (90 + y * 2, 150 + y, 230)
+      where
+        hill = 30 + round (6 * sin (fromIntegral x / 9 :: Double))
+        sun = (x - 70) ^ (2 :: Int) + (y - 14) ^ (2 :: Int) < 64
 
 -- | A @w@ by @h@ opaque RGBA image, rows top to bottom, from each pixel's
 -- red, green and blue.

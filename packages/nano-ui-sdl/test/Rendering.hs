@@ -19,7 +19,8 @@ import Foreign.Storable (peekByteOff, pokeByteOff)
 import GHC.Clock (getMonotonicTimeNSec)
 import GHC.Conc (getAllocationCounter)
 import NanoUI
-  ( Color, ImageId (..), Rect (..), colorRGBA
+  ( Color, ImageConfig (..), ImageId (..), Rect (..), Rotation (..), colorRGBA, column, defaultImageConfig, defaultLayout
+  , fixedWH, imageConfigured', respRect
   )
 import NanoUI.Internal.Context (lookupImageUv)
 import NanoUI.Sdl.Internal.Image (ImageAtlas, destroyImageAtlas, newImageAtlas, syncImageAtlas)
@@ -28,6 +29,8 @@ import NanoUI.Testing
   ( Context, Damage (..), DrawCmd (..), DrawData (..), Layer (..), atlasTextureId, glyphPageTextureId
   , newPixelContext, registerImage
   )
+import NanoUI.Testing.Assert (withInput)
+import NanoUI.Testing.Harness (warmupDraw)
 import SDL3.Sys.Bindgen.Render (SDL_Renderer, SDL_Texture)
 import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
 import SDL3.Sys.Render (renderPresentSafe, renderReadPixels)
@@ -100,7 +103,8 @@ atlasChecks env draw = withGlyphSurface $ \surface ->
 
 -- | Images reach the texture however they changed: written in place, added
 -- beside the others, and added by growing the atlas; each is sampled at its
--- centre through white vertices.
+-- centre through white vertices. Then a view's images: a quarter turn clockwise
+-- puts the left half on top, and a half-opaque image lets half the backdrop through.
 imageChecks :: SdlEnv -> Context -> ImageAtlas -> (DrawData -> IO ()) -> IO ()
 imageChecks env ctx images draw = do
   let register tid w h px = registerImage ctx (ImageId tid) w h px >>= \ok -> unless ok (fail "image registration failed")
@@ -121,6 +125,20 @@ imageChecks env ctx images draw = do
   solid 4 300 2 (0, 255, 255)
   sample "added by growing" 4 (0, 255, 255)
   sample "kept across growth" 1 (0, 0, 255)
+  -- Red on the left half, blue on the right.
+  register 5 8 4 (BS.concat [BS.pack (if x < 4 then [255, 0, 0, 255] else [0, 0, 255, 255]) | _ <- [0 .. 3 :: Int], x <- [0 .. 7 :: Int]])
+  let image h cfg = imageConfigured' cfg {icLayout = fixedWH 80 h defaultLayout} (ImageId 5)
+  ((turned, faded), dd) <-
+    warmupDraw ctx (withInput 400 300) . column $
+      (,) <$> image 80 defaultImageConfig {icRotation = RotateSolid (pi / 2)} <*> image 40 defaultImageConfig {icOpacity = 0.5}
+  syncImageAtlas (sdlRenderer env) images ctx
+  draw dd
+  let at resp dx dy = let Rect x y _ _ = respRect resp in pixel env (floor (x + dx)) (floor (y + dy))
+  top <- at turned 40 15
+  bottom <- at turned 40 65
+  unless (top == (255, 0, 0) && bottom == (0, 0, 255)) (fail ("turned image: " ++ show (top, bottom)))
+  half@(r, g, b) <- at faded 10 20
+  unless (r >= 120 && r <= 136 && g == 0 && b == 0) (fail ("half-opaque image: " ++ show half))
 
 atlasBench :: SdlEnv -> IO ()
 atlasBench env = withGlyphSurface $ \surface ->
@@ -222,4 +240,4 @@ main = do
               unless (inside == (255, 0, 0) && untouched == (0, 0, 0)) $
                 fail (name ++ ": clipped geometry lost or escaped damage: " ++ show (inside, untouched))
           step "glyph upload, padding and reset readback" (atlasChecks env (\tex dd -> drawWithGlyph tex dd DamageFull))
-          step "image atlas upload readback" (imageChecks env ctx images (`draw` DamageFull))
+          step "image atlas upload, and turned and faded image readback" (imageChecks env ctx images (`draw` DamageFull))

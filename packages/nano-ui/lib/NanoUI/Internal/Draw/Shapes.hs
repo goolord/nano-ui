@@ -6,6 +6,7 @@ module NanoUI.Internal.Draw.Shapes
   ( pushRect
   , pushQuadGradient
   , pushImage
+  , pushImageRotated
   , pushRoundedRect
   , pushRoundedRectRaw
   , pushRoundedStroke
@@ -61,6 +62,49 @@ pushImage da rect tex u0 v0 u1 v1 col
       r <- snapRectOrigin da rect
       setTexture da tex
       pushQuad da r u0 v0 u1 v1 col
+
+-- | 'pushImage' turned by @angle@ radians, clockwise on screen, about the
+-- rect's centre. Its corners fall between device pixels, so nothing snaps.
+pushImageRotated :: DrawArena -> Rect -> Float -> Int -> Float -> Float -> Float -> Float -> Color -> IO ()
+pushImageRotated da (Rect x y w h) angle tex0 u0 v0 u1 v1 col = do
+  -- A texture-less quad takes the white pixel, as 'pushRect' does.
+  let (!tex, !tu0, !tv0, !tu1, !tv1)
+        | tex0 <= 0 = (glyphAtlasTextureId, whitePixel, whitePixel, whitePixel, whitePixel)
+        | otherwise = (tex0, u0, v0, u1, v1)
+      !(r, g, b, a) = unpackColorF col
+      !c = cos angle
+      !s = sin angle
+      !cx = x + w / 2
+      !cy = y + h / 2
+      !hw = w / 2
+      !hh = h / 2
+      -- The corner at (dx, dy) from the centre, turned.
+      cornerX dx dy = cx + dx * c - dy * s
+      cornerY dx dy = cy + dx * s + dy * c
+  setTexture da tex
+  withVerts da 4 6 $ \vp ip vOff iOff baseIdxWord ->
+    pokeQuadCornersSIMD
+      vp
+      vOff
+      ip
+      iOff
+      (cornerX (-hw) (-hh))
+      (cornerY (-hw) (-hh))
+      (cornerX hw (-hh))
+      (cornerY hw (-hh))
+      (cornerX hw hh)
+      (cornerY hw hh)
+      (cornerX (-hw) hh)
+      (cornerY (-hw) hh)
+      tu0
+      tv0
+      tu1
+      tv1
+      r
+      g
+      b
+      a
+      baseIdxWord
 
 -- 4 segments per 90° arc, so 'cornerCosSin' has 5 points per quadrant.
 cornerSegments :: Int

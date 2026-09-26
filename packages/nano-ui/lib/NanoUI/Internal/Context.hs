@@ -38,6 +38,7 @@ module NanoUI.Internal.Context
   , registerImage
   , registerImages
   , lookupImageUv
+  , lookupImageSize
   , atlasSnapshot
   , atlasChanges
   , AtlasUpload (..)
@@ -162,6 +163,11 @@ registerImages ctx =
 {-# INLINE lookupImageUv #-}
 lookupImageUv :: Context -> ImageId -> IO (Maybe (Float, Float, Float, Float))
 lookupImageUv ctx = Atlas.lookupImageUv (ctxImageAtlas ctx)
+
+-- | The size in pixels of a registered image, or 'Nothing' for an unknown one.
+{-# INLINE lookupImageSize #-}
+lookupImageSize :: Context -> ImageId -> IO (Maybe (Int, Int))
+lookupImageSize ctx = Atlas.lookupImageSize (ctxImageAtlas ctx)
 
 -- | What a texture of the image atlas uploaded at generation @since@ (0 for
 -- none) needs, with the atlas's size, pixels and generation.

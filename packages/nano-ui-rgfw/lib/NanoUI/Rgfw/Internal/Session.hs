@@ -76,7 +76,7 @@ import NanoUI.Rgfw.Internal.Debug
   , newRgfwDebugSampler
   )
 import NanoUI.Rgfw.Internal.Font.Cozette (getCozetteFont)
-import NanoUI.Rgfw.Internal.Gl (freeGlRenderer, newGlRenderer, renderArenaGl)
+import NanoUI.Rgfw.Internal.Gl (freeGlRenderer, newGlRenderer, renderArenaGl, syncImagesGl)
 import qualified RGFW as R
 
 -- | Window and rendering options for the RGFW runners.
@@ -259,6 +259,7 @@ runRgfwAppReduceCustom opts getThemeAndScale updateModel initialModel view = inB
                   curMonScale <- readIORef monScaleRef
                   (baseSpans, overlaySpans) <- collectRasterSpans c curInp
                   pieces <- if paintFull then pure [] else takeDamagePieces c
+                  syncImagesGl renderer c
                   renderArenaGl renderer font curScale pw ph (themeWindow frameTheme)
                       (if paintFull then DamageFull else damage) pieces drawData baseSpans overlaySpans
                   writeIORef presentedRef $! (pw, ph, curScale)

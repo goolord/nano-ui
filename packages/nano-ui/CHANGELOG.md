@@ -249,6 +249,10 @@
 - `stack` and `stackWith` layer their children in one box. The `wrap`
   modifier flows a row onto new lines, or a column into new columns, `lineGap`
   apart, and `pinAt x y` places a node at an offset over its siblings.
+- `imageConfigured` and `imageConfigured'` take an `ImageConfig`: a
+  `ContentFit` like CSS's `object-fit`, an alignment, an opacity and a
+  `Rotation`. The `DrawImageRotated` op and the canvas's `drawImageRotated`
+  draw an image turned about its centre.
 - `NanoUI.Backend` has what a backend needs for the above:
   `modifiersFromBits`.
 
@@ -509,7 +513,8 @@
 - The node index by widget id is an unboxed table, so indexing and looking
   up a widget allocate nothing, and `nano-ui` no longer depends on
   `hashtables`.
-- `Layout` has new fields, for the additions above.
+- `Layout` and `DrawOp` have new fields or constructors, for the additions
+  above.
 
 ### Fixed
 
@@ -675,6 +680,8 @@
   is.
 - A row or column too short for its children takes the room it lacks from
   the others that shrink once one reaches its minimum, instead of overflowing.
+- A canvas's `drawImage` and `drawImageUV`, and a drawing's `DrawImageRect`,
+  draw the registered image rather than a rectangle in the tint colour.
 - A wrapped label keeps its indent and the runs of spaces inside its lines;
   a line ends at a run of spaces, which it drops. A label wider than its box
   used to have every run of spaces cut to one.

@@ -102,6 +102,7 @@ test-suite nano-ui-rgfw-test
         NanoUI.Rgfw.Surface
     build-depends:
         base >=4.20 && <4.23,
+        bytestring ^>=0.12,
         nano-ui,
         nano-ui-rgfw,
         nano-ui-rgfw-bindings,

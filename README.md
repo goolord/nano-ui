@@ -51,7 +51,8 @@ counter = do
   `richText ["Read ", strong "the guide", " or ", hyperlink "faq" "the FAQ"]`.
 - Text fields with undo and redo, driven by `TextCommand` values that code
   can run too.
-- SVG icons (`loadSvg`, `svgIcon`) and a `spinner`.
+- Images with a content fit, opacity and rotation (`imageConfigured`), SVG
+  icons (`loadSvg`, `svgIcon`) and a `spinner`.
 - Backends block on input when no animation or timed update needs a frame.
   Each frame computes
   its damage against the previous one. `wakeAfter` schedules a frame for a

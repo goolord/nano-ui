@@ -110,7 +110,9 @@ card = panelWith (minW 300 . padXY 12 10 . gap 8 . fillW)
 toolbar :: Ui :> es => Eff es a -> Eff es a
 toolbar = rowWith (tight . gap 8 . alignMid . fillW)
 
--- | An image registered with the host, sized by the layout modifier.
+-- | An image registered with the host, stretched over the rect the layout
+-- modifier gives it. 'NanoUI.imageConfigured' fits, aligns, fades and turns
+-- it instead.
 image :: Ui :> es => (Layout -> Layout) -> ImageId -> Eff es ()
 image f iid = void (image' f iid)
 

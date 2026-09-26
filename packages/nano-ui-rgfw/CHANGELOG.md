@@ -36,6 +36,8 @@
 - A frame with no damage skips the OpenGL render and the buffer swap, since
   it would swap in the picture already on screen. An animation scrolled out
   of view costs its UI pass and nothing on the GPU.
+- Images are drawn, from a texture of the core's image atlas, instead of as
+  a rectangle in their tint colour.
 
 ### Removed
 

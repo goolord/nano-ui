@@ -378,6 +378,23 @@ module NanoUI
   , DrawingBuild
   , shiftDrawOp
 
+    -- * Image fit, opacity and rotation
+
+    -- | 'imageConfigured' draws an image fitted to its rect the way CSS's
+    -- @object-fit@ does ('ContentFit'), aligned where the fit leaves room,
+    -- faded, and turned ('Rotation'). Unlike 'image', an axis its layout
+    -- leaves unsized takes the image's own size:
+    --
+    -- > imageConfigured defaultImageConfig {icFit = FitContain, icLayout = fixedWH 200 120 defaultLayout} photo
+    -- > imageConfigured defaultImageConfig {icRotation = RotateSolid (pi / 2), icOpacity = 0.5} photo
+  , ContentFit (..)
+  , Rotation (..)
+  , rotationAngle
+  , ImageConfig (..)
+  , defaultImageConfig
+  , imageConfigured
+  , imageConfigured'
+
     -- * Custom widgets
 
     -- | "NanoUI.Widgets.Custom" also holds the canvas-drawn widgets: toggle
@@ -717,6 +734,7 @@ import NanoUI.Widgets.Custom
 import NanoUI.Internal.Widgets.Display
 import NanoUI.Internal.Widgets.Drawing
 import NanoUI.Internal.Widgets.Drop
+import NanoUI.Internal.Widgets.Image
 import NanoUI.Internal.Widgets.Layout
 import NanoUI.Internal.Widgets.Menu
 import NanoUI.Internal.Widgets.Node

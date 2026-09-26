@@ -114,7 +114,21 @@ data DrawOp
       {-# UNPACK #-} !Float
       {-# UNPACK #-} !Float
       !Color
-  -- ^ Destination rectangle, texture id, u0/v0/u1/v1, and tint colour.
+  -- ^ Destination rectangle, texture id, u0/v0/u1/v1, and tint colour. In a
+  -- drawing the texture id may be an 'NanoUI.ImageId' registered with the
+  -- context, whose own UVs run from 0 to 1.
+  | DrawImageRotated
+      !Rect
+      {-# UNPACK #-} !Float
+      {-# UNPACK #-} !Int
+      {-# UNPACK #-} !Float
+      {-# UNPACK #-} !Float
+      {-# UNPACK #-} !Float
+      {-# UNPACK #-} !Float
+      !Color
+  -- ^ 'DrawImageRect' turned about the rectangle's centre: the rectangle,
+  -- the angle in radians (clockwise on screen), texture id, u0/v0/u1/v1, and
+  -- tint colour.
   | DrawText
       {-# UNPACK #-} !Float
       {-# UNPACK #-} !Float
@@ -167,6 +181,8 @@ shiftDrawOp dx dy op =
     StrokePolyline pts w closed c -> StrokePolyline (shiftPoints dx dy pts) w closed c
     FillQuadGradient (Rect x y w h) c0 c1 c2 c3 -> FillQuadGradient (Rect (x + dx) (y + dy) w h) c0 c1 c2 c3
     DrawImageRect (Rect x y w h) tex u0 v0 u1 v1 c -> DrawImageRect (Rect (x + dx) (y + dy) w h) tex u0 v0 u1 v1 c
+    DrawImageRotated (Rect x y w h) angle tex u0 v0 u1 v1 c ->
+      DrawImageRotated (Rect (x + dx) (y + dy) w h) angle tex u0 v0 u1 v1 c
     DrawText x y ax ay t c -> DrawText (x + dx) (y + dy) ax ay t c
     DrawTextStyled x y font t c -> DrawTextStyled (x + dx) (y + dy) font t c
 

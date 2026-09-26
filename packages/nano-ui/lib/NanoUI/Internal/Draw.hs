@@ -40,6 +40,7 @@ module NanoUI.Internal.Draw
   , pushRect
   , pushQuadGradient
   , pushImage
+  , pushImageRotated
   , pushRoundedRect
   , pushRoundedRectRaw
   , pushRoundedStroke
@@ -315,9 +316,23 @@ pushPreparedTextStyledQuads da fm weight fstyle deco x y txt col
 
 -- | Emit ops with @fm@ as the default font and @resolve@ giving the font of
 -- styled text, and whether it draws its weight and slant natively.
-emitDrawOps :: DrawArena -> FontMetrics -> (TextFont -> IO (FontMetrics, Bool)) -> SmallArray DrawOp -> IO ()
-emitDrawOps da fm resolve ops = forUpTo_ (sizeofSmallArray ops) (emitOne . indexSmallArray ops)
+-- @imageUv@ gives the texture and UV bounds of an image id an image op
+-- names, or 'Nothing' when the id is a texture of its own.
+emitDrawOps ::
+  DrawArena
+  -> FontMetrics
+  -> (TextFont -> IO (FontMetrics, Bool))
+  -> (Int -> IO (Maybe (Int, (Float, Float, Float, Float))))
+  -> SmallArray DrawOp
+  -> IO ()
+emitDrawOps da fm resolve imageUv ops = forUpTo_ (sizeofSmallArray ops) (emitOne . indexSmallArray ops)
   where
+    -- The op's UVs, which run 0 to 1 over the image, within its bounds.
+    image tex u0 v0 u1 v1 draw =
+      imageUv tex >>= \case
+        Just (atlas, (a0, b0, a1, b1)) ->
+          draw atlas (a0 + u0 * (a1 - a0)) (b0 + v0 * (b1 - b0)) (a0 + u1 * (a1 - a0)) (b0 + v1 * (b1 - b0))
+        Nothing -> draw tex u0 v0 u1 v1
     emitOne (FillRect r c) = pushRect da r c
     emitOne (FillRoundedRect r radius c) = pushRoundedRect da r radius c
     emitOne (FillTriangle x0 y0 x1 y1 x2 y2 c) = pushFilledTriangle da x0 y0 x1 y1 x2 y2 c
@@ -329,7 +344,10 @@ emitDrawOps da fm resolve ops = forUpTo_ (sizeofSmallArray ops) (emitOne . index
     emitOne (FillPolygon pts tris c) = pushPolygonAA da pts tris c
     emitOne (StrokePolyline pts w closed c) = pushPolylineAA da pts w closed c
     emitOne (FillQuadGradient r c0 c1 c2 c3) = pushQuadGradient da r c0 c1 c2 c3
-    emitOne (DrawImageRect r tex u0 v0 u1 v1 c) = pushImage da r tex u0 v0 u1 v1 c
+    emitOne (DrawImageRect r tex u0 v0 u1 v1 c) =
+      image tex u0 v0 u1 v1 (\t a0 b0 a1 b1 -> pushImage da r t a0 b0 a1 b1 c)
+    emitOne (DrawImageRotated r angle tex u0 v0 u1 v1 c) =
+      image tex u0 v0 u1 v1 (\t a0 b0 a1 b1 -> pushImageRotated da r angle t a0 b0 a1 b1 c)
     emitOne (DrawText x y ax ay t c) = do
       prepared <- prepareFontMetrics fm t
       let Rect px py _ _ = drawTextBox prepared x y ax ay t

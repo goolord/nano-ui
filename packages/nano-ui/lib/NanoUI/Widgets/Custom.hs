@@ -40,6 +40,7 @@ module NanoUI.Widgets.Custom
   , drawLinearGradientV
   , drawImage
   , drawImageUV
+  , drawImageRotated
   , drawText
     -- * Paths and transforms
 
@@ -204,6 +205,11 @@ drawImage r (ImageId tid) c = emitOp (DrawImageRect r tid 0 0 1 1 c)
 drawImageUV :: Rect -> ImageId -> Float -> Float -> Float -> Float -> Color -> CanvasM ()
 drawImageUV r (ImageId tid) u0 v0 u1 v1 c = emitOp (DrawImageRect r tid u0 v0 u1 v1 c)
 
+-- | 'drawImage' turned about the rectangle's centre by an angle in radians,
+-- clockwise on screen. Whatever leaves the canvas is clipped.
+drawImageRotated :: Rect -> Float -> ImageId -> Color -> CanvasM ()
+drawImageRotated r angle (ImageId tid) c = emitOp (DrawImageRotated r angle tid 0 0 1 1 c)
+
 -- | Draw text positioned at a reference point with horizontal and vertical alignment.
 drawText :: V2 -> AlignX -> AlignY -> Text -> Color -> CanvasM ()
 drawText (V2 x y) alignX alignY txt col =
@@ -242,11 +248,12 @@ drawStrokePathCapped cap path w col = emitWith (\t tol -> strokePathOps tol t ca
 -- circles and their outlines keep their own ops while they keep their
 -- shape, and otherwise become paths: a rect turned other than by quarter
 -- turns is a polygon, and a circle scaled on one axis an ellipse. Lines and
--- triangles move their points. Gradients and images fill the bounding box
--- of their transformed rect: a gradient's corners take the colours of the
--- corners that land nearest them, and an image turns over with a flip, but
--- neither turns. Text moves its anchor; its glyphs are neither scaled nor
--- turned.
+-- triangles move their points. A gradient fills the bounding box of its
+-- transformed rect, its corners taking the colours of the corners that land
+-- nearest them, and does not turn. An image turns and scales with the
+-- transform, and turns over with a flip: under a rotation or a skew it is
+-- drawn as a 'DrawImageRotated', and a skew leaves it a rect. Text moves its
+-- anchor; its glyphs are neither scaled nor turned.
 withTransform :: Transform -> CanvasM a -> CanvasM a
 withTransform t (CanvasM m) =
   CanvasM (Reader.local (\env -> env {ceTransform = Just (maybe t (<> t) (ceTransform env))}) m)

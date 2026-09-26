@@ -667,12 +667,14 @@ extendEnds d pts = generatePrimArray (2 * n) at
 -- one of those that scales both ways alike; a circle keeps its op under a
 -- transform that keeps it round. Otherwise they become polygons. Lines,
 -- polygons and triangles move their points, their widths scaled by the
--- transform's 'averageStretch'. Gradients and images fill the bounding box
--- of their transformed rect: a gradient's corners take the colours of the
--- corners that land nearest them, and an image turns over with a flip, but
--- neither turns. Text moves its anchor, its glyphs neither scaled nor
--- turned. A transform with a NaN or infinite entry draws nothing, as does
--- a rounded rect or circle with no size.
+-- transform's 'averageStretch'. A gradient fills the bounding box of its
+-- transformed rect, its corners taking the colours of the corners that land
+-- nearest them, and does not turn. An image keeps its op under a transform
+-- with no rotation or skew, turning over with a flip, and otherwise becomes
+-- a 'DrawImageRotated', as a turned image always does: its centre moves, it
+-- scales and it turns with the transform. Text moves its anchor, its glyphs
+-- neither scaled nor turned. A transform with a NaN or infinite entry draws
+-- nothing, as does a rounded rect or circle with no size.
 transformOp :: Float -> Transform -> DrawOp -> [DrawOp]
 transformOp tol t@(Transform a b c d _ _) op
   | not (transformFinite t) = []
@@ -723,10 +725,13 @@ transformOp tol t@(Transform a b c d _ _) op
                 (nearest (bx + bw, by + bh))
                 (nearest (bx, by + bh))
             ]
-      DrawImageRect r tex u0 v0 u1 v1 col ->
-        let (u0', u1') = if levelAxes && a < 0 then (u1, u0) else (u0, u1)
-            (v0', v1') = if levelAxes && d < 0 then (v1, v0) else (v0, v1)
-         in [DrawImageRect (box r) tex u0' v0' u1' v1' col]
+      DrawImageRect r tex u0 v0 u1 v1 col
+        | levelAxes ->
+            let (u0', u1') = if a < 0 then (u1, u0) else (u0, u1)
+                (v0', v1') = if d < 0 then (v1, v0) else (v0, v1)
+             in [DrawImageRect (box r) tex u0' v0' u1' v1' col]
+        | otherwise -> [turnedImage r 0 tex u0 v0 u1 v1 col]
+      DrawImageRotated r angle tex u0 v0 u1 v1 col -> [turnedImage r angle tex u0 v0 u1 v1 col]
       DrawText x y ax ay txt col -> let (x', y') = applyTransform t x y in [DrawText x' y' ax ay txt col]
       DrawTextStyled x y font txt col -> let (x', y') = applyTransform t x y in [DrawTextStyled x' y' font txt col]
   where
@@ -757,6 +762,25 @@ transformOp tol t@(Transform a b c d _ _) op
           ys = map snd (corners r)
        in Rect (minimum xs) (minimum ys) (maximum xs - minimum xs) (maximum ys - minimum ys)
     minimumOn f = foldr1 (\p q -> if f p <= f q then p else q)
+    -- An image turned by @angle@ about its rect's centre, under the
+    -- transform: the centre goes where the transform takes it, each side
+    -- stretches as the transform stretches the turned image's axis along it,
+    -- and the image turns as its x axis does, over on its v axis when the
+    -- transform flips. That is exact while the transform keeps the turned
+    -- axes square, as a rotation, a uniform scale and a flip do; under a
+    -- skew the image stays a rect rather than a parallelogram.
+    turnedImage (Rect x y w h) angle tex u0 v0 u1 v1 col =
+      let (cx, cy) = applyTransform t (x + w / 2) (y + h / 2)
+          cs = cos angle
+          sn = sin angle
+          exX = a * cs + c * sn
+          exY = b * cs + d * sn
+          eyX = c * cs - a * sn
+          eyY = d * cs - b * sn
+          w' = w * sqrt (exX * exX + exY * exY)
+          h' = h * sqrt (eyX * eyX + eyY * eyY)
+          (v0', v1') = if a * d - b * c < 0 then (v1, v0) else (v0, v1)
+       in DrawImageRotated (Rect (cx - w' / 2) (cy - h' / 2) w' h') (atan2 exY exX) tex u0 v0' u1 v1' col
 
 -- | A rectangle's outline, clockwise on screen from its top left corner.
 rect :: Rect -> Path
