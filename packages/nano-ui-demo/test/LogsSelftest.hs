@@ -47,6 +47,13 @@ selftest = do
       drawFrame baseInput
       expect "selftest: sticky scroll failed to stay PINNED after appending logs" "PINNED"
 
+      -- Pinned is the scroller's own end, so the last row clears the
+      -- horizontal bar.
+      pinnedWid <- scrollerId "selftest: scroller WidgetId not found for the pinned end"
+      getScrollMetrics ctx pinnedWid >>= \case
+        Just m | v2Y (scrollOffset m) == v2Y (scrollRange m) -> pure ()
+        m -> fail ("selftest: a PINNED view should sit at the scroller's end: " <> show m)
+
       drawFrame baseInput {inputScroll = V2 0 (-15.0)}
       drawFrame baseInput
       expect "selftest: scrolling up into history did not transition to UNPINNED" "UNPINNED"

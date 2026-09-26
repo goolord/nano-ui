@@ -203,7 +203,7 @@ logStickyThresh :: Float
 logStickyThresh = 8.0
 
 -- Header toolbar + banner + status bar height; fallback viewport estimate
--- before the scroller has a previous-frame rect.
+-- before the scroller has been laid out.
 logChromeFallbackH :: Float
 logChromeFallbackH = 140.0
 
@@ -326,7 +326,8 @@ renderLogScroller stateRef allSelected st = do
   when (asScrollerWid st /= Just scrollWid) $
     liftIO $ writeIORef stateRef st {asScrollerWid = Just scrollWid}
   ctx <- askContext
-  mPrevRect <- liftIO $ getPrevRect ctx scrollWid
+  mMetrics <- getScrollMetricsUi scrollWid
+  endPad <- padB . layoutPadding <$> askDefaultLayout
   inp <- askInput
 
   (sticky, setSticky) <- withKey ("log-sticky" :: Text) (useFlag True)
@@ -335,8 +336,12 @@ renderLogScroller stateRef allSelected st = do
 
   let n = asShownCount st
       totalH = fromIntegral n * logRowH
-      viewH = maybe (sizeH (inputWindowSize inp) - logChromeFallbackH) rectH mPrevRect
-      maxOff = max 0 (totalH - viewH)
+      -- The viewport, not the scroller's rect: the rect also holds the
+      -- horizontal bar, and pinning to it leaves the last row under the bar.
+      viewH = maybe (sizeH (inputWindowSize inp) - logChromeFallbackH) (rectH . scrollViewport) mMetrics
+      -- The scroller's own range: past the last row to its bottom padding,
+      -- once the rows overflow by more than the half pixel layout rounds off.
+      maxOff = if totalH > viewH + 0.5 then totalH + endPad - viewH else 0
 
   curOff <- liftIO $ getScrollOffset2D ctx scrollWid
   let curY = v2Y curOff
