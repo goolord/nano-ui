@@ -203,7 +203,7 @@ themeChoice = \case
   TomorrowNightMin -> ("Tomorrow Night Min", setUiTheme tomorrowNightMinDarkTheme)
   TomorrowLight -> ("Tomorrow Light", setUiTheme tomorrowMinLightTheme)
   TomorrowMidnightMin -> ("Tomorrow at Midnight Min", setUiTheme tomorrowMidnightMinDarkTheme)
-  ThemeSystem -> ("Follow system", setUiTheme . lightDark defaultLightTheme defaultTheme =<< systemAppearance)
+  ThemeSystem -> ("Follow system", setUiTheme . defaultThemeFor =<< systemAppearance)
 
 -- | What the demo reads once per context: the font families offered by the
 -- Controls-tab font combo box, from the SDL backend's system font scan

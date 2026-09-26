@@ -57,6 +57,7 @@ module NanoUI.Internal.WidgetText
   , tabEncodeStyle
   ) where
 
+import Control.Applicative ((<|>))
 import Data.Bits ((.&.), (.|.), complement, shiftL, shiftR)
 import Data.Char (digitToInt, isHexDigit)
 import Data.Maybe (fromMaybe)
@@ -264,7 +265,7 @@ packTextNodeStyle l stripe =
     .|. ((fromEnum (layoutFontWeight l) .&. 0x0F) `shiftL` 8)
     .|. ((fromEnum (layoutFontStyle l) .&. 0x03) `shiftL` 12)
     .|. ((fromEnum (layoutTextDecoration l) .&. 0x03) `shiftL` 14)
-    .|. (maybe 0 ((+ 1) . fromEnum) (maybe (variantTone (layoutFontVariant l)) Just (layoutFontTone l)) `shiftL` 18)
+    .|. (maybe 0 ((+ 1) . fromEnum) (layoutFontTone l <|> variantTone (layoutFontVariant l)) `shiftL` 18)
 
 -- | The enum packed in the style bits at @shift@ under @mask@, or @fallback@
 -- when they hold no constructor.

@@ -444,6 +444,7 @@ getExplainLayout ctx = esOn <$> readIORef (ctxExplain ctx)
 -- no node.
 getExplainedNode :: Context -> IO (Maybe ExplainedNode)
 getExplainedNode ctx = fmap fst . esHover <$> readIORef (ctxExplain ctx)
+
 -- | Make the base theme a function of the system's appearance, which the
 -- backend reports ('Nothing' when it cannot tell), as
 -- @'NanoUI.Internal.Style.lightDark' light dark@ picks one of two themes.
