@@ -665,6 +665,9 @@
   is.
 - A row or column too short for its children takes the room it lacks from
   the others that shrink once one reaches its minimum, instead of overflowing.
+- A wrapped label keeps its indent and the runs of spaces inside its lines;
+  a line ends at a run of spaces, which it drops. A label wider than its box
+  used to have every run of spaces cut to one.
 
 ### Removed
 
