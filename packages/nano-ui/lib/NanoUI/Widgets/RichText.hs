@@ -292,19 +292,14 @@ paragraphBound = 4096
 
 -- | The font a piece's layout chooses.
 pieceFont :: Layout -> TextFont
-pieceFont l = TextFont (layoutFontSize l) (layoutFontVariant l) (layoutFontWeight l) (layoutFontStyle l) (layoutTextDecoration l)
+pieceFont l = TextFont (layoutFontSize l) (variantFace (layoutFontVariant l)) (layoutFontWeight l) (layoutFontStyle l) (layoutTextDecoration l)
 
 -- | A piece's colour: its own, else the link colour for a link, else its
--- font variant's colour.
+-- tone's or face's, as a label's.
 pieceColor :: Theme -> Layout -> Maybe Text -> Color
 pieceColor theme l target =
-  let variantColor = case layoutFontVariant l of
-        FontHeading -> themeAccent theme
-        FontMuted -> themeMuted theme
-        FontDanger -> themeRed theme
-        FontWarning -> themeWarning theme
-        _ -> styleFg (themePanel theme)
-   in fromMaybe (maybe variantColor (const (themeLink theme)) target) (layoutFontColor l)
+  let toneCol = textToneColor theme (layoutFontVariant l) (layoutFontTone l)
+   in fromMaybe (maybe toneCol (const (themeLink theme)) target) (layoutFontColor l)
 
 -- | A piece's line metrics and its tokens measured in its font.
 measurePiece :: Context -> (Int, (Inline, TextFont, Color)) -> IO (Run, [Token])

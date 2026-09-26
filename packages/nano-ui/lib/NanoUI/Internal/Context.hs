@@ -61,6 +61,8 @@ module NanoUI.Internal.Context
   , getExplainLayout
   , getExplainedNode
   , followSystemTheme
+  , setThemeInView
+  , settleViewTheme
   , setSystemAppearance
   , getSystemAppearance
   , withClipboard
@@ -367,12 +369,13 @@ clearMeasureCache ctx = do
 withTheme :: Context -> Theme -> IO Context
 withTheme ctx theme = ctx <$ setTheme ctx theme
 
--- | Change the base theme, invalidate text/layout caches, and request a full
--- repaint. An equal theme is a no-op. A context following the system
--- appearance ('followSystemTheme') stops following it.
+-- | Set a fixed base theme, invalidate text/layout caches, and request a
+-- full repaint. The same theme again changes nothing, so a view may set it
+-- every frame. It replaces a theme that follows the system's appearance
+-- ('followSystemTheme'), which is the base theme too.
 setTheme :: Context -> Theme -> IO ()
 setTheme ctx th = do
-  writeIORef (ctxSystemThemes ctx) Nothing
+  writeIORef (ctxThemeFor ctx) Nothing
   applyBaseTheme ctx th
 
 -- | 'setTheme' without leaving 'followSystemTheme'.
@@ -381,9 +384,32 @@ applyBaseTheme ctx th = do
   cur <- readIORef (ctxTheme ctx)
   when (cur /= th) $ do
     writeIORef (ctxTheme ctx) th
-    invalidateTextCaches ctx
-    damageFull ctx
-    markDirty ctx
+    repaintForTheme ctx
+
+-- | What a new base theme needs: text caches dropped, the whole window
+-- repainted, and a frame.
+repaintForTheme :: Context -> IO ()
+repaintForTheme ctx = do
+  invalidateTextCaches ctx
+  damageFull ctx
+  markDirty ctx
+
+-- | 'setTheme' from a view: what the view reads after it sees the theme
+-- at once, and the frame repaints once the view is built if it ends with
+-- another theme than it began with ('settleViewTheme'). So a view that sets
+-- the theme every frame, even two themes a frame, repaints only when the
+-- theme it ends with changes.
+setThemeInView :: Context -> Theme -> IO ()
+setThemeInView ctx th = do
+  writeIORef (ctxThemeFor ctx) Nothing
+  writeIORef (ctxTheme ctx) th
+
+-- | Repaint for the base theme a view set ('setThemeInView'), if it is not
+-- the one the frame began with.
+settleViewTheme :: Context -> Theme -> IO ()
+settleViewTheme ctx before = do
+  now <- readIORef (ctxTheme ctx)
+  when (now /= before) (repaintForTheme ctx)
 
 -- | Base session theme. Use 'currentTheme' to include the current paint scope.
 getTheme :: Context -> IO Theme
@@ -411,17 +437,19 @@ getExplainLayout ctx = esOn <$> readIORef (ctxExplain ctx)
 -- no node.
 getExplainedNode :: Context -> IO (Maybe ExplainedNode)
 getExplainedNode ctx = fmap fst . esHover <$> readIORef (ctxExplain ctx)
--- | Make the base theme follow the system's appearance: the dark theme
--- while the backend reports 'AppearanceDark', otherwise the light one,
--- including when it cannot tell. Applies the matching theme now, like
--- 'setTheme', and again whenever 'setSystemAppearance' reports a change;
--- a later 'setTheme' stops following. Calling it again with the same themes
--- changes nothing, so a view may call it every frame.
-followSystemTheme :: Context -> Theme -> Theme -> IO ()
-followSystemTheme ctx light dark = do
-  writeIORef (ctxSystemThemes ctx) (Just (light, dark))
-  appearance <- readIORef (ctxSystemAppearance ctx)
-  applyBaseTheme ctx (if appearance == Just AppearanceDark then dark else light)
+-- | Make the base theme a function of the system's appearance, which the
+-- backend reports ('Nothing' when it cannot tell), as
+-- @'NanoUI.Internal.Style.lightDark' light dark@ picks one of two themes.
+-- It applies the theme for the appearance now, like 'setTheme', and again
+-- whenever 'setSystemAppearance' reports a change, until 'setTheme' sets a
+-- fixed theme in its place. A view that picks its theme itself sets it
+-- each frame instead:
+--
+-- > setUiTheme . lightDark defaultLightTheme defaultTheme =<< systemAppearance
+followSystemTheme :: Context -> (Maybe Appearance -> Theme) -> IO ()
+followSystemTheme ctx pick = do
+  writeIORef (ctxThemeFor ctx) (Just pick)
+  applyBaseTheme ctx . pick =<< readIORef (ctxSystemAppearance ctx)
 
 -- | Record the system's light or dark preference, 'Nothing' when the
 -- platform does not say. For backends, on the UI thread: the SDL backend
@@ -434,7 +462,7 @@ setSystemAppearance ctx appearance = do
   cur <- readIORef (ctxSystemAppearance ctx)
   when (cur /= appearance) $ do
     writeIORef (ctxSystemAppearance ctx) appearance
-    readIORef (ctxSystemThemes ctx) >>= mapM_ (\(light, dark) -> followSystemTheme ctx light dark)
+    readIORef (ctxThemeFor ctx) >>= mapM_ (\pick -> applyBaseTheme ctx (pick appearance))
     -- A view can read the appearance itself.
     damageFull ctx
     markDirty ctx
@@ -550,7 +578,7 @@ newContext = do
   ctxTheme <- newIORef defaultTheme
   ctxThemeScopes <- newIORef =<< newThemeScopes
   ctxSystemAppearance <- newIORef Nothing
-  ctxSystemThemes <- newIORef Nothing
+  ctxThemeFor <- newIORef Nothing
   ctxSpanCache <- newIORef IM.empty
   ctxWidgetTextCache <- newIORef IM.empty
   ctxDerivedCache <- newIORef IM.empty

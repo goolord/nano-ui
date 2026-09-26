@@ -436,8 +436,10 @@ scrollBarGutter slot trailPad =
 
 -- | The one policy for "does this node use the ambient base font, or does it
 -- need the host resolver?". A zero size with a plain weight/style and the
--- regular or mono variant resolves to the pre-read base metrics; everything
--- else (heading/muted/danger, bold, italic, explicit size) defers to the host.
+-- regular or mono face resolves to the pre-read base metrics; everything
+-- else (a heading, bold, italic, explicit size) defers to the host. Colour
+-- is not part of it: a tone ('NanoUI.Internal.Style.fontTone') keeps the
+-- base metrics.
 -- Layout, paint, span placement and hit testing all share this so they cannot
 -- pick different faces for the same node.
 {-# INLINE isDefaultNodeFont #-}

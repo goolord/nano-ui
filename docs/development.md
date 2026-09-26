@@ -180,7 +180,7 @@ decisions, compiler checks, and before/after measurements for the refactors.
 
 | Command | Runs |
 | --- | --- |
-| `cabal run nano-ui-profile -- <scene> +RTS -s` | Headless frames. Scenes: `widgets` (the default), `canvas` (an op-heavy unkeyed custom widget), `canvas-keyed` (the same drawing with a content key), `textarea` (typing into a 100,000-line `textAreaDocument`), `textarea-text` (the same through the `Text` API, which joins the document on every edit), and `svg` (icon rasterization) |
+| `cabal run nano-ui-profile -- <scene> +RTS -s` | Headless frames. Scenes: `widgets` (the default), `canvas` (an op-heavy unkeyed custom widget), `canvas-keyed` (the same drawing with a content key), `canvas-paths` (filled and stroked paths, turned a little every frame so they are built and painted again), `canvas-paths-build` (the same paths built without a frame), `textarea` (typing into a 100,000-line `textAreaDocument`), `textarea-text` (the same through the `Text` API, which joins the document on every edit), and `svg` (icon rasterization) |
 | `cabal run nano-ui-sdl-profile` | The SDL demo's UI in a hidden window: the full demo, each tab, widget microbenchmarks, and scaling |
 | `cabal run nano-ui-rgfw-profile` | The RGFW demo's frame loop on the OpenGL path in a hidden window |
 | `cabal run nano-ui-sdl-anim` | Tween and spring animations in an SDL window, for checking animation pacing by eye |

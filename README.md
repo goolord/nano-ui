@@ -35,8 +35,9 @@ counter = do
 - Text inputs and a multi-line text area, numeric fields, sliders, knobs,
   selects, combo boxes, sortable tables, trees, tabs, menus, context menus,
   modals, floating windows, pane grids, colour pickers, progress bars,
-  sparklines, and drag and drop. `customWidget` and a canvas API, with curves
-  and transforms (`NanoUI.Path`), cover anything else.
+  sparklines, and drag and drop. `customWidget` and a canvas API, with paths,
+  fill rules, strokes with joins and dashes, gradients, clips and transforms
+  (`NanoUI.Path`), cover anything else.
 - Row, column, grid, and stacked (`stack`) layout with scrolling, wrapping
   (`wrap`), and pinned children (`pinAt`). Layout options are
   `Layout -> Layout` modifiers, as in `columnWith (gap 8 . padAll 12)`.
@@ -70,8 +71,9 @@ counter = do
 - Themes, including ones built from Base16 schemes, changed for part of a
   view with `styled` and composable modifiers, as in
   `styled (primary . buttonStyle (cornerRadius 6)) (button "Save")`.
-  `disabledWhen` switches widgets off, and `followSystemTheme` follows the
-  desktop's light or dark setting.
+  `disabledWhen` switches widgets off, `tone` and `fontTone` colour buttons
+  and text by status, and the theme can follow the desktop's light or dark
+  setting (`lightDark`, `followSystemTheme`).
 - One `WindowSettings` for every backend, a view that reads its window
   (`askWindow`), changes it (`setWindowTitleUi`, `moveWindowUi`,
   `setWindowModeUi`), takes screenshots (`requestScreenshot`) and decides

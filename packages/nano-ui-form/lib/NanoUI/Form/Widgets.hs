@@ -20,7 +20,8 @@ import NanoUI
   , label
   , padXY
   , calloutWith
-  , themeRed
+  , Tone (Danger)
+  , toneColor
   , uiTheme
   , rowWith
   )
@@ -30,7 +31,7 @@ import NanoUI.Form.Types (FormView (..))
 defaultErrorView :: Foldable f => f Text -> FormView
 defaultErrorView errs | null errs = FormView (pure ())
 defaultErrorView errs = FormView $ do
-  errColor <- themeRed <$> uiTheme
+  errColor <- (`toneColor` Danger) <$> uiTheme
   calloutWith errColor (padXY 8 4 . gap 2) (mapM_ (danger . ("• " <>)) errs)
 
 -- | Wrap a form view in a flex-growing column with standard form gap.

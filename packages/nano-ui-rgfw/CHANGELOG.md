@@ -11,6 +11,9 @@
 - The pointer leaving the window moves it off every widget, so nothing stays
   hovered.
 - `UiCursorHidden` hides the pointer.
+- `optThemeFor`, the theme for the desktop's light or dark setting, as SDL's
+  `sdlAppThemeFor`. RGFW cannot read the setting, so it is given `Nothing`,
+  for which `lightDark` picks the dark theme.
 - The core's window: the window opens from `optWindow`, a core
   `WindowSettings`, with a position, size limits, an icon, a mode and
   whether a close request ends the session. The core's window setters and

@@ -185,11 +185,28 @@ These scopes affect painting, not layout. Font-size changes belong in layout
 modifiers. `disabledWhen condition` keeps widget geometry and state while
 disabling interaction and applying disabled colours.
 
-To follow the desktop's light or dark setting rather than `setTheme`, call
-`followSystemTheme ctx light dark` or `followSystemThemeUi`, or set
-`sdlAppFollowSystemTheme`; `defaultLightTheme` pairs with `defaultTheme`.
-RGFW cannot read the setting, so it keeps the light theme. A later
-`setTheme` stops following.
+Status colours are tones: `fontTone Warning` colours a label's text, in
+whatever face it has (`fontMono . fontTone Danger`), and `tone Danger`
+fills buttons; `toneColor` gives a tone's colour for your own drawing.
+`fontMuted`, `fontDanger`, `primary`, `destructive`, `success` and
+`warning` are the same tones by their old names. Each theme's success,
+warning and danger colours read on its window.
+
+To follow the desktop's light or dark setting, the theme is a function of
+the appearance: `lightDark light dark` takes the light theme for a light
+desktop and the dark one otherwise, including when the platform cannot tell,
+as `defaultTheme` is dark. A view can pick its theme every frame, which costs
+nothing while it stays the same:
+
+```haskell
+setUiTheme . lightDark defaultLightTheme defaultTheme =<< systemAppearance
+```
+
+Or hand the function to `followSystemTheme ctx`, or to the backend's
+`sdlAppThemeFor` or `optThemeFor`, to switch from the start. RGFW cannot
+read the setting, so it gets `Nothing`. `setTheme` and `setUiTheme` set a
+fixed theme in place of a following one. `themeAppearance` says whether a
+theme is light or dark.
 
 Modals, floating windows, and popups return close or dismissal requests.
 The application owns their open flag and must update it. Keep calling the
@@ -364,10 +381,36 @@ compare their operations each frame.
 
 Curves go through `NanoUI.Path`, imported qualified: build a path with
 `P.moveTo`, `P.lineTo`, `P.cubicTo`, `P.arc` and the rest, fill it with
-`drawPath` and stroke it with `drawStrokePath`. `withTransform` moves, turns
-and scales a block of canvas drawing. Run a custom widget's canvas with
-`runCanvasFor`, as `canvas` does, so curves stay smooth on a dense display.
-A hole drawn as a second subpath is filled over, not cut out.
+`drawPath` and stroke it with `drawStrokePath`. `drawPathWith` takes a fill
+rule and a paint: a subpath inside another is a hole in it where the rule
+leaves it unfilled, so a ring is one path, and `P.Linear` fills with a
+gradient. `drawStrokePathWith` takes a `P.Stroke`, its width with caps,
+joins, a miter limit and dashes. `withTransform` moves, turns and scales a
+block of canvas drawing, and `withClip` clips it. Run a custom widget's
+canvas with `runCanvasFor`, as `canvas` does, so curves stay smooth on a
+dense display; `canvasConfigured` adds a content key and a cursor, and
+`drawContext` gives the drawing its widget's hover and press state.
+
+```haskell
+import NanoUI.Path qualified as P
+
+gauge :: Float -> NanoUI Response
+gauge level =
+  canvasConfigured defaultCanvasConfig {canvasLayout = fixedWH 80 80 defaultLayout, canvasContent = contentKey [level]} $
+    \(Rect x y w h) -> do
+      cdc <- drawContext
+      let c = V2 (x + w / 2) (y + h / 2)
+          theme = cdcTheme cdc
+      drawPathWith P.EvenOdd (P.circle c 36 <> P.circle c 26) (P.Solid (themeSeparator theme))
+      drawStrokePathWith (P.stroke 10) {P.strokeCap = P.RoundCap}
+        (P.arc c 31 (-pi / 2) (2 * pi * level))
+        (P.Solid (if cdcHovered cdc then themeAccent theme else themeMuted theme))
+```
+
+A fill does not work out where paths cross: subpaths that cross each other
+fill on their own, and one that crosses itself may fill only in part. A
+path's stroke is centred on it, where `drawStrokeRoundedRect` and
+`drawStrokeCircle` draw a border inside their shape, as a panel's is.
 
 `textArea` accepts `Text` and joins the document when edits change it.
 `textAreaDocument` accepts a `TextDocument`, sharing unchanged lines across

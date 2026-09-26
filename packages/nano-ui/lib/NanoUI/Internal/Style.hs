@@ -17,6 +17,15 @@ module NanoUI.Internal.Style
   , defaultTheme
   , defaultLightTheme
   , Appearance (..)
+  , lightDark
+  , defaultThemeFor
+  , themeAppearance
+  , Tone (..)
+  , toneColor
+  , tone
+  , textToneColor
+  , variantFace
+  , variantTone
   , tomorrowNightMinDarkTheme
   , tomorrowMinLightTheme
   , tomorrowMidnightMinDarkTheme
@@ -99,7 +108,7 @@ module NanoUI.Internal.Style
   , fontMuted
   , fontMono
   , fontDanger
-  , fontWarning
+  , fontTone
   , fontSize
   , fontSizeScale
   , fontColor
@@ -181,15 +190,31 @@ windowPad = Padding 10 10 0 10
 windowMargin :: Float
 windowMargin = 14
 
--- | Semantic font choice. The backend selects a face and the theme supplies
--- colours for heading, muted, danger, and warning text.
+-- | Semantic font choice. The backend selects a face; a heading's text takes
+-- the theme's accent colour. 'FontMuted' and 'FontDanger' are the regular
+-- face in the 'Muted' and 'Danger' tones: 'fontMuted' and 'fontDanger' set
+-- the tone ('fontTone'), which combines with any face.
 data FontVariant
   = FontRegular
   | FontHeading
   | FontMuted
   | FontMono
   | FontDanger
-  | FontWarning
+  deriving (Eq, Show, Enum, Bounded, Ord)
+
+-- | A status colour from the theme ('toneColor'), for text ('fontTone') and
+-- buttons ('tone').
+data Tone
+  = Accent
+  -- ^ The accent: what a view is for ('primary').
+  | Muted
+  -- ^ Secondary text.
+  | Success
+  -- ^ Something went well ('themeSuccess').
+  | Warning
+  -- ^ Something needs care ('themeWarning').
+  | Danger
+  -- ^ Something failed or cannot be undone ('themeDanger').
   deriving (Eq, Show, Enum, Bounded, Ord)
 
 -- | Requested font weight. Available faces and synthetic weights depend on the backend.
@@ -247,6 +272,9 @@ data Layout = Layout
   , layoutGridMinColW :: {-# UNPACK #-} !Float
   , layoutFontSize :: {-# UNPACK #-} !Float
   , layoutFontColor :: !(Maybe Color)
+  , layoutFontTone :: !(Maybe Tone)
+  -- ^ The tone text takes its colour from, unless 'layoutFontColor' gives
+  -- one ('fontTone'). It leaves the face alone.
   , layoutFontWeight :: !FontWeight
   , layoutFontStyle :: !FontStyle
   , layoutTextDecoration :: !TextDecoration
@@ -277,6 +305,7 @@ defaultLayout =
     , layoutGridMinColW = 0
     , layoutFontSize = 0
     , layoutFontColor = Nothing
+    , layoutFontTone = Nothing
     , layoutFontWeight = WeightNormal
     , layoutFontStyle = FontStyleNormal
     , layoutTextDecoration = DecorationNone
@@ -397,22 +426,27 @@ fontRegular l = l {layoutFontVariant = FontRegular}
 fontHeading :: Layout -> Layout
 fontHeading l = l {layoutFontVariant = FontHeading}
 
--- | Select regular text in the theme's muted colour.
+-- | Text in the theme's muted colour: 'fontTone' 'Muted'.
 fontMuted :: Layout -> Layout
-fontMuted l = l {layoutFontVariant = FontMuted}
+fontMuted = fontTone Muted
 
 -- | Select the backend's monospace font variant.
 fontMono :: Layout -> Layout
 fontMono l = l {layoutFontVariant = FontMono}
 
--- | Select text in the theme's danger colour.
+-- | Text in the theme's danger colour: 'fontTone' 'Danger'.
 fontDanger :: Layout -> Layout
-fontDanger l = l {layoutFontVariant = FontDanger}
+fontDanger = fontTone Danger
 
--- | Select text in the theme's warning colour ('themeWarning'), as in
--- @labelWith fontWarning "Unsaved changes"@.
-fontWarning :: Layout -> Layout
-fontWarning l = l {layoutFontVariant = FontWarning}
+-- | Text in a tone's colour, in whatever face the layout picks, so it
+-- combines with the others:
+--
+-- > labelWith (fontMono . fontTone Warning) "unsaved"
+--
+-- A 'fontColor' wins over it. Colour alone does not change how text is
+-- measured, so a label in a tone keeps the base font's metrics.
+fontTone :: Tone -> Layout -> Layout
+fontTone t l = l {layoutFontTone = Just t}
 
 -- | Set logical font size. Non-positive values select the backend default.
 fontSize :: Float -> Layout -> Layout
@@ -628,9 +662,13 @@ data Theme = Theme
   , themeYellow :: {-# UNPACK #-} !Color
   , themeGreen :: {-# UNPACK #-} !Color
   , themePurple :: {-# UNPACK #-} !Color
+  , themeSuccess :: {-# UNPACK #-} !Color
+  -- ^ The 'Success' tone: the green that reads on the window colour.
   , themeWarning :: {-# UNPACK #-} !Color
-  -- ^ Warning text ('fontWarning') and 'warning' buttons: an amber that
-  -- reads on the window colour.
+  -- ^ The 'Warning' tone: an amber that reads on the window colour.
+  , themeDanger :: {-# UNPACK #-} !Color
+  -- ^ The 'Danger' tone: the red that reads on the window colour, for
+  -- 'danger' labels, 'fontDanger' text and 'destructive' buttons.
   , themeOverlayDim :: {-# UNPACK #-} !Color
   , themeOnAccent :: {-# UNPACK #-} !Color
   -- ^ Text and marks drawn on an accent fill: a checked box, an active tab,
@@ -654,6 +692,73 @@ data Appearance
   = AppearanceLight
   | AppearanceDark
   deriving (Eq, Show, Enum, Bounded, Ord)
+
+-- | The light theme for a light appearance and the dark one otherwise,
+-- including when the system cannot tell ('Nothing'), as nano-ui's own
+-- default theme is dark. Hand it to @followSystemTheme@, or pick with it
+-- each frame:
+--
+-- > setUiTheme . lightDark defaultLightTheme defaultTheme =<< systemAppearance
+lightDark :: Theme -> Theme -> Maybe Appearance -> Theme
+lightDark light _ (Just AppearanceLight) = light
+lightDark _ dark _ = dark
+
+-- | 'defaultLightTheme' for a light appearance, 'defaultTheme' otherwise.
+defaultThemeFor :: Maybe Appearance -> Theme
+defaultThemeFor = lightDark defaultLightTheme defaultTheme
+
+-- | Whether a theme is a light or a dark one, by its window colour: dark
+-- where white text would read better on it than black.
+themeAppearance :: Theme -> Appearance
+themeAppearance t = if darkColor (themeWindow t) then AppearanceDark else AppearanceLight
+
+-- | Whether white reads better on a colour than black.
+darkColor :: Color -> Bool
+darkColor c = colorLuminance c < 0.179
+
+-- | A colour taken toward white on a dark window or black on a light one, a
+-- twentieth at a time, until it reads on the window at 4.5:1. The themes'
+-- tones are made readable so.
+readableTone :: Color -> Color -> Color
+readableTone window c0 =
+  fromMaybe (lerpColor c0 toward 0.95) $
+    find (\c -> contrastRatio c window >= 4.5) [lerpColor c0 toward (fromIntegral i * 0.05) | i <- [0 .. 18 :: Int]]
+  where
+    toward = if darkColor window then colorRGBA 255 255 255 255 else colorRGBA 0 0 0 255
+
+-- | A tone's colour in a theme.
+toneColor :: Theme -> Tone -> Color
+toneColor t = \case
+  Accent -> themeAccent t
+  Muted -> themeMuted t
+  Success -> themeSuccess t
+  Warning -> themeWarning t
+  Danger -> themeDanger t
+
+-- | The colour text in a face and a tone takes, when no 'fontColor' says:
+-- the tone's ('fontTone'), else the one 'FontMuted' or 'FontDanger' stands
+-- for, a heading's accent, or the panel's text colour.
+textToneColor :: Theme -> FontVariant -> Maybe Tone -> Color
+textToneColor theme variant t = case maybe (variantTone variant) Just t of
+  Just t' -> toneColor theme t'
+  Nothing
+    | variant == FontHeading -> themeAccent theme
+    | otherwise -> styleFg (themePanel theme)
+
+-- | The face a variant draws in: the colour-only variants are the regular
+-- face, which draws with the base font's metrics.
+variantFace :: FontVariant -> FontVariant
+variantFace = \case
+  FontMuted -> FontRegular
+  FontDanger -> FontRegular
+  v -> v
+
+-- | The tone a colour-only variant stands for.
+variantTone :: FontVariant -> Maybe Tone
+variantTone = \case
+  FontMuted -> Just Muted
+  FontDanger -> Just Danger
+  _ -> Nothing
 
 -- -----------------------------------------------------------------------------
 -- Style and theme modifiers
@@ -770,22 +875,29 @@ tinted pick t =
         )
         t
 
--- | Buttons in the accent colour, for the action a view is for.
+-- | Buttons in a tone's colour, under a label that reads on it:
+--
+-- > styled (tone Danger) (button "Delete")
+tone :: Tone -> Theme -> Theme
+tone t = tinted (`toneColor` t)
+
+-- | Buttons in the accent colour, for the action a view is for: 'tone'
+-- 'Accent'.
 primary :: Theme -> Theme
-primary = tinted themeAccent
+primary = tone Accent
 
--- | Buttons in the theme's red, for destructive actions.
+-- | Buttons in the danger colour, for destructive actions: 'tone' 'Danger'.
 destructive :: Theme -> Theme
-destructive = tinted themeRed
+destructive = tone Danger
 
--- | Fill buttons with the theme's green and choose a readable label colour.
+-- | Buttons in the success colour: 'tone' 'Success'.
 success :: Theme -> Theme
-success = tinted themeGreen
+success = tone Success
 
--- | Buttons in the theme's warning amber, for an action that needs care but
--- is not destructive.
+-- | Buttons in the warning amber, for an action that needs care but is not
+-- destructive: 'tone' 'Warning'.
 warning :: Theme -> Theme
-warning = tinted themeWarning
+warning = tone Warning
 
 -- | Buttons without a fill or border until hovered, for toolbars and
 -- secondary actions.
@@ -833,7 +945,9 @@ disabledTheme t =
         , themeYellow = fade (themeYellow t)
         , themeGreen = fade (themeGreen t)
         , themePurple = fade (themePurple t)
+        , themeSuccess = fade (themeSuccess t)
         , themeWarning = fade (themeWarning t)
+        , themeDanger = fade (themeDanger t)
         , themeOnAccent = fade (themeOnAccent t)
         , themeFocusRing = fade (themeFocusRing t)
         , themeLink = fade (themeLink t)
@@ -890,7 +1004,9 @@ defaultTheme =
         , themeYellow = colorRGBA 212 176 88 255
         , themeGreen = colorRGBA 104 168 124 255
         , themePurple = colorRGBA 176 140 220 255
+        , themeSuccess = readableTone (colorRGBA 24 24 27 255) (colorRGBA 104 168 124 255)
         , themeWarning = colorRGBA 242 180 76 255
+        , themeDanger = readableTone (colorRGBA 24 24 27 255) (colorRGBA 252 165 165 255)
         , themeOverlayDim = colorRGBA 8 8 10 176
         , themeOnAccent = colorRGBA 255 255 255 255
         , themeSelection = fadeAlpha (colorRGBA 88 156 246 255) 115
@@ -938,7 +1054,9 @@ defaultLightTheme =
         , themeYellow = colorRGBA 150 104 0 255
         , themeGreen = colorRGBA 30 128 70 255
         , themePurple = colorRGBA 128 70 190 255
+        , themeSuccess = readableTone (colorRGBA 244 244 242 255) (colorRGBA 30 128 70 255)
         , themeWarning = colorRGBA 150 90 0 255
+        , themeDanger = readableTone (colorRGBA 244 244 242 255) (colorRGBA 190 40 40 255)
         , themeOverlayDim = colorRGBA 20 20 24 90
         , themeOnAccent = colorRGBA 255 255 255 255
         , themeSelection = fadeAlpha (colorRGBA 37 99 235 255) 80
@@ -995,7 +1113,7 @@ tomorrowNightMinDarkTheme =
           (colorRGBA 52 54 62 255)  -- #34363E
           (colorRGBA 26 27 29 255)  -- #1A1B1D
    in (accentColor accentCol defaultTheme)
-        { themeWindow = colorRGBA 23 24 26 255         -- #17181A (dark root window backdrop)
+        { themeWindow = windowCol
         , themePanel = panelSurface
         , themeFloatingWindow = panelSurface
         , themeButton =
@@ -1019,11 +1137,14 @@ tomorrowNightMinDarkTheme =
         , themeYellow = colorRGBA 240 198 116 255      -- base.yellow #F0C674
         , themeGreen = colorRGBA 181 189 104 255       -- base.green #B5BD68
         , themePurple = colorRGBA 178 148 187 255      -- base.purple #B294BB
+        , themeSuccess = readableTone windowCol (colorRGBA 181 189 104 255)
         , themeWarning = colorRGBA 240 198 116 255     -- base.yellow #F0C674
+        , themeDanger = readableTone windowCol (colorRGBA 204 102 102 255)
         , themeOverlayDim = colorRGBA 0 0 0 160
         , themeLink = accentCol
         }
   where
+  windowCol  = colorRGBA 23 24 26 255              -- #17181A (dark root window backdrop)
   edgeCol    = colorRGBA 77 80 87 255              -- window #4D5057 (touch brighter crisp border)
   accentCol    = colorRGBA 103 150 230 255           -- vscode.cornflower_blue #6796E6
 
@@ -1062,7 +1183,9 @@ tomorrowMinLightTheme =
         , themeYellow = colorRGBA 231 197 71 255      -- Tomorrow Yellow #E7C547
         , themeGreen = colorRGBA 113 140 0 255        -- Tomorrow Green #718C00
         , themePurple = colorRGBA 137 91 144 255      -- Tomorrow Purple #895B90
+        , themeSuccess = readableTone (colorRGBA 255 255 255 255) (colorRGBA 113 140 0 255)
         , themeWarning = colorRGBA 150 94 0 255       -- #965E00 (an amber dark enough to read on white)
+        , themeDanger = readableTone (colorRGBA 255 255 255 255) (colorRGBA 197 78 82 255)
         , themeOverlayDim = colorRGBA 0 0 0 100
         , themeSelection = fadeAlpha (colorRGBA 82 134 188 255) 80
         , themeLink = colorRGBA 66 113 174 255
@@ -1104,7 +1227,9 @@ tomorrowMidnightMinDarkTheme =
         , themeYellow = colorRGBA 231 197 71 255       -- bright.yellow #E7C547
         , themeGreen = colorRGBA 185 202 74 255        -- bright.green #B9CA4A
         , themePurple = colorRGBA 195 151 216 255      -- bright.purple #C397D8
+        , themeSuccess = readableTone (colorRGBA 0 0 0 255) (colorRGBA 185 202 74 255)
         , themeWarning = colorRGBA 231 197 71 255      -- bright.yellow #E7C547
+        , themeDanger = readableTone (colorRGBA 0 0 0 255) (colorRGBA 213 78 83 255)
         , themeOverlayDim = colorRGBA 0 0 0 160
         , themeLink = accentCol
         , themeShadow = colorRGBA 0 0 0 96
@@ -1171,16 +1296,10 @@ themeFromBase16Mode dark b =
         edgeCol
         (pick (lerpColor panelBg (base02 b) 0.5) (lerpColor panelBg (base00 b) 0.4))
         (lerpColor panelBg (pick (base00 b) (base02 b)) 0.4)
-    -- Warning text is the scheme's yellow on a dark background and its
-    -- orange on a light one, where yellow rarely reads, taken toward white
-    -- or black until it reads on the window at 4.5:1.
-    warn0 = pick (base0A b) (base09 b)
-    toward = pick (colorRGBA 255 255 255 255) (colorRGBA 0 0 0 255)
-    warnCol =
-      fromMaybe (lerpColor warn0 toward 0.95) $
-        find
-          (\c -> contrastRatio c (base00 b) >= 4.5)
-          [lerpColor warn0 toward (fromIntegral i * 0.05) | i <- [0 .. 18 :: Int]]
+    -- The tones are the scheme's green, red, and yellow on a dark
+    -- background or orange on a light one, where yellow rarely reads, each
+    -- taken toward white or black until it reads on the window.
+    readable = readableTone (base00 b)
    in
     (accentColor (base0D b) defaultTheme)
       { themeWindow = base00 b
@@ -1207,7 +1326,9 @@ themeFromBase16Mode dark b =
       , themeYellow = base0A b
       , themeGreen = base0B b
       , themePurple = base0E b
-      , themeWarning = warnCol
+      , themeSuccess = readable (base0B b)
+      , themeWarning = readable (pick (base0A b) (base09 b))
+      , themeDanger = readable (base08 b)
       , themeOverlayDim = colorRGBA 0 0 0 (pick 160 100)
       , themeOnAccent =
           if colorLuminance (base0D b) > 0.6

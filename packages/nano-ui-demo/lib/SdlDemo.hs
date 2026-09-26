@@ -193,15 +193,17 @@ data DemoTheme
   | ThemeSystem
   deriving (Bounded, Enum, Eq, Ord, Read, Show)
 
--- | A theme choice's name, and how it sets the session theme: a fixed theme,
--- or the default theme in light or dark as the desktop is set.
+-- | A theme choice's name, and how it sets the session theme each frame: a
+-- fixed theme, or the default theme in light or dark as the desktop is set,
+-- picked from the system's appearance. Setting the same theme again costs
+-- nothing.
 themeChoice :: DemoTheme -> (T.Text, NanoUI ())
 themeChoice = \case
   ThemeDefault -> ("Default", setUiTheme defaultTheme)
   TomorrowNightMin -> ("Tomorrow Night Min", setUiTheme tomorrowNightMinDarkTheme)
   TomorrowLight -> ("Tomorrow Light", setUiTheme tomorrowMinLightTheme)
   TomorrowMidnightMin -> ("Tomorrow at Midnight Min", setUiTheme tomorrowMidnightMinDarkTheme)
-  ThemeSystem -> ("Follow system", followSystemThemeUi defaultLightTheme defaultTheme)
+  ThemeSystem -> ("Follow system", setUiTheme . lightDark defaultLightTheme defaultTheme =<< systemAppearance)
 
 -- | What the demo reads once per context: the font families offered by the
 -- Controls-tab font combo box, from the SDL backend's system font scan
@@ -712,7 +714,8 @@ demoUi = do
               captioned "Drawing" (diagram (fillW . maxH 200) . drawingSample =<< uiPlotStyle)
               -- Drawing without diagrams: paths on a canvas, built with
               -- NanoUI.Path. Their curves flatten for the display the
-              -- canvas is on, and withTransform turns and moves them.
+              -- canvas is on, withTransform turns and moves them, and a
+              -- fill rule, a gradient, joins, caps and dashes paint them.
               captioned "Canvas paths" (canvas (fixedWH 360 120) . pathSample =<< uiTheme)
 
             ------------------------------------------- Diagnostics ---------
@@ -953,8 +956,9 @@ drawingSample ps =
     <> (circle 0.28 # fc (plotInk ps) # lw none)
     <> (fromVertices [p2 (-0.5, -0.5), p2 (0.5, 0.5)] # lc (plotGrid ps) # lwO 1.5)
 
--- | A pie chart of arcs, a star turned by a transform, and a curve with
--- round ends.
+-- | A pie chart of arcs; a star turned by a transform, a round hole cut out
+-- of it by the even-odd rule, filled with a gradient and outlined with round
+-- corners; and a dashed curve with round ends.
 pathSample :: Theme -> Rect -> CanvasM ()
 pathSample theme (Rect x y _ h) = do
   let r = h / 2 - 8
@@ -972,13 +976,15 @@ pathSample theme (Rect x y _ h) = do
                 k = if even i then r else r * 0.45
           ]
   withTransform (P.translate (x + h * 1.5) (y + h / 2) <> P.rotate (pi / 12)) $ do
-    drawPath star (themeYellow theme)
-    drawStrokePath star 1.5 (themeOrange theme)
-  drawStrokePathCapped
-    P.RoundCap
+    drawPathWith
+      P.EvenOdd
+      (star <> P.circle (V2 0 0) (r * 0.2))
+      (P.Linear (V2 0 (-r)) (V2 0 r) [(0, themeYellow theme), (1, themeOrange theme)])
+    drawStrokePathWith (P.stroke 1.5) {P.strokeJoin = P.RoundJoin} star (P.Solid (themeOrange theme))
+  drawStrokePathWith
+    (P.stroke 3) {P.strokeCap = P.RoundCap, P.strokeDash = [10, 7]}
     (P.moveTo (V2 (x + 250) (y + h - 16)) <> P.cubicTo (V2 (x + 280) (y - 20)) (V2 (x + 310) (y + h + 20)) (V2 (x + 350) (y + 16)))
-    3
-    (themeAccent theme)
+    (P.Solid (themeAccent theme))
 
 ------------------------------------------------------------------------------
 -- §9  Debug window content

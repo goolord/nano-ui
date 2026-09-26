@@ -16,10 +16,10 @@ import Data.Text qualified as T
 import NanoUI
   ( Color, DrawOp (..), ImageId (..), Input (..), NanoUI, NanoUIEs, Rect (..), Size (..), Style (..), TextFont (..), Theme (..)
   , V2 (..), WidgetId, background, checkboxBoxSize, colorA, colorB, colorG, colorR, colorRGBA, columnWith, drawCheckbox, fillW, fixedH, fixedW, fontColor, foreground
-  , getScrollOffset, label, padAll, panel, rectIntersect, runCanvas, scrollArea, uiIO
+  , getScrollOffset, label, padAll, panel, rectIntersect, runCanvasFor, scrollArea, uiIO
   )
 import NanoUI.Backend (FontBackend (..), FontMetrics (..), monospaceMetrics)
-import NanoUI.Internal.Context (Context (..), CustomDrawingEntry (..), DrawingEntry (..), lookupCustomDrawing, lookupDrawing)
+import NanoUI.Internal.Context (Context (..), CustomDrawingEntry (..), lookupCustomDrawing)
 import NanoUI.Internal.Layout.Arena (NodeType (..), arenaCount, getNodeRect, getNodeType, getWidgetId)
 import NanoUI.Internal.Widgets.Custom (mkCustomDrawContext)
 import NanoUI.Markdown
@@ -54,14 +54,16 @@ drawnWords ctx = do
     cdc <- mkCustomDrawContext ctx (ctxFontMetrics ctx) wid
     pure [Word' wid (V2 tx ty) (textFontSize font) t c | Just e <- [entry], DrawTextStyled tx ty font t c <- toList (cdrBuild e cdc r)]
 
--- | The frame's list markers: each one's id, version and ops, in document
--- order.
+-- | The frame's list markers: each one's id, content key and ops, in
+-- document order. They are the canvases that draw no text.
 markers :: Context -> IO [(WidgetId, Int, [DrawOp])]
 markers ctx = do
   drawings <- nodesOf NodeDrawing ctx
   fmap concat . forM drawings $ \(wid, r) -> do
-    entry <- lookupDrawing ctx wid
-    pure [(wid, deContent e, toList (deBuild e r)) | Just e <- [entry]]
+    entry <- lookupCustomDrawing ctx wid
+    cdc <- mkCustomDrawContext ctx (ctxFontMetrics ctx) wid
+    let isText = \case DrawTextStyled {} -> True; DrawText {} -> True; _ -> False
+    pure [(wid, cdrContent e, ops) | Just e <- [entry], let ops = toList (cdrBuild e cdc r), not (any isText ops)]
 
 wordNamed :: Text -> [Word'] -> Maybe Word'
 wordNamed t = find ((== t) . wText)
@@ -350,7 +352,8 @@ spec = do
     case ops of
       [_, StrokeRoundedRect r@(Rect _ _ w h) _ _ _] -> do
         (w, h) `shouldBe` (side, side)
-        ops == toList (runCanvas (drawCheckbox theme r False)) `shouldBe` True
+        cdc <- mkCustomDrawContext ctx (ctxFontMetrics ctx) boxId
+        ops == toList (runCanvasFor cdc (drawCheckbox theme r False)) `shouldBe` True
       _ -> expectationFailure ("expected an unchecked box's two ops, got " <> show (length ops))
 
   it "draws the blocks mdBlock draws, at every depth, and the rest as it would" $ do

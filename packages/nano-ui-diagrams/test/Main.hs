@@ -10,6 +10,7 @@ import Data.Primitive.PrimArray (indexPrimArray, primArrayToList, sizeofPrimArra
 import Data.Text qualified as T
 import Data.Primitive.SmallArray (SmallArray, emptySmallArray)
 import Data.Vector qualified as V
+import Diagrams.Prelude qualified as D
 import Diagrams.Prelude
   ( Diagram
   , circle
@@ -33,7 +34,7 @@ import NanoUI.Diagrams
   , fitLayout
   )
 import NanoUI.Diagrams.Backend (diagramTextOps)
-import NanoUI.Internal.Path (LineCap (ButtCap), fillPathOps, strokePathOps)
+import NanoUI.Internal.Path (FillRule (..), Paint (..), Shade (..), fillPathOps, strokePathOps)
 import NanoUI.Path qualified as P
 import NanoUI.Plot.Chrome
   ( Margins (..)
@@ -85,6 +86,8 @@ main = hspec $ do
     it "triangulates indexed polygons with full coverage" testIndexedTriangulation
     it "covers polyline strokes end to end" testStrokeCoversMidpoint
     it "fills a level rectangle with a rect op" testRectFill
+    it "cuts a loop inside another out by the fill rule" testFillRule
+    it "strokes with the style's caps, joins and dashes" testStrokeStyle
   describe "scales and domains" $ do
     it "picks and formats nice ticks" testNiceTicks
     it "shares bounds across series" testMultiSeriesDomains
@@ -168,7 +171,7 @@ testIndexedTriangulation = do
       toV (x, y) = NanoUI.V2 x y
       triangles pts =
         [ (corner k, corner (k + 1), corner (k + 2))
-        | FillPolygon vs tris _ <- fillPathOps 0.5 mempty (P.polygon (map toV pts)) col
+        | FillPolygon vs _ tris _ <- fillPathOps 0.5 mempty NonZero (P.polygon (map toV pts)) (Solid col)
         , let corner k = let i = indexPrimArray tris k in (indexPrimArray vs (2 * i), indexPrimArray vs (2 * i + 1))
         , k <- [0, 3 .. sizeofPrimArray tris - 3]
         ]
@@ -203,13 +206,13 @@ testStrokeCoversMidpoint :: IO ()
 testStrokeCoversMidpoint = do
   let
     col = themeRed defaultTheme
-    stroke w path = strokePathOps 0.5 mempty ButtCap path w col
+    stroke w path = strokePathOps 0.5 mempty (P.stroke w) path (Solid col)
   -- One anti-aliased op for the whole line, its repeated point dropped.
   check "stroke polyline changed its points" $ case stroke 2 (P.polyline [NanoUI.V2 0 0, NanoUI.V2 20 0, NanoUI.V2 20 0, NanoUI.V2 20 20]) of
-    [StrokePolyline pts 2 False c] -> c == col && primArrayToList pts == [0, 0, 20, 0, 20, 20]
+    [StrokePolyline pts 2 False _ _ _ (Flat c)] -> c == col && primArrayToList pts == [0, 0, 20, 0, 20, 20]
     _ -> False
   check "closed stroke polyline repeated its first point" $ case stroke 1 (P.polygon [NanoUI.V2 0 0, NanoUI.V2 10 0, NanoUI.V2 10 10, NanoUI.V2 0 0]) of
-    [StrokePolyline pts 1 True _] -> sizeofPrimArray pts == 6
+    [StrokePolyline pts 1 True _ _ _ _] -> sizeofPrimArray pts == 6
     _ -> False
 
 testRectFill :: IO ()
@@ -225,6 +228,27 @@ testRectFill = do
   check "a turned rectangle is not one polygon" $ case fills (rect 4 2 # rotateBy (1 / 8)) of
     [FillPolygon {}] -> True
     _ -> False
+
+testFillRule :: IO ()
+testFillRule = do
+  let ringsOf d = [sizeofPrimArray rings - 1 | FillPolygon _ rings _ _ <- toList (diagramOps 100 100 (d # fc coral # lw none))]
+      annulus :: D.Path D.V2 Double
+      annulus = D.circle 2 <> D.circle 1
+  -- A path's loops fill together: the inner circle is a hole by the even-odd
+  -- rule, or by winding when it goes the other way, and filled over when not.
+  check "even-odd annulus lost its hole" (ringsOf (D.strokeP annulus # D.fillRule D.EvenOdd) == [2])
+  check "winding annulus lost its hole" (ringsOf (D.strokeP (D.circle 2 <> D.reversePath (D.circle 1))) == [2])
+  check "winding annulus cut a hole" (ringsOf (D.strokeP annulus) == [1])
+
+testStrokeStyle :: IO ()
+testStrokeStyle = do
+  let strokes d = [(cap, join, sizeofPrimArray pts) | StrokePolyline pts _ _ cap join _ _ <- toList (diagramOps 100 100 (d # D.lc steelblue))]
+      zigzag = D.fromVertices [D.p2 (0, 0), D.p2 (1, 0), D.p2 (1, 1)] :: Diagram B
+  check "a line's cap and join were not the style's" $
+    map (\(c, j, _) -> (c, j)) (strokes (zigzag # D.lineCap D.LineCapRound # D.lineJoin D.LineJoinRound)) == [(P.RoundCap, P.RoundJoin)]
+  check "a line's default cap and join changed" $
+    map (\(c, j, _) -> (c, j)) (strokes zigzag) == [(P.ButtCap, P.MiterJoin)]
+  check "a dashed line was not cut into dashes" (length (strokes (zigzag # D.dashingO [4, 4] 0)) > 4)
 
 testNiceTicks :: IO ()
 testNiceTicks = do
@@ -416,13 +440,13 @@ testLegendColors fm = do
 
 -- | The colour of a polygon fill or a polyline stroke.
 inkColor :: DrawOp -> Maybe Color
-inkColor (FillPolygon _ _ c) = Just c
-inkColor (StrokePolyline _ _ _ c) = Just c
+inkColor (FillPolygon _ _ _ (Flat c)) = Just c
+inkColor (StrokePolyline _ _ _ _ _ _ (Flat c)) = Just c
 inkColor _ = Nothing
 
 -- | Triangles across the polygon fills.
 fillTriCount :: SmallArray DrawOp -> Int
-fillTriCount ops = sum [sizeofPrimArray tris `div` 3 | FillPolygon _ tris _ <- toList ops]
+fillTriCount ops = sum [sizeofPrimArray tris `div` 3 | FillPolygon _ _ tris _ <- toList ops]
 
 -- | Every x of the polygon fills and polyline strokes in @c@.
 inkXsOf :: Color -> SmallArray DrawOp -> [Float]
@@ -431,8 +455,8 @@ inkXsOf c ops =
   | op <- toList ops
   , inkColor op == Just c
   , pts <- case op of
-      FillPolygon p _ _ -> [p]
-      StrokePolyline p _ _ _ -> [p]
+      FillPolygon p _ _ _ -> [p]
+      StrokePolyline p _ _ _ _ _ _ -> [p]
       _ -> []
   , (i, x) <- zip [0 :: Int ..] (primArrayToList pts)
   , even i

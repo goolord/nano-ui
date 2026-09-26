@@ -96,6 +96,7 @@ library
         NanoUI.Widgets.TextDocument
         NanoUI.Widgets.TextEditor
         NanoUI.Widgets.TextField
+        NanoUI.Internal.Canvas
         NanoUI.Internal.Context
         NanoUI.Internal.Context.Types
         NanoUI.Internal.Debug

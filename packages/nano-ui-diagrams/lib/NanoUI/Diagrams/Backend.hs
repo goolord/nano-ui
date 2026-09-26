@@ -21,7 +21,7 @@ import Data.Tree (Tree (Node))
 import Data.Typeable (Typeable)
 import Data.Primitive.PrimArray (primArrayToList)
 import Data.Primitive.SmallArray (SmallArray, emptySmallArray, mapSmallArray', smallArrayFromList)
-import Diagrams.Attributes (_lineWidthU)
+import Diagrams.Attributes (Dashing (..), LineCap (..), LineJoin (..), _dashingU, _lineCap, _lineJoin, _lineMiterLimit, _lineWidthU)
 import Diagrams.Core
   ( Backend (..)
   , N
@@ -52,6 +52,7 @@ import Diagrams.Segment (FixedSegment (..))
 import Diagrams.Trail (fixTrail, isLoop)
 import Diagrams.TwoD.Adjust (adjustDia2D)
 import Diagrams.TwoD.Attributes (_AC, _fillTexture, _lineTexture)
+import Diagrams.TwoD.Path (FillRule (..), _fillRule)
 import Diagrams.TwoD.Size (mkHeight)
 import Diagrams.TwoD.Text (Text (..), TextAlignment (..))
 import NanoUI
@@ -111,7 +112,7 @@ instance (Typeable n, RealFloat n) => Renderable (Path V2 n) NanoUIBackend where
   render _ path = NRenderFull $ \textOnly sty ->
     if textOnly
       then DL.empty
-      else foldMap (DL.fromList . trailOps sty) (pathTrails path)
+      else DL.fromList (pathOps sty (pathTrails path))
 
 textOps ::
   (Typeable n, RealFloat n) => Text n -> DiaCore.Style V2 n -> DList DrawOp
@@ -132,23 +133,44 @@ textOps (Text tr align str) sty
 instance (Typeable n, RealFloat n) => Renderable (Text n) NanoUIBackend where
   render _ t = NRenderFull (const (textOps t))
 
-trailOps ::
+-- | A path's ops: its loops filled together by the style's fill rule, so
+-- a loop inside another can be a hole in it, then every trail stroked with
+-- the style's caps, joins and dashes.
+pathOps ::
   (Typeable n, RealFloat n) =>
-  DiaCore.Style V2 n -> Located (Trail V2 n) -> [DrawOp]
-trailOps sty lt = fills ++ strokes
+  DiaCore.Style V2 n -> [Located (Trail V2 n)] -> [DrawOp]
+pathOps sty trails = fills ++ strokes
   where
-    closed = isLoop (unLoc lt)
-    path = trailPath closed (fixTrail lt)
+    trailOf lt = let closed = isLoop (unLoc lt) in (closed, trailPath closed (fixTrail lt))
+    paths = map trailOf trails
+    loops = mconcat [path | (True, path) <- paths]
     lineW = case toF <$> sty ^. _lineWidthU of
       Nothing -> 1
       Just w
         | w <= 0 -> 0
         | otherwise -> max 1 w
+    rule = case sty ^. _fillRule of
+      Winding -> P.NonZero
+      EvenOdd -> P.EvenOdd
+    lineStroke =
+      (P.stroke lineW)
+        { P.strokeCap = case sty ^. _lineCap of
+            LineCapButt -> P.ButtCap
+            LineCapRound -> P.RoundCap
+            LineCapSquare -> P.SquareCap
+        , P.strokeJoin = case sty ^. _lineJoin of
+            LineJoinMiter -> P.MiterJoin
+            LineJoinRound -> P.RoundJoin
+            LineJoinBevel -> P.BevelJoin
+        , P.strokeMiterLimit = toF (sty ^. _lineMiterLimit)
+        , P.strokeDash = maybe [] (\(Dashing ds _) -> map toF ds) (sty ^. _dashingU)
+        , P.strokeDashOffset = maybe 0 (\(Dashing _ o) -> toF o) (sty ^. _dashingU)
+        }
     fills = case fillColour sty of
-      Just c | colorA c > 0 && closed -> map rectOp (P.fillPathOps curveTol mempty path c)
+      Just c | colorA c > 0 && any fst paths -> map rectOp (P.fillPathOps curveTol mempty rule loops (P.Solid c))
       _ -> []
     strokes = case lineColour sty of
-      Just c | colorA c > 0 && lineW > 0 -> P.strokePathOps curveTol mempty P.ButtCap path lineW c
+      Just c | colorA c > 0 && lineW > 0 -> P.strokePathOps curveTol mempty lineStroke (mconcat (map snd paths)) (P.Solid c)
       _ -> []
 
 -- | How far a flattened curve may stray from the true one, in logical pixels.
@@ -172,7 +194,7 @@ trailPath closed segs@(s0 : _) = P.Path (start s0 : map seg segs ++ [P.SegClose 
 -- | A filled axis-aligned rectangle, what bar charts are made of, as a rect
 -- op: it draws without the seams a polygon's triangles can show.
 rectOp :: DrawOp -> DrawOp
-rectOp op@(FillPolygon pts _ col) = case primArrayToList pts of
+rectOp op@(FillPolygon pts _ _ (P.Flat col)) = case primArrayToList pts of
   [x0, y0, x1, y1, x2, y2, x3, y3]
     | level x0 y0 x1 y1 x2 y2 x3 y3 || level y0 x0 y1 x1 y2 x2 y3 x3 ->
         FillRect (Rect (min x0 x2) (min y0 y2) (abs (x2 - x0)) (abs (y2 - y0))) col

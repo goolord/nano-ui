@@ -779,9 +779,10 @@ data Context = Context
   , ctxSystemAppearance :: !(IORef (Maybe Appearance))
   -- ^ The system's light or dark preference as the backend last reported
   -- it, or 'Nothing' when it cannot tell.
-  , ctxSystemThemes :: !(IORef (Maybe (Theme, Theme)))
-  -- ^ The light and dark themes the base theme follows the system
-  -- appearance with, or 'Nothing' for a fixed base theme.
+  , ctxThemeFor :: !(IORef (Maybe (Maybe Appearance -> Theme)))
+  -- ^ The base theme for each system appearance, when it follows the
+  -- system ('NanoUI.Internal.Context.followSystemTheme'); 'Nothing' for a
+  -- fixed base theme.
   , ctxContainerStack :: IORef [Int]
   , ctxMessages :: IORef [FrameMsg]
   , ctxFocusables :: IORef (MutablePrimArray RealWorld WidgetId)

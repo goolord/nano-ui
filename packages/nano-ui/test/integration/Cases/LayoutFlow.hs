@@ -1,6 +1,7 @@
 module Cases.LayoutFlow (tests) where
 
 import Spec
+import Data.Primitive.SmallArray (smallArrayFromList)
 import Data.List (findIndex)
 import NanoUI.Adornment qualified as A
 import NanoUI.Internal.Context (Context (..))
@@ -178,7 +179,7 @@ runPinOutsideParentPaintTest ctx failed = do
         stackWith tight $ box (pinAt 10 10 . fixedWH 20 20) green
         rowWith (tight . fixedWH 50 20) $
           drawingVersioned version (pinAt 200 0 . fixedWH 20 20) $ \r ->
-            runCanvas (drawRect r (if version == 1 then red else blue))
+            smallArrayFromList [FillRect r (if version == 1 then red else blue)]
       drawn col draw = any ((== col) . snd) <$> drawQuads draw
   (_, full) <- warmupDraw ctx input0 (ui 1)
   forM_ [green, red] $ \col -> assert failed =<< drawn col full

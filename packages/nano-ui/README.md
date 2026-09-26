@@ -79,7 +79,8 @@ backends' reducer runners fold them into the model.
   sliders, knobs, selects, combo boxes, sortable tables, trees, tabs, menus,
   context menus, modals, floating windows, pane grids, colour pickers, progress
   bars, sparklines, rich text, SVG icons, and drag and drop. `customWidget` and
-  a canvas API cover anything else.
+  a canvas API, with paths, fill rules, strokes with joins and dashes,
+  gradients, clips and transforms, cover anything else.
 - Row, column, grid, and stacked (`stack`) layout with scrolling, wrapping
   (`wrap`), and pinned children (`pinAt`). Layout options are
   `Layout -> Layout` modifiers, as in `columnWith (gap 8 . padAll 12)`.

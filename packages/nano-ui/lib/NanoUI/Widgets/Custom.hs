@@ -5,7 +5,9 @@
 -- and damage slop.
 -- 'canvas' is the short form for drawing into a laid-out rectangle with
 -- 'CanvasM', which fills and strokes paths from "NanoUI.Path" as well as
--- rects, circles, lines, images and text, and draws through transforms.
+-- rects, circles, lines, images and text, clips, and draws through
+-- transforms; 'canvasConfigured' adds a content key, a cursor and pointer
+-- tracking, and 'drawContext' hands the drawing hover and press state.
 -- 'useDrag2DOn' and 'useWheelDeltaOn' are gesture hooks for your own
 -- controls, fed the widget's 'Response'; 'knob' and 'toggleSwitch' show how
 -- they fit together. Each reference
@@ -26,9 +28,13 @@ module NanoUI.Widgets.Custom
   , CustomDrawBuild
     -- * Canvas
   , CanvasM
-  , runCanvas
-  , runCanvasFor
   , canvas
+  , CanvasConfig (..)
+  , defaultCanvasConfig
+  , canvasConfigured
+  , runCanvasFor
+  , drawContext
+  , runCanvas
   , drawRect
   , drawRoundedRect
   , drawCircle
@@ -43,17 +49,20 @@ module NanoUI.Widgets.Custom
   , drawImageUV
   , drawImageRotated
   , drawText
+  , drawTextWith
   , drawCheckbox
   , checkboxBoxSize
-    -- * Paths and transforms
+    -- * Paths, clips and transforms
 
     -- | Build a path with "NanoUI.Path", imported qualified, and fill or
-    -- stroke it here. 'withTransform' moves, turns and scales what a block
-    -- draws.
+    -- stroke it here, in a colour or a 'NanoUI.Path.Paint'. 'withTransform'
+    -- moves, turns and scales what a block draws, and 'withClip' clips it.
   , drawPath
+  , drawPathWith
   , drawStrokePath
-  , drawStrokePathCapped
+  , drawStrokePathWith
   , withTransform
+  , withClip
     -- * Gestures
   , useDrag2DOn
   , Drag2D (..)
@@ -76,25 +85,19 @@ module NanoUI.Widgets.Custom
   ) where
 
 import Control.Monad (void, when)
-import Control.Monad.Trans.Class (lift)
-import Control.Monad.Trans.Reader qualified as Reader
-import Control.Monad.Trans.State.Strict qualified as State
-import Data.Text (Text)
 import Data.Text qualified as T
-import Data.Primitive.SmallArray (SmallArray, emptySmallArray, smallArrayFromList)
+import Data.Primitive.SmallArray (emptySmallArray)
 import Effectful (Eff, type (:>))
+import NanoUI.Internal.Canvas
 import NanoUI.Internal.Context
-import NanoUI.Internal.Draw (DrawOp (..), checkboxOps)
 import Data.Word (Word64)
 import Data.Hashable (Hashable, hash)
-import Data.Maybe (fromMaybe)
 import GHC.Float (castFloatToWord32)
-import NanoUI.Internal.Font (FontMetrics (fmSnapScale), checkboxBoxSize)
+import NanoUI.Internal.Font (checkboxBoxSize)
 import NanoUI.Internal.Id (WidgetId, mix64)
 import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena (NodeType (NodeDrawing))
 import NanoUI.Internal.Monad (Ui, askContext, askInput, freshWidget, nextId, uiIO, uiTime)
-import NanoUI.Internal.Path (LineCap (..), Path, Transform, curveTolerance, fillPathOps, strokePathOps, transformOp)
 import NanoUI.Path qualified as P
 import NanoUI.Internal.Store
 import NanoUI.Internal.Style
@@ -104,171 +107,6 @@ import NanoUI.Internal.Widgets.Combinators (finishInput, finishToggle)
 import NanoUI.Internal.Widgets.Node
 import NanoUI.Internal.Widgets.Animate (keepAnimating)
 import NanoUI.Internal.Widgets.Custom (customDrawContext)
-
--- -----------------------------------------------------------------------------
--- Canvas Monad
--- -----------------------------------------------------------------------------
-
--- | Monadic canvas builder that collects 'DrawOp' vector operations efficiently.
-newtype CanvasM a = CanvasM (Reader.ReaderT CanvasEnv (State.State ([DrawOp] -> [DrawOp])) a)
-  deriving (Functor, Applicative, Monad)
-
--- | What a canvas block draws under: the transform 'withTransform' set, if
--- any, and how far a flattened curve may stray from the true one, in
--- logical pixels, which a block that draws no curve never works out.
-data CanvasEnv = CanvasEnv
-  { ceTransform :: !(Maybe Transform)
-  , ceTolerance :: Float
-  }
-
--- | Compile a 'CanvasM' block into an immutable 'SmallArray DrawOp'. It
--- does not know the display's scale, so it flattens curves finely enough
--- for two device pixels to the logical one; 'runCanvasFor' flattens them
--- for the display the widget is on.
-{-# INLINE runCanvas #-}
-runCanvas :: CanvasM a -> SmallArray DrawOp
-runCanvas = runCanvasScaled 2
-
--- | 'runCanvas' for a custom widget's drawing, flattening curves to within
--- a quarter of a device pixel on the display its draw context is for:
---
--- > widgetDraw = \cdc rect -> runCanvasFor cdc (drawPath (P.circle (V2 20 20) 12) accent)
-{-# INLINE runCanvasFor #-}
-runCanvasFor :: CustomDrawContext -> CanvasM a -> SmallArray DrawOp
-runCanvasFor cdc = runCanvasScaled (fmSnapScale (cdcFont cdc))
-
-{-# INLINE runCanvasScaled #-}
-runCanvasScaled :: Float -> CanvasM a -> SmallArray DrawOp
-runCanvasScaled scale (CanvasM m) =
-  smallArrayFromList (State.execState (Reader.runReaderT m (CanvasEnv Nothing (curveTolerance scale))) id [])
-
-{-# INLINE emitOp #-}
-emitOp :: DrawOp -> CanvasM ()
-emitOp op = CanvasM $ do
-  env <- Reader.ask
-  lift $ case ceTransform env of
-    Nothing -> State.modify (. (op :))
-    Just t -> emitOps (transformOp (ceTolerance env) t op)
-
-{-# INLINE emitOps #-}
-emitOps :: [DrawOp] -> State.State ([DrawOp] -> [DrawOp]) ()
-emitOps ops = State.modify (. (ops ++))
-
--- | Ops built from the block's transform, the identity for none, and its
--- curve tolerance.
-{-# INLINE emitWith #-}
-emitWith :: (Transform -> Float -> [DrawOp]) -> CanvasM ()
-emitWith build = CanvasM $ do
-  env <- Reader.ask
-  lift (emitOps (build (fromMaybe mempty (ceTransform env)) (ceTolerance env)))
-
--- | Fill a solid rectangle.
-drawRect :: Rect -> Color -> CanvasM ()
-drawRect r c = emitOp (FillRect r c)
-
--- | Fill a rounded rectangle with given corner radius.
-drawRoundedRect :: Rect -> Float -> Color -> CanvasM ()
-drawRoundedRect r radius c = emitOp (FillRoundedRect r radius c)
-
--- | Fill a solid circle at center with given radius.
-drawCircle :: V2 -> Float -> Color -> CanvasM ()
-drawCircle (V2 cx cy) radius c = emitOp (FillCircle cx cy radius c)
-
--- | Stroke a straight segment between two points with thickness.
-drawStroke :: V2 -> V2 -> Float -> Color -> CanvasM ()
-drawStroke (V2 x0 y0) (V2 x1 y1) thickness c = emitOp (Stroke x0 y0 x1 y1 thickness c)
-
--- | Stroke a rounded rectangle border with given radius and stroke width.
-drawStrokeRoundedRect :: Rect -> Float -> Float -> Color -> CanvasM ()
-drawStrokeRoundedRect r radius thickness c = emitOp (StrokeRoundedRect r radius thickness c)
-
--- | Stroke a circular outline at center with given radius and stroke width.
-drawStrokeCircle :: V2 -> Float -> Float -> Color -> CanvasM ()
-drawStrokeCircle (V2 cx cy) radius thickness c = emitOp (StrokeCircle cx cy radius thickness c)
-
--- | Antialiased smooth stroke line between two points.
-drawStrokeAA :: V2 -> V2 -> Float -> Color -> CanvasM ()
-drawStrokeAA (V2 x0 y0) (V2 x1 y1) thickness c = emitOp (StrokeLineAA x0 y0 x1 y1 thickness c)
-
--- | Four-corner bilinear gradient fill (top-left, top-right, bottom-right, bottom-left).
-drawQuadGradient :: Rect -> Color -> Color -> Color -> Color -> CanvasM ()
-drawQuadGradient r tl tr br bl = emitOp (FillQuadGradient r tl tr br bl)
-
--- | Horizontal 2-color linear gradient fill (left to right).
-drawLinearGradientH :: Rect -> Color -> Color -> CanvasM ()
-drawLinearGradientH r leftCol rightCol = emitOp (FillQuadGradient r leftCol rightCol rightCol leftCol)
-
--- | Vertical 2-color linear gradient fill (top to bottom).
-drawLinearGradientV :: Rect -> Color -> Color -> CanvasM ()
-drawLinearGradientV r topCol botCol = emitOp (FillQuadGradient r topCol topCol botCol botCol)
-
--- | Draw a textured image stretched over given rectangle.
-drawImage :: Rect -> ImageId -> Color -> CanvasM ()
-drawImage r (ImageId tid) c = emitOp (DrawImageRect r tid 0 0 1 1 c)
-
--- | Draw a sub-region of a textured image with explicit UV texture coordinates.
-drawImageUV :: Rect -> ImageId -> Float -> Float -> Float -> Float -> Color -> CanvasM ()
-drawImageUV r (ImageId tid) u0 v0 u1 v1 c = emitOp (DrawImageRect r tid u0 v0 u1 v1 c)
-
--- | 'drawImage' turned about the rectangle's centre by an angle in radians,
--- clockwise on screen. Whatever leaves the canvas is clipped.
-drawImageRotated :: Rect -> Float -> ImageId -> Color -> CanvasM ()
-drawImageRotated r angle (ImageId tid) c = emitOp (DrawImageRotated r angle tid 0 0 1 1 c)
-
--- | Draw text positioned at a reference point with horizontal and vertical alignment.
-drawText :: V2 -> AlignX -> AlignY -> Text -> Color -> CanvasM ()
-drawText (V2 x y) alignX alignY txt col =
-  let ax = case alignX of AlignStart -> 0; AlignCenter -> 0.5; AlignEnd -> 1
-      ay = case alignY of AlignTop -> 1; AlignMiddle -> 0.5; AlignBottom -> 0; AlignBaseline -> -1
-   in emitOp (DrawText x y ax ay txt col)
-
--- | A checkbox's box as the checkbox widget draws it, in the square at the
--- rect's top-left corner as wide as the rect's shorter side: the theme's
--- accent with a check mark when checked, otherwise an input well with the
--- theme's button border. The widget draws it 'checkboxBoxSize' wide.
-drawCheckbox :: Theme -> Rect -> Bool -> CanvasM ()
-drawCheckbox theme (Rect x y w h) = checkboxOps emitOp theme (styleBorder (themeButton theme)) x y (min w h)
-
--- | Fill a path built with "NanoUI.Path". Each subpath fills on its own,
--- as if closed, as one anti-aliased 'FillPolygon': one inside another is
--- drawn over it rather than cut out of it, and one that crosses itself may
--- fill only in part.
-drawPath :: Path -> Color -> CanvasM ()
-drawPath path col = emitWith (\t tol -> fillPathOps tol t path col)
-
--- | Stroke a path built with "NanoUI.Path", this wide, as one anti-aliased
--- 'StrokePolyline' a subpath. Its corners are mitered, a very sharp one cut
--- short, and an open subpath's ends are cut square at its end points.
-drawStrokePath :: Path -> Float -> Color -> CanvasM ()
-drawStrokePath = drawStrokePathCapped ButtCap
-
--- | 'drawStrokePath' with the given ends on open subpaths. A round cap is a
--- disc drawn over the end, so a translucent line shows darker where the two
--- overlap.
-drawStrokePathCapped :: LineCap -> Path -> Float -> Color -> CanvasM ()
-drawStrokePathCapped cap path w col = emitWith (\t tol -> strokePathOps tol t cap path w col)
-
--- | Draw a block through a transform from "NanoUI.Path", inside any it is
--- already in, which applies after it: @withTransform (P.translate 40 40 <>
--- P.rotate a)@ turns what the block draws by @a@ about the origin, then
--- moves it 40 right and 40 down.
---
--- Paths are transformed before they are flattened, so a curve scaled up
--- stays smooth, and a stroke's width scales with the transform (by the
--- square root of its area scale, for one that scales x and y apart). The
--- other ops follow as far as their shapes allow. Rects, rounded rects,
--- circles and their outlines keep their own ops while they keep their
--- shape, and otherwise become paths: a rect turned other than by quarter
--- turns is a polygon, and a circle scaled on one axis an ellipse. Lines and
--- triangles move their points. A gradient fills the bounding box of its
--- transformed rect, its corners taking the colours of the corners that land
--- nearest them, and does not turn. An image turns and scales with the
--- transform, and turns over with a flip: under a rotation or a skew it is
--- drawn as a 'DrawImageRotated', and a skew leaves it a rect. Text moves its
--- anchor; its glyphs are neither scaled nor turned.
-withTransform :: Transform -> CanvasM a -> CanvasM a
-withTransform t (CanvasM m) =
-  CanvasM (Reader.local (\env -> env {ceTransform = Just (maybe t (<> t) (ceTransform env))}) m)
 
 -- -----------------------------------------------------------------------------
 -- Custom Widget Specification
@@ -388,13 +226,54 @@ customWidget spec = do
   customWidgetWithId wid spec
 
 -- | Draw into a rectangle sized by the layout modifier, curves flattened
--- for the display it is on ('runCanvasFor'). Use 'customWidget' when the
--- drawing needs hover or press state.
+-- for the display it is on ('runCanvasFor'). Its ops are rebuilt and
+-- compared every frame; 'canvasConfigured' takes a content key that saves
+-- that, and a cursor.
 canvas :: (Ui :> es) => (Layout -> Layout) -> (Rect -> CanvasM ()) -> Eff es Response
-canvas f drawAction =
+canvas f = canvasConfigured defaultCanvasConfig {canvasLayout = f defaultLayout}
+
+-- | What 'canvasConfigured' draws with besides its drawing.
+data CanvasConfig = CanvasConfig
+  { canvasLayout :: !Layout
+    -- ^ Its size and place, as a custom widget's 'widgetLayout' (default
+    -- 'defaultLayout').
+  , canvasContent :: !Int
+    -- ^ A content key, as 'widgetContent': a number that changes whenever
+    -- the drawing would draw something different, made with 'contentKey'
+    -- or 'contentKeyOf' (default 0, no key: the drawing runs every frame).
+  , canvasTrackPointer :: !Bool
+    -- ^ A frame for every pointer move over it, for a drawing of what is
+    -- under the pointer ('widgetTrackPointer'; default 'False').
+  , canvasCursor :: !(Maybe (CustomDrawContext -> Rect -> V2 -> UiCursorKind))
+    -- ^ The pointer's shape over it, from its rect and the pointer
+    -- ('widgetCursor'; default 'Nothing').
+  }
+
+-- | A canvas laid out by 'defaultLayout', with no content key, cursor or
+-- pointer tracking.
+defaultCanvasConfig :: CanvasConfig
+defaultCanvasConfig =
+  CanvasConfig
+    { canvasLayout = defaultLayout
+    , canvasContent = 0
+    , canvasTrackPointer = False
+    , canvasCursor = Nothing
+    }
+
+-- | 'canvas' as a 'CanvasConfig' says. The drawing reads its hover and
+-- press state and theme with 'drawContext':
+--
+-- > canvasConfigured defaultCanvasConfig {canvasLayout = fixedWH 120 24 defaultLayout, canvasContent = contentKey [level]} $ \r -> do
+-- >   cdc <- drawContext
+-- >   drawRoundedRect r 4 (if cdcHovered cdc then themeAccent (cdcTheme cdc) else themeMuted (cdcTheme cdc))
+canvasConfigured :: (Ui :> es) => CanvasConfig -> (Rect -> CanvasM ()) -> Eff es Response
+canvasConfigured cfg drawAction =
   fst <$> customWidget defaultCustomWidgetSpec
-    { widgetLayout = f defaultLayout
-    , widgetDraw   = \cdc rect -> runCanvasFor cdc (drawAction rect)
+    { widgetLayout = canvasLayout cfg
+    , widgetContent = canvasContent cfg
+    , widgetTrackPointer = canvasTrackPointer cfg
+    , widgetCursor = canvasCursor cfg
+    , widgetDraw = \cdc rect -> runCanvasFor cdc (drawAction rect)
     }
 
 -- -----------------------------------------------------------------------------

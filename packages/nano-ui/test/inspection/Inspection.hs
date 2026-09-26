@@ -40,11 +40,12 @@ import NanoUI.Internal.Store
 import NanoUI
   ( Animatable (..)
   , Color
+  , CustomDrawContext
   , Rect (..)
   , V2 (..)
   , drawCircle
   , drawRect
-  , runCanvas
+  , runCanvasFor
   )
 import NanoUI.Testing (DrawCmd (..), DrawOp (..), Layer (..))
 
@@ -147,12 +148,14 @@ inspect $ hasNoTypeClasses 'commandWriteProbe
 inspect $ 'commandReadProbe `doesNotUse` 'U.fromURepr
 inspect $ 'commandWriteProbe `doesNotUse` 'U.toURepr
 
-canvasProbe :: Float -> Color -> SmallArray DrawOp
-canvasProbe x color = runCanvas $ do
+-- A block that draws no curve and asks for no draw context builds neither
+-- the curve tolerance nor the context.
+canvasProbe :: CustomDrawContext -> Float -> Color -> SmallArray DrawOp
+canvasProbe cdc x color = runCanvasFor cdc $ do
   drawRect (Rect x 2 3 4) color
   drawCircle (V2 5 x) 6 color
 
-canvasByHand :: Float -> Color -> SmallArray DrawOp
-canvasByHand !x color = smallArrayFromList [FillRect (Rect x 2 3 4) color, FillCircle 5 x 6 color]
+canvasByHand :: CustomDrawContext -> Float -> Color -> SmallArray DrawOp
+canvasByHand _ !x color = smallArrayFromList [FillRect (Rect x 2 3 4) color, FillCircle 5 x 6 color]
 
 inspect $ 'canvasProbe === 'canvasByHand

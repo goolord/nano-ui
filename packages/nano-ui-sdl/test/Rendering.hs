@@ -23,9 +23,11 @@ import GHC.Clock (getMonotonicTimeNSec)
 import GHC.Conc (getAllocationCounter)
 import Keyboard (keyboardTranslation)
 import NanoUI
-  ( Color, ImageConfig (..), ImageId (..), Rect (..), Rotation (..), colorRGBA, column, defaultImageConfig, defaultLayout
-  , defaultLightTheme, defaultTheme, fixedWH, followSystemTheme, getTheme, imageConfigured', respRect
+  ( Color, ImageConfig (..), ImageId (..), Rect (..), Rotation (..), V2 (..), canvas, colorRGBA, column, defaultImageConfig
+  , defaultLayout, defaultLightTheme, defaultTheme, drawPathWith, drawStrokePathWith, fixedWH, followSystemTheme, getTheme, lightDark
+  , imageConfigured', respRect
   )
+import NanoUI.Path qualified as P
 import NanoUI.Backend (Appearance (..), emptyInput, getSystemAppearance, setSystemAppearance)
 import NanoUI.Internal.Context (lookupImageUv)
 import NanoUI.Sdl.Internal.Cursor (SdlCursors (..), destroyCursors, initCursors, sdlSystemCursor, showCursorKind)
@@ -153,6 +155,36 @@ imageChecks env ctx images draw = do
   half@(r, g, b) <- at faded 10 20
   unless (r >= 120 && r <= 136 && g == 0 && b == 0) (fail ("half-opaque image: " ++ show half))
 
+-- | Canvas paths as SDL draws them: a ring's hole left unfilled by the
+-- even-odd rule; a translucent line as even at its round caps and join as
+-- along it, which a cap drawn over its end would darken; and a dashed
+-- line's gaps.
+pathChecks :: SdlEnv -> Context -> (DrawData -> IO ()) -> IO ()
+pathChecks env ctx draw = do
+  let white = colorRGBA 255 255 255 255
+      glass = colorRGBA 255 255 255 128
+  (resp, dd) <-
+    warmupDraw ctx (withInput 400 300) . column . canvas (fixedWH 200 100) $ \(Rect x y _ _) -> do
+      let c = V2 (x + 40) (y + 50)
+      drawPathWith P.EvenOdd (P.circle c 30 <> P.circle c 15) (P.Solid white)
+      drawStrokePathWith
+        (P.stroke 20) {P.strokeCap = P.RoundCap, P.strokeJoin = P.RoundJoin}
+        (P.polyline [V2 (x + 100) (y + 30), V2 (x + 150) (y + 30), V2 (x + 150) (y + 80)])
+        (P.Solid glass)
+      drawStrokePathWith (P.stroke 4) {P.strokeDash = [6, 6]} (P.polyline [V2 (x + 100) (y + 95), V2 (x + 190) (y + 95)]) (P.Solid white)
+  draw dd
+  let at dx dy = let Rect x y _ _ = respRect resp in pixel env (floor (x + dx)) (floor (y + dy))
+  backdrop <- at 80 5
+  hole <- at 40 50
+  ring <- at 40 27
+  unless (hole == backdrop && ring == (255, 255, 255)) (fail ("even-odd ring: " ++ show (hole, ring, backdrop)))
+  line <- mapM (uncurry at) [(125, 30), (103, 30), (93, 30), (152, 28), (156, 24), (150, 88)]
+  case nub line of
+    [one] | one /= backdrop -> pure ()
+    _ -> fail ("translucent line, caps and join: " ++ show line)
+  dashes <- mapM (\dx -> at dx 95) [103, 109, 115, 121]
+  unless (dashes == [(255, 255, 255), backdrop, (255, 255, 255), backdrop]) (fail ("dashes: " ++ show dashes))
+
 atlasBench :: SdlEnv -> IO ()
 atlasBench env = withGlyphSurface $ \surface ->
   bracket (newAtlas (sdlRenderer env)) freeAtlas $ \atlas -> allocaArray 4 $ \uv -> do
@@ -265,12 +297,12 @@ systemThemeChecks env ctx = do
   -- The context starts out believing the opposite of what SDL says, so a
   -- sync that did not report would leave it, and its theme, stale.
   setSystemAppearance ctx (Just (if want == Just AppearanceDark then AppearanceLight else AppearanceDark))
-  followSystemTheme ctx defaultLightTheme defaultTheme
+  followSystemTheme ctx (lightDark defaultLightTheme defaultTheme)
   (synced, _) <- syncDisplay ctx env emptyInput
   got <- getSystemAppearance synced
   unless (got == want) (fail ("system appearance " ++ show got ++ ", SDL reports " ++ show want))
   theme <- getTheme synced
-  unless (theme == if want == Just AppearanceDark then defaultTheme else defaultLightTheme) $
+  unless (theme == lightDark defaultLightTheme defaultTheme want) $
     fail "a context following the system kept the stale theme after the sync"
 
 main :: IO ()
@@ -317,6 +349,7 @@ main = do
                 fail (name ++ ": clipped geometry lost or escaped damage: " ++ show (inside, untouched))
           step "glyph upload, padding and reset readback" (atlasChecks env (\tex dd -> drawWithGlyph tex dd DamageFull))
           step "image atlas upload, and turned and faded image readback" (imageChecks env ctx images (`draw` DamageFull))
+          step "canvas paths, caps, joins and dashes readback" (pathChecks env ctx (`draw` DamageFull))
           step "cursor mapping and creation" cursorChecks
           step "system theme event" (systemThemeChecks env ctx)
   unless bench $ do

@@ -432,4 +432,4 @@ drawTreeChevron da fm x y h depth expanded col = do
       pts
         | expanded = points3 (mx - s) (my - s * 0.45) mx (my + s * 0.7) (mx + s) (my - s * 0.45)
         | otherwise = points3 (mx - s * 0.45) (my - s) (mx + s * 0.7) my (mx - s * 0.45) (my + s)
-  pushPolylineAA da pts t False col
+  pushPolylineAA da pts t False ButtCap MiterJoin 4 (Flat col)

@@ -8,6 +8,9 @@ module NanoUI.Internal.Draw
   , DrawData (..)
   , DrawArena (..)
   , DrawOp (..)
+  , LineCap (..)
+  , LineJoin (..)
+  , Shade (..)
   , TextFont (..)
   , defaultTextFont
   , DrawingBuild
@@ -60,6 +63,7 @@ module NanoUI.Internal.Draw
 
 import Control.Monad (forM_, unless, when)
 import Data.IORef (readIORef)
+import Data.Maybe (fromMaybe)
 import qualified Data.Text as T
 import Data.Primitive.SmallArray (SmallArray, indexSmallArray, sizeofSmallArray)
 import Data.Primitive.PrimArray (indexPrimArray, readPrimArray, sizeofPrimArray)
@@ -71,7 +75,7 @@ import NanoUI.Internal.Draw.Types
 import NanoUI.Internal.Font
 import NanoUI.Internal.SIMD (pokeQuadCornersSIMD, pokeQuadSIMD)
 import NanoUI.Internal.Style (FontStyle (..), FontWeight (..), TextDecoration (..), Theme (..), styleBg)
-import NanoUI.Internal.Types (Color (..), Rect (..), forUpTo_, onGrid, rectInflate)
+import NanoUI.Internal.Types (Color (..), Rect (..), onGrid, rectInflate, rectIntersect)
 
 -- | Pixel box for a 'DrawText' using host advances. diagrams text has no
 -- envelope, so plot sizing uses this instead of `fontSizeL`.
@@ -316,19 +320,37 @@ pushPreparedTextStyledQuads da fm weight fstyle deco x y txt col
           DecorationUnderlineStrike -> underline >> strike
           DecorationNone -> pure ()
 
--- | Emit ops with @fm@ as the default font and @resolve@ giving the font of
--- styled text, and whether it draws its weight and slant natively.
--- @imageUv@ gives the texture and UV bounds of an image id an image op
--- names, or 'Nothing' when the id is a texture of its own.
+-- | Emit ops with @fm@ as the default font, @size@ the size it is, and
+-- @resolve@ giving the font of styled text, and whether it draws its
+-- weight and slant natively. @imageUv@ gives the texture and UV bounds of
+-- an image id an image op names, or 'Nothing' when the id is a texture of
+-- its own. A 'PushClip' clips the ops up to its 'PopClip' inside the clip
+-- they are drawn in, and one left open ends with the ops.
 emitDrawOps ::
   DrawArena
   -> FontMetrics
+  -> Float
   -> (TextFont -> IO (FontMetrics, Bool))
   -> (Int -> IO (Maybe (Int, (Float, Float, Float, Float))))
   -> SmallArray DrawOp
   -> IO ()
-emitDrawOps da fm resolve imageUv ops = forUpTo_ (sizeofSmallArray ops) (emitOne . indexSmallArray ops)
+emitDrawOps da fm size resolve imageUv ops = go 0 []
   where
+    !n = sizeofSmallArray ops
+    -- The clips the open 'PushClip's replaced, innermost first.
+    go !i saved
+      | i >= n = case reverse saved of
+          outermost : _ -> setClip da outermost
+          [] -> pure ()
+      | otherwise = case indexSmallArray ops i of
+          PushClip r -> do
+            prev <- currentClip da
+            setClip da (fromMaybe (Rect 0 0 0 0) (rectIntersect prev r))
+            go (i + 1) (prev : saved)
+          PopClip -> case saved of
+            prev : rest -> setClip da prev >> go (i + 1) rest
+            [] -> go (i + 1) []
+          op -> emitOne op >> go (i + 1) saved
     -- The op's UVs, which run 0 to 1 over the image, within its bounds.
     image tex u0 v0 u1 v1 draw =
       imageUv tex >>= \case
@@ -345,17 +367,27 @@ emitDrawOps da fm resolve imageUv ops = forUpTo_ (sizeofSmallArray ops) (emitOne
       -- Drawing text has no collected text span, so it keeps its quads even
       -- when the host rasterizes widget text externally.
       pushPreparedTextQuads da prepared px py t c
-    emitOne (DrawTextStyled x y font t c) = do
+    emitOne (DrawTextStyled x y font t c) = styled x y font t c
+    emitOne (DrawTextAligned x y ax ay k font t c) = do
+      let font'
+            | k == 1 = font
+            | otherwise = font {textFontSize = k * (if textFontSize font > 0 then textFontSize font else size)}
+      (styledFm, _) <- resolve font'
+      prepared <- prepareFontMetrics styledFm t
+      let Rect px py _ _ = drawTextBox prepared x y ax ay t
+      styled px py font' t c
+    emitOne op = pushShapeOp da op
+    -- Text in a font of its own, its line box's top left corner at (x, y).
+    styled x y font t c = do
       (styledFm, native) <- resolve font
       let weight = if native then WeightNormal else textFontWeight font
           fstyle = if native then FontStyleNormal else textFontStyle font
       prepared <- prepareFontMetrics styledFm t
       pushPreparedTextStyledQuads da prepared weight fstyle (textFontDecoration font) x y t c
-    emitOne op = pushShapeOp da op
 
 -- | Paint an op that needs no font or image: a fill, stroke, line or
--- gradient. Text and image ops paint nothing here ('emitDrawOps' paints
--- them). Inlined, so an op built only to be painted costs nothing.
+-- gradient. Text, image and clip ops paint nothing here ('emitDrawOps'
+-- paints them). Inlined, so an op built only to be painted costs nothing.
 {-# INLINE pushShapeOp #-}
 pushShapeOp :: DrawArena -> DrawOp -> IO ()
 pushShapeOp da = \case
@@ -367,8 +399,8 @@ pushShapeOp da = \case
   StrokeRoundedRect r radius bw c -> pushRoundedStroke da r radius bw c
   StrokeCircle cx cy radius bw c -> pushCircleStroke da cx cy radius bw c
   StrokeLineAA x0 y0 x1 y1 bw c -> pushStrokeAA da x0 y0 x1 y1 bw c
-  FillPolygon pts tris c -> pushPolygonAA da pts tris c
-  StrokePolyline pts w closed c -> pushPolylineAA da pts w closed c
+  FillPolygon pts rings tris sh -> pushPolygonAA da pts rings tris sh
+  StrokePolyline pts w closed cap join limit sh -> pushPolylineAA da pts w closed cap join limit sh
   FillQuadGradient r c0 c1 c2 c3 -> pushQuadGradient da r c0 c1 c2 c3
   _ -> pure ()
 

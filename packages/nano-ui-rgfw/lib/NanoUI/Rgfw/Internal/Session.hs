@@ -34,7 +34,8 @@ import Data.Word (Word8, Word32)
 import Foreign.Ptr (Ptr)
 import GHC.Clock (getMonotonicTime)
 import NanoUI
-  ( NanoUI
+  ( Appearance
+  , NanoUI
   , Size (..)
   , Theme (..)
   , V2 (..)
@@ -116,6 +117,12 @@ data RgfwOptions = RgfwOptions
   -- and do not fade: 'wsTransparent' and 'wsOpacity' do nothing here.
   , optTheme  :: !Theme
   -- ^ Any core theme; the backend draws it square ('NanoUI.Rgfw.Internal.Context.applyRgfwTheme').
+  , optThemeFor :: !(Maybe (Maybe Appearance -> Theme))
+  -- ^ The theme for the desktop's light or dark setting, such as
+  -- @'NanoUI.lightDark' light dark@, as SDL's @sdlAppThemeFor@ (default:
+  -- 'Nothing'). Set, it replaces 'optTheme'. RGFW cannot read the setting,
+  -- so it is given 'Nothing', for which 'NanoUI.lightDark' picks the dark
+  -- theme.
   , optScale  :: !Float
   -- ^ UI scale. @0@ follows the monitor's scale.
   , optRefreshHz :: !Int
@@ -132,10 +139,16 @@ defaultRgfwOptions =
   RgfwOptions
     { optWindow = defaultWindowSettings
     , optTheme  = tomorrowNightMinDarkTheme
+    , optThemeFor = Nothing
     , optScale  = 0.0
     , optRefreshHz = 0
     , optExplainLayout = False
     }
+
+-- | The theme the options ask for: 'optThemeFor' for an appearance RGFW
+-- cannot read, else 'optTheme'.
+optionsTheme :: RgfwOptions -> Theme
+optionsTheme opts = maybe (optTheme opts) ($ Nothing) (optThemeFor opts)
 
 -- | The key an RGFW key code names, given the modifier bits it came with.
 mapRgfwKey :: Word32 -> Word8 -> Maybe Key
@@ -229,7 +242,7 @@ runRgfwAppReduce ::
   (model -> NanoUI ()) ->
   IO ()
 runRgfwAppReduce opts =
-  runRgfwAppReduceCustom opts (\_ -> (optTheme opts, optScale opts))
+  runRgfwAppReduceCustom opts (\_ -> (optionsTheme opts, optScale opts))
 
 -- | Reducer runner whose theme and UI scale are derived from the current
 -- model. A non-positive scale follows the monitor. OpenGL calls remain on

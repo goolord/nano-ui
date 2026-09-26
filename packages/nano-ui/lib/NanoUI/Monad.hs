@@ -46,7 +46,6 @@ module NanoUI.Monad
   , styled
   , themed
   , disabledWhen
-  , followSystemThemeUi
   , systemAppearance
 
     -- * Focus and clipboard

@@ -221,7 +221,7 @@ selftest continuous = do
     clickPos systemOpt
     appearance <- getSystemAppearance ctx'
     thSystem <- getTheme ctx'
-    unless (thSystem == (if appearance == Just AppearanceDark then defaultTheme else defaultLightTheme)) $
+    unless (thSystem == lightDark defaultLightTheme defaultTheme appearance) $
       fail "selftest: following the system did not pick the default theme's light or dark version"
     clickPos lightOpt
     vol <- requireSpan "selftest: Volume slider" (findRightmost "Volume" spansTheme)

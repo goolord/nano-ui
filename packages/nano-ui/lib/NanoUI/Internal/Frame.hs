@@ -91,6 +91,7 @@ runFrameEff ::
 runFrameEff unlift ctx rawInp ui = do
   ensureMetricCaches ctx
   snap <- captureFrameSnapshot ctx
+  themeBefore <- readIORef (ctxTheme ctx)
   clearDirty ctx
   -- Timed wakes are re-requested by whatever is still built this frame.
   clearWakeAt ctx
@@ -156,6 +157,7 @@ runFrameEff unlift ctx rawInp ui = do
   whenM (themeScopesChanged ctx) $ do
     damageFull ctx
     modifyIORef' (ctxMetricGen ctx) (+ 1)
+  settleViewTheme ctx themeBefore
   let
     size@(Size w h) = inputWindowSize frameInp
   layoutArena ctx size True

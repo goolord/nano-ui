@@ -26,7 +26,7 @@ runSdlSession :: SdlOptions -> (Context -> SdlEnv -> Input -> Bool -> IO Bool) -
 runSdlSession options drawFn = do
   base <- newPixelContext
   ctx <- maybe (pure base) (withTheme base) (sdlAppTheme options)
-  forM_ (sdlAppFollowSystemTheme options) (uncurry (followSystemTheme ctx))
+  forM_ (sdlAppThemeFor options) (followSystemTheme ctx)
   setExplainLayout ctx (sdlExplainLayout options)
   forM_ (sdlAppImages options) $ \(RgbaImage image w h pixels) ->
     registerImage ctx image w h pixels >>= (`unless` fail "registerImage failed")
