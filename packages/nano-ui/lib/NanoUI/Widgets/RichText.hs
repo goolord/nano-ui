@@ -16,7 +16,7 @@ module NanoUI.Widgets.RichText
 
 import Control.Monad (unless)
 import Data.Hashable (hashWithSalt)
-import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
 import Data.List (dropWhileEnd, groupBy)
 import Data.Maybe (fromMaybe, isJust, listToMaybe)
@@ -131,7 +131,11 @@ data Paragraph = Paragraph
   , paraLines :: [Line]
   }
 
-newtype Paragraphs = Paragraphs (IORef (IM.IntMap Paragraph))
+-- The paragraphs laid out lately, by widget key: how many there are, how
+-- many there may be before those not drawn lately are dropped, and them.
+data ParagraphCache = ParagraphCache !Int !Int !(IM.IntMap Paragraph)
+
+newtype Paragraphs = Paragraphs (IORef ParagraphCache)
 
 -- | 'richTextWith' returning the paragraph response and optional clicked link target.
 richTextWith' :: Ui :> es => (Layout -> Layout) -> [Inline] -> Eff es (Response, Maybe Text)
@@ -142,7 +146,7 @@ richTextWith' f pieces = do
   theme <- uiTheme
   let styled = [(txt, pieceFont l, pieceColor theme l target, target) | Inline txt style target <- pieces, let l = style base]
       align = layoutAlignX base
-  Paragraphs cacheRef <- uiIO $ hostOrInit ctx (Paragraphs <$> newIORef IM.empty)
+  Paragraphs cacheRef <- uiIO $ hostOrInit ctx (Paragraphs <$> newIORef (ParagraphCache 0 paragraphBound IM.empty))
   gen <- uiIO (readIORef (ctxMetricGen ctx))
   let key =
         foldl'
@@ -153,7 +157,7 @@ richTextWith' f pieces = do
           )
           (gen `hashWithSalt` fromEnum align)
           styled
-  cached <- uiIO (IM.lookup (intKey wid) <$> readIORef cacheRef)
+  cached <- uiIO ((\(ParagraphCache _ _ m) -> IM.lookup (intKey wid) m) <$> readIORef cacheRef)
   para0 <- case cached of
     Just para | paraKey para == key -> pure para
     _ -> uiIO $ do
@@ -231,10 +235,23 @@ richTextWith' f pieces = do
               DecorationNone -> []
       drawKey = key `hashWithSalt` fromMaybe (-1) hoveredRun
   uiIO $ do
-    unless (paraWidth para0 == rw && fmap paraKey cached == Just key) $
-      modifyIORef' cacheRef $ \m ->
-        -- Paragraphs no longer drawn are dropped all at once past a bound.
-        IM.insert (intKey wid) para (if IM.size m > 4096 then IM.empty else m)
+    unless (paraWidth para0 == rw && fmap paraKey cached == Just key) $ do
+      ParagraphCache n bound m <- readIORef cacheRef
+      let n' = if isJust cached then n else n + 1
+      writeIORef cacheRef
+        =<< if n' <= bound
+          then pure $! ParagraphCache n' bound (IM.insert (intKey wid) para m)
+          else do
+            -- Past the bound, drop the paragraphs neither laid out last
+            -- frame nor drawn yet this one, and let the bound be twice what
+            -- is left: a view that draws more paragraphs than the bound
+            -- keeps every one, and what a view stops drawing goes now and
+            -- then rather than every frame.
+            prev <- getsDamage ctx (pfRects . dsPrev)
+            now <- dcsCustomDrawings <$> readIORef (ctxDrawingCache ctx)
+            let kept = IM.insert (intKey wid) para (IM.filterWithKey (\k _ -> IM.member k prev || IM.member k now) m)
+                size = IM.size kept
+            pure $! ParagraphCache size (max paragraphBound (2 * size)) kept
     registerCustomMeasure ctx wid $ \_ (availW, _) ->
       if availW >= 1e9 then paraNatural para else lineBoxes (linesAt availW)
     registerCustomEntry ctx wid $
@@ -250,6 +267,11 @@ richTextWith' f pieces = do
   pure (resp, clicked)
   where
     lineBoxes lines' = (maximum (0 : map lineWidth lines'), sum (map lineHeight lines'))
+
+-- | How many paragraphs the cache keeps before it drops those not drawn
+-- lately.
+paragraphBound :: Int
+paragraphBound = 4096
 
 -- | The font a piece's layout chooses.
 pieceFont :: Layout -> TextFont

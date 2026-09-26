@@ -672,6 +672,8 @@
   aligned at the width it wraps to there rather than its one-line width, which
   could put it past the column's left edge. Rich text places each line as its
   paragraph's horizontal alignment says.
+- Past 4096 paragraphs, rich text keeps the paragraphs drawn lately instead of
+  emptying its layout cache on every frame.
 
 ### Removed
 

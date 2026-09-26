@@ -1,6 +1,7 @@
 module Cases.RichText (tests) where
 
 import Spec
+import Control.Exception (evaluate)
 import Data.Foldable (toList)
 import Data.List (groupBy)
 import Data.Text qualified as T
@@ -12,6 +13,7 @@ tests =
   [ spec "rich-text-wrap" runRichTextWrapTest
   , spec "rich-text-link" runRichTextLinkTest
   , spec "rich-text-align" runRichTextAlignTest
+  , spec "rich-text-many" runRichTextManyTest
   ]
 
 -- | A paragraph wraps at its column's width, taking a line's height per line,
@@ -96,3 +98,21 @@ runRichTextAlignTest ctx failed = do
       assertEq failed (round (rx + at * rw) :: Int) (round (x0 + at * (x1 - x0)))
     assertEq failed full fitted
 
+-- | Past the cache's bound, a view that draws more paragraphs than it keeps
+-- them all: a frame that changes nothing measures nothing.
+runRichTextManyTest :: Context -> IORef Int -> IO ()
+runRichTextManyTest base failed = do
+  measured <- newIORef (0 :: Int)
+  recording <- newIORef False
+  let fm = ctxFontMetrics base
+      prepare _ = readIORef recording >>= \on -> fm <$ when on (modifyIORef' measured (+ 1))
+  -- Bound in IO, so that every frame gets this one context, and with it the
+  -- same metrics source.
+  ctx <- evaluate (withFontMetrics base fm {fmBackend = Just (FontBackend prepare (const (pure Nothing)))})
+  let inp = withInput 400 400
+      ui = column (forM_ [1 .. 4500 :: Int] (\i -> richText [inlineText (T.pack (show i))]))
+      frame = runFrame ctx inp (uiIO (writeIORef recording True) *> ui <* uiIO (writeIORef recording False))
+  replicateM_ 3 frame
+  writeIORef measured 0
+  replicateM_ 2 frame
+  assertEq failed 0 =<< readIORef measured
