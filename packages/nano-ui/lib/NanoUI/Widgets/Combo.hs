@@ -22,7 +22,7 @@ import NanoUI.Internal.Font (menuItemRowH)
 import NanoUI.Internal.Frame.Hit (findNodeByWidgetId)
 import NanoUI.Internal.Frame.Select (comboDropPickIndex, comboDropRect, comboScrollGeom)
 import NanoUI.Internal.Id (WidgetId (..))
-import NanoUI.Internal.Input (Input, Key (..), inputKeys, inputMouseDown, inputMousePos, inputMousePressed, inputScroll)
+import NanoUI.Internal.Input (Input, Key (..), MouseButton (..), buttonHeld, buttonPressed, inputKeys, inputMousePos, inputScroll)
 import NanoUI.Internal.Layout.Arena (setOptions)
 import NanoUI.Internal.Monad (Ui, askContext, uiIO)
 import NanoUI.Internal.Store (boolInt, ptrEq, fieldFloat, fieldInt, fieldText, findSlot, flagSlot, insertSlot, setFieldSelection)
@@ -209,8 +209,8 @@ comboStep ci cs0 =
     onVTrack = rectContains vTrackR mouse
     onHThumb = rectContains hThumbR mouse
     onHTrack = rectContains hTrackR mouse
-    pressed = isFocus && inputMousePressed inp
-    down = isFocus && inputMouseDown inp
+    pressed = isFocus && buttonPressed MouseLeft inp
+    down = isFocus && buttonHeld MouseLeft inp
     startV = pressed && overDrop && onVTrack
     startH = pressed && overDrop && not startV && onHTrack
     vGrab = if onVThumb then v2Y mouse - rectY vThumbR else rectH vThumbR / 2

@@ -15,7 +15,7 @@ import NanoUI
   , UiCursorKind (..), V2 (..), box, button, checkbox, colorRGBA, column, defaultImageConfig, defaultLayout, drawing
   , fixedWH, grow, imageConfigured', label, respRect, tomorrowNightMinDarkTheme, window
   )
-import NanoUI.Input (Input (..), Key (..), Modifiers (..), emptyInput, noModifiers)
+import NanoUI.Input (Input (..), Key (..), Modifiers (..), MouseButton (..), buttonHeld, buttonPressed, buttonReleased, buttonsFromList, buttonsToList, emptyInput, noModifiers)
 import NanoUI.Internal.Context (Context (..), setDrawSquareGeometry)
 import NanoUI.Internal.Layout.Arena (NodeType (..), arenaCount, getNodeRect, getNodeType)
 import NanoUI.Rgfw.Internal.Context (newRgfwContext)
@@ -270,18 +270,22 @@ testRgfwTyping = do
 
 -- | Wheel events queued in one batch add up rather than keeping the last.
 -- The middle button is held and clicks like the others; the side buttons
--- are back and forward.
+-- are back and forward, and the misc buttons past them are the extra ones.
+-- The pointer leaving the window moves it off every widget.
 testRgfwPointer :: IO ()
 testRgfwPointer = do
   let middle = applied [EventMouseButton R.rgfw_mouseMiddle True]
       middleUp = applied [EventMouseButton R.rgfw_mouseMiddle True, EventMouseButton R.rgfw_mouseMiddle False]
-      sides b = (\i -> (inputMouseBackPressed i, inputMouseForwardPressed i)) (applied [EventMouseButton b True])
+      pressedBy b = buttonsToList (inputButtonsPressed (applied [EventMouseButton b True]))
+      gone = applied [EventMouseMotion 30 40, EventOther R.rgfw_mouseLeave]
   assert "RGFW scroll: a batch of wheel events accumulates" (inputScroll (applied [EventMouseScroll 0 1, EventMouseScroll 0.5 2]) == V2 0.5 3)
-  assert "RGFW buttons: the middle button goes down" (inputMouseMiddleDown middle && inputMouseMiddlePressed middle)
-  assert "RGFW buttons: the middle button comes up" (not (inputMouseMiddleDown middleUp) && inputMouseMiddleReleased middleUp)
-  assert "RGFW buttons: the middle button is not the left" (not (inputMouseDown middle || inputMouseRightDown middle))
-  assert "RGFW buttons: misc 1 is back" (sides R.rgfw_mouseMisc1 == (True, False))
-  assert "RGFW buttons: misc 2 is forward" (sides R.rgfw_mouseMisc2 == (False, True))
+  assert "RGFW buttons: the middle button goes down" (buttonHeld MouseMiddle middle && buttonPressed MouseMiddle middle)
+  assert "RGFW buttons: the middle button comes up" (not (buttonHeld MouseMiddle middleUp) && buttonReleased MouseMiddle middleUp)
+  assert "RGFW buttons: the middle button is not the left" (inputButtonsHeld middle == buttonsFromList [MouseMiddle])
+  assert "RGFW buttons: misc 1 is back" (pressedBy R.rgfw_mouseMisc1 == [MouseBack])
+  assert "RGFW buttons: misc 2 is forward" (pressedBy R.rgfw_mouseMisc2 == [MouseForward])
+  assert "RGFW buttons: misc 3 to 5 are the next buttons" (concatMap pressedBy [R.rgfw_mouseMisc2 + 1 .. R.rgfw_mouseMisc2 + 3] == map MouseOther [6, 7, 8])
+  assert "RGFW pointer: leaving the window moves the pointer off it" (let V2 x y = inputMousePos gone in x < -1000 && y < -1000)
 
 -- | A turned image reaches the rasteriser as a turned quad, clipped to its
 -- widget: turned an eighth, a 40 by 20 image covers its rect's top-left and
@@ -320,10 +324,13 @@ testRgfwCursors = do
         , (UiCursorCell, R.rgfw_mouseCrosshair), (UiCursorColResize, R.rgfw_mouseResizeEW), (UiCursorRowResize, R.rgfw_mouseResizeNS)
         ]
           ++ map (,R.rgfw_mouseArrow) [UiCursorHelp, UiCursorCopy, UiCursorAlias, UiCursorContextMenu, UiCursorZoomIn, UiCursorZoomOut]
+      -- The session hides the pointer for this kind rather than showing an
+      -- icon; the arrow is what the mapping gives it.
+      hidden = [(UiCursorHidden, R.rgfw_mouseArrow)]
       shows' = all (\(k, icon) -> mapRgfwCursor k == icon)
   assert "RGFW cursors: each native shape shows its own cursor" (shows' native && length (nub (map snd native)) == length native)
-  assert "RGFW cursors: the other shapes fall back" (shows' fallback)
-  assert "RGFW cursors: every kind is mapped" (all (`elem` map fst (native ++ fallback)) [minBound .. maxBound])
+  assert "RGFW cursors: the other shapes fall back" (shows' (fallback ++ hidden))
+  assert "RGFW cursors: every kind is mapped" (all (`elem` map fst (native ++ fallback ++ hidden)) [minBound .. maxBound])
 
 main :: IO ()
 main = do

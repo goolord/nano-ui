@@ -275,7 +275,7 @@ richTextWith' f pieces = do
       CustomDrawingEntry
         (if drawKey == 0 then 1 else drawKey)
         draw
-        (Just (const (if isJust hoveredRun then UiCursorPointer else UiCursorDefault)))
+        (Just (\_ _ _ -> if isJust hoveredRun then UiCursorPointer else UiCursorDefault))
         0
         False
   let clicked

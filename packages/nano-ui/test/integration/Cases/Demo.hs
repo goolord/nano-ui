@@ -169,7 +169,7 @@ runColorPickerCommitTest ctx failed = do
   (baseDrag, drag) <- colors
   assertEq failed baseDrag initial
   assert failed (drag /= initial)
-  _ <- runFrame ctx press {inputMousePressed = False} ui
+  _ <- runFrame ctx press {inputButtonsPressed = noButtons} ui
   assertEq failed drag . snd =<< colors
   _ <- runFrame ctx (releaseAt press) ui
   (baseDone, done) <- colors

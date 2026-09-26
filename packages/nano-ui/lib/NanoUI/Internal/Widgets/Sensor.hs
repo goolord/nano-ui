@@ -31,6 +31,7 @@ import Data.IntMap.Strict (IntMap)
 import Data.IntMap.Strict qualified as IM
 import Data.Maybe (fromMaybe, isJust)
 import Effectful (Eff, type (:>))
+import GHC.Clock (getMonotonicTime)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Frame.Node (readScrollNode)
 import NanoUI.Internal.Frame.Scroll.Geometry (borderContentClip, scrollNodeViewport)
@@ -47,8 +48,8 @@ data Visibility = Visibility
     -- ^ The widget overlapped the window and the inside of every scroller,
     -- panel and floating panel around it, each grown by the sensor's
     -- anticipate margin: it was painted, or would have been with that much
-    -- more room. A widget of zero width or height counts as the line or point
-    -- it sits at.
+    -- more room; and it had for the sensor's delay. A widget of zero width or
+    -- height counts as the line or point it sits at.
   , visEvent :: !(Maybe VisibilityEvent)
     -- ^ How 'visVisible' changed at the last layout. Reported once: to the
     -- first view pass that reads the sensor after the change.
@@ -57,6 +58,10 @@ data Visibility = Visibility
     -- window coordinates, without the anticipate margin; empty when no part
     -- is. Like 'NanoUI.Internal.Widgets.Node.respRect' it is last frame's,
     -- and moving alone asks for no frame.
+  , visBounds :: !Rect
+    -- ^ The whole widget at the last layout, in logical window coordinates,
+    -- on screen or not; empty when it had no node. 'visRect' is its part on
+    -- screen.
   }
   deriving (Eq, Show)
 
@@ -74,21 +79,28 @@ becameVisible v = visEvent v == Just BecameVisible
 becameHidden :: Visibility -> Bool
 becameHidden v = visEvent v == Just BecameHidden
 
--- | How a 'sensorConfigured' sensor lays out its body and when it counts as
--- visible.
+-- | When a sensor counts its widget as visible, and how a
+-- 'sensorConfigured' sensor lays out its body.
 data SensorConfig = SensorConfig
   { sensorAnticipate :: Float
     -- ^ Logical pixels the window, and every scroller, panel and floating
     -- panel around the widget, grow by for it: a sensor with a margin of 200
     -- reports its widget visible while it is still up to 200 pixels outside
     -- the viewport, in time to start loading it. Negative margins count as 0.
+  , sensorDelay :: Double
+    -- ^ Seconds the widget must stay in view before it counts as visible,
+    -- so a list flung past does not load every row it shows for a frame. 0
+    -- counts it at once. Going out of view counts at once, and restarts the
+    -- wait. The sensor wakes the loop when the wait is over, as a tooltip
+    -- does, so waiting draws nothing.
   , sensorLayout :: Layout -> Layout
-    -- ^ Modifies the sensor's container: a column without padding.
+    -- ^ Modifies a 'sensorConfigured' sensor's container: a column without
+    -- padding. 'useVisibility' has no container and ignores it.
   }
 
--- | No margin, and the body in a column without padding.
+-- | No margin, no delay, and the body in a column without padding.
 defaultSensorConfig :: SensorConfig
-defaultSensorConfig = SensorConfig {sensorAnticipate = 0, sensorLayout = id}
+defaultSensorConfig = SensorConfig {sensorAnticipate = 0, sensorDelay = 0, sensorLayout = id}
 
 -- | Run @body@ in a container that reports its 'Visibility'. The container is
 -- a column without padding.
@@ -116,21 +128,21 @@ sensorConfigured cfg body = do
   base <- askDefaultLayout
   let layout = sensorLayout cfg (tight base) {layoutDirection = Column}
   a <- container NodeContainer layout (tagContainer wid >> body)
-  vis <- uiIO (watchSensor ctx wid wid (sensorAnticipate cfg))
+  vis <- uiIO (watchSensor ctx wid (Watch wid cfg))
   pure (vis, a)
 
 -- | The 'Visibility' of the widget with id @target@, such as @respId resp@ of
--- a widget built before it, with an anticipate margin of @margin@ logical
--- pixels (see 'sensorAnticipate'). A hook: it takes the next widget id, so
--- call it on every frame, like the other hooks. A target with no node this
--- frame is hidden.
+-- a widget built before it, with the anticipate margin and delay of the
+-- config ('sensorAnticipate', 'sensorDelay'). A hook: it takes the next
+-- widget id, so call it on every frame, like the other hooks. A target with
+-- no node this frame is hidden.
 --
 -- > resp <- image' (fixedWH 96 96) thumb
--- > vis <- useVisibility 200 (respId resp)
-useVisibility :: Ui :> es => Float -> WidgetId -> Eff es Visibility
-useVisibility margin target = do
+-- > vis <- useVisibility defaultSensorConfig {sensorAnticipate = 200} (respId resp)
+useVisibility :: Ui :> es => SensorConfig -> WidgetId -> Eff es Visibility
+useVisibility cfg target = do
   (wid, ctx) <- freshWidget
-  uiIO (watchSensor ctx wid target margin)
+  uiIO (watchSensor ctx wid (Watch target cfg))
 
 -- | Sensors on a context: those built this pass, and what each one measured
 -- at the last layout, both by the sensor's own key. Kept as a host value
@@ -138,26 +150,30 @@ useVisibility margin target = do
 newtype Sensors = Sensors (IORef SensorState)
 
 -- | The sensors built this pass, and what each one saw at the last layout.
-data SensorState = SensorState (IntMap Watch) (IntMap Visibility)
+data SensorState = SensorState (IntMap Watch) (IntMap Seen)
 
--- | The widget a sensor watches, and its anticipate margin.
-data Watch = Watch WidgetId Float
+-- | The widget a sensor watches, and when it counts it as visible.
+data Watch = Watch WidgetId SensorConfig
 
--- | Register sensor @wid@ watching @target@ for this pass, and return what it
+-- | What a sensor saw at the last layout, and when its widget came into view
+-- while it waits out its 'sensorDelay': the monotonic time, or 0.
+data Seen = Seen Visibility Double
+
+-- | Register sensor @wid@ with its watch for this pass, and return what it
 -- saw at the last layout. Reading an event consumes it, so a second view pass
 -- in the same frame sees the state without the event.
-watchSensor :: Context -> WidgetId -> WidgetId -> Float -> IO Visibility
-watchSensor ctx wid target margin = do
+watchSensor :: Context -> WidgetId -> Watch -> IO Visibility
+watchSensor ctx wid watch = do
   Sensors ref <- hostOrInit ctx (Sensors <$> newIORef (SensorState IM.empty IM.empty))
   SensorState watched seen <- readIORef ref
   let k = intKey wid
-      vis = fromMaybe notSeen (IM.lookup k seen)
-      seen' = if isJust (visEvent vis) then IM.insert k vis {visEvent = Nothing} seen else seen
-  writeIORef ref $! SensorState (IM.insert k (Watch target margin) watched) seen'
+      Seen vis since = fromMaybe (Seen notSeen 0) (IM.lookup k seen)
+      seen' = if isJust (visEvent vis) then IM.insert k (Seen vis {visEvent = Nothing} since) seen else seen
+  writeIORef ref $! SensorState (IM.insert k watch watched) seen'
   pure vis
 
 notSeen :: Visibility
-notSeen = Visibility False Nothing (Rect 0 0 0 0)
+notSeen = Visibility False Nothing (Rect 0 0 0 0) (Rect 0 0 0 0)
 
 -- | Forget the sensors the last view pass built: the view is about to run
 -- again and build its own.
@@ -177,23 +193,41 @@ updateSensors ctx size =
     unless (IM.null watched && IM.null seen) $ do
       seen' <- IM.traverseWithKey (\k w -> measureSensor ctx size (IM.lookup k seen) w) watched
       writeIORef ref $! SensorState watched seen'
-      when (any (isJust . visEvent) seen') (markDirty ctx))
+      when (any (\(Seen v _) -> isJust (visEvent v)) seen') (markDirty ctx))
 
-measureSensor :: Context -> Size -> Maybe Visibility -> Watch -> IO Visibility
-measureSensor ctx@Context {ctxNodeArena = na} size before (Watch target margin) = do
+-- | What sensor @watch@ sees at this layout, given what it saw before. A
+-- widget in view counts as visible once it has been in view for the
+-- sensor's delay; until then the sensor asks for a frame when it will have
+-- been, as 'NanoUI.Internal.Widgets.Popup.tooltipTimer' does.
+measureSensor :: Context -> Size -> Maybe Seen -> Watch -> IO Seen
+measureSensor ctx@Context {ctxNodeArena = na} size before (Watch target cfg) = do
   mIdx <- lookupNodeByWidgetId na target
-  (shown, onScreen) <- case mIdx of
-    Nothing -> pure (False, Nothing)
+  (inView, bounds, onScreen) <- case mIdx of
+    Nothing -> pure (False, Rect 0 0 0 0, Nothing)
     Just idx -> do
       rect <- getNodeRect na idx
-      (exact, grown) <- paintClips ctx size (max 0 margin) idx
-      pure (maybe False (overlaps rect) grown, exact >>= rectIntersect rect)
-  let was = maybe False visVisible before
-      event
+      (exact, grown) <- paintClips ctx size (max 0 (sensorAnticipate cfg)) idx
+      pure (maybe False (overlaps rect) grown, rect, exact >>= rectIntersect rect)
+  let was = maybe False (\(Seen v _) -> visVisible v) before
+      since0 = maybe 0 (\(Seen _ t) -> t) before
+      delay = sensorDelay cfg
+  -- The time the widget came into view, kept while it stays in view and has
+  -- not counted as visible yet.
+  (shown, since) <-
+    if not inView || was || delay <= 0
+      then pure (inView, 0)
+      else do
+        now <- getMonotonicTime
+        let t = if since0 > 0 then since0 else now
+            due = t + delay
+        if now >= due
+          then pure (True, 0)
+          else (False, t) <$ requestWakeAt ctx due
+  let event
         | shown == was = Nothing
         | shown = Just BecameVisible
         | otherwise = Just BecameHidden
-  pure (Visibility shown event (fromMaybe (Rect 0 0 0 0) onScreen))
+  pure (Seen (Visibility shown event (fromMaybe (Rect 0 0 0 0) onScreen) bounds) since)
 
 -- | The part of a window of @size@ node @idx@ is painted within, and the part
 -- it would be with every clip grown by @margin@: 'Nothing' when paint does not

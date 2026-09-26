@@ -15,7 +15,9 @@ module NanoUI.Internal.Frame.Hit
   , nodePointVisible
   , nodeClippedHit
   , nodeInteractionHit
-  , widgetHitAt
+  , takesPointer
+  , passesPointer
+  , pointerHitAt
   , reachedWidgetAt
   , reachedHit
   , innermostHit
@@ -26,11 +28,13 @@ where
 import Control.Applicative ((<|>))
 import Control.Monad ((<=<))
 import Control.Monad.Trans.Maybe (MaybeT (..))
+import Data.Functor ((<&>))
 import Data.Maybe (isJust)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Monad (ifM, (<&&>))
+import NanoUI.Internal.Style (PointerMode (..))
 import NanoUI.Internal.Types (Rect (..), V2 (..), rectContains, rectHit)
 import NanoUI.Internal.WidgetText (containerFlagInert, hasFlag)
 
@@ -194,28 +198,49 @@ nodeInteractionHit ctx@Context {ctxNodeArena = na} idx rect mouse
           _ | isFloatingNode nt -> pure True
             | otherwise -> getParent na i >>= inside
 
--- | Whether the pointer at @mouse@ is on widget node @idx@: on its visible
--- part ('nodePointVisible'), where the floating panels leave it reachable
--- ('overlayHitAllowed', with @top@ from 'overlayHitRoot').
-widgetHitAt :: Context -> Maybe NodeIdx -> V2 -> NodeIdx -> IO Bool
-widgetHitAt ctx top mouse idx =
-  (isWidgetNode <$> getNodeType (ctxNodeArena ctx) idx)
+-- | Whether node @idx@, of type @nt@, takes the pointer where it is drawn on
+-- top ('PointerMode'): a control, or a node given 'PointerBlock', unless it
+-- passes the pointer.
+{-# INLINE takesPointer #-}
+takesPointer :: NodeArena -> NodeIdx -> NodeType -> IO Bool
+takesPointer na idx nt =
+  getPointerMode na idx <&> \case
+    PointerAuto -> isWidgetNode nt
+    PointerBlock -> True
+    PointerPass -> False
+
+-- | Whether node @idx@ lets the pointer through, being given 'PointerPass'
+-- or inside a node that was: it takes no hover or presses.
+{-# INLINE passesPointer #-}
+passesPointer :: NodeArena -> NodeIdx -> IO Bool
+passesPointer na idx = (== PointerPass) <$> getPointerMode na idx
+
+-- | Whether the pointer at @mouse@ is on node @idx@, which takes the pointer
+-- ('takesPointer'): on its visible part ('nodePointVisible'), where the
+-- floating panels leave it reachable ('overlayHitAllowed', with @top@ from
+-- 'overlayHitRoot').
+pointerHitAt :: Context -> Maybe NodeIdx -> V2 -> NodeIdx -> IO Bool
+pointerHitAt ctx@Context {ctxNodeArena = na} top mouse idx =
+  (takesPointer na idx =<< getNodeType na idx)
     <&&> nodePointVisible ctx idx mouse
     <&&> overlayHitAllowed ctx top idx
 
 -- | The widget node the pointer at @mouse@ reaches, as hover finds it: of the
--- widgets under it ('widgetHitAt'), the first in arena order, unless a stack
--- or a pinned child draws a later one over it, and then any widget drawn
--- inside that one ('reachedHit').
+-- nodes under it that take the pointer ('pointerHitAt'), the first in arena
+-- order, unless a stack or a pinned child draws a later one over it, and
+-- then any widget drawn inside that one ('reachedHit'). 'Nothing' where that
+-- is a node given 'PointerBlock' with no widget of its own there.
 reachedWidgetAt :: Context -> V2 -> IO (Maybe NodeIdx)
-reachedWidgetAt ctx mouse = do
+reachedWidgetAt ctx@Context {ctxNodeArena = na} mouse = do
   top <- overlayHitRoot ctx mouse
-  let hits = widgetHitAt ctx top mouse
-  traverse (reachedHit ctx hits) =<< findClassNodeM (ctxNodeArena ctx) PointerNodes hits
+  let hits = pointerHitAt ctx top mouse
+      widget idx = (\nt -> if isWidgetNode nt then Just idx else Nothing) <$> getNodeType na idx
+  maybe (pure Nothing) (widget <=< reachedHit ctx hits) =<< findClassNodeM na PointerNodes hits
 
 -- | The node a pointer hit lands on, given @first@, the first node in arena
 -- order that @hits@: the hit drawn on top ('topmostHit'), then the widget
--- drawn innermost inside it ('innermostHit').
+-- drawn innermost inside it ('innermostHit'). A node given 'PointerBlock'
+-- without a widget of its own under the pointer is itself what it lands on.
 reachedHit :: Context -> (NodeIdx -> IO Bool) -> NodeIdx -> IO NodeIdx
 reachedHit ctx hits = innermostHit ctx hits <=< topmostHit ctx hits
 

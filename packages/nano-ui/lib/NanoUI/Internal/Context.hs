@@ -518,13 +518,11 @@ newContext = do
   drawArena <- newDrawArena
   ctxHotId <- newIORef (WidgetId 0)
   ctxLastHotId <- newIORef (WidgetId 0)
-  ctxPointerCovered <- newIORef mempty
+  ctxPointerReach <- newIORef Nothing
   ctxActiveId <- newIORef (WidgetId 0)
   ctxClickedId <- newIORef (WidgetId 0)
   ctxReleaseClickedId <- newIORef (WidgetId 0)
-  ctxPressPos <- newIORef Nothing
-  ctxRightPressPos <- newIORef Nothing
-  ctxMiddlePressPos <- newIORef Nothing
+  ctxPressPos <- newIORef Map.empty
   ctxFocusId <- newIORef (WidgetId 0)
   ctxFocusVisible <- newIORef False
   ctxFocusRequest <- newIORef Nothing

@@ -16,6 +16,7 @@ module RGFW
   , windowScale
   , setMouseStandard
   , setMouseDefault
+  , showMouse
   , readClipboardText
   , writeClipboardText
   , setWindowIcon
@@ -207,6 +208,10 @@ setMouseStandard (Window win) icon = (/= 0) <$> c_rgfw_window_set_mouse_standard
 -- | Restore the default cursor. Returns 'False' if the request fails.
 setMouseDefault :: Window -> IO Bool
 setMouseDefault (Window win) = (/= 0) <$> c_rgfw_window_set_mouse_default win
+
+-- | Show the pointer over the window, or hide it ('False').
+showMouse :: Window -> Bool -> IO ()
+showMouse (Window win) visible = c_RGFW_window_showMouse win (if visible then 1 else 0)
 
 -- | The system clipboard's text, if it holds any. Needs an open window; on
 -- X11 it waits for the selection owner to convert the data. Invalid UTF-8

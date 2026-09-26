@@ -118,13 +118,13 @@ module NanoUI
   , respClicked
   , respChanged
   , respSubmitted
+  , respHeldWith
+  , respClickedWith
   , respRightPressed
   , respRightClicked
   , setChanged
   , setClicked
   , setSubmitted
-  , respMiddlePressed
-  , respMiddleClicked
 
     -- * Containers
   , row
@@ -155,6 +155,7 @@ module NanoUI
   , flex
   , stack
   , stackWith
+  , mouseArea
 
     -- * Text
   , label
@@ -345,7 +346,8 @@ module NanoUI
     -- It shuts when the pointer leaves the target or a button goes down, and
     -- a wheel turn starts the wait again. Waiting costs nothing: the frame the
     -- tooltip opens on is a timed wake. 'PlacementAtCursor' keeps it just below
-    -- the pointer as the pointer moves.
+    -- the pointer as the pointer moves ('tooltipGap' away). A disabled widget
+    -- has its tooltip too, to say why it is off.
   , TooltipConfig (..)
   , defaultTooltipConfig
   , tooltipConfigured
@@ -447,17 +449,18 @@ module NanoUI
     -- * Cursors
 
     -- | Widgets pick the pointer shape shown over them: the pointing hand over
-    -- a button, the I-beam over a text field. 'withCursorShape' asks for a
-    -- shape over any part of a view, where the widgets inside do not pick
-    -- one:
+    -- a button, the I-beam over a text field, and a custom widget what its
+    -- 'widgetCursor' answers for the part of it under the pointer.
+    -- 'withCursorShape' asks for a shape over any part of a view, where the
+    -- widgets inside do not pick one:
     --
     -- > withCursorShape UiCursorMove (drawing (fixedWH 320 200) board)
     --
-    -- A 'CursorShape' is a 'UiCursorKind'. Disabled widgets keep the arrow;
-    -- wrap them in @withCursorShape UiCursorNotAllowed@ to show that they are
-    -- off.
+    -- 'UiCursorDefault' from a widget picks nothing, and from a scope picks
+    -- the arrow; 'UiCursorHidden' hides the pointer. Disabled widgets keep
+    -- the arrow; wrap them in @withCursorShape UiCursorNotAllowed@ to show
+    -- that they are off.
   , withCursorShape
-  , CursorShape
 
     -- * Drag and drop
   , DropType (..)
@@ -589,7 +592,10 @@ module NanoUI
     --
     -- An anticipate margin ('sensorAnticipate') counts a widget as visible
     -- while it is still that far outside, which gives lazy loading a head
-    -- start. A thumbnail that decodes its picture the first time it comes
+    -- start, and a delay ('sensorDelay') only once it has stayed in view
+    -- that long, so a list flung past loads none of the rows it shows for a
+    -- moment. 'visRect' is the part of the widget on screen, and 'visBounds'
+    -- all of it. A thumbnail that decodes its picture the first time it comes
     -- within 200 pixels of the viewport (@decodeRgba@ stands for an image
     -- decoder):
     --
@@ -637,7 +643,14 @@ module NanoUI
     -- top. 'wrap' breaks a row or column into lines where the next child
     -- would overflow it, as a list of tags does, and 'pinAt' takes a child out
     -- of its parent's flow to sit at an offset in the parent, over its
-    -- siblings, as a badge or a floating button does.
+    -- siblings, from the corner its alignment picks, as a badge or a floating
+    -- button does.
+    --
+    -- Where a stack or a pinned node draws one node over another, a control
+    -- on top takes the pointer from what is beneath, and anything else lets it
+    -- through to the controls beneath. 'pointer' changes that for a node and
+    -- what is inside it: 'PointerBlock' makes a card or scrim take the pointer
+    -- over its whole box, and 'PointerPass' makes a decoration let it through.
   , Layout (..)
   , LayoutModifier
   , Sizing (..)
@@ -682,6 +695,8 @@ module NanoUI
   , wrap
   , lineGap
   , pinAt
+  , PointerMode (..)
+  , pointer
 
     -- * Text style
   , FontVariant (..)
@@ -848,6 +863,42 @@ module NanoUI
   , foldInputKeys
   , takeEscape
   , Composition (..)
+
+    -- * Mouse buttons
+
+    -- | A widget's 'Response' says which buttons went down on it and are
+    -- held ('respHeldWith') and which clicked it ('respClickedWith'), and
+    -- 'mousePressed', 'mouseReleased' and 'mouseHeld' listen for a button
+    -- anywhere on the part of the view being declared, as 'keyPressed' does
+    -- for a key:
+    --
+    -- > whenM (mousePressed MouseBack) goBack
+    --
+    -- An 'Input' holds the buttons held, pressed and released as
+    -- 'MouseButtons' sets, which 'buttonHeld', 'buttonPressed' and
+    -- 'buttonReleased' read.
+  , MouseButton (..)
+  , mousePressed
+  , mouseReleased
+  , mouseHeld
+  , MouseButtons
+  , noButtons
+  , buttonsMember
+  , buttonsNull
+  , buttonsToList
+  , buttonsFromList
+  , buttonHeld
+  , buttonPressed
+  , buttonReleased
+  , anyButtonPressed
+  , anyButtonReleased
+  , inputPointerHeld
+  , inputMouseDown
+  , inputMousePressed
+  , inputMouseReleased
+  , inputMouseRightDown
+  , inputMouseRightPressed
+  , inputMouseRightReleased
 
     -- * Keyboard
 

@@ -89,7 +89,7 @@ runTabsEmitTest ctx failed = do
 -- Composite responses expose every flag of their widget response.
 runTabResponseForwardingTest :: Context -> IORef Int -> IO ()
 runTabResponseForwardingTest _ failed = do
-  let inner = mempty {rawRespSubmitted = True, rawRespRightPressed = True, rawRespChanged = True}
+  let inner = mempty {rawRespSubmitted = True, rawRespHeld = buttonsFromList [MouseRight], rawRespChanged = True}
       tabResp = TabResponse inner Nothing TabA
       tableResp = TableResponse inner (SortCol 0 SortAsc) [] mempty
   assert failed (respSubmitted tabResp && respRightPressed tabResp && respChanged tabResp)

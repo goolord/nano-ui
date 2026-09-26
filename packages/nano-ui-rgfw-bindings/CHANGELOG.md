@@ -5,6 +5,9 @@
 ### Added
 
 - `rgfw_windowHide` in `RGFW.Raw`.
+- `rgfw_mouseLeave`, the event tag of the pointer leaving the window, which
+  `pollEvent` reports as an `EventOther`.
+- `showMouse`, which shows or hides the pointer over a window.
 - `rgfw_mouseNotAllowed`, `rgfw_mouseWait`, `rgfw_mouseProgress`, the side
   buttons `rgfw_mouseMisc1` and `rgfw_mouseMisc2`, and the key codes of Space,
   Insert, PrintScreen, Pause and the function, paging, lock, menu and keypad

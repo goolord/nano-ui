@@ -27,11 +27,11 @@ inp :: Input
 inp = withInputOff 640 480
 
 -- | Check the cursor after a frame with the pointer at each point.
-shapesAt :: IORef Int -> Context -> NanoUI a -> [(V2, CursorShape)] -> IO ()
+shapesAt :: IORef Int -> Context -> NanoUI a -> [(V2, UiCursorKind)] -> IO ()
 shapesAt failed ctx ui = mapM_ $ \(p, want) -> cursorOver ctx inp ui p >>= assertEq failed want
 
 -- | Warm the view up, then check the cursor at point @at@ of each response it returns.
-shapesOver :: IORef Int -> Context -> (Response -> V2) -> NanoUI [Response] -> [CursorShape] -> IO [Response]
+shapesOver :: IORef Int -> Context -> (Response -> V2) -> NanoUI [Response] -> [UiCursorKind] -> IO [Response]
 shapesOver failed ctx at ui wants = do
   rs <- warmup2 ctx inp ui
   assertEq failed (length wants) (length rs)
@@ -130,9 +130,9 @@ runCursorShapeRepeatedPassTest ctx failed = do
 -- | The view API's names are the cursor kinds the backends map.
 runCursorShapeNamesTest :: Context -> IORef Int -> IO ()
 runCursorShapeNamesTest _ failed =
-  assertEq failed (32, True) (length shapes, all (`elem` shapes) [UiCursorNotAllowed, UiCursorCrosshair, UiCursorMove, UiCursorWait, UiCursorNwResize])
+  assertEq failed (33, True) (length shapes, all (`elem` shapes) [UiCursorNotAllowed, UiCursorCrosshair, UiCursorMove, UiCursorWait, UiCursorNwResize, UiCursorHidden])
   where
-    shapes = [minBound .. maxBound] :: [CursorShape]
+    shapes = [minBound .. maxBound] :: [UiCursorKind]
 
 -- | While a modal is open only scopes in it show, and a popup in it covers a scope there.
 runCursorShapeModalTest :: Context -> IORef Int -> IO ()

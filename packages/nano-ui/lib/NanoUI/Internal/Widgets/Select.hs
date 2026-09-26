@@ -20,7 +20,7 @@ import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context
 import NanoUI.Internal.Font (menuItemRowH)
 import NanoUI.Internal.Frame.Select (selectDropPickIndex, selectDropRect)
-import NanoUI.Internal.Input (inputMousePos, inputMousePressed, inputMouseReleased)
+import NanoUI.Internal.Input (MouseButton (..), buttonPressed, buttonReleased, inputMousePos)
 import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Monad (Ui, (<&&>), askInput, freshWidget, uiIO)
 import NanoUI.Internal.Store (fieldInt, insertSlot)
@@ -74,14 +74,14 @@ selectWith' f options index = do
     mouse = inputMousePos inp
     dropRect = selectDropRect rx ry rw rh n
     picked
-      | open && rectNonEmpty rect && rectContains dropRect mouse && inputMouseReleased inp =
+      | open && rectNonEmpty rect && rectContains dropRect mouse && buttonReleased MouseLeft inp =
           selectDropPickIndex dropRect menuItemRowH n (v2Y mouse)
       | otherwise = Nothing
     finalIdx = maybe current (clamp 0 (n - 1)) picked
   -- Opening, closing or picking changes the store, which wakes the loop.
   uiIO $ do
     -- Not a press on a widget a stack or a pinned node draws over it.
-    pressed <- pure (rectHit rect mouse && inputMousePressed inp) <&&> (not <$> pointerCovered ctx wid)
+    pressed <- pure (rectHit rect mouse && buttonPressed MouseLeft inp) <&&> (not <$> pointerCovered ctx wid)
     when pressed $ do
       modifyStore ctx (\st -> setSelectOpen st key (not open))
       writeIORef (ctxFocusId ctx) wid

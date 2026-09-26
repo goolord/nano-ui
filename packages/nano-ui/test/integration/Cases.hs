@@ -189,7 +189,7 @@ runPointerCursorTest ctx failed = do
   let hoverBox = inp0 {inputMousePos = centerOf cb}
   onBox <- wantAt hoverBox
   assert failed onBox
-  pressBox <- wantAt (hoverBox {inputMouseDown = True, inputMousePressed = True, inputMouseReleased = False})
+  pressBox <- wantAt (applyMouseButton MouseLeft True hoverBox)
   assert failed pressBox
 
 -- A frame whose UI adds no widgets is an empty frame, not a read of a node
@@ -204,7 +204,7 @@ runEmptyFrameTest ctx failed = do
   writeTree arrays 0 TreeFirstChild 0
   writeTree arrays 0 TreeNextSibling (-1)
   let inp0 = (withInput 320 200) {inputMousePos = V2 40 40}
-      press = inp0 {inputMouseDown = True, inputMousePressed = True, inputScroll = V2 0 1}
+      press = (applyMouseButton MouseLeft True inp0) {inputScroll = V2 0 1}
       ui = row $ do
         wid <- currentId
         image (fixedWH 40 24) (ImageId 0)
@@ -300,7 +300,7 @@ runHoverDamageTest ctx failed = do
   _ <- runFrame ctx drain ui
   needStay <- needsRedraw ctx drain inp2
   assert failed (not needStay)
-  let inpClick = inp1 {inputMouseDown = True, inputMousePressed = True}
+  let inpClick = applyMouseButton MouseLeft True inp1
   needClick <- needsRedraw ctx drain inpClick
   assert failed needClick
   _ <- runFrame ctx inpClick ui
@@ -736,15 +736,9 @@ runPaneGridMixedDragTest ctx failed = do
           -- top-level band drop ([pb, pc, pa] either way), so pin the pointer
           -- to the pane-split path first.
           assert failed (topLevelDropTarget 20 (Rect gx gy gw gh) dest == Nothing)
-          let press =
-                inp0
-                  { inputMousePos = grab
-                  , inputMouseDown = True
-                  , inputMousePressed = True
-                  , inputMouseReleased = False
-                  }
-              hold = press {inputMousePos = dest, inputMousePressed = False}
-              release = hold {inputMouseDown = False, inputMouseReleased = True}
+          let press = pressAt inp0 grab
+              hold = holdAt inp0 dest
+              release = releaseAt hold
           _ <- runFrame ctx press ui
           writeIORef rects IM.empty
           writeIORef paneStates IM.empty
@@ -1044,7 +1038,7 @@ runPaneGridClippedControlTest ctx failed = do
         assertJustM failed (getPrevRect ctx targetId) $ \r -> do
           let grab = spanCenter r
               press = pressAt inp0 grab
-              hold = press {inputMousePressed = False, inputMousePos = V2 (v2X grab + 30) (v2Y grab)}
+              hold = holdAt inp0 (V2 (v2X grab + 30) (v2Y grab))
           assert failed (rectContains hr grab)
           _ <- runFrame ctx press ui
           writeIORef rendered False
@@ -1070,7 +1064,7 @@ runSearchInputClearTest ctx failed = do
             kind <- uiCursorKind ctx probe
             if kind == UiCursorPointer then pure (Just x) else scanClear (x - 2)
   assertJustM failed (scanClear (bx + bw - 6)) $ \cx -> do
-    let press = inp0 {inputMousePos = V2 cx cy, inputMouseDown = True, inputMousePressed = True, inputMouseReleased = False}
+    let press = pressAt inp0 (V2 cx cy)
     _ <- runFrame ctx press ui
     ((r1, t1), _, _, _) <- runFrame ctx inp0 ui
     assertEq failed t1 ""

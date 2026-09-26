@@ -29,8 +29,8 @@ releaseAfterMove ctx failed lbl ui picked = do
   spans <- collectTextSpans ctx
   assertJust failed (spanRectOf lbl spans) $ \r -> do
     let V2 px py = spanCenter r
-        press = inp0 {inputMousePos = V2 px py, inputMouseDown = True, inputMousePressed = True}
-        release = inp0 {inputMousePos = V2 px (py + shift), inputMouseReleased = True}
+        press = pressAt inp0 (V2 px py)
+        release = applyMouseButton MouseLeft False inp0 {inputMousePos = V2 px (py + shift)}
     _ <- runFrame ctx press (ui 0)
     (missed, _, _, dirty) <- runFrame ctx release (ui shift)
     assert failed (not (picked missed))
@@ -162,13 +162,13 @@ runOverlapPressTest ctx failed = do
   (a, _) <- warmup2 ctx inp0 ui
   let Rect ax ay aw ah = respRect a
       overlap = inp0 {inputMousePos = V2 (ax + aw - 10) (ay + ah / 2)}
-      press = overlap {inputMouseDown = True, inputMousePressed = True}
-      held' = overlap {inputMouseDown = True}
+      press = applyMouseButton MouseLeft True overlap
+      held' = overlap {inputButtonsHeld = buttonsFromList [MouseLeft]}
   _ <- runFrame ctx overlap ui
   hot <- getHotId ctx
   assert failed (hot == respId a)
   _ <- runFrame ctx press ui
   ((aHeld, bHeld), _, _, _) <- runFrame ctx held' ui
   assert failed (respPressed aHeld && not (respPressed bHeld))
-  void (runFrame ctx (overlap {inputMouseReleased = True}) ui)
+  void (runFrame ctx (applyMouseButton MouseLeft False overlap) ui)
   void (runFrame ctx inp0 ui)

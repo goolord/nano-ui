@@ -402,6 +402,10 @@ data PopupPlacement
   | PlacementRight
   | PlacementLeft
   | PlacementAtCursor
+  -- ^ For a tooltip ('NanoUI.tooltipPlacement'), just below the pointer,
+  -- following it as it moves. For a popup or a context menu, at the anchor
+  -- point itself, its top-left corner there, where the menu opens at the
+  -- pointer of the click that opened it and stays.
   | PlacementAuto
   deriving (Eq, Show)
 

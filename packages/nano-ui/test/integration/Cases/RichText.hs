@@ -57,8 +57,8 @@ runRichTextLinkTest ctx failed = do
         pure clicked
   linkClick <- clickAt onLink
   assertEq failed (Just "docs-target") linkClick
-  pointer <- cursorKindIs ctx inp0 {inputMousePos = onLink} UiCursorPointer
-  assert failed pointer
+  handShown <- cursorKindIs ctx inp0 {inputMousePos = onLink} UiCursorPointer
+  assert failed handShown
   -- The hovered link is underlined once, across its words and the space
   -- between them.
   (_, _, dd, _) <- runFrame ctx inp0 {inputMousePos = onLink} ui

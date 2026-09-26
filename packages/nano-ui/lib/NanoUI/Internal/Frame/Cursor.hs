@@ -71,7 +71,7 @@ selectDropdownCursorKind ctx inp = do
 scrollThumbCursorKind :: Context -> Input -> IO (Maybe UiCursorKind)
 scrollThumbCursorKind ctx@Context {ctxNodeArena = na} inp = do
   mDrag <- getsInteraction ctx isScrollDrag
-  if inputMouseDown inp && isJust mDrag
+  if buttonHeld MouseLeft inp && isJust mDrag
     then pure (Just UiCursorGrabbing)
     else do
       thumb <- findClassNodeM na PointerNodes $ \idx ->
@@ -108,7 +108,8 @@ numericStepperHit ctx idx mouse = do
 
 -- | The cursor widget @wid@ asks for with the pointer at @mouse@: the default
 -- unless the pointer is on the visible part of its node, and a custom
--- widget's own choice.
+-- widget's own choice for its rect and the pointer, which it makes too while
+-- a drag of it goes on off it.
 cursorKindAt :: Context -> WidgetId -> V2 -> Input -> IO UiCursorKind
 cursorKindAt ctx wid mouse inp
   | hashWidgetId wid == 0 = pure UiCursorDefault
@@ -124,9 +125,14 @@ cursorKindAt ctx wid mouse inp
               whenVisible kind = pure (if visible then kind else UiCursorDefault)
           mCursorFn <- (>>= cdrCursor) <$> lookupCustomDrawing ctx wid
           case mCursorFn of
-            Just cursorFn
-              | visible -> cursorFn <$> mkCustomDrawContext ctx (ctxFontMetrics ctx) wid
-              | otherwise -> pure UiCursorDefault
+            Just cursorFn -> do
+              dragging <- pure (buttonHeld MouseLeft inp) <&&> ((== wid) <$> readIORef (ctxActiveId ctx))
+              if visible || dragging
+                then do
+                  rect <- getNodeRect (ctxNodeArena ctx) idx
+                  cdc <- mkCustomDrawContext ctx (ctxFontMetrics ctx) wid
+                  pure (cursorFn cdc rect mouse)
+                else pure UiCursorDefault
             Nothing ->
               getNodeType (ctxNodeArena ctx) idx >>= \case
                 NodeButton -> whenVisible UiCursorPointer
@@ -144,7 +150,7 @@ cursorKindAt ctx wid mouse inp
                     maybe UiCursorDefault (over UiCursorText) <$> hitRect
                 NodeSlider -> do
                   active <- readIORef (ctxActiveId ctx)
-                  if active == wid && inputMouseDown inp
+                  if active == wid && buttonHeld MouseLeft inp
                     then pure UiCursorGrabbing
                     else do
                       let onTrack (Rect x y w h) = rectContains (sliderHitBounds x y w h) mouse
@@ -156,7 +162,7 @@ cursorKindAt ctx wid mouse inp
 cursorZoneKind :: Context -> Input -> IO (Maybe UiCursorKind)
 cursorZoneKind ctx inp = do
   dragging <- getsInteraction ctx isColumnResize
-  if inputMouseDown inp && dragging
+  if buttonHeld MouseLeft inp && dragging
     then pure (Just UiCursorEwResize)
     else do
       let mouse = inputMousePos inp

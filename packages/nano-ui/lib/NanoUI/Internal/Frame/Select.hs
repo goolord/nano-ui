@@ -27,7 +27,7 @@ import NanoUI.Internal.Font (FontMetrics, centeredTextY, menuItemPadX, menuItemR
 import NanoUI.Internal.Frame.Chrome (menuPanelBounds, overlayMenuStyle, paintMenuAccent, paintMenuPanel)
 import NanoUI.Internal.Frame.Hit (widgetOverlayAllowed)
 import NanoUI.Internal.Id (WidgetId (..))
-import NanoUI.Internal.Input (Input (..), Key (..), inputKeys, inputKeysElem, inputMousePos, inputMousePressed, inputPointerHeld)
+import NanoUI.Internal.Input (Input (..), Key (..), MouseButton (..), anyButtonPressed, anyButtonReleased, buttonPressed, buttonReleased, inputKeys, inputKeysElem, inputPointerHeld)
 import NanoUI.Internal.Layout.Arena (NodeIdx, NodeType (NodeSelect, NodeTextInput), getNodeType, lookupNodeByKey, lookupNodeByWidgetId, getOptions, getNodeRect, getWidgetId)
 import NanoUI.Internal.Monad (whenM, (<&&>))
 import NanoUI.Internal.Store (fieldFloat, fieldInt, fieldText, findSlot, insertSlot, setFieldSelection)
@@ -171,8 +171,8 @@ overlayRouteAt ctx mouse = do
 routePointer :: Context -> Input -> IO PointerRoute
 routePointer ctx inp = do
   (held, old) <- getsInteraction ctx (\s -> (isPointerHeld s, isPointerRoute s))
-  let pressed = inputMousePressed inp || inputMouseRightPressed inp || inputMouseMiddlePressed inp
-      released = inputMouseReleased inp || inputMouseRightReleased inp || inputMouseMiddleReleased inp
+  let pressed = anyButtonPressed inp
+      released = anyButtonReleased inp
       -- A hold that ended without its release being seen is over too.
       holding = held && not pressed && (inputPointerHeld inp || released)
       mouse = inputMousePos inp
@@ -194,7 +194,7 @@ routePointer ctx inp = do
 
 closeSelectOnOutsideClick :: Context -> Input -> IO ()
 closeSelectOnOutsideClick ctx inp =
-  when (inputMousePressed inp || inputMouseReleased inp) $ do
+  when (buttonPressed MouseLeft inp || buttonReleased MouseLeft inp) $ do
     store <- getStore ctx
     when (anySelectOpen store) $ do
       let mouse = inputMousePos inp
@@ -258,7 +258,7 @@ keepNode p = fmap listToMaybe . filterM p . maybeToList
 
 finalizeSelectPick :: Context -> Input -> IO ()
 finalizeSelectPick ctx inp =
-  when (inputMousePressed inp || inputMouseReleased inp) $ do
+  when (buttonPressed MouseLeft inp || buttonReleased MouseLeft inp) $ do
     let mouse@(V2 _ mouseY) = inputMousePos inp
     dropdowns <- allowedDropdowns ctx
     forM_ dropdowns $ \dd ->
@@ -276,7 +276,7 @@ finalizeSelectPick ctx inp =
             -- disappears with the pick.
             let (_, vSb, hSb, _) = ddComboGeom dd
                 onLane = any (\(track, _) -> rectContains track mouse) (catMaybes [vSb, hSb])
-            when (inputMousePressed inp && not onLane) $
+            when (buttonPressed MouseLeft inp && not onLane) $
               forM_ (comboDropPickIndex (ddRect dd) menuItemRowH nOpts mouseY) $ \picked -> do
                 let txt = fromMaybe "" (listToMaybe (drop picked (ddOptions dd)))
                     len = T.length txt

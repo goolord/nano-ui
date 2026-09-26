@@ -18,7 +18,7 @@ import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context
 import NanoUI.Internal.Frame.Scroll.Geometry (scrollAxisRange, scrollBare, scrollHorizontalHidden)
 import NanoUI.Internal.Id (WidgetId)
-import NanoUI.Internal.Input (inputMousePos, inputScroll)
+import NanoUI.Internal.Input (MouseButton (..), inputMousePos, inputScroll)
 import NanoUI.Internal.Monad (Ui, askInput, freshWidget, lastRect, nextId, requestFrame, uiIO, uiTheme, withKey)
 import NanoUI.Internal.Store (fieldFloat, findSlot, insertSlot)
 import NanoUI.Internal.Style
@@ -235,7 +235,7 @@ renderHeader tabStyle cur t = do
       resp <- mainButton
       closeResp <-
         headerButton "\215" 0 (tabHeaderLay {layoutPadding = Padding 2 4 4 4}) buttonFlagClose
-      pure (tabKey t, resp, respClicked closeResp || respMiddleClicked resp || respMiddleClicked closeResp)
+      pure (tabKey t, resp, respClicked closeResp || respClickedWith MouseMiddle resp || respClickedWith MouseMiddle closeResp)
     else (tabKey t,,False) <$> mainButton
 
 -- | Tab headers and the active tab's body. Pass the active key; the result is

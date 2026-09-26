@@ -19,6 +19,7 @@ tests =
   , spec "session-loop-hard-quit" runSessionLoopHardQuitTest
   , spec "session-loop-close-request" runSessionLoopCloseTest
   , spec "session-loop-close-asks-the-view" runSessionLoopCloseAskTest
+  , spec "session-loop-clicks" runSessionLoopClicksTest
   , spec "drawing-lock" runDrawingLockTest
   ]
 
@@ -100,6 +101,30 @@ runSessionLoopTest ctx failed = do
     ]
     actual
   assertEq failed 3 =<< readIORef draws
+
+-- Presses of one button close together count up to a triple click, and a
+-- press of another button starts the count over.
+runSessionLoopClicksTest :: Context -> IORef Int -> IO ()
+runSessionLoopClicksTest ctx failed = do
+  clicks <- newIORef []
+  debug <- newDebugSampler
+  batches <- newIORef [[1, 2, 1, 2, 1, 2, 4 :: Int]]
+  let buttonOf = \case
+        1 -> Just (MouseLeft, True)
+        2 -> Just (MouseLeft, False)
+        4 -> Just (MouseRight, True)
+        _ -> Nothing
+      driver =
+        (quietDriver debug)
+          { sdWaitEvents = \_ -> atomicModifyIORef' batches (\case b : rest -> (rest, b); [] -> ([], [3]))
+          , sdApplyEvent = \inp e -> maybe inp (\(b, down) -> applyMouseButton b down inp) (buttonOf e)
+          , sdIsButtonEdge = \e -> buttonOf e /= Nothing
+          , sdShouldDraw = \_ _ _ _ _ -> pure True
+          , sdDraw = \_ inp _ -> False <$ when (anyButtonPressed inp) (modifyIORef' clicks (<> [inputMouseClicks inp]))
+          }
+  clearDirty ctx
+  runSessionLoop driver ctx emptyInput
+  assertEq failed [1, 2, 3, 1] =<< readIORef clicks
 
 -- A requested wake bounds the idle wait and draws when it comes due, and the
 -- loop blocks again once nothing asks for another. No pass runs in between:

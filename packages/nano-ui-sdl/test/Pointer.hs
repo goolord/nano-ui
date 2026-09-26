@@ -1,7 +1,8 @@
 {-# LANGUAGE DisambiguateRecordFields #-}
 
--- | SDL pointer translation: the middle and side buttons, and the mouse's
--- motion. Events go through SDL's own queue, on the dummy video driver.
+-- | SDL pointer translation: the middle, side and extra buttons, the
+-- mouse's motion, and the pointer leaving the window. Events go through
+-- SDL's own queue, on the dummy video driver.
 module Main (main) where
 
 import Control.Monad (forM_, unless)
@@ -9,10 +10,10 @@ import Foreign.C.Types (CBool (..))
 import Foreign.Marshal.Alloc (alloca)
 import Foreign.Ptr (castPtr)
 import Foreign.Storable (Storable, poke)
-import NanoUI (V2 (..))
+import NanoUI (V2 (..), buttonHeld, buttonPressed, buttonReleased)
 import NanoUI.Backend
 import NanoUI.Sdl.Internal.Input (SdlEvent (..), applyEvent, pollEvents)
-import SDL3.Sys.Bindgen.Events (SDL_MouseButtonEvent (..), SDL_MouseMotionEvent (..))
+import SDL3.Sys.Bindgen.Events (SDL_MouseButtonEvent (..), SDL_MouseMotionEvent (..), SDL_WindowEvent (..))
 import SDL3.Sys.Bindgen.Events qualified as Events
 import SDL3.Sys.Bindgen.Init (SDL_InitFlags (..), sDL_INIT_VIDEO)
 import SDL3.Sys.Bindgen.Mouse (sDL_BUTTON_MIDDLE, sDL_BUTTON_X1, sDL_BUTTON_X2)
@@ -42,6 +43,8 @@ main = do
     , ("the middle button comes up", False, sDL_BUTTON_MIDDLE, MouseMiddle)
     , ("X1 is back", True, sDL_BUTTON_X1, MouseBack)
     , ("X2 is forward", True, sDL_BUTTON_X2, MouseForward)
+    , ("X2 comes up", False, sDL_BUTTON_X2, MouseForward)
+    , ("a sixth button is another", True, 6, MouseOther 6)
     ]
     $ \(name, isDown, sdlButton, want) -> do
       events <-
@@ -63,6 +66,18 @@ main = do
   check "the mouse moves the pointer" $ case moved of
     [EvMouseMotion (V2 30 40) _] -> True
     _ -> False
+  left <-
+    through
+      SDL_WindowEvent
+        { type' = Events.SDL_EVENT_WINDOW_MOUSE_LEAVE, reserved = 0, timestamp = 0, windowID = 0, data1 = 0, data2 = 0
+        }
+  check "the pointer leaves the window" (left == [EvMouseLeave])
   quitSafe
-  let pressed = applyEvent emptyInput (EvMouseButton MouseMiddle True (V2 5 5) (inputModifiers emptyInput))
-  check "a middle press is held" (inputMouseMiddleDown pressed && inputMouseMiddlePressed pressed)
+  let button b isDown inp = applyEvent inp (EvMouseButton b isDown (V2 5 5) (inputModifiers emptyInput))
+      pressed = button MouseMiddle True emptyInput
+      side = button MouseBack False (clearEphemeral (button MouseBack True emptyInput))
+      gone = applyEvent pressed EvMouseLeave
+  check "a middle press is held" (buttonHeld MouseMiddle pressed && buttonPressed MouseMiddle pressed)
+  check "a side button is released" (buttonReleased MouseBack side && not (buttonHeld MouseBack side))
+  check "leaving moves the pointer off the window and keeps the button" $
+    let V2 x y = inputMousePos gone in x < -1000 && y < -1000 && buttonHeld MouseMiddle gone

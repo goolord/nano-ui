@@ -125,13 +125,30 @@ growing children; `minW` and `maxW` constrain width. `percent 50` requests
 half the available width. `tight` removes padding but keeps the child gap.
 
 `stack` layers its children in one box as large as the largest, each placed
-by its alignment; a later child draws over the earlier ones and takes the
-pointer from them. The `wrap` modifier flows a row onto a new line where the
-next child would not fit, as in
-`rowWith (wrap . gap 6 . lineGap 4) (mapM_ chip tags)`; inside a container
-that sizes itself to its content, bound the row with `maxW` or `fixedW`.
-`pinAt x y` places a node at that offset in its parent's content box, over
-its siblings and out of their flow.
+by its alignment; a later child draws over the earlier ones. The `wrap`
+modifier flows a row onto a new line where the next child would not fit, as
+in `rowWith (wrap . gap 6 . lineGap 4) (mapM_ chip tags)`; inside a
+container that sizes itself to its content, bound the row with `maxW` or
+`fixedW`. `pinAt x y` places a node over its siblings and out of their
+flow, at that offset from where its alignment puts it in its parent's
+content box: from the top-left corner by default, and from the bottom-right
+one with `pinAt (-16) (-16) . alignEnd . alignBottom`, as a floating button
+sits.
+
+Where a stack or a pinned node draws one node over another, a control on
+top (a button, field, slider or drawing) takes the pointer from whatever is
+beneath it, while a panel, label, image or container lets the pointer
+through to the controls beneath. `pointer PointerBlock` makes a node take
+the pointer over its whole box, as a card or a scrim over a list must, and
+`pointer PointerPass` makes a node and everything in it let the pointer
+through, as a decorative drawing laid over controls should. A node never
+takes the pointer from what it is inside:
+
+```haskell
+stack $ do
+  list
+  panelWith (pointer PointerBlock . alignEnd . fixedW 240) details
+```
 
 Give a scroller a bounded viewport, for example
 `scrollWith (fixedH 240 . fillW) body`. `scrollArea` also returns its id for
@@ -141,8 +158,10 @@ range when building only the visible rows of a large collection.
 To load something as it comes into view, wrap it in a `sensor` or watch its
 id with `useVisibility`. A sensor reports the last frame's layout, as
 `respRect` does; `becameVisible` holds once, on the frame it comes into view,
-and `sensorAnticipate` reports it that many pixels early. Here `load`
-registers an image and returns its id:
+`sensorAnticipate` reports it that many pixels early, and `sensorDelay` only
+once it has stayed in view that many seconds, so a list scrolled quickly
+past loads nothing. `visRect` is the part on screen and `visBounds` the
+whole widget. Here `load` registers an image and returns its id:
 
 ```haskell
 lazyImage :: NanoUI ImageId -> NanoUI ()
@@ -178,8 +197,10 @@ overlay with that flag so its identity and later siblings remain stable.
 
 Tooltips need no flag. One opens once the pointer has rested on its target
 for `tooltipDelay`, half a second by default, and shuts when the pointer
-leaves or a button goes down. `tooltipConfigured` sets the delay and the
-placement; `PlacementAtCursor` follows the pointer.
+leaves or a button goes down. A disabled widget has one too, which is where
+to say why it is off. `tooltipConfigured` sets the delay, the placement and
+the gap to the target; `PlacementAtCursor` follows the pointer, where for a
+popup or context menu it opens at the anchor point.
 
 Ordinary widgets read routed input with `askInput`. A covered layer receives
 no pointer. `askFrameInput` is for window-wide handling, such as dismissing
@@ -193,9 +214,12 @@ it. Focus moves as Tab would, from the next frame; a widget Tab would skip,
 such as one disabled or behind a modal, refuses it.
 
 `withCursorShape` sets the pointer's shape over a subtree wherever the
-widgets inside pick none, such as `UiCursorCrosshair` over a canvas, or
-`UiCursorNotAllowed` around disabled widgets. A custom widget picks its own
-with `widgetCursor`. A backend shows the nearest shape the platform has.
+widgets inside pick none, such as `UiCursorCrosshair` over a canvas,
+`UiCursorNotAllowed` around disabled widgets, or `UiCursorHidden` over a
+video. A custom widget picks its own with `widgetCursor`, from its rect and
+the pointer, so a part of it can show another shape, and keeps it through a
+drag that leaves it; its `UiCursorDefault` leaves the choice to the scope
+around it. A backend shows the nearest shape the platform has.
 
 Keys arrive in `inputKeys`, `inputKeysReleased` and `inputKeysHeld`, and the
 text they type in `inputChars`. A key that types is a `KeyChar` of what it
@@ -231,8 +255,36 @@ focused field draws the composition (`inputComposition`) at its caret and
 changes its value only on commit. Meanwhile the frame drops the keys, so no
 shortcut fires.
 
-A middle click is `respMiddleClicked`, routed like a right click; a closable
-tab closes on one.
+Mouse buttons come as a `MouseButton`: `MouseLeft`, `MouseRight`,
+`MouseMiddle`, the side buttons `MouseBack` and `MouseForward`, and
+`MouseOther n` for any other. A widget's response says which went down on it
+and are still held (`respHeldWith`), and which clicked it, going down and up
+on it (`respClickedWith`); `respClicked` is its activation, a left click or
+Enter. A button that went down elsewhere and is dragged over a widget is not
+the widget's. `mousePressed`, `mouseReleased` and `mouseHeld` hear a button
+anywhere on the part of the view being declared, as `keyPressed` hears a
+key, and stay quiet behind a modal and in `disabledWhen`:
+
+```haskell
+whenM (mousePressed MouseBack) goBack
+tab <- button' "Report"
+when (respClickedWith MouseMiddle tab) closeReport
+```
+
+`mouseArea` gives any part of a view a response of its own, as iced's
+`mouse_area` does: it is hovered while the pointer is on it or anything in
+it, and reports the buttons pressed and clicked there, except a click a
+widget inside takes for itself.
+
+```haskell
+(_, item) <- mouseArea (fillW . gap 6) $ do
+  label name
+  muted path
+when (respClickedWith MouseMiddle item) (openInNewTab path)
+when (respClickedWith MouseRight item) (showMenuFor path)
+```
+
+A closable tab closes on a middle click.
 
 ## Animation and background work
 
@@ -458,9 +510,10 @@ delta time explicitly in test input. Warm up before targeting a widget by
 its response rectangle, then send separate press and release frames.
 
 `NanoUI.Testing.Harness` supplies `warmup2`, `clickPair`, `runClick`, and
-text-span queries, with `middleClickPair` for the middle button. Its `held`
-helper stores controlled input values outside the hook store, so an automatic
-hook rebuild does not hide a change flag that the test is trying to observe.
+text-span queries, with `clickPairWith` for another button, as in
+`clickPairWith MouseMiddle base pos`. Its `held` helper stores controlled
+input values outside the hook store, so an automatic hook rebuild does not
+hide a change flag that the test is trying to observe.
 
 A tooltip's delay runs on the real clock, so a test sets `tooltipDelay = 0`.
 `newWakeSignal` lets a test wait for a background job's wake, and

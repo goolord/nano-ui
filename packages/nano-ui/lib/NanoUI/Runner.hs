@@ -63,19 +63,21 @@ alignFrameStart periodSec lastT = do
       now <- getMonotonicTime
       when (now < target) (fullSpin target)
 
--- | Stamp multi-click counts into an 'Input' record: presses within 5 pixels
--- and 0.4 seconds of the previous one count up to a triple click. The ref
--- holds the time, position and count of the previous press.
-stampClicks :: IORef (Double, V2, Int) -> Input -> IO Input
+-- | Stamp multi-click counts into an 'Input' record: presses of the same
+-- button within 5 pixels and 0.4 seconds of the previous one count up to a
+-- triple click. The ref holds the time, position, buttons and count of the
+-- previous press.
+stampClicks :: IORef (Double, V2, MouseButtons, Int) -> Input -> IO Input
 stampClicks ref inp
-  | not (inputMousePressed inp) = pure inp
+  | not (anyButtonPressed inp) = pure inp
   | otherwise = do
       now <- getMonotonicTime
-      (t, V2 px py, n) <- readIORef ref
+      (t, V2 px py, prevButtons, n) <- readIORef ref
       let pos@(V2 x y) = inputMousePos inp
+          buttons = inputButtonsPressed inp
           close = (x - px) * (x - px) + (y - py) * (y - py) <= 25
-          !n' = if close && now - t <= 0.4 then min 3 (n + 1) else 1
-      writeIORef ref (now, pos, n')
+          !n' = if close && buttons == prevButtons && now - t <= 0.4 then min 3 (n + 1) else 1
+      writeIORef ref (now, pos, buttons, n')
       pure (inp {inputMouseClicks = n'})
 
 -- | Concurrency lock for drawing vs async callbacks (e.g. resize watchers).
@@ -110,15 +112,7 @@ shouldRedrawFrame ctx prevInp curInp wasAnim continuous refreshDue = do
       -- so an animation that just ended is the only animation case left: it
       -- needs one final frame.
       need <- needsRedraw ctx prevInp curInp
-      let pointerEdge =
-            inputMousePressed curInp
-              || inputMouseReleased curInp
-              || inputMouseRightPressed curInp
-              || inputMouseRightReleased curInp
-              || inputMouseMiddlePressed curInp
-              || inputMouseMiddleReleased curInp
-              || inputMouseBackPressed curInp
-              || inputMouseForwardPressed curInp
+      let pointerEdge = anyButtonPressed curInp || anyButtonReleased curInp
           scrollEdge = inputScroll curInp /= V2 0 0
       pure (need || wasAnim || pointerEdge || scrollEdge)
 
@@ -222,7 +216,7 @@ runSessionLoop ::
   Input ->
   IO ()
 runSessionLoop drv ctx0 inp0 = do
-  clickTracker <- newIORef (0, V2 (-999) (-999), 0)
+  clickTracker <- newIORef (0, V2 (-999) (-999), noButtons, 0)
   startT <- getMonotonicTime
   trace <- newLoopTrace startT
 

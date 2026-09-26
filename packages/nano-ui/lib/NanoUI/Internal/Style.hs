@@ -1,3 +1,4 @@
+{-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE StrictData #-}
 
 -- | Layout options, text styling, and theme palettes. Modifiers compose with
@@ -124,6 +125,8 @@ module NanoUI.Internal.Style
   , wrap
   , lineGap
   , pinAt
+  , PointerMode (PointerAuto, PointerBlock, PointerPass)
+  , pointer
   ) where
 
 import Data.Bits ((.&.), (.|.))
@@ -231,6 +234,8 @@ data Layout = Layout
   , layoutHeight :: !Sizing
   , layoutPadding :: !Padding
   , layoutGap :: {-# UNPACK #-} !Float
+  , layoutPointer :: {-# UNPACK #-} !PointerMode
+  -- ^ Beside 'layoutGap', whose word it shares.
   , layoutAlignX :: !AlignX
   , layoutAlignY :: !AlignY
   , layoutMinW :: {-# UNPACK #-} !Float
@@ -278,6 +283,7 @@ defaultLayout =
     , layoutWrap = False
     , layoutLineGap = Nothing
     , layoutPin = Nothing
+    , layoutPointer = PointerAuto
     }
 
 -- | Set all four padding edges in logical pixels.
@@ -519,16 +525,79 @@ wrap l = l {layoutWrap = True}
 lineGap :: Float -> Layout -> Layout
 lineGap n l = l {layoutLineGap = Just (max 0 n)}
 
--- | Take the node out of its parent's flow and place it @x@ right and @y@ down
--- from the parent's content box (inside its padding), over its siblings,
--- taking the pointer from them where it covers them. The siblings lay out as
--- if it were absent, and it does not count towards the parent's size, but it
--- is clipped and scrolled with them. It keeps its own
--- size: a content or fixed size as usual, even past the parent's edge, a
--- grow size fills the content box past the offset, and a percentage is of
--- the content box. Windows, modals and popups place themselves and ignore it.
+-- | Take the node out of its parent's flow and place it over its siblings in
+-- the parent's content box (inside its padding), where its alignment puts it
+-- and then @x@ right and @y@ down. With the default top-left alignment the
+-- offset is from the top-left corner; aligned to the end or the bottom, the
+-- node is anchored to that edge:
+--
+-- > buttonWith (pinAt (-16) (-16) . alignEnd . alignBottom) "+"   -- 16 in from the bottom-right corner
+-- > box (pinAt 6 (-6) . alignEnd . alignTop . fixedWH 12 12) red   -- overhanging the top-right corner
+--
+-- The siblings lay out as if it were absent, and it does not count towards
+-- the parent's size, but it is clipped and scrolled with them. It keeps its
+-- own size: a content or fixed size as usual, even past the parent's edge, a
+-- grow size fills the content box from the offset to the edge it is not
+-- aligned to, and a percentage is of the content box. Windows, modals and
+-- popups place themselves and ignore it.
+--
+-- A control pinned over its siblings takes the pointer from them where it is
+-- drawn over them; a panel, label or image lets it through to the controls
+-- beneath unless it is given @'pointer' 'PointerBlock'@.
 pinAt :: Float -> Float -> Layout -> Layout
 pinAt x y l = l {layoutPin = Just (V2 x y)}
+
+-- | How a node takes the pointer where a stack or a pinned node draws it over
+-- others ('pointer'). A node never takes the pointer from the nodes it is
+-- inside.
+--
+-- A byte, so that it shares a word of 'Layout' with 'layoutGap' and a layout
+-- costs no more for it: 'PointerAuto', 'PointerBlock' and 'PointerPass' are
+-- its values.
+newtype PointerMode = PointerMode Word8
+  deriving newtype (Eq, Enum)
+
+-- | The default. A control (a button, slider, text field, drawing and the
+-- like) takes the pointer from whatever it is drawn over; a container,
+-- label, image or box lets it through to the controls beneath. What it lets
+-- through to is its hover and presses, so a label or container drawn under
+-- a control gets no hover there either.
+pattern PointerAuto :: PointerMode
+pattern PointerAuto = PointerMode 0
+
+-- | The node's box takes the pointer from whatever it is drawn over,
+-- whatever the node is: a press or a wheel turn on it reaches nothing
+-- beneath, and nothing beneath is hovered. The controls inside it take the pointer as usual. For
+-- a card, a panel or a scrim over other controls.
+pattern PointerBlock :: PointerMode
+pattern PointerBlock = PointerMode 1
+
+-- | The node and everything inside it let the pointer through: they take no
+-- hover or presses and cover nothing, as a decorative drawing or an image
+-- laid over controls should.
+pattern PointerPass :: PointerMode
+pattern PointerPass = PointerMode 2
+
+{-# COMPLETE PointerAuto, PointerBlock, PointerPass #-}
+
+instance Show PointerMode where
+  show = \case
+    PointerAuto -> "PointerAuto"
+    PointerBlock -> "PointerBlock"
+    _ -> "PointerPass"
+
+instance Bounded PointerMode where
+  minBound = PointerAuto
+  maxBound = PointerPass
+
+-- | Set how the node takes the pointer where it is drawn over others:
+--
+-- > stack $ do
+-- >   list
+-- >   panelWith (pointer PointerBlock . alignEnd . fixedW 240) details
+-- >   drawing (pointer PointerPass . fillW . fillH) glow
+pointer :: PointerMode -> Layout -> Layout
+pointer m l = l {layoutPointer = m}
 
 -- | Surface colours and border geometry. Border width and corner radius use
 -- logical pixels and affect painting, not layout size.

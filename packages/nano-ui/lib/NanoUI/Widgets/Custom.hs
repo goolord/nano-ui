@@ -6,8 +6,9 @@
 -- 'canvas' is the short form for drawing into a laid-out rectangle with
 -- 'CanvasM', which fills and strokes paths from "NanoUI.Path" as well as
 -- rects, circles, lines, images and text, and draws through transforms.
--- 'useDrag2D' and 'useWheelDelta' are gesture hooks for your own controls;
--- 'knob' and 'toggleSwitch' show how they fit together. Each reference
+-- 'useDrag2DOn' and 'useWheelDeltaOn' are gesture hooks for your own
+-- controls, fed the widget's 'Response'; 'knob' and 'toggleSwitch' show how
+-- they fit together. Each reference
 -- widget comes as @x@, at its default size, and as @xWith'@, which takes a
 -- layout modifier and a size and also returns the widget's 'Response'.
 module NanoUI.Widgets.Custom
@@ -54,8 +55,10 @@ module NanoUI.Widgets.Custom
   , drawStrokePathCapped
   , withTransform
     -- * Gestures
-  , useDrag2D
+  , useDrag2DOn
   , Drag2D (..)
+  , useWheelDeltaOn
+  , useDrag2D
   , useWheelDelta
     -- * Reference widgets
   , knob
@@ -287,8 +290,16 @@ data CustomWidgetSpec a = CustomWidgetSpec
     -- rebuilt and compared every frame. A stale key draws stale pixels, so
     -- derive it from everything the drawing reads: it is believed even while
     -- the widget animates.
-  , widgetCursor     :: !(Maybe (CustomDrawContext -> UiCursorKind))
-    -- ^ Optional custom mouse cursor when pointer is over the widget.
+  , widgetCursor     :: !(Maybe (CustomDrawContext -> Rect -> V2 -> UiCursorKind))
+    -- ^ The pointer's shape over the widget, from its draw context, its rect
+    -- and where the pointer is, so parts of the widget can show different
+    -- shapes. It is asked while the pointer is on the widget, and while a
+    -- drag that went down on it goes on elsewhere, so a drag keeps its
+    -- shape. 'UiCursorDefault' is no opinion: the 'NanoUI.withCursorShape'
+    -- around the widget picks, or the arrow shows.
+    --
+    -- > widgetCursor = Just $ \_ (Rect x _ w _) (V2 px _) ->
+    -- >   if px > x + w - 6 then UiCursorEwResize else UiCursorDefault
   , widgetFocusable  :: !Bool
     -- ^ Whether this widget accepts tab/keyboard focus.
   , widgetDamageSlop :: !Float
@@ -401,12 +412,33 @@ data Drag2D = Drag2D
   }
   deriving (Eq, Show)
 
--- | Tracks pointer dragging across a 2D area (e.g. for color pickers, joysticks, canvas panning).
-useDrag2D ::
-  (Ui :> es) =>
-  Rect ->
-  Eff es Drag2D
+-- | A drag of the left button that starts with a press on the widget, and
+-- lasts until the button comes up wherever the pointer goes, for a colour
+-- picker, a joystick or a panned canvas. The position is clamped to the
+-- widget's rect. The press is the widget's own ('respPressed'), so a press
+-- on something drawn over it, or on the part a scroller has clipped off, or
+-- on it disabled, starts nothing. Call it every frame, after the widget:
+--
+-- > (resp, ()) <- customWidget spec
+-- > drag <- useDrag2DOn resp
+-- > when (dragActive drag) (setPan (dragPosition drag))
+useDrag2DOn :: (Ui :> es, HasResponse r) => r -> Eff es Drag2D
+useDrag2DOn r = do
+  inp <- askInput
+  drag2DFrom (respRect r) (respPressed r && buttonPressed MouseLeft inp)
+
+-- | 'useDrag2DOn' over a rect: the drag starts with a press anywhere in it,
+-- whatever is drawn there.
+useDrag2D :: (Ui :> es) => Rect -> Eff es Drag2D
 useDrag2D bounds = do
+  inp <- askInput
+  drag2DFrom bounds (buttonPressed MouseLeft inp && rectContains bounds (inputMousePos inp))
+{-# DEPRECATED useDrag2D "Use useDrag2DOn with the widget's Response, which respects what is drawn over it" #-}
+
+-- | A drag of the left button that @starts@ this frame or started before,
+-- clamped to @bounds@.
+drag2DFrom :: (Ui :> es) => Rect -> Bool -> Eff es Drag2D
+drag2DFrom bounds starts = do
   (wid, ctx) <- freshWidget
   inp <- askInput
   -- The drag flag is quiet bookkeeping; the last pointer position is a point
@@ -415,7 +447,7 @@ useDrag2D bounds = do
       mouse = inputMousePos inp
   store <- uiIO (getStore ctx)
   let active0 = quietFlag dragK store
-      active = inputMouseDown inp && (active0 || (inputMousePressed inp && rectContains bounds mouse))
+      active = buttonHeld MouseLeft inp && (active0 || starts)
       prev = uncurry V2 (findSlot fieldPoint (v2X mouse, v2Y mouse) dragK store)
       delta = if active && active0 then v2Sub mouse prev else V2 0 0
       clampedMouse =
@@ -428,12 +460,22 @@ useDrag2D bounds = do
         . (if active then insertSlot fieldPoint dragK (v2X mouse, v2Y mouse) else deleteSlot fieldPoint dragK)
   pure Drag2D { dragPosition = clampedMouse, dragActive = active, dragDelta = delta }
 
--- | Inspects mouse wheel scroll delta when pointer is hovering over bounds.
+-- | This frame's wheel turn while the pointer is on the widget
+-- ('respHovered'): not where something is drawn over it, nor where a
+-- scroller has clipped it off, nor while it is disabled.
+useWheelDeltaOn :: (Ui :> es, HasResponse r) => r -> Eff es (Float, Float)
+useWheelDeltaOn r = wheelIf (respHovered r)
+
+-- | 'useWheelDeltaOn' over a rect: the wheel wherever the pointer is in it.
 useWheelDelta :: (Ui :> es) => Rect -> Eff es (Float, Float)
-useWheelDelta bounds = do
-  inp <- askInput
-  let V2 x y = inputScroll inp
-  pure (if rectContains bounds (inputMousePos inp) then (x, y) else (0, 0))
+useWheelDelta bounds = wheelIf . rectContains bounds . inputMousePos =<< askInput
+{-# DEPRECATED useWheelDelta "Use useWheelDeltaOn with the widget's Response, which respects what is drawn over it" #-}
+
+-- | This frame's wheel turn when @on@, else none.
+wheelIf :: (Ui :> es) => Bool -> Eff es (Float, Float)
+wheelIf on = do
+  V2 x y <- inputScroll <$> askInput
+  pure (if on then (x, y) else (0, 0))
 
 -- -----------------------------------------------------------------------------
 -- Reference Custom Widgets
@@ -467,7 +509,7 @@ knobWith' f diameter minV maxV value = do
     customWidgetWithId
       wid
       (fixedSizeSpec f diameter diameter)
-        { widgetCursor = Just (\_ -> UiCursorNsResize)
+        { widgetCursor = Just (\_ _ _ -> UiCursorNsResize)
         , widgetFocusable = True
         , widgetContent = contentKey [frac]
         , widgetDraw = \cdc (Rect x y w h) -> runCanvasFor cdc $ do
@@ -487,8 +529,8 @@ knobWith' f diameter minV maxV value = do
             drawStrokeAA (V2 cx cy) tip 2.5 (themeAccent (cdcTheme cdc))
         }
   -- A drag reports no movement while it is not held.
-  drag <- useDrag2D (respRect resp)
-  (_, scrollY) <- useWheelDelta (respRect resp)
+  drag <- useDrag2DOn resp
+  (_, scrollY) <- useWheelDeltaOn resp
   nav <- useKeyNav wid
   let
     deltaNorm = -v2Y (dragDelta drag) / 120 + scrollY * 2 / 60 + fromIntegral (navStep nav) * 0.05
@@ -517,7 +559,7 @@ toggleSwitchWith' f on = do
     customWidgetWithId
       wid
       (fixedSizeSpec f pillW pillH)
-        { widgetCursor = Just (\_ -> UiCursorPointer)
+        { widgetCursor = Just (\_ _ _ -> UiCursorPointer)
         , widgetFocusable = True
         , widgetContent = contentKey [if current then 1 else 0]
         , widgetDraw = \cdc rect@(Rect x y w h) -> runCanvasFor cdc $ do

@@ -121,7 +121,7 @@ textEditMenuRow ctx inp wid (Rect mx _ _ _) style row@(Rect _ ry _ rh) cmd lbl =
 -- a right press lands on, and focus that field.
 openTextEditMenu :: Context -> Input -> IO ()
 openTextEditMenu ctx inp =
-  when (inputMouseRightPressed inp) $ do
+  when (buttonPressed MouseRight inp) $ do
     let mouse@(V2 mx my) = inputMousePos inp
     mWid <- textFieldWidgetAtMouse ctx mouse
     forM_ mWid $ \wid -> do
@@ -162,7 +162,7 @@ textFieldWidgetAtMouse ctx@Context {ctxNodeArena = na} mouse = do
 -- menu closes it.
 finalizeTextEditMenuPick :: Context -> Input -> IO ()
 finalizeTextEditMenuPick ctx inp =
-  when (inputMousePressed inp) $ do
+  when (buttonPressed MouseLeft inp) $ do
     mMenu <- getsInteraction ctx isTextInputMenu
     case mMenu of
       Just (TextInputMenu wid menuRect)
@@ -185,7 +185,7 @@ finalizeTextEditMenuPick ctx inp =
 -- input: the press it waits for is by definition not the menu's own.
 closeTextEditMenuOnOutsideClick :: Context -> Input -> IO ()
 closeTextEditMenuOnOutsideClick ctx inp =
-  when (inputMousePressed inp || inputMouseRightPressed inp || inputMouseMiddlePressed inp) $ do
+  when (anyButtonPressed inp) $ do
     route <- getsInteraction ctx isPointerRoute
     when (route /= RouteTextMenu) $ modifyInteraction ctx (\s -> s {isTextInputMenu = Nothing})
 

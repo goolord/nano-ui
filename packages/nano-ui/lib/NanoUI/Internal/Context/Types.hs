@@ -84,7 +84,7 @@ import NanoUI.Internal.Draw.Types (DrawArena, DrawOp, DrawingBuild)
 import NanoUI.Internal.Font (CustomMeasureFn, FontMetrics, WrapResult)
 import NanoUI.Internal.Frame.SpanArena (SpanArena)
 import NanoUI.Internal.Id (IdContext, WidgetId, hashWidgetId)
-import NanoUI.Internal.Input (Composition, UiCursorKind)
+import NanoUI.Internal.Input (Composition, MouseButton, UiCursorKind)
 import NanoUI.Internal.Layout.Arena (DirTag, LayoutCache, NodeArena)
 import NanoUI.Internal.Store (WidgetStore)
 import NanoUI.Internal.Style (Appearance, FontStyle, FontVariant, FontWeight, Layout, Padding, Theme)
@@ -544,7 +544,8 @@ type CustomDrawBuild = CustomDrawContext -> Rect -> SmallArray DrawOp
 data CustomDrawingEntry = CustomDrawingEntry
   { cdrContent :: {-# UNPACK #-} !Int
   , cdrBuild :: !CustomDrawBuild
-  , cdrCursor :: !(Maybe (CustomDrawContext -> UiCursorKind))
+  , cdrCursor :: !(Maybe (CustomDrawContext -> Rect -> V2 -> UiCursorKind))
+    -- ^ The widget's cursor, given its rect and the pointer.
   , cdrDamageSlop :: {-# UNPACK #-} !Float
     -- ^ Repaint margin in logical pixels; anything but a positive value
     -- leaves the default margin in place.
@@ -708,22 +709,23 @@ data Context = Context
   , ctxDrawArena :: DrawArena
   , ctxHotId :: IORef WidgetId
   , ctxLastHotId :: IORef WidgetId
-  -- | The widgets, by 'intKey', that the pointer is over
-  -- in the frame the user saw but does not reach, since a stack or a pinned
-  -- node draws another widget over them there
-  -- ('NanoUI.Internal.Frame.Input.recordCoveredWidgets'). Found before the
-  -- view runs, which then gives them no pointer.
-  , ctxPointerCovered :: !(IORef IntSet)
+  -- | Where a stack or a pinned node can draw one node over another, the
+  -- ids, by 'intKey', of the node on top at the pointer that takes it and of
+  -- every node that one is inside, in the frame the user saw
+  -- ('NanoUI.Internal.Frame.Input.recordCoveredWidgets'). Every other node
+  -- under the pointer is covered there. Found before the view runs, which
+  -- then gives the covered ones no pointer ('pointerCovered'). 'Nothing'
+  -- when nothing is covered.
+  , ctxPointerReach :: !(IORef (Maybe IntSet))
   , ctxActiveId :: IORef WidgetId
   , ctxClickedId :: IORef WidgetId
   , ctxReleaseClickedId :: IORef WidgetId
-  -- | Where the held left, right and middle buttons went down, cleared when
-  -- they come up. A click belongs to the widget the press landed on, so a
-  -- widget hit-tests this point as well as the release point. 'Nothing' (a
-  -- release with no press behind it) lets the release stand on its own.
-  , ctxPressPos :: IORef (Maybe V2)
-  , ctxRightPressPos :: IORef (Maybe V2)
-  , ctxMiddlePressPos :: IORef (Maybe V2)
+  -- | Where each held button went down, written on the frames a button
+  -- goes down or comes up ('NanoUI.Internal.Frame.Input.armPointerPress').
+  -- A click, or a button held, belongs to the widget the press landed on, so
+  -- a widget hit-tests this point as well as the pointer. A button without
+  -- one (a release with no press behind it) stands on its own.
+  , ctxPressPos :: IORef (Map MouseButton V2)
   , ctxFocusId :: IORef WidgetId
   -- | Focus last moved by keyboard or from code, so the focused widget shows
   -- its ring. A pointer press hides it again.

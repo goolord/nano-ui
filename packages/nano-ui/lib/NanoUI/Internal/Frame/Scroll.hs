@@ -14,9 +14,9 @@ where
 
 import Control.Applicative ((<|>))
 import Control.Monad (forM_, join, unless, when)
-import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Maybe (MaybeT (..))
 import Data.Foldable (find)
+import Data.Functor ((<&>))
 import Data.Maybe (fromMaybe, isJust)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Frame.Hit (overlayHitAllowed, overlayHitRoot, topmostFloating, topmostOverlayAtMouse)
@@ -27,7 +27,7 @@ import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Monad ((<&&>))
 import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena
-import NanoUI.Internal.Style (Padding (..), themePanel)
+import NanoUI.Internal.Style (Padding (..), PointerMode (..), themePanel)
 import NanoUI.Internal.Types (Rect (..), Size (..), V2 (..), rectContains, rectHit, rectInflate, rectIntersect, rectUnion)
 
 -- | Move every node by the offsets of the scroll containers around it, and
@@ -200,20 +200,78 @@ findScrollNodeUnderMouse ctx mouse = do
             <|> MaybeT (topmostOverlayAtMouse ctx mouse)
       let start = fromMaybe 0 top
       rect <- getNodeRect (ctxNodeArena ctx) start
-      queryScrollTarget ctx mouse rect start
+      layered <- (> 0) <$> layeredNodeCount (ctxNodeArena ctx)
+      queryScrollTarget ctx layered mouse rect start <&> \case
+        WheelTo idx -> Just idx
+        _ -> Nothing
 
--- | The scroller under @mouse@ in the subtree at @idx@: its first child's,
--- else @idx@ itself.
-queryScrollTarget :: Context -> V2 -> Rect -> NodeIdx -> IO (Maybe NodeIdx)
-queryScrollTarget ctx mouse parentClip idx = runMaybeT $ do
-  nt <- liftIO $ getNodeType (ctxNodeArena ctx) idx
-  clip <- MaybeT $ scrollHitClip ctx idx nt parentClip
-  MaybeT (firstChildJustM (ctxNodeArena ctx) idx (queryScrollTarget ctx mouse clip))
-    <|> MaybeT (scrollHitSelf ctx idx nt mouse clip)
+-- | What a subtree does with the wheel at the pointer.
+data WheelHit
+  = WheelMiss
+  -- ^ Nothing in it takes the wheel there.
+  | WheelBlocked
+  -- ^ A node given 'PointerBlock' is on top there with no scroller of its
+  -- own: nothing drawn beneath it takes the wheel, though a scroller it is
+  -- inside still does.
+  | WheelTo !NodeIdx
+  -- ^ This scroller takes it.
 
+-- | What the subtree at @idx@ does with the wheel at @mouse@: the answer of
+-- the child drawn on top there, else @idx@ itself if it is a scroller under
+-- the pointer. Where a stack or a pinned node draws one child over another
+-- (@layered@, and this node a stack or above a pinned node), the children
+-- are asked in the order paint draws them, the one on top first
+-- ('childrenTopFirst'), so a scroller pinned over another takes the wheel;
+-- elsewhere children do not overlap, and are asked in the arena's sibling
+-- order.
+queryScrollTarget :: Context -> Bool -> V2 -> Rect -> NodeIdx -> IO WheelHit
+queryScrollTarget ctx@Context {ctxNodeArena = na} layered mouse parentClip idx = do
+  nt <- getNodeType na idx
+  scrollHitClip ctx idx nt parentClip >>= \case
+    Nothing -> pure WheelMiss
+    Just clip -> do
+      overlapping <-
+        pure layered <&&> ((||) <$> ((== FlowStack) <$> getFlow na idx) <*> hasPinnedBelow na idx)
+      let answered c =
+            queryScrollTarget ctx layered mouse clip c <&> \case
+              WheelMiss -> Nothing
+              hit -> Just hit
+      inner <-
+        fromMaybe WheelMiss <$>
+          if overlapping
+            then firstJust answered =<< childrenTopFirst na idx
+            else firstChildJustM na idx answered
+      case inner of
+        WheelTo _ -> pure inner
+        _ ->
+          scrollHitSelf ctx idx nt mouse clip >>= \case
+            Just self -> pure (WheelTo self)
+            Nothing -> do
+              blocks <-
+                pure layered
+                  <&&> ((== PointerBlock) <$> getPointerMode na idx)
+                  <&&> (rectHit <$> getNodeRect na idx <*> pure mouse)
+                  <&&> pure (rectHit clip mouse)
+              pure (if blocks then WheelBlocked else inner)
+ where
+  firstJust _ [] = pure Nothing
+  firstJust f (c : cs) = f c >>= maybe (firstJust f cs) (pure . Just)
+
+-- | Node @idx@, when it is a scroller that takes the wheel at @mouse@: a
+-- scroll container whose viewport or bar lanes hold it, or a text area with
+-- something to scroll. Not one that lets the pointer through ('PointerPass').
 scrollHitSelf ::
   Context -> NodeIdx -> NodeType -> V2 -> Rect -> IO (Maybe NodeIdx)
 scrollHitSelf ctx idx nt mouse clip
+  | not (nt == NodeTextArea || isScrollNode nt) = pure Nothing
+  | otherwise =
+      getPointerMode (ctxNodeArena ctx) idx >>= \case
+        PointerPass -> pure Nothing
+        _ -> scrollerHit ctx idx nt mouse clip
+
+scrollerHit ::
+  Context -> NodeIdx -> NodeType -> V2 -> Rect -> IO (Maybe NodeIdx)
+scrollerHit ctx idx nt mouse clip
   | nt == NodeTextArea = do
       (field, bars) <- textAreaScrollGeom ctx idx
       let hit = rectHit clip mouse && rectHit field mouse && (tabVertical bars || tabHorizontal bars)
@@ -271,18 +329,18 @@ grabbableBars ctx wid =
 
 updateScrollDrag :: Context -> Input -> IO ()
 updateScrollDrag ctx inp
-  | inputMouseReleased inp =
+  | buttonReleased MouseLeft inp =
       modifyInteraction ctx (\s -> s {isScrollDrag = Nothing})
   | otherwise = do
       mDrag <- getsInteraction ctx isScrollDrag
       case mDrag of
         Just (wid, dragDir, grabOff)
-          | inputMouseDown inp -> do
+          | buttonHeld MouseLeft inp -> do
               bars <- grabbableBars ctx wid
               forM_ bars $ \(dir, layout, setOffset) ->
                 when (dir == dragDir) $
                   setOffset (scrollOffsetFromThumb dir layout grabOff (inputMousePos inp))
-        Nothing | inputMousePressed inp -> tryStartScrollDrag ctx inp
+        Nothing | buttonPressed MouseLeft inp -> tryStartScrollDrag ctx inp
         _ -> pure ()
 
 -- | Grab a thumb, or jump the thumb's center to a track press and keep
@@ -314,7 +372,7 @@ probeScrollBarHover ctx@Context {ctxNodeArena = na} inp = do
   case mDrag of
     Just (wid, dir, _) -> barWhere wid (\(d, _, _) -> d == dir) <$> grabbableBars ctx wid
     Nothing
-      | inputMouseDown inp || not (rectContains (Rect 0 0 winW winH) mouse) -> pure Nothing
+      | buttonHeld MouseLeft inp || not (rectContains (Rect 0 0 winW winH) mouse) -> pure Nothing
       | otherwise -> do
           top <- overlayHitRoot ctx mouse
           let candidate idx = do

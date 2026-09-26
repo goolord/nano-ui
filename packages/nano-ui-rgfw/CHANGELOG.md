@@ -6,7 +6,11 @@
 
 - `optExplainLayout` opens a window with the layout overlay on, and
   `debugWindowBody` has a checkbox for it.
-- The middle mouse button, and the side buttons as back and forward.
+- The middle mouse button, the side buttons as back and forward, and the
+  misc buttons past them as `MouseOther 6` to `MouseOther 8`.
+- The pointer leaving the window moves it off every widget, so nothing stays
+  hovered.
+- `UiCursorHidden` hides the pointer.
 - The core's window: the window opens from `optWindow`, a core
   `WindowSettings`, with a position, size limits, an icon, a mode and
   whether a close request ends the session. The core's window setters and

@@ -250,7 +250,23 @@
   custom widget's canvas with its curves flattened for its display.
 - `stack` and `stackWith` layer their children in one box. The `wrap`
   modifier flows a row onto new lines, or a column into new columns, `lineGap`
-  apart, and `pinAt x y` places a node at an offset over its siblings.
+  apart, and `pinAt x y` places a node at an offset over its siblings, from
+  where its alignment puts it: `pinAt (-16) (-16) . alignEnd . alignBottom`
+  is a floating button 16 in from the bottom-right corner.
+- `useDrag2DOn` and `useWheelDeltaOn`, the drag and wheel hooks of a custom
+  widget fed its `Response`: a drag starts with a press on the widget and a
+  wheel turns it while it is hovered, so neither acts through something drawn
+  over the widget, on the part a scroller clips off, or while it is disabled.
+  `knob` uses them. `useDrag2D` and `useWheelDelta`, which test a rect, are
+  deprecated.
+- `pointer`, a layout modifier for what a node drawn over others by a stack
+  or a pin does with the pointer: by default (`PointerAuto`) a control on top
+  takes it and anything else lets it through to the controls beneath;
+  `PointerBlock` makes a node, such as a card or a scrim, take it over its
+  whole box, so nothing beneath is hovered, pressed, focused or scrolled, and
+  `PointerPass` makes a node and all inside it let it through. A label, an
+  image or a container with an id under a control on top is covered like a
+  control, taking no hover or tooltip there.
 - `imageConfigured` and `imageConfigured'` take an `ImageConfig`: a
   `ContentFit` like CSS's `object-fit`, an alignment, an opacity and a
   `Rotation`. The `DrawImageRotated` op and the canvas's `drawImageRotated`
@@ -259,14 +275,22 @@
   as Tab would, or with `WidgetId 0` takes it away.
 - `tooltipConfigured` and `tooltipWidgetConfigured` take a `TooltipConfig`:
   the hover delay (`tooltipDelay`), the grace after another tooltip
-  (`tooltipGrace`) and the placement (`tooltipPlacement`).
+  (`tooltipGrace`), the placement (`tooltipPlacement`) and the space between
+  the tooltip and its target (`tooltipGap`). `PlacementAtCursor` makes a
+  tooltip follow the pointer, and opens a popup or context menu at its
+  anchor point.
 - Visibility sensors, for loading what scrolls into view: `sensor`,
-  `sensorWith`, `sensorConfigured` (with a `sensorAnticipate` margin) and
-  `useVisibility` report a `Visibility` (`visVisible`, `visRect`,
-  `becameVisible`, `becameHidden`).
+  `sensorWith`, `sensorConfigured` and `useVisibility` report a `Visibility`
+  (`visVisible`, `visRect`, the part on screen, `visBounds`, the whole
+  widget, `becameVisible`, `becameHidden`). A `SensorConfig` gives an
+  anticipate margin (`sensorAnticipate`) and a delay (`sensorDelay`), the
+  time a widget must stay in view before it counts as visible, which the
+  sensor wakes the loop for rather than drawing frames meanwhile.
 - More cursor shapes from CSS's set, from `UiCursorNotAllowed` to the one-way
-  resize arrows. `withCursorShape` shows a `CursorShape` over part of a view
-  where its widgets pick none.
+  resize arrows, and `UiCursorHidden`, which the SDL and RGFW backends show
+  by hiding the pointer. `withCursorShape` shows a `UiCursorKind` over part of
+  a view where its widgets pick none; `UiCursorDefault` from a widget picks
+  nothing, and from a scope picks the arrow.
 - A layout overlay, like iced's `explain`: `explainLayout` outlines every
   layout node and highlights the one under the pointer, which `explainedNode`
   describes; `explainingLayout` says whether it is on.
@@ -285,10 +309,23 @@
   text area draws it at its caret until it is committed, and the frame drops
   the keys meanwhile, so no shortcut fires. `textInputArea` in
   `NanoUI.Testing` says where the input method's candidate window goes.
-- The middle and side mouse buttons: `respMiddleClicked`, `respMiddlePressed`
-  and `inputMouseMiddleDown` and its siblings, routed like a right click (a
-  middle click closes a closable tab), and `inputMouseBackPressed` and
-  `inputMouseForwardPressed`.
+- Every mouse button: `MouseButton` has `MouseMiddle`, the side buttons
+  `MouseBack` and `MouseForward`, and `MouseOther n` for any other, which
+  the SDL and RGFW backends report by number (`mouseButtonNumber`). Each is
+  held, pressed and released like the left one. `respHeldWith b` and
+  `respClickedWith b` say whether button `b` went down on a widget and is
+  held, or clicked it (a middle click closes a closable tab), and
+  `mousePressed`, `mouseReleased` and `mouseHeld` hear a button anywhere on
+  the view's layer, quiet behind a modal and in `disabledWhen`, as
+  `keyPressed` is.
+- `mouseArea`, iced's `mouse_area`: a column around part of a view with a
+  `Response` of its own, hovered while the pointer is on it or anything in
+  it, and held or clicked with any button (`respHeldWith`,
+  `respClickedWith`), but for a click a widget inside takes. Nothing inside
+  it covers it, so what it shows while hovered stays shown.
+- The pointer leaving the window moves it off every widget
+  (`applyPointerLeave`, on SDL's window-leave and RGFW's mouse-leave
+  events), so nothing stays hovered.
 - A warning style beside the danger one: `themeWarning`, `fontWarning` and the
   `warning` button modifier.
 - Following the system's light or dark setting: `followSystemTheme ctx light
@@ -333,14 +370,19 @@
   `setWakeLoop` and `cancelTasks`. `runSessionLoop` ends the session when a
   view calls `quitUi`, and hands a close request to the view when the
   window's settings say to.
-- `NanoUI.Testing.Harness` has `chordInp`, `keyUpInp`, `middleClickPair`,
-  and `newWakeSignal` for a test to wait on a job's wake.
+- `NanoUI.Testing.Harness` has `chordInp`, `keyUpInp`, `clickPairWith`,
+  `pressWith` and `releaseWith` for any mouse button, and `newWakeSignal`
+  for a test to wait on a job's wake.
 - `uiFontSize`, the size text takes when its layout sets none, and
   `withFontSize` in `NanoUI.Testing`; the SDL backend reports its base size.
   `drawCheckbox` and `checkboxBoxSize` draw nano-ui's checkbox on a canvas.
 
 ### Changed
 
+- `widgetCursor` takes the widget's rect and the pointer as well as its draw
+  context, so parts of a custom widget can show different shapes, and it is
+  asked through a drag that went down on the widget wherever the pointer
+  goes: a `knob` keeps its resize arrows while dragged off it.
 - Builds with GHC 9.10 through 9.14 (`base >=4.20 && <4.23`).
 - `comboBox` filters its options only when the options list or the field
   text changes, rather than on every frame, open or closed. It also measures
@@ -598,13 +640,28 @@
   `hashtables`.
 - Tooltips open once the pointer has rested on the target for half a second
   (`defaultTooltipConfig`), or at once just after another, and shut while a
-  button is held. `tooltipAt PlacementAtCursor` follows the pointer.
+  button is held. `tooltipAt PlacementAtCursor` follows the pointer. A
+  disabled widget has its tooltip too, where the pointer is on it with
+  nothing drawn over it, so it can say why it is off.
 - `menuItemShortcut` is also `True` when its chord is pressed while its menu
   is open, and shows the chord as its `shortcutLabel`.
 - A key chord is a key, not typed text: Ctrl+C is `KeyChar 'c'` with `modCtrl`
   in `inputKeys` and nothing in `inputChars`, so look for it with `shortcut`
   or in `inputKeys`. Text fields take Command as well as Ctrl on macOS.
 - `Key` is `Ord` and no longer `Enum`, and `Modifiers` is `Ord`.
+- `Input` holds the mouse buttons as sets, `inputButtonsHeld`,
+  `inputButtonsPressed` and `inputButtonsReleased` (`MouseButtons`, read with
+  `buttonHeld`, `buttonPressed` and `buttonReleased`), in place of a field
+  for each button and edge; an `Input` is 128 bytes rather than 200. Fold
+  events in with `applyMouseButton`. `inputMouseDown`, `inputMousePressed`,
+  `inputMouseReleased` and their `Right` forms remain as deprecated functions.
+  A `Response` keeps the buttons held on the widget and those that clicked it
+  the same way (`rawRespHeld`, `rawRespClickedWith`), 64 bytes rather than 96;
+  `respPressed`, `respRightPressed` and `respRightClicked` read them.
+- A right or middle button held is a widget's only when it went down on the
+  widget: dragged across others, it no longer reports each as pressed.
+- A double or triple click counts presses of one button: a left click
+  after a right one starts over.
 - `Input`, `Modifiers` (`modSuper`), `MouseButton`, `Response`, `Layout`,
   `Theme`, `FontVariant`, `DrawOp` and `UiCursorKind` have new fields or
   constructors, for the additions above.
@@ -613,6 +670,8 @@
 
 ### Fixed
 
+- The wheel goes to the scroller drawn on top at the pointer: a scroller
+  pinned over another takes it even when declared before the one beneath.
 - A text field focused by Tab no longer has its whole text selected after a
   press elsewhere.
 - A text field with its own font size puts its caret, selection and

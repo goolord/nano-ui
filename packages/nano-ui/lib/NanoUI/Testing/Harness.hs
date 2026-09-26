@@ -1,11 +1,13 @@
 -- | Shared helpers for integration tests: input gestures, spans, scroll checks.
 module NanoUI.Testing.Harness
   ( clickPair
+  , clickPairWith
   , rightClickPair
-  , middleClickPair
   , pressAt
+  , pressWith
   , holdAt
   , releaseAt
+  , releaseWith
   , keyInp
   , chordInp
   , keyUpInp
@@ -193,31 +195,41 @@ dragPos drawFrame base from to = do
 
 -- | Left-button press and release at a point, retaining other base-input fields.
 clickPair :: Input -> V2 -> (Input, Input)
-clickPair inp pos = let press = pressAt inp pos in (press, releaseAt press)
+clickPair = clickPairWith MouseLeft
 
--- | Right- or middle-button press and release at a point. Supply event-free
--- base input.
-rightClickPair, middleClickPair :: Input -> V2 -> (Input, Input)
-rightClickPair = buttonPair MouseRight (\i -> i {inputMouseRightPressed = False})
-middleClickPair = buttonPair MouseMiddle (\i -> i {inputMouseMiddlePressed = False})
+-- | A press and a release of the button at a point, retaining other
+-- base-input fields.
+clickPairWith :: MouseButton -> Input -> V2 -> (Input, Input)
+clickPairWith b inp pos = let press = pressWith b inp pos in (press, releaseWith b press)
 
-buttonPair :: MouseButton -> (Input -> Input) -> Input -> V2 -> (Input, Input)
-buttonPair mouseButton unpress inp pos =
-  let press = applyMouseButton mouseButton True inp {inputMousePos = pos}
-   in (press, applyMouseButton mouseButton False (unpress press))
+-- | 'clickPairWith' 'MouseRight'.
+rightClickPair :: Input -> V2 -> (Input, Input)
+rightClickPair = clickPairWith MouseRight
 
 -- | Set pointer position and left-button press/held flags, clearing its release flag.
 pressAt :: Input -> V2 -> Input
-pressAt inp pos =
-  (applyMouseButton MouseLeft True inp {inputMousePos = pos}) {inputMouseReleased = False}
+pressAt = pressWith MouseLeft
+
+-- | The button down at @pos@ this frame, and not released.
+pressWith :: MouseButton -> Input -> V2 -> Input
+pressWith b inp pos =
+  applyMouseButton b True inp {inputMousePos = pos, inputButtonsReleased = buttonsDelete b (inputButtonsReleased inp)}
 
 -- | The button still down from an earlier 'pressAt', with the pointer at @pos@.
 holdAt :: Input -> V2 -> Input
-holdAt inp pos = (pressAt inp pos) {inputMousePressed = False}
+holdAt inp pos = unpress MouseLeft (pressAt inp pos)
 
 -- | Release the left button at its current position, clearing its press/held flags.
 releaseAt :: Input -> Input
-releaseAt press = applyMouseButton MouseLeft False press {inputMousePressed = False}
+releaseAt = releaseWith MouseLeft
+
+-- | The button up at the pointer this frame, not pressed in it.
+releaseWith :: MouseButton -> Input -> Input
+releaseWith b = applyMouseButton b False . unpress b
+
+-- | The frame without the button's press.
+unpress :: MouseButton -> Input -> Input
+unpress b inp = inp {inputButtonsPressed = buttonsDelete b (inputButtonsPressed inp)}
 
 -- | A single key-down frame.
 keyInp :: Key -> Input -> Input
