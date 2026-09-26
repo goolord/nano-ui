@@ -28,8 +28,8 @@
 --                   numericInput,
 --                   button + tooltip, contextMenu, file dialogs, dropZone
 --   * Graphics:     image gallery, content fits, a turned and faded image,
---                   an animated GIF, and a progressBar driven by a pulsing
---                   value
+--                   an animated GIF that a sensor pauses off screen, and a
+--                   progressBar driven by a pulsing value
 --   * Typography:   label / labelWith + the @font*@ style combinators
 --   * List:         tree, searchInput
 --   * Table:        tableWith (needs useTableSort)
@@ -568,7 +568,8 @@ demoUi = do
               -- registers its frames once that is done. Each frame is its own
               -- image, and the clock picks which one to show; every frame of
               -- this GIF lasts 100 ms. keepAnimating keeps frames coming while
-              -- it loads and plays.
+              -- it loads and plays; the sensor round it holds the frames only
+              -- while it is on screen, so off screen the GIF asks for none.
               case lick of
                 Nothing -> do
                   keepAnimating =<< labelWith' (fillW . fontMuted) "Loading lick.gif..."
@@ -580,9 +581,11 @@ demoUi = do
                 Just (Left err) -> muted ("Could not load lick.gif: " <> T.pack err)
                 Just (Right frames) -> do
                   t <- uiTime
-                  columnWith (tight . gap gapMicro) $ do
-                    keepAnimating =<< image' (fixedWH 150 150) (indexSmallArray frames (floor (t * 10) `mod` sizeofSmallArray frames))
+                  (vis, gif) <- sensorWith (gap gapMicro) $ do
+                    gif <- image' (fixedWH 150 150) (indexSmallArray frames (floor (t * 10) `mod` sizeofSmallArray frames))
                     muted "lick.gif"
+                    pure gif
+                  when (visVisible vis) (keepAnimating gif)
               separator
               -- A plain response-driven bar. pulse provides a smooth
               -- clock-driven 0-1 sweep and keepAnimating holds it live.

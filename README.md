@@ -43,7 +43,8 @@ counter = do
 - Scrollers take a wheel step and a glide time (`setScrollTuning`,
   `setScrollStep`), and move from code: `scrollTo`, `scrollBy`, `scrollPages`,
   and `scrollIntoView`. `getScrollMetrics` gives a virtualized list the
-  viewport and offset it needs to pick its rows.
+  viewport and offset it needs to pick its rows, and `sensor` says when a
+  widget scrolls into view.
 - Keyboard focus and navigation for every control.
 - Middle and side mouse buttons, and tooltips with a hover delay.
 - Shaped text in the SDL backend, with fallback fonts for other scripts and

@@ -172,6 +172,7 @@ library
         NanoUI.Internal.Widgets.Select
         NanoUI.Internal.Widgets.Slider
         NanoUI.Internal.Widgets.Image
+        NanoUI.Internal.Widgets.Sensor
     build-depends:
         base >=4.20 && <4.23,
         bytestring ^>=0.12,
@@ -253,6 +254,7 @@ test-suite nano-ui-test
         Cases.LayoutFlow
         Cases.Images
         Cases.TooltipDelay
+        Cases.Visibility
         Cases.PointerExtra
     build-depends:
         bytestring,

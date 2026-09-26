@@ -256,6 +256,10 @@
 - `tooltipConfigured` and `tooltipWidgetConfigured` take a `TooltipConfig`:
   the hover delay (`tooltipDelay`), the grace after another tooltip
   (`tooltipGrace`) and the placement (`tooltipPlacement`).
+- Visibility sensors, for loading what scrolls into view: `sensor`,
+  `sensorWith`, `sensorConfigured` (with a `sensorAnticipate` margin) and
+  `useVisibility` report a `Visibility` (`visVisible`, `visRect`,
+  `becameVisible`, `becameHidden`).
 - The middle and side mouse buttons: `respMiddleClicked`, `respMiddlePressed`
   and `inputMouseMiddleDown` and its siblings, routed like a right click (a
   middle click closes a closable tab), and `inputMouseBackPressed` and

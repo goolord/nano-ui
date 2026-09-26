@@ -34,6 +34,7 @@ import NanoUI.Internal.Store (mirrorStoresChanged)
 import NanoUI.Internal.Style (Padding (..), Theme (..), themeOverlayDim, themeSeparator)
 import NanoUI.Internal.Types (Damage (..), Rect (..), Size (..), rectInflate, rectNonEmpty)
 import NanoUI.Internal.Widgets.Overlay (windowChromeSepH, windowTitleBarH)
+import NanoUI.Internal.Widgets.Sensor (beginSensors, updateSensors)
 
 -- | Build, lay out, resolve input, and paint one headless frame. Returns the
 -- view result, emitted messages, borrowed draw buffers, and whether state
@@ -178,6 +179,8 @@ runFrameEff unlift ctx frameInp ui = do
   when (mirrorStoresChanged storeBuilt storeAfter) $ do
     layoutArena ctx size True
     applyScrollOffsets ctx size
+  -- The layout is final: what the sensors see now is what the next view reads.
+  updateSensors ctx size
   updatePrevRects ctx size
   refreshHover ctx frameInp
   refreshScrollBarHover ctx layerInp
@@ -211,10 +214,10 @@ runFrameEff unlift ctx frameInp ui = do
   dirtyAfterUi <- isDirty ctx
   pure (result, msgs, drawData, dirtyAfterUi)
 
--- | Reset what a view run builds: the node arena, and the container, id,
--- focus, hover, cursor-zone and drawing scopes. A second run after a mirror
--- store write (@newFrame@ 'False') keeps the store, animations and prev rects,
--- and the theme scopes it compares against.
+-- | Reset what a view run builds: the node arena, the sensors, and the
+-- container, id, focus, hover, cursor-zone and drawing scopes. A second run
+-- after a mirror store write (@newFrame@ 'False') keeps the store, animations
+-- and prev rects, and the theme scopes it compares against.
 resetUiBuild :: Context -> Bool -> IO ()
 resetUiBuild ctx newFrame = do
   beginThemeScopes ctx newFrame
@@ -225,6 +228,7 @@ resetUiBuild ctx newFrame = do
   writeIORef (ctxHotId ctx) (WidgetId 0)
   writeIORef (ctxCursorZones ctx) []
   resetDrawingScopeCache ctx
+  beginSensors ctx
 
 -- | Paint the floating panels over the page: windows with their title-bar
 -- separator, the modal backdrop and the modals, then popups. Each is a

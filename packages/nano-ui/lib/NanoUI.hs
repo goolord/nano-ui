@@ -514,6 +514,51 @@ module NanoUI
   , scrollRectIntoViewUi
   , setScrollStepUi
 
+    -- * Visibility
+
+    -- | A sensor reports whether a widget is on screen: whether it overlaps
+    -- the window and the inside of every scroller, panel and floating panel
+    -- around it. 'sensor' runs part of the view in a container that watches
+    -- itself, and 'useVisibility' watches a widget already built, by its id.
+    --
+    -- Layout is solved after the view runs, so a sensor reports what the
+    -- last frame's layout showed, as 'respRect' does. A layout that changes
+    -- what a sensor sees (a scroll, a resize, content growing above it)
+    -- makes the loop run one more frame, whose view reads the change in
+    -- 'visEvent'. The event goes to the first view pass that reads the
+    -- sensor, not to the pass a hook write in reaction to it runs again.
+    -- While nothing moves, sensors cost no frames. A sensor that is not
+    -- built on some frame, in a tab that is not shown or a 'scope' that left
+    -- it out, is forgotten, and reports 'BecameVisible' again once it is
+    -- built and seen.
+    --
+    -- An anticipate margin ('sensorAnticipate') counts a widget as visible
+    -- while it is still that far outside, which gives lazy loading a head
+    -- start. A thumbnail that decodes its picture the first time it comes
+    -- within 200 pixels of the viewport (@decodeRgba@ stands for an image
+    -- decoder):
+    --
+    -- > thumbnail :: FilePath -> NanoUI ()
+    -- > thumbnail path = do
+    -- >   (picture, setPicture) <- useState Nothing
+    -- >   let cfg = defaultSensorConfig {sensorAnticipate = 200, sensorLayout = fixedWH 96 96}
+    -- >   (vis, _) <- sensorConfigured cfg $
+    -- >     maybe (label "Loading") (image (fixedWH 96 96)) picture
+    -- >   when (becameVisible vis && isNothing picture) $ do
+    -- >     (w, h, rgba) <- uiIO (decodeRgba path)
+    -- >     iid <- freshImageId
+    -- >     whenM (registerImageRgba iid w h rgba) (setPicture (Just iid))
+  , Visibility (..)
+  , VisibilityEvent (..)
+  , becameVisible
+  , becameHidden
+  , sensor
+  , sensorWith
+  , SensorConfig (..)
+  , defaultSensorConfig
+  , sensorConfigured
+  , useVisibility
+
     -- * Animation
   , Transition (..)
   , animate
@@ -758,6 +803,7 @@ import NanoUI.Internal.Widgets.Popup
 import NanoUI.Internal.Widgets.Radio
 import NanoUI.Widgets.RichText
 import NanoUI.Internal.Widgets.Select
+import NanoUI.Internal.Widgets.Sensor
 import NanoUI.Internal.Widgets.Slider
 import NanoUI.Internal.Widgets.Table
 import NanoUI.Internal.Widgets.Tabs
