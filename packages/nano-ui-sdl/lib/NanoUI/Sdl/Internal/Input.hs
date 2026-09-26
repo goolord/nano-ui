@@ -25,7 +25,7 @@ import qualified Data.Text as T
 import Data.Text (Text)
 import qualified Data.Text.Foreign as TF
 import Data.Word (Word32)
-import Foreign.C.Types (CFloat, CUInt)
+import Foreign.C.Types (CChar, CFloat, CUInt)
 import Data.Foldable (for_)
 import Data.Int (Int32)
 import Data.Maybe (fromMaybe, isJust, isNothing)
@@ -277,7 +277,7 @@ textInput :: Ptr SDL_Event -> IO (Maybe SdlEvent)
 textInput p = do
   te <- peek p.text
   mods <- peekModifiers
-  txt <- maybePeek TF.peekCString (PtrConst.unsafeToPtr (getField @"text" te))
+  txt <- peekText (getField @"text" te)
   pure ((`EvText` mods) <$> mfilter (not . T.null) txt)
 
 -- | The input method's composition. With @SDL_HINT_IME_IMPLEMENTED_UI@ set
@@ -286,7 +286,7 @@ textInput p = do
 textEditing :: Ptr SDL_Event -> IO (Maybe SdlEvent)
 textEditing p = do
   ee <- peek p.edit
-  txt <- fromMaybe "" <$> maybePeek TF.peekCString (PtrConst.unsafeToPtr (getField @"text" ee))
+  txt <- fromMaybe "" <$> peekText (getField @"text" ee)
   let int v = fromIntegral v :: Int
   pure (Just (EvEditing txt (int (getField @"start" ee)) (int (getField @"length" ee))))
 
@@ -307,8 +307,12 @@ dropEvent p ty = do
       pos
         | ty == DropBegin || ty == DropComplete = Nothing
         | otherwise = Just (v2 (getField @"x" de) (getField @"y" de))
-  payload <- fromMaybe "" <$> maybePeek TF.peekCString (PtrConst.unsafeToPtr (getField @"data'" de))
+  payload <- fromMaybe "" <$> peekText (getField @"data'" de)
   pure (Just (EvDrop (DropEvent ty pos payload)))
+
+-- | The text an event's UTF-8 string holds, or 'Nothing' for a null one.
+peekText :: PtrConst.PtrConst CChar -> IO (Maybe Text)
+peekText = maybePeek TF.peekCString . PtrConst.unsafeToPtr
 
 peekModifiers :: IO Modifiers
 peekModifiers = modFromKeymod <$> getModState

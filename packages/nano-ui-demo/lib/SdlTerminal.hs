@@ -399,10 +399,9 @@ main = withPty $ \fd -> do
             inputs = fmap (applyEvent emptyInput) events
             -- Each event's bytes, in order. While the input method composes,
             -- the keys are its own, and only the text it commits is sent.
-            (inp', typed) = foldl' typeEvent (clearEphemeral inp, B.empty) events
-            typeEvent (i, out) ev =
-              let one = applyEvent emptyInput ev
-               in (applyEvent i ev, out <> if isJust (inputComposition i) then E.encodeUtf8 (inputChars one) else keys one)
+            (inp', typed) = foldl' typeEvent (clearEphemeral inp, B.empty) (zip events inputs)
+            typeEvent (i, out) (ev, one) =
+              (applyEvent i ev, out <> if isJust (inputComposition i) then E.encodeUtf8 (inputChars one) else keys one)
           rest <- send fd (pending <> typed)
           next :> ended <- drain fd (foldl' navigate t inputs)
           let

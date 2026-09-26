@@ -28,7 +28,7 @@ import NanoUI.Internal.Frame.TextEdit
 import NanoUI.Internal.Frame.TextInput (claimComposition, settleInputMethod)
 import NanoUI.Internal.Frame.Window
 import NanoUI.Internal.Id (WidgetId (..), initialIdContext)
-import NanoUI.Internal.Input (Input (..), Key (..), MouseButton (..), buttonPressed, inputKeysElem, inputKeysNull, stripInteractionInput, withoutPointer)
+import NanoUI.Internal.Input (Input (..), Key (..), MouseButton (..), Pressable (..), buttonPressed, inputKeysNull, stripInteractionInput, withoutPointer)
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Layout.Solve (placeFloatingNodes, runCustomMeasure, solveLayout)
 import NanoUI.Internal.Monad (NanoUI, Ui, runUi, whenM)
@@ -133,7 +133,7 @@ runFrameEff unlift ctx rawInp ui = do
   resetUiBuild ctx True
   beginFrameModal ctx
   -- Nor does an Escape the input method took quit the app.
-  when (inputKeysNull (inputKeys frameInp) && inputKeysElem KeyEscape (inputKeys rawInp)) $
+  when (inputKeysNull (inputKeys frameInp) && pressedIn KeyEscape rawInp) $
     markEscapeConsumed ctx
   writeIORef (ctxReleaseClickedId ctx) (WidgetId 0)
   armPointerPress ctx frameInp
