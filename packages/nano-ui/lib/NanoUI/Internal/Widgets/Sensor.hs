@@ -33,12 +33,11 @@ import Data.Maybe (fromMaybe, isJust)
 import Effectful (Eff, type (:>))
 import GHC.Clock (getMonotonicTime)
 import NanoUI.Internal.Context
-import NanoUI.Internal.Frame.Node (readScrollNode)
-import NanoUI.Internal.Frame.Scroll.Geometry (borderContentClip, scrollNodeViewport)
+import NanoUI.Internal.Frame.Node (childPaintClip)
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Monad (Ui, askContext, askDefaultLayout, currentId, freshWidget, uiIO)
-import NanoUI.Internal.Style (Direction (..), Layout (..), themePanel, tight)
+import NanoUI.Internal.Style (Direction (..), Layout (..), tight)
 import NanoUI.Internal.Types (Rect (..), Size (..), rectInflate, rectIntersect)
 import NanoUI.Internal.Widgets.Node (container, tagContainer)
 
@@ -255,12 +254,8 @@ paintClips ctx@Context {ctxNodeArena = na} (Size ww wh) margin idx = do
     enter clips@(_, Nothing) _ = pure clips
     enter (exact, grown) i = do
       nt <- getNodeType na i
-      rect@(Rect x y w h) <- getNodeRect na i
-      cut <- case nt of
-        NodeContainer -> pure Nothing
-        NodeScrollContainer -> (\sn -> Just (scrollNodeViewport sn x y w h)) <$> readScrollNode na i
-        NodePanel -> (\theme -> Just (borderContentClip (themePanel theme) rect)) <$> nodeTheme ctx i
-        _ -> pure (Just rect)
+      rect <- getNodeRect na i
+      cut <- childPaintClip ctx i nt rect
       -- Paint still walks a plain container it would skip when a pinned node
       -- is below it: the container clips nothing, so the pinned node can show
       -- outside it, even when it has no size or is off screen.

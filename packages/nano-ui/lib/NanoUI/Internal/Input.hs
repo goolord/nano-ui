@@ -16,9 +16,6 @@ module NanoUI.Internal.Input
   , shiftAtMost
   , Input (..)
   , Pressable (..)
-  , buttonHeld
-  , buttonPressed
-  , buttonReleased
   , anyButtonPressed
   , anyButtonReleased
   , inputMouseDown
@@ -289,25 +286,11 @@ instance Pressable Key where
 
 instance Pressable MouseButton where
   {-# INLINE pressedIn #-}
-  pressedIn = buttonPressed
+  pressedIn b = buttonsMember b . inputButtonsPressed
   {-# INLINE releasedIn #-}
-  releasedIn = buttonReleased
+  releasedIn b = buttonsMember b . inputButtonsReleased
   {-# INLINE heldIn #-}
-  heldIn = buttonHeld
-
--- | 'heldIn', 'pressedIn' and 'releasedIn' for a mouse button alone, which
--- the frame's own steps call.
-{-# INLINE buttonHeld #-}
-buttonHeld :: MouseButton -> Input -> Bool
-buttonHeld b = buttonsMember b . inputButtonsHeld
-
-{-# INLINE buttonPressed #-}
-buttonPressed :: MouseButton -> Input -> Bool
-buttonPressed b = buttonsMember b . inputButtonsPressed
-
-{-# INLINE buttonReleased #-}
-buttonReleased :: MouseButton -> Input -> Bool
-buttonReleased b = buttonsMember b . inputButtonsReleased
+  heldIn b = buttonsMember b . inputButtonsHeld
 
 -- | Whether any mouse button went down this frame.
 {-# INLINE anyButtonPressed #-}
@@ -322,17 +305,17 @@ anyButtonReleased = not . buttonsNull . inputButtonsReleased
 -- | The left button's held, pressed and released state, and the right
 -- button's, under the names the fields had in nano-ui 0.1.
 inputMouseDown, inputMousePressed, inputMouseReleased :: Input -> Bool
-inputMouseDown = buttonHeld MouseLeft
-inputMousePressed = buttonPressed MouseLeft
-inputMouseReleased = buttonReleased MouseLeft
+inputMouseDown = heldIn MouseLeft
+inputMousePressed = pressedIn MouseLeft
+inputMouseReleased = releasedIn MouseLeft
 {-# DEPRECATED inputMouseDown "Use heldIn MouseLeft" #-}
 {-# DEPRECATED inputMousePressed "Use pressedIn MouseLeft" #-}
 {-# DEPRECATED inputMouseReleased "Use releasedIn MouseLeft" #-}
 
 inputMouseRightDown, inputMouseRightPressed, inputMouseRightReleased :: Input -> Bool
-inputMouseRightDown = buttonHeld MouseRight
-inputMouseRightPressed = buttonPressed MouseRight
-inputMouseRightReleased = buttonReleased MouseRight
+inputMouseRightDown = heldIn MouseRight
+inputMouseRightPressed = pressedIn MouseRight
+inputMouseRightReleased = releasedIn MouseRight
 {-# DEPRECATED inputMouseRightDown "Use heldIn MouseRight" #-}
 {-# DEPRECATED inputMouseRightPressed "Use pressedIn MouseRight" #-}
 {-# DEPRECATED inputMouseRightReleased "Use releasedIn MouseRight" #-}
@@ -447,7 +430,7 @@ grabHoverKind onTarget inp = grabDragKind onTarget False inp
 grabDragKind :: Bool -> Bool -> Input -> UiCursorKind
 grabDragKind onTarget dragging inp
   | dragging = UiCursorGrabbing
-  | onTarget, buttonHeld MouseLeft inp = UiCursorGrabbing
+  | onTarget, heldIn MouseLeft inp = UiCursorGrabbing
   | onTarget = UiCursorGrab
   | otherwise = UiCursorDefault
 

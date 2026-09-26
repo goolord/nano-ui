@@ -193,8 +193,8 @@ decodeEvent refreshTy p = do
         me <- peek p.motion
         Just . EvMouseMotion (v2 (getField @"x" me) (getField @"y" me)) <$> peekModifiers
       Events.SDL_EVENT_WINDOW_MOUSE_LEAVE -> pure (Just EvMouseLeave)
-      Events.SDL_EVENT_MOUSE_BUTTON_DOWN -> mouseButton p True
-      Events.SDL_EVENT_MOUSE_BUTTON_UP -> mouseButton p False
+      Events.SDL_EVENT_MOUSE_BUTTON_DOWN -> Just <$> mouseButton p True
+      Events.SDL_EVENT_MOUSE_BUTTON_UP -> Just <$> mouseButton p False
       Events.SDL_EVENT_MOUSE_WHEEL -> do
         we <- peek p.wheel
         pure (Just (EvScroll (v2 (getField @"x" we) (negate (getField @"y" we)))))
@@ -293,12 +293,11 @@ textEditing p = do
 -- | A button going down or up. SDL numbers the buttons as
 -- 'mouseButtonNumber' does, left, middle, right, X1 and X2 from 1, and
 -- reports any further button by its number past those.
-mouseButton :: Ptr SDL_Event -> Bool -> IO (Maybe SdlEvent)
+mouseButton :: Ptr SDL_Event -> Bool -> IO SdlEvent
 mouseButton p down = do
   be <- peek p.button
-  mods <- peekModifiers
   let btn = mouseButtonNumber (fromIntegral (getField @"button" be))
-  pure (Just (EvMouseButton btn down (v2 (getField @"x" be) (getField @"y" be)) mods))
+  EvMouseButton btn down (v2 (getField @"x" be) (getField @"y" be)) <$> peekModifiers
 
 dropEvent :: Ptr SDL_Event -> DropType -> IO (Maybe SdlEvent)
 dropEvent p ty = do

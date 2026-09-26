@@ -480,9 +480,8 @@
   view calls `quitUi`, and hands a close request to the view when the
   window's settings say to.
 - `NanoUI.Testing.Harness` has `chordInp`, `keyUpInp`, `keyRepeatInp`,
-  `clickPairWith`,
-  `pressWith` and `releaseWith` for any mouse button, and `newWakeSignal`
-  for a test to wait on a job's wake.
+  `clickPairWith`, `pressWith` and `releaseWith` for any mouse button, and
+  `newWakeSignal` for a test to wait on a job's wake.
 - `uiFontSize`, the size text takes when its layout sets none, and
   `withFontSize` in `NanoUI.Testing`; the SDL backend reports its base size.
   `drawCheckbox` and `checkboxBoxSize` draw nano-ui's checkbox on a canvas.
@@ -781,7 +780,7 @@
 - `Input` holds the mouse buttons as sets, `inputButtonsHeld`,
   `inputButtonsPressed` and `inputButtonsReleased` (`MouseButtons`, read with
   `heldIn`, `pressedIn` and `releasedIn`), in place of a field
-  for each button and edge; an `Input` is 128 bytes rather than 200. Fold
+  for each button and edge; an `Input` is 136 bytes rather than 208. Fold
   events in with `applyMouseButton`. `inputMouseDown`, `inputMousePressed`,
   `inputMouseReleased` and their `Right` forms remain as deprecated functions.
   A `Response` keeps the buttons held on the widget and those that clicked it

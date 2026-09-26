@@ -27,7 +27,7 @@ import NanoUI.Internal.Font (FontMetrics, centeredTextY, menuItemPadX, menuItemR
 import NanoUI.Internal.Frame.Chrome (menuPanelBounds, overlayMenuStyle, paintMenuAccent, paintMenuPanel)
 import NanoUI.Internal.Frame.Hit (widgetOverlayAllowed)
 import NanoUI.Internal.Id (WidgetId (..))
-import NanoUI.Internal.Input (Input (..), Key (..), MouseButton (..), Pressable (..), anyButtonPressed, anyButtonReleased, buttonPressed, buttonReleased, inputPointerHeld, shiftAtMost)
+import NanoUI.Internal.Input (Input (..), Key (..), MouseButton (..), Pressable (..), anyButtonPressed, anyButtonReleased, inputPointerHeld, shiftAtMost)
 import NanoUI.Internal.Layout.Arena (NodeIdx, NodeType (NodeSelect, NodeTextInput), getNodeType, lookupNodeByKey, lookupNodeByWidgetId, getOptions, getNodeRect, getWidgetId)
 import NanoUI.Internal.Monad (whenM, (<&&>))
 import NanoUI.Internal.Store (fieldFloat, fieldInt, fieldText, findSlot, insertSlot, setFieldSelection)
@@ -194,7 +194,7 @@ routePointer ctx inp = do
 
 closeSelectOnOutsideClick :: Context -> Input -> IO ()
 closeSelectOnOutsideClick ctx inp =
-  when (buttonPressed MouseLeft inp || buttonReleased MouseLeft inp) $ do
+  when (pressedIn MouseLeft inp || releasedIn MouseLeft inp) $ do
     store <- getStore ctx
     when (anySelectOpen store) $ do
       let mouse = inputMousePos inp
@@ -260,7 +260,7 @@ keepNode p = fmap listToMaybe . filterM p . maybeToList
 
 finalizeSelectPick :: Context -> Input -> IO ()
 finalizeSelectPick ctx inp =
-  when (buttonPressed MouseLeft inp || buttonReleased MouseLeft inp) $ do
+  when (pressedIn MouseLeft inp || releasedIn MouseLeft inp) $ do
     let mouse@(V2 _ mouseY) = inputMousePos inp
     dropdowns <- allowedDropdowns ctx
     forM_ dropdowns $ \dd ->
@@ -278,7 +278,7 @@ finalizeSelectPick ctx inp =
             -- disappears with the pick.
             let (_, vSb, hSb, _) = ddComboGeom dd
                 onLane = any (\(track, _) -> rectContains track mouse) (catMaybes [vSb, hSb])
-            when (buttonPressed MouseLeft inp && not onLane) $
+            when (pressedIn MouseLeft inp && not onLane) $
               forM_ (comboDropPickIndex (ddRect dd) menuItemRowH nOpts mouseY) $ \picked -> do
                 let txt = fromMaybe "" (listToMaybe (drop picked (ddOptions dd)))
                     len = T.length txt

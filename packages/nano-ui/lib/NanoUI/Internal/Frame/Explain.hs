@@ -21,12 +21,11 @@ import Data.Text qualified as T
 import NanoUI.Internal.Context
 import NanoUI.Internal.Draw (DrawArena, Layer (..), beginLayer, pushRect)
 import NanoUI.Internal.Frame.Hit (topmostFloating)
-import NanoUI.Internal.Frame.Node (readScrollNode)
-import NanoUI.Internal.Frame.Scroll.Geometry (borderContentClip, scrollNodeViewport)
+import NanoUI.Internal.Frame.Node (childPaintClip)
 import NanoUI.Internal.Input (Input (..))
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Id (hashWidgetId)
-import NanoUI.Internal.Style (Direction (..), Flow (..), Padding (..), Theme, fadeAlpha, themePanel, themeSeries)
+import NanoUI.Internal.Style (Direction (..), Flow (..), Padding (..), Theme, fadeAlpha, themeSeries)
 import NanoUI.Internal.Types (Color, Rect (..), Size (..), V2 (..), rectContains, rectHit, rectIntersect)
 
 -- | Work out what the overlay draws this frame, and repaint where that
@@ -131,18 +130,11 @@ paintExplainHover ctx@Context {ctxDrawArena = da} = do
       outline da clip (Rect (x + l) (y + t) (w - l - r) (h - t - b)) col
 
 -- | The clip node @idx@'s children paint in, when it paints in @clip@ at
--- @rect@, cut as "NanoUI.Internal.Frame.Paint" cuts it: to a scroller's
--- viewport, the inside of a panel's border, and the rect of a floating panel
--- or of a widget holding children. A row or column cuts nothing. 'Nothing'
--- when nothing inside shows.
+-- @rect@ ('childPaintClip'). 'Nothing' when nothing inside shows.
 childClip :: Context -> NodeIdx -> Rect -> Rect -> IO (Maybe Rect)
-childClip ctx@Context {ctxNodeArena = na} idx clip rect@(Rect x y w h) =
-  getNodeType na idx >>= \case
-    NodeScrollContainer -> (\sn -> rectIntersect clip (scrollNodeViewport sn x y w h)) <$> readScrollNode na idx
-    NodePanel -> (\theme -> rectIntersect clip (borderContentClip (themePanel theme) rect)) <$> nodeTheme ctx idx
-    nt
-      | isFloatingNode nt || isWidgetNode nt -> pure (rectIntersect clip rect)
-      | otherwise -> pure (Just clip)
+childClip ctx idx clip rect = do
+  nt <- getNodeType (ctxNodeArena ctx) idx
+  maybe (Just clip) (rectIntersect clip) <$> childPaintClip ctx idx nt rect
 
 -- | What the overlay says of node @idx@, @depth@ deep in its layer.
 describeNode :: NodeArena -> Int -> NodeIdx -> IO ExplainedNode

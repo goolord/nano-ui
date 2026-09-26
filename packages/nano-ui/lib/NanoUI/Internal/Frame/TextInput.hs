@@ -281,7 +281,7 @@ data FieldDoc = FieldDoc !TB.Cursor !TB.TextBuffer (TB.Cursor -> TB.Cursor -> IO
 -- own chrome. @atMouse@ reads the document at the pointer.
 selectWithMouse :: Context -> Input -> WidgetId -> Rect -> IO Bool -> IO FieldDoc -> IO ()
 selectWithMouse ctx inp wid box chromePress atMouse
-  | buttonPressed MouseLeft inp && rectContains box (inputMousePos inp) =
+  | pressedIn MouseLeft inp && rectContains box (inputMousePos inp) =
       unlessM chromePress $ do
         FieldDoc pos buf select <- atMouse
         -- A press counts as a multi-click only on the cell of the press before.
@@ -291,7 +291,7 @@ selectWithMouse ctx inp wid box chromePress atMouse
         uncurry select (dragSelection buf pos pos clicks)
         modifyInteraction ctx $ \s ->
           s {isTextFieldClickCell = cell, isTextInputDrag = Just (TextInputDrag wid pos clicks)}
-  | buttonHeld MouseLeft inp || buttonReleased MouseLeft inp =
+  | heldIn MouseLeft inp || releasedIn MouseLeft inp =
       getsInteraction ctx isTextInputDrag >>= \case
         Just (TextInputDrag dragWid anchor clicks) | dragWid == wid -> do
           FieldDoc pos buf select <- atMouse

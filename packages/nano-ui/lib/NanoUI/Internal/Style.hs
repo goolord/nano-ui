@@ -724,8 +724,8 @@ pattern PointerAuto = PointerMode 0
 
 -- | The node's box takes the pointer from whatever it is drawn over,
 -- whatever the node is: a press or a wheel turn on it reaches nothing
--- beneath, and nothing beneath is hovered. The controls inside it take the pointer as usual. For
--- a card, a panel or a scrim over other controls.
+-- beneath, and nothing beneath is hovered. The controls inside it take the
+-- pointer as usual. For a card, a panel or a scrim over other controls.
 pattern PointerBlock :: PointerMode
 pattern PointerBlock = PointerMode 1
 

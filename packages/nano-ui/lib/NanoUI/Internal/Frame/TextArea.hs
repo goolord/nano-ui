@@ -43,7 +43,7 @@ import NanoUI.Internal.Frame.Scroll.Geometry (ScrollBarLayout (..), scrollBarLay
 import NanoUI.Internal.Frame.Node (nodeFontMetrics)
 import NanoUI.Internal.Frame.TextInput (FieldDoc (..), Preedit (..), drawLineCaret, drawLinePreedit, drawLineSelection, fieldEditLine, nodeTextFieldGeom, preeditSourceIndex, selectWithMouse, splicePreedit, textInputMouse, textWordBounds)
 import NanoUI.Internal.Id (WidgetId, hashWidgetId)
-import NanoUI.Internal.Input (Input, InputPurpose, MouseButton (..), buttonHeld, buttonPressed, buttonReleased, inputMousePos)
+import NanoUI.Internal.Input (Input, InputPurpose, MouseButton (..), Pressable (..), inputMousePos)
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Store (collapseFieldSelection, fieldFloat, fieldPoint, findSlot, insertDyn, insertSlot, lookupDyn, lookupSlot)
 import NanoUI.Internal.Style
@@ -66,20 +66,20 @@ finalizeTextFieldMouse ctx inp onControl = do
         -- until the pointer acts.
         NodeTextArea -> do
           _ <- textAreaContentMetrics ctx idx
-          when (buttonPressed MouseLeft inp || buttonHeld MouseLeft inp || buttonReleased MouseLeft inp) $
+          when (pressedIn MouseLeft inp || heldIn MouseLeft inp || releasedIn MouseLeft inp) $
             textAreaMouse ctx inp focus idx
         _ -> pure ()
       -- A selection dragged past the field's edge scrolls a step a frame, as
       -- the caret follows the pointer. A pointer held still out there sends
       -- no input to run those frames, so ask for them while the drag lasts.
-      when (buttonHeld MouseLeft inp) $ do
+      when (heldIn MouseLeft inp) $ do
         mDrag <- getsInteraction ctx isTextInputDrag
         forM_ mDrag $ \drag ->
           when (textInputDragWidget drag == focus) $ do
             rect <- getNodeRect (ctxNodeArena ctx) idx
             unless (rectContains rect (inputMousePos inp)) $
               requestWakeAfter ctx (1 / 60)
-  when (buttonReleased MouseLeft inp) $
+  when (releasedIn MouseLeft inp) $
     modifyInteraction ctx (\s -> s {isTextInputDrag = Nothing})
 
 -- | Collapse selection in a current single-line or multiline field onto its

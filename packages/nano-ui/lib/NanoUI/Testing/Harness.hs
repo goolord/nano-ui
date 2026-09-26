@@ -194,7 +194,7 @@ dragPos drawFrame base from to = do
       hold = holdAt base to
   mapM_ drawFrame [press, hold, releaseAt hold, base, base]
 
--- | Left-button press and release at a point, retaining other base-input fields.
+-- | 'clickPairWith' 'MouseLeft'.
 clickPair :: Input -> V2 -> (Input, Input)
 clickPair = clickPairWith MouseLeft
 
@@ -207,7 +207,7 @@ clickPairWith b inp pos = let press = pressWith b inp pos in (press, releaseWith
 rightClickPair :: Input -> V2 -> (Input, Input)
 rightClickPair = clickPairWith MouseRight
 
--- | Set pointer position and left-button press/held flags, clearing its release flag.
+-- | 'pressWith' 'MouseLeft'.
 pressAt :: Input -> V2 -> Input
 pressAt = pressWith MouseLeft
 
@@ -220,7 +220,7 @@ pressWith b inp pos =
 holdAt :: Input -> V2 -> Input
 holdAt inp pos = unpress MouseLeft (pressAt inp pos)
 
--- | Release the left button at its current position, clearing its press/held flags.
+-- | 'releaseWith' 'MouseLeft'.
 releaseAt :: Input -> Input
 releaseAt = releaseWith MouseLeft
 

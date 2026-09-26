@@ -17,7 +17,7 @@ module NanoUI.Internal.Frame.Hit
   , nodeInteractionHit
   , takesPointer
   , passesPointer
-  , pointerHitAt
+  , reachedAt
   , reachedWidgetAt
   , reachedHit
   , innermostHit
@@ -28,7 +28,6 @@ where
 import Control.Applicative ((<|>))
 import Control.Monad ((<=<))
 import Control.Monad.Trans.Maybe (MaybeT (..))
-import Data.Functor ((<&>))
 import Data.Maybe (isJust)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Id (WidgetId)
@@ -198,16 +197,16 @@ nodeInteractionHit ctx@Context {ctxNodeArena = na} idx rect mouse
           _ | isFloatingNode nt -> pure True
             | otherwise -> getParent na i >>= inside
 
--- | Whether node @idx@, of type @nt@, takes the pointer where it is drawn on
--- top ('PointerMode'): a control, or a node given 'PointerBlock', unless it
+-- | Whether node @idx@ takes the pointer where it is drawn on top
+-- ('PointerMode'): a control, or a node given 'PointerBlock', unless it
 -- passes the pointer.
 {-# INLINE takesPointer #-}
-takesPointer :: NodeArena -> NodeIdx -> NodeType -> IO Bool
-takesPointer na idx nt =
-  getPointerMode na idx <&> \case
-    PointerAuto -> isWidgetNode nt
-    PointerBlock -> True
-    PointerPass -> False
+takesPointer :: NodeArena -> NodeIdx -> IO Bool
+takesPointer na idx =
+  getPointerMode na idx >>= \case
+    PointerAuto -> isWidgetNode <$> getNodeType na idx
+    PointerBlock -> pure True
+    PointerPass -> pure False
 
 -- | Whether node @idx@ lets the pointer through, being given 'PointerPass'
 -- or inside a node that was: it takes no hover or presses.
@@ -221,28 +220,37 @@ passesPointer na idx = (== PointerPass) <$> getPointerMode na idx
 -- 'overlayHitRoot').
 pointerHitAt :: Context -> Maybe NodeIdx -> V2 -> NodeIdx -> IO Bool
 pointerHitAt ctx@Context {ctxNodeArena = na} top mouse idx =
-  (takesPointer na idx =<< getNodeType na idx)
+  takesPointer na idx
     <&&> nodePointVisible ctx idx mouse
     <&&> overlayHitAllowed ctx top idx
 
--- | The widget node the pointer at @mouse@ reaches, as hover finds it: of the
--- nodes under it that take the pointer ('pointerHitAt'), the first in arena
--- order, unless layers or a pinned child draw a later one over it, and
--- then any widget drawn inside that one ('reachedHit'). 'Nothing' where that
--- is a node given 'PointerBlock' with no widget of its own there.
-reachedWidgetAt :: Context -> V2 -> IO (Maybe NodeIdx)
-reachedWidgetAt ctx@Context {ctxNodeArena = na} mouse = do
+-- | The node the pointer at @mouse@ reaches, as hover finds it: where it
+-- lands ('reachedHit') among the nodes under it that take the pointer
+-- ('pointerHitAt').
+{-# INLINE reachedAt #-}
+reachedAt :: Context -> V2 -> IO (Maybe NodeIdx)
+reachedAt ctx mouse = do
   top <- overlayHitRoot ctx mouse
-  let hits = pointerHitAt ctx top mouse
-      widget idx = (\nt -> if isWidgetNode nt then Just idx else Nothing) <$> getNodeType na idx
-  maybe (pure Nothing) (widget <=< reachedHit ctx hits) =<< findClassNodeM na PointerNodes hits
+  reachedHit ctx (pointerHitAt ctx top mouse)
 
--- | The node a pointer hit lands on, given @first@, the first node in arena
--- order that @hits@: the hit drawn on top ('topmostHit'), then the widget
--- drawn innermost inside it ('innermostHit'). A node given 'PointerBlock'
--- without a widget of its own under the pointer is itself what it lands on.
-reachedHit :: Context -> (NodeIdx -> IO Bool) -> NodeIdx -> IO NodeIdx
-reachedHit ctx hits = innermostHit ctx hits <=< topmostHit ctx hits
+-- | The widget node the pointer at @mouse@ reaches ('reachedAt'). 'Nothing'
+-- where that is a node given 'PointerBlock' with no widget of its own there.
+reachedWidgetAt :: Context -> V2 -> IO (Maybe NodeIdx)
+reachedWidgetAt ctx@Context {ctxNodeArena = na} mouse = maybe (pure Nothing) widget =<< reachedAt ctx mouse
+ where
+  widget idx = (\nt -> if isWidgetNode nt then Just idx else Nothing) <$> getNodeType na idx
+
+-- | The node a pointer hit lands on: of the nodes that @hits@, the first in
+-- arena order, unless layers or a pinned node draw a later one over it
+-- ('topmostHit'), and then the widget drawn innermost inside that one
+-- ('innermostHit'). A node given 'PointerBlock' without a widget of its own
+-- under the pointer is itself what it lands on. 'Nothing' when nothing hits.
+-- Inlined, so that the search over the pointer nodes calls a known @hits@,
+-- which boxes no node index.
+{-# INLINE reachedHit #-}
+reachedHit :: Context -> (NodeIdx -> IO Bool) -> IO (Maybe NodeIdx)
+reachedHit ctx hits =
+  traverse (innermostHit ctx hits <=< topmostHit ctx hits) =<< findClassNodeM (ctxNodeArena ctx) PointerNodes hits
 
 -- | The widget a pointer hit on widget @idx@ lands on: its first enabled
 -- descendant widget that @hits@, painted over it, and so on inward, skipping
@@ -252,21 +260,16 @@ innermostHit ctx@Context {ctxNodeArena = na} hits idx =
   maybe (pure idx) (innermostHit ctx hits) =<< firstHitIn idx
  where
   -- Depth first from the child drawn on top, past widgets that miss.
-  firstHitIn i = childrenTopFirst na i >>= firstJust
-  firstJust [] = pure Nothing
-  firstJust (d : ds) = do
+  firstHitIn i = firstChildOnTopJustM na i $ \d -> do
     nt <- getNodeType na d
     si <- getStyleIdx na d
-    found <-
-      if nt == NodeContainer && hasFlag containerFlagInert si
-        then pure Nothing
-        else do
-          here <-
-            pure (isWidgetNode nt)
-              <&&> hits d
-              <&&> (not <$> (isDisabled ctx =<< getWidgetId na d))
-          if here then pure (Just d) else firstHitIn d
-    maybe (firstJust ds) (pure . Just) found
+    if nt == NodeContainer && hasFlag containerFlagInert si
+      then pure Nothing
+      else
+        ifM
+          (pure (isWidgetNode nt) <&&> hits d <&&> (not <$> (isDisabled ctx =<< getWidgetId na d)))
+          (pure (Just d))
+          (firstHitIn d)
 
 -- | The node drawn on top among those that @hits@, given @first@, the first
 -- of them in arena order. Paint draws an earlier sibling over a later one, so

@@ -312,22 +312,18 @@ data Drag2D = Drag2D
 -- > drag <- useDrag2DOn resp
 -- > when (dragActive drag) (setPan (dragPosition drag))
 useDrag2DOn :: (Ui :> es, HasResponse r) => r -> Eff es Drag2D
-useDrag2DOn r = do
-  inp <- askInput
-  drag2DFrom (respRect r) (respPressed r && buttonPressed MouseLeft inp)
+useDrag2DOn r = drag2DFrom (respRect r) (respPressed r)
 
 -- | 'useDrag2DOn' over a rect: the drag starts with a press anywhere in it,
 -- whatever is drawn there.
 useDrag2D :: (Ui :> es) => Rect -> Eff es Drag2D
-useDrag2D bounds = do
-  inp <- askInput
-  drag2DFrom bounds (buttonPressed MouseLeft inp && rectContains bounds (inputMousePos inp))
+useDrag2D bounds = drag2DFrom bounds . rectContains bounds . inputMousePos =<< askInput
 {-# DEPRECATED useDrag2D "Use useDrag2DOn with the widget's Response, which respects what is drawn over it" #-}
 
--- | A drag of the left button that @starts@ this frame or started before,
--- clamped to @bounds@.
+-- | A drag of the left button that started before, or starts with a press
+-- this frame where @onIt@, clamped to @bounds@.
 drag2DFrom :: (Ui :> es) => Rect -> Bool -> Eff es Drag2D
-drag2DFrom bounds starts = do
+drag2DFrom bounds onIt = do
   (wid, ctx) <- freshWidget
   inp <- askInput
   -- The drag flag is quiet bookkeeping; the last pointer position is a point
@@ -336,7 +332,7 @@ drag2DFrom bounds starts = do
       mouse = inputMousePos inp
   store <- uiIO (getStore ctx)
   let active0 = quietFlag dragK store
-      active = buttonHeld MouseLeft inp && (active0 || starts)
+      active = heldIn MouseLeft inp && (active0 || (pressedIn MouseLeft inp && onIt))
       prev = uncurry V2 (findSlot fieldPoint (v2X mouse, v2Y mouse) dragK store)
       delta = if active && active0 then v2Sub mouse prev else V2 0 0
       clampedMouse =
