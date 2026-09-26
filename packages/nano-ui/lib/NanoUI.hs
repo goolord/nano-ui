@@ -886,6 +886,12 @@ module NanoUI
   , anyButtonPressed
   , anyButtonReleased
   , inputPointerHeld
+  , inputMouseDown
+  , inputMousePressed
+  , inputMouseReleased
+  , inputMouseRightDown
+  , inputMouseRightPressed
+  , inputMouseRightReleased
 
     -- * Keyboard
 
