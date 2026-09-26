@@ -324,10 +324,13 @@ testRgfwCursors = do
         , (UiCursorCell, R.rgfw_mouseCrosshair), (UiCursorColResize, R.rgfw_mouseResizeEW), (UiCursorRowResize, R.rgfw_mouseResizeNS)
         ]
           ++ map (,R.rgfw_mouseArrow) [UiCursorHelp, UiCursorCopy, UiCursorAlias, UiCursorContextMenu, UiCursorZoomIn, UiCursorZoomOut]
+      -- The session hides the pointer for this kind rather than showing an
+      -- icon; the arrow is what the mapping gives it.
+      hidden = [(UiCursorHidden, R.rgfw_mouseArrow)]
       shows' = all (\(k, icon) -> mapRgfwCursor k == icon)
   assert "RGFW cursors: each native shape shows its own cursor" (shows' native && length (nub (map snd native)) == length native)
-  assert "RGFW cursors: the other shapes fall back" (shows' fallback)
-  assert "RGFW cursors: every kind is mapped" (all (`elem` map fst (native ++ fallback)) [minBound .. maxBound])
+  assert "RGFW cursors: the other shapes fall back" (shows' (fallback ++ hidden))
+  assert "RGFW cursors: every kind is mapped" (all (`elem` map fst (native ++ fallback ++ hidden)) [minBound .. maxBound])
 
 main :: IO ()
 main = do

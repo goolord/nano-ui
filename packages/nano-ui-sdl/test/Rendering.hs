@@ -42,6 +42,7 @@ import SDL3.Sys.Bindgen.Render (SDL_Renderer, SDL_Texture)
 import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
 import SDL3.Sys.Bindgen.Video qualified as Video
 import SDL3.Sys.Events (pushEvent)
+import SDL3.Sys.Mouse (cursorVisibleSafe)
 import SDL3.Sys.Render (renderPresentSafe, renderReadPixels)
 import SDL3.Sys.Video (getSystemTheme)
 import System.Environment (getArgs, lookupEnv, setEnv)
@@ -202,6 +203,13 @@ cursorChecks = do
     created <- map fst <$> readIORef (scSystem cursors)
     unless (length created == length (nub wanted) && all (`elem` created) wanted) $
       fail ("system cursors created more than once or not at all: " ++ show created)
+    -- The hidden kind hides the pointer, and any other shows it again.
+    showCursorKind cursors UiCursorHidden
+    hidden <- not <$> cursorVisibleSafe
+    showCursorKind cursors UiCursorPointer
+    shownAgain <- cursorVisibleSafe
+    unless (hidden && shownAgain) $
+      fail ("the hidden cursor kind does not hide the pointer and show it again: " ++ show (hidden, shownAgain))
 
 black :: Color
 black = colorRGBA 0 0 0 255
