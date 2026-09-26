@@ -318,7 +318,7 @@ paneGrid cfg = do
                   | otherwise -> Nothing
            in (moved, zone, rest)
         _ -> (False, Nothing, Nothing)
-      lifted = dragMoved && buttonHeld MouseLeft inp
+      lifted = dragMoved && heldIn MouseLeft inp
       -- The store keeps the committed tree, for cancelling. On screen is the
       -- post-drop tree with the dragged pane's slot empty, or with no target
       -- the tree without it.
@@ -447,7 +447,7 @@ renderPane env pid rect =
     -- Whether a press landed on a control in the pane, from last frame's
     -- rects: the active id is only settled after the view.
     controlHit <-
-      if not (buttonPressed MouseLeft inp)
+      if not (pressedIn MouseLeft inp)
         then pure False
         else uiIO $ do
           end <- arenaCount arena
@@ -581,7 +581,7 @@ runGestures ::
 runGestures env dividers rendered moved zone = do
   inp <- askInput
   let mouse = inputMousePos inp
-      down = buttonHeld MouseLeft inp
+      down = heldIn MouseLeft inp
       setGesture mirror g = void (updateGrid env mirror (\s -> s {gsGesture = g}))
       -- diBand already spans the leeway; inflating it would steal presses
       -- from the neighbouring panes.
@@ -592,7 +592,7 @@ runGestures env dividers rendered moved zone = do
         let v = rpView pane
          in any (`rectHit` mouse) (pvDragPick v)
               || (pvDraggable v && any (`rectHit` mouse) (M.lookup (rpPaneId pane) (geRegions env)))
-  when (buttonPressed MouseLeft inp && gsGesture (geState env) == NoGesture && not (any rpControlHit rendered)) $
+  when (pressedIn MouseLeft inp && gsGesture (geState env) == NoGesture && not (any rpControlHit rendered)) $
     case (hitDiv, pickHit) of
       (Just d, _) -> setGesture True (Resize (diSplitId d) (diRatio d) (mouseMain (diAxis d) mouse))
       (_, Just pane) -> setGesture True (Drag (rpPaneId pane) mouse False (pvTitle (rpView pane)))

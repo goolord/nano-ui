@@ -33,12 +33,11 @@ import Data.Maybe (fromMaybe, isJust)
 import Effectful (Eff, type (:>))
 import GHC.Clock (getMonotonicTime)
 import NanoUI.Internal.Context
-import NanoUI.Internal.Frame.Node (readScrollNode)
-import NanoUI.Internal.Frame.Scroll.Geometry (borderContentClip, scrollNodeViewport)
+import NanoUI.Internal.Frame.Node (childPaintClip)
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Monad (Ui, askContext, askDefaultLayout, currentId, freshWidget, uiIO)
-import NanoUI.Internal.Style (Direction (..), Layout (..), themePanel, tight)
+import NanoUI.Internal.Style (Direction (..), Layout (..), tight)
 import NanoUI.Internal.Types (Rect (..), Size (..), rectInflate, rectIntersect)
 import NanoUI.Internal.Widgets.Node (container, tagContainer)
 
@@ -116,9 +115,10 @@ sensor = sensorConfigured defaultSensorConfig
 sensorWith :: Ui :> es => (Layout -> Layout) -> Eff es a -> Eff es (Visibility, a)
 sensorWith f = sensorConfigured defaultSensorConfig {sensorLayout = f}
 
--- | 'sensor' with an anticipate margin as well as layout. The container takes
--- one widget id, like a 'NanoUI.Internal.Widgets.Layout.column', and its body
--- runs in an id scope of its own.
+-- | 'sensor' with an anticipate margin and a delay as well as layout. The
+-- container takes one widget id, like a
+-- 'NanoUI.Internal.Widgets.Layout.column', and its body runs in an id scope
+-- of its own.
 sensorConfigured :: Ui :> es => SensorConfig -> Eff es a -> Eff es (Visibility, a)
 sensorConfigured cfg body = do
   -- The id the container takes as it opens its scope, which no other widget
@@ -159,6 +159,10 @@ data Watch = Watch WidgetId SensorConfig
 -- while it waits out its 'sensorDelay': the monotonic time, or 0.
 data Seen = Seen Visibility Double
 
+-- | What a sensor new this pass has seen: a hidden widget without a node.
+unseen :: Seen
+unseen = Seen (Visibility False Nothing (Rect 0 0 0 0) (Rect 0 0 0 0)) 0
+
 -- | Register sensor @wid@ with its watch for this pass, and return what it
 -- saw at the last layout. Reading an event consumes it, so a second view pass
 -- in the same frame sees the state without the event.
@@ -167,13 +171,10 @@ watchSensor ctx wid watch = do
   Sensors ref <- hostOrInit ctx (Sensors <$> newIORef (SensorState IM.empty IM.empty))
   SensorState watched seen <- readIORef ref
   let k = intKey wid
-      Seen vis since = fromMaybe (Seen notSeen 0) (IM.lookup k seen)
+      Seen vis since = IM.findWithDefault unseen k seen
       seen' = if isJust (visEvent vis) then IM.insert k (Seen vis {visEvent = Nothing} since) seen else seen
   writeIORef ref $! SensorState (IM.insert k watch watched) seen'
   pure vis
-
-notSeen :: Visibility
-notSeen = Visibility False Nothing (Rect 0 0 0 0) (Rect 0 0 0 0)
 
 -- | Forget the sensors the last view pass built: the view is about to run
 -- again and build its own.
@@ -191,7 +192,7 @@ updateSensors ctx size =
   askHostIO ctx >>= mapM_ (\(Sensors ref) -> do
     SensorState watched seen <- readIORef ref
     unless (IM.null watched && IM.null seen) $ do
-      seen' <- IM.traverseWithKey (\k w -> measureSensor ctx size (IM.lookup k seen) w) watched
+      seen' <- IM.traverseWithKey (\k w -> measureSensor ctx size (IM.findWithDefault unseen k seen) w) watched
       writeIORef ref $! SensorState watched seen'
       when (any (\(Seen v _) -> isJust (visEvent v)) seen') (markDirty ctx))
 
@@ -199,8 +200,8 @@ updateSensors ctx size =
 -- widget in view counts as visible once it has been in view for the
 -- sensor's delay; until then the sensor asks for a frame when it will have
 -- been, as 'NanoUI.Internal.Widgets.Popup.tooltipTimer' does.
-measureSensor :: Context -> Size -> Maybe Seen -> Watch -> IO Seen
-measureSensor ctx@Context {ctxNodeArena = na} size before (Watch target cfg) = do
+measureSensor :: Context -> Size -> Seen -> Watch -> IO Seen
+measureSensor ctx@Context {ctxNodeArena = na} size (Seen before since0) (Watch target cfg) = do
   mIdx <- lookupNodeByWidgetId na target
   (inView, bounds, onScreen) <- case mIdx of
     Nothing -> pure (False, Rect 0 0 0 0, Nothing)
@@ -208,8 +209,7 @@ measureSensor ctx@Context {ctxNodeArena = na} size before (Watch target cfg) = d
       rect <- getNodeRect na idx
       (exact, grown) <- paintClips ctx size (max 0 (sensorAnticipate cfg)) idx
       pure (maybe False (overlaps rect) grown, rect, exact >>= rectIntersect rect)
-  let was = maybe False (\(Seen v _) -> visVisible v) before
-      since0 = maybe 0 (\(Seen _ t) -> t) before
+  let was = visVisible before
       delay = sensorDelay cfg
   -- The time the widget came into view, kept while it stays in view and has
   -- not counted as visible yet.
@@ -254,12 +254,8 @@ paintClips ctx@Context {ctxNodeArena = na} (Size ww wh) margin idx = do
     enter clips@(_, Nothing) _ = pure clips
     enter (exact, grown) i = do
       nt <- getNodeType na i
-      rect@(Rect x y w h) <- getNodeRect na i
-      cut <- case nt of
-        NodeContainer -> pure Nothing
-        NodeScrollContainer -> (\sn -> Just (scrollNodeViewport sn x y w h)) <$> readScrollNode na i
-        NodePanel -> (\theme -> Just (borderContentClip (themePanel theme) rect)) <$> nodeTheme ctx i
-        _ -> pure (Just rect)
+      rect <- getNodeRect na i
+      cut <- childPaintClip ctx i nt rect
       -- Paint still walks a plain container it would skip when a pinned node
       -- is below it: the container clips nothing, so the pinned node can show
       -- outside it, even when it has no size or is off screen.

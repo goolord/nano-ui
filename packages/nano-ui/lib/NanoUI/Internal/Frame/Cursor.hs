@@ -10,7 +10,6 @@ where
 import Control.Monad (forM, forM_, unless, when)
 import Control.Monad.Trans.Maybe (MaybeT (..))
 import Data.Foldable (asum, find)
-import Data.List (sortOn)
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Maybe (fromMaybe, isJust)
 import NanoUI.Internal.Context
@@ -25,7 +24,7 @@ import NanoUI.Internal.Frame.Window (windowResizeCursorKind)
 import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena
-import NanoUI.Internal.Monad (ifM, (<&&>))
+import NanoUI.Internal.Monad (ifM, whenM, (<&&>))
 import NanoUI.Internal.Types (Rect (..), V2 (..), rectContains)
 import NanoUI.Internal.WidgetText (hasFlag, numericStepperRects, textInputFlagNumeric)
 import NanoUI.Internal.Widgets.Custom (mkCustomDrawContext)
@@ -71,7 +70,7 @@ selectDropdownCursorKind ctx inp = do
 scrollThumbCursorKind :: Context -> Input -> IO (Maybe UiCursorKind)
 scrollThumbCursorKind ctx@Context {ctxNodeArena = na} inp = do
   mDrag <- getsInteraction ctx isScrollDrag
-  if buttonHeld MouseLeft inp && isJust mDrag
+  if heldIn MouseLeft inp && isJust mDrag
     then pure (Just UiCursorGrabbing)
     else do
       thumb <- findClassNodeM na PointerNodes $ \idx ->
@@ -126,7 +125,7 @@ cursorKindAt ctx wid mouse inp
           mCursorFn <- (>>= cdrCursor) <$> lookupCustomDrawing ctx wid
           case mCursorFn of
             Just cursorFn -> do
-              dragging <- pure (buttonHeld MouseLeft inp) <&&> ((== wid) <$> readIORef (ctxActiveId ctx))
+              dragging <- pure (heldIn MouseLeft inp) <&&> ((== wid) <$> readIORef (ctxActiveId ctx))
               if visible || dragging
                 then do
                   rect <- getNodeRect (ctxNodeArena ctx) idx
@@ -150,7 +149,7 @@ cursorKindAt ctx wid mouse inp
                     maybe UiCursorDefault (over UiCursorText) <$> hitRect
                 NodeSlider -> do
                   active <- readIORef (ctxActiveId ctx)
-                  if active == wid && buttonHeld MouseLeft inp
+                  if active == wid && heldIn MouseLeft inp
                     then pure UiCursorGrabbing
                     else do
                       let onTrack (Rect x y w h) = rectContains (sliderHitBounds x y w h) mouse
@@ -162,7 +161,7 @@ cursorKindAt ctx wid mouse inp
 cursorZoneKind :: Context -> Input -> IO (Maybe UiCursorKind)
 cursorZoneKind ctx inp = do
   dragging <- getsInteraction ctx isColumnResize
-  if buttonHeld MouseLeft inp && dragging
+  if heldIn MouseLeft inp && dragging
     then pure (Just UiCursorEwResize)
     else do
       let mouse = inputMousePos inp
@@ -210,28 +209,18 @@ nodeOnTopAt ctx@Context {ctxNodeArena = na} top mouse = do
     Just panel -> do
       visit panel
       -- The panels declared inside it, such as a menu opened in a modal, are
-      -- drawn over it. Only a modal confines the pointer while another panel
-      -- is under it, so most frames find none.
-      inner <- foldClassNodeRevM na FloatingNodes (\acc i ->
-        if i <= panel
-          then pure acc
-          else do
-            inside <- nodeInSubtree ctx i panel
-            rank <- floatingRank <$> getNodeType na i
-            pure (if inside then (rank, i) : acc else acc)) []
-      forM_ (sortOn fst inner) (visit . snd)
+      -- drawn over it, in the order the frame paints panels. Only a modal
+      -- confines the pointer while another panel is under it, so most frames
+      -- find none.
+      forM_ [NodeWindow, NodeModal, NodePopup] $ \nt ->
+        forFloatingNodes_ na nt $ \i ->
+          when (i > panel) $ whenM (nodeInSubtree ctx i panel) (visit i)
     Nothing -> do
       count <- arenaCount na
       forM_ [0 .. count - 1] $ \i -> do
         parent <- getParent na i
         when (parent < 0) (visitLayer i)
   readIORef found
-  where
-    floatingRank :: NodeType -> Int
-    floatingRank = \case
-      NodeWindow -> 0
-      NodeModal -> 1
-      _ -> 2
 
 -- | Whether 'uiCursorKind' requests the link/button pointer cursor.
 pointerCursorWanted :: Context -> Input -> IO Bool

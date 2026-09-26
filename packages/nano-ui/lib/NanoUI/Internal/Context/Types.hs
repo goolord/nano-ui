@@ -38,6 +38,7 @@ module NanoUI.Internal.Context.Types
   , DrawingEntry (..)
   , DrawingCacheState (..)
   , PopupConfig (..)
+  , HoverZone (..)
   , DrawOpCacheEntry (..)
   , CustomDrawingEntry (..)
   , CustomDrawOpCacheEntry (..)
@@ -609,19 +610,21 @@ data DrawingCacheState = DrawingCacheState
   , dcsDrawOpCache :: !(IntMap DrawOpCacheEntry)
   , dcsCustomDrawOpCache :: !(IntMap CustomDrawOpCacheEntry)
   , dcsDrawFitCache :: !(IntMap DrawFitCache)
-  , dcsHoverZones :: ![Rect]
+  , dcsHoverZones :: ![HoverZone]
   -- ^ Rects the pointer coming onto or leaving needs a frame for, though no
   -- widget the hover probe finds may be there: tooltip targets.
   }
+
+-- | A rect the pointer coming onto or leaving needs a frame for, and whether
+-- every move over it does too: the target of an open tooltip that follows
+-- the pointer.
+data HoverZone = HoverZone {-# UNPACK #-} !Rect !Bool
 
 -- | Strict cache entry for a popup's anchor configuration.
 data PopupConfig = PopupConfig
   { pcAnchor :: !PopupAnchor
   , pcPlacement :: !PopupPlacement
   , pcOffset :: {-# UNPACK #-} !Float
-  , pcFollowsPointer :: !Bool
-  -- ^ Placed from where the pointer is, so while it is up every pointer move
-  -- needs a frame to move it.
   }
 
 -- | Strict cache entry for a drawing's compiled draw ops.

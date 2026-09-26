@@ -31,7 +31,7 @@ module NanoUI.Internal.Frame.Input
   ) where
 
 import Control.Applicative ((<|>))
-import Control.Monad (filterM, guard, mfilter, unless, when, (<=<))
+import Control.Monad (filterM, guard, mfilter, unless, when)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.Map.Strict qualified as M
 import Data.Foldable (for_)
@@ -125,7 +125,7 @@ armPointerPress ctx inp =
     let here = inputMousePos inp
     modifyIORef' (ctxPressPos ctx) $ \m -> foldr (`M.insert` here) m (buttonsToList (inputButtonsPressed inp))
     -- A pointer press hides the keyboard focus ring.
-    when (buttonPressed MouseLeft inp) $ writeIORef (ctxFocusVisible ctx) False
+    when (pressedIn MouseLeft inp) $ writeIORef (ctxFocusVisible ctx) False
 
 -- | Forget the press point of each button that came up this frame. Runs after
 -- the view, which compares the release with the press point.
@@ -149,7 +149,7 @@ data PressTargets = PressTargets
 -- layout, like the steps.
 pressTargets :: Context -> Input -> IO PressTargets
 pressTargets ctx inp
-  | not (buttonPressed MouseLeft inp) = pure none
+  | not (pressedIn MouseLeft inp) = pure none
   | otherwise = targetsAt ctx (inputMousePos inp)
 
 -- | The widgets a press at @mouse@ would land on, found in one pass over the
@@ -171,14 +171,12 @@ targetsAt ctx@Context {ctxNodeArena = na} mouse = do
   -- own under the press, takes it: nothing beneath is pressed or focused.
   -- Only a stack or a pinned node draws one node over another.
   layered <- layeredNodeCount na
-  let takerUnder idx = (takesPointer na idx =<< getNodeType na idx) <&&> under idx
+  let takerUnder idx = takesPointer na idx <&&> under idx
+      blocking idx = not . isWidgetNode <$> getNodeType na idx
   blocked <-
     if layered == 0
       then pure False
-      else
-        findClassNodeM na PointerNodes takerUnder >>= \case
-          Nothing -> pure False
-          Just first -> not . isWidgetNode <$> (getNodeType na =<< reachedHit ctx takerUnder first)
+      else maybe (pure False) blocking =<< reachedHit ctx takerUnder
   if blocked then pure none else pressTargetsAt ctx under
 
 -- | 'targetsAt' past a node that blocks the press, with @under@ the press's
@@ -266,7 +264,7 @@ widgetHitRect ctx nt idx x y w h = case nt of
 -- fully hovered at once.
 finalizePointerRelease :: Context -> Input -> IO ()
 finalizePointerRelease ctx@Context {ctxNodeArena = na} inp =
-  when (buttonReleased MouseLeft inp) $ do
+  when (releasedIn MouseLeft inp) $ do
     let mouse = inputMousePos inp
     active <- readIORef (ctxActiveId ctx)
     when (hashWidgetId active /= 0) $ do
@@ -324,7 +322,7 @@ inUiClickHit ctx wid mouse = do
 -- A press on a control drawn inside a text field keeps the focus as it was.
 finalizeTextInputFocus :: Context -> Input -> PressTargets -> IO ()
 finalizeTextInputFocus ctx inp targets =
-  when (buttonPressed MouseLeft inp) $ do
+  when (pressedIn MouseLeft inp) $ do
     prevFocus <- readIORef (ctxFocusId ctx)
     mFocused <-
       if ptFieldControl targets
@@ -448,8 +446,6 @@ needsRedraw ctx prev inp = do
   anim <- anyAnimating ctx
   drag <- getsInteraction ctx (\s -> isJust (isScrollDrag s) || isJust (isWindowDrag s))
   overlay <- overlayMenuOpen ctx
-  -- A tooltip placed at the pointer moves with it.
-  follow <- popupFollowsPointer ctx
   -- The layout overlay highlights whatever node the pointer is over.
   explain <- getExplainLayout ctx
   let moved = inputMousePos prev /= inputMousePos inp
@@ -459,7 +455,7 @@ needsRedraw ctx prev inp = do
     || inputWindowRedraw inp
     || inputPointerHeld inp
     || drag
-    || ((overlay || follow) && moved)
+    || (overlay && moved)
     || (explain && moved)
     then pure True
     else
@@ -475,7 +471,8 @@ needsRedraw ctx prev inp = do
             else maybe False cdrTracked <$> lookupCustomDrawing ctx lastHot
         hotMoved <- if tracked then pure True else (/= lastHot) <$> probeHotId ctx (inputMousePos inp)
         -- A scrollbar is not a widget, and brightens as the pointer enters
-        -- it. Nor need a tooltip's target be one.
+        -- it. Nor need a tooltip's target be one, and a tooltip that follows
+        -- the pointer moves with it over its target.
         if hotMoved
           then pure True
           else ifM scrollBarHoverMoved (pure True) (hoverZoneCrossed ctx (inputMousePos prev) (inputMousePos inp))
@@ -542,11 +539,11 @@ probeHotId ctx@Context {ctxNodeArena = na} mouse = do
 
 -- | Note in 'ctxPointerReach' what the pointer reaches in the frame the user
 -- saw: where a stack or a pinned node draws one node over another, the node
--- on top at the pointer that takes it ('reachedHit'), as hover finds it
--- ('probeHotId'), and the nodes that one is inside. Every other node under
--- the pointer is covered there, a label or a container as much as a widget.
--- Runs before the view, against the last frame's layout: while the view
--- runs, each widget tests the pointer against its rect in that layout
+-- on top at the pointer that takes it, as hover finds it ('reachedAt'), and
+-- the nodes that one is inside. Every other node under the pointer is
+-- covered there, a label or a container as much as a widget. Runs before
+-- the view, against the last frame's layout: while the view runs, each
+-- widget tests the pointer against its rect in that layout
 -- ('NanoUI.Internal.Widgets.Node.resolveInteraction'), and one covered takes
 -- neither hover nor presses. Nothing is covered while the pointer is on a
 -- menu or dropdown, which routes it away from every layer, nor where nothing
@@ -557,11 +554,7 @@ recordCoveredWidgets :: Context -> PointerRoute -> Input -> IO ()
 recordCoveredWidgets ctx@Context {ctxNodeArena = na} route inp = do
   layered <- layeredNodeCount na
   reach <- case route of
-    RouteLayer _ | layered > 0 -> do
-      top <- overlayHitRoot ctx mouse
-      let hits = pointerHitAt ctx top mouse
-      first <- findClassNodeM na PointerNodes hits
-      traverse (idsUpFrom IS.empty <=< reachedHit ctx hits) first
+    RouteLayer _ | layered > 0 -> traverse (idsUpFrom IS.empty) =<< reachedAt ctx mouse
     _ -> pure Nothing
   -- Most frames have nothing covered before or after, and write nothing.
   old <- readIORef (ctxPointerReach ctx)

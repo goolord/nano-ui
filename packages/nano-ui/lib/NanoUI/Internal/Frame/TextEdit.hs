@@ -123,7 +123,7 @@ textEditMenuRow ctx inp wid (Rect mx _ _ _) style row@(Rect _ ry _ rh) cmd lbl =
 -- a right press lands on, and focus that field.
 openTextEditMenu :: Context -> Input -> IO ()
 openTextEditMenu ctx inp =
-  when (buttonPressed MouseRight inp) $ do
+  when (pressedIn MouseRight inp) $ do
     let mouse@(V2 mx my) = inputMousePos inp
     mWid <- textFieldWidgetAtMouse ctx mouse
     forM_ mWid $ \wid -> do
@@ -164,7 +164,7 @@ textFieldWidgetAtMouse ctx@Context {ctxNodeArena = na} mouse = do
 -- menu closes it.
 finalizeTextEditMenuPick :: Context -> Input -> IO ()
 finalizeTextEditMenuPick ctx inp =
-  when (buttonPressed MouseLeft inp) $ do
+  when (pressedIn MouseLeft inp) $ do
     mMenu <- getsInteraction ctx isTextInputMenu
     case mMenu of
       Just (TextInputMenu wid menuRect)

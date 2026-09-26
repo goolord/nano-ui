@@ -42,7 +42,7 @@ import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context (Context (..), InteractionState (..), getPrevRect, getScrollOffset2D, getStore, intKey, linkScrollAxes, modifyInteraction, writeSlots)
 import NanoUI.Internal.Hooks (useInt)
 import NanoUI.Internal.Font (ScrollBarSlot (..), scrollBarGutter, tableCellInset, lineWidthIO)
-import NanoUI.Internal.Input (Input (..), MouseButton (..), UiCursorKind (..), buttonHeld, buttonPressed, buttonReleased)
+import NanoUI.Internal.Input (Input (..), MouseButton (..), Pressable (..), UiCursorKind (..))
 import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Monad (Ui, askInput, freshWidget, lastRect, nextId, uiIO, withKey)
 import NanoUI.Internal.Store (Slot (..), SlotWrites (..), fieldFloat, fieldInt, fieldIntSet, findSlot, insertDyn, lookupDyn, slotKey, slotWrite)
@@ -332,7 +332,7 @@ tableConfigured cfg f key cols inputRows curSort =
         mx = v2X (inputMousePos inp)
         widths1 = case drag0 of
           HeaderResize c
-            | buttonHeld MouseLeft inp ->
+            | heldIn MouseLeft inp ->
                 setAt c (max (colFloor sizes contentWs c) (dragW0 + mx - dragX0)) widths0
           _ -> widths0
     let outerLayout = f (fillW flatLayout)
@@ -480,7 +480,7 @@ tableConfigured cfg f key cols inputRows curSort =
             HeaderResize _ -> (True, False)
             HeaderReorder _ -> (False, True)
             HeaderIdle -> (False, False)
-          resizing = isResize && buttonHeld MouseLeft inp
+          resizing = isResize && heldIn MouseLeft inp
       unless (null edgeZones) . uiIO $
         -- Strict in the spine and the rects, so no thunk waits in the IORef.
         modifyIORef' (ctxCursorZones ctx) (\zs -> foldl' (\acc (_, !r) -> (r, UiCursorEwResize) : acc) zs edgeZones)
@@ -488,12 +488,12 @@ tableConfigured cfg f key cols inputRows curSort =
         withKey ("reorder" :: Text) $
           useReorder vis (if resizing || isJust edgeCol then [] else headerRects)
       let dragged = isReorder && abs (mx - dragX0) > dragThresholdPx
-          pressResize = buttonPressed MouseLeft inp && isJust edgeCol
-          pressReorder = buttonPressed MouseLeft inp && edgeCol == Nothing && isJust hoverCol
+          pressResize = pressedIn MouseLeft inp && isJust edgeCol
+          pressReorder = pressedIn MouseLeft inp && edgeCol == Nothing && isJust hoverCol
           nextDrag
             | pressResize = maybe HeaderIdle HeaderResize edgeCol
             | pressReorder = maybe HeaderIdle HeaderReorder hoverCol
-            | buttonReleased MouseLeft inp || not (buttonHeld MouseLeft inp) = HeaderIdle
+            | releasedIn MouseLeft inp || not (heldIn MouseLeft inp) = HeaderIdle
             | otherwise = drag0
           nextDragX
             | pressResize || pressReorder = mx
@@ -516,7 +516,7 @@ tableConfigured cfg f key cols inputRows curSort =
               (i : _) | IS.size hidden0 + 1 < n -> IS.insert i hidden0
               _ -> hidden0
           sortClick =
-            if dragged || isJust mReorder || vis' /= vis || isResize || (isJust edgeCol && (buttonHeld MouseLeft inp || buttonReleased MouseLeft inp))
+            if dragged || isJust mReorder || vis' /= vis || isResize || (isJust edgeCol && (heldIn MouseLeft inp || releasedIn MouseLeft inp))
               then Nothing
               else listToMaybe [i | (i, r) <- headerPairs, respClicked r]
           nextSort = maybe sort0 (nextSortCol sort0) sortClick
@@ -533,7 +533,7 @@ tableConfigured cfg f key cols inputRows curSort =
           <> slotWrite fieldFloat (slotKey SlotDragW stateKey) nextDragW
       -- The resize cursor lasts the whole drag, wherever the pointer goes.
       case nextDrag of
-        HeaderResize _ | buttonHeld MouseLeft inp -> uiIO (modifyInteraction ctx (\s -> s {isColumnResize = True}))
+        HeaderResize _ | heldIn MouseLeft inp -> uiIO (modifyInteraction ctx (\s -> s {isColumnResize = True}))
         _ -> pure ()
       pure (TableResponse widgetResp nextSort nextOrder nextHidden)
 

@@ -21,12 +21,11 @@ import Data.Text qualified as T
 import NanoUI.Internal.Context
 import NanoUI.Internal.Draw (DrawArena, Layer (..), beginLayer, pushRect)
 import NanoUI.Internal.Frame.Hit (topmostFloating)
-import NanoUI.Internal.Frame.Node (readScrollNode)
-import NanoUI.Internal.Frame.Scroll.Geometry (borderContentClip, scrollNodeViewport)
+import NanoUI.Internal.Frame.Node (childPaintClip)
 import NanoUI.Internal.Input (Input (..))
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Id (hashWidgetId)
-import NanoUI.Internal.Style (Direction (..), Flow (..), Padding (..), Theme, fadeAlpha, themePanel, themeSeries)
+import NanoUI.Internal.Style (Direction (..), Flow (..), Padding (..), Theme, fadeAlpha, themeSeries)
 import NanoUI.Internal.Types (Color, Rect (..), Size (..), V2 (..), rectContains, rectHit, rectIntersect)
 
 -- | Work out what the overlay draws this frame, and repaint where that
@@ -55,17 +54,14 @@ explainFrame ctx@Context {ctxNodeArena = na} inp = do
           Just c -> foldPlacedChildrenM na idx (\acc ci -> outlines (depth + 1) c ci acc) rest
         pure (if inScope idx then (rect, clip, depth) : below else below)
       -- The innermost node under the pointer from @idx@ down: the child
-      -- drawn on top with a node under it ('childrenTopFirst': an earlier
-      -- sibling over a later one, but a later layer over an earlier
+      -- drawn on top with a node under it ('firstChildOnTopJustM': an
+      -- earlier sibling over a later one, but a later layer over an earlier
       -- one, and a pinned child over the rest), or else @idx@ itself. A child
       -- can paint outside a row or column, so each is searched.
       nodeAt !depth clip idx = do
         rect <- getNodeRect na idx
         inner <- childClip ctx idx clip rect
-        kids <- childrenTopFirst na idx
-        let firstHit c =
-              foldr (\ci rest -> nodeAt (depth + 1) c ci >>= maybe rest (pure . Just)) (pure Nothing) kids
-        deeper <- maybe (pure Nothing) firstHit inner
+        deeper <- maybe (pure Nothing) (firstChildOnTopJustM na idx . nodeAt (depth + 1)) inner
         case deeper of
           Just _ -> pure deeper
           Nothing
@@ -134,24 +130,17 @@ paintExplainHover ctx@Context {ctxDrawArena = da} = do
       outline da clip (Rect (x + l) (y + t) (w - l - r) (h - t - b)) col
 
 -- | The clip node @idx@'s children paint in, when it paints in @clip@ at
--- @rect@, cut as "NanoUI.Internal.Frame.Paint" cuts it: to a scroller's
--- viewport, the inside of a panel's border, and the rect of a floating panel
--- or of a widget holding children. A row or column cuts nothing. 'Nothing'
--- when nothing inside shows.
+-- @rect@ ('childPaintClip'). 'Nothing' when nothing inside shows.
 childClip :: Context -> NodeIdx -> Rect -> Rect -> IO (Maybe Rect)
-childClip ctx@Context {ctxNodeArena = na} idx clip rect@(Rect x y w h) =
-  getNodeType na idx >>= \case
-    NodeScrollContainer -> (\sn -> rectIntersect clip (scrollNodeViewport sn x y w h)) <$> readScrollNode na idx
-    NodePanel -> (\theme -> rectIntersect clip (borderContentClip (themePanel theme) rect)) <$> nodeTheme ctx idx
-    nt
-      | isFloatingNode nt || isWidgetNode nt -> pure (rectIntersect clip rect)
-      | otherwise -> pure (Just clip)
+childClip ctx idx clip rect = do
+  nt <- getNodeType (ctxNodeArena ctx) idx
+  maybe (Just clip) (rectIntersect clip) <$> childPaintClip ctx idx nt rect
 
 -- | What the overlay says of node @idx@, @depth@ deep in its layer.
 describeNode :: NodeArena -> Int -> NodeIdx -> IO ExplainedNode
 describeNode na depth idx = do
   a <- arenaArrays na
-  kind <- nodeKind na idx
+  nt <- readTagEnum a idx TagNodeType
   wid <- getWidgetId na idx
   rect <- getNodeRect na idx
   pad <- getPadding na idx
@@ -163,9 +152,10 @@ describeNode na depth idx = do
   pinned <- readTagEnum a idx TagPinned
   pin <- if pinned then Just <$> (V2 <$> readStyle a idx StylePinX <*> readStyle a idx StylePinY) else pure Nothing
   mode <- readTagEnum a idx TagPointer
+  let direction = case dir of DirRow -> Row; DirColumn -> Column
   pure
     ExplainedNode
-      { explainedKind = kind
+      { explainedKind = nodeKind nt direction flow
       , explainedWidget = if hashWidgetId wid == 0 then Nothing else Just wid
       , explainedDepth = depth
       , explainedRect = rect
@@ -175,7 +165,7 @@ describeNode na depth idx = do
       , explainedMin = V2 (axMin wAx) (axMin hAx)
       , explainedMax = V2 (axMax wAx) (axMax hAx)
       , explainedGap = gap
-      , explainedDirection = case dir of DirRow -> Row; DirColumn -> Column
+      , explainedDirection = direction
       , explainedFlow = flow
       , explainedPin = pin
       , explainedPointer = mode
@@ -184,20 +174,16 @@ describeNode na depth idx = do
 -- | A node's type without its @Node@ prefix, and how a container lays out
 -- its children: its direction, @layered@ for layers, and @wrap@ after the
 -- direction of a container that wraps.
-nodeKind :: NodeArena -> NodeIdx -> IO T.Text
-nodeKind na idx = do
-  nt <- getNodeType na idx
-  let kind = T.pack (drop 4 (show nt))
-      direction dir = T.toLower (T.pack (drop 3 (show dir)))
-  if isContainerNode nt
-    then do
-      dir <- getDirection na idx
-      flow <- getFlow na idx
-      pure $ kind <> ", " <> case flow of
-        Layered -> "layered"
-        Wrap -> direction dir <> ", wrap"
-        Line -> direction dir
-    else pure kind
+nodeKind :: NodeType -> Direction -> Flow -> T.Text
+nodeKind nt dir flow
+  | not (isContainerNode nt) = kind
+  | otherwise = kind <> ", " <> case flow of
+      Layered -> "layered"
+      Wrap -> direction <> ", wrap"
+      Line -> direction
+  where
+    kind = T.pack (drop 4 (show nt))
+    direction = T.toLower (T.pack (show dir))
 
 -- | The outline colour at a depth: the theme's series colours in turn.
 depthColor :: Theme -> Int -> Color

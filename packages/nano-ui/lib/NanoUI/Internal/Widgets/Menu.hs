@@ -21,7 +21,7 @@ import Data.Text (Text)
 import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context (Context (..), getStore, intKey, modifyStore)
 import NanoUI.Internal.Font (menuItemPadX, menuItemRowH, menuMinW, menuOuterPad, menuSepH, widgetContentInset)
-import NanoUI.Internal.Input (MouseButton (..), buttonReleased, inputMousePos)
+import NanoUI.Internal.Input (MouseButton (..), Pressable (..), inputMousePos)
 import NanoUI.Internal.Monad (Ui, askContext, askDefaultLayout, askInput, freshWidget, uiIO)
 import NanoUI.Internal.Store (Slot (..), fieldPoint, findSlot, flagSlot, insertSlot, setFlagSlot, slotKey)
 import NanoUI.Internal.Style (Layout (..), Padding (..), defaultLayout, fillW, fixedH, fontMuted, gap, minW, padXY, tight)
@@ -77,7 +77,7 @@ runContextMenu (isOpen0, pos0, openAt, close) rightClick child = do
   -- A release the menu itself sees, which is one on a row, picks.
   (popupResp, mBody) <-
     popup (isOpen0 || rightClick) cfg $
-      (,) . buttonReleased MouseLeft <$> askInput <*> columnWith (tight . gap 0) (child pos)
+      (,) . releasedIn MouseLeft <$> askInput <*> columnWith (tight . gap 0) (child pos)
   let picked = respHovered popupResp && maybe False fst mBody
   when (respClicked popupResp || picked) close
   pure (snd <$> mBody)

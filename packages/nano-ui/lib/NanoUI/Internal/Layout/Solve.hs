@@ -928,9 +928,11 @@ recomputeFitHeightAtWidth env@SolveEnv {seArena = na, seArrays = a} idx availW =
           SizingFixed -> val
           _ -> avail
         effW' = clamp minW maxW (widthOf wAx availW)
-    -- A fit height that keeps an aspect ratio is the width over it.
     ratio <- if hTag == SizingFit then readStyle a idx StyleAspect else pure 0
-    if ratio > 0 then pure (clamp minH maxH (effW' / ratio)) else case nt of
+    case nt of
+      -- A fit height that keeps an aspect ratio is the width over it.
+      _ | ratio > 0 -> pure (clamp minH maxH (effW' / ratio))
+
       NodeText
         | hTag /= SizingFixed -> do
             isRowChild <- parentIsRow na idx
@@ -1053,25 +1055,19 @@ positionNodeA env@SolveEnv {seArena = na, seArrays = a} !depth !idx (Rect x y av
   nt <- readTagEnum a idx TagNodeType
   let !w = resolveSize wAx intrinsicW availW
       !resolvedH = resolveSize hAx intrinsicH availH
-  isRowChild <- parentIsRow na idx
-  -- A fit height that keeps an aspect ratio follows the width it got.
   ratio <- if hTag == SizingFit then readStyle a idx StyleAspect else pure 0
-  h <-
-    if ratio > 0
-      then pure (clamp minH maxH (w / ratio))
-      else
-        if nt == NodeText && hTag /= SizingFixed && not isRowChild
-          then textHeightAt env idx hAx w (axTag wAx /= SizingFit) resolvedH
-          else
-            if (nt == NodeContainer || nt == NodePanel) && hTag == SizingFit
-              then pure (clamp minH maxH (max intrinsicH availH))
-              else
-                if nt == NodeDrawing && hTag == SizingFit && w /= intrinsicW
-                  then
-                    -- A measured drawing laid out at another width than it
-                    -- was measured at takes its height at the width it got.
-                    drawingHeightAt env idx w hAx resolvedH
-                  else pure resolvedH
+  h <- case nt of
+    -- A fit height that keeps an aspect ratio follows the width it got.
+    _ | ratio > 0 -> pure (clamp minH maxH (w / ratio))
+    -- Text outside a row wraps at the width it got.
+    NodeText | hTag /= SizingFixed -> do
+      isRowChild <- parentIsRow na idx
+      if isRowChild then pure resolvedH else textHeightAt env idx hAx w (axTag wAx /= SizingFit) resolvedH
+    _ | (nt == NodeContainer || nt == NodePanel) && hTag == SizingFit -> pure (clamp minH maxH (max intrinsicH availH))
+    -- A measured drawing laid out at another width than it was measured at
+    -- takes its height at the width it got.
+    NodeDrawing | hTag == SizingFit && w /= intrinsicW -> drawingHeightAt env idx w hAx resolvedH
+    _ -> pure resolvedH
   setRect na idx x y w h
   if isContainerNode nt
     then do

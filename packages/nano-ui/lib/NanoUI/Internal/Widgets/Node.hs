@@ -407,7 +407,7 @@ resolveInteraction ctx inp wid = do
       -- widget the drag passes over is not hovered, so it neither lights up
       -- nor reports a press of its own.
       captured <-
-        pure (buttonHeld MouseLeft inp)
+        pure (heldIn MouseLeft inp)
           <&&> if hashWidgetId active /= 0 && active /= wid
             then pure True
             else not <$> startedHere MouseLeft
@@ -418,7 +418,7 @@ resolveInteraction ctx inp wid = do
       -- Every other button, held or released, is the widget's only when it
       -- went down on it; a hovered widget owns a held left button already.
       let ownedHere bs = if hovered then buttonsFilterM startedHere bs else pure noButtons
-          leftHeld = if hovered && buttonHeld MouseLeft inp then buttonsInsert MouseLeft noButtons else noButtons
+          leftHeld = if hovered && heldIn MouseLeft inp then buttonsInsert MouseLeft noButtons else noButtons
       held <- (leftHeld <>) <$> ownedHere (buttonsDelete MouseLeft (inputButtonsHeld inp))
       released <- ownedHere (inputButtonsReleased inp)
       -- The click belongs to whatever the press went down on: a release that
@@ -426,7 +426,7 @@ resolveInteraction ctx inp wid = do
       -- nor is one on a widget that moved under the pointer after another
       -- widget took the press. A press and release in one frame have set no
       -- active widget yet.
-      let ownsRelease = hashWidgetId active == 0 || active == wid || buttonPressed MouseLeft inp
+      let ownsRelease = hashWidgetId active == 0 || active == wid || pressedIn MouseLeft inp
           clickedWith = if ownsRelease then released else buttonsDelete MouseLeft released
           leftClicked = buttonsMember MouseLeft clickedWith
       when (leftClicked && wid == active) $

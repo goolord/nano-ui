@@ -28,7 +28,7 @@ import NanoUI.Internal.Frame.TextEdit
 import NanoUI.Internal.Frame.TextInput (claimComposition, settleInputMethod)
 import NanoUI.Internal.Frame.Window
 import NanoUI.Internal.Id (WidgetId (..), initialIdContext)
-import NanoUI.Internal.Input (Input (..), Key (..), MouseButton (..), Pressable (..), buttonPressed, inputKeysNull, stripInteractionInput, withoutPointer)
+import NanoUI.Internal.Input (Input (..), Key (..), MouseButton (..), Pressable (..), inputKeysNull, stripInteractionInput, withoutPointer)
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Layout.Solve (placeFloatingNodes, runCustomMeasure, solveLayout)
 import NanoUI.Internal.Monad (NanoUI, Ui, runUi, whenM)
@@ -173,7 +173,7 @@ runFrameEff unlift ctx rawInp ui = do
   applyScrollOffsets ctx size
   -- A press on a menu or dropdown leaves nothing active, whatever a release
   -- that never arrived left behind.
-  when (buttonPressed MouseLeft frameInp && not (buttonPressed MouseLeft layerInp)) $
+  when (pressedIn MouseLeft frameInp && not (pressedIn MouseLeft layerInp)) $
     writeIORef (ctxActiveId ctx) (WidgetId 0)
   targets <- pressTargets ctx layerInp
   finalizePointerPress ctx targets

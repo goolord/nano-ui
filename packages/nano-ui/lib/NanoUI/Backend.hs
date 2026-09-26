@@ -45,9 +45,9 @@ module NanoUI.Backend
     -- keys, mouse buttons through 'applyMouseButton' (a backend numbers
     -- them with 'mouseButtonNumber') and dropped files through
     -- 'appendDropEvent'. When the pointer leaves the window,
-    -- 'applyPointerLeave' moves it off every widget. Every key goes in as a 'Key' whatever the
-    -- modifiers, a key that types a character as the 'KeyChar' it types
-    -- with no modifier held; the text typed goes in 'inputChars' as well, and
+    -- 'applyPointerLeave' moves it off every widget. Every key goes in as a
+    -- 'Key' whatever the modifiers, a key that types a character as the
+    -- 'KeyChar' it types with no modifier held; the text typed goes in 'inputChars' as well, and
     -- a chord such as Ctrl+C types none. Every auto-repeat of a held key goes
     -- in as a press, which 'applyKey' keeps out of 'inputKeysNew', and
     -- 'keypadKey' says what a keypad key is. When the window loses the
