@@ -439,9 +439,9 @@ its response rectangle, then send separate press and release frames.
 
 `NanoUI.Testing.Harness` supplies `warmup2`, `clickPair`, `runClick`, and
 text-span queries, with `clickPairWith` for another button, as in
-`clickPairWith MouseMiddle base pos`. Its `held`
-helper stores controlled input values outside the hook store, so an automatic
-hook rebuild does not hide a change flag that the test is trying to observe.
+`clickPairWith MouseMiddle base pos`. Its `held` helper stores controlled
+input values outside the hook store, so an automatic hook rebuild does not
+hide a change flag that the test is trying to observe.
 
 A tooltip's delay runs on the real clock, so a test sets `tooltipDelay = 0`.
 `newWakeSignal` lets a test wait for a background job's wake, and
