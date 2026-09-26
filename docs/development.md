@@ -233,9 +233,11 @@ Three rules keep a view idle:
   widgets still built ask again, so one that is gone stops costing anything.
   Do not mark the context dirty every frame to get there: a dirty context is
   redrawn at once, which is a busy loop.
-- Background work goes in `useTask`, which wakes the loop once, when its job
-  finishes. Any other thread that changes what the view reads wakes the loop
-  with the action `askWake` returns. Either wake runs one frame, which
+- Background work goes in `useTask` or `useTaskStatus`, which wake the loop
+  once, when the job finishes, or in `useStream`, which wakes it on each
+  update and costs one frame for a burst of them. Any other thread that
+  changes what the view reads wakes the loop with the action `askWake`
+  returns. Each wake runs one frame, which
   repaints the whole window. Code holding a `Context` can wake through
   `ctxWakeLoop` instead: that frame's damage decides what is presented, so
   waking for a change that is not on screen is cheap, and a change damage

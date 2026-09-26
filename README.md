@@ -61,8 +61,9 @@ counter = do
 - Backends block on input when no animation or timed update needs a frame.
   Each frame computes
   its damage against the previous one. `wakeAfter` schedules a frame for a
-  view that changes on a timer, `useTask` runs background work, and `askWake`
-  lets any thread wake the loop.
+  view that changes on a timer, `useTaskStatus` and `useTask` run background
+  work, `useStream` folds a producer's updates into a view's state, and
+  `askWake` lets any thread wake the loop.
 - State in local hooks (`useInt`, `useText`, `useState`), in your own model,
   or in a reducer with `NanoUI.Emit`.
 - Eased and spring animation.

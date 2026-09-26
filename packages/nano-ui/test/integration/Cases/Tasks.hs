@@ -2,10 +2,10 @@ module Cases.Tasks (tests) where
 
 import Spec
 import Control.Concurrent (newEmptyMVar, putMVar, readMVar, takeMVar, threadDelay)
-import Control.Exception (IOException, displayException, finally, onException, try)
+import Control.Exception (displayException, finally, onException)
 import Data.List (isInfixOf)
 import Data.Function (fix)
-import Data.Maybe (isJust, isNothing)
+import Data.Maybe (isJust)
 import GHC.Conc (getUncaughtExceptionHandler, setUncaughtExceptionHandler)
 import System.Timeout (timeout)
 
@@ -16,8 +16,12 @@ tests =
   , spec "task-lease" runTaskLeaseTest
   , spec "task-two-passes" runTaskTwoPassTest
   , spec "task-failure" runTaskFailureTest
+  , spec "task-status" runTaskStatusTest
+  , spec "task-retry" runTaskRetryTest
   , spec "task-shutdown" runTaskShutdownTest
   , spec "wake-from-thread" runWakeFromThreadTest
+  , spec "stream" runStreamTest
+  , spec "stream-key-change" runStreamKeyChangeTest
   ]
 
 inp :: Input
@@ -84,21 +88,27 @@ runTaskResultTest ctx failed = do
   assert failed =<< wait 2000000
   takesNews ctx failed ui (Just 42)
 
--- | A new key kills the old key's job and starts its own, whose result the hook returns.
+-- | A new key kills the old key's job and starts its own, whose result the
+-- hook returns; until then it returns the last key's result.
 runTaskKeyChangeTest :: Context -> IORef Int -> IO ()
 runTaskKeyChangeTest ctx failed = do
   wait <- newWakeSignal ctx
   (sleep, killedIn) <- sleeper
   gate <- newEmptyMVar
   keyRef <- newIORef (1 :: Int)
-  let ui = uiIO (readIORef keyRef) >>= \k -> useTask k (if k == 1 then sleep >> pure k else takeMVar gate >> pure (k * 10))
+  let ui = uiIO (readIORef keyRef) >>= \k -> useTask k (if k == 2 then sleep >> pure k else takeMVar gate >> pure (k * 10))
+  _ <- wait 0
   assertEq failed Nothing =<< evalUi ctx inp ui
+  putMVar gate ()
+  assertEq failed (Just (Just 10)) =<< frameUntil wait ctx ui isJust
   writeIORef keyRef 2
-  assertEq failed Nothing =<< evalUi ctx inp ui
+  assertEq failed (Just 10) =<< evalUi ctx inp ui
+  writeIORef keyRef 3
+  assertEq failed (Just 10) =<< evalUi ctx inp ui
   assert failed =<< killedIn 2000000
   _ <- wait 0
   putMVar gate ()
-  assertEq failed (Just (Just 20)) =<< frameUntil wait ctx ui isJust
+  assertEq failed (Just (Just 30)) =<< frameUntil wait ctx ui (== Just 30)
 
 -- | A job lives while the view calls its hook: the first frame without the call
 -- kills it (asking for no frame), and a later call starts a new job.
@@ -130,8 +140,9 @@ runTaskTwoPassTest ctx failed = do
   assertEq failed 1 =<< readIORef starts
   cancelTasks ctx
 
--- | A job that throws, or returns a value that throws, leaves its hook at
--- 'Nothing' and its exception to the uncaught handler; a caught one reaches the view.
+-- | A job that throws, or returns a value that throws, fails with its
+-- exception and wakes the loop; none reaches the uncaught handler, and the
+-- hook's result stays the last one.
 runTaskFailureTest :: Context -> IORef Int -> IO ()
 runTaskFailureTest ctx failed = do
   wait <- newWakeSignal ctx
@@ -142,17 +153,62 @@ runTaskFailureTest ctx failed = do
   flip finally (setUncaughtExceptionHandler handler) $ do
     let ui =
           (,,)
-            <$> useTask ("thrown" :: String) (readMVar gate >> ioError (userError "boom") :: IO Int)
-            <*> useTask ("lazy" :: String) (readMVar gate >> pure (error "lazy" :: Int))
-            <*> useTask ("caught" :: String) (try (readMVar gate >> ioError (userError "caught")) :: IO (Either IOException Int))
-        shown (_, _, caught) = any (either (("caught" `isInfixOf`) . displayException) (const False)) caught
+            <$> useTaskStatus ("thrown" :: String) (readMVar gate >> ioError (userError "boom") :: IO Int)
+            <*> useTaskStatus ("lazy" :: String) (readMVar gate >> pure (error "lazy" :: Int))
+            <*> useTask ("thrown too" :: String) (readMVar gate >> ioError (userError "boom") :: IO Int)
+        failure = \case
+          TaskFailed e Nothing -> Just (displayException e)
+          _ -> Nothing
+        shown (thrown, lazy, _) = all (isJust . failure) [thrown, lazy]
     _ <- runFrame ctx inp ui
     _ <- wait 0
     putMVar gate ()
-    assert failed . isJust =<< frameUntil wait ctx ui shown
-    assert failed =<< reaches uncaught 2
-    (thrown, lazy, _) <- evalUi ctx inp ui
-    assert failed (isNothing thrown && isNothing lazy)
+    Just (thrown, lazy, plain) <- frameUntil wait ctx ui shown
+    assert failed (maybe False ("boom" `isInfixOf`) (failure thrown))
+    assert failed (maybe False ("lazy" `isInfixOf`) (failure lazy))
+    assertEq failed Nothing plain
+    threadDelay 20000
+    assertEq failed 0 =<< readIORef uncaught
+
+-- | A job runs, then is done; one for a new key runs with the last key's
+-- result, and fails with it.
+runTaskStatusTest :: Context -> IORef Int -> IO ()
+runTaskStatusTest ctx failed = do
+  wait <- newWakeSignal ctx
+  gate <- newEmptyMVar
+  keyRef <- newIORef (1 :: Int)
+  let ui = do
+        k <- uiIO (readIORef keyRef)
+        status <- useTaskStatus k (takeMVar gate >> if k == 1 then pure ("one" :: String) else ioError (userError "two"))
+        pure $ case status of
+          TaskRunning prev -> ("running" :: String, prev)
+          TaskDone a -> ("done", Just a)
+          TaskFailed _ prev -> ("failed", prev)
+  _ <- wait 0
+  assertEq failed ("running", Nothing) =<< evalUi ctx inp ui
+  putMVar gate ()
+  assertEq failed (Just ("done", Just "one")) =<< frameUntil wait ctx ui ((== "done") . fst)
+  writeIORef keyRef 2
+  assertEq failed ("running", Just "one") =<< evalUi ctx inp ui
+  putMVar gate ()
+  assertEq failed (Just ("failed", Just "one")) =<< frameUntil wait ctx ui ((== "failed") . fst)
+  settled ctx failed ui ("failed", Just "one")
+
+-- | The same input runs again under a new attempt count.
+runTaskRetryTest :: Context -> IORef Int -> IO ()
+runTaskRetryTest ctx failed = do
+  wait <- newWakeSignal ctx
+  starts <- newIORef 0
+  attempt <- newIORef (0 :: Int)
+  let ui = do
+        n <- uiIO (readIORef attempt)
+        useTask ("same input" :: String, n) (tick starts >> readIORef starts)
+  _ <- wait 0
+  assertEq failed (Just (Just 1)) =<< frameUntil wait ctx ui isJust
+  assertEq failed (Just 1) =<< evalUi ctx inp ui
+  writeIORef attempt 1
+  assertEq failed (Just (Just 2)) =<< frameUntil wait ctx ui (== Just 2)
+  assertEq failed 2 =<< readIORef starts
 
 -- | 'cancelTasks', which ends a session, kills the jobs still running.
 runTaskShutdownTest :: Context -> IORef Int -> IO ()
@@ -162,8 +218,9 @@ runTaskShutdownTest ctx failed = do
   cancelTasks ctx
   assert failed =<< killedIn 2000000
 
--- | A job streaming values and waking the loop with 'askWake' costs, for a burst
--- faster than frames, the one frame that shows the last value.
+-- | A thread of the app's own streaming values and waking the loop with
+-- 'askWake' costs, for a burst faster than frames, the one frame that shows
+-- the last value.
 runWakeFromThreadTest :: Context -> IORef Int -> IO ()
 runWakeFromThreadTest ctx failed = do
   wait <- newWakeSignal ctx
@@ -187,4 +244,46 @@ runWakeFromThreadTest ctx failed = do
   takeMVar burst
   assertEq failed [True, False] =<< replicateM 2 (wait 0)
   takesNews ctx failed ui 1000
+  cancelTasks ctx
+
+-- | A stream's updates fold into the hook's state, and a burst faster than
+-- frames costs the one frame that shows where it ended.
+runStreamTest :: Context -> IORef Int -> IO ()
+runStreamTest ctx failed = do
+  wait <- newWakeSignal ctx
+  go <- newEmptyMVar
+  burst <- newEmptyMVar
+  let produce update = do
+        takeMVar go
+        forM_ [1 .. 1000 :: Int] $ \i -> update (+ i)
+        putMVar burst ()
+        takeMVar go
+      ui = do
+        n <- useStream ("stream" :: String) 0 produce
+        n <$ lamp (n > 0)
+  _ <- warmup2 ctx inp ui
+  settled ctx failed ui 0
+  _ <- wait 0
+  putMVar go ()
+  takeMVar burst
+  assertEq failed [True, False] =<< replicateM 2 (wait 0)
+  takesNews ctx failed ui 500500
+  cancelTasks ctx
+
+-- | A new key kills the old producer and starts again from the initial
+-- state; the old one's late updates do not reach the view.
+runStreamKeyChangeTest :: Context -> IORef Int -> IO ()
+runStreamKeyChangeTest ctx failed = do
+  wait <- newWakeSignal ctx
+  (sleep, killedIn) <- sleeper
+  keyRef <- newIORef (1 :: Int)
+  let ui = do
+        k <- uiIO (readIORef keyRef)
+        useStream k [] (\update -> update (k :) >> sleep)
+  _ <- wait 0
+  assertEq failed (Just [1]) =<< frameUntil wait ctx ui (not . null)
+  writeIORef keyRef 2
+  assertEq failed [] =<< evalUi ctx inp ui
+  assert failed =<< killedIn 2000000
+  assertEq failed (Just [2]) =<< frameUntil wait ctx ui (not . null)
   cancelTasks ctx

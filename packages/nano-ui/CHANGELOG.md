@@ -297,9 +297,15 @@
   `setWindowMinSizeUi`, `setWindowMaxSizeUi`, `setWindowPositionUi` and
   `setWindowOpacityUi` change the window. `RgbaImage` moved here from
   `nano-ui-sdl`, which still exports it, and `WindowPosition` is new.
-- Background work: `useTask` runs an action on its own thread, wakes the loop
-  with its result and kills it once the view stops calling the hook.
-  `askWake` gives the view an action any thread may call to run it again.
+- Background work: `useTaskStatus` runs an action on its own thread and says
+  whether it is running, done, or failed with the exception it threw, which
+  wakes the loop too; while a new key's job runs it keeps the last key's
+  result. `useTask` returns the latest result, so a list of results does not
+  flicker empty as its key changes. `useStream` runs a producer that updates
+  the hook's own state and wakes the loop, for a stream that needs no
+  `IORef` of the app's. A job is killed once the view stops calling its
+  hook. `askWake` gives the view an action any thread may call to run it
+  again.
 - `NanoUI.Backend` has what a backend needs for the above: `applyKey`,
   `keyRepeats`, `keypadKey`, `modifiersFromBits`, `noModifiers`,
   `applyComposition`, `cursorFallback`, `setExplainLayout`,

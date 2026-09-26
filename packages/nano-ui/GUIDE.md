@@ -245,42 +245,58 @@ Work that should not hold up a frame, such as reading a file, runs in a hook
 on a thread of its own:
 
 ```haskell
-contents <- useTask path (T.readFile path)
-label (fromMaybe "Loading..." contents)
+status <- useTaskStatus path (T.readFile path)
+case status of
+  TaskRunning _ -> label "Loading..."
+  TaskDone contents -> label contents
+  TaskFailed e _ -> danger (T.pack (displayException e))
 ```
 
-`useTask` returns `Nothing` until the action finishes, then its result, and
-runs once per key: a new key kills the job and starts another, which is also
-how to run it again. The job's end wakes the loop. The first frame that does
-not call the hook kills the job, so call it outside a tab or branch that
-should not end it. An action that throws stays `Nothing`; catch the
-exception inside it (`try`) to show it. Results are forced only to weak head
-normal form on the job's thread. Build with `-threaded`.
+`useTaskStatus` says whether the job is running, done with its result, or
+failed with the exception it threw; `useTask` returns just the latest result
+(`Nothing` until there is one). A job runs once per key, and its end wakes the
+loop. A new key kills the job and starts another; until the new one finishes,
+both hooks still hand back the last key's result (`TaskRunning (Just old)`),
+so a list of search results does not flicker empty as the query changes. To
+run the same work again, such as a Retry button, put a count in the key:
+`useTaskStatus (path, attempt)`. The old job is killed by an asynchronous
+exception from another thread, so it can run on for a moment beside the new
+one: give a job that writes files or holds a resource a `bracket`. Synchronous
+exceptions from the action are caught as `TaskFailed`. Results are forced only
+to weak head normal form on the job's thread. Build with `-threaded`.
 
-The context and its arenas belong to the UI thread. Another thread that
-changes what the view reads publishes the change where the view reads it,
-then calls the action `askWake` returns: the next frame runs the view and
-repaints the whole window, and wakes that come before it cost only that
-frame. A stream, a poller or a progress report is built this way. Here the
-thread is a `useTask` job that never returns, so it ends with the view:
+The first frame that does not call the hook kills the job, so call it outside
+a tab or branch that should not end it. A hook that runs on some frames and
+not others goes inside `scope`, which takes one id either way, so the hooks
+after it keep theirs:
 
 ```haskell
-sensorLoop :: IORef (Maybe Double) -> IO () -> IO ()
-sensorLoop latest wake = forever $ do
-  reading <- readSensor
-  writeIORef latest (Just reading)
-  wake
+scope (when previewOpen (void (useTask path (renderPreview path))))
+```
 
-sensorView :: IORef (Maybe Double) -> NanoUI ()
-sensorView latest = do
-  wake <- askWake
-  _ <- useTask () (sensorLoop latest wake)
-  reading <- uiIO (readIORef latest)
+`useStream` runs a producer that updates a state the view reads: a stream of
+readings, a download's progress, a reply arriving a token at a time. The
+producer gets an `update` function, which applies a change to the hook's
+state atomically and wakes the loop; updates that come faster than frames
+cost one frame between them. The state starts from the value given, again
+for each new key, and the producer lives as long as the view calls the hook:
+
+```haskell
+sensorView :: NanoUI ()
+sensorView = do
+  reading <- useStream () Nothing $ \update -> forever $ do
+    r <- readSensor
+    update (const (Just r))
   label (maybe "--" (T.pack . show) reading)
 ```
 
-`latest` is made in `main`, before the app runs. A stream that keeps every
-value folds each one into the reference instead.
+A state that keeps every value folds each one in (`update (r :)`).
+
+The context and its arenas belong to the UI thread. Another thread that the
+view does not own, and that changes what the view reads, publishes the change
+where the view reads it, then calls the action `askWake` returns: the next
+frame runs the view and repaints the whole window, and wakes that come before
+it cost only that frame.
 
 Damage requests describe pixels to repaint. They do not themselves wake the
 loop. Context operations that change stored state generally do both; for a

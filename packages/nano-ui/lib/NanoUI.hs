@@ -478,19 +478,26 @@ module NanoUI
     -- ** Background work
 
     -- | Work that should not hold up a frame runs on a thread of its own.
-    -- 'useTask' runs an action there and returns its result once there is
-    -- one; the loop sleeps while it runs and wakes when it finishes. A job
-    -- starts the first frame its hook is called with a key, is replaced when
-    -- the key changes, and is killed once the view stops calling its hook:
+    -- 'useTaskStatus' runs an action there and says whether it is running,
+    -- done or failed; 'useTask' returns its result once there is one. The
+    -- loop sleeps while a job runs and wakes when it ends. A job starts the
+    -- first frame its hook is called with a key, is replaced when the key
+    -- changes, and is killed once the view stops calling its hook:
     --
     -- > (query, setQuery) <- useText ""
     -- > setQuery =<< textInput query
     -- > hits <- useTask query (searchIndex index query)
     -- > mapM_ (label . hitTitle) (fromMaybe [] hits)
     --
-    -- 'askWake' hands the view an action any thread may call to run it
-    -- again: what a stream or a poller of the app's own needs.
+    -- While a new key's job runs, 'useTask' goes on returning the last
+    -- key's result, so the list above does not flicker empty as the query
+    -- changes. 'useStream' runs a producer that updates a state the view
+    -- reads, for a stream of values, and 'askWake' hands the view an action
+    -- any thread may call to run it again.
+  , TaskStatus (..)
+  , useTaskStatus
   , useTask
+  , useStream
   , askWake
 
     -- * Scrolling

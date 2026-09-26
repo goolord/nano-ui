@@ -197,16 +197,17 @@ module NanoUI.Backend
 
     -- * Background work
 
-    -- | A view's @useTask@ jobs, and any thread that calls the action
-    -- @askWake@ returns, wake the loop through the wake action the backend
-    -- installs with 'setWakeLoop' before the first frame: an action any
-    -- thread may call that ends the loop's wait for events, such as pushing
-    -- an event of the backend's own onto the platform's queue. A loop that
-    -- blocks with no wake action installed shows a job's result only once
-    -- other input comes along. The jobs run until their hooks stop being
-    -- called. @runSessionLoop@ in "NanoUI.Runner" ends the rest as its loop
-    -- returns; a host that runs frames itself ends them with 'cancelTasks'
-    -- when it closes the context's session.
+    -- | A view's @useTaskStatus@, @useTask@ and @useStream@ jobs, and any
+    -- thread that calls the action @askWake@ returns, wake the loop through
+    -- the wake action the backend installs with 'setWakeLoop' before the
+    -- first frame: an action any thread may call that ends the loop's wait
+    -- for events, such as pushing an event of the backend's own onto the
+    -- platform's queue. A loop that blocks with no wake action installed
+    -- shows a job's result only once other input comes along. The jobs run
+    -- until their hooks stop being called. @runSessionLoop@ in
+    -- "NanoUI.Runner" ends the rest as its loop returns; a host that runs
+    -- frames itself ends them with 'cancelTasks' when it closes the
+    -- context's session.
   , setWakeLoop
   , cancelTasks
   )

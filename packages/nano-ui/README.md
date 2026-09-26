@@ -85,8 +85,8 @@ backends' reducer runners fold them into the model.
   `Layout -> Layout` modifiers, as in `columnWith (gap 8 . padAll 12)`.
 - Keyboard focus and navigation for every control, and shortcuts, as in
   `shortcut (ctrl <> key 's')`.
-- Background work with `useTask`, and `askWake` for any thread to wake the
-  loop.
+- Background work with `useTaskStatus` and `useTask`, streams with
+  `useStream`, and `askWake` for any thread to wake the loop.
 - Themes, including ones built from Base16 schemes, changed for part of a view
   with `styled`, as in
   `styled (primary . buttonStyle (cornerRadius 6)) (button "Save")`.
