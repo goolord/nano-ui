@@ -8,7 +8,7 @@ module NanoUI.Sdl.Internal.WindowOptions
   , queryWindowState
   ) where
 
-import Control.Monad (void)
+import Control.Monad (unless, void)
 import Data.Bits (zeroBits, (.&.))
 import Data.ByteString.Unsafe qualified as BSU
 import Data.Int (Int32)
@@ -17,7 +17,7 @@ import Data.Text.Foreign qualified as TextForeign
 import Foreign.Ptr (Ptr, castPtr, nullPtr)
 import NanoUI (RgbaPixels, Size (..), WindowMode (..), rgbaBytes, rgbaHeight, rgbaWidth)
 import NanoUI.Backend (WindowHost (..), WindowState (..), defaultWindowState)
-import NanoUI.Sdl.Internal.Display (outPair)
+import NanoUI.Sdl.Internal.Display (outPair, windowPosCentered)
 import NanoUI.Sdl.Internal.Frame (nativeFrameOutset)
 import SDL3.Sys.Bindgen.Pixels qualified as Pixels
 import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
@@ -44,8 +44,7 @@ windowHostFor win zoom =
         Fullscreen -> void (SDL.showWindowSafe win) >> void (SDL.setWindowFullscreenSafe win True)
         Hidden -> void (SDL.hideWindowSafe win)
     , hostMove = \x y -> void (SDL.setWindowPositionSafe win (fromIntegral x) (fromIntegral y))
-    , -- SDL_WINDOWPOS_CENTERED: on the display the window is on.
-      hostCenter = void (SDL.setWindowPositionSafe win 0x2FFF0000 0x2FFF0000)
+    , hostCenter = void (SDL.setWindowPositionSafe win windowPosCentered windowPosCentered)
     , hostResize = \s -> viewSize s >>= \(w, h) -> void (SDL.setWindowSizeSafe win w h)
     , hostMinimize = void (SDL.minimizeWindowSafe win)
     , hostMaximize = void (SDL.maximizeWindowSafe win)
@@ -71,9 +70,8 @@ setIcon :: Ptr SDL_Window -> RgbaPixels -> IO ()
 setIcon win px =
   BSU.unsafeUseAsCString (rgbaBytes px) $ \p -> do
     surface <- createSurfaceFrom (fromIntegral (rgbaWidth px)) (fromIntegral (rgbaHeight px)) Pixels.SDL_PIXELFORMAT_RGBA32 (castPtr p) (fromIntegral (rgbaWidth px * 4))
-    if surface == nullPtr
-      then pure ()
-      else void (SDL.setWindowIconSafe win surface) >> destroySurface surface
+    unless (surface == nullPtr) $
+      void (SDL.setWindowIconSafe win surface) >> destroySurface surface
 
 -- | The window's state for views, at a scale: its position as the desktop
 -- last said (Wayland does not say), and its focus and mode from its flags.

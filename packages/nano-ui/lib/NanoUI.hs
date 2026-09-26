@@ -1036,7 +1036,6 @@ module NanoUI
   , rgbaWidth
   , rgbaHeight
   , rgbaBytes
-  , RgbaImage (..)
   , Screenshot (..)
   , requestScreenshot
   , askScreenshot

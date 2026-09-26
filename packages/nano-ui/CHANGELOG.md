@@ -432,8 +432,7 @@
   an action a `Screenshot`, the frame's `RgbaPixels` and its scale;
   `askScreenshot` gives another thread an action that waits for one, and
   `useScreenshot` takes one per key. `RgbaPixels` come from `rgbaPixels`,
-  which checks that the bytes fit the size. `RgbaImage` moved here from
-  `nano-ui-sdl`, which still exports it.
+  which checks that the bytes fit the size.
 - Background work: `useTaskStatus` runs an action on its own thread and says
   whether it is running, done, or failed with the exception it threw, which
   wakes the loop too; while a new key's job runs it keeps the last key's

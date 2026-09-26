@@ -290,9 +290,10 @@ richTextWith' f pieces = do
 paragraphBound :: Int
 paragraphBound = 4096
 
--- | The font a piece's layout chooses.
+-- | The font a piece's layout chooses. A colour-only variant resolves to the
+-- regular face ('resolveTextFont').
 pieceFont :: Layout -> TextFont
-pieceFont l = TextFont (layoutFontSize l) (variantFace (layoutFontVariant l)) (layoutFontWeight l) (layoutFontStyle l) (layoutTextDecoration l)
+pieceFont l = TextFont (layoutFontSize l) (layoutFontVariant l) (layoutFontWeight l) (layoutFontStyle l) (layoutTextDecoration l)
 
 -- | A piece's colour: its own, else the link colour for a link, else its
 -- tone's or face's, as a label's.

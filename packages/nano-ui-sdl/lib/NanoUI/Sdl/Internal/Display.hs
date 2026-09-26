@@ -8,6 +8,7 @@ module NanoUI.Sdl.Internal.Display
   , queryMouseWindowPos
   , outPair
   , zoomWindow
+  , windowPosCentered
   , installResizeWatch
   , refreshEventType
   , initRefreshEvent
@@ -24,6 +25,7 @@ import Foreign.Marshal.Alloc (alloca, callocBytes)
 import Foreign.Marshal.Utils (with)
 import Foreign.Ptr (FunPtr, Ptr, freeHaskellFunPtr)
 import Foreign.Storable (Storable, peek, poke, sizeOf)
+import Data.Int (Int32)
 import Data.Word (Word32)
 import NanoUI (Appearance (..), Size (..), V2 (..))
 import SDL3.Sys.Bindgen.Events (SDL_Event)
@@ -157,9 +159,13 @@ zoomWindow win (Size w h) zoom = do
   let fit want avail = if avail > 0 then min want (fromIntegral avail) else want
       zw = fit (w * zoom) usable.w
       zh = fit (h * zoom) usable.h
-      centred = 0x2FFF0000 -- SDL_WINDOWPOS_CENTERED
   void $ setWindowSize win (round zw) (round zh)
-  void $ setWindowPosition win centred centred
+  void $ setWindowPosition win windowPosCentered windowPosCentered
+
+-- | SDL_WINDOWPOS_CENTERED, a window position that centres the window on the
+-- display it is on: the centring mask with display 0.
+windowPosCentered :: Int32
+windowPosCentered = fromIntegral Video.sDL_WINDOWPOS_CENTERED_MASK
 
 -- | Whether the desktop is set to light or dark colours, 'Nothing' when SDL
 -- cannot tell. SDL keeps the value its theme-change event reports, so this

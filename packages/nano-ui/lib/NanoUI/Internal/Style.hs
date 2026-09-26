@@ -138,6 +138,7 @@ module NanoUI.Internal.Style
   , pointer
   ) where
 
+import Control.Applicative ((<|>))
 import Data.Bits ((.&.), (.|.))
 import Data.List (find)
 import Data.Maybe (fromMaybe)
@@ -739,7 +740,7 @@ toneColor t = \case
 -- the tone's ('fontTone'), else the one 'FontMuted' or 'FontDanger' stands
 -- for, a heading's accent, or the panel's text colour.
 textToneColor :: Theme -> FontVariant -> Maybe Tone -> Color
-textToneColor theme variant t = case maybe (variantTone variant) Just t of
+textToneColor theme variant t = case t <|> variantTone variant of
   Just t' -> toneColor theme t'
   Nothing
     | variant == FontHeading -> themeAccent theme

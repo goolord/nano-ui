@@ -11,8 +11,7 @@
 -- the frame's input.
 module NanoUI.Internal.NativeWindow
   ( -- * Pixels
-    RgbaImage (..)
-  , RgbaPixels
+    RgbaPixels
   , rgbaPixels
   , rgbaWidth
   , rgbaHeight
@@ -72,22 +71,11 @@ import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context (Context, askHostIO, markDirtyCovered, setHost, wakeFromThread)
 import NanoUI.Internal.Monad (Ui, windowSize, withContext)
 import NanoUI.Internal.Tasks (useTask)
-import NanoUI.Internal.Types (ImageId, Size (..))
+import NanoUI.Internal.Types (Size (..))
 
 --------------------------------------------------------------------------------
 -- Pixels
 --------------------------------------------------------------------------------
-
--- | An image to register before the first frame (the SDL backend's
--- @sdlAppImages@), under the id 'NanoUI.image' draws it by: a positive width
--- and height, and tightly packed RGBA8 bytes as 'RgbaPixels' has them.
-data RgbaImage = RgbaImage
-  { rgbaImageId :: !ImageId
-  , rgbaImageWidth :: !Int
-  , rgbaImageHeight :: !Int
-  , rgbaImagePixels :: !ByteString
-  }
-  deriving (Eq)
 
 -- | Pixels as RGBA8: a positive width and height, and tightly packed bytes,
 -- four a pixel (red, green, blue, straight alpha), in rows from the top. A
@@ -525,11 +513,11 @@ quitUi = withNativeWindow (\nw -> writeIORef (nwQuit nw) True)
 -- on it; the frame after the answer runs by itself, for a view that shows
 -- what came back. 'useScreenshot' hands the view the screenshot itself.
 requestScreenshot :: Ui :> es => (Maybe Screenshot -> IO ()) -> Eff es ()
-requestScreenshot answer =
-  withContext $ \ctx ->
-    askHostIO ctx >>= \case
-      Nothing -> answer Nothing
-      Just nw -> atomicModifyIORef' (nwShots nw) (\waiting -> (answer : waiting, ()))
+requestScreenshot answer = withContext $ \ctx -> askHostIO ctx >>= maybe (answer Nothing) (`queueScreenshot` answer)
+
+-- | Add an answer to the screenshots waiting ('answerScreenshots').
+queueScreenshot :: NativeWindow -> (Maybe Screenshot -> IO ()) -> IO ()
+queueScreenshot nw answer = atomicModifyIORef' (nwShots nw) (\waiting -> (answer : waiting, ()))
 
 -- | An action for another thread, such as a 'NanoUI.useTaskStatus' job, that
 -- waits for the next frame to be on screen and returns a screenshot of it,
@@ -544,7 +532,7 @@ askScreenshot = withContext $ \ctx -> maybe (pure Nothing) (shoot ctx) <$> askHo
   where
     shoot ctx nw = do
       box <- newEmptyMVar
-      atomicModifyIORef' (nwShots nw) (\waiting -> (putMVar box : waiting, ()))
+      queueScreenshot nw (putMVar box)
       wakeFromThread ctx
       takeMVar box
 
