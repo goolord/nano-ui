@@ -346,7 +346,8 @@ module NanoUI
     -- It shuts when the pointer leaves the target or a button goes down, and
     -- a wheel turn starts the wait again. Waiting costs nothing: the frame the
     -- tooltip opens on is a timed wake. 'PlacementAtCursor' keeps it just below
-    -- the pointer as the pointer moves.
+    -- the pointer as the pointer moves ('tooltipGap' away). A disabled widget
+    -- has its tooltip too, to say why it is off.
   , TooltipConfig (..)
   , defaultTooltipConfig
   , tooltipConfigured

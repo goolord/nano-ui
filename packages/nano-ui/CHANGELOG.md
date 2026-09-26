@@ -273,7 +273,10 @@
   as Tab would, or with `WidgetId 0` takes it away.
 - `tooltipConfigured` and `tooltipWidgetConfigured` take a `TooltipConfig`:
   the hover delay (`tooltipDelay`), the grace after another tooltip
-  (`tooltipGrace`) and the placement (`tooltipPlacement`).
+  (`tooltipGrace`), the placement (`tooltipPlacement`) and the space between
+  the tooltip and its target (`tooltipGap`). `PlacementAtCursor` makes a
+  tooltip follow the pointer, and opens a popup or context menu at its
+  anchor point.
 - Visibility sensors, for loading what scrolls into view: `sensor`,
   `sensorWith`, `sensorConfigured` (with a `sensorAnticipate` margin) and
   `useVisibility` report a `Visibility` (`visVisible`, `visRect`,
@@ -606,7 +609,9 @@
   `hashtables`.
 - Tooltips open once the pointer has rested on the target for half a second
   (`defaultTooltipConfig`), or at once just after another, and shut while a
-  button is held. `tooltipAt PlacementAtCursor` follows the pointer.
+  button is held. `tooltipAt PlacementAtCursor` follows the pointer. A
+  disabled widget has its tooltip too, where the pointer is on it with
+  nothing drawn over it, so it can say why it is off.
 - `menuItemShortcut` is also `True` when its chord is pressed while its menu
   is open, and shows the chord as its `shortcutLabel`.
 - A key chord is a key, not typed text: Ctrl+C is `KeyChar 'c'` with `modCtrl`

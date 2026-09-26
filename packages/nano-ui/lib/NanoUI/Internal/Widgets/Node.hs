@@ -13,6 +13,7 @@ module NanoUI.Internal.Widgets.Node
   , respClickedWith
   , respRightPressed
   , respRightClicked
+  , pointerOnWidget
   , mkResponse
   , setClicked
   , setChanged
@@ -49,7 +50,7 @@ import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Monad (Ui, (<&&>), askContext, askDefaultLayout, askFrameInput, askInput, localInput, nextId, uiIO, withContext, withIdFrame)
 import NanoUI.Internal.WidgetText (containerFlagInert, packTextNodeStyle)
 import NanoUI.Internal.Style (Layout (..), tight)
-import NanoUI.Internal.Types (Rect (..), rectContains, rectH, rectHit, rectUnion, rectW)
+import NanoUI.Internal.Types (Rect (..), V2, rectContains, rectH, rectHit, rectUnion, rectW)
 import NanoUI.Internal.Frame.Hit (findNodeByWidgetId, nodeInteractionHit, passesPointer, withWidgetNode)
 
 -- | The innermost open container, or @-1@ at the root.
@@ -364,6 +365,18 @@ addWidgetWithOptions wid nt txt opts value layout =
     setOptions arena idx opts
     setStyleIdx arena idx 0
 
+-- | Whether the pointer at @mouse@ is on widget @wid@ laid out at @rect@
+-- last frame, with @mIdx@ its node: on the part of it scrollers leave in
+-- view ('nodeInteractionHit'), with nothing that takes the pointer drawn over
+-- it there ('pointerCovered'), and the widget not letting the pointer
+-- through ('passesPointer'). Whether the widget takes the pointer, being
+-- enabled and not dragged over, is its hover's business.
+pointerOnWidget :: Context -> Maybe NodeIdx -> WidgetId -> Rect -> V2 -> IO Bool
+pointerOnWidget ctx mIdx wid rect mouse =
+  (not <$> pointerCovered ctx wid)
+    <&&> (not <$> maybe (pure False) (passesPointer (ctxNodeArena ctx)) mIdx)
+    <&&> maybe (pure (rectContains rect mouse)) (\idx -> nodeInteractionHit ctx idx rect mouse) mIdx
+
 resolveInteraction :: Context -> Input -> WidgetId -> IO Response
 resolveInteraction ctx inp wid = do
   mrect <- getPrevRect ctx wid
@@ -379,9 +392,7 @@ resolveInteraction ctx inp wid = do
       mIdx <- findNodeByWidgetId ctx wid
       presses <- readIORef (ctxPressPos ctx)
       let
-        hitAt p = case mIdx of
-          Nothing -> pure (rectContains rect p)
-          Just idx -> nodeInteractionHit ctx idx rect p
+        hitAt p = maybe (pure (rectContains rect p)) (\idx -> nodeInteractionHit ctx idx rect p) mIdx
         -- Whether the button went down on this widget. A press the frame
         -- never saw (synthesized input, or one swallowed before it arrived)
         -- leaves the gesture unowned, so nobody is ruled out.
@@ -397,9 +408,7 @@ resolveInteraction ctx inp wid = do
       -- Where a stack or a pinned node draws something that takes the
       -- pointer over this one, the pointer is that one's; and a node that
       -- lets the pointer through ('PointerPass') takes none of it.
-      covered <- pointerCovered ctx wid
-      passes <- maybe (pure False) (passesPointer (ctxNodeArena ctx)) mIdx
-      hovered <- pure (not (disabled || captured || covered || passes)) <&&> hitAt mouse
+      hovered <- pure (not (disabled || captured)) <&&> pointerOnWidget ctx mIdx wid rect mouse
       -- Every other button, held or released, is the widget's only when it
       -- went down on it; a hovered widget owns a held left button already.
       let ownedHere bs = if hovered then buttonsFilterM startedHere bs else pure noButtons

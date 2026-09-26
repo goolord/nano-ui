@@ -28,7 +28,7 @@ import GHC.Clock (getMonotonicTime)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Id (WidgetId, enterScope, scopeTag)
 import NanoUI.Internal.Input
-import NanoUI.Internal.Layout.Arena (NodeIdx, NodeType (..), addNodeFromLayout)
+import NanoUI.Internal.Layout.Arena (NodeIdx, NodeType (..), addNodeFromLayout, lookupNodeByWidgetId)
 import NanoUI.Internal.Monad
 import NanoUI.Internal.Store (deleteSlot, fieldQuiet, findSlot, insertSlot)
 import NanoUI.Internal.Style
@@ -135,18 +135,23 @@ data TooltipConfig = TooltipConfig
   , tooltipPlacement :: !PopupPlacement
   -- ^ The side of the target the tooltip opens on. 'PlacementAtCursor' puts
   -- it below the pointer instead, above it when there is no room, and moves
-  -- it with the pointer.
+  -- it with the pointer; for a tooltip, unlike a 'popup', it follows the
+  -- pointer.
+  , tooltipGap :: !Float
+  -- ^ Logical pixels between the tooltip and its target, or the pointer it
+  -- follows.
   }
   deriving (Eq, Show)
 
--- | Below the target, after the pointer has rested on it for half a second,
--- or at once within 0.3 seconds of another tooltip.
+-- | Below the target, 4 pixels from it, after the pointer has rested on it
+-- for half a second, or at once within 0.3 seconds of another tooltip.
 defaultTooltipConfig :: TooltipConfig
 defaultTooltipConfig =
   TooltipConfig
     { tooltipDelay = 0.5
     , tooltipGrace = 0.3
     , tooltipPlacement = PlacementBelow
+    , tooltipGap = 4
     }
 
 -- | Attach a rich tooltip widget to any target response, displayed once the
@@ -168,7 +173,10 @@ tooltipWidgetConfigured ::
 tooltipWidgetConfigured cfg target child = snd <$> hoverPopup cfg target child
 
 -- | A non-dismissable popup around @target@, open once the pointer has
--- rested on it ('tooltipTimer'), and placed as @cfg@ says.
+-- rested on it ('tooltipTimer'), and placed as @cfg@ says. The pointer is on
+-- the target where the view's routed pointer is on its visible part with
+-- nothing drawn over it ('pointerOnWidget'), whether or not the target takes
+-- input: a disabled button has its tooltip, to say why it is off.
 hoverPopup ::
   (Ui :> es, HasResponse r) =>
   TooltipConfig ->
@@ -181,13 +189,19 @@ hoverPopup cfg target child = do
   wid <- currentId
   ctx <- askContext
   frame <- askFrameInput
+  routed <- inputMousePos <$> askInput
   let mouse@(V2 mx my) = inputMousePos frame
       follow = tooltipPlacement cfg == PlacementAtCursor
+      rect = respRect target
+  onTarget <-
+    if rectHit rect routed
+      then uiIO $ lookupNodeByWidgetId (ctxNodeArena ctx) (respId target) >>= \mIdx -> pointerOnWidget ctx mIdx (respId target) rect routed
+      else pure False
   -- The pointer is still on the target while the tooltip itself is in front
   -- of it there, as one following the pointer is for the frame before it
   -- moves out from under it.
   onTip <- uiIO ((== RouteLayer (intKey wid)) <$> getsInteraction ctx isPointerRoute)
-  let hovered = respHovered target || (onTip && rectHit (respRect target) mouse)
+  let hovered = onTarget || (onTip && rectHit rect mouse)
   -- The pointer coming onto the target starts the wait, and leaving it shuts
   -- the tooltip, even where the target is a label or a container.
   uiIO (registerHoverZone ctx (respRect target))
@@ -196,7 +210,7 @@ hoverPopup cfg target child = do
         | follow = AnchorRect (Rect mx my 0 pointerClearance)
         | otherwise = AnchorRect (respRect target)
       placement = if follow then PlacementBelow else tooltipPlacement cfg
-  r <- popup open ((defaultPopupConfig anchor) {cfgPlacement = placement, cfgDismissable = False}) child
+  r <- popup open ((defaultPopupConfig anchor) {cfgPlacement = placement, cfgDismissable = False, cfgOffset = tooltipGap cfg}) child
   when (open && follow) $ uiIO (markPopupFollowsPointer ctx wid)
   pure r
 

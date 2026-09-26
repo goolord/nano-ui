@@ -8,6 +8,8 @@ tests :: [Spec]
 tests =
   [ spec "tooltip-hover" runTooltipHoverTest
   , spec "tooltip-scroll-pos" runTooltipScrollPosTest
+  , spec "tooltip-disabled-target" runTooltipDisabledTargetTest
+  , spec "tooltip-gap" runTooltipGapTest
   ]
 
 -- | Rest the pointer where @inp@ has it until the default tooltip delay has
@@ -94,3 +96,43 @@ runTooltipScrollPosTest ctx failed = do
       (tipY : _) -> do
         assert failed (abs (tipY - visualBottom) <= 16)
         assert failed (abs (tipY - visualBottom) < abs (tipY - layoutBottom))
+
+-- | A disabled widget has its tooltip, where the pointer is on it and
+-- nothing is drawn over it, though it takes no hover.
+runTooltipDisabledTargetTest :: Context -> IORef Int -> IO ()
+runTooltipDisabledTargetTest ctx failed = do
+  let inp0 = withInputOff 400 200
+      cfg = defaultTooltipConfig {tooltipDelay = 0}
+      ui = columnWith tight $ do
+        off <- disabledWhen True (buttonWith' (fixedWH 200 40) "Off")
+        tooltipConfigured cfg off "Why it is off"
+        _ <- buttonWith' (pinAt 150 0 . fixedWH 40 40) "cover"
+        pure off
+      tipAt p = do
+        let inp = inp0 {inputMousePos = p}
+        warmup ctx inp ui
+        r <- evalUi ctx inp ui
+        (,) (respHovered r) . hasText "Why it is off" <$> collectOverlayTextSpans ctx inp
+  _ <- warmup2 ctx inp0 ui
+  tipAt (V2 60 20) >>= assertEq failed (False, True)
+  tipAt (V2 170 20) >>= assertEq failed (False, False)
+  tipAt (V2 300 150) >>= assertEq failed (False, False)
+
+-- | 'tooltipGap' is the space between the tooltip and its target.
+runTooltipGapTest :: Context -> IORef Int -> IO ()
+runTooltipGapTest ctx failed = do
+  let inp0 = withInputOff 400 300
+      ui gap' = columnWith tight $ do
+        b <- buttonWith' (fixedWH 100 30) "Target"
+        tooltipConfigured defaultTooltipConfig {tooltipDelay = 0, tooltipGap = gap'} b "Gap tip"
+        pure b
+      tipTop gap' = do
+        b <- warmup2 ctx inp0 (ui gap')
+        let inp = inp0 {inputMousePos = centerOf b}
+        warmup ctx inp (ui gap')
+        warmup ctx inp (ui gap')
+        spans <- collectOverlayTextSpans ctx inp
+        pure (rectY <$> spanRect "Gap tip" spans)
+  near <- tipTop 4
+  far <- tipTop 20
+  assertEq failed (Just 16) ((-) <$> far <*> near)

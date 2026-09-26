@@ -195,8 +195,10 @@ overlay with that flag so its identity and later siblings remain stable.
 
 Tooltips need no flag. One opens once the pointer has rested on its target
 for `tooltipDelay`, half a second by default, and shuts when the pointer
-leaves or a button goes down. `tooltipConfigured` sets the delay and the
-placement; `PlacementAtCursor` follows the pointer.
+leaves or a button goes down. A disabled widget has one too, which is where
+to say why it is off. `tooltipConfigured` sets the delay, the placement and
+the gap to the target; `PlacementAtCursor` follows the pointer, where for a
+popup or context menu it opens at the anchor point.
 
 Ordinary widgets read routed input with `askInput`. A covered layer receives
 no pointer. `askFrameInput` is for window-wide handling, such as dismissing
