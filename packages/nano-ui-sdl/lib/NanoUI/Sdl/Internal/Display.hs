@@ -32,7 +32,7 @@ import SDL3.Sys.Bindgen.Events (SDL_Event)
 import SDL3.Sys.Bindgen.Stdinc (Uint32 (..))
 import SDL3.Sys.Bindgen.Video (SDL_Window)
 import SDL3.Sys.Bindgen.Video qualified as Video
-import SDL3.Sys.Events (pushEvent, registerEvents)
+import SDL3.Sys.Events (pushEventSafe, registerEvents)
 import SDL3.Sys.Mouse (getMouseState)
 import SDL3.Sys.Bindgen.Rect (SDL_Rect (..))
 import SDL3.Sys.Video (getDisplayForWindow, getDisplayUsableBounds, getSystemTheme, getWindowPixelDensity, getWindowSize, setWindowPosition, setWindowSize)
@@ -122,13 +122,19 @@ refreshPending = unsafePerformIO (newIORef False)
 -- The swap is a memory barrier, so whatever the caller wrote before waking is
 -- visible by the time the loop takes the event: 'takeRefreshEvent' runs
 -- before the frame that reads it.
+--
+-- The push is a safe foreign call. SDL_PushEvent waits for the lock SDL
+-- holds while it runs event watches, and the resize watch
+-- ('installResizeWatch') runs Haskell. Pushed from a worker thread as an
+-- unsafe call, it would keep the capability that watch is waiting for
+-- while it waits for the lock the watch holds, and the program would hang.
 pushRefreshEvent :: IO ()
 pushRefreshEvent = do
   ty <- refreshEventType
   unless (ty == 0) $ do
     pending <- atomicSwapIORef refreshPending True
     unless pending $ do
-      ok <- pushEvent refreshEvent
+      ok <- pushEventSafe refreshEvent
       unless ok $ void (atomicSwapIORef refreshPending False)
 
 -- | The loop took the queued refresh event, so the next wake queues another.
