@@ -35,6 +35,8 @@ module NanoUI.Internal.Monad
   , uiTime
   , uiTheme
   , setUiTheme
+  , followSystemThemeUi
+  , systemAppearance
   , styled
   , themed
   , disabledWhen
@@ -107,7 +109,7 @@ import NanoUI.Internal.Font (FontMetrics, lineWidthIO)
 import NanoUI.Internal.Frame.Node (resolveTextFont)
 import NanoUI.Internal.Id hiding (currentId)
 import NanoUI.Internal.Layout.Arena (getArenaScope, setArenaScope)
-import NanoUI.Internal.Style (FontStyle, FontVariant, FontWeight, Layout, TextDecoration (DecorationNone), Theme, defaultLayout)
+import NanoUI.Internal.Style (Appearance, FontStyle, FontVariant, FontWeight, Layout, TextDecoration (DecorationNone), Theme, defaultLayout)
 import NanoUI.Internal.Input (Input (..), Key (KeyEscape), inputKeysElem, inputMousePos, inputWindowSize, stripInteractionInput)
 import NanoUI.Internal.Types (DamageBounds, Rect, Size (..), V2)
 
@@ -367,10 +369,25 @@ withPaintScope enter m = do
     m
 
 -- | Set the session's base theme and request a repaint. Use 'styled' for a
--- temporary change limited to part of the view.
+-- temporary change limited to part of the view. A session following the
+-- system's appearance ('followSystemThemeUi') stops following it.
 {-# INLINE setUiTheme #-}
 setUiTheme :: Ui :> es => Theme -> Eff es ()
 setUiTheme th = withContext (\ctx -> setTheme ctx th)
+
+-- | Make the session's base theme follow the system's light or dark
+-- appearance ('followSystemTheme'): the first theme is the light one.
+-- Calling it every frame with the same themes costs nothing; 'setUiTheme'
+-- stops following.
+{-# INLINE followSystemThemeUi #-}
+followSystemThemeUi :: Ui :> es => Theme -> Theme -> Eff es ()
+followSystemThemeUi light dark = withContext (\ctx -> followSystemTheme ctx light dark)
+
+-- | Whether the system asks for light or dark colours, 'Nothing' when the
+-- backend cannot tell (RGFW never can). A change repaints the whole window.
+{-# INLINE systemAppearance #-}
+systemAppearance :: Ui :> es => Eff es (Maybe Appearance)
+systemAppearance = withContext getSystemAppearance
 
 -- | Where the pointer is, as the view being declared sees it: far off every
 -- widget while something drawn in front has the pointer.

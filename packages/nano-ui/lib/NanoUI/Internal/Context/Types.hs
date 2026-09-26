@@ -87,7 +87,7 @@ import NanoUI.Internal.Id (IdContext, WidgetId, hashWidgetId)
 import NanoUI.Internal.Input (Composition, UiCursorKind)
 import NanoUI.Internal.Layout.Arena (DirTag, LayoutCache, NodeArena)
 import NanoUI.Internal.Store (WidgetStore)
-import NanoUI.Internal.Style (FontStyle, FontVariant, FontWeight, Layout, Padding, Theme)
+import NanoUI.Internal.Style (Appearance, FontStyle, FontVariant, FontWeight, Layout, Padding, Theme)
 import NanoUI.Widgets.TextBuffer (Cursor)
 import NanoUI.Widgets.TextCommand (TextCommand)
 import NanoUI.Internal.Types
@@ -771,6 +771,12 @@ data Context = Context
   , ctxTheme :: !(IORef Theme)
   -- ^ Base theme; scoped themes live in 'ctxThemeScopes'.
   , ctxThemeScopes :: !(IORef ThemeScopes)
+  , ctxSystemAppearance :: !(IORef (Maybe Appearance))
+  -- ^ The system's light or dark preference as the backend last reported
+  -- it, or 'Nothing' when it cannot tell.
+  , ctxSystemThemes :: !(IORef (Maybe (Theme, Theme)))
+  -- ^ The light and dark themes the base theme follows the system
+  -- appearance with, or 'Nothing' for a fixed base theme.
   , ctxContainerStack :: IORef [Int]
   , ctxMessages :: IORef [FrameMsg]
   , ctxFocusables :: IORef (MutablePrimArray RealWorld WidgetId)

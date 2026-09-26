@@ -15,8 +15,8 @@
 -- Writing a GUI needs none of it: "NanoUI" has the widgets, layout, styling
 -- and state, and a backend's own runner (@runSdlApp@, @runRgfwApp@) starts
 -- the loop. Nothing here shadows a name in "NanoUI": the names the two
--- share (the input types, 'FontMetrics' and 'lineWidth') are the same
--- entities in both, so importing both is safe.
+-- share (the input types, 'FontMetrics', 'lineWidth' and 'Appearance') are
+-- the same entities in both, so importing both is safe.
 --
 -- A backend's frame is: collect events into an 'Input', run the view with
 -- "NanoUI.Runner" or "NanoUI.Testing", take the 'Damage' and present the
@@ -173,15 +173,26 @@ module NanoUI.Backend
   , setExplainLayout
   , getExplainLayout
   , getExplainedNode
+
+    -- * System appearance
+
+    -- | A backend that can ask the platform whether the desktop is set to
+    -- light or dark colours reports it with 'setSystemAppearance' before the
+    -- first frame and again when it changes. A view reads it with
+    -- @systemAppearance@, and a context following it (@followSystemTheme@)
+    -- switches its theme.
+  , Appearance (..)
+  , setSystemAppearance
+  , getSystemAppearance
   )
 where
 
 import NanoUI.Internal.Compact (Compact, askCompact, compactHost)
-import NanoUI.Internal.Context (getExplainLayout, getExplainedNode, setExplainLayout)
+import NanoUI.Internal.Context (getExplainLayout, getExplainedNode, getSystemAppearance, setExplainLayout, setSystemAppearance)
 import NanoUI.Internal.Draw (drawTextBox)
 import NanoUI.Internal.Font
 import NanoUI.Internal.Id
 import NanoUI.Internal.Input
 import NanoUI.Internal.Monad
-import NanoUI.Internal.Style (windowMargin, windowPad)
+import NanoUI.Internal.Style (Appearance (..), windowMargin, windowPad)
 import NanoUI.Internal.Types

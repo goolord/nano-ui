@@ -196,15 +196,18 @@ data DemoTheme
   | TomorrowNightMin
   | TomorrowLight
   | TomorrowMidnightMin
+  | ThemeSystem
   deriving (Bounded, Enum, Eq, Ord, Read, Show)
 
--- | A theme choice's name and theme.
-themeChoice :: DemoTheme -> (T.Text, Theme)
+-- | A theme choice's name, and how it sets the session theme: a fixed theme,
+-- or the default theme in light or dark as the desktop is set.
+themeChoice :: DemoTheme -> (T.Text, NanoUI ())
 themeChoice = \case
-  ThemeDefault -> ("Default", defaultTheme)
-  TomorrowNightMin -> ("Tomorrow Night Min", tomorrowNightMinDarkTheme)
-  TomorrowLight -> ("Tomorrow Light", tomorrowMinLightTheme)
-  TomorrowMidnightMin -> ("Tomorrow at Midnight Min", tomorrowMidnightMinDarkTheme)
+  ThemeDefault -> ("Default", setUiTheme defaultTheme)
+  TomorrowNightMin -> ("Tomorrow Night Min", setUiTheme tomorrowNightMinDarkTheme)
+  TomorrowLight -> ("Tomorrow Light", setUiTheme tomorrowMinLightTheme)
+  TomorrowMidnightMin -> ("Tomorrow at Midnight Min", setUiTheme tomorrowMidnightMinDarkTheme)
+  ThemeSystem -> ("Follow system", followSystemThemeUi defaultLightTheme defaultTheme)
 
 -- | What the demo reads once per context: the font families offered by the
 -- Controls-tab font combo box, from the SDL backend's system font scan
@@ -403,7 +406,7 @@ demoUi = do
                   heading "Appearance"
                   picked <- demoField "Theme" (boundedRadio (fst . themeChoice) themeSel)
                   setThemeSel picked
-                  setUiTheme (snd (themeChoice picked))
+                  snd (themeChoice picked)
                   (fResp, fVal) <- demoField "Font" (comboBox' "Font" demoFontFamilies fontChoice)
                   tooltip fResp "Type to filter; Enter applies, Esc reverts."
                   setFontChoice fVal

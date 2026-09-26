@@ -112,6 +112,9 @@ data SdlEvent
   | EvWindowChanged
   -- ^ The window's size or pixel density changed; display synchronisation
   -- reads both again.
+  | EvSystemThemeChanged
+  -- ^ The desktop switched between light and dark; display synchronisation
+  -- reads which.
   | EvKey Key Modifiers
   -- ^ A key went down, or repeated while held.
   | EvKeyUp Key Modifiers
@@ -166,6 +169,7 @@ decodeEvent refreshTy p = do
       Events.SDL_EVENT_WINDOW_RESIZED -> pure (Just EvWindowChanged)
       Events.SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED -> pure (Just EvWindowChanged)
       Events.SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED -> pure (Just EvWindowChanged)
+      Events.SDL_EVENT_SYSTEM_THEME_CHANGED -> pure (Just EvSystemThemeChanged)
       -- The window manager damaged our window surface (occlusion, compositor
       -- effects, restore). The backbuffer contents are gone; the next present
       -- must be full or stale regions flash.
@@ -346,6 +350,7 @@ applyEvent inp ev =
     EvRefresh -> inp
     EvQuit -> inp
     EvWindowChanged -> inp
+    EvSystemThemeChanged -> inp
 
 -- | Whether an event is a button press or release and should end an input batch.
 isButtonEdge :: SdlEvent -> Bool

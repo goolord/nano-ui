@@ -285,6 +285,7 @@ pieceColor theme l target =
         FontHeading -> themeAccent theme
         FontMuted -> themeMuted theme
         FontDanger -> themeRed theme
+        FontWarning -> themeWarning theme
         _ -> styleFg (themePanel theme)
    in fromMaybe (maybe variantColor (const (themeLink theme)) target) (layoutFontColor l)
 

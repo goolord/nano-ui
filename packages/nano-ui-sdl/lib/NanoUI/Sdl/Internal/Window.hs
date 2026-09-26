@@ -38,6 +38,7 @@ import Foreign.C.String (withCString)
 import Foreign.Marshal.Utils (maybePeek, with)
 import Foreign.Ptr (Ptr, castPtr, nullPtr)
 import NanoUI (ImageId, Input (..), Size (..), Theme, V2 (..))
+import NanoUI.Backend (setSystemAppearance)
 import NanoUI.Internal.Context (Context (..), setDrawSnapScale)
 import NanoUI.Testing (clearMeasureCache, damageFull, markDirty, setHost, setWakeLoop, withClipboard)
 import NanoUI.Sdl.Internal.Display
@@ -128,6 +129,10 @@ data SdlOptions = SdlOptions
   -- ^ Base font size in points (default: 16).
   , sdlAppTheme :: !(Maybe Theme)
   -- ^ Initial UI theme override (default: 'Nothing').
+  , sdlAppFollowSystemTheme :: !(Maybe (Theme, Theme))
+  -- ^ A light and a dark theme to follow the desktop's light or dark
+  -- setting with, switching when it changes (default: 'Nothing'). Set, it
+  -- replaces 'sdlAppTheme'; see 'NanoUI.followSystemTheme'.
   , sdlAppShouldQuit :: !(Input -> Bool)
   -- ^ Predicate on user input to trigger application exit (default: @const False@).
   , sdlAppImages :: !(SmallArray RgbaImage)
@@ -174,6 +179,7 @@ defaultSdlOptions =
           ]
     , sdlAppFontSize = 16
     , sdlAppTheme = Nothing
+    , sdlAppFollowSystemTheme = Nothing
     , sdlAppShouldQuit = const False
     , sdlAppImages = mempty
     , sdlAppUiScale = 1
@@ -305,6 +311,9 @@ syncDisplay ctx env inp = do
     -- Glyphs change under rects and texts that may not: repaint everything.
     damageFull ctx
     markDirty ctx
+  -- The desktop's light or dark setting. SDL updates it before queueing
+  -- its theme event, which wakes the loop for this; reading it is free.
+  setSystemAppearance ctx =<< querySystemAppearance
   queried <- queryWindowLogicalSize (sdlWindow env)
   let winSize = case (queried, inputWindowSize inp) of
         (Size 0 0, Size 0 0) -> defaultWindowSize
@@ -507,6 +516,9 @@ startSdlWindow bench opts ctx guessedDriver fontSource monoSource = do
   let
     env = SdlEnv {..}
   ctx' <- liftIO $ readIORef sdlCachedCtx
+  -- Before the wake action: the first frame is drawn in the right theme and
+  -- needs no wake for it.
+  liftIO $ setSystemAppearance ctx' =<< querySystemAppearance
   liftIO $ setHost ctx' env >> setWakeLoop ctx' pushRefreshEvent
   pure (ctx', env)
 

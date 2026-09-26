@@ -14,6 +14,8 @@ module NanoUI.Internal.Style
   , fieldIconColor
   , Theme (..)
   , defaultTheme
+  , defaultLightTheme
+  , Appearance (..)
   , tomorrowNightMinDarkTheme
   , tomorrowMinLightTheme
   , tomorrowMidnightMinDarkTheme
@@ -49,6 +51,7 @@ module NanoUI.Internal.Style
   , primary
   , destructive
   , success
+  , warning
   , subtle
   , readableOn
   , disabledTheme
@@ -95,6 +98,7 @@ module NanoUI.Internal.Style
   , fontMuted
   , fontMono
   , fontDanger
+  , fontWarning
   , fontSize
   , fontSizeScale
   , fontColor
@@ -123,6 +127,8 @@ module NanoUI.Internal.Style
   ) where
 
 import Data.Bits ((.&.), (.|.))
+import Data.List (find)
+import Data.Maybe (fromMaybe)
 import Data.Word (Word8)
 import NanoUI.Internal.Types (Color (..), V2 (..), colorA, colorLuminance, colorRGBA, contrastRatio, lerpColor)
 
@@ -173,13 +179,14 @@ windowMargin :: Float
 windowMargin = 14
 
 -- | Semantic font choice. The backend selects a face and the theme supplies
--- colours for heading, muted, and danger text.
+-- colours for heading, muted, danger, and warning text.
 data FontVariant
   = FontRegular
   | FontHeading
   | FontMuted
   | FontMono
   | FontDanger
+  | FontWarning
   deriving (Eq, Show, Enum, Bounded, Ord)
 
 -- | Requested font weight. Available faces and synthetic weights depend on the backend.
@@ -396,6 +403,11 @@ fontMono l = l {layoutFontVariant = FontMono}
 fontDanger :: Layout -> Layout
 fontDanger l = l {layoutFontVariant = FontDanger}
 
+-- | Select text in the theme's warning colour ('themeWarning'), as in
+-- @labelWith fontWarning "Unsaved changes"@.
+fontWarning :: Layout -> Layout
+fontWarning l = l {layoutFontVariant = FontWarning}
+
 -- | Set logical font size. Non-positive values select the backend default.
 fontSize :: Float -> Layout -> Layout
 fontSize sz l = l {layoutFontSize = max 0 sz}
@@ -546,6 +558,9 @@ data Theme = Theme
   , themeYellow :: {-# UNPACK #-} !Color
   , themeGreen :: {-# UNPACK #-} !Color
   , themePurple :: {-# UNPACK #-} !Color
+  , themeWarning :: {-# UNPACK #-} !Color
+  -- ^ Warning text ('fontWarning') and 'warning' buttons: an amber that
+  -- reads on the window colour.
   , themeOverlayDim :: {-# UNPACK #-} !Color
   , themeOnAccent :: {-# UNPACK #-} !Color
   -- ^ Text and marks drawn on an accent fill: a checked box, an active tab,
@@ -562,6 +577,13 @@ data Theme = Theme
   -- 0 (not at all) to 1 (invisible).
   }
   deriving (Eq, Show)
+
+-- | Whether the system asks apps for light or dark colours. See
+-- @systemAppearance@ and @followSystemTheme@ in "NanoUI".
+data Appearance
+  = AppearanceLight
+  | AppearanceDark
+  deriving (Eq, Show, Enum, Bounded, Ord)
 
 -- -----------------------------------------------------------------------------
 -- Style and theme modifiers
@@ -690,6 +712,11 @@ destructive = tinted themeRed
 success :: Theme -> Theme
 success = tinted themeGreen
 
+-- | Buttons in the theme's warning amber, for an action that needs care but
+-- is not destructive.
+warning :: Theme -> Theme
+warning = tinted themeWarning
+
 -- | Buttons without a fill or border until hovered, for toolbars and
 -- secondary actions.
 subtle :: Theme -> Theme
@@ -736,6 +763,7 @@ disabledTheme t =
         , themeYellow = fade (themeYellow t)
         , themeGreen = fade (themeGreen t)
         , themePurple = fade (themePurple t)
+        , themeWarning = fade (themeWarning t)
         , themeOnAccent = fade (themeOnAccent t)
         , themeFocusRing = fade (themeFocusRing t)
         , themeLink = fade (themeLink t)
@@ -792,12 +820,61 @@ defaultTheme =
         , themeYellow = colorRGBA 212 176 88 255
         , themeGreen = colorRGBA 104 168 124 255
         , themePurple = colorRGBA 176 140 220 255
+        , themeWarning = colorRGBA 242 180 76 255
         , themeOverlayDim = colorRGBA 8 8 10 176
         , themeOnAccent = colorRGBA 255 255 255 255
         , themeSelection = fadeAlpha (colorRGBA 88 156 246 255) 115
         , themeFocusRing = colorRGBA 88 156 246 255
         , themeLink = colorRGBA 124 178 250 255
         , themeShadow = colorRGBA 0 0 0 72
+        , themeDisabledFade = 0.55
+        }
+
+-- | 'defaultTheme' in light: off-white surfaces, near-black text, and a
+-- deeper blue accent that reads on white. The two make a pair for
+-- @followSystemTheme@.
+defaultLightTheme :: Theme
+defaultLightTheme =
+  let panelSurface =
+        flatStyle
+          (colorRGBA 252 252 251 255)
+          (colorRGBA 36 36 40 255)
+          (colorRGBA 220 220 216 255)
+          (colorRGBA 252 252 251 255)
+          (colorRGBA 240 240 238 255)
+   in Theme
+        { themeWindow = colorRGBA 244 244 242 255
+        , themePanel = panelSurface
+        , themeFloatingWindow = panelSurface
+        , themeButton =
+            flatStyle
+              (colorRGBA 234 234 231 255)
+              (colorRGBA 24 24 27 255)
+              (colorRGBA 196 196 192 255)
+              (colorRGBA 222 222 218 255)
+              (colorRGBA 210 210 206 255)
+        , themeInput =
+            flatStyle
+              (colorRGBA 255 255 255 255)
+              (colorRGBA 36 36 40 255)
+              (colorRGBA 190 190 186 255)
+              (colorRGBA 250 250 249 255)
+              (colorRGBA 255 255 255 255)
+        , themeSeparator = colorRGBA 214 214 210 255
+        , themeAccent = colorRGBA 37 99 235 255
+        , themeMuted = colorRGBA 108 105 100 255
+        , themeRed = colorRGBA 190 40 40 255
+        , themeOrange = colorRGBA 184 82 14 255
+        , themeYellow = colorRGBA 150 104 0 255
+        , themeGreen = colorRGBA 30 128 70 255
+        , themePurple = colorRGBA 128 70 190 255
+        , themeWarning = colorRGBA 150 90 0 255
+        , themeOverlayDim = colorRGBA 20 20 24 90
+        , themeOnAccent = colorRGBA 255 255 255 255
+        , themeSelection = fadeAlpha (colorRGBA 37 99 235 255) 80
+        , themeFocusRing = colorRGBA 37 99 235 255
+        , themeLink = colorRGBA 29 78 216 255
+        , themeShadow = colorRGBA 0 0 0 40
         , themeDisabledFade = 0.55
         }
 
@@ -872,6 +949,7 @@ tomorrowNightMinDarkTheme =
         , themeYellow = colorRGBA 240 198 116 255      -- base.yellow #F0C674
         , themeGreen = colorRGBA 181 189 104 255       -- base.green #B5BD68
         , themePurple = colorRGBA 178 148 187 255      -- base.purple #B294BB
+        , themeWarning = colorRGBA 240 198 116 255     -- base.yellow #F0C674
         , themeOverlayDim = colorRGBA 0 0 0 160
         , themeLink = accentCol
         }
@@ -914,6 +992,7 @@ tomorrowMinLightTheme =
         , themeYellow = colorRGBA 231 197 71 255      -- Tomorrow Yellow #E7C547
         , themeGreen = colorRGBA 113 140 0 255        -- Tomorrow Green #718C00
         , themePurple = colorRGBA 137 91 144 255      -- Tomorrow Purple #895B90
+        , themeWarning = colorRGBA 150 94 0 255       -- #965E00 (an amber dark enough to read on white)
         , themeOverlayDim = colorRGBA 0 0 0 100
         , themeSelection = fadeAlpha (colorRGBA 82 134 188 255) 80
         , themeLink = colorRGBA 66 113 174 255
@@ -955,6 +1034,7 @@ tomorrowMidnightMinDarkTheme =
         , themeYellow = colorRGBA 231 197 71 255       -- bright.yellow #E7C547
         , themeGreen = colorRGBA 185 202 74 255        -- bright.green #B9CA4A
         , themePurple = colorRGBA 195 151 216 255      -- bright.purple #C397D8
+        , themeWarning = colorRGBA 231 197 71 255      -- bright.yellow #E7C547
         , themeOverlayDim = colorRGBA 0 0 0 160
         , themeLink = accentCol
         , themeShadow = colorRGBA 0 0 0 96
@@ -1021,6 +1101,16 @@ themeFromBase16Mode dark b =
         edgeCol
         (pick (lerpColor panelBg (base02 b) 0.5) (lerpColor panelBg (base00 b) 0.4))
         (lerpColor panelBg (pick (base00 b) (base02 b)) 0.4)
+    -- Warning text is the scheme's yellow on a dark background and its
+    -- orange on a light one, where yellow rarely reads, taken toward white
+    -- or black until it reads on the window at 4.5:1.
+    warn0 = pick (base0A b) (base09 b)
+    toward = pick (colorRGBA 255 255 255 255) (colorRGBA 0 0 0 255)
+    warnCol =
+      fromMaybe (lerpColor warn0 toward 0.95) $
+        find
+          (\c -> contrastRatio c (base00 b) >= 4.5)
+          [lerpColor warn0 toward (fromIntegral i * 0.05) | i <- [0 .. 18 :: Int]]
    in
     (accentColor (base0D b) defaultTheme)
       { themeWindow = base00 b
@@ -1047,6 +1137,7 @@ themeFromBase16Mode dark b =
       , themeYellow = base0A b
       , themeGreen = base0B b
       , themePurple = base0E b
+      , themeWarning = warnCol
       , themeOverlayDim = colorRGBA 0 0 0 (pick 160 100)
       , themeOnAccent =
           if colorLuminance (base0D b) > 0.6

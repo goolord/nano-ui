@@ -154,6 +154,7 @@ textNodeSpanEntry ctx@Context {ctxNodeArena = arena} idx x y w h = do
         FontHeading -> themeAccent theme
         FontMuted -> themeMuted theme
         FontDanger -> themeRed theme
+        FontWarning -> themeWarning theme
         _ -> styleFg (themePanel theme)
       fg = fromMaybe variantFg mCustomCol
       bg = fromMaybe (styleBg (themePanel theme)) mStripe

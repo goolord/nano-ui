@@ -6,15 +6,16 @@ module Main (main) where
 import Control.Exception (bracket)
 import Control.Monad (forM_, replicateM_, unless, void)
 import Data.ByteString qualified as BS
+import Data.Functor ((<&>))
 import Data.IORef (readIORef)
 import Data.List (nub)
 import Data.Maybe (fromMaybe, mapMaybe)
 import Data.Primitive.PrimArray (primArrayFromList)
 import Data.Vector.Unboxed qualified as U
-import Data.Word (Word8)
+import Data.Word (Word32, Word8)
 import Foreign.C.Types (CBool (..), CFloat (..), CInt (..), CUInt (..))
 import Foreign.ForeignPtr (mallocForeignPtrBytes, withForeignPtr)
-import Foreign.Marshal.Alloc (allocaBytes)
+import Foreign.Marshal.Alloc (alloca, allocaBytes)
 import Foreign.Marshal.Array (allocaArray, peekArray, pokeArray)
 import Foreign.Ptr (Ptr, castPtr, nullPtr, plusPtr)
 import Foreign.Storable (peekByteOff, pokeByteOff)
@@ -23,8 +24,9 @@ import GHC.Conc (getAllocationCounter)
 import Keyboard (keyboardTranslation)
 import NanoUI
   ( Color, ImageConfig (..), ImageId (..), Rect (..), Rotation (..), colorRGBA, column, defaultImageConfig, defaultLayout
-  , fixedWH, imageConfigured', respRect
+  , defaultLightTheme, defaultTheme, fixedWH, followSystemTheme, getTheme, imageConfigured', respRect
   )
+import NanoUI.Backend (Appearance (..), emptyInput, getSystemAppearance, setSystemAppearance)
 import NanoUI.Internal.Context (lookupImageUv)
 import NanoUI.Sdl.Internal.Cursor (SdlCursors (..), destroyCursors, initCursors, sdlSystemCursor, showCursorKind)
 import NanoUI.Sdl.Internal.Image (ImageAtlas, destroyImageAtlas, newImageAtlas, syncImageAtlas)
@@ -38,12 +40,16 @@ import NanoUI.Testing.Harness (warmupDraw)
 import SDL3.Sys.Bindgen.Mouse qualified as M
 import SDL3.Sys.Bindgen.Render (SDL_Renderer, SDL_Texture)
 import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
+import SDL3.Sys.Bindgen.Video qualified as Video
+import SDL3.Sys.Events (pushEvent)
 import SDL3.Sys.Render (renderPresentSafe, renderReadPixels)
+import SDL3.Sys.Video (getSystemTheme)
 import System.Environment (getArgs, lookupEnv, setEnv)
 import System.Mem (performGC)
 import Text.Printf (printf)
 import Text.Read (readMaybe)
-import "nano-ui-sdl" NanoUI.Backend.Sdl (SdlEnv (..), withSdlBench)
+import "nano-ui-sdl" NanoUI.Backend.Sdl (SdlEnv (..), syncDisplay, withSdlBench)
+import "nano-ui-sdl" NanoUI.Sdl.Internal.Input (SdlEvent (..), pollEvents)
 
 foreign import ccall unsafe "SDL_ReadSurfacePixel"
   readPixel :: Ptr () -> CInt -> CInt -> Ptr Word8 -> Ptr Word8 -> Ptr Word8 -> Ptr Word8 -> IO CBool
@@ -232,6 +238,32 @@ pixel env x y =
 expectPixel :: SdlEnv -> String -> (Word8, Word8, Word8) -> IO ()
 expectPixel env name expected = pixel env 20 20 >>= \actual -> unless (actual == expected) (fail (name ++ ": " ++ show actual))
 
+-- | SDL's theme-change event reaches the loop as 'EvSystemThemeChanged', and
+-- display synchronisation hands the context what SDL reports, switching a
+-- context that follows the system.
+systemThemeChecks :: SdlEnv -> Context -> IO ()
+systemThemeChecks env ctx = do
+  -- SDL_EVENT_SYSTEM_THEME_CHANGED, an event with nothing but its type.
+  pushed <- alloca $ \ev -> pokeByteOff ev 0 (0x108 :: Word32) >> pushEvent ev
+  unless pushed (fail "SDL_PushEvent failed")
+  events <- pollEvents
+  unless (EvSystemThemeChanged `elem` events) (fail ("theme event not translated: " ++ show events))
+  want <-
+    getSystemTheme <&> \case
+      Video.SDL_SYSTEM_THEME_LIGHT -> Just AppearanceLight
+      Video.SDL_SYSTEM_THEME_DARK -> Just AppearanceDark
+      _ -> Nothing
+  -- The context starts out believing the opposite of what SDL says, so a
+  -- sync that did not report would leave it, and its theme, stale.
+  setSystemAppearance ctx (Just (if want == Just AppearanceDark then AppearanceLight else AppearanceDark))
+  followSystemTheme ctx defaultLightTheme defaultTheme
+  (synced, _) <- syncDisplay ctx env emptyInput
+  got <- getSystemAppearance synced
+  unless (got == want) (fail ("system appearance " ++ show got ++ ", SDL reports " ++ show want))
+  theme <- getTheme synced
+  unless (theme == if want == Just AppearanceDark then defaultTheme else defaultLightTheme) $
+    fail "a context following the system kept the stale theme after the sync"
+
 main :: IO ()
 main = do
   args <- getArgs
@@ -277,3 +309,4 @@ main = do
           step "glyph upload, padding and reset readback" (atlasChecks env (\tex dd -> drawWithGlyph tex dd DamageFull))
           step "image atlas upload, and turned and faded image readback" (imageChecks env ctx images (`draw` DamageFull))
           step "cursor mapping and creation" cursorChecks
+          step "system theme event" (systemThemeChecks env ctx)

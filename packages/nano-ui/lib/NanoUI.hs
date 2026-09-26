@@ -683,6 +683,7 @@ module NanoUI
   , textDecoration
   , fontUnderline
   , fontStrike
+  , fontWarning
 
     -- * Styling
 
@@ -738,6 +739,7 @@ module NanoUI
   , tinted
   , readableOn
   , disabledTheme
+  , warning
 
     -- * Themes
   , Theme (..)
@@ -760,6 +762,25 @@ module NanoUI
   , scrollBarTrackColor
   , scrollBarThumbColor
   , scrollBarThumbHoverColor
+
+    -- ** Following the system
+
+    -- | Where the platform says whether the desktop is set to light or dark
+    -- colours, the backend reports it and 'systemAppearance' reads it: the
+    -- SDL backend does, RGFW cannot tell and reports 'Nothing'.
+    -- 'followSystemTheme' makes the base theme switch with it, or the SDL
+    -- option @sdlAppFollowSystemTheme@ from the start:
+    --
+    -- > followSystemTheme ctx defaultLightTheme defaultTheme
+    --
+    -- The dark theme is used while the system asks for dark and the light one
+    -- otherwise. A switch repaints the whole window; 'setTheme' goes back to
+    -- a fixed theme.
+  , defaultLightTheme
+  , Appearance (..)
+  , systemAppearance
+  , followSystemTheme
+  , followSystemThemeUi
 
     -- * Geometry and colour
   , V2 (..)

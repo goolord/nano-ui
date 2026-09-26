@@ -59,6 +59,9 @@ module NanoUI.Internal.Context
   , setExplainLayout
   , getExplainLayout
   , getExplainedNode
+  , followSystemTheme
+  , setSystemAppearance
+  , getSystemAppearance
   , withClipboard
   , enableMeasureCache
   , setHost
@@ -143,7 +146,7 @@ import NanoUI.Internal.Frame.SpanArena (newSpanArena)
 import NanoUI.Internal.Id (WidgetId (..), initialIdContext)
 import NanoUI.Internal.Layout.Arena (getArenaScope, newNodeArena)
 import NanoUI.Internal.Store
-import NanoUI.Internal.Style (FontStyle, FontVariant (..), FontWeight, Theme, defaultTheme)
+import NanoUI.Internal.Style (Appearance (..), FontStyle, FontVariant (..), FontWeight, Theme, defaultTheme)
 import NanoUI.Internal.Types (ImageId)
 
 -- | Register tightly packed RGBA8 pixels under an image id. Width and height
@@ -356,9 +359,16 @@ withTheme :: Context -> Theme -> IO Context
 withTheme ctx theme = ctx <$ setTheme ctx theme
 
 -- | Change the base theme, invalidate text/layout caches, and request a full
--- repaint. An equal theme is a no-op.
+-- repaint. An equal theme is a no-op. A context following the system
+-- appearance ('followSystemTheme') stops following it.
 setTheme :: Context -> Theme -> IO ()
 setTheme ctx th = do
+  writeIORef (ctxSystemThemes ctx) Nothing
+  applyBaseTheme ctx th
+
+-- | 'setTheme' without leaving 'followSystemTheme'.
+applyBaseTheme :: Context -> Theme -> IO ()
+applyBaseTheme ctx th = do
   cur <- readIORef (ctxTheme ctx)
   when (cur /= th) $ do
     writeIORef (ctxTheme ctx) th
@@ -392,6 +402,38 @@ getExplainLayout ctx = esOn <$> readIORef (ctxExplain ctx)
 -- no node.
 getExplainedNode :: Context -> IO (Maybe ExplainedNode)
 getExplainedNode ctx = fmap fst . esHover <$> readIORef (ctxExplain ctx)
+-- | Make the base theme follow the system's appearance: the dark theme
+-- while the backend reports 'AppearanceDark', otherwise the light one,
+-- including when it cannot tell. Applies the matching theme now, like
+-- 'setTheme', and again whenever 'setSystemAppearance' reports a change;
+-- a later 'setTheme' stops following. Calling it again with the same themes
+-- changes nothing, so a view may call it every frame.
+followSystemTheme :: Context -> Theme -> Theme -> IO ()
+followSystemTheme ctx light dark = do
+  writeIORef (ctxSystemThemes ctx) (Just (light, dark))
+  appearance <- readIORef (ctxSystemAppearance ctx)
+  applyBaseTheme ctx (if appearance == Just AppearanceDark then dark else light)
+
+-- | Record the system's light or dark preference, 'Nothing' when the
+-- platform does not say. For backends, on the UI thread: the SDL backend
+-- reports it at startup and when the system switches; RGFW has no way to
+-- ask. A change repaints the whole window and wakes the loop, and a context
+-- following the system switches its base theme. The same value again is a
+-- no-op.
+setSystemAppearance :: Context -> Maybe Appearance -> IO ()
+setSystemAppearance ctx appearance = do
+  cur <- readIORef (ctxSystemAppearance ctx)
+  when (cur /= appearance) $ do
+    writeIORef (ctxSystemAppearance ctx) appearance
+    readIORef (ctxSystemThemes ctx) >>= mapM_ (\(light, dark) -> followSystemTheme ctx light dark)
+    -- A view can read the appearance itself.
+    damageFull ctx
+    markDirty ctx
+
+-- | The system's light or dark preference as the backend last reported it.
+getSystemAppearance :: Context -> IO (Maybe Appearance)
+getSystemAppearance ctx = readIORef (ctxSystemAppearance ctx)
+
 -- | Install clipboard read/write callbacks. 'Nothing' means no text is
 -- available; a write returns 'False' when refused or unsupported.
 withClipboard :: Context -> IO (Maybe Text) -> (Text -> IO Bool) -> Context
@@ -499,6 +541,8 @@ newContext = do
   ctxHost <- newIORef Map.empty
   ctxTheme <- newIORef defaultTheme
   ctxThemeScopes <- newIORef =<< newThemeScopes
+  ctxSystemAppearance <- newIORef Nothing
+  ctxSystemThemes <- newIORef Nothing
   ctxSpanCache <- newIORef IM.empty
   ctxWidgetTextCache <- newIORef IM.empty
   ctxDerivedCache <- newIORef IM.empty

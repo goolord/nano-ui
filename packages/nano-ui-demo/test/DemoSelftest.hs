@@ -197,6 +197,15 @@ selftest continuous = do
     spansTheme <- spansWith "selftest: radio did not pick Tomorrow Light" "Tomorrow Light"
     th <- getTheme ctx'
     unless (th == tomorrowMinLightTheme) $ fail "selftest: context theme was not updated to Tomorrow Light"
+    -- Following the system gives the default theme in light or dark, as SDL
+    -- reports the desktop.
+    systemOpt <- requireSpan "selftest: Follow system option" (findExact "Follow system" spansTheme)
+    clickPos systemOpt
+    appearance <- getSystemAppearance ctx'
+    thSystem <- getTheme ctx'
+    unless (thSystem == (if appearance == Just AppearanceDark then defaultTheme else defaultLightTheme)) $
+      fail "selftest: following the system did not pick the default theme's light or dark version"
+    clickPos lightOpt
     vol <- requireSpan "selftest: Volume slider" (findRightmost "Volume" spansTheme)
     clickPos (V2 (v2X vol + 80) (v2Y vol))
     clickPos =<< requireSpan "selftest: About button" (findExact "About" spansTheme)

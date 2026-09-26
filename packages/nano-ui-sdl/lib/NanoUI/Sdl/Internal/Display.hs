@@ -13,6 +13,7 @@ module NanoUI.Sdl.Internal.Display
   , initRefreshEvent
   , pushRefreshEvent
   , takeRefreshEvent
+  , querySystemAppearance
   ) where
 
 import Control.Monad (unless, void)
@@ -24,14 +25,15 @@ import Foreign.Marshal.Utils (with)
 import Foreign.Ptr (FunPtr, Ptr, freeHaskellFunPtr)
 import Foreign.Storable (Storable, peek, poke, sizeOf)
 import Data.Word (Word32)
-import NanoUI (Size (..), V2 (..))
+import NanoUI (Appearance (..), Size (..), V2 (..))
 import SDL3.Sys.Bindgen.Events (SDL_Event)
 import SDL3.Sys.Bindgen.Stdinc (Uint32 (..))
 import SDL3.Sys.Bindgen.Video (SDL_Window)
+import SDL3.Sys.Bindgen.Video qualified as Video
 import SDL3.Sys.Events (pushEvent, registerEvents)
 import SDL3.Sys.Mouse (getMouseState)
 import SDL3.Sys.Bindgen.Rect (SDL_Rect (..))
-import SDL3.Sys.Video (getDisplayForWindow, getDisplayUsableBounds, getWindowPixelDensity, getWindowSize, setWindowPosition, setWindowSize)
+import SDL3.Sys.Video (getDisplayForWindow, getDisplayUsableBounds, getSystemTheme, getWindowPixelDensity, getWindowSize, setWindowPosition, setWindowSize)
 import System.IO.Unsafe (unsafePerformIO)
 
 -- | Backbuffer pixels per window coordinate: the factor the retained
@@ -158,3 +160,13 @@ zoomWindow win (Size w h) zoom = do
       centred = 0x2FFF0000 -- SDL_WINDOWPOS_CENTERED
   void $ setWindowSize win (round zw) (round zh)
   void $ setWindowPosition win centred centred
+
+-- | Whether the desktop is set to light or dark colours, 'Nothing' when SDL
+-- cannot tell. SDL keeps the value its theme-change event reports, so this
+-- only reads it.
+querySystemAppearance :: IO (Maybe Appearance)
+querySystemAppearance =
+  getSystemTheme >>= \case
+    Video.SDL_SYSTEM_THEME_LIGHT -> pure (Just AppearanceLight)
+    Video.SDL_SYSTEM_THEME_DARK -> pure (Just AppearanceDark)
+    _ -> pure Nothing

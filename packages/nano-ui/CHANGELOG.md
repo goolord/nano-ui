@@ -287,9 +287,15 @@
   and `inputMouseMiddleDown` and its siblings, routed like a right click (a
   middle click closes a closable tab), and `inputMouseBackPressed` and
   `inputMouseForwardPressed`.
+- A warning style beside the danger one: `themeWarning`, `fontWarning` and the
+  `warning` button modifier.
+- Following the system's light or dark setting: `followSystemTheme ctx light
+  dark` or `followSystemThemeUi`, with `defaultLightTheme` as the light theme.
+  `systemAppearance` reads the setting.
 - `NanoUI.Backend` has what a backend needs for the above: `applyKey`,
   `keyRepeats`, `keypadKey`, `modifiersFromBits`, `noModifiers`,
-  `applyComposition`, `cursorFallback` and `setExplainLayout`.
+  `applyComposition`, `cursorFallback`, `setExplainLayout` and
+  `setSystemAppearance`.
 - `NanoUI.Testing.Harness` has `chordInp`, `keyUpInp` and `middleClickPair`.
 
 ### Changed
@@ -559,8 +565,10 @@
   or in `inputKeys`. Text fields take Command as well as Ctrl on macOS.
 - `Key` is `Ord` and no longer `Enum`, and `Modifiers` is `Ord`.
 - `Input`, `Modifiers` (`modSuper`), `MouseButton`, `Response`, `Layout`,
-  `DrawOp` and `UiCursorKind` have new fields or constructors, for the
-  additions above.
+  `Theme`, `FontVariant`, `DrawOp` and `UiCursorKind` have new fields or
+  constructors, for the additions above.
+- `setTheme` and `setUiTheme` stop a context following the system's
+  appearance.
 
 ### Fixed
 

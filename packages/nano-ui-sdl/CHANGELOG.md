@@ -78,6 +78,9 @@
   `SDL_IME_IMPLEMENTED_UI=none` in the environment lets the input method draw
   it again.
 - The middle mouse button, and the side buttons as back and forward.
+- The desktop's light or dark setting reaches `systemAppearance`, and a change
+  arrives as `EvSystemThemeChanged`. `sdlAppFollowSystemTheme` takes a light
+  and a dark theme to switch between.
 
 ### Changed
 

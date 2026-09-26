@@ -166,6 +166,12 @@ These scopes affect painting, not layout. Font-size changes belong in layout
 modifiers. `disabledWhen condition` keeps widget geometry and state while
 disabling interaction and applying disabled colours.
 
+To follow the desktop's light or dark setting rather than `setTheme`, call
+`followSystemTheme ctx light dark` or `followSystemThemeUi`, or set
+`sdlAppFollowSystemTheme`; `defaultLightTheme` pairs with `defaultTheme`.
+RGFW cannot read the setting, so it keeps the light theme. A later
+`setTheme` stops following.
+
 Modals, floating windows, and popups return close or dismissal requests.
 The application owns their open flag and must update it. Keep calling the
 overlay with that flag so its identity and later siblings remain stable.
@@ -315,7 +321,9 @@ wake-ups. The two backends in this repository,
 Fold keys in with `applyKey` (a typing key as the `KeyChar` it types
 unmodified, with its text in `inputChars` too) and input-method updates with
 `applyComposition`. After a frame, `textInputArea` from
-`NanoUI.Testing` says where the candidate window goes.
+`NanoUI.Testing` says where the candidate window goes. Before the first frame,
+report the desktop's light or dark setting with `setSystemAppearance`, again
+on each change.
 
 ## Headless tests
 
