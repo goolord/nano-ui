@@ -71,8 +71,9 @@ counter = do
 - Themes, including ones built from Base16 schemes, changed for part of a
   view with `styled` and composable modifiers, as in
   `styled (primary . buttonStyle (cornerRadius 6)) (button "Save")`.
-  `disabledWhen` switches widgets off, and `followSystemTheme` follows the
-  desktop's light or dark setting.
+  `disabledWhen` switches widgets off, `tone` and `fontTone` colour buttons
+  and text by status, and the theme can follow the desktop's light or dark
+  setting (`lightDark`, `followSystemTheme`).
 - One `WindowSettings` for every backend, a view that reads its window
   (`askWindow`), changes it (`setWindowTitleUi`, `moveWindowUi`,
   `setWindowModeUi`), takes screenshots (`requestScreenshot`) and decides

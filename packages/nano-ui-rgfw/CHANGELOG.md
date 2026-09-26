@@ -7,6 +7,9 @@
 - `optExplainLayout` opens a window with the layout overlay on, and
   `debugWindowBody` has a checkbox for it.
 - The middle mouse button, and the side buttons as back and forward.
+- `optThemeFor`, the theme for the desktop's light or dark setting, as SDL's
+  `sdlAppThemeFor`. RGFW cannot read the setting, so it is given `Nothing`,
+  for which `lightDark` picks the dark theme.
 - The core's window: the window opens from `optWindow`, a core
   `WindowSettings`, with a position, size limits, an icon, a mode and
   whether a close request ends the session. The core's window setters and

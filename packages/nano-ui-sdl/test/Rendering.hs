@@ -24,7 +24,7 @@ import GHC.Conc (getAllocationCounter)
 import Keyboard (keyboardTranslation)
 import NanoUI
   ( Color, ImageConfig (..), ImageId (..), Rect (..), Rotation (..), V2 (..), canvas, colorRGBA, column, defaultImageConfig
-  , defaultLayout, defaultLightTheme, defaultTheme, drawPathWith, drawStrokePathWith, fixedWH, followSystemTheme, getTheme
+  , defaultLayout, defaultLightTheme, defaultTheme, drawPathWith, drawStrokePathWith, fixedWH, followSystemTheme, getTheme, lightDark
   , imageConfigured', respRect
   )
 import NanoUI.Path qualified as P
@@ -289,12 +289,12 @@ systemThemeChecks env ctx = do
   -- The context starts out believing the opposite of what SDL says, so a
   -- sync that did not report would leave it, and its theme, stale.
   setSystemAppearance ctx (Just (if want == Just AppearanceDark then AppearanceLight else AppearanceDark))
-  followSystemTheme ctx defaultLightTheme defaultTheme
+  followSystemTheme ctx (lightDark defaultLightTheme defaultTheme)
   (synced, _) <- syncDisplay ctx env emptyInput
   got <- getSystemAppearance synced
   unless (got == want) (fail ("system appearance " ++ show got ++ ", SDL reports " ++ show want))
   theme <- getTheme synced
-  unless (theme == if want == Just AppearanceDark then defaultTheme else defaultLightTheme) $
+  unless (theme == lightDark defaultLightTheme defaultTheme want) $
     fail "a context following the system kept the stale theme after the sync"
 
 main :: IO ()

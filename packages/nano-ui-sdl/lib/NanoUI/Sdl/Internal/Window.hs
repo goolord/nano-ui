@@ -40,7 +40,7 @@ import Foreign.C.String (withCString)
 import Foreign.Marshal.Utils (copyBytes, maybePeek, with)
 import Foreign.Storable (peek)
 import Foreign.Ptr (Ptr, castPtr, nullPtr, plusPtr)
-import NanoUI (Input (..), RgbaImage (..), RgbaPixels, Screenshot (..), Size (..), Theme, V2 (..), WindowMode (..), WindowSettings (..), defaultWindowSettings, rgbaPixels)
+import NanoUI (Appearance, Input (..), RgbaImage (..), RgbaPixels, Screenshot (..), Size (..), Theme, V2 (..), WindowMode (..), WindowSettings (..), defaultWindowSettings, rgbaPixels)
 import NanoUI.Backend (cancelTasks, installWindowHost, reportWindowState, setSystemAppearance, setWakeLoop)
 import NanoUI.Internal.Context (Context (..), setDrawSnapScale)
 import NanoUI.Testing (clearMeasureCache, damageFull, markDirty, setHost, withClipboard)
@@ -131,10 +131,10 @@ data SdlOptions = SdlOptions
   -- ^ Base font size in points (default: 16).
   , sdlAppTheme :: !(Maybe Theme)
   -- ^ Initial UI theme override (default: 'Nothing').
-  , sdlAppFollowSystemTheme :: !(Maybe (Theme, Theme))
-  -- ^ A light and a dark theme to follow the desktop's light or dark
-  -- setting with, switching when it changes (default: 'Nothing'). Set, it
-  -- replaces 'sdlAppTheme'; see 'NanoUI.followSystemTheme'.
+  , sdlAppThemeFor :: !(Maybe (Maybe Appearance -> Theme))
+  -- ^ The theme for the desktop's light or dark setting, followed as it
+  -- changes, such as @'NanoUI.lightDark' light dark@ (default: 'Nothing').
+  -- Set, it replaces 'sdlAppTheme'; see 'NanoUI.followSystemTheme'.
   , sdlAppShouldQuit :: !(Input -> Bool)
   -- ^ Predicate on user input to trigger application exit (default: @const False@).
   , sdlAppImages :: !(SmallArray RgbaImage)
@@ -177,7 +177,7 @@ defaultSdlOptions =
           ]
     , sdlAppFontSize = 16
     , sdlAppTheme = Nothing
-    , sdlAppFollowSystemTheme = Nothing
+    , sdlAppThemeFor = Nothing
     , sdlAppShouldQuit = const False
     , sdlAppImages = mempty
     , sdlAppUiScale = 1

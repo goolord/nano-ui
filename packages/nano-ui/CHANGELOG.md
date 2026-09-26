@@ -325,11 +325,23 @@
   and `inputMouseMiddleDown` and its siblings, routed like a right click (a
   middle click closes a closable tab), and `inputMouseBackPressed` and
   `inputMouseForwardPressed`.
-- A warning style beside the danger one: `themeWarning`, `fontWarning` and the
-  `warning` button modifier.
-- Following the system's light or dark setting: `followSystemTheme ctx light
-  dark` or `followSystemThemeUi`, with `defaultLightTheme` as the light theme.
-  `systemAppearance` reads the setting.
+- Tones: `Tone` (`Accent`, `Muted`, `Success`, `Warning`, `Danger`) names a
+  status colour, `toneColor` gives a theme's, `fontTone` colours text in any
+  face (`fontMono . fontTone Warning`), and `tone` fills buttons with it.
+  `themeSuccess`, `themeWarning` and `themeDanger` are the theme's, each
+  taken toward white or black until it reads on the window at 4.5:1.
+  `fontMuted` and `fontDanger` set the tone rather than the face, and
+  `primary`, `destructive`, `success` and the new `warning` are `tone`, so a
+  `danger` label and a `destructive` button share the danger colour. Text in
+  a tone keeps the base font's metrics.
+- Following the system's light or dark setting: the theme is a function of
+  the `Appearance`, as `lightDark light dark` picks one, handed to
+  `followSystemTheme ctx`, or picked by a view every frame with
+  `setUiTheme . lightDark light dark =<< systemAppearance`.
+  `defaultLightTheme` pairs with `defaultTheme` (`defaultThemeFor`), and
+  `lightDark` picks the dark theme when the system cannot tell, as the
+  default theme is dark. `systemAppearance` reads the setting, and
+  `themeAppearance` says whether a theme is light or dark.
 - The native window, the same on every backend. `WindowSettings`
   (`defaultWindowSettings`) is what a window opens with, sized in layout
   units: its title, size, position, size limits, icon, whether it resizes,
@@ -644,8 +656,13 @@
 - `Input`, `Modifiers` (`modSuper`), `MouseButton`, `Response`, `Layout`,
   `Theme`, `FontVariant`, `DrawOp` and `UiCursorKind` have new fields or
   constructors, for the additions above.
-- `setTheme` and `setUiTheme` stop a context following the system's
-  appearance.
+- `setTheme` and `setUiTheme` set a fixed theme in place of one following
+  the system's appearance. A view's `setUiTheme` repaints once the view is
+  built, and only if the frame ends with another theme than it began with,
+  so a view that sets its theme every frame, even two themes a frame, does
+  not repaint the window every frame.
+- `FontMuted` and `FontDanger` draw in the regular face with the base
+  font's metrics, as their tones.
 - `runCanvas` is deprecated: it flattens curves for a guessed display
   scale. Use `runCanvasFor` with the widget's draw context, or `canvas`.
 

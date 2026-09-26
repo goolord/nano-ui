@@ -3,6 +3,8 @@
 ## Unreleased
 
 - Builds with GHC 9.10 through 9.14 (`base >=4.20 && <4.23`).
+- `defaultErrorView`'s callout takes the theme's danger colour, which its
+  messages are drawn in, rather than its red.
 - `NanoUI.Form.Backend` is now `NanoUI.Form.Internal.Backend`. `NanoUI.Form`
   still exports `FormInput`, `FormUI` and `liftNanoUI`.
 - `inputWidget` adapts custom controlled widgets to named or positional fields,

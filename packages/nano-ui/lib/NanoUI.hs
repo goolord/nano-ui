@@ -715,7 +715,8 @@ module NanoUI
   , textDecoration
   , fontUnderline
   , fontStrike
-  , fontWarning
+  , Tone (..)
+  , fontTone
 
     -- * Styling
 
@@ -764,14 +765,16 @@ module NanoUI
   , selectionColor
   , windowColor
   , rounded
+  , tone
+  , toneColor
   , primary
   , destructive
   , success
+  , warning
   , subtle
   , tinted
   , readableOn
   , disabledTheme
-  , warning
 
     -- * Themes
   , Theme (..)
@@ -799,20 +802,28 @@ module NanoUI
 
     -- | Where the platform says whether the desktop is set to light or dark
     -- colours, the backend reports it and 'systemAppearance' reads it: the
-    -- SDL backend does, RGFW cannot tell and reports 'Nothing'.
-    -- 'followSystemTheme' makes the base theme switch with it, or the SDL
-    -- option @sdlAppFollowSystemTheme@ from the start:
+    -- SDL backend does, RGFW cannot tell and reports 'Nothing'. The theme
+    -- for an appearance is a function, such as 'lightDark', which picks the
+    -- dark theme when the system cannot tell, as nano-ui's default theme is
+    -- dark. A view picks its theme each frame, which costs nothing while it
+    -- is the same:
     --
-    -- > followSystemTheme ctx defaultLightTheme defaultTheme
+    -- > setUiTheme . lightDark defaultLightTheme defaultTheme =<< systemAppearance
     --
-    -- The dark theme is used while the system asks for dark and the light one
-    -- otherwise. A switch repaints the whole window; 'setTheme' goes back to
-    -- a fixed theme.
+    -- or the context follows the system with 'followSystemTheme', or the
+    -- backend's @sdlAppThemeFor@ or @optThemeFor@ option from the start:
+    --
+    -- > followSystemTheme ctx (lightDark defaultLightTheme defaultTheme)
+    --
+    -- A switch repaints the whole window; 'setTheme' goes back to a fixed
+    -- theme.
   , defaultLightTheme
   , Appearance (..)
+  , lightDark
+  , defaultThemeFor
+  , themeAppearance
   , systemAppearance
   , followSystemTheme
-  , followSystemThemeUi
 
     -- * Geometry and colour
   , V2 (..)

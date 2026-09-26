@@ -180,7 +180,7 @@ module NanoUI.Backend
     -- light or dark colours reports it with 'setSystemAppearance' before the
     -- first frame and again when it changes. A view reads it with
     -- @systemAppearance@, and a context following it (@followSystemTheme@)
-    -- switches its theme.
+    -- switches to the theme its function gives for it.
   , Appearance (..)
   , setSystemAppearance
   , getSystemAppearance

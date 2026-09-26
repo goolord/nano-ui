@@ -78,8 +78,9 @@
   it again.
 - The middle mouse button, and the side buttons as back and forward.
 - The desktop's light or dark setting reaches `systemAppearance`, and a change
-  arrives as `EvSystemThemeChanged`. `sdlAppFollowSystemTheme` takes a light
-  and a dark theme to switch between.
+  arrives as `EvSystemThemeChanged`. `sdlAppThemeFor` takes the theme for
+  each setting, such as `lightDark light dark`, and follows it as it
+  changes.
 - The core's window, in full: the window opens from `sdlWindowSettings`, a
   core `WindowSettings`, which adds a position, size limits, an icon, a
   mode, transparency, opacity and whether a close request ends the session.

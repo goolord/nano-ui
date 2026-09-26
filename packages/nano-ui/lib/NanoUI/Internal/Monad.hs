@@ -36,7 +36,6 @@ module NanoUI.Internal.Monad
   , uiTime
   , uiTheme
   , setUiTheme
-  , followSystemThemeUi
   , systemAppearance
   , styled
   , themed
@@ -377,20 +376,18 @@ withPaintScope enter m = do
     (setArenaScope na)
     m
 
--- | Set the session's base theme and request a repaint. Use 'styled' for a
--- temporary change limited to part of the view. A session following the
--- system's appearance ('followSystemThemeUi') stops following it.
+-- | Set the session's base theme, repainting when it changes. Use 'styled'
+-- for a change limited to part of the view. Setting the same theme again
+-- changes nothing, so a view may pick its theme every frame, as from the
+-- system's appearance:
+--
+-- > setUiTheme . lightDark defaultLightTheme defaultTheme =<< systemAppearance
+--
+-- It replaces a theme that follows the system's appearance
+-- ('NanoUI.Internal.Context.followSystemTheme').
 {-# INLINE setUiTheme #-}
 setUiTheme :: Ui :> es => Theme -> Eff es ()
-setUiTheme th = withContext (\ctx -> setTheme ctx th)
-
--- | Make the session's base theme follow the system's light or dark
--- appearance ('followSystemTheme'): the first theme is the light one.
--- Calling it every frame with the same themes costs nothing; 'setUiTheme'
--- stops following.
-{-# INLINE followSystemThemeUi #-}
-followSystemThemeUi :: Ui :> es => Theme -> Theme -> Eff es ()
-followSystemThemeUi light dark = withContext (\ctx -> followSystemTheme ctx light dark)
+setUiTheme th = withContext (\ctx -> setThemeInView ctx th)
 
 -- | Whether the system asks for light or dark colours, 'Nothing' when the
 -- backend cannot tell (RGFW never can). A change repaints the whole window.

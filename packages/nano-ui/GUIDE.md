@@ -166,11 +166,28 @@ These scopes affect painting, not layout. Font-size changes belong in layout
 modifiers. `disabledWhen condition` keeps widget geometry and state while
 disabling interaction and applying disabled colours.
 
-To follow the desktop's light or dark setting rather than `setTheme`, call
-`followSystemTheme ctx light dark` or `followSystemThemeUi`, or set
-`sdlAppFollowSystemTheme`; `defaultLightTheme` pairs with `defaultTheme`.
-RGFW cannot read the setting, so it keeps the light theme. A later
-`setTheme` stops following.
+Status colours are tones: `fontTone Warning` colours a label's text, in
+whatever face it has (`fontMono . fontTone Danger`), and `tone Danger`
+fills buttons; `toneColor` gives a tone's colour for your own drawing.
+`fontMuted`, `fontDanger`, `primary`, `destructive`, `success` and
+`warning` are the same tones by their old names. Each theme's success,
+warning and danger colours read on its window.
+
+To follow the desktop's light or dark setting, the theme is a function of
+the appearance: `lightDark light dark` takes the light theme for a light
+desktop and the dark one otherwise, including when the platform cannot tell,
+as `defaultTheme` is dark. A view can pick its theme every frame, which costs
+nothing while it stays the same:
+
+```haskell
+setUiTheme . lightDark defaultLightTheme defaultTheme =<< systemAppearance
+```
+
+Or hand the function to `followSystemTheme ctx`, or to the backend's
+`sdlAppThemeFor` or `optThemeFor`, to switch from the start. RGFW cannot
+read the setting, so it gets `Nothing`. `setTheme` and `setUiTheme` set a
+fixed theme in place of a following one. `themeAppearance` says whether a
+theme is light or dark.
 
 Modals, floating windows, and popups return close or dismissal requests.
 The application owns their open flag and must update it. Keep calling the

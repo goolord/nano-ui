@@ -30,7 +30,7 @@ import NanoUI.Internal.Frame.TextInput (fieldEditLine, nodeTextFieldGeom, syncTe
 import NanoUI.Internal.Input (Input)
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Layout.Solve (findAncestorMaxW, textWrapCap)
-import NanoUI.Internal.Style (AlignX (..), FontVariant (..), Style (..), Theme (..), themeAccent, themeMuted, themePanel)
+import NanoUI.Internal.Style (AlignX (..), Style (..), Theme (..), textToneColor)
 import NanoUI.Internal.Types (Color (..), Rect (..), lerpColor, onGrid, rectIntersect)
 import NanoUI.Internal.Widgets.ColorPicker (ColorPickerPart (..), colorPickerPartOf, colorPickerPartRect, colorPickerPreviewGeom)
 import NanoUI.Internal.WidgetText
@@ -150,13 +150,7 @@ textNodeSpanEntry ctx@Context {ctxNodeArena = arena} idx x y w h = do
       else findAncestorMaxW arena idx
   let rect = Rect x y w h
       mStripe = tableStripeColor theme si
-      variantFg = case textNodeFontVariant si of
-        FontHeading -> themeAccent theme
-        FontMuted -> themeMuted theme
-        FontDanger -> themeRed theme
-        FontWarning -> themeWarning theme
-        _ -> styleFg (themePanel theme)
-      fg = fromMaybe variantFg mCustomCol
+      fg = fromMaybe (textToneColor theme (textNodeFontVariant si) (textNodeFontTone si)) mCustomCol
       bg = fromMaybe (styleBg (themePanel theme)) mStripe
       !ix = if isJust mStripe then tableCellInset else 0
       -- What the lines depend on: everything but where the node is and

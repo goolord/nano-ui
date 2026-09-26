@@ -193,15 +193,17 @@ data DemoTheme
   | ThemeSystem
   deriving (Bounded, Enum, Eq, Ord, Read, Show)
 
--- | A theme choice's name, and how it sets the session theme: a fixed theme,
--- or the default theme in light or dark as the desktop is set.
+-- | A theme choice's name, and how it sets the session theme each frame: a
+-- fixed theme, or the default theme in light or dark as the desktop is set,
+-- picked from the system's appearance. Setting the same theme again costs
+-- nothing.
 themeChoice :: DemoTheme -> (T.Text, NanoUI ())
 themeChoice = \case
   ThemeDefault -> ("Default", setUiTheme defaultTheme)
   TomorrowNightMin -> ("Tomorrow Night Min", setUiTheme tomorrowNightMinDarkTheme)
   TomorrowLight -> ("Tomorrow Light", setUiTheme tomorrowMinLightTheme)
   TomorrowMidnightMin -> ("Tomorrow at Midnight Min", setUiTheme tomorrowMidnightMinDarkTheme)
-  ThemeSystem -> ("Follow system", followSystemThemeUi defaultLightTheme defaultTheme)
+  ThemeSystem -> ("Follow system", setUiTheme . lightDark defaultLightTheme defaultTheme =<< systemAppearance)
 
 -- | What the demo reads once per context: the font families offered by the
 -- Controls-tab font combo box, from the SDL backend's system font scan
