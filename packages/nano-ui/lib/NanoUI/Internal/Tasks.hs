@@ -6,20 +6,21 @@
 -- A job's thread never touches the context's stores. It writes into a box
 -- of its own and wakes the loop ('wakeFromThread'), and the view reads the
 -- box the next time it calls the hook. A job belongs to its hook's widget id
--- and lives as long as the view calls the hook: 'sweepTasks' ends the ones a
--- frame left out.
+-- and lives as long as the view calls the hook ('useHeld'): 'sweepHeld' ends
+-- the ones a frame left out.
 module NanoUI.Internal.Tasks
   ( TaskStatus (..)
   , useTaskStatus
   , useTask
   , useStream
   , askWake
-  , sweepTasks
+  , useHeld
+  , sweepHeld
   , cancelTasks
   )
 where
 
-import Control.Concurrent (ThreadId, forkIO, killThread)
+import Control.Concurrent (forkIO, killThread)
 import Control.Exception (SomeAsyncException, SomeException, evaluate, fromException, throwIO, try)
 import Control.Monad (unless, void)
 import Data.Dynamic (Dynamic, fromDynamic, toDyn)
@@ -35,16 +36,45 @@ import GHC.Conc (labelThread)
 import NanoUI.Internal.Context (Context, askHostIO, hostOrInit, intKey, wakeFromThread)
 import NanoUI.Internal.Monad (Ui, askContext, freshWidget, uiIO)
 
--- | The context's jobs, kept on it as a host value ('hostOrInit').
-newtype Tasks = Tasks (IORef TaskTable)
+-- | What the context's hooks hold, kept on it as a host value ('hostOrInit').
+newtype Held = Held (IORef HeldTable)
 
--- | The jobs by the store key of their hook's widget id, and the keys whose
--- hook ran this frame, in any of its view passes.
-data TaskTable = TaskTable !(IntMap Job) !IntSet
+-- | What each hook holds, by the store key of its widget id, and the keys
+-- whose hook ran this frame, in any of its view passes.
+data HeldTable = HeldTable !(IntMap Holding) !IntSet
 
--- | A job: its hook's key, compared by value, the box its thread writes
--- into, and the thread.
-data Job = forall k. (Eq k, Typeable k) => Job !k !Dynamic !ThreadId
+-- | A hook's key, compared by value, what it holds for the key, and how to
+-- let that go.
+data Holding = forall k. (Eq k, Typeable k) => Holding !k !Dynamic !(IO ())
+
+-- | What this hook holds for its key: what it held already, or, for a new
+-- key or a hook new at this id, what @acquire@ makes, given what it replaces
+-- when that has the same type, along with how to let it go. What another key,
+-- or another hook at this id, held is let go first. A second view pass in
+-- the frame finds what the first made. What a hook holds is let go once a
+-- frame does not call it ('sweepHeld'), and as the session ends
+-- ('cancelTasks'): a job's thread, or a 'NanoUI.useImageRgba' image.
+useHeld :: (Eq k, Typeable k, Typeable a, Ui :> es) => k -> (Context -> Maybe a -> IO (a, IO ())) -> Eff es a
+useHeld k acquire = do
+  (wid, ctx) <- freshWidget
+  uiIO $ do
+    Held ref <- hostOrInit ctx (Held <$> newIORef (HeldTable IM.empty IS.empty))
+    HeldTable held called <- readIORef ref
+    let key = intKey wid
+        entry = IM.lookup key held
+        valueOf (Holding _ v _) = fromDynamic v
+    case entry of
+      Just h@(Holding k0 _ _) | cast k0 == Just k, Just v <- valueOf h -> do
+        unless (IS.member key called) $ writeIORef ref $! HeldTable held (IS.insert key called)
+        pure v
+      _ -> do
+        mapM_ letGo entry
+        (v, release) <- acquire ctx (valueOf =<< entry)
+        writeIORef ref $! HeldTable (IM.insert key (Holding k (toDyn v) release) held) (IS.insert key called)
+        pure v
+
+letGo :: Holding -> IO ()
+letGo (Holding _ _ release) = release
 
 -- | Where a 'useTaskStatus' job is. The 'Maybe' is the result of the job
 -- for an earlier key, the latest that finished, so a view can go on showing
@@ -62,33 +92,18 @@ data TaskStatus a
 -- that status has, so neither read allocates.
 data Outcome a = Outcome !(TaskStatus a) !(Maybe a)
 
--- | The box of this hook's job for its key: the running job's, or, for a new
--- key or a hook new at this id, the box @start@ makes, given the box of the
--- job it replaces when that has the same type, along with the job to run.
--- A job for another key, or one another hook left at this id, is killed. A
--- second view pass in the frame finds the job the first started.
+-- | The box of this hook's job for its key ('useHeld'): @start@ makes the
+-- box, given the box of the job it replaces when that has the same type,
+-- along with the job to run on a thread of its own.
 useJob :: (Eq k, Typeable k, Typeable b, Ui :> es) => k -> (Context -> Maybe b -> IO (b, IO ())) -> Eff es b
-useJob k start = do
-  (wid, ctx) <- freshWidget
-  uiIO $ do
-    Tasks ref <- hostOrInit ctx (Tasks <$> newIORef (TaskTable IM.empty IS.empty))
-    TaskTable jobs called <- readIORef ref
-    let key = intKey wid
-        entry = IM.lookup key jobs
-        boxOf (Job _ box _) = fromDynamic box
-        current = case entry of
-          Just job@(Job k0 _ _) | cast k0 == Just k -> boxOf job
-          _ -> Nothing
-    (box, jobs') <- case current of
-      Just box -> pure (box, jobs)
-      Nothing -> do
-        mapM_ stopJob entry
-        (box, run) <- start ctx (boxOf =<< entry)
-        tid <- forkIO run
-        labelThread tid "nano-ui task"
-        pure (box, IM.insert key (Job k (toDyn box) tid) jobs)
-    writeIORef ref $! TaskTable jobs' (IS.insert key called)
-    pure box
+useJob k start = useHeld k $ \ctx old -> do
+  (box, run) <- start ctx old
+  tid <- forkIO run
+  labelThread tid "nano-ui task"
+  -- Killed from a thread of its own: 'killThread' returns once the job
+  -- takes the exception, which a job that masks it or sits in a foreign
+  -- call puts off, and the frame must not wait for that.
+  pure (box, void (forkIO (killThread tid)))
 
 -- | Run an action on a thread of its own and say where it is: running,
 -- done with its result, or failed with the exception it threw.
@@ -203,31 +218,26 @@ useStream k initial produce = do
 askWake :: Ui :> es => Eff es (IO ())
 askWake = wakeFromThread <$> askContext
 
--- | Kill a job's thread, from a thread of its own: 'killThread' returns once
--- the job takes the exception, which a job that masks it or sits in a
--- foreign call puts off, and the frame must not wait for that.
-stopJob :: Job -> IO ()
-stopJob (Job _ _ tid) = void (forkIO (killThread tid))
-
--- | End a frame for the jobs: those whose hook ran stay, and the rest are
--- killed. Two view passes of one frame count as one frame.
-sweepTasks :: Context -> IO ()
-sweepTasks ctx = askHostIO ctx >>= mapM_ (\(Tasks ref) -> sweep ref)
+-- | End a frame for what the hooks hold: what a hook that ran holds stays,
+-- and the rest is let go. Two view passes of one frame count as one frame.
+sweepHeld :: Context -> IO ()
+sweepHeld ctx = askHostIO ctx >>= mapM_ (\(Held ref) -> sweep ref)
   where
     sweep ref = do
-      TaskTable jobs called <- readIORef ref
-      unless (IM.null jobs && IS.null called) $ do
-        let (kept, gone) = IM.partitionWithKey (\k _ -> IS.member k called) jobs
-        writeIORef ref $! TaskTable kept IS.empty
-        mapM_ stopJob gone
+      HeldTable held called <- readIORef ref
+      unless (IM.null held && IS.null called) $ do
+        let (kept, gone) = IM.partitionWithKey (\k _ -> IS.member k called) held
+        writeIORef ref $! HeldTable kept IS.empty
+        mapM_ letGo gone
 
--- | Kill every job on the context, as a session ends.
+-- | Kill every job on the context, and let go of the images its
+-- 'NanoUI.useImageRgba' hooks hold, as a session ends.
 -- 'NanoUI.Runner.runSessionLoop' does this when its loop returns; a host
 -- that runs frames itself should too.
 cancelTasks :: Context -> IO ()
 cancelTasks ctx = askHostIO ctx >>= mapM_ cancelAll
   where
-    cancelAll (Tasks ref) = do
-      TaskTable jobs _ <- readIORef ref
-      writeIORef ref $! TaskTable IM.empty IS.empty
-      mapM_ stopJob jobs
+    cancelAll (Held ref) = do
+      HeldTable held _ <- readIORef ref
+      writeIORef ref $! HeldTable IM.empty IS.empty
+      mapM_ letGo held

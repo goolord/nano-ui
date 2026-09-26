@@ -12,28 +12,23 @@ module NanoUI.Internal.Widgets.Image
   , imageConfigured
   , imageConfigured'
   , useImageRgba
-  , sweepImageHooks
   )
 where
 
-import Control.Monad (forM_, unless, void)
+import Control.Monad (void)
 import Data.ByteString (ByteString)
-import Data.IORef (IORef, newIORef, readIORef, writeIORef)
-import Data.IntMap.Strict (IntMap)
-import Data.IntMap.Strict qualified as IM
-import Data.IntSet (IntSet)
-import Data.IntSet qualified as IS
 import Data.Maybe (fromMaybe, isJust)
 import Data.Text qualified as T
-import Data.Typeable (Typeable, cast)
+import Data.Typeable (Typeable)
 import Effectful (Eff, type (:>))
 import NanoUI.Internal.Atlas qualified as Atlas
-import NanoUI.Internal.Context (Context (..), askHostIO, hostOrInit, intKey, lookupImageSize, registerImage, releaseImage)
+import NanoUI.Internal.Context (Context (..), lookupImageSize, registerImage, releaseImage)
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Image
 import NanoUI.Internal.Layout.Arena (ImageNode (..), NodeType (NodeImage), setImageNode)
 import NanoUI.Internal.Monad (Ui, freshWidget, uiIO)
 import NanoUI.Internal.Style (Layout (..), Sizing (..), aspect, defaultLayout)
+import NanoUI.Internal.Tasks (useHeld)
 import NanoUI.Internal.Types (ImageId (..), colorRGBA)
 import NanoUI.Internal.WidgetText (intValueText)
 import NanoUI.Internal.Widgets.Node (Response, addWidgetNode)
@@ -78,18 +73,6 @@ imageConfigured' cfg iid = do
       fixed = \case Fixed _ -> True; _ -> False
   imageNode wid (if plain then Nothing else Just (ImageNode look w h)) lay iid
 
--- | The context's 'useImageRgba' images, kept on it as a host value
--- ('hostOrInit').
-newtype ImageHooks = ImageHooks (IORef HookTable)
-
--- | The images by the store key of their hook's widget id, and the keys
--- whose hook ran this frame, in any of its view passes.
-data HookTable = HookTable !(IntMap HookImage) !IntSet
-
--- | A hook's key, compared by value, and the image registered for it, or
--- 'Nothing' when the atlas refused it.
-data HookImage = forall k. (Eq k, Typeable k) => HookImage !k !(Maybe ImageId)
-
 -- | Register an RGBA image (4 bytes a pixel, rows top to bottom), @w@ by
 -- @h@ pixels, the first frame this is called with a key, and hand back its
 -- id on that frame and every one after while the key stays the same:
@@ -107,36 +90,7 @@ data HookImage = forall k. (Eq k, Typeable k) => HookImage !k !(Maybe ImageId)
 -- takes the next widget id; call it on every frame that shows the image, or
 -- inside 'NanoUI.scope' where it is called on some frames and not others.
 useImageRgba :: (Eq k, Typeable k, Ui :> es) => k -> Int -> Int -> ByteString -> Eff es (Maybe ImageId)
-useImageRgba k w h pixels = do
-  (wid, ctx) <- freshWidget
-  uiIO $ do
-    ImageHooks ref <- hostOrInit ctx (ImageHooks <$> newIORef (HookTable IM.empty IS.empty))
-    HookTable hooks called <- readIORef ref
-    let key = intKey wid
-    case IM.lookup key hooks of
-      Just (HookImage k0 iid) | cast k0 == Just k -> do
-        unless (IS.member key called) $ writeIORef ref $! HookTable hooks (IS.insert key called)
-        pure iid
-      old -> do
-        forM_ old (releaseHookImage ctx)
-        iid <- Atlas.freshImageId (ctxImageAtlas ctx)
-        ok <- registerImage ctx iid w h pixels
-        let registered = if ok then Just iid else Nothing
-        writeIORef ref $! HookTable (IM.insert key (HookImage k registered) hooks) (IS.insert key called)
-        pure registered
-
--- | End a frame for the 'useImageRgba' images: those whose hook ran stay,
--- and the rest are let go. Two view passes of one frame count as one frame.
-sweepImageHooks :: Context -> IO ()
-sweepImageHooks ctx = askHostIO ctx >>= mapM_ sweep
-  where
-    sweep (ImageHooks ref) = do
-      HookTable hooks called <- readIORef ref
-      unless (IM.null hooks && IS.null called) $ do
-        let (kept, gone) = IM.partitionWithKey (\k _ -> IS.member k called) hooks
-        writeIORef ref $! HookTable kept IS.empty
-        mapM_ (releaseHookImage ctx) gone
-
--- | Take a hook's image out of the atlas.
-releaseHookImage :: Context -> HookImage -> IO ()
-releaseHookImage ctx (HookImage _ iid) = mapM_ (releaseImage ctx) iid
+useImageRgba k w h pixels = useHeld k $ \ctx _ -> do
+  iid <- Atlas.freshImageId (ctxImageAtlas ctx)
+  ok <- registerImage ctx iid w h pixels
+  pure (if ok then (Just iid, releaseImage ctx iid) else (Nothing, pure ()))
