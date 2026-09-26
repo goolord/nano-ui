@@ -71,7 +71,7 @@ selectDropdownCursorKind ctx inp = do
 scrollThumbCursorKind :: Context -> Input -> IO (Maybe UiCursorKind)
 scrollThumbCursorKind ctx@Context {ctxNodeArena = na} inp = do
   mDrag <- getsInteraction ctx isScrollDrag
-  if inputMouseDown inp && isJust mDrag
+  if buttonHeld MouseLeft inp && isJust mDrag
     then pure (Just UiCursorGrabbing)
     else do
       thumb <- findClassNodeM na PointerNodes $ \idx ->
@@ -144,7 +144,7 @@ cursorKindAt ctx wid mouse inp
                     maybe UiCursorDefault (over UiCursorText) <$> hitRect
                 NodeSlider -> do
                   active <- readIORef (ctxActiveId ctx)
-                  if active == wid && inputMouseDown inp
+                  if active == wid && buttonHeld MouseLeft inp
                     then pure UiCursorGrabbing
                     else do
                       let onTrack (Rect x y w h) = rectContains (sliderHitBounds x y w h) mouse
@@ -156,7 +156,7 @@ cursorKindAt ctx wid mouse inp
 cursorZoneKind :: Context -> Input -> IO (Maybe UiCursorKind)
 cursorZoneKind ctx inp = do
   dragging <- getsInteraction ctx isColumnResize
-  if inputMouseDown inp && dragging
+  if buttonHeld MouseLeft inp && dragging
     then pure (Just UiCursorEwResize)
     else do
       let mouse = inputMousePos inp

@@ -250,7 +250,7 @@ logsApp stateRef = do
   -- A left click on a selectable row clears the Select-All highlight. The
   -- scrollbar is chrome, not an interactive widget, so `ctxActiveId` stays 0
   -- for gutter grabs and only an actual row press clears.
-  when (allSelected && (inputMousePressed inp || inputMouseDown inp || inputMouseReleased inp)) $ do
+  when (allSelected && (buttonPressed MouseLeft inp || buttonHeld MouseLeft inp || buttonReleased MouseLeft inp)) $ do
     active <- liftIO $ readIORef (ctxActiveId ctx)
     mRect <- liftIO $ maybe (pure Nothing) (getPrevRect ctx) (asScrollerWid st0)
     when (active /= WidgetId 0 && maybe False (`rectContains` inputMousePos inp) mRect) $

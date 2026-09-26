@@ -522,9 +522,7 @@ newContext = do
   ctxActiveId <- newIORef (WidgetId 0)
   ctxClickedId <- newIORef (WidgetId 0)
   ctxReleaseClickedId <- newIORef (WidgetId 0)
-  ctxPressPos <- newIORef Nothing
-  ctxRightPressPos <- newIORef Nothing
-  ctxMiddlePressPos <- newIORef Nothing
+  ctxPressPos <- newIORef Map.empty
   ctxFocusId <- newIORef (WidgetId 0)
   ctxFocusVisible <- newIORef False
   ctxFocusRequest <- newIORef Nothing

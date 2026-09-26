@@ -39,6 +39,7 @@ module RGFW.Raw
   , rgfw_mouseButtonReleased
   , rgfw_mouseScroll
   , rgfw_mouseMotion
+  , rgfw_mouseLeave
   , rgfw_windowMoved
   , rgfw_windowResized
   , rgfw_windowFocusIn
@@ -269,8 +270,9 @@ foreign import ccall "rgfw_write_clipboard_text"
 
 -- | Event tags for no event, key press, key release, and typed character.
 rgfw_eventNone, rgfw_keyPressed, rgfw_keyReleased, rgfw_keyChar :: Word8
--- | Event tags for button press/release, wheel movement, and pointer movement.
-rgfw_mouseButtonPressed, rgfw_mouseButtonReleased, rgfw_mouseScroll, rgfw_mouseMotion :: Word8
+-- | Event tags for button press/release, wheel movement, pointer movement,
+-- and the pointer leaving the window.
+rgfw_mouseButtonPressed, rgfw_mouseButtonReleased, rgfw_mouseScroll, rgfw_mouseMotion, rgfw_mouseLeave :: Word8
 -- | Event tags for window movement, resize, focus, scale, and close requests.
 rgfw_windowMoved, rgfw_windowResized, rgfw_windowFocusIn, rgfw_windowFocusOut, rgfw_scaleUpdated, rgfw_windowClose :: Word8
 
@@ -282,6 +284,7 @@ rgfw_mouseButtonPressed  = #{const RGFW_mouseButtonPressed}
 rgfw_mouseButtonReleased = #{const RGFW_mouseButtonReleased}
 rgfw_mouseScroll         = #{const RGFW_mouseScroll}
 rgfw_mouseMotion         = #{const RGFW_mouseMotion}
+rgfw_mouseLeave          = #{const RGFW_mouseLeave}
 rgfw_windowMoved         = #{const RGFW_windowMoved}
 rgfw_windowResized       = #{const RGFW_windowResized}
 rgfw_windowFocusIn       = #{const RGFW_windowFocusIn}

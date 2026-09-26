@@ -99,7 +99,6 @@ import SDL3.Sys.Bindgen.Keycode
   , sDL_KMOD_NUM
   , sDL_KMOD_SHIFT
   )
-import SDL3.Sys.Bindgen.Mouse (sDL_BUTTON_LEFT, sDL_BUTTON_MIDDLE, sDL_BUTTON_RIGHT, sDL_BUTTON_X1, sDL_BUTTON_X2)
 import SDL3.Sys.Bindgen.Rect (SDL_Rect (..))
 import SDL3.Sys.Bindgen.Stdinc (Uint32 (..))
 import SDL3.Sys.Bindgen.Video (SDL_Window)
@@ -125,6 +124,8 @@ data SdlEvent
   | EvMouseMotion V2 Modifiers
   | EvMouseButton MouseButton Bool V2 Modifiers
   -- ^ A button went down ('True') or up at a point.
+  | EvMouseLeave
+  -- ^ The pointer left the window.
   | EvScroll V2
   | EvDrop DropEvent
   | EvRefresh
@@ -186,6 +187,7 @@ decodeEvent refreshTy p = do
       Events.SDL_EVENT_MOUSE_MOTION -> do
         me <- peek p.motion
         Just . EvMouseMotion (v2 (getField @"x" me) (getField @"y" me)) <$> peekModifiers
+      Events.SDL_EVENT_WINDOW_MOUSE_LEAVE -> pure (Just EvMouseLeave)
       Events.SDL_EVENT_MOUSE_BUTTON_DOWN -> mouseButton p True
       Events.SDL_EVENT_MOUSE_BUTTON_UP -> mouseButton p False
       Events.SDL_EVENT_MOUSE_WHEEL -> do
@@ -293,20 +295,15 @@ textEditing p = do
   let int v = fromIntegral v :: Int
   pure (Just (EvEditing txt (int (getField @"start" ee)) (int (getField @"length" ee))))
 
+-- | A button going down or up. SDL numbers the buttons as
+-- 'mouseButtonNumber' does, left, middle, right, X1 and X2 from 1, and
+-- reports any further button by its number past those.
 mouseButton :: Ptr SDL_Event -> Bool -> IO (Maybe SdlEvent)
 mouseButton p down = do
   be <- peek p.button
   mods <- peekModifiers
-  let btn = fromIntegral (getField @"button" be)
-      press b = EvMouseButton b down (v2 (getField @"x" be) (getField @"y" be)) mods
-      buttons =
-        [ (sDL_BUTTON_LEFT, MouseLeft)
-        , (sDL_BUTTON_RIGHT, MouseRight)
-        , (sDL_BUTTON_MIDDLE, MouseMiddle)
-        , (sDL_BUTTON_X1, MouseBack)
-        , (sDL_BUTTON_X2, MouseForward)
-        ]
-  pure (press <$> lookup btn buttons)
+  let btn = mouseButtonNumber (fromIntegral (getField @"button" be))
+  pure (Just (EvMouseButton btn down (v2 (getField @"x" be) (getField @"y" be)) mods))
 
 dropEvent :: Ptr SDL_Event -> DropType -> IO (Maybe SdlEvent)
 dropEvent p ty = do
@@ -341,6 +338,7 @@ applyEvent inp ev =
       inp {inputMousePos = pos, inputModifiers = mods}
     EvMouseButton btn down pos mods ->
       (applyMouseButton btn down inp) {inputMousePos = pos, inputModifiers = mods}
+    EvMouseLeave -> applyPointerLeave inp
     EvScroll delta -> inp {inputScroll = v2Add (inputScroll inp) delta}
     EvDrop dropEv -> inp {inputDrops = appendDropEvent dropEv (inputDrops inp)}
     EvEditing txt start len -> applyComposition txt start len inp

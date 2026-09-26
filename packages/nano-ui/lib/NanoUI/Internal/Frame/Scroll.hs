@@ -271,18 +271,18 @@ grabbableBars ctx wid =
 
 updateScrollDrag :: Context -> Input -> IO ()
 updateScrollDrag ctx inp
-  | inputMouseReleased inp =
+  | buttonReleased MouseLeft inp =
       modifyInteraction ctx (\s -> s {isScrollDrag = Nothing})
   | otherwise = do
       mDrag <- getsInteraction ctx isScrollDrag
       case mDrag of
         Just (wid, dragDir, grabOff)
-          | inputMouseDown inp -> do
+          | buttonHeld MouseLeft inp -> do
               bars <- grabbableBars ctx wid
               forM_ bars $ \(dir, layout, setOffset) ->
                 when (dir == dragDir) $
                   setOffset (scrollOffsetFromThumb dir layout grabOff (inputMousePos inp))
-        Nothing | inputMousePressed inp -> tryStartScrollDrag ctx inp
+        Nothing | buttonPressed MouseLeft inp -> tryStartScrollDrag ctx inp
         _ -> pure ()
 
 -- | Grab a thumb, or jump the thumb's center to a track press and keep
@@ -314,7 +314,7 @@ probeScrollBarHover ctx@Context {ctxNodeArena = na} inp = do
   case mDrag of
     Just (wid, dir, _) -> barWhere wid (\(d, _, _) -> d == dir) <$> grabbableBars ctx wid
     Nothing
-      | inputMouseDown inp || not (rectContains (Rect 0 0 winW winH) mouse) -> pure Nothing
+      | buttonHeld MouseLeft inp || not (rectContains (Rect 0 0 winW winH) mouse) -> pure Nothing
       | otherwise -> do
           top <- overlayHitRoot ctx mouse
           let candidate idx = do

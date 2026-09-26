@@ -48,8 +48,8 @@ counter = do
   widget scrolls into view.
 - Keyboard focus and navigation for every control, focus from code, and
   shortcuts, as in `shortcut (ctrl <> key 's')`.
-- Middle and side mouse buttons, cursor shapes, and tooltips with a hover
-  delay.
+- Every mouse button, held and clicked per widget (`respClickedWith
+  MouseMiddle`), cursor shapes, and tooltips with a hover delay.
 - Shaped text in the SDL backend, with fallback fonts for other scripts and
   mixed left-to-right and right-to-left lines. `richText` wraps a paragraph
   of mixed styles and links, as in

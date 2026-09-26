@@ -42,8 +42,10 @@ module NanoUI.Backend
     -- window's new events into it. Starting from 'emptyInput' every frame
     -- instead forgets a held button and the pointer between events. Keys
     -- arrive through 'applyKey', which records presses, releases and held
-    -- keys, mouse buttons through 'applyMouseButton' and dropped files
-    -- through 'appendDropEvent'. Every key goes in as a 'Key' whatever the
+    -- keys, mouse buttons through 'applyMouseButton' (a backend numbers
+    -- them with 'mouseButtonNumber') and dropped files through
+    -- 'appendDropEvent'. When the pointer leaves the window,
+    -- 'applyPointerLeave' moves it off every widget. Every key goes in as a 'Key' whatever the
     -- modifiers, a key that types a character as the 'KeyChar' it types
     -- with no modifier held; the text typed goes in 'inputChars' as well, and
     -- a chord such as Ctrl+C types none. A held key's auto-repeats go in
@@ -53,10 +55,20 @@ module NanoUI.Backend
   , Key (..)
   , Modifiers (..)
   , MouseButton (..)
+  , mouseButtonNumber
+  , MouseButtons
   , DropEvent (..)
   , DropType (..)
   , emptyInput
   , applyMouseButton
+  , applyPointerLeave
+  , noButtons
+  , buttonsMember
+  , buttonsNull
+  , buttonsInsert
+  , buttonsDelete
+  , buttonsToList
+  , buttonsFromList
   , clearEphemeral
   , appendInputKey
   , appendDropEvent

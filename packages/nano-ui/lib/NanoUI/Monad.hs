@@ -24,6 +24,9 @@ module NanoUI.Monad
   , askFrameInput
   , localInput
   , uiMousePos
+  , mousePressed
+  , mouseReleased
+  , mouseHeld
   , uiTime
   , windowSize
   , windowWidth

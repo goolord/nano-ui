@@ -283,10 +283,18 @@
   text area draws it at its caret until it is committed, and the frame drops
   the keys meanwhile, so no shortcut fires. `textInputArea` in
   `NanoUI.Testing` says where the input method's candidate window goes.
-- The middle and side mouse buttons: `respMiddleClicked`, `respMiddlePressed`
-  and `inputMouseMiddleDown` and its siblings, routed like a right click (a
-  middle click closes a closable tab), and `inputMouseBackPressed` and
-  `inputMouseForwardPressed`.
+- Every mouse button: `MouseButton` has `MouseMiddle`, the side buttons
+  `MouseBack` and `MouseForward`, and `MouseOther n` for any other, which
+  the SDL and RGFW backends report by number (`mouseButtonNumber`). Each is
+  held, pressed and released like the left one. `respHeldWith b` and
+  `respClickedWith b` say whether button `b` went down on a widget and is
+  held, or clicked it (a middle click closes a closable tab), and
+  `mousePressed`, `mouseReleased` and `mouseHeld` hear a button anywhere on
+  the view's layer, quiet behind a modal and in `disabledWhen`, as
+  `keyPressed` is.
+- The pointer leaving the window moves it off every widget
+  (`applyPointerLeave`, on SDL's window-leave and RGFW's mouse-leave
+  events), so nothing stays hovered.
 - A warning style beside the danger one: `themeWarning`, `fontWarning` and the
   `warning` button modifier.
 - Following the system's light or dark setting: `followSystemTheme ctx light
@@ -305,8 +313,9 @@
   `applyComposition`, `cursorFallback`, `setExplainLayout`,
   `setSystemAppearance`, `WindowHost`,
   `installWindowHost`, `answerScreenshots`, `setWakeLoop` and `cancelTasks`.
-- `NanoUI.Testing.Harness` has `chordInp`, `keyUpInp`, `middleClickPair`,
-  and `newWakeSignal` for a test to wait on a job's wake.
+- `NanoUI.Testing.Harness` has `chordInp`, `keyUpInp`, `clickPairWith`,
+  `pressWith` and `releaseWith` for any mouse button, and `newWakeSignal`
+  for a test to wait on a job's wake.
 - `uiFontSize`, the size text takes when its layout sets none, and
   `withFontSize` in `NanoUI.Testing`; the SDL backend reports its base size.
   `drawCheckbox` and `checkboxBoxSize` draw nano-ui's checkbox on a canvas.
@@ -577,6 +586,19 @@
   in `inputKeys` and nothing in `inputChars`, so look for it with `shortcut`
   or in `inputKeys`. Text fields take Command as well as Ctrl on macOS.
 - `Key` is `Ord` and no longer `Enum`, and `Modifiers` is `Ord`.
+- `Input` holds the mouse buttons as sets, `inputButtonsHeld`,
+  `inputButtonsPressed` and `inputButtonsReleased` (`MouseButtons`, read with
+  `buttonHeld`, `buttonPressed` and `buttonReleased`), in place of a field
+  for each button and edge; an `Input` is 128 bytes rather than 200. Fold
+  events in with `applyMouseButton`. `inputMouseDown`, `inputMousePressed`,
+  `inputMouseReleased` and their `Right` forms remain as deprecated functions.
+  A `Response` keeps the buttons held on the widget and those that clicked it
+  the same way (`rawRespHeld`, `rawRespClickedWith`), 64 bytes rather than 96;
+  `respPressed`, `respRightPressed` and `respRightClicked` read them.
+- A right or middle button held is a widget's only when it went down on the
+  widget: dragged across others, it no longer reports each as pressed.
+- A double or triple click counts presses of one button: a left click
+  after a right one starts over.
 - `Input`, `Modifiers` (`modSuper`), `MouseButton`, `Response`, `Layout`,
   `Theme`, `FontVariant`, `DrawOp` and `UiCursorKind` have new fields or
   constructors, for the additions above.

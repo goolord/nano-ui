@@ -121,9 +121,9 @@ runComboScrollbarDragTest ctx failed = do
       trackX = rx + rw - 5
       press = pressAt inp0 (V2 trackX (dropY + 200))
   _ <- runFrame ctx press ui
-  _ <- runFrame ctx press {inputMousePressed = False} ui
+  _ <- runFrame ctx press {inputButtonsPressed = noButtons} ui
   -- Release over a row position (bottom of the list): must not pick.
-  let release = press {inputMouseDown = False, inputMouseReleased = True}
+  let release = applyMouseButton MouseLeft False press
   ((r, t), _, _, _) <- runFrame ctx release ui
   assert failed (T.null t && not (respChanged r))
   overlays1 <- collectOverlayTextSpans ctx inp0
@@ -155,7 +155,7 @@ runComboBlurCommitTest ctx failed = do
   -- blur commits the typed text.
   let away = pressAt inp0 (V2 310 5)
   _ <- runFrame ctx away ui
-  ((rC, tC), _, _, _) <- runFrame ctx inp0 {inputMouseReleased = True} ui
+  ((rC, tC), _, _, _) <- runFrame ctx (applyMouseButton MouseLeft False inp0) ui
   assertEq failed tC "No"
   assert failed (respChanged rC)
   ((rD, _), _, _, _) <- runFrame ctx inp0 ui

@@ -118,13 +118,13 @@ module NanoUI
   , respClicked
   , respChanged
   , respSubmitted
+  , respHeldWith
+  , respClickedWith
   , respRightPressed
   , respRightClicked
   , setChanged
   , setClicked
   , setSubmitted
-  , respMiddlePressed
-  , respMiddleClicked
 
     -- * Containers
   , row
@@ -841,6 +841,36 @@ module NanoUI
   , foldInputKeys
   , takeEscape
   , Composition (..)
+
+    -- * Mouse buttons
+
+    -- | A widget's 'Response' says which buttons went down on it and are
+    -- held ('respHeldWith') and which clicked it ('respClickedWith'), and
+    -- 'mousePressed', 'mouseReleased' and 'mouseHeld' listen for a button
+    -- anywhere on the part of the view being declared, as 'keyPressed' does
+    -- for a key:
+    --
+    -- > whenM (mousePressed MouseBack) goBack
+    --
+    -- An 'Input' holds the buttons held, pressed and released as
+    -- 'MouseButtons' sets, which 'buttonHeld', 'buttonPressed' and
+    -- 'buttonReleased' read.
+  , MouseButton (..)
+  , mousePressed
+  , mouseReleased
+  , mouseHeld
+  , MouseButtons
+  , noButtons
+  , buttonsMember
+  , buttonsNull
+  , buttonsToList
+  , buttonsFromList
+  , buttonHeld
+  , buttonPressed
+  , buttonReleased
+  , anyButtonPressed
+  , anyButtonReleased
+  , inputPointerHeld
 
     -- * Keyboard
 

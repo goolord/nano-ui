@@ -318,7 +318,7 @@ runTextInputDirtyTest ctx failed = do
   let
     Rect rx ry _ _ = respRect resp
     (_, release) = clickPair inp0 (V2 (rx + 1) (ry + 0.5))
-    idle = release {inputMouseReleased = False, inputDeltaTime = 1}
+    idle = release {inputButtonsReleased = noButtons, inputDeltaTime = 1}
   _ <- runClick ctx inp0 ui (V2 (rx + 1) (ry + 0.5))
   _ <- warmup2 ctx idle ui
   -- Keyboard focus by itself asks for nothing: the caret does not blink, and
@@ -340,14 +340,14 @@ runTextInputDragWakeTest ctx failed = do
     Rect rx ry rw _ = respRect resp
     outside = V2 (rx + rw + 40) (ry + 4)
     (press, release) = clickPair inp0 (V2 (rx + 4) (ry + 4))
-    hold = press {inputMousePressed = False}
+    hold = press {inputButtonsPressed = noButtons}
   _ <- runFrame ctx press ui
   _ <- runFrame ctx hold ui
   assertEq failed 0 =<< getWakeAt ctx
   _ <- runFrame ctx hold {inputMousePos = outside} ui
   assert failed . (> 0) =<< getWakeAt ctx
   _ <- runFrame ctx release {inputMousePos = outside} ui
-  _ <- runFrame ctx release {inputMousePos = outside, inputMouseReleased = False} ui
+  _ <- runFrame ctx release {inputMousePos = outside, inputButtonsReleased = noButtons} ui
   assertEq failed 0 =<< getWakeAt ctx
 
 runTextInputFfCaretTest :: Context -> IORef Int -> IO ()
@@ -538,7 +538,7 @@ textAreaThumbDragTest horizontal ctx failed = do
       _ <- runFrame ctx drag ui
       off1 <- offset
       assertGt failed off1 off0
-      _ <- runFrame ctx drag {inputMouseDown = False, inputMouseReleased = True} ui
+      _ <- runFrame ctx (applyMouseButton MouseLeft False drag) ui
       -- Dragging the scrollbar must not start a selection or edit the text.
       st <- (`loadTextAreaState` intKey (respId resp)) <$> getStore ctx
       assertEq failed (toText (buffer st)) txt

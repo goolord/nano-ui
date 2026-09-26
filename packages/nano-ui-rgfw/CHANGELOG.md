@@ -6,7 +6,10 @@
 
 - `optExplainLayout` opens a window with the layout overlay on, and
   `debugWindowBody` has a checkbox for it.
-- The middle mouse button, and the side buttons as back and forward.
+- The middle mouse button, the side buttons as back and forward, and the
+  misc buttons past them as `MouseOther 6` to `MouseOther 8`.
+- The pointer leaving the window moves it off every widget, so nothing stays
+  hovered.
 - Window options `optIcon`, `optMinSize` and `optMaxSize` (in native
   pixels). The core's window setters and `requestScreenshot` work from a
   view, but for `setWindowOpacityUi`, which does nothing: RGFW windows do not

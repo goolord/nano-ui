@@ -399,7 +399,7 @@ runPointerCaptureTest ctx failed = do
     assert failed (respHovered freed)
     -- A press is routed afresh even with the other button still down: with
     -- the right button held on the page, a left click in the window lands.
-    let rightHeld = win {inputMouseRightDown = True}
+    let rightHeld = win {inputButtonsHeld = buttonsFromList [MouseRight]}
         chord = pressAt rightHeld onButton
     _ <- frame (fst (rightClickPair win onTrack))
     _ <- frame chord

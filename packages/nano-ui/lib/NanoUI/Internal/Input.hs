@@ -10,6 +10,17 @@ module NanoUI.Internal.Input
   , modPrimary
   , primaryModifiers
   , Input (..)
+  , buttonHeld
+  , buttonPressed
+  , buttonReleased
+  , anyButtonPressed
+  , anyButtonReleased
+  , inputMouseDown
+  , inputMousePressed
+  , inputMouseReleased
+  , inputMouseRightDown
+  , inputMouseRightPressed
+  , inputMouseRightReleased
   , DropType (..)
   , DropEvent (..)
   , emptyInput
@@ -21,7 +32,18 @@ module NanoUI.Internal.Input
   , keypadKey
   , appendDropEvent
   , MouseButton (..)
+  , mouseButtonNumber
+  , MouseButtons
+  , noButtons
+  , buttonsMember
+  , buttonsToList
+  , buttonsFromList
+  , buttonsNull
+  , buttonsInsert
+  , buttonsDelete
+  , buttonsFilterM
   , applyMouseButton
+  , applyPointerLeave
   , inputKeysNull
   , inputKeysElem
   , foldInputKeys
@@ -40,11 +62,12 @@ module NanoUI.Internal.Input
   , applyComposition
   ) where
 
-import Data.Bits (Bits, zeroBits, (.&.))
+import Data.Bits (Bits, clearBit, countTrailingZeros, setBit, testBit, zeroBits, (.&.), (.|.))
 import Data.Foldable (toList)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Primitive.SmallArray (SmallArray, copySmallArray, newSmallArray, runSmallArray, sizeofSmallArray, smallArrayFromList)
+import Data.Word (Word32)
 import NanoUI.Internal.Types (Size (..), V2 (..))
 import System.Info (os)
 
@@ -144,27 +167,23 @@ data DropEvent = DropEvent
   deriving (Eq, Show)
 
 -- | Input for one frame. Positions and window sizes use logical pixels;
--- scroll values use wheel steps and delta time uses seconds. Held flags and
+-- scroll values use wheel steps and delta time uses seconds. Held buttons and
 -- held keys and the input method's composition persist between frames;
--- press/release flags, text, key presses and releases, and drops are events
+-- presses and releases, text, key presses and releases, and drops are events
 -- consumed once. Backends clear those
 -- events with 'clearEphemeral'.
 data Input = Input
   { inputMousePos :: {-# UNPACK #-} !V2
-  , inputMouseDown :: {-# UNPACK #-} !Bool
-  , inputMousePressed :: {-# UNPACK #-} !Bool
-  , inputMouseReleased :: {-# UNPACK #-} !Bool
-  , inputMouseRightDown :: {-# UNPACK #-} !Bool
-  , inputMouseRightPressed :: {-# UNPACK #-} !Bool
-  , inputMouseRightReleased :: {-# UNPACK #-} !Bool
-  , inputMouseMiddleDown :: {-# UNPACK #-} !Bool
-  , inputMouseMiddlePressed :: {-# UNPACK #-} !Bool
-  , inputMouseMiddleReleased :: {-# UNPACK #-} !Bool
-  , inputMouseBackPressed :: {-# UNPACK #-} !Bool
-  -- ^ The back side button (X1) went down this frame. Its release is not reported.
-  , inputMouseForwardPressed :: {-# UNPACK #-} !Bool
-  -- ^ The forward side button (X2) went down this frame.
+  , inputButtonsHeld :: {-# UNPACK #-} !MouseButtons
+  -- ^ The mouse buttons down as the frame's events leave them
+  -- ('buttonHeld').
+  , inputButtonsPressed :: {-# UNPACK #-} !MouseButtons
+  -- ^ The mouse buttons that went down this frame ('buttonPressed').
+  , inputButtonsReleased :: {-# UNPACK #-} !MouseButtons
+  -- ^ The mouse buttons that came up this frame ('buttonReleased').
   , inputMouseClicks :: {-# UNPACK #-} !Int
+  -- ^ 1 for this frame's press, or 2 or 3 when it came soon after the one
+  -- before, near it and with the same button: a double or triple click.
   , inputScroll :: {-# UNPACK #-} !V2
   , inputKeys :: SmallArray Key
   -- ^ Keys pressed this frame in event order, with a held key's auto-repeats.
@@ -185,23 +204,59 @@ data Input = Input
   }
   deriving (Eq, Show)
 
+-- | Whether the button is down. A view asks 'NanoUI.mouseHeld', which is
+-- quiet where the view takes no pointer.
+{-# INLINE buttonHeld #-}
+buttonHeld :: MouseButton -> Input -> Bool
+buttonHeld b = buttonsMember b . inputButtonsHeld
+
+-- | Whether the button went down this frame.
+{-# INLINE buttonPressed #-}
+buttonPressed :: MouseButton -> Input -> Bool
+buttonPressed b = buttonsMember b . inputButtonsPressed
+
+-- | Whether the button came up this frame.
+{-# INLINE buttonReleased #-}
+buttonReleased :: MouseButton -> Input -> Bool
+buttonReleased b = buttonsMember b . inputButtonsReleased
+
+-- | Whether any mouse button went down this frame.
+{-# INLINE anyButtonPressed #-}
+anyButtonPressed :: Input -> Bool
+anyButtonPressed = not . buttonsNull . inputButtonsPressed
+
+-- | Whether any mouse button came up this frame.
+{-# INLINE anyButtonReleased #-}
+anyButtonReleased :: Input -> Bool
+anyButtonReleased = not . buttonsNull . inputButtonsReleased
+
+-- | The left button's held, pressed and released state, and the right
+-- button's, under the names the fields had in nano-ui 0.1.
+inputMouseDown, inputMousePressed, inputMouseReleased :: Input -> Bool
+inputMouseDown = buttonHeld MouseLeft
+inputMousePressed = buttonPressed MouseLeft
+inputMouseReleased = buttonReleased MouseLeft
+{-# DEPRECATED inputMouseDown "Use buttonHeld MouseLeft" #-}
+{-# DEPRECATED inputMousePressed "Use buttonPressed MouseLeft" #-}
+{-# DEPRECATED inputMouseReleased "Use buttonReleased MouseLeft" #-}
+
+inputMouseRightDown, inputMouseRightPressed, inputMouseRightReleased :: Input -> Bool
+inputMouseRightDown = buttonHeld MouseRight
+inputMouseRightPressed = buttonPressed MouseRight
+inputMouseRightReleased = buttonReleased MouseRight
+{-# DEPRECATED inputMouseRightDown "Use buttonHeld MouseRight" #-}
+{-# DEPRECATED inputMouseRightPressed "Use buttonPressed MouseRight" #-}
+{-# DEPRECATED inputMouseRightReleased "Use buttonReleased MouseRight" #-}
+
 -- | No events or held buttons, with an 800x600 window and zero elapsed time.
 -- Override window size and delta time when driving headless frames.
 emptyInput :: Input
 emptyInput =
   Input
     { inputMousePos = V2 0 0
-    , inputMouseDown = False
-    , inputMousePressed = False
-    , inputMouseReleased = False
-    , inputMouseRightDown = False
-    , inputMouseRightPressed = False
-    , inputMouseRightReleased = False
-    , inputMouseMiddleDown = False
-    , inputMouseMiddlePressed = False
-    , inputMouseMiddleReleased = False
-    , inputMouseBackPressed = False
-    , inputMouseForwardPressed = False
+    , inputButtonsHeld = noButtons
+    , inputButtonsPressed = noButtons
+    , inputButtonsReleased = noButtons
     , inputMouseClicks = 1
     , inputScroll = V2 0 0
     , inputKeys = mempty
@@ -302,7 +357,7 @@ grabHoverKind onTarget inp = grabDragKind onTarget False inp
 grabDragKind :: Bool -> Bool -> Input -> UiCursorKind
 grabDragKind onTarget dragging inp
   | dragging = UiCursorGrabbing
-  | onTarget, inputMouseDown inp = UiCursorGrabbing
+  | onTarget, buttonHeld MouseLeft inp = UiCursorGrabbing
   | onTarget = UiCursorGrab
   | otherwise = UiCursorDefault
 
@@ -385,23 +440,127 @@ keypadKey True c = Just (KeyChar c)
 keypadKey False c =
   lookup c [('0', KeyInsert), ('1', KeyEnd), ('2', KeyDown), ('3', KeyPageDown), ('4', KeyLeft), ('6', KeyRight), ('7', KeyHome), ('8', KeyUp), ('9', KeyPageUp), ('.', KeyDelete)]
 
--- | Mouse buttons tracked by 'Input'. 'MouseBack' and 'MouseForward' are the
--- side buttons (X1 and X2) a browser navigates with.
-data MouseButton = MouseLeft | MouseRight | MouseMiddle | MouseBack | MouseForward
-  deriving (Eq, Show)
+-- | A mouse button. 'MouseBack' and 'MouseForward' are the side buttons (X1
+-- and X2) a browser navigates with.
+data MouseButton
+  = MouseLeft
+  | MouseRight
+  | MouseMiddle
+  | MouseBack
+  | MouseForward
+  | MouseOther !Int
+  -- ^ Any other button, by its number: buttons count from 1 as SDL numbers
+  -- them, left, middle, right, back and forward first, so the first button
+  -- past those is @MouseOther 6@. 'MouseButtons' tracks the buttons up to
+  -- 32.
+  deriving (Eq, Ord, Show)
 
--- | Apply a button transition: the held state plus that frame's one-shot
--- pressed or released flag. The side buttons report only their press.
+-- | The button with a number, counting left, middle, right, back and
+-- forward as 1 to 5, as SDL numbers them ('MouseOther').
+mouseButtonNumber :: Int -> MouseButton
+mouseButtonNumber = \case
+  1 -> MouseLeft
+  2 -> MouseMiddle
+  3 -> MouseRight
+  4 -> MouseBack
+  5 -> MouseForward
+  n -> MouseOther n
+
+-- | The button's bit in a 'MouseButtons': its number less one, or -1 for a
+-- number past 32, which a set cannot hold.
+{-# INLINE buttonBit #-}
+buttonBit :: MouseButton -> Int
+buttonBit = \case
+  MouseLeft -> 0
+  MouseMiddle -> 1
+  MouseRight -> 2
+  MouseBack -> 3
+  MouseForward -> 4
+  MouseOther n
+    | n >= 1 && n <= 32 -> n - 1
+    | otherwise -> -1
+
+-- | A set of mouse buttons: those held, pressed or released in an 'Input',
+-- or those a widget was clicked with ('NanoUI.respClickedWith'). '<>' is the
+-- union.
+newtype MouseButtons = MouseButtons Word32
+  deriving (Eq)
+
+instance Show MouseButtons where
+  showsPrec d bs = showParen (d > 10) (showString "buttonsFromList " . showsPrec 11 (buttonsToList bs))
+
+instance Semigroup MouseButtons where
+  {-# INLINE (<>) #-}
+  MouseButtons a <> MouseButtons b = MouseButtons (a .|. b)
+
+instance Monoid MouseButtons where
+  mempty = noButtons
+
+-- | No button.
+noButtons :: MouseButtons
+noButtons = MouseButtons 0
+
+-- | Whether the set holds the button.
+{-# INLINE buttonsMember #-}
+buttonsMember :: MouseButton -> MouseButtons -> Bool
+buttonsMember b (MouseButtons w) = let i = buttonBit b in i >= 0 && testBit w i
+
+-- | Whether the set is empty.
+{-# INLINE buttonsNull #-}
+buttonsNull :: MouseButtons -> Bool
+buttonsNull (MouseButtons w) = w == 0
+
+-- | The set with the button added.
+{-# INLINE buttonsInsert #-}
+buttonsInsert :: MouseButton -> MouseButtons -> MouseButtons
+buttonsInsert b bs@(MouseButtons w) = let i = buttonBit b in if i < 0 then bs else MouseButtons (setBit w i)
+
+-- | The set without the button.
+{-# INLINE buttonsDelete #-}
+buttonsDelete :: MouseButton -> MouseButtons -> MouseButtons
+buttonsDelete b bs@(MouseButtons w) = let i = buttonBit b in if i < 0 then bs else MouseButtons (clearBit w i)
+
+-- | The buttons in the set, by number.
+buttonsToList :: MouseButtons -> [MouseButton]
+buttonsToList (MouseButtons w)
+  | w == 0 = []
+  | otherwise =
+      let i = countTrailingZeros w
+       in mouseButtonNumber (i + 1) : buttonsToList (MouseButtons (clearBit w i))
+
+-- | The set of the buttons listed.
+buttonsFromList :: [MouseButton] -> MouseButtons
+buttonsFromList = foldr buttonsInsert noButtons
+
+-- | The buttons of the set that pass the test, each tested once, in number
+-- order. An empty set tests nothing.
+{-# INLINE buttonsFilterM #-}
+buttonsFilterM :: Monad m => (MouseButton -> m Bool) -> MouseButtons -> m MouseButtons
+buttonsFilterM p (MouseButtons w0) = go w0 0
+  where
+    go 0 !acc = pure (MouseButtons acc)
+    go w !acc = do
+      let i = countTrailingZeros w
+      keep <- p (mouseButtonNumber (i + 1))
+      go (clearBit w i) (if keep then setBit acc i else acc)
+
+-- | Apply a button going down ('True') or up: it joins the held buttons and
+-- this frame's presses, or leaves the held ones and joins the releases.
 applyMouseButton :: MouseButton -> Bool -> Input -> Input
-applyMouseButton MouseLeft True inp = inp {inputMouseDown = True, inputMousePressed = True}
-applyMouseButton MouseLeft False inp = inp {inputMouseDown = False, inputMouseReleased = True}
-applyMouseButton MouseRight True inp = inp {inputMouseRightDown = True, inputMouseRightPressed = True}
-applyMouseButton MouseRight False inp = inp {inputMouseRightDown = False, inputMouseRightReleased = True}
-applyMouseButton MouseMiddle True inp = inp {inputMouseMiddleDown = True, inputMouseMiddlePressed = True}
-applyMouseButton MouseMiddle False inp = inp {inputMouseMiddleDown = False, inputMouseMiddleReleased = True}
-applyMouseButton MouseBack True inp = inp {inputMouseBackPressed = True}
-applyMouseButton MouseForward True inp = inp {inputMouseForwardPressed = True}
-applyMouseButton _ False inp = inp
+applyMouseButton b True inp =
+  inp {inputButtonsHeld = buttonsInsert b (inputButtonsHeld inp), inputButtonsPressed = buttonsInsert b (inputButtonsPressed inp)}
+applyMouseButton b False inp =
+  inp {inputButtonsHeld = buttonsDelete b (inputButtonsHeld inp), inputButtonsReleased = buttonsInsert b (inputButtonsReleased inp)}
+
+-- | The pointer left the window: move it far off every widget, as
+-- 'withoutPointer' does, so nothing stays hovered. Held buttons stay held;
+-- their releases come as usual.
+applyPointerLeave :: Input -> Input
+applyPointerLeave inp = inp {inputMousePos = offWindow}
+
+-- | A point off every widget, far outside any window.
+offWindow :: V2
+offWindow = V2 (-1e6) (-1e6)
 
 -- | Copy a list of key events into the frame's array, preserving order.
 {-# INLINE inputKeysFromList #-}
@@ -430,11 +589,10 @@ inputInteracted a b = quiet a /= quiet b
   where
     quiet i = i {inputMousePos = V2 0 0, inputDeltaTime = 0, inputWindowRedraw = False}
 
--- | Whether the left, right or middle mouse button is held.
+-- | Whether any mouse button is held.
 {-# INLINE inputPointerHeld #-}
 inputPointerHeld :: Input -> Bool
-inputPointerHeld inp =
-  inputMouseDown inp || inputMouseRightDown inp || inputMouseMiddleDown inp
+inputPointerHeld = not . buttonsNull . inputButtonsHeld
 
 -- | Remove one-shot interaction events for a repeated view pass. Retains
 -- pointer position, held buttons and held keys so hover and drag state remain
@@ -442,14 +600,8 @@ inputPointerHeld inp =
 stripInteractionInput :: Input -> Input
 stripInteractionInput inp =
   inp
-    { inputMousePressed = False
-    , inputMouseReleased = False
-    , inputMouseRightPressed = False
-    , inputMouseRightReleased = False
-    , inputMouseMiddlePressed = False
-    , inputMouseMiddleReleased = False
-    , inputMouseBackPressed = False
-    , inputMouseForwardPressed = False
+    { inputButtonsPressed = noButtons
+    , inputButtonsReleased = noButtons
     , inputKeys = mempty
     , inputKeysReleased = mempty
     , inputChars = ""
@@ -464,18 +616,10 @@ stripInteractionInput inp =
 withoutPointer :: Input -> Input
 withoutPointer inp =
   inp
-    { inputMousePos = V2 (-1e6) (-1e6)
-    , inputMouseDown = False
-    , inputMousePressed = False
-    , inputMouseReleased = False
-    , inputMouseRightDown = False
-    , inputMouseRightPressed = False
-    , inputMouseRightReleased = False
-    , inputMouseMiddleDown = False
-    , inputMouseMiddlePressed = False
-    , inputMouseMiddleReleased = False
-    , inputMouseBackPressed = False
-    , inputMouseForwardPressed = False
+    { inputMousePos = offWindow
+    , inputButtonsHeld = noButtons
+    , inputButtonsPressed = noButtons
+    , inputButtonsReleased = noButtons
     , inputScroll = V2 0 0
     }
 

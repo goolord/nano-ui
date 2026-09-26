@@ -9,7 +9,7 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Primitive.SmallArray (SmallArray)
 import NanoUI
-import NanoUI.Backend (emptyInput, inputKeysFromList)
+import NanoUI.Backend (applyMouseButton, emptyInput, inputKeysFromList)
 import NanoUI.Svg (rasterizeSvg)
 import NanoUI.Testing (newContext, runFrame, uiCursorKind)
 import GHC.Clock (getMonotonicTime)
@@ -178,10 +178,10 @@ main = do
           grab = V2 1014 22
       replicateM_ 5 (void (runFrame ctx inp ui))
       when drag $
-        void (runFrame ctx inp {inputMousePos = grab, inputMouseDown = True, inputMousePressed = True} ui)
+        void (runFrame ctx (applyMouseButton MouseLeft True inp {inputMousePos = grab}) ui)
       forM_ [1 .. 300 :: Int] $ \i -> do
         let V2 gx gy = grab
-            step = inp {inputMousePos = V2 (gx - 100 + fromIntegral (i `mod` 2) * 6) (gy + 50), inputMouseDown = True}
+            step = inp {inputMousePos = V2 (gx - 100 + fromIntegral (i `mod` 2) * 6) (gy + 50), inputButtonsHeld = buttonsFromList [MouseLeft]}
         void (runFrame ctx (if drag then step else inp) ui)
       putStrLn ("profiled 300 window frames" ++ if drag then ", dragging" else "")
     ("pointer" : _) -> do
@@ -198,8 +198,8 @@ main = do
       forM_ [1 .. frames] $ \i -> do
         let base = at i
             fi = case i `mod` 10 of
-              0 -> base {inputMouseDown = True, inputMousePressed = True}
-              1 -> base {inputMouseReleased = True}
+              0 -> applyMouseButton MouseLeft True base
+              1 -> applyMouseButton MouseLeft False base
               _ -> base
         void (runFrame ctx fi ui)
         c0 <- getMonotonicTime
@@ -231,7 +231,7 @@ main = do
             emptyInput
               { inputWindowSize = Size 800 600
               , inputMousePos = V2 400 300
-              , inputMouseDown = True
+              , inputButtonsHeld = buttonsFromList [MouseLeft]
               }
           (name, ui) = case args of
             ("canvas" : _) -> ("canvas", canvasScene 0)

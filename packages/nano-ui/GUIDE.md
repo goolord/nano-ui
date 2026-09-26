@@ -231,8 +231,23 @@ focused field draws the composition (`inputComposition`) at its caret and
 changes its value only on commit. Meanwhile the frame drops the keys, so no
 shortcut fires.
 
-A middle click is `respMiddleClicked`, routed like a right click; a closable
-tab closes on one.
+Mouse buttons come as a `MouseButton`: `MouseLeft`, `MouseRight`,
+`MouseMiddle`, the side buttons `MouseBack` and `MouseForward`, and
+`MouseOther n` for any other. A widget's response says which went down on it
+and are still held (`respHeldWith`), and which clicked it, going down and up
+on it (`respClickedWith`); `respClicked` is its activation, a left click or
+Enter. A button that went down elsewhere and is dragged over a widget is not
+the widget's. `mousePressed`, `mouseReleased` and `mouseHeld` hear a button
+anywhere on the part of the view being declared, as `keyPressed` hears a
+key, and stay quiet behind a modal and in `disabledWhen`:
+
+```haskell
+whenM (mousePressed MouseBack) goBack
+tab <- button' "Report"
+when (respClickedWith MouseMiddle tab) closeReport
+```
+
+A closable tab closes on a middle click.
 
 ## Animation and background work
 
@@ -386,7 +401,8 @@ delta time explicitly in test input. Warm up before targeting a widget by
 its response rectangle, then send separate press and release frames.
 
 `NanoUI.Testing.Harness` supplies `warmup2`, `clickPair`, `runClick`, and
-text-span queries, with `middleClickPair` for the middle button. Its `held`
+text-span queries, with `clickPairWith` for another button, as in
+`clickPairWith MouseMiddle base pos`. Its `held`
 helper stores controlled input values outside the hook store, so an automatic
 hook rebuild does not hide a change flag that the test is trying to observe.
 

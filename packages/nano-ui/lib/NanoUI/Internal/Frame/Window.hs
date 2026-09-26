@@ -21,7 +21,7 @@ import NanoUI.Internal.Frame.Hit
 import NanoUI.Internal.Frame.Input (PressTargets (..), probeHotId, targetsAt)
 import NanoUI.Internal.Frame.Scroll.Geometry (scrollChromeLane)
 import NanoUI.Internal.Id (WidgetId (..))
-import NanoUI.Internal.Input (Input (..), UiCursorKind (..), inputMouseDown, inputMousePos, inputMousePressed)
+import NanoUI.Internal.Input (Input (..), MouseButton (..), UiCursorKind (..), buttonHeld, buttonPressed)
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Layout.Solve (Measurers (..), placeWindowNode, windowBodyScroller)
 import NanoUI.Internal.Monad ((<&&>))
@@ -81,14 +81,14 @@ windowGesture ::
 windowGesture ctx inp held release step start =
   getsInteraction ctx held >>= \case
     Just g
-      | inputMouseDown inp -> do
+      | buttonHeld MouseLeft inp -> do
           wid <- step g
           damageWidget ctx wid (DamageInflated haloDamageSlop)
           markDirty ctx
           pure True
       | otherwise -> False <$ modifyInteraction ctx release
     Nothing
-      | inputMousePressed inp -> start ctx (inputMousePos inp)
+      | buttonPressed MouseLeft inp -> start ctx (inputMousePos inp)
       | otherwise -> pure False
 
 -- | How far the resize handles reach out past the window's edges.
@@ -221,7 +221,7 @@ windowResizeCursorKind :: Context -> Input -> IO (Maybe UiCursorKind)
 windowResizeCursorKind ctx inp =
   getsInteraction ctx isWindowResize >>= \case
     Just wrd
-      | inputMouseDown inp -> pure (Just (cursorForResizeEdge (wrdEdge wrd)))
+      | buttonHeld MouseLeft inp -> pure (Just (cursorForResizeEdge (wrdEdge wrd)))
       | otherwise -> pure Nothing
     Nothing -> fmap (\(_, _, edge) -> cursorForResizeEdge edge) <$> resizeEdgeTarget ctx (inputMousePos inp)
 

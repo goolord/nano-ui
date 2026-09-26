@@ -30,7 +30,7 @@ runSlidersDragApartTest ctx failed = do
   let Rect rx ry rw rh = respRect second
       Rect tx ty tw th = sliderTrackBounds rx ry rw rh
       press = pressAt inp0 (V2 (tx + tw * 0.25) (ty + th / 2))
-      drag = press {inputMousePressed = False, inputMousePos = V2 (tx + tw * 0.75) (ty + th / 2)}
+      drag = press {inputButtonsPressed = noButtons, inputMousePos = V2 (tx + tw * 0.75) (ty + th / 2)}
   _ <- runFrame ctx press ui
   (((_, v1), (_, v2)), _, _, _) <- runFrame ctx drag ui
   assertEq failed v1 20
@@ -88,7 +88,7 @@ runSelectOverlayDamageTest ctx failed = do
   let pos = centerOf resp
       open = snd (clickPair inp0 pos)
   _ <- runClick ctx inp0 ui pos
-  let idle = open {inputMouseReleased = False, inputDeltaTime = 1}
+  let idle = open {inputButtonsReleased = noButtons, inputDeltaTime = 1}
   _ <- runFrame ctx idle ui
   overlays <- collectOverlayTextSpans ctx idle
   assertJust failed (rectY <$> spanRect "High" overlays) $ \highY -> do
@@ -111,7 +111,7 @@ runSelectDropdownSpanColorsTest ctx failed = do
   (resp, _) <- warmup2 ctx inp0 ui
   let open = snd (clickPair inp0 (centerOf resp))
   _ <- runClick ctx inp0 ui (centerOf resp)
-  let away = open {inputMouseReleased = False, inputMousePos = V2 600 400}
+  let away = open {inputButtonsReleased = noButtons, inputMousePos = V2 600 400}
   _ <- runFrame ctx away ui
   overlays <- collectOverlayTextSpans ctx away
   let fgOf lbl = [fg | (_, txt, fg, _, _) <- overlays, txt == lbl]
@@ -214,13 +214,13 @@ runSelectDragToSelectTest ctx failed = do
   assert failed (hasText "High" overlaysPress)
   assertJust failed (rectY <$> spanRect "Low" overlaysPress) $ \lowY -> do
     -- 2. Move mouse over an item while still pressed
-    let drag = inp0 {inputMousePos = V2 (sx + sw / 2) (lowY + 0.5), inputMouseDown = True}
+    let drag = inp0 {inputMousePos = V2 (sx + sw / 2) (lowY + 0.5), inputButtonsHeld = buttonsFromList [MouseLeft]}
     _ <- runFrame ctx drag ui
     overlaysDrag <- collectOverlayTextSpans ctx drag
     assert failed (hasText "Low" overlaysDrag)
     assertEq failed UiCursorPointer =<< uiCursorKind ctx drag
     -- 3. Mouseup over the item selects it and closes the menu
-    let release = drag {inputMouseDown = False, inputMouseReleased = True}
+    let release = applyMouseButton MouseLeft False drag
     assertEq failed 0 . snd =<< evalUi ctx release ui
     overlaysClosed <- collectOverlayTextSpans ctx release
     assert failed (not (hasText "Low" overlaysClosed))
@@ -240,8 +240,8 @@ runSelectKeyboardTest ctx failed = do
   assertEq failed 2 . snd =<< evalUi ctx openRelease ui
   _ <- runFrame ctx (keyInp KeyUp openRelease) ui
   assertEq failed 1 . snd =<< evalUi ctx openRelease ui
-  _ <- runFrame ctx (openRelease {inputKeys = inputKeysFromList [KeyEscape], inputMouseReleased = False}) ui
-  let idleAfterOpen = openRelease {inputMouseReleased = False}
+  _ <- runFrame ctx (openRelease {inputKeys = inputKeysFromList [KeyEscape], inputButtonsReleased = noButtons}) ui
+  let idleAfterOpen = openRelease {inputButtonsReleased = noButtons}
   _ <- runFrame ctx idleAfterOpen ui
   overlays <- collectOverlayTextSpans ctx idleAfterOpen
   assert failed (not (any (\(_, txt, _, _, _) -> txt `elem` ["Low", "Medium", "High"]) overlays))
@@ -270,7 +270,7 @@ runSelectCloseKeepsFocusTest ctx failed = do
   _ <- runClick ctx inp0 ui mid
   assert failed . listed =<< collectOverlayTextSpans ctx openRelease
   _ <- runClick ctx openRelease ui mid
-  let idle = closeRelease {inputMouseReleased = False}
+  let idle = closeRelease {inputButtonsReleased = noButtons}
   _ <- runFrame ctx idle ui
   assert failed . not . listed =<< collectOverlayTextSpans ctx idle
   assertEq failed (respId resp) =<< getFocusId ctx

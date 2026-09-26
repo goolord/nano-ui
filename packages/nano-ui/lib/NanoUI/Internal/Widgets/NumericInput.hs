@@ -19,7 +19,7 @@ import Data.Text.Read qualified as TR
 import Effectful (Eff, type (:>))
 import GHC.Clock (getMonotonicTime)
 import NanoUI.Internal.Context (getStore, intKey, registerFocusable, requestWakeAt, modifyStore)
-import NanoUI.Internal.Input (Key (..), inputKeys, inputKeysElem, inputModifiers, inputMouseDown, inputMousePos, inputMousePressed, modShift)
+import NanoUI.Internal.Input (Key (..), MouseButton (..), buttonHeld, buttonPressed, inputKeys, inputKeysElem, inputModifiers, inputMousePos, modShift)
 import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Monad (Ui, askInput, freshWidget, uiIO)
 import NanoUI.Internal.Store (Slot (..), deleteSlot, fieldDouble, fieldInt, fieldText, findSlot, insertSlot, lookupSlot, slotKey)
@@ -118,14 +118,14 @@ numericInputConfigured' cfg value = do
     keys = inputKeys inp
     over r dir = if respHovered resp && rectContains r mouse then dir else 0
     pressDir
-      | inputMousePressed inp = over upRect 1 + over downRect (-1)
+      | buttonPressed MouseLeft inp = over upRect 1 + over downRect (-1)
       | otherwise = 0 :: Int
     heldK = slotKey SlotNumericHeld key
     repeatK = slotKey SlotNumericRepeat key
     held0 = findSlot fieldInt 0 heldK store
     holding =
       held0 /= 0
-        && inputMouseDown inp
+        && buttonHeld MouseLeft inp
         && over (if held0 > 0 then upRect else downRect) held0 /= 0
     keyDir
       | not isFocus = 0

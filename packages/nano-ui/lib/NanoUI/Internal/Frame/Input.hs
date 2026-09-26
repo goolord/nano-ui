@@ -32,7 +32,8 @@ module NanoUI.Internal.Frame.Input
 
 import Control.Applicative ((<|>))
 import Control.Monad (filterM, mfilter, unless, when)
-import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
+import Data.Map.Strict qualified as M
 import Data.Functor ((<&>))
 import Data.IntSet qualified as IS
 import Data.Maybe (fromMaybe, isJust, isNothing, listToMaybe, maybeToList)
@@ -100,28 +101,26 @@ refreshHover ctx inp = do
     when (hashWidgetId prevHot /= 0 && not prevMenu) $ startAnimation ctx prevHot 1 0 0.12
     when (hashWidgetId newHot /= 0 && not newMenu) $ startAnimation ctx newHot 0 1 0.12
 
--- | Record where each button went down, in 'ctxPressPos',
--- 'ctxRightPressPos' and 'ctxMiddlePressPos'. Runs before the view. A widget counts a release as its
--- click only when the press point is on it as well, so a press that drifts
--- onto a neighbouring widget before the button comes up clicks nothing.
--- 'disarmPointerPress' forgets the point once the button is up.
+-- | Record where each button that went down this frame did, in
+-- 'ctxPressPos'. Runs before the view. A widget counts a release as its
+-- click, and a held button as held on it, only when the press point is on
+-- it as well, so a press that drifts onto a neighbouring widget before the
+-- button comes up clicks nothing. 'disarmPointerPress' forgets the point
+-- once the button is up.
 armPointerPress :: Context -> Input -> IO ()
-armPointerPress ctx inp = do
-  let here = Just (inputMousePos inp)
-  when (inputMousePressed inp) $ do
-    writeIORef (ctxPressPos ctx) here
+armPointerPress ctx inp =
+  when (anyButtonPressed inp) $ do
+    let here = inputMousePos inp
+    modifyIORef' (ctxPressPos ctx) $ \m -> foldr (`M.insert` here) m (buttonsToList (inputButtonsPressed inp))
     -- A pointer press hides the keyboard focus ring.
-    writeIORef (ctxFocusVisible ctx) False
-  when (inputMouseRightPressed inp) $ writeIORef (ctxRightPressPos ctx) here
-  when (inputMouseMiddlePressed inp) $ writeIORef (ctxMiddlePressPos ctx) here
+    when (buttonPressed MouseLeft inp) $ writeIORef (ctxFocusVisible ctx) False
 
 -- | Forget the press point of each button that came up this frame. Runs after
 -- the view, which compares the release with the press point.
 disarmPointerPress :: Context -> Input -> IO ()
-disarmPointerPress ctx inp = do
-  when (inputMouseReleased inp) $ writeIORef (ctxPressPos ctx) Nothing
-  when (inputMouseRightReleased inp) $ writeIORef (ctxRightPressPos ctx) Nothing
-  when (inputMouseMiddleReleased inp) $ writeIORef (ctxMiddlePressPos ctx) Nothing
+disarmPointerPress ctx inp =
+  when (anyButtonReleased inp) $
+    modifyIORef' (ctxPressPos ctx) $ \m -> foldr M.delete m (buttonsToList (inputButtonsReleased inp))
 
 -- | What a left press landed on, for the steps that act on it: the
 -- interactive widget, the text field or text area, and the select under the
@@ -138,7 +137,7 @@ data PressTargets = PressTargets
 -- layout, like the steps.
 pressTargets :: Context -> Input -> IO PressTargets
 pressTargets ctx inp
-  | not (inputMousePressed inp) = pure none
+  | not (buttonPressed MouseLeft inp) = pure none
   | otherwise = targetsAt ctx (inputMousePos inp)
 
 -- | The widgets a press at @mouse@ would land on, found in one pass over the
@@ -232,7 +231,7 @@ widgetHitRect ctx nt idx x y w h = case nt of
 -- fully hovered at once.
 finalizePointerRelease :: Context -> Input -> IO ()
 finalizePointerRelease ctx@Context {ctxNodeArena = na} inp =
-  when (inputMouseReleased inp) $ do
+  when (buttonReleased MouseLeft inp) $ do
     let mouse = inputMousePos inp
     active <- readIORef (ctxActiveId ctx)
     when (hashWidgetId active /= 0) $ do
@@ -290,7 +289,7 @@ inUiClickHit ctx wid mouse = do
 -- A press on a control drawn inside a text field keeps the focus as it was.
 finalizeTextInputFocus :: Context -> Input -> PressTargets -> IO ()
 finalizeTextInputFocus ctx inp targets =
-  when (inputMousePressed inp) $ do
+  when (buttonPressed MouseLeft inp) $ do
     prevFocus <- readIORef (ctxFocusId ctx)
     mFocused <-
       if ptFieldControl targets

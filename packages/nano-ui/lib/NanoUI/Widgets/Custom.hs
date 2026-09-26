@@ -415,7 +415,7 @@ useDrag2D bounds = do
       mouse = inputMousePos inp
   store <- uiIO (getStore ctx)
   let active0 = quietFlag dragK store
-      active = inputMouseDown inp && (active0 || (inputMousePressed inp && rectContains bounds mouse))
+      active = buttonHeld MouseLeft inp && (active0 || (buttonPressed MouseLeft inp && rectContains bounds mouse))
       prev = uncurry V2 (findSlot fieldPoint (v2X mouse, v2Y mouse) dragK store)
       delta = if active && active0 then v2Sub mouse prev else V2 0 0
       clampedMouse =

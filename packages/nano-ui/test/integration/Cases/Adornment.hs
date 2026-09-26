@@ -260,7 +260,7 @@ runAdornedButtonControlTest ctx failed = do
   spans <- collectTextSpans ctx
   Just xR <- pure (spanRectOf "x" spans)
   Just chipR <- pure (spanRectOf "Chip" spans)
-  (tapped, _, _, _) <- runFrame ctx (inp0 {inputMousePos = spanCenter xR, inputMousePressed = True, inputMouseReleased = True}) ui
+  (tapped, _, _, _) <- runFrame ctx (inp0 {inputMousePos = spanCenter xR, inputButtonsPressed = buttonsFromList [MouseLeft], inputButtonsReleased = buttonsFromList [MouseLeft]}) ui
   onControl <- runClick ctx inp0 ui (spanCenter xR)
   assert failed (not (respClicked tapped || respClicked onControl))
   readIORef removes >>= assertEq failed 2

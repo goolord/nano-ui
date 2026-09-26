@@ -42,6 +42,9 @@ module NanoUI.Internal.Monad
   , themed
   , disabledWhen
   , uiMousePos
+  , mousePressed
+  , mouseReleased
+  , mouseHeld
   , windowSize
   , windowWidth
   , windowHeight
@@ -111,7 +114,7 @@ import NanoUI.Internal.Frame.Node (resolveTextFont)
 import NanoUI.Internal.Id hiding (currentId)
 import NanoUI.Internal.Layout.Arena (getArenaScope, setArenaScope)
 import NanoUI.Internal.Style (Appearance, FontStyle, FontVariant, FontWeight, Layout, TextDecoration (DecorationNone), Theme, defaultLayout)
-import NanoUI.Internal.Input (Input (..), Key (KeyEscape), inputKeysElem, inputMousePos, inputWindowSize, stripInteractionInput)
+import NanoUI.Internal.Input (Input (..), Key (KeyEscape), MouseButton, buttonHeld, buttonPressed, buttonReleased, inputKeysElem, inputMousePos, inputWindowSize, noButtons, stripInteractionInput)
 import NanoUI.Internal.Types (DamageBounds, Rect, Size (..), V2)
 
 -- | A view with UI operations and IO. Backend runners execute it as frames
@@ -350,12 +353,7 @@ disabledWhen True m =
     (withPaintScope enter m)
   where
     inert i =
-      (stripInteractionInput i)
-        { inputMouseDown = False
-        , inputMouseRightDown = False
-        , inputMouseMiddleDown = False
-        , inputKeysHeld = mempty
-        }
+      (stripInteractionInput i) {inputButtonsHeld = noButtons, inputKeysHeld = mempty}
     enter ctx outer
       | outer .&. 1 /= 0 = pure outer
       | otherwise = pushThemeScope ctx True =<< scopeRawTheme ctx outer
@@ -403,6 +401,28 @@ systemAppearance = withContext getSystemAppearance
 {-# INLINE uiMousePos #-}
 uiMousePos :: Ui :> es => Eff es V2
 uiMousePos = fmap inputMousePos askInput
+
+-- | Whether the button went down this frame with the pointer on the part of
+-- the view being declared, whatever widget it is on. 'False' behind an open
+-- modal, under a menu or panel drawn in front, and inside 'disabledWhen',
+-- where the view has no pointer. A press on a widget is the widget's
+-- 'NanoUI.respClickedWith' and 'NanoUI.respHeldWith'; @mousePressed@ is
+-- for a press anywhere:
+--
+-- > whenM (mousePressed MouseBack) goBack
+{-# INLINE mousePressed #-}
+mousePressed :: Ui :> es => MouseButton -> Eff es Bool
+mousePressed b = buttonPressed b <$> askInput
+
+-- | Whether the button came up this frame, as 'mousePressed' for a release.
+{-# INLINE mouseReleased #-}
+mouseReleased :: Ui :> es => MouseButton -> Eff es Bool
+mouseReleased b = buttonReleased b <$> askInput
+
+-- | Whether the button is down, as 'mousePressed' for a button held.
+{-# INLINE mouseHeld #-}
+mouseHeld :: Ui :> es => MouseButton -> Eff es Bool
+mouseHeld b = buttonHeld b <$> askInput
 
 -- | Input routed to the current layer. Covered layers receive no pointer;
 -- disabled scopes also remove keyboard and other interaction events.

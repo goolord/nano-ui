@@ -10,11 +10,34 @@ module NanoUI.Input
   , inputInteracted
   , inputPointerHeld
 
-    -- * Keys and buttons
+    -- * Mouse buttons
+  , MouseButton (..)
+  , mouseButtonNumber
+  , MouseButtons
+  , noButtons
+  , buttonsMember
+  , buttonsNull
+  , buttonsInsert
+  , buttonsDelete
+  , buttonsToList
+  , buttonsFromList
+  , buttonHeld
+  , buttonPressed
+  , buttonReleased
+  , anyButtonPressed
+  , anyButtonReleased
+  , applyMouseButton
+  , applyPointerLeave
+  , inputMouseDown
+  , inputMousePressed
+  , inputMouseReleased
+  , inputMouseRightDown
+  , inputMouseRightPressed
+  , inputMouseRightReleased
+
+    -- * Keys
   , Key (..)
   , Modifiers (..)
-  , MouseButton (..)
-  , applyMouseButton
   , appendInputKey
   , inputKeysFromList
   , inputKeysNull

@@ -49,17 +49,18 @@ import NanoUI.Backend
   , Input (..)
   , Key (..)
   , Modifiers (..)
-  , MouseButton (..)
   , WindowHost (..)
   , answerScreenshots
   , applyKey
   , applyMouseButton
+  , applyPointerLeave
   , cursorFallback
   , emptyInput
   , installWindowHost
   , keyRepeats
   , keypadKey
   , modifiersFromBits
+  , mouseButtonNumber
   , setExplainLayout
   , setWakeLoop
   )
@@ -462,6 +463,7 @@ data RgfwEvent
   | RgfwEvResize -- ^ window size or monitor scale changed (read back at sync)
   | RgfwEvMotion !Float !Float
   | RgfwEvButton !Word8 !Bool
+  | RgfwEvLeave -- ^ the pointer left the window
   | RgfwEvScroll !Float !Float
   | RgfwEvChar !Char -- ^ typed character
   | RgfwEvKeyPress !Word32 !Word8 !Bool -- ^ key, modifiers, and whether an auto-repeat
@@ -511,6 +513,7 @@ decodeRgfwEvents scale = mapMaybe $ \case
   R.EventMouseMotion x y -> Just (RgfwEvMotion (fromIntegral x / scale) (fromIntegral y / scale))
   R.EventMouseButton btn down -> Just (RgfwEvButton btn down)
   R.EventMouseScroll dx dy -> Just (RgfwEvScroll dx dy)
+  R.EventOther t | t == R.rgfw_mouseLeave -> Just RgfwEvLeave
   R.EventKeyPress k m -> Just (RgfwEvKeyPress k m False)
   R.EventKeyRepeat k m -> Just (RgfwEvKeyPress k m True)
   R.EventKeyRelease k m -> Just (RgfwEvKeyRelease k m)
@@ -524,13 +527,11 @@ applyRgfwEvent inp ev = case ev of
   RgfwEvClose -> inp
   RgfwEvResize -> inp
   RgfwEvMotion x y -> inp {inputMousePos = V2 x y}
-  RgfwEvButton btn down
-    | btn == R.rgfw_mouseLeft -> applyMouseButton MouseLeft down inp
-    | btn == R.rgfw_mouseRight -> applyMouseButton MouseRight down inp
-    | btn == R.rgfw_mouseMiddle -> applyMouseButton MouseMiddle down inp
-    | btn == R.rgfw_mouseMisc1 -> applyMouseButton MouseBack down inp
-    | btn == R.rgfw_mouseMisc2 -> applyMouseButton MouseForward down inp
-    | otherwise -> inp
+  -- RGFW numbers the buttons from 0 in the order 'mouseButtonNumber' counts
+  -- them from 1: left, middle, right, then its misc buttons, the first two
+  -- the back and forward side buttons.
+  RgfwEvButton btn down -> applyMouseButton (mouseButtonNumber (fromIntegral btn + 1)) down inp
+  RgfwEvLeave -> applyPointerLeave inp
   RgfwEvScroll dx dy -> inp {inputScroll = v2Add (inputScroll inp) (V2 dx dy)}
   RgfwEvChar c -> inp {inputChars = T.snoc (inputChars inp) c}
   RgfwEvKeyPress k m repeated ->

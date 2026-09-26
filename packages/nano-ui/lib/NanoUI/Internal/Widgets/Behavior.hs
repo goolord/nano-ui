@@ -59,8 +59,8 @@ useDrag1D axis owner lo hi current track = do
         DragAxisX -> (rectX track, rectW track, v2X (inputMousePos inp))
         DragAxisY -> (rectY track, rectH track, v2Y (inputMousePos inp))
   active0 <- quietFlag dragK <$> uiIO (getStore ctx)
-  started <- pure (inputMousePressed inp && rectHit track (inputMousePos inp)) <&&> (not <$> uiIO (pointerCovered ctx owner))
-  let active = inputMouseDown inp && (active0 || started)
+  started <- pure (buttonPressed MouseLeft inp && rectHit track (inputMousePos inp)) <&&> (not <$> uiIO (pointerCovered ctx owner))
+  let active = buttonHeld MouseLeft inp && (active0 || started)
       frac = if trackLen <= 0 then 0 else clamp01 ((mouse - origin) / trackLen)
   when (active /= active0) $ uiIO (modifyStore ctx (setQuietFlag dragK active))
   pure (if active then lo + frac * (hi - lo) else current, active, active0)
@@ -86,14 +86,14 @@ useReorder order items = do
       dragK = slotKey SlotDrag key
       dragWK = slotKey SlotDragW key
       mouse = inputMousePos inp
-      press = inputMousePressed inp
-      release = inputMouseReleased inp
+      press = buttonPressed MouseLeft inp
+      release = buttonReleased MouseLeft inp
       hit = fst <$> find (\(_, r) -> rectHit r mouse) items
   store <- uiIO (getStore ctx)
   let from0 = findSlot fieldInt (-1) dragK store
       startX = findSlot fieldFloat 0 dragWK store
       dragging = if press then fromMaybe (-1) hit else from0
-      nextDrag = if release || not (inputMouseDown inp) then -1 else dragging
+      nextDrag = if release || not (buttonHeld MouseLeft inp) then -1 else dragging
       -- Resolve the drop using the held source before clearing it on release.
       moved = not press && dragging >= 0 && abs (v2X mouse - startX) > dragThresholdPx
       nextOrder = case hit of
@@ -190,6 +190,6 @@ useDismissable panel = do
           RouteLayer _ -> False
           _ -> True
         esc = inputKeysElem KeyEscape (inputKeys inp) && not taken && null menu && not dropdown
-        pressed = (inputMousePressed inp || inputMouseRightPressed inp || inputMouseMiddlePressed inp) && not onMenu
+        pressed = anyButtonPressed inp && not onMenu
     when esc (markEscapeConsumed ctx)
     pure (esc || (pressed && not (rectHit panel (inputMousePos inp))))

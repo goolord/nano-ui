@@ -84,7 +84,7 @@ import NanoUI.Internal.Draw.Types (DrawArena, DrawOp, DrawingBuild)
 import NanoUI.Internal.Font (CustomMeasureFn, FontMetrics, WrapResult)
 import NanoUI.Internal.Frame.SpanArena (SpanArena)
 import NanoUI.Internal.Id (IdContext, WidgetId, hashWidgetId)
-import NanoUI.Internal.Input (Composition, UiCursorKind)
+import NanoUI.Internal.Input (Composition, MouseButton, UiCursorKind)
 import NanoUI.Internal.Layout.Arena (DirTag, LayoutCache, NodeArena)
 import NanoUI.Internal.Store (WidgetStore)
 import NanoUI.Internal.Style (Appearance, FontStyle, FontVariant, FontWeight, Layout, Padding, Theme)
@@ -717,13 +717,12 @@ data Context = Context
   , ctxActiveId :: IORef WidgetId
   , ctxClickedId :: IORef WidgetId
   , ctxReleaseClickedId :: IORef WidgetId
-  -- | Where the held left, right and middle buttons went down, cleared when
-  -- they come up. A click belongs to the widget the press landed on, so a
-  -- widget hit-tests this point as well as the release point. 'Nothing' (a
-  -- release with no press behind it) lets the release stand on its own.
-  , ctxPressPos :: IORef (Maybe V2)
-  , ctxRightPressPos :: IORef (Maybe V2)
-  , ctxMiddlePressPos :: IORef (Maybe V2)
+  -- | Where each held button went down, written on the frames a button
+  -- goes down or comes up ('NanoUI.Internal.Frame.Input.armPointerPress').
+  -- A click, or a button held, belongs to the widget the press landed on, so
+  -- a widget hit-tests this point as well as the pointer. A button without
+  -- one (a release with no press behind it) stands on its own.
+  , ctxPressPos :: IORef (Map MouseButton V2)
   , ctxFocusId :: IORef WidgetId
   -- | Focus last moved by keyboard or from code, so the focused widget shows
   -- its ring. A pointer press hides it again.

@@ -15,7 +15,7 @@ import qualified Data.ByteString as BS
 import qualified Data.Text as T
 
 import NanoUI
-import NanoUI.Backend (Damage (..), emptyInput)
+import NanoUI.Backend (Damage (..), applyMouseButton, emptyInput)
 import NanoUI.Backend.Sdl (sdlDrawFrame, syncDisplay, withSdlBench)
 import NanoUI.Internal.Debug (debugCadence, newDebugSampler, refreshDebugSnapshot)
 import NanoUI.Diagrams
@@ -55,7 +55,6 @@ profileInput =
   emptyInput
     { inputWindowSize = Size 1280 800
     , inputMousePos = V2 640 400
-    , inputMouseDown = False
     }
 
 -- | Mean wall time and allocation per run after a short warmup. The clock
@@ -88,7 +87,7 @@ main = do
   ctx0 <- newPixelContext
   withSdlBench ctx0 $ \ctx sdlEnv -> do
     (ctx', inp) <- syncDisplay ctx sdlEnv profileInput
-    (_, inpAct) <- syncDisplay ctx sdlEnv profileInput {inputMouseDown = True}
+    (_, inpAct) <- syncDisplay ctx sdlEnv profileInput {inputButtonsHeld = buttonsFromList [MouseLeft]}
     let drawDemo frameInp = void (sdlDrawFrame ctx' demoUi sdlEnv frameInp False)
         runFrames = mapM_ (\(name, ui) -> measureBench name (void (runFrame ctx' inp ui)))
 
@@ -238,13 +237,13 @@ main = do
       nextCorner >>= \k -> void (sdlDrawFrame ctx' (benchCorners k) sdlEnv inp False)
     -- Dragging the divider of two panes that each hold the paragraphs: every
     -- frame shares the width out again and wraps both panes at new widths.
-    let dividerAt k = inp {inputMousePos = V2 (400 + fromIntegral (k `mod` 40 - 20)) 300, inputMouseDown = True}
+    let dividerAt k = inp {inputMousePos = V2 (400 + fromIntegral (k `mod` 40 - 20)) 300, inputButtonsHeld = buttonsFromList [MouseLeft]}
     replicateM_ 3 (void (runFrame ctx' inp benchSplit))
-    void (runFrame ctx' (dividerAt 20) {inputMousePressed = True} benchSplit)
+    void (runFrame ctx' (dividerAt 20) {inputButtonsPressed = buttonsFromList [MouseLeft]} benchSplit)
     nextSplit <- newCounter 1
     measureBench "Wrap: split drag, 2x20 paragraphs" $
       nextSplit >>= \k -> void (runFrame ctx' (dividerAt k) benchSplit)
-    void (runFrame ctx' inp {inputMouseReleased = True} benchSplit)
+    void (runFrame ctx' (applyMouseButton MouseLeft False inp) benchSplit)
     -- More glyphs than one atlas page holds, all painted every frame: ten
     -- sizes of 280 characters each.
     measureBench "Text: 10 sizes of 280 glyphs, > 1 atlas page" $

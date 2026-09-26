@@ -60,7 +60,7 @@ runScrollThumbCursorTest ctx failed = do
     assertJustM failed (findGrabHover ctx ui inp0 thumbX tryYs) $ \hover -> do
       kind <- uiCursorKind ctx hover
       assertEq failed kind UiCursorGrab
-      let press = hover {inputMouseDown = True, inputMousePressed = True}
+      let press = applyMouseButton MouseLeft True hover
       _ <- runFrame ctx press ui
       grabbing <- cursorKindIs ctx press UiCursorGrabbing
       assert failed grabbing
@@ -91,9 +91,9 @@ runScrollThumbHoverTest ctx failed = do
     assert failed =<< needsRedraw ctx over off
     thumbIs off rest
     -- A drag keeps its thumb bright wherever the pointer goes.
-    thumbIs over {inputMouseDown = True, inputMousePressed = True} hovered
-    thumbIs off {inputMousePos = V2 20 (ry + rh / 2), inputMouseDown = True} hovered
-    thumbIs off {inputMouseReleased = True} rest
+    thumbIs (applyMouseButton MouseLeft True over) hovered
+    thumbIs off {inputMousePos = V2 20 (ry + rh / 2), inputButtonsHeld = buttonsFromList [MouseLeft]} hovered
+    thumbIs (applyMouseButton MouseLeft False off) rest
 
 -- The scroll content's right edge stops at the scrollbar gutter, one gap
 -- before the bar. The gap matches the scroller's right padding and is never

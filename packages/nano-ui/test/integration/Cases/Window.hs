@@ -255,11 +255,11 @@ runWindowLayoutReuseTest ctx failed = do
   let r0 = respRect win0
       V2 gx gy = windowTitleGrab r0
   _ <- sameAsFresh inp0
-  _ <- runFrame ctx inp0 {inputMousePos = V2 gx gy, inputMouseDown = True, inputMousePressed = True} ui
+  _ <- runFrame ctx (pressAt inp0 (V2 gx gy)) ui
   forM_ [1 .. 4 :: Int] $ \k -> do
-    let step = inp0 {inputMousePos = V2 (gx - 20 * fromIntegral k) (gy + 10 * fromIntegral k), inputMouseDown = True}
+    let step = inp0 {inputMousePos = V2 (gx - 20 * fromIntegral k) (gy + 10 * fromIntegral k), inputButtonsHeld = buttonsFromList [MouseLeft]}
     void (sameAsFresh step)
-  Rect x1 y1 _ _ <- sameAsFresh inp0 {inputMousePos = V2 (gx - 80) (gy + 40), inputMouseReleased = True}
+  Rect x1 y1 _ _ <- sameAsFresh (applyMouseButton MouseLeft False inp0 {inputMousePos = V2 (gx - 80) (gy + 40)})
   assert failed (x1 < rectX r0 - 40 && y1 > rectY r0 + 20)
 
 -- Wheeling over a window's body scrolls the window, not the page, whether the
@@ -413,7 +413,7 @@ runWindowResizeHaloHitTest ctx failed = do
       destX = bx + bw + 4
       press = pressAt inp0 grab
   _ <- runFrame ctx press ui
-  let moved = press {inputMousePos = V2 (destX + 24) (y0 + 22), inputMousePressed = False}
+  let moved = press {inputMousePos = V2 (destX + 24) (y0 + 22), inputButtonsPressed = noButtons}
   _ <- runFrame ctx moved ui
   ((_, win1), _, _, _) <- runFrame ctx (inp0 {inputMousePos = V2 destX (y0 + 22)}) ui
   let Rect x1 y1 _ h1 = respRect win1

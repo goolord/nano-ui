@@ -25,7 +25,7 @@ benchInput =
   emptyInput
     { inputWindowSize = benchWindowSize
     , inputMousePos = V2 400 300
-    , inputMouseDown = True
+    , inputButtonsHeld = buttonsFromList [MouseLeft]
     }
 
 smallUi, mediumUi, largeUi :: NanoUI ()
