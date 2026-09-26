@@ -221,9 +221,9 @@ data WheelHit
 -- the pointer. Where layers or a pinned node draw one child over another
 -- (@layered@, and this node layered or above a pinned node), the children
 -- are asked in the order paint draws them, the one on top first
--- ('childrenTopFirst'), so a scroller pinned over another takes the wheel;
--- elsewhere children do not overlap, and are asked in the arena's sibling
--- order.
+-- ('firstChildOnTopJustM'), so a scroller pinned over another takes the
+-- wheel; elsewhere children do not overlap, and are asked in the arena's
+-- sibling order.
 queryScrollTarget :: Context -> Bool -> V2 -> Rect -> NodeIdx -> IO WheelHit
 queryScrollTarget ctx@Context {ctxNodeArena = na} layered mouse parentClip idx = do
   nt <- getNodeType na idx
@@ -237,10 +237,7 @@ queryScrollTarget ctx@Context {ctxNodeArena = na} layered mouse parentClip idx =
               WheelMiss -> Nothing
               hit -> Just hit
       inner <-
-        fromMaybe WheelMiss <$>
-          if overlapping
-            then firstJust answered =<< childrenTopFirst na idx
-            else firstChildJustM na idx answered
+        fromMaybe WheelMiss <$> (if overlapping then firstChildOnTopJustM else firstChildJustM) na idx answered
       case inner of
         WheelTo _ -> pure inner
         _ ->
@@ -253,9 +250,6 @@ queryScrollTarget ctx@Context {ctxNodeArena = na} layered mouse parentClip idx =
                   <&&> (rectHit <$> getNodeRect na idx <*> pure mouse)
                   <&&> pure (rectHit clip mouse)
               pure (if blocks then WheelBlocked else inner)
- where
-  firstJust _ [] = pure Nothing
-  firstJust f (c : cs) = f c >>= maybe (firstJust f cs) (pure . Just)
 
 -- | Node @idx@, when it is a scroller that takes the wheel at @mouse@: a
 -- scroll container whose viewport or bar lanes hold it, or a text area with

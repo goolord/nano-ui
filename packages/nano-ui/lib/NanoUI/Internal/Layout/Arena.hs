@@ -116,6 +116,7 @@ module NanoUI.Internal.Layout.Arena
   , foldPlacedChildrenM
   , forChildrenInPaintOrder_
   , childrenTopFirst
+  , firstChildOnTopJustM
   , drawnOver
   , AdornRows (..)
   , adornRows
@@ -307,9 +308,9 @@ data NodeClass
   -- content a clip of their own, for the damage pass that tracks them
   -- ('NanoUI.Internal.Damage.updatePrevRects').
   | LayeredNodes
-  -- ^ Layered containers and pinned nodes, the only places where paint draws a node over
-  -- one declared before it ('forChildrenInPaintOrder_'), so that the pointer
-  -- over two widgets can be on the later one ('layeredNodeCount').
+  -- ^ Layered containers and pinned nodes, the only places where paint draws
+  -- a node over one declared before it ('forChildrenInPaintOrder_'), so that
+  -- the pointer over two widgets can be on the later one ('layeredNodeCount').
   deriving (Eq, Enum, Bounded)
 
 -- | The constructor of a 'Sizing' without its number, as the arena stores it
@@ -1757,9 +1758,9 @@ flowChildrenInOrder na parentIdx = foldFlowChildrenM na parentIdx (\acc ci -> pu
 -- | Visit a node's children, floating ones included, in the order paint draws
 -- them, so that each is drawn over the ones visited before it. A layered
 -- container draws the children that are not pinned in declaration order,
--- later children on top. Any other node draws them from the last declared to the first, so
--- where two overlap the earlier one is on top. Either then draws its pinned
--- children, in declaration order, over all of those.
+-- later children on top. Any other node draws them from the last declared to
+-- the first, so where two overlap the earlier one is on top. Either then
+-- draws its pinned children, in declaration order, over all of those.
 {-# INLINE forChildrenInPaintOrder_ #-}
 forChildrenInPaintOrder_ :: NodeArena -> NodeIdx -> (NodeIdx -> IO ()) -> IO ()
 forChildrenInPaintOrder_ na parentIdx f = do
@@ -1791,6 +1792,14 @@ childrenTopFirst na parentIdx = do
     nt <- getNodeType na ci
     unless (isFloatingNode nt) $ modifyIORef' acc (ci :)
   readIORef acc
+
+-- | What @f@ finds for the first child of @parentIdx@ it finds anything for,
+-- asking the children in 'childrenTopFirst' order: 'firstChildJustM' where
+-- one child can be drawn over another.
+{-# INLINE firstChildOnTopJustM #-}
+firstChildOnTopJustM :: NodeArena -> NodeIdx -> (NodeIdx -> IO (Maybe a)) -> IO (Maybe a)
+firstChildOnTopJustM na parentIdx f =
+  foldr (\ci rest -> f ci >>= maybe rest (pure . Just)) (pure Nothing) =<< childrenTopFirst na parentIdx
 
 -- | Whether paint draws node @b@ over node @a@, declared before it: whether,
 -- of the two children of the node where their branches meet,
