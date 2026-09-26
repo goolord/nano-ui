@@ -81,6 +81,8 @@
 - `NanoUI` exports `UiCursorKind`, which `widgetCursor` on a custom widget
   returns, so choosing its pointer no longer needs `NanoUI.Testing`.
 
+- `inlineBackground`: a colour painted behind a rich-text piece, such as the
+  tint behind inline code.
 - `NanoUIEs`, the effect row behind `NanoUI`. A widget configuration carrying
   its caller's row, such as `PaneGridConfig`, can now be named from an
   ordinary view without depending on `effectful`.

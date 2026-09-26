@@ -14,6 +14,7 @@ tests =
   , spec "rich-text-link" runRichTextLinkTest
   , spec "rich-text-align" runRichTextAlignTest
   , spec "rich-text-many" runRichTextManyTest
+  , spec "rich-text-background" runRichTextBackgroundTest
   ]
 
 -- | A paragraph wraps at its column's width, taking a line's height per line,
@@ -116,3 +117,30 @@ runRichTextManyTest base failed = do
   writeIORef measured 0
   replicateM_ 2 frame
   assertEq failed 0 =<< readIORef measured
+
+-- | A piece's background is painted under its words, across the spaces
+-- between them but not those at its ends, once for each line it is on; a
+-- change of colour is a change of paragraph.
+runRichTextBackgroundTest :: Context -> IORef Int -> IO ()
+runRichTextBackgroundTest ctx failed = do
+  let inp = withInput 400 400
+      fm = ctxFontMetrics ctx
+      tint = colorRGBA 1 2 3 255
+      ui c = column (fst <$> richText' ["Run ", inlineBackground c (inlineCode " cabal build "), " first"])
+      opsOf c = do
+        resp <- warmup2 ctx inp (ui c)
+        Just entry <- lookupCustomDrawing ctx (respId resp)
+        cdc <- mkCustomDrawContext ctx fm (respId resp)
+        pure (respRect resp, toList (cdrBuild entry cdc (respRect resp)))
+  (Rect rx _ _ _, ops) <- opsOf tint
+  prefixW <- sum <$> mapM (lineWidthIO fm) ["Run", " ", " "]
+  codeW <- sum <$> mapM (lineWidthIO fm) ["cabal", " ", "build"]
+  let fills = [r | FillRect r c <- ops, c == tint]
+      firstText = length (takeWhile (\case DrawTextStyled {} -> False; _ -> True) ops)
+  assertEq failed 1 (length fills)
+  forM_ fills $ \(Rect x _ w h) ->
+    assert failed (abs (x - (rx + prefixW)) < 0.5 && abs (w - codeW) < 0.5 && h > 0)
+  -- Under the words: before the first of them.
+  assert failed (firstText >= 1)
+  (_, plain) <- opsOf (colorRGBA 9 9 9 255)
+  assertEq failed [] [r | FillRect r c <- plain, c == tint]

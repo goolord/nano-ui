@@ -25,11 +25,14 @@ module NanoUI.Markdown.Document
   , parseMarkdown
   , appendMarkdown
   , markdownBlocks
+  , markdownSource
+  , markdownImages
   , parseMarkdownBlocks
   ) where
 
 import Control.DeepSeq (NFData, deepseq, rnf)
 import Control.Monad (guard)
+import Data.Containers.ListUtils (nubOrd)
 import Data.Foldable (toList)
 import Data.List (find)
 import Data.Map.Strict qualified as M
@@ -116,6 +119,31 @@ parseMarkdown t = fromMaybe unparsed (resume new t)
 -- | The blocks of a document.
 markdownBlocks :: MarkdownDoc -> [Block]
 markdownBlocks doc = toList (docClosed doc) ++ docLast doc
+
+-- | A document's text, parsed or appended: what '==' compares.
+markdownSource :: MarkdownDoc -> Text
+markdownSource = T.concat . pieces
+
+-- | The sources of a document's images, each once, in the order they first
+-- appear, in quotes, lists, tables and links as well: for loading them
+-- before they come into view.
+markdownImages :: MarkdownDoc -> [Text]
+markdownImages = nubOrd . concatMap blockImages . markdownBlocks
+  where
+    blockImages = \case
+      Paragraph xs -> spanImages xs
+      Heading _ xs -> spanImages xs
+      BlockQuote bs -> concatMap blockImages bs
+      List _ _ items -> concatMap (concatMap blockImages . itemBlocks) items
+      Table _ header rows -> concatMap spanImages (header ++ concat rows)
+      _ -> []
+    spanImages = concatMap $ \case
+      Image src _ alt -> src : spanImages alt
+      Emph xs -> spanImages xs
+      Strong xs -> spanImages xs
+      Strike xs -> spanImages xs
+      Link _ _ xs -> spanImages xs
+      _ -> []
 
 -- | The blocks of a text: @'markdownBlocks' . 'parseMarkdown'@.
 parseMarkdownBlocks :: Text -> [Block]

@@ -13,3 +13,14 @@
   clicked. Documents are equal when their texts are. `NFData` instances for
   the syntax types. Task items draw nano-ui's checkbox, headings scale the
   backend's default font size, and a drawn image shows its title as a tooltip.
+- `MarkdownConfig es` carries the view's effect row, for `mdBlock`, which
+  draws any block, at any depth, your own way (syntax highlighting, images
+  loaded as they are drawn, chrome of your own), and `markdownBlock`, the
+  widget's own drawing of a block, to fall back to or wrap. Style modifiers
+  over the look of inline code (`mdInlineCode`, with a background from
+  `mdInlineCodeBackground`), code blocks (`mdCodeBlock`), quotes (`mdQuote`)
+  and table cells (`mdTableCell`).
+- `markdownSource`, a document's text, and `markdownImages`, its images'
+  sources, for loading them ahead.
+- The example streams its reply with nano-ui's `useStream`, appending tokens
+  on the producer's thread.

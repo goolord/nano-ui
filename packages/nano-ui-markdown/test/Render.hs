@@ -6,14 +6,17 @@ import Control.Monad (filterM, forM, replicateM_, void, when)
 import Data.Foldable (toList)
 import Data.Function (on)
 import Data.IORef (modifyIORef', newIORef, readIORef, writeIORef)
+import Data.Word (Word8)
+import Foreign.ForeignPtr (withForeignPtr)
+import Foreign.Storable (peekByteOff)
 import Data.List (find, groupBy, nub, sortOn)
 import Data.Maybe (isJust)
 import Data.Text (Text)
 import Data.Text qualified as T
 import NanoUI
-  ( Color, DrawOp (..), ImageId (..), Input (..), NanoUI, Rect (..), Size (..), TextFont (..), Theme (..), V2 (..)
-  , WidgetId, checkboxBoxSize, columnWith, drawCheckbox, fillW, fixedH, fixedW, getScrollOffset, padAll, rectIntersect
-  , runCanvas, scrollArea, uiIO
+  ( Color, DrawOp (..), ImageId (..), Input (..), NanoUI, NanoUIEs, Rect (..), Size (..), Style (..), TextFont (..), Theme (..)
+  , V2 (..), WidgetId, background, checkboxBoxSize, colorA, colorB, colorG, colorR, colorRGBA, columnWith, drawCheckbox, fillW, fixedH, fixedW, fontColor, foreground
+  , getScrollOffset, label, padAll, panel, rectIntersect, runCanvas, scrollArea, uiIO
   )
 import NanoUI.Backend (FontBackend (..), FontMetrics (..), monospaceMetrics)
 import NanoUI.Internal.Context (Context (..), CustomDrawingEntry (..), DrawingEntry (..), lookupCustomDrawing, lookupDrawing)
@@ -21,7 +24,8 @@ import NanoUI.Internal.Layout.Arena (NodeType (..), arenaCount, getNodeRect, get
 import NanoUI.Internal.Widgets.Custom (mkCustomDrawContext)
 import NanoUI.Markdown
 import NanoUI.Testing
-  ( Damage (..), collectOverlayTextSpans, collectTextSpans, newContext, runFrame, takeDamage, withClipboard, withFontMetrics
+  ( Damage (..), DrawData (..), collectOverlayTextSpans, collectTextSpans, newContext, runFrame, takeDamage, withClipboard
+  , withFontMetrics
   )
 import NanoUI.Testing.Assert (withInput)
 import NanoUI.Testing.Harness (covers, hasText, runClick, spanCenter, spanRect, spanRectOf, warmup, warmup2)
@@ -62,6 +66,27 @@ markers ctx = do
 wordNamed :: Text -> [Word'] -> Maybe Word'
 wordNamed t = find ((== t) . wText)
 
+-- | The rectangles the frame's rich-text widgets fill in a colour: their
+-- pieces' backgrounds and decorations.
+drawnFills :: Color -> Context -> IO [Rect]
+drawnFills c ctx = do
+  drawings <- nodesOf NodeDrawing ctx
+  fmap concat . forM drawings $ \(wid, r) -> do
+    entry <- lookupCustomDrawing ctx wid
+    cdc <- mkCustomDrawContext ctx (ctxFontMetrics ctx) wid
+    pure [rect | Just e <- [entry], FillRect rect c' <- toList (cdrBuild e cdc r), c' == c]
+
+-- | Whether a frame, painted in full, draws anything in a colour.
+paints :: Color -> NanoUI a -> IO Bool
+paints c ui = do
+  ctx <- drawn 600 400 ui
+  writeIORef (ctxPaintFull ctx) True
+  (_, _, dd, _) <- runFrame ctx (withInput 600 400) ui
+  withForeignPtr (drawVertices dd) $ \vp ->
+    fmap or . forM [0 .. drawVertexCount dd - 1] $ \i -> do
+      rgba <- forM [2 .. 5] $ \k -> peekByteOff vp (i * 32 + 4 * k) :: IO Float
+      pure (map (round . (* 255)) rgba == map (fromIntegral :: Word8 -> Int) [colorR c, colorG c, colorB c, colorA c])
+
 -- | A fresh context that has drawn a view twice in a window @w@ by @h@.
 drawn :: Float -> Float -> NanoUI a -> IO Context
 drawn w h ui = newContext >>= \ctx -> ctx <$ warmup2 ctx (withInput w h) ui
@@ -95,8 +120,18 @@ clickWord ui w = do
   runClick ctx inp ui pos
 
 -- | Draws cat.png at 40 by 30 and no other image.
-catImages :: MarkdownConfig
+catImages :: MarkdownConfig es
 catImages = defaultMarkdownConfig {mdImage = \src -> if src == "cat.png" then Just (ImageId 7, Size 40 30) else Nothing}
+
+-- | Draws a code block in Haskell as a label of its own, and every other
+-- block as the widget does.
+customCode :: MarkdownConfig NanoUIEs
+customCode =
+  defaultMarkdownConfig
+    { mdBlock = \case
+        CodeBlock "hs" code -> Just (Nothing <$ label ("custom " <> code))
+        _ -> Nothing
+    }
 
 spec :: Spec
 spec = do
@@ -317,3 +352,54 @@ spec = do
         (w, h) `shouldBe` (side, side)
         ops == toList (runCanvas (drawCheckbox theme r False)) `shouldBe` True
       _ -> expectationFailure ("expected an unchecked box's two ops, got " <> show (length ops))
+
+  it "draws the blocks mdBlock draws, at every depth, and the rest as it would" $ do
+    ctx <-
+      drawn 600 600 . columnWith (fixedW 500) . markdownConfigured customCode . parseMarkdown $
+        "```hs\ntop\n```\n\n> ```hs\n> quoted\n> ```\n\n- item\n\n  ```hs\n  listed\n  ```\n\n```py\nother\n```\n\nafter"
+    spans <- collectTextSpans ctx
+    map (`hasText` spans) ["custom top", "custom quoted", "custom listed", "other", "py"] `shouldBe` replicate 5 True
+    -- Only the Python block is the widget's own, with its copy button.
+    length [() | (_, "Copy", _, _, _) <- spans] `shouldBe` 1
+    map wText <$> drawnWords ctx `shouldReturn` ["item", "after"]
+
+  it "falls back to markdownBlock inside chrome of its own, and returns its link" $ do
+    let cfg :: MarkdownConfig NanoUIEs
+        cfg =
+          defaultMarkdownConfig
+            { mdBlock = \case
+                b@(Paragraph _) -> Just (panel (markdownBlock cfg b))
+                _ -> Nothing
+            }
+        ui = columnWith (fixedW 500) (markdownConfigured cfg (parseMarkdown "See [the docs](/docs).\n\n> Quoted [link](/quoted)."))
+    clickWord ui "docs" `shouldReturn` Just "/docs"
+    clickWord ui "link" `shouldReturn` Just "/quoted"
+
+  it "styles inline code, quotes, table cells and code blocks over their own look" $ do
+    let tint = colorRGBA 1 2 3 255
+        codeInk = colorRGBA 40 50 60 255
+        quoteInk = colorRGBA 70 80 90 255
+        cellInk = colorRGBA 100 110 120 255
+        cfg =
+          (defaultMarkdownConfig :: MarkdownConfig NanoUIEs)
+            { mdInlineCode = fontColor codeInk
+            , mdInlineCodeBackground = Just tint
+            , mdQuote = fontColor quoteInk
+            , mdTableCell = \header -> if header then id else foreground cellInk
+            }
+        ui c = columnWith (fixedW 500) (markdownConfigured c (parseMarkdown "Run `build` now.\n\n> quoted\n\n| head |\n|---|\n| cell |"))
+    ctx <- drawn 600 400 (ui cfg)
+    ws <- drawnWords ctx
+    theme <- readIORef (ctxTheme ctx)
+    map (fmap wColor . (`wordNamed` ws)) ["build", "quoted", "cell", "head", "Run"]
+      `shouldBe` map Just [codeInk, quoteInk, cellInk, styleFgOf theme, styleFgOf theme]
+    -- The background is under the code alone.
+    Just code <- pure (wordNamed "build" ws)
+    [Rect x _ _ _] <- drawnFills tint ctx
+    x `shouldBe` let V2 cx _ = wPos code in cx
+    (drawnFills tint =<< drawn 600 400 (ui defaultMarkdownConfig)) `shouldReturn` []
+    let block c = columnWith (fixedW 500) (markdownConfigured (defaultMarkdownConfig :: MarkdownConfig NanoUIEs) {mdCodeBlock = background c} (parseMarkdown "```\ncode\n```"))
+    paints tint (block tint) `shouldReturn` True
+    paints tint (block (colorRGBA 9 9 9 255)) `shouldReturn` False
+  where
+    styleFgOf theme = styleFg (themePanel theme)

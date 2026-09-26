@@ -164,6 +164,16 @@ spec = do
       parseMarkdown "a" `shouldNotBe` parseMarkdown "a\n"
       parseMarkdown "a\r\n" `shouldNotBe` parseMarkdown "a\n"
       emptyMarkdown `shouldBe` parseMarkdown ""
+    it "hands back its text, however it was built" $
+      withNumTests 300 $ property $ \(Cut d cuts) ->
+        markdownSource (appendAll (chunksAt cuts (docText d))) === docText d
+    it "lists its images' sources once each, in order, at any depth" $
+      markdownImages
+        ( parseMarkdown
+            "![a](one.png) and [![b](two.png)](/link)\n\n> - ![c](three.png) *![d](one.png)*\n\n\
+            \| h | ![e](four.png) |\n|---|---|\n| ![f](five.png) | x |\n\n```\n![not](code.png)\n```"
+        )
+        `shouldBe` ["one.png", "two.png", "three.png", "four.png", "five.png"]
     it "shows as the parse of its text" $
       show (appendMarkdown "b" (parseMarkdown "*a*\n")) `shouldBe` "parseMarkdown \"*a*\\nb\""
     it "keeps every token in a store that skips equal documents" $ do

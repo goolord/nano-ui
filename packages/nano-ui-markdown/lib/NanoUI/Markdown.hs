@@ -16,8 +16,14 @@
 -- >   for_ clicked setLastLink
 -- >   unless (T.null lastLink) $ label ("Clicked " <> lastLink)
 --
--- A reply that streams in grows with 'appendMarkdown'. Append the tokens
--- that arrived in a frame at once:
+-- A reply that streams in grows with 'appendMarkdown'. One that arrives on
+-- a thread of its own streams in with nano-ui's @useStream@, which appends
+-- each token on that thread:
+--
+-- > doc <- useStream replyId emptyMarkdown $ \update ->
+-- >   onToken client (\token -> update (appendMarkdown token))
+--
+-- On the UI thread, append the tokens that arrived in a frame at once:
 --
 -- > onTokens :: [Text] -> MarkdownDoc -> MarkdownDoc
 -- > onTokens tokens = appendMarkdown (T.concat tokens)
@@ -27,6 +33,14 @@
 -- inside a list, a table, fenced code or a block quote, down to its last
 -- item, row, line or block. "NanoUI.Markdown.Document" says when more is
 -- parsed again.
+--
+-- 'mdBlock' draws blocks your own way, at any depth, falling back to
+-- 'markdownBlock', the widget's own drawing:
+--
+-- > highlighted :: MarkdownConfig NanoUIEs
+-- > highlighted = defaultMarkdownConfig {mdBlock = \case
+-- >   CodeBlock "haskell" code -> Just (Nothing <$ panel (richText (highlight code)))
+-- >   _ -> Nothing}
 --
 -- The @commonmark@ library parses the text, with GitHub's tables, task lists
 -- (in bullet lists), strikethrough and bare web and email links from
@@ -38,6 +52,8 @@ module NanoUI.Markdown
   , parseMarkdown
   , appendMarkdown
   , markdownBlocks
+  , markdownSource
+  , markdownImages
   , parseMarkdownBlocks
 
     -- * Drawing
@@ -45,6 +61,7 @@ module NanoUI.Markdown
   , markdownConfigured
   , MarkdownConfig (..)
   , defaultMarkdownConfig
+  , markdownBlock
 
     -- * Syntax
   , module NanoUI.Markdown.Syntax
