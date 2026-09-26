@@ -38,8 +38,9 @@ counter = do
   sparklines, and drag and drop. `customWidget` and a canvas API, with paths,
   fill rules, strokes with joins and dashes, gradients, clips and transforms
   (`NanoUI.Path`), cover anything else.
-- Row, column, grid, and stacked (`stack`) layout with scrolling, wrapping
-  (`wrap`), and pinned children (`pinAt`). Layout options are
+- Row, column, grid, and layered (`layers`) layout with scrolling, wrapping
+  (`wrap`, `lineAlign`), pinned children (`pinAt`) and aspect ratios
+  (`aspect`). Layout options are
   `Layout -> Layout` modifiers, as in `columnWith (gap 8 . padAll 12)`.
   `explainLayout` outlines every layout node.
 - Scrollers take a wheel step and a glide time (`setScrollTuning`,
@@ -58,8 +59,9 @@ counter = do
   `richText ["Read ", strong "the guide", " or ", hyperlink "faq" "the FAQ"]`.
 - Text fields with undo and redo, driven by `TextCommand` values that code
   can run too, and input-method composition in the SDL backend.
-- Images with a content fit, opacity and rotation (`imageConfigured`), SVG
-  icons (`loadSvg`, `svgIcon`) and a `spinner`.
+- Images with a content fit, crop, zoom, opacity and rotation
+  (`imageConfigured`), registered for as long as a view shows them
+  (`useImageRgba`), SVG icons (`loadSvg`, `svgIcon`) and a `spinner`.
 - Backends block on input when no animation or timed update needs a frame.
   Each frame computes
   its damage against the previous one. `wakeAfter` schedules a frame for a

@@ -6,6 +6,7 @@
 module NanoUI.Internal.Style
   ( Sizing (..)
   , Direction (..)
+  , Flow (..)
   , AlignX (..)
   , AlignY (..)
   , Padding (..)
@@ -97,6 +98,7 @@ module NanoUI.Internal.Style
   , gridMinColW
   , fixedAspectW
   , fixedAspectH
+  , aspect
   , gridCols
   , FontVariant (..)
   , FontWeight (..)
@@ -132,7 +134,11 @@ module NanoUI.Internal.Style
   , alignBottom
   , alignBaseline
   , wrap
+  , layered
   , lineGap
+  , lineAlign
+  , LineAlign (LinesStart, LinesCenter, LinesEnd)
+  , lineAlignFraction
   , pinAt
   , PointerMode (PointerAuto, PointerBlock, PointerPass)
   , pointer
@@ -155,11 +161,26 @@ data Sizing
   | Percent Float
   deriving (Eq, Show)
 
--- | Main axis for laying out a container's children. A 'Stack' has none:
--- each of its children takes the whole content box, placed in it by its own
--- alignment, and is drawn over the children declared before it. A scroll
--- container lays out a 'Stack' as a 'Column', and a grid ignores it.
-data Direction = Row | Column | Stack
+-- | Main axis for laying out a container's children: left to right, or top
+-- to bottom. Its 'Flow' says whether they go in one line, wrap onto more, or
+-- are layered with no axis at all.
+data Direction = Row | Column
+  deriving (Eq, Show, Enum, Bounded)
+
+-- | How a container places its children ('layoutFlow'). A scroll container
+-- and a grid place theirs their own way, whatever this says: put a wrapping
+-- or layered column inside the scroll container.
+data Flow
+  = -- | One after another in one line along its 'Direction': a row or a
+    -- column. The default.
+    Line
+  | -- | In lines along its 'Direction', a new one started where the next
+    -- child would overflow the main axis ('wrap').
+    Wrap
+  | -- | Each over the whole content box, placed in it by its own alignment,
+    -- and drawn over the children declared before it ('layered'). The
+    -- direction does not matter.
+    Layered
   deriving (Eq, Show, Enum, Bounded)
 
 -- | Horizontal alignment: left, centre, or right.
@@ -250,10 +271,13 @@ type LayoutModifier = Layout -> Layout
 
 -- | Layout and text options for a node. Lengths use logical pixels. Font size
 -- 0 selects the backend default; 'Nothing' for font colour uses the theme.
--- Grid column count 0 leaves the count to grid sizing. A row or column with
--- 'layoutWrap' starts a new line where the next child would overflow it,
--- 'layoutLineGap' apart ('Nothing' takes the gap). A node with 'layoutPin'
--- sits at that offset from its parent's content box instead of in its flow.
+-- Grid column count 0 leaves the count to grid sizing. A container whose
+-- 'layoutFlow' is 'Wrap' starts a new line where the next child would
+-- overflow it, 'layoutLineGap' apart (a negative gap takes 'layoutGap'), and
+-- places each line along its main axis by 'layoutLineAlign'. A node with
+-- 'layoutPin' sits at that offset from its parent's content box instead of
+-- in its flow. A positive 'layoutAspect' is the width over the height that
+-- a 'Fit' height keeps ('aspect'), and 0 is none.
 data Layout = Layout
   { layoutDirection :: !Direction
   , layoutWidth :: !Sizing
@@ -262,6 +286,8 @@ data Layout = Layout
   , layoutGap :: {-# UNPACK #-} !Float
   , layoutPointer :: {-# UNPACK #-} !PointerMode
   -- ^ Beside 'layoutGap', whose word it shares.
+  , layoutLineAlign :: {-# UNPACK #-} !LineAlign
+  -- ^ In the same word.
   , layoutAlignX :: !AlignX
   , layoutAlignY :: !AlignY
   , layoutMinW :: {-# UNPACK #-} !Float
@@ -272,6 +298,8 @@ data Layout = Layout
   , layoutGridCols :: {-# UNPACK #-} !Int
   , layoutGridMinColW :: {-# UNPACK #-} !Float
   , layoutFontSize :: {-# UNPACK #-} !Float
+  , layoutLineGap :: {-# UNPACK #-} !Float
+  , layoutAspect :: {-# UNPACK #-} !Float
   , layoutFontColor :: !(Maybe Color)
   , layoutFontTone :: !(Maybe Tone)
   -- ^ The tone text takes its colour from, unless 'layoutFontColor' gives
@@ -279,8 +307,7 @@ data Layout = Layout
   , layoutFontWeight :: !FontWeight
   , layoutFontStyle :: !FontStyle
   , layoutTextDecoration :: !TextDecoration
-  , layoutWrap :: !Bool
-  , layoutLineGap :: !(Maybe Float)
+  , layoutFlow :: !Flow
   , layoutPin :: !(Maybe V2)
   }
   deriving (Eq, Show)
@@ -310,8 +337,10 @@ defaultLayout =
     , layoutFontWeight = WeightNormal
     , layoutFontStyle = FontStyleNormal
     , layoutTextDecoration = DecorationNone
-    , layoutWrap = False
-    , layoutLineGap = Nothing
+    , layoutFlow = Line
+    , layoutLineGap = -1
+    , layoutLineAlign = LinesStart
+    , layoutAspect = 0
     , layoutPin = Nothing
     , layoutPointer = PointerAuto
     }
@@ -407,13 +436,30 @@ percent p l = l {layoutWidth = Percent p}
 gridMinColW :: Float -> Layout -> Layout
 gridMinColW w l = l {layoutGridMinColW = max 0 w}
 
--- | Fixed width and width/height ratio. The ratio must be positive.
+-- | Fixed width and width/height ratio: both sides fixed, the height
+-- worked out from the ratio. The ratio must be positive. 'aspect' keeps a
+-- ratio at a width the layout gives.
 fixedAspectW :: Float -> Float -> Layout -> Layout
 fixedAspectW w ratio = fixedWH w (w / ratio)
 
--- | Fixed height and width/height ratio. The ratio must be positive.
+-- | Fixed height and width/height ratio: both sides fixed, the width worked
+-- out from the ratio. The ratio must be positive.
 fixedAspectH :: Float -> Float -> Layout -> Layout
 fixedAspectH h ratio = fixedWH (h * ratio) h
+
+-- | Keep the width over the height at @ratio@: a 'Fit' height is the width
+-- the node is given over the ratio, within its height limits, so a picture
+-- that fills its column keeps its shape at any width:
+--
+-- > panelWith (fillW . aspect (16 / 9)) video
+--
+-- A 'Fit' width beside a fixed height is the height times the ratio. The
+-- height is the ratio's whatever the node holds, so a container's children
+-- can overflow it, as they can a 'fixedH'. A ratio that is not positive
+-- turns it off. A configured image ('NanoUI.imageConfigured') keeps its own
+-- ratio unless its layout gives one.
+aspect :: Float -> Layout -> Layout
+aspect ratio l = l {layoutAspect = if ratio > 0 && not (isInfinite ratio) then ratio else 0}
 
 -- | Set the grid column count, clamping negative counts to zero.
 gridCols :: Int -> Layout -> Layout
@@ -546,19 +592,86 @@ alignBaseline l = l {layoutAlignY = AlignBaseline}
 
 -- | Flow a row's children onto a new line below, or a column's into a new
 -- column to the right, where the next child would overflow the main axis, as
--- a list of tags or chips does. A child longer than a whole line takes one to
--- itself. Children keep their gap within a line, and lines are 'lineGap'
--- apart. Grow children share the space left on their own line, and a child's
--- cross-axis alignment places it within its line. A row wraps at the width it
--- is given; a column needs a bounded height ('fixedH', 'maxH') to wrap. Grids
--- and scroll containers ignore it.
+-- a list of tags or chips does ('Wrap'). A child longer than a whole line
+-- takes one to itself. Children keep their gap within a line, and lines are
+-- 'lineGap' apart, each at the start of the main axis unless 'lineAlign'
+-- moves it. Grow children share the space left on their own line, and a
+-- child's cross-axis alignment places it within its line. A row wraps at the
+-- width it is given; a column needs a bounded height ('fixedH', 'maxH') to
+-- wrap. Grids and scroll containers ignore it.
 wrap :: Layout -> Layout
-wrap l = l {layoutWrap = True}
+wrap l = l {layoutFlow = Wrap}
+
+-- | Layer a container's children in its content box instead of laying them
+-- out in a line ('Layered'): each is placed by its own alignment, and later
+-- ones are drawn over earlier ones. 'NanoUI.layers' is a container with it;
+-- this gives it to a panel or a card:
+--
+-- > panelWith (layered . fixedWH 240 160) $ do
+-- >   image grow cover
+-- >   labelWith (alignEnd . alignBottom) caption
+--
+-- A grow child fills the box on that axis. Grids and scroll containers
+-- ignore it: layer a column inside the scroll container.
+layered :: Layout -> Layout
+layered l = l {layoutFlow = Layered}
 
 -- | Set the space between a wrapping container's lines in logical pixels. By
 -- default lines are the 'gap' apart.
 lineGap :: Float -> Layout -> Layout
-lineGap n l = l {layoutLineGap = Just (max 0 n)}
+lineGap n l = l {layoutLineGap = max 0 n}
+
+-- | Where a wrapping container's lines sit along its main axis where they
+-- are shorter than it: at its start (the default), centred, or at its end.
+-- For chips centred under a heading, or right-aligned:
+--
+-- > rowWith (wrap . lineAlign LinesCenter . fillW) (mapM_ chip tags)
+--
+-- A line with a grow child fills the axis, so this moves only lines that
+-- leave room.
+lineAlign :: LineAlign -> Layout -> Layout
+lineAlign a l = l {layoutLineAlign = a}
+
+-- | Where a wrapping container's lines sit along its main axis
+-- ('lineAlign'): 'LinesStart', 'LinesCenter' or 'LinesEnd', left, centre and
+-- right in a row, top, middle and bottom in a column.
+--
+-- A byte, so that it shares a word of 'Layout' with 'layoutGap' and a layout
+-- costs no more for it.
+newtype LineAlign = LineAlign Word8
+  deriving newtype (Eq, Enum)
+
+-- | At the start of the main axis: the left of a row, the top of a column.
+pattern LinesStart :: LineAlign
+pattern LinesStart = LineAlign 0
+
+-- | Centred on the main axis.
+pattern LinesCenter :: LineAlign
+pattern LinesCenter = LineAlign 1
+
+-- | At the end of the main axis: the right of a row, the bottom of a column.
+pattern LinesEnd :: LineAlign
+pattern LinesEnd = LineAlign 2
+
+{-# COMPLETE LinesStart, LinesCenter, LinesEnd #-}
+
+instance Show LineAlign where
+  show = \case
+    LinesStart -> "LinesStart"
+    LinesCenter -> "LinesCenter"
+    _ -> "LinesEnd"
+
+instance Bounded LineAlign where
+  minBound = LinesStart
+  maxBound = LinesEnd
+
+-- | How far along the room a line leaves it starts: 0 at the start, a half
+-- centred, 1 at the end.
+lineAlignFraction :: LineAlign -> Float
+lineAlignFraction = \case
+  LinesStart -> 0
+  LinesCenter -> 0.5
+  _ -> 1
 
 -- | Take the node out of its parent's flow and place it over its siblings in
 -- the parent's content box (inside its padding), where its alignment puts it
@@ -576,13 +689,22 @@ lineGap n l = l {layoutLineGap = Just (max 0 n)}
 -- aligned to, and a percentage is of the content box. Windows, modals and
 -- popups place themselves and ignore it.
 --
+-- @pinAt 0 0 . grow@ is an overlay over the parent's whole content box that
+-- does not size the parent: a scrim, a drop highlight, a veil over a form
+-- while it saves. In 'NanoUI.layers' the overlay would count towards the
+-- size, and a large one would stretch the box it is meant to cover:
+--
+-- > columnWith (padAll 12) $ do
+-- >   form
+-- >   when saving $ box (pinAt 0 0 . grow . pointer PointerBlock) veil
+--
 -- A control pinned over its siblings takes the pointer from them where it is
 -- drawn over them; a panel, label or image lets it through to the controls
 -- beneath unless it is given @'pointer' 'PointerBlock'@.
 pinAt :: Float -> Float -> Layout -> Layout
 pinAt x y l = l {layoutPin = Just (V2 x y)}
 
--- | How a node takes the pointer where a stack or a pinned node draws it over
+-- | How a node takes the pointer where layers or a pinned node draw it over
 -- others ('pointer'). A node never takes the pointer from the nodes it is
 -- inside.
 --
@@ -627,7 +749,7 @@ instance Bounded PointerMode where
 
 -- | Set how the node takes the pointer where it is drawn over others:
 --
--- > stack $ do
+-- > layers $ do
 -- >   list
 -- >   panelWith (pointer PointerBlock . alignEnd . fixedW 240) details
 -- >   drawing (pointer PointerPass . fillW . fillH) glow

@@ -790,8 +790,8 @@ runDisjointViewportHitTest ctx failed = do
 -- | Stacked buttons and one pinned over them, in a scroller scrolled out of
 -- the outer viewport, have an empty clip and take no pointer
 -- ('NanoUI.Internal.Frame.Hit.topmostHit' chooses only among reachable
--- widgets). In view, the pinned one takes the pointer over the stack, and
--- the stack's top button beside it.
+-- widgets). In view, the pinned one takes the pointer over the layers, and
+-- the top layer's button beside it.
 runDisjointViewportLayersTest :: Context -> IORef Int -> IO ()
 runDisjointViewportLayersTest ctx failed = do
   let inp0 = withInputOff 300 200
@@ -799,14 +799,14 @@ runDisjointViewportLayersTest ctx failed = do
       ui = scrollArea (fixedH 100 . fillW) . column $ do
         filler 150
         inner <- scrollArea (fixedH 30 . fillW) . column $ do
-          layered <- stack (mapM (buttonWith' (fixedWH 100 20)) ["Under", "Over"])
+          stacked <- layers (mapM (buttonWith' (fixedWH 100 20)) ["Under", "Over"])
           pinned <- buttonWith' (pinAt 60 0 . fixedWH 40 20) "Pin"
           filler 200
-          pure (layered ++ [pinned])
+          pure (stacked ++ [pinned])
         filler 100
         pure inner
       buttons = fmap (snd . snd) ui
-      -- The stack's top button left of the pinned one, and the pinned one.
+      -- The top layer's button left of the pinned one, and the pinned one.
       targets bs = [(1 :: Int, V2 (rectX (respRect (bs !! 1)) + 10) (v2Y (centerOf (bs !! 1)))), (2, centerOf (bs !! 2))]
   (outer, (inner, _)) <- warmup2 ctx inp0 ui
   setScrollOffset ctx inner 100

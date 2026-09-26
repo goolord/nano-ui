@@ -1,7 +1,7 @@
 module Cases.Tasks (tests) where
 
 import Spec
-import Control.Concurrent (newEmptyMVar, putMVar, readMVar, takeMVar, threadDelay)
+import Control.Concurrent (newEmptyMVar, putMVar, readMVar, takeMVar, threadDelay, tryPutMVar)
 import Control.Exception (displayException, finally, onException)
 import Data.List (isInfixOf)
 import Data.Function (fix)
@@ -47,11 +47,19 @@ reaches ref n = isJust <$> timeout 2000000 (fix (\go -> readIORef ref >>= \v -> 
 tick :: IORef Int -> IO ()
 tick ref = atomicModifyIORef' ref (\n -> (n + 1, ()))
 
--- | A job that sleeps until killed, and a wait of up to @us@ for its kill.
-sleeper :: IO (IO (), Int -> IO Bool)
+-- | A job that sleeps until killed, a wait until it has started, and a
+-- wait of up to @us@ for its kill. A job killed before its thread first runs
+-- ends without running at all, its handler with it, so a test that kills a
+-- job at once waits for it to start first.
+sleeper :: IO (IO (), IO (), Int -> IO Bool)
 sleeper = do
+  started <- newEmptyMVar
   killed <- newEmptyMVar
-  pure (threadDelay 10000000 `onException` putMVar killed (), \us -> isJust <$> timeout us (takeMVar killed))
+  pure
+    ( (void (tryPutMVar started ()) >> threadDelay 10000000) `onException` putMVar killed ()
+    , takeMVar started
+    , \us -> isJust <$> timeout us (takeMVar killed)
+    )
 
 -- | A box whose colour alone shows @on@, so no rect or text diff sees it change.
 lamp :: Bool -> NanoUI ()
@@ -93,7 +101,7 @@ runTaskResultTest ctx failed = do
 runTaskKeyChangeTest :: Context -> IORef Int -> IO ()
 runTaskKeyChangeTest ctx failed = do
   wait <- newWakeSignal ctx
-  (sleep, killedIn) <- sleeper
+  (sleep, _, killedIn) <- sleeper
   gate <- newEmptyMVar
   keyRef <- newIORef (1 :: Int)
   let ui = uiIO (readIORef keyRef) >>= \k -> useTask k (if k == 2 then sleep >> pure k else takeMVar gate >> pure (k * 10))
@@ -115,7 +123,7 @@ runTaskKeyChangeTest ctx failed = do
 runTaskLeaseTest :: Context -> IORef Int -> IO ()
 runTaskLeaseTest ctx failed = do
   starts <- newIORef 0
-  (sleep, killedIn) <- sleeper
+  (sleep, _, killedIn) <- sleeper
   let ui shown = scope (when shown (void (useTask ("lease" :: String) (tick starts >> sleep)))) >> label "lease"
   replicateM_ 3 (runFrame ctx inp (ui True))
   assert failed =<< reaches starts 1
@@ -213,8 +221,9 @@ runTaskRetryTest ctx failed = do
 -- | 'cancelTasks', which ends a session, kills the jobs still running.
 runTaskShutdownTest :: Context -> IORef Int -> IO ()
 runTaskShutdownTest ctx failed = do
-  (sleep, killedIn) <- sleeper
+  (sleep, started, killedIn) <- sleeper
   _ <- runFrame ctx inp (useTask ("shutdown" :: String) sleep)
+  started
   cancelTasks ctx
   assert failed =<< killedIn 2000000
 
@@ -275,7 +284,7 @@ runStreamTest ctx failed = do
 runStreamKeyChangeTest :: Context -> IORef Int -> IO ()
 runStreamKeyChangeTest ctx failed = do
   wait <- newWakeSignal ctx
-  (sleep, killedIn) <- sleeper
+  (sleep, _, killedIn) <- sleeper
   keyRef <- newIORef (1 :: Int)
   let ui = do
         k <- uiIO (readIORef keyRef)

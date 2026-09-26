@@ -39,7 +39,7 @@ data DragAxis = DragAxisX | DragAxisY
 -- | Clamped 1D drag on a track of widget @owner@. Maps pointer position on
 -- @track@ into [lo, hi]. The drag starts with a press on the track and lasts
 -- until the button comes up; a button held from elsewhere and moved onto the
--- track drags nothing, nor does a press where a stack or a pinned node draws
+-- track drags nothing, nor does a press where layers or a pinned node draw
 -- another widget over the owner ('pointerCovered'). Returns the value,
 -- whether the drag is held, and whether it was held before this frame.
 useDrag1D ::

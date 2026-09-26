@@ -282,7 +282,8 @@ runTransformOpsTest _ failed = do
       under t block = opsAt 1 (withTransform t block)
       r0 = Rect 10 20 10 20
       -- The only op, if it is a turned image: its centre, size, angle and UVs.
-      turned block = [([V2 (x + w / 2) (y + h / 2), V2 w h], angle, (u0, v0, u1, v1)) | [DrawImageRotated (Rect x y w h) angle _ u0 v0 u1 v1 _] <- [block]]
+      turned block = [([V2 (x + w / 2) (y + h / 2), V2 w h], angle, (u0, v0, u1, v1)) | [DrawImage (Rect x y w h) angle _ u0 v0 u1 v1 _] <- [block], angle /= 0]
+      turnedImage r angle = drawImageWith (imageDraw r (ImageId 7)) {imageAngle = angle, imageTint = red}
   -- A flip keeps a rect's size positive, and turns gradients and images over.
   assertEq failed [] . map fst . filter (not . snd) . zip [0 :: Int ..] $
     [ [FillRect (Rect 15 25 10 20) red] == under (P.translate 5 5) (drawRect r0 red)
@@ -318,8 +319,8 @@ runTransformOpsTest _ failed = do
   -- A turning transform turns an image, a turned one further, and a flip turns it over.
   forM_
     [ (under (P.translate 30 0 <> P.rotate (pi / 2)) (drawImage (Rect 0 0 20 10) (ImageId 7) red), [V2 25 10, V2 20 10], pi / 2, (0, 0, 1, 1))
-    , (under (P.rotate 0.3 <> P.scale 2 2) (drawImageRotated (Rect 0 0 10 10) 0.2 (ImageId 7) red), [V2 (10 * cos 0.3 - 10 * sin 0.3) (10 * sin 0.3 + 10 * cos 0.3), V2 20 20], 0.5, (0, 0, 1, 1))
-    , (under (P.scale (-1) 1) (drawImageRotated (Rect 0 0 10 10) 0.2 (ImageId 7) red), [V2 (-5) 5, V2 10 10], pi - 0.2, (0, 1, 1, 0))
+    , (under (P.rotate 0.3 <> P.scale 2 2) (turnedImage (Rect 0 0 10 10) 0.2), [V2 (10 * cos 0.3 - 10 * sin 0.3) (10 * sin 0.3 + 10 * cos 0.3), V2 20 20], 0.5, (0, 0, 1, 1))
+    , (under (P.scale (-1) 1) (turnedImage (Rect 0 0 10 10) 0.2), [V2 (-5) 5, V2 10 10], pi - 0.2, (0, 1, 1, 0))
     ]
     $ \(block, want, wantAngle, uvs) -> single failed (turned block) $ \(got, angle, uv) -> do
       assertNear failed 1e-3 want got

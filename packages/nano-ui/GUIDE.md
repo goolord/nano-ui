@@ -124,18 +124,27 @@ the leftmost wins. `fillW` and `fillH` share available space with other
 growing children; `minW` and `maxW` constrain width. `percent 50` requests
 half the available width. `tight` removes padding but keeps the child gap.
 
-`stack` layers its children in one box as large as the largest, each placed
-by its alignment; a later child draws over the earlier ones. The `wrap`
-modifier flows a row onto a new line where the next child would not fit, as
-in `rowWith (wrap . gap 6 . lineGap 4) (mapM_ chip tags)`; inside a
-container that sizes itself to its content, bound the row with `maxW` or
-`fixedW`. `pinAt x y` places a node over its siblings and out of their
-flow, at that offset from where its alignment puts it in its parent's
+A container's `Flow` says how it places its children along its `Row` or
+`Column`: in one `Line`, the default; in lines that `Wrap`; or `Layered`, each
+over the whole content box. `layers` layers its children in one box as large
+as the largest, each placed by its alignment; a later child draws over the
+earlier ones. The `layered` modifier does the same for a panel or a card:
+`panelWith (layered . fixedWH 240 160)`. The `wrap` modifier flows a row onto
+a new line where the next child would not fit, as in
+`rowWith (wrap . gap 6 . lineGap 4) (mapM_ chip tags)`, and `lineAlign
+LinesCenter` or `lineAlign LinesEnd` centres each line or moves it to the
+end; inside a container that sizes itself to its content, bound the row with
+`maxW` or `fixedW`. `pinAt x y` places a node over its siblings and out of
+their flow, at that offset from where its alignment puts it in its parent's
 content box: from the top-left corner by default, and from the bottom-right
 one with `pinAt (-16) (-16) . alignEnd . alignBottom`, as a floating button
-sits.
+sits. `pinAt 0 0 . grow` is an overlay over the whole content box that does
+not size its parent, as a scrim or a drop highlight should be.
 
-Where a stack or a pinned node draws one node over another, a control on
+`aspect r` keeps a fit height at the width over `r`: `box (fillW . aspect
+(16 / 9)) c` fills its column's width at 16:9 whatever the width.
+
+Where layers or a pinned node draw one node over another, a control on
 top (a button, field, slider or drawing) takes the pointer from whatever is
 beneath it, while a panel, label, image or container lets the pointer
 through to the controls beneath. `pointer PointerBlock` makes a node take
@@ -145,7 +154,7 @@ through, as a decorative drawing laid over controls should. A node never
 takes the pointer from what it is inside:
 
 ```haskell
-stack $ do
+layers $ do
   list
   panelWith (pointer PointerBlock . alignEnd . fixedW 240) details
 ```
@@ -450,28 +459,44 @@ their backend session.
 
 ## Images
 
-Register an image's RGBA pixels once with `registerImageRgba`, under an id
-from `freshImageId`. `image` stretches it over its rect. `imageConfigured`
-takes an `ImageConfig`: a `ContentFit` like CSS's `object-fit`, an alignment,
-an opacity, and a rotation (`RotateSolid` fits the turned image in its rect,
+`useImageRgba key w h pixels` registers an image's RGBA pixels the first
+frame it is called with a key and hands back its id while the view keeps
+calling it; once the view stops, the image is let go and its room in the
+image atlas goes to the next image. For an image the app keeps for its whole
+run, `registerImageRgba` registers it once under an id from `freshImageId`.
+
+`image` stretches an image over its rect. `imageConfigured` takes an
+`ImageConfig`: a `ContentFit` like CSS's `object-fit`, an alignment, a crop to
+part of the image (`icCrop`, in its pixels), a zoom (`icScale`), an opacity,
+and a rotation (`RotateSolid` fits the turned image in its rect,
 `RotateFloating` keeps the unturned layout and crops). An axis the layout
-leaves unsized takes the image's own size. A canvas draws images with
-`drawImage`, `drawImageUV` and `drawImageRotated`.
+leaves unsized takes the image's own size, and a fit height follows the
+width in the image's shape, so `icLayout = fillW` fills the width without
+stretching it. `svgIconConfigured` draws an SVG icon the same way, and
+`fitRect` is the placement a fit makes. A canvas draws images with
+`drawImageWith`, whose `ImageDraw` holds the rect, the part of the image,
+the turn, the tint and the opacity; `drawImage` and `drawImageUV` are its
+short forms.
 
 ```haskell
-thumbnail :: ImageId -> NanoUI ()
-thumbnail photo =
-  imageConfigured
-    defaultImageConfig {icLayout = fixedWH 120 90 defaultLayout, icFit = FitCover}
-    photo
+thumbnail :: FilePath -> Int -> Int -> ByteString -> NanoUI ()
+thumbnail path w h pixels = do
+  photo <- useImageRgba path w h pixels
+  for_ photo $
+    imageConfigured defaultImageConfig {icLayout = fixedWH 120 90, icFit = FitCover}
 ```
 
 ## Seeing the layout
 
 `explainLayout True` outlines every layout node, coloured by depth, and
-highlights the node under the pointer, which `explainedNode` describes. The
-overlay only paints. `sdlExplainLayout`, `optExplainLayout` and the SDL demo's
-`--explain` start with it on, and a debug window can toggle it:
+highlights the node under the pointer, which `explainedNode` describes: its
+widget id (the `respId` of the widget it belongs to), rect and padding, and
+what its layout asked for, the width and height `Sizing` with their limits,
+the gap, direction and `Flow`, the pin offset and the `PointerMode`.
+`explainScope body` narrows the overlay to the nodes `body` adds, for
+looking at one panel of a busy view. The overlay only paints.
+`sdlExplainLayout`, `optExplainLayout` and the SDL demo's `--explain` start
+with it on, and a debug window can toggle it:
 
 ```haskell
 explainLayout =<< checkbox "Outline layout nodes" =<< explainingLayout

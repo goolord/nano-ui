@@ -88,10 +88,11 @@ import NanoUI.Internal.Draw.Types (DrawArena, DrawOp, DrawingBuild)
 import NanoUI.Internal.Font (CustomMeasureFn, FontMetrics, WrapResult)
 import NanoUI.Internal.Frame.SpanArena (SpanArena)
 import NanoUI.Internal.Id (IdContext, WidgetId, hashWidgetId)
+import NanoUI.Internal.Image (ImageLook)
 import NanoUI.Internal.Input (Composition, InputPurpose, MouseButton, UiCursorKind)
 import NanoUI.Internal.Layout.Arena (DirTag, LayoutCache, NodeArena)
 import NanoUI.Internal.Store (WidgetStore)
-import NanoUI.Internal.Style (Appearance, FontStyle, FontVariant, FontWeight, Layout, Padding, Theme)
+import NanoUI.Internal.Style (Appearance, Direction, Flow, FontStyle, FontVariant, FontWeight, Layout, Padding, PointerMode, Sizing, Theme)
 import NanoUI.Widgets.TextBuffer (Cursor)
 import NanoUI.Widgets.TextCommand (TextCommand)
 import NanoUI.Internal.Types
@@ -284,10 +285,12 @@ data PrevFrame = PrevFrame
   -- around it, where 'pfClips' holds the smaller one it gives its content.
   , pfTexts :: !(IntMap Text)
   -- ^ The text of text and image nodes.
+  , pfLooks :: !(IntMap ImageLook)
+  -- ^ The look of image nodes that have one, which paint draws them by.
   }
 
 emptyPrevFrame :: PrevFrame
-emptyPrevFrame = PrevFrame IM.empty IM.empty IM.empty IM.empty
+emptyPrevFrame = PrevFrame IM.empty IM.empty IM.empty IM.empty IM.empty
 
 -- | Require a first frame and full repaint, with no previous geometry.
 initialDamageState :: DamageState
@@ -342,21 +345,31 @@ data ExplainState = ExplainState
   -- it: each node's rect, the clip it was cut to, and its depth in the layer.
   , esHover :: !(Maybe (ExplainedNode, Rect))
   -- ^ The node under the pointer, and the clip its highlight was cut to.
+  , esScopes :: ![(Int, Int)]
+  -- ^ The arena index ranges, from and below, that the view's
+  -- @explainScope@ blocks added this build: the overlay outlines only those
+  -- nodes, or every node when there are none. A node's subtree follows it
+  -- in the arena, so a range holds whole subtrees.
   }
 
 -- | The overlay off.
 initialExplainState :: ExplainState
-initialExplainState = ExplainState {esOn = False, esLayers = [], esHover = Nothing}
+initialExplainState = ExplainState {esOn = False, esLayers = [], esHover = Nothing, esScopes = []}
 
 -- | The layout node under the pointer while the layout overlay is on: the
 -- innermost node there in the topmost layer, the page or a floating panel.
+-- What its layout asked for is here as well as where it was laid out, so a
+-- debug panel can say why a node came out the size it did.
 data ExplainedNode = ExplainedNode
   { explainedKind :: !Text
-  -- ^ What the node is: @Container@, @Text@, @Button@, @ScrollContainer@
-  -- and so on, with how a container lays out its children after a comma:
-  -- its direction (@Container, row@), @stack@ for a stack
-  -- (@Container, stack@), and @wrap@ after the direction of one that wraps
+  -- ^ What the node is, for display: @Container@, @Text@, @Button@,
+  -- @ScrollContainer@ and so on, with how a container lays out its children
+  -- after a comma: its direction (@Container, row@), @layered@ for layers
+  -- (@Container, layered@), and @wrap@ after the direction of one that wraps
   -- (@Container, row, wrap@).
+  , explainedWidget :: !(Maybe WidgetId)
+  -- ^ The widget the node belongs to, which its 'NanoUI.respId' names, and
+  -- 'Nothing' for a node without an id, such as a spacer.
   , explainedDepth :: !Int
   -- ^ How many nodes it is inside, counted from the root of its layer, which
   -- is 0. The overlay colours its outline by this.
@@ -364,6 +377,27 @@ data ExplainedNode = ExplainedNode
   -- ^ Where it was laid out, in logical window coordinates after scrolling.
   , explainedPadding :: !Padding
   -- ^ Its padding. The content box is the rect less this.
+  , explainedWidth :: !Sizing
+  -- ^ How its layout sizes its width.
+  , explainedHeight :: !Sizing
+  -- ^ How its layout sizes its height.
+  , explainedMin :: !V2
+  -- ^ Its least width and height.
+  , explainedMax :: !V2
+  -- ^ Its greatest width and height, 1e8 or more for none.
+  , explainedGap :: !Float
+  -- ^ The space between its children.
+  , explainedDirection :: !Direction
+  -- ^ The axis it lays its children along: 'NanoUI.Column' for layers.
+  , explainedFlow :: !Flow
+  -- ^ How it places its children: 'NanoUI.Line' for a node that is not a
+  -- container, and for a scroll container and a grid, which place theirs
+  -- their own way.
+  , explainedPin :: !(Maybe V2)
+  -- ^ Its offset where it is pinned ('NanoUI.pinAt').
+  , explainedPointer :: !PointerMode
+  -- ^ How it takes the pointer where it is drawn over others: its own mode,
+  -- or 'NanoUI.PointerPass' inside a node that passes the pointer.
   }
   deriving (Eq, Show)
 
@@ -753,7 +787,7 @@ data Context = Context
   , ctxDrawArena :: DrawArena
   , ctxHotId :: IORef WidgetId
   , ctxLastHotId :: IORef WidgetId
-  -- | Where a stack or a pinned node can draw one node over another, the
+  -- | Where layers or a pinned node can draw one node over another, the
   -- ids, by 'intKey', of the node on top at the pointer that takes it and of
   -- every node that one is inside, in the frame the user saw
   -- ('NanoUI.Internal.Frame.Input.recordCoveredWidgets'). Every other node

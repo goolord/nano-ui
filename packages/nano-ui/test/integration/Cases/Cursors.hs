@@ -16,7 +16,7 @@ tests =
   , spec "cursor-shape-names" runCursorShapeNamesTest
   , spec "cursor-shape-modal" runCursorShapeModalTest
   , spec "cursor-shape-in-window" runCursorShapeInWindowTest
-  , spec "cursor-shape-stack-and-pin" runCursorShapeStackAndPinTest
+  , spec "cursor-shape-layers-and-pin" runCursorShapeLayersAndPinTest
   ]
 
 -- | A plain drawing: a node with no cursor of its own.
@@ -162,14 +162,14 @@ runCursorShapeInWindowTest ctx failed = do
   assertJust failed mInner $ \inner -> assertJustM failed (getPrevRect ctx (respId w)) $ \(Rect wx wy ww _) ->
     shapesAt failed ctx ui [(centerOf inner, UiCursorCrosshair), (V2 (wx + ww / 2) (wy + 12), UiCursorDefault)]
 
--- | The shape follows the node drawn on top: a pinned one, or a stack's later child.
-runCursorShapeStackAndPinTest :: Context -> IORef Int -> IO ()
-runCursorShapeStackAndPinTest ctx failed = do
+-- | The shape follows the node drawn on top: a pinned one, or a later layer.
+runCursorShapeLayersAndPinTest :: Context -> IORef Int -> IO ()
+runCursorShapeLayersAndPinTest ctx failed = do
   let pinned = drawing (pinAt 20 20 . fixedWH 60 40) (const mempty)
       farCorner r = let Rect x y w h = respRect r in V2 (x + w - 10) (y + h - 10)
       check ui = void . shapesOver failed ctx farCorner ui
       col = columnWith (tight . gap 0) . sequence
   check (col [withCursorShape UiCursorCrosshair pinned, plainArea 200 120]) [UiCursorCrosshair, UiCursorDefault]
   check (col [pinned, withCursorShape UiCursorCrosshair (plainArea 200 120)]) [UiCursorDefault, UiCursorCrosshair]
-  check (stackWith tight (sequence [withCursorShape UiCursorMove pinned, withCursorShape UiCursorHelp (plainArea 200 120), plainArea 100 60]))
+  check (layersWith tight (sequence [withCursorShape UiCursorMove pinned, withCursorShape UiCursorHelp (plainArea 200 120), plainArea 100 60]))
     [UiCursorMove, UiCursorHelp, UiCursorDefault]

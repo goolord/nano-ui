@@ -164,8 +164,8 @@ module NanoUI
   , separator
   , spacer
   , flex
-  , stack
-  , stackWith
+  , layers
+  , layersWith
   , mouseArea
 
     -- * Text
@@ -401,12 +401,15 @@ module NanoUI
   , image'
   , freshImageId
   , registerImageRgba
+  , useImageRgba
   , Svg
   , parseSvg
   , loadSvg
   , svgIcon
   , svgIconWith
   , svgIconWith'
+  , svgIconConfigured
+  , svgIconConfigured'
   , svgSize
   , box
   , drawing
@@ -427,11 +430,17 @@ module NanoUI
 
     -- | 'imageConfigured' draws an image fitted to its rect the way CSS's
     -- @object-fit@ does ('ContentFit'), aligned where the fit leaves room,
-    -- faded, and turned ('Rotation'). Unlike 'image', an axis its layout
-    -- leaves unsized takes the image's own size:
+    -- cropped to a part of it, zoomed, faded, and turned ('Rotation').
+    -- Unlike 'image', an axis its layout leaves unsized takes the image's own
+    -- size, and a fit height follows the width in the image's shape:
     --
-    -- > imageConfigured defaultImageConfig {icFit = FitContain, icLayout = fixedWH 200 120 defaultLayout} photo
+    -- > imageConfigured defaultImageConfig {icFit = FitContain, icLayout = fixedWH 200 120} photo
     -- > imageConfigured defaultImageConfig {icRotation = RotateSolid (pi / 2), icOpacity = 0.5} photo
+    -- > imageConfigured defaultImageConfig {icLayout = fillW, icCrop = Just (Rect 0 0 64 64)} sheet
+    --
+    -- 'svgIconConfigured' draws an SVG icon the same way, and 'fitRect' is
+    -- the placement a fit makes, for a canvas that draws images of its own
+    -- ('drawImageWith').
   , ContentFit (..)
   , Rotation (..)
   , rotationAngle
@@ -439,6 +448,7 @@ module NanoUI
   , defaultImageConfig
   , imageConfigured
   , imageConfigured'
+  , fitRect
 
     -- * Custom widgets
 
@@ -656,14 +666,17 @@ module NanoUI
     -- * Layout
 
     -- | A container lays its children out along a 'Row' or a 'Column', one
-    -- after another, or layers them in a 'Stack' ('stack'), later children on
-    -- top. 'wrap' breaks a row or column into lines where the next child
-    -- would overflow it, as a list of tags does, and 'pinAt' takes a child out
-    -- of its parent's flow to sit at an offset in the parent, over its
-    -- siblings, from the corner its alignment picks, as a badge or a floating
-    -- button does.
+    -- after another in a 'Line', or in lines that 'Wrap' where the next child
+    -- would overflow, as a list of tags does ('wrap', with 'lineGap' between
+    -- the lines and 'lineAlign' placing each), or it layers them over one
+    -- another ('Layered'), later children on top: 'layers' is such a
+    -- container, and 'layered' makes a panel or a card one. 'pinAt' takes a
+    -- child out of its parent's flow to sit at an offset in the parent, over
+    -- its siblings, from the corner its alignment picks, as a badge or a
+    -- floating button does, and @pinAt 0 0 . grow@ covers the parent without
+    -- sizing it. 'aspect' keeps a fit height at a ratio to the width.
     --
-    -- Where a stack or a pinned node draws one node over another, a control
+    -- Where layers or a pinned node draw one node over another, a control
     -- on top takes the pointer from what is beneath, and anything else lets it
     -- through to the controls beneath. 'pointer' changes that for a node and
     -- what is inside it: 'PointerBlock' makes a card or scrim take the pointer
@@ -672,6 +685,7 @@ module NanoUI
   , LayoutModifier
   , Sizing (..)
   , Direction (..)
+  , Flow (..)
   , AlignX (..)
   , AlignY (..)
   , Padding (..)
@@ -709,8 +723,12 @@ module NanoUI
   , gridCols
   , fixedAspectW
   , fixedAspectH
+  , aspect
   , wrap
+  , layered
   , lineGap
+  , lineAlign
+  , LineAlign (..)
   , pinAt
   , PointerMode (..)
   , pointer
@@ -976,12 +994,15 @@ module NanoUI
 
     -- | 'explainLayout' shows how a view was laid out: it outlines every
     -- layout node, coloured by how deep the node is, and tints the node under
-    -- the pointer, whose rect and padding 'explainedNode' reports. Put the
-    -- toggle in a debug panel; the overlay changes nothing else, and with it
-    -- off a frame costs what it did.
+    -- the pointer, which 'explainedNode' describes: its widget id (to match a
+    -- 'respId'), rect and padding, and what its layout asked for, its sizing,
+    -- gap, flow, pin and pointer mode. 'explainScope' narrows the overlay to
+    -- part of a view. Put the toggle in a debug panel; the overlay changes
+    -- nothing else, and with it off a frame costs what it did.
   , explainLayout
   , explainingLayout
   , explainedNode
+  , explainScope
   , ExplainedNode (..)
 
     -- * The native window

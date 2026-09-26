@@ -305,7 +305,7 @@ runPinnedTest :: Context -> IORef Int -> IO ()
 runPinnedTest ctx failed = do
   let (red, blue) = (colorRGBA 200 40 40 255, colorRGBA 40 40 200 255)
       ui = columnWith (tight . gap 0 . fillW) $ do
-        (inStack, _) <- stackWith tight (sensorWith (pinAt 10 10) (box (fixedWH 20 20) red))
+        (inStack, _) <- layersWith tight (sensorWith (pinAt 10 10) (box (fixedWH 20 20) red))
         (sid, (hanging, _)) <- scrollCol 100 $
           columnWith (tight . fixedH 10 . fillW) (sensorWith (pinAt 0 150) (box (fixedWH 20 20) blue))
             <* box (fixedH 400 . fillW) grey

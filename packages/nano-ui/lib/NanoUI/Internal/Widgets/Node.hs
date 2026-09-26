@@ -30,6 +30,7 @@ module NanoUI.Internal.Widgets.Node
   , dropdownInput
   , addWidget
   , addWidgetStyled
+  , addWidgetNode
   , addWidgetWithOptions
   , tagContainer
   , setWidgetValue
@@ -410,7 +411,7 @@ resolveInteraction ctx inp wid = do
           <&&> if hashWidgetId active /= 0 && active /= wid
             then pure True
             else not <$> startedHere MouseLeft
-      -- Where a stack or a pinned node draws something that takes the
+      -- Where layers or a pinned node draw something that takes the
       -- pointer over this one, the pointer is that one's; and a node that
       -- lets the pointer through ('PointerPass') takes none of it.
       hovered <- pure (not (disabled || captured)) <&&> pointerOnWidget ctx mIdx wid rect mouse

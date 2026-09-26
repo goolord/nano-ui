@@ -11,9 +11,9 @@ module NanoUI.Internal.Widgets.Layout
   , column
   , columnWith
   , column'
-  , stack
-  , stackWith
-  , stack'
+  , layers
+  , layersWith
+  , layers'
   , hstack
   , vstack
   , label
@@ -116,25 +116,29 @@ column' :: Ui :> es => Layout -> Eff es a -> Eff es a
 column' layout = container NodeContainer (layout {layoutDirection = Column})
 
 -- | Layer children over one another in the same box, later ones on top, as
--- for a badge on an icon or a caption over an image. The stack is as large as
+-- for a badge on an icon or a caption over an image. The box is as large as
 -- its largest child, and each child sits in it where its alignment puts it:
 -- @alignEnd . alignTop@ for a corner badge, @alignCenter . alignMid@ to
--- centre it. A child that grows ('fillW', 'grow') fills the stack on that
+-- centre it. A child that grows ('fillW', 'grow') fills the box on that
 -- axis. The pointer goes to the child on top: where a widget covers another,
 -- hover highlights, presses and focus go to it, and the widget under it is
 -- neither hovered nor pressed there, nor shows its tooltip.
-{-# INLINE stack #-}
-stack :: Ui :> es => Eff es a -> Eff es a
-stack = stackWith id
+--
+-- It is a container with the 'layered' flow, which a panel or a card takes
+-- too. An overlay that should cover a container without sizing it is pinned
+-- instead ('pinAt').
+{-# INLINE layers #-}
+layers :: Ui :> es => Eff es a -> Eff es a
+layers = layersWith id
 
--- | 'stack' with modified layout defaults.
-{-# INLINE stackWith #-}
-stackWith :: Ui :> es => (Layout -> Layout) -> Eff es a -> Eff es a
-stackWith = (`withDefaultWith` stack')
+-- | 'layers' with modified layout defaults; the flow remains layered.
+{-# INLINE layersWith #-}
+layersWith :: Ui :> es => (Layout -> Layout) -> Eff es a -> Eff es a
+layersWith = (`withDefaultWith` layers')
 
-{-# INLINE stack' #-}
-stack' :: Ui :> es => Layout -> Eff es a -> Eff es a
-stack' layout = container NodeContainer (layout {layoutDirection = Stack})
+{-# INLINE layers' #-}
+layers' :: Ui :> es => Layout -> Eff es a -> Eff es a
+layers' = container NodeContainer . layered
 
 -- | Run a collection of widgets side by side, as in @hstack (map label names)@.
 {-# INLINE hstack #-}

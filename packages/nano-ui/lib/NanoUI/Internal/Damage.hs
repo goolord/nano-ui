@@ -96,7 +96,7 @@ getNonzeroRect arena i = do
 
 updatePrevRects :: Context -> Size -> IO ()
 updatePrevRects ctx@Context {ctxNodeArena = na} size@(Size winW winH) = do
-  PrevFrame oldRects oldClips oldOuters oldTexts <- getsDamage ctx dsPrev
+  PrevFrame oldRects oldClips oldOuters oldTexts oldLooks <- getsDamage ctx dsPrev
   count <- arenaCount na
   let setPrev p = modifyDamage ctx (\ds -> ds {dsPrev = p})
   if count <= 0
@@ -148,36 +148,41 @@ updatePrevRects ctx@Context {ctxNodeArena = na} size@(Size winW winH) = do
       -- 'lookupNodeByKey' finds, is walked ('getIdSuperseded'): counting each
       -- would stand in for a key that went away, and writing each would
       -- rewrite the maps every frame.
-      let go !i !m !cm !tm !foundOld !dropped
+      let go !i !m !cm !tm !lm !foundOld !dropped
             | i >= count =
                 if dropped || foundOld /= IM.size oldRects || foundOuter /= IM.size oldOuters
                   then setPrev emptyPrevFrame >> updatePrevRects ctx size
                   else
-                    unless (ptrEq m oldRects && ptrEq cm oldClips && ptrEq om oldOuters && ptrEq tm oldTexts) $
-                      setPrev (PrevFrame m cm om tm)
+                    unless (ptrEq m oldRects && ptrEq cm oldClips && ptrEq om oldOuters && ptrEq tm oldTexts && ptrEq lm oldLooks) $
+                      setPrev (PrevFrame m cm om tm lm)
             | otherwise = do
                 wid <- getWidgetId na i
                 superseded <- if hashWidgetId wid == 0 then pure True else getIdSuperseded na i
                 if superseded
-                  then go (i + 1) m cm tm foundOld dropped
+                  then go (i + 1) m cm tm lm foundOld dropped
                   else do
                     let !k = intKey wid
                         isOld = IM.member k oldRects
                     mRect <- getNonzeroRect na i
                     case mRect of
                       Nothing ->
-                        go (i + 1) (if isOld then IM.delete k m else m) (dropKey k cm) (dropKey k tm) foundOld (dropped || isOld)
+                        go (i + 1) (if isOld then IM.delete k m else m) (dropKey k cm) (dropKey k tm) (dropKey k lm) foundOld (dropped || isOld)
                       Just r -> do
                         mClip <- getClipBounds na i
                         nt <- getNodeType na i
                         -- Text nodes, and images, whose text is their image
-                        -- id: switching an image repaints it like new text.
+                        -- id: switching an image repaints it like new text,
+                        -- and so does changing how it is drawn.
                         tm' <-
                           if nt == NodeText || nt == NodeImage
                             then (\txt -> putNew k txt tm) <$!> getText na i
                             else pure $! dropKey k tm
-                        go (i + 1) (putNew k r m) (maybe (dropKey k cm) (\c -> putNew k c cm) mClip) tm' (foundOld + if isOld then 1 else 0) dropped
-      go 0 m0 oldClips oldTexts foundContainers droppedContainer
+                        lm' <-
+                          if nt == NodeImage
+                            then maybe (dropKey k lm) (\n -> putNew k (inLook n) lm) <$!> getImageNode na i
+                            else pure $! dropKey k lm
+                        go (i + 1) (putNew k r m) (maybe (dropKey k cm) (\c -> putNew k c cm) mClip) tm' lm' (foundOld + if isOld then 1 else 0) dropped
+      go 0 m0 oldClips oldTexts oldLooks foundContainers droppedContainer
 
 -- | @m@ with @k@ mapped to @v@: @m@ itself when it already is.
 {-# INLINE putNew #-}
@@ -523,6 +528,11 @@ clipDamage ctx snap d owners = do
         (\n o -> if n /= o then Just n else Nothing)
         (pfTexts new)
         (pfTexts old)
+  -- An image drawn another way at the same rect, or no longer drawn its
+  -- own way, repaints as a text change does.
+  unless (ptrEq (pfLooks new) (pfLooks old)) $
+    forM_ (IM.keys (IM.union (pfLooks new) (pfLooks old))) $ \k ->
+      unless (IM.lookup k (pfLooks new) == IM.lookup k (pfLooks old)) (addText k)
   -- Drawings redrawn in place repaint their own rects, like a text change
   -- that keeps its rect.
   forM_ (fdRedrawn d) $ \k ->

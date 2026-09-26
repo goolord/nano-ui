@@ -1,9 +1,12 @@
--- | Context-owned RGBA image atlas with shelf packing and versioned pixel snapshots.
+-- | Context-owned RGBA image atlas with shelf packing and versioned pixel
+-- snapshots. Room an image lets go ('releaseImage') is reused for the next
+-- images that fit it.
 module NanoUI.Internal.Atlas
   ( ImageAtlas
   , newImageAtlas
   , atlasTextureId
   , registerImage
+  , releaseImage
   , freshImageId
   , lookupImageUv
   , lookupImageSize
@@ -14,6 +17,7 @@ module NanoUI.Internal.Atlas
 where
 
 import Control.Applicative ((<|>))
+import Control.Monad (forM_)
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.Functor ((<&>))
@@ -63,6 +67,9 @@ data AtlasState = AtlasState
   -- at least the last 'atlasWriteLog', and fewer than twice as many.
   , asWriteCount :: {-# UNPACK #-} !Int
   -- ^ The length of 'asWrites'.
+  , asFree :: [AtlasSlot]
+  -- ^ Room that released images let go, each with the padding after it,
+  -- which a new image that fits takes before the shelves ('takeFree').
   }
 
 newtype ImageAtlas = ImageAtlas (IORef AtlasState)
@@ -85,6 +92,7 @@ newImageAtlas = do
         , asResizedGen = 0
         , asWrites = []
         , asWriteCount = 0
+        , asFree = []
         }
 
 registerImage :: ImageAtlas -> ImageId -> Int -> Int -> ByteString -> IO Bool
@@ -101,9 +109,61 @@ registerImage (ImageAtlas ref) (ImageId tid) w h pixels
               writeIORef ref (recordWrite slot st0)
               pure True
           | otherwise -> pure False
-        Nothing ->
-          fitImage st0 tid w h pixels
-            >>= maybe (pure False) (\st1 -> True <$ writeIORef ref st1)
+        Nothing -> case takeFree st0 w h of
+          Just (x, y, st1) -> True <$ (writeIORef ref =<< placeInFree st1 tid x y w h pixels)
+          Nothing ->
+            fitImage st0 tid w h pixels
+              >>= maybe (pure False) (\st1 -> True <$ writeIORef ref st1)
+
+-- | Take an image out of the atlas: its id no longer draws, and its room
+-- goes to the next images that fit it. Its pixels stay where they were
+-- until one does, and 'freshImageId' does not hand its id out again. An id
+-- that is not registered is left alone.
+releaseImage :: ImageAtlas -> ImageId -> IO ()
+releaseImage (ImageAtlas ref) (ImageId tid) = do
+  st <- readIORef ref
+  forM_ (IM.lookup tid (asSlots st)) $ \(AtlasSlot x y w h) ->
+    writeIORef
+      ref
+      st
+        { asSlots = IM.delete tid (asSlots st)
+        , asFree = AtlasSlot x y (w + atlasPad) (h + atlasPad) : asFree st
+        , asLastFresh = max tid (asLastFresh st)
+        }
+
+-- | Where the first free room an image @w@ by @h@ fits in, with its
+-- padding, puts it, and the atlas with the rest of that room still free:
+-- the part right of the image, as tall as the image and its padding, and
+-- the part below, as wide as the room. A part too thin for any image is
+-- dropped.
+takeFree :: AtlasState -> Int -> Int -> Maybe (Int, Int, AtlasState)
+takeFree st w h = go [] (asFree st)
+  where
+    go _ [] = Nothing
+    go seen (slot@(AtlasSlot fx fy fw fh) : rest)
+      | w + atlasPad <= fw && h + atlasPad <= fh =
+          let right = [AtlasSlot (fx + w + atlasPad) fy (fw - w - atlasPad) (h + atlasPad) | fw - w - atlasPad > atlasPad]
+              below = [AtlasSlot fx (fy + h + atlasPad) fw (fh - h - atlasPad) | fh - h - atlasPad > atlasPad]
+           in Just (fx, fy, st {asFree = foldl' (flip (:)) (right ++ below ++ rest) seen})
+      | otherwise = go (slot : seen) rest
+
+-- | Put an image in room another let go, at @x@ @y@, and clear the
+-- padding round it: the image before may have drawn there, and a texture
+-- filtered at the image's edge reads it. The write covers the padding, so
+-- a texture takes it too.
+placeInFree :: AtlasState -> Int -> Int -> Int -> Int -> Int -> ByteString -> IO AtlasState
+placeInFree st tid x y w h pixels = do
+  blitPixels (asPtr st) (asW st) x y w h pixels
+  withForeignPtr (asPtr st) $ \p -> do
+    let clear px py n = fillBytes (p `plusPtr` ((py * asW st + px) * 4)) 0 (n * 4)
+    clear (x - atlasPad) (y - atlasPad) (w + 2 * atlasPad)
+    clear (x - atlasPad) (y + h) (w + 2 * atlasPad)
+    forM_ [y .. y + h - 1] $ \row -> clear (x - atlasPad) row atlasPad >> clear (x + w) row atlasPad
+  pure
+    ( recordWrite
+        (AtlasSlot (x - atlasPad) (y - atlasPad) (w + 2 * atlasPad) (h + 2 * atlasPad))
+        st {asSlots = IM.insert tid (AtlasSlot x y w h) (asSlots st)}
+    )
 
 -- | An id above every registered image's and every id this returned before.
 -- An id the app picks itself can still collide with one returned and not yet

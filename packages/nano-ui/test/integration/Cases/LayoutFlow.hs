@@ -10,14 +10,17 @@ import NanoUI.Internal.Layout.Arena (GeomCol, StyleCol, TagCol, TreeCol, geomStr
 tests :: [Spec]
 tests =
   [ spec "layout-flow-rects" runLayoutFlowRectsTest
-  , spec "stack-text-wrap" runStackTextWrapTest
+  , spec "layers-text-wrap" runLayersTextWrapTest
+  , spec "layered-modifier" runLayeredModifierTest
+  , spec "wrap-line-align" runWrapLineAlignTest
+  , spec "aspect-ratio" runAspectRatioTest
   , spec "wrap-refit-in-column" runWrapRefitInColumnTest
   , spec "wrap-in-scroller" runWrapInScrollerTest
   , spec "pin-in-scroller" runPinInScrollerTest
   , spec "layer-paint-order" runLayerPaintOrderTest
   , spec "pin-outside-parent-paint" runPinOutsideParentPaintTest
   , spec "layer-hit-order" runLayerHitOrderTest
-  , spec "stack-field-focus" runStackFieldFocusTest
+  , spec "layers-field-focus" runLayersFieldFocusTest
   , spec "layout-flow-damage" runLayoutFlowDamageTest
   , spec "scroll-ignores-flow" runScrollIgnoresFlowTest
   , spec "arena-columns-fit-strides" runArenaColumnsFitStridesTest
@@ -39,7 +42,7 @@ input0 = withInputOff 400 300
 rectsAt :: Context -> [Int] -> IO [Rect]
 rectsAt ctx is = (\rs -> [r | (i, r) <- zip [0 ..] rs, i `elem` is]) <$> arenaRects ctx
 
--- | Every node's rect but the root's: a stack is as large as its largest child
+-- | Every node's rect but the root's: layers are as large as their largest child
 -- plus padding and places each by its alignment; a wrapping row breaks lines
 -- at its width with the gap within and the line gap between them, a child
 -- wider than a line alone on one, and a grow child sharing only its line; a
@@ -54,7 +57,7 @@ runLayoutFlowRectsTest ctx failed =
       box (alignBottom . fixedWH 30 10) red
       forM_ [(30, 20), (30, 10), (50, 10), (120, 10), (20, 10)] $ \(bw, bh) -> box (fixedWH bw bh) red
     cases =
-      [ ( columnWith tight $ stackWith (padAll 4) $ do
+      [ ( columnWith tight $ layersWith (padAll 4) $ do
             box (fixedWH 100 60) red
             box (alignEnd . alignBottom . fixedWH 20 10) blue
             box (alignCenter . alignMid . fixedWH 10 10) blue
@@ -90,12 +93,64 @@ runLayoutFlowRectsTest ctx failed =
         , [Rect 0 0 200 100, Rect 144 44 40 40, Rect 194 (-6) 12 12, Rect 0 0 190 4, Rect 100 45 20 10] )
       ]
 
--- | A label in a fixed-width stack wraps to its width, and the stack and
+-- | 'layered' makes a panel or a row layer its children as 'layers' does:
+-- each at the content box's corner its alignment picks, the container as
+-- large as the largest, and the row's text wrapping as a column's would.
+runLayeredModifierTest :: Context -> IORef Int -> IO ()
+runLayeredModifierTest ctx failed = do
+  _ <- warmup2 ctx input0 . columnWith tight $ panelWith (layered . padAll 5) $ do
+    box (fixedWH 60 40) red
+    box (alignEnd . alignBottom . fixedWH 10 10) blue
+  rectsAt ctx [1, 2, 3] >>= assertEq failed [Rect 0 0 70 50, Rect 5 5 60 40, Rect 55 35 10 10]
+  _ <- warmup2 ctx input0 . columnWith tight $ rowWith (layered . tight . fixedW 60) $ do
+    label "one two three four five six"
+    box (alignEnd . fixedWH 10 10) blue
+  arenaRects ctx >>= \case
+    [_, r, txt, b] -> do
+      assertEq failed (Rect 50 0 10 10) b
+      assert failed (rectW txt <= 60 && rectH txt > rectH b && rectH r == rectH txt)
+    rs -> assertEq failed 4 (length rs)
+
+-- | A wrapping row's lines sit at its start, centred or at its end along
+-- its width, as 'lineAlign' says, and a column's along its height; a line
+-- that a grow child fills does not move.
+runWrapLineAlignTest :: Context -> IORef Int -> IO ()
+runWrapLineAlignTest ctx failed = do
+  let chips a = columnWith tight $ rowWith (wrap . lineAlign a . fixedW 100 . tight . gap 10 . lineGap 0) $ do
+        replicateM_ 4 (box (fixedWH 30 10) red)
+        box (fillW . fixedH 10) blue
+      xs = fmap (map rectX . drop 2) (arenaRects ctx)
+  forM_ [(LinesStart, 0), (LinesCenter, 15), (LinesEnd, 30)] $ \(a, shift) -> do
+    _ <- warmup2 ctx input0 (chips a)
+    xs >>= assertEq failed [shift, shift + 40, shift, shift + 40, 0]
+  _ <- warmup2 ctx input0 . columnWith tight . columnWith (wrap . lineAlign LinesEnd . fixedH 100 . tight . gap 0 . lineGap 5) $
+    replicateM_ 3 (box (fixedWH 20 40) red)
+  rectsAt ctx [2, 3, 4] >>= assertEq failed [Rect 0 20 20 40, Rect 0 60 20 40, Rect 25 60 20 40]
+
+-- | A fit height with 'aspect' is the width it is given over the ratio:
+-- filling a column, beside a fixed width, in a row sharing its width, and
+-- within a maximum. A fit width beside a fixed height is the height times the
+-- ratio. A panel keeps the ratio's height whatever it holds.
+runAspectRatioTest :: Context -> IORef Int -> IO ()
+runAspectRatioTest ctx failed = do
+  let sized ui = warmup2 ctx input0 (columnWith (tight . gap 0 . fixedW 300) ui) >> drop 1 <$> arenaRects ctx
+  sized (box (fillW . aspect 2) red) >>= assertEq failed [Rect 0 0 300 150]
+  sized (box (fixedW 80 . aspect 4) red) >>= assertEq failed [Rect 0 0 80 20]
+  sized (box (fixedH 50 . aspect 2) red) >>= assertEq failed [Rect 0 0 100 50]
+  sized (box (fillW . aspect 1 . maxH 50) red) >>= assertEq failed [Rect 0 0 300 50]
+  sized (rowWith (tight . gap 0 . fillW) (box (fillW . aspect 2) red >> box (fixedWH 100 10) blue))
+    >>= assertEq failed [Rect 0 0 300 100, Rect 0 0 200 100, Rect 200 0 100 10]
+  sized (panelWith (tight . fillW . aspect 10) (box (fixedWH 20 100) red) >> box (fixedWH 10 10) blue)
+    >>= assertEq failed [Rect 0 0 300 30, Rect 0 0 20 100, Rect 0 30 10 10]
+  -- Off for a ratio that is not positive.
+  sized (box (fixedWH 40 20 . aspect 0) red) >>= assertEq failed [Rect 0 0 40 20]
+
+-- | A label in fixed-width layers wraps to its width, and the layers and
 -- what follows it make room for all its lines.
-runStackTextWrapTest :: Context -> IORef Int -> IO ()
-runStackTextWrapTest ctx failed = do
+runLayersTextWrapTest :: Context -> IORef Int -> IO ()
+runLayersTextWrapTest ctx failed = do
   _ <- warmup2 ctx input0 . columnWith tight $ do
-    stackWith (fixedW 100 . tight) $ label "one two three four five six seven eight nine ten"
+    layersWith (fixedW 100 . tight) $ label "one two three four five six seven eight nine ten"
     label "x"
   arenaRects ctx >>= \case
     [_, s, long, short] ->
@@ -154,8 +209,8 @@ runPinInScrollerTest ctx failed = do
   assertJustM failed (getClipRect (ctxNodeArena ctx) 3) (assert failed . covers (Rect 0 0 100 50))
 
 -- | Paint draws the first colour before the second: a row's earlier child over
--- a later one, a stack's later child over an earlier one, and a pinned child
--- over its siblings, even one declared before it or, in a stack, after it.
+-- a later one, a later layer over an earlier one, and a pinned child
+-- over its siblings, even one declared before it or, among layers, after it.
 runLayerPaintOrderTest :: Context -> IORef Int -> IO ()
 runLayerPaintOrderTest ctx failed =
   forM_ cases $ \(ui, under, over) -> do
@@ -166,17 +221,17 @@ runLayerPaintOrderTest ctx failed =
     sq n = fixedWH n n
     cases =
       [ (rowWith tight (box (sq 60) green >> box (sq 20) yellow), yellow, green)
-      , (stackWith tight (box (sq 60) red >> box (sq 20) blue), red, blue)
+      , (layersWith tight (box (sq 60) red >> box (sq 20) blue), red, blue)
       , (rowWith tight (box (sq 40) red >> box (pinAt 10 10 . sq 10) blue), red, blue)
-      , (stackWith tight (box (pinAt 5 5 . sq 10) blue >> box (sq 60) red), red, blue)
+      , (layersWith tight (box (pinAt 5 5 . sq 10) blue >> box (sq 60) red), red, blue)
       ]
 
--- | Paint finds a pinned child outside its parent: under a stack of no size,
+-- | Paint finds a pinned child outside its parent: under layers of no size,
 -- and on a frame that repaints only the pinned child.
 runPinOutsideParentPaintTest :: Context -> IORef Int -> IO ()
 runPinOutsideParentPaintTest ctx failed = do
   let ui version = columnWith (tight . gap 0 . fillW) $ do
-        stackWith tight $ box (pinAt 10 10 . fixedWH 20 20) green
+        layersWith tight $ box (pinAt 10 10 . fixedWH 20 20) green
         rowWith (tight . fixedWH 50 20) $
           drawingVersioned version (pinAt 200 0 . fixedWH 20 20) $ \r ->
             smallArrayFromList [FillRect r (if version == 1 then red else blue)]
@@ -190,8 +245,8 @@ runPinOutsideParentPaintTest ctx failed = do
   assert failed =<< drawn blue draw
   writeIORef (ctxPaintFull ctx) True
 
--- | The pointer is on the button drawn on top: a stack's later child, a
--- pinned child (in a stack too, declared first), and each button of a stack
+-- | The pointer is on the button drawn on top: a later layer, a
+-- pinned child (among layers too, declared first), and each button of layers
 -- pinned over an earlier one, while beside them the button under them has
 -- it. Each case checks its buttons' rects, then that each point hovers and
 -- clicks only the button at its index.
@@ -209,24 +264,24 @@ runLayerHitOrderTest ctx failed =
   where
     btn f w h = buttonWith' (f . fixedWH w h) "b"
     cases =
-      [ (stack (sequence [btn id 120 40, btn id 120 40]), \bs -> ([(1, respRect (bs !! 0))], [(centerOf (bs !! 1), 1)]))
+      [ (layers (sequence [btn id 120 40, btn id 120 40]), \bs -> ([(1, respRect (bs !! 0))], [(centerOf (bs !! 1), 1)]))
       , (rowWith tight (sequence [btn id 120 40, btn (pinAt 20 10) 40 20]), const ([(1, Rect 20 10 40 20)], [(V2 40 20, 1), (V2 100 20, 0)]))
-      , (stackWith tight (sequence [btn (pinAt 10 10) 40 20, btn id 120 60]), const ([(0, Rect 10 10 40 20)], [(V2 30 20, 0)]))
-      , ( rowWith tight ((:) <$> btn id 200 100 <*> stackWith (pinAt 10 10 . tight) (sequence [btn id 50 50, btn id 20 20]))
+      , (layersWith tight (sequence [btn (pinAt 10 10) 40 20, btn id 120 60]), const ([(0, Rect 10 10 40 20)], [(V2 30 20, 0)]))
+      , ( rowWith tight ((:) <$> btn id 200 100 <*> layersWith (pinAt 10 10 . tight) (sequence [btn id 50 50, btn id 20 20]))
         , const ([(1, Rect 10 10 50 50), (2, Rect 10 10 20 20)], [(V2 15 15, 2), (V2 40 40, 1), (V2 150 50, 0)]) )
       ]
 
--- | A button stacked over a text field takes the press, keeps the field's
+-- | A button layered over a text field takes the press, keeps the field's
 -- focus as it was and shows no text cursor, while the field's uncovered part
--- focuses it; a field stacked over a button takes focus, and the button does
+-- focuses it; a field layered over a button takes focus, and the button does
 -- not click.
-runStackFieldFocusTest :: Context -> IORef Int -> IO ()
-runStackFieldFocusTest ctx failed = do
+runLayersFieldFocusTest :: Context -> IORef Int -> IO ()
+runLayersFieldFocusTest ctx failed = do
   let sized w = defaultTextInputConfig {ticLayout = fixedW w (ticLayout defaultTextInputConfig)}
       field w t = fst <$> textInputConfigured' (sized w) t
       ui = column $ do
-        (f, cover) <- stack $ (,) <$> field 200 "under" <*> buttonWith' (alignEnd . fixedWH 40 20) "x"
-        (under, top) <- stack $ (,) <$> buttonWith' (fixedWH 200 30) "under" <*> field 100 "over"
+        (f, cover) <- layers $ (,) <$> field 200 "under" <*> buttonWith' (alignEnd . fixedWH 40 20) "x"
+        (under, top) <- layers $ (,) <$> buttonWith' (fixedWH 200 30) "under" <*> field 100 "over"
         pure (f, cover, under, top)
   (field0, cover0, _, top0) <- warmup2 ctx input0 ui
   let press p = runClick ctx input0 {inputMousePos = p} ui p
@@ -270,14 +325,14 @@ runLayoutFlowDamageTest ctx failed = do
   writeIORef (ctxPaintFull ctx) True
 
 -- | A scroll container lays its children out one after another even when
--- its layout asks for a stack or for wrapping, and scrolls over all of them.
+-- its layout asks for layers or for wrapping, and scrolls over all of them.
 runScrollIgnoresFlowTest :: Context -> IORef Int -> IO ()
-runScrollIgnoresFlowTest ctx failed = do
-  let stacked l = l {layoutDirection = Stack}
-  (sid, _) <- warmup2 ctx input0 . columnWith tight . scrollArea2D (stacked . wrap . fixedWH 100 50 . tight . gap 0) $
-    replicateM_ 3 (box (fixedWH 40 20) red)
-  arenaRects ctx >>= assertEq failed [0, 20, 40] . map rectY . drop 2
-  assertJustM failed (getScrollMetrics ctx sid) $ \m -> assertEq failed 10 (v2Y (scrollRange m))
+runScrollIgnoresFlowTest ctx failed =
+  forM_ [layered, wrap] $ \flow -> do
+    (sid, _) <- warmup2 ctx input0 . columnWith tight . scrollArea2D (flow . fixedWH 100 50 . tight . gap 0) $
+      replicateM_ 3 (box (fixedWH 40 20) red)
+    arenaRects ctx >>= assertEq failed [0, 20, 40] . map rectY . drop 2
+    assertJustM failed (getScrollMetrics ctx sid) $ \m -> assertEq failed 10 (v2Y (scrollRange m))
 
 -- | Every column of the arena's per-node rows fits the row's stride, or it
 -- would write into the next node's row.
@@ -293,7 +348,7 @@ runArenaColumnsFitStridesTest _ failed =
     columns :: (Enum c, Bounded c) => c -> Int
     columns c = fromEnum (maxBound `asTypeOf` c) + 1
 
--- | Where a pinned or stacked button is drawn over another widget, that
+-- | Where a pinned or layered button is drawn over another widget, that
 -- widget has no pointer there: not hovered, not pressed, its tooltip shut, a
 -- slider not moved, a select not opened. Beside the button it has the
 -- pointer, and the widgets the button is inside keep it.
@@ -342,21 +397,21 @@ runCoveredWidgetNoPointerTest ctx failed = do
   _ <- pressThrough selects onB5
   warmup ctx (at onB5) selects
   assert failed . not . hasText "Gamma" =<< collectOverlayTextSpans ctx (at onB5)
-  -- A chip stacked over a drawing, with a control among its adornments. The
-  -- chip and its stack keep the pointer on its label, and the control takes
+  -- A chip layered over a drawing, with a control among its adornments. The
+  -- chip and its layers keep the pointer on its label, and the control takes
   -- the click on itself; the drawing is neither hovered nor pressed.
   removes <- newIORef (0 :: Int)
   let remove = A.trailing (A.control (whenM (buttonWith tight "x") (uiIO (modifyIORef' removes (+ 1)))))
-      layered = columnWith tight $ stackWith tight $ do
+      chipOver = columnWith tight $ layersWith tight $ do
         under <- drawing (fixedWH 200 100) (const mempty)
         (under,) <$> buttonConfigured' defaultButtonConfig {bcAdornments = remove} "Chip"
-  _ <- warmup2 ctx inp layered
+  _ <- warmup2 ctx inp chipOver
   spans <- collectTextSpans ctx
   assertJust failed ((,) <$> spanRectOf "Chip" spans <*> spanRectOf "x" spans) $ \(chipR, xR) -> do
-    warmup ctx (at (spanCenter chipR)) layered
-    (under1, chip1) <- evalUi ctx (at (spanCenter chipR)) layered
+    warmup ctx (at (spanCenter chipR)) chipOver
+    (under1, chip1) <- evalUi ctx (at (spanCenter chipR)) chipOver
     assert failed (respHovered chip1 && not (respHovered under1))
-    ((under2, _), (_, chip3)) <- pressThrough layered (spanCenter xR)
+    ((under2, _), (_, chip3)) <- pressThrough chipOver (spanCenter xR)
     assert failed (not (respHovered under2 || respPressed under2) && not (respClicked chip3))
     readIORef removes >>= assertEq failed 1
 

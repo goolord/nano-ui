@@ -36,6 +36,7 @@ import NanoUI.Internal.Store (mirrorStoresChanged)
 import NanoUI.Internal.Style (Padding (..), Theme (..), themeOverlayDim, themeSeparator)
 import NanoUI.Internal.Tasks (sweepTasks)
 import NanoUI.Internal.Types (Damage (..), Rect (..), Size (..), rectInflate, rectNonEmpty)
+import NanoUI.Internal.Widgets.Image (sweepImageHooks)
 import NanoUI.Internal.Widgets.Overlay (windowChromeSepH, windowTitleBarH)
 import NanoUI.Internal.Widgets.Sensor (beginSensors, updateSensors)
 
@@ -205,6 +206,7 @@ runFrameEff unlift ctx rawInp ui = do
   refreshScrollBarHover ctx layerInp
   tickAnimations ctx (inputDeltaTime frameInp)
   sweepTasks ctx
+  sweepImageHooks ctx
   pruneDrawOpCache ctx
   -- Dropdowns and the text-edit menu are not in the arena, so nothing in the
   -- damage pass sees their rows change under the pointer, their filter or
@@ -244,10 +246,10 @@ runFrameEff unlift ctx rawInp ui = do
   pure (result, msgs, drawData, dirtyAfterUi)
 
 -- | Reset what a view run builds: the node arena, the sensors, the input
--- method's request, and the container, id, focus, hover, cursor-zone and
--- drawing scopes. A second run
--- after a mirror store write (@newFrame@ 'False') keeps the store, animations
--- and prev rects, and the theme scopes it compares against.
+-- method's request, and the container, id, focus, hover, cursor-zone,
+-- drawing and layout-overlay scopes. A second run after a mirror store write
+-- (@newFrame@ 'False') keeps the store, animations and prev rects, and the
+-- theme scopes it compares against.
 resetUiBuild :: Context -> Bool -> IO ()
 resetUiBuild ctx newFrame = do
   beginThemeScopes ctx newFrame
@@ -261,6 +263,9 @@ resetUiBuild ctx newFrame = do
   writeIORef (ctxCursorZones ctx) []
   writeIORef (ctxCursorRegions ctx) []
   resetDrawingScopeCache ctx
+  -- The layout overlay's scopes are ranges of the arena just emptied.
+  explain <- readIORef (ctxExplain ctx)
+  unless (null (esScopes explain)) $ writeIORef (ctxExplain ctx) explain {esScopes = []}
   beginSensors ctx
 
 -- | Paint the floating panels over the page: windows with their title-bar

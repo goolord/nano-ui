@@ -33,7 +33,7 @@ import NanoUI.Internal.Frame.Node (resolveTextFont)
 import NanoUI.Internal.Input (Input (..), UiCursorKind (..))
 import NanoUI.Internal.Layout.Arena (NodeType (NodeDrawing))
 import NanoUI.Internal.Monad (Ui, askDefaultLayout, askInput, freshWidget, uiIO, uiTheme)
-import NanoUI.Internal.Style
+import NanoUI.Internal.Style hiding (Flow (..))
 import NanoUI.Internal.Types (Color (..), Rect (..), V2 (..))
 import NanoUI.Internal.Widgets.Node (Response, addWidget, respClicked, respHovered, respRect)
 

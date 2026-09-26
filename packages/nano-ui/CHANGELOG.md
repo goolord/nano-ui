@@ -284,18 +284,27 @@
 - `NanoUI.Internal.Canvas` holds the canvas's representation (`CanvasM`,
   `CanvasEnv`, `emitOp`, `emitWith`, `runCanvasScaled`) for tools that build
   ops of their own; `NanoUI.Widgets.Custom` exports the API.
-- `stack` and `stackWith` layer their children in one box. The `wrap`
-  modifier flows a row onto new lines, or a column into new columns, `lineGap`
-  apart, and `pinAt x y` places a node at an offset over its siblings, from
-  where its alignment puts it: `pinAt (-16) (-16) . alignEnd . alignBottom`
-  is a floating button 16 in from the bottom-right corner.
+- `Flow`, a container's way of placing its children along its `Direction`
+  (`layoutFlow`): in one `Line`, in lines that `Wrap`, or `Layered` over one
+  another. `layers` and `layersWith` layer their children in one box, and the
+  `layered` modifier makes a panel or a card do so. The `wrap` modifier flows
+  a row onto new lines, or a column into new columns, `lineGap` apart, and
+  `lineAlign` places each line at the start, centre (`LinesCenter`) or end
+  (`LinesEnd`) of the main axis. `pinAt x y` places a node at an offset over
+  its siblings, from where its alignment puts it: `pinAt (-16) (-16) .
+  alignEnd . alignBottom` is a floating button 16 in from the bottom-right
+  corner, and `pinAt 0 0 . grow` an overlay that covers its parent without
+  sizing it.
+- `aspect r`: a fit height is the width the node is given over `r`, so
+  `fillW . aspect (16 / 9)` keeps 16:9 at any width. `fixedAspectW` and
+  `fixedAspectH` are its fixed cases.
 - `useDrag2DOn` and `useWheelDeltaOn`, the drag and wheel hooks of a custom
   widget fed its `Response`: a drag starts with a press on the widget and a
   wheel turns it while it is hovered, so neither acts through something drawn
   over the widget, on the part a scroller clips off, or while it is disabled.
   `knob` uses them. `useDrag2D` and `useWheelDelta`, which test a rect, are
   deprecated.
-- `pointer`, a layout modifier for what a node drawn over others by a stack
+- `pointer`, a layout modifier for what a node drawn over others by layers
   or a pin does with the pointer: by default (`PointerAuto`) a control on top
   takes it and anything else lets it through to the controls beneath;
   `PointerBlock` makes a node, such as a card or a scrim, take it over its
@@ -303,10 +312,22 @@
   `PointerPass` makes a node and all inside it let it through. A label, an
   image or a container with an id under a control on top is covered like a
   control, taking no hover or tooltip there.
-- `imageConfigured` and `imageConfigured'` take an `ImageConfig`: a
-  `ContentFit` like CSS's `object-fit`, an alignment, an opacity and a
-  `Rotation`. The `DrawImageRotated` op and the canvas's `drawImageRotated`
-  draw an image turned about its centre.
+- `imageConfigured` and `imageConfigured'` take an `ImageConfig`: a layout
+  modifier, a `ContentFit` like CSS's `object-fit`, an alignment, a crop to
+  part of the image in its pixels (`icCrop`), a zoom about the fitted
+  image's centre (`icScale`), an opacity and a `Rotation`. An axis the
+  layout leaves unsized takes the image's own size, and a fit height follows
+  the width in the image's shape (`aspect`). It is the same node as `image`,
+  drawn by paint, not a custom widget: a frame measures and hashes nothing
+  for it. `svgIconConfigured` draws an SVG icon with the same options, and
+  `fitRect` is the placement a fit makes, for a canvas.
+- `drawImageWith` draws an `ImageDraw` on a canvas: a rect, an image, the
+  part of it in UVs, a turn about the rect's centre, a tint and an opacity.
+  `drawImage` and `drawImageUV` draw through it. The `DrawImage` op draws
+  any image, turned or not; `DrawImageRect` is it unturned, as a pattern.
+- `useImageRgba` registers an image once per key and lets it go when the
+  view stops calling it, as `useTask` does a job; the image atlas gives the
+  room of an image let go to the next image that fits it.
 - Focus from code: `requestFocus` gives a widget the keyboard by its `respId`
   as Tab would, or by `currentId` just before declaring it; `focusNext` and
   `focusPrevious` move it on as Tab and Shift+Tab do; `clearFocus` takes it
@@ -336,7 +357,10 @@
   nothing, and from a scope picks the arrow.
 - A layout overlay, like iced's `explain`: `explainLayout` outlines every
   layout node and highlights the one under the pointer, which `explainedNode`
-  describes; `explainingLayout` says whether it is on.
+  describes: its widget id, to match a `respId`, rect and padding, sizing
+  and limits, gap, direction, `Flow`, pin and `PointerMode`, as fields of
+  `ExplainedNode`. `explainingLayout` says whether it is on, and
+  `explainScope` narrows it to the nodes a part of the view adds.
 - Every key as a `Key`: `KeyF n`, paging, Insert, Space, the lock and menu
   keys, and a `KeyChar` of what a typing key types unmodified. `modSuper`,
   `modPrimary` for the platform's command key (Command on macOS, else Ctrl),
@@ -770,6 +794,9 @@
 - `Input`, `Modifiers` (`modSuper`), `MouseButton`, `Response`, `Layout`,
   `Theme`, `FontVariant`, `DrawOp` and `UiCursorKind` have new fields or
   constructors, for the additions above.
+- `DrawImageRect` is a pattern for a `DrawImage` at angle 0: it builds an
+  image op and matches an unturned one as before, and a turned image
+  matches `DrawImage` only.
 - `setTheme` and `setUiTheme` set a fixed theme in place of one following
   the system's appearance. A view's `setUiTheme` repaints once the view is
   built, and only if the frame ends with another theme than it began with,

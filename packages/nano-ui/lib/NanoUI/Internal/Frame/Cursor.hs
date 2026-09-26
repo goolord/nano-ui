@@ -189,7 +189,7 @@ cursorRegionKind ctx inp =
 -- in the floating panel @top@ when the pointer is confined to one, else on
 -- the page, whose top-level nodes count in the order they were declared.
 -- Paint draws a node's children over the node, in 'forChildrenInPaintOrder_'
--- (a stack's later children and every pinned child over the rest), and each
+-- (a layered container's later children and every pinned child over the rest), and each
 -- floating panel as a layer of its own, over the page: windows, then modals,
 -- then popups. A node other than a plain container clips its children to
 -- itself, so where it misses the pointer none of them is looked at.
