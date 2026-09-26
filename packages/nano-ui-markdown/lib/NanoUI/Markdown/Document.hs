@@ -73,7 +73,7 @@ instance Eq MarkdownDoc where
   a == b = docLength a == docLength b && TL.fromChunks (pieces a) == TL.fromChunks (pieces b)
 
 instance Show MarkdownDoc where
-  showsPrec d doc = showParen (d > 10) (showString "parseMarkdown " . showsPrec 11 (T.concat (pieces doc)))
+  showsPrec d doc = showParen (d > 10) (showString "parseMarkdown " . showsPrec 11 (markdownSource doc))
 
 -- | The text of a document, in pieces.
 pieces :: MarkdownDoc -> [Text]
@@ -114,7 +114,7 @@ parseMarkdown t = fromMaybe unparsed (resume new t)
   where
     new = emptyMarkdown {docLength = T.length t}
     -- If commonmark failed, the text would show as it is.
-    unparsed = new {docRest = t, docLast = [Paragraph [Str (chomp (parsedText (parseLines mempty t)))]]}
+    unparsed = new {docRest = t, docLast = [Paragraph [Str (chomp (unixLines t))]]}
 
 -- | The blocks of a document.
 markdownBlocks :: MarkdownDoc -> [Block]
@@ -158,7 +158,7 @@ appendMarkdown new doc
   | T.null new = doc
   | otherwise =
       fromMaybe
-        (parseMarkdown (T.concat (pieces doc) <> new))
+        (parseMarkdown (markdownSource doc <> new))
         (resume doc {docLength = docLength doc + T.length new} (docRest doc <> new))
 
 -- | A document with a new rest, parsed after its closed blocks, or 'Nothing'
@@ -174,7 +174,8 @@ resume doc rest = do
       Parsed input complete parsed = parseLines (docKnown doc) (reopened <> rest)
   fresh <- parsed
   rnf (mapMaybe nodeBlock fresh) `seq` pure ()
-  let refs = foldMap nodeRefs fresh `M.difference` docKnown doc
+  let freshRefs = foldMap nodeRefs fresh
+      refs = freshRefs `M.difference` docKnown doc
   guard (null (docDone doc) || refs == docPending doc)
   nodes <- case (fresh, open) of
     (n : ns, _) -> (: ns) <$> continue open n
@@ -193,7 +194,7 @@ resume doc rest = do
               , docClosed = docClosed doc <> Seq.fromList (mapMaybe nodeBlock closing)
               , docOpen = open'
               , docKnown = known
-              , docPending = foldMap nodeRefs fresh `M.difference` known
+              , docPending = freshRefs `M.difference` known
               , docRest = rest'
               , docLast = spine (mapMaybe nodeBlock opened)
               }
@@ -204,9 +205,10 @@ resume doc rest = do
 spine :: [a] -> [a]
 spine xs = foldr seq () xs `seq` xs
 
--- | The first block of the rest, which starts inside the open block,
--- continuing it: 'Nothing' if it does not, which it always does, or if the
--- table it continues gets too big for 'fits'.
+-- | The first block of the rest, which starts inside the open block, joined
+-- to the open block's part before the rest: 'Nothing' if the table it
+-- continues gets too big for 'fits' (or if it continued no open block, which
+-- it always does).
 continue :: Open -> Node -> Maybe Node
 continue open n = case (open, nodeBlock n, nodeShape n) of
   (Fresh, _, _) -> Just n

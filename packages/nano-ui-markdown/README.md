@@ -71,16 +71,14 @@ those blocks may link to it: definitions at the end of a reply cost a whole
 parse an append.
 
 `markdownSource` gives a document's text back. Two documents are equal when
-their texts are, so one kept in `useState`
-changes with every append. The widget keeps the ids of the blocks before the
-one that changed, so they are not measured, laid out or repainted again. A chat
-log of thousands of paragraphs should draw only the messages in view, using
-`getScrollMetrics`.
+their texts are, so one kept in `useState` changes with every append. The
+widget keeps the ids of the blocks before the one that changed, so they are not
+measured, laid out or repainted again. A chat log of thousands of paragraphs
+should draw only the messages in view, using `getScrollMetrics`.
 
 `cabal run nano-ui-markdown-example` streams a reply into a chat view with
-`useStream`. It
-needs `nano-ui-sdl`, behind this package's `sdl` flag (on by default); the
-library itself does not depend on a backend.
+`useStream`. It needs `nano-ui-sdl`, behind this package's `sdl` flag (on by
+default); the library itself does not depend on a backend.
 
 ## What it parses
 
@@ -116,22 +114,21 @@ markdownConfigured
 ```
 
 `mdBlock` draws blocks your own way: it is asked of every block, in quotes
-and lists too, and `Nothing` leaves a block to the widget. `markdownBlock`
-draws one as the widget would, to fall back to or to wrap. The configuration
-carries the view's effect row, as nano-ui's `PaneGridConfig` does, since
-`mdBlock` runs widgets of yours. A code block with syntax highlighting, where
-`highlight` stands for a highlighter of your own that returns rich-text
-pieces:
+and lists too, and given the widget's own drawing of a block, to fall back to
+or to wrap. The configuration carries the view's effect row, as nano-ui's
+`PaneGridConfig` does, since `mdBlock` runs widgets of yours. A code block with
+syntax highlighting, where `highlight` stands for a highlighter of your own
+that returns rich-text pieces:
 
 ```haskell
 highlighted :: MarkdownConfig NanoUIEs
 highlighted =
   defaultMarkdownConfig
-    { mdBlock = \case
-        CodeBlock "haskell" code -> Just $ do
+    { mdBlock = \own -> \case
+        CodeBlock "haskell" code -> do
           panel (richTextWith (fontMono . fillW) (highlight code))
           pure Nothing
-        _ -> Nothing
+        b -> own b
     }
 ```
 
@@ -142,14 +139,14 @@ decoder of yours, which registers the image and returns its id and size):
 lazyImages :: MarkdownConfig NanoUIEs
 lazyImages =
   defaultMarkdownConfig
-    { mdBlock = \case
-        Paragraph [Image src _ alt] -> Just $ do
+    { mdBlock = \own -> \case
+        Paragraph [Image src _ alt] -> do
           loaded <- useTask src (decodePng src)
           case loaded of
             Just (iid, Size w h) -> void (image (fixedWH w h) iid)
             Nothing -> label ("Loading " <> spansText alt)
           pure Nothing
-        _ -> Nothing
+        b -> own b
     }
 ```
 

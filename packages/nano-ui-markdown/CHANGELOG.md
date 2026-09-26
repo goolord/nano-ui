@@ -15,8 +15,8 @@
   backend's default font size, and a drawn image shows its title as a tooltip.
 - `MarkdownConfig es` carries the view's effect row, for `mdBlock`, which
   draws any block, at any depth, your own way (syntax highlighting, images
-  loaded as they are drawn, chrome of your own), and `markdownBlock`, the
-  widget's own drawing of a block, to fall back to or wrap. Style modifiers
+  loaded as they are drawn, chrome of your own), given the widget's own
+  drawing of a block to fall back to or wrap. Style modifiers
   over the look of inline code (`mdInlineCode`, with a background from
   `mdInlineCodeBackground`), code blocks (`mdCodeBlock`), quotes (`mdQuote`)
   and table cells (`mdTableCell`).

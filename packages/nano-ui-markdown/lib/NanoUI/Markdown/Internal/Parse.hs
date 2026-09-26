@@ -9,6 +9,7 @@ module NanoUI.Markdown.Internal.Parse
   , Shape (..)
   , Refs
   , parseLines
+  , unixLines
   , splitLines
   , chomp
   ) where
@@ -29,7 +30,7 @@ import Commonmark.Extensions
 import Commonmark.ReferenceMap (LinkInfo (..), ReferenceMap (..))
 import Data.Char (isSpace)
 import Data.Dynamic (toDyn)
-import Data.Functor.Identity (runIdentity)
+import Data.Functor.Identity (Identity, runIdentity)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as M
 import Data.Maybe (fromMaybe, mapMaybe)
@@ -91,15 +92,21 @@ parseLines before src = Parsed unix (T.count "\n" unix) nodes
     -- and keeps @\\r@ out of code, and the last line gets one: without it
     -- commonmark ends no table row there, and adds an empty paragraph after a
     -- heading or a closing fence. 'splitLines' knows the same line endings.
-    unix = T.replace "\r" "\n" (T.replace "\r\n" "\n" src)
+    unix = unixLines src
     text = if "\n" `T.isSuffixOf` unix then unix else T.snoc unix '\n'
     nodes = case runIdentity (C.commonmarkWith syntax "" text) of
       Right (Blocks ns) -> Just ns
       Left _ -> Nothing
-    -- Task items before the core list items, tables after the core blocks.
-    syntax =
-      taskListSpec <> strikethroughSpec <> autolinkSpec <> C.defaultSyntaxSpec <> pipeTableSpec
-        <> mempty {C.syntaxFinalParsers = [defined before]}
+    syntax = extensions <> mempty {C.syntaxFinalParsers = [defined before]}
+
+-- | A text with its line endings, @\\r\\n@ or @\\r@, made @\\n@.
+unixLines :: Text -> Text
+unixLines = T.replace "\r" "\n" . T.replace "\r\n" "\n"
+
+-- | CommonMark with GitHub's extensions, built once rather than at every
+-- parse: task items before the core list items, tables after the core blocks.
+extensions :: C.SyntaxSpec Identity Spans Blocks
+extensions = taskListSpec <> strikethroughSpec <> autolinkSpec <> C.defaultSyntaxSpec <> pipeTableSpec
 
 -- | Adds link reference definitions made before the text to the text's own,
 -- ahead of them, before commonmark parses the inline text that uses them.

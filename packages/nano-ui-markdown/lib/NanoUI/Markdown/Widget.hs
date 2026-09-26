@@ -4,7 +4,6 @@ module NanoUI.Markdown.Widget
   , defaultMarkdownConfig
   , markdown
   , markdownConfigured
-  , markdownBlock
   ) where
 
 import Control.Applicative ((<|>))
@@ -136,15 +135,20 @@ data MarkdownConfig es = MarkdownConfig
   -- link there, is drawn when this has one: a click on it goes to the link,
   -- else to its source, and its title, else the link's, shows as a tooltip.
   -- Any other image shows its alt text as a link to the same place.
-  , mdBlock :: !(Block -> Maybe (Eff es (Maybe Text)))
-  -- ^ Draw a block your own way, or leave it to the widget with 'Nothing'
-  -- (default: @const Nothing@). Asked of every block at every depth,
-  -- those in quotes and list items too, it can highlight code, load an
-  -- image as it comes into view, or put chrome of its own around a block,
-  -- falling back to 'markdownBlock' for the rest. What it returns is the
-  -- link clicked, as for 'markdown'. Either way a block is drawn under a key
-  -- of its position and kind, so a block that is appended to keeps the ids
-  -- of what is drawn for it.
+  , mdBlock :: !((Block -> Eff es (Maybe Text)) -> Block -> Eff es (Maybe Text))
+  -- ^ Draw a block your own way, given the widget's own drawing of a block
+  -- to fall back to or wrap (default: 'id'). Asked of every block at every
+  -- depth, those in quotes and list items too, it can highlight code, load
+  -- an image as it comes into view, or put chrome of its own around a block.
+  -- The widget's drawing draws a block where it is, muted in a quote, and
+  -- asks this of the blocks inside it. What it returns is the link clicked,
+  -- as for 'markdown'. Either way a block is drawn under a key of its
+  -- position and kind, so a block that is appended to keeps the ids of what
+  -- is drawn for it.
+  --
+  -- > mdBlock = \own -> \case
+  -- >   CodeBlock "haskell" code -> Nothing <$ highlighted code
+  -- >   b -> own b
   }
 
 -- | A full-width column, body text in the theme's font, headings from 1.6
@@ -172,7 +176,7 @@ defaultMarkdownConfig =
     , mdTableCell = const id
     , mdCopyCode = True
     , mdImage = const Nothing
-    , mdBlock = const Nothing
+    , mdBlock = id
     }
 
 -- | Draw a document. Returns the destination of a link clicked this frame.
@@ -187,25 +191,6 @@ markdown = markdownConfigured defaultMarkdownConfig
 -- | 'markdown' drawn as the configuration says.
 markdownConfigured :: Ui :> es => MarkdownConfig es -> MarkdownDoc -> Eff es (Maybe Text)
 markdownConfigured cfg doc = do
-  env <- topEnv cfg
-  columnWith (mdLayout cfg) (blocks env (markdownBlocks doc))
-
--- | Draw one block as the widget does, as a block at the top of a document
--- drawn with the configuration: for an 'mdBlock' to fall back to, or to
--- wrap. The blocks inside it, in a quote or a list, are drawn as the
--- document draws them, 'mdBlock' first; a block this draws inside a quote
--- or a list is drawn as at the top, neither muted nor indented further.
--- Returns the link clicked this frame.
---
--- > cfg = defaultMarkdownConfig {mdBlock = \case
--- >   CodeBlock "haskell" code -> Just (Nothing <$ highlighted code)
--- >   _ -> Nothing}
-markdownBlock :: Ui :> es => MarkdownConfig es -> Block -> Eff es (Maybe Text)
-markdownBlock cfg b = (\env -> snd (block env b)) =<< topEnv cfg
-
--- | What the document's top-level blocks are drawn with.
-topEnv :: Ui :> es => MarkdownConfig es -> Eff es (Env es)
-topEnv cfg = do
   theme <- uiTheme
   size <- uiFontSize
   -- The body text's size is set, to the backend's default where nothing
@@ -213,15 +198,16 @@ topEnv cfg = do
   let text = mdText cfg . \l -> if layoutFontSize l > 0 then l else fontSize size l
   base <- text <$> askDefaultLayout
   fm <- resolveFontUi (layoutFontSize base) (layoutFontWeight base) (layoutFontStyle base) (layoutFontVariant base)
-  pure
-    Env
-      { envCfg = cfg
-      , envTheme = theme
-      , envText = text
-      , envSize = layoutFontSize base
-      , envDepth = 0
-      , envMetrics = fm
-      }
+  let env =
+        Env
+          { envCfg = cfg
+          , envTheme = theme
+          , envText = text
+          , envSize = layoutFontSize base
+          , envDepth = 0
+          , envMetrics = fm
+          }
+  columnWith (mdLayout cfg) (blocks env (markdownBlocks doc))
 
 -- What a block is drawn with: the configuration, the theme, the text's
 -- modifier where it is (a quote mutes it), the body text's size, how deep in
@@ -239,41 +225,53 @@ data Env es = Env
 -- so a block that turns into another kind as text streams in, a paragraph
 -- into a heading, a table or a drawn image, gets fresh ids.
 --
--- 'mdBlock' is asked first, and draws the block under the same key as the
--- widget would.
+-- 'mdBlock' draws each block under that key, given the widget's own
+-- drawing.
 blocks :: Ui :> es => Env es -> [Block] -> Eff es (Maybe Text)
 blocks env bs = asum <$> zipWithM draw [0 :: Int ..] bs
   where
-    draw i b =
-      let (kind, byWidget) = block env b
-       in withKey (i, kind) (fromMaybe byWidget (mdBlock (envCfg env) b))
+    own = block env
+    draw i b = withKey (i, blockKind (envCfg env) b) (mdBlock (envCfg env) own b)
 
--- | A block's kind, and how the widget draws it.
-block :: Ui :> es => Env es -> Block -> (Int, Eff es (Maybe Text))
+-- | A block's kind, for its key: a paragraph drawn as an image is a kind of
+-- its own.
+blockKind :: MarkdownConfig es -> Block -> Int
+blockKind cfg = \case
+  Paragraph xs
+    | isJust (soleImage cfg xs) -> 13
+    | otherwise -> 0
+  Heading level _ -> level
+  ThematicBreak -> 7
+  CodeBlock {} -> 8
+  BlockQuote _ -> 9
+  List (Bullet _) _ _ -> 10
+  List (Ordered _ _) _ _ -> 11
+  Table {} -> 12
+
+-- | How the widget draws a block. Kept out of 'blocks', which hands it to
+-- 'mdBlock': inlined there, its closures over the 'Env' would be built at
+-- every call of 'blocks', whichever blocks it draws.
+{-# NOINLINE block #-}
+block :: Ui :> es => Env es -> Block -> Eff es (Maybe Text)
 block env = \case
   Paragraph xs
-    | Just (target, title, iid, Size w h) <- soleImage (envCfg env) xs ->
-        ( 13
-        , do
-            resp <- image' (fixedWH w h) iid
-            unless (T.null title) (tooltip resp title)
-            pure (if respClicked resp then Just target else Nothing)
-        )
-    | otherwise -> (0, richTextWith (tight . fillW . envText env) (inlines env xs))
+    | Just (target, title, iid, Size w h) <- soleImage (envCfg env) xs -> do
+        resp <- image' (fixedWH w h) iid
+        unless (T.null title) (tooltip resp title)
+        pure (if respClicked resp then Just target else Nothing)
+    | otherwise -> richTextWith (tight . fillW . envText env) (inlines env xs)
   Heading level xs ->
     let title = richTextWith (tight . fillW . mdHeading (envCfg env) level . envText env) (inlines env xs)
-     in (level, if level <= 2 then columnWith (tight . fillW . gap 4) (title <* separator) else title)
-  ThematicBreak -> (7, Nothing <$ separator)
-  CodeBlock info code -> (8, Nothing <$ codeBlock env info code)
+     in if level <= 2 then columnWith (tight . fillW . gap 4) (title <* separator) else title
+  ThematicBreak -> Nothing <$ separator
+  CodeBlock info code -> Nothing <$ codeBlock env info code
   BlockQuote bs ->
-    ( 9
-    , rowWith (tight . fillW . gap 10) $ do
-        box (fixedW 3 . fillH) (themeSeparator (envTheme env))
-        columnWith (tight . fillW . gap 10) $
-          blocks env {envText = mdQuote (envCfg env) . fontColor (themeMuted (envTheme env)) . envText env} bs
-    )
-  List ty isTight items -> (case ty of Bullet _ -> 10; Ordered _ _ -> 11, listBlock env ty isTight items)
-  Table aligns header rows -> (12, tableBlock env aligns header rows)
+    rowWith (tight . fillW . gap 10) $ do
+      box (fixedW 3 . fillH) (themeSeparator (envTheme env))
+      columnWith (tight . fillW . gap 10) $
+        blocks env {envText = mdQuote (envCfg env) . fontColor (themeMuted (envTheme env)) . envText env} bs
+  List ty isTight items -> listBlock env ty isTight items
+  Table aligns header rows -> tableBlock env aligns header rows
 
 -- | The image a paragraph shows, when it holds an image alone, or alone in a
 -- link, that the configuration draws: where a click on it goes, its title
@@ -303,7 +301,10 @@ inlines env = concatMap (go id Nothing)
       Emph xs -> concatMap (go (fontItalic . style) target) xs
       Strong xs -> concatMap (go (fontBold . style) target) xs
       Strike xs -> concatMap (go (fontStrike . style) target) xs
-      Code t -> [codeBackground (piece (mdInlineCode cfg . fontMono . maybe (fontColor (themeOrange theme)) (const id) target . style) target t)]
+      Code t ->
+        -- Code in a link keeps the link's colour.
+        let ink = if isJust target then id else fontColor (themeOrange theme)
+         in [codeBackground (piece (mdInlineCode cfg . fontMono . ink . style) target t)]
       Link url _ xs -> concatMap (go (fontColor linkColor' . style) (target <|> Just url)) xs
       Image src _ alt ->
         let txt = if null alt then "image" else spansText alt

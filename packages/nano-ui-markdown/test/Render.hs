@@ -6,13 +6,13 @@ import Control.Monad (filterM, forM, replicateM_, void, when)
 import Data.Foldable (toList)
 import Data.Function (on)
 import Data.IORef (modifyIORef', newIORef, readIORef, writeIORef)
-import Data.Word (Word8)
-import Foreign.ForeignPtr (withForeignPtr)
-import Foreign.Storable (peekByteOff)
 import Data.List (find, groupBy, nub, sortOn)
 import Data.Maybe (isJust)
 import Data.Text (Text)
 import Data.Text qualified as T
+import Data.Word (Word8)
+import Foreign.ForeignPtr (withForeignPtr)
+import Foreign.Storable (peekByteOff)
 import NanoUI
   ( Color, DrawOp (..), ImageId (..), Input (..), NanoUI, NanoUIEs, Rect (..), Size (..), Style (..), TextFont (..), Theme (..)
   , V2 (..), WidgetId, background, checkboxBoxSize, colorA, colorB, colorG, colorR, colorRGBA, columnWith, drawCheckbox, fillW, fixedH, fixedW, fontColor, foreground
@@ -45,25 +45,27 @@ nodesOf wanted ctx = do
   matching <- filterM (fmap (== wanted) . getNodeType na) [0 .. n - 1]
   forM matching $ \i -> (,) <$> getWidgetId na i <*> getNodeRect na i
 
+-- | The frame's custom drawings, rich text and canvases: each one's id,
+-- content key and ops, in document order.
+drawings :: Context -> IO [(WidgetId, Int, [DrawOp])]
+drawings ctx = do
+  nodes <- nodesOf NodeDrawing ctx
+  fmap concat . forM nodes $ \(wid, r) -> do
+    entry <- lookupCustomDrawing ctx wid
+    cdc <- mkCustomDrawContext ctx (ctxFontMetrics ctx) wid
+    pure [(wid, cdrContent e, toList (cdrBuild e cdc r)) | Just e <- [entry]]
+
 -- | Every word the frame's rich-text widgets draw, in document order.
 drawnWords :: Context -> IO [Word']
 drawnWords ctx = do
-  drawings <- nodesOf NodeDrawing ctx
-  fmap concat . forM drawings $ \(wid, r) -> do
-    entry <- lookupCustomDrawing ctx wid
-    cdc <- mkCustomDrawContext ctx (ctxFontMetrics ctx) wid
-    pure [Word' wid (V2 tx ty) (textFontSize font) t c | Just e <- [entry], DrawTextStyled tx ty font t c <- toList (cdrBuild e cdc r)]
+  ds <- drawings ctx
+  pure [Word' wid (V2 tx ty) (textFontSize font) t c | (wid, _, ops) <- ds, DrawTextStyled tx ty font t c <- ops]
 
--- | The frame's list markers: each one's id, content key and ops, in
--- document order. They are the canvases that draw no text.
+-- | The frame's list markers, in document order: the drawings with no text.
 markers :: Context -> IO [(WidgetId, Int, [DrawOp])]
-markers ctx = do
-  drawings <- nodesOf NodeDrawing ctx
-  fmap concat . forM drawings $ \(wid, r) -> do
-    entry <- lookupCustomDrawing ctx wid
-    cdc <- mkCustomDrawContext ctx (ctxFontMetrics ctx) wid
-    let isText = \case DrawTextStyled {} -> True; DrawText {} -> True; _ -> False
-    pure [(wid, cdrContent e, ops) | Just e <- [entry], let ops = toList (cdrBuild e cdc r), not (any isText ops)]
+markers ctx = filter (\(_, _, ops) -> not (any isText ops)) <$> drawings ctx
+  where
+    isText = \case DrawTextStyled {} -> True; DrawText {} -> True; _ -> False
 
 wordNamed :: Text -> [Word'] -> Maybe Word'
 wordNamed t = find ((== t) . wText)
@@ -72,11 +74,8 @@ wordNamed t = find ((== t) . wText)
 -- pieces' backgrounds and decorations.
 drawnFills :: Color -> Context -> IO [Rect]
 drawnFills c ctx = do
-  drawings <- nodesOf NodeDrawing ctx
-  fmap concat . forM drawings $ \(wid, r) -> do
-    entry <- lookupCustomDrawing ctx wid
-    cdc <- mkCustomDrawContext ctx (ctxFontMetrics ctx) wid
-    pure [rect | Just e <- [entry], FillRect rect c' <- toList (cdrBuild e cdc r), c' == c]
+  ds <- drawings ctx
+  pure [rect | (_, _, ops) <- ds, FillRect rect c' <- ops, c' == c]
 
 -- | Whether a frame, painted in full, draws anything in a colour.
 paints :: Color -> NanoUI a -> IO Bool
@@ -130,9 +129,9 @@ catImages = defaultMarkdownConfig {mdImage = \src -> if src == "cat.png" then Ju
 customCode :: MarkdownConfig NanoUIEs
 customCode =
   defaultMarkdownConfig
-    { mdBlock = \case
-        CodeBlock "hs" code -> Just (Nothing <$ label ("custom " <> code))
-        _ -> Nothing
+    { mdBlock = \own -> \case
+        CodeBlock "hs" code -> Nothing <$ label ("custom " <> code)
+        b -> own b
     }
 
 spec :: Spec
@@ -366,17 +365,21 @@ spec = do
     length [() | (_, "Copy", _, _, _) <- spans] `shouldBe` 1
     map wText <$> drawnWords ctx `shouldReturn` ["item", "after"]
 
-  it "falls back to markdownBlock inside chrome of its own, and returns its link" $ do
+  it "wraps the widget's own drawing in chrome of its own, where the block is, and returns its link" $ do
     let cfg :: MarkdownConfig NanoUIEs
         cfg =
           defaultMarkdownConfig
-            { mdBlock = \case
-                b@(Paragraph _) -> Just (panel (markdownBlock cfg b))
-                _ -> Nothing
+            { mdBlock = \own b -> case b of
+                Paragraph _ -> panel (own b)
+                _ -> own b
             }
         ui = columnWith (fixedW 500) (markdownConfigured cfg (parseMarkdown "See [the docs](/docs).\n\n> Quoted [link](/quoted)."))
     clickWord ui "docs" `shouldReturn` Just "/docs"
     clickWord ui "link" `shouldReturn` Just "/quoted"
+    -- The quoted paragraph is drawn as in the quote: muted.
+    ctx <- drawn 600 400 ui
+    theme <- readIORef (ctxTheme ctx)
+    fmap wColor . wordNamed "Quoted" <$> drawnWords ctx `shouldReturn` Just (themeMuted theme)
 
   it "styles inline code, quotes, table cells and code blocks over their own look" $ do
     let tint = colorRGBA 1 2 3 255

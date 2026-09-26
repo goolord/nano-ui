@@ -34,13 +34,13 @@
 -- item, row, line or block. "NanoUI.Markdown.Document" says when more is
 -- parsed again.
 --
--- 'mdBlock' draws blocks your own way, at any depth, falling back to
--- 'markdownBlock', the widget's own drawing:
+-- 'mdBlock' draws blocks your own way, at any depth, given the widget's own
+-- drawing to fall back to or wrap:
 --
 -- > highlighted :: MarkdownConfig NanoUIEs
--- > highlighted = defaultMarkdownConfig {mdBlock = \case
--- >   CodeBlock "haskell" code -> Just (Nothing <$ panel (richText (highlight code)))
--- >   _ -> Nothing}
+-- > highlighted = defaultMarkdownConfig {mdBlock = \own -> \case
+-- >   CodeBlock "haskell" code -> Nothing <$ panel (richText (highlight code))
+-- >   b -> own b}
 --
 -- The @commonmark@ library parses the text, with GitHub's tables, task lists
 -- (in bullet lists), strikethrough and bare web and email links from
@@ -61,7 +61,6 @@ module NanoUI.Markdown
   , markdownConfigured
   , MarkdownConfig (..)
   , defaultMarkdownConfig
-  , markdownBlock
 
     -- * Syntax
   , module NanoUI.Markdown.Syntax
