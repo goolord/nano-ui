@@ -462,7 +462,7 @@ clearEphemeral inp = (stripInteractionInput inp) {inputMouseClicks = 1, inputWin
 isHardQuitInput :: Input -> Bool
 isHardQuitInput inp =
   modCtrl (inputModifiers inp)
-    && ( inputKeysElem (KeyChar 'c') (inputKeys inp)
+    && ( pressedIn (KeyChar 'c') inp
           || T.elem 'c' (inputChars inp)
           || T.elem '\ETX' (inputChars inp)
        )

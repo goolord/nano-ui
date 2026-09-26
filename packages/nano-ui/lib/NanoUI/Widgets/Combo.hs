@@ -22,7 +22,7 @@ import NanoUI.Internal.Font (menuItemRowH)
 import NanoUI.Internal.Frame.Hit (findNodeByWidgetId)
 import NanoUI.Internal.Frame.Select (comboDropPickIndex, comboDropRect, comboScrollGeom)
 import NanoUI.Internal.Id (WidgetId (..))
-import NanoUI.Internal.Input (Input, Key (..), MouseButton (..), Pressable (..), buttonHeld, buttonPressed, inputKeys, inputMousePos, inputScroll)
+import NanoUI.Internal.Input (Input, Key (..), MouseButton (..), Pressable (..), buttonHeld, buttonPressed, inputMousePos, inputScroll)
 import NanoUI.Internal.Layout.Arena (setOptions)
 import NanoUI.Internal.Monad (Ui, askContext, uiIO)
 import NanoUI.Internal.Store (boolInt, ptrEq, fieldFloat, fieldInt, fieldText, findSlot, flagSlot, insertSlot, setFieldSelection)
@@ -152,7 +152,6 @@ comboStep ci cs0 =
   where
     isFocus = ciFocused ci
     inp = ciInput ci
-    hasKey k = k `elem` inputKeys inp
     text = ciText ci
     displayed = ciRows ci
     contentW = ciContentW ci
@@ -169,8 +168,8 @@ comboStep ci cs0 =
     win0 = if ciEdited ci then 0 else storedWin
     nav
       | not isFocus || n <= 0 = 0 :: Int
-      | hasKey KeyDown = 1
-      | hasKey KeyUp = -1
+      | pressedIn KeyDown inp = 1
+      | pressedIn KeyUp inp = -1
       | otherwise = 0
     hi
       | nav == 0 = hi0

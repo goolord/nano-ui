@@ -8,13 +8,11 @@ module NanoUI.Internal.Widgets.Shortcut
   , keyHeld
   , shortcut
   , shortcutOnce
-  , focusTakesChord
   ) where
 
 import Control.Monad (when)
 import Data.Foldable (toList)
 import Data.Maybe (isJust)
-import Data.Primitive.SmallArray (SmallArray)
 import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context
 import NanoUI.Internal.Input
@@ -30,25 +28,25 @@ import NanoUI.Widgets.TextEditor (keyCommand, multiLineMode, singleLineMode)
 -- input itself has them all ('pressedIn'). For a command bound to a key,
 -- use 'shortcut'.
 keyPressed :: Ui :> es => Key -> Eff es Bool
-keyPressed = keyIn inputKeys
+keyPressed = keyIn pressedIn
 
 -- | 'keyPressed' for the press alone: 'False' on the frames that only
 -- auto-repeat a held key, so holding the key down acts once.
 keyPressedOnce :: Ui :> es => Key -> Eff es Bool
-keyPressedOnce = keyIn inputKeysNew
+keyPressedOnce = keyIn pressedOnceIn
 
 -- | Whether the key came up this frame, as 'keyPressed' for a release.
 keyReleased :: Ui :> es => Key -> Eff es Bool
-keyReleased = keyIn inputKeysReleased
+keyReleased = keyIn releasedIn
 
 -- | Whether the key is down, as 'keyPressed' for a key held.
 keyHeld :: Ui :> es => Key -> Eff es Bool
-keyHeld = keyIn inputKeysHeld
+keyHeld = keyIn heldIn
 
-keyIn :: Ui :> es => (Input -> SmallArray Key) -> Key -> Eff es Bool
-keyIn field k = do
+keyIn :: Ui :> es => (Key -> Input -> Bool) -> Key -> Eff es Bool
+keyIn happened k = do
   inp <- askInput
-  if inputKeysElem k (field inp)
+  if happened k inp
     then withContext (\ctx -> keyFree ctx (inputModifiers inp) k)
     else pure False
 
@@ -104,8 +102,7 @@ chordShortcut :: Ui :> es => Bool -> Shortcut -> Eff es Bool
 chordShortcut _ (Shortcut Nothing _) = pure False
 chordShortcut once (Shortcut (Just pressedKey) mods) = do
   inp <- askInput
-  let presses = [i | (i, k) <- zip [0 ..] (toList (inputKeys inp)), k == pressedKey]
-  if null presses || inputModifiers inp /= mods || (once && not (pressedOnceIn pressedKey inp))
+  if inputModifiers inp /= mods || not ((if once then pressedOnceIn else pressedIn) pressedKey inp)
     then pure False
     else do
       free <- withContext (\ctx -> keyFree ctx mods pressedKey)
@@ -116,6 +113,7 @@ chordShortcut once (Shortcut (Just pressedKey) mods) = do
         else withContext $ \ctx -> do
           -- Take every press of the key, auto-repeats included, so a second
           -- binding of the chord does not act on one of them.
+          let presses = [i | (i, k) <- zip [0 ..] (toList (inputKeys inp)), k == pressedKey]
           took <- or <$> mapM (takeKeyPress ctx) presses
           when (took && pressedKey == KeyTab) (markTabConsumed ctx)
           pure took
@@ -143,7 +141,7 @@ focusTakesChord kind mods k =
     FocusControl KeysNavigate -> activates || moves
     FocusControl KeysType -> fieldTakes True
     FocusControl KeysAll -> True
-    FocusTextField multi -> fieldTakes multi
+    FocusTextLine -> fieldTakes False
     FocusComposing -> True
   where
     activates = shiftAtMost mods && (k == KeyEnter || k == KeySpace)

@@ -155,4 +155,4 @@ keyLabel = \case
 -- the key; a view asks 'NanoUI.shortcut' instead.
 shortcutIn :: Shortcut -> Input -> Bool
 shortcutIn (Shortcut k mods) inp =
-  inputModifiers inp == mods && any (`inputKeysElem` inputKeys inp) k
+  inputModifiers inp == mods && any (`pressedIn` inp) k

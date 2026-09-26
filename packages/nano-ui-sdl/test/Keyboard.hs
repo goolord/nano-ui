@@ -30,9 +30,9 @@ keyboardTranslation = do
   check "keypad Enter and plus" (key sDLK_KP_ENTER == Just KeyEnter && keypad sDLK_KP_PLUS == Just (KeyChar '+'))
   check "a modifier key is no key" (key sDLK_LSHIFT == Nothing)
   let ctrl = noModifiers {modCtrl = True}
-      chord = foldl' applyEvent emptyInput [EvModifiers ctrl, EvKey (KeyChar 's') ctrl]
-      letGo = foldl' applyEvent emptyInput [EvKey (KeyChar 's') ctrl, EvKeyUp (KeyChar 's') ctrl, EvModifiers noModifiers]
-      enterHeld = foldl' applyEvent emptyInput [EvKey KeyEnter noModifiers, EvKey KeyEnter noModifiers]
+      chord = foldl' applyEvent emptyInput [EvModifiers ctrl, EvKey (KeyChar 's') True ctrl]
+      letGo = foldl' applyEvent emptyInput [EvKey (KeyChar 's') True ctrl, EvKey (KeyChar 's') False ctrl, EvModifiers noModifiers]
+      enterHeld = foldl' applyEvent emptyInput [EvKey KeyEnter True noModifiers, EvKey KeyEnter True noModifiers]
       blurred = applyEvent chord EvFocusLost
   check "a chord is a key with its modifiers and types nothing" $
     toList (inputKeys chord) == [KeyChar 's'] && inputModifiers chord == ctrl && inputChars chord == ""

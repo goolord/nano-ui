@@ -277,8 +277,8 @@ keyCommand mode mods key =
   case key of
     KeyBackspace -> Just (Delete (widen LineStart WordLeft CharLeft))
     KeyDelete -> Just (Delete (widen LineEnd WordRight CharRight))
-    KeyLeft -> move (if modMacCommand mods then LineStart else if jump then WordLeft else CharLeft)
-    KeyRight -> move (if modMacCommand mods then LineEnd else if jump then WordRight else CharRight)
+    KeyLeft -> move (reach LineStart WordLeft CharLeft)
+    KeyRight -> move (reach LineEnd WordRight CharRight)
     KeyHome -> move (if jump && multi then DocumentStart else LineStart)
     KeyEnd -> move (if jump && multi then DocumentEnd else LineEnd)
     -- Ctrl or Alt with Enter or a vertical arrow is a chord, for a shortcut.
@@ -293,10 +293,15 @@ keyCommand mode mods key =
     multi = modeMultiLine mode
     jump = modJump mods
     chorded = modCtrl mods || modAlt mods
-    widen line word char
-      | modMacCommand mods || (modPrimary mods && modShift mods) = line
+    -- How far an arrow goes, and a deletion, which Ctrl+Shift also takes to
+    -- the line's end off macOS.
+    reach line word char
+      | modMacCommand mods = line
       | jump = word
       | otherwise = char
+    widen line word char
+      | modPrimary mods && modShift mods = line
+      | otherwise = reach line word char
     move m = Just (Move m (modShift mods))
 
 -- | This frame's typing and keys as commands, typed characters first.
