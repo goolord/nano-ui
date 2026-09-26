@@ -37,7 +37,7 @@ main =
       { -- Closing the window asks the view, which asks about unsaved changes.
         sdlWindowSettings = defaultWindowSettings {wsTitle = "nano-ui Notepad", wsSize = Size 1000 720, wsExitOnCloseRequest = False}
       , sdlAppTheme = Just tomorrowNightMinDarkTheme
-      , sdlAppShouldQuit = \inp -> inputKeysElem KeyEscape (inputKeys inp)
+      , sdlAppShouldQuit = pressedOnceIn KeyEscape
       }
     notepadUi
 

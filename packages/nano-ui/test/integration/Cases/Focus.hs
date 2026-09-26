@@ -2,7 +2,9 @@ module Cases.Focus (tests) where
 
 import Spec
 import Data.Maybe (isJust)
-import NanoUI.Internal.Context (InteractionState (..), getFocusVisible, getsInteraction, intKey)
+import Data.Text qualified as T
+import NanoUI.Internal.Context (Context (..), InteractionState (..), getFocusVisible, getsInteraction, intKey)
+import NanoUI.Monad (focusedWidget, releaseFocus)
 import NanoUI.Internal.Store (anySelectOpen, fieldSelection, fieldText, findSlot)
 import NanoUI.Shortcut
 
@@ -20,6 +22,9 @@ tests =
   , spec "focus-request-idle" runFocusRequestIdleTest
   , spec "focus-request-order" runFocusRequestOrderTest
   , spec "focus-request-closes-menus" runFocusRequestClosesMenusTest
+  , spec "focus-next-previous" runFocusNextPreviousTest
+  , spec "focus-clear-release" runFocusClearReleaseTest
+  , spec "focus-text-command" runFocusTextCommandTest
   ]
 
 inp :: Input
@@ -211,3 +216,76 @@ runFocusRequestClosesMenusTest ctx failed = do
   mapM_ (\i -> warmup ctx i ui) [rightPress, rightRelease]
   assertEq failed (respId field) =<< getFocusId ctx
   closes (isJust <$> getsInteraction ctx isTextInputMenu)
+
+-- | 'focusNext' and 'focusPrevious' move the keyboard as Tab and Shift+Tab
+-- do, at the end of the frame, wrapping at both ends; 'isFocused' says
+-- which widget has it. 'requestFocus' with 'currentId' names the widget
+-- declared next.
+runFocusNextPreviousTest :: Context -> IORef Int -> IO ()
+runFocusNextPreviousTest ctx failed = do
+  move <- newIORef (pure ())
+  let ui = column $ do
+        join (uiIO (readIORef move))
+        ids <- mapM (fmap respId . button') ["A", "B", "C"]
+        (,) ids <$> mapM isFocused ids
+      step m = writeIORef move m >> runFrame ctx inp ui >> writeIORef move (pure ()) >> snd <$> evalUi ctx inp ui
+  ([a, _, c], _) <- warmup2 ctx inp ui
+  assertEq failed [True, False, False] =<< step focusNext
+  assertEq failed [False, True, False] =<< step focusNext
+  assertEq failed [True, False, False] =<< step focusPrevious
+  assertEq failed [False, False, True] =<< step focusPrevious
+  assertEq failed c =<< getFocusId ctx
+  assert failed =<< getFocusVisible ctx
+  assertEq failed [True, False, False] =<< step (requestFocus =<< currentId)
+  assertEq failed a =<< getFocusId ctx
+
+-- | 'clearFocus' takes the keyboard off at the end of the frame, collapsing
+-- the field's selection; 'releaseFocus' takes it off at once, in the view,
+-- and leaves the selection as it was.
+runFocusClearReleaseTest :: Context -> IORef Int -> IO ()
+runFocusClearReleaseTest ctx failed = do
+  act <- newIORef (const (pure ()))
+  let ui = column $ do
+        (r, _) <- textInput' ("hello" :: T.Text)
+        f <- uiIO (readIORef act)
+        f (respId r)
+        after <- focusedWidget
+        pure (respId r, after)
+      selection wid = (\st -> fieldSelection st (intKey wid) (findSlot fieldText "" (intKey wid) st)) <$> getStore ctx
+      selectAll = chordInp (cmdOrCtrl <> key 'a') inp
+  warmupFocused ctx inp ui
+  (field, _) <- evalUi ctx inp ui
+  _ <- runFrame ctx selectAll ui
+  assertEq failed (0, 5) =<< selection field
+  writeIORef act (const clearFocus)
+  assertEq failed (field, field) =<< evalUi ctx inp ui
+  assertEq failed (WidgetId 0) =<< getFocusId ctx
+  assertEq failed (5, 5) =<< selection field
+  writeIORef act (const (pure ()))
+  _ <- runFrame ctx (tabInp inp) ui
+  _ <- runFrame ctx selectAll ui
+  writeIORef act releaseFocus
+  assertEq failed (field, WidgetId 0) =<< evalUi ctx inp ui
+  assertEq failed (0, 5) =<< selection field
+
+-- | A command run on a field from code focuses it as 'requestFocus' does: at
+-- the end of the frame, with the ring, and not for a disabled field.
+runFocusTextCommandTest :: Context -> IORef Int -> IO ()
+runFocusTextCommandTest ctx failed = do
+  offRef <- newIORef False
+  run <- newIORef False
+  let ui = column $ do
+        off <- uiIO (readIORef offRef)
+        (r, _) <- disabledWhen off (textInput' ("hello" :: T.Text))
+        whenM (uiIO (readIORef run)) (runTextCommand (respId r) SelectAll)
+        (,) (respId r) <$> focusedWidget
+  (field, _) <- warmup2 ctx inp ui
+  writeIORef run True
+  assertEq failed (field, WidgetId 0) =<< evalUi ctx inp ui
+  assertEq failed field =<< getFocusId ctx
+  assert failed =<< getFocusVisible ctx
+  writeIORef (ctxFocusId ctx) (WidgetId 0)
+  writeIORef offRef True
+  writeIORef run True
+  _ <- warmup ctx inp ui
+  assertEq failed (WidgetId 0) =<< getFocusId ctx

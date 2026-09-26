@@ -10,7 +10,7 @@ import Foreign.C.Types (CBool (..))
 import Foreign.Marshal.Alloc (alloca)
 import Foreign.Ptr (castPtr)
 import Foreign.Storable (Storable, poke)
-import NanoUI (V2 (..), buttonHeld, buttonPressed, buttonReleased)
+import NanoUI (Pressable (..), V2 (..))
 import NanoUI.Backend
 import NanoUI.Sdl.Internal.Input (SdlEvent (..), applyEvent, pollEvents)
 import SDL3.Sys.Bindgen.Events (SDL_MouseButtonEvent (..), SDL_MouseMotionEvent (..), SDL_WindowEvent (..))
@@ -77,7 +77,7 @@ main = do
       pressed = button MouseMiddle True emptyInput
       side = button MouseBack False (clearEphemeral (button MouseBack True emptyInput))
       gone = applyEvent pressed EvMouseLeave
-  check "a middle press is held" (buttonHeld MouseMiddle pressed && buttonPressed MouseMiddle pressed)
-  check "a side button is released" (buttonReleased MouseBack side && not (buttonHeld MouseBack side))
+  check "a middle press is held" (heldIn MouseMiddle pressed && pressedIn MouseMiddle pressed)
+  check "a side button is released" (releasedIn MouseBack side && not (heldIn MouseBack side))
   check "leaving moves the pointer off the window and keeps the button" $
-    let V2 x y = inputMousePos gone in x < -1000 && y < -1000 && buttonHeld MouseMiddle gone
+    let V2 x y = inputMousePos gone in x < -1000 && y < -1000 && heldIn MouseMiddle gone

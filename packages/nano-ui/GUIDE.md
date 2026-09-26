@@ -226,9 +226,16 @@ pointer routing.
 
 To move keyboard focus from the view, name the widget by its response:
 `when findPressed (requestFocus (respId resp))` focuses a search box on
-Ctrl+F, and `requestFocus (WidgetId 0)` takes the keyboard off whatever has
-it. Focus moves as Tab would, from the next frame; a widget Tab would skip,
-such as one disabled or behind a modal, refuses it.
+Ctrl+F, and `requestFocus =<< currentId` just before declaring a widget
+focuses that one. `focusNext` and `focusPrevious` move the keyboard as Tab
+and Shift+Tab do, `clearFocus` takes it off whatever has it, and
+`isFocused` says whether a widget has it. Focus moves as Tab would, at the
+end of the frame: the field that had the keyboard drops its selection and
+menu, as on a click elsewhere, and a widget Tab would skip, such as one
+disabled or behind a modal, refuses it. Only text fields and selects take
+the keyboard on a click. `releaseFocus` is the exception: it takes the
+keyboard off one widget at once, in the middle of the view, and changes
+nothing else.
 
 `withCursorShape` sets the pointer's shape over a subtree wherever the
 widgets inside pick none, such as `UiCursorCrosshair` over a canvas,
@@ -241,7 +248,15 @@ around it. A backend shows the nearest shape the platform has.
 Keys arrive in `inputKeys`, `inputKeysReleased` and `inputKeysHeld`, and the
 text they type in `inputChars`. A key that types is a `KeyChar` of what it
 types unmodified, so Ctrl+S is `KeyChar 's'` with `modCtrl` set and types
-nothing. Bind a chord with `shortcut`. A chord is the modifiers `ctrl`,
+nothing. A key held down auto-repeats, and each repeat is a press in
+`inputKeys`; `inputKeysNew` has the presses that are not repeats. A frame
+does not keep the order of what came in, so the runner ends a frame after a
+command key (a named key but Space, or a chord) that text, another key or
+other modifiers follow: a frame's text comes before its one command key,
+which went down with the frame's modifiers.
+`pressedIn`, `pressedOnceIn`, `releasedIn` and `heldIn` read one key, or one
+mouse button, in an `Input`: `sdlAppShouldQuit = pressedOnceIn KeyEscape`.
+Bind a chord with `shortcut`. A chord is the modifiers `ctrl`,
 `shift`, `alt`, `super` and `cmdOrCtrl` (Command on macOS, else Ctrl) and a
 `key`, a character or a `Key`, put together with `<>`. These short names
 come from `NanoUI.Shortcut`, which `NanoUI` leaves out; import it where
@@ -259,18 +274,30 @@ A chord with no key, such as `ctrl <> shift` alone, is never pressed.
 `parseShortcut` reads a chord written as text, such as one from a settings
 file: `C-s`, `M-S-p`, `A-<Enter>`, `<F5>`.
 
-A shortcut fires once per press, for the first `shortcut` declared for the
-chord. It stays quiet behind a modal, inside `disabledWhen`, and for keys the
-focused widget uses, such as a text field's typing and Ctrl+A.
+A shortcut fires once per press, auto-repeats included, for the first
+`shortcut` declared for the chord; `shortcutOnce` and `keyPressedOnce` leave
+the repeats out, for a chord that toggles. It stays quiet behind a modal,
+inside `disabledWhen`, and for keys the focused widget uses, such as a text
+field's typing and Ctrl+A, and so do `keyPressed`, `keyReleased` and
+`keyHeld`: a view hears the keys no widget took, and `askInput` has them
+all. A focused control uses the keys it acts on alone or with Shift, so
+Ctrl+Enter or Alt+Left still reaches a shortcut: a button Enter and Space,
+and a slider or a list the arrows too. A custom widget says which keys it
+uses with `widgetKeys`; a terminal takes `KeysAll`.
 `menuItemShortcut "Save" (ctrl <> key 's')` binds its chord only while its
 menu is open; for the closed menu, bind it with `shortcut` too, declared
-first. `keyPressed`, `keyReleased` and `keyHeld` read a key whatever has the
-keyboard.
+first.
 
 Text fields and text areas work with input methods by themselves: the
 focused field draws the composition (`inputComposition`) at its caret and
 changes its value only on commit. Meanwhile the frame drops the keys, so no
-shortcut fires.
+shortcut fires. A widget of your own that takes typed text, such as a
+terminal, asks for the input method with `useInputMethod` every frame it has
+the keyboard, giving its caret and what it takes (`InputNormal`,
+`InputSecure`, `InputNumeric`), and draws the composition it answers. The
+input method puts its candidate window by the caret, and a backend such as
+SDL takes text only while some widget asks, so a view that reads
+`inputChars` outside a text field asks too.
 
 Mouse buttons come as a `MouseButton`: `MouseLeft`, `MouseRight`,
 `MouseMiddle`, the side buttons `MouseBack` and `MouseForward`, and
@@ -529,9 +556,11 @@ wake-ups. The two backends in this repository,
 `NanoUI.Backend.Sdl` and `NanoUI.Backend.Rgfw`, are the worked examples.
 
 Fold keys in with `applyKey` (a typing key as the `KeyChar` it types
-unmodified, with its text in `inputChars` too) and input-method updates with
-`applyComposition`. After a frame, `textInputArea` from
-`NanoUI.Testing` says where the candidate window goes. Open the window from
+unmodified, with its text in `inputChars` too, and every auto-repeat as a
+press) and input-method updates with `applyComposition`. After a frame,
+`textInputArea` says whether a widget takes text, where the candidate window
+goes and what the widget takes: take text input while it is there, for its
+`InputPurpose`, and stop it while it is not. Open the window from
 the `WindowSettings` with their title, size, mode, resizability and
 transparency. Before the first frame, install a `WindowHost` with
 `installWindowHost`, which applies the rest of the settings through it; build

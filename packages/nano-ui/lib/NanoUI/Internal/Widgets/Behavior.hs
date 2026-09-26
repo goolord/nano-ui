@@ -8,6 +8,7 @@ module NanoUI.Internal.Widgets.Behavior
   , useReorder
   , useKeyNav
   , keyboardFocused
+  , useInputMethod
   , keyActivated
   , KeyNav (..)
   , navStep
@@ -27,7 +28,6 @@ import NanoUI.Internal.Input
 import NanoUI.Internal.Monad (Ui, (<&&>), askContext, askFrameInput, askInput, focusedWidget, freshWidget, uiIO, withContext)
 import NanoUI.Internal.Store (fieldFloat, fieldInt, findSlot, insertSlot, quietFlag, setQuietFlag)
 import NanoUI.Internal.Types (Rect (..), clamp01, rectHit, v2X, v2Y)
-import qualified Data.Text as T
 
 -- | Pointer slop in pixels before a held press counts as a drag.
 dragThresholdPx :: Float
@@ -137,25 +137,54 @@ keyboardFocused wid
         <&&> uiIO (not <$> isDisabled ctx wid)
         <&&> uiIO (not <$> pointerBlockedByModal ctx)
 
--- | Arrow / Enter / Space while @wid@ is focused and eligible for input.
+-- | Take text from the input method (IME) for the widget with this id, as
+-- iced's @request_input_method@ does: the widget that has the keyboard asks
+-- every frame it takes text, with its caret in window coordinates and what
+-- it takes, as the text fields ask for themselves. While the input method
+-- composes for it, this answers the 'Composition', which the widget draws at
+-- its caret, and the frame drops the keys, which are the input method's;
+-- the text it commits arrives as typed text ('inputChars'). The backend
+-- puts the input method's candidate window by the caret, and takes text
+-- input at all only while a widget asks: a widget of its own that reads
+-- 'inputChars', such as a terminal, asks here. A widget without the
+-- keyboard, or disabled, or behind a modal, asks nothing and gets
+-- 'Nothing'.
+--
+-- > wid <- nextId
+-- > Rect x y _ _ <- fromMaybe (Rect 0 0 0 0) <$> lastRect wid
+-- > preedit <- useInputMethod wid InputNormal (Rect (x + caretX) y 1 lineH)
+-- > customWidgetWithId wid spec {widgetFocusable = True, widgetKeys = KeysAll}
+useInputMethod :: Ui :> es => WidgetId -> InputPurpose -> Rect -> Eff es (Maybe Composition)
+useInputMethod wid purpose caret = do
+  focused <- keyboardFocused wid
+  if not focused
+    then pure Nothing
+    else withContext $ \ctx -> do
+      requestInputMethod ctx wid (Just caret) purpose
+      fieldComposition ctx wid
+
+-- | Arrow / Enter / Space while @wid@ is focused and eligible for input, each
+-- alone or with Shift ('shiftAtMost'): with Ctrl, Alt or Super it is a
+-- chord, for a shortcut. An arrow held down steps again on each
+-- auto-repeat; Enter and Space, which activate, count only when they go
+-- down.
 useKeyNav :: (Ui :> es) => WidgetId -> Eff es KeyNav
 useKeyNav wid = do
   inp <- askInput
-  let keys = inputKeys inp
-      none = KeyNav False False False False False False
-  if hashWidgetId wid == 0 || (inputKeysNull keys && T.null (inputChars inp))
+  let none = KeyNav False False False False False False
+  if hashWidgetId wid == 0 || inputKeysNull (inputKeys inp) || not (shiftAtMost (inputModifiers inp))
     then pure none
     else do
       eligible <- keyboardFocused wid
       if not eligible
         then pure none
         else pure KeyNav
-          { knUp = inputKeysElem KeyUp keys
-          , knDown = inputKeysElem KeyDown keys
-          , knLeft = inputKeysElem KeyLeft keys
-          , knRight = inputKeysElem KeyRight keys
-          , knEnter = inputKeysElem KeyEnter keys
-          , knSpace = T.any (== ' ') (inputChars inp)
+          { knUp = pressedIn KeyUp inp
+          , knDown = pressedIn KeyDown inp
+          , knLeft = pressedIn KeyLeft inp
+          , knRight = pressedIn KeyRight inp
+          , knEnter = pressedOnceIn KeyEnter inp
+          , knSpace = pressedOnceIn KeySpace inp
           }
 
 -- | The step the arrow keys ask for along a control that grows rightwards and
@@ -189,7 +218,7 @@ useDismissable panel = do
     let onMenu = case route of
           RouteLayer _ -> False
           _ -> True
-        esc = inputKeysElem KeyEscape (inputKeys inp) && not taken && null menu && not dropdown
+        esc = pressedOnceIn KeyEscape inp && not taken && null menu && not dropdown
         pressed = anyButtonPressed inp && not onMenu
     when esc (markEscapeConsumed ctx)
     pure (esc || (pressed && not (rectHit panel (inputMousePos inp))))

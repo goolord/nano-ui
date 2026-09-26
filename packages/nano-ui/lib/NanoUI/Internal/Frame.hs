@@ -25,7 +25,7 @@ import NanoUI.Internal.Frame.Scroll
 import NanoUI.Internal.Frame.Select
 import NanoUI.Internal.Frame.TextArea (finalizeTextFieldMouse)
 import NanoUI.Internal.Frame.TextEdit
-import NanoUI.Internal.Frame.TextInput (claimComposition)
+import NanoUI.Internal.Frame.TextInput (claimComposition, settleInputMethod)
 import NanoUI.Internal.Frame.Window
 import NanoUI.Internal.Id (WidgetId (..), initialIdContext)
 import NanoUI.Internal.Input (Input (..), Key (..), MouseButton (..), buttonPressed, inputKeysElem, inputKeysNull, stripInteractionInput, withoutPointer)
@@ -137,6 +137,7 @@ runFrameEff unlift ctx rawInp ui = do
     markEscapeConsumed ctx
   writeIORef (ctxReleaseClickedId ctx) (WidgetId 0)
   armPointerPress ctx frameInp
+  focusBefore <- readIORef (ctxFocusId ctx)
   result0 <- unlift (runUi ctx frameInp ui)
   -- Pending click is one-shot. Clear before a mirror rebuild so toggles do not fire twice.
   writeIORef (ctxClickedId ctx) (WidgetId 0)
@@ -187,6 +188,7 @@ runFrameEff unlift ctx rawInp ui = do
   finalizeFocusRequest ctx
   constrainFocusToModal ctx
   finalizeTabFocus ctx frameInp
+  settleInputMethod ctx focusBefore
   finalizeSelectKeyboard ctx frameInp
   finalizeSelectPick ctx dropInp
   closeSelectOnOutsideClick ctx frameInp
@@ -241,8 +243,9 @@ runFrameEff unlift ctx rawInp ui = do
   dirtyAfterUi <- isDirty ctx
   pure (result, msgs, drawData, dirtyAfterUi)
 
--- | Reset what a view run builds: the node arena, the sensors, and the
--- container, id, focus, hover, cursor-zone and drawing scopes. A second run
+-- | Reset what a view run builds: the node arena, the sensors, the input
+-- method's request, and the container, id, focus, hover, cursor-zone and
+-- drawing scopes. A second run
 -- after a mirror store write (@newFrame@ 'False') keeps the store, animations
 -- and prev rects, and the theme scopes it compares against.
 resetUiBuild :: Context -> Bool -> IO ()
@@ -252,6 +255,8 @@ resetUiBuild ctx newFrame = do
   writeIORef (ctxContainerStack ctx) []
   writeIORef (ctxIdContext ctx) initialIdContext
   writeIORef (ctxFocusablesCount ctx) 0
+  -- The view asks for the input method afresh, while a widget still takes text.
+  readIORef (ctxInputMethod ctx) >>= mapM_ (\_ -> writeIORef (ctxInputMethod ctx) Nothing)
   writeIORef (ctxHotId ctx) (WidgetId 0)
   writeIORef (ctxCursorZones ctx) []
   writeIORef (ctxCursorRegions ctx) []

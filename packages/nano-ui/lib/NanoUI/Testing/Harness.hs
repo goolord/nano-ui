@@ -9,6 +9,7 @@ module NanoUI.Testing.Harness
   , releaseAt
   , releaseWith
   , keyInp
+  , keyRepeatInp
   , chordInp
   , keyUpInp
   , tabInp
@@ -231,19 +232,25 @@ releaseWith b = applyMouseButton b False . unpress b
 unpress :: MouseButton -> Input -> Input
 unpress b inp = inp {inputButtonsPressed = buttonsDelete b (inputButtonsPressed inp)}
 
--- | A single key-down frame.
+-- | A single key-down frame: the key goes down, not as an auto-repeat.
 keyInp :: Key -> Input -> Input
-keyInp k inp = inp {inputKeys = inputKeysFromList [k]}
+keyInp k inp = inp {inputKeys = ks, inputKeysNew = ks}
+  where
+    ks = inputKeysFromList [k]
+
+-- | A frame with one auto-repeat of a held key: a press that is not new.
+keyRepeatInp :: Key -> Input -> Input
+keyRepeatInp k inp = inp {inputKeys = inputKeysFromList [k], inputKeysNew = mempty}
 
 -- | A frame pressing a chord, such as @ctrl <> key 'a'@: its key goes down
 -- with exactly the chord's modifiers held.
 chordInp :: Shortcut -> Input -> Input
 chordInp (Shortcut k mods) inp =
-  (maybe id (`applyKey` True) k inp {inputKeys = mempty}) {inputModifiers = mods}
+  (maybe id (`applyKey` True) k inp {inputKeys = mempty, inputKeysNew = mempty}) {inputModifiers = mods}
 
 -- | A frame releasing a key, which leaves the held keys.
 keyUpInp :: Key -> Input -> Input
-keyUpInp k inp = applyKey k False inp {inputKeys = mempty, inputKeysReleased = mempty}
+keyUpInp k inp = applyKey k False inp {inputKeys = mempty, inputKeysNew = mempty, inputKeysReleased = mempty}
 
 -- | Step the tab focus to the next focusable.
 tabInp :: Input -> Input

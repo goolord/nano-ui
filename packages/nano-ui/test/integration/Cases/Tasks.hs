@@ -283,7 +283,8 @@ runStreamKeyChangeTest ctx failed = do
   _ <- wait 0
   assertEq failed (Just [1]) =<< frameUntil wait ctx ui (not . null)
   writeIORef keyRef 2
-  assertEq failed [] =<< evalUi ctx inp ui
+  -- The new producer may already have run by the time the view reads it.
+  assert failed . (`elem` [[], [2]]) =<< evalUi ctx inp ui
   assert failed =<< killedIn 2000000
   assertEq failed (Just [2]) =<< frameUntil wait ctx ui (not . null)
   cancelTasks ctx

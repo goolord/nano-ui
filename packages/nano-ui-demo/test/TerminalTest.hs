@@ -85,6 +85,8 @@ main = do
   check "function keys and Shift+Tab send xterm's sequences" $
     map (pressed noModifiers) [KeyF 1, KeyF 5, KeyF 12, KeyTab] == ["\ESCOP", "\ESC[15~", "\ESC[24~", "\t"]
       && pressed noModifiers {modShift = True} KeyTab == "\ESC[Z"
+  check "a frame's text goes before its command key" $
+    keys emptyInput {inputChars = "ls", inputKeys = inputKeysFromList [KeyChar 'l', KeyChar 's', KeyEnter]} == "ls\r"
 
   result <- timeout 8000000 $ withPty $ \fd -> do
     let

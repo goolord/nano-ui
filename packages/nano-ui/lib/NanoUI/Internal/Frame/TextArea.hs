@@ -41,14 +41,13 @@ import NanoUI.Internal.Frame.Chrome (paintScrollBars, textInputFocused)
 import NanoUI.Internal.Frame.Hit (withWidgetNode)
 import NanoUI.Internal.Frame.Scroll.Geometry (ScrollBarLayout (..), scrollBarLayout, scrollChromeLane)
 import NanoUI.Internal.Frame.Node (nodeFontMetrics)
-import NanoUI.Internal.Frame.TextInput (FieldDoc (..), Preedit (..), drawLineCaret, drawLinePreedit, drawLineSelection, fieldComposition, fieldEditLine, nodeTextFieldGeom, preeditSourceIndex, selectWithMouse, splicePreedit, textInputMouse, textWordBounds)
+import NanoUI.Internal.Frame.TextInput (FieldDoc (..), Preedit (..), drawLineCaret, drawLinePreedit, drawLineSelection, fieldEditLine, nodeTextFieldGeom, preeditSourceIndex, selectWithMouse, splicePreedit, textInputMouse, textWordBounds)
 import NanoUI.Internal.Id (WidgetId, hashWidgetId)
-import NanoUI.Internal.Input (Input, MouseButton (..), buttonHeld, buttonPressed, buttonReleased, inputMousePos)
+import NanoUI.Internal.Input (Input, InputPurpose, MouseButton (..), buttonHeld, buttonPressed, buttonReleased, inputMousePos)
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Store (collapseFieldSelection, fieldFloat, fieldPoint, findSlot, insertDyn, insertSlot, lookupDyn, lookupSlot)
 import NanoUI.Internal.Style
 import NanoUI.Internal.Types (Rect (..), V2 (..), clamp, onGrid, rectContains)
-import NanoUI.Internal.WidgetText (hasFlag, textInputFlagSelectable)
 import qualified NanoUI.Internal.Widgets.TextArea as TA
 import qualified NanoUI.Widgets.TextBuffer as TB
 
@@ -97,45 +96,46 @@ collapseTextFieldSelection ctx wid =
  where
   key = intKey wid
 
--- | Where the focused text field is taking text, for an input method to put
--- its candidate window by, in logical window coordinates. See 'textInputArea'.
+-- | Where the focused widget is taking text, for an input method to put its
+-- candidate window by, in logical window coordinates, and what it takes. See
+-- 'textInputArea'.
 data TextInputArea = TextInputArea
   { textInputAreaRect :: !Rect
   -- ^ The text being composed, from where it starts to where it ends on its
   -- row, or a caret-wide rect at the caret while nothing is.
   , textInputAreaCursor :: !Float
   -- ^ How far right of the rect's left edge the caret is.
+  , textInputAreaPurpose :: !InputPurpose
+  -- ^ What the widget takes: an on-screen keyboard shows the keys for it.
   }
   deriving (Eq, Show)
 
--- | Where the focused editable text field takes text ('TextInputArea'), or
--- 'Nothing' while none has the focus. A backend reads it after a frame and
--- passes it on to the input method (SDL's @SDL_SetTextInputArea@), which
--- puts its candidate window beside it rather than over the text. It follows
--- the field's scroll and the input method's composition, and a composition
--- in right-to-left text covers its runs as they are drawn.
+-- | Where the widget that took text from the input method in the last view
+-- takes it ('TextInputArea'), or 'Nothing' while none did: a text field
+-- does while it has the focus, and a widget of the app's own with
+-- 'NanoUI.useInputMethod'. A backend reads it after a frame, takes text
+-- input while it is there and stops it while it is not, and passes it on
+-- to the input method (SDL's @SDL_SetTextInputArea@), which puts its
+-- candidate window beside it rather than over the text. In a text field it
+-- follows the field's scroll and the input method's composition, and a
+-- composition in right-to-left text covers its runs as they are drawn.
 textInputArea :: Context -> IO (Maybe TextInputArea)
-textInputArea ctx@Context {ctxNodeArena = na} = do
-  focus <- readIORef (ctxFocusId ctx)
-  -- Widget id 0 names no widget: nothing has the focus.
-  if hashWidgetId focus == 0
-    then pure Nothing
-    else withWidgetNode ctx focus Nothing $ \idx -> do
+textInputArea ctx@Context {ctxNodeArena = na} =
+  readIORef (ctxInputMethod ctx) >>= \case
+    Nothing -> pure Nothing
+    Just (InputMethodRequest _ (Just caret) purpose) -> pure (Just (TextInputArea caret 0 purpose))
+    Just (InputMethodRequest wid Nothing purpose) -> withWidgetNode ctx wid Nothing $ \idx -> do
       store <- getStore ctx
-      let key = intKey focus
+      let key = intKey wid
       getNodeType na idx >>= \case
         NodeTextInput -> do
-          si <- getStyleIdx na idx
-          if hasFlag textInputFlagSelectable si
-            then pure Nothing
-            else do
-              Rect x y w h <- getNodeRect na idx
-              (Rect _ boxY _ boxH, Rect clipX _ _ _) <- nodeTextFieldGeom ctx idx x y w h
-              fm <- nodeFontMetrics ctx idx
-              -- The scroll the frame settled; reading it writes nothing.
-              let scrollX = findSlot fieldFloat 0 (slotKey SlotTextInputScroll key) store
-              (line, caret, _, preedit) <- fieldEditLine ctx idx
-              Just <$> lineInputArea fm line caret preedit (clipX - scrollX) (centeredTextY fm boxY boxH (fmLineHeight fm)) (fmLineHeight fm)
+          Rect x y w h <- getNodeRect na idx
+          (Rect _ boxY _ boxH, Rect clipX _ _ _) <- nodeTextFieldGeom ctx idx x y w h
+          fm <- nodeFontMetrics ctx idx
+          -- The scroll the frame settled; reading it writes nothing.
+          let scrollX = findSlot fieldFloat 0 (slotKey SlotTextInputScroll key) store
+          (line, caret, _, preedit) <- fieldEditLine ctx idx
+          Just <$> lineInputArea fm line caret preedit (clipX - scrollX) (centeredTextY fm boxY boxH (fmLineHeight fm)) (fmLineHeight fm) purpose
         NodeTextArea -> do
           fm <- resolveTextAreaFont ctx idx
           field <- getNodeRect na idx
@@ -145,24 +145,24 @@ textInputArea ctx@Context {ctxNodeArena = na} = do
               lineH = textAreaLineHeight fm
               Rect clipX contentTop _ _ = textAreaFieldClip fm field
           (scrollXf, scrollYf) <- textAreaScrollSnapped (ctxDrawArena ctx) state
-          preedit <- textAreaPreedit ctx focus state
+          preedit <- textAreaPreedit ctx wid state
           let (row, line, caret) = case preedit of
                 Just (r, p) -> (r, preeditLine p, preeditCaret p)
                 Nothing -> (caretRow, TB.lineAt caretRow buf, caretCol)
-          Just <$> lineInputArea fm line caret (snd <$> preedit) (clipX - scrollXf) (contentTop + fromIntegral row * lineH - scrollYf) lineH
+          Just <$> lineInputArea fm line caret (snd <$> preedit) (clipX - scrollXf) (contentTop + fromIntegral row * lineH - scrollYf) lineH purpose
         _ -> pure Nothing
 
 -- | The 'TextInputArea' of @line@, whose pen starts at @penX@, on a row at
 -- @rowY@ of height @lineH@, with its caret before character @caret@.
-lineInputArea :: FontMetrics -> T.Text -> Int -> Maybe Preedit -> Float -> Float -> Float -> IO TextInputArea
-lineInputArea fm line caret preedit penX rowY lineH = do
+lineInputArea :: FontMetrics -> T.Text -> Int -> Maybe Preedit -> Float -> Float -> Float -> InputPurpose -> IO TextInputArea
+lineInputArea fm line caret preedit penX rowY lineH purpose = do
   prepared <- prepareFontMetrics fm line
   let caretAt = penX + caretX prepared line caret
       runs = maybe [] (\p -> selectionSpans prepared line (preeditStart p) (preeditEnd p)) preedit
       (x0, x1)
         | null runs = (caretAt, caretAt + 1)
         | otherwise = (penX + minimum (map fst runs), penX + maximum (map snd runs))
-  pure (TextInputArea (Rect x0 rowY (max 1 (x1 - x0)) lineH) (max 0 (caretAt - x0)))
+  pure (TextInputArea (Rect x0 rowY (max 1 (x1 - x0)) lineH) (max 0 (caretAt - x0)) purpose)
 
 -- | Text area row height, snapped to the device pixel grid.
 textAreaLineHeight :: FontMetrics -> Float

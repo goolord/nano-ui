@@ -22,7 +22,7 @@ import NanoUI.Internal.Font (menuItemRowH)
 import NanoUI.Internal.Frame.Hit (findNodeByWidgetId)
 import NanoUI.Internal.Frame.Select (comboDropPickIndex, comboDropRect, comboScrollGeom)
 import NanoUI.Internal.Id (WidgetId (..))
-import NanoUI.Internal.Input (Input, Key (..), MouseButton (..), buttonHeld, buttonPressed, inputKeys, inputMousePos, inputScroll)
+import NanoUI.Internal.Input (Input, Key (..), MouseButton (..), Pressable (..), buttonHeld, buttonPressed, inputKeys, inputMousePos, inputScroll)
 import NanoUI.Internal.Layout.Arena (setOptions)
 import NanoUI.Internal.Monad (Ui, askContext, uiIO)
 import NanoUI.Internal.Store (boolInt, ptrEq, fieldFloat, fieldInt, fieldText, findSlot, flagSlot, insertSlot, setFieldSelection)
@@ -239,10 +239,10 @@ comboStep ci cs0 =
     dragKind' = if down then drag1 else 0
     dragOff' | startV = vGrab | startH = hGrab | otherwise = dragOff0
     -- Enter commits only an explicitly highlighted row (hover or Up/Down).
-    picked = isFocus && n > 0 && hi' >= 0 && hasKey KeyEnter
+    picked = isFocus && n > 0 && hi' >= 0 && pressedOnceIn KeyEnter inp
     -- Only read when 'picked', so @hi'@ is a row.
     pickedText = fromMaybe text (listToMaybe (drop hi' displayed))
-    escDismiss = isFocus && hasKey KeyEscape
+    escDismiss = isFocus && pressedOnceIn KeyEscape inp
     -- Commit points: Enter, a row click (the frame-side pick lands as a
     -- frame-start text the widget did not produce), and losing focus (which
     -- the blur frame after the focus clear detects). Escape is a cancel: it

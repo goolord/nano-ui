@@ -9,7 +9,13 @@ module NanoUI.Internal.Input
   , modifiersFromBits
   , modPrimary
   , primaryModifiers
+  , modJump
+  , modMacCommand
+  , onMac
+  , isCommandKey
+  , shiftAtMost
   , Input (..)
+  , Pressable (..)
   , buttonHeld
   , buttonPressed
   , buttonReleased
@@ -28,7 +34,7 @@ module NanoUI.Internal.Input
   , inputPointerHeld
   , appendInputKey
   , applyKey
-  , keyRepeats
+  , releaseAllKeys
   , keypadKey
   , appendDropEvent
   , MouseButton (..)
@@ -56,16 +62,17 @@ module NanoUI.Internal.Input
   , grabDragKind
   , clearEphemeral
   , isHardQuitInput
-  , splitFrame
+  , takeFrame
   , Composition (..)
   , applyComposition
+  , InputPurpose (..)
   ) where
 
 import Data.Bits (Bits, clearBit, countTrailingZeros, setBit, testBit, zeroBits, (.&.), (.|.))
 import Data.Foldable (toList)
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Primitive.SmallArray (SmallArray, copySmallArray, newSmallArray, runSmallArray, sizeofSmallArray, smallArrayFromList)
+import Data.Primitive.SmallArray (SmallArray, copySmallArray, indexSmallArray, newSmallArray, runSmallArray, sizeofSmallArray, smallArrayFromList)
 import Data.Word (Word32)
 import NanoUI.Internal.Types (Size (..), V2 (..))
 import System.Info (os)
@@ -140,13 +147,48 @@ modifiersFromBits m shift ctrl alt super = Modifiers (has shift) (has ctrl) (has
 -- | Whether the platform's command modifier is held: Command ('modSuper') on
 -- macOS and Ctrl elsewhere. A chord's @M-@ ('NanoUI.parseShortcut') is it.
 modPrimary :: Modifiers -> Bool
-modPrimary = if os == "darwin" then modSuper else modCtrl
+modPrimary = if onMac then modSuper else modCtrl
 
 -- | The platform's command modifier alone ('modPrimary').
 primaryModifiers :: Modifiers
 primaryModifiers
-  | os == "darwin" = noModifiers {modSuper = True}
+  | onMac = noModifiers {modSuper = True}
   | otherwise = noModifiers {modCtrl = True}
+
+-- | Whether the modifier that widens a caret motion or a deletion to a word
+-- is held: Option ('modAlt') on macOS and Ctrl elsewhere, as iced's @jump@.
+modJump :: Modifiers -> Bool
+modJump = if onMac then modAlt else modCtrl
+
+-- | Whether Command ('modSuper') is held on macOS, where it takes a caret
+-- motion or a deletion to the line's end. Never elsewhere.
+modMacCommand :: Modifiers -> Bool
+modMacCommand m = onMac && modSuper m
+
+-- | Whether this is macOS, whose keys differ: Command is the command
+-- modifier, and Option types.
+onMac :: Bool
+onMac = os == "darwin"
+{-# NOINLINE onMac #-}
+
+-- | Whether no modifier but Shift is held: a key a control acts on, such as
+-- an arrow on a slider, is its own pressed so, and a chord otherwise.
+shiftAtMost :: Modifiers -> Bool
+shiftAtMost m = not (modCtrl m || modAlt m || modSuper m)
+
+-- | Whether a key pressed with these modifiers is a command rather than
+-- typing: every named key but Space, and a key that types ('KeyChar',
+-- Space) held with modifiers that make a chord of it. A character key types
+-- alone, with Shift, and with AltGr, which is Ctrl+Alt, or on macOS with
+-- Option; Super (Command), Ctrl, and elsewhere than macOS Alt alone, make a
+-- chord of it.
+isCommandKey :: Modifiers -> Key -> Bool
+isCommandKey mods = \case
+  KeyChar _ -> chord
+  KeySpace -> chord
+  _ -> True
+  where
+    chord = modSuper mods || if onMac then modCtrl mods else modCtrl mods /= modAlt mods
 
 -- | OS-level drag-and-drop event kind, mirroring @SDL_EventType@ drop codes.
 data DropType
@@ -174,18 +216,24 @@ data DropEvent = DropEvent
 data Input = Input
   { inputMousePos :: {-# UNPACK #-} !V2
   , inputButtonsHeld :: {-# UNPACK #-} !MouseButtons
-  -- ^ The mouse buttons down as the frame's events leave them
-  -- ('buttonHeld').
+  -- ^ The mouse buttons down as the frame's events leave them ('heldIn').
   , inputButtonsPressed :: {-# UNPACK #-} !MouseButtons
-  -- ^ The mouse buttons that went down this frame ('buttonPressed').
+  -- ^ The mouse buttons that went down this frame ('pressedIn').
   , inputButtonsReleased :: {-# UNPACK #-} !MouseButtons
-  -- ^ The mouse buttons that came up this frame ('buttonReleased').
+  -- ^ The mouse buttons that came up this frame ('releasedIn').
   , inputMouseClicks :: {-# UNPACK #-} !Int
   -- ^ 1 for this frame's press, or 2 or 3 when it came soon after the one
   -- before, near it and with the same button: a double or triple click.
   , inputScroll :: {-# UNPACK #-} !V2
   , inputKeys :: SmallArray Key
   -- ^ Keys pressed this frame in event order, with a held key's auto-repeats.
+  -- A frame the session runner ('takeFrame') batches has at most one
+  -- command key ('isCommandKey'), and it comes last, perhaps repeating: the
+  -- frame's text came before it, and 'inputModifiers' are what it went down
+  -- with.
+  , inputKeysNew :: SmallArray Key
+  -- ^ The presses of 'inputKeys' that are not auto-repeats: keys that went
+  -- down this frame while up, in event order.
   , inputKeysReleased :: SmallArray Key
   -- ^ Keys released this frame, in event order.
   , inputKeysHeld :: SmallArray Key
@@ -203,18 +251,60 @@ data Input = Input
   }
   deriving (Eq, Show)
 
--- | Whether the button is down. A view asks 'NanoUI.mouseHeld', which is
--- quiet where the view takes no pointer.
+-- | A key or a mouse button, asked about in a frame's 'Input': whether it
+-- went down this frame, came up, or is down. Keys and buttons read alike,
+-- and like 'NanoUI.shortcutIn' for a chord:
+--
+-- > pressedIn KeyEscape inp
+-- > heldIn MouseMiddle inp
+--
+-- These read the input as it stands, whatever has the keyboard or the
+-- pointer. A view listens with 'NanoUI.keyPressed' and 'NanoUI.mousePressed'
+-- instead, which stay quiet where the keys or the pointer are not the view's.
+class Pressable a where
+  -- | Whether it went down this frame; a held key's auto-repeats count.
+  pressedIn :: a -> Input -> Bool
+
+  -- | Whether it went down this frame while it was up: a key's
+  -- auto-repeats do not count ('inputKeysNew'). A mouse button does not
+  -- repeat, so for one this is 'pressedIn'.
+  pressedOnceIn :: a -> Input -> Bool
+  pressedOnceIn = pressedIn
+
+  -- | Whether it came up this frame.
+  releasedIn :: a -> Input -> Bool
+
+  -- | Whether it is down as the frame's events leave it.
+  heldIn :: a -> Input -> Bool
+
+instance Pressable Key where
+  {-# INLINE pressedIn #-}
+  pressedIn k = inputKeysElem k . inputKeys
+  {-# INLINE pressedOnceIn #-}
+  pressedOnceIn k = inputKeysElem k . inputKeysNew
+  {-# INLINE releasedIn #-}
+  releasedIn k = inputKeysElem k . inputKeysReleased
+  {-# INLINE heldIn #-}
+  heldIn k = inputKeysElem k . inputKeysHeld
+
+instance Pressable MouseButton where
+  {-# INLINE pressedIn #-}
+  pressedIn = buttonPressed
+  {-# INLINE releasedIn #-}
+  releasedIn = buttonReleased
+  {-# INLINE heldIn #-}
+  heldIn = buttonHeld
+
+-- | 'heldIn', 'pressedIn' and 'releasedIn' for a mouse button alone, which
+-- the frame's own steps call.
 {-# INLINE buttonHeld #-}
 buttonHeld :: MouseButton -> Input -> Bool
 buttonHeld b = buttonsMember b . inputButtonsHeld
 
--- | Whether the button went down this frame.
 {-# INLINE buttonPressed #-}
 buttonPressed :: MouseButton -> Input -> Bool
 buttonPressed b = buttonsMember b . inputButtonsPressed
 
--- | Whether the button came up this frame.
 {-# INLINE buttonReleased #-}
 buttonReleased :: MouseButton -> Input -> Bool
 buttonReleased b = buttonsMember b . inputButtonsReleased
@@ -235,17 +325,17 @@ inputMouseDown, inputMousePressed, inputMouseReleased :: Input -> Bool
 inputMouseDown = buttonHeld MouseLeft
 inputMousePressed = buttonPressed MouseLeft
 inputMouseReleased = buttonReleased MouseLeft
-{-# DEPRECATED inputMouseDown "Use buttonHeld MouseLeft" #-}
-{-# DEPRECATED inputMousePressed "Use buttonPressed MouseLeft" #-}
-{-# DEPRECATED inputMouseReleased "Use buttonReleased MouseLeft" #-}
+{-# DEPRECATED inputMouseDown "Use heldIn MouseLeft" #-}
+{-# DEPRECATED inputMousePressed "Use pressedIn MouseLeft" #-}
+{-# DEPRECATED inputMouseReleased "Use releasedIn MouseLeft" #-}
 
 inputMouseRightDown, inputMouseRightPressed, inputMouseRightReleased :: Input -> Bool
 inputMouseRightDown = buttonHeld MouseRight
 inputMouseRightPressed = buttonPressed MouseRight
 inputMouseRightReleased = buttonReleased MouseRight
-{-# DEPRECATED inputMouseRightDown "Use buttonHeld MouseRight" #-}
-{-# DEPRECATED inputMouseRightPressed "Use buttonPressed MouseRight" #-}
-{-# DEPRECATED inputMouseRightReleased "Use buttonReleased MouseRight" #-}
+{-# DEPRECATED inputMouseRightDown "Use heldIn MouseRight" #-}
+{-# DEPRECATED inputMouseRightPressed "Use pressedIn MouseRight" #-}
+{-# DEPRECATED inputMouseRightReleased "Use releasedIn MouseRight" #-}
 
 -- | No events or held buttons, with an 800x600 window and zero elapsed time.
 -- Override window size and delta time when driving headless frames.
@@ -259,6 +349,7 @@ emptyInput =
     , inputMouseClicks = 1
     , inputScroll = V2 0 0
     , inputKeys = mempty
+    , inputKeysNew = mempty
     , inputKeysReleased = mempty
     , inputKeysHeld = mempty
     , inputChars = ""
@@ -376,28 +467,61 @@ isHardQuitInput inp =
           || T.elem '\ETX' (inputChars inp)
        )
 
--- | Split after the first event satisfying the predicate. Including that edge
--- in the first batch keeps separate press/release transitions in separate frames.
-splitFrame :: (a -> Bool) -> [a] -> ([a], [a])
-splitFrame isEdge events =
-  case break isEdge events of
-    (before, edge : rest) -> (before ++ [edge], rest)
-    (before, []) -> (before, [])
+-- | Fold a batch of events into a frame's input, from @start@, as far as one
+-- frame may take them: the frame's input, the events it took, and the rest,
+-- for the frames after. A frame ends after an edge (@isEdge@, a mouse
+-- button going down or up), so each press and release has a frame. It also
+-- ends after a command key ('isCommandKey') when text, another key or a
+-- change of modifiers comes next: within a frame the order of text, keys and
+-- modifiers is lost, so a frame's text comes before its one command key,
+-- and its modifiers are those the key went down with. Auto-repeats of the
+-- key stay in its frame, so a burst takes extra frames and steady typing
+-- none.
+takeFrame :: (Input -> e -> Input) -> (e -> Bool) -> Input -> [e] -> (Input, [e], [e])
+takeFrame apply isEdge = go []
+  where
+    go taken !inp = \case
+      [] -> (inp, reverse taken, [])
+      events@(e : rest)
+        | commandEnds inp next -> (inp, reverse taken, events)
+        | isEdge e -> (next, reverse (e : taken), rest)
+        | otherwise -> go (e : taken) next rest
+        where
+          next = apply inp e
+
+-- | Whether the event that took a frame's input from @cur@ to @next@ must
+-- wait for the next frame: @cur@'s last key press is a command key, and the
+-- event typed text, pressed another key or changed the modifiers.
+commandEnds :: Input -> Input -> Bool
+commandEnds cur next
+  | n == 0 || not (isCommandKey mods k) = False
+  | otherwise =
+      inputModifiers next /= mods
+        || inputChars next /= inputChars cur
+        || (sizeofSmallArray (inputKeys next) > n && indexSmallArray (inputKeys next) n /= k)
+  where
+    n = sizeofSmallArray (inputKeys cur)
+    k = indexSmallArray (inputKeys cur) (n - 1)
+    mods = inputModifiers cur
 
 -- | Append a key in event order. Copies the small array.
 {-# INLINE appendInputKey #-}
 appendInputKey :: Key -> SmallArray Key -> SmallArray Key
 appendInputKey k ks = snocSmallArray ks k
 
--- | Apply a key going down ('True') or up: a press joins 'inputKeys' and,
--- unless the key is already down, 'inputKeysHeld'; a release joins
--- 'inputKeysReleased' and leaves the held keys.
+-- | Apply a key going down ('True') or up: a press joins 'inputKeys', and,
+-- unless the key is already down (an auto-repeat), 'inputKeysNew' and
+-- 'inputKeysHeld'; a release joins 'inputKeysReleased' and leaves the held
+-- keys. A backend passes every auto-repeat of a held key in as a press.
 applyKey :: Key -> Bool -> Input -> Input
-applyKey k True inp =
-  inp
-    { inputKeys = appendInputKey k (inputKeys inp)
-    , inputKeysHeld = if inputKeysElem k held then held else appendInputKey k held
-    }
+applyKey k True inp
+  | inputKeysElem k held = inp {inputKeys = appendInputKey k (inputKeys inp)}
+  | otherwise =
+      inp
+        { inputKeys = appendInputKey k (inputKeys inp)
+        , inputKeysNew = appendInputKey k (inputKeysNew inp)
+        , inputKeysHeld = appendInputKey k held
+        }
   where
     held = inputKeysHeld inp
 applyKey k False inp =
@@ -408,6 +532,17 @@ applyKey k False inp =
     }
   where
     held = inputKeysHeld inp
+
+-- | Release every held key and modifier, as a backend does when its window
+-- loses the keyboard: the keys let go elsewhere send no release, and would
+-- otherwise stay held. Each held key joins 'inputKeysReleased'.
+releaseAllKeys :: Input -> Input
+releaseAllKeys inp =
+  inp
+    { inputKeysReleased = inputKeysReleased inp <> inputKeysHeld inp
+    , inputKeysHeld = mempty
+    , inputModifiers = noModifiers
+    }
 
 -- | The drops with one more at the end.
 {-# INLINE appendDropEvent #-}
@@ -421,15 +556,6 @@ snocSmallArray xs x = runSmallArray $ do
   out <- newSmallArray (n + 1) x
   copySmallArray out 0 xs 0 n
   pure out
-
--- | Whether a held key's auto-repeats count as presses: they do for the
--- keys that type, move the caret or delete, and not for Enter, Escape, Tab,
--- Insert, the function keys, the lock keys and the like. A backend drops the
--- repeats of a key that does not repeat.
-keyRepeats :: Key -> Bool
-keyRepeats = \case
-  KeyChar _ -> True
-  k -> k `elem` [KeyBackspace, KeyDelete, KeyLeft, KeyRight, KeyUp, KeyDown, KeyHome, KeyEnd, KeyPageUp, KeyPageDown, KeySpace]
 
 -- | The key a keypad digit or point (@'0'@ to @'9'@, @'.'@) is: with Num
 -- Lock on, the character it types; off, the navigation key printed on it,
@@ -603,6 +729,7 @@ stripInteractionInput inp =
     { inputButtonsPressed = noButtons
     , inputButtonsReleased = noButtons
     , inputKeys = mempty
+    , inputKeysNew = mempty
     , inputKeysReleased = mempty
     , inputChars = ""
     , inputScroll = V2 0 0
@@ -655,3 +782,10 @@ applyComposition txt start len inp
        in inp {inputComposition = Just (Composition txt cursor (clamp0 (n - cursor) len))}
   where
     clamp0 hi v = max 0 (min hi v)
+
+-- | What a widget taking text asks the input method for, as iced's
+-- @input_method::Purpose@: ordinary text, a secret such as a password,
+-- which the input method should neither show nor learn, or a number. An
+-- on-screen keyboard shows the keys for it.
+data InputPurpose = InputNormal | InputSecure | InputNumeric
+  deriving (Eq, Show, Enum, Bounded)

@@ -86,7 +86,7 @@ runControlledInputsTest ctx failed = do
       (inp, (True, "two"), (True, "two"))
     , -- Tab focuses the checkbox; Space toggles it and the caller keeps it.
       (tabInp inp, (True, "two"), (True, "two"))
-    , (inp {inputChars = " "}, (True, "two"), (False, "two"))
+    , ((keyInp KeySpace inp) {inputChars = " "}, (True, "two"), (False, "two"))
     , (tabInp inp, (False, "two"), (False, "two"))
     , -- Tab moved focus to the field. A kept edit stays.
       (inp {inputChars = "x"}, (False, "two"), (False, "twox"))

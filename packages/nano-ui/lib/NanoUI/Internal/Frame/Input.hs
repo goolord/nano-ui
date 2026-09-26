@@ -48,24 +48,17 @@ import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Monad (ifM, unlessM, whenM, (<&&>))
 import NanoUI.Internal.Types (DamageBounds (..), Rect (..), V2 (..), defaultDamageSlop, rectContains)
-import NanoUI.Internal.WidgetText (hasFlag, buttonFlagClose, buttonFlagMenuBar, buttonFlagMenu)
+import NanoUI.Internal.WidgetText (hasFlag, buttonFlagClose, buttonFlagMenuBar, buttonFlagMenu, buttonFlagRow)
 
--- | Move keyboard focus when Tab was pressed, backwards with Shift held. Focus
--- steps through the widgets that called 'NanoUI.Internal.Context.registerFocusable'
--- during the view, in declaration order, and wraps at both ends. While a modal
--- is open, only the widgets inside the top modal take part. Focus moved this
--- way shows the focus ring. A Tab taken by the widget holding the keyboard
+-- | Move keyboard focus when Tab was pressed, backwards with Shift held, to
+-- the widget 'tabTarget' names. Focus moved this way shows the focus ring. A
+-- Tab taken by the widget holding the keyboard
 -- ('NanoUI.Internal.Context.markTabConsumed') moves nothing.
 finalizeTabFocus :: Context -> Input -> IO ()
 finalizeTabFocus ctx inp =
   whenM (pure (inputKeysElem KeyTab (inputKeys inp)) <&&> (not <$> tabConsumed ctx)) $ do
     cur <- readIORef (ctxFocusId ctx)
-    -- The modal's root is looked up once for the whole list. Each widget then
-    -- costs one walk up its ancestors.
-    top <- topModalNode (ctxNodeArena ctx)
-    let inModal w = maybe (pure True) (\modal -> widgetIdInSubtree ctx modal w) top
-    ids <- filterM inModal . filter (/= WidgetId 0) =<< getFocusables ctx
-    let next = tabNext cur ids (modShift (inputModifiers inp))
+    next <- tabTarget ctx cur (modShift (inputModifiers inp))
     when (hashWidgetId next /= 0) $ do
       -- Tab can reveal the focus ring without changing the focused rectangle.
       -- Damage that case explicitly; geometry comparison cannot detect it.
@@ -75,6 +68,20 @@ finalizeTabFocus ctx inp =
       writeIORef (ctxFocusId ctx) next
       writeIORef (ctxFocusVisible ctx) True
       markDirty ctx
+
+-- | Where Tab moves focus from @cur@, backwards with @back@: focus steps
+-- through the widgets that called
+-- 'NanoUI.Internal.Context.registerFocusable' during the view, in
+-- declaration order, and wraps at both ends. While a modal is open, only the
+-- widgets inside the top modal take part. @WidgetId 0@ when none does.
+tabTarget :: Context -> WidgetId -> Bool -> IO WidgetId
+tabTarget ctx cur back = do
+  -- The modal's root is looked up once for the whole list. Each widget then
+  -- costs one walk up its ancestors.
+  top <- topModalNode (ctxNodeArena ctx)
+  let inModal w = maybe (pure True) (\modal -> widgetIdInSubtree ctx modal w) top
+  ids <- filterM inModal . filter (/= WidgetId 0) =<< getFocusables ctx
+  pure (tabNext cur ids back)
 
 -- | Whether @wid@ is a menu row or a menu-bar title. Their hover highlight
 -- switches on and off at once, so 'refreshHover' runs no animation for them.
@@ -335,12 +342,15 @@ finalizeSelectFocus ctx targets =
   enabledTarget ctx (ptSelect targets) >>= mapM_ (focusWidget ctx)
 
 -- | Move keyboard focus where the view last asked this frame with
--- 'NanoUI.Internal.Monad.requestFocus'. Runs after the pointer steps and
+-- 'NanoUI.Internal.Monad.requestFocus', 'NanoUI.Internal.Monad.focusNext',
+-- 'NanoUI.Internal.Monad.focusPrevious' or
+-- 'NanoUI.Internal.Monad.clearFocus'. Runs after the pointer steps and
 -- before 'constrainFocusToModal' and 'finalizeTabFocus', so a Tab in the
 -- same frame goes on from the widget focused here.
 --
--- Focus goes nowhere for @WidgetId 0@, and otherwise only where Tab could
--- take it this frame: to a widget that called
+-- Focus goes nowhere for 'FocusNowhere', where Tab would go for 'FocusNext'
+-- and 'FocusPrevious' ('tabTarget'), and otherwise only where Tab could take
+-- it this frame: to a widget that called
 -- 'NanoUI.Internal.Context.registerFocusable' (a disabled one does not),
 -- inside the top modal while one is open. Otherwise the request is dropped.
 -- When focus moves it moves as a press elsewhere moves it off a field: the
@@ -350,9 +360,15 @@ finalizeSelectFocus ctx targets =
 -- included.
 finalizeFocusRequest :: Context -> IO ()
 finalizeFocusRequest ctx =
-  readIORef (ctxFocusRequest ctx) >>= mapM_ (\wid -> do
+  readIORef (ctxFocusRequest ctx) >>= mapM_ (\req -> do
     writeIORef (ctxFocusRequest ctx) Nothing
     prev <- readIORef (ctxFocusId ctx)
+    let stepTo back = (\t -> if hashWidgetId t == 0 then prev else t) <$> tabTarget ctx prev back
+    wid <- case req of
+      FocusOn w -> pure w
+      FocusNowhere -> pure (WidgetId 0)
+      FocusNext -> stepTo False
+      FocusPrevious -> stepTo True
     let tabStop
           | hashWidgetId wid == 0 = pure True
           | otherwise = ((wid `elem`) <$> getFocusables ctx) <&&> widgetOverlayAllowed ctx wid
@@ -398,11 +414,11 @@ constrainFocusToModal ctx = do
   when (hashWidgetId focus /= 0) $
     unlessM (widgetOverlayAllowed ctx focus) $ writeIORef (ctxFocusId ctx) (WidgetId 0)
 
--- | Note in 'isFocusKind' what kind of widget has the keyboard, from the
--- last frame's nodes. Runs before the view, which rebuilds them, so that a
--- shortcut declared ahead of the focused widget knows about it too. @ime@:
--- an input method has the focused field's keys this frame
--- ('NanoUI.Internal.Frame.TextInput.claimComposition').
+-- | Note in 'isFocusKind' what kind of widget has the keyboard, and the keys
+-- it takes ('KeyClaim'), from the last frame's nodes. Runs before the view,
+-- which rebuilds them, so that a shortcut declared ahead of the focused
+-- widget knows about it too. @ime@: an input method has the focused field's
+-- keys this frame ('NanoUI.Internal.Frame.TextInput.claimComposition').
 recordFocusKind :: Context -> Bool -> IO ()
 recordFocusKind ctx ime = do
   focus <- readIORef (ctxFocusId ctx)
@@ -410,11 +426,15 @@ recordFocusKind ctx ime = do
     _
       | hashWidgetId focus == 0 -> pure FocusNone
       | ime -> pure FocusComposing
-      | otherwise -> withWidgetNode ctx focus FocusNone $ \idx ->
-          getNodeType (ctxNodeArena ctx) idx <&> \case
-            NodeTextInput -> FocusTextField False
-            NodeTextArea -> FocusTextField True
-            _ -> FocusControl
+      | otherwise -> withWidgetNode ctx focus FocusNone $ \idx -> do
+          let si = getStyleIdx (ctxNodeArena ctx) idx
+          getNodeType (ctxNodeArena ctx) idx >>= \case
+            NodeTextInput -> pure (FocusTextField False)
+            NodeTextArea -> pure (FocusTextField True)
+            -- A tree row moves with the arrows; any other button activates.
+            NodeButton -> si <&> \s -> FocusControl (if hasFlag buttonFlagRow s then KeysNavigate else KeysActivate)
+            NodeDrawing -> FocusControl . drawingKeyClaim <$> si
+            _ -> pure (FocusControl KeysNavigate)
   was <- getsInteraction ctx isFocusKind
   when (kind /= was) $ modifyInteraction ctx (\s -> s {isFocusKind = kind})
 

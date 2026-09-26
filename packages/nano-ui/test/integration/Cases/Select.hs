@@ -240,7 +240,7 @@ runSelectKeyboardTest ctx failed = do
   assertEq failed 2 . snd =<< evalUi ctx openRelease ui
   _ <- runFrame ctx (keyInp KeyUp openRelease) ui
   assertEq failed 1 . snd =<< evalUi ctx openRelease ui
-  _ <- runFrame ctx (openRelease {inputKeys = inputKeysFromList [KeyEscape], inputButtonsReleased = noButtons}) ui
+  _ <- runFrame ctx (keyInp KeyEscape openRelease {inputButtonsReleased = noButtons}) ui
   let idleAfterOpen = openRelease {inputButtonsReleased = noButtons}
   _ <- runFrame ctx idleAfterOpen ui
   overlays <- collectOverlayTextSpans ctx idleAfterOpen

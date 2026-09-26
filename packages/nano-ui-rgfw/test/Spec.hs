@@ -15,7 +15,7 @@ import NanoUI
   , UiCursorKind (..), V2 (..), box, button, checkbox, colorRGBA, column, defaultImageConfig, defaultLayout, drawing
   , fixedWH, grow, imageConfigured', label, respRect, tomorrowNightMinDarkTheme, window
   )
-import NanoUI.Input (Input (..), Key (..), Modifiers (..), MouseButton (..), buttonHeld, buttonPressed, buttonReleased, buttonsFromList, buttonsToList, emptyInput, noModifiers)
+import NanoUI.Input (Input (..), Key (..), Modifiers (..), MouseButton (..), Pressable (..), buttonsFromList, buttonsToList, emptyInput, noModifiers)
 import NanoUI.Internal.Context (Context (..), setDrawSquareGeometry)
 import NanoUI.Internal.Layout.Arena (NodeType (..), arenaCount, getNodeRect, getNodeType)
 import NanoUI.Rgfw.Internal.Context (newRgfwContext)
@@ -257,9 +257,15 @@ testRgfwTyping = do
   assert "RGFW keys: a release is reported and leaves nothing held"
     (toList (inputKeysReleased released) == [KeyChar 'l'] && null (inputKeysHeld released))
   assert "RGFW keys: a held key is held" (toList (inputKeysHeld (applied [EventKeyPress keyL 0])) == [KeyChar 'l'])
-  assert "RGFW keys: letters repeat, Enter does not" $
+  let enterHeld = applied [EventKeyPress R.rgfw_keyReturn 0, EventKeyRepeat R.rgfw_keyReturn 0]
+  assert "RGFW keys: every key repeats, and a repeat is no new press" $
     keys [EventKeyPress keyL 0, EventKeyRepeat keyL 0] == [KeyChar 'l', KeyChar 'l']
-      && keys [EventKeyPress R.rgfw_keyReturn 0, EventKeyRepeat R.rgfw_keyReturn 0] == [KeyEnter]
+      && toList (inputKeys enterHeld) == [KeyEnter, KeyEnter]
+      && toList (inputKeysNew enterHeld) == [KeyEnter]
+  let blurred = applied [EventKeyPress keyL R.rgfw_modControl, EventOther R.rgfw_windowFocusOut]
+  assert "RGFW keys: losing the keyboard lets go of the keys held" $
+    null (inputKeysHeld blurred) && pressedIn (KeyChar 'l') blurred && releasedIn (KeyChar 'l') blurred
+      && inputModifiers blurred == noModifiers
   assert "RGFW keys: function keys, paging and Super" $
     keys [EventKeyPress (R.rgfw_keyF1 + 4) 0, EventKeyPress R.rgfw_keyPageDown 0] == [KeyF 5, KeyPageDown]
       && inputModifiers (applied [EventKeyPress keyL R.rgfw_modSuper]) == noModifiers {modSuper = True}
@@ -279,8 +285,8 @@ testRgfwPointer = do
       pressedBy b = buttonsToList (inputButtonsPressed (applied [EventMouseButton b True]))
       gone = applied [EventMouseMotion 30 40, EventOther R.rgfw_mouseLeave]
   assert "RGFW scroll: a batch of wheel events accumulates" (inputScroll (applied [EventMouseScroll 0 1, EventMouseScroll 0.5 2]) == V2 0.5 3)
-  assert "RGFW buttons: the middle button goes down" (buttonHeld MouseMiddle middle && buttonPressed MouseMiddle middle)
-  assert "RGFW buttons: the middle button comes up" (not (buttonHeld MouseMiddle middleUp) && buttonReleased MouseMiddle middleUp)
+  assert "RGFW buttons: the middle button goes down" (heldIn MouseMiddle middle && pressedIn MouseMiddle middle)
+  assert "RGFW buttons: the middle button comes up" (not (heldIn MouseMiddle middleUp) && releasedIn MouseMiddle middleUp)
   assert "RGFW buttons: the middle button is not the left" (inputButtonsHeld middle == buttonsFromList [MouseMiddle])
   assert "RGFW buttons: misc 1 is back" (pressedBy R.rgfw_mouseMisc1 == [MouseBack])
   assert "RGFW buttons: misc 2 is forward" (pressedBy R.rgfw_mouseMisc2 == [MouseForward])

@@ -24,7 +24,7 @@ import Data.IntSet qualified as IS
 import NanoUI.Internal.Context.Core
 import NanoUI.Internal.Context.Types (Context (..), InteractionState (..), OverlayState (..), PointerRoute (..), intKey)
 import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
-import NanoUI.Internal.Input (Input, Key (KeyEscape), inputKeys, inputKeysElem, withoutPointer)
+import NanoUI.Internal.Input (Input, Key (KeyEscape), Pressable (..), withoutPointer)
 import NanoUI.Internal.Types (Rect, V2, rectHit, rectNonEmpty)
 
 -- | Whether any widget has keyboard focus or a text-edit menu is open.
@@ -43,7 +43,7 @@ modalActive ctx = getsOverlay ctx (\os -> osModalWasActive os || osModalActive o
 overlayConsumesQuit :: Context -> Input -> IO Bool
 overlayConsumesQuit ctx inp = do
   consumed <- getsOverlay ctx osEscapeConsumed
-  pure (inputKeysElem KeyEscape (inputKeys inp) && consumed)
+  pure (pressedOnceIn KeyEscape inp && consumed)
 
 -- | Mark Escape as handled so closing an overlay does not also quit the app.
 markEscapeConsumed :: Context -> IO ()

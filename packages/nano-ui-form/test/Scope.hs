@@ -16,7 +16,7 @@ import NanoUI
   , fillW
   , uiIO
   )
-import NanoUI.Backend (inputKeysFromList, runNanoUI)
+import NanoUI.Backend (runNanoUI)
 import NanoUI.Internal.Context (ctxFocusId, ctxNodeArena)
 import NanoUI.Form
 import NanoUI.Form.Internal.Backend
@@ -40,7 +40,7 @@ import NanoUI.Internal.Layout.Arena
   , getWidgetId
   )
 import NanoUI.Testing (Context, clearDirty, isDirty, newPixelContext, runFrame)
-import NanoUI.Testing.Harness (runClick, spanCenter, warmup2, withInputOff)
+import NanoUI.Testing.Harness (keyInp, runClick, spanCenter, warmup2, withInputOff)
 
 check :: String -> Bool -> IO ()
 check message ok = unless ok (fail message)
@@ -173,7 +173,7 @@ testSubmitPulse = do
   initial <- warmup2 ctx input ui
   check "form submitted before activation" (initial == Nothing)
   (submitted, _, _, _) <-
-    runFrame ctx input {inputKeys = inputKeysFromList [KeyEnter]} ui
+    runFrame ctx (keyInp KeyEnter input) ui
   check "valid submission did not return its value" (submitted == Just 42)
   idle <- warmup2 ctx input ui
   check "a submitted form kept emitting values on idle frames" (idle == Nothing)

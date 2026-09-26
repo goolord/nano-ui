@@ -20,6 +20,7 @@ import Control.Monad (mfilter, void, when)
 import Data.Bits ((.&.))
 import Data.Char (chr, isPrint, toLower)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.ByteString qualified as BS
 import qualified Data.Text as T
 import Data.Text (Text)
 import qualified Data.Text.Foreign as TF
@@ -27,17 +28,16 @@ import Data.Word (Word32)
 import Foreign.C.Types (CFloat, CUInt)
 import Data.Foldable (for_)
 import Data.Int (Int32)
-import Data.Maybe (fromMaybe, isJust)
+import Data.Maybe (fromMaybe, isJust, isNothing)
 import Foreign.Marshal.Alloc (alloca)
 import Foreign.Marshal.Utils (maybePeek, with)
 import Foreign.Ptr (Ptr)
 import Foreign.Storable (Storable (..))
 import GHC.Records.Compat (getField)
-import SDL3.Sys.Bindgen.Runtime.CBool qualified as CBool
 import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
 import NanoUI (Rect (..), V2 (..), WidgetId (..), v2Add)
 import NanoUI.Backend
-import NanoUI.Testing (Context, TextInputArea (..), getFocusId, textInputArea)
+import NanoUI.Testing (Context)
 import NanoUI.Sdl.Internal.Display (refreshEventType, takeRefreshEvent)
 import SDL3.Sys.Bindgen.Events
   ( SDL_Event (..)
@@ -102,7 +102,10 @@ import SDL3.Sys.Bindgen.Keycode
 import SDL3.Sys.Bindgen.Rect (SDL_Rect (..))
 import SDL3.Sys.Bindgen.Stdinc (Uint32 (..))
 import SDL3.Sys.Bindgen.Video (SDL_Window)
-import SDL3.Sys.Keyboard (getModState, setTextInputAreaSafe, startTextInputSafe, stopTextInputSafe)
+import SDL3.Sys.Bindgen.Keyboard (SDL_TextInputType (..), sDL_PROP_TEXTINPUT_TYPE_NUMBER)
+import SDL3.Sys.Bindgen.Keyboard qualified as Keyboard
+import SDL3.Sys.Keyboard (getModState, setTextInputAreaSafe, startTextInputWithPropertiesSafe, stopTextInputSafe)
+import SDL3.Sys.Properties (createPropertiesSafe, destroyPropertiesSafe, setNumberPropertySafe)
 
 -- | Copied SDL event data. Pointer positions use SDL window coordinates until
 -- display synchronisation converts them to nano-ui's logical coordinates.
@@ -134,6 +137,9 @@ data SdlEvent
   -- ^ The input method's composition changed: its text, and where its caret
   -- or selection starts and how long that is ('applyComposition'). Empty
   -- text ends it.
+  | EvFocusLost
+  -- ^ The window lost the keyboard. The keys held go up elsewhere
+  -- ('releaseAllKeys'), and the composition ends.
   deriving (Eq, Show)
 
 -- | Drain every pending event, oldest first.
@@ -176,14 +182,14 @@ decodeEvent refreshTy p = do
       -- must be full or stale regions flash.
       Events.SDL_EVENT_WINDOW_EXPOSED -> pure (Just EvWindowRedraw)
       Events.SDL_EVENT_WINDOW_RESTORED -> pure (Just EvWindowRedraw)
-      Events.SDL_EVENT_KEY_DOWN -> keyDown <$> peek p.key
+      Events.SDL_EVENT_KEY_DOWN -> Just . keyDown <$> peek p.key
       Events.SDL_EVENT_KEY_UP -> Just . keyUp <$> peek p.key
       Events.SDL_EVENT_TEXT_INPUT -> textInput p
       Events.SDL_EVENT_TEXT_EDITING -> textEditing p
       -- SDL stops text input while the window is in the background, which
       -- drops the input method's composition without always saying so. End
       -- it here, or a field would go on showing it and giving it its keys.
-      Events.SDL_EVENT_WINDOW_FOCUS_LOST -> pure (Just (EvEditing "" 0 0))
+      Events.SDL_EVENT_WINDOW_FOCUS_LOST -> pure (Just EvFocusLost)
       Events.SDL_EVENT_MOUSE_MOTION -> do
         me <- peek p.motion
         Just . EvMouseMotion (v2 (getField @"x" me) (getField @"y" me)) <$> peekModifiers
@@ -203,15 +209,10 @@ decodeEvent refreshTy p = do
 v2 :: CFloat -> CFloat -> V2
 v2 x y = V2 (realToFrac x) (realToFrac y)
 
--- | A key press. A held key's auto-repeats are presses too, for the keys
--- that repeat ('keyRepeats').
-keyDown :: SDL_KeyboardEvent -> Maybe SdlEvent
-keyDown ke =
-  case sdlKey (keyCode ke) (keyMods ke) of
-    Just k
-      | keyRepeats k || not (CBool.toBool (getField @"repeat" ke)) -> Just (EvKey k mods)
-      | otherwise -> Nothing
-    Nothing -> Just (EvModifiers mods)
+-- | A key press. A held key's auto-repeats are presses too, which
+-- 'applyKey' tells from the first by the key being held already.
+keyDown :: SDL_KeyboardEvent -> SdlEvent
+keyDown ke = maybe (EvModifiers mods) (`EvKey` mods) (sdlKey (keyCode ke) (keyMods ke))
   where
     mods = modFromKeymod (keyMods ke)
 
@@ -342,6 +343,7 @@ applyEvent inp ev =
     EvScroll delta -> inp {inputScroll = v2Add (inputScroll inp) delta}
     EvDrop dropEv -> inp {inputDrops = appendDropEvent dropEv (inputDrops inp)}
     EvEditing txt start len -> applyComposition txt start len inp
+    EvFocusLost -> releaseAllKeys (applyComposition "" 0 0 inp)
     EvWindowRedraw -> inp {inputWindowRedraw = True}
     -- A wake asks for a frame, not a repaint: the session runs one, and its
     -- damage decides what is presented, if anything.
@@ -356,40 +358,61 @@ isButtonEdge = \case
   EvMouseButton {} -> True
   _ -> False
 
--- | What SDL's text input last heard: the widget that had the keyboard
--- focus, and the text input area, in window coordinates.
-newtype TextInputSync = TextInputSync (IORef (WidgetId, Maybe (SDL_Rect, Int32)))
+-- | What SDL's text input last heard: the widget that had the keyboard, what
+-- text input runs for ('Nothing' while it is stopped), and the text input
+-- area, in window coordinates.
+newtype TextInputSync = TextInputSync (IORef (WidgetId, Maybe InputPurpose, Maybe (SDL_Rect, Int32)))
 
--- | A sync that has told SDL nothing yet.
+-- | A sync that has told SDL nothing yet, with text input stopped.
 newTextInputSync :: IO TextInputSync
-newTextInputSync = TextInputSync <$> newIORef (WidgetId 0, Nothing)
+newTextInputSync = TextInputSync <$> newIORef (WidgetId 0, Nothing, Nothing)
 
 -- | Bring SDL's text input up to date after a frame drawn with @inp@ in
--- window @win@, whose window coordinates are @zoom@ layout units: hand the
--- input method the focused field's 'TextInputArea', so its candidate window
--- sits by the caret, and when the focus moved while it was composing,
--- restart text input, which drops the composition rather than letting it
--- carry over into the next field. Text input itself stays on while no field
--- has the focus: views read typed text outside text fields too. Says whether
--- it restarted text input. Every frame the backend draws calls it.
+-- window @win@, whose window coordinates are @zoom@ layout units. Text input
+-- runs while a widget takes text ('textInputArea'), for what it takes
+-- ('InputPurpose'), and stops while none does, so no input method composes
+-- where nothing shows it and no on-screen keyboard stays up; it restarts
+-- when the purpose changes, and when the focus moved while the input method
+-- was composing, which drops the composition rather than letting it carry
+-- over into the next widget. The input method gets the widget's area, so its
+-- candidate window sits by the caret. Says whether it started text input,
+-- afresh or again. Every frame the backend draws calls it.
 syncTextInput :: TextInputSync -> Ptr SDL_Window -> Float -> Context -> Input -> IO Bool
 syncTextInput (TextInputSync ref) win zoom ctx inp = do
   focus <- getFocusId ctx
   area <- textInputArea ctx
-  (lastFocus, lastArea) <- readIORef ref
-  let restart = focus /= lastFocus && isJust (inputComposition inp)
-  when restart $ do
-    void (stopTextInputSafe win)
-    void (startTextInputSafe win)
-  let native = toWindow <$> area
+  (lastFocus, running, lastArea) <- readIORef ref
+  let purpose = textInputAreaPurpose <$> area
+      moved = focus /= lastFocus && isJust (inputComposition inp)
+      restart = isJust running && isJust purpose && (moved || purpose /= running)
+      started = isJust purpose && (isNothing running || restart)
+      native = toWindow <$> area
+  when (isJust running && (isNothing purpose || restart)) $ void (stopTextInputSafe win)
+  when started $ for_ purpose (startTextInput win)
   for_ native $ \(r, cursor) ->
-    when (native /= lastArea) $
+    when (started || native /= lastArea) $
       -- A safe call: the input method may take a round trip to answer.
       with r $ \rp -> void (setTextInputAreaSafe win (PtrConst.unsafeFromPtr rp) cursor)
-  writeIORef ref (focus, maybe lastArea Just native)
-  pure restart
+  writeIORef ref (focus, purpose, native)
+  pure started
   where
-    toWindow (TextInputArea (Rect x y w h) cursor) =
+    toWindow TextInputArea {textInputAreaRect = Rect x y w h, textInputAreaCursor = cursor} =
       let at :: Integral b => Float -> b
           at v = round (v * zoom)
        in (SDL_Rect (at x) (at y) (max 1 (at w)) (max 1 (at h)), at cursor)
+
+-- | Start text input for what a widget takes, which an on-screen keyboard
+-- shows the keys for: a password's input method hides what it types, and a
+-- number's keyboard has digits.
+startTextInput :: Ptr SDL_Window -> InputPurpose -> IO ()
+startTextInput win purpose = do
+  props <- createPropertiesSafe
+  _ <- BS.useAsCString sDL_PROP_TEXTINPUT_TYPE_NUMBER $ \name ->
+    setNumberPropertySafe props (PtrConst.unsafeFromPtr name) (fromIntegral textType)
+  _ <- startTextInputWithPropertiesSafe win props
+  destroyPropertiesSafe props
+  where
+    SDL_TextInputType textType = case purpose of
+      InputNormal -> Keyboard.SDL_TEXTINPUT_TYPE_TEXT
+      InputSecure -> Keyboard.SDL_TEXTINPUT_TYPE_TEXT_PASSWORD_HIDDEN
+      InputNumeric -> Keyboard.SDL_TEXTINPUT_TYPE_NUMBER

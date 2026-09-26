@@ -22,7 +22,7 @@ module NanoUI.Internal.Frame.TextInput
   , textInputMouse
     -- * Input-method composition
   , claimComposition
-  , fieldComposition
+  , settleInputMethod
   , Preedit (..)
   , splicePreedit
   , preeditSourceIndex
@@ -30,7 +30,7 @@ module NanoUI.Internal.Frame.TextInput
 
 import Control.Monad (forM_, mfilter, when)
 import Data.Char (isAlphaNum, isSpace)
-import Data.IORef (readIORef)
+import Data.IORef (readIORef, writeIORef)
 import Data.Maybe (isJust, mapMaybe)
 import Data.Sequence qualified as Seq
 import Data.Text (Text)
@@ -334,15 +334,16 @@ textInputMouse ctx inp onControl wid idx = do
     pure $ FieldDoc pos (TB.fromLines (Seq.singleton value)) $ \(TB.Cursor _ anchor) (TB.Cursor _ cursor) ->
       writeSlots ctx (fieldSelectionWrite key value anchor cursor)
 
--- | Settle which text field the frame's composition ('inputComposition')
--- shows in, before the view runs: the enabled, editable field that had the
--- focus when the composition last changed, while it keeps the focus. A
--- composition the focus left shows in no field until the input method
--- changes it, so it never turns up in the next one. Repaints the field it
--- leaves and the one it reaches.
+-- | Settle which widget the frame's composition ('inputComposition') shows
+-- in, before the view runs: the one that took text from the input method in
+-- the view before ('requestInputMethod'), a text field while it is focused,
+-- enabled and editable, and had the focus when the composition last
+-- changed, while it keeps the focus. A composition the focus left shows in
+-- no widget until the input method changes it, so it never turns up in the
+-- next one. Repaints the widget it leaves and the one it reaches.
 --
 -- Returns the input the frame runs on, and whether the input method has the
--- focused field's keys ('FocusComposing'). While the composition shows, they
+-- focused widget's keys ('FocusComposing'). While the composition shows, they
 -- are the input method's: the frame drops them, pressed, released and held,
 -- so none edits the field or fires a shortcut. Its commit still arrives as
 -- typed text. In the frame it commits, the keys it passes on, such as an
@@ -354,15 +355,16 @@ claimComposition :: Context -> Input -> IO (Input, Bool)
 claimComposition ctx !inp = do
   focus <- readIORef (ctxFocusId ctx)
   held <- getsInteraction ctx isComposition
+  taker <- maybe (WidgetId 0) imrWidget <$> readIORef (ctxInputMethod ctx)
   let new = mfilter (not . T.null . compositionText) (inputComposition inp)
-      -- An unchanged composition stays with its field, a new one goes to the
-      -- focused field.
+      -- An unchanged composition stays with its widget, a new one goes to
+      -- the focused widget.
       claimant = case held of
         Just (old, o) | Just old == new -> if o == focus then o else WidgetId 0
         _ -> focus
       showing = maybe False (\(_, o) -> o == focus && hashWidgetId o /= 0)
-  !owner <- if isJust new then ifM (editableField claimant) (pure claimant) (pure (WidgetId 0)) else pure (WidgetId 0)
-  let next = (,owner) <$> new
+      !owner = if isJust new && claimant == taker then claimant else WidgetId 0
+      next = (,owner) <$> new
   when (next /= held) $ do
     modifyInteraction ctx (\s -> s {isComposition = next})
     mapM_ (\(_, old) -> damageWidget ctx old DamageSelf) held
@@ -370,27 +372,34 @@ claimComposition ctx !inp = do
   let !committing = showing held && not (T.null (inputChars inp))
   pure $
     if showing next
-      then (inp {inputKeys = mempty, inputKeysReleased = mempty, inputKeysHeld = mempty}, True)
+      then (inp {inputKeys = mempty, inputKeysNew = mempty, inputKeysReleased = mempty, inputKeysHeld = mempty}, True)
       else (inp, committing)
-  where
-    editableField wid
-      | hashWidgetId wid == 0 = pure False
-      | otherwise = withWidgetNode ctx wid False $ \idx ->
-          ( getNodeType (ctxNodeArena ctx) idx >>= \case
-              NodeTextArea -> pure True
-              NodeTextInput -> not . hasFlag textInputFlagSelectable <$> getStyleIdx (ctxNodeArena ctx) idx
-              _ -> pure False
-          )
-            <&&> (not <$> isDisabled ctx wid)
 
--- | The composition showing in text field @wid@: the frame's, while @wid@
--- has the focus and the composition belongs to it ('claimComposition').
-fieldComposition :: Context -> WidgetId -> IO (Maybe Composition)
-fieldComposition ctx wid = do
+-- | Keep the input method's request with the keyboard at the end of a frame
+-- whose focus moved: off the widget that asked ('requestInputMethod'), or,
+-- when none asked, off the widget that had it as the view began
+-- (@before@). The request then passes to the text field focus moved to,
+-- which asks for itself from its next view on, or goes. A backend takes
+-- text for the field from this frame on, and the input method's next
+-- composition is the field's.
+settleInputMethod :: Context -> WidgetId -> IO ()
+settleInputMethod ctx@Context {ctxNodeArena = na} before = do
   focus <- readIORef (ctxFocusId ctx)
-  getsInteraction ctx $ \s -> case isComposition s of
-    Just (c, owner) | owner == wid && owner == focus && hashWidgetId owner /= 0 -> Just c
-    _ -> Nothing
+  asked <- readIORef (ctxInputMethod ctx)
+  when (maybe (focus /= before) ((/= focus) . imrWidget) asked) $ do
+    let request purpose = Just (InputMethodRequest focus Nothing purpose)
+        fieldRequest si
+          | hasFlag textInputFlagSelectable si = Nothing
+          | hasFlag textInputFlagPassword si = request InputSecure
+          | hasFlag textInputFlagNumeric si = request InputNumeric
+          | otherwise = request InputNormal
+    field <-
+      ifM (isDisabled ctx focus) (pure Nothing) . withWidgetNode ctx focus Nothing $ \idx ->
+        getNodeType na idx >>= \case
+          NodeTextArea -> pure (request InputNormal)
+          NodeTextInput -> fieldRequest <$> getStyleIdx na idx
+          _ -> pure Nothing
+    writeIORef (ctxInputMethod ctx) field
 
 -- | A line of text with a composition in place of some of its characters:
 -- what a field shows while an input method composes in it. Positions count
