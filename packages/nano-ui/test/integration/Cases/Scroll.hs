@@ -835,7 +835,8 @@ runDisjointViewportLayersTest ctx failed = do
 -- | The wheel goes to the scroller drawn on top at the pointer: one pinned
 -- over another takes it though declared before it, and a panel pinned over
 -- the scroller beneath takes it with 'PointerBlock' and lets it through
--- without. Beside what is pinned, the scroller beneath takes it.
+-- without. Beside what is pinned, the scroller beneath takes it, and a
+-- blocking card inside a scroller leaves it that scroller's.
 runWheelPaintOrderTest :: Context -> IORef Int -> IO ()
 runWheelPaintOrderTest ctx failed = do
   let inp0 = withInputOff 400 300
@@ -857,3 +858,16 @@ runWheelPaintOrderTest ctx failed = do
   moved PointerAuto (V2 250 60) >>= assertEq failed (False, True)
   moved PointerBlock (V2 250 60) >>= assertEq failed (False, False)
   moved PointerBlock (V2 250 200) >>= assertEq failed (False, True)
+  -- A blocking card inside a scroller covers nothing the scroller is under:
+  -- the wheel over it scrolls the scroller it is in.
+  let inside = columnWith tight $ do
+        (sid, ()) <- scrollArea (fixedWH 300 200) . column $ do
+          panelWith (pointer PointerBlock . fixedWH 200 60) (pure ())
+          rows 30
+        box (pinAt 350 250 . fixedWH 10 10) (colorRGBA 255 0 0 255)
+        pure sid
+  sid <- warmup2 ctx inp0 inside
+  let onCard = V2 60 30
+  warmup ctx inp0 {inputMousePos = onCard} inside
+  _ <- runFrame ctx inp0 {inputMousePos = onCard, inputScroll = V2 0 1} inside
+  assert failed . (> 0) =<< getScrollOffset ctx sid

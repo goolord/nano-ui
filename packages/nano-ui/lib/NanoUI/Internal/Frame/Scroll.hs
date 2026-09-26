@@ -14,9 +14,9 @@ where
 
 import Control.Applicative ((<|>))
 import Control.Monad (forM_, join, unless, when)
-import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Maybe (MaybeT (..))
 import Data.Foldable (find)
+import Data.Functor ((<&>))
 import Data.Maybe (fromMaybe, isJust)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Frame.Hit (overlayHitAllowed, overlayHitRoot, topmostFloating, topmostOverlayAtMouse)
@@ -201,32 +201,58 @@ findScrollNodeUnderMouse ctx mouse = do
       let start = fromMaybe 0 top
       rect <- getNodeRect (ctxNodeArena ctx) start
       layered <- (> 0) <$> layeredNodeCount (ctxNodeArena ctx)
-      join <$> queryScrollTarget ctx layered mouse rect start
+      queryScrollTarget ctx layered mouse rect start <&> \case
+        WheelTo idx -> Just idx
+        _ -> Nothing
 
--- | The scroller under @mouse@ in the subtree at @idx@: the one in the child
--- drawn on top at @mouse@, else @idx@ itself; @Just Nothing@ where a node
--- given 'PointerBlock' is drawn on top there with no scroller of its own,
--- and takes the wheel from what is beneath. Where a stack or a pinned node
--- (@layered@) can draw one child over another, the children are asked in the
--- order paint draws them, the one on top first ('childrenTopFirst'), so a
--- scroller pinned over another takes the wheel; elsewhere children do not
--- overlap and are asked in the arena's sibling order.
-queryScrollTarget :: Context -> Bool -> V2 -> Rect -> NodeIdx -> IO (Maybe (Maybe NodeIdx))
-queryScrollTarget ctx@Context {ctxNodeArena = na} layered mouse parentClip idx = runMaybeT $ do
-  nt <- liftIO $ getNodeType na idx
-  clip <- MaybeT $ scrollHitClip ctx idx nt parentClip
-  let inChild = queryScrollTarget ctx layered mouse clip
-      inChildren
-        | layered = firstJust inChild =<< childrenTopFirst na idx
-        | otherwise = firstChildJustM na idx inChild
-      blocks =
-        pure layered
-          <&&> ((== PointerBlock) <$> getPointerMode na idx)
-          <&&> (rectHit <$> getNodeRect na idx <*> pure mouse)
-          <&&> pure (rectHit clip mouse)
-  MaybeT inChildren
-    <|> (Just <$> MaybeT (scrollHitSelf ctx idx nt mouse clip))
-    <|> MaybeT ((\b -> if b then Just Nothing else Nothing) <$> blocks)
+-- | What a subtree does with the wheel at the pointer.
+data WheelHit
+  = WheelMiss
+  -- ^ Nothing in it takes the wheel there.
+  | WheelBlocked
+  -- ^ A node given 'PointerBlock' is on top there with no scroller of its
+  -- own: nothing drawn beneath it takes the wheel, though a scroller it is
+  -- inside still does.
+  | WheelTo !NodeIdx
+  -- ^ This scroller takes it.
+
+-- | What the subtree at @idx@ does with the wheel at @mouse@: the answer of
+-- the child drawn on top there, else @idx@ itself if it is a scroller under
+-- the pointer. Where a stack or a pinned node draws one child over another
+-- (@layered@, and this node a stack or above a pinned node), the children
+-- are asked in the order paint draws them, the one on top first
+-- ('childrenTopFirst'), so a scroller pinned over another takes the wheel;
+-- elsewhere children do not overlap, and are asked in the arena's sibling
+-- order.
+queryScrollTarget :: Context -> Bool -> V2 -> Rect -> NodeIdx -> IO WheelHit
+queryScrollTarget ctx@Context {ctxNodeArena = na} layered mouse parentClip idx = do
+  nt <- getNodeType na idx
+  scrollHitClip ctx idx nt parentClip >>= \case
+    Nothing -> pure WheelMiss
+    Just clip -> do
+      overlapping <-
+        pure layered <&&> ((||) <$> ((== FlowStack) <$> getFlow na idx) <*> hasPinnedBelow na idx)
+      let answered c =
+            queryScrollTarget ctx layered mouse clip c <&> \case
+              WheelMiss -> Nothing
+              hit -> Just hit
+      inner <-
+        fromMaybe WheelMiss <$>
+          if overlapping
+            then firstJust answered =<< childrenTopFirst na idx
+            else firstChildJustM na idx answered
+      case inner of
+        WheelTo _ -> pure inner
+        _ ->
+          scrollHitSelf ctx idx nt mouse clip >>= \case
+            Just self -> pure (WheelTo self)
+            Nothing -> do
+              blocks <-
+                pure layered
+                  <&&> ((== PointerBlock) <$> getPointerMode na idx)
+                  <&&> (rectHit <$> getNodeRect na idx <*> pure mouse)
+                  <&&> pure (rectHit clip mouse)
+              pure (if blocks then WheelBlocked else inner)
  where
   firstJust _ [] = pure Nothing
   firstJust f (c : cs) = f c >>= maybe (firstJust f cs) (pure . Just)
