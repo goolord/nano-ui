@@ -47,13 +47,12 @@ module SdlDemo
     ) where
 
 import Control.Concurrent (forkIO)
-import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, tryTakeMVar)
 import Control.Exception (SomeException, displayException, evaluate, try)
-import Control.Monad (forM, forM_, unless, void, when)
+import Control.Monad (forM, forM_, unless, void, when, (<=<))
 import Control.Monad.IO.Class (liftIO)
 import Data.Foldable (for_, toList, traverse_)
 import Data.List (elemIndex)
-import Data.Maybe (catMaybes, fromMaybe, isJust, listToMaybe, mapMaybe)
+import Data.Maybe (catMaybes, fromMaybe, isJust, isNothing, listToMaybe, mapMaybe)
 import Data.Primitive.SmallArray (SmallArray, indexSmallArray, sizeofSmallArray, smallArrayFromList)
 import Data.Word (Word64)
 import NanoUI
@@ -129,31 +128,22 @@ main = do
 -- §2  Assets & shared look
 ------------------------------------------------------------------------------
 
--- | An animated GIF loading in the background: each frame's width, height and
--- RGBA pixels once decoded, or why the file could not be used.
-newtype GifLoad = GifLoad (MVar (Either String [(Int, Int, BS.ByteString)]))
-  deriving (Eq)
-
--- | Start loading an animated GIF while the app runs. The file is read and
--- decoded with JuicyPixels on a background thread, so the frame that starts
--- the load does not stall. Collect the frames with 'gifFrames'.
-loadGif :: FilePath -> NanoUI GifLoad
-loadGif path =
-  liftIO $ do
-    done <- newEmptyMVar
-    _ <- forkIO $ do
-      decoded <- try $ do
-        bytes <- BS.readFile path
-        frames <- either fail pure (JP.decodeGifImages bytes)
-        when (null frames) (fail "the file has no frames")
-        forM frames $ \frame -> do
-          let rgba = JP.convertRGBA8 frame
-              (fp, n) = VS.unsafeToForeignPtr0 (JP.imageData rgba)
-          -- Decode and convert here, so registering the frames only copies.
-          pixels <- evaluate (BSI.fromForeignPtr0 fp n)
-          pure (JP.imageWidth rgba, JP.imageHeight rgba, pixels)
-      putMVar done (either (\e -> Left (displayException (e :: SomeException))) Right decoded)
-    pure (GifLoad done)
+-- | Read and decode an animated GIF with JuicyPixels: each frame's width,
+-- height and RGBA pixels, or why the file could not be used. The demo runs it
+-- with 'useTask', on a thread of its own, so no frame waits for it.
+decodeGif :: FilePath -> IO (Either String [(Int, Int, BS.ByteString)])
+decodeGif path = do
+  decoded <- try $ do
+    bytes <- BS.readFile path
+    frames <- either fail pure (JP.decodeGifImages bytes)
+    when (null frames) (fail "the file has no frames")
+    forM frames $ \frame -> do
+      let rgba = JP.convertRGBA8 frame
+          (fp, n) = VS.unsafeToForeignPtr0 (JP.imageData rgba)
+      -- Decode and convert here, so registering the frames only copies.
+      pixels <- evaluate (BSI.fromForeignPtr0 fp n)
+      pure (JP.imageWidth rgba, JP.imageHeight rgba, pixels)
+  pure (either (\e -> Left (displayException (e :: SomeException))) Right decoded)
 
 -- | Save a screenshot as a PNG with JuicyPixels.
 savePng :: FilePath -> RgbaImage -> IO ()
@@ -161,13 +151,11 @@ savePng path (RgbaImage _ w h pixels) =
   let (fp, n) = BSI.toForeignPtr0 pixels
    in JP.writePng path (JP.Image w h (VS.unsafeFromForeignPtr0 fp n) :: JP.Image JP.PixelRGBA8)
 
--- | Register a finished load's frames under fresh ids, in order. 'Nothing'
--- while the file is still decoding, then the frames' ids or why the file could
--- not be used. The result comes once; keep it. Registering stops at the first
--- frame the atlas refuses.
-gifFrames :: GifLoad -> NanoUI (Maybe (Either String (SmallArray ImageId)))
-gifFrames (GifLoad done) =
-  liftIO (tryTakeMVar done) >>= traverse (either (pure . Left) (register []))
+-- | Register a decoded GIF's frames under fresh ids, in order, or say why the
+-- file could not be used. Registering stops at the first frame the atlas
+-- refuses.
+gifFrames :: Either String [(Int, Int, BS.ByteString)] -> NanoUI (Either String (SmallArray ImageId))
+gifFrames = either (pure . Left) (register [])
   where
     register ids [] = pure (Right (smallArrayFromList (reverse ids)))
     register ids ((w, h, pixels) : rest) =
@@ -265,7 +253,6 @@ demoUi = do
   (openDlg, setOpenDlg) <- useState (Nothing :: Maybe FileDialogId)
   (saveDlg, setSaveDlg) <- useState (Nothing :: Maybe FileDialogId)
   (lick, setLick) <- useState (Nothing :: Maybe (Either String (SmallArray ImageId))) -- GIF frames, once loaded
-  (lickLoad, setLickLoad) <- useState (Nothing :: Maybe GifLoad) -- the GIF while it decodes
   (icons, setIcons) <- useState (Nothing :: Maybe [Either String Svg]) -- SVG icons, read on first show
   (weight, setWeight) <- useText "" -- adorned textInput
   (saving, toggleSaving) <- useToggle False -- content button showing a spinner
@@ -579,20 +566,19 @@ demoUi = do
                     _ -> pure ()
               separator
               -- An animated GIF loaded from disk the first time this tab
-              -- shows: loadGif decodes it in the background, and gifFrames
-              -- registers its frames once that is done. Each frame is its own
-              -- image, and the clock picks which one to show; every frame of
-              -- this GIF lasts 100 ms. keepAnimating keeps frames coming while
-              -- it loads and plays; the sensor round it holds the frames only
-              -- while it is on screen, so off screen the GIF asks for none.
+              -- shows: useTask decodes it on a thread of its own while the
+              -- loop sleeps, and the frame the result wakes registers its
+              -- frames. The hook is called only until then, so the decoded
+              -- pixels are let go. Each frame is its own image, and the clock
+              -- picks which one to show; every frame of this GIF lasts 100 ms.
+              -- keepAnimating keeps frames coming while it plays; the sensor
+              -- round it holds the frames only while it is on screen, so off
+              -- screen the GIF asks for none.
+              scope . when (isNothing lick) $ do
+                decoded <- useTask ("lick.gif" :: T.Text) (decodeGif =<< getDataFileName "data/lick.gif")
+                mapM_ (setLick . Just <=< gifFrames) decoded
               case lick of
-                Nothing -> do
-                  keepAnimating =<< labelWith' (fillW . fontMuted) "Loading lick.gif..."
-                  case lickLoad of
-                    Nothing -> do
-                      path <- liftIO (getDataFileName "data/lick.gif")
-                      setLickLoad . Just =<< loadGif path
-                    Just pending -> mapM_ (setLick . Just) =<< gifFrames pending
+                Nothing -> labelWith (fillW . fontMuted) "Loading lick.gif..."
                 Just (Left err) -> muted ("Could not load lick.gif: " <> T.pack err)
                 Just (Right frames) -> do
                   t <- uiTime

@@ -56,6 +56,8 @@
   of view costs its UI pass and nothing on the GPU.
 - Images are drawn, from a texture of the core's image atlas, instead of as
   a rectangle in their tint colour.
+- Another thread can wake the loop: the session installs `ctxWakeLoop`, so a
+  background job's result shows without waiting for input.
 
 ### Removed
 

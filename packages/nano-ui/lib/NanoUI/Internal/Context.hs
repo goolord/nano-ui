@@ -537,6 +537,7 @@ newContext = do
   ctxCursorRegions <- newIORef []
   ctxImageAtlas <- Atlas.newImageAtlas
   ctxWakeLoop <- newIORef Nothing
+  ctxWoken <- newIORef False
   ctxWakeAt <- newIORef 0
   ctxHost <- newIORef Map.empty
   ctxTheme <- newIORef defaultTheme

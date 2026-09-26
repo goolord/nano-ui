@@ -9,6 +9,7 @@ module RGFW
   , closeWindow
   , pollEvent
   , waitForEvent
+  , stopWaitForEvent
   , withEventBuffer
   , physicalToMappedKey
   , windowSize
@@ -100,6 +101,12 @@ closeWindow (Window ptr) = c_RGFW_window_close ptr
 -- that many milliseconds before returning.
 waitForEvent :: Int -> IO ()
 waitForEvent t = c_RGFW_waitForEvent (fromIntegral t)
+
+-- | End a 'waitForEvent' that is waiting, or make the next one return at
+-- once: how another thread wakes a loop blocked on events. Safe to call from
+-- any thread once a window exists.
+stopWaitForEvent :: IO ()
+stopWaitForEvent = c_RGFW_stopCheckEvents
 
 -- | Allocate native event storage for a callback. The pointer must not escape
 -- the callback; reuse it for consecutive 'pollEvent' calls.

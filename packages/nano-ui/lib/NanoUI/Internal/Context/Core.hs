@@ -16,6 +16,8 @@ module NanoUI.Internal.Context.Core
   , clearDirty
   , isDirty
   , setWakeLoop
+  , wakeFromThread
+  , takeThreadWake
   , requestWakeAt
   , requestWakeAfter
   , getWakeAt
@@ -56,7 +58,7 @@ where
 
 import Control.Monad (forM_, unless, when)
 import Data.Bits (shiftL, shiftR, (.&.), (.|.))
-import Data.IORef (modifyIORef', readIORef, writeIORef)
+import Data.IORef (atomicWriteIORef, modifyIORef', readIORef, writeIORef)
 import Data.Primitive.SmallArray (SmallMutableArray, copySmallMutableArray, newSmallArray, readSmallArray, getSizeofSmallMutableArray, writeSmallArray)
 import Data.IntMap.Strict qualified as IM
 import Data.IntSet qualified as IS
@@ -206,11 +208,31 @@ isDirty ctx = getsDamage ctx dsDirty
 setWakeLoop :: Context -> IO () -> IO ()
 setWakeLoop ctx wake = writeIORef (ctxWakeLoop ctx) (Just wake)
 
+-- | Wake the loop from any thread, after changing something the view reads.
+-- The frame that runs next repaints the whole window ('takeThreadWake'),
+-- since nothing says which widgets show the change. Publish the change
+-- before waking.
+wakeFromThread :: Context -> IO ()
+wakeFromThread ctx = do
+  atomicWriteIORef (ctxWoken ctx) True
+  readIORef (ctxWakeLoop ctx) >>= sequence_
+
+-- | As a frame starts, before its view reads anything: queue a whole-window
+-- repaint for the 'wakeFromThread' calls since the last frame. A call made
+-- while the view runs is left for the frame it wakes.
+{-# INLINE takeThreadWake #-}
+takeThreadWake :: Context -> IO ()
+takeThreadWake ctx = do
+  woken <- readIORef (ctxWoken ctx)
+  when woken $ do
+    atomicWriteIORef (ctxWoken ctx) False
+    damageFull ctx
+
 -- | Ask for a frame at a monotonic time ('getMonotonicTime') even if no input
 -- arrives. The earliest request wins. Each frame starts with none pending, so
 -- a widget that still needs a later frame asks again as it is built; one that
 -- is gone stops asking, and the loop sleeps. Call it from the UI thread: a
--- background thread wakes the loop through 'ctxWakeLoop' instead.
+-- background thread wakes the loop with 'wakeFromThread' instead.
 requestWakeAt :: Context -> Double -> IO ()
 requestWakeAt ctx t = do
   cur <- readIORef (ctxWakeAt ctx)

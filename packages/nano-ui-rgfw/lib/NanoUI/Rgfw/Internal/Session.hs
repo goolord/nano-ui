@@ -20,13 +20,13 @@ module NanoUI.Rgfw.Internal.Session
   , mapRgfwCursor
   ) where
 
-import Control.Concurrent (rtsSupportsBoundThreads, runInBoundThread)
+import Control.Concurrent (myThreadId, rtsSupportsBoundThreads, runInBoundThread)
 import Control.Exception (bracket)
-import Control.Monad (void, when)
+import Control.Monad (unless, void, when)
 import Data.Bits ((.&.))
 import Data.Char (chr, isDigit, isPrint, toLower)
 import Data.Foldable (for_)
-import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.IORef (IORef, atomicModifyIORef', atomicWriteIORef, newIORef, readIORef, writeIORef)
 import Data.List (find)
 import Data.Maybe (fromMaybe, mapMaybe)
 import qualified Data.Text as T
@@ -61,6 +61,7 @@ import NanoUI.Backend
   , keypadKey
   , modifiersFromBits
   , setExplainLayout
+  , setWakeLoop
   )
 import NanoUI.Internal.Context
   ( Context (..)
@@ -317,6 +318,17 @@ runRgfwAppReduceCustom opts getThemeAndScale updateModel initialModel view = inB
             -- nothing here.
           , hostSetOpacity = \_ -> pure ()
           }
+      -- Another thread (a background job) wakes the loop: it ends the event
+      -- wait, and the pass it ends draws a frame. Until that frame starts,
+      -- more wakes stop no more waits. The loop's own thread wakes it on
+      -- every 'markDirty', which it sees for itself.
+      loopThread <- myThreadId
+      wakeRef <- newIORef False
+      setWakeLoop ctx $ do
+        me <- myThreadId
+        unless (me == loopThread) $ do
+          pending <- atomicModifyIORef' wakeRef (True,)
+          unless pending R.stopWaitForEvent
       let font = getCozetteFont
           initInp = emptyInput {inputWindowSize = logicalSize initPhys initScale}
           -- Set the pointer shape only when the wanted kind changes.
@@ -397,7 +409,8 @@ runRgfwAppReduceCustom opts getThemeAndScale updateModel initialModel view = inB
               SessionDriver
                 { sdPollEvents    = pollRgfwEvents win evPtr scaleRef monScaleRef winSizeRef
                 , sdWaitEvents    = \t -> do
-                    R.waitForEvent t
+                    woke <- readIORef wakeRef
+                    unless woke (R.waitForEvent t)
                     pollRgfwEvents win evPtr scaleRef monScaleRef winSizeRef
                 , sdApplyEvent    = applyRgfwEvent
                 , sdIsButtonEdge  = \case RgfwEvButton {} -> True; _ -> False
@@ -420,9 +433,13 @@ runRgfwAppReduceCustom opts getThemeAndScale updateModel initialModel view = inB
                   -- instead of spinning.
                 , sdPacingMs      = animateTimeout
                 , sdPresentPaces  = pure False
-                , sdShouldDraw    = \c prevInp inpSynced wasAnim refreshDue ->
-                    shouldRedrawFrame c prevInp inpSynced wasAnim False refreshDue
-                , sdDraw          = \c curInp forceFull -> drawOne forceFull c curInp
+                , sdShouldDraw    = \c prevInp inpSynced wasAnim refreshDue -> do
+                    woke <- readIORef wakeRef
+                    shouldRedrawFrame c prevInp inpSynced wasAnim False (refreshDue || woke)
+                , sdDraw          = \c curInp forceFull -> do
+                    -- The frame answers every wake before its view runs.
+                    atomicWriteIORef wakeRef False
+                    drawOne forceFull c curInp
                 , sdOnCursor      = syncCursor
                 , sdShouldQuit    = \_ -> False
                 , sdAlignSec      = refreshSec

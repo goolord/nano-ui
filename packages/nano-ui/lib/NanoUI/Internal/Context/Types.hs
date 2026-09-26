@@ -798,6 +798,10 @@ data Context = Context
   , ctxClipboardSet :: Text -> IO Bool
   , ctxImageAtlas :: ImageAtlas
   , ctxWakeLoop :: IORef (Maybe (IO ()))
+  , ctxWoken :: !(IORef Bool)
+  -- ^ Set by 'NanoUI.Internal.Context.Core.wakeFromThread', from any thread:
+  -- another thread changed what the view reads. The next frame repaints
+  -- whole and clears it.
   , ctxWakeAt :: !(IORef Double)
   -- ^ Monotonic time ('GHC.Clock.getMonotonicTime') of the earliest frame
   -- anything asked for without input to cause it, or 0 for none. Each frame

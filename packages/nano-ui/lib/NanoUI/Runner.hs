@@ -33,6 +33,7 @@ import NanoUI.Internal.Context
 import NanoUI.Internal.Debug
 import NanoUI.Internal.Frame.Input (needsRedraw)
 import NanoUI.Internal.Input
+import NanoUI.Internal.Tasks (cancelTasks)
 import NanoUI.Internal.Types (V2 (..))
 
 -- | Standard upper bound for single-frame delta-time (50ms).
@@ -209,7 +210,8 @@ wakePadMs = 2
 debugHudTimeout :: Int
 debugHudTimeout = round (debugRefreshSec * 1000)
 
--- | Run an event-driven session loop until a termination event or user quit condition.
+-- | Run an event-driven session loop until a termination event or user quit
+-- condition. The background jobs the view started end with it.
 runSessionLoop ::
   SessionDriver ev ->
   Context ->
@@ -316,4 +318,4 @@ runSessionLoop drv ctx0 inp0 = do
           unless (sdShouldQuit drv inpSynced && not overlayQuit) $
             loop ctx' inpSynced rest now dirtyOut animNow
 
-  loop ctx0 inp0 [] startT False False
+  loop ctx0 inp0 [] startT False False `finally` cancelTasks ctx0

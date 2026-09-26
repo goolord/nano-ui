@@ -179,6 +179,7 @@ library
         NanoUI.Internal.Shortcut
         NanoUI.Internal.Widgets.Shortcut
         NanoUI.Internal.NativeWindow
+        NanoUI.Internal.Tasks
     build-depends:
         base >=4.20 && <4.23,
         bytestring ^>=0.12,
@@ -269,6 +270,7 @@ test-suite nano-ui-test
         Cases.PointerExtra
         Cases.Theming
         Cases.NativeWindow
+        Cases.Tasks
     build-depends:
         bytestring,
         containers,

@@ -474,6 +474,24 @@ module NanoUI
   , useEnum
   , useText
 
+    -- ** Background work
+
+    -- | Work that should not hold up a frame runs on a thread of its own.
+    -- 'useTask' runs an action there and returns its result once there is
+    -- one; the loop sleeps while it runs and wakes when it finishes. A job
+    -- starts the first frame its hook is called with a key, is replaced when
+    -- the key changes, and is killed once the view stops calling its hook:
+    --
+    -- > (query, setQuery) <- useText ""
+    -- > setQuery =<< textInput query
+    -- > hits <- useTask query (searchIndex index query)
+    -- > mapM_ (label . hitTitle) (fromMaybe [] hits)
+    --
+    -- 'askWake' hands the view an action any thread may call to run it
+    -- again: what a stream or a poller of the app's own needs.
+  , useTask
+  , askWake
+
     -- * Scrolling
 
     -- | A scroll container ('scroll', 'scroll2D') handles the wheel and its
@@ -889,6 +907,7 @@ import NanoUI.Internal.Input
 import NanoUI.Internal.Monad
 import NanoUI.Internal.NativeWindow
 import NanoUI.Internal.Style
+import NanoUI.Internal.Tasks
 import NanoUI.Svg
 import NanoUI.Internal.Types
 import NanoUI.Internal.WidgetText

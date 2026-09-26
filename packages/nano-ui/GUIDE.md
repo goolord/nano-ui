@@ -241,10 +241,46 @@ an on-screen widget needs continuous frames. Use `wakeAfter` for a clock,
 debounce, or delayed update; request it again on each frame that still needs
 the deadline. Repeatedly marking the context dirty creates an unpaced loop.
 
-The context and its arenas belong to the UI thread. A worker should publish
-results through an application-owned synchronisation mechanism, then call
-the backend wake action installed in `ctxWakeLoop`. The next view reads the
-result. Do not mutate context stores concurrently with a frame.
+Work that should not hold up a frame, such as reading a file, runs in a hook
+on a thread of its own:
+
+```haskell
+contents <- useTask path (T.readFile path)
+label (fromMaybe "Loading..." contents)
+```
+
+`useTask` returns `Nothing` until the action finishes, then its result, and
+runs once per key: a new key kills the job and starts another, which is also
+how to run it again. The job's end wakes the loop. The first frame that does
+not call the hook kills the job, so call it outside a tab or branch that
+should not end it. An action that throws stays `Nothing`; catch the
+exception inside it (`try`) to show it. Results are forced only to weak head
+normal form on the job's thread. Build with `-threaded`.
+
+The context and its arenas belong to the UI thread. Another thread that
+changes what the view reads publishes the change where the view reads it,
+then calls the action `askWake` returns: the next frame runs the view and
+repaints the whole window, and wakes that come before it cost only that
+frame. A stream, a poller or a progress report is built this way. Here the
+thread is a `useTask` job that never returns, so it ends with the view:
+
+```haskell
+sensorLoop :: IORef (Maybe Double) -> IO () -> IO ()
+sensorLoop latest wake = forever $ do
+  reading <- readSensor
+  writeIORef latest (Just reading)
+  wake
+
+sensorView :: IORef (Maybe Double) -> NanoUI ()
+sensorView latest = do
+  wake <- askWake
+  _ <- useTask () (sensorLoop latest wake)
+  reading <- uiIO (readIORef latest)
+  label (maybe "--" (T.pack . show) reading)
+```
+
+`latest` is made in `main`, before the app runs. A stream that keeps every
+value folds each one into the reference instead.
 
 Damage requests describe pixels to repaint. They do not themselves wake the
 loop. Context operations that change stored state generally do both; for a
@@ -337,10 +373,10 @@ Fold keys in with `applyKey` (a typing key as the `KeyChar` it types
 unmodified, with its text in `inputChars` too) and input-method updates with
 `applyComposition`. After a frame, `textInputArea` from
 `NanoUI.Testing` says where the candidate window goes. Before the first frame,
-install a `WindowHost` (`installWindowHost`) and report the desktop's light
-or dark setting with `setSystemAppearance`, again on each change. Once a
-frame is on screen, call `answerScreenshots` with a capture of it, or
-`pure Nothing`.
+install a `WindowHost` (`installWindowHost`) and a wake action any thread may
+call (`setWakeLoop`), and report the desktop's light or dark setting with
+`setSystemAppearance`, again on each change. Once a frame is on screen, call
+`answerScreenshots` with a capture of it, or `pure Nothing`.
 
 ## Headless tests
 
@@ -355,6 +391,8 @@ helper stores controlled input values outside the hook store, so an automatic
 hook rebuild does not hide a change flag that the test is trying to observe.
 
 A tooltip's delay runs on the real clock, so a test sets `tooltipDelay = 0`.
+`newWakeSignal` lets a test wait for a background job's wake, and
+`cancelTasks` from `NanoUI.Backend` kills the jobs it leaves running.
 
 Headless tests cover layout and input behaviour. Run the native backend too
 when changing rendering, fonts, dialogs, or display scaling.

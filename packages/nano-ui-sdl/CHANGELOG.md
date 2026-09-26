@@ -87,6 +87,7 @@
   `setWindowPosition` and `setWindowOpacity`; `windowPosition` says where it is.
 - `captureScreenshot`, the last presented frame as an `RgbaImage`, and
   answers to the core's `requestScreenshot`.
+- The jobs a view's `useTask` hooks started end with the session.
 
 ### Changed
 

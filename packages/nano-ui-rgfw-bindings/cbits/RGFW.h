@@ -6059,9 +6059,11 @@ void RGFW_waitForEvent(i32 waitMS) {
 
 	if (_RGFW->eventWait_forceStop[0] == 0 || _RGFW->eventWait_forceStop[1] == 0) {
 		if (pipe(_RGFW->eventWait_forceStop) != -1) {
-			fcntl(_RGFW->eventWait_forceStop[0], F_GETFL, 0);
+			/* nano-ui: non-blocking, as these calls were meant to make it, so
+			   a stop never blocks on a full pipe nor a drain on an empty one. */
+			fcntl(_RGFW->eventWait_forceStop[0], F_SETFL, fcntl(_RGFW->eventWait_forceStop[0], F_GETFL, 0) | O_NONBLOCK);
 			fcntl(_RGFW->eventWait_forceStop[0], F_GETFD, 0);
-			fcntl(_RGFW->eventWait_forceStop[1], F_GETFL, 0);
+			fcntl(_RGFW->eventWait_forceStop[1], F_SETFL, fcntl(_RGFW->eventWait_forceStop[1], F_GETFL, 0) | O_NONBLOCK);
 			fcntl(_RGFW->eventWait_forceStop[1], F_GETFD, 0);
 		}
 	}
@@ -6070,7 +6072,8 @@ void RGFW_waitForEvent(i32 waitMS) {
     fds[0].fd = 0;
     fds[0].events = POLLIN;
     fds[0].revents = 0;
-    fds[1].fd = _RGFW->eventWait_forceStop[0];
+    /* nano-ui: no pipe (pipe() failed) polls nothing rather than stdin. */
+    fds[1].fd = _RGFW->eventWait_forceStop[1] ? _RGFW->eventWait_forceStop[0] : -1;
     fds[1].events = POLLIN;
     fds[1].revents = 0;
 
@@ -6132,7 +6135,9 @@ void RGFW_waitForEvent(i32 waitMS) {
 	} else {
 		#ifdef RGFW_X11
 		while (XPending(_RGFW->display) == 0) {
-			if (poll(fds, 1, waitMS) <= 0)
+			/* nano-ui: poll the stop pipe as well, so that
+			   RGFW_stopCheckEvents from another thread ends the wait. */
+			if (poll(fds, 2, waitMS) <= 0 || fds[1].revents)
 				break;
 
 			if (waitMS != RGFW_eventWaitNext) {
@@ -6143,12 +6148,14 @@ void RGFW_waitForEvent(i32 waitMS) {
 	}
 
 	/* drain any data in the stop request */
-	if (_RGFW->eventWait_forceStop[2]) {
+	/* nano-ui: drain whenever the pipe has data, and all of it. Stops made
+	   while the loop was not waiting pile up, and one byte left in the pipe
+	   with the flag clear would end every later wait at once, a busy loop. */
+	if (_RGFW->eventWait_forceStop[1] && (_RGFW->eventWait_forceStop[2] || (fds[1].revents & POLLIN))) {
 		char data[64];
         RGFW_MEMZERO(data, sizeof(data));
-        (void)!read(_RGFW->eventWait_forceStop[0], data, sizeof(data));
-
 		_RGFW->eventWait_forceStop[2] = 0;
+        while (read(_RGFW->eventWait_forceStop[0], data, sizeof(data)) > 0) {}
 	}
 }
 

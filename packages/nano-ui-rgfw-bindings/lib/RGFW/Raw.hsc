@@ -6,6 +6,7 @@ module RGFW.Raw
   , c_RGFW_window_close
   , c_RGFW_window_checkEvent
   , c_RGFW_waitForEvent
+  , c_RGFW_stopCheckEvents
   , c_rgfw_create_window_gl
   , c_RGFW_window_swapBuffers_OpenGL
   , c_rgfw_event_type
@@ -163,6 +164,10 @@ foreign import ccall unsafe "RGFW_window_checkEvent"
 -- | Wait in milliseconds: negative blocks indefinitely; zero does not wait.
 foreign import ccall "RGFW_waitForEvent"
   c_RGFW_waitForEvent :: CInt -> IO ()
+
+-- | End a 'c_RGFW_waitForEvent' in progress, or the next one, from any thread.
+foreign import ccall "RGFW_stopCheckEvents"
+  c_RGFW_stopCheckEvents :: IO ()
 
 -- | Create title/x/y/width/height/flags with a core OpenGL major/minor version.
 -- Returns null on failure; the resulting context is current on this OS thread.

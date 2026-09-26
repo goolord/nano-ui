@@ -59,6 +59,9 @@ test-suite nano-ui-rgfw-bindings-test
     hs-source-dirs: test
     main-is: Events.hs
     c-sources: test/Events.c
+    -- A stop from another thread ends a wait only while the waiting call
+    -- leaves other threads running.
+    ghc-options: -threaded
     include-dirs: cbits
     build-depends: base >=4.20 && <4.23, nano-ui-rgfw-bindings
     if os(windows)

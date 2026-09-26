@@ -51,13 +51,15 @@ module NanoUI.Testing.Harness
   , clickTab
   , dragPos
   , drawQuads
+  , newWakeSignal
   ) where
 
 import Control.Applicative ((<|>))
+import Control.Concurrent.MVar (newEmptyMVar, takeMVar, tryPutMVar, tryTakeMVar)
 import Control.Monad (forM, forM_, unless, void, when)
 import Data.IORef (IORef, readIORef, writeIORef)
 import Data.List (maximumBy)
-import Data.Maybe (listToMaybe)
+import Data.Maybe (isJust, listToMaybe)
 import Data.Ord (comparing)
 import Data.Text qualified as T
 import Data.Typeable (Typeable)
@@ -72,6 +74,7 @@ import NanoUI.Internal.Types (clamp)
 import NanoUI.Shortcut (Shortcut (..))
 import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, assertJustM, assertLt, bump, evalUi, run2Frames, withInput)
+import System.Timeout (timeout)
 
 -- | Text bounds, text, foreground, background, and clip in logical window coordinates.
 type DemoSpan = (Rect, T.Text, Color, Color, Rect)
@@ -452,3 +455,18 @@ windowTitleGrab (Rect x0 y0 _ _) = V2 (x0 + 24) (y0 + padT windowPad + 19.5)
 runDragFrom :: Context -> Input -> NanoUI a -> V2 -> V2 -> IO ()
 runDragFrom ctx inp0 ui grab dest =
   forM_ [pressAt inp0 grab, holdAt inp0 dest] $ \inp -> runFrame ctx inp ui
+
+-- | Install a wake action on a headless context, and return a wait on it:
+-- @wait us@ takes the wake that came since the last wait, blocking up to @us@
+-- microseconds for one, and says whether there was one. A background job
+-- wakes the loop when it has something new, which is what a test of one
+-- waits for; a frame wakes it too when it asks for another, so take those
+-- with @wait 0@ before starting what the test waits on.
+newWakeSignal :: Context -> IO (Int -> IO Bool)
+newWakeSignal ctx = do
+  signal <- newEmptyMVar
+  setWakeLoop ctx (void (tryPutMVar signal ()))
+  pure $ \us ->
+    if us <= 0
+      then isJust <$> tryTakeMVar signal
+      else isJust <$> timeout us (takeMVar signal)

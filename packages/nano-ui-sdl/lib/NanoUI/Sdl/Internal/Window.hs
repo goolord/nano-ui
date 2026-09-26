@@ -41,9 +41,9 @@ import Foreign.Marshal.Utils (copyBytes, maybePeek, with)
 import Foreign.Storable (peek)
 import Foreign.Ptr (Ptr, castPtr, nullPtr, plusPtr)
 import NanoUI (ImageId (..), Input (..), RgbaImage (..), Size (..), Theme, V2 (..), WindowPosition (..))
-import NanoUI.Backend (installWindowHost, setSystemAppearance)
+import NanoUI.Backend (cancelTasks, installWindowHost, setSystemAppearance, setWakeLoop)
 import NanoUI.Internal.Context (Context (..), setDrawSnapScale)
-import NanoUI.Testing (clearMeasureCache, damageFull, markDirty, setHost, setWakeLoop, withClipboard)
+import NanoUI.Testing (clearMeasureCache, damageFull, markDirty, setHost, withClipboard)
 import NanoUI.Sdl.Internal.Display
 import NanoUI.Sdl.Internal.Chrome.Types (ChromeState, clearChromeState, newChromeState)
 import NanoUI.Sdl.Internal.Frame (WindowDecorations (..), applyDecorations)
@@ -569,7 +569,10 @@ startSdlWindow bench opts ctx guessedDriver fontSource monoSource = do
   -- Before the wake action: the first frame is drawn in the right theme and
   -- needs no wake for it.
   liftIO $ setSystemAppearance ctx' =<< querySystemAppearance
-  liftIO $ setHost ctx' env >> setWakeLoop ctx' pushRefreshEvent
+  liftIO $ setHost ctx' env
+  -- The jobs the view's background hooks started end with the session and
+  -- before SDL does, also where a host runs frames itself inside 'withSdl'.
+  mkAcquire (setWakeLoop ctx' pushRefreshEvent) (const (cancelTasks ctx'))
   liftIO $ installWindowHost ctx' (windowHostFor sdlWindow (windowZoom env))
   pure (ctx', env)
 

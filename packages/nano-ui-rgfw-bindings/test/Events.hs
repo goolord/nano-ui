@@ -1,14 +1,16 @@
 module Main (main) where
 
-import Control.Monad (unless)
+import Control.Concurrent (forkIO, threadDelay)
+import Control.Monad (replicateM_, unless, void)
 import Data.Bits ((.|.))
 import Foreign.C.Types (CInt (..), CSize (..))
 import Foreign.Ptr (Ptr)
-import GHC.Clock (getMonotonicTimeNSec)
+import GHC.Clock (getMonotonicTime, getMonotonicTimeNSec)
 import GHC.Conc (getAllocationCounter)
-import RGFW (withEventBuffer)
+import RGFW (Event (..), closeWindow, createWindowGL, pollEvent, stopWaitForEvent, waitForEvent, withEventBuffer)
 import RGFW.Raw
-import System.Environment (getArgs)
+import System.Environment (getArgs, lookupEnv)
+import System.Info (os)
 import Text.Printf (printf)
 
 foreign import ccall unsafe "rgfw_test_event_size" nativeSize :: IO CSize
@@ -61,4 +63,41 @@ main = withEventBuffer $ \event -> do
       after <- getAllocationCounter
       unless (total == 10000000 * fromIntegral rgfw_keyHome) (fail "event benchmark checksum")
       printf "event-key: %.6f ns/read | %.3f B/read\n" (fromIntegral (t1 - t0) / 1e7 :: Double) (fromIntegral (before - after) / 1e7 :: Double)
-    else putStrLn "RGFW native event ABI: ok"
+    else do
+      putStrLn "RGFW native event ABI: ok"
+      stopWaitCheck event
+
+-- | A stop from another thread ends a wait, one made before a wait makes it
+-- return at once, and stops that piled up while nothing waited are drained
+-- by the next wait, so the wait after that waits again rather than returning
+-- at once for good. Needs an X display, and is skipped without one.
+stopWaitCheck :: Ptr RGFW_event -> IO ()
+stopWaitCheck event = do
+  display <- lookupEnv "DISPLAY"
+  if os /= "linux" || maybe True null display
+    then putStrLn "RGFW stop wait: skipped (no X display)"
+    else
+      createWindowGL "stop wait" 0 0 64 64 rgfw_windowHide 3 2 >>= \case
+        Nothing -> fail "RGFW stop wait: no window"
+        Just win -> do
+          let drain = pollEvent win event >>= \case
+                EventNone -> pure ()
+                _ -> drain
+              -- Seconds a wait of up to @ms@ took, with no events queued before it.
+              timedWait ms = do
+                drain
+                t0 <- getMonotonicTime
+                waitForEvent ms
+                subtract t0 <$> getMonotonicTime
+              endsWithin limit what stop = do
+                stop
+                took <- timedWait 5000
+                unless (took < limit) (fail ("RGFW stop wait: " ++ what ++ " ended the wait after " ++ show took ++ " s"))
+          endsWithin 2 "a stop from another thread" (void (forkIO (threadDelay 100000 >> stopWaitForEvent)))
+          endsWithin 1 "a stop before the wait" stopWaitForEvent
+          endsWithin 1 "piled-up stops" (replicateM_ 100 stopWaitForEvent)
+          -- An event can end a wait early; one of three waiting is enough.
+          waited <- mapM (const (timedWait 200)) [1 .. 3 :: Int]
+          unless (any (>= 0.15) waited) (fail ("RGFW stop wait: the waits after the drain returned at once: " ++ show waited))
+          closeWindow win
+          putStrLn "RGFW stop wait: ok"

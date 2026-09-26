@@ -30,8 +30,8 @@ fails the build instead of swapping.
 | `nano-ui-test` | Widgets, layout, input, focus, damage, and drawing, run headlessly frame by frame |
 | `text-buffer-spec` | The multi-line text buffer |
 | `nano-ui-inspection` | Compiler checks for SIMD writers, typed store slots, animation channels, unboxed commands, and canvas construction |
-| `nano-ui-rgfw-test` | RGFW input translation, the glyph atlas, and frames drawn by a software rasteriser kept in the test suite; with a display, OpenGL frames |
-| `nano-ui-rgfw-bindings-test` | Native event union layouts, key width, modifiers, and constant values |
+| `nano-ui-rgfw-test` | RGFW input translation, the glyph atlas, and frames drawn by a software rasteriser kept in the test suite; with a display, OpenGL frames and loop wakes |
+| `nano-ui-rgfw-bindings-test` | Native event union layouts, key width, modifiers, and constant values; with a display, `stopWaitForEvent` |
 | `nano-ui-font-search-test`, `nano-ui-font-effects-test` | SDL font discovery, measurement, and handle lifetimes |
 | `nano-ui-render-test` | SDL key and cursor translation and the theme event; native SDL readback of partial-damage triangles and clipping, images, window options, and screenshots, also on OpenGL with a display |
 | `nano-ui-sdl-pointer-test` | SDL mouse buttons, through SDL's event queue |
@@ -231,11 +231,14 @@ Three rules keep a view idle:
   widgets still built ask again, so one that is gone stops costing anything.
   Do not mark the context dirty every frame to get there: a dirty context is
   redrawn at once, which is a busy loop.
-- A background thread that changes what the view reads wakes the loop through
-  `ctxWakeLoop`. The wake runs one frame, and the frame's damage decides what
-  is presented, so waking for a change that is not on screen is cheap. A
-  change damage cannot see, such as new pixels under a registered image id,
-  needs `damageFull`.
+- Background work goes in `useTask`, which wakes the loop once, when its job
+  finishes. Any other thread that changes what the view reads wakes the loop
+  with the action `askWake` returns. Either wake runs one frame, which
+  repaints the whole window. Code holding a `Context` can wake through
+  `ctxWakeLoop` instead: that frame's damage decides what is presented, so
+  waking for a change that is not on screen is cheap, and a change damage
+  cannot see, such as new pixels under a registered image id, needs
+  `damageFull`.
 
 To measure a process, read its cycle time (`QueryProcessCycleTime` on
 Windows) and its threads' context switch counts over ten seconds or so. CPU

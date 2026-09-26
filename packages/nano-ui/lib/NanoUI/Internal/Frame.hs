@@ -34,6 +34,7 @@ import NanoUI.Internal.Layout.Solve (placeFloatingNodes, runCustomMeasure, solve
 import NanoUI.Internal.Monad (NanoUI, Ui, runUi, whenM)
 import NanoUI.Internal.Store (mirrorStoresChanged)
 import NanoUI.Internal.Style (Padding (..), Theme (..), themeOverlayDim, themeSeparator)
+import NanoUI.Internal.Tasks (sweepTasks)
 import NanoUI.Internal.Types (Damage (..), Rect (..), Size (..), rectInflate, rectNonEmpty)
 import NanoUI.Internal.Widgets.Overlay (windowChromeSepH, windowTitleBarH)
 import NanoUI.Internal.Widgets.Sensor (beginSensors, updateSensors)
@@ -93,6 +94,9 @@ runFrameEff unlift ctx rawInp ui = do
   clearDirty ctx
   -- Timed wakes are re-requested by whatever is still built this frame.
   clearWakeAt ctx
+  -- What a thread changed before it woke the loop, the view is about to
+  -- read: repaint whole.
+  takeThreadWake ctx
   -- An input method's composition goes to the field that has the focus, and
   -- while it shows there, the keys are the input method's.
   (frameInp, imeKeys) <- claimComposition ctx rawInp
@@ -196,6 +200,7 @@ runFrameEff unlift ctx rawInp ui = do
   refreshHover ctx frameInp
   refreshScrollBarHover ctx layerInp
   tickAnimations ctx (inputDeltaTime frameInp)
+  sweepTasks ctx
   pruneDrawOpCache ctx
   -- Dropdowns and the text-edit menu are not in the arena, so nothing in the
   -- damage pass sees their rows change under the pointer, their filter or

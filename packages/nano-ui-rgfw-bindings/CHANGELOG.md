@@ -13,6 +13,8 @@
   reports, and `physicalToMappedKey`.
 - `setWindowIcon`, `setWindowMinSize`, `setWindowMaxSize`, `moveWindow` and
   `centerWindow`.
+- `stopWaitForEvent`, which ends a `waitForEvent` from another thread. On X11
+  the bundled RGFW's wait now watches its stop pipe too.
 
 ### Changed
 

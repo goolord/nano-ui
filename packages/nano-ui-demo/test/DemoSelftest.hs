@@ -113,6 +113,24 @@ selftest continuous = do
     for_ [20, 60, 100, 140, 180, 50, 120, -60, -100, 0 :: Float] $ \dx ->
       dragPos sizeSpan (V2 (v2X sizeSpan + dx) (v2Y sizeSpan))
     expect "selftest: typography missing after size changes" "Live Playground"
+    -- The Graphics tab decodes its GIF with useTask, on a thread of its own,
+    -- and shows it on a frame after the job is done. The GIF is below the
+    -- fold, under the image gallery and viewer, so each wait turns the wheel
+    -- a notch over the tab's right side, clear of the viewer, which takes
+    -- the wheel itself. The tab goes back to its top afterwards.
+    clickTab "Graphics"
+    let wheelAt notches = base {inputMousePos = V2 1100 400, inputScroll = V2 0 notches}
+        awaitGif :: Int -> IO ()
+        awaitGif n = do
+          spans <- collectTextSpans ctx'
+          unless (isJust (findExact "lick.gif" spans)) $ do
+            when (n <= 0) (fail "selftest: the Graphics tab's GIF never loaded")
+            threadDelay 20000
+            drawOnce (wheelAt 1)
+            awaitGif (n - 1)
+    awaitGif 250
+    drawOnce (wheelAt (-1000))
+    drawOnce base
     clickTab "Panes"
     spansPane0 <- spansWith "selftest: pane grid missing after Panes tab" "Pane 1"
     -- Pane titles, left to right.

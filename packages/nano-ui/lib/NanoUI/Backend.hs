@@ -194,11 +194,26 @@ module NanoUI.Backend
   , WindowHost (..)
   , installWindowHost
   , answerScreenshots
+
+    -- * Background work
+
+    -- | A view's @useTask@ jobs, and any thread that calls the action
+    -- @askWake@ returns, wake the loop through the wake action the backend
+    -- installs with 'setWakeLoop' before the first frame: an action any
+    -- thread may call that ends the loop's wait for events, such as pushing
+    -- an event of the backend's own onto the platform's queue. A loop that
+    -- blocks with no wake action installed shows a job's result only once
+    -- other input comes along. The jobs run until their hooks stop being
+    -- called. @runSessionLoop@ in "NanoUI.Runner" ends the rest as its loop
+    -- returns; a host that runs frames itself ends them with 'cancelTasks'
+    -- when it closes the context's session.
+  , setWakeLoop
+  , cancelTasks
   )
 where
 
 import NanoUI.Internal.Compact (Compact, askCompact, compactHost)
-import NanoUI.Internal.Context (getExplainLayout, getExplainedNode, getSystemAppearance, setExplainLayout, setSystemAppearance)
+import NanoUI.Internal.Context (getExplainLayout, getExplainedNode, getSystemAppearance, setExplainLayout, setSystemAppearance, setWakeLoop)
 import NanoUI.Internal.Draw (drawTextBox)
 import NanoUI.Internal.Font
 import NanoUI.Internal.Id
@@ -206,4 +221,5 @@ import NanoUI.Internal.Input
 import NanoUI.Internal.Monad
 import NanoUI.Internal.NativeWindow (WindowHost (..), answerScreenshots, installWindowHost)
 import NanoUI.Internal.Style (Appearance (..), windowMargin, windowPad)
+import NanoUI.Internal.Tasks (cancelTasks)
 import NanoUI.Internal.Types

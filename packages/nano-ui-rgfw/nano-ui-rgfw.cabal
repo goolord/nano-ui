@@ -101,6 +101,9 @@ test-suite nano-ui-rgfw-test
         NanoUI.Rgfw.Render
         NanoUI.Rgfw.Surface
         NanoUI.Rgfw.Window
+        NanoUI.Rgfw.Wake
+    -- The wake test's job and producer run while the loop waits in RGFW.
+    ghc-options:      -threaded
     build-depends:
         base >=4.20 && <4.23,
         bytestring ^>=0.12,
