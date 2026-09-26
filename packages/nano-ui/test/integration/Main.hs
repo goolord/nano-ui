@@ -39,6 +39,7 @@ import Cases.Paths qualified
 import Cases.LayoutFlow qualified
 import Cases.Images qualified
 import Cases.TooltipDelay qualified
+import Cases.PointerExtra qualified
 import NanoUI.Testing.Runner (runTests)
 
 main :: IO ()
@@ -83,4 +84,5 @@ main =
     , Cases.LayoutFlow.tests
     , Cases.Images.tests
     , Cases.TooltipDelay.tests
+    , Cases.PointerExtra.tests
     ]

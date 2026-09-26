@@ -250,9 +250,19 @@ testRgfwTyping = do
     (chars (ctrlLCharFirst ++ ctrlLCharFirst) == "ll" && chars (ctrlLPressFirst ++ ctrlLPressFirst) == "ll")
 
 -- | Wheel events queued in one batch add up rather than keeping the last.
-testRgfwScroll :: IO ()
-testRgfwScroll =
+-- The middle button is held and clicks like the others; the side buttons
+-- are back and forward.
+testRgfwPointer :: IO ()
+testRgfwPointer = do
+  let middle = applied [EventMouseButton R.rgfw_mouseMiddle True]
+      middleUp = applied [EventMouseButton R.rgfw_mouseMiddle True, EventMouseButton R.rgfw_mouseMiddle False]
+      sides b = (\i -> (inputMouseBackPressed i, inputMouseForwardPressed i)) (applied [EventMouseButton b True])
   assert "RGFW scroll: a batch of wheel events accumulates" (inputScroll (applied [EventMouseScroll 0 1, EventMouseScroll 0.5 2]) == V2 0.5 3)
+  assert "RGFW buttons: the middle button goes down" (inputMouseMiddleDown middle && inputMouseMiddlePressed middle)
+  assert "RGFW buttons: the middle button comes up" (not (inputMouseMiddleDown middleUp) && inputMouseMiddleReleased middleUp)
+  assert "RGFW buttons: the middle button is not the left" (not (inputMouseDown middle || inputMouseRightDown middle))
+  assert "RGFW buttons: misc 1 is back" (sides R.rgfw_mouseMisc1 == (True, False))
+  assert "RGFW buttons: misc 2 is forward" (sides R.rgfw_mouseMisc2 == (False, True))
 
 -- | A turned image reaches the rasteriser as a turned quad, clipped to its
 -- widget: turned an eighth, a 40 by 20 image covers its rect's top-left and
@@ -276,7 +286,7 @@ main :: IO ()
 main = do
   putStrLn "=== Running nano-ui-rgfw Unit Tests ==="
   testRgfwTyping
-  testRgfwScroll
+  testRgfwPointer
   testPackColor
   testSurfaceAllocation
   testScale2xGlyphTables

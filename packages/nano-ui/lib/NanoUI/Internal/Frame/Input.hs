@@ -97,8 +97,8 @@ refreshHover ctx inp = do
     when (hashWidgetId prevHot /= 0 && not prevMenu) $ startAnimation ctx prevHot 1 0 0.12
     when (hashWidgetId newHot /= 0 && not newMenu) $ startAnimation ctx newHot 0 1 0.12
 
--- | Record where each button went down, in 'ctxPressPos' and
--- 'ctxRightPressPos'. Runs before the view. A widget counts a release as its
+-- | Record where each button went down, in 'ctxPressPos',
+-- 'ctxRightPressPos' and 'ctxMiddlePressPos'. Runs before the view. A widget counts a release as its
 -- click only when the press point is on it as well, so a press that drifts
 -- onto a neighbouring widget before the button comes up clicks nothing.
 -- 'disarmPointerPress' forgets the point once the button is up.
@@ -110,6 +110,7 @@ armPointerPress ctx inp = do
     -- A pointer press hides the keyboard focus ring.
     writeIORef (ctxFocusVisible ctx) False
   when (inputMouseRightPressed inp) $ writeIORef (ctxRightPressPos ctx) here
+  when (inputMouseMiddlePressed inp) $ writeIORef (ctxMiddlePressPos ctx) here
 
 -- | Forget the press point of each button that came up this frame. Runs after
 -- the view, which compares the release with the press point.
@@ -117,6 +118,7 @@ disarmPointerPress :: Context -> Input -> IO ()
 disarmPointerPress ctx inp = do
   when (inputMouseReleased inp) $ writeIORef (ctxPressPos ctx) Nothing
   when (inputMouseRightReleased inp) $ writeIORef (ctxRightPressPos ctx) Nothing
+  when (inputMouseMiddleReleased inp) $ writeIORef (ctxMiddlePressPos ctx) Nothing
 
 -- | What a left press landed on, for the steps that act on it: the
 -- interactive widget, the text field or text area, and the select under the

@@ -162,6 +162,19 @@ test-suite nano-ui-font-effects-test
     if !flag(sdl)
         buildable: False
 
+test-suite nano-ui-sdl-pointer-test
+    import:           extensions, warnings, rts-options
+    type:             exitcode-stdio-1.0
+    main-is:          Pointer.hs
+    hs-source-dirs:   test
+    build-depends:
+        base >=4.20 && <4.23,
+        nano-ui,
+        nano-ui-sdl,
+        sdl3-bindgen-sys ^>=0.0.0.2
+    if !flag(sdl)
+        buildable: False
+
 executable nano-ui-sdl-anim
     import:           extensions
     import:           rts-options

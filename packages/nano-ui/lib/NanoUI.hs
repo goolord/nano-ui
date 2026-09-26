@@ -109,6 +109,8 @@ module NanoUI
   , setChanged
   , setClicked
   , setSubmitted
+  , respMiddlePressed
+  , respMiddleClicked
 
     -- * Containers
   , row

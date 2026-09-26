@@ -65,6 +65,7 @@
   `RenderDriverSdlDefault` leaves SDL's own order alone, and
   `RenderDriverNamed` asks for one by name. An `SDL_RENDER_DRIVER` in the
   environment still wins over all three.
+- The middle mouse button, and the side buttons as back and forward.
 
 ### Changed
 

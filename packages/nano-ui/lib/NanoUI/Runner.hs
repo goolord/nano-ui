@@ -113,6 +113,10 @@ shouldRedrawFrame ctx prevInp curInp wasAnim continuous refreshDue = do
               || inputMouseReleased curInp
               || inputMouseRightPressed curInp
               || inputMouseRightReleased curInp
+              || inputMouseMiddlePressed curInp
+              || inputMouseMiddleReleased curInp
+              || inputMouseBackPressed curInp
+              || inputMouseForwardPressed curInp
           scrollEdge = inputScroll curInp /= V2 0 0
       pure (need || wasAnim || pointerEdge || scrollEdge)
 

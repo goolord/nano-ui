@@ -46,6 +46,8 @@ module RGFW.Raw
   , rgfw_mouseLeft
   , rgfw_mouseMiddle
   , rgfw_mouseRight
+  , rgfw_mouseMisc1
+  , rgfw_mouseMisc2
   -- Keys
   , rgfw_keyBackSpace
   , rgfw_keyTab
@@ -237,6 +239,11 @@ rgfw_mouseLeft, rgfw_mouseMiddle, rgfw_mouseRight :: Word8
 rgfw_mouseLeft   = #{const RGFW_mouseLeft}
 rgfw_mouseMiddle = #{const RGFW_mouseMiddle}
 rgfw_mouseRight  = #{const RGFW_mouseRight}
+
+-- | The side buttons, back (X1) and forward (X2), on X11, Windows and macOS.
+rgfw_mouseMisc1, rgfw_mouseMisc2 :: Word8
+rgfw_mouseMisc1 = #{const RGFW_mouseMisc1}
+rgfw_mouseMisc2 = #{const RGFW_mouseMisc2}
 
 -- | Editing key codes carried by key events.
 rgfw_keyBackSpace, rgfw_keyTab, rgfw_keyReturn, rgfw_keyEscape, rgfw_keyDelete :: Word32

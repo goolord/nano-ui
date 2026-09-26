@@ -96,6 +96,13 @@ data Input = Input
   , inputMouseRightDown :: {-# UNPACK #-} !Bool
   , inputMouseRightPressed :: {-# UNPACK #-} !Bool
   , inputMouseRightReleased :: {-# UNPACK #-} !Bool
+  , inputMouseMiddleDown :: {-# UNPACK #-} !Bool
+  , inputMouseMiddlePressed :: {-# UNPACK #-} !Bool
+  , inputMouseMiddleReleased :: {-# UNPACK #-} !Bool
+  , inputMouseBackPressed :: {-# UNPACK #-} !Bool
+  -- ^ The back side button (X1) went down this frame. Its release is not reported.
+  , inputMouseForwardPressed :: {-# UNPACK #-} !Bool
+  -- ^ The forward side button (X2) went down this frame.
   , inputMouseClicks :: {-# UNPACK #-} !Int
   , inputScroll :: {-# UNPACK #-} !V2
   , inputKeys :: SmallArray Key
@@ -120,6 +127,11 @@ emptyInput =
     , inputMouseRightDown = False
     , inputMouseRightPressed = False
     , inputMouseRightReleased = False
+    , inputMouseMiddleDown = False
+    , inputMouseMiddlePressed = False
+    , inputMouseMiddleReleased = False
+    , inputMouseBackPressed = False
+    , inputMouseForwardPressed = False
     , inputMouseClicks = 1
     , inputScroll = V2 0 0
     , inputKeys = mempty
@@ -193,17 +205,23 @@ snocSmallArray xs x = runSmallArray $ do
   copySmallArray out 0 xs 0 n
   pure out
 
--- | Mouse buttons tracked by 'Input'.
-data MouseButton = MouseLeft | MouseRight
+-- | Mouse buttons tracked by 'Input'. 'MouseBack' and 'MouseForward' are the
+-- side buttons (X1 and X2) a browser navigates with.
+data MouseButton = MouseLeft | MouseRight | MouseMiddle | MouseBack | MouseForward
   deriving (Eq, Show)
 
 -- | Apply a button transition: the held state plus that frame's one-shot
--- pressed or released flag.
+-- pressed or released flag. The side buttons report only their press.
 applyMouseButton :: MouseButton -> Bool -> Input -> Input
 applyMouseButton MouseLeft True inp = inp {inputMouseDown = True, inputMousePressed = True}
 applyMouseButton MouseLeft False inp = inp {inputMouseDown = False, inputMouseReleased = True}
 applyMouseButton MouseRight True inp = inp {inputMouseRightDown = True, inputMouseRightPressed = True}
 applyMouseButton MouseRight False inp = inp {inputMouseRightDown = False, inputMouseRightReleased = True}
+applyMouseButton MouseMiddle True inp = inp {inputMouseMiddleDown = True, inputMouseMiddlePressed = True}
+applyMouseButton MouseMiddle False inp = inp {inputMouseMiddleDown = False, inputMouseMiddleReleased = True}
+applyMouseButton MouseBack True inp = inp {inputMouseBackPressed = True}
+applyMouseButton MouseForward True inp = inp {inputMouseForwardPressed = True}
+applyMouseButton _ False inp = inp
 
 -- | Copy a list of key events into the frame's array, preserving order.
 {-# INLINE inputKeysFromList #-}
@@ -232,11 +250,11 @@ inputInteracted a b = quiet a /= quiet b
   where
     quiet i = i {inputMousePos = V2 0 0, inputDeltaTime = 0, inputWindowRedraw = False}
 
--- | Whether either tracked mouse button is held.
+-- | Whether the left, right or middle mouse button is held.
 {-# INLINE inputPointerHeld #-}
 inputPointerHeld :: Input -> Bool
 inputPointerHeld inp =
-  inputMouseDown inp || inputMouseRightDown inp
+  inputMouseDown inp || inputMouseRightDown inp || inputMouseMiddleDown inp
 
 -- | Remove one-shot interaction events for a repeated view pass. Retains
 -- pointer position and held buttons so hover and drag state remain available.
@@ -247,6 +265,10 @@ stripInteractionInput inp =
     , inputMouseReleased = False
     , inputMouseRightPressed = False
     , inputMouseRightReleased = False
+    , inputMouseMiddlePressed = False
+    , inputMouseMiddleReleased = False
+    , inputMouseBackPressed = False
+    , inputMouseForwardPressed = False
     , inputKeys = mempty
     , inputChars = ""
     , inputScroll = V2 0 0
@@ -267,5 +289,10 @@ withoutPointer inp =
     , inputMouseRightDown = False
     , inputMouseRightPressed = False
     , inputMouseRightReleased = False
+    , inputMouseMiddleDown = False
+    , inputMouseMiddlePressed = False
+    , inputMouseMiddleReleased = False
+    , inputMouseBackPressed = False
+    , inputMouseForwardPressed = False
     , inputScroll = V2 0 0
     }

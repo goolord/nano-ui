@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- The middle mouse button, and the side buttons as back and forward.
+
 ### Changed
 
 - Builds with GHC 9.10 through 9.14 (`base >=4.20 && <4.23`).

@@ -445,6 +445,7 @@ newContext = do
   ctxReleaseClickedId <- newIORef (WidgetId 0)
   ctxPressPos <- newIORef Nothing
   ctxRightPressPos <- newIORef Nothing
+  ctxMiddlePressPos <- newIORef Nothing
   ctxFocusId <- newIORef (WidgetId 0)
   ctxFocusVisible <- newIORef False
   ctxStore <- newIORef emptyWidgetStore

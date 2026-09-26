@@ -53,7 +53,7 @@ import SDL3.Sys.Bindgen.Keycode
   , sDL_KMOD_CTRL
   , sDL_KMOD_SHIFT
   )
-import SDL3.Sys.Bindgen.Mouse (sDL_BUTTON_LEFT, sDL_BUTTON_RIGHT)
+import SDL3.Sys.Bindgen.Mouse (sDL_BUTTON_LEFT, sDL_BUTTON_MIDDLE, sDL_BUTTON_RIGHT, sDL_BUTTON_X1, sDL_BUTTON_X2)
 import SDL3.Sys.Bindgen.Stdinc (Uint32 (..))
 import SDL3.Sys.Keyboard (getModState)
 
@@ -179,7 +179,14 @@ mouseButton p down = do
   mods <- peekModifiers
   let btn = fromIntegral (getField @"button" be)
       press b = EvMouseButton b down (v2 (getField @"x" be) (getField @"y" be)) mods
-  pure (press <$> lookup btn [(sDL_BUTTON_LEFT, MouseLeft), (sDL_BUTTON_RIGHT, MouseRight)])
+      buttons =
+        [ (sDL_BUTTON_LEFT, MouseLeft)
+        , (sDL_BUTTON_RIGHT, MouseRight)
+        , (sDL_BUTTON_MIDDLE, MouseMiddle)
+        , (sDL_BUTTON_X1, MouseBack)
+        , (sDL_BUTTON_X2, MouseForward)
+        ]
+  pure (press <$> lookup btn buttons)
 
 dropEvent :: Ptr SDL_Event -> DropType -> IO (Maybe SdlEvent)
 dropEvent p ty = do

@@ -190,6 +190,6 @@ useDismissable panel = do
           RouteLayer _ -> False
           _ -> True
         esc = inputKeysElem KeyEscape (inputKeys inp) && not taken && null menu && not dropdown
-        pressed = (inputMousePressed inp || inputMouseRightPressed inp) && not onMenu
+        pressed = (inputMousePressed inp || inputMouseRightPressed inp || inputMouseMiddlePressed inp) && not onMenu
     when esc (markEscapeConsumed ctx)
     pure (esc || (pressed && not (rectHit panel (inputMousePos inp))))

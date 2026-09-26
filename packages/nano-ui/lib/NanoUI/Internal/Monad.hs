@@ -338,6 +338,7 @@ disabledWhen True m =
       (stripInteractionInput i)
         { inputMouseDown = False
         , inputMouseRightDown = False
+        , inputMouseMiddleDown = False
         }
     enter ctx outer
       | outer .&. 1 /= 0 = pure outer

@@ -45,7 +45,7 @@ counter = do
   and `scrollIntoView`. `getScrollMetrics` gives a virtualized list the
   viewport and offset it needs to pick its rows.
 - Keyboard focus and navigation for every control.
-- Tooltips with a hover delay.
+- Middle and side mouse buttons, and tooltips with a hover delay.
 - Shaped text in the SDL backend, with fallback fonts for other scripts and
   mixed left-to-right and right-to-left lines. `richText` wraps a paragraph
   of mixed styles and links, as in

@@ -11,6 +11,8 @@ module NanoUI.Internal.Widgets.Node
   , respSubmitted
   , respRightPressed
   , respRightClicked
+  , respMiddlePressed
+  , respMiddleClicked
   , mkResponse
   , setClicked
   , setChanged
@@ -108,6 +110,18 @@ respRightPressed = rawRespRightPressed . toResponse
 respRightClicked :: HasResponse r => r -> Bool
 respRightClicked = rawRespRightClicked . toResponse
 
+-- | Whether the middle button is held over the widget.
+{-# INLINE respMiddlePressed #-}
+respMiddlePressed :: HasResponse r => r -> Bool
+respMiddlePressed = rawRespMiddlePressed . toResponse
+
+-- | Whether a middle-button click completed on the widget this frame: it went
+-- down on the widget and came up on it. A middle click is not a click
+-- ('respClicked'); what it does is up to the view, such as closing a tab.
+{-# INLINE respMiddleClicked #-}
+respMiddleClicked :: HasResponse r => r -> Bool
+respMiddleClicked = rawRespMiddleClicked . toResponse
+
 -- | Per-frame widget identity, bounds, and interaction flags. Primed widget
 -- variants expose this alongside their value. Combining responses unions
 -- bounds, ORs flags, and keeps the last nonzero id.
@@ -121,15 +135,17 @@ data Response = Response
   , rawRespSubmitted :: !Bool
   , rawRespRightPressed :: !Bool
   , rawRespRightClicked :: !Bool
+  , rawRespMiddlePressed :: !Bool
+  , rawRespMiddleClicked :: !Bool
   }
   deriving (Eq, Show)
 
 instance Semigroup Response where
-  Response i1 r1 h1 p1 c1 ch1 s1 rp1 rc1 <> Response i2 r2 h2 p2 c2 ch2 s2 rp2 rc2 =
+  Response i1 r1 h1 p1 c1 ch1 s1 rp1 rc1 mp1 mc1 <> Response i2 r2 h2 p2 c2 ch2 s2 rp2 rc2 mp2 mc2 =
     Response
       (if i2 == WidgetId 0 then i1 else i2)
       (unionRespRect r1 r2)
-      (h1 || h2) (p1 || p2) (c1 || c2) (ch1 || ch2) (s1 || s2) (rp1 || rp2) (rc1 || rc2)
+      (h1 || h2) (p1 || p2) (c1 || c2) (ch1 || ch2) (s1 || s2) (rp1 || rp2) (rc1 || rc2) (mp1 || mp2) (mc1 || mc2)
 
 instance Monoid Response where
   mempty = mkResponse (WidgetId 0) (Rect 0 0 0 0) False False False
@@ -156,12 +172,12 @@ setSubmitted s r = r {rawRespSubmitted = s}
 -- interaction.
 inertResponse :: Response -> Response
 inertResponse r =
-  r {rawRespHovered = False, rawRespPressed = False, rawRespClicked = False, rawRespRightPressed = False, rawRespRightClicked = False}
+  r {rawRespHovered = False, rawRespPressed = False, rawRespClicked = False, rawRespRightPressed = False, rawRespRightClicked = False, rawRespMiddlePressed = False, rawRespMiddleClicked = False}
 
 -- | An unpressed response with the given hover, click, and change flags.
 mkResponse :: WidgetId -> Rect -> Bool -> Bool -> Bool -> Response
 mkResponse wid rect hovered clicked changed =
-  Response wid rect hovered False clicked changed False False False
+  Response wid rect hovered False clicked changed False False False False False
 
 container :: Ui :> es => NodeType -> Layout -> Eff es a -> Eff es a
 container nt layout child = do
@@ -352,6 +368,7 @@ resolveInteraction ctx inp wid = do
       let
         pressed = hovered && inputMouseDown inp
         rightPressed = hovered && inputMouseRightDown inp
+        middlePressed = hovered && inputMouseMiddleDown inp
       -- The click belongs to whatever the press went down on: a release that
       -- drifted here from a neighbouring widget is not this widget's click,
       -- nor is one on a widget that moved under the pointer after another
@@ -361,10 +378,12 @@ resolveInteraction ctx inp wid = do
       released <- pure (hovered && inputMouseReleased inp && ownsRelease) <&&> startedHere (ctxPressPos ctx)
       rightClicked <-
         pure (hovered && inputMouseRightReleased inp) <&&> startedHere (ctxRightPressPos ctx)
+      middleClicked <-
+        pure (hovered && inputMouseMiddleReleased inp) <&&> startedHere (ctxMiddlePressPos ctx)
       when (released && wid == active) $
         writeIORef (ctxReleaseClickedId ctx) wid
       let clicked = released || pending == wid
-      pure $! Response wid rect hovered pressed clicked False False rightPressed rightClicked
+      pure $! Response wid rect hovered pressed clicked False False rightPressed rightClicked middlePressed middleClicked
 
 -- | Set the value of widget @wid@'s node, added this frame: a checkbox
 -- showing the click read after it was added.

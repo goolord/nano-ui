@@ -223,7 +223,13 @@ tooltipTimer ctx cfg k hovered inp = do
       showAt0 = findSlot fieldQuiet 0 showK store
       lastUp0 = findSlot fieldQuiet 0 lastK store
       held = inputPointerHeld inp
-      interrupted = inputMousePressed inp || inputMouseRightPressed inp || inputScroll inp /= V2 0 0
+      interrupted =
+        inputMousePressed inp
+          || inputMouseRightPressed inp
+          || inputMouseMiddlePressed inp
+          || inputMouseBackPressed inp
+          || inputMouseForwardPressed inp
+          || inputScroll inp /= V2 0 0
   -- Most tooltips belong to targets the pointer is nowhere near.
   if not hovered && showAt0 == 0 && (lastUp0 == 0 || not interrupted)
     then pure False

@@ -409,6 +409,9 @@ applyRgfwEvent inp ev = case ev of
   RgfwEvButton btn down
     | btn == R.rgfw_mouseLeft -> applyMouseButton MouseLeft down inp
     | btn == R.rgfw_mouseRight -> applyMouseButton MouseRight down inp
+    | btn == R.rgfw_mouseMiddle -> applyMouseButton MouseMiddle down inp
+    | btn == R.rgfw_mouseMisc1 -> applyMouseButton MouseBack down inp
+    | btn == R.rgfw_mouseMisc2 -> applyMouseButton MouseForward down inp
     | otherwise -> inp
   RgfwEvScroll dx dy -> inp {inputScroll = v2Add (inputScroll inp) (V2 dx dy)}
   RgfwEvChar c chord ->

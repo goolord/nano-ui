@@ -185,7 +185,7 @@ finalizeTextEditMenuPick ctx inp =
 -- input: the press it waits for is by definition not the menu's own.
 closeTextEditMenuOnOutsideClick :: Context -> Input -> IO ()
 closeTextEditMenuOnOutsideClick ctx inp =
-  when (inputMousePressed inp || inputMouseRightPressed inp) $ do
+  when (inputMousePressed inp || inputMouseRightPressed inp || inputMouseMiddlePressed inp) $ do
     route <- getsInteraction ctx isPointerRoute
     when (route /= RouteTextMenu) $ modifyInteraction ctx (\s -> s {isTextInputMenu = Nothing})
 

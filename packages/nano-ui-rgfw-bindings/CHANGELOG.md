@@ -5,6 +5,7 @@
 ### Added
 
 - `rgfw_windowHide` in `RGFW.Raw`.
+- The side buttons `rgfw_mouseMisc1` and `rgfw_mouseMisc2`, in `RGFW.Raw`.
 
 ### Changed
 

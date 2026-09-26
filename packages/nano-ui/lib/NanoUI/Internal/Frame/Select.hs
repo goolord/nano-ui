@@ -171,8 +171,8 @@ overlayRouteAt ctx mouse = do
 routePointer :: Context -> Input -> IO PointerRoute
 routePointer ctx inp = do
   (held, old) <- getsInteraction ctx (\s -> (isPointerHeld s, isPointerRoute s))
-  let pressed = inputMousePressed inp || inputMouseRightPressed inp
-      released = inputMouseReleased inp || inputMouseRightReleased inp
+  let pressed = inputMousePressed inp || inputMouseRightPressed inp || inputMouseMiddlePressed inp
+      released = inputMouseReleased inp || inputMouseRightReleased inp || inputMouseMiddleReleased inp
       -- A hold that ended without its release being seen is over too.
       holding = held && not pressed && (inputPointerHeld inp || released)
       mouse = inputMousePos inp

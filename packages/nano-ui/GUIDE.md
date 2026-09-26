@@ -163,6 +163,9 @@ no pointer. `askFrameInput` is for window-wide handling, such as dismissing
 a popup after an outside click; using it for an ordinary control bypasses
 pointer routing.
 
+A middle click is `respMiddleClicked`, routed like a right click; a closable
+tab closes on one.
+
 ## Animation and background work
 
 Backends wait for events when no frame is needed. Use `keepAnimating` while
@@ -244,9 +247,9 @@ delta time explicitly in test input. Warm up before targeting a widget by
 its response rectangle, then send separate press and release frames.
 
 `NanoUI.Testing.Harness` supplies `warmup2`, `clickPair`, `runClick`, and
-text-span queries. Its `held` helper stores controlled input values outside
-the hook store, so an automatic hook rebuild does not hide a change flag
-that the test is trying to observe.
+text-span queries, with `middleClickPair` for the middle button. Its `held`
+helper stores controlled input values outside the hook store, so an automatic
+hook rebuild does not hide a change flag that the test is trying to observe.
 
 A tooltip's delay runs on the real clock, so a test sets `tooltipDelay = 0`.
 

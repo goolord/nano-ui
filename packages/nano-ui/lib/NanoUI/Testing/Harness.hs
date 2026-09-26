@@ -2,6 +2,7 @@
 module NanoUI.Testing.Harness
   ( clickPair
   , rightClickPair
+  , middleClickPair
   , pressAt
   , holdAt
   , releaseAt
@@ -188,11 +189,16 @@ dragPos drawFrame base from to = do
 clickPair :: Input -> V2 -> (Input, Input)
 clickPair inp pos = let press = pressAt inp pos in (press, releaseAt press)
 
--- | Right-button press and release at a point. Supply event-free base input.
-rightClickPair :: Input -> V2 -> (Input, Input)
-rightClickPair inp pos =
-  let press = applyMouseButton MouseRight True inp {inputMousePos = pos}
-   in (press, applyMouseButton MouseRight False press {inputMouseRightPressed = False})
+-- | Right- or middle-button press and release at a point. Supply event-free
+-- base input.
+rightClickPair, middleClickPair :: Input -> V2 -> (Input, Input)
+rightClickPair = buttonPair MouseRight (\i -> i {inputMouseRightPressed = False})
+middleClickPair = buttonPair MouseMiddle (\i -> i {inputMouseMiddlePressed = False})
+
+buttonPair :: MouseButton -> (Input -> Input) -> Input -> V2 -> (Input, Input)
+buttonPair mouseButton unpress inp pos =
+  let press = applyMouseButton mouseButton True inp {inputMousePos = pos}
+   in (press, applyMouseButton mouseButton False (unpress press))
 
 -- | Set pointer position and left-button press/held flags, clearing its release flag.
 pressAt :: Input -> V2 -> Input
