@@ -432,20 +432,31 @@ their backend session.
 
 ## Images
 
-Register an image's RGBA pixels once with `registerImageRgba`, under an id
-from `freshImageId`. `image` stretches it over its rect. `imageConfigured`
-takes an `ImageConfig`: a `ContentFit` like CSS's `object-fit`, an alignment,
-an opacity, and a rotation (`RotateSolid` fits the turned image in its rect,
+`useImageRgba key w h pixels` registers an image's RGBA pixels the first
+frame it is called with a key and hands back its id while the view keeps
+calling it; once the view stops, the image is let go and its room in the
+image atlas goes to the next image. For an image the app keeps for its whole
+run, `registerImageRgba` registers it once under an id from `freshImageId`.
+
+`image` stretches an image over its rect. `imageConfigured` takes an
+`ImageConfig`: a `ContentFit` like CSS's `object-fit`, an alignment, a crop to
+part of the image (`icCrop`, in its pixels), a zoom (`icScale`), an opacity,
+and a rotation (`RotateSolid` fits the turned image in its rect,
 `RotateFloating` keeps the unturned layout and crops). An axis the layout
-leaves unsized takes the image's own size. A canvas draws images with
-`drawImage`, `drawImageUV` and `drawImageRotated`.
+leaves unsized takes the image's own size, and a fit height follows the
+width in the image's shape, so `icLayout = fillW` fills the width without
+stretching it. `svgIconConfigured` draws an SVG icon the same way, and
+`fitRect` is the placement a fit makes. A canvas draws images with
+`drawImageWith`, whose `ImageDraw` holds the rect, the part of the image,
+the turn, the tint and the opacity; `drawImage` and `drawImageUV` are its
+short forms.
 
 ```haskell
-thumbnail :: ImageId -> NanoUI ()
-thumbnail photo =
-  imageConfigured
-    defaultImageConfig {icLayout = fixedWH 120 90 defaultLayout, icFit = FitCover}
-    photo
+thumbnail :: FilePath -> Int -> Int -> ByteString -> NanoUI ()
+thumbnail path w h pixels = do
+  photo <- useImageRgba path w h pixels
+  for_ photo $
+    imageConfigured defaultImageConfig {icLayout = fixedWH 120 90, icFit = FitCover}
 ```
 
 ## Seeing the layout

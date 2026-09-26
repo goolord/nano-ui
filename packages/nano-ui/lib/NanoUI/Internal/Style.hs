@@ -455,7 +455,8 @@ fixedAspectH h ratio = fixedWH (h * ratio) h
 -- A 'Fit' width beside a fixed height is the height times the ratio. The
 -- height is the ratio's whatever the node holds, so a container's children
 -- can overflow it, as they can a 'fixedH'. A ratio that is not positive
--- turns it off.
+-- turns it off. A configured image ('NanoUI.imageConfigured') keeps its own
+-- ratio unless its layout gives one.
 aspect :: Float -> Layout -> Layout
 aspect ratio l = l {layoutAspect = if ratio > 0 && not (isInfinite ratio) then ratio else 0}
 

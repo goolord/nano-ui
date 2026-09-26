@@ -47,7 +47,9 @@ module NanoUI.Widgets.Custom
   , drawLinearGradientV
   , drawImage
   , drawImageUV
-  , drawImageRotated
+  , ImageDraw (..)
+  , imageDraw
+  , drawImageWith
   , drawText
   , drawTextWith
   , drawCheckbox

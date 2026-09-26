@@ -1274,10 +1274,10 @@ maxDashes = 4096
 -- that keeps rects, filling the transformed rect, its corners taking the
 -- colours of the corners that land nearest them; under any other it is a
 -- polygon with a colour at each corner, drawn as it would be unturned. An
--- image keeps its op under a transform with no rotation or skew, turning
--- over with a flip, and otherwise becomes a 'DrawImageRotated', as a turned
--- image always does: its centre moves, it scales and it turns with the
--- transform. Text moves its anchor, and a transform that scales it (by its
+-- unturned image keeps its rect under a transform with no rotation or skew,
+-- turning over with a flip, and otherwise turns, as a turned image always
+-- does: its centre moves, it scales and it turns with the transform. Text
+-- moves its anchor, and a transform that scales it (by its
 -- 'averageStretch') scales its font; its glyphs do not turn. A clip is the
 -- bounding box of its transformed rect. A transform with a NaN or infinite
 -- entry draws nothing, as does a rounded rect or circle with no size.
@@ -1339,13 +1339,12 @@ transformOp tol t@(Transform a b c d _ _) op
                     (nearest (bx + bw, by + bh))
                     (nearest (bx, by + bh))
                 ]
-      DrawImageRect r tex u0 v0 u1 v1 col
-        | levelAxes ->
+      DrawImage r angle tex u0 v0 u1 v1 col
+        | angle == 0 && levelAxes ->
             let (u0', u1') = if a < 0 then (u1, u0) else (u0, u1)
                 (v0', v1') = if d < 0 then (v1, v0) else (v0, v1)
-             in [DrawImageRect (box r) tex u0' v0' u1' v1' col]
-        | otherwise -> [turnedImage r 0 tex u0 v0 u1 v1 col]
-      DrawImageRotated r angle tex u0 v0 u1 v1 col -> [turnedImage r angle tex u0 v0 u1 v1 col]
+             in [DrawImage (box r) 0 tex u0' v0' u1' v1' col]
+        | otherwise -> [turnedImage r angle tex u0 v0 u1 v1 col]
       DrawText x y ax ay txt col
         | scaled -> [DrawTextAligned x' y' ax ay k defaultTextFont txt col]
         | otherwise -> [DrawText x' y' ax ay txt col]
@@ -1409,7 +1408,7 @@ transformOp tol t@(Transform a b c d _ _) op
           w' = w * sqrt (exX * exX + exY * exY)
           h' = h * sqrt (eyX * eyX + eyY * eyY)
           (v0', v1') = if a * d - b * c < 0 then (v1, v0) else (v0, v1)
-       in DrawImageRotated (Rect (cx - w' / 2) (cy - h' / 2) w' h') (atan2 exY exX) tex u0 v0' u1 v1' col
+       in DrawImage (Rect (cx - w' / 2) (cy - h' / 2) w' h') (atan2 exY exX) tex u0 v0' u1 v1' col
 
 -- | A rectangle's outline, clockwise on screen from its top left corner.
 rect :: Rect -> Path

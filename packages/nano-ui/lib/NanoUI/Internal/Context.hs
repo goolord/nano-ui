@@ -37,6 +37,7 @@ module NanoUI.Internal.Context
   , CustomDrawingEntry (..)
   , atlasTextureId
   , registerImage
+  , releaseImage
   , registerImages
   , lookupImageUv
   , lookupImageSize
@@ -163,6 +164,13 @@ registerImage ctx iid w h px = do
   -- packing can move other images' texels, so nothing narrower is safe.
   when ok (damageFull ctx >> markDirty ctx)
   pure ok
+
+-- | Take an image out of the atlas: its id no longer draws, and its room
+-- goes to the next images registered that fit it. Whatever still names the
+-- id draws the placeholder for an unknown image.
+{-# INLINE releaseImage #-}
+releaseImage :: Context -> ImageId -> IO ()
+releaseImage ctx = Atlas.releaseImage (ctxImageAtlas ctx)
 
 -- | Register every image and return whether all succeeded. Successful earlier
 -- registrations remain in place if another image fails.

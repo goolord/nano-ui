@@ -357,10 +357,11 @@ emitDrawOps da fm size resolve imageUv ops = go 0 []
         Just (atlas, (a0, b0, a1, b1)) ->
           draw atlas (a0 + u0 * (a1 - a0)) (b0 + v0 * (b1 - b0)) (a0 + u1 * (a1 - a0)) (b0 + v1 * (b1 - b0))
         Nothing -> draw tex u0 v0 u1 v1
-    emitOne (DrawImageRect r tex u0 v0 u1 v1 c) =
-      image tex u0 v0 u1 v1 (\t a0 b0 a1 b1 -> pushImage da r t a0 b0 a1 b1 c)
-    emitOne (DrawImageRotated r angle tex u0 v0 u1 v1 c) =
-      image tex u0 v0 u1 v1 (\t a0 b0 a1 b1 -> pushImageRotated da r angle t a0 b0 a1 b1 c)
+    -- An unturned image keeps the snapped quad; only a turned one needs
+    -- its corners worked out.
+    emitOne (DrawImage r angle tex u0 v0 u1 v1 c)
+      | angle == 0 = image tex u0 v0 u1 v1 (\t a0 b0 a1 b1 -> pushImage da r t a0 b0 a1 b1 c)
+      | otherwise = image tex u0 v0 u1 v1 (\t a0 b0 a1 b1 -> pushImageRotated da r angle t a0 b0 a1 b1 c)
     emitOne (DrawText x y ax ay t c) = do
       prepared <- prepareFontMetrics fm t
       let Rect px py _ _ = drawTextBox prepared x y ax ay t

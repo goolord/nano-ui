@@ -334,14 +334,14 @@ measureContent env@SolveEnv {seArena = na} idx = do
     NodeSpacer -> measureSpacer na idx
     NodeSeparator -> measureSeparator na idx
     NodeScrollContainer -> measureScrollContainer env idx
-    NodeImage -> measureImage na idx
-    NodeBox -> measureImage na idx
+    NodeImage -> getImageNode na idx >>= measureImage na idx . fmap (\n -> (inWidth n, inHeight n))
+    NodeBox -> measureImage na idx Nothing
     NodeDrawing -> do
       wid <- getWidgetId na idx
       mFn <- msLookupMeasure (seMs env) wid
       case mFn of
         Just fn -> measureCustomNode env fn idx
-        Nothing -> measureImage na idx
+        Nothing -> measureImage na idx Nothing
     _
       | isContainerNode nt -> do
           measureContainer env idx
@@ -473,13 +473,17 @@ growParent na idx = getParent na idx >>= go True
               then pure False
               else (/= NodeModal) <$> getNodeType na p
 
-measureImage :: NodeArena -> NodeIdx -> IO ()
-measureImage na idx = do
+-- | Measure a node with no content to measure: an image, a box, or a
+-- drawing without a measure of its own. Without a fixed size it takes its
+-- @natural@ size, an image's own, within its limits, or else its minimum,
+-- or 32 without one.
+measureImage :: NodeArena -> NodeIdx -> Maybe (Float, Float) -> IO ()
+measureImage na idx natural = do
   wAx <- getWidthSizing na idx
   hAx <- getHeightSizing na idx
-  -- Without a fixed size, an image takes its minimum, or 32 without one.
   let orMin ax = if axMin ax > 0 then axMin ax else 32
-  setRect na idx 0 0 (sizeWithin wAx (orMin wAx)) (sizeWithin hAx (orMin hAx))
+      (nw, nh) = fromMaybe (orMin wAx, orMin hAx) natural
+  setRect na idx 0 0 (sizeWithin wAx nw) (sizeWithin hAx nh)
 
 measureSpacer :: NodeArena -> NodeIdx -> IO ()
 measureSpacer na idx = do

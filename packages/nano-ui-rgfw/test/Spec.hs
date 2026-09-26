@@ -12,7 +12,7 @@ import Foreign.Marshal.Alloc (allocaBytes, callocBytes, free)
 import Foreign.Storable (peekByteOff, peekElemOff)
 import NanoUI
   ( DrawOp (..), ImageConfig (..), ImageId (..), NanoUI, Rect (..), Rotation (..), Style (..), Theme (..)
-  , UiCursorKind (..), V2 (..), box, button, checkbox, colorRGBA, column, defaultImageConfig, defaultLayout, drawing
+  , UiCursorKind (..), V2 (..), box, button, checkbox, colorRGBA, column, defaultImageConfig, drawing
   , fixedWH, grow, imageConfigured', label, respRect, tomorrowNightMinDarkTheme, window
   )
 import NanoUI.Input (Input (..), Key (..), Modifiers (..), MouseButton (..), buttonHeld, buttonPressed, buttonReleased, buttonsFromList, buttonsToList, emptyInput, noModifiers)
@@ -295,7 +295,7 @@ testTurnedImageRaster = do
   let probe angle = do
         ctx <- newRgfwContext tomorrowNightMinDarkTheme
         _ <- registerImage ctx (ImageId 1) 8 4 (BS.replicate (8 * 4 * 4) 255)
-        let cfg = defaultImageConfig {icLayout = fixedWH 40 20 defaultLayout, icRotation = RotateFloating angle}
+        let cfg = defaultImageConfig {icLayout = fixedWH 40 20, icRotation = RotateFloating angle}
         raster ctx 60 40 0 (column (imageConfigured' cfg (ImageId 1))) $ \resp _ px -> do
           let Rect x y w h = respRect resp
               white (u, v) = (== packColor (colorRGBA 255 255 255 255)) <$> px (round u) (round v)

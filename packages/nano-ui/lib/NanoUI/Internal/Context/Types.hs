@@ -84,6 +84,7 @@ import NanoUI.Internal.Draw.Types (DrawArena, DrawOp, DrawingBuild)
 import NanoUI.Internal.Font (CustomMeasureFn, FontMetrics, WrapResult)
 import NanoUI.Internal.Frame.SpanArena (SpanArena)
 import NanoUI.Internal.Id (IdContext, WidgetId, hashWidgetId)
+import NanoUI.Internal.Image (ImageLook)
 import NanoUI.Internal.Input (Composition, MouseButton, UiCursorKind)
 import NanoUI.Internal.Layout.Arena (DirTag, LayoutCache, NodeArena)
 import NanoUI.Internal.Store (WidgetStore)
@@ -280,10 +281,12 @@ data PrevFrame = PrevFrame
   -- around it, where 'pfClips' holds the smaller one it gives its content.
   , pfTexts :: !(IntMap Text)
   -- ^ The text of text and image nodes.
+  , pfLooks :: !(IntMap ImageLook)
+  -- ^ The look of image nodes that have one, which paint draws them by.
   }
 
 emptyPrevFrame :: PrevFrame
-emptyPrevFrame = PrevFrame IM.empty IM.empty IM.empty IM.empty
+emptyPrevFrame = PrevFrame IM.empty IM.empty IM.empty IM.empty IM.empty
 
 -- | Require a first frame and full repaint, with no previous geometry.
 initialDamageState :: DamageState

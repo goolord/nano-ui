@@ -390,12 +390,15 @@ module NanoUI
   , image'
   , freshImageId
   , registerImageRgba
+  , useImageRgba
   , Svg
   , parseSvg
   , loadSvg
   , svgIcon
   , svgIconWith
   , svgIconWith'
+  , svgIconConfigured
+  , svgIconConfigured'
   , svgSize
   , box
   , drawing
@@ -416,11 +419,17 @@ module NanoUI
 
     -- | 'imageConfigured' draws an image fitted to its rect the way CSS's
     -- @object-fit@ does ('ContentFit'), aligned where the fit leaves room,
-    -- faded, and turned ('Rotation'). Unlike 'image', an axis its layout
-    -- leaves unsized takes the image's own size:
+    -- cropped to a part of it, zoomed, faded, and turned ('Rotation').
+    -- Unlike 'image', an axis its layout leaves unsized takes the image's own
+    -- size, and a fit height follows the width in the image's shape:
     --
-    -- > imageConfigured defaultImageConfig {icFit = FitContain, icLayout = fixedWH 200 120 defaultLayout} photo
+    -- > imageConfigured defaultImageConfig {icFit = FitContain, icLayout = fixedWH 200 120} photo
     -- > imageConfigured defaultImageConfig {icRotation = RotateSolid (pi / 2), icOpacity = 0.5} photo
+    -- > imageConfigured defaultImageConfig {icLayout = fillW, icCrop = Just (Rect 0 0 64 64)} sheet
+    --
+    -- 'svgIconConfigured' draws an SVG icon the same way, and 'fitRect' is
+    -- the placement a fit makes, for a canvas that draws images of its own
+    -- ('drawImageWith').
   , ContentFit (..)
   , Rotation (..)
   , rotationAngle
@@ -428,6 +437,7 @@ module NanoUI
   , defaultImageConfig
   , imageConfigured
   , imageConfigured'
+  , fitRect
 
     -- * Custom widgets
 

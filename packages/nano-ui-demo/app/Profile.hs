@@ -44,7 +44,6 @@ import DemoData
   , sineCosineChart
   , weeklyBars
   )
-import DemoApp (registerRgba)
 import SdlDemo (demoUi)
 
 iterations :: Int
@@ -177,7 +176,7 @@ main = do
     putStrLn ""
 
     (images, _, _, _) <- runFrame ctx' inp $
-      smallArrayFromList <$> forM demoSwatches (\(_, pixels) -> registered (registerRgba 32 32 pixels))
+      smallArrayFromList <$> forM demoSwatches (\(_, pixels) -> registerFresh 32 32 pixels)
 
     putStrLn "--- 3. WIDGET MICROBENCHMARKS (100 widgets in container, runFrame) ---"
     runFrames
@@ -251,7 +250,7 @@ main = do
     -- One small image changing every frame in an atlas holding 12 large
     -- ones, as a live thumbnail does: getting it to the GPU is the cost.
     void $ runFrame ctx' inp $ forM_ [1 .. 12 :: Int] $ \i ->
-      registered (registerRgba 1024 256 (BS.replicate (1024 * 256 * 4) (fromIntegral i)))
+      registerFresh 1024 256 (BS.replicate (1024 * 256 * 4) (fromIntegral i))
     (liveImage, _, _, _) <- runFrame ctx' inp freshImageId
     let livePixels k = BS.replicate (64 * 64 * 4) (if even k then 40 else 200)
     nextLive <- newCounter 0
@@ -373,9 +372,13 @@ repeated g n widget = columnWith (tight . gap g . fillW) (forM_ [1 .. n] widget)
 numbered :: String -> Int -> T.Text
 numbered prefix i = T.pack (prefix <> show i)
 
--- | Fail unless the image was registered.
-registered :: NanoUI (Maybe ImageId) -> NanoUI ImageId
-registered = (maybe (liftIO (fail "registerImageRgba failed")) pure =<<)
+-- | Register a @w@ by @h@ RGBA image under a fresh id for the rest of the
+-- run, as a benchmark's setup does.
+registerFresh :: Int -> Int -> BS.ByteString -> NanoUI ImageId
+registerFresh w h pixels = do
+  iid <- freshImageId
+  ok <- registerImageRgba iid w h pixels
+  if ok then pure iid else liftIO (fail "registerImageRgba failed")
 
 --------------------------------------------------------------------------------
 -- Scaling Benchmarks

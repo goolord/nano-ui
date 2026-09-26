@@ -26,7 +26,7 @@ import Data.Primitive.PrimArray
   , unsafeFreezePrimArray
   , writePrimArray
   )
-import Data.Primitive.SmallArray (SmallArray)
+import Data.Primitive.SmallArray (SmallArray, smallArrayFromList)
 import qualified Data.Text as T
 import Data.Word (Word32)
 import NanoUI.Internal.Context
@@ -38,6 +38,7 @@ import NanoUI.Internal.Frame.Paint.Widgets (PaintEnv (..), buildPaintEnv, paintT
 import NanoUI.Internal.Frame.Scroll.Geometry (ScrollNode (..), borderContentClip, scrollBare, scrollNodeBars, scrollNodeViewport)
 import NanoUI.Internal.Frame.Spans (textNodeSpanEntry)
 import NanoUI.Internal.Id (hashWidgetId)
+import NanoUI.Internal.Image (ImageDraw (..), imageDrawOp, lookDraw)
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Style hiding (fontSize)
 import NanoUI.Internal.Types (Color (..), ImageId (..), Rect (..), V2 (..), colorA, colorRGBA, rectInflate)
@@ -212,8 +213,11 @@ paintContainerNode env@PaintEnv {peContext = ctx} idx rect = do
 -- | A drawing's ops clipped to its rect, in the env's default font. An image
 -- op naming a registered 'ImageId' draws that image from the atlas.
 emitDrawingOps :: PaintEnv -> Rect -> SmallArray DrawOp -> IO ()
-emitDrawingOps env@PaintEnv {peDrawArena = da} rect ops =
-  withClip da rect (emitDrawOps da (peFontMetrics env) (ctxFontSize ctx) (resolveTextFont ctx) imageUv ops)
+emitDrawingOps env rect ops = withClip (peDrawArena env) rect (emitOps env ops)
+
+-- | Ops in the env's default font, where they are, unclipped.
+emitOps :: PaintEnv -> SmallArray DrawOp -> IO ()
+emitOps env@PaintEnv {peDrawArena = da} = emitDrawOps da (peFontMetrics env) (ctxFontSize ctx) (resolveTextFont ctx) imageUv
   where
     ctx = peContext env
     imageUv tid = fmap (atlasTextureId,) <$> lookupImageUv ctx (ImageId tid)
@@ -310,20 +314,33 @@ paintBoxNode env idx rect = do
   -- styleIdx holds RGBA Word32 bits; see `box` in NanoUI.Widgets.
   pushRect (peDrawArena env) rect (Color (fromIntegral si :: Word32))
 
+-- | An image node: stretched over its rect in its font colour's tint, or,
+-- with a look ('getImageNode'), fitted, cropped, zoomed, faded and turned
+-- ('lookDraw'), a turned one clipped to its rect. A disabled image fades
+-- the way disabled widget colours do, and one not registered paints the
+-- accent.
 paintImageNode :: PaintEnv -> NodeIdx -> Rect -> IO ()
 paintImageNode env@PaintEnv {peDrawArena = da} idx rect = do
-  tex <- imageIdFromText <$> getText (peNodeArena env) idx
-  mUv <- lookupImageUv (peContext env) (ImageId tex)
-  case mUv of
-    Just (u0, v0, u1, v1) -> do
-      -- An image may carry a tint in its font colour (an SVG icon). A
-      -- disabled image fades the way disabled widget colours do.
-      base <- fromMaybe (colorRGBA 255 255 255 255) <$> getNodeFontColor (peNodeArena env) idx
-      let tint
-            | peScope env .&. 1 /= 0 = fadeAlpha base (round (fromIntegral (colorA base) * (1 - themeDisabledFade (peTheme env))))
-            | otherwise = base
-      pushImage da rect atlasTextureId u0 v0 u1 v1 tint
-    _ -> pushRect da rect (themeAccent (peTheme env))
+  let na = peNodeArena env
+      fade = if peScope env .&. 1 /= 0 then 1 - themeDisabledFade (peTheme env) else 1
+      iid = ImageId . imageIdFromText
+  tex <- iid <$> getText na idx
+  node <- getImageNode na idx
+  case node of
+    Nothing ->
+      lookupImageUv (peContext env) tex >>= \case
+        Just (u0, v0, u1, v1) -> do
+          base <- fromMaybe (colorRGBA 255 255 255 255) <$> getNodeFontColor na idx
+          pushImage da rect atlasTextureId u0 v0 u1 v1 (fadeAlpha base (round (fromIntegral (colorA base) * fade)))
+        Nothing -> accent
+    Just ImageNode {inLook = look} ->
+      lookupImageSize (peContext env) tex >>= \case
+        Just size -> forM_ (lookDraw look size tex fade rect) $ \d ->
+          (if imageAngle d /= 0 then withClip da rect else id) $
+            forM_ (imageDrawOp d) (emitOps env . smallArrayFromList . pure)
+        Nothing -> accent
+  where
+    accent = pushRect da rect (themeAccent (peTheme env))
 
 {-# NOINLINE paintDrawingNode #-}
 paintDrawingNode :: PaintEnv -> NodeIdx -> Rect -> IO ()

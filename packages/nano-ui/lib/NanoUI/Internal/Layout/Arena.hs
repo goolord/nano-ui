@@ -87,6 +87,9 @@ module NanoUI.Internal.Layout.Arena
   , getText
   , getOptions
   , setOptions
+  , ImageNode (..)
+  , setImageNode
+  , getImageNode
   , getWidgetId
   , setWidgetId
   , lookupNodeByWidgetId
@@ -165,6 +168,7 @@ import Data.Word (Word8, Word32, Word64)
 import qualified Data.Text as T
 import GHC.Float (castFloatToWord32)
 import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
+import NanoUI.Internal.Image (ImageLook, defaultImageConfig, imageLook)
 import NanoUI.Internal.Store (ptrEq)
 import NanoUI.Internal.Style (AlignX (..), AlignY, Direction (..), Flow (..), Layout (..), Padding (..), PointerMode (..), Sizing (..))
 import NanoUI.Internal.Types (Color (..), Rect (..), V2 (..), rectNonEmpty)
@@ -210,7 +214,8 @@ data NodeType
   | NodeModal
   -- ^ A modal dialog. Floating: see 'isFloatingNode'.
   | NodeImage
-  -- ^ An image. The node's text is the image id in decimal.
+  -- ^ An image. The node's text is the image id in decimal, and its style
+  -- index says how it is drawn ('getImageNode').
   | NodePanel
   -- ^ A container that paints the theme's panel background and border, and
   -- clips its children to the inside of the border.
@@ -422,6 +427,23 @@ data NodeArena = NodeArena
   -- more nodes than the arena, so each has room for 'naCapacity' of them.
   , naClassCounts :: IOArr Int
   -- ^ Nodes in each list of 'naClassNodes', by 'fromEnum' of the class.
+  , naImages :: IORef (MutableArray RealWorld ImageNode)
+  -- ^ The looks of the image nodes that draw their image fitted, faded or
+  -- turned, in the order they were added ('setImageNode'): the first
+  -- 'naImageCount' of them are this frame's. It grows as a frame needs.
+  , naImageCount :: IOArr Int
+  -- ^ How many of 'naImages' this frame has, in one slot.
+  }
+
+-- | An image node's look ('ImageLook'), and the width and height it takes
+-- on an axis its layout leaves unsized, which is the image's own size. A
+-- plain image node has none: it stretches its image, and an unsized axis
+-- takes its minimum or 32. The node's style index is its place in
+-- 'naImages' plus one, and 0 for a plain image.
+data ImageNode = ImageNode
+  { inLook :: !ImageLook
+  , inWidth :: {-# UNPACK #-} !Float
+  , inHeight :: {-# UNPACK #-} !Float
   }
 
 -- | The solver's buffers for the flow children of one container (its children
@@ -690,6 +712,8 @@ newNodeArena = do
   naMeasured <- newIORef =<< newPrimArray (cap * 2)
   naClassNodes <- newIORef =<< newPrimArray (cap * nodeClassCount)
   naClassCounts <- newZeroedPrimArray nodeClassCount
+  naImages <- newIORef =<< newArray 0 noImageNode
+  naImageCount <- newZeroedPrimArray 1
   pure NodeArena {..}
 
 nodeClassCount :: Int
@@ -710,6 +734,7 @@ resetNodeArena na = do
   writeIORef (naScopeSig na) 0
   writePrimArray (naInputSig na) 0 0
   setPrimArray (naClassCounts na) 0 nodeClassCount 0
+  writePrimArray (naImageCount na) 0 0
   -- 0 marks a memo entry that was never written, so the tag wraps to 1.
   !ft <- readIORef (naFrameTag na)
   writeIORef (naFrameTag na) (if ft == maxBound then 1 else ft + 1)
@@ -1294,6 +1319,38 @@ getText na idx = do
   if ti < 0
     then pure T.empty
     else readArray (naArrTextStore a) ti
+
+-- | Give image node @idx@ its look and the size it takes unsized. The size
+-- is a layout input, and joins the node's.
+setImageNode :: NodeArena -> NodeIdx -> ImageNode -> IO ()
+setImageNode na idx node@ImageNode {inWidth = w, inHeight = h} = do
+  k <- readPrimArray (naImageCount na) 0
+  arr0 <- readIORef (naImages na)
+  let cap = sizeofMutableArray arr0
+  arr <-
+    if k < cap
+      then pure arr0
+      else do
+        grown <- growBoxedStoreCopy noImageNode arr0 cap (max 16 (2 * cap))
+        grown <$ writeIORef (naImages na) grown
+  writeArray arr k node
+  writePrimArray (naImageCount na) 0 (k + 1)
+  a <- arenaArrays na
+  writeTree a idx TreeStyleIdx (k + 1)
+  mixNodeInput na idx 0x494d (fromIntegral (castFloatToWord32 w) `shiftL` 32 .|. fromIntegral (castFloatToWord32 h))
+
+-- | Image node @idx@'s look and unsized size, or 'Nothing' for a plain
+-- image. Only for a 'NodeImage': another node's style index means
+-- something else.
+{-# INLINE getImageNode #-}
+getImageNode :: NodeArena -> NodeIdx -> IO (Maybe ImageNode)
+getImageNode na idx = do
+  si <- arenaArrays na >>= \a -> readTree a idx TreeStyleIdx
+  if si <= 0 then pure Nothing else Just <$> (readIORef (naImages na) >>= \arr -> readArray arr (si - 1))
+
+-- | What fills the unused slots of 'naImages'.
+noImageNode :: ImageNode
+noImageNode = ImageNode (imageLook defaultImageConfig (Color 0xFFFFFFFF)) 0 0
 
 -- | Choices stored on a select node, or an empty list when none were assigned.
 {-# INLINE getOptions #-}

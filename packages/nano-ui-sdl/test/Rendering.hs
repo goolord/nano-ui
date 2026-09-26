@@ -24,7 +24,7 @@ import GHC.Conc (getAllocationCounter)
 import Keyboard (keyboardTranslation)
 import NanoUI
   ( Color, ImageConfig (..), ImageId (..), Rect (..), Rotation (..), V2 (..), canvas, colorRGBA, column, defaultImageConfig
-  , defaultLayout, defaultLightTheme, defaultTheme, drawPathWith, drawStrokePathWith, fixedWH, followSystemTheme, getTheme, lightDark
+  , defaultLightTheme, defaultTheme, drawPathWith, drawStrokePathWith, fixedWH, followSystemTheme, getTheme, lightDark
   , imageConfigured', respRect
   )
 import NanoUI.Path qualified as P
@@ -142,7 +142,7 @@ imageChecks env ctx images draw = do
   sample "kept across growth" 1 (0, 0, 255)
   -- Red on the left half, blue on the right.
   register 5 8 4 (BS.concat [BS.pack (if x < 4 then [255, 0, 0, 255] else [0, 0, 255, 255]) | _ <- [0 .. 3 :: Int], x <- [0 .. 7 :: Int]])
-  let image h cfg = imageConfigured' cfg {icLayout = fixedWH 80 h defaultLayout} (ImageId 5)
+  let image h cfg = imageConfigured' cfg {icLayout = fixedWH 80 h} (ImageId 5)
   ((turned, faded), dd) <-
     warmupDraw ctx (withInput 400 300) . column $
       (,) <$> image 80 defaultImageConfig {icRotation = RotateSolid (pi / 2)} <*> image 40 defaultImageConfig {icOpacity = 0.5}

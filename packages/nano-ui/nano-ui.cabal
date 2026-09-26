@@ -104,6 +104,7 @@ library
         NanoUI.Internal.Frame.TextArea
         NanoUI.Internal.Frame.Window
         NanoUI.Internal.Id
+        NanoUI.Internal.Image
         NanoUI.Internal.Input
         NanoUI.Internal.Layout.Arena
         NanoUI.Internal.Layout.Solve

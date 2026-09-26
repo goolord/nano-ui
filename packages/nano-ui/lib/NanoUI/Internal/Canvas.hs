@@ -24,7 +24,9 @@ module NanoUI.Internal.Canvas
   , drawLinearGradientV
   , drawImage
   , drawImageUV
-  , drawImageRotated
+  , ImageDraw (..)
+  , imageDraw
+  , drawImageWith
   , drawText
   , drawTextWith
   , drawCheckbox
@@ -46,9 +48,10 @@ import Data.Text (Text)
 import NanoUI.Internal.Context.Types (CustomDrawContext (..))
 import NanoUI.Internal.Draw (DrawOp (..), TextFont, checkboxOps)
 import NanoUI.Internal.Font (FontMetrics (fmSnapScale), monospaceMetrics)
+import NanoUI.Internal.Image (ImageDraw (..), imageDraw, imageDrawOp)
 import NanoUI.Internal.Path (FillRule (..), Paint (..), Path, Stroke, Transform, curveTolerance, fillPathOps, stroke, strokePathOps, transformOp)
 import NanoUI.Internal.Style (AlignX (..), AlignY (..), Style (..), Theme (..), defaultTheme)
-import NanoUI.Internal.Types (Color, ImageId (..), Rect (..), V2 (..))
+import NanoUI.Internal.Types (Color, ImageId, Rect (..), V2 (..))
 
 -- | A block of drawing: a monad that collects draw ops, run with
 -- 'runCanvasFor'.
@@ -174,18 +177,23 @@ drawLinearGradientH r leftCol rightCol = emitOp (FillQuadGradient r leftCol righ
 drawLinearGradientV :: Rect -> Color -> Color -> CanvasM ()
 drawLinearGradientV r topCol botCol = emitOp (FillQuadGradient r topCol topCol botCol botCol)
 
--- | Draw a textured image stretched over given rectangle.
+-- | Draw a textured image stretched over given rectangle, tinted
+-- ('drawImageWith').
 drawImage :: Rect -> ImageId -> Color -> CanvasM ()
-drawImage r (ImageId tid) c = emitOp (DrawImageRect r tid 0 0 1 1 c)
+drawImage r iid c = drawImageWith (imageDraw r iid) {imageTint = c}
 
--- | Draw a sub-region of a textured image with explicit UV texture coordinates.
+-- | Draw a sub-region of a textured image with explicit UV texture
+-- coordinates, from u0/v0 to u1/v1 ('drawImageWith').
 drawImageUV :: Rect -> ImageId -> Float -> Float -> Float -> Float -> Color -> CanvasM ()
-drawImageUV r (ImageId tid) u0 v0 u1 v1 c = emitOp (DrawImageRect r tid u0 v0 u1 v1 c)
+drawImageUV r iid u0 v0 u1 v1 c = drawImageWith (imageDraw r iid) {imageUV = Rect u0 v0 (u1 - u0) (v1 - v0), imageTint = c}
 
--- | 'drawImage' turned about the rectangle's centre by an angle in radians,
--- clockwise on screen. Whatever leaves the canvas is clipped.
-drawImageRotated :: Rect -> Float -> ImageId -> Color -> CanvasM ()
-drawImageRotated r angle (ImageId tid) c = emitOp (DrawImageRotated r angle tid 0 0 1 1 c)
+-- | Draw an image: a part of it ('imageUV'), over a rect, turned about the
+-- rect's centre ('imageAngle'), tinted and faded. Whatever leaves the
+-- canvas is clipped, and an invisible image draws nothing:
+--
+-- > drawImageWith (imageDraw r photo) {imageAngle = pi / 8, imageOpacity = 0.6}
+drawImageWith :: ImageDraw -> CanvasM ()
+drawImageWith = mapM_ emitOp . imageDrawOp
 
 -- | Draw text in the context's font, placed on a point by its horizontal
 -- and vertical alignment: 'AlignStart' puts the point at the text's left,

@@ -47,12 +47,12 @@ module SdlDemo
     ) where
 
 import Control.Exception (SomeException, displayException, evaluate, try)
-import Control.Monad (forM, forM_, unless, void, when, (<=<))
+import Control.Monad (forM, forM_, unless, void, when)
 import Control.Monad.IO.Class (liftIO)
 import Data.Foldable (for_, toList)
 import Data.List (elemIndex)
 import Data.Maybe (catMaybes, fromMaybe, isJust, isNothing, listToMaybe, mapMaybe)
-import Data.Primitive.SmallArray (SmallArray, indexSmallArray, sizeofSmallArray, smallArrayFromList)
+import Data.Primitive.SmallArray (indexSmallArray, sizeofSmallArray, smallArrayFromList)
 import Data.Word (Word64)
 import NanoUI
 import NanoUI.Adornment qualified as A
@@ -93,7 +93,7 @@ import qualified Data.Text as T
 import qualified Data.Vector.Storable as VS
 import qualified SdlRecord
 
-import DemoApp (registerRgba, useFileDialog)
+import DemoApp (useFileDialog)
 import DemoData
   ( DemoPerson (..)
   , colPeople
@@ -150,16 +150,6 @@ savePng path shot =
   let px = screenshotPixels shot
       (fp, n) = BSI.toForeignPtr0 (rgbaBytes px)
    in JP.writePng path (JP.Image (rgbaWidth px) (rgbaHeight px) (VS.unsafeFromForeignPtr0 fp n) :: JP.Image JP.PixelRGBA8)
-
--- | Register a decoded GIF's frames under fresh ids, in order, or say why the
--- file could not be used. Registering stops at the first frame the atlas
--- refuses.
-gifFrames :: Either String [(Int, Int, BS.ByteString)] -> NanoUI (Either String (SmallArray ImageId))
-gifFrames = either (pure . Left) (register [])
-  where
-    register ids [] = pure (Right (smallArrayFromList (reverse ids)))
-    register ids ((w, h, pixels) : rest) =
-      registerRgba w h pixels >>= maybe (pure (Left "the image atlas is full")) (\iid -> register (iid : ids) rest)
 
 -- | Demo accent used across the state readout and pane headers.
 demoAccent :: Color
@@ -254,16 +244,15 @@ demoUi = do
   -- File dialog handles; results land in the paths below via useFileDialog.
   (openDlg, setOpenDlg) <- useState (Nothing :: Maybe FileDialogId)
   (saveDlg, setSaveDlg) <- useState (Nothing :: Maybe FileDialogId)
-  (lick, setLick) <- useState (Nothing :: Maybe (Either String (SmallArray ImageId))) -- GIF frames, once loaded
+  (lick, setLick) <- useState (Nothing :: Maybe (Either String [(Int, Int, BS.ByteString)])) -- GIF frames, once decoded
   (icons, setIcons) <- useState (Nothing :: Maybe [Either String Svg]) -- SVG icons, read on first show
   (weight, setWeight) <- useText "" -- adorned textInput
   (saving, toggleSaving) <- useToggle False -- content button showing a spinner
   (secret, setSecret) <- useText "" -- password field with a show/hide control
   (secretShown, toggleSecretShown) <- useToggle False
-  (swatches, setSwatches) <- useState (Nothing :: Maybe [(ImageId, T.Text)]) -- generated images, registered on first show
-  (landscape, setLandscape) <- useState (Nothing :: Maybe ImageId) -- wide generated image, registered on first show
   (imageTurn, setImageTurn) <- useFloat 30 -- imageConfigured rotation, in degrees
   (imageFade, setImageFade) <- useFloat 1 -- imageConfigured opacity
+  (imageZoom, setImageZoom) <- useFloat 1 -- imageConfigured zoom
   (folderDlg, setFolderDlg) <- useState (Nothing :: Maybe FileDialogId)
   (openPath, setOpenPath) <- useText ""
   (savePath, setSavePath) <- useText ""
@@ -478,50 +467,54 @@ demoUi = do
             Graphics -> do
               heading "Graphics"
               separator
-              -- Generated RGBA images, registered under fresh ids the first
-              -- time this tab shows.
-              case swatches of
-                Nothing ->
-                  setSwatches . Just . catMaybes
-                    =<< forM demoSwatches (\(caption, pixels) -> fmap (,caption) <$> registerRgba 32 32 pixels)
-                -- A wrapping row flows the swatches onto a new line in a
-                -- narrow window, and layers lay a badge over each image's
-                -- corner.
-                Just registered ->
-                  rowWith (wrap . tight . gap gapInline . fillW) $
-                    for_ registered $ \(iid, caption) ->
-                      columnWith (tight . gap gapMicro) $ do
-                        layersWith tight $ do
-                          image (fixedWH 88 88) iid
-                          panelWith (alignEnd . alignTop . padXY 4 1) $
-                            labelWith (tight . fontMono . fontSize 11) "32px"
-                        muted caption
+              -- Generated RGBA images, registered while this tab shows and
+              -- let go when it does not, which frees their room in the
+              -- image atlas.
+              swatches <- catMaybes <$> forM demoSwatches (\(caption, pixels) -> fmap (,caption) <$> useImageRgba caption 32 32 pixels)
+              -- A wrapping row flows the swatches onto new lines in a narrow
+              -- window, each line centred, and layers lay a badge over each
+              -- image's corner.
+              rowWith (wrap . lineAlign LinesCenter . tight . gap gapInline . fillW) $
+                for_ swatches $ \(iid, caption) ->
+                  columnWith (tight . gap gapMicro) $ do
+                    layersWith tight $ do
+                      image (fixedWH 88 88) iid
+                      panelWith (alignEnd . alignTop . padXY 4 1) $
+                        labelWith (tight . fontMono . fontSize 11) "32px"
+                    muted caption
               separator
-              -- A wide image in each content fit, turned and faded. The scope
-              -- keeps the widgets after it on their ids once the image is
-              -- registered.
-              scope $ case landscape of
-                Nothing -> mapM_ (setLandscape . Just) =<< registerRgba 96 48 demoLandscape
-                Just iid -> columnWith (tight . gap gapText . fillW) $ do
-                  rowWith (tight . gap gapInline . fillW) $
-                    for_ [minBound .. maxBound] $ \fit ->
-                      columnWith (tight . gap gapMicro) $ do
-                        imageConfigured defaultImageConfig {icLayout = fixedWH 72 72 defaultLayout, icFit = fit} iid
-                        muted (T.drop 3 (T.pack (show fit)))
-                  rowWith (tight . gap gapInline . alignMid . fillW) $ do
-                    imageConfigured
-                      defaultImageConfig
-                        { icLayout = fixedWH 96 96 defaultLayout
-                        , icFit = FitContain
-                        , icRotation = RotateSolid (imageTurn * pi / 180)
-                        , icOpacity = imageFade
-                        }
-                      iid
-                    columnWith (tight . gap gapText . fillW) $ do
-                      kv "Turn" (T.pack (printf "%.0f deg" imageTurn))
-                      setImageTurn =<< slider 0 360 imageTurn
-                      kv "Opacity" (T.pack (printf "%.2f" imageFade))
-                      setImageFade =<< slider 0 1 imageFade
+              -- A wide image in each content fit, cropped, turned, faded and
+              -- zoomed, and filling the width in its own shape. The scope
+              -- keeps the widgets after it on their ids whether or not the
+              -- image is registered.
+              landscape <- useImageRgba ("landscape" :: T.Text) 96 48 demoLandscape
+              scope $ for_ landscape $ \iid -> columnWith (tight . gap gapText . fillW) $ do
+                rowWith (wrap . tight . gap gapInline . fillW) $ do
+                  for_ [minBound .. maxBound] $ \fit ->
+                    columnWith (tight . gap gapMicro) $ do
+                      imageConfigured defaultImageConfig {icLayout = fixedWH 72 72, icFit = fit} iid
+                      muted (T.drop 3 (T.pack (show fit)))
+                  columnWith (tight . gap gapMicro) $ do
+                    imageConfigured defaultImageConfig {icLayout = fixedWH 72 72, icFit = FitCover, icCrop = Just (Rect 0 0 48 48)} iid
+                    muted "Crop"
+                rowWith (tight . gap gapInline . alignMid . fillW) $ do
+                  imageConfigured
+                    defaultImageConfig
+                      { icLayout = fixedWH 96 96
+                      , icFit = FitContain
+                      , icRotation = RotateSolid (imageTurn * pi / 180)
+                      , icOpacity = imageFade
+                      , icScale = imageZoom
+                      }
+                    iid
+                  columnWith (tight . gap gapText . fillW) $ do
+                    kv "Turn" (T.pack (printf "%.0f deg" imageTurn))
+                    setImageTurn =<< slider 0 360 imageTurn
+                    kv "Opacity" (T.pack (printf "%.2f" imageFade))
+                    setImageFade =<< slider 0 1 imageFade
+                    kv "Zoom" (T.pack (printf "%.2fx" imageZoom))
+                    setImageZoom =<< slider 0.5 3 imageZoom
+                imageConfigured defaultImageConfig {icLayout = fillW . maxW 360} iid
               separator
               -- SVG icons read from disk the first time this tab shows. A
               -- one-colour icon takes the text colour (or a fontColor), and
@@ -576,26 +569,31 @@ demoUi = do
               separator
               -- An animated GIF loaded from disk the first time this tab
               -- shows: useTask decodes it on a thread of its own while the
-              -- loop sleeps, and the frame the result wakes registers its
-              -- frames. The hook is called only until then, so the decoded
-              -- pixels are let go. Each frame is its own image, and the clock
-              -- picks which one to show; every frame of this GIF lasts 100 ms.
-              -- keepAnimating keeps frames coming while it plays; the sensor
-              -- round it holds the frames only while it is on screen, so off
-              -- screen the GIF asks for none.
+              -- loop sleeps, and the frame the result wakes keeps its frames.
+              -- The hook is called only until then. Each frame is its own
+              -- image, registered while this tab shows (useImageRgba, keyed
+              -- by its place), and the clock picks which one to show; every
+              -- frame of this GIF lasts 100 ms. keepAnimating keeps frames
+              -- coming while it plays; the sensor round it holds the frames
+              -- only while it is on screen, so off screen the GIF asks for
+              -- none.
               scope . when (isNothing lick) $ do
                 decoded <- useTask ("lick.gif" :: T.Text) (decodeGif =<< getDataFileName "data/lick.gif")
-                mapM_ (setLick . Just <=< gifFrames) decoded
-              case lick of
+                mapM_ (setLick . Just) decoded
+              scope $ case lick of
                 Nothing -> labelWith (fillW . fontMuted) "Loading lick.gif..."
                 Just (Left err) -> muted ("Could not load lick.gif: " <> T.pack err)
-                Just (Right frames) -> do
+                Just (Right decoded) -> do
+                  frames <- smallArrayFromList . catMaybes <$> forM (zip [0 :: Int ..] decoded) (\(i, (w, h, px)) -> useImageRgba i w h px)
                   t <- uiTime
-                  (vis, gif) <- sensorWith (gap gapMicro) $ do
-                    gif <- image' (fixedWH 150 150) (indexSmallArray frames (floor (t * 10) `mod` sizeofSmallArray frames))
-                    muted "lick.gif"
-                    pure gif
-                  when (visVisible vis) (keepAnimating gif)
+                  if sizeofSmallArray frames < length decoded
+                    then muted "The image atlas has no room for lick.gif."
+                    else do
+                      (vis, gif) <- sensorWith (gap gapMicro) $ do
+                        gif <- image' (fixedWH 150 150) (indexSmallArray frames (floor (t * 10) `mod` sizeofSmallArray frames))
+                        muted "lick.gif"
+                        pure gif
+                      when (visVisible vis) (keepAnimating gif)
               separator
               -- A plain response-driven bar. pulse provides a smooth
               -- clock-driven 0-1 sweep and keepAnimating holds it live.

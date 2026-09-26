@@ -30,6 +30,7 @@ module NanoUI.Internal.Widgets.Node
   , dropdownInput
   , addWidget
   , addWidgetStyled
+  , addWidgetNode
   , addWidgetWithOptions
   , tagContainer
   , setWidgetValue

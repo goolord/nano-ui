@@ -1,4 +1,5 @@
 {-# LANGUAGE DerivingVia #-}
+{-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE StrictData #-}
 {-# LANGUAGE TypeFamilies #-}
 
@@ -7,7 +8,7 @@
 -- the context types can name these without depending on the emitters.
 module NanoUI.Internal.Draw.Types
   ( Layer (..)
-  , DrawOp (..)
+  , DrawOp (.., DrawImageRect)
   , LineCap (..)
   , LineJoin (..)
   , Shade (..)
@@ -109,17 +110,21 @@ data DrawOp
   -- ^ Anti-aliased line: endpoint x0/y0/x1/y1, width, and colour.
   | FillQuadGradient !Rect !Color !Color !Color !Color
   -- ^ Rectangle with colours at top-left, top-right, bottom-right, bottom-left.
-  | DrawImageRect
+  | DrawImage
       !Rect
+      {-# UNPACK #-} !Float
       {-# UNPACK #-} !Int
       {-# UNPACK #-} !Float
       {-# UNPACK #-} !Float
       {-# UNPACK #-} !Float
       {-# UNPACK #-} !Float
       !Color
-  -- ^ Destination rectangle, texture id, u0/v0/u1/v1, and tint colour. In a
-  -- drawing the texture id may be an 'NanoUI.ImageId' registered with the
-  -- context, whose own UVs run from 0 to 1.
+  -- ^ Destination rectangle, the angle it turns by about its centre in
+  -- radians (clockwise on screen), texture id, u0/v0/u1/v1, and tint colour.
+  -- In a drawing the texture id may be an 'NanoUI.ImageId' registered with
+  -- the context, whose own UVs run from 0 to 1. An image at angle 0 snaps to
+  -- the pixel grid; a turned one's corners fall between pixels. Draw one
+  -- with the canvas's 'NanoUI.Widgets.Custom.drawImageWith'.
   | DrawText
       {-# UNPACK #-} !Float
       {-# UNPACK #-} !Float
@@ -157,18 +162,6 @@ data DrawOp
   -- not repeated; how an open one's ends are capped; how its corners join;
   -- the miter limit, as a multiple of the width, past which a miter join is
   -- beveled; and its colour.
-  | DrawImageRotated
-      !Rect
-      {-# UNPACK #-} !Float
-      {-# UNPACK #-} !Int
-      {-# UNPACK #-} !Float
-      {-# UNPACK #-} !Float
-      {-# UNPACK #-} !Float
-      {-# UNPACK #-} !Float
-      !Color
-  -- ^ 'DrawImageRect' turned about the rectangle's centre: the rectangle,
-  -- the angle in radians (clockwise on screen), texture id, u0/v0/u1/v1, and
-  -- tint colour.
   | DrawTextAligned
       {-# UNPACK #-} !Float
       {-# UNPACK #-} !Float
@@ -187,6 +180,11 @@ data DrawOp
   | PopClip
   -- ^ End the clip of the last 'PushClip' still open.
   deriving (Eq)
+
+-- | A 'DrawImage' that does not turn: destination rectangle, texture id,
+-- u0/v0/u1/v1, and tint colour. As a pattern it matches an image at angle 0.
+pattern DrawImageRect :: Rect -> Int -> Float -> Float -> Float -> Float -> Color -> DrawOp
+pattern DrawImageRect r tex u0 v0 u1 v1 c = DrawImage r 0 tex u0 v0 u1 v1 c
 
 -- | How a stroke ends an open subpath.
 data LineCap
@@ -249,9 +247,7 @@ shiftDrawOp dx dy op =
     FillPolygon pts rings tris c -> FillPolygon (shiftPoints dx dy pts) rings tris c
     StrokePolyline pts w closed cap join limit c -> StrokePolyline (shiftPoints dx dy pts) w closed cap join limit c
     FillQuadGradient (Rect x y w h) c0 c1 c2 c3 -> FillQuadGradient (Rect (x + dx) (y + dy) w h) c0 c1 c2 c3
-    DrawImageRect (Rect x y w h) tex u0 v0 u1 v1 c -> DrawImageRect (Rect (x + dx) (y + dy) w h) tex u0 v0 u1 v1 c
-    DrawImageRotated (Rect x y w h) angle tex u0 v0 u1 v1 c ->
-      DrawImageRotated (Rect (x + dx) (y + dy) w h) angle tex u0 v0 u1 v1 c
+    DrawImage (Rect x y w h) angle tex u0 v0 u1 v1 c -> DrawImage (Rect (x + dx) (y + dy) w h) angle tex u0 v0 u1 v1 c
     DrawText x y ax ay t c -> DrawText (x + dx) (y + dy) ax ay t c
     DrawTextStyled x y font t c -> DrawTextStyled (x + dx) (y + dy) font t c
     DrawTextAligned x y ax ay k font t c -> DrawTextAligned (x + dx) (y + dy) ax ay k font t c

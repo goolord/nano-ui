@@ -312,10 +312,22 @@
   `PointerPass` makes a node and all inside it let it through. A label, an
   image or a container with an id under a control on top is covered like a
   control, taking no hover or tooltip there.
-- `imageConfigured` and `imageConfigured'` take an `ImageConfig`: a
-  `ContentFit` like CSS's `object-fit`, an alignment, an opacity and a
-  `Rotation`. The `DrawImageRotated` op and the canvas's `drawImageRotated`
-  draw an image turned about its centre.
+- `imageConfigured` and `imageConfigured'` take an `ImageConfig`: a layout
+  modifier, a `ContentFit` like CSS's `object-fit`, an alignment, a crop to
+  part of the image in its pixels (`icCrop`), a zoom about the fitted
+  image's centre (`icScale`), an opacity and a `Rotation`. An axis the
+  layout leaves unsized takes the image's own size, and a fit height follows
+  the width in the image's shape (`aspect`). It is the same node as `image`,
+  drawn by paint, not a custom widget: a frame measures and hashes nothing
+  for it. `svgIconConfigured` draws an SVG icon with the same options, and
+  `fitRect` is the placement a fit makes, for a canvas.
+- `drawImageWith` draws an `ImageDraw` on a canvas: a rect, an image, the
+  part of it in UVs, a turn about the rect's centre, a tint and an opacity.
+  `drawImage` and `drawImageUV` draw through it. The `DrawImage` op draws
+  any image, turned or not; `DrawImageRect` is it unturned, as a pattern.
+- `useImageRgba` registers an image once per key and lets it go when the
+  view stops calling it, as `useTask` does a job; the image atlas gives the
+  room of an image let go to the next image that fits it.
 - Focus from code: `requestFocus` gives a widget the keyboard by its `respId`
   as Tab would, or with `WidgetId 0` takes it away.
 - `tooltipConfigured` and `tooltipWidgetConfigured` take a `TooltipConfig`:
@@ -725,6 +737,9 @@
 - `Input`, `Modifiers` (`modSuper`), `MouseButton`, `Response`, `Layout`,
   `Theme`, `FontVariant`, `DrawOp` and `UiCursorKind` have new fields or
   constructors, for the additions above.
+- `DrawImageRect` is a pattern for a `DrawImage` at angle 0: it builds an
+  image op and matches an unturned one as before, and a turned image
+  matches `DrawImage` only.
 - `setTheme` and `setUiTheme` set a fixed theme in place of one following
   the system's appearance. A view's `setUiTheme` repaints once the view is
   built, and only if the frame ends with another theme than it began with,
