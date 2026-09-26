@@ -246,6 +246,17 @@ thumbnail photo =
     photo
 ```
 
+## Seeing the layout
+
+`explainLayout True` outlines every layout node, coloured by depth, and
+highlights the node under the pointer, which `explainedNode` describes. The
+overlay only paints. `sdlExplainLayout`, `optExplainLayout` and the SDL demo's
+`--explain` start with it on, and a debug window can toggle it:
+
+```haskell
+explainLayout =<< checkbox "Outline layout nodes" =<< explainingLayout
+```
+
 ## Writing a backend
 
 `NanoUI` is the view API. What a backend is written against is in

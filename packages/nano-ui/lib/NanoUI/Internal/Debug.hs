@@ -1,5 +1,6 @@
 -- | Debug readout sampling shared by the backends: frame timing and skip
--- counts, RTS statistics, draw counts, and the rows the debug windows show.
+-- counts, RTS statistics, draw counts, and the rows the debug windows show,
+-- the layout overlay's among them.
 module NanoUI.Internal.Debug
   ( debugRefreshSec
   , CoreDebugSnapshot (..)
@@ -13,6 +14,7 @@ module NanoUI.Internal.Debug
   , refreshDebugSnapshot
   , formatFpsRows
   , formatDrawRows
+  , formatExplainRows
   ) where
 
 import Data.Dynamic (Dynamic, Typeable, fromDynamic, toDyn)
@@ -23,6 +25,9 @@ import Data.Word (Word32, Word64)
 import GHC.Clock (getMonotonicTime)
 import GHC.Conc (getNumCapabilities, getNumProcessors)
 import GHC.Stats (GCDetails (..), RTSStats (..), getRTSStats, getRTSStatsEnabled)
+import NanoUI.Internal.Context.Types (ExplainedNode (..))
+import NanoUI.Internal.Style (Padding (..))
+import NanoUI.Internal.Types (Rect (..))
 import Text.Printf (printf)
 
 -- | Minimum interval between published snapshots, in seconds (0.25).
@@ -214,4 +219,19 @@ formatDrawRows s =
   [ ("vertices", T.pack (printf "%10d" (dbgVerts s)))
   , ("indices", T.pack (printf "%10d" (dbgIndices s)))
   , ("commands", T.pack (printf "%10d" (dbgCmds s)))
+  ]
+
+-- | Label/value rows for the node under the pointer while the layout overlay
+-- is on ('NanoUI.Internal.Context.getExplainedNode'): what it is, how deep,
+-- where, its padding (left, right, top, bottom) and the content box that
+-- leaves. One row saying there is none otherwise.
+formatExplainRows :: Maybe ExplainedNode -> [(Text, Text)]
+formatExplainRows Nothing = [("node", "none under the pointer")]
+formatExplainRows (Just (ExplainedNode kind depth (Rect x y w h) (Padding l r t b))) =
+  [ ("node", kind)
+  , ("depth", T.pack (show depth))
+  , ("origin", T.pack (printf "%.1f, %.1f" x y))
+  , ("size", T.pack (printf "%.1f x %.1f" w h))
+  , ("padding", T.pack (printf "%.1f %.1f %.1f %.1f" l r t b))
+  , ("content", T.pack (printf "%.1f x %.1f" (w - l - r) (h - t - b)))
   ]

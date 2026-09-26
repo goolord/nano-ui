@@ -134,6 +134,7 @@ library
         NanoUI.Internal.Draw.Types
         NanoUI.Internal.Frame.Input
         NanoUI.Internal.Frame.Chrome
+        NanoUI.Internal.Frame.Explain
         NanoUI.Internal.Frame.Paint
         NanoUI.Internal.Frame.Paint.Widgets
         NanoUI.Internal.Frame.Scroll
@@ -257,6 +258,7 @@ test-suite nano-ui-test
         Cases.TooltipDelay
         Cases.Visibility
         Cases.Cursors
+        Cases.Explain
         Cases.PointerExtra
     build-depends:
         bytestring,

@@ -19,6 +19,7 @@ import NanoUI.Internal.Damage (FrameSnapshot (..), captureFrameSnapshot, updateP
 import NanoUI.Internal.Draw
 import NanoUI.Internal.Frame.Input
 import NanoUI.Internal.Frame.Chrome (overlayMenuStyle, overlayWindowStyle, paintMenuPanel)
+import NanoUI.Internal.Frame.Explain (explainFrame, paintExplainHover, paintExplainLayer, paintExplainPage)
 import NanoUI.Internal.Frame.Paint (lowerShapes, walkChildren)
 import NanoUI.Internal.Frame.Scroll
 import NanoUI.Internal.Frame.Select
@@ -195,6 +196,10 @@ runFrameEff unlift ctx frameInp ui = do
   unless (null menuRects && null prevMenuRects) $ do
     mapM_ (damageRect ctx) (menuRects ++ prevMenuRects)
     modifyOverlay ctx (\os -> os {osPrevMenuRects = menuRects})
+  -- The layout overlay damages its own outlines: the rect diffs below do not
+  -- cover a row or column that moved.
+  explain <- getExplainLayout ctx
+  when explain (explainFrame ctx frameInp)
   writeDamage ctx frameInp snap
   -- Clip frames repaint the damaged region of the retained texture, which
   -- preserves the other pixels ('paintDamageClip'). Full-present frames
@@ -205,10 +210,15 @@ runFrameEff unlift ctx frameInp ui = do
     damage <- takeDamage ctx
     paintDamageClip ctx damage =<< takeDamagePieces ctx
   lowerShapes ctx
+  -- Over the page's scrollbars, and under every floating panel.
+  when explain $ do
+    beginLayer (ctxDrawArena ctx) LayerContent
+    paintExplainPage ctx
   beginLayer (ctxDrawArena ctx) LayerOverlay
-  drawFloatingPanels ctx size
+  drawFloatingPanels ctx size explain
   drawSelectOverlays ctx frameInp
   drawTextEditMenuOverlays ctx frameInp
+  when explain (paintExplainHover ctx)
   drawData <- finishDraw (ctxDrawArena ctx)
   msgs <- drainMessages ctx
   dirtyAfterUi <- isDirty ctx
@@ -233,15 +243,17 @@ resetUiBuild ctx newFrame = do
 
 -- | Paint the floating panels over the page: windows with their title-bar
 -- separator, the modal backdrop and the modals, then popups. Each is a
--- menu-style panel in its node's theme with its subtree clipped inside.
-drawFloatingPanels :: Context -> Size -> IO ()
-drawFloatingPanels ctx@Context {ctxNodeArena = na, ctxDrawArena = da} (Size ww wh) = do
+-- menu-style panel in its node's theme with its subtree clipped inside, and
+-- with @explain@, the layout overlay's outlines over it.
+drawFloatingPanels :: Context -> Size -> Bool -> IO ()
+drawFloatingPanels ctx@Context {ctxNodeArena = na, ctxDrawArena = da} (Size ww wh) explain = do
   let panels nt style after = forFloatingNodes_ na nt $ \idx -> do
         rect <- getNodeRect na idx
         theme <- nodeTheme ctx idx
         paintMenuPanel da theme (style theme) rect
         withClip da rect (walkChildren ctx idx)
         after theme idx rect
+        when explain (paintExplainLayer ctx idx)
       plain _ _ _ = pure ()
   panels NodeWindow overlayWindowStyle $ \theme idx (Rect x y w _) -> do
     pad <- getPadding na idx

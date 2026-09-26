@@ -115,6 +115,9 @@ data SdlOptions = SdlOptions
   -- An @SDL_RENDER_DRIVER@ in the environment wins over this.
   , sdlAppContinuous :: !Bool
   -- ^ Continuous unthrottled rendering without waiting for events (default: 'False').
+  , sdlExplainLayout :: !Bool
+  -- ^ Start with the layout overlay on, which outlines every layout node
+  -- (default: 'False'). A view turns it on and off with @explainLayout@.
   , sdlAppFont :: !NanoUIFont
   -- ^ UI font (default: installed sans-serif search, falling back to bundled Inter).
   , sdlAppMonoFont :: !NanoUIFont
@@ -149,6 +152,7 @@ defaultSdlOptions =
     , sdlAppVsync = True
     , sdlRenderDriver = RenderDriverAuto
     , sdlAppContinuous = False
+    , sdlExplainLayout = False
     , sdlAppFont =
         FontSearch
           [ "Inter"

@@ -4,6 +4,8 @@
 
 ### Added
 
+- `optExplainLayout` opens a window with the layout overlay on, and
+  `debugWindowBody` has a checkbox for it.
 - The middle mouse button, and the side buttons as back and forward.
 
 ### Changed

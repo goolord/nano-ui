@@ -23,6 +23,9 @@ module NanoUI.Internal.Context.Types
   , emptyPrevFrame
   , OverlayState (..)
   , initialOverlayState
+  , ExplainState (..)
+  , initialExplainState
+  , ExplainedNode (..)
   , AnimationState (..)
   , initialAnimationState
   , ScrollTuning (..)
@@ -83,7 +86,7 @@ import NanoUI.Internal.Id (IdContext, WidgetId, hashWidgetId)
 import NanoUI.Internal.Input (UiCursorKind)
 import NanoUI.Internal.Layout.Arena (DirTag, LayoutCache, NodeArena)
 import NanoUI.Internal.Store (WidgetStore)
-import NanoUI.Internal.Style (FontStyle, FontVariant, FontWeight, Layout, Theme)
+import NanoUI.Internal.Style (FontStyle, FontVariant, FontWeight, Layout, Padding, Theme)
 import NanoUI.Widgets.TextBuffer (Cursor)
 import NanoUI.Widgets.TextCommand (TextCommand)
 import NanoUI.Internal.Types
@@ -319,6 +322,41 @@ initialOverlayState = OverlayState
   , osPrevFloatingOrder = []
   , osPrevMenuRects = []
   }
+
+-- | The layout overlay ('NanoUI.Internal.Frame.Explain'): whether it is on,
+-- and what the last frame drew with it on, to diff the next frame against.
+data ExplainState = ExplainState
+  { esOn :: !Bool
+  , esLayers :: ![(Int, [(Rect, Rect, Int)])]
+  -- ^ Each layer, the page's (keyed -1) first and then the floating panels'
+  -- (keyed by their root node) in paint order, with the outlines drawn over
+  -- it: each node's rect, the clip it was cut to, and its depth in the layer.
+  , esHover :: !(Maybe (ExplainedNode, Rect))
+  -- ^ The node under the pointer, and the clip its highlight was cut to.
+  }
+
+-- | The overlay off.
+initialExplainState :: ExplainState
+initialExplainState = ExplainState {esOn = False, esLayers = [], esHover = Nothing}
+
+-- | The layout node under the pointer while the layout overlay is on: the
+-- innermost node there in the topmost layer, the page or a floating panel.
+data ExplainedNode = ExplainedNode
+  { explainedKind :: !Text
+  -- ^ What the node is: @Container@, @Text@, @Button@, @ScrollContainer@
+  -- and so on, with how a container lays out its children after a comma:
+  -- its direction (@Container, row@), @stack@ for a stack
+  -- (@Container, stack@), and @wrap@ after the direction of one that wraps
+  -- (@Container, row, wrap@).
+  , explainedDepth :: !Int
+  -- ^ How many nodes it is inside, counted from the root of its layer, which
+  -- is 0. The overlay colours its outline by this.
+  , explainedRect :: !Rect
+  -- ^ Where it was laid out, in logical window coordinates after scrolling.
+  , explainedPadding :: !Padding
+  -- ^ Its padding. The content box is the rect less this.
+  }
+  deriving (Eq, Show)
 
 -- | Running animations, settled values with their leases, and per-frame
 -- keep-alive requests, keyed by widget or animation id.
@@ -692,6 +730,8 @@ data Context = Context
   -- texture, forced full, continuous present, or window expose). When False,
   -- a DamageClip frame culls the paint pass to the damaged region.
   , ctxPaintFull :: !(IORef Bool)
+  -- | The layout overlay, which outlines every node ('ExplainState').
+  , ctxExplain :: !(IORef ExplainState)
   , ctxTheme :: !(IORef Theme)
   -- ^ Base theme; scoped themes live in 'ctxThemeScopes'.
   , ctxThemeScopes :: !(IORef ThemeScopes)

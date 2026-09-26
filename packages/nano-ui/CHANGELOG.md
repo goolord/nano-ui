@@ -263,12 +263,15 @@
 - More cursor shapes from CSS's set, from `UiCursorNotAllowed` to the one-way
   resize arrows. `withCursorShape` shows a `CursorShape` over part of a view
   where its widgets pick none.
+- A layout overlay, like iced's `explain`: `explainLayout` outlines every
+  layout node and highlights the one under the pointer, which `explainedNode`
+  describes; `explainingLayout` says whether it is on.
 - The middle and side mouse buttons: `respMiddleClicked`, `respMiddlePressed`
   and `inputMouseMiddleDown` and its siblings, routed like a right click (a
   middle click closes a closable tab), and `inputMouseBackPressed` and
   `inputMouseForwardPressed`.
 - `NanoUI.Backend` has what a backend needs for the above:
-  `modifiersFromBits` and `cursorFallback`.
+  `modifiersFromBits`, `cursorFallback` and `setExplainLayout`.
 - `NanoUI.Testing.Harness` has `middleClickPair`.
 
 ### Changed

@@ -28,7 +28,8 @@ cabal test nano-ui-demo-test
 cabal test nano-ui-terminal-test
 ```
 
-`nano-ui-sdl-demo --help` lists the demo's options.
+`nano-ui-sdl-demo --help` lists the demo's options; `--explain` starts it
+with the layout overlay on, which the Debug panel also toggles.
 
 `nano-ui-demo-test` drives the demo, notepad, and log viewer in hidden windows
 and fails if a check does not hold.

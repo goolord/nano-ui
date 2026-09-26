@@ -1,5 +1,5 @@
 -- | RGFW frame statistics and the debug window body that shows them with the
--- core debug rows.
+-- core debug rows, and the layout overlay's toggle.
 module NanoUI.Rgfw.Internal.Debug
   ( RgfwDebugSnapshot (..)
   , RgfwFrameStats (..)
@@ -11,6 +11,7 @@ module NanoUI.Rgfw.Internal.Debug
   , debugWindowBody
   ) where
 
+import Control.Monad (when)
 import Data.IORef (IORef, newIORef, readIORef)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -21,10 +22,15 @@ import NanoUI
   ( Size (..)
   , Ui
   , V2 (..)
+  , checkbox
+  , explainLayout
+  , explainedNode
+  , explainingLayout
   , heading
   , inputMousePos
   , inputWindowSize
   , kvBlock
+  , scope
   , separator
   , uiIO
   )
@@ -39,6 +45,7 @@ import NanoUI.Internal.Debug
   , DebugSamplerRef
   , emptyCoreDebugSnapshot
   , formatDrawRows
+  , formatExplainRows
   , formatFpsRows
   , newDebugSampler
   , refreshDebugSnapshot
@@ -130,8 +137,10 @@ data RgfwDebugRows = RgfwDebugRows !RgfwDebugSnapshot !(Rows, Rows, Rows, Rows)
 
 type Rows = [(Text, Text)]
 
--- | Draw timing, geometry, display, and RTS rows for a snapshot. Place this
--- inside a window or panel; it does not create its own container.
+-- | Draw timing, geometry, display, and RTS rows for a snapshot, and a
+-- checkbox for the layout overlay, with the node under the pointer while it
+-- is on. Place this inside a window or panel; it does not create its own
+-- container.
 debugWindowBody :: Ui :> es => RgfwDebugSnapshot -> Eff es ()
 debugWindowBody snap = do
   ctx <- askContext
@@ -148,6 +157,9 @@ debugWindowBody snap = do
   separator
   heading "Layout & Draw"
   kvBlock layout
+  explain <- checkbox "Outline layout nodes" =<< explainingLayout
+  explainLayout explain
+  scope $ when explain (kvBlock . formatExplainRows =<< explainedNode)
   separator
   heading "Display & Scale"
   kvBlock display

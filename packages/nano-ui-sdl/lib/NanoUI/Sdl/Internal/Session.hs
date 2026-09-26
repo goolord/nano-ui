@@ -7,7 +7,7 @@ import Control.Exception (bracket)
 import Control.Monad (forM_, unless, void, when)
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Maybe (fromMaybe, isNothing)
-import NanoUI.Backend (Input (..), clearEphemeral, emptyInput)
+import NanoUI.Backend (Input (..), clearEphemeral, emptyInput, setExplainLayout)
 import NanoUI.Runner
 import NanoUI.Testing (Context, newPixelContext, registerImage, withTheme)
 import NanoUI.Sdl.Internal.Cursor (syncPointerCursor)
@@ -25,6 +25,7 @@ runSdlSession :: SdlOptions -> (Context -> SdlEnv -> Input -> Bool -> IO Bool) -
 runSdlSession options drawFn = do
   base <- newPixelContext
   ctx <- maybe (pure base) (withTheme base) (sdlAppTheme options)
+  setExplainLayout ctx (sdlExplainLayout options)
   forM_ (sdlAppImages options) $ \(RgbaImage image w h pixels) ->
     registerImage ctx image w h pixels >>= (`unless` fail "registerImage failed")
   withSdl options ctx $ \ctx0 env -> do

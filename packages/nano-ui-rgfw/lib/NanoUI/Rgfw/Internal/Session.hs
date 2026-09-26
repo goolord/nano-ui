@@ -46,6 +46,7 @@ import NanoUI.Backend
   , cursorFallback
   , emptyInput
   , modifiersFromBits
+  , setExplainLayout
   )
 import NanoUI.Internal.Context
   ( Context (..)
@@ -95,6 +96,9 @@ data RgfwOptions = RgfwOptions
   -- ^ UI scale. @0@ follows the monitor's scale.
   , optRefreshHz :: !Int
   -- ^ Frame pacing rate while animating. @0@ means 60.
+  , optExplainLayout :: !Bool
+  -- ^ Start with the layout overlay on, which outlines every layout node. A
+  -- view turns it on and off with @explainLayout@.
   }
 
 -- | Centred 1680x1040 window with the dark theme, monitor scale, and 60 Hz
@@ -109,6 +113,7 @@ defaultRgfwOptions =
     , optCenter = True
     , optScale  = 0.0
     , optRefreshHz = 0
+    , optExplainLayout = False
     }
 
 mapRgfwKey :: Word32 -> Maybe Key
@@ -226,6 +231,7 @@ runRgfwAppReduceCustom opts getThemeAndScale updateModel initialModel view = inB
       let ctx = withClipboard ctx0 R.readClipboardText R.writeClipboardText
       debugSampler <- newRgfwDebugSampler
       setHost ctx (RgfwDebugHost debugSampler)
+      setExplainLayout ctx (optExplainLayout opts)
       let font = getCozetteFont
           initInp = emptyInput {inputWindowSize = logicalSize initPhys initScale}
           -- Set the pointer shape only when the wanted kind changes.

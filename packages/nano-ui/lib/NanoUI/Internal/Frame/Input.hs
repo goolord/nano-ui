@@ -352,6 +352,8 @@ needsRedraw ctx prev inp = do
   overlay <- overlayMenuOpen ctx
   -- A tooltip placed at the pointer moves with it.
   follow <- popupFollowsPointer ctx
+  -- The layout overlay highlights whatever node the pointer is over.
+  explain <- getExplainLayout ctx
   let moved = inputMousePos prev /= inputMousePos inp
   if dirty
     || anim
@@ -360,6 +362,7 @@ needsRedraw ctx prev inp = do
     || inputPointerHeld inp
     || drag
     || ((overlay || follow) && moved)
+    || (explain && moved)
     then pure True
     else
       -- Idle: hover can only change when the pointer moved since the frame

@@ -50,6 +50,9 @@ module NanoUI.Internal.Monad
   , setClipboard
   , requestFrame
   , takeEscape
+  , explainLayout
+  , explainingLayout
+  , explainedNode
   , getScrollMetricsUi
   , setScrollOffsetUi
   , scrollToUi
@@ -491,6 +494,32 @@ takeEscape = do
       let ours = not taken && null menu && not dropdown
       when ours (markEscapeConsumed ctx)
       pure ours
+
+-- | Turn the layout overlay on or off: a one-pixel outline just inside every
+-- layout node, coloured by its depth, over the layer the node is in, and a
+-- tint on the node under the pointer with its content box outlined. It is
+-- for seeing how a view was laid out; layout and input never see it. Turning
+-- it on or off repaints the whole window, and calling this with what is
+-- already set does nothing, so a view can call it every frame:
+--
+-- > explainLayout =<< checkbox "Outline layout nodes" =<< explainingLayout
+--
+-- A backend's options can turn it on from the start (@sdlExplainLayout@,
+-- @optExplainLayout@), and 'setExplainLayout' in "NanoUI.Backend" on a
+-- context of your own.
+explainLayout :: Ui :> es => Bool -> Eff es ()
+explainLayout on = withContext (\ctx -> setExplainLayout ctx on)
+
+-- | Whether the layout overlay is on ('explainLayout').
+explainingLayout :: Ui :> es => Eff es Bool
+explainingLayout = withContext getExplainLayout
+
+-- | The node under the pointer while the layout overlay is on, as the last
+-- frame laid it out: what it is, where, and its padding. 'Nothing' with the
+-- overlay off or the pointer over no node. A debug panel shows it; a change
+-- asks for a frame of its own, so the panel keeps up with the pointer.
+explainedNode :: Ui :> es => Eff es (Maybe ExplainedNode)
+explainedNode = withContext getExplainedNode
 
 -- | The scroller's geometry as its last layout left it (its viewport, range
 -- and offset), or 'Nothing' before it has been laid out. The id is the one a

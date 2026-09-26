@@ -67,6 +67,7 @@
   environment still wins over all three.
 - The new cursor shapes, as SDL's system cursors or the nearest it has; help,
   zoom, copy, alias and context-menu show the arrow.
+- `sdlExplainLayout` opens a window with the layout overlay on.
 - The middle mouse button, and the side buttons as back and forward.
 
 ### Changed

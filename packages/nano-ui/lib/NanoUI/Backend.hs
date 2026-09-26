@@ -143,10 +143,19 @@ module NanoUI.Backend
   , Compact
   , compactHost
   , askCompact
+
+    -- * Debugging
+
+    -- | The layout overlay a view turns on with @explainLayout@, for a
+    -- backend option or a harness that turns it on from outside the view.
+  , setExplainLayout
+  , getExplainLayout
+  , getExplainedNode
   )
 where
 
 import NanoUI.Internal.Compact (Compact, askCompact, compactHost)
+import NanoUI.Internal.Context (getExplainLayout, getExplainedNode, setExplainLayout)
 import NanoUI.Internal.Draw (drawTextBox)
 import NanoUI.Internal.Font
 import NanoUI.Internal.Id

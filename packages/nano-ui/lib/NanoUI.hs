@@ -781,6 +781,18 @@ module NanoUI
   , inputKeysElem
   , foldInputKeys
   , takeEscape
+
+    -- * Debugging
+
+    -- | 'explainLayout' shows how a view was laid out: it outlines every
+    -- layout node, coloured by how deep the node is, and tints the node under
+    -- the pointer, whose rect and padding 'explainedNode' reports. Put the
+    -- toggle in a debug panel; the overlay changes nothing else, and with it
+    -- off a frame costs what it did.
+  , explainLayout
+  , explainingLayout
+  , explainedNode
+  , ExplainedNode (..)
   )
 where
 

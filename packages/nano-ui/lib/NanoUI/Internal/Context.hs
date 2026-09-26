@@ -53,6 +53,11 @@ module NanoUI.Internal.Context
   , withTheme
   , setTheme
   , getTheme
+  , ExplainState (..)
+  , ExplainedNode (..)
+  , setExplainLayout
+  , getExplainLayout
+  , getExplainedNode
   , withClipboard
   , enableMeasureCache
   , setHost
@@ -364,6 +369,28 @@ setTheme ctx th = do
 getTheme :: Context -> IO Theme
 getTheme ctx = readIORef (ctxTheme ctx)
 
+-- | Turn the layout overlay on or off: a one-pixel outline just inside every
+-- layout node, coloured by depth, and a tint on the node under the pointer
+-- ("NanoUI.Internal.Frame.Explain"). A change repaints the whole window and
+-- wakes the loop; setting what is already set does nothing.
+setExplainLayout :: Context -> Bool -> IO ()
+setExplainLayout ctx on = do
+  cur <- getExplainLayout ctx
+  when (cur /= on) $ do
+    writeIORef (ctxExplain ctx) initialExplainState {esOn = on}
+    damageFull ctx
+    markDirtyCovered ctx
+
+-- | Whether the layout overlay is on ('setExplainLayout').
+{-# INLINE getExplainLayout #-}
+getExplainLayout :: Context -> IO Bool
+getExplainLayout ctx = esOn <$> readIORef (ctxExplain ctx)
+
+-- | The node the pointer was over at the end of the last frame while the
+-- layout overlay is on. 'Nothing' while it is off, or with the pointer over
+-- no node.
+getExplainedNode :: Context -> IO (Maybe ExplainedNode)
+getExplainedNode ctx = fmap fst . esHover <$> readIORef (ctxExplain ctx)
 -- | Install clipboard read/write callbacks. 'Nothing' means no text is
 -- available; a write returns 'False' when refused or unsupported.
 withClipboard :: Context -> IO (Maybe Text) -> (Text -> IO Bool) -> Context
@@ -478,6 +505,7 @@ newContext = do
   ctxWrapCache <- newIORef (WrapCache 0 emptyGenCache)
   ctxLastMetricSource <- newIORef Nothing
   ctxPaintFull <- newIORef True
+  ctxExplain <- newIORef initialExplainState
   -- References above use their field names; font-dependent defaults stay
   -- explicit, including the resolvers that close over this context.
   let fm0 = monospaceMetrics 12

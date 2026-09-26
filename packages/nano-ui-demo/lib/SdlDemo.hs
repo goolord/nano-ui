@@ -52,7 +52,7 @@ import Control.Exception (SomeException, displayException, evaluate, try)
 import Control.Monad (forM, forM_, unless, void, when)
 import Control.Monad.IO.Class (liftIO)
 import Data.Foldable (for_, toList)
-import Data.List (elemIndex, intersperse)
+import Data.List (elemIndex)
 import Data.Maybe (catMaybes, fromMaybe, isJust, listToMaybe, mapMaybe)
 import Data.Primitive.SmallArray (SmallArray, indexSmallArray, sizeofSmallArray, smallArrayFromList)
 import Data.Word (Word64)
@@ -60,7 +60,7 @@ import NanoUI
 import NanoUI.Adornment qualified as A
 import NanoUI.Path qualified as P
 import NanoUI.Backend.Sdl
-import NanoUI.Internal.Debug (CoreDebugSnapshot (..))
+import NanoUI.Internal.Debug (CoreDebugSnapshot (..), formatExplainRows)
 import NanoUI.Diagrams
 import NanoUI.Internal.Monad (withContext)
 import NanoUI.Internal.Context (askHostIO, hostOrInit, setHost)
@@ -1044,10 +1044,17 @@ debugText s =
 
 debugBody :: DebugText -> NanoUI ()
 debugBody text =
-  columnWith (tight . gap 4 . minW 300 . fillW) . sequence_ . intersperse separator $
-    [ heading title >> mapM_ (uncurry kvMono) (rows text)
-    | (title, rows) <- [("Frame", dtFrame), ("Draw", dtDraw), ("Display", dtDisplay), ("Runtime", dtRuntime)]
-    ]
+  columnWith (tight . gap 4 . minW 300 . fillW) $ do
+    for_ [("Frame", dtFrame), ("Draw", dtDraw), ("Display", dtDisplay), ("Runtime", dtRuntime)] $ \(title, rows) -> do
+      heading title
+      mapM_ (uncurry kvMono) (rows text)
+      separator
+    -- The layout overlay outlines every node; the rows name the one under
+    -- the pointer.
+    heading "Layout"
+    explain <- checkbox "Outline layout nodes" =<< explainingLayout
+    explainLayout explain
+    scope $ when explain (mapM_ (uncurry kvMono) . formatExplainRows =<< explainedNode)
 
 ------------------------------------------------------------------------------
 -- §10  CLI plumbing
@@ -1066,6 +1073,7 @@ options :: [OptDescr (Maybe (SdlOptions -> SdlOptions))]
 options =
   [ Option ['v'] ["vsync"] (ReqArg (\s -> Just $ \o -> o {sdlAppVsync = s `elem` ["true", "True", "1"]}) "BOOL") "Enable or disable vsync (true/false, default: true)"
   , Option ['c', 'b', 'f'] ["continuous", "benchmark", "fps"] (NoArg (Just $ \o -> o {sdlAppContinuous = True, sdlAppVsync = False})) "Continuous unthrottled rendering, to show uncapped FPS (disables vsync)"
+  , Option [] ["explain"] (NoArg (Just $ \o -> o {sdlExplainLayout = True})) "Start with the layout overlay on, which outlines every layout node"
   , Option ['F'] ["fullscreen"] (NoArg (Just $ \o -> o {sdlWindowFullscreen = True})) "Launch window in fullscreen mode"
   , Option [] ["borderless"] (NoArg (Just $ \o -> o {sdlWindowDecorations = DecorationsFrame})) "Launch borderless window"
   , Option ['t'] ["always-on-top"] (NoArg (Just $ \o -> o {sdlWindowAlwaysOnTop = True})) "Keep window always on top"
