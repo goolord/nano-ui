@@ -1068,17 +1068,19 @@ hasPanelAncestor na p =
 
 -- | Left edge of column child @ci@ in a column of width @cw@ at @cx@. Grow and
 -- percent children already take the full width; alignment is for content
--- narrower than the column, not for shifting a full-width box past it.
+-- narrower than the column, not for shifting a full-width box past it, so a
+-- child is aligned at the width it takes there: text measured on one line
+-- wraps to the column.
 {-# INLINE columnChildX #-}
 columnChildX :: NodeArena -> NodeIdx -> Float -> Float -> IO Float
 columnChildX na ci cx cw = do
-  wTag <- axTag <$> getWidthSizing na ci
-  if wTag == SizingGrow || wTag == SizingPercent
+  wAx <- getWidthSizing na ci
+  if axTag wAx == SizingGrow || axTag wAx == SizingPercent
     then pure cx
     else do
       Rect _ _ iw _ <- getNodeRect na ci
       ax <- getAlignX na ci
-      pure $! alignX ax cx cw iw
+      pure $! alignX ax cx cw (resolveSize wAx iw cw)
 
 -- | The size a node takes along an axis where @avail@ is offered, from its
 -- sizing, its measured size @intrinsic@ and its limits.

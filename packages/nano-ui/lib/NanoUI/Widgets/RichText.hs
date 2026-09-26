@@ -79,7 +79,8 @@ richText :: Ui :> es => [Inline] -> Eff es (Maybe Text)
 richText = richTextWith id
 
 -- | 'richText' with a layout modifier, whose font choices are the default
--- for every piece.
+-- for every piece. Its horizontal alignment places each line in the
+-- paragraph: with 'alignEnd' every line ends at its right edge.
 richTextWith :: Ui :> es => (Layout -> Layout) -> [Inline] -> Eff es (Maybe Text)
 richTextWith f pieces = snd <$> richTextWith' f pieces
 
@@ -140,6 +141,7 @@ richTextWith' f pieces = do
   base <- f <$> askDefaultLayout
   theme <- uiTheme
   let styled = [(txt, pieceFont l, pieceColor theme l target, target) | Inline txt style target <- pieces, let l = style base]
+      align = layoutAlignX base
   Paragraphs cacheRef <- uiIO $ hostOrInit ctx (Paragraphs <$> newIORef IM.empty)
   gen <- uiIO (readIORef (ctxMetricGen ctx))
   let key =
@@ -149,7 +151,7 @@ richTextWith' f pieces = do
                 `hashWithSalt` fromEnum weight `hashWithSalt` fromEnum fstyle `hashWithSalt` fromEnum deco
                 `hashWithSalt` rgba `hashWithSalt` target
           )
-          gen
+          (gen `hashWithSalt` fromEnum align)
           styled
   cached <- uiIO (IM.lookup (intKey wid) <$> readIORef cacheRef)
   para0 <- case cached of
@@ -161,11 +163,11 @@ richTextWith' f pieces = do
           emptyLine = case resolved of
             (run, _) : _ -> (runLineHeight run, runAscent run)
             [] -> (fmLineHeight (ctxFontMetrics ctx), fmAscent (ctxFontMetrics ctx))
-      pure (Paragraph key runs tokens emptyLine (lineBoxes (layoutLines runs emptyLine 1e9 tokens)) (-1) [])
+      pure (Paragraph key runs tokens emptyLine (lineBoxes (layoutLines runs emptyLine AlignStart 1e9 tokens)) (-1) [])
   resp <- addWidget wid NodeDrawing T.empty 0 base
   let Rect rx ry rw _ = respRect resp
       runs = paraRuns para0
-      layoutAt width = layoutLines runs (paraEmptyLine para0) width (paraTokens para0)
+      layoutAt width = layoutLines runs (paraEmptyLine para0) align width (paraTokens para0)
       para
         | paraWidth para0 == rw = para0
         | otherwise = para0 {paraWidth = rw, paraLines = layoutAt rw}
@@ -280,11 +282,11 @@ measurePiece ctx (i, (txt, font, color, target)) = do
       w <- if kind == Break then pure 0 else lineWidthIO fm part
       pure (Token part i kind w)
 
--- | Greedy lines at @width@: a break goes between words only at spaces or
--- line breaks, spaces at a wrap are dropped, and a word wider than the line
--- takes a line of its own.
-layoutLines :: SmallArray Run -> (Float, Float) -> Float -> [Token] -> [Line]
-layoutLines runs (emptyH, emptyAscent) width = go 0 [] 0 [] True
+-- | Greedy lines at @width@, each placed in it as @align@ says: a break goes
+-- between words only at spaces or line breaks, spaces at a wrap are dropped,
+-- and a word wider than the line takes a line of its own.
+layoutLines :: SmallArray Run -> (Float, Float) -> AlignX -> Float -> [Token] -> [Line]
+layoutLines runs (emptyH, emptyAscent) align width = go 0 [] 0 [] True
   where
     -- @placed@ holds the line's tokens in reverse, @pending@ the spaces since
     -- its last word; @fresh@ whether the line starts after a wrap.
@@ -307,7 +309,11 @@ layoutLines runs (emptyH, emptyAscent) width = go 0 [] 0 [] True
                    in go top placed'' x'' [] False rest'
     place (acc, x) tok = ((x, tok) : acc, x + tokenWidth tok)
     finish top placed x =
-      let toks = reverse placed
+      let shift = case align of
+            AlignStart -> 0
+            AlignCenter -> (width - x) / 2
+            AlignEnd -> width - x
+          toks = reverse (if shift == 0 then placed else [(tx + shift, tok) | (tx, tok) <- placed])
           metrics = [indexSmallArray runs (tokenRun tok) | (_, tok) <- toks]
           (h, ascent) = case metrics of
             [] -> (emptyH, emptyAscent)

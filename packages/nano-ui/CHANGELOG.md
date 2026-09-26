@@ -668,6 +668,10 @@
 - A wrapped label keeps its indent and the runs of spaces inside its lines;
   a line ends at a run of spaces, which it drops. A label wider than its box
   used to have every run of spaces cut to one.
+- Text as wide as its content in a column, such as a right-aligned label, is
+  aligned at the width it wraps to there rather than its one-line width, which
+  could put it past the column's left edge. Rich text places each line as its
+  paragraph's horizontal alignment says.
 
 ### Removed
 

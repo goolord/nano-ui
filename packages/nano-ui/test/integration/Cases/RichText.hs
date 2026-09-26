@@ -1,12 +1,17 @@
 module Cases.RichText (tests) where
 
 import Spec
+import Data.Foldable (toList)
+import Data.List (groupBy)
 import Data.Text qualified as T
+import NanoUI.Internal.Context (CustomDrawingEntry (..), lookupCustomDrawing)
+import NanoUI.Internal.Widgets.Custom (mkCustomDrawContext)
 
 tests :: [Spec]
 tests =
   [ spec "rich-text-wrap" runRichTextWrapTest
   , spec "rich-text-link" runRichTextLinkTest
+  , spec "rich-text-align" runRichTextAlignTest
   ]
 
 -- | A paragraph wraps at its column's width, taking a line's height per line,
@@ -61,3 +66,33 @@ runRichTextLinkTest ctx failed = do
   assertEq failed Nothing textClick
   plainCursor <- cursorKindIs ctx inp0 {inputMousePos = onText} UiCursorPointer
   assert failed (not plainCursor)
+
+-- | A paragraph's lines, wrapped or not, sit in its box as its alignment
+-- says: each ends at the box's right edge for 'alignEnd', and is centred in
+-- it for 'alignCenter'. One as wide as its text sits in its column as the
+-- same alignment says, at the width it wraps to there, so its lines land
+-- where a full-width one's do.
+runRichTextAlignTest :: Context -> IORef Int -> IO ()
+runRichTextAlignTest ctx failed = do
+  let inp = withInput 400 400
+      fm = ctxFontMetrics ctx
+      paragraph = [inlineText "a few words of different lengths ", strong "wrapping", " over several lines here"]
+      -- Each drawn line's left and right edges, and the paragraph's box.
+      linesOf width align = do
+        resp <- warmup2 ctx inp (columnWith (fixedW 200) (fst <$> richTextWith' (width . align) paragraph))
+        let wid = respId resp
+            r = respRect resp
+        Just entry <- lookupCustomDrawing ctx wid
+        cdc <- mkCustomDrawContext ctx fm wid
+        extents <- forM [(x, y, t) | DrawTextStyled x y _ t _ <- toList (cdrBuild entry cdc r)] $ \(x, y, t) ->
+          (\w -> (y, x, x + w)) <$> lineWidthIO fm t
+        let lines' = groupBy (\(a, _, _) (b, _, _) -> a == b) extents
+        pure (r, [(minimum [x0 | (_, x0, _) <- l], maximum [x1 | (_, _, x1) <- l]) | l <- lines'])
+  forM_ [(alignEnd, 1), (alignCenter, 0.5)] $ \(align, at :: Float) -> do
+    (Rect rx _ rw _, full) <- linesOf fillW align
+    (_, fitted) <- linesOf id align
+    assert failed (length full > 1)
+    forM_ full $ \(x0, x1) ->
+      assertEq failed (round (rx + at * rw) :: Int) (round (x0 + at * (x1 - x0)))
+    assertEq failed full fitted
+
