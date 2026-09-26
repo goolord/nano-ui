@@ -30,7 +30,7 @@ import Foreign.Ptr (Ptr)
 import Foreign.Storable (pokeByteOff)
 import NanoUI.Internal.Draw.Arena
 import NanoUI.Internal.Draw.Types (DrawArena (..), LineCap (..), LineJoin (..), Shade (..), glyphAtlasTextureId, indexSize, vertexSize)
-import NanoUI.Internal.Path (miterOffset)
+import NanoUI.Internal.Path (miterOffset, shoelace)
 import NanoUI.Internal.SIMD
 import NanoUI.Internal.Types (Color (..), Rect (..), clamp, forUpTo_, onGrid)
 
@@ -669,13 +669,7 @@ polygonAAFrom da rx ry pts rings tris shade
     px i = indexPrimArray pts (2 * i)
     py i = indexPrimArray pts (2 * i + 1)
     -- The outline's area, whose sign says which way the rings wind.
-    !area = shoelace 0 0
-    !outlineEnd = if nr >= 1 then ringAt 1 else 0
-    shoelace !i !acc
-      | i >= outlineEnd = acc
-      | otherwise =
-          let !j = if i + 1 >= outlineEnd then 0 else i + 1
-           in shoelace (i + 1) (acc + px i * py j - px j * py i)
+    !area = shoelace (if nr >= 1 then ringAt 1 else 0) (\i -> (px i, py i))
 
 -- | Stroke a polyline @w@ wide with anti-aliased sides. @pts@ holds x/y
 -- pairs; @closed@ joins the last point back to the first, which should not

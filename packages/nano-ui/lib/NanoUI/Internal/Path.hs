@@ -47,6 +47,7 @@ module NanoUI.Internal.Path
     -- * Rings
   , Rings (..)
   , ringCount
+  , shoelace
   , buildRings
   , cleanRings
     -- * Flattening
@@ -191,9 +192,61 @@ arcTo (V2 rx ry) rot large clockwise (V2 x y) = Path [SegArcTo rx ry rot large c
 close :: Path
 close = Path [SegClose]
 
+--------------------------------------------------------------------------------
+-- Shapes
+--------------------------------------------------------------------------------
+
+-- | A rectangle's outline, clockwise on screen from its top left corner.
+rect :: Rect -> Path
+rect (Rect x y w h) =
+  Path [SegMove x y, SegLine (x + w) y, SegLine (x + w) (y + h), SegLine x (y + h), SegClose]
+
+-- | A rounded rectangle's outline and its corner radius, kept within half
+-- the shorter side, clockwise on screen from the top left corner's end.
+roundedRect :: Rect -> Float -> Path
+roundedRect box radius = roundedRectCorners box radius radius radius radius
+
+-- | A rectangle with a radius for each corner: top left, top right, bottom
+-- right and bottom left, as CSS's @border-radius@ lists them. Where two
+-- corners on a side would overlap, every radius shrinks by the same factor
+-- until they meet, as CSS shrinks them; a negative radius is square.
+roundedRectCorners :: Rect -> Float -> Float -> Float -> Float -> Path
+roundedRectCorners box@(Rect x y w h) tl0 tr0 br0 bl0
+  | tl <= 0 && tr <= 0 && br <= 0 && bl <= 0 = rect box
+  | otherwise =
+      Path
+        [ SegMove (x + tl) y
+        , corner (x + w - tr) (y + tr) tr (-pi / 2)
+        , corner (x + w - br) (y + h - br) br 0
+        , corner (x + bl) (y + h - bl) bl (pi / 2)
+        , corner (x + tl) (y + tl) tl pi
+        , SegClose
+        ]
+  where
+    positive r = if r > 0 then r else 0
+    aw = abs w
+    ah = abs h
+    -- How far a side's two radii shrink to fit along it.
+    fitSide side a b = let both = positive a + positive b in if both > side then side / both else 1
+    shrink = min (min (fitSide aw tl0 tr0) (fitSide ah tr0 br0)) (min (fitSide aw br0 bl0) (fitSide ah bl0 tl0))
+    fit r = positive r * shrink
+    tl = fit tl0
+    tr = fit tr0
+    br = fit br0
+    bl = fit bl0
+    -- A quarter turn round a corner's centre, or a line to its point.
+    corner cx cy r a0
+      | r > 0 = SegArc cx cy r r 0 a0 (pi / 2)
+      | otherwise = SegLine cx cy
+
 -- | A circle: its centre and radius.
 circle :: V2 -> Float -> Path
 circle c r = ellipse c (V2 r r)
+
+-- | An ellipse: its centre and its x and y radii. Rotate one with
+-- 'NanoUI.Path.ellipticalArc' or a transform.
+ellipse :: V2 -> V2 -> Path
+ellipse (V2 cx cy) (V2 rx ry) = Path [SegMove (cx + abs rx) cy, SegArc cx cy rx ry 0 0 (2 * pi), SegClose]
 
 -- | A closed polygon through the points.
 polygon :: [V2] -> Path
@@ -649,23 +702,19 @@ triangulate vs
 
 -- | Index triples that cover a polygon with holes: @vs@ holds its rings'
 -- points, one ring after another, and @rings@ where each ring starts and
--- the last ends. The first ring is its outline, wound either way, and the
--- rest are holes inside it that touch neither it nor each other, wound the
--- other way. Each hole is joined to the outline by a cut to a point it can
--- see, as in Eberly's \"Triangulation by Ear Clipping\" and mapbox's
--- earcut, and the one ring that makes is ear clipped.
+-- the last ends. The first ring is its outline, and the rest are holes
+-- inside it that touch neither it nor each other. A lone outline may wind
+-- either way; with holes, the outline winds with a positive 'ringArea' and
+-- the holes negative, as 'fillPathOps' winds them. Each hole is joined to
+-- the outline by a cut to a point it can see, as in Eberly's
+-- \"Triangulation by Ear Clipping\" and mapbox's earcut, and the one ring
+-- that makes is ear clipped.
 triangulateRings :: PrimArray Float -> PrimArray Int -> PrimArray Int
 triangulateRings vs rings
   | sizeofPrimArray rings <= 2 = triangulate vs
-  | otherwise = earClip vs (primArrayFromList (bridgeHoles vs outline holes))
+  | otherwise = earClip vs (primArrayFromList (bridgeHoles vs (ringAt 0) (map ringAt [1 .. sizeofPrimArray rings - 2])))
   where
     ringAt r = [indexPrimArray rings r .. indexPrimArray rings (r + 1) - 1]
-    -- The outline wound as the holes are joined to it: with a positive
-    -- 'signedArea', and the holes negative.
-    outline = orient True (ringAt 0)
-    holes = [orient False (ringAt r) | r <- [1 .. sizeofPrimArray rings - 2]]
-    orient positive ix = if (indexArea ix >= 0) == positive then ix else reverse ix
-    indexArea ix = sum [cross (pointAt vs i) (pointAt vs j) | (i, j) <- zip ix (drop 1 ix ++ take 1 ix)]
 
 -- | The outline's point indices with each hole spliced in, leftmost hole
 -- first: from the outline point a cut from the hole's leftmost point can
@@ -775,19 +824,22 @@ pointAt vs i =
 -- | The shoelace area of the points of @vs@ that @ix@ lists, in order:
 -- positive for a ring clockwise on screen.
 signedArea :: PrimArray Float -> PrimArray Int -> Float
-signedArea vs ix =
-  let n = sizeofPrimArray ix
-      at k = pointAt vs (indexPrimArray ix k)
-   in foldl' (\acc k -> acc + cross (at k) (at ((k + 1) `mod` n)) / 2) 0 [0 .. n - 1]
+signedArea vs ix = shoelace (sizeofPrimArray ix) (pointAt vs . indexPrimArray ix)
 
 -- | 'signedArea' of a ring's points in their own order.
 ringArea :: PrimArray Float -> Float
-ringArea vs = go 0 0
+ringArea vs = shoelace (sizeofPrimArray vs `div` 2) (pointAt vs)
+
+-- | The shoelace area of @n@ points, the @k@th at @at k@: positive for a
+-- ring clockwise on screen. The polygon emitter tells a ring's winding by
+-- it.
+{-# INLINE shoelace #-}
+shoelace :: Int -> (Int -> (Float, Float)) -> Float
+shoelace n at = go 0 0
   where
-    n = sizeofPrimArray vs `div` 2
-    go !i !acc
-      | i >= n = acc / 2
-      | otherwise = go (i + 1) (acc + cross (pointAt vs i) (pointAt vs (if i + 1 >= n then 0 else i + 1)))
+    go !k !acc
+      | k >= n = acc / 2
+      | otherwise = go (k + 1) (acc + cross (at k) (at (if k + 1 >= n then 0 else k + 1)))
 
 cross :: (Float, Float) -> (Float, Float) -> Float
 cross (x0, y0) (x1, y1) = x0 * y1 - x1 * y0
@@ -1003,8 +1055,9 @@ ringStarts [r] = runPrimArray $ do
   pure starts
 ringStarts rs = primArrayFromList (scanl (+) 0 [sizeofPrimArray r `div` 2 | r <- rs])
 
--- | The rings' outlines, each with the holes the fill rule cuts in it,
--- wound the other way. A ring is inside another when all of its points
+-- | The rings' outlines, each with the holes the fill rule cuts in it:
+-- where there are holes, the outline wound with a positive 'ringArea' and
+-- the holes the other way. A ring is inside another when all of its points
 -- are; the path winds round the points just inside a ring once more, one
 -- way or the other by the ring's winding, than round those just outside,
 -- and the rule says which of them it fills. A filled ring with nothing
@@ -1013,7 +1066,7 @@ ringStarts rs = primArrayFromList (scanl (+) 0 [sizeofPrimArray r `div` 2 | r <-
 -- inside nor outside each other, each fill on their own.
 fillComponents :: FillRule -> [PrimArray Float] -> [(PrimArray Float, [PrimArray Float])]
 fillComponents _ [r] = [(r, [])]
-fillComponents rule rs = [(orient True (ring i), map (orient False . ring) (holesOf i)) | i <- ids, outline i]
+fillComponents rule rs = [(orient True i, map (orient False) (holesOf i)) | i <- ids, outline i]
   where
     count = length rs
     ids = [0 .. count - 1]
@@ -1038,9 +1091,9 @@ fillComponents rule rs = [(orient True (ring i), map (orient False . ring) (hole
     outline i = filled i && maybe True (not . filled) (parent i)
     children i = [j | j <- ids, parent j == Just i]
     holesOf i = concat [if filled c then holesOf c else [c] | c <- children i]
-    orient positive r
-      | (ringArea r >= 0) == positive = r
-      | otherwise = reversePoints r
+    orient positive i
+      | (areaOf i >= 0) == positive = ring i
+      | otherwise = reversePoints (ring i)
     points r = [pointAt r i | i <- [0 .. sizeofPrimArray r `div` 2 - 1]]
     bounds r =
       let xs = [x | (x, _) <- points r]
@@ -1264,6 +1317,10 @@ dashes pattern0 offset closed pts
 maxDashes :: Int
 maxDashes = 4096
 
+--------------------------------------------------------------------------------
+-- Ops under a transform
+--------------------------------------------------------------------------------
+
 -- | An op drawn under transform @t@, flattening what it has to within
 -- @tol@. A rect keeps its op under a transform that keeps its sides level
 -- and upright (a scale, a flip, a quarter turn), and a rounded rect under
@@ -1367,11 +1424,12 @@ transformOp tol t@(Transform a b c d _ _) op
     -- A rect with no size, for which a rounded rect's own op draws nothing.
     empty (Rect _ _ w h) = not (w > 0 && h > 0)
     -- Zero but for rounding: a half turn's sine is not quite 0.
-    small v = abs v <= 1e-6 * maximum (map abs [a, b, c, d])
+    rounding = 1e-6 * maximum (map abs [a, b, c, d])
+    small v = abs v <= rounding
     -- No rotation or skew.
     levelAxes = small b && small c
     keepsRects = levelAxes || (small a && small d)
-    uniform = abs (abs a + abs b - abs c - abs d) <= 1e-6 * maximum (map abs [a, b, c, d])
+    uniform = small (abs a + abs b - abs c - abs d)
     -- Rotation and a uniform scale, perhaps with a flip.
     conformal = (a == d && b == negate c) || (a == negate d && b == c)
     line mk x0 y0 x1 y1 w col =
@@ -1386,8 +1444,9 @@ transformOp tol t@(Transform a b c d _ _) op
     corners (Rect x y w h) = [applyTransform t px py | (px, py) <- [(x, y), (x + w, y), (x + w, y + h), (x, y + h)]]
     -- The bounding box of the rect's transformed corners.
     box r =
-      let xs = map fst (corners r)
-          ys = map snd (corners r)
+      let cs = corners r
+          xs = map fst cs
+          ys = map snd cs
        in Rect (minimum xs) (minimum ys) (maximum xs - minimum xs) (maximum ys - minimum ys)
     minimumOn f = foldr1 (\p q -> if f p <= f q then p else q)
     -- An image turned by @angle@ about its rect's centre, under the
@@ -1409,51 +1468,3 @@ transformOp tol t@(Transform a b c d _ _) op
           h' = h * sqrt (eyX * eyX + eyY * eyY)
           (v0', v1') = if a * d - b * c < 0 then (v1, v0) else (v0, v1)
        in DrawImage (Rect (cx - w' / 2) (cy - h' / 2) w' h') (atan2 exY exX) tex u0 v0' u1 v1' col
-
--- | A rectangle's outline, clockwise on screen from its top left corner.
-rect :: Rect -> Path
-rect (Rect x y w h) =
-  Path [SegMove x y, SegLine (x + w) y, SegLine (x + w) (y + h), SegLine x (y + h), SegClose]
-
--- | A rounded rectangle's outline and its corner radius, kept within half
--- the shorter side, clockwise on screen from the top left corner's end.
-roundedRect :: Rect -> Float -> Path
-roundedRect box radius = roundedRectCorners box radius radius radius radius
-
--- | A rectangle with a radius for each corner: top left, top right, bottom
--- right and bottom left, as CSS's @border-radius@ lists them. Where two
--- corners on a side would overlap, every radius shrinks by the same factor
--- until they meet, as CSS shrinks them; a negative radius is square.
-roundedRectCorners :: Rect -> Float -> Float -> Float -> Float -> Path
-roundedRectCorners box@(Rect x y w h) tl0 tr0 br0 bl0
-  | tl <= 0 && tr <= 0 && br <= 0 && bl <= 0 = rect box
-  | otherwise =
-      Path
-        [ SegMove (x + tl) y
-        , corner (x + w - tr) (y + tr) tr (-pi / 2)
-        , corner (x + w - br) (y + h - br) br 0
-        , corner (x + bl) (y + h - bl) bl (pi / 2)
-        , corner (x + tl) (y + tl) tl pi
-        , SegClose
-        ]
-  where
-    positive r = if r > 0 then r else 0
-    aw = abs w
-    ah = abs h
-    -- How far a side's two radii shrink to fit along it.
-    fitSide side a b = let both = positive a + positive b in if both > side then side / both else 1
-    shrink = min (min (fitSide aw tl0 tr0) (fitSide ah tr0 br0)) (min (fitSide aw br0 bl0) (fitSide ah bl0 tl0))
-    fit r = positive r * shrink
-    tl = fit tl0
-    tr = fit tr0
-    br = fit br0
-    bl = fit bl0
-    -- A quarter turn round a corner's centre, or a line to its point.
-    corner cx cy r a0
-      | r > 0 = SegArc cx cy r r 0 a0 (pi / 2)
-      | otherwise = SegLine cx cy
-
--- | An ellipse: its centre and its x and y radii. Rotate one with
--- 'NanoUI.Path.ellipticalArc' or a transform.
-ellipse :: V2 -> V2 -> Path
-ellipse (V2 cx cy) (V2 rx ry) = Path [SegMove (cx + abs rx) cy, SegArc cx cy rx ry 0 0 (2 * pi), SegClose]

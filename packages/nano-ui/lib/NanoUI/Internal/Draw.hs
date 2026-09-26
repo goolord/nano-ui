@@ -339,9 +339,7 @@ emitDrawOps da fm size resolve imageUv ops = go 0 []
     !n = sizeofSmallArray ops
     -- The clips the open 'PushClip's replaced, innermost first.
     go !i saved
-      | i >= n = case reverse saved of
-          outermost : _ -> setClip da outermost
-          [] -> pure ()
+      | i >= n = unless (null saved) (setClip da (last saved))
       | otherwise = case indexSmallArray ops i of
           PushClip r -> do
             prev <- currentClip da
