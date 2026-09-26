@@ -17,10 +17,13 @@
   resting thumb, so an `inputStyle` or `windowStyle` that restyles one
   restyles both.
 - A widget drawn inside another is on top of it for hover and presses.
-- `FillPolygon` and `StrokePolyline` draw ops: a simple polygon, given with
-  its triangulation, and a polyline with mitered joins, both anti-aliased
-  along their outline only. A shape cut into `FillTriangle`s would show
-  faint seams where the triangles meet.
+- `FillPolygon`, `StrokePolyline`, `DrawTextAligned`, `PushClip` and
+  `PopClip` draw ops, which the canvas builds its paths, text and clips
+  from: a polygon with holes, given with its triangulation, and a polyline
+  with caps and joins, both anti-aliased along their outline only and in one
+  colour or a colour a point (`Shade`), text in a font placed by alignment,
+  and a clip round the ops between a push and its pop. Draw them through the
+  canvas rather than by hand.
 - What a widget that works out its own input needs, without
   `NanoUI.Context`: `lastRect`, where a widget was laid out last frame, which
   is the rect a list that scrolls itself hit-tests this frame's pointer
@@ -243,11 +246,44 @@
   `NanoUI.Testing` gives the pieces, which a backend that draws text outside
   the draw commands must clip it to, and `damagePieces` is how they are made.
 - `NanoUI.Path`, for qualified import: paths of lines, curves, arcs and
-  shapes (`moveTo`, `cubicTo`, `arc`, `circle` and more), which a canvas fills
-  with `drawPath` and strokes with `drawStrokePath` or `drawStrokePathCapped`.
+  shapes (`moveTo`, `cubicTo`, `arc`, `circle`, `roundedRectCorners` with a
+  radius per corner, and more), which a canvas fills with `drawPath` and
+  strokes with `drawStrokePath`. `arcTo` is SVG's `A` command, not HTML
+  canvas's `arcTo`.
+- Fills by a fill rule: `drawPathWith P.EvenOdd` or `P.NonZero` fills a path
+  whose subpaths nest, cutting a hole where the rule leaves one unfilled, so
+  a ring, a glyph's counter or a frame is one path instead of a shape and
+  its hole painted over in the background colour. Subpaths that cross each
+  other fill on their own, and a subpath that crosses itself may fill only
+  in part.
+- One stroke value: `drawStrokePathWith (P.stroke w) {..}` with a
+  `LineCap` (`ButtCap`, `SquareCap`, `RoundCap`), a `LineJoin`
+  (`MiterJoin`, `RoundJoin`, `BevelJoin`), a miter limit (4 by default, as
+  SVG's) past which a miter is beveled, and a dash pattern with an offset.
+  Each dash is capped, a zero-length dash with round caps is a dot, and a
+  pattern that would cut a subpath into more than 4096 dashes draws it
+  solid. Round caps and joins are part of the line, so a translucent line
+  is even all along.
+- Paints: `P.Solid` and `P.Linear`, a linear gradient with colour stops, for
+  fills and strokes. A gradient is exact to its stops (each point of the
+  fill carries its colour, and the fill is cut where the gradient bends),
+  and turns and scales with a transform; a stroke takes the colour along its
+  centre line.
 - `withTransform` draws a canvas block through a `Transform` (`translate`,
-  `rotate`, `scale`, `affine`, composed with `<>`), and `runCanvasFor` runs a
-  custom widget's canvas with its curves flattened for its display.
+  `rotate`, `scale`, `affine`, composed with `<>`, undone with `invert`),
+  and `runCanvasFor` runs a custom widget's canvas with its curves flattened
+  for its display. A four-corner gradient turns with its rect, and text
+  scales its font with the transform.
+- `withClip` clips a canvas block to a rect, inside the widget's own clip;
+  under a turn, to the box round the turned rect.
+- `drawTextWith` draws canvas text in a `TextFont` of its own, placed on a
+  point by alignment as `drawText` places it.
+- `canvasConfigured` and `CanvasConfig`: a canvas with a content key, a
+  cursor and pointer tracking, and `drawContext`, with which a canvas block
+  reads its widget's hover, press and focus state, theme and font.
+- `NanoUI.Internal.Canvas` holds the canvas's representation (`CanvasM`,
+  `CanvasEnv`, `emitOp`, `emitWith`, `runCanvasScaled`) for tools that build
+  ops of their own; `NanoUI.Widgets.Custom` exports the API.
 - `stack` and `stackWith` layer their children in one box. The `wrap`
   modifier flows a row onto new lines, or a column into new columns, `lineGap`
   apart, and `pinAt x y` places a node at an offset over its siblings.
@@ -610,6 +646,8 @@
   constructors, for the additions above.
 - `setTheme` and `setUiTheme` stop a context following the system's
   appearance.
+- `runCanvas` is deprecated: it flattens curves for a guessed display
+  scale. Use `runCanvasFor` with the widget's draw context, or `canvas`.
 
 ### Fixed
 

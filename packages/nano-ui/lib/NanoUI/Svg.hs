@@ -134,18 +134,11 @@ strokeWalk w cap join miterLimit contours point end =
         case join of
           JoinRound -> disc v
           JoinBevel -> bevel
-          JoinMiter -> do
-            let mx = n1x + n2x
-                my = n1y + n2y
-                mlen2 = mx * mx + my * my
-                -- The miter point sits along the bisector at hw / cos(half angle).
-                scale = if mlen2 < 1e-9 then 0 else 2 * hw * hw / mlen2
-                ratio = if mlen2 < 1e-9 then 1 / 0 else sqrt (scale * scale * mlen2) / hw
-            if ratio > miterLimit
-              then bevel
-              else do
-                quad v (Point (vx + n1x) (vy + n1y)) (Point (vx + mx * scale) (vy + my * scale)) (Point (vx + n2x) (vy + n2y))
-                quad v (Point (vx - n1x) (vy - n1y)) (Point (vx - mx * scale) (vy - my * scale)) (Point (vx - n2x) (vy - n2y))
+          JoinMiter -> case P.miterOffset miterLimit (n1x / hw) (n1y / hw) (n2x / hw) (n2y / hw) of
+            Nothing -> bevel
+            Just (mx, my) -> do
+              quad v (Point (vx + n1x) (vy + n1y)) (Point (vx + mx * hw) (vy + my * hw)) (Point (vx + n2x) (vy + n2y))
+              quad v (Point (vx - n1x) (vy - n1y)) (Point (vx - mx * hw) (vy - my * hw)) (Point (vx - n2x) (vy - n2y))
       endCap inner e@(Point ex ey) = case cap of
         CapButt -> pure ()
         CapRound -> disc e
@@ -301,9 +294,9 @@ coverPolygons width height cov rule rings@(Rings pts starts _) = do
   let samples = 5 :: Int
       weight = 1 / fromIntegral samples :: Float
       inside :: Int -> Bool
-      inside w = case rule of
-        NonZero -> w /= 0
-        EvenOdd -> odd w
+      inside = P.fillsWinding $ case rule of
+        NonZero -> P.NonZero
+        EvenOdd -> P.EvenOdd
       add i v = readPrimArray cov i >>= \c -> writePrimArray cov i (c + v)
       spanCover base xa0 xb0 = do
         let xa = clamp 0 (fromIntegral width) xa0

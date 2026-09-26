@@ -369,7 +369,7 @@ paneGrid cfg = do
         when (ringPane && not lifted) $
           forM_ (M.lookup focused visibleRegions) $ \r ->
             uiIO $ registerCustomDrawing ctx wid (contentKey [1, rectX r, rectY r, rectW r, rectH r]) $ \cdc _ ->
-              runCanvas (drawStrokeRoundedRect (rectInflate (-2) r) 2 1.5 (themeAccent (cdcTheme cdc)))
+              runCanvasFor cdc (drawStrokeRoundedRect (rectInflate (-2) r) 2 1.5 (themeAccent (cdcTheme cdc)))
 
   -- Keys for the focused grid. Escape restores a maximized pane unless
   -- something earlier (a popup in a pane) took it, and then claims it.
@@ -521,7 +521,7 @@ dividerWidget env axis =
       defaultCustomWidgetSpec
         { widgetLayout = axisLay axis (Fixed (geGutter env))
         , widgetContent = contentKey [if axis == AxisV then 1 else 2, thickness, leeway]
-        , widgetDraw = \cdc rect -> runCanvas $ do
+        , widgetDraw = \cdc rect -> runCanvasFor cdc $ do
             let theme = cdcTheme cdc
                 panel = themePanel theme
                 -- The gutter as a vertical one; its centre line as a
@@ -547,7 +547,7 @@ dividerWidget env axis =
 -- translucent and offset from the pointer, so the preview stays visible.
 drawDragOverlay :: (Ui :> es) => GridEnv es -> WidgetId -> V2 -> Maybe Rect -> Eff es ()
 drawDragOverlay env wid (V2 mx my) zone =
-  uiIO $ registerCustomDrawing (geCtx env) wid key $ \cdc _ -> runCanvas $ do
+  uiIO $ registerCustomDrawing (geCtx env) wid key $ \cdc _ -> runCanvasFor cdc $ do
     let theme = cdcTheme cdc
         accent = themeAccent theme
         shortTitle = if T.length title > 12 then T.take 11 title <> "…" else title

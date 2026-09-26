@@ -83,7 +83,7 @@ runVersionedDrawingDamageTest ctx failed = do
       ui version = column $ do
         _ <- label "Other"
         drawingVersioned version (fixedWH 80 40) $ \r ->
-          runCanvas (drawRect r (colorRGBA 255 0 0 255))
+          smallArrayFromList [FillRect r (colorRGBA 255 0 0 255)]
   resp <- warmup2 ctx inp (ui 1)
   _ <- takeDamage ctx
   _ <- runFrame ctx inp (ui 2)

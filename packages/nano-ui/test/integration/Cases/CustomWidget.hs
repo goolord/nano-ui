@@ -130,7 +130,7 @@ blue = colorRGBA 0 0 255 255
 runCustomWidgetContentDamageTest :: Context -> IORef Int -> IO ()
 runCustomWidgetContentDamageTest ctx failed = do
   let inp = withInputOff 400 300
-      ui on = afterLabel 0 (\_ r -> runCanvas (drawRect r (if on then red else blue)))
+      ui on = afterLabel 0 (\cdc r -> runCanvasFor cdc (drawRect r (if on then red else blue)))
   resp <- warmup2 ctx inp (ui False)
   _ <- takeDamage ctx
   quads <- frameQuads ctx inp (ui True)
@@ -153,7 +153,7 @@ runCustomWidgetContentDamageTest ctx failed = do
 runCustomWidgetContentKeyTest :: Context -> IORef Int -> IO ()
 runCustomWidgetContentKeyTest ctx failed = do
   let inp = withInputOff 400 300
-      ui key on = afterLabel key (\_ r -> runCanvas (drawRect r (if on then red else blue)))
+      ui key on = afterLabel key (\cdc r -> runCanvasFor cdc (drawRect r (if on then red else blue)))
   resp <- warmup2 ctx inp (ui 1 False)
   _ <- takeDamage ctx
 
@@ -179,7 +179,7 @@ runCustomWidgetContentKeyTest ctx failed = do
         disabledWhen off $ fst <$> customWidget defaultCustomWidgetSpec
           { widgetLayout = fixedWH 80 40 defaultLayout
           , widgetContent = 4
-          , widgetDraw = \cdc r -> runCanvas (drawRect r (if cdcDisabled cdc then grey else blue))
+          , widgetDraw = \cdc r -> runCanvasFor cdc (drawRect r (if cdcDisabled cdc then grey else blue))
           }
   disabledCtx <- newContext
   dresp <- warmup2 disabledCtx inp (dimmable False)
@@ -198,7 +198,7 @@ runCustomWidgetContentKeyTest ctx failed = do
         fst <$> customWidget defaultCustomWidgetSpec
           { widgetLayout = fixedWH 80 40 defaultLayout
           , widgetContent = 5
-          , widgetDraw = \_ r -> runCanvas (drawRect r red)
+          , widgetDraw = \cdc r -> runCanvasFor cdc (drawRect r red)
           }
   settled <- warmup2 ctx inp (moved 40)
   let Rect _ my _ _ = respRect settled
@@ -210,7 +210,7 @@ runCustomWidgetContentKeyTest ctx failed = do
   -- through either theme entry point.
   let accent2 = colorRGBA 7 8 9 255
       accent3 = colorRGBA 11 12 13 255
-      themedUi = afterLabel 3 (\cdc r -> runCanvas (drawRect r (themeAccent (cdcTheme cdc))))
+      themedUi = afterLabel 3 (\cdc r -> runCanvasFor cdc (drawRect r (themeAccent (cdcTheme cdc))))
   _ <- warmup2 ctx inp themedUi
   theme0 <- getTheme ctx
   setTheme ctx theme0 {themeAccent = accent2}

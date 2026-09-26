@@ -41,13 +41,15 @@ import NanoUI
   , checkboxBoxSize
   , colorToWord32
   , columnWith
+  , CanvasConfig (..)
+  , canvasConfigured
   , cornerRadius
+  , defaultCanvasConfig
   , defaultLayout
   , drawCheckbox
   , drawCircle
   , drawRect
   , drawStrokeCircle
-  , drawingVersioned
   , fillH
   , fillW
   , fixedW
@@ -80,7 +82,6 @@ import NanoUI
   , restyle
   , richTextWith
   , rowWith
-  , runCanvas
   , scope
   , separator
   , setClipboard
@@ -354,7 +355,7 @@ listBlock env ty isTight items = do
     Bullet _ -> pure []
   let markerW = maximum (lineH : [side | any (isJust . itemTask) items] ++ numberWs)
       ink = fromMaybe (styleFg (themePanel theme)) (layoutFontColor (envText env defaultLayout))
-      marker v h shape = void (drawingVersioned v (fixedWH markerW h) (\(Rect x y _ _) -> runCanvas (shape x y)))
+      marker v h shape = void (canvasConfigured defaultCanvasConfig {canvasLayout = fixedWH markerW h defaultLayout, canvasContent = v} (\(Rect x y _ _) -> shape x y))
       bullet = marker (version 1 (envDepth env, colorToWord32 ink)) lineH $ \x y ->
         let c@(V2 cx cy) = V2 (x + markerW / 2) (y + lineH / 2)
             r = max 2 (lineH * 0.15)
@@ -383,10 +384,10 @@ listBlock env ty isTight items = do
       [0 :: Int ..]
       items
 
--- | A list marker's drawing version: its shape's tag (1 a bullet, 2 a check
+-- | A list marker's content key: its shape's tag (1 a bullet, 2 a check
 -- box) in the low bits, so an item that turns into a task item redraws its
 -- marker, over a hash of what else the marker's ops depend on besides its
--- size. It is never 0, which 'drawingVersioned' takes for no version.
+-- size. It is never 0, which a canvas takes for no key.
 version :: Hashable a => Int -> a -> Int
 version tag deps = hash deps * 4 + tag
 

@@ -8,8 +8,8 @@
 - Plots and diagrams are anti-aliased. A filled path is one `FillPolygon`
   and a stroked one one `StrokePolyline`, instead of hard-edged
   `FillTriangle`s whose corners each snapped to the pixel grid, so lines
-  and markers no longer come out jagged. Strokes join with miters rather
-  than narrowing at each bend.
+  and markers no longer come out jagged. Strokes take the style's line cap,
+  join, miter limit and dashing.
 - Draw ops are a `SmallArray DrawOp` from `primitive` instead of a boxed
   `Vector` in `diagramOps`, `diagramTextOps`, `diagramFrame` and
   `labelFitScale`.
@@ -26,6 +26,10 @@
 - Paths are filled and stroked by the core's canvas path code
   (`NanoUI.Path`): a convex fill is fanned, every chord of a flattened curve
   stays within half a unit of it, and a level rectangle is one rect op.
+- A path's loops are filled together by the style's fill rule, so a loop
+  inside another (an annulus, a glyph's counter) is a hole in it where the
+  rule says so, instead of each loop being filled on its own over the
+  others. A path is filled whole before it is stroked.
 
 ### Removed
 

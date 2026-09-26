@@ -23,14 +23,16 @@ module NanoUI.Internal.Draw.Shapes
 
 import Control.Monad (when)
 import Data.IORef (readIORef)
+import Data.Maybe (isJust)
 import Data.Primitive.PrimArray (PrimArray, indexPrimArray, newPrimArray, primArrayFromListN, runPrimArray, sizeofPrimArray, writePrimArray)
 import Data.Word (Word32, Word8)
 import Foreign.Ptr (Ptr)
 import Foreign.Storable (pokeByteOff)
 import NanoUI.Internal.Draw.Arena
-import NanoUI.Internal.Draw.Types (DrawArena (..), glyphAtlasTextureId, indexSize, vertexSize)
+import NanoUI.Internal.Draw.Types (DrawArena (..), LineCap (..), LineJoin (..), Shade (..), glyphAtlasTextureId, indexSize, vertexSize)
+import NanoUI.Internal.Path (miterOffset)
 import NanoUI.Internal.SIMD
-import NanoUI.Internal.Types (Color (..), Rect (..), forUpTo_, onGrid)
+import NanoUI.Internal.Types (Color (..), Rect (..), clamp, forUpTo_, onGrid)
 
 {-# INLINE pushRect #-}
 pushRect :: DrawArena -> Rect -> Color -> IO ()
@@ -505,13 +507,15 @@ pushStroke da x1 y1 x2 y2 thickness col
 -- width, and its first corner's row, which an arrow's flat base passes
 -- through, stays sharp.
 pushFilledTriangle :: DrawArena -> Float -> Float -> Float -> Float -> Float -> Float -> Color -> IO ()
-pushFilledTriangle da x0 y0 x1 y1 x2 y2 =
+pushFilledTriangle da x0 y0 x1 y1 x2 y2 col =
   polygonAAFrom
     da
     ((min x0 (min x1 x2) + max x0 (max x1 x2)) * 0.5)
     y0
     (points3 x0 y0 x1 y1 x2 y2)
+    triangleRing
     triangleIndices
+    (Flat col)
 
 -- | Three points as the flat coordinate array 'pushPolygonAA' and
 -- 'pushPolylineAA' take, written straight into the array: a list literal
@@ -531,6 +535,10 @@ points3 x0 y0 x1 y1 x2 y2 = runPrimArray $ do
 triangleIndices :: PrimArray Int
 triangleIndices = primArrayFromListN 3 [0, 1, 2]
 
+-- | The ring starts of a lone triangle: one ring of three points.
+triangleRing :: PrimArray Int
+triangleRing = primArrayFromListN 2 [0, 3]
+
 -- | Half the width of an anti-aliased edge's fade, in logical pixels: half a
 -- device pixel, so an edge on the grid is solid on one side of it and clear
 -- on the other.
@@ -538,9 +546,10 @@ triangleIndices = primArrayFromListN 3 [0, 1, 2]
 edgeFeather :: Float -> Float
 edgeFeather s = if s > 0 then 0.5 / s else 0.5
 
--- | How far a miter may reach, as a multiple of the offset squared: a join
--- sharper than 120 degrees is cut back to twice the offset instead of
--- shooting off into a spike.
+-- | How far a miter may reach, as a multiple of the offset squared: a
+-- join sharper than 120 degrees is cut back to twice the offset instead of
+-- shooting off into a spike. A polygon's fringe, and the inside of a
+-- stroke's corner, are cut back so.
 miterLimit :: Float
 miterLimit = 4
 
@@ -569,24 +578,34 @@ segNormal x0 y0 x1 y1 =
       !len = sqrt (dx * dx + dy * dy)
    in if len < 1.0e-6 then (0, 0) else (-dy / len, dx / len)
 
--- | Fill a simple polygon with anti-aliased edges. @pts@ holds its outline as
--- x/y pairs, in either winding and without repeating the first point, and
--- @tris@ index triples into those points that cover it. The polygon moves as
--- a whole to put its first point on the device grid: snapping each point on
--- its own would bend a small shape, an arrow's two sides landing a pixel
--- apart. Each edge then fades out across one device pixel centred on it, so
--- an edge on the grid comes out sharp and a slanted one smooth.
-pushPolygonAA :: DrawArena -> PrimArray Float -> PrimArray Int -> Color -> IO ()
-pushPolygonAA da pts tris
+-- | Whether a shade has a colour for each of @n@ points, or one for all.
+shadeCovers :: Shade -> Int -> Bool
+shadeCovers sh n = case sh of
+  Flat _ -> True
+  Shaded cs -> sizeofPrimArray cs >= n
+
+-- | Fill a polygon, holes and all, with anti-aliased edges. @pts@ holds its
+-- rings' points as x/y pairs, in either winding and without repeating a
+-- ring's first point, one ring after another, and then any points inside
+-- it; @rings@ where each ring starts and the last ends; and @tris@ index
+-- triples into the points that cover it. The first ring is the outline and
+-- the rest are holes, wound the other way. The polygon moves as a whole to
+-- put its first point on the device grid: snapping each point on its own
+-- would bend a small shape, an arrow's two sides landing a pixel apart.
+-- Each ring's edges then fade out across one device pixel centred on them,
+-- so an edge on the grid comes out sharp and a slanted one smooth; the
+-- points inside have no fade.
+pushPolygonAA :: DrawArena -> PrimArray Float -> PrimArray Int -> PrimArray Int -> Shade -> IO ()
+pushPolygonAA da pts rings tris
   | sizeofPrimArray pts < 2 = const (pure ())
-  | otherwise = polygonAAFrom da (indexPrimArray pts 0) (indexPrimArray pts 1) pts tris
+  | otherwise = polygonAAFrom da (indexPrimArray pts 0) (indexPrimArray pts 1) pts rings tris
 
 -- | 'pushPolygonAA', moved to put @(rx, ry)@ rather than the first point on
 -- the grid.
 {-# NOINLINE polygonAAFrom #-}
-polygonAAFrom :: DrawArena -> Float -> Float -> PrimArray Float -> PrimArray Int -> Color -> IO ()
-polygonAAFrom da rx ry pts tris col
-  | n < 3 || nt < 3 || area == 0 = pure ()
+polygonAAFrom :: DrawArena -> Float -> Float -> PrimArray Float -> PrimArray Int -> PrimArray Int -> Shade -> IO ()
+polygonAAFrom da rx ry pts rings tris shade
+  | n < 3 || nt < 3 || not ringsValid || area == 0 || not (shadeCovers shade n) = pure ()
   | otherwise = do
       s <- readIORef (daSnapScale da)
       square <- readIORef (daSquareGeometry da)
@@ -594,56 +613,90 @@ polygonAAFrom da rx ry pts tris col
       let !ox = onGrid s rx - rx
           !oy = onGrid s ry - ry
           !f = if square then 0 else edgeFeather s
-          -- 'segNormal' points into a polygon of positive area.
+          -- 'segNormal' points into a ring of positive area; the holes,
+          -- wound the other way, then have theirs pointing out of the fill.
           !out = if area > 0 then -1 else 1
-          normalAt i =
-            let !j = if i + 1 >= n then 0 else i + 1
-                (nx, ny) = segNormal (px i) (py i) (px j) (py j)
+          {-# INLINE normalAt #-}
+          normalAt i j =
+            let (nx, ny) = segNormal (px i) (py i) (px j) (py j)
              in (nx * out, ny * out)
-          !(r, g, b, a) = unpackColorF col
           -- Square geometry has no fade, so no fringe either.
-          !fringe = if square then 0 else n
+          !fringe = if square then 0 else nOut
+          !flat = case shade of
+            Flat c -> unpackColorF c
+            Shaded _ -> (0, 0, 0, 0)
+          {-# INLINE rgbaAt #-}
+          rgbaAt i = case shade of
+            Flat _ -> flat
+            Shaded cs -> unpackColorF (Color (indexPrimArray cs i))
       withVertsRaw da (n + fringe) (nt + 6 * fringe) $ \vp ip base baseIdx -> do
-        forUpTo_ n $ \i -> do
-          let (ax, ay) = normalAt (if i == 0 then n - 1 else i - 1)
-              (bx, by) = normalAt i
+        forRings $ \from to -> forUpTo_ (to - from) $ \k -> do
+          let !i = from + k
+              !prev = if k == 0 then to - 1 else i - 1
+              !next = if i + 1 >= to then from else i + 1
+              (ax, ay) = normalAt prev i
+              (bx, by) = normalAt i next
               (mx, my) = miterOf ax ay bx by
               !vx = px i + ox
               !vy = py i + oy
+              !(r, g, b, a) = rgbaAt i
           pokeVertexSIMD vp ((base + i) * vertexSize) (vx - f * mx) (vy - f * my) r g b a whitePixel whitePixel
           when (fringe > 0) $
             pokeVertexSIMD vp ((base + n + i) * vertexSize) (vx + f * mx) (vy + f * my) r g b 0 whitePixel whitePixel
+        forUpTo_ (n - nOut) $ \k -> do
+          let !i = nOut + k
+              !(r, g, b, a) = rgbaAt i
+          pokeVertexSIMD vp ((base + i) * vertexSize) (px i + ox) (py i + oy) r g b a whitePixel whitePixel
         forUpTo_ nt $ \k ->
           pokeByteOff ip ((baseIdx + k) * indexSize) (fromIntegral (base + indexPrimArray tris k) :: Word32)
-        forUpTo_ fringe $ \i -> do
-          let !j = if i + 1 >= n then 0 else i + 1
-              !inI = fromIntegral (base + i) :: Word32
-              !inJ = fromIntegral (base + j) :: Word32
-              !m = fromIntegral n :: Word32
-          pokeQuadIndices ip ((baseIdx + nt + 6 * i) * indexSize) inI inJ (inJ + m) (inI + m)
+        when (fringe > 0) $
+          forRings $ \from to -> forUpTo_ (to - from) $ \k -> do
+            let !i = from + k
+                !j = if i + 1 >= to then from else i + 1
+                !inI = fromIntegral (base + i) :: Word32
+                !inJ = fromIntegral (base + j) :: Word32
+                !m = fromIntegral n :: Word32
+            pokeQuadIndices ip ((baseIdx + nt + 6 * i) * indexSize) inI inJ (inJ + m) (inI + m)
   where
     !n = sizeofPrimArray pts `div` 2
     !nt = sizeofPrimArray tris - sizeofPrimArray tris `mod` 3
+    !nr = sizeofPrimArray rings - 1
+    ringAt r = indexPrimArray rings r
+    -- Where the rings end and the points inside begin.
+    !nOut = if nr >= 1 then ringAt nr else 0
+    ringsValid = nr >= 1 && ringAt 0 == 0 && nOut <= n && and [ringAt r < ringAt (r + 1) | r <- [0 .. nr - 1]]
+    forRings body = forUpTo_ nr $ \r -> body (ringAt r) (ringAt (r + 1))
     px i = indexPrimArray pts (2 * i)
     py i = indexPrimArray pts (2 * i + 1)
+    -- The outline's area, whose sign says which way the rings wind.
     !area = shoelace 0 0
+    !outlineEnd = if nr >= 1 then ringAt 1 else 0
     shoelace !i !acc
-      | i >= n = acc
+      | i >= outlineEnd = acc
       | otherwise =
-          let !j = if i + 1 >= n then 0 else i + 1
+          let !j = if i + 1 >= outlineEnd then 0 else i + 1
            in shoelace (i + 1) (acc + px i * py j - px j * py i)
 
--- | Stroke a polyline @w@ wide with anti-aliased sides and mitered joins.
--- @pts@ holds x/y pairs; @closed@ joins the last point back to the first,
--- which should not be repeated. Open ends are cut square at their points.
+-- | Stroke a polyline @w@ wide with anti-aliased sides. @pts@ holds x/y
+-- pairs; @closed@ joins the last point back to the first, which should not
+-- be repeated. An open line's ends are capped as @cap@ says, and its
+-- corners joined as @join@ does, a miter longer than @limit@ times the width
+-- beveled. The inside of a corner sharper than 60 degrees is cut back, as
+-- 'miterLimit' says. A corner turned so little that no join would show is
+-- mitered whatever the join, so a flattened curve's many small turns cost
+-- no more than a straight line's.
+--
 -- The line moves as a whole to put its first point's edges on the device
 -- grid, as 'pushPolygonAA' moves a polygon, so a level or upright line a
 -- whole number of pixels wide is sharp and every segment keeps its angle.
--- A line thinner than its fade keeps its ink by drawing fainter.
+-- A line thinner than its fade keeps its ink by drawing fainter. Each point
+-- has a cross-section of four vertices, faded, solid, solid, faded, and a
+-- round or beveled join has two, one square to each of its segments, the
+-- outside of its corner filled between them.
 {-# NOINLINE pushPolylineAA #-}
-pushPolylineAA :: DrawArena -> PrimArray Float -> Float -> Bool -> Color -> IO ()
-pushPolylineAA da pts w closed col
-  | n < 2 || w <= 0 = pure ()
+pushPolylineAA :: DrawArena -> PrimArray Float -> Float -> Bool -> LineCap -> LineJoin -> Float -> Shade -> IO ()
+pushPolylineAA da pts w closed cap join limit shade
+  | n < 2 || not (w > 0) || not (shadeCovers shade n) = pure ()
   | otherwise = do
       s <- readIORef (daSnapScale da)
       square <- readIORef (daSquareGeometry da)
@@ -654,30 +707,177 @@ pushPolylineAA da pts w closed col
           !f = if square then 0 else edgeFeather s
           !core = max 0 (hw - f)
           !outer = hw + f
-          !(r, g, b, a0) = unpackColorF col
-          !a = if core > 0 then a0 else a0 * min 1 (w / outer)
+          !thin = if core > 0 then 1 else min 1 (w / outer)
+          !flat = case shade of
+            Flat c -> let !(r, g, b, a) = unpackColorF c in (r, g, b, a * thin)
+            Shaded _ -> (0, 0, 0, 0)
+          {-# INLINE colourAt #-}
+          colourAt i = case shade of
+            Flat _ -> flat
+            Shaded cs -> let !(r, g, b, a) = unpackColorF (Color (indexPrimArray cs i)) in (r, g, b, a * thin)
           !segs = if closed then n else n - 1
+          -- The most chords a round join or cap is cut into: a half turn's,
+          -- each within a quarter device pixel of the line's edge.
+          !halfTurn = max 2 (arcChords s outer pi)
+          !roundJoins = join == RoundJoin
+          !roundCaps = cap == RoundCap && not closed
+          !maxV = 8 * n + (if roundJoins then 2 * halfTurn * n else 0) + (if roundCaps then 4 * halfTurn else 0)
+          !maxI = 18 * segs + 9 * n * (if roundJoins then halfTurn else 1) + (if roundCaps then 18 * halfTurn else 0)
+          -- A corner no join would show on: a miter reaching less than a
+          -- tenth of a device pixel past the line's side.
+          !straightD2 = let q = hw / (hw + 0.1 / max 1 s) in q * q
+          {-# INLINE normalAt #-}
           normalAt i =
             let !j = if i + 1 >= n then 0 else i + 1
              in segNormal (px i) (py i) (px j) (py j)
-      withVertsRaw da (4 * n) (18 * segs) $ \vp ip base baseIdx -> do
-        forUpTo_ n $ \i -> do
-          let (ax, ay)
-                | i > 0 = normalAt (i - 1)
-                | closed = normalAt (n - 1)
-                | otherwise = normalAt 0
-              (bx, by)
-                | i < n - 1 || closed = normalAt i
-                | otherwise = normalAt (n - 2)
-              (mx, my) = miterOf ax ay bx by
-          pokeBandVerts vp ((base + 4 * i) * vertexSize) True r g b a $
-            concentricOffsetsSIMD (px i + ox) (py i + oy) mx my (-outer) (-core) core outer
-        forUpTo_ segs $ \i -> do
-          let !j = if i + 1 >= n then 0 else i + 1
-              !va = fromIntegral (base + 4 * i) :: Word32
-              !vb = fromIntegral (base + 4 * j) :: Word32
-          pokeBandIndices ip ((baseIdx + 18 * i) * indexSize) True va vb
+      withVertsReserve da maxV maxI $ \vp ip base baseIdx commit -> do
+        let vidx k = fromIntegral (base + k) :: Word32
+            vert k x y r g b a = pokeVertexSIMD vp ((base + k) * vertexSize) (x + ox) (y + oy) r g b a whitePixel whitePixel
+            -- A cross-section at @(x, y)@: its negative side along
+            -- @(nx, ny)@, its positive side along @(qx, qy)@.
+            section v x y nx ny qx qy (r, g, b, a) = do
+              vert v (x - nx * outer) (y - ny * outer) r g b 0
+              vert (v + 1) (x - nx * core) (y - ny * core) r g b a
+              vert (v + 2) (x + qx * core) (y + qy * core) r g b a
+              vert (v + 3) (x + qx * outer) (y + qy * outer) r g b 0
+            -- A section square to both sides, the common case, as the
+            -- concentric offsets write it.
+            {-# INLINE evenSection #-}
+            evenSection v x y mx my (r, g, b, a) =
+              pokeBandVerts vp ((base + v) * vertexSize) True r g b a $
+                concentricOffsetsSIMD (x + ox) (y + oy) mx my (-outer) (-core) core outer
+            {-# INLINE band #-}
+            band k va vb = do
+              pokeBandIndices ip ((baseIdx + k) * indexSize) True (vidx va) (vidx vb)
+              pure (k + 18)
+            -- The edge round @(x, y)@ from angle @a0@ through @sweep@ in
+            -- @chords@ chords: its solid core fanned from vertex @centre@,
+            -- faded out to the edge, from the core and edge vertices @c0@
+            -- and @o0@ to @c1@ and @o1@, with the ones between from @v@.
+            fan v k centre c0 o0 c1 o1 x y a0 sweep chords (r, g, b, a) = do
+              forUpTo_ (chords - 1) $ \j0 -> do
+                let !t = a0 + sweep * fromIntegral (j0 + 1) / fromIntegral chords
+                    !ct = cos t
+                    !st = sin t
+                vert (v + 2 * j0) (x + ct * core) (y + st * core) r g b a
+                vert (v + 2 * j0 + 1) (x + ct * outer) (y + st * outer) r g b 0
+              let coreAt j
+                    | j == 0 = c0
+                    | j == chords = c1
+                    | otherwise = v + 2 * (j - 1)
+                  edgeAt j
+                    | j == 0 = o0
+                    | j == chords = o1
+                    | otherwise = v + 2 * (j - 1) + 1
+              forUpTo_ chords $ \j -> do
+                let !o = (baseIdx + k + 9 * j) * indexSize
+                pokeByteOff ip o (vidx centre)
+                pokeByteOff ip (o + 4) (vidx (coreAt j))
+                pokeByteOff ip (o + 8) (vidx (coreAt (j + 1)))
+                pokeQuadIndices ip (o + 12) (vidx (coreAt j)) (vidx (edgeAt j)) (vidx (edgeAt (j + 1))) (vidx (coreAt (j + 1)))
+              pure (v + 2 * (chords - 1), k + 9 * chords)
+            -- An open end: a section square to the end segment, whose
+            -- normal is @(nx, ny)@, at the end point or, for a square cap,
+            -- half the width past it; a round cap fans round beyond it.
+            -- @dir@ is 1 at the last point and -1 at the first.
+            capAt i v k nx ny dir = do
+              let !col = colourAt i
+                  !reach = if cap == SquareCap then hw * dir else 0
+                  !x = px i + ny * reach
+                  !y = py i - nx * reach
+              evenSection v x y nx ny col
+              if cap == RoundCap
+                then do
+                  (v', k') <- fan (v + 4) k (v + 2) (v + 2) (v + 3) (v + 1) v x y (atan2 ny nx) (negate dir * pi) halfTurn col
+                  pure (v, v, v', k')
+                else pure (v, v, v + 4, k)
+            -- A corner between segments whose normals are @a@ and @b@.
+            joinAt i v k ax0 ay0 bx0 by0 = do
+              let (!ax, !ay) = if ax0 == 0 && ay0 == 0 then (bx0, by0) else (ax0, ay0)
+                  (!bx, !by) = if bx0 == 0 && by0 == 0 then (ax, ay) else (bx0, by0)
+                  !mx = (ax + bx) * 0.5
+                  !my = (ay + by) * 0.5
+                  !d2 = mx * mx + my * my
+                  !col = colourAt i
+                  !x = px i
+                  !y = py i
+                  -- The inside of the corner, cut back if very sharp.
+                  (!ix, !iy) = miterOf ax ay bx by
+                  miter = if join == MiterJoin then miterOffset limit ax ay bx by else Nothing
+              if d2 >= straightD2 || (d2 >= 0.25 && isJust miter)
+                then do
+                  evenSection v x y ix iy col
+                  pure (v, v, v + 4, k)
+                else do
+                  -- The outside of the corner is the side the next segment
+                  -- turns away from.
+                  let !turnsPositive = by * ax - bx * ay > 0
+                      !outSign = if turnsPositive then -1 else 1
+                  case miter of
+                    Just (fx, fy) -> do
+                      -- A sharp miter: the outside runs to the full point.
+                      if turnsPositive then section v x y fx fy ix iy col else section v x y ix iy fx fy col
+                      pure (v, v, v + 4, k)
+                    Nothing -> do
+                      let (!centre, !cIn, !oIn, !cOut, !oOut)
+                            | turnsPositive = (v + 2, v + 1, v, v + 5, v + 4)
+                            | otherwise = (v + 1, v + 2, v + 3, v + 6, v + 7)
+                          !ux = outSign * ax
+                          !uy = outSign * ay
+                          !sweep = atan2 (ux * outSign * by - uy * outSign * bx) (ux * outSign * bx + uy * outSign * by)
+                          !chords = if join == RoundJoin then arcChords s outer (abs sweep) else 1
+                      if turnsPositive
+                        then section v x y ax ay ix iy col >> section (v + 4) x y bx by ix iy col
+                        else section v x y ix iy ax ay col >> section (v + 4) x y ix iy bx by col
+                      (v', k') <- fan (v + 8) k centre cIn oIn cOut oOut x y (atan2 uy ux) sweep chords col
+                      pure (v, v + 4, v', k')
+            pointAt i v k
+              | not closed && i == 0 = let (nx, ny) = normalAt 0 in capAt i v k nx ny (-1)
+              | not closed && i == n - 1 = let (nx, ny) = normalAt (n - 2) in capAt i v k nx ny 1
+              | otherwise =
+                  let (ax, ay) = normalAt (if i == 0 then n - 1 else i - 1)
+                      (bx, by) = normalAt i
+                   in joinAt i v k ax ay bx by
+            loop !i !v !k !prevOut !firstIn
+              | i >= n = do
+                  k' <- if closed then band k prevOut firstIn else pure k
+                  commit v k'
+              -- The common corner, one a miter joins without cutting back:
+              -- one section, with no tuple to return.
+              | closed || (i > 0 && i < n - 1)
+              , (ax, ay) <- normalAt (if i == 0 then n - 1 else i - 1)
+              , (bx, by) <- normalAt i
+              , evenJoin ax ay bx by = do
+                  let (mx, my) = miterOf ax ay bx by
+                  evenSection v (px i) (py i) mx my (colourAt i)
+                  k' <- if i > 0 then band k prevOut v else pure k
+                  loop (i + 1) (v + 4) k' v (if i == 0 then v else firstIn)
+              | otherwise = do
+                  (inV, outV, v', k') <- pointAt i v k
+                  k'' <- if i > 0 then band k' prevOut inV else pure k'
+                  loop (i + 1) v' k'' outV (if i == 0 then inV else firstIn)
+            -- A corner a single section square to its miter draws: one
+            -- turned so little no join would show, or a miter within its
+            -- limit that needs no cutting back inside.
+            evenJoin ax ay bx by
+              | (ax == 0 && ay == 0) || (bx == 0 && by == 0) = True
+              | otherwise =
+                  let !mx = (ax + bx) * 0.5
+                      !my = (ay + by) * 0.5
+                      !d2 = mx * mx + my * my
+                   in d2 >= straightD2 || (join == MiterJoin && d2 >= 0.25 && d2 * limit * limit >= 1)
+        loop 0 0 0 0 0
   where
     !n = sizeofPrimArray pts `div` 2
     px i = indexPrimArray pts (2 * i)
     py i = indexPrimArray pts (2 * i + 1)
+
+-- | Chords for @sweep@ radians of a circle @r@ logical pixels across on a
+-- display of @s@ device pixels to the logical one, each within a quarter
+-- device pixel of it: at least 1, at most 32.
+arcChords :: Float -> Float -> Float -> Int
+arcChords s r sweep
+  | not (rd > 0.25) = 1
+  | otherwise = clamp 1 32 (ceiling (abs sweep / (2 * acos (1 - 0.25 / rd))))
+  where
+    rd = r * max 1 s

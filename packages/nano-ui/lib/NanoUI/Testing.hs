@@ -103,6 +103,7 @@ module NanoUI.Testing
   , DrawData (..)
   , DrawCmd (..)
   , DrawOp (..)
+  , Shade (..)
   , drawTextBox
   , Layer (..)
   , drawCmdNull

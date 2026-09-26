@@ -213,7 +213,7 @@ paintContainerNode env@PaintEnv {peContext = ctx} idx rect = do
 -- op naming a registered 'ImageId' draws that image from the atlas.
 emitDrawingOps :: PaintEnv -> Rect -> SmallArray DrawOp -> IO ()
 emitDrawingOps env@PaintEnv {peDrawArena = da} rect ops =
-  withClip da rect (emitDrawOps da (peFontMetrics env) (resolveTextFont ctx) imageUv ops)
+  withClip da rect (emitDrawOps da (peFontMetrics env) (ctxFontSize ctx) (resolveTextFont ctx) imageUv ops)
   where
     ctx = peContext env
     imageUv tid = fmap (atlasTextureId,) <$> lookupImageUv ctx (ImageId tid)

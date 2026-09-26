@@ -35,8 +35,9 @@ counter = do
 - Text inputs and a multi-line text area, numeric fields, sliders, knobs,
   selects, combo boxes, sortable tables, trees, tabs, menus, context menus,
   modals, floating windows, pane grids, colour pickers, progress bars,
-  sparklines, and drag and drop. `customWidget` and a canvas API, with curves
-  and transforms (`NanoUI.Path`), cover anything else.
+  sparklines, and drag and drop. `customWidget` and a canvas API, with paths,
+  fill rules, strokes with joins and dashes, gradients, clips and transforms
+  (`NanoUI.Path`), cover anything else.
 - Row, column, grid, and stacked (`stack`) layout with scrolling, wrapping
   (`wrap`), and pinned children (`pinAt`). Layout options are
   `Layout -> Layout` modifiers, as in `columnWith (gap 8 . padAll 12)`.

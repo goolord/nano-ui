@@ -32,6 +32,7 @@ import NanoUI.Internal.Layout.Arena (getArenaScope)
 import NanoUI.Internal.Monad (Ui, styled, themed, withContext)
 import NanoUI.Internal.Style
 import NanoUI.Internal.Types (Color, Rect (..), V2 (..), lerpColor, rectUnion)
+import NanoUI.Path qualified as P
 import NanoUI.Widgets.Custom
 import NanoUI.Internal.Widgets.Layout (panelWith)
 import NanoUI.Internal.Widgets.Node (Response, respClicked, respRect)
@@ -93,7 +94,7 @@ captionButton cfg glyph = do
     customWidget
       defaultCustomWidgetSpec
         { widgetLayout = tight . fixedWH (capButtonW cfg) (capButtonH cfg) $ defaultLayout
-        , widgetDraw = \cdc rect -> runCanvas $ do
+        , widgetDraw = \cdc rect -> runCanvasFor cdc $ do
             let theme = cdcTheme cdc
                 lit = cdcHovered cdc || cdcPressed cdc
                 fg = styleFg (themePanel theme)
@@ -107,12 +108,9 @@ captionButton cfg glyph = do
 
 -- | A fill rounded only at its top right.
 cornerRect :: Float -> Rect -> Color -> CanvasM ()
-cornerRect radius r@(Rect x y w h) col
-  | radius <= 0 || radius > w || radius > h = drawRect r col
-  | otherwise = do
-      drawRoundedRect r radius col
-      drawRect (Rect x (y + radius) w (h - radius)) col
-      drawRect (Rect x y (w - radius) radius) col
+cornerRect radius r col
+  | radius <= 0 = drawRect r col
+  | otherwise = drawPath (P.roundedRectCorners r 0 radius 0 0) col
 
 -- | The three buttons in a row: what they were asked to do, and the
 -- rectangle they span, which the window cannot be dragged by. Pass whether

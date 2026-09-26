@@ -8,6 +8,9 @@
 module NanoUI.Internal.Draw.Types
   ( Layer (..)
   , DrawOp (..)
+  , LineCap (..)
+  , LineJoin (..)
+  , Shade (..)
   , TextFont (..)
   , defaultTextFont
   , DrawingBuild
@@ -49,6 +52,11 @@ data Layer = LayerBackground | LayerContent | LayerOverlay | LayerChrome
 -- | Vector drawing operations in logical pixels. Builders receive a solved
 -- window-space rectangle and should place operations within it. Circles use
 -- centre/radius; strokes use endpoints and width. Image UVs are normalised.
+--
+-- Build ops with the canvas ("NanoUI.Widgets.Custom"), which fills and
+-- strokes paths, clips, and draws through transforms. The constructors past
+-- 'DrawTextStyled' are what the canvas builds those from, and change as it
+-- does.
 data DrawOp
   = FillRect !Rect !Color
   -- ^ Solid rectangle.
@@ -64,7 +72,7 @@ data DrawOp
       !Color
   -- ^ Three x/y pairs followed by the fill colour. The edges are
   -- anti-aliased, so a shape tessellated into triangles shows faint seams
-  -- along the shared edges; fill it with 'FillPolygon' instead.
+  -- along the shared edges; fill a path on a canvas instead.
   | FillCircle
       {-# UNPACK #-} !Float
       {-# UNPACK #-} !Float
@@ -78,16 +86,19 @@ data DrawOp
       {-# UNPACK #-} !Float
       {-# UNPACK #-} !Float
       !Color
-  -- ^ Endpoint x0/y0/x1/y1, width, and colour.
+  -- ^ Endpoint x0/y0/x1/y1, width, and colour. Not anti-aliased; see
+  -- 'StrokeLineAA'.
   | StrokeRoundedRect !Rect {-# UNPACK #-} !Float {-# UNPACK #-} !Float !Color
-  -- ^ Rectangle, corner radius, border width, and colour.
+  -- ^ Rectangle, corner radius, border width, and colour. The border lies
+  -- inside the rectangle.
   | StrokeCircle
       {-# UNPACK #-} !Float
       {-# UNPACK #-} !Float
       {-# UNPACK #-} !Float
       {-# UNPACK #-} !Float
       !Color
-  -- ^ Centre x/y, radius, border width, and colour.
+  -- ^ Centre x/y, radius, border width, and colour. The border lies inside
+  -- the circle.
   | StrokeLineAA
       {-# UNPACK #-} !Float
       {-# UNPACK #-} !Float
@@ -96,14 +107,6 @@ data DrawOp
       {-# UNPACK #-} !Float
       !Color
   -- ^ Anti-aliased line: endpoint x0/y0/x1/y1, width, and colour.
-  | FillPolygon !(PrimArray Float) !(PrimArray Int) !Color
-  -- ^ Simple polygon with anti-aliased edges: its outline as x/y pairs,
-  -- without repeating the first point; index triples into the outline's
-  -- points that cover it; and the fill colour.
-  | StrokePolyline !(PrimArray Float) {-# UNPACK #-} !Float !Bool !Color
-  -- ^ Anti-aliased polyline with mitered joins: its points as x/y pairs,
-  -- width, whether the last point joins back to the first (which is then not
-  -- repeated), and colour.
   | FillQuadGradient !Rect !Color !Color !Color !Color
   -- ^ Rectangle with colours at top-left, top-right, bottom-right, bottom-left.
   | DrawImageRect
@@ -117,18 +120,6 @@ data DrawOp
   -- ^ Destination rectangle, texture id, u0/v0/u1/v1, and tint colour. In a
   -- drawing the texture id may be an 'NanoUI.ImageId' registered with the
   -- context, whose own UVs run from 0 to 1.
-  | DrawImageRotated
-      !Rect
-      {-# UNPACK #-} !Float
-      {-# UNPACK #-} !Int
-      {-# UNPACK #-} !Float
-      {-# UNPACK #-} !Float
-      {-# UNPACK #-} !Float
-      {-# UNPACK #-} !Float
-      !Color
-  -- ^ 'DrawImageRect' turned about the rectangle's centre: the rectangle,
-  -- the angle in radians (clockwise on screen), texture id, u0/v0/u1/v1, and
-  -- tint colour.
   | DrawText
       {-# UNPACK #-} !Float
       {-# UNPACK #-} !Float
@@ -146,7 +137,85 @@ data DrawOp
       !T.Text
       !Color
   -- ^ Text in a font of its own, its line box's top left corner at (x, y).
+  | FillPolygon !(PrimArray Float) !(PrimArray Int) !(PrimArray Int) !Shade
+  -- ^ A polygon, holes and all, anti-aliased along its outline only: its
+  -- rings' points as x/y pairs, one ring after another, then any points
+  -- inside it that its triangles need; where each ring starts, and the last
+  -- one ends; index triples into the points that cover it; and its colour.
+  -- The first ring is its outline and the rest are holes, wound the other
+  -- way.
+  | StrokePolyline
+      !(PrimArray Float)
+      {-# UNPACK #-} !Float
+      !Bool
+      !LineCap
+      !LineJoin
+      {-# UNPACK #-} !Float
+      !Shade
+  -- ^ A polyline anti-aliased along its sides: its points as x/y pairs;
+  -- width; whether the last point joins back to the first, which is then
+  -- not repeated; how an open one's ends are capped; how its corners join;
+  -- the miter limit, as a multiple of the width, past which a miter join is
+  -- beveled; and its colour.
+  | DrawImageRotated
+      !Rect
+      {-# UNPACK #-} !Float
+      {-# UNPACK #-} !Int
+      {-# UNPACK #-} !Float
+      {-# UNPACK #-} !Float
+      {-# UNPACK #-} !Float
+      {-# UNPACK #-} !Float
+      !Color
+  -- ^ 'DrawImageRect' turned about the rectangle's centre: the rectangle,
+  -- the angle in radians (clockwise on screen), texture id, u0/v0/u1/v1, and
+  -- tint colour.
+  | DrawTextAligned
+      {-# UNPACK #-} !Float
+      {-# UNPACK #-} !Float
+      {-# UNPACK #-} !Float
+      {-# UNPACK #-} !Float
+      {-# UNPACK #-} !Float
+      !TextFont
+      !T.Text
+      !Color
+  -- ^ Text in a font of its own, placed on (x, y) by ax and ay as
+  -- 'DrawText' places its text, its font size scaled by a factor: x, y, ax,
+  -- ay, the factor, the font, the text and its colour.
+  | PushClip !Rect
+  -- ^ Clip the ops up to the matching 'PopClip' to the rectangle, inside
+  -- whatever clip they are drawn in.
+  | PopClip
+  -- ^ End the clip of the last 'PushClip' still open.
   deriving (Eq)
+
+-- | How a stroke ends an open subpath.
+data LineCap
+  = ButtCap
+  -- ^ Cut square at the end point.
+  | SquareCap
+  -- ^ Cut square half the width past the end point.
+  | RoundCap
+  -- ^ A half disc past the end point.
+  deriving (Eq, Show, Enum, Bounded)
+
+-- | How a stroke turns a corner.
+data LineJoin
+  = MiterJoin
+  -- ^ Its sides run on until they meet in a point, unless that is further
+  -- out than the miter limit allows, when the corner is beveled.
+  | RoundJoin
+  -- ^ A circular arc round the corner.
+  | BevelJoin
+  -- ^ The corner cut straight across.
+  deriving (Eq, Show, Enum, Bounded)
+
+-- | The colour of a 'FillPolygon' or 'StrokePolyline': one for the whole
+-- shape, or one for each of its points, blended across the triangles
+-- between them. A stroke's point's colour is its colour across the line.
+data Shade
+  = Flat !Color
+  | Shaded !(PrimArray Word32)
+  deriving (Eq, Show)
 
 -- | The font a 'DrawTextStyled' draws with: the same choices a label's
 -- layout makes.
@@ -177,14 +246,17 @@ shiftDrawOp dx dy op =
     StrokeRoundedRect (Rect x y w h) r bw c -> StrokeRoundedRect (Rect (x + dx) (y + dy) w h) r bw c
     StrokeCircle cx cy r bw c -> StrokeCircle (cx + dx) (cy + dy) r bw c
     StrokeLineAA x0 y0 x1 y1 bw c -> StrokeLineAA (x0 + dx) (y0 + dy) (x1 + dx) (y1 + dy) bw c
-    FillPolygon pts tris c -> FillPolygon (shiftPoints dx dy pts) tris c
-    StrokePolyline pts w closed c -> StrokePolyline (shiftPoints dx dy pts) w closed c
+    FillPolygon pts rings tris c -> FillPolygon (shiftPoints dx dy pts) rings tris c
+    StrokePolyline pts w closed cap join limit c -> StrokePolyline (shiftPoints dx dy pts) w closed cap join limit c
     FillQuadGradient (Rect x y w h) c0 c1 c2 c3 -> FillQuadGradient (Rect (x + dx) (y + dy) w h) c0 c1 c2 c3
     DrawImageRect (Rect x y w h) tex u0 v0 u1 v1 c -> DrawImageRect (Rect (x + dx) (y + dy) w h) tex u0 v0 u1 v1 c
     DrawImageRotated (Rect x y w h) angle tex u0 v0 u1 v1 c ->
       DrawImageRotated (Rect (x + dx) (y + dy) w h) angle tex u0 v0 u1 v1 c
     DrawText x y ax ay t c -> DrawText (x + dx) (y + dy) ax ay t c
     DrawTextStyled x y font t c -> DrawTextStyled (x + dx) (y + dy) font t c
+    DrawTextAligned x y ax ay k font t c -> DrawTextAligned (x + dx) (y + dy) ax ay k font t c
+    PushClip (Rect x y w h) -> PushClip (Rect (x + dx) (y + dy) w h)
+    PopClip -> PopClip
 
 -- | Translate x/y pairs.
 shiftPoints :: Float -> Float -> PrimArray Float -> PrimArray Float

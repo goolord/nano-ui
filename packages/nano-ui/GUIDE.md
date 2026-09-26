@@ -312,10 +312,36 @@ compare their operations each frame.
 
 Curves go through `NanoUI.Path`, imported qualified: build a path with
 `P.moveTo`, `P.lineTo`, `P.cubicTo`, `P.arc` and the rest, fill it with
-`drawPath` and stroke it with `drawStrokePath`. `withTransform` moves, turns
-and scales a block of canvas drawing. Run a custom widget's canvas with
-`runCanvasFor`, as `canvas` does, so curves stay smooth on a dense display.
-A hole drawn as a second subpath is filled over, not cut out.
+`drawPath` and stroke it with `drawStrokePath`. `drawPathWith` takes a fill
+rule and a paint: a subpath inside another is a hole in it where the rule
+leaves it unfilled, so a ring is one path, and `P.Linear` fills with a
+gradient. `drawStrokePathWith` takes a `P.Stroke`, its width with caps,
+joins, a miter limit and dashes. `withTransform` moves, turns and scales a
+block of canvas drawing, and `withClip` clips it. Run a custom widget's
+canvas with `runCanvasFor`, as `canvas` does, so curves stay smooth on a
+dense display; `canvasConfigured` adds a content key and a cursor, and
+`drawContext` gives the drawing its widget's hover and press state.
+
+```haskell
+import NanoUI.Path qualified as P
+
+gauge :: Float -> NanoUI Response
+gauge level =
+  canvasConfigured defaultCanvasConfig {canvasLayout = fixedWH 80 80 defaultLayout, canvasContent = contentKey [level]} $
+    \(Rect x y w h) -> do
+      cdc <- drawContext
+      let c = V2 (x + w / 2) (y + h / 2)
+          theme = cdcTheme cdc
+      drawPathWith P.EvenOdd (P.circle c 36 <> P.circle c 26) (P.Solid (themeSeparator theme))
+      drawStrokePathWith (P.stroke 10) {P.strokeCap = P.RoundCap}
+        (P.arc c 31 (-pi / 2) (2 * pi * level))
+        (P.Solid (if cdcHovered cdc then themeAccent theme else themeMuted theme))
+```
+
+A fill does not work out where paths cross: subpaths that cross each other
+fill on their own, and one that crosses itself may fill only in part. A
+path's stroke is centred on it, where `drawStrokeRoundedRect` and
+`drawStrokeCircle` draw a border inside their shape, as a panel's is.
 
 `textArea` accepts `Text` and joins the document when edits change it.
 `textAreaDocument` accepts a `TextDocument`, sharing unchanged lines across
