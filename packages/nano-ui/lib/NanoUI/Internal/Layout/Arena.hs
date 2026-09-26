@@ -32,7 +32,6 @@ module NanoUI.Internal.Layout.Arena
   , NodeClass (..)
   , SizingTag (..)
   , DirTag (..)
-  , FlowTag (..)
   , NodeArena (..)
   , FlexScratch (..)
   , newNodeArena
@@ -166,7 +165,7 @@ import qualified Data.Text as T
 import GHC.Float (castFloatToWord32)
 import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Internal.Store (ptrEq)
-import NanoUI.Internal.Style (AlignX (..), AlignY, Direction (..), Layout (..), Padding (..), PointerMode (..), Sizing (..))
+import NanoUI.Internal.Style (AlignX (..), AlignY, Direction (..), Flow (..), Layout (..), Padding (..), PointerMode (..), Sizing (..))
 import NanoUI.Internal.Types (Color (..), Rect (..), V2 (..), rectNonEmpty)
 
 -- | A node's position in the arena's arrays. It is valid from the 'addNode'
@@ -300,7 +299,7 @@ data NodeClass
   -- content a clip of their own, for the damage pass that tracks them
   -- ('NanoUI.Internal.Damage.updatePrevRects').
   | LayeredNodes
-  -- ^ Stacks and pinned nodes, the only places where paint draws a node over
+  -- ^ Layered containers and pinned nodes, the only places where paint draws a node over
   -- one declared before it ('forChildrenInPaintOrder_'), so that the pointer
   -- over two widgets can be on the later one ('layeredNodeCount').
   deriving (Eq, Enum, Bounded)
@@ -319,22 +318,10 @@ data SizingTag
 -- | A 'Direction' as the arena stores it in 'TagDirection'. On a container
 -- it is the axis the children are laid out along. A separator carries its
 -- parent's direction, which decides whether the rule is horizontal or
--- vertical.
+-- vertical. A layered container's ('TagFlow') is 'DirColumn', so whatever
+-- reads the direction as an axis (a separator, a text wrap) treats it as a
+-- column.
 data DirTag = DirRow | DirColumn
-  deriving (Eq, Show, Enum, Bounded)
-
--- | How a container lays out its flow children, as the arena stores it in
--- 'TagFlow'. A stack's 'TagDirection' is 'DirColumn', so whatever reads the
--- direction as an axis (a separator, a text wrap) treats it as a column.
-data FlowTag
-  = FlowLine
-  -- ^ One line along its direction: a row or a column.
-  | FlowWrap
-  -- ^ Lines along its direction, a new one started where the next child
-  -- would overflow the main axis ('NanoUI.Internal.Style.layoutWrap').
-  | FlowStack
-  -- ^ Every child over the whole content box, later ones drawn on top
-  -- ('NanoUI.Internal.Style.Stack').
   deriving (Eq, Show, Enum, Bounded)
 
 -- | The arena's per-node arrays. The first four are strided: node @idx@ owns
@@ -530,6 +517,8 @@ data GeomCol
 -- * 'StyleLineGap': the space between a wrapping container's lines.
 -- * 'StylePinX', 'StylePinY': a pinned node's offset from its parent's
 --   content box.
+-- * 'StyleAspect': the width over the height a fit height keeps
+--   ('NanoUI.Internal.Style.aspect'), or 0 for none.
 --
 -- The layout cache does not compare 'StyleScrollContentW' and
 -- 'StyleNodeValue', which are not layout inputs.
@@ -538,7 +527,7 @@ data StyleCol
   | StylePadL | StylePadR | StylePadT | StylePadB
   | StyleGap | StyleMinW | StyleMinH | StyleMaxW | StyleMaxH
   | StyleScrollContentW | StyleNodeValue | StyleGridMinColW | StyleFontSize
-  | StyleLineGap | StylePinX | StylePinY
+  | StyleLineGap | StylePinX | StylePinY | StyleAspect
   deriving (Enum, Bounded)
 
 -- | Columns of 'naArrTags'. Each holds one enum value as a 'Word8', written
@@ -554,7 +543,10 @@ data StyleCol
 -- * 'TagIdSuperseded': whether a later node of this frame holds this node's
 --   widget id too, as a table's scrolling pane shares its frozen pane's
 --   ('setWidgetId', 'getIdSuperseded').
--- * 'TagFlow': the 'FlowTag'.
+-- * 'TagFlow': the 'Flow': 'Line' for a scroll container, a grid and a
+--   node that is not a container.
+-- * 'TagLineAlign': a wrapping container's
+--   'NanoUI.Internal.Style.LineAlign'.
 -- * 'TagPinned': whether the node is pinned ('isPinnedNode'), as a 'Bool'.
 -- * 'TagPinnedBelow': whether a node below this one is pinned, as a 'Bool',
 --   written when the pinned node is added ('hasPinnedBelow'). The solver,
@@ -564,7 +556,7 @@ data StyleCol
 data TagCol
   = TagNodeType | TagDirection | TagWSizing | TagHSizing
   | TagScrollBarSlot | TagAlignX | TagAlignY | TagIdSuperseded
-  | TagFlow | TagPinned | TagPinnedBelow | TagPointer
+  | TagFlow | TagPinned | TagPinnedBelow | TagPointer | TagLineAlign
   deriving (Enum, Bounded)
 
 -- | Columns of 'naArrTree'. A link that leads nowhere is -1.
@@ -765,7 +757,7 @@ mixNodeInput na idx tag v = do
 floatingNodeCount :: NodeArena -> IO Int
 floatingNodeCount na = readPrimArray (naClassCounts na) (fromEnum FloatingNodes)
 
--- | Number of stacks and pinned nodes added since the last reset
+-- | Number of layered containers and pinned nodes added since the last reset
 -- ('LayeredNodes'). While it is 0, of two overlapping nodes the one declared
 -- first is drawn on top.
 {-# INLINE layeredNodeCount #-}
@@ -874,11 +866,9 @@ addNode na nt parent Layout {..} = do
       -- A scroll container or a grid lays its children out its own way, and
       -- paint and hit tests take them in a line's order too.
       !flow
-        | isScrollNode nt || layoutGridCols > 0 || layoutGridMinColW > 0 = FlowLine
-        | layoutDirection == Stack = FlowStack
-        | layoutWrap = FlowWrap
-        | otherwise = FlowLine
-      !lineGap = fromMaybe layoutGap layoutLineGap
+        | not (isContainerNode nt) || isScrollNode nt || layoutGridCols > 0 || layoutGridMinColW > 0 = Line
+        | otherwise = layoutFlow
+      !lineGap = if layoutLineGap < 0 then layoutGap else layoutLineGap
       -- A floating node is placed on its own, and a root has nothing to be
       -- pinned in.
       !pinned = isJust layoutPin && parent >= 0 && not (isFloatingNode nt)
@@ -910,13 +900,13 @@ addNode na nt parent Layout {..} = do
   writeStyle a idx StyleLineGap lineGap
   writeStyle a idx StylePinX pinX
   writeStyle a idx StylePinY pinY
+  writeStyle a idx StyleAspect layoutAspect
 
   setPrimArray (naArrTags a) (idx * tagStride) tagStride 0
   writeTagEnum a idx TagNodeType nt
   writeTagEnum a idx TagDirection $ case layoutDirection of
-    Row -> DirRow
-    Column -> DirColumn
-    Stack -> DirColumn
+    Row | flow /= Layered -> DirRow
+    _ -> DirColumn
   writeTagEnum a idx TagWSizing wTag
   writeTagEnum a idx TagHSizing hTag
   writeTagEnum a idx TagAlignX layoutAlignX
@@ -924,6 +914,7 @@ addNode na nt parent Layout {..} = do
   writeTagEnum a idx TagFlow flow
   writeTagEnum a idx TagPinned pinned
   writeTagEnum a idx TagPointer pointerMode
+  writeTagEnum a idx TagLineAlign layoutLineAlign
 
   setPrimArray (naArrTree a) (idx * treeStride) treeStride 0
   writeTree a idx TreeParent parent
@@ -962,6 +953,7 @@ addNode na nt parent Layout {..} = do
           , (0x5049, fromIntegral (fromEnum pinned))
           , (0x5058, fromIntegral (castFloatToWord32 pinX))
           , (0x5059, fromIntegral (castFloatToWord32 pinY))
+          , (0x4153, fromIntegral (castFloatToWord32 layoutAspect) .|. fromIntegral (fromEnum layoutLineAlign) `shiftL` 32)
           , (0x5041, fromIntegral (parent + 1))
           ]
   mixInputSig na 0x4e4f nodeSig
@@ -992,7 +984,7 @@ addNode na nt parent Layout {..} = do
     when pinned $ markPinnedBelow parent
   when (isFloatingNode nt) $ pushClassNode na FloatingNodes idx
   when (nt == NodePanel || nt == NodeScrollContainer) $ pushClassNode na BackdropNodes idx
-  when (flow == FlowStack || pinned) $ pushClassNode na LayeredNodes idx
+  when (flow == Layered || pinned) $ pushClassNode na LayeredNodes idx
   when (isWidgetNode nt || isScrollNode nt || pointerMode == PointerBlock) $
     pushClassNode na PointerNodes idx
   when (nt == NodeDrawing) $ pushClassNode na DrawingNodes idx
@@ -1117,7 +1109,7 @@ getAlignY na idx = arenaArrays na >>= \a -> readTagEnum a idx TagAlignY
 
 -- | How the node lays out its flow children.
 {-# INLINE getFlow #-}
-getFlow :: NodeArena -> NodeIdx -> IO FlowTag
+getFlow :: NodeArena -> NodeIdx -> IO Flow
 getFlow na idx = arenaArrays na >>= \a -> readTagEnum a idx TagFlow
 
 -- | Whether the node is pinned: out of its parent's flow, at an offset from
@@ -1694,9 +1686,9 @@ flowChildrenInOrder :: NodeArena -> NodeIdx -> IO [NodeIdx]
 flowChildrenInOrder na parentIdx = foldFlowChildrenM na parentIdx (\acc ci -> pure (ci : acc)) []
 
 -- | Visit a node's children, floating ones included, in the order paint draws
--- them, so that each is drawn over the ones visited before it. A stack draws
--- the children that are not pinned in declaration order, later children on
--- top. Any other node draws them from the last declared to the first, so
+-- them, so that each is drawn over the ones visited before it. A layered
+-- container draws the children that are not pinned in declaration order,
+-- later children on top. Any other node draws them from the last declared to the first, so
 -- where two overlap the earlier one is on top. Either then draws its pinned
 -- children, in declaration order, over all of those.
 {-# INLINE forChildrenInPaintOrder_ #-}
@@ -1715,7 +1707,7 @@ forChildrenInPaintOrder_ na parentIdx f = do
         pinned <- isPinnedNode na ci
         if pinned then pinnedLast ns >> f ci else f ci >> pinnedLast ns
   case flow of
-    FlowStack -> inOrderIf False fc >> when pinnedBelow (inOrderIf True fc)
+    Layered -> inOrderIf False fc >> when pinnedBelow (inOrderIf True fc)
     _
       | pinnedBelow -> pinnedLast fc
       | otherwise -> forChildNodes_ na parentIdx f

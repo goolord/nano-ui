@@ -284,18 +284,27 @@
 - `NanoUI.Internal.Canvas` holds the canvas's representation (`CanvasM`,
   `CanvasEnv`, `emitOp`, `emitWith`, `runCanvasScaled`) for tools that build
   ops of their own; `NanoUI.Widgets.Custom` exports the API.
-- `stack` and `stackWith` layer their children in one box. The `wrap`
-  modifier flows a row onto new lines, or a column into new columns, `lineGap`
-  apart, and `pinAt x y` places a node at an offset over its siblings, from
-  where its alignment puts it: `pinAt (-16) (-16) . alignEnd . alignBottom`
-  is a floating button 16 in from the bottom-right corner.
+- `Flow`, a container's way of placing its children along its `Direction`
+  (`layoutFlow`): in one `Line`, in lines that `Wrap`, or `Layered` over one
+  another. `layers` and `layersWith` layer their children in one box, and the
+  `layered` modifier makes a panel or a card do so. The `wrap` modifier flows
+  a row onto new lines, or a column into new columns, `lineGap` apart, and
+  `lineAlign` places each line at the start, centre (`LinesCenter`) or end
+  (`LinesEnd`) of the main axis. `pinAt x y` places a node at an offset over
+  its siblings, from where its alignment puts it: `pinAt (-16) (-16) .
+  alignEnd . alignBottom` is a floating button 16 in from the bottom-right
+  corner, and `pinAt 0 0 . grow` an overlay that covers its parent without
+  sizing it.
+- `aspect r`: a fit height is the width the node is given over `r`, so
+  `fillW . aspect (16 / 9)` keeps 16:9 at any width. `fixedAspectW` and
+  `fixedAspectH` are its fixed cases.
 - `useDrag2DOn` and `useWheelDeltaOn`, the drag and wheel hooks of a custom
   widget fed its `Response`: a drag starts with a press on the widget and a
   wheel turns it while it is hovered, so neither acts through something drawn
   over the widget, on the part a scroller clips off, or while it is disabled.
   `knob` uses them. `useDrag2D` and `useWheelDelta`, which test a rect, are
   deprecated.
-- `pointer`, a layout modifier for what a node drawn over others by a stack
+- `pointer`, a layout modifier for what a node drawn over others by layers
   or a pin does with the pointer: by default (`PointerAuto`) a control on top
   takes it and anything else lets it through to the controls beneath;
   `PointerBlock` makes a node, such as a card or a scrim, take it over its

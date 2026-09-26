@@ -153,8 +153,8 @@ module NanoUI
   , separator
   , spacer
   , flex
-  , stack
-  , stackWith
+  , layers
+  , layersWith
   , mouseArea
 
     -- * Text
@@ -645,14 +645,17 @@ module NanoUI
     -- * Layout
 
     -- | A container lays its children out along a 'Row' or a 'Column', one
-    -- after another, or layers them in a 'Stack' ('stack'), later children on
-    -- top. 'wrap' breaks a row or column into lines where the next child
-    -- would overflow it, as a list of tags does, and 'pinAt' takes a child out
-    -- of its parent's flow to sit at an offset in the parent, over its
-    -- siblings, from the corner its alignment picks, as a badge or a floating
-    -- button does.
+    -- after another in a 'Line', or in lines that 'Wrap' where the next child
+    -- would overflow, as a list of tags does ('wrap', with 'lineGap' between
+    -- the lines and 'lineAlign' placing each), or it layers them over one
+    -- another ('Layered'), later children on top: 'layers' is such a
+    -- container, and 'layered' makes a panel or a card one. 'pinAt' takes a
+    -- child out of its parent's flow to sit at an offset in the parent, over
+    -- its siblings, from the corner its alignment picks, as a badge or a
+    -- floating button does, and @pinAt 0 0 . grow@ covers the parent without
+    -- sizing it. 'aspect' keeps a fit height at a ratio to the width.
     --
-    -- Where a stack or a pinned node draws one node over another, a control
+    -- Where layers or a pinned node draw one node over another, a control
     -- on top takes the pointer from what is beneath, and anything else lets it
     -- through to the controls beneath. 'pointer' changes that for a node and
     -- what is inside it: 'PointerBlock' makes a card or scrim take the pointer
@@ -661,6 +664,7 @@ module NanoUI
   , LayoutModifier
   , Sizing (..)
   , Direction (..)
+  , Flow (..)
   , AlignX (..)
   , AlignY (..)
   , Padding (..)
@@ -698,8 +702,12 @@ module NanoUI
   , gridCols
   , fixedAspectW
   , fixedAspectH
+  , aspect
   , wrap
+  , layered
   , lineGap
+  , lineAlign
+  , LineAlign (..)
   , pinAt
   , PointerMode (..)
   , pointer

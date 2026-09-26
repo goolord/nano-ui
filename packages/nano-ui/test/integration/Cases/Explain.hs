@@ -14,7 +14,7 @@ tests =
   , spec "explain-moved-node-damage" runExplainMovedNodeDamageTest
   , spec "explain-hover" runExplainHoverTest
   , spec "explain-window-layer" runExplainWindowLayerTest
-  , spec "explain-stack-and-pin" runExplainStackAndPinTest
+  , spec "explain-layers-and-pin" runExplainLayersAndPinTest
   ]
 
 inp :: Input
@@ -206,26 +206,26 @@ runExplainWindowLayerTest ctx failed = do
     assertJust failed ((,) <$> windowFill theme quads <*> drawnIndex quads e) $ \(f, i) -> assert failed (f < i)
 
 -- | Pinned nodes are outlined, the one drawn on top is explained, and containers are named.
-runExplainStackAndPinTest :: Context -> IORef Int -> IO ()
-runExplainStackAndPinTest ctx failed = do
+runExplainLayersAndPinTest :: Context -> IORef Int -> IO ()
+runExplainLayersAndPinTest ctx failed = do
   theme <- outlining ctx
   let area l = drawing l (const mempty)
       ui = columnWith (tight . gap 0) $
         (++) <$> sequence [area (pinAt 20 20 . fixedWH 60 40), area (fixedWH 200 100)]
-          <*> stackWith tight (sequence [area (fixedWH 200 100), area (fixedWH 100 50)])
+          <*> layersWith tight (sequence [area (fixedWH 200 100), area (fixedWH 100 50)])
       explainedAt view p = runFrame ctx inp {inputMousePos = p} view >> getExplainedNode ctx
       farCorner r = let Rect x y w h = respRect r in V2 (x + w - 5) (y + h - 5)
   (rs, quads) <- quadsOf ctx inp ui
   assert failed (any (drawnAt quads . edge theme 1 . respRect) (take 1 rs))
-  -- The pinned area, the one it covers, the stack's upper and lower areas.
+  -- The pinned area, the one it covers, the upper and lower layers.
   forM_ (zip rs [centerOf, farCorner, farCorner, centerOf]) $ \(r, at) ->
     explainedAt (void ui) (at r) >>= assertEq failed (Just (respRect r)) . fmap explainedRect
-  -- In the padding of a stack and of a wrapping row, the container itself.
+  -- In the padding of layers and of a wrapping row, the container itself.
   let square = void (area (fixedWH 10 10))
       kinds = columnWith (tight . gap 0) $ do
-        stackWith (padAll 20 . fixedWH 200 100) square
+        layersWith (padAll 20 . fixedWH 200 100) square
         rowWith (padAll 20 . fixedWH 200 100 . wrap) (square >> square)
         columnWith (padAll 20 . fixedWH 200 100) square
   warmup2 ctx inp kinds
-  forM_ [(80, "Container, stack"), (180, "Container, row, wrap"), (280, "Container, column")] $ \(y, kind) ->
+  forM_ [(80, "Container, layered"), (180, "Container, row, wrap"), (280, "Container, column")] $ \(y, kind) ->
     explainedAt kinds (V2 150 y) >>= assertEq failed (Just kind) . fmap explainedKind

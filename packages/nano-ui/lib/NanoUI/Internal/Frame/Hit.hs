@@ -227,7 +227,7 @@ pointerHitAt ctx@Context {ctxNodeArena = na} top mouse idx =
 
 -- | The widget node the pointer at @mouse@ reaches, as hover finds it: of the
 -- nodes under it that take the pointer ('pointerHitAt'), the first in arena
--- order, unless a stack or a pinned child draws a later one over it, and
+-- order, unless layers or a pinned child draw a later one over it, and
 -- then any widget drawn inside that one ('reachedHit'). 'Nothing' where that
 -- is a node given 'PointerBlock' with no widget of its own there.
 reachedWidgetAt :: Context -> V2 -> IO (Maybe NodeIdx)
@@ -270,7 +270,7 @@ innermostHit ctx@Context {ctxNodeArena = na} hits idx =
 
 -- | The node drawn on top among those that @hits@, given @first@, the first
 -- of them in arena order. Paint draws an earlier sibling over a later one, so
--- that is @first@, unless a stack or a pinned node draws a later hit over it
+-- that is @first@, unless layers or a pinned node draw a later hit over it
 -- ('drawnOver'), which only an arena with one of them can do. A hit inside
 -- another does not count as over it here ('innermostHit').
 topmostHit :: Context -> (NodeIdx -> IO Bool) -> NodeIdx -> IO NodeIdx

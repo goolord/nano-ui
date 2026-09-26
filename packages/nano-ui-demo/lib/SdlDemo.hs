@@ -485,13 +485,13 @@ demoUi = do
                   setSwatches . Just . catMaybes
                     =<< forM demoSwatches (\(caption, pixels) -> fmap (,caption) <$> registerRgba 32 32 pixels)
                 -- A wrapping row flows the swatches onto a new line in a
-                -- narrow window, and a stack lays a badge over each image's
+                -- narrow window, and layers lay a badge over each image's
                 -- corner.
                 Just registered ->
                   rowWith (wrap . tight . gap gapInline . fillW) $
                     for_ registered $ \(iid, caption) ->
                       columnWith (tight . gap gapMicro) $ do
-                        stackWith tight $ do
+                        layersWith tight $ do
                           image (fixedWH 88 88) iid
                           panelWith (alignEnd . alignTop . padXY 4 1) $
                             labelWith (tight . fontMono . fontSize 11) "32px"

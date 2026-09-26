@@ -38,8 +38,9 @@ counter = do
   sparklines, and drag and drop. `customWidget` and a canvas API, with paths,
   fill rules, strokes with joins and dashes, gradients, clips and transforms
   (`NanoUI.Path`), cover anything else.
-- Row, column, grid, and stacked (`stack`) layout with scrolling, wrapping
-  (`wrap`), and pinned children (`pinAt`). Layout options are
+- Row, column, grid, and layered (`layers`) layout with scrolling, wrapping
+  (`wrap`, `lineAlign`), pinned children (`pinAt`) and aspect ratios
+  (`aspect`). Layout options are
   `Layout -> Layout` modifiers, as in `columnWith (gap 8 . padAll 12)`.
   `explainLayout` outlines every layout node.
 - Scrollers take a wheel step and a glide time (`setScrollTuning`,

@@ -124,18 +124,27 @@ the leftmost wins. `fillW` and `fillH` share available space with other
 growing children; `minW` and `maxW` constrain width. `percent 50` requests
 half the available width. `tight` removes padding but keeps the child gap.
 
-`stack` layers its children in one box as large as the largest, each placed
-by its alignment; a later child draws over the earlier ones. The `wrap`
-modifier flows a row onto a new line where the next child would not fit, as
-in `rowWith (wrap . gap 6 . lineGap 4) (mapM_ chip tags)`; inside a
-container that sizes itself to its content, bound the row with `maxW` or
-`fixedW`. `pinAt x y` places a node over its siblings and out of their
-flow, at that offset from where its alignment puts it in its parent's
+A container's `Flow` says how it places its children along its `Row` or
+`Column`: in one `Line`, the default; in lines that `Wrap`; or `Layered`, each
+over the whole content box. `layers` layers its children in one box as large
+as the largest, each placed by its alignment; a later child draws over the
+earlier ones. The `layered` modifier does the same for a panel or a card:
+`panelWith (layered . fixedWH 240 160)`. The `wrap` modifier flows a row onto
+a new line where the next child would not fit, as in
+`rowWith (wrap . gap 6 . lineGap 4) (mapM_ chip tags)`, and `lineAlign
+LinesCenter` or `lineAlign LinesEnd` centres each line or moves it to the
+end; inside a container that sizes itself to its content, bound the row with
+`maxW` or `fixedW`. `pinAt x y` places a node over its siblings and out of
+their flow, at that offset from where its alignment puts it in its parent's
 content box: from the top-left corner by default, and from the bottom-right
 one with `pinAt (-16) (-16) . alignEnd . alignBottom`, as a floating button
-sits.
+sits. `pinAt 0 0 . grow` is an overlay over the whole content box that does
+not size its parent, as a scrim or a drop highlight should be.
 
-Where a stack or a pinned node draws one node over another, a control on
+`aspect r` keeps a fit height at the width over `r`: `box (fillW . aspect
+(16 / 9)) c` fills its column's width at 16:9 whatever the width.
+
+Where layers or a pinned node draw one node over another, a control on
 top (a button, field, slider or drawing) takes the pointer from whatever is
 beneath it, while a panel, label, image or container lets the pointer
 through to the controls beneath. `pointer PointerBlock` makes a node take
@@ -145,7 +154,7 @@ through, as a decorative drawing laid over controls should. A node never
 takes the pointer from what it is inside:
 
 ```haskell
-stack $ do
+layers $ do
   list
   panelWith (pointer PointerBlock . alignEnd . fixedW 240) details
 ```

@@ -27,7 +27,7 @@ import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Monad ((<&&>))
 import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena
-import NanoUI.Internal.Style (Padding (..), PointerMode (..), themePanel)
+import NanoUI.Internal.Style (Flow (..), Padding (..), PointerMode (..), themePanel)
 import NanoUI.Internal.Types (Rect (..), Size (..), V2 (..), rectContains, rectHit, rectInflate, rectIntersect, rectUnion)
 
 -- | Move every node by the offsets of the scroll containers around it, and
@@ -218,8 +218,8 @@ data WheelHit
 
 -- | What the subtree at @idx@ does with the wheel at @mouse@: the answer of
 -- the child drawn on top there, else @idx@ itself if it is a scroller under
--- the pointer. Where a stack or a pinned node draws one child over another
--- (@layered@, and this node a stack or above a pinned node), the children
+-- the pointer. Where layers or a pinned node draw one child over another
+-- (@layered@, and this node layered or above a pinned node), the children
 -- are asked in the order paint draws them, the one on top first
 -- ('childrenTopFirst'), so a scroller pinned over another takes the wheel;
 -- elsewhere children do not overlap, and are asked in the arena's sibling
@@ -231,7 +231,7 @@ queryScrollTarget ctx@Context {ctxNodeArena = na} layered mouse parentClip idx =
     Nothing -> pure WheelMiss
     Just clip -> do
       overlapping <-
-        pure layered <&&> ((||) <$> ((== FlowStack) <$> getFlow na idx) <*> hasPinnedBelow na idx)
+        pure layered <&&> ((||) <$> ((== Layered) <$> getFlow na idx) <*> hasPinnedBelow na idx)
       let answered c =
             queryScrollTarget ctx layered mouse clip c <&> \case
               WheelMiss -> Nothing

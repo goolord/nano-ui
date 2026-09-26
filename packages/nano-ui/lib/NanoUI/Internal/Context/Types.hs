@@ -709,7 +709,7 @@ data Context = Context
   , ctxDrawArena :: DrawArena
   , ctxHotId :: IORef WidgetId
   , ctxLastHotId :: IORef WidgetId
-  -- | Where a stack or a pinned node can draw one node over another, the
+  -- | Where layers or a pinned node can draw one node over another, the
   -- ids, by 'intKey', of the node on top at the pointer that takes it and of
   -- every node that one is inside, in the frame the user saw
   -- ('NanoUI.Internal.Frame.Input.recordCoveredWidgets'). Every other node

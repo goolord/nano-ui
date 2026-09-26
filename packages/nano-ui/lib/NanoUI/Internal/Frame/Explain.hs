@@ -23,7 +23,7 @@ import NanoUI.Internal.Frame.Node (readScrollNode)
 import NanoUI.Internal.Frame.Scroll.Geometry (borderContentClip, scrollNodeViewport)
 import NanoUI.Internal.Input (Input (..))
 import NanoUI.Internal.Layout.Arena
-import NanoUI.Internal.Style (Padding (..), Theme, fadeAlpha, themePanel, themeSeries)
+import NanoUI.Internal.Style (Flow (..), Padding (..), Theme, fadeAlpha, themePanel, themeSeries)
 import NanoUI.Internal.Types (Color, Rect (..), Size (..), rectContains, rectHit, rectIntersect)
 
 -- | Work out what the overlay draws this frame, and repaint where that
@@ -49,7 +49,7 @@ explainFrame ctx@Context {ctxNodeArena = na} inp = do
         pure ((rect, clip, depth) : below)
       -- The innermost node under the pointer from @idx@ down: the child
       -- drawn on top with a node under it ('childrenTopFirst': an earlier
-      -- sibling over a later one, but a stack's later child over an earlier
+      -- sibling over a later one, but a later layer over an earlier
       -- one, and a pinned child over the rest), or else @idx@ itself. A child
       -- can paint outside a row or column, so each is searched.
       nodeAt !depth clip idx = do
@@ -143,7 +143,7 @@ childClip ctx@Context {ctxNodeArena = na} idx clip rect@(Rect x y w h) =
       | otherwise -> pure (Just clip)
 
 -- | A node's type without its @Node@ prefix, and how a container lays out
--- its children: its direction, @stack@ for a stack, and @wrap@ after the
+-- its children: its direction, @layered@ for layers, and @wrap@ after the
 -- direction of a container that wraps.
 nodeKind :: NodeArena -> NodeIdx -> IO T.Text
 nodeKind na idx = do
@@ -155,9 +155,9 @@ nodeKind na idx = do
       dir <- getDirection na idx
       flow <- getFlow na idx
       pure $ kind <> ", " <> case flow of
-        FlowStack -> "stack"
-        FlowWrap -> direction dir <> ", wrap"
-        FlowLine -> direction dir
+        Layered -> "layered"
+        Wrap -> direction dir <> ", wrap"
+        Line -> direction dir
     else pure kind
 
 -- | The outline colour at a depth: the theme's series colours in turn.

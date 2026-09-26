@@ -81,8 +81,9 @@ backends' reducer runners fold them into the model.
   bars, sparklines, rich text, SVG icons, and drag and drop. `customWidget` and
   a canvas API, with paths, fill rules, strokes with joins and dashes,
   gradients, clips and transforms, cover anything else.
-- Row, column, grid, and stacked (`stack`) layout with scrolling, wrapping
-  (`wrap`), and pinned children (`pinAt`). Layout options are
+- Row, column, grid, and layered (`layers`) layout with scrolling, wrapping
+  (`wrap`, `lineAlign`), pinned children (`pinAt`) and aspect ratios
+  (`aspect`). Layout options are
   `Layout -> Layout` modifiers, as in `columnWith (gap 8 . padAll 12)`.
 - Keyboard focus and navigation for every control, and shortcuts, as in
   `shortcut (ctrl <> key 's')`.
