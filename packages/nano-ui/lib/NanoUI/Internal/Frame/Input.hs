@@ -31,9 +31,10 @@ module NanoUI.Internal.Frame.Input
   ) where
 
 import Control.Applicative ((<|>))
-import Control.Monad (filterM, mfilter, unless, when, (<=<))
+import Control.Monad (filterM, guard, mfilter, unless, when, (<=<))
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.Map.Strict qualified as M
+import Data.Foldable (for_)
 import Data.Functor ((<&>))
 import Data.IntSet qualified as IS
 import Data.Maybe (fromMaybe, isJust, isNothing, listToMaybe, maybeToList)
@@ -70,18 +71,22 @@ finalizeTabFocus ctx inp =
       markDirty ctx
 
 -- | Where Tab moves focus from @cur@, backwards with @back@: focus steps
--- through the widgets that called
--- 'NanoUI.Internal.Context.registerFocusable' during the view, in
--- declaration order, and wraps at both ends. While a modal is open, only the
--- widgets inside the top modal take part. @WidgetId 0@ when none does.
+-- through the 'tabStops' and wraps at both ends. @WidgetId 0@ when there
+-- are none.
 tabTarget :: Context -> WidgetId -> Bool -> IO WidgetId
-tabTarget ctx cur back = do
+tabTarget ctx cur back = (\stops -> tabNext cur stops back) <$> tabStops ctx
+
+-- | The widgets Tab stops at, in order: those that called
+-- 'NanoUI.Internal.Context.registerFocusable' during the view, in
+-- declaration order, and while a modal is open, only those inside the top
+-- modal.
+tabStops :: Context -> IO [WidgetId]
+tabStops ctx = do
   -- The modal's root is looked up once for the whole list. Each widget then
   -- costs one walk up its ancestors.
   top <- topModalNode (ctxNodeArena ctx)
   let inModal w = maybe (pure True) (\modal -> widgetIdInSubtree ctx modal w) top
-  ids <- filterM inModal . filter (/= WidgetId 0) =<< getFocusables ctx
-  pure (tabNext cur ids back)
+  filterM inModal . filter (/= WidgetId 0) =<< getFocusables ctx
 
 -- | Whether @wid@ is a menu row or a menu-bar title. Their hover highlight
 -- switches on and off at once, so 'refreshHover' runs no animation for them.
@@ -350,29 +355,25 @@ finalizeSelectFocus ctx targets =
 --
 -- Focus goes nowhere for 'FocusNowhere', where Tab would go for 'FocusNext'
 -- and 'FocusPrevious' ('tabTarget'), and otherwise only where Tab could take
--- it this frame: to a widget that called
--- 'NanoUI.Internal.Context.registerFocusable' (a disabled one does not),
--- inside the top modal while one is open. Otherwise the request is dropped.
--- When focus moves it moves as a press elsewhere moves it off a field: the
--- field that had it collapses its selection, and the text-field menu and an
--- open dropdown close. The widget focused shows the ring, as Tab's does. A
--- request for the widget that has focus already changes nothing, the ring
--- included.
+-- it this frame: to one of the 'tabStops', which a disabled widget is not.
+-- Otherwise the request is dropped. When focus moves it moves as a press
+-- elsewhere moves it off a field: the field that had it collapses its
+-- selection, and the text-field menu and an open dropdown close. The widget
+-- focused shows the ring, as Tab's does. A request for the widget that has
+-- focus already changes nothing, the ring included.
 finalizeFocusRequest :: Context -> IO ()
 finalizeFocusRequest ctx =
   readIORef (ctxFocusRequest ctx) >>= mapM_ (\req -> do
     writeIORef (ctxFocusRequest ctx) Nothing
     prev <- readIORef (ctxFocusId ctx)
-    let stepTo back = (\t -> if hashWidgetId t == 0 then prev else t) <$> tabTarget ctx prev back
-    wid <- case req of
-      FocusOn w -> pure w
-      FocusNowhere -> pure (WidgetId 0)
-      FocusNext -> stepTo False
-      FocusPrevious -> stepTo True
-    let tabStop
-          | hashWidgetId wid == 0 = pure True
-          | otherwise = ((wid `elem`) <$> getFocusables ctx) <&&> widgetOverlayAllowed ctx wid
-    whenM (pure (wid /= prev) <&&> tabStop) $ do
+    stops <- tabStops ctx
+    let step back = mfilter (/= WidgetId 0) (Just (tabNext prev stops back))
+        target = case req of
+          FocusOn w -> w <$ guard (w `elem` stops)
+          FocusNowhere -> Just (WidgetId 0)
+          FocusNext -> step False
+          FocusPrevious -> step True
+    for_ (mfilter (/= prev) target) $ \wid -> do
       collapseTextFieldSelection ctx prev
       modifyInteraction ctx (\s -> s {isTextInputMenu = Nothing})
       store <- getStore ctx
