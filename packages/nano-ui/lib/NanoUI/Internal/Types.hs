@@ -15,6 +15,7 @@ module NanoUI.Internal.Types
   , hsvToRgb
   , clamp
   , clamp01
+  , finite
   , onGrid
   , gridSpan
   , roundHalfUp
@@ -127,6 +128,11 @@ clamp lo hi x = max lo (min hi x)
 {-# INLINE clamp01 #-}
 clamp01 :: Float -> Float
 clamp01 x = clamp 0 1 x
+
+-- | A number: neither NaN nor infinite.
+{-# INLINE finite #-}
+finite :: Float -> Bool
+finite v = not (isNaN v || isInfinite v)
 
 -- | Round a logical coordinate onto the device-pixel grid implied by draw
 -- scale @s@ (device px = logical * s). Every layer that positions pixels --

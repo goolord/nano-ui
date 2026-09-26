@@ -20,7 +20,6 @@ import Control.Applicative ((<|>))
 import Control.Monad (forM_)
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
-import Data.Functor ((<&>))
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
 import Data.Word (Word8)
@@ -181,18 +180,22 @@ lookupImageUv (ImageAtlas ref) (ImageId tid) = do
   st <- readIORef ref
   let fw = fromIntegral (asW st)
       fh = fromIntegral (asH st)
-  pure $
-    IM.lookup tid (asSlots st) <&> \(AtlasSlot x y w h) ->
-      ( fromIntegral x / fw
-      , fromIntegral y / fh
-      , fromIntegral (x + w) / fw
-      , fromIntegral (y + h) / fh
-      )
+  pure $! case IM.lookup tid (asSlots st) of
+    Nothing -> Nothing
+    Just (AtlasSlot x y w h) ->
+      let !u0 = fromIntegral x / fw
+          !v0 = fromIntegral y / fh
+          !u1 = fromIntegral (x + w) / fw
+          !v1 = fromIntegral (y + h) / fh
+       in Just (u0, v0, u1, v1)
 
 -- | The width and height in pixels of the image registered under an id.
 lookupImageSize :: ImageAtlas -> ImageId -> IO (Maybe (Int, Int))
-lookupImageSize (ImageAtlas ref) (ImageId tid) =
-  fmap (\slot -> (slotW slot, slotH slot)) . IM.lookup tid . asSlots <$> readIORef ref
+lookupImageSize (ImageAtlas ref) (ImageId tid) = do
+  st <- readIORef ref
+  pure $! case IM.lookup tid (asSlots st) of
+    Nothing -> Nothing
+    Just (AtlasSlot _ _ w h) -> Just (w, h)
 
 -- | Writes 'asWrites' keeps: enough for a few frames of a few changing
 -- images between two uploads.

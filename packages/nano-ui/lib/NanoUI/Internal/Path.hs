@@ -86,7 +86,7 @@ import Data.Primitive.PrimArray
 import Data.Primitive.SmallArray (indexSmallArray, smallArrayFromListN)
 import Data.Word (Word32)
 import NanoUI.Internal.Draw.Types (DrawOp (..), LineCap (..), LineJoin (..), Shade (..), defaultTextFont)
-import NanoUI.Internal.Types (Color (..), Rect (..), V2 (..), lerpColor)
+import NanoUI.Internal.Types (Color (..), Rect (..), V2 (..), finite, lerpColor)
 
 --------------------------------------------------------------------------------
 -- Paths
@@ -420,10 +420,6 @@ invert (Transform a b c d e f)
 -- | Every entry is a number: neither NaN nor infinite.
 transformFinite :: Transform -> Bool
 transformFinite (Transform a b c d e f) = all finite [a, b, c, d, e, f]
-
-{-# INLINE finite #-}
-finite :: Float -> Bool
-finite v = not (isNaN v || isInfinite v)
 
 -- | The most a transform lengthens anything: the larger singular value of
 -- its linear part.

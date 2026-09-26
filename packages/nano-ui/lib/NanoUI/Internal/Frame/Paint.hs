@@ -26,7 +26,7 @@ import Data.Primitive.PrimArray
   , unsafeFreezePrimArray
   , writePrimArray
   )
-import Data.Primitive.SmallArray (SmallArray, smallArrayFromList)
+import Data.Primitive.SmallArray (SmallArray)
 import qualified Data.Text as T
 import Data.Word (Word32)
 import NanoUI.Internal.Context
@@ -38,7 +38,7 @@ import NanoUI.Internal.Frame.Paint.Widgets (PaintEnv (..), buildPaintEnv, paintT
 import NanoUI.Internal.Frame.Scroll.Geometry (ScrollNode (..), borderContentClip, scrollBare, scrollNodeBars, scrollNodeViewport)
 import NanoUI.Internal.Frame.Spans (textNodeSpanEntry)
 import NanoUI.Internal.Id (hashWidgetId)
-import NanoUI.Internal.Image (ImageDraw (..), imageDrawOp, lookDraw)
+import NanoUI.Internal.Image (ImageDraw (..), fadeBy, imageDrawOp, lookDraw)
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Style hiding (fontSize)
 import NanoUI.Internal.Types (Color (..), ImageId (..), Rect (..), V2 (..), colorA, colorRGBA, rectInflate)
@@ -215,12 +215,19 @@ paintContainerNode env@PaintEnv {peContext = ctx} idx rect = do
 emitDrawingOps :: PaintEnv -> Rect -> SmallArray DrawOp -> IO ()
 emitDrawingOps env rect ops = withClip (peDrawArena env) rect (emitOps env ops)
 
--- | Ops in the env's default font, where they are, unclipped.
+-- | Ops in the env's default font, where they are, unclipped. Kept out of
+-- line: inlined into its one caller, the clip's action captures its
+-- arguments, which allocates more each drawing.
+{-# NOINLINE emitOps #-}
 emitOps :: PaintEnv -> SmallArray DrawOp -> IO ()
-emitOps env@PaintEnv {peDrawArena = da} = emitDrawOps da (peFontMetrics env) (ctxFontSize ctx) (resolveTextFont ctx) imageUv
+emitOps env@PaintEnv {peDrawArena = da} = emitDrawOps da (peFontMetrics env) (ctxFontSize ctx) (resolveTextFont ctx) (atlasImageUv ctx)
   where
     ctx = peContext env
-    imageUv tid = fmap (atlasTextureId,) <$> lookupImageUv ctx (ImageId tid)
+
+-- | The atlas texture and UV bounds of a registered image, for an image op
+-- that names it.
+atlasImageUv :: Context -> Int -> IO (Maybe (Int, (Float, Float, Float, Float)))
+atlasImageUv ctx tid = fmap (atlasTextureId,) <$> lookupImageUv ctx (ImageId tid)
 
 paintPanelNode :: PaintEnv -> NodeIdx -> Rect -> IO ()
 paintPanelNode env@PaintEnv {peDrawArena = da} idx rect = do
@@ -331,13 +338,13 @@ paintImageNode env@PaintEnv {peDrawArena = da} idx rect = do
       lookupImageUv (peContext env) tex >>= \case
         Just (u0, v0, u1, v1) -> do
           base <- fromMaybe (colorRGBA 255 255 255 255) <$> getNodeFontColor na idx
-          pushImage da rect atlasTextureId u0 v0 u1 v1 (fadeAlpha base (round (fromIntegral (colorA base) * fade)))
+          pushImage da rect atlasTextureId u0 v0 u1 v1 (fadeBy fade base)
         Nothing -> accent
     Just ImageNode {inLook = look} ->
       lookupImageSize (peContext env) tex >>= \case
         Just size -> forM_ (lookDraw look size tex fade rect) $ \d ->
           (if imageAngle d /= 0 then withClip da rect else id) $
-            forM_ (imageDrawOp d) (emitOps env . smallArrayFromList . pure)
+            forM_ (imageDrawOp d) (pushImageOp da (atlasImageUv (peContext env)))
         Nothing -> accent
   where
     accent = pushRect da rect (themeAccent (peTheme env))

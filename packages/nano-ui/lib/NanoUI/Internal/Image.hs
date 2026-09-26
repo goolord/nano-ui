@@ -16,12 +16,13 @@ module NanoUI.Internal.Image
   , ImageDraw (..)
   , imageDraw
   , imageDrawOp
+  , fadeBy
   ) where
 
 import Data.Maybe (fromMaybe)
 import NanoUI.Internal.Draw.Types (DrawOp (..))
 import NanoUI.Internal.Style (AlignX (..), AlignY (..), Layout, fadeAlpha)
-import NanoUI.Internal.Types (Color, ImageId (..), Rect (..), clamp, colorA, colorRGBA, rectIntersect)
+import NanoUI.Internal.Types (Color, ImageId (..), Rect (..), clamp, clamp01, colorA, colorRGBA, finite, rectIntersect)
 
 -- | How an image fills the rect its layout gives it, as CSS's @object-fit@
 -- does. The image keeps its own shape under every fit but 'FitFill'.
@@ -203,12 +204,20 @@ imageLook cfg =
     (icFit cfg)
     (icAlignX cfg)
     (icAlignY cfg)
-    (if isNaN (icOpacity cfg) then 1 else clamp 0 1 (icOpacity cfg))
-    (if isNaN angle || isInfinite angle then RotateFloating 0 else icRotation cfg)
+    (unitOpacity (icOpacity cfg))
+    (if finite (rotationAngle (icRotation cfg)) then icRotation cfg else RotateFloating 0)
     (icCrop cfg)
-    (if icScale cfg > 0 && not (isInfinite (icScale cfg)) then icScale cfg else 1)
-  where
-    angle = rotationAngle (icRotation cfg)
+    (if icScale cfg > 0 && finite (icScale cfg) then icScale cfg else 1)
+
+-- | An opacity kept within 0 and 1, one that is not a number taken as 1.
+unitOpacity :: Float -> Float
+unitOpacity o = if isNaN o then 1 else clamp01 o
+
+-- | A colour faded by an opacity from 0 to 1: its alpha scaled by it.
+fadeBy :: Float -> Color -> Color
+fadeBy o c
+  | o >= 1 = c
+  | otherwise = fadeAlpha c (round (fromIntegral (colorA c) * o))
 
 -- | The size an image node with this look takes where its layout leaves an
 -- axis unsized, its image @iw@ by @ih@ pixels: the part its crop keeps,
@@ -278,8 +287,6 @@ imageDraw r iid = ImageDraw r iid (Rect 0 0 1 1) 0 (colorRGBA 255 255 255 255) 1
 imageDrawOp :: ImageDraw -> Maybe DrawOp
 imageDrawOp (ImageDraw r (ImageId tid) (Rect u v uw vh) angle tint opacity)
   | colorA tint' == 0 = Nothing
-  | otherwise = Just (DrawImage r angle' tid u v (u + uw) (v + vh) tint')
+  | otherwise = Just (DrawImage r (if finite angle then angle else 0) tid u v (u + uw) (v + vh) tint')
   where
-    o = if isNaN opacity then 1 else clamp 0 1 opacity
-    tint' = if o >= 1 then tint else fadeAlpha tint (round (fromIntegral (colorA tint) * o))
-    angle' = if isNaN angle || isInfinite angle then 0 else angle
+    tint' = fadeBy (unitOpacity opacity) tint

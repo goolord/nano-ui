@@ -57,6 +57,7 @@ module NanoUI.Internal.Draw
   , pushText
   , pushPreparedTextStyled
   , emitDrawOps
+  , pushImageOp
   , pushShapeOp
   , checkboxOps
   ) where
@@ -349,17 +350,7 @@ emitDrawOps da fm size resolve imageUv ops = go 0 []
             prev : rest -> setClip da prev >> go (i + 1) rest
             [] -> go (i + 1) []
           op -> emitOne op >> go (i + 1) saved
-    -- The op's UVs, which run 0 to 1 over the image, within its bounds.
-    image tex u0 v0 u1 v1 draw =
-      imageUv tex >>= \case
-        Just (atlas, (a0, b0, a1, b1)) ->
-          draw atlas (a0 + u0 * (a1 - a0)) (b0 + v0 * (b1 - b0)) (a0 + u1 * (a1 - a0)) (b0 + v1 * (b1 - b0))
-        Nothing -> draw tex u0 v0 u1 v1
-    -- An unturned image keeps the snapped quad; only a turned one needs
-    -- its corners worked out.
-    emitOne (DrawImage r angle tex u0 v0 u1 v1 c)
-      | angle == 0 = image tex u0 v0 u1 v1 (\t a0 b0 a1 b1 -> pushImage da r t a0 b0 a1 b1 c)
-      | otherwise = image tex u0 v0 u1 v1 (\t a0 b0 a1 b1 -> pushImageRotated da r angle t a0 b0 a1 b1 c)
+    emitOne op@DrawImage {} = pushImageOp da imageUv op
     emitOne (DrawText x y ax ay t c) = do
       prepared <- prepareFontMetrics fm t
       let Rect px py _ _ = drawTextBox prepared x y ax ay t
@@ -383,6 +374,24 @@ emitDrawOps da fm size resolve imageUv ops = go 0 []
           fstyle = if native then FontStyleNormal else textFontStyle font
       prepared <- prepareFontMetrics styledFm t
       pushPreparedTextStyledQuads da prepared weight fstyle (textFontDecoration font) x y t c
+
+-- | Paint an image op ('DrawImage'), @imageUv@ giving the texture and UV
+-- bounds of the image id it names, or 'Nothing' when the id is a texture of
+-- its own; any other op paints nothing. The op's UVs run 0 to 1 over the
+-- image. An unturned image keeps the snapped quad; only a turned one needs
+-- its corners worked out.
+{-# INLINE pushImageOp #-}
+pushImageOp :: DrawArena -> (Int -> IO (Maybe (Int, (Float, Float, Float, Float)))) -> DrawOp -> IO ()
+pushImageOp da imageUv = \case
+  DrawImage r angle tex u0 v0 u1 v1 c ->
+    let draw !t !a0 !b0 !a1 !b1
+          | angle == 0 = pushImage da r t a0 b0 a1 b1 c
+          | otherwise = pushImageRotated da r angle t a0 b0 a1 b1 c
+     in imageUv tex >>= \case
+          Just (atlas, (a0, b0, a1, b1)) ->
+            draw atlas (a0 + u0 * (a1 - a0)) (b0 + v0 * (b1 - b0)) (a0 + u1 * (a1 - a0)) (b0 + v1 * (b1 - b0))
+          Nothing -> draw tex u0 v0 u1 v1
+  _ -> pure ()
 
 -- | Paint an op that needs no font or image: a fill, stroke, line or
 -- gradient. Text, image and clip ops paint nothing here ('emitDrawOps'
