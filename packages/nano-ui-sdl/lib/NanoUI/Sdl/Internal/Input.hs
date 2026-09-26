@@ -117,9 +117,8 @@ data SdlEvent
   | EvSystemThemeChanged
   -- ^ The desktop switched between light and dark; display synchronisation
   -- reads which.
-  | EvKey Key Modifiers
-  -- ^ A key went down, or repeated while held.
-  | EvKeyUp Key Modifiers
+  | EvKey Key Bool Modifiers
+  -- ^ A key went down ('True', an auto-repeat of a held key too) or up.
   | EvModifiers Modifiers
   -- ^ A key nano-ui has no 'Key' for, a modifier key among them, went down
   -- or up; only the modifiers it leaves held are kept.
@@ -182,8 +181,8 @@ decodeEvent refreshTy p = do
       -- must be full or stale regions flash.
       Events.SDL_EVENT_WINDOW_EXPOSED -> pure (Just EvWindowRedraw)
       Events.SDL_EVENT_WINDOW_RESTORED -> pure (Just EvWindowRedraw)
-      Events.SDL_EVENT_KEY_DOWN -> Just . keyDown <$> peek p.key
-      Events.SDL_EVENT_KEY_UP -> Just . keyUp <$> peek p.key
+      Events.SDL_EVENT_KEY_DOWN -> Just . keyEvent True <$> peek p.key
+      Events.SDL_EVENT_KEY_UP -> Just . keyEvent False <$> peek p.key
       Events.SDL_EVENT_TEXT_INPUT -> textInput p
       Events.SDL_EVENT_TEXT_EDITING -> textEditing p
       -- SDL stops text input while the window is in the background, which
@@ -209,15 +208,10 @@ decodeEvent refreshTy p = do
 v2 :: CFloat -> CFloat -> V2
 v2 x y = V2 (realToFrac x) (realToFrac y)
 
--- | A key press. A held key's auto-repeats are presses too, which
--- 'applyKey' tells from the first by the key being held already.
-keyDown :: SDL_KeyboardEvent -> SdlEvent
-keyDown ke = maybe (EvModifiers mods) (`EvKey` mods) (sdlKey (keyCode ke) (keyMods ke))
-  where
-    mods = modFromKeymod (keyMods ke)
-
-keyUp :: SDL_KeyboardEvent -> SdlEvent
-keyUp ke = maybe (EvModifiers mods) (`EvKeyUp` mods) (sdlKey (keyCode ke) (keyMods ke))
+-- | A key going down ('True') or up. A held key's auto-repeats are presses
+-- too, which 'applyKey' tells from the first by the key being held already.
+keyEvent :: Bool -> SDL_KeyboardEvent -> SdlEvent
+keyEvent down ke = maybe (EvModifiers mods) (\k -> EvKey k down mods) (sdlKey (keyCode ke) (keyMods ke))
   where
     mods = modFromKeymod (keyMods ke)
 
@@ -330,8 +324,7 @@ word32 = fromIntegral
 applyEvent :: Input -> SdlEvent -> Input
 applyEvent inp ev =
   case ev of
-    EvKey k mods -> (applyKey k True inp) {inputModifiers = mods}
-    EvKeyUp k mods -> (applyKey k False inp) {inputModifiers = mods}
+    EvKey k down mods -> (applyKey k down inp) {inputModifiers = mods}
     EvModifiers mods -> inp {inputModifiers = mods}
     EvText txt mods ->
       inp {inputChars = inputChars inp <> txt, inputModifiers = mods}

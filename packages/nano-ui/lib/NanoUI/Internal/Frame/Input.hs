@@ -429,8 +429,8 @@ recordFocusKind ctx ime = do
       | otherwise -> withWidgetNode ctx focus FocusNone $ \idx -> do
           let si = getStyleIdx (ctxNodeArena ctx) idx
           getNodeType (ctxNodeArena ctx) idx >>= \case
-            NodeTextInput -> pure (FocusTextField False)
-            NodeTextArea -> pure (FocusTextField True)
+            NodeTextInput -> pure FocusTextLine
+            NodeTextArea -> pure (FocusControl KeysType)
             -- A tree row moves with the arrows; any other button activates.
             NodeButton -> si <&> \s -> FocusControl (if hasFlag buttonFlagRow s then KeysNavigate else KeysActivate)
             NodeDrawing -> FocusControl . drawingKeyClaim <$> si

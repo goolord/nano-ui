@@ -19,7 +19,7 @@ import Data.Text.Read qualified as TR
 import Effectful (Eff, type (:>))
 import GHC.Clock (getMonotonicTime)
 import NanoUI.Internal.Context (getStore, intKey, registerFocusable, requestInputMethod, requestWakeAt, modifyStore)
-import NanoUI.Internal.Input (InputPurpose (..), Key (..), MouseButton (..), Pressable (..), buttonHeld, buttonPressed, inputKeys, inputKeysElem, inputModifiers, inputMousePos, modShift)
+import NanoUI.Internal.Input (InputPurpose (..), Key (..), MouseButton (..), Pressable (..), buttonHeld, buttonPressed, inputModifiers, inputMousePos, modShift)
 import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Monad (Ui, askInput, freshWidget, uiIO)
 import NanoUI.Internal.Store (Slot (..), deleteSlot, fieldDouble, fieldInt, fieldText, findSlot, insertSlot, lookupSlot, slotKey)
@@ -117,7 +117,6 @@ numericInputConfigured' cfg value = do
     Rect rx ry rw rh = respRect resp
     (upRect, downRect) = numericStepperRects rx ry rw rh
     mouse = inputMousePos inp
-    keys = inputKeys inp
     over r dir = if respHovered resp && rectContains r mouse then dir else 0
     pressDir
       | buttonPressed MouseLeft inp = over upRect 1 + over downRect (-1)
@@ -131,8 +130,8 @@ numericInputConfigured' cfg value = do
         && over (if held0 > 0 then upRect else downRect) held0 /= 0
     keyDir
       | not isFocus = 0
-      | inputKeysElem KeyUp keys = 1
-      | inputKeysElem KeyDown keys = -1
+      | pressedIn KeyUp inp = 1
+      | pressedIn KeyDown inp = -1
       | otherwise = 0
   now <- if pressDir /= 0 || holding then uiIO getMonotonicTime else pure 0
   let

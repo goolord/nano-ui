@@ -674,11 +674,11 @@ data InteractionState = InteractionState
 -- keys it acts on ('NanoUI.Internal.Widgets.Shortcut').
 data FocusKind
   = FocusNone
-  | -- | A control that is not a text field, and the keys it takes.
+  | -- | A control, and the keys it takes: a text area takes 'KeysType'.
     FocusControl !KeyClaim
-  | -- | A text field, multi-line when 'True'. It takes typing and its
-    -- editing keys and shortcuts.
-    FocusTextField !Bool
+  | -- | A single-line text field. It takes what a text area does, and
+    -- Enter.
+    FocusTextLine
   | -- | A text field an input method composes in, or commits into this
     -- frame. Its keys are the input method's, or come with its commit, so it
     -- takes every key, and its typed text, the commit, whatever modifiers

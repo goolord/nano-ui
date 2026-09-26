@@ -506,8 +506,7 @@ data RgfwEvent
   | RgfwEvLeave -- ^ the pointer left the window
   | RgfwEvScroll !Float !Float
   | RgfwEvChar !Char -- ^ typed character
-  | RgfwEvKeyPress !Word32 !Word8 -- ^ key and modifiers; an auto-repeat too
-  | RgfwEvKeyRelease !Word32 !Word8
+  | RgfwEvKey !Word32 !Word8 !Bool -- ^ key and modifiers, down (an auto-repeat too) or up
   | RgfwEvFocusLost -- ^ the window lost the keyboard
 
 -- | Drain the RGFW queue, recording size and scale changes for the next sync.
@@ -529,10 +528,12 @@ pollRgfwEvents win evPtr scaleRef monScaleRef winSizeRef = do
         R.EventScaleUpdate sx _ -> do
           writeIORef monScaleRef (if sx > 0 then sx else 1)
           drain (ev : acc)
-        R.EventKeyPress k m -> layoutKey k >>= \k' -> drain (R.EventKeyPress k' m : acc)
-        R.EventKeyRepeat k m -> layoutKey k >>= \k' -> drain (R.EventKeyRepeat k' m : acc)
-        R.EventKeyRelease k m -> layoutKey k >>= \k' -> drain (R.EventKeyRelease k' m : acc)
+        R.EventKeyPress k m -> relayout R.EventKeyPress k m
+        R.EventKeyRepeat k m -> relayout R.EventKeyRepeat k m
+        R.EventKeyRelease k m -> relayout R.EventKeyRelease k m
         _ -> drain (ev : acc)
+      where
+        relayout event k m = layoutKey k >>= \k' -> drain (event k' m : acc)
     -- RGFW names a physical key by what it types in a US layout. A letter or
     -- punctuation key takes what it types in the current one when that is
     -- ASCII; the digit row keeps its digits, as some layouts type symbols
@@ -557,9 +558,9 @@ decodeRgfwEvents scale = mapMaybe $ \case
   R.EventOther t
     | t == R.rgfw_mouseLeave -> Just RgfwEvLeave
     | t == R.rgfw_windowFocusOut -> Just RgfwEvFocusLost
-  R.EventKeyPress k m -> Just (RgfwEvKeyPress k m)
-  R.EventKeyRepeat k m -> Just (RgfwEvKeyPress k m)
-  R.EventKeyRelease k m -> Just (RgfwEvKeyRelease k m)
+  R.EventKeyPress k m -> Just (RgfwEvKey k m True)
+  R.EventKeyRepeat k m -> Just (RgfwEvKey k m True)
+  R.EventKeyRelease k m -> Just (RgfwEvKey k m False)
   R.EventKeyChar ch | isPrint ch -> Just (RgfwEvChar ch)
   _ -> Nothing
 
@@ -578,8 +579,6 @@ applyRgfwEvent inp ev = case ev of
   RgfwEvScroll dx dy -> inp {inputScroll = v2Add (inputScroll inp) (V2 dx dy)}
   RgfwEvChar c -> inp {inputChars = T.snoc (inputChars inp) c}
   -- 'applyKey' tells an auto-repeat by the key being held already.
-  RgfwEvKeyPress k m ->
-    (maybe inp (\key -> applyKey key True inp) (mapRgfwKey k m)) {inputModifiers = modsFromRgfw m}
-  RgfwEvKeyRelease k m ->
-    (maybe inp (\key -> applyKey key False inp) (mapRgfwKey k m)) {inputModifiers = modsFromRgfw m}
+  RgfwEvKey k m down ->
+    (maybe inp (\key -> applyKey key down inp) (mapRgfwKey k m)) {inputModifiers = modsFromRgfw m}
   RgfwEvFocusLost -> releaseAllKeys inp
