@@ -204,15 +204,14 @@ closeSelectOnOutsideClick ctx inp =
 
 finalizeSelectKeyboard :: Context -> Input -> IO ()
 finalizeSelectKeyboard ctx@Context {ctxNodeArena = na} inp = do
-  -- With Ctrl, Alt or Super held, an arrow or Enter is a chord, for a
-  -- shortcut.
-  let plain = shiftAtMost (inputModifiers inp)
-      has k = plain && pressedIn k inp
+  let has k = pressedIn k inp
       wantNext = has KeyDown || has KeyRight
       wantStep = wantNext || has KeyUp || has KeyLeft
       wantEsc = pressedOnceIn KeyEscape inp
-      wantEnter = plain && pressedOnceIn KeyEnter inp
-  when (wantStep || wantEsc || wantEnter) $ do
+      wantEnter = pressedOnceIn KeyEnter inp
+  -- With Ctrl, Alt or Super held, an arrow or Enter is a chord, for a
+  -- shortcut.
+  when (wantEsc || ((wantStep || wantEnter) && shiftAtMost (inputModifiers inp))) $ do
     focus <- readIORef (ctxFocusId ctx)
     store <- getStore ctx
     -- Arrows step the focused enabled select, open or not. Otherwise the keys

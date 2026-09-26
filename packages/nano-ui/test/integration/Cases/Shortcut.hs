@@ -159,6 +159,13 @@ runShortcutFocusedControlTest ctx failed = do
   warmupFocused s inp0 sliderUi
   fires failed pressS False [key KeyEnter, key KeyRight, shift <> key KeyRight]
   fires failed pressS True [ctrl <> key KeyEnter, alt <> key KeyLeft, key 's']
+  sel <- newContext
+  selRef <- newIORef 0
+  (selUi, pressSel) <- noting sel $ \note -> column (binds note [ctrl <> key KeyDown] >> void (held selRef (select' ["a", "b", "c"])))
+  warmupFocused sel inp0 selUi
+  let chosenAfter c = pressSel (chordInp c inp0) >> pressSel inp0 >> readIORef selRef
+  assertEq failed 0 =<< chosenAfter (ctrl <> key KeyDown)
+  assertEq failed 1 =<< chosenAfter (key KeyDown)
   c <- newContext
   (customUi, pressC) <- noting c $ \note ->
     column (binds note chords >> void (customWidget defaultCustomWidgetSpec {widgetFocusable = True, widgetKeys = KeysAll}))
