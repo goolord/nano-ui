@@ -78,7 +78,9 @@ library
         NanoUI.Emit
         NanoUI.Input
         NanoUI.Monad
+        NanoUI.Path
         NanoUI.Runner
+        NanoUI.Shortcut
         NanoUI.Svg
         NanoUI.Testing
         NanoUI.Testing.Assert
@@ -94,6 +96,7 @@ library
         NanoUI.Widgets.TextDocument
         NanoUI.Widgets.TextEditor
         NanoUI.Widgets.TextField
+        NanoUI.Internal.Canvas
         NanoUI.Internal.Context
         NanoUI.Internal.Context.Types
         NanoUI.Internal.Debug
@@ -101,10 +104,12 @@ library
         NanoUI.Internal.Frame.TextArea
         NanoUI.Internal.Frame.Window
         NanoUI.Internal.Id
+        NanoUI.Internal.Image
         NanoUI.Internal.Input
         NanoUI.Internal.Layout.Arena
         NanoUI.Internal.Layout.Solve
         NanoUI.Internal.Monad
+        NanoUI.Internal.Path
         NanoUI.Internal.SIMD
         NanoUI.Internal.Store
         NanoUI.Internal.Widgets.Custom
@@ -132,6 +137,7 @@ library
         NanoUI.Internal.Draw.Types
         NanoUI.Internal.Frame.Input
         NanoUI.Internal.Frame.Chrome
+        NanoUI.Internal.Frame.Explain
         NanoUI.Internal.Frame.Paint
         NanoUI.Internal.Frame.Paint.Widgets
         NanoUI.Internal.Frame.Scroll
@@ -152,6 +158,7 @@ library
         NanoUI.Internal.Widgets.Radio
         NanoUI.Internal.Widgets.Tree
         NanoUI.Internal.Widgets.ColorPicker
+        NanoUI.Internal.Widgets.Cursor
         NanoUI.Internal.Widgets.Drawing
         NanoUI.Internal.Widgets.TextInput
         NanoUI.Internal.Widgets.NumericInput
@@ -169,6 +176,12 @@ library
         NanoUI.Internal.Widgets.Display
         NanoUI.Internal.Widgets.Select
         NanoUI.Internal.Widgets.Slider
+        NanoUI.Internal.Widgets.Image
+        NanoUI.Internal.Widgets.Sensor
+        NanoUI.Internal.Shortcut
+        NanoUI.Internal.Widgets.Shortcut
+        NanoUI.Internal.NativeWindow
+        NanoUI.Internal.Tasks
     build-depends:
         base >=4.20 && <4.23,
         bytestring ^>=0.12,
@@ -177,7 +190,6 @@ library
         effectful-core ^>=2.6,
         ghc-compact ^>=0.1,
         hashable ^>=1.5,
-        hashtables ^>=1.4,
         nano-svg ^>=0.1,
         primitive ^>=0.9,
         text ^>=2.1,
@@ -246,6 +258,21 @@ test-suite nano-ui-test
         Cases.Tooltip
         Cases.ViewApi
         Cases.Window
+        Cases.WidgetIdIndex
+        Cases.Paths
+        Cases.LayoutFlow
+        Cases.Images
+        Cases.Focus
+        Cases.TooltipDelay
+        Cases.Visibility
+        Cases.Cursors
+        Cases.Explain
+        Cases.Shortcut
+        Cases.Ime
+        Cases.PointerExtra
+        Cases.Theming
+        Cases.NativeWindow
+        Cases.Tasks
     build-depends:
         bytestring,
         containers,

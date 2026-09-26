@@ -39,11 +39,14 @@ opens no window. A backend package runs the view:
 | [nano-ui-rgfw](https://github.com/goolord/nano-ui/tree/main/packages/nano-ui-rgfw) | RGFW and OpenGL 3.2, with a bundled bitmap font and no system dependencies beyond windowing |
 
 [nano-ui-diagrams](https://hackage.haskell.org/package/nano-ui-diagrams) adds
-charts and [diagrams](https://diagrams.github.io/) drawings, and
+charts and [diagrams](https://diagrams.github.io/) drawings,
 [nano-ui-form](https://hackage.haskell.org/package/nano-ui-form) adds validated
-forms. In this package, `NanoUI.Testing` runs frames headlessly on scripted
-input, for tests, and `NanoUI.Backend` has what a window backend is built
-from. Writing a GUI needs neither: everything for that is in `NanoUI`.
+forms, and
+[nano-ui-markdown](https://github.com/goolord/nano-ui/tree/main/packages/nano-ui-markdown)
+draws Markdown as it streams in. In this package, `NanoUI.Testing` runs frames
+headlessly on scripted input, for tests, and `NanoUI.Backend` has what a window
+backend is built from. Writing a GUI needs neither: everything for that is in
+`NanoUI`.
 
 ## Inputs are controlled
 
@@ -76,10 +79,17 @@ backends' reducer runners fold them into the model.
   sliders, knobs, selects, combo boxes, sortable tables, trees, tabs, menus,
   context menus, modals, floating windows, pane grids, colour pickers, progress
   bars, sparklines, rich text, SVG icons, and drag and drop. `customWidget` and
-  a canvas API cover anything else.
-- Row, column, and grid layout with scrolling. Layout options are
+  a canvas API, with paths, fill rules, strokes with joins and dashes,
+  gradients, clips and transforms, cover anything else.
+- Row, column, grid, and layered (`layers`) layout with scrolling, wrapping
+  (`wrap`, `lineAlign`), pinned children (`pinAt`) and aspect ratios
+  (`aspect`). Layout options are
   `Layout -> Layout` modifiers, as in `columnWith (gap 8 . padAll 12)`.
-- Keyboard focus and navigation for every control.
+- Keyboard focus and navigation for every control, focus from code, and
+  shortcuts, as in `shortcut (ctrl <> key 's')`. Input methods compose in
+  the text fields, and in a widget of your own with `useInputMethod`.
+- Background work with `useTaskStatus` and `useTask`, streams with
+  `useStream`, and `askWake` for any thread to wake the loop.
 - Themes, including ones built from Base16 schemes, changed for part of a view
   with `styled`, as in
   `styled (primary . buttonStyle (cornerRadius 6)) (button "Save")`.

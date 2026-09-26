@@ -8,7 +8,7 @@ import Foreign.Ptr (castPtr)
 import Data.Text qualified as T
 import NanoUI.Internal.Context (Context (..))
 import NanoUI.Internal.Layout.Arena
-  ( NodeType (..), addNodeFromLayout, getRect, setNodeText
+  ( NodeType (..), addNodeFromLayout, getNodeRect, setNodeText
   , setNodeValue, setStyleIdx, setWidgetId
   )
 import System.Mem.StableName (makeStableName)
@@ -20,7 +20,16 @@ tests =
   , spec "layout-cache-paint-state" runLayoutPaintStateTest
   , spec "partial-measure-ancestor-width" runPartialMeasureAncestorTest
   , spec "wrap-width-bounds" runWrapBoundsTest
+  , spec "wrap-keeps-spaces" runWrapKeepsSpacesTest
   ]
+
+-- | Wrapping drops the run of spaces at a line break but keeps indentation
+-- and runs of spaces inside a line, which code needs.
+runWrapKeepsSpacesTest :: Context -> IORef Int -> IO ()
+runWrapKeepsSpacesTest _ failed = do
+  let lineW t = pure (fromIntegral (T.length t))
+  assertEq failed ["    let x  = 1", "in  x + 1"] =<< wrapTextLinesIO lineW "    let x  = 1   in  x + 1  " 14
+  assertEq failed ["    a", "b  c"] =<< wrapTextLinesIO lineW "    a  b  c" 6
 
 -- | A wrap holds for every width from its widest fitting line up to, not
 -- including, its break width: the wrap cache hands it out for all of them.
@@ -43,6 +52,7 @@ runWrapBoundsTest _ failed = do
         , "two\n\nparagraphs, the second with Wide Words mmm www"
         , "nospacesatalljustonelongrunoflettersWWWmmm"
         , "  leading and  double spaced  words  "
+        , "    indented    code  = aligned   -- and a comment"
         ]
   forM_ texts $ \txt -> forM_ [1, 3 .. 320 :: Float] $ \w -> do
     r <- wrapTextIO lineW txt w
@@ -68,7 +78,7 @@ runMetricCacheInvalidationTest ctx failed = do
   let inp = withInputOff 400 300
       width c = do
         void $ runFrame c inp (button "ABC")
-        (_, _, w, _) <- getRect (ctxNodeArena c) 0
+        Rect _ _ w _ <- getNodeRect (ctxNodeArena c) 0
         pure w
       a = withMeasureText ctx (\_ -> pure (200, 20))
       b = withMeasureText ctx (\_ -> pure (80, 12))
@@ -97,8 +107,7 @@ runMetricCacheInvalidationTest ctx failed = do
       spans <- collectTextSpans configured
       fresh <- configure <$> newContext
       (_, _, coldDraw, _) <- runFrame fresh inp ui
-      expected <- snapshotDraw coldDraw
-      assertEq failed actual expected
+      assertEq failed actual =<< snapshotDraw coldDraw
       assertEq failed spans =<< collectTextSpans fresh
 
 -- A table header's width and style stay fixed while alignment and its parent

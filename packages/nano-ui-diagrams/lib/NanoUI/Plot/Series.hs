@@ -86,26 +86,30 @@ withBaseline b s =
     AreaSeries _ -> s {seriesKind = AreaSeries b}
     _ -> s
 
--- | Numeric series retain unboxed coordinates. Unboxed inputs are shared;
--- boxed/storable inputs are converted once at the construction boundary.
+-- | Vector form of 'line'. Coordinates are stored unboxed: unboxed inputs
+-- are shared, and boxed or storable ones are converted once.
 {-# INLINE lineVec #-}
 lineVec :: G.Vector v (Double, Double) => Text -> v (Double, Double) -> Series
-lineVec name pts = Series name Nothing (LineSeries 1.5 Nothing) (PointsXY (G.convert pts))
+lineVec = pointSeries (LineSeries 1.5 Nothing)
 
--- | Vector form of 'scatter'; converts coordinates to unboxed storage once.
+-- | Vector form of 'scatter'.
 {-# INLINE scatterVec #-}
 scatterVec :: G.Vector v (Double, Double) => Text -> v (Double, Double) -> Series
-scatterVec name pts = Series name Nothing (ScatterSeries 3 MarkCircle) (PointsXY (G.convert pts))
+scatterVec = pointSeries (ScatterSeries 3 MarkCircle)
 
 -- | Vector form of 'area', with a baseline of zero.
 {-# INLINE areaVec #-}
 areaVec :: G.Vector v (Double, Double) => Text -> v (Double, Double) -> Series
-areaVec name pts = Series name Nothing (AreaSeries 0) (PointsXY (G.convert pts))
+areaVec = pointSeries (AreaSeries 0)
 
 -- | Vector form of 'step', preserving point order.
 {-# INLINE stepVec #-}
 stepVec :: G.Vector v (Double, Double) => Text -> v (Double, Double) -> Series
-stepVec name pts = Series name Nothing (StepSeries 1.5) (PointsXY (G.convert pts))
+stepVec = pointSeries (StepSeries 1.5)
+
+{-# INLINE pointSeries #-}
+pointSeries :: G.Vector v (Double, Double) => SeriesKind -> Text -> v (Double, Double) -> Series
+pointSeries kind name pts = Series name Nothing kind (PointsXY (G.convert pts))
 
 -- | Vector form of 'bar'. Copies labels and values into equally sized arrays.
 barVec :: Text -> Vector (Text, Double) -> Series

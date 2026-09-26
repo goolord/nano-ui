@@ -21,7 +21,7 @@ import NanoUI.Internal.Frame.Hit
 import NanoUI.Internal.Frame.Input (PressTargets (..), probeHotId, targetsAt)
 import NanoUI.Internal.Frame.Scroll.Geometry (scrollChromeLane)
 import NanoUI.Internal.Id (WidgetId (..))
-import NanoUI.Internal.Input (Input (..), UiCursorKind (..), inputMouseDown, inputMousePos, inputMousePressed)
+import NanoUI.Internal.Input (Input (..), MouseButton (..), Pressable (..), UiCursorKind (..))
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Layout.Solve (Measurers (..), placeWindowNode, windowBodyScroller)
 import NanoUI.Internal.Monad ((<&&>))
@@ -47,7 +47,7 @@ persistWindowPositions ctx = floatingNodeCount na >>= \floating -> when (floatin
           then pure acc
           else do
             wid <- getWidgetId na idx
-            (x, y, w, h) <- getRect na idx
+            Rect x y w h <- getNodeRect na idx
             let k = intKey wid
                 sizeKey = slotKey SlotWinSize k
             -- Keep an unchanged store as is: the write below is skipped
@@ -81,14 +81,14 @@ windowGesture ::
 windowGesture ctx inp held release step start =
   getsInteraction ctx held >>= \case
     Just g
-      | inputMouseDown inp -> do
+      | heldIn MouseLeft inp -> do
           wid <- step g
           damageWidget ctx wid (DamageInflated haloDamageSlop)
           markDirty ctx
           pure True
       | otherwise -> False <$ modifyInteraction ctx release
     Nothing
-      | inputMousePressed inp -> start ctx (inputMousePos inp)
+      | pressedIn MouseLeft inp -> start ctx (inputMousePos inp)
       | otherwise -> pure False
 
 -- | How far the resize handles reach out past the window's edges.
@@ -165,7 +165,7 @@ updateWindowResize ctx inp winW winH =
       modifyStore ctx (insertSlot fieldPoint (slotKey SlotWinSize key) (nw, nh) . insertSlot fieldPoint key (nx, ny))
       withWidgetNode ctx wid () $ \idx -> do
         mpos <- lookupWindowPos ctx wid
-        (x, y, _, _) <- getRect (ctxNodeArena ctx) idx
+        Rect x y _ _ <- getNodeRect (ctxNodeArena ctx) idx
         let ms = contextMeasurers ctx
         placeWindowNode (ctxNodeArena ctx) ms winW winH idx nw nh (const (fromMaybe (x, y) mpos))
       pure wid
@@ -187,7 +187,7 @@ resizeEdgeTarget ctx@Context {ctxNodeArena = na} mouse = runMaybeT $ do
     onLane <- liftIO $ windowBodyScroller na idx >>= \case
       Nothing -> pure False
       Just ci -> do
-        (x, y, w, h) <- getRect na ci
+        Rect x y w h <- getNodeRect na ci
         bodyPad <- getPadding na ci
         contentSize <- getNodeValue na ci
         dir <- getDirection na ci
@@ -221,7 +221,7 @@ windowResizeCursorKind :: Context -> Input -> IO (Maybe UiCursorKind)
 windowResizeCursorKind ctx inp =
   getsInteraction ctx isWindowResize >>= \case
     Just wrd
-      | inputMouseDown inp -> pure (Just (cursorForResizeEdge (wrdEdge wrd)))
+      | heldIn MouseLeft inp -> pure (Just (cursorForResizeEdge (wrdEdge wrd)))
       | otherwise -> pure Nothing
     Nothing -> fmap (\(_, _, edge) -> cursorForResizeEdge edge) <$> resizeEdgeTarget ctx (inputMousePos inp)
 
@@ -242,7 +242,7 @@ tryStartWindowDrag ctx mouse@(V2 mx my) = fmap isJust . runMaybeT $ do
 -- | Title bar: the window's topmost child, stretched up to the window top.
 windowTitleRect :: Context -> NodeIdx -> IO (Maybe Rect)
 windowTitleRect Context {ctxNodeArena = na} idx = do
-  (_, wy, _, _) <- getRect na idx
+  Rect _ wy _ _ <- getNodeRect na idx
   best <- newIORef Nothing
   forChildNodes_ na idx $ \ci -> do
     here@(Rect _ y _ _) <- getNodeRect na ci

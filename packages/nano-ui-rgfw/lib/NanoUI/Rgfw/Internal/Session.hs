@@ -1,5 +1,10 @@
 -- | The RGFW window session: options, the runners, and translation of RGFW
 -- events into 'NanoUI.Input.Input'.
+--
+-- RGFW reports no IME composition. On X11, as on Windows, its input context
+-- leaves drawing the composition to the input method, and committed text
+-- arrives as key-char events. So 'NanoUI.Input.inputComposition' stays
+-- 'Nothing', and fields receive committed text as typing.
 module NanoUI.Rgfw.Internal.Session
   ( RgfwOptions (..)
   , defaultRgfwOptions
@@ -10,24 +15,36 @@ module NanoUI.Rgfw.Internal.Session
   , RgfwEvent
   , decodeRgfwEvents
   , applyRgfwEvent
+  -- * Cursors
+  , mapRgfwCursor
   ) where
 
-import Control.Concurrent (rtsSupportsBoundThreads, runInBoundThread)
+import Control.Concurrent (myThreadId, rtsSupportsBoundThreads, runInBoundThread)
 import Control.Exception (bracket)
-import Control.Monad (void, when)
-import Data.Bits ((.&.))
-import Data.Char (chr, isPrint, ord)
-import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Control.Monad (unless, void, when)
+import Data.Bits ((.&.), (.|.))
+import Data.Char (chr, isDigit, isPrint, toLower)
+import Data.IORef (IORef, atomicModifyIORef', atomicWriteIORef, newIORef, readIORef, writeIORef)
+import Data.List (find)
+import Data.Maybe (fromMaybe, mapMaybe)
 import qualified Data.Text as T
 import Data.Typeable (Typeable)
 import Data.Word (Word8, Word32)
 import Foreign.Ptr (Ptr)
 import GHC.Clock (getMonotonicTime)
 import NanoUI
-  ( NanoUI
+  ( Appearance
+  , NanoUI
   , Size (..)
   , Theme (..)
   , V2 (..)
+  , WindowMode (..)
+  , WindowPosition (..)
+  , WindowSettings (..)
+  , defaultWindowSettings
+  , rgbaBytes
+  , rgbaHeight
+  , rgbaWidth
   , tomorrowNightMinDarkTheme
   , v2Add
   )
@@ -36,10 +53,24 @@ import NanoUI.Backend
   , Input (..)
   , Key (..)
   , Modifiers (..)
-  , MouseButton (..)
-  , appendInputKey
+  , WindowHost (..)
+  , WindowState (..)
+  , answerScreenshots
+  , applyKey
   , applyMouseButton
+  , applyPointerLeave
+  , cursorFallback
+  , defaultWindowHost
+  , defaultWindowState
   , emptyInput
+  , installWindowHost
+  , releaseAllKeys
+  , keypadKey
+  , modifiersFromBits
+  , reportWindowState
+  , mouseButtonNumber
+  , setExplainLayout
+  , setWakeLoop
   )
 import NanoUI.Internal.Context
   ( Context (..)
@@ -73,75 +104,127 @@ import NanoUI.Rgfw.Internal.Debug
   , newRgfwDebugSampler
   )
 import NanoUI.Rgfw.Internal.Font.Cozette (getCozetteFont)
-import NanoUI.Rgfw.Internal.Gl (freeGlRenderer, newGlRenderer, renderArenaGl)
+import NanoUI.Rgfw.Internal.Gl (freeGlRenderer, newGlRenderer, renderArenaGl, retainedPixels, syncImagesGl)
 import qualified RGFW as R
 
 -- | Window and rendering options for the RGFW runners.
 data RgfwOptions = RgfwOptions
-  { optTitle  :: !String
-  , optWidth  :: !Int
-  , optHeight :: !Int
+  { optWindow :: !WindowSettings
+  -- ^ The window (default: 'defaultWindowSettings'). Sizes are in layout
+  -- units, converted at the opening scale. RGFW places windows itself, so
+  -- 'WindowPositionDefault' centres the window. 'wsTransparent' and
+  -- 'wsOpacity' do nothing: RGFW windows are always opaque.
   , optTheme  :: !Theme
   -- ^ Any core theme; the backend draws it square ('NanoUI.Rgfw.Internal.Context.applyRgfwTheme').
-  , optCenter :: !Bool
-  -- ^ Center the window on the screen.
+  , optThemeFor :: !(Maybe (Maybe Appearance -> Theme))
+  -- ^ Pick the theme from the desktop's light or dark setting, such as
+  -- @'NanoUI.lightDark' light dark@, like SDL's @sdlAppThemeFor@ (default:
+  -- 'Nothing'). When set it replaces 'optTheme'. RGFW cannot read the
+  -- setting, so the function gets 'Nothing' and 'NanoUI.lightDark' picks
+  -- dark.
   , optScale  :: !Float
   -- ^ UI scale. @0@ follows the monitor's scale.
   , optRefreshHz :: !Int
   -- ^ Frame pacing rate while animating. @0@ means 60.
+  , optExplainLayout :: !Bool
+  -- ^ Start with the layout overlay (an outline of every layout node) on.
+  -- Views toggle it with @explainLayout@.
   }
 
--- | Centred 1680x1040 window with the dark theme, monitor scale, and 60 Hz
--- animation pacing. Width and height are native window pixels.
+-- | A 'defaultWindowSettings' window with the dark theme, the monitor's
+-- scale, and 60 Hz animation pacing.
 defaultRgfwOptions :: RgfwOptions
 defaultRgfwOptions =
   RgfwOptions
-    { optTitle  = "nano-ui (RGFW Single-Pass)"
-    , optWidth  = 1680
-    , optHeight = 1040
+    { optWindow = defaultWindowSettings
     , optTheme  = tomorrowNightMinDarkTheme
-    , optCenter = True
+    , optThemeFor = Nothing
     , optScale  = 0.0
     , optRefreshHz = 0
+    , optExplainLayout = False
     }
 
-mapRgfwKey :: Word32 -> Maybe Key
-mapRgfwKey k
-  | k == R.rgfw_keyBackSpace = Just KeyBackspace
-  | k == R.rgfw_keyDelete = Just KeyDelete
-  | k == R.rgfw_keyReturn = Just KeyEnter
-  | k == R.rgfw_keyEscape = Just KeyEscape
-  | k == R.rgfw_keyTab = Just KeyTab
-  | k == R.rgfw_keyUp = Just KeyUp
-  | k == R.rgfw_keyDown = Just KeyDown
-  | k == R.rgfw_keyLeft = Just KeyLeft
-  | k == R.rgfw_keyRight = Just KeyRight
-  | k == R.rgfw_keyEnd = Just KeyEnd
-  | k == R.rgfw_keyHome = Just KeyHome
+-- | 'optThemeFor' applied to 'Nothing', since RGFW cannot read the
+-- appearance; else 'optTheme'.
+optionsTheme :: RgfwOptions -> Theme
+optionsTheme opts = maybe (optTheme opts) ($ Nothing) (optThemeFor opts)
+
+-- | The key for an RGFW key code and its modifier bits.
+mapRgfwKey :: Word32 -> Word8 -> Maybe Key
+mapRgfwKey k m
+  | Just named <- lookup k namedRgfwKeys = Just named
+  | Just c <- lookup k keypadRgfwKeys = keypadKey (m .&. R.rgfw_modNumLock /= 0) c
+  | k >= R.rgfw_keyF1 && k <= R.rgfw_keyF24 = Just (KeyF (fromIntegral (k - R.rgfw_keyF1) + 1))
+  -- Codes below 128 are the ASCII characters the keys type unshifted on a US
+  -- layout.
+  | k > 32 && k < 127 = Just (KeyChar (toLower (chr (fromIntegral k))))
   | otherwise = Nothing
 
--- | Decode RGFW key modifier bits. Super (Cmd) counts as Ctrl.
-modsFromRgfw :: Word8 -> Modifiers
-modsFromRgfw m =
-  Modifiers
-    { modShift = has R.rgfw_modShift
-    , modCtrl = has R.rgfw_modControl || has R.rgfw_modSuper
-    , modAlt = has R.rgfw_modAlt
-    }
-  where
-    has bit = m .&. bit /= 0
+namedRgfwKeys :: [(Word32, Key)]
+namedRgfwKeys =
+  [ (R.rgfw_keyEscape, KeyEscape)
+  , (R.rgfw_keyReturn, KeyEnter)
+  , (R.rgfw_keyPadReturn, KeyEnter)
+  , (R.rgfw_keyTab, KeyTab)
+  , (R.rgfw_keyBackSpace, KeyBackspace)
+  , (R.rgfw_keyDelete, KeyDelete)
+  , (R.rgfw_keyLeft, KeyLeft)
+  , (R.rgfw_keyRight, KeyRight)
+  , (R.rgfw_keyUp, KeyUp)
+  , (R.rgfw_keyDown, KeyDown)
+  , (R.rgfw_keyHome, KeyHome)
+  , (R.rgfw_keyEnd, KeyEnd)
+  , (R.rgfw_keyPageUp, KeyPageUp)
+  , (R.rgfw_keyPageDown, KeyPageDown)
+  , (R.rgfw_keyInsert, KeyInsert)
+  , (R.rgfw_keySpace, KeySpace)
+  , (R.rgfw_keyPrintScreen, KeyPrintScreen)
+  , (R.rgfw_keyPause, KeyPause)
+  , (R.rgfw_keyCapsLock, KeyCapsLock)
+  , (R.rgfw_keyNumLock, KeyNumLock)
+  , (R.rgfw_keyScrollLock, KeyScrollLock)
+  , (R.rgfw_keyMenu, KeyMenu)
+  , (R.rgfw_keyPadSlash, KeyChar '/')
+  , (R.rgfw_keyPadMultiply, KeyChar '*')
+  , (R.rgfw_keyPadMinus, KeyChar '-')
+  , (R.rgfw_keyPadPlus, KeyChar '+')
+  , (R.rgfw_keyPadEqual, KeyChar '=')
+  ]
 
+-- | Keypad digit and point codes, by the character each types ('keypadKey').
+keypadRgfwKeys :: [(Word32, Char)]
+keypadRgfwKeys =
+  zip
+    [R.rgfw_keyPad0, R.rgfw_keyPad1, R.rgfw_keyPad2, R.rgfw_keyPad3, R.rgfw_keyPad4, R.rgfw_keyPad5, R.rgfw_keyPad6, R.rgfw_keyPad7, R.rgfw_keyPad8, R.rgfw_keyPad9, R.rgfw_keyPadPeriod]
+    "0123456789."
+
+modsFromRgfw :: Word8 -> Modifiers
+modsFromRgfw m = modifiersFromBits m R.rgfw_modShift R.rgfw_modControl R.rgfw_modAlt R.rgfw_modSuper
+
+-- | The RGFW standard cursor for a cursor kind, after 'cursorFallback'.
+-- 'R.rgfw_mouseArrow' stands for the platform's default arrow.
 mapRgfwCursor :: UiCursorKind -> Word8
-mapRgfwCursor kind = case kind of
-  UiCursorDefault    -> R.rgfw_mouseArrow
+mapRgfwCursor kind = case cursorFallback kind of
   UiCursorPointer    -> R.rgfw_mousePointingHand
   UiCursorText       -> R.rgfw_mouseIbeam
-  UiCursorGrab       -> R.rgfw_mouseArrow
-  UiCursorGrabbing   -> R.rgfw_mouseArrow
   UiCursorNsResize   -> R.rgfw_mouseResizeNS
   UiCursorEwResize   -> R.rgfw_mouseResizeEW
   UiCursorNwseResize -> R.rgfw_mouseResizeNWSE
   UiCursorNeswResize -> R.rgfw_mouseResizeNESW
+  UiCursorNotAllowed -> R.rgfw_mouseNotAllowed
+  UiCursorWait       -> R.rgfw_mouseWait
+  UiCursorProgress   -> R.rgfw_mouseProgress
+  UiCursorCrosshair  -> R.rgfw_mouseCrosshair
+  UiCursorMove       -> R.rgfw_mouseResizeAll
+  UiCursorNResize    -> R.rgfw_mouseResizeN
+  UiCursorNeResize   -> R.rgfw_mouseResizeNE
+  UiCursorEResize    -> R.rgfw_mouseResizeE
+  UiCursorSeResize   -> R.rgfw_mouseResizeSE
+  UiCursorSResize    -> R.rgfw_mouseResizeS
+  UiCursorSwResize   -> R.rgfw_mouseResizeSW
+  UiCursorWResize    -> R.rgfw_mouseResizeW
+  UiCursorNwResize   -> R.rgfw_mouseResizeNW
+  _                  -> R.rgfw_mouseArrow
 
 -- | Run a view in an owned RGFW/OpenGL window until quit. Native resources are
 -- released on exit. Window creation failure prints a message and returns.
@@ -158,7 +241,7 @@ runRgfwAppReduce ::
   (model -> NanoUI ()) ->
   IO ()
 runRgfwAppReduce opts =
-  runRgfwAppReduceCustom opts (\_ -> (optTheme opts, optScale opts))
+  runRgfwAppReduceCustom opts (\_ -> (optionsTheme opts, optScale opts))
 
 -- | Reducer runner whose theme and UI scale are derived from the current
 -- model. A non-positive scale follows the monitor. OpenGL calls remain on
@@ -172,15 +255,27 @@ runRgfwAppReduceCustom ::
   (model -> NanoUI ()) ->
   IO ()
 runRgfwAppReduceCustom opts getThemeAndScale updateModel initialModel view = inBoundThread $ do
-  let flags = if optCenter opts then R.rgfw_windowCenter else 0
+  -- Open hidden at the requested scale: the monitor's scale is unknown until
+  -- the window exists. Resize, place and show it once that scale is known.
+  let flags =
+        R.rgfw_windowHide
+          .|. (if wsResizable settings then 0 else R.rgfw_windowNoResize)
+          .|. (if wsMode settings == Fullscreen then R.rgfw_windowFullscreen else 0)
+      (openW, openH) = pixelSize (resolveScale (snd (getThemeAndScale initialModel)) 1)
   bracket
-    (R.createWindowGL (optTitle opts) 0 0 (optWidth opts) (optHeight opts) flags 3 2)
+    (R.createWindowGL (T.unpack (wsTitle settings)) 0 0 openW openH flags 3 2)
     (mapM_ R.closeWindow) $ \mWin -> case mWin of
       Nothing -> putStrLn "Failed to create RGFW window with an OpenGL 3.2 context."
       Just win -> runWindow win
   where
+    settings = optWindow opts
     -- The GL context is current only on the OS thread that created it.
     inBoundThread act = if rtsSupportsBoundThreads then runInBoundThread act else act
+    -- The model's scale, else the options', else the monitor's.
+    resolveScale userScale monScale = fromMaybe 1 (find (> 0) [userScale, optScale opts, monScale])
+    -- Native pixel size at a scale, of any size or of the settings' size.
+    pixelsAt scale (Size w h) = (max 1 (round (w * scale)), max 1 (round (h * scale)))
+    pixelSize scale = pixelsAt scale (wsSize settings)
     runWindow win = do
       let !refreshHz = if optRefreshHz opts > 0 then optRefreshHz opts else 60
           !refreshSec = 1.0 / fromIntegral refreshHz :: Double
@@ -188,25 +283,18 @@ runRgfwAppReduceCustom opts getThemeAndScale updateModel initialModel view = inB
       let !initMonScale = if monScaleInit > 0.0 then monScaleInit else 1.0
       monScaleRef <- newIORef initMonScale
 
-      let resolveScale !userScale !monScale =
-            if userScale > 0.0
-              then userScale
-              else if optScale opts > 0.0
-                then optScale opts
-                else if monScale > 0.0
-                  then monScale
-                  else 1.0
-
-      let (initTheme, initScaleChoice) = getThemeAndScale initialModel
+      let -- Native pixels to layout units at a scale.
+          logicalSize (pw, ph) scale = Size (units pw) (units ph)
+            where
+              units v = fromIntegral (max 1 (round (fromIntegral v / scale) :: Int))
+          (initTheme, initScaleChoice) = getThemeAndScale initialModel
           !initScale = resolveScale initScaleChoice initMonScale
-          !initPhysW = optWidth opts
-          !initPhysH = optHeight opts
-          !initLogW = max 1 (round (fromIntegral initPhysW / initScale) :: Int)
-          !initLogH = max 1 (round (fromIntegral initPhysH / initScale) :: Int)
+          initPhys = pixelSize initScale
+      when (initPhys /= pixelSize (resolveScale initScaleChoice 1)) $ uncurry (R.resizeWindow win) initPhys
 
       modelRef <- newIORef initialModel
       scaleRef <- newIORef initScale
-      winSizeRef <- newIORef (initPhysW, initPhysH)
+      winSizeRef <- newIORef initPhys
       -- The theme last applied, before squaring: comparing it with the
       -- model's theme skips rebuilding the squared theme on every frame.
       themeRef <- newIORef initTheme
@@ -220,19 +308,61 @@ runRgfwAppReduceCustom opts getThemeAndScale updateModel initialModel view = inB
       let ctx = withClipboard ctx0 R.readClipboardText R.writeClipboardText
       debugSampler <- newRgfwDebugSampler
       setHost ctx (RgfwDebugHost debugSampler)
+      setExplainLayout ctx (optExplainLayout opts)
+      -- Size limits are in layout units, converted at the current scale. A
+      -- zero axis is unlimited.
+      let limit set s = do
+            scale <- readIORef scaleRef
+            let Size w h = fromMaybe (Size 0 0) s
+                axis v = if v <= 0 then 0 else round (v * scale)
+            set win (axis w) (axis h)
+          place = case wsPosition settings of
+            WindowPositionDefault -> WindowPositionCentered
+            p -> p
+      installWindowHost ctx settings {wsPosition = place} $
+        defaultWindowHost
+          { hostSetTitle = R.setWindowName win
+          , hostSetIcon = \p -> void (R.setWindowIcon win (rgbaWidth p) (rgbaHeight p) (rgbaBytes p))
+          , hostSetMinSize = limit R.setWindowMinSize
+          , hostSetMaxSize = limit R.setWindowMaxSize
+            -- No 'hostSetOpacity': RGFW windows cannot fade.
+          , hostSetMode = \case
+              Windowed -> R.setWindowFullscreen win False >> R.showWindow win
+              Fullscreen -> R.showWindow win >> R.setWindowFullscreen win True
+              Hidden -> R.hideWindow win
+          , hostMove = R.moveWindow win
+          , hostCenter = R.centerWindow win
+          , hostResize = \s -> readIORef scaleRef >>= \scale -> uncurry (R.resizeWindow win) (pixelsAt scale s)
+          , hostMinimize = R.minimizeWindow win
+          , hostMaximize = R.maximizeWindow win
+          , hostRestore = R.restoreWindow win
+          }
+      reportWindowState ctx =<< rgfwWindowState win initScale
+      unless (wsMode settings == Hidden) (R.showWindow win)
+      -- A wake from another thread (a background job) ends the event wait and
+      -- forces a frame; repeat wakes before that frame are dropped. Wakes from
+      -- the loop's own thread (every 'markDirty') are ignored, since the loop
+      -- already sees the dirty flag.
+      loopThread <- myThreadId
+      wakeRef <- newIORef False
+      setWakeLoop ctx $ do
+        me <- myThreadId
+        unless (me == loopThread) $ do
+          pending <- atomicModifyIORef' wakeRef (True,)
+          unless pending R.stopWaitForEvent
       let font = getCozetteFont
-          initInp =
-            emptyInput
-              { inputWindowSize = Size (fromIntegral initLogW) (fromIntegral initLogH)
-              }
-          -- Set the pointer shape only when the wanted kind changes.
+          initInp = emptyInput {inputWindowSize = logicalSize initPhys initScale}
+          -- Touch the platform cursor only when the wanted kind changes.
+          -- 'UiCursorHidden' hides the pointer.
           syncCursor c inp = do
             want <- uiCursorKind c inp
             cur <- readIORef cursorRef
             when (want /= cur) $ do
               writeIORef cursorRef want
-              let icon = mapRgfwCursor want
-              void $
+              let hidden = want == UiCursorHidden
+                  icon = mapRgfwCursor want
+              when (hidden /= (cur == UiCursorHidden)) $ R.showMouse win (not hidden)
+              unless hidden . void $
                 if icon == R.rgfw_mouseArrow
                   then R.setMouseDefault win
                   else R.setMouseStandard win icon
@@ -262,31 +392,30 @@ runRgfwAppReduceCustom opts getThemeAndScale updateModel initialModel view = inB
                 runFrameReduceEff runEff updateModel c curInp curModel view
               writeIORef modelRef newModel
               tUiEnd <- getMonotonicTime
-              let !uiMs = (tUiEnd - tUiStart) * 1000.0
               damage <- takeDamage c
               if damageIsEmpty damage && not paintFull
                 then do
                   noteDebugSkip (rdsSampler debugSampler)
+                  -- Nothing was drawn, so the retained framebuffer holds this frame.
+                  answerScreenshots c (retainedPixels renderer pw ph)
                   pure dirtyAfterUi
                 else do
                   tRenderStart <- getMonotonicTime
                   curMonScale <- readIORef monScaleRef
                   (baseSpans, overlaySpans) <- collectRasterSpans c curInp
                   pieces <- if paintFull then pure [] else takeDamagePieces c
+                  syncImagesGl renderer c
                   renderArenaGl renderer font curScale pw ph (themeWindow frameTheme)
                       (if paintFull then DamageFull else damage) pieces drawData baseSpans overlaySpans
                   writeIORef presentedRef $! (pw, ph, curScale)
-                  tRenderEnd <- getMonotonicTime
-                  let !renderMs = (tRenderEnd - tRenderStart) * 1000.0
-
                   tSwapStart <- getMonotonicTime
                   R.swapBuffersGL win
                   tSwapEnd <- getMonotonicTime
-                  let !swapMs = (tSwapEnd - tSwapStart) * 1000.0
-                      !frameMs = (tSwapEnd - tUiStart) * 1000.0
-
+                  answerScreenshots c (retainedPixels renderer pw ph)
                   nodes <- arenaCount (ctxNodeArena c)
-                  noteDebugPresent (rdsSampler debugSampler) uiMs renderMs swapMs frameMs
+                  let ms a b = (b - a) * 1000
+                  noteDebugPresent (rdsSampler debugSampler) (ms tUiStart tUiEnd) (ms tRenderStart tSwapStart)
+                    (ms tSwapStart tSwapEnd) (ms tUiStart tSwapEnd)
                     (drawVertexCount drawData) (drawIndexCount drawData) (drawCmdCount drawData)
                   writeIORef (rdsFrame debugSampler)
                     RgfwFrameStats
@@ -304,11 +433,12 @@ runRgfwAppReduceCustom opts getThemeAndScale updateModel initialModel view = inB
               SessionDriver
                 { sdPollEvents    = pollRgfwEvents win evPtr scaleRef monScaleRef winSizeRef
                 , sdWaitEvents    = \t -> do
-                    R.waitForEvent t
+                    woke <- readIORef wakeRef
+                    unless woke (R.waitForEvent t)
                     pollRgfwEvents win evPtr scaleRef monScaleRef winSizeRef
                 , sdApplyEvent    = applyRgfwEvent
-                , sdIsButtonEdge  = isRgfwButtonEdge
-                , sdIsSessionQuit = isRgfwSessionQuit
+                , sdIsButtonEdge  = \case RgfwEvButton {} -> True; _ -> False
+                , sdIsSessionQuit = \case RgfwEvClose -> True; _ -> False
                 , sdSyncDisplay   = \c inp -> do
                     (curWinW, curWinH) <- R.windowSize win
                     (pw0, ph0) <- readIORef winSizeRef
@@ -319,9 +449,8 @@ runRgfwAppReduceCustom opts getThemeAndScale updateModel initialModel view = inB
                     let (_, userScale) = getThemeAndScale curModel
                         !newScale = resolveScale userScale curMonScale
                     writeIORef scaleRef newScale
-                    let !lw = max 1 (round (fromIntegral pw / newScale) :: Int)
-                        !lh = max 1 (round (fromIntegral ph / newScale) :: Int)
-                    pure (c, inp { inputWindowSize = Size (fromIntegral lw) (fromIntegral lh) })
+                    reportWindowState c =<< rgfwWindowState win newScale
+                    pure (c, inp {inputWindowSize = logicalSize (pw, ph) newScale})
                 , sdDebug         = rdsSampler debugSampler
                 , sdContinuous    = False
                   -- Presents are unthrottled (swap interval 0, no vsync), so a
@@ -329,9 +458,13 @@ runRgfwAppReduceCustom opts getThemeAndScale updateModel initialModel view = inB
                   -- instead of spinning.
                 , sdPacingMs      = animateTimeout
                 , sdPresentPaces  = pure False
-                , sdShouldDraw    = \c prevInp inpSynced wasAnim refreshDue ->
-                    shouldRedrawFrame c prevInp inpSynced wasAnim False refreshDue
-                , sdDraw          = \c curInp forceFull -> drawOne forceFull c curInp
+                , sdShouldDraw    = \c prevInp inpSynced wasAnim refreshDue -> do
+                    woke <- readIORef wakeRef
+                    shouldRedrawFrame c prevInp inpSynced wasAnim False (refreshDue || woke)
+                , sdDraw          = \c curInp forceFull -> do
+                    -- Clear before the view runs, so a wake during it forces another frame.
+                    atomicWriteIORef wakeRef False
+                    drawOne forceFull c curInp
                 , sdOnCursor      = syncCursor
                 , sdShouldQuit    = \_ -> False
                 , sdAlignSec      = refreshSec
@@ -344,18 +477,38 @@ runRgfwAppReduceCustom opts getThemeAndScale updateModel initialModel view = inB
         _ <- drawOne True ctx initInp
         runSessionLoop drv ctx initInp
 
+-- | The window's state at a scale, from what RGFW tracks through its events,
+-- so reading it costs no round trip to the desktop.
+rgfwWindowState :: R.Window -> Float -> IO WindowState
+rgfwWindowState win scale = do
+  (x, y) <- R.windowPosition win
+  flags <- R.windowFlags win
+  focused <- R.windowFocused win
+  let has bit = flags .&. bit /= 0
+  pure
+    defaultWindowState
+      { winScale = scale
+      , winPosition = Just (x, y)
+      , winFocused = focused
+      , winMaximized = has R.rgfw_windowMaximize
+      , winMinimized = has R.rgfw_windowMinimize
+      , winFullscreen = has R.rgfw_windowFullscreen
+      }
+
 -- | An RGFW event translated for the input fold.
 data RgfwEvent
   = RgfwEvClose
   | RgfwEvResize -- ^ window size or monitor scale changed (read back at sync)
   | RgfwEvMotion !Float !Float
   | RgfwEvButton !Word8 !Bool
+  | RgfwEvLeave -- ^ the pointer left the window
   | RgfwEvScroll !Float !Float
-  | RgfwEvChar !Char !Bool -- ^ typed character; True when a Ctrl chord typed it
-  | RgfwEvKeyPress !Word32 !Word8
-  | RgfwEvKeyRelease !Word8
+  | RgfwEvChar !Char -- ^ typed character
+  | RgfwEvKey !Word32 !Word8 !Bool -- ^ key, modifiers, down (including repeats) or up
+  | RgfwEvFocusLost -- ^ the window lost keyboard focus
 
 -- | Drain the RGFW queue, recording size and scale changes for the next sync.
+-- Character keys are remapped to the current layout ('layoutKey').
 pollRgfwEvents :: R.Window -> Ptr R.RGFW_event -> IORef Float -> IORef Float -> IORef (Int, Int) -> IO [RgfwEvent]
 pollRgfwEvents win evPtr scaleRef monScaleRef winSizeRef = do
   raw <- drain []
@@ -372,51 +525,40 @@ pollRgfwEvents win evPtr scaleRef monScaleRef winSizeRef = do
         R.EventScaleUpdate sx _ -> do
           writeIORef monScaleRef (if sx > 0 then sx else 1)
           drain (ev : acc)
+        R.EventKeyPress k m -> relayout R.EventKeyPress k m
+        R.EventKeyRepeat k m -> relayout R.EventKeyRepeat k m
+        R.EventKeyRelease k m -> relayout R.EventKeyRelease k m
         _ -> drain (ev : acc)
-
--- | What the previous event typed. One keystroke can queue both a key-char
--- and a Ctrl+letter key-press event, in either order (X11 queues the char
--- first), and must type its letter once.
-data Typed = TypedNothing | TypedByChar !Char | TypedByChord !Char
-  deriving (Eq)
+      where
+        relayout event k m = layoutKey k >>= \k' -> drain (event k' m : acc)
+    -- RGFW key codes are what the key types on a US layout. Letter and
+    -- punctuation keys are remapped to the current layout when the result is
+    -- ASCII. Digits stay, since some layouts type symbols there unshifted.
+    layoutKey k
+      | k > 32 && k < 127 && not (isDigit (chr (fromIntegral k))) =
+          maybe k (\mapped -> if mapped > 32 && mapped < 127 then mapped else k) <$> R.physicalToMappedKey k
+      | otherwise = pure k
 
 -- | Translate a batch of raw events in queue order. Pointer positions are
--- divided by the logical scale. A Ctrl+letter press types its letter unless
--- the adjacent key-char event of the same keystroke already did, and a
--- key-char event right after such a press is dropped.
+-- divided by the logical scale. Control characters are dropped: some
+-- platforms send Ctrl+letter as one, and the key event already reports the
+-- chord.
 decodeRgfwEvents :: Float -> [R.Event] -> [RgfwEvent]
-decodeRgfwEvents scale = go TypedNothing
-  where
-    go _ [] = []
-    go typed (ev : rest) = case ev of
-      R.EventKeyPress k m
-        | modCtrl (modsFromRgfw m) && k >= R.rgfw_keyA && k <= R.rgfw_keyZ ->
-            let c = chr (fromIntegral k)
-             in RgfwEvKeyPress k m
-                  : if typed == TypedByChar c
-                      then go TypedNothing rest
-                      else RgfwEvChar c True : go (TypedByChord c) rest
-      -- Control codes \x01..\x1a are Ctrl+letter chords; backspace and delete
-      -- are keys, not text.
-      R.EventKeyChar ch
-        | ch /= '\b' && ch /= '\DEL' && (isPrint ch || chord) ->
-            let c = if chord then chr (ord ch + 96) else ch
-             in if typed == TypedByChord c
-                  then go TypedNothing rest
-                  else RgfwEvChar c chord : go (TypedByChar c) rest
-        where
-          chord = ch >= '\x01' && ch <= '\x1a'
-      _ -> maybe id (:) (untyped ev) (go TypedNothing rest)
-    untyped ev = case ev of
-      R.EventWindowClose -> Just RgfwEvClose
-      R.EventWindowResize _ _ -> Just RgfwEvResize
-      R.EventScaleUpdate _ _ -> Just RgfwEvResize
-      R.EventMouseMotion x y -> Just (RgfwEvMotion (fromIntegral x / scale) (fromIntegral y / scale))
-      R.EventMouseButton btn down -> Just (RgfwEvButton btn down)
-      R.EventMouseScroll dx dy -> Just (RgfwEvScroll dx dy)
-      R.EventKeyPress k m -> Just (RgfwEvKeyPress k m)
-      R.EventKeyRelease _ m -> Just (RgfwEvKeyRelease m)
-      _ -> Nothing
+decodeRgfwEvents scale = mapMaybe $ \case
+  R.EventWindowClose -> Just RgfwEvClose
+  R.EventWindowResize _ _ -> Just RgfwEvResize
+  R.EventScaleUpdate _ _ -> Just RgfwEvResize
+  R.EventMouseMotion x y -> Just (RgfwEvMotion (fromIntegral x / scale) (fromIntegral y / scale))
+  R.EventMouseButton btn down -> Just (RgfwEvButton btn down)
+  R.EventMouseScroll dx dy -> Just (RgfwEvScroll dx dy)
+  R.EventOther t
+    | t == R.rgfw_mouseLeave -> Just RgfwEvLeave
+    | t == R.rgfw_windowFocusOut -> Just RgfwEvFocusLost
+  R.EventKeyPress k m -> Just (RgfwEvKey k m True)
+  R.EventKeyRepeat k m -> Just (RgfwEvKey k m True)
+  R.EventKeyRelease k m -> Just (RgfwEvKey k m False)
+  R.EventKeyChar ch | isPrint ch -> Just (RgfwEvChar ch)
+  _ -> Nothing
 
 -- | Accumulate a decoded event into frame input. The caller handles close
 -- and resize events separately; motion coordinates are already scaled by decoding.
@@ -425,27 +567,13 @@ applyRgfwEvent inp ev = case ev of
   RgfwEvClose -> inp
   RgfwEvResize -> inp
   RgfwEvMotion x y -> inp {inputMousePos = V2 x y}
-  RgfwEvButton btn down
-    | btn == R.rgfw_mouseLeft -> applyMouseButton MouseLeft down inp
-    | btn == R.rgfw_mouseRight -> applyMouseButton MouseRight down inp
-    | otherwise -> inp
+  -- RGFW numbers buttons from 0 in 'mouseButtonNumber' order: left, middle,
+  -- right, back, forward, then the rest.
+  RgfwEvButton btn down -> applyMouseButton (mouseButtonNumber (fromIntegral btn + 1)) down inp
+  RgfwEvLeave -> applyPointerLeave inp
   RgfwEvScroll dx dy -> inp {inputScroll = v2Add (inputScroll inp) (V2 dx dy)}
-  RgfwEvChar c chord ->
-    inp
-      { inputChars = T.snoc (inputChars inp) c
-      , inputModifiers = if chord then (inputModifiers inp) {modCtrl = True} else inputModifiers inp
-      }
-  RgfwEvKeyPress k m ->
-    inp
-      { inputKeys = maybe id appendInputKey (mapRgfwKey k) (inputKeys inp)
-      , inputModifiers = modsFromRgfw m
-      }
-  RgfwEvKeyRelease m -> inp {inputModifiers = modsFromRgfw m}
-
-isRgfwButtonEdge :: RgfwEvent -> Bool
-isRgfwButtonEdge (RgfwEvButton {}) = True
-isRgfwButtonEdge _ = False
-
-isRgfwSessionQuit :: RgfwEvent -> Bool
-isRgfwSessionQuit RgfwEvClose = True
-isRgfwSessionQuit _ = False
+  RgfwEvChar c -> inp {inputChars = T.snoc (inputChars inp) c}
+  -- 'applyKey' detects auto-repeat because the key is already held.
+  RgfwEvKey k m down ->
+    (maybe inp (\key -> applyKey key down inp) (mapRgfwKey k m)) {inputModifiers = modsFromRgfw m}
+  RgfwEvFocusLost -> releaseAllKeys inp

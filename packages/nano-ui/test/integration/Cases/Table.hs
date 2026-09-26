@@ -3,7 +3,8 @@ module Cases.Table (tests) where
 import Spec
 import Data.Bits ((.&.))
 import Data.IntMap.Strict qualified as IM
-import Data.List (sortBy, sortOn, tails)
+import Data.List (sortOn, tails)
+import Data.Ord (Down (..))
 import Data.Maybe (isJust, listToMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -20,7 +21,7 @@ import NanoUI.Internal.Layout.Arena
   , getDirection
   , getNodeType
   , getParent
-  , getRect
+  , getNodeRect
   , getScrollContentW
   , getStyleIdx
   , getWidgetId
@@ -117,17 +118,7 @@ runPageWheelAboveTableTest ctx failed = do
 
 bottomRowIndex :: [(Rect, T.Text, a, b, c)] -> Maybe Int
 bottomRowIndex spans =
-  listToMaybe
-    [ n
-    | (_, t, _, _, _) <-
-        sortBy
-          ( \(ra, _, _, _, _) (rb, _, _, _, _) ->
-              compare (rectY rb) (rectY ra)
-          )
-          spans
-    , "row-" `T.isPrefixOf` t
-    , Just n <- [rowLabelIndex t]
-    ]
+  listToMaybe [n | (_, t) <- sortOn (Down . fst) [(rectY r, t) | (r, t, _, _, _) <- spans], "row-" `T.isPrefixOf` t, Just n <- [rowLabelIndex t]]
 
 -- Scrolling must materialize the newly revealed row in the same frame the
 -- offset lands. The scroll offset is applied after the UI pass, so a frame
@@ -178,7 +169,7 @@ runTableWrapRowStretchTest ctx failed = do
     if nt /= NodeText
       then pure acc
       else do
-        (_, y, w, h) <- getRect na i
+        Rect _ y w h <- getNodeRect na i
         -- Body cells sit below the header band and have real width (both
         -- columns are wider than 50px; the 90px Notes column wraps its long
         -- text and drives the row height).
@@ -214,7 +205,7 @@ runTableResizeOverflowTest ctx failed = do
     let edgeX = hx + hw
         headerY = hy + hh / 2
         pressInp = pressAt inp0 (V2 (edgeX - 2) headerY)
-        dragInp x = inp0 {inputMousePos = V2 x headerY, inputMouseDown = True}
+        dragInp x = inp0 {inputMousePos = V2 x headerY, inputButtonsHeld = buttonsFromList [MouseLeft]}
         -- First drag well past the pane's right edge (lane + v-bar appear),
         -- then settle back inside the vertical-bar gutter band so the
         -- scroller viewport and the stale lane flag disagree across frames.
@@ -232,7 +223,7 @@ runTableResizeOverflowTest ctx failed = do
     assertJustM failed (bodyScrollerRect ctx) $ \(Rect bx by bw bh) -> do
       let barY = by + bh - scrollBarWidth / 2
           barPress = pressAt inp0 (V2 (bx + bw * 0.3) barY)
-          barDrag x = inp0 {inputMousePos = V2 x barY, inputMouseDown = True}
+          barDrag x = inp0 {inputMousePos = V2 x barY, inputButtonsHeld = buttonsFromList [MouseLeft]}
       _ <- runFrame ctx barPress ui
       V2 off1 _ <- bodyOffset ctx
       _ <- runFrame ctx (barDrag (bx + bw * 0.95)) ui
@@ -377,13 +368,12 @@ runTableColResizeDemoReproTest _ failed =
               grabY = if inBody then (hy + hh + bodyBot) / 2 else hy + hh / 2
               hoverInp = inp0 {inputMousePos = V2 edgeX grabY}
           _ <- runFrame ctx hoverInp ui
-          kind <- uiCursorKind ctx hoverInp
-          assertEq failed kind UiCursorEwResize
+          assertEq failed UiCursorEwResize =<< uiCursorKind ctx hoverInp
           -- Away from the edge, the header is not a resize zone.
           midKind <- uiCursorKind ctx inp0 {inputMousePos = V2 (hx + hw / 2) grabY}
           assert failed (midKind /= UiCursorEwResize)
-          let pressInp = hoverInp {inputMouseDown = True, inputMousePressed = True}
-              dragInp x = inp0 {inputMousePos = V2 x grabY, inputMouseDown = True}
+          let pressInp = applyMouseButton MouseLeft True hoverInp
+              dragInp x = inp0 {inputMousePos = V2 x grabY, inputButtonsHeld = buttonsFromList [MouseLeft]}
           before <- headerButtonRects ctx
           _ <- runFrame ctx pressInp ui
           _ <- runFrame ctx (dragInp (edgeX + 60)) ui
@@ -395,9 +385,9 @@ runTableColResizeDemoReproTest _ failed =
             _ -> assert failed False
           -- The arrow stays for the whole drag, off the edge too, and goes
           -- once the button is let go.
-          let offInp = inp0 {inputMousePos = V2 (edgeX + 60) 490, inputMouseDown = True}
+          let offInp = inp0 {inputMousePos = V2 (edgeX + 60) 490, inputButtonsHeld = buttonsFromList [MouseLeft]}
           assertEq failed UiCursorEwResize =<< uiCursorKind ctx offInp
-          _ <- runFrame ctx offInp {inputMouseDown = False, inputMouseReleased = True} ui
+          _ <- runFrame ctx (applyMouseButton MouseLeft False offInp) ui
           released <- uiCursorKind ctx offInp
           assert failed (released /= UiCursorEwResize)
         _ -> assert failed False
@@ -439,7 +429,7 @@ headerButtonRects ctx = do
   let na = ctxNodeArena ctx
   rects <- foldNodesM na (\acc i -> do
     header <- isHeaderButton na i
-    if header then (\(x, y, w, h) -> Rect x y w h : acc) <$> getRect na i else pure acc) []
+    if header then (: acc) <$> getNodeRect na i else pure acc) []
   pure (sortOn rectX rects)
 
 isHeaderButton :: NodeArena -> NodeIdx -> IO Bool
@@ -459,7 +449,7 @@ tableBodyBottom ctx = do
             if nt /= NodePanel
               then getParent na i >>= walkUp
               else do
-                (_, py, _, ph) <- getRect na i
+                Rect _ py _ ph <- getNodeRect na i
                 pure (py + ph)
   findNodeM na (isHeaderButton na) >>= maybe (pure 0) walkUp
 
@@ -483,10 +473,7 @@ isBodyScroller ctx i = do
 bodyScrollerRect :: Context -> IO (Maybe Rect)
 bodyScrollerRect ctx = do
   let na = ctxNodeArena ctx
-  found <- findNodeM na (isBodyScroller ctx)
-  forM found $ \i -> do
-    (x, y, w, h) <- getRect na i
-    pure (Rect x y w h)
+  traverse (getNodeRect na) =<< findNodeM na (isBodyScroller ctx)
 
 -- | The body scroller's 2D offset.
 bodyOffset :: Context -> IO V2
@@ -544,8 +531,7 @@ runTableSharedScrollMetricsTest ctx failed = do
     -- The pane that owns both scrollbars, not the frozen column's sliver.
     assertEq failed (Just ScrollAxisXY) (fmap scrollAxes before)
     _ <- runFrame ctx inp0 ui
-    after <- getScrollMetrics ctx wid
-    assertEq failed before after
+    assertEq failed before =<< getScrollMetrics ctx wid
 
 -- The widget id shared by the table body's panes: the id of the first scroll
 -- container the arena holds that another scroll container repeats.
@@ -579,7 +565,7 @@ runTableRulesTileTest _ failed =
           parent <- getParent na i
           if parent < 0 then pure acc else do
             nt <- getNodeType na i
-            (x, _, w, _) <- getRect na i
+            Rect x _ w _ <- getNodeRect na i
             let merge (r1, e1) (r2, e2) = (r1 || r2, e1 ++ e2)
             pure (IM.insertWith merge parent (nt == NodeSeparator, [(x, w)]) acc)) IM.empty
         rows <- filterM (fmap (== DirRow) . getDirection na) [p | (p, (True, _)) <- IM.toList byParent]

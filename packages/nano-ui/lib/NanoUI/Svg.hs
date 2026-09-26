@@ -20,8 +20,9 @@ import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.ByteString.Internal qualified as BSI
 import Data.Maybe (fromMaybe)
+import Data.Foldable (toList)
 import Data.Primitive.PrimArray (MutablePrimArray, PrimArray, copyMutablePrimArray, indexPrimArray, newPrimArray, readPrimArray, setPrimArray, sizeofPrimArray, unsafeFreezePrimArray, writePrimArray)
-import Data.Primitive.SmallArray (SmallArray, indexSmallArray, sizeofSmallArray)
+import Data.Primitive.SmallArray (SmallArray)
 import Data.Word (Word8)
 import Foreign.Storable (pokeByteOff)
 import Graphics.NanoSvg
@@ -41,9 +42,10 @@ import Graphics.NanoSvg
   , black
   , multiply
   , parseSvg
-  , transformPoint
   )
-import NanoUI.Internal.Types (Color, clamp, colorA, colorB, colorFromWord32, colorG, colorR)
+import NanoUI.Internal.Path (Rings (..), buildRings, cleanRings, ringCount)
+import NanoUI.Internal.Path qualified as P
+import NanoUI.Internal.Types (Color (..), clamp, colorA, colorB, colorG, colorR)
 
 -- | A parsed SVG document, as @nano-svg@ returns it.
 type Svg = Document
@@ -63,163 +65,25 @@ svgMonochrome :: Svg -> Bool
 svgMonochrome = documentMonochrome
 
 --------------------------------------------------------------------------------
--- Rings
---------------------------------------------------------------------------------
-
--- | Point lists in flat arrays: ring @i@ is points @starts[i]@ up to
--- @starts[i + 1]@, stored x then y, with a number the builder tagged it with.
-data Rings = Rings !(PrimArray Float) !(PrimArray Int) !(PrimArray Int)
-
-ringCount :: Rings -> Int
-ringCount (Rings _ starts _) = sizeofPrimArray starts - 1
-
--- | Rings from a walk that calls @point x y@ for each point and @end tag@
--- after each ring's last. The walk runs twice, to size the arrays and then
--- to fill them, so it must visit the same points both times.
-{-# INLINE buildRings #-}
-buildRings :: (forall s. (Float -> Float -> ST s ()) -> (Int -> ST s ()) -> ST s ()) -> Rings
-buildRings walk = runST $ do
-  counts <- newPrimArray 2
-  setPrimArray counts 0 2 (0 :: Int)
-  let bump k = readPrimArray counts k >>= writePrimArray counts k . (+ 1)
-  walk (\_ _ -> bump 0) (\_ -> bump 1)
-  nPoints <- readPrimArray counts 0
-  nRings <- readPrimArray counts 1
-  points <- newPrimArray (2 * nPoints)
-  starts <- newPrimArray (nRings + 1)
-  tags <- newPrimArray nRings
-  writePrimArray starts 0 0
-  setPrimArray counts 0 2 0
-  walk
-    ( \x y -> do
-        k <- readPrimArray counts 0
-        writePrimArray points (2 * k) x
-        writePrimArray points (2 * k + 1) y
-        writePrimArray counts 0 (k + 1)
-    )
-    ( \tag -> do
-        r <- readPrimArray counts 1
-        readPrimArray counts 0 >>= writePrimArray starts (r + 1)
-        writePrimArray tags r tag
-        writePrimArray counts 1 (r + 1)
-    )
-  Rings <$> unsafeFreezePrimArray points <*> unsafeFreezePrimArray starts <*> unsafeFreezePrimArray tags
-
---------------------------------------------------------------------------------
 -- Flattening
 --------------------------------------------------------------------------------
 
 -- | Flatten segments through a transform into contours in device pixels,
 -- each tagged 1 when closed. Curves are split until they are within a
--- quarter pixel of their chords.
+-- quarter pixel of their chords. Arcs use steps of at most pi/16, and at
+-- least four steps.
 flatten :: Matrix -> SmallArray Segment -> Rings
-flatten m segs = buildRings (flattenWalk m segs)
-
-{-# INLINE flattenWalk #-}
-flattenWalk :: Matrix -> SmallArray Segment -> (Float -> Float -> ST s ()) -> (Int -> ST s ()) -> ST s ()
-flattenWalk m segs point end =
-  let count = sizeofSmallArray segs
-      emit p = let Point x y = transformPoint m p in point x y
-      finish n closed = when (n > 0) (end (if closed then 1 else 0))
-      -- A segment with no subpath open starts one at the current point.
-      begin n started cur = if started || n > 0 then pure n else emit cur >> pure (1 :: Int)
-      go !i !n !started cur start
-        | i >= count = finish n False
-        | otherwise = case indexSmallArray segs i of
-            MoveTo p -> finish n False >> emit p >> go (i + 1) 1 True p p
-            LineTo p -> do
-              n1 <- begin n started cur
-              emit p
-              go (i + 1) (n1 + 1) True p start
-            CubicTo c1 c2 p -> do
-              n1 <- begin n started cur
-              k <- cubicPoints point (transformPoint m cur) (transformPoint m c1) (transformPoint m c2) (transformPoint m p)
-              go (i + 1) (n1 + k) True p start
-            QuadTo c1 p -> do
-              n1 <- begin n started cur
-              let Point x0 y0 = cur
-                  Point x1 y1 = c1
-                  Point x2 y2 = p
-                  q1 = Point (x0 + 2 / 3 * (x1 - x0)) (y0 + 2 / 3 * (y1 - y0))
-                  q2 = Point (x2 + 2 / 3 * (x1 - x2)) (y2 + 2 / 3 * (y1 - y2))
-              k <- cubicPoints point (transformPoint m cur) (transformPoint m q1) (transformPoint m q2) (transformPoint m p)
-              go (i + 1) (n1 + k) True p start
-            ArcTo rx ry rot large sweep p -> do
-              n1 <- begin n started cur
-              k <- arcPoints emit cur rx ry rot large sweep p
-              go (i + 1) (n1 + k) True p start
-            ClosePath -> finish n True >> go (i + 1) 0 False start start
-   in go 0 0 False (Point 0 0) (Point 0 0)
-
--- | The points after the start of a cubic, subdividing by flatness, and how
--- many there were.
-{-# INLINE cubicPoints #-}
-cubicPoints :: (Float -> Float -> ST s ()) -> Point -> Point -> Point -> Point -> ST s Int
-cubicPoints point = go (0 :: Int)
+flatten (Matrix a b c d e f) segs =
+  P.flattenPath 0.25 arcSteps (P.Transform a b c d e f) (P.Path (map segment (toList segs)))
   where
-    go depth a b c d
-      | depth >= 12 || flat a b c d = let Point x y = d in point x y >> pure 1
-      | otherwise = do
-          let ab = mid a b
-              bc = mid b c
-              cd = mid c d
-              abc = mid ab bc
-              bcd = mid bc cd
-              abcd = mid abc bcd
-          k1 <- go (depth + 1) a ab abc abcd
-          k2 <- go (depth + 1) abcd bcd cd d
-          pure (k1 + k2)
-    mid (Point x0 y0) (Point x1 y1) = Point ((x0 + x1) / 2) ((y0 + y1) / 2)
-    flat (Point x0 y0) (Point x1 y1) (Point x2 y2) (Point x3 y3) =
-      let ux = 3 * x1 - 2 * x0 - x3
-          uy = 3 * y1 - 2 * y0 - y3
-          vx = 3 * x2 - 2 * x3 - x0
-          vy = 3 * y2 - 2 * y3 - y0
-       in max (ux * ux) (vx * vx) + max (uy * uy) (vy * vy) <= 16 * 0.25 * 0.25
-
--- | The points after the start of an SVG arc, by the endpoint-to-centre
--- conversion in the SVG specification, in user space, and how many there
--- were.
-{-# INLINE arcPoints #-}
-arcPoints :: (Point -> ST s ()) -> Point -> Float -> Float -> Float -> Bool -> Bool -> Point -> ST s Int
-arcPoints emit (Point x1 y1) rx0 ry0 rotDeg large sweep (Point x2 y2)
-  | rx0 == 0 || ry0 == 0 || (x1 == x2 && y1 == y2) = emit (Point x2 y2) >> pure 1
-  | otherwise = do
-      forM_ [1 .. steps - 1] $ \i -> emit (pointAt i)
-      emit (Point x2 y2)
-      pure steps
-  where
-    phi = rotDeg * pi / 180
-    cosP = cos phi
-    sinP = sin phi
-    dx = (x1 - x2) / 2
-    dy = (y1 - y2) / 2
-    x1' = cosP * dx + sinP * dy
-    y1' = negate sinP * dx + cosP * dy
-    lambda = (x1' * x1') / (rx0 * rx0) + (y1' * y1') / (ry0 * ry0)
-    scale = if lambda > 1 then sqrt lambda else 1
-    rx = abs rx0 * scale
-    ry = abs ry0 * scale
-    num = rx * rx * ry * ry - rx * rx * y1' * y1' - ry * ry * x1' * x1'
-    den = rx * rx * y1' * y1' + ry * ry * x1' * x1'
-    coef = (if large == sweep then -1 else 1) * sqrt (max 0 (num / den))
-    cx' = coef * rx * y1' / ry
-    cy' = coef * negate (ry * x1' / rx)
-    cx = cosP * cx' - sinP * cy' + (x1 + x2) / 2
-    cy = sinP * cx' + cosP * cy' + (y1 + y2) / 2
-    angle ux uy vx vy = atan2 (ux * vy - uy * vx) (ux * vx + uy * vy)
-    theta1 = angle 1 0 ((x1' - cx') / rx) ((y1' - cy') / ry)
-    dtheta0 = angle ((x1' - cx') / rx) ((y1' - cy') / ry) ((negate x1' - cx') / rx) ((negate y1' - cy') / ry)
-    dtheta
-      | not sweep && dtheta0 > 0 = dtheta0 - 2 * pi
-      | sweep && dtheta0 < 0 = dtheta0 + 2 * pi
-      | otherwise = dtheta0
-    steps = max 4 (ceiling (abs dtheta / (pi / 16)) :: Int)
-    pointAt i =
-      let t = theta1 + dtheta * fromIntegral i / fromIntegral steps
-          ex = rx * cos t
-          ey = ry * sin t
-       in Point (cosP * ex - sinP * ey + cx) (sinP * ex + cosP * ey + cy)
+    arcSteps _ sweep = max 4 (ceiling (abs sweep / (pi / 16)))
+    segment = \case
+      MoveTo (Point x y) -> P.SegMove x y
+      LineTo (Point x y) -> P.SegLine x y
+      CubicTo (Point x1 y1) (Point x2 y2) (Point x y) -> P.SegCubic x1 y1 x2 y2 x y
+      QuadTo (Point qx qy) (Point x y) -> P.SegQuad qx qy x y
+      ArcTo rx ry rot large sweep (Point x y) -> P.SegArcTo rx ry (rot * pi / 180) large sweep x y
+      ClosePath -> P.SegClose
 
 --------------------------------------------------------------------------------
 -- Stroking
@@ -228,14 +92,14 @@ arcPoints emit (Point x1 y1) rx0 ry0 rotDeg large sweep (Point x2 y2)
 -- | Polygons covering a stroke of width @w@ along the contours, each wound
 -- counter-clockwise so a non-zero fill of all of them is their union.
 strokePolygons :: Float -> LineCap -> LineJoin -> Float -> Rings -> Rings
-strokePolygons w cap join miterLimit contours = buildRings (strokeWalk w cap join miterLimit contours)
+strokePolygons w cap join miterLimit contours = buildRings (strokeWalk w cap join miterLimit (cleanRings False contours))
 
+-- | The outline walk behind 'strokePolygons'. Contours must have no
+-- repeated points.
 {-# INLINE strokeWalk #-}
-strokeWalk :: Float -> LineCap -> LineJoin -> Float -> Rings -> (Float -> Float -> ST s ()) -> (Int -> ST s ()) -> ST s ()
-strokeWalk w cap join miterLimit contours@(Rings cpts cstarts ctags) point end =
+strokeWalk :: Float -> LineCap -> LineJoin -> Float -> [(PrimArray Float, Bool)] -> (Float -> Float -> ST s ()) -> (Int -> ST s ()) -> ST s ()
+strokeWalk w cap join miterLimit contours point end =
   let hw = w / 2
-      at k = Point (indexPrimArray cpts (2 * k)) (indexPrimArray cpts (2 * k + 1))
-      close (Point x0 y0) (Point x1 y1) = abs (x0 - x1) < 1e-4 && abs (y0 - y1) < 1e-4
       emitP (Point x y) = point x y
       -- Twice the signed area of a polygon's corners, positive when they
       -- wind counter-clockwise.
@@ -270,18 +134,11 @@ strokeWalk w cap join miterLimit contours@(Rings cpts cstarts ctags) point end =
         case join of
           JoinRound -> disc v
           JoinBevel -> bevel
-          JoinMiter -> do
-            let mx = n1x + n2x
-                my = n1y + n2y
-                mlen2 = mx * mx + my * my
-                -- The miter point sits along the bisector at hw / cos(half angle).
-                scale = if mlen2 < 1e-9 then 0 else 2 * hw * hw / mlen2
-                ratio = if mlen2 < 1e-9 then 1 / 0 else sqrt (scale * scale * mlen2) / hw
-            if ratio > miterLimit
-              then bevel
-              else do
-                quad v (Point (vx + n1x) (vy + n1y)) (Point (vx + mx * scale) (vy + my * scale)) (Point (vx + n2x) (vy + n2y))
-                quad v (Point (vx - n1x) (vy - n1y)) (Point (vx - mx * scale) (vy - my * scale)) (Point (vx - n2x) (vy - n2y))
+          JoinMiter -> case P.miterOffset miterLimit (n1x / hw) (n1y / hw) (n2x / hw) (n2y / hw) of
+            Nothing -> bevel
+            Just (mx, my) -> do
+              quad v (Point (vx + n1x) (vy + n1y)) (Point (vx + mx * hw) (vy + my * hw)) (Point (vx + n2x) (vy + n2y))
+              quad v (Point (vx - n1x) (vy - n1y)) (Point (vx - mx * hw) (vy - my * hw)) (Point (vx - n2x) (vy - n2y))
       endCap inner e@(Point ex ey) = case cap of
         CapButt -> pure ()
         CapRound -> disc e
@@ -299,59 +156,26 @@ strokeWalk w cap join miterLimit contours@(Rings cpts cstarts ctags) point end =
         end 0
       square (Point cx cy) =
         emit4 (Point (cx - hw) (cy - hw)) (Point (cx + hw) (cy - hw)) (Point (cx + hw) (cy + hw)) (Point (cx - hw) (cy + hw))
-      contour r = do
-        let from = indexPrimArray cstarts r
-            to = indexPrimArray cstarts (r + 1)
-            closed = indexPrimArray ctags r /= 0
-        -- The contour's points, dropping any that repeat the one before.
-        kept <- newPrimArray (to - from)
-        let dedupe !k !n
-              | k >= to = pure n
-              | n > 0 = do
-                  prevK <- readPrimArray kept (n - 1)
-                  if close (at prevK) (at k)
-                    then dedupe (k + 1) n
-                    else writePrimArray kept n k >> dedupe (k + 1) (n + 1)
-              | otherwise = writePrimArray kept 0 k >> dedupe (k + 1) 1
-        n0 <- dedupe from 0
-        firstK <- readPrimArray kept 0
-        lastK <- readPrimArray kept (max 0 (n0 - 1))
-        -- A closed contour that returns to its start ends on that point.
-        let n = if closed && n0 >= 2 && close (at firstK) (at lastK) then n0 - 1 else n0
-            pt i = at <$> readPrimArray kept i
+      contour (pts, closed) = do
+        let n = sizeofPrimArray pts `div` 2
+            pt i = Point (indexPrimArray pts (2 * i)) (indexPrimArray pts (2 * i + 1))
+            cornerAt i = corner (pt ((i - 1 + n) `mod` n)) (pt i) (pt ((i + 1) `mod` n))
         case n of
           0 -> pure ()
-          1 -> do
-            p <- pt 0
-            case cap of
-              CapButt -> pure ()
-              CapRound -> disc p
-              CapSquare -> square p
+          1 -> case cap of
+            CapButt -> pure ()
+            CapRound -> disc (pt 0)
+            CapSquare -> square (pt 0)
           _ -> do
-            forM_ [0 .. n - 2] $ \i -> do
-              a <- pt i
-              b <- pt (i + 1)
-              segmentQuad a b
-            when closed $ do
-              a <- pt (n - 1)
-              b <- pt 0
-              segmentQuad a b
-            let cornerAt i = do
-                  prev <- pt ((i - 1 + n) `mod` n)
-                  v <- pt i
-                  next <- pt ((i + 1) `mod` n)
-                  corner prev v next
+            forM_ [0 .. n - 2] $ \i -> segmentQuad (pt i) (pt (i + 1))
+            when closed $ segmentQuad (pt (n - 1)) (pt 0)
             if closed
               then forM_ [0 .. n - 1] cornerAt
               else forM_ [1 .. n - 2] cornerAt
             unless closed $ do
-              first <- pt 0
-              second <- pt 1
-              beforeLast <- pt (n - 2)
-              final <- pt (n - 1)
-              endCap second first
-              endCap beforeLast final
-   in forM_ [0 .. ringCount contours - 1] contour
+              endCap (pt 1) (pt 0)
+              endCap (pt (n - 2)) (pt (n - 1))
+   in mapM_ contour contours
 
 --------------------------------------------------------------------------------
 -- Rasterizing
@@ -391,7 +215,7 @@ rasterizeSvg width height current svg
             paintColor p = case p of
               PaintNone -> Nothing
               PaintCurrent -> Just current
-              PaintColor col -> Just (colorFromWord32 (rgbaToWord32 col))
+              PaintColor col -> Just (Color (rgbaToWord32 col))
             -- An unspecified fill paints black, or the current colour in a
             -- monochrome document, so an icon without paints tints.
             fill = fromMaybe (if documentMonochrome svg then PaintCurrent else PaintColor black) (styleFill style)
@@ -470,9 +294,9 @@ coverPolygons width height cov rule rings@(Rings pts starts _) = do
   let samples = 5 :: Int
       weight = 1 / fromIntegral samples :: Float
       inside :: Int -> Bool
-      inside w = case rule of
-        NonZero -> w /= 0
-        EvenOdd -> odd w
+      inside = P.fillsWinding $ case rule of
+        NonZero -> P.NonZero
+        EvenOdd -> P.EvenOdd
       add i v = readPrimArray cov i >>= \c -> writePrimArray cov i (c + v)
       spanCover base xa0 xb0 = do
         let xa = clamp 0 (fromIntegral width) xa0

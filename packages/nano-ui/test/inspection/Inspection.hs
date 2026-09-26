@@ -9,6 +9,7 @@ module Main
   ( main
   , solidQuadProbe
   , gradientQuadProbe
+  , cornerQuadProbe
   , storeWriteProbe
   , storeWriteByHand
   , storeReadProbe
@@ -39,11 +40,12 @@ import NanoUI.Internal.Store
 import NanoUI
   ( Animatable (..)
   , Color
+  , CustomDrawContext
   , Rect (..)
   , V2 (..)
   , drawCircle
   , drawRect
-  , runCanvas
+  , runCanvasFor
   )
 import NanoUI.Testing (DrawCmd (..), DrawOp (..), Layer (..))
 
@@ -63,6 +65,7 @@ gradientQuadProbe vp ip offset x base =
     (x, 0, 0, 1) (0, x, 0, 1) (0, 0, x, 1) (x, x, x, 1) base
 
 inspect $ 'solidQuadProbe `doesNotUse` 'SIMD.pokeQuadSIMD
+inspect $ 'solidQuadProbe `doesNotUse` 'SIMD.pokeQuadCornersSIMD
 inspect $ 'solidQuadProbe `doesNotUse` 'SIMD.pokeVertexSIMD
 inspect $ hasNoTypeClasses 'solidQuadProbe
 inspect $ 'solidQuadProbe `hasNoType` ''[]
@@ -75,6 +78,16 @@ inspect $ 'gradientQuadProbe `doesNotUse` 'SIMD.pokeQuadGradientSIMD
 inspect $ 'gradientQuadProbe `doesNotUse` 'SIMD.pokeVertexSIMD
 inspect $ hasNoTypeClasses 'gradientQuadProbe
 inspect $ 'gradientQuadProbe `hasNoType` ''(,,,)
+
+-- The rotated image quad writer, which takes each corner explicitly.
+cornerQuadProbe :: Ptr Word8 -> Ptr Word8 -> Int -> Float -> Word32 -> IO ()
+cornerQuadProbe vp ip offset x base =
+  SIMD.pokeQuadCornersSIMD vp offset ip offset x 0 x x 0 x 0 0 0 0 1 1 x x x 1 base
+
+inspect $ 'cornerQuadProbe `doesNotUse` 'SIMD.pokeQuadCornersSIMD
+inspect $ 'cornerQuadProbe `doesNotUse` 'SIMD.pokeVertexSIMD
+inspect $ hasNoTypeClasses 'cornerQuadProbe
+inspect $ 'cornerQuadProbe `hasNoType` ''(,)
 
 -- The store's slot functions take the map they work on as a 'Field'. They
 -- must compile to the record code they stand for, with no 'Field' left, so
@@ -135,12 +148,14 @@ inspect $ hasNoTypeClasses 'commandWriteProbe
 inspect $ 'commandReadProbe `doesNotUse` 'U.fromURepr
 inspect $ 'commandWriteProbe `doesNotUse` 'U.toURepr
 
-canvasProbe :: Float -> Color -> SmallArray DrawOp
-canvasProbe x color = runCanvas $ do
+-- A block with no curves and no draw-context use must build neither the
+-- curve tolerance nor the context.
+canvasProbe :: CustomDrawContext -> Float -> Color -> SmallArray DrawOp
+canvasProbe cdc x color = runCanvasFor cdc $ do
   drawRect (Rect x 2 3 4) color
   drawCircle (V2 5 x) 6 color
 
-canvasByHand :: Float -> Color -> SmallArray DrawOp
-canvasByHand !x color = smallArrayFromList [FillRect (Rect x 2 3 4) color, FillCircle 5 x 6 color]
+canvasByHand :: CustomDrawContext -> Float -> Color -> SmallArray DrawOp
+canvasByHand _ !x color = smallArrayFromList [FillRect (Rect x 2 3 4) color, FillCircle 5 x 6 color]
 
 inspect $ 'canvasProbe === 'canvasByHand

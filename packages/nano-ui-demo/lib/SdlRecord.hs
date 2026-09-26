@@ -15,6 +15,7 @@ import Control.Monad (forM_, replicateM_, unless, void, when)
 import GHC.Clock (getMonotonicTime)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import NanoUI
+import NanoUI.Backend (applyMouseButton)
 import NanoUI.Backend.Sdl
 import NanoUI.Testing (Context, collectOverlayTextSpans, collectTextSpans)
 import NanoUI.Testing.Harness (DemoSpan, findExact, findHeader, findRightmost, keyInp)
@@ -95,13 +96,13 @@ frame r f = do
   prev <- readIORef (recLast r)
   pos <- readIORef (recMouse r)
   down <- readIORef (recDown r)
-  let inp = f (recBase r) {inputMousePos = pos, inputMouseDown = down, inputDeltaTime = realToFrac (t - prev)}
+  let inp = f (recBase r) {inputMousePos = pos, inputButtonsHeld = if down then left else noButtons, inputDeltaTime = realToFrac (t - prev)}
   recDraw r inp
   ok <- saveScreenshot (recEnv r) (recDir r </> frameName n)
   unless ok $ fail "record: could not read back the frame"
   writeIORef (recLast r) t
   writeIORef (recFrame r) (n + 1)
-  modifyIORef' (recLog r) ((inputMousePos inp, inputMouseDown inp, t - recStart r) :)
+  modifyIORef' (recLog r) ((inputMousePos inp, heldIn MouseLeft inp, t - recStart r) :)
 
 frames :: Double -> Int
 frames secs = max 1 (round (secs * fps))
@@ -125,21 +126,24 @@ ease s = if s < 0.5 then 4 * s * s * s else 1 - (-2 * s + 2) ** 3 / 2
 lerpV :: V2 -> V2 -> Float -> V2
 lerpV (V2 ax ay) (V2 bx by) s = V2 (ax + (bx - ax) * s) (ay + (by - ay) * s)
 
+left :: MouseButtons
+left = buttonsFromList [MouseLeft]
+
 press, release :: Rec -> IO ()
 press r = do
   writeIORef (recDown r) True
-  frame r (\i -> i {inputMousePressed = True})
+  frame r (\i -> i {inputButtonsPressed = left})
 release r = do
   writeIORef (recDown r) False
-  frame r (\i -> i {inputMouseReleased = True})
+  frame r (\i -> i {inputButtonsReleased = left})
 
 click :: Rec -> IO ()
 click r = press r >> frame r id >> release r >> wait r 0.2
 
 rightClick :: Rec -> IO ()
 rightClick r = do
-  frame r (\i -> i {inputMouseRightDown = True, inputMouseRightPressed = True})
-  frame r (\i -> i {inputMouseRightReleased = True})
+  frame r (applyMouseButton MouseRight True)
+  frame r (applyMouseButton MouseRight False)
   wait r 0.25
 
 -- | Move to @pos@ and click there.

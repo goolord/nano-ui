@@ -6,11 +6,14 @@ module NotepadSelftest
   ) where
 
 import Control.Monad (void, when)
+import Data.Text qualified as T
 import NanoUI
 import NanoUI.Backend.Sdl
+import NanoUI.Shortcut
 import NanoUI.Testing (collectOverlayTextSpans, collectTextSpans)
 import NanoUI.Testing.Harness
-  ( clickPos
+  ( chordInp
+  , clickPos
   , findExact
   , findRightmost
   , expectText
@@ -25,20 +28,22 @@ selftest = do
   withHiddenWindow 1000 720 (V2 500 400) id $ \ctx env base -> do
       let
         drawFrame inp = void (sdlDrawFrame ctx notepadUi env inp False)
+        click = clickPos drawFrame base
+        clickOn name spans = click =<< requireSpan ("selftest: " <> T.unpack name) (findExact name spans)
+        chord c = drawFrame (chordInp c base) >> drawFrame base
+        overlay = collectOverlayTextSpans ctx base
 
       mapM_ drawFrame [base, base]
 
       spans0 <- collectTextSpans ctx
       expectText "selftest: status bar missing" "Ready" spans0
-      filePos <- requireSpan "selftest: File menu" (findExact "File" spans0)
 
-      clickPos drawFrame base filePos
-      spansFile <- collectOverlayTextSpans ctx base
+      clickOn "File" spans0
+      spansFile <- overlay
       expectText "selftest: File menu did not open" "Save As..." spansFile
-      newPos <- requireSpan "selftest: New item" (findExact "New" spansFile)
-      clickPos drawFrame base newPos
+      click =<< requireSpan "selftest: New item" (findRightmost "New" spansFile)
       baseSpansNew <- collectTextSpans ctx
-      overlaySpansNew <- collectOverlayTextSpans ctx base
+      overlaySpansNew <- overlay
       when (hasText "Save As..." overlaySpansNew) $
         fail "selftest: File menu did not close"
       expectText "selftest: New action not run" "New document" baseSpansNew
@@ -46,15 +51,11 @@ selftest = do
       -- Focus the editor and type; Select All from the Edit menu must keep the
       -- field focused so the selection highlights and the next keystroke
       -- replaces the selection.
-      clickPos drawFrame base (V2 500 300)
+      click (V2 500 300)
       drawFrame base {inputChars = "abc"}
       drawFrame base
-      editPos <- requireSpan "selftest: Edit menu" (findExact "Edit" baseSpansNew)
-      clickPos drawFrame base editPos
-      spansEdit <- collectOverlayTextSpans ctx base
-      selectAllPos <-
-        requireSpan "selftest: Select All item" (findRightmost "Select All" spansEdit)
-      clickPos drawFrame base selectAllPos
+      clickOn "Edit" baseSpansNew
+      click =<< requireSpan "selftest: Select All item" . findRightmost "Select All" =<< overlay
       drawFrame base {inputChars = "Z"}
       drawFrame base
       spansReplaced <- collectTextSpans ctx
@@ -63,33 +64,21 @@ selftest = do
         fail "selftest: typed text was not replaced"
 
       -- Ctrl+= / Ctrl+- zoom the editor font only; the status bar tracks it.
-      drawFrame base {inputChars = "=", inputModifiers = Modifiers False True False}
-      drawFrame base
-      spansZoomIn <- collectTextSpans ctx
-      expectText "selftest: Ctrl+= did not zoom in" "Zoom: 110%" spansZoomIn
-      drawFrame base {inputChars = "-", inputModifiers = Modifiers False True False}
-      drawFrame base
-      spansZoomOut <- collectTextSpans ctx
-      expectText "selftest: Ctrl+- did not zoom out" "Zoom: 100%" spansZoomOut
+      chord (ctrl <> key '=')
+      expectText "selftest: Ctrl+= did not zoom in" "Zoom: 110%" =<< collectTextSpans ctx
+      chord (ctrl <> key '-')
+      expectText "selftest: Ctrl+- did not zoom out" "Zoom: 100%" =<< collectTextSpans ctx
 
       -- The File menu offers Exit; activating it terminates the process (via
       -- 'exitSuccess'), so the selftest only checks the item is present and
       -- closes the menu again.
-      filePos2 <-
-        requireSpan "selftest: File menu (exit)" . findExact "File"
-          =<< collectTextSpans ctx
-      clickPos drawFrame base filePos2
-      spansFile2 <- collectOverlayTextSpans ctx base
-      expectText "selftest: File menu missing Exit item" "Exit" spansFile2
-      clickPos drawFrame base (V2 500 300) -- dismiss the menu without activating Exit
+      clickOn "File" =<< collectTextSpans ctx
+      expectText "selftest: File menu missing Exit item" "Exit" =<< overlay
+      click (V2 500 300) -- dismiss the menu without activating Exit
 
-      helpPos <- requireSpan "selftest: Help menu" (findExact "Help" baseSpansNew)
-      clickPos drawFrame base helpPos
-      spansHelp <- collectOverlayTextSpans ctx base
+      clickOn "Help" baseSpansNew
+      spansHelp <- overlay
       expectText "selftest: Help menu did not open" "About nano-ui Notepad" spansHelp
-      aboutPos <-
-        requireSpan "selftest: About item" (findExact "About nano-ui Notepad" spansHelp)
-      clickPos drawFrame base aboutPos
-      spansAbout <- collectOverlayTextSpans ctx base
-      expectText "selftest: About modal did not open" "built with nano-ui" spansAbout
+      clickOn "About nano-ui Notepad" spansHelp
+      expectText "selftest: About modal did not open" "built with nano-ui" =<< overlay
       putStrLn "notepad selftest: ok"

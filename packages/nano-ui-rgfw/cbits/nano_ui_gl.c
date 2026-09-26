@@ -2,8 +2,9 @@
  *
  * Geometry is the core's shared draw buffer uploaded as-is (32-byte vertices:
  * position, RGBA, UV; 32-bit indices) and drawn per command under a scissor.
- * Text is pre-clipped glyph quads in physical pixels, sampled from an R8
- * coverage atlas.
+ * Image-atlas commands sample it tinted by vertex colour; other geometry is
+ * flat. Text is pre-clipped glyph quads in physical pixels, sampled from an
+ * R8 coverage atlas.
  *
  * Frames draw into a retained offscreen framebuffer, which keeps the pixels
  * outside a frame's damage, and every present copies it to the window: the
@@ -44,6 +45,7 @@ typedef intptr_t GLsizeiptr;
 #define GL_DEPTH_TEST 0x0B71
 #define GL_BLEND 0x0BE2
 #define GL_SCISSOR_TEST 0x0C11
+#define GL_UNPACK_ROW_LENGTH 0x0CF2
 #define GL_UNPACK_ALIGNMENT 0x0CF5
 #define GL_PACK_ALIGNMENT 0x0D05
 #define GL_TEXTURE_2D 0x0DE1
@@ -53,6 +55,7 @@ typedef intptr_t GLsizeiptr;
 #define GL_RED 0x1903
 #define GL_VERSION 0x1F02
 #define GL_NEAREST 0x2600
+#define GL_LINEAR 0x2601
 #define GL_TEXTURE_MAG_FILTER 0x2800
 #define GL_TEXTURE_MIN_FILTER 0x2801
 #define GL_TEXTURE_WRAP_S 0x2802
@@ -68,6 +71,7 @@ typedef intptr_t GLsizeiptr;
 #define GL_COLOR_ATTACHMENT0 0x8CE0
 #define GL_FRAMEBUFFER 0x8D40
 #define GL_TEXTURE0 0x84C0
+#define GL_TEXTURE1 0x84C1
 #define GL_ARRAY_BUFFER 0x8892
 #define GL_ELEMENT_ARRAY_BUFFER 0x8893
 #define GL_STREAM_DRAW 0x88E0
@@ -121,6 +125,7 @@ typedef intptr_t GLsizeiptr;
   X(void, ActiveTexture, (GLenum))                                                                  \
   X(void, TexParameteri, (GLenum, GLenum, GLint))                                                   \
   X(void, TexImage2D, (GLenum, GLint, GLint, GLsizei, GLsizei, GLint, GLenum, GLenum, const void*)) \
+  X(void, TexSubImage2D, (GLenum, GLint, GLint, GLint, GLsizei, GLsizei, GLenum, GLenum, const void*)) \
   X(void, DeleteTextures, (GLsizei, const GLuint*))                                                \
   X(void, ReadPixels, (GLint, GLint, GLsizei, GLsizei, GLenum, GLenum, void*))                      \
   X(void, GenFramebuffers, (GLsizei, GLuint*))                                                      \
@@ -139,15 +144,17 @@ typedef struct ngl_api {
 /* Must match the core's vertexSize / indexSize. */
 enum { NGL_VERTEX_BYTES = 32, NGL_INDEX_BYTES = 4 };
 
-enum { NGL_MODE_NONE, NGL_MODE_GEOMETRY, NGL_MODE_TEXT };
+enum { NGL_MODE_NONE, NGL_MODE_GEOMETRY, NGL_MODE_IMAGE, NGL_MODE_TEXT };
 
 typedef struct nano_ui_gl {
   ngl_api gl;
   GLuint program;
-  GLint uViewport, uScale, uTextured, uAtlas;
+  GLint uViewport, uScale, uTextured, uAtlas, uImages;
   GLuint geomVao, geomVbo, geomEbo;
   GLuint textVao, textVbo;
   GLuint atlas;
+  GLuint images; /* the core's RGBA image atlas, texture unit 1 */
+  int32_t imagesW, imagesH;
   GLuint retainFbo, retainTex;
   int32_t retainCapW, retainCapH; /* texture size, the window rounded up */
   int32_t fbW, fbH;
@@ -176,11 +183,16 @@ static const char* ngl_fragment_src =
     "in vec4 vColor;\n"
     "in vec2 vUV;\n"
     "uniform sampler2D uAtlas;\n"
+    "uniform sampler2D uImages;\n"
     "uniform float uTextured;\n"
     "out vec4 fragColor;\n"
     "void main() {\n"
-    "  float coverage = uTextured > 0.5 ? texture(uAtlas, vUV).r : 1.0;\n"
-    "  fragColor = vec4(vColor.rgb, vColor.a * coverage);\n"
+    "  if (uTextured > 1.5) {\n"
+    "    fragColor = texture(uImages, vUV) * vColor;\n"
+    "  } else {\n"
+    "    float coverage = uTextured > 0.5 ? texture(uAtlas, vUV).r : 1.0;\n"
+    "    fragColor = vec4(vColor.rgb, vColor.a * coverage);\n"
+    "  }\n"
     "}\n";
 
 static int ngl_load(ngl_api* gl) {
@@ -240,6 +252,7 @@ static int ngl_link(nano_ui_gl* r) {
   r->uScale = gl->GetUniformLocation(r->program, "uScale");
   r->uTextured = gl->GetUniformLocation(r->program, "uTextured");
   r->uAtlas = gl->GetUniformLocation(r->program, "uAtlas");
+  r->uImages = gl->GetUniformLocation(r->program, "uImages");
   return 1;
 }
 
@@ -307,6 +320,7 @@ nano_ui_gl* nano_ui_gl_create(void) {
 
   gl->UseProgram(r->program);
   gl->Uniform1i(r->uAtlas, 0);
+  gl->Uniform1i(r->uImages, 1);
   return r;
 }
 
@@ -316,6 +330,7 @@ void nano_ui_gl_destroy(nano_ui_gl* r) {
   if (r->retainFbo) gl->DeleteFramebuffers(1, &r->retainFbo);
   if (r->retainTex) gl->DeleteTextures(1, &r->retainTex);
   if (r->atlas) gl->DeleteTextures(1, &r->atlas);
+  if (r->images) gl->DeleteTextures(1, &r->images);
   if (r->textVbo) gl->DeleteBuffers(1, &r->textVbo);
   if (r->textVao) gl->DeleteVertexArrays(1, &r->textVao);
   if (r->geomEbo) gl->DeleteBuffers(1, &r->geomEbo);
@@ -338,6 +353,41 @@ int32_t nano_ui_gl_upload_atlas(nano_ui_gl* r, const uint32_t* pixels, int32_t w
   gl->PixelStorei(GL_UNPACK_ALIGNMENT, 1);
   gl->TexImage2D(GL_TEXTURE_2D, 0, GL_R8, w, h, 0, GL_RED, GL_UNSIGNED_BYTE, coverage);
   free(coverage);
+  return 1;
+}
+
+/* Sync the image texture with the core's atlasW x atlasH RGBA image atlas.
+ * With whole set, reallocate the texture at that size and upload everything;
+ * otherwise upload only the x, y, w, h rect. Returns 0 if a rect upload finds
+ * no texture of the atlas's size. */
+int32_t nano_ui_gl_upload_images(nano_ui_gl* r, const uint8_t* pixels, int32_t atlasW, int32_t atlasH,
+                                 int32_t x, int32_t y, int32_t w, int32_t h, int32_t whole) {
+  ngl_api* gl = &r->gl;
+  if (!whole && (r->images == 0 || r->imagesW != atlasW || r->imagesH != atlasH)) return 0;
+  if (r->images == 0) {
+    gl->GenTextures(1, &r->images);
+    gl->ActiveTexture(GL_TEXTURE1);
+    gl->BindTexture(GL_TEXTURE_2D, r->images);
+    gl->TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    gl->TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    gl->TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    gl->TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  } else {
+    gl->ActiveTexture(GL_TEXTURE1);
+    gl->BindTexture(GL_TEXTURE_2D, r->images);
+  }
+  gl->PixelStorei(GL_UNPACK_ALIGNMENT, 1);
+  if (whole) {
+    gl->TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, atlasW, atlasH, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+    r->imagesW = atlasW;
+    r->imagesH = atlasH;
+  } else {
+    gl->PixelStorei(GL_UNPACK_ROW_LENGTH, atlasW);
+    gl->TexSubImage2D(GL_TEXTURE_2D, 0, x, y, w, h, GL_RGBA, GL_UNSIGNED_BYTE,
+                      pixels + ((size_t)y * (size_t)atlasW + (size_t)x) * 4);
+    gl->PixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+  }
+  gl->ActiveTexture(GL_TEXTURE0);
   return 1;
 }
 
@@ -412,6 +462,8 @@ int32_t nano_ui_gl_begin(nano_ui_gl* r, int32_t fbW, int32_t fbH, float scale, f
   gl->BlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
   gl->UseProgram(r->program);
   gl->Uniform2f(r->uViewport, (GLfloat)r->fbW, (GLfloat)r->fbH);
+  gl->ActiveTexture(GL_TEXTURE1);
+  gl->BindTexture(GL_TEXTURE_2D, r->images);
   gl->ActiveTexture(GL_TEXTURE0);
   gl->BindTexture(GL_TEXTURE_2D, r->atlas);
   return 1;
@@ -422,6 +474,16 @@ int32_t nano_ui_gl_begin(nano_ui_gl* r, int32_t fbW, int32_t fbH, float scale, f
 void nano_ui_gl_read_retained(nano_ui_gl* r, uint8_t* out) {
   ngl_api* gl = &r->gl;
   gl->BindFramebuffer(GL_READ_FRAMEBUFFER, r->retainFbo);
+  gl->PixelStorei(GL_PACK_ALIGNMENT, 1);
+  gl->ReadPixels(0, 0, r->fbW, r->fbH, GL_RGBA, GL_UNSIGNED_BYTE, out);
+  gl->BindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
+/* Read the window's back buffer after present and before the swap, which
+ * leaves it undefined. Used by tests of the present. */
+void nano_ui_gl_read_window(nano_ui_gl* r, uint8_t* out) {
+  ngl_api* gl = &r->gl;
+  gl->BindFramebuffer(GL_READ_FRAMEBUFFER, 0);
   gl->PixelStorei(GL_PACK_ALIGNMENT, 1);
   gl->ReadPixels(0, 0, r->fbW, r->fbH, GL_RGBA, GL_UNSIGNED_BYTE, out);
   gl->BindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -459,18 +521,22 @@ void nano_ui_gl_upload_text(nano_ui_gl* r, const void* vertices, int32_t vertexC
                  vertexCount > 0 ? vertices : NULL, GL_STREAM_DRAW);
 }
 
-/* Draw one command's index range. The clip is in top-left physical pixels,
- * already intersected with the framebuffer; vertices are logical and scaled
- * in the vertex shader by the frame's scale. */
+/* Draw one command's index range, sampling the image texture if image is
+ * set. The clip is in top-left physical pixels, already intersected with the
+ * framebuffer; vertices are logical and scaled in the vertex shader by the
+ * frame's scale. */
 void nano_ui_gl_draw_geometry(nano_ui_gl* r, int32_t x0, int32_t y0, int32_t x1, int32_t y1,
-                              uint32_t firstIndex, uint32_t indexCount) {
+                              uint32_t firstIndex, uint32_t indexCount, int32_t image) {
   ngl_api* gl = &r->gl;
-  if (r->mode != NGL_MODE_GEOMETRY) {
-    gl->BindVertexArray(r->geomVao);
-    gl->Uniform1f(r->uTextured, 0.0f);
-    gl->Uniform1f(r->uScale, r->scale);
-    gl->Enable(GL_SCISSOR_TEST);
-    r->mode = NGL_MODE_GEOMETRY;
+  int mode = image && r->images ? NGL_MODE_IMAGE : NGL_MODE_GEOMETRY;
+  if (r->mode != mode) {
+    if (r->mode != NGL_MODE_GEOMETRY && r->mode != NGL_MODE_IMAGE) {
+      gl->BindVertexArray(r->geomVao);
+      gl->Uniform1f(r->uScale, r->scale);
+      gl->Enable(GL_SCISSOR_TEST);
+    }
+    gl->Uniform1f(r->uTextured, mode == NGL_MODE_IMAGE ? 2.0f : 0.0f);
+    r->mode = mode;
   }
   gl->Scissor(x0, r->fbH - y1, x1 - x0, y1 - y0);
   gl->DrawElements(GL_TRIANGLES, (GLsizei)indexCount, GL_UNSIGNED_INT,

@@ -13,7 +13,7 @@ module NanoUI.Internal.Layout.Solve
   , textWrapCap
   ) where
 
-import Control.Monad (filterM, foldM, forM_, guard, mfilter, unless, when)
+import Control.Monad (filterM, foldM, foldM_, forM_, guard, mfilter, unless, when, zipWithM_)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IM
@@ -34,7 +34,7 @@ import GHC.Float (castFloatToWord32)
 import NanoUI.Internal.Font
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Id (WidgetId)
-import NanoUI.Internal.Style (AlignX (..), AlignY (..), FontStyle (..), FontVariant (..), FontWeight (..), Padding (..), windowMargin)
+import NanoUI.Internal.Style (AlignX (..), AlignY (..), Flow (..), FontStyle (..), FontVariant (..), FontWeight (..), Padding (..), lineAlignFraction, windowMargin)
 import NanoUI.Internal.Types (PopupAnchor (..), PopupPlacement (..), Rect (..), V2 (..), clamp, foldUpTo, forUpTo_, gridSpan, onGrid)
 import NanoUI.Internal.WidgetText
 import NanoUI.Internal.Frame.Scroll.Geometry
@@ -166,11 +166,19 @@ measureTextNodeAt env idx txt outerW shouldWrap = do
       pure (TextBox True tw th lineH)
     else pure (TextBox False tw0 th0 lineH)
 
--- | Wrap policy once a width is assigned: wrap when allowed and the single
--- line overflows a positive wrap width.
-{-# INLINE wrapsNarrower #-}
-wrapsNarrower :: Bool -> Float -> Float -> Bool
-wrapsNarrower allowed wrapW lineW = allowed && wrapW + 0.5 < lineW && wrapW > 0
+-- | Height of text node @idx@ at width @w@, clamped to @hAx@. Empty text is
+-- zero height; text that does not wrap returns @fallback@. Text wraps at
+-- newlines, and at @w@ when @allowed@ and its line overflows a positive @w@.
+{-# INLINE textHeightAt #-}
+textHeightAt :: SolveEnv -> NodeIdx -> AxisSizing -> Float -> Bool -> Float -> IO Float
+textHeightAt env !idx (AxisSizing _ _ minH maxH) !w allowed !fallback = do
+  txt <- getText (seArena env) idx
+  if T.null txt
+    then pure (clamp minH maxH 0)
+    else do
+      TextBox {tbWrapped, tbH, tbLineH} <-
+        measureTextNodeAt env idx txt w (\wrapW lineW -> allowed && wrapW + 0.5 < lineW && wrapW > 0)
+      pure (if tbWrapped then clamp minH maxH (max tbLineH tbH) else fallback)
 
 -- | Measure nodes and place the page within the supplied logical width/height.
 -- The view must have finished adding nodes, and 'computeSubtreeHashes' must
@@ -184,20 +192,19 @@ wrapsNarrower allowed wrapW lineW = allowed && wrapW + 0.5 < lineW && wrapW > 0
 -- exactly what a full solve computes. Returns each custom-measured node's
 -- 'CustomMeasureRecord', for the layout cache.
 solveLayout :: NodeArena -> Measurers -> Float -> Float -> Maybe LayoutCache -> IO (IntMap CustomMeasureRecord)
-solveLayout na ms rootW rootH mCache =
-  withArenaArraysSnap na $ do
-    count <- arenaCount na
-    if count <= 0
-      then pure IM.empty
-      else do
-        measureLog <- newIORef IM.empty
-        env0 <- solveEnv na ms mCache
-        let env = env0 {seMeasureLog = Just measureLog}
-        measurePass env count
-        positionNodeA env 0 0 (Rect 0 0 rootW rootH)
-        floatingCount <- floatingNodeCount na
-        quantizeResultsA (seArrays env) count floatingCount (fmSnapScale (msFm ms))
-        readIORef measureLog
+solveLayout na ms rootW rootH mCache = do
+  count <- arenaCount na
+  if count <= 0
+    then pure IM.empty
+    else do
+      measureLog <- newIORef IM.empty
+      env0 <- solveEnv na ms mCache
+      let env = env0 {seMeasureLog = Just measureLog}
+      measurePass env count
+      positionNodeA env 0 0 (Rect 0 0 rootW rootH)
+      floatingCount <- floatingNodeCount na
+      quantizeResultsA (seArrays env) count floatingCount (fmSnapScale (msFm ms))
+      readIORef measureLog
 
 -- | Snap the solved geometry of the @count@ nodes to the device pixel grid of
 -- scale @s@. @floatingCount@ is the arena's floating node count.
@@ -293,28 +300,46 @@ restoreMeasured env lc moved idx
 -- just measured or restored, and return it.
 recordMeasured :: SolveEnv -> NodeIdx -> IO (Float, Float)
 recordMeasured env idx = do
-  (_, _, w, h) <- getRect (seArena env) idx
+  Rect _ _ w h <- getNodeRect (seArena env) idx
   let ma = seMeasured env
   writePrimArray ma (idx * 2) w
   writePrimArray ma (idx * 2 + 1) h
   pure (w, h)
 
 measureNode :: SolveEnv -> NodeIdx -> IO ()
-measureNode env@SolveEnv {seArena = na} idx = do
+measureNode env idx = measureContent env idx >> measureAspect (seArrays env) idx
+
+-- | Apply a node's aspect ratio ('StyleAspect') after its content is
+-- measured. A fit height becomes width / ratio, and a fit width beside a
+-- fixed height becomes height * ratio, both within limits.
+{-# INLINE measureAspect #-}
+measureAspect :: NodeArenaArrays -> NodeIdx -> IO ()
+measureAspect a idx = do
+  ratio <- readStyle a idx StyleAspect
+  when (ratio > 0) $ do
+    wAx <- readAxisSizing a idx True
+    hAx <- readAxisSizing a idx False
+    case (axTag wAx, axTag hAx) of
+      (_, SizingFit) -> readGeom a idx GeomW >>= \w -> writeGeom a idx GeomH (sizeWithin hAx (w / ratio))
+      (SizingFit, SizingFixed) -> readGeom a idx GeomH >>= \h -> writeGeom a idx GeomW (sizeWithin wAx (h * ratio))
+      _ -> pure ()
+
+measureContent :: SolveEnv -> NodeIdx -> IO ()
+measureContent env@SolveEnv {seArena = na} idx = do
   nt <- readTagEnum (seArrays env) idx TagNodeType
   case nt of
     NodeText -> measureTextNode env idx
     NodeSpacer -> measureSpacer na idx
     NodeSeparator -> measureSeparator na idx
     NodeScrollContainer -> measureScrollContainer env idx
-    NodeImage -> measureImage na idx
-    NodeBox -> measureImage na idx
+    NodeImage -> getImageNode na idx >>= measureImage na idx . fmap (\n -> (inWidth n, inHeight n))
+    NodeBox -> measureImage na idx Nothing
     NodeDrawing -> do
       wid <- getWidgetId na idx
       mFn <- msLookupMeasure (seMs env) wid
       case mFn of
         Just fn -> measureCustomNode env fn idx
-        Nothing -> measureImage na idx
+        Nothing -> measureImage na idx Nothing
     _
       | isContainerNode nt -> do
           measureContainer env idx
@@ -446,13 +471,16 @@ growParent na idx = getParent na idx >>= go True
               then pure False
               else (/= NodeModal) <$> getNodeType na p
 
-measureImage :: NodeArena -> NodeIdx -> IO ()
-measureImage na idx = do
+-- | Measure a node with no measurable content: an image, a box, or a
+-- drawing without its own measure. Unless fixed, it takes @natural@ (an
+-- image's own size), else its minimum, else 32, within its limits.
+measureImage :: NodeArena -> NodeIdx -> Maybe (Float, Float) -> IO ()
+measureImage na idx natural = do
   wAx <- getWidthSizing na idx
   hAx <- getHeightSizing na idx
-  -- Without a fixed size, an image takes its minimum, or 32 without one.
   let orMin ax = if axMin ax > 0 then axMin ax else 32
-  setRect na idx 0 0 (sizeWithin wAx (orMin wAx)) (sizeWithin hAx (orMin hAx))
+      (nw, nh) = fromMaybe (orMin wAx, orMin hAx) natural
+  setRect na idx 0 0 (sizeWithin wAx nw) (sizeWithin hAx nh)
 
 measureSpacer :: NodeArena -> NodeIdx -> IO ()
 measureSpacer na idx = do
@@ -608,6 +636,7 @@ measureContainer env@SolveEnv {seArena = na, seArrays = a} idx = do
   (pad, gap, dir) <- containerFlow a idx
   gCols <- readTree a idx TreeGridCols
   minColW <- readStyle a idx StyleGridMinColW
+  flow <- readTagEnum a idx TagFlow
   wAx@(AxisSizing wTag _ minW _) <- readAxisSizing a idx True
   hAx <- readAxisSizing a idx False
   nt <- readTagEnum a idx TagNodeType
@@ -621,11 +650,20 @@ measureContainer env@SolveEnv {seArena = na, seArrays = a} idx = do
   (contentW, contentH) <-
     if gCols > 0 || minColW > 0
       then measureGridScratch env idx gCols minColW innerMaxW innerAvailH gap
-      else if dir == DirColumn && chrome
-        then do
-          n <- loadChildrenScratch na idx (flowChildSize env False innerMaxW innerAvailH)
-          foldChromeColumnScratch na n gap
-        else foldChildDimsFromParent env idx dir gap
+      else case flow of
+        -- Layered children make a box as large as the largest on each axis.
+        Layered -> do
+          let step (FlowAcc count maxW maxH) ci = do
+                Rect _ _ w h <- getNodeRect na ci
+                pure (FlowAcc (count + 1) (max maxW w) (max maxH h))
+          FlowAcc _ layersW layersH <- foldFlowChildrenM na idx step (FlowAcc 0 0 0)
+          pure (layersW, layersH)
+        Wrap -> measureWrap env idx dir gap (if dir == DirRow then innerMaxW else innerAvailH)
+        Line
+          | dir == DirColumn && chrome -> do
+              n <- loadChildrenScratch na idx (flowChildSize env False innerMaxW innerAvailH)
+              foldChromeColumnScratch na n gap
+          | otherwise -> foldChildDimsFromParent env idx dir gap
   -- A grow container with its own minimum width, whose width is assigned from
   -- above, reports that minimum rather than its content: it shrinks that far
   -- in a row that is short of space, so that is the least it needs. As with
@@ -662,7 +700,7 @@ floatingBodyGutter na idx overflow = do
         then pure 0
         else do
           pad <- getPadding na ci
-          (_, _, _, bodyH) <- getRect na ci
+          Rect _ _ _ bodyH <- getNodeRect na ci
           contentH <- getNodeValue na ci
           let innerH = bodyH - padT pad - padB pad - max 0 overflow
           pure (scrollAxisGutter (scrollPolicyY (decodeScrollConfig si)) ScrollBarWindow (padR pad) contentH innerH)
@@ -727,7 +765,7 @@ foldChildDimsFromParent env@SolveEnv {seArena = na} idx dir gap = do
       pure (along + gaps, if count <= 0 then 0 else max across (above + below))
   where
     step (FlowAcc count along across) ci = do
-      (_, _, w, h) <- getRect na ci
+      Rect _ _ w h <- getNodeRect na ci
       pure $ case dir of
         DirRow -> FlowAcc (count + 1) (along + w) (max across h)
         DirColumn -> FlowAcc (count + 1) (along + h) (max across w)
@@ -736,9 +774,74 @@ foldChildDimsFromParent env@SolveEnv {seArena = na} idx dir gap = do
       if ay /= AlignBaseline
         then pure acc
         else do
-          (_, _, _, h) <- getRect na ci
+          Rect _ _ _ h <- getNodeRect na ci
           b <- childBaseline env ci h
           pure (FlowAcc 0 (max above b) (max below (h - b)))
+
+-- | Content size of wrapping container @idx@ ('Wrap'), with lines along
+-- @dir@ at most @bound@ long ('wrapExtent').
+--
+-- A row with no bound of its own (1e8 or more) wraps at its nearest bounded
+-- ancestor's width, like text ('findAncestorMaxW'), or stays on one line if
+-- there is none. A grow row whose width comes from its parent ('growParent')
+-- reports only its widest child's width and one line's height, then wraps
+-- at the width it gets: a column refits its height
+-- ('recomputeFitHeightAtWidth'); elsewhere it grows to its lines after
+-- placement ('adjustFitHeight').
+measureWrap :: SolveEnv -> NodeIdx -> DirTag -> Float -> Float -> IO (Float, Float)
+measureWrap env@SolveEnv {seArena = na} idx dir gap bound = do
+  kids <- mapM (\ci -> (\(Rect _ _ w h) -> (ci, (w, h))) <$> getNodeRect na ci) =<< flowChildrenInOrder na idx
+  limit <-
+    if dir == DirRow && bound >= 1e8
+      then do
+        pad <- getPadding na idx
+        (\w -> w - padL pad - padR pad) <$> findAncestorMaxW na idx
+      else pure bound
+  (along, across) <- wrapExtent env idx dir gap limit kids
+  wTag <- axTag <$> getWidthSizing na idx
+  assigned <-
+    if dir == DirRow && limit >= 1e8 && wTag == SizingGrow then growParent na idx else pure False
+  let widest = foldl' (\m (_, (w, _)) -> max m w) 0 kids
+  pure (if dir == DirRow then (if assigned then widest else along, across) else (across, along))
+
+-- | Extent of @kids@ broken into lines no longer than @limit@ ('wrapLines'):
+-- the longest line's length, and the sum of the lines' cross sizes
+-- ('wrapLineCross') plus the line gaps.
+wrapExtent :: SolveEnv -> NodeIdx -> DirTag -> Float -> Float -> [(NodeIdx, (Float, Float))] -> IO (Float, Float)
+wrapExtent env idx dir gap limit kids = do
+  lineGap <- readStyle (seArrays env) idx StyleLineGap
+  let along (_, (w, h)) = if dir == DirRow then w else h
+      lns = wrapLines limit gap along kids
+      lineLength l = sum (map along l) + gap * fromIntegral (length l - 1)
+  crosses <- mapM (wrapLineCross env dir) lns
+  pure (foldl' max 0 (map lineLength lns), sum crosses + lineGap * fromIntegral (max 0 (length lns - 1)))
+
+-- | Greedily break items into lines no longer than @limit@, with @gap@
+-- between neighbours. An item longer than the limit gets a line to itself.
+wrapLines :: Float -> Float -> (a -> Float) -> [a] -> [[a]]
+wrapLines limit gap len = go
+  where
+    go [] = []
+    go (x : xs) = let (line, rest) = fill (len x) xs in (x : line) : go rest
+    fill !used (y : ys)
+      | used + gap + len y <= limit + 1.0e-3 =
+          let (line, rest) = fill (used + gap + len y) ys in (y : line, rest)
+    fill _ ys = ([], ys)
+
+-- | A wrap line's cross size: its largest child's. In a row it is at least
+-- the tallest ascent plus the deepest descent among baseline-aligned
+-- children, as in 'foldChildDimsFromParent'.
+wrapLineCross :: SolveEnv -> DirTag -> [(NodeIdx, (Float, Float))] -> IO Float
+wrapLineCross env@SolveEnv {seArena = na} dir line = do
+  let across = foldl' (\m (_, (w, h)) -> max m (if dir == DirRow then h else w)) 0 line
+      baselineStep acc@(!above, !below) (ci, (_, h)) = do
+        ay <- getAlignY na ci
+        if ay /= AlignBaseline
+          then pure acc
+          else (\b -> (max above b, max below (h - b))) <$> childBaseline env ci h
+  if dir /= DirRow
+    then pure across
+    else (\(above, below) -> max across (above + below)) <$> foldM baselineStep (0, 0) line
 
 isChromeColumn :: NodeType -> DirTag -> Bool
 isChromeColumn nt dir =
@@ -811,24 +914,22 @@ recomputeFitHeightAtWidth env@SolveEnv {seArena = na, seArrays = a} idx availW =
     nt <- getNodeType na idx
     wAx@(AxisSizing wTag _ minW maxW) <- getWidthSizing na idx
     hAx@(AxisSizing hTag _ minH maxH) <- getHeightSizing na idx
-    (_, _, _, oldH) <- getRect na idx
+    Rect _ _ _ oldH <- getNodeRect na idx
     let -- The width a node takes of @avail@: fixed, a percentage, or all of it.
         widthOf (AxisSizing tag val _ _) avail = case tag of
           SizingPercent -> avail * val / 100
           SizingFixed -> val
           _ -> avail
         effW' = clamp minW maxW (widthOf wAx availW)
+    ratio <- if hTag == SizingFit then readStyle a idx StyleAspect else pure 0
     case nt of
+      -- A fit height with an aspect ratio is width / ratio.
+      _ | ratio > 0 -> pure (clamp minH maxH (effW' / ratio))
+
       NodeText
         | hTag /= SizingFixed -> do
             isRowChild <- parentIsRow na idx
-            txt <- getText na idx
-            if T.null txt
-              then pure (clamp minH maxH 0)
-              else do
-                TextBox {tbWrapped, tbH, tbLineH} <-
-                  measureTextNodeAt env idx txt effW' (wrapsNarrower (wTag /= SizingFit && not isRowChild))
-                pure (if tbWrapped then clamp minH maxH (max tbLineH tbH) else oldH)
+            textHeightAt env idx hAx effW' (wTag /= SizingFit && not isRowChild) oldH
         | otherwise -> pure oldH
 
       -- A measured drawing, like wrapped text, can be taller when narrower.
@@ -858,15 +959,31 @@ recomputeFitHeightAtWidth env@SolveEnv {seArena = na, seArrays = a} idx availW =
                 hs <- mapM (childH colW) =<< flowChildrenInOrder na idx
                 let rowHs = map (foldl' max 0) (rows hs)
                 padded (if null rowHs then 0 else sum rowHs + gap * fromIntegral (length rowHs - 1))
-              else
-                if dir == DirRow
-                  then pure oldH
-                  else do
-                    let step (FlowAcc count contentH _) ci = do
-                          subH <- childH innerW ci
-                          pure (FlowAcc (count + 1) (contentH + subH) 0)
-                    FlowAcc count contentH _ <- foldFlowChildrenM na idx step (FlowAcc 0 0 0)
-                    padded (if count <= 0 then 0 else contentH + gap * fromIntegral (count - 1))
+              else do
+                flow <- readTagEnum a idx TagFlow
+                case flow of
+                  -- Layers are as tall as the tallest child at this width.
+                  Layered -> padded . foldl' max 0 =<< mapM (childH innerW) =<< flowChildrenInOrder na idx
+                  -- A wrapping row is as tall as the lines this width breaks
+                  -- it into, with percentages resolved against the width. A
+                  -- wrapping column's height does not depend on its width.
+                  Wrap
+                    | dir == DirRow -> do
+                        let sized ci = do
+                              subAx <- getWidthSizing na ci
+                              Rect _ _ w h <- getNodeRect na ci
+                              pure (ci, (percentOr subAx innerW w, h))
+                        kids <- mapM sized =<< flowChildrenInOrder na idx
+                        padded . snd =<< wrapExtent env idx dir gap innerW kids
+                    | otherwise -> pure oldH
+                  Line
+                    | dir == DirRow -> pure oldH
+                    | otherwise -> do
+                        let step (FlowAcc count contentH _) ci = do
+                              subH <- childH innerW ci
+                              pure (FlowAcc (count + 1) (contentH + subH) 0)
+                        FlowAcc count contentH _ <- foldFlowChildrenM na idx step (FlowAcc 0 0 0)
+                        padded (if count <= 0 then 0 else contentH + gap * fromIntegral (count - 1))
 
       _ -> pure oldH
 
@@ -902,20 +1019,19 @@ flowChildSize env refit availW availH ci = do
   let a = seArrays env
   w <- readGeom a ci GeomW
   h <- readGeom a ci GeomH
-  AxisSizing wTag wVal minW maxW <- readAxisSizing a ci True
-  AxisSizing hTag hVal minH maxH <- readAxisSizing a ci False
-  let w' =
-        case wTag of
-          SizingPercent -> clamp minW maxW (availW * wVal / 100)
-          _ -> w
+  wAx@(AxisSizing wTag _ _ _) <- readAxisSizing a ci True
+  hAx@(AxisSizing hTag _ _ _) <- readAxisSizing a ci False
+  let w' = percentOr wAx availW w
   h' <-
     if refit && hTag /= SizingFixed && hTag /= SizingPercent && (wTag == SizingGrow || wTag == SizingPercent || availW < w)
       then recomputeFitHeightAtWidth env ci (if wTag == SizingPercent then w' else availW)
-      else pure $
-        case hTag of
-          SizingPercent -> clamp minH maxH (availH * hVal / 100)
-          _ -> h
+      else pure (percentOr hAx availH h)
   pure (w', h')
+
+-- | A percentage of @avail@ within the axis's limits, or else @size@.
+{-# INLINE percentOr #-}
+percentOr :: AxisSizing -> Float -> Float -> Float
+percentOr (AxisSizing tag val lo hi) avail size = if tag == SizingPercent then clamp lo hi (avail * val / 100) else size
 
 positionNodeA ::
   SolveEnv ->
@@ -931,27 +1047,18 @@ positionNodeA env@SolveEnv {seArena = na, seArrays = a} !depth !idx (Rect x y av
   nt <- readTagEnum a idx TagNodeType
   let !w = resolveSize wAx intrinsicW availW
       !resolvedH = resolveSize hAx intrinsicH availH
-  isRowChild <- parentIsRow na idx
-  h <-
-    if nt == NodeText && hTag /= SizingFixed && not isRowChild
-      then do
-        txt <- getText na idx
-        if T.null txt
-          then pure (clamp minH maxH 0)
-          else do
-            TextBox {tbWrapped, tbH, tbLineH} <-
-              measureTextNodeAt env idx txt w (wrapsNarrower (axTag wAx /= SizingFit))
-            pure (if tbWrapped then clamp minH maxH (max tbLineH tbH) else resolvedH)
-      else
-        if (nt == NodeContainer || nt == NodePanel) && hTag == SizingFit
-          then pure (clamp minH maxH (max intrinsicH availH))
-          else
-            if nt == NodeDrawing && hTag == SizingFit && w /= intrinsicW
-              then
-                -- A measured drawing laid out at another width than it was
-                -- measured at takes its height at the width it got.
-                drawingHeightAt env idx w hAx resolvedH
-              else pure resolvedH
+  ratio <- if hTag == SizingFit then readStyle a idx StyleAspect else pure 0
+  h <- case nt of
+    -- A fit height with an aspect ratio follows the assigned width.
+    _ | ratio > 0 -> pure (clamp minH maxH (w / ratio))
+    -- Text outside a row wraps at the assigned width.
+    NodeText | hTag /= SizingFixed -> do
+      isRowChild <- parentIsRow na idx
+      if isRowChild then pure resolvedH else textHeightAt env idx hAx w (axTag wAx /= SizingFit) resolvedH
+    _ | (nt == NodeContainer || nt == NodePanel) && hTag == SizingFit -> pure (clamp minH maxH (max intrinsicH availH))
+    -- A measured drawing laid out at a new width recomputes its height.
+    NodeDrawing | hTag == SizingFit && w /= intrinsicW -> drawingHeightAt env idx w hAx resolvedH
+    _ -> pure resolvedH
   setRect na idx x y w h
   if isContainerNode nt
     then do
@@ -962,7 +1069,7 @@ positionNodeA env@SolveEnv {seArena = na, seArrays = a} !depth !idx (Rect x y av
     else do
       kids <- readTree a idx TreeFirstChild
       when (kids >= 0) $ positionAdornments env depth idx nt (Rect x y w h)
-  when (hTag == SizingFit && isContainerNode nt && not (isScrollNode nt)) $
+  when (hTag == SizingFit && ratio <= 0 && isContainerNode nt && not (isScrollNode nt)) $
     adjustFitHeight na idx minH maxH x y w
 
 -- | A container's resolved padding and gap, and its direction.
@@ -980,11 +1087,11 @@ adjustFitHeight na idx minH maxH x y w = do
   when (fc >= 0) $ do
     pad <- getPadding na idx
     let step maxB ci = do
-          (_, subY, _, subH) <- getRect na ci
+          Rect _ subY _ subH <- getNodeRect na ci
           pure (max maxB (subY + subH))
     maxB <- foldFlowChildrenM na idx step y
     let fitH = clamp minH maxH (maxB + padB pad - y)
-    (_, _, _, curH) <- getRect na idx
+    Rect _ _ _ curH <- getNodeRect na idx
     -- Children sit at raw positions, so only float error separates their
     -- bottom from the measured height; the epsilon keeps that from growing
     -- every nested content-sized level.
@@ -1030,16 +1137,20 @@ positionScrollChildren env@SolveEnv {seArena = na} depth idx dir gap pad (Rect p
                 if wTag == SizingGrow
                   then max contentSize (innerW - gutterRow)
                   else contentSize
-          positionRowFromParent env depth idx gap (Rect cx cy rowMain (innerH - gutterRow))
+              box = Rect cx cy rowMain (innerH - gutterRow)
+          positionRowFromParent env depth idx gap box
+          positionLayered env depth idx False box
         DirColumn -> do
           let viewW = innerW - gutterCol
           positionColumn env depth idx gap False (Just contentSize) cx viewW (Rect cx cy viewW innerH)
+          positionLayered env depth idx False (Rect cx cy viewW innerH)
   fc <- getFirstChild na idx
   when (fc >= 0) $ do
     let step (FlowAcc count maxB maxR) ci = do
-          (subX, subY, subW, subH) <- getRect na ci
+          Rect subX subY subW subH <- getNodeRect na ci
           pure (FlowAcc (count + 1) (max maxB (subY + subH)) (max maxR (subX + subW)))
-    FlowAcc _ maxB maxR <- foldFlowChildrenM na idx step (FlowAcc 0 cy cx)
+    -- Pinned children count too, so the scroller reaches them.
+    FlowAcc _ maxB maxR <- foldPlacedChildrenM na idx step (FlowAcc 0 cy cx)
     -- Content size is measured from the content origin (px+padL, py+padT) so
     -- it compares against the padded viewport (innerW/innerH) on the same
     -- scale. Measuring from the padding-box origin double-counts the leading
@@ -1074,17 +1185,19 @@ hasPanelAncestor na p =
 
 -- | Left edge of column child @ci@ in a column of width @cw@ at @cx@. Grow and
 -- percent children already take the full width; alignment is for content
--- narrower than the column, not for shifting a full-width box past it.
+-- narrower than the column, not for shifting a full-width box past it. A
+-- child is aligned at its resolved width, so text measured wider than the
+-- column wraps to it instead of being pushed past the edge.
 {-# INLINE columnChildX #-}
 columnChildX :: NodeArena -> NodeIdx -> Float -> Float -> IO Float
 columnChildX na ci cx cw = do
-  wTag <- axTag <$> getWidthSizing na ci
-  if wTag == SizingGrow || wTag == SizingPercent
+  wAx <- getWidthSizing na ci
+  if axTag wAx == SizingGrow || axTag wAx == SizingPercent
     then pure cx
     else do
-      (_, _, iw, _) <- getRect na ci
+      Rect _ _ iw _ <- getNodeRect na ci
       ax <- getAlignX na ci
-      pure $! alignX ax cx cw iw
+      pure $! alignX ax cx cw (resolveSize wAx iw cw)
 
 -- | The size a node takes along an axis where @avail@ is offered, from its
 -- sizing, its measured size @intrinsic@ and its limits.
@@ -1110,6 +1223,7 @@ positionChildren env@SolveEnv {seArrays = a} depth idx dir gap pad (Rect px py p
   nt <- readTagEnum a idx TagNodeType
   gCols <- readTree a idx TreeGridCols
   minColW <- readStyle a idx StyleGridMinColW
+  flow <- readTagEnum a idx TagFlow
   let chrome = isChromeColumn nt dir
       cx = px + padL pad
       cy = py + padT pad
@@ -1117,14 +1231,19 @@ positionChildren env@SolveEnv {seArrays = a} depth idx dir gap pad (Rect px py p
       ch = ph - padT pad - padB pad
   if gCols > 0 || minColW > 0
     then positionGrid env depth idx gCols minColW gap (Rect cx cy cw ch)
-    else case dir of
-      DirRow -> positionRowFromParent env depth idx gap (Rect cx cy cw ch)
-      DirColumn -> positionColumn env depth idx gap chrome Nothing px pw (Rect cx cy cw ch)
+    else case flow of
+      -- Layered children are placed with the pinned ones, below.
+      Layered -> pure ()
+      Wrap -> positionWrap env depth idx dir gap (Rect cx cy cw ch)
+      Line -> case dir of
+        DirRow -> positionRowFromParent env depth idx gap (Rect cx cy cw ch)
+        DirColumn -> positionColumn env depth idx gap chrome Nothing px pw (Rect cx cy cw ch)
+  positionLayered env depth idx (flow == Layered) (Rect cx cy cw ch)
 
 childRowCrossSize :: NodeArena -> NodeIdx -> Float -> IO Float
 childRowCrossSize na ci availCross = do
   hAx@(AxisSizing hTag _ minH _) <- getHeightSizing na ci
-  (_, _, _, intrinsic) <- getRect na ci
+  Rect _ _ _ intrinsic <- getNodeRect na ci
   pure $
     if hTag == SizingFit || hTag == SizingShrink
       -- Fit/Shrink keep the measured box. Do not use the wrap-line
@@ -1139,7 +1258,7 @@ columnChildHeight na ci scratchH = do
   AxisSizing hTag _ minH maxH <- getHeightSizing na ci
   case hTag of
     SizingFixed -> do
-      (_, _, _, ih) <- getRect na ci
+      Rect _ _ _ ih <- getNodeRect na ci
       pure (clamp minH maxH ih)
     _ -> pure (clamp minH maxH scratchH)
 
@@ -1166,39 +1285,45 @@ positionRowFromParent ::
   Rect ->
   IO ()
 positionRowFromParent env@SolveEnv {seArena = na} depth parent gap (Rect cx cy cw ch) = do
-  n <- loadChildrenScratch (seArena env) parent (flowChildSize env False cw ch)
+  n <- loadChildrenScratch na parent (flowChildSize env False cw ch)
   distributeScratch na n cw (gap * fromIntegral (max 0 (n - 1))) True
-  withSnapshot na depth n fsOut $ \idxSnap outSnap -> do
-    -- The shared baseline sits as low as the deepest one among the children
-    -- aligned on it, so the child with the tallest ascent stays at the top.
-    let lowestBaseline acc i = do
-          ci <- readPrimArray idxSnap i
-          ay <- getAlignY na ci
-          if ay /= AlignBaseline
-            then pure acc
-            else max acc <$> (childRowCrossSize na ci ch >>= childBaseline env ci)
-    rowBase <- foldUpTo n lowestBaseline 0
-    -- The cursor stays in raw floats, never snapped: rounding it re-compounds
-    -- error every child (1.667 -> 2.0 -> ...) so a shrink row overruns its
-    -- fixed width. Each child's far edge is the next one's raw origin, so
-    -- quantizeResultsA, which snaps edges, puts both on the same pixel.
-    let goRow !i !x = when (i < n) $ do
+  withSnapshot na depth n fsOut $ \idxSnap outSnap ->
+    placeRowLine env depth idxSnap outSnap n gap cx cy ch
+
+-- | Place the first @k@ snapshot children left to right from @x0@, each as
+-- wide as its @outSnap@ share, in a line @cross@ tall at @top@.
+-- Baseline-aligned children share the lowest of their baselines, so the
+-- child with the tallest ascent touches the top.
+placeRowLine :: SolveEnv -> Int -> IOArr Int -> IOArr Float -> Int -> Float -> Float -> Float -> Float -> IO ()
+placeRowLine env@SolveEnv {seArena = na} !depth idxSnap outSnap !k !gap !x0 !top !cross = do
+  let lowestBaseline acc i = do
+        ci <- readPrimArray idxSnap i
+        ay <- getAlignY na ci
+        if ay /= AlignBaseline
+          then pure acc
+          else max acc <$> (childRowCrossSize na ci cross >>= childBaseline env ci)
+  base <- foldUpTo k lowestBaseline 0
+  -- The cursor stays in raw floats, never snapped: rounding it re-compounds
+  -- error every child (1.667 -> 2.0 -> ...) so a shrink row overruns its
+  -- fixed width. Each child's far edge is the next one's raw origin, so
+  -- quantizeResultsA, which snaps edges, puts both on the same pixel.
+  let go !i !x = when (i < k) $ do
           ci <- readPrimArray idxSnap i
           fw <- readPrimArray outSnap i
-          -- Fit/fixed children keep content height. Only Grow/Percent eat `ch`.
-          crossH <- childRowCrossSize na ci ch
+          -- Fit/fixed children keep content height. Only Grow/Percent eat `cross`.
+          crossH <- childRowCrossSize na ci cross
           ay <- getAlignY na ci
           fy <-
             if ay == AlignBaseline
-              then (\b -> cy + rowBase - b) <$> childBaseline env ci crossH
-              else pure (alignY ay cy ch crossH)
+              then (\b -> top + base - b) <$> childBaseline env ci crossH
+              else pure (alignY ay top cross crossH)
           positionNodeA env (depth + 1) ci (Rect x fy fw crossH)
           -- A grow child that its max width stopped short of its share
           -- hands the rest to the siblings after it instead of leaving a
           -- hole.
           placedW <- readGeom (seArrays env) ci GeomW
-          goRow (i + 1) (x + min fw placedW + gap)
-    goRow 0 cx
+          go (i + 1) (x + min fw placedW + gap)
+  go 0 x0
 
 positionGrid ::
   SolveEnv ->
@@ -1225,7 +1350,7 @@ positionGrid env@SolveEnv {seArena = na} depth parent gCols minColW gap (Rect cx
               ci <- readPrimArray idxArr (r * cols + j)
               wAx <- getWidthSizing na ci
               hAx <- getHeightSizing na ci
-              (_, _, iw, ih) <- getRect na ci
+              Rect _ _ iw ih <- getNodeRect na ci
               let childW = resolveSize wAx iw colW
                   childH = resolveSize hAx ih rowH
                   itemX = cx + fromIntegral j * (colW + gap)
@@ -1236,6 +1361,85 @@ positionGrid env@SolveEnv {seArena = na} depth parent gCols minColW gap (Rect cx
               positionNodeA env (depth + 1) ci (Rect fx fy colW rowH)
             goRows (r + 1) (curY + rowH + gap)
       goRows 0 cy
+
+-- | Lay out a wrapping container's flow children in lines along @dir@
+-- within the content box ('wrapLines'), separated by the line gap.
+-- Within a line, children share its spare or missing length as in a row or
+-- column ('distributeScratch'), and sit across it by alignment or fill it
+-- if they grow. A line with room left over shifts by the container's line
+-- alignment ('TagLineAlign'). A line is as thick as its thickest child
+-- ('wrapLineCross'), or whatever a placed child grew to.
+positionWrap :: SolveEnv -> Int -> NodeIdx -> DirTag -> Float -> Rect -> IO ()
+positionWrap env@SolveEnv {seArena = na, seArrays = a} depth parent dir gap (Rect cx cy cw ch) = do
+  lineGap <- readStyle a parent StyleLineGap
+  align <- lineAlignFraction <$> readTagEnum a parent TagLineAlign
+  let row = dir == DirRow
+      limit = if row then cw else ch
+      along (_, (w, h)) = if row then w else h
+      gaps k = gap * fromIntegral (k - 1)
+  kids <- mapM (\ci -> (ci,) <$> flowChildSize env False cw ch ci) =<< flowChildrenInOrder na parent
+  let placeLine !lineAt line = do
+        let k = length line
+        FlexScratch {fsIdx = idxArr, fsW = wArr, fsH = hArr, fsOut = outArr} <- ensureScratchCapacity na k
+        zipWithM_ (\j (ci, (w, h)) -> writePrimArray idxArr j ci >> writePrimArray wArr j w >> writePrimArray hArr j h) [0 ..] line
+        distributeScratch na k limit (gaps k) row
+        lineCross <- wrapLineCross env dir line
+        -- Shift the line by its alignment's share of the leftover room.
+        shift <-
+          if align <= 0
+            then pure 0
+            else (\used -> max 0 (limit - used) * align) <$> foldUpTo k (\t i -> (t +) <$> readPrimArray outArr i) (gaps k)
+        withSnapshot na depth k fsOut $ \idxSnap outSnap ->
+          if row
+            then placeRowLine env depth idxSnap outSnap k gap (cx + shift) lineAt lineCross
+            else placeColumnLine env depth idxSnap outSnap k gap False Nothing 0 0 (Rect lineAt (cy + shift) lineCross ch)
+        -- The next line starts past this one, or past any child that grew.
+        let reach m (ci, _) = do
+              Rect x y w h <- getNodeRect na ci
+              pure (max m (if row then y + h else x + w))
+        (+ lineGap) <$> foldM reach (lineAt + lineCross) line
+  foldM_ placeLine (if row then cy else cx) (wrapLines limit gap along kids)
+
+-- | Place the children of node @idx@ that draw over the rest, in its content
+-- box: every child of a layered container (@allLayered@), plus pinned
+-- children. Each sits where its alignment puts it; pinned ones then move by
+-- their offsets, so an offset from the end edge anchors to that edge.
+--
+-- A grow child fills the box (from a pin's offset to its unaligned edge), a
+-- percentage is of the box, and anything else keeps its measured size, capped
+-- at the box width for layers. A fit height is recomputed at the new width.
+positionLayered :: SolveEnv -> Int -> NodeIdx -> Bool -> Rect -> IO ()
+positionLayered env@SolveEnv {seArena = na, seArrays = a} depth idx allLayered (Rect cx cy cw ch) = do
+  pinnedBelow <- readTagEnum a idx TagPinnedBelow
+  when (allLayered || pinnedBelow) $ forChildNodes_ na idx $ \ci -> do
+    floating <- isFloatingNode <$> readTagEnum a ci TagNodeType
+    pinned <- readTagEnum a ci TagPinned
+    when ((allLayered || pinned) && not floating) $ do
+      -- Only a pinned node has an offset.
+      ox <- readStyle a ci StylePinX
+      oy <- readStyle a ci StylePinY
+      ax <- readTagEnum a ci TagAlignX
+      ay <- readTagEnum a ci TagAlignY
+      wAx <- readAxisSizing a ci True
+      hAx@(AxisSizing hTag _ _ _) <- readAxisSizing a ci False
+      iw <- readGeom a ci GeomW
+      ih <- readGeom a ci GeomH
+      let -- Room a grow child gets beside its offset: past it at the start,
+          -- short of it at the end, inset on both sides when centred.
+          room (AxisSizing tag val _ _) atStart atEnd box offset other = case tag of
+            SizingGrow
+              | atStart -> max 0 (box - offset)
+              | atEnd -> max 0 (box + offset)
+              | otherwise -> max 0 (box - 2 * abs offset)
+            SizingPercent -> box * val / 100
+            _ -> other
+          w = resolveSize wAx iw (room wAx (ax == AlignStart) (ax == AlignEnd) cw ox (if pinned then iw else cw))
+      fitH <-
+        if (hTag == SizingFit || hTag == SizingShrink) && w /= iw
+          then recomputeFitHeightAtWidth env ci w
+          else pure ih
+      let h = resolveSize hAx fitH (room hAx (ay /= AlignMiddle && ay /= AlignBottom) (ay == AlignBottom) ch oy fitH)
+      positionNodeA env (depth + 1) ci (Rect (alignX ax cx cw w + ox) (alignY ay cy ch h + oy) w h)
 
 -- | Place a column's flow children top to bottom in the box @cx cy cw ch@. A
 -- scroll column shares out its content height (@scrollContent@) and gives a
@@ -1253,33 +1457,43 @@ positionColumn ::
   Float ->
   Rect ->
   IO ()
-positionColumn env@SolveEnv {seArena = na} !depth !parent !gap chrome scrollContent !px !pw (Rect cx cy cw ch) = do
+positionColumn env@SolveEnv {seArena = na} !depth !parent !gap chrome scrollContent !px !pw box@(Rect _ _ cw ch) = do
   n <- loadChildrenScratch na parent (flowChildSize env True cw ch)
   -- The gaps come out of the height shared, as in a row, or grow children
   -- overflow the column by them.
   gapSum <-
     if chrome then columnGapSumScratch na n gap else pure (gap * fromIntegral (max 0 (n - 1)))
   distributeScratch na n (fromMaybe ch scrollContent) gapSum False
-  withSnapshot na depth n fsOut $ \idxSnap outSnap -> do
-    let go !i !y = when (i < n) $ do
-          ci <- readPrimArray idxSnap i
-          fh <- readPrimArray outSnap i
-          nt <- getNodeType na ci
-          (fx, nodeW) <-
-            if chrome && nt == NodeSeparator
-              then pure (px, pw)
-              else (,cw) <$> columnChildX na ci cx cw
-          childH <- case scrollContent of
-            Just _ -> pure (if isScrollNode nt then min fh (max 0 (ch - (y - cy))) else fh)
-            Nothing -> columnChildHeight na ci fh
-          positionNodeA env (depth + 1) ci (Rect fx y nodeW childH)
-          (_, _, _, placedH) <- getRect na ci
-          gapAfter <-
-            if i + 1 >= n
-              then pure 0
-              else readPrimArray idxSnap (i + 1) >>= \b -> pairColumnGap na chrome b gap
-          go (i + 1) (y + placedH + gapAfter)
-    go 0 cy
+  withSnapshot na depth n fsOut $ \idxSnap outSnap ->
+    placeColumnLine env depth idxSnap outSnap n gap chrome scrollContent px pw box
+
+-- | Place the first @k@ snapshot children top to bottom in the box, each as
+-- tall as its @outSnap@ share. Arguments after @gap@ are as for
+-- 'positionColumn'.
+placeColumnLine ::
+  SolveEnv -> Int -> IOArr Int -> IOArr Float -> Int -> Float ->
+  Bool -> Maybe Float -> Float -> Float -> Rect -> IO ()
+placeColumnLine env@SolveEnv {seArena = na} !depth idxSnap outSnap !k !gap chrome scrollContent !px !pw (Rect cx cy cw ch) =
+  go 0 cy
+  where
+    go !i !y = when (i < k) $ do
+      ci <- readPrimArray idxSnap i
+      fh <- readPrimArray outSnap i
+      nt <- getNodeType na ci
+      (fx, nodeW) <-
+        if chrome && nt == NodeSeparator
+          then pure (px, pw)
+          else (,cw) <$> columnChildX na ci cx cw
+      childH <- case scrollContent of
+        Just _ -> pure (if isScrollNode nt then min fh (max 0 (ch - (y - cy))) else fh)
+        Nothing -> columnChildHeight na ci fh
+      positionNodeA env (depth + 1) ci (Rect fx y nodeW childH)
+      Rect _ _ _ placedH <- getNodeRect na ci
+      gapAfter <-
+        if i + 1 >= k
+          then pure 0
+          else readPrimArray idxSnap (i + 1) >>= \b -> pairColumnGap na chrome b gap
+      go (i + 1) (y + placedH + gapAfter)
 
 -- | The gaps between the first @n@ scratch children of a window's or modal's
 -- column, where a separator takes none before it.
@@ -1322,12 +1536,38 @@ distributeScratch na n avail gapSum horizontal = do
           gf <- readPrimArray gfArr i
           when (gf > 0) $ writePrimArray out i (max 0 (free * gf / gfSum))
     else when (slack < -0.001) $ do
-      shrinkTotal <- foldUpTo n (\acc i -> (acc +) . shrinkFactor <$> sizingAt i) 0
-      when (shrinkTotal > 0) $ forUpTo_ n $ \i -> do
-        ax <- sizingAt i
-        main <- readPrimArray out i
-        let delta = negate slack * shrinkFactor ax / shrinkTotal
-        writePrimArray out i (max (axMin ax) (main - delta))
+      -- Shrink children by factor to make up the shortfall, none below its
+      -- minimum ('shrinkScratch'). 'fsGrow' holds the factors.
+      forUpTo_ n $ \i -> sizingAt i >>= writePrimArray gfArr i . shrinkFactor
+      shrinkScratch out gfArr (fmap axMin . sizingAt) n (negate slack)
+
+-- | Take @need@ from the first @n@ sizes in @mainArr@ in proportion to their
+-- factors in @factorArr@ (0 keeps a size). A child that would drop below its
+-- minimum (@minAt@) stops there with its factor cleared, and the others
+-- share what it could not give.
+shrinkScratch :: IOArr Float -> IOArr Float -> (Int -> IO Float) -> Int -> Float -> IO ()
+shrinkScratch mainArr factorArr minAt n !need = do
+  total <- foldUpTo n (\acc i -> (acc +) <$> readPrimArray factorArr i) 0
+  when (total > 0) $ do
+    let stop (!given, !stopped) i = do
+          f <- readPrimArray factorArr i
+          if f <= 0
+            then pure (given, stopped)
+            else do
+              lo <- minAt i
+              main <- readPrimArray mainArr i
+              if main - need * f / total < lo
+                then do
+                  writePrimArray mainArr i lo
+                  writePrimArray factorArr i 0
+                  pure (given + main - lo, stopped + 1)
+                else pure (given, stopped)
+    (given, stopped) <- foldUpTo n stop (0, 0 :: Int)
+    if stopped > 0
+      then shrinkScratch mainArr factorArr minAt n (need - given)
+      else forUpTo_ n $ \i -> do
+        f <- readPrimArray factorArr i
+        when (f > 0) $ readPrimArray mainArr i >>= \main -> writePrimArray mainArr i (main - need * f / total)
 
 {-# INLINE shrinkFactor #-}
 shrinkFactor :: AxisSizing -> Float
@@ -1436,7 +1676,8 @@ alignY AlignBaseline cy _ _ = cy
 -- * a widget with a label (a button, select, checkbox): the label's, which
 --   paint centers in the widget.
 -- * a container: the baseline its baseline-aligned children share if it is a
---   row that has some, and otherwise its first child's.
+--   row that has some, and otherwise its first child's, offset by where
+--   that child's alignment places it in a row or among layers.
 -- * anything else: its bottom edge.
 childBaseline :: SolveEnv -> NodeIdx -> Float -> IO Float
 childBaseline env@SolveEnv {seArena = na, seArrays = a} ci h = do
@@ -1456,7 +1697,7 @@ childBaseline env@SolveEnv {seArena = na, seArrays = a} ci h = do
               then pure newline
               else do
                 AxisSizing wTag _ _ maxW <- getWidthSizing na ci
-                (_, _, w, _) <- getRect na ci
+                Rect _ _ w _ <- getNodeRect na ci
                 effMaxW <- if maxW < 1e8 then pure maxW else findAncestorMaxW na ci
                 let cap = textWrapCap effMaxW wTag w
                 (tw, _) <- measureFontLine measurer raw
@@ -1474,7 +1715,7 @@ childBaseline env@SolveEnv {seArena = na, seArrays = a} ci h = do
             first : _ -> do
               (pad, _, dir) <- containerFlow a ci
               let innerH = max 0 (h - padT pad - padB pad)
-                  heightOf k = (\(_, _, _, kh) -> kh) <$> getRect na k
+                  heightOf k = rectH <$> getNodeRect na k
               aligned <-
                 if dir == DirRow then filterM (fmap (== AlignBaseline) . getAlignY na) kids else pure []
               grouped <- mapM (\k -> heightOf k >>= childBaseline env k) aligned
@@ -1482,7 +1723,8 @@ childBaseline env@SolveEnv {seArena = na, seArrays = a} ci h = do
                 _ : _ -> pure (maximum grouped)
                 [] -> do
                   fh <- heightOf first
-                  ay <- if dir == DirRow then getAlignY na first else pure AlignTop
+                  flow <- getFlow na ci
+                  ay <- if dir == DirRow || flow == Layered then getAlignY na first else pure AlignTop
                   (alignY ay 0 innerH fh +) <$> childBaseline env first fh
       | otherwise -> pure h
   where
@@ -1509,7 +1751,7 @@ placeFloatingNodes na ms winW winH lookupPos lookupSize lookupAnchor = do
   forClassNodes_ na FloatingNodes $ \idx -> do
     nt <- getNodeType na idx
     wid <- getWidgetId na idx
-    (_, _, iw, ih) <- getRect na idx
+    Rect _ _ iw ih <- getNodeRect na idx
     case nt of
       NodeModal -> do
         let w = min iw (max 0 (winW - 2 * windowMargin))
@@ -1567,21 +1809,19 @@ computePopupPosition ::
 computePopupPosition winW winH margin iw ih anchor placement offset =
   case anchor of
     AnchorPoint (V2 px py) ->
-      let x0 = case placement of
-            PlacementLeft -> px - iw - offset
-            PlacementRight -> px + offset
-            _ -> px
-          y0 = case placement of
-            PlacementAbove -> py - ih - offset
-            PlacementBelow -> py + offset
-            _ -> py
-          x = if x0 + iw > winW - margin && px - iw - margin >= 0
-                then px - iw - offset
-                else clamp margin (winW - iw - margin) x0
-          y = if y0 + ih > winH - margin && py - ih - margin >= 0
-                then py - ih - offset
-                else clampY y0
-       in (x, y)
+      -- On each axis the popup goes before, after or at the point, flipping
+      -- to the other side if it would overflow and fits there.
+      let onAxis p size lim isBefore isAfter =
+            let p0
+                  | isBefore = p - size - offset
+                  | isAfter = p + offset
+                  | otherwise = p
+             in if p0 + size > lim - margin && p - size - margin >= 0
+                  then p - size - offset
+                  else clamp margin (lim - size - margin) p0
+       in ( onAxis px iw winW (placement == PlacementLeft) (placement == PlacementRight)
+          , onAxis py ih winH (placement == PlacementAbove) (placement == PlacementBelow)
+          )
     AnchorRect (Rect rx ry rw rh) ->
       case placement of
         PlacementBelow -> (clampPopupX margin winW iw rx, clampY (after ry rh winH ih))

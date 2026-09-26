@@ -8,6 +8,7 @@ module NanoUI.Internal.Widgets.TextInput
   , editorTextState
   , saveTextEditor
   , editTextInput
+  , fieldTextCommands
   , textInputMode
   , textInputFieldEditor
     -- * Text fields
@@ -35,6 +36,7 @@ where
 
 import Control.Monad (foldM, void, when)
 import Data.Bits ((.|.))
+import Data.Char (isPrint)
 import Data.Maybe (fromMaybe, isNothing)
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -105,9 +107,22 @@ saveTextEditor key ed =
 -- | Run this frame's commands on a field, or 'Nothing' when it had none.
 editTextInput :: Context -> EditorMode -> Input -> WidgetStore -> Int -> TextInputState -> IO (Maybe Editor)
 editTextInput ctx mode inp store key s0 =
-  case inputTextCommands mode inp of
+  fieldTextCommands ctx mode inp >>= \case
     [] -> pure Nothing
     cmds -> Just <$> foldM (flip (runCommandIO ctx mode)) (textInputEditor store key s0) cmds
+
+-- | This frame's edit commands for the focused field ('inputTextCommands').
+-- Under 'FocusComposing' the typed text is the IME commit and is inserted
+-- regardless of modifiers, so a chord that ends a composition keeps it.
+fieldTextCommands :: Context -> EditorMode -> Input -> IO [TextCommand]
+fieldTextCommands ctx mode inp = do
+  kind <- getsInteraction ctx isFocusKind
+  pure $
+    if kind == FocusComposing
+      then
+        [InsertText (T.singleton c) | c <- T.unpack (inputChars inp), isPrint c]
+          ++ inputTextCommands mode inp {inputChars = T.empty}
+      else inputTextCommands mode inp
 
 -- | The editor mode of a single-line field with these style flags.
 textInputMode :: Int -> EditorMode
@@ -215,6 +230,10 @@ editTextField wid mode initial unfocusedText = do
         . deleteSlot fieldInt pulseKey
         . insertDyn modeKey mode
   isFocus <- keyboardFocused wid
+  -- Password fields request 'InputSecure' so the IME neither shows nor
+  -- learns their text.
+  when (isFocus && modeEditable mode) $
+    uiIO (requestInputMethod ctx wid Nothing (if modeCopyable mode then InputNormal else InputSecure))
   mEdited <- if isFocus then uiIO (editTextInput ctx mode inp store key s0) else pure Nothing
   let s1 = case mEdited of
         Just ed -> editorTextState ed
@@ -249,7 +268,7 @@ buildTextInput styleIdx layout placeholder value mDebounceMs = do
   (oldText, newText, isFocus, pulse) <- editTextField wid mode value Nothing
   uiIO $ recordSlot fieldText ctx key newText
   inp <- askInput
-  let submitted = isFocus && KeyEnter `elem` inputKeys inp
+  let submitted = isFocus && pressedOnceIn KeyEnter inp
       edited = pulse || newText /= oldText
   changed <- case mDebounceMs of
     Nothing -> pure edited

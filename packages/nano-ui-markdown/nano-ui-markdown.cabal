@@ -1,0 +1,111 @@
+cabal-version:      3.4
+name:               nano-ui-markdown
+version:            0.1.0.0
+synopsis:           Markdown rendering for nano-ui, parsed incrementally
+description:
+    A Markdown widget for nano-ui, drawn with its rich text and layout, and
+    documents parsed by the commonmark library that text can be appended to
+    without parsing the whole document again, for chat messages that stream
+    in.
+license:            MIT
+license-file:       LICENSE
+author:             goolord
+maintainer:         zacharyachurchill@gmail.com
+homepage:           https://github.com/goolord/nano-ui
+bug-reports:        https://github.com/goolord/nano-ui/issues
+category:           Graphics, Text
+build-type:         Simple
+extra-doc-files:
+    CHANGELOG.md
+    README.md
+
+source-repository head
+    type:     git
+    location: https://github.com/goolord/nano-ui.git
+    subdir:   packages/nano-ui-markdown
+
+common extensions
+    default-language: GHC2024
+    default-extensions:
+        OverloadedStrings
+
+common warnings
+  ghc-options:
+    -Wall
+    -Wextra
+    -Wcompat
+    -Widentities
+    -Wincomplete-record-updates
+    -Wincomplete-uni-patterns
+    -Wmissing-export-lists
+    -Wmissing-home-modules
+    -Wpartial-fields
+    -Wredundant-constraints
+    -Wunused-packages
+
+library
+    import:           extensions
+    import:           warnings
+    exposed-modules:
+        NanoUI.Markdown
+        NanoUI.Markdown.Document
+        NanoUI.Markdown.Syntax
+        NanoUI.Markdown.Widget
+    other-modules:
+        NanoUI.Markdown.Internal.Parse
+    build-depends:
+        base >=4.20 && <4.23,
+        commonmark ^>=0.3,
+        commonmark-extensions ^>=0.2.7,
+        containers >=0.7 && <0.9,
+        deepseq >=1.4 && <1.7,
+        effectful-core ^>=2.6,
+        hashable ^>=1.5,
+        nano-ui ^>=0.1,
+        parsec ^>=3.1,
+        text ^>=2.1
+    hs-source-dirs:   lib
+
+flag sdl
+    description: Build the SDL3 window example
+    manual: True
+    default: True
+
+executable nano-ui-markdown-example
+    import:           extensions
+    import:           warnings
+    main-is:          Main.hs
+    other-modules:    ChatDemo
+    ghc-options:      -rtsopts -threaded "-with-rtsopts=-N1 -A64m -T -I0"
+    build-depends:
+        base >=4.20 && <4.23,
+        nano-ui ^>=0.1,
+        nano-ui-markdown,
+        text ^>=2.1
+    if flag(sdl)
+        build-depends:
+            nano-ui-sdl ^>=0.1
+    if os(windows)
+        ghc-options: -optl-mconsole
+    if !flag(sdl)
+        buildable: False
+    hs-source-dirs:   examples
+
+test-suite nano-ui-markdown-test
+    import:           extensions
+    import:           warnings
+    type:             exitcode-stdio-1.0
+    main-is:          Main.hs
+    other-modules:
+        Incremental
+        Parse
+        Render
+    ghc-options:      -rtsopts -threaded "-with-rtsopts=-M512m -N1"
+    build-depends:
+        base >=4.20 && <4.23,
+        hspec ^>=2.11,
+        QuickCheck >=2.15 && <2.19,
+        nano-ui,
+        nano-ui-markdown,
+        text ^>=2.1
+    hs-source-dirs:   test

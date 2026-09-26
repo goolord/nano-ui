@@ -20,11 +20,10 @@
   so a drag region also snaps the window to the sides of the screen,
   maximizes it on a double click, and hangs the window menu off the right
   button.
-- `setWindowTitle`, `setWindowSize` (the size of the view, whatever frame
-  the desktop keeps around it), `minimizeWindow`, `maximizeWindow`,
-  `restoreWindow`, `toggleMaximized`, `windowMaximized` and `windowResizable`,
-  with `setWindowTitleUi`, `minimizeWindowUi`, `toggleMaximizedUi`,
-  `windowMaximizedUi` and `setWindowChromeUi` for calling them from a view.
+- `windowResizable`, and `setWindowChromeUi` for handing over chrome regions
+  from a view. The title, size, mode, maximizing and minimizing are the
+  core's, for any backend (`setWindowTitleUi`, `resizeWindowUi`,
+  `toggleMaximizedUi` and the rest); `windowCaption`'s buttons use them.
 - `WindowDecorations`: `DecorationsFull`, `DecorationsFrame` or
   `DecorationsNone`, how much of the desktop's title bar and frame a window
   keeps. `sdlWindowDecorations` picks it when the window opens and
@@ -36,7 +35,7 @@
   frame back, the sizing frame's width in on every side and no caption, so
   the frame stays where it always is -- invisible, outside the window you can
   see, what the desktop resizes the window by, and what carries its shadow.
-  The window is made that much larger, so `sdlWindowSize` is still the size
+  The window is made that much larger, so `wsSize` is still the size
   of the view. Two things go with it. The desktop's own border line is taken
   off, since with no caption that line falls on the view's first row, over
   the border the view draws there. And the desktop's rounding is turned off:
@@ -65,6 +64,44 @@
   `RenderDriverSdlDefault` leaves SDL's own order alone, and
   `RenderDriverNamed` asks for one by name. An `SDL_RENDER_DRIVER` in the
   environment still wins over all three.
+- The new cursor shapes, as SDL's system cursors or the nearest it has; help,
+  zoom, copy, alias and context-menu show the arrow.
+- `sdlExplainLayout` opens a window with the layout overlay on.
+- Every key comes in as a `Key`, with its release and held state: F1 to F24,
+  paging, Insert, Space, PrintScreen, Pause, the lock and menu keys, the
+  keypad, and a typing key as the `KeyChar` it types in the current layout.
+  The GUI key is `modSuper`. Each auto-repeat of a held key is a press,
+  which `inputKeysNew` leaves out, and the window losing the keyboard lets
+  go of the keys held.
+- Input methods compose inside the text fields, with the candidate window by
+  the caret. Text input runs only while a widget takes text (a focused text
+  field, or a widget that calls `useInputMethod`), with SDL's text input type
+  for what it takes, so a password's input method hides it and a number
+  gets a numeric on-screen keyboard; with nothing taking text it stops, so
+  no composition builds up unseen and no on-screen keyboard stays up. A
+  widget of your own that reads typed text, such as a terminal, asks with
+  `useInputMethod` and draws the composition it answers;
+  `SDL_IME_IMPLEMENTED_UI=none` in the environment lets the input method draw
+  it again.
+- The middle mouse button, the side buttons as back and forward, and any
+  further button as a `MouseOther` of its SDL number. The pointer leaving
+  the window (`EvMouseLeave`) moves it off every widget, so nothing stays
+  hovered. `UiCursorHidden` hides the pointer.
+- The desktop's light or dark setting reaches `systemAppearance`, and a change
+  arrives as `EvSystemThemeChanged`. `sdlAppThemeFor` takes the theme for
+  each setting, such as `lightDark light dark`, and follows it as it
+  changes.
+- The core's window, in full: the window opens from `sdlWindowSettings`, a
+  core `WindowSettings`, which adds a position, size limits, an icon, a
+  mode, transparency, opacity and whether a close request ends the session.
+  Views change it with the core's setters and commands (`setWindowTitleUi`,
+  `setWindowModeUi`, `moveWindowUi`, `resizeWindowUi` and the rest), read it
+  with `askWindow`, and end the session with `quitUi`. A transparent window
+  (`wsTransparent`) shows the desktop where the theme's window colour is
+  translucent.
+- `captureScreenshot`, the last presented frame as a `Screenshot`, and
+  answers to the core's `requestScreenshot`.
+- The jobs a view's `useTask` hooks started end with the session.
 
 ### Changed
 
@@ -103,6 +140,13 @@
 
 - `sdlWindowBorderless` is replaced by `sdlWindowDecorations`:
   `DecorationsFull` for `False`, and `DecorationsNone` for what `True` did.
+- `sdlWindowTitle`, `sdlWindowSize`, `sdlWindowResizable`,
+  `sdlWindowFullscreen` and `sdlWindowHidden` are replaced by
+  `sdlWindowSettings`, the core `WindowSettings` both backends open their
+  windows from: `sdlWindowSettings = defaultWindowSettings {wsTitle = t,
+  wsSize = s, wsResizable = r}`, and `wsMode = Fullscreen` or `wsMode =
+  Hidden` for the two flags. `sdlWindowDecorations` and
+  `sdlWindowAlwaysOnTop` stay, as the SDL window's own.
 
 - Windows windows render through OpenGL rather than D3D11. D3D11 presents
   through a flip-model swap chain, so a present blocks for about a refresh
@@ -135,6 +179,8 @@
 - The retained framebuffer is allocated in 256 pixel blocks and reused while
   the window fits, so a resize drag no longer creates a new render target
   for every pixel the border moves.
+- A key held with Ctrl is a key chord (`KeyChar` with `modCtrl`) instead of
+  its symbol typed into `inputChars`.
 
 ### Fixed
 
@@ -162,6 +208,8 @@
 - Wakes are coalesced: while one is queued, another costs an atomic swap and
   no `SDL_PushEvent`. The core wakes the loop on every `markDirty`, most of
   them made by the loop's own thread in the middle of a frame.
+- The grab hands show the move arrows. The backend asked SDL 3.2 for cursors
+  it does not have, which showed the arrow on X11.
 
 ### Removed
 

@@ -33,8 +33,7 @@ runCollectionApiTest ctx failed = do
   assertEq failed 0 emptyRadio
   assertEq failed "Beta" combo
   -- A failed image must not prevent later registrations in traversal order.
-  ok <- registerImages ctx (Seq.fromList [(ImageId 0, 1, 1, BS.replicate 4 255), (ImageId 42, 1, 1, BS.replicate 4 255)])
-  assertEq failed False ok
+  assertEq failed False =<< registerImages ctx (Seq.fromList [(ImageId 0, 1, 1, BS.replicate 4 255), (ImageId 42, 1, 1, BS.replicate 4 255)])
   registered <- lookupImageUv ctx (ImageId 42)
   assertEq failed True (case registered of Just _ -> True; Nothing -> False)
 
@@ -56,20 +55,13 @@ runControlledStateTest ctx failed = do
   assertEq failed expectedId (respId check)
   store <- getStore ctx
   assertEq failed (Just 0) (IM.lookup (intKey (respId check)) (storeInt store))
-  assertEq
-    failed
-    (Just "replacement")
-    (IM.lookup (intKey (respId field)) (storeText store))
+  assertEq failed (Just "replacement") (IM.lookup (intKey (respId field)) (storeText store))
   assertEq failed (Just 75) (IM.lookup (intKey (respId range)) (storeFloat store))
   assertEq failed [] =<< readIORef callbacks
 
   -- Keyboard activation notifies the owner, which may decline the change.
   writeIORef (ctxFocusId ctx) (respId check)
-  _ <-
-    runFrame
-      ctx
-      (keyInp KeyEnter inp)
-      (ui False "replacement" 75)
+  _ <- runFrame ctx (keyInp KeyEnter inp) (ui False "replacement" 75)
   assertEq failed [True] =<< readIORef callbacks
   _ <- runFrame ctx inp (ui False "replacement" 75)
   settled <- getStore ctx
@@ -94,7 +86,7 @@ runControlledInputsTest ctx failed = do
       (inp, (True, "two"), (True, "two"))
     , -- Tab focuses the checkbox; Space toggles it and the caller keeps it.
       (tabInp inp, (True, "two"), (True, "two"))
-    , (inp {inputChars = " "}, (True, "two"), (False, "two"))
+    , ((keyInp KeySpace inp) {inputChars = " "}, (True, "two"), (False, "two"))
     , (tabInp inp, (False, "two"), (False, "two"))
     , -- Tab moved focus to the field. A kept edit stays.
       (inp {inputChars = "x"}, (False, "two"), (False, "twox"))

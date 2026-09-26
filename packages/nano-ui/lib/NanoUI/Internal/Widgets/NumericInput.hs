@@ -18,8 +18,8 @@ import Data.Text qualified as T
 import Data.Text.Read qualified as TR
 import Effectful (Eff, type (:>))
 import GHC.Clock (getMonotonicTime)
-import NanoUI.Internal.Context (getStore, intKey, registerFocusable, requestWakeAt, modifyStore)
-import NanoUI.Internal.Input (Key (..), inputKeys, inputKeysElem, inputModifiers, inputMouseDown, inputMousePos, inputMousePressed, modShift)
+import NanoUI.Internal.Context (getStore, intKey, registerFocusable, requestInputMethod, requestWakeAt, modifyStore)
+import NanoUI.Internal.Input (InputPurpose (..), Key (..), MouseButton (..), Pressable (..), inputModifiers, inputMousePos, modShift)
 import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Monad (Ui, askInput, freshWidget, uiIO)
 import NanoUI.Internal.Store (Slot (..), deleteSlot, fieldDouble, fieldInt, fieldText, findSlot, insertSlot, lookupSlot, slotKey)
@@ -94,6 +94,8 @@ numericInputConfigured' cfg value = do
   uiIO $ registerFocusable ctx wid
   store <- uiIO (getStore ctx)
   isFocus <- keyboardFocused wid
+  -- Hex input needs letters, so it gets the normal text keyboard.
+  when isFocus $ uiIO (requestInputMethod ctx wid Nothing (if nicHex cfg then InputNormal else InputNumeric))
   let
     key = intKey wid
     given = clampNumber cfg value
@@ -115,22 +117,21 @@ numericInputConfigured' cfg value = do
     Rect rx ry rw rh = respRect resp
     (upRect, downRect) = numericStepperRects rx ry rw rh
     mouse = inputMousePos inp
-    keys = inputKeys inp
     over r dir = if respHovered resp && rectContains r mouse then dir else 0
     pressDir
-      | inputMousePressed inp = over upRect 1 + over downRect (-1)
+      | pressedIn MouseLeft inp = over upRect 1 + over downRect (-1)
       | otherwise = 0 :: Int
     heldK = slotKey SlotNumericHeld key
     repeatK = slotKey SlotNumericRepeat key
     held0 = findSlot fieldInt 0 heldK store
     holding =
       held0 /= 0
-        && inputMouseDown inp
+        && heldIn MouseLeft inp
         && over (if held0 > 0 then upRect else downRect) held0 /= 0
     keyDir
       | not isFocus = 0
-      | inputKeysElem KeyUp keys = 1
-      | inputKeysElem KeyDown keys = -1
+      | pressedIn KeyUp inp = 1
+      | pressedIn KeyDown inp = -1
       | otherwise = 0
   now <- if pressDir /= 0 || holding then uiIO getMonotonicTime else pure 0
   let
@@ -154,7 +155,7 @@ numericInputConfigured' cfg value = do
     final
       | dir /= 0 = clampNumber cfg (roundNumber cfg (current + fromIntegral dir * scale * nicStep cfg))
       | otherwise = current
-    submitted = isFocus && inputKeysElem KeyEnter keys
+    submitted = isFocus && pressedOnceIn KeyEnter inp
     -- A step or Enter rewrites the text as the value, caret at its end.
     s2
       | dir /= 0 || submitted =

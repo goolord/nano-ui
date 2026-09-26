@@ -16,6 +16,8 @@ module NanoUI.Internal.Context.Core
   , clearDirty
   , isDirty
   , setWakeLoop
+  , wakeFromThread
+  , takeThreadWake
   , requestWakeAt
   , requestWakeAfter
   , getWakeAt
@@ -29,6 +31,7 @@ module NanoUI.Internal.Context.Core
   , damagePeers
   , damageFull
   , getPrevRect
+  , pointerCovered
   , getPrevClipRect
   -- Store
   , getStore
@@ -55,9 +58,10 @@ where
 
 import Control.Monad (forM_, unless, when)
 import Data.Bits (shiftL, shiftR, (.&.), (.|.))
-import Data.IORef (modifyIORef', readIORef, writeIORef)
+import Data.IORef (atomicWriteIORef, modifyIORef', readIORef, writeIORef)
 import Data.Primitive.SmallArray (SmallMutableArray, copySmallMutableArray, newSmallArray, readSmallArray, getSizeofSmallMutableArray, writeSmallArray)
 import Data.IntMap.Strict qualified as IM
+import Data.IntSet qualified as IS
 import GHC.Clock (getMonotonicTime)
 import GHC.Exts (RealWorld)
 
@@ -204,11 +208,30 @@ isDirty ctx = getsDamage ctx dsDirty
 setWakeLoop :: Context -> IO () -> IO ()
 setWakeLoop ctx wake = writeIORef (ctxWakeLoop ctx) (Just wake)
 
+-- | Wake the loop from any thread after changing state the view reads.
+-- Publish the change first. The next frame repaints the whole window
+-- ('takeThreadWake'), since the affected widgets are unknown.
+wakeFromThread :: Context -> IO ()
+wakeFromThread ctx = do
+  atomicWriteIORef (ctxWoken ctx) True
+  readIORef (ctxWakeLoop ctx) >>= sequence_
+
+-- | At frame start, before the view runs: queue a full repaint if
+-- 'wakeFromThread' was called since the last frame. Calls made while the
+-- view runs are left for the frame they wake.
+{-# INLINE takeThreadWake #-}
+takeThreadWake :: Context -> IO ()
+takeThreadWake ctx = do
+  woken <- readIORef (ctxWoken ctx)
+  when woken $ do
+    atomicWriteIORef (ctxWoken ctx) False
+    damageFull ctx
+
 -- | Ask for a frame at a monotonic time ('getMonotonicTime') even if no input
 -- arrives. The earliest request wins. Each frame starts with none pending, so
 -- a widget that still needs a later frame asks again as it is built; one that
 -- is gone stops asking, and the loop sleeps. Call it from the UI thread: a
--- background thread wakes the loop through 'ctxWakeLoop' instead.
+-- background thread uses 'wakeFromThread' instead.
 requestWakeAt :: Context -> Double -> IO ()
 requestWakeAt ctx t = do
   cur <- readIORef (ctxWakeAt ctx)
@@ -247,12 +270,21 @@ takeDamagePieces ctx = getsDamage ctx dsDamagePieces
 -- applied. 'Nothing' means the damage pass recorded no bounds for this id.
 {-# INLINE getPrevRect #-}
 getPrevRect :: Context -> WidgetId -> IO (Maybe Rect)
-getPrevRect ctx wid = getsDamage ctx (IM.lookup (intKey wid) . dsPrevRects)
+getPrevRect ctx wid = getsDamage ctx (IM.lookup (intKey wid) . pfRects . dsPrev)
+
+-- | Whether a pointer-taking node drawn over @wid@ (by layers or a pin) has
+-- the pointer instead, in the frame the user saw ('ctxPointerReach'). Only
+-- meaningful for a widget under the pointer. Widgets that hit-test presses
+-- against their own rect, rather than via
+-- 'NanoUI.Internal.Widgets.Node.Response', must check this too.
+{-# INLINE pointerCovered #-}
+pointerCovered :: Context -> WidgetId -> IO Bool
+pointerCovered ctx wid = maybe False (not . IS.member (intKey wid)) <$> readIORef (ctxPointerReach ctx)
 
 -- | Last recorded widget clip in logical window coordinates, or 'Nothing'.
 {-# INLINE getPrevClipRect #-}
 getPrevClipRect :: Context -> WidgetId -> IO (Maybe Rect)
-getPrevClipRect ctx wid = getsDamage ctx (IM.lookup (intKey wid) . dsPrevClips)
+getPrevClipRect ctx wid = getsDamage ctx (IM.lookup (intKey wid) . pfClips . dsPrev)
 
 -- =============================================================================
 -- Store

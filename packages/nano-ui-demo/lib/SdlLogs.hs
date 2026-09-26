@@ -11,6 +11,7 @@ module SdlLogs
   ) where
 
 import Control.Monad (foldM, forM, forM_, void, when)
+import Data.Foldable (for_)
 import Control.Monad.IO.Class (liftIO)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Text (Text)
@@ -27,6 +28,7 @@ import NanoUI.Internal.Context
   , takeTextEditLastAction
   )
 import NanoUI.Internal.Monad (askContext)
+import NanoUI.Shortcut
 import Text.Printf (printf)
 
 data LogLevel
@@ -97,15 +99,16 @@ generateLogEntry idx =
       minu = (idx `div` 8) `mod` 60
       hr = 10 + (idx `div` 480) `mod` 12
       millis = (idx * 137) `mod` 1000
-      tag :: Text
-      tag = case lvl of
-        LevelDebug -> "DEBUG"
-        LevelInfo -> "INFO"
-        LevelWarn -> "WARN"
-        LevelError -> "ERROR"
    in LogEntry idx lvl $
         T.pack $
-          printf "#%05d  %02d:%02d:%02d.%03d  [%-5s]  %-14s  %s (event #%d)" idx hr minu sec millis tag src msg idx
+          printf "#%05d  %02d:%02d:%02d.%03d  [%-5s]  %-14s  %s (event #%d)" idx hr minu sec millis (levelTag lvl) src msg idx
+
+levelTag :: LogLevel -> Text
+levelTag = \case
+  LevelDebug -> "DEBUG"
+  LevelInfo -> "INFO"
+  LevelWarn -> "WARN"
+  LevelError -> "ERROR"
 
 newAppState :: Int -> Bool -> IO AppState
 newAppState initialCount streaming = do
@@ -178,8 +181,20 @@ levelColor :: LogLevel -> Color
 levelColor = \case
   LevelDebug -> colorRGBA 180 142 173 255
   LevelInfo -> colorRGBA 136 192 208 255
-  LevelWarn -> colorRGBA 235 203 139 255
+  LevelWarn -> amber
   LevelError -> colorRGBA 191 97 106 255
+
+amber, green :: Color
+amber = colorRGBA 235 203 139 255
+green = colorRGBA 163 190 140 255
+
+-- | A bold monospace status label.
+status :: Color -> Text -> NanoUI ()
+status c = labelWith (fontMono . fontBold . fontColor c . tight)
+
+-- | A panel with custom background and border colours.
+tintedPanel :: Color -> Color -> (Layout -> Layout) -> NanoUI a -> NanoUI a
+tintedPanel bg border f = styled (panelStyle (background bg . borderColor border)) . panelWith f
 
 logRowH :: Float
 logRowH = 24.0
@@ -220,25 +235,21 @@ logsApp stateRef = do
 
   (allSelected, setAllSelected) <- withKey ("log-all-selected" :: Text) (useFlag False)
 
-  mMenuAction <- liftIO $ takeTextEditLastAction ctx
-  case mMenuAction of
-    Just (_, SelectAll) -> setAllSelected True
-    _ -> pure ()
+  -- Ctrl+A / Ctrl+C, or Select All / Copy from a row's context menu. Uses
+  -- 'shortcutIn' because 'shortcut' would yield to a focused row.
+  menuAction <- fmap snd <$> liftIO (takeTextEditLastAction ctx)
+  let chosen c cmd = menuAction == Just cmd || shortcutIn (ctrl <> key c) inp
 
-  let mods = inputModifiers inp
-      chars = inputChars inp
-      aPressed = modCtrl mods && T.any (`T.elem` "aA\x01") chars
-      cPressed = modCtrl mods && T.any (`T.elem` "cC\ETX") chars
+  when (chosen 'a' SelectAll) $ setAllSelected True
 
-  when aPressed $ setAllSelected True
-
-  when (allSelected && inputKeysElem KeyEscape (inputKeys inp)) $
+  escape <- keyPressed KeyEscape
+  when (allSelected && escape) $
     setAllSelected False
 
   -- A left click on a selectable row clears the Select-All highlight. The
   -- scrollbar is chrome, not an interactive widget, so `ctxActiveId` stays 0
   -- for gutter grabs and only an actual row press clears.
-  when (allSelected && (inputMousePressed inp || inputMouseDown inp || inputMouseReleased inp)) $ do
+  when (allSelected && (pressedIn MouseLeft inp || heldIn MouseLeft inp || releasedIn MouseLeft inp)) $ do
     active <- liftIO $ readIORef (ctxActiveId ctx)
     mRect <- liftIO $ maybe (pure Nothing) (getPrevRect ctx) (asScrollerWid st0)
     when (active /= WidgetId 0 && maybe False (`rectContains` inputMousePos inp) mRect) $
@@ -259,9 +270,7 @@ logsApp stateRef = do
     let copyAll = liftIO $ do
           rows <- forM [0 .. asShownCount st - 1] (fmap leLine . shownEntry st)
           void (ctxClipboardSet ctx (T.unlines rows))
-    case mMenuAction of
-      Just (_, Copy) | allSelected -> copyAll
-      _ -> when (allSelected && cPressed) copyAll
+    when (allSelected && chosen 'c' Copy) copyAll
 
     separator
     renderStatusBar (asCount st) (asShownCount st) allSelected
@@ -274,26 +283,23 @@ renderHeaderToolbar ::
 renderHeaderToolbar mutateState st (allSelected, setAllSelected) = do
   let totalCount = asCount st
       filteredCount = asShownCount st
-      filterPill lvl lbl = do
-        clicked <- buttonWith (if asFilterLevel st == lvl then fontBold else id) lbl
-        when clicked $
+      filterPill lvl lbl =
+        whenM (buttonWith (if asFilterLevel st == lvl then fontBold else id) lbl) $
           mutateState (setFilter lvl)
-  styled (panelStyle (background (colorRGBA 24 29 38 255) . borderColor (colorRGBA 45 52 64 255))) $ panelWith fillW $ do
+  tintedPanel (colorRGBA 24 29 38 255) (colorRGBA 45 52 64 255) fillW $ do
     columnWith (tight . fillW . padXY 12 10 . gap 8) $ do
       rowWith (tight . fillW . alignMid . gap 12) $ do
         labelWith (fontBold . fontSize 16 . tight) "Log Viewer"
         labelWith (fontMono . fontMuted . tight) ("[" <> T.pack (show totalCount) <> " total]")
 
         when (filteredCount /= totalCount) $
-          labelWith (fontMono . fontColor (colorRGBA 235 203 139 255) . tight)
-            ("[" <> T.pack (show filteredCount) <> " filtered]")
+          labelWith (fontMono . fontColor amber . tight) ("[" <> T.pack (show filteredCount) <> " filtered]")
 
         if asStreaming st
-          then labelWith (fontMono . fontBold . fontColor (colorRGBA 163 190 140 255) . tight) "[● STREAMING]"
+          then status green "[● STREAMING]"
           else labelWith (fontMono . fontMuted . tight) "[⏸ PAUSED]"
 
-        when allSelected $
-          labelWith (fontMono . fontBold . fontColor (colorRGBA 235 203 139 255) . tight) "[● ALL SELECTED]"
+        when allSelected $ status amber "[● ALL SELECTED]"
 
       rowWith (tight . fillW . alignMid . gap 8) $ do
         whenM (button (if asStreaming st then "Pause Stream" else "Start Stream")) $
@@ -312,10 +318,7 @@ renderHeaderToolbar mutateState st (allSelected, setAllSelected) = do
 
         labelWith (fontMuted . tight) "Filter:"
         filterPill Nothing "ALL"
-        filterPill (Just LevelInfo) "INFO"
-        filterPill (Just LevelWarn) "WARN"
-        filterPill (Just LevelError) "ERROR"
-        filterPill (Just LevelDebug) "DEBUG"
+        for_ [LevelInfo, LevelWarn, LevelError, LevelDebug] $ \lvl -> filterPill (Just lvl) (levelTag lvl)
 
 renderLogScroller :: IORef AppState -> Bool -> AppState -> NanoUI ()
 renderLogScroller stateRef allSelected st = do
@@ -360,9 +363,9 @@ renderLogScroller stateRef allSelected st = do
 
   rowWith (tight . fillW . padXY 12 4 . alignMid . gap 8) $ do
     if isSticky
-      then labelWith (fontMono . fontBold . fontColor (colorRGBA 163 190 140 255) . tight) "● PINNED"
+      then status green "● PINNED"
       else do
-        labelWith (fontMono . fontBold . fontColor (colorRGBA 235 203 139 255) . tight) "⏸ UNPINNED (reading history)"
+        status amber "⏸ UNPINNED (reading history)"
         whenM (buttonWith (fontColor (colorRGBA 136 192 208 255) . fontBold) "Jump to Bottom") $
           setReqJump True
 
@@ -393,19 +396,17 @@ renderLogRow isAllSel entry = do
       rowLay = tight . fixedH logRowH . padXY 8 2 . alignMid
       rowBody = selectableTextWith (fontColor col . fontMono . tight) (leLine entry)
   if isAllSel
-    then styled (panelStyle (background (colorRGBA 45 65 95 255) . borderColor (colorRGBA 70 100 145 255))) (panelWith rowLay rowBody)
+    then tintedPanel (colorRGBA 45 65 95 255) (colorRGBA 70 100 145 255) rowLay rowBody
     else rowWith rowLay rowBody
 
 renderStatusBar :: Int -> Int -> Bool -> NanoUI ()
 renderStatusBar totalCount filteredCount allSelected = do
-  styled (panelStyle (background (colorRGBA 20 24 32 255) . borderColor (colorRGBA 45 52 64 255))) $ panelWith fillW $ do
+  tintedPanel (colorRGBA 20 24 32 255) (colorRGBA 45 52 64 255) fillW $ do
     rowWith (tight . fillW . padXY 12 4 . alignMid . gap 16) $ do
       labelWith (fontMono . fontMuted . tight)
         ("Total: " <> T.pack (show totalCount) <> " logs | Filtered: " <> T.pack (show filteredCount))
       if allSelected
-        then
-          labelWith (fontMono . fontBold . fontColor (colorRGBA 235 203 139 255) . tight)
-            "ALL LOGS SELECTED | Ctrl+C to copy all | ESC to clear"
+        then status amber "ALL LOGS SELECTED | Ctrl+C to copy all | ESC to clear"
         else
           labelWith (fontMuted . tight)
             "Tip: Click & drag to select | Right-click for Copy/Select All | 2D Scroll | Ctrl+Q to quit"
@@ -415,12 +416,9 @@ main = do
   appStateRef <- newIORef =<< newAppState 120 True
   runSdlApp
     defaultSdlOptions
-      { sdlWindowTitle = "nano-ui Log Viewer"
-      , sdlWindowSize = Size 1050 720
+      { sdlWindowSettings = defaultWindowSettings {wsTitle = "nano-ui Log Viewer", wsSize = Size 1050 720}
       , sdlAppTheme = Just tomorrowNightMinDarkTheme
       -- ESC clears the selection (handled in logsApp); quit is Ctrl+Q.
-      , sdlAppShouldQuit = \inp ->
-          modCtrl (inputModifiers inp)
-            && T.any (`T.elem` ("qQ" :: Text)) (inputChars inp)
+      , sdlAppShouldQuit = shortcutIn (ctrl <> key 'q')
       }
     (logsApp appStateRef)

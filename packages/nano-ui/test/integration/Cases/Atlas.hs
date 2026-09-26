@@ -5,14 +5,48 @@ import Data.ByteString qualified as BS
 import Foreign.ForeignPtr (withForeignPtr)
 import Foreign.Marshal.Array (peekArray)
 import Foreign.Ptr (plusPtr)
-import NanoUI.Internal.Context (lookupImageUv)
+import NanoUI.Internal.Context (lookupImageUv, releaseImage)
 
 tests :: [Spec]
 tests =
   [ spec "atlas-growth" runAtlasGrowthTest
   , spec "atlas-changes" runAtlasChangesTest
   , spec "atlas-fills-width" runAtlasFillsWidthTest
+  , spec "atlas-release-reuse" runAtlasReleaseReuseTest
   ]
+
+-- | A released image stops drawing and its slot is reused by the next image
+-- that fits, with the surrounding padding cleared and uploaded. Images that
+-- do not fit go on the shelves. Released ids are not reused.
+runAtlasReleaseReuseTest :: Context -> IORef Int -> IO ()
+runAtlasReleaseReuseTest ctx failed = do
+  let insert tid w h v = registerImage ctx (ImageId tid) w h (BS.replicate (w * h * 4) v)
+      pixelAt x y = do
+        (w, _, fp, _) <- atlasSnapshot ctx >>= maybe (fail "missing atlas snapshot") pure
+        withForeignPtr fp $ \ptr -> BS.pack <$> peekArray 4 (ptr `plusPtr` ((y * w + x) * 4))
+      origin tid = do
+        (w, h, _, _) <- atlasSnapshot ctx >>= maybe (fail "missing atlas snapshot") pure
+        fmap (\(u0, v0, _, _) -> (round (u0 * fromIntegral w), round (v0 * fromIntegral h))) <$> lookupImageUv ctx (ImageId tid)
+  mapM_ (\(tid, w, v) -> insert tid w w v >>= assert failed) [(1, 8, 200), (2, 4, 100)]
+  Just (x, y) <- origin 1
+  sizeBefore <- fmap (\(w, h, _, _) -> (w, h)) <$> atlasSnapshot ctx
+  releaseImage ctx (ImageId 1)
+  lookupImageUv ctx (ImageId 1) >>= assertEq failed Nothing
+  -- A smaller image takes the slot; its padding is cleared of old pixels.
+  insert 3 6 6 50 >>= assert failed
+  origin 3 >>= assertEq failed (Just (x, y))
+  fmap (\(w, h, _, _) -> (w, h)) <$> atlasSnapshot ctx >>= assertEq failed sizeBefore
+  forM_ [(x + 6, y), (x + 6, y + 5), (x, y + 6), (x + 6, y + 6)] $ \(px, py) -> pixelAt px py >>= assertEq failed (BS.replicate 4 0)
+  pixelAt (x + 5) (y + 5) >>= assertEq failed (BS.replicate 4 50)
+  fmap (\(_, _, _, _, u) -> u) <$> (atlasChanges ctx . subtract 1 =<< maybe 0 (\(_, _, _, g) -> g) <$> atlasSnapshot ctx)
+    >>= assertEq failed (Just (AtlasRegions [(x - 1, y - 1, 8, 8)]))
+  -- The leftover strip is too thin for a 4x4 image, so it goes on a shelf.
+  insert 4 4 4 60 >>= assert failed
+  origin 4 >>= assert failed . (/= Just (x, y))
+  -- A released id is not handed out again.
+  releaseImage ctx (ImageId 4)
+  fresh <- evalUi ctx (withInput 100 100) freshImageId
+  assert failed (fresh > ImageId 4)
 
 -- | Narrow images spread across the atlas's allowed width instead of
 -- stacking in one strip until the height limit.

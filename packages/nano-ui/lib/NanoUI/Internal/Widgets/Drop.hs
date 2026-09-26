@@ -41,18 +41,10 @@ data DropTarget = DropTarget
   }
   deriving (Eq, Show)
 
--- | Compute the drop state for a rectangle from the current frame's drop events.
---
--- Active/hover state persists across frames in the widget store, so a target
--- keeps highlighting while the OS drag is stationary. Payload events
--- ('DropFile'/'DropText') are one-shot: they are reported exactly on the frame
--- they arrive.
---
--- Attribution uses the tracked drag position (the coordinates of the most
--- recent 'DropPosition') rather than a payload's own coordinates. SDL
--- synthesizes file/text events at the last drag position and reports (0,0)
--- when it never observed one, so the position stream is the only reliable
--- signal for "which target is this drop over".
+-- | The drop state for a rectangle from this frame's drop events. Hover
+-- persists while the OS drag is still; payloads are reported on the frame
+-- they arrive. A payload lands at the last 'DropPosition', not its own
+-- coordinates, which SDL reports as (0,0) when it has none.
 useDrop :: Ui :> es => Rect -> Eff es DropTarget
 useDrop bounds = do
   (wid, ctx) <- freshWidget
@@ -63,11 +55,8 @@ useDrop bounds = do
   store <- uiIO (getStore ctx)
   let active0 = flagSlot activeK store
       lastPos0 = uncurry V2 <$> lookupSlot fieldPoint posK store
-      -- A drag is active from 'DropBegin' until 'DropComplete'. Only
-      -- 'DropPosition' moves the tracked position and 'DropComplete' clears
-      -- it. Payload events leave it unchanged, so a payload is attributed to
-      -- the position at that point in the sequence, not to the frame's final
-      -- position.
+      -- A drag is active from 'DropBegin' until 'DropComplete'. A payload
+      -- uses the position current at its point in the sequence.
       step (active, pos, fs, ts) ev = case dropEventType ev of
         DropBegin -> (True, pos, fs, ts)
         DropPosition -> (active, dropEventPos ev <|> pos, fs, ts)

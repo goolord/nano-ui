@@ -1,13 +1,14 @@
 -- | Minimal 80x24 PTY terminal with ANSI colors. Run with @cabal run nano-ui-sdl-terminal@.
-module SdlTerminal (main, Term (..), blank, feed, scrollBy, viewport, withPty, drain, send) where
+module SdlTerminal (main, Term (..), blank, feed, scrollBy, viewport, withPty, drain, send, keys) where
 
 import Control.Concurrent (threadDelay)
 import Control.Exception (bracket, bracketOnError, catch, throwIO, try)
-import Control.Monad (foldM, void, when)
+import Control.Monad (foldM, forM_, void, when)
 import Control.Monad.ST (ST, runST)
 import Data.Bits ((.&.))
 import Data.ByteString qualified as B
 import Data.Char (chr, isPrint, ord, toUpper)
+import Data.Maybe (fromMaybe, isJust)
 import Data.Ord (clamp)
 import Data.Primitive.PrimArray (PrimArray, indexPrimArray, primArrayFromList)
 import Data.STRef (STRef, modifySTRef', newSTRef, readSTRef, writeSTRef)
@@ -27,6 +28,7 @@ import Foreign.C.Error
 import Foreign.C.Types (CInt (..))
 import GHC.IO.Exception (IOException (..))
 import NanoUI hiding (scrollBy)
+import NanoUI.Backend (clearEphemeral, emptyInput)
 import NanoUI.Backend.Sdl
 import NanoUI.Sdl.Internal.Input (SdlEvent (..), applyEvent, pollEvents)
 import NanoUI.Testing (newPixelContext)
@@ -54,6 +56,7 @@ data Term = Term
   , history :: V.Vector Cell
   , back :: Float
   }
+  deriving (Eq)
 
 -- | Scrollback keeps at most 2000 rows.
 historyCells :: Int
@@ -309,8 +312,18 @@ withPty action = bracket boot close (action . fst)
     signalProcess sigKILL pid `catch` \(_ :: IOException) -> pure ()
     void (getProcessStatus True False pid)
 
-isE :: [Errno] -> IOException -> Bool
-isE es = maybe False (`elem` es) . fmap Errno . ioe_errno
+-- | Run a PTY read or write, returning @busy@ if it would block and @gone@
+-- if the shell has exited.
+onPty :: IO a -> (a -> b) -> b -> b -> IO b
+onPty io done busy gone =
+  try io >>= \case
+    Right a -> pure (done a)
+    Left e
+      | isE [eAGAIN, eWOULDBLOCK] -> pure busy
+      | isE [eIO] -> pure gone
+      | otherwise -> throwIO e
+      where
+        isE es = maybe False ((`elem` es) . Errno) (ioe_errno e)
 
 -- | Feed up to four 1024-byte reads into the terminal. The flag is set when
 -- the shell has exited.
@@ -319,36 +332,30 @@ drain fd t = S.fold feed t id (S.unfoldr readChunk (4 :: Int))
  where
   readChunk 0 = pure (Left False)
   readChunk n =
-    try (P.fdRead fd 1024) >>= \case
-      Right b -> pure (if B.null b then Left True else Right (b, n - 1))
-      Left e
-        | isE [eAGAIN, eWOULDBLOCK] e -> pure (Left False)
-        | isE [eIO] e -> pure (Left True)
-        | otherwise -> throwIO e
+    onPty (P.fdRead fd 1024) (\b -> if B.null b then Left True else Right (b, n - 1)) (Left False) (Left True)
 
 -- | Write what the PTY accepts and return the rest.
 send :: Fd -> B.ByteString -> IO B.ByteString
 send _ b | B.null b = pure b
-send fd b =
-  (flip B.drop b . fromIntegral <$> P.fdWrite fd b)
-    `catch` \e ->
-      if isE [eAGAIN, eWOULDBLOCK] e
-        then pure b
-        else
-          if isE [eIO] e
-            then pure B.empty
-            else throwIO e
+send fd b = onPty (P.fdWrite fd b) (\n -> B.drop (fromIntegral n) b) b B.empty
 
+-- | Bytes a frame's input sends to the shell: typed text, then keys, the
+-- order the session runner leaves them in ('inputKeys').
 keys :: Input -> B.ByteString
-keys inp = E.encodeUtf8 (foldMap key (inputKeys inp) <> prefix <> text)
+keys inp = E.encodeUtf8 (prefix <> text <> foldMap key (inputKeys inp))
  where
   mods = inputModifiers inp
-  ctrlChar = chr . (.&. 31) . ord . toUpper
-  text = (if modCtrl mods then T.map ctrlChar else id) (inputChars inp)
+  -- Ctrl+key sends the control code, so text typed with Ctrl is dropped.
+  ctrl = modCtrl mods && not (modAlt mods)
+  ctrlChar = T.singleton . chr . (.&. 31) . ord . toUpper
+  text = if ctrl then "" else inputChars inp
   prefix = if modAlt mods && not (T.null text) then "\ESC" else ""
   key = \case
+    KeyChar c | ctrl -> ctrlChar c
+    KeySpace | ctrl -> "\NUL"
     KeyEnter -> "\r"
     KeyBackspace -> "\DEL"
+    KeyTab | modShift mods -> "\ESC[Z"
     KeyTab -> "\t"
     KeyEscape -> "\ESC"
     KeyUp -> "\ESC[A"
@@ -358,6 +365,16 @@ keys inp = E.encodeUtf8 (foldMap key (inputKeys inp) <> prefix <> text)
     KeyHome -> "\ESC[H"
     KeyEnd -> "\ESC[F"
     KeyDelete -> "\ESC[3~"
+    KeyPageUp -> "\ESC[5~"
+    KeyPageDown -> "\ESC[6~"
+    KeyInsert -> "\ESC[2~"
+    KeyF n -> fromMaybe "" (lookup n functionKeys)
+    _ -> ""
+
+-- | What xterm sends for F1 to F12.
+functionKeys :: [(Int, T.Text)]
+functionKeys =
+  zip [1 ..] (map ("\ESCO" <>) ["P", "Q", "R", "S"] ++ [T.pack ("\ESC[" ++ show c ++ "~") | c <- [15, 17, 18, 19, 20, 21, 23, 24 :: Int]])
 
 main :: IO ()
 main = withPty $ \fd -> do
@@ -366,9 +383,7 @@ main = withPty $ \fd -> do
     monoFont = FontSearch ["Input Mono", "JetBrains Mono", "Menlo", "monospace"]
   withSdl
     defaultSdlOptions
-      { sdlWindowTitle = "nano-ui Terminal"
-      , sdlWindowSize = Size 816 592
-      , sdlWindowResizable = False
+      { sdlWindowSettings = defaultWindowSettings {wsTitle = "nano-ui Terminal", wsSize = Size 816 592, wsResizable = False}
       , sdlAppFontSize = 16
       , sdlAppFont = monoFont
       , sdlAppMonoFont = monoFont
@@ -376,12 +391,17 @@ main = withPty $ \fd -> do
     ctx0
     $ \ctx env -> do
       let
-        advance (t, pending, _, _) = do
+        advance (t, pending, inp, _, _) = do
           threadDelay 16000
           events <- pollEvents
           let
             inputs = fmap (applyEvent emptyInput) events
-          rest <- send fd (pending <> foldMap keys inputs)
+            -- Each event's bytes, in order. While the input method is
+            -- composing, it owns the keys and only committed text is sent.
+            (inp', typed) = foldl' typeEvent (clearEphemeral inp, B.empty) (zip events inputs)
+            typeEvent (i, out) (ev, one) =
+              (applyEvent i ev, out <> if isJust (inputComposition i) then E.encodeUtf8 (inputChars one) else keys one)
+          rest <- send fd (pending <> typed)
           next :> ended <- drain fd (foldl' navigate t inputs)
           let
             changed =
@@ -389,15 +409,33 @@ main = withPty $ \fd -> do
                 || cursor next /= cursor t
                 || back next /= back t
                 || screen next /= screen t
-          pure (next, rest, ended || any (== EvQuit) events, changed)
+          pure (next, rest, inp', ended || any (== EvQuit) events, changed)
       S.mapM_
-        ( \(t, _, _, changed) -> when changed (void (sdlDrawFrame ctx (view t) env emptyInput True))
+        ( \(t, _, inp, _, changed) -> when changed (void (sdlDrawFrame ctx (view t) env inp True))
         )
-        . S.takeWhile (\(_, _, ended, _) -> not ended)
-        $ S.iterateM advance (pure (blank, B.empty, False, True))
+        . S.takeWhile (\(_, _, _, ended, _) -> not ended)
+        $ S.iterateM advance (pure (blank, B.empty, emptyInput, False, True))
 
+-- | The terminal claims every key and takes typed text from the input
+-- method. It draws the composition at the cursor and places the candidate
+-- window there too.
 view :: Term -> NanoUI ()
-view t = void $ canvas (fontMono . grow) $ \(Rect x y w h) -> do
+view t = do
+  wid <- nextId
+  holdFocus wid
+  Rect x y _ _ <- fromMaybe (Rect 0 0 0 0) <$> lastRect wid
+  let (cx, cy) = cursor t
+  preedit <- useInputMethod wid InputNormal (Rect (x + 8 + fromIntegral (min 79 cx) * 10) (y + 8 + fromIntegral cy * 24) 10 24)
+  void . customWidgetWithId wid $
+    defaultCustomWidgetSpec
+      { widgetLayout = fontMono (grow defaultLayout)
+      , widgetFocusable = True
+      , widgetKeys = KeysAll
+      , widgetDraw = \cdc rect -> runCanvasFor cdc (drawTerm t preedit rect)
+      }
+
+drawTerm :: Term -> Maybe Composition -> Rect -> CanvasM ()
+drawTerm t preedit (Rect x y w h) = do
   drawRect (Rect x y w h) 0x181D26FF
   V.imapM_
     ( \i (c, f, b) -> do
@@ -416,6 +454,13 @@ view t = void $ canvas (fontMono . grow) $ \(Rect x y w h) -> do
     curX = x + 8 + fromIntegral (min 79 cx) * 10
     curY = y + 29 + fromIntegral cy * 24
   when (back t < 1) $ drawRect (Rect curX curY 10 2) 0x81A1C1FF
+  -- The composition, underlined, over the cells starting at the cursor.
+  forM_ preedit $ \c -> do
+    let comp = compositionText c
+        compW = fromIntegral (T.length comp) * 10
+    drawRect (Rect curX (curY - 21) compW 24) 0x181D26FF
+    drawText (V2 curX (curY - 21)) AlignStart AlignTop comp 0xECEFF4FF
+    drawRect (Rect curX curY compW 2) 0xEBCB8BFF
   when (back t > 0 && hRows > 0) $ do
     let
       thumbH = max 24 (h * (24 / (hRows + 24)))

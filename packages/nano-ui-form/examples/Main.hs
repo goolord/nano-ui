@@ -1,7 +1,7 @@
 module Main (main) where
 
 import FormDemo (formDemoUi)
-import NanoUI (Key (KeyEscape), Size (..), inputKeys, inputKeysElem)
+import NanoUI (Key (KeyEscape), Pressable (..), Size (..), WindowSettings (..), defaultWindowSettings)
 import NanoUI.Backend.Sdl
   ( SdlOptions (..)
   , defaultSdlOptions
@@ -12,8 +12,7 @@ main :: IO ()
 main =
   runSdlApp
     defaultSdlOptions
-      { sdlWindowTitle = "nano-ui-form example"
-      , sdlWindowSize = Size 1100 800
-      , sdlAppShouldQuit = \inp -> inputKeysElem KeyEscape (inputKeys inp)
+      { sdlWindowSettings = defaultWindowSettings {wsTitle = "nano-ui-form example", wsSize = Size 1100 800}
+      , sdlAppShouldQuit = pressedOnceIn KeyEscape
       }
     formDemoUi

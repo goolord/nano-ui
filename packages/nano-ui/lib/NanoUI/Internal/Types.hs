@@ -11,11 +11,11 @@ module NanoUI.Internal.Types
   , colorG
   , colorB
   , colorA
-  , colorFromWord32
   , rgbToHsv
   , hsvToRgb
   , clamp
   , clamp01
+  , finite
   , onGrid
   , gridSpan
   , roundHalfUp
@@ -119,11 +119,6 @@ colorB (Color w) = fromIntegral ((w `shiftR` 8) .&. 0xFF)
 colorA :: Color -> Word8
 colorA (Color w) = fromIntegral (w .&. 0xFF)
 
--- | Interpret a packed @0xRRGGBBAA@ word without conversion.
-{-# INLINE colorFromWord32 #-}
-colorFromWord32 :: Word32 -> Color
-colorFromWord32 = Color
-
 -- | Restrict a value to inclusive lower and upper bounds, which must be ordered.
 {-# INLINE clamp #-}
 clamp :: Ord a => a -> a -> a -> a
@@ -133,6 +128,11 @@ clamp lo hi x = max lo (min hi x)
 {-# INLINE clamp01 #-}
 clamp01 :: Float -> Float
 clamp01 x = clamp 0 1 x
+
+-- | Neither NaN nor infinite.
+{-# INLINE finite #-}
+finite :: Float -> Bool
+finite v = not (isNaN v || isInfinite v)
 
 -- | Round a logical coordinate onto the device-pixel grid implied by draw
 -- scale @s@ (device px = logical * s). Every layer that positions pixels --
@@ -408,6 +408,9 @@ data PopupPlacement
   | PlacementRight
   | PlacementLeft
   | PlacementAtCursor
+  -- ^ For a tooltip ('NanoUI.tooltipPlacement'): just below the pointer,
+  -- following it. For a popup or context menu: top-left corner at the
+  -- anchor point, so a menu opens where it was clicked and stays there.
   | PlacementAuto
   deriving (Eq, Show)
 

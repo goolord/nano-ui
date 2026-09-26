@@ -100,8 +100,13 @@ test-suite nano-ui-rgfw-test
     other-modules:
         NanoUI.Rgfw.Render
         NanoUI.Rgfw.Surface
+        NanoUI.Rgfw.Window
+        NanoUI.Rgfw.Wake
+    -- Threaded: the wake test's job and producer run while the loop blocks in RGFW.
+    ghc-options:      -threaded
     build-depends:
         base >=4.20 && <4.23,
+        bytestring ^>=0.12,
         nano-ui,
         nano-ui-rgfw,
         nano-ui-rgfw-bindings,

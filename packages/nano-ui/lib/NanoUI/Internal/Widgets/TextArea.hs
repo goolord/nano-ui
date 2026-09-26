@@ -41,6 +41,7 @@ import NanoUI.Internal.Style (FontStyle (..), FontVariant (..), FontWeight (..),
 import NanoUI.Internal.Types (DamageBounds (..), clamp)
 import NanoUI.Internal.Widgets.Behavior (keyboardFocused)
 import NanoUI.Internal.Widgets.Node (Response, addWidget, setChanged)
+import NanoUI.Internal.Widgets.TextInput (fieldTextCommands)
 import qualified NanoUI.Widgets.TextBuffer as TB
 import NanoUI.Internal.Widgets.TextDocument
 import NanoUI.Widgets.TextEditor
@@ -229,6 +230,7 @@ textAreaCore f wid value = do
       -- gets its respChanged pulse, then cleared in the state write below.
       menuPulse = memberSlot fieldInt changedSlotKey store
   isFocus <- keyboardFocused wid
+  when isFocus $ uiIO (requestInputMethod ctx wid Nothing InputNormal)
   (newDoc, stateChanged) <-
     if isFocus
       then do
@@ -241,7 +243,7 @@ textAreaCore f wid value = do
             hadInput = not (T.null (inputChars inp)) || not (inputKeysNull (inputKeys inp))
         newState <- uiIO $ do
           when hadInput $ modifyInteraction ctx (\s -> s {isTextInputDrag = Nothing})
-          case inputTextCommands multiLineMode inp of
+          fieldTextCommands ctx multiLineMode inp >>= \case
             [] -> pure s1
             cmds -> withEditor s1 <$> foldM (flip (runCommandIO ctx multiLineMode)) (textAreaEditor s1) cmds
         let newBuf = buffer newState

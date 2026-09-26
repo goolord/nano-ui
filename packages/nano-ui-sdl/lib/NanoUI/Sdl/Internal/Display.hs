@@ -8,11 +8,13 @@ module NanoUI.Sdl.Internal.Display
   , queryMouseWindowPos
   , outPair
   , zoomWindow
+  , windowPosCentered
   , installResizeWatch
   , refreshEventType
   , initRefreshEvent
   , pushRefreshEvent
   , takeRefreshEvent
+  , querySystemAppearance
   ) where
 
 import Control.Monad (unless, void)
@@ -23,15 +25,17 @@ import Foreign.Marshal.Alloc (alloca, callocBytes)
 import Foreign.Marshal.Utils (with)
 import Foreign.Ptr (FunPtr, Ptr, freeHaskellFunPtr)
 import Foreign.Storable (Storable, peek, poke, sizeOf)
+import Data.Int (Int32)
 import Data.Word (Word32)
-import NanoUI (Size (..), V2 (..))
+import NanoUI (Appearance (..), Size (..), V2 (..))
 import SDL3.Sys.Bindgen.Events (SDL_Event)
 import SDL3.Sys.Bindgen.Stdinc (Uint32 (..))
 import SDL3.Sys.Bindgen.Video (SDL_Window)
-import SDL3.Sys.Events (pushEvent, registerEvents)
+import SDL3.Sys.Bindgen.Video qualified as Video
+import SDL3.Sys.Events (pushEventSafe, registerEvents)
 import SDL3.Sys.Mouse (getMouseState)
 import SDL3.Sys.Bindgen.Rect (SDL_Rect (..))
-import SDL3.Sys.Video (getDisplayForWindow, getDisplayUsableBounds, getWindowPixelDensity, getWindowSize, setWindowPosition, setWindowSize)
+import SDL3.Sys.Video (getDisplayForWindow, getDisplayUsableBounds, getSystemTheme, getWindowPixelDensity, getWindowSize, setWindowPosition, setWindowSize)
 import System.IO.Unsafe (unsafePerformIO)
 
 -- | Backbuffer pixels per window coordinate: the factor the retained
@@ -118,13 +122,19 @@ refreshPending = unsafePerformIO (newIORef False)
 -- The swap is a memory barrier, so whatever the caller wrote before waking is
 -- visible by the time the loop takes the event: 'takeRefreshEvent' runs
 -- before the frame that reads it.
+--
+-- The push is a safe foreign call. SDL_PushEvent waits for the lock SDL
+-- holds while it runs event watches, and the resize watch
+-- ('installResizeWatch') runs Haskell. Pushed from a worker thread as an
+-- unsafe call, it would keep the capability that watch is waiting for
+-- while it waits for the lock the watch holds, and the program would hang.
 pushRefreshEvent :: IO ()
 pushRefreshEvent = do
   ty <- refreshEventType
   unless (ty == 0) $ do
     pending <- atomicSwapIORef refreshPending True
     unless pending $ do
-      ok <- pushEvent refreshEvent
+      ok <- pushEventSafe refreshEvent
       unless ok $ void (atomicSwapIORef refreshPending False)
 
 -- | The loop took the queued refresh event, so the next wake queues another.
@@ -155,6 +165,18 @@ zoomWindow win (Size w h) zoom = do
   let fit want avail = if avail > 0 then min want (fromIntegral avail) else want
       zw = fit (w * zoom) usable.w
       zh = fit (h * zoom) usable.h
-      centred = 0x2FFF0000 -- SDL_WINDOWPOS_CENTERED
   void $ setWindowSize win (round zw) (round zh)
-  void $ setWindowPosition win centred centred
+  void $ setWindowPosition win windowPosCentered windowPosCentered
+
+-- | SDL_WINDOWPOS_CENTERED: the centring mask with display 0.
+windowPosCentered :: Int32
+windowPosCentered = fromIntegral Video.sDL_WINDOWPOS_CENTERED_MASK
+
+-- | The desktop's light or dark setting, or 'Nothing' if SDL cannot tell.
+-- Cheap: SDL caches the value from its theme-change event.
+querySystemAppearance :: IO (Maybe Appearance)
+querySystemAppearance =
+  getSystemTheme >>= \case
+    Video.SDL_SYSTEM_THEME_LIGHT -> pure (Just AppearanceLight)
+    Video.SDL_SYSTEM_THEME_DARK -> pure (Just AppearanceDark)
+    _ -> pure Nothing

@@ -35,33 +35,52 @@ counter = do
 - Text inputs and a multi-line text area, numeric fields, sliders, knobs,
   selects, combo boxes, sortable tables, trees, tabs, menus, context menus,
   modals, floating windows, pane grids, colour pickers, progress bars,
-  sparklines, and drag and drop. `customWidget` and a canvas API cover
-  anything else.
-- Row, column, and grid layout with scrolling. Layout options are
+  sparklines, and drag and drop. `customWidget` and a canvas API, with paths,
+  fill rules, strokes with joins and dashes, gradients, clips and transforms
+  (`NanoUI.Path`), cover anything else.
+- Row, column, grid, and layered (`layers`) layout with scrolling, wrapping
+  (`wrap`, `lineAlign`), pinned children (`pinAt`) and aspect ratios
+  (`aspect`). Layout options are
   `Layout -> Layout` modifiers, as in `columnWith (gap 8 . padAll 12)`.
+  `explainLayout` outlines every layout node.
 - Scrollers take a wheel step and a glide time (`setScrollTuning`,
   `setScrollStep`), and move from code: `scrollTo`, `scrollBy`, `scrollPages`,
   and `scrollIntoView`. `getScrollMetrics` gives a virtualized list the
-  viewport and offset it needs to pick its rows.
-- Keyboard focus and navigation for every control.
+  viewport and offset it needs to pick its rows, and `sensor` says when a
+  widget scrolls into view.
+- Keyboard focus and navigation for every control, focus from code, and
+  shortcuts, as in `shortcut (ctrl <> key 's')`. Input methods compose in
+  the text fields, and in a widget of your own with `useInputMethod`.
+- Every mouse button, held and clicked per widget (`respClickedWith
+  MouseMiddle`), cursor shapes, and tooltips with a hover delay.
 - Shaped text in the SDL backend, with fallback fonts for other scripts and
   mixed left-to-right and right-to-left lines. `richText` wraps a paragraph
   of mixed styles and links, as in
   `richText ["Read ", strong "the guide", " or ", hyperlink "faq" "the FAQ"]`.
 - Text fields with undo and redo, driven by `TextCommand` values that code
-  can run too.
-- SVG icons (`loadSvg`, `svgIcon`) and a `spinner`.
+  can run too, and input-method composition in the SDL backend.
+- Images with a content fit, crop, zoom, opacity and rotation
+  (`imageConfigured`), registered for as long as a view shows them
+  (`useImageRgba`), SVG icons (`loadSvg`, `svgIcon`) and a `spinner`.
 - Backends block on input when no animation or timed update needs a frame.
   Each frame computes
   its damage against the previous one. `wakeAfter` schedules a frame for a
-  view that changes on a timer.
+  view that changes on a timer, `useTaskStatus` and `useTask` run background
+  work, `useStream` folds a producer's updates into a view's state, and
+  `askWake` lets any thread wake the loop.
 - State in local hooks (`useInt`, `useText`, `useState`), in your own model,
   or in a reducer with `NanoUI.Emit`.
 - Eased and spring animation.
 - Themes, including ones built from Base16 schemes, changed for part of a
   view with `styled` and composable modifiers, as in
   `styled (primary . buttonStyle (cornerRadius 6)) (button "Save")`.
-  `disabledWhen` switches widgets off.
+  `disabledWhen` switches widgets off, `tone` and `fontTone` colour buttons
+  and text by status, and the theme can follow the desktop's light or dark
+  setting (`lightDark`, `followSystemTheme`).
+- One `WindowSettings` for every backend, a view that reads its window
+  (`askWindow`), changes it (`setWindowTitleUi`, `moveWindowUi`,
+  `setWindowModeUi`), takes screenshots (`requestScreenshot`) and decides
+  when it closes (`quitUi`).
 - `NanoUI.Testing` runs frames headlessly on scripted input, for tests, and
   `NanoUI.Backend` has the font, input and damage plumbing a window backend
   is written against. `NanoUI` itself is only what writing a GUI needs.
@@ -148,6 +167,7 @@ suite checks that the vertex writers compile without dictionaries or tuples.
 | `nano-ui-rgfw-bindings` | Haskell bindings to RGFW |
 | `nano-ui-diagrams` | Line, bar, scatter, and area charts, and drawing with [diagrams](https://diagrams.github.io/) |
 | `nano-ui-form` | Validated forms built on [ditto](https://hackage.haskell.org/package/ditto) |
+| `nano-ui-markdown` | Markdown documents drawn with rich text, parsed incrementally for streamed chat replies |
 | `nano-ui-demo` | Example applications |
 
 ## Running the demos
@@ -163,6 +183,7 @@ cabal run nano-ui-sdl-notepad    # text editor with menus and file dialogs
 cabal run nano-ui-sdl-logs       # streaming log viewer
 cabal run nano-ui-sdl-terminal   # terminal on /bin/sh (Linux and macOS)
 cabal run nano-ui-rgfw-demo      # the RGFW backend
+cabal run nano-ui-markdown-example  # a Markdown chat reply streaming in
 ```
 
 ## Documentation

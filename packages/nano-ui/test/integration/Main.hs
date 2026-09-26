@@ -34,6 +34,21 @@ import Cases.PointerRelease qualified
 import Cases.PointerOwnership qualified
 import Cases.Tooltip qualified
 import Cases.CustomWidget qualified
+import Cases.WidgetIdIndex qualified
+import Cases.Paths qualified
+import Cases.LayoutFlow qualified
+import Cases.Images qualified
+import Cases.Focus qualified
+import Cases.TooltipDelay qualified
+import Cases.Visibility qualified
+import Cases.Cursors qualified
+import Cases.Explain qualified
+import Cases.Shortcut qualified
+import Cases.Ime qualified
+import Cases.PointerExtra qualified
+import Cases.Theming qualified
+import Cases.NativeWindow qualified
+import Cases.Tasks qualified
 import NanoUI.Testing.Runner (runTests)
 
 main :: IO ()
@@ -73,4 +88,19 @@ main =
     , Cases.PointerOwnership.tests
     , Cases.Tooltip.tests
     , Cases.CustomWidget.tests
+    , Cases.WidgetIdIndex.tests
+    , Cases.Paths.tests
+    , Cases.LayoutFlow.tests
+    , Cases.Images.tests
+    , Cases.Focus.tests
+    , Cases.TooltipDelay.tests
+    , Cases.Visibility.tests
+    , Cases.Cursors.tests
+    , Cases.Explain.tests
+    , Cases.Shortcut.tests
+    , Cases.Ime.tests
+    , Cases.PointerExtra.tests
+    , Cases.Theming.tests
+    , Cases.NativeWindow.tests
+    , Cases.Tasks.tests
     ]

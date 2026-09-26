@@ -1,12 +1,20 @@
 module Cases.RichText (tests) where
 
 import Spec
+import Control.Exception (evaluate)
+import Data.Foldable (toList)
+import Data.List (groupBy)
 import Data.Text qualified as T
+import NanoUI.Internal.Context (CustomDrawingEntry (..), lookupCustomDrawing)
+import NanoUI.Internal.Widgets.Custom (mkCustomDrawContext)
 
 tests :: [Spec]
 tests =
   [ spec "rich-text-wrap" runRichTextWrapTest
   , spec "rich-text-link" runRichTextLinkTest
+  , spec "rich-text-align" runRichTextAlignTest
+  , spec "rich-text-many" runRichTextManyTest
+  , spec "rich-text-background" runRichTextBackgroundTest
   ]
 
 -- | A paragraph wraps at its column's width, taking a line's height per line,
@@ -49,8 +57,8 @@ runRichTextLinkTest ctx failed = do
         pure clicked
   linkClick <- clickAt onLink
   assertEq failed (Just "docs-target") linkClick
-  pointer <- cursorKindIs ctx inp0 {inputMousePos = onLink} UiCursorPointer
-  assert failed pointer
+  handShown <- cursorKindIs ctx inp0 {inputMousePos = onLink} UiCursorPointer
+  assert failed handShown
   -- The hovered link is underlined once, across its words and the space
   -- between them.
   (_, _, dd, _) <- runFrame ctx inp0 {inputMousePos = onLink} ui
@@ -61,3 +69,77 @@ runRichTextLinkTest ctx failed = do
   assertEq failed Nothing textClick
   plainCursor <- cursorKindIs ctx inp0 {inputMousePos = onText} UiCursorPointer
   assert failed (not plainCursor)
+
+-- | Each line of a paragraph, wrapped or not, aligns within its box: flush
+-- right for 'alignEnd', centred for 'alignCenter'. A fit-width paragraph is
+-- placed in its column by the same alignment at its wrapped width, so its
+-- lines land where a full-width paragraph's do.
+runRichTextAlignTest :: Context -> IORef Int -> IO ()
+runRichTextAlignTest ctx failed = do
+  let inp = withInput 400 400
+      fm = ctxFontMetrics ctx
+      paragraph = [inlineText "a few words of different lengths ", strong "wrapping", " over several lines here"]
+      -- The paragraph's box and each drawn line's left and right edges.
+      linesOf width align = do
+        resp <- warmup2 ctx inp (columnWith (fixedW 200) (fst <$> richTextWith' (width . align) paragraph))
+        let wid = respId resp
+            r = respRect resp
+        Just entry <- lookupCustomDrawing ctx wid
+        cdc <- mkCustomDrawContext ctx fm wid
+        extents <- forM [(x, y, t) | DrawTextStyled x y _ t _ <- toList (cdrBuild entry cdc r)] $ \(x, y, t) ->
+          (\w -> (y, x, x + w)) <$> lineWidthIO fm t
+        let lines' = groupBy (\(a, _, _) (b, _, _) -> a == b) extents
+        pure (r, [(minimum [x0 | (_, x0, _) <- l], maximum [x1 | (_, _, x1) <- l]) | l <- lines'])
+  forM_ [(alignEnd, 1), (alignCenter, 0.5)] $ \(align, at :: Float) -> do
+    (Rect rx _ rw _, full) <- linesOf fillW align
+    (_, fitted) <- linesOf id align
+    assert failed (length full > 1)
+    forM_ full $ \(x0, x1) ->
+      assertEq failed (round (rx + at * rw) :: Int) (round (x0 + at * (x1 - x0)))
+    assertEq failed full fitted
+
+-- | A view with more paragraphs than the cache bound still keeps them all:
+-- an unchanged frame measures nothing.
+runRichTextManyTest :: Context -> IORef Int -> IO ()
+runRichTextManyTest base failed = do
+  measured <- newIORef (0 :: Int)
+  recording <- newIORef False
+  let fm = ctxFontMetrics base
+      prepare _ = readIORef recording >>= \on -> fm <$ when on (modifyIORef' measured (+ 1))
+  -- Evaluated once in IO so every frame shares this context and its metrics
+  -- source.
+  ctx <- evaluate (withFontMetrics base fm {fmBackend = Just (FontBackend prepare (const (pure Nothing)))})
+  let inp = withInput 400 400
+      ui = column (forM_ [1 .. 4500 :: Int] (\i -> richText [inlineText (T.pack (show i))]))
+      frame = runFrame ctx inp (uiIO (writeIORef recording True) *> ui <* uiIO (writeIORef recording False))
+  replicateM_ 3 frame
+  writeIORef measured 0
+  replicateM_ 2 frame
+  assertEq failed 0 =<< readIORef measured
+
+-- | A piece's background is painted under its words, spanning inner spaces
+-- but not leading or trailing ones, once per line. Changing the colour
+-- counts as a new paragraph.
+runRichTextBackgroundTest :: Context -> IORef Int -> IO ()
+runRichTextBackgroundTest ctx failed = do
+  let inp = withInput 400 400
+      fm = ctxFontMetrics ctx
+      tint = colorRGBA 1 2 3 255
+      ui c = column (fst <$> richText' ["Run ", inlineBackground c (inlineCode " cabal build "), " first"])
+      opsOf c = do
+        resp <- warmup2 ctx inp (ui c)
+        Just entry <- lookupCustomDrawing ctx (respId resp)
+        cdc <- mkCustomDrawContext ctx fm (respId resp)
+        pure (respRect resp, toList (cdrBuild entry cdc (respRect resp)))
+  (Rect rx _ _ _, ops) <- opsOf tint
+  prefixW <- sum <$> mapM (lineWidthIO fm) ["Run", " ", " "]
+  codeW <- sum <$> mapM (lineWidthIO fm) ["cabal", " ", "build"]
+  let fills = [r | FillRect r c <- ops, c == tint]
+      firstText = length (takeWhile (\case DrawTextStyled {} -> False; _ -> True) ops)
+  assertEq failed 1 (length fills)
+  forM_ fills $ \(Rect x _ w h) ->
+    assert failed (abs (x - (rx + prefixW)) < 0.5 && abs (w - codeW) < 0.5 && h > 0)
+  -- Under the words: the fill comes before the first text op.
+  assert failed (firstText >= 1)
+  (_, plain) <- opsOf (colorRGBA 9 9 9 255)
+  assertEq failed [] [r | FillRect r c <- plain, c == tint]

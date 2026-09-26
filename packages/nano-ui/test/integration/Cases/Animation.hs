@@ -226,7 +226,7 @@ runSpinnerTest ctx failed = do
   let inp = withDelta 400 300 0.016
       ui = column $ do
         label "Loading a long label so the window has more than the spinner"
-        spinner'
+        spinnerWith' id 18
   _ <- runFrame ctx inp ui
   (resp, _, draw0, _) <- runFrame ctx inp ui
   _ <- takeDamage ctx

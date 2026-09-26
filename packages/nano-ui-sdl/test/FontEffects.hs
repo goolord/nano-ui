@@ -36,7 +36,7 @@ main = do
   failedStart <-
     try
       ( withSdl
-          defaultSdlOptions {sdlWindowHidden = True}
+          defaultSdlOptions {sdlWindowSettings = defaultWindowSettings {wsMode = Hidden}}
           ctx0
           (\_ _ -> fail "unexpected window")
       ) ::

@@ -86,12 +86,13 @@ transparentColor = colorRGBA 0 0 0 0
 clearStyle :: Style -> Style
 clearStyle s = s {styleBg = transparentColor, styleHoverBg = transparentColor, styleActiveBg = transparentColor, styleBorderWidth = 0}
 
-closeButtonStyle :: Theme -> Bool -> Float -> Style
-closeButtonStyle theme isHot animT =
+-- | Close button style; the cross goes from muted to full colour as @hotT@
+-- goes from 0 to 1.
+closeButtonStyle :: Theme -> Float -> Style
+closeButtonStyle theme hotT =
   let btn = themeButton theme
       muted = lerpColor (styleFg btn) (styleBg (themePanel theme)) 0.42
-      t = if isHot && not (animT > 0) then 1 else animT
-   in (clearStyle btn) {styleFg = lerpColor muted (styleFg btn) t}
+   in (clearStyle btn) {styleFg = lerpColor muted (styleFg btn) hotT}
 
 tabHeaderVisualStyle :: Theme -> Int -> Bool -> Style
 tabHeaderVisualStyle theme styleIdx isActive =
@@ -227,7 +228,7 @@ widgetVisualStyle ctx nt idx = do
                       then rowStyle (lerpColor unselectedBg accent 0.25) 0.35 0.45
                       else rowStyle unselectedBg 0.12 0.22
             | isMenu -> menuItemVisualStyle theme val
-            | isClose -> closeButtonStyle theme isHot animT
+            | isClose -> closeButtonStyle theme hotT
             | isTab -> tabHeaderVisualStyle theme (buttonVisualStyle styleIdx) (val > 0.5)
             | isTable -> tableHeaderVisualStyle theme (val > 0.5)
             | val > 0.5 ->

@@ -6,6 +6,8 @@ import Data.ByteString qualified as B
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as E
 import Data.Vector.Unboxed qualified as V
+import NanoUI (Input (..), Key (..), Modifiers (..), noModifiers)
+import NanoUI.Backend (emptyInput, inputKeysFromList)
 import SdlTerminal hiding (main)
 import Streaming (Of (..))
 import System.Timeout (timeout)
@@ -21,18 +23,10 @@ main = do
     charAt x y t = let (c, _, _) = at x y t in c
     text = T.pack . V.toList . V.map (\(c, _, _) -> c) . screen
     linesOf ns = E.encodeUtf8 (T.concat [T.pack (show n) <> "\r\n" | n <- ns :: [Int]])
-    equal a b =
-      screen a == screen b
-        && cursor a == cursor b
-        && pen a == pen b
-        && escape a == escape b
-        && utf8 a == utf8 b
-        && history a == history b
-        && back a == back b
     sample = E.encodeUtf8 "abc\rZ\ESC[2;4Héλ\ESC[;H!\ESC]0;hidden\ESC\\\ESC[7;31m.\ESCc☃"
   check "UTF-8 / escape chunk boundaries" $
     all
-      (\i -> equal (run sample) (feed (run (B.take i sample)) (B.drop i sample)))
+      (\i -> run sample == feed (run (B.take i sample)) (B.drop i sample))
       [0 .. B.length sample]
   check "RI consumes escape, scrolls down at top and moves up below it" $
     charAt 0 0 (run "A\r\ESCMZ") == 'Z' && charAt 0 1 (run "A\r\ESCMZ") == 'A'
@@ -86,6 +80,13 @@ main = do
     V.length (history capped) <= 2000 * 80
       && floor (back capped) * 80 == V.length (history capped)
       && V.length (viewport capped) == V.length (screen blank)
+  let
+    pressed mods k = keys emptyInput {inputKeys = inputKeysFromList [k], inputModifiers = mods}
+  check "function keys and Shift+Tab send xterm's sequences" $
+    map (pressed noModifiers) [KeyF 1, KeyF 5, KeyF 12, KeyTab] == ["\ESCOP", "\ESC[15~", "\ESC[24~", "\t"]
+      && pressed noModifiers {modShift = True} KeyTab == "\ESC[Z"
+  check "a frame's text goes before its command key" $
+    keys emptyInput {inputChars = "ls", inputKeys = inputKeysFromList [KeyChar 'l', KeyChar 's', KeyEnter]} == "ls\r"
 
   result <- timeout 8000000 $ withPty $ \fd -> do
     let

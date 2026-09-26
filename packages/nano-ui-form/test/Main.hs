@@ -28,6 +28,18 @@ data Person = Person
   }
   deriving (Eq, Show)
 
+-- | Check a form's value, failing on validation errors.
+expectOk :: String -> (a -> Bool) -> Ditto.Result Text (Ditto.Proved a) -> IO ()
+expectOk msg ok = \case
+  Ditto.Ok (Ditto.Proved _ value) -> check msg (ok value)
+  Ditto.Error errs -> fail (msg <> ": " <> show errs)
+
+-- | Check a form's validation errors, failing when it has a value.
+expectErrors :: String -> ([(Ditto.FormRange, Text)] -> Bool) -> Ditto.Result Text a -> IO ()
+expectErrors msg ok = \case
+  Ditto.Error errs -> check msg (ok errs)
+  Ditto.Ok _ -> fail (msg <> ": expected validation errors")
+
 failingForm :: Form Text Person
 failingForm =
   Person
@@ -68,29 +80,13 @@ main = do
     runCustom = runNanoUI customCtx emptyInput (runNanoForm "custom" customForm)
   (customView, _) <- runCustom
   runNanoUI customCtx emptyInput (runFormView (Ditto.unView customView []))
-  (_, customResult) <- runCustom
-  case customResult of
-    Ditto.Ok (Ditto.Proved _ values) ->
-      check
-        "Custom fields publish value changes without a response flag"
-        (values == ("edited", "automatic"))
-    Ditto.Error errs -> fail (show errs)
+  expectOk "Custom fields publish value changes without a response flag" (== ("edited", "automatic")) . snd
+    =<< runCustom
   updateFieldInput customCtx "custom" "internal-key" (FormInputText "external")
-  (_, externalResult) <- runCustom
-  case externalResult of
-    Ditto.Ok (Ditto.Proved _ values) ->
-      check
-        "Custom field identity is independent of its visible label"
-        (values == ("external", "automatic"))
-    Ditto.Error errs -> fail (show errs)
+  expectOk "Custom field identity is independent of its visible label" (== ("external", "automatic")) . snd
+    =<< runCustom
   updateFieldInput customCtx "custom" "internal-key" (FormInputBool True)
-  (_, invalidResult) <- runCustom
-  case invalidResult of
-    Ditto.Error errs ->
-      check
-        "Custom field decoder errors reach ditto"
-        (map snd errs == ["Expected text"])
-    Ditto.Ok _ -> fail "Expected custom decoder failure"
+  expectErrors "Custom field decoder errors reach ditto" ((== ["Expected text"]) . map snd) . snd =<< runCustom
 
   captionCtx <- newContext
   let
@@ -105,9 +101,7 @@ main = do
   updateFieldInput captionCtx "captions" "stable-key" (FormInputText "kept")
   (captionResult, _, _, _) <-
     runFrame captionCtx emptyInput (renderCaption secondCaption)
-  case captionResult of
-    Ditto.Ok (Ditto.Proved _ value) -> check "Caption changes retain named field values" (value == "kept")
-    Ditto.Error errs -> fail (show errs)
+  expectOk "Caption changes retain named field values" (== "kept") captionResult
   captionSpans <- collectTextSpans captionCtx
   let
     captions = [t | (_, t, _, _, _) <- captionSpans]
@@ -128,10 +122,7 @@ main = do
         <*> inputSelect unnamed (Just "Only") 0
   (_, collectionResult) <-
     runNanoUI ctx inp (runNanoForm "collections" collectionForm)
-  case collectionResult of
-    Ditto.Ok (Ditto.Proved _ values) ->
-      check "Foldable form options preserve initial indices" (values == (1, 0, 0))
-    Ditto.Error errs -> fail (show errs)
+  expectOk "Foldable form options preserve initial indices" (== (1, 0, 0)) collectionResult
 
   putStrLn "\n--- Validation Failure & Errors (runNanoUI) ---"
   (_, res2) <- runNanoUI ctx inp (runNanoForm "failing" failingForm)
@@ -152,14 +143,9 @@ main = do
         <$> inputEnumSelect "select" (-42)
         <*> inputEnumRadio "radio" 42
         <*> inputEnumSelect unnamed (-12)
-    checkEnums expected = do
-      (_, result) <- runNanoUI ctx inp (runNanoForm "enums" enumForm)
-      case result of
-        Ditto.Ok (Ditto.Proved _ values) ->
-          check
-            "Enum fields use zero-based widget indices independently of enum bounds"
-            (values == expected)
-        Ditto.Error errs -> fail (show errs)
+    checkEnums expected =
+      expectOk "Enum fields use zero-based widget indices independently of enum bounds" (== expected) . snd
+        =<< runNanoUI ctx inp (runNanoForm "enums" enumForm)
   checkEnums (-42, 42, -12)
   updateFieldInput ctx "enums" "select" (FormInputInt 0)
   updateFieldInput ctx "enums" "radio" (FormInputInt 255)

@@ -11,6 +11,9 @@ module NanoUI.Internal.Widgets.Layout
   , column
   , columnWith
   , column'
+  , layers
+  , layersWith
+  , layers'
   , hstack
   , vstack
   , label
@@ -111,6 +114,31 @@ columnWith = (`withDefaultWith` column')
 {-# INLINE column' #-}
 column' :: Ui :> es => Layout -> Eff es a -> Eff es a
 column' layout = container NodeContainer (layout {layoutDirection = Column})
+
+-- | Stack children in the same box, later ones on top, such as a badge on
+-- an icon or a caption over an image. The box is as large as its largest
+-- child, and each child is placed by its alignment: @alignEnd . alignTop@
+-- for a corner badge, @alignCenter . alignMid@ to centre it. A growing
+-- child ('fillW', 'grow') fills the box on that axis. The pointer goes to
+-- the child on top: where one widget covers another, hover, presses and
+-- focus go to the top one, and the one underneath shows no hover or tooltip
+-- there.
+--
+-- This is a container with the 'layered' flow, which panels and cards can
+-- also use. To cover a container without affecting its size, pin the
+-- overlay instead ('pinAt').
+{-# INLINE layers #-}
+layers :: Ui :> es => Eff es a -> Eff es a
+layers = layersWith id
+
+-- | 'layers' with modified layout defaults; the flow remains layered.
+{-# INLINE layersWith #-}
+layersWith :: Ui :> es => (Layout -> Layout) -> Eff es a -> Eff es a
+layersWith = (`withDefaultWith` layers')
+
+{-# INLINE layers' #-}
+layers' :: Ui :> es => Layout -> Eff es a -> Eff es a
+layers' = container NodeContainer . layered
 
 -- | Run a collection of widgets side by side, as in @hstack (map label names)@.
 {-# INLINE hstack #-}

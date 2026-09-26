@@ -30,13 +30,15 @@ fails the build instead of swapping.
 | `nano-ui-test` | Widgets, layout, input, focus, damage, and drawing, run headlessly frame by frame |
 | `text-buffer-spec` | The multi-line text buffer |
 | `nano-ui-inspection` | Compiler checks for SIMD writers, typed store slots, animation channels, unboxed commands, and canvas construction |
-| `nano-ui-rgfw-test` | RGFW input translation, the glyph atlas, and frames drawn by a software rasteriser kept in the test suite |
-| `nano-ui-rgfw-bindings-test` | Native event union layouts, key width, modifiers, and constant values |
+| `nano-ui-rgfw-test` | RGFW input translation, the glyph atlas, and frames drawn by a software rasteriser kept in the test suite; with a display, OpenGL frames and loop wakes |
+| `nano-ui-rgfw-bindings-test` | Native event union layouts, key width, modifiers, and constant values; with a display, `stopWaitForEvent` |
 | `nano-ui-font-search-test`, `nano-ui-font-effects-test` | SDL font discovery, measurement, and handle lifetimes |
-| `nano-ui-render-test` | Native SDL readback of partial-damage triangles and clipping |
+| `nano-ui-render-test` | SDL key and cursor translation and the theme event; native SDL readback of partial-damage triangles and clipping, images, window options, and screenshots, also on OpenGL with a display |
+| `nano-ui-sdl-pointer-test` | SDL mouse buttons, through SDL's event queue |
 | `nano-ui-diagrams-test` | Diagram conversion, tessellation, and charts |
 | `nano-ui-form-test` | Form scopes, validation, reset, and submission |
-| `nano-ui-demo-test` | The SDL demo, notepad, and log viewer, driven in hidden windows |
+| `nano-ui-markdown-test` | Markdown parsing, appending against whole-text parsing (QuickCheck), and drawing |
+| `nano-ui-demo-test` | The SDL demo, notepad, log viewer, and input-method composition, driven in hidden windows |
 | `nano-ui-terminal-test` | The terminal demo's escape-sequence parser and PTY |
 
 Run one suite with `cabal test nano-ui-test --test-show-details=failures`.
@@ -63,8 +65,8 @@ comment box and put the `user-attachments` URL GitHub gives back in
 
 `cabal.project` turns on these flags:
 
-- `nano-ui-sdl:sdl` builds the SDL backend. `nano-ui-demo` and `nano-ui-form`
-  have their own `sdl` flag for the executables that need it.
+- `nano-ui-sdl:sdl` builds the SDL backend. `nano-ui-demo`, `nano-ui-form` and
+  `nano-ui-markdown` have their own `sdl` flag for the executables that need it.
 
 ## Repository layout
 
@@ -74,6 +76,7 @@ comment box and put the `user-attachments` URL GitHub gives back in
 | `packages/nano-ui-sdl`, `packages/nano-ui-rgfw` | Window backends |
 | `packages/nano-ui-rgfw-bindings` | RGFW bindings, with the C source |
 | `packages/nano-ui-diagrams`, `packages/nano-ui-form` | Charts and diagrams, and forms |
+| `packages/nano-ui-markdown` | Markdown parsing and drawing |
 | `packages/nano-ui-demo` | Example applications |
 | `scripts/` | Font subsetting (`prune_inter.py`, `prune_cozette.py`) and profiling helpers |
 
@@ -82,7 +85,7 @@ The core's modules, under `packages/nano-ui/lib`. A module outside
 `NanoUI/Internal/`; some of those modules are exposed for backends, tests and
 tools that need more than the API, but they can change at any time. The other
 packages follow the same rule with `NanoUI.Sdl.Internal`, `NanoUI.Rgfw.Internal`,
-`NanoUI.Diagrams.Internal` and `NanoUI.Form.Internal`.
+`NanoUI.Diagrams.Internal`, `NanoUI.Form.Internal` and `NanoUI.Markdown.Internal`.
 
 | Path | Contents |
 | --- | --- |
@@ -177,7 +180,7 @@ decisions, compiler checks, and before/after measurements for the refactors.
 
 | Command | Runs |
 | --- | --- |
-| `cabal run nano-ui-profile -- <scene> +RTS -s` | Headless frames. Scenes: `widgets` (the default), `canvas` (an op-heavy unkeyed custom widget), `canvas-keyed` (the same drawing with a content key), `textarea` (typing into a 100,000-line `textAreaDocument`), `textarea-text` (the same through the `Text` API, which joins the document on every edit), and `svg` (icon rasterization) |
+| `cabal run nano-ui-profile -- <scene> +RTS -s` | Headless frames. Scenes: `widgets` (the default), `canvas` (an op-heavy unkeyed custom widget), `canvas-keyed` (the same drawing with a content key), `canvas-paths` (filled and stroked paths, turned a little every frame so they are built and painted again), `canvas-paths-build` (the same paths built without a frame), `textarea` (typing into a 100,000-line `textAreaDocument`), `textarea-text` (the same through the `Text` API, which joins the document on every edit), and `svg` (icon rasterization) |
 | `cabal run nano-ui-sdl-profile` | The SDL demo's UI in a hidden window: the full demo, each tab, widget microbenchmarks, and scaling |
 | `cabal run nano-ui-rgfw-profile` | The RGFW demo's frame loop on the OpenGL path in a hidden window |
 | `cabal run nano-ui-sdl-anim` | Tween and spring animations in an SDL window, for checking animation pacing by eye |
@@ -230,11 +233,16 @@ Three rules keep a view idle:
   widgets still built ask again, so one that is gone stops costing anything.
   Do not mark the context dirty every frame to get there: a dirty context is
   redrawn at once, which is a busy loop.
-- A background thread that changes what the view reads wakes the loop through
-  `ctxWakeLoop`. The wake runs one frame, and the frame's damage decides what
-  is presented, so waking for a change that is not on screen is cheap. A
-  change damage cannot see, such as new pixels under a registered image id,
-  needs `damageFull`.
+- Background work goes in `useTask` or `useTaskStatus`, which wake the loop
+  once, when the job finishes, or in `useStream`, which wakes it on each
+  update and costs one frame for a burst of them. Any other thread that
+  changes what the view reads wakes the loop with the action `askWake`
+  returns. Each wake runs one frame, which
+  repaints the whole window. Code holding a `Context` can wake through
+  `ctxWakeLoop` instead: that frame's damage decides what is presented, so
+  waking for a change that is not on screen is cheap, and a change damage
+  cannot see, such as new pixels under a registered image id, needs
+  `damageFull`.
 
 To measure a process, read its cycle time (`QueryProcessCycleTime` on
 Windows) and its threads' context switch counts over ten seconds or so. CPU

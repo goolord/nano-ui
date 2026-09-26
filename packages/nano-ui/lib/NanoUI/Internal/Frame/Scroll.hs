@@ -14,41 +14,44 @@ where
 
 import Control.Applicative ((<|>))
 import Control.Monad (forM_, join, unless, when)
-import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Maybe (MaybeT (..))
 import Data.Foldable (find)
+import Data.Functor ((<&>))
 import Data.Maybe (fromMaybe, isJust)
 import NanoUI.Internal.Context
-import NanoUI.Internal.Frame.Hit (overlayHitAllowed, overlayHitRoot, topmostModalAtMouse, topmostOverlayAtMouse)
+import NanoUI.Internal.Frame.Hit (overlayHitAllowed, overlayHitRoot, passesPointer, topmostFloating, topmostOverlayAtMouse)
 import NanoUI.Internal.Frame.Node (readScrollNode)
 import NanoUI.Internal.Frame.Scroll.Geometry
 import NanoUI.Internal.Frame.TextArea (TextAreaBars (..), textAreaBarLayouts, textAreaScrollGeom)
 import NanoUI.Internal.Id (WidgetId)
-import NanoUI.Internal.Monad ((<&&>))
+import NanoUI.Internal.Monad (ifM, (<&&>))
 import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena
-import NanoUI.Internal.Style (Padding (..), themePanel)
+import NanoUI.Internal.Style (Flow (..), Padding (..), PointerMode (..), themePanel)
 import NanoUI.Internal.Types (Rect (..), Size (..), V2 (..), rectContains, rectHit, rectInflate, rectIntersect, rectUnion)
 
-applyScrollOffsets :: Context -> IO ()
-applyScrollOffsets ctx = do
+-- | Offset every node by its enclosing scrollers and set its clip. The root
+-- clips to the window, as in paint, so a root smaller than its content still
+-- draws the overflow.
+applyScrollOffsets :: Context -> Size -> IO ()
+applyScrollOffsets ctx (Size w h) = do
   beginScrollMetrics ctx
   -- A frame that added no widgets has no root to walk.
   count <- arenaCount (ctxNodeArena ctx)
-  when (count > 0) $ do
-    rect <- getNodeRect (ctxNodeArena ctx) 0
-    transformSubtree ctx 0 0 0 rect
+  when (count > 0) $ transformSubtree ctx 0 0 0 (Rect 0 0 w h)
 
 transformSubtree :: Context -> NodeIdx -> Float -> Float -> Rect -> IO ()
 transformSubtree ctx@Context {ctxNodeArena = na} idx scrollX scrollY parentClip = do
   nt <- getNodeType na idx
-  (lx, ly, vw, vh) <- getRect na idx
+  Rect lx ly vw vh <- getNodeRect na idx
   let
     floating = isFloatingNode nt
     (sx, sy) = if floating then (0, 0) else (scrollX, scrollY)
     !vx = lx + sx
     !vy = ly + sy
-    within r = fromMaybe parentClip (rectIntersect parentClip r)
+    -- A rect entirely outside the parent clip gets an empty clip, not the
+    -- parent's.
+    within r = fromMaybe (Rect (rectX r) (rectY r) 0 0) (rectIntersect parentClip r)
   -- With no offset on either axis the placed rect equals the laid-out one, so
   -- the write is a no-op; a floating node always takes that path.
   unless (sx == 0 && sy == 0) $ setRect na idx vx vy vw vh
@@ -190,40 +193,78 @@ findScrollNodeUnderMouse ctx mouse = do
   if count <= 0
     then pure Nothing
     else do
+      -- Start at the topmost modal under the pointer, else the window or popup.
       top <-
         runMaybeT $
-          MaybeT (topmostModalAtMouse ctx mouse)
+          MaybeT (topmostFloating ctx (== NodeModal) (`rectHit` mouse))
             <|> MaybeT (topmostOverlayAtMouse ctx mouse)
-      let
-        start = fromMaybe 0 top
+      let start = fromMaybe 0 top
       rect <- getNodeRect (ctxNodeArena ctx) start
-      queryScrollTarget ctx mouse rect start
+      layered <- (> 0) <$> layeredNodeCount (ctxNodeArena ctx)
+      queryScrollTarget ctx layered mouse rect start <&> \case
+        WheelTo idx -> Just idx
+        _ -> Nothing
 
--- | The scroller under @mouse@ in the subtree at @idx@: its first child's,
--- else @idx@ itself.
-queryScrollTarget :: Context -> V2 -> Rect -> NodeIdx -> IO (Maybe NodeIdx)
-queryScrollTarget ctx mouse parentClip idx = runMaybeT $ do
-  nt <- liftIO $ getNodeType (ctxNodeArena ctx) idx
-  clip <- MaybeT $ scrollHitClip ctx idx nt parentClip
-  MaybeT (firstChildJustM (ctxNodeArena ctx) idx (queryScrollTarget ctx mouse clip))
-    <|> MaybeT (scrollHitSelf ctx idx nt mouse clip)
+-- | What a subtree does with the wheel at the pointer.
+data WheelHit
+  = WheelMiss
+  -- ^ Nothing in the subtree takes the wheel here.
+  | WheelBlocked
+  -- ^ A 'PointerBlock' node without a scroller is on top here. Nodes
+  -- beneath it do not get the wheel, but an enclosing scroller still does.
+  | WheelTo !NodeIdx
+  -- ^ This scroller takes the wheel.
 
-scrollHitSelf ::
-  Context -> NodeIdx -> NodeType -> V2 -> Rect -> IO (Maybe NodeIdx)
-scrollHitSelf ctx idx nt mouse clip
-  | nt == NodeTextArea = do
-      (field, bars) <- textAreaScrollGeom ctx idx
-      let hit = rectHit clip mouse && rectHit field mouse && (tabVertical bars || tabHorizontal bars)
-      pure (if hit then Just idx else Nothing)
-  | isScrollNode nt && rectHit clip mouse = pure (Just idx)
-  | otherwise = pure Nothing
+-- | The wheel target at @mouse@ in the subtree at @idx@: the topmost child's
+-- answer, else @idx@ itself if it is a scroller under the pointer. Where
+-- children can overlap (@layered@ is set and this node is 'Layered' or has a
+-- pinned descendant), they are asked topmost first ('firstChildOnTopJustM'),
+-- so a scroller pinned over another wins. Otherwise children cannot overlap
+-- and are asked in arena sibling order.
+queryScrollTarget :: Context -> Bool -> V2 -> Rect -> NodeIdx -> IO WheelHit
+queryScrollTarget ctx@Context {ctxNodeArena = na} layered mouse parentClip idx = do
+  nt <- getNodeType na idx
+  scrollHitClip ctx idx nt parentClip >>= \case
+    Nothing -> pure WheelMiss
+    Just clip -> do
+      overlapping <-
+        pure layered <&&> ((||) <$> ((== Layered) <$> getFlow na idx) <*> hasPinnedBelow na idx)
+      let answered c =
+            queryScrollTarget ctx layered mouse clip c <&> \case
+              WheelMiss -> Nothing
+              hit -> Just hit
+      inner <-
+        fromMaybe WheelMiss <$> (if overlapping then firstChildOnTopJustM else firstChildJustM) na idx answered
+      case inner of
+        WheelTo _ -> pure inner
+        _ -> ifM (scrollHitSelf ctx idx nt mouse clip) (pure (WheelTo idx)) $ do
+          blocks <-
+            pure layered
+              <&&> ((== PointerBlock) <$> getPointerMode na idx)
+              <&&> (rectHit <$> getNodeRect na idx <*> pure mouse)
+              <&&> pure (rectHit clip mouse)
+          pure (if blocks then WheelBlocked else inner)
+
+-- | Whether node @idx@ takes the wheel at @mouse@: a scroll container whose
+-- viewport or bar lanes contain it, or a text area with something to scroll.
+-- A 'PointerPass' node never does.
+scrollHitSelf :: Context -> NodeIdx -> NodeType -> V2 -> Rect -> IO Bool
+scrollHitSelf ctx@Context {ctxNodeArena = na} idx nt mouse clip
+  | nt == NodeTextArea =
+      takes <&&> do
+        (field, bars) <- textAreaScrollGeom ctx idx
+        pure (rectHit clip mouse && rectHit field mouse && (tabVertical bars || tabHorizontal bars))
+  | isScrollNode nt = pure (rectHit clip mouse) <&&> takes
+  | otherwise = pure False
+ where
+  takes = not <$> passesPointer na idx
 
 -- Same clip stack as the span walk: scroll viewport (plus its bar lanes),
 -- then panel bounds.
 scrollHitClip :: Context -> NodeIdx -> NodeType -> Rect -> IO (Maybe Rect)
 scrollHitClip Context {ctxNodeArena = na} idx nt parentClip
   | isScrollNode nt = do
-      (x, y, w, h) <- getRect na idx
+      Rect x y w h <- getNodeRect na idx
       sn <- readScrollNode na idx
       let
         lane d = scrollChromeLane (snSlot sn) d x y w h (snPad sn)
@@ -255,7 +296,7 @@ scrollBarsFor ctx@Context {ctxNodeArena = na} idx wid = do
   if nt == NodeTextArea
     then (\(field, tab) -> bars True (textAreaBarLayouts field tab curX curY)) <$> textAreaScrollGeom ctx idx
     else do
-      (x, y, w, h) <- getRect na idx
+      Rect x y w h <- getNodeRect na idx
       sn <- readScrollNode na idx
       pure (bars (sn2D sn) (scrollNodeBars sn x y w h curX curY))
 
@@ -268,18 +309,18 @@ grabbableBars ctx wid =
 
 updateScrollDrag :: Context -> Input -> IO ()
 updateScrollDrag ctx inp
-  | inputMouseReleased inp =
+  | releasedIn MouseLeft inp =
       modifyInteraction ctx (\s -> s {isScrollDrag = Nothing})
   | otherwise = do
       mDrag <- getsInteraction ctx isScrollDrag
       case mDrag of
         Just (wid, dragDir, grabOff)
-          | inputMouseDown inp -> do
+          | heldIn MouseLeft inp -> do
               bars <- grabbableBars ctx wid
               forM_ bars $ \(dir, layout, setOffset) ->
                 when (dir == dragDir) $
                   setOffset (scrollOffsetFromThumb dir layout grabOff (inputMousePos inp))
-        Nothing | inputMousePressed inp -> tryStartScrollDrag ctx inp
+        Nothing | pressedIn MouseLeft inp -> tryStartScrollDrag ctx inp
         _ -> pure ()
 
 -- | Grab a thumb, or jump the thumb's center to a track press and keep
@@ -292,9 +333,7 @@ tryStartScrollDrag ctx inp = do
   forM_ mIdx $ \hitIdx -> do
     wid <- getWidgetId (ctxNodeArena ctx) hitIdx
     bars <- grabbableBars ctx wid
-    let
-      onBar (_, l, _) = rectContains (sbThumb l) mouse || rectContains (sbTrack l) mouse
-    forM_ (find onBar bars) $ \(dir, layout, setOffset) -> do
+    forM_ (find (\(_, l, _) -> onScrollBar mouse l) bars) $ \(dir, layout, setOffset) -> do
       let
         Rect tx ty tw th = sbThumb layout
         along (V2 mx my) = if dir == DirColumn then my else mx
@@ -313,7 +352,7 @@ probeScrollBarHover ctx@Context {ctxNodeArena = na} inp = do
   case mDrag of
     Just (wid, dir, _) -> barWhere wid (\(d, _, _) -> d == dir) <$> grabbableBars ctx wid
     Nothing
-      | inputMouseDown inp || not (rectContains (Rect 0 0 winW winH) mouse) -> pure Nothing
+      | heldIn MouseLeft inp || not (rectContains (Rect 0 0 winW winH) mouse) -> pure Nothing
       | otherwise -> do
           top <- overlayHitRoot ctx mouse
           let candidate idx = do
@@ -324,17 +363,16 @@ probeScrollBarHover ctx@Context {ctxNodeArena = na} inp = do
                     -- A scroller's own clip is its viewport, short of its
                     -- bars; the clip around it is its parent's.
                     owner <- if isScrollNode nt then getParent na idx else pure idx
-                    if owner < 0 then pure True else maybe True (`rectContains` mouse) <$> getClipRect na owner
+                    if owner < 0 then pure True else maybe True (`rectContains` mouse) <$> getClipBounds na owner
                   <&&> (isJust <$> barAt idx)
                   <&&> overlayHitAllowed ctx top idx
               barAt idx = do
                 wid <- getWidgetId na idx
-                barWhere wid (\(_, l, _) -> onBar l) <$> scrollBarsFor ctx idx wid
+                barWhere wid (\(_, l, _) -> onScrollBar mouse l) <$> scrollBarsFor ctx idx wid
           findClassNodeM na PointerNodes candidate >>= maybe (pure Nothing) barAt
   where
     mouse = inputMousePos inp
     Size winW winH = inputWindowSize inp
-    onBar l = rectContains (sbThumb l) mouse || rectContains (sbTrack l) mouse
     barWhere wid p bars = (\(dir, l, _) -> (wid, dir, sbTrack l)) <$> find p bars
 
 -- | Record the scrollbar the pointer is on ('probeScrollBarHover') and

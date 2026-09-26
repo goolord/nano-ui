@@ -7,6 +7,7 @@ module NanoUI.Widgets.RichText
   , strong
   , emphasis
   , inlineCode
+  , inlineBackground
   , hyperlink
   , richText
   , richText'
@@ -16,7 +17,7 @@ module NanoUI.Widgets.RichText
 
 import Control.Monad (unless)
 import Data.Hashable (hashWithSalt)
-import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
 import Data.List (dropWhileEnd, groupBy)
 import Data.Maybe (fromMaybe, isJust, listToMaybe)
@@ -32,29 +33,29 @@ import NanoUI.Internal.Frame.Node (resolveTextFont)
 import NanoUI.Internal.Input (Input (..), UiCursorKind (..))
 import NanoUI.Internal.Layout.Arena (NodeType (NodeDrawing))
 import NanoUI.Internal.Monad (Ui, askDefaultLayout, askInput, freshWidget, uiIO, uiTheme)
-import NanoUI.Internal.Style
+import NanoUI.Internal.Style hiding (Flow (..))
 import NanoUI.Internal.Types (Color (..), Rect (..), V2 (..))
 import NanoUI.Internal.Widgets.Node (Response, addWidget, respClicked, respHovered, respRect)
 
--- | A piece of a paragraph: text in one style, and the hyperlink it follows when
--- it is one. A string literal produces unstyled text.
-data Inline = Inline !Text (Layout -> Layout) !(Maybe Text)
+-- | A piece of a paragraph: text in one style, with an optional hyperlink
+-- target and background colour. A string literal is unstyled text.
+data Inline = Inline !Text (Layout -> Layout) !(Maybe Text) !(Maybe Color)
 
 instance IsString Inline where
   fromString = inlineText . T.pack
 
 -- | Text in the paragraph's own style.
 inlineText :: Text -> Inline
-inlineText txt = Inline txt id Nothing
+inlineText txt = Inline txt id Nothing Nothing
 
 -- | Text styled by font modifiers (@fontBold@, @fontSize 20@,
 -- @fontColor red . fontUnderline@), applied over the paragraph's layout.
 inlineWith :: (Layout -> Layout) -> Text -> Inline
-inlineWith f txt = Inline txt f Nothing
+inlineWith f txt = Inline txt f Nothing Nothing
 
 -- | Add font modifiers to a piece, a hyperlink included.
 restyle :: (Layout -> Layout) -> Inline -> Inline
-restyle f (Inline txt style target) = Inline txt (f . style) target
+restyle f (Inline txt style target bg) = Inline txt (f . style) target bg
 
 -- | Bold text.
 strong :: Text -> Inline
@@ -68,10 +69,18 @@ emphasis = inlineWith fontItalic
 inlineCode :: Text -> Inline
 inlineCode = inlineWith fontMono
 
+-- | Paint a colour behind a piece, the full line-box height, e.g. a
+-- highlight or an inline code tint. Leading and trailing spaces on each line
+-- are left bare.
+--
+-- > richText ["Run ", inlineBackground codeTint (inlineCode "cabal build"), " first."]
+inlineBackground :: Color -> Inline -> Inline
+inlineBackground c (Inline txt style target _) = Inline txt style target (Just c)
+
 -- | @hyperlink target label@: text in the theme's link colour, underlined while
 -- hovered, whose click the paragraph reports as @target@.
 hyperlink :: Text -> Text -> Inline
-hyperlink target label = Inline label id (Just target)
+hyperlink target label = Inline label id (Just target) Nothing
 
 -- | A paragraph of pieces, wrapped at its width. Returns the target of the
 -- hyperlink clicked this frame.
@@ -79,7 +88,8 @@ richText :: Ui :> es => [Inline] -> Eff es (Maybe Text)
 richText = richTextWith id
 
 -- | 'richText' with a layout modifier, whose font choices are the default
--- for every piece.
+-- for every piece. Horizontal alignment applies per line: with 'alignEnd'
+-- every line ends at the right edge.
 richTextWith :: Ui :> es => (Layout -> Layout) -> [Inline] -> Eff es (Maybe Text)
 richTextWith f pieces = snd <$> richTextWith' f pieces
 
@@ -88,13 +98,14 @@ richTextWith f pieces = snd <$> richTextWith' f pieces
 richText' :: Ui :> es => [Inline] -> Eff es (Response, Maybe Text)
 richText' = richTextWith' id
 
--- A resolved piece: its font, colour, line metrics and hyperlink.
+-- A piece resolved to concrete font, colour and metrics.
 data Run = Run
   { runFont :: !TextFont
   , runColor :: !Color
   , runLineHeight :: !Float
   , runAscent :: !Float
   , runTarget :: !(Maybe Text)
+  , runBackground :: !(Maybe Color)
   }
 
 data TokenKind = Word | Space | Break
@@ -130,7 +141,11 @@ data Paragraph = Paragraph
   , paraLines :: [Line]
   }
 
-newtype Paragraphs = Paragraphs (IORef (IM.IntMap Paragraph))
+-- Recently laid-out paragraphs by widget key, with their count and the
+-- count that triggers dropping stale ones.
+data ParagraphCache = ParagraphCache !Int !Int !(IM.IntMap Paragraph)
+
+newtype Paragraphs = Paragraphs (IORef ParagraphCache)
 
 -- | 'richTextWith' returning the paragraph response and optional clicked link target.
 richTextWith' :: Ui :> es => (Layout -> Layout) -> [Inline] -> Eff es (Response, Maybe Text)
@@ -139,19 +154,20 @@ richTextWith' f pieces = do
   inp <- askInput
   base <- f <$> askDefaultLayout
   theme <- uiTheme
-  let styled = [(txt, pieceFont l, pieceColor theme l target, target) | Inline txt style target <- pieces, let l = style base]
-  Paragraphs cacheRef <- uiIO $ hostOrInit ctx (Paragraphs <$> newIORef IM.empty)
+  let styled = [(piece, pieceFont l, pieceColor theme l target) | piece@(Inline _ style target _) <- pieces, let l = style base]
+      align = layoutAlignX base
+  Paragraphs cacheRef <- uiIO $ hostOrInit ctx (Paragraphs <$> newIORef (ParagraphCache 0 paragraphBound IM.empty))
   gen <- uiIO (readIORef (ctxMetricGen ctx))
   let key =
         foldl'
-          ( \h (txt, TextFont size variant weight fstyle deco, Color rgba, target) ->
+          ( \h (Inline txt _ target bg, TextFont size variant weight fstyle deco, Color rgba) ->
               h `hashWithSalt` txt `hashWithSalt` size `hashWithSalt` fromEnum variant
                 `hashWithSalt` fromEnum weight `hashWithSalt` fromEnum fstyle `hashWithSalt` fromEnum deco
-                `hashWithSalt` rgba `hashWithSalt` target
+                `hashWithSalt` rgba `hashWithSalt` target `hashWithSalt` fmap (\(Color c) -> c) bg
           )
-          gen
+          (gen `hashWithSalt` fromEnum align)
           styled
-  cached <- uiIO (IM.lookup (intKey wid) <$> readIORef cacheRef)
+  cached <- uiIO ((\(ParagraphCache _ _ m) -> IM.lookup (intKey wid) m) <$> readIORef cacheRef)
   para0 <- case cached of
     Just para | paraKey para == key -> pure para
     _ -> uiIO $ do
@@ -161,11 +177,11 @@ richTextWith' f pieces = do
           emptyLine = case resolved of
             (run, _) : _ -> (runLineHeight run, runAscent run)
             [] -> (fmLineHeight (ctxFontMetrics ctx), fmAscent (ctxFontMetrics ctx))
-      pure (Paragraph key runs tokens emptyLine (lineBoxes (layoutLines runs emptyLine 1e9 tokens)) (-1) [])
+      pure (Paragraph key runs tokens emptyLine (lineBoxes (layoutLines runs emptyLine AlignStart 1e9 tokens)) (-1) [])
   resp <- addWidget wid NodeDrawing T.empty 0 base
   let Rect rx ry rw _ = respRect resp
       runs = paraRuns para0
-      layoutAt width = layoutLines runs (paraEmptyLine para0) width (paraTokens para0)
+      layoutAt width = layoutLines runs (paraEmptyLine para0) align width (paraTokens para0)
       para
         | paraWidth para0 == rw = para0
         | otherwise = para0 {paraWidth = rw, paraLines = layoutAt rw}
@@ -185,34 +201,39 @@ richTextWith' f pieces = do
               , mx >= rx + x && mx < rx + x + tokenWidth tok
               , isJust (runTarget (indexSmallArray runs (tokenRun tok)))
               ]
-      -- Words are drawn one by one, so a decoration is drawn once across a
-      -- piece's words on a line and the spaces between them.
+      -- Words are drawn separately, so backgrounds and decorations are drawn
+      -- once per piece per line, spanning the inner spaces. Backgrounds go
+      -- underneath.
       draw _cdc (Rect x0 y0 w _) =
         smallArrayFromList $
           concat
-            [ [ DrawTextStyled (x0 + x) (lineY line run) ((runFont run) {textFontDecoration = DecorationNone}) txt (runColor run)
-              | (x, Token txt runIdx Word _) <- lineTokens line
-              , let run = indexSmallArray runs runIdx
-              ]
-                ++ concat
-                  [ [FillRect (Rect (x0 + x1) (y + offset) (x2 - x1) thick) (runColor run) | offset <- decorationOffsets deco run]
-                  | group <- groupBy (\(_, a) (_, b) -> tokenRun a == tokenRun b) (lineTokens line)
-                  , let trimmed = dropWhileEnd isSpaceToken (dropWhile isSpaceToken group)
-                  , (x1, first) : _ <- [trimmed]
-                  , let runIdx = tokenRun first
-                        run = indexSmallArray runs runIdx
-                        deco = decorationOf runIdx
-                        (lastX, lastTok) = last trimmed
-                        x2 = lastX + tokenWidth lastTok
-                        y = lineY line run
-                        thick = max 1 (0.06 * runLineHeight run)
-                  , deco /= DecorationNone
-                  ]
+            [ [FillRect (Rect (x0 + x1) (lineY line run) (x2 - x1) (runLineHeight run)) bg | (run, _, x1, x2) <- spans, Just bg <- [runBackground run]]
+                ++ [ DrawTextStyled (x0 + x) (lineY line run) ((runFont run) {textFontDecoration = DecorationNone}) txt (runColor run)
+                   | (x, Token txt runIdx Word _) <- lineTokens line
+                   , let run = indexSmallArray runs runIdx
+                   ]
+                ++ [ FillRect (Rect (x0 + x1) (lineY line run + offset) (x2 - x1) thick) (runColor run)
+                   | (run, runIdx, x1, x2) <- spans
+                   , let deco = decorationOf runIdx
+                         thick = max 1 (0.06 * runLineHeight run)
+                   , deco /= DecorationNone
+                   , offset <- decorationOffsets deco run
+                   ]
             | line <- linesAt w
+            , let spans = pieceSpans line
             ]
         where
           lineY line run = y0 + lineTop line + lineAscent line - runAscent run
           isSpaceToken (_, tok) = tokenKind tok == Space
+          -- Each piece's tokens on a line, trimmed of edge spaces: run, run
+          -- index, start x and end x.
+          pieceSpans line =
+            [ (indexSmallArray runs (tokenRun first), tokenRun first, x1, lastX + tokenWidth lastTok)
+            | group <- groupBy (\(_, a) (_, b) -> tokenRun a == tokenRun b) (lineTokens line)
+            , let trimmed = dropWhileEnd isSpaceToken (dropWhile isSpaceToken group)
+            , (x1, first) : _ <- [trimmed]
+            , let (lastX, lastTok) = last trimmed
+            ]
       decorationOf runIdx =
         (if Just runIdx == hoveredRun then addUnderline else id)
           (textFontDecoration (runFont (indexSmallArray runs runIdx)))
@@ -229,17 +250,29 @@ richTextWith' f pieces = do
               DecorationNone -> []
       drawKey = key `hashWithSalt` fromMaybe (-1) hoveredRun
   uiIO $ do
-    unless (paraWidth para0 == rw && fmap paraKey cached == Just key) $
-      modifyIORef' cacheRef $ \m ->
-        -- Paragraphs no longer drawn are dropped all at once past a bound.
-        IM.insert (intKey wid) para (if IM.size m > 4096 then IM.empty else m)
+    unless (paraWidth para0 == rw && fmap paraKey cached == Just key) $ do
+      ParagraphCache n bound m <- readIORef cacheRef
+      let n' = if isJust cached then n else n + 1
+      writeIORef cacheRef
+        =<< if n' <= bound
+          then pure $! ParagraphCache n' bound (IM.insert (intKey wid) para m)
+          else do
+            -- Past the bound, drop paragraphs neither drawn last frame nor
+            -- yet this one, then set the bound to twice what is left. Views
+            -- with more paragraphs than the bound keep them all, and pruning
+            -- runs occasionally rather than every frame.
+            prev <- getsDamage ctx (pfRects . dsPrev)
+            now <- dcsCustomDrawings <$> readIORef (ctxDrawingCache ctx)
+            let kept = IM.insert (intKey wid) para (IM.filterWithKey (\k _ -> IM.member k prev || IM.member k now) m)
+                size = IM.size kept
+            pure $! ParagraphCache size (max paragraphBound (2 * size)) kept
     registerCustomMeasure ctx wid $ \_ (availW, _) ->
       if availW >= 1e9 then paraNatural para else lineBoxes (linesAt availW)
     registerCustomEntry ctx wid $
       CustomDrawingEntry
         (if drawKey == 0 then 1 else drawKey)
         draw
-        (Just (const (if isJust hoveredRun then UiCursorPointer else UiCursorDefault)))
+        (Just (\_ _ _ -> if isJust hoveredRun then UiCursorPointer else UiCursorDefault))
         0
         False
   let clicked
@@ -249,27 +282,28 @@ richTextWith' f pieces = do
   where
     lineBoxes lines' = (maximum (0 : map lineWidth lines'), sum (map lineHeight lines'))
 
--- | The font a piece's layout chooses.
+-- | Cache size at which stale paragraphs are first pruned.
+paragraphBound :: Int
+paragraphBound = 4096
+
+-- | The font a piece's layout chooses. A colour-only variant resolves to the
+-- regular face ('resolveTextFont').
 pieceFont :: Layout -> TextFont
 pieceFont l = TextFont (layoutFontSize l) (layoutFontVariant l) (layoutFontWeight l) (layoutFontStyle l) (layoutTextDecoration l)
 
 -- | A piece's colour: its own, else the link colour for a link, else its
--- font variant's colour.
+-- colour for its tone and face, as for a label.
 pieceColor :: Theme -> Layout -> Maybe Text -> Color
 pieceColor theme l target =
-  let variantColor = case layoutFontVariant l of
-        FontHeading -> themeAccent theme
-        FontMuted -> themeMuted theme
-        FontDanger -> themeRed theme
-        _ -> styleFg (themePanel theme)
-   in fromMaybe (maybe variantColor (const (themeLink theme)) target) (layoutFontColor l)
+  let toneCol = textToneColor theme (layoutFontVariant l) (layoutFontTone l)
+   in fromMaybe (maybe toneCol (const (themeLink theme)) target) (layoutFontColor l)
 
 -- | A piece's line metrics and its tokens measured in its font.
-measurePiece :: Context -> (Int, (Text, TextFont, Color, Maybe Text)) -> IO (Run, [Token])
-measurePiece ctx (i, (txt, font, color, target)) = do
+measurePiece :: Context -> (Int, (Inline, TextFont, Color)) -> IO (Run, [Token])
+measurePiece ctx (i, (Inline txt _ target bg, font, color)) = do
   (fm, _) <- resolveTextFont ctx font
   tokens <- mapM (measure fm) (T.groupBy (\a b -> kindOf a == kindOf b && kindOf a /= Break) txt)
-  pure (Run font color (fmLineHeight fm) (fmAscent fm) target, tokens)
+  pure (Run font color (fmLineHeight fm) (fmAscent fm) target bg, tokens)
   where
     kindOf c
       | c == '\n' = Break
@@ -280,11 +314,11 @@ measurePiece ctx (i, (txt, font, color, target)) = do
       w <- if kind == Break then pure 0 else lineWidthIO fm part
       pure (Token part i kind w)
 
--- | Greedy lines at @width@: a break goes between words only at spaces or
--- line breaks, spaces at a wrap are dropped, and a word wider than the line
--- takes a line of its own.
-layoutLines :: SmallArray Run -> (Float, Float) -> Float -> [Token] -> [Line]
-layoutLines runs (emptyH, emptyAscent) width = go 0 [] 0 [] True
+-- | Greedy line breaking at @width@, aligned by @align@. Breaks only at
+-- spaces or newlines, drops spaces at a wrap, and gives an overlong word its
+-- own line.
+layoutLines :: SmallArray Run -> (Float, Float) -> AlignX -> Float -> [Token] -> [Line]
+layoutLines runs (emptyH, emptyAscent) align width = go 0 [] 0 [] True
   where
     -- @placed@ holds the line's tokens in reverse, @pending@ the spaces since
     -- its last word; @fresh@ whether the line starts after a wrap.
@@ -307,7 +341,11 @@ layoutLines runs (emptyH, emptyAscent) width = go 0 [] 0 [] True
                    in go top placed'' x'' [] False rest'
     place (acc, x) tok = ((x, tok) : acc, x + tokenWidth tok)
     finish top placed x =
-      let toks = reverse placed
+      let shift = case align of
+            AlignStart -> 0
+            AlignCenter -> (width - x) / 2
+            AlignEnd -> width - x
+          toks = reverse (if shift == 0 then placed else [(tx + shift, tok) | (tx, tok) <- placed])
           metrics = [indexSmallArray runs (tokenRun tok) | (_, tok) <- toks]
           (h, ascent) = case metrics of
             [] -> (emptyH, emptyAscent)

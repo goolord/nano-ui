@@ -23,33 +23,33 @@ module NanoUI.Backend.Sdl
   , askSaveFileDialog
   , askOpenFolderDialog
   , pollFileDialogUi
+    -- * The window
+
+    -- | 'WindowSettings' and the view-side window functions come from the
+    -- core ("NanoUI"): 'NanoUI.askWindow', 'NanoUI.setWindowTitleUi',
+    -- 'NanoUI.moveWindowUi', 'NanoUI.quitUi' and others. The rest of this
+    -- section is specific to SDL.
+  , WindowSettings (..)
+  , defaultWindowSettings
+  , WindowPosition (..)
+  , WindowMode (..)
+  , windowZoom
+  , windowResizable
+  , WindowDecorations (..)
+  , setWindowDecorations
+  , setWindowShadow
+
     -- * Window chrome
   , WindowChrome (..)
   , defaultWindowChrome
   , defaultResizeBorder
   , setWindowChrome
   , clearWindowChrome
-  , setWindowTitle
-  , setWindowSize
-  , minimizeWindow
-  , maximizeWindow
-  , restoreWindow
-  , toggleMaximized
-  , windowMaximized
-  , windowResizable
-  , windowZoom
-  , WindowDecorations (..)
-  , setWindowDecorations
-  , setWindowShadow
   , CaptionOptions (..)
   , defaultCaptionOptions
   , windowCaption
   , windowCaptionWith
-  , setWindowTitleUi
   , setWindowChromeUi
-  , minimizeWindowUi
-  , toggleMaximizedUi
-  , windowMaximizedUi
   , NanoUIFont (..)
   , listFontFamilies
   , runSdlApp
@@ -59,15 +59,16 @@ module NanoUI.Backend.Sdl
   , withSdl
   , withSdlBench
   , saveScreenshot
+  , captureScreenshot
   ) where
 
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Typeable (Typeable)
-import NanoUI (NanoUI)
+import NanoUI (NanoUI, WindowMode (..), WindowPosition (..), WindowSettings (..), defaultWindowSettings)
 import NanoUI.Sdl.Internal.Runner (askSdlDebug, drawFrameWith, sdlDrawFrame, setSdlUiFont, setSdlUiScale)
 import NanoUI.Sdl.Internal.Session (runSdlSession)
 import NanoUI.Sdl.Internal.Debug (SdlDebugSnapshot (..))
-import NanoUI.Sdl.Internal.Window (RenderDriver (..), RgbaImage (..), SdlEnv (..), SdlOptions (..), defaultSdlOptions, saveScreenshot, syncDisplay, windowZoom, withSdl, withSdlBench)
+import NanoUI.Sdl.Internal.Window (RenderDriver (..), RgbaImage (..), SdlEnv (..), SdlOptions (..), captureScreenshot, defaultSdlOptions, saveScreenshot, syncDisplay, windowZoom, withSdl, withSdlBench)
 import NanoUI.Sdl.Internal.Dialog
 import NanoUI.Sdl.Internal.Chrome
 import NanoUI.Sdl.Internal.NanoUIFont (NanoUIFont (..))

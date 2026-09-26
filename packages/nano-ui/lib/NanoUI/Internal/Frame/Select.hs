@@ -27,8 +27,8 @@ import NanoUI.Internal.Font (FontMetrics, centeredTextY, menuItemPadX, menuItemR
 import NanoUI.Internal.Frame.Chrome (menuPanelBounds, overlayMenuStyle, paintMenuAccent, paintMenuPanel)
 import NanoUI.Internal.Frame.Hit (widgetOverlayAllowed)
 import NanoUI.Internal.Id (WidgetId (..))
-import NanoUI.Internal.Input (Input (..), Key (..), inputKeys, inputKeysElem, inputMousePos, inputMousePressed, inputPointerHeld)
-import NanoUI.Internal.Layout.Arena (NodeIdx, NodeType (NodeSelect, NodeTextInput), getNodeType, lookupNodeByKey, lookupNodeByWidgetId, getOptions, getRect, getWidgetId)
+import NanoUI.Internal.Input (Input (..), Key (..), MouseButton (..), Pressable (..), anyButtonPressed, anyButtonReleased, inputPointerHeld, shiftAtMost)
+import NanoUI.Internal.Layout.Arena (NodeIdx, NodeType (NodeSelect, NodeTextInput), getNodeType, lookupNodeByKey, lookupNodeByWidgetId, getOptions, getNodeRect, getWidgetId)
 import NanoUI.Internal.Monad (whenM, (<&&>))
 import NanoUI.Internal.Store (fieldFloat, fieldInt, fieldText, findSlot, insertSlot, setFieldSelection)
 import NanoUI.Internal.Style (Style (..), Theme (..), scrollBarThumbColor, scrollBarThumbHoverColor, scrollBarTrackColor, themeAccent, themeInput)
@@ -76,7 +76,7 @@ openDropdowns ctx@Context {ctxNodeArena = na} = do
   where
     build store idx wid combo = do
       opts <- getOptions na idx
-      (x, y, w, h) <- getRect na idx
+      Rect x y w h <- getNodeRect na idx
       let key = intKey wid
           slotInt slot def = findSlot fieldInt def (slotKey slot key) store
           slotFloat slot = findSlot fieldFloat 0 (slotKey slot key) store
@@ -171,8 +171,8 @@ overlayRouteAt ctx mouse = do
 routePointer :: Context -> Input -> IO PointerRoute
 routePointer ctx inp = do
   (held, old) <- getsInteraction ctx (\s -> (isPointerHeld s, isPointerRoute s))
-  let pressed = inputMousePressed inp || inputMouseRightPressed inp
-      released = inputMouseReleased inp || inputMouseRightReleased inp
+  let pressed = anyButtonPressed inp
+      released = anyButtonReleased inp
       -- A hold that ended without its release being seen is over too.
       holding = held && not pressed && (inputPointerHeld inp || released)
       mouse = inputMousePos inp
@@ -194,7 +194,7 @@ routePointer ctx inp = do
 
 closeSelectOnOutsideClick :: Context -> Input -> IO ()
 closeSelectOnOutsideClick ctx inp =
-  when (inputMousePressed inp || inputMouseReleased inp) $ do
+  when (pressedIn MouseLeft inp || releasedIn MouseLeft inp) $ do
     store <- getStore ctx
     when (anySelectOpen store) $ do
       let mouse = inputMousePos inp
@@ -204,12 +204,13 @@ closeSelectOnOutsideClick ctx inp =
 
 finalizeSelectKeyboard :: Context -> Input -> IO ()
 finalizeSelectKeyboard ctx@Context {ctxNodeArena = na} inp = do
-  let has k = inputKeysElem k (inputKeys inp)
+  let has k = pressedIn k inp
       wantNext = has KeyDown || has KeyRight
       wantStep = wantNext || has KeyUp || has KeyLeft
-      wantEsc = has KeyEscape
-      wantEnter = has KeyEnter
-  when (wantStep || wantEsc || wantEnter) $ do
+      wantEsc = pressedOnceIn KeyEscape inp
+      wantEnter = pressedOnceIn KeyEnter inp
+  -- With Ctrl, Alt or Super held, arrows and Enter are left to shortcuts.
+  when (wantEsc || ((wantStep || wantEnter) && shiftAtMost (inputModifiers inp))) $ do
     focus <- readIORef (ctxFocusId ctx)
     store <- getStore ctx
     -- Arrows step the focused enabled select, open or not. Otherwise the keys
@@ -258,7 +259,7 @@ keepNode p = fmap listToMaybe . filterM p . maybeToList
 
 finalizeSelectPick :: Context -> Input -> IO ()
 finalizeSelectPick ctx inp =
-  when (inputMousePressed inp || inputMouseReleased inp) $ do
+  when (pressedIn MouseLeft inp || releasedIn MouseLeft inp) $ do
     let mouse@(V2 _ mouseY) = inputMousePos inp
     dropdowns <- allowedDropdowns ctx
     forM_ dropdowns $ \dd ->
@@ -276,7 +277,7 @@ finalizeSelectPick ctx inp =
             -- disappears with the pick.
             let (_, vSb, hSb, _) = ddComboGeom dd
                 onLane = any (\(track, _) -> rectContains track mouse) (catMaybes [vSb, hSb])
-            when (inputMousePressed inp && not onLane) $
+            when (pressedIn MouseLeft inp && not onLane) $
               forM_ (comboDropPickIndex (ddRect dd) menuItemRowH nOpts mouseY) $ \picked -> do
                 let txt = fromMaybe "" (listToMaybe (drop picked (ddOptions dd)))
                     len = T.length txt

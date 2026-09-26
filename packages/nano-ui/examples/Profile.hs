@@ -7,9 +7,11 @@ import Data.ByteString (ByteString)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.Text (Text)
 import Data.Text qualified as T
+import Data.Foldable (toList)
 import Data.Primitive.SmallArray (SmallArray)
 import NanoUI
-import NanoUI.Backend (emptyInput, inputKeysFromList)
+import NanoUI.Backend (applyMouseButton, emptyInput, inputKeysFromList, monospaceMetrics)
+import NanoUI.Path qualified as P
 import NanoUI.Svg (rasterizeSvg)
 import NanoUI.Testing (newContext, runFrame, uiCursorKind)
 import GHC.Clock (getMonotonicTime)
@@ -77,7 +79,7 @@ widgetScene =
 -- | A thousand rects: enough ops that building them costs more than replaying
 -- them, which is the case a content key is for.
 canvasOps :: CustomDrawContext -> Rect -> SmallArray DrawOp
-canvasOps cdc (Rect x y w h) = runCanvas $ do
+canvasOps cdc (Rect x y w h) = runCanvasFor cdc $ do
   let side = 32 :: Int
       cw = w / fromIntegral side
       ch = h / fromIntegral side
@@ -114,6 +116,43 @@ canvasScene key =
         , widgetContent = key
         , widgetDraw = countedCanvasOps
         }
+
+-- | Path counterpart of 'canvasOps': 64 filled circles and 64 stroked
+-- rounded rects, then, rotated by @turn@, a star (ear-clip triangulated) and
+-- a 400-point polyline.
+pathOps :: Float -> CustomDrawContext -> Rect -> SmallArray DrawOp
+pathOps turn cdc (Rect x y w h) = runCanvasFor cdc $ do
+  let accent = themeAccent (cdcTheme cdc)
+      ink = styleFg (themePanel (cdcTheme cdc))
+      c = V2 (x + w / 2) (y + h / 2)
+      star = [V2 (x + w / 2 + r * cos a) (y + h / 2 + r * sin a) | k <- [0 .. 19 :: Int], let a = pi * fromIntegral k / 10; r = if even k then 200 else 90]
+      wave = [V2 (x + fromIntegral k * w / 400) (y + h / 2 + 60 * sin (fromIntegral k / 12)) | k <- [0 .. 399 :: Int]]
+  forM_ [0 .. 7 :: Int] $ \i -> forM_ [0 .. 7 :: Int] $ \j -> do
+    let cx = x + 32 + fromIntegral i * 60
+        cy = y + 32 + fromIntegral j * 60
+    drawPath (P.circle (V2 cx cy) 20) accent
+    drawStrokePath (P.roundedRect (Rect (cx - 25) (cy - 25) 50 50) 8) 2 ink
+  withTransform (P.rotateAround c turn) $ do
+    drawPath (P.polygon star) accent
+    drawStrokePath (P.polyline wave) 3 ink
+
+-- | A custom widget that builds 'pathOps' every frame, rotated a little more
+-- each time so every frame also repaints.
+pathScene :: NanoUI ()
+pathScene =
+  void $
+    customWidget
+      defaultCustomWidgetSpec
+        { widgetLayout = fixedWH 512 512 defaultLayout
+        , widgetDraw = countedPathOps
+        }
+
+{-# NOINLINE countedPathOps #-}
+countedPathOps :: CustomDrawContext -> Rect -> SmallArray DrawOp
+countedPathOps cdc rect = unsafePerformIO $ do
+  modifyIORef' buildCount (+ 1)
+  n <- readIORef buildCount
+  pure (pathOps (fromIntegral n * 0.01) cdc rect)
 
 -- | A focused text area over a long document, typing into its middle: the
 -- editor path, whose per-frame cost must not grow with the document.
@@ -169,6 +208,12 @@ main = do
               void (evaluate (rasterizeSvg (16 + i `mod` 2) 16 white doc))
               void (evaluate (rasterizeSvg (128 + i `mod` 2) 128 white doc))
       putStrLn "profiled 1000 rasterizations of two icons at 16 and 128 px"
+    ("canvas-paths-build" : _) -> do
+      -- Build 'pathOps' with no frame around it, timing the ops alone.
+      let cdc = CustomDrawContext False False False False False defaultTheme (monospaceMetrics 16)
+      forM_ [1 .. iterations] $ \i ->
+        mapM_ evaluate (toList (pathOps (fromIntegral i * 0.01) cdc (Rect 0 0 512 512)))
+      putStrLn ("built " ++ show iterations ++ " path scenes")
     ("window" : rest) -> do
       -- A floating window over 3000 rows of a scroll area, held still or,
       -- with "drag", dragged back and forth by its title bar.
@@ -178,10 +223,10 @@ main = do
           grab = V2 1014 22
       replicateM_ 5 (void (runFrame ctx inp ui))
       when drag $
-        void (runFrame ctx inp {inputMousePos = grab, inputMouseDown = True, inputMousePressed = True} ui)
+        void (runFrame ctx (applyMouseButton MouseLeft True inp {inputMousePos = grab}) ui)
       forM_ [1 .. 300 :: Int] $ \i -> do
         let V2 gx gy = grab
-            step = inp {inputMousePos = V2 (gx - 100 + fromIntegral (i `mod` 2) * 6) (gy + 50), inputMouseDown = True}
+            step = inp {inputMousePos = V2 (gx - 100 + fromIntegral (i `mod` 2) * 6) (gy + 50), inputButtonsHeld = buttonsFromList [MouseLeft]}
         void (runFrame ctx (if drag then step else inp) ui)
       putStrLn ("profiled 300 window frames" ++ if drag then ", dragging" else "")
     ("pointer" : _) -> do
@@ -198,8 +243,8 @@ main = do
       forM_ [1 .. frames] $ \i -> do
         let base = at i
             fi = case i `mod` 10 of
-              0 -> base {inputMouseDown = True, inputMousePressed = True}
-              1 -> base {inputMouseReleased = True}
+              0 -> applyMouseButton MouseLeft True base
+              1 -> applyMouseButton MouseLeft False base
               _ -> base
         void (runFrame ctx fi ui)
         c0 <- getMonotonicTime
@@ -231,11 +276,12 @@ main = do
             emptyInput
               { inputWindowSize = Size 800 600
               , inputMousePos = V2 400 300
-              , inputMouseDown = True
+              , inputButtonsHeld = buttonsFromList [MouseLeft]
               }
           (name, ui) = case args of
             ("canvas" : _) -> ("canvas", canvasScene 0)
             ("canvas-keyed" : _) -> ("canvas-keyed", canvasScene 1)
+            ("canvas-paths" : _) -> ("canvas-paths", pathScene)
             _ -> ("widgets", widgetScene)
       replicateM_ iterations (void (runFrame ctx inp ui))
       builds <- readIORef buildCount

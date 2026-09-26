@@ -30,11 +30,11 @@ module NanoUI.Widgets.TextEditor
   ) where
 
 import Control.Monad (unless, void, when)
-import Data.Char (chr, isPrint, isSpace, ord, toLower)
+import Data.Char (isPrint, isSpace, toLower)
 import Data.Text qualified as T
 import Data.Text.Short qualified as TS
 import NanoUI.Internal.Context (Context (..))
-import NanoUI.Internal.Input (Input (..), Key (..), Modifiers (..))
+import NanoUI.Internal.Input (Input (..), Key (..), Modifiers (..), modJump, modMacCommand, modPrimary, noModifiers, onMac)
 import NanoUI.Widgets.TextBuffer (Cursor (..), TextBuffer, TextEdit (..))
 import NanoUI.Widgets.TextCommand (TextCommand (..), TextMotion (..))
 import NanoUI.Widgets.TextBuffer qualified as TB
@@ -183,47 +183,33 @@ runCommand mode cmd ed@(Editor buf anchor hist) =
     InsertText raw
       | modeEditable mode ->
           let txt = singleLine raw
-              kind
-                | T.length txt == 1 && txt /= "\n" = EditTyping
-                | otherwise = EditOther
-           in if T.null txt && not (hasSelection ed) then ed else replaceSelection kind txt
+           in replaceSelection (if T.length txt == 1 && txt /= "\n" then EditTyping else EditOther) txt
     Delete motion
       | modeEditable mode ->
           if hasSelection ed
             then replaceSelection EditDeleting T.empty
-            else
-              let target = motionTarget motion
-               in if target == cursor
-                    then ed
-                    else edit EditDeleting (TB.replaceEdit T.empty cursor target buf)
+            else edit EditDeleting (TB.replaceEdit T.empty cursor (motionTarget motion) buf)
     Move motion extend ->
       let moved = moveBuffer motion
        in Editor moved (if extend then anchor else TB.getCursor moved) (sealHistory hist)
-    SelectAll ->
-      let end = TB.documentEnd buf
-       in Editor (TB.withCursor end buf) (Cursor 0 0) (sealHistory hist)
+    SelectAll -> runCommand mode (Select (Cursor 0 0) (TB.documentEnd buf)) ed
     Select a c ->
       Editor (TB.withCursor c buf) (TB.clampCursor buf a) (sealHistory hist)
     Replace a b txt
       | modeEditable mode -> edit EditOther (TB.replaceEdit (singleLine txt) a b buf)
-    ReplaceAll txt
-      | modeEditable mode ->
-          edit EditOther (TB.replaceEdit (singleLine txt) (Cursor 0 0) (TB.documentEnd buf) buf)
-    Undo -> case historyUndo hist of
-      g : rest ->
-        let buf' = foldl (\b e -> TB.applyEdit (TB.invertEdit (replayed e)) b) buf (groupEdits g)
-            (a, c) = groupBefore g
-         in Editor (TB.withCursor c buf') a hist {historyUndo = rest, historyRedo = g : historyRedo hist, historyDepth = historyDepth hist - 1, historyOpen = False}
-      [] -> ed
-    Redo -> case historyRedo hist of
-      g : rest ->
-        let buf' = foldr (TB.applyEdit . replayed) buf (groupEdits g)
-            (a, c) = groupAfter g
-         in Editor (TB.withCursor c buf') a hist {historyUndo = g : historyUndo hist, historyRedo = rest, historyDepth = historyDepth hist + 1, historyOpen = False}
-      [] -> ed
+    ReplaceAll txt -> runCommand mode (Replace (Cursor 0 0) (TB.documentEnd buf) txt) ed
+    Undo
+      | g : rest <- historyUndo hist ->
+          restore (groupBefore g) (foldl (\b e -> TB.applyEdit (TB.invertEdit (replayed e)) b) buf (groupEdits g)) $
+            hist {historyUndo = rest, historyRedo = g : historyRedo hist, historyDepth = historyDepth hist - 1}
+    Redo
+      | g : rest <- historyRedo hist ->
+          restore (groupAfter g) (foldr (TB.applyEdit . replayed) buf (groupEdits g)) $
+            hist {historyUndo = g : historyUndo hist, historyRedo = rest, historyDepth = historyDepth hist + 1}
     _ -> ed
   where
     cursor = TB.getCursor buf
+    restore (a, c) buf' h = Editor (TB.withCursor c buf') a h {historyOpen = False}
     replayed (StoredEdit at removed inserted) = TextEdit at (TS.toText removed) (TS.toText inserted)
     singleLine = (if modeMultiLine mode then id else T.filter (/= '\n')) . TB.insertableText
     replaceSelection kind txt = edit kind (TB.replaceEdit txt anchor cursor buf)
@@ -275,59 +261,85 @@ runCommandIO ctx mode cmd ed =
           txt = if a /= c then TB.selectedText a c buf else TB.toText buf
       unless (T.null txt) $ void (ctxClipboardSet ctx txt)
 
--- | The command a key runs. Ctrl or Alt turns character and deletion keys
--- into word motions, and Shift extends the selection.
+-- | The command a key runs, following iced's bindings. 'modJump' (Option on
+-- macOS, Ctrl elsewhere) makes motions and deletions work by word, and
+-- Home/End in a multi-line field go to the document's ends. Command on
+-- macOS, or Ctrl+Shift with Backspace/Delete elsewhere, goes to the line's
+-- ends. Shift extends the selection. With 'modPrimary': A select all, C/X/V
+-- copy/cut/paste, Z undo, Shift+Z or Y redo. On macOS, Ctrl alone gives the
+-- Emacs keys: A/E line start/end, B/F move, H/D delete, K/U delete to line
+-- end/start.
 keyCommand :: EditorMode -> Modifiers -> Key -> Maybe TextCommand
 keyCommand mode mods key =
   case key of
-    KeyBackspace -> Just (Delete (if word then WordLeft else CharLeft))
-    KeyDelete -> Just (Delete (if word then WordRight else CharRight))
-    KeyLeft -> move (if word then WordLeft else CharLeft)
-    KeyRight -> move (if word then WordRight else CharRight)
-    KeyHome -> move (if modCtrl mods && multi then DocumentStart else LineStart)
-    KeyEnd -> move (if modCtrl mods && multi then DocumentEnd else LineEnd)
-    KeyUp | multi && not word -> move LineUp
-    KeyDown | multi && not word -> move LineDown
-    KeyEnter | multi && not word -> Just (InsertText "\n")
+    KeyBackspace -> Just (Delete (widen LineStart WordLeft CharLeft))
+    KeyDelete -> Just (Delete (widen LineEnd WordRight CharRight))
+    KeyLeft -> move (reach LineStart WordLeft CharLeft)
+    KeyRight -> move (reach LineEnd WordRight CharRight)
+    KeyHome -> move (if jump && multi then DocumentStart else LineStart)
+    KeyEnd -> move (if jump && multi then DocumentEnd else LineEnd)
+    -- Leave Ctrl/Alt with Enter or a vertical arrow to shortcuts.
+    KeyUp | multi && not chorded -> move LineUp
+    KeyDown | multi && not chorded -> move LineDown
+    KeyEnter | multi && not chorded -> Just (InsertText "\n")
+    KeyChar c
+      | onMac && mods == noModifiers {modCtrl = True} -> emacsCommand c
+      | chordModifiers mods -> chordCommand mods c
     _ -> Nothing
   where
     multi = modeMultiLine mode
-    word = modCtrl mods || modAlt mods
+    jump = modJump mods
+    chorded = modCtrl mods || modAlt mods
+    -- Extent of an arrow or deletion; 'widen' adds Ctrl+Shift deletions to
+    -- the line's ends off macOS.
+    reach line word char
+      | modMacCommand mods = line
+      | jump = word
+      | otherwise = char
+    widen line word char
+      | modPrimary mods && modShift mods = line
+      | otherwise = reach line word char
     move m = Just (Move m (modShift mods))
 
--- | This frame's typing and keys as commands, typed characters first. Ctrl
--- turns characters into shortcuts. Ctrl with Alt is AltGr on many layouts, so
--- its characters are typed like plain ones.
+-- | This frame's typing and keys as commands, typed characters first.
+-- Characters typed under a shortcut modifier ('chordModifiers') are dropped,
+-- since those keystrokes arrive as key commands. Ctrl+Alt is AltGr on many
+-- layouts, so its characters are typed normally.
 inputTextCommands :: EditorMode -> Input -> [TextCommand]
 inputTextCommands mode inp = T.foldr char keys (inputChars inp)
   where
     mods = inputModifiers inp
-    shortcut = modCtrl mods && not (modAlt mods)
     char c rest
-      | shortcut = maybe rest (: rest) (ctrlCharCommand mode mods c)
-      | isPrint c = InsertText (T.singleton c) : rest
+      | isPrint c && not (chordModifiers mods) = InsertText (T.singleton c) : rest
       | otherwise = rest
     keys = foldr (\k rest -> maybe rest (: rest) (keyCommand mode mods k)) [] (inputKeys inp)
 
--- | The command a character typed with Ctrl runs. Letters may arrive as the
--- letter or as their control code (1 for A to 26 for Z), which is read as the
--- letter, so Ctrl+Shift+Z redoes whichever way it arrives.
-ctrlCharCommand :: EditorMode -> Modifiers -> Char -> Maybe TextCommand
-ctrlCharCommand mode mods c =
-  case toLower letter of
+-- | Whether a character key is a shortcut rather than typing: 'modPrimary'
+-- (Command on macOS, Ctrl elsewhere) without Alt.
+chordModifiers :: Modifiers -> Bool
+chordModifiers mods = modPrimary mods && not (modAlt mods)
+
+chordCommand :: Modifiers -> Char -> Maybe TextCommand
+chordCommand mods c =
+  case toLower c of
     'a' -> Just SelectAll
     'c' -> Just Copy
     'x' -> Just Cut
     'v' -> Just Paste
-    'z' | modShift mods || letter == 'Z' -> Just Redo
+    'z' | modShift mods -> Just Redo
     'z' -> Just Undo
     'y' -> Just Redo
-    'k' | multi -> Just (Delete LineEnd)
-    'u' | multi -> Just (Delete LineStart)
-    'e' | multi -> Just (Move LineEnd False)
     _ -> Nothing
-  where
-    multi = modeMultiLine mode
-    letter
-      | c >= '\x01' && c <= '\x1a' = chr (ord c + 0x60)
-      | otherwise = c
+
+-- | Emacs-style Ctrl bindings, used on macOS.
+emacsCommand :: Char -> Maybe TextCommand
+emacsCommand = \case
+  'a' -> Just (Move LineStart False)
+  'e' -> Just (Move LineEnd False)
+  'b' -> Just (Move CharLeft False)
+  'f' -> Just (Move CharRight False)
+  'h' -> Just (Delete CharLeft)
+  'd' -> Just (Delete CharRight)
+  'k' -> Just (Delete LineEnd)
+  'u' -> Just (Delete LineStart)
+  _ -> Nothing

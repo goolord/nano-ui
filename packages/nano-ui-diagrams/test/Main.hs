@@ -6,10 +6,11 @@ import Data.Foldable (toList)
 import Data.IORef (readIORef)
 import Data.List (tails)
 import Data.Maybe (fromMaybe, listToMaybe, mapMaybe)
-import Data.Primitive.PrimArray (primArrayToList, sizeofPrimArray)
+import Data.Primitive.PrimArray (indexPrimArray, primArrayToList, sizeofPrimArray)
 import Data.Text qualified as T
 import Data.Primitive.SmallArray (SmallArray, emptySmallArray)
 import Data.Vector qualified as V
+import Diagrams.Prelude qualified as D
 import Diagrams.Prelude
   ( Diagram
   , circle
@@ -17,6 +18,8 @@ import Diagrams.Prelude
   , lw
   , lwO
   , none
+  , rect
+  , rotateBy
   , (#)
   )
 import NanoUI
@@ -31,10 +34,8 @@ import NanoUI.Diagrams
   , fitLayout
   )
 import NanoUI.Diagrams.Backend (diagramTextOps)
-import NanoUI.Diagrams.Internal.Tessellation
-  ( strokePolyline
-  , triangulatePolygon
-  )
+import NanoUI.Internal.Path (FillRule (..), Paint (..), Shade (..), fillPathOps, strokePathOps)
+import NanoUI.Path qualified as P
 import NanoUI.Plot.Chrome
   ( Margins (..)
   , chartDiagram
@@ -43,6 +44,7 @@ import NanoUI.Plot.Chrome
   , seriesPoints
   )
 import NanoUI.Plot.Decimate (lttb, minMaxDecimate)
+import NanoUI.Plot.Builder qualified as Builder
 import NanoUI.Plot.Hit (nearestPlotHover)
 import NanoUI.Plot.Scale (formatTick, mergeDomains, niceTicks)
 import NanoUI.Plot.Series
@@ -83,6 +85,9 @@ main = hspec $ do
   describe "tessellation" $ do
     it "triangulates indexed polygons with full coverage" testIndexedTriangulation
     it "covers polyline strokes end to end" testStrokeCoversMidpoint
+    it "fills a level rectangle with a rect op" testRectFill
+    it "cuts a loop inside another out by the fill rule" testFillRule
+    it "strokes with the style's caps, joins and dashes" testStrokeStyle
   describe "scales and domains" $ do
     it "picks and formats nice ticks" testNiceTicks
     it "shares bounds across series" testMultiSeriesDomains
@@ -98,16 +103,7 @@ main = hspec $ do
 
 -- | A chart of the given series with no legend, grid or decimation.
 bareChart :: [Series] -> Chart
-bareChart ss =
-  Chart
-    { chartTitle = Nothing
-    , chartXTitle = Nothing
-    , chartYTitle = Nothing
-    , chartSeries = ss
-    , chartLegend = LegendNone
-    , chartGrid = GridNone
-    , chartDecimate = False
-    }
+bareChart ss = (Builder.chart ss) {chartLegend = LegendNone, chartGrid = GridNone, chartDecimate = False}
 
 chartDia :: FontMetrics -> Chart -> Diagram B
 chartDia fm c = chartDiagram fm defaultTheme defaultPlotStyle (seriesDomains c) (map (seriesPoints c) (chartSeries c)) c
@@ -154,16 +150,10 @@ testChartCache = do
 
 testRendering :: Context -> Input -> IO ()
 testRendering ctx inp = do
-  let
-    ok d = drawIndexCount d > 0 && not (drawCmdNull d)
-  (_, _, filled, _) <-
-    runFrame ctx inp $
-      diagram (fixedWH 200 80) (circle 1 # fc coral # lw none)
-  check "diagram produced no draw commands" (ok filled)
-  (_, _, filledAgain, _) <-
-    runFrame ctx inp $
-      diagram (fixedWH 200 80) (circle 1 # fc coral # lw none)
-  check "cached diagram produced no draw commands" (ok filledAgain)
+  -- The second frame draws from the cache.
+  forM_ ["diagram", "cached diagram"] $ \what -> do
+    (_, _, dd, _) <- runFrame ctx inp (diagram (fixedWH 200 80) (circle 1 # fc coral # lw none))
+    check (what <> " produced no draw commands") (drawIndexCount dd > 0 && not (drawCmdNull dd))
 
 linePlotDiag :: FontMetrics -> [(Double, Double)] -> Diagram B
 linePlotDiag fm pts =
@@ -177,8 +167,16 @@ triArea (x0, y0) (x1, y1) (x2, y2) =
 
 testIndexedTriangulation :: IO ()
 testIndexedTriangulation = do
+  let col = themeRed defaultTheme
+      toV (x, y) = NanoUI.V2 x y
+      triangles pts =
+        [ (corner k, corner (k + 1), corner (k + 2))
+        | FillPolygon vs _ tris _ <- fillPathOps 0.5 mempty NonZero (P.polygon (map toV pts)) (Solid col)
+        , let corner k = let i = indexPrimArray tris k in (indexPrimArray vs (2 * i), indexPrimArray vs (2 * i + 1))
+        , k <- [0, 3 .. sizeofPrimArray tris - 3]
+        ]
   forM_ [[], [(0, 0)], [(0, 0), (1, 1)], [(0, 0), (1, 1), (0, 0)]] $ \pts ->
-    check "undersized polygon emitted triangles" (null (triangulatePolygon pts))
+    check "undersized polygon emitted triangles" (null (triangles pts))
   -- Alternating radii exercise repeated ear removal and wraparound indices.
   forM_ [3, 16, 127, 256 :: Int] $ \n -> do
     let
@@ -196,26 +194,61 @@ testIndexedTriangulation = do
           / 2
     forM_ [points, reverse points, points ++ take 1 points] $ \pts -> do
       let
-        triangles = triangulatePolygon pts
-        areaSum = sum [triArea a b c | (a, b, c) <- triangles]
-      unless (length triangles == n - 2 && abs (areaSum - polygonArea) < 0.01) $
+        tris = triangles pts
+        areaSum = sum [triArea a b c | (a, b, c) <- tris]
+      unless (length tris == n - 2 && abs (areaSum - polygonArea) < 0.01) $
         fail
           ( "indexed triangulation changed polygon coverage: "
-              ++ show (n, length triangles, areaSum, polygonArea)
+              ++ show (n, length tris, areaSum, polygonArea)
           )
 
 testStrokeCoversMidpoint :: IO ()
 testStrokeCoversMidpoint = do
   let
     col = themeRed defaultTheme
-    ops = strokePolyline col 2 False [(0, 0), (20, 0), (20, 0), (20, 20)]
+    stroke w path = strokePathOps 0.5 mempty (P.stroke w) path (Solid col)
   -- One anti-aliased op for the whole line, its repeated point dropped.
-  check "stroke polyline changed its points" $ case ops of
-    [StrokePolyline pts 2 False c] -> c == col && primArrayToList pts == [0, 0, 20, 0, 20, 20]
+  check "stroke polyline changed its points" $ case stroke 2 (P.polyline [NanoUI.V2 0 0, NanoUI.V2 20 0, NanoUI.V2 20 0, NanoUI.V2 20 20]) of
+    [StrokePolyline pts 2 False _ _ _ (Flat c)] -> c == col && primArrayToList pts == [0, 0, 20, 0, 20, 20]
     _ -> False
-  check "closed stroke polyline repeated its first point" $ case strokePolyline col 1 True [(0, 0), (10, 0), (10, 10), (0, 0)] of
-    [StrokePolyline pts 1 True _] -> sizeofPrimArray pts == 6
+  check "closed stroke polyline repeated its first point" $ case stroke 1 (P.polygon [NanoUI.V2 0 0, NanoUI.V2 10 0, NanoUI.V2 10 10, NanoUI.V2 0 0]) of
+    [StrokePolyline pts 1 True _ _ _ _] -> sizeofPrimArray pts == 6
     _ -> False
+
+testRectFill :: IO ()
+testRectFill = do
+  let fills d = [op | op <- toList (diagramOps 100 100 (d # fc coral # lw none)), isFill op]
+      isFill = \case
+        FillRect {} -> True
+        FillPolygon {} -> True
+        _ -> False
+  check "a level rectangle is not one rect op" $ case fills (rect 4 2) of
+    [FillRect {}] -> True
+    _ -> False
+  check "a turned rectangle is not one polygon" $ case fills (rect 4 2 # rotateBy (1 / 8)) of
+    [FillPolygon {}] -> True
+    _ -> False
+
+testFillRule :: IO ()
+testFillRule = do
+  let ringsOf d = [sizeofPrimArray rings - 1 | FillPolygon _ rings _ _ <- toList (diagramOps 100 100 (d # fc coral # lw none))]
+      annulus :: D.Path D.V2 Double
+      annulus = D.circle 2 <> D.circle 1
+  -- A path's loops fill together. The inner circle is a hole under even-odd,
+  -- or under winding when reversed; with the same direction it is filled.
+  check "even-odd annulus lost its hole" (ringsOf (D.strokeP annulus # D.fillRule D.EvenOdd) == [2])
+  check "winding annulus lost its hole" (ringsOf (D.strokeP (D.circle 2 <> D.reversePath (D.circle 1))) == [2])
+  check "winding annulus cut a hole" (ringsOf (D.strokeP annulus) == [1])
+
+testStrokeStyle :: IO ()
+testStrokeStyle = do
+  let strokes d = [(cap, join, sizeofPrimArray pts) | StrokePolyline pts _ _ cap join _ _ <- toList (diagramOps 100 100 (d # D.lc steelblue))]
+      zigzag = D.fromVertices [D.p2 (0, 0), D.p2 (1, 0), D.p2 (1, 1)] :: Diagram B
+  check "a line's cap and join were not the style's" $
+    map (\(c, j, _) -> (c, j)) (strokes (zigzag # D.lineCap D.LineCapRound # D.lineJoin D.LineJoinRound)) == [(P.RoundCap, P.RoundJoin)]
+  check "a line's default cap and join changed" $
+    map (\(c, j, _) -> (c, j)) (strokes zigzag) == [(P.ButtCap, P.MiterJoin)]
+  check "a dashed line was not cut into dashes" (length (strokes (zigzag # D.dashingO [4, 4] 0)) > 4)
 
 testNiceTicks :: IO ()
 testNiceTicks = do
@@ -324,36 +357,22 @@ testLabelFit fm = do
     botOps = diagramOps 400 240 (chartDia fm botChart)
     tickText t =
       T.all (\c -> c == '-' || c == '.' || c >= '0' && c <= '9') t && not (T.null t)
-    overlapTitleTick chart w h drawOps =
+    -- Whether a label selected by @picks@ overlaps a tick label.
+    overlapsTicks picks drawOps =
       let
-        ts =
-          [(drawTextBox fm x y ax ay t, t) | DrawText x y ax ay t _ <- toList drawOps]
-        titles =
-          [ b
-          | (b@(Rect bx by _ _), t) <- ts
-          , (chartXTitle chart == Just t && by < h * 0.45)
-              || (chartYTitle chart == Just t && bx < w * 0.4)
-          ]
-        ticks = [b | (b, t) <- ts, tickText t]
+        ts = [(drawTextBox fm x y ax ay t, t) | DrawText x y ax ay t _ <- toList drawOps]
        in
-        or [rectsOverlap a b | a <- titles, b <- ticks]
-    overlapLegendTick chart w h drawOps =
-      let
-        names = map seriesName (chartSeries chart)
-        ts =
-          [(drawTextBox fm x y ax ay t, t) | DrawText x y ax ay t _ <- toList drawOps]
-        legends =
-          [ b
-          | (b@(Rect bx by _ _), t) <- ts
-          , t `elem` names
-          , case chartLegend chart of
-              LegendRight -> bx > w * 0.55
-              LegendBottom -> by < h * 0.45
-              _ -> False
-          ]
-        ticks = [b | (b, t) <- ts, tickText t]
-       in
-        or [rectsOverlap a b | a <- legends, b <- ticks]
+        or [rectsOverlap a b | (a, t) <- ts, picks a t, (b, t') <- ts, tickText t']
+    overlapTitleTick c w h =
+      overlapsTicks $ \(Rect bx by _ _) t ->
+        (chartXTitle c == Just t && by < h * 0.45) || (chartYTitle c == Just t && bx < w * 0.4)
+    overlapLegendTick c w h =
+      overlapsTicks $ \(Rect bx by _ _) t ->
+        t `elem` map seriesName (chartSeries c)
+          && case chartLegend c of
+            LegendRight -> bx > w * 0.55
+            LegendBottom -> by < h * 0.45
+            _ -> False
   check "axis titles overlap ticks" (not (overlapTitleTick sleepChart 400 240 legendOps))
   check "legend overlaps ticks" (not (overlapLegendTick sleepChart 400 240 legendOps))
   check "axis titles overlap ticks on a small plot" (not (overlapTitleTick sleepChart 220 150 tightOps))
@@ -421,13 +440,13 @@ testLegendColors fm = do
 
 -- | The colour of a polygon fill or a polyline stroke.
 inkColor :: DrawOp -> Maybe Color
-inkColor (FillPolygon _ _ c) = Just c
-inkColor (StrokePolyline _ _ _ c) = Just c
+inkColor (FillPolygon _ _ _ (Flat c)) = Just c
+inkColor (StrokePolyline _ _ _ _ _ _ (Flat c)) = Just c
 inkColor _ = Nothing
 
 -- | Triangles across the polygon fills.
 fillTriCount :: SmallArray DrawOp -> Int
-fillTriCount ops = sum [sizeofPrimArray tris `div` 3 | FillPolygon _ tris _ <- toList ops]
+fillTriCount ops = sum [sizeofPrimArray tris `div` 3 | FillPolygon _ _ tris _ <- toList ops]
 
 -- | Every x of the polygon fills and polyline strokes in @c@.
 inkXsOf :: Color -> SmallArray DrawOp -> [Float]
@@ -436,8 +455,8 @@ inkXsOf c ops =
   | op <- toList ops
   , inkColor op == Just c
   , pts <- case op of
-      FillPolygon p _ _ -> [p]
-      StrokePolyline p _ _ _ -> [p]
+      FillPolygon p _ _ _ -> [p]
+      StrokePolyline p _ _ _ _ _ _ -> [p]
       _ -> []
   , (i, x) <- zip [0 :: Int ..] (primArrayToList pts)
   , even i

@@ -8,6 +8,8 @@ module NanoUI.Internal.Frame.TextArea
     finalizeTextFieldMouse
   , collapseTextFieldSelection
   , textWordBounds
+  , TextInputArea (..)
+  , textInputArea
     -- * Geometry
   , textAreaLineHeight
   , textAreaBarLane
@@ -38,11 +40,12 @@ import NanoUI.Internal.Font
 import NanoUI.Internal.Frame.Chrome (paintScrollBars, textInputFocused)
 import NanoUI.Internal.Frame.Hit (withWidgetNode)
 import NanoUI.Internal.Frame.Scroll.Geometry (ScrollBarLayout (..), scrollBarLayout, scrollChromeLane)
-import NanoUI.Internal.Frame.TextInput (FieldDoc (..), drawLineCaret, drawLineSelection, selectWithMouse, textInputMouse, textWordBounds)
+import NanoUI.Internal.Frame.Node (nodeFontMetrics)
+import NanoUI.Internal.Frame.TextInput (FieldDoc (..), Preedit (..), drawLineCaret, drawLinePreedit, drawLineSelection, fieldEditLine, nodeTextFieldGeom, preeditSourceIndex, selectWithMouse, splicePreedit, textInputMouse, textWordBounds)
 import NanoUI.Internal.Id (WidgetId, hashWidgetId)
-import NanoUI.Internal.Input (Input, inputMouseDown, inputMousePos, inputMousePressed, inputMouseReleased)
+import NanoUI.Internal.Input (Input, InputPurpose, MouseButton (..), Pressable (..), inputMousePos)
 import NanoUI.Internal.Layout.Arena
-import NanoUI.Internal.Store (collapseFieldSelection, fieldPoint, findSlot, insertDyn, insertSlot, lookupDyn, lookupSlot)
+import NanoUI.Internal.Store (collapseFieldSelection, fieldFloat, fieldPoint, findSlot, insertDyn, insertSlot, lookupDyn, lookupSlot)
 import NanoUI.Internal.Style
 import NanoUI.Internal.Types (Rect (..), V2 (..), clamp, onGrid, rectContains)
 import qualified NanoUI.Internal.Widgets.TextArea as TA
@@ -63,20 +66,20 @@ finalizeTextFieldMouse ctx inp onControl = do
         -- until the pointer acts.
         NodeTextArea -> do
           _ <- textAreaContentMetrics ctx idx
-          when (inputMousePressed inp || inputMouseDown inp || inputMouseReleased inp) $
+          when (pressedIn MouseLeft inp || heldIn MouseLeft inp || releasedIn MouseLeft inp) $
             textAreaMouse ctx inp focus idx
         _ -> pure ()
       -- A selection dragged past the field's edge scrolls a step a frame, as
       -- the caret follows the pointer. A pointer held still out there sends
       -- no input to run those frames, so ask for them while the drag lasts.
-      when (inputMouseDown inp) $ do
+      when (heldIn MouseLeft inp) $ do
         mDrag <- getsInteraction ctx isTextInputDrag
         forM_ mDrag $ \drag ->
           when (textInputDragWidget drag == focus) $ do
             rect <- getNodeRect (ctxNodeArena ctx) idx
             unless (rectContains rect (inputMousePos inp)) $
               requestWakeAfter ctx (1 / 60)
-  when (inputMouseReleased inp) $
+  when (releasedIn MouseLeft inp) $
     modifyInteraction ctx (\s -> s {isTextInputDrag = Nothing})
 
 -- | Collapse selection in a current single-line or multiline field onto its
@@ -92,6 +95,70 @@ collapseTextFieldSelection ctx wid =
       _ -> pure ()
  where
   key = intKey wid
+
+-- | Where the focused widget takes text, in logical window coordinates, so
+-- the input method can place its candidate window. See 'textInputArea'.
+data TextInputArea = TextInputArea
+  { textInputAreaRect :: !Rect
+  -- ^ The composed text's extent on its row, or a caret-wide rect when
+  -- nothing is composed.
+  , textInputAreaCursor :: !Float
+  -- ^ Caret offset from the rect's left edge.
+  , textInputAreaPurpose :: !InputPurpose
+  -- ^ Kind of input, which selects an on-screen keyboard layout.
+  }
+  deriving (Eq, Show)
+
+-- | The text input area of the widget that requested the input method last
+-- view, or 'Nothing'. Focused text fields request it, as do custom widgets
+-- via 'NanoUI.useInputMethod'. Backends read it after each frame to start or
+-- stop text input and pass it on (SDL's @SDL_SetTextInputArea@) so the
+-- candidate window sits beside the text, not over it. For text fields it
+-- tracks scroll and composition, including right-to-left runs.
+textInputArea :: Context -> IO (Maybe TextInputArea)
+textInputArea ctx@Context {ctxNodeArena = na} =
+  readIORef (ctxInputMethod ctx) >>= \case
+    Nothing -> pure Nothing
+    Just (InputMethodRequest _ (Just caret) purpose) -> pure (Just (TextInputArea caret 0 purpose))
+    Just (InputMethodRequest wid Nothing purpose) -> withWidgetNode ctx wid Nothing $ \idx -> do
+      store <- getStore ctx
+      let key = intKey wid
+      getNodeType na idx >>= \case
+        NodeTextInput -> do
+          Rect x y w h <- getNodeRect na idx
+          (Rect _ boxY _ boxH, Rect clipX _ _ _) <- nodeTextFieldGeom ctx idx x y w h
+          fm <- nodeFontMetrics ctx idx
+          -- Read the scroll the frame already settled, without writing it.
+          let scrollX = findSlot fieldFloat 0 (slotKey SlotTextInputScroll key) store
+          (line, caret, _, preedit) <- fieldEditLine ctx idx
+          Just <$> lineInputArea fm line caret preedit (clipX - scrollX) (centeredTextY fm boxY boxH (fmLineHeight fm)) (fmLineHeight fm) purpose
+        NodeTextArea -> do
+          fm <- resolveTextAreaFont ctx idx
+          field <- getNodeRect na idx
+          let state = TA.loadTextAreaState store key
+              buf = TA.buffer state
+              TB.Cursor caretRow caretCol = TB.getCursor buf
+              lineH = textAreaLineHeight fm
+              Rect clipX contentTop _ _ = textAreaFieldClip fm field
+          (scrollXf, scrollYf) <- textAreaScrollSnapped (ctxDrawArena ctx) state
+          preedit <- textAreaPreedit ctx wid state
+          let (row, line, caret) = case preedit of
+                Just (r, p) -> (r, preeditLine p, preeditCaret p)
+                Nothing -> (caretRow, TB.lineAt caretRow buf, caretCol)
+          Just <$> lineInputArea fm line caret (snd <$> preedit) (clipX - scrollXf) (contentTop + fromIntegral row * lineH - scrollYf) lineH purpose
+        _ -> pure Nothing
+
+-- | 'TextInputArea' for @line@ drawn from @penX@ on a row at @rowY@ of
+-- height @lineH@, caret before character @caret@.
+lineInputArea :: FontMetrics -> T.Text -> Int -> Maybe Preedit -> Float -> Float -> Float -> InputPurpose -> IO TextInputArea
+lineInputArea fm line caret preedit penX rowY lineH purpose = do
+  prepared <- prepareFontMetrics fm line
+  let caretAt = penX + caretX prepared line caret
+      runs = maybe [] (\p -> selectionSpans prepared line (preeditStart p) (preeditEnd p)) preedit
+      (x0, x1)
+        | null runs = (caretAt, caretAt + 1)
+        | otherwise = (penX + minimum (map fst runs), penX + maximum (map snd runs))
+  pure (TextInputArea (Rect x0 rowY (max 1 (x1 - x0)) lineH) (max 0 (caretAt - x0)) purpose)
 
 -- | Text area row height, snapped to the device pixel grid.
 textAreaLineHeight :: FontMetrics -> Float
@@ -312,6 +379,7 @@ drawTextAreaContentWith da ctx fm idx x y w h style = do
   theme <- nodeTheme ctx idx
   state <- (`TA.loadTextAreaState` key) <$> getStore ctx
   (scrollXf, scrollYf) <- textAreaScrollSnapped da state
+  preedit <- textAreaPreedit ctx wid state
   let lineH = textAreaLineHeight fm
       Rect clipX contentTop clipW clipH = textAreaFieldClip fm field
       fg = styleFg style
@@ -327,24 +395,53 @@ drawTextAreaContentWith da ctx fm idx x y w h style = do
       firstRow = max 0 (rowAt y)
       lastRow = min (TB.getLineCount buf - 1) (rowAt (y + h))
       (lo, hi) = TB.selectionRange (TA.selectionAnchor state) cursor
-  withClip da textClip $ do
-    when (focus && lo /= hi) $ do
       -- The selection sits on the unsnapped inset, as the pointer hit test does.
-      let (ix, iy) = widgetContentInset fm
+      (ix, iy) = widgetContentInset fm
+  withClip da textClip $ do
+    when (focus && (lo /= hi || isJust preedit)) $
       forM_ [max (TB.cursorRow lo) firstRow .. min (TB.cursorRow hi) lastRow] $ \row -> do
         let line = TB.lineAt row buf
             clampCol c = clamp 0 (T.length line) c
-            startCol = clampCol (if row == TB.cursorRow lo then TB.cursorCol lo else 0)
-            endCol = clampCol (if row == TB.cursorRow hi then TB.cursorCol hi else T.length line)
+            -- On the composition row, show the input method's selection
+            -- instead of the field's.
+            (shown, startCol, endCol) = case preedit of
+              Just (prow, p) | prow == row -> (preeditLine p, preeditCaret p, preeditSelectionEnd p)
+              _ ->
+                ( line
+                , clampCol (if row == TB.cursorRow lo then TB.cursorCol lo else 0)
+                , clampCol (if row == TB.cursorRow hi then TB.cursorCol hi else T.length line)
+                )
         when (startCol < endCol) $
-          drawLineSelection da fm line startCol endCol (x + ix - scrollXf) (y + iy + fromIntegral row * lineH - scrollYf) lineH (themeSelection theme)
+          drawLineSelection da fm shown startCol endCol (x + ix - scrollXf) (y + iy + fromIntegral row * lineH - scrollYf) lineH (themeSelection theme)
     forM_ [firstRow .. lastRow] $ \row -> do
-      let line = TB.lineAt row buf
+      let line = fst (shownRow preedit buf row)
       unless (T.null line) $
         pushText da fm contentX (rowY row) line fg
     when focus $
-      drawLineCaret da fm (TB.lineAt caretRow buf) caretCol contentX (rowY caretRow) lineH fg
+      case preedit of
+        Just (row, p) -> drawLinePreedit da fm p contentX (rowY row) lineH fg
+        Nothing -> drawLineCaret da fm (TB.lineAt caretRow buf) caretCol contentX (rowY caretRow) lineH fg
   paintScrollBars ctx da theme (themePanel theme) wid mV mH
+
+-- | Text area @wid@'s composition ('fieldComposition'): its row, and that
+-- row with the composition spliced over the selection ('splicePreedit'). A
+-- multi-row selection stays highlighted on other rows, since a commit
+-- replaces all of it.
+textAreaPreedit :: Context -> WidgetId -> TA.TextAreaState -> IO (Maybe (Int, Preedit))
+textAreaPreedit ctx wid state = do
+  composition <- fieldComposition ctx wid
+  let buf = TA.buffer state
+      (lo, hi) = TB.selectionRange (TA.selectionAnchor state) (TB.getCursor buf)
+      row = TB.cursorRow lo
+      line = TB.lineAt row buf
+      endCol = if TB.cursorRow hi == row then TB.cursorCol hi else T.length line
+  pure $ (\c -> (row, splicePreedit c line (TB.cursorCol lo) endCol)) <$> composition
+
+-- | Row @row@ as displayed, composition included ('textAreaPreedit'), with
+-- a map from displayed columns to document columns.
+shownRow :: Maybe (Int, Preedit) -> TB.TextBuffer -> Int -> (T.Text, Int -> Int)
+shownRow (Just (prow, p)) _ row | prow == row = (preeditLine p, preeditSourceIndex p)
+shownRow _ buf row = (TB.lineAt row buf, id)
 
 -- | The clip a text area's rows are painted in: its content clip, short of
 -- the lane of each scrollbar that shows.
@@ -362,17 +459,19 @@ textClipBeside (Rect clipX contentTop clipW clipH) mV mH =
 textAreaTextPlacements :: Context -> NodeIdx -> Rect -> IO (Rect, [(T.Text, Float, Float, Float, Float)])
 textAreaTextPlacements ctx idx field@(Rect _ y _ h) = do
   fm <- resolveTextAreaFont ctx idx
-  key <- intKey <$> getWidgetId (ctxNodeArena ctx) idx
+  wid <- getWidgetId (ctxNodeArena ctx) idx
+  let key = intKey wid
   (contentW, contentH) <- textAreaContentMetrics ctx idx
   state <- (`TA.loadTextAreaState` key) <$> getStore ctx
   (scrollXf, scrollYf) <- textAreaScrollSnapped (ctxDrawArena ctx) state
+  preedit <- textAreaPreedit ctx wid state
   let lineH = textAreaLineHeight fm
       clip@(Rect clipX contentTop _ _) = textAreaFieldClip fm field
       (mV, mH) = textAreaBarLayouts field (textAreaBars fm field contentW contentH) scrollXf scrollYf
       buf = TA.buffer state
       rowAt py = floor ((py - contentTop + scrollYf) / max 1 lineH) :: Int
       rows = [max 0 (rowAt y) .. min (TB.getLineCount buf - 1) (rowAt (y + h))]
-  placements <- forM [(row, line) | row <- rows, let line = TB.lineAt row buf, not (T.null line)] $ \(row, line) -> do
+  placements <- forM [(row, line) | row <- rows, let line = fst (shownRow preedit buf row), not (T.null line)] $ \(row, line) -> do
     lw <- lineWidthIO fm line
     pure (line, clipX - scrollXf, contentTop + fromIntegral row * lineH - scrollYf, lw, lineH)
   pure (textClipBeside clip mV mH, placements)
@@ -395,10 +494,12 @@ textAreaMouse ctx inp wid idx = do
         buf = TA.buffer state
         (_, iy) = widgetContentInset fm
     (scrollXf, scrollYf) <- textAreaScrollSnapped (ctxDrawArena ctx) state
+    preedit <- textAreaPreedit ctx wid state
     let row = clamp 0 (TB.getLineCount buf - 1) (floor ((mouseY - (fieldY + iy) + scrollYf) / max 1 lineH))
-        line = TB.lineAt row buf
+        -- Hit-test the displayed row, then map back to a document column.
+        (line, toSource) = shownRow preedit buf row
     prepared <- prepareFontMetrics fm line
-    let pos = TB.Cursor row (textIndexAtX prepared line (max 0 (mouseX - (clipX - scrollXf))))
+    let pos = TB.Cursor row (toSource (textIndexAtX prepared line (max 0 (mouseX - (clipX - scrollXf)))))
     -- Nothing writes the store between this load and the selection write
     -- (click counting lives in the interaction state).
     pure $ FieldDoc pos buf $ \anchor cursor -> do

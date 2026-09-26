@@ -878,13 +878,13 @@ reloadSdlFontCache cache source = do
   resetGlyphAtlas cache
 
 -- | Install the cache's base fonts as the context's measurement and glyph
--- metrics, and its sizes and variants as the font resolver. Text measurement
--- uses the sans font's shaped lines.
+-- metrics and default size, and its sizes and variants as the font resolver.
+-- Text measurement uses the sans font's shaped lines.
 withSdlFontCache :: SdlFontCache -> Context -> IO Context
 withSdlFontCache cache ctx = do
   scale <- readIORef (sfcScaleRef cache)
   (sans, mono) <- readIORef (sfcBaseEntries cache)
-  let metrics = withMonoFontMetrics (withFontMetrics ctx (cfeFm sans)) (cfeFm mono)
+  let metrics = withFontSize (withMonoFontMetrics (withFontMetrics ctx (cfeFm sans)) (cfeFm mono)) (sfcBasePt cache)
   pure $
     withFontResolver
       (wrapMeasureCache scale metrics (cfeMeasure sans))

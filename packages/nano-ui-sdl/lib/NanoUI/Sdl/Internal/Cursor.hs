@@ -4,14 +4,15 @@ module NanoUI.Sdl.Internal.Cursor
   , initCursors
   , destroyCursors
   , syncPointerCursor
+  , showCursorKind
+  , sdlSystemCursor
   ) where
 
 import Control.Monad (void, when)
-import Data.Foldable (toList)
-import Data.Primitive.SmallArray (SmallArray, indexSmallArray, smallArrayFromList)
-import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Foreign.Ptr (Ptr, nullPtr)
 import NanoUI (Input (..))
+import NanoUI.Backend (cursorFallback)
 import NanoUI.Testing (Context, UiCursorKind (..), uiCursorKind)
 import System.Environment (lookupEnv)
 import System.IO (hPutStrLn, stderr)
@@ -20,50 +21,77 @@ import SDL3.Sys.Mouse
   ( createSystemCursorSafe
   , destroyCursorSafe
   , getDefaultCursorSafe
+  , hideCursorSafe
   , setCursorSafe
+  , showCursorSafe
   )
 
 data SdlCursors = SdlCursors
-  { scCursors :: !(SmallArray (Ptr Mouse.SDL_Cursor))
-  -- ^ By 'fromEnum' of the 'UiCursorKind'. A NULL cursor selects the
-  -- platform's default arrow.
-  , scMoveFallback :: Ptr Mouse.SDL_Cursor
+  { scDefault :: Ptr Mouse.SDL_Cursor
+  -- ^ The platform's default arrow, which SDL owns.
+  , scSystem :: IORef [(Mouse.SDL_SystemCursor, Ptr Mouse.SDL_Cursor)]
+  -- ^ System cursors created so far, each on first use. A NULL entry is one
+  -- the platform could not create (headless and dummy video drivers have
+  -- none) and is not retried.
   , scCurrent :: IORef UiCursorKind
   , scTrace :: Bool
   }
 
 initCursors :: IO SdlCursors
-initCursors = do
-  def <- getDefaultCursorSafe
-  moveFallback <- createSystemCursorSafe Mouse.SDL_SYSTEM_CURSOR_MOVE
-  let orMove c = if c == nullPtr then moveFallback else c
-  -- In 'UiCursorKind' order. NULL cursors are tolerated: SDL_SetCursor(NULL)
-  -- selects the platform default arrow, which keeps us running on
-  -- headless/dummy video drivers where system cursor shapes are unavailable.
-  -- SDL_SYSTEM_CURSOR_GRAB (27) and GRABBING (28) have no bindgen patterns.
-  -- Where SDL or the platform lacks them creation returns NULL, and the move
-  -- cursor stands in.
-  owned <-
-    sequence
-      [ createSystemCursorSafe Mouse.SDL_SYSTEM_CURSOR_POINTER
-      , createSystemCursorSafe Mouse.SDL_SYSTEM_CURSOR_TEXT
-      , orMove <$> createSystemCursorSafe (Mouse.SDL_SystemCursor 27)
-      , orMove <$> createSystemCursorSafe (Mouse.SDL_SystemCursor 28)
-      , createSystemCursorSafe Mouse.SDL_SYSTEM_CURSOR_NS_RESIZE
-      , createSystemCursorSafe Mouse.SDL_SYSTEM_CURSOR_EW_RESIZE
-      , createSystemCursorSafe Mouse.SDL_SYSTEM_CURSOR_NWSE_RESIZE
-      , createSystemCursorSafe Mouse.SDL_SYSTEM_CURSOR_NESW_RESIZE
-      ]
-  SdlCursors (smallArrayFromList (def : owned)) moveFallback
-    <$> newIORef UiCursorDefault
+initCursors =
+  SdlCursors
+    <$> getDefaultCursorSafe
+    <*> newIORef []
+    <*> newIORef UiCursorDefault
     -- Debug aid, read once here so cursor changes stay allocation-free:
     -- NANO_CURSOR_TRACE=1 logs every cursor change to stderr.
     <*> ((== Just "1") <$> lookupEnv "NANO_CURSOR_TRACE")
 
 -- | Destroy the cursors this session created. SDL owns the default one.
 destroyCursors :: SdlCursors -> IO ()
-destroyCursors SdlCursors {scCursors, scMoveFallback = fb} =
-  mapM_ destroyCursorSafe (fb : filter (/= fb) (drop 1 (toList scCursors)))
+destroyCursors SdlCursors {scSystem} =
+  mapM_ destroyCursorSafe . filter (/= nullPtr) . map snd =<< readIORef scSystem
+
+-- | The SDL system cursor for @kind@ (or its 'cursorFallback'); 'Nothing'
+-- for the default arrow. Platforms without one-way resize arrows show
+-- two-way ones; SDL handles that.
+sdlSystemCursor :: UiCursorKind -> Maybe Mouse.SDL_SystemCursor
+sdlSystemCursor kind = case cursorFallback kind of
+  UiCursorPointer -> Just Mouse.SDL_SYSTEM_CURSOR_POINTER
+  UiCursorText -> Just Mouse.SDL_SYSTEM_CURSOR_TEXT
+  UiCursorNsResize -> Just Mouse.SDL_SYSTEM_CURSOR_NS_RESIZE
+  UiCursorEwResize -> Just Mouse.SDL_SYSTEM_CURSOR_EW_RESIZE
+  UiCursorNwseResize -> Just Mouse.SDL_SYSTEM_CURSOR_NWSE_RESIZE
+  UiCursorNeswResize -> Just Mouse.SDL_SYSTEM_CURSOR_NESW_RESIZE
+  UiCursorNotAllowed -> Just Mouse.SDL_SYSTEM_CURSOR_NOT_ALLOWED
+  UiCursorWait -> Just Mouse.SDL_SYSTEM_CURSOR_WAIT
+  UiCursorProgress -> Just Mouse.SDL_SYSTEM_CURSOR_PROGRESS
+  UiCursorCrosshair -> Just Mouse.SDL_SYSTEM_CURSOR_CROSSHAIR
+  UiCursorMove -> Just Mouse.SDL_SYSTEM_CURSOR_MOVE
+  UiCursorNResize -> Just Mouse.SDL_SYSTEM_CURSOR_N_RESIZE
+  UiCursorNeResize -> Just Mouse.SDL_SYSTEM_CURSOR_NE_RESIZE
+  UiCursorEResize -> Just Mouse.SDL_SYSTEM_CURSOR_E_RESIZE
+  UiCursorSeResize -> Just Mouse.SDL_SYSTEM_CURSOR_SE_RESIZE
+  UiCursorSResize -> Just Mouse.SDL_SYSTEM_CURSOR_S_RESIZE
+  UiCursorSwResize -> Just Mouse.SDL_SYSTEM_CURSOR_SW_RESIZE
+  UiCursorWResize -> Just Mouse.SDL_SYSTEM_CURSOR_W_RESIZE
+  UiCursorNwResize -> Just Mouse.SDL_SYSTEM_CURSOR_NW_RESIZE
+  _ -> Nothing
+
+-- | The cursor for @kind@: its 'sdlSystemCursor', created on first use, or
+-- the default arrow if the platform lacks it.
+cursorFor :: SdlCursors -> UiCursorKind -> IO (Ptr Mouse.SDL_Cursor)
+cursorFor SdlCursors {scDefault, scSystem} kind = case sdlSystemCursor kind of
+  Nothing -> pure scDefault
+  Just sys -> do
+    c <-
+      lookup sys <$> readIORef scSystem >>= \case
+        Just c -> pure c
+        Nothing -> do
+          c <- createSystemCursorSafe sys
+          modifyIORef' scSystem ((sys, c) :)
+          pure c
+    pure (if c == nullPtr then scDefault else c)
 
 syncPointerCursor :: SdlCursors -> Context -> Input -> IO ()
 syncPointerCursor cursors ctx inp = do
@@ -72,5 +100,17 @@ syncPointerCursor cursors ctx inp = do
   when (want /= cur) $ do
     when (scTrace cursors) $
       hPutStrLn stderr ("cursor: " ++ show want ++ " at " ++ show (inputMousePos inp))
-    void $ setCursorSafe (indexSmallArray (scCursors cursors) (fromEnum want))
-    writeIORef (scCurrent cursors) want
+    showCursorKind cursors want
+
+-- | Show the cursor for @kind@, or hide it for 'UiCursorHidden' until
+-- another kind is shown. If even the default arrow is NULL,
+-- SDL_SetCursor(NULL) just redraws the current cursor.
+showCursorKind :: SdlCursors -> UiCursorKind -> IO ()
+showCursorKind cursors kind = do
+  hidden <- (== UiCursorHidden) <$> readIORef (scCurrent cursors)
+  if kind == UiCursorHidden
+    then void hideCursorSafe
+    else do
+      when hidden (void showCursorSafe)
+      void . setCursorSafe =<< cursorFor cursors kind
+  writeIORef (scCurrent cursors) kind

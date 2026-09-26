@@ -60,10 +60,13 @@ main = do
   typedAt <- newIORef (0 :: Double)
   runSdlApp
     defaultSdlOptions
-      { sdlWindowTitle = "nano-ui idle: " <> T.pack scene
-      , sdlWindowSize = Size 900 600
-      , sdlWindowHidden = "hidden" `elem` drop 1 args
-      , sdlAppShouldQuit = \inp -> inputKeysElem KeyEscape (inputKeys inp)
+      { sdlWindowSettings =
+          defaultWindowSettings
+            { wsTitle = "nano-ui idle: " <> T.pack scene
+            , wsSize = Size 900 600
+            , wsMode = if "hidden" `elem` drop 1 args then Hidden else Windowed
+            }
+      , sdlAppShouldQuit = pressedOnceIn KeyEscape
       }
     (idleUi scene frames started typedAt)
 
@@ -98,7 +101,7 @@ idleUi scene frames started typedAt = do
     setQuery query'
     -- Hold keyboard focus without a click, as an app's search box would.
     when (scene `elem` ["focus", "type"] && n < 4) $
-      liftIO (writeIORef (ctxFocusId ctx) (respId resp))
+      requestFocus (respId resp)
     when (scene == "type" && respChanged resp) $ liftIO $ do
       now <- getMonotonicTime
       sent <- readIORef typedAt

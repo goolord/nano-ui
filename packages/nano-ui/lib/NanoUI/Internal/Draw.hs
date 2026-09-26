@@ -8,6 +8,9 @@ module NanoUI.Internal.Draw
   , DrawData (..)
   , DrawArena (..)
   , DrawOp (..)
+  , LineCap (..)
+  , LineJoin (..)
+  , Shade (..)
   , TextFont (..)
   , defaultTextFont
   , DrawingBuild
@@ -40,6 +43,7 @@ module NanoUI.Internal.Draw
   , pushRect
   , pushQuadGradient
   , pushImage
+  , pushImageRotated
   , pushRoundedRect
   , pushRoundedRectRaw
   , pushRoundedStroke
@@ -53,10 +57,14 @@ module NanoUI.Internal.Draw
   , pushText
   , pushPreparedTextStyled
   , emitDrawOps
+  , pushImageOp
+  , pushShapeOp
+  , checkboxOps
   ) where
 
 import Control.Monad (forM_, unless, when)
 import Data.IORef (readIORef)
+import Data.Maybe (fromMaybe)
 import qualified Data.Text as T
 import Data.Primitive.SmallArray (SmallArray, indexSmallArray, sizeofSmallArray)
 import Data.Primitive.PrimArray (indexPrimArray, readPrimArray, sizeofPrimArray)
@@ -66,9 +74,9 @@ import NanoUI.Internal.Draw.Arena
 import NanoUI.Internal.Draw.Shapes
 import NanoUI.Internal.Draw.Types
 import NanoUI.Internal.Font
-import NanoUI.Internal.SIMD (pokeQuadIndices, pokeQuadSIMD, pokeVertexSIMD)
-import NanoUI.Internal.Style (FontStyle (..), FontWeight (..), TextDecoration (..))
-import NanoUI.Internal.Types (Color (..), Rect (..), forUpTo_, onGrid)
+import NanoUI.Internal.SIMD (pokeQuadCornersSIMD, pokeQuadSIMD)
+import NanoUI.Internal.Style (FontStyle (..), FontWeight (..), TextDecoration (..), Theme (..), styleBg)
+import NanoUI.Internal.Types (Color (..), Rect (..), onGrid, rectInflate, rectIntersect)
 
 -- | Pixel box for a 'DrawText' using host advances. diagrams text has no
 -- envelope, so plot sizing uses this instead of `fontSizeL`.
@@ -230,11 +238,7 @@ pokeGlyphQuad vp ip base baseIdx slant baselineY r g b a q gx gy gw gh u0 v0 u1 
       let !gy1 = gy + gh
           !topDx = slant * (baselineY - gy)
           !botDx = slant * (baselineY - gy1)
-      pokeVertexSIMD vp vb (gx + topDx) gy r g b a u0 v0
-      pokeVertexSIMD vp (vb + 32) (gx + gw + topDx) gy r g b a u1 v0
-      pokeVertexSIMD vp (vb + 64) (gx + gw + botDx) gy1 r g b a u1 v1
-      pokeVertexSIMD vp (vb + 96) (gx + botDx) gy1 r g b a u0 v1
-      pokeQuadIndices ip ib i0 (i0 + 1) (i0 + 2) (i0 + 3)
+      pokeQuadCornersSIMD vp vb ip ib (gx + topDx) gy (gx + gw + topDx) gy (gx + gw + botDx) gy1 (gx + botDx) gy1 u0 v0 u1 v1 r g b a i0
 
 -- | Glyph quads for one line from pen @(px, py)@, used as given: synthetic bold
 -- relies on its sub-pixel pass offsets. Every quad shares one arena
@@ -317,32 +321,127 @@ pushPreparedTextStyledQuads da fm weight fstyle deco x y txt col
           DecorationUnderlineStrike -> underline >> strike
           DecorationNone -> pure ()
 
--- | Emit ops with @fm@ as the default font and @resolve@ giving the font of
--- styled text, and whether it draws its weight and slant natively.
-emitDrawOps :: DrawArena -> FontMetrics -> (TextFont -> IO (FontMetrics, Bool)) -> SmallArray DrawOp -> IO ()
-emitDrawOps da fm resolve ops = forUpTo_ (sizeofSmallArray ops) (emitOne . indexSmallArray ops)
+-- | Emit ops with @fm@ as the default font, at @size@. @resolve@ gives the
+-- font for styled text and whether it renders weight and slant natively.
+-- @imageUv@ maps an image op's id to an atlas texture and UV bounds, or
+-- 'Nothing' when the id is itself a texture. A 'PushClip' intersects the
+-- current clip until its 'PopClip'; an unclosed one ends with the ops.
+emitDrawOps ::
+  DrawArena
+  -> FontMetrics
+  -> Float
+  -> (TextFont -> IO (FontMetrics, Bool))
+  -> (Int -> IO (Maybe (Int, (Float, Float, Float, Float))))
+  -> SmallArray DrawOp
+  -> IO ()
+emitDrawOps da fm size resolve imageUv ops = go 0 []
   where
-    emitOne (FillRect r c) = pushRect da r c
-    emitOne (FillRoundedRect r radius c) = pushRoundedRect da r radius c
-    emitOne (FillTriangle x0 y0 x1 y1 x2 y2 c) = pushFilledTriangle da x0 y0 x1 y1 x2 y2 c
-    emitOne (FillCircle cx cy radius c) = pushCircle da cx cy radius c
-    emitOne (Stroke x0 y0 x1 y1 t c) = pushStroke da x0 y0 x1 y1 t c
-    emitOne (StrokeRoundedRect r radius bw c) = pushRoundedStroke da r radius bw c
-    emitOne (StrokeCircle cx cy radius bw c) = pushCircleStroke da cx cy radius bw c
-    emitOne (StrokeLineAA x0 y0 x1 y1 bw c) = pushStrokeAA da x0 y0 x1 y1 bw c
-    emitOne (FillPolygon pts tris c) = pushPolygonAA da pts tris c
-    emitOne (StrokePolyline pts w closed c) = pushPolylineAA da pts w closed c
-    emitOne (FillQuadGradient r c0 c1 c2 c3) = pushQuadGradient da r c0 c1 c2 c3
-    emitOne (DrawImageRect r tex u0 v0 u1 v1 c) = pushImage da r tex u0 v0 u1 v1 c
+    !n = sizeofSmallArray ops
+    -- Clips saved by open 'PushClip's, innermost first.
+    go !i saved
+      | i >= n = unless (null saved) (setClip da (last saved))
+      | otherwise = case indexSmallArray ops i of
+          PushClip r -> do
+            prev <- currentClip da
+            setClip da (fromMaybe (Rect 0 0 0 0) (rectIntersect prev r))
+            go (i + 1) (prev : saved)
+          PopClip -> case saved of
+            prev : rest -> setClip da prev >> go (i + 1) rest
+            [] -> go (i + 1) []
+          op -> emitOne op >> go (i + 1) saved
+    emitOne op@DrawImage {} = pushImageOp da imageUv op
     emitOne (DrawText x y ax ay t c) = do
       prepared <- prepareFontMetrics fm t
       let Rect px py _ _ = drawTextBox prepared x y ax ay t
       -- Drawing text has no collected text span, so it keeps its quads even
       -- when the host rasterizes widget text externally.
       pushPreparedTextQuads da prepared px py t c
-    emitOne (DrawTextStyled x y font t c) = do
+    emitOne (DrawTextStyled x y font t c) = styled x y font t c
+    emitOne (DrawTextAligned x y ax ay k font t c) = do
+      let font'
+            | k == 1 = font
+            | otherwise = font {textFontSize = k * (if textFontSize font > 0 then textFontSize font else size)}
+      (styledFm, _) <- resolve font'
+      prepared <- prepareFontMetrics styledFm t
+      let Rect px py _ _ = drawTextBox prepared x y ax ay t
+      styled px py font' t c
+    emitOne op = pushShapeOp da op
+    -- Styled text with its line box's top-left corner at (x, y).
+    styled x y font t c = do
       (styledFm, native) <- resolve font
       let weight = if native then WeightNormal else textFontWeight font
           fstyle = if native then FontStyleNormal else textFontStyle font
       prepared <- prepareFontMetrics styledFm t
       pushPreparedTextStyledQuads da prepared weight fstyle (textFontDecoration font) x y t c
+
+-- | Paint a 'DrawImage' op; other ops paint nothing. @imageUv@ is as for
+-- 'emitDrawOps', and the op's UVs span 0 to 1 over the image. Unrotated
+-- images use the snapped quad; only rotated ones compute their corners.
+{-# INLINE pushImageOp #-}
+pushImageOp :: DrawArena -> (Int -> IO (Maybe (Int, (Float, Float, Float, Float)))) -> DrawOp -> IO ()
+pushImageOp da imageUv = \case
+  DrawImage r angle tex u0 v0 u1 v1 c ->
+    let draw !t !a0 !b0 !a1 !b1
+          | angle == 0 = pushImage da r t a0 b0 a1 b1 c
+          | otherwise = pushImageRotated da r angle t a0 b0 a1 b1 c
+     in imageUv tex >>= \case
+          Just (atlas, (a0, b0, a1, b1)) ->
+            draw atlas (a0 + u0 * (a1 - a0)) (b0 + v0 * (b1 - b0)) (a0 + u1 * (a1 - a0)) (b0 + v1 * (b1 - b0))
+          Nothing -> draw tex u0 v0 u1 v1
+  _ -> pure ()
+
+-- | Paint a fill, stroke, line or gradient op. Text, image and clip ops
+-- paint nothing here ('emitDrawOps' handles them). Inlined so that an op
+-- built only to be painted is optimized away.
+{-# INLINE pushShapeOp #-}
+pushShapeOp :: DrawArena -> DrawOp -> IO ()
+pushShapeOp da = \case
+  FillRect r c -> pushRect da r c
+  FillRoundedRect r radius c -> pushRoundedRect da r radius c
+  FillTriangle x0 y0 x1 y1 x2 y2 c -> pushFilledTriangle da x0 y0 x1 y1 x2 y2 c
+  FillCircle cx cy radius c -> pushCircle da cx cy radius c
+  Stroke x0 y0 x1 y1 t c -> pushStroke da x0 y0 x1 y1 t c
+  StrokeRoundedRect r radius bw c -> pushRoundedStroke da r radius bw c
+  StrokeCircle cx cy radius bw c -> pushCircleStroke da cx cy radius bw c
+  StrokeLineAA x0 y0 x1 y1 bw c -> pushStrokeAA da x0 y0 x1 y1 bw c
+  FillPolygon pts rings tris sh -> pushPolygonAA da pts rings tris sh
+  StrokePolyline pts w closed cap join limit sh -> pushPolylineAA da pts w closed cap join limit sh
+  FillQuadGradient r c0 c1 c2 c3 -> pushQuadGradient da r c0 c1 c2 c3
+  _ -> pure ()
+
+-- | The checkbox widget's box, @box@ wide with its top-left corner at
+-- @(x, y)@, passed op by op to @op@: the theme accent with a check mark when
+-- @checked@, else an input well outlined in @border@. The widget paints the
+-- ops directly ('pushShapeOp'); a canvas collects them
+-- ('NanoUI.Widgets.Custom.drawCheckbox').
+{-# INLINE checkboxOps #-}
+checkboxOps :: Applicative f => (DrawOp -> f ()) -> Theme -> Color -> Float -> Float -> Float -> Bool -> f ()
+checkboxOps op theme border x y box checked
+  | checked =
+      op (FillRoundedRect outer r accent)
+        *> op (StrokeRoundedRect outer r bw accent)
+        *> stroke x0 y0 x1 y1
+        *> stroke x1 y1 x2 y2
+        *> cap x0 y0
+        *> cap x1 y1
+        *> cap x2 y2
+  | otherwise =
+      op (FillRoundedRect (rectInflate (-bw) outer) (max 0 (r - bw)) (styleBg (themeInput theme)))
+        *> op (StrokeRoundedRect outer r bw border)
+  where
+    outer = Rect x y box box
+    r = min 6 (box / 3.5)
+    bw = 1.5
+    accent = themeAccent theme
+    mark = themeOnAccent theme
+    t = max 1.6 (box * 0.11)
+    x0 = x + box * 0.22
+    y0 = y + box * 0.52
+    x1 = x + box * 0.42
+    y1 = y + box * 0.72
+    x2 = x + box * 0.78
+    y2 = y + box * 0.28
+    stroke ax ay bx by = op (StrokeLineAA ax ay bx by t mark)
+    -- Caps snap their centres, like the stroke ends. Snapping a cap's corner
+    -- instead can land it a pixel off the stroke at fractional scales.
+    cap cx cy = op (FillCircle cx cy (t / 2) mark)

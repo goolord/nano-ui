@@ -18,7 +18,7 @@ import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context
 import NanoUI.Internal.Frame.Scroll.Geometry (scrollAxisRange, scrollBare, scrollHorizontalHidden)
 import NanoUI.Internal.Id (WidgetId)
-import NanoUI.Internal.Input (inputMousePos, inputScroll)
+import NanoUI.Internal.Input (MouseButton (..), inputMousePos, inputScroll)
 import NanoUI.Internal.Monad (Ui, askInput, freshWidget, lastRect, nextId, requestFrame, uiIO, uiTheme, withKey)
 import NanoUI.Internal.Store (fieldFloat, findSlot, insertSlot)
 import NanoUI.Internal.Style
@@ -75,12 +75,12 @@ instance HasResponse (TabResponse a) where
 tab :: a -> Text -> body -> Tab a body
 tab key title body = Tab key title False False Nothing body
 
--- | Enabled tab with a close button, reported through 'tabClosed'.
+-- | Enabled tab with a close button. A click on it, or a middle click on the
+-- header, is reported through 'tabClosed'.
 closableTab :: a -> Text -> body -> Tab a body
 closableTab key title body = Tab key title True False Nothing body
 
--- | Header chrome height: one source for the strip bar, the scroller, and
--- the paging arrows so they cannot drift apart.
+-- | Header height, shared by the strip, its scroller and the paging arrows.
 tabHeaderH :: Float
 tabHeaderH = 28
 
@@ -118,13 +118,8 @@ tabStrip (TabsConfig style orient) cur tabList mRenderBody = do
         pure tabResp
 
 -- | Horizontal headers that page with chevron buttons when they overflow.
--- While the labels fit, the headers sit in the bar with no scroll container.
--- Once they overflow, they move into a hidden, bare 'scrollHorizontalHidden'
--- container, so the framework owns the clip, the offset store, the damage and
--- the left+right wheel, while painting no well and no scrollbar; up/down
--- wheel notches page the same offset here, because a tab bar is horizontal.
--- The scroller grows between the two arrow buttons, so the right arrow sits
--- on the bar's far edge instead of trailing the last tab.
+-- Overflowing headers move into a bare horizontal scroller that grows between
+-- the two arrows; the vertical wheel pages it too.
 scrollableHeaders ::
   (Eq a, Ui :> es) =>
   Context ->
@@ -139,9 +134,9 @@ scrollableHeaders ctx groupId barGap cur headers = do
       renderInner =
         withKey ("tab-strip" :: Text) $
           row' (tight . fixedH tabHeaderH . gap barGap $ defaultLayout) headers
-  -- The reachable range cached last frame decides whether the strip needs the
-  -- scroller at all. Cached as a float so a pure scroll frame keeps its clip
-  -- damage (see `onlyScrollFloatsChanged` in NanoUI.Internal.Damage).
+  -- Last frame's reachable range decides whether the strip needs the
+  -- scroller. It is a float slot so a pure scroll frame keeps its clip damage
+  -- (`onlyScrollFloatsChanged` in NanoUI.Internal.Damage).
   maxOffPrev <- max 0 . findSlot fieldFloat 0 rangeKey <$> uiIO (getStore ctx)
   let overflow = maxOffPrev > 0.5
   off <- uiIO (getScrollOffset ctx scrollWid)
@@ -152,9 +147,7 @@ scrollableHeaders ctx groupId barGap cur headers = do
   let overBar = maybe False (\r -> rectContains r (inputMousePos inp)) mBar
       notches = if overBar then round (v2Y (inputScroll inp)) else 0 :: Int
       canLeft = overflow && off > 0.5
-      -- A paging arrow, only while the bar overflows. A disabled end paints
-      -- its glyph muted instead of dropping the button, so the row keeps its
-      -- width as you page to either end.
+      -- A paging arrow while the bar overflows, muted at its end.
       arrow k enabled glyph
         | overflow = withKey (k :: Text) $ do
             theme <- uiTheme
@@ -176,9 +169,7 @@ scrollableHeaders ctx groupId barGap cur headers = do
     (viewX, viewW) = maybe (0, 0) (\r -> (rectX r, rectW r)) (if overflow then mScr else mBar)
     maxRight = maximum (0 : [rectX r + rectW r | (_, resp) <- hdrs, let r = respRect resp])
     contentW = maxRight - viewX + (if overflow then off else 0)
-    -- The first overflow frame has no scroller rect yet; keep the last cached
-    -- range instead of measuring against a phantom viewport, so nothing pages
-    -- or clamps wildly and the cache never flip-flops the scroller away.
+    -- The first overflow frame has no scroller rect yet: keep the cached range.
     maxOff
       | overflow, Nothing <- mScr = maxOffPrev
       | otherwise = scrollAxisRange contentW viewW 0
@@ -188,10 +179,8 @@ scrollableHeaders ctx groupId barGap cur headers = do
   -- Sub-pixel churn is ignored so a parked strip never dirties.
   when (abs (maxOff - maxOffPrev) > 0.5) $
     uiIO (modifyStore ctx (insertSlot fieldFloat rangeKey maxOff))
-  -- One final offset per frame. The paged result folds the arrow pages, the
-  -- wheel notches, and the end clamp (a stale offset that outlived a wider
-  -- bar); the active-follow wins over it so a programmatically changed tab
-  -- always lands in view.
+  -- One offset per frame: arrow pages, wheel notches and the end clamp, or,
+  -- when the active tab changed, whatever brings it into view.
   let pagedOff
         | leftClicked, canLeft = max 0 (off - page)
         | rightClicked, canRight = min maxOff (off + page)
@@ -233,7 +222,9 @@ renderHeaders ctx tabStyle cur tabList = do
   uiIO (moveSelection ctx cur nextTab keyed)
   pure (TabResponse resp closedKey nextTab, keyed)
 
--- | One header: its key, its response, and whether its close button was clicked.
+-- | One header: its key, its response, and whether it was closed (close
+-- button clicked, or header or close button middle-clicked, as in a
+-- browser).
 renderHeader :: (Eq a, Ui :> es) => Int -> a -> Tab a body -> Eff es (a, Response, Bool)
 renderHeader tabStyle cur t = do
   let headerText = maybe (tabTitle t) (\b -> mconcat [tabTitle t, " (", b, ")"]) (tabBadge t)
@@ -244,7 +235,7 @@ renderHeader tabStyle cur t = do
       resp <- mainButton
       closeResp <-
         headerButton "\215" 0 (tabHeaderLay {layoutPadding = Padding 2 4 4 4}) buttonFlagClose
-      pure (tabKey t, resp, respClicked closeResp)
+      pure (tabKey t, resp, respClicked closeResp || respClickedWith MouseMiddle resp || respClickedWith MouseMiddle closeResp)
     else (tabKey t,,False) <$> mainButton
 
 -- | Tab headers and the active tab's body. Pass the active key; the result is

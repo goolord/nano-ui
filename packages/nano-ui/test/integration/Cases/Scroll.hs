@@ -11,11 +11,14 @@ import NanoUI.Internal.Context (ctxNodeArena, setDrawSnapScale)
 import NanoUI.Internal.Layout.Arena
   ( NodeType (..)
   , findNodeM
+  , getClipBounds
+  , getClipRect
   , getNodeValue
   , getNodeType
-  , getRect
+  , getNodeRect
   , getScrollContentW
   , getWidgetId
+  , lookupNodeByWidgetId
   )
 
 tests :: [Spec]
@@ -41,6 +44,9 @@ tests =
   , pixelSpec "scroll-metrics" runScrollMetricsTest
   , pixelSpec "scroll-into-view" runScrollIntoViewTest
   , pixelSpec "scroll-glide-clamp" runScrollGlideClampTest
+  , spec "scroll-disjoint-viewport-hit" runDisjointViewportHitTest
+  , spec "scroll-disjoint-viewport-layers" runDisjointViewportLayersTest
+  , spec "scroll-wheel-paint-order" runWheelPaintOrderTest
   ]
 
 runScrollThumbCursorTest :: Context -> IORef Int -> IO ()
@@ -55,7 +61,7 @@ runScrollThumbCursorTest ctx failed = do
     assertJustM failed (findGrabHover ctx ui inp0 thumbX tryYs) $ \hover -> do
       kind <- uiCursorKind ctx hover
       assertEq failed kind UiCursorGrab
-      let press = hover {inputMouseDown = True, inputMousePressed = True}
+      let press = applyMouseButton MouseLeft True hover
       _ <- runFrame ctx press ui
       grabbing <- cursorKindIs ctx press UiCursorGrabbing
       assert failed grabbing
@@ -86,9 +92,9 @@ runScrollThumbHoverTest ctx failed = do
     assert failed =<< needsRedraw ctx over off
     thumbIs off rest
     -- A drag keeps its thumb bright wherever the pointer goes.
-    thumbIs over {inputMouseDown = True, inputMousePressed = True} hovered
-    thumbIs off {inputMousePos = V2 20 (ry + rh / 2), inputMouseDown = True} hovered
-    thumbIs off {inputMouseReleased = True} rest
+    thumbIs (applyMouseButton MouseLeft True over) hovered
+    thumbIs off {inputMousePos = V2 20 (ry + rh / 2), inputButtonsHeld = buttonsFromList [MouseLeft]} hovered
+    thumbIs (applyMouseButton MouseLeft False off) rest
 
 -- The scroll content's right edge stops at the scrollbar gutter, one gap
 -- before the bar. The gap matches the scroller's right padding and is never
@@ -543,7 +549,7 @@ scrollNodeState ctx wid is2D = do
       if is2D
         then getScrollContentW na i
         else getNodeValue na i
-    (_, _, rw, rh) <- getRect na i
+    Rect _ _ rw rh <- getNodeRect na i
     pure (contentMain, if is2D then rw - padTestBoth else rh - padTestBoth)
 
 -- The other side of the pad fix: a padded 2D scroller whose child really is
@@ -741,3 +747,125 @@ runScroll2DGrowMinWidthTest ctx failed = do
   assertGt failed narrow 0
   wrapped <- rangeX (withInput 400 200) (rows (columnWith (grow . tight) (rowWith (fixedW 600 . tight) (label (T.pack "wide")))))
   assertGt failed wrapped 0
+
+-- | A scroller below its parent's fold has an empty viewport, so its content
+-- takes no pointer input even where it has scrolled into the outer
+-- viewport's rect. Scrolled by 100, the inner scroller's button sits about
+-- 50 px down, inside the outer viewport but above the inner one. It is not
+-- painted there, so it neither hovers nor clicks.
+runDisjointViewportHitTest :: Context -> IORef Int -> IO ()
+runDisjointViewportHitTest ctx failed = do
+  let inp0 = withInputOff 300 200
+      filler h = spacer (Fixed 10) (Fixed h)
+      ui = fmap snd . scrollArea (fixedH 100 . fillW) . column $ do
+        filler 150
+        inner <- scrollArea (fixedH 30 . fillW) . column $ do
+          deep <- button' "Deep"
+          filler 200
+          pure deep
+        filler 100
+        pure inner
+  (sid, _) <- warmup2 ctx inp0 ui
+  setScrollOffset ctx sid 100
+  (_, deep) <- warmup2 ctx inp0 ui
+  let Rect bx by bw bh = respRect deep
+      centre = V2 (bx + bw / 2) (by + bh / 2)
+      hover = inp0 {inputMousePos = centre}
+  -- The button is inside the outer viewport's rect, and its clip is empty
+  -- rather than unset.
+  assert failed (by >= 0 && by + bh < 100)
+  let na = ctxNodeArena ctx
+  assertJustM failed (lookupNodeByWidgetId na (respId deep)) $ \idx -> do
+    assertEq failed Nothing =<< getClipRect na idx
+    assert failed . maybe False (\(Rect _ _ w h) -> w == 0 && h == 0) =<< getClipBounds na idx
+  (_, hovered) <- warmup2 ctx hover ui
+  assert failed (not (respHovered hovered))
+  let (press, release) = clickPair hover centre
+  (_, pressed) <- evalUi ctx press ui
+  assert failed (not (respPressed pressed))
+  (_, clicked) <- evalUi ctx release ui
+  assert failed (not (respClicked clicked))
+
+-- | Layered buttons and a pinned one in a scroller outside the outer
+-- viewport have an empty clip and take no pointer input
+-- ('NanoUI.Internal.Frame.Hit.topmostHit' only picks reachable widgets). In
+-- view, the pinned button wins over the layers, and the top layer's button
+-- wins beside it.
+runDisjointViewportLayersTest :: Context -> IORef Int -> IO ()
+runDisjointViewportLayersTest ctx failed = do
+  let inp0 = withInputOff 300 200
+      filler h = spacer (Fixed 10) (Fixed h)
+      ui = scrollArea (fixedH 100 . fillW) . column $ do
+        filler 150
+        inner <- scrollArea (fixedH 30 . fillW) . column $ do
+          stacked <- layers (mapM (buttonWith' (fixedWH 100 20)) ["Under", "Over"])
+          pinned <- buttonWith' (pinAt 60 0 . fixedWH 40 20) "Pin"
+          filler 200
+          pure (stacked ++ [pinned])
+        filler 100
+        pure inner
+      buttons = fmap (snd . snd) ui
+      -- A point on the top layer's button left of the pinned one, and on the pinned one.
+      targets bs = [(1 :: Int, V2 (rectX (respRect (bs !! 1)) + 10) (v2Y (centerOf (bs !! 1)))), (2, centerOf (bs !! 2))]
+  (outer, (inner, _)) <- warmup2 ctx inp0 ui
+  setScrollOffset ctx inner 100
+  hidden <- warmup2 ctx inp0 buttons
+  forM_ hidden $ \b ->
+    assertJustM failed (lookupNodeByWidgetId (ctxNodeArena ctx) (respId b)) $ \idx ->
+      assert failed . maybe False (\(Rect _ _ w h) -> w == 0 && h == 0) =<< getClipBounds (ctxNodeArena ctx) idx
+  forM_ (targets hidden) $ \(_, pos) -> do
+    assert failed (v2Y pos > 0 && v2Y pos < 100)
+    _ <- warmup2 ctx inp0 {inputMousePos = pos} buttons
+    assert failed . (`notElem` map respId hidden) =<< getHotId ctx
+    let (press, release) = clickPair inp0 pos
+    pressed <- evalUi ctx press buttons
+    assert failed (not (any (\r -> respHovered r || respPressed r) pressed))
+    clicked <- evalUi ctx release buttons
+    assert failed (not (any respClicked clicked))
+  setScrollOffset ctx inner 0
+  setScrollOffset ctx outer 140
+  shown <- warmup2 ctx inp0 buttons
+  forM_ (targets shown) $ \(i, pos) -> do
+    _ <- warmup2 ctx inp0 {inputMousePos = pos} buttons
+    assertEq failed (respId (shown !! i)) =<< getHotId ctx
+    clicked <- runClick ctx inp0 {inputMousePos = pos} buttons pos
+    assertEq failed [j == i | j <- [0 .. 2]] (map respClicked clicked)
+
+-- | The wheel goes to the topmost scroller under the pointer, even one pinned
+-- over another but declared first. A pinned panel over the lower scroller
+-- blocks the wheel with 'PointerBlock' and passes it through otherwise. A
+-- blocking card inside a scroller does not stop that scroller.
+runWheelPaintOrderTest :: Context -> IORef Int -> IO ()
+runWheelPaintOrderTest ctx failed = do
+  let inp0 = withInputOff 400 300
+      rows n = column (replicateM_ n (label "row"))
+      ui mode = columnWith tight $ do
+        (top, ()) <- scrollArea (pinAt 20 20 . fixedWH 120 100) (rows 30)
+        (under, ()) <- scrollArea (fixedWH 360 240) (rows 60)
+        panelWith (pointer mode . pinAt 200 20 . fixedWH 100 80) (pure ())
+        pure (top, under)
+      -- Which scrollers a wheel turn at @p@ moves.
+      moved mode p = do
+        (top, under) <- warmup2 ctx inp0 (ui mode)
+        setScrollOffset ctx top 0
+        setScrollOffset ctx under 0
+        warmup ctx inp0 {inputMousePos = p} (ui mode)
+        _ <- runFrame ctx inp0 {inputMousePos = p, inputScroll = V2 0 1} (ui mode)
+        (,) <$> ((> 0) <$> getScrollOffset ctx top) <*> ((> 0) <$> getScrollOffset ctx under)
+  moved PointerAuto (V2 60 60) >>= assertEq failed (True, False)
+  moved PointerAuto (V2 250 60) >>= assertEq failed (False, True)
+  moved PointerBlock (V2 250 60) >>= assertEq failed (False, False)
+  moved PointerBlock (V2 250 200) >>= assertEq failed (False, True)
+  -- A blocking card blocks only what lies under its own scroller, so the
+  -- wheel over it scrolls that scroller.
+  let inside = columnWith tight $ do
+        (sid, ()) <- scrollArea (fixedWH 300 200) . column $ do
+          panelWith (pointer PointerBlock . fixedWH 200 60) (pure ())
+          rows 30
+        box (pinAt 350 250 . fixedWH 10 10) (colorRGBA 255 0 0 255)
+        pure sid
+  sid <- warmup2 ctx inp0 inside
+  let onCard = V2 60 30
+  warmup ctx inp0 {inputMousePos = onCard} inside
+  _ <- runFrame ctx inp0 {inputMousePos = onCard, inputScroll = V2 0 1} inside
+  assert failed . (> 0) =<< getScrollOffset ctx sid

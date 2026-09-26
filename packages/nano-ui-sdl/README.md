@@ -19,6 +19,29 @@ main = runSdlApp defaultSdlOptions (label "Hello")
 with `NanoUI.Emit`. `SdlOptions` sets the window, fonts, font size, theme, and
 vsync.
 
+## Windows and screenshots
+
+`sdlWindowSettings` is the core's `WindowSettings`, which the RGFW backend
+opens its window from too: the title, the size in layout units, the
+position, size limits, icon, mode, transparency, opacity, and whether a close
+request ends the session.
+
+```haskell
+runSdlApp
+  defaultSdlOptions
+    {sdlWindowSettings = defaultWindowSettings {wsTitle = "Notes", wsSize = Size 900 600}}
+  notesView
+```
+
+A view reads the window with `askWindow` and changes it with the core's
+setters and commands (`setWindowTitleUi`, `setWindowModeUi`, `moveWindowUi`,
+`resizeWindowUi` and the rest). `sdlWindowDecorations` and `windowCaption`
+are for a window that draws its own title bar. A transparent window
+(`wsTransparent`) shows the desktop where the theme's window colour is
+translucent; the software renderer adds up the alpha where translucent
+colours overlap. `captureScreenshot` returns the last presented frame as a
+`Screenshot`, and `saveScreenshot` writes it to a BMP file.
+
 ## Add to an application
 
 Use GHC 9.14 and include `nano-ui` and `nano-ui-sdl` in `build-depends`.

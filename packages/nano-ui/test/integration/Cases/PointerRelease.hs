@@ -29,8 +29,8 @@ releaseAfterMove ctx failed lbl ui picked = do
   spans <- collectTextSpans ctx
   assertJust failed (spanRectOf lbl spans) $ \r -> do
     let V2 px py = spanCenter r
-        press = inp0 {inputMousePos = V2 px py, inputMouseDown = True, inputMousePressed = True}
-        release = inp0 {inputMousePos = V2 px (py + shift), inputMouseReleased = True}
+        press = pressAt inp0 (V2 px py)
+        release = applyMouseButton MouseLeft False inp0 {inputMousePos = V2 px (py + shift)}
     _ <- runFrame ctx press (ui 0)
     (missed, _, _, dirty) <- runFrame ctx release (ui shift)
     assert failed (not (picked missed))
@@ -74,10 +74,9 @@ runReleaseElsewhereTest ctx failed = do
 
   (a, b, cb, _) <- warmup2 ctx inp0 ui
   let at r = inp0 {inputMousePos = centerOf r}
-      pressOn r = (at r) {inputMouseDown = True, inputMousePressed = True}
-      dragTo r p = p {inputMousePos = centerOf r, inputMousePressed = False}
-      releaseOn r p = (dragTo r p) {inputMouseDown = False, inputMouseReleased = True}
-
+      pressOn r = pressAt inp0 (centerOf r)
+      dragTo r p = holdAt p (centerOf r)
+      releaseOn r p = releaseAt (dragTo r p)
   -- Button to button.
   _ <- runFrame ctx (pressOn a) ui
   ((_, bDrag, _, _), _, _, _) <- runFrame ctx (dragTo b (pressOn a)) ui
@@ -113,20 +112,8 @@ runRightReleaseElsewhereTest ctx failed = do
           contextMenuArea (fixedH 60 . fillW) (label' "Area") (const (menuItem "Cut"))
         pure (a, lbl, menu)
   (a, lbl, _) <- warmup2 ctx inp0 ui
-  let rightPressOn r =
-        inp0
-          { inputMousePos = centerOf r
-          , inputMouseRightDown = True
-          , inputMouseRightPressed = True
-          }
-      rightReleaseOn r p =
-        p
-          { inputMousePos = centerOf r
-          , inputMouseRightPressed = False
-          , inputMouseRightDown = False
-          , inputMouseRightReleased = True
-          }
-
+  let rightPressOn r = fst (rightClickPair inp0 (centerOf r))
+      rightReleaseOn r p = snd (rightClickPair p (centerOf r))
   -- Right press on the button, release over the menu area: no menu.
   _ <- runFrame ctx (rightPressOn a) ui
   ((aUp, _, menuUp), _, _, _) <- runFrame ctx (rightReleaseOn lbl (rightPressOn a)) ui
@@ -148,11 +135,9 @@ runReleaseReturnsTest ctx failed = do
         b <- button' "Beta"
         pure (a, b)
   (a, b) <- warmup2 ctx inp0 ui
-  let at r = inp0 {inputMousePos = centerOf r}
-      pressOn r = (at r) {inputMouseDown = True, inputMousePressed = True}
-      moveTo r p = p {inputMousePos = centerOf r, inputMousePressed = False}
-      releaseOn r p = (moveTo r p) {inputMouseDown = False, inputMouseReleased = True}
-
+  let pressOn r = pressAt inp0 (centerOf r)
+      moveTo r p = holdAt p (centerOf r)
+      releaseOn r p = releaseAt (moveTo r p)
   -- Straight click.
   _ <- runFrame ctx (pressOn a) ui
   ((aUp, _), _, _, _) <- runFrame ctx (releaseOn a (pressOn a)) ui
@@ -177,13 +162,13 @@ runOverlapPressTest ctx failed = do
   (a, _) <- warmup2 ctx inp0 ui
   let Rect ax ay aw ah = respRect a
       overlap = inp0 {inputMousePos = V2 (ax + aw - 10) (ay + ah / 2)}
-      press = overlap {inputMouseDown = True, inputMousePressed = True}
-      held' = overlap {inputMouseDown = True}
+      press = applyMouseButton MouseLeft True overlap
+      held' = overlap {inputButtonsHeld = buttonsFromList [MouseLeft]}
   _ <- runFrame ctx overlap ui
   hot <- getHotId ctx
   assert failed (hot == respId a)
   _ <- runFrame ctx press ui
   ((aHeld, bHeld), _, _, _) <- runFrame ctx held' ui
   assert failed (respPressed aHeld && not (respPressed bHeld))
-  void (runFrame ctx (overlap {inputMouseReleased = True}) ui)
+  void (runFrame ctx (applyMouseButton MouseLeft False overlap) ui)
   void (runFrame ctx inp0 ui)

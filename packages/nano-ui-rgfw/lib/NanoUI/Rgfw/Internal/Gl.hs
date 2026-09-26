@@ -1,7 +1,8 @@
 -- | OpenGL presentation for the RGFW host.
 --
 -- Geometry goes to the GPU straight from the core's shared 'DrawData'
--- buffers, one scissored draw per command. Text comes from the collected
+-- buffers, one scissored draw per command; image-atlas commands sample the
+-- texture 'syncImagesGl' maintains. Text comes from the collected
 -- spans: every glyph is a quad sampled from an atlas that the Cozette
 -- software blitter bakes at the current scale, so glyph pixels match what the
 -- blitter stamps.
@@ -17,8 +18,10 @@ module NanoUI.Rgfw.Internal.Gl
   , newGlRenderer
   , freeGlRenderer
   , renderArenaGl
+  , syncImagesGl
   , readRetainedPixels
-  , damageBox
+  , readWindowPixels
+  , retainedPixels
   , GlyphAtlas (..)
   , glyphAtlasFor
   , atlasCell
@@ -26,25 +29,26 @@ module NanoUI.Rgfw.Internal.Gl
   , writeSpanQuads
   , toPhysRect
   , physClip
-  , physClipIn
   ) where
 
 import Control.Exception (bracket)
-import Control.Monad (foldM, when)
+import Control.Monad (foldM, forM_, when)
 import Data.Bits (shiftR, (.&.))
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Int (Int32)
 import Data.Maybe (fromMaybe)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Internal as BSI
+import qualified Data.ByteString.Unsafe as BSU
 import qualified Data.Text as T
 import qualified Data.Text.Foreign as TF
 import Data.Word (Word32, Word8)
 import Foreign.ForeignPtr (withForeignPtr)
 import Foreign.Marshal.Alloc (callocBytes, free, reallocBytes)
-import Foreign.Ptr (Ptr, nullPtr)
+import Foreign.Marshal.Utils (copyBytes)
+import Foreign.Ptr (Ptr, nullPtr, plusPtr)
 import Foreign.Storable (pokeByteOff)
-import NanoUI (Color (..), Rect (..), rectInflate, roundHalfUp)
+import NanoUI (Color (..), Rect (..), RgbaPixels, rectInflate, rgbaPixels, roundHalfUp)
 import NanoUI.Backend (Damage (..))
 import NanoUI.Rgfw.Internal.Context (TextSpan, paintInLayerOrder)
 import NanoUI.Rgfw.Internal.Font.Cozette
@@ -55,8 +59,12 @@ import NanoUI.Rgfw.Internal.Font.Cozette
   , renderGlyphScaledToBuffer
   )
 import NanoUI.Testing
-  ( DrawCmd (..)
+  ( AtlasUpload (..)
+  , Context
+  , DrawCmd (..)
   , DrawData (..)
+  , atlasChanges
+  , atlasTextureId
   , forDrawCmdsInLayer_
   , vertexSize
   )
@@ -73,6 +81,9 @@ foreign import ccall unsafe "nano_ui_gl_destroy"
 foreign import ccall unsafe "nano_ui_gl_upload_atlas"
   c_uploadAtlas :: Ptr NanoUiGl -> Ptr Word32 -> Int32 -> Int32 -> IO Int32
 
+foreign import ccall unsafe "nano_ui_gl_upload_images"
+  c_uploadImages :: Ptr NanoUiGl -> Ptr Word8 -> Int32 -> Int32 -> Int32 -> Int32 -> Int32 -> Int32 -> Int32 -> IO Int32
+
 foreign import ccall unsafe "nano_ui_gl_begin"
   c_begin :: Ptr NanoUiGl -> Int32 -> Int32 -> Float -> Float -> Float -> Float -> Int32 -> IO Int32
 
@@ -82,6 +93,9 @@ foreign import ccall unsafe "nano_ui_gl_present"
 foreign import ccall unsafe "nano_ui_gl_read_retained"
   c_readRetained :: Ptr NanoUiGl -> Ptr Word8 -> IO ()
 
+foreign import ccall unsafe "nano_ui_gl_read_window"
+  c_readWindow :: Ptr NanoUiGl -> Ptr Word8 -> IO ()
+
 foreign import ccall unsafe "nano_ui_gl_upload_geometry"
   c_uploadGeometry :: Ptr NanoUiGl -> Ptr Word8 -> Int32 -> Ptr Word8 -> Int32 -> IO ()
 
@@ -89,7 +103,7 @@ foreign import ccall unsafe "nano_ui_gl_upload_text"
   c_uploadText :: Ptr NanoUiGl -> Ptr Word8 -> Int32 -> IO ()
 
 foreign import ccall unsafe "nano_ui_gl_draw_geometry"
-  c_drawGeometry :: Ptr NanoUiGl -> Int32 -> Int32 -> Int32 -> Int32 -> Word32 -> Word32 -> IO ()
+  c_drawGeometry :: Ptr NanoUiGl -> Int32 -> Int32 -> Int32 -> Int32 -> Word32 -> Word32 -> Int32 -> IO ()
 
 foreign import ccall unsafe "nano_ui_gl_draw_text"
   c_drawText :: Ptr NanoUiGl -> Int32 -> Int32 -> IO ()
@@ -100,6 +114,7 @@ data GlRenderer = GlRenderer
   { glHandle :: !(Ptr NanoUiGl)
   , glAtlas  :: !(IORef (Maybe GlyphAtlas))
   , glText   :: !(IORef (Ptr Word8, Int)) -- ^ glyph vertex scratch, capacity in vertices
+  , glImages :: !(IORef Int) -- ^ image atlas generation uploaded, 0 for none
   }
 
 -- | Build the renderer on the calling thread's current OpenGL context.
@@ -108,7 +123,7 @@ newGlRenderer = do
   h <- c_create
   when (h == nullPtr) $
     fail "nano-ui-rgfw: OpenGL renderer setup failed (needs an OpenGL 3.2 core context)"
-  GlRenderer h <$> newIORef Nothing <*> newIORef (nullPtr, 0)
+  GlRenderer h <$> newIORef Nothing <*> newIORef (nullPtr, 0) <*> newIORef 0
 
 -- | Release the GPU objects (the context must still be current) and the
 -- glyph vertex scratch.
@@ -162,11 +177,49 @@ renderArenaGl r font !scale !fbW !fbH bg damage pieces drawData baseSpans overla
     (c_drawText h (fromIntegral nBase) (fromIntegral (nAll - nBase)))
   c_present h
 
+-- | Upload image atlas changes since the last sync: dirty rects, or the
+-- whole atlas after a resize or on first use. Call before 'renderArenaGl'
+-- with the GL context current.
+syncImagesGl :: GlRenderer -> Context -> IO ()
+syncImagesGl r ctx = do
+  since <- readIORef (glImages r)
+  changes <- atlasChanges ctx since
+  forM_ changes $ \(w, h, pixels, gen, upload) -> do
+    let put whole (x, y, rw, rh) =
+          (/= 0) <$> withForeignPtr pixels (\p ->
+            c_uploadImages (glHandle r) p (fromIntegral w) (fromIntegral h)
+              (fromIntegral x) (fromIntegral y) (fromIntegral rw) (fromIntegral rh) whole)
+    ok <- case upload of
+      AtlasWhole -> put 1 (0, 0, w, h)
+      AtlasRegions rects -> and <$> mapM (put 0) rects
+    -- A failed rect upload (no texture yet) forces a full upload next frame.
+    writeIORef (glImages r) (if ok then gen else 0)
+
 -- | The retained frame's pixels, for checking what frames drew: RGBA rows,
 -- bottom row first, of a w x h frame, which must be the last frame's size.
 readRetainedPixels :: GlRenderer -> Int -> Int -> IO BS.ByteString
 readRetainedPixels r w h =
   BSI.create (w * h * 4) (c_readRetained (glHandle r))
+
+-- | The window back buffer after the last present, in the same layout as
+-- 'readRetainedPixels'. For tests; read before the swap, after which the
+-- back buffer is undefined.
+readWindowPixels :: GlRenderer -> Int -> Int -> IO BS.ByteString
+readWindowPixels r w h =
+  BSI.create (w * h * 4) (c_readWindow (glHandle r))
+
+-- | The retained frame as a top-down screenshot. @w@ x @h@ must be the last
+-- frame's size; each is clamped to at least 1.
+retainedPixels :: GlRenderer -> Int -> Int -> IO (Maybe RgbaPixels)
+retainedPixels r w0 h0 = do
+  let w = max 1 w0
+      h = max 1 h0
+      row = w * 4
+  bottomUp <- readRetainedPixels r w h
+  pixels <- BSI.create (h * row) $ \dst ->
+    BSU.unsafeUseAsCString bottomUp $ \src ->
+      mapM_ (\y -> copyBytes (dst `plusPtr` (y * row)) (src `plusPtr` ((h - 1 - y) * row)) row) [0 .. h - 1]
+  pure (rgbaPixels w h pixels)
 
 -- | The physical pixels a damage rect repaints, as @(x0, y0, x1, y1)@ within
 -- a w x h framebuffer. The core paints a clip frame's backdrop one logical
@@ -183,7 +236,7 @@ drawCmd h !scale !fbW !fbH cmd
         Nothing -> pure ()
         Just (x0, y0, x1, y1) ->
           c_drawGeometry h (fromIntegral x0) (fromIntegral y0) (fromIntegral x1) (fromIntegral y1)
-            (cmdIndexOffset cmd) (cmdIndexCount cmd)
+            (cmdIndexOffset cmd) (cmdIndexCount cmd) (if cmdTextureId cmd == atlasTextureId then 1 else 0)
 
 -- | Scale logical x/y/width/height to physical pixels, snapping both edges
 -- with half-up rounding. Returns x/y/width/height with non-negative extents.
