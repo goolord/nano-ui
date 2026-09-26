@@ -17,12 +17,19 @@ module RGFW
   , setMouseDefault
   , readClipboardText
   , writeClipboardText
+  , setWindowIcon
+  , setWindowMinSize
+  , setWindowMaxSize
+  , moveWindow
+  , centerWindow
   -- Re-exports
   , module RGFW.Raw
   )
 where
 
-import Data.ByteString.Unsafe (unsafePackCStringLen)
+import Data.ByteString (ByteString)
+import Data.ByteString qualified as BS
+import Data.ByteString.Unsafe (unsafePackCStringLen, unsafeUseAsCString)
 import Data.Char (chr)
 import Data.Function (on)
 import Data.Text (Text)
@@ -33,7 +40,7 @@ import Data.Word (Word32, Word8)
 import Foreign.C.String (withCString)
 import Foreign.C.Types (CSize (..), CUChar (..), CUInt (..))
 import Foreign.Marshal.Alloc (alloca, allocaBytes)
-import Foreign.Ptr (Ptr, nullPtr)
+import Foreign.Ptr (Ptr, castPtr, nullPtr)
 import Foreign.Storable (peek)
 import RGFW.Raw
 
@@ -202,3 +209,31 @@ writeClipboardText :: Text -> IO Bool
 writeClipboardText txt =
   TF.withCStringLen txt $ \(ptr, len) ->
     (/= 0) <$> c_rgfw_write_clipboard_text ptr (fromIntegral len)
+
+-- | Give the window (and its taskbar entry) an icon: @w@ by @h@ pixels of
+-- tightly packed RGBA bytes, rows from the top. RGFW copies them. 'False'
+-- when the size is not positive, the bytes are too few, or RGFW refuses.
+setWindowIcon :: Window -> Int -> Int -> ByteString -> IO Bool
+setWindowIcon (Window win) w h pixels
+  | w <= 0 || h <= 0 || BS.length pixels < w * h * 4 = pure False
+  | otherwise =
+      unsafeUseAsCString pixels $ \p ->
+        (/= 0) <$> c_RGFW_window_setIcon win (castPtr p) (fromIntegral w) (fromIntegral h) (CUChar rgfw_formatRGBA8)
+
+-- | The smallest size the user may give the window, in native pixels; an
+-- axis of zero has no limit.
+setWindowMinSize :: Window -> Int -> Int -> IO ()
+setWindowMinSize (Window win) w h = c_RGFW_window_setMinSize win (fromIntegral w) (fromIntegral h)
+
+-- | The largest size the user may give the window, in native pixels; an
+-- axis of zero has no limit.
+setWindowMaxSize :: Window -> Int -> Int -> IO ()
+setWindowMaxSize (Window win) w h = c_RGFW_window_setMaxSize win (fromIntegral w) (fromIntegral h)
+
+-- | Move the window's top-left corner to a point on the desktop, in pixels.
+moveWindow :: Window -> Int -> Int -> IO ()
+moveWindow (Window win) x y = c_RGFW_window_move win (fromIntegral x) (fromIntegral y)
+
+-- | Centre the window on its monitor.
+centerWindow :: Window -> IO ()
+centerWindow (Window win) = c_RGFW_window_center win

@@ -11,6 +11,8 @@
   keys, in `RGFW.Raw`.
 - `EventKeyRepeat`, a held key's auto-repeat, which `EventKeyPress` no longer
   reports, and `physicalToMappedKey`.
+- `setWindowIcon`, `setWindowMinSize`, `setWindowMaxSize`, `moveWindow` and
+  `centerWindow`.
 
 ### Changed
 

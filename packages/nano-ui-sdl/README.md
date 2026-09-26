@@ -19,6 +19,17 @@ main = runSdlApp defaultSdlOptions (label "Hello")
 with `NanoUI.Emit`. `SdlOptions` sets the window, fonts, font size, theme, and
 vsync.
 
+## Windows and screenshots
+
+`SdlOptions` also sets the window's position, icon, size limits, opacity and
+transparency (`sdlWindowPosition`, `sdlWindowIcon`, `sdlWindowMinSize`,
+`sdlWindowMaxSize`, `sdlWindowOpacity`, `sdlWindowTransparent`), and
+`setWindowPosition` and the other setters change them in a session. A
+transparent window shows the desktop where the theme's window colour is
+translucent; the software renderer adds up the alpha where translucent
+colours overlap. `captureScreenshot` returns the last presented frame as an
+`RgbaImage`, and `saveScreenshot` writes it to a BMP file.
+
 ## Add to an application
 
 Use GHC 9.14 and include `nano-ui` and `nano-ui-sdl` in `build-depends`.

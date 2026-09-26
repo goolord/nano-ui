@@ -29,7 +29,8 @@ cabal test nano-ui-terminal-test
 ```
 
 `nano-ui-sdl-demo --help` lists the demo's options; `--explain` starts it
-with the layout overlay on, which the Debug panel (F12) also toggles.
+with the layout overlay on, which the Debug panel (F12) also toggles. Its
+Screenshot button saves `nano-ui-demo.png`.
 
 `nano-ui-demo-test` drives the demo, notepad, log viewer, and an input-method
 composition in hidden windows, and fails if a check does not hold.

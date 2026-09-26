@@ -7,6 +7,8 @@ module NanoUI.Backend.Rgfw
   , runRgfwAppReduceCustom
   , RgfwOptions (..)
   , defaultRgfwOptions
+  , WindowPosition (..)
+  , RgbaImage (..)
   , newRgfwContext
   , applyRgfwTheme
   , RgfwDebugSnapshot (..)
@@ -15,6 +17,7 @@ module NanoUI.Backend.Rgfw
   , emptyRgfwDebug
   ) where
 
+import NanoUI (RgbaImage (..), WindowPosition (..))
 import NanoUI.Rgfw.Internal.Context (applyRgfwTheme, newRgfwContext)
 import NanoUI.Rgfw.Internal.Debug
   ( RgfwDebugSnapshot (..)

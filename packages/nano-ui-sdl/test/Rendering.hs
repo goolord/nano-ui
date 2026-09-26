@@ -3,13 +3,13 @@
 
 module Main (main) where
 
-import Control.Exception (bracket)
-import Control.Monad (forM_, replicateM_, unless, void)
+import Control.Exception (IOException, bracket, throwIO, try)
+import Control.Monad (forM_, replicateM_, unless, void, when)
 import Data.ByteString qualified as BS
 import Data.Functor ((<&>))
 import Data.IORef (readIORef)
-import Data.List (nub)
-import Data.Maybe (fromMaybe, mapMaybe)
+import Data.List (isInfixOf, nub)
+import Data.Maybe (fromMaybe, isJust, mapMaybe)
 import Data.Primitive.PrimArray (primArrayFromList)
 import Data.Vector.Unboxed qualified as U
 import Data.Word (Word32, Word8)
@@ -48,6 +48,7 @@ import System.Environment (getArgs, lookupEnv, setEnv)
 import System.Mem (performGC)
 import Text.Printf (printf)
 import Text.Read (readMaybe)
+import WindowChecks (windowChecks)
 import "nano-ui-sdl" NanoUI.Backend.Sdl (SdlEnv (..), syncDisplay, withSdlBench)
 import "nano-ui-sdl" NanoUI.Sdl.Internal.Input (SdlEvent (..), pollEvents)
 
@@ -310,3 +311,20 @@ main = do
           step "image atlas upload, and turned and faded image readback" (imageChecks env ctx images (`draw` DamageFull))
           step "cursor mapping and creation" cursorChecks
           step "system theme event" (systemThemeChecks env ctx)
+  unless bench $ do
+    windowChecks (if native then "native drivers" else "dummy video, software renderer") False
+    -- With a display, again on its GPU renderers, which give a transparent
+    -- window custom blend modes: OpenGL's blends alpha with the colour's
+    -- operation, and OpenGL ES's keeps the larger alpha. A renderer the
+    -- display does not have is skipped.
+    display <- lookupEnv "DISPLAY"
+    when (isJust display && not native) $
+      forM_ ["opengl", "opengles2"] $ \renderer -> do
+        setEnv "SDL_VIDEODRIVER" "x11"
+        setEnv "SDL_RENDER_DRIVER" renderer
+        try (windowChecks ("x11, " ++ renderer) True) >>= \case
+          Left (err :: IOException)
+            | any (`isInfixOf` show err) ["SDL_Init", "SDL_CreateWindowAndRenderer"] ->
+                putStrLn ("SDL window checks on " ++ renderer ++ " skipped: " ++ show err)
+            | otherwise -> throwIO err
+          Right () -> pure ()

@@ -30,6 +30,12 @@ module NanoUI.Sdl.Internal.Chrome
   , WindowDecorations (..)
   , setWindowDecorations
   , setWindowShadow
+  , setWindowIcon
+  , setWindowMinSize
+  , setWindowMaxSize
+  , setWindowPosition
+  , windowPosition
+  , setWindowOpacity
 
     -- * A window that draws its own chrome
   , WindowChrome (..)
@@ -68,6 +74,7 @@ import NanoUI.Sdl.Internal.Chrome.Types
 import NanoUI.Sdl.Internal.Display (outPair)
 import NanoUI.Sdl.Internal.Frame
 import NanoUI.Sdl.Internal.Window (SdlEnv (..), windowZoom)
+import NanoUI.Sdl.Internal.WindowOptions
 import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
 import SDL3.Sys.Bindgen.Video (SDL_HitTest (..), SDL_HitTestResult (..), SDL_WindowFlags)
 import SDL3.Sys.Video qualified as SDL
@@ -151,6 +158,42 @@ setWindowDecorations env decorations = do
 -- the desktop's shadow already.
 setWindowShadow :: SdlEnv -> Bool -> IO ()
 setWindowShadow env = applyWindowShadow (sdlWindow env)
+
+-- | Change the window's icon ('NanoUI.Backend.Sdl.sdlWindowIcon'). 'False'
+-- for an image that is not one, or a video driver without icons.
+-- 'NanoUI.setWindowIconUi' does this from a view.
+setWindowIcon :: SdlEnv -> RgbaImage -> IO Bool
+setWindowIcon env = applyWindowIcon (sdlWindow env)
+
+-- | Change the smallest size the user may give the window, in layout units
+-- at the zoom the window is at now ('NanoUI.Backend.Sdl.sdlWindowMinSize'),
+-- which a later change of zoom does not convert again. A window smaller than
+-- that grows to it.
+setWindowMinSize :: SdlEnv -> Maybe Size -> IO ()
+setWindowMinSize env s = windowZoom env >>= \z -> applyWindowMinSize (sdlWindow env) z s
+
+-- | Change the largest size the user may give the window
+-- ('NanoUI.Backend.Sdl.sdlWindowMaxSize'). A window larger than that
+-- shrinks to it.
+setWindowMaxSize :: SdlEnv -> Maybe Size -> IO ()
+setWindowMaxSize env s = windowZoom env >>= \z -> applyWindowMaxSize (sdlWindow env) z s
+
+-- | Move the window, in the desktop's coordinates. 'WindowPositionDefault'
+-- leaves it where it is, and a maximized or fullscreen window, or one on
+-- Wayland, stays put.
+setWindowPosition :: SdlEnv -> WindowPosition -> IO ()
+setWindowPosition env = applyWindowPosition (sdlWindow env)
+
+-- | Where the window's top-left corner is, in the desktop's coordinates, as
+-- far as the desktop has said; 'Nothing' when SDL cannot say. Wayland does
+-- not tell a window where it is, so there this is not where it is.
+windowPosition :: SdlEnv -> IO (Maybe (Int, Int))
+windowPosition env = queryWindowPosition (sdlWindow env)
+
+-- | Fade the whole window, frame and all, from 0 (invisible) to 1 (opaque)
+-- ('NanoUI.Backend.Sdl.sdlWindowOpacity'), where the desktop allows.
+setWindowOpacity :: SdlEnv -> Float -> IO ()
+setWindowOpacity env = applyWindowOpacity (sdlWindow env)
 
 --------------------------------------------------------------------------------
 -- A window that draws its own chrome

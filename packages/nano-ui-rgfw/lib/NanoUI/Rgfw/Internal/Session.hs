@@ -25,6 +25,7 @@ import Control.Exception (bracket)
 import Control.Monad (void, when)
 import Data.Bits ((.&.))
 import Data.Char (chr, isDigit, isPrint, toLower)
+import Data.Foldable (for_)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.List (find)
 import Data.Maybe (fromMaybe, mapMaybe)
@@ -35,9 +36,11 @@ import Foreign.Ptr (Ptr)
 import GHC.Clock (getMonotonicTime)
 import NanoUI
   ( NanoUI
+  , RgbaImage (..)
   , Size (..)
   , Theme (..)
   , V2 (..)
+  , WindowPosition (..)
   , tomorrowNightMinDarkTheme
   , v2Add
   )
@@ -47,10 +50,13 @@ import NanoUI.Backend
   , Key (..)
   , Modifiers (..)
   , MouseButton (..)
+  , WindowHost (..)
+  , answerScreenshots
   , applyKey
   , applyMouseButton
   , cursorFallback
   , emptyInput
+  , installWindowHost
   , keyRepeats
   , keypadKey
   , modifiersFromBits
@@ -88,7 +94,7 @@ import NanoUI.Rgfw.Internal.Debug
   , newRgfwDebugSampler
   )
 import NanoUI.Rgfw.Internal.Font.Cozette (getCozetteFont)
-import NanoUI.Rgfw.Internal.Gl (freeGlRenderer, newGlRenderer, renderArenaGl, syncImagesGl)
+import NanoUI.Rgfw.Internal.Gl (freeGlRenderer, newGlRenderer, renderArenaGl, retainedImage, syncImagesGl)
 import qualified RGFW as R
 
 -- | Window and rendering options for the RGFW runners.
@@ -98,8 +104,10 @@ data RgfwOptions = RgfwOptions
   , optHeight :: !Int
   , optTheme  :: !Theme
   -- ^ Any core theme; the backend draws it square ('NanoUI.Rgfw.Internal.Context.applyRgfwTheme').
-  , optCenter :: !Bool
-  -- ^ Center the window on the screen.
+  , optPosition :: !WindowPosition
+  -- ^ Where the window opens (default: centred on the screen). RGFW places
+  -- a window itself, so 'WindowPositionDefault' asks for the top-left corner,
+  -- which an X11 window manager may place elsewhere.
   , optScale  :: !Float
   -- ^ UI scale. @0@ follows the monitor's scale.
   , optRefreshHz :: !Int
@@ -107,6 +115,14 @@ data RgfwOptions = RgfwOptions
   , optExplainLayout :: !Bool
   -- ^ Start with the layout overlay on, which outlines every layout node. A
   -- view turns it on and off with @explainLayout@.
+  , optMinSize :: !(Maybe (Int, Int))
+  -- ^ The smallest the user may make the window, in native pixels like
+  -- 'optWidth' and 'optHeight' (default: no limit). An axis of zero has no
+  -- limit.
+  , optMaxSize :: !(Maybe (Int, Int))
+  -- ^ The largest the user may make the window (default: no limit).
+  , optIcon :: !(Maybe RgbaImage)
+  -- ^ The window's icon (default: the desktop's). Its image id is not used.
   }
 
 -- | Centred 1680x1040 window with the dark theme, monitor scale, and 60 Hz
@@ -118,10 +134,13 @@ defaultRgfwOptions =
     , optWidth  = 1680
     , optHeight = 1040
     , optTheme  = tomorrowNightMinDarkTheme
-    , optCenter = True
+    , optPosition = WindowPositionCentered
     , optScale  = 0.0
     , optRefreshHz = 0
     , optExplainLayout = False
+    , optMinSize = Nothing
+    , optMaxSize = Nothing
+    , optIcon = Nothing
     }
 
 -- | The key an RGFW key code names, given the modifier bits it came with.
@@ -230,9 +249,12 @@ runRgfwAppReduceCustom ::
   (model -> NanoUI ()) ->
   IO ()
 runRgfwAppReduceCustom opts getThemeAndScale updateModel initialModel view = inBoundThread $ do
-  let flags = if optCenter opts then R.rgfw_windowCenter else 0
+  let flags = if optPosition opts == WindowPositionCentered then R.rgfw_windowCenter else 0
+      (x, y) = case optPosition opts of
+        WindowPositionAt px py -> (px, py)
+        _ -> (0, 0)
   bracket
-    (R.createWindowGL (optTitle opts) 0 0 (optWidth opts) (optHeight opts) flags 3 2)
+    (R.createWindowGL (optTitle opts) x y (optWidth opts) (optHeight opts) flags 3 2)
     (mapM_ R.closeWindow) $ \mWin -> case mWin of
       Nothing -> putStrLn "Failed to create RGFW window with an OpenGL 3.2 context."
       Just win -> runWindow win
@@ -240,6 +262,9 @@ runRgfwAppReduceCustom opts getThemeAndScale updateModel initialModel view = inB
     -- The GL context is current only on the OS thread that created it.
     inBoundThread act = if rtsSupportsBoundThreads then runInBoundThread act else act
     runWindow win = do
+      for_ (optMinSize opts) (uncurry (R.setWindowMinSize win))
+      for_ (optMaxSize opts) (uncurry (R.setWindowMaxSize win))
+      for_ (optIcon opts) (setIcon win)
       let !refreshHz = if optRefreshHz opts > 0 then optRefreshHz opts else 60
           !refreshSec = 1.0 / fromIntegral refreshHz :: Double
       monScaleInit <- R.windowScale win
@@ -273,6 +298,25 @@ runRgfwAppReduceCustom opts getThemeAndScale updateModel initialModel view = inB
       debugSampler <- newRgfwDebugSampler
       setHost ctx (RgfwDebugHost debugSampler)
       setExplainLayout ctx (optExplainLayout opts)
+      -- Views give sizes in layout units, at the scale the window is at
+      -- when they ask.
+      let limit set s = do
+            scale <- readIORef scaleRef
+            let px v = if v <= 0 then 0 else round (v * scale)
+            uncurry (set win) (maybe (0, 0) (\(Size w h) -> (px w, px h)) s)
+      installWindowHost ctx
+        WindowHost
+          { hostSetIcon = setIcon win
+          , hostSetMinSize = limit R.setWindowMinSize
+          , hostSetMaxSize = limit R.setWindowMaxSize
+          , hostSetPosition = \case
+              WindowPositionDefault -> pure ()
+              WindowPositionCentered -> R.centerWindow win
+              WindowPositionAt px py -> R.moveWindow win px py
+            -- RGFW windows do not fade: 'NanoUI.setWindowOpacityUi' does
+            -- nothing here.
+          , hostSetOpacity = \_ -> pure ()
+          }
       let font = getCozetteFont
           initInp = emptyInput {inputWindowSize = logicalSize initPhys initScale}
           -- Set the pointer shape only when the wanted kind changes.
@@ -316,6 +360,8 @@ runRgfwAppReduceCustom opts getThemeAndScale updateModel initialModel view = inB
               if damageIsEmpty damage && not paintFull
                 then do
                   noteDebugSkip (rdsSampler debugSampler)
+                  -- The retained frame, on screen, is this one.
+                  answerScreenshots c (Just <$> retainedImage renderer pw ph)
                   pure dirtyAfterUi
                 else do
                   tRenderStart <- getMonotonicTime
@@ -329,6 +375,7 @@ runRgfwAppReduceCustom opts getThemeAndScale updateModel initialModel view = inB
                   tSwapStart <- getMonotonicTime
                   R.swapBuffersGL win
                   tSwapEnd <- getMonotonicTime
+                  answerScreenshots c (Just <$> retainedImage renderer pw ph)
                   nodes <- arenaCount (ctxNodeArena c)
                   let ms a b = (b - a) * 1000
                   noteDebugPresent (rdsSampler debugSampler) (ms tUiStart tUiEnd) (ms tRenderStart tSwapStart)
@@ -387,6 +434,10 @@ runRgfwAppReduceCustom opts getThemeAndScale updateModel initialModel view = inB
         -- blocking until some input happens along.
         _ <- drawOne True ctx initInp
         runSessionLoop drv ctx initInp
+
+-- | Give the window an icon, as 'optIcon' and 'NanoUI.setWindowIconUi' do.
+setIcon :: R.Window -> RgbaImage -> IO ()
+setIcon win (RgbaImage _ w h pixels) = void (R.setWindowIcon win w h pixels)
 
 -- | An RGFW event translated for the input fold.
 data RgfwEvent

@@ -31,7 +31,7 @@ runSdlSession options drawFn = do
   forM_ (sdlAppImages options) $ \(RgbaImage image w h pixels) ->
     registerImage ctx image w h pixels >>= (`unless` fail "registerImage failed")
   withSdl options ctx $ \ctx0 env -> do
-    void $ setRenderDrawBlendModeSafe (sdlRenderer env) (fromIntegral sDL_BLENDMODE_BLEND)
+    void $ setRenderDrawBlendModeSafe (sdlRenderer env) (maybe (fromIntegral sDL_BLENDMODE_BLEND) fst (sdlTransparent env))
     prev <- newIORef emptyInput
     drawing <- newDrawingLock
     -- The resize watch presents with vsync off: Windows' modal size loop

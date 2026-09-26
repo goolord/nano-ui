@@ -303,6 +303,21 @@ overlay only paints. `sdlExplainLayout`, `optExplainLayout` and the SDL demo's
 explainLayout =<< checkbox "Outline layout nodes" =<< explainingLayout
 ```
 
+## The window
+
+`SdlOptions` and `RgfwOptions` set the window's size, position, icon and size
+limits, and `SdlOptions` its opacity and transparency. A view changes them
+with `setWindowIconUi`, `setWindowMinSizeUi`, `setWindowMaxSizeUi` and
+`setWindowOpacityUi`, which act only on a change and so can run every frame,
+and `setWindowPositionUi`, which moves the window on every call. A
+transparent window (`sdlWindowTransparent`) shows the desktop, given a
+compositor, where the theme's `windowColor` is translucent. An RGFW window is
+opaque and does not fade, so `setWindowOpacityUi` does nothing there.
+
+`requestScreenshot` hands its action the frame as an `RgbaImage` once it is on
+screen, or `Nothing` outside a window. Ask from an event, and keep the action
+short or fork it, since the next frame waits for it.
+
 ## Writing a backend
 
 `NanoUI` is the view API. What a backend is written against is in
@@ -322,8 +337,10 @@ Fold keys in with `applyKey` (a typing key as the `KeyChar` it types
 unmodified, with its text in `inputChars` too) and input-method updates with
 `applyComposition`. After a frame, `textInputArea` from
 `NanoUI.Testing` says where the candidate window goes. Before the first frame,
-report the desktop's light or dark setting with `setSystemAppearance`, again
-on each change.
+install a `WindowHost` (`installWindowHost`) and report the desktop's light
+or dark setting with `setSystemAppearance`, again on each change. Once a
+frame is on screen, call `answerScreenshots` with a capture of it, or
+`pure Nothing`.
 
 ## Headless tests
 

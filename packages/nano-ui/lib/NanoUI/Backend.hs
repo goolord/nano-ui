@@ -184,6 +184,16 @@ module NanoUI.Backend
   , Appearance (..)
   , setSystemAppearance
   , getSystemAppearance
+
+    -- * The native window
+
+    -- | What a backend does with what a view asks of its window
+    -- ('NanoUI.requestScreenshot', 'NanoUI.setWindowIconUi' and the other
+    -- setters). Install a 'WindowHost' once, before the first frame, and
+    -- call 'answerScreenshots' with a capture once each frame is on screen.
+  , WindowHost (..)
+  , installWindowHost
+  , answerScreenshots
   )
 where
 
@@ -194,5 +204,6 @@ import NanoUI.Internal.Font
 import NanoUI.Internal.Id
 import NanoUI.Internal.Input
 import NanoUI.Internal.Monad
+import NanoUI.Internal.NativeWindow (WindowHost (..), answerScreenshots, installWindowHost)
 import NanoUI.Internal.Style (Appearance (..), windowMargin, windowPad)
 import NanoUI.Internal.Types

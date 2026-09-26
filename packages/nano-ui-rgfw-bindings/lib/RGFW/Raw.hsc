@@ -104,6 +104,13 @@ module RGFW.Raw
   -- Window flags
   , rgfw_windowCenter
   , rgfw_windowHide
+  -- Window options
+  , c_RGFW_window_setIcon
+  , c_RGFW_window_setMinSize
+  , c_RGFW_window_setMaxSize
+  , c_RGFW_window_move
+  , c_RGFW_window_center
+  , rgfw_formatRGBA8
   -- Mouse cursors
   , c_rgfw_window_set_mouse_standard
   , c_rgfw_window_set_mouse_default
@@ -359,6 +366,34 @@ rgfw_modScrollLock = #{const RGFW_modScrollLock}
 rgfw_windowCenter, rgfw_windowHide :: Word32
 rgfw_windowCenter = #{const RGFW_windowCenter}
 rgfw_windowHide   = #{const RGFW_windowHide}
+
+-- Window options
+-- | Set the window and taskbar icon from pixels of a format, @w@ by @h@.
+-- RGFW copies them. Returns zero on failure.
+foreign import ccall "RGFW_window_setIcon"
+  c_RGFW_window_setIcon :: Ptr RGFW_window -> Ptr Word8 -> CInt -> CInt -> CUChar -> IO CUChar
+
+-- | Smallest size the user may resize the window to, in native pixels;
+-- zero is no limit.
+foreign import ccall "RGFW_window_setMinSize"
+  c_RGFW_window_setMinSize :: Ptr RGFW_window -> CInt -> CInt -> IO ()
+
+-- | Largest size the user may resize the window to, in native pixels; zero
+-- is no limit.
+foreign import ccall "RGFW_window_setMaxSize"
+  c_RGFW_window_setMaxSize :: Ptr RGFW_window -> CInt -> CInt -> IO ()
+
+-- | Move the window's top-left corner to a point on the desktop.
+foreign import ccall "RGFW_window_move"
+  c_RGFW_window_move :: Ptr RGFW_window -> CInt -> CInt -> IO ()
+
+-- | Centre the window on its monitor.
+foreign import ccall "RGFW_window_center"
+  c_RGFW_window_center :: Ptr RGFW_window -> IO ()
+
+-- | Pixel format of tightly packed RGBA bytes, for 'c_RGFW_window_setIcon'.
+rgfw_formatRGBA8 :: Word8
+rgfw_formatRGBA8 = #{const RGFW_formatRGBA8}
 
 -- Mouse cursors
 -- | Set a standard cursor shape. Returns zero on failure or for a null window.

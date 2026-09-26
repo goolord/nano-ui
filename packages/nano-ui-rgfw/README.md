@@ -17,8 +17,10 @@ main = runRgfwApp defaultRgfwOptions {optScale = 2} (label "Hello")
 ```
 
 `runRgfwAppReduce` takes a model and an update function, for use with
-`NanoUI.Emit`. `RgfwOptions` sets the window title, size and centering, the
-theme, the UI scale, and the refresh rate used for pacing animations.
+`NanoUI.Emit`. `RgfwOptions` sets the window title, size, position, icon and
+size limits, the theme, the UI scale, and the refresh rate used for pacing
+animations. RGFW windows are opaque and do not fade: `setWindowOpacityUi`
+does nothing here. The SDL backend has transparent and faded windows.
 
 The theme is any core `Theme`. The backend draws it with square corners and 1px
 borders (`applyRgfwTheme`), since geometry is drawn as flat quads. The font is

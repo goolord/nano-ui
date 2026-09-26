@@ -47,6 +47,7 @@ import Cases.Shortcut qualified
 import Cases.Ime qualified
 import Cases.PointerExtra qualified
 import Cases.Theming qualified
+import Cases.NativeWindow qualified
 import NanoUI.Testing.Runner (runTests)
 
 main :: IO ()
@@ -99,4 +100,5 @@ main =
     , Cases.Ime.tests
     , Cases.PointerExtra.tests
     , Cases.Theming.tests
+    , Cases.NativeWindow.tests
     ]

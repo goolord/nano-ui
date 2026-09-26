@@ -20,6 +20,8 @@ module NanoUI.Rgfw.Internal.Gl
   , renderArenaGl
   , syncImagesGl
   , readRetainedPixels
+  , readWindowPixels
+  , retainedImage
   , GlyphAtlas (..)
   , glyphAtlasFor
   , atlasCell
@@ -37,14 +39,16 @@ import Data.Int (Int32)
 import Data.Maybe (fromMaybe)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Internal as BSI
+import qualified Data.ByteString.Unsafe as BSU
 import qualified Data.Text as T
 import qualified Data.Text.Foreign as TF
 import Data.Word (Word32, Word8)
 import Foreign.ForeignPtr (withForeignPtr)
 import Foreign.Marshal.Alloc (callocBytes, free, reallocBytes)
-import Foreign.Ptr (Ptr, nullPtr)
+import Foreign.Marshal.Utils (copyBytes)
+import Foreign.Ptr (Ptr, nullPtr, plusPtr)
 import Foreign.Storable (pokeByteOff)
-import NanoUI (Color (..), Rect (..), rectInflate, roundHalfUp)
+import NanoUI (Color (..), ImageId (..), Rect (..), RgbaImage (..), rectInflate, roundHalfUp)
 import NanoUI.Backend (Damage (..))
 import NanoUI.Rgfw.Internal.Context (TextSpan, paintInLayerOrder)
 import NanoUI.Rgfw.Internal.Font.Cozette
@@ -88,6 +92,9 @@ foreign import ccall unsafe "nano_ui_gl_present"
 
 foreign import ccall unsafe "nano_ui_gl_read_retained"
   c_readRetained :: Ptr NanoUiGl -> Ptr Word8 -> IO ()
+
+foreign import ccall unsafe "nano_ui_gl_read_window"
+  c_readWindow :: Ptr NanoUiGl -> Ptr Word8 -> IO ()
 
 foreign import ccall unsafe "nano_ui_gl_upload_geometry"
   c_uploadGeometry :: Ptr NanoUiGl -> Ptr Word8 -> Int32 -> Ptr Word8 -> Int32 -> IO ()
@@ -193,6 +200,27 @@ syncImagesGl r ctx = do
 readRetainedPixels :: GlRenderer -> Int -> Int -> IO BS.ByteString
 readRetainedPixels r w h =
   BSI.create (w * h * 4) (c_readRetained (glHandle r))
+
+-- | What the last present put in the window's back buffer, read as
+-- 'readRetainedPixels' reads the retained frame: for checking the present,
+-- before the swap, after which the back buffer is undefined.
+readWindowPixels :: GlRenderer -> Int -> Int -> IO BS.ByteString
+readWindowPixels r w h =
+  BSI.create (w * h * 4) (c_readWindow (glHandle r))
+
+-- | The retained frame as an image, rows from the top, with image id 0:
+-- what a screenshot of the window is. The frame must be the last one's
+-- size, w x h, which the renderer takes to be at least 1 x 1.
+retainedImage :: GlRenderer -> Int -> Int -> IO RgbaImage
+retainedImage r w0 h0 = do
+  let w = max 1 w0
+      h = max 1 h0
+      row = w * 4
+  bottomUp <- readRetainedPixels r w h
+  pixels <- BSI.create (h * row) $ \dst ->
+    BSU.unsafeUseAsCString bottomUp $ \src ->
+      mapM_ (\y -> copyBytes (dst `plusPtr` (y * row)) (src `plusPtr` ((h - 1 - y) * row)) row) [0 .. h - 1]
+  pure (RgbaImage (ImageId 0) w h pixels)
 
 -- | The physical pixels a damage rect repaints, as @(x0, y0, x1, y1)@ within
 -- a w x h framebuffer. The core paints a clip frame's backdrop one logical

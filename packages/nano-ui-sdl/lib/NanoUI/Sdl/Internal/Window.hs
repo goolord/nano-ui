@@ -13,6 +13,8 @@ module NanoUI.Sdl.Internal.Window
   , syncDisplay
   , windowZoom
   , saveScreenshot
+  , captureScreenshot
+  , captureFrame
   ) where
 
 import Control.Concurrent (rtsSupportsBoundThreads, runInBoundThread)
@@ -22,8 +24,8 @@ import Control.Monad.IO.Class (liftIO)
 import Data.Acquire (Acquire, mkAcquire)
 import Data.Acquire qualified as Acquire
 import Data.Bits ((.|.))
-import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
+import Data.ByteString.Internal qualified as BSI
 import Data.Foldable (for_)
 import Data.Maybe (fromMaybe, isJust, isNothing)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
@@ -35,10 +37,11 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Foreign qualified as TextForeign
 import Foreign.C.String (withCString)
-import Foreign.Marshal.Utils (maybePeek, with)
-import Foreign.Ptr (Ptr, castPtr, nullPtr)
-import NanoUI (ImageId, Input (..), Size (..), Theme, V2 (..))
-import NanoUI.Backend (setSystemAppearance)
+import Foreign.Marshal.Utils (copyBytes, maybePeek, with)
+import Foreign.Storable (peek)
+import Foreign.Ptr (Ptr, castPtr, nullPtr, plusPtr)
+import NanoUI (ImageId (..), Input (..), RgbaImage (..), Size (..), Theme, V2 (..), WindowPosition (..))
+import NanoUI.Backend (installWindowHost, setSystemAppearance)
 import NanoUI.Internal.Context (Context (..), setDrawSnapScale)
 import NanoUI.Testing (clearMeasureCache, damageFull, markDirty, setHost, setWakeLoop, withClipboard)
 import NanoUI.Sdl.Internal.Display
@@ -52,6 +55,7 @@ import NanoUI.Internal.Debug (DebugSamplerRef, newDebugSampler)
 import NanoUI.Sdl.Internal.Image (ImageAtlas, destroyImageAtlas, newImageAtlas)
 import NanoUI.Sdl.Internal.Input (TextInputSync, newTextInputSync)
 import NanoUI.Sdl.Internal.Render (RenderBatch, destroyRenderBatch, newRenderBatch)
+import NanoUI.Sdl.Internal.WindowOptions
 import SDL3.Sys.Bindgen.Rect (SDL_Rect (..))
 import SDL3.Sys.Bindgen.Hints
   ( sDL_HINT_ASSERT
@@ -60,12 +64,17 @@ import SDL3.Sys.Bindgen.Hints
   , sDL_HINT_RENDER_VSYNC
   , sDL_HINT_VIDEO_DRIVER
   )
+import SDL3.Sys.Bindgen.Pixels qualified as Pixels
 import SDL3.Sys.Bindgen.Render (SDL_Renderer, SDL_Texture)
+import SDL3.Sys.Bindgen.Surface (SDL_Surface)
+import SDL3.Sys.Bindgen.Surface qualified as Surface
 import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
 import SDL3.Sys.Bindgen.Video (SDL_Window, SDL_WindowFlags (..))
 import SDL3.Sys.Bindgen.Init (SDL_InitFlags (..), sDL_INIT_VIDEO)
 import SDL3.Sys.Clipboard (getClipboardText, setClipboardText)
 import SDL3.Sys.Hints (resetHint, setHint)
+import SDL3.Sys.Blendmode (SDL_BlendMode, composeCustomBlendMode)
+import SDL3.Sys.Blendmode qualified as Blend
 import SDL3.Sys.Init (initSafe, quitSafe)
 import SDL3.Sys.Keyboard (startTextInputSafe, stopTextInputSafe)
 import SDL3.Sys.Render
@@ -74,23 +83,14 @@ import SDL3.Sys.Render
   , destroyTexture
   , getRendererName
   , renderReadPixels
+  , setRenderDrawBlendMode
   , setRenderScale
   , setRenderTarget
   , setRenderVSync
   )
 import SDL3.Sys.Stdinc (free)
-import SDL3.Sys.Surface (destroySurface, saveBMP)
+import SDL3.Sys.Surface (convertSurface, destroySurface, saveBMP)
 import SDL3.Sys.Video (destroyWindowSafe, getWindowDisplayScale)
-
--- | Initial image: positive pixel width/height and tightly packed RGBA8 bytes,
--- four bytes per pixel in row order. The high-level runners register these
--- assets before the first frame.
-data RgbaImage = RgbaImage
-  { rgbaImageId :: !ImageId
-  , rgbaImageWidth :: !Int
-  , rgbaImageHeight :: !Int
-  , rgbaImagePixels :: !ByteString
-  }
 
 -- | Application-owned SDL settings.
 data SdlOptions = SdlOptions
@@ -111,6 +111,32 @@ data SdlOptions = SdlOptions
   -- ^ Keep the window on top of other windows (default: 'False').
   , sdlWindowHidden :: !Bool
   -- ^ Start the window hidden (default: 'False').
+  , sdlWindowPosition :: !WindowPosition
+  -- ^ Where the window opens (default: 'WindowPositionDefault', which is
+  -- where the desktop puts it, or centred when 'sdlAppUiScale' grows it).
+  -- 'NanoUI.Backend.Sdl.setWindowPosition' moves it afterwards.
+  , sdlWindowMinSize :: !(Maybe Size)
+  -- ^ The smallest the user may make the window, in logical units like
+  -- 'sdlWindowSize' (default: no limit). An axis of zero has no limit. Like
+  -- the size, it is converted at the zoom the window opens at: a later
+  -- 'NanoUI.Backend.Sdl.setSdlUiScale' leaves it where it was.
+  , sdlWindowMaxSize :: !(Maybe Size)
+  -- ^ The largest the user may make the window (default: no limit).
+  , sdlWindowIcon :: !(Maybe RgbaImage)
+  -- ^ The window's icon (default: the desktop's). Its image id is not used.
+  , sdlWindowTransparent :: !Bool
+  -- ^ Let the desktop show through the window where the theme's window
+  -- colour is translucent (default: 'False'). Give the theme a window
+  -- colour with an alpha under 255 ('NanoUI.windowColor'); widgets drawn
+  -- over it keep their own alpha, and the desktop needs a compositor to
+  -- show through. A transparent window repaints in full when anything in
+  -- it changes. Where translucent colours overlap, the alpha depends on the
+  -- render driver: most keep the more opaque one, SDL's OpenGL renderer
+  -- weighs the colour drawn by its own alpha, and the software renderer
+  -- adds them up.
+  , sdlWindowOpacity :: !Float
+  -- ^ Fade the whole window, frame and all, from 0 to 1 (default: 1),
+  -- where the desktop allows.
   , sdlAppVsync :: !Bool
   -- ^ Enable vertical synchronization (default: 'True').
   , sdlRenderDriver :: !RenderDriver
@@ -156,6 +182,12 @@ defaultSdlOptions =
     , sdlWindowDecorations = DecorationsFull
     , sdlWindowAlwaysOnTop = False
     , sdlWindowHidden = False
+    , sdlWindowPosition = WindowPositionDefault
+    , sdlWindowMinSize = Nothing
+    , sdlWindowMaxSize = Nothing
+    , sdlWindowIcon = Nothing
+    , sdlWindowTransparent = False
+    , sdlWindowOpacity = 1
     , sdlAppVsync = True
     , sdlRenderDriver = RenderDriverAuto
     , sdlAppContinuous = False
@@ -202,6 +234,7 @@ windowFlags opts =
       .|. flag ((/= DecorationsFull) . sdlWindowDecorations) 0x0000000000000010
       .|. flag sdlWindowAlwaysOnTop 0x0000000000010000
       .|. flag sdlWindowHidden 0x0000000000000008
+      .|. flag sdlWindowTransparent 0x0000000040000000
   where
     flag field bit = if field opts then bit else 0
 
@@ -234,6 +267,10 @@ data SdlEnv = SdlEnv
   , sdlVsync :: !Bool
   , sdlRefreshPeriod :: !Double
   , sdlContinuous :: !Bool
+  , sdlTransparent :: !(Maybe (SDL_BlendMode, SDL_BlendMode))
+  -- ^ For a transparent window ('sdlWindowTransparent'), the blend modes
+  -- frames draw with and the retained frame goes to the window with;
+  -- 'Nothing' for an opaque one. See 'transparentBlends'.
   , sdlCachedCtx :: !(IORef Context)
   , sdlFontCache :: !SdlFontCache
   , sdlChromeState :: !ChromeState
@@ -475,6 +512,14 @@ startSdlWindow bench opts ctx guessedDriver fontSource monoSource = do
   -- the whole of it, so the desktop's frame goes on around a view that is
   -- already the size asked for, and the window grows by the frame.
   liftIO $ when (sdlWindowDecorations opts /= DecorationsFull) (applyDecorations sdlWindow (sdlWindowDecorations opts))
+  -- After the decorations, whose frame the size limits leave room for, and
+  -- after the zoom, which centres the window it grows.
+  liftIO $ do
+    for_ (sdlWindowMinSize opts) (applyWindowMinSize sdlWindow zoom . Just)
+    for_ (sdlWindowMaxSize opts) (applyWindowMaxSize sdlWindow zoom . Just)
+    applyWindowPosition sdlWindow (sdlWindowPosition opts)
+    for_ (sdlWindowIcon opts) (void . applyWindowIcon sdlWindow)
+    when (sdlWindowOpacity opts < 1) (applyWindowOpacity sdlWindow (sdlWindowOpacity opts))
   let
     scale = density * zoom
   liftIO $ setDrawSnapScale ctx scale
@@ -503,6 +548,11 @@ startSdlWindow bench opts ctx guessedDriver fontSource monoSource = do
     sdlRefreshPeriod = if refreshHz > 0 then 1 / fromIntegral refreshHz else 1 / 60
     sdlVsync = sdlAppVsync opts
     sdlContinuous = sdlAppContinuous opts
+  sdlTransparent <-
+    liftIO $
+      if sdlWindowTransparent opts && not bench
+        then Just <$> transparentBlends sdlRenderer
+        else pure Nothing
   liftIO $ setRenderScale sdlRenderer 1 1 >>= (`unless` fail "SDL_SetRenderScale failed")
   unless bench $
     mkAcquire
@@ -520,7 +570,43 @@ startSdlWindow bench opts ctx guessedDriver fontSource monoSource = do
   -- needs no wake for it.
   liftIO $ setSystemAppearance ctx' =<< querySystemAppearance
   liftIO $ setHost ctx' env >> setWakeLoop ctx' pushRefreshEvent
+  liftIO $ installWindowHost ctx' (windowHostFor sdlWindow (windowZoom env))
   pure (ctx', env)
+
+-- | The blend modes a transparent window draws with and is presented with.
+--
+-- A frame paints the window colour more than once in places: the backdrop,
+-- then a page-sized scroller over it. Over a translucent colour, ordinary
+-- blending adds up the alpha each time. Colour blends as usual here, but
+-- alpha keeps the larger of the two, so the window colour painted over
+-- itself stays the window colour and the retained frame holds straight
+-- alpha, which a screenshot reads. The copy to the window premultiplies it,
+-- which is what compositors take.
+--
+-- SDL's OpenGL renderer blends colour and alpha with one operation, so it
+-- cannot keep the larger alpha. It weighs the alpha drawn by itself
+-- instead, which keeps the window colour over itself too, and leaves a
+-- translucent pixel over a more opaque one a little more transparent than
+-- either. The software renderer has neither, and draws as for an opaque
+-- window: its alpha adds up where translucent colours overlap.
+transparentBlends :: Ptr SDL_Renderer -> IO (SDL_BlendMode, SDL_BlendMode)
+transparentBlends ren = do
+  let straightColour =
+        composeCustomBlendMode Blend.SDL_BLENDFACTOR_SRC_ALPHA Blend.SDL_BLENDFACTOR_ONE_MINUS_SRC_ALPHA Blend.SDL_BLENDOPERATION_ADD
+      firstSupported = \case
+        [] -> pure Nothing
+        mode : rest -> setRenderDrawBlendMode ren mode >>= \ok -> if ok then pure (Just mode) else firstSupported rest
+  keepLarger <- straightColour Blend.SDL_BLENDFACTOR_ONE Blend.SDL_BLENDFACTOR_ONE Blend.SDL_BLENDOPERATION_MAXIMUM
+  selfWeighted <- straightColour Blend.SDL_BLENDFACTOR_SRC_ALPHA Blend.SDL_BLENDFACTOR_ONE_MINUS_SRC_ALPHA Blend.SDL_BLENDOPERATION_ADD
+  present <-
+    composeCustomBlendMode
+      Blend.SDL_BLENDFACTOR_SRC_ALPHA
+      Blend.SDL_BLENDFACTOR_ZERO
+      Blend.SDL_BLENDOPERATION_ADD
+      Blend.SDL_BLENDFACTOR_ONE
+      Blend.SDL_BLENDFACTOR_ZERO
+      Blend.SDL_BLENDOPERATION_ADD
+  maybe (Blend.SDL_BLENDMODE_BLEND, Blend.SDL_BLENDMODE_NONE) (,present) <$> firstSupported [keepLarger, selfWeighted]
 
 -- | Resolve a font request. A search falls back to bundled Inter when no
 -- family matches; an explicit file path is passed through, and loading it can
@@ -548,21 +634,61 @@ withSdlClipboard ctx = withClipboard ctx readClipboard writeClipboard
 -- after a present; a direct-to-window session reads the backbuffer.
 saveScreenshot :: SdlEnv -> FilePath -> IO Bool
 saveScreenshot env path = do
-  r <- readIORef (sdlRetain env)
-  let tex = retainTexture r
-      ren = sdlRenderer env
-  surface <-
-    if tex == nullPtr
-      then renderReadPixels ren (PtrConst.unsafeFromPtr nullPtr)
-      else do
-        void $ setRenderTarget ren tex
-        s <- with (SDL_Rect 0 0 (fromIntegral (retainW r)) (fromIntegral (retainH r))) $ \rp ->
-          renderReadPixels ren (PtrConst.unsafeFromPtr rp)
-        void $ setRenderTarget ren nullPtr
-        pure s
+  surface <- readFrame env . retainTexture =<< readIORef (sdlRetain env)
   if surface == nullPtr
     then pure False
     else withCString path $ \cpath -> do
       ok <- saveBMP surface (PtrConst.unsafeFromPtr cpath)
       destroySurface surface
       pure ok
+
+-- | The last presented frame's pixels, read as 'saveScreenshot' reads them:
+-- the window's pixels (its logical size times the display scale), with the
+-- alpha the frame was drawn with, which is the theme's window colour's
+-- wherever nothing covers it. Its image id is @ImageId 0@. 'Nothing' when
+-- SDL cannot read the frame back.
+--
+-- A direct-to-window session ('sdlAppContinuous') has a frame to read only
+-- between drawing and presenting it: from a view, use
+-- 'NanoUI.requestScreenshot', which reads it then.
+captureScreenshot :: SdlEnv -> IO (Maybe RgbaImage)
+captureScreenshot env = captureFrame env . retainTexture =<< readIORef (sdlRetain env)
+
+-- | 'captureScreenshot' of the frame drawn to a target: the retained
+-- texture, or null for the window backbuffer, which is only worth reading
+-- before the frame is presented.
+captureFrame :: SdlEnv -> Ptr SDL_Texture -> IO (Maybe RgbaImage)
+captureFrame env target = do
+  surface <- readFrame env target
+  if surface == nullPtr
+    then pure Nothing
+    else do
+      rgba <- convertSurface surface Pixels.SDL_PIXELFORMAT_RGBA32
+      destroySurface surface
+      if rgba == nullPtr
+        then pure Nothing
+        else do
+          Surface.SDL_Surface _ _ sw sh pitch pixels _ _ <- peek rgba
+          let w = fromIntegral sw
+              h = fromIntegral sh
+              rowBytes = w * 4
+          bytes <- BSI.create (h * rowBytes) $ \dst ->
+            for_ [0 .. h - 1] $ \y ->
+              copyBytes (dst `plusPtr` (y * rowBytes)) (castPtr pixels `plusPtr` (y * fromIntegral pitch)) rowBytes
+          destroySurface rgba
+          pure (Just (RgbaImage (ImageId 0) w h bytes))
+
+-- | Read a frame back into a new surface: the used area of the retained
+-- texture, or with a null target the window backbuffer. Null on failure.
+readFrame :: SdlEnv -> Ptr SDL_Texture -> IO (Ptr SDL_Surface)
+readFrame env tex = do
+  r <- readIORef (sdlRetain env)
+  let ren = sdlRenderer env
+  if tex == nullPtr
+    then renderReadPixels ren (PtrConst.unsafeFromPtr nullPtr)
+    else do
+      void $ setRenderTarget ren tex
+      s <- with (SDL_Rect 0 0 (fromIntegral (retainW r)) (fromIntegral (retainH r))) $ \rp ->
+        renderReadPixels ren (PtrConst.unsafeFromPtr rp)
+      void $ setRenderTarget ren nullPtr
+      pure s

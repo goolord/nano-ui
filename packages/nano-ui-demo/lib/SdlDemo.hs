@@ -51,7 +51,7 @@ import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, tryTakeMVar)
 import Control.Exception (SomeException, displayException, evaluate, try)
 import Control.Monad (forM, forM_, unless, void, when)
 import Control.Monad.IO.Class (liftIO)
-import Data.Foldable (for_, toList)
+import Data.Foldable (for_, toList, traverse_)
 import Data.List (elemIndex)
 import Data.Maybe (catMaybes, fromMaybe, isJust, listToMaybe, mapMaybe)
 import Data.Primitive.SmallArray (SmallArray, indexSmallArray, sizeofSmallArray, smallArrayFromList)
@@ -154,6 +154,12 @@ loadGif path =
           pure (JP.imageWidth rgba, JP.imageHeight rgba, pixels)
       putMVar done (either (\e -> Left (displayException (e :: SomeException))) Right decoded)
     pure (GifLoad done)
+
+-- | Save a screenshot as a PNG with JuicyPixels.
+savePng :: FilePath -> RgbaImage -> IO ()
+savePng path (RgbaImage _ w h pixels) =
+  let (fp, n) = BSI.toForeignPtr0 pixels
+   in JP.writePng path (JP.Image w h (VS.unsafeFromForeignPtr0 fp n) :: JP.Image JP.PixelRGBA8)
 
 -- | Register a finished load's frames under fresh ids, in order. 'Nothing'
 -- while the file is still decoding, then the frames' ids or why the file could
@@ -322,6 +328,10 @@ demoUi = do
             -- F1 and F12 do what the buttons do; a shortcut takes no id.
             whenM ((||) <$> button "About" <*> shortcut (key (KeyF 1))) (setAbout True)
             whenM ((||) <$> button "Debug" <*> shortcut (key (KeyF 12))) (setDebug (not debugOpen))
+            whenM (button "Screenshot") $ do
+              -- Taken once this frame is on screen, and saved off the UI thread.
+              requestScreenshot (traverse_ (forkIO . savePng "nano-ui-demo.png"))
+              setClick "Screenshot: nano-ui-demo.png"
 
       ----------------------------------------------------------- body ----
       responsiveRowCol 1000 (tight . gap gapLayout . fillW) $ do
@@ -1074,6 +1084,7 @@ demoOptions =
     { sdlAppShouldQuit = \inp -> inputKeysElem KeyEscape (inputKeys inp)
     , sdlAppTheme = Just defaultTheme
     , sdlWindowSize = Size 1280 800
+    , sdlWindowMinSize = Just (Size 480 360)
     }
 
 -- | Each option's change to 'demoOptions'; 'Nothing' asks for the help text.

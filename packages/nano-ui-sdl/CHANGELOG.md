@@ -81,6 +81,12 @@
 - The desktop's light or dark setting reaches `systemAppearance`, and a change
   arrives as `EvSystemThemeChanged`. `sdlAppFollowSystemTheme` takes a light
   and a dark theme to switch between.
+- Window options `sdlWindowIcon`, `sdlWindowMinSize`, `sdlWindowMaxSize`,
+  `sdlWindowPosition`, `sdlWindowOpacity` and `sdlWindowTransparent`, changed
+  in a session by `setWindowIcon`, `setWindowMinSize`, `setWindowMaxSize`,
+  `setWindowPosition` and `setWindowOpacity`; `windowPosition` says where it is.
+- `captureScreenshot`, the last presented frame as an `RgbaImage`, and
+  answers to the core's `requestScreenshot`.
 
 ### Changed
 

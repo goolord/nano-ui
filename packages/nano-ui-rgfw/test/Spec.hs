@@ -24,6 +24,7 @@ import NanoUI.Rgfw.Internal.Gl (GlyphAtlas (..), atlasCell, bakeGlyphAtlas, glyp
 import NanoUI.Rgfw.Internal.Session (applyRgfwEvent, decodeRgfwEvents, mapRgfwCursor)
 import NanoUI.Rgfw.Render (renderArena)
 import NanoUI.Rgfw.Surface (clearScreen, fillRect, freeRgfwSurface, newOffscreenRgfwSurface, packColor, sBuffer, sHeight, sWidth)
+import NanoUI.Rgfw.Window (testGlWindow)
 import NanoUI.Testing (DrawCmd (..), DrawData (..), collectRasterSpans, newPixelContext, registerImage, runFrame)
 import NanoUI.Testing.Assert (run2Frames, withInput)
 import NanoUI.Testing.Harness (DemoSpan, withInputOff)
@@ -339,4 +340,5 @@ main = do
   testGlyphAtlas
   testSpanQuads
   testTurnedImageRaster
+  testGlWindow assert
   putStrLn "=== All tests passed successfully! ==="

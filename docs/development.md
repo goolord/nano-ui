@@ -30,10 +30,10 @@ fails the build instead of swapping.
 | `nano-ui-test` | Widgets, layout, input, focus, damage, and drawing, run headlessly frame by frame |
 | `text-buffer-spec` | The multi-line text buffer |
 | `nano-ui-inspection` | Compiler checks for SIMD writers, typed store slots, animation channels, unboxed commands, and canvas construction |
-| `nano-ui-rgfw-test` | RGFW input translation, the glyph atlas, and frames drawn by a software rasteriser kept in the test suite |
+| `nano-ui-rgfw-test` | RGFW input translation, the glyph atlas, and frames drawn by a software rasteriser kept in the test suite; with a display, OpenGL frames |
 | `nano-ui-rgfw-bindings-test` | Native event union layouts, key width, modifiers, and constant values |
 | `nano-ui-font-search-test`, `nano-ui-font-effects-test` | SDL font discovery, measurement, and handle lifetimes |
-| `nano-ui-render-test` | SDL key and cursor translation and the theme event; native SDL readback of partial-damage triangles and clipping, and images |
+| `nano-ui-render-test` | SDL key and cursor translation and the theme event; native SDL readback of partial-damage triangles and clipping, images, window options, and screenshots, also on OpenGL with a display |
 | `nano-ui-sdl-pointer-test` | SDL mouse buttons, through SDL's event queue |
 | `nano-ui-diagrams-test` | Diagram conversion, tessellation, and charts |
 | `nano-ui-form-test` | Form scopes, validation, reset, and submission |

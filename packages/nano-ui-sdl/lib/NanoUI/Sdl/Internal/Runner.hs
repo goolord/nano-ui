@@ -9,10 +9,12 @@ module NanoUI.Sdl.Internal.Runner
 
 import Control.Exception (finally, mask_)
 import Control.Monad (unless, void, when)
-import Data.Foldable (traverse_)
+import Data.Foldable (for_, traverse_)
 import Data.IORef (readIORef, writeIORef)
+import Data.Maybe (isJust, isNothing)
 import GHC.Clock (getMonotonicTime)
 import NanoUI
+import NanoUI.Backend (answerScreenshots)
 import NanoUI.Testing
 import NanoUI.Internal.Debug (CoreDebugSnapshot (..), noteDebugPresent, noteDebugSkip, refreshDebugSnapshot)
 import NanoUI.Sdl.Internal.Debug
@@ -21,7 +23,7 @@ import NanoUI.Sdl.Internal.Font
 import NanoUI.Sdl.Internal.Input (syncTextInput)
 import NanoUI.Sdl.Internal.NanoUIFont (NanoUIFont)
 import NanoUI.Sdl.Internal.Render (flushRenderBatch, renderDrawDataPass, snapDamage)
-import NanoUI.Sdl.Internal.Window (Retain (..), SdlEnv (..), windowZoom)
+import NanoUI.Sdl.Internal.Window (Retain (..), SdlEnv (..), captureFrame, windowZoom)
 import Foreign.Marshal.Utils (with)
 import Foreign.Ptr (Ptr, nullPtr)
 import qualified NanoUI.Sdl.Internal.Image as SdlImage
@@ -75,9 +77,10 @@ drawFrameWith ctx env inp forceFull evaluateUi = do
   -- second framebuffer only adds a target switch and a full-window blit.
   -- A null target selects the window backbuffer directly. Direct drawing is
   -- equivalent to the retained blit only at the same pixel dimensions;
-  -- content scale and window pixel density can differ.
+  -- content scale and window pixel density can differ. A transparent window
+  -- always draws retained: the copy to the window premultiplies its alpha.
   direct <-
-    if sdlContinuous env
+    if sdlContinuous env && isNothing (sdlTransparent env)
       then do
         (ok, ow, oh) <- outPair (getRenderOutputSize ren)
         pure (ok && fromIntegral ow == pw && fromIntegral oh == ph)
@@ -87,7 +90,11 @@ drawFrameWith ctx env inp forceFull evaluateUi = do
       then pure (nullPtr, False)
       else ensureRetain env pw ph scale
   let presentFull = forceFull || retainNew || sdlContinuous env || inputWindowRedraw inp
-  writeIORef (ctxPaintFull ctx) presentFull
+      -- A transparent window paints whatever changes in full. A clip
+      -- frame's backdrop is blended over the pixels it repaints, and over a
+      -- translucent window colour the old pixels would show through it.
+      transparent = isJust (sdlTransparent env)
+  writeIORef (ctxPaintFull ctx) (presentFull || transparent)
   t0 <- getMonotonicTime
   (drawData, dirtyAfterUi) <- evaluateUi
   t1 <- getMonotonicTime
@@ -102,10 +109,10 @@ drawFrameWith ctx env inp forceFull evaluateUi = do
   -- DamageFull here would turn every skip frame into a full present. A
   -- window redraw event (expose/restore) is the exception: the backbuffer
   -- is gone, so the next present must be full.
-  let damage =
-        if presentFull
-          then DamageFull
-          else snapDamage scale dmg0
+  let damage
+        | presentFull = DamageFull
+        | transparent = if damageIsEmpty dmg0 then dmg0 else DamageFull
+        | otherwise = snapDamage scale dmg0
   writeIORef (sdlLastPresented env) False
   -- A glyph-atlas exhaustion during the UI pass means text quads the frame
   -- could not place. Drop the frame instead of presenting it: the screen
@@ -119,6 +126,11 @@ drawFrameWith ctx env inp forceFull evaluateUi = do
         damageFull ctx
         markDirty ctx
       noteDebugSkip (sdlDebug env)
+      -- With nothing to repaint, the retained frame on screen is this one.
+      -- A dropped frame's screenshots wait for the next frame, which the
+      -- reset asked for.
+      when (not atlasReset && damageIsEmpty damage && tex /= nullPtr) $
+        answerScreenshots ctx (captureFrame env tex)
       pure (atlasReset || dirtyAfterUi)
     else do
       -- A null texture draws full-repaint sessions straight to the window.
@@ -127,6 +139,13 @@ drawFrameWith ctx env inp forceFull evaluateUi = do
       unless (okBegin && okScale) $ fail "SDL_SetRenderTarget/Scale failed"
       theme <- readIORef (ctxTheme ctx)
       glyphTex <- glyphAtlasTextures (sdlFontCache env)
+      -- A transparent window draws the atlases' textures with its own blend
+      -- mode. Both atlases can make a texture during the UI pass, so this is
+      -- set after it.
+      for_ (sdlTransparent env) $ \(blend, _) -> do
+        imageTex <- SdlImage.lookupImage (sdlImages env) atlasTextureId
+        for_ (imageTex : map glyphTex [0 .. glyphAtlasPages - 1]) $ \t ->
+          unless (t == nullPtr) (void (setTextureBlendMode t blend))
       -- Persistent batch created once per session (sdlBatch): no C
       -- calloc/free pair per presented frame. Flush unconditionally so an
       -- aborted pass cannot leak pending geometry into the next frame.
@@ -162,12 +181,16 @@ drawFrameWith ctx env inp forceFull evaluateUi = do
               renderTexture ren tex (PtrConst.unsafeFromPtr srcP) (PtrConst.unsafeFromPtr nullPtr)
             pure (okTarget && okClip && okCopy)
       unless okBlit $ fail "SDL window presentation preparation failed"
+      -- The window backbuffer is undefined once presented, so a frame drawn
+      -- straight to it is read for screenshots before.
+      when (tex == nullPtr) $ answerScreenshots ctx (captureFrame env tex)
       void $ renderPresentSafe ren
       t3 <- getMonotonicTime
       let ms a b = (b - a) * 1000
       noteDebugPresent (sdlDebug env) (ms t0 t1) (ms t1 t2) (ms t2 t3) (ms t0 t3)
         (drawVertexCount drawData) (drawIndexCount drawData) (drawCmdCount drawData)
       writeIORef (sdlLastPresented env) True
+      unless (tex == nullPtr) $ answerScreenshots ctx (captureFrame env tex)
       pure dirtyAfterUi
   where
     ren = sdlRenderer env
@@ -196,7 +219,7 @@ ensureRetain env w h scale = do
       -- Allocate before replacing: failure leaves the owned texture valid.
       tex' <- createTexture (sdlRenderer env) Pixels.SDL_PIXELFORMAT_RGBA32 Render.SDL_TEXTUREACCESS_TARGET (fromIntegral cw) (fromIntegral ch)
       when (tex' == nullPtr) $ fail "SDL_CreateTexture(retain) failed"
-      void $ setTextureBlendMode tex' (fromIntegral sDL_BLENDMODE_NONE)
+      void $ setTextureBlendMode tex' (maybe (fromIntegral sDL_BLENDMODE_NONE) snd (sdlTransparent env))
       writeIORef (sdlRetain env) (Retain tex' cw ch w h scale)
       unless (tex == nullPtr) $ destroyTexture tex
       pure (tex', True)

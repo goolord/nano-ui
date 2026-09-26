@@ -7,6 +7,10 @@
 - `optExplainLayout` opens a window with the layout overlay on, and
   `debugWindowBody` has a checkbox for it.
 - The middle mouse button, and the side buttons as back and forward.
+- Window options `optIcon`, `optMinSize` and `optMaxSize` (in native
+  pixels). The core's window setters and `requestScreenshot` work from a
+  view, but for `setWindowOpacityUi`, which does nothing: RGFW windows do not
+  fade.
 
 ### Changed
 
@@ -35,6 +39,8 @@
   chord rather than typed text. Every key RGFW reports comes in as a `Key`,
   with its release and held state, and Enter, Escape, Tab, Insert, the
   function and lock keys no longer auto-repeat.
+- `optCenter` is replaced by `optPosition`: `WindowPositionCentered`, the
+  default, or `WindowPositionAt` a point on the desktop.
 
 ### Fixed
 

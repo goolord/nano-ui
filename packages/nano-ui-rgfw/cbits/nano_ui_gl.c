@@ -479,6 +479,17 @@ void nano_ui_gl_read_retained(nano_ui_gl* r, uint8_t* out) {
   gl->BindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
+/* Read what the last present put in the window's back buffer, before the
+ * swap that leaves it undefined, as nano_ui_gl_read_retained reads the
+ * retained frame. For tests of the present. */
+void nano_ui_gl_read_window(nano_ui_gl* r, uint8_t* out) {
+  ngl_api* gl = &r->gl;
+  gl->BindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+  gl->PixelStorei(GL_PACK_ALIGNMENT, 1);
+  gl->ReadPixels(0, 0, r->fbW, r->fbH, GL_RGBA, GL_UNSIGNED_BYTE, out);
+  gl->BindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
 /* Copy the retained frame to the window's back buffer. The caller swaps. */
 void nano_ui_gl_present(nano_ui_gl* r) {
   ngl_api* gl = &r->gl;

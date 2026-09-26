@@ -292,10 +292,16 @@
 - Following the system's light or dark setting: `followSystemTheme ctx light
   dark` or `followSystemThemeUi`, with `defaultLightTheme` as the light theme.
   `systemAppearance` reads the setting.
+- Window control from a view, on any backend: `requestScreenshot` hands an
+  action the frame as an `RgbaImage`, and `setWindowIconUi`,
+  `setWindowMinSizeUi`, `setWindowMaxSizeUi`, `setWindowPositionUi` and
+  `setWindowOpacityUi` change the window. `RgbaImage` moved here from
+  `nano-ui-sdl`, which still exports it, and `WindowPosition` is new.
 - `NanoUI.Backend` has what a backend needs for the above: `applyKey`,
   `keyRepeats`, `keypadKey`, `modifiersFromBits`, `noModifiers`,
-  `applyComposition`, `cursorFallback`, `setExplainLayout` and
-  `setSystemAppearance`.
+  `applyComposition`, `cursorFallback`, `setExplainLayout`,
+  `setSystemAppearance`, `WindowHost`,
+  `installWindowHost` and `answerScreenshots`.
 - `NanoUI.Testing.Harness` has `chordInp`, `keyUpInp` and `middleClickPair`.
 
 ### Changed

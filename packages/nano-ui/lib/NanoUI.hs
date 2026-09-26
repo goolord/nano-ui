@@ -858,6 +858,23 @@ module NanoUI
   , explainingLayout
   , explainedNode
   , ExplainedNode (..)
+
+    -- * The native window
+
+    -- | What a view can ask of the window it runs in: a screenshot of it,
+    -- an icon, limits on its size, a position and an opacity. The backend
+    -- does what it can with each; a view that is not running in a window,
+    -- as under a test context, gets nothing done, and 'requestScreenshot'
+    -- answers 'Nothing'. What a window opens with is the backend's options
+    -- record: @SdlOptions@ or @RgfwOptions@.
+  , RgbaImage (..)
+  , WindowPosition (..)
+  , requestScreenshot
+  , setWindowIconUi
+  , setWindowMinSizeUi
+  , setWindowMaxSizeUi
+  , setWindowPositionUi
+  , setWindowOpacityUi
   )
 where
 
@@ -870,6 +887,7 @@ import NanoUI.Internal.Hooks
 import NanoUI.Internal.Id (WidgetId (..))
 import NanoUI.Internal.Input
 import NanoUI.Internal.Monad
+import NanoUI.Internal.NativeWindow
 import NanoUI.Internal.Style
 import NanoUI.Svg
 import NanoUI.Internal.Types

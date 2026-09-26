@@ -41,6 +41,13 @@ module NanoUI.Backend.Sdl
   , WindowDecorations (..)
   , setWindowDecorations
   , setWindowShadow
+  , setWindowIcon
+  , setWindowMinSize
+  , setWindowMaxSize
+  , WindowPosition (..)
+  , setWindowPosition
+  , windowPosition
+  , setWindowOpacity
   , CaptionOptions (..)
   , defaultCaptionOptions
   , windowCaption
@@ -59,15 +66,16 @@ module NanoUI.Backend.Sdl
   , withSdl
   , withSdlBench
   , saveScreenshot
+  , captureScreenshot
   ) where
 
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Typeable (Typeable)
-import NanoUI (NanoUI)
+import NanoUI (NanoUI, WindowPosition (..))
 import NanoUI.Sdl.Internal.Runner (askSdlDebug, drawFrameWith, sdlDrawFrame, setSdlUiFont, setSdlUiScale)
 import NanoUI.Sdl.Internal.Session (runSdlSession)
 import NanoUI.Sdl.Internal.Debug (SdlDebugSnapshot (..))
-import NanoUI.Sdl.Internal.Window (RenderDriver (..), RgbaImage (..), SdlEnv (..), SdlOptions (..), defaultSdlOptions, saveScreenshot, syncDisplay, windowZoom, withSdl, withSdlBench)
+import NanoUI.Sdl.Internal.Window (RenderDriver (..), RgbaImage (..), SdlEnv (..), SdlOptions (..), captureScreenshot, defaultSdlOptions, saveScreenshot, syncDisplay, windowZoom, withSdl, withSdlBench)
 import NanoUI.Sdl.Internal.Dialog
 import NanoUI.Sdl.Internal.Chrome
 import NanoUI.Sdl.Internal.NanoUIFont (NanoUIFont (..))
