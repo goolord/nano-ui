@@ -33,7 +33,7 @@
 --   * List:         tree, searchInput
 --   * Table:        tableWith (needs useTableSort)
 --   * Panes:        paneGrid
---   * Plots:        plot, barChart, areaChart, diagram
+--   * Plots:        plot, barChart, areaChart, diagram, canvas paths
 --   * Diagnostics:  debug readouts from the SDL backend
 --
 -- The entry point is 'main' (§1) with a small CLI; the argument plumbing is the
@@ -57,6 +57,7 @@ import Data.Primitive.SmallArray (SmallArray, indexSmallArray, sizeofSmallArray,
 import Data.Word (Word64)
 import NanoUI
 import NanoUI.Adornment qualified as A
+import NanoUI.Path qualified as P
 import NanoUI.Backend.Sdl
 import NanoUI.Internal.Debug (CoreDebugSnapshot (..))
 import NanoUI.Diagrams
@@ -654,6 +655,10 @@ demoUi = do
                 captioned "Sleep vs focus" (plot (minH 240 . fillW) sleepFocusChart)
                 captioned "Area" (areaChart (minH 240 . fillW) areaDemo)
               captioned "Drawing" (diagram (fillW . maxH 200) . drawingSample =<< uiPlotStyle)
+              -- Drawing without diagrams: paths on a canvas, built with
+              -- NanoUI.Path. Their curves flatten for the display the
+              -- canvas is on, and withTransform turns and moves them.
+              captioned "Canvas paths" (canvas (fixedWH 360 120) . pathSample =<< uiTheme)
 
             ------------------------------------------- Diagnostics ---------
             Diagnostics -> do
@@ -892,6 +897,33 @@ drawingSample ps =
   (circle 0.45 # fc (plotFill ps) # lw none)
     <> (circle 0.28 # fc (plotInk ps) # lw none)
     <> (fromVertices [p2 (-0.5, -0.5), p2 (0.5, 0.5)] # lc (plotGrid ps) # lwO 1.5)
+
+-- | A pie chart of arcs, a star turned by a transform, and a curve with
+-- round ends.
+pathSample :: Theme -> Rect -> CanvasM ()
+pathSample theme (Rect x y _ h) = do
+  let r = h / 2 - 8
+      centre = V2 (x + h / 2) (y + h / 2)
+      shares = [0.4, 0.25, 0.2, 0.15]
+      starts = scanl (+) (-pi / 2) (map (* (2 * pi)) shares)
+  forM_ (zip3 starts shares (themeSeries theme)) $ \(a0, share, col) ->
+    drawPath (P.moveTo centre <> P.arc centre r a0 (2 * pi * share) <> P.close) col
+  -- The star is drawn about the origin, then turned and moved into place.
+  let star =
+        P.polygon
+          [ V2 (k * cos a) (k * sin a)
+          | i <- [0 .. 9 :: Int]
+          , let a = pi * fromIntegral i / 5 - pi / 2
+                k = if even i then r else r * 0.45
+          ]
+  withTransform (P.translate (x + h * 1.5) (y + h / 2) <> P.rotate (pi / 12)) $ do
+    drawPath star (themeYellow theme)
+    drawStrokePath star 1.5 (themeOrange theme)
+  drawStrokePathCapped
+    P.RoundCap
+    (P.moveTo (V2 (x + 250) (y + h - 16)) <> P.cubicTo (V2 (x + 280) (y - 20)) (V2 (x + 310) (y + h + 20)) (V2 (x + 350) (y + 16)))
+    3
+    (themeAccent theme)
 
 ------------------------------------------------------------------------------
 -- §9  Debug window content

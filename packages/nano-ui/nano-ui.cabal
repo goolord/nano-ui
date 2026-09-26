@@ -78,6 +78,7 @@ library
         NanoUI.Emit
         NanoUI.Input
         NanoUI.Monad
+        NanoUI.Path
         NanoUI.Runner
         NanoUI.Svg
         NanoUI.Testing
@@ -105,6 +106,7 @@ library
         NanoUI.Internal.Layout.Arena
         NanoUI.Internal.Layout.Solve
         NanoUI.Internal.Monad
+        NanoUI.Internal.Path
         NanoUI.Internal.SIMD
         NanoUI.Internal.Store
         NanoUI.Internal.Widgets.Custom
@@ -246,6 +248,7 @@ test-suite nano-ui-test
         Cases.ViewApi
         Cases.Window
         Cases.WidgetIdIndex
+        Cases.Paths
     build-depends:
         bytestring,
         containers,

@@ -384,6 +384,11 @@ module NanoUI
     -- A measure function and 'cdcFont' hand a widget the context's
     -- 'FontMetrics'; 'lineWidth' and 'fmLineHeight' size text with them.
     -- 'widgetCursor' picks the pointer shown over the widget.
+    --
+    -- The paths 'drawPath' and 'drawStrokePath' draw, and the transforms
+    -- 'withTransform' takes, are built with "NanoUI.Path", imported
+    -- qualified, which keeps names such as @circle@ and @rotate@ out of this
+    -- module.
   , module NanoUI.Widgets.Custom
   , FontMetrics (fmLineHeight, fmAscent)
   , lineWidth

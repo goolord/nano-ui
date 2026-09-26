@@ -35,6 +35,7 @@ import Cases.PointerOwnership qualified
 import Cases.Tooltip qualified
 import Cases.CustomWidget qualified
 import Cases.WidgetIdIndex qualified
+import Cases.Paths qualified
 import NanoUI.Testing.Runner (runTests)
 
 main :: IO ()
@@ -75,4 +76,5 @@ main =
     , Cases.Tooltip.tests
     , Cases.CustomWidget.tests
     , Cases.WidgetIdIndex.tests
+    , Cases.Paths.tests
     ]

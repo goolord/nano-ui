@@ -6,7 +6,7 @@ import Data.Foldable (toList)
 import Data.IORef (readIORef)
 import Data.List (tails)
 import Data.Maybe (fromMaybe, listToMaybe, mapMaybe)
-import Data.Primitive.PrimArray (primArrayToList, sizeofPrimArray)
+import Data.Primitive.PrimArray (indexPrimArray, primArrayToList, sizeofPrimArray)
 import Data.Text qualified as T
 import Data.Primitive.SmallArray (SmallArray, emptySmallArray)
 import Data.Vector qualified as V
@@ -17,6 +17,8 @@ import Diagrams.Prelude
   , lw
   , lwO
   , none
+  , rect
+  , rotateBy
   , (#)
   )
 import NanoUI
@@ -31,10 +33,8 @@ import NanoUI.Diagrams
   , fitLayout
   )
 import NanoUI.Diagrams.Backend (diagramTextOps)
-import NanoUI.Diagrams.Internal.Tessellation
-  ( strokePolyline
-  , triangulatePolygon
-  )
+import NanoUI.Internal.Path (LineCap (ButtCap), fillPathOps, strokePathOps)
+import NanoUI.Path qualified as P
 import NanoUI.Plot.Chrome
   ( Margins (..)
   , chartDiagram
@@ -84,6 +84,7 @@ main = hspec $ do
   describe "tessellation" $ do
     it "triangulates indexed polygons with full coverage" testIndexedTriangulation
     it "covers polyline strokes end to end" testStrokeCoversMidpoint
+    it "fills a level rectangle with a rect op" testRectFill
   describe "scales and domains" $ do
     it "picks and formats nice ticks" testNiceTicks
     it "shares bounds across series" testMultiSeriesDomains
@@ -163,8 +164,16 @@ triArea (x0, y0) (x1, y1) (x2, y2) =
 
 testIndexedTriangulation :: IO ()
 testIndexedTriangulation = do
+  let col = themeRed defaultTheme
+      toV (x, y) = NanoUI.V2 x y
+      triangles pts =
+        [ (corner k, corner (k + 1), corner (k + 2))
+        | FillPolygon vs tris _ <- fillPathOps 0.5 mempty (P.polygon (map toV pts)) col
+        , let corner k = let i = indexPrimArray tris k in (indexPrimArray vs (2 * i), indexPrimArray vs (2 * i + 1))
+        , k <- [0, 3 .. sizeofPrimArray tris - 3]
+        ]
   forM_ [[], [(0, 0)], [(0, 0), (1, 1)], [(0, 0), (1, 1), (0, 0)]] $ \pts ->
-    check "undersized polygon emitted triangles" (null (triangulatePolygon pts))
+    check "undersized polygon emitted triangles" (null (triangles pts))
   -- Alternating radii exercise repeated ear removal and wraparound indices.
   forM_ [3, 16, 127, 256 :: Int] $ \n -> do
     let
@@ -182,25 +191,39 @@ testIndexedTriangulation = do
           / 2
     forM_ [points, reverse points, points ++ take 1 points] $ \pts -> do
       let
-        triangles = triangulatePolygon pts
-        areaSum = sum [triArea a b c | (a, b, c) <- triangles]
-      unless (length triangles == n - 2 && abs (areaSum - polygonArea) < 0.01) $
+        tris = triangles pts
+        areaSum = sum [triArea a b c | (a, b, c) <- tris]
+      unless (length tris == n - 2 && abs (areaSum - polygonArea) < 0.01) $
         fail
           ( "indexed triangulation changed polygon coverage: "
-              ++ show (n, length triangles, areaSum, polygonArea)
+              ++ show (n, length tris, areaSum, polygonArea)
           )
 
 testStrokeCoversMidpoint :: IO ()
 testStrokeCoversMidpoint = do
   let
     col = themeRed defaultTheme
-    ops = strokePolyline col 2 False [(0, 0), (20, 0), (20, 0), (20, 20)]
+    stroke w path = strokePathOps 0.5 mempty ButtCap path w col
   -- One anti-aliased op for the whole line, its repeated point dropped.
-  check "stroke polyline changed its points" $ case ops of
+  check "stroke polyline changed its points" $ case stroke 2 (P.polyline [NanoUI.V2 0 0, NanoUI.V2 20 0, NanoUI.V2 20 0, NanoUI.V2 20 20]) of
     [StrokePolyline pts 2 False c] -> c == col && primArrayToList pts == [0, 0, 20, 0, 20, 20]
     _ -> False
-  check "closed stroke polyline repeated its first point" $ case strokePolyline col 1 True [(0, 0), (10, 0), (10, 10), (0, 0)] of
+  check "closed stroke polyline repeated its first point" $ case stroke 1 (P.polygon [NanoUI.V2 0 0, NanoUI.V2 10 0, NanoUI.V2 10 10, NanoUI.V2 0 0]) of
     [StrokePolyline pts 1 True _] -> sizeofPrimArray pts == 6
+    _ -> False
+
+testRectFill :: IO ()
+testRectFill = do
+  let fills d = [op | op <- toList (diagramOps 100 100 (d # fc coral # lw none)), isFill op]
+      isFill = \case
+        FillRect {} -> True
+        FillPolygon {} -> True
+        _ -> False
+  check "a level rectangle is not one rect op" $ case fills (rect 4 2) of
+    [FillRect {}] -> True
+    _ -> False
+  check "a turned rectangle is not one polygon" $ case fills (rect 4 2 # rotateBy (1 / 8)) of
+    [FillPolygon {}] -> True
     _ -> False
 
 testNiceTicks :: IO ()

@@ -173,6 +173,13 @@ input, including animation values. A key that stays fixed while the content
 changes can leave stale pixels. Custom widgets without a key rebuild and
 compare their operations each frame.
 
+Curves go through `NanoUI.Path`, imported qualified: build a path with
+`P.moveTo`, `P.lineTo`, `P.cubicTo`, `P.arc` and the rest, fill it with
+`drawPath` and stroke it with `drawStrokePath`. `withTransform` moves, turns
+and scales a block of canvas drawing. Run a custom widget's canvas with
+`runCanvasFor`, as `canvas` does, so curves stay smooth on a dense display.
+A hole drawn as a second subpath is filled over, not cut out.
+
 `textArea` accepts `Text` and joins the document when edits change it.
 `textAreaDocument` accepts a `TextDocument`, sharing unchanged lines across
 edits. Keep the document value in your model and call `documentText` when

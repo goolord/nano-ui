@@ -4,11 +4,12 @@
 -- drawing that sees hover and press state, an optional content key, a cursor,
 -- and damage slop.
 -- 'canvas' is the short form for drawing into a laid-out rectangle with
--- 'CanvasM'. 'useDrag2D' and 'useWheelDelta' are gesture hooks for your own
--- controls; 'knob' and 'toggleSwitch' show how they fit together. Each
--- reference widget comes as @x@, at its default size, and as @xWith'@, which
--- takes a layout modifier and a size and also returns the widget's
--- 'Response'.
+-- 'CanvasM', which fills and strokes paths from "NanoUI.Path" as well as
+-- rects, circles, lines, images and text, and draws through transforms.
+-- 'useDrag2D' and 'useWheelDelta' are gesture hooks for your own controls;
+-- 'knob' and 'toggleSwitch' show how they fit together. Each reference
+-- widget comes as @x@, at its default size, and as @xWith'@, which takes a
+-- layout modifier and a size and also returns the widget's 'Response'.
 module NanoUI.Widgets.Custom
   ( -- * Custom widgets
     CustomWidgetSpec (..)
@@ -25,6 +26,7 @@ module NanoUI.Widgets.Custom
     -- * Canvas
   , CanvasM
   , runCanvas
+  , runCanvasFor
   , canvas
   , drawRect
   , drawRoundedRect
@@ -39,6 +41,15 @@ module NanoUI.Widgets.Custom
   , drawImage
   , drawImageUV
   , drawText
+    -- * Paths and transforms
+
+    -- | Build a path with "NanoUI.Path", imported qualified, and fill or
+    -- stroke it here. 'withTransform' moves, turns and scales what a block
+    -- draws.
+  , drawPath
+  , drawStrokePath
+  , drawStrokePathCapped
+  , withTransform
     -- * Gestures
   , useDrag2D
   , Drag2D (..)
@@ -58,7 +69,9 @@ module NanoUI.Widgets.Custom
   , sparklineWith'
   ) where
 
-import Control.Monad (forM_, void, when, zipWithM_)
+import Control.Monad (void, when)
+import Control.Monad.Trans.Class (lift)
+import Control.Monad.Trans.Reader qualified as Reader
 import Control.Monad.Trans.State.Strict qualified as State
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -68,11 +81,15 @@ import NanoUI.Internal.Context
 import NanoUI.Internal.Draw (DrawOp (..))
 import Data.Word (Word64)
 import Data.Hashable (Hashable, hash)
+import Data.Maybe (fromMaybe)
 import GHC.Float (castFloatToWord32)
+import NanoUI.Internal.Font (FontMetrics (fmSnapScale))
 import NanoUI.Internal.Id (WidgetId, mix64)
 import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena (NodeType (NodeDrawing))
 import NanoUI.Internal.Monad (Ui, askContext, askInput, freshWidget, nextId, uiIO, uiTime)
+import NanoUI.Internal.Path (LineCap (..), Path, Transform, curveTolerance, fillPathOps, strokePathOps, transformOp)
+import NanoUI.Path qualified as P
 import NanoUI.Internal.Store
 import NanoUI.Internal.Style
 import NanoUI.Internal.Types
@@ -87,17 +104,57 @@ import NanoUI.Internal.Widgets.Custom (customDrawContext)
 -- -----------------------------------------------------------------------------
 
 -- | Monadic canvas builder that collects 'DrawOp' vector operations efficiently.
-newtype CanvasM a = CanvasM (State.State ([DrawOp] -> [DrawOp]) a)
+newtype CanvasM a = CanvasM (Reader.ReaderT CanvasEnv (State.State ([DrawOp] -> [DrawOp])) a)
   deriving (Functor, Applicative, Monad)
 
--- | Compile a 'CanvasM' block into an immutable 'SmallArray DrawOp'.
+-- | What a canvas block draws under: the transform 'withTransform' set, if
+-- any, and how far a flattened curve may stray from the true one, in
+-- logical pixels, which a block that draws no curve never works out.
+data CanvasEnv = CanvasEnv
+  { ceTransform :: !(Maybe Transform)
+  , ceTolerance :: Float
+  }
+
+-- | Compile a 'CanvasM' block into an immutable 'SmallArray DrawOp'. It
+-- does not know the display's scale, so it flattens curves finely enough
+-- for two device pixels to the logical one; 'runCanvasFor' flattens them
+-- for the display the widget is on.
 {-# INLINE runCanvas #-}
 runCanvas :: CanvasM a -> SmallArray DrawOp
-runCanvas (CanvasM m) = smallArrayFromList (State.execState m id [])
+runCanvas = runCanvasScaled 2
+
+-- | 'runCanvas' for a custom widget's drawing, flattening curves to within
+-- a quarter of a device pixel on the display its draw context is for:
+--
+-- > widgetDraw = \cdc rect -> runCanvasFor cdc (drawPath (P.circle (V2 20 20) 12) accent)
+{-# INLINE runCanvasFor #-}
+runCanvasFor :: CustomDrawContext -> CanvasM a -> SmallArray DrawOp
+runCanvasFor cdc = runCanvasScaled (fmSnapScale (cdcFont cdc))
+
+{-# INLINE runCanvasScaled #-}
+runCanvasScaled :: Float -> CanvasM a -> SmallArray DrawOp
+runCanvasScaled scale (CanvasM m) =
+  smallArrayFromList (State.execState (Reader.runReaderT m (CanvasEnv Nothing (curveTolerance scale))) id [])
 
 {-# INLINE emitOp #-}
 emitOp :: DrawOp -> CanvasM ()
-emitOp op = CanvasM (State.modify (. (op :)))
+emitOp op = CanvasM $ do
+  env <- Reader.ask
+  lift $ case ceTransform env of
+    Nothing -> State.modify (. (op :))
+    Just t -> emitOps (transformOp (ceTolerance env) t op)
+
+{-# INLINE emitOps #-}
+emitOps :: [DrawOp] -> State.State ([DrawOp] -> [DrawOp]) ()
+emitOps ops = State.modify (. (ops ++))
+
+-- | Ops built from the block's transform, the identity for none, and its
+-- curve tolerance.
+{-# INLINE emitWith #-}
+emitWith :: (Transform -> Float -> [DrawOp]) -> CanvasM ()
+emitWith build = CanvasM $ do
+  env <- Reader.ask
+  lift (emitOps (build (fromMaybe mempty (ceTransform env)) (ceTolerance env)))
 
 -- | Fill a solid rectangle.
 drawRect :: Rect -> Color -> CanvasM ()
@@ -153,6 +210,46 @@ drawText (V2 x y) alignX alignY txt col =
   let ax = case alignX of AlignStart -> 0; AlignCenter -> 0.5; AlignEnd -> 1
       ay = case alignY of AlignTop -> 1; AlignMiddle -> 0.5; AlignBottom -> 0; AlignBaseline -> -1
    in emitOp (DrawText x y ax ay txt col)
+
+-- | Fill a path built with "NanoUI.Path". Each subpath fills on its own,
+-- as if closed, as one anti-aliased 'FillPolygon': one inside another is
+-- drawn over it rather than cut out of it, and one that crosses itself may
+-- fill only in part.
+drawPath :: Path -> Color -> CanvasM ()
+drawPath path col = emitWith (\t tol -> fillPathOps tol t path col)
+
+-- | Stroke a path built with "NanoUI.Path", this wide, as one anti-aliased
+-- 'StrokePolyline' a subpath. Its corners are mitered, a very sharp one cut
+-- short, and an open subpath's ends are cut square at its end points.
+drawStrokePath :: Path -> Float -> Color -> CanvasM ()
+drawStrokePath = drawStrokePathCapped ButtCap
+
+-- | 'drawStrokePath' with the given ends on open subpaths. A round cap is a
+-- disc drawn over the end, so a translucent line shows darker where the two
+-- overlap.
+drawStrokePathCapped :: LineCap -> Path -> Float -> Color -> CanvasM ()
+drawStrokePathCapped cap path w col = emitWith (\t tol -> strokePathOps tol t cap path w col)
+
+-- | Draw a block through a transform from "NanoUI.Path", inside any it is
+-- already in, which applies after it: @withTransform (P.translate 40 40 <>
+-- P.rotate a)@ turns what the block draws by @a@ about the origin, then
+-- moves it 40 right and 40 down.
+--
+-- Paths are transformed before they are flattened, so a curve scaled up
+-- stays smooth, and a stroke's width scales with the transform (by the
+-- square root of its area scale, for one that scales x and y apart). The
+-- other ops follow as far as their shapes allow. Rects, rounded rects,
+-- circles and their outlines keep their own ops while they keep their
+-- shape, and otherwise become paths: a rect turned other than by quarter
+-- turns is a polygon, and a circle scaled on one axis an ellipse. Lines and
+-- triangles move their points. Gradients and images fill the bounding box
+-- of their transformed rect: a gradient's corners take the colours of the
+-- corners that land nearest them, and an image turns over with a flip, but
+-- neither turns. Text moves its anchor; its glyphs are neither scaled nor
+-- turned.
+withTransform :: Transform -> CanvasM a -> CanvasM a
+withTransform t (CanvasM m) =
+  CanvasM (Reader.local (\env -> env {ceTransform = Just (maybe t (<> t) (ceTransform env))}) m)
 
 -- -----------------------------------------------------------------------------
 -- Custom Widget Specification
@@ -263,13 +360,14 @@ customWidget spec = do
   wid <- nextId
   customWidgetWithId wid spec
 
--- | Draw into a rectangle sized by the layout modifier. Use 'customWidget'
--- when the drawing needs hover or press state.
+-- | Draw into a rectangle sized by the layout modifier, curves flattened
+-- for the display it is on ('runCanvasFor'). Use 'customWidget' when the
+-- drawing needs hover or press state.
 canvas :: (Ui :> es) => (Layout -> Layout) -> (Rect -> CanvasM ()) -> Eff es Response
 canvas f drawAction =
   fst <$> customWidget defaultCustomWidgetSpec
     { widgetLayout = f defaultLayout
-    , widgetDraw   = \_ rect -> runCanvas (drawAction rect)
+    , widgetDraw   = \cdc rect -> runCanvasFor cdc (drawAction rect)
     }
 
 -- -----------------------------------------------------------------------------
@@ -356,7 +454,7 @@ knobWith' f diameter minV maxV value = do
         { widgetCursor = Just (\_ -> UiCursorNsResize)
         , widgetFocusable = True
         , widgetContent = contentKey [frac]
-        , widgetDraw = \cdc (Rect x y w h) -> runCanvas $ do
+        , widgetDraw = \cdc (Rect x y w h) -> runCanvasFor cdc $ do
             let
               cx = x + w / 2
               cy = y + h / 2
@@ -406,7 +504,7 @@ toggleSwitchWith' f on = do
         { widgetCursor = Just (\_ -> UiCursorPointer)
         , widgetFocusable = True
         , widgetContent = contentKey [if current then 1 else 0]
-        , widgetDraw = \cdc rect@(Rect x y w h) -> runCanvas $ do
+        , widgetDraw = \cdc rect@(Rect x y w h) -> runCanvasFor cdc $ do
             let
               theme = cdcTheme cdc
               r = h / 2
@@ -428,7 +526,7 @@ circularProgressWith' :: Ui :> es => (Layout -> Layout) -> Float -> Float -> Eff
 circularProgressWith' f diameter frac =
   fst <$> customWidget (fixedSizeSpec f diameter diameter)
     { widgetContent = contentKey [clamp01 frac]
-    , widgetDraw = \cdc (Rect x y w h) -> runCanvas $ do
+    , widgetDraw = \cdc (Rect x y w h) -> runCanvasFor cdc $ do
         let centre = V2 (x + w / 2) (y + h / 2)
             r = min (w / 2) (h / 2) - 2
             theme = cdcTheme cdc
@@ -456,21 +554,15 @@ spinnerWith' f diameter = do
   resp <-
     fst <$> customWidget (fixedSizeSpec f d d)
       { widgetContent = step + 1
-      , widgetDraw = \cdc (Rect x y w h) -> runCanvas $ do
+      , widgetDraw = \cdc (Rect x y w h) -> runCanvasFor cdc $ do
           let theme = cdcTheme cdc
               thick = max 1.5 (d / 9)
               r = min w h / 2 - thick / 2
               cx = x + w / 2
               cy = y + h / 2
               start = 2 * pi * fromIntegral step / 48
-              at a = V2 (cx + r * cos a) (cy + r * sin a)
-              segments = 8 :: Int
-              sweep = pi / 2
           drawStrokeCircle (V2 cx cy) r thick (fadeAlpha (themeAccent theme) 48)
-          forM_ [0 .. segments - 1] $ \i -> do
-            let a0 = start + sweep * fromIntegral i / fromIntegral segments
-                a1 = start + sweep * fromIntegral (i + 1) / fromIntegral segments
-            drawStrokeAA (at a0) (at a1) thick (themeAccent theme)
+          drawStrokePath (P.arc (V2 cx cy) r start (pi / 2)) thick (themeAccent theme)
       }
   keepAnimating resp
   pure resp
@@ -490,7 +582,7 @@ progressBarWith' f height frac =
         { widgetLayout = fillW (fixedH barH (f defaultLayout))
         , widgetMeasure = Just $ \_ _ -> (progressBarDefaultWidth, barH)
         , widgetContent = contentKey [clamp01 frac]
-        , widgetDraw = \cdc (Rect x y w h) -> runCanvas $ do
+        , widgetDraw = \cdc (Rect x y w h) -> runCanvasFor cdc $ do
             let theme = cdcTheme cdc
                 barW = max 0 w
                 barH' = max 0 h
@@ -518,7 +610,7 @@ sparklineWith' :: Ui :> es => (Layout -> Layout) -> Float -> Float -> [Float] ->
 sparklineWith' f prefW prefH values =
   fst <$> customWidget (fixedSizeSpec f prefW prefH)
     { widgetContent = contentKey values
-    , widgetDraw = \cdc rect@(Rect x y rw rh) -> runCanvas $ do
+    , widgetDraw = \cdc rect@(Rect x y rw rh) -> runCanvasFor cdc $ do
         let accent = themeAccent (cdcTheme cdc)
         drawRoundedRect rect 3.0 (styleBg (themePanel (cdcTheme cdc)))
         case values of
@@ -537,6 +629,6 @@ sparklineWith' f prefW prefH values =
                            (y + rh - pad - ((v - minV) / range) * plotH)
                       | (i, v) <- zip [0 :: Int ..] vs
                       ]
-            zipWithM_ (\p1 p2 -> drawStrokeAA p1 p2 1.5 accent) pts (drop 1 pts)
+            drawStrokePath (P.polyline pts) 1.5 accent
             drawCircle (last pts) 2.5 accent
     }

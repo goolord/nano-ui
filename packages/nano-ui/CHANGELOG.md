@@ -240,6 +240,12 @@
   window. `DamageClip` is still the bounding box; `takeDamagePieces` in
   `NanoUI.Testing` gives the pieces, which a backend that draws text outside
   the draw commands must clip it to, and `damagePieces` is how they are made.
+- `NanoUI.Path`, for qualified import: paths of lines, curves, arcs and
+  shapes (`moveTo`, `cubicTo`, `arc`, `circle` and more), which a canvas fills
+  with `drawPath` and strokes with `drawStrokePath` or `drawStrokePathCapped`.
+- `withTransform` draws a canvas block through a `Transform` (`translate`,
+  `rotate`, `scale`, `affine`, composed with `<>`), and `runCanvasFor` runs a
+  custom widget's canvas with its curves flattened for its display.
 - `NanoUI.Backend` has what a backend needs for the above:
   `modifiersFromBits`.
 
