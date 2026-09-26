@@ -132,9 +132,7 @@ useJob k start = do
 -- a job whose key changed, ends the job. The view must run on the threaded
 -- runtime (@-threaded@) for a job to run while the loop sleeps.
 useTaskStatus :: (Eq k, Typeable k, Typeable a, Ui :> es) => k -> IO a -> Eff es (TaskStatus a)
-useTaskStatus k run = do
-  box <- useTaskBox k run
-  uiIO ((\(Outcome status _) -> status) <$> readIORef box)
+useTaskStatus k run = (\(Outcome status _) -> status) <$> useOutcome k run
 
 -- | 'useTaskStatus' as the latest result there is: the job's once it has
 -- returned, before that the result of the job for an earlier key, and
@@ -145,25 +143,25 @@ useTaskStatus k run = do
 -- > contents <- useTask path (T.readFile (T.unpack path))
 -- > label (fromMaybe "Loading..." contents)
 useTask :: (Eq k, Typeable k, Typeable a, Ui :> es) => k -> IO a -> Eff es (Maybe a)
-useTask k run = do
-  box <- useTaskBox k run
-  uiIO ((\(Outcome _ latest) -> latest) <$> readIORef box)
+useTask k run = (\(Outcome _ latest) -> latest) <$> useOutcome k run
 
--- | The box of a 'useTaskStatus' job. A new key's job starts out running,
--- with the latest result of the job it replaces.
-useTaskBox :: (Eq k, Typeable k, Typeable a, Ui :> es) => k -> IO a -> Eff es (IORef (Outcome a))
-useTaskBox k run = useJob k $ \ctx old -> do
-  prev <- maybe (pure Nothing) (fmap (\(Outcome _ latest) -> latest) . readIORef) old
-  box <- newIORef (Outcome (TaskRunning prev) prev)
-  let finish = (>> wakeFromThread ctx) . atomicWriteIORef box
-  pure
-    ( box
-    , try (run >>= evaluate) >>= \case
-        Right a -> finish (Outcome (TaskDone a) (Just a))
-        Left e
-          | isJust (fromException e :: Maybe SomeAsyncException) -> throwIO e
-          | otherwise -> finish (Outcome (TaskFailed e prev) prev)
-    )
+-- | Where a 'useTaskStatus' job is as this frame reads it. A new key's job
+-- starts out running, with the latest result of the job it replaces.
+useOutcome :: (Eq k, Typeable k, Typeable a, Ui :> es) => k -> IO a -> Eff es (Outcome a)
+useOutcome k run = do
+  box <- useJob k $ \ctx old -> do
+    prev <- maybe (pure Nothing) (fmap (\(Outcome _ latest) -> latest) . readIORef) old
+    box <- newIORef (Outcome (TaskRunning prev) prev)
+    let finish = (>> wakeFromThread ctx) . atomicWriteIORef box
+    pure
+      ( box
+      , try (run >>= evaluate) >>= \case
+          Right a -> finish (Outcome (TaskDone a) (Just a))
+          Left e
+            | isJust (fromException e :: Maybe SomeAsyncException) -> throwIO e
+            | otherwise -> finish (Outcome (TaskFailed e prev) prev)
+      )
+  uiIO (readIORef box)
 
 -- | Run a producer on a thread of its own, which updates a state the view
 -- reads: a stream of readings, a download's progress, a chat reply arriving
