@@ -1379,10 +1379,12 @@ positionWrap env@SolveEnv {seArena = na, seArrays = a} depth parent dir gap (Rec
 
 -- | Place the children of node @idx@ drawn over the rest in its content box
 -- @cx cy cw ch@: all of a stack's (@stacked@), each where its alignment puts
--- it, and pinned ones at their offsets. Each keeps its own size: a child that
--- grows fills the box, past a pin's offset, a percentage is of the box, and
--- any other keeps its measured size, in a stack no wider than the box. A fit
--- height is taken again at the width the child gets.
+-- it, and pinned ones where their alignment puts them, moved by their
+-- offsets, so an offset from the end edge anchors a node there. Each keeps
+-- its own size: a child that grows fills the box, from a pin's offset to the
+-- edge it is not aligned to, a percentage is of the box, and any other keeps
+-- its measured size, in a stack no wider than the box. A fit height is taken
+-- again at the width the child gets.
 positionLayered :: SolveEnv -> Int -> NodeIdx -> Bool -> Rect -> IO ()
 positionLayered env@SolveEnv {seArena = na, seArrays = a} depth idx stacked (Rect cx cy cw ch) = do
   pinnedBelow <- readTagEnum a idx TagPinnedBelow
@@ -1390,26 +1392,31 @@ positionLayered env@SolveEnv {seArena = na, seArrays = a} depth idx stacked (Rec
     floating <- isFloatingNode <$> readTagEnum a ci TagNodeType
     pinned <- readTagEnum a ci TagPinned
     when ((stacked || pinned) && not floating) $ do
-      -- Only a pinned node has an offset, and it has no alignment.
+      -- Only a pinned node has an offset.
       ox <- readStyle a ci StylePinX
       oy <- readStyle a ci StylePinY
-      ax <- if pinned then pure AlignStart else readTagEnum a ci TagAlignX
-      ay <- if pinned then pure AlignTop else readTagEnum a ci TagAlignY
+      ax <- readTagEnum a ci TagAlignX
+      ay <- readTagEnum a ci TagAlignY
       wAx <- readAxisSizing a ci True
       hAx@(AxisSizing hTag _ _ _) <- readAxisSizing a ci False
       iw <- readGeom a ci GeomW
       ih <- readGeom a ci GeomH
-      let room (AxisSizing tag val _ _) box offset other = case tag of
-            SizingGrow -> max 0 (box - offset)
+      let -- What the offset leaves a grow size of the box: past it at the
+          -- start, short of it at the end, and centred between.
+          room (AxisSizing tag val _ _) atStart atEnd box offset other = case tag of
+            SizingGrow
+              | atStart -> max 0 (box - offset)
+              | atEnd -> max 0 (box + offset)
+              | otherwise -> max 0 (box - 2 * abs offset)
             SizingPercent -> box * val / 100
             _ -> other
-          w = resolveSize wAx iw (room wAx cw ox (if pinned then iw else cw))
+          w = resolveSize wAx iw (room wAx (ax == AlignStart) (ax == AlignEnd) cw ox (if pinned then iw else cw))
       fitH <-
         if (hTag == SizingFit || hTag == SizingShrink) && w /= iw
           then recomputeFitHeightAtWidth env ci w
           else pure ih
-      let h = resolveSize hAx fitH (room hAx ch oy fitH)
-      positionNodeA env (depth + 1) ci (Rect (alignX ax (cx + ox) (cw - ox) w) (alignY ay (cy + oy) (ch - oy) h) w h)
+      let h = resolveSize hAx fitH (room hAx (ay /= AlignMiddle && ay /= AlignBottom) (ay == AlignBottom) ch oy fitH)
+      positionNodeA env (depth + 1) ci (Rect (alignX ax cx cw w + ox) (alignY ay cy ch h + oy) w h)
 
 -- | Place a column's flow children top to bottom in the box @cx cy cw ch@. A
 -- scroll column shares out its content height (@scrollContent@) and gives a

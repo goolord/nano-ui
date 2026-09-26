@@ -129,8 +129,11 @@ by its alignment; a later child draws over the earlier ones. The `wrap`
 modifier flows a row onto a new line where the next child would not fit, as
 in `rowWith (wrap . gap 6 . lineGap 4) (mapM_ chip tags)`; inside a
 container that sizes itself to its content, bound the row with `maxW` or
-`fixedW`. `pinAt x y` places a node at that offset in its parent's content
-box, over its siblings and out of their flow.
+`fixedW`. `pinAt x y` places a node over its siblings and out of their
+flow, at that offset from where its alignment puts it in its parent's
+content box: from the top-left corner by default, and from the bottom-right
+one with `pinAt (-16) (-16) . alignEnd . alignBottom`, as a floating button
+sits.
 
 Where a stack or a pinned node draws one node over another, a control on
 top (a button, field, slider or drawing) takes the pointer from whatever is

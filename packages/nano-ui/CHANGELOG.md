@@ -248,7 +248,9 @@
   custom widget's canvas with its curves flattened for its display.
 - `stack` and `stackWith` layer their children in one box. The `wrap`
   modifier flows a row onto new lines, or a column into new columns, `lineGap`
-  apart, and `pinAt x y` places a node at an offset over its siblings.
+  apart, and `pinAt x y` places a node at an offset over its siblings, from
+  where its alignment puts it: `pinAt (-16) (-16) . alignEnd . alignBottom`
+  is a floating button 16 in from the bottom-right corner.
 - `useDrag2DOn` and `useWheelDeltaOn`, the drag and wheel hooks of a custom
   widget fed its `Response`: a drag starts with a press on the widget and a
   wheel turns it while it is hovered, so neither acts through something drawn

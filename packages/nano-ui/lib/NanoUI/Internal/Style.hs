@@ -525,13 +525,21 @@ wrap l = l {layoutWrap = True}
 lineGap :: Float -> Layout -> Layout
 lineGap n l = l {layoutLineGap = Just (max 0 n)}
 
--- | Take the node out of its parent's flow and place it @x@ right and @y@ down
--- from the parent's content box (inside its padding), over its siblings. The
--- siblings lay out as if it were absent, and it does not count towards the
--- parent's size, but it is clipped and scrolled with them. It keeps its own
--- size: a content or fixed size as usual, even past the parent's edge, a
--- grow size fills the content box past the offset, and a percentage is of
--- the content box. Windows, modals and popups place themselves and ignore it.
+-- | Take the node out of its parent's flow and place it over its siblings in
+-- the parent's content box (inside its padding), where its alignment puts it
+-- and then @x@ right and @y@ down. With the default top-left alignment the
+-- offset is from the top-left corner; aligned to the end or the bottom, the
+-- node is anchored to that edge:
+--
+-- > buttonWith (pinAt (-16) (-16) . alignEnd . alignBottom) "+"   -- 16 in from the bottom-right corner
+-- > box (pinAt 6 (-6) . alignEnd . alignTop . fixedWH 12 12) red   -- overhanging the top-right corner
+--
+-- The siblings lay out as if it were absent, and it does not count towards
+-- the parent's size, but it is clipped and scrolled with them. It keeps its
+-- own size: a content or fixed size as usual, even past the parent's edge, a
+-- grow size fills the content box from the offset to the edge it is not
+-- aligned to, and a percentage is of the content box. Windows, modals and
+-- popups place themselves and ignore it.
 --
 -- A control pinned over its siblings takes the pointer from them where it is
 -- drawn over them; a panel, label or image lets it through to the controls

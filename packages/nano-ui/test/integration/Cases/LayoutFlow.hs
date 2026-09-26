@@ -42,8 +42,9 @@ rectsAt ctx is = (\rs -> [r | (i, r) <- zip [0 ..] rs, i `elem` is]) <$> arenaRe
 -- plus padding and places each by its alignment; a wrapping row breaks lines
 -- at its width with the gap within and the line gap between them, a child
 -- wider than a line alone on one, and a grow child sharing only its line; a
--- wrapping column flows into columns; pinned children sit at their offsets,
--- out of the flow and of the parent's size.
+-- wrapping column flows into columns; pinned children sit at their offsets
+-- from where their alignment puts them, out of the flow and of the parent's
+-- size.
 runLayoutFlowRectsTest :: Context -> IORef Int -> IO ()
 runLayoutFlowRectsTest ctx failed =
   forM_ cases $ \(ui, want) -> warmup2 ctx input0 ui >> arenaRects ctx >>= assertEq failed want . drop 1
@@ -77,6 +78,15 @@ runLayoutFlowRectsTest ctx failed =
               box (pinAt 0 0 . fillW . fixedH 4) yellow
             box (fixedWH 10 10) yellow
         , [Rect 0 0 100 50, Rect 5 5 40 40, Rect 35 17 16 16, Rect 55 5 40 40, Rect 5 5 90 4, Rect 0 50 10 10] )
+      , ( columnWith (tight . gap 0) $ columnWith (tight . fixedWH 200 100) $ do
+            -- A floating button 16 from the bottom-right corner, a badge
+            -- overhanging the top-right one, a bar grown to 10 short of the
+            -- right edge, and a centred box moved right.
+            box (pinAt (-16) (-16) . alignEnd . alignBottom . fixedWH 40 40) red
+            box (pinAt 6 (-6) . alignEnd . alignTop . fixedWH 12 12) blue
+            box (pinAt (-10) 0 . alignEnd . fillW . fixedH 4) green
+            box (pinAt 10 0 . alignCenter . alignMid . fixedWH 20 10) yellow
+        , [Rect 0 0 200 100, Rect 144 44 40 40, Rect 194 (-6) 12 12, Rect 0 0 190 4, Rect 100 45 20 10] )
       ]
 
 -- | A label in a fixed-width stack wraps to its width, and the stack and

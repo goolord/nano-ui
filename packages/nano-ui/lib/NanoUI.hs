@@ -631,7 +631,8 @@ module NanoUI
     -- top. 'wrap' breaks a row or column into lines where the next child
     -- would overflow it, as a list of tags does, and 'pinAt' takes a child out
     -- of its parent's flow to sit at an offset in the parent, over its
-    -- siblings, as a badge or a floating button does.
+    -- siblings, from the corner its alignment picks, as a badge or a floating
+    -- button does.
     --
     -- Where a stack or a pinned node draws one node over another, a control
     -- on top takes the pointer from what is beneath, and anything else lets it
