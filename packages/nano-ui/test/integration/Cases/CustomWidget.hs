@@ -14,6 +14,7 @@ tests =
   , spec "custom-widget-content-damage" runCustomWidgetContentDamageTest
   , spec "custom-widget-content-key" runCustomWidgetContentKeyTest
   , spec "custom-widget-knob" runReferenceKnobTest
+  , spec "custom-widget-knob-covered" runKnobCoveredTest
   , spec "drop-target" runDropTargetTest
   ]
 
@@ -235,6 +236,39 @@ runReferenceKnobTest ctx failed = do
   assert failed (valDragged > 25)
   assert failed (respChanged respDragged)
   void $ runFrame ctx (releaseAt dragUp) ui
+
+-- | A knob under a button pinned over it neither drags nor turns there:
+-- 'useDrag2DOn' and 'useWheelDeltaOn' go by the knob's response, not its
+-- rect. Beside the button, both work.
+runKnobCoveredTest :: Context -> IORef Int -> IO ()
+runKnobCoveredTest ctx failed = do
+  valueRef <- newIORef (0 :: Float)
+  let inp0 = withInputOff 300 300
+      ui = columnWith tight $ do
+        k <- held valueRef (knobWith' id 60 0 100)
+        _ <- buttonWith' (pinAt 0 0 . fixedWH 30 60) "x"
+        pure k
+      dragFrom p = do
+        writeIORef valueRef 50
+        warmup ctx inp0 {inputMousePos = p} ui
+        _ <- runFrame ctx (pressAt inp0 p) ui
+        let up = holdAt inp0 (V2 (v2X p) (v2Y p - 40))
+        _ <- runFrame ctx up ui
+        _ <- runFrame ctx (releaseAt up) ui
+        readIORef valueRef
+      wheelAt p = do
+        writeIORef valueRef 50
+        warmup ctx inp0 {inputMousePos = p} ui
+        _ <- runFrame ctx inp0 {inputMousePos = p, inputScroll = V2 0 3} ui
+        readIORef valueRef
+  (k0, _) <- warmup2 ctx inp0 ui
+  let Rect kx ky _ kh = respRect k0
+      onButton = V2 (kx + 15) (ky + kh / 2)
+      onKnob = V2 (kx + 45) (ky + kh / 2)
+  dragFrom onButton >>= assertEq failed 50
+  wheelAt onButton >>= assertEq failed 50
+  dragFrom onKnob >>= assert failed . (> 50)
+  wheelAt onKnob >>= assert failed . (/= 50)
 
 -- | Verifies the composable drag-and-drop hook: hover, file, text, and bounds.
 runDropTargetTest :: Context -> IORef Int -> IO ()

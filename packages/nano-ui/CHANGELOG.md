@@ -249,6 +249,12 @@
 - `stack` and `stackWith` layer their children in one box. The `wrap`
   modifier flows a row onto new lines, or a column into new columns, `lineGap`
   apart, and `pinAt x y` places a node at an offset over its siblings.
+- `useDrag2DOn` and `useWheelDeltaOn`, the drag and wheel hooks of a custom
+  widget fed its `Response`: a drag starts with a press on the widget and a
+  wheel turns it while it is hovered, so neither acts through something drawn
+  over the widget, on the part a scroller clips off, or while it is disabled.
+  `knob` uses them. `useDrag2D` and `useWheelDelta`, which test a rect, are
+  deprecated.
 - `pointer`, a layout modifier for what a node drawn over others by a stack
   or a pin does with the pointer: by default (`PointerAuto`) a control on top
   takes it and anything else lets it through to the controls beneath;
