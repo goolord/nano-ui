@@ -46,6 +46,7 @@ tests =
   , pixelSpec "scroll-glide-clamp" runScrollGlideClampTest
   , spec "scroll-disjoint-viewport-hit" runDisjointViewportHitTest
   , spec "scroll-disjoint-viewport-layers" runDisjointViewportLayersTest
+  , spec "scroll-wheel-paint-order" runWheelPaintOrderTest
   ]
 
 runScrollThumbCursorTest :: Context -> IORef Int -> IO ()
@@ -830,3 +831,29 @@ runDisjointViewportLayersTest ctx failed = do
     assertEq failed (respId (shown !! i)) =<< getHotId ctx
     clicked <- runClick ctx inp0 {inputMousePos = pos} buttons pos
     assertEq failed [j == i | j <- [0 .. 2]] (map respClicked clicked)
+
+-- | The wheel goes to the scroller drawn on top at the pointer: one pinned
+-- over another takes it though declared before it, and a panel pinned over
+-- the scroller beneath takes it with 'PointerBlock' and lets it through
+-- without. Beside what is pinned, the scroller beneath takes it.
+runWheelPaintOrderTest :: Context -> IORef Int -> IO ()
+runWheelPaintOrderTest ctx failed = do
+  let inp0 = withInputOff 400 300
+      rows n = column (replicateM_ n (label "row"))
+      ui mode = columnWith tight $ do
+        (top, ()) <- scrollArea (pinAt 20 20 . fixedWH 120 100) (rows 30)
+        (under, ()) <- scrollArea (fixedWH 360 240) (rows 60)
+        panelWith (pointer mode . pinAt 200 20 . fixedWH 100 80) (pure ())
+        pure (top, under)
+      -- Which of the two scrollers a wheel turn at @p@ moves.
+      moved mode p = do
+        (top, under) <- warmup2 ctx inp0 (ui mode)
+        setScrollOffset ctx top 0
+        setScrollOffset ctx under 0
+        warmup ctx inp0 {inputMousePos = p} (ui mode)
+        _ <- runFrame ctx inp0 {inputMousePos = p, inputScroll = V2 0 1} (ui mode)
+        (,) <$> ((> 0) <$> getScrollOffset ctx top) <*> ((> 0) <$> getScrollOffset ctx under)
+  moved PointerAuto (V2 60 60) >>= assertEq failed (True, False)
+  moved PointerAuto (V2 250 60) >>= assertEq failed (False, True)
+  moved PointerBlock (V2 250 60) >>= assertEq failed (False, False)
+  moved PointerBlock (V2 250 200) >>= assertEq failed (False, True)

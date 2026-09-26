@@ -27,7 +27,7 @@ import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Monad ((<&&>))
 import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena
-import NanoUI.Internal.Style (Padding (..), themePanel)
+import NanoUI.Internal.Style (Padding (..), PointerMode (..), themePanel)
 import NanoUI.Internal.Types (Rect (..), Size (..), V2 (..), rectContains, rectHit, rectInflate, rectIntersect, rectUnion)
 
 -- | Move every node by the offsets of the scroll containers around it, and
@@ -200,20 +200,52 @@ findScrollNodeUnderMouse ctx mouse = do
             <|> MaybeT (topmostOverlayAtMouse ctx mouse)
       let start = fromMaybe 0 top
       rect <- getNodeRect (ctxNodeArena ctx) start
-      queryScrollTarget ctx mouse rect start
+      layered <- (> 0) <$> layeredNodeCount (ctxNodeArena ctx)
+      join <$> queryScrollTarget ctx layered mouse rect start
 
--- | The scroller under @mouse@ in the subtree at @idx@: its first child's,
--- else @idx@ itself.
-queryScrollTarget :: Context -> V2 -> Rect -> NodeIdx -> IO (Maybe NodeIdx)
-queryScrollTarget ctx mouse parentClip idx = runMaybeT $ do
-  nt <- liftIO $ getNodeType (ctxNodeArena ctx) idx
+-- | The scroller under @mouse@ in the subtree at @idx@: the one in the child
+-- drawn on top at @mouse@, else @idx@ itself; @Just Nothing@ where a node
+-- given 'PointerBlock' is drawn on top there with no scroller of its own,
+-- and takes the wheel from what is beneath. Where a stack or a pinned node
+-- (@layered@) can draw one child over another, the children are asked in the
+-- order paint draws them, the one on top first ('childrenTopFirst'), so a
+-- scroller pinned over another takes the wheel; elsewhere children do not
+-- overlap and are asked in the arena's sibling order.
+queryScrollTarget :: Context -> Bool -> V2 -> Rect -> NodeIdx -> IO (Maybe (Maybe NodeIdx))
+queryScrollTarget ctx@Context {ctxNodeArena = na} layered mouse parentClip idx = runMaybeT $ do
+  nt <- liftIO $ getNodeType na idx
   clip <- MaybeT $ scrollHitClip ctx idx nt parentClip
-  MaybeT (firstChildJustM (ctxNodeArena ctx) idx (queryScrollTarget ctx mouse clip))
-    <|> MaybeT (scrollHitSelf ctx idx nt mouse clip)
+  let inChild = queryScrollTarget ctx layered mouse clip
+      inChildren
+        | layered = firstJust inChild =<< childrenTopFirst na idx
+        | otherwise = firstChildJustM na idx inChild
+      blocks =
+        pure layered
+          <&&> ((== PointerBlock) <$> getPointerMode na idx)
+          <&&> (rectHit <$> getNodeRect na idx <*> pure mouse)
+          <&&> pure (rectHit clip mouse)
+  MaybeT inChildren
+    <|> (Just <$> MaybeT (scrollHitSelf ctx idx nt mouse clip))
+    <|> MaybeT ((\b -> if b then Just Nothing else Nothing) <$> blocks)
+ where
+  firstJust _ [] = pure Nothing
+  firstJust f (c : cs) = f c >>= maybe (firstJust f cs) (pure . Just)
 
+-- | Node @idx@, when it is a scroller that takes the wheel at @mouse@: a
+-- scroll container whose viewport or bar lanes hold it, or a text area with
+-- something to scroll. Not one that lets the pointer through ('PointerPass').
 scrollHitSelf ::
   Context -> NodeIdx -> NodeType -> V2 -> Rect -> IO (Maybe NodeIdx)
 scrollHitSelf ctx idx nt mouse clip
+  | not (nt == NodeTextArea || isScrollNode nt) = pure Nothing
+  | otherwise =
+      getPointerMode (ctxNodeArena ctx) idx >>= \case
+        PointerPass -> pure Nothing
+        _ -> scrollerHit ctx idx nt mouse clip
+
+scrollerHit ::
+  Context -> NodeIdx -> NodeType -> V2 -> Rect -> IO (Maybe NodeIdx)
+scrollerHit ctx idx nt mouse clip
   | nt == NodeTextArea = do
       (field, bars) <- textAreaScrollGeom ctx idx
       let hit = rectHit clip mouse && rectHit field mouse && (tabVertical bars || tabHorizontal bars)

@@ -261,7 +261,7 @@
   or a pin does with the pointer: by default (`PointerAuto`) a control on top
   takes it and anything else lets it through to the controls beneath;
   `PointerBlock` makes a node, such as a card or a scrim, take it over its
-  whole box, so nothing beneath is hovered, pressed or focused, and
+  whole box, so nothing beneath is hovered, pressed, focused or scrolled, and
   `PointerPass` makes a node and all inside it let it through. A label, an
   image or a container with an id under a control on top is covered like a
   control, taking no hover or tooltip there.
@@ -628,6 +628,8 @@
 
 ### Fixed
 
+- The wheel goes to the scroller drawn on top at the pointer: a scroller
+  pinned over another takes it even when declared before the one beneath.
 - A text field focused by Tab no longer has its whole text selected after a
   press elsewhere.
 - A text field with its own font size puts its caret, selection and
