@@ -266,7 +266,7 @@ buildTextInput styleIdx layout placeholder value mDebounceMs = do
   (oldText, newText, isFocus, pulse) <- editTextField wid mode value Nothing
   uiIO $ recordSlot fieldText ctx key newText
   inp <- askInput
-  let submitted = isFocus && KeyEnter `elem` inputKeys inp
+  let submitted = isFocus && pressedOnceIn KeyEnter inp
       edited = pulse || newText /= oldText
   changed <- case mDebounceMs of
     Nothing -> pure edited

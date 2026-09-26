@@ -5,6 +5,7 @@
 module NanoUI.Input
   ( -- * Input
     Input (..)
+  , Pressable (..)
   , emptyInput
   , clearEphemeral
   , inputInteracted
@@ -21,9 +22,6 @@ module NanoUI.Input
   , buttonsDelete
   , buttonsToList
   , buttonsFromList
-  , buttonHeld
-  , buttonPressed
-  , buttonReleased
   , anyButtonPressed
   , anyButtonReleased
   , applyMouseButton
@@ -44,6 +42,7 @@ module NanoUI.Input
   , inputKeysElem
   , foldInputKeys
   , applyKey
+  , releaseAllKeys
   , noModifiers
   , modPrimary
   , primaryModifiers

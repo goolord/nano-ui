@@ -191,7 +191,7 @@ closeTextEditMenuOnOutsideClick ctx inp =
 
 closeTextEditMenuOnEscape :: Context -> Input -> IO ()
 closeTextEditMenuOnEscape ctx inp =
-  when (inputKeysElem KeyEscape (inputKeys inp)) $
+  when (pressedOnceIn KeyEscape inp) $
     whenM (isJust <$> getsInteraction ctx isTextInputMenu) $ do
       modifyInteraction ctx (\s -> s {isTextInputMenu = Nothing})
       markEscapeConsumed ctx

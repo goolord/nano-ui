@@ -855,8 +855,14 @@ module NanoUI
     -- 'Composition' at its caret and the keys go to the input method: the
     -- frame drops the keys pressed, released and held ('inputKeys',
     -- 'inputKeysReleased', 'inputKeysHeld') until the text is committed or
-    -- cancelled, so no shortcut fires on them.
+    -- cancelled, so no shortcut fires on them. 'pressedIn', 'releasedIn'
+    -- and 'heldIn' ask about one key or mouse button in it, as it stands,
+    -- and 'pressedOnceIn' about a press that is not a held key's
+    -- auto-repeat:
+    --
+    -- > runSdlApp defaultSdlOptions {sdlAppShouldQuit = pressedOnceIn KeyEscape} view
   , Input (..)
+  , Pressable (..)
   , Key (..)
   , Modifiers (..)
   , inputKeysElem
@@ -875,8 +881,8 @@ module NanoUI
     -- > whenM (mousePressed MouseBack) goBack
     --
     -- An 'Input' holds the buttons held, pressed and released as
-    -- 'MouseButtons' sets, which 'buttonHeld', 'buttonPressed' and
-    -- 'buttonReleased' read.
+    -- 'MouseButtons' sets, which 'pressedIn', 'releasedIn' and 'heldIn'
+    -- read, as they read a key's.
   , MouseButton (..)
   , mousePressed
   , mouseReleased
@@ -887,9 +893,6 @@ module NanoUI
   , buttonsNull
   , buttonsToList
   , buttonsFromList
-  , buttonHeld
-  , buttonPressed
-  , buttonReleased
   , anyButtonPressed
   , anyButtonReleased
   , inputPointerHeld
@@ -916,10 +919,17 @@ module NanoUI
     -- shortcut bound to Ctrl+A ('shortcut' has the rules). A
     -- 'menuItemShortcut' row binds its chord the same way while its menu is
     -- open.
+    --
+    -- A key held down auto-repeats, and each repeat is a press: holding
+    -- Ctrl+Z undoes step after step. 'keyPressedOnce' and 'shortcutOnce' see
+    -- the key go down and not its repeats, for what should happen once however
+    -- long the key is held, such as a toggle.
   , keyPressed
+  , keyPressedOnce
   , keyReleased
   , keyHeld
   , shortcut
+  , shortcutOnce
   , noModifiers
   , modPrimary
   , primaryModifiers

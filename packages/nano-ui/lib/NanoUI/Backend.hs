@@ -48,9 +48,11 @@ module NanoUI.Backend
     -- 'applyPointerLeave' moves it off every widget. Every key goes in as a 'Key' whatever the
     -- modifiers, a key that types a character as the 'KeyChar' it types
     -- with no modifier held; the text typed goes in 'inputChars' as well, and
-    -- a chord such as Ctrl+C types none. A held key's auto-repeats go in
-    -- only for the keys 'keyRepeats' says repeat, and 'keypadKey' says what
-    -- a keypad key is.
+    -- a chord such as Ctrl+C types none. Every auto-repeat of a held key goes
+    -- in as a press, which 'applyKey' keeps out of 'inputKeysNew', and
+    -- 'keypadKey' says what a keypad key is. When the window loses the
+    -- keyboard, 'releaseAllKeys' lets go of what was held, whose releases
+    -- go elsewhere.
   , Input (..)
   , Key (..)
   , Modifiers (..)
@@ -78,7 +80,7 @@ module NanoUI.Backend
   , inputKeysNull
   , foldInputKeys
   , applyKey
-  , keyRepeats
+  , releaseAllKeys
   , keypadKey
   , noModifiers
   , modifiersFromBits

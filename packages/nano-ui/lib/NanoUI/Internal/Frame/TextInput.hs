@@ -370,7 +370,7 @@ claimComposition ctx !inp = do
   let !committing = showing held && not (T.null (inputChars inp))
   pure $
     if showing next
-      then (inp {inputKeys = mempty, inputKeysReleased = mempty, inputKeysHeld = mempty}, True)
+      then (inp {inputKeys = mempty, inputKeysNew = mempty, inputKeysReleased = mempty, inputKeysHeld = mempty}, True)
       else (inp, committing)
   where
     editableField wid

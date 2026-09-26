@@ -3,9 +3,11 @@
 -- widget holding the keyboard the keys it uses itself.
 module NanoUI.Internal.Widgets.Shortcut
   ( keyPressed
+  , keyPressedOnce
   , keyReleased
   , keyHeld
   , shortcut
+  , shortcutOnce
   , focusTakesChord
   ) where
 
@@ -27,6 +29,11 @@ import System.Info (os)
 -- 'shortcut'.
 keyPressed :: Ui :> es => Key -> Eff es Bool
 keyPressed = keyIn inputKeys
+
+-- | 'keyPressed' for the press alone: 'False' on the frames that only
+-- auto-repeat a held key, so holding the key down acts once.
+keyPressedOnce :: Ui :> es => Key -> Eff es Bool
+keyPressedOnce = keyIn inputKeysNew
 
 -- | Whether the key came up this frame, as 'keyPressed' for a release.
 keyReleased :: Ui :> es => Key -> Eff es Bool
@@ -69,11 +76,24 @@ keyIn field k = do
 --
 -- A chord with no key never fires.
 shortcut :: Ui :> es => Shortcut -> Eff es Bool
-shortcut (Shortcut Nothing _) = pure False
-shortcut (Shortcut (Just pressedKey) mods) = do
+shortcut = chordShortcut False
+
+-- | 'shortcut' for the chord's press alone: 'False' on the frames that only
+-- auto-repeat its key, so holding a chord that toggles something toggles it
+-- once. A frame of auto-repeats alone leaves them to a 'shortcut' for the
+-- chord declared later.
+--
+-- > whenM (shortcutOnce (key (KeyF 11))) toggleFullscreen
+shortcutOnce :: Ui :> es => Shortcut -> Eff es Bool
+shortcutOnce = chordShortcut True
+
+-- | 'shortcut', or with @once@ 'shortcutOnce'.
+chordShortcut :: Ui :> es => Bool -> Shortcut -> Eff es Bool
+chordShortcut _ (Shortcut Nothing _) = pure False
+chordShortcut once (Shortcut (Just pressedKey) mods) = do
   inp <- askInput
   let presses = [i | (i, k) <- zip [0 ..] (toList (inputKeys inp)), k == pressedKey]
-  if null presses || inputModifiers inp /= mods
+  if null presses || inputModifiers inp /= mods || (once && not (pressedOnceIn pressedKey inp))
     then pure False
     else do
       free <- withContext $ \ctx -> do

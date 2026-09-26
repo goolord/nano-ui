@@ -114,7 +114,7 @@ import NanoUI.Internal.Frame.Node (resolveTextFont)
 import NanoUI.Internal.Id hiding (currentId)
 import NanoUI.Internal.Layout.Arena (getArenaScope, setArenaScope)
 import NanoUI.Internal.Style (Appearance, FontStyle, FontVariant, FontWeight, Layout, TextDecoration (DecorationNone), Theme, defaultLayout)
-import NanoUI.Internal.Input (Input (..), Key (KeyEscape), MouseButton, buttonHeld, buttonPressed, buttonReleased, inputKeysElem, inputMousePos, inputWindowSize, noButtons, stripInteractionInput)
+import NanoUI.Internal.Input (Input (..), Key (KeyEscape), MouseButton, Pressable (..), buttonHeld, buttonPressed, buttonReleased, inputMousePos, inputWindowSize, noButtons, stripInteractionInput)
 import NanoUI.Internal.Types (DamageBounds, Rect, Size (..), V2)
 
 -- | A view with UI operations and IO. Backend runners execute it as frames
@@ -558,7 +558,7 @@ requestFrame = withContext markDirty
 takeEscape :: Ui :> es => Eff es Bool
 takeEscape = do
   inp <- askInput
-  if not (inputKeysElem KeyEscape (inputKeys inp))
+  if not (pressedOnceIn KeyEscape inp)
     then pure False
     else withContext $ \ctx -> do
       taken <- overlayConsumesQuit ctx inp

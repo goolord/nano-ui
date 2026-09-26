@@ -27,7 +27,6 @@ import NanoUI.Internal.Input
 import NanoUI.Internal.Monad (Ui, (<&&>), askContext, askFrameInput, askInput, focusedWidget, freshWidget, uiIO, withContext)
 import NanoUI.Internal.Store (fieldFloat, fieldInt, findSlot, insertSlot, quietFlag, setQuietFlag)
 import NanoUI.Internal.Types (Rect (..), clamp01, rectHit, v2X, v2Y)
-import qualified Data.Text as T
 
 -- | Pointer slop in pixels before a held press counts as a drag.
 dragThresholdPx :: Float
@@ -137,25 +136,26 @@ keyboardFocused wid
         <&&> uiIO (not <$> isDisabled ctx wid)
         <&&> uiIO (not <$> pointerBlockedByModal ctx)
 
--- | Arrow / Enter / Space while @wid@ is focused and eligible for input.
+-- | Arrow / Enter / Space while @wid@ is focused and eligible for input. An
+-- arrow held down steps again on each auto-repeat; Enter and Space, which
+-- activate, count only when they go down.
 useKeyNav :: (Ui :> es) => WidgetId -> Eff es KeyNav
 useKeyNav wid = do
   inp <- askInput
-  let keys = inputKeys inp
-      none = KeyNav False False False False False False
-  if hashWidgetId wid == 0 || (inputKeysNull keys && T.null (inputChars inp))
+  let none = KeyNav False False False False False False
+  if hashWidgetId wid == 0 || inputKeysNull (inputKeys inp)
     then pure none
     else do
       eligible <- keyboardFocused wid
       if not eligible
         then pure none
         else pure KeyNav
-          { knUp = inputKeysElem KeyUp keys
-          , knDown = inputKeysElem KeyDown keys
-          , knLeft = inputKeysElem KeyLeft keys
-          , knRight = inputKeysElem KeyRight keys
-          , knEnter = inputKeysElem KeyEnter keys
-          , knSpace = T.any (== ' ') (inputChars inp)
+          { knUp = pressedIn KeyUp inp
+          , knDown = pressedIn KeyDown inp
+          , knLeft = pressedIn KeyLeft inp
+          , knRight = pressedIn KeyRight inp
+          , knEnter = pressedOnceIn KeyEnter inp
+          , knSpace = pressedOnceIn KeySpace inp
           }
 
 -- | The step the arrow keys ask for along a control that grows rightwards and
@@ -189,7 +189,7 @@ useDismissable panel = do
     let onMenu = case route of
           RouteLayer _ -> False
           _ -> True
-        esc = inputKeysElem KeyEscape (inputKeys inp) && not taken && null menu && not dropdown
+        esc = pressedOnceIn KeyEscape inp && not taken && null menu && not dropdown
         pressed = anyButtonPressed inp && not onMenu
     when esc (markEscapeConsumed ctx)
     pure (esc || (pressed && not (rectHit panel (inputMousePos inp))))

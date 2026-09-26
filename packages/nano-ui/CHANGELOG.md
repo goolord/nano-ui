@@ -297,10 +297,20 @@
 - Every key as a `Key`: `KeyF n`, paging, Insert, Space, the lock and menu
   keys, and a `KeyChar` of what a typing key types unmodified. `modSuper`, and
   `modPrimary` for the platform's command key (Command on macOS, else Ctrl).
-  A view reads keys with `keyPressed`, `keyReleased` and `keyHeld`.
+  A view reads keys with `keyPressed`, `keyReleased` and `keyHeld`. Every key
+  auto-repeats while held, each repeat a press in `inputKeys`, and
+  `inputKeysNew` has the presses that are not repeats: holding Enter breaks
+  a text area's line again and again, while Enter and Space activate a
+  focused button, Enter submits a field and Escape closes only as they go
+  down. `keyPressedOnce` hears that press alone. Space activates by its key,
+  not by the space it types.
+- `pressedIn`, `pressedOnceIn`, `releasedIn` and `heldIn` (the `Pressable`
+  class) read a key or a mouse button in an `Input` alike, as `shortcutIn`
+  reads a chord: `sdlAppShouldQuit = pressedOnceIn KeyEscape`.
 - Shortcuts: `shortcut (ctrl <> key 's')` is `True` once on the frame the
-  chord is pressed, unless a modal, `disabledWhen` or the focused widget
-  takes it. The new module `NanoUI.Shortcut` has chords: a `Shortcut` is
+  chord is pressed, and again on each auto-repeat, unless a modal,
+  `disabledWhen` or the focused widget takes it; `shortcutOnce` is not
+  `True` on the repeats, for a chord that toggles. The new module `NanoUI.Shortcut` has chords: a `Shortcut` is
   modifiers (`ctrl`, `shift`, `alt`, `super`, `cmdOrCtrl`) and a `key` put
   together with `<>`, with `shortcutLabel` and `shortcutIn`, and
   `parseShortcut` reads one written as xmonad's EZConfig writes it (`C-s`,
@@ -360,7 +370,9 @@
   hook. `askWake` gives the view an action any thread may call to run it
   again.
 - `NanoUI.Backend` has what a backend needs for the above: `applyKey`,
-  `keyRepeats`, `keypadKey`, `modifiersFromBits`, `noModifiers`,
+  `releaseAllKeys`, which the SDL and RGFW backends call as their window
+  loses the keyboard, so no key stays held, `keypadKey`, `modifiersFromBits`,
+  `noModifiers`,
   `applyComposition`, `cursorFallback`, `setExplainLayout`,
   `setSystemAppearance`, `WindowHost` with `defaultWindowHost` (every field
   a no-op, to build a host from by record update), `installWindowHost`,
@@ -370,7 +382,8 @@
   `setWakeLoop` and `cancelTasks`. `runSessionLoop` ends the session when a
   view calls `quitUi`, and hands a close request to the view when the
   window's settings say to.
-- `NanoUI.Testing.Harness` has `chordInp`, `keyUpInp`, `clickPairWith`,
+- `NanoUI.Testing.Harness` has `chordInp`, `keyUpInp`, `keyRepeatInp`,
+  `clickPairWith`,
   `pressWith` and `releaseWith` for any mouse button, and `newWakeSignal`
   for a test to wait on a job's wake.
 - `uiFontSize`, the size text takes when its layout sets none, and
@@ -651,7 +664,7 @@
 - `Key` is `Ord` and no longer `Enum`, and `Modifiers` is `Ord`.
 - `Input` holds the mouse buttons as sets, `inputButtonsHeld`,
   `inputButtonsPressed` and `inputButtonsReleased` (`MouseButtons`, read with
-  `buttonHeld`, `buttonPressed` and `buttonReleased`), in place of a field
+  `heldIn`, `pressedIn` and `releasedIn`), in place of a field
   for each button and edge; an `Input` is 128 bytes rather than 200. Fold
   events in with `applyMouseButton`. `inputMouseDown`, `inputMousePressed`,
   `inputMouseReleased` and their `Right` forms remain as deprecated functions.

@@ -20,6 +20,9 @@ tests =
   , spec "shortcut-escape-tab" runShortcutEscapeTabTest
   , spec "shortcut-menu-item" runShortcutMenuItemTest
   , spec "key-release-held" runKeyReleaseTest
+  , spec "key-repeats" runKeyRepeatsTest
+  , spec "key-repeats-widgets" runKeyRepeatsWidgetsTest
+  , spec "key-pressable" runKeyPressableTest
   , spec "key-hard-quit" runKeyHardQuitTest
   , spec "shortcut-focused-text-area" runShortcutFocusedTextAreaTest
   , spec "shortcut-focus-from-code" runShortcutFocusFromCodeTest
@@ -200,6 +203,61 @@ runKeyReleaseTest ctx failed = do
   assertEq failed ([KeySpace], [], [KeySpace]) (toList (inputKeysHeld holding), toList (inputKeysReleased (clearEphemeral up)), toList (inputKeysHeld (applyKey KeySpace True down)))
   assert failed (inputInteracted holding up)
   assertEq failed [False, False, False] =<< evalUi ctx down (disabledWhen True keys)
+
+-- | A held key's auto-repeats are presses that are not new: 'shortcut' and
+-- 'keyPressed' fire on them, 'shortcutOnce' and 'keyPressedOnce' do not,
+-- and a 'shortcutOnce' that does not fire leaves them to a later 'shortcut'.
+runKeyRepeatsTest :: Context -> IORef Int -> IO ()
+runKeyRepeatsTest ctx failed = do
+  (ui, press) <- noting ctx $ \note -> column $ do
+    whenM (shortcut (ctrl <> key 'k')) (note "k")
+    whenM (shortcutOnce (ctrl <> key 'j')) (note "j once")
+    whenM (shortcut (ctrl <> key 'j')) (note "j")
+    whenM (keyPressed (KeyChar 'k')) (note "pressed")
+    whenM (keyPressedOnce (KeyChar 'k')) (note "pressed once")
+  warmup ctx inp0 ui
+  let down c = chordInp (ctrl <> key c) inp0
+      repeated c = (applyKey (KeyChar c) True (clearEphemeral (down c)))
+  -- The key pressed down, then auto-repeating while held.
+  assertEq failed ["pressed once", "pressed", "k"] =<< press (down 'k')
+  assertEq failed ["pressed", "k"] =<< press (repeated 'k')
+  assertEq failed ["j once"] =<< press (down 'j')
+  assertEq failed ["j"] =<< press (repeated 'j')
+  -- Backends pass every repeat in; the key held is listed once.
+  let r = repeated 'k'
+  assertEq failed ([KeyChar 'k'], [], [KeyChar 'k']) (toList (inputKeys r), toList (inputKeysNew r), toList (inputKeysHeld r))
+
+-- | Holding Enter types a line break on every repeat in a text area, but
+-- presses a focused button once, and submits a text field once.
+runKeyRepeatsWidgetsTest :: Context -> IORef Int -> IO ()
+runKeyRepeatsWidgetsTest ctx failed = do
+  areaRef <- newIORef ""
+  let area = column (held areaRef textArea')
+  warmupFocused ctx inp0 area
+  mapM_ (\i -> runFrame ctx i area) [keyInp KeyEnter inp0, keyRepeatInp KeyEnter inp0, keyRepeatInp KeyEnter inp0]
+  assertEq failed "\n\n\n" =<< readIORef areaRef
+  c <- newContext
+  let buttons = column (button' "Go")
+  warmupFocused c inp0 buttons
+  assertEq failed [True, False] . map respClicked =<< mapM (\i -> evalUi c i buttons) [keyInp KeyEnter inp0, keyRepeatInp KeyEnter inp0]
+  f <- newContext
+  fieldRef <- newIORef "x"
+  let field = column (held fieldRef textInput')
+  warmupFocused f inp0 field
+  assertEq failed [True, False] . map (respSubmitted . fst) =<< mapM (\i -> evalUi f i field) [keyInp KeyEnter inp0, keyRepeatInp KeyEnter inp0]
+
+-- | Keys and mouse buttons read alike from an input; a window that loses
+-- the keyboard lets go of the keys and modifiers held.
+runKeyPressableTest :: Context -> IORef Int -> IO ()
+runKeyPressableTest _ failed = do
+  let down = applyMouseButton MouseMiddle True (applyKey KeyEnter True inp0)
+      up = applyMouseButton MouseMiddle False (applyKey KeyEnter False (clearEphemeral down))
+      queries i = [pressedIn KeyEnter i, pressedOnceIn KeyEnter i, releasedIn KeyEnter i, heldIn KeyEnter i, pressedIn MouseMiddle i, pressedOnceIn MouseMiddle i, releasedIn MouseMiddle i, heldIn MouseMiddle i]
+  assertEq failed [True, True, False, True, True, True, False, True] (queries down)
+  assertEq failed [False, False, False, True, False, False, False, True] (queries (clearEphemeral down))
+  assertEq failed [False, False, True, False, False, False, True, False] (queries up)
+  let blurred = releaseAllKeys (clearEphemeral (chordInp (ctrl <> key 's') inp0))
+  assertEq failed ([], [KeyChar 's'], noModifiers) (toList (inputKeysHeld blurred), toList (inputKeysReleased blurred), inputModifiers blurred)
 
 -- | Ctrl+C quits from its key as it did from its typed letter.
 runKeyHardQuitTest :: Context -> IORef Int -> IO ()

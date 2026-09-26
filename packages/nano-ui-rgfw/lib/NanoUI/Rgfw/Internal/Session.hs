@@ -64,7 +64,7 @@ import NanoUI.Backend
   , defaultWindowState
   , emptyInput
   , installWindowHost
-  , keyRepeats
+  , releaseAllKeys
   , keypadKey
   , modifiersFromBits
   , reportWindowState
@@ -493,8 +493,9 @@ data RgfwEvent
   | RgfwEvLeave -- ^ the pointer left the window
   | RgfwEvScroll !Float !Float
   | RgfwEvChar !Char -- ^ typed character
-  | RgfwEvKeyPress !Word32 !Word8 !Bool -- ^ key, modifiers, and whether an auto-repeat
+  | RgfwEvKeyPress !Word32 !Word8 -- ^ key and modifiers; an auto-repeat too
   | RgfwEvKeyRelease !Word32 !Word8
+  | RgfwEvFocusLost -- ^ the window lost the keyboard
 
 -- | Drain the RGFW queue, recording size and scale changes for the next sync.
 -- A key that types a character is reported by what it types in the current
@@ -540,9 +541,11 @@ decodeRgfwEvents scale = mapMaybe $ \case
   R.EventMouseMotion x y -> Just (RgfwEvMotion (fromIntegral x / scale) (fromIntegral y / scale))
   R.EventMouseButton btn down -> Just (RgfwEvButton btn down)
   R.EventMouseScroll dx dy -> Just (RgfwEvScroll dx dy)
-  R.EventOther t | t == R.rgfw_mouseLeave -> Just RgfwEvLeave
-  R.EventKeyPress k m -> Just (RgfwEvKeyPress k m False)
-  R.EventKeyRepeat k m -> Just (RgfwEvKeyPress k m True)
+  R.EventOther t
+    | t == R.rgfw_mouseLeave -> Just RgfwEvLeave
+    | t == R.rgfw_windowFocusOut -> Just RgfwEvFocusLost
+  R.EventKeyPress k m -> Just (RgfwEvKeyPress k m)
+  R.EventKeyRepeat k m -> Just (RgfwEvKeyPress k m)
   R.EventKeyRelease k m -> Just (RgfwEvKeyRelease k m)
   R.EventKeyChar ch | isPrint ch -> Just (RgfwEvChar ch)
   _ -> Nothing
@@ -561,10 +564,9 @@ applyRgfwEvent inp ev = case ev of
   RgfwEvLeave -> applyPointerLeave inp
   RgfwEvScroll dx dy -> inp {inputScroll = v2Add (inputScroll inp) (V2 dx dy)}
   RgfwEvChar c -> inp {inputChars = T.snoc (inputChars inp) c}
-  RgfwEvKeyPress k m repeated ->
-    let keyed = case mapRgfwKey k m of
-          Just key | keyRepeats key || not repeated -> applyKey key True inp
-          _ -> inp
-     in keyed {inputModifiers = modsFromRgfw m}
+  -- 'applyKey' tells an auto-repeat by the key being held already.
+  RgfwEvKeyPress k m ->
+    (maybe inp (\key -> applyKey key True inp) (mapRgfwKey k m)) {inputModifiers = modsFromRgfw m}
   RgfwEvKeyRelease k m ->
     (maybe inp (\key -> applyKey key False inp) (mapRgfwKey k m)) {inputModifiers = modsFromRgfw m}
+  RgfwEvFocusLost -> releaseAllKeys inp

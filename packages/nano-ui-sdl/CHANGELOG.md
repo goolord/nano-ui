@@ -70,7 +70,9 @@
 - Every key comes in as a `Key`, with its release and held state: F1 to F24,
   paging, Insert, Space, PrintScreen, Pause, the lock and menu keys, the
   keypad, and a typing key as the `KeyChar` it types in the current layout.
-  The GUI key is `modSuper`.
+  The GUI key is `modSuper`. Each auto-repeat of a held key is a press,
+  which `inputKeysNew` leaves out, and the window losing the keyboard lets
+  go of the keys held.
 - Input methods compose inside the text fields, with the candidate window by
   the caret. A widget of your own that takes typed text, such as a terminal,
   now gets the composition only as `inputComposition`;

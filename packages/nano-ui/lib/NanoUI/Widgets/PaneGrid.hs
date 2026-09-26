@@ -376,14 +376,14 @@ paneGrid cfg = do
   focusedNow <- focusedWidget
   when (pgFocusable cfg && focusedNow == wid) $ do
     nav <- useKeyNav wid
-    let ch = inputChars inp
+    let plain c = pressedOnceIn (KeyChar c) inp && inputModifiers inp == noModifiers
     forM_ [(knLeft, (-1, 0)), (knRight, (1, 0)), (knUp, (0, -1)), (knDown, (0, 1))] $
       \(k, dir) -> when (k nav) (moveFocus env focused dir)
     when (knLeft nav || knRight nav || knUp nav || knDown nav) $
       damageWidgetNow wid (DamageInflated 0)
-    when (T.any (== 'm') ch) $ maximizePane env focused
-    when (T.any (== 'x') ch) $ closePane env focused
-    when (inputKeysElem KeyEscape (inputKeys inp)) $ do
+    when (plain 'm') $ maximizePane env focused
+    when (plain 'x') $ closePane env focused
+    when (pressedOnceIn KeyEscape inp) $ do
       taken <- uiIO (overlayConsumesQuit ctx inp)
       unless taken $ do
         restorePane env

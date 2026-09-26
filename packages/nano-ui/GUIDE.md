@@ -224,7 +224,11 @@ around it. A backend shows the nearest shape the platform has.
 Keys arrive in `inputKeys`, `inputKeysReleased` and `inputKeysHeld`, and the
 text they type in `inputChars`. A key that types is a `KeyChar` of what it
 types unmodified, so Ctrl+S is `KeyChar 's'` with `modCtrl` set and types
-nothing. Bind a chord with `shortcut`. A chord is the modifiers `ctrl`,
+nothing. A key held down auto-repeats, and each repeat is a press in
+`inputKeys`; `inputKeysNew` has the presses that are not repeats.
+`pressedIn`, `pressedOnceIn`, `releasedIn` and `heldIn` read one key, or one
+mouse button, in an `Input`: `sdlAppShouldQuit = pressedOnceIn KeyEscape`.
+Bind a chord with `shortcut`. A chord is the modifiers `ctrl`,
 `shift`, `alt`, `super` and `cmdOrCtrl` (Command on macOS, else Ctrl) and a
 `key`, a character or a `Key`, put together with `<>`. These short names
 come from `NanoUI.Shortcut`, which `NanoUI` leaves out; import it where
@@ -242,8 +246,9 @@ A chord with no key, such as `ctrl <> shift` alone, is never pressed.
 `parseShortcut` reads a chord written as text, such as one from a settings
 file: `C-s`, `M-S-p`, `A-<Enter>`, `<F5>`.
 
-A shortcut fires once per press, for the first `shortcut` declared for the
-chord. It stays quiet behind a modal, inside `disabledWhen`, and for keys the
+A shortcut fires once per press, auto-repeats included, for the first
+`shortcut` declared for the chord; `shortcutOnce` and `keyPressedOnce` leave
+the repeats out, for a chord that toggles. It stays quiet behind a modal, inside `disabledWhen`, and for keys the
 focused widget uses, such as a text field's typing and Ctrl+A.
 `menuItemShortcut "Save" (ctrl <> key 's')` binds its chord only while its
 menu is open; for the closed menu, bind it with `shortcut` too, declared
@@ -486,8 +491,10 @@ wake-ups. The two backends in this repository,
 `NanoUI.Backend.Sdl` and `NanoUI.Backend.Rgfw`, are the worked examples.
 
 Fold keys in with `applyKey` (a typing key as the `KeyChar` it types
-unmodified, with its text in `inputChars` too) and input-method updates with
-`applyComposition`. After a frame, `textInputArea` from
+unmodified, with its text in `inputChars` too, and every auto-repeat as a
+press) and input-method updates with `applyComposition`. When the window
+loses the keyboard, `releaseAllKeys` lets go of the keys held, whose
+releases go elsewhere. After a frame, `textInputArea` from
 `NanoUI.Testing` says where the candidate window goes. Open the window from
 the `WindowSettings` with their title, size, mode, resizability and
 transparency. Before the first frame, install a `WindowHost` with

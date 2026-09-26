@@ -66,7 +66,7 @@ main = do
             , wsSize = Size 900 600
             , wsMode = if "hidden" `elem` drop 1 args then Hidden else Windowed
             }
-      , sdlAppShouldQuit = \inp -> inputKeysElem KeyEscape (inputKeys inp)
+      , sdlAppShouldQuit = pressedOnceIn KeyEscape
       }
     (idleUi scene frames started typedAt)
 

@@ -33,7 +33,6 @@ import Foreign.Marshal.Utils (maybePeek, with)
 import Foreign.Ptr (Ptr)
 import Foreign.Storable (Storable (..))
 import GHC.Records.Compat (getField)
-import SDL3.Sys.Bindgen.Runtime.CBool qualified as CBool
 import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
 import NanoUI (Rect (..), V2 (..), WidgetId (..), v2Add)
 import NanoUI.Backend
@@ -134,6 +133,9 @@ data SdlEvent
   -- ^ The input method's composition changed: its text, and where its caret
   -- or selection starts and how long that is ('applyComposition'). Empty
   -- text ends it.
+  | EvFocusLost
+  -- ^ The window lost the keyboard. The keys held go up elsewhere
+  -- ('releaseAllKeys'), and the composition ends.
   deriving (Eq, Show)
 
 -- | Drain every pending event, oldest first.
@@ -176,14 +178,14 @@ decodeEvent refreshTy p = do
       -- must be full or stale regions flash.
       Events.SDL_EVENT_WINDOW_EXPOSED -> pure (Just EvWindowRedraw)
       Events.SDL_EVENT_WINDOW_RESTORED -> pure (Just EvWindowRedraw)
-      Events.SDL_EVENT_KEY_DOWN -> keyDown <$> peek p.key
+      Events.SDL_EVENT_KEY_DOWN -> Just . keyDown <$> peek p.key
       Events.SDL_EVENT_KEY_UP -> Just . keyUp <$> peek p.key
       Events.SDL_EVENT_TEXT_INPUT -> textInput p
       Events.SDL_EVENT_TEXT_EDITING -> textEditing p
       -- SDL stops text input while the window is in the background, which
       -- drops the input method's composition without always saying so. End
       -- it here, or a field would go on showing it and giving it its keys.
-      Events.SDL_EVENT_WINDOW_FOCUS_LOST -> pure (Just (EvEditing "" 0 0))
+      Events.SDL_EVENT_WINDOW_FOCUS_LOST -> pure (Just EvFocusLost)
       Events.SDL_EVENT_MOUSE_MOTION -> do
         me <- peek p.motion
         Just . EvMouseMotion (v2 (getField @"x" me) (getField @"y" me)) <$> peekModifiers
@@ -203,15 +205,10 @@ decodeEvent refreshTy p = do
 v2 :: CFloat -> CFloat -> V2
 v2 x y = V2 (realToFrac x) (realToFrac y)
 
--- | A key press. A held key's auto-repeats are presses too, for the keys
--- that repeat ('keyRepeats').
-keyDown :: SDL_KeyboardEvent -> Maybe SdlEvent
-keyDown ke =
-  case sdlKey (keyCode ke) (keyMods ke) of
-    Just k
-      | keyRepeats k || not (CBool.toBool (getField @"repeat" ke)) -> Just (EvKey k mods)
-      | otherwise -> Nothing
-    Nothing -> Just (EvModifiers mods)
+-- | A key press. A held key's auto-repeats are presses too, which
+-- 'applyKey' tells from the first by the key being held already.
+keyDown :: SDL_KeyboardEvent -> SdlEvent
+keyDown ke = maybe (EvModifiers mods) (`EvKey` mods) (sdlKey (keyCode ke) (keyMods ke))
   where
     mods = modFromKeymod (keyMods ke)
 
@@ -342,6 +339,7 @@ applyEvent inp ev =
     EvScroll delta -> inp {inputScroll = v2Add (inputScroll inp) delta}
     EvDrop dropEv -> inp {inputDrops = appendDropEvent dropEv (inputDrops inp)}
     EvEditing txt start len -> applyComposition txt start len inp
+    EvFocusLost -> releaseAllKeys (applyComposition "" 0 0 inp)
     EvWindowRedraw -> inp {inputWindowRedraw = True}
     -- A wake asks for a frame, not a repaint: the session runs one, and its
     -- damage decides what is presented, if anything.
