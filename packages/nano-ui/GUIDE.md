@@ -261,6 +261,19 @@ tab <- button' "Report"
 when (respClickedWith MouseMiddle tab) closeReport
 ```
 
+`mouseArea` gives any part of a view a response of its own, as iced's
+`mouse_area` does: it is hovered while the pointer is on it or anything in
+it, and reports the buttons pressed and clicked there, except a click a
+widget inside takes for itself.
+
+```haskell
+(_, item) <- mouseArea (fillW . gap 6) $ do
+  label name
+  muted path
+when (respClickedWith MouseMiddle item) (openInNewTab path)
+when (respClickedWith MouseRight item) (showMenuFor path)
+```
+
 A closable tab closes on a middle click.
 
 ## Animation and background work

@@ -23,6 +23,7 @@ tests =
   , spec "pointer-button-sets" runButtonSetsTest
   , spec "pointer-held-ownership" runHeldOwnershipTest
   , spec "pointer-mouse-listeners" runMouseListenersTest
+  , spec "pointer-mouse-area" runMouseAreaTest
   ]
 
 win :: Input
@@ -207,3 +208,39 @@ runMouseListenersTest ctx failed = do
   let covered = listen <* modal True "Cover" (label "on top")
   _ <- warmup2 ctx win covered
   assertEq failed [(False, False, False)] =<< frames ctx covered [back]
+
+-- | A mouse area reports hover and every button over it and all inside it: a
+-- middle click or a right press on its label is the area's, and so is a left
+-- click beside its button, while a click on the button is the button's. What
+-- the area reveals while hovered stays revealed with the pointer on it, even
+-- where a pinned node elsewhere turns covering on.
+runMouseAreaTest :: Context -> IORef Int -> IO ()
+runMouseAreaTest ctx failed = do
+  hoveredRef <- newIORef False
+  let ui = columnWith tight $ do
+        shown <- uiIO (readIORef hoveredRef)
+        ((l, b), area) <- mouseArea (fixedWH 300 80) $ do
+          l <- label' "Name"
+          b <- if shown then Just <$> button' "Delete" else pure Nothing
+          pure (l, b)
+        uiIO (writeIORef hoveredRef (respHovered area))
+        _ <- buttonWith' (pinAt 320 0 . fixedWH 40 20) "pinned"
+        pure (l, b, area)
+      at p = win {inputMousePos = p}
+  (l0, _, area0) <- warmup2 ctx win ui
+  [(_, _, areaMid)] <- frames ctx ui [snd (clickPairWith MouseMiddle win (centerOf l0))]
+  assert failed (respClickedWith MouseMiddle areaMid && not (respClicked areaMid))
+  [(_, _, areaRight)] <- frames ctx ui [fst (clickPairWith MouseRight win (centerOf l0))]
+  assert failed (respHeldWith MouseRight areaRight && respHovered areaRight)
+  let beside = V2 250 60
+  (_, _, areaLeft) <- runClick ctx (at beside) ui beside
+  assert failed (respClicked areaLeft && respClickedWith MouseLeft areaLeft)
+  -- Hovering reveals the button, which stays while the pointer is on it.
+  (_, _, _) <- warmup2 ctx (at (centerOf l0)) ui
+  (_, b1, _) <- evalUi ctx (at (centerOf l0)) ui
+  assertJust failed b1 $ \b -> do
+    rs <- frames ctx ui (replicate 4 (at (centerOf b)))
+    assert failed (all (\(_, b', a) -> respHovered a && maybe False respHovered b') rs)
+    (_, bClicked, aClicked) <- runClick ctx (at (centerOf b)) ui (centerOf b)
+    assert failed (maybe False respClicked bClicked && not (respClicked aClicked))
+  assert failed (rectContains (respRect area0) beside)

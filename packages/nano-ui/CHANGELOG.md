@@ -306,6 +306,11 @@
   `mousePressed`, `mouseReleased` and `mouseHeld` hear a button anywhere on
   the view's layer, quiet behind a modal and in `disabledWhen`, as
   `keyPressed` is.
+- `mouseArea`, iced's `mouse_area`: a column around part of a view with a
+  `Response` of its own, hovered while the pointer is on it or anything in
+  it, and held or clicked with any button (`respHeldWith`,
+  `respClickedWith`), but for a click a widget inside takes. Nothing inside
+  it covers it, so what it shows while hovered stays shown.
 - The pointer leaving the window moves it off every widget
   (`applyPointerLeave`, on SDL's window-leave and RGFW's mouse-leave
   events), so nothing stays hovered.

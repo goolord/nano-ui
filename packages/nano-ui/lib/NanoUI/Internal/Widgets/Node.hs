@@ -21,6 +21,7 @@ module NanoUI.Internal.Widgets.Node
   , currentParent
   , container
   , containerResponse
+  , mouseArea
   , inertContainer
   , withContainerNode
   , withWidgetChildren
@@ -45,9 +46,9 @@ import NanoUI.Internal.Context
 import NanoUI.Internal.Id (IdContext (..), WidgetId (..), enterScope, hashWidgetId, mix64, scopeTag)
 import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena
-import NanoUI.Internal.Monad (Ui, (<&&>), askContext, askFrameInput, askInput, localInput, nextId, uiIO, withContext, withIdFrame)
+import NanoUI.Internal.Monad (Ui, (<&&>), askContext, askDefaultLayout, askFrameInput, askInput, localInput, nextId, uiIO, withContext, withIdFrame)
 import NanoUI.Internal.WidgetText (containerFlagInert, packTextNodeStyle)
-import NanoUI.Internal.Style (Layout (..))
+import NanoUI.Internal.Style (Layout (..), tight)
 import NanoUI.Internal.Types (Rect (..), rectContains, rectH, rectHit, rectUnion, rectW)
 import NanoUI.Internal.Frame.Hit (findNodeByWidgetId, nodeInteractionHit, passesPointer, withWidgetNode)
 
@@ -218,6 +219,27 @@ containerResponse nt layout child = do
   r <- container nt layout (tagContainer wid >> child)
   resp <- withContext (\ctx -> resolveInteraction ctx inp wid)
   pure (r, resp)
+
+-- | A column without padding, laid out by the modifier, that reports the
+-- pointer over it and everything in it, as iced's @mouse_area@ does: whether
+-- it is hovered ('respHovered'), which buttons went down on it and are held
+-- ('respHeldWith') and which clicked it ('respClickedWith', and
+-- 'respClicked' for the left one). A widget inside keeps what it takes for
+-- itself, so a click on a button inside is the button's; any other button,
+-- and a click beside the widgets, is the area's. Nothing inside covers the
+-- area, so what the area shows while hovered stays shown while the pointer
+-- is on it:
+--
+-- > (hovered, setHovered) <- useFlag False
+-- > (_, item) <- mouseArea (fillW . gap 6) $ do
+-- >   label name
+-- >   when hovered (void (button "Delete"))
+-- > setHovered (respHovered item)
+-- > when (respClickedWith MouseMiddle item) (openInNewTab name)
+mouseArea :: Ui :> es => (Layout -> Layout) -> Eff es a -> Eff es (a, Response)
+mouseArea f body = do
+  base <- askDefaultLayout
+  containerResponse NodeContainer (f (tight base)) body
 
 -- | Push container node @idx@ (already added under the current parent), run
 -- @child@ inside it, then pop. @scoped@ also runs the children in a fresh id

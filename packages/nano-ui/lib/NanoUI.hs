@@ -155,6 +155,7 @@ module NanoUI
   , flex
   , stack
   , stackWith
+  , mouseArea
 
     -- * Text
   , label
