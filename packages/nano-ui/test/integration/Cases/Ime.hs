@@ -26,6 +26,8 @@ tests =
   , pixelSpec "ime-damage" runImeDamageTest
   , pixelSpec "ime-repeated-pass" runImeRepeatedPassTest
   , pixelSpec "ime-shortcuts" runImeShortcutsTest
+  , pixelSpec "ime-custom-widget" runImeCustomWidgetTest
+  , pixelSpec "ime-purpose" runImePurposeTest
   ]
 
 inp :: Input
@@ -105,7 +107,7 @@ runImeCommitTest ctx failed = do
   (_, u) <- field c "" 0 (textInputConfigured' defaultTextInputConfig {ticPlaceholder = "Name"})
   _ <- runFrame c (composing "かな" 1 inp) u
   shown c failed ["かな"] ["Name"]
-  assertJustM failed (textInputArea c) $ \(TextInputArea (Rect _ _ aw _) cursor) -> assertEq failed (aw, cursor) (32, 16)
+  assertJustM failed (textInputArea c) $ \(TextInputArea (Rect _ _ aw _) cursor _) -> assertEq failed (aw, cursor) (32, 16)
   assertEq failed "仮名" . snd =<< evalUi c (commit "仮名" inp) u
 
 -- | Composing, the keys are the input method's: none edits, submits or moves
@@ -170,7 +172,7 @@ runImeAreaPaintTest ctx failed = do
         (quads, spans) <- paint step
         assertJust failed (spanRectOf line spans) $ \(Rect sx sy _ sh) -> do
           let x0 = sx + at * cell
-          assertJustM failed (textInputArea ctx) $ \(TextInputArea (Rect ax ay aw ah) cursor) ->
+          assertJustM failed (textInputArea ctx) $ \(TextInputArea (Rect ax ay aw ah) cursor _) ->
             assertEq failed (ax, ay, aw, ah, cursor) (x0, sy, len * cell, cell, c * cell)
           assert failed (or [near x x0 && near w (len * cell) && h <= 2 && y > sy + sh / 2 && y < sy + sh + 2 | (Rect x y w h, _) <- quads])
           -- The input method's caret, not the field's own where it starts.
@@ -179,7 +181,7 @@ runImeAreaPaintTest ctx failed = do
   frames ctx ui (replicate 2 (keyInp KeyLeft inp))
   spans <- collectTextSpans ctx
   assertJust failed (spanRectOf "abcd" spans) $ \(Rect sx sy _ sh) -> do
-    assertJustM failed (textInputArea ctx) $ \(TextInputArea r cursor) -> assertEq failed (r, cursor) (Rect (sx + 2 * cell) sy 1 cell, 0)
+    assertJustM failed (textInputArea ctx) $ \(TextInputArea r cursor _) -> assertEq failed (r, cursor) (Rect (sx + 2 * cell) sy 1 cell, 0)
     check "abxyzcd" 2 3 1 (composing "xyz" 1 inp)
     -- A selection in it is highlighted, with no caret.
     (quads, _) <- paint (applyComposition "xyz" 0 2 inp)
@@ -202,7 +204,7 @@ runImeScrollTest ctx failed = do
   (resp, _) <- evalUi ctx (composing "0123456789" 10 inp) ui
   store <- getStore ctx
   let Rect fx _ fw _ = respRect resp
-      caretIn ok = assertJustM failed (textInputArea ctx) $ \(TextInputArea (Rect ax _ _ _) cursor) -> assert failed (ok (ax + cursor))
+      caretIn ok = assertJustM failed (textInputArea ctx) $ \(TextInputArea (Rect ax _ _ _) cursor _) -> assert failed (ok (ax + cursor))
   assertGt failed (IM.findWithDefault 0 (slotKey SlotTextInputScroll (intKey (respId resp))) (storeFloat store)) 0
   caretIn (\x -> x >= fx && x <= fx + fw)
   _ <- runFrame ctx (composing "0123456789" 0 inp) ui
@@ -221,7 +223,7 @@ runImeBidiTest base failed = do
   assertJust failed (spanRectOf line spans) $ \(Rect sx _ _ _) ->
     forM_ [(0, 20), (2, 0)] $ \(c, cursor) -> do
       _ <- runFrame ctx (composing "\x05D0\x05D1" c inp) ui
-      assertJustM failed (textInputArea ctx) $ \(TextInputArea (Rect ax _ aw _) cur) ->
+      assertJustM failed (textInputArea ctx) $ \(TextInputArea (Rect ax _ aw _) cur _) ->
         assertEq failed (ax, aw, cur) (sx + 20, 20, cursor)
 
 -- | It shows only in the field focused when it last changed: moving the
@@ -313,3 +315,45 @@ runImeShortcutsTest ctx failed = do
   assertEq failed ("ab漢字かなx", []) =<< valueFired (keyInp KeyLeft (commit "x" inp))
   assertEq failed ("ab漢字かなyx", []) =<< valueFired inp {inputChars = "y"}
   forM_ [ctrl <> key 's', ctrl <> key 'd'] $ \c -> assertEq failed ("ab漢字かなyx", [shortcutLabel c]) =<< valueFired (chordInp c inp)
+
+-- | A widget of the app's own takes text with 'useInputMethod' while it has
+-- the keyboard: the composition is its to draw, its keys the input
+-- method's, and the input method's area its caret. Without the keyboard it
+-- asks nothing, and gets nothing.
+runImeCustomWidgetTest :: Context -> IORef Int -> IO ()
+runImeCustomWidgetTest ctx failed = do
+  seen <- newIORef ([] :: [T.Text])
+  let caret = Rect 40 20 2 16
+      ui = column $ do
+        wid <- nextId
+        preedit <- useInputMethod wid InputNormal caret
+        (_, ()) <- customWidgetWithId wid defaultCustomWidgetSpec {widgetFocusable = True, widgetKeys = KeysAll, widgetLayout = fixedWH 100 40 defaultLayout}
+        whenM (shortcut (key KeyEscape)) (uiIO (modifyIORef' seen ("escape" :)))
+        pure preedit
+  warmup ctx inp ui
+  assertEq failed Nothing =<< evalUi ctx (composing "か" 1 inp) ui
+  assertEq failed Nothing =<< textInputArea ctx
+  _ <- runFrame ctx (tabInp inp) ui
+  assertEq failed Nothing =<< evalUi ctx inp ui
+  assertEq failed (Just (TextInputArea caret 0 InputNormal)) =<< textInputArea ctx
+  assertEq failed (Just (Composition "か" 1 0)) =<< evalUi ctx (composing "か" 1 inp) ui
+  _ <- runFrame ctx (keyInp KeyEscape (composing "か" 1 inp)) ui
+  assertEq failed [] =<< readIORef seen
+  assertEq failed Nothing =<< evalUi ctx (commit "" inp) ui
+
+-- | A text field asks for what it takes: a password field for a secret, a
+-- numeric one for a number, and focus moved onto a field by Tab asks for it
+-- in that frame already. A selectable label or a button takes no text.
+runImePurposeTest :: Context -> IORef Int -> IO ()
+runImePurposeTest ctx failed = do
+  let ui = column $ do
+        _ <- button "Before"
+        _ <- textInputConfigured defaultTextInputConfig {ticPassword = True} "secret"
+        _ <- numericInput 3
+        _ <- textArea "notes"
+        selectableText "label"
+  warmup2 ctx inp ui
+  let purposeAfter i = runFrame ctx i ui >> fmap textInputAreaPurpose <$> textInputArea ctx
+  assertEq failed [Nothing, Just InputSecure, Just InputNumeric, Just InputNormal, Nothing]
+    =<< mapM purposeAfter (replicate 5 (tabInp inp))
+  assertEq failed Nothing =<< purposeAfter inp

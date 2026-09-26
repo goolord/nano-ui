@@ -62,6 +62,7 @@ module NanoUI.Input
     -- * Input methods
   , Composition (..)
   , applyComposition
+  , InputPurpose (..)
   ) where
 
 import NanoUI.Internal.Input

@@ -18,8 +18,8 @@ import Data.Text qualified as T
 import Data.Text.Read qualified as TR
 import Effectful (Eff, type (:>))
 import GHC.Clock (getMonotonicTime)
-import NanoUI.Internal.Context (getStore, intKey, registerFocusable, requestWakeAt, modifyStore)
-import NanoUI.Internal.Input (Key (..), MouseButton (..), Pressable (..), buttonHeld, buttonPressed, inputKeys, inputKeysElem, inputModifiers, inputMousePos, modShift)
+import NanoUI.Internal.Context (getStore, intKey, registerFocusable, requestInputMethod, requestWakeAt, modifyStore)
+import NanoUI.Internal.Input (InputPurpose (..), Key (..), MouseButton (..), Pressable (..), buttonHeld, buttonPressed, inputKeys, inputKeysElem, inputModifiers, inputMousePos, modShift)
 import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Monad (Ui, askInput, freshWidget, uiIO)
 import NanoUI.Internal.Store (Slot (..), deleteSlot, fieldDouble, fieldInt, fieldText, findSlot, insertSlot, lookupSlot, slotKey)
@@ -94,6 +94,8 @@ numericInputConfigured' cfg value = do
   uiIO $ registerFocusable ctx wid
   store <- uiIO (getStore ctx)
   isFocus <- keyboardFocused wid
+  -- A hexadecimal number takes letters too.
+  when isFocus $ uiIO (requestInputMethod ctx wid Nothing (if nicHex cfg then InputNormal else InputNumeric))
   let
     key = intKey wid
     given = clampNumber cfg value

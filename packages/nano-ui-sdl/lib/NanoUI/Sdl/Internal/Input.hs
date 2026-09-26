@@ -20,6 +20,7 @@ import Control.Monad (mfilter, void, when)
 import Data.Bits ((.&.))
 import Data.Char (chr, isPrint, toLower)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.ByteString qualified as BS
 import qualified Data.Text as T
 import Data.Text (Text)
 import qualified Data.Text.Foreign as TF
@@ -27,7 +28,7 @@ import Data.Word (Word32)
 import Foreign.C.Types (CFloat, CUInt)
 import Data.Foldable (for_)
 import Data.Int (Int32)
-import Data.Maybe (fromMaybe, isJust)
+import Data.Maybe (fromMaybe, isJust, isNothing)
 import Foreign.Marshal.Alloc (alloca)
 import Foreign.Marshal.Utils (maybePeek, with)
 import Foreign.Ptr (Ptr)
@@ -36,7 +37,7 @@ import GHC.Records.Compat (getField)
 import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
 import NanoUI (Rect (..), V2 (..), WidgetId (..), v2Add)
 import NanoUI.Backend
-import NanoUI.Testing (Context, TextInputArea (..), getFocusId, textInputArea)
+import NanoUI.Testing (Context)
 import NanoUI.Sdl.Internal.Display (refreshEventType, takeRefreshEvent)
 import SDL3.Sys.Bindgen.Events
   ( SDL_Event (..)
@@ -101,7 +102,10 @@ import SDL3.Sys.Bindgen.Keycode
 import SDL3.Sys.Bindgen.Rect (SDL_Rect (..))
 import SDL3.Sys.Bindgen.Stdinc (Uint32 (..))
 import SDL3.Sys.Bindgen.Video (SDL_Window)
-import SDL3.Sys.Keyboard (getModState, setTextInputAreaSafe, startTextInputSafe, stopTextInputSafe)
+import SDL3.Sys.Bindgen.Keyboard (SDL_TextInputType (..), sDL_PROP_TEXTINPUT_TYPE_NUMBER)
+import SDL3.Sys.Bindgen.Keyboard qualified as Keyboard
+import SDL3.Sys.Keyboard (getModState, setTextInputAreaSafe, startTextInputWithPropertiesSafe, stopTextInputSafe)
+import SDL3.Sys.Properties (createPropertiesSafe, destroyPropertiesSafe, setNumberPropertySafe)
 
 -- | Copied SDL event data. Pointer positions use SDL window coordinates until
 -- display synchronisation converts them to nano-ui's logical coordinates.
@@ -354,40 +358,61 @@ isButtonEdge = \case
   EvMouseButton {} -> True
   _ -> False
 
--- | What SDL's text input last heard: the widget that had the keyboard
--- focus, and the text input area, in window coordinates.
-newtype TextInputSync = TextInputSync (IORef (WidgetId, Maybe (SDL_Rect, Int32)))
+-- | What SDL's text input last heard: the widget that had the keyboard, what
+-- text input runs for ('Nothing' while it is stopped), and the text input
+-- area, in window coordinates.
+newtype TextInputSync = TextInputSync (IORef (WidgetId, Maybe InputPurpose, Maybe (SDL_Rect, Int32)))
 
--- | A sync that has told SDL nothing yet.
+-- | A sync that has told SDL nothing yet, with text input stopped.
 newTextInputSync :: IO TextInputSync
-newTextInputSync = TextInputSync <$> newIORef (WidgetId 0, Nothing)
+newTextInputSync = TextInputSync <$> newIORef (WidgetId 0, Nothing, Nothing)
 
 -- | Bring SDL's text input up to date after a frame drawn with @inp@ in
--- window @win@, whose window coordinates are @zoom@ layout units: hand the
--- input method the focused field's 'TextInputArea', so its candidate window
--- sits by the caret, and when the focus moved while it was composing,
--- restart text input, which drops the composition rather than letting it
--- carry over into the next field. Text input itself stays on while no field
--- has the focus: views read typed text outside text fields too. Says whether
--- it restarted text input. Every frame the backend draws calls it.
+-- window @win@, whose window coordinates are @zoom@ layout units. Text input
+-- runs while a widget takes text ('textInputArea'), for what it takes
+-- ('InputPurpose'), and stops while none does, so no input method composes
+-- where nothing shows it and no on-screen keyboard stays up; it restarts
+-- when the purpose changes, and when the focus moved while the input method
+-- was composing, which drops the composition rather than letting it carry
+-- over into the next widget. The input method gets the widget's area, so its
+-- candidate window sits by the caret. Says whether it started text input,
+-- afresh or again. Every frame the backend draws calls it.
 syncTextInput :: TextInputSync -> Ptr SDL_Window -> Float -> Context -> Input -> IO Bool
 syncTextInput (TextInputSync ref) win zoom ctx inp = do
   focus <- getFocusId ctx
   area <- textInputArea ctx
-  (lastFocus, lastArea) <- readIORef ref
-  let restart = focus /= lastFocus && isJust (inputComposition inp)
-  when restart $ do
-    void (stopTextInputSafe win)
-    void (startTextInputSafe win)
-  let native = toWindow <$> area
+  (lastFocus, running, lastArea) <- readIORef ref
+  let purpose = textInputAreaPurpose <$> area
+      moved = focus /= lastFocus && isJust (inputComposition inp)
+      restart = isJust running && isJust purpose && (moved || purpose /= running)
+      started = isJust purpose && (isNothing running || restart)
+      native = toWindow <$> area
+  when (isJust running && (isNothing purpose || restart)) $ void (stopTextInputSafe win)
+  when started $ for_ purpose (startTextInput win)
   for_ native $ \(r, cursor) ->
-    when (native /= lastArea) $
+    when (started || native /= lastArea) $
       -- A safe call: the input method may take a round trip to answer.
       with r $ \rp -> void (setTextInputAreaSafe win (PtrConst.unsafeFromPtr rp) cursor)
-  writeIORef ref (focus, maybe lastArea Just native)
-  pure restart
+  writeIORef ref (focus, purpose, native)
+  pure started
   where
-    toWindow (TextInputArea (Rect x y w h) cursor) =
+    toWindow TextInputArea {textInputAreaRect = Rect x y w h, textInputAreaCursor = cursor} =
       let at :: Integral b => Float -> b
           at v = round (v * zoom)
        in (SDL_Rect (at x) (at y) (max 1 (at w)) (max 1 (at h)), at cursor)
+
+-- | Start text input for what a widget takes, which an on-screen keyboard
+-- shows the keys for: a password's input method hides what it types, and a
+-- number's keyboard has digits.
+startTextInput :: Ptr SDL_Window -> InputPurpose -> IO ()
+startTextInput win purpose = do
+  props <- createPropertiesSafe
+  _ <- BS.useAsCString sDL_PROP_TEXTINPUT_TYPE_NUMBER $ \name ->
+    setNumberPropertySafe props (PtrConst.unsafeFromPtr name) (fromIntegral textType)
+  _ <- startTextInputWithPropertiesSafe win props
+  destroyPropertiesSafe props
+  where
+    SDL_TextInputType textType = case purpose of
+      InputNormal -> Keyboard.SDL_TEXTINPUT_TYPE_TEXT
+      InputSecure -> Keyboard.SDL_TEXTINPUT_TYPE_TEXT_PASSWORD_HIDDEN
+      InputNumeric -> Keyboard.SDL_TEXTINPUT_TYPE_NUMBER

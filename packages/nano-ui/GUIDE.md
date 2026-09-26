@@ -267,7 +267,13 @@ first.
 Text fields and text areas work with input methods by themselves: the
 focused field draws the composition (`inputComposition`) at its caret and
 changes its value only on commit. Meanwhile the frame drops the keys, so no
-shortcut fires.
+shortcut fires. A widget of your own that takes typed text, such as a
+terminal, asks for the input method with `useInputMethod` every frame it has
+the keyboard, giving its caret and what it takes (`InputNormal`,
+`InputSecure`, `InputNumeric`), and draws the composition it answers. The
+input method puts its candidate window by the caret, and a backend such as
+SDL takes text only while some widget asks, so a view that reads
+`inputChars` outside a text field asks too.
 
 Mouse buttons come as a `MouseButton`: `MouseLeft`, `MouseRight`,
 `MouseMiddle`, the side buttons `MouseBack` and `MouseForward`, and
@@ -501,12 +507,10 @@ wake-ups. The two backends in this repository,
 
 Fold keys in with `applyKey` (a typing key as the `KeyChar` it types
 unmodified, with its text in `inputChars` too, and every auto-repeat as a
-press) and input-method updates with `applyComposition`. When the window
-loses the keyboard, `releaseAllKeys` lets go of the keys held, whose
-releases go elsewhere. `runSessionLoop` batches events into frames so that
-a frame's text comes before its one command key; a loop of your own should
-do the same. After a frame, `textInputArea` from
-`NanoUI.Testing` says where the candidate window goes. Open the window from
+press) and input-method updates with `applyComposition`. After a frame,
+`textInputArea` says whether a widget takes text, where the candidate window
+goes and what the widget takes: take text input while it is there, for its
+`InputPurpose`, and stop it while it is not. Open the window from
 the `WindowSettings` with their title, size, mode, resizability and
 transparency. Before the first frame, install a `WindowHost` with
 `installWindowHost`, which applies the rest of the settings through it; build

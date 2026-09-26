@@ -232,6 +232,9 @@ editTextField wid mode initial unfocusedText = do
         . deleteSlot fieldInt pulseKey
         . insertDyn modeKey mode
   isFocus <- keyboardFocused wid
+  -- A password's input method neither shows nor learns what it types.
+  when (isFocus && modeEditable mode) $
+    uiIO (requestInputMethod ctx wid Nothing (if modeCopyable mode then InputNormal else InputSecure))
   mEdited <- if isFocus then uiIO (editTextInput ctx mode inp store key s0) else pure Nothing
   let s1 = case mEdited of
         Just ed -> editorTextState ed

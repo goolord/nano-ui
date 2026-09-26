@@ -51,6 +51,7 @@ module NanoUI.Internal.Context.Types
   , FocusKind (..)
   , KeyClaim (..)
   , drawingKeyClaim
+  , InputMethodRequest (..)
   , initialInteractionState
   , CustomMeasureFn
   , CustomDrawContext (..)
@@ -86,7 +87,7 @@ import NanoUI.Internal.Draw.Types (DrawArena, DrawOp, DrawingBuild)
 import NanoUI.Internal.Font (CustomMeasureFn, FontMetrics, WrapResult)
 import NanoUI.Internal.Frame.SpanArena (SpanArena)
 import NanoUI.Internal.Id (IdContext, WidgetId, hashWidgetId)
-import NanoUI.Internal.Input (Composition, MouseButton, UiCursorKind)
+import NanoUI.Internal.Input (Composition, InputPurpose, MouseButton, UiCursorKind)
 import NanoUI.Internal.Layout.Arena (DirTag, LayoutCache, NodeArena)
 import NanoUI.Internal.Store (WidgetStore)
 import NanoUI.Internal.Style (Appearance, FontStyle, FontVariant, FontWeight, Layout, Padding, Theme)
@@ -684,6 +685,16 @@ data FocusKind
     FocusComposing
   deriving (Eq, Show)
 
+-- | A widget taking text from the input method this frame: the widget, its
+-- caret in window coordinates ('Nothing' for a text field, whose caret the
+-- frame works out from its node), and what it takes.
+data InputMethodRequest = InputMethodRequest
+  { imrWidget :: !WidgetId
+  , imrCaret :: !(Maybe Rect)
+  , imrPurpose :: !InputPurpose
+  }
+  deriving (Eq, Show)
+
 -- | Which keys a focused control acts on itself, so that shortcuts and the
 -- key listeners ('NanoUI.keyPressed') leave them to it. A control takes
 -- Enter, Space and the arrows only alone or with Shift
@@ -762,6 +773,12 @@ data Context = Context
   -- frame moves focus there after layout
   -- ('NanoUI.Internal.Frame.Input.finalizeFocusRequest').
   , ctxFocusRequest :: IORef (Maybe WidgetId)
+  -- | What the focused widget asked of the input method in the view last
+  -- run ('NanoUI.Internal.Context.requestInputMethod'), which each build
+  -- starts without. The frame after gives the composition to that widget
+  -- ('NanoUI.Internal.Frame.TextInput.claimComposition'), and a backend
+  -- reads where it takes text from it ('NanoUI.Internal.Frame.TextArea.textInputArea').
+  , ctxInputMethod :: !(IORef (Maybe InputMethodRequest))
   , ctxStore :: IORef WidgetStore
   , ctxDamageState :: IORef DamageState
   , ctxOverlayState :: IORef OverlayState

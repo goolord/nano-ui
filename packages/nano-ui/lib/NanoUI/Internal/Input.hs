@@ -65,6 +65,7 @@ module NanoUI.Internal.Input
   , takeFrame
   , Composition (..)
   , applyComposition
+  , InputPurpose (..)
   ) where
 
 import Data.Bits (Bits, clearBit, countTrailingZeros, setBit, testBit, zeroBits, (.&.), (.|.))
@@ -781,3 +782,10 @@ applyComposition txt start len inp
        in inp {inputComposition = Just (Composition txt cursor (clamp0 (n - cursor) len))}
   where
     clamp0 hi v = max 0 (min hi v)
+
+-- | What a widget taking text asks the input method for, as iced's
+-- @input_method::Purpose@: ordinary text, a secret such as a password,
+-- which the input method should neither show nor learn, or a number. An
+-- on-screen keyboard shows the keys for it.
+data InputPurpose = InputNormal | InputSecure | InputNumeric
+  deriving (Eq, Show, Enum, Bounded)

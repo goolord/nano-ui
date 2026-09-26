@@ -8,6 +8,7 @@ module NanoUI.Internal.Widgets.Behavior
   , useReorder
   , useKeyNav
   , keyboardFocused
+  , useInputMethod
   , keyActivated
   , KeyNav (..)
   , navStep
@@ -135,6 +136,32 @@ keyboardFocused wid
       pure (focus == wid)
         <&&> uiIO (not <$> isDisabled ctx wid)
         <&&> uiIO (not <$> pointerBlockedByModal ctx)
+
+-- | Take text from the input method (IME) for the widget with this id, as
+-- iced's @request_input_method@ does: the widget that has the keyboard asks
+-- every frame it takes text, with its caret in window coordinates and what
+-- it takes, as the text fields ask for themselves. While the input method
+-- composes for it, this answers the 'Composition', which the widget draws at
+-- its caret, and the frame drops the keys, which are the input method's;
+-- the text it commits arrives as typed text ('inputChars'). The backend
+-- puts the input method's candidate window by the caret, and takes text
+-- input at all only while a widget asks: a widget of its own that reads
+-- 'inputChars', such as a terminal, asks here. A widget without the
+-- keyboard, or disabled, or behind a modal, asks nothing and gets
+-- 'Nothing'.
+--
+-- > wid <- nextId
+-- > Rect x y _ _ <- fromMaybe (Rect 0 0 0 0) <$> lastRect wid
+-- > preedit <- useInputMethod wid InputNormal (Rect (x + caretX) y 1 lineH)
+-- > customWidgetWithId wid spec {widgetFocusable = True, widgetKeys = KeysAll}
+useInputMethod :: Ui :> es => WidgetId -> InputPurpose -> Rect -> Eff es (Maybe Composition)
+useInputMethod wid purpose caret = do
+  focused <- keyboardFocused wid
+  if not focused
+    then pure Nothing
+    else withContext $ \ctx -> do
+      requestInputMethod ctx wid (Just caret) purpose
+      fieldComposition ctx wid
 
 -- | Arrow / Enter / Space while @wid@ is focused and eligible for input, each
 -- alone or with Shift ('shiftAtMost'): with Ctrl, Alt or Super it is a

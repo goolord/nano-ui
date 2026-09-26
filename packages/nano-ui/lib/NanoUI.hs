@@ -855,7 +855,9 @@ module NanoUI
     -- 'Composition' at its caret and the keys go to the input method: the
     -- frame drops the keys pressed, released and held ('inputKeys',
     -- 'inputKeysReleased', 'inputKeysHeld') until the text is committed or
-    -- cancelled, so no shortcut fires on them. 'pressedIn', 'releasedIn'
+    -- cancelled, so no shortcut fires on them. A widget of the app's own
+    -- that takes text asks for the input method with 'useInputMethod', and
+    -- draws the composition it answers. 'pressedIn', 'releasedIn'
     -- and 'heldIn' ask about one key or mouse button in it, as it stands,
     -- and 'pressedOnceIn' about a press that is not a held key's
     -- auto-repeat:
@@ -869,6 +871,8 @@ module NanoUI
   , foldInputKeys
   , takeEscape
   , Composition (..)
+  , InputPurpose (..)
+  , useInputMethod
 
     -- * Mouse buttons
 
@@ -1028,6 +1032,7 @@ import NanoUI.Svg
 import NanoUI.Internal.Types
 import NanoUI.Internal.WidgetText
 import NanoUI.Internal.Widgets.Animate
+import NanoUI.Internal.Widgets.Behavior (useInputMethod)
 import NanoUI.Internal.Widgets.Button
 import NanoUI.Internal.Widgets.Caption
 import NanoUI.Internal.Widgets.Checkbox

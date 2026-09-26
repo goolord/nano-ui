@@ -31,6 +31,7 @@ module NanoUI.Internal.Context
   , FocusKind (..)
   , KeyClaim (..)
   , drawingKeyClaim
+  , InputMethodRequest (..)
   , intKey
   , DamageRequest (..)
   , CustomMeasureFn
@@ -84,6 +85,8 @@ module NanoUI.Internal.Context
   , getHotId
   , registerFocusable
   , getFocusables
+  , requestInputMethod
+  , fieldComposition
   , AnimationState (..)
   , FrameMsg (..)
   , decodeMessages
@@ -146,11 +149,12 @@ import NanoUI.Internal.Draw (newDrawArena)
 import NanoUI.Internal.Draw qualified as Draw
 import NanoUI.Internal.Font (FontMetrics, WrapResult (..), fmLineHeight, measureTextIO, monospaceMetrics, scaleFontMetrics, wrapTextIO)
 import NanoUI.Internal.Frame.SpanArena (newSpanArena)
-import NanoUI.Internal.Id (WidgetId (..), initialIdContext)
+import NanoUI.Internal.Id (WidgetId (..), hashWidgetId, initialIdContext)
+import NanoUI.Internal.Input (Composition, InputPurpose)
 import NanoUI.Internal.Layout.Arena (getArenaScope, newNodeArena)
 import NanoUI.Internal.Store
 import NanoUI.Internal.Style (Appearance (..), FontStyle, FontVariant (..), FontWeight, Theme, defaultTheme)
-import NanoUI.Internal.Types (ImageId)
+import NanoUI.Internal.Types (ImageId, Rect)
 
 -- | Register tightly packed RGBA8 pixels under an image id. Width and height
 -- are positive pixel counts. Returns 'False' for invalid data or atlas limits;
@@ -528,6 +532,7 @@ newContext = do
   ctxFocusId <- newIORef (WidgetId 0)
   ctxFocusVisible <- newIORef False
   ctxFocusRequest <- newIORef Nothing
+  ctxInputMethod <- newIORef Nothing
   ctxStore <- newIORef emptyWidgetStore
   ctxDamageState <- newIORef initialDamageState
   ctxOverlayState <- newIORef initialOverlayState
@@ -627,6 +632,26 @@ registerFocusable ctx wid = do
         else pure arr
     writePrimArray arr' idx wid
     writeIORef (ctxFocusablesCount ctx) (idx + 1)
+
+-- | Take text from the input method this frame for @wid@, which has the
+-- keyboard: its caret in window coordinates ('Nothing' for a text field,
+-- whose caret the frame works out) and what it takes. The frame after gives
+-- @wid@ the input method's composition ('fieldComposition'), and a backend
+-- reads where it takes text ('NanoUI.Internal.Frame.TextArea.textInputArea').
+-- A build that asks for none leaves the input method off. The last request
+-- of a build wins.
+requestInputMethod :: Context -> WidgetId -> Maybe Rect -> InputPurpose -> IO ()
+requestInputMethod ctx wid caret purpose = writeIORef (ctxInputMethod ctx) $! Just (InputMethodRequest wid caret purpose)
+
+-- | The composition showing in widget @wid@: the frame's, while @wid@ has
+-- the focus and the composition belongs to it
+-- ('NanoUI.Internal.Frame.TextInput.claimComposition').
+fieldComposition :: Context -> WidgetId -> IO (Maybe Composition)
+fieldComposition ctx wid = do
+  focus <- readIORef (ctxFocusId ctx)
+  getsInteraction ctx $ \s -> case isComposition s of
+    Just (c, owner) | owner == wid && owner == focus && hashWidgetId owner /= 0 -> Just c
+    _ -> Nothing
 
 -- | Copy this frame's registered focus ids in declaration order. Modal
 -- filtering is applied separately when moving focus.

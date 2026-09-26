@@ -3,12 +3,12 @@ module SdlTerminal (main, Term (..), blank, feed, scrollBy, viewport, withPty, d
 
 import Control.Concurrent (threadDelay)
 import Control.Exception (bracket, bracketOnError, catch, throwIO, try)
-import Control.Monad (foldM, void, when)
+import Control.Monad (foldM, forM_, void, when)
 import Control.Monad.ST (ST, runST)
 import Data.Bits ((.&.))
 import Data.ByteString qualified as B
 import Data.Char (chr, isPrint, ord, toUpper)
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, isJust)
 import Data.Ord (clamp)
 import Data.Primitive.PrimArray (PrimArray, indexPrimArray, primArrayFromList)
 import Data.STRef (STRef, modifySTRef', newSTRef, readSTRef, writeSTRef)
@@ -28,7 +28,7 @@ import Foreign.C.Error
 import Foreign.C.Types (CInt (..))
 import GHC.IO.Exception (IOException (..))
 import NanoUI hiding (scrollBy)
-import NanoUI.Backend (emptyInput)
+import NanoUI.Backend (clearEphemeral, emptyInput)
 import NanoUI.Backend.Sdl
 import NanoUI.Sdl.Internal.Input (SdlEvent (..), applyEvent, pollEvents)
 import NanoUI.Testing (newPixelContext)
@@ -392,12 +392,18 @@ main = withPty $ \fd -> do
     ctx0
     $ \ctx env -> do
       let
-        advance (t, pending, _, _) = do
+        advance (t, pending, inp, _, _) = do
           threadDelay 16000
           events <- pollEvents
           let
             inputs = fmap (applyEvent emptyInput) events
-          rest <- send fd (pending <> foldMap keys inputs)
+            -- Each event's bytes, in order. While the input method composes,
+            -- the keys are its own, and only the text it commits is sent.
+            (inp', typed) = foldl' typeEvent (clearEphemeral inp, B.empty) events
+            typeEvent (i, out) ev =
+              let one = applyEvent emptyInput ev
+               in (applyEvent i ev, out <> if isJust (inputComposition i) then E.encodeUtf8 (inputChars one) else keys one)
+          rest <- send fd (pending <> typed)
           next :> ended <- drain fd (foldl' navigate t inputs)
           let
             changed =
@@ -405,15 +411,33 @@ main = withPty $ \fd -> do
                 || cursor next /= cursor t
                 || back next /= back t
                 || screen next /= screen t
-          pure (next, rest, ended || any (== EvQuit) events, changed)
+          pure (next, rest, inp', ended || any (== EvQuit) events, changed)
       S.mapM_
-        ( \(t, _, _, changed) -> when changed (void (sdlDrawFrame ctx (view t) env emptyInput True))
+        ( \(t, _, inp, _, changed) -> when changed (void (sdlDrawFrame ctx (view t) env inp True))
         )
-        . S.takeWhile (\(_, _, ended, _) -> not ended)
-        $ S.iterateM advance (pure (blank, B.empty, False, True))
+        . S.takeWhile (\(_, _, _, ended, _) -> not ended)
+        $ S.iterateM advance (pure (blank, B.empty, emptyInput, False, True))
 
+-- | The terminal holds the keyboard, every key its own, and takes typed text
+-- from the input method, whose composition it draws at the cursor, where
+-- the input method's candidate window goes too.
 view :: Term -> NanoUI ()
-view t = void $ canvas (fontMono . grow) $ \(Rect x y w h) -> do
+view t = do
+  wid <- nextId
+  holdFocus wid
+  Rect x y _ _ <- fromMaybe (Rect 0 0 0 0) <$> lastRect wid
+  let (cx, cy) = cursor t
+  preedit <- useInputMethod wid InputNormal (Rect (x + 8 + fromIntegral (min 79 cx) * 10) (y + 8 + fromIntegral cy * 24) 10 24)
+  void . customWidgetWithId wid $
+    defaultCustomWidgetSpec
+      { widgetLayout = fontMono (grow defaultLayout)
+      , widgetFocusable = True
+      , widgetKeys = KeysAll
+      , widgetDraw = \cdc rect -> runCanvasFor cdc (drawTerm t preedit rect)
+      }
+
+drawTerm :: Term -> Maybe Composition -> Rect -> CanvasM ()
+drawTerm t preedit (Rect x y w h) = do
   drawRect (Rect x y w h) 0x181D26FF
   V.imapM_
     ( \i (c, f, b) -> do
@@ -432,6 +456,13 @@ view t = void $ canvas (fontMono . grow) $ \(Rect x y w h) -> do
     curX = x + 8 + fromIntegral (min 79 cx) * 10
     curY = y + 29 + fromIntegral cy * 24
   when (back t < 1) $ drawRect (Rect curX curY 10 2) 0x81A1C1FF
+  -- The composition, underlined, over the cells from the cursor on.
+  forM_ preedit $ \c -> do
+    let comp = compositionText c
+        compW = fromIntegral (T.length comp) * 10
+    drawRect (Rect curX (curY - 21) compW 24) 0x181D26FF
+    drawText (V2 curX (curY - 21)) AlignStart AlignTop comp 0xECEFF4FF
+    drawRect (Rect curX curY compW 2) 0xEBCB8BFF
   when (back t > 0 && hRows > 0) $ do
     let
       thumbH = max 24 (h * (24 / (hRows + 24)))

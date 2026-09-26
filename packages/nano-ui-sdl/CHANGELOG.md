@@ -74,8 +74,13 @@
   which `inputKeysNew` leaves out, and the window losing the keyboard lets
   go of the keys held.
 - Input methods compose inside the text fields, with the candidate window by
-  the caret. A widget of your own that takes typed text, such as a terminal,
-  now gets the composition only as `inputComposition`;
+  the caret. Text input runs only while a widget takes text (a focused text
+  field, or a widget that calls `useInputMethod`), with SDL's text input type
+  for what it takes, so a password's input method hides it and a number
+  gets a numeric on-screen keyboard; with nothing taking text it stops, so
+  no composition builds up unseen and no on-screen keyboard stays up. A
+  widget of your own that reads typed text, such as a terminal, asks with
+  `useInputMethod` and draws the composition it answers;
   `SDL_IME_IMPLEMENTED_UI=none` in the environment lets the input method draw
   it again.
 - The middle mouse button, the side buttons as back and forward, and any

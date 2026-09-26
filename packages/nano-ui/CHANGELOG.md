@@ -329,8 +329,15 @@
   `M-S-p`, `A-<Enter>`, `<F5>`). `Modifiers` is a `Monoid`.
 - Input-method composition (`inputComposition`): the focused text field or
   text area draws it at its caret until it is committed, and the frame drops
-  the keys meanwhile, so no shortcut fires. `textInputArea` in
-  `NanoUI.Testing` says where the input method's candidate window goes.
+  the keys meanwhile, so no shortcut fires. `useInputMethod`, iced's
+  `request_input_method`, lets a widget of the app's own do the same: called
+  every frame from the widget with the keyboard, with its caret and an
+  `InputPurpose` (`InputNormal`, `InputSecure`, `InputNumeric`), it answers
+  the composition to draw; the text fields ask this way too, a password
+  field for `InputSecure` and a numeric one for `InputNumeric`.
+  `textInputArea` says whether a widget takes text, where the input
+  method's candidate window goes and what the widget takes;
+  `NanoUI.Backend` exports it with `TextInputArea` and `getFocusId`.
 - Every mouse button: `MouseButton` has `MouseMiddle`, the side buttons
   `MouseBack` and `MouseForward`, and `MouseOther n` for any other, which
   the SDL and RGFW backends report by number (`mouseButtonNumber`). Each is
