@@ -13,6 +13,7 @@ module NanoUI.Internal.Store
   , fieldText
   , fieldIntSet
   , fieldDyn
+  , fieldQuiet
   , overField
   , lookupSlot
   , findSlot
@@ -394,6 +395,10 @@ data Slot
   | -- | When a numeric field's held stepper arrow next repeats, in monotonic
     -- seconds.
     SlotNumericRepeat
+  | -- | When a tooltip opens, in monotonic microseconds ('storeQuiet', keyed
+    -- by the tooltip's id): absent while its target is not hovered. Under key
+    -- 0, when any tooltip was last up, which opens the next one at once.
+    SlotTooltipShow
   deriving (Enum)
 
 -- | Tag for a built-in slot: the constructor index mixed with a salt, so tags

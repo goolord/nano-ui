@@ -527,6 +527,9 @@ data DrawingCacheState = DrawingCacheState
   , dcsDrawOpCache :: !(IntMap DrawOpCacheEntry)
   , dcsCustomDrawOpCache :: !(IntMap CustomDrawOpCacheEntry)
   , dcsDrawFitCache :: !(IntMap DrawFitCache)
+  , dcsHoverZones :: ![Rect]
+  -- ^ Rects the pointer coming onto or leaving needs a frame for, though no
+  -- widget the hover probe finds may be there: tooltip targets.
   }
 
 -- | Strict cache entry for a popup's anchor configuration.
@@ -534,6 +537,9 @@ data PopupConfig = PopupConfig
   { pcAnchor :: !PopupAnchor
   , pcPlacement :: !PopupPlacement
   , pcOffset :: {-# UNPACK #-} !Float
+  , pcFollowsPointer :: !Bool
+  -- ^ Placed from where the pointer is, so while it is up every pointer move
+  -- needs a frame to move it.
   }
 
 -- | Strict cache entry for a drawing's compiled draw ops.
@@ -568,6 +574,7 @@ initialDrawingCacheState = DrawingCacheState
   , dcsDrawOpCache = IM.empty
   , dcsCustomDrawOpCache = IM.empty
   , dcsDrawFitCache = IM.empty
+  , dcsHoverZones = []
   }
 
 -- | Where a frame's pointer events go: the press, the drag and release that

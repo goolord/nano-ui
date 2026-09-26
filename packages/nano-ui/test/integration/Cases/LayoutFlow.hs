@@ -299,7 +299,7 @@ runCoveredWidgetNoPointerTest ctx failed = do
   -- A drawing with a tooltip, under a pinned button.
   let covered = columnWith tight $ do
         area <- drawing (fixedWH 200 100) (const mempty)
-        tooltip area "Canvas tip"
+        tooltipConfigured defaultTooltipConfig {tooltipDelay = 0} area "Canvas tip"
         (area,) <$> buttonWith' (pinAt 10 10 . fixedWH 60 30) "pin"
       tipShown p = warmup ctx (at p) covered >> hasText "Canvas tip" <$> collectOverlayTextSpans ctx (at p)
       beside = V2 150 70

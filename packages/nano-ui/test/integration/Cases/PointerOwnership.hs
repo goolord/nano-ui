@@ -351,6 +351,7 @@ runPointerRoutingLintTest _ failed = do
       [ "NanoUI/Internal/Monad.hs" -- defines it
       , "NanoUI/Internal/Widgets/Node.hs" -- routes a floating panel's body and a dropdown's owner
       , "NanoUI/Internal/Widgets/Behavior.hs" -- useDismissable: a press anywhere else dismisses
+      , "NanoUI/Internal/Widgets/Popup.hs" -- tooltips: a press anywhere shuts one, and one covering its target stays
       ]
     complain msg = putStrLn ("  " <> msg) >> modifyIORef' failed (+ 1)
     haskellFiles dir = do

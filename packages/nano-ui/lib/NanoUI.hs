@@ -324,6 +324,17 @@ module NanoUI
   , tooltipWidget
   , withTooltip
 
+    -- | A tooltip opens once the pointer has rested on its target for
+    -- 'tooltipDelay', and opens at once when another was up moments before.
+    -- It shuts when the pointer leaves the target or a button goes down, and
+    -- a wheel turn starts the wait again. Waiting costs nothing: the frame the
+    -- tooltip opens on is a timed wake. 'PlacementAtCursor' keeps it just below
+    -- the pointer as the pointer moves.
+  , TooltipConfig (..)
+  , defaultTooltipConfig
+  , tooltipConfigured
+  , tooltipWidgetConfigured
+
     -- * Window caption
 
     -- | The minimize, maximize and close buttons of a window that draws its

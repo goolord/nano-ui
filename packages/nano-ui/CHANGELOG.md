@@ -253,6 +253,9 @@
   `ContentFit` like CSS's `object-fit`, an alignment, an opacity and a
   `Rotation`. The `DrawImageRotated` op and the canvas's `drawImageRotated`
   draw an image turned about its centre.
+- `tooltipConfigured` and `tooltipWidgetConfigured` take a `TooltipConfig`:
+  the hover delay (`tooltipDelay`), the grace after another tooltip
+  (`tooltipGrace`) and the placement (`tooltipPlacement`).
 - `NanoUI.Backend` has what a backend needs for the above:
   `modifiersFromBits`.
 
@@ -513,6 +516,9 @@
 - The node index by widget id is an unboxed table, so indexing and looking
   up a widget allocate nothing, and `nano-ui` no longer depends on
   `hashtables`.
+- Tooltips open once the pointer has rested on the target for half a second
+  (`defaultTooltipConfig`), or at once just after another, and shut while a
+  button is held. `tooltipAt PlacementAtCursor` follows the pointer.
 - `Layout` and `DrawOp` have new fields or constructors, for the additions
   above.
 
@@ -682,6 +688,9 @@
   the others that shrink once one reaches its minimum, instead of overflowing.
 - A canvas's `drawImage` and `drawImageUV`, and a drawing's `DrawImageRect`,
   draw the registered image rather than a rectangle in the tint colour.
+- A tooltip on a label or a container (`label'`, `withTooltip`) starts its
+  wait as the pointer comes onto the target and shuts as it leaves, rather
+  than at the next unrelated event.
 - A wrapped label keeps its indent and the runs of spaces inside its lines;
   a line ends at a run of spaces, which it drops. A label wider than its box
   used to have every run of spaces cut to one.

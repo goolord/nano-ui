@@ -417,6 +417,8 @@ demoUi = do
               rowWith (tight . gap gapInline . fillW) $ do
                 btnTip <- button' "Hover for Tooltip"
                 tooltip btnTip "This is a floating tooltip widget!"
+                btnFollow <- button' "Tooltip at Pointer"
+                tooltipConfigured defaultTooltipConfig {tooltipPlacement = PlacementAtCursor} btnFollow "This one follows the pointer."
                 btnMenu <- button' "Right-click Menu"
                 void $ contextMenu btnMenu $ do
                   menuHeader "Context Menu"

@@ -153,6 +153,11 @@ Modals, floating windows, and popups return close or dismissal requests.
 The application owns their open flag and must update it. Keep calling the
 overlay with that flag so its identity and later siblings remain stable.
 
+Tooltips need no flag. One opens once the pointer has rested on its target
+for `tooltipDelay`, half a second by default, and shuts when the pointer
+leaves or a button goes down. `tooltipConfigured` sets the delay and the
+placement; `PlacementAtCursor` follows the pointer.
+
 Ordinary widgets read routed input with `askInput`. A covered layer receives
 no pointer. `askFrameInput` is for window-wide handling, such as dismissing
 a popup after an outside click; using it for an ordinary control bypasses
@@ -242,6 +247,8 @@ its response rectangle, then send separate press and release frames.
 text-span queries. Its `held` helper stores controlled input values outside
 the hook store, so an automatic hook rebuild does not hide a change flag
 that the test is trying to observe.
+
+A tooltip's delay runs on the real clock, so a test sets `tooltipDelay = 0`.
 
 Headless tests cover layout and input behaviour. Run the native backend too
 when changing rendering, fonts, dialogs, or display scaling.

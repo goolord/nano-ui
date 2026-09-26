@@ -38,6 +38,7 @@ import Cases.WidgetIdIndex qualified
 import Cases.Paths qualified
 import Cases.LayoutFlow qualified
 import Cases.Images qualified
+import Cases.TooltipDelay qualified
 import NanoUI.Testing.Runner (runTests)
 
 main :: IO ()
@@ -81,4 +82,5 @@ main =
     , Cases.Paths.tests
     , Cases.LayoutFlow.tests
     , Cases.Images.tests
+    , Cases.TooltipDelay.tests
     ]

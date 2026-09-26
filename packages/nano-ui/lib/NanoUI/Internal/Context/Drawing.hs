@@ -2,6 +2,10 @@
 module NanoUI.Internal.Context.Drawing
   ( registerPopupConfig
   , lookupPopupConfig
+  , markPopupFollowsPointer
+  , popupFollowsPointer
+  , registerHoverZone
+  , hoverZoneCrossed
   , registerDrawing
   , lookupDrawing
   , cachedDrawingOps
@@ -33,7 +37,7 @@ import NanoUI.Internal.Context.Types
 import NanoUI.Internal.Draw (DrawOp, DrawingBuild, shiftDrawOp)
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Style (Layout)
-import NanoUI.Internal.Types (PopupAnchor, PopupPlacement, Rect (..), rectH, rectW)
+import NanoUI.Internal.Types (PopupAnchor, PopupPlacement, Rect (..), V2, rectH, rectHit, rectW)
 
 {-# INLINE lookupIn #-}
 lookupIn :: (DrawingCacheState -> IntMap a) -> Context -> WidgetId -> IO (Maybe a)
@@ -56,14 +60,39 @@ registerIn field setField ctx wid v =
 {-# INLINE registerPopupConfig #-}
 registerPopupConfig :: Context -> WidgetId -> PopupAnchor -> PopupPlacement -> Float -> IO ()
 registerPopupConfig ctx wid anchor placement offset =
-  registerIn dcsPopupConfigs (\m dc -> dc {dcsPopupConfigs = m}) ctx wid (PopupConfig anchor placement offset)
+  registerIn dcsPopupConfigs (\m dc -> dc {dcsPopupConfigs = m}) ctx wid (PopupConfig anchor placement offset False)
 
 -- | Current popup placement registration, or 'Nothing' for an unregistered id.
 {-# INLINE lookupPopupConfig #-}
 lookupPopupConfig :: Context -> WidgetId -> IO (Maybe (PopupAnchor, PopupPlacement, Float))
 lookupPopupConfig ctx wid =
-  fmap (\(PopupConfig anchor placement offset) -> (anchor, placement, offset))
+  fmap (\(PopupConfig anchor placement offset _) -> (anchor, placement, offset))
     <$> lookupIn dcsPopupConfigs ctx wid
+
+-- | Mark the popup registered under @wid@ this pass as placed from the
+-- pointer: while it is up, every pointer move needs a frame to move it.
+markPopupFollowsPointer :: Context -> WidgetId -> IO ()
+markPopupFollowsPointer ctx wid =
+  modifyIORef' (ctxDrawingCache ctx) $ \dc ->
+    dc {dcsPopupConfigs = IM.adjust (\pc -> pc {pcFollowsPointer = True}) (intKey wid) (dcsPopupConfigs dc)}
+
+-- | Whether a popup registered this pass follows the pointer
+-- ('markPopupFollowsPointer').
+popupFollowsPointer :: Context -> IO Bool
+popupFollowsPointer ctx = any pcFollowsPointer . dcsPopupConfigs <$> readIORef (ctxDrawingCache ctx)
+
+-- | Ask for a frame when the pointer comes onto @rect@ or leaves it, for this
+-- pass: a tooltip's target, which can be a label or a container that the
+-- hover probe does not find.
+registerHoverZone :: Context -> Rect -> IO ()
+registerHoverZone ctx rect =
+  modifyIORef' (ctxDrawingCache ctx) $ \dc -> dc {dcsHoverZones = rect : dcsHoverZones dc}
+
+-- | Whether the pointer moving from @from@ to @to@ comes onto or leaves a
+-- rect registered this pass ('registerHoverZone').
+hoverZoneCrossed :: Context -> V2 -> V2 -> IO Bool
+hoverZoneCrossed ctx from to =
+  any (\r -> rectHit r from /= rectHit r to) . dcsHoverZones <$> readIORef (ctxDrawingCache ctx)
 
 -- | Register a draw builder and content version. Change the version when
 -- captured content changes without a size change.
@@ -333,4 +362,5 @@ resetDrawingScopeCache ctx =
       , dcsPopupConfigs = IM.empty
       , dcsCustomMeasures = IM.empty
       , dcsCustomDrawings = IM.empty
+      , dcsHoverZones = []
       }
