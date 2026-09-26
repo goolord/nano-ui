@@ -415,10 +415,10 @@ constrainFocusToModal ctx = do
     unlessM (widgetOverlayAllowed ctx focus) $ writeIORef (ctxFocusId ctx) (WidgetId 0)
 
 -- | Note in 'isFocusKind' what kind of widget has the keyboard, and the keys
--- it takes ('KeyClaim'), from the last frame's nodes. Runs before the view, which rebuilds them, so that a
--- shortcut declared ahead of the focused widget knows about it too. @ime@:
--- an input method has the focused field's keys this frame
--- ('NanoUI.Internal.Frame.TextInput.claimComposition').
+-- it takes ('KeyClaim'), from the last frame's nodes. Runs before the view,
+-- which rebuilds them, so that a shortcut declared ahead of the focused
+-- widget knows about it too. @ime@: an input method has the focused field's
+-- keys this frame ('NanoUI.Internal.Frame.TextInput.claimComposition').
 recordFocusKind :: Context -> Bool -> IO ()
 recordFocusKind ctx ime = do
   focus <- readIORef (ctxFocusId ctx)

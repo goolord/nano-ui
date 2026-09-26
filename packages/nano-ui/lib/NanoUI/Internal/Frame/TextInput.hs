@@ -30,7 +30,6 @@ module NanoUI.Internal.Frame.TextInput
 
 import Control.Monad (forM_, mfilter, when)
 import Data.Char (isAlphaNum, isSpace)
-import Data.Functor ((<&>))
 import Data.IORef (readIORef, writeIORef)
 import Data.Maybe (isJust, mapMaybe)
 import Data.Sequence qualified as Seq
@@ -389,14 +388,16 @@ settleInputMethod ctx@Context {ctxNodeArena = na} before = do
   asked <- readIORef (ctxInputMethod ctx)
   when (maybe (focus /= before) ((/= focus) . imrWidget) asked) $ do
     let request purpose = Just (InputMethodRequest focus Nothing purpose)
+        fieldRequest si
+          | hasFlag textInputFlagSelectable si = Nothing
+          | hasFlag textInputFlagPassword si = request InputSecure
+          | hasFlag textInputFlagNumeric si = request InputNumeric
+          | otherwise = request InputNormal
     field <-
       ifM (isDisabled ctx focus) (pure Nothing) . withWidgetNode ctx focus Nothing $ \idx ->
         getNodeType na idx >>= \case
           NodeTextArea -> pure (request InputNormal)
-          NodeTextInput -> getStyleIdx na idx <&> \si ->
-            if hasFlag textInputFlagSelectable si
-              then Nothing
-              else request (if hasFlag textInputFlagPassword si then InputSecure else if hasFlag textInputFlagNumeric si then InputNumeric else InputNormal)
+          NodeTextInput -> fieldRequest <$> getStyleIdx na idx
           _ -> pure Nothing
     writeIORef (ctxInputMethod ctx) field
 

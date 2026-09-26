@@ -14,7 +14,8 @@ the SDL backend.
 The terminal is kept small: 80 by 24 cells, UTF-8, the 16 ANSI colours with
 bold and inverse, basic cursor movement and erasing, and 2,000 lines of
 scrollback. It advertises `TERM=ansi` and has no wide-character layout or full
-VT100 support.
+VT100 support. It takes typed text through the input method, whose
+composition it shows at the cursor (`useInputMethod`).
 
 ## Running
 
