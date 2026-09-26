@@ -311,10 +311,10 @@ runSessionLoop drv ctx0 inp0 = do
               ++ (if refreshDue then "T" else "")
           -- Open modals/overlays consume Escape/Quit before the app sees it.
           overlayQuit <- overlayConsumesQuit ctx' inpSynced
+          quit <- quitRequested ctx'
           -- The next pass was animating if this frame was, even when this
           -- frame's tick finished the animation: its view read the value
           -- before that tick, so one more (settle) frame draws the end value.
-          quit <- quitRequested ctx'
           unless (quit || (sdShouldQuit drv inpSynced && not overlayQuit)) $
             loop ctx' inpSynced rest now dirtyOut animNow
 

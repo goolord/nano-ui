@@ -22,7 +22,7 @@ module NanoUI.Rgfw.Internal.Session
 
 import Control.Concurrent (myThreadId, rtsSupportsBoundThreads, runInBoundThread)
 import Control.Exception (bracket)
-import Control.Monad (join, unless, void, when)
+import Control.Monad (unless, void, when)
 import Data.Bits ((.&.), (.|.))
 import Data.Char (chr, isDigit, isPrint, toLower)
 import Data.IORef (IORef, atomicModifyIORef', atomicWriteIORef, newIORef, readIORef, writeIORef)
@@ -312,10 +312,11 @@ runRgfwAppReduceCustom opts getThemeAndScale updateModel initialModel view = inB
       setExplainLayout ctx (optExplainLayout opts)
       -- Views give sizes in layout units, at the scale the window is at
       -- when they ask. An axis of zero is no limit.
-      let pixels v = readIORef scaleRef >>= \scale -> pure (if v <= 0 then 0 else round (v * scale))
-          limit set s = do
+      let limit set s = do
+            scale <- readIORef scaleRef
             let Size w h = fromMaybe (Size 0 0) s
-            join (set win <$> pixels w <*> pixels h)
+                axis v = if v <= 0 then 0 else round (v * scale)
+            set win (axis w) (axis h)
           place = case wsPosition settings of
             WindowPositionDefault -> WindowPositionCentered
             p -> p

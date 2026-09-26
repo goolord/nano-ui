@@ -23,7 +23,7 @@ import Control.Monad (mfilter, unless, void, when)
 import Control.Monad.IO.Class (liftIO)
 import Data.Acquire (Acquire, mkAcquire)
 import Data.Acquire qualified as Acquire
-import Data.Bits ((.|.))
+import Data.Bits (zeroBits, (.|.))
 import Data.ByteString qualified as BS
 import Data.ByteString.Internal qualified as BSI
 import Data.Foldable (for_)
@@ -40,7 +40,7 @@ import Foreign.C.String (withCString)
 import Foreign.Marshal.Utils (copyBytes, maybePeek, with)
 import Foreign.Storable (peek)
 import Foreign.Ptr (Ptr, castPtr, nullPtr, plusPtr)
-import NanoUI (Appearance, Input (..), RgbaImage (..), RgbaPixels, Screenshot (..), Size (..), Theme, V2 (..), WindowMode (..), WindowSettings (..), defaultWindowSettings, rgbaPixels)
+import NanoUI (Appearance, ImageId, Input (..), RgbaPixels, Screenshot (..), Size (..), Theme, V2 (..), WindowMode (..), WindowSettings (..), defaultWindowSettings, rgbaPixels)
 import NanoUI.Backend (cancelTasks, installWindowHost, reportWindowState, setSystemAppearance, setWakeLoop)
 import NanoUI.Internal.Context (Context (..), setDrawSnapScale)
 import NanoUI.Testing (clearMeasureCache, damageFull, markDirty, setHost, withClipboard)
@@ -69,7 +69,7 @@ import SDL3.Sys.Bindgen.Render (SDL_Renderer, SDL_Texture)
 import SDL3.Sys.Bindgen.Surface (SDL_Surface)
 import SDL3.Sys.Bindgen.Surface qualified as Surface
 import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
-import SDL3.Sys.Bindgen.Video (SDL_Window, SDL_WindowFlags (..))
+import SDL3.Sys.Bindgen.Video (SDL_Window, SDL_WindowFlags)
 import SDL3.Sys.Bindgen.Init (SDL_InitFlags (..), sDL_INIT_VIDEO)
 import SDL3.Sys.Clipboard (getClipboardText, setClipboardText)
 import SDL3.Sys.Hints (resetHint, setHint)
@@ -91,6 +91,18 @@ import SDL3.Sys.Render
 import SDL3.Sys.Stdinc (free)
 import SDL3.Sys.Surface (convertSurface, destroySurface, saveBMP)
 import SDL3.Sys.Video (destroyWindowSafe, getWindowDisplayScale)
+import SDL3.Sys.Video qualified as SDL
+
+-- | An image to register before the first frame ('sdlAppImages'), under the
+-- id 'NanoUI.image' draws it by: a positive width and height, and tightly
+-- packed RGBA8 bytes, four a pixel in rows from the top.
+data RgbaImage = RgbaImage
+  { rgbaImageId :: !ImageId
+  , rgbaImageWidth :: !Int
+  , rgbaImageHeight :: !Int
+  , rgbaImagePixels :: !BS.ByteString
+  }
+  deriving (Eq)
 
 -- | Application-owned SDL settings.
 data SdlOptions = SdlOptions
@@ -183,7 +195,7 @@ defaultSdlOptions =
     , sdlAppUiScale = 1
     }
 
--- | SDL_WINDOW_HIGH_PIXEL_DENSITY (0x2000): without it the window's surface
+-- | SDL_WINDOW_HIGH_PIXEL_DENSITY: without it the window's surface
 -- gets scale 1.0 even on a 2x / HiDPI output, so the compositor upscales the
 -- whole window (blurry "looks upscaled"). With it, SDL_GetWindowPixelDensity
 -- returns the real output scale where window coordinates are points (macOS,
@@ -193,17 +205,16 @@ defaultSdlOptions =
 -- the density stays 1 whatever the desktop scaling.
 windowFlags :: SdlOptions -> SDL_WindowFlags
 windowFlags opts =
-  SDL_WindowFlags $
-    0x0000000000002000
-      .|. flag (wsResizable settings) 0x0000000000000020
-      .|. flag (wsMode settings == Fullscreen) 0x0000000000000001
-      .|. flag (sdlWindowDecorations opts /= DecorationsFull) 0x0000000000000010
-      .|. flag (sdlWindowAlwaysOnTop opts) 0x0000000000010000
-      .|. flag (wsMode settings == Hidden) 0x0000000000000008
-      .|. flag (wsTransparent settings) 0x0000000040000000
+  SDL.SDL_WINDOW_HIGH_PIXEL_DENSITY
+    .|. flag (wsResizable settings) SDL.SDL_WINDOW_RESIZABLE
+    .|. flag (wsMode settings == Fullscreen) SDL.SDL_WINDOW_FULLSCREEN
+    .|. flag (sdlWindowDecorations opts /= DecorationsFull) SDL.SDL_WINDOW_BORDERLESS
+    .|. flag (sdlWindowAlwaysOnTop opts) SDL.SDL_WINDOW_ALWAYS_ON_TOP
+    .|. flag (wsMode settings == Hidden) SDL.SDL_WINDOW_HIDDEN
+    .|. flag (wsTransparent settings) SDL.SDL_WINDOW_TRANSPARENT
   where
     settings = sdlWindowSettings opts
-    flag on bit = if on then bit else 0
+    flag on bit = if on then bit else zeroBits
 
 scaleEpsilon :: Float
 scaleEpsilon = 0.001
@@ -458,7 +469,7 @@ startSdlWindow bench opts ctx guessedDriver fontSource monoSource = do
           TextForeign.withCString (wsTitle settings) $ \titlePtr -> do
             -- A bench window is hidden only: on Windows it must not be
             -- resizable as well.
-            let flags = if bench then SDL_WindowFlags 0x0000000000000008 else windowFlags opts
+            let flags = if bench then SDL.SDL_WINDOW_HIDDEN else windowFlags opts
             (ok, win, ren) <-
               outPair (createWindowAndRendererSafe (PtrConst.unsafeFromPtr titlePtr) (round w) (round h) flags)
             unless ok $ fail "SDL_CreateWindowAndRenderer failed"
