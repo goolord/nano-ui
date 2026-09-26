@@ -3,7 +3,7 @@ module Cases.Explain (tests) where
 import Spec
 import Data.List (findIndex)
 import Data.Maybe (isJust, isNothing, listToMaybe)
-import NanoUI.Internal.Context (Context (..), setDrawSquareGeometry)
+import NanoUI.Internal.Context (Context (..), ExplainState (..), setDrawSquareGeometry)
 import NanoUI.Internal.Layout.Arena (arenaCount, getNodeRect, getNodeType, getParent, isFloatingNode)
 
 tests :: [Spec]
@@ -15,6 +15,8 @@ tests =
   , spec "explain-hover" runExplainHoverTest
   , spec "explain-window-layer" runExplainWindowLayerTest
   , spec "explain-layers-and-pin" runExplainLayersAndPinTest
+  , spec "explain-node-fields" runExplainNodeFieldsTest
+  , spec "explain-scope" runExplainScopeTest
   ]
 
 inp :: Input
@@ -229,3 +231,57 @@ runExplainLayersAndPinTest ctx failed = do
   warmup2 ctx inp kinds
   forM_ [(80, "Container, layered"), (180, "Container, row, wrap"), (280, "Container, column")] $ \(y, kind) ->
     explainedAt kinds (V2 150 y) >>= assertEq failed (Just kind) . fmap explainedKind
+
+-- | The explained node says what its layout asked for: its widget's id, its
+-- sizing with limits, gap, direction and flow, where it is pinned and how it
+-- takes the pointer; a container without an id has none.
+runExplainNodeFieldsTest :: Context -> IORef Int -> IO ()
+runExplainNodeFieldsTest ctx failed = do
+  _ <- outlining ctx
+  let ui = columnWith (tight . gap 0) $ do
+        chips <- rowWith (wrap . gap 6 . fixedW 300 . minH 40) $ label' "chip"
+        pinned <- buttonWith' (pinAt 10 50 . pointer PointerBlock . fillW . maxW 120 . fixedH 30) "pin"
+        pure (chips, pinned)
+      explainedAt p = runFrame ctx inp {inputMousePos = p} ui >> getExplainedNode ctx
+  (chip, pinned) <- warmup2 ctx inp ui
+  assertJustM failed (explainedAt (centerOf pinned)) $ \node ->
+    assertEq
+      failed
+      (Just (respId pinned), Grow 1, Fixed 30, V2 0 0, V2 120 1e9, Just (V2 10 50), PointerBlock, Line)
+      (explainedWidget node, explainedWidth node, explainedHeight node, explainedMin node, explainedMax node, explainedPin node, explainedPointer node, explainedFlow node)
+  -- The wrapping row, in its padding beside the chip.
+  let Rect cx cy _ ch = respRect chip
+  assertJustM failed (explainedAt (V2 (cx - 1) (cy + ch / 2))) $ \node ->
+    assertEq
+      failed
+      (Nothing, Fixed 300, Fit, V2 300 40, 6, Row, Wrap, Nothing, PointerAuto)
+      (explainedWidget node, explainedWidth node, explainedHeight node, explainedMin node, explainedGap node, explainedDirection node, explainedFlow node, explainedPin node, explainedPointer node)
+
+-- | 'explainScope' narrows the overlay to what its body adds: those nodes
+-- are outlined and explained, the rest are not, and a view without a scope
+-- shows every node again. With the overlay off it records nothing.
+runExplainScopeTest :: Context -> IORef Int -> IO ()
+runExplainScopeTest ctx failed = do
+  theme <- outlining ctx
+  let ui scoped = columnWith (padAll 8 . gap 8) $ do
+        outside <- labelWith' (fixedWH 80 20) "outside"
+        (a, b) <- (if scoped then explainScope else id) $
+          rowWith (padAll 4) ((,) <$> labelWith' (fixedWH 60 20) "a" <*> labelWith' (fixedWH 60 20) "b")
+        pure (outside, a, b)
+      outlined quads r = maybe False (\d -> drawnAt quads (edge theme d r)) . lookup r <$> layerDepths ctx
+  ((outside, a, b), quads) <- quadsOf ctx inp (ui True)
+  mapM (outlined quads . respRect) [a, b] >>= assertEq failed [True, True]
+  outlined quads (respRect outside) >>= assert failed . not
+  -- Nor is the root column.
+  assertJustM failed (listToMaybe <$> arenaRects ctx) $ \root -> outlined quads root >>= assert failed . not
+  getExplainedNode ctx >>= assert failed . isNothing
+  runFrame ctx inp {inputMousePos = centerOf outside} (ui True) >> getExplainedNode ctx >>= assert failed . isNothing
+  runFrame ctx inp {inputMousePos = centerOf a} (ui True) >> getExplainedNode ctx
+    >>= assertEq failed (Just (respId a)) . (>>= explainedWidget)
+  -- Without a scope the whole view is outlined again.
+  (_, quadsAll) <- quadsOf ctx inp (ui False)
+  outlined quadsAll (respRect outside) >>= assert failed
+  -- With the overlay off a scope records nothing.
+  setExplainLayout ctx False
+  _ <- runFrame ctx inp (ui True)
+  esScopes <$> readIORef (ctxExplain ctx) >>= assertEq failed []

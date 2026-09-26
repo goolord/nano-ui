@@ -59,6 +59,7 @@ module NanoUI.Internal.Monad
   , explainLayout
   , explainingLayout
   , explainedNode
+  , explainScope
   , getScrollMetricsUi
   , setScrollOffsetUi
   , scrollToUi
@@ -111,7 +112,7 @@ import NanoUI.Internal.Draw.Types (TextFont (..))
 import NanoUI.Internal.Font (FontMetrics, lineWidthIO)
 import NanoUI.Internal.Frame.Node (resolveTextFont)
 import NanoUI.Internal.Id hiding (currentId)
-import NanoUI.Internal.Layout.Arena (getArenaScope, setArenaScope)
+import NanoUI.Internal.Layout.Arena (arenaCount, getArenaScope, setArenaScope)
 import NanoUI.Internal.Style (Appearance, FontStyle, FontVariant, FontWeight, Layout, TextDecoration (DecorationNone), Theme, defaultLayout)
 import NanoUI.Internal.Input (Input (..), Key (KeyEscape), MouseButton, buttonHeld, buttonPressed, buttonReleased, inputKeysElem, inputMousePos, inputWindowSize, noButtons, stripInteractionInput)
 import NanoUI.Internal.Types (DamageBounds, Rect, Size (..), V2)
@@ -590,6 +591,29 @@ explainingLayout = withContext getExplainLayout
 -- asks for a frame of its own, so the panel keeps up with the pointer.
 explainedNode :: Ui :> es => Eff es (Maybe ExplainedNode)
 explainedNode = withContext getExplainedNode
+
+-- | Narrow the layout overlay ('explainLayout') to what the body adds: its
+-- nodes and everything inside them are outlined and explained, and the rest
+-- of the view is not. Several scopes show all their parts; a view with none
+-- shows everything. With the overlay off it runs the body and nothing else,
+-- so it can stay in a view:
+--
+-- > explainScope (settingsPanel model)
+explainScope :: Ui :> es => Eff es a -> Eff es a
+explainScope body = do
+  ctx <- askContext
+  on <- uiIO (getExplainLayout ctx)
+  if not on
+    then body
+    else do
+      let count = uiIO (arenaCount (ctxNodeArena ctx))
+      from <- count
+      a <- body
+      below <- count
+      -- A subtree follows its root in the arena, so the range holds the
+      -- whole of everything the body added.
+      uiIO (modifyIORef' (ctxExplain ctx) (\es -> es {esScopes = (from, below) : esScopes es}))
+      pure a
 
 -- | The scroller's geometry as its last layout left it (its viewport, range
 -- and offset), or 'Nothing' before it has been laid out. The id is the one a

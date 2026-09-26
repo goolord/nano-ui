@@ -3,8 +3,10 @@
 -- node is, and a tint over the node under the pointer with its content box
 -- outlined. Each layer's outlines are drawn over that layer, the page's over
 -- the page and a floating panel's over the panel, so a window hides the
--- outlines of what it covers as it hides those nodes. The overlay only paints:
--- layout and hit tests never see it, and a frame with it off runs none of this.
+-- outlines of what it covers as it hides those nodes. Where the view marked
+-- parts of itself ('esScopes'), only the nodes of those parts are outlined
+-- and explained. The overlay only paints: layout and hit tests never see it,
+-- and a frame with it off runs none of this.
 module NanoUI.Internal.Frame.Explain
   ( explainFrame
   , paintExplainPage
@@ -13,7 +15,7 @@ module NanoUI.Internal.Frame.Explain
   ) where
 
 import Control.Monad (forM_, when)
-import Data.IORef (readIORef, writeIORef)
+import Data.IORef (modifyIORef', readIORef)
 import Data.Maybe (mapMaybe)
 import Data.Text qualified as T
 import NanoUI.Internal.Context
@@ -23,8 +25,9 @@ import NanoUI.Internal.Frame.Node (readScrollNode)
 import NanoUI.Internal.Frame.Scroll.Geometry (borderContentClip, scrollNodeViewport)
 import NanoUI.Internal.Input (Input (..))
 import NanoUI.Internal.Layout.Arena
-import NanoUI.Internal.Style (Flow (..), Padding (..), Theme, fadeAlpha, themePanel, themeSeries)
-import NanoUI.Internal.Types (Color, Rect (..), Size (..), rectContains, rectHit, rectIntersect)
+import NanoUI.Internal.Id (hashWidgetId)
+import NanoUI.Internal.Style (Direction (..), Flow (..), Padding (..), Theme, fadeAlpha, themePanel, themeSeries)
+import NanoUI.Internal.Types (Color, Rect (..), Size (..), V2 (..), rectContains, rectHit, rectIntersect)
 
 -- | Work out what the overlay draws this frame, and repaint where that
 -- changed: the outlines of every layer, and the highlight under the pointer.
@@ -34,9 +37,13 @@ import NanoUI.Internal.Types (Color, Rect (..), Size (..), rectContains, rectHit
 -- layout and before the frame's damage is written.
 explainFrame :: Context -> Input -> IO ()
 explainFrame ctx@Context {ctxNodeArena = na} inp = do
+  scopes <- esScopes <$> readIORef (ctxExplain ctx)
   let mouse = inputMousePos inp
       Size w h = inputWindowSize inp
       window = Rect 0 0 w h
+      -- Whether node @idx@ is one the overlay shows: in a scope, if the view
+      -- marked any.
+      inScope idx = null scopes || any (\(from, below) -> idx >= from && idx < below) scopes
       -- Node @idx@'s outline and those inside it, in declaration order, ahead
       -- of @rest@. The children, pinned ones included, are visited last
       -- declared first.
@@ -46,7 +53,7 @@ explainFrame ctx@Context {ctxNodeArena = na} inp = do
         below <- case inner of
           Nothing -> pure rest
           Just c -> foldPlacedChildrenM na idx (\acc ci -> outlines (depth + 1) c ci acc) rest
-        pure ((rect, clip, depth) : below)
+        pure (if inScope idx then (rect, clip, depth) : below else below)
       -- The innermost node under the pointer from @idx@ down: the child
       -- drawn on top with a node under it ('childrenTopFirst': an earlier
       -- sibling over a later one, but a later layer over an earlier
@@ -62,10 +69,8 @@ explainFrame ctx@Context {ctxNodeArena = na} inp = do
         case deeper of
           Just _ -> pure deeper
           Nothing
-            | rectHit rect mouse && rectContains clip mouse -> do
-                kind <- nodeKind na idx
-                pad <- getPadding na idx
-                pure (Just (ExplainedNode kind depth rect pad, clip))
+            | inScope idx && rectHit rect mouse && rectContains clip mouse ->
+                Just . (,clip) <$> describeNode na depth idx
             | otherwise -> pure Nothing
   count <- arenaCount na
   -- The layers in the order the frame paints them: the page, then the
@@ -97,7 +102,7 @@ explainFrame ctx@Context {ctxNodeArena = na} inp = do
     mapM_ (damageRect ctx) (prevHover >>= highlight)
     mapM_ (damageRect ctx) (hover >>= highlight)
     markDirtyCovered ctx
-  writeIORef (ctxExplain ctx) ExplainState {esOn = True, esLayers = layers, esHover = hover}
+  modifyIORef' (ctxExplain ctx) (\es -> es {esOn = True, esLayers = layers, esHover = hover})
 
 -- | The key 'esLayers' files the page's outlines under. No node has it, and
 -- node 0 can be a floating panel's root, whose outlines go over the panel.
@@ -121,7 +126,7 @@ paintExplainLayer ctx@Context {ctxDrawArena = da} root = do
 paintExplainHover :: Context -> IO ()
 paintExplainHover ctx@Context {ctxDrawArena = da} = do
   hover <- esHover <$> readIORef (ctxExplain ctx)
-  forM_ hover $ \(ExplainedNode _ depth rect@(Rect x y w h) (Padding l r t b), clip) -> do
+  forM_ hover $ \(ExplainedNode {explainedDepth = depth, explainedRect = rect@(Rect x y w h), explainedPadding = Padding l r t b}, clip) -> do
     col <- (`depthColor` depth) <$> getTheme ctx
     beginLayer da LayerChrome
     forM_ (rectIntersect clip rect) $ \tint -> pushRect da tint (fadeAlpha col 0x40)
@@ -141,6 +146,40 @@ childClip ctx@Context {ctxNodeArena = na} idx clip rect@(Rect x y w h) =
     nt
       | isFloatingNode nt || isWidgetNode nt -> pure (rectIntersect clip rect)
       | otherwise -> pure (Just clip)
+
+-- | What the overlay says of node @idx@, @depth@ deep in its layer.
+describeNode :: NodeArena -> Int -> NodeIdx -> IO ExplainedNode
+describeNode na depth idx = do
+  a <- arenaArrays na
+  kind <- nodeKind na idx
+  wid <- getWidgetId na idx
+  rect <- getNodeRect na idx
+  pad <- getPadding na idx
+  wAx <- readAxisSizing a idx True
+  hAx <- readAxisSizing a idx False
+  gap <- readStyle a idx StyleGap
+  dir <- readTagEnum a idx TagDirection
+  flow <- readTagEnum a idx TagFlow
+  pinned <- readTagEnum a idx TagPinned
+  pin <- if pinned then Just <$> (V2 <$> readStyle a idx StylePinX <*> readStyle a idx StylePinY) else pure Nothing
+  mode <- readTagEnum a idx TagPointer
+  pure
+    ExplainedNode
+      { explainedKind = kind
+      , explainedWidget = if hashWidgetId wid == 0 then Nothing else Just wid
+      , explainedDepth = depth
+      , explainedRect = rect
+      , explainedPadding = pad
+      , explainedWidth = axisSizing wAx
+      , explainedHeight = axisSizing hAx
+      , explainedMin = V2 (axMin wAx) (axMin hAx)
+      , explainedMax = V2 (axMax wAx) (axMax hAx)
+      , explainedGap = gap
+      , explainedDirection = case dir of DirRow -> Row; DirColumn -> Column
+      , explainedFlow = flow
+      , explainedPin = pin
+      , explainedPointer = mode
+      }
 
 -- | A node's type without its @Node@ prefix, and how a container lays out
 -- its children: its direction, @layered@ for layers, and @wrap@ after the

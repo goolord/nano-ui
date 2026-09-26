@@ -26,8 +26,9 @@ import GHC.Clock (getMonotonicTime)
 import GHC.Conc (getNumCapabilities, getNumProcessors)
 import GHC.Stats (GCDetails (..), RTSStats (..), getRTSStats, getRTSStatsEnabled)
 import NanoUI.Internal.Context.Types (ExplainedNode (..))
-import NanoUI.Internal.Style (Padding (..))
-import NanoUI.Internal.Types (Rect (..))
+import NanoUI.Internal.Id (WidgetId (..))
+import NanoUI.Internal.Style (Padding (..), PointerMode (..), Sizing (..))
+import NanoUI.Internal.Types (Rect (..), V2 (..))
 import Text.Printf (printf)
 
 -- | Minimum interval between published snapshots, in seconds (0.25).
@@ -222,16 +223,44 @@ formatDrawRows s =
   ]
 
 -- | Label/value rows for the node under the pointer while the layout overlay
--- is on ('NanoUI.Internal.Context.getExplainedNode'): what it is, how deep,
--- where, its padding (left, right, top, bottom) and the content box that
--- leaves. One row saying there is none otherwise.
+-- is on ('NanoUI.Internal.Context.getExplainedNode'): what it is, its widget
+-- id, how deep, where, its padding (left, right, top, bottom) and the content
+-- box that leaves, what its layout asked for (the width and height with
+-- their limits, and the gap), and, where they are not the defaults, where it
+-- is pinned and how it takes the pointer. One row saying there is none
+-- otherwise.
 formatExplainRows :: Maybe ExplainedNode -> [(Text, Text)]
 formatExplainRows Nothing = [("node", "none under the pointer")]
-formatExplainRows (Just (ExplainedNode kind depth (Rect x y w h) (Padding l r t b))) =
-  [ ("node", kind)
-  , ("depth", T.pack (show depth))
+formatExplainRows (Just node) =
+  [ ("node", explainedKind node)
+  , ("id", maybe "none" (\(WidgetId k) -> T.pack (printf "%016x" k)) (explainedWidget node))
+  , ("depth", T.pack (show (explainedDepth node)))
   , ("origin", T.pack (printf "%.1f, %.1f" x y))
   , ("size", T.pack (printf "%.1f x %.1f" w h))
   , ("padding", T.pack (printf "%.1f %.1f %.1f %.1f" l r t b))
   , ("content", T.pack (printf "%.1f x %.1f" (w - l - r) (h - t - b)))
+  , ("width", sizingText (explainedWidth node) minW maxW)
+  , ("height", sizingText (explainedHeight node) minH maxH)
+  , ("gap", T.pack (printf "%.1f" (explainedGap node)))
   ]
+    ++ [("pin", T.pack (printf "%.1f, %.1f" px py)) | Just (V2 px py) <- [explainedPin node]]
+    ++ [("pointer", T.pack (show (explainedPointer node))) | explainedPointer node /= PointerAuto]
+  where
+    Rect x y w h = explainedRect node
+    Padding l r t b = explainedPadding node
+    V2 minW minH = explainedMin node
+    V2 maxW maxH = explainedMax node
+
+-- | A sizing and the limits beside it that are not the defaults (none below,
+-- and none above at 1e8 or more).
+sizingText :: Sizing -> Float -> Float -> Text
+sizingText sizing lo hi =
+  T.pack (base <> (if lo > 0 then printf ", min %.1f" lo else "") <> (if hi < 1e8 then printf ", max %.1f" hi else ""))
+  where
+    base :: String
+    base = case sizing of
+      Fixed n -> printf "fixed %.1f" n
+      Fit -> "fit"
+      Grow g -> printf "grow %g" g
+      Shrink k -> printf "shrink %g" k
+      Percent p -> printf "%g%%" p

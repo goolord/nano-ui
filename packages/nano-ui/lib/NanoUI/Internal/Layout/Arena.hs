@@ -68,6 +68,7 @@ module NanoUI.Internal.Layout.Arena
   , getScrollContentW
   , setScrollContentW
   , AxisSizing (..)
+  , axisSizing
   , readAxisSizing
   , getWidthSizing
   , getHeightSizing
@@ -833,6 +834,15 @@ growBoxedStoreCopy emptyVal arr oldCap newCap = do
   newArr <- newArray newCap emptyVal
   copyMutableArray newArr 0 arr 0 oldCap
   pure newArr
+
+-- | The 'Sizing' an axis was given, from what the arena stored of it.
+axisSizing :: AxisSizing -> Sizing
+axisSizing (AxisSizing tag val _ _) = case tag of
+  SizingFixed -> Fixed val
+  SizingFit -> Fit
+  SizingGrow -> Grow val
+  SizingShrink -> Shrink val
+  SizingPercent -> Percent val
 
 {-# INLINE sizingTag #-}
 sizingTag :: Sizing -> (SizingTag, Float)

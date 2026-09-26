@@ -242,9 +242,10 @@ runFrameEff unlift ctx rawInp ui = do
   pure (result, msgs, drawData, dirtyAfterUi)
 
 -- | Reset what a view run builds: the node arena, the sensors, and the
--- container, id, focus, hover, cursor-zone and drawing scopes. A second run
--- after a mirror store write (@newFrame@ 'False') keeps the store, animations
--- and prev rects, and the theme scopes it compares against.
+-- container, id, focus, hover, cursor-zone, drawing and layout-overlay
+-- scopes. A second run after a mirror store write (@newFrame@ 'False') keeps
+-- the store, animations and prev rects, and the theme scopes it compares
+-- against.
 resetUiBuild :: Context -> Bool -> IO ()
 resetUiBuild ctx newFrame = do
   beginThemeScopes ctx newFrame
@@ -256,6 +257,9 @@ resetUiBuild ctx newFrame = do
   writeIORef (ctxCursorZones ctx) []
   writeIORef (ctxCursorRegions ctx) []
   resetDrawingScopeCache ctx
+  -- The layout overlay's scopes are ranges of the arena just emptied.
+  explain <- readIORef (ctxExplain ctx)
+  unless (null (esScopes explain)) $ writeIORef (ctxExplain ctx) explain {esScopes = []}
   beginSensors ctx
 
 -- | Paint the floating panels over the page: windows with their title-bar

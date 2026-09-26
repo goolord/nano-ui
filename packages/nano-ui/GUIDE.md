@@ -451,9 +451,14 @@ thumbnail photo =
 ## Seeing the layout
 
 `explainLayout True` outlines every layout node, coloured by depth, and
-highlights the node under the pointer, which `explainedNode` describes. The
-overlay only paints. `sdlExplainLayout`, `optExplainLayout` and the SDL demo's
-`--explain` start with it on, and a debug window can toggle it:
+highlights the node under the pointer, which `explainedNode` describes: its
+widget id (the `respId` of the widget it belongs to), rect and padding, and
+what its layout asked for, the width and height `Sizing` with their limits,
+the gap, direction and `Flow`, the pin offset and the `PointerMode`.
+`explainScope body` narrows the overlay to the nodes `body` adds, for
+looking at one panel of a busy view. The overlay only paints.
+`sdlExplainLayout`, `optExplainLayout` and the SDL demo's `--explain` start
+with it on, and a debug window can toggle it:
 
 ```haskell
 explainLayout =<< checkbox "Outline layout nodes" =<< explainingLayout

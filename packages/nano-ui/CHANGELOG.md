@@ -338,7 +338,10 @@
   nothing, and from a scope picks the arrow.
 - A layout overlay, like iced's `explain`: `explainLayout` outlines every
   layout node and highlights the one under the pointer, which `explainedNode`
-  describes; `explainingLayout` says whether it is on.
+  describes: its widget id, to match a `respId`, rect and padding, sizing
+  and limits, gap, direction, `Flow`, pin and `PointerMode`, as fields of
+  `ExplainedNode`. `explainingLayout` says whether it is on, and
+  `explainScope` narrows it to the nodes a part of the view adds.
 - Every key as a `Key`: `KeyF n`, paging, Insert, Space, the lock and menu
   keys, and a `KeyChar` of what a typing key types unmodified. `modSuper`, and
   `modPrimary` for the platform's command key (Command on macOS, else Ctrl).

@@ -953,12 +953,15 @@ module NanoUI
 
     -- | 'explainLayout' shows how a view was laid out: it outlines every
     -- layout node, coloured by how deep the node is, and tints the node under
-    -- the pointer, whose rect and padding 'explainedNode' reports. Put the
-    -- toggle in a debug panel; the overlay changes nothing else, and with it
-    -- off a frame costs what it did.
+    -- the pointer, which 'explainedNode' describes: its widget id (to match a
+    -- 'respId'), rect and padding, and what its layout asked for, its sizing,
+    -- gap, flow, pin and pointer mode. 'explainScope' narrows the overlay to
+    -- part of a view. Put the toggle in a debug panel; the overlay changes
+    -- nothing else, and with it off a frame costs what it did.
   , explainLayout
   , explainingLayout
   , explainedNode
+  , explainScope
   , ExplainedNode (..)
 
     -- * The native window
