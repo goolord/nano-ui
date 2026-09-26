@@ -154,6 +154,7 @@ library
         NanoUI.Internal.Widgets.Radio
         NanoUI.Internal.Widgets.Tree
         NanoUI.Internal.Widgets.ColorPicker
+        NanoUI.Internal.Widgets.Cursor
         NanoUI.Internal.Widgets.Drawing
         NanoUI.Internal.Widgets.TextInput
         NanoUI.Internal.Widgets.NumericInput
@@ -255,6 +256,7 @@ test-suite nano-ui-test
         Cases.Images
         Cases.TooltipDelay
         Cases.Visibility
+        Cases.Cursors
         Cases.PointerExtra
     build-depends:
         bytestring,

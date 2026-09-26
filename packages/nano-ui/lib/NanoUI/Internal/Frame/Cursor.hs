@@ -7,10 +7,11 @@ module NanoUI.Internal.Frame.Cursor
   )
 where
 
-import Control.Monad (forM)
+import Control.Monad (forM, forM_, unless, when)
 import Control.Monad.Trans.Maybe (MaybeT (..))
 import Data.Foldable (asum, find)
-import Data.IORef (readIORef)
+import Data.List (sortOn)
+import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Maybe (fromMaybe, isJust)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Font (sliderHitBounds)
@@ -35,6 +36,7 @@ uiCursorKind :: Context -> Input -> IO UiCursorKind
 uiCursorKind ctx inp =
   -- The first query with an opinion wins; later ones do not run. The active
   -- widget, then the hot one, has an opinion unless it asks for the default.
+  -- A 'withCursorShape' scope only fills in where nothing had one.
   fmap (fromMaybe UiCursorDefault) . runMaybeT . asum . map MaybeT $
     [ textEditMenuCursorKind ctx inp
     , selectDropdownCursorKind ctx inp
@@ -44,6 +46,7 @@ uiCursorKind ctx inp =
     , textFieldHoverCursorKind ctx inp
     , widgetKind =<< readIORef (ctxActiveId ctx)
     , widgetKind =<< getHotId ctx
+    , cursorRegionKind ctx inp
     ]
   where
     widgetKind wid = do
@@ -158,6 +161,71 @@ cursorZoneKind ctx inp = do
     else do
       let mouse = inputMousePos inp
       fmap snd . find (\(r, _) -> rectContains r mouse) <$> readIORef (ctxCursorZones ctx)
+
+-- | The shape of the innermost
+-- 'NanoUI.Internal.Widgets.Cursor.withCursorShape' scope ('ctxCursorRegions')
+-- that declared the node on top at the pointer ('nodeOnTopAt'), among the
+-- nodes of the floating panel the pointer is confined to when there is one.
+cursorRegionKind :: Context -> Input -> IO (Maybe UiCursorKind)
+cursorRegionKind ctx inp =
+  readIORef (ctxCursorRegions ctx) >>= \case
+    [] -> pure Nothing
+    regions -> do
+      let mouse = inputMousePos inp
+      top <- overlayHitRoot ctx mouse
+      mIdx <- nodeOnTopAt ctx top mouse
+      -- A scope comes before the scopes inside it, so the last one holding
+      -- the node is the innermost.
+      pure $ mIdx >>= \idx ->
+        foldl' (\found (from, to, kind) -> if from <= idx && idx < to then Just kind else found) Nothing regions
+
+-- | The node paint draws last among those whose visible part holds @mouse@:
+-- in the floating panel @top@ when the pointer is confined to one, else on
+-- the page, whose top-level nodes count in the order they were declared.
+-- Paint draws a node's children over the node, in 'forChildrenInPaintOrder_'
+-- (a stack's later children and every pinned child over the rest), and each
+-- floating panel as a layer of its own, over the page: windows, then modals,
+-- then popups. A node other than a plain container clips its children to
+-- itself, so where it misses the pointer none of them is looked at.
+nodeOnTopAt :: Context -> Maybe NodeIdx -> V2 -> IO (Maybe NodeIdx)
+nodeOnTopAt ctx@Context {ctxNodeArena = na} top mouse = do
+  found <- newIORef Nothing
+  let visit i = do
+        hit <- nodePointVisible ctx i mouse
+        when hit (writeIORef found (Just i))
+        nt <- getNodeType na i
+        when (hit || nt == NodeContainer) $
+          forChildrenInPaintOrder_ na i visitLayer
+      -- A floating panel is a layer of its own, not part of the one around it.
+      visitLayer i = do
+        floating <- isFloatingNode <$> getNodeType na i
+        unless floating (visit i)
+  case top of
+    Just panel -> do
+      visit panel
+      -- The panels declared inside it, such as a menu opened in a modal, are
+      -- drawn over it. Only a modal confines the pointer while another panel
+      -- is under it, so most frames find none.
+      inner <- foldClassNodeRevM na FloatingNodes (\acc i ->
+        if i <= panel
+          then pure acc
+          else do
+            inside <- nodeInSubtree ctx i panel
+            rank <- floatingRank <$> getNodeType na i
+            pure (if inside then (rank, i) : acc else acc)) []
+      forM_ (sortOn fst inner) (visit . snd)
+    Nothing -> do
+      count <- arenaCount na
+      forM_ [0 .. count - 1] $ \i -> do
+        parent <- getParent na i
+        when (parent < 0) (visitLayer i)
+  readIORef found
+  where
+    floatingRank :: NodeType -> Int
+    floatingRank = \case
+      NodeWindow -> 0
+      NodeModal -> 1
+      _ -> 2
 
 -- | Whether 'uiCursorKind' requests the link/button pointer cursor.
 pointerCursorWanted :: Context -> Input -> IO Bool

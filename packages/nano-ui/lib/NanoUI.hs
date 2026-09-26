@@ -429,6 +429,21 @@ module NanoUI
   , resolveFontUi
   , UiCursorKind (..)
 
+    -- * Cursors
+
+    -- | Widgets pick the pointer shape shown over them: the pointing hand over
+    -- a button, the I-beam over a text field. 'withCursorShape' asks for a
+    -- shape over any part of a view, where the widgets inside do not pick
+    -- one:
+    --
+    -- > withCursorShape UiCursorMove (drawing (fixedWH 320 200) board)
+    --
+    -- A 'CursorShape' is a 'UiCursorKind'. Disabled widgets keep the arrow;
+    -- wrap them in @withCursorShape UiCursorNotAllowed@ to show that they are
+    -- off.
+  , withCursorShape
+  , CursorShape
+
     -- * Drag and drop
   , DropType (..)
   , DropEvent (..)
@@ -787,6 +802,7 @@ import NanoUI.Internal.Widgets.Button
 import NanoUI.Internal.Widgets.Caption
 import NanoUI.Internal.Widgets.Checkbox
 import NanoUI.Internal.Widgets.ColorPicker
+import NanoUI.Internal.Widgets.Cursor
 import NanoUI.Widgets.Combo
 import NanoUI.Widgets.Custom
 import NanoUI.Internal.Widgets.Display

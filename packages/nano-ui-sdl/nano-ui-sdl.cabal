@@ -121,7 +121,7 @@ test-suite nano-ui-render-test
     type:             exitcode-stdio-1.0
     main-is:          Rendering.hs
     hs-source-dirs:   test, lib
-    other-modules:    NanoUI.Sdl.Internal.Render, NanoUI.Sdl.Internal.Image
+    other-modules:    NanoUI.Sdl.Internal.Render, NanoUI.Sdl.Internal.Image, NanoUI.Sdl.Internal.Cursor
     if os(windows)
         ghc-options: -optl-mconsole
     build-depends:

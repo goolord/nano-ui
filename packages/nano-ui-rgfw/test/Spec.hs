@@ -4,13 +4,14 @@ import Control.Exception (IOException, bracket, try)
 import Control.Monad (forM_)
 import Data.ByteString qualified as BS
 import Data.Either (isLeft)
+import Data.List (nub)
 import Data.Vector.Unboxed qualified as U
 import Data.Word (Word32)
 import Foreign.Marshal.Alloc (allocaBytes, callocBytes, free)
 import Foreign.Storable (peekByteOff, peekElemOff)
 import NanoUI
   ( DrawOp (..), ImageConfig (..), ImageId (..), NanoUI, Rect (..), Rotation (..), Style (..), Theme (..)
-  , V2 (..), box, button, checkbox, colorRGBA, column, defaultImageConfig, defaultLayout, drawing
+  , UiCursorKind (..), V2 (..), box, button, checkbox, colorRGBA, column, defaultImageConfig, defaultLayout, drawing
   , fixedWH, grow, imageConfigured', label, respRect, tomorrowNightMinDarkTheme, window
   )
 import NanoUI.Input (Input (..), Modifiers (..), emptyInput)
@@ -19,7 +20,7 @@ import NanoUI.Internal.Layout.Arena (NodeType (..), arenaCount, getNodeRect, get
 import NanoUI.Rgfw.Internal.Context (newRgfwContext)
 import NanoUI.Rgfw.Internal.Font.Cozette (CozetteFont (..), charToGlyphId, cozetteGlyphBit, getCozetteFont, renderGlyphScaledToBuffer)
 import NanoUI.Rgfw.Internal.Gl (GlyphAtlas (..), atlasCell, bakeGlyphAtlas, glyphAtlasFor, toPhysRect, writeSpanQuads)
-import NanoUI.Rgfw.Internal.Session (applyRgfwEvent, decodeRgfwEvents)
+import NanoUI.Rgfw.Internal.Session (applyRgfwEvent, decodeRgfwEvents, mapRgfwCursor)
 import NanoUI.Rgfw.Render (renderArena)
 import NanoUI.Rgfw.Surface (clearScreen, fillRect, freeRgfwSurface, newOffscreenRgfwSurface, packColor, sBuffer, sHeight, sWidth)
 import NanoUI.Testing (DrawCmd (..), DrawData (..), collectRasterSpans, newPixelContext, registerImage, runFrame)
@@ -282,11 +283,36 @@ testTurnedImageRaster = do
   flat <- probe 0
   assert "Unturned image covers its whole rect" (and flat)
 
+-- | Each cursor kind RGFW has a cursor for shows that cursor, no two of them
+-- the same one, and every other kind shows the nearest one RGFW has.
+testRgfwCursors :: IO ()
+testRgfwCursors = do
+  let native =
+        [ (UiCursorDefault, R.rgfw_mouseArrow), (UiCursorPointer, R.rgfw_mousePointingHand), (UiCursorText, R.rgfw_mouseIbeam)
+        , (UiCursorNsResize, R.rgfw_mouseResizeNS), (UiCursorEwResize, R.rgfw_mouseResizeEW)
+        , (UiCursorNwseResize, R.rgfw_mouseResizeNWSE), (UiCursorNeswResize, R.rgfw_mouseResizeNESW)
+        , (UiCursorNotAllowed, R.rgfw_mouseNotAllowed), (UiCursorWait, R.rgfw_mouseWait), (UiCursorProgress, R.rgfw_mouseProgress)
+        , (UiCursorCrosshair, R.rgfw_mouseCrosshair), (UiCursorMove, R.rgfw_mouseResizeAll), (UiCursorNResize, R.rgfw_mouseResizeN)
+        , (UiCursorNeResize, R.rgfw_mouseResizeNE), (UiCursorEResize, R.rgfw_mouseResizeE), (UiCursorSeResize, R.rgfw_mouseResizeSE)
+        , (UiCursorSResize, R.rgfw_mouseResizeS), (UiCursorSwResize, R.rgfw_mouseResizeSW), (UiCursorWResize, R.rgfw_mouseResizeW)
+        , (UiCursorNwResize, R.rgfw_mouseResizeNW)
+        ]
+      fallback =
+        [ (UiCursorGrab, R.rgfw_mouseResizeAll), (UiCursorGrabbing, R.rgfw_mouseResizeAll), (UiCursorAllScroll, R.rgfw_mouseResizeAll)
+        , (UiCursorCell, R.rgfw_mouseCrosshair), (UiCursorColResize, R.rgfw_mouseResizeEW), (UiCursorRowResize, R.rgfw_mouseResizeNS)
+        ]
+          ++ map (,R.rgfw_mouseArrow) [UiCursorHelp, UiCursorCopy, UiCursorAlias, UiCursorContextMenu, UiCursorZoomIn, UiCursorZoomOut]
+      shows' = all (\(k, icon) -> mapRgfwCursor k == icon)
+  assert "RGFW cursors: each native shape shows its own cursor" (shows' native && length (nub (map snd native)) == length native)
+  assert "RGFW cursors: the other shapes fall back" (shows' fallback)
+  assert "RGFW cursors: every kind is mapped" (all (`elem` map fst (native ++ fallback)) [minBound .. maxBound])
+
 main :: IO ()
 main = do
   putStrLn "=== Running nano-ui-rgfw Unit Tests ==="
   testRgfwTyping
   testRgfwPointer
+  testRgfwCursors
   testPackColor
   testSurfaceAllocation
   testScale2xGlyphTables

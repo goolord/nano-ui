@@ -180,6 +180,11 @@ no pointer. `askFrameInput` is for window-wide handling, such as dismissing
 a popup after an outside click; using it for an ordinary control bypasses
 pointer routing.
 
+`withCursorShape` sets the pointer's shape over a subtree wherever the
+widgets inside pick none, such as `UiCursorCrosshair` over a canvas, or
+`UiCursorNotAllowed` around disabled widgets. A custom widget picks its own
+with `widgetCursor`. A backend shows the nearest shape the platform has.
+
 A middle click is `respMiddleClicked`, routed like a right click; a closable
 tab closes on one.
 

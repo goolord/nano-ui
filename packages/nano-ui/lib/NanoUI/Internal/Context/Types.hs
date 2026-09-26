@@ -707,6 +707,11 @@ data Context = Context
   -- | Rects the view asked a cursor for this build, newest first: a table's
   -- column edges. Each build starts empty.
   , ctxCursorZones :: !(IORef [(Rect, UiCursorKind)])
+  -- | The node ranges of this build's 'NanoUI.Internal.Widgets.Cursor.withCursorShape'
+  -- scopes, from the first index up to but not including the second, newest
+  -- first: a scope ends after the scopes inside it, so it comes before them.
+  -- Each build starts empty.
+  , ctxCursorRegions :: !(IORef [(Int, Int, UiCursorKind)])
   , ctxClipboardGet :: IO (Maybe Text)
   , ctxClipboardSet :: Text -> IO Bool
   , ctxImageAtlas :: ImageAtlas

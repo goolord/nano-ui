@@ -10,6 +10,8 @@ module NanoUI.Rgfw.Internal.Session
   , RgfwEvent
   , decodeRgfwEvents
   , applyRgfwEvent
+  -- * Cursors
+  , mapRgfwCursor
   ) where
 
 import Control.Concurrent (rtsSupportsBoundThreads, runInBoundThread)
@@ -41,6 +43,7 @@ import NanoUI.Backend
   , MouseButton (..)
   , appendInputKey
   , applyMouseButton
+  , cursorFallback
   , emptyInput
   , modifiersFromBits
   )
@@ -127,17 +130,30 @@ mapRgfwKey k
 modsFromRgfw :: Word8 -> Modifiers
 modsFromRgfw m = modifiersFromBits m R.rgfw_modShift (R.rgfw_modControl .|. R.rgfw_modSuper) R.rgfw_modAlt
 
+-- | The RGFW standard cursor that shows a cursor kind, or its
+-- 'cursorFallback'. 'R.rgfw_mouseArrow' selects the platform's default arrow.
 mapRgfwCursor :: UiCursorKind -> Word8
-mapRgfwCursor kind = case kind of
-  UiCursorDefault    -> R.rgfw_mouseArrow
+mapRgfwCursor kind = case cursorFallback kind of
   UiCursorPointer    -> R.rgfw_mousePointingHand
   UiCursorText       -> R.rgfw_mouseIbeam
-  UiCursorGrab       -> R.rgfw_mouseArrow
-  UiCursorGrabbing   -> R.rgfw_mouseArrow
   UiCursorNsResize   -> R.rgfw_mouseResizeNS
   UiCursorEwResize   -> R.rgfw_mouseResizeEW
   UiCursorNwseResize -> R.rgfw_mouseResizeNWSE
   UiCursorNeswResize -> R.rgfw_mouseResizeNESW
+  UiCursorNotAllowed -> R.rgfw_mouseNotAllowed
+  UiCursorWait       -> R.rgfw_mouseWait
+  UiCursorProgress   -> R.rgfw_mouseProgress
+  UiCursorCrosshair  -> R.rgfw_mouseCrosshair
+  UiCursorMove       -> R.rgfw_mouseResizeAll
+  UiCursorNResize    -> R.rgfw_mouseResizeN
+  UiCursorNeResize   -> R.rgfw_mouseResizeNE
+  UiCursorEResize    -> R.rgfw_mouseResizeE
+  UiCursorSeResize   -> R.rgfw_mouseResizeSE
+  UiCursorSResize    -> R.rgfw_mouseResizeS
+  UiCursorSwResize   -> R.rgfw_mouseResizeSW
+  UiCursorWResize    -> R.rgfw_mouseResizeW
+  UiCursorNwResize   -> R.rgfw_mouseResizeNW
+  _                  -> R.rgfw_mouseArrow
 
 -- | Run a view in an owned RGFW/OpenGL window until quit. Native resources are
 -- released on exit. Window creation failure prints a message and returns.

@@ -6,7 +6,9 @@ module Main (main) where
 import Control.Exception (bracket)
 import Control.Monad (forM_, replicateM_, unless, void)
 import Data.ByteString qualified as BS
-import Data.Maybe (fromMaybe)
+import Data.IORef (readIORef)
+import Data.List (nub)
+import Data.Maybe (fromMaybe, mapMaybe)
 import Data.Primitive.PrimArray (primArrayFromList)
 import Data.Vector.Unboxed qualified as U
 import Data.Word (Word8)
@@ -23,14 +25,16 @@ import NanoUI
   , fixedWH, imageConfigured', respRect
   )
 import NanoUI.Internal.Context (lookupImageUv)
+import NanoUI.Sdl.Internal.Cursor (SdlCursors (..), destroyCursors, initCursors, sdlSystemCursor, showCursorKind)
 import NanoUI.Sdl.Internal.Image (ImageAtlas, destroyImageAtlas, newImageAtlas, syncImageAtlas)
 import NanoUI.Sdl.Internal.Render (destroyRenderBatch, flushRenderBatch, newRenderBatch, renderDrawDataPass)
 import NanoUI.Testing
-  ( Context, Damage (..), DrawCmd (..), DrawData (..), Layer (..), atlasTextureId, glyphPageTextureId
+  ( Context, Damage (..), DrawCmd (..), DrawData (..), Layer (..), UiCursorKind (..), atlasTextureId, glyphPageTextureId
   , newPixelContext, registerImage
   )
 import NanoUI.Testing.Assert (withInput)
 import NanoUI.Testing.Harness (warmupDraw)
+import SDL3.Sys.Bindgen.Mouse qualified as M
 import SDL3.Sys.Bindgen.Render (SDL_Renderer, SDL_Texture)
 import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
 import SDL3.Sys.Render (renderPresentSafe, renderReadPixels)
@@ -162,6 +166,35 @@ benchmark name warm n action = do
       perRun x = fromIntegral x / fromIntegral n
   printf "%s: %.6f ms/frame | %.1f B/frame\n" name (perRun (t1 - t0) / 1e6) (perRun (bytes0 - bytes1))
 
+-- | Every cursor kind asks for a system cursor SDL declares (SDL 3.2 does not
+-- check), the kinds SDL has a cursor for each get their own, and showing every
+-- kind twice creates each system cursor once, NULL ones (this driver's) too.
+cursorChecks :: IO ()
+cursorChecks = do
+  let kinds = [minBound .. maxBound] :: [UiCursorKind]
+      wanted = mapMaybe sdlSystemCursor kinds
+      native =
+        [ (UiCursorPointer, M.SDL_SYSTEM_CURSOR_POINTER), (UiCursorText, M.SDL_SYSTEM_CURSOR_TEXT)
+        , (UiCursorNsResize, M.SDL_SYSTEM_CURSOR_NS_RESIZE), (UiCursorEwResize, M.SDL_SYSTEM_CURSOR_EW_RESIZE)
+        , (UiCursorNwseResize, M.SDL_SYSTEM_CURSOR_NWSE_RESIZE), (UiCursorNeswResize, M.SDL_SYSTEM_CURSOR_NESW_RESIZE)
+        , (UiCursorNotAllowed, M.SDL_SYSTEM_CURSOR_NOT_ALLOWED), (UiCursorWait, M.SDL_SYSTEM_CURSOR_WAIT)
+        , (UiCursorProgress, M.SDL_SYSTEM_CURSOR_PROGRESS), (UiCursorCrosshair, M.SDL_SYSTEM_CURSOR_CROSSHAIR)
+        , (UiCursorMove, M.SDL_SYSTEM_CURSOR_MOVE), (UiCursorNResize, M.SDL_SYSTEM_CURSOR_N_RESIZE)
+        , (UiCursorNeResize, M.SDL_SYSTEM_CURSOR_NE_RESIZE), (UiCursorEResize, M.SDL_SYSTEM_CURSOR_E_RESIZE)
+        , (UiCursorSeResize, M.SDL_SYSTEM_CURSOR_SE_RESIZE), (UiCursorSResize, M.SDL_SYSTEM_CURSOR_S_RESIZE)
+        , (UiCursorSwResize, M.SDL_SYSTEM_CURSOR_SW_RESIZE), (UiCursorWResize, M.SDL_SYSTEM_CURSOR_W_RESIZE)
+        , (UiCursorNwResize, M.SDL_SYSTEM_CURSOR_NW_RESIZE)
+        ]
+  unless (all (\c -> c >= M.SDL_SYSTEM_CURSOR_DEFAULT && c < M.SDL_SYSTEM_CURSOR_COUNT) wanted) $
+    fail ("cursor kinds ask for undeclared SDL cursors: " ++ show wanted)
+  unless (all (\(k, c) -> sdlSystemCursor k == Just c) native && length (nub (map snd native)) == length native) $
+    fail ("cursor kinds do not show their own SDL cursors: " ++ show [(k, sdlSystemCursor k) | (k, _) <- native])
+  bracket initCursors destroyCursors $ \cursors -> do
+    mapM_ (showCursorKind cursors) (kinds ++ kinds)
+    created <- map fst <$> readIORef (scSystem cursors)
+    unless (length created == length (nub wanted) && all (`elem` created) wanted) $
+      fail ("system cursors created more than once or not at all: " ++ show created)
+
 black :: Color
 black = colorRGBA 0 0 0 255
 
@@ -241,3 +274,4 @@ main = do
                 fail (name ++ ": clipped geometry lost or escaped damage: " ++ show (inside, untouched))
           step "glyph upload, padding and reset readback" (atlasChecks env (\tex dd -> drawWithGlyph tex dd DamageFull))
           step "image atlas upload, and turned and faded image readback" (imageChecks env ctx images (`draw` DamageFull))
+          step "cursor mapping and creation" cursorChecks

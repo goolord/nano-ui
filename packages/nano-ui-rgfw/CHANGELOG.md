@@ -27,6 +27,8 @@
 - `renderArenaGl` takes the frame's damage pieces and cuts text to each. Two
   labels changing in opposite corners of a window of text went from 0.41 to
   0.11 ms a frame, since they no longer repaint everything between them.
+- The new cursor shapes show RGFW's standard cursors or the nearest it has,
+  and the grab hands show the move arrows instead of the arrow.
 
 ### Fixed
 

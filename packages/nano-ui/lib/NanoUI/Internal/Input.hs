@@ -23,6 +23,8 @@ module NanoUI.Internal.Input
   , stripInteractionInput
   , withoutPointer
   , UiCursorKind (..)
+  , CursorShape
+  , cursorFallback
   , grabHoverKind
   , grabDragKind
   , clearEphemeral
@@ -143,7 +145,10 @@ emptyInput =
     , inputWindowRedraw = False
     }
 
--- | Backend-independent cursor shape requested by a hovered control.
+-- | Backend-independent cursor shape requested by a hovered control. The
+-- shapes are CSS's cursors, and a backend shows each with the platform's
+-- cursor of that name. Where the platform has none, it shows the closest
+-- one it has: the SDL and RGFW backends show the 'cursorFallback'.
 data UiCursorKind
   = UiCursorDefault
   | UiCursorPointer
@@ -154,7 +159,69 @@ data UiCursorKind
   | UiCursorEwResize
   | UiCursorNwseResize
   | UiCursorNeswResize
-  deriving (Eq, Show, Enum)
+  | -- | The action is not allowed here: a slashed circle.
+    UiCursorNotAllowed
+  | -- | Busy, and not taking input: an hourglass or a spinner.
+    UiCursorWait
+  | -- | Busy, but still taking input: the arrow with a spinner.
+    UiCursorProgress
+  | -- | Help is available: the arrow with a question mark.
+    UiCursorHelp
+  | -- | Precise selection, as over a canvas.
+    UiCursorCrosshair
+  | -- | A cell or a set of cells can be selected: a thick plus.
+    UiCursorCell
+  | -- | What is under the pointer can be moved: arrows in four directions.
+    UiCursorMove
+  | -- | The content can be scrolled in any direction.
+    UiCursorAllScroll
+  | -- | A drop here copies.
+    UiCursorCopy
+  | -- | A drop here makes a link or shortcut.
+    UiCursorAlias
+  | -- | A context menu is available.
+    UiCursorContextMenu
+  | -- | A click zooms in: a magnifier with a plus.
+    UiCursorZoomIn
+  | -- | A click zooms out: a magnifier with a minus.
+    UiCursorZoomOut
+  | -- | A column can be resized sideways.
+    UiCursorColResize
+  | -- | A row can be resized up or down.
+    UiCursorRowResize
+  | -- | This and the seven after it are the one-way resize arrows, for an
+    -- edge or corner that can move only one way, such as a pane's edge at
+    -- its limit. Platforms without one-way arrows show the two-way ones.
+    UiCursorNResize
+  | UiCursorNeResize
+  | UiCursorEResize
+  | UiCursorSeResize
+  | UiCursorSResize
+  | UiCursorSwResize
+  | UiCursorWResize
+  | UiCursorNwResize
+  deriving (Eq, Show, Enum, Bounded)
+
+-- | The pointer shape a view asks for while the pointer is over part of it
+-- ('NanoUI.withCursorShape', 'NanoUI.Widgets.Custom.widgetCursor'):
+-- 'UiCursorKind' under the name the view API uses.
+type CursorShape = UiCursorKind
+
+
+-- | The shape a backend shows for a kind when it has only the cursors SDL
+-- and RGFW have: the grab hands and all-scroll are the move arrows, a cell
+-- the crosshair, column and row resizing the two-way arrows, and help, copy,
+-- alias, context menu and the zooms the arrow. Every other kind is itself.
+cursorFallback :: UiCursorKind -> UiCursorKind
+cursorFallback = \case
+  UiCursorGrab -> UiCursorMove
+  UiCursorGrabbing -> UiCursorMove
+  UiCursorAllScroll -> UiCursorMove
+  UiCursorCell -> UiCursorCrosshair
+  UiCursorColResize -> UiCursorEwResize
+  UiCursorRowResize -> UiCursorNsResize
+  k | k `elem` [UiCursorHelp, UiCursorCopy, UiCursorAlias, UiCursorContextMenu, UiCursorZoomIn, UiCursorZoomOut] -> UiCursorDefault
+  k -> k
 
 -- | Grab cursor over a target, becoming a closed hand while the left button is held.
 grabHoverKind :: Bool -> Input -> UiCursorKind

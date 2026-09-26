@@ -94,6 +94,9 @@ module RGFW.Raw
   , rgfw_mouseResizeSW
   , rgfw_mouseResizeW
   , rgfw_mouseResizeAll
+  , rgfw_mouseNotAllowed
+  , rgfw_mouseWait
+  , rgfw_mouseProgress
   ) where
 
 import Data.Word (Word8, Word32)
@@ -297,6 +300,9 @@ rgfw_mouseResizeEW, rgfw_mouseResizeNS, rgfw_mouseResizeNWSE, rgfw_mouseResizeNE
 rgfw_mouseResizeNW, rgfw_mouseResizeN, rgfw_mouseResizeNE, rgfw_mouseResizeE :: Word8
 -- | Directional resize cursor codes: southeast, south, southwest, west, and all directions.
 rgfw_mouseResizeSE, rgfw_mouseResizeS, rgfw_mouseResizeSW, rgfw_mouseResizeW, rgfw_mouseResizeAll :: Word8
+-- | Standard cursor codes for a forbidden action, a busy application, and one
+-- busy in the background.
+rgfw_mouseNotAllowed, rgfw_mouseWait, rgfw_mouseProgress :: Word8
 
 rgfw_mouseNormal       = #{const RGFW_mouseNormal}
 rgfw_mouseArrow        = #{const RGFW_mouseArrow}
@@ -316,3 +322,6 @@ rgfw_mouseResizeS      = #{const RGFW_mouseResizeS}
 rgfw_mouseResizeSW     = #{const RGFW_mouseResizeSW}
 rgfw_mouseResizeW      = #{const RGFW_mouseResizeW}
 rgfw_mouseResizeAll    = #{const RGFW_mouseResizeAll}
+rgfw_mouseNotAllowed   = #{const RGFW_mouseNotAllowed}
+rgfw_mouseWait         = #{const RGFW_mouseWait}
+rgfw_mouseProgress     = #{const RGFW_mouseProgress}

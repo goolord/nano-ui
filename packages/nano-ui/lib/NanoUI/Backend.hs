@@ -62,6 +62,9 @@ module NanoUI.Backend
   , foldInputKeys
   , modifiersFromBits
 
+    -- * Cursors
+  , cursorFallback
+
     -- * Fonts
 
     -- | A backend hands the context 'FontMetrics' whose 'fmBackend' is a

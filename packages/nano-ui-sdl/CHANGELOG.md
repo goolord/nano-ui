@@ -65,6 +65,8 @@
   `RenderDriverSdlDefault` leaves SDL's own order alone, and
   `RenderDriverNamed` asks for one by name. An `SDL_RENDER_DRIVER` in the
   environment still wins over all three.
+- The new cursor shapes, as SDL's system cursors or the nearest it has; help,
+  zoom, copy, alias and context-menu show the arrow.
 - The middle mouse button, and the side buttons as back and forward.
 
 ### Changed
@@ -163,6 +165,8 @@
 - Wakes are coalesced: while one is queued, another costs an atomic swap and
   no `SDL_PushEvent`. The core wakes the loop on every `markDirty`, most of
   them made by the loop's own thread in the middle of a frame.
+- The grab hands show the move arrows. The backend asked SDL 3.2 for cursors
+  it does not have, which showed the arrow on X11.
 
 ### Removed
 

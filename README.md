@@ -46,7 +46,8 @@ counter = do
   viewport and offset it needs to pick its rows, and `sensor` says when a
   widget scrolls into view.
 - Keyboard focus and navigation for every control.
-- Middle and side mouse buttons, and tooltips with a hover delay.
+- Middle and side mouse buttons, cursor shapes, and tooltips with a hover
+  delay.
 - Shaped text in the SDL backend, with fallback fonts for other scripts and
   mixed left-to-right and right-to-left lines. `richText` wraps a paragraph
   of mixed styles and links, as in

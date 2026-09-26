@@ -40,6 +40,7 @@ import Cases.LayoutFlow qualified
 import Cases.Images qualified
 import Cases.TooltipDelay qualified
 import Cases.Visibility qualified
+import Cases.Cursors qualified
 import Cases.PointerExtra qualified
 import NanoUI.Testing.Runner (runTests)
 
@@ -86,5 +87,6 @@ main =
     , Cases.Images.tests
     , Cases.TooltipDelay.tests
     , Cases.Visibility.tests
+    , Cases.Cursors.tests
     , Cases.PointerExtra.tests
     ]

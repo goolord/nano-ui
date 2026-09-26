@@ -260,12 +260,15 @@
   `sensorWith`, `sensorConfigured` (with a `sensorAnticipate` margin) and
   `useVisibility` report a `Visibility` (`visVisible`, `visRect`,
   `becameVisible`, `becameHidden`).
+- More cursor shapes from CSS's set, from `UiCursorNotAllowed` to the one-way
+  resize arrows. `withCursorShape` shows a `CursorShape` over part of a view
+  where its widgets pick none.
 - The middle and side mouse buttons: `respMiddleClicked`, `respMiddlePressed`
   and `inputMouseMiddleDown` and its siblings, routed like a right click (a
   middle click closes a closable tab), and `inputMouseBackPressed` and
   `inputMouseForwardPressed`.
 - `NanoUI.Backend` has what a backend needs for the above:
-  `modifiersFromBits`.
+  `modifiersFromBits` and `cursorFallback`.
 - `NanoUI.Testing.Harness` has `middleClickPair`.
 
 ### Changed
@@ -528,8 +531,9 @@
 - Tooltips open once the pointer has rested on the target for half a second
   (`defaultTooltipConfig`), or at once just after another, and shut while a
   button is held. `tooltipAt PlacementAtCursor` follows the pointer.
-- `Input`, `MouseButton`, `Response`, `Layout` and `DrawOp` have new fields
-  or constructors, for the additions above.
+- `Input`, `MouseButton`, `Response`, `Layout`,
+  `DrawOp` and `UiCursorKind` have new fields or constructors, for the
+  additions above.
 
 ### Fixed
 

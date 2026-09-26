@@ -691,7 +691,9 @@ demoUi = do
               muted "Auto ticks, shared scales, and decimation."
               -- chart data lives in "DemoData" (plus the §Plots section below).
               responsiveRowCol 760 (tight . gap 16 . fillW) $ do
-                captioned "Sine + cosine" (plot (minH 240 . fillW) sineCosineChart)
+                -- The crosshair over the plot, for reading values off it.
+                captioned "Sine + cosine" $
+                  withCursorShape UiCursorCrosshair (plot (minH 240 . fillW) sineCosineChart)
                 captioned "Weekly counts" (barChart (minH 240 . fillW) weeklyBars)
               responsiveRowCol 760 (tight . gap 16 . fillW) $ do
                 captioned "Sleep vs focus" (plot (minH 240 . fillW) sleepFocusChart)

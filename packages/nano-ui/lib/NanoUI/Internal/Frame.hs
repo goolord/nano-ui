@@ -227,6 +227,7 @@ resetUiBuild ctx newFrame = do
   writeIORef (ctxFocusablesCount ctx) 0
   writeIORef (ctxHotId ctx) (WidgetId 0)
   writeIORef (ctxCursorZones ctx) []
+  writeIORef (ctxCursorRegions ctx) []
   resetDrawingScopeCache ctx
   beginSensors ctx
 
