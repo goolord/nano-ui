@@ -53,6 +53,10 @@ module NanoUI.Internal.Monad
   , releaseFocus
   , focusedWidget
   , requestFocus
+  , focusNext
+  , focusPrevious
+  , clearFocus
+  , isFocused
   , getClipboard
   , setClipboard
   , requestFrame
@@ -495,6 +499,11 @@ holdFocus wid = withContext $ \ctx -> do
       writeIORef (ctxFocusVisible ctx) False
 
 -- | Take the keyboard off a widget, if it has it; nothing then has focus.
+-- It happens at once, in the middle of the view: a widget declared after
+-- the call sees no focus. Nothing else changes: a text field keeps its
+-- selection and its menu, as it does when a 'holdFocus' elsewhere takes the
+-- keyboard. 'clearFocus' moves it off as Tab or a click would, at the end of
+-- the frame.
 releaseFocus :: Ui :> es => WidgetId -> Eff es ()
 releaseFocus wid = withContext $ \ctx -> do
   focus <- getFocusId ctx
@@ -504,29 +513,61 @@ releaseFocus wid = withContext $ \ctx -> do
 focusedWidget :: Ui :> es => Eff es WidgetId
 focusedWidget = withContext getFocusId
 
+-- | Whether the widget with this id has the keyboard.
+isFocused :: Ui :> es => WidgetId -> Eff es Bool
+isFocused wid = (\focus -> hashWidgetId wid /= 0 && focus == wid) <$> focusedWidget
+
 -- | Move the keyboard to the widget with this id, as Tab moving onto it
 -- would: a text field starts taking keys with its caret where it last left
 -- it (at the end of one not yet edited), the widget shows the focus ring,
 -- and Tab goes on from it. The field that had the keyboard drops its
--- selection and menu, and commits on its next frame, as it does when a click
--- lands elsewhere. @'WidgetId' 0@, no widget, takes the keyboard off
--- whatever has it. For a search box that Ctrl+F sends the keys to:
+-- selection and menu, an open dropdown closes, and the field sees on its
+-- next frame that it lost the keyboard, as it does when a click lands
+-- elsewhere (a combo box or a search field commits then). For a search box
+-- that Ctrl+F sends the keys to:
 --
 -- > (resp, query') <- searchInput' "Find" query
 -- > findPressed <- shortcut (ctrl <> key 'f')
 -- > when findPressed (requestFocus (respId resp))
 --
 -- The request is carried out at the end of the frame, against the frame's
--- layout, so a widget declared after the call can be named too; the widget
--- has the keyboard from the next frame, which the request asks for. The
--- last request of a frame wins. A widget that Tab would not stop at this
+-- layout, so a widget declared after the call can be named too, as the next
+-- widget is by 'currentId', the id it will take:
+--
+-- > whenM (shortcut (ctrl <> key 'l')) (requestFocus =<< currentId)
+-- > address' <- textInput address
+--
+-- The widget has the keyboard from the next frame, which the request asks
+-- for. The last request of a frame wins ('focusNext', 'focusPrevious' and
+-- 'clearFocus' are requests too). A widget that Tab would not stop at this
 -- frame refuses it and focus stays where it was: one that is disabled, one
 -- behind an open 'NanoUI.Internal.Widgets.Overlay.modal', one not declared
 -- this frame, or a radio group's last option, which its response names.
 -- Asking for the widget that already has the keyboard changes nothing, so a
--- view can ask on every frame a condition holds.
+-- view can ask on every frame a condition holds. @'WidgetId' 0@, no widget,
+-- is 'clearFocus'.
 requestFocus :: Ui :> es => WidgetId -> Eff es ()
-requestFocus wid = withContext (\ctx -> writeIORef (ctxFocusRequest ctx) (Just wid))
+requestFocus wid = askFocus (if hashWidgetId wid == 0 then FocusNowhere else FocusOn wid)
+
+-- | Move the keyboard on to the next widget Tab stops at, as Tab does, at
+-- the end of the frame ('requestFocus').
+focusNext :: Ui :> es => Eff es ()
+focusNext = askFocus FocusNext
+
+-- | Move the keyboard back to the previous widget Tab stops at, as
+-- Shift+Tab does, at the end of the frame ('requestFocus').
+focusPrevious :: Ui :> es => Eff es ()
+focusPrevious = askFocus FocusPrevious
+
+-- | Take the keyboard off whatever has it, as a click on no text field or
+-- select does, at the end of the frame ('requestFocus'): the field that had
+-- it drops its selection and menu. 'releaseFocus' takes it off one widget
+-- at once and leaves the rest as it is.
+clearFocus :: Ui :> es => Eff es ()
+clearFocus = askFocus FocusNowhere
+
+askFocus :: Ui :> es => FocusRequest -> Eff es ()
+askFocus req = withContext (\ctx -> writeIORef (ctxFocusRequest ctx) (Just req))
 
 -- | The clipboard's text, through whatever clipboard the backend installed.
 -- 'Nothing' for an empty clipboard or none at all.

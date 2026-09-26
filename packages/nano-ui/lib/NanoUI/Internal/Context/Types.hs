@@ -52,6 +52,7 @@ module NanoUI.Internal.Context.Types
   , KeyClaim (..)
   , drawingKeyClaim
   , InputMethodRequest (..)
+  , FocusRequest (..)
   , initialInteractionState
   , CustomMeasureFn
   , CustomDrawContext (..)
@@ -685,6 +686,11 @@ data FocusKind
     FocusComposing
   deriving (Eq, Show)
 
+-- | Where a view asks the keyboard to go: to a widget, on to the next or
+-- back to the previous widget Tab stops at, or nowhere.
+data FocusRequest = FocusOn !WidgetId | FocusNext | FocusPrevious | FocusNowhere
+  deriving (Eq, Show)
+
 -- | A widget taking text from the input method this frame: the widget, its
 -- caret in window coordinates ('Nothing' for a text field, whose caret the
 -- frame works out from its node), and what it takes.
@@ -769,10 +775,9 @@ data Context = Context
   -- its ring. A pointer press hides it again.
   , ctxFocusVisible :: IORef Bool
   -- | Where the view asked the keyboard to go this frame
-  -- ('NanoUI.Internal.Monad.requestFocus'; @WidgetId 0@ for nowhere). The
-  -- frame moves focus there after layout
-  -- ('NanoUI.Internal.Frame.Input.finalizeFocusRequest').
-  , ctxFocusRequest :: IORef (Maybe WidgetId)
+  -- ('NanoUI.Internal.Monad.requestFocus'). The frame moves focus there
+  -- after layout ('NanoUI.Internal.Frame.Input.finalizeFocusRequest').
+  , ctxFocusRequest :: IORef (Maybe FocusRequest)
   -- | What the focused widget asked of the input method in the view last
   -- run ('NanoUI.Internal.Context.requestInputMethod'), which each build
   -- starts without. The frame after gives the composition to that widget

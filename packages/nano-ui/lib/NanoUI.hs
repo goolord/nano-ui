@@ -64,25 +64,36 @@ module NanoUI
 
     -- * Focus
 
-    -- | Tab moves the keyboard between focusable widgets, and a click gives it
-    -- to the widget clicked. A view that decides for itself where typing goes
-    -- -- an editor that keeps the keyboard while its find bar is shut -- says
-    -- so with 'holdFocus' each frame it should, and gets that frame's Tab.
+    -- | Tab moves the keyboard between focusable widgets, and a click on a
+    -- text field or a select gives it to that; a click anywhere else takes
+    -- it off the field that had it. A view that decides for itself where
+    -- typing goes -- an editor that keeps the keyboard while its find bar is
+    -- shut -- says so with 'holdFocus' each frame it should, and gets that
+    -- frame's Tab.
     --
     -- A view sends the keyboard somewhere once with 'requestFocus', naming
-    -- the widget by the 'respId' of its response, or nowhere with
-    -- @'WidgetId' 0@. Focus moves as Tab would move it: the widget shows the
-    -- focus ring, a text field takes the keys with its caret where it left
-    -- it, the field that had them commits, and the next Tab goes on from
-    -- there. A disabled widget, or one behind an open modal, refuses it. The
-    -- move happens at the end of the frame, and the widget has the keyboard
-    -- from the next ('NanoUI.Monad.focusedWidget' says which has it):
+    -- the widget by the 'respId' of its response, or by 'currentId' just
+    -- before declaring it; on with 'focusNext' and 'focusPrevious', as Tab
+    -- and Shift+Tab; or nowhere with 'clearFocus'. Focus moves as Tab would
+    -- move it: the widget shows the focus ring, a text field takes the keys
+    -- with its caret where it left it, the field that had them drops its
+    -- selection and commits, and the next Tab goes on from there. A disabled
+    -- widget, or one behind an open modal, refuses it. The move happens at
+    -- the end of the frame, and the widget has the keyboard from the next
+    -- ('isFocused' says whether it has):
     --
     -- > (resp, query') <- searchInput' "Find" query
     -- > findPressed <- shortcut (ctrl <> key 'f')
     -- > when findPressed (requestFocus (respId resp))
+    --
+    -- 'NanoUI.Monad.releaseFocus' takes the keyboard off a widget at once,
+    -- in the middle of the view, and changes nothing else.
   , holdFocus
   , requestFocus
+  , focusNext
+  , focusPrevious
+  , clearFocus
+  , isFocused
 
     -- * Clipboard
   , getClipboard

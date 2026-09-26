@@ -209,9 +209,16 @@ pointer routing.
 
 To move keyboard focus from the view, name the widget by its response:
 `when findPressed (requestFocus (respId resp))` focuses a search box on
-Ctrl+F, and `requestFocus (WidgetId 0)` takes the keyboard off whatever has
-it. Focus moves as Tab would, from the next frame; a widget Tab would skip,
-such as one disabled or behind a modal, refuses it.
+Ctrl+F, and `requestFocus =<< currentId` just before declaring a widget
+focuses that one. `focusNext` and `focusPrevious` move the keyboard as Tab
+and Shift+Tab do, `clearFocus` takes it off whatever has it, and
+`isFocused` says whether a widget has it. Focus moves as Tab would, at the
+end of the frame: the field that had the keyboard drops its selection and
+menu, as on a click elsewhere, and a widget Tab would skip, such as one
+disabled or behind a modal, refuses it. Only text fields and selects take
+the keyboard on a click. `releaseFocus` is the exception: it takes the
+keyboard off one widget at once, in the middle of the view, and changes
+nothing else.
 
 `withCursorShape` sets the pointer's shape over a subtree wherever the
 widgets inside pick none, such as `UiCursorCrosshair` over a canvas,

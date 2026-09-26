@@ -32,6 +32,7 @@ module NanoUI.Internal.Context
   , KeyClaim (..)
   , drawingKeyClaim
   , InputMethodRequest (..)
+  , FocusRequest (..)
   , intKey
   , DamageRequest (..)
   , CustomMeasureFn

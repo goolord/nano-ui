@@ -272,7 +272,14 @@
   `Rotation`. The `DrawImageRotated` op and the canvas's `drawImageRotated`
   draw an image turned about its centre.
 - Focus from code: `requestFocus` gives a widget the keyboard by its `respId`
-  as Tab would, or with `WidgetId 0` takes it away.
+  as Tab would, or by `currentId` just before declaring it; `focusNext` and
+  `focusPrevious` move it on as Tab and Shift+Tab do; `clearFocus` takes it
+  away (as `requestFocus (WidgetId 0)` does), and `isFocused` says whether a
+  widget has it. Each moves the keyboard at the end of the frame, as Tab or
+  a click would, where `releaseFocus` takes it off one widget at once and
+  changes nothing else. A command run on a text field from code
+  (`runTextCommand`) focuses it the same way, so a disabled field or one
+  behind a modal refuses it, and the field shows the focus ring.
 - `tooltipConfigured` and `tooltipWidgetConfigured` take a `TooltipConfig`:
   the hover delay (`tooltipDelay`), the grace after another tooltip
   (`tooltipGrace`), the placement (`tooltipPlacement`) and the space between

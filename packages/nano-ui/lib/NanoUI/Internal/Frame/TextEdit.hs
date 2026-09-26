@@ -40,7 +40,9 @@ import NanoUI.Widgets.TextEditor
 
 -- | Run a command on the field with this id and focus it: the command comes
 -- from a menu or button that may not be over the field, and the caret,
--- selection highlight and next keystroke belong to the field it edited. A
+-- selection highlight and next keystroke belong to the field it edited. The
+-- focus moves as 'NanoUI.Internal.Monad.requestFocus' moves it, at the end
+-- of the frame, so a disabled field or one behind a modal refuses it. A
 -- change to the text pulses @respChanged@ on the field's next frame.
 applyTextFieldCommand :: Context -> WidgetId -> TextCommand -> IO ()
 applyTextFieldCommand ctx wid cmd =
@@ -53,7 +55,7 @@ applyTextFieldCommand ctx wid cmd =
     -- selection-only command (Select All) repaints this frame.
     damageWidget ctx wid DamageSelf
     markDirty ctx
-    writeIORef (ctxFocusId ctx) wid
+    writeIORef (ctxFocusRequest ctx) (Just (FocusOn wid))
     modifyInteraction ctx (\s -> s {isTextInputMenu = Nothing}))
 
 -- | The field with this id as a command from outside its frame sees it: how
