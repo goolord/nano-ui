@@ -278,9 +278,12 @@
   tooltip follow the pointer, and opens a popup or context menu at its
   anchor point.
 - Visibility sensors, for loading what scrolls into view: `sensor`,
-  `sensorWith`, `sensorConfigured` (with a `sensorAnticipate` margin) and
-  `useVisibility` report a `Visibility` (`visVisible`, `visRect`,
-  `becameVisible`, `becameHidden`).
+  `sensorWith`, `sensorConfigured` and `useVisibility` report a `Visibility`
+  (`visVisible`, `visRect`, the part on screen, `visBounds`, the whole
+  widget, `becameVisible`, `becameHidden`). A `SensorConfig` gives an
+  anticipate margin (`sensorAnticipate`) and a delay (`sensorDelay`), the
+  time a widget must stay in view before it counts as visible, which the
+  sensor wakes the loop for rather than drawing frames meanwhile.
 - More cursor shapes from CSS's set, from `UiCursorNotAllowed` to the one-way
   resize arrows, and `UiCursorHidden`, which the SDL and RGFW backends show
   by hiding the pointer. `withCursorShape` shows a `UiCursorKind` over part of

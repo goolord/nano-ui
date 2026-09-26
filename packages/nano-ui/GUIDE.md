@@ -158,8 +158,10 @@ range when building only the visible rows of a large collection.
 To load something as it comes into view, wrap it in a `sensor` or watch its
 id with `useVisibility`. A sensor reports the last frame's layout, as
 `respRect` does; `becameVisible` holds once, on the frame it comes into view,
-and `sensorAnticipate` reports it that many pixels early. Here `load`
-registers an image and returns its id:
+`sensorAnticipate` reports it that many pixels early, and `sensorDelay` only
+once it has stayed in view that many seconds, so a list scrolled quickly
+past loads nothing. `visRect` is the part on screen and `visBounds` the
+whole widget. Here `load` registers an image and returns its id:
 
 ```haskell
 lazyImage :: NanoUI ImageId -> NanoUI ()

@@ -585,7 +585,10 @@ module NanoUI
     --
     -- An anticipate margin ('sensorAnticipate') counts a widget as visible
     -- while it is still that far outside, which gives lazy loading a head
-    -- start. A thumbnail that decodes its picture the first time it comes
+    -- start, and a delay ('sensorDelay') only once it has stayed in view
+    -- that long, so a list flung past loads none of the rows it shows for a
+    -- moment. 'visRect' is the part of the widget on screen, and 'visBounds'
+    -- all of it. A thumbnail that decodes its picture the first time it comes
     -- within 200 pixels of the viewport (@decodeRgba@ stands for an image
     -- decoder):
     --
