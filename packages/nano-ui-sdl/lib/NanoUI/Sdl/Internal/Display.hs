@@ -17,13 +17,10 @@ module NanoUI.Sdl.Internal.Display
   , refreshEventType
   , initRefreshEvent
   , pushRefreshEvent
-  , takeRefreshEvent
   , querySystemAppearance
   ) where
 
 import Control.Monad (unless, void)
-import Data.IORef (IORef, newIORef)
-import GHC.IORef (atomicSwapIORef)
 import Foreign.C.Types (CBool (..), CInt (..))
 import Foreign.Marshal.Alloc (alloca, callocBytes)
 import Foreign.Marshal.Utils (with)
@@ -89,8 +86,8 @@ installResizeWatch act = do
     removeResizeWatchC
     freeHaskellFunPtr fp
 
--- | The event 'pushRefreshEvent' sends, filled in once by 'initRefreshEvent'.
--- The core wakes the loop on every 'markDirty', so a push must not allocate.
+-- | The event 'pushRefreshEvent' sends, filled in once by 'initRefreshEvent',
+-- so a push does not allocate.
 {-# NOINLINE refreshEvent #-}
 refreshEvent :: Ptr SDL_Event
 refreshEvent = unsafePerformIO (callocBytes (sizeOf (undefined :: SDL_Event)))
@@ -102,9 +99,6 @@ refreshEventType = (\(Uint32 ty) -> ty) <$> peek refreshEvent.type'
 
 initRefreshEvent :: IO Bool
 initRefreshEvent = do
-  -- A wake queued as the last session closed went down with SDL's queue.
-  -- Left pending, it would stop this session from ever queuing one.
-  takeRefreshEvent
   registered <- refreshEventType
   if registered /= 0
     then pure True
@@ -113,19 +107,9 @@ initRefreshEvent = do
       poke refreshEvent.type' (Uint32 ty)
       pure (ty /= 0)
 
--- | Whether a refresh event is queued that the loop has not taken yet.
-{-# NOINLINE refreshPending #-}
-refreshPending :: IORef Bool
-refreshPending = unsafePerformIO (newIORef False)
-
--- | Wake the event loop from any thread. One queued event wakes it as well as
--- many, so a wake while one is pending costs an atomic swap and no SDL call:
--- the core wakes on every 'NanoUI.Testing.markDirty', most of them made by
--- the loop's own thread in the middle of a frame.
---
--- The swap is a memory barrier, so whatever the caller wrote before waking is
--- visible by the time the loop takes the event: 'takeRefreshEvent' runs
--- before the frame that reads it.
+-- | Wake the event loop from any thread. As the session's wake action it
+-- runs once for a run of wakes until the loop takes them, and not for the
+-- loop's own dirty marks ('NanoUI.Backend.setWakeLoop').
 --
 -- The push is a safe foreign call. SDL_PushEvent waits for the lock SDL
 -- holds while it runs event watches, and the resize watch
@@ -135,15 +119,7 @@ refreshPending = unsafePerformIO (newIORef False)
 pushRefreshEvent :: IO ()
 pushRefreshEvent = do
   ty <- refreshEventType
-  unless (ty == 0) $ do
-    pending <- atomicSwapIORef refreshPending True
-    unless pending $ do
-      ok <- pushEventSafe refreshEvent
-      unless ok $ void (atomicSwapIORef refreshPending False)
-
--- | The loop took the queued refresh event, so the next wake queues another.
-takeRefreshEvent :: IO ()
-takeRefreshEvent = void (atomicSwapIORef refreshPending False)
+  unless (ty == 0) $ void (pushEventSafe refreshEvent)
 
 -- | Whether the pointer is over the window (SDL's mouse focus). Once it has
 -- left, 'queryMouseWindowPos' still answers the last position inside.

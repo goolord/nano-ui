@@ -600,6 +600,8 @@ newContext = do
   ctxImageAtlas <- Atlas.newImageAtlas
   ctxWakeLoop <- newIORef Nothing
   ctxWoken <- newIORef False
+  ctxWakePending <- newIORef False
+  ctxLoopThread <- newIORef Nothing
   ctxWakeAt <- newIORef 0
   ctxHost <- newIORef Map.empty
   ctxTheme <- newIORef defaultTheme

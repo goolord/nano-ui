@@ -19,12 +19,12 @@ module NanoUI.Rgfw.Internal.Session
   , mapRgfwCursor
   ) where
 
-import Control.Concurrent (myThreadId, rtsSupportsBoundThreads, runInBoundThread)
+import Control.Concurrent (rtsSupportsBoundThreads, runInBoundThread)
 import Control.Exception (bracket)
 import Control.Monad (unless, void, when)
 import Data.Bits ((.&.), (.|.))
 import Data.Char (chr, isDigit, isPrint, toLower)
-import Data.IORef (IORef, atomicModifyIORef', atomicWriteIORef, newIORef, readIORef, writeIORef)
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.List (find)
 import Data.Maybe (fromMaybe, mapMaybe)
 import qualified Data.Text as T
@@ -71,6 +71,8 @@ import NanoUI.Backend
   , mouseButtonNumber
   , setExplainLayout
   , setWakeLoop
+  , sizeLimitAt
+  , syncCursorKind
   )
 import NanoUI.Internal.Context
   ( Context (..)
@@ -308,13 +310,10 @@ runRgfwAppReduceCustom opts getThemeAndScale updateModel initialModel view = inB
       debugSampler <- newRgfwDebugSampler
       setHost ctx (RgfwDebugHost debugSampler)
       setExplainLayout ctx (optExplainLayout opts)
-      -- Size limits are in layout units, converted at the current scale. A
-      -- zero axis is unlimited.
+      -- Size limits are in layout units, converted at the current scale.
       let limit set s = do
             scale <- readIORef scaleRef
-            let Size w h = fromMaybe (Size 0 0) s
-                axis v = if v <= 0 then 0 else round (v * scale)
-            set win (axis w) (axis h)
+            uncurry (set win) (sizeLimitAt scale (0, 0) s)
           place = case wsPosition settings of
             WindowPositionDefault -> WindowPositionCentered
             p -> p
@@ -338,33 +337,15 @@ runRgfwAppReduceCustom opts getThemeAndScale updateModel initialModel view = inB
           }
       reportWindowState ctx =<< rgfwWindowState win initScale
       unless (wsMode settings == Hidden) (R.showWindow win)
-      -- A wake from another thread (a background job) ends the event wait and
-      -- forces a frame; repeat wakes before that frame are dropped. Wakes from
-      -- the loop's own thread (every 'markDirty') are ignored, since the loop
-      -- already sees the dirty flag.
-      loopThread <- myThreadId
-      wakeRef <- newIORef False
-      setWakeLoop ctx $ do
-        me <- myThreadId
-        unless (me == loopThread) $ do
-          pending <- atomicModifyIORef' wakeRef (True,)
-          unless pending R.stopWaitForEvent
+      -- A wake from another thread (a background job) ends the event wait,
+      -- or the next one if none is under way.
+      setWakeLoop ctx R.stopWaitForEvent
       let font = getCozetteFont
           initInp = emptyInput {inputWindowSize = logicalSize initPhys initScale}
           -- Touch the platform cursor only when the wanted kind changes.
           -- 'UiCursorHidden' hides the pointer.
-          syncCursor c inp = do
-            want <- uiCursorKind c inp
-            cur <- readIORef cursorRef
-            when (want /= cur) $ do
-              writeIORef cursorRef want
-              let hidden = want == UiCursorHidden
-                  icon = mapRgfwCursor want
-              when (hidden /= (cur == UiCursorHidden)) $ R.showMouse win (not hidden)
-              unless hidden . void $
-                if icon == R.rgfw_mouseArrow
-                  then R.setMouseDefault win
-                  else R.setMouseStandard win icon
+          syncCursor c inp = uiCursorKind c inp >>= syncCursorKind cursorRef (R.showMouse win) (setIcon . mapRgfwCursor)
+          setIcon icon = void $ if icon == R.rgfw_mouseArrow then R.setMouseDefault win else R.setMouseStandard win icon
 
       bracket newGlRenderer freeGlRenderer $ \renderer -> R.withEventBuffer $ \evPtr -> do
         let !animateTimeout = max 1 (floor (refreshSec * 1000) - 2) :: Int
@@ -436,8 +417,7 @@ runRgfwAppReduceCustom opts getThemeAndScale updateModel initialModel view = inB
               SessionDriver
                 { sdPollEvents    = pollRgfwEvents win evPtr scaleRef monScaleRef winSizeRef
                 , sdWaitEvents    = \t -> do
-                    woke <- readIORef wakeRef
-                    unless woke (R.waitForEvent t)
+                    R.waitForEvent t
                     pollRgfwEvents win evPtr scaleRef monScaleRef winSizeRef
                 , sdApplyEvent    = applyRgfwEvent
                 , sdIsButtonEdge  = \case RgfwEvButton {} -> True; _ -> False
@@ -461,13 +441,9 @@ runRgfwAppReduceCustom opts getThemeAndScale updateModel initialModel view = inB
                   -- instead of spinning.
                 , sdPacingMs      = animateTimeout
                 , sdPresentPaces  = pure False
-                , sdShouldDraw    = \c prevInp inpSynced wasAnim refreshDue -> do
-                    woke <- readIORef wakeRef
-                    shouldRedrawFrame c prevInp inpSynced wasAnim False (refreshDue || woke)
-                , sdDraw          = \c curInp forceFull -> do
-                    -- Clear before the view runs, so a wake during it forces another frame.
-                    atomicWriteIORef wakeRef False
-                    drawOne forceFull c curInp
+                , sdShouldDraw    = \c prevInp inpSynced wasAnim refreshDue ->
+                    shouldRedrawFrame c prevInp inpSynced wasAnim False refreshDue
+                , sdDraw          = \c curInp forceFull -> drawOne forceFull c curInp
                 , sdOnCursor      = syncCursor
                 , sdShouldQuit    = \_ -> False
                 , sdAlignSec      = refreshSec

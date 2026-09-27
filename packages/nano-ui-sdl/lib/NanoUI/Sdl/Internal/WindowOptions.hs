@@ -12,11 +12,10 @@ import Data.Bits (zeroBits, (.&.))
 import Data.ByteString.Unsafe qualified as BSU
 import Data.Int (Int32)
 import Data.IORef (IORef, readIORef, writeIORef)
-import Data.Maybe (fromMaybe)
 import Data.Text.Foreign qualified as TextForeign
 import Foreign.Ptr (Ptr, castPtr, nullPtr)
 import NanoUI (RgbaPixels, Size (..), WindowMode (..), rgbaBytes, rgbaHeight, rgbaWidth)
-import NanoUI.Backend (WindowHost (..), WindowState (..), defaultWindowState)
+import NanoUI.Backend (WindowHost (..), WindowState (..), defaultWindowState, sizeLimitAt)
 import NanoUI.Sdl.Internal.Display (outPair, queryWindowPosition, sendWaylandSizeLimits, windowPosCentered)
 import NanoUI.Sdl.Internal.Frame (nativeFrameOutset)
 import SDL3.Sys.Bindgen.Pixels qualified as Pixels
@@ -46,7 +45,7 @@ windowHostFor win zoom limits =
         Hidden -> void (SDL.hideWindowSafe win)
     , hostMove = \x y -> void (SDL.setWindowPositionSafe win (fromIntegral x) (fromIntegral y))
     , hostCenter = void (SDL.setWindowPositionSafe win windowPosCentered windowPosCentered)
-    , hostResize = \s -> viewSize s >>= \(w, h) -> void (SDL.setWindowSizeSafe win w h)
+    , hostResize = \s -> viewSize (Just s) >>= \(w, h) -> void (SDL.setWindowSizeSafe win w h)
     , hostMinimize = void (SDL.minimizeWindowSafe win)
     , hostMaximize = void (SDL.maximizeWindowSafe win)
     , hostRestore = void (SDL.restoreWindowSafe win)
@@ -59,12 +58,12 @@ windowHostFor win zoom limits =
     lowerMin lo hi = if hi > 0 && lo > hi then hi else lo
     -- A view size in window coordinates at the current zoom, plus the
     -- desktop frame on a 'NanoUI.Sdl.Internal.Frame.DecorationsFrame' window
-    -- (as at open). A zero axis stays zero, meaning no limit.
-    viewSize (Size w h) = do
+    -- (as at open). A zero axis stays zero, meaning no limit ('sizeLimitAt').
+    viewSize size = do
       z <- zoom
-      (across, down) <- nativeFrameOutset win
-      let axis v outset = if v <= 0 then 0 else fromIntegral (round (v * z) + outset) :: Int32
-      pure (axis w across, axis h down)
+      outset <- nativeFrameOutset win
+      let (w, h) = sizeLimitAt z outset size
+      pure (fromIntegral w :: Int32, fromIntegral h)
     -- SDL resizes a window that is already past the limit. A Wayland
     -- toplevel's limits go to the compositor ('sendWaylandSizeLimits') and
     -- not to SDL, which would clamp configures to them, so it is resized here.
@@ -74,7 +73,7 @@ windowHostFor win zoom limits =
       Maybe Size ->
       IO ()
     sizeLimit set place limit = do
-      (w, h) <- viewSize (fromMaybe (Size 0 0) limit)
+      (w, h) <- viewSize limit
       case limits of
         Nothing -> void (set win w h)
         Just ref -> do

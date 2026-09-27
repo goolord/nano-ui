@@ -72,6 +72,7 @@ module NanoUI.Internal.Context.Types
   , intKey
   ) where
 
+import Control.Concurrent (ThreadId)
 import Data.Dynamic (Dynamic)
 import Data.HashMap.Strict (HashMap)
 import Data.HashMap.Strict qualified as HashMap
@@ -977,6 +978,13 @@ data Context = Context
   , ctxWoken :: !(IORef Bool)
   -- ^ Set from any thread by 'NanoUI.Internal.Context.Core.wakeFromThread'
   -- when view inputs changed. The next frame repaints fully and clears it.
+  , ctxWakePending :: !(IORef Bool)
+  -- ^ A wake ran the wake action and the loop has not taken it yet. Later
+  -- wakes skip the action until a loop pass or frame takes it
+  -- ('NanoUI.Internal.Context.Core.takeWakes').
+  , ctxLoopThread :: !(IORef (Maybe ThreadId))
+  -- ^ The thread in 'NanoUI.Runner.runSessionLoop', if one runs. Its dirty
+  -- marks run no wake action: the loop checks the dirty flag before it waits.
   , ctxWakeAt :: !(IORef Double)
   -- ^ Monotonic time ('GHC.Clock.getMonotonicTime') of the earliest frame
   -- anything asked for without input to cause it, or 0 for none. Each frame

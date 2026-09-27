@@ -9,10 +9,10 @@ module NanoUI.Sdl.Internal.Cursor
   ) where
 
 import Control.Monad (void, when)
-import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
+import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
 import Foreign.Ptr (Ptr, nullPtr)
 import NanoUI (Input (..))
-import NanoUI.Backend (cursorFallback)
+import NanoUI.Backend (cursorFallback, syncCursorKind)
 import NanoUI.Testing (Context, UiCursorKind (..), uiCursorKind)
 import System.Environment (lookupEnv)
 import System.IO (hPutStrLn, stderr)
@@ -96,21 +96,18 @@ cursorFor SdlCursors {scDefault, scSystem} kind = case sdlSystemCursor kind of
 syncPointerCursor :: SdlCursors -> Context -> Input -> IO ()
 syncPointerCursor cursors ctx inp = do
   want <- uiCursorKind ctx inp
-  cur <- readIORef (scCurrent cursors)
-  when (want /= cur) $ do
-    when (scTrace cursors) $
+  when (scTrace cursors) $ do
+    cur <- readIORef (scCurrent cursors)
+    when (want /= cur) $
       hPutStrLn stderr ("cursor: " ++ show want ++ " at " ++ show (inputMousePos inp))
-    showCursorKind cursors want
+  showCursorKind cursors want
 
--- | Show the cursor for @kind@, or hide it for 'UiCursorHidden' until
--- another kind is shown. If even the default arrow is NULL,
--- SDL_SetCursor(NULL) just redraws the current cursor.
+-- | Show the cursor for @kind@ unless it is the one shown, or hide it for
+-- 'UiCursorHidden' until another kind is shown ('syncCursorKind'). If even
+-- the default arrow is NULL, SDL_SetCursor(NULL) just redraws the current
+-- cursor.
 showCursorKind :: SdlCursors -> UiCursorKind -> IO ()
-showCursorKind cursors kind = do
-  hidden <- (== UiCursorHidden) <$> readIORef (scCurrent cursors)
-  if kind == UiCursorHidden
-    then void hideCursorSafe
-    else do
-      when hidden (void showCursorSafe)
-      void . setCursorSafe =<< cursorFor cursors kind
-  writeIORef (scCurrent cursors) kind
+showCursorKind cursors =
+  syncCursorKind (scCurrent cursors)
+    (\visible -> void (if visible then showCursorSafe else hideCursorSafe))
+    (\kind -> void . setCursorSafe =<< cursorFor cursors kind)

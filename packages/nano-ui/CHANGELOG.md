@@ -496,9 +496,17 @@
 - `uiFontSize`, the size text takes when its layout sets none, and
   `withFontSize` in `NanoUI.Testing`; the SDL backend reports its base size.
   `drawCheckbox` and `checkboxBoxSize` draw nano-ui's checkbox on a canvas.
+- `syncCursorKind` and `sizeLimitAt` in `NanoUI.Backend`: showing a view's
+  cursor kind only when it changes, hiding the pointer for `UiCursorHidden`,
+  and a size limit in native units with a zero or missing axis unlimited.
+  The SDL and RGFW backends use both.
 
 ### Changed
 
+- The wake action installed with `setWakeLoop` runs once for a run of wakes
+  until the loop takes them, and not for dirty marks made on the thread
+  running `runSessionLoop`, so a backend's action needs no coalescing or
+  thread check of its own.
 - `ComboState` gains `csNavPointer`, where the pointer was when Up or Down
   last moved the highlight.
 - `atlasTextureId` is `0x7ffffff9`, next to the glyph page ids. As 1 it

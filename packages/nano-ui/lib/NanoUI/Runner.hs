@@ -13,7 +13,7 @@ module NanoUI.Runner
   , runSessionLoop
   ) where
 
-import Control.Concurrent (threadDelay)
+import Control.Concurrent (myThreadId, threadDelay)
 import Control.Exception (finally, mask)
 import Control.Monad (forM_, unless, when)
 import Data.Maybe (isJust)
@@ -281,6 +281,9 @@ runSessionLoop drv ctx0 inp0 = do
                 -- A readout wait that timed out ends on its refresh.
                 let hudDue = timeout == debugHudTimeout && debugActive && null events
                 pure (events, dueNow || wakeDue || hudDue)
+        -- What follows reads what the wakes so far changed; a later wake runs
+        -- the wake action again.
+        takeWakes ctx
 
         now <- getMonotonicTime
         let !dt = min maxFrameDt (realToFrac (now - lastT))
@@ -322,7 +325,9 @@ runSessionLoop drv ctx0 inp0 = do
           unless (quit || (sdShouldQuit drv inpSynced && not overlayQuit)) $
             loop ctx' inpSynced rest now dirtyOut animNow
 
+  -- This thread's dirty marks need no wake action ('markDirty').
+  myThreadId >>= writeIORef (ctxLoopThread ctx0) . Just
   -- An opening frame the backend drew before the loop may have called
   -- 'NanoUI.quitUi' already; waiting first could block for good.
   (quitRequested ctx0 >>= \quit -> unless quit (loop ctx0 inp0 [] startT False False))
-    `finally` cancelTasks ctx0
+    `finally` (cancelTasks ctx0 >> writeIORef (ctxLoopThread ctx0) Nothing)

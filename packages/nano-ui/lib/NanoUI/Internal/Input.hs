@@ -55,6 +55,7 @@ module NanoUI.Internal.Input
   , withoutPointer
   , UiCursorKind (..)
   , cursorFallback
+  , syncCursorKind
   , grabHoverKind
   , grabDragKind
   , clearEphemeral
@@ -65,8 +66,10 @@ module NanoUI.Internal.Input
   , InputPurpose (..)
   ) where
 
+import Control.Monad (unless, when)
 import Data.Bits (Bits, clearBit, countTrailingZeros, setBit, testBit, zeroBits, (.&.), (.|.))
 import Data.Foldable (toList)
+import Data.IORef (IORef, readIORef, writeIORef)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Primitive.SmallArray (SmallArray, copySmallArray, indexSmallArray, newSmallArray, runSmallArray, sizeofSmallArray, smallArrayFromList)
@@ -402,6 +405,21 @@ cursorFallback = \case
   UiCursorRowResize -> UiCursorNsResize
   k | k `elem` [UiCursorHelp, UiCursorCopy, UiCursorAlias, UiCursorContextMenu, UiCursorZoomIn, UiCursorZoomOut] -> UiCursorDefault
   k -> k
+
+-- | Show the platform cursor for a kind when it differs from the kind last
+-- shown, which @ref@ holds. 'UiCursorHidden' hides the pointer through
+-- @setVisible False@ and sets no shape; the next other kind shows it again
+-- with @setVisible True@ before @setShape@ sets that kind's shape. The
+-- backend maps the kind to its own cursor in @setShape@, usually through
+-- 'cursorFallback'.
+syncCursorKind :: IORef UiCursorKind -> (Bool -> IO ()) -> (UiCursorKind -> IO ()) -> UiCursorKind -> IO ()
+syncCursorKind ref setVisible setShape want = do
+  cur <- readIORef ref
+  when (want /= cur) $ do
+    writeIORef ref want
+    let hidden = want == UiCursorHidden
+    when (hidden /= (cur == UiCursorHidden)) (setVisible (not hidden))
+    unless hidden (setShape want)
 
 -- | Grab cursor over a target, becoming a closed hand while the left button is held.
 grabHoverKind :: Bool -> Input -> UiCursorKind

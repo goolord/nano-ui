@@ -115,6 +115,7 @@ module NanoUI.Backend
 
     -- * Cursors
   , cursorFallback
+  , syncCursorKind
 
     -- * Fonts
 
@@ -235,6 +236,7 @@ module NanoUI.Backend
   , WindowHost (..)
   , defaultWindowHost
   , installWindowHost
+  , sizeLimitAt
   , WindowState (..)
   , defaultWindowState
   , reportWindowState
@@ -248,9 +250,12 @@ module NanoUI.Backend
     -- | Background jobs (@useTaskStatus@, @useTask@, @useStream@) and
     -- threads calling the action from @askWake@ wake the loop through the
     -- action installed with 'setWakeLoop' before the first frame. It must be
-    -- callable from any thread and end the loop's wait for events, for
-    -- example by pushing a custom event onto the platform queue. Without it,
-    -- a blocking loop shows a job's result only when other input arrives.
+    -- callable from any thread and end the loop's wait for events, or make
+    -- the next wait return at once, for example by pushing a custom event
+    -- onto the platform queue. The core runs it once for a run of wakes until
+    -- the loop takes them, and not for dirty marks made on the thread running
+    -- @runSessionLoop@, so it needs no filtering of its own. Without it, a
+    -- blocking loop shows a job's result only when other input arrives.
     --
     -- Jobs run until their hooks stop being called. @runSessionLoop@ in
     -- "NanoUI.Runner" cancels the rest when it returns; a host that runs
@@ -279,6 +284,7 @@ import NanoUI.Internal.NativeWindow
   , quitRequested
   , reportWindowState
   , requestWindowClose
+  , sizeLimitAt
   )
 import NanoUI.Internal.Style (Appearance (..), windowMargin, windowPad)
 import NanoUI.Internal.Tasks (cancelTasks)

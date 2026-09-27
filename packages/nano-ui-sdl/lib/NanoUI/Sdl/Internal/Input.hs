@@ -38,7 +38,7 @@ import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
 import NanoUI (Rect (..), V2 (..), WidgetId (..), v2Add)
 import NanoUI.Backend
 import NanoUI.Testing (Context)
-import NanoUI.Sdl.Internal.Display (refreshEventType, takeRefreshEvent)
+import NanoUI.Sdl.Internal.Display (refreshEventType)
 import SDL3.Sys.Bindgen.Events
   ( SDL_Event (..)
   , SDL_EventType (..)
@@ -172,7 +172,7 @@ decodeEvent :: Word32 -> Ptr SDL_Event -> IO (Maybe SdlEvent)
 decodeEvent refreshTy p = do
   Uint32 w <- peek p.type'
   if refreshTy /= 0 && w == refreshTy
-    then Just EvRefresh <$ takeRefreshEvent
+    then pure (Just EvRefresh)
     else case SDL_EventType (fromIntegral w) of
       Events.SDL_EVENT_QUIT -> pure (Just EvQuit)
       Events.SDL_EVENT_WINDOW_RESIZED -> pure (Just EvWindowChanged)

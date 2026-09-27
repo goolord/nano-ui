@@ -20,6 +20,7 @@ module NanoUI.Internal.NativeWindow
     -- * Settings
   , WindowSettings (..)
   , defaultWindowSettings
+  , sizeLimitAt
   , WindowPosition (..)
   , WindowMode (..)
 
@@ -64,6 +65,7 @@ import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.Foldable (traverse_)
 import Data.IORef (IORef, atomicModifyIORef', modifyIORef', newIORef, readIORef, writeIORef)
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Typeable (Typeable)
 import NanoUI.Internal.Context (Context, askHostIO, markDirtyCovered, setHost, wakeFromThread)
@@ -164,6 +166,16 @@ defaultWindowSettings =
     , wsOpacity = 1
     , wsExitOnCloseRequest = True
     }
+
+-- | A size limit in layout units ('wsMinSize', 'wsMaxSize') in whole native
+-- units at @scale@ per layout unit, plus @outset@ on each axis, such as a
+-- desktop frame the native limit includes. A missing limit, or an axis of
+-- zero or less, is 0 on that axis: no limit.
+sizeLimitAt :: Float -> (Int, Int) -> Maybe Size -> (Int, Int)
+sizeLimitAt scale (outW, outH) limit = (axis w outW, axis h outH)
+  where
+    Size w h = fromMaybe (Size 0 0) limit
+    axis v outset = if v <= 0 then 0 else round (v * scale) + outset
 
 -- | Where a window opens ('wsPosition').
 data WindowPosition

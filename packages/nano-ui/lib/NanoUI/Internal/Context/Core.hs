@@ -19,6 +19,7 @@ module NanoUI.Internal.Context.Core
   , isDirty
   , setWakeLoop
   , wakeFromThread
+  , takeWakes
   , takeThreadWake
   , requestWakeAt
   , requestWakeAfter
@@ -60,9 +61,10 @@ module NanoUI.Internal.Context.Core
   )
 where
 
+import Control.Concurrent (myThreadId)
 import Control.Monad (forM_, unless, when, (<$!>))
 import Data.Bits (shiftL, shiftR, (.&.), (.|.))
-import Data.IORef (atomicWriteIORef, modifyIORef', readIORef, writeIORef)
+import Data.IORef (atomicModifyIORef', atomicWriteIORef, modifyIORef', readIORef, writeIORef)
 import Data.Primitive.Array (readArray)
 import Data.Primitive.PrimArray (readPrimArray)
 import Data.Primitive.PrimVar (readPrimVar)
@@ -182,14 +184,14 @@ damagePeers ctx wids bounds =
 damageFull :: Context -> IO ()
 damageFull ctx = requestDamage ctx ReqFull
 
--- | Request another view pass and invoke the installed event-loop wake action.
+-- | Request another view pass and wake the event loop ('wakeOffLoop').
 -- Dirty state schedules work; damage determines which pixels are repainted.
 -- The request is opaque: its follow-up frame repaints the whole window.
 {-# INLINE markDirty #-}
 markDirty :: Context -> IO ()
 markDirty ctx = do
   modifyDamage ctx (\ds -> ds {dsDirty = True, dsDirtyOpaque = True})
-  readIORef (ctxWakeLoop ctx) >>= sequence_
+  wakeOffLoop ctx
 
 -- | 'markDirty' for a request whose visible effects the frame's own damage
 -- machinery already covers: store writes are damaged per key ('modifyStore',
@@ -199,7 +201,7 @@ markDirty ctx = do
 markDirtyCovered :: Context -> IO ()
 markDirtyCovered ctx = do
   modifyDamage ctx (\ds -> ds {dsDirty = True})
-  readIORef (ctxWakeLoop ctx) >>= sequence_
+  wakeOffLoop ctx
 
 -- | Note that the view read @k@ of the last frame's layout. After this
 -- frame's layout, 'settleLayoutReads' runs @stale@, which answers whether the
@@ -234,9 +236,36 @@ isDirty ctx = getsDamage ctx dsDirty
 
 -- | Install the backend action that interrupts an event wait. A background
 -- producer should invoke the wake action after publishing synchronised data.
+-- The action runs once for a run of wakes until the loop takes them
+-- ('takeWakes'), and not for the loop thread's own dirty marks, so it need
+-- not filter or coalesce calls itself.
 {-# INLINE setWakeLoop #-}
 setWakeLoop :: Context -> IO () -> IO ()
 setWakeLoop ctx wake = writeIORef (ctxWakeLoop ctx) (Just wake)
+
+-- | Run the wake action, unless an earlier wake ran it and the loop has not
+-- taken that one yet: the loop reads what both changed when it does.
+wakeLoop :: Context -> IO ()
+wakeLoop ctx = do
+  pending <- atomicModifyIORef' (ctxWakePending ctx) (True,)
+  unless pending $ readIORef (ctxWakeLoop ctx) >>= sequence_
+
+-- | 'wakeLoop' for a dirty mark. The thread running
+-- 'NanoUI.Runner.runSessionLoop' checks the dirty flag before it waits, so
+-- its own marks, made on every frame that asks for another, wake nothing.
+wakeOffLoop :: Context -> IO ()
+wakeOffLoop ctx =
+  readIORef (ctxLoopThread ctx) >>= \case
+    Nothing -> wakeLoop ctx
+    Just loop -> myThreadId >>= \me -> unless (me == loop) (wakeLoop ctx)
+
+-- | The loop is about to read what the wakes so far changed, so the next
+-- wake runs the wake action again. The session loop calls this after each
+-- wait for events, and every frame at its start ('takeThreadWake'). A wake
+-- before this is read by what follows it; one after it ends the next wait.
+{-# INLINE takeWakes #-}
+takeWakes :: Context -> IO ()
+takeWakes ctx = atomicWriteIORef (ctxWakePending ctx) False
 
 -- | Wake the loop from any thread after changing state the view reads.
 -- Publish the change first. The next frame repaints the whole window
@@ -244,14 +273,16 @@ setWakeLoop ctx wake = writeIORef (ctxWakeLoop ctx) (Just wake)
 wakeFromThread :: Context -> IO ()
 wakeFromThread ctx = do
   atomicWriteIORef (ctxWoken ctx) True
-  readIORef (ctxWakeLoop ctx) >>= sequence_
+  wakeLoop ctx
 
--- | At frame start, before the view runs: queue a full repaint if
--- 'wakeFromThread' was called since the last frame. Calls made while the
--- view runs are left for the frame they wake.
+-- | At frame start, before the view runs: take the wakes so far
+-- ('takeWakes'), and queue a full repaint if 'wakeFromThread' was called
+-- since the last frame. Calls made while the view runs are left for the
+-- frame they wake.
 {-# INLINE takeThreadWake #-}
 takeThreadWake :: Context -> IO ()
 takeThreadWake ctx = do
+  takeWakes ctx
   woken <- readIORef (ctxWoken ctx)
   when woken $ do
     atomicWriteIORef (ctxWoken ctx) False
