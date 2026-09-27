@@ -76,6 +76,25 @@ widgetScene =
         label "nano-ui profile loop"
     )
 
+-- | 200 short paragraphs in a scroll area, full-width and capped at a width
+-- they stay under in turn: the rich text path, whose paragraphs are laid out
+-- again only when their width or pieces change.
+richTextScene :: NanoUI ()
+richTextScene = void $ scrollWith (fillW . fillH) $ columnWith (tight . fillW) $
+  forM_ [1 .. 200 :: Int] $ \i ->
+    richTextWith
+      (if even i then fillW else maxW 290)
+      [ inlineText ("Paragraph " <> T.pack (show i) <> " mixes ")
+      , strong "bold"
+      , " and "
+      , emphasis "italic"
+      , " text with "
+      , inlineCode "code"
+      , " and a "
+      , hyperlink "x" "link"
+      , " in one wrapped line of prose that is long enough to wrap onto a few lines at most widths."
+      ]
+
 -- | A thousand rects: enough ops that building them costs more than replaying
 -- them, which is the case a content key is for.
 canvasOps :: CustomDrawContext -> Rect -> SmallArray DrawOp
@@ -263,6 +282,24 @@ main = do
       forM_ [1 .. frames] $ \i -> void (runFrame ctx inp (growScene i))
       t1 <- getMonotonicTime
       putStrLn ("profiled " ++ show frames ++ " grow frames: " ++ show ((t1 - t0) * 1000 / fromIntegral frames) ++ " ms/frame")
+    ("richtext" : rest) -> do
+      -- 'richTextScene' with the pointer on a paragraph every other frame and
+      -- off the window in between, so a paragraph is drawn again every frame
+      -- at an unchanged width; with "resize" the window's width changes every
+      -- frame as well.
+      let resize = rest == ["resize"]
+          frames = 1000 :: Int
+          inp i =
+            emptyInput
+              { inputWindowSize = Size (if resize then 600 + fromIntegral (i `mod` 50) * 4 else 800) 800
+              , inputDeltaTime = 0.016
+              , inputMousePos = if even i then V2 40 (fromIntegral (20 + (i * 7) `mod` 760)) else V2 (-10) (-10)
+              }
+      replicateM_ 5 (void (runFrame ctx (inp 0) richTextScene))
+      t0 <- getMonotonicTime
+      forM_ [1 .. frames] $ \i -> void (runFrame ctx (inp i) richTextScene)
+      t1 <- getMonotonicTime
+      putStrLn ("profiled " ++ show frames ++ " richtext frames" ++ (if resize then ", resizing" else "") ++ ": " ++ show ((t1 - t0) * 1000 / fromIntegral frames) ++ " ms/frame")
     ("textarea" : _) -> do
       ref <- newIORef (textDocument longDocument)
       typeIntoMiddle (textAreaScene ref)

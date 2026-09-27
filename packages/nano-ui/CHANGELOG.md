@@ -152,9 +152,11 @@
   `hyperlink target label`, drawn in the theme's link colour, underlined
   while hovered, with the pointer cursor. `restyle` adds modifiers to a
   piece, and `richTextWith` sets the paragraph's default font. Mixed sizes
-  share a baseline. A paragraph keeps its measured words between frames
-  while its pieces, fonts and colours stay the same, and while its width
-  changes it breaks its lines once a frame, for measuring and drawing both.
+  share a baseline. A paragraph keeps its measured words, its lines and the
+  size it was last measured at between frames while its pieces, fonts and
+  colours stay the same: an unchanged paragraph is not broken into lines
+  again, even under a maximum width it does not fill, and while its width
+  changes it is broken once a frame to measure and once to draw.
 - `DrawTextStyled` draws text in a `TextFont` (size, variant, weight, style
   and decoration) from custom widgets.
 - Mixed-direction lines: `NanoUI.Bidi` splits a line into left-to-right and

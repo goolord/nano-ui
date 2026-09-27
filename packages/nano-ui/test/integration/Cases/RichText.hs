@@ -18,6 +18,7 @@ tests =
   , spec "rich-text-many" runRichTextManyTest
   , spec "rich-text-background" runRichTextBackgroundTest
   , spec "rich-text-resize" runRichTextResizeTest
+  , spec "rich-text-capped" runRichTextCappedTest
   ]
 
 -- | A paragraph wraps at its column's width, taking a line's height per line,
@@ -162,3 +163,39 @@ runRichTextResizeTest ctx failed = do
     resized <- opsAt ctx w
     fresh <- newContext >>= \c -> warmup c (withInputOff w 400) ui >> opsAt c w
     assert failed (resized /= Nothing && resized == fresh)
+
+-- | A paragraph capped at a width it stays under, hovered on and off, edited
+-- and resized, draws at the rect and with the ops one laid out from the start
+-- draws, and is as tall as one laid out at the width it takes: what it keeps
+-- between frames at the capped width and at its own never goes stale.
+runRichTextCappedTest :: Context -> IORef Int -> IO ()
+runRichTextCappedTest ctx failed = do
+  let cap = 170
+      paragraph t = [inlineText t, strong "wrapping", " over several lines ", hyperlink "x" "here"]
+      ui width t = column ((\r -> (respId r, respRect r)) . fst <$> richTextWith' width (paragraph t))
+      -- The rect and ops the paragraph was drawn with in a frame with this
+      -- input.
+      drawnAt c inp t = do
+        (wid, _) <- evalUi c inp (ui (maxW cap) t)
+        entry <- IM.lookup (intKey wid) . dcsCustomDrawOpCache <$> readIORef (ctxDrawingCache c)
+        pure ((\e -> (cdeBounds e, toList (cdeOps e))) <$> entry)
+      step inp t = do
+        drawn <- drawnAt ctx inp t
+        fresh <- newContext >>= \c -> warmup c inp (ui (maxW cap) t) >> drawnAt c inp t
+        assert failed (drawn /= Nothing && drawn == fresh)
+        forM_ drawn $ \(Rect _ _ w h, _) -> do
+          (_, Rect _ _ _ laidOutH) <- newContext >>= \c -> warmup2 c inp (ui (fixedW w) t)
+          assertEq failed laidOutH h
+      short = "a few words "
+      long = "other words, a much longer run of them this time, enough for more lines "
+  (_, Rect rx ry rw rh) <- warmup2 ctx (withInputOff 400 400) (ui (maxW cap) short)
+  -- Under its cap, so the solver offers it a width it does not take.
+  assert failed (rw > 0 && rw < cap)
+  let over = (withInputOff 400 400) {inputMousePos = V2 (rx + rw / 2) (ry + rh / 2)}
+  step over short
+  step (withInputOff 400 400) short
+  step over short
+  step over long
+  step (withInputOff 120 400) long
+  step (withInputOff 400 400) long
+  step (withInputOff 400 400) short

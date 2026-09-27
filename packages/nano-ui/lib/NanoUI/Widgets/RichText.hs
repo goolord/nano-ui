@@ -130,8 +130,9 @@ data Line = Line
   , lineTokens :: ![(Float, Token)]
   }
 
--- A paragraph's measured pieces and its lines at the width it last had,
--- kept between frames while its pieces, fonts and colours stay the same.
+-- A paragraph's measured pieces, its lines at the width it last had and the
+-- size it was last measured at, kept between frames while its pieces, fonts
+-- and colours stay the same.
 data Paragraph = Paragraph
   { paraKey :: !Int
   , paraRuns :: !(SmallArray Run)
@@ -140,7 +141,12 @@ data Paragraph = Paragraph
   , paraNatural :: (Float, Float)
   , paraWidth :: !Float
   , paraLines :: [Line]
+  , paraMeasured :: !(IORef Measured)
   }
+
+-- The width a paragraph was last measured at and its extent there
+-- ('measureAt').
+data Measured = Unmeasured | Measured !Float !Float !Float
 
 -- Recently laid-out paragraphs by widget key, with their count and the
 -- count that triggers dropping stale ones.
@@ -178,7 +184,8 @@ richTextWith' f pieces = do
           emptyLine = case resolved of
             (run, _) : _ -> (runLineHeight run, runAscent run)
             [] -> (fmLineHeight (ctxFontMetrics ctx), fmAscent (ctxFontMetrics ctx))
-      pure (Paragraph key runs tokens emptyLine (lineBoxes (layoutLines runs emptyLine AlignStart 1e9 tokens)) (-1) [])
+      measured <- newIORef Unmeasured
+      pure (Paragraph key runs tokens emptyLine (lineBoxes (layoutLines runs emptyLine AlignStart 1e9 tokens)) (-1) [] measured)
   resp <- addWidget wid NodeDrawing T.empty 0 base
   let Rect rx ry rw _ = respRect resp
       runs = paraRuns para0
@@ -186,20 +193,9 @@ richTextWith' f pieces = do
       para
         | paraWidth para0 == rw = para0
         | otherwise = para0 {paraWidth = rw, paraLines = layoutAt rw}
-  -- The lines at a width, through a memo of the last width asked for: while
-  -- the width changes, the solver measures the paragraph twice at the new
-  -- width and the draw builder then draws it there, and the three share one
-  -- layout. The draw builder asks last, with @keep@ off, and empties the memo
-  -- so the lines live no longer than the paint. Reading and writing the memo
-  -- from pure code is safe because layoutAt is a pure function of the width:
-  -- the memo only decides what is shared.
-  memo <- uiIO (newIORef (Just (paraWidth para, paraLines para)))
-  let linesAt keep width = unsafeDupablePerformIO $ do
-        kept <- readIORef memo
-        let lines' = case kept of
-              Just (w, ls) | w == width -> ls
-              _ -> layoutAt width
-        lines' <$ writeIORef memo (if keep then Just (width, lines') else Nothing)
+      linesAt width
+        | width == paraWidth para = paraLines para
+        | otherwise = layoutAt width
       V2 mx my = inputMousePos inp
       hoveredRun
         | not (respHovered resp) = Nothing
@@ -231,7 +227,7 @@ richTextWith' f pieces = do
                    , deco /= DecorationNone
                    , offset <- decorationOffsets deco run
                    ]
-            | line <- linesAt False w
+            | line <- linesAt w
             , let spans = pieceSpans line
             ]
         where
@@ -279,7 +275,7 @@ richTextWith' f pieces = do
                 size = IM.size kept
             pure $! ParagraphCache size (max paragraphBound (2 * size)) kept
     registerCustomMeasure ctx wid $ \_ (availW, _) ->
-      if availW >= 1e9 then paraNatural para else lineBoxes (linesAt True availW)
+      if availW >= 1e9 then paraNatural para else measureAt (paraMeasured para) (lineBoxes . linesAt) availW
     registerCustomEntry ctx wid $
       CustomDrawingEntry
         (if drawKey == 0 then 1 else drawKey)
@@ -293,6 +289,24 @@ richTextWith' f pieces = do
   pure (resp, clicked)
   where
     lineBoxes lines' = (maximum (0 : map lineWidth lines'), sum (map lineHeight lines'))
+
+-- | @measureAt ref extentAt width@ is @extentAt width@, reused from @ref@
+-- when it holds the extent at that width, and otherwise computed and left
+-- there. A paragraph keeps its reference while its pieces stay the same, so
+-- the solver's check of last frame's layout, which measures the paragraph
+-- again at the width it offered then, costs nothing even when that width is a
+-- cap the paragraph stays under, and its second measure at a new width reuses
+-- the first. Only the extent is kept, never the lines. Reading and writing
+-- the reference from pure code is safe because @extentAt@ is a pure function
+-- of the width for those pieces: the reference only decides what is shared.
+measureAt :: IORef Measured -> (Float -> (Float, Float)) -> Float -> (Float, Float)
+measureAt ref extentAt width = unsafeDupablePerformIO $ do
+  kept <- readIORef ref
+  case kept of
+    Measured w ew eh | w == width -> pure (ew, eh)
+    _ -> case extentAt width of
+      (!ew, !eh) -> (ew, eh) <$ writeIORef ref (Measured width ew eh)
+{-# NOINLINE measureAt #-}
 
 -- | Cache size at which stale paragraphs are first pruned.
 paragraphBound :: Int
