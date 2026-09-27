@@ -29,7 +29,19 @@ data SeriesData
   = PointsXY !(U.Vector (Double, Double))
   | -- | Bar labels and their values, in order.
     CategoryY !(SmallArray Text) !(PrimArray Double)
-  deriving (Eq, Show)
+  deriving (Show)
+
+-- Points compare pair by pair, as the vector's own instance does, without
+-- boxing each pair: charts are compared every frame to reuse their drawing.
+instance Eq SeriesData where
+  PointsXY a == PointsXY b = U.length a == U.length b && go 0
+    where
+      go !i
+        | i >= U.length a = True
+        | otherwise = case (U.unsafeIndex a i, U.unsafeIndex b i) of
+            ((x, y), (x', y')) -> x == x' && y == y' && go (i + 1)
+  CategoryY labels values == CategoryY labels' values' = labels == labels' && values == values'
+  _ == _ = False
 
 -- | Shape of a plotted point marker.
 data MarkShape = MarkCircle | MarkSquare | MarkDiamond | MarkTriangle | MarkCross

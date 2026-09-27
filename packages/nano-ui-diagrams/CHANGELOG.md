@@ -30,6 +30,11 @@
   inside another (an annulus, a glyph's counter) is a hole in it where the
   rule says so, instead of each loop being filled on its own over the
   others. A path is filled whole before it is stroked.
+- A plot checks whether its chart changed without boxing each point, skips
+  the check for a chart kept across frames, and no longer derives its plot
+  style every frame to compare. The demo's four plots allocate 106 KB a
+  frame instead of 210 KB, and a kept 8000-point chart 92 KB instead of
+  687 KB.
 
 ### Removed
 
