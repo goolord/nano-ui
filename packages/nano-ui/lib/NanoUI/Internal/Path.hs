@@ -67,6 +67,7 @@ import Control.Monad.ST (ST, runST)
 import Data.List (sortOn)
 import Data.Primitive.PrimArray
   ( PrimArray
+  , copyMutablePrimArray
   , emptyPrimArray
   , generatePrimArray
   , indexPrimArray
@@ -79,6 +80,7 @@ import Data.Primitive.PrimArray
   , setPrimArray
   , shrinkMutablePrimArray
   , sizeofPrimArray
+  , thawPrimArray
   , unsafeFreezePrimArray
   , writePrimArray
   )
@@ -855,76 +857,218 @@ pointInTri p a b c =
 -- | Triangle index triples into @vs@ covering the ring listed by @ix@. A
 -- hole bridge lists its end points twice, so a point on an ear's corner does
 -- not block the ear.
+--
+-- After an ear is cut the scan goes on from its next corner, and the points
+-- that could block an ear are looked up in a grid of the remaining points,
+-- so a typical ring costs about linear time rather than a full pass of
+-- every point per ear.
 earClip :: PrimArray Float -> PrimArray Int -> PrimArray Int
-earClip vs ix = primArrayFromList [indexPrimArray ix k | (a, b, c) <- clipped, k <- [a, b, c]]
-  where
-    clipped = runST $ do
-      let !ccw = signedArea vs ix >= 0
-      -- Remove an ear by relinking its neighbours instead of copying the
-      -- remaining points at every step.
-      prevs <- newPrimArray n
-      nexts <- newPrimArray n
-      forM_ [0 .. n - 1] $ \i -> do
-        writePrimArray prevs i ((i - 1 + n) `mod` n)
-        writePrimArray nexts i ((i + 1) `mod` n)
-      -- Corners are forced here; returned lazily they cost two thunks per
-      -- corner of every ear tried.
-      let {-# INLINE triangle #-}
-          triangle i = do
+earClip vs ix = runPrimArray $ do
+  let !ccw = signedArea vs ix >= 0
+  -- Remove an ear by relinking its neighbours instead of copying the
+  -- remaining points at every step.
+  prevs <- newPrimArray n
+  nexts <- newPrimArray n
+  forM_ [0 .. n - 1] $ \i -> do
+    writePrimArray prevs i (if i == 0 then n - 1 else i - 1)
+    writePrimArray nexts i (if i + 1 == n then 0 else i + 1)
+  -- The remaining points by cell: cell @c@ holds the first @lens c@ entries
+  -- of its span of @members@, and @slots@ says where each point is.
+  members <- thawPrimArray (gridItems grid) 0 n
+  lens <- newPrimArray cellCount
+  forM_ [0 .. cellCount - 1] $ \c -> writePrimArray lens c (start (c + 1) - start c)
+  slots <- newPrimArray n
+  forM_ [0 .. n - 1] $ \k -> readPrimArray members k >>= \i -> writePrimArray slots i k
+  out <- newPrimArray (3 * max 0 (n - 2))
+  let remove i = do
+        let !c = cellOf (at i)
+        len <- readPrimArray lens c
+        slot <- readPrimArray slots i
+        moved <- readPrimArray members (start c + len - 1)
+        writePrimArray members slot moved
+        writePrimArray slots moved slot
+        writePrimArray lens c (len - 1)
+      -- Whether a remaining point lies in the ear @p i q@. One on a corner
+      -- (the other end of a hole bridge) does not block it. The loops only
+      -- tail call each other, so they compile to jumps, not closures.
+      blocked p i q a@(ax, ay) b@(bx, by) c@(cx, cy) = cell r0 c0
+        where
+          !c0 = gridCol grid (min ax (min bx cx))
+          !c1 = gridCol grid (max ax (max bx cx))
+          !r0 = gridRow grid (min ay (min by cy))
+          !r1 = gridRow grid (max ay (max by cy))
+          cell !r !col
+            | r > r1 = pure False
+            | col > c1 = cell (r + 1) c0
+            | otherwise = do
+                let !k = r * gridCols grid + col
+                len <- readPrimArray lens k
+                scan r col (start k) (start k + len)
+          scan !r !col !k !end
+            | k >= end = cell r (col + 1)
+            | otherwise = do
+                j <- readPrimArray members k
+                let !pj = at j
+                if j /= p && j /= i && j /= q && pointInTri pj a b c && pj /= a && pj /= b && pj /= c
+                  then pure True
+                  else scan r col (k + 1) end
+      emit !m p i q = do
+        writePrimArray out m (indexPrimArray ix p)
+        writePrimArray out (m + 1) (indexPrimArray ix i)
+        writePrimArray out (m + 2) (indexPrimArray ix q)
+        pure (m + 3)
+      convex !_ 0 = pure True
+      convex !i !left = do
+        p <- readPrimArray prevs i
+        q <- readPrimArray nexts i
+        if isConvex ccw (at p) (at i) (at q) then convex q (left - 1) else pure False
+      fan !m !origin !i !left
+        | left <= 0 = pure m
+        | otherwise = do
+            q <- readPrimArray nexts i
+            m' <- emit m origin i q
+            fan m' origin q (left - 1)
+      go !m !count !i !tries
+        | count < 3 = pure m
+        | count == 3 = do
+            p <- readPrimArray prevs i
+            q <- readPrimArray nexts i
+            emit m p i q
+        | tries >= count = do
+            -- A whole pass found no ear: fan a convex remainder, else stop.
+            isConvexRing <- convex i count
+            if isConvexRing then readPrimArray nexts i >>= \q -> fan m i q (count - 2) else pure m
+        | otherwise = do
             p <- readPrimArray prevs i
             q <- readPrimArray nexts i
             let !a = at p
                 !b = at i
                 !c = at q
-            pure (p, q, (a, b, c))
-          isEarAt first count i p q (a, b, c)
-            | not (isConvex ccw a b c) = pure False
-            | otherwise = outside first count
-            where
-              outside !_ 0 = pure True
-              outside !j !left
-                | j /= p && j /= i && j /= q && blocks (at j) = pure False
-                | otherwise = do
-                    next <- readPrimArray nexts j
-                    outside next (left - 1)
-              -- A point inside the ear blocks it, unless it sits on a corner
-              -- (the other end of a hole bridge).
-              blocks pj = pointInTri pj a b c && pj /= a && pj /= b && pj /= c
-          convex !_ 0 = pure True
-          convex !i !left = do
-            (_, q, (a, b, c)) <- triangle i
-            if isConvex ccw a b c then convex q (left - 1) else pure False
-          fan origin i left
-            | left <= 0 = pure []
-            | otherwise = do
-                q <- readPrimArray nexts i
-                rest <- fan origin q (left - 1)
-                pure ((origin, i, q) : rest)
-          go !first !count !idx !tries tris
-            | count < 3 = pure tris
-            | count == 3 = do
-                second <- readPrimArray nexts first
-                third <- readPrimArray nexts second
-                pure ((first, second, third) : tris)
-            | tries >= count = do
-                isConvexRing <- convex first count
-                if isConvexRing then do
-                  second <- readPrimArray nexts first
-                  rest <- fan first second (count - 2)
-                  pure (tris ++ rest)
-                else pure tris
-            | otherwise = do
-                (p, q, tri) <- triangle idx
-                ear <- isEarAt first count idx p q tri
-                if ear then do
-                  writePrimArray nexts p q
-                  writePrimArray prevs q p
-                  let !first' = if idx == first then q else first
-                  go first' (count - 1) first' 0 ((p, idx, q) : tris)
-                else go first count q (tries + 1) tris
-      reverse <$> go 0 n 0 0 []
+            ear <- if isConvex ccw a b c then not <$> blocked p i q a b c else pure False
+            if ear
+              then do
+                writePrimArray nexts p q
+                writePrimArray prevs q p
+                remove i
+                m' <- emit m p i q
+                go m' (count - 1) q 0
+              else go m count q (tries + 1)
+  m <- go 0 n 0 0
+  shrinkMutablePrimArray out m
+  pure out
+  where
     n = sizeofPrimArray ix
     at k = pointAt vs (indexPrimArray ix k)
+    -- About four points per cell. A point that is not finite could block
+    -- any ear, so then every point shares one cell.
+    (x0, y0, x1, y1) = ringBox vs
+    cells = if all (finite . indexPrimArray vs) [0 .. sizeofPrimArray vs - 1] then n `div` 4 else 1
+    grid = gridOf cells x0 y0 x1 y1 n (\k -> let (x, y) = at k in (x, y, x, y))
+    cellCount = gridCols grid * gridRows grid
+    start = indexPrimArray (gridStarts grid)
+    cellOf (x, y) = gridRow grid y * gridCols grid + gridCol grid x
+
+--------------------------------------------------------------------------------
+-- Grids
+--------------------------------------------------------------------------------
+
+-- | Items bucketed by a uniform grid of about square cells over a box. Cell
+-- @c@, counted along rows, lists the items whose boxes overlap it, in item
+-- order: 'gridItems' from @'gridStarts' c@ up to @'gridStarts' (c + 1)@.
+data Grid = Grid
+  { gridCols :: !Int
+  , gridRows :: !Int
+  , gridX :: !Float
+  , gridY :: !Float
+  , gridScaleX :: !Float
+  -- ^ Columns per unit of x (0 with one column).
+  , gridScaleY :: !Float
+  , gridStarts :: !(PrimArray Int)
+  , gridItems :: !(PrimArray Int)
+  }
+
+-- | The column of the cells holding an x coordinate, clamped to the grid.
+{-# INLINE gridCol #-}
+gridCol :: Grid -> Float -> Int
+gridCol g = cellAlong (gridCols g) (gridX g) (gridScaleX g)
+
+-- | The row of the cells holding a y coordinate, clamped to the grid.
+{-# INLINE gridRow #-}
+gridRow :: Grid -> Float -> Int
+gridRow g = cellAlong (gridRows g) (gridY g) (gridScaleY g)
+
+-- | The cell along one axis holding a coordinate, clamped to @0 .. cells - 1@.
+-- Monotonic, so the cells a box's corners fall in bound the cells of every
+-- point in the box.
+{-# INLINE cellAlong #-}
+cellAlong :: Int -> Float -> Float -> Float -> Int
+cellAlong cells origin perUnit v = max 0 (min (cells - 1) (truncate ((v - origin) * perUnit)))
+
+-- | A grid of about @cells@ cells over the box from @(x0, y0)@ to @(x1, y1)@,
+-- holding items @0 .. count - 1@; item @k@ covers @boxOf k@. A box that is
+-- not finite gets one cell, and a side under 1e-20 a single row or column.
+{-# INLINE gridOf #-}
+gridOf :: Int -> Float -> Float -> Float -> Float -> Int -> (Int -> (Float, Float, Float, Float)) -> Grid
+gridOf cells x0 y0 x1 y1 count boxOf = runST $ do
+  -- Count each cell's items at the next cell's start, sum the counts into
+  -- starts, then hand out the slots.
+  starts <- newPrimArray (total + 1)
+  setPrimArray starts 0 (total + 1) 0
+  -- Explicit loops: list ranges here are shared across iterations rather
+  -- than fused, and cost a cell per step.
+  let forCells f = item 0
+        where
+          item !k
+            | k >= count = pure ()
+            | otherwise = do
+                let (bx0, by0, bx1, by1) = boxOf k
+                    !c0 = cellAlong cols x0 sx bx0
+                    !c1 = cellAlong cols x0 sx bx1
+                    !r1 = cellAlong rows y0 sy by1
+                    cell !r !c
+                      | r > r1 = item (k + 1)
+                      | c > c1 = cell (r + 1) c0
+                      | otherwise = f k (r * cols + c) >> cell r (c + 1)
+                cell (cellAlong rows y0 sy by0) c0
+  forCells $ \_ c -> readPrimArray starts (c + 1) >>= writePrimArray starts (c + 1) . (+ 1)
+  forM_ [1 .. total] $ \c -> do
+    before <- readPrimArray starts (c - 1)
+    readPrimArray starts c >>= writePrimArray starts c . (+ before)
+  size <- readPrimArray starts total
+  items <- newPrimArray size
+  fill <- newPrimArray total
+  copyMutablePrimArray fill 0 starts 0 total
+  forCells $ \k c -> do
+    slot <- readPrimArray fill c
+    writePrimArray items slot k
+    writePrimArray fill c (slot + 1)
+  Grid cols rows x0 y0 sx sy <$> unsafeFreezePrimArray starts <*> unsafeFreezePrimArray items
+  where
+    w = x1 - x0
+    h = y1 - y0
+    target = max 1 cells
+    usable s = s > 1e-20 && finite s
+    (cols, rows)
+      | not (finite w && finite h) = (1, 1)
+      | usable w && usable h =
+          let side = sqrt w * sqrt h / sqrt (fromIntegral target)
+           in (fit (w / side), fit (h / side))
+      | otherwise = (if usable w then target else 1, if usable h then target else 1)
+    fit v = max 1 (ceiling (min (fromIntegral target) v))
+    total = cols * rows
+    sx = if cols > 1 then fromIntegral cols / w else 0
+    sy = if rows > 1 then fromIntegral rows / h else 0
+
+-- | A ring's bounding box: its least and greatest x and y.
+ringBox :: PrimArray Float -> (Float, Float, Float, Float)
+ringBox r = go 0 (1 / 0) (1 / 0) (-1 / 0) (-1 / 0)
+  where
+    go !k !x0 !y0 !x1 !y1
+      | k + 1 >= sizeofPrimArray r = (x0, y0, x1, y1)
+      | otherwise =
+          let !x = indexPrimArray r k
+              !y = indexPrimArray r (k + 1)
+           in go (k + 2) (min x0 x) (min y0 y) (max x1 x) (max y1 y)
 
 --------------------------------------------------------------------------------
 -- Draw ops

@@ -230,6 +230,10 @@ runFillTriangulationTest _ failed = do
         ]
           -- Random simple star polygons with 5 to 64 corners.
           <> [("random star " <> show seed, P.polygon (ring (5 + seed `mod` 60) (\i -> 5 + 50 * rnd (seed * 1000 + i)))) | seed <- [1 .. 60 :: Int]]
+          -- Large rings, where ear clipping looks up blockers in its grid:
+          -- stars, and an area chart's top edge closed along a baseline.
+          <> [("random star of " <> show k, P.polygon (ring k (\i -> 5 + 50 * rnd (k + i)))) | k <- [300, 2000]]
+          <> [("area of 2000 samples", P.polygon ([V2 (fromIntegral i * 0.05) (10 + 30 * rnd (7 * i)) | i <- [0 .. 1999 :: Int]] <> [V2 99.95 60, V2 0 60]))]
   forM_ shapes $ \(name, shape) ->
     assertEq failed (name, [True]) . (,) name $
       [ inRange && length tris == 3 * (length pts - 2) && abs (area - want) <= 1e-3 * want
