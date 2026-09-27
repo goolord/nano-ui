@@ -1,8 +1,7 @@
 -- | Widget labels, numeric/colour formatting, and packed node-style encodings
 -- shared by construction, layout, and painting.
 module NanoUI.Internal.WidgetText
-  ( intValueText
-  , treeEncodeStyle
+  ( treeEncodeStyle
   , treeDecodeStyle
   , treeDecodeStripe
   , textInputFieldText
@@ -63,9 +62,6 @@ import Data.Char (digitToInt, isHexDigit)
 import Data.Maybe (fromMaybe)
 import Data.Primitive.SmallArray (SmallArray, indexSmallArray, smallArrayFromList)
 import Data.Text (Text)
-import qualified Data.Text.Lazy as TL
-import qualified Data.Text.Lazy.Builder as TB
-import qualified Data.Text.Lazy.Builder.Int as TB
 import Data.Word (Word8)
 import GHC.Float (castFloatToWord32)
 import Numeric (showHex)
@@ -73,9 +69,6 @@ import NanoUI.Internal.Font (FontMetrics (..), fmLineHeight, widgetContentInset)
 import NanoUI.Internal.Style (FontStyle (..), FontVariant (..), FontWeight (..), Layout (..), TextDecoration (..), Theme (..), Tone (..), styleBg, variantFace, variantTone)
 import NanoUI.Internal.Types (Color (..), Rect (..), clamp, colorA, colorB, colorG, colorR, colorRGBA, lerpColor)
 import qualified Data.Text as T
-
-intValueText :: Int -> Text
-intValueText = TL.toStrict . TB.toLazyText . TB.decimal
 
 -- | A tree row's button style: 'buttonFlagRow', and its depth in bits 0-7,
 -- whether it has children in bit 8, is expanded in bit 9, and is an odd row

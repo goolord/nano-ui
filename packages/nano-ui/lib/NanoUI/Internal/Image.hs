@@ -10,8 +10,11 @@ module NanoUI.Internal.Image
   , fitRect
   , ImageLook (..)
   , imageLook
+  , plainLook
   , lookSize
+  , lookTurned
   , lookDraw
+  , lookQuad
   , ImageDraw (..)
   , imageDraw
   , imageDrawOp
@@ -195,6 +198,18 @@ imageLook cfg =
     (icCrop cfg)
     (if icScale cfg > 0 && finite (icScale cfg) then icScale cfg else 1)
 
+-- | Whether a look is the default config's with its own tint: an image
+-- stretched over its rect, drawn as a plain image.
+plainLook :: ImageLook -> Bool
+plainLook l =
+  lookFit l == FitFill
+    && lookAlignX l == AlignCenter
+    && lookAlignY l == AlignMiddle
+    && lookOpacity l == 1
+    && lookRotation l == RotateFloating 0
+    && null (lookCrop l)
+    && lookScale l == 1
+
 -- | Clamp to [0, 1], NaN to 1.
 unitOpacity :: Float -> Float
 unitOpacity o = if isNaN o then 1 else clamp01 o
@@ -216,26 +231,56 @@ lookSize look size =
 -- cut to the box by adjusting its UVs; a rotated one can extend past the
 -- box and the caller must clip it. 'Nothing' when nothing is visible.
 lookDraw :: ImageLook -> (Int, Int) -> ImageId -> Float -> Rect -> Maybe ImageDraw
-lookDraw look size@(iw, ih) iid fade box
+lookDraw look size iid fade box
   | lookOpacity look * fade <= 0 || colorA (lookTint look) == 0 = Nothing
-  | turned = Just draw
-  | otherwise = case rectIntersect dest box of
-      Just (Rect x y w h)
-        | dw > 0 && dh > 0 && w > 0 && h > 0 ->
-            -- Shrink the UVs to match the visible part of the rect.
-            let Rect u v uw vh = uvCrop
-             in Just draw {imageRect = Rect x y w h, imageUV = Rect (u + (x - dx) / dw * uw) (v + (y - dy) / dh * vh) (w / dw * uw) (h / dh * vh)}
-      _ -> Nothing
+  | lookTurned look = Just (draw dest uv (rotationAngle (lookRotation look)))
+  | otherwise = (\(r, uvr) -> draw r uvr 0) <$> cropToBox dest uv box
+  where
+    (dest, uv) = lookPlacement look size box
+    draw r uvr angle = ImageDraw r iid uvr angle (lookTint look) (lookOpacity look * fade)
+
+-- | 'lookDraw' then 'imageDrawOp' for a look that is not 'lookTurned': the
+-- op's rect, UVs within the image and tint go to @k@, and nothing is built.
+-- Nothing is called when nothing is visible.
+{-# INLINE lookQuad #-}
+lookQuad :: ImageLook -> (Int, Int) -> Float -> Rect -> (Rect -> Float -> Float -> Float -> Float -> Color -> IO ()) -> IO ()
+lookQuad look size fade box k
+  | opacity <= 0 || colorA tint == 0 = pure ()
+  | otherwise = case cropToBox dest uv box of
+      Just (r, Rect u v uw vh) -> k r u v (u + uw) (v + vh) tint
+      Nothing -> pure ()
+  where
+    opacity = lookOpacity look * fade
+    tint = fadeBy (unitOpacity opacity) (lookTint look)
+    (dest, uv) = lookPlacement look size box
+
+-- | Whether a look turns its image: its angle is not a whole turn.
+lookTurned :: ImageLook -> Bool
+lookTurned look = not (angle == 0 || abs (sin angle) < 1.0e-6 && cos angle > 0)
+  where
+    angle = rotationAngle (lookRotation look)
+
+-- | The unrotated rect an @iw@ by @ih@ image is drawn in over @box@
+-- (fitted, aligned and zoomed), and the UV rect of its crop.
+{-# INLINE lookPlacement #-}
+lookPlacement :: ImageLook -> (Int, Int) -> Rect -> (Rect, Rect)
+lookPlacement look size@(iw, ih) box = (dest, uv)
   where
     Rect cx cy cw ch = cropRegion (lookCrop look) size
-    uvCrop = Rect (cx / fromIntegral iw) (cy / fromIntegral ih) (cw / fromIntegral iw) (ch / fromIntegral ih)
-    rot = lookRotation look
-    angle = rotationAngle rot
-    turned = not (abs (sin angle) < 1.0e-6 && cos angle > 0)
-    Rect fx fy fw fh = turnedRect (lookFit look) (lookAlignX look) (lookAlignY look) rot (cw, ch) box
+    uv = Rect (cx / fromIntegral iw) (cy / fromIntegral ih) (cw / fromIntegral iw) (ch / fromIntegral ih)
+    Rect fx fy fw fh = turnedRect (lookFit look) (lookAlignX look) (lookAlignY look) (lookRotation look) (cw, ch) box
     k = lookScale look
-    dest@(Rect dx dy dw dh) = Rect (fx + fw * (1 - k) / 2) (fy + fh * (1 - k) / 2) (fw * k) (fh * k)
-    draw = ImageDraw dest iid uvCrop (if turned then angle else 0) (lookTint look) (lookOpacity look * fade)
+    dest = Rect (fx + fw * (1 - k) / 2) (fy + fh * (1 - k) / 2) (fw * k) (fh * k)
+
+-- | The part of an unrotated image drawn over @dest@ with UVs @uv@ that lies
+-- in @box@, with its UVs; 'Nothing' when none does.
+{-# INLINE cropToBox #-}
+cropToBox :: Rect -> Rect -> Rect -> Maybe (Rect, Rect)
+cropToBox dest@(Rect dx dy dw dh) (Rect u v uw vh) box = case rectIntersect dest box of
+  Just (Rect x y w h)
+    | dw > 0 && dh > 0 && w > 0 && h > 0 ->
+        Just (Rect x y w h, Rect (u + (x - dx) / dw * uw) (v + (y - dy) / dh * vh) (w / dw * uw) (h / dh * vh))
+  _ -> Nothing
 
 -- | An image for 'NanoUI.Widgets.Custom.drawImageWith'. Start from
 -- 'imageDraw' and override fields:

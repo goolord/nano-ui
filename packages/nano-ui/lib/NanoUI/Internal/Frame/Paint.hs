@@ -37,7 +37,7 @@ import NanoUI.Internal.Frame.Paint.Widgets (PaintEnv (..), buildPaintEnv, paintT
 import NanoUI.Internal.Frame.Scroll.Geometry (ScrollNode (..), borderContentClip, scrollBare, scrollNodeBars, scrollNodeViewport)
 import NanoUI.Internal.Frame.Spans (textNodeSpanEntry)
 import NanoUI.Internal.Id (hashWidgetId)
-import NanoUI.Internal.Image (ImageDraw (..), fadeBy, imageDrawOp, lookDraw)
+import NanoUI.Internal.Image (fadeBy, imageDrawOp, lookDraw, lookQuad, lookTurned)
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Style hiding (fontSize)
 import NanoUI.Internal.Types (Color (..), ImageId (..), Rect (..), V2 (..), colorA, colorRGBA, rectInflate)
@@ -335,27 +335,27 @@ paintBoxNode env idx rect = do
 -- its font colour. With a look ('getImageNode') it is fitted, cropped,
 -- zoomed, faded and rotated ('lookDraw'), and clipped to its rect when
 -- rotated. Disabled images fade like disabled widget colours; unregistered
--- ones paint the accent.
+-- ones paint the accent. The image's size and UVs come from one atlas
+-- lookup, and an unrotated look ('lookQuad') builds no draw record.
 paintImageNode :: PaintEnv -> NodeIdx -> Rect -> IO ()
 paintImageNode env@PaintEnv {peDrawArena = da} idx rect = do
   let na = peNodeArena env
       fade = if peScope env .&. 1 /= 0 then 1 - themeDisabledFade (peTheme env) else 1
-      iid = ImageId . imageIdFromText
-  tex <- iid <$> getText na idx
+  tid <- getImageId na idx
   node <- getImageNode na idx
-  case node of
-    Nothing ->
-      lookupImageUv (peContext env) tex >>= \case
-        Just (u0, v0, u1, v1) -> do
-          base <- fromMaybe (colorRGBA 255 255 255 255) <$> getNodeFontColor na idx
-          pushImage da rect atlasTextureId u0 v0 u1 v1 (fadeBy fade base)
-        Nothing -> accent
-    Just ImageNode {inLook = look} ->
-      lookupImageSize (peContext env) tex >>= \case
-        Just size -> forM_ (lookDraw look size tex fade rect) $ \d ->
-          (if imageAngle d /= 0 then withClip da rect else id) $
-            forM_ (imageDrawOp d) (pushImageOp da (atlasImageUv (peContext env)))
-        Nothing -> accent
+  withImageSlot (peContext env) (ImageId tid) accent $ \iw ih a0 b0 a1 b1 -> do
+    let slot _ = pure (Just (atlasTextureId, (a0, b0, a1, b1)))
+    case node of
+      Nothing -> do
+        base <- fromMaybe (colorRGBA 255 255 255 255) <$> getNodeFontColor na idx
+        pushImage da rect atlasTextureId a0 b0 a1 b1 (fadeBy fade base)
+      Just ImageNode {inLook = look}
+        | lookTurned look ->
+            forM_ (lookDraw look (iw, ih) (ImageId tid) fade rect) $ \d ->
+              withClip da rect $ forM_ (imageDrawOp d) (pushImageOp da slot)
+        | otherwise ->
+            lookQuad look (iw, ih) fade rect $ \r u0 v0 u1 v1 c ->
+              pushImageOp da slot (DrawImage r 0 tid u0 v0 u1 v1 c)
   where
     accent = pushRect da rect (themeAccent (peTheme env))
 

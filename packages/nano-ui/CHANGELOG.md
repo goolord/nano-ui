@@ -817,6 +817,14 @@
   allocates 415 MB instead of 578 MB over 3000 frames, and the SDL demo's
   frame 140 KB instead of 157 KB. `NanoUI.Internal.Draw.Arena` exports
   `reserveRaw` and `commitRaw` for such emitters.
+- An image node keeps its image id as a number (`setImageId`,
+  `getImageId` in `NanoUI.Internal.Layout.Arena`) instead of as its text
+  in decimal, which the view formatted and paint parsed back every frame.
+  Paint finds an image's size and place in the atlas with one lookup, and
+  draws an unrotated look without building a draw record; damage compares
+  the id and look (`ImagePaint`, in `pfImages` in place of `pfLooks`). A
+  frame of 600 images allocates 256 KB instead of 692 KB, or 842 KB instead
+  of 1.8 MB with a look, taking 0.55 ms instead of 0.9 ms.
 
 ### Fixed
 

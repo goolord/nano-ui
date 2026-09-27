@@ -90,6 +90,8 @@ module NanoUI.Internal.Layout.Arena
   , ImageNode (..)
   , setImageNode
   , getImageNode
+  , setImageId
+  , getImageId
   , getWidgetId
   , setWidgetId
   , lookupNodeByWidgetId
@@ -215,8 +217,8 @@ data NodeType
   | NodeModal
   -- ^ A modal dialog. Floating: see 'isFloatingNode'.
   | NodeImage
-  -- ^ An image. The node's text is the image id in decimal. The style index
-  -- selects its look ('getImageNode').
+  -- ^ An image. Its image id is 'getImageId', and its style index selects
+  -- its look ('getImageNode').
   | NodePanel
   -- ^ A container that paints the theme's panel background and border, and
   -- clips its children to the inside of the border.
@@ -360,6 +362,8 @@ data NodeArenaArrays = NodeArenaArrays
   -- disabled. The theme index sits above bit 0, with 0 for the context's
   -- theme, and bit 0 is the disabled flag. See
   -- 'NanoUI.Internal.Context.Types.ThemeScopes'.
+  , naArrImageId :: !(IOArr Int)
+  -- ^ Each image node's image id ('setImageId'). Only image nodes set it.
   }
 
 -- | The arena: the node arrays, the number of nodes in use, and the solver's
@@ -659,6 +663,7 @@ newNodeArenaArrays cap = do
   naArrOptionsStore <- newArray cap []
   naArrFontColor <- newPrimArray cap
   naArrScope <- newPrimArray cap
+  naArrImageId <- newPrimArray cap
   pure NodeArenaArrays {..}
 
 -- | Uninitialised solver buffers with room for @fsCap@ children.
@@ -835,6 +840,7 @@ growNodeArenaArrays cap newCap a = do
   naArrOptionsStore <- growBoxedStoreCopy [] (naArrOptionsStore a) cap newCap
   naArrFontColor <- growPrimArrayCopy (naArrFontColor a) cap newCap 0
   naArrScope <- growPrimArrayCopy (naArrScope a) cap newCap 0
+  naArrImageId <- growPrimArrayCopy (naArrImageId a) cap newCap 0
   pure NodeArenaArrays {..}
 
 {-# NOINLINE growPrimArrayCopy #-}
@@ -1343,6 +1349,18 @@ getImageNode :: NodeArena -> NodeIdx -> IO (Maybe ImageNode)
 getImageNode na idx = do
   si <- arenaArrays na >>= \a -> readTree a idx TreeStyleIdx
   if si <= 0 then pure Nothing else Just <$> (readIORef (naImages na) >>= \arr -> readArray arr (si - 1))
+
+-- | Set image node @idx@'s image id: the 'NanoUI.Internal.Types.ImageId'
+-- it draws, or 0 for none. Layout does not read it, so it is not mixed into
+-- the node's hash.
+{-# INLINE setImageId #-}
+setImageId :: NodeArena -> NodeIdx -> Int -> IO ()
+setImageId na idx tid = arenaArrays na >>= \a -> writePrimArray (naArrImageId a) idx tid
+
+-- | Image node @idx@'s image id ('setImageId'). Only valid on a 'NodeImage'.
+{-# INLINE getImageId #-}
+getImageId :: NodeArena -> NodeIdx -> IO Int
+getImageId na idx = arenaArrays na >>= \a -> readPrimArray (naArrImageId a) idx
 
 -- | Filler for unused slots of 'naImages'.
 noImageNode :: ImageNode

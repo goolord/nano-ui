@@ -20,6 +20,7 @@ module NanoUI.Internal.Context.Types
   , DamageState (..)
   , initialDamageState
   , PrevFrame (..)
+  , ImagePaint (..)
   , emptyPrevFrame
   , OverlayState (..)
   , initialOverlayState
@@ -284,10 +285,15 @@ data PrevFrame = PrevFrame
   -- ^ Scroll containers and panels: the enclosing clip they paint in.
   -- 'pfClips' holds the inner clip they give their content.
   , pfTexts :: !(IntMap Text)
-  -- ^ Text of text and image nodes.
-  , pfLooks :: !(IntMap ImageLook)
-  -- ^ Paint look of image nodes that have one.
+  -- ^ Text of text nodes.
+  , pfImages :: !(IntMap ImagePaint)
+  -- ^ What image nodes draw.
   }
+
+-- | What an image node draws: its image id, and its look ('Nothing' for a
+-- plain image).
+data ImagePaint = ImagePaint !Int !(Maybe ImageLook)
+  deriving (Eq)
 
 emptyPrevFrame :: PrevFrame
 emptyPrevFrame = PrevFrame IM.empty IM.empty IM.empty IM.empty IM.empty

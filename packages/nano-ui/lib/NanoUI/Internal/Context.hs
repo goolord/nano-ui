@@ -18,6 +18,7 @@ module NanoUI.Internal.Context
   , WindowResizeDrag (..)
   , DamageState (..)
   , PrevFrame (..)
+  , ImagePaint (..)
   , emptyPrevFrame
   , OverlayState (..)
   , DrawingCacheState (..)
@@ -45,6 +46,7 @@ module NanoUI.Internal.Context
   , registerImages
   , lookupImageUv
   , lookupImageSize
+  , withImageSlot
   , atlasSnapshot
   , atlasChanges
   , AtlasUpload (..)
@@ -195,6 +197,12 @@ lookupImageUv ctx = Atlas.lookupImageUv (ctxImageAtlas ctx)
 {-# INLINE lookupImageSize #-}
 lookupImageSize :: Context -> ImageId -> IO (Maybe (Int, Int))
 lookupImageSize ctx = Atlas.lookupImageSize (ctxImageAtlas ctx)
+
+-- | A registered image's size in pixels and atlas UV bounds, passed to @k@,
+-- or @none@ if unknown ('Atlas.withImageSlot').
+{-# INLINE withImageSlot #-}
+withImageSlot :: Context -> ImageId -> IO r -> (Int -> Int -> Float -> Float -> Float -> Float -> IO r) -> IO r
+withImageSlot ctx = Atlas.withImageSlot (ctxImageAtlas ctx)
 
 -- | What a texture of the image atlas uploaded at generation @since@ (0 for
 -- none) needs, with the atlas's size, pixels and generation.

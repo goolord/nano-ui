@@ -21,6 +21,8 @@ tests =
   , spec "image-crop-scale" runImageCropScaleTest
   , spec "image-fit-rect" runImageFitRectTest
   , spec "image-look-damage" runImageLookDamageTest
+  , spec "image-id-damage" runImageIdDamageTest
+  , spec "image-large-id" runImageLargeIdTest
   , spec "svg-icon-configured" runSvgIconConfiguredTest
   , spec "use-image-rgba" runUseImageRgbaTest
   ]
@@ -225,6 +227,36 @@ runImageLookDamageTest ctx failed = do
   _ <- runFrame ctx (withInput 400 400) (ui 0.5)
   takeDamage ctx >>= assert failed . damageIsEmpty
   writeIORef (ctxPaintFull ctx) True
+
+-- | Switching the image an image node shows, at the same rect, repaints the
+-- node, plain or with a look; showing the same image again repaints nothing.
+runImageIdDamageTest :: Context -> IORef Int -> IO ()
+runImageIdDamageTest ctx failed = do
+  writeIORef (ctxPaintFull ctx) False
+  a <- whiteImage ctx 1 40 20
+  b <- whiteImage ctx 2 40 20
+  let looked = imageConfigured' defaultImageConfig {icLayout = fixedWH 80 40, icFit = FitContain}
+  forM_ [image' (fixedWH 80 40), looked] $ \img -> do
+    let ui iid = column (img iid)
+        inp = withInput 400 400
+    r <- warmup2 ctx inp (ui a)
+    _ <- runFrame ctx inp (ui a)
+    takeDamage ctx >>= assert failed . damageIsEmpty
+    _ <- runFrame ctx inp (ui b)
+    takeDamage ctx >>= assert failed . (`clipCovers` respRect r)
+    _ <- runFrame ctx inp (ui b)
+    takeDamage ctx >>= assert failed . damageIsEmpty
+  writeIORef (ctxPaintFull ctx) True
+
+-- | An image id past what a 'Float' holds exactly still draws its own image,
+-- not a neighbour's or the placeholder.
+runImageLargeIdTest :: Context -> IORef Int -> IO ()
+runImageLargeIdTest ctx failed = do
+  _ <- whiteImage ctx (2 ^ (24 :: Int)) 40 20
+  big <- whiteImage ctx (2 ^ (24 :: Int) + 1) 20 40
+  forM_ [image (fixedWH 20 40), imageConfigured defaultImageConfig {icLayout = fixedWH 20 40, icFit = FitContain}] $ \img -> do
+    (_, _, quads) <- frame ctx big (img big)
+    assertNear failed [0, 0, 1, 1] (concat [drop 4 q | q <- bounds (V2 0 0) quads])
 
 -- | A configured SVG icon fades like an image, and the default config draws
 -- the same as 'svgIconWith'.

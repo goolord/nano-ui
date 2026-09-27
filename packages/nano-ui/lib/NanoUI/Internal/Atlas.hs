@@ -9,6 +9,7 @@ module NanoUI.Internal.Atlas
   , freshImageId
   , lookupImageUv
   , lookupImageSize
+  , withImageSlot
   , atlasSnapshot
   , AtlasUpload (..)
   , atlasChanges
@@ -173,26 +174,28 @@ freshImageId (ImageAtlas ref) = do
 
 lookupImageUv ::
   ImageAtlas -> ImageId -> IO (Maybe (Float, Float, Float, Float))
-lookupImageUv (ImageAtlas ref) (ImageId tid) = do
+lookupImageUv atlas iid = withImageSlot atlas iid (pure Nothing) $ \_ _ u0 v0 u1 v1 -> pure (Just (u0, v0, u1, v1))
+
+-- | A registered image's pixel size and atlas UV bounds, from one lookup,
+-- passed to @k@; @none@ when the image is not registered.
+{-# INLINE withImageSlot #-}
+withImageSlot :: ImageAtlas -> ImageId -> IO r -> (Int -> Int -> Float -> Float -> Float -> Float -> IO r) -> IO r
+withImageSlot (ImageAtlas ref) (ImageId tid) none k = do
   st <- readIORef ref
-  let fw = fromIntegral (asW st)
-      fh = fromIntegral (asH st)
-  pure $! case IM.lookup tid (asSlots st) of
-    Nothing -> Nothing
-    Just (AtlasSlot x y w h) ->
-      let !u0 = fromIntegral x / fw
+  case IM.lookup tid (asSlots st) of
+    Nothing -> none
+    Just (AtlasSlot x y w h) -> do
+      let !fw = fromIntegral (asW st) :: Float
+          !fh = fromIntegral (asH st) :: Float
+          !u0 = fromIntegral x / fw
           !v0 = fromIntegral y / fh
           !u1 = fromIntegral (x + w) / fw
           !v1 = fromIntegral (y + h) / fh
-       in Just (u0, v0, u1, v1)
+      k w h u0 v0 u1 v1
 
 -- | Pixel width and height of a registered image.
 lookupImageSize :: ImageAtlas -> ImageId -> IO (Maybe (Int, Int))
-lookupImageSize (ImageAtlas ref) (ImageId tid) = do
-  st <- readIORef ref
-  pure $! case IM.lookup tid (asSlots st) of
-    Nothing -> Nothing
-    Just (AtlasSlot _ _ w h) -> Just (w, h)
+lookupImageSize atlas iid = withImageSlot atlas iid (pure Nothing) $ \w h _ _ _ _ -> pure (Just (w, h))
 
 -- | Writes 'asWrites' keeps: enough for a few frames of a few changing
 -- images between two uploads.

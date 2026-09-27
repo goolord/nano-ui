@@ -25,24 +25,24 @@ import NanoUI.Internal.Atlas qualified as Atlas
 import NanoUI.Internal.Context (Context (..), lookupImageSize, registerImage, releaseImage)
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Image
-import NanoUI.Internal.Layout.Arena (ImageNode (..), NodeType (NodeImage), setImageNode)
+import NanoUI.Internal.Layout.Arena (ImageNode (..), NodeType (NodeImage), setImageId, setImageNode)
 import NanoUI.Internal.Monad (Ui, freshWidget, uiIO)
 import NanoUI.Internal.Style (Layout (..), Sizing (..), aspect, defaultLayout)
 import NanoUI.Internal.Tasks (useHeld)
 import NanoUI.Internal.Types (ImageId (..), colorRGBA)
-import NanoUI.Internal.WidgetText (intValueText)
 import NanoUI.Internal.Widgets.Node (Response, addWidgetNode)
 
--- | An image node for image @iid@ under widget @wid@. Its text is the image
--- id, which paint uses to find the image and damage uses to spot a switched
--- image. With an 'ImageNode', paint fits, fades and rotates the image
+-- | An image node for image @iid@ under widget @wid@. Paint finds the image
+-- by the node's image id ('setImageId'), and damage spots a switched image
+-- by it. With an 'ImageNode', paint fits, fades and rotates the image
 -- ('lookDraw') and an unsized axis takes the image's size; without one the
 -- image is stretched, as with 'NanoUI.image'. Like a label, it passes the
 -- pointer to a control it is drawn over; its response still reports hover
 -- and clicks.
 imageNode :: Ui :> es => WidgetId -> Maybe ImageNode -> Layout -> ImageId -> Eff es Response
 imageNode wid node lay (ImageId tid) =
-  addWidgetNode wid NodeImage (if tid <= 0 then T.empty else intValueText tid) 0 lay $ \arena idx ->
+  addWidgetNode wid NodeImage T.empty 0 lay $ \arena idx -> do
+    setImageId arena idx (max 0 tid)
     mapM_ (setImageNode arena idx) node
 
 -- | A registered image drawn with a fit, alignment, crop, zoom, opacity and
@@ -60,18 +60,20 @@ imageConfigured' :: Ui :> es => ImageConfig -> ImageId -> Eff es Response
 imageConfigured' cfg iid = do
   (wid, ctx) <- freshWidget
   natural <- uiIO (lookupImageSize ctx iid)
-  let lay0 = icLayout cfg defaultLayout
-      look = imageLook cfg (fromMaybe (colorRGBA 255 255 255 255) (layoutFontColor lay0))
-      (w, h) = maybe (32, 32) (lookSize look) natural
-      -- A registered image keeps its aspect ratio on an unsized axis.
-      lay
-        | isJust natural && (layoutWidth lay0 == Fit || layoutHeight lay0 == Fit) && layoutAspect lay0 <= 0 = aspect (w / h) lay0
-        | otherwise = lay0
-      -- Both axes fixed with a default look: a plain stretched image, which
-      -- paint and damage handle on a faster path.
-      plain = fixed (layoutWidth lay) && fixed (layoutHeight lay) && look == imageLook defaultImageConfig (lookTint look)
+  let !lay0 = icLayout cfg defaultLayout
+      !look = imageLook cfg (fromMaybe (colorRGBA 255 255 255 255) (layoutFontColor lay0))
       fixed = \case Fixed _ -> True; _ -> False
-  imageNode wid (if plain then Nothing else Just (ImageNode look w h)) lay iid
+  -- Both axes fixed with a default look: a plain stretched image, which
+  -- paint and damage handle on a faster path.
+  if fixed (layoutWidth lay0) && fixed (layoutHeight lay0) && plainLook look
+    then imageNode wid Nothing lay0 iid
+    else do
+      let !(w, h) = maybe (32, 32) (lookSize look) natural
+          -- A registered image keeps its aspect ratio on an unsized axis.
+          lay
+            | isJust natural && (layoutWidth lay0 == Fit || layoutHeight lay0 == Fit) && layoutAspect lay0 <= 0 = aspect (w / h) lay0
+            | otherwise = lay0
+      imageNode wid (Just $! ImageNode look w h) lay iid
 
 -- | Register an RGBA image (4 bytes per pixel, rows top to bottom), @w@ by
 -- @h@ pixels, on the first frame this is called with a key, and return its
