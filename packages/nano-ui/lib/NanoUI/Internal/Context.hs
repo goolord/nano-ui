@@ -19,6 +19,7 @@ module NanoUI.Internal.Context
   , DamageState (..)
   , PrevFrame (..)
   , emptyPrevFrame
+  , PrevWalk (..)
   , OverlayState (..)
   , DrawingCacheState (..)
   , DrawingEntry (..)
@@ -562,6 +563,7 @@ newContext = do
   ctxInputMethod <- newIORef Nothing
   ctxStore <- newIORef emptyWidgetStore
   ctxDamageState <- newIORef initialDamageState
+  ctxPrevWalk <- newIORef =<< newPrevWalk 0
   ctxOverlayState <- newIORef initialOverlayState
   ctxAnimationState <- newIORef initialAnimationState
   ctxScrollState <- newIORef initialScrollState

@@ -21,6 +21,8 @@ module NanoUI.Internal.Context.Types
   , initialDamageState
   , PrevFrame (..)
   , emptyPrevFrame
+  , PrevWalk (..)
+  , newPrevWalk
   , OverlayState (..)
   , initialOverlayState
   , ExplainState (..)
@@ -70,13 +72,15 @@ import Data.Dynamic (Dynamic)
 import Data.HashMap.Strict (HashMap)
 import Data.HashMap.Strict qualified as HashMap
 import Data.Hashable (Hashable)
-import Data.IORef (IORef, modifyIORef', readIORef, writeIORef)
+import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.IntMap.Strict (IntMap)
 import Data.IntMap.Strict qualified as IM
 import Data.IntSet (IntSet)
 import Data.IntSet qualified as IS
 import Data.Map.Strict (Map)
-import Data.Primitive.PrimArray (MutablePrimArray)
+import Data.Primitive.Array (MutableArray, newArray)
+import Data.Primitive.PrimArray (MutablePrimArray, newPrimArray, setPrimArray)
+import Data.Primitive.PrimVar (PrimVar, newPrimVar)
 import Data.Primitive.SmallArray (SmallArray, SmallMutableArray)
 import Data.Word (Word64)
 import Data.Text (Text)
@@ -291,6 +295,38 @@ data PrevFrame = PrevFrame
 
 emptyPrevFrame :: PrevFrame
 emptyPrevFrame = PrevFrame IM.empty IM.empty IM.empty IM.empty IM.empty
+
+-- | What the last completed 'NanoUI.Internal.Damage.updatePrevRects' walk
+-- saw at each arena index, so a node that has not changed since skips the
+-- 'PrevFrame' maps: they already hold its entries. Valid only while
+-- 'dsPrev' still holds the rects that walk built ('pwFor'). Updated in
+-- place, so a frame allocates none of it.
+data PrevWalk = PrevWalk
+  { pwKeys :: !(MutablePrimArray RealWorld Int)
+  -- ^ The node's key, or 0 where the walk made no entries.
+  , pwTags :: !(MutablePrimArray RealWorld Int)
+  -- ^ Which of a clip, text and look the node has.
+  , pwGeom :: !(MutablePrimArray RealWorld Float)
+  -- ^ Eight per index: the rect, then the clip.
+  , pwTexts :: !(MutableArray RealWorld Text)
+  , pwLooks :: !(MutableArray RealWorld (Maybe ImageLook))
+  , pwValid :: !(PrimVar RealWorld Int)
+  -- ^ How many indices hold entries: none while a walk is under way.
+  , pwFor :: !(IORef (IntMap Rect))
+  }
+
+-- | Room for @n@ nodes, with no entries.
+newPrevWalk :: Int -> IO PrevWalk
+newPrevWalk n = do
+  keys <- newPrimArray n
+  setPrimArray keys 0 n 0
+  tags <- newPrimArray n
+  setPrimArray tags 0 n 0
+  geom <- newPrimArray (8 * n)
+  setPrimArray geom 0 (8 * n) 0
+  texts <- newArray n mempty
+  looks <- newArray n Nothing
+  PrevWalk keys tags geom texts looks <$> newPrimVar 0 <*> newIORef IM.empty
 
 -- | Require a first frame and full repaint, with no previous geometry.
 initialDamageState :: DamageState
@@ -800,6 +836,7 @@ data Context = Context
   , ctxInputMethod :: !(IORef (Maybe InputMethodRequest))
   , ctxStore :: IORef WidgetStore
   , ctxDamageState :: IORef DamageState
+  , ctxPrevWalk :: !(IORef PrevWalk)
   , ctxOverlayState :: IORef OverlayState
   , ctxAnimationState :: IORef AnimationState
   , ctxScrollState :: !(IORef ScrollState)
