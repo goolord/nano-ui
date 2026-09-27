@@ -24,17 +24,18 @@ where
 import Colonnade (Colonnade, Headed (..), headed, headless)
 import Colonnade.Encode qualified as Encode
 import Control.Monad (forM, forM_, unless, void, when)
+import Control.Monad.ST (runST)
 import Data.Char (isDigit)
 import Data.Foldable (toList)
 import Data.IORef (modifyIORef')
 import Data.IntSet (IntSet)
 import Data.IntSet qualified as IS
-import Data.List (find, sortBy, sortOn)
+import Data.List (find, sortOn)
 import Data.Maybe (fromMaybe, isJust, listToMaybe)
-import Data.Ord (Down (..), comparing)
+import Data.Ord (Down (..))
 import Data.Text (Text)
 import Data.Text qualified as T
-import Data.Primitive.PrimArray (PrimArray, indexPrimArray, newPrimArray, primArrayFromList, sizeofPrimArray, unsafeFreezePrimArray, writePrimArray)
+import Data.Primitive.PrimArray (PrimArray, copyMutablePrimArray, indexPrimArray, newPrimArray, primArrayFromList, readPrimArray, sizeofPrimArray, unsafeFreezePrimArray, writePrimArray)
 import Data.Primitive.SmallArray (SmallArray, indexSmallArray, mapSmallArray', newSmallArray, sizeofSmallArray, smallArrayFromList, unsafeFreezeSmallArray, writeSmallArray)
 import Data.Primitive.Types (Prim)
 import Data.Vector qualified as V
@@ -548,11 +549,49 @@ gridColumnsLay lay keys layouts cells =
     go False moreKeys moreLayouts moreCells
   go _ _ _ _ = pure ()
 
--- | Indices of @keys@ stably sorted by key.
+-- | Indices of @keys@ stably sorted by key: a bottom-up merge sort between
+-- two index buffers.
 sortIndices :: SortDir -> SmallArray Text -> PrimArray Int
-sortIndices dir keys =
-  let byKey = comparing (indexSmallArray keys)
-   in primArrayFromList (sortBy (if dir == SortAsc then byKey else flip byKey) [0 .. sizeofSmallArray keys - 1])
+sortIndices dir keys = runST $ do
+  let n = sizeofSmallArray keys
+      before l r = case compare (indexSmallArray keys l) (indexSmallArray keys r) of
+        LT -> dir == SortAsc
+        GT -> dir == SortDesc
+        EQ -> True
+  start <- newPrimArray n
+  let fill !i = when (i < n) (writePrimArray start i i >> fill (i + 1))
+  fill 0
+  spare <- newPrimArray n
+  let pass !src !dst !width
+        | width >= n = unsafeFreezePrimArray src
+        | otherwise = do
+            let mergeFrom !lo = when (lo < n) $ do
+                  let !mid = min n (lo + width)
+                      !hi = min n (lo + 2 * width)
+                      copy from to len = copyMutablePrimArray dst to src from len
+                      takeLeft !i !j !k = readPrimArray src i >>= writePrimArray dst k >> go (i + 1) j (k + 1)
+                      takeRight !i !j !k = readPrimArray src j >>= writePrimArray dst k >> go i (j + 1) (k + 1)
+                      go !i !j !k
+                        | k >= hi = pure ()
+                        | i >= mid = takeRight i j k
+                        | j >= hi = takeLeft i j k
+                        | otherwise = do
+                            l <- readPrimArray src i
+                            r <- readPrimArray src j
+                            if before l r then takeLeft i j k else takeRight i j k
+                  -- Runs already in order, or wholly reversed, are copied
+                  -- without a merge, so sorted input costs O(n) compares.
+                  -- Reversed means every right key is strictly first, so
+                  -- swapping the runs keeps the sort stable.
+                  inOrder <- if mid >= hi then pure True else before <$> readPrimArray src (mid - 1) <*> readPrimArray src mid
+                  merge <- if inOrder then pure False else before <$> readPrimArray src lo <*> readPrimArray src (hi - 1)
+                  if inOrder
+                    then copy lo lo (hi - lo)
+                    else if merge then go lo mid lo else copy mid lo (hi - mid) >> copy lo (lo + hi - mid) (mid - lo)
+                  mergeFrom hi
+            mergeFrom 0
+            pass dst src (2 * width)
+  pass start spare 1
 
 -- | First and last visible item index for a uniform-height list, or
 -- @(0, -1)@ when nothing is visible.

@@ -735,10 +735,11 @@
   `takeDebugLive`.
 - Lines are drawn as one anti-aliased strip with round caps instead of a
   capsule per segment.
-- Tables encode each row once and sort row indices with a merge sort, combo
-  boxes filter their options only while focused, pane grid dividers and
-  overlays are keyed drawings, and unchanged animations are not rewritten
-  to the store, cutting per-frame work for those widgets.
+- Tables encode each row once and sort row indices with a merge sort that
+  copies runs already in order, combo boxes filter their options only while
+  focused, pane grid dividers and overlays are keyed drawings, and unchanged
+  animations are not rewritten to the store, cutting per-frame work for
+  those widgets.
 - Damage is gathered into one running union instead of rect lists, paint
   keeps the opaque floating panels it culls against in a flat array built
   only when a frame has floating panels, and the node arena tracks the
