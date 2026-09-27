@@ -22,5 +22,11 @@
   and table cells (`mdTableCell`).
 - `markdownSource`, a document's text, and `markdownImages`, its images'
   sources, for loading them ahead.
+- Blocks are 16 pixels apart, as are the items of a loose list; a tight
+  list's items are 6 apart.
+- The widget keeps the rich-text pieces of blocks that are unchanged since
+  the last frame, so a long document costs little a frame while a reply
+  streams into its last block: its paragraphs are neither rebuilt nor
+  hashed again.
 - The example streams its reply with nano-ui's `useStream`, appending tokens
   on the producer's thread.
