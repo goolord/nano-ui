@@ -10,10 +10,6 @@ check that the packages still build on 9.10, use a separate build directory:
 cabal build all -w ghc-9.10.3 --builddir=dist-newstyle-910
 ```
 
-`nano-ui-form` depends on ditto 0.5, which `cabal.project` builds from a
-checkout at `../ditto`. Clone [ditto](https://github.com/goolord/ditto) next to
-this repository before building.
-
 ## Building and testing
 
 ```sh
