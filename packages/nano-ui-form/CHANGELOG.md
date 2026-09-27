@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0.0 -- Unreleased
 
 - No longer depends on `effectful-core`.
 - Builds with GHC 9.10 through 9.14 (`base >=4.20 && <4.23`).
