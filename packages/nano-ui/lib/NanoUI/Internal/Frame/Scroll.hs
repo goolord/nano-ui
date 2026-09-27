@@ -140,7 +140,9 @@ applyCrossAxisScroll ctx@Context {ctxNodeArena = na} idx scroll = do
       if nt == NodePanel || nt == NodeWindow || nt == NodeModal
         then pure (Just Nothing)
         else fmap Just <$> crossWid i
-    inside i = firstChildJustM na i $ \ci -> crossWid ci >>= maybe (inside ci) (pure . Just)
+    -- Only subtrees holding a scroller can hold a cross one.
+    inside i = firstChildJustM na i $ \ci ->
+      ifM (hasScrollerBelow na ci) (crossWid ci >>= maybe (inside ci) (pure . Just)) (pure Nothing)
   parent <- getParent na idx
   up <- join <$> walkAncestors na parent above
   target <- maybe (inside idx) (pure . Just) up
@@ -229,7 +231,10 @@ queryScrollTarget ctx@Context {ctxNodeArena = na} layered mouse parentClip idx =
     Just clip -> do
       overlapping <-
         pure layered <&&> ((||) <$> ((== Layered) <$> getFlow na idx) <*> hasPinnedBelow na idx)
-      let answered c =
+      -- A child with no scroller, text area or 'PointerBlock' node in its
+      -- subtree can only answer 'WheelMiss', so it is not asked.
+      let answered c = ifM (hasScrollerBelow na c) (query c) (pure Nothing)
+          query c =
             queryScrollTarget ctx layered mouse clip c <&> \case
               WheelMiss -> Nothing
               hit -> Just hit
