@@ -28,7 +28,8 @@ import Data.IntMap.Strict qualified as IM
 import Data.IntSet qualified as IS
 import Data.Maybe (isJust, isNothing)
 import Data.Primitive.PrimVar (PrimVar, modifyPrimVar, newPrimVar, readPrimVar, writePrimVar)
-import Data.Typeable (Typeable, cast)
+import Data.Type.Equality ((:~:) (Refl))
+import Data.Typeable (Typeable, cast, eqT)
 import Effectful (Eff, type (:>))
 import GHC.Conc (labelThread)
 import GHC.Exts (RealWorld)
@@ -54,7 +55,13 @@ data Holding = forall k. (Eq k, Typeable k) => Holding !k !Dynamic !(IO ()) !(Pr
 -- when the session ends ('cancelTasks'). Holds job threads and
 -- 'NanoUI.useImageRgba' images.
 useHeld :: (Eq k, Typeable k, Typeable a, Ui :> es) => k -> (Context -> Maybe a -> IO (a, IO ())) -> Eff es a
-useHeld k acquire = do
+useHeld k acquire = useHeldBy k Just (\ctx old -> (\(v, release) -> (v, v, release)) <$> acquire ctx old)
+
+-- | 'useHeld' keeping an @s@ and returning what @view@ finds in it. An entry
+-- @view@ finds nothing in is replaced, as one of another type is.
+{-# INLINE useHeldBy #-}
+useHeldBy :: (Eq k, Typeable k, Typeable s, Ui :> es) => k -> (s -> Maybe b) -> (Context -> Maybe b -> IO (s, b, IO ())) -> Eff es b
+useHeldBy k view acquire = do
   (wid, ctx) <- freshWidget
   uiIO $ do
     Held ref frameVar stampedVar countVar <- hostOrInit ctx newHeld
@@ -62,7 +69,7 @@ useHeld k acquire = do
     frame <- readPrimVar frameVar
     let key = intKey wid
         entry = IM.lookup key held
-        valueOf (Holding _ v _ _) = fromDynamic v
+        valueOf (Holding _ v _ _) = view =<< fromDynamic v
         stamp = modifyPrimVar stampedVar (+ 1)
     case entry of
       Just h@(Holding k0 _ _ seen) | cast k0 == Just k, Just v <- valueOf h -> do
@@ -72,9 +79,9 @@ useHeld k acquire = do
       _ -> do
         -- A replaced entry stamped earlier this frame stays counted.
         counted <- maybe (pure False) (\old -> letGo old >> (== frame) <$> seenIn old) entry
-        (v, release) <- acquire ctx (valueOf =<< entry)
+        (stored, v, release) <- acquire ctx (valueOf =<< entry)
         seen <- newPrimVar frame
-        writeIORef ref $! IM.insert key (Holding k (toDyn v) release seen) held
+        writeIORef ref $! IM.insert key (Holding k (toDyn stored) release seen) held
         unless counted stamp
         when (isNothing entry) $ modifyPrimVar countVar (+ 1)
         pure v
@@ -100,16 +107,26 @@ data TaskStatus a
 -- allocates.
 data Outcome a = Outcome !(TaskStatus a) !(Maybe a)
 
--- | 'useHeld' for a job. @start@ builds the result box (given the old box
--- when the types match) and the action to fork.
-useJob :: (Eq k, Typeable k, Typeable b, Ui :> es) => k -> (Context -> Maybe b -> IO (b, IO ())) -> Eff es b
-useJob k start = useHeld k $ \ctx old -> do
-  (box, run) <- start ctx old
+-- | A job's result box as its hook keeps it. The type of the box itself is
+-- known here, so finding it costs a fingerprint compare; a 'Dynamic' of the
+-- box would build that type from the caller's result type on every call.
+data TaskBox = forall a. Typeable a => TaskBox !(IORef (Outcome a))
+
+-- | The box, if its job returns an @a@.
+taskRef :: forall a. Typeable a => TaskBox -> Maybe (IORef (Outcome a))
+taskRef (TaskBox (ref :: IORef (Outcome b))) = (\Refl -> ref) <$> eqT @a @b
+
+-- | 'useHeldBy' for a job. @start@ builds what the hook keeps, the result
+-- box (given the old box when @view@ finds one) and the action to fork.
+{-# INLINE useJob #-}
+useJob :: (Eq k, Typeable k, Typeable s, Ui :> es) => k -> (s -> Maybe b) -> (Context -> Maybe b -> IO (s, b, IO ())) -> Eff es b
+useJob k view start = useHeldBy k view $ \ctx old -> do
+  (stored, box, run) <- start ctx old
   tid <- forkIO run
   labelThread tid "nano-ui task"
   -- Kill from a separate thread: 'killThread' blocks until the job receives
   -- the exception, which masking or a foreign call can delay.
-  pure (box, void (forkIO (killThread tid)))
+  pure (stored, box, void (forkIO (killThread tid)))
 
 -- | Run an action on a worker thread and report its status: running, done,
 -- or failed with the exception it threw.
@@ -163,12 +180,13 @@ useTask k run = (\(Outcome _ latest) -> latest) <$> useOutcome k run
 -- carrying the replaced job's latest result.
 useOutcome :: (Eq k, Typeable k, Typeable a, Ui :> es) => k -> IO a -> Eff es (Outcome a)
 useOutcome k run = do
-  box <- useJob k $ \ctx old -> do
+  box <- useJob k taskRef $ \ctx old -> do
     prev <- maybe (pure Nothing) (fmap (\(Outcome _ latest) -> latest) . readIORef) old
     box <- newIORef (Outcome (TaskRunning prev) prev)
     let finish = (>> wakeFromThread ctx) . atomicWriteIORef box
     pure
-      ( box
+      ( TaskBox box
+      , box
       , try (run >>= evaluate) >>= \case
           Right a -> finish (Outcome (TaskDone a) (Just a))
           Left e
@@ -199,9 +217,9 @@ useOutcome k run = do
 -- inside to show it in the state.
 useStream :: (Eq k, Typeable k, Typeable s, Ui :> es) => k -> s -> (((s -> s) -> IO ()) -> IO ()) -> Eff es s
 useStream k initial produce = do
-  box <- useJob k $ \ctx _ -> do
+  box <- useJob k Just $ \ctx _ -> do
     box <- newIORef initial
-    pure (box, produce (\f -> atomicModifyIORef' box (\s -> (f s, ())) >> wakeFromThread ctx))
+    pure (box, box, produce (\f -> atomicModifyIORef' box (\s -> (f s, ())) >> wakeFromThread ctx))
   uiIO (readIORef box)
 
 -- | An action any thread can call to rerun the view after changing something

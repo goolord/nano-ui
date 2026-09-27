@@ -13,6 +13,7 @@ tests :: [Spec]
 tests =
   [ spec "task-result-after-wake" runTaskResultTest
   , spec "task-key-change" runTaskKeyChangeTest
+  , spec "task-type-change" runTaskTypeChangeTest
   , spec "task-lease" runTaskLeaseTest
   , spec "task-lease-partial" runTaskPartialLeaseTest
   , spec "task-two-passes" runTaskTwoPassTest
@@ -119,6 +120,20 @@ runTaskKeyChangeTest ctx failed = do
   _ <- wait 0
   putMVar gate ()
   assertEq failed (Just (Just 30)) =<< frameUntil wait ctx ui (== Just 30)
+
+-- | A hook that keeps its key but returns another type starts a new job and
+-- carries no result over, which has another type.
+runTaskTypeChangeTest :: Context -> IORef Int -> IO ()
+runTaskTypeChangeTest ctx failed = do
+  wait <- newWakeSignal ctx
+  gate <- newEmptyMVar
+  let asInt = useTask ("same" :: String) (pure (1 :: Int))
+      asString = useTask ("same" :: String) (readMVar gate >> pure ("one" :: String))
+  assertEq failed (Just (Just 1)) =<< frameUntil wait ctx asInt isJust
+  assertEq failed Nothing =<< evalUi ctx inp asString
+  putMVar gate ()
+  assertEq failed (Just (Just "one")) =<< frameUntil wait ctx asString isJust
+  cancelTasks ctx
 
 -- | A job lives while the view calls its hook. The first frame without the
 -- call kills it without requesting a frame; a later call starts a new job.
