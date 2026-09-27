@@ -7,7 +7,6 @@ module Cases.ViewApi (tests) where
 import Spec
 import Data.IntMap.Strict qualified as IM
 import Data.Text (Text)
-import Effectful (liftIO)
 import NanoUI.Internal.Context (Context (..))
 import NanoUI.Monad (focusedWidget, releaseFocus)
 

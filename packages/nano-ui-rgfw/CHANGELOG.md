@@ -24,6 +24,8 @@
 
 ### Changed
 
+- Widgets and view functions have `NanoUI` types instead of
+  `Ui :> es => Eff es`, and the package no longer depends on `effectful-core`.
 - Builds with GHC 9.10 through 9.14 (`base >=4.20 && <4.23`).
 - `NanoUI.Rgfw.Context`, `.Debug`, `.Gl`, `.Session` and `.Font.Cozette` are
   now under `NanoUI.Rgfw.Internal`. `NanoUI.Backend.Rgfw` is the API.

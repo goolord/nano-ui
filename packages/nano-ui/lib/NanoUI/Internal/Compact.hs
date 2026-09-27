@@ -6,10 +6,9 @@ module NanoUI.Internal.Compact
   ) where
 
 import Data.Typeable (Typeable)
-import Effectful (Eff, type (:>))
 import GHC.Compact (Compact, compact, getCompact)
 import NanoUI.Internal.Context (Context, setHost)
-import NanoUI.Internal.Monad (Ui, askHost)
+import NanoUI.Internal.Monad (NanoUI, askHost)
 
 -- | Copy data into a compact region and store it by type in the context.
 -- GHC's 'compact' restrictions apply: values containing functions or mutable
@@ -18,5 +17,5 @@ compactHost :: Typeable a => Context -> a -> IO (Compact a)
 compactHost ctx a = compact a >>= \region -> region <$ setHost ctx region
 
 -- | Read the compacted host value of the requested type, or 'Nothing' if absent.
-askCompact :: forall a es. (Typeable a, Ui :> es) => Eff es (Maybe a)
+askCompact :: forall a. Typeable a => NanoUI (Maybe a)
 askCompact = fmap getCompact <$> askHost @(Compact a)

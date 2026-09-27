@@ -32,7 +32,7 @@ import NanoUI.Internal.Id (WidgetId (..), initialIdContext)
 import NanoUI.Internal.Input (Input (..), Key (..), MouseButton (..), Pressable (..), inputKeysNull, stripInteractionInput, withoutPointer)
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Layout.Solve (placeFloatingNodes, runCustomMeasure, solveLayout)
-import NanoUI.Internal.Monad (NanoUI, Ui, runUi, whenM)
+import NanoUI.Internal.Monad (NanoUI (..), Ui, runUi, whenM)
 import NanoUI.Internal.Store (mirrorStoresChanged)
 import NanoUI.Internal.Style (Padding (..), Theme (..), themeOverlayDim, themeSeparator)
 import NanoUI.Internal.Tasks (sweepHeld)
@@ -45,7 +45,7 @@ import NanoUI.Internal.Widgets.Sensor (beginSensors, updateSensors)
 -- needs a follow-up frame. A local-state change can rebuild the view within
 -- this call, with one-shot input removed. Native presentation is the host's job.
 runFrame :: Context -> Input -> NanoUI a -> IO (a, [FrameMsg], DrawData, Bool)
-runFrame = runFrameEff runEff
+runFrame ctx inp ui = runFrameEff runEff ctx inp (unNanoUI ui)
 
 -- | View this model, then apply decoded messages at frame end.
 -- DrawData is from the pre-reduce model (one-frame lag). The idle
@@ -58,7 +58,7 @@ runFrameReduce ::
   -> model
   -> (model -> NanoUI a)
   -> IO (a, model, [msg], DrawData, Bool)
-runFrameReduce = runFrameReduceEff runEff
+runFrameReduce update ctx inp model view = runFrameReduceEff runEff update ctx inp model (unNanoUI . view)
 
 -- | 'runFrameReduce' for a larger effect stack, with a runner that interprets
 -- the remaining effects in IO.

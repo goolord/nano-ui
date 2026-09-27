@@ -16,12 +16,11 @@ import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Read qualified as TR
-import Effectful (Eff, type (:>))
 import GHC.Clock (getMonotonicTime)
 import NanoUI.Internal.Context (getStore, intKey, registerFocusable, requestInputMethod, requestWakeAt, modifyStore)
 import NanoUI.Internal.Input (InputPurpose (..), Key (..), MouseButton (..), Pressable (..), inputModifiers, inputMousePos, modShift)
 import NanoUI.Internal.Layout.Arena (NodeType (..))
-import NanoUI.Internal.Monad (Ui, askInput, freshWidget, uiIO)
+import NanoUI.Internal.Monad (NanoUI, askInput, freshWidget, liftIO)
 import NanoUI.Internal.Store (Slot (..), deleteSlot, fieldDouble, fieldInt, fieldText, findSlot, insertSlot, lookupSlot, slotKey)
 import NanoUI.Internal.Style (Layout (..), Sizing (..), defaultLayout)
 import NanoUI.Internal.Types (Rect (..), clamp, rectContains)
@@ -70,12 +69,12 @@ defaultNumericInputConfig =
 -- holding a stepper arrow repeats. Enter, a step, or leaving the field rewrites
 -- the text as the value, clamped to the range.
 {-# INLINE numericInput #-}
-numericInput :: Ui :> es => Double -> Eff es Double
+numericInput :: Double -> NanoUI Double
 numericInput value = snd <$> numericInputConfigured' defaultNumericInputConfig value
 
 -- | 'numericInput' returning @(response, updatedValue)@.
 {-# INLINE numericInput' #-}
-numericInput' :: Ui :> es => Double -> Eff es (Response, Double)
+numericInput' :: Double -> NanoUI (Response, Double)
 numericInput' = numericInputConfigured' defaultNumericInputConfig
 
 -- | 'numericInput' with a range, a step, decimal places, hexadecimal mode, or
@@ -83,19 +82,19 @@ numericInput' = numericInputConfigured' defaultNumericInputConfig
 --
 -- > byte' <- numericInputConfigured defaultNumericInputConfig {nicMin = 0, nicMax = 255, nicHex = True} byte
 {-# INLINE numericInputConfigured #-}
-numericInputConfigured :: Ui :> es => NumericInputConfig -> Double -> Eff es Double
+numericInputConfigured :: NumericInputConfig -> Double -> NanoUI Double
 numericInputConfigured cfg value = snd <$> numericInputConfigured' cfg value
 
 -- | 'numericInputConfigured' returning @(response, updatedValue)@.
-numericInputConfigured' :: Ui :> es => NumericInputConfig -> Double -> Eff es (Response, Double)
+numericInputConfigured' :: NumericInputConfig -> Double -> NanoUI (Response, Double)
 numericInputConfigured' cfg value = do
   (wid, ctx) <- freshWidget
   inp <- askInput
-  uiIO $ registerFocusable ctx wid
-  store <- uiIO (getStore ctx)
+  liftIO $ registerFocusable ctx wid
+  store <- liftIO (getStore ctx)
   isFocus <- keyboardFocused wid
   -- Hex input needs letters, so it gets the normal text keyboard.
-  when isFocus $ uiIO (requestInputMethod ctx wid Nothing (if nicHex cfg then InputNormal else InputNumeric))
+  when isFocus $ liftIO (requestInputMethod ctx wid Nothing (if nicHex cfg then InputNormal else InputNumeric))
   let
     key = intKey wid
     given = clampNumber cfg value
@@ -105,7 +104,7 @@ numericInputConfigured' cfg value = do
     text0 = if isFocus then fromMaybe (formatNumber cfg given) stored else formatNumber cfg given
     s0 = loadTextInputState store key text0
     lastValue = findSlot fieldDouble given key store
-  mEdited <- if isFocus then uiIO (editTextInput ctx singleLineMode inp store key s0) else pure Nothing
+  mEdited <- if isFocus then liftIO (editTextInput ctx singleLineMode inp store key s0) else pure Nothing
   resp <- addWidgetStyled wid NodeTextInput "" 0 (nicLayout cfg) textInputFlagNumeric
   let
     -- An edit that would leave text no number can start with is dropped.
@@ -133,7 +132,7 @@ numericInputConfigured' cfg value = do
       | pressedIn KeyUp inp = 1
       | pressedIn KeyDown inp = -1
       | otherwise = 0
-  now <- if pressDir /= 0 || holding then uiIO getMonotonicTime else pure 0
+  now <- if pressDir /= 0 || holding then liftIO getMonotonicTime else pure 0
   let
     repeatAt0 = findSlot fieldDouble 0 repeatK store
     -- A held arrow repeats after a pause.
@@ -169,7 +168,7 @@ numericInputConfigured' cfg value = do
         || held1 /= held0
         || repeatAt1 /= repeatAt0
   when dirty $
-    uiIO $ do
+    liftIO $ do
       -- An accepted edit keeps its undo history; a rejected one or a step
       -- rewrites the text without it.
       let save = case mEdited of
@@ -182,7 +181,7 @@ numericInputConfigured' cfg value = do
           . save
   -- A held arrow repeats on a schedule: ask for the frame of its next step
   -- instead of running frames back to back until then.
-  when (held1 /= 0) $ uiIO (requestWakeAt ctx repeatAt1)
+  when (held1 /= 0) $ liftIO (requestWakeAt ctx repeatAt1)
   pure (setSubmitted submitted (setChanged (final /= value) resp), final)
 
 clampNumber :: NumericInputConfig -> Double -> Double

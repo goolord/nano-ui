@@ -27,7 +27,7 @@ import NanoUI
   , fillW
   , gap
   , tight
-  , uiIO
+  , liftIO
   , withKey
   )
 import NanoUI qualified as NUI
@@ -72,10 +72,10 @@ fieldView ::
   -> FormView
 fieldView changed encode widget formId value = FormView $ withKey fieldKey $ do
   ctx <- askContext
-  prefix <- uiIO (getActiveFormPrefix ctx)
+  prefix <- liftIO (getActiveFormPrefix ctx)
   (response, newValue) <- widget value
   when (changed response || newValue /= value) $
-    uiIO (updateFieldInput ctx prefix fieldKey (encode newValue))
+    liftIO (updateFieldInput ctx prefix fieldKey (encode newValue))
  where
   fieldKey = encodeFormId formId
 

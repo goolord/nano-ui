@@ -15,12 +15,11 @@ import Control.Monad (when)
 import Data.IORef (IORef, newIORef, readIORef)
 import Data.Text (Text)
 import qualified Data.Text as T
-import Effectful (Eff, (:>))
 import Text.Printf (printf)
 
 import NanoUI
-  ( Size (..)
-  , Ui
+  ( NanoUI
+  , Size (..)
   , V2 (..)
   , checkbox
   , explainLayout
@@ -32,7 +31,7 @@ import NanoUI
   , kvBlock
   , scope
   , separator
-  , uiIO
+  , liftIO
   )
 import NanoUI.Internal.Context (askHostIO, setHost)
 import NanoUI.Internal.Monad
@@ -95,14 +94,14 @@ emptyRgfwDebug =
 
 -- | Read debug data, refreshing at most four times per second. Returns
 -- 'emptyRgfwDebug' outside an RGFW session. Queries keep debug refresh active.
-askRgfwDebug :: Ui :> es => Eff es RgfwDebugSnapshot
+askRgfwDebug :: NanoUI RgfwDebugSnapshot
 askRgfwDebug = do
   inp <- askInput
   mhost <- askHost @RgfwDebugHost
   case mhost of
     Nothing -> pure emptyRgfwDebug
     Just (RgfwDebugHost s) ->
-      uiIO $ refreshDebugSnapshot (rdsSampler s) $ \core -> do
+      liftIO $ refreshDebugSnapshot (rdsSampler s) $ \core -> do
         let Size lw lh = inputWindowSize inp
             V2 mx my = inputMousePos inp
         frame <- readIORef (rdsFrame s)
@@ -140,10 +139,10 @@ type Rows = [(Text, Text)]
 -- | Draw timing, geometry, display, and RTS rows for a snapshot, plus a
 -- layout overlay checkbox that, when on, shows the node under the pointer.
 -- Place this inside a window or panel; it creates no container.
-debugWindowBody :: Ui :> es => RgfwDebugSnapshot -> Eff es ()
+debugWindowBody :: RgfwDebugSnapshot -> NanoUI ()
 debugWindowBody snap = do
   ctx <- askContext
-  (fps, layout, display, rts) <- uiIO $ do
+  (fps, layout, display, rts) <- liftIO $ do
     cached <- askHostIO ctx
     case cached of
       Just (RgfwDebugRows shown rows) | shown == snap -> pure rows

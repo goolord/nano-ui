@@ -36,12 +36,11 @@ import Data.Map.Strict qualified as Map
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
-import Effectful (Eff, type (:>))
 import NanoUI.Internal.Atlas qualified as Atlas
 import NanoUI.Internal.Context (Context (..), hostOrInit, registerImage)
 import NanoUI.Internal.Draw (getDrawSnapScale)
 import NanoUI.Internal.Layout.Arena (NodeType (..))
-import NanoUI.Internal.Monad (Ui, askContext, nextId, uiIO, uiTheme, withContext)
+import NanoUI.Internal.Monad (NanoUI, askContext, nextId, liftIO, uiTheme, withContext)
 import NanoUI.Svg (Svg, parseSvg, rasterizeSvg, svgKey, svgMonochrome, svgSize)
 import NanoUI.Internal.Style
 import Data.Word (Word32)
@@ -51,51 +50,51 @@ import NanoUI.Internal.Widgets.Image (ImageConfig (..), defaultImageConfig, imag
 import NanoUI.Internal.Widgets.Node (Response, addWidgetStyled)
 
 -- | Medium-weight label without padding. Uses the current font size.
-heading :: Ui :> es => Text -> Eff es ()
+heading :: Text -> NanoUI ()
 heading = labelWith (tight . fontMedium)
 
 -- | Full-width label in the theme's muted colour.
-muted :: Ui :> es => Text -> Eff es ()
+muted :: Text -> NanoUI ()
 muted = labelWith (fillW . fontMuted)
 
 -- | Label using the backend's monospace font variant.
-mono :: Ui :> es => Text -> Eff es ()
+mono :: Text -> NanoUI ()
 mono = labelWith fontMono
 
 -- | Full-width label in the theme's danger colour.
-danger :: Ui :> es => Text -> Eff es ()
+danger :: Text -> NanoUI ()
 danger = labelWith (fillW . fontDanger)
 
 -- | Label requesting bold weight.
-bold :: Ui :> es => Text -> Eff es ()
+bold :: Text -> NanoUI ()
 bold = labelWith fontBold
 
 -- | Label requesting italic styling.
-italic :: Ui :> es => Text -> Eff es ()
+italic :: Text -> NanoUI ()
 italic = labelWith fontItalic
 
 -- | Label with an underline.
-underline :: Ui :> es => Text -> Eff es ()
+underline :: Text -> NanoUI ()
 underline = labelWith fontUnderline
 
 -- | Key/value row: a muted key on the left, the value right-aligned. Trailing
 -- whitespace in the value is dropped.
-kv :: Ui :> es => Text -> Text -> Eff es ()
+kv :: Text -> Text -> NanoUI ()
 kv = kvRow fontMuted id
 
 -- | Key/value row with a monospace value.
-kvMono :: Ui :> es => Text -> Text -> Eff es ()
+kvMono :: Text -> Text -> NanoUI ()
 kvMono = kvRow id fontMono
 
 -- | The row behind 'kv' and 'kvMono', given the key's and the value's font.
-kvRow :: Ui :> es => (Layout -> Layout) -> (Layout -> Layout) -> Text -> Text -> Eff es ()
+kvRow :: (Layout -> Layout) -> (Layout -> Layout) -> Text -> Text -> NanoUI ()
 kvRow keyF valF k v =
   row' (tight . gap 12 . alignMid . fillW $ defaultLayout) $ do
     void (labelEx (keyF . tight . minW 88 $ defaultLayout) k)
     void (labelEx (tight . fillW . alignEnd . valF $ defaultLayout) (T.stripEnd v))
 
 -- | Key/value pairs as one monospace block with the keys padded to a column.
-kvBlock :: (Foldable f, Ui :> es) => f (Text, Text) -> Eff es ()
+kvBlock :: Foldable f => f (Text, Text) -> NanoUI ()
 kvBlock rows =
   let maxK = foldl' (\acc (k, _) -> max acc (T.length k)) 0 rows
       padK k = T.justifyLeft maxK ' ' k
@@ -105,35 +104,35 @@ kvBlock rows =
           (T.concat (foldr (\(k, v) rest -> padK k : "  " : v : "\n" : rest) [] rows))
 
 -- | Full-width panel with a 300-pixel minimum width, 12x10 padding, and 8-pixel gap.
-card :: Ui :> es => Eff es a -> Eff es a
+card :: NanoUI a -> NanoUI a
 card = panelWith (minW 300 . padXY 12 10 . gap 8 . fillW)
 
 -- | Full-width row with no padding, an 8-pixel gap, and vertical centring.
-toolbar :: Ui :> es => Eff es a -> Eff es a
+toolbar :: NanoUI a -> NanoUI a
 toolbar = rowWith (tight . gap 8 . alignMid . fillW)
 
 -- | An image registered with the host, stretched to the rect the layout
 -- modifier gives it; an unsized axis is 32 pixels. 'NanoUI.imageConfigured'
 -- instead uses the image's own size and can fit, align, crop, fade and
 -- rotate it.
-image :: Ui :> es => (Layout -> Layout) -> ImageId -> Eff es ()
+image :: (Layout -> Layout) -> ImageId -> NanoUI ()
 image f iid = void (image' f iid)
 
 -- | 'image' with its 'Response', for example to 'NanoUI.keepAnimating' an
 -- image whose id changes over time.
-image' :: Ui :> es => (Layout -> Layout) -> ImageId -> Eff es Response
+image' :: (Layout -> Layout) -> ImageId -> NanoUI Response
 image' f iid = nextId >>= \wid -> imageNode wid Nothing (f defaultLayout) iid
 
 -- | An image id that no registered image uses and no earlier call returned.
 -- Take one for each image registered while the app runs.
-freshImageId :: Ui :> es => Eff es ImageId
+freshImageId :: NanoUI ImageId
 freshImageId = withContext (\ctx -> Atlas.freshImageId (ctxImageAtlas ctx))
 
 -- | Register an RGBA image (4 bytes a pixel, rows top to bottom) under an id
 -- while the app runs, for 'image' to draw. Returns 'False' when the size or
 -- pixels are invalid, an image of another size already has the id, or the
 -- atlas is full. An image of the same size is replaced.
-registerImageRgba :: Ui :> es => ImageId -> Int -> Int -> ByteString -> Eff es Bool
+registerImageRgba :: ImageId -> Int -> Int -> ByteString -> NanoUI Bool
 registerImageRgba iid w h pixels = withContext (\ctx -> registerImage ctx iid w h pixels)
 
 -- | Read and parse an SVG file.
@@ -146,19 +145,19 @@ loadSvg path =
 -- unspecified) takes the colour as a tint, and a multicoloured one paints
 -- its @currentColor@ with it.
 {-# INLINE svgIcon #-}
-svgIcon :: Ui :> es => Float -> Svg -> Eff es ()
+svgIcon :: Float -> Svg -> NanoUI ()
 svgIcon size = svgIconWith (fixedWH size size)
 
 -- | An SVG document sized by the layout modifier: a fixed width and height,
 -- or else the document's own size. A 'NanoUI.fontColor' in the modifier
 -- replaces the text colour.
 {-# INLINE svgIconWith #-}
-svgIconWith :: Ui :> es => (Layout -> Layout) -> Svg -> Eff es ()
+svgIconWith :: (Layout -> Layout) -> Svg -> NanoUI ()
 svgIconWith f doc = void (svgIconWith' f doc)
 
 -- | The document is rasterized once per pixel size and colour, at the
 -- display's scale, and kept in the image atlas for as long as the app runs.
-svgIconWith' :: Ui :> es => (Layout -> Layout) -> Svg -> Eff es Response
+svgIconWith' :: (Layout -> Layout) -> Svg -> NanoUI Response
 svgIconWith' f = svgIconConfigured' defaultImageConfig {icLayout = f}
 
 -- | An SVG document drawn like 'NanoUI.imageConfigured' draws an image:
@@ -167,11 +166,11 @@ svgIconWith' f = svgIconConfigured' defaultImageConfig {icLayout = f}
 -- document's own size.
 --
 -- > svgIconConfigured defaultImageConfig {icLayout = fixedWH 24 24, icRotation = RotateFloating turn} spinnerIcon
-svgIconConfigured :: Ui :> es => ImageConfig -> Svg -> Eff es ()
+svgIconConfigured :: ImageConfig -> Svg -> NanoUI ()
 svgIconConfigured cfg doc = void (svgIconConfigured' cfg doc)
 
 -- | 'svgIconConfigured' with its 'Response'.
-svgIconConfigured' :: Ui :> es => ImageConfig -> Svg -> Eff es Response
+svgIconConfigured' :: ImageConfig -> Svg -> NanoUI Response
 svgIconConfigured' cfg doc = do
   ctx <- askContext
   theme <- uiTheme
@@ -186,7 +185,7 @@ svgIconConfigured' cfg doc = do
       oneColour = svgMonochrome doc
       white = colorRGBA 255 255 255 255
       lay = lay0 {layoutWidth = Fixed w, layoutHeight = Fixed h, layoutFontColor = Just (if oneColour then color else white)}
-  iid <- uiIO $ do
+  iid <- liftIO $ do
     scale <- getDrawSnapScale (ctxDrawArena ctx)
     let pw = max 1 (ceiling (w * max 1 scale))
         ph = max 1 (ceiling (h * max 1 scale))
@@ -209,7 +208,7 @@ svgIconConfigured' cfg doc = do
 newtype SvgRasters = SvgRasters (IORef (Map.Map (Int, Int, Int, Word32) ImageId))
 
 -- | A solid rectangle sized by the layout modifier.
-box :: Ui :> es => (Layout -> Layout) -> Color -> Eff es ()
+box :: (Layout -> Layout) -> Color -> NanoUI ()
 box f col = do
   wid <- nextId
   void

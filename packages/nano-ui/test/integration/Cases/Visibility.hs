@@ -162,7 +162,7 @@ runRemovedTest :: Context -> IORef Int -> IO ()
 runRemovedTest ctx failed = do
   shownRef <- newIORef True
   let ui = column $ do
-        shown <- uiIO (readIORef shownRef)
+        shown <- liftIO (readIORef shownRef)
         vis <- scope (if shown then fst <$> sensor (label "watched") else pure hidden)
         (,) vis . respId <$> button' "After"
       go = frames failed ctx inp ui fst
@@ -178,7 +178,7 @@ runRemovedTest ctx failed = do
 runSwappedTest :: Context -> IORef Int -> IO ()
 runSwappedTest ctx failed = do
   whichRef <- newIORef (0 :: Int)
-  let ui = column (uiIO (readIORef whichRef) >>= \which -> withKey which (fst <$> sensor (label "watched")))
+  let ui = column (liftIO (readIORef whichRef) >>= \which -> withKey which (fst <$> sensor (label "watched")))
       go = void . frames failed ctx inp ui id
   go [(off, True), (cameIn, False)]
   writeIORef whichRef 1 >> go [(off, True), (cameIn, False)]
@@ -204,7 +204,7 @@ runSharedIdRemovedTest ctx failed = do
   shownRef <- newIORef True
   let ui = column $ do
         replicateM_ 2 (withKey (0 :: Int) (sensor (label "twin")))
-        shown <- uiIO (readIORef shownRef)
+        shown <- liftIO (readIORef shownRef)
         scope (if shown then fst <$> sensor (label "watched") else pure hidden)
       go = void . frames failed ctx inp ui id
   go [(off, True), (cameIn, False)]
@@ -216,9 +216,9 @@ runTabsTest :: Context -> IORef Int -> IO ()
 runTabsTest ctx failed = do
   activeRef <- newIORef (0 :: Int)
   eventsRef <- newIORef []
-  let watched = sensor (label "in tab A") >>= \(vis, _) -> forM_ (visEvent vis) (uiIO . modifyIORef' eventsRef . (:))
+  let watched = sensor (label "in tab A") >>= \(vis, _) -> forM_ (visEvent vis) (liftIO . modifyIORef' eventsRef . (:))
       ui = do
-        active <- uiIO (readIORef activeRef)
+        active <- liftIO (readIORef activeRef)
         void (tabs active [tab 0 "A" watched, tab 1 "B" (label "in tab B")])
   settle ctx inp ui 3
   writeIORef activeRef 1 >> settle ctx inp ui 3
@@ -234,7 +234,7 @@ runTwoPassesTest ctx failed = do
   let view _ = column $ do
         (loaded, setLoaded) <- useFlag False
         (vis, _) <- sensor (label (if loaded then "loaded" else "loading"))
-        when (becameVisible vis) (uiIO (modifyIORef' seenRef (+ 1)) >> emit (1 :: Int) >> setLoaded True)
+        when (becameVisible vis) (liftIO (modifyIORef' seenRef (+ 1)) >> emit (1 :: Int) >> setLoaded True)
         pure (loaded, (visVisible vis, visEvent vis))
       frame model = (\(r, model', _, _, _) -> (r, model')) <$> runFrameReduce (+) ctx inp model view
   (second, model2) <- frame (0 :: Int) >>= frame . snd
@@ -249,9 +249,9 @@ runUseVisibilityTest ctx failed = do
   targetRef <- newIORef (WidgetId 0)
   let ui = scrollCol 100 $ do
         replicateM_ 5 bar
-        shown <- uiIO (readIORef shownRef)
-        scope . when shown $ uiIO . writeIORef targetRef . respId =<< button' "Target"
-        target <- uiIO (readIORef targetRef)
+        shown <- liftIO (readIORef shownRef)
+        scope . when shown $ liftIO . writeIORef targetRef . respId =<< button' "Target"
+        target <- liftIO (readIORef targetRef)
         vis <- useVisibility defaultSensorConfig target
         after <- button' "After"
         (vis, target, respId after) <$ replicateM_ 5 bar
@@ -301,7 +301,7 @@ runLayoutShiftTest :: Context -> IORef Int -> IO ()
 runLayoutShiftTest ctx failed = do
   countRef <- newIORef (0 :: Int)
   let ui = scrollCol 100 $ do
-        n <- uiIO (readIORef countRef)
+        n <- liftIO (readIORef countRef)
         scope (replicateM_ n bar)
         replicateM 2 (fst <$> sensorWith fillW bar)
   settle ctx inp ui 3

@@ -47,9 +47,7 @@
 module NanoUI
   ( -- * Views
     NanoUI
-  , NanoUIEs
-  , Ui
-  , uiIO
+  , liftIO
   , whenM
   , unlessM
   , ifM
@@ -623,7 +621,7 @@ module NanoUI
     -- >   (vis, _) <- sensorConfigured cfg $
     -- >     maybe (label "Loading") (image (fixedWH 96 96)) picture
     -- >   when (becameVisible vis && isNothing picture) $ do
-    -- >     (w, h, rgba) <- uiIO (decodeRgba path)
+    -- >     (w, h, rgba) <- liftIO (decodeRgba path)
     -- >     iid <- freshImageId
     -- >     whenM (registerImageRgba iid w h rgba) (setPicture (Just iid))
   , Visibility (..)

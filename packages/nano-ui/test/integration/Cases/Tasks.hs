@@ -107,7 +107,7 @@ runTaskKeyChangeTest ctx failed = do
   (sleep, _, killedIn) <- sleeper
   gate <- newEmptyMVar
   keyRef <- newIORef (1 :: Int)
-  let ui = uiIO (readIORef keyRef) >>= \k -> useTask k (if k == 2 then sleep >> pure k else takeMVar gate >> pure (k * 10))
+  let ui = liftIO (readIORef keyRef) >>= \k -> useTask k (if k == 2 then sleep >> pure k else takeMVar gate >> pure (k * 10))
   _ <- wait 0
   assertEq failed Nothing =<< evalUi ctx inp ui
   putMVar gate ()
@@ -222,7 +222,7 @@ runTaskStatusTest ctx failed = do
   gate <- newEmptyMVar
   keyRef <- newIORef (1 :: Int)
   let ui = do
-        k <- uiIO (readIORef keyRef)
+        k <- liftIO (readIORef keyRef)
         status <- useTaskStatus k (takeMVar gate >> if k == 1 then pure ("one" :: String) else ioError (userError "two"))
         pure $ case status of
           TaskRunning prev -> ("running" :: String, prev)
@@ -245,7 +245,7 @@ runTaskRetryTest ctx failed = do
   starts <- newIORef 0
   attempt <- newIORef (0 :: Int)
   let ui = do
-        n <- uiIO (readIORef attempt)
+        n <- liftIO (readIORef attempt)
         useTask ("same input" :: String, n) (tick starts >> readIORef starts)
   _ <- wait 0
   assertEq failed (Just (Just 1)) =<< frameUntil wait ctx ui isJust
@@ -280,7 +280,7 @@ runWakeFromThreadTest ctx failed = do
       ui = do
         wake <- askWake
         _ <- useTask ("stream" :: String) (produce wake)
-        n <- uiIO (readIORef latest)
+        n <- liftIO (readIORef latest)
         n <$ lamp (n > 0)
   _ <- warmup2 ctx inp ui
   settled ctx failed ui 0
@@ -323,7 +323,7 @@ runStreamKeyChangeTest ctx failed = do
   (sleep, _, killedIn) <- sleeper
   keyRef <- newIORef (1 :: Int)
   let ui = do
-        k <- uiIO (readIORef keyRef)
+        k <- liftIO (readIORef keyRef)
         useStream k [] (\update -> update (k :) >> sleep)
   _ <- wait 0
   assertEq failed (Just [1]) =<< frameUntil wait ctx ui (not . null)

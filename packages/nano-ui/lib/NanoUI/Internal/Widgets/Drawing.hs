@@ -11,11 +11,10 @@ where
 
 import Data.Text qualified as T
 import Data.Primitive.SmallArray (SmallArray)
-import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context (cachedWidgetLayout, registerDrawing)
 import NanoUI.Internal.Draw (DrawOp (..), DrawingBuild)
 import NanoUI.Internal.Layout.Arena (NodeType (NodeDrawing))
-import NanoUI.Internal.Monad (Ui, freshWidget, nextId, uiIO, withContext)
+import NanoUI.Internal.Monad (NanoUI, freshWidget, nextId, liftIO, withContext)
 import NanoUI.Internal.Style (Layout, defaultLayout)
 import NanoUI.Internal.Types (Rect)
 import NanoUI.Internal.Widgets.Node (Response, addWidget)
@@ -28,7 +27,7 @@ import NanoUI.Internal.Widgets.Node (Response, addWidget)
 -- 'NanoUI.Widgets.Custom.customWidget' without a key to have every frame
 -- rebuild and compare.
 {-# INLINE drawing #-}
-drawing :: Ui :> es => (Layout -> Layout) -> (Rect -> SmallArray DrawOp) -> Eff es Response
+drawing :: (Layout -> Layout) -> (Rect -> SmallArray DrawOp) -> NanoUI Response
 drawing = drawingVersioned 0
 
 -- | Like 'drawing', but the tessellated op cache is keyed by an explicit
@@ -37,7 +36,7 @@ drawing = drawingVersioned 0
 -- repaints the widget. Frames with the same version replay cached ops without
 -- rebuilding, even while the widget animates. Version 0 means unversioned, as
 -- in 'drawing'.
-drawingVersioned :: Ui :> es => Int -> (Layout -> Layout) -> (Rect -> SmallArray DrawOp) -> Eff es Response
+drawingVersioned :: Int -> (Layout -> Layout) -> (Rect -> SmallArray DrawOp) -> NanoUI Response
 drawingVersioned version f build = do
   wid <- nextId
   withContext (\ctx -> registerDrawing ctx wid version build)
@@ -47,7 +46,6 @@ drawingVersioned version f build = do
 -- only reruns when the envelope, line height, content key, or modifier result
 -- change.
 drawingCached ::
-  Ui :> es =>
   Double ->
   Double ->
   Float ->
@@ -55,9 +53,9 @@ drawingCached ::
   (Layout -> Layout) ->
   IO Layout ->
   DrawingBuild ->
-  Eff es Response
+  NanoUI Response
 drawingCached dw dh lh content f compute build = do
   (wid, ctx) <- freshWidget
-  layout <- uiIO (cachedWidgetLayout ctx wid dw dh lh content (f defaultLayout) compute)
-  uiIO (registerDrawing ctx wid content build)
+  layout <- liftIO (cachedWidgetLayout ctx wid dw dh lh content (f defaultLayout) compute)
+  liftIO (registerDrawing ctx wid content build)
   addWidget wid NodeDrawing T.empty 0 layout

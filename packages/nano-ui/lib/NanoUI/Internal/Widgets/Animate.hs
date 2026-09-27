@@ -12,10 +12,9 @@ where
 
 import Control.Monad (when)
 import Data.Maybe (isNothing)
-import Effectful (Eff, type (:>))
 import NanoUI.Internal.Animatable (Animatable (..))
 import NanoUI.Internal.Context
-import NanoUI.Internal.Monad (Ui, nextId, scope, uiTime, withContext, withKey)
+import NanoUI.Internal.Monad (NanoUI, nextId, scope, uiTime, withContext, withKey)
 import NanoUI.Internal.Widgets.Node (HasResponse, respId)
 
 -- | How an animated value moves.
@@ -28,7 +27,7 @@ data Transition
 -- | Animate from @from@ to @to@. It starts over from @from@ once it has
 -- finished (a tween completes, a spring settles) or its tween changes, so
 -- calling it every frame cycles.
-animate :: Ui :> es => Transition -> Float -> Float -> Eff es Float
+animate :: Transition -> Float -> Float -> NanoUI Float
 animate transition from to = do
   wid <- nextId
   withContext $ \ctx -> do
@@ -42,7 +41,7 @@ animate transition from to = do
 
 -- | Animate from the current value toward @target@. An unchanged target keeps
 -- the running animation; a new one retargets from wherever the value is.
-animateTo :: Ui :> es => Transition -> Float -> Eff es Float
+animateTo :: Transition -> Float -> NanoUI Float
 animateTo transition target = do
   wid <- nextId
   withContext $ \ctx -> do
@@ -61,7 +60,7 @@ animateTo transition target = do
 
 -- | 'animateTo' for every component of a composite value. Component keys are
 -- local to the value, not its parent widget.
-animateToA :: (Animatable a, Ui :> es) => Transition -> a -> Eff es a
+animateToA :: Animatable a => Transition -> a -> NanoUI a
 animateToA transition =
   scope . traverseChannels (\index value -> withKey index (animateTo transition value))
 
@@ -70,7 +69,7 @@ animateToA transition =
 -- The time is captured in 'Double' (see 'NanoUI.Internal.Monad.uiTime'), so the sweep
 -- stays sub-frame smooth even on long-running processes. The value is
 -- re-evaluated each frame, like 'animate'.
-pulse :: Ui :> es => Float -> Eff es Float
+pulse :: Float -> NanoUI Float
 pulse periodSec = do
   t <- uiTime
   let
@@ -86,7 +85,7 @@ pulse periodSec = do
 --
 -- > bar <- progressBarWith' id 12 =<< pulse 6
 -- > keepAnimating bar
-keepAnimating :: (HasResponse r, Ui :> es) => r -> Eff es ()
+keepAnimating :: HasResponse r => r -> NanoUI ()
 keepAnimating resp = withContext (\ctx -> keepAnimationAlive ctx (respId resp))
 
 -- | Ask for another frame after this many seconds, even if no input arrives.
@@ -99,5 +98,5 @@ keepAnimating resp = withContext (\ctx -> keepAnimationAlive ctx (respId resp))
 --
 -- Use it instead of 'keepAnimating' when a view changes on a schedule and not
 -- continuously: 'keepAnimating' runs a frame for every display refresh.
-wakeAfter :: Ui :> es => Double -> Eff es ()
+wakeAfter :: Double -> NanoUI ()
 wakeAfter sec = withContext (\ctx -> requestWakeAfter ctx sec)

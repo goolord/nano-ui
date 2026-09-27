@@ -19,8 +19,7 @@ where
 
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
-import Effectful (Eff, type (:>))
-import NanoUI.Internal.Monad (Ui, uiTheme)
+import NanoUI.Internal.Monad (NanoUI, uiTheme)
 import NanoUI.Internal.Style (Layout (..), Style (..), Theme (..), defaultLayout)
 import NanoUI.Internal.Types (Color)
 import NanoUI.Internal.WidgetText (buttonFlagContent)
@@ -35,7 +34,7 @@ import NanoUI.Svg (Svg)
 --
 -- > whenM (button "Save") saveDocument
 {-# INLINE button #-}
-button :: Ui :> es => Text -> Eff es Bool
+button :: Text -> NanoUI Bool
 button txt = respClicked <$> button' txt
 
 -- | 'button' returning its 'Response', for tooltips, anchored popups, or
@@ -45,19 +44,19 @@ button txt = respClicked <$> button' txt
 -- > tooltip help "Open the manual"
 -- > when (respClicked help) openManual
 {-# INLINE button' #-}
-button' :: Ui :> es => Text -> Eff es Response
+button' :: Text -> NanoUI Response
 button' = buttonWith' id
 
 -- | 'button' with a layout modifier.
 --
 -- > whenM (buttonWith (fixedW 120) "Submit") submitForm
 {-# INLINE buttonWith #-}
-buttonWith :: Ui :> es => (Layout -> Layout) -> Text -> Eff es Bool
+buttonWith :: (Layout -> Layout) -> Text -> NanoUI Bool
 buttonWith f txt = respClicked <$> buttonWith' f txt
 
 {-# INLINE buttonWith' #-}
 -- | 'buttonWith' returning the full response; activation is in @respClicked@.
-buttonWith' :: Ui :> es => (Layout -> Layout) -> Text -> Eff es Response
+buttonWith' :: (Layout -> Layout) -> Text -> NanoUI Response
 buttonWith' f txt = buttonStyledEx True txt 0 (f defaultLayout) 0
 
 -- | A button's layout, and the adornments ("NanoUI.Adornment") it draws
@@ -77,11 +76,11 @@ defaultButtonConfig = ButtonConfig {bcLayout = defaultLayout, bcAdornments = mem
 --
 -- > whenM (buttonConfigured defaultButtonConfig {bcAdornments = A.trailing (A.icon chevron)} "Next") next
 {-# INLINE buttonConfigured #-}
-buttonConfigured :: Ui :> es => ButtonConfig -> Text -> Eff es Bool
+buttonConfigured :: ButtonConfig -> Text -> NanoUI Bool
 buttonConfigured cfg txt = respClicked <$> buttonConfigured' cfg txt
 
 -- | 'buttonConfigured' returning its 'Response'.
-buttonConfigured' :: Ui :> es => ButtonConfig -> Text -> Eff es Response
+buttonConfigured' :: ButtonConfig -> Text -> NanoUI Response
 buttonConfigured' (ButtonConfig lay adorns) txt = do
   resp <- buttonStyledEx True txt 0 lay 0
   taken <- adornWidget (respId resp) lay (labelColor lay) adorns
@@ -99,12 +98,12 @@ labelColor lay theme = fromMaybe (styleFg (themeButton theme)) (layoutFontColor 
 -- > whenM (iconButton saveIcon "Save") saveDocument
 -- > whenM (iconButton gearIcon "") openSettings
 {-# INLINE iconButton #-}
-iconButton :: Ui :> es => Svg -> Text -> Eff es Bool
+iconButton :: Svg -> Text -> NanoUI Bool
 iconButton doc txt = respClicked <$> iconButton' doc txt
 
 -- | 'iconButton' returning its 'Response', for a tooltip on an icon alone.
 {-# INLINE iconButton' #-}
-iconButton' :: Ui :> es => Svg -> Text -> Eff es Response
+iconButton' :: Svg -> Text -> NanoUI Response
 iconButton' doc = buttonConfigured' defaultButtonConfig {bcAdornments = leading (icon doc)}
 
 -- | A button whose content is any view, as iced's buttons are: laid out in a
@@ -114,23 +113,23 @@ iconButton' doc = buttonConfigured' defaultButtonConfig {bcAdornments = leading 
 --
 -- > whenM (buttonContent (svgIcon 16 saveIcon >> label "Save")) saveDocument
 {-# INLINE buttonContent #-}
-buttonContent :: Ui :> es => Eff es () -> Eff es Bool
+buttonContent :: NanoUI () -> NanoUI Bool
 buttonContent = buttonContentWith id
 
 -- | 'buttonContent' returning its 'Response'.
 {-# INLINE buttonContent' #-}
-buttonContent' :: Ui :> es => Eff es () -> Eff es Response
+buttonContent' :: NanoUI () -> NanoUI Response
 buttonContent' = buttonContentWith' id
 
 -- | 'buttonContent' with a layout modifier.
 --
 -- > whenM (buttonContentWith (gap 4 . fixedW 160) (spinner >> label "Saving")) cancel
 {-# INLINE buttonContentWith #-}
-buttonContentWith :: Ui :> es => (Layout -> Layout) -> Eff es () -> Eff es Bool
+buttonContentWith :: (Layout -> Layout) -> NanoUI () -> NanoUI Bool
 buttonContentWith f content = respClicked <$> buttonContentWith' f content
 
 -- | 'buttonContentWith' returning its 'Response'.
-buttonContentWith' :: Ui :> es => (Layout -> Layout) -> Eff es () -> Eff es Response
+buttonContentWith' :: (Layout -> Layout) -> NanoUI () -> NanoUI Response
 buttonContentWith' f content = do
   let lay = f defaultLayout
   resp <- buttonStyledEx True "" 0 lay buttonFlagContent

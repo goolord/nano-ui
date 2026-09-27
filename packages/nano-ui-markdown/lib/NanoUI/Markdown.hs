@@ -34,7 +34,7 @@
 -- 'mdBlock' overrides block drawing at any depth, given the widget's own
 -- drawing to fall back to or wrap:
 --
--- > highlighted :: MarkdownConfig NanoUIEs
+-- > highlighted :: MarkdownConfig
 -- > highlighted = defaultMarkdownConfig {mdBlock = \own -> \case
 -- >   CodeBlock "haskell" code -> Nothing <$ panel (richText (highlight code))
 -- >   b -> own b}

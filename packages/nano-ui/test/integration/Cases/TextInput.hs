@@ -111,7 +111,7 @@ runTextAreaSpansTest ctx failed = do
 labeledArea :: T.Text -> T.Text -> NanoUI (Response, T.Text)
 labeledArea lbl initial = label lbl >> textArea' initial
 
-labeledInput :: Ui :> es => T.Text -> T.Text -> Eff es (Response, T.Text)
+labeledInput :: T.Text -> T.Text -> NanoUI (Response, T.Text)
 labeledInput lbl initial =
   label lbl >> textInputConfigured' defaultTextInputConfig {ticPlaceholder = "Enter " <> lbl} initial
 
@@ -755,8 +755,8 @@ runTextUndoTest ctx failed = do
     -- would; the field's undo state is read the same way.
     ui = column $ do
       (resp, _) <- held ref textInput'
-      pending <- uiIO (readIORef commands)
-      uiIO (writeIORef commands [])
+      pending <- liftIO (readIORef commands)
+      liftIO (writeIORef commands [])
       mapM_ (runTextCommand (respId resp)) pending
       (,) resp <$> textCanUndo (respId resp)
     frame i = evalUi ctx i ui
@@ -838,7 +838,7 @@ runTextAreaDocumentTest ctx failed = do
   source <- newIORef original
   let
     -- Split inside the frame, so each frame passes a new copy.
-    copies = column (void (textAreaDocument =<< uiIO (textDocument <$> readIORef source)))
+    copies = column (void (textAreaDocument =<< liftIO (textDocument <$> readIORef source)))
     idle = inp {inputDeltaTime = 1}
   _ <- warmup2 copyCtx inp copies
   _ <- warmup2 copyCtx idle copies

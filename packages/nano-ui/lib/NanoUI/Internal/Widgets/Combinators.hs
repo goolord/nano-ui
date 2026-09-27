@@ -15,12 +15,11 @@ import Data.IORef (modifyIORef', readIORef)
 import Data.IntMap.Strict qualified as IM
 import Data.Text (Text)
 import Data.Typeable (Typeable)
-import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Store (fieldInt, Field, boolInt)
 import NanoUI.Internal.Layout.Arena (NodeType (..))
-import NanoUI.Internal.Monad (Ui, freshWidget, uiIO)
+import NanoUI.Internal.Monad (NanoUI, freshWidget, liftIO)
 import NanoUI.Internal.Style (Layout (..))
 import NanoUI.Internal.Widgets.Behavior (keyActivated)
 import NanoUI.Internal.Widgets.Node
@@ -32,12 +31,12 @@ import NanoUI.Internal.Widgets.Node
 -- Disabled controls keep their identity and geometry but cannot take focus or
 -- activate, including through a click queued before they became disabled.
 {-# INLINE buttonStyledEx #-}
-buttonStyledEx :: (Ui :> es) => Bool -> Text -> Float -> Layout -> Int -> Eff es Response
+buttonStyledEx :: Bool -> Text -> Float -> Layout -> Int -> NanoUI Response
 buttonStyledEx enabled txt value layout styleIdx = do
   (wid, ctx) <- freshWidget
-  disabled <- uiIO (isDisabled ctx wid)
+  disabled <- liftIO (isDisabled ctx wid)
   let active = enabled && not disabled
-  when active $ uiIO (registerFocusable ctx wid)
+  when active $ liftIO (registerFocusable ctx wid)
   resp <- addWidgetStyled wid NodeButton txt value layout styleIdx
   if active
     then do
@@ -49,13 +48,13 @@ buttonStyledEx enabled txt value layout styleIdx = do
 -- Keyboard activation changes the value without inventing a pointer click.
 {-# INLINE finishToggle #-}
 finishToggle ::
-  Ui :> es => Context -> WidgetId -> Bool -> Response -> Eff es (Response, Bool)
+  Context -> WidgetId -> Bool -> Response -> NanoUI (Response, Bool)
 finishToggle ctx wid current resp = do
   keyClick <- keyActivated wid
   let
     clicked = respClicked resp || keyClick
     value = current /= clicked
-  uiIO $ do
+  liftIO $ do
     writeStoreBool ctx wid value
     recordSlot fieldInt ctx (intKey wid) (boolInt value)
   pure (setChanged clicked resp, value)
@@ -64,16 +63,16 @@ finishToggle ctx wid current resp = do
 -- caller chooses the comparison value: live state or the supplied model value.
 {-# INLINE finishInput #-}
 finishInput ::
-  (Eq a, Ui :> es) =>
+  Eq a =>
   Field a
   -> Context
   -> WidgetId
   -> a
   -> Response
   -> a
-  -> Eff es (Response, a)
+  -> NanoUI (Response, a)
 finishInput field ctx wid original resp value = do
-  uiIO $ do
+  liftIO $ do
     writeSlot field ctx wid (intKey wid) value
     recordSlot field ctx (intKey wid) value
   pure (setChanged (value /= original) resp, value)

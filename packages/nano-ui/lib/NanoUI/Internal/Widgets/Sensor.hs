@@ -30,14 +30,13 @@ import Data.IntMap.Strict (IntMap)
 import Data.IntMap.Strict qualified as IM
 import Data.Maybe (fromMaybe, isJust)
 import Data.Primitive.Array (MutableArray, newArray, readArray, sizeofMutableArray, writeArray)
-import Effectful (Eff, type (:>))
 import GHC.Clock (getMonotonicTime)
 import GHC.Exts (RealWorld)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Frame.Node (childPaintClip)
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Layout.Arena
-import NanoUI.Internal.Monad (Ui, askContext, askDefaultLayout, currentId, freshWidget, uiIO)
+import NanoUI.Internal.Monad (NanoUI, askContext, askDefaultLayout, currentId, freshWidget, liftIO)
 import NanoUI.Internal.Style (Direction (..), Layout (..), tight)
 import NanoUI.Internal.Types (Rect (..), Size (..), rectInflate, rectIntersect)
 import NanoUI.Internal.Widgets.Node (container, tagContainer)
@@ -100,20 +99,20 @@ defaultSensorConfig = SensorConfig {sensorAnticipate = 0, sensorDelay = 0, senso
 -- a column without padding.
 --
 -- > (vis, _) <- sensor (label "Row 42")
--- > when (becameVisible vis) (uiIO (putStrLn "row 42 scrolled into view"))
+-- > when (becameVisible vis) (liftIO (putStrLn "row 42 scrolled into view"))
 {-# INLINE sensor #-}
-sensor :: Ui :> es => Eff es a -> Eff es (Visibility, a)
+sensor :: NanoUI a -> NanoUI (Visibility, a)
 sensor = sensorConfigured defaultSensorConfig
 
 -- | 'sensor' with modified layout.
 {-# INLINE sensorWith #-}
-sensorWith :: Ui :> es => (Layout -> Layout) -> Eff es a -> Eff es (Visibility, a)
+sensorWith :: (Layout -> Layout) -> NanoUI a -> NanoUI (Visibility, a)
 sensorWith f = sensorConfigured defaultSensorConfig {sensorLayout = f}
 
 -- | 'sensor' with a full 'SensorConfig'. Like
 -- 'NanoUI.Internal.Widgets.Layout.column', the container takes one widget id
 -- and runs its body in its own id scope.
-sensorConfigured :: Ui :> es => SensorConfig -> Eff es a -> Eff es (Visibility, a)
+sensorConfigured :: SensorConfig -> NanoUI a -> NanoUI (Visibility, a)
 sensorConfigured cfg body = do
   -- The container's own id, unique to it; the sensor is keyed by it.
   wid <- currentId
@@ -121,7 +120,7 @@ sensorConfigured cfg body = do
   base <- askDefaultLayout
   let layout = sensorLayout cfg (tight base) {layoutDirection = Column}
   a <- container NodeContainer layout (tagContainer wid >> body)
-  vis <- uiIO (watchSensor ctx wid (Watch wid cfg))
+  vis <- liftIO (watchSensor ctx wid (Watch wid cfg))
   pure (vis, a)
 
 -- | The 'Visibility' of the widget @target@, such as @respId resp@ of an
@@ -130,10 +129,10 @@ sensorConfigured cfg body = do
 --
 -- > resp <- image' (fixedWH 96 96) thumb
 -- > vis <- useVisibility defaultSensorConfig {sensorAnticipate = 200} (respId resp)
-useVisibility :: Ui :> es => SensorConfig -> WidgetId -> Eff es Visibility
+useVisibility :: SensorConfig -> WidgetId -> NanoUI Visibility
 useVisibility cfg target = do
   (wid, ctx) <- freshWidget
-  uiIO (watchSensor ctx wid (Watch target cfg))
+  liftIO (watchSensor ctx wid (Watch target cfg))
 
 -- | Per-context sensor state, stored as a host value ('hostOrInit') so a
 -- context without sensors never allocates it.

@@ -12,7 +12,6 @@ import Control.Monad (unless, void, when)
 import Data.Bits ((.|.))
 import Data.Text (Text)
 import Data.Text qualified as T
-import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context
 import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena (NodeType (..), addNodeFromLayout)
@@ -37,7 +36,7 @@ windowChromeSepH = 1
 -- | Show a modal while the first argument is true, blocking interaction with
 -- content behind it. Returns a close-request response and the body's result;
 -- the result is 'Nothing' while closed. The caller owns the open flag.
-modal :: Ui :> es => Bool -> Text -> Eff es a -> Eff es (Response, Maybe a)
+modal :: Bool -> Text -> NanoUI a -> NanoUI (Response, Maybe a)
 modal = overlay True id
 
 -- | 'modal' with a layout modifier for its panel, which by default fits its
@@ -53,19 +52,18 @@ modal = overlay True id
 --
 -- A panel is never larger than the window, less the margin every floating
 -- panel keeps from its edge.
-modalWith :: Ui :> es => (Layout -> Layout) -> Bool -> Text -> Eff es a -> Eff es (Response, Maybe a)
+modalWith :: (Layout -> Layout) -> Bool -> Text -> NanoUI a -> NanoUI (Response, Maybe a)
 modalWith = overlay True
 
 -- | Show a draggable, resizable in-app window with a scrolling body. Like
 -- 'modal', the response reports a close request and the caller updates the
 -- open flag. Other windows and the page remain interactive outside its bounds.
-window :: Ui :> es => Bool -> Text -> Eff es a -> Eff es (Response, Maybe a)
+window :: Bool -> Text -> NanoUI a -> NanoUI (Response, Maybe a)
 window = overlay False id
 
 -- | A modal (@isModal@) or a window.
 overlay ::
-  Ui :> es =>
-  Bool -> (Layout -> Layout) -> Bool -> Text -> Eff es a -> Eff es (Response, Maybe a)
+  Bool -> (Layout -> Layout) -> Bool -> Text -> NanoUI a -> NanoUI (Response, Maybe a)
 overlay isModal shape open title child = do
   ctx <- askContext
   inp <- askInput
@@ -169,5 +167,5 @@ overlay isModal shape open title child = do
     r <- case panelH of
       Fixed _ -> columnWith (tight . grow . fillW) child
       _ -> scrollWith (tight . grow) child
-    when isModal (uiIO (endModal ctx))
+    when isModal (liftIO (endModal ctx))
     pure (respClicked close, r)

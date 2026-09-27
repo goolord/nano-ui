@@ -40,7 +40,7 @@ ctrlHeld = noModifiers {modCtrl = True}
 noting :: Context -> ((T.Text -> NanoUI ()) -> NanoUI a) -> IO (NanoUI a, Input -> IO [T.Text])
 noting ctx mk = do
   fired <- newIORef []
-  let ui = mk (\c -> uiIO (modifyIORef' fired (c :)))
+  let ui = mk (\c -> liftIO (modifyIORef' fired (c :)))
   pure (ui, \i -> writeIORef fired [] >> runFrame ctx i ui >> readIORef fired)
 
 binds :: (T.Text -> NanoUI ()) -> [Shortcut] -> NanoUI ()
@@ -110,7 +110,7 @@ runShortcutModalTest ctx failed = do
   openRef <- newIORef True
   (ui, press) <- noting ctx $ \note -> column $ do
     binds note [ctrl <> key 's']
-    open <- uiIO (readIORef openRef)
+    open <- liftIO (readIORef openRef)
     _ <- modal open "Dialog" (binds note [ctrl <> key 'd'] >> label "Body")
     binds note [ctrl <> key 'e']
     whenM (keyPressed (KeyChar 'e')) (note "raw")

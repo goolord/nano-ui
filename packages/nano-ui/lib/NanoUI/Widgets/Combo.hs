@@ -16,7 +16,6 @@ import Data.IORef (writeIORef)
 import Data.Maybe (fromMaybe, isJust, listToMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
-import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context
 import NanoUI.Internal.Font (menuItemRowH)
 import NanoUI.Internal.Frame.Hit (findNodeByWidgetId)
@@ -24,7 +23,7 @@ import NanoUI.Internal.Frame.Select (comboDropPickIndex, comboDropRect, comboScr
 import NanoUI.Internal.Id (WidgetId (..))
 import NanoUI.Internal.Input (Input, Key (..), MouseButton (..), Pressable (..), inputMousePos, inputScroll)
 import NanoUI.Internal.Layout.Arena (setOptions)
-import NanoUI.Internal.Monad (Ui, askContext, uiIO)
+import NanoUI.Internal.Monad (NanoUI, askContext, liftIO)
 import NanoUI.Internal.Store (boolInt, ptrEq, fieldFloat, fieldInt, fieldText, findSlot, flagSlot, insertSlot, setFieldSelection)
 import NanoUI.Internal.Types (Rect (..), V2 (..), clamp, rectContains, rectNonEmpty, v2X, v2Y)
 import NanoUI.Internal.WidgetText (textInputFlagSearch)
@@ -265,12 +264,12 @@ comboStep ci cs0 =
 -- 'comboStep' for when the value commits. Pass the current text; the result is
 -- the text after this frame, and @respChanged@ on 'comboBox'' marks a commit.
 {-# INLINE comboBox #-}
-comboBox :: (Foldable f, Ui :> es) => Text -> f Text -> Text -> Eff es Text
+comboBox :: Foldable f => Text -> f Text -> Text -> NanoUI Text
 comboBox placeholder options value = snd <$> comboBox' placeholder options value
 
 -- | 'comboBox' returning @(response, updatedText)@. The first text argument
 -- is the placeholder; the last is the controlled value.
-comboBox' :: (Foldable f, Ui :> es) => Text -> f Text -> Text -> Eff es (Response, Text)
+comboBox' :: Foldable f => Text -> f Text -> Text -> NanoUI (Response, Text)
 comboBox' placeholder options value = do
   (resp, text) <-
     buildTextInput textInputFlagSearch searchInputLayout placeholder value Nothing
@@ -282,9 +281,9 @@ comboBox' placeholder options value = do
   -- The dropdown only shows while the field is focused, so an unfocused
   -- combo steps with no rows. The matches stay lazy: the option window below
   -- forces only its rows, and the count is forced only on frames that store it.
-  ComboMatches opts query matches cachedW <- uiIO (comboMatches ctx key (toList options) text)
+  ComboMatches opts query matches cachedW <- liftIO (comboMatches ctx key (toList options) text)
   let displayed = if isFocus then matches else []
-  store <- uiIO (getStore ctx)
+  store <- liftIO (getStore ctx)
   let cs0 =
         ComboState
           { csHighlight = findSlot fieldInt (-1) (slotKey SlotComboHighlight key) store
@@ -297,7 +296,7 @@ comboBox' placeholder options value = do
           , csLive = findSlot fieldText text (slotKey SlotComboLive key) store
           , csFocused = flagSlot (slotKey SlotComboFocus key) store
           }
-  contentW <- uiIO $
+  contentW <- liftIO $
     case cachedW of
       Just w | isFocus -> pure w
       _
@@ -320,7 +319,7 @@ comboBox' placeholder options value = do
       cs1 = stepState step
       finalText = csLive cs1
   when (isFocus || stepRedraw step) $
-    uiIO $ do
+    liftIO $ do
       let len = T.length finalText
           caretToEnd
             | stepPicked step = setFieldSelection key len len
@@ -345,7 +344,7 @@ comboBox' placeholder options value = do
   -- The dropdown overlay reads its rows from the node's option list: the
   -- visible window of the filtered list. Unfocused combos set it too, since a
   -- click that focuses the field this frame shows the dropdown this frame.
-  uiIO $ do
+  liftIO $ do
     findNodeByWidgetId ctx wid
       >>= mapM_ (\idx -> setOptions (ctxNodeArena ctx) idx (take comboBoxMaxVisible (drop (csWindow cs1) matches)))
     recordSlot fieldText ctx key finalText

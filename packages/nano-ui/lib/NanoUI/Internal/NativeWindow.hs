@@ -66,9 +66,8 @@ import Data.Foldable (traverse_)
 import Data.IORef (IORef, atomicModifyIORef', modifyIORef', newIORef, readIORef, writeIORef)
 import Data.Text (Text)
 import Data.Typeable (Typeable)
-import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context (Context, askHostIO, markDirtyCovered, setHost, wakeFromThread)
-import NanoUI.Internal.Monad (Ui, windowSize, withContext)
+import NanoUI.Internal.Monad (NanoUI, windowSize, withContext)
 import NanoUI.Internal.Tasks (useTask)
 import NanoUI.Internal.Types (Size (..))
 
@@ -227,7 +226,7 @@ defaultWindowState =
 -- whether it was asked to close. Its 'winSize' is 'NanoUI.windowSize'. Once
 -- a view reads it, a change (in focus, say) triggers a frame; a view that
 -- never reads it pays nothing.
-askWindow :: Ui :> es => Eff es WindowState
+askWindow :: NanoUI WindowState
 askWindow = do
   size <- windowSize
   withContext $ \ctx ->
@@ -364,7 +363,7 @@ quitRequested ctx = maybe (pure False) (readIORef . nwQuit) =<< askHostIO ctx
 withHost :: Context -> (NativeWindow -> IO ()) -> IO ()
 withHost ctx act = askHostIO ctx >>= traverse_ act
 
-withNativeWindow :: Ui :> es => (NativeWindow -> IO ()) -> Eff es ()
+withNativeWindow :: (NativeWindow -> IO ()) -> NanoUI ()
 withNativeWindow act = withContext (`withHost` act)
 
 -- | Apply a setting through the host only when it differs from the current
@@ -388,29 +387,29 @@ setOpacity nw = setting wsOpacity (\v s -> s {wsOpacity = v}) hostSetOpacity nw 
 --
 -- This and the setters below do nothing when the value matches what the
 -- window already has, so calling them every frame costs only a comparison.
-setWindowTitleUi :: Ui :> es => Text -> Eff es ()
+setWindowTitleUi :: Text -> NanoUI ()
 setWindowTitleUi t = withNativeWindow (\nw -> setting wsTitle (\v s -> s {wsTitle = v}) hostSetTitle nw t)
 
 -- | Set the window icon ('wsIcon').
-setWindowIconUi :: Ui :> es => RgbaPixels -> Eff es ()
+setWindowIconUi :: RgbaPixels -> NanoUI ()
 setWindowIconUi icon = withNativeWindow (`setIcon` icon)
 
 -- | Set the smallest size, in layout units, the user can resize the window
 -- to, or remove the limit with 'Nothing'. A zero axis is unlimited. The size
 -- is converted at the UI scale when the limit is set, and not again if the
 -- scale changes later.
-setWindowMinSizeUi :: Ui :> es => Maybe Size -> Eff es ()
+setWindowMinSizeUi :: Maybe Size -> NanoUI ()
 setWindowMinSizeUi s = withNativeWindow (`setMinSize` s)
 
 -- | Set the largest size the user can resize the window to, as for
 -- 'setWindowMinSizeUi'.
-setWindowMaxSizeUi :: Ui :> es => Maybe Size -> Eff es ()
+setWindowMaxSizeUi :: Maybe Size -> NanoUI ()
 setWindowMaxSizeUi s = withNativeWindow (`setMaxSize` s)
 
 -- | Set the opacity of the whole window, decorations included, from 0
 -- (invisible) to 1 (opaque), clamped, where the backend and desktop support
 -- it ('wsOpacity'). For a see-through background use 'wsTransparent'.
-setWindowOpacityUi :: Ui :> es => Float -> Eff es ()
+setWindowOpacityUi :: Float -> NanoUI ()
 setWindowOpacityUi o = withNativeWindow (`setOpacity` o)
 
 -- | Make the window windowed, fullscreen or hidden ('wsMode').
@@ -418,7 +417,7 @@ setWindowOpacityUi o = withNativeWindow (`setOpacity` o)
 -- > (fullscreen, toggleFullscreen) <- useToggle False
 -- > whenM (shortcut (key (KeyF 11))) toggleFullscreen
 -- > setWindowModeUi (if fullscreen then Fullscreen else Windowed)
-setWindowModeUi :: Ui :> es => WindowMode -> Eff es ()
+setWindowModeUi :: WindowMode -> NanoUI ()
 setWindowModeUi m = withNativeWindow (\nw -> setting wsMode (\v s -> s {wsMode = v}) hostSetMode nw m)
 
 -- | Move the window's top-left corner to a desktop point: window coordinates
@@ -428,34 +427,34 @@ setWindowModeUi m = withNativeWindow (\nw -> setting wsMode (\v s -> s {wsMode =
 -- move, resize, maximize and restore the window. Call them from an event,
 -- not every frame. Some desktops ignore placement (Wayland does), and a
 -- maximized or fullscreen window stays put.
-moveWindowUi :: Ui :> es => Int -> Int -> Eff es ()
+moveWindowUi :: Int -> Int -> NanoUI ()
 moveWindowUi x y = withNativeWindow (\nw -> hostMove (nwHost nw) x y)
 
 -- | Centre the window on its display.
-centerWindowUi :: Ui :> es => Eff es ()
+centerWindowUi :: NanoUI ()
 centerWindowUi = withNativeWindow (hostCenter . nwHost)
 
 -- | Resize the view to a size in layout units, excluding the desktop's
 -- decorations.
-resizeWindowUi :: Ui :> es => Size -> Eff es ()
+resizeWindowUi :: Size -> NanoUI ()
 resizeWindowUi s = withNativeWindow (\nw -> hostResize (nwHost nw) s)
 
 -- | Minimize the window to the taskbar.
-minimizeWindowUi :: Ui :> es => Eff es ()
+minimizeWindowUi :: NanoUI ()
 minimizeWindowUi = withNativeWindow (hostMinimize . nwHost)
 
 -- | Maximize the window, leaving the desktop's panels visible.
-maximizeWindowUi :: Ui :> es => Eff es ()
+maximizeWindowUi :: NanoUI ()
 maximizeWindowUi = withNativeWindow (hostMaximize . nwHost)
 
 -- | Return a maximized or minimized window to its previous size.
-restoreWindowUi :: Ui :> es => Eff es ()
+restoreWindowUi :: NanoUI ()
 restoreWindowUi = withNativeWindow (hostRestore . nwHost)
 
 -- | Maximize the window, or restore it if it is maximized. Reads
 -- 'winMaximized', since the desktop can maximize the window itself (on a
 -- title bar double-click, say).
-toggleMaximizedUi :: Ui :> es => Eff es ()
+toggleMaximizedUi :: NanoUI ()
 toggleMaximizedUi = withNativeWindow $ \nw -> do
   maxed <- winMaximized <$> readIORef (nwState nw)
   (if maxed then hostRestore else hostMaximize) (nwHost nw)
@@ -463,7 +462,7 @@ toggleMaximizedUi = withNativeWindow $ \nw -> do
 -- | End the session after this frame is drawn; the backend's runner closes
 -- the window and returns. With 'wsExitOnCloseRequest' off, this is how the
 -- window closes.
-quitUi :: Ui :> es => Eff es ()
+quitUi :: NanoUI ()
 quitUi = withNativeWindow (\nw -> writeIORef (nwQuit nw) True)
 
 -- | Request a screenshot of the frame this view is building. The action runs
@@ -477,7 +476,7 @@ quitUi = withNativeWindow (\nw -> writeIORef (nwQuit nw) True)
 -- encoding), since the next frame waits on it. A frame follows each answer,
 -- so the view can show the result. 'useScreenshot' returns the screenshot to
 -- the view directly.
-requestScreenshot :: Ui :> es => (Maybe Screenshot -> IO ()) -> Eff es ()
+requestScreenshot :: (Maybe Screenshot -> IO ()) -> NanoUI ()
 requestScreenshot answer = withContext $ \ctx -> askHostIO ctx >>= maybe (answer Nothing) (`queueScreenshot` answer)
 
 -- | Queue an answer for 'answerScreenshots'.
@@ -491,7 +490,7 @@ queueScreenshot nw answer = atomicModifyIORef' (nwShots nw) (\waiting -> (answer
 --
 -- > shoot <- askScreenshot
 -- > saved <- useTaskStatus shots (shoot >>= traverse_ (savePng "shot.png"))
-askScreenshot :: Ui :> es => Eff es (IO (Maybe Screenshot))
+askScreenshot :: NanoUI (IO (Maybe Screenshot))
 askScreenshot = withContext $ \ctx -> maybe (pure Nothing) (shoot ctx) <$> askHostIO ctx
   where
     shoot ctx nw = do
@@ -508,7 +507,7 @@ askScreenshot = withContext $ \ctx -> maybe (pure Nothing) (shoot ctx) <$> askHo
 -- > (shots, setShots) <- useInt 0
 -- > whenM (button "Screenshot") (setShots (shots + 1))
 -- > shot <- scope (if shots == 0 then pure Nothing else useScreenshot shots)
-useScreenshot :: (Eq k, Typeable k, Ui :> es) => k -> Eff es (Maybe Screenshot)
+useScreenshot :: (Eq k, Typeable k) => k -> NanoUI (Maybe Screenshot)
 useScreenshot k = join <$> (useTask k =<< askScreenshot)
 
 -- | Answer every screenshot request since the last call, in request order,

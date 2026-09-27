@@ -34,7 +34,6 @@ import Data.IORef (IORef, atomicModifyIORef', atomicWriteIORef, newIORef, readIO
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
-import Effectful (Eff, type (:>))
 import Foreign.C.String (newCString, peekCString)
 import Foreign.Marshal.Alloc (free)
 import Foreign.Marshal.Array (newArray, peekArray0)
@@ -43,7 +42,8 @@ import Foreign.Ptr (FunPtr, Ptr, castFunPtr, castPtr, nullPtr)
 import Foreign.StablePtr (castPtrToStablePtr, castStablePtrToPtr, deRefStablePtr, freeStablePtr, newStablePtr)
 import NanoUI.Sdl.Internal.Display (pushRefreshEvent)
 import NanoUI.Sdl.Internal.Window (SdlEnv (..))
-import NanoUI.Testing (Ui, askHost, markDirty, uiIO)
+import NanoUI.Monad (NanoUI)
+import NanoUI.Testing (askHost, markDirty, liftIO)
 import SDL3.Sys.Bindgen.Dialog (SDL_DialogFileCallback (..), SDL_DialogFileFilter (..))
 import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
 import SDL3.Sys.Dialog
@@ -147,22 +147,22 @@ cancelFileDialog _ (FileDialogId ref) = atomicWriteIORef ref FileDialogUnknown
 
 -- | Open-file dialog, usable from within 'NanoUI' widget code. Returns
 -- 'Nothing' when there is no SDL host to launch a dialog.
-askOpenFileDialog :: Ui :> es => FileDialogOptions -> Eff es (Maybe FileDialogId)
-askOpenFileDialog opts = askHost >>= traverse (uiIO . (`openFileDialog` opts))
+askOpenFileDialog :: FileDialogOptions -> NanoUI (Maybe FileDialogId)
+askOpenFileDialog opts = askHost >>= traverse (liftIO . (`openFileDialog` opts))
 
 -- | Save-file dialog, usable from within 'NanoUI' widget code. Returns
 -- 'Nothing' when there is no SDL host to launch a dialog.
-askSaveFileDialog :: Ui :> es => FileDialogOptions -> Eff es (Maybe FileDialogId)
-askSaveFileDialog opts = askHost >>= traverse (uiIO . (`saveFileDialog` opts))
+askSaveFileDialog :: FileDialogOptions -> NanoUI (Maybe FileDialogId)
+askSaveFileDialog opts = askHost >>= traverse (liftIO . (`saveFileDialog` opts))
 
 -- | Folder dialog, usable from within 'NanoUI' widget code. Returns
 -- 'Nothing' when there is no SDL host to launch a dialog.
-askOpenFolderDialog :: Ui :> es => FileDialogOptions -> Eff es (Maybe FileDialogId)
-askOpenFolderDialog opts = askHost >>= traverse (uiIO . (`openFolderDialog` opts))
+askOpenFolderDialog :: FileDialogOptions -> NanoUI (Maybe FileDialogId)
+askOpenFolderDialog opts = askHost >>= traverse (liftIO . (`openFolderDialog` opts))
 
 -- | Poll a dialog from within 'NanoUI' widget code.
-pollFileDialogUi :: Ui :> es => FileDialogId -> Eff es FileDialogResult
-pollFileDialogUi did = askHost >>= maybe (pure FileDialogUnknown) (uiIO . (`pollFileDialog` did))
+pollFileDialogUi :: FileDialogId -> NanoUI FileDialogResult
+pollFileDialogUi did = askHost >>= maybe (pure FileDialogUnknown) (liftIO . (`pollFileDialog` did))
 
 data DialogKind = OpenDialog | SaveDialog | FolderDialog
   deriving (Eq)

@@ -218,7 +218,7 @@ runAdornedFieldControlTest ctx failed = do
         { ticPassword = True
         , ticAdornments =
             A.leading (A.control (disabledWhen True (void (buttonWith tight "Off"))))
-              <> A.trailing (A.control (whenM (buttonWith tight "Show") (uiIO (modifyIORef' showClicks (+ 1)))))
+              <> A.trailing (A.control (whenM (buttonWith tight "Show") (liftIO (modifyIORef' showClicks (+ 1)))))
         , ticLayout = fixedW 260 (ticLayout defaultTextInputConfig)
         }
     ui = column ((,) <$> textInputConfigured' cfg "ab" <*> textInput' "bb")
@@ -254,7 +254,7 @@ runAdornedButtonControlTest ctx failed = do
   removes <- newIORef (0 :: Int)
   let
     inp0 = withInputOff 400 200
-    remove = A.trailing (A.control (whenM (buttonWith tight "x") (uiIO (modifyIORef' removes (+ 1)))))
+    remove = A.trailing (A.control (whenM (buttonWith tight "x") (liftIO (modifyIORef' removes (+ 1)))))
     ui = column (buttonConfigured' defaultButtonConfig {bcAdornments = remove} "Chip")
   _ <- warmup2 ctx inp0 ui
   spans <- collectTextSpans ctx
@@ -279,7 +279,7 @@ runButtonContentTest ctx failed = do
     inp0 = withInputOff 400 200
     ui = column $ do
       pair <- row ((,) <$> buttonContent' (label "Save") <*> button' "Save")
-      nested <- buttonContent' (whenM (button "x") (uiIO (writeIORef inner True)))
+      nested <- buttonContent' (whenM (button "x") (liftIO (writeIORef inner True)))
       pure (pair, nested)
   ((content, plain), nested) <- warmup2 ctx inp0 ui
   assertEq failed (rectW (respRect plain), rectH (respRect plain)) (rectW (respRect content), rectH (respRect content))

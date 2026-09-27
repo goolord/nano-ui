@@ -23,7 +23,6 @@ import Data.IORef (modifyIORef')
 import Data.IntMap.Strict qualified as IM
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
-import Effectful (Eff, type (:>))
 import GHC.Clock (getMonotonicTime)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Id (WidgetId, enterScope, scopeTag)
@@ -62,21 +61,19 @@ defaultPopupConfig anchor =
 -- body's result while open. The 'Response' reports a dismissal (Escape, or a
 -- click outside when 'cfgDismissable') as a click.
 popup ::
-  Ui :> es =>
   Bool ->
   PopupConfig ->
-  Eff es a ->
-  Eff es (Response, Maybe a)
+  NanoUI a ->
+  NanoUI (Response, Maybe a)
 popup open cfg child = popupWith open cfg id child
 
 -- | 'popup' with a modifier applied to its tight default layout.
 popupWith ::
-  Ui :> es =>
   Bool ->
   PopupConfig ->
   (Layout -> Layout) ->
-  Eff es a ->
-  Eff es (Response, Maybe a)
+  NanoUI a ->
+  NanoUI (Response, Maybe a)
 popupWith open cfg f child = do
   ctx <- askContext
   let
@@ -99,18 +96,17 @@ popupWith open cfg f child = do
 -- closed panel still consumes its id scope, so the ids of later siblings do
 -- not shift when it opens.
 floatingOverlay ::
-  Ui :> es =>
   Bool ->
   Bool ->
   (WidgetId -> Int -> IO NodeIdx) ->
   (WidgetId -> IO ()) ->
-  Eff es (Bool, a) ->
-  Eff es (Response, Maybe a)
+  NanoUI (Bool, a) ->
+  NanoUI (Response, Maybe a)
 floatingOverlay open dismissable addPanel enter body = do
   (wid, ctx) <- freshWidget
   if not open
     then do
-      uiIO (modifyIORef' (ctxIdContext ctx) (fst . enterScope scopeTag))
+      liftIO (modifyIORef' (ctxIdContext ctx) (fst . enterScope scopeTag))
       pure (mempty {rawRespId = wid}, Nothing)
     else do
       -- Hovered is the pointer on the panel as the panel's own layer sees it,
@@ -155,10 +151,10 @@ defaultTooltipConfig =
 -- | Attach a rich tooltip widget to any target response, shown once the
 -- pointer rests on it ('defaultTooltipConfig').
 tooltipWidget ::
-  (Ui :> es, HasResponse r) =>
+  HasResponse r =>
   r ->
-  Eff es a ->
-  Eff es (Maybe a)
+  NanoUI a ->
+  NanoUI (Maybe a)
 tooltipWidget = tooltipWidgetConfigured defaultTooltipConfig
 
 -- | 'tooltipWidget' with a configured delay, placement and gap. The target
@@ -166,11 +162,11 @@ tooltipWidget = tooltipWidgetConfigured defaultTooltipConfig
 -- part ('pointerOnWidget'), even if it takes no input, so a disabled button
 -- can still explain why it is off.
 tooltipWidgetConfigured ::
-  (Ui :> es, HasResponse r) =>
+  HasResponse r =>
   TooltipConfig ->
   r ->
-  Eff es a ->
-  Eff es (Maybe a)
+  NanoUI a ->
+  NanoUI (Maybe a)
 tooltipWidgetConfigured cfg target child = do
   -- The id 'popup' takes next; the timer is keyed on it to avoid using a
   -- sibling id.
@@ -184,16 +180,16 @@ tooltipWidgetConfigured cfg target child = do
       tid = respId target
   onTarget <-
     if rectHit rect routed
-      then uiIO (findNodeByWidgetId ctx tid >>= \mIdx -> pointerOnWidget ctx mIdx tid rect routed)
+      then liftIO (findNodeByWidgetId ctx tid >>= \mIdx -> pointerOnWidget ctx mIdx tid rect routed)
       else pure False
   -- The tooltip covering the target still counts as hovering it, as when a
   -- pointer-following tooltip lags one frame behind the pointer.
-  onTip <- uiIO ((== RouteLayer (intKey wid)) <$> getsInteraction ctx isPointerRoute)
+  onTip <- liftIO ((== RouteLayer (intKey wid)) <$> getsInteraction ctx isPointerRoute)
   let hovered = onTarget || (onTip && rectHit rect mouse)
-  open <- uiIO (tooltipTimer ctx cfg (intKey wid) hovered frame)
+  open <- liftIO (tooltipTimer ctx cfg (intKey wid) hovered frame)
   -- Request a frame when the pointer enters or leaves the target, even a
   -- label or container, and on every move while a following tooltip is open.
-  uiIO (registerHoverZone ctx (open && follow) rect)
+  liftIO (registerHoverZone ctx (open && follow) rect)
   let (anchor, placement)
         | follow = (AnchorRect (Rect mx my 0 pointerClearance), PlacementBelow)
         | otherwise = (AnchorRect rect, tooltipPlacement cfg)
@@ -262,10 +258,9 @@ tooltipTimer ctx cfg k hovered inp = do
 
 -- | Attach a rich tooltip widget to an inner UI computation.
 withTooltip ::
-  Ui :> es =>
-  Eff es a ->
-  Eff es b ->
-  Eff es (a, Maybe b)
+  NanoUI a ->
+  NanoUI b ->
+  NanoUI (a, Maybe b)
 withTooltip mainChild tipChild = do
   base <- askDefaultLayout
   (res, contResp) <- containerResponse NodeContainer (tight base) mainChild
@@ -274,22 +269,22 @@ withTooltip mainChild tipChild = do
 
 -- | 'tooltip' with a placement. 'PlacementAtCursor' follows the pointer.
 tooltipAt ::
-  (Ui :> es, HasResponse r) =>
+  HasResponse r =>
   PopupPlacement ->
   r ->
   Text ->
-  Eff es ()
+  NanoUI ()
 tooltipAt placement = tooltipConfigured defaultTooltipConfig {tooltipPlacement = placement}
 
 -- | 'tooltip' with a configured delay and placement.
 --
 -- > tooltipConfigured defaultTooltipConfig {tooltipPlacement = PlacementAtCursor} swatch name
 tooltipConfigured ::
-  (Ui :> es, HasResponse r) =>
+  HasResponse r =>
   TooltipConfig ->
   r ->
   Text ->
-  Eff es ()
+  NanoUI ()
 tooltipConfigured cfg target txt = void (tooltipWidgetConfigured cfg target (label txt))
 
 -- | Text shown below a widget after the pointer rests on it for half a
@@ -298,8 +293,8 @@ tooltipConfigured cfg target txt = void (tooltipWidgetConfigured cfg target (lab
 -- > save <- button' "Save"
 -- > tooltip save "Write the file to disk"
 tooltip ::
-  (Ui :> es, HasResponse r) =>
+  HasResponse r =>
   r ->
   Text ->
-  Eff es ()
+  NanoUI ()
 tooltip = tooltipConfigured defaultTooltipConfig

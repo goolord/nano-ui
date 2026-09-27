@@ -88,7 +88,6 @@ module NanoUI.Widgets.Custom
 import Control.Monad (void, when)
 import Data.Text qualified as T
 import Data.Primitive.SmallArray (emptySmallArray)
-import Effectful (Eff, type (:>))
 import NanoUI.Internal.Canvas
 import NanoUI.Internal.Context
 import Data.Word (Word64)
@@ -98,7 +97,7 @@ import NanoUI.Internal.Font (checkboxBoxSize)
 import NanoUI.Internal.Id (WidgetId, mix64)
 import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena (NodeType (NodeDrawing))
-import NanoUI.Internal.Monad (Ui, askContext, askInput, freshWidget, nextId, uiIO, uiTime)
+import NanoUI.Internal.Monad (NanoUI, askContext, askInput, freshWidget, nextId, liftIO, uiTime)
 import NanoUI.Path qualified as P
 import NanoUI.Internal.Store
 import NanoUI.Internal.Style
@@ -205,11 +204,11 @@ keyPart :: Hashable a => a -> KeyPart
 keyPart = KeyPart . fromIntegral . hash
 
 -- | Instantiates a custom widget using an existing 'WidgetId'.
-customWidgetWithId :: (Ui :> es) => WidgetId -> CustomWidgetSpec a -> Eff es (Response, a)
+customWidgetWithId :: WidgetId -> CustomWidgetSpec a -> NanoUI (Response, a)
 customWidgetWithId wid spec = do
   ctx <- askContext
   inp <- askInput
-  uiIO $ do
+  liftIO $ do
     when (widgetFocusable spec) $ registerFocusable ctx wid
     mapM_ (registerCustomMeasure ctx wid) (widgetMeasure spec)
     registerCustomEntry ctx wid $
@@ -220,11 +219,11 @@ customWidgetWithId wid spec = do
         (widgetDamageSlop spec)
         (widgetTrackPointer spec)
   resp0 <- addWidgetStyled wid NodeDrawing T.empty 0 (widgetLayout spec) (fromEnum (widgetKeys spec))
-  cdc <- uiIO (customDrawContext ctx (ctxFontMetrics ctx) wid (respHovered resp0) (respPressed resp0))
+  cdc <- liftIO (customDrawContext ctx (ctxFontMetrics ctx) wid (respHovered resp0) (respPressed resp0))
   pure (widgetInteract spec resp0 cdc inp)
 
 -- | Instantiates a custom widget from a 'CustomWidgetSpec'.
-customWidget :: (Ui :> es) => CustomWidgetSpec a -> Eff es (Response, a)
+customWidget :: CustomWidgetSpec a -> NanoUI (Response, a)
 customWidget spec = do
   wid <- nextId
   customWidgetWithId wid spec
@@ -232,7 +231,7 @@ customWidget spec = do
 -- | Draw into a rectangle sized by the layout modifier. Curves are flattened
 -- for the current display ('runCanvasFor'). Ops are rebuilt and compared
 -- every frame; use 'canvasConfigured' for a content key or a cursor.
-canvas :: (Ui :> es) => (Layout -> Layout) -> (Rect -> CanvasM ()) -> Eff es Response
+canvas :: (Layout -> Layout) -> (Rect -> CanvasM ()) -> NanoUI Response
 canvas f = canvasConfigured defaultCanvasConfig {canvasLayout = f defaultLayout}
 
 -- | Options for 'canvasConfigured'.
@@ -264,7 +263,7 @@ defaultCanvasConfig =
 -- > canvasConfigured defaultCanvasConfig {canvasLayout = fixedWH 120 24 defaultLayout, canvasContent = contentKey [level]} $ \r -> do
 -- >   cdc <- drawContext
 -- >   drawRoundedRect r 4 (if cdcHovered cdc then themeAccent (cdcTheme cdc) else themeMuted (cdcTheme cdc))
-canvasConfigured :: (Ui :> es) => CanvasConfig -> (Rect -> CanvasM ()) -> Eff es Response
+canvasConfigured :: CanvasConfig -> (Rect -> CanvasM ()) -> NanoUI Response
 canvasConfigured cfg drawAction =
   fst <$> customWidget defaultCustomWidgetSpec
     { widgetLayout = canvasLayout cfg
@@ -299,18 +298,18 @@ data Drag2D = Drag2D
 -- > (resp, ()) <- customWidget spec
 -- > drag <- useDrag2DOn resp
 -- > when (dragActive drag) (setPan (dragPosition drag))
-useDrag2DOn :: (Ui :> es, HasResponse r) => r -> Eff es Drag2D
+useDrag2DOn :: HasResponse r => r -> NanoUI Drag2D
 useDrag2DOn r = drag2DFrom (respRect r) (respPressed r)
 
 -- | 'useDrag2DOn' over a rect: a press anywhere in it starts the drag, even
 -- on something drawn over it.
-useDrag2D :: (Ui :> es) => Rect -> Eff es Drag2D
+useDrag2D :: Rect -> NanoUI Drag2D
 useDrag2D bounds = drag2DFrom bounds . rectContains bounds . inputMousePos =<< askInput
 {-# DEPRECATED useDrag2D "Use useDrag2DOn with the widget's Response, which respects what is drawn over it" #-}
 
 -- | A left-button drag already under way, or starting with a press this
 -- frame when @onIt@; the position is clamped to @bounds@.
-drag2DFrom :: (Ui :> es) => Rect -> Bool -> Eff es Drag2D
+drag2DFrom :: Rect -> Bool -> NanoUI Drag2D
 drag2DFrom bounds onIt = do
   (wid, ctx) <- freshWidget
   inp <- askInput
@@ -318,7 +317,7 @@ drag2DFrom bounds onIt = do
   -- pointer position goes in a point slot.
   let dragK = slotKey SlotDrag (intKey wid)
       mouse = inputMousePos inp
-  store <- uiIO (getStore ctx)
+  store <- liftIO (getStore ctx)
   let active0 = quietFlag dragK store
       active = heldIn MouseLeft inp && (active0 || (pressedIn MouseLeft inp && onIt))
       prev = uncurry V2 (findSlot fieldPoint (v2X mouse, v2Y mouse) dragK store)
@@ -328,23 +327,23 @@ drag2DFrom bounds onIt = do
           (clamp (rectX bounds) (rectX bounds + rectW bounds) (v2X mouse))
           (clamp (rectY bounds) (rectY bounds + rectH bounds) (v2Y mouse))
   when (active || active0) $
-    uiIO . modifyStore ctx $
+    liftIO . modifyStore ctx $
       setQuietFlag dragK active
         . (if active then insertSlot fieldPoint dragK (v2X mouse, v2Y mouse) else deleteSlot fieldPoint dragK)
   pure Drag2D { dragPosition = clampedMouse, dragActive = active, dragDelta = delta }
 
 -- | This frame's wheel delta while the widget is hovered ('respHovered').
 -- Overlays, scrolled-off parts and a disabled widget get none.
-useWheelDeltaOn :: (Ui :> es, HasResponse r) => r -> Eff es (Float, Float)
+useWheelDeltaOn :: HasResponse r => r -> NanoUI (Float, Float)
 useWheelDeltaOn r = wheelIf (respHovered r)
 
 -- | 'useWheelDeltaOn' over a rect, regardless of what is drawn over it.
-useWheelDelta :: (Ui :> es) => Rect -> Eff es (Float, Float)
+useWheelDelta :: Rect -> NanoUI (Float, Float)
 useWheelDelta bounds = wheelIf . rectContains bounds . inputMousePos =<< askInput
 {-# DEPRECATED useWheelDelta "Use useWheelDeltaOn with the widget's Response, which respects what is drawn over it" #-}
 
 -- | This frame's wheel delta when @on@, else zero.
-wheelIf :: (Ui :> es) => Bool -> Eff es (Float, Float)
+wheelIf :: Bool -> NanoUI (Float, Float)
 wheelIf on = do
   V2 x y <- inputScroll <$> askInput
   pure (if on then (x, y) else (0, 0))
@@ -357,23 +356,22 @@ wheelIf on = do
 -- or use the arrow keys. Pass the current value; the result is the value
 -- after this frame.
 {-# INLINE knob #-}
-knob :: Ui :> es => Float -> Float -> Float -> Eff es Float
+knob :: Float -> Float -> Float -> NanoUI Float
 knob minV maxV value = snd <$> knobWith' id 36 minV maxV value
 
 -- | 'knob' with a layout modifier and a diameter in pixels, returning the
 -- response and the updated value.
 knobWith' ::
-  Ui :> es =>
   (Layout -> Layout)
   -> Float
   -> Float
   -> Float
   -> Float
-  -> Eff es (Response, Float)
+  -> NanoUI (Response, Float)
 knobWith' f diameter minV maxV value = do
   (wid, ctx) <- freshWidget
   -- NaN never equals itself, so it would be re-adopted, dirtying every frame.
-  current <- uiIO $ adoptSlot fieldFloat ctx wid (if isNaN value then minV else value)
+  current <- liftIO $ adoptSlot fieldFloat ctx wid (if isNaN value then minV else value)
   let
     range = maxV - minV
     frac = if range > 0 then clamp01 ((current - minV) / range) else 0
@@ -414,16 +412,16 @@ knobWith' f diameter minV maxV value = do
 -- | On/off switch. Pass the current state; the result is the state after
 -- this frame's click or Space/Enter.
 {-# INLINE toggleSwitch #-}
-toggleSwitch :: Ui :> es => Bool -> Eff es Bool
+toggleSwitch :: Bool -> NanoUI Bool
 toggleSwitch on = snd <$> toggleSwitchWith' id on
 
 -- | 'toggleSwitch' with a layout modifier, returning the response and the
 -- updated flag.
 toggleSwitchWith' ::
-  Ui :> es => (Layout -> Layout) -> Bool -> Eff es (Response, Bool)
+  (Layout -> Layout) -> Bool -> NanoUI (Response, Bool)
 toggleSwitchWith' f on = do
   (wid, ctx) <- freshWidget
-  current <- intBool <$> uiIO (adoptSlot fieldInt ctx wid (boolInt on))
+  current <- intBool <$> liftIO (adoptSlot fieldInt ctx wid (boolInt on))
   let
     pillW = 44.0
     pillH = 24.0
@@ -448,12 +446,12 @@ toggleSwitchWith' f on = do
 
 -- | Progress ring for a fraction in @[0, 1]@, 32 px across.
 {-# INLINE circularProgress #-}
-circularProgress :: Ui :> es => Float -> Eff es ()
+circularProgress :: Float -> NanoUI ()
 circularProgress frac = void (circularProgressWith' id 32 frac)
 
 -- | 'circularProgress' with a layout modifier and a diameter in pixels,
 -- returning its response.
-circularProgressWith' :: Ui :> es => (Layout -> Layout) -> Float -> Float -> Eff es Response
+circularProgressWith' :: (Layout -> Layout) -> Float -> Float -> NanoUI Response
 circularProgressWith' f diameter frac =
   fst <$> customWidget (fixedSizeSpec f diameter diameter)
     { widgetContent = contentKey [clamp01 frac]
@@ -470,12 +468,12 @@ circularProgressWith' f diameter frac =
 -- | An indeterminate loading indicator, 18 px across: an accent arc turning
 -- over a faint ring. It keeps the frame loop running while on screen.
 {-# INLINE spinner #-}
-spinner :: Ui :> es => Eff es ()
+spinner :: NanoUI ()
 spinner = void (spinnerWith' id 18)
 
 -- | 'spinner' with a layout modifier and a diameter in pixels, returning its
 -- response. It requests animation frames while declared.
-spinnerWith' :: Ui :> es => (Layout -> Layout) -> Float -> Eff es Response
+spinnerWith' :: (Layout -> Layout) -> Float -> NanoUI Response
 spinnerWith' f diameter = do
   t <- uiTime
   let !d = max 4 diameter
@@ -501,12 +499,12 @@ spinnerWith' f diameter = do
 -- | Horizontal progress bar for a fraction in @[0, 1]@. It fills the
 -- available width at a fixed height.
 {-# INLINE progressBar #-}
-progressBar :: Ui :> es => Float -> Eff es ()
+progressBar :: Float -> NanoUI ()
 progressBar frac = void (progressBarWith' id progressBarDefaultHeight frac)
 
 -- | 'progressBar' with a layout modifier and a height in pixels, returning
 -- its response.
-progressBarWith' :: Ui :> es => (Layout -> Layout) -> Float -> Float -> Eff es Response
+progressBarWith' :: (Layout -> Layout) -> Float -> Float -> NanoUI Response
 progressBarWith' f height frac =
   let !barH = max 0 height
    in fst <$> customWidget defaultCustomWidgetSpec
@@ -532,12 +530,12 @@ progressBarDefaultWidth = 120.0
 
 -- | A small line chart of the values, 80 by 24 px, scaled to their range.
 {-# INLINE sparkline #-}
-sparkline :: Ui :> es => [Float] -> Eff es ()
+sparkline :: [Float] -> NanoUI ()
 sparkline values = void (sparklineWith' id 80 24 values)
 
 -- | 'sparkline' with a layout modifier and a preferred size, returning its
 -- response.
-sparklineWith' :: Ui :> es => (Layout -> Layout) -> Float -> Float -> [Float] -> Eff es Response
+sparklineWith' :: (Layout -> Layout) -> Float -> Float -> [Float] -> NanoUI Response
 sparklineWith' f prefW prefH values =
   fst <$> customWidget (fixedSizeSpec f prefW prefH)
     { widgetContent = contentKey values

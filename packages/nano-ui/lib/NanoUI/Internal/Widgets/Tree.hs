@@ -8,7 +8,6 @@ import Data.Foldable (asum, find, fold, toList)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Primitive.SmallArray (SmallArray, indexSmallArray, sizeofSmallArray, smallArrayFromList)
-import Effectful (Eff, type (:>))
 import GHC.Exts (isTrue#, reallyUnsafePtrEquality#)
 import qualified Data.IntSet as IS
 import NanoUI.Internal.Context (Context (..), adoptSlot, getPrevRect, getStore, intKey, registerFocusable, writeSlots)
@@ -17,7 +16,7 @@ import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Internal.Input (inputMousePos)
 import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Store (fieldInt, fieldIntSet, lookupSlot, slotWrite)
-import NanoUI.Internal.Monad (Ui, askInput, focusedWidget, freshWidget, uiIO, withKey)
+import NanoUI.Internal.Monad (NanoUI, askInput, focusedWidget, freshWidget, liftIO, withKey)
 import NanoUI.Internal.Style (defaultLayout, fillW, gap, tight)
 import NanoUI.Internal.Types (Rect (..), clamp, rectContains)
 import NanoUI.Internal.WidgetText (treeEncodeStyle)
@@ -108,17 +107,17 @@ toggle idx s = if IS.member idx s then IS.delete idx s else IS.insert idx s
 -- | One visible row, and the selection and expansion its click asks for: a
 -- click on a parent's chevron toggles it and keeps the selection.
 treeRow ::
-  (Ui :> es) => Int -> TreeRow -> Int -> IS.IntSet -> Eff es (Response, Maybe (Int, IS.IntSet))
+  Int -> TreeRow -> Int -> IS.IntSet -> NanoUI (Response, Maybe (Int, IS.IntSet))
 treeRow rowIdx (nodeIdx, depth, hasKids, lbl) selected expanded = do
   (wid, ctx) <- freshWidget
   inp <- askInput
   let style = treeEncodeStyle depth hasKids (IS.member nodeIdx expanded) (odd rowIdx)
       value = if selected == nodeIdx then 1 else 0
   resp <- addWidgetStyled wid NodeButton lbl value (tight . fillW $ defaultLayout) style
-  uiIO $ registerFocusable ctx wid
+  liftIO $ registerFocusable ctx wid
   if not (rawRespClicked resp)
     then pure (resp, Nothing)
-    else uiIO $ do
+    else liftIO $ do
       mrect <- getPrevRect ctx wid
       let mouse = inputMousePos inp
           onChevron = case mrect of
@@ -133,11 +132,11 @@ treeRow rowIdx (nodeIdx, depth, hasKids, lbl) selected expanded = do
 -- and the result is the selection after this frame's click or arrow keys.
 -- Expansion is kept by the widget. @key@ distinguishes trees in one scope.
 {-# INLINE tree #-}
-tree :: (Foldable f, Ui :> es) => Text -> f TreeItem -> Int -> Eff es Int
+tree :: Foldable f => Text -> f TreeItem -> Int -> NanoUI Int
 tree key items index = snd <$> tree' key items index
 
 -- | 'tree' returning its response and selected pre-order item index.
-tree' :: (Foldable f, Ui :> es) => Text -> f TreeItem -> Int -> Eff es (Response, Int)
+tree' :: Foldable f => Text -> f TreeItem -> Int -> NanoUI (Response, Int)
 tree' key inputItems index =
   withKey ("tree:" <> key) $ do
     (groupId, ctx) <- freshWidget
@@ -147,9 +146,9 @@ tree' key inputItems index =
         clamped = if total <= 0 then 0 else clamp 0 (total - 1) index
         -- Every parent starts expanded.
         allParents = IS.fromList [i | (i, _, True, _) <- toList (visibleRows (const True) items)]
-    selected <- uiIO $ adoptSlot fieldInt ctx groupId clamped
-    expandedSet <- fromMaybe allParents . lookupSlot fieldIntSet groupKey <$> uiIO (getStore ctx)
-    rows <- uiIO (cachedRows ctx groupKey items expandedSet)
+    selected <- liftIO $ adoptSlot fieldInt ctx groupId clamped
+    expandedSet <- fromMaybe allParents . lookupSlot fieldIntSet groupKey <$> liftIO (getStore ctx)
+    rows <- liftIO (cachedRows ctx groupKey items expandedSet)
     columnWith (tight . gap 0 . fillW) $ do
       tagContainer groupId
       results <-
@@ -162,8 +161,8 @@ tree' key inputItems index =
       focus <- focusedWidget
       nav <- useKeyNav focus
       let (keySel, keyExp, mFocus) = treeKeyNav nav rows resps focus clickSel clickExp
-      uiIO (moveSelection ctx selected keySel [(i, r) | ((i, _, _, _), (r, _)) <- zip (toList rows) results])
+      liftIO (moveSelection ctx selected keySel [(i, r) | ((i, _, _, _), (r, _)) <- zip (toList rows) results])
       result <- finishInput fieldInt ctx groupId selected (fold resps) keySel
-      uiIO (writeSlots ctx (slotWrite fieldIntSet groupKey keyExp))
-      mapM_ (uiIO . writeIORef (ctxFocusId ctx)) mFocus
+      liftIO (writeSlots ctx (slotWrite fieldIntSet groupKey keyExp))
+      mapM_ (liftIO . writeIORef (ctxFocusId ctx)) mFocus
       pure result

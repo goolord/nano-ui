@@ -2,7 +2,6 @@ module Main (main) where
 
 import Control.Exception (evaluate)
 import Control.Monad (forM_, replicateM_, void, when)
-import Control.Monad.IO.Class (liftIO)
 import Data.ByteString (ByteString)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.Text (Text)

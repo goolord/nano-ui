@@ -30,11 +30,10 @@ import Data.Maybe (isJust, isNothing)
 import Data.Primitive.PrimVar (PrimVar, modifyPrimVar, newPrimVar, readPrimVar, writePrimVar)
 import Data.Type.Equality ((:~:) (Refl))
 import Data.Typeable (Typeable, cast, eqT)
-import Effectful (Eff, type (:>))
 import GHC.Conc (labelThread)
 import GHC.Exts (RealWorld)
 import NanoUI.Internal.Context (Context, askHostIO, hostOrInit, intKey, wakeFromThread)
-import NanoUI.Internal.Monad (Ui, askContext, freshWidget, uiIO)
+import NanoUI.Internal.Monad (NanoUI, askContext, freshWidget, liftIO)
 
 -- | Per-context hook resources, stored as a host value ('hostOrInit'): the
 -- resources by widget store key; the frame the view is running, which each
@@ -54,16 +53,16 @@ data Holding = forall k. (Eq k, Typeable k) => Holding !k !Dynamic !(IO ()) !(Pr
 -- value. Resources are released when a frame skips the hook ('sweepHeld') and
 -- when the session ends ('cancelTasks'). Holds job threads and
 -- 'NanoUI.useImageRgba' images.
-useHeld :: (Eq k, Typeable k, Typeable a, Ui :> es) => k -> (Context -> Maybe a -> IO (a, IO ())) -> Eff es a
+useHeld :: (Eq k, Typeable k, Typeable a) => k -> (Context -> Maybe a -> IO (a, IO ())) -> NanoUI a
 useHeld k acquire = useHeldBy k Just (\ctx old -> (\(v, release) -> (v, v, release)) <$> acquire ctx old)
 
 -- | 'useHeld' keeping an @s@ and returning what @view@ finds in it. An entry
 -- @view@ finds nothing in is replaced, as one of another type is.
 {-# INLINE useHeldBy #-}
-useHeldBy :: (Eq k, Typeable k, Typeable s, Ui :> es) => k -> (s -> Maybe b) -> (Context -> Maybe b -> IO (s, b, IO ())) -> Eff es b
+useHeldBy :: (Eq k, Typeable k, Typeable s) => k -> (s -> Maybe b) -> (Context -> Maybe b -> IO (s, b, IO ())) -> NanoUI b
 useHeldBy k view acquire = do
   (wid, ctx) <- freshWidget
-  uiIO $ do
+  liftIO $ do
     Held ref frameVar stampedVar countVar <- hostOrInit ctx newHeld
     held <- readIORef ref
     frame <- readPrimVar frameVar
@@ -119,7 +118,7 @@ taskRef (TaskBox (ref :: IORef (Outcome b))) = (\Refl -> ref) <$> eqT @a @b
 -- | 'useHeldBy' for a job. @start@ builds what the hook keeps, the result
 -- box (given the old box when @view@ finds one) and the action to fork.
 {-# INLINE useJob #-}
-useJob :: (Eq k, Typeable k, Typeable s, Ui :> es) => k -> (s -> Maybe b) -> (Context -> Maybe b -> IO (s, b, IO ())) -> Eff es b
+useJob :: (Eq k, Typeable k, Typeable s) => k -> (s -> Maybe b) -> (Context -> Maybe b -> IO (s, b, IO ())) -> NanoUI b
 useJob k view start = useHeldBy k view $ \ctx old -> do
   (stored, box, run) <- start ctx old
   tid <- forkIO run
@@ -163,7 +162,7 @@ useJob k view start = useHeldBy k view $ \ctx old -> do
 -- Synchronous exceptions from the action or from forcing the result become
 -- 'TaskFailed'; asynchronous ones end the job. Build with @-threaded@ so jobs
 -- run while the loop sleeps.
-useTaskStatus :: (Eq k, Typeable k, Typeable a, Ui :> es) => k -> IO a -> Eff es (TaskStatus a)
+useTaskStatus :: (Eq k, Typeable k, Typeable a) => k -> IO a -> NanoUI (TaskStatus a)
 useTaskStatus k run = (\(Outcome status _) -> status) <$> useOutcome k run
 
 -- | Like 'useTaskStatus', but returns only the latest result: the current
@@ -173,12 +172,12 @@ useTaskStatus k run = (\(Outcome status _) -> status) <$> useOutcome k run
 -- > (path, setPath) <- useText "notes.txt"
 -- > contents <- useTask path (T.readFile (T.unpack path))
 -- > label (fromMaybe "Loading..." contents)
-useTask :: (Eq k, Typeable k, Typeable a, Ui :> es) => k -> IO a -> Eff es (Maybe a)
+useTask :: (Eq k, Typeable k, Typeable a) => k -> IO a -> NanoUI (Maybe a)
 useTask k run = (\(Outcome _ latest) -> latest) <$> useOutcome k run
 
 -- | The job's outcome as of this frame. A new key's job starts as running,
 -- carrying the replaced job's latest result.
-useOutcome :: (Eq k, Typeable k, Typeable a, Ui :> es) => k -> IO a -> Eff es (Outcome a)
+useOutcome :: (Eq k, Typeable k, Typeable a) => k -> IO a -> NanoUI (Outcome a)
 useOutcome k run = do
   box <- useJob k taskRef $ \ctx old -> do
     prev <- maybe (pure Nothing) (fmap (\(Outcome _ latest) -> latest) . readIORef) old
@@ -193,7 +192,7 @@ useOutcome k run = do
             | isJust (fromException e :: Maybe SomeAsyncException) -> throwIO e
             | otherwise -> finish (Outcome (TaskFailed e prev) prev)
       )
-  uiIO (readIORef box)
+  liftIO (readIORef box)
 
 -- | Run a producer on a worker thread that updates state the view reads, such
 -- as sensor readings, download progress, or a streamed chat reply. The
@@ -215,12 +214,12 @@ useOutcome k run = do
 -- hook kills it. A producer that returns leaves the state as it last set it.
 -- An uncaught exception ends the producer like any 'forkIO' thread; catch it
 -- inside to show it in the state.
-useStream :: (Eq k, Typeable k, Typeable s, Ui :> es) => k -> s -> (((s -> s) -> IO ()) -> IO ()) -> Eff es s
+useStream :: (Eq k, Typeable k, Typeable s) => k -> s -> (((s -> s) -> IO ()) -> IO ()) -> NanoUI s
 useStream k initial produce = do
   box <- useJob k Just $ \ctx _ -> do
     box <- newIORef initial
     pure (box, box, produce (\f -> atomicModifyIORef' box (\s -> (f s, ())) >> wakeFromThread ctx))
-  uiIO (readIORef box)
+  liftIO (readIORef box)
 
 -- | An action any thread can call to rerun the view after changing something
 -- it reads. The woken frame repaints the whole window, since nothing says
@@ -229,7 +228,7 @@ useStream k initial produce = do
 --
 -- 'useStream' is built on this. Use it directly for a thread the view does
 -- not own: publish each value where the view reads it, then wake.
-askWake :: Ui :> es => Eff es (IO ())
+askWake :: NanoUI (IO ())
 askWake = wakeFromThread <$> askContext
 
 -- | End-of-frame sweep: release resources whose hook did not run this frame.

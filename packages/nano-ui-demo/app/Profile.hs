@@ -1,7 +1,6 @@
 module Main (main) where
 
 import Control.Monad (forM, forM_, replicateM_, unless, void, when)
-import Control.Monad.IO.Class (liftIO)
 import Data.IORef (atomicModifyIORef', newIORef, readIORef)
 import Data.Primitive.SmallArray (indexSmallArray, sizeofSmallArray, smallArrayFromList)
 import GHC.Clock (getMonotonicTimeNSec)

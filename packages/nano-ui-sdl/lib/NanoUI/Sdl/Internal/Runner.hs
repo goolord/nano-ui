@@ -232,8 +232,8 @@ ensureRetain env w h scale = do
 -- | Read debug information, refreshing at most four times per second.
 -- Returns the empty snapshot outside an SDL session. Repeated queries keep
 -- the debug sampler active and can schedule periodic frames.
-askSdlDebug :: Ui :> es => Eff es SdlDebugSnapshot
-askSdlDebug = askHost @SdlEnv >>= maybe (pure emptySdlDebug) (uiIO . sample)
+askSdlDebug :: NanoUI SdlDebugSnapshot
+askSdlDebug = askHost @SdlEnv >>= maybe (pure emptySdlDebug) (liftIO . sample)
   where
     sample env = do
       -- The display is queried only when the snapshot refreshes.
@@ -257,15 +257,15 @@ askSdlDebug = askHost @SdlEnv >>= maybe (pure emptySdlDebug) (uiIO . sample)
 -- | Request a UI font family. The SDL display thread resolves and applies it
 -- before the next frame (see 'NanoUI.Sdl.Internal.Window.syncDisplay'), rebuilding the
 -- glyph atlas and text resolver. A no-op on non-SDL hosts.
-setSdlUiFont :: Ui :> es => NanoUIFont -> Eff es ()
-setSdlUiFont font = askHost >>= traverse_ (uiIO . (`writeIORef` font) . sdlFontRequestRef)
+setSdlUiFont :: NanoUIFont -> NanoUI ()
+setSdlUiFont font = askHost >>= traverse_ (liftIO . (`writeIORef` font) . sdlFontRequestRef)
 
 -- | Set the UI scale (see 'NanoUI.Sdl.Internal.Window.sdlAppUiScale'): a zoom on top
 -- of the pixel density, or zero or less to follow the display. The display
 -- thread applies it before the next frame, which this wakes. A no-op on
 -- non-SDL hosts.
-setSdlUiScale :: Ui :> es => Float -> Eff es ()
-setSdlUiScale s = askHost @SdlEnv >>= traverse_ (uiIO . request)
+setSdlUiScale :: Float -> NanoUI ()
+setSdlUiScale s = askHost @SdlEnv >>= traverse_ (liftIO . request)
   where
     request env = do
       cur <- readIORef (sdlUiScaleRef env)

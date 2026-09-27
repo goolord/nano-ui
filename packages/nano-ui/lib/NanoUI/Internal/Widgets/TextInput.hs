@@ -40,13 +40,12 @@ import Data.Char (isPrint)
 import Data.Maybe (fromMaybe, isNothing)
 import Data.Text (Text)
 import Data.Text qualified as T
-import Effectful (Eff, type (:>))
 import GHC.Clock (getMonotonicTime)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena (NodeType (..))
-import NanoUI.Internal.Monad (Ui, askContext, askDefaultLayout, askInput, freshWidget, nextId, uiIO, withContext)
+import NanoUI.Internal.Monad (NanoUI, askContext, askDefaultLayout, askInput, freshWidget, nextId, liftIO, withContext)
 import NanoUI.Internal.Store
 import NanoUI.Internal.Style (Layout (..), Style (..), Theme (..), defaultLayout, fieldIconColor, fillW, minW)
 import NanoUI.Internal.Types (Color)
@@ -168,12 +167,12 @@ defaultTextInputConfig =
 -- | Single-line text field. Pass the current text; the result is the text
 -- after this frame's typing, pastes, and menu edits.
 {-# INLINE textInput #-}
-textInput :: Ui :> es => Text -> Eff es Text
+textInput :: Text -> NanoUI Text
 textInput value = snd <$> textInputConfigured' defaultTextInputConfig value
 
 -- | 'textInput' returning @(response, updatedText)@, including change/submit flags.
 {-# INLINE textInput' #-}
-textInput' :: Ui :> es => Text -> Eff es (Response, Text)
+textInput' :: Text -> NanoUI (Response, Text)
 textInput' = textInputConfigured' defaultTextInputConfig
 
 -- | 'textInput' with a placeholder, password masking, its own layout, or
@@ -182,11 +181,11 @@ textInput' = textInputConfigured' defaultTextInputConfig
 -- > secret' <- textInputConfigured defaultTextInputConfig {ticPassword = True} secret
 -- > weight' <- textInputConfigured defaultTextInputConfig {ticAdornments = A.trailing (A.affix "kg")} weight
 {-# INLINE textInputConfigured #-}
-textInputConfigured :: Ui :> es => TextInputConfig -> Text -> Eff es Text
+textInputConfigured :: TextInputConfig -> Text -> NanoUI Text
 textInputConfigured cfg value = snd <$> textInputConfigured' cfg value
 
 -- | 'textInputConfigured' returning @(response, updatedText)@.
-textInputConfigured' :: Ui :> es => TextInputConfig -> Text -> Eff es (Response, Text)
+textInputConfigured' :: TextInputConfig -> Text -> NanoUI (Response, Text)
 textInputConfigured' (TextInputConfig placeholder password lay adorns) value = do
   r@(resp, txt) <-
     buildTextInput
@@ -211,12 +210,12 @@ fieldAdornmentColor lay theme =
 -- replaces the stored text, so a field that mirrors another value follows it.
 -- Returns the text before and after this frame, whether it is focused, and
 -- whether a command run from outside the frame changed it.
-editTextField :: Ui :> es => WidgetId -> EditorMode -> Text -> Maybe Text -> Eff es (Text, Text, Bool, Bool)
+editTextField :: WidgetId -> EditorMode -> Text -> Maybe Text -> NanoUI (Text, Text, Bool, Bool)
 editTextField wid mode initial unfocusedText = do
   ctx <- askContext
-  uiIO $ registerFocusable ctx wid
+  liftIO $ registerFocusable ctx wid
   inp <- askInput
-  store <- uiIO (getStore ctx)
+  store <- liftIO (getStore ctx)
   let
     key = intKey wid
     modeKey = slotKey SlotTextMode key
@@ -225,7 +224,7 @@ editTextField wid mode initial unfocusedText = do
     s0 = loadTextInputState store key (fromMaybe initial stored)
     pulse = memberSlot fieldInt pulseKey store
   when (isNothing stored || lookupDyn modeKey store /= Just mode || pulse) $
-    uiIO . modifyStore ctx $
+    liftIO . modifyStore ctx $
       (if isNothing stored then insertSlot fieldText key initial else id)
         . deleteSlot fieldInt pulseKey
         . insertDyn modeKey mode
@@ -233,8 +232,8 @@ editTextField wid mode initial unfocusedText = do
   -- Password fields request 'InputSecure' so the IME neither shows nor
   -- learns their text.
   when (isFocus && modeEditable mode) $
-    uiIO (requestInputMethod ctx wid Nothing (if modeCopyable mode then InputNormal else InputSecure))
-  mEdited <- if isFocus then uiIO (editTextInput ctx mode inp store key s0) else pure Nothing
+    liftIO (requestInputMethod ctx wid Nothing (if modeCopyable mode then InputNormal else InputSecure))
+  mEdited <- if isFocus then liftIO (editTextInput ctx mode inp store key s0) else pure Nothing
   let s1 = case mEdited of
         Just ed -> editorTextState ed
         Nothing
@@ -243,7 +242,7 @@ editTextField wid mode initial unfocusedText = do
           | isFocus -> s0
           | otherwise -> maybe s0 (\t -> s0 {tisText = t}) unfocusedText
   when (s1 /= s0) $
-    uiIO $ modifyStore ctx (maybe (saveTextInputState key s1) (saveTextEditor key) mEdited)
+    liftIO $ modifyStore ctx (maybe (saveTextInputState key s1) (saveTextEditor key) mEdited)
   pure (tisText s0, tisText s1, isFocus, pulse)
 
 -- | Shared single-line field builder. The caller's @value@ is adopted as by
@@ -252,27 +251,26 @@ editTextField wid mode initial unfocusedText = do
 -- pulse is delayed until the text has been idle for that long (immediate for
 -- clear clicks).
 buildTextInput ::
-  Ui :> es =>
   Int ->
   Layout ->
   Text ->
   Text ->
   Maybe Float ->
-  Eff es (Response, Text)
+  NanoUI (Response, Text)
 buildTextInput styleIdx layout placeholder value mDebounceMs = do
   (wid, ctx) <- freshWidget
   let key = intKey wid
-  _ <- uiIO $ adoptSlot fieldText ctx wid value
+  _ <- liftIO $ adoptSlot fieldText ctx wid value
   -- Both modes are constants, so an idle field allocates no mode record.
   let mode = if hasFlag textInputFlagPassword styleIdx then singleLineMode {modeCopyable = False} else singleLineMode
   (oldText, newText, isFocus, pulse) <- editTextField wid mode value Nothing
-  uiIO $ recordSlot fieldText ctx key newText
+  liftIO $ recordSlot fieldText ctx key newText
   inp <- askInput
   let submitted = isFocus && pressedOnceIn KeyEnter inp
       edited = pulse || newText /= oldText
   changed <- case mDebounceMs of
     Nothing -> pure edited
-    Just ms -> uiIO (debounceSearchChanged ctx key isFocus edited ms)
+    Just ms -> liftIO (debounceSearchChanged ctx key isFocus edited ms)
   resp <- addWidgetStyled wid NodeTextInput placeholder 0 layout styleIdx
   pure (setSubmitted submitted (setChanged changed resp), newText)
 
@@ -342,25 +340,25 @@ defaultSearchInputConfig =
 -- frame. @respChanged@ on 'searchInput'' is debounced: it fires once typing
 -- pauses, or at once when the field is cleared.
 {-# INLINE searchInput #-}
-searchInput :: Ui :> es => Text -> Text -> Eff es Text
+searchInput :: Text -> Text -> NanoUI Text
 searchInput placeholder value = snd <$> searchInput' placeholder value
 
 -- | 'searchInput' with a response. Text updates immediately; only the change
 -- flag waits for the debounce interval.
 {-# INLINE searchInput' #-}
-searchInput' :: Ui :> es => Text -> Text -> Eff es (Response, Text)
+searchInput' :: Text -> Text -> NanoUI (Response, Text)
 searchInput' placeholder =
   searchInputConfigured' (defaultSearchInputConfig {sicPlaceholder = placeholder})
 
 -- | Search field with explicit placeholder, debounce in milliseconds, and layout.
 {-# INLINE searchInputConfigured #-}
-searchInputConfigured :: Ui :> es => SearchInputConfig -> Text -> Eff es Text
+searchInputConfigured :: SearchInputConfig -> Text -> NanoUI Text
 searchInputConfigured cfg value = snd <$> searchInputConfigured' cfg value
 
 -- | 'searchInputConfigured' returning @(response, updatedText)@. Store the
 -- returned text every frame, including before the debounced change flag fires.
 searchInputConfigured' ::
-  Ui :> es => SearchInputConfig -> Text -> Eff es (Response, Text)
+  SearchInputConfig -> Text -> NanoUI (Response, Text)
 searchInputConfigured' cfg value =
   buildTextInput
     textInputFlagSearch
@@ -375,21 +373,21 @@ searchInputConfigured' cfg value =
 
 -- | Read-only text that can be selected with the mouse and copied with Ctrl+C.
 {-# INLINE selectableText #-}
-selectableText :: Ui :> es => Text -> Eff es ()
+selectableText :: Text -> NanoUI ()
 selectableText = selectableTextWith id
 
 -- | 'selectableText' with its response, for hover or anchored UI.
 {-# INLINE selectableText' #-}
-selectableText' :: Ui :> es => Text -> Eff es Response
+selectableText' :: Text -> NanoUI Response
 selectableText' = selectableTextWith' id
 
 -- | Read-only selectable text with a layout/font modifier.
 {-# INLINE selectableTextWith #-}
-selectableTextWith :: Ui :> es => (Layout -> Layout) -> Text -> Eff es ()
+selectableTextWith :: (Layout -> Layout) -> Text -> NanoUI ()
 selectableTextWith f txt = void (selectableTextWith' f txt)
 
 -- | 'selectableTextWith' returning its response; text remains caller-owned.
-selectableTextWith' :: Ui :> es => (Layout -> Layout) -> Text -> Eff es Response
+selectableTextWith' :: (Layout -> Layout) -> Text -> NanoUI Response
 selectableTextWith' f txt = do
   layout <- f <$> askDefaultLayout
   wid <- nextId

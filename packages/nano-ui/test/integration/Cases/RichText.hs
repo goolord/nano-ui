@@ -116,7 +116,7 @@ runRichTextManyTest base failed = do
   ctx <- evaluate (withFontMetrics base fm {fmBackend = Just (FontBackend prepare (const (pure Nothing)))})
   let inp = withInput 400 400
       ui = column (forM_ [1 .. 4500 :: Int] (\i -> richText [inlineText (T.pack (show i))]))
-      frame = runFrame ctx inp (uiIO (writeIORef recording True) *> ui <* uiIO (writeIORef recording False))
+      frame = runFrame ctx inp (liftIO (writeIORef recording True) *> ui <* liftIO (writeIORef recording False))
   replicateM_ 3 frame
   writeIORef measured 0
   replicateM_ 2 frame

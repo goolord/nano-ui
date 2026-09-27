@@ -159,7 +159,7 @@ runScrollDamageTest ctx failed = do
       inp0 = withInputOff 200 120
   sid <- warmup2 ctx inp0 scrollUi
   forM_ [24, 48] $ \off -> do
-    _ <- runFrame ctx inp0 (scrollUi >> uiIO (setScrollOffset ctx sid off))
+    _ <- runFrame ctx inp0 (scrollUi >> liftIO (setScrollOffset ctx sid off))
     dScroll <- takeDamage ctx
     case dScroll of
       DamageFull -> assert failed False
@@ -273,7 +273,7 @@ runScrollTopClipTest ctx failed = do
               (cb, _) <- checkbox' "Feature" False
               _ <- slider 0 100 50
               mapM_ (\i -> void (label (T.pack ("pad line " <> show (i :: Int))))) [1 .. 16]
-              uiIO $ writeIORef cbRef (Just cb)
+              liftIO $ writeIORef cbRef (Just cb)
               pure ()
       clipFits dmg = case dmg of
         DamageFull -> True
@@ -737,7 +737,7 @@ runScrollGlideClampTest ctx failed = do
   rows <- newIORef (40 :: Int)
   let inp0 = withInput 200 120
       ui = do
-        n <- uiIO (readIORef rows)
+        n <- liftIO (readIORef rows)
         scrollArea (fillW . fixedH 80) (column (replicateM_ n (label "scroll line")))
   setScrollTuning ctx defaultScrollTuning {scrollWheelStep = 60, scrollSmoothTime = 0.2}
   (sid, ()) <- warmup2 ctx inp0 ui

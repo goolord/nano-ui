@@ -21,7 +21,7 @@ runCollectionApiTest :: Context -> IORef Int -> IO ()
 runCollectionApiTest ctx failed = do
   seen <- newIORef []
   _ <- runFrame ctx (withInputOff 300 100) $
-    hstack (SA.smallArrayFromList [uiIO (modifyIORef' seen (key :)) | key <- [7, 2, 9 :: Int]])
+    hstack (SA.smallArrayFromList [liftIO (modifyIORef' seen (key :)) | key <- [7, 2, 9 :: Int]])
   assertEq failed [9, 2, 7] =<< readIORef seen
   ((emptySelect, emptyRadio, combo), _, _, _) <- runFrame ctx (withInputOff 300 200) $
     withKey ("collection-options" :: Text) $ column $ do
@@ -45,7 +45,7 @@ runControlledStateTest ctx failed = do
     ui checked text value = column $ do
       expectedId <- currentId
       (check, checked') <- checkbox' "Controlled" checked
-      when (respChanged check) (uiIO (modifyIORef' callbacks (<> [checked'])))
+      when (respChanged check) (liftIO (modifyIORef' callbacks (<> [checked'])))
       (field, _) <- textInput' text
       (range, _) <- slider' 0 100 value
       pure (expectedId, check, field, range)

@@ -12,7 +12,6 @@ module SdlNotepad
 
 import Control.Exception (SomeException, try)
 import Control.Monad (when)
-import Control.Monad.IO.Class (liftIO)
 import Data.ByteString qualified as BS
 import Data.Foldable (for_)
 import Data.Either (isRight)

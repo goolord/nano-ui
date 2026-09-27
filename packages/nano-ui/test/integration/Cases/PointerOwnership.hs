@@ -178,7 +178,7 @@ victims = do
         ( do
             (wid, ()) <- scrollArea (fillW . fixedH 140) (mapM_ label (numbered "scroll line" [1 .. 40]))
             ctx <- askContext
-            rect <- uiIO (getPrevRect ctx wid)
+            rect <- liftIO (getPrevRect ctx wid)
             pure (mempty {rawRespId = wid, rawRespRect = fromMaybe (Rect 0 0 0 0) rect}, "")
         )
         -- On the scrollbar lane, where a press drags the thumb.

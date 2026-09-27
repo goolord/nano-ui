@@ -6,11 +6,10 @@ module NanoUI.Internal.Widgets.Cursor
 
 import Control.Monad (when)
 import Data.IORef (modifyIORef')
-import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context (Context (..))
 import NanoUI.Internal.Input (UiCursorKind)
 import NanoUI.Internal.Layout.Arena (arenaCount)
-import NanoUI.Internal.Monad (Ui, askContext, uiIO)
+import NanoUI.Internal.Monad (NanoUI, askContext, liftIO)
 
 -- | Show @shape@ while the pointer is over the widgets and containers declared
 -- inside. Gaps in the enclosing container keep their own cursor.
@@ -30,15 +29,15 @@ import NanoUI.Internal.Monad (Ui, askContext, uiIO)
 -- it changes neither ids nor layout. Windows and popups declared inside also
 -- get the shape. Only the pointer position matters: a drag that leaves the
 -- scope's widgets loses the shape.
-withCursorShape :: Ui :> es => UiCursorKind -> Eff es a -> Eff es a
+withCursorShape :: UiCursorKind -> NanoUI a -> NanoUI a
 withCursorShape !shape body = do
   ctx <- askContext
   let na = ctxNodeArena ctx
   -- The arena appends nodes in declaration order, so the scope covers exactly
   -- the nodes added while the body runs.
-  !start <- uiIO (arenaCount na)
+  !start <- liftIO (arenaCount na)
   result <- body
-  uiIO $ do
+  liftIO $ do
     !end <- arenaCount na
     when (end > start) $
       modifyIORef' (ctxCursorRegions ctx) ((start, end, shape) :)

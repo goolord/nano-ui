@@ -26,10 +26,9 @@ module NanoUI.Internal.Widgets.Caption
 import Control.Monad (when)
 import Data.List (sortOn)
 import Data.Maybe (fromMaybe)
-import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context (Context (..), scopeRawTheme)
 import NanoUI.Internal.Layout.Arena (getArenaScope)
-import NanoUI.Internal.Monad (Ui, styled, themed, withContext)
+import NanoUI.Internal.Monad (NanoUI, styled, themed, withContext)
 import NanoUI.Internal.Style
 import NanoUI.Internal.Types (Color, Rect (..), V2 (..), lerpColor, rectUnion)
 import NanoUI.Path qualified as P
@@ -89,7 +88,7 @@ captionBarHeight = 30
 -- | One caption button. It lights up under the pointer: 'GlyphClose' in red
 -- (rounded at the top right by 'capCornerRadius'), the others a step up from
 -- the window's colour.
-captionButton :: Ui :> es => CaptionConfig -> CaptionGlyph -> Eff es Response
+captionButton :: CaptionConfig -> CaptionGlyph -> NanoUI Response
 captionButton cfg glyph = do
   (resp, _) <-
     customWidget
@@ -116,11 +115,11 @@ cornerRect radius r col
 -- | The three buttons in a row: what they were asked to do, and the
 -- rectangle they span, which the window cannot be dragged by. Pass whether
 -- the window is maximized, which decides the middle button's glyph.
-captionButtons :: Ui :> es => Bool -> Eff es (Maybe CaptionAction, Rect)
+captionButtons :: Bool -> NanoUI (Maybe CaptionAction, Rect)
 captionButtons = captionButtonsConfigured defaultCaptionConfig
 
 -- | 'captionButtons' at a size of your own.
-captionButtonsConfigured :: Ui :> es => CaptionConfig -> Bool -> Eff es (Maybe CaptionAction, Rect)
+captionButtonsConfigured :: CaptionConfig -> Bool -> NanoUI (Maybe CaptionAction, Rect)
 captionButtonsConfigured cfg maximized = do
   mini <- captionButton cfg GlyphMinimize
   mid <- captionButton cfg (if maximized then GlyphRestore else GlyphMaximize)
@@ -153,7 +152,7 @@ defaultWindowFrame col = WindowFrame {frameWidth = 1, frameRadius = 8, frameColo
 -- of zero (for a maximized window) draws none but keeps the container, so
 -- the widgets inside keep their ids. The border style stays on the frame's
 -- own panel; the view inside uses the surrounding theme.
-windowFrame :: Ui :> es => WindowFrame -> Eff es a -> Eff es a
+windowFrame :: WindowFrame -> NanoUI a -> NanoUI a
 windowFrame frame body = do
   outer <- withContext $ \ctx -> scopeRawTheme ctx =<< getArenaScope (ctxNodeArena ctx)
   styled

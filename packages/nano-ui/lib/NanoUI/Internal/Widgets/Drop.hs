@@ -16,10 +16,9 @@ module NanoUI.Internal.Widgets.Drop
 import Control.Applicative ((<|>))
 import Control.Monad (when)
 import Data.Text (Text)
-import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context
 import NanoUI.Internal.Input
-import NanoUI.Internal.Monad (Ui, askDefaultLayout, askInput, freshWidget, uiIO)
+import NanoUI.Internal.Monad (NanoUI, askDefaultLayout, askInput, freshWidget, liftIO)
 import NanoUI.Internal.Store (deleteSlot, fieldPoint, flagSlot, insertSlot, lookupSlot, setFlagSlot)
 import NanoUI.Internal.Style (Layout)
 import NanoUI.Internal.Types (Rect, V2 (..), rectContains)
@@ -45,14 +44,14 @@ data DropTarget = DropTarget
 -- persists while the OS drag is still; payloads are reported on the frame
 -- they arrive. A payload lands at the last 'DropPosition', not its own
 -- coordinates, which SDL reports as (0,0) when it has none.
-useDrop :: Ui :> es => Rect -> Eff es DropTarget
+useDrop :: Rect -> NanoUI DropTarget
 useDrop bounds = do
   (wid, ctx) <- freshWidget
   inp <- askInput
   let key = intKey wid
       activeK = slotKey SlotDrop key
       posK = slotKey SlotDropPos key
-  store <- uiIO (getStore ctx)
+  store <- liftIO (getStore ctx)
   let active0 = flagSlot activeK store
       lastPos0 = uncurry V2 <$> lookupSlot fieldPoint posK store
       -- A drag is active from 'DropBegin' until 'DropComplete'. A payload
@@ -70,7 +69,7 @@ useDrop bounds = do
       texts = reverse textsRev
       hovered = active1 && posInside bounds lastPos1
   when (active1 /= active0 || lastPos1 /= lastPos0) $
-    uiIO . modifyStore ctx $
+    liftIO . modifyStore ctx $
       setFlagSlot activeK active1
         . maybe (deleteSlot fieldPoint posK) (\(V2 x y) -> insertSlot fieldPoint posK (x, y)) lastPos1
   pure
@@ -87,7 +86,7 @@ posInside bounds = maybe False (rectContains bounds)
 
 -- | A panel that is also a drop target. Returns the body's result, the
 -- panel's 'Response', and the 'DropTarget' for its rect.
-dropZone :: Ui :> es => (Layout -> Layout) -> Eff es a -> Eff es (a, Response, DropTarget)
+dropZone :: (Layout -> Layout) -> NanoUI a -> NanoUI (a, Response, DropTarget)
 dropZone f child = do
   base <- askDefaultLayout
   (a, resp) <- containerResponse NodePanel (f base) child

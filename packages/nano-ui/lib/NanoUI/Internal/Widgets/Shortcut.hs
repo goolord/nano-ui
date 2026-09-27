@@ -12,10 +12,9 @@ module NanoUI.Internal.Widgets.Shortcut
 import Control.Monad (when)
 import Data.Foldable (toList)
 import Data.Maybe (isJust)
-import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context
 import NanoUI.Internal.Input
-import NanoUI.Internal.Monad (Ui, askInput, takeEscape, withContext)
+import NanoUI.Internal.Monad (NanoUI, askInput, takeEscape, withContext)
 import NanoUI.Internal.Shortcut
 import NanoUI.Widgets.TextEditor (keyCommand, multiLineMode, singleLineMode)
 
@@ -25,22 +24,22 @@ import NanoUI.Widgets.TextEditor (keyCommand, multiLineMode, singleLineMode)
 -- Delete in a focused text field. Like iced's @keyboard::listen@, a view only
 -- hears keys no widget took; 'pressedIn' sees all of them. To bind a command
 -- to a key, use 'shortcut'.
-keyPressed :: Ui :> es => Key -> Eff es Bool
+keyPressed :: Key -> NanoUI Bool
 keyPressed = keyIn pressedIn
 
 -- | 'keyPressed' without auto-repeats, so holding the key acts once.
-keyPressedOnce :: Ui :> es => Key -> Eff es Bool
+keyPressedOnce :: Key -> NanoUI Bool
 keyPressedOnce = keyIn pressedOnceIn
 
 -- | Whether the key came up this frame. Filtered like 'keyPressed'.
-keyReleased :: Ui :> es => Key -> Eff es Bool
+keyReleased :: Key -> NanoUI Bool
 keyReleased = keyIn releasedIn
 
 -- | Whether the key is down. Filtered like 'keyPressed'.
-keyHeld :: Ui :> es => Key -> Eff es Bool
+keyHeld :: Key -> NanoUI Bool
 keyHeld = keyIn heldIn
 
-keyIn :: Ui :> es => (Key -> Input -> Bool) -> Key -> Eff es Bool
+keyIn :: (Key -> Input -> Bool) -> Key -> NanoUI Bool
 keyIn happened k = do
   inp <- askInput
   if happened k inp
@@ -79,7 +78,7 @@ keyFree ctx mods k = do
 -- > whenM (shortcut (key (KeyF 5))) refresh
 --
 -- A chord with no key never fires.
-shortcut :: Ui :> es => Shortcut -> Eff es Bool
+shortcut :: Shortcut -> NanoUI Bool
 shortcut = chordShortcut False
 
 -- | 'shortcut' without auto-repeats, so holding a toggle chord toggles once.
@@ -87,11 +86,11 @@ shortcut = chordShortcut False
 -- can still take them.
 --
 -- > whenM (shortcutOnce (key (KeyF 11))) toggleFullscreen
-shortcutOnce :: Ui :> es => Shortcut -> Eff es Bool
+shortcutOnce :: Shortcut -> NanoUI Bool
 shortcutOnce = chordShortcut True
 
 -- | 'shortcut', or 'shortcutOnce' when @once@ is set.
-chordShortcut :: Ui :> es => Bool -> Shortcut -> Eff es Bool
+chordShortcut :: Bool -> Shortcut -> NanoUI Bool
 chordShortcut _ (Shortcut Nothing _) = pure False
 chordShortcut once (Shortcut (Just pressedKey) mods) = do
   inp <- askInput

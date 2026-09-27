@@ -24,9 +24,9 @@ import Data.Primitive.PrimArray (indexPrimArray, newPrimArray, runPrimArray, wri
 import Data.Primitive.SmallArray (SmallArray, emptySmallArray, indexSmallArray, mapSmallArray', sizeofSmallArray, smallArrayFromList)
 import Diagrams.Core (QDiagram)
 import Diagrams.Prelude (Any, Diagram, V2 (..), size)
-import Effectful (Eff, type (:>))
 import NanoUI
-  ( Color
+  ( NanoUI
+  , Color
   , DrawOp (..)
   , Layout (..)
   , Rect (..)
@@ -34,7 +34,6 @@ import NanoUI
   , Sizing (..)
   , Style (..)
   , Theme (..)
-  , Ui
   , colorB
   , colorG
   , colorR
@@ -60,7 +59,7 @@ import NanoUI
 import NanoUI.Backend (FontMetrics (..), drawTextBox, prepareFontMetricsMany, uiFontMetrics)
 import NanoUI.Internal.Context (lookupDrawFitEnvelope)
 import NanoUI.Internal.Monad (askContext)
-import NanoUI.Monad (currentId, uiIO)
+import NanoUI.Monad (currentId, liftIO)
 import NanoUI.Diagrams.Backend
   ( B
   , NanoUIBackend
@@ -118,7 +117,7 @@ themePlotKey t =
     `hashWithSalt` colorToWord32 (styleBg (themeInput t))
 
 -- | Plot colours from the current view's scoped theme.
-uiPlotStyle :: Ui :> es => Eff es PlotStyle
+uiPlotStyle :: NanoUI PlotStyle
 uiPlotStyle = fmap themePlotStyle uiTheme
 
 -- | Estimate a scale from 1 to 2 that separates overlapping plain-text labels.
@@ -261,36 +260,33 @@ fitLayout fm layout d =
 -- | 'diagramWithEnvelope' whose cached draw ops are also keyed by @userKey@.
 -- Change the key when the diagram's content changes.
 diagramWithKeyAndEnvelope ::
-  Ui :> es =>
   Int ->
   Double ->
   Double ->
   (Layout -> Layout) ->
   QDiagram NanoUIBackend V2 Double Any ->
-  Eff es Response
+  NanoUI Response
 diagramWithKeyAndEnvelope userKey dw dh f =
   framedDiagram (\t -> hash (userKey, themePlotKey t)) dw dh (f defaultLayout)
 
 -- | 'diagram' with an explicit envelope width and height.
 diagramWithEnvelope ::
-  Ui :> es =>
   Double ->
   Double ->
   (Layout -> Layout) ->
   QDiagram NanoUIBackend V2 Double Any ->
-  Eff es Response
+  NanoUI Response
 diagramWithEnvelope dw dh f = framedDiagram themePlotKey dw dh (f defaultLayout)
 
 -- | Draw a diagram inside the plot frame. Its draw ops are cached under the
 -- content key the caller derives from the current theme.
 framedDiagram ::
-  Ui :> es =>
   (Theme -> Int) ->
   Double ->
   Double ->
   Layout ->
   QDiagram NanoUIBackend V2 Double Any ->
-  Eff es Response
+  NanoUI Response
 framedDiagram contentKey dw dh layout d = do
   fm <- uiFontMetrics
   theme <- uiTheme
@@ -323,13 +319,13 @@ fitLayoutIO fm layout d = do
 
 -- | Draw a diagram inside a framed box sized by the layout modifier. Text in
 -- the diagram is measured with the current font so labels fit.
-diagram :: Ui :> es => (Layout -> Layout) -> QDiagram NanoUIBackend V2 Double Any -> Eff es Response
+diagram :: (Layout -> Layout) -> QDiagram NanoUIBackend V2 Double Any -> NanoUI Response
 diagram f d = do
   ctx <- askContext
   wid <- currentId
   fm <- uiFontMetrics
   theme <- uiTheme
-  mEnv <- uiIO (lookupDrawFitEnvelope ctx wid (fmLineHeight fm) (themePlotKey theme) (f defaultLayout))
+  mEnv <- liftIO (lookupDrawFitEnvelope ctx wid (fmLineHeight fm) (themePlotKey theme) (f defaultLayout))
   case mEnv of
     Just (dw, dh) -> diagramWithEnvelope dw dh f d
     Nothing -> let V2 dw dh = size d in diagramWithEnvelope dw dh f d

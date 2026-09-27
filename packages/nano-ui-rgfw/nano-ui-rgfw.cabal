@@ -57,7 +57,6 @@ library
     build-depends:
         base >=4.20 && <4.23,
         bytestring ^>=0.12,
-        effectful-core ^>=2.6,
         file-embed ^>=0.0.16,
         nano-ui-rgfw-bindings ^>=0.1,
         nano-ui ^>=0.1,

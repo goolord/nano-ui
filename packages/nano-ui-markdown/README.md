@@ -117,13 +117,11 @@ markdownConfigured
 
 `mdBlock` draws blocks your own way: it is asked of every block, in quotes
 and lists too, and given the widget's own drawing of a block, to fall back to
-or to wrap. The configuration carries the view's effect row, as nano-ui's
-`PaneGridConfig` does, since `mdBlock` runs widgets of yours. A code block with
-syntax highlighting, where `highlight` stands for a highlighter of your own
-that returns rich-text pieces:
+or to wrap. A code block with syntax highlighting, where `highlight` stands
+for a highlighter of your own that returns rich-text pieces:
 
 ```haskell
-highlighted :: MarkdownConfig NanoUIEs
+highlighted :: MarkdownConfig
 highlighted =
   defaultMarkdownConfig
     { mdBlock = \own -> \case
@@ -138,7 +136,7 @@ An image can load as it is drawn, with `useTask` (`decodePng` stands for a
 decoder of yours, which registers the image and returns its id and size):
 
 ```haskell
-lazyImages :: MarkdownConfig NanoUIEs
+lazyImages :: MarkdownConfig
 lazyImages =
   defaultMarkdownConfig
     { mdBlock = \own -> \case

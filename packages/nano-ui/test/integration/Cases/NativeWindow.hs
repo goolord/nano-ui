@@ -189,7 +189,7 @@ runScreenshotFromClickTest ctx failed = do
   answers <- newIORef (0 :: Int)
   passes <- newIORef (0 :: Int)
   let view = do
-        uiIO (modifyIORef' passes (+ 1))
+        liftIO (modifyIORef' passes (+ 1))
         (shots, setShots) <- useInt 0
         resp <- button' "Shot"
         when (respClicked resp) (requestScreenshot (\_ -> modifyIORef' answers (+ 1)) >> setShots (shots + 1))

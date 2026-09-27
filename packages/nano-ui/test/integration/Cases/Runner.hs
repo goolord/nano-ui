@@ -273,7 +273,7 @@ runSessionLoopCloseAskTest ctx failed = do
   seen <- newIORef []
   let view = do
         closing <- winCloseRequested <$> askWindow
-        n <- uiIO (atomicModifyIORef' seen (\s -> (s <> [closing], length (filter id s))))
+        n <- liftIO (atomicModifyIORef' seen (\s -> (s <> [closing], length (filter id s))))
         when (closing && n == 1) quitUi
   clearDirty ctx
   runSessionLoop

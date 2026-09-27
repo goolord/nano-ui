@@ -22,14 +22,13 @@ import Data.Bits ((.&.))
 import Data.Maybe (fromMaybe, isJust)
 import Data.Text (Text)
 import Data.Word (Word8)
-import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context
 import NanoUI.Internal.Draw
 import NanoUI.Internal.Font
 import NanoUI.Internal.Id (WidgetId (..), mix64)
 import NanoUI.Internal.Input (Input (..), Key (..), Pressable (..), inputModifiers, modShift, shiftAtMost)
 import NanoUI.Internal.Layout.Arena
-import NanoUI.Internal.Monad (Ui, (<&&>), askContext, askInput, freshWidget, nextId, uiIO, withKey)
+import NanoUI.Internal.Monad (NanoUI, (<&&>), askContext, askInput, freshWidget, nextId, liftIO, withKey)
 import NanoUI.Internal.Store (fieldFloat, fieldInt, fieldPoint, findSlot, insertSlot, lookupSlot, slotWriteOr)
 import NanoUI.Internal.Style
 import NanoUI.Internal.Types
@@ -255,20 +254,20 @@ colorPickerFieldLayout = tight . fillW . minW 40 $ defaultLayout
 -- value); on a bar they move its handle, and Home and End jump to its ends.
 -- Shift takes steps ten times larger.
 {-# INLINE colorPicker #-}
-colorPicker :: Ui :> es => Color -> Eff es Color
+colorPicker :: Color -> NanoUI Color
 colorPicker value = snd <$> colorPickerWith False value
 
 -- | 'colorPicker' returning @(response, updatedColour)@.
-colorPicker' :: Ui :> es => Color -> Eff es (Response, Color)
+colorPicker' :: Color -> NanoUI (Response, Color)
 colorPicker' = colorPickerWith False
 
 -- | 'colorPicker' with an alpha bar and an A / @#RRGGBBAA@ field.
 {-# INLINE colorPickerRGBA #-}
-colorPickerRGBA :: Ui :> es => Color -> Eff es Color
+colorPickerRGBA :: Color -> NanoUI Color
 colorPickerRGBA value = snd <$> colorPickerWith True value
 
 -- | 'colorPickerRGBA' returning its response and colour, including alpha.
-colorPickerRGBA' :: Ui :> es => Color -> Eff es (Response, Color)
+colorPickerRGBA' :: Color -> NanoUI (Response, Color)
 colorPickerRGBA' = colorPickerWith True
 
 -- | The byte fields: label, the channel read, and the channel write.
@@ -292,7 +291,7 @@ hsvChannels =
     fraction n = fromIntegral n / 100
 
 colorPickerWith ::
-  Ui :> es => Bool -> Color -> Eff es (Response, Color)
+  Bool -> Color -> NanoUI (Response, Color)
 colorPickerWith showAlpha value = do
   -- The field's id keys the picker's state.
   (wid, ctx) <- freshWidget
@@ -302,14 +301,14 @@ colorPickerWith showAlpha value = do
   let
     key = pickerKey wid
     pct = 100 / (if showAlpha then 4 else 3)
-    readColor = (\st -> widgetStoreColor st wid value) <$> uiIO (getStore ctx)
-    writePicker col hsv = uiIO (modifyStore ctx (putColorState key col hsv))
+    readColor = (\st -> widgetStoreColor st wid value) <$> liftIO (getStore ctx)
+    writePicker col hsv = liftIO (modifyStore ctx (putColorState key col hsv))
     writeColor col = writePicker col (rgbToHsv col)
     -- Without the alpha bar the colour stays opaque.
     alphaOf c = if showAlpha then colorA c else 255
     part pid p lay = (,) pid <$> addWidgetStyled pid NodeColorPicker "" 0 lay (fromEnum p)
     column w = fixedW w colorPickerSvLayout
-  uiIO $ do
+  liftIO $ do
     adoptColorPickerValue ctx wid value
     mapM_ (registerFocusable ctx) (wid : hueWid : [alphaWid | showAlpha])
   (start, final, svResp) <- container NodeContainer (colorPickerLayout Column) $ do
@@ -334,7 +333,7 @@ colorPickerWith showAlpha value = do
         n <- channelField pct lbl 255 shown
         when (n /= shown) $
           writeColor (set (fromIntegral n) (fadeAlpha rgb (alphaOf rgb)))
-    hsvStore <- uiIO (getStore ctx)
+    hsvStore <- liftIO (getStore ctx)
     let
       hsv = widgetStoreHsv hsvStore wid value
       alpha = alphaOf (widgetStoreColor hsvStore wid value)
@@ -358,7 +357,7 @@ colorPickerWith showAlpha value = do
         writeColor (colorRGBA r g b (if showAlpha then fromMaybe (colorA hex) ma else 255))
     final <- readColor
     pure (start, final, snd sv)
-  uiIO $ recordSlot fieldInt ctx key (packColor final)
+  liftIO $ recordSlot fieldInt ctx key (packColor final)
   pure (setChanged (final /= start) svResp, final)
 
 -- | The field and the bars, each its part's id and response: pointer drags,
@@ -366,16 +365,15 @@ colorPickerWith showAlpha value = do
 -- "current" swatch when a drag ends or a key moved the colour. Returns the
 -- colour the frame started with.
 colorPickerCanvas ::
-  Ui :> es =>
   (WidgetId, Response) ->
   (WidgetId, Response) ->
   Maybe (WidgetId, Response) ->
   Color ->
-  Eff es Color
+  NanoUI Color
 colorPickerCanvas (wid, svResp) (hueWid, hueResp) alphaPart initial = do
   ctx <- askContext
   inp <- askInput
-  store0 <- uiIO (getStore ctx)
+  store0 <- liftIO (getStore ctx)
   let
     current0 = widgetStoreColor store0 wid initial
     (h0, s0, v0) = widgetStoreHsv store0 wid initial
@@ -401,23 +399,23 @@ colorPickerCanvas (wid, svResp) (hueWid, hueResp) alphaPart initial = do
       | otherwise = fadeAlpha (hsvToRgb h s v) (if isJust alphaPart then alpha else 255)
   holdActiveWhile wid dragging
   when (dragging && (dragged /= current0 || h /= h0 || s /= s0 || v /= v0)) $
-    uiIO $ modifyStore ctx (putColorState (pickerKey wid) dragged (h, s, v))
+    liftIO $ modifyStore ctx (putColorState (pickerKey wid) dragged (h, s, v))
   svFocus <- keyboardFocused wid
   hueFocus <- keyboardFocused hueWid
   alphaFocus <- maybe (pure False) (keyboardFocused . fst) alphaPart
   keyMoved <-
     pure (svFocus || hueFocus || alphaFocus)
-      <&&> uiIO (applyColorPickerKeys ctx wid initial inp svFocus hueFocus)
+      <&&> liftIO (applyColorPickerKeys ctx wid initial inp svFocus hueFocus)
   let releasedDrag = (sHeld || vHeld || hHeld || aHeld) && not dragging
   when (releasedDrag || keyMoved) $
-    uiIO $ do
+    liftIO $ do
       st <- getStore ctx
       commitColorPickerCurrent ctx wid (widgetStoreColor st wid initial)
   pure current0
 
 -- | One channel field: an inline label and a numeric box over @0..hi@ that
 -- shows @value@ while unfocused. Returns the value after this frame's edits.
-channelField :: Ui :> es => Float -> Text -> Int -> Int -> Eff es Int
+channelField :: Float -> Text -> Int -> Int -> NanoUI Int
 channelField pct label hi value =
   container NodeContainer (colorPickerFieldGroupLayout pct) $ do
     labelWid <- nextId

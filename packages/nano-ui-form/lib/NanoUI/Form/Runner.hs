@@ -19,7 +19,7 @@ import NanoUI
   , button
   , column
   , Pressable (..)
-  , uiIO
+  , liftIO
   , whenM
   )
 import NanoUI.Internal.Monad (askContext, withContext)
@@ -79,7 +79,7 @@ nanoFormSubmit :: Text -> Text -> Form Text a -> NanoUI (Maybe a)
 nanoFormSubmit prefix submitLabel form = do
   ctx <- askContext
   inp <- askInput
-  submittedBefore <- uiIO (isFormSubmitted ctx prefix)
+  submittedBefore <- liftIO (isFormSubmitted ctx prefix)
   withNanoForm prefix form $ \view' res -> do
     btnClicked <- column $ do
       renderResult submittedBefore view' res
@@ -87,7 +87,7 @@ nanoFormSubmit prefix submitLabel form = do
     let enterPressed = pressedOnceIn KeyEnter inp
         clickedSubmit = btnClicked || enterPressed
     when clickedSubmit $
-      uiIO (markFormSubmitted ctx prefix True)
+      liftIO (markFormSubmitted ctx prefix True)
     pure $ case (clickedSubmit, res) of
       (True, Ditto.Ok (Ditto.Proved _ a)) -> Just a
       _                                  -> Nothing
@@ -97,7 +97,7 @@ nanoFormSubmit prefix submitLabel form = do
 nanoFormEx :: FormConfig -> Text -> Form Text a -> NanoUI (FormStatus a)
 nanoFormEx cfg prefix form = do
   ctx <- askContext
-  submittedBefore <- uiIO (isFormSubmitted ctx prefix)
+  submittedBefore <- liftIO (isFormSubmitted ctx prefix)
   withNanoForm prefix form $ \view' res -> do
     let showErrors = case fcMode cfg of
           FormLive     -> True
@@ -105,7 +105,7 @@ nanoFormEx cfg prefix form = do
     column $ do
       renderResult showErrors view' res
       for_ (fcSubmitButton cfg) $ \lbl ->
-        whenM (button lbl) (uiIO (markFormSubmitted ctx prefix True))
+        whenM (button lbl) (liftIO (markFormSubmitted ctx prefix True))
     pure $ case res of
       Ditto.Ok (Ditto.Proved _ a) -> FormValid a
       Ditto.Error errs -> FormInvalid errs

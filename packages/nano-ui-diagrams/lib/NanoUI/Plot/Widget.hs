@@ -15,12 +15,11 @@ import Data.Maybe (fromMaybe, catMaybes)
 import Data.Text (Text)
 import Data.Vector.Unboxed qualified as U
 import Diagrams.Prelude (Diagram, V2 (..), extentX, extentY, size)
-import Effectful (Eff, type (:>))
 import GHC.Exts (isTrue#, reallyUnsafePtrEquality#)
 import NanoUI
-  ( Layout
+  ( NanoUI
+  , Layout
   , Theme
-  , Ui
   , WidgetId
   , uiMousePos
   , uiTheme
@@ -29,7 +28,7 @@ import NanoUI
 import NanoUI.Backend (FontMetrics, prepareFontMetricsMany, uiFontMetrics)
 import NanoUI.Internal.Context (Context (..), getStore, intKey, setStore)
 import NanoUI.Internal.Monad (freshWidget)
-import NanoUI.Monad (uiIO)
+import NanoUI.Monad (liftIO)
 import NanoUI.Diagrams.Backend (B)
 import NanoUI.Diagrams.Widget (diagramWithKeyAndEnvelope, themePlotStyle)
 import NanoUI.Plot.Builder qualified as Builder
@@ -95,31 +94,31 @@ sameChart !a !b = isTrue# (reallyUnsafePtrEquality# a b) || a == b
 
 -- | Draw a chart sized by the layout modifier. The response reports the
 -- nearest data point under the pointer.
-plot :: Ui :> es => (Layout -> Layout) -> Chart -> Eff es PlotResponse
+plot :: (Layout -> Layout) -> Chart -> NanoUI PlotResponse
 plot f chart = do
   (wid, ctx) <- freshWidget
   fm <- uiFontMetrics
   theme <- uiTheme
-  cc <- uiIO (cachedChartDiagram ctx wid fm theme chart)
+  cc <- liftIO (cachedChartDiagram ctx wid fm theme chart)
   resp <- diagramWithKeyAndEnvelope (ccVersion cc) (ccWidth cc) (ccHeight cc) f (ccDiagram cc)
   mouse <- uiMousePos
   let hover = hitTestChartCached (ccWidth cc) (ccHeight cc) (ccExtX cc) (ccExtY cc) (ccDomains cc) (ccPoints cc) (respRect resp) mouse
   pure PlotResponse {plotResponse = resp, plotHover = hover}
 
 -- | One line series with a grid and no legend.
-lineChart :: Ui :> es => (Layout -> Layout) -> [(Double, Double)] -> Eff es PlotResponse
+lineChart :: (Layout -> Layout) -> [(Double, Double)] -> NanoUI PlotResponse
 lineChart f pts = plot f (singleSeries True (line "series" pts))
 
 -- | One category-bar series with a grid, no legend, and no decimation.
-barChart :: Ui :> es => (Layout -> Layout) -> [(Text, Double)] -> Eff es PlotResponse
+barChart :: (Layout -> Layout) -> [(Text, Double)] -> NanoUI PlotResponse
 barChart f pts = plot f (singleSeries False (bar "series" pts))
 
 -- | One scatter series with a grid, no legend, and no decimation.
-scatterChart :: Ui :> es => (Layout -> Layout) -> [(Double, Double)] -> Eff es PlotResponse
+scatterChart :: (Layout -> Layout) -> [(Double, Double)] -> NanoUI PlotResponse
 scatterChart f pts = plot f (singleSeries False (scatter "series" pts))
 
 -- | One area series with a zero baseline, grid, no legend, and decimation.
-areaChart :: Ui :> es => (Layout -> Layout) -> [(Double, Double)] -> Eff es PlotResponse
+areaChart :: (Layout -> Layout) -> [(Double, Double)] -> NanoUI PlotResponse
 areaChart f pts = plot f (singleSeries True (area "series" pts))
 
 -- | A gridded chart of one series without a legend, optionally decimated.

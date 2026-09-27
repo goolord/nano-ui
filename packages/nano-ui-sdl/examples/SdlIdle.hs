@@ -27,7 +27,6 @@ module Main (main) where
 
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Monad (forM_, forever, void, when)
-import Control.Monad.IO.Class (liftIO)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Foreign.C.String (newCString)
 import Foreign.Marshal.Alloc (callocBytes)

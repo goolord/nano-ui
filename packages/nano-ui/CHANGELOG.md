@@ -4,6 +4,11 @@
 
 ### Added
 
+- `NanoUI.Effectful`, for programs that use `effectful`: `NanoUI`'s
+  constructor, `NanoUIEs`, the `Ui` effect, `runUi`, `runFrameEff`,
+  `runFrameReduceEff`, `embedNanoUI`, which runs a view in any row with `Ui`,
+  and `withRunInNanoUI`, which hands a view a function to run that row's
+  actions inside it, in the scope they are run in.
 - `NanoUI.Adornment`, for qualified import: icons, texts and views drawn
   before or after a text field's value (`ticAdornments`) or a button's label
   (`buttonConfigured`, `iconButton`). `icon`, `iconSized`, `affix` and `view`
@@ -494,6 +499,19 @@
 
 ### Changed
 
+- `NanoUI` is a newtype over `Eff '[Ui, IOE]` with `MonadIO`,
+  `MonadUnliftIO`, `MonadFix`, `MonadThrow`, `MonadCatch`, `MonadMask`,
+  `MonadBase IO`, `MonadBaseControl IO`, and `Semigroup` and `Monoid` for
+  results that have them. Every widget, hook and view function has a
+  `NanoUI` type instead of `Ui :> es => Eff es`, so a view never names an
+  effect row; mixing views with other effects goes through
+  `NanoUI.Effectful`. `PaneGridConfig` and `PaneGridCtx` lose their effect
+  row parameter.
+- `liftIO` replaces `uiIO`; `NanoUI`, `NanoUI.Monad` and `NanoUI.Testing`
+  re-export it.
+- `NanoUI.Testing` no longer exports `Eff`, `runEff`, `IOE`, `:>`, `Ui`,
+  `runFrameEff` or `runFrameReduceEff`, and `NanoUI.Backend` no longer
+  exports `runUi`; the effectful ones are in `NanoUI.Effectful`.
 - `widgetCursor` takes the widget's rect and the pointer as well as its draw
   context, so parts of a custom widget can show different shapes, and it is
   asked through a drag that went down on the widget wherever the pointer

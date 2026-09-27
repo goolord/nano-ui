@@ -397,7 +397,7 @@ runCoveredWidgetNoPointerTest ctx failed = do
   -- the pointer on its label, the control takes its own click, and the
   -- drawing is neither hovered nor pressed.
   removes <- newIORef (0 :: Int)
-  let remove = A.trailing (A.control (whenM (buttonWith tight "x") (uiIO (modifyIORef' removes (+ 1)))))
+  let remove = A.trailing (A.control (whenM (buttonWith tight "x") (liftIO (modifyIORef' removes (+ 1)))))
       chipOver = columnWith tight $ layersWith tight $ do
         under <- drawing (fixedWH 200 100) (const mempty)
         (under,) <$> buttonConfigured' defaultButtonConfig {bcAdornments = remove} "Chip"

@@ -75,6 +75,7 @@ library
         NanoUI.Adornment
         NanoUI.Backend
         NanoUI.Bidi
+        NanoUI.Effectful
         NanoUI.Emit
         NanoUI.Input
         NanoUI.Monad
@@ -188,13 +189,17 @@ library
         colonnade ^>=1.2,
         containers >=0.7 && <0.9,
         effectful-core ^>=2.6,
+        exceptions ^>=0.10,
         ghc-compact ^>=0.1,
         hashable ^>=1.5,
+        monad-control ^>=1.0,
         nano-svg ^>=0.2,
         primitive ^>=0.9,
         text ^>=2.1,
         text-short ^>=0.1.6,
         transformers ^>=0.6,
+        transformers-base ^>=0.4,
+        unliftio-core ^>=0.2,
         unordered-containers ^>=0.2,
         vector ^>=0.13
     hs-source-dirs:   lib

@@ -217,12 +217,12 @@ runMouseAreaTest :: Context -> IORef Int -> IO ()
 runMouseAreaTest ctx failed = do
   hoveredRef <- newIORef False
   let ui = columnWith tight $ do
-        shown <- uiIO (readIORef hoveredRef)
+        shown <- liftIO (readIORef hoveredRef)
         ((l, b), area) <- mouseArea (fixedWH 300 80) $ do
           l <- label' "Name"
           b <- if shown then Just <$> button' "Delete" else pure Nothing
           pure (l, b)
-        uiIO (writeIORef hoveredRef (respHovered area))
+        liftIO (writeIORef hoveredRef (respHovered area))
         _ <- buttonWith' (pinAt 320 0 . fixedWH 40 20) "pinned"
         pure (l, b, area)
       at p = win {inputMousePos = p}

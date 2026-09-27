@@ -299,17 +299,11 @@ inputMouseDown, inputMousePressed, inputMouseReleased :: Input -> Bool
 inputMouseDown = heldIn MouseLeft
 inputMousePressed = pressedIn MouseLeft
 inputMouseReleased = releasedIn MouseLeft
-{-# DEPRECATED inputMouseDown "Use heldIn MouseLeft" #-}
-{-# DEPRECATED inputMousePressed "Use pressedIn MouseLeft" #-}
-{-# DEPRECATED inputMouseReleased "Use releasedIn MouseLeft" #-}
 
 inputMouseRightDown, inputMouseRightPressed, inputMouseRightReleased :: Input -> Bool
 inputMouseRightDown = heldIn MouseRight
 inputMouseRightPressed = pressedIn MouseRight
 inputMouseRightReleased = releasedIn MouseRight
-{-# DEPRECATED inputMouseRightDown "Use heldIn MouseRight" #-}
-{-# DEPRECATED inputMouseRightPressed "Use pressedIn MouseRight" #-}
-{-# DEPRECATED inputMouseRightReleased "Use releasedIn MouseRight" #-}
 
 -- | No events or held buttons, with an 800x600 window and zero elapsed time.
 -- Override window size and delta time when driving headless frames.

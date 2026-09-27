@@ -83,8 +83,7 @@ import NanoUI.Testing
   , collectRasterSpans
   , damageIsEmpty
   , drawCmdCount
-  , runEff
-  , runFrameReduceEff
+  , runFrameReduce
   , takeDamage
   , takeDamagePieces
   , uiCursorKind
@@ -389,7 +388,7 @@ runRgfwAppReduceCustom opts getThemeAndScale updateModel initialModel view = inB
                 writeIORef themeRef frameTheme
                 applyRgfwTheme c frameTheme
               (_, newModel, _, drawData, dirtyAfterUi) <-
-                runFrameReduceEff runEff updateModel c curInp curModel view
+                runFrameReduce updateModel c curInp curModel view
               writeIORef modelRef newModel
               tUiEnd <- getMonotonicTime
               damage <- takeDamage c

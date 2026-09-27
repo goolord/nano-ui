@@ -55,7 +55,7 @@ frame :: Context -> SdlEnv -> Bool -> NanoUI a -> IO a
 frame ctx env full ui = do
   (ctx', inp) <- syncDisplay ctx env emptyInput {inputWindowSize = Size 200 100}
   out <- newIORef Nothing
-  void (sdlDrawFrame ctx' (ui >>= uiIO . writeIORef out . Just) env inp full)
+  void (sdlDrawFrame ctx' (ui >>= liftIO . writeIORef out . Just) env inp full)
   maybe (fail "the view did not run") pure =<< readIORef out
 
 -- | Draw a frame that requests a screenshot; fail unless exactly one arrives.

@@ -45,7 +45,6 @@ import Data.Bits (zeroBits, (.&.))
 import Data.Foldable (for_, traverse_)
 import Data.IORef (readIORef, writeIORef)
 import Data.Maybe (isNothing)
-import Effectful (Eff, type (:>))
 -- The constructor under 'SDL_HitTestResult', which the callback returns.
 import Foreign.C.Types (CUInt (..))
 import Foreign.Ptr (FunPtr, castFunPtr, castPtr, nullFunPtr, nullPtr)
@@ -203,7 +202,7 @@ edgeHit left right top bottom
 -- Nothing happens and nothing is drawn differently when the view is not
 -- running on a window, so a view under a test context is laid out the same
 -- way.
-windowCaption :: Ui :> es => [Rect] -> Eff es Bool
+windowCaption :: [Rect] -> NanoUI Bool
 windowCaption = windowCaptionWith defaultCaptionOptions
 
 -- | What the caption hands the desktop, beside the buttons themselves.
@@ -228,11 +227,11 @@ defaultCaptionOptions =
     }
 
 -- | 'windowCaption' with buttons and edges of your own.
-windowCaptionWith :: Ui :> es => CaptionOptions -> [Rect] -> Eff es Bool
+windowCaptionWith :: CaptionOptions -> [Rect] -> NanoUI Bool
 windowCaptionWith opts taken = do
   menv <- askHost
   width <- windowWidth
-  flags <- maybe (pure zeroBits) (uiIO . windowFlagsOf) menv
+  flags <- maybe (pure zeroBits) (liftIO . windowFlagsOf) menv
   let maxed = hasFlag SDL.SDL_WINDOW_MAXIMIZED flags
       fullscreen = hasFlag SDL.SDL_WINDOW_FULLSCREEN flags
       immovable = maxed || fullscreen || not (hasFlag SDL.SDL_WINDOW_RESIZABLE flags)
@@ -242,7 +241,7 @@ windowCaptionWith opts taken = do
         | maxed || fullscreen = (capButtons opts) {capCornerRadius = 0}
         | otherwise = capButtons opts
   (action, buttons) <- captionButtonsConfigured cfg maxed
-  for_ menv $ \env -> uiIO $
+  for_ menv $ \env -> liftIO $
     when (hasFlag SDL.SDL_WINDOW_BORDERLESS flags) $
       setWindowChrome
         env
@@ -263,6 +262,6 @@ windowCaptionWith opts taken = do
 -- | Hand the window's chrome regions over from within a view. 'windowCaption'
 -- does this for a view that draws the usual three buttons; this is for one
 -- that draws something else.
-setWindowChromeUi :: Ui :> es => WindowChrome -> Eff es ()
-setWindowChromeUi chrome = askHost >>= traverse_ (uiIO . (`setWindowChrome` chrome))
+setWindowChromeUi :: WindowChrome -> NanoUI ()
+setWindowChromeUi chrome = askHost >>= traverse_ (liftIO . (`setWindowChrome` chrome))
 

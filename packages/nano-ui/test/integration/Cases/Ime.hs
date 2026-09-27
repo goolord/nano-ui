@@ -293,7 +293,7 @@ runImeShortcutsTest :: Context -> IORef Int -> IO ()
 runImeShortcutsTest ctx failed = do
   fired <- newIORef ([] :: [T.Text])
   seen <- newIORef ([] :: [T.Text])
-  let note r c = uiIO (modifyIORef' r (c :))
+  let note r c = liftIO (modifyIORef' r (c :))
   (_, ui) <- field ctx "ab" 0 $ \v -> do
     r <- textInput' v
     forM_ [ctrl <> key 's', key KeyEscape, ctrl <> key KeyEnter, ctrl <> key 'd'] $ \c -> whenM (shortcut c) (note fired (shortcutLabel c))
@@ -330,7 +330,7 @@ runImeCustomWidgetTest ctx failed = do
         wid <- nextId
         preedit <- useInputMethod wid InputNormal caret
         (_, ()) <- customWidgetWithId wid defaultCustomWidgetSpec {widgetFocusable = True, widgetKeys = KeysAll, widgetLayout = fixedWH 100 40 defaultLayout}
-        whenM (shortcut (key KeyEscape)) (uiIO (modifyIORef' seen ("escape" :)))
+        whenM (shortcut (key KeyEscape)) (liftIO (modifyIORef' seen ("escape" :)))
         pure preedit
   warmup ctx inp ui
   assertEq failed Nothing =<< evalUi ctx (composing "か" 1 inp) ui

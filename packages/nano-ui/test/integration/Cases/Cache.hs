@@ -117,7 +117,7 @@ runMetricCacheInvalidationTest ctx failed = do
 -- A table header's width and style stay fixed while alignment and its parent
 -- origin change independently. This exercises the placement cache's key.
 header :: Context -> AlignX -> Float -> Float -> NanoUI ()
-header ctx ax x y = uiIO $ do
+header ctx ax x y = liftIO $ do
   let na = ctxNodeArena ctx
   parent <- addNodeFromLayout na NodeContainer (-1) $
     (fixedWH 320 160 defaultLayout) {layoutPadding = Padding x 0 y 0}
@@ -161,7 +161,7 @@ runLayoutPaintStateTest ctx failed = do
       ui value color = do
         column $ do
           box (fixedWH 30 30) color
-          uiIO $ do
+          liftIO $ do
             let na = ctxNodeArena ctx
             i <- addNodeFromLayout na NodeSlider 0 (fixedWH 200 30 defaultLayout)
             setWidgetId na i (WidgetId 123)
@@ -204,7 +204,7 @@ runDrawReuseTest ctx failed = do
         void (labelWith (fontColor fontCol) "paint only")
         imageConfigured defaultImageConfig {icLayout = fixedWH 20 20, icOpacity = opacity} (ImageId iid)
         -- A custom drawing on a container, which paint builds afresh.
-        uiIO $ do
+        liftIO $ do
           let na = ctxNodeArena ctx
           i <- addNodeFromLayout na NodeContainer 0 (fixedWH 40 40 defaultLayout)
           setWidgetId na i (WidgetId 777)
@@ -313,7 +313,7 @@ runContinuousDrawReuseTest ctx failed = do
 runPartialMeasureAncestorTest :: Context -> IORef Int -> IO ()
 runPartialMeasureAncestorTest ctx failed = do
   let inp = withInputOff 400 300
-      ui c w = uiIO $ do
+      ui c w = liftIO $ do
         let na = ctxNodeArena c
         parent <- addNodeFromLayout na NodeContainer (-1) (fixedWH w 200 defaultLayout)
         i <- addNodeFromLayout na NodeText parent defaultLayout

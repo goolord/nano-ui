@@ -289,10 +289,10 @@ warmupFocused ctx inp ui = warmup2 ctx inp ui >> void (runFrame ctx (tabInp inp)
 -- in the test's 'IORef' and store the widget's result for the next frame. Not
 -- a hook: a hook write makes the frame run the view again without input, and
 -- the frame then returns that pass's result without its click or change flags.
-held :: Ui :> es => IORef a -> (a -> Eff es (r, a)) -> Eff es (r, a)
+held :: IORef a -> (a -> NanoUI (r, a)) -> NanoUI (r, a)
 held ref widget = do
-  result <- widget =<< uiIO (readIORef ref)
-  uiIO (writeIORef ref (snd result))
+  result <- widget =<< liftIO (readIORef ref)
+  liftIO (writeIORef ref (snd result))
   pure result
 
 -- | Run a press frame and a release frame at @pos@ ('clickPair'), returning

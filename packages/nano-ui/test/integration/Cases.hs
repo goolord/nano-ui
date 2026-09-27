@@ -8,9 +8,11 @@ import Data.IntMap.Strict qualified as IM
 import Data.Map.Strict qualified as M
 import Data.Text qualified as T
 import Data.Word (Word64)
-import Effectful (liftIO)
+import Effectful (Eff, IOE, runEff)
 import Effectful.State.Static.Local (State, evalState, get, modify)
 import NanoUI.Internal.Context (Context (..))
+import NanoUI.Monad (localInput)
+import NanoUI.Effectful (Ui, embedNanoUI, runFrameEff, withRunInNanoUI)
 import NanoUI.Emit qualified as Emit
 import NanoUI.Internal.Layout.Arena
   ( NodeType (..)
@@ -233,7 +235,7 @@ runImageSwapDamageTest ctx failed = do
           column $ do
             label "frames"
             wid <- currentId
-            image (fixedWH 40 24) =<< uiIO (readIORef frameRef)
+            image (fixedWH 40 24) =<< liftIO (readIORef frameRef)
             pure wid
   wid <- warmup2 ctx inp0 ui
   _ <- takeDamage ctx
@@ -490,14 +492,20 @@ runHostSlotTest ctx failed = do
 
 runEmbedStateTest :: Context -> IORef Int -> IO ()
 runEmbedStateTest ctx failed = do
-  let ui :: Eff '[Ui, State Int, IOE] Int
+  let ui :: Eff '[Ui, State Int, IOE] (Int, Float)
       ui = do
-        _ <- column (pure ())
+        _ <- embedNanoUI (column (pure ()))
         modify (+ (1 :: Int))
-        modify (+ (1 :: Int))
-        get
-  (n, _, _, _) <- runFrameEff (runEff . evalState (0 :: Int)) ctx (withInput 80 80) ui
+        -- The row's actions run inside the body, in the body's scope.
+        w <- withRunInNanoUI $ \run -> column $ do
+          run (modify (+ (1 :: Int)))
+          inp <- askInput
+          localInput inp {inputWindowSize = Size 123 45} (run (embedNanoUI windowWidth))
+        n <- get
+        pure (n, w)
+  ((n, w), _, _, _) <- runFrameEff (runEff . evalState (0 :: Int)) ctx (withInput 80 80) ui
   assertEq failed n 2
+  assertEq failed w 123
 
 data CounterMsg = Inc | Dec
   deriving (Eq, Show)
@@ -529,7 +537,7 @@ runReduceMessagesTest ctx failed = do
   -- edit pulses. A response-only pulse cannot emit the unchanged value.
   calls <- newIORef (0 :: Int)
   let
-    control value = uiIO (modifyIORef' calls (+ 1)) >> pure (value + 1)
+    control value = liftIO (modifyIORef' calls (+ 1)) >> pure (value + 1)
     adapters = do
       Emit.emitWhen (pure False) (1 :: Int)
       Emit.emitWhen (pure True) (2 :: Int)
@@ -585,7 +593,7 @@ data MixedSeed = SeedStart | SeedRight Word64 | SeedDone
 -- | Called from every pane's 'pgViewPane', grows a fresh grid into the mixed
 -- three-pane layout over its first frames: the first pane splits vertically,
 -- then the new pane splits horizontally (one pane left, two stacked right).
-seedMixedGrid :: IOE :> es => IORef MixedSeed -> Word64 -> PaneGridCtx es -> Eff es ()
+seedMixedGrid :: IORef MixedSeed -> Word64 -> PaneGridCtx -> NanoUI ()
 seedMixedGrid ref pid pctx = do
   s <- liftIO (readIORef ref)
   case s of
@@ -603,7 +611,7 @@ seedMixedGrid ref pid pctx = do
 -- its parent split and re-flows the sibling subtrees, so the naive highlight
 -- lands at the wrong position and size.
 -- | A filling grid with 40px minimum panes and 4px dividers.
-testGridConfig :: PaneGridConfig es
+testGridConfig :: PaneGridConfig
 testGridConfig = defaultPaneGridConfig {pgLayout = fillW . fillH, pgMinSize = 40, pgSpacing = 4}
 
 runPaneGridMixedDragTest :: Context -> IORef Int -> IO ()

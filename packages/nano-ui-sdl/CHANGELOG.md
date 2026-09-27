@@ -105,6 +105,8 @@
 
 ### Changed
 
+- Widgets and view functions have `NanoUI` types instead of
+  `Ui :> es => Eff es`, and the package no longer depends on `effectful-core`.
 - Builds with GHC 9.10 through 9.14 (`base >=4.20 && <4.23`).
 - With SDL 3.4 or later, the renderer's texture address mode is set to clamp
   when the session starts. Left on auto, SDL scans every UV in the frame's

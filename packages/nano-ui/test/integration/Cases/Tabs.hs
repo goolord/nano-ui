@@ -53,9 +53,9 @@ runTabsLazinessTest ctx failed = do
   evalCountC <- newIORef (0 :: Int)
   let inp = withInput 200 100
       ui = tabs TabB $ Seq.fromList
-        [ tab TabA "A" (uiIO (modifyIORef' evalCountA (+ 1)) >> label "Body A")
-        , tab TabB "B" (uiIO (modifyIORef' evalCountB (+ 1)) >> label "Body B")
-        , tab TabC "C" (uiIO (modifyIORef' evalCountC (+ 1)) >> label "Body C")
+        [ tab TabA "A" (liftIO (modifyIORef' evalCountA (+ 1)) >> label "Body A")
+        , tab TabB "B" (liftIO (modifyIORef' evalCountB (+ 1)) >> label "Body B")
+        , tab TabC "C" (liftIO (modifyIORef' evalCountC (+ 1)) >> label "Body C")
         ]
   _ <- runFrame ctx inp ui
   assertEq failed [0, 1, 0] =<< mapM readIORef [evalCountA, evalCountB, evalCountC]

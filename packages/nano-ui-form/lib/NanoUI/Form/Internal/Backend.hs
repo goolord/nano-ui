@@ -39,9 +39,8 @@ import Ditto.Backend
 import Ditto.Core (Environment (..))
 import Ditto.Types (Value (..), encodeFormId)
 import GHC.Generics (Generic)
-import Effectful.Exception (bracket)
-import NanoUI (NanoUI, uiIO, withKey)
-import NanoUI.Internal.Monad (askContext)
+import NanoUI (NanoUI, liftIO, withKey)
+import NanoUI.Internal.Monad (askContext, withUiResource)
 import NanoUI.Internal.Context (Context, getStore, markDirty, modifyStore)
 import NanoUI.Internal.Store (fieldDyn, insertDyn, lookupDyn, lookupSlot, overField)
 
@@ -131,17 +130,17 @@ setActiveFormPrefix ctx prefix = modifyStore ctx (insertDyn activePrefixSlot pre
 withFormPrefix :: Text -> NanoUI a -> NanoUI a
 withFormPrefix prefix action = do
   ctx <- askContext
-  let restorePrefix previous = uiIO (modifyStore ctx (overField fieldDyn (IM.alter (const previous) activePrefixSlot)))
-  bracket
-    (uiIO $ lookupSlot fieldDyn activePrefixSlot <$> getStore ctx)
+  let restorePrefix previous = modifyStore ctx (overField fieldDyn (IM.alter (const previous) activePrefixSlot))
+  withUiResource
+    (lookupSlot fieldDyn activePrefixSlot <$> getStore ctx)
     restorePrefix
-    (\_ -> uiIO (setActiveFormPrefix ctx prefix) >> action)
+    (liftIO (setActiveFormPrefix ctx prefix) >> action)
 
 -- | Stable widget identity for a form, renewed when its state is reset.
 withFormWidgets :: Text -> NanoUI a -> NanoUI a
 withFormWidgets prefix action = do
   ctx <- askContext
-  stored <- uiIO (getStoredForm ctx prefix)
+  stored <- liftIO (getStoredForm ctx prefix)
   withKey (prefix, sfGeneration stored) action
 
 getStoredForm :: Context -> Text -> IO StoredForm
@@ -204,8 +203,8 @@ resetFormState ctx prefix = modifyStoredForm ctx prefix $ \stored ->
 instance Environment FormUI FormInput where
   environment fid = FormUI $ do
     ctx <- askContext
-    prefix <- uiIO (getActiveFormPrefix ctx)
-    fss <- uiIO (getFormStore ctx prefix)
+    prefix <- liftIO (getActiveFormPrefix ctx)
+    fss <- liftIO (getFormStore ctx prefix)
     let fieldKey = encodeFormId fid
     pure $ case Map.lookup fieldKey (fssInputs fss) of
       Just val -> Found val

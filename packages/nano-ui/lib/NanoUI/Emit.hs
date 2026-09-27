@@ -15,29 +15,28 @@ where
 
 import Control.Monad (when)
 import Data.Typeable (Typeable)
-import Effectful (Eff, type (:>))
-import NanoUI.Internal.Monad (Ui, emit, whenM)
+import NanoUI.Internal.Monad (NanoUI, emit, whenM)
 import NanoUI.Internal.Widgets.Node (Response, respChanged)
 
 -- | Emit a message when an action activates, for example a button or menu item.
 {-# INLINE emitWhen #-}
-emitWhen :: (Typeable msg, Ui :> es) => Eff es Bool -> msg -> Eff es ()
+emitWhen :: Typeable msg => NanoUI Bool -> msg -> NanoUI ()
 emitWhen widget msg = whenM widget (emit msg)
 
 -- | Supply the model value to a control and emit only a different returned
 -- value. The original value is passed once, including for configured widgets.
 {-# INLINE emitChanged #-}
 emitChanged ::
-  (Eq a, Typeable msg, Ui :> es) =>
-  (a -> Eff es a) -> a -> (a -> msg) -> Eff es ()
+  (Eq a, Typeable msg) =>
+  (a -> NanoUI a) -> a -> (a -> msg) -> NanoUI ()
 emitChanged widget old toMsg = widget old >>= \new -> when (new /= old) (emit (toMsg new))
 
 -- | Emit a different value only when the response also reports an edit. Use
 -- for text areas or debounced controls; caret/scroll-only changes emit nothing.
 {-# INLINE emitEdited #-}
 emitEdited ::
-  (Eq a, Typeable msg, Ui :> es) =>
-  (a -> Eff es (Response, a)) -> a -> (a -> msg) -> Eff es ()
+  (Eq a, Typeable msg) =>
+  (a -> NanoUI (Response, a)) -> a -> (a -> msg) -> NanoUI ()
 emitEdited widget old toMsg = do
   (resp, new) <- widget old
   when (respChanged resp && new /= old) (emit (toMsg new))

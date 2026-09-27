@@ -12,7 +12,6 @@ module SdlLogs
 
 import Control.Monad (foldM, forM, forM_, void, when)
 import Data.Foldable (for_)
-import Control.Monad.IO.Class (liftIO)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Text (Text)
 import Data.Text qualified as T

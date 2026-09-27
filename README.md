@@ -135,10 +135,11 @@ view n = row $ do
 
 ## How it works
 
-`NanoUI` is `Eff '[Ui, IOE]` from
-[effectful](https://hackage.haskell.org/package/effectful), and widgets have
-types like `Ui :> es => Eff es Bool`, so a view can run in a larger effect
-stack. A frame:
+A view is a `NanoUI` action, which has `MonadIO`, `MonadUnliftIO` and the
+`exceptions` classes. It is built on
+[effectful](https://hackage.haskell.org/package/effectful), which a view never
+needs to know about; `NanoUI.Effectful` exposes it for programs that want their
+views to share effects with the rest of the program. A frame:
 
 1. Routes the pointer to whatever was on top under it (a menu, a dropdown,
    the floating panel in front, or the page), resets the node and vertex

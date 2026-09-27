@@ -29,13 +29,12 @@ import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.IntMap.Strict as IM
-import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context hiding (scrollOffset)
 import NanoUI.Internal.Font (fmLineHeight)
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena (NodeType (..))
-import NanoUI.Internal.Monad (Ui, askContext, askInput, freshWidget, nextId, uiIO)
+import NanoUI.Internal.Monad (NanoUI, askContext, askInput, freshWidget, nextId, liftIO)
 import NanoUI.Internal.Store
 import NanoUI.Internal.Style (FontStyle (..), FontVariant (..), FontWeight (..), Layout (..), defaultLayout, fillW, fixedH, minW)
 import NanoUI.Internal.Types (DamageBounds (..), clamp)
@@ -129,25 +128,25 @@ textAreaLayout = fixedH 140 . minW 200 . fillW $ defaultLayout
 -- 'Text'. For long documents use 'textAreaDocument', whose edits cost only
 -- the lines they touch.
 {-# INLINE textArea #-}
-textArea :: Ui :> es => Text -> Eff es Text
+textArea :: Text -> NanoUI Text
 textArea value = snd <$> textAreaWith' id value
 
 -- | 'textArea' returning @(response, updatedText)@.
 {-# INLINE textArea' #-}
-textArea' :: Ui :> es => Text -> Eff es (Response, Text)
+textArea' :: Text -> NanoUI (Response, Text)
 textArea' = textAreaWith' id
 
 -- | 'textArea' with a modifier applied to 'textAreaLayout', for example
 -- 'grow' to fill the parent.
 {-# INLINE textAreaWith #-}
-textAreaWith :: Ui :> es => (Layout -> Layout) -> Text -> Eff es Text
+textAreaWith :: (Layout -> Layout) -> Text -> NanoUI Text
 textAreaWith f value = snd <$> textAreaWith' f value
 
 -- | 'textAreaWith' returning @(response, updatedText)@.
-textAreaWith' :: Ui :> es => (Layout -> Layout) -> Text -> Eff es (Response, Text)
+textAreaWith' :: (Layout -> Layout) -> Text -> NanoUI (Response, Text)
 textAreaWith' f value = do
   (wid, ctx) <- freshWidget
-  store <- uiIO (getStore ctx)
+  store <- liftIO (getStore ctx)
   let textKey = slotKey SlotTextAreaText (intKey wid)
       -- The text last passed or returned, and its document: passing it back
       -- neither splits it again nor, while nothing is edited, joins it.
@@ -162,7 +161,7 @@ textAreaWith' f value = do
       let out
             | sameDocument doc incoming = value
             | otherwise = documentText doc
-      uiIO $ modifyStore ctx (insertDyn textKey (out, doc))
+      liftIO $ modifyStore ctx (insertDyn textKey (out, doc))
       pure (resp, out)
 
 -- | Multi-line text editor over a 'TextDocument'. Pass the current document;
@@ -172,31 +171,31 @@ textAreaWith' f value = do
 -- their cost still depends on affected lines and tree operations. Join it
 -- with 'documentText' when the whole text is wanted.
 {-# INLINE textAreaDocument #-}
-textAreaDocument :: Ui :> es => TextDocument -> Eff es TextDocument
+textAreaDocument :: TextDocument -> NanoUI TextDocument
 textAreaDocument value = snd <$> textAreaDocumentWith' id value
 
 -- | 'textAreaDocument' returning @(response, updatedDocument)@.
 {-# INLINE textAreaDocument' #-}
-textAreaDocument' :: Ui :> es => TextDocument -> Eff es (Response, TextDocument)
+textAreaDocument' :: TextDocument -> NanoUI (Response, TextDocument)
 textAreaDocument' = textAreaDocumentWith' id
 
 -- | 'textAreaDocument' with a modifier applied to 'textAreaLayout'.
 {-# INLINE textAreaDocumentWith #-}
-textAreaDocumentWith :: Ui :> es => (Layout -> Layout) -> TextDocument -> Eff es TextDocument
+textAreaDocumentWith :: (Layout -> Layout) -> TextDocument -> NanoUI TextDocument
 textAreaDocumentWith f value = snd <$> textAreaDocumentWith' f value
 
 -- | 'textAreaDocumentWith' returning @(response, updatedDocument)@.
-textAreaDocumentWith' :: Ui :> es => (Layout -> Layout) -> TextDocument -> Eff es (Response, TextDocument)
+textAreaDocumentWith' :: (Layout -> Layout) -> TextDocument -> NanoUI (Response, TextDocument)
 textAreaDocumentWith' f value = do
   wid <- nextId
   textAreaCore f wid value
 
-textAreaCore :: Ui :> es => (Layout -> Layout) -> WidgetId -> TextDocument -> Eff es (Response, TextDocument)
+textAreaCore :: (Layout -> Layout) -> WidgetId -> TextDocument -> NanoUI (Response, TextDocument)
 textAreaCore f wid value = do
   ctx <- askContext
-  uiIO $ registerFocusable ctx wid
+  liftIO $ registerFocusable ctx wid
   inp <- askInput
-  store0 <- uiIO (getStore ctx)
+  store0 <- liftIO (getStore ctx)
   let layout = f textAreaLayout
       key = intKey wid
       seenKey = slotKey SlotSeen key
@@ -217,31 +216,31 @@ textAreaCore f wid value = do
   -- too: the wheel and drag paths write offsets through setScrollOffset2D,
   -- which only updates the text area's slot once it exists.
   when (lookupDyn seenKey store0 /= Just value) $
-    uiIO . setStore ctx $
+    liftIO . setStore ctx $
       insertDyn seenKey value
         . adoptDocument
         . overField fieldPoint (IM.insertWith (\_ old -> old) (slotKey SlotTextAreaScroll key) (0, 0))
         . insertDyn (slotKey SlotTextMode key) multiLineMode
         $ store0
-  store <- uiIO (getStore ctx)
+  store <- liftIO (getStore ctx)
   let current = maybe value bufferDocument (lookupDyn bufKey store)
       -- Set by commands run outside the frame ('applyTextFieldCommand') whose
       -- edits carry no keys or chars; folded into 'changed' so the caller
       -- gets its respChanged pulse, then cleared in the state write below.
       menuPulse = memberSlot fieldInt changedSlotKey store
   isFocus <- keyboardFocused wid
-  when isFocus $ uiIO (requestInputMethod ctx wid Nothing InputNormal)
+  when isFocus $ liftIO (requestInputMethod ctx wid Nothing InputNormal)
   (newDoc, stateChanged) <-
     if isFocus
       then do
         editFm <-
           if layoutFontSize layout <= 0
             then pure (ctxFontMetrics ctx)
-            else fst <$> uiIO (ctxResolveFont ctx (layoutFontSize layout) WeightNormal FontStyleNormal FontRegular)
+            else fst <$> liftIO (ctxResolveFont ctx (layoutFontSize layout) WeightNormal FontStyleNormal FontRegular)
         let oldState = loadTextAreaState store key
             s1 = setTextAreaViewport (viewportSize oldState) (realToFrac (fmLineHeight editFm)) oldState
             hadInput = not (T.null (inputChars inp)) || not (inputKeysNull (inputKeys inp))
-        newState <- uiIO $ do
+        newState <- liftIO $ do
           when hadInput $ modifyInteraction ctx (\s -> s {isTextInputDrag = Nothing})
           fieldTextCommands ctx multiLineMode inp >>= \case
             [] -> pure s1
@@ -264,7 +263,7 @@ textAreaCore f wid value = do
         -- damage the widget itself: a selection-only change (Ctrl+A) would
         -- otherwise repaint nothing until the next frame.
         when changed $
-          uiIO $ do
+          liftIO $ do
             damageWidget ctx wid DamageSelf
             modifyStore ctx (deleteSlot fieldInt changedSlotKey . saveTextAreaState key newState)
         pure (doc, changed)
@@ -272,14 +271,14 @@ textAreaCore f wid value = do
         -- A command run on the unfocused area ('applyTextFieldCommand') still
         -- pulses this frame's respChanged, once.
         when menuPulse $
-          uiIO $ modifyStore ctx (deleteSlot fieldInt changedSlotKey)
+          liftIO $ modifyStore ctx (deleteSlot fieldInt changedSlotKey)
         pure (current, menuPulse)
   -- Record what is returned as seen, so the caller passing it back is not
   -- taken for a replacement. A caller that passes an equal copy each frame
   -- gets the stored document back every frame; rewriting the slot then would
   -- damage it and wake the loop forever.
   unless (sameDocument newDoc value) $
-    uiIO $ modifyStore ctx $ \st ->
+    liftIO $ modifyStore ctx $ \st ->
       case lookupDyn seenKey st of
         Just seen | sameDocument seen newDoc -> st
         _ -> insertDyn seenKey newDoc st

@@ -59,7 +59,6 @@ library
         commonmark-extensions ^>=0.2.7,
         containers >=0.7 && <0.9,
         deepseq >=1.4 && <1.7,
-        effectful-core ^>=2.6,
         hashable ^>=1.5,
         nano-ui ^>=0.1,
         parsec ^>=3.1,

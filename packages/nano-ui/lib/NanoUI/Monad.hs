@@ -1,14 +1,13 @@
--- | The 'Ui' effect and the 'NanoUI' view type: widget id scopes and keys,
--- the frame's input and time, theme scopes, focus, clipboard, scrolling,
--- and damage requests from inside a view. "NanoUI" re-exports the names a
--- view usually needs; this module has the rest. Running a view against a
--- context is in "NanoUI.Backend".
+-- | The 'NanoUI' view type: widget id scopes and keys, the frame's input and
+-- time, theme scopes, focus, clipboard, scrolling, and damage requests from
+-- inside a view. "NanoUI" re-exports the names a view usually needs; this
+-- module has the rest. Running a view against a context is in
+-- "NanoUI.Backend", and mixing views with other @effectful@ effects in
+-- "NanoUI.Effectful".
 module NanoUI.Monad
-  ( -- * The effect
+  ( -- * Views
     NanoUI
-  , NanoUIEs
-  , Ui
-  , uiIO
+  , liftIO
   , withUiResource
   , emit
 

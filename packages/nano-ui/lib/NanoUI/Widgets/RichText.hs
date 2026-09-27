@@ -25,14 +25,13 @@ import Data.Primitive.SmallArray (SmallArray, indexSmallArray, smallArrayFromLis
 import Data.String (IsString (..))
 import Data.Text (Text)
 import Data.Text qualified as T
-import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context
 import NanoUI.Internal.Draw (DrawOp (..), TextFont (..))
 import NanoUI.Internal.Font (FontMetrics (..), lineWidthIO)
 import NanoUI.Internal.Frame.Node (resolveTextFont)
 import NanoUI.Internal.Input (Input (..), UiCursorKind (..))
 import NanoUI.Internal.Layout.Arena (NodeType (NodeDrawing))
-import NanoUI.Internal.Monad (Ui, askDefaultLayout, askInput, freshWidget, uiIO, uiTheme)
+import NanoUI.Internal.Monad (NanoUI, askDefaultLayout, askInput, freshWidget, liftIO, uiTheme)
 import NanoUI.Internal.Style hiding (Flow (..))
 import NanoUI.Internal.Types (Color (..), Rect (..), V2 (..))
 import NanoUI.Internal.Widgets.Node (Response, addWidget, respClicked, respHovered, respRect)
@@ -85,18 +84,18 @@ hyperlink target label = Inline label id (Just target) Nothing
 
 -- | A paragraph of pieces, wrapped at its width. Returns the target of the
 -- hyperlink clicked this frame.
-richText :: Ui :> es => [Inline] -> Eff es (Maybe Text)
+richText :: [Inline] -> NanoUI (Maybe Text)
 richText = richTextWith id
 
 -- | 'richText' with a layout modifier, whose font choices are the default
 -- for every piece. Horizontal alignment applies per line: with 'alignEnd'
 -- every line ends at the right edge.
-richTextWith :: Ui :> es => (Layout -> Layout) -> [Inline] -> Eff es (Maybe Text)
+richTextWith :: (Layout -> Layout) -> [Inline] -> NanoUI (Maybe Text)
 richTextWith f pieces = snd <$> richTextWith' f pieces
 
 -- | 'richText' returning the paragraph response and a link target clicked
 -- this frame, or 'Nothing' when no link was activated.
-richText' :: Ui :> es => [Inline] -> Eff es (Response, Maybe Text)
+richText' :: [Inline] -> NanoUI (Response, Maybe Text)
 richText' = richTextWith' id
 
 -- A piece resolved to concrete font, colour and metrics.
@@ -155,7 +154,7 @@ data ParagraphCache = ParagraphCache !Int !Int !(IM.IntMap Paragraph)
 newtype Paragraphs = Paragraphs (IORef ParagraphCache)
 
 -- | 'richTextWith' returning the paragraph response and optional clicked link target.
-richTextWith' :: Ui :> es => (Layout -> Layout) -> [Inline] -> Eff es (Response, Maybe Text)
+richTextWith' :: (Layout -> Layout) -> [Inline] -> NanoUI (Response, Maybe Text)
 richTextWith' f pieces = do
   (wid, ctx) <- freshWidget
   inp <- askInput
@@ -163,8 +162,8 @@ richTextWith' f pieces = do
   theme <- uiTheme
   let styled = [(piece, pieceFont l, pieceColor theme l target) | piece@(Inline _ style target _) <- pieces, let l = style base]
       align = layoutAlignX base
-  Paragraphs cacheRef <- uiIO $ hostOrInit ctx (Paragraphs <$> newIORef (ParagraphCache 0 paragraphBound IM.empty))
-  gen <- uiIO (readIORef (ctxMetricGen ctx))
+  Paragraphs cacheRef <- liftIO $ hostOrInit ctx (Paragraphs <$> newIORef (ParagraphCache 0 paragraphBound IM.empty))
+  gen <- liftIO (readIORef (ctxMetricGen ctx))
   let key =
         foldl'
           ( \h (Inline txt _ target bg, TextFont size variant weight fstyle deco, Color rgba) ->
@@ -174,10 +173,10 @@ richTextWith' f pieces = do
           )
           (gen `hashWithSalt` fromEnum align)
           styled
-  cached <- uiIO ((\(ParagraphCache _ _ m) -> IM.lookup (intKey wid) m) <$> readIORef cacheRef)
+  cached <- liftIO ((\(ParagraphCache _ _ m) -> IM.lookup (intKey wid) m) <$> readIORef cacheRef)
   para0 <- case cached of
     Just para | paraKey para == key -> pure para
-    _ -> uiIO $ do
+    _ -> liftIO $ do
       resolved <- mapM (measurePiece ctx) (zip [0 ..] styled)
       let runs = smallArrayFromList (map fst resolved)
           tokens = concatMap snd resolved
@@ -257,7 +256,7 @@ richTextWith' f pieces = do
               DecorationUnderlineStrike -> [under, strike]
               DecorationNone -> []
       drawKey = key `hashWithSalt` fromMaybe (-1) hoveredRun
-  uiIO $ do
+  liftIO $ do
     unless (paraWidth para0 == rw && fmap paraKey cached == Just key) $ do
       ParagraphCache n bound m <- readIORef cacheRef
       let n' = if isJust cached then n else n + 1

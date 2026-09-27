@@ -43,12 +43,11 @@ import Data.IORef (readIORef, writeIORef)
 import Data.Map.Strict qualified as M
 import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Text (Text)
-import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context
 import NanoUI.Internal.Id (IdContext (..), WidgetId (..), enterScope, hashWidgetId, mix64, scopeTag)
 import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena
-import NanoUI.Internal.Monad (Ui, (<&&>), askContext, askDefaultLayout, askFrameInput, askInput, localInput, nextId, uiIO, withContext, withIdFrame)
+import NanoUI.Internal.Monad (NanoUI, (<&&>), askContext, askDefaultLayout, askFrameInput, askInput, localInput, nextId, liftIO, withContext, withIdFrame)
 import NanoUI.Internal.WidgetText (containerFlagInert, packTextNodeStyle)
 import NanoUI.Internal.Style (Layout (..), tight)
 import NanoUI.Internal.Types (Rect (..), V2, rectContains, rectH, rectHit, rectUnion, rectW)
@@ -188,10 +187,10 @@ mkResponse :: WidgetId -> Rect -> Bool -> Bool -> Bool -> Response
 mkResponse wid rect hovered clicked changed =
   Response wid rect hovered clicked changed False noButtons noButtons
 
-container :: Ui :> es => NodeType -> Layout -> Eff es a -> Eff es a
+container :: NodeType -> Layout -> NanoUI a -> NanoUI a
 container nt layout child = do
   ctx <- askContext
-  idx <- uiIO $ do
+  idx <- liftIO $ do
     parent <- currentParent ctx
     addNodeFromLayout (ctxNodeArena ctx) nt parent layout
   withContainerNode True idx child
@@ -199,18 +198,18 @@ container nt layout child = do
 -- | A container whose widgets are for display: they see no pointer, and a
 -- press passes through them to the widget they are drawn in
 -- ('NanoUI.Internal.Frame.Hit.innermostHit').
-inertContainer :: Ui :> es => Layout -> Eff es a -> Eff es a
+inertContainer :: Layout -> NanoUI a -> NanoUI a
 inertContainer layout child = do
   ctx <- askContext
   inp <- askInput
-  idx <- uiIO $ do
+  idx <- liftIO $ do
     parent <- currentParent ctx
     idx <- addNodeFromLayout (ctxNodeArena ctx) NodeContainer parent layout
     idx <$ setStyleIdx (ctxNodeArena ctx) idx containerFlagInert
   withContainerNode True idx (localInput (withoutPointer inp) child)
 
 -- | A 'container' tagged with a fresh id, and its interaction under that id.
-containerResponse :: Ui :> es => NodeType -> Layout -> Eff es a -> Eff es (a, Response)
+containerResponse :: NodeType -> Layout -> NanoUI a -> NanoUI (a, Response)
 containerResponse nt layout child = do
   wid <- nextId
   inp <- askInput
@@ -231,7 +230,7 @@ containerResponse nt layout child = do
 -- >   when hovered (void (button "Delete"))
 -- > setHovered (respHovered item)
 -- > when (respClickedWith MouseMiddle item) (openInNewTab name)
-mouseArea :: Ui :> es => (Layout -> Layout) -> Eff es a -> Eff es (a, Response)
+mouseArea :: (Layout -> Layout) -> NanoUI a -> NanoUI (a, Response)
 mouseArea f body = do
   base <- askDefaultLayout
   containerResponse NodeContainer (f (tight base)) body
@@ -240,10 +239,10 @@ mouseArea f body = do
 -- @child@ inside it, then pop. @scoped@ also runs the children in a fresh id
 -- scope; it changes the children's widget ids (and so their store keys), so
 -- callers pick it explicitly: plain containers scope, scroll containers do not.
-withContainerNode :: Ui :> es => Bool -> NodeIdx -> Eff es a -> Eff es a
+withContainerNode :: Bool -> NodeIdx -> NanoUI a -> NanoUI a
 withContainerNode scoped idx child = do
   ctx <- askContext
-  (stack, parentIds) <- uiIO $ do
+  (stack, parentIds) <- liftIO $ do
     stack <- readIORef (ctxContainerStack ctx)
     writeIORef (ctxContainerStack ctx) (idx : stack)
     ids <- readIORef (ctxIdContext ctx)
@@ -251,7 +250,7 @@ withContainerNode scoped idx child = do
     writeIORef (ctxIdContext ctx) childIds
     pure (stack, parentIds)
   r <- child
-  uiIO $ do
+  liftIO $ do
     writeIORef (ctxContainerStack ctx) stack
     when scoped $ writeIORef (ctxIdContext ctx) parentIds
   pure r
@@ -259,10 +258,10 @@ withContainerNode scoped idx child = do
 -- | Run @child@ inside the node of widget @wid@, just added, in the id scope
 -- the widget's id opens, so its siblings' ids do not move; 'Nothing' when it
 -- has no node.
-withWidgetChildren :: Ui :> es => WidgetId -> Eff es a -> Eff es (Maybe a)
+withWidgetChildren :: WidgetId -> NanoUI a -> NanoUI (Maybe a)
 withWidgetChildren wid@(WidgetId w) child = do
   ctx <- askContext
-  mIdx <- uiIO (lookupNodeByWidgetId (ctxNodeArena ctx) wid)
+  mIdx <- liftIO (lookupNodeByWidgetId (ctxNodeArena ctx) wid)
   forM mIdx $ \idx ->
     withContainerNode False idx (withIdFrame (\ids -> (ids, IdContext (mix64 w scopeTag) 0)) child)
 
@@ -272,25 +271,25 @@ withWidgetChildren wid@(WidgetId w) child = do
 -- given parent; @enter@ runs once the node is pushed (seeding its rect,
 -- opening a modal). The body runs in a fresh id scope.
 floatingPanel ::
-  Ui :> es => WidgetId -> (Int -> IO NodeIdx) -> IO () -> Eff es a -> Eff es a
+  WidgetId -> (Int -> IO NodeIdx) -> IO () -> NanoUI a -> NanoUI a
 floatingPanel wid addPanel enter body = do
   ctx <- askContext
   let arena = ctxNodeArena ctx
-  idx <- uiIO $ do
+  idx <- liftIO $ do
     idx <- addPanel =<< rootAttachParent arena =<< currentParent ctx
     setWidgetId arena idx wid
     pure idx
   withContainerNode True idx $ do
     -- A modal has to be entered first: that is what lets its own body through.
-    uiIO enter
+    liftIO enter
     frame <- askFrameInput
-    inp <- uiIO (routedInput ctx (intKey wid) frame)
+    inp <- liftIO (routedInput ctx (intKey wid) frame)
     localInput inp body
 
 -- | The input for widget @wid@'s own dropdown, which the frame draws over
 -- every layer: the frame's while the pointer is routed to that dropdown, and
 -- the view's otherwise.
-dropdownInput :: Ui :> es => WidgetId -> Eff es Input
+dropdownInput :: WidgetId -> NanoUI Input
 dropdownInput wid =
   withContext (\ctx -> getsInteraction ctx isPointerRoute) >>= \case
     RouteDropdown owner | owner == wid -> askFrameInput
@@ -298,25 +297,23 @@ dropdownInput wid =
 
 {-# INLINE addWidget #-}
 addWidget ::
-  Ui :> es =>
   WidgetId
   -> NodeType
   -> Text
   -> Float
   -> Layout
-  -> Eff es Response
+  -> NanoUI Response
 addWidget wid nt txt value layout = addWidgetStyled wid nt txt value layout 0
 
 {-# INLINE addWidgetStyled #-}
 addWidgetStyled ::
-  Ui :> es =>
   WidgetId
   -> NodeType
   -> Text
   -> Float
   -> Layout
   -> Int
-  -> Eff es Response
+  -> NanoUI Response
 addWidgetStyled wid nt txt value layout styleIdx =
   addWidgetNode wid nt txt value layout $ \arena idx ->
     setStyleIdx arena idx (if nt == NodeText then packTextNodeStyle layout styleIdx else styleIdx)
@@ -325,18 +322,17 @@ addWidgetStyled wid nt txt value layout styleIdx =
 -- and interaction path are shared by styled leaves and option controls.
 {-# INLINE addWidgetNode #-}
 addWidgetNode ::
-  Ui :> es =>
   WidgetId
   -> NodeType
   -> Text
   -> Float
   -> Layout
   -> (NodeArena -> NodeIdx -> IO ())
-  -> Eff es Response
+  -> NanoUI Response
 addWidgetNode wid nt txt value layout initialize = do
   ctx <- askContext
   inp <- askInput
-  uiIO $ do
+  liftIO $ do
     parent <- currentParent ctx
     idx <- addNodeFromLayout (ctxNodeArena ctx) nt parent layout
     setNodeText (ctxNodeArena ctx) idx txt
@@ -346,14 +342,13 @@ addWidgetNode wid nt txt value layout initialize = do
     resolveInteraction ctx inp idx wid
 
 addWidgetWithOptions ::
-  Ui :> es =>
   WidgetId
   -> NodeType
   -> Text
   -> [Text]
   -> Float
   -> Layout
-  -> Eff es Response
+  -> NanoUI Response
 addWidgetWithOptions wid nt txt opts value layout =
   addWidgetNode wid nt txt value layout $ \arena idx -> do
     setOptions arena idx opts
@@ -437,9 +432,9 @@ moveSelection ctx old new members =
 -- | Stamp the current container with a widget id (a radio or tree group key),
 -- so store keys and damage requests under that id resolve to the container.
 -- Containers are never hot, so the id does not make it hoverable.
-tagContainer :: Ui :> es => WidgetId -> Eff es ()
+tagContainer :: WidgetId -> NanoUI ()
 tagContainer wid = do
   ctx <- askContext
-  uiIO $ do
+  liftIO $ do
     parent <- currentParent ctx
     when (parent >= 0) $ setWidgetId (ctxNodeArena ctx) parent wid

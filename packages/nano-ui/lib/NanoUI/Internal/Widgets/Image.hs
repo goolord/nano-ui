@@ -20,13 +20,12 @@ import Data.ByteString (ByteString)
 import Data.Maybe (fromMaybe, isJust)
 import Data.Text qualified as T
 import Data.Typeable (Typeable)
-import Effectful (Eff, type (:>))
 import NanoUI.Internal.Atlas qualified as Atlas
 import NanoUI.Internal.Context (Context (..), lookupImageSize, registerImage, releaseImage)
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Image
 import NanoUI.Internal.Layout.Arena (ImageNode (..), NodeType (NodeImage), setImageId, setImageNode)
-import NanoUI.Internal.Monad (Ui, freshWidget, uiIO)
+import NanoUI.Internal.Monad (NanoUI, freshWidget, liftIO)
 import NanoUI.Internal.Style (Layout (..), Sizing (..), aspect, defaultLayout)
 import NanoUI.Internal.Tasks (useHeld)
 import NanoUI.Internal.Types (ImageId (..), colorRGBA)
@@ -39,7 +38,7 @@ import NanoUI.Internal.Widgets.Node (Response, addWidgetNode)
 -- image is stretched, as with 'NanoUI.image'. Like a label, it passes the
 -- pointer to a control it is drawn over; its response still reports hover
 -- and clicks.
-imageNode :: Ui :> es => WidgetId -> Maybe ImageNode -> Layout -> ImageId -> Eff es Response
+imageNode :: WidgetId -> Maybe ImageNode -> Layout -> ImageId -> NanoUI Response
 imageNode wid node lay (ImageId tid) =
   addWidgetNode wid NodeImage T.empty 0 lay $ \arena idx -> do
     setImageId arena idx (max 0 tid)
@@ -50,16 +49,16 @@ imageNode wid node lay (ImageId tid) =
 --
 -- > imageConfigured defaultImageConfig {icLayout = fixedWH 160 90, icFit = FitCover} photo
 -- > imageConfigured defaultImageConfig {icLayout = fillW} photo   -- column width, photo's aspect ratio
-imageConfigured :: Ui :> es => ImageConfig -> ImageId -> Eff es ()
+imageConfigured :: ImageConfig -> ImageId -> NanoUI ()
 imageConfigured cfg iid = void (imageConfigured' cfg iid)
 
 -- | 'imageConfigured' returning its 'Response'. An unregistered image
 -- behaves like 'NanoUI.image': 32 pixels on an unsized axis, painted in the
 -- theme accent.
-imageConfigured' :: Ui :> es => ImageConfig -> ImageId -> Eff es Response
+imageConfigured' :: ImageConfig -> ImageId -> NanoUI Response
 imageConfigured' cfg iid = do
   (wid, ctx) <- freshWidget
-  natural <- uiIO (lookupImageSize ctx iid)
+  natural <- liftIO (lookupImageSize ctx iid)
   let !lay0 = icLayout cfg defaultLayout
       !look = imageLook cfg (fromMaybe (colorRGBA 255 255 255 255) (layoutFontColor lay0))
       fixed = \case Fixed _ -> True; _ -> False
@@ -90,7 +89,7 @@ imageConfigured' cfg iid = do
 -- pixels are invalid or the atlas is full, until the key changes. Like any
 -- hook it takes the next widget id: call it on every frame that shows the
 -- image, or inside 'NanoUI.scope' if only some frames call it.
-useImageRgba :: (Eq k, Typeable k, Ui :> es) => k -> Int -> Int -> ByteString -> Eff es (Maybe ImageId)
+useImageRgba :: (Eq k, Typeable k) => k -> Int -> Int -> ByteString -> NanoUI (Maybe ImageId)
 useImageRgba k w h pixels = useHeld k $ \ctx _ -> do
   iid <- Atlas.freshImageId (ctxImageAtlas ctx)
   ok <- registerImage ctx iid w h pixels

@@ -70,7 +70,7 @@ runControlsTabHeightTest ctx failed = do
       _ <- boundedRadio (T.pack . show) Dark
       (ti, _) <- textInput' ""
       separator
-      uiIO $ writeIORef dumpRef (Just (cb, cp, ti))
+      liftIO $ writeIORef dumpRef (Just (cb, cp, ti))
     demoPage dumpRef =
       scrollWith (tight . grow) $
         columnWith (padAll 8 . gap 8 . fillW) $

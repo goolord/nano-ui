@@ -14,7 +14,7 @@ import NanoUI
   , Rect (..)
   , columnWith
   , fillW
-  , uiIO
+  , liftIO
   )
 import NanoUI.Backend (runNanoUI)
 import NanoUI.Internal.Context (ctxFocusId, ctxNodeArena)
@@ -136,8 +136,8 @@ testPrefixRestoration = do
   result <-
     try
       ( runNanoUI ctx input $ withFormPrefix "outer" $ withFormPrefix "inner" $ do
-          uiIO (updateFieldInput ctx "inner" "value" (FormInputText "preserved"))
-          uiIO (ioError (userError "form failed"))
+          liftIO (updateFieldInput ctx "inner" "value" (FormInputText "preserved"))
+          liftIO (ioError (userError "form failed"))
       ) ::
       IO (Either IOException ())
   check "expected a form exception" (either (const True) (const False) result)

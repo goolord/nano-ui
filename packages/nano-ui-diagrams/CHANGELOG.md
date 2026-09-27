@@ -4,6 +4,8 @@
 
 ### Changed
 
+- Widgets and view functions have `NanoUI` types instead of
+  `Ui :> es => Eff es`, and the package no longer depends on `effectful-core`.
 - Builds with GHC 9.10 through 9.14 (`base >=4.20 && <4.23`).
 - Plots and diagrams are anti-aliased. A filled path is one `FillPolygon`
   and a stroked one one `StrokePolyline`, instead of hard-edged

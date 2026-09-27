@@ -133,7 +133,7 @@ runExplainMovedNodeDamageTest ctx failed = do
   writeIORef (ctxPaintFull ctx) False
   setExplainLayout ctx True
   widthRef <- newIORef 40
-  let ui = columnWith (padAll 10) (uiIO (readIORef widthRef) >>= \w -> columnWith (fixedWH w 30) (pure ()))
+  let ui = columnWith (padAll 10) (liftIO (readIORef widthRef) >>= \w -> columnWith (fixedWH w 30) (pure ()))
       sized w = filter (\(Rect _ _ w' h) -> w' == w && h == 30) <$> arenaRects ctx
   warmup2 ctx inp ui
   damageOf ctx inp ui >>= assert failed . damageIsEmpty

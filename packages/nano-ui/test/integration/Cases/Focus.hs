@@ -36,7 +36,7 @@ inp = withInputOff 400 400
 asking :: Context -> (NanoUI () -> NanoUI a) -> IO (NanoUI a, [WidgetId] -> Input -> IO (Bool, WidgetId))
 asking ctx mk = do
   q <- newIORef []
-  let ui = mk (mapM_ requestFocus =<< uiIO (atomicModifyIORef' q ([],)))
+  let ui = mk (mapM_ requestFocus =<< liftIO (atomicModifyIORef' q ([],)))
   pure (ui, \ids i -> writeIORef q ids >> runFrame ctx i ui >>= \(_, _, _, dirty) -> (dirty,) <$> getFocusId ctx)
 
 -- | A field focused from code shows the ring and accepts typing from the
@@ -132,7 +132,7 @@ runFocusRequestBehindModalTest ctx failed = do
   let ui = column $ do
         (page, _) <- textInput' "page"
         requestFocus (respId page)
-        shown <- uiIO (readIORef open)
+        shown <- liftIO (readIORef open)
         when shown $ void (modal True "Dialog" (textInput' "inside"))
         pure (respId page)
   _ <- warmup2 ctx inp ui
@@ -246,7 +246,7 @@ runFocusNextPreviousTest :: Context -> IORef Int -> IO ()
 runFocusNextPreviousTest ctx failed = do
   move <- newIORef (pure ())
   let ui = column $ do
-        join (uiIO (readIORef move))
+        join (liftIO (readIORef move))
         ids <- mapM (fmap respId . button') ["A", "B", "C"]
         (,) ids <$> mapM isFocused ids
       step m = writeIORef move m >> runFrame ctx inp ui >> writeIORef move (pure ()) >> snd <$> evalUi ctx inp ui
@@ -267,7 +267,7 @@ runFocusClearReleaseTest ctx failed = do
   act <- newIORef (const (pure ()))
   let ui = column $ do
         (r, _) <- textInput' ("hello" :: T.Text)
-        f <- uiIO (readIORef act)
+        f <- liftIO (readIORef act)
         f (respId r)
         after <- focusedWidget
         pure (respId r, after)
@@ -295,9 +295,9 @@ runFocusTextCommandTest ctx failed = do
   offRef <- newIORef False
   run <- newIORef False
   let ui = column $ do
-        off <- uiIO (readIORef offRef)
+        off <- liftIO (readIORef offRef)
         (r, _) <- disabledWhen off (textInput' ("hello" :: T.Text))
-        whenM (uiIO (readIORef run)) (runTextCommand (respId r) SelectAll)
+        whenM (liftIO (readIORef run)) (runTextCommand (respId r) SelectAll)
         (,) (respId r) <$> focusedWidget
   (field, _) <- warmup2 ctx inp ui
   writeIORef run True

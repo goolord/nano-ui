@@ -1,16 +1,19 @@
+{-# LANGUAGE DerivingVia #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 -- | Implementation of "NanoUI.Monad", plus running a view against a context,
 -- reading and swapping the context, id-frame plumbing, and the frame's
 -- message queue.
 module NanoUI.Internal.Monad
-  ( NanoUI
+  ( NanoUI (..)
   , NanoUIEs
   , Ui
   , runNanoUI
   , runUi
   , embedNanoUI
-  , uiIO
+  , withRunInNanoUI
+  , liftIO
   , withContext
   , withUiResource
   , emit
@@ -85,9 +88,16 @@ where
 
 import Control.Exception (bracket)
 import Control.Monad (unless, when, (<$!>))
+import Control.Monad.Base (MonadBase)
+import Control.Monad.Catch (MonadCatch, MonadMask, MonadThrow)
+import Control.Monad.Fix (MonadFix)
+import Control.Monad.IO.Class (MonadIO (liftIO))
+import Control.Monad.IO.Unlift (MonadUnliftIO)
+import Control.Monad.Trans.Control (MonadBaseControl)
 import Data.Bits ((.&.))
 import Data.Hashable (Hashable, hash)
 import Data.IORef (modifyIORef', readIORef, writeIORef)
+import Data.Monoid (Ap (..))
 import Data.Text (Text)
 import Data.Typeable (Typeable)
 import Data.Word (Word64)
@@ -121,12 +131,31 @@ import NanoUI.Internal.Style (Appearance, FontStyle, FontVariant, FontWeight, La
 import NanoUI.Internal.Input (Input (..), Key (KeyEscape), MouseButton, Pressable (..), inputMousePos, inputWindowSize, noButtons, stripInteractionInput)
 import NanoUI.Internal.Types (DamageBounds, Rect, Size (..), V2)
 
--- | A view with UI operations and IO. Backend runners execute it as frames
--- are needed; local-state changes can trigger a second pass within a frame.
-type NanoUI = Eff NanoUIEs
+-- | A view: widgets, layout, local state and IO. Backend runners execute it
+-- as frames are needed; local-state changes can trigger a second pass within
+-- a frame. Run IO in it with 'liftIO'; the action runs on every frame that
+-- reaches it, so guard one-shot effects with a button or another event.
+--
+-- It is an @effectful@ computation in the row 'NanoUIEs'. A view never needs
+-- to know that; "NanoUI.Effectful" has the constructor and the functions for
+-- mixing views with other effects.
+newtype NanoUI a = NanoUI {unNanoUI :: Eff NanoUIEs a}
+  deriving newtype
+    ( Functor
+    , Applicative
+    , Monad
+    , MonadFix
+    , MonadIO
+    , MonadUnliftIO
+    , MonadThrow
+    , MonadCatch
+    , MonadMask
+    , MonadBase IO
+    , MonadBaseControl IO
+    )
+  deriving (Semigroup, Monoid) via Ap NanoUI a
 
--- | The effect row a 'NanoUI' view runs in. Name it where a widget's
--- configuration carries its caller's row, as @PaneGridConfig NanoUIEs@ does.
+-- | The effect row a 'NanoUI' view runs in.
 type NanoUIEs = '[Ui, IOE]
 
 -- | Access to the current context, routed input, layout defaults, and widget ids.
@@ -154,55 +183,66 @@ runUi ctx inp ui = do
   page <- unsafeEff_ (routedInput ctx 0 inp)
   evalStaticRep (UiRep ctx page inp defaultLayout) ui
 
--- | Run 'runUi' in IO for the standard 'NanoUI' effect stack.
+-- | Run a view against a context and input, without laying it out or
+-- painting it.
 {-# INLINE runNanoUI #-}
 runNanoUI :: Context -> Input -> NanoUI a -> IO a
-runNanoUI ctx inp = runEff . runUi ctx inp
+runNanoUI ctx inp = runEff . runUi ctx inp . unNanoUI
 
 -- | Run a 'NanoUI' view as part of a view in any effect row with 'Ui', where
 -- it declares its widgets as if written there: same context, input, layout
 -- defaults and widget ids.
 embedNanoUI :: Ui :> es => NanoUI a -> Eff es a
-embedNanoUI view = do
-  rep <- getStaticRep
-  unsafeEff_ (runEff (evalStaticRep rep view))
+embedNanoUI view = withRunInNanoUI (\_ -> view)
 
--- | Perform IO while building a view. The action runs on every frame that
--- reaches it; guard one-shot effects with a button or another event.
-{-# INLINE uiIO #-}
-uiIO :: Ui :> es => IO a -> Eff es a
-uiIO m = do
-  UiRep {} <- getStaticRep
-  unsafeEff_ m
+-- | Run a 'NanoUI' view from any effect row with 'Ui', with a function that
+-- runs that row's actions inside it: how a view written in a larger row
+-- passes a body using its other effects to a container widget.
+--
+-- > counter :: (Ui :> es, State Int :> es) => Eff es ()
+-- > counter = withRunInNanoUI $ \run -> row $ do
+-- >   n <- run get
+-- >   whenM (button "+") (run (put (n + 1)))
+--
+-- An action run this way sees the scope it is run in (layout defaults,
+-- routed input, 'disabledWhen'), not the one 'withRunInNanoUI' was called
+-- in. Call the function only on the thread running the view.
+withRunInNanoUI :: forall es a. Ui :> es => ((forall r. Eff es r -> NanoUI r) -> NanoUI a) -> Eff es a
+withRunInNanoUI k = unsafeEff $ \es -> do
+  rep <- unEff (getStaticRep @Ui) es
+  let run :: Eff es r -> NanoUI r
+      run m = NanoUI $ do
+        inner <- getStaticRep @Ui
+        unsafeEff_ (unEff (localStaticRep (const inner) m) es)
+  runEff (evalStaticRep rep (unNanoUI (k run)))
 
 -- | Run an action on the view's 'Context'.
 {-# INLINE withContext #-}
-withContext :: Ui :> es => (Context -> IO a) -> Eff es a
-withContext f = getStaticRep >>= \r -> unsafeEff_ (f $! repContext r)
+withContext :: (Context -> IO a) -> NanoUI a
+withContext f = NanoUI (getStaticRep >>= \r -> unsafeEff_ (f $! repContext r))
 
 -- | Acquire UI-thread state, run an action, and restore it even on exceptions.
 -- Acquisition and release are masked, as in 'bracket'; the view inherits the
 -- caller's masking state.
 {-# INLINE withUiResource #-}
-withUiResource :: Ui :> es => IO a -> (a -> IO ()) -> Eff es b -> Eff es b
-withUiResource acquire release action = do
-  UiRep {} <- getStaticRep
-  unsafeEff $ \es -> bracket acquire release (\_ -> unEff action es)
+withUiResource :: IO a -> (a -> IO ()) -> NanoUI b -> NanoUI b
+withUiResource acquire release (NanoUI action) =
+  NanoUI (unsafeEff $ \es -> bracket acquire release (\_ -> unEff action es))
 
 -- | Queue a typed message for the frame's reducer, in emission order.
 {-# INLINE emit #-}
-emit :: (Typeable msg, Ui :> es) => msg -> Eff es ()
+emit :: Typeable msg => msg -> NanoUI ()
 emit msg = withContext (\ctx -> pushMessage ctx (FrameMsg msg))
 
 -- | The id 'nextId' would issue, without consuming it.
 {-# INLINE currentId #-}
-currentId :: Ui :> es => Eff es WidgetId
+currentId :: NanoUI WidgetId
 currentId = withContext (fmap idContextWidgetId . readIORef . ctxIdContext)
 
 -- | Consume the next sibling id. Widgets and state hooks share this sequence,
 -- so conditional calls need their own 'scope'.
 {-# INLINE nextId #-}
-nextId :: Ui :> es => Eff es WidgetId
+nextId :: NanoUI WidgetId
 nextId = withContext $ \ctx -> do
   ic <- readIORef (ctxIdContext ctx)
   writeIORef (ctxIdContext ctx) $! ic {siblingId = siblingId ic + 1}
@@ -210,7 +250,7 @@ nextId = withContext $ \ctx -> do
 
 -- | The next sibling id ('nextId') and the view's 'Context', which a widget's body starts from.
 {-# INLINE freshWidget #-}
-freshWidget :: Ui :> es => Eff es (WidgetId, Context)
+freshWidget :: NanoUI (WidgetId, Context)
 freshWidget = do
   wid <- nextId
   ctx <- askContext
@@ -218,7 +258,7 @@ freshWidget = do
 
 -- | Reserve @n@ sibling ids without returning them. Non-positive counts do nothing.
 {-# INLINE burstNextIds #-}
-burstNextIds :: Ui :> es => Int -> Eff es ()
+burstNextIds :: Int -> NanoUI ()
 burstNextIds n
   | n <= 0 = pure ()
   | otherwise = withContext $ \ctx ->
@@ -230,7 +270,7 @@ burstNextIds n
 -- parent context, including when the action throws an exception.
 {-# INLINE withIdFrame #-}
 withIdFrame ::
-  Ui :> es => (IdContext -> (IdContext, IdContext)) -> Eff es a -> Eff es a
+  (IdContext -> (IdContext, IdContext)) -> NanoUI a -> NanoUI a
 withIdFrame enter m = do
   ctx <- askContext
   withUiResource
@@ -247,47 +287,47 @@ withIdFrame enter m = do
 -- | Give the action a child id sequence while consuming one parent id.
 -- Put conditional content inside this scope to keep later siblings stable.
 {-# INLINE scope #-}
-scope :: Ui :> es => Eff es a -> Eff es a
+scope :: NanoUI a -> NanoUI a
 scope = withIdFrame (enterScope scopeTag)
 
 -- | Run the action under a key so its widgets keep their ids and state when
 -- earlier siblings change. Keys must be unique among siblings in the same
 -- scope; use a stable item key for a list that can be reordered.
 {-# INLINE withKey #-}
-withKey :: (Hashable k, Ui :> es) => k -> Eff es a -> Eff es a
+withKey :: Hashable k => k -> NanoUI a -> NanoUI a
 withKey k = keyedTag (fromIntegral (hash k))
 
 -- | A keyed child scope using a precomputed 64-bit tag. Tags must be unique
 -- among siblings; use 'withKey' to hash an application key.
 {-# INLINE keyedTag #-}
-keyedTag :: Ui :> es => Word64 -> Eff es a -> Eff es a
+keyedTag :: Word64 -> NanoUI a -> NanoUI a
 keyedTag tag = withIdFrame (enterKeyed tag)
 
 -- | The mutable context for this view. It belongs to the current UI session.
 {-# INLINE askContext #-}
-askContext :: Ui :> es => Eff es Context
-askContext = repContext <$!> getStaticRep
+askContext :: NanoUI Context
+askContext = NanoUI (repContext <$!> getStaticRep)
 
 -- | Layout defaults in the current 'withDefaultLayout' scope.
 {-# INLINE askDefaultLayout #-}
-askDefaultLayout :: Ui :> es => Eff es Layout
-askDefaultLayout = repLayout <$!> getStaticRep
+askDefaultLayout :: NanoUI Layout
+askDefaultLayout = NanoUI (repLayout <$!> getStaticRep)
 
 -- | Modify layout defaults for the enclosed action, restoring them on exit.
 {-# INLINE withDefaultLayout #-}
-withDefaultLayout :: Ui :> es => (Layout -> Layout) -> Eff es a -> Eff es a
-withDefaultLayout f = localStaticRep (\r -> r {repLayout = f (repLayout r)})
+withDefaultLayout :: (Layout -> Layout) -> NanoUI a -> NanoUI a
+withDefaultLayout f (NanoUI m) = NanoUI (localStaticRep (\r -> r {repLayout = f (repLayout r)}) m)
 
 -- | The context's base font metrics, before per-widget font overrides.
 {-# INLINE uiFontMetrics #-}
-uiFontMetrics :: Ui :> es => Eff es FontMetrics
+uiFontMetrics :: NanoUI FontMetrics
 uiFontMetrics = fmap ctxFontMetrics askContext
 
 -- | The backend's default font size, used when a layout sets none. To scale
 -- text relative to it, pass a multiple to 'NanoUI.Internal.Style.fontSize';
 -- 'NanoUI.Internal.Style.fontSizeScale' alone scales from 16.
 {-# INLINE uiFontSize #-}
-uiFontSize :: Ui :> es => Eff es Float
+uiFontSize :: NanoUI Float
 uiFontSize = fmap ctxFontSize askContext
 
 -- | Metrics for text at a size, weight, style and variant, resolved through
@@ -297,27 +337,27 @@ uiFontSize = fmap ctxFontSize askContext
 -- It resolves the font as a 'DrawTextStyled' op naming the same size,
 -- weight, style and variant is painted, so text measured with these metrics
 -- is drawn at the width it was measured at.
-resolveFontUi :: Ui :> es => Float -> FontWeight -> FontStyle -> FontVariant -> Eff es FontMetrics
+resolveFontUi :: Float -> FontWeight -> FontStyle -> FontVariant -> NanoUI FontMetrics
 resolveFontUi size weight style variant =
   withContext (\ctx -> fst <$> resolveTextFont ctx (TextFont size variant weight style DecorationNone))
 
 -- | The advance of one line of text in these metrics, in logical pixels. Unlike
 -- the pure 'NanoUI.Internal.Font.lineWidth' it first loads the glyphs the text needs,
 -- so it is right for metrics that have not drawn this text yet.
-lineWidthUi :: Ui :> es => FontMetrics -> Text -> Eff es Float
-lineWidthUi fm txt = uiIO (lineWidthIO fm txt)
+lineWidthUi :: FontMetrics -> Text -> NanoUI Float
+lineWidthUi fm txt = liftIO (lineWidthIO fm txt)
 
 {-# INLINE uiTime #-}
 -- | Monotonic seconds from an unspecified epoch. Subtract two readings to
 -- measure elapsed time; this is not a wall-clock timestamp. Keep absolute
 -- readings as 'Double' to retain precision during long sessions.
-uiTime :: Ui :> es => Eff es Double
-uiTime = uiIO getMonotonicTime
+uiTime :: NanoUI Double
+uiTime = liftIO getMonotonicTime
 
 -- | The theme the view is drawn with where this is called: the context theme
 -- as modified by the enclosing 'styled' and 'disabledWhen' scopes.
 {-# INLINE uiTheme #-}
-uiTheme :: Ui :> es => Eff es Theme
+uiTheme :: NanoUI Theme
 uiTheme = withContext currentTheme
 
 -- | Draw a part of the view with a modified theme. Widgets declared inside
@@ -331,13 +371,13 @@ uiTheme = withContext currentTheme
 -- The modifier runs once per scope per frame. The theme only affects how
 -- widgets look, never their layout.
 {-# INLINE styled #-}
-styled :: Ui :> es => (Theme -> Theme) -> Eff es a -> Eff es a
+styled :: (Theme -> Theme) -> NanoUI a -> NanoUI a
 styled f = withPaintScope $ \ctx outer ->
   pushThemeScope ctx (outer .&. 1 /= 0) . f =<< scopeRawTheme ctx outer
 
 -- | Draw a part of the view with another theme, whatever the theme around it.
 {-# INLINE themed #-}
-themed :: Ui :> es => Theme -> Eff es a -> Eff es a
+themed :: Theme -> NanoUI a -> NanoUI a
 themed theme = styled (const theme)
 
 -- | Disable every widget declared inside when the condition holds. Disabled
@@ -346,14 +386,14 @@ themed theme = styled (const theme)
 --
 -- > disabledWhen (T.null name) $ whenM (button "Save") save
 {-# INLINE disabledWhen #-}
-disabledWhen :: Ui :> es => Bool -> Eff es a -> Eff es a
+disabledWhen :: Bool -> NanoUI a -> NanoUI a
 disabledWhen False m = m
 disabledWhen True m =
   -- The view inside sees no presses, keys or wheel, so no widget's own input
   -- handling can fire; the frame's focus and click passes check the scope.
-  localStaticRep
+  NanoUI . localStaticRep
     (\r -> r {repInput = inert (repInput r), repFrame = inert (repFrame r)})
-    (withPaintScope enter m)
+    $ unNanoUI (withPaintScope enter m)
   where
     inert i =
       (stripInteractionInput i) {inputButtonsHeld = noButtons, inputKeysHeld = mempty}
@@ -364,7 +404,7 @@ disabledWhen True m =
 -- Run @m@ with the arena scope @enter@ picks, then restore the scope around it
 -- (also on exceptions).
 {-# INLINE withPaintScope #-}
-withPaintScope :: Ui :> es => (Context -> Int -> IO Int) -> Eff es a -> Eff es a
+withPaintScope :: (Context -> Int -> IO Int) -> NanoUI a -> NanoUI a
 withPaintScope enter m = do
   ctx <- askContext
   let
@@ -386,19 +426,19 @@ withPaintScope enter m = do
 --
 -- This replaces a theme set by 'NanoUI.Internal.Context.followSystemTheme'.
 {-# INLINE setUiTheme #-}
-setUiTheme :: Ui :> es => Theme -> Eff es ()
+setUiTheme :: Theme -> NanoUI ()
 setUiTheme th = withContext (\ctx -> setThemeInView ctx th)
 
 -- | Whether the system prefers light or dark colours, or 'Nothing' when the
 -- backend cannot tell (RGFW never can). A change repaints the whole window.
 {-# INLINE systemAppearance #-}
-systemAppearance :: Ui :> es => Eff es (Maybe Appearance)
+systemAppearance :: NanoUI (Maybe Appearance)
 systemAppearance = withContext getSystemAppearance
 
 -- | Where the pointer is, as the view being declared sees it: far off every
 -- widget while something drawn in front has the pointer.
 {-# INLINE uiMousePos #-}
-uiMousePos :: Ui :> es => Eff es V2
+uiMousePos :: NanoUI V2
 uiMousePos = fmap inputMousePos askInput
 
 -- | Whether the button went down this frame with the pointer over the part of
@@ -408,24 +448,24 @@ uiMousePos = fmap inputMousePos askInput
 --
 -- > whenM (mousePressed MouseBack) goBack
 {-# INLINE mousePressed #-}
-mousePressed :: Ui :> es => MouseButton -> Eff es Bool
+mousePressed :: MouseButton -> NanoUI Bool
 mousePressed b = pressedIn b <$> askInput
 
 -- | Like 'mousePressed', for a button that came up this frame.
 {-# INLINE mouseReleased #-}
-mouseReleased :: Ui :> es => MouseButton -> Eff es Bool
+mouseReleased :: MouseButton -> NanoUI Bool
 mouseReleased b = releasedIn b <$> askInput
 
 -- | Like 'mousePressed', for a button that is down.
 {-# INLINE mouseHeld #-}
-mouseHeld :: Ui :> es => MouseButton -> Eff es Bool
+mouseHeld :: MouseButton -> NanoUI Bool
 mouseHeld b = heldIn b <$> askInput
 
 -- | Input routed to the current layer. Covered layers receive no pointer;
 -- disabled scopes also remove keyboard and other interaction events.
 {-# INLINE askInput #-}
-askInput :: Ui :> es => Eff es Input
-askInput = repInput <$!> getStaticRep
+askInput :: NanoUI Input
+askInput = NanoUI (repInput <$!> getStaticRep)
 
 -- | The frame's input before routing, pointer included whoever it belongs
 -- to. For what watches the whole window rather than reacting to its own
@@ -433,30 +473,30 @@ askInput = repInput <$!> getStaticRep
 -- working out its body's input. A widget that read its presses from this
 -- would react through whatever is drawn over it, so widgets use 'askInput'.
 {-# INLINE askFrameInput #-}
-askFrameInput :: Ui :> es => Eff es Input
+askFrameInput :: NanoUI Input
 askFrameInput = do
-  UiRep {repFrame = frame} <- getStaticRep
+  UiRep {repFrame = frame} <- NanoUI getStaticRep
   pure frame
 
 -- | Run a part of the view with another routed input.
 {-# INLINE localInput #-}
-localInput :: Ui :> es => Input -> Eff es a -> Eff es a
-localInput inp = localStaticRep (\r -> r {repInput = inp})
+localInput :: Input -> NanoUI a -> NanoUI a
+localInput inp (NanoUI m) = NanoUI (localStaticRep (\r -> r {repInput = inp}) m)
 
 -- | The window's content size in logical pixels ('NanoUI.winSize' of
 -- 'NanoUI.askWindow').
 {-# INLINE windowSize #-}
-windowSize :: Ui :> es => Eff es Size
+windowSize :: NanoUI Size
 windowSize = fmap inputWindowSize askInput
 
 -- | Width component of 'windowSize', in logical pixels.
 {-# INLINE windowWidth #-}
-windowWidth :: Ui :> es => Eff es Float
+windowWidth :: NanoUI Float
 windowWidth = fmap (sizeW . inputWindowSize) askInput
 
 -- | Height component of 'windowSize', in logical pixels.
 {-# INLINE windowHeight #-}
-windowHeight :: Ui :> es => Eff es Float
+windowHeight :: NanoUI Float
 windowHeight = fmap (sizeH . inputWindowSize) askInput
 
 -- | Where a widget was laid out last frame, or 'Nothing' before its first.
@@ -468,7 +508,7 @@ windowHeight = fmap (sizeH . inputWindowSize) askInput
 -- > rect <- fromMaybe (Rect 0 0 320 240) <$> lastRect wid
 -- > ... work out this frame from rect and the input ...
 -- > customWidgetWithId wid spec
-lastRect :: Ui :> es => WidgetId -> Eff es (Maybe Rect)
+lastRect :: WidgetId -> NanoUI (Maybe Rect)
 lastRect wid = withContext (\ctx -> getPrevRect ctx wid)
 
 -- | Give a widget the keyboard, without the focus ring Tab would draw round
@@ -482,7 +522,7 @@ lastRect wid = withContext (\ctx -> getPrevRect ctx wid)
 -- An open 'NanoUI.Internal.Widgets.Overlay.modal' keeps the keyboard inside it:
 -- called outside one while it is up, this does nothing, so a widget behind
 -- the modal cannot take the keys typed into it.
-holdFocus :: Ui :> es => WidgetId -> Eff es ()
+holdFocus :: WidgetId -> NanoUI ()
 holdFocus wid = withContext $ \ctx -> do
   focus <- getFocusId ctx
   unlessM (pointerBlockedByModal ctx) $ do
@@ -495,17 +535,17 @@ holdFocus wid = withContext $ \ctx -> do
 -- This takes effect immediately, so widgets declared after the call see no
 -- focus. A text field keeps its selection and menu. To drop focus the way a
 -- click elsewhere does, at the end of the frame, use 'clearFocus'.
-releaseFocus :: Ui :> es => WidgetId -> Eff es ()
+releaseFocus :: WidgetId -> NanoUI ()
 releaseFocus wid = withContext $ \ctx -> do
   focus <- getFocusId ctx
   when (focus == wid) (writeIORef (ctxFocusId ctx) (WidgetId 0))
 
 -- | The widget that has the keyboard, or @'WidgetId' 0@ for none.
-focusedWidget :: Ui :> es => Eff es WidgetId
+focusedWidget :: NanoUI WidgetId
 focusedWidget = withContext getFocusId
 
 -- | Whether the widget with this id has the keyboard.
-isFocused :: Ui :> es => WidgetId -> Eff es Bool
+isFocused :: WidgetId -> NanoUI Bool
 isFocused wid = (\focus -> hashWidgetId wid /= 0 && focus == wid) <$> focusedWidget
 
 -- | Move the keyboard to the widget with this id, as Tab would. A text field
@@ -534,34 +574,34 @@ isFocused wid = (\focus -> hashWidgetId wid /= 0 && focus == wid) <$> focusedWid
 -- group's response names its last option, which is not a Tab stop.
 -- Requesting the widget that already has focus is a no-op, so a view can
 -- request it every frame. @'WidgetId' 0@ means 'clearFocus'.
-requestFocus :: Ui :> es => WidgetId -> Eff es ()
+requestFocus :: WidgetId -> NanoUI ()
 requestFocus wid = askFocus (if hashWidgetId wid == 0 then FocusNowhere else FocusOn wid)
 
 -- | Move focus to the next Tab stop at the end of the frame ('requestFocus').
-focusNext :: Ui :> es => Eff es ()
+focusNext :: NanoUI ()
 focusNext = askFocus FocusNext
 
 -- | Move focus to the previous Tab stop at the end of the frame
 -- ('requestFocus').
-focusPrevious :: Ui :> es => Eff es ()
+focusPrevious :: NanoUI ()
 focusPrevious = askFocus FocusPrevious
 
 -- | Drop focus at the end of the frame ('requestFocus'), as a click outside
 -- any text field or select does. The focused field drops its selection and
 -- menu. 'releaseFocus' instead acts at once on one widget.
-clearFocus :: Ui :> es => Eff es ()
+clearFocus :: NanoUI ()
 clearFocus = askFocus FocusNowhere
 
-askFocus :: Ui :> es => FocusRequest -> Eff es ()
+askFocus :: FocusRequest -> NanoUI ()
 askFocus req = withContext (\ctx -> writeIORef (ctxFocusRequest ctx) (Just req))
 
 -- | The clipboard's text, through whatever clipboard the backend installed.
 -- 'Nothing' for an empty clipboard or none at all.
-getClipboard :: Ui :> es => Eff es (Maybe Text)
+getClipboard :: NanoUI (Maybe Text)
 getClipboard = withContext ctxClipboardGet
 
 -- | Put text on the clipboard. 'False' when the backend could not.
-setClipboard :: Ui :> es => Text -> Eff es Bool
+setClipboard :: Text -> NanoUI Bool
 setClipboard txt = withContext (\ctx -> ctxClipboardSet ctx txt)
 
 -- | Ask for another frame after this one. For a view whose state lives
@@ -573,7 +613,7 @@ setClipboard txt = withContext (\ctx -> ctxClipboardSet ctx txt)
 -- window, since nothing nano-ui keeps says which pixels the change touched,
 -- and a view that asks every frame keeps the loop from ever sleeping;
 -- 'NanoUI.Internal.Widgets.Animate.wakeAfter' asks for a frame at a later time.
-requestFrame :: Ui :> es => Eff es ()
+requestFrame :: NanoUI ()
 requestFrame = withContext markDirty
 
 -- | Whether Escape was pressed this frame and is the view's to act on, and
@@ -582,7 +622,7 @@ requestFrame = withContext markDirty
 -- a dropdown is open, since that Escape is for closing it. A dialog that
 -- Escape puts away reads it here rather than from the input, so the Escape
 -- that closes a menu inside it does not close the dialog as well.
-takeEscape :: Ui :> es => Eff es Bool
+takeEscape :: NanoUI Bool
 takeEscape = do
   inp <- askInput
   if not (pressedOnceIn KeyEscape inp)
@@ -606,18 +646,18 @@ takeEscape = do
 -- Backend options can enable it at startup (@sdlExplainLayout@,
 -- @optExplainLayout@); on your own context use 'setExplainLayout' from
 -- "NanoUI.Backend".
-explainLayout :: Ui :> es => Bool -> Eff es ()
+explainLayout :: Bool -> NanoUI ()
 explainLayout on = withContext (\ctx -> setExplainLayout ctx on)
 
 -- | Whether the layout overlay is on ('explainLayout').
-explainingLayout :: Ui :> es => Eff es Bool
+explainingLayout :: NanoUI Bool
 explainingLayout = withContext getExplainLayout
 
 -- | The node under the pointer while the layout overlay is on, as laid out
 -- last frame: its kind, rect and padding. 'Nothing' when the overlay is off
 -- or the pointer is over no node. A change requests a frame, so a debug panel
 -- showing it keeps up with the pointer.
-explainedNode :: Ui :> es => Eff es (Maybe ExplainedNode)
+explainedNode :: NanoUI (Maybe ExplainedNode)
 explainedNode = withContext getExplainedNode
 
 -- | Limit the layout overlay ('explainLayout') to the nodes the body adds and
@@ -626,20 +666,20 @@ explainedNode = withContext getExplainedNode
 -- stay in a view:
 --
 -- > explainScope (settingsPanel model)
-explainScope :: Ui :> es => Eff es a -> Eff es a
+explainScope :: NanoUI a -> NanoUI a
 explainScope body = do
   ctx <- askContext
-  on <- uiIO (getExplainLayout ctx)
+  on <- liftIO (getExplainLayout ctx)
   if not on
     then body
     else do
-      let count = uiIO (arenaCount (ctxNodeArena ctx))
+      let count = liftIO (arenaCount (ctxNodeArena ctx))
       from <- count
       a <- body
       below <- count
       -- A subtree follows its root in the arena, so this range covers
       -- everything the body added.
-      uiIO (modifyIORef' (ctxExplain ctx) (\es -> es {esScopes = (from, below) : esScopes es}))
+      liftIO (modifyIORef' (ctxExplain ctx) (\es -> es {esScopes = (from, below) : esScopes es}))
       pure a
 
 -- | The scroller's geometry as its last layout left it (its viewport, range
@@ -650,7 +690,7 @@ explainScope body = do
 -- > sid <- currentId
 -- > metrics <- getScrollMetricsUi sid
 -- > (_, rows) <- scrollArea (fillW . fillH) (visibleRows metrics)
-getScrollMetricsUi :: Ui :> es => WidgetId -> Eff es (Maybe ScrollMetrics)
+getScrollMetricsUi :: WidgetId -> NanoUI (Maybe ScrollMetrics)
 getScrollMetricsUi wid = withContext (\ctx -> getScrollMetrics ctx wid)
 
 -- | Put a scroller at an offset in window axes, cancelling a glide; a 1D
@@ -658,64 +698,64 @@ getScrollMetricsUi wid = withContext (\ctx -> getScrollMetrics ctx wid)
 -- 'scrollToUi' the offset is not held to the range the last layout found,
 -- so it can place content this frame is about to lay out; the layout holds
 -- it to the content's real range.
-setScrollOffsetUi :: Ui :> es => WidgetId -> V2 -> Eff es ()
+setScrollOffsetUi :: WidgetId -> V2 -> NanoUI ()
 setScrollOffsetUi wid off = withContext $ \ctx ->
   getScrollMetrics ctx wid >>= \case
     Just m -> setScrollOffsetIn ctx wid (scrollAxes m) off
     Nothing -> setScrollOffset2D ctx wid off
 
 -- | Scroll to an offset, held to the scroller's range.
-scrollToUi :: Ui :> es => WidgetId -> V2 -> ScrollBehavior -> Eff es ()
+scrollToUi :: WidgetId -> V2 -> ScrollBehavior -> NanoUI ()
 scrollToUi wid off behavior = withContext (\ctx -> scrollTo ctx wid off behavior)
 
 -- | Scroll by a delta in pixels.
-scrollByUi :: Ui :> es => WidgetId -> V2 -> ScrollBehavior -> Eff es ()
+scrollByUi :: WidgetId -> V2 -> ScrollBehavior -> NanoUI ()
 scrollByUi wid delta behavior = withContext (\ctx -> scrollBy ctx wid delta behavior)
 
 -- | Scroll by whole viewports: @V2 0 0.5@ is half a page down.
-scrollPagesUi :: Ui :> es => WidgetId -> V2 -> ScrollBehavior -> Eff es ()
+scrollPagesUi :: WidgetId -> V2 -> ScrollBehavior -> NanoUI ()
 scrollPagesUi wid pages behavior = withContext (\ctx -> scrollPages ctx wid pages behavior)
 
 -- | Scroll a rectangle of the content, in content coordinates, into view:
 -- the row a keyboard selection moved to in a list that builds only the rows
 -- it shows.
-scrollRectIntoViewUi :: Ui :> es => WidgetId -> Rect -> ScrollAlign -> ScrollBehavior -> Eff es ()
+scrollRectIntoViewUi :: WidgetId -> Rect -> ScrollAlign -> ScrollBehavior -> NanoUI ()
 scrollRectIntoViewUi wid r align behavior = withContext (\ctx -> scrollRectIntoView ctx wid r align behavior)
 
 -- | Give a scroller its own wheel step, in pixels a notch; @0@ puts it back on
 -- the app's.
-setScrollStepUi :: Ui :> es => WidgetId -> Float -> Eff es ()
+setScrollStepUi :: WidgetId -> Float -> NanoUI ()
 setScrollStepUi wid px = withContext (\ctx -> setScrollStep ctx wid px)
 
 -- | Retrieve the host value installed in the context. 'Nothing' means no
 -- value was installed or its runtime type differs from the requested type.
 {-# INLINE askHost #-}
-askHost :: (Typeable a, Ui :> es) => Eff es (Maybe a)
+askHost :: Typeable a => NanoUI (Maybe a)
 askHost = withContext askHostIO
 
 -- | Request repaint bounds relative to a widget's rectangle.
 {-# INLINE damageWidgetNow #-}
-damageWidgetNow :: (Ui :> es) => WidgetId -> DamageBounds -> Eff es ()
+damageWidgetNow :: WidgetId -> DamageBounds -> NanoUI ()
 damageWidgetNow wid bounds = withContext (\ctx -> damageWidget ctx wid bounds)
 
 -- | 'damageWidgetNow' using the integer store key of a widget.
 {-# INLINE damageKeyNow #-}
-damageKeyNow :: (Ui :> es) => Int -> DamageBounds -> Eff es ()
+damageKeyNow :: Int -> DamageBounds -> NanoUI ()
 damageKeyNow k bounds = withContext (\ctx -> damageKey ctx k bounds)
 
 -- | Request repaint of a rectangle in logical window coordinates.
 {-# INLINE damageRectNow #-}
-damageRectNow :: (Ui :> es) => Rect -> Eff es ()
+damageRectNow :: Rect -> NanoUI ()
 damageRectNow r = withContext (\ctx -> damageRect ctx r)
 
 -- | Request repaint bounds for each widget in a group.
 {-# INLINE damageGroupNow #-}
-damageGroupNow :: (Ui :> es) => [WidgetId] -> DamageBounds -> Eff es ()
+damageGroupNow :: [WidgetId] -> DamageBounds -> NanoUI ()
 damageGroupNow wids bounds = withContext (\ctx -> damagePeers ctx wids bounds)
 
 -- | Request repaint of the entire window, for changes without widget bounds.
 {-# INLINE damageFullNow #-}
-damageFullNow :: (Ui :> es) => Eff es ()
+damageFullNow :: NanoUI ()
 damageFullNow = withContext damageFull
 
 -- | Monadic variant of 'when'. Runs the second action if the first returns 'True'.

@@ -32,10 +32,9 @@ import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Word (Word64)
-import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context
 import NanoUI.Internal.Input
-import NanoUI.Internal.Monad (Ui, (<&&>), askInput, damageWidgetNow, focusedWidget, freshWidget, lastRect, releaseFocus, requestFrame, uiIO, withIdFrame, withKey)
+import NanoUI.Internal.Monad (NanoUI, (<&&>), askInput, damageWidgetNow, focusedWidget, freshWidget, lastRect, releaseFocus, requestFrame, liftIO, withIdFrame, withKey)
 import NanoUI.Internal.Id (IdContext (..), WidgetId, hashWidgetId)
 import NanoUI.Internal.Frame.Hit (nodeInteractionHit)
 import NanoUI.Internal.Store (insertDyn, lookupDyn)
@@ -52,9 +51,8 @@ import NanoUI.Internal.Widgets.SplitPane
 -- Public API
 -- -----------------------------------------------------------------------------
 
--- | Configuration for a pane grid. 'pgViewPane' can run arbitrary widget code,
--- so the config carries the caller's effect row.
-data PaneGridConfig es = PaneGridConfig
+-- | Configuration for a pane grid.
+data PaneGridConfig = PaneGridConfig
   { pgLayout :: !(Layout -> Layout)
     -- ^ Layout modifier for the grid container (default 'id'); pass
     -- @fillW . fillH@ to fill the parent area.
@@ -95,13 +93,13 @@ data PaneGridConfig es = PaneGridConfig
     -- ^ Whether the grid is a Tab stop whose arrow, @m@, @x@ and Escape keys
     -- act on its panes (default 'True'). Turn it off when pane content needs
     -- those keys.
-  , pgViewPane :: !(Word64 -> PaneGridCtx es -> Eff es PaneView)
+  , pgViewPane :: !(Word64 -> PaneGridCtx -> NanoUI PaneView)
     -- ^ Renders the content of one pane.
   }
 
 -- | Default spacing and drag margins with empty pane bodies. Set 'pgViewPane'
 -- to render application content and 'pgLayout' to constrain the grid.
-defaultPaneGridConfig :: PaneGridConfig es
+defaultPaneGridConfig :: PaneGridConfig
 defaultPaneGridConfig =
   PaneGridConfig
     { pgLayout = id
@@ -117,7 +115,7 @@ defaultPaneGridConfig =
     }
 
 -- | Actions handed to a pane so it can mutate the grid immediately.
-data PaneGridCtx es = PaneGridCtx
+data PaneGridCtx = PaneGridCtx
   { pgcPaneId :: !Word64
   , pgcRect :: !Rect
     -- ^ This pane's screen rect from the previous frame, for placing
@@ -130,11 +128,11 @@ data PaneGridCtx es = PaneGridCtx
     -- the pane is not rendered until release.
   , pgcDndActive :: !Bool
     -- ^ True while any pane drag-and-drop gesture is in progress.
-  , pgcSplit :: !(GridAxis -> Eff es Word64)
+  , pgcSplit :: !(GridAxis -> NanoUI Word64)
     -- ^ Split this pane along the axis; returns the new pane id.
-  , pgcClose :: !(Eff es ())
-  , pgcMaximize :: !(Eff es ())
-  , pgcRestore :: !(Eff es ())
+  , pgcClose :: !(NanoUI ())
+  , pgcMaximize :: !(NanoUI ())
+  , pgcRestore :: !(NanoUI ())
   }
 
 -- | How a pane can be dragged this frame. 'pgViewPane' draws all of the
@@ -215,13 +213,13 @@ data RenderedPane = RenderedPane
   }
 
 -- | Per-frame shared environment.
-data GridEnv es = GridEnv
+data GridEnv = GridEnv
   { geCtx :: !Context
   , geKey :: !Int
   , gePaneScope :: !IdContext
     -- ^ Pane ids are rooted at the grid, not the split tree, so rearranging
     -- splits keeps pane state.
-  , geCfg :: !(PaneGridConfig es)
+  , geCfg :: !(PaneGridConfig)
   , geGutter :: !Float
   , geThickness :: !Float
   , geMinSize :: !Float
@@ -233,7 +231,7 @@ data GridEnv es = GridEnv
   , geLifted :: !Bool
     -- ^ The dragged pane is lifted out: not rendered, and its slot left
     -- empty in a drop preview.
-  , geMakeCtx :: Word64 -> Rect -> Bool -> PaneGridCtx es
+  , geMakeCtx :: Word64 -> Rect -> Bool -> PaneGridCtx
   }
 
 -- -----------------------------------------------------------------------------
@@ -259,19 +257,19 @@ paneFocus tree g = (maxPane, focus)
 -- | Stateful split-pane workspace with draggable tabs and dividers. Keep its
 -- widget identity stable; pane callbacks receive actions for splits, closes,
 -- and maximisation through 'PaneGridCtx'.
-paneGrid :: (Ui :> es) => PaneGridConfig es -> Eff es PaneGridResponse
+paneGrid :: PaneGridConfig -> NanoUI PaneGridResponse
 paneGrid cfg = do
   (wid, ctx) <- freshWidget
   inp <- askInput
   -- If Tab focus was turned off, drop any focus the grid still holds.
-  if pgFocusable cfg then uiIO (registerFocusable ctx wid) else releaseFocus wid
+  if pgFocusable cfg then liftIO (registerFocusable ctx wid) else releaseFocus wid
   let key = intKey wid
       spacing = max 0 (pgSpacing cfg)
       minSize = max 0 (pgMinSize cfg)
       leeway = max 0 (pgLeeway cfg)
       edgeBand = max 0 (pgEdgeBand cfg)
       gutter = spacing + 2 * leeway
-  stored <- lookupDyn key <$> uiIO (getStore ctx)
+  stored <- lookupDyn key <$> liftIO (getStore ctx)
   baseRect <- fromMaybe (Rect 0 0 0 0) <$> lastRect wid
   let (tree0, started) = case stored of
         Just st@GridState {gsTree = Just t} -> (t, st)
@@ -290,7 +288,7 @@ paneGrid cfg = do
               reflowFixed (pgFixedPanes cfg) minSize gutter (baseRect {rectW = pw, rectH = ph}) baseRect tree0
         _ -> tree0
       gs = started {gsTree = Just tree, gsSpan = Just curSpan}
-  when (Just gs /= stored) $ uiIO (modifyStore ctx (insertDyn key gs))
+  when (Just gs /= stored) $ liftIO (modifyStore ctx (insertDyn key gs))
   let (maxPane, focused) = paneFocus tree gs
       mouse = inputMousePos inp
       (regions, dividers) = layoutNode minSize gutter tree baseRect
@@ -363,10 +361,10 @@ paneGrid cfg = do
           drawDragOverlay env wid mouse (dpRect <$> dragZone)
         -- Keyboard focus also rings the focused pane, so the arrow keys show
         -- where they moved; the grid's own ring says the grid holds focus.
-        ringPane <- uiIO ((&&) <$> getFocusVisible ctx <*> ((== wid) <$> getFocusId ctx))
+        ringPane <- liftIO ((&&) <$> getFocusVisible ctx <*> ((== wid) <$> getFocusId ctx))
         when (ringPane && not lifted) $
           forM_ (M.lookup focused visibleRegions) $ \r ->
-            uiIO $ registerCustomDrawing ctx wid (contentKey [1, rectX r, rectY r, rectW r, rectH r]) $ \cdc _ ->
+            liftIO $ registerCustomDrawing ctx wid (contentKey [1, rectX r, rectY r, rectW r, rectH r]) $ \cdc _ ->
               runCanvasFor cdc (drawStrokeRoundedRect (rectInflate (-2) r) 2 1.5 (themeAccent (cdcTheme cdc)))
 
   -- Keys for the focused grid. Escape restores a maximized pane and is
@@ -382,12 +380,12 @@ paneGrid cfg = do
     when (plain 'm') $ maximizePane env focused
     when (plain 'x') $ closePane env focused
     when (pressedOnceIn KeyEscape inp) $ do
-      taken <- uiIO (overlayConsumesQuit ctx inp)
+      taken <- liftIO (overlayConsumesQuit ctx inp)
       unless taken $ do
         restorePane env
-        uiIO (markEscapeConsumed ctx)
+        liftIO (markEscapeConsumed ctx)
 
-  end <- fromMaybe gs . lookupDyn key <$> uiIO (getStore ctx)
+  end <- fromMaybe gs . lookupDyn key <$> liftIO (getStore ctx)
   let (maxEnd, focusEnd) = maybe (0, 0) (`paneFocus` end) (gsTree end)
   pure
     PaneGridResponse
@@ -423,23 +421,22 @@ paneLay m = minW m (minH m fillLay)
 
 -- | Enter a pane's grid-relative id scope. Consumes one sibling slot, like
 -- 'withKey'.
-withPaneKey :: (Ui :> es) => GridEnv es -> Word64 -> Eff es a -> Eff es a
+withPaneKey :: GridEnv -> Word64 -> NanoUI a -> NanoUI a
 withPaneKey env pid =
   withIdFrame (\parent -> (parent {siblingId = siblingId parent + 1}, gePaneScope env)) . withKey pid
 
 -- | Render one pane's content via 'pgViewPane' under the pane's stable key.
 renderPane ::
-  (Ui :> es) =>
-  GridEnv es ->
+  GridEnv ->
   Word64 ->
   Rect ->
-  Eff es [RenderedPane]
+  NanoUI [RenderedPane]
 renderPane env pid rect =
   withPaneKey env pid $ do
     inp <- askInput
     let ctx = geCtx env
         arena = ctxNodeArena ctx
-    start <- uiIO (arenaCount arena)
+    start <- liftIO (arenaCount arena)
     let ctxt = geMakeCtx env pid rect (draggingPane env pid)
     (view, _) <- containerResponse NodeContainer (paneLay (geMinSize env)) (pgViewPane (geCfg env) pid ctxt)
     -- Whether a press landed on a control in the pane, using last frame's
@@ -447,7 +444,7 @@ renderPane env pid rect =
     controlHit <-
       if not (pressedIn MouseLeft inp)
         then pure False
-        else uiIO $ do
+        else liftIO $ do
           end <- arenaCount arena
           let hitFrom idx
                 | idx >= end = pure False
@@ -462,11 +459,10 @@ renderPane env pid rect =
     pure [RenderedPane pid view controlHit]
 
 renderNode ::
-  (Ui :> es) =>
-  GridEnv es ->
+  GridEnv ->
   Map Word64 DividerInfo ->
   GridNode ->
-  Eff es [RenderedPane]
+  NanoUI [RenderedPane]
 renderNode env dividers = \case
   Pane pid
     -- The lifted pane's landing slot in a drop preview: an empty cell of the
@@ -505,14 +501,14 @@ renderNode env dividers = \case
         pure (a' <> b')
 
 -- | Is this the pane being drag-and-dropped?
-draggingPane :: GridEnv es -> Word64 -> Bool
+draggingPane :: GridEnv -> Word64 -> Bool
 draggingPane env pid = case gsGesture (geState env) of
   Drag p _ _ _ -> p == pid
   _ -> False
 
 -- | The divider: a drawing that covers the whole gutter, so all of it grabs.
 -- Painted as a faint rail with a solid 'geThickness' strip in the middle.
-dividerWidget :: (Ui :> es) => GridEnv es -> GridAxis -> Eff es ()
+dividerWidget :: GridEnv -> GridAxis -> NanoUI ()
 dividerWidget env axis =
   void $
     customWidget
@@ -543,9 +539,9 @@ dividerWidget env axis =
 -- | The drag indicator and drop-zone highlight, drawn over the grid by its
 -- root container so they stay out of the layout. The indicator is small,
 -- translucent and offset from the pointer so the preview stays visible.
-drawDragOverlay :: (Ui :> es) => GridEnv es -> WidgetId -> V2 -> Maybe Rect -> Eff es ()
+drawDragOverlay :: GridEnv -> WidgetId -> V2 -> Maybe Rect -> NanoUI ()
 drawDragOverlay env wid (V2 mx my) zone =
-  uiIO $ registerCustomDrawing (geCtx env) wid key $ \cdc _ -> runCanvasFor cdc $ do
+  liftIO $ registerCustomDrawing (geCtx env) wid key $ \cdc _ -> runCanvasFor cdc $ do
     let theme = cdcTheme cdc
         accent = themeAccent theme
         shortTitle = if T.length title > 12 then T.take 11 title <> "…" else title
@@ -569,13 +565,12 @@ drawDragOverlay env wid (V2 mx my) zone =
 
 -- | Arm, run and finish the resize and drag gestures.
 runGestures ::
-  (Ui :> es) =>
-  GridEnv es ->
+  GridEnv ->
   [DividerInfo] ->
   [RenderedPane] ->
   Bool ->
   Maybe DropPreview ->
-  Eff es ()
+  NanoUI ()
 runGestures env dividers rendered moved zone = do
   inp <- askInput
   let mouse = inputMousePos inp
@@ -626,7 +621,7 @@ mouseMain AxisH = v2Y
 -- Keyboard navigation
 -- -----------------------------------------------------------------------------
 
-moveFocus :: (Ui :> es) => GridEnv es -> Word64 -> (Float, Float) -> Eff es ()
+moveFocus :: GridEnv -> Word64 -> (Float, Float) -> NanoUI ()
 moveFocus env cur dir =
   forM_ (neighborPane (geRegions env) cur dir) $ \p -> updateGrid env True (\s -> s {gsFocus = p})
 
@@ -652,8 +647,8 @@ centerOf r = (rectX r + rectW r / 2, rectY r + rectH r / 2)
 -- | Update the grid's stored state and return it. With @mirror@, the
 -- running frame rebuilds its view from the new state. A no-op update leaves
 -- the store untouched.
-updateGrid :: (Ui :> es) => GridEnv es -> Bool -> (GridState -> GridState) -> Eff es GridState
-updateGrid env mirror f = uiIO $ do
+updateGrid :: GridEnv -> Bool -> (GridState -> GridState) -> NanoUI GridState
+updateGrid env mirror f = liftIO $ do
   st <- getStore (geCtx env)
   let old = fromMaybe (geState env) (lookupDyn (geKey env) st)
       new = f old
@@ -662,23 +657,23 @@ updateGrid env mirror f = uiIO $ do
   pure new
 
 -- | Split a pane, focusing and returning the new one.
-splitPane :: (Ui :> es) => GridEnv es -> Word64 -> GridAxis -> Eff es Word64
+splitPane :: GridEnv -> Word64 -> GridAxis -> NanoUI Word64
 splitPane env pid axis =
   fmap gsFocus . updateGrid env True $ \s ->
     let seed = gsSeed s
      in s {gsTree = treeSplit pid seed axis False (seed + 1) <$> gsTree s, gsSeed = seed + 2, gsFocus = seed + 1}
 
-closePane :: (Ui :> es) => GridEnv es -> Word64 -> Eff es ()
+closePane :: GridEnv -> Word64 -> NanoUI ()
 closePane env pid =
   void . updateGrid env True $ \s ->
     s {gsTree = gsTree s >>= treeRemovePane pid, gsMax = if gsMax s == pid then 0 else gsMax s}
 
 -- | Maximizing hides the dividers and every other pane, so an armed drag or
 -- resize gesture could never complete; cancel it instead of leaking it.
-maximizePane :: (Ui :> es) => GridEnv es -> Word64 -> Eff es ()
+maximizePane :: GridEnv -> Word64 -> NanoUI ()
 maximizePane env pid =
   void . updateGrid env True $ \s ->
     if gsMax s == pid then s {gsMax = 0} else s {gsMax = pid, gsGesture = NoGesture}
 
-restorePane :: (Ui :> es) => GridEnv es -> Eff es ()
+restorePane :: GridEnv -> NanoUI ()
 restorePane env = void (updateGrid env True (\s -> s {gsMax = 0}))

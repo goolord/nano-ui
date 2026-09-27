@@ -8,7 +8,6 @@ module DemoSelftest
 
 import Control.Concurrent (threadDelay)
 import Control.Monad (unless, void, when)
-import Control.Monad.IO.Class (liftIO)
 import Data.Char (isDigit)
 import Data.Foldable (for_)
 import Data.IORef (newIORef, readIORef, writeIORef)

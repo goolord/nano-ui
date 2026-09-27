@@ -14,9 +14,9 @@ import Data.Hashable (Hashable, hash)
 import Data.Maybe (fromMaybe, isJust)
 import Data.Text (Text)
 import Data.Text qualified as T
-import Effectful (Eff, type (:>))
 import NanoUI
-  ( Color
+  ( NanoUI
+  , Color
   , FontMetrics (fmLineHeight)
   , ImageId
   , Inline
@@ -25,7 +25,6 @@ import NanoUI
   , Size (..)
   , Style (..)
   , Theme (..)
-  , Ui
   , V2 (..)
   , alignCenter
   , alignEnd
@@ -100,10 +99,7 @@ import NanoUI.Markdown.Syntax
 -- Each style modifier is applied on top of the default look it names, so
 -- @mdCodeBlock = background c@ changes a code block's background and keeps
 -- its border.
---
--- The effect row @es@ is the view's, as in 'NanoUI.PaneGridConfig', because
--- 'mdBlock' runs the caller's widgets.
-data MarkdownConfig es = MarkdownConfig
+data MarkdownConfig = MarkdownConfig
   { mdLayout :: !(Layout -> Layout)
   -- ^ The document's column.
   , mdText :: !(Layout -> Layout)
@@ -133,7 +129,7 @@ data MarkdownConfig es = MarkdownConfig
   -- drawn. Clicking it returns the link, or else the source; its title, or
   -- else the link's, is the tooltip. Other images show their alt text as a
   -- link.
-  , mdBlock :: !((Block -> Eff es (Maybe Text)) -> Block -> Eff es (Maybe Text))
+  , mdBlock :: !((Block -> NanoUI (Maybe Text)) -> Block -> NanoUI (Maybe Text))
   -- ^ Custom block drawing, given the widget's own drawing to fall back to
   -- or wrap (default: 'id'). Called for every block at every depth,
   -- including inside quotes and list items, so it can highlight code, load
@@ -149,7 +145,7 @@ data MarkdownConfig es = MarkdownConfig
 -- | A full-width column, body text in the theme's font, headings from 1.6x
 -- down to 0.9x its size, theme colours, copy buttons on code blocks, and no
 -- images.
-defaultMarkdownConfig :: MarkdownConfig es
+defaultMarkdownConfig :: MarkdownConfig
 defaultMarkdownConfig =
   MarkdownConfig
     { mdLayout = tight . fillW . gap 10
@@ -179,11 +175,11 @@ defaultMarkdownConfig =
 -- Each top-level block is keyed by its position and kind, so appending to a
 -- document keeps the ids, and the cached text layout, of earlier blocks.
 -- Text is not selectable; code blocks have a copy button.
-markdown :: Ui :> es => MarkdownDoc -> Eff es (Maybe Text)
+markdown :: MarkdownDoc -> NanoUI (Maybe Text)
 markdown = markdownConfigured defaultMarkdownConfig
 
 -- | 'markdown' with a configuration.
-markdownConfigured :: Ui :> es => MarkdownConfig es -> MarkdownDoc -> Eff es (Maybe Text)
+markdownConfigured :: MarkdownConfig -> MarkdownDoc -> NanoUI (Maybe Text)
 markdownConfigured cfg doc = do
   theme <- uiTheme
   size <- uiFontSize
@@ -205,8 +201,8 @@ markdownConfigured cfg doc = do
 
 -- Per-block drawing context. envText is the current text modifier (muted
 -- inside quotes); envMetrics is the body font, which sizes list markers.
-data Env es = Env
-  { envCfg :: !(MarkdownConfig es)
+data Env = Env
+  { envCfg :: !(MarkdownConfig)
   , envTheme :: !Theme
   , envText :: !(Layout -> Layout)
   , envSize :: !Float
@@ -217,7 +213,7 @@ data Env es = Env
 -- | Blocks in sequence, each drawn by 'mdBlock' under a key of its position
 -- and kind. A block that changes kind as text streams in (a paragraph
 -- becoming a heading, table or image) gets fresh ids.
-blocks :: Ui :> es => Env es -> [Block] -> Eff es (Maybe Text)
+blocks :: Env -> [Block] -> NanoUI (Maybe Text)
 blocks env bs = asum <$> zipWithM draw [0 :: Int ..] bs
   where
     own = block env
@@ -225,7 +221,7 @@ blocks env bs = asum <$> zipWithM draw [0 :: Int ..] bs
 
 -- | A block's kind, for its key. A paragraph drawn as an image is its own
 -- kind.
-blockKind :: MarkdownConfig es -> Block -> Int
+blockKind :: MarkdownConfig -> Block -> Int
 blockKind cfg = \case
   Paragraph xs
     | isJust (soleImage cfg xs) -> 13
@@ -241,7 +237,7 @@ blockKind cfg = \case
 -- | The widget's own block drawing. NOINLINE: inlined into 'blocks', its
 -- closures over 'Env' would be allocated on every call.
 {-# NOINLINE block #-}
-block :: Ui :> es => Env es -> Block -> Eff es (Maybe Text)
+block :: Env -> Block -> NanoUI (Maybe Text)
 block env = \case
   Paragraph xs
     | Just (target, title, iid, Size w h) <- soleImage (envCfg env) xs -> do
@@ -265,7 +261,7 @@ block env = \case
 -- | The image to draw for a paragraph holding only an image (or only a
 -- linked image) that 'mdImage' knows: click target, title (else the link's),
 -- image and size.
-soleImage :: MarkdownConfig es -> [Span] -> Maybe (Text, Text, ImageId, Size)
+soleImage :: MarkdownConfig -> [Span] -> Maybe (Text, Text, ImageId, Size)
 soleImage cfg = \case
   [Image src title _] -> drawn src src title
   [Link url linkTitle [Image src title _]] -> drawn url src (if T.null title then linkTitle else title)
@@ -276,7 +272,7 @@ soleImage cfg = \case
 -- | Spans as rich-text pieces. Every piece inside a link targets its
 -- destination; an image's alt text targets its enclosing link, else its
 -- source.
-inlines :: Env es -> [Span] -> [Inline]
+inlines :: Env -> [Span] -> [Inline]
 inlines env = concatMap (go id Nothing)
   where
     theme = envTheme env
@@ -306,7 +302,7 @@ inlines env = concatMap (go id Nothing)
 -- button. Long lines wrap, keeping indentation and inner spaces. A
 -- horizontal scroller would steal the wheel from the page and its bar would
 -- cover the last line.
-codeBlock :: Ui :> es => Env es -> Text -> Text -> Eff es ()
+codeBlock :: Env -> Text -> Text -> NanoUI ()
 codeBlock env info code = do
   let theme = envTheme env
       cfg = envCfg env
@@ -326,7 +322,7 @@ codeBlock env info code = do
 -- spacing. Markers take the surrounding text colour. Bullets are a disc,
 -- then a ring one level deeper, then a square. Task items use a nano-ui
 -- checkbox, recoloured to the text colour when that differs from the theme.
-listBlock :: Ui :> es => Env es -> ListType -> Bool -> [ListItem] -> Eff es (Maybe Text)
+listBlock :: Env -> ListType -> Bool -> [ListItem] -> NanoUI (Maybe Text)
 listBlock env ty isTight items = do
   let fm = envMetrics env
       theme = envTheme env
@@ -381,7 +377,7 @@ version tag deps = hash deps * 4 + tag
 
 -- | A table as a grid of equal columns: bold header cells on a tinted row,
 -- one-pixel rules between cells, and each cell aligned per its column.
-tableBlock :: Ui :> es => Env es -> [CellAlign] -> [[Span]] -> [[[Span]]] -> Eff es (Maybe Text)
+tableBlock :: Env -> [CellAlign] -> [[Span]] -> [[[Span]]] -> NanoUI (Maybe Text)
 tableBlock env aligns header rows = do
   let theme = envTheme env
       rule = themeSeparator theme

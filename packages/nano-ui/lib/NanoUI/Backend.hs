@@ -26,12 +26,11 @@
 module NanoUI.Backend
   ( -- * Running a view
 
-    -- | These run one view against a @Context@ from "NanoUI.Testing" and an
+    -- | This runs one view against a @Context@ from "NanoUI.Testing" and an
     -- 'Input'. Most backends want a whole frame instead: @runFrame@ in
     -- "NanoUI.Testing", or the runners in "NanoUI.Runner", which lay out,
-    -- paint and collect damage around a call to these.
-    runUi
-  , runNanoUI
+    -- paint and collect damage around a call to this.
+    runNanoUI
 
     -- * Input
 

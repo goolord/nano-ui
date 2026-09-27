@@ -14,9 +14,9 @@ import Data.Word (Word8)
 import Foreign.ForeignPtr (withForeignPtr)
 import Foreign.Storable (peekByteOff)
 import NanoUI
-  ( Color, DrawOp (..), ImageId (..), Input (..), NanoUI, NanoUIEs, Rect (..), Size (..), Style (..), TextFont (..), Theme (..)
+  ( Color, DrawOp (..), ImageId (..), Input (..), NanoUI, Rect (..), Size (..), Style (..), TextFont (..), Theme (..)
   , V2 (..), WidgetId, background, checkboxBoxSize, colorA, colorB, colorG, colorR, colorRGBA, columnWith, drawCheckbox, fillW, fixedH, fixedW, fontColor, foreground
-  , getScrollOffset, label, padAll, panel, rectIntersect, runCanvasFor, scrollArea, uiIO
+  , getScrollOffset, label, padAll, panel, rectIntersect, runCanvasFor, scrollArea, liftIO
   )
 import NanoUI.Backend (FontBackend (..), FontMetrics (..), monospaceMetrics)
 import NanoUI.Internal.Context (Context (..), CustomDrawingEntry (..), lookupCustomDrawing)
@@ -119,12 +119,12 @@ clickWord ui w = do
   runClick ctx inp ui pos
 
 -- | Resolves only cat.png, at 40 by 30.
-catImages :: MarkdownConfig es
+catImages :: MarkdownConfig
 catImages = defaultMarkdownConfig {mdImage = \src -> if src == "cat.png" then Just (ImageId 7, Size 40 30) else Nothing}
 
 -- | Draws Haskell code blocks as a plain label, and every other block as the
 -- default widget does.
-customCode :: MarkdownConfig NanoUIEs
+customCode :: MarkdownConfig
 customCode =
   defaultMarkdownConfig
     { mdBlock = \own -> \case
@@ -192,7 +192,7 @@ spec = do
         doc2 = appendMarkdown "ma delta" doc1
         measuring doc = do
           writeIORef measured []
-          void (runFrame ctx inp (uiIO (writeIORef inView True) *> view doc <* uiIO (writeIORef inView False)))
+          void (runFrame ctx inp (liftIO (writeIORef inView True) *> view doc <* liftIO (writeIORef inView False)))
           readIORef measured
     measuring doc1 >>= (`shouldContain` ["first"])
     _ <- measuring doc1
@@ -364,7 +364,7 @@ spec = do
     map wText <$> drawnWords ctx `shouldReturn` ["item", "after"]
 
   it "wraps the widget's own drawing in chrome of its own, where the block is, and returns its link" $ do
-    let cfg :: MarkdownConfig NanoUIEs
+    let cfg :: MarkdownConfig
         cfg =
           defaultMarkdownConfig
             { mdBlock = \own b -> case b of
@@ -385,7 +385,7 @@ spec = do
         quoteInk = colorRGBA 70 80 90 255
         cellInk = colorRGBA 100 110 120 255
         cfg =
-          (defaultMarkdownConfig :: MarkdownConfig NanoUIEs)
+          (defaultMarkdownConfig :: MarkdownConfig)
             { mdInlineCode = fontColor codeInk
             , mdInlineCodeBackground = Just tint
             , mdQuote = fontColor quoteInk
@@ -402,7 +402,7 @@ spec = do
     [Rect x _ _ _] <- drawnFills tint ctx
     x `shouldBe` let V2 cx _ = wPos code in cx
     (drawnFills tint =<< drawn 600 400 (ui defaultMarkdownConfig)) `shouldReturn` []
-    let block c = columnWith (fixedW 500) (markdownConfigured (defaultMarkdownConfig :: MarkdownConfig NanoUIEs) {mdCodeBlock = background c} (parseMarkdown "```\ncode\n```"))
+    let block c = columnWith (fixedW 500) (markdownConfigured (defaultMarkdownConfig :: MarkdownConfig) {mdCodeBlock = background c} (parseMarkdown "```\ncode\n```"))
     paints tint (block tint) `shouldReturn` True
     paints tint (block (colorRGBA 9 9 9 255)) `shouldReturn` False
   where

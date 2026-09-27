@@ -14,12 +14,11 @@ import Data.Foldable (toList)
 import Data.List (find)
 import Data.Maybe (fromMaybe, isJust, listToMaybe)
 import Data.Text (Text)
-import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context
 import NanoUI.Internal.Frame.Scroll.Geometry (scrollAxisRange, scrollBare, scrollHorizontalHidden)
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Input (MouseButton (..), inputMousePos, inputScroll)
-import NanoUI.Internal.Monad (Ui, askInput, freshWidget, lastRect, nextId, requestFrame, uiIO, uiTheme, withKey)
+import NanoUI.Internal.Monad (NanoUI, askInput, freshWidget, lastRect, nextId, requestFrame, liftIO, uiTheme, withKey)
 import NanoUI.Internal.Store (fieldFloat, findSlot, insertSlot)
 import NanoUI.Internal.Style
 import NanoUI.Internal.Types (Rect (..), clamp, rectContains, rectW, v2Y)
@@ -89,12 +88,12 @@ tabHeaderLay :: Layout
 tabHeaderLay = padXY 8 4 . fixedH tabHeaderH . alignCenter . alignMid . gap 4 $ defaultLayout
 
 tabStrip ::
-  (Eq a, Ui :> es) =>
+  Eq a =>
   TabsConfig ->
   a ->
   [Tab a body] ->
-  Maybe (a -> Eff es ()) ->
-  Eff es (TabResponse a)
+  Maybe (a -> NanoUI ()) ->
+  NanoUI (TabResponse a)
 tabStrip (TabsConfig style orient) cur tabList mRenderBody = do
   (groupId, ctx) <- freshWidget
   let vertical = orient == TabLeft || orient == TabRight
@@ -121,13 +120,13 @@ tabStrip (TabsConfig style orient) cur tabList mRenderBody = do
 -- Overflowing headers move into a bare horizontal scroller that grows between
 -- the two arrows; the vertical wheel pages it too.
 scrollableHeaders ::
-  (Eq a, Ui :> es) =>
+  Eq a =>
   Context ->
   WidgetId ->
   Float ->
   a ->
-  Eff es (TabResponse a, [(a, Response)]) ->
-  Eff es (TabResponse a)
+  NanoUI (TabResponse a, [(a, Response)]) ->
+  NanoUI (TabResponse a)
 scrollableHeaders ctx groupId barGap cur headers = do
   scrollWid <- withKey ("tab-scroller" :: Text) nextId
   let rangeKey = slotKey SlotScrollContent (intKey scrollWid)
@@ -137,10 +136,10 @@ scrollableHeaders ctx groupId barGap cur headers = do
   -- Last frame's reachable range decides whether the strip needs the
   -- scroller. It is a float slot so a pure scroll frame keeps its clip damage
   -- (`onlyScrollFloatsChanged` in NanoUI.Internal.Damage).
-  maxOffPrev <- max 0 . findSlot fieldFloat 0 rangeKey <$> uiIO (getStore ctx)
+  maxOffPrev <- max 0 . findSlot fieldFloat 0 rangeKey <$> liftIO (getStore ctx)
   let overflow = maxOffPrev > 0.5
-  off <- uiIO (getScrollOffset ctx scrollWid)
-  wheelStep <- uiIO (resolveScrollStep ctx scrollWid)
+  off <- liftIO (getScrollOffset ctx scrollWid)
+  wheelStep <- liftIO (resolveScrollStep ctx scrollWid)
   mBar <- lastRect groupId
   mScr <- lastRect scrollWid
   inp <- askInput
@@ -178,7 +177,7 @@ scrollableHeaders ctx groupId barGap cur headers = do
   rightClicked <- arrow "tab-arrow-right" canRight "\8250"
   -- Sub-pixel churn is ignored so a parked strip never dirties.
   when (abs (maxOff - maxOffPrev) > 0.5) $
-    uiIO (modifyStore ctx (insertSlot fieldFloat rangeKey maxOff))
+    liftIO (modifyStore ctx (insertSlot fieldFloat rangeKey maxOff))
   -- One offset per frame: arrow pages, wheel notches and the end clamp, or,
   -- when the active tab changed, whatever brings it into view.
   let pagedOff
@@ -198,18 +197,18 @@ scrollableHeaders ctx groupId barGap cur headers = do
             maybe pagedOff (follow . respRect) (lookup (tabActive tabResp) hdrs)
         | otherwise = pagedOff
   when (finalOff /= off) $
-    uiIO (setScrollOffset ctx scrollWid finalOff)
+    liftIO (setScrollOffset ctx scrollWid finalOff)
   pure tabResp
 
 -- | The headers and the selection after this frame's clicks, with each
 -- header's key and response for the scrolling strip.
 renderHeaders ::
-  (Eq a, Ui :> es) =>
+  Eq a =>
   Context ->
   Int ->
   a ->
   [Tab a body] ->
-  Eff es (TabResponse a, [(a, Response)])
+  NanoUI (TabResponse a, [(a, Response)])
 renderHeaders ctx tabStyle cur tabList = do
   hdrs <- zipWithM (\i t -> withKey i (renderHeader tabStyle cur t)) [0 :: Int ..] tabList
   let clickedKeys = [k | (k, r, False) <- hdrs, respClicked r]
@@ -219,13 +218,13 @@ renderHeaders ctx tabStyle cur tabList = do
       hasChanged = nextTab /= cur
       resp = setChanged hasChanged (setClicked (not (null clickedKeys)) (foldMap snd keyed))
   when (hasChanged || isJust closedKey) requestFrame
-  uiIO (moveSelection ctx cur nextTab keyed)
+  liftIO (moveSelection ctx cur nextTab keyed)
   pure (TabResponse resp closedKey nextTab, keyed)
 
 -- | One header: its key, its response, and whether it was closed (close
 -- button clicked, or header or close button middle-clicked, as in a
 -- browser).
-renderHeader :: (Eq a, Ui :> es) => Int -> a -> Tab a body -> Eff es (a, Response, Bool)
+renderHeader :: Eq a => Int -> a -> Tab a body -> NanoUI (a, Response, Bool)
 renderHeader tabStyle cur t = do
   let headerText = maybe (tabTitle t) (\b -> mconcat [tabTitle t, " (", b, ")"]) (tabBadge t)
       headerButton = buttonStyledEx (not (tabDisabled t))
@@ -242,20 +241,20 @@ renderHeader tabStyle cur t = do
 -- the active key after this frame's clicks, or Enter or Space on a focused
 -- header. Only the active tab's body runs.
 {-# INLINE tabs #-}
-tabs :: (Foldable f, Eq a, Ui :> es) => a -> f (Tab a (Eff es ())) -> Eff es a
+tabs :: (Foldable f, Eq a) => a -> f (Tab a (NanoUI ())) -> NanoUI a
 tabs = tabsConfigured defaultTabsConfig
 
 -- | 'tabs' returning the 'TabResponse', which also reports a closed tab.
 {-# INLINE tabs' #-}
-tabs' :: (Foldable f, Eq a, Ui :> es) => a -> f (Tab a (Eff es ())) -> Eff es (TabResponse a)
+tabs' :: (Foldable f, Eq a) => a -> f (Tab a (NanoUI ())) -> NanoUI (TabResponse a)
 tabs' = tabsConfigured' defaultTabsConfig
 
 -- | 'tabs' with a header style and placement.
-tabsConfigured :: (Foldable f, Eq a, Ui :> es) => TabsConfig -> a -> f (Tab a (Eff es ())) -> Eff es a
+tabsConfigured :: (Foldable f, Eq a) => TabsConfig -> a -> f (Tab a (NanoUI ())) -> NanoUI a
 tabsConfigured cfg active = fmap tabActive . tabsConfigured' cfg active
 
 -- | 'tabsConfigured' with selection, close requests, and header interaction details.
-tabsConfigured' :: (Foldable f, Eq a, Ui :> es) => TabsConfig -> a -> f (Tab a (Eff es ())) -> Eff es (TabResponse a)
+tabsConfigured' :: (Foldable f, Eq a) => TabsConfig -> a -> f (Tab a (NanoUI ())) -> NanoUI (TabResponse a)
 tabsConfigured' cfg active inputTabs = tabStrip cfg active ts (Just body)
   where
     ts = toList inputTabs
@@ -271,19 +270,19 @@ tabsConfigured' cfg active inputTabs = tabStrip cfg active ts (Just body)
 
 -- | Tab headers only; the caller renders the body.
 {-# INLINE tabBar #-}
-tabBar :: (Foldable f, Eq a, Ui :> es) => a -> f (Tab a body) -> Eff es a
+tabBar :: (Foldable f, Eq a) => a -> f (Tab a body) -> NanoUI a
 tabBar = tabBarConfigured defaultTabsConfig
 
 {-# INLINE tabBar' #-}
 -- | Header-only 'tabBar' with selection and close requests. Does not run tab bodies.
-tabBar' :: (Foldable f, Eq a, Ui :> es) => a -> f (Tab a body) -> Eff es (TabResponse a)
+tabBar' :: (Foldable f, Eq a) => a -> f (Tab a body) -> NanoUI (TabResponse a)
 tabBar' = tabBarConfigured' defaultTabsConfig
 
 -- | Header-only bar with explicit style/orientation. Returns the selected key
 -- without running tab bodies.
-tabBarConfigured :: (Foldable f, Eq a, Ui :> es) => TabsConfig -> a -> f (Tab a body) -> Eff es a
+tabBarConfigured :: (Foldable f, Eq a) => TabsConfig -> a -> f (Tab a body) -> NanoUI a
 tabBarConfigured cfg active = fmap tabActive . tabBarConfigured' cfg active
 
 -- | 'tabBarConfigured' with interaction details and optional close request.
-tabBarConfigured' :: (Foldable f, Eq a, Ui :> es) => TabsConfig -> a -> f (Tab a body) -> Eff es (TabResponse a)
+tabBarConfigured' :: (Foldable f, Eq a) => TabsConfig -> a -> f (Tab a body) -> NanoUI (TabResponse a)
 tabBarConfigured' cfg active ts = tabStrip cfg active (toList ts) Nothing

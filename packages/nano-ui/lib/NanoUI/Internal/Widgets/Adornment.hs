@@ -24,14 +24,13 @@ import Control.Monad (forM)
 import Data.IORef (readIORef)
 import Data.Maybe (catMaybes)
 import Data.Text (Text)
-import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context (Context (..), getPrevRect, isDisabled, pointerCovered)
 import NanoUI.Internal.Font (FontMetrics (..))
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Input (inputMousePos)
 import NanoUI.Internal.Frame.Hit (nodeInteractionHit)
 import NanoUI.Internal.Layout.Arena (arenaCount, getNodeType, getWidgetId, isWidgetNode, lookupNodeByWidgetId)
-import NanoUI.Internal.Monad (NanoUI, Ui, askContext, askInput, embedNanoUI, ifM, resolveFontUi, uiIO, uiTheme, withDefaultLayout, (<&&>))
+import NanoUI.Internal.Monad (NanoUI, askContext, askInput, ifM, resolveFontUi, liftIO, uiTheme, withDefaultLayout, (<&&>))
 import NanoUI.Internal.Style
 import NanoUI.Internal.Types (Color, V2)
 import NanoUI.Internal.Widgets.Display (svgIconWith')
@@ -120,14 +119,14 @@ control = AdornControl
 -- colour @colorOf@ picks; 'True' when one of its controls holds the pointer
 -- ('holdsPointer'), which the widget then yields.
 {-# INLINE adornWidget #-}
-adornWidget :: Ui :> es => WidgetId -> Layout -> (Theme -> Color) -> Adornments -> Eff es Bool
+adornWidget :: WidgetId -> Layout -> (Theme -> Color) -> Adornments -> NanoUI Bool
 adornWidget _ _ _ (Adornments [] []) = pure False
 adornWidget wid lay colorOf adorns = addAdornments wid lay colorOf adorns
 
 -- | 'adornWidget' with something to draw: one row a side, the leading row
 -- aligned to the start and the trailing one to the end ('adornRows').
 {-# NOINLINE addAdornments #-}
-addAdornments :: Ui :> es => WidgetId -> Layout -> (Theme -> Color) -> Adornments -> Eff es Bool
+addAdornments :: WidgetId -> Layout -> (Theme -> Color) -> Adornments -> NanoUI Bool
 addAdornments wid lay colorOf (Adornments ls ts) = do
   ctx <- askContext
   let na = ctxNodeArena ctx
@@ -144,23 +143,23 @@ addAdornments wid lay colorOf (Adornments ls ts) = do
               pure (fromIntegral (round (fmLineHeight fm * 0.9) :: Int))
           Nothing <$ svgIconWith' (fixedWH s s . fontColor color) doc
         AdornText txt -> Nothing <$ labelEx (tight . font . fontColor color $ defaultLayout) txt
-        AdornView v -> Nothing <$ adornmentRow lay color (embedNanoUI v)
+        AdornView v -> Nothing <$ adornmentRow lay color v
         AdornControl v -> do
-          from <- uiIO (arenaCount na)
-          withDefaultLayout (font . fontColor color) (embedNanoUI v)
-          to <- uiIO (arenaCount na)
+          from <- liftIO (arenaCount na)
+          withDefaultLayout (font . fontColor color) v
+          to <- liftIO (arenaCount na)
           pure (Just (from, to))
       side align pieces
         | null pieces = pure []
         | otherwise = row' (align (adornmentRowLayout lay)) (catMaybes <$> forM pieces add)
   mRanges <- withWidgetChildren wid ((<>) <$> side alignStart ls <*> side alignEnd ts)
   case mRanges of
-    Just ranges@(_ : _) -> uiIO (holdsPointer ctx wid (inputMousePos inp) ranges)
+    Just ranges@(_ : _) -> liftIO (holdsPointer ctx wid (inputMousePos inp) ranges)
     _ -> pure False
 
 -- | An inert row inside a widget with layout @lay@, its labels in the
 -- widget's font and colour @color@.
-adornmentRow :: Ui :> es => Layout -> Color -> Eff es a -> Eff es a
+adornmentRow :: Layout -> Color -> NanoUI a -> NanoUI a
 adornmentRow lay color =
   inertContainer (adornmentRowLayout lay) . withDefaultLayout (fontSize (layoutFontSize lay) . fontColor color)
 

@@ -40,13 +40,12 @@ import Data.Primitive.SmallArray (SmallArray, emptySmallArray, indexSmallArray, 
 import Data.Primitive.Types (Prim)
 import Data.Vector qualified as V
 import Data.Vector.Mutable qualified as MV
-import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context (Context (..), InteractionState (..), getPrevRect, getScrollOffset2D, getStore, intKey, linkScrollAxes, modifyInteraction, writeSlots)
 import NanoUI.Internal.Hooks (useInt)
 import NanoUI.Internal.Font (ScrollBarSlot (..), scrollBarGutter, tableCellInset, lineWidthIO)
 import NanoUI.Internal.Input (Input (..), MouseButton (..), Pressable (..), UiCursorKind (..))
 import NanoUI.Internal.Layout.Arena (NodeType (..))
-import NanoUI.Internal.Monad (Ui, askInput, freshWidget, lastRect, nextId, uiIO, withKey)
+import NanoUI.Internal.Monad (NanoUI, askInput, freshWidget, lastRect, nextId, liftIO, withKey)
 import NanoUI.Internal.Store (Slot (..), SlotWrites (..), fieldFloat, fieldInt, fieldIntSet, findSlot, insertDyn, lookupDyn, slotKey, slotWrite)
 import NanoUI.Internal.Style (AlignX (..), AlignY (..), Direction (..), FontVariant (..), Layout (..), Sizing (..), defaultLayout, fillH, fillW, minW, tight)
 import Data.Bits ((.|.), shiftL)
@@ -370,7 +369,7 @@ nextSortCol cur clicked
   | otherwise = SortCol clicked SortAsc
 
 -- | Local sort state and setter. Call in a stable hook position each frame.
-useTableSort :: Ui :> es => SortCol -> Eff es (SortCol, SortCol -> Eff es ())
+useTableSort :: SortCol -> NanoUI (SortCol, SortCol -> NanoUI ())
 useTableSort initial = do
   (packed, setPacked) <- useInt (packSort initial)
   pure (unpackSort packed, setPacked . packSort)
@@ -434,16 +433,16 @@ colBoxLayout fillInner hasStretch sizes contentWs stored i
 -- current sort; the 'TableResponse' carries the sort after this frame's
 -- header clicks, along with the column order and hidden columns.
 {-# INLINE table #-}
-table :: (Foldable f, Ui :> es) => Text -> Colonnade Headed row Text -> f row -> SortCol -> Eff es TableResponse
+table :: Foldable f => Text -> Colonnade Headed row Text -> f row -> SortCol -> NanoUI TableResponse
 table = tableConfigured defaultTableConfig id
 
 -- | 'table' with a layout modifier.
 {-# INLINE tableWith #-}
-tableWith :: (Foldable f, Ui :> es) => (Layout -> Layout) -> Text -> Colonnade Headed row Text -> f row -> SortCol -> Eff es TableResponse
+tableWith :: Foldable f => (Layout -> Layout) -> Text -> Colonnade Headed row Text -> f row -> SortCol -> NanoUI TableResponse
 tableWith = tableConfigured defaultTableConfig
 
 -- | A table of text rows under the given headers.
-simpleTable :: (Foldable f, Ui :> es) => [Text] -> f [Text] -> Eff es TableResponse
+simpleTable :: Foldable f => [Text] -> f [Text] -> NanoUI TableResponse
 simpleTable headers rows = do
   let cols = mconcat [headed h (\r -> smallAt r i "") | (i, h) <- zip [0 ..] headers]
       indexedRows = map smallArrayFromList (toList rows)
@@ -452,14 +451,14 @@ simpleTable headers rows = do
 -- | 'tableWith' with column sizes, frozen rows and columns, and initially
 -- hidden columns.
 tableConfigured ::
-  (Foldable f, Ui :> es) =>
+  Foldable f =>
   TableConfig ->
   (Layout -> Layout) ->
   Text ->
   Colonnade Headed row Text ->
   f row ->
   SortCol ->
-  Eff es TableResponse
+  NanoUI TableResponse
 tableConfigured cfg f key cols inputRows curSort =
   withKey ("table:" <> key) $ do
     (stateWid, ctx) <- freshWidget
@@ -470,9 +469,9 @@ tableConfigured cfg f key cols inputRows curSort =
         sort0 = clampSortCol n curSort
         stateKey = intKey stateWid
     inp <- askInput
-    st0 <- uiIO (getStore ctx)
+    st0 <- liftIO (getStore ctx)
     TableDerived {tdHeaders = hdrs, tdEncoded = encoded, tdWidths = contentWs, tdNumeric = numeric, tdOrder = sorted} <-
-      uiIO (tableDerived ctx stateKey cols inputRows sort0)
+      liftIO (tableDerived ctx stateKey cols inputRows sort0)
     let sizes = smallArrayFromList (tableColSizes cfg)
         -- The column order and the widths columns were dragged to.
         (storedOrder, storedWidths) = fromMaybe ([0 .. n - 1], []) (lookupDyn stateKey st0)
@@ -551,7 +550,7 @@ tableConfigured cfg f key cols inputRows curSort =
           (lo, hi) <-
             if scrollN == 0
               then pure (0, -1)
-              else uiIO $ do
+              else liftIO $ do
                 V2 _ scrollY <- getScrollOffset2D ctx vWid
                 viewH <- maybe (rowMinH * 8) rectH <$> getPrevRect ctx vWid
                 pure (listClipper scrollN scrollY viewH rowMinH)
@@ -595,7 +594,7 @@ tableConfigured cfg f key cols inputRows curSort =
                 -- The body scroller has no padding, so its whole lane is gutter.
                 when hasVertBar $ void (spacer (Fixed (scrollBarGutter ScrollBarList 0)) Fit)
                 pure hs'
-            uiIO (linkScrollAxes ctx vWid hWid)
+            liftIO (linkScrollAxes ctx vWid hWid)
             -- The body owns both scrollbars.
             scrollAreaIdConfigured
               vWid
@@ -634,7 +633,7 @@ tableConfigured cfg f key cols inputRows curSort =
             HeaderReorder _ -> (False, True)
             HeaderIdle -> (False, False)
           resizing = isResize && heldIn MouseLeft inp
-      unless (null edgeZones) . uiIO $
+      unless (null edgeZones) . liftIO $
         -- Strict in the spine and the rects, so no thunk waits in the IORef.
         modifyIORef' (ctxCursorZones ctx) (\zs -> foldl' (\acc (_, !r) -> (r, UiCursorEwResize) : acc) zs edgeZones)
       (vis', mReorder) <-
@@ -678,7 +677,7 @@ tableConfigured cfg f key cols inputRows curSort =
             setChanged hasChanged $
               setClicked (hasChanged && isJust sortClick) (mconcat (map snd headerPairs ++ maybe [] pure showAllResp))
       -- Compare before writing, so an idle table writes nothing.
-      uiIO . writeSlots ctx $
+      liftIO . writeSlots ctx $
         SlotWrites (\st -> lookupDyn stateKey st == Just (nextOrder, widths1)) (insertDyn stateKey (nextOrder, widths1))
           <> slotWrite fieldIntSet stateKey nextHidden
           <> slotWrite fieldInt (slotKey SlotDrag stateKey) (packHeaderDrag nextDrag)
@@ -686,12 +685,12 @@ tableConfigured cfg f key cols inputRows curSort =
           <> slotWrite fieldFloat (slotKey SlotDragW stateKey) nextDragW
       -- Keep the resize cursor for the whole drag, wherever the pointer is.
       case nextDrag of
-        HeaderResize _ | heldIn MouseLeft inp -> uiIO (modifyInteraction ctx (\s -> s {isColumnResize = True}))
+        HeaderResize _ | heldIn MouseLeft inp -> liftIO (modifyInteraction ctx (\s -> s {isColumnResize = True}))
         _ -> pure ()
       pure (TableResponse widgetResp nextSort nextOrder nextHidden)
 
 -- | One row of cells with custom row layout.
-gridColumnsLay :: (Ui :> es) => Layout -> [Int] -> [Layout] -> [Eff es ()] -> Eff es ()
+gridColumnsLay :: Layout -> [Int] -> [Layout] -> [NanoUI ()] -> NanoUI ()
 gridColumnsLay lay keys layouts cells =
   void (row' lay (go True keys layouts cells))
  where

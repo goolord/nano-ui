@@ -48,7 +48,6 @@ module SdlDemo
 
 import Control.Exception (SomeException, displayException, evaluate, try)
 import Control.Monad (forM, forM_, unless, void, when)
-import Control.Monad.IO.Class (liftIO)
 import Data.Foldable (for_, toList)
 import Data.List (elemIndex)
 import Data.Maybe (catMaybes, fromMaybe, isJust, isNothing, listToMaybe, mapMaybe)
@@ -877,7 +876,7 @@ tableSortDirText s =
 -- §7  Pane grid demo
 ------------------------------------------------------------------------------
 
-demoPaneGridCfg :: Bool -> PaneGridConfig NanoUIEs
+demoPaneGridCfg :: Bool -> PaneGridConfig
 demoPaneGridCfg showHeader =
   defaultPaneGridConfig
     { pgLayout = fillW . fixedH 380
@@ -897,7 +896,7 @@ demoPaneTitle pid maximized =
 -- 'showHeader' 'False' drops it and the pane becomes a bare canvas body. The
 -- whole pane is still a drag handle either way ('pvDraggable'), so a headerless
 -- pane can be grabbed anywhere to reorder it.
-demoPaneHeader :: Word64 -> Bool -> PaneGridCtx NanoUIEs -> NanoUI ()
+demoPaneHeader :: Word64 -> Bool -> PaneGridCtx -> NanoUI ()
 demoPaneHeader pid maximized pctx =
   rowWith (tight . gap gapMicro . alignMid . fillW) $ do
     box (alignMid . fixedWH 3 16) demoAccent
@@ -909,7 +908,7 @@ demoPaneHeader pid maximized pctx =
     whenM (button "x") (pgcClose pctx)
 
 -- | Each pane is a card, so panes stay distinct with the headers off.
-demoPaneView :: Bool -> Word64 -> PaneGridCtx NanoUIEs -> NanoUI PaneView
+demoPaneView :: Bool -> Word64 -> PaneGridCtx -> NanoUI PaneView
 demoPaneView showHeader pid pctx = do
   let maximized = pgcMaximized pctx
   panelWith (padAll gapLayout . gap gapLayout . grow) $ do
