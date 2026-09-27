@@ -23,7 +23,7 @@ import NanoUI.Internal.Context
 import NanoUI.Internal.Draw (pushRect, pushText)
 import NanoUI.Internal.Font
 import NanoUI.Internal.Frame.Chrome (overlayMenuStyle, paintMenuAccent, paintMenuPanel)
-import NanoUI.Internal.Frame.Hit (findNodeByWidgetId, nodeClippedHit, overlayHitAllowed, overlayHitRoot, reachedWidgetAt, widgetOverlayAllowed)
+import NanoUI.Internal.Frame.Hit (findNodeByWidgetId, reachedWidgetAt, widgetOverlayAllowed)
 import NanoUI.Internal.Frame.TextArea (isMouseOnTextAreaScrollBarAt)
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Input
@@ -139,26 +139,23 @@ openTextEditMenu ctx inp =
       markDirty ctx
 
 -- | The enabled text field or text area the pointer at @mouse@ is on, which
--- takes the text cursor and the right-click menu. Excludes a field covered
--- there by a stack or pinned node ('topmostHit') and one whose inner
--- control has the pointer ('innermostHit').
+-- takes the text cursor and the right-click menu: the widget hover lands on
+-- ('reachedWidgetAt'), when it is one. Excludes a field covered there by a
+-- stack or pinned node and one whose inner control has the pointer.
 textFieldWidgetAtMouse :: Context -> V2 -> IO (Maybe WidgetId)
-textFieldWidgetAtMouse ctx@Context {ctxNodeArena = na} mouse = do
-  top <- overlayHitRoot ctx mouse
-  mIdx <-
-    findClassNodeRevM na PointerNodes $ \idx -> do
-      nt <- getNodeType na idx
-      pure (nt == NodeTextInput || nt == NodeTextArea) <&&> do
-        wid <- getWidgetId na idx
-        rect <- getNodeRect na idx
-        (not <$> isDisabled ctx wid)
-          <&&> nodeClippedHit ctx idx rect mouse
-          <&&> overlayHitAllowed ctx top idx
-          <&&> (if nt == NodeTextArea then not <$> isMouseOnTextAreaScrollBarAt ctx idx mouse else pure True)
-  case mIdx of
+textFieldWidgetAtMouse ctx@Context {ctxNodeArena = na} mouse =
+  reachedWidgetAt ctx mouse >>= \case
     Nothing -> pure Nothing
-    -- Accept it only if hover would land on it too.
-    Just idx -> ifM ((== Just idx) <$> reachedWidgetAt ctx mouse) (Just <$> getWidgetId na idx) (pure Nothing)
+    Just idx -> do
+      nt <- getNodeType na idx
+      wid <- getWidgetId na idx
+      ifM
+        ( pure (nt == NodeTextInput || nt == NodeTextArea)
+            <&&> (not <$> isDisabled ctx wid)
+            <&&> (if nt == NodeTextArea then not <$> isMouseOnTextAreaScrollBarAt ctx idx mouse else pure True)
+        )
+        (pure (Just wid))
+        (pure Nothing)
 
 -- | A press on a command row runs it when it can run, recorded for the caller
 -- ('NanoUI.Internal.Context.takeTextEditLastAction'); a press elsewhere on the
