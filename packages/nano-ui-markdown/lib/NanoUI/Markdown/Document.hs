@@ -12,7 +12,9 @@
 -- of fenced code (reparsed after the table header or the fence), or a block
 -- quote's block after the first that is not directly under a paragraph. So an
 -- append costs the new text plus the last list item, table row, code line or
--- quote block, or otherwise the last block.
+-- quote block, or otherwise the last block. Plain words added to a
+-- paragraph that ends the text join its last line without a parse (see
+-- 'plainAppend').
 --
 -- The rest is parsed with the link reference definitions before it. If the
 -- rest's new definitions differ from those the closed blocks were parsed
@@ -31,9 +33,10 @@ module NanoUI.Markdown.Document
 
 import Control.DeepSeq (NFData, deepseq, rnf)
 import Control.Monad (guard)
+import Data.Char (isAlpha, isAlphaNum)
 import Data.Containers.ListUtils (nubOrd)
 import Data.Foldable (toList)
-import Data.List (find)
+import Data.List (find, unsnoc)
 import Data.Map.Strict qualified as M
 import Data.Maybe (fromMaybe, isJust, listToMaybe, mapMaybe)
 import Data.Sequence (Seq)
@@ -65,6 +68,8 @@ data MarkdownDoc = MarkdownDoc
   -- ^ The text after the closed blocks.
   , docLast :: ![Block]
   -- ^ Blocks of the rest; the first continues 'docOpen'.
+  , docTail :: !Tail
+  -- ^ Whether the rest ends in a paragraph 'plainAppend' can add to.
   }
 
 instance Eq MarkdownDoc where
@@ -93,6 +98,15 @@ data Open
 
 instance NFData Open
 
+-- | Whether 'plainAppend' can add to the end of the rest.
+data Tail
+  = NoTail
+  | -- | The rest ends in a top-level paragraph that defines no link
+    -- references and whose first line does not start with @[@, as it could
+    -- still become a definition whose title closes later. The flag says
+    -- whether the paragraph is one line long.
+    TailPara !Bool
+
 -- | Lines prepended to the rest when parsing it, to restart the block.
 reopen :: Open -> Text
 reopen = \case
@@ -102,7 +116,7 @@ reopen = \case
 
 -- | A document with no text.
 emptyMarkdown :: MarkdownDoc
-emptyMarkdown = MarkdownDoc 0 [] Seq.empty Fresh mempty mempty "" []
+emptyMarkdown = MarkdownDoc 0 [] Seq.empty Fresh mempty mempty "" [] NoTail
 
 -- | Parse a whole document. Keep the result in your model rather than
 -- parsing the text again every frame.
@@ -148,11 +162,13 @@ parseMarkdownBlocks = markdownBlocks . parseMarkdown
 
 -- | Append text to a document. This costs the new text plus the rest after
 -- the closed blocks (see "NanoUI.Markdown.Document"), or the whole text when
--- the rest changes a link reference definition. Append a frame's tokens in
--- one call rather than one at a time.
+-- the rest changes a link reference definition, but only the new text for
+-- plain words added to a paragraph. Append a frame's tokens in one call
+-- rather than one at a time.
 appendMarkdown :: Text -> MarkdownDoc -> MarkdownDoc
 appendMarkdown new doc
   | T.null new = doc
+  | Just doc' <- plainAppend new doc = doc'
   | otherwise =
       fromMaybe
         (parseMarkdown (markdownSource doc <> new))
@@ -193,8 +209,63 @@ resume doc rest = do
               , docPending = freshRefs `M.difference` known
               , docRest = rest'
               , docLast = spine (mapMaybe nodeBlock opened)
+              , docTail = tailOf input opened
               }
-    _ -> doc {docRest = rest, docPending = refs, docLast = spine (mapMaybe nodeBlock nodes)}
+    _ -> doc {docRest = rest, docPending = refs, docLast = spine (mapMaybe nodeBlock nodes), docTail = tailOf input nodes}
+
+-- | The 'Tail' of a rest, given its blocks and the text they were parsed
+-- from.
+tailOf :: Text -> [Node] -> Tail
+tailOf input nodes = case unsnoc nodes of
+  Just (_, Node {nodeLines = (first, end), nodeBlock = Just (Paragraph _), nodeRefs = defs, nodeShape = Para})
+    | M.null defs
+    , T.take 1 (T.dropWhile isBlank (snd (splitLines (first - 1) input))) /= "[" ->
+        TailPara (first == end)
+  _ -> NoTail
+
+-- | Add plain words to the paragraph that ends the rest without parsing,
+-- when the parse would only make the paragraph's last 'Str' longer by them.
+-- That holds when the words have no character Markdown gives a meaning to
+-- and no @www.@, which starts a web address; the paragraph's last line
+-- starts with a letter, or on its first line also a digit, so the words
+-- cannot turn it into the start of a block; and the words follow a space, or
+-- are letters with closing punctuation after a letter, so they cannot close
+-- or change an inline before them. 'Nothing' when it may not hold.
+plainAppend :: Text -> MarkdownDoc -> Maybe MarkdownDoc
+plainAppend new doc = do
+  TailPara oneLine <- Just (docTail doc)
+  guard (T.all plain new && not ("www." `T.isInfixOf` T.toLower new))
+  (blocks, Paragraph xs) <- unsnoc (docLast doc)
+  (before, Str s) <- unsnoc xs
+  -- A space that ends the Str (from an entity, or before an HTML comment the
+  -- parse dropped) is not one the parse strips from the end of the text.
+  (_, end) <- T.unsnoc s
+  guard (not (isBlank end))
+  let line = T.takeWhileEnd (\c -> c /= '\n' && c /= '\r') (docRest doc)
+      spaces = T.takeWhileEnd isBlank line
+  (lead, _) <- T.uncons (T.dropWhile isBlank line)
+  guard (if oneLine then isAlphaNum lead else isAlpha lead)
+  guard $
+    not (T.null spaces)
+      || T.take 1 new == " "
+      || (isAlpha end && joins (T.takeWhile (not . isBlank) new))
+  let !s' = T.dropWhileEnd isBlank (s <> spaces <> new)
+  pure
+    doc
+      { docLength = docLength doc + T.length new
+      , docRest = docRest doc <> new
+      , docLast = spine (blocks ++ [Paragraph (spine (before ++ [Str s']))])
+      }
+  where
+    plain c = isAlphaNum c || c `elem` (" ,;?!:.'\"-" :: String)
+    -- Letters, digits, apostrophes and hyphens, then closing punctuation.
+    joins w =
+      T.all (\c -> isAlphaNum c || c == '\'' || c == '-') $
+        T.dropWhileEnd (`elem` (".,?!:\"" :: String)) w
+
+-- | A space or a tab, which a line's text is indented and ended with.
+isBlank :: Char -> Bool
+isBlank c = c == ' ' || c == '\t'
 
 -- | Force a list's spine and elements so it retains nothing of the parse.
 spine :: [a] -> [a]

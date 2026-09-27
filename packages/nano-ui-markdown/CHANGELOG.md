@@ -9,10 +9,11 @@
   HTML shown as text without its comments; `appendMarkdown`, which keeps the
   blocks that appended text cannot change and parses again only the rest, down
   to the last item of a list, row of a table, line of fenced code or block of a
-  quote; and `markdown`, which draws one with rich text and returns the link
-  clicked. Documents are equal when their texts are. `NFData` instances for
-  the syntax types. Task items draw nano-ui's checkbox, headings scale the
-  backend's default font size, and a drawn image shows its title as a tooltip.
+  quote, and adds plain words to a paragraph without parsing it; and
+  `markdown`, which draws one with rich text and returns the link clicked.
+  Documents are equal when their texts are. `NFData` instances for the syntax
+  types. Task items draw nano-ui's checkbox, headings scale the backend's
+  default font size, and a drawn image shows its title as a tooltip.
 - `MarkdownConfig es` carries the view's effect row, for `mdBlock`, which
   draws any block, at any depth, your own way (syntax highlighting, images
   loaded as they are drawn, chrome of your own), given the widget's own

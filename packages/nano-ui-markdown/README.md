@@ -63,7 +63,9 @@ unless the reply ends in one long block that is not split this way, which is
 parsed whole: a paragraph, a list or code block inside a list item or a block
 quote, indented code, or an HTML block. Every append parses that rest again, so
 on the UI thread, appending the tokens of a frame one at a time costs more for
-nothing.
+nothing. The exception is plain words (letters, digits, spaces and common
+punctuation) added to a paragraph that ends the reply, after a space or to a
+word: they join its last line without a parse.
 
 Text after link reference definitions is parsed with them. An append that adds
 or changes a definition after other blocks parses the whole reply again, as
