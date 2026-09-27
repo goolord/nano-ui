@@ -17,6 +17,7 @@ tests =
   , pixelSpec "tabs-disabled" runTabsDisabledTest
   , spec "tabs-scroll" runTabsScrollTest
   , spec "tabs-scroll-widen" runTabsScrollWidenTest
+  , spec "tabs-scroll-close-button" runTabsScrollCloseButtonTest
   , spec "tabs-state-persistence" runTabsStatePersistenceTest
   , spec "tabs-bodies-apart" runTabsBodiesApartTest
   , spec "tabs-damage" runTabsDamageTest
@@ -140,6 +141,35 @@ runTabsScrollWidenTest _ failed = do
       spans <- collectTextSpans ctx
       forM_ labels $ \l -> assert failed (hasText l spans)
       assert failed . not =<< hasArrows ctx
+    _ -> assert failed False
+
+-- A strip whose last close button runs past the bar overflows, though every
+-- header's main button fits: the range counts each header's close button.
+runTabsScrollCloseButtonTest :: Context -> IORef Int -> IO ()
+runTabsScrollCloseButtonTest _ failed = do
+  let labels = ["Controls", "Graphics", "Typography"]
+      mkTabs = tabBar (0 :: Int) [closableTab i l () | (i, l) <- zip [0 ..] labels]
+      nodeRects ctx p = do
+        let na = ctxNodeArena ctx
+        n <- arenaCount na
+        fmap concat . forM [0 .. n - 1] $ \i -> do
+          t <- getText na i
+          if p t then pure <$> getNodeRect na i else pure []
+      hasArrows ctx = do
+        spans <- collectTextSpans ctx
+        pure (T.any (`elem` ['\8250', '\8249']) (T.concat [t | (_, t, _, _, _) <- spans]))
+  wide <- newContext
+  _ <- warmup2 wide (withInput 900 120) mkTabs
+  firsts <- nodeRects wide (== "Controls")
+  closes <- nodeRects wide (== "\215")
+  case firsts of
+    Rect x0 _ _ _ : _ | length closes == length labels -> do
+      -- The last close button's right edge, less a little, plus the
+      -- window's right padding: only that button runs past the bar.
+      let clipW = maximum [rectX r + rectW r | r <- closes] - 4 + x0
+      ctx <- newContext
+      replicateM_ 3 (runFrame ctx (withInput clipW 120) mkTabs)
+      assert failed =<< hasArrows ctx
     _ -> assert failed False
 
 findCloseButtonRect :: Context -> IO (Maybe Rect)

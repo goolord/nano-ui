@@ -180,6 +180,7 @@ scrollableHeaders ctx groupId barGap cur headers = do
     measure = do
       mView <- getPrevRect ctx (if overflow then scrollWid else groupId)
       mBarNow <- if overflow then getPrevRect ctx groupId else pure Nothing
+      -- A header's extent carries its rightmost button's id.
       rights <- mapM (fmap (maybe 0 (\r -> rectX r + rectW r)) . getPrevRect ctx . respId . snd) hdrs
       o <- getScrollOffset ctx scrollWid
       let extent vx = maximum (0 : rights) - vx + (if overflow then o else 0)
@@ -219,7 +220,8 @@ scrollableHeaders ctx groupId barGap cur headers = do
   pure tabResp
 
 -- | The headers and the selection after this frame's clicks, with each
--- header's key and response for the scrolling strip.
+-- header's key and extent (its close button included) for the scrolling
+-- strip.
 renderHeaders ::
   Eq a =>
   Context ->
@@ -229,20 +231,21 @@ renderHeaders ::
   NanoUI (TabResponse a, [(a, Response)])
 renderHeaders ctx tabStyle cur tabList = do
   hdrs <- zipWithM (\i t -> withKey i (renderHeader tabStyle cur t)) [0 :: Int ..] tabList
-  let clickedKeys = [k | (k, r, False) <- hdrs, respClicked r]
-      closedKey = listToMaybe [k | (k, _, True) <- hdrs]
-      keyed = [(k, r) | (k, r, _) <- hdrs]
+  let clickedKeys = [k | (k, r, False, _) <- hdrs, respClicked r]
+      closedKey = listToMaybe [k | (k, _, True, _) <- hdrs]
+      keyed = [(k, r) | (k, r, _, _) <- hdrs]
       nextTab = fromMaybe cur (listToMaybe clickedKeys)
       hasChanged = nextTab /= cur
       resp = setChanged hasChanged (setClicked (not (null clickedKeys)) (foldMap snd keyed))
   when (hasChanged || isJust closedKey) requestFrame
   liftIO (moveSelection ctx cur nextTab keyed)
-  pure (TabResponse resp closedKey nextTab, keyed)
+  pure (TabResponse resp closedKey nextTab, [(k, e) | (k, _, _, e) <- hdrs])
 
--- | One header: its key, its response, and whether it was closed (close
--- button clicked, or header or close button middle-clicked, as in a
--- browser).
-renderHeader :: Eq a => Int -> a -> Tab a body -> NanoUI (a, Response, Bool)
+-- | One header: its key, its response, whether it was closed (close button
+-- clicked, or header or close button middle-clicked, as in a browser), and
+-- its whole extent: the response combined with the close button's, whose
+-- rect spans both and whose id is the rightmost button's.
+renderHeader :: Eq a => Int -> a -> Tab a body -> NanoUI (a, Response, Bool, Response)
 renderHeader tabStyle cur t = do
   let headerText = maybe (tabTitle t) (\b -> mconcat [tabTitle t, " (", b, ")"]) (tabBadge t)
       headerButton = buttonStyledEx (not (tabDisabled t))
@@ -252,8 +255,9 @@ renderHeader tabStyle cur t = do
       resp <- mainButton
       closeResp <-
         headerButton "\215" 0 (tabHeaderLay {layoutPadding = Padding 2 4 4 4}) buttonFlagClose
-      pure (tabKey t, resp, respClicked closeResp || respClickedWith MouseMiddle resp || respClickedWith MouseMiddle closeResp)
-    else (tabKey t,,False) <$> mainButton
+      let closed = respClicked closeResp || respClickedWith MouseMiddle resp || respClickedWith MouseMiddle closeResp
+      pure (tabKey t, resp, closed, resp <> closeResp)
+    else (\resp -> (tabKey t, resp, False, resp)) <$> mainButton
 
 -- | Tab headers and the active tab's body. Pass the active key; the result is
 -- the active key after this frame's clicks, or Enter or Space on a focused
