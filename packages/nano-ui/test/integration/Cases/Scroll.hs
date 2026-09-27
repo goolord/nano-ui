@@ -205,30 +205,37 @@ runScrollTextDamageTest ctx failed = do
 -- Ghosting guard: a grow×grow (page-level) scroll container paints no well,
 -- so on clip frames the strip vacated by scrolled content has no covering
 -- command and the retained texture would show stale pixels, a ghost of a
--- previous scroll position. Every frame must emit a full-viewport fill (the
--- window-color backdrop) so clip replay repaints the whole viewport.
+-- previous scroll position. Every clip frame must emit a full-viewport fill
+-- (the window-color backdrop) so clip replay repaints the whole viewport. A
+-- full frame starts from the runner's clear to the window colour, so there
+-- the fill is left out, unless something was drawn under the scroller or a
+-- scope gives it another window colour.
 runPageScrollBackdropCoverageTest :: Context -> IORef Int -> IO ()
 runPageScrollBackdropCoverageTest ctx failed = do
+  theme <- readIORef (ctxTheme ctx)
   let inp0 = withInputOff 300 220
-      ui = fmap fst $
-        scrollArea
-          grow
-          (column (replicateM 20 (label "scroll backdrop line") >> pure ()))
-  sid <- warmup2 ctx inp0 ui
-  setScrollOffset ctx sid 120
-  _ <- runFrame ctx inp0 ui
-  (_, _, draw, _) <- runFrame ctx inp0 ui
-  assertJustM failed (getPrevRect ctx sid) $ \(Rect rx ry rw rh) -> do
-    quads <- drawQuads draw
-    let covered =
-          any
-            (\(Rect qx qy qw qh, _) ->
+      page around = fmap fst $ around $ scrollArea grow (column (replicateM_ 20 (label "scroll backdrop line")))
+      other = theme {themeWindow = colorRGBA 1 2 3 255}
+      -- Whether the frame after @prep@ fills the scroller's viewport.
+      backdrop ui prep = do
+        sid <- warmup2 ctx inp0 ui
+        prep sid
+        (_, _, draw, _) <- runFrame ctx inp0 ui
+        quads <- drawQuads draw
+        getPrevRect ctx sid >>= \case
+          Nothing -> False <$ assert failed False
+          Just (Rect rx ry rw rh) ->
+            pure $ flip any quads $ \(Rect qx qy qw qh, _) ->
               abs (qx - rx) <= 0.6
                 && abs (qy - ry) <= 0.6
                 && abs (qx + qw - (rx + rw)) <= 0.6
-                && abs (qy + qh - (ry + rh)) <= 0.6)
-            quads
-    assert failed covered
+                && abs (qy + qh - (ry + rh)) <= 0.6
+  writeIORef (ctxPaintFull ctx) False
+  backdrop (page id) (\sid -> setScrollOffset ctx sid 120 >> void (runFrame ctx inp0 (page id))) >>= assert failed
+  writeIORef (ctxPaintFull ctx) True
+  backdrop (page id) (const (pure ())) >>= assert failed . not
+  backdrop (page (themed other)) (const (pure ())) >>= assert failed
+  backdrop (page panel) (const (pure ())) >>= assert failed
 
 -- A label far taller than its scroller draws only the lines near the
 -- viewport: its quads stay few however long the text is, and every row of

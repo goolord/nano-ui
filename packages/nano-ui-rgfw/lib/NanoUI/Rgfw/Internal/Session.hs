@@ -405,7 +405,11 @@ runRgfwAppReduceCustom opts getThemeAndScale updateModel initialModel view = inB
                   (baseSpans, overlaySpans) <- collectRasterSpans c curInp
                   pieces <- if paintFull then pure [] else takeDamagePieces c
                   syncImagesGl renderer c
-                  renderArenaGl renderer font curScale pw ph (themeWindow frameTheme)
+                  -- The window colour of the theme the frame was painted in,
+                  -- which a view's 'setUiTheme' may have changed: a full
+                  -- frame leaves the page backdrop to this clear.
+                  paintedTheme <- readIORef (ctxTheme c)
+                  renderArenaGl renderer font curScale pw ph (themeWindow paintedTheme)
                       (if paintFull then DamageFull else damage) pieces drawData baseSpans overlaySpans
                   writeIORef presentedRef $! (pw, ph, curScale)
                   tSwapStart <- getMonotonicTime

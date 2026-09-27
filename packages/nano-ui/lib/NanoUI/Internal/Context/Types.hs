@@ -838,7 +838,11 @@ data Context = Context
   , ctxLastMetricSource :: !(IORef (Maybe MetricSource))
   -- | True when the next present must repaint the whole window (fresh retain
   -- texture, forced full, continuous present, or window expose). When False,
-  -- a DamageClip frame culls the paint pass to the damaged region.
+  -- a DamageClip frame culls the paint pass to the damaged region. A backend
+  -- that sets it clears the target to the
+  -- 'NanoUI.Internal.Style.themeWindow' of 'ctxTheme', as
+  -- it is after the frame, before it draws the frame: paint leaves out a
+  -- page scroller's backdrop that would only repeat that clear.
   , ctxPaintFull :: !(IORef Bool)
   -- | Layout overlay state.
   , ctxExplain :: !(IORef ExplainState)

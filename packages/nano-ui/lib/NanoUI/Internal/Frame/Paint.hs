@@ -14,6 +14,7 @@ module NanoUI.Internal.Frame.Paint
 
 import Control.Monad (forM_, unless, when)
 import Data.Bits ((.&.))
+import Data.IORef (readIORef)
 import Data.Maybe (fromMaybe, isJust)
 import Data.Primitive.PrimArray
   ( PrimArray
@@ -256,7 +257,24 @@ paintScrollContainerNode env idx rect@(Rect x y w h) = do
     wTag <- axTag <$> getWidthSizing arena idx
     hTag <- axTag <$> getHeightSizing arena idx
     if wTag == SizingGrow && hTag == SizingGrow
-      then pushRect da rect (if inFloating then styleBg (themeFloatingWindow tm) else themeWindow tm)
+      then do
+        let bg = if inFloating then styleBg (themeFloatingWindow tm) else themeWindow tm
+        -- A full frame starts from the runner's clear to the base theme's
+        -- window colour ('ctxPaintFull'). Drawn first, in that same opaque
+        -- colour, the backdrop would only fill the cleared pixels again: a
+        -- whole-window blend on every continuous frame. Anything drawn
+        -- before it (a panel, a card, a layer below), a scope's other
+        -- window colour or a translucent one still needs it, as clip
+        -- frames do.
+        redundant <-
+          if inFloating || colorA bg /= 255
+            then pure False
+            else do
+              full <- readIORef (ctxPaintFull ctx)
+              drawn <- drawnVertexCount da
+              base <- readIORef (ctxTheme ctx)
+              pure (full && drawn == 0 && bg == themeWindow base)
+        unless redundant $ pushRect da rect bg
       else do
         let well = (if inFloating then themeFloatingWindow tm else themeInput tm) {styleCornerRadius = 0}
         paintStyledRect da well rect

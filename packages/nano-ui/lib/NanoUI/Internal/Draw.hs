@@ -30,6 +30,7 @@ module NanoUI.Internal.Draw
   , withClip
   , finishDraw
   , drawCmdCount
+  , drawnVertexCount
   , drawCmdNull
   , forDrawCmdsInLayer_
   , drawCmdElems

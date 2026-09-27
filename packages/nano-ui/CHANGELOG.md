@@ -825,6 +825,14 @@
   the id and look (`ImagePaint`, in `pfImages` in place of `pfLooks`). A
   frame of 600 images allocates 256 KB instead of 692 KB, or 842 KB instead
   of 1.8 MB with a look, taking 0.55 ms instead of 0.9 ms.
+- A full frame no longer draws a page scroller's window-coloured backdrop
+  over the runner's clear to the same colour, one blended fill of the whole
+  window each continuous frame (1 Mpx at 1280x800, 4 Mpx at 2x). Clip
+  frames still draw it, and so does a full frame where something is drawn
+  under the scroller, a scope gives it another window colour, or the colour
+  is translucent. A backend that sets `ctxPaintFull` clears the target to
+  the frame's `themeWindow` first, as the SDL and RGFW runners do. Under
+  software GL the SDL demo presents 100 frames a second instead of 77.
 
 ### Fixed
 

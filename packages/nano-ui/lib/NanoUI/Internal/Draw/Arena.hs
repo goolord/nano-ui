@@ -25,6 +25,7 @@ module NanoUI.Internal.Draw.Arena
   , reserveRaw
   , commitRaw
   , withVertsReserve
+  , drawnVertexCount
   , pushQuad
   , snapRectOrigin
   , unpackColorF
@@ -439,6 +440,12 @@ commitRaw :: DrawArena -> Int -> Int -> Int -> Int -> IO ()
 commitRaw da base baseIdx nv ni = do
   setCount da vertexCountSlot (base + nv)
   setCount da indexCountSlot (baseIdx + ni)
+
+-- | Vertices recorded so far this frame, in every layer: 0 before the
+-- frame's first geometry.
+{-# INLINE drawnVertexCount #-}
+drawnVertexCount :: DrawArena -> IO Int
+drawnVertexCount da = getCount da vertexCountSlot
 
 {-# INLINE pushQuad #-}
 pushQuad :: DrawArena -> Rect -> Float -> Float -> Float -> Float -> Color -> IO ()
