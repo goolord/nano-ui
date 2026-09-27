@@ -262,6 +262,9 @@ data SdlEnv = SdlEnv
   -- height in window coordinates (zero for none), which nano-ui sends to the
   -- compositor before each present instead of giving them to SDL.
   -- 'Nothing' elsewhere, where SDL keeps them.
+  , sdlSizeLimitsSent :: !(IORef Bool)
+  -- ^ Whether the limits last sent from 'sdlSizeLimits' were any, so none
+  -- are sent again only to clear them.
   }
 
 -- | The retained framebuffer. The texture is allocated in blocks larger than
@@ -543,6 +546,7 @@ startSdlWindow bench opts ctx guessedDriver fontSource monoSource = do
   sdlSizeLimits <- liftIO $ do
     toplevel <- waylandToplevel sdlWindow
     if toplevel /= 0 then Just <$> newIORef (0, 0, 0, 0) else pure Nothing
+  sdlSizeLimitsSent <- liftIO $ newIORef False
   sdlBatch <- mkAcquire (newRenderBatch sdlRenderer) destroyRenderBatch
   let
     env = SdlEnv {..}

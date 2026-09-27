@@ -160,7 +160,7 @@ bool nano_ui_wayland_toplevel(SDL_Window *window)
 }
 
 /* SDL sends its own limits (none) with every configure, so these are sent
- * again before each commit. Zero is no limit. A window that cannot be resized
+ * again before each commit, while there are any. Zero is no limit. A window that cannot be resized
  * or is fullscreen keeps what SDL sends: its size, or nothing. */
 void nano_ui_wayland_size_limits(SDL_Window *window, int min_w, int min_h, int max_w, int max_h)
 {
