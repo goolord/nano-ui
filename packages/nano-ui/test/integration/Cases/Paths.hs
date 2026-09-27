@@ -688,6 +688,9 @@ runShapesAndInverseTest _ failed = do
   assertLt failed (abs (areaOf (P.roundedRectCorners (Rect 0 0 100 60) 60 60 0 0) - (6000 - 2 * quarterCut 50))) (2 * flat 50)
   assert failed (filled (P.roundedRectCorners (Rect 0 0 10 10) 0 0 (-3) 0) == filled (P.rect (Rect 0 0 10 10)))
   assert failed (filled (P.roundedRect (Rect 0 0 40 20) 6) == filled (P.roundedRectCorners (Rect 0 0 40 20) 6 6 6 6))
+  -- A negative width or height spans the same rectangle.
+  forM_ [Rect 50 0 (-50) 30, Rect 0 30 50 (-30), Rect 50 30 (-50) (-30)] $ \r ->
+    assert failed (filled (P.roundedRectCorners r 5 8 0 3) == filled (P.roundedRectCorners (Rect 0 0 50 30) 5 8 0 3))
   let t = P.translate 3 (-2) <> P.rotate 0.4 <> P.scale 2 (-0.5) <> P.affine 1 0.3 0 1 0 0
       pts = [V2 1 2, V2 (-40) 7, V2 0 0]
   case P.invert t of

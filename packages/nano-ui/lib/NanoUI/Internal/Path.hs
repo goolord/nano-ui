@@ -209,21 +209,24 @@ roundedRect box radius = roundedRectCorners box radius radius radius radius
 -- | A rectangle with a radius per corner, in CSS @border-radius@ order: top
 -- left, top right, bottom right, bottom left. If two corners on a side would
 -- overlap, all radii shrink by the same factor, as in CSS. A negative radius
--- gives a square corner.
+-- gives a square corner. A rectangle with a negative width or height is
+-- the one it spans, with the radii on its corners as seen on screen.
 roundedRectCorners :: Rect -> Float -> Float -> Float -> Float -> Path
-roundedRectCorners box@(Rect x y w h) tl0 tr0 br0 bl0
+roundedRectCorners box@(Rect x0 y0 w h) tl0 tr0 br0 bl0
   | tl <= 0 && tr <= 0 && br <= 0 && bl <= 0 = rect box
   | otherwise =
       Path
         [ SegMove (x + tl) y
-        , corner (x + w - tr) (y + tr) tr (-pi / 2)
-        , corner (x + w - br) (y + h - br) br 0
-        , corner (x + bl) (y + h - bl) bl (pi / 2)
+        , corner (x + aw - tr) (y + tr) tr (-pi / 2)
+        , corner (x + aw - br) (y + ah - br) br 0
+        , corner (x + bl) (y + ah - bl) bl (pi / 2)
         , corner (x + tl) (y + tl) tl pi
         , SegClose
         ]
   where
     positive r = if r > 0 then r else 0
+    x = min x0 (x0 + w)
+    y = min y0 (y0 + h)
     aw = abs w
     ah = abs h
     -- The factor that fits a side's two radii within its length.
