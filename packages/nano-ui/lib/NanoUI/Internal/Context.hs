@@ -90,6 +90,7 @@ module NanoUI.Internal.Context
   , getHotId
   , registerFocusable
   , getFocusables
+  , isFocusable
   , requestInputMethod
   , fieldComposition
   , AnimationState (..)
@@ -688,3 +689,14 @@ getFocusables ctx = do
   count <- readIORef (ctxFocusablesCount ctx)
   arr <- readIORef (ctxFocusables ctx)
   forM [0 .. count - 1] (readPrimArray arr)
+
+-- | Whether @wid@ registered as focusable this frame ('registerFocusable'),
+-- without copying the list.
+isFocusable :: Context -> WidgetId -> IO Bool
+isFocusable ctx wid = do
+  count <- readIORef (ctxFocusablesCount ctx)
+  arr <- readIORef (ctxFocusables ctx)
+  let go i
+        | i >= count = pure False
+        | otherwise = readPrimArray arr i >>= \w -> if w == wid then pure True else go (i + 1)
+  go 0

@@ -16,6 +16,7 @@ tests =
   , spec "focus-request-none" runFocusRequestNoneTest
   , spec "focus-request-refused" runFocusRequestRefusedTest
   , spec "focus-request-modal" runFocusRequestModalTest
+  , spec "focus-request-behind-modal" runFocusRequestBehindModalTest
   , spec "focus-request-blurs-previous" runFocusRequestBlursPreviousTest
   , spec "focus-request-damage" runFocusRequestDamageTest
   , spec "focus-request-first-pass" runFocusRequestFirstPassTest
@@ -122,6 +123,24 @@ runFocusRequestModalTest ctx failed = do
     _ <- ask [r] inp >> warmup ctx inp ui
     assertEq failed r =<< getFocusId ctx
     assertEq failed (False, r) =<< ask [page] inp
+
+-- | A view asking every frame for a field behind an open modal never focuses
+-- it, and focuses it once the modal closes.
+runFocusRequestBehindModalTest :: Context -> IORef Int -> IO ()
+runFocusRequestBehindModalTest ctx failed = do
+  open <- newIORef True
+  let ui = column $ do
+        (page, _) <- textInput' "page"
+        requestFocus (respId page)
+        shown <- uiIO (readIORef open)
+        when shown $ void (modal True "Dialog" (textInput' "inside"))
+        pure (respId page)
+  _ <- warmup2 ctx inp ui
+  replicateM_ 3 (warmup ctx inp ui)
+  assertEq failed (WidgetId 0) =<< getFocusId ctx
+  writeIORef open False
+  page <- warmup2 ctx inp ui
+  assertEq failed page =<< getFocusId ctx
 
 -- | Losing focus to a request collapses a field's selection, and a search
 -- field commits its debounced query, as with a click elsewhere.
