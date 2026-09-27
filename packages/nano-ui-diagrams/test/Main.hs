@@ -99,7 +99,8 @@ main = hspec $ do
     it "colors legend entries like their series" (testLegendColors fm)
     it "picks the nearest hover point" testPlotHover
     it "fills closed series and markers" (testClosedSeriesFills fm)
-    it "closes an area along its baseline's two ends" (testAreaRing fm)
+    it "fills an area a ring per side of its baseline" (testAreaRings fm)
+    it "places filled series where their data is" (testFillPlacement fm)
     it "caps the height of growing plots" (testGrowPlotHeight fm)
 
 -- | A chart of the given series with no legend, grid or decimation.
@@ -478,24 +479,50 @@ testClosedSeriesFills fm = do
   check "triangle marker produced no fill" (fillTriCount triOps >= 1)
   check "MarkCross arm left at origin" (not (null inkXs) && maximum inkXs - minimum inkXs < 40)
 
--- | An area series fills one ring of its samples and the baseline's two
--- ends, triangulated into as many triangles as the ring has sides less two,
--- covering the ring exactly.
-testAreaRing :: FontMetrics -> IO ()
-testAreaRing fm = do
+-- | An area series fills a ring per run of samples on one side of its
+-- baseline, split where the data crosses it: the samples and the baseline's
+-- two ends, triangulated into as many triangles as the ring has sides less
+-- two, covering it exactly.
+testAreaRings :: FontMetrics -> IO ()
+testAreaRings fm = do
   let
-    samples = [(x, 1 + sin x) | x <- [0, 0.5 .. 10]]
-    ops = diagramOps 200 120 (chartDia fm (bareChart [area "a" samples]))
-  case [(p, t) | FillPolygon p _ t _ <- toList ops, sizeofPrimArray p > 8] of
-    [(p, t)] -> do
+    rings samples = [(p, t) | FillPolygon p _ t _ <- toList (diagramOps 200 120 (chartDia fm (bareChart [area "a" samples])))]
+    exact (p, t) =
       let ring = sizeofPrimArray p `div` 2
           at k = (indexPrimArray p (2 * k), indexPrimArray p (2 * k + 1))
           shoelace = abs (sum [x0 * y1 - x1 * y0 | k <- [0 .. ring - 1], let (x0, y0) = at k; (x1, y1) = at ((k + 1) `mod` ring)]) / 2
           covered = sum [triArea (at (indexPrimArray t k)) (at (indexPrimArray t (k + 1))) (at (indexPrimArray t (k + 2))) | k <- [0, 3 .. sizeofPrimArray t - 3]]
-      check "area ring has more than its samples and the baseline's ends" (ring <= length samples + 2)
-      check "area fill has more triangles than its ring allows" (sizeofPrimArray t `div` 3 == ring - 2)
-      check "area triangles do not cover the ring" (abs (covered - shoelace) <= 1e-3 * shoelace)
+       in sizeofPrimArray t `div` 3 == ring - 2 && abs (covered - shoelace) <= 1e-3 * shoelace
+    above = [(x, 1 + sin x) | x <- [0, 0.5 .. 10]]
+    -- sin crosses its baseline at pi, 2 pi and 3 pi.
+    crossing = [(x, sin x) | x <- [0, 0.5 .. 10]]
+  case rings above of
+    [r@(p, _)] -> do
+      check "area ring has more than its samples and the baseline's ends" (sizeofPrimArray p `div` 2 <= length above + 2)
+      check "area triangles do not cover their ring" (exact r)
     polys -> fail ("expected one area polygon, got " <> show (length polys))
+  check "crossing area is not a ring per side" (length (rings crossing) == 4)
+  check "crossing area triangles do not cover their rings" (all exact (rings crossing))
+
+-- | Filled series shapes sit where their data is: an area starts at the
+-- line through the same samples, and a diamond marker is centred on its
+-- point.
+testFillPlacement :: FontMetrics -> IO ()
+testFillPlacement fm = do
+  let
+    samples = [(x, 1 + sin x) | x <- [0, 0.5 .. 10]]
+    ops = toList (diagramOps 200 120 (chartDia fm (bareChart [area "a" samples, line "l" samples, withMarker MarkDiamond (scatter "d" samples)])))
+    pointsOf p = [(indexPrimArray p (2 * k), indexPrimArray p (2 * k + 1)) | k <- [0 .. sizeofPrimArray p `div` 2 - 1]]
+    near (x0, y0) (x1, y1) = abs (x1 - x0) < 1e-3 && abs (y1 - y0) < 1e-3
+    centre ps = (sum (map fst ps) / fromIntegral (length ps), sum (map snd ps) / fromIntegral (length ps))
+    linePts = [pointsOf p | StrokePolyline p _ _ _ _ _ _ <- ops, sizeofPrimArray p == 2 * length samples]
+    areaPts = [pointsOf p | FillPolygon p _ _ _ <- ops, sizeofPrimArray p > 8]
+    diamonds = [centre (pointsOf p) | FillPolygon p _ _ _ <- ops, sizeofPrimArray p == 8]
+  case (linePts, areaPts) of
+    ([l@(start : _)], [area0 : _]) -> do
+      check "area does not start at its first sample" (near start area0)
+      check "diamond markers are not centred on their points" (length diamonds == length l && all (\d -> any (near d) l) diamonds)
+    _ -> fail ("expected one line and one area, got " <> show (length linePts, length areaPts))
 
 testGrowPlotHeight :: FontMetrics -> IO ()
 testGrowPlotHeight fm = do

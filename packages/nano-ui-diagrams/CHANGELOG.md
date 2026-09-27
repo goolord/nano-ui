@@ -35,6 +35,15 @@
   vertices painted each frame, and a quarter of the triangulation work when
   the chart is rebuilt.
 
+### Fixed
+
+- An area series and diamond and triangle markers are drawn where their
+  data is. Each polygon was drawn from the plot's origin instead of its
+  first point, which moved an area by its first sample's offset from the
+  corner and a marker by about its radius.
+- An area series whose data crosses its baseline fills each side, one
+  polygon per run between crossings, where it left gaps or spilled.
+
 ### Removed
 
 - `chartXDomain` and `chartYDomain` from `NanoUI.Plot.Chrome` (use
