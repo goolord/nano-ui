@@ -1,5 +1,3 @@
-{-# LANGUAGE MagicHash #-}
-
 -- | Chart widgets: 'plot' draws a chart and reports the hovered point, and
 -- 'lineChart', 'barChart', 'scatterChart' and 'areaChart' draw one series.
 module NanoUI.Plot.Widget
@@ -15,7 +13,6 @@ import Data.Maybe (fromMaybe, catMaybes)
 import Data.Text (Text)
 import Data.Vector.Unboxed qualified as U
 import Diagrams.Prelude (Diagram, V2 (..), extentX, extentY, size)
-import GHC.Exts (isTrue#, reallyUnsafePtrEquality#)
 import NanoUI
   ( NanoUI
   , Layout
@@ -43,7 +40,7 @@ import NanoUI.Plot.Types
   , LegendPos (..)
   , PlotResponse (..)
   )
-import NanoUI.Internal.Store (insertDyn, lookupDyn)
+import NanoUI.Internal.Store (eqByPtr, insertDyn, lookupDyn)
 
 data CachedChart = CachedChart
   { ccChart :: !Chart
@@ -61,7 +58,8 @@ data CachedChart = CachedChart
 
 -- Keep the cache in the owning context's widget store. Versions only need
 -- to distinguish successive contents of this widget's draw-op cache. The
--- plot style is derived from the theme, so the theme check covers it.
+-- plot style is derived from the theme, so the theme check covers it. A
+-- chart kept across frames matches by pointer, before its value is compared.
 cachedChartDiagram :: Context -> WidgetId -> FontMetrics -> Theme -> Chart -> IO CachedChart
 cachedChartDiagram ctx wid fm theme chart = do
   let k = intKey wid
@@ -69,7 +67,7 @@ cachedChartDiagram ctx wid fm theme chart = do
   store <- getStore ctx
   let previous = lookupDyn k store
   case previous of
-    Just cc | ccTheme cc == theme && ccFont cc == font && sameChart (ccChart cc) chart -> pure cc
+    Just cc | ccTheme cc == theme && ccFont cc == font && eqByPtr (ccChart cc) chart -> pure cc
     _ -> do
       let ps = themePlotStyle theme
           domains@(xDom, yDom) = seriesDomains chart
@@ -86,11 +84,6 @@ cachedChartDiagram ctx wid fm theme chart = do
           !cc = CachedChart chart theme font v d dw dh extX extY domains points
       setStore ctx (insertDyn k cc store)
       pure cc
-
--- | Whether the cached chart stands for @chart@: the same value, as when a
--- chart is kept across frames, or an equal one.
-sameChart :: Chart -> Chart -> Bool
-sameChart !a !b = isTrue# (reallyUnsafePtrEquality# a b) || a == b
 
 -- | Draw a chart sized by the layout modifier. The response reports the
 -- nearest data point under the pointer.

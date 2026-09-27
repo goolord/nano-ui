@@ -22,7 +22,7 @@ import Data.Sequence (Seq)
 import Data.Sequence qualified as Seq
 import Data.Text (Text)
 import Data.Text qualified as T
-import GHC.Exts (isTrue#, reallyUnsafePtrEquality#)
+import NanoUI.Internal.Store (eqByPtr, ptrEq)
 import NanoUI.Widgets.TextBuffer qualified as TB
 
 -- | A text as its lines, without their newlines. There is always at least
@@ -36,9 +36,7 @@ newtype TextDocument = TextDocument (Seq Text)
 instance Eq TextDocument where
   a == b =
     sameDocument a b
-      || liftEq sameLine (documentLines a) (documentLines b)
-   where
-    sameLine !x !y = isTrue# (reallyUnsafePtrEquality# x y) || x == y
+      || liftEq eqByPtr (documentLines a) (documentLines b)
 
 instance Show TextDocument where
   showsPrec d doc =
@@ -92,4 +90,4 @@ documentBuffer = TB.fromLines . documentLines
 -- evaluation), never 'True' for different ones; callers treat 'False' as
 -- "maybe changed". Both arguments are forced first, so neither is a thunk.
 sameLines :: Seq Text -> Seq Text -> Bool
-sameLines !a !b = isTrue# (reallyUnsafePtrEquality# a b)
+sameLines !a !b = ptrEq a b

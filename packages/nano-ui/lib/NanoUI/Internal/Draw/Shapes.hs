@@ -29,7 +29,7 @@ import Foreign.Ptr (Ptr)
 import Foreign.Storable (pokeByteOff)
 import NanoUI.Internal.Draw.Arena
 import NanoUI.Internal.Draw.Types (DrawArena (..), LineCap (..), LineJoin (..), Shade (..), glyphAtlasTextureId, indexSize, vertexSize)
-import NanoUI.Internal.Path (miterOffset, shoelace)
+import NanoUI.Internal.Path (idealArcSteps, miterOffset, shoelace)
 import NanoUI.Internal.SIMD
 import NanoUI.Internal.Types (Color (..), Rect (..), clamp, forUpTo_, onGrid)
 
@@ -868,6 +868,7 @@ pushPolylineAA da pts w closed cap join limit shade
 arcChords :: Float -> Float -> Float -> Int
 arcChords s r sweep
   | not (rd > 0.25) = 1
-  | otherwise = clamp 1 32 (ceiling (abs sweep / (2 * acos (1 - 0.25 / rd))))
+  -- Bounded before rounding, so a huge radius cannot overflow the 'Int'.
+  | otherwise = clamp 1 32 (ceiling (min 32 (idealArcSteps 0.25 rd sweep)))
   where
     rd = r * max 1 s

@@ -52,10 +52,7 @@ module NanoUI.Internal.Path
     -- * Flattening
   , curveTolerance
   , flattenPath
-  , cubicPoints
-    -- * Triangulation
-  , triangulate
-  , triangulateRings
+  , idealArcSteps
     -- * Draw ops
   , fillPathOps
   , strokePathOps
@@ -70,6 +67,7 @@ import Data.Ord (comparing)
 import Data.Primitive.PrimArray
   ( PrimArray
   , copyMutablePrimArray
+  , copyPrimArray
   , emptyPrimArray
   , generatePrimArray
   , indexPrimArray
@@ -590,11 +588,19 @@ arcSteps tol r sweep
   | otherwise = quarters
   where
     quarters = max 1 (ceiling (abs sweep / (pi / 2)))
-    -- A chord of angle @da@ strays @r (1 - cos (da / 2)) = 2 r sin (da / 4) ^ 2@
-    -- from the circle. Solved in the sine form because @1 - tol / r@ rounds
-    -- to 1 for huge radii, which would give a nearly straight arc
-    -- 'maxArcSteps' chords.
-    ideal = abs sweep / (4 * asin (sqrt (tol / (2 * r))))
+    ideal = idealArcSteps tol r sweep
+
+-- | The unrounded number of equal chords that keep @sweep@ radians of a
+-- circle of radius @r@ within @tol@ of it, for @r > tol@. Grows without
+-- bound as @tol / r@ shrinks, so bound it before rounding to an 'Int'.
+--
+-- A chord of angle @da@ strays @r (1 - cos (da / 2)) = 2 r sin (da / 4) ^ 2@
+-- from the circle. Solved in the sine form because @1 - tol / r@ rounds to 1
+-- for huge radii, which would give a nearly straight arc as many chords as
+-- the caller allows.
+{-# INLINE idealArcSteps #-}
+idealArcSteps :: Float -> Float -> Float -> Float
+idealArcSteps tol r sweep = abs sweep / (4 * asin (sqrt (tol / (2 * r))))
 
 -- | The most chords one arc is split into.
 maxArcSteps :: Int
@@ -1182,7 +1188,12 @@ strokePathOps tol t st path paint
 -- | All rings' points, back to back.
 concatPoints :: [PrimArray Float] -> PrimArray Float
 concatPoints [r] = r
-concatPoints rs = primArrayFromList (concatMap primArrayToList rs)
+concatPoints rs = runPrimArray $ do
+  out <- newPrimArray (sum (map sizeofPrimArray rs))
+  let go !_ [] = pure ()
+      go !off (r : rest) = copyPrimArray out off r 0 (sizeofPrimArray r) >> go (off + sizeofPrimArray r) rest
+  go 0 rs
+  pure out
 
 -- | Where each ring starts in 'concatPoints', and where the last ends.
 ringStarts :: [PrimArray Float] -> PrimArray Int
