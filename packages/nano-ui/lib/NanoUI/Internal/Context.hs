@@ -63,8 +63,11 @@ module NanoUI.Internal.Context
   , setTheme
   , getTheme
   , ExplainState (..)
+  , DrawReuse (..)
+  , DrawReuseKey (..)
   , ExplainedNode (..)
   , setExplainLayout
+  , setDrawReuse
   , getExplainLayout
   , getExplainedNode
   , followSystemTheme
@@ -433,6 +436,13 @@ settleViewTheme ctx before = do
 getTheme :: Context -> IO Theme
 getTheme ctx = readIORef (ctxTheme ctx)
 
+-- | Whether a full frame with no damage, built from the same view output
+-- as the last, takes the last frame's draw data instead of painting again
+-- (on by default). A benchmark that times paint on a still scene turns it
+-- off.
+setDrawReuse :: Context -> Bool -> IO ()
+setDrawReuse ctx on = writeIORef (ctxDrawReuse ctx) (DrawReuse on Nothing)
+
 -- | Toggle the layout overlay ("NanoUI.Internal.Frame.Explain"): a one-pixel
 -- outline inside every layout node, coloured by depth, and a tint on the
 -- hovered node. A change repaints the window and wakes the loop.
@@ -601,6 +611,7 @@ newContext = do
   ctxWrapCache <- newIORef (WrapCache 0 emptyGenCache)
   ctxLastMetricSource <- newIORef Nothing
   ctxPaintFull <- newIORef True
+  ctxDrawReuse <- newIORef (DrawReuse True Nothing)
   ctxExplain <- newIORef initialExplainState
   -- References above use their field names; font-dependent defaults stay
   -- explicit, including the resolvers that close over this context.

@@ -13,7 +13,7 @@ import NanoUI
 import NanoUI.Backend (applyMouseButton, emptyInput, inputKeysFromList, monospaceMetrics)
 import NanoUI.Path qualified as P
 import NanoUI.Svg (rasterizeSvg)
-import NanoUI.Testing (newContext, runFrame, uiCursorKind)
+import NanoUI.Testing (newContext, runFrame, setDrawReuse, uiCursorKind)
 import GHC.Clock (getMonotonicTime)
 import System.Environment (getArgs)
 import System.IO.Unsafe (unsafePerformIO)
@@ -184,6 +184,8 @@ main :: IO ()
 main = do
   args <- getArgs
   ctx <- newContext
+  -- Frames here repeat one scene: time their paint instead of reusing it.
+  setDrawReuse ctx False
   let
     -- Focus the text area, move 5,000 lines down and type 1,000 characters.
     typeIntoMiddle scene = do

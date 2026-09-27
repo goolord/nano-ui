@@ -101,12 +101,14 @@ module NanoUI.Internal.Layout.Arena
   , setStyleIdx
   , getNodeValue
   , setNodeValue
+  , setSolvedValue
   , getNodeFontSize
   , getNodeFontColor
   , getNodeScope
   , getArenaScope
   , setArenaScope
   , getScopeSignature
+  , getPaintSignature
   , ensureScratchCapacity
   , AxisSnapshot (..)
   , ensureAxisSnapshot
@@ -171,7 +173,7 @@ import Data.Word (Word8, Word32, Word64)
 import qualified Data.Text as T
 import GHC.Float (castFloatToWord32)
 import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
-import NanoUI.Internal.Image (ImageLook, defaultImageConfig, imageLook)
+import NanoUI.Internal.Image (ImageLook (..), Rotation (..), defaultImageConfig, imageLook)
 import NanoUI.Internal.Store (ptrEq)
 import NanoUI.Internal.Style (AlignX (..), AlignY, Direction (..), Flow (..), Layout (..), Padding (..), PointerMode (..), Sizing (..))
 import NanoUI.Internal.Types (Color (..), Rect (..), V2 (..), rectNonEmpty)
@@ -404,6 +406,9 @@ data NodeArena = NodeArena
   , naScopeSig :: IORef Word64
   -- ^ A hash over the index and scope of every node added under a scope other
   -- than 0 since the reset. See 'getScopeSignature'.
+  , naPaintSig :: IOArr Word64
+  -- ^ Hash of the paint state the input signature leaves out, mixed as it is
+  -- written ('getPaintSignature'). One unboxed slot, like 'naInputSig'.
   , naInputSig :: IOArr Word64
   -- ^ The frame's input signature ('getInputSignature'). An unboxed slot, so
   -- mixing into it allocates nothing.
@@ -707,6 +712,7 @@ newNodeArena = do
   naScope <- newIORef 0
   naScopeSig <- newIORef 0
   naInputSig <- newZeroedPrimArray 1
+  naPaintSig <- newZeroedPrimArray 1
   -- Zeroed: the stores start as the shared 'T.empty' and '[]', which pass the
   -- same-object check, and 0 marks a hash that was never taken.
   naTextHash <- newIORef =<< newZeroedPrimArray cap
@@ -737,6 +743,7 @@ resetNodeArena na = do
   writeIORef (naScope na) 0
   writeIORef (naScopeSig na) 0
   writePrimArray (naInputSig na) 0 0
+  writePrimArray (naPaintSig na) 0 0
   setPrimArray (naClassCounts na) 0 nodeClassCount 0
   writePrimArray (naImageCount na) 0 0
   -- 0 marks a memo entry that was never written, so the tag wraps to 1.
@@ -769,6 +776,14 @@ mixInputSig :: NodeArena -> Word64 -> Word64 -> IO ()
 mixInputSig na tag v = do
   sig <- readPrimArray (naInputSig na) 0
   writePrimArray (naInputSig na) 0 (mixTagged sig tag v)
+
+-- | Fold node @idx@'s paint state under @tag@ into 'naPaintSig'. The index
+-- goes in with the tag, so the same value on another node mixes differently.
+{-# INLINE mixPaintSig #-}
+mixPaintSig :: NodeArena -> NodeIdx -> Word64 -> Word64 -> IO ()
+mixPaintSig na idx tag v = do
+  sig <- readPrimArray (naPaintSig na) 0
+  writePrimArray (naPaintSig na) 0 (mixTagged sig (tag `xor` (fromIntegral idx `shiftL` 16)) v)
 
 -- | Fold a post-creation input change into the node's own hash and the
 -- frame's input signature. The subtree hash a later solve compares against
@@ -998,10 +1013,12 @@ addNode na nt parent Layout {..} = do
   ownA <- readIORef (naOwnHash na)
   writePrimArray ownA idx nodeSig
 
-  -- The font colour is paint state, so the signature leaves it out.
-  writePrimArray (naArrFontColor a) idx $ case layoutFontColor of
-    Nothing -> 0
-    Just (Color w) -> 0x100000000 .|. fromIntegral w
+  -- The font colour is paint state, so the input signature leaves it out.
+  case layoutFontColor of
+    Nothing -> writePrimArray (naArrFontColor a) idx 0
+    Just (Color w) -> do
+      writePrimArray (naArrFontColor a) idx (0x100000000 .|. fromIntegral w)
+      mixPaintSig na idx 0x4643 (fromIntegral w)
   scope <- readIORef (naScope na)
   writePrimArray (naArrScope a) idx scope
   when (scope /= 0) $ do
@@ -1340,6 +1357,28 @@ setImageNode na idx node@ImageNode {inWidth = w, inHeight = h} = do
   a <- arenaArrays na
   writeTree a idx TreeStyleIdx (k + 1)
   mixNodeInput na idx 0x494d (fromIntegral (castFloatToWord32 w) `shiftL` 32 .|. fromIntegral (castFloatToWord32 h))
+  mixPaintSig na idx 0x4c4b (lookWord (inLook node))
+
+-- | A hash of everything a look draws with, for 'getPaintSignature'.
+lookWord :: ImageLook -> Word64
+lookWord look =
+  foldl'
+    (\acc (t, v) -> mixTagged acc t v)
+    0
+    [ (1, fromIntegral (fromEnum (lookFit look)))
+    , (2, fromIntegral (fromEnum (lookAlignX look)))
+    , (3, fromIntegral (fromEnum (lookAlignY look)))
+    , (4, floatWord (lookOpacity look))
+    , (5, case lookRotation look of RotateFloating r -> floatWord r; RotateSolid r -> 0x100000000 .|. floatWord r)
+    , (6, maybe 0 (const 1) crop)
+    , (7, maybe 0 (\(Rect x y _ _) -> floatWord x `shiftL` 32 .|. floatWord y) crop)
+    , (8, maybe 0 (\(Rect _ _ w h) -> floatWord w `shiftL` 32 .|. floatWord h) crop)
+    , (9, floatWord (lookScale look))
+    , (10, let Color w = lookTint look in fromIntegral w)
+    ]
+  where
+    crop = lookCrop look
+    floatWord = fromIntegral . castFloatToWord32
 
 -- | Image node @idx@'s look and natural size, or 'Nothing' for a plain
 -- image. Only valid on a 'NodeImage'; other nodes use the style index
@@ -1351,11 +1390,14 @@ getImageNode na idx = do
   if si <= 0 then pure Nothing else Just <$> (readIORef (naImages na) >>= \arr -> readArray arr (si - 1))
 
 -- | Set image node @idx@'s image id: the 'NanoUI.Internal.Types.ImageId'
--- it draws, or 0 for none. Layout does not read it, so it is not mixed into
--- the node's hash.
+-- it draws, or 0 for none. Layout does not read it, so it is paint state
+-- ('getPaintSignature').
 {-# INLINE setImageId #-}
 setImageId :: NodeArena -> NodeIdx -> Int -> IO ()
-setImageId na idx tid = arenaArrays na >>= \a -> writePrimArray (naArrImageId a) idx tid
+setImageId na idx tid = do
+  a <- arenaArrays na
+  writePrimArray (naArrImageId a) idx tid
+  mixPaintSig na idx 0x4944 (fromIntegral tid)
 
 -- | Image node @idx@'s image id ('setImageId'). Only valid on a 'NodeImage'.
 {-# INLINE getImageId #-}
@@ -1518,10 +1560,19 @@ lookupNodeByKey na key = lookupNodeByWidgetId na (WidgetId (fromIntegral key))
 getNodeValue :: NodeArena -> NodeIdx -> IO Float
 getNodeValue na idx = arenaArrays na >>= \a -> readStyle a idx StyleNodeValue
 
--- | Set the type-specific numeric value read by the solver or painter.
+-- | Set the type-specific numeric value read by the solver or painter. It is
+-- paint state ('getPaintSignature').
 {-# INLINE setNodeValue #-}
 setNodeValue :: NodeArena -> NodeIdx -> Float -> IO ()
-setNodeValue na idx v = arenaArrays na >>= \a -> writeStyle a idx StyleNodeValue v
+setNodeValue na idx v = do
+  setSolvedValue na idx v
+  mixPaintSig na idx 0x5641 (fromIntegral (castFloatToWord32 v))
+
+-- | 'setNodeValue' for a value the solver works out from the layout, such as
+-- a scroller's content extent, which the layout inputs already cover.
+{-# INLINE setSolvedValue #-}
+setSolvedValue :: NodeArena -> NodeIdx -> Float -> IO ()
+setSolvedValue na idx v = arenaArrays na >>= \a -> writeStyle a idx StyleNodeValue v
 
 -- | Explicit logical font size, or zero for the backend default.
 {-# INLINE getNodeFontSize #-}
@@ -1558,6 +1609,22 @@ setArenaScope na = writeIORef (naScope na)
 {-# INLINE getScopeSignature #-}
 getScopeSignature :: NodeArena -> IO Word64
 getScopeSignature na = readIORef (naScopeSig na)
+
+-- | Hash over everything the view put in the arena that paint reads: the
+-- input signature ('getInputSignature'), the node count, the scopes
+-- ('getScopeSignature'), and the paint state the input signature leaves
+-- out, mixed as it is written: node values ('setNodeValue'), font colours,
+-- the style index of boxes, images and drawings, and images' ids and looks.
+-- Two frames with the same signature hand paint the same nodes; what else
+-- paint reads (the layout it solves to, widget state in the store, the
+-- theme) the frame's damage covers.
+getPaintSignature :: NodeArena -> IO Word64
+getPaintSignature na = do
+  input <- getInputSignature na
+  count <- arenaCount na
+  scope <- getScopeSignature na
+  paint <- readPrimArray (naPaintSig na) 0
+  pure (mixTagged (mixTagged (mixTagged input 1 (fromIntegral count)) 2 scope) 3 paint)
 
 -- | Hash over every layout input written since the reset: each node's
 -- layout and tree links as 'addNode' wrote them, plus every later change
@@ -1629,15 +1696,17 @@ getStyleIdx na idx = arenaArrays na >>= \a -> readTree a idx TreeStyleIdx
 
 -- | Store a style code encoded for this node's type. Part of the layout
 -- input signature, except on box, image, and drawing nodes: their style code
--- is paint data (a colour, a version).
+-- is paint data (a colour, a version), which goes in the paint signature
+-- ('getPaintSignature') instead.
 {-# INLINE setStyleIdx #-}
 setStyleIdx :: NodeArena -> NodeIdx -> Int -> IO ()
 setStyleIdx na idx v = do
   a <- arenaArrays na
   writeTree a idx TreeStyleIdx v
   nt <- readTagEnum a idx TagNodeType
-  unless (nt == NodeBox || nt == NodeImage || nt == NodeDrawing) $
-    mixNodeInput na idx 0x5354 (fromIntegral v)
+  if nt == NodeBox || nt == NodeImage || nt == NodeDrawing
+    then mixPaintSig na idx 0x5354 (fromIntegral v)
+    else mixNodeInput na idx 0x5354 (fromIntegral v)
 
 -- | The snapshot buffers for nesting depth @depth@, with room for at least
 -- @needed@ entries. Each depth keeps its buffers across frames, so nothing is

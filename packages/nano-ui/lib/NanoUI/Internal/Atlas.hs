@@ -10,6 +10,8 @@ module NanoUI.Internal.Atlas
   , lookupImageUv
   , lookupImageSize
   , withImageSlot
+  , AtlasToken
+  , atlasToken
   , atlasSnapshot
   , AtlasUpload (..)
   , atlasChanges
@@ -26,6 +28,7 @@ import Data.Word (Word8)
 import Foreign.ForeignPtr (ForeignPtr, mallocForeignPtrBytes, withForeignPtr)
 import Foreign.Marshal.Utils (copyBytes, fillBytes)
 import Foreign.Ptr (Ptr, plusPtr)
+import NanoUI.Internal.Store (ptrEq)
 import NanoUI.Internal.Types (ImageId (..))
 
 -- | GPU texture id shared by every packed image so draw cmds batch.
@@ -72,6 +75,17 @@ data AtlasState = AtlasState
   }
 
 newtype ImageAtlas = ImageAtlas (IORef AtlasState)
+
+-- | The atlas as it is at one moment. Two tokens are equal only while no
+-- image was registered or released between them: each write installs a new
+-- state.
+newtype AtlasToken = AtlasToken AtlasState
+
+instance Eq AtlasToken where
+  AtlasToken a == AtlasToken b = ptrEq a b
+
+atlasToken :: ImageAtlas -> IO AtlasToken
+atlasToken (ImageAtlas ref) = AtlasToken <$> readIORef ref
 
 newImageAtlas :: IO ImageAtlas
 newImageAtlas = do

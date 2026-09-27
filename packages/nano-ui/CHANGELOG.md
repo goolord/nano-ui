@@ -833,6 +833,18 @@
   is translucent. A backend that sets `ctxPaintFull` clears the target to
   the frame's `themeWindow` first, as the SDL and RGFW runners do. Under
   software GL the SDL demo presents 100 frames a second instead of 77.
+- A full frame (every continuous frame) with no damage, whose view put the
+  same into the arena as the last, returns the last frame's draw data
+  instead of painting again. The arena keeps a signature of the paint state
+  its layout signature leaves out, mixed as it is written: node values, font
+  colours, box, image and drawing style indices, and image ids and looks
+  (`getPaintSignature`). Widget state, hover, focus, scrolling, animations
+  and themes repaint through damage, as they do on retained frames. An idle
+  full frame of the SDL demo's Controls tab runs in 0.11 ms instead of
+  0.29 ms and allocates 64 KB instead of 129 KB. `setDrawReuse` (in
+  `NanoUI.Testing`) turns it off, as the headless and SDL profilers and
+  `nano-ui-sdl-bench` do to keep timing paint. The node value the solver
+  computes is set with `setSolvedValue`.
 
 ### Fixed
 

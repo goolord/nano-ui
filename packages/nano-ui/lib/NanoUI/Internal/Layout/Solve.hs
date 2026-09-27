@@ -343,7 +343,7 @@ measureContent env@SolveEnv {seArena = na} idx = do
     _
       | isContainerNode nt -> do
           measureContainer env idx
-          when (nt == NodeModal) $ setNodeValue na idx 0
+          when (nt == NodeModal) $ setSolvedValue na idx 0
       | otherwise -> measureWidget env idx
 
 measureCustomNode :: SolveEnv -> CustomMeasureFn -> NodeIdx -> IO ()
@@ -745,9 +745,9 @@ measureScrollContainer env@SolveEnv {seArena = na, seArrays = a} idx = do
               DirRow -> 0
   if isScrollStyle2D si
     then do
-      setNodeValue na idx contentH
+      setSolvedValue na idx contentH
       setScrollContentW na idx contentW
-    else setNodeValue na idx (case dir of DirColumn -> contentH; DirRow -> contentW)
+    else setSolvedValue na idx (case dir of DirColumn -> contentH; DirRow -> contentW)
   setRect na idx 0 0 (sizeWithin wAx (contentW + padX + fitGutterW)) (sizeWithin hAx (contentH + padY))
 
 foldChildDimsFromParent :: SolveEnv -> NodeIdx -> DirTag -> Float -> IO (Float, Float)
@@ -1165,9 +1165,9 @@ positionScrollChildren env@SolveEnv {seArena = na} depth idx dir gap pad (Rect p
         raise get set v = get na idx >>= \old -> set na idx (max old v)
     if isScrollStyle2D si
       then do
-        raise getNodeValue setNodeValue actualContentH
+        raise getNodeValue setSolvedValue actualContentH
         raise getScrollContentW setScrollContentW actualContentW
-      else raise getNodeValue setNodeValue $
+      else raise getNodeValue setSolvedValue $
         case dir of DirColumn -> actualContentH; DirRow -> actualContentW
 
 -- | Where a scroll container's bar sits, as measurement stored it. Text

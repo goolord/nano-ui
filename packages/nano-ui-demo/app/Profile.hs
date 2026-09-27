@@ -28,6 +28,7 @@ import NanoUI.Testing
   , collectTextSpans
   , debugPanelOpen
   , runFrame
+  , setDrawReuse
   , takeDamage
   , drawVertexCount
   , drawIndexCount
@@ -84,6 +85,8 @@ main = do
   putStrLn "================================================================================"
   putStrLn ""
   ctx0 <- newPixelContext
+  -- The workloads repeat one scene: time their paint instead of reusing it.
+  setDrawReuse ctx0 False
   withSdlBench ctx0 $ \ctx sdlEnv -> do
     (ctx', inp) <- syncDisplay ctx sdlEnv profileInput
     (_, inpAct) <- syncDisplay ctx sdlEnv profileInput {inputButtonsHeld = buttonsFromList [MouseLeft]}
@@ -95,6 +98,11 @@ main = do
     measureBench "Full DemoUi (Active, SDL Present)" (drawDemo inpAct)
     measureBench "Full DemoUi (runFrame only, No SDL)" $
       void (runFrame ctx' inp demoUi)
+    -- An idle continuous frame: the last frame's draw data is reused.
+    setDrawReuse ctx' True
+    measureBench "Full DemoUi (runFrame, draw reused)" $
+      void (runFrame ctx' inp demoUi)
+    setDrawReuse ctx' False
 
     (_, _, dd, _) <- runFrame ctx' inp demoUi
     printf "  -> Vertices: %d, Indices: %d, DrawCmds: %d\n\n"
@@ -122,6 +130,7 @@ main = do
         measureBench "Debug Open, ForceFull replay" $
           void (sdlDrawFrame ctx' demoUi sdlEnv inp True)
         churnCtx <- newPixelContext
+        setDrawReuse churnCtx False
         nextChurn <- newCounter 0
         let churnFrame = nextChurn >>= \k -> void (runFrame churnCtx inp (churnWindowUi k))
         void (runFrame churnCtx inp (churnWindowUi 0))
