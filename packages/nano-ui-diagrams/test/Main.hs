@@ -99,6 +99,7 @@ main = hspec $ do
     it "colors legend entries like their series" (testLegendColors fm)
     it "picks the nearest hover point" testPlotHover
     it "fills closed series and markers" (testClosedSeriesFills fm)
+    it "closes an area along its baseline's two ends" (testAreaRing fm)
     it "caps the height of growing plots" (testGrowPlotHeight fm)
 
 -- | A chart of the given series with no legend, grid or decimation.
@@ -476,6 +477,25 @@ testClosedSeriesFills fm = do
   check "diamond marker produced no fill" (fillTriCount diamondOps >= 2)
   check "triangle marker produced no fill" (fillTriCount triOps >= 1)
   check "MarkCross arm left at origin" (not (null inkXs) && maximum inkXs - minimum inkXs < 40)
+
+-- | An area series fills one ring of its samples and the baseline's two
+-- ends, triangulated into as many triangles as the ring has sides less two,
+-- covering the ring exactly.
+testAreaRing :: FontMetrics -> IO ()
+testAreaRing fm = do
+  let
+    samples = [(x, 1 + sin x) | x <- [0, 0.5 .. 10]]
+    ops = diagramOps 200 120 (chartDia fm (bareChart [area "a" samples]))
+  case [(p, t) | FillPolygon p _ t _ <- toList ops, sizeofPrimArray p > 8] of
+    [(p, t)] -> do
+      let ring = sizeofPrimArray p `div` 2
+          at k = (indexPrimArray p (2 * k), indexPrimArray p (2 * k + 1))
+          shoelace = abs (sum [x0 * y1 - x1 * y0 | k <- [0 .. ring - 1], let (x0, y0) = at k; (x1, y1) = at ((k + 1) `mod` ring)]) / 2
+          covered = sum [triArea (at (indexPrimArray t k)) (at (indexPrimArray t (k + 1))) (at (indexPrimArray t (k + 2))) | k <- [0, 3 .. sizeofPrimArray t - 3]]
+      check "area ring has more than its samples and the baseline's ends" (ring <= length samples + 2)
+      check "area fill has more triangles than its ring allows" (sizeofPrimArray t `div` 3 == ring - 2)
+      check "area triangles do not cover the ring" (abs (covered - shoelace) <= 1e-3 * shoelace)
+    polys -> fail ("expected one area polygon, got " <> show (length polys))
 
 testGrowPlotHeight :: FontMetrics -> IO ()
 testGrowPlotHeight fm = do

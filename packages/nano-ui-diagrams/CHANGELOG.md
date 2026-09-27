@@ -30,6 +30,10 @@
   inside another (an annulus, a glyph's counter) is a hole in it where the
   rule says so, instead of each loop being filled on its own over the
   others. A path is filled whole before it is stroked.
+- An area series is filled from its points and the two ends of its
+  baseline, instead of a baseline point under every sample: half the
+  vertices painted each frame, and a quarter of the triangulation work when
+  the chart is rebuilt.
 
 ### Removed
 

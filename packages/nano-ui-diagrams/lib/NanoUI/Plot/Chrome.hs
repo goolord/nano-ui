@@ -267,11 +267,12 @@ renderSeries ps c xDom yDom s pts =
         AreaSeries baseline
           | U.null pts -> mempty
           | otherwise ->
-              -- Top edge in order, then the baseline in reverse; the left
-              -- fold builds it reversed without copying the points.
-              let top = U.foldr (\p acc -> toP p : acc) [] pts
-                  base = U.foldl' (\acc (x, _) -> toP (x, baseline) : acc) [] pts
-               in closedPoly (top ++ base) # fc (colourOf (lerpColor c (plotFrameBg ps) 0.18)) # lw none
+              -- Top edge in order, then back along the baseline. The baseline
+              -- is straight, so its two ends are enough: a point under every
+              -- sample doubled the ring, its triangulation and its outline.
+              let base = [toP (fst (U.last pts), baseline), toP (fst (U.head pts), baseline)]
+                  ring = U.foldr (\p acc -> toP p : acc) base pts
+               in closedPoly ring # fc (colourOf (lerpColor c (plotFrameBg ps) 0.18)) # lw none
         StepSeries w ->
           let steps = U.foldr (\((x0, y0), (x1, _)) acc -> toP (x0, y0) : toP (x1, y0) : acc) [] (U.zip pts (U.drop 1 pts))
            in fromVertices steps # lc ink # lwO (plotStroke w)
