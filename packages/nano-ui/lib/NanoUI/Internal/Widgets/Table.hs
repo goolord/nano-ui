@@ -39,6 +39,7 @@ import Data.Primitive.PrimArray (PrimArray, copyMutablePrimArray, copyPrimArray,
 import Data.Primitive.SmallArray (SmallArray, emptySmallArray, indexSmallArray, mapSmallArray', newSmallArray, sizeofSmallArray, smallArrayFromList, smallArrayFromListN, unsafeFreezeSmallArray, writeSmallArray)
 import Data.Primitive.Types (Prim)
 import Data.Vector qualified as V
+import Data.Vector.Mutable qualified as MV
 import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context (Context (..), InteractionState (..), getPrevRect, getScrollOffset2D, getStore, intKey, linkScrollAxes, modifyInteraction, writeSlots)
 import NanoUI.Internal.Hooks (useInt)
@@ -154,8 +155,9 @@ data TableDerived = TableDerived
   , tdEncoded :: !(SmallArray (V.Vector Text))
   , tdCellW :: !(PrimArray Float)
     -- ^ Each cell's padded width in its column's font, column by column.
-  , tdNonNumeric :: !(PrimArray Int)
-    -- ^ Each column's count of cells that are not numeric.
+  , tdTextRow :: !(PrimArray Int)
+    -- ^ For each column, a row whose cell is not numeric, or -1 when every
+    -- cell is.
   , tdWidths :: !(PrimArray Float)
   , tdNumeric :: !(SmallArray Bool)
   , tdSort :: !SortCol
@@ -170,9 +172,11 @@ samePtr (Opaque a) b = isTrue# (reallyUnsafePtrEquality# a b)
 
 -- | The table's derived data for @rows@ under @sort@: the cached data when
 -- the rows and columns are the ones it was derived from, else derived again
--- from what it holds.
+-- from what it holds. The rows and columns are evaluated first, so the
+-- pointers kept and compared are their values, whether or not the code that
+-- derives the data evaluates them before keeping them.
 tableDerived :: Foldable f => Context -> Int -> Colonnade Headed row Text -> f row -> SortCol -> IO TableDerived
-tableDerived ctx key cols rows sort = do
+tableDerived ctx key !cols !rows sort = do
   cached <- readDerived ctx key
   let hdrs = Encode.header id cols
   derived <- case cached of
@@ -193,69 +197,138 @@ orderFor sort cells = sortIndices (sortColDir sort) (mapSmallArray' (sortKey sor
 sortKey :: SortCol -> V.Vector Text -> Text
 sortKey sort row = fromMaybe T.empty (row V.!? sortColIndex sort)
 
+-- | A row's cells, each evaluated. Every cell of an encoded row is compared
+-- or measured, so none is left as a thunk.
+encodeRow :: V.Vector (Encode.OneColonnade Headed row Text) -> row -> V.Vector Text
+encodeRow encoders r = V.create $ do
+  let k = V.length encoders
+  cells <- MV.unsafeNew k
+  let fill !j = when (j < k) $ do
+        MV.unsafeWrite cells j $! Encode.oneColonnadeEncode (V.unsafeIndex encoders j) r
+        fill (j + 1)
+  fill 0
+  pure cells
+
+-- | The first cell at which two rows differ, or -1 when they are the same.
+firstDiff :: V.Vector Text -> V.Vector Text -> Int
+firstDiff a b = go 0
+  where
+    k = min (V.length a) (V.length b)
+    go !j
+      | j >= k = if V.length a == V.length b then -1 else j
+      | sameText (V.unsafeIndex a j) (V.unsafeIndex b j) = go (j + 1)
+      | otherwise = j
+
+-- | Equal text, checked by pointer first: a cell kept from the same object
+-- is often the very same text.
+sameText :: Text -> Text -> Bool
+sameText !a !b = isTrue# (reallyUnsafePtrEquality# a b) || a == b
+
 -- | Derive from @rows@, reusing @old@ (derived under the same headers):
 -- each row that is the same object under the same columns keeps its text,
--- each whose text is unchanged keeps its widths, and the order stands while
--- no sort key changed. Widths measured with other fonts are kept only while
--- no text changed.
+-- each cell whose text is unchanged keeps its width, and the order stands
+-- while no sort key changed. Widths measured with other fonts are kept only
+-- while no text changed.
 rederive :: Foldable f => Context -> Colonnade Headed row Text -> f row -> SortCol -> V.Vector Text -> Maybe TableDerived -> IO TableDerived
 rederive Context {ctxFontMetrics = fm, ctxMonoFontMetrics = mono} cols rows sort hdrs old = do
-  let n = length rows
-      c = V.length hdrs
-      oldN = maybe 0 (sizeofSmallArray . tdEncoded) old
-      oldObjs = maybe emptySmallArray tdRowObjs old
-      oldEnc = maybe emptySmallArray tdEncoded old
-      sameCols = any (\d -> samePtr (tdCols d) cols) old
+  -- Bound evaluated, so the loops below do not enter them again.
+  let !n = length rows
+      !c = V.length hdrs
+      !oldN = maybe 0 (sizeofSmallArray . tdEncoded) old
+      !oldObjs = maybe emptySmallArray tdRowObjs old
+      !oldEnc = maybe emptySmallArray tdEncoded old
+      !sameCols = any (\d -> samePtr (tdCols d) cols) old
+      !encoders = Encode.getColonnade cols
   objsM <- newSmallArray n (Opaque ())
   encM <- newSmallArray n V.empty
+  changedM <- newPrimArray n
+  diffM <- newPrimArray n
+  countM <- newPrimArray 1
   let store i o e = writeSmallArray objsM i o >> writeSmallArray encM i e
-      -- Collects the rows whose text changed or is new. Rows are compared
-      -- evaluated: a list's elements are often fresh thunks over the same
-      -- objects. Old entries are read strictly, so kept text does not hold
-      -- on to last frame's arrays.
-      walk !_ [] changed = pure changed
-      walk !i (!r : rs) changed
+      note k i d = writePrimArray changedM k i >> writePrimArray diffM k d
+      -- Lists the rows whose text changed or is new, each with its first
+      -- changed cell (0 for a new row), and stores their count in countM,
+      -- which keeps the counter unboxed. Rows are compared evaluated: a
+      -- list's elements are often fresh thunks over the same objects. Old
+      -- entries are read strictly, so kept text does not hold on to last
+      -- frame's arrays.
+      walk !_ !k [] = writePrimArray countM 0 k
+      walk !i !k (!r : rs)
         | i < oldN = do
             let !o = indexSmallArray oldObjs i
                 !e = indexSmallArray oldEnc i
-                e' = Encode.row id cols r
             if sameCols && samePtr o r
-              then store i o e >> walk (i + 1) rs changed
-              else
-                if e' == e
-                  then store i (Opaque r) e >> walk (i + 1) rs changed
-                  else store i (Opaque r) e' >> walk (i + 1) rs (i : changed)
-        | otherwise = store i (Opaque r) (Encode.row id cols r) >> walk (i + 1) rs (i : changed)
-  changed <- walk (0 :: Int) (toList rows) []
+              then store i o e >> walk (i + 1) k rs
+              else do
+                let !e' = encodeRow encoders r
+                    !d = firstDiff e' e
+                if d < 0
+                  then store i (Opaque r) e >> walk (i + 1) k rs
+                  else store i (Opaque r) e' >> note k i d >> walk (i + 1) (k + 1) rs
+        | otherwise = store i (Opaque r) (encodeRow encoders r) >> note k i 0 >> walk (i + 1) (k + 1) rs
+  walk (0 :: Int) (0 :: Int) (toList rows)
+  nChanged <- readPrimArray countM 0
   objs <- unsafeFreezeSmallArray objsM
   case old of
-    Just d | n == oldN && null changed -> pure d {tdRows = Opaque rows, tdCols = Opaque cols, tdRowObjs = objs}
+    Just d | n == oldN && nChanged == 0 -> pure d {tdRows = Opaque rows, tdCols = Opaque cols, tdRowObjs = objs}
     _ -> do
       encoded <- unsafeFreezeSmallArray encM
-      let cellPadX = 2 * tableCellInset
+      changedRows <- unsafeFreezePrimArray changedM
+      firstDiffs <- unsafeFreezePrimArray diffM
+      let !cellPadX = 2 * tableCellInset
           cell r i = indexSmallArray encoded r V.! i
-          -- The old data, if measured with these fonts: then only the rows
-          -- in @redo@ are measured again.
+          oldCell r i = indexSmallArray oldEnc r V.! i
+          -- Whether cell i of changed row r, first changed at cell f, is
+          -- kept: cells before f are, f is not, later ones are compared.
+          keptCell !r !f !i = r < oldN && (i < f || (i > f && sameText (oldCell r i) (cell r i)))
+          -- The first changed row r, first changed at f, with p r f; or -1.
+          {-# INLINE findChanged #-}
+          findChanged p = go 0
+            where
+              go !j
+                | j >= nChanged = -1
+                | p r (indexPrimArray firstDiffs j) = r
+                | otherwise = go (j + 1)
+                where
+                  r = indexPrimArray changedRows j
+          -- Each column's row whose cell is not numeric, or -1. The old row
+          -- stands while its cell still is not; a column whose old cells were
+          -- all numeric looks only at changed rows, from their first changed
+          -- cell; any other column is scanned to its first cell that is not,
+          -- as without old data.
+          !textRows = generatePrimArray c $ \i ->
+            let isText r = not (isNumericCell (cell r i))
+                scan !r
+                  | r >= n = -1
+                  | isText r = r
+                  | otherwise = scan (r + 1)
+             in case old of
+                  Just d
+                    | w < 0 -> findChanged (\r f -> not (r < oldN && i < f) && isText r)
+                    | w < n && isText w -> w
+                    where
+                      w = indexPrimArray (tdTextRow d) i
+                  _ -> scan 0
+          isNum i = n > 0 && indexPrimArray textRows i < 0
+          -- The old data, if measured with these fonts.
           prior = mfilter (\d -> samePtr (tdFont d) fm && samePtr (tdMonoFont d) mono) old
-          priorN = maybe 0 (const oldN) prior
-          redo = if isJust prior then changed else [0 .. n - 1]
-          gone = filter (< priorN) redo ++ [n .. priorN - 1]
-          nonNumeric at = length . filter (not . isNumericCell . at)
-          counts = generatePrimArray c $ \i ->
-            maybe 0 (\d -> indexPrimArray (tdNonNumeric d) i) prior
-              - nonNumeric (\r -> indexSmallArray oldEnc r V.! i) gone
-              + nonNumeric (`cell` i) redo
-          isNum i = n > 0 && indexPrimArray counts i == 0
       cellWM <- newPrimArray (n * c)
       hdrWM <- newPrimArray c
       forM_ [0 .. c - 1] $ \i -> do
         let font = if isNum i then mono else fm
-            measure r = writePrimArray cellWM (i * n + r) . (+ cellPadX) =<< lineWidthIO font (cell r i)
+            measure !r = do
+              let !t = cell r i
+              writePrimArray cellWM (i * n + r) . (+ cellPadX) =<< lineWidthIO font t
         case prior of
-          -- The column's font is unchanged, so its other cells keep their widths.
+          -- The column's font is unchanged, so its cells whose text is
+          -- unchanged keep their widths, in changed rows too.
           Just d | indexSmallArray (tdNumeric d) i == isNum i -> do
-            copyPrimArray cellWM (i * n) (tdCellW d) (i * priorN) (min n priorN)
-            mapM_ measure redo
+            copyPrimArray cellWM (i * n) (tdCellW d) (i * oldN) (min n oldN)
+            let remeasure !j = when (j < nChanged) $ do
+                  let !r = indexPrimArray changedRows j
+                  unless (keptCell r (indexPrimArray firstDiffs j) i) (measure r)
+                  remeasure (j + 1)
+            remeasure 0
           _ -> mapM_ measure [0 .. n - 1]
         writePrimArray hdrWM i . (+ cellPadX) =<< lineWidthIO fm (hdrs V.! i <> tableSortReserve)
       cellWs <- unsafeFreezePrimArray cellWM
@@ -264,7 +337,11 @@ rederive Context {ctxFontMetrics = fm, ctxMonoFontMetrics = mono} cols rows sort
           widths = generatePrimArray c $ \i ->
             let hdrW = indexPrimArray hdrWs i in if n == 0 then hdrW else max hdrW (widest i 0 minColW)
       -- The order stands while no row came or went and no sort key changed.
-      let keysKept d = n == oldN && all (\r -> sortKey (tdSort d) (indexSmallArray oldEnc r) == sortKey (tdSort d) (indexSmallArray encoded r)) changed
+      let keysKept d =
+            let key = sortKey (tdSort d)
+                s = sortColIndex (tdSort d)
+                keyChanged r f = s == f || (s > f && not (sameText (key (indexSmallArray oldEnc r)) (key (indexSmallArray encoded r))))
+             in n == oldN && findChanged keyChanged < 0
           (sort', order) = case old of
             Just d | keysKept d -> (tdSort d, tdOrder d)
             _ -> (sort, orderFor sort encoded)
@@ -278,7 +355,7 @@ rederive Context {ctxFontMetrics = fm, ctxMonoFontMetrics = mono} cols rows sort
           , tdHeaders = hdrs
           , tdEncoded = encoded
           , tdCellW = cellWs
-          , tdNonNumeric = counts
+          , tdTextRow = textRows
           , tdWidths = widths
           , tdNumeric = smallArrayFromListN c (map isNum [0 .. c - 1])
           , tdSort = sort'

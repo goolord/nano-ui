@@ -53,9 +53,10 @@ liveCols :: Colonnade Headed LiveRow Text
 liveCols = mconcat [headed "Name" (\(LiveRow a _ _) -> a), headed "Qty" (\(LiveRow _ b _) -> b), headed "Note" (\(LiveRow _ _ c) -> c)]
 
 -- A table given its rows again each frame, a few of them changed, lays out
--- as a fresh one given the same rows: widths follow changed, added and
--- removed rows and a column that stops being numeric (and so its mono
--- font), and the order follows changed sort keys.
+-- as a fresh one given the same rows: widths follow changed cells, added and
+-- removed rows and a column that stops and starts being numeric (and so
+-- changes font), whichever of its cells are not numbers, and the order
+-- follows changed sort keys.
 runTableLiveRowsTest :: Context -> IORef Int -> IO ()
 runTableLiveRowsTest ctx0 failed = do
   let fonts c = withMonoFontMetrics c (monospaceMetrics 10)
@@ -71,6 +72,13 @@ runTableLiveRowsTest ctx0 failed = do
         , init
         , setAt 0 (LiveRow "zz" "1" "w")
         , setAt 2 (LiveRow "e" "3" "z")
+        , setAt 3 (LiveRow "a" "n/a" "note")
+        , setAt 1 (LiveRow "b" "none" "x")
+        , setAt 3 (LiveRow "a" "4" "note")
+        , setAt 3 (LiveRow "a" "four" "note")
+        , take 1
+        , (++ [LiveRow "y" "2" "note"])
+        , setAt 1 (LiveRow "b" "2" "a much longer note")
         ]
       live = fonts ctx0
   void (laidOut live rows0)

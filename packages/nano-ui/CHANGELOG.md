@@ -744,7 +744,13 @@
   only rows that are not last frame's objects, measures only cells whose
   text changed, and sorts only when a sort key changed. With 2000 rows and
   one changing each frame, a frame allocates 0.48 MB instead of 1.97 MB and
-  takes about 0.24 ms instead of 1.3 ms.
+  takes about 0.23 ms instead of 1.3 ms. With every row's age changing in
+  place, only those cells are measured: 1.15 ms instead of 1.49 ms. Rows
+  that are not last frame's objects are compared with the text last shown
+  at their index, which does not pay when nearly every index shows another
+  row, as in a window that moves by one row each frame: such a frame takes
+  about as long as before (1.19 ms against 1.21 ms with 2000 rows) and
+  allocates 1.19 MB instead of 1.79 MB.
 - A tree keeps its visible rows while it is given the same item list and
   its expansion is unchanged, instead of listing them every frame: a
   1000-row tree in a scroller allocates 783 KB a frame instead of 989 KB.
