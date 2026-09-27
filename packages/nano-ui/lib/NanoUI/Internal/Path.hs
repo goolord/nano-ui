@@ -780,20 +780,27 @@ convexRing :: PrimArray Float -> Bool
 convexRing vs = go 0 0 0 0 0 0
   where
     n = sizeofPrimArray vs `div` 2
-    at = pointAt vs
     go :: Int -> Int -> Int -> Int -> Int -> Int -> Bool
     go !i !turn' !xs !ys !lastX !lastY
       | i >= n = True
       | otherwise =
-          let (x0, y0) = at i
-              (x1, y1) = at ((i + 1) `mod` n)
-              (x2, y2) = at ((i + 2) `mod` n)
-              c = cross (x1 - x0, y1 - y0) (x2 - x1, y2 - y1)
-              turn'' = if c > 0 then 1 else if c < 0 then -1 else turn'
-              sx = signum' (x1 - x0)
-              sy = signum' (y1 - y0)
-              xs' = if sx /= 0 && lastX /= 0 && sx /= lastX then xs + 1 else xs
-              ys' = if sy /= 0 && lastY /= 0 && sy /= lastY then ys + 1 else ys
+          -- Strict coordinates: lazily bound point tuples cost a thunk and
+          -- boxes per point. 'triangulate' calls this with n >= 3, so one
+          -- subtraction wraps an index.
+          let !i1 = if i + 1 >= n then i + 1 - n else i + 1
+              !i2 = if i1 + 1 >= n then i1 + 1 - n else i1 + 1
+              !x0 = indexPrimArray vs (2 * i)
+              !y0 = indexPrimArray vs (2 * i + 1)
+              !x1 = indexPrimArray vs (2 * i1)
+              !y1 = indexPrimArray vs (2 * i1 + 1)
+              !x2 = indexPrimArray vs (2 * i2)
+              !y2 = indexPrimArray vs (2 * i2 + 1)
+              !c = (x1 - x0) * (y2 - y1) - (x2 - x1) * (y1 - y0)
+              !turn'' = if c > 0 then 1 else if c < 0 then -1 else turn'
+              !sx = signum' (x1 - x0)
+              !sy = signum' (y1 - y0)
+              !xs' = if sx /= 0 && lastX /= 0 && sx /= lastX then xs + 1 else xs
+              !ys' = if sy /= 0 && lastY /= 0 && sy /= lastY then ys + 1 else ys
            in if turn' /= 0 && turn'' /= turn' || xs' > 2 || ys' > 2
                 then False
                 else go (i + 1) turn'' xs' ys' (if sx /= 0 then sx else lastX) (if sy /= 0 then sy else lastY)
