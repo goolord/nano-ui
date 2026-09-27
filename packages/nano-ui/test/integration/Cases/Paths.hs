@@ -572,6 +572,15 @@ runJoinGeometryTest ctx failed = do
   assert failed (roundJ > edge * 0.95 && roundJ < edge + 0.01)
   assertLt failed (abs (bevel - edge * sqrt 0.5)) 0.01
   assertLt failed (abs (limited - bevel)) 0.01
+  -- A round join where a line turns back on itself rounds the tip, the way
+  -- the line was heading, whichever way it points.
+  forM_ [V2 60 0, V2 60 80] $ \(V2 dx dy) -> do
+    let len = sqrt (dx * dx + dy * dy)
+        dir = V2 (dx / len) (dy / len)
+        tip = V2 (40 + dx) (100 + dy)
+    vs <- canvasVertices ctx (\(Rect x y _ _) -> drawStrokePathWith (P.stroke 10) {P.strokeJoin = P.RoundJoin} (P.polyline [V2 (x + 40) (y + 100), V2 (x + 40 + dx) (y + 100 + dy), V2 (x + 40) (y + 100)]) (P.Solid black))
+    let tipReach = maximum [v2Dot (v2Sub q tip) dir | (q, _) <- vs, v2Dist q tip < 30]
+    assert failed (tipReach > edge * 0.95 && tipReach < edge + 0.01)
   -- Each cap extends past the line end by its expected amount.
   let capReach cap = do
         vs <- canvasVertices ctx (\(Rect x y _ _) -> drawStrokePathWith (P.stroke 10) {P.strokeCap = cap} (P.polyline [V2 (x + 40) (y + 100), V2 (x + 100) (y + 100)]) (P.Solid black))

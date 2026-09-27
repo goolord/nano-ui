@@ -817,8 +817,12 @@ pushPolylineAA da pts w closed cap join limit shade
                         | otherwise = (v + 1, v + 2, v + 3, v + 6, v + 7)
                       !ux = outSign * ax
                       !uy = outSign * ay
-                      !sweep = atan2 (ux * outSign * by - uy * outSign * bx) (ux * outSign * bx + uy * outSign * by)
-                      !chords = if join == RoundJoin then arcChords s outer (abs sweep) else 1
+                      -- Turning the way the corner turns: at a half turn
+                      -- the cross product is a signed zero, and atan2 would
+                      -- follow its sign back through the stroke instead.
+                      !turned = abs (atan2 (ux * outSign * by - uy * outSign * bx) (ux * outSign * bx + uy * outSign * by))
+                      !sweep = if turnsPositive then turned else negate turned
+                      !chords = if join == RoundJoin then arcChords s outer turned else 1
                   if turnsPositive
                     then section v x y ax ay ix iy col >> section (v + 4) x y bx by ix iy col
                     else section v x y ix iy ax ay col >> section (v + 4) x y ix iy bx by col
