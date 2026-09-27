@@ -19,7 +19,7 @@ import NanoUI.Testing
 import NanoUI.Internal.Context (Context (ctxDamageWanted))
 import NanoUI.Internal.Debug (CoreDebugSnapshot (..), noteDebugPresent, noteDebugSkip, refreshDebugSnapshot)
 import NanoUI.Sdl.Internal.Debug
-import NanoUI.Sdl.Internal.Display (outPair, pushRefreshEvent, queryMouseWindowPos, queryWindowLogicalSize)
+import NanoUI.Sdl.Internal.Display (outPair, pushRefreshEvent, queryMouseWindowPos, queryWindowLogicalSize, sendWaylandSizeLimits)
 import NanoUI.Sdl.Internal.Font
 import NanoUI.Sdl.Internal.Input (syncTextInput)
 import NanoUI.Sdl.Internal.NanoUIFont (NanoUIFont)
@@ -187,6 +187,11 @@ drawFrameWith ctx env inp forceFull evaluateUi = do
       -- The backbuffer is undefined after present, so capture a frame drawn
       -- straight to it before presenting.
       when (tex == nullPtr) $ answerScreenshots ctx (captureFrame env tex)
+      -- SDL replaced a Wayland toplevel's size limits with its own at every
+      -- configure; the present commits them with the frame.
+      for_ (sdlSizeLimits env) $ \ref -> do
+        (nw, nh, xw, xh) <- readIORef ref
+        sendWaylandSizeLimits (sdlWindow env) nw nh xw xh
       void $ renderPresentSafe ren
       t3 <- getMonotonicTime
       let ms a b = (b - a) * 1000

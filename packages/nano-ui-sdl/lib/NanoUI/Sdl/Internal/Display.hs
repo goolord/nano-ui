@@ -10,6 +10,8 @@ module NanoUI.Sdl.Internal.Display
   , zoomWindow
   , windowPosCentered
   , installResizeWatch
+  , waylandToplevel
+  , sendWaylandSizeLimits
   , refreshEventType
   , initRefreshEvent
   , pushRefreshEvent
@@ -145,6 +147,21 @@ takeRefreshEvent = void (atomicSwapIORef refreshPending False)
 -- (0 when unavailable).
 foreign import ccall unsafe "nano_ui_window_refresh_rate"
   queryWindowRefreshHz :: Ptr SDL_Window -> IO CInt
+
+-- | Whether the window is a shown Wayland toplevel SDL made itself (not
+-- libdecor's), whose size limits nano-ui sends rather than SDL: SDL would
+-- also clamp every configure to them, and a configure it clamps back to the
+-- current size is never committed, which stalls a tiling compositor's resize.
+-- See @nano_ui_display.c@.
+foreign import ccall unsafe "nano_ui_wayland_toplevel"
+  waylandToplevel :: Ptr SDL_Window -> IO CBool
+
+-- | Send a 'waylandToplevel' window's minimum and maximum width and height, in
+-- window coordinates, zero for none. SDL replaces them with its own on every
+-- configure, so they are sent again before each present. A window that cannot
+-- be resized, or is fullscreen, keeps SDL's.
+foreign import ccall unsafe "nano_ui_wayland_size_limits"
+  sendWaylandSizeLimits :: Ptr SDL_Window -> Int32 -> Int32 -> Int32 -> Int32 -> IO ()
 
 foreign import ccall "wrapper"
   mkResizeCb :: IO () -> IO (FunPtr (IO ()))

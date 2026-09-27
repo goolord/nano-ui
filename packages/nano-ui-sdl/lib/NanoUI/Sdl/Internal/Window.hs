@@ -27,6 +27,7 @@ import Data.Bits (zeroBits, (.|.))
 import Data.ByteString qualified as BS
 import Data.ByteString.Internal qualified as BSI
 import Data.Foldable (for_)
+import Data.Int (Int32)
 import Data.Maybe (fromMaybe, isJust, isNothing)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import System.Environment (lookupEnv)
@@ -256,6 +257,11 @@ data SdlEnv = SdlEnv
   , sdlTextInput :: !TextInputSync
   -- ^ The focused-field state last sent to SDL's text input; updated each
   -- drawn frame.
+  , sdlSizeLimits :: !(Maybe (IORef (Int32, Int32, Int32, Int32)))
+  -- ^ On a 'waylandToplevel' window, its minimum and maximum width and
+  -- height in window coordinates (zero for none), which nano-ui sends to the
+  -- compositor before each present instead of giving them to SDL.
+  -- 'Nothing' elsewhere, where SDL keeps them.
   }
 
 -- | The retained framebuffer. The texture is allocated in blocks larger than
@@ -528,6 +534,10 @@ startSdlWindow bench opts ctx guessedDriver fontSource monoSource = do
       (const (void (stopTextInputSafe sdlWindow)))
   sdlLastPresented <- liftIO $ newIORef False
   sdlTextInput <- liftIO newTextInputSync
+  -- Decided while the window is shown, before the settings apply its limits.
+  sdlSizeLimits <- liftIO $ do
+    toplevel <- waylandToplevel sdlWindow
+    if toplevel /= 0 then Just <$> newIORef (0, 0, 0, 0) else pure Nothing
   sdlBatch <- mkAcquire (newRenderBatch sdlRenderer) destroyRenderBatch
   let
     env = SdlEnv {..}
@@ -542,7 +552,7 @@ startSdlWindow bench opts ctx guessedDriver fontSource monoSource = do
   -- The remaining settings go through the host, as from a view. This runs
   -- after the decorations (size limits account for the frame) and after the
   -- zoom (which centres the enlarged window).
-  liftIO $ installWindowHost ctx' settings (windowHostFor sdlWindow (windowZoom env))
+  liftIO $ installWindowHost ctx' settings (windowHostFor sdlWindow (windowZoom env) sdlSizeLimits)
   liftIO $ reportWindowState ctx' =<< queryWindowState sdlWindow scale
   pure (ctx', env)
 

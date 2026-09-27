@@ -200,6 +200,13 @@
 
 ### Fixed
 
+- Resizing a Wayland window past its minimum or maximum size no longer
+  stutters under a compositor that ignores the limits, such as sway's tiling.
+  SDL clamped each such configure back to the current size without reporting
+  it, so no frame committed it and sway waited out its 200 ms transaction
+  timeout on every step of the drag. The limits now go to the compositor
+  without SDL clamping to them, and the window takes the size it is given.
+
 - Partial redraws retain independent triangles and a command's final triangle.
   Damage rejection checks all three vertices rather than assuming quad pairs.
 

@@ -11,12 +11,13 @@ import Control.Monad (unless, void)
 import Data.Bits (zeroBits, (.&.))
 import Data.ByteString.Unsafe qualified as BSU
 import Data.Int (Int32)
+import Data.IORef (IORef, readIORef, writeIORef)
 import Data.Maybe (fromMaybe)
 import Data.Text.Foreign qualified as TextForeign
 import Foreign.Ptr (Ptr, castPtr, nullPtr)
 import NanoUI (RgbaPixels, Size (..), WindowMode (..), rgbaBytes, rgbaHeight, rgbaWidth)
 import NanoUI.Backend (WindowHost (..), WindowState (..), defaultWindowState)
-import NanoUI.Sdl.Internal.Display (outPair, windowPosCentered)
+import NanoUI.Sdl.Internal.Display (outPair, sendWaylandSizeLimits, windowPosCentered)
 import NanoUI.Sdl.Internal.Frame (nativeFrameOutset)
 import SDL3.Sys.Bindgen.Pixels qualified as Pixels
 import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
@@ -29,14 +30,15 @@ import SDL3.Sys.Video qualified as SDL
 -- call back into the Haskell hit test.
 
 -- | The window host for @win@. @zoom@ gives the window coordinates per layout
--- unit, read at each call.
-windowHostFor :: Ptr SDL_Window -> IO Float -> WindowHost
-windowHostFor win zoom =
+-- unit, read at each call. @limits@ holds the size limits of a Wayland
+-- toplevel that nano-ui sends itself ('NanoUI.Sdl.Internal.Window.sdlSizeLimits').
+windowHostFor :: Ptr SDL_Window -> IO Float -> Maybe (IORef (Int32, Int32, Int32, Int32)) -> WindowHost
+windowHostFor win zoom limits =
   WindowHost
     { hostSetTitle = \t -> TextForeign.withCString t (void . SDL.setWindowTitleSafe win . PtrConst.unsafeFromPtr)
     , hostSetIcon = setIcon win
-    , hostSetMinSize = sizeLimit SDL.setWindowMinimumSizeSafe
-    , hostSetMaxSize = sizeLimit SDL.setWindowMaximumSizeSafe
+    , hostSetMinSize = sizeLimit SDL.setWindowMinimumSizeSafe (\(w, h) (_, _, xw, xh) -> (w, h, xw, xh))
+    , hostSetMaxSize = sizeLimit SDL.setWindowMaximumSizeSafe (\(w, h) (nw, nh, _, _) -> (nw, nh, w, h))
     , hostSetOpacity = void . SDL.setWindowOpacitySafe win
     , hostSetMode = \case
         Windowed -> void (SDL.setWindowFullscreenSafe win False) >> void (SDL.showWindowSafe win)
@@ -58,9 +60,27 @@ windowHostFor win zoom =
       (across, down) <- nativeFrameOutset win
       let axis v outset = if v <= 0 then 0 else fromIntegral (round (v * z) + outset) :: Int32
       pure (axis w across, axis h down)
-    -- SDL resizes a window that is already past the limit.
-    sizeLimit :: (Ptr SDL_Window -> Int32 -> Int32 -> IO Bool) -> Maybe Size -> IO ()
-    sizeLimit set limit = viewSize (fromMaybe (Size 0 0) limit) >>= \(w, h) -> void (set win w h)
+    -- SDL resizes a window that is already past the limit. A Wayland
+    -- toplevel's limits go to the compositor ('sendWaylandSizeLimits') and
+    -- not to SDL, which would clamp configures to them, so it is resized here.
+    sizeLimit ::
+      (Ptr SDL_Window -> Int32 -> Int32 -> IO Bool) ->
+      ((Int32, Int32) -> (Int32, Int32, Int32, Int32) -> (Int32, Int32, Int32, Int32)) ->
+      Maybe Size ->
+      IO ()
+    sizeLimit set place limit = do
+      (w, h) <- viewSize (fromMaybe (Size 0 0) limit)
+      case limits of
+        Nothing -> void (set win w h)
+        Just ref -> do
+          new@(nw, nh, xw, xh) <- place (w, h) <$> readIORef ref
+          writeIORef ref new
+          sendWaylandSizeLimits win nw nh xw xh
+          (_, cw, ch) <- outPair (SDL.getWindowSize win)
+          let fit v lo hi = (if hi > 0 then min hi else id) (max lo (fromIntegral v))
+              (fw, fh) = (fit cw nw xw, fit ch nh xh)
+          unless (fw == fromIntegral cw && fh == fromIntegral ch) $
+            void (SDL.setWindowSizeSafe win fw fh)
 
 -- | Set the window icon. SDL keeps a copy; video drivers without icons
 -- ignore it.
