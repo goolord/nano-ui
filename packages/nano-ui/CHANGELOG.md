@@ -881,6 +881,11 @@
   instead of 1.3 ms (2000 lines: 0.03 ms instead of 42 ms, which also
   overflowed the SDL text caches), and a 2000-sentence rich text in 2.4 ms
   instead of 48 ms.
+- Rich text given the same list of pieces as last frame, under an equal
+  paragraph layout and theme, reuses its laid-out paragraph without hashing
+  the pieces' text again. Keep a paragraph's pieces between frames (as the
+  Markdown widget does for a document's closed blocks) for a long text that
+  costs little a frame.
 - Rounded fills and borders allocate about 450 bytes less per bordered
   widget and frame, with the same geometry: their corner loops are workers
   of their own instead of closures. The headless profiler's button grid

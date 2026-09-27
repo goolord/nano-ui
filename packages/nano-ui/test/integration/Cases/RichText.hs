@@ -21,6 +21,7 @@ tests =
   , spec "rich-text-scroll-cull" runRichTextScrollCullTest
   , spec "rich-text-resize" runRichTextResizeTest
   , spec "rich-text-capped" runRichTextCappedTest
+  , spec "rich-text-same-pieces" runRichTextSamePiecesTest
   ]
 
 -- | A paragraph wraps at its column's width, taking a line's height per line,
@@ -237,3 +238,24 @@ runRichTextCappedTest ctx failed = do
   step (withInputOff 120 400) long
   step (withInputOff 400 400) long
   step (withInputOff 400 400) short
+
+-- | The same pieces list drawn frame after frame (as a Markdown document's
+-- closed blocks are) still follows a change to the paragraph's layout or
+-- the theme: its key is reused only while both are unchanged.
+runRichTextSamePiecesTest :: Context -> IORef Int -> IO ()
+runRichTextSamePiecesTest ctx failed = do
+  let inp = withInput 400 400
+      fm = ctxFontMetrics ctx
+      pieces = ["kept ", strong "pieces", hyperlink "x" " here"]
+      red = colorRGBA 200 10 10 255
+      blue = colorRGBA 10 10 200 255
+      colorsOf theme f = do
+        resp <- warmup2 ctx inp (column (setUiTheme theme >> fst <$> richTextWith' f pieces))
+        Just entry <- lookupCustomDrawing ctx (respId resp)
+        cdc <- mkCustomDrawContext ctx fm (respId resp)
+        pure [c | DrawTextStyled _ _ _ t c <- toList (cdrBuild entry cdc (respRect resp)), t == "kept"]
+  assertEq failed [red] =<< colorsOf defaultTheme (fontColor red)
+  assertEq failed [blue] =<< colorsOf defaultTheme (fontColor blue)
+  dark <- colorsOf defaultTheme id
+  light <- colorsOf defaultLightTheme id
+  assert failed (length dark == 1 && dark /= light)

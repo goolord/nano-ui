@@ -31,6 +31,7 @@ import NanoUI.Internal.Font (FontMetrics (..), lineWidthIO)
 import NanoUI.Internal.Frame.Node (resolveTextFont)
 import NanoUI.Internal.Input (Input (..), UiCursorKind (..))
 import NanoUI.Internal.Layout.Arena (NodeType (NodeDrawing))
+import NanoUI.Internal.Store (eqByPtr, ptrEq)
 import NanoUI.Internal.Monad (NanoUI, askDefaultLayout, askInput, freshWidget, liftIO, uiTheme)
 import NanoUI.Internal.Style hiding (Flow (..))
 import NanoUI.Internal.Types (Color (..), Rect (..), V2 (..))
@@ -134,6 +135,7 @@ data Line = Line
 -- and colours stay the same.
 data Paragraph = Paragraph
   { paraKey :: !Int
+  , paraInputs :: !(IORef Inputs)
   , paraRuns :: !(SmallArray Run)
   , paraTokens :: ![Token]
   , paraEmptyLine :: !(Float, Float)
@@ -142,6 +144,13 @@ data Paragraph = Paragraph
   , paraLines :: [Line]
   , paraMeasured :: !(IORef Measured)
   }
+
+-- What a paragraph's key was last worked out from: the pieces, the
+-- paragraph's layout, the theme and the font metric generation. Pieces that
+-- are the same list as last frame's under an equal layout and theme resolve
+-- to the same fonts and colours, so the key is reused without hashing their
+-- text.
+data Inputs = Inputs [Inline] !Layout !Theme !Int
 
 -- The width a paragraph was last measured at and its extent there
 -- ('measureAt').
@@ -164,7 +173,12 @@ richTextWith' f pieces = do
       align = layoutAlignX base
   Paragraphs cacheRef <- liftIO $ hostOrInit ctx (Paragraphs <$> newIORef (ParagraphCache 0 paragraphBound IM.empty))
   gen <- liftIO (readIORef (ctxMetricGen ctx))
-  let key =
+  let reused = \para -> do
+        Inputs pieces0 base0 theme0 gen0 <- readIORef (paraInputs para)
+        pure (ptrEq pieces pieces0 && gen == gen0 && eqByPtr base base0 && eqByPtr theme theme0)
+  cached <- liftIO ((\(ParagraphCache _ _ m) -> IM.lookup (intKey wid) m) <$> readIORef cacheRef)
+  sameInputs <- liftIO (maybe (pure False) reused cached)
+  let hashed =
         foldl'
           ( \h (Inline txt _ target bg, TextFont size variant weight fstyle deco, Color rgba) ->
               h `hashWithSalt` txt `hashWithSalt` size `hashWithSalt` fromEnum variant
@@ -173,9 +187,12 @@ richTextWith' f pieces = do
           )
           (gen `hashWithSalt` fromEnum align)
           styled
-  cached <- liftIO ((\(ParagraphCache _ _ m) -> IM.lookup (intKey wid) m) <$> readIORef cacheRef)
+      key = case cached of
+        Just para | sameInputs -> paraKey para
+        _ -> hashed
+      inputs = Inputs pieces base theme gen
   para0 <- case cached of
-    Just para | paraKey para == key -> pure para
+    Just para | paraKey para == key -> liftIO (para <$ unless sameInputs (writeIORef (paraInputs para) inputs))
     _ -> liftIO $ do
       resolved <- mapM (measurePiece ctx) (zip [0 ..] styled)
       let runs = smallArrayFromList (map fst resolved)
@@ -184,7 +201,8 @@ richTextWith' f pieces = do
             (run, _) : _ -> (runLineHeight run, runAscent run)
             [] -> (fmLineHeight (ctxFontMetrics ctx), fmAscent (ctxFontMetrics ctx))
       measured <- newIORef Unmeasured
-      pure (Paragraph key runs tokens emptyLine (lineBoxes (layoutLines runs emptyLine AlignStart 1e9 tokens)) (-1) [] measured)
+      inputsRef <- newIORef inputs
+      pure (Paragraph key inputsRef runs tokens emptyLine (lineBoxes (layoutLines runs emptyLine AlignStart 1e9 tokens)) (-1) [] measured)
   resp <- addWidget wid NodeDrawing T.empty 0 base
   let Rect rx ry rw _ = respRect resp
       runs = paraRuns para0
