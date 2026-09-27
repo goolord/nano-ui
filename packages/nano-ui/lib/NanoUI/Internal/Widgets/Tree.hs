@@ -8,14 +8,13 @@ import Data.Foldable (asum, find, fold, toList)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Primitive.SmallArray (SmallArray, indexSmallArray, sizeofSmallArray, smallArrayFromList)
-import GHC.Exts (isTrue#, reallyUnsafePtrEquality#)
 import qualified Data.IntSet as IS
 import NanoUI.Internal.Context (Context (..), adoptSlot, getPrevRect, getStore, intKey, registerFocusable, writeSlots)
 import NanoUI.Internal.Font (treeChevronRect)
 import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Internal.Input (inputMousePos)
 import NanoUI.Internal.Layout.Arena (NodeType (..))
-import NanoUI.Internal.Store (fieldInt, fieldIntSet, lookupSlot, slotWrite)
+import NanoUI.Internal.Store (fieldInt, fieldIntSet, lookupSlot, ptrEq, slotWrite)
 import NanoUI.Internal.Monad (NanoUI, askInput, focusedWidget, freshWidget, liftIO, withKey)
 import NanoUI.Internal.Style (defaultLayout, fillW, gap, tight)
 import NanoUI.Internal.Types (Rect (..), clamp, rectContains)
@@ -67,7 +66,7 @@ cachedRows ctx key !items !expanded = do
   cached <- readDerived ctx key
   case cached of
     Just (TreeRows items' expanded' total rows)
-      | isTrue# (reallyUnsafePtrEquality# items' items) && expanded' == expanded -> pure (total, rows)
+      | ptrEq items' items && expanded' == expanded -> pure (total, rows)
     _ -> do
       let list = toList items
           !total = forestSize list
