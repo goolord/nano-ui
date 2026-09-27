@@ -2,6 +2,8 @@ module Cases.Cursors (tests) where
 
 import Spec
 import Data.List (find)
+import Data.Maybe (isNothing)
+import Data.Text qualified as T
 
 tests :: [Spec]
 tests =
@@ -17,6 +19,7 @@ tests =
   , spec "cursor-shape-modal" runCursorShapeModalTest
   , spec "cursor-shape-in-window" runCursorShapeInWindowTest
   , spec "cursor-shape-layers-and-pin" runCursorShapeLayersAndPinTest
+  , spec "cursor-shape-small-scope" runCursorShapeSmallScopeTest
   ]
 
 -- | A plain drawing: a node with no cursor of its own.
@@ -179,3 +182,22 @@ runCursorShapeLayersAndPinTest ctx failed = do
   check (col [pinned, withCursorShape UiCursorCrosshair (plainArea 200 120)]) [UiCursorDefault, UiCursorCrosshair]
   check (layersWith tight (sequence [withCursorShape UiCursorMove pinned, withCursorShape UiCursorHelp (plainArea 200 120), plainArea 100 60]))
     [UiCursorMove, UiCursorHelp, UiCursorDefault]
+
+-- | A scope much smaller than the page, whose nodes alone are tested for the
+-- pointer: its shape shows on it and in a window declared in it, and not on
+-- the list beside it, its labels or the gaps between its rows.
+runCursorShapeSmallScopeTest :: Context -> IORef Int -> IO ()
+runCursorShapeSmallScopeTest ctx failed = do
+  let ui = row $ do
+        labels <- columnWith (gap 6) . forM [1 .. 30 :: Int] $ \i -> row (label' (T.pack ("row " <> show i)) <* plainArea 60 8)
+        scoped <- withCursorShape UiCursorCrosshair ((,) <$> plainArea 80 60 <*> (fst <$> window True "Tools" (label "Body")))
+        pure (labels, scoped)
+  (labels, (area, w)) <- warmup2 ctx inp ui
+  assertJustM failed (getPrevRect ctx (respId w)) $ \wr -> do
+    let clear = filter (\r -> isNothing (rectIntersect (rectInflate 8 wr) (respRect r))) labels
+        gapBelow r = let Rect x y _ h = respRect r in V2 (x + 2) (y + h + 3)
+    assert failed (length clear >= 2)
+    shapesAt failed ctx ui $
+      [(centerOf r, UiCursorDefault) | r <- take 1 clear]
+        ++ [(gapBelow r, UiCursorDefault) | r <- take 1 (drop 1 clear)]
+        ++ [(centerOf area, UiCursorCrosshair), (spanCenter wr, UiCursorCrosshair)]

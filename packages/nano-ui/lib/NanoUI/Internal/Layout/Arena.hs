@@ -78,6 +78,7 @@ module NanoUI.Internal.Layout.Arena
   , getAlignY
   , getFlow
   , hasPinnedBelow
+  , hasScrollerBelow
   , getPointerMode
   , getNodeRect
   , setRect
@@ -607,10 +608,15 @@ data StyleCol
 --   when that node is added ('hasPinnedBelow'). The solver, paint and hit
 --   tests look for pinned children only under such a node.
 -- * 'TagPointer': the node's effective 'PointerMode' ('getPointerMode').
+-- * 'TagScrollerBelow': whether the node or a descendant is a scroll
+--   container, a text area or a 'PointerBlock' node, as a 'Bool', set when
+--   that node is added ('hasScrollerBelow'). Wheel routing looks for its
+--   target only under such a node.
 data TagCol
   = TagNodeType | TagDirection | TagWSizing | TagHSizing
   | TagScrollBarSlot | TagAlignX | TagAlignY | TagIdSuperseded
   | TagFlow | TagPinned | TagPinnedBelow | TagPointer | TagLineAlign
+  | TagScrollerBelow
   deriving (Enum, Bounded)
 
 -- | Columns of 'naArrTree'. A link that leads nowhere is -1.
@@ -1069,8 +1075,13 @@ addNode na nt parent Layout {..} = do
   when (isFloatingNode nt) $ pushClassNode na FloatingNodes idx
   when (nt == NodePanel || nt == NodeScrollContainer) $ pushClassNode na BackdropNodes idx
   when (flow == Layered || pinned) $ pushClassNode na LayeredNodes idx
-  when (isWidgetNode nt || isScrollNode nt || pointerMode == PointerBlock) $
+  when (isWidgetNode nt || isScrollNode nt || pointerMode == PointerBlock) $ do
     pushClassNode na PointerNodes idx
+    -- Mark the node and its ancestors, stopping at the first one marked.
+    let markScrollerBelow p = when (p >= 0) $ do
+          marked <- readTagEnum a p TagScrollerBelow
+          unless marked $ writeTagEnum a p TagScrollerBelow True >> readTree a p TreeParent >>= markScrollerBelow
+    when (isScrollNode nt || nt == NodeTextArea || pointerMode == PointerBlock) $ markScrollerBelow idx
   when (nt == NodeDrawing) $ pushClassNode na DrawingNodes idx
   writeIORef (naCount na) (idx + 1)
   pure idx
@@ -1208,6 +1219,12 @@ isPinnedNode na idx = arenaArrays na >>= \a -> readTagEnum a idx TagPinned
 {-# INLINE hasPinnedBelow #-}
 hasPinnedBelow :: NodeArena -> NodeIdx -> IO Bool
 hasPinnedBelow na idx = arenaArrays na >>= \a -> readTagEnum a idx TagPinnedBelow
+
+-- | Whether the node or a descendant is a scroll container, a text area or
+-- a 'PointerBlock' node: whether its subtree can take or block the wheel.
+{-# INLINE hasScrollerBelow #-}
+hasScrollerBelow :: NodeArena -> NodeIdx -> IO Bool
+hasScrollerBelow na idx = arenaArrays na >>= \a -> readTagEnum a idx TagScrollerBelow
 
 -- | The node's own 'PointerMode', or 'PointerPass' when an ancestor passes
 -- the pointer.

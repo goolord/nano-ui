@@ -22,6 +22,8 @@ module NanoUI.Internal.Context.Types
   , PrevFrame (..)
   , ImagePaint (..)
   , emptyPrevFrame
+  , PrevByIdx (..)
+  , newPrevByIdx
   , OverlayState (..)
   , initialOverlayState
   , ExplainState (..)
@@ -79,7 +81,8 @@ import Data.IntMap.Strict qualified as IM
 import Data.IntSet (IntSet)
 import Data.IntSet qualified as IS
 import Data.Map.Strict (Map)
-import Data.Primitive.PrimArray (MutablePrimArray)
+import Data.Primitive.Array (MutableArray, newArray)
+import Data.Primitive.PrimArray (MutablePrimArray, newPrimArray)
 import Data.Primitive.SmallArray (SmallArray, SmallMutableArray)
 import Data.Word (Word64)
 import Data.Text (Text)
@@ -299,6 +302,19 @@ data ImagePaint = ImagePaint !Int !(Maybe ImageLook)
 
 emptyPrevFrame :: PrevFrame
 emptyPrevFrame = PrevFrame IM.empty IM.empty IM.empty IM.empty IM.empty
+
+-- | 'pfRects' by the last frame's node index, for widgets declared where
+-- they were ('NanoUI.Internal.Context.Core.getPrevRectAt'): for each of the
+-- first @count@ nodes, the key it recorded in 'pfRects' (0 for none) and
+-- that entry's rect. Written with 'pfRects', so the two always agree.
+data PrevByIdx = PrevByIdx
+  !(MutablePrimArray RealWorld Int)
+  !(MutableArray RealWorld Rect)
+  {-# UNPACK #-} !Int
+
+-- | Empty 'PrevByIdx'.
+newPrevByIdx :: IO PrevByIdx
+newPrevByIdx = PrevByIdx <$> newPrimArray 0 <*> newArray 0 (Rect 0 0 0 0) <*> pure 0
 
 -- | Require a first frame and full repaint, with no previous geometry.
 initialDamageState :: DamageState
@@ -836,6 +852,7 @@ data Context = Context
   , ctxInputMethod :: !(IORef (Maybe InputMethodRequest))
   , ctxStore :: IORef WidgetStore
   , ctxDamageState :: IORef DamageState
+  , ctxPrevByIdx :: !(IORef PrevByIdx)
   , ctxOverlayState :: IORef OverlayState
   , ctxAnimationState :: IORef AnimationState
   , ctxScrollState :: !(IORef ScrollState)

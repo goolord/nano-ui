@@ -215,7 +215,7 @@ containerResponse nt layout child = do
   wid <- nextId
   inp <- askInput
   r <- container nt layout (tagContainer wid >> child)
-  resp <- withContext (\ctx -> resolveInteraction ctx inp wid)
+  resp <- withContext (\ctx -> resolveInteraction ctx inp (-1) wid)
   pure (r, resp)
 
 -- | An unpadded column that reports pointer activity over itself and its
@@ -343,7 +343,7 @@ addWidgetNode wid nt txt value layout initialize = do
     setNodeValue (ctxNodeArena ctx) idx value
     initialize (ctxNodeArena ctx) idx
     setWidgetId (ctxNodeArena ctx) idx wid
-    resolveInteraction ctx inp wid
+    resolveInteraction ctx inp idx wid
 
 addWidgetWithOptions ::
   Ui :> es =>
@@ -374,14 +374,15 @@ pointerOnWidget ctx mIdx wid rect mouse =
 widgetHit :: Context -> Maybe NodeIdx -> Rect -> V2 -> IO Bool
 widgetHit ctx mIdx rect p = maybe (pure (rectContains rect p)) (\idx -> nodeInteractionHit ctx idx rect p) mIdx
 
-resolveInteraction :: Context -> Input -> WidgetId -> IO Response
-resolveInteraction ctx inp wid = do
-  mrect <- getPrevRect ctx wid
+-- | The interaction of widget @wid@, declared as node @idx@ (or -1), with
+-- the pointer and buttons of @inp@, judged against its last-frame rect.
+resolveInteraction :: Context -> Input -> NodeIdx -> WidgetId -> IO Response
+resolveInteraction ctx inp idx wid = do
+  rect <- getPrevRectAt ctx idx wid
   active <- readIORef (ctxActiveId ctx)
   pending <- readIORef (ctxClickedId ctx)
   let
     mouse = inputMousePos inp
-    rect = fromMaybe (Rect 0 0 0 0) mrect
   if not (rectHit rect mouse || pending == wid)
     then pure $! mkResponse wid rect False False False
     else do

@@ -48,6 +48,7 @@ tests =
   , spec "scroll-disjoint-viewport-hit" runDisjointViewportHitTest
   , spec "scroll-disjoint-viewport-layers" runDisjointViewportLayersTest
   , spec "scroll-wheel-paint-order" runWheelPaintOrderTest
+  , spec "scroll-wheel-cross-inside" runWheelCrossInsideTest
   ]
 
 runScrollThumbCursorTest :: Context -> IORef Int -> IO ()
@@ -861,6 +862,26 @@ runDisjointViewportLayersTest ctx failed = do
     assertEq failed (respId (shown !! i)) =<< getHotId ctx
     clicked <- runClick ctx inp0 {inputMousePos = pos} buttons pos
     assertEq failed [j == i | j <- [0 .. 2]] (map respClicked clicked)
+
+-- | A sideways wheel over a vertical scroller with no horizontal one around
+-- it scrolls the first horizontal scroller inside it, found past rows that
+-- hold no scroller.
+runWheelCrossInsideTest :: Context -> IORef Int -> IO ()
+runWheelCrossInsideTest ctx failed = do
+  let inp0 = withInputOff 400 300
+      across l = (fixedWH 200 40 l) {layoutDirection = Row}
+      ui = scrollArea (fixedWH 300 200) . column $ do
+        replicateM_ 3 (row (label "plain" >> void (button' "b")))
+        (inner, ()) <- column (scrollArea across (replicateM_ 30 (label "wide cell")))
+        replicateM_ 20 (label "row")
+        pure inner
+  (outer, inner) <- warmup2 ctx inp0 ui
+  assertJustM failed (getPrevRect ctx outer) $ \(Rect ox oy _ _) -> do
+    let onPlain = inp0 {inputMousePos = V2 (ox + 10) (oy + 5)}
+    warmup ctx onPlain ui
+    _ <- runFrame ctx onPlain {inputScroll = V2 1 0} ui
+    assert failed . (> 0) =<< getScrollOffset ctx inner
+    assertEq failed 0 =<< getScrollOffset ctx outer
 
 -- | The wheel goes to the topmost scroller under the pointer, even one pinned
 -- over another but declared first. A pinned panel over the lower scroller

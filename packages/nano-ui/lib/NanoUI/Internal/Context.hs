@@ -20,6 +20,7 @@ module NanoUI.Internal.Context
   , PrevFrame (..)
   , ImagePaint (..)
   , emptyPrevFrame
+  , PrevByIdx (..)
   , OverlayState (..)
   , DrawingCacheState (..)
   , DrawingEntry (..)
@@ -94,6 +95,7 @@ module NanoUI.Internal.Context
   , getHotId
   , registerFocusable
   , getFocusables
+  , isFocusable
   , requestInputMethod
   , fieldComposition
   , AnimationState (..)
@@ -580,6 +582,7 @@ newContext = do
   ctxInputMethod <- newIORef Nothing
   ctxStore <- newIORef emptyWidgetStore
   ctxDamageState <- newIORef initialDamageState
+  ctxPrevByIdx <- newIORef =<< newPrevByIdx
   ctxOverlayState <- newIORef initialOverlayState
   ctxAnimationState <- newIORef initialAnimationState
   ctxScrollState <- newIORef initialScrollState
@@ -705,3 +708,14 @@ getFocusables ctx = do
   count <- readIORef (ctxFocusablesCount ctx)
   arr <- readIORef (ctxFocusables ctx)
   forM [0 .. count - 1] (readPrimArray arr)
+
+-- | Whether @wid@ registered as focusable this frame ('registerFocusable'),
+-- without copying the list.
+isFocusable :: Context -> WidgetId -> IO Bool
+isFocusable ctx wid = do
+  count <- readIORef (ctxFocusablesCount ctx)
+  arr <- readIORef (ctxFocusables ctx)
+  let go i
+        | i >= count = pure False
+        | otherwise = readPrimArray arr i >>= \w -> if w == wid then pure True else go (i + 1)
+  go 0

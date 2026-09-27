@@ -86,6 +86,15 @@ tabStops ctx = do
   let inModal w = maybe (pure True) (\modal -> widgetIdInSubtree ctx modal w) top
   filterM inModal . filter (/= WidgetId 0) =<< getFocusables ctx
 
+-- | Whether @w@ is one of the 'tabStops', without building them: one scan
+-- of the registered ids and one walk up @w@'s ancestors.
+isTabStop :: Context -> WidgetId -> IO Bool
+isTabStop ctx w
+  | w == WidgetId 0 = pure False
+  | otherwise =
+      isFocusable ctx w
+        <&&> (maybe (pure True) (\modal -> widgetIdInSubtree ctx modal w) =<< topModalNode (ctxNodeArena ctx))
+
 -- | Whether @wid@ is a menu row or a menu-bar title. Their hover highlight
 -- switches on and off at once, so 'refreshHover' runs no animation for them.
 isMenuButtonWidget :: Context -> WidgetId -> IO Bool
@@ -360,13 +369,16 @@ finalizeFocusRequest ctx =
   readIORef (ctxFocusRequest ctx) >>= mapM_ (\req -> do
     writeIORef (ctxFocusRequest ctx) Nothing
     prev <- readIORef (ctxFocusId ctx)
-    stops <- tabStops ctx
-    let step back = mfilter (/= WidgetId 0) (Just (tabNext prev stops back))
-        target = case req of
-          FocusOn w -> w <$ guard (w `elem` stops)
-          FocusNowhere -> Just (WidgetId 0)
-          FocusNext -> step False
-          FocusPrevious -> step True
+    let step back = mfilter (/= WidgetId 0) . Just <$> tabTarget ctx prev back
+    target <- case req of
+      -- Requesting the focused widget changes nothing, so a view that asks
+      -- every frame builds no list.
+      FocusOn w
+        | w == prev -> pure Nothing
+        | otherwise -> (w <$) . guard <$> isTabStop ctx w
+      FocusNowhere -> pure (Just (WidgetId 0))
+      FocusNext -> step False
+      FocusPrevious -> step True
     for_ (mfilter (/= prev) target) $ \wid -> do
       collapseTextFieldSelection ctx prev
       modifyInteraction ctx (\s -> s {isTextInputMenu = Nothing})
