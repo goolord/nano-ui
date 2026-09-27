@@ -760,7 +760,10 @@
   and no longer diffs maps and stores the frame left unchanged. A frame of
   3000 rows under the pointer takes about 9 ms instead of 16 ms and
   allocates 6.0 MB instead of 6.5 MB; a scrolled one about 20 ms instead
-  of 27 ms.
+  of 27 ms. A host that repaints the whole window every frame can clear
+  `ctxDamageWanted` (in `NanoUI.Internal.Context`), as the SDL runner does
+  for frames it presents in full, and the frame skips the damage diff,
+  unless it may reuse the last frame's draw data (below).
 - The node index by widget id is an unboxed table, so indexing and looking
   up a widget allocate nothing, and `nano-ui` no longer depends on
   `hashtables`.
@@ -854,16 +857,20 @@
   its layout signature leaves out, mixed as it is written: node values, font
   colours, box, image and drawing style indices, and image ids and looks
   (`getPaintSignature`). Widget state, hover, focus, scrolling, animations
-  and themes repaint through damage, as they do on retained frames. An idle
-  full frame of the SDL demo's Controls tab runs in 0.11 ms instead of
-  0.29 ms and allocates 64 KB instead of 129 KB. `setDrawReuse` (in
+  and themes repaint through damage, as they do on retained frames. A
+  frame whose host does not read damage (`ctxDamageWanted`) still works it
+  out when its key matches the last draw's and its recorded rects, texts
+  and images are unchanged, so continuous sessions reuse too; it skips the
+  diff otherwise. An idle full frame of the SDL demo's Controls tab runs
+  in 0.11 ms instead of 0.29 ms and allocates 64 KB instead of 129 KB. `setDrawReuse` (in
   `NanoUI.Testing`) turns it off, as the headless and SDL profilers and
   `nano-ui-sdl-bench` do to keep timing paint. The node value the solver
   computes is set with `setSolvedValue`.
 - A widget declared where it was last frame reads last frame's rect by its
-  node index instead of looking its id up in a map, which missed the cache
-  in large views. A frame of 3000 rows (9000 widgets) takes about 15% less
-  time and allocates the same. The API is unchanged.
+  node index, from the damage pass's per-node record, instead of looking
+  its id up in a map, which missed the cache in large views. A frame of
+  3000 rows (6000 widgets) takes about 15% less time and allocates the
+  same. The API is unchanged.
 
 ### Fixed
 

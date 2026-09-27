@@ -21,6 +21,7 @@ tests =
   , spec "widget-placement-cache" runWidgetPlacementCacheTest
   , spec "layout-cache-paint-state" runLayoutPaintStateTest
   , spec "draw-reuse" runDrawReuseTest
+  , spec "draw-reuse-continuous" runContinuousDrawReuseTest
   , spec "partial-measure-ancestor-width" runPartialMeasureAncestorTest
   , spec "wrap-width-bounds" runWrapBoundsTest
   , spec "wrap-keeps-spaces" runWrapKeepsSpacesTest
@@ -240,6 +241,71 @@ runDrawReuseTest ctx failed = do
   check base base False
   writeIORef (ctxPaintFull ctx) True
   check base base True
+
+-- | A continuous session: every frame paints in full and the host does not
+-- read damage ('ctxDamageWanted' off around each frame, as the SDL runner
+-- sets it). Every frame draws what a context that never reuses draws: a
+-- hover, a focus move, each step of an animation drawn by a drawing alone
+-- or moving a widget, and each wheel notch paint again and show the
+-- change. Idle frames,
+-- and the frames after each change once it settles, return the last frame's
+-- draw data.
+runContinuousDrawReuseTest :: Context -> IORef Int -> IO ()
+runContinuousDrawReuseTest ctx failed = do
+  ref <- newContext
+  setDrawReuse ref False
+  lastDraw <- newIORef Nothing
+  let off = (withInputOff 300 200) {inputDeltaTime = 0.016}
+      ui (barTo, gapTo) = column $ do
+        b <- buttonWith' (fixedWH 60 20) "a"
+        -- A drawing of an animated value: no node value or style holds it.
+        v <- withKey ("bar" :: String) (animateTo (Tween EaseLinear 0.2 0) barTo)
+        void (progressBarWith' (fixedW 100) 12 v)
+        -- An animated gap moves the widget below it.
+        g <- withKey ("gap" :: String) (animateTo (Tween EaseLinear 0.2 0) gapTo)
+        void (spacer (Fixed 4) (Fixed (4 + 30 * g)))
+        void (buttonWith' (fixedWH 40 20) "b")
+        void $ scrollWith (fixedWH 100 40) $ column $ forM_ [1 .. 10 :: Int] $ \i -> label (T.pack (show i))
+        pure b
+      frame c inp target = do
+        writeIORef (ctxDamageWanted c) False
+        (b, _, dd, _) <- runFrame c inp (ui target)
+        writeIORef (ctxDamageWanted c) True
+        pure (b, dd)
+      -- One frame on both contexts: its response, whether it reused the
+      -- last draw, and whether it draws something else.
+      step inp target = do
+        (b, dd) <- frame ctx inp target
+        now <- snapshotDraw dd
+        assertEq failed now . snd =<< (traverse snapshotDraw =<< frame ref inp target)
+        prev <- readIORef lastDraw
+        writeIORef lastDraw (Just (dd, now))
+        pure $ case prev of
+          Just (lastDd, lastNow) -> (b, ptrEq dd lastDd, now /= lastNow)
+          Nothing -> (b, False, True)
+      steps n inp target = replicateM n (step inp target)
+      reused (_, r, _) = r
+      repainted (_, r, changed) = not r && changed
+      -- The first frame after a change paints it, and the last has settled.
+      paintsThenSettles xs = case (xs, reverse xs) of
+        (first : _, final : _) -> repainted first && reused final
+        _ -> False
+      -- The frame that starts an animation still draws its start; each after
+      -- paints a step, and the settled value is reused.
+      animates inp target = do
+        moving <- steps 6 inp target
+        assert failed (not (any reused moving) && all repainted (drop 1 moving))
+        assert failed . all reused . drop 16 =<< steps 20 inp target
+  settle <- steps 4 off (0, 0)
+  let hover = off {inputMousePos = case reverse settle of (b, _, _) : _ -> centerOf b; [] -> V2 0 0}
+  assert failed . all reused =<< steps 3 off (0, 0)
+  assert failed . paintsThenSettles =<< steps 12 hover (0, 0)
+  assert failed . paintsThenSettles =<< ((:) <$> step (tabInp hover) (0, 0) <*> steps 12 hover (0, 0))
+  animates hover (1, 0)
+  animates hover (1, 1)
+  let wheel = off {inputMousePos = V2 30 120, inputScroll = V2 0 (-1)}
+  assert failed . all repainted =<< steps 3 wheel (1, 1)
+  assert failed . paintsThenSettles =<< steps 12 wheel {inputScroll = V2 0 0} (1, 1)
 
 -- A label wraps at its container's width. A frame that changes only the
 -- container's width must measure the label again, not restore the size it

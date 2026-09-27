@@ -927,7 +927,9 @@ data Context = Context
   -- | Whether the host reads this frame's damage
   -- ('NanoUI.Internal.Context.Core.takeDamage'). A host that repaints the
   -- whole window whatever changed (a continuous session) clears it, and the
-  -- frame reports 'DamageFull' without diffing anything. True by default.
+  -- frame reports 'DamageFull' without diffing anything, unless it may reuse
+  -- the last frame's draw ('ctxDrawReuse'), which needs to know that nothing
+  -- is damaged. True by default.
   , ctxDamageWanted :: !(IORef Bool)
   -- | Layout overlay state.
   , ctxExplain :: !(IORef ExplainState)

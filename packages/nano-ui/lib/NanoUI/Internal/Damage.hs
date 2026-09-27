@@ -439,8 +439,12 @@ data FrameDelta = FrameDelta
   -- ^ Keys of drawings whose ops changed at an unchanged rect.
   }
 
-writeDamage :: Context -> Input -> FrameSnapshot -> IO ()
-writeDamage ctx inp snap = do
+-- | Work out the frame's damage against @snap@ and record it, with what the
+-- next frame compares against. @mayReuse@: the frame may take the last
+-- frame's draw ('NanoUI.Internal.Frame.paintOrReuse'), which it does only
+-- when nothing is damaged.
+writeDamage :: Context -> Input -> FrameSnapshot -> Bool -> IO ()
+writeDamage ctx inp snap mayReuse = do
   newStore <- getStore ctx
   panels <- floatingPanelsInOrder ctx
   new <- getsDamage ctx dsPrev
@@ -497,8 +501,18 @@ writeDamage ctx inp snap = do
               then pure (DamageFull, [])
               else clipDamage ctx snap delta owners
   -- A host repainting the whole window whatever changed does not read the
-  -- damage, so nothing is diffed ('ctxDamageWanted').
-  (dmg, pieces) <- if wanted then changes else pure (DamageFull, [])
+  -- damage, so nothing is diffed ('ctxDamageWanted'), unless the frame may
+  -- reuse the last draw: that takes damage known to be empty. A frame whose
+  -- recorded rects, clips, texts or images changed ('updatePrevRects' kept
+  -- no record unchanged) almost always has damage, and one that redrew a
+  -- drawing in view has it for sure ('clipDamage'), so those paint instead
+  -- of diffing. An idle frame diffs cheaply: its maps and store compare by
+  -- pointer. A drawing redrawn out of view (an animation scrolled away)
+  -- leaves the frame to the diff, which finds nothing to repaint.
+  let Size winW winH = inputWindowSize inp
+      inView k = maybe False (rectNonEmpty . clipRectToWindow winW winH . clipToViewport (ownClip new k)) (IM.lookup k (pfRects new))
+      diff = wanted || (mayReuse && samePrev (fsPrev snap) new && not (any inView redrawn))
+  (dmg, pieces) <- if diff then changes else pure (DamageFull, [])
   modifyDamage ctx $ \ds ->
     ds
       { dsDamage = dmg
@@ -517,6 +531,12 @@ writeDamage ctx inp snap = do
   when modalFlip (markDirtyCovered ctx)
   when (floatingChanged && not (IM.null (fsFloatingRects snap) && not (IM.null newFloatingRects))) $
     markDirtyCovered ctx
+
+-- | Whether 'updatePrevRects' left every map of @old@ as it was. Compared by
+-- map, not by record: GHC may rebuild a record passed unboxed.
+samePrev :: PrevFrame -> PrevFrame -> Bool
+samePrev (PrevFrame !r0 !c0 !o0 !t0 !i0) (PrevFrame !r1 !c1 !o1 !t1 !i1) =
+  ptrEq r0 r1 && ptrEq c0 c1 && ptrEq o0 o1 && ptrEq t0 t1 && ptrEq i0 i1
 
 -- | Settle every drawing's ops for this frame and return the keys of those
 -- that now draw something else at an unchanged rect. A drawing follows state

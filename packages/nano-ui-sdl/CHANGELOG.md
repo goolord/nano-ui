@@ -116,8 +116,10 @@
   depends on `hashable` or `unordered-containers`.
 - A frame presented in full, as every frame of a continuous session is, no
   longer works out what changed since the last one: it clears the core's
-  `ctxDamageWanted` for its UI pass. Scrolling a 3000-row list continuously
-  takes about 20% less time a frame on the Haskell side.
+  `ctxDamageWanted` for its UI pass, and sets it back even when the pass
+  throws. Scrolling a 3000-row list continuously takes about 20% less time
+  a frame on the Haskell side. An idle frame still works it out, cheaply,
+  so it can hand back the last frame's draw data instead of painting.
 - `SdlEnv` no longer has `sdlDialogState`: file dialogs are tracked per
   process, and every dialog shares one native callback instead of a wrapper
   apiece. `RenderDriver` is exported from `NanoUI.Backend.Sdl`, which

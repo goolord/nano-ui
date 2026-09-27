@@ -8,7 +8,7 @@ module NanoUI.Internal.Frame
   )
 where
 
-import Control.Monad (unless, when)
+import Control.Monad (unless, when, (<$!>))
 import Data.IORef (modifyIORef', readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
 import Data.Maybe (isJust, isNothing)
@@ -219,26 +219,39 @@ runFrameEff unlift ctx rawInp ui = do
   -- miss rows and columns that moved.
   explain <- getExplainLayout ctx
   when explain (explainFrame ctx frameInp)
-  writeDamage ctx frameInp snap
-  drawData <- paintOrReuse ctx frameInp size explain
+  -- The draw this frame may reuse is decided before its damage: a frame
+  -- that may reuse it needs its damage worked out even for a host that does
+  -- not read it ('ctxDamageWanted').
+  reuse <- readIORef (ctxDrawReuse ctx)
+  key <- reuseKeyFor ctx reuse size explain
+  let !mayReuse = case (key, drLast reuse) of
+        (Just k, Just (lastKey, _)) -> k == lastKey
+        _ -> False
+  writeDamage ctx frameInp snap mayReuse
+  drawData <- paintOrReuse ctx frameInp size explain reuse key
   msgs <- drainMessages ctx
   dirtyAfterUi <- isDirty ctx
   pure (result, msgs, drawData, dirtyAfterUi)
 
--- | The frame's draw data. A full frame with no damage whose 'DrawReuseKey'
--- matches the last full frame's hands paint what that frame did, so it takes
--- that frame's draw data instead of painting again: an idle continuous frame
--- paints nothing. Other frames paint, and a full frame keeps what it painted
--- for the next. Paint that reads state nano-ui does not track must call
--- 'damageFull' when that state changes.
-paintOrReuse :: Context -> Input -> Size -> Bool -> IO DrawData
-paintOrReuse ctx frameInp size explain = do
+-- | The key the frame's draw would be kept under ('drawReuseKey'), or
+-- 'Nothing' when it can be neither kept nor reused: reuse is off, the frame
+-- paints only a clip, or the layout overlay is on.
+reuseKeyFor :: Context -> DrawReuse -> Size -> Bool -> IO (Maybe DrawReuseKey)
+reuseKeyFor ctx reuse size explain = do
   paintFull <- readIORef (ctxPaintFull ctx)
-  reuse <- readIORef (ctxDrawReuse ctx)
-  key <-
-    if drOn reuse && paintFull && not explain
-      then drawReuseKey ctx size
-      else pure Nothing
+  if drOn reuse && paintFull && not explain
+    then drawReuseKey ctx size
+    else pure Nothing
+
+-- | The frame's draw data. A full frame with no damage whose 'DrawReuseKey'
+-- (@key@) matches the last full frame's hands paint what that frame did, so
+-- it takes that frame's draw data instead of painting again: an idle
+-- continuous frame paints nothing. Other frames paint, and a full frame
+-- keeps what it painted for the next. Paint that reads state nano-ui does
+-- not track must call 'damageFull' when that state changes.
+paintOrReuse :: Context -> Input -> Size -> Bool -> DrawReuse -> Maybe DrawReuseKey -> IO DrawData
+paintOrReuse ctx frameInp size explain reuse key = do
+  paintFull <- readIORef (ctxPaintFull ctx)
   damage <- getsDamage ctx dsDamage
   case (key, drLast reuse) of
     (Just k, Just (lastKey, lastDraw)) | k == lastKey && damageIsEmpty damage -> pure lastDraw
@@ -246,7 +259,7 @@ paintOrReuse ctx frameInp size explain = do
       drawData <- paintFrame ctx frameInp size explain paintFull
       -- Nothing to keep now or before: leave the state as it is.
       unless (isNothing key && isNothing (drLast reuse)) $
-        writeIORef (ctxDrawReuse ctx) reuse {drLast = (,drawData) <$> key}
+        writeIORef (ctxDrawReuse ctx) reuse {drLast = (\k -> (k, drawData)) <$!> key}
       pure drawData
 
 -- | What a full frame's draw follows besides its damage ('DrawReuseKey'), or
