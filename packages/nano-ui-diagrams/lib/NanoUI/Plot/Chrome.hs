@@ -26,12 +26,13 @@ import Diagrams.Prelude
   , lc
   , lw
   , lwO
+  , mapLoc
   , moveTo
   , none
   , p2
   , phantom
   , rect
-  , strokeTrail
+  , strokeLocTrail
   , translate
   , (^&)
   , ( # )
@@ -264,17 +265,40 @@ renderSeries ps c xDom yDom s pts =
           U.foldl' (\acc p -> acc <> markShape mk w ink (toP p)) mempty pts
         BarSeries frac ->
           renderBars ink frac pts
-        AreaSeries baseline
-          | U.null pts -> mempty
-          | otherwise ->
-              -- Top edge in order, then the baseline in reverse; the left
-              -- fold builds it reversed without copying the points.
-              let top = U.foldr (\p acc -> toP p : acc) [] pts
-                  base = U.foldl' (\acc (x, _) -> toP (x, baseline) : acc) [] pts
-               in closedPoly (top ++ base) # fc (colourOf (lerpColor c (plotFrameBg ps) 0.18)) # lw none
+        AreaSeries baseline ->
+          mconcat [closedPoly (map toP ring) | ring <- areaRings baseline pts]
+            # fc (colourOf (lerpColor c (plotFrameBg ps) 0.18))
+            # lw none
         StepSeries w ->
           let steps = U.foldr (\((x0, y0), (x1, _)) acc -> toP (x0, y0) : toP (x1, y0) : acc) [] (U.zip pts (U.drop 1 pts))
            in fromVertices steps # lc ink # lwO (plotStroke w)
+
+-- | An area series' fill polygons: for each run of points on one side of
+-- the baseline, the points and then the baseline's two ends under them. The
+-- baseline is straight, so those two are enough; a point under every
+-- sample only doubled the polygon, its triangulation and its outline. A run
+-- ends where the data crosses the baseline, at the crossing, so no polygon
+-- crosses itself.
+areaRings :: Double -> U.Vector (Double, Double) -> [[(Double, Double)]]
+areaRings baseline = map closeRun . runs . U.toList
+  where
+    closeRun run = case run of
+      (x0, _) : _ -> run ++ [(fst (last run), baseline), (x0, baseline)]
+      [] -> []
+    side (_, y) = compare y baseline
+    runs (p : ps) = go [p] (side p) p ps
+    runs [] = []
+    -- The run so far, reversed; its side (EQ while all its points are on
+    -- the baseline); and its last point.
+    go run _ _ [] = [reverse run]
+    go run s prev@(px, py) (q@(qx, qy) : qs)
+      | sq == EQ || s == EQ || sq == s = go (q : run) (if s == EQ then sq else s) q qs
+      | side prev == EQ = reverse run : go [q, prev] sq q qs
+      | otherwise =
+          let crossing = (px + (qx - px) * (baseline - py) / (qy - py), baseline)
+           in reverse (crossing : run) : go [q, crossing] sq q qs
+      where
+        sq = side q
 
 -- | Points used for drawing and hit tests. Numeric data may be decimated;
 -- categories become zero-based x positions paired with their values.
@@ -302,8 +326,10 @@ renderBars fill frac pts
       let h = abs y * invMaxY
        in rect (realToFrac frac / n) h # fc fill # lw none # translate ((x * invN + 0.5 * invN) ^& (signum y * h * 0.5))
 
+-- | A closed polygon through the points. The trail keeps its location: a
+-- bare trail would be drawn from the origin rather than its first point.
 closedPoly :: [P2 Double] -> Diagram B
-closedPoly pts = fromVertices pts # closeTrail # strokeTrail
+closedPoly pts = strokeLocTrail (mapLoc closeTrail (fromVertices pts))
 
 markShape :: MarkShape -> Float -> Colour Double -> P2 Double -> Diagram B
 markShape shape w c p = moveTo p $ case shape of

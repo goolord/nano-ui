@@ -64,9 +64,11 @@ module NanoUI.Internal.Path
 
 import Control.Monad (forM_, unless, when)
 import Control.Monad.ST (ST, runST)
-import Data.List (sortOn)
+import Data.List (sortBy, sortOn)
+import Data.Ord (comparing)
 import Data.Primitive.PrimArray
   ( PrimArray
+  , copyMutablePrimArray
   , emptyPrimArray
   , generatePrimArray
   , indexPrimArray
@@ -79,10 +81,11 @@ import Data.Primitive.PrimArray
   , setPrimArray
   , shrinkMutablePrimArray
   , sizeofPrimArray
+  , thawPrimArray
   , unsafeFreezePrimArray
   , writePrimArray
   )
-import Data.Primitive.SmallArray (indexSmallArray, smallArrayFromListN)
+import Data.Primitive.SmallArray (indexSmallArray, newSmallArray, readSmallArray, runSmallArray, smallArrayFromListN, writeSmallArray)
 import Data.Word (Word32)
 import NanoUI.Internal.Draw.Types (DrawOp (..), LineCap (..), LineJoin (..), Shade (..), defaultTextFont)
 import NanoUI.Internal.Types (Color (..), Rect (..), V2 (..), finite, lerpColor)
@@ -780,20 +783,27 @@ convexRing :: PrimArray Float -> Bool
 convexRing vs = go 0 0 0 0 0 0
   where
     n = sizeofPrimArray vs `div` 2
-    at = pointAt vs
     go :: Int -> Int -> Int -> Int -> Int -> Int -> Bool
     go !i !turn' !xs !ys !lastX !lastY
       | i >= n = True
       | otherwise =
-          let (x0, y0) = at i
-              (x1, y1) = at ((i + 1) `mod` n)
-              (x2, y2) = at ((i + 2) `mod` n)
-              c = cross (x1 - x0, y1 - y0) (x2 - x1, y2 - y1)
-              turn'' = if c > 0 then 1 else if c < 0 then -1 else turn'
-              sx = signum' (x1 - x0)
-              sy = signum' (y1 - y0)
-              xs' = if sx /= 0 && lastX /= 0 && sx /= lastX then xs + 1 else xs
-              ys' = if sy /= 0 && lastY /= 0 && sy /= lastY then ys + 1 else ys
+          -- Strict coordinates: lazily bound point tuples cost a thunk and
+          -- boxes per point. 'triangulate' calls this with n >= 3, so one
+          -- subtraction wraps an index.
+          let !i1 = if i + 1 >= n then i + 1 - n else i + 1
+              !i2 = if i1 + 1 >= n then i1 + 1 - n else i1 + 1
+              !x0 = indexPrimArray vs (2 * i)
+              !y0 = indexPrimArray vs (2 * i + 1)
+              !x1 = indexPrimArray vs (2 * i1)
+              !y1 = indexPrimArray vs (2 * i1 + 1)
+              !x2 = indexPrimArray vs (2 * i2)
+              !y2 = indexPrimArray vs (2 * i2 + 1)
+              !c = (x1 - x0) * (y2 - y1) - (x2 - x1) * (y1 - y0)
+              !turn'' = if c > 0 then 1 else if c < 0 then -1 else turn'
+              !sx = signum' (x1 - x0)
+              !sy = signum' (y1 - y0)
+              !xs' = if sx /= 0 && lastX /= 0 && sx /= lastX then xs + 1 else xs
+              !ys' = if sy /= 0 && lastY /= 0 && sy /= lastY then ys + 1 else ys
            in if turn' /= 0 && turn'' /= turn' || xs' > 2 || ys' > 2
                 then False
                 else go (i + 1) turn'' xs' ys' (if sx /= 0 then sx else lastX) (if sy /= 0 then sy else lastY)
@@ -848,76 +858,218 @@ pointInTri p a b c =
 -- | Triangle index triples into @vs@ covering the ring listed by @ix@. A
 -- hole bridge lists its end points twice, so a point on an ear's corner does
 -- not block the ear.
+--
+-- After an ear is cut the scan goes on from its next corner, and the points
+-- that could block an ear are looked up in a grid of the remaining points,
+-- so a typical ring costs about linear time rather than a full pass of
+-- every point per ear.
 earClip :: PrimArray Float -> PrimArray Int -> PrimArray Int
-earClip vs ix = primArrayFromList [indexPrimArray ix k | (a, b, c) <- clipped, k <- [a, b, c]]
-  where
-    clipped = runST $ do
-      let !ccw = signedArea vs ix >= 0
-      -- Remove an ear by relinking its neighbours instead of copying the
-      -- remaining points at every step.
-      prevs <- newPrimArray n
-      nexts <- newPrimArray n
-      forM_ [0 .. n - 1] $ \i -> do
-        writePrimArray prevs i ((i - 1 + n) `mod` n)
-        writePrimArray nexts i ((i + 1) `mod` n)
-      -- Corners are forced here; returned lazily they cost two thunks per
-      -- corner of every ear tried.
-      let {-# INLINE triangle #-}
-          triangle i = do
+earClip vs ix = runPrimArray $ do
+  let !ccw = signedArea vs ix >= 0
+  -- Remove an ear by relinking its neighbours instead of copying the
+  -- remaining points at every step.
+  prevs <- newPrimArray n
+  nexts <- newPrimArray n
+  forM_ [0 .. n - 1] $ \i -> do
+    writePrimArray prevs i (if i == 0 then n - 1 else i - 1)
+    writePrimArray nexts i (if i + 1 == n then 0 else i + 1)
+  -- The remaining points by cell: cell @c@ holds the first @lens c@ entries
+  -- of its span of @members@, and @slots@ says where each point is.
+  members <- thawPrimArray (gridItems grid) 0 n
+  lens <- newPrimArray cellCount
+  forM_ [0 .. cellCount - 1] $ \c -> writePrimArray lens c (start (c + 1) - start c)
+  slots <- newPrimArray n
+  forM_ [0 .. n - 1] $ \k -> readPrimArray members k >>= \i -> writePrimArray slots i k
+  out <- newPrimArray (3 * max 0 (n - 2))
+  let remove i = do
+        let !c = cellOf (at i)
+        len <- readPrimArray lens c
+        slot <- readPrimArray slots i
+        moved <- readPrimArray members (start c + len - 1)
+        writePrimArray members slot moved
+        writePrimArray slots moved slot
+        writePrimArray lens c (len - 1)
+      -- Whether a remaining point lies in the ear @p i q@. One on a corner
+      -- (the other end of a hole bridge) does not block it. The loops only
+      -- tail call each other, so they compile to jumps, not closures.
+      blocked p i q a@(ax, ay) b@(bx, by) c@(cx, cy) = cell r0 c0
+        where
+          !c0 = gridCol grid (min ax (min bx cx))
+          !c1 = gridCol grid (max ax (max bx cx))
+          !r0 = gridRow grid (min ay (min by cy))
+          !r1 = gridRow grid (max ay (max by cy))
+          cell !r !col
+            | r > r1 = pure False
+            | col > c1 = cell (r + 1) c0
+            | otherwise = do
+                let !k = r * gridCols grid + col
+                len <- readPrimArray lens k
+                scan r col (start k) (start k + len)
+          scan !r !col !k !end
+            | k >= end = cell r (col + 1)
+            | otherwise = do
+                j <- readPrimArray members k
+                let !pj = at j
+                if j /= p && j /= i && j /= q && pointInTri pj a b c && pj /= a && pj /= b && pj /= c
+                  then pure True
+                  else scan r col (k + 1) end
+      emit !m p i q = do
+        writePrimArray out m (indexPrimArray ix p)
+        writePrimArray out (m + 1) (indexPrimArray ix i)
+        writePrimArray out (m + 2) (indexPrimArray ix q)
+        pure (m + 3)
+      convex !_ 0 = pure True
+      convex !i !left = do
+        p <- readPrimArray prevs i
+        q <- readPrimArray nexts i
+        if isConvex ccw (at p) (at i) (at q) then convex q (left - 1) else pure False
+      fan !m !origin !i !left
+        | left <= 0 = pure m
+        | otherwise = do
+            q <- readPrimArray nexts i
+            m' <- emit m origin i q
+            fan m' origin q (left - 1)
+      go !m !count !i !tries
+        | count < 3 = pure m
+        | count == 3 = do
+            p <- readPrimArray prevs i
+            q <- readPrimArray nexts i
+            emit m p i q
+        | tries >= count = do
+            -- A whole pass found no ear: fan a convex remainder, else stop.
+            isConvexRing <- convex i count
+            if isConvexRing then readPrimArray nexts i >>= \q -> fan m i q (count - 2) else pure m
+        | otherwise = do
             p <- readPrimArray prevs i
             q <- readPrimArray nexts i
             let !a = at p
                 !b = at i
                 !c = at q
-            pure (p, q, (a, b, c))
-          isEarAt first count i p q (a, b, c)
-            | not (isConvex ccw a b c) = pure False
-            | otherwise = outside first count
-            where
-              outside !_ 0 = pure True
-              outside !j !left
-                | j /= p && j /= i && j /= q && blocks (at j) = pure False
-                | otherwise = do
-                    next <- readPrimArray nexts j
-                    outside next (left - 1)
-              -- A point inside the ear blocks it, unless it sits on a corner
-              -- (the other end of a hole bridge).
-              blocks pj = pointInTri pj a b c && pj /= a && pj /= b && pj /= c
-          convex !_ 0 = pure True
-          convex !i !left = do
-            (_, q, (a, b, c)) <- triangle i
-            if isConvex ccw a b c then convex q (left - 1) else pure False
-          fan origin i left
-            | left <= 0 = pure []
-            | otherwise = do
-                q <- readPrimArray nexts i
-                rest <- fan origin q (left - 1)
-                pure ((origin, i, q) : rest)
-          go !first !count !idx !tries tris
-            | count < 3 = pure tris
-            | count == 3 = do
-                second <- readPrimArray nexts first
-                third <- readPrimArray nexts second
-                pure ((first, second, third) : tris)
-            | tries >= count = do
-                isConvexRing <- convex first count
-                if isConvexRing then do
-                  second <- readPrimArray nexts first
-                  rest <- fan first second (count - 2)
-                  pure (tris ++ rest)
-                else pure tris
-            | otherwise = do
-                (p, q, tri) <- triangle idx
-                ear <- isEarAt first count idx p q tri
-                if ear then do
-                  writePrimArray nexts p q
-                  writePrimArray prevs q p
-                  let !first' = if idx == first then q else first
-                  go first' (count - 1) first' 0 ((p, idx, q) : tris)
-                else go first count q (tries + 1) tris
-      reverse <$> go 0 n 0 0 []
+            ear <- if isConvex ccw a b c then not <$> blocked p i q a b c else pure False
+            if ear
+              then do
+                writePrimArray nexts p q
+                writePrimArray prevs q p
+                remove i
+                m' <- emit m p i q
+                go m' (count - 1) q 0
+              else go m count q (tries + 1)
+  m <- go 0 n 0 0
+  shrinkMutablePrimArray out m
+  pure out
+  where
     n = sizeofPrimArray ix
     at k = pointAt vs (indexPrimArray ix k)
+    -- About four points per cell. A point that is not finite could block
+    -- any ear, so then every point shares one cell.
+    (x0, y0, x1, y1) = ringBox vs
+    cells = if all (finite . indexPrimArray vs) [0 .. sizeofPrimArray vs - 1] then n `div` 4 else 1
+    grid = gridOf cells x0 y0 x1 y1 n (\k -> let (x, y) = at k in (x, y, x, y))
+    cellCount = gridCols grid * gridRows grid
+    start = indexPrimArray (gridStarts grid)
+    cellOf (x, y) = gridRow grid y * gridCols grid + gridCol grid x
+
+--------------------------------------------------------------------------------
+-- Grids
+--------------------------------------------------------------------------------
+
+-- | Items bucketed by a uniform grid of about square cells over a box. Cell
+-- @c@, counted along rows, lists the items whose boxes overlap it, in item
+-- order: 'gridItems' from @'gridStarts' c@ up to @'gridStarts' (c + 1)@.
+data Grid = Grid
+  { gridCols :: !Int
+  , gridRows :: !Int
+  , gridX :: !Float
+  , gridY :: !Float
+  , gridScaleX :: !Float
+  -- ^ Columns per unit of x (0 with one column).
+  , gridScaleY :: !Float
+  , gridStarts :: !(PrimArray Int)
+  , gridItems :: !(PrimArray Int)
+  }
+
+-- | The column of the cells holding an x coordinate, clamped to the grid.
+{-# INLINE gridCol #-}
+gridCol :: Grid -> Float -> Int
+gridCol g = cellAlong (gridCols g) (gridX g) (gridScaleX g)
+
+-- | The row of the cells holding a y coordinate, clamped to the grid.
+{-# INLINE gridRow #-}
+gridRow :: Grid -> Float -> Int
+gridRow g = cellAlong (gridRows g) (gridY g) (gridScaleY g)
+
+-- | The cell along one axis holding a coordinate, clamped to @0 .. cells - 1@.
+-- Monotonic, so the cells a box's corners fall in bound the cells of every
+-- point in the box.
+{-# INLINE cellAlong #-}
+cellAlong :: Int -> Float -> Float -> Float -> Int
+cellAlong cells origin perUnit v = max 0 (min (cells - 1) (truncate ((v - origin) * perUnit)))
+
+-- | A grid of about @cells@ cells over the box from @(x0, y0)@ to @(x1, y1)@,
+-- holding items @0 .. count - 1@; item @k@ covers @boxOf k@. A box that is
+-- not finite gets one cell, and a side under 1e-20 a single row or column.
+{-# INLINE gridOf #-}
+gridOf :: Int -> Float -> Float -> Float -> Float -> Int -> (Int -> (Float, Float, Float, Float)) -> Grid
+gridOf cells x0 y0 x1 y1 count boxOf = runST $ do
+  -- Count each cell's items at the next cell's start, sum the counts into
+  -- starts, then hand out the slots.
+  starts <- newPrimArray (total + 1)
+  setPrimArray starts 0 (total + 1) 0
+  -- Explicit loops: list ranges here are shared across iterations rather
+  -- than fused, and cost a cell per step.
+  let forCells f = item 0
+        where
+          item !k
+            | k >= count = pure ()
+            | otherwise = do
+                let (bx0, by0, bx1, by1) = boxOf k
+                    !c0 = cellAlong cols x0 sx bx0
+                    !c1 = cellAlong cols x0 sx bx1
+                    !r1 = cellAlong rows y0 sy by1
+                    cell !r !c
+                      | r > r1 = item (k + 1)
+                      | c > c1 = cell (r + 1) c0
+                      | otherwise = f k (r * cols + c) >> cell r (c + 1)
+                cell (cellAlong rows y0 sy by0) c0
+  forCells $ \_ c -> readPrimArray starts (c + 1) >>= writePrimArray starts (c + 1) . (+ 1)
+  forM_ [1 .. total] $ \c -> do
+    before <- readPrimArray starts (c - 1)
+    readPrimArray starts c >>= writePrimArray starts c . (+ before)
+  size <- readPrimArray starts total
+  items <- newPrimArray size
+  fill <- newPrimArray total
+  copyMutablePrimArray fill 0 starts 0 total
+  forCells $ \k c -> do
+    slot <- readPrimArray fill c
+    writePrimArray items slot k
+    writePrimArray fill c (slot + 1)
+  Grid cols rows x0 y0 sx sy <$> unsafeFreezePrimArray starts <*> unsafeFreezePrimArray items
+  where
+    w = x1 - x0
+    h = y1 - y0
+    target = max 1 cells
+    usable s = s > 1e-20 && finite s
+    (cols, rows)
+      | not (finite w && finite h) = (1, 1)
+      | usable w && usable h =
+          let side = sqrt w * sqrt h / sqrt (fromIntegral target)
+           in (fit (w / side), fit (h / side))
+      | otherwise = (if usable w then target else 1, if usable h then target else 1)
+    fit v = max 1 (ceiling (min (fromIntegral target) v))
+    total = cols * rows
+    sx = if cols > 1 then fromIntegral cols / w else 0
+    sy = if rows > 1 then fromIntegral rows / h else 0
+
+-- | A ring's bounding box: its least and greatest x and y.
+ringBox :: PrimArray Float -> (Float, Float, Float, Float)
+ringBox r = go 0 (1 / 0) (1 / 0) (-1 / 0) (-1 / 0)
+  where
+    go !k !x0 !y0 !x1 !y1
+      | k + 1 >= sizeofPrimArray r = (x0, y0, x1, y1)
+      | otherwise =
+          let !x = indexPrimArray r k
+              !y = indexPrimArray r (k + 1)
+           in go (k + 2) (min x0 x) (min y0 y) (max x1 x) (max y1 y)
 
 --------------------------------------------------------------------------------
 -- Draw ops
@@ -1046,6 +1198,10 @@ ringStarts rs = primArrayFromList (scanl (+) 0 [sizeofPrimArray r `div` 2 | r <-
 -- ring with no filled parent is an outline. An unfilled ring directly inside
 -- it, or inside filled rings within it, is one of its holes. Crossing rings
 -- are not nested, so each fills on its own.
+--
+-- A ring's parent is the smallest larger ring holding all its points. The
+-- rings whose boxes hold its box are found through a grid of the boxes and
+-- tried smallest first, so mostly only the parent is tested point by point.
 fillComponents :: FillRule -> [PrimArray Float] -> [(PrimArray Float, [PrimArray Float])]
 fillComponents _ [r] = [(r, [])]
 fillComponents rule rs = [(orient True i, map (orient False) (holesOf i)) | i <- ids, outline i]
@@ -1056,14 +1212,32 @@ fillComponents rule rs = [(orient True i, map (orient False) (holesOf i)) | i <-
     ring = indexSmallArray rings
     areas = primArrayFromListN count (map ringArea rs)
     areaOf i = indexPrimArray areas i
-    boxes = smallArrayFromListN count (map bounds rs)
+    -- No area is NaN: 'fillPathOps' keeps only rings whose area is over 1e-6.
+    size i = abs (areaOf i)
+    boxes = smallArrayFromListN count (map ringBox rs)
     boxOf = indexSmallArray boxes
-    -- The smallest ring enclosing ring @i@.
-    parents = primArrayFromListN count (map parentOf ids)
-    parentOf i =
-      case [(abs (areaOf j), j) | j <- ids, j /= i, abs (areaOf j) > abs (areaOf i), boxInside (boxOf i) (boxOf j), all (inside (ring j)) (points (ring i))] of
-        [] -> -1
-        cs -> snd (minimum cs)
+    -- Ring ids smallest first (the sort is stable, so equal sizes stay in id
+    -- order), and a grid of their boxes in that order, so each cell lists its
+    -- rings smallest first.
+    bySize = primArrayFromListN count (sortBy (comparing size) ids)
+    grid =
+      let (x0, y0, x1, y1) = foldl' union (1 / 0, 1 / 0, -1 / 0, -1 / 0) boxes
+          union (!a, !b, !c, !d) (bx0, by0, bx1, by1) = (min a bx0, min b by0, max c bx1, max d by1)
+       in gridOf count x0 y0 x1 y1 count (boxOf . indexPrimArray bySize)
+    -- The smallest ring enclosing ring @i@. A box holding @i@'s box holds
+    -- its corner, so the corner's cell lists every candidate.
+    parents = generatePrimArray count parentOf
+    parentOf i = candidate (indexPrimArray (gridStarts grid) cell)
+      where
+        box@(bx0, by0, _, _) = boxOf i
+        cell = gridRow grid by0 * gridCols grid + gridCol grid bx0
+        end = indexPrimArray (gridStarts grid) (cell + 1)
+        candidate !k
+          | k >= end = -1
+          | size j > size i && boxInside box (boxOf j) && encloses (ring j) (ring i) = j
+          | otherwise = candidate (k + 1)
+          where
+            j = indexPrimArray bySize (indexPrimArray (gridItems grid) k)
     parent i = let p = indexPrimArray parents i in if p < 0 then Nothing else Just p
     -- The winding number just inside ring @i@: its parent's plus or minus
     -- one. Boxed and lazy so each ring can read its parent's.
@@ -1071,25 +1245,40 @@ fillComponents rule rs = [(orient True i, map (orient False) (holesOf i)) | i <-
     windingOf i = maybe 0 (indexSmallArray windings) (parent i) + (if areaOf i > 0 then 1 else -1) :: Int
     filled i = fillsWinding rule (indexSmallArray windings i)
     outline i = filled i && maybe True (not . filled) (parent i)
-    children i = [j | j <- ids, parent j == Just i]
+    -- Each ring's children in id order, gathered in one pass.
+    children = indexSmallArray $ runSmallArray $ do
+      kids <- newSmallArray count []
+      forM_ [count - 1, count - 2 .. 0] $ \j -> do
+        let p = indexPrimArray parents j
+        when (p >= 0) (readSmallArray kids p >>= writeSmallArray kids p . (j :))
+      pure kids
     holesOf i = concat [if filled c then holesOf c else [c] | c <- children i]
     orient positive i
       | (areaOf i >= 0) == positive = ring i
       | otherwise = reversePoints (ring i)
-    points r = [pointAt r i | i <- [0 .. sizeofPrimArray r `div` 2 - 1]]
-    bounds r =
-      let xs = [x | (x, _) <- points r]
-          ys = [y | (_, y) <- points r]
-       in (minimum xs, minimum ys, maximum xs, maximum ys)
     boxInside (ax0, ay0, ax1, ay1) (bx0, by0, bx1, by1) = ax0 >= bx0 && ay0 >= by0 && ax1 <= bx1 && ay1 <= by1
-    -- Point-in-ring test by ray crossing parity.
-    inside r (px, py) =
-      let m = sizeofPrimArray r `div` 2
-          crosses k =
-            let (ax, ay) = pointAt r k
-                (bx, by) = pointAt r ((k + 1) `mod` m)
-             in (ay > py) /= (by > py) && px < ax + (py - ay) * (bx - ax) / (by - ay)
-       in odd (length (filter crosses [0 .. m - 1]))
+
+-- | Whether every point of ring @q@ is inside ring @r@, by ray crossing
+-- parity.
+encloses :: PrimArray Float -> PrimArray Float -> Bool
+encloses r q = every 0
+  where
+    every !k
+      | k + 1 >= sizeofPrimArray q = True
+      | otherwise = inside (indexPrimArray q k) (indexPrimArray q (k + 1)) && every (k + 2)
+    m = sizeofPrimArray r `div` 2
+    inside px py = walk 0 False
+      where
+        walk !k !odd'
+          | k >= m = odd'
+          | otherwise =
+              let !k' = if k + 1 >= m then 0 else k + 1
+                  !ax = indexPrimArray r (2 * k)
+                  !ay = indexPrimArray r (2 * k + 1)
+                  !bx = indexPrimArray r (2 * k')
+                  !by = indexPrimArray r (2 * k' + 1)
+                  crosses = (ay > py) /= (by > py) && px < ax + (py - ay) * (bx - ax) / (by - ay)
+               in walk (k + 1) (if crosses then not odd' else odd')
 
 -- | A ring's points in reverse order.
 reversePoints :: PrimArray Float -> PrimArray Float

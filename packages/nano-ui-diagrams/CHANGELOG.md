@@ -30,6 +30,19 @@
   inside another (an annulus, a glyph's counter) is a hole in it where the
   rule says so, instead of each loop being filled on its own over the
   others. A path is filled whole before it is stroked.
+- An area series is filled from its points and the two ends of its
+  baseline, instead of a baseline point under every sample: half the
+  vertices painted each frame, and a quarter of the triangulation work when
+  the chart is rebuilt.
+
+### Fixed
+
+- An area series and diamond and triangle markers are drawn where their
+  data is. Each polygon was drawn from the plot's origin instead of its
+  first point, which moved an area by its first sample's offset from the
+  corner and a marker by about its radius.
+- An area series whose data crosses its baseline fills each side, one
+  polygon per run between crossings, where it left gaps or spilled.
 
 ### Removed
 

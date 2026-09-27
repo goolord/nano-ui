@@ -230,6 +230,10 @@ runFillTriangulationTest _ failed = do
         ]
           -- Random simple star polygons with 5 to 64 corners.
           <> [("random star " <> show seed, P.polygon (ring (5 + seed `mod` 60) (\i -> 5 + 50 * rnd (seed * 1000 + i)))) | seed <- [1 .. 60 :: Int]]
+          -- Large rings, where ear clipping looks up blockers in its grid:
+          -- stars, and an area chart's top edge closed along a baseline.
+          <> [("random star of " <> show k, P.polygon (ring k (\i -> 5 + 50 * rnd (k + i)))) | k <- [300, 2000]]
+          <> [("area of 2000 samples", P.polygon ([V2 (fromIntegral i * 0.05) (10 + 30 * rnd (7 * i)) | i <- [0 .. 1999 :: Int]] <> [V2 99.95 60, V2 0 60]))]
   forM_ shapes $ \(name, shape) ->
     assertEq failed (name, [True]) . (,) name $
       [ inRange && length tris == 3 * (length pts - 2) && abs (area - want) <= 1e-3 * want
@@ -476,6 +480,18 @@ runFillHolesTest _ failed = do
       shoelace ps = abs (sum [x0 * y1 - x1 * y0 | (V2 x0 y0, V2 x1 y1) <- zip ps (drop 1 ps ++ take 1 ps)]) / 2
   single failed (polygons P.EvenOdd (square 0 0 400 <> foldMap P.polygon blobs)) $ \poly ->
     assertLt failed (abs (maybe 0 id (coverage poly) - (160000 - sum (map shoelace blobs)))) 1
+  -- Many subpaths, each finding its parent among the others: nested squares
+  -- are filled bands and holes in turn, and a grid of squares is 100
+  -- polygons, or 100 holes inside a larger square.
+  let nested :: Int -> P.Path
+      nested k = (if even k then square else squareBack) (5 * fromIntegral k) (5 * fromIntegral k) (200 - 10 * fromIntegral k)
+      bands = [s * s - (s - 10) * (s - 10) | j <- [0 .. 9 :: Int], let s = 200 - 20 * fromIntegral j]
+      cells = foldMap (\k -> square (10 * fromIntegral (k `mod` 10)) (10 * fromIntegral (k `div` 10)) 5) [0 .. 99 :: Int]
+  check "20 nested, even-odd" P.EvenOdd (foldMap (\k -> square (5 * fromIntegral k) (5 * fromIntegral k) (200 - 10 * fromIntegral k)) [0 .. 19 :: Int]) bands
+  check "20 nested, non-zero alternating" P.NonZero (foldMap nested [0 .. 19]) bands
+  check "20 nested, non-zero same way" P.NonZero (foldMap (\k -> square (5 * fromIntegral k) (5 * fromIntegral k) (200 - 10 * fromIntegral k)) [0 .. 19 :: Int]) [40000]
+  check "100 apart" P.NonZero cells (replicate 100 25)
+  check "100 holes" P.EvenOdd (square (-10) (-10) 120 <> cells) [14400 - 2500]
   -- A single subpath is one polygon with one ring.
   assertEq failed [[0, 4]] [rings | (_, rings, _) <- polygons P.EvenOdd (square 0 0 10)]
   -- 'fillPathOps', which backends use, matches the canvas output.
