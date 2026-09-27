@@ -270,7 +270,8 @@ data Stroke = StrokeStyle
   -- ^ Line width. A transform scales it along with the path.
   , strokeCap :: !LineCap
   -- ^ Cap for the ends of open subpaths and of every dash (default
-  -- 'ButtCap').
+  -- 'ButtCap'). A subpath of zero length, such as a move and a line to the
+  -- same point, is a dot with 'RoundCap' or 'SquareCap'.
   , strokeJoin :: !LineJoin
   -- ^ Corner join (default 'MiterJoin').
   , strokeMiterLimit :: !Float
@@ -1085,7 +1086,8 @@ ringBox r = go 0 (1 / 0) (1 / 0) (-1 / 0) (-1 / 0)
 -- | Each ring's points with near-duplicates dropped, and whether it was
 -- closed. Rings with a NaN or infinite coordinate are skipped. A point
 -- within 1e-4 px of the previous one is a duplicate; with @closing@, or for
--- a closed ring, so is a last point on the first.
+-- a closed ring, so is a last point on the first. A lone move, one point
+-- that is not closed, is left out: it draws nothing, even with caps.
 cleanRings :: Bool -> Rings -> [(PrimArray Float, Bool)]
 cleanRings closing rings@(Rings pts starts tags) =
   [ (kept, closed)
@@ -1093,6 +1095,7 @@ cleanRings closing rings@(Rings pts starts tags) =
   , let from = indexPrimArray starts r
         to = indexPrimArray starts (r + 1)
         closed = indexPrimArray tags r /= 0
+  , closed || to - from > 1
   , all (\k -> finite (indexPrimArray pts k)) [2 * from .. 2 * to - 1]
   , let kept = dedupe (closing || closed) from to
   ]
@@ -1168,6 +1171,9 @@ strokePathOps tol t st path paint
     width = strokeWidth st * k
     shade = devicePaint t paint
     ring (pts, closed)
+      -- A subpath of zero length is a dot for round and square caps, a
+      -- square one aligned with the x axis, as in SVG.
+      | n == 1 = [line False (strokeCap st) (dot pts) | strokeCap st /= ButtCap]
       | n < 2 = []
       | not (null (strokeDash st))
       , Just pieces <- dashes (strokeCap st /= ButtCap) (map (* k) (strokeDash st)) (strokeDashOffset st * k) (closed && n > 2) pts =
@@ -1179,6 +1185,15 @@ strokePathOps tol t st path paint
       | otherwise = [line closed (strokeCap st) pts]
       where
         n = sizeofPrimArray pts `div` 2
+    -- The point and another a hair along the transformed x axis, so its
+    -- caps have a direction.
+    dot pts =
+      let x = indexPrimArray pts 0
+          y = indexPrimArray pts 1
+          Transform a b _ _ _ _ = t
+          len = sqrt (a * a + b * b)
+          (ux, uy) = if len > 0 && finite len then (a / len, b / len) else (1, 0)
+       in primArrayFromListN 4 [x, y, x + 1e-3 * ux, y + 1e-3 * uy]
     line closed cap pts = case shade of
       DeviceSolid col -> StrokePolyline pts width closed cap (strokeJoin st) (strokeMiterLimit st) (Flat col)
       DeviceRamp ramp ->

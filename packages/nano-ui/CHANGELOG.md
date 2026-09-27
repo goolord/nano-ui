@@ -271,10 +271,10 @@
   `LineCap` (`ButtCap`, `SquareCap`, `RoundCap`), a `LineJoin`
   (`MiterJoin`, `RoundJoin`, `BevelJoin`), a miter limit (4 by default, as
   SVG's) past which a miter is beveled, and a dash pattern with an offset.
-  Each dash is capped, a zero-length dash with round caps is a dot, and a
-  pattern that would cut a subpath into more than 4096 dashes draws it
-  solid. Round caps and joins are part of the line, so a translucent line
-  is even all along.
+  Each dash is capped, a zero-length dash or subpath with round caps is a
+  dot, and a pattern that would cut a subpath into more than 4096 dashes
+  draws it solid. Round caps and joins are part of the line, so a
+  translucent line is even all along.
 - Paints: `P.Solid` and `P.Linear`, a linear gradient with colour stops, for
   fills and strokes. A gradient is exact to its stops (each point of the
   fill carries its colour, and the fill is cut where the gradient bends),

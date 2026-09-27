@@ -365,6 +365,16 @@ runDegenerateTest _ failed = do
     , opsAt 1 (withTransform (P.scale nan 1) (drawPath (P.circle p 5) red >> drawRect (Rect 0 0 5 5) red >> drawCircle p 3 red))
     , opsAt 1 (withTransform (P.rotate inf) (drawPath (P.circle p 5) red))
     ]
+  -- A zero-length subpath is a dot with round or square caps, and a lone
+  -- move draws nothing.
+  let capped cap path = [(pairs pts, c) | StrokePolyline pts _ _ c _ _ _ <- opsAt 1 (drawStrokePathWith (P.stroke 2) {P.strokeCap = cap} path (P.Solid black))]
+  forM_ [P.RoundCap, P.SquareCap] $ \cap ->
+    forM_ [P.moveTo p <> P.lineTo p, P.moveTo p <> P.close, P.circle p 0] $ \path ->
+      single failed (capped cap path) $ \(ps, c) -> do
+        assertEq failed cap c
+        assert failed (case ps of [a, b] -> a == p && dist a b > 0 && dist a b < 0.01; _ -> False)
+  assertEq failed [] (capped P.ButtCap (P.moveTo p <> P.lineTo p))
+  assertEq failed [[V2 0 0, V2 10 0]] (map fst (capped P.RoundCap (P.moveTo p <> P.moveTo (V2 0 0) <> P.lineTo (V2 10 0) <> P.moveTo p)))
   -- Repeated points are dropped, and segments with NaN or infinity are skipped.
   assertEq failed [[V2 0 0, V2 10 0, V2 10 10]] (lines' (P.polyline [V2 0 0, V2 0 0, V2 10 0, V2 10 0, V2 10 10]))
   assertEq failed [[V2 0 0, V2 10 0]] (lines' (P.polyline [V2 0 0, V2 nan 3, V2 inf 0, V2 10 0]))
