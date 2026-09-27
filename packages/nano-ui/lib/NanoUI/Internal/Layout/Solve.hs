@@ -13,12 +13,12 @@ module NanoUI.Internal.Layout.Solve
   , textWrapCap
   ) where
 
-import Control.Monad (filterM, foldM, foldM_, forM_, guard, mfilter, unless, when, zipWithM_)
-import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
+import Control.Monad (filterM, foldM, foldM_, forM_, guard, join, mfilter, unless, when, zipWithM_)
+import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IM
 import Data.List (sortOn)
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, isJust)
 import Data.Ord (Down (..))
 import Data.Primitive.PrimArray
   ( copyMutablePrimArray
@@ -62,6 +62,16 @@ data SolveEnv = SolveEnv
   -- ^ Where 'measureCustomNode' records each custom measurement, for the
   -- layout cache: set by 'solveLayout' only, so floating placement records
   -- nothing.
+  , sePositions :: !(Maybe PositionLog)
+  -- ^ Set by 'solveLayout' only: what its position pass records and puts
+  -- back ('positionNodeA').
+  }
+
+-- | The position pass's record of the rects it offers, and which subtrees
+-- it may put back from the cache ('naOffered', 'naSpans').
+data PositionLog = PositionLog
+  { plOffered :: !(IOArr Float)
+  , plSpans :: !(IOArr Int)
   }
 
 -- | How text and custom widgets are measured. The solve and the placement of
@@ -85,7 +95,7 @@ solveEnv :: NodeArena -> Measurers -> Maybe LayoutCache -> IO SolveEnv
 solveEnv na ms mCache = do
   a <- arenaArrays na
   (sub, measured) <- subtreeArrays na
-  pure (SolveEnv na a ms sub measured (mfilter ((> 0) . lcCount) mCache) Nothing)
+  pure (SolveEnv na a ms sub measured (mfilter ((> 0) . lcCount) mCache) Nothing Nothing)
 
 -- | Strict accumulator for flow-child folds: a child count and two running
 -- sums or extents. The strict fields keep the folds unboxed.
@@ -187,9 +197,11 @@ textHeightAt env !idx (AxisSizing _ _ minH maxH) !w allowed !fallback = do
 -- When a layout cache captured under the same font metrics is supplied, a
 -- node whose inputs, ancestors' inputs and subtree are unchanged since that
 -- solve, and whose children all came out their captured sizes, takes its
--- captured measured size instead of measuring again ('restoreMeasured').
--- Position and quantization run over every node regardless, so the result is
--- exactly what a full solve computes. Returns each custom-measured node's
+-- captured measured size instead of measuring again ('restoreMeasured'). The
+-- position pass then puts back, instead of placing again, each such subtree
+-- that holds no drawing and is offered the rect the captured solve offered
+-- it ('reusePositions'). Quantization runs over every node, so the
+-- result is what a full solve computes. Returns each custom-measured node's
 -- 'CustomMeasureRecord', for the layout cache.
 solveLayout :: NodeArena -> Measurers -> Float -> Float -> Maybe LayoutCache -> IO (IntMap CustomMeasureRecord)
 solveLayout na ms rootW rootH mCache = do
@@ -199,9 +211,14 @@ solveLayout na ms rootW rootH mCache = do
     else do
       measureLog <- newIORef IM.empty
       env0 <- solveEnv na ms mCache
-      let env = env0 {seMeasureLog = Just measureLog}
+      (offered, unsnapped, spans) <- positionArrays na
+      setPrimArray offered 0 (count * 4) (0 / 0)
+      let env = env0 {seMeasureLog = Just measureLog, sePositions = Just (PositionLog offered spans)}
       measurePass env count
       positionNodeA env 0 0 (Rect 0 0 rootW rootH)
+      forUpTo_ count $ \i -> do
+        let copyCol col k = readGeom (seArrays env) i col >>= writePrimArray unsnapped (i * 4 + k)
+        copyCol GeomX 0 >> copyCol GeomY 1 >> copyCol GeomW 2 >> copyCol GeomH 3
       floatingCount <- floatingNodeCount na
       quantizeResultsA (seArrays env) count floatingCount (fmSnapScale (msFm ms))
       readIORef measureLog
@@ -254,7 +271,11 @@ measurePass env count = case seCache env of
     moved <- newPrimArray count :: IO (IOArr Word8)
     setPrimArray moved 0 count 0
     forDown $ \idx -> do
-      restored <- restoreMeasured env lc moved idx
+      hit <-
+        if idx < lcCount lc
+          then (==) <$> readPrimArray (seSub env) idx <*> readPrimArray (lcSub lc) idx
+          else pure False
+      restored <- restoreMeasured env lc moved hit idx
       unless restored (measureNode env idx)
       (w, h) <- recordMeasured env idx
       same <-
@@ -267,6 +288,14 @@ measurePass env count = case seCache env of
       unless same $ do
         p <- readTree (seArrays env) idx TreeParent
         when (p >= 0) $ writePrimArray moved p 1
+      -- The captured solve placed the subtree as this one will when the
+      -- node's key hit and it came out its captured size, as did every node
+      -- below it, and it holds no drawing, whose measure may answer
+      -- differently with nothing in the arena changed.
+      forM_ (sePositions env) $ \PositionLog {plSpans} -> do
+        nt <- readTagEnum (seArrays env) idx TagNodeType
+        end <- if hit && same && nt /= NodeDrawing then subtreeEnd (seArrays env) plSpans idx else pure (-1)
+        writePrimArray plSpans idx end
   where
     -- Children follow their parent in the arena, so a descending walk
     -- measures every child before its parent.
@@ -275,26 +304,41 @@ measurePass env count = case seCache env of
 -- | Put back the measured size the captured solve recorded for a node, when
 -- that solve measured it the same way: its restore key
 -- ('computeSubtreeHashes', over its own, its ancestors' and its descendants'
--- inputs) matches the capture's, and no child came out a different size.
+-- inputs) matches the capture's (@hit@), and no child came out a different
+-- size.
 -- 'False' when the node must be measured. Drawing nodes always measure: a
 -- custom measure may read state outside the arena, and losing the hook
 -- changes what the size means. Scroll containers always measure too, cheaply
 -- from their children: the capture holds their content extent as the position
 -- pass left it, not as measured.
-restoreMeasured :: SolveEnv -> LayoutCache -> IOArr Word8 -> NodeIdx -> IO Bool
-restoreMeasured env lc moved idx
-  | idx >= lcCount lc = pure False
+restoreMeasured :: SolveEnv -> LayoutCache -> IOArr Word8 -> Bool -> NodeIdx -> IO Bool
+restoreMeasured env lc moved hit idx
+  | not hit = pure False
   | otherwise = do
-      hit <- (==) <$> readPrimArray (seSub env) idx <*> readPrimArray (lcSub lc) idx
       childMoved <- (/= 0) <$> readPrimArray moved idx
       nt <- readTagEnum (seArrays env) idx TagNodeType
-      if not hit || childMoved || nt == NodeDrawing || isScrollNode nt
+      if childMoved || nt == NodeDrawing || isScrollNode nt
         then pure False
         else do
           w <- readPrimArray (lcMeasured lc) (idx * 2)
           h <- readPrimArray (lcMeasured lc) (idx * 2 + 1)
           setRect (seArena env) idx 0 0 w h
           pure True
+
+-- | One past the last node of @idx@'s subtree when its children's subtrees,
+-- whose ends @spans@ holds, follow it one after another, and -1 when one of
+-- them has none or they do not.
+subtreeEnd :: NodeArenaArrays -> IOArr Int -> NodeIdx -> IO Int
+subtreeEnd a spans idx = do
+  -- Children are linked last added first, so the first holds the end.
+  fc <- readTree a idx TreeFirstChild
+  end <- if fc < 0 then pure (idx + 1) else readPrimArray spans fc
+  let go !c !next
+        | c < 0 = pure (if next == idx + 1 then end else -1)
+        | otherwise = do
+            e <- readPrimArray spans c
+            if e /= next then pure (-1) else readTree a c TreeNextSibling >>= \sib -> go sib c
+  if end < 0 then pure (-1) else go fc end
 
 -- | Record the node's measured size for the next capture, whether it was
 -- just measured or restored, and return it.
@@ -1033,13 +1077,70 @@ flowChildSize env refit availW availH ci = do
 percentOr :: AxisSizing -> Float -> Float -> Float
 percentOr (AxisSizing tag val lo hi) avail size = if tag == SizingPercent then clamp lo hi (avail * val / 100) else size
 
+-- | Place node @idx@ and its subtree in the rect offered it. In the solve's
+-- position pass, record the rect, or put the subtree back from the cache
+-- when the captured solve placed it as this one would ('reusePositions').
 positionNodeA ::
   SolveEnv ->
   Int ->
   NodeIdx ->
   Rect ->
   IO ()
-positionNodeA env@SolveEnv {seArena = na, seArrays = a} !depth !idx (Rect x y availW availH) = do
+positionNodeA env !depth !idx rect@(Rect x y w h) = case sePositions env of
+  Nothing -> positionNode env depth idx rect
+  Just pl@PositionLog {plOffered} -> do
+    let !o = idx * 4
+    offeredBefore <- not . isNaN <$> readPrimArray plOffered o
+    if offeredBefore
+      -- A second offer reads what the first placed, so neither is put back.
+      then writePrimArray plOffered (o + 2) (0 / 0) >> positionNode env depth idx rect
+      else do
+        reused <- case seCache env of
+          Just lc -> reusePositions env lc pl idx rect
+          Nothing -> pure False
+        unless reused $ do
+          writePrimArray plOffered o x
+          writePrimArray plOffered (o + 1) y
+          writePrimArray plOffered (o + 2) w
+          writePrimArray plOffered (o + 3) h
+          positionNode env depth idx rect
+
+-- | Put back what the captured solve's position pass left in @idx@'s subtree
+-- (its unsnapped rects, the rects offered its nodes and its scroll extents),
+-- when the measure pass found that solve placed the subtree as this one
+-- would ('plSpans') and it offered the node @rect@ too. 'False' when not.
+reusePositions :: SolveEnv -> LayoutCache -> PositionLog -> NodeIdx -> Rect -> IO Bool
+reusePositions SolveEnv {seArena = na, seArrays = a} lc PositionLog {plOffered, plSpans} idx (Rect x y w h) = do
+  end <- readPrimArray plSpans idx
+  let prev = lcOffered lc
+      !o = idx * 4
+  same <-
+    if end < 0 || end > lcCount lc
+      then pure False
+      else do
+        px <- readPrimArray prev o
+        py <- readPrimArray prev (o + 1)
+        pw <- readPrimArray prev (o + 2)
+        ph <- readPrimArray prev (o + 3)
+        pure (px == x && py == y && pw == w && ph == h)
+  when same $ do
+    copyMutablePrimArray plOffered o prev o ((end - idx) * 4)
+    let copyNode !i = when (i < end) $ do
+          let at k = readPrimArray (lcUnsnapped lc) (i * 4 + k)
+          join (setRect na i <$> at 0 <*> at 1 <*> at 2 <*> at 3)
+          nt <- readTagEnum a i TagNodeType
+          when (isScrollNode nt) (restoreScrollExtents a lc i)
+          copyNode (i + 1)
+    copyNode idx
+  pure same
+
+positionNode ::
+  SolveEnv ->
+  Int ->
+  NodeIdx ->
+  Rect ->
+  IO ()
+positionNode env@SolveEnv {seArena = na, seArrays = a} !depth !idx (Rect x y availW availH) = do
   wAx <- readAxisSizing a idx True
   hAx@(AxisSizing hTag _ minH maxH) <- readAxisSizing a idx False
   intrinsicW <- readGeom a idx GeomW
@@ -1539,35 +1640,41 @@ distributeScratch na n avail gapSum horizontal = do
       -- Shrink children by factor to make up the shortfall, none below its
       -- minimum ('shrinkScratch'). 'fsGrow' holds the factors.
       forUpTo_ n $ \i -> sizingAt i >>= writePrimArray gfArr i . shrinkFactor
-      shrinkScratch out gfArr (fmap axMin . sizingAt) n (negate slack)
+      let minCol = if horizontal then StyleMinW else StyleMinH
+      shrinkScratch out gfArr (\i -> readPrimArray idxArr i >>= \ci -> readStyle a ci minCol) n (negate slack)
 
 -- | Take @need@ from the first @n@ sizes in @mainArr@ in proportion to their
 -- factors in @factorArr@ (0 keeps a size). A child that would drop below its
 -- minimum (@minAt@) stops there with its factor cleared, and the others
--- share what it could not give.
+-- share what it could not give. Inlined, so @minAt@ is a known function and
+-- the passes run unboxed.
+{-# INLINE shrinkScratch #-}
 shrinkScratch :: IOArr Float -> IOArr Float -> (Int -> IO Float) -> Int -> Float -> IO ()
-shrinkScratch mainArr factorArr minAt n !need = do
-  total <- foldUpTo n (\acc i -> (acc +) <$> readPrimArray factorArr i) 0
-  when (total > 0) $ do
-    let stop (!given, !stopped) i = do
-          f <- readPrimArray factorArr i
-          if f <= 0
-            then pure (given, stopped)
-            else do
-              lo <- minAt i
-              main <- readPrimArray mainArr i
-              if main - need * f / total < lo
-                then do
-                  writePrimArray mainArr i lo
-                  writePrimArray factorArr i 0
-                  pure (given + main - lo, stopped + 1)
-                else pure (given, stopped)
-    (given, stopped) <- foldUpTo n stop (0, 0 :: Int)
-    if stopped > 0
-      then shrinkScratch mainArr factorArr minAt n (need - given)
-      else forUpTo_ n $ \i -> do
-        f <- readPrimArray factorArr i
-        when (f > 0) $ readPrimArray mainArr i >>= \main -> writePrimArray mainArr i (main - need * f / total)
+shrinkScratch mainArr factorArr minAt n = pass
+  where
+    pass !need = do
+      total <- foldUpTo n (\acc i -> (acc +) <$> readPrimArray factorArr i) 0
+      when (total > 0) $ do
+        let stop !i !given !stopped
+              | i >= n = if stopped > (0 :: Int) then pass (need - given) else apply 0
+              | otherwise = do
+                  f <- readPrimArray factorArr i
+                  if f <= 0
+                    then stop (i + 1) given stopped
+                    else do
+                      lo <- minAt i
+                      main <- readPrimArray mainArr i
+                      if main - need * f / total < lo
+                        then do
+                          writePrimArray mainArr i lo
+                          writePrimArray factorArr i 0
+                          stop (i + 1) (given + main - lo) (stopped + 1)
+                        else stop (i + 1) given stopped
+            apply !i = when (i < n) $ do
+              f <- readPrimArray factorArr i
+              when (f > 0) $ readPrimArray mainArr i >>= \main -> writePrimArray mainArr i (main - need * f / total)
+              apply (i + 1)
+        stop 0 0 0
 
 {-# INLINE shrinkFactor #-}
 shrinkFactor :: AxisSizing -> Float
@@ -1737,6 +1844,13 @@ childBaseline env@SolveEnv {seArena = na, seArrays = a} ci h = do
 -- measured size near the top-right corner. A popup goes where its registered
 -- anchor, side and gap put it ('computePopupPosition'), by default at the
 -- origin with automatic placement.
+--
+-- With @placed@, what placing each node over the arena's current solve left
+-- ('PlacedFloat'), a node that goes to the rect it went to then gets that
+-- back instead of being laid out again, and a node laid out is recorded
+-- there. Nodes go in arena order, so a node inside another floating node is
+-- placed or put back after the outer one, whose record holds the inner
+-- subtree as the solve left it.
 placeFloatingNodes ::
   NodeArena ->
   Measurers ->
@@ -1745,44 +1859,84 @@ placeFloatingNodes ::
   (WidgetId -> IO (Maybe (Float, Float))) ->
   (WidgetId -> IO (Maybe (Float, Float))) ->
   (WidgetId -> IO (Maybe (PopupAnchor, PopupPlacement, Float))) ->
+  Maybe (IORef (IntMap PlacedFloat)) ->
   IO ()
-placeFloatingNodes na ms winW winH lookupPos lookupSize lookupAnchor = do
+placeFloatingNodes na ms winW winH lookupPos lookupSize lookupAnchor mPlaced = do
   env <- solveEnv na ms Nothing
-  forClassNodes_ na FloatingNodes $ \idx -> do
-    nt <- getNodeType na idx
-    wid <- getWidgetId na idx
-    Rect _ _ iw ih <- getNodeRect na idx
-    case nt of
-      NodeModal -> do
-        let w = min iw (max 0 (winW - 2 * windowMargin))
-            h = min ih (max 0 (winH - 2 * windowMargin))
-        positionNodeA env 0 idx (Rect (max 0 ((winW - w) / 2)) (max 0 ((winH - h) / 2)) w h)
-      NodeWindow -> do
-        (w0, h0) <- fromMaybe (min iw winW, min ih winH) <$> lookupSize wid
-        mpos <- lookupPos wid
-        placeWindowNode na ms winW winH idx w0 h0 $ \w -> fromMaybe (winW - w - windowMargin, windowMargin) mpos
-      _ -> do
-        mcfg <- lookupAnchor wid
-        let (anchor, placement, offset) = fromMaybe (AnchorPoint (V2 0 0), PlacementAuto, 4) mcfg
-            (x, y) = computePopupPosition winW winH windowMargin iw ih anchor placement offset
-        positionNodeA env 0 idx (Rect x y iw ih)
+  let place placed idx = do
+        rect <- floatingRect idx
+        case IM.lookup idx placed of
+          Just p | pfRect p == rect -> placed <$ restorePlaced na idx p
+          _ -> do
+            positionFloating env idx rect
+            maybe (IM.delete idx placed) (\p -> IM.insert idx p placed) <$> recordPlaced env idx rect
+  case mPlaced of
+    Nothing -> forClassNodes_ na FloatingNodes $ \idx -> positionFloating env idx =<< floatingRect idx
+    Just placedRef -> writeIORef placedRef =<< foldClassNodesM na FloatingNodes place =<< readIORef placedRef
+  where
+    floatingRect idx = do
+      nt <- getNodeType na idx
+      wid <- getWidgetId na idx
+      Rect _ _ iw ih <- getNodeRect na idx
+      case nt of
+        NodeModal -> do
+          let w = min iw (max 0 (winW - 2 * windowMargin))
+              h = min ih (max 0 (winH - 2 * windowMargin))
+          pure (Rect (max 0 ((winW - w) / 2)) (max 0 ((winH - h) / 2)) w h)
+        NodeWindow -> do
+          (w0, h0) <- fromMaybe (min iw winW, min ih winH) <$> lookupSize wid
+          mpos <- lookupPos wid
+          windowRect na winW winH idx w0 h0 $ \w -> fromMaybe (winW - w - windowMargin, windowMargin) mpos
+        _ -> do
+          mcfg <- lookupAnchor wid
+          let (anchor, placement, offset) = fromMaybe (AnchorPoint (V2 0 0), PlacementAuto, 4) mcfg
+              (x, y) = computePopupPosition winW winH windowMargin iw ih anchor placement offset
+          pure (Rect x y iw ih)
 
--- | Lay out window @idx@ at size @w0 h0@, clamped to its min and max size and
--- the screen, with its origin, given that size, clamped on screen. Fit sizing
--- caps at intrinsic size; floating windows use an explicit frame size.
+-- | Lay out floating node @idx@ and its subtree at @rect@: a window at
+-- exactly that rect, a modal or popup as the solve places a node offered it.
+positionFloating :: SolveEnv -> NodeIdx -> Rect -> IO ()
+positionFloating env@SolveEnv {seArena = na} idx rect@(Rect x y w h) = do
+  nt <- getNodeType na idx
+  if nt == NodeWindow
+    then do
+      setRect na idx x y w h
+      (pad, gap, dir) <- containerFlow (seArrays env) idx
+      positionChildren env 0 idx dir gap pad rect
+    else positionNodeA env 0 idx rect
+
+-- | What placing floating node @idx@ at @rect@ left ('snapshotPlaced'), or
+-- 'Nothing' when its subtree is not one index range or holds a drawing with
+-- a custom measure: placement asks that measure for its height at the placed
+-- width, which the layout cache does not check again.
+recordPlaced :: SolveEnv -> NodeIdx -> Rect -> IO (Maybe PlacedFloat)
+recordPlaced SolveEnv {seArena = na, seMs = ms} idx rect =
+  subtreeSpan na idx >>= \case
+    Nothing -> pure Nothing
+    Just n -> do
+      let measured i = do
+            nt <- getNodeType na i
+            if nt == NodeDrawing then isJust <$> (msLookupMeasure ms =<< getWidgetId na i) else pure False
+      anyMeasured <- foldUpTo n (\acc i -> if acc then pure True else measured (idx + i)) False
+      if anyMeasured then pure Nothing else Just <$> snapshotPlaced na idx n rect
+
+-- | Lay out window @idx@ at size @w0 h0@ ('windowRect').
 placeWindowNode :: NodeArena -> Measurers -> Float -> Float -> NodeIdx -> Float -> Float -> (Float -> (Float, Float)) -> IO ()
 placeWindowNode na ms winW winH idx w0 h0 originFor = do
+  env <- solveEnv na ms Nothing
+  positionFloating env idx =<< windowRect na winW winH idx w0 h0 originFor
+
+-- | Window @idx@'s rect at size @w0 h0@, clamped to its min and max size and
+-- the screen, with its origin, given that size, clamped on screen. Fit sizing
+-- caps at intrinsic size; floating windows use an explicit frame size.
+windowRect :: NodeArena -> Float -> Float -> NodeIdx -> Float -> Float -> (Float -> (Float, Float)) -> IO Rect
+windowRect na winW winH idx w0 h0 originFor = do
   AxisSizing _ _ minW maxW <- getWidthSizing na idx
   AxisSizing _ _ minH maxH <- getHeightSizing na idx
   let w = clamp minW (min maxW winW) w0
       h = clamp minH (min maxH winH) h0
       (x0, y0) = originFor w
-      x = clamp 0 (max 0 (winW - w)) x0
-      y = clamp 0 (max 0 (winH - h)) y0
-  setRect na idx x y w h
-  env <- solveEnv na ms Nothing
-  (pad, gap, dir) <- containerFlow (seArrays env) idx
-  positionChildren env 0 idx dir gap pad (Rect x y w h)
+  pure (Rect (clamp 0 (max 0 (winW - w)) x0) (clamp 0 (max 0 (winH - h)) y0) w h)
 
 -- | Horizontal placement for a widget-anchored popup. Aligns the popup's left
 -- edge with the anchor even when the anchor sits inside the window margin (a

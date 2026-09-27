@@ -232,11 +232,14 @@
   and `pinnedSide` the side test it turns on.
 - An open window, modal, popup or tooltip no longer turns off the reuse of
   the last frame's layout. The layout is cached as solved, before the floating
-  panels are placed, and a frame that reuses it places them again. A window
-  dragged or resized places the panels again over the frame's solve instead of
-  solving the whole layout a second time. Over 5000 rows, a frame with a window
-  open went from 15.8 to 11.1 ms and one dragging it from 20 to 11.2 ms, where
-  the page alone takes 10.6.
+  panels are placed, and a frame that reuses it gives each panel back what
+  placing it there left, laying out again only a panel that moved: dragged,
+  resized, or following its anchor. A window dragged or resized places the
+  panels again over the frame's solve instead of solving the whole layout a
+  second time. Over 5000 rows, a frame with a window open went from 15.8 to
+  11.1 ms and one dragging it from 20 to 11.2 ms, where the page alone takes
+  10.6. A still frame with a 300-row window open takes about 0.53 ms
+  instead of 0.7 and allocates 475 KB instead of 732 KB.
 - Damage in places far apart repaints as up to four disjoint pieces instead
   of their bounding box. Two labels changing in opposite corners no longer
   repaint the whole window: paint skips nodes that meet no piece, each piece
@@ -548,9 +551,15 @@
   and its children all came out their captured sizes, instead of wrapping
   its text again, so a frame that changed one label re-measures that label's
   branch only. Drawing widgets and scroll containers always measure fresh,
-  and a font-metric change restores nothing. Position and quantization run
-  over every node, so a partially measured solve computes exactly what a
-  full one would.
+  and a font-metric change restores nothing. The position pass then puts
+  back, instead of placing again, each such subtree without a drawing in it
+  that is offered the rect the captured solve offered it, so that frame
+  places the label's branch and its ancestors' direct children only;
+  quantization runs over every node, so the result is what a full solve
+  computes. The grow profile (a label that changes every frame over 60
+  rows of flex columns) allocates 5.0 MB a frame instead of 8.0 and takes
+  about 4.5 ms instead of 5.3; a frame where everything moves costs about
+  2% more.
 - Whole-layout reuse is validated by a hash over the frame's layout inputs
   instead of comparing every node's columns: the arena folds each node's
   constraints, links, text, options, widget id, style code, and grid fields

@@ -7,6 +7,7 @@ import Cases.State qualified
 import Cases qualified
 import Cases.Window qualified
 import Cases.Cache qualified
+import Cases.LayoutReuse qualified
 import Cases.Grid qualified
 import Cases.Caption qualified
 import Cases.ViewApi qualified
@@ -61,6 +62,7 @@ main =
     , Cases.tests
     , Cases.Window.tests
     , Cases.Cache.tests
+    , Cases.LayoutReuse.tests
     , Cases.Grid.tests
     , Cases.Caption.tests
     , Cases.ViewApi.tests

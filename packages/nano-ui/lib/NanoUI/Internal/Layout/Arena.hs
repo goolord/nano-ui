@@ -134,15 +134,21 @@ module NanoUI.Internal.Layout.Arena
   , walkAncestors
   , LayoutCache (..)
   , CustomMeasureRecord
+  , PlacedFloat (..)
   , newLayoutCache
   , captureLayoutCache
   , layoutSigMatches
   , computeSubtreeHashes
   , subtreeArrays
+  , positionArrays
   , restoreLayoutCache
+  , restoreScrollExtents
+  , subtreeSpan
+  , snapshotPlaced
+  , restorePlaced
   ) where
 
-import Control.Monad (forM_, mfilter, unless, when)
+import Control.Monad (foldM, forM_, mfilter, unless, when)
 import Data.Bits (shiftL, shiftR, xor, (.&.), (.|.))
 import Data.Hashable (Hashable, hash)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
@@ -154,13 +160,17 @@ import Data.Maybe (fromMaybe, isJust)
 import Data.Primitive.Array (MutableArray, copyMutableArray, newArray, readArray, sizeofMutableArray, writeArray)
 import Data.Primitive.PrimArray
   ( MutablePrimArray
+  , PrimArray
   , copyMutablePrimArray
+  , copyPrimArray
   , getSizeofMutablePrimArray
   , newPrimArray
   , readPrimArray
   , setPrimArray
   , writePrimArray
   , resizeMutablePrimArray
+  , sizeofPrimArray
+  , unsafeFreezePrimArray
   )
 import Data.Primitive.Types (Prim)
 import GHC.Exts (RealWorld)
@@ -422,6 +432,19 @@ data NodeArena = NodeArena
   -- floats). 'captureLayoutCache' snapshots it, and a reused solve restores
   -- clean subtrees' measurements from the snapshot instead of measuring
   -- again.
+  , naOffered :: IORef (IOArr Float)
+  -- ^ Per node, the rect the position pass first offered it (four floats):
+  -- NaN until then, and a NaN width once it is offered one again.
+  -- 'captureLayoutCache' snapshots it.
+  , naUnsnapped :: IORef (IOArr Float)
+  -- ^ Per node, its rect as the position pass left it, before quantizing
+  -- (four floats). 'captureLayoutCache' snapshots it: a parent sizes itself
+  -- from its children's unsnapped extents, so a subtree the solve puts back
+  -- must be put back as that.
+  , naSpans :: IORef (IOArr Int)
+  -- ^ Per node, one past the last node of its subtree when the captured
+  -- solve placed that subtree as this solve would at the same rect, and -1
+  -- otherwise. The measure pass writes it when there is a cache.
   , naClassNodes :: IORef (IOArr Int)
   -- ^ The node lists of 'NodeClass', one after another: class @c@ keeps its
   -- @i@th node at element @fromEnum c * capacity + i@. A list never holds
@@ -709,6 +732,9 @@ newNodeArena = do
   naOwnHash <- newIORef =<< newPrimArray cap
   naSubHash <- newIORef =<< newPrimArray cap
   naMeasured <- newIORef =<< newPrimArray (cap * 2)
+  naOffered <- newIORef =<< newPrimArray (cap * 4)
+  naUnsnapped <- newIORef =<< newPrimArray (cap * 4)
+  naSpans <- newIORef =<< newPrimArray cap
   naClassNodes <- newIORef =<< newPrimArray (cap * nodeClassCount)
   naClassCounts <- newZeroedPrimArray nodeClassCount
   naImages <- newIORef =<< newArray 0 noImageNode
@@ -814,6 +840,9 @@ ensureCapacity na needed = do
     growRef (naOwnHash na) cap newCap
     growRef (naSubHash na) cap newCap
     growRef (naMeasured na) (cap * 2) (newCap * 2)
+    growRef (naOffered na) (cap * 4) (newCap * 4)
+    growRef (naUnsnapped na) (cap * 4) (newCap * 4)
+    growRef (naSpans na) cap newCap
     -- Each class list starts at a multiple of the capacity, so the lists move
     -- apart as it grows.
     oldClass <- readIORef (naClassNodes na)
@@ -1238,6 +1267,10 @@ data LayoutCache = LayoutCache
   -- solve restores its measured size instead of measuring again.
   , lcMeasured :: !(IOArr Float)
   -- ^ Per captured node, the width and height its measure took (two floats).
+  , lcOffered :: !(IOArr Float)
+  -- ^ The captured 'naOffered'.
+  , lcUnsnapped :: !(IOArr Float)
+  -- ^ The captured 'naUnsnapped'.
   , lcGeom :: !(IOArr Float)
   -- ^ The captured 'naArrGeom'.
   , lcStyle :: !(IOArr Float)
@@ -1245,6 +1278,22 @@ data LayoutCache = LayoutCache
   -- writes.
   , lcTags :: !(IOArr Word8)
   -- ^ The captured 'naArrTags'. A restore reads only 'TagScrollBarSlot'.
+  , lcPlaced :: !(IORef (IntMap PlacedFloat))
+  -- ^ Per floating node, what placing it over the captured solve left
+  -- ('NanoUI.Internal.Layout.Solve.placeFloatingNodes'). Emptied at capture.
+  }
+
+-- | What placing a floating node (modal, window, popup) at a rect left in
+-- its subtree: the geometry rows and the extents its scroll containers were
+-- raised to. Placing it at the same rect over the same solve leaves the
+-- same, so a frame can put this back instead.
+data PlacedFloat = PlacedFloat
+  { pfRect :: !Rect
+  -- ^ The rect placement gave the node.
+  , pfGeom :: !(PrimArray Float)
+  -- ^ The 'naArrGeom' rows of the subtree, which starts at the node.
+  , pfScroll :: ![(NodeIdx, Float, Float)]
+  -- ^ Each scroll container's 'StyleScrollContentW' and 'StyleNodeValue'.
   }
 
 -- | A custom measure's (available width, available height, measured width,
@@ -1257,10 +1306,13 @@ newLayoutCache cap0 = do
   let !cap = max 16 cap0
   lcSub <- newPrimArray cap
   lcMeasured <- newPrimArray (cap * 2)
+  lcOffered <- newPrimArray (cap * 4)
+  lcUnsnapped <- newPrimArray (cap * 4)
   lcGeom <- newPrimArray (cap * geomStride)
   lcStyle <- newPrimArray (cap * styleStride)
   lcTags <- newPrimArray (cap * tagStride)
-  pure (LayoutCache cap 0 0 IM.empty IS.empty lcSub lcMeasured lcGeom lcStyle lcTags)
+  lcPlaced <- newIORef IM.empty
+  pure (LayoutCache cap 0 0 IM.empty IS.empty lcSub lcMeasured lcOffered lcUnsnapped lcGeom lcStyle lcTags lcPlaced)
 
 -- | Snapshot the current (post-solve) arena form, constraints and rects.
 captureLayoutCache :: NodeArena -> LayoutCache -> IO LayoutCache
@@ -1269,6 +1321,8 @@ captureLayoutCache na lc0 = do
   sig <- getInputSignature na
   subA <- readIORef (naSubHash na)
   measuredA <- readIORef (naMeasured na)
+  offeredA <- readIORef (naOffered na)
+  unsnappedA <- readIORef (naUnsnapped na)
   -- The copies below overwrite everything a capture reads, so a cache too
   -- small for the arena is replaced rather than grown.
   lc <- if n <= lcCap lc0 then pure lc0 else newLayoutCache (max n (lcCap lc0 * 2))
@@ -1278,6 +1332,9 @@ captureLayoutCache na lc0 = do
   copyMutablePrimArray (lcTags lc) 0 (naArrTags a) 0 (n * tagStride)
   copyMutablePrimArray (lcSub lc) 0 subA 0 n
   copyMutablePrimArray (lcMeasured lc) 0 measuredA 0 (n * 2)
+  copyMutablePrimArray (lcOffered lc) 0 offeredA 0 (n * 4)
+  copyMutablePrimArray (lcUnsnapped lc) 0 unsnappedA 0 (n * 4)
+  writeIORef (lcPlaced lc) IM.empty
   pure lc {lcCount = n, lcSig = sig}
 
 -- | Whether the frame's layout inputs hash to what the cache captured.
@@ -1301,10 +1358,54 @@ restoreLayoutCache na lc = do
   forClassNodes_ na PointerNodes $ \i -> do
     nt <- readTagEnum a i TagNodeType
     when (isScrollNode nt) $ do
-      let !off = i * styleStride + fromEnum StyleScrollContentW
-          !slotOff = i * tagStride + fromEnum TagScrollBarSlot
-      copyMutablePrimArray (naArrStyle a) off (lcStyle lc) off 2
+      let !slotOff = i * tagStride + fromEnum TagScrollBarSlot
+      restoreScrollExtents a lc i
       readPrimArray (lcTags lc) slotOff >>= writePrimArray (naArrTags a) slotOff
+
+-- | Put back scroll container @i@'s captured content width and node value
+-- (the content height), which the position pass raises.
+{-# INLINE restoreScrollExtents #-}
+restoreScrollExtents :: NodeArenaArrays -> LayoutCache -> NodeIdx -> IO ()
+restoreScrollExtents a lc i = do
+  let !off = i * styleStride + fromEnum StyleScrollContentW
+  copyMutablePrimArray (naArrStyle a) off (lcStyle lc) off 2
+
+-- | The number of nodes in @idx@'s subtree when they are the indices from
+-- @idx@ on, as a view that adds each node under the open container leaves
+-- them, or else 'Nothing'.
+subtreeSpan :: NodeArena -> NodeIdx -> IO (Maybe Int)
+subtreeSpan na idx = do
+  a <- arenaArrays na
+  let node (!count, !hi) i = readTree a i TreeFirstChild >>= kids (count + 1, max hi i)
+      kids acc c
+        | c < 0 = pure acc
+        | otherwise = node acc c >>= \acc' -> readTree a c TreeNextSibling >>= kids acc'
+  (count, hi) <- node (0 :: Int, idx) idx
+  pure (if hi - idx + 1 == count then Just count else Nothing)
+
+-- | Copy what placement left in the @n@ nodes of @idx@'s subtree, which
+-- start at @idx@ ('subtreeSpan'), placed at @rect@.
+snapshotPlaced :: NodeArena -> NodeIdx -> Int -> Rect -> IO PlacedFloat
+snapshotPlaced na idx n rect = do
+  a <- arenaArrays na
+  geom <- newPrimArray (n * geomStride)
+  copyMutablePrimArray geom 0 (naArrGeom a) (idx * geomStride) (n * geomStride)
+  let scrollFrom i acc = do
+        nt <- readTagEnum a i TagNodeType
+        if isScrollNode nt
+          then (\cw v -> (i, cw, v) : acc) <$> readStyle a i StyleScrollContentW <*> readStyle a i StyleNodeValue
+          else pure acc
+  scroll <- foldM (flip scrollFrom) [] [idx + n - 1, idx + n - 2 .. idx]
+  PlacedFloat rect <$> unsafeFreezePrimArray geom <*> pure scroll
+
+-- | Put back what 'snapshotPlaced' copied from @idx@'s subtree.
+restorePlaced :: NodeArena -> NodeIdx -> PlacedFloat -> IO ()
+restorePlaced na idx PlacedFloat {pfGeom, pfScroll} = do
+  a <- arenaArrays na
+  copyPrimArray (naArrGeom a) (idx * geomStride) pfGeom 0 (sizeofPrimArray pfGeom)
+  forM_ pfScroll $ \(i, cw, v) -> do
+    writeStyle a i StyleScrollContentW cw
+    writeStyle a i StyleNodeValue v
 
 -- | Node text, or empty text when no text was assigned this frame.
 {-# INLINE getText #-}
@@ -1602,6 +1703,12 @@ walkKids a sub !pos !h !c
 -- during a solve. Do not retain them across arena growth.
 subtreeArrays :: NodeArena -> IO (IOArr Word64, IOArr Float)
 subtreeArrays na = (,) <$> readIORef (naSubHash na) <*> readIORef (naMeasured na)
+
+-- | The offered-rect, unsnapped-rect and span arrays ('naOffered',
+-- 'naUnsnapped', 'naSpans') the solver writes during a solve. Do not retain
+-- them across arena growth.
+positionArrays :: NodeArena -> IO (IOArr Float, IOArr Float, IOArr Int)
+positionArrays na = (,,) <$> readIORef (naOffered na) <*> readIORef (naUnsnapped na) <*> readIORef (naSpans na)
 
 -- | Type-specific style code. Its encoding depends on 'getNodeType', such as
 -- button flags, a radio option index, or packed text styling.

@@ -317,7 +317,9 @@ paintDamageClip ctx@Context {ctxDrawArena = da} (DamageClip r) pieces = do
 -- keys are folded here, so frames that reuse the whole layout never compute
 -- them. A cache taken under other font metrics measured text differently, so
 -- none of it is restored. Floating panels depend on state outside the arena
--- (window positions, popup anchors), so they are placed every time.
+-- (window positions, popup anchors), so each is placed after the solve, or,
+-- over a reused solve, given back what placing it there left when it goes
+-- where it went then ('lcPlaced').
 layoutArena :: Context -> Size -> Bool -> IO ()
 layoutArena ctx@Context {ctxNodeArena = na} size@(Size w h) check = do
   let ms = contextMeasurers ctx
@@ -345,8 +347,12 @@ layoutArena ctx@Context {ctxNodeArena = na} size@(Size w h) check = do
         let c' = c {lcMeasures = measures, lcMeasureHooks = hooks}
         writeIORef (ctxLayoutCache ctx) (Just (c', size, gen))
   floating <- floatingNodeCount na
-  when (floating > 0) $
-    placeFloatingNodes na ms w h (lookupWindowPos ctx) (lookupWindowSize ctx) (lookupPopupConfig ctx)
+  when (floating > 0) $ do
+    -- Placing over a solve is kept once a frame reuses it: content that
+    -- changes every frame solves every frame, and would keep what no frame
+    -- puts back.
+    placed <- if reused then fmap (\(c, _, _) -> lcPlaced c) <$> readIORef (ctxLayoutCache ctx) else pure Nothing
+    placeFloatingNodes na ms w h (lookupWindowPos ctx) (lookupWindowSize ctx) (lookupPopupConfig ctx) placed
 
 -- | Layout reuse is sound when the frame's layout inputs hash to what the
 -- cache captured, the same widgets register custom measures, and every custom
