@@ -398,50 +398,55 @@ writeDamage ctx inp snap = do
   windowLive <- getsInteraction ctx (\s -> isJust (isWindowDrag s) || isJust (isWindowResize s))
   requests <- getsDamage ctx dsRequests
   redrawn <- refreshCustomDrawings ctx
+  wanted <- readIORef (ctxDamageWanted ctx)
   let oldStore = fsStore snap
       newFloatingRects = IM.fromList panels
-  (settledMoved, churn) <- rectDeltas (map snd panels) (fsPrev snap) new
-  let scrollChanged = not (eqByPtr (storeFloat oldStore) (storeFloat newStore))
-      pointsChanged = not (eqByPtr (storePoint oldStore) (storePoint newStore))
-  let delta =
-        FrameDelta
-          { fdWinSize = inputWindowSize inp
-          , fdStore = newStore
-          , fdPrev = new
-          , fdFloatingRects = newFloatingRects
-          , fdModalFlip = modalFlip
-          , fdLiveAnims = liveAnims
-          , fdWindowLive = windowLive
-          , fdRequests = requests
-          , fdAnimLive = not (IM.null liveAnims) || settled
-          , fdFloatingChanged = fsFloatingRects snap /= newFloatingRects
-          , fdScrollChanged = scrollChanged
-          , fdPointsChanged = pointsChanged
-          , fdScrollOnly =
-              scrollChanged
-                && not pointsChanged
-                && storeMirrorGen oldStore == storeMirrorGen newStore
-                && storeOpenSelect oldStore == storeOpenSelect newStore
-                && null (slotChangedKeys oldStore newStore)
-          , fdSettledMoved = settledMoved
-          , fdChurn = churn
-          , fdRedrawn = redrawn
-          }
-  -- The store diff runs only once the cheap checks would clip: a frame
-  -- already repainting whole needs no per-key damage.
-  (dmg, pieces) <-
-    if needsFullDamage snap delta
-      then pure (DamageFull, [])
-      else do
-        (misses, owners) <- storeKeyChanges ctx oldStore newStore
-        -- A changed key that resolves to no node (a local hook's key, or a
-        -- widget-internal key nothing in the arena carries) may have changed
-        -- paint state no diff describes, so nothing narrower than the window
-        -- is known to cover it. Key 0 names no widget and is damaged by
-        -- nothing, so its writes cannot escalate a frame.
-        if any (\k -> k /= 0 && IM.notMember k owners) misses
+      floatingChanged = fsFloatingRects snap /= newFloatingRects
+      changes = do
+        (settledMoved, churn) <- rectDeltas (map snd panels) (fsPrev snap) new
+        let scrollChanged = not (eqByPtr (storeFloat oldStore) (storeFloat newStore))
+            pointsChanged = not (eqByPtr (storePoint oldStore) (storePoint newStore))
+        let delta =
+              FrameDelta
+                { fdWinSize = inputWindowSize inp
+                , fdStore = newStore
+                , fdPrev = new
+                , fdFloatingRects = newFloatingRects
+                , fdModalFlip = modalFlip
+                , fdLiveAnims = liveAnims
+                , fdWindowLive = windowLive
+                , fdRequests = requests
+                , fdAnimLive = not (IM.null liveAnims) || settled
+                , fdFloatingChanged = floatingChanged
+                , fdScrollChanged = scrollChanged
+                , fdPointsChanged = pointsChanged
+                , fdScrollOnly =
+                    scrollChanged
+                      && not pointsChanged
+                      && storeMirrorGen oldStore == storeMirrorGen newStore
+                      && storeOpenSelect oldStore == storeOpenSelect newStore
+                      && null (slotChangedKeys oldStore newStore)
+                , fdSettledMoved = settledMoved
+                , fdChurn = churn
+                , fdRedrawn = redrawn
+                }
+        -- The store diff runs only once the cheap checks would clip: a frame
+        -- already repainting whole needs no per-key damage.
+        if needsFullDamage snap delta
           then pure (DamageFull, [])
-          else clipDamage ctx snap delta owners
+          else do
+            (misses, owners) <- storeKeyChanges ctx oldStore newStore
+            -- A changed key that resolves to no node (a local hook's key, or a
+            -- widget-internal key nothing in the arena carries) may have changed
+            -- paint state no diff describes, so nothing narrower than the window
+            -- is known to cover it. Key 0 names no widget and is damaged by
+            -- nothing, so its writes cannot escalate a frame.
+            if any (\k -> k /= 0 && IM.notMember k owners) misses
+              then pure (DamageFull, [])
+              else clipDamage ctx snap delta owners
+  -- A host repainting the whole window whatever changed does not read the
+  -- damage, so nothing is diffed ('ctxDamageWanted').
+  (dmg, pieces) <- if wanted then changes else pure (DamageFull, [])
   modifyDamage ctx $ \ds ->
     ds
       { dsDamage = dmg
@@ -458,7 +463,7 @@ writeDamage ctx inp snap = do
   -- floating change each made this frame repaint whole already, so their
   -- pixels are not waiting on the next frame.
   when modalFlip (markDirtyCovered ctx)
-  when (fdFloatingChanged delta && not (IM.null (fsFloatingRects snap) && not (IM.null newFloatingRects))) $
+  when (floatingChanged && not (IM.null (fsFloatingRects snap) && not (IM.null newFloatingRects))) $
     markDirtyCovered ctx
 
 -- | Settle every drawing's ops for this frame and return the keys of those

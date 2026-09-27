@@ -32,6 +32,7 @@ tests =
   , spec "hovered-button-shrink-damage" runHoveredButtonShrinkDamageTest
   , spec "root-overflow-grow-damage" (runRootOverflowDamageTest 40 20)
   , spec "root-overflow-shrink-damage" (runRootOverflowDamageTest 20 30)
+  , spec "damage-unwanted" runDamageUnwantedTest
   , spec "label-button-swap-damage" runLabelButtonSwapDamageTest
   , spec "prev-frame-matches-fresh-walk" runPrevFrameFreshWalkTest
   ]
@@ -369,6 +370,24 @@ runRootOverflowDamageTest h dh ctx failed = do
   _ <- warmup2 ctx inp (ui 20 40) >> takeDamage ctx
   _ <- runFrame ctx inp (ui h dh)
   assert failed . (`damageCovers` Rect 0 0 40 40) =<< takeDamage ctx
+
+-- | A frame whose host does not read damage reports 'DamageFull' and still
+-- keeps what the next frame diffs against: that frame, read again, repaints
+-- nothing when nothing changed, and only a changed label's rect when it did.
+runDamageUnwantedTest :: Context -> IORef Int -> IO ()
+runDamageUnwantedTest ctx failed = do
+  let inp = withInputOff 300 200
+      ui n = column (labelWith (fixedWH 40 20) (T.pack (show (n :: Int))) >> void (buttonWith (fixedWH 30 20) ""))
+  _ <- warmup2 ctx inp (ui 1) >> takeDamage ctx
+  writeIORef (ctxDamageWanted ctx) False
+  _ <- runFrame ctx inp (ui 2)
+  assertEq failed DamageFull =<< takeDamage ctx
+  writeIORef (ctxDamageWanted ctx) True
+  _ <- runFrame ctx inp (ui 2)
+  assertEq failed (DamageClip (Rect 0 0 0 0)) =<< takeDamage ctx
+  _ <- runFrame ctx inp (ui 3)
+  dmg <- takeDamage ctx
+  assert failed (dmg `clipCovers` Rect 3 3 40 20 && not (dmg `damageCovers` Rect 3 26 30 20))
 
 -- | An empty label and a button take turns at one key and rect. Each time the
 -- label comes back its rect repaints: the text entry it had left with it.

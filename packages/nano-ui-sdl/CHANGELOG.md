@@ -112,6 +112,10 @@
   full-window frame.
 - The text caches use the core's generational cache, so the package no longer
   depends on `hashable` or `unordered-containers`.
+- A frame presented in full, as every frame of a continuous session is, no
+  longer works out what changed since the last one: it clears the core's
+  `ctxDamageWanted` for its UI pass. Scrolling a 3000-row list continuously
+  takes about 20% less time a frame on the Haskell side.
 - `SdlEnv` no longer has `sdlDialogState`: file dialogs are tracked per
   process, and every dialog shares one native callback instead of a wrapper
   apiece. `RenderDriver` is exported from `NanoUI.Backend.Sdl`, which

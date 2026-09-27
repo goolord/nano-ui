@@ -595,6 +595,7 @@ newContext = do
   ctxWrapCache <- newIORef (WrapCache 0 emptyGenCache)
   ctxLastMetricSource <- newIORef Nothing
   ctxPaintFull <- newIORef True
+  ctxDamageWanted <- newIORef True
   ctxExplain <- newIORef initialExplainState
   -- References above use their field names; font-dependent defaults stay
   -- explicit, including the resolvers that close over this context.

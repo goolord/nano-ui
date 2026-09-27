@@ -871,6 +871,11 @@ data Context = Context
   -- texture, forced full, continuous present, or window expose). When False,
   -- a DamageClip frame culls the paint pass to the damaged region.
   , ctxPaintFull :: !(IORef Bool)
+  -- | Whether the host reads this frame's damage
+  -- ('NanoUI.Internal.Context.Core.takeDamage'). A host that repaints the
+  -- whole window whatever changed (a continuous session) clears it, and the
+  -- frame reports 'DamageFull' without diffing anything. True by default.
+  , ctxDamageWanted :: !(IORef Bool)
   -- | Layout overlay state.
   , ctxExplain :: !(IORef ExplainState)
   , ctxTheme :: !(IORef Theme)
