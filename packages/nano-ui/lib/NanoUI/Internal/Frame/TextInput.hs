@@ -38,7 +38,7 @@ import qualified Data.Text as T
 import NanoUI.Internal.Context
 import NanoUI.Internal.Draw (DrawArena, pushRect)
 import NanoUI.Internal.Font (FontMetrics (..), caretXIO, centeredTextY, lineWidthIO, prepareFontMetrics, selectionSpans, textIndexAtX, widgetContentInset)
-import NanoUI.Internal.Frame.Chrome (textInputFocused, textInputValue)
+import NanoUI.Internal.Frame.Chrome (maskPassword, textInputFocused, textInputValue)
 import NanoUI.Internal.Frame.Hit (withWidgetNode)
 import NanoUI.Internal.Frame.Node (nodeAdornmentInsets, nodeFontMetrics)
 import NanoUI.Internal.Frame.Scroll.Geometry (padTextClipRect)
@@ -222,7 +222,7 @@ fieldEditLine ctx idx = do
       si <- getStyleIdx (ctxNodeArena ctx) idx
       -- Password fields mask the composition too.
       let shown
-            | hasFlag textInputFlagPassword si = c {compositionText = T.replicate (T.length (compositionText c)) "*"}
+            | hasFlag textInputFlagPassword si = c {compositionText = maskPassword (compositionText c)}
             | otherwise = c
           p = splicePreedit shown value (min anchor cursor) (max anchor cursor)
       pure (preeditLine p, preeditCaret p, preeditSelectionEnd p, Just p)
@@ -412,10 +412,10 @@ data Preedit = Preedit
 splicePreedit :: Composition -> Text -> Int -> Int -> Preedit
 splicePreedit (Composition txt cursor sel) line lo0 hi0 =
   let n = T.length line
-      lo = max 0 (min n lo0)
-      hi = max lo (min n hi0)
+      lo = clamp 0 n lo0
+      hi = clamp lo n hi0
       len = T.length txt
-      caret = lo + max 0 (min len cursor)
+      caret = lo + clamp 0 len cursor
    in Preedit
         { preeditLine = T.take lo line <> txt <> T.drop hi line
         , preeditStart = lo

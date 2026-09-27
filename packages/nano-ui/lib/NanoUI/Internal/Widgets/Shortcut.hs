@@ -140,7 +140,7 @@ focusTakesChord kind mods k =
     FocusTextLine -> fieldTakes False
     FocusTextSelectable ->
       k `elem` [KeyLeft, KeyRight, KeyHome, KeyEnd]
-        || (modPrimary mods && not (modAlt mods) && k `elem` [KeyChar 'a', KeyChar 'c'])
+        || (chordModifiers mods && k `elem` [KeyChar 'a', KeyChar 'c'])
     FocusComposing -> True
   where
     activates = shiftAtMost mods && (k == KeyEnter || k == KeySpace)

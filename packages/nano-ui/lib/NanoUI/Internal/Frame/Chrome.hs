@@ -4,6 +4,7 @@ module NanoUI.Internal.Frame.Chrome
   , displayText
   , widgetVisualStyle
   , textInputValue
+  , maskPassword
   , textInputFocused
   , fillStyledRect
   , strokeStyledRect
@@ -67,8 +68,12 @@ textInputValue ctx@Context {ctxNodeArena = na} idx = do
   let value = findSlot fieldText "" (intKey wid) store
   pure $
     if nt == NodeTextInput && hasFlag textInputFlagPassword si
-      then T.replicate (T.length value) "*"
+      then maskPassword value
       else value
+
+-- | A password field's text as shown: one @*@ per character.
+maskPassword :: Text -> Text
+maskPassword t = T.replicate (T.length t) "*"
 
 textInputFocused :: Context -> NodeIdx -> IO Bool
 textInputFocused ctx idx = do
