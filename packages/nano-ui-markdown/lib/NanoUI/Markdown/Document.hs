@@ -33,7 +33,7 @@ module NanoUI.Markdown.Document
 
 import Control.DeepSeq (NFData, deepseq, rnf)
 import Control.Monad (guard)
-import Data.Char (isAlpha, isAlphaNum)
+import Data.Char (isAlpha, isAlphaNum, isAscii)
 import Data.Containers.ListUtils (nubOrd)
 import Data.Foldable (toList)
 import Data.List (find, unsnoc)
@@ -43,6 +43,7 @@ import Data.Sequence (Seq)
 import Data.Sequence qualified as Seq
 import Data.Text (Text)
 import Data.Text qualified as T
+import Data.Text.Normalize (NormalizationMode (NFC), normalize)
 import Data.Text.Lazy qualified as TL
 import GHC.Generics (Generic)
 import NanoUI.Markdown.Internal.Parse
@@ -230,11 +231,17 @@ tailOf input nodes = case unsnoc nodes of
 -- starts with a letter, or on its first line also a digit, so the words
 -- cannot turn it into the start of a block; and the words follow a space, or
 -- are letters with closing punctuation after a letter, so they cannot close
--- or change an inline before them. 'Nothing' when it may not hold.
+-- or change an inline before them; and they start with an ASCII character
+-- and are in NFC, as the parse leaves text. 'Nothing' when it may not hold.
 plainAppend :: Text -> MarkdownDoc -> Maybe MarkdownDoc
 plainAppend new doc = do
   TailPara oneLine <- Just (docTail doc)
   guard (T.all plain new && not ("www." `T.isInfixOf` T.toLower new))
+  -- The parse puts its text in NFC. Words in NFC that start with an ASCII
+  -- character, which nothing before it composes with, join the text before
+  -- them unchanged.
+  (first, _) <- T.uncons new
+  guard (isAscii first && normalize NFC new == new)
   (blocks, Paragraph xs) <- unsnoc (docLast doc)
   (before, Str s) <- unsnoc xs
   -- A space that ends the Str (from an entity, or before an HTML comment the

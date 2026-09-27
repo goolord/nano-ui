@@ -63,7 +63,8 @@ library
         hashable ^>=1.5,
         nano-ui ^>=0.1,
         parsec ^>=3.1,
-        text ^>=2.1
+        text ^>=2.1,
+        unicode-transforms ^>=0.4
     hs-source-dirs:   lib
 
 flag sdl

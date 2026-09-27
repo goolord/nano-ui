@@ -164,6 +164,8 @@ spec = do
     adds "end a web address's www" "www" "."
     adds "follow an HTML comment" "foo<!-- c -->  " "bar"
     adds "follow a space from an entity" "foo&#32;" " "
+    adds "join a letter the parse normalizes" "\28010" "\63786"
+    adds "combine with the letter before" "cafe" "\769"
     it "parse to what the whole text does, one at a time" $
       withNumTests 1000 $ property $ forAll ((:) <$> elements openings <*> listOf (elements proseTokens)) $ \tokens ->
         map markdownBlocks (streams tokens) === map (parseMarkdownBlocks . T.concat) (inits tokens)
