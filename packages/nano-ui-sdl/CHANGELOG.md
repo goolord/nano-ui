@@ -109,7 +109,9 @@
 - With SDL 3.4 or later, the renderer's texture address mode is set to clamp
   when the session starts. Left on auto, SDL scans every UV in the frame's
   vertex buffer on each draw call, which cost more than a quarter of a
-  full-window frame.
+  full-window frame. SDL 3.2 has no such setting, so there each draw call
+  passes SDL only the vertices it uses: submitting the demo's Controls tab
+  went from 0.77 to 0.22 ms a frame.
 - The text caches use the core's generational cache, so the package no longer
   depends on `hashable` or `unordered-containers`.
 - `SdlEnv` no longer has `sdlDialogState`: file dialogs are tracked per
