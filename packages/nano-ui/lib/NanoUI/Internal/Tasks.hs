@@ -20,29 +20,31 @@ where
 
 import Control.Concurrent (forkIO, killThread)
 import Control.Exception (SomeAsyncException, SomeException, evaluate, fromException, throwIO, try)
-import Control.Monad (unless, void)
+import Control.Monad (filterM, unless, void, when)
 import Data.Dynamic (Dynamic, fromDynamic, toDyn)
 import Data.IORef (IORef, atomicModifyIORef', atomicWriteIORef, newIORef, readIORef, writeIORef)
 import Data.IntMap.Strict (IntMap)
 import Data.IntMap.Strict qualified as IM
-import Data.IntSet (IntSet)
 import Data.IntSet qualified as IS
-import Data.Maybe (isJust)
+import Data.Maybe (isJust, isNothing)
+import Data.Primitive.PrimVar (PrimVar, modifyPrimVar, newPrimVar, readPrimVar, writePrimVar)
 import Data.Typeable (Typeable, cast)
 import Effectful (Eff, type (:>))
 import GHC.Conc (labelThread)
+import GHC.Exts (RealWorld)
 import NanoUI.Internal.Context (Context, askHostIO, hostOrInit, intKey, wakeFromThread)
 import NanoUI.Internal.Monad (Ui, askContext, freshWidget, uiIO)
 
--- | Per-context hook resources, stored as a host value ('hostOrInit').
-newtype Held = Held (IORef HeldTable)
+-- | Per-context hook resources, stored as a host value ('hostOrInit'): the
+-- resources by widget store key; the frame the view is running, which each
+-- hook stamps its entry with; how many entries are stamped this frame (in
+-- any view pass); and how many there are. A frame whose hooks all ran ends
+-- without looking at any entry.
+data Held = Held !(IORef (IntMap Holding)) !(PrimVar RealWorld Int) !(PrimVar RealWorld Int) !(PrimVar RealWorld Int)
 
--- | Resources by widget store key, plus the keys whose hook ran this frame
--- (in any view pass).
-data HeldTable = HeldTable !(IntMap Holding) !IntSet
-
--- | A hook's key (compared by value), its resource, and the release action.
-data Holding = forall k. (Eq k, Typeable k) => Holding !k !Dynamic !(IO ())
+-- | A hook's key (compared by value), its resource, the release action, and
+-- the last frame its hook ran.
+data Holding = forall k. (Eq k, Typeable k) => Holding !k !Dynamic !(IO ()) !(PrimVar RealWorld Int)
 
 -- | Hold a resource for key @k@ at this hook's widget id. While the key is
 -- unchanged the cached value is returned. Otherwise the old resource is
@@ -55,23 +57,33 @@ useHeld :: (Eq k, Typeable k, Typeable a, Ui :> es) => k -> (Context -> Maybe a 
 useHeld k acquire = do
   (wid, ctx) <- freshWidget
   uiIO $ do
-    Held ref <- hostOrInit ctx (Held <$> newIORef (HeldTable IM.empty IS.empty))
-    HeldTable held called <- readIORef ref
+    Held ref frameVar stampedVar countVar <- hostOrInit ctx newHeld
+    held <- readIORef ref
+    frame <- readPrimVar frameVar
     let key = intKey wid
         entry = IM.lookup key held
-        valueOf (Holding _ v _) = fromDynamic v
+        valueOf (Holding _ v _ _) = fromDynamic v
+        stamp = modifyPrimVar stampedVar (+ 1)
     case entry of
-      Just h@(Holding k0 _ _) | cast k0 == Just k, Just v <- valueOf h -> do
-        unless (IS.member key called) $ writeIORef ref $! HeldTable held (IS.insert key called)
+      Just h@(Holding k0 _ _ seen) | cast k0 == Just k, Just v <- valueOf h -> do
+        s <- readPrimVar seen
+        unless (s == frame) $ writePrimVar seen frame >> stamp
         pure v
       _ -> do
-        mapM_ letGo entry
+        -- A replaced entry stamped earlier this frame stays counted.
+        counted <- maybe (pure False) (\old -> letGo old >> (== frame) <$> seenIn old) entry
         (v, release) <- acquire ctx (valueOf =<< entry)
-        writeIORef ref $! HeldTable (IM.insert key (Holding k (toDyn v) release) held) (IS.insert key called)
+        seen <- newPrimVar frame
+        writeIORef ref $! IM.insert key (Holding k (toDyn v) release seen) held
+        unless counted stamp
+        when (isNothing entry) $ modifyPrimVar countVar (+ 1)
         pure v
+  where
+    newHeld = Held <$> newIORef IM.empty <*> newPrimVar 0 <*> newPrimVar 0 <*> newPrimVar 0
+    seenIn (Holding _ _ _ seen) = readPrimVar seen
 
 letGo :: Holding -> IO ()
-letGo (Holding _ _ release) = release
+letGo (Holding _ _ release _) = release
 
 -- | State of a 'useTaskStatus' job. The 'Maybe' is the latest result from an
 -- earlier key, so the view can keep showing it instead of flickering.
@@ -203,16 +215,23 @@ askWake :: Ui :> es => Eff es (IO ())
 askWake = wakeFromThread <$> askContext
 
 -- | End-of-frame sweep: release resources whose hook did not run this frame.
--- Two view passes in one frame count as one.
+-- Two view passes in one frame count as one. When every hook ran, it touches
+-- no entry.
 sweepHeld :: Context -> IO ()
-sweepHeld ctx = askHostIO ctx >>= mapM_ (\(Held ref) -> sweep ref)
+sweepHeld ctx = askHostIO ctx >>= mapM_ sweep
   where
-    sweep ref = do
-      HeldTable held called <- readIORef ref
-      unless (IM.null held && IS.null called) $ do
-        let (kept, gone) = IM.partitionWithKey (\k _ -> IS.member k called) held
-        writeIORef ref $! HeldTable kept IS.empty
-        mapM_ letGo gone
+    sweep (Held ref frameVar stampedVar countVar) = do
+      frame <- readPrimVar frameVar
+      stamped <- readPrimVar stampedVar
+      count <- readPrimVar countVar
+      writePrimVar frameVar (frame + 1)
+      writePrimVar stampedVar 0
+      unless (stamped == count) $ do
+        held <- readIORef ref
+        gone <- filterM (\(_, Holding _ _ _ seen) -> (/= frame) <$> readPrimVar seen) (IM.toAscList held)
+        writeIORef ref $! IM.withoutKeys held (IS.fromDistinctAscList (map fst gone))
+        writePrimVar countVar (count - length gone)
+        mapM_ (letGo . snd) gone
 
 -- | Kill every job on the context and release images held by
 -- 'NanoUI.useImageRgba', at session end. 'NanoUI.Runner.runSessionLoop' calls
@@ -220,7 +239,9 @@ sweepHeld ctx = askHostIO ctx >>= mapM_ (\(Held ref) -> sweep ref)
 cancelTasks :: Context -> IO ()
 cancelTasks ctx = askHostIO ctx >>= mapM_ cancelAll
   where
-    cancelAll (Held ref) = do
-      HeldTable held _ <- readIORef ref
-      writeIORef ref $! HeldTable IM.empty IS.empty
+    cancelAll (Held ref _ stampedVar countVar) = do
+      held <- readIORef ref
+      writeIORef ref IM.empty
+      writePrimVar stampedVar 0
+      writePrimVar countVar 0
       mapM_ letGo held

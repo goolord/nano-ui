@@ -14,6 +14,7 @@ tests =
   [ spec "task-result-after-wake" runTaskResultTest
   , spec "task-key-change" runTaskKeyChangeTest
   , spec "task-lease" runTaskLeaseTest
+  , spec "task-lease-partial" runTaskPartialLeaseTest
   , spec "task-two-passes" runTaskTwoPassTest
   , spec "task-failure" runTaskFailureTest
   , spec "task-status" runTaskStatusTest
@@ -133,6 +134,25 @@ runTaskLeaseTest ctx failed = do
   assert failed =<< killedIn 2000000
   _ <- runFrame ctx inp (ui True)
   assert failed =<< reaches starts 2
+  cancelTasks ctx
+
+-- | A frame that skips one of two hooks ends only that hook's job; the other
+-- keeps its job through later frames until a frame skips it too.
+runTaskPartialLeaseTest :: Context -> IORef Int -> IO ()
+runTaskPartialLeaseTest ctx failed = do
+  (sleepA, startedA, killedA) <- sleeper
+  (sleepB, startedB, killedB) <- sleeper
+  let ui showA showB = do
+        scope (when showA (void (useTask ("a" :: String) sleepA)))
+        scope (when showB (void (useTask ("b" :: String) sleepB)))
+        label "lease"
+  _ <- runFrame ctx inp (ui True True)
+  startedA >> startedB
+  replicateM_ 3 (runFrame ctx inp (ui False True))
+  assert failed =<< killedA 2000000
+  assert failed . not =<< killedB 20000
+  _ <- runFrame ctx inp (ui False False)
+  assert failed =<< killedB 2000000
   cancelTasks ctx
 
 -- | A frame that runs the view twice after a hook write starts the job once.
