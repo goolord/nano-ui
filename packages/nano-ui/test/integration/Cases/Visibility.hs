@@ -24,6 +24,9 @@ tests =
   , spec "visibility-pinned" runPinnedTest
   , spec "visibility-bounds" runBoundsTest
   , spec "visibility-delay" runDelayTest
+  , spec "visibility-swapped" runSwappedTest
+  , spec "visibility-shared-id" runSharedIdTest
+  , spec "visibility-shared-id-removed" runSharedIdRemovedTest
   ]
 
 inp :: Input
@@ -170,6 +173,43 @@ runRemovedTest ctx failed = do
   c <- go [(off, True), (cameIn, False)]
   let ids = map snd (a ++ b ++ c)
   assert failed (and (zipWith (==) ids (drop 1 ids)))
+
+-- A sensor swapped for another in one frame is forgotten all the same.
+runSwappedTest :: Context -> IORef Int -> IO ()
+runSwappedTest ctx failed = do
+  whichRef <- newIORef (0 :: Int)
+  let ui = column (uiIO (readIORef whichRef) >>= \which -> withKey which (fst <$> sensor (label "watched")))
+      go = void . frames failed ctx inp ui id
+  go [(off, True), (cameIn, False)]
+  writeIORef whichRef 1 >> go [(off, True), (cameIn, False)]
+  writeIORef whichRef 0 >> go [(off, True), (cameIn, False)]
+
+-- Watches sharing an id are one sensor: the last watch is measured, and the
+-- first read takes the event.
+runSharedIdTest :: Context -> IORef Int -> IO ()
+runSharedIdTest ctx failed = do
+  let ui = scrollCol 100 $ do
+        shown <- respId <$> button' "Shown"
+        replicateM_ 5 bar
+        below <- respId <$> button' "Below"
+        forM [below, shown] (withKey (0 :: Int) . useVisibility defaultSensorConfig)
+  ((_, first), follow) <- step ctx inp ui
+  expectVis failed [off, off] first >> assert failed follow
+  ((_, second), _) <- step ctx inp ui
+  expectVis failed [cameIn, on] second
+
+-- A sensor left out for a frame is forgotten, also next to sensors sharing an id.
+runSharedIdRemovedTest :: Context -> IORef Int -> IO ()
+runSharedIdRemovedTest ctx failed = do
+  shownRef <- newIORef True
+  let ui = column $ do
+        replicateM_ 2 (withKey (0 :: Int) (sensor (label "twin")))
+        shown <- uiIO (readIORef shownRef)
+        scope (if shown then fst <$> sensor (label "watched") else pure hidden)
+      go = void . frames failed ctx inp ui id
+  go [(off, True), (cameIn, False)]
+  writeIORef shownRef False >> go [(off, False)]
+  writeIORef shownRef True >> go [(off, True), (cameIn, False)]
 
 -- A sensor in a hidden tab's body is forgotten while another tab shows.
 runTabsTest :: Context -> IORef Int -> IO ()

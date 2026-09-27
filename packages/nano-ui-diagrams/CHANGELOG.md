@@ -34,6 +34,11 @@
   baseline, instead of a baseline point under every sample: half the
   vertices painted each frame, and a quarter of the triangulation work when
   the chart is rebuilt.
+- A plot checks whether its chart changed without boxing each point, skips
+  the check for a chart kept across frames, and no longer derives its plot
+  style every frame to compare. The demo's four plots allocate 106 KB a
+  frame instead of 210 KB, and a kept 8000-point chart 92 KB instead of
+  687 KB.
 
 ### Fixed
 
