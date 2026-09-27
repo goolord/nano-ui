@@ -8,7 +8,8 @@ import Data.IntMap.Strict qualified as IM
 import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Text qualified as T
 import Data.Text.IO qualified as TIO
-import NanoUI.Internal.Context (Context (ctxActiveId), InteractionState (..), getsInteraction, intKey, textInputMenuWidget)
+import NanoUI.Internal.Context (Context (ctxActiveId, ctxNodeArena), InteractionState (..), getsInteraction, intKey, textInputMenuWidget)
+import NanoUI.Internal.Layout.Arena (NodeType (..), arenaCount, getNodeRect, getNodeType)
 import NanoUI.Internal.Store (Slot (..), WidgetStore (..), isSelectOpen, slotKey)
 import NanoUI.Internal.Widgets.TextArea (buffer, loadTextAreaState, selectionAnchor)
 import NanoUI.Widgets.TextBuffer (getCursor)
@@ -20,7 +21,39 @@ tests =
   [ pixelSpec "pointer-ownership" runPointerOwnershipTest
   , spec "pointer-routing-lint" runPointerRoutingLintTest
   , pixelSpec "pointer-capture" runPointerCaptureTest
+  , spec "color-picker-bar-slack" runColorPickerBarSlackTest
   ]
+
+-- | A colour picker's hue bar takes presses a little beside itself. There the
+-- pointer reaches what holds the bar, which covers nothing, even in a view
+-- with a pinned node (where presses check what covers their widget).
+runColorPickerBarSlackTest :: Context -> IORef Int -> IO ()
+runColorPickerBarSlackTest ctx failed = do
+  ref <- newIORef (colorRGBA 200 40 40 255)
+  let inp0 = withInputOff 600 500
+      ui = columnWith tight $ do
+        _ <- buttonWith' (pinAt 500 400 . fixedWH 30 30) "x"
+        columnWith (pointer PointerBlock . tight) (held ref colorPicker')
+  _ <- warmup2 ctx inp0 ui
+  let na = ctxNodeArena ctx
+  n <- arenaCount na
+  pickers <- fmap concat . forM [0 .. n - 1] $ \i -> do
+    nt <- getNodeType na i
+    if nt == NodeColorPicker then pure <$> getNodeRect na i else pure []
+  case pickers of
+    -- The field, then the hue bar.
+    _ : Rect hx hy _ hh : _ -> do
+      -- Down the bar's middle stretch, off hue 0 at either end.
+      let p = V2 (hx - 1) (hy + hh * 0.3)
+          down = holdAt inp0 (V2 (hx - 1) (hy + hh * 0.5))
+      before <- readIORef ref
+      _ <- runFrame ctx inp0 {inputMousePos = p} ui
+      _ <- runFrame ctx (pressAt inp0 p) ui
+      _ <- runFrame ctx down ui
+      _ <- runFrame ctx (releaseAt down) ui
+      after <- readIORef ref
+      assert failed (after /= before)
+    _ -> assert failed False
 
 -- | Something drawn over the page. Its source is declared above the widget
 -- under test; @ovOpen@ lists the frames that open it, given the source's
