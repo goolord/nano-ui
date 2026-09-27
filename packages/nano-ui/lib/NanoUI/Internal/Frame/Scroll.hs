@@ -20,14 +20,14 @@ import Data.Functor ((<&>))
 import Data.Maybe (fromMaybe, isJust)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Frame.Hit (overlayHitAllowed, overlayHitRoot, passesPointer, topmostFloating, topmostOverlayAtMouse)
-import NanoUI.Internal.Frame.Node (readScrollNode)
+import NanoUI.Internal.Frame.Node (childPaintClip, readScrollNode)
 import NanoUI.Internal.Frame.Scroll.Geometry
 import NanoUI.Internal.Frame.TextArea (TextAreaBars (..), textAreaBarLayouts, textAreaScrollGeom)
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Monad (ifM, (<&&>))
 import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena
-import NanoUI.Internal.Style (Flow (..), Padding (..), PointerMode (..), themePanel)
+import NanoUI.Internal.Style (Flow (..), Padding (..), PointerMode (..))
 import NanoUI.Internal.Types (Rect (..), Size (..), V2 (..), rectContains, rectHit, rectInflate, rectIntersect, rectUnion)
 
 -- | Offset every node by its enclosing scrollers and set its clip. The root
@@ -49,18 +49,35 @@ transformSubtree ctx@Context {ctxNodeArena = na} idx scrollX scrollY parentClip 
     (sx, sy) = if floating then (0, 0) else (scrollX, scrollY)
     !vx = lx + sx
     !vy = ly + sy
+    rect = Rect vx vy vw vh
+    -- A floating node is painted in its own rect, wherever it was declared.
+    outer = if floating then rect else parentClip
     -- A rect entirely outside the parent clip gets an empty clip, not the
     -- parent's.
     within r = fromMaybe (Rect (rectX r) (rectY r) 0 0) (rectIntersect parentClip r)
+    -- A scroller or panel records the clip it gives its content; any other
+    -- node the clip it is painted in.
+    records = isScrollNode nt || nt == NodePanel
   -- With no offset on either axis the placed rect equals the laid-out one, so
   -- the write is a no-op; a floating node always takes that path.
   unless (sx == 0 && sy == 0) $ setRect na idx vx vy vw vh
+  -- The children are clipped as paint clips them ('childPaintClip'): a
+  -- widget's children, its adornments or content, to the widget, so none
+  -- takes the pointer outside it; a floating node's to the node. Most nodes
+  -- have no children and record the clip they are painted in, so that lookup
+  -- is skipped.
+  kids <- getFirstChild na idx
+  !inner <-
+    if floating || (kids < 0 && not records)
+      then pure outer
+      else maybe parentClip within <$> childPaintClip ctx idx nt rect
+  setClipRect na idx (if records then inner else outer)
   -- Recursing from inside each branch keeps the child transform in registers;
   -- returning it as a tuple allocated one box per node per frame.
-  let descend !cx !cy !clip = forChildNodes_ na idx $ \ci -> transformSubtree ctx ci cx cy clip
+  let descend !cx !cy = forChildNodes_ na idx $ \ci -> transformSubtree ctx ci cx cy inner
   if isScrollNode nt
     then do
-      (axes, viewport, range) <- scrollNodeGeometry ctx idx (Rect vx vy vw vh)
+      (axes, viewport, range) <- scrollNodeGeometry ctx idx rect
       wid <- getWidgetId na idx
       -- The only pass that sees a scroller's placed geometry. Everything
       -- that scrolls one between frames reads it back from here.
@@ -75,22 +92,9 @@ transformSubtree ctx@Context {ctxNodeArena = na} idx scrollX scrollY parentClip 
           ScrollAxisY -> V2 cx hy
           ScrollAxisX -> V2 hx cy
           ScrollAxisXY -> V2 hx hy
-        clip = within viewport
       when (held /= cur) $ setScrollOffsetIn ctx wid axes held
-      setClipRect na idx clip
-      descend (sx - dx) (sy - dy) clip
-    else do
-      clip <-
-        case nt of
-          NodePanel -> do
-            theme <- nodeTheme ctx idx
-            pure (within (borderContentClip (themePanel theme) (Rect vx vy vw vh)))
-          _ -> pure $! if floating then Rect vx vy vw vh else parentClip
-      setClipRect na idx clip
-      -- A widget's children, its adornments or content, are clipped to the
-      -- widget, as paint clips them, so none takes the pointer outside it.
-      kids <- if isWidgetNode nt then getFirstChild na idx else pure (-1)
-      descend sx sy (if kids < 0 then clip else within (Rect vx vy vw vh))
+      descend (sx - dx) (sy - dy)
+    else descend sx sy
 
 -- | Axes, content viewport and reachable offset range of the scroll container
 -- at @idx@ placed at @rect@, in window axes. The wheel, the programmatic

@@ -34,7 +34,7 @@ import GHC.Float (castFloatToWord32)
 import NanoUI.Internal.Font
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Id (WidgetId)
-import NanoUI.Internal.Style (AlignX (..), AlignY (..), Flow (..), FontStyle (..), FontVariant (..), FontWeight (..), Padding (..), lineAlignFraction, windowMargin)
+import NanoUI.Internal.Style (AlignX (..), AlignY (..), Flow (..), FontStyle (..), FontVariant (..), FontWeight (..), Padding (..), alignXFraction, alignYFraction, lineAlignFraction, windowMargin)
 import NanoUI.Internal.Types (PopupAnchor (..), PopupPlacement (..), Rect (..), V2 (..), clamp, foldUpTo, forUpTo_, gridSpan, onGrid)
 import NanoUI.Internal.WidgetText
 import NanoUI.Internal.Frame.Scroll.Geometry
@@ -1762,16 +1762,12 @@ waterFillGrow mainArr crossArr room n = do
   lockFrom (room - occupied) gfSum (sortOn (\(perUnit, _, _, _) -> Down perUnit) growing)
 
 alignX :: AlignX -> Float -> Float -> Float -> Float
-alignX AlignStart cx _ _ = cx
-alignX AlignCenter cx cw iw = cx + (cw - iw) / 2
-alignX AlignEnd cx cw iw = cx + cw - iw
+alignX ax cx cw iw = cx + (cw - iw) * alignXFraction ax
 
+-- | 'AlignBaseline' places like 'AlignTop' here; 'positionRowFromParent'
+-- places a row's baseline-aligned children.
 alignY :: AlignY -> Float -> Float -> Float -> Float
-alignY AlignTop cy _ _ = cy
-alignY AlignMiddle cy ch ih = cy + (ch - ih) / 2
-alignY AlignBottom cy ch ih = cy + ch - ih
--- Only a row has a baseline to share; 'positionRowFromParent' places these.
-alignY AlignBaseline cy _ _ = cy
+alignY ay cy ch ih = cy + (ch - ih) * alignYFraction ay
 
 -- | Distance from the top of node @ci@, laid out @h@ tall, to its first
 -- baseline, as in CSS:

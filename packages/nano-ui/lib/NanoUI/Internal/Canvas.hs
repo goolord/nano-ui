@@ -50,7 +50,7 @@ import NanoUI.Internal.Draw (DrawOp (..), TextFont, checkboxOps)
 import NanoUI.Internal.Font (FontMetrics (fmSnapScale), monospaceMetrics)
 import NanoUI.Internal.Image (ImageDraw (..), imageDraw, imageDrawOp)
 import NanoUI.Internal.Path (FillRule (..), Paint (..), Path, Stroke, Transform, curveTolerance, fillPathOps, stroke, strokePathOps, transformOp)
-import NanoUI.Internal.Style (AlignX (..), AlignY (..), Style (..), Theme (..), defaultTheme)
+import NanoUI.Internal.Style (AlignX (..), AlignY (..), Style (..), Theme (..), alignXFraction, defaultTheme)
 import NanoUI.Internal.Types (Color, ImageId, Rect (..), V2 (..))
 
 -- | A drawing block that collects draw ops. Run it with 'runCanvasFor'.
@@ -192,7 +192,7 @@ drawImageWith = mapM_ emitOp . imageDrawOp
 -- 'AlignStart' puts the point at the text's left edge, 'AlignTop' at the
 -- line's top, and 'AlignBaseline' on the baseline.
 drawText :: V2 -> AlignX -> AlignY -> Text -> Color -> CanvasM ()
-drawText (V2 x y) alignX alignY txt col = emitOp (DrawText x y (alignXFrac alignX) (alignYFrac alignY) txt col)
+drawText (V2 x y) alignX alignY txt col = emitOp (DrawText x y (alignXFraction alignX) (alignYFrac alignY) txt col)
 
 -- | 'drawText' with an explicit font: size, variant (such as 'FontMono'),
 -- weight, slant and decoration.
@@ -202,11 +202,7 @@ drawText (V2 x y) alignX alignY txt col = emitOp (DrawText x y (alignXFrac align
 -- Under a transform the point moves and the font scales by the square root
 -- of the transform's area scale. Glyphs do not rotate.
 drawTextWith :: TextFont -> V2 -> AlignX -> AlignY -> Text -> Color -> CanvasM ()
-drawTextWith font (V2 x y) alignX alignY txt col = emitOp (DrawTextAligned x y (alignXFrac alignX) (alignYFrac alignY) 1 font txt col)
-
--- | Anchor position across the text: 0 is the left edge, 1 the right.
-alignXFrac :: AlignX -> Float
-alignXFrac = \case AlignStart -> 0; AlignCenter -> 0.5; AlignEnd -> 1
+drawTextWith font (V2 x y) alignX alignY txt col = emitOp (DrawTextAligned x y (alignXFraction alignX) (alignYFrac alignY) 1 font txt col)
 
 -- | Anchor position up the line: 0 is the bottom, 1 the top, and a negative
 -- value the baseline.

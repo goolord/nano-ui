@@ -9,6 +9,8 @@ module NanoUI.Internal.Style
   , Flow (..)
   , AlignX (..)
   , AlignY (..)
+  , alignXFraction
+  , alignYFraction
   , Padding (..)
   , Layout (..)
   , defaultLayout
@@ -188,6 +190,23 @@ data AlignX = AlignStart | AlignCenter | AlignEnd
 -- 'AlignTop'.
 data AlignY = AlignTop | AlignMiddle | AlignBottom | AlignBaseline
   deriving (Eq, Show, Enum, Bounded)
+
+-- | Where 'AlignX' puts content across the room left over: 0 at the left, 0.5
+-- centred, 1 at the right.
+{-# INLINE alignXFraction #-}
+alignXFraction :: AlignX -> Float
+alignXFraction AlignStart = 0
+alignXFraction AlignCenter = 0.5
+alignXFraction AlignEnd = 1
+
+-- | Where 'AlignY' puts content down the room left over: 0 at the top, 0.5
+-- centred, 1 at the bottom. 'AlignBaseline' counts as 'AlignTop': only a row
+-- has a baseline to share, and it places those children itself.
+{-# INLINE alignYFraction #-}
+alignYFraction :: AlignY -> Float
+alignYFraction AlignMiddle = 0.5
+alignYFraction AlignBottom = 1
+alignYFraction _ = 0
 
 -- | Insets in logical pixels, ordered left, right, top, bottom.
 data Padding = Padding

@@ -23,7 +23,7 @@ module NanoUI.Internal.Image
 
 import Data.Maybe (fromMaybe)
 import NanoUI.Internal.Draw.Types (DrawOp (..))
-import NanoUI.Internal.Style (AlignX (..), AlignY (..), Layout, fadeAlpha)
+import NanoUI.Internal.Style (AlignX (..), AlignY (..), Layout, alignXFraction, alignYFraction, fadeAlpha)
 import NanoUI.Internal.Types (Color, ImageId (..), Rect (..), clamp, clamp01, colorA, colorRGBA, finite, rectIntersect)
 
 -- | How an image fills its layout rect, like CSS @object-fit@. Every fit but
@@ -116,14 +116,8 @@ fitRect fit ax ay (w, h) (Rect bx by bw bh) = Rect (bx + (bw - dw) * fx) (by + (
       FitFill -> (bw, bh)
       FitNone -> scaled 1
       FitScaleDown -> scaled (min 1 contain)
-    fx = case ax of
-      AlignStart -> 0
-      AlignCenter -> 0.5
-      AlignEnd -> 1
-    fy = case ay of
-      AlignMiddle -> 0.5
-      AlignBottom -> 1
-      _ -> 0
+    fx = alignXFraction ax
+    fy = alignYFraction ay
 
 -- | Bounding size after a solid rotation; floating rotations keep the size.
 turnedSize :: Rotation -> (Float, Float) -> (Float, Float)
