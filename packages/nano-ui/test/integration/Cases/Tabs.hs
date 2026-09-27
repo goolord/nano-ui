@@ -18,6 +18,7 @@ tests =
   , spec "tabs-scroll" runTabsScrollTest
   , spec "tabs-scroll-widen" runTabsScrollWidenTest
   , spec "tabs-scroll-close-button" runTabsScrollCloseButtonTest
+  , spec "tabs-range-damage" runTabsRangeDamageTest
   , spec "tabs-state-persistence" runTabsStatePersistenceTest
   , spec "tabs-bodies-apart" runTabsBodiesApartTest
   , spec "tabs-damage" runTabsDamageTest
@@ -171,6 +172,22 @@ runTabsScrollCloseButtonTest _ failed = do
       replicateM_ 3 (runFrame ctx (withInput clipW 120) mkTabs)
       assert failed =<< hasArrows ctx
     _ -> assert failed False
+
+-- The frame a strip first measures an overflow publishes its range, a float.
+-- That is layout, not a scroll: the resize that made the strip overflow
+-- still repaints the whole window.
+runTabsRangeDamageTest :: Context -> IORef Int -> IO ()
+runTabsRangeDamageTest ctx failed = do
+  let labels = ["Controls", "Graphics", "Typography", "Diagnostics", "LongestTabName"]
+      ui = column $ do
+        _ <- tabBar (0 :: Int) [tab i l () | (i, l) <- zip [0 ..] labels]
+        label "Below"
+  _ <- warmup2 ctx (withInput 900 120) ui
+  _ <- runFrame ctx (withInput 900 120) ui
+  _ <- takeDamage ctx
+  _ <- runFrame ctx (withInput 240 120) ui
+  dmg <- takeDamage ctx
+  assert failed (dmg == DamageFull)
 
 findCloseButtonRect :: Context -> IO (Maybe Rect)
 findCloseButtonRect ctx = do

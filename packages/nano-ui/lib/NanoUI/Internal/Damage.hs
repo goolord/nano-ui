@@ -432,7 +432,8 @@ data FrameDelta = FrameDelta
   , fdPointsChanged :: Bool
   , fdScrollOnly :: Bool
   -- ^ Only 'storeFloat' (and the 'storeQuiet' bookkeeping) changed in the
-  -- store, e.g. a floating pane scrolled.
+  -- store, e.g. a floating pane scrolled, and not by a float the frame
+  -- measured of its own layout.
   , fdSettledMoved :: !RectGroup
   -- ^ Changed key rects, clipped to their scroll viewports, that cover some
   -- area.
@@ -445,9 +446,11 @@ data FrameDelta = FrameDelta
 -- | Work out the frame's damage against @snap@ and record it, with what the
 -- next frame compares against. @mayReuse@: the frame may take the last
 -- frame's draw ('NanoUI.Internal.Frame.paintOrReuse'), which it does only
--- when nothing is damaged.
-writeDamage :: Context -> Input -> FrameSnapshot -> Bool -> IO ()
-writeDamage ctx inp snap mayReuse = do
+-- when nothing is damaged. @layoutFloats@: the frame published a float it
+-- measured of its own layout ('NanoUI.Internal.Context.Core.publishLayoutSlots'),
+-- so its float change is no scroll: widgets moved with it.
+writeDamage :: Context -> Input -> FrameSnapshot -> Bool -> Bool -> IO ()
+writeDamage ctx inp snap mayReuse layoutFloats = do
   newStore <- getStore ctx
   panels <- floatingPanelsInOrder ctx
   new <- getsDamage ctx dsPrev
@@ -481,6 +484,7 @@ writeDamage ctx inp snap mayReuse = do
                 , fdPointsChanged = pointsChanged
                 , fdScrollOnly =
                     scrollChanged
+                      && not layoutFloats
                       && not pointsChanged
                       && storeMirrorGen oldStore == storeMirrorGen newStore
                       && storeOpenSelect oldStore == storeOpenSelect newStore
