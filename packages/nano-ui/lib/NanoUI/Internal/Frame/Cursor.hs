@@ -176,11 +176,32 @@ cursorRegionKind ctx inp =
     [] -> pure Nothing
     regions -> do
       let mouse = inputMousePos inp
-      top <- overlayHitRoot ctx mouse
-      mIdx <- nodeOnTopAt ctx top mouse
-      -- Outer scopes are listed first, so the last match is innermost.
-      pure $ mIdx >>= \idx ->
-        foldl' (\found (from, to, kind) -> if from <= idx && idx < to then Just kind else found) Nothing regions
+          covered = foldl' (\n (from, to, _) -> n + (to - from)) 0 regions
+      count <- arenaCount (ctxNodeArena ctx)
+      -- 'nodeOnTopAt' finds only a node the pointer is on, so when it is on
+      -- none of the scopes' nodes no scope can match and the page walk is
+      -- skipped. The scopes' nodes are tested only while they are the smaller
+      -- set, so a scope around most of the page costs no more than the walk.
+      reach <- if 2 * covered <= count then anyScopeNodeAt ctx mouse regions else pure True
+      if not reach
+        then pure Nothing
+        else do
+          top <- overlayHitRoot ctx mouse
+          mIdx <- nodeOnTopAt ctx top mouse
+          -- Outer scopes are listed first, so the last match is innermost.
+          pure $ mIdx >>= \idx ->
+            foldl' (\found (from, to, kind) -> if from <= idx && idx < to then Just kind else found) Nothing regions
+
+-- | Whether @mouse@ is on the visible part of any node in the scopes' ranges.
+anyScopeNodeAt :: Context -> V2 -> [(Int, Int, UiCursorKind)] -> IO Bool
+anyScopeNodeAt ctx mouse = go
+  where
+    go [] = pure False
+    go ((from, to, _) : rest) = scan from
+      where
+        scan !i
+          | i >= to = go rest
+          | otherwise = ifM (nodePointVisible ctx i mouse) (pure True) (scan (i + 1))
 
 -- | The last-painted node whose visible part contains @mouse@, searching the
 -- floating panel @top@ if the pointer is confined to one, else the page.
