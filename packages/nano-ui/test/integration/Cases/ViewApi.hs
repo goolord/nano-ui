@@ -24,6 +24,7 @@ tests =
   , spec "pane-grid-initial-once" runPaneGridInitialOnceTest
   , spec "pane-grid-unfocusable" runPaneGridUnfocusableTest
   , spec "scroll-ui" runScrollUiTest
+  , spec "scroll-metrics-read-follows" runScrollMetricsReadTest
   , spec "take-escape" runTakeEscapeTest
   , spec "modal-with" runModalWithTest
   , spec "font-size" runFontSizeTest
@@ -324,6 +325,24 @@ runScrollUiTest ctx failed = do
   settle
   after <- offsetNow
   assertJust failed ((,) <$> before <*> after) $ \(b, a) -> assert failed (a < b)
+
+-- | A view that picks rows from the context's 'getScrollMetrics' gets a
+-- frame after a resize changes them, as through 'getScrollMetricsUi', and
+-- none once they hold.
+runScrollMetricsReadTest :: Context -> IORef Int -> IO ()
+runScrollMetricsReadTest ctx failed = do
+  let ui = do
+        sid <- currentId
+        c <- askContext
+        m <- liftIO (getScrollMetrics c sid)
+        _ <- scrollArea (fillW . fillH) $
+          void (customWidget defaultCustomWidgetSpec {widgetLayout = fixedWH 180 1000 defaultLayout})
+        pure (fmap (rectH . scrollViewport) m)
+      dirtyAfter i = (\(_, _, _, d) -> d) <$> runFrame ctx i ui
+  replicateM_ 3 (runFrame ctx (withInput 400 300) ui)
+  assert failed . not =<< dirtyAfter (withInput 400 300)
+  assert failed =<< dirtyAfter (withInput 400 200)
+  assert failed . not =<< dirtyAfter (withInput 400 200)
 
 -- | 'takeEscape' is the view's when nothing else took it, is taken once, and
 -- is not the view's while a text field's menu is open.

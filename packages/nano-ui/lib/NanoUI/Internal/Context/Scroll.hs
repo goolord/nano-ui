@@ -19,6 +19,7 @@ module NanoUI.Internal.Context.Scroll
   , ScrollAxes (..)
   , ScrollMetrics (..)
   , getScrollMetrics
+  , readScrollMetrics
   , cacheScrollMetrics
   , beginScrollMetrics
   , getScrollOffsetIn
@@ -46,7 +47,7 @@ import Data.IORef (modifyIORef', readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
 import Data.IntSet qualified as IS
 
-import NanoUI.Internal.Context.Core (damageWidget, getPrevRect, getStore, publishLayoutSlots, setStore, writeSlots)
+import NanoUI.Internal.Context.Core (damageWidget, getPrevRect, getStore, publishLayoutSlots, recordLayoutRead, setStore, writeSlots)
 import NanoUI.Internal.Context.Types
 import NanoUI.Internal.Draw qualified as Draw
 import NanoUI.Internal.Id (WidgetId)
@@ -198,9 +199,19 @@ data ScrollMetrics = ScrollMetrics
 
 -- | Geometry of the scroller @wid@, or 'Nothing' before it has been laid out.
 -- Reads the last frame's layout, so it is safe to call while building the
--- next one.
+-- next one, from the UI thread. A view that reads it gets another frame when
+-- this frame's layout changes the metrics, so rows it picked from them catch
+-- up with a resize. From a view, 'NanoUI.getScrollMetricsUi' is the same.
 getScrollMetrics :: Context -> WidgetId -> IO (Maybe ScrollMetrics)
 getScrollMetrics ctx wid = do
+  m <- readScrollMetrics ctx wid
+  recordLayoutRead ctx (slotKey SlotScrollRange (intKey wid)) ((/= m) <$> readScrollMetrics ctx wid)
+  pure m
+
+-- | 'getScrollMetrics' without noting the read: for commands, which act on
+-- the metrics rather than build from them.
+readScrollMetrics :: Context -> WidgetId -> IO (Maybe ScrollMetrics)
+readScrollMetrics ctx wid = do
   s <- getStore ctx
   let key = intKey wid
       point slot = lookupSlot fieldPoint (slotKey slot key) s
@@ -232,7 +243,7 @@ beginScrollMetrics ctx =
 -- every frame and hand the commands a viewport that alternates between panes.
 -- The write requests no frame ('publishLayoutSlots'): a view that read these
 -- metrics while building this frame asked for one through
--- 'NanoUI.Internal.Monad.getScrollMetricsUi'.
+-- 'getScrollMetrics'.
 cacheScrollMetrics :: Context -> WidgetId -> ScrollAxes -> Rect -> V2 -> IO ()
 cacheScrollMetrics ctx wid axes (Rect vx vy vw vh) range@(V2 mx my) = do
   let key = intKey wid
@@ -326,7 +337,7 @@ scrollToEnd ctx wid = scrollTo ctx wid (V2 (1 / 0) (1 / 0)) -- clamped to the ra
 -- be found; scroll to its content rectangle with 'scrollRectIntoView' instead.
 scrollIntoView :: Context -> WidgetId -> WidgetId -> ScrollAlign -> ScrollBehavior -> IO ()
 scrollIntoView ctx wid target align behavior = do
-  mMetrics <- getScrollMetrics ctx wid
+  mMetrics <- readScrollMetrics ctx wid
   mRect <- getPrevRect ctx target
   case (mMetrics, mRect) of
     (Just m, Just (Rect rx ry rw rh)) -> do
@@ -376,7 +387,7 @@ projectAxes axes (V2 x y) =
 -- to its range. Nothing happens before it has been laid out.
 scrollToward :: Context -> WidgetId -> (ScrollMetrics -> IO V2) -> ScrollBehavior -> IO ()
 scrollToward ctx wid pick behavior = do
-  mMetrics <- getScrollMetrics ctx wid
+  mMetrics <- readScrollMetrics ctx wid
   forM_ mMetrics $ \m -> do
     target <- pick m
     applyScrollTarget ctx wid (scrollAxes m) (clampScrollOffset (scrollRange m) target) behavior

@@ -934,6 +934,9 @@
   text.
 - `releaseImage` repaints and requests a frame, as `registerImage` does, so
   an image still shown draws the unknown-image placeholder.
+- A view that builds rows from `getScrollMetrics` gets another frame when
+  that frame's layout changes the metrics, as with `getScrollMetricsUi`, so
+  a virtualized list catches up with a resize without waiting for input.
 - A window size limit set past the other one on an axis moves the other one
   to it, so the desktop never gets a minimum above the maximum. SDL dropped
   such a limit outside Wayland.

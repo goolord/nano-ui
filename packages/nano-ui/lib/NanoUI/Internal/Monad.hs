@@ -713,10 +713,7 @@ inArenaRange from below idx = from <= idx && idx < below
 -- When this frame's layout changes the metrics, another frame follows, so
 -- the view gets to read them again.
 getScrollMetricsUi :: WidgetId -> NanoUI (Maybe ScrollMetrics)
-getScrollMetricsUi wid = withContext $ \ctx -> do
-  m <- getScrollMetrics ctx wid
-  recordLayoutRead ctx (slotKey SlotScrollRange (intKey wid)) ((/= m) <$> getScrollMetrics ctx wid)
-  pure m
+getScrollMetricsUi wid = withContext (`getScrollMetrics` wid)
 
 -- | Put a scroller at an offset in window axes, cancelling a glide; a 1D
 -- scroller ignores the axis it does not scroll on. Unlike
@@ -725,7 +722,7 @@ getScrollMetricsUi wid = withContext $ \ctx -> do
 -- it to the content's real range.
 setScrollOffsetUi :: WidgetId -> V2 -> NanoUI ()
 setScrollOffsetUi wid off = withContext $ \ctx ->
-  getScrollMetrics ctx wid >>= \case
+  readScrollMetrics ctx wid >>= \case
     Just m -> setScrollOffsetIn ctx wid (scrollAxes m) off
     Nothing -> setScrollOffset2D ctx wid off
 
