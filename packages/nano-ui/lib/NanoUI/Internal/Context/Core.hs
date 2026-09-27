@@ -13,6 +13,8 @@ module NanoUI.Internal.Context.Core
   -- Damage
   , markDirty
   , markDirtyCovered
+  , recordLayoutRead
+  , settleLayoutReads
   , clearDirty
   , isDirty
   , setWakeLoop
@@ -39,6 +41,7 @@ module NanoUI.Internal.Context.Core
   , setStore
   , modifyStore
   , writeSlots
+  , publishLayoutSlots
   , writeSlot
   , adoptSlot
   , recordSlot
@@ -65,6 +68,7 @@ import Data.Primitive.PrimArray (readPrimArray)
 import Data.Primitive.PrimVar (readPrimVar)
 import Data.Primitive.SmallArray (SmallMutableArray, copySmallMutableArray, newSmallArray, readSmallArray, getSizeofSmallMutableArray, writeSmallArray)
 import Data.IntMap.Strict qualified as IM
+import Data.Foldable (foldlM)
 import Data.Maybe (fromMaybe)
 import Data.IntSet qualified as IS
 import GHC.Clock (getMonotonicTime)
@@ -196,6 +200,27 @@ markDirtyCovered :: Context -> IO ()
 markDirtyCovered ctx = do
   modifyDamage ctx (\ds -> ds {dsDirty = True})
   readIORef (ctxWakeLoop ctx) >>= sequence_
+
+-- | Note that the view read @k@ of the last frame's layout. After this
+-- frame's layout, 'settleLayoutReads' runs @stale@, which answers whether the
+-- read would now come out differently, and a stale read asks for a follow-up
+-- frame. A layout change nothing read requests no frame. The first read of a
+-- key since the last settle is the one checked.
+recordLayoutRead :: Context -> Int -> IO Bool -> IO ()
+recordLayoutRead ctx k stale =
+  modifyDamage ctx (\ds -> ds {dsLayoutReads = IM.insertWith (\_ old -> old) k stale (dsLayoutReads ds)})
+
+-- | Check the reads 'recordLayoutRead' noted against the layout just
+-- finished, then forget them. Every check runs, so a check may also publish
+-- what it measured ('publishLayoutSlots'). The follow-up frame is covered: it
+-- rebuilds from the new layout, and its own rect diffs damage what that moves.
+settleLayoutReads :: Context -> IO ()
+settleLayoutReads ctx = do
+  pending <- getsDamage ctx dsLayoutReads
+  unless (IM.null pending) $ do
+    modifyDamage ctx (\ds -> ds {dsLayoutReads = IM.empty})
+    stale <- foldlM (\acc check -> (acc ||) <$> check) False pending
+    when stale (markDirtyCovered ctx)
 
 -- | Clear the follow-up-frame request without clearing queued repaint bounds.
 {-# INLINE clearDirty #-}
@@ -354,6 +379,16 @@ writeSlots :: Context -> SlotWrites -> IO ()
 writeSlots ctx (SlotWrites same f) = do
   st <- readIORef (ctxStore ctx)
   unless (same st) (setStore ctx (f st))
+
+-- | 'writeSlots' for what a frame measured of its own layout, for the next
+-- view to read (scroll geometry). No frame is requested: a view that read the
+-- old values asked for one through 'recordLayoutRead' if it needed it. The
+-- frame's store diff still damages what the values paint
+-- ('NanoUI.Internal.Damage.writeDamage').
+publishLayoutSlots :: Context -> SlotWrites -> IO ()
+publishLayoutSlots ctx (SlotWrites same f) = do
+  st <- readIORef (ctxStore ctx)
+  unless (same st) (writeIORef (ctxStore ctx) $! f st)
 
 -- | Targeted single-slot write: compares only the target slot, updates one map
 -- field, damages the owning widget and wakes the loop. Unlike 'setStore' it

@@ -261,8 +261,9 @@ runTabsScrollTest _ failed = do
   ctx <- newContext
   let inp = withInput 240 120
   _ <- warmup2 ctx inp (mkTabs 0)
-  -- The strip only pulls in its scroller once it has measured an overflow, so
-  -- the arrow buttons show from the third frame on.
+  -- The strip only pulls in its scroller once it has measured an overflow,
+  -- after the first frame's layout, so the arrow buttons show from the second
+  -- frame on.
   _ <- runFrame ctx inp (mkTabs 0)
   spans0 <- collectTextSpans ctx
   assert failed (hasText "Controls" spans0)

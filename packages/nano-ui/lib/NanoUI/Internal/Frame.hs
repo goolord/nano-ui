@@ -201,6 +201,9 @@ runFrameEff unlift ctx rawInp ui = do
   -- Layout is final, so the sensors record what the next view reads.
   updateSensors ctx size
   updatePrevRects ctx size
+  -- With the layout recorded, what the view read of the last one is checked
+  -- against it.
+  settleLayoutReads ctx
   refreshHover ctx frameInp
   refreshScrollBarHover ctx layerInp
   tickAnimations ctx (inputDeltaTime frameInp)

@@ -508,8 +508,14 @@ windowHeight = fmap (sizeH . inputWindowSize) askInput
 -- > rect <- fromMaybe (Rect 0 0 320 240) <$> lastRect wid
 -- > ... work out this frame from rect and the input ...
 -- > customWidgetWithId wid spec
+--
+-- When this frame's layout moves or resizes the widget, another frame
+-- follows, so the view gets to read the new rect.
 lastRect :: WidgetId -> NanoUI (Maybe Rect)
-lastRect wid = withContext (\ctx -> getPrevRect ctx wid)
+lastRect wid = withContext $ \ctx -> do
+  r <- getPrevRect ctx wid
+  recordLayoutRead ctx (intKey wid) ((/= r) <$> getPrevRect ctx wid)
+  pure r
 
 -- | Give a widget the keyboard, without the focus ring Tab would draw round
 -- it. A widget that should keep the keyboard while some condition holds calls
@@ -690,8 +696,14 @@ explainScope body = do
 -- > sid <- currentId
 -- > metrics <- getScrollMetricsUi sid
 -- > (_, rows) <- scrollArea (fillW . fillH) (visibleRows metrics)
+--
+-- When this frame's layout changes the metrics, another frame follows, so
+-- the view gets to read them again.
 getScrollMetricsUi :: WidgetId -> NanoUI (Maybe ScrollMetrics)
-getScrollMetricsUi wid = withContext (\ctx -> getScrollMetrics ctx wid)
+getScrollMetricsUi wid = withContext $ \ctx -> do
+  m <- getScrollMetrics ctx wid
+  recordLayoutRead ctx (slotKey SlotScrollRange (intKey wid)) ((/= m) <$> getScrollMetrics ctx wid)
+  pure m
 
 -- | Put a scroller at an offset in window axes, cancelling a glide; a 1D
 -- scroller ignores the axis it does not scroll on. Unlike

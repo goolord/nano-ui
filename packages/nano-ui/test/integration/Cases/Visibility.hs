@@ -93,7 +93,9 @@ runInitialTest ctx failed = do
 runScrollTest :: Context -> IORef Int -> IO ()
 runScrollTest ctx failed = do
   let go = frames failed ctx inp rows snd
-  (sid, _) : _ <- go ((off, True) : replicate 3 (off, False))
+  -- Nothing on screen changes and nothing read the layout, so the first
+  -- frame asks for no second.
+  (sid, _) : _ <- go (replicate 4 (off, False))
   -- Row 10 now starts 70 pixels down the 100-pixel viewport.
   setScrollOffset ctx sid 330
   [_, (_, v2)] <- go [(off, True), (cameIn, False)]
@@ -256,7 +258,7 @@ runUseVisibilityTest ctx failed = do
         after <- button' "After"
         (vis, target, respId after) <$ replicateM_ 5 bar
       go = frames failed ctx inp ui (\(_, (v, _, _)) -> v)
-  [(sid, (_, target0, after0))] <- go [(off, True)]
+  [(sid, (_, target0, after0))] <- go [(off, False)]
   setScrollOffset ctx sid 180
   [_, (_, (v, target, after))] <- go [(off, True), (cameIn, False)]
   assertJustM failed (getPrevRect ctx target) $ \r ->

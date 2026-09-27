@@ -46,7 +46,7 @@ import Data.IORef (modifyIORef', readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
 import Data.IntSet qualified as IS
 
-import NanoUI.Internal.Context.Core (damageWidget, getPrevRect, getStore, setStore, writeSlots)
+import NanoUI.Internal.Context.Core (damageWidget, getPrevRect, getStore, publishLayoutSlots, setStore, writeSlots)
 import NanoUI.Internal.Context.Types
 import NanoUI.Internal.Draw qualified as Draw
 import NanoUI.Internal.Id (WidgetId)
@@ -230,6 +230,9 @@ beginScrollMetrics ctx =
 -- all for a second node sharing this one's widget id. A table's frozen pane
 -- and its body share theirs, and letting both publish would rewrite the store
 -- every frame and hand the commands a viewport that alternates between panes.
+-- The write requests no frame ('publishLayoutSlots'): a view that read these
+-- metrics while building this frame asked for one through
+-- 'NanoUI.Internal.Monad.getScrollMetricsUi'.
 cacheScrollMetrics :: Context -> WidgetId -> ScrollAxes -> Rect -> V2 -> IO ()
 cacheScrollMetrics ctx wid axes (Rect vx vy vw vh) range@(V2 mx my) = do
   let key = intKey wid
@@ -239,7 +242,7 @@ cacheScrollMetrics ctx wid axes (Rect vx vy vw vh) range@(V2 mx my) = do
     -- A range that just shrank (a filtered list, a narrower window) would
     -- leave a glide heading past the new end.
     clampScrollGlide ctx wid range
-    writeSlots ctx $
+    publishLayoutSlots ctx $
       slotWrite fieldPoint (slotKey SlotScrollViewPos key) (vx, vy)
         <> slotWrite fieldPoint (slotKey SlotScrollViewSize key) (vw, vh)
         <> slotWrite fieldPoint (slotKey SlotScrollRange key) (mx, my)

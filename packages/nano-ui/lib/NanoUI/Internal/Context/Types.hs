@@ -280,6 +280,10 @@ data DamageState = DamageState
   , dsRequests :: ![DamageRequest]
   , dsLastWindowSize :: !Size
   , dsPrev :: !PrevFrame
+  , dsLayoutReads :: !(IntMap (IO Bool))
+  -- ^ What the view read of the last frame's layout, by key, each with an
+  -- action that answers after this frame's layout whether the read went
+  -- stale ('NanoUI.Internal.Context.Core.recordLayoutRead').
   }
 
 -- | The last finished frame's layout by widget key, for the next frame's
@@ -358,6 +362,7 @@ initialDamageState = DamageState
   , dsRequests = []
   , dsLastWindowSize = Size 0 0
   , dsPrev = emptyPrevFrame
+  , dsLayoutReads = IM.empty
   }
 
 -- | Current modal nesting and previous floating-panel bounds/order used for

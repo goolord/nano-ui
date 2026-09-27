@@ -18,8 +18,8 @@ import NanoUI.Internal.Context
 import NanoUI.Internal.Frame.Scroll.Geometry (scrollAxisRange, scrollBare, scrollHorizontalHidden)
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Input (MouseButton (..), inputMousePos, inputScroll)
-import NanoUI.Internal.Monad (NanoUI, askInput, freshWidget, lastRect, nextId, requestFrame, liftIO, uiTheme, withKey)
-import NanoUI.Internal.Store (fieldFloat, findSlot, insertSlot)
+import NanoUI.Internal.Monad (NanoUI, askInput, freshWidget, nextId, requestFrame, liftIO, uiTheme, withKey)
+import NanoUI.Internal.Store (fieldFloat, findSlot, slotWrite)
 import NanoUI.Internal.Style
 import NanoUI.Internal.Types (Rect (..), clamp, rectContains, rectW, v2Y)
 import NanoUI.Internal.WidgetText (buttonFlagClose, tabEncodeStyle)
@@ -133,19 +133,23 @@ scrollableHeaders ctx groupId barGap cur headers = do
       renderInner =
         withKey ("tab-strip" :: Text) $
           row' (tight . fixedH tabHeaderH . gap barGap $ defaultLayout) headers
-  -- Last frame's reachable range decides whether the strip needs the
-  -- scroller. It is a float slot so a pure scroll frame keeps its clip damage
-  -- (`onlyScrollFloatsChanged` in NanoUI.Internal.Damage).
-  maxOffPrev <- max 0 . findSlot fieldFloat 0 rangeKey <$> liftIO (getStore ctx)
-  let overflow = maxOffPrev > 0.5
+      -- Whether the strip overflows and can page left and right, at reachable
+      -- range @r@ and offset @o@.
+      paging r o = (r > 0.5, r > 0.5 && o > 0.5, o < r - 0.5)
+  -- The reachable range measured after last frame's layout decides whether
+  -- the strip needs the scroller. It is a float slot so a pure scroll frame
+  -- keeps its clip damage (`onlyScrollFloatsChanged` in NanoUI.Internal.Damage).
+  maxOff <- max 0 . findSlot fieldFloat 0 rangeKey <$> liftIO (getStore ctx)
   off <- liftIO (getScrollOffset ctx scrollWid)
+  let (overflow, canLeft, canRight) = paging maxOff off
   wheelStep <- liftIO (resolveScrollStep ctx scrollWid)
-  mBar <- lastRect groupId
-  mScr <- lastRect scrollWid
+  -- Not 'lastRect': the strip checks its own layout below, and the bar
+  -- moving alone needs no second frame.
+  mBar <- liftIO (getPrevRect ctx groupId)
+  mScr <- liftIO (getPrevRect ctx scrollWid)
   inp <- askInput
   let overBar = maybe False (\r -> rectContains r (inputMousePos inp)) mBar
       notches = if overBar then round (v2Y (inputScroll inp)) else 0 :: Int
-      canLeft = overflow && off > 0.5
       -- A paging arrow while the bar overflows, muted at its end.
       arrow k enabled glyph
         | overflow = withKey (k :: Text) $ do
@@ -164,20 +168,28 @@ scrollableHeaders ctx groupId barGap cur headers = do
           scrollHorizontalHidden {scrollBare = True}
           renderInner
       else renderInner
+  rightClicked <- arrow "tab-arrow-right" canRight "\8250"
   let
     (viewX, viewW) = maybe (0, 0) (\r -> (rectX r, rectW r)) (if overflow then mScr else mBar)
-    maxRight = maximum (0 : [rectX r + rectW r | (_, resp) <- hdrs, let r = respRect resp])
-    contentW = maxRight - viewX + (if overflow then off else 0)
-    -- The first overflow frame has no scroller rect yet: keep the cached range.
-    maxOff
-      | overflow, Nothing <- mScr = maxOffPrev
-      | otherwise = scrollAxisRange contentW viewW 0
     page = max 1 (viewW * 0.9)
-    canRight = overflow && off < maxOff - 0.5
-  rightClicked <- arrow "tab-arrow-right" canRight "\8250"
-  -- Sub-pixel churn is ignored so a parked strip never dirties.
-  when (abs (maxOff - maxOffPrev) > 0.5) $
-    liftIO (modifyStore ctx (insertSlot fieldFloat rangeKey maxOff))
+    -- The range this frame's layout leaves: the headers' right edge past the
+    -- start of what shows them, less its width. The first overflow frame has
+    -- no scroller rect yet, and keeps the range it has.
+    measure = do
+      mView <- getPrevRect ctx (if overflow then scrollWid else groupId)
+      rights <- mapM (fmap (maybe 0 (\r -> rectX r + rectW r)) . getPrevRect ctx . respId . snd) hdrs
+      o <- getScrollOffset ctx scrollWid
+      let range (Rect vx _ vw _) = scrollAxisRange (maximum (0 : rights) - vx + (if overflow then o else 0)) vw 0
+      pure (maybe maxOff range mView, o)
+  -- After layout the strip measures itself for the next frame, which it only
+  -- asks for when the overflow or an arrow flips: a width change that keeps
+  -- them settles in the frame it happens in. Sub-pixel churn is ignored so a
+  -- parked strip never writes.
+  liftIO . recordLayoutRead ctx rangeKey $ do
+    (maxOff', o) <- measure
+    when (abs (maxOff' - maxOff) > 0.5) $
+      publishLayoutSlots ctx (slotWrite fieldFloat rangeKey maxOff')
+    pure (paging maxOff' o /= paging maxOff off)
   -- One offset per frame: arrow pages, wheel notches and the end clamp, or,
   -- when the active tab changed, whatever brings it into view.
   let pagedOff
