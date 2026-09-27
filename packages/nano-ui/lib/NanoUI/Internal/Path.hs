@@ -64,7 +64,8 @@ module NanoUI.Internal.Path
 
 import Control.Monad (forM_, unless, when)
 import Control.Monad.ST (ST, runST)
-import Data.List (sortOn)
+import Data.List (sortBy, sortOn)
+import Data.Ord (comparing)
 import Data.Primitive.PrimArray
   ( PrimArray
   , copyMutablePrimArray
@@ -84,7 +85,7 @@ import Data.Primitive.PrimArray
   , unsafeFreezePrimArray
   , writePrimArray
   )
-import Data.Primitive.SmallArray (indexSmallArray, smallArrayFromListN)
+import Data.Primitive.SmallArray (indexSmallArray, newSmallArray, readSmallArray, runSmallArray, smallArrayFromListN, writeSmallArray)
 import Data.Word (Word32)
 import NanoUI.Internal.Draw.Types (DrawOp (..), LineCap (..), LineJoin (..), Shade (..), defaultTextFont)
 import NanoUI.Internal.Types (Color (..), Rect (..), V2 (..), finite, lerpColor)
@@ -1197,6 +1198,10 @@ ringStarts rs = primArrayFromList (scanl (+) 0 [sizeofPrimArray r `div` 2 | r <-
 -- ring with no filled parent is an outline. An unfilled ring directly inside
 -- it, or inside filled rings within it, is one of its holes. Crossing rings
 -- are not nested, so each fills on its own.
+--
+-- A ring's parent is the smallest larger ring holding all its points. The
+-- rings whose boxes hold its box are found through a grid of the boxes and
+-- tried smallest first, so mostly only the parent is tested point by point.
 fillComponents :: FillRule -> [PrimArray Float] -> [(PrimArray Float, [PrimArray Float])]
 fillComponents _ [r] = [(r, [])]
 fillComponents rule rs = [(orient True i, map (orient False) (holesOf i)) | i <- ids, outline i]
@@ -1207,14 +1212,32 @@ fillComponents rule rs = [(orient True i, map (orient False) (holesOf i)) | i <-
     ring = indexSmallArray rings
     areas = primArrayFromListN count (map ringArea rs)
     areaOf i = indexPrimArray areas i
-    boxes = smallArrayFromListN count (map bounds rs)
+    -- No area is NaN: 'fillPathOps' keeps only rings whose area is over 1e-6.
+    size i = abs (areaOf i)
+    boxes = smallArrayFromListN count (map ringBox rs)
     boxOf = indexSmallArray boxes
-    -- The smallest ring enclosing ring @i@.
-    parents = primArrayFromListN count (map parentOf ids)
-    parentOf i =
-      case [(abs (areaOf j), j) | j <- ids, j /= i, abs (areaOf j) > abs (areaOf i), boxInside (boxOf i) (boxOf j), all (inside (ring j)) (points (ring i))] of
-        [] -> -1
-        cs -> snd (minimum cs)
+    -- Ring ids smallest first (the sort is stable, so equal sizes stay in id
+    -- order), and a grid of their boxes in that order, so each cell lists its
+    -- rings smallest first.
+    bySize = primArrayFromListN count (sortBy (comparing size) ids)
+    grid =
+      let (x0, y0, x1, y1) = foldl' union (1 / 0, 1 / 0, -1 / 0, -1 / 0) boxes
+          union (!a, !b, !c, !d) (bx0, by0, bx1, by1) = (min a bx0, min b by0, max c bx1, max d by1)
+       in gridOf count x0 y0 x1 y1 count (boxOf . indexPrimArray bySize)
+    -- The smallest ring enclosing ring @i@. A box holding @i@'s box holds
+    -- its corner, so the corner's cell lists every candidate.
+    parents = generatePrimArray count parentOf
+    parentOf i = candidate (indexPrimArray (gridStarts grid) cell)
+      where
+        box@(bx0, by0, _, _) = boxOf i
+        cell = gridRow grid by0 * gridCols grid + gridCol grid bx0
+        end = indexPrimArray (gridStarts grid) (cell + 1)
+        candidate !k
+          | k >= end = -1
+          | size j > size i && boxInside box (boxOf j) && encloses (ring j) (ring i) = j
+          | otherwise = candidate (k + 1)
+          where
+            j = indexPrimArray bySize (indexPrimArray (gridItems grid) k)
     parent i = let p = indexPrimArray parents i in if p < 0 then Nothing else Just p
     -- The winding number just inside ring @i@: its parent's plus or minus
     -- one. Boxed and lazy so each ring can read its parent's.
@@ -1222,25 +1245,40 @@ fillComponents rule rs = [(orient True i, map (orient False) (holesOf i)) | i <-
     windingOf i = maybe 0 (indexSmallArray windings) (parent i) + (if areaOf i > 0 then 1 else -1) :: Int
     filled i = fillsWinding rule (indexSmallArray windings i)
     outline i = filled i && maybe True (not . filled) (parent i)
-    children i = [j | j <- ids, parent j == Just i]
+    -- Each ring's children in id order, gathered in one pass.
+    children = indexSmallArray $ runSmallArray $ do
+      kids <- newSmallArray count []
+      forM_ [count - 1, count - 2 .. 0] $ \j -> do
+        let p = indexPrimArray parents j
+        when (p >= 0) (readSmallArray kids p >>= writeSmallArray kids p . (j :))
+      pure kids
     holesOf i = concat [if filled c then holesOf c else [c] | c <- children i]
     orient positive i
       | (areaOf i >= 0) == positive = ring i
       | otherwise = reversePoints (ring i)
-    points r = [pointAt r i | i <- [0 .. sizeofPrimArray r `div` 2 - 1]]
-    bounds r =
-      let xs = [x | (x, _) <- points r]
-          ys = [y | (_, y) <- points r]
-       in (minimum xs, minimum ys, maximum xs, maximum ys)
     boxInside (ax0, ay0, ax1, ay1) (bx0, by0, bx1, by1) = ax0 >= bx0 && ay0 >= by0 && ax1 <= bx1 && ay1 <= by1
-    -- Point-in-ring test by ray crossing parity.
-    inside r (px, py) =
-      let m = sizeofPrimArray r `div` 2
-          crosses k =
-            let (ax, ay) = pointAt r k
-                (bx, by) = pointAt r ((k + 1) `mod` m)
-             in (ay > py) /= (by > py) && px < ax + (py - ay) * (bx - ax) / (by - ay)
-       in odd (length (filter crosses [0 .. m - 1]))
+
+-- | Whether every point of ring @q@ is inside ring @r@, by ray crossing
+-- parity.
+encloses :: PrimArray Float -> PrimArray Float -> Bool
+encloses r q = every 0
+  where
+    every !k
+      | k + 1 >= sizeofPrimArray q = True
+      | otherwise = inside (indexPrimArray q k) (indexPrimArray q (k + 1)) && every (k + 2)
+    m = sizeofPrimArray r `div` 2
+    inside px py = walk 0 False
+      where
+        walk !k !odd'
+          | k >= m = odd'
+          | otherwise =
+              let !k' = if k + 1 >= m then 0 else k + 1
+                  !ax = indexPrimArray r (2 * k)
+                  !ay = indexPrimArray r (2 * k + 1)
+                  !bx = indexPrimArray r (2 * k')
+                  !by = indexPrimArray r (2 * k' + 1)
+                  crosses = (ay > py) /= (by > py) && px < ax + (py - ay) * (bx - ax) / (by - ay)
+               in walk (k + 1) (if crosses then not odd' else odd')
 
 -- | A ring's points in reverse order.
 reversePoints :: PrimArray Float -> PrimArray Float
