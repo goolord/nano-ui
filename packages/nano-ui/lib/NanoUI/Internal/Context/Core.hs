@@ -62,6 +62,7 @@ import Data.Bits (shiftL, shiftR, (.&.), (.|.))
 import Data.IORef (atomicWriteIORef, modifyIORef', readIORef, writeIORef)
 import Data.Primitive.Array (readArray)
 import Data.Primitive.PrimArray (readPrimArray)
+import Data.Primitive.PrimVar (readPrimVar)
 import Data.Primitive.SmallArray (SmallMutableArray, copySmallMutableArray, newSmallArray, readSmallArray, getSizeofSmallMutableArray, writeSmallArray)
 import Data.IntMap.Strict qualified as IM
 import Data.Maybe (fromMaybe)
@@ -278,17 +279,18 @@ getPrevRect ctx wid = getsDamage ctx (IM.lookup (intKey wid) . pfRects . dsPrev)
 
 -- | 'getPrevRect' of @wid@, declared as node @idx@, or an empty rect. A
 -- widget declared where it was last frame, as views rebuilt in the same
--- order are, is read by node index ('ctxPrevByIdx'); any other from the map,
--- whose lookup costs a large view about 100 ns a widget.
--- The bang on the id keeps it unboxed in callers.
+-- order are, is read by node index from the last walk's record
+-- ('ctxPrevWalk'); any other from the map, whose lookup misses the cache in
+-- a large view. The bang on the id keeps it unboxed in callers.
 {-# NOINLINE getPrevRectAt #-}
 getPrevRectAt :: Context -> NodeIdx -> WidgetId -> IO Rect
 getPrevRectAt ctx !idx (WidgetId !w) = do
-  PrevByIdx keys rects count <- readIORef (ctxPrevByIdx ctx)
+  walk <- readIORef (ctxPrevWalk ctx)
+  valid <- readPrimVar (pwValid walk)
   let !k = fromIntegral w
-  here <- if k /= 0 && idx >= 0 && idx < count then (== k) <$> readPrimArray keys idx else pure False
+  here <- if k /= 0 && idx >= 0 && idx < valid then (== k) <$> readPrimArray (pwKeys walk) idx else pure False
   if here
-    then readArray rects idx
+    then readArray (pwRects walk) idx
     else fromMaybe (Rect 0 0 0 0) <$!> getsDamage ctx (IM.lookup k . pfRects . dsPrev)
 
 -- | Whether a pointer-taking node drawn over @wid@ (by layers or a pin) has

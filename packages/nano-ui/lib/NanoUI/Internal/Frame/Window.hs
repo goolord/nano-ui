@@ -56,7 +56,7 @@ persistWindowPositions ctx = floatingNodeCount na >>= \floating -> when (floatin
               if lookupSlot fieldPoint k acc == Just (x, y) && lookupSlot fieldPoint sizeKey acc == Just (w, h)
                 then acc
                 else insertSlot fieldPoint k (x, y) (insertSlot fieldPoint sizeKey (w, h) acc)
-  store1 <- foldClassNodesM na FloatingNodes record store0
+  !store1 <- foldClassNodesM na FloatingNodes record store0
   unless (ptrEq store1 store0) $ setStore ctx store1
  where
   na = ctxNodeArena ctx

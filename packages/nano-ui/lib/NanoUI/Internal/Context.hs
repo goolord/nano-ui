@@ -20,7 +20,7 @@ module NanoUI.Internal.Context
   , PrevFrame (..)
   , ImagePaint (..)
   , emptyPrevFrame
-  , PrevByIdx (..)
+  , PrevWalk (..)
   , OverlayState (..)
   , DrawingCacheState (..)
   , DrawingEntry (..)
@@ -582,7 +582,7 @@ newContext = do
   ctxInputMethod <- newIORef Nothing
   ctxStore <- newIORef emptyWidgetStore
   ctxDamageState <- newIORef initialDamageState
-  ctxPrevByIdx <- newIORef =<< newPrevByIdx
+  ctxPrevWalk <- newIORef =<< newPrevWalk 0
   ctxOverlayState <- newIORef initialOverlayState
   ctxAnimationState <- newIORef initialAnimationState
   ctxScrollState <- newIORef initialScrollState
@@ -615,6 +615,7 @@ newContext = do
   ctxLastMetricSource <- newIORef Nothing
   ctxPaintFull <- newIORef True
   ctxDrawReuse <- newIORef (DrawReuse True Nothing)
+  ctxDamageWanted <- newIORef True
   ctxExplain <- newIORef initialExplainState
   -- References above use their field names; font-dependent defaults stay
   -- explicit, including the resolvers that close over this context.

@@ -21,9 +21,10 @@ module NanoUI.Internal.Context.Types
   , initialDamageState
   , PrevFrame (..)
   , ImagePaint (..)
+  , noImagePaint
   , emptyPrevFrame
-  , PrevByIdx (..)
-  , newPrevByIdx
+  , PrevWalk (..)
+  , newPrevWalk
   , OverlayState (..)
   , initialOverlayState
   , ExplainState (..)
@@ -75,14 +76,15 @@ import Data.Dynamic (Dynamic)
 import Data.HashMap.Strict (HashMap)
 import Data.HashMap.Strict qualified as HashMap
 import Data.Hashable (Hashable)
-import Data.IORef (IORef, modifyIORef', readIORef, writeIORef)
+import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.IntMap.Strict (IntMap)
 import Data.IntMap.Strict qualified as IM
 import Data.IntSet (IntSet)
 import Data.IntSet qualified as IS
 import Data.Map.Strict (Map)
 import Data.Primitive.Array (MutableArray, newArray)
-import Data.Primitive.PrimArray (MutablePrimArray, newPrimArray)
+import Data.Primitive.PrimArray (MutablePrimArray, newPrimArray, setPrimArray)
+import Data.Primitive.PrimVar (PrimVar, newPrimVar)
 import Data.Primitive.SmallArray (SmallArray, SmallMutableArray)
 import Data.Word (Word64)
 import Data.Text (Text)
@@ -298,23 +300,53 @@ data PrevFrame = PrevFrame
 -- | What an image node draws: its image id, and its look ('Nothing' for a
 -- plain image).
 data ImagePaint = ImagePaint !Int !(Maybe ImageLook)
-  deriving (Eq)
+  deriving (Eq, Show)
+
+-- | What a node that is no image draws: id 0 and no look.
+noImagePaint :: ImagePaint
+noImagePaint = ImagePaint 0 Nothing
 
 emptyPrevFrame :: PrevFrame
 emptyPrevFrame = PrevFrame IM.empty IM.empty IM.empty IM.empty IM.empty
 
--- | 'pfRects' by the last frame's node index, for widgets declared where
--- they were ('NanoUI.Internal.Context.Core.getPrevRectAt'): for each of the
--- first @count@ nodes, the key it recorded in 'pfRects' (0 for none) and
--- that entry's rect. Written with 'pfRects', so the two always agree.
-data PrevByIdx = PrevByIdx
-  !(MutablePrimArray RealWorld Int)
-  !(MutableArray RealWorld Rect)
-  {-# UNPACK #-} !Int
+-- | What the last completed 'NanoUI.Internal.Damage.updatePrevRects' walk
+-- recorded at each arena index: the key and the rect, clip, text and image
+-- it gave the 'PrevFrame' maps. A node that has not changed since skips the
+-- maps, which already hold its entries, and a widget declared where it was
+-- reads its last rect here ('NanoUI.Internal.Context.Core.getPrevRectAt').
+-- The first 'pwValid' indices hold the walk that built 'dsPrev' (its rects
+-- are 'pwFor'); none do while a walk is under way. Updated in place, so a
+-- frame allocates none of it.
+data PrevWalk = PrevWalk
+  { pwKeys :: !(MutablePrimArray RealWorld Int)
+  -- ^ The node's key, or 0 where the walk made no entries.
+  , pwTags :: !(MutablePrimArray RealWorld Int)
+  -- ^ Which of a clip, text and image the node has.
+  , pwRects :: !(MutableArray RealWorld Rect)
+  -- ^ The node's rect, the object its 'pfRects' entry holds unless the
+  -- entry was already equal.
+  , pwClips :: !(MutablePrimArray RealWorld Float)
+  -- ^ Four per index: the node's clip.
+  , pwTexts :: !(MutableArray RealWorld Text)
+  , pwImages :: !(MutableArray RealWorld ImagePaint)
+  , pwValid :: !(PrimVar RealWorld Int)
+  -- ^ How many indices hold the walk: none while a walk is under way.
+  , pwFor :: !(IORef (IntMap Rect))
+  }
 
--- | Empty 'PrevByIdx'.
-newPrevByIdx :: IO PrevByIdx
-newPrevByIdx = PrevByIdx <$> newPrimArray 0 <*> newArray 0 (Rect 0 0 0 0) <*> pure 0
+-- | Room for @n@ nodes, with no entries.
+newPrevWalk :: Int -> IO PrevWalk
+newPrevWalk n = do
+  keys <- newPrimArray n
+  setPrimArray keys 0 n 0
+  tags <- newPrimArray n
+  setPrimArray tags 0 n 0
+  rects <- newArray n (Rect 0 0 0 0)
+  clips <- newPrimArray (4 * n)
+  setPrimArray clips 0 (4 * n) 0
+  texts <- newArray n mempty
+  images <- newArray n noImagePaint
+  PrevWalk keys tags rects clips texts images <$> newPrimVar 0 <*> newIORef IM.empty
 
 -- | Require a first frame and full repaint, with no previous geometry.
 initialDamageState :: DamageState
@@ -852,7 +884,7 @@ data Context = Context
   , ctxInputMethod :: !(IORef (Maybe InputMethodRequest))
   , ctxStore :: IORef WidgetStore
   , ctxDamageState :: IORef DamageState
-  , ctxPrevByIdx :: !(IORef PrevByIdx)
+  , ctxPrevWalk :: !(IORef PrevWalk)
   , ctxOverlayState :: IORef OverlayState
   , ctxAnimationState :: IORef AnimationState
   , ctxScrollState :: !(IORef ScrollState)
@@ -892,6 +924,13 @@ data Context = Context
   -- page scroller's backdrop that would only repeat that clear.
   , ctxPaintFull :: !(IORef Bool)
   , ctxDrawReuse :: !(IORef DrawReuse)
+  -- | Whether the host reads this frame's damage
+  -- ('NanoUI.Internal.Context.Core.takeDamage'). A host that repaints the
+  -- whole window whatever changed (a continuous session) clears it, and the
+  -- frame reports 'DamageFull' without diffing anything, unless it may reuse
+  -- the last frame's draw ('ctxDrawReuse'), which needs to know that nothing
+  -- is damaged. True by default.
+  , ctxDamageWanted :: !(IORef Bool)
   -- | Layout overlay state.
   , ctxExplain :: !(IORef ExplainState)
   , ctxTheme :: !(IORef Theme)

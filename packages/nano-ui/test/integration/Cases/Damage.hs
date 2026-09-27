@@ -2,9 +2,12 @@ module Cases.Damage (tests) where
 
 import Spec
 import NanoUI.Shortcut
-import Data.Maybe (listToMaybe)
+import Data.ByteString qualified as BS
+import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Text qualified as T
 import Data.Primitive.SmallArray (smallArrayFromList)
+import NanoUI.Internal.Context (Context (..), DamageState (..), PrevFrame (..), emptyPrevFrame, getPrevRectAt, getsDamage)
+import NanoUI.Internal.Layout.Arena (arenaCount, getWidgetId)
 
 tests :: [Spec]
 tests =
@@ -30,6 +33,9 @@ tests =
   , spec "hovered-button-shrink-damage" runHoveredButtonShrinkDamageTest
   , spec "root-overflow-grow-damage" (runRootOverflowDamageTest 40 20)
   , spec "root-overflow-shrink-damage" (runRootOverflowDamageTest 20 30)
+  , spec "damage-unwanted" runDamageUnwantedTest
+  , spec "label-button-swap-damage" runLabelButtonSwapDamageTest
+  , spec "prev-frame-matches-fresh-walk" runPrevFrameFreshWalkTest
   ]
 
 -- | Far-apart rects stay apart, near ones merge, and a frame never has more
@@ -365,6 +371,84 @@ runRootOverflowDamageTest h dh ctx failed = do
   _ <- warmup2 ctx inp (ui 20 40) >> takeDamage ctx
   _ <- runFrame ctx inp (ui h dh)
   assert failed . (`damageCovers` Rect 0 0 40 40) =<< takeDamage ctx
+
+-- | A frame whose host does not read damage reports 'DamageFull' and still
+-- keeps what the next frame diffs against: that frame, read again, repaints
+-- nothing when nothing changed, and only a changed label's rect when it did.
+runDamageUnwantedTest :: Context -> IORef Int -> IO ()
+runDamageUnwantedTest ctx failed = do
+  let inp = withInputOff 300 200
+      ui n = column (labelWith (fixedWH 40 20) (T.pack (show (n :: Int))) >> void (buttonWith (fixedWH 30 20) ""))
+  _ <- warmup2 ctx inp (ui 1) >> takeDamage ctx
+  writeIORef (ctxDamageWanted ctx) False
+  _ <- runFrame ctx inp (ui 2)
+  assertEq failed DamageFull =<< takeDamage ctx
+  writeIORef (ctxDamageWanted ctx) True
+  _ <- runFrame ctx inp (ui 2)
+  assertEq failed (DamageClip (Rect 0 0 0 0)) =<< takeDamage ctx
+  _ <- runFrame ctx inp (ui 3)
+  dmg <- takeDamage ctx
+  assert failed (dmg `clipCovers` Rect 3 3 40 20 && not (dmg `damageCovers` Rect 3 26 30 20))
+
+-- | An empty label and a button take turns at one key and rect. Each time the
+-- label comes back its rect repaints: the text entry it had left with it.
+runLabelButtonSwapDamageTest :: Context -> IORef Int -> IO ()
+runLabelButtonSwapDamageTest ctx failed = do
+  let inp = withInputOff 200 100
+      ui asButton = column (if asButton then void (buttonWith (fixedWH 60 20) "") else labelWith (fixedWH 60 20) "")
+  _ <- warmup2 ctx inp (ui False) >> takeDamage ctx
+  forM_ [True, False, True, False] $ \asButton -> do
+    _ <- runFrame ctx inp (ui asButton)
+    dmg <- takeDamage ctx
+    unless asButton $ assert failed (dmg `damageCovers` Rect 3 3 60 20)
+
+-- | The previous-frame maps each frame updates in place equal the ones a walk
+-- from empty maps builds for the same frame, through label and button swaps,
+-- text changes, plain and configured images, image switches, a collapsing
+-- widget, shared keys, a panel that moves, a viewport that resizes, and
+-- keyed rows reordered and removed. One
+-- context keeps its record of the last walk from frame to frame; another
+-- walks each frame from empty maps. Each widget's last rect read by its node
+-- index ('getPrevRectAt') is its map entry.
+runPrevFrameFreshWalkTest :: Context -> IORef Int -> IO ()
+runPrevFrameFreshWalkTest ctx failed = do
+  ref <- newContext
+  let img = ImageId 1
+      img2 = ImageId 2
+      inp = withInputOff 400 400
+      ui :: Int -> NanoUI ()
+      ui f = columnWith (fillW . fillH) $ do
+        scope (if even f then labelWith (fixedWH 60 20) "" else void (buttonWith (fixedWH 60 20) ""))
+        label (if f `mod` 3 == 0 then "" else "x")
+        labelWith (fixedWH 40 20) (T.pack (show (f `mod` 4)))
+        image (fixedWH 16 16) (if even (f `div` 2) then img else img2)
+        scope $
+          if f `mod` 4 < 2
+            then image (fixedWH 32 32) img
+            else imageConfigured defaultImageConfig {icLayout = fixedWH 32 32, icOpacity = if f `mod` 4 == 2 then 0.5 else 1} img
+        void (buttonWith (if f `mod` 5 == 0 then fixedWH 0 0 else fixedWH 40 20) "z")
+        rowWith tight $ forM_ [1 :: Int, 1, 2] $ \k -> withKey k (void (buttonWith (fixedWH (if odd (f `div` 3) then 30 else 50) 20) "d"))
+        rowWith tight $ do
+          when (f `mod` 6 < 3) (void (buttonWith (fixedWH 20 20) "p"))
+          panelWith (fixedWH 80 40) (label "panel")
+        void $ scrollWith (fixedWH 200 (if even (f `div` 3) then 100 else 80)) $ column $
+          forM_ (if f `mod` 7 < 3 then [1 .. 6 :: Int] else reverse [2 .. 5]) $ \k -> withKey k (void (button (T.pack (show k))))
+        -- Nodes past the end come and go.
+        when (f `mod` 8 < 4) $ forM_ [1 .. 3 :: Int] $ \k -> label (T.pack (show k))
+      maps c = (\p -> (pfRects p, pfClips p, pfOuterClips p, pfTexts p, pfImages p)) <$> getsDamage c dsPrev
+  forM_ [ctx, ref] $ \c -> forM_ [img, img2] $ \i -> assert failed =<< registerImage c i 8 8 (BS.replicate (8 * 8 * 4) 200)
+  forM_ [0 .. 47] $ \f -> do
+    _ <- runFrame ctx inp (ui f)
+    kept <- maps ctx
+    modifyIORef' (ctxDamageState ref) (\ds -> ds {dsPrev = emptyPrevFrame})
+    _ <- runFrame ref inp (ui f)
+    fresh <- maps ref
+    assertEq failed fresh kept
+    n <- arenaCount (ctxNodeArena ctx)
+    forM_ [0 .. n - 1] $ \i -> do
+      wid <- getWidgetId (ctxNodeArena ctx) i
+      inMap <- fromMaybe (Rect 0 0 0 0) <$> getPrevRect ctx wid
+      assertEq failed inMap =<< getPrevRectAt ctx i wid
 
 redDrawing :: Float -> Float -> NanoUI ()
 redDrawing w h = void (drawing (fixedWH w h) (\r -> smallArrayFromList [FillRect r (colorRGBA 255 0 0 255)]))
