@@ -42,7 +42,7 @@ import Foreign.Marshal.Utils (copyBytes, maybePeek, with)
 import Foreign.Storable (peek)
 import Foreign.Ptr (Ptr, castPtr, nullPtr, plusPtr)
 import NanoUI (Appearance, ImageId, Input (..), RgbaPixels, Screenshot (..), Size (..), Theme, V2 (..), WindowMode (..), WindowSettings (..), defaultWindowSettings, rgbaPixels)
-import NanoUI.Backend (cancelTasks, installWindowHost, reportWindowState, setSystemAppearance, setWakeLoop)
+import NanoUI.Backend (cancelTasks, installWindowHost, reportWindowState, setSystemAppearance, setWakeLoopChecked)
 import NanoUI.Internal.Context (Context (..), setDrawSnapScale)
 import NanoUI.Testing (clearMeasureCache, damageFull, markDirty, setHost, withClipboard)
 import NanoUI.Sdl.Internal.Display
@@ -557,7 +557,7 @@ startSdlWindow bench opts ctx guessedDriver fontSource monoSource = do
   liftIO $ setHost ctx' env
   -- Background hook jobs are cancelled with the session, before SDL quits,
   -- including when a host drives frames itself inside 'withSdl'.
-  mkAcquire (setWakeLoop ctx' pushRefreshEvent) (const (cancelTasks ctx'))
+  mkAcquire (setWakeLoopChecked ctx' tryPushRefreshEvent) (const (cancelTasks ctx'))
   -- The remaining settings go through the host, as from a view. This runs
   -- after the decorations (size limits account for the frame) and after the
   -- zoom (which centres the enlarged window).

@@ -500,6 +500,10 @@
   cursor kind only when it changes, hiding the pointer for `UiCursorHidden`,
   and a size limit in native units with a zero or missing axis unlimited.
   The SDL and RGFW backends use both.
+- `setWakeLoopChecked` in `NanoUI.Backend`: a wake action that answers
+  whether it reached the loop. After one that did not, the next wake runs it
+  again rather than waiting for the loop to take the lost one. The SDL
+  backend's push onto its event queue is one.
 
 ### Changed
 
@@ -922,6 +926,10 @@
 
 ### Fixed
 
+- A wake with no wake action installed no longer holds back the wakes after
+  it until other input arrives.
+- `newWakeSignal`'s wait takes the wakes it consumes, so a job's wake after
+  one drained with no frame between still signals.
 - Up and Down move a combo's highlight while the pointer rests on its
   dropdown. The hovered row took the highlight back every frame.
 - An app's Edit > Cut or Copy acts on the text field's selection. The press

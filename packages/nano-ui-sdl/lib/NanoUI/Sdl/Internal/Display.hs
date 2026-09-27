@@ -17,6 +17,7 @@ module NanoUI.Sdl.Internal.Display
   , refreshEventType
   , initRefreshEvent
   , pushRefreshEvent
+  , tryPushRefreshEvent
   , querySystemAppearance
   ) where
 
@@ -107,9 +108,7 @@ initRefreshEvent = do
       poke refreshEvent.type' (Uint32 ty)
       pure (ty /= 0)
 
--- | Wake the event loop from any thread. As the session's wake action it
--- runs once for a run of wakes until the loop takes them, and not for the
--- loop's own dirty marks ('NanoUI.Backend.setWakeLoop').
+-- | Wake the event loop from any thread.
 --
 -- The push is a safe foreign call. SDL_PushEvent waits for the lock SDL
 -- holds while it runs event watches, and the resize watch
@@ -117,9 +116,17 @@ initRefreshEvent = do
 -- unsafe call, it would keep the capability that watch is waiting for
 -- while it waits for the lock the watch holds, and the program would hang.
 pushRefreshEvent :: IO ()
-pushRefreshEvent = do
+pushRefreshEvent = void tryPushRefreshEvent
+
+-- | 'pushRefreshEvent', answering whether the event was queued: not before
+-- 'initRefreshEvent', nor when SDL's queue is full. As the session's wake
+-- action it runs once for a run of wakes until the loop takes them, and not
+-- for the loop's own dirty marks; a push that fails lets the next wake try
+-- again ('NanoUI.Backend.setWakeLoopChecked').
+tryPushRefreshEvent :: IO Bool
+tryPushRefreshEvent = do
   ty <- refreshEventType
-  unless (ty == 0) $ void (pushEventSafe refreshEvent)
+  if ty == 0 then pure False else pushEventSafe refreshEvent
 
 -- | Whether the pointer is over the window (SDL's mouse focus). Once it has
 -- left, 'queryMouseWindowPos' still answers the last position inside.

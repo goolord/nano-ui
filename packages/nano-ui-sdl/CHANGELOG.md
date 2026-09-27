@@ -200,6 +200,9 @@
 
 ### Fixed
 
+- A background job's wake whose refresh event could not be queued (SDL's
+  queue was full) no longer stops later wakes from waking the loop until
+  other input arrives.
 - Resizing a Wayland window past its minimum or maximum size no longer
   stutters under a compositor that ignores the limits, such as sway's tiling.
   SDL clamped each such configure back to the current size without reporting

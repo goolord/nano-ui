@@ -261,12 +261,13 @@ module NanoUI.Backend
     -- "NanoUI.Runner" cancels the rest when it returns; a host that runs
     -- frames itself calls 'cancelTasks' when it closes the session.
   , setWakeLoop
+  , setWakeLoopChecked
   , cancelTasks
   )
 where
 
 import NanoUI.Internal.Compact (Compact, askCompact, compactHost)
-import NanoUI.Internal.Context (getExplainLayout, getExplainedNode, getFocusId, getSystemAppearance, setExplainLayout, setSystemAppearance, setWakeLoop)
+import NanoUI.Internal.Context (getExplainLayout, getExplainedNode, getFocusId, getSystemAppearance, setExplainLayout, setSystemAppearance, setWakeLoop, setWakeLoopChecked)
 import NanoUI.Internal.Frame.TextArea (TextInputArea (..), textInputArea)
 import NanoUI.Internal.Draw (drawTextBox)
 import NanoUI.Internal.Font
