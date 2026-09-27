@@ -5,9 +5,8 @@ import Control.Concurrent (threadDelay)
 import Control.Exception (bracket, bracketOnError, catch, throwIO, try)
 import Control.Monad (foldM, forM_, void, when)
 import Control.Monad.ST (ST, runST)
-import Data.Bits ((.&.))
 import Data.ByteString qualified as B
-import Data.Char (chr, isPrint, ord, toUpper)
+import Data.Char (chr, isAsciiLower, isPrint, ord)
 import Data.Maybe (fromMaybe, isJust)
 import Data.Ord (clamp)
 import Data.Primitive.PrimArray (PrimArray, indexPrimArray, primArrayFromList)
@@ -345,12 +344,17 @@ keys :: Input -> B.ByteString
 keys inp = E.encodeUtf8 (prefix <> text <> foldMap key (inputKeys inp))
  where
   mods = inputModifiers inp
-  -- Ctrl+key sends the control code, so text typed with Ctrl is dropped.
+  -- Ctrl+key sends the control code xterm sends, so text typed with Ctrl is
+  -- dropped. A key with none, such as Ctrl+- or Ctrl+0, sends nothing.
   ctrl = modCtrl mods && not (modAlt mods)
-  ctrlChar = T.singleton . chr . (.&. 31) . ord . toUpper
+  ctrlChar c
+    | isAsciiLower c = T.singleton (chr (ord c - 96))
+    | otherwise = maybe "" T.singleton (lookup c controlKeys)
   text = if ctrl then "" else inputChars inp
   prefix = if modAlt mods && not (T.null text) then "\ESC" else ""
   key = \case
+    -- Keys arrive unshifted: Ctrl+_ is Ctrl+Shift+- on a US layout.
+    KeyChar '-' | ctrl && modShift mods -> "\US"
     KeyChar c | ctrl -> ctrlChar c
     KeySpace | ctrl -> "\NUL"
     KeyEnter -> "\r"
@@ -370,6 +374,16 @@ keys inp = E.encodeUtf8 (prefix <> text <> foldMap key (inputKeys inp))
     KeyInsert -> "\ESC[2~"
     KeyF n -> fromMaybe "" (lookup n functionKeys)
     _ -> ""
+
+-- | The control code xterm sends for Ctrl and a key other than a letter.
+-- Keys arrive unshifted, so the digits stand in for the symbols above them
+-- on a US layout (Ctrl+^ is Ctrl+6).
+controlKeys :: [(Char, Char)]
+controlKeys =
+  [ (c, code)
+  | (cs, code) <- [("@2", '\NUL'), ("[3", '\ESC'), ("\\4", '\FS'), ("]5", '\GS'), ("^6~", '\RS'), ("_7/", '\US'), ("?8", '\DEL')]
+  , c <- cs
+  ]
 
 -- | What xterm sends for F1 to F12.
 functionKeys :: [(Int, T.Text)]

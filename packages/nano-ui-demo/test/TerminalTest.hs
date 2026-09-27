@@ -85,6 +85,10 @@ main = do
   check "function keys and Shift+Tab send xterm's sequences" $
     map (pressed noModifiers) [KeyF 1, KeyF 5, KeyF 12, KeyTab] == ["\ESCOP", "\ESC[15~", "\ESC[24~", "\t"]
       && pressed noModifiers {modShift = True} KeyTab == "\ESC[Z"
+  let ctrl = noModifiers {modCtrl = True}
+  check "Ctrl sends a control code, or nothing for a key without one" $
+    map (pressed ctrl . KeyChar) "c[6-0," == ["\ETX", "\ESC", "\RS", "", "", ""]
+      && pressed ctrl {modShift = True} (KeyChar '-') == "\US"
   check "a frame's text goes before its command key" $
     keys emptyInput {inputChars = "ls", inputKeys = inputKeysFromList [KeyChar 'l', KeyChar 's', KeyEnter]} == "ls\r"
 
