@@ -29,8 +29,10 @@ import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.IntMap.Strict (IntMap)
 import Data.IntMap.Strict qualified as IM
 import Data.Maybe (fromMaybe, isJust)
+import Data.Primitive.Array (MutableArray, newArray, readArray, sizeofMutableArray, writeArray)
 import Effectful (Eff, type (:>))
 import GHC.Clock (getMonotonicTime)
+import GHC.Exts (RealWorld)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Frame.Node (childPaintClip)
 import NanoUI.Internal.Id (WidgetId)
@@ -135,10 +137,18 @@ useVisibility cfg target = do
 
 -- | Per-context sensor state, stored as a host value ('hostOrInit') so a
 -- context without sensors never allocates it.
-newtype Sensors = Sensors (IORef SensorState)
+data Sensors = Sensors (IORef SensorState) (IORef ClipMemo)
 
--- | Watches built this pass and results from the last layout, by sensor key.
-data SensorState = SensorState (IntMap Watch) (IntMap Seen)
+-- | The pass number (bumped by 'beginSensors'), the cells watched this pass
+-- (newest first, each once) and their count, and every sensor's cell by key
+-- with the map's size. A steady frame writes cells, not the map.
+data SensorState = SensorState Int [Cell] Int (IntMap Cell) Int
+
+-- | One sensor, by key.
+data Cell = Cell Int (IORef CellState)
+
+-- | The pass that last watched the sensor, its last watch and its last result.
+data CellState = CellState Int Watch Seen
 
 data Watch = Watch WidgetId SensorConfig
 
@@ -154,18 +164,26 @@ unseen = Seen (Visibility False Nothing (Rect 0 0 0 0) (Rect 0 0 0 0)) 0
 -- consumes the event, so a second view pass in the frame sees none.
 watchSensor :: Context -> WidgetId -> Watch -> IO Visibility
 watchSensor ctx wid watch = do
-  Sensors ref <- hostOrInit ctx (Sensors <$> newIORef (SensorState IM.empty IM.empty))
-  SensorState watched seen <- readIORef ref
+  Sensors ref _ <- hostOrInit ctx (Sensors <$> newIORef (SensorState 1 [] 0 IM.empty 0) <*> (newIORef . ClipMemo 0 =<< newArray 0 NoClips))
+  SensorState pass watched n cells size <- readIORef ref
   let k = intKey wid
-      Seen vis since = IM.findWithDefault unseen k seen
-      seen' = if isJust (visEvent vis) then IM.insert k (Seen vis {visEvent = Nothing} since) seen else seen
-  writeIORef ref $! SensorState (IM.insert k watch watched) seen'
-  pure vis
+  case IM.lookup k cells of
+    Just cell@(Cell _ cref) -> do
+      CellState stamp _ seen@(Seen vis since) <- readIORef cref
+      -- The last watch of a key wins; the cell is listed once.
+      writeIORef cref $! CellState pass watch (if isJust (visEvent vis) then Seen vis {visEvent = Nothing} since else seen)
+      when (stamp /= pass) $ writeIORef ref $! SensorState pass (cell : watched) (n + 1) cells size
+      pure vis
+    Nothing -> do
+      cell <- Cell k <$> newIORef (CellState pass watch unseen)
+      writeIORef ref $! SensorState pass (cell : watched) (n + 1) (IM.insert k cell cells) (size + 1)
+      let Seen vis _ = unseen
+      pure vis
 
--- | Clear the last pass's watches before the view reruns.
+-- | Start a pass: clear the last pass's watches before the view reruns.
 beginSensors :: Context -> IO ()
 beginSensors ctx =
-  askHostIO ctx >>= mapM_ (\(Sensors ref) -> modifyIORef' ref (\(SensorState _ seen) -> SensorState IM.empty seen))
+  askHostIO ctx >>= mapM_ (\(Sensors ref _) -> modifyIORef' ref (\(SensorState pass _ _ cells size) -> SensorState (pass + 1) [] 0 cells size))
 
 -- | Measure every watch against the final layout. Sensors not built this
 -- pass are dropped. A visibility change marks the context dirty: the view's
@@ -173,23 +191,35 @@ beginSensors ctx =
 -- repaints like a model change.
 updateSensors :: Context -> Size -> IO ()
 updateSensors ctx size =
-  askHostIO ctx >>= mapM_ (\(Sensors ref) -> do
-    SensorState watched seen <- readIORef ref
-    unless (IM.null watched && IM.null seen) $ do
-      seen' <- IM.traverseWithKey (\k w -> measureSensor ctx size (IM.findWithDefault unseen k seen) w) watched
-      writeIORef ref $! SensorState watched seen'
-      when (any (\(Seen v _) -> isJust (visEvent v)) seen') (markDirty ctx))
+  askHostIO ctx >>= mapM_ (\(Sensors ref memoRef) -> do
+    SensorState pass watched n _ count <- readIORef ref
+    unless (n == 0 && count == 0) $ do
+      memo <- freshMemo ctx memoRef
+      let step !event (Cell _ cref) = do
+            CellState stamp watch old <- readIORef cref
+            new@(Seen vis _) <- measureSensor ctx memo size old watch
+            unless (sameSeen old new) $ writeIORef cref $! CellState stamp watch new
+            pure (event || isJust (visEvent vis))
+      event <- foldM step False watched
+      -- Every cell is listed at most once, so a count short of the map's
+      -- means some sensor was not built this pass.
+      when (count /= n) $
+        writeIORef ref $! SensorState pass watched n (IM.fromList [(k, c) | c@(Cell k _) <- watched]) n
+      when event (markDirty ctx))
+
+sameSeen :: Seen -> Seen -> Bool
+sameSeen (Seen a since) (Seen b since') = since == since' && a == b
 
 -- | Measure one watch. While 'sensorDelay' runs, request a wake-up for when
 -- it ends, as 'NanoUI.Internal.Widgets.Popup.tooltipTimer' does.
-measureSensor :: Context -> Size -> Seen -> Watch -> IO Seen
-measureSensor ctx@Context {ctxNodeArena = na} size (Seen before since0) (Watch target cfg) = do
+measureSensor :: Context -> ClipMemo -> Size -> Seen -> Watch -> IO Seen
+measureSensor ctx@Context {ctxNodeArena = na} memo size (Seen before since0) (Watch target cfg) = do
   mIdx <- lookupNodeByWidgetId na target
   (inView, bounds, onScreen) <- case mIdx of
     Nothing -> pure (False, Rect 0 0 0 0, Nothing)
     Just idx -> do
       rect <- getNodeRect na idx
-      (exact, grown) <- paintClips ctx size (max 0 (sensorAnticipate cfg)) idx
+      (exact, grown) <- paintClips ctx memo size (max 0 (sensorAnticipate cfg)) idx
       pure (maybe False (overlaps rect) grown, rect, exact >>= rectIntersect rect)
   let was = visVisible before
       delay = sensorDelay cfg
@@ -215,32 +245,63 @@ measureSensor ctx@Context {ctxNodeArena = na} size (Seen before since0) (Watch t
 -- each enclosing scroller viewport, panel interior and widget rect, and skip
 -- subtrees that are empty or outside their clip, except plain containers with
 -- a pinned node below. Floating panels clip only to themselves.
-paintClips :: Context -> Size -> Float -> NodeIdx -> IO (Maybe Rect, Maybe Rect)
-paintClips ctx@Context {ctxNodeArena = na} (Size ww wh) margin idx = do
+paintClips :: Context -> ClipMemo -> Size -> Float -> NodeIdx -> IO (Maybe Rect, Maybe Rect)
+paintClips ctx@Context {ctxNodeArena = na} memo size margin idx = do
   floating <- isFloatingNode <$> getNodeType na idx
-  chain <- if floating then pure [] else getParent na idx >>= outward []
-  let window = Rect 0 0 ww wh
-  foldM enter (Just window, Just (rectInflate margin window)) chain
-  where
-    -- Ancestors up to the root or first floating panel, outermost first.
-    outward acc i
-      | i < 0 = pure acc
-      | otherwise = do
+  if floating then pure (windowClips size margin) else getParent na idx >>= clipsInside ctx memo size margin
+
+-- | The clips before any node: the window, and the window grown by @margin@.
+windowClips :: Size -> Float -> (Maybe Rect, Maybe Rect)
+windowClips (Size ww wh) margin = let window = Rect 0 0 ww wh in (Just window, Just (rectInflate margin window))
+
+-- | The clips inside ancestor @i@ ('windowClips' for none), entered from the
+-- root or the first floating panel down. Sensors under one ancestor share
+-- them through the memo.
+clipsInside :: Context -> ClipMemo -> Size -> Float -> NodeIdx -> IO (Maybe Rect, Maybe Rect)
+clipsInside ctx@Context {ctxNodeArena = na} memo@(ClipMemo stamp entries) size margin i
+  | i < 0 = pure (windowClips size margin)
+  | otherwise = do
+      entry <- readArray entries i
+      case entry of
+        Clips s m clips | s == stamp && m == margin -> pure clips
+        _ -> do
           floating <- isFloatingNode <$> getNodeType na i
-          if floating then pure (i : acc) else getParent na i >>= outward (i : acc)
-    enter clips@(_, Nothing) _ = pure clips
-    enter (exact, grown) i = do
-      nt <- getNodeType na i
-      rect <- getNodeRect na i
-      cut <- childPaintClip ctx i nt rect
-      -- A plain container clips nothing, so a pinned descendant can show
-      -- even when the container is empty or off screen.
-      walked <- if nt == NodeContainer then hasPinnedBelow na i else pure False
-      let within grow clip = do
-            c <- clip
-            unless walked (void (rectIntersect c rect))
-            maybe (Just c) (rectIntersect c . grow) cut
-      pure (within id exact, within (rectInflate margin) grown)
+          outer <- if floating then pure (windowClips size margin) else getParent na i >>= clipsInside ctx memo size margin
+          clips <- enterClips ctx margin outer i
+          clips <$ writeArray entries i (Clips stamp margin clips)
+
+-- | The clips inside node @i@, given those outside it.
+enterClips :: Context -> Float -> (Maybe Rect, Maybe Rect) -> NodeIdx -> IO (Maybe Rect, Maybe Rect)
+enterClips _ _ clips@(_, Nothing) _ = pure clips
+enterClips ctx@Context {ctxNodeArena = na} margin (exact, grown) i = do
+  nt <- getNodeType na i
+  rect <- getNodeRect na i
+  cut <- childPaintClip ctx i nt rect
+  -- A plain container clips nothing, so a pinned descendant can show
+  -- even when the container is empty or off screen.
+  walked <- if nt == NodeContainer then hasPinnedBelow na i else pure False
+  let within grow clip = do
+        c <- clip
+        unless walked (void (rectIntersect c rect))
+        maybe (Just c) (rectIntersect c . grow) cut
+  pure (within id exact, within (rectInflate margin) grown)
+
+-- | The clips inside each ancestor by node index, for one 'updateSensors'.
+-- Entries of an earlier stamp count as absent, so the array is reused
+-- rather than cleared.
+data ClipMemo = ClipMemo Int (MutableArray RealWorld MemoEntry)
+
+-- | The stamp and margin the clips were computed for.
+data MemoEntry = NoClips | Clips Int Float (Maybe Rect, Maybe Rect)
+
+-- | Bump the stamp and make room for every node of this layout.
+freshMemo :: Context -> IORef ClipMemo -> IO ClipMemo
+freshMemo Context {ctxNodeArena = na} ref = do
+  ClipMemo stamp memo <- readIORef ref
+  nodes <- arenaCount na
+  memo' <- if sizeofMutableArray memo >= nodes then pure memo else newArray (max nodes (2 * sizeofMutableArray memo)) NoClips
+  let fresh = ClipMemo (stamp + 1) memo'
+  fresh <$ writeIORef ref fresh
 
 -- | Whether @r@ overlaps @clip@. An empty extent counts as a line or point.
 overlaps :: Rect -> Rect -> Bool
