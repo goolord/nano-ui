@@ -805,6 +805,10 @@
   font's metrics, as their tones.
 - `runCanvas` is deprecated: it flattens curves for a guessed display
   scale. Use `runCanvasFor` with the widget's draw context, or `canvas`.
+- A widget declared where it was last frame reads last frame's rect by its
+  node index instead of looking its id up in a map, which missed the cache
+  in large views. A frame of 3000 rows (9000 widgets) takes about 15% less
+  time and allocates the same. The API is unchanged.
 
 ### Fixed
 

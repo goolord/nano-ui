@@ -13,12 +13,14 @@ import Control.Applicative ((<|>))
 import Control.Exception (evaluate)
 import Control.Monad (filterM, forM_, unless, when, (<$!>), (>=>))
 import Data.Bits (xor)
-import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
+import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
 import Data.IntSet qualified as IS
 import Data.List (partition, tails)
 import Data.Maybe (fromMaybe, isJust, isNothing)
 import Data.Hashable (hashWithSalt)
+import Data.Primitive.Array (newArray, readArray, sizeofMutableArray, writeArray)
+import Data.Primitive.PrimArray (newPrimArray, writePrimArray)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Internal.Input
@@ -99,7 +101,7 @@ updatePrevRects ctx@Context {ctxNodeArena = na} size@(Size winW winH) = do
   count <- arenaCount na
   let setPrev p = modifyDamage ctx (\ds -> ds {dsPrev = p})
   if count <= 0
-    then setPrev emptyPrevFrame
+    then setPrev emptyPrevFrame >> modifyIORef' (ctxPrevByIdx ctx) (\(PrevByIdx ks rs _) -> PrevByIdx ks rs 0)
     else do
       -- First pass, scroll containers and panels ('BackdropNodes') only:
       -- record the clip each is painted in. A painting container with no
@@ -144,25 +146,29 @@ updatePrevRects ctx@Context {ctxNodeArena = na} size@(Size winW winH) = do
       -- as old. Of nodes sharing a key (a table's frozen and scrolling panes)
       -- only the last, the one 'lookupNodeByKey' finds, is walked
       -- ('getIdSuperseded'). Counting each would mask a key that went away,
-      -- and writing each would rewrite the maps every frame.
+      -- and writing each would rewrite the maps every frame. Each node also
+      -- records its key and rect by index ('ctxPrevByIdx').
+      PrevByIdx idxKeys idxRects idxCount <- prevByIdxRoom ctx count
       let go !i !m !cm !tm !lm !foundOld !dropped
             | i >= count =
                 if dropped || foundOld /= IM.size oldRects || foundOuter /= IM.size oldOuters
                   then setPrev emptyPrevFrame >> updatePrevRects ctx size
-                  else
+                  else do
+                    unless (idxCount == count) $ writeIORef (ctxPrevByIdx ctx) $! PrevByIdx idxKeys idxRects count
                     unless (ptrEq m oldRects && ptrEq cm oldClips && ptrEq om oldOuters && ptrEq tm oldTexts && ptrEq lm oldLooks) $
                       setPrev (PrevFrame m cm om tm lm)
             | otherwise = do
                 wid <- getWidgetId na i
                 superseded <- if hashWidgetId wid == 0 then pure True else getIdSuperseded na i
                 if superseded
-                  then go (i + 1) m cm tm lm foundOld dropped
+                  then writePrimArray idxKeys i 0 >> go (i + 1) m cm tm lm foundOld dropped
                   else do
                     let !k = intKey wid
                         isOld = IM.member k oldRects
                     mRect <- getNonzeroRect na i
                     case mRect of
-                      Nothing ->
+                      Nothing -> do
+                        writePrimArray idxKeys i 0
                         go (i + 1) (if isOld then IM.delete k m else m) (dropKey k cm) (dropKey k tm) (dropKey k lm) foundOld (dropped || isOld)
                       Just r -> do
                         mClip <- getClipBounds na i
@@ -178,8 +184,26 @@ updatePrevRects ctx@Context {ctxNodeArena = na} size@(Size winW winH) = do
                           if nt == NodeImage
                             then maybe (dropKey k lm) (\n -> putNew k (inLook n) lm) <$!> getImageNode na i
                             else pure $! dropKey k lm
-                        go (i + 1) (putNew k r m) (maybe (dropKey k cm) (\c -> putNew k c cm) mClip) tm' lm' (foundOld + if isOld then 1 else 0) dropped
+                        -- By index too. An unchanged rect keeps the object
+                        -- already stored, so a still frame allocates nothing;
+                        -- a new one is read back so it is boxed only here.
+                        writePrimArray idxKeys i k
+                        was <- readArray idxRects i
+                        now <- if was == r then pure was else writeArray idxRects i r >> readArray idxRects i
+                        go (i + 1) (putNew k now m) (maybe (dropKey k cm) (\c -> putNew k c cm) mClip) tm' lm' (foundOld + if isOld then 1 else 0) dropped
       go 0 m0 oldClips oldTexts oldLooks foundContainers droppedContainer
+
+-- | 'ctxPrevByIdx' with room for @n@ nodes. Growing empties it until
+-- 'updatePrevRects' fills the new arrays.
+prevByIdxRoom :: Context -> Int -> IO PrevByIdx
+prevByIdxRoom ctx n = do
+  prev@(PrevByIdx _ rects _) <- readIORef (ctxPrevByIdx ctx)
+  if sizeofMutableArray rects >= n
+    then pure prev
+    else do
+      let cap = max n (2 * sizeofMutableArray rects)
+      grown <- PrevByIdx <$> newPrimArray cap <*> newArray cap (Rect 0 0 0 0) <*> pure 0
+      grown <$ writeIORef (ctxPrevByIdx ctx) grown
 
 -- | Insert, returning @m@ itself when @k@ already maps to @v@, so pointer
 -- equality survives an unchanged frame.
