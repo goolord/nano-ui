@@ -67,6 +67,21 @@ genToken =
     , (1, elements ["  ", "\\"] >>= \end -> pure (end <> "\n"))
     ]
 
+-- | Texts a streamed paragraph starts from: plain ones, and ones that words
+-- could still turn into another block or inline.
+openings :: [Text]
+openings =
+  [ "", "Some text", "2024", "a\n1.", "a\n", "a  ", "x\\", "*a", "_a_", "`code", "# h", "- item", "> quote"
+  , "| a | b |", "[a]: /u 'x", "[a]: /u\n'x", "[a]", "<div", "x &amp", "foo<!-- c -->", "see ww", "a@b"
+  ]
+
+-- | Tokens of prose, and a few that are not plain.
+proseTokens :: [Text]
+proseTokens =
+  [ "word", " word", " a", "b", " 42", "7", ",", ".", ";", "?", "!", ":", "'", "\"", "-", " it's", "e.g."
+  , "www", " www", " ", "  ", "\n", "\n\n", "*", "_", "&amp", "`", "["
+  ]
+
 -- | A document and its cut positions; both shrink.
 data Cut = Cut Doc [Int]
 
@@ -99,6 +114,13 @@ streamsLikeWhole :: Text -> Expectation
 streamsLikeWhole t =
   map markdownBlocks (streams (T.chunksOf 1 t)) `shouldBe` map parseMarkdownBlocks (T.inits t)
 
+-- | Appending @b@ to @a@, whole and a character at a time, parses to what
+-- the whole text does.
+appendsLikeWhole :: Text -> Text -> Expectation
+appendsLikeWhole a b = do
+  markdownBlocks (appendMarkdown b (parseMarkdown a)) `shouldBe` parseMarkdownBlocks (a <> b)
+  streamsLikeWhole (a <> b)
+
 spec :: Spec
 spec = do
   describe "appendMarkdown" $ do
@@ -117,9 +139,7 @@ spec = do
     -- Such a line may underline the paragraph, make it a table header, or
     -- fail to interrupt it where it would otherwise start a block, so the
     -- paragraph must be reparsed with it.
-    let underParagraph name a b = it name $ do
-          markdownBlocks (appendMarkdown b (parseMarkdown a)) `shouldBe` parseMarkdownBlocks (a <> b)
-          streamsLikeWhole (a <> b)
+    let underParagraph name a b = it name (appendsLikeWhole a b)
     underParagraph "underlines it into a heading" "a\n---\n" "b"
     underParagraph "makes it a table's header" "a | b\n--|--\n" "c | d"
     underParagraph "continues it with an ordered item not numbered 1" "a\n2. b\n" "c"
@@ -127,6 +147,26 @@ spec = do
     underParagraph "continues it with HTML of type 7" "a\n<x-y>\n" "b"
     underParagraph "continues it with a task item with nothing after its box" "a\n- [x] \n" "b"
     underParagraph "continues link reference definitions" "[r]: /u\n- [x] \n" "b"
+
+  describe "plain words" $ do
+    -- Words added to a paragraph join its last line without a parse, unless
+    -- the text could still become another block or inline.
+    let adds name a b = it name (appendsLikeWhole a b)
+    adds "complete a link reference definition" "[foo]:" " bar"
+    adds "close a definition's title" "[a]: /u 'title\nfoo" " bar'"
+    adds "close a definition's title on its own line" "[a]: /u\n'title\nfoo" " bar'"
+    adds "continue an HTML block" "<div" " foo "
+    adds "start a line" "Foo\n" "bar"
+    adds "start a paragraph" "Foo\n\n" " bar"
+    adds "make a list item" "a\n1." " b"
+    adds "end an entity" "x &amp" ";"
+    adds "make a web address" "see" " www.example.com"
+    adds "end a web address's www" "www" "."
+    adds "follow an HTML comment" "foo<!-- c -->  " "bar"
+    adds "follow a space from an entity" "foo&#32;" " "
+    it "parse to what the whole text does, one at a time" $
+      withNumTests 1000 $ property $ forAll ((:) <$> elements openings <*> listOf (elements proseTokens)) $ \tokens ->
+        map markdownBlocks (streams tokens) === map (parseMarkdownBlocks . T.concat) (inits tokens)
 
   describe "a streamed message" $ do
     it "keeps its finished blocks" $ do

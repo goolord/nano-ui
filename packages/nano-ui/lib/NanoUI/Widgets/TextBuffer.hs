@@ -53,13 +53,17 @@ module NanoUI.Widgets.TextBuffer
   )
 where
 
+import Control.Monad (when)
+import Control.Monad.ST (runST)
 import Data.Char (isPrint, isSpace)
-import Data.Foldable (toList)
+import Data.Foldable (foldlM, toList)
 import Data.Maybe (fromMaybe)
 import Data.Sequence (Seq)
 import Data.Sequence qualified as Seq
 import Data.Text (Text)
 import Data.Text qualified as T
+import Data.Text.Array qualified as A
+import Data.Text.Internal (Text (..))
 import NanoUI.Internal.Types (clamp)
 
 -- | Zero-indexed logical (row, column) position in the buffer. Fields are
@@ -119,9 +123,23 @@ splitLines = Seq.fromList . T.splitOn "\n"
 toText :: TextBuffer -> Text
 toText = joinLines . bufferLines
 
--- | Lines joined with newlines, copied once into a new text.
+-- | Lines joined with newlines, copied once into a new text. A single line
+-- is returned as it is.
 joinLines :: Seq Text -> Text
-joinLines = T.intercalate "\n" . toList
+joinLines lns = case lns of
+  Seq.Empty -> T.empty
+  line Seq.:<| Seq.Empty -> line
+  _ ->
+    let !total = foldl' (\acc (Text _ _ len) -> acc + len + 1) (-1) lns
+     in runST $ do
+          dest <- A.new total
+          let copyLine !off (Text arr start len) = do
+                A.copyI len dest off arr start
+                when (off + len < total) $ A.unsafeWrite dest (off + len) 10
+                pure (off + len + 1)
+          _ <- foldlM copyLine 0 lns
+          frozen <- A.unsafeFreeze dest
+          pure (Text frozen 0 total)
 
 -- | Lines in document order without newline separators. Allocates the list spine.
 toLines :: TextBuffer -> [Text]

@@ -59,6 +59,11 @@ spec = do
       TB.toText (TB.fromText "a\n") `shouldBe` "a\n"
       TB.toLines (TB.fromText "a\n") `shouldBe` ["a", ""]
 
+    it "joins lines back into the text they were split from" $
+      mapM_
+        (\t -> TB.joinLines (TB.splitLines t) `shouldBe` t)
+        ["", "\n", "\n\n", "a", "a\n", "\nλ", "α\n\n猫🙂\n", "one\ntwo\nthree"]
+
     it "inserts a tab that text-zipper would otherwise drop" $ do
       let
         b = edit TE.multiLineMode [TE.InsertText "\t"] TB.empty

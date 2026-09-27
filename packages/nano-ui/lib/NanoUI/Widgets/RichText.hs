@@ -36,6 +36,7 @@ import NanoUI.Internal.Monad (Ui, askDefaultLayout, askInput, freshWidget, uiIO,
 import NanoUI.Internal.Style hiding (Flow (..))
 import NanoUI.Internal.Types (Color (..), Rect (..), V2 (..))
 import NanoUI.Internal.Widgets.Node (Response, addWidget, respClicked, respHovered, respRect)
+import System.IO.Unsafe (unsafeDupablePerformIO)
 
 -- | A piece of a paragraph: text in one style, with an optional hyperlink
 -- target and background colour. A string literal is unstyled text.
@@ -129,8 +130,9 @@ data Line = Line
   , lineTokens :: ![(Float, Token)]
   }
 
--- A paragraph's measured pieces and its lines at the width it last had,
--- kept between frames while its pieces, fonts and colours stay the same.
+-- A paragraph's measured pieces, its lines at the width it last had and the
+-- size it was last measured at, kept between frames while its pieces, fonts
+-- and colours stay the same.
 data Paragraph = Paragraph
   { paraKey :: !Int
   , paraRuns :: !(SmallArray Run)
@@ -139,7 +141,12 @@ data Paragraph = Paragraph
   , paraNatural :: (Float, Float)
   , paraWidth :: !Float
   , paraLines :: [Line]
+  , paraMeasured :: !(IORef Measured)
   }
+
+-- The width a paragraph was last measured at and its extent there
+-- ('measureAt').
+data Measured = Unmeasured | Measured !Float !Float !Float
 
 -- Recently laid-out paragraphs by widget key, with their count and the
 -- count that triggers dropping stale ones.
@@ -177,7 +184,8 @@ richTextWith' f pieces = do
           emptyLine = case resolved of
             (run, _) : _ -> (runLineHeight run, runAscent run)
             [] -> (fmLineHeight (ctxFontMetrics ctx), fmAscent (ctxFontMetrics ctx))
-      pure (Paragraph key runs tokens emptyLine (lineBoxes (layoutLines runs emptyLine AlignStart 1e9 tokens)) (-1) [])
+      measured <- newIORef Unmeasured
+      pure (Paragraph key runs tokens emptyLine (lineBoxes (layoutLines runs emptyLine AlignStart 1e9 tokens)) (-1) [] measured)
   resp <- addWidget wid NodeDrawing T.empty 0 base
   let Rect rx ry rw _ = respRect resp
       runs = paraRuns para0
@@ -267,7 +275,7 @@ richTextWith' f pieces = do
                 size = IM.size kept
             pure $! ParagraphCache size (max paragraphBound (2 * size)) kept
     registerCustomMeasure ctx wid $ \_ (availW, _) ->
-      if availW >= 1e9 then paraNatural para else lineBoxes (linesAt availW)
+      if availW >= 1e9 then paraNatural para else measureAt (paraMeasured para) (lineBoxes . linesAt) availW
     registerCustomEntry ctx wid $
       CustomDrawingEntry
         (if drawKey == 0 then 1 else drawKey)
@@ -281,6 +289,24 @@ richTextWith' f pieces = do
   pure (resp, clicked)
   where
     lineBoxes lines' = (maximum (0 : map lineWidth lines'), sum (map lineHeight lines'))
+
+-- | @measureAt ref extentAt width@ is @extentAt width@, reused from @ref@
+-- when it holds the extent at that width, and otherwise computed and left
+-- there. A paragraph keeps its reference while its pieces stay the same, so
+-- the solver's check of last frame's layout, which measures the paragraph
+-- again at the width it offered then, costs nothing even when that width is a
+-- cap the paragraph stays under, and its second measure at a new width reuses
+-- the first. Only the extent is kept, never the lines. Reading and writing
+-- the reference from pure code is safe because @extentAt@ is a pure function
+-- of the width for those pieces: the reference only decides what is shared.
+measureAt :: IORef Measured -> (Float -> (Float, Float)) -> Float -> (Float, Float)
+measureAt ref extentAt width = unsafeDupablePerformIO $ do
+  kept <- readIORef ref
+  case kept of
+    Measured w ew eh | w == width -> pure (ew, eh)
+    _ -> case extentAt width of
+      (!ew, !eh) -> (ew, eh) <$ writeIORef ref (Measured width ew eh)
+{-# NOINLINE measureAt #-}
 
 -- | Cache size at which stale paragraphs are first pruned.
 paragraphBound :: Int
