@@ -740,6 +740,11 @@
   focused, pane grid dividers and overlays are keyed drawings, and unchanged
   animations are not rewritten to the store, cutting per-frame work for
   those widgets.
+- A table given its rows again every frame, a few of them changed, encodes
+  only rows that are not last frame's objects, measures only cells whose
+  text changed, and sorts only when a sort key changed. With 2000 rows and
+  one changing each frame, a frame allocates 0.48 MB instead of 1.97 MB and
+  takes about 0.24 ms instead of 1.3 ms.
 - Damage is gathered into one running union instead of rect lists, paint
   keeps the opaque floating panels it culls against in a flat array built
   only when a frame has floating panels, and the node arena tracks the

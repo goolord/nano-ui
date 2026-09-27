@@ -43,7 +43,46 @@ tests =
   , pixelSpec "table-resize-overflow" runTableResizeOverflowTest
   , spec "table-col-resize-body" runTableColResizeDemoReproTest
   , pixelSpec "table-hbar-reach" runTableHBarReachTest
+  , spec "table-live-rows" runTableLiveRowsTest
   ]
+
+-- | A row of 'runTableLiveRowsTest'; its middle column starts numeric.
+data LiveRow = LiveRow Text Text Text
+
+liveCols :: Colonnade Headed LiveRow Text
+liveCols = mconcat [headed "Name" (\(LiveRow a _ _) -> a), headed "Qty" (\(LiveRow _ b _) -> b), headed "Note" (\(LiveRow _ _ c) -> c)]
+
+-- A table given its rows again each frame, a few of them changed, lays out
+-- as a fresh one given the same rows: widths follow changed, added and
+-- removed rows and a column that stops being numeric (and so its mono
+-- font), and the order follows changed sort keys.
+runTableLiveRowsTest :: Context -> IORef Int -> IO ()
+runTableLiveRowsTest ctx0 failed = do
+  let fonts c = withMonoFontMetrics c (monospaceMetrics 10)
+      inp0 = (withInput 600 300) {inputMousePos = V2 590 290}
+      laidOut c rows = warmup2 c inp0 (sortedTable (table "live" liveCols rows)) >> collectTextSpans c
+      setAt i x xs = take i xs ++ x : drop (i + 1) xs
+      rows0 = [LiveRow (T.pack [n]) (T.pack (show i)) "note" | (i, n) <- zip [1 :: Int ..] "dbeac"]
+      edits =
+        [ setAt 1 (LiveRow "a much longer name" "2" "x")
+        , (++ [LiveRow "added" "40" "y"])
+        , setAt 2 (LiveRow "e" "n/a" "z")
+        , setAt 1 (LiveRow "b" "2" "x")
+        , init
+        , setAt 0 (LiveRow "zz" "1" "w")
+        , setAt 2 (LiveRow "e" "3" "z")
+        ]
+      live = fonts ctx0
+  void (laidOut live rows0)
+  foldM_
+    ( \rows edit -> do
+        let rows' = edit rows
+        fresh <- newContext >>= \c -> laidOut (fonts c) rows'
+        laidOut live rows' >>= assertEq failed fresh
+        pure rows'
+    )
+    rows0
+    edits
 
 -- | A table sorted ascending on its first column, given everything but the sort.
 sortedTable :: (SortCol -> NanoUI TableResponse) -> NanoUI ()
