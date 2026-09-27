@@ -393,7 +393,8 @@ initialOverlayState = OverlayState
 
 -- | The last full frame's draw data and what it was drawn from, for a full
 -- frame that would draw the same to take instead of painting again
--- ('NanoUI.Internal.Frame.runFrameEff').
+-- ('NanoUI.Internal.Frame.runFrameEff'). A reused frame hands the host the
+-- same 'DrawData' buffers again, so a host reads them and never writes them.
 data DrawReuse = DrawReuse
   { drOn :: !Bool
   -- ^ Whether frames may reuse a draw at all ('setDrawReuse').
@@ -929,7 +930,9 @@ data Context = Context
   -- whole window whatever changed (a continuous session) clears it, and the
   -- frame reports 'DamageFull' without diffing anything, unless it may reuse
   -- the last frame's draw ('ctxDrawReuse'), which needs to know that nothing
-  -- is damaged. True by default.
+  -- is damaged. A host that clears it while 'ctxPaintFull' is off gets
+  -- 'DamageFull' too, so its clip frames repaint the whole window. True by
+  -- default.
   , ctxDamageWanted :: !(IORef Bool)
   -- | Layout overlay state.
   , ctxExplain :: !(IORef ExplainState)

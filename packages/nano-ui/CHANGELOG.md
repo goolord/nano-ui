@@ -775,10 +775,10 @@
   or 1.38 GB instead of 1.48 GB with a modal.
 - Each frame's damage bookkeeping compares a widget with what the last
   frame recorded at the same node instead of looking it up in five maps,
-  and no longer diffs maps and stores the frame left unchanged. A frame of
-  3000 rows under the pointer takes about 9 ms instead of 16 ms and
-  allocates 6.0 MB instead of 6.5 MB; a scrolled one about 20 ms instead
-  of 27 ms. A host that repaints the whole window every frame can clear
+  and no longer diffs maps and stores the frame left unchanged. With the
+  by-index rects below, a frame of 3000 rows under the pointer takes about
+  7 ms instead of 15 ms and allocates 5.8 MB instead of 6.5 MB; a scrolled
+  one about 18 ms instead of 27 ms. A host that repaints the whole window every frame can clear
   `ctxDamageWanted` (in `NanoUI.Internal.Context`), as the SDL runner does
   for frames it presents in full, and the frame skips the damage diff,
   unless it may reuse the last frame's draw data (below).
@@ -886,9 +886,8 @@
   computes is set with `setSolvedValue`.
 - A widget declared where it was last frame reads last frame's rect by its
   node index, from the damage pass's per-node record, instead of looking
-  its id up in a map, which missed the cache in large views. A frame of
-  3000 rows (6000 widgets) takes about 15% less time and allocates the
-  same. The API is unchanged.
+  its id up in a map, which missed the cache in large views. The API is
+  unchanged.
 
 ### Fixed
 

@@ -259,7 +259,7 @@ paintOrReuse ctx frameInp size explain reuse key = do
       drawData <- paintFrame ctx frameInp size explain paintFull
       -- Nothing to keep now or before: leave the state as it is.
       unless (isNothing key && isNothing (drLast reuse)) $
-        writeIORef (ctxDrawReuse ctx) reuse {drLast = (\k -> (k, drawData)) <$!> key}
+        writeIORef (ctxDrawReuse ctx) $! reuse {drLast = (\k -> (k, drawData)) <$!> key}
       pure drawData
 
 -- | What a full frame's draw follows besides its damage ('DrawReuseKey'), or
