@@ -928,6 +928,13 @@
 
 - A wake with no wake action installed no longer holds back the wakes after
   it until other input arrives.
+- A view that paints the window state (`askWindow`), such as a colour on
+  focus, repaints when that state changes, and so does a frame that follows
+  a screenshot's answer. Their frames repainted only what moved or changed
+  text.
+- A window size limit set past the other one on an axis moves the other one
+  to it, so the desktop never gets a minimum above the maximum. SDL dropped
+  such a limit outside Wayland.
 - `newWakeSignal`'s wait takes the wakes it consumes, so a job's wake after
   one drained with no frame between still signals.
 - Up and Down move a combo's highlight while the pointer rests on its
