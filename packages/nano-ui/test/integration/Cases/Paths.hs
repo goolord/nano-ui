@@ -6,12 +6,13 @@ module Cases.Paths (tests) where
 import Spec
 import Data.Foldable (toList)
 import Data.IntMap.Strict qualified as IM
-import Data.Primitive.PrimArray (PrimArray, indexPrimArray, primArrayToList, sizeofPrimArray)
+import Data.Primitive.PrimArray (PrimArray, indexPrimArray, primArrayFromList, primArrayToList, sizeofPrimArray)
 import Foreign.ForeignPtr (withForeignPtr)
 import Foreign.Storable (peekByteOff)
 import NanoUI.Internal.Context (setDrawSnapScale)
 import GHC.Stack (HasCallStack)
 import NanoUI.Internal.Context (Context (..), DrawingCacheState (..))
+import NanoUI.Internal.Canvas (emitOp)
 import NanoUI.Internal.Path (fillPathOps)
 import NanoUI.Internal.Context.Types (CustomDrawOpCacheEntry (..))
 import NanoUI.Path qualified as P
@@ -602,6 +603,14 @@ runJoinGeometryTest ctx failed = do
   sq <- capReach P.SquareCap
   roundC <- capReach P.RoundCap
   assertEq failed [True, True, True] [abs (butt - 0) < 0.01, abs (sq - edge + 0.5) < 0.01, abs (roundC - edge) < 0.01]
+  -- An end repeated in a polyline op still gets its cap.
+  vs <- canvasVertices ctx $ \(Rect x y _ _) ->
+    let a = [x + 40, y + 100]
+        b = [x + 100, y + 100]
+     in emitOp (StrokePolyline (primArrayFromList (a ++ a ++ b ++ b)) 10 False P.SquareCap P.MiterJoin 4 (Flat black))
+  let near100 = [q | (q@(V2 _ py), _) <- vs, abs (py - 100) < 20]
+  assertLt failed (abs (maximum [px - 100 | V2 px _ <- near100] - 5)) 0.01
+  assertLt failed (abs (maximum [40 - px | V2 px _ <- near100] - 5)) 0.01
   where
     v2Dot (V2 a b) (V2 c d) = a * c + b * d
     v2Dist a b = let V2 dx dy = v2Sub a b in sqrt (dx * dx + dy * dy)
