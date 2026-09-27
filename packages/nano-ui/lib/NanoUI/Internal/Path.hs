@@ -783,9 +783,10 @@ bridgeHoles vs outline holes = foldl' join outline (map snd (sortOn fst (map lef
                in if qx == hx then Just m else Just (snd (foldl' better (1 / 0, m) [0 .. n - 1]))
 
 -- | Twice a triangle's signed area, with earcut's sign: negative at a convex
--- corner of a ring with positive 'signedArea'.
+-- corner of a ring with positive 'signedArea'. The negated 'cross' of its
+-- edges, which 'isConvex' tests.
 turn :: (Float, Float) -> (Float, Float) -> (Float, Float) -> Float
-turn (px, py) (qx, qy) (rx, ry) = (qy - py) * (rx - qx) - (qx - px) * (ry - qy)
+turn p q r = negate (cross (diff p q) (diff q r))
 
 -- | Whether the ring is convex: every corner turns the same way (straight
 -- ones aside) and it winds once. Winding once is checked by the x and y
