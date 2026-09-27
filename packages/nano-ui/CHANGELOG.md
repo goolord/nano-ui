@@ -888,6 +888,7 @@
   node index, from the damage pass's per-node record, instead of looking
   its id up in a map, which missed the cache in large views. The API is
   unchanged.
+- Builds with `nano-svg` 0.2.
 
 ### Fixed
 
