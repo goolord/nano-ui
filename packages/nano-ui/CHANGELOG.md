@@ -153,7 +153,8 @@
   while hovered, with the pointer cursor. `restyle` adds modifiers to a
   piece, and `richTextWith` sets the paragraph's default font. Mixed sizes
   share a baseline. A paragraph keeps its measured words between frames
-  while its pieces, fonts and colours stay the same.
+  while its pieces, fonts and colours stay the same, and while its width
+  changes it breaks its lines once a frame, for measuring and drawing both.
 - `DrawTextStyled` draws text in a `TextFont` (size, variant, weight, style
   and decoration) from custom widgets.
 - Mixed-direction lines: `NanoUI.Bidi` splits a line into left-to-right and

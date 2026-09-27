@@ -36,6 +36,7 @@ import NanoUI.Internal.Monad (Ui, askDefaultLayout, askInput, freshWidget, uiIO,
 import NanoUI.Internal.Style hiding (Flow (..))
 import NanoUI.Internal.Types (Color (..), Rect (..), V2 (..))
 import NanoUI.Internal.Widgets.Node (Response, addWidget, respClicked, respHovered, respRect)
+import System.IO.Unsafe (unsafeDupablePerformIO)
 
 -- | A piece of a paragraph: text in one style, with an optional hyperlink
 -- target and background colour. A string literal is unstyled text.
@@ -185,9 +186,20 @@ richTextWith' f pieces = do
       para
         | paraWidth para0 == rw = para0
         | otherwise = para0 {paraWidth = rw, paraLines = layoutAt rw}
-      linesAt width
-        | width == paraWidth para = paraLines para
-        | otherwise = layoutAt width
+  -- The lines at a width, through a memo of the last width asked for: while
+  -- the width changes, the solver measures the paragraph twice at the new
+  -- width and the draw builder then draws it there, and the three share one
+  -- layout. The draw builder asks last, with @keep@ off, and empties the memo
+  -- so the lines live no longer than the paint. Reading and writing the memo
+  -- from pure code is safe because layoutAt is a pure function of the width:
+  -- the memo only decides what is shared.
+  memo <- uiIO (newIORef (Just (paraWidth para, paraLines para)))
+  let linesAt keep width = unsafeDupablePerformIO $ do
+        kept <- readIORef memo
+        let lines' = case kept of
+              Just (w, ls) | w == width -> ls
+              _ -> layoutAt width
+        lines' <$ writeIORef memo (if keep then Just (width, lines') else Nothing)
       V2 mx my = inputMousePos inp
       hoveredRun
         | not (respHovered resp) = Nothing
@@ -219,7 +231,7 @@ richTextWith' f pieces = do
                    , deco /= DecorationNone
                    , offset <- decorationOffsets deco run
                    ]
-            | line <- linesAt w
+            | line <- linesAt False w
             , let spans = pieceSpans line
             ]
         where
@@ -267,7 +279,7 @@ richTextWith' f pieces = do
                 size = IM.size kept
             pure $! ParagraphCache size (max paragraphBound (2 * size)) kept
     registerCustomMeasure ctx wid $ \_ (availW, _) ->
-      if availW >= 1e9 then paraNatural para else lineBoxes (linesAt availW)
+      if availW >= 1e9 then paraNatural para else lineBoxes (linesAt True availW)
     registerCustomEntry ctx wid $
       CustomDrawingEntry
         (if drawKey == 0 then 1 else drawKey)

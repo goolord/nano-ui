@@ -3,9 +3,11 @@ module Cases.RichText (tests) where
 import Spec
 import Control.Exception (evaluate)
 import Data.Foldable (toList)
+import Data.IntMap.Strict qualified as IM
 import Data.List (groupBy)
 import Data.Text qualified as T
-import NanoUI.Internal.Context (CustomDrawingEntry (..), lookupCustomDrawing)
+import NanoUI.Internal.Context (Context (..), CustomDrawingEntry (..), DrawingCacheState (..), intKey, lookupCustomDrawing)
+import NanoUI.Internal.Context.Types (CustomDrawOpCacheEntry (..))
 import NanoUI.Internal.Widgets.Custom (mkCustomDrawContext)
 
 tests :: [Spec]
@@ -15,6 +17,7 @@ tests =
   , spec "rich-text-align" runRichTextAlignTest
   , spec "rich-text-many" runRichTextManyTest
   , spec "rich-text-background" runRichTextBackgroundTest
+  , spec "rich-text-resize" runRichTextResizeTest
   ]
 
 -- | A paragraph wraps at its column's width, taking a line's height per line,
@@ -143,3 +146,19 @@ runRichTextBackgroundTest ctx failed = do
   assert failed (firstText >= 1)
   (_, plain) <- opsOf (colorRGBA 9 9 9 255)
   assertEq failed [] [r | FillRect r c <- plain, c == tint]
+
+-- | A paragraph whose width changes every frame draws what one laid out at
+-- each width from the start draws.
+runRichTextResizeTest :: Context -> IORef Int -> IO ()
+runRichTextResizeTest ctx failed = do
+  let paragraph = [inlineText "a few words of different lengths ", strong "wrapping", " over several lines ", hyperlink "x" "here"]
+      ui = column (respId . fst <$> richTextWith' fillW paragraph)
+      -- The ops the paragraph was drawn with in a frame at width @w@.
+      opsAt c w = do
+        wid <- evalUi c (withInputOff w 400) ui
+        fmap (toList . cdeOps) . IM.lookup (intKey wid) . dcsCustomDrawOpCache <$> readIORef (ctxDrawingCache c)
+  void (warmup2 ctx (withInputOff 400 400) ui)
+  forM_ [180, 260, 150, 320, 400] $ \w -> do
+    resized <- opsAt ctx w
+    fresh <- newContext >>= \c -> warmup c (withInputOff w 400) ui >> opsAt c w
+    assert failed (resized /= Nothing && resized == fresh)
