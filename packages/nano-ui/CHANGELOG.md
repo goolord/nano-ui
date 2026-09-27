@@ -932,6 +932,8 @@
   focus, repaints when that state changes, and so does a frame that follows
   a screenshot's answer. Their frames repainted only what moved or changed
   text.
+- `releaseImage` repaints and requests a frame, as `registerImage` does, so
+  an image still shown draws the unknown-image placeholder.
 - A window size limit set past the other one on an axis moves the other one
   to it, so the desktop never gets a minimum above the maximum. SDL dropped
   such a limit outside Wayland.

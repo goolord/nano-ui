@@ -28,17 +28,19 @@ import Data.Word (Word8)
 import Foreign.ForeignPtr (ForeignPtr, mallocForeignPtrBytes, withForeignPtr)
 import Foreign.Marshal.Utils (copyBytes, fillBytes)
 import Foreign.Ptr (Ptr, plusPtr)
+import NanoUI.Internal.Draw.Types (glyphAtlasPages, glyphPageTextureId)
 import NanoUI.Internal.Store (ptrEq)
 import NanoUI.Internal.Types (ImageId (..))
 
 -- | GPU texture id shared by every packed image so draw cmds batch. It is
--- reserved, like the glyph atlas pages' ids below it
--- ('NanoUI.Internal.Draw.Types.glyphAtlasTextureId'), rather than a small
+-- reserved, like the glyph atlas pages' ids above it
+-- ('NanoUI.Internal.Draw.Types.glyphPageTextureId'), rather than a small
 -- number: a drawing's image op names a registered 'ImageId' or a raw
 -- texture, and 'freshImageId' starts at 1, so an unregistered image id must
--- not also name the atlas.
+-- not also name the atlas. It is the id below the last glyph page's, so more
+-- pages move it down rather than onto a page.
 atlasTextureId :: Int
-atlasTextureId = 0x7ffffff9
+atlasTextureId = glyphPageTextureId glyphAtlasPages
 
 atlasPad :: Int
 atlasPad = 1
@@ -136,17 +138,21 @@ registerImage (ImageAtlas ref) (ImageId tid) w h pixels
 -- | Remove an image. Its id stops drawing and its space goes on the free
 -- list. The old pixels stay until another image overwrites them, and
 -- 'freshImageId' never returns the id again. Unregistered ids are ignored.
-releaseImage :: ImageAtlas -> ImageId -> IO ()
+-- Returns whether the id was registered.
+releaseImage :: ImageAtlas -> ImageId -> IO Bool
 releaseImage (ImageAtlas ref) (ImageId tid) = do
   st <- readIORef ref
-  forM_ (IM.lookup tid (asSlots st)) $ \(AtlasSlot x y w h) ->
-    writeIORef
-      ref
-      st
-        { asSlots = IM.delete tid (asSlots st)
-        , asFree = AtlasSlot x y (w + atlasPad) (h + atlasPad) : asFree st
-        , asLastFresh = max tid (asLastFresh st)
-        }
+  case IM.lookup tid (asSlots st) of
+    Nothing -> pure False
+    Just (AtlasSlot x y w h) -> do
+      writeIORef
+        ref
+        st
+          { asSlots = IM.delete tid (asSlots st)
+          , asFree = AtlasSlot x y (w + atlasPad) (h + atlasPad) : asFree st
+          , asLastFresh = max tid (asLastFresh st)
+          }
+      pure True
 
 -- | Find the first free slot that fits a @w@ x @h@ image plus padding, and
 -- return the image position and the updated state. The leftover space is
