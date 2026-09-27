@@ -532,6 +532,9 @@ runDashTest _ failed = do
   let dots = dashed [0, 10] 0 line
   assertEq failed 11 (length dots)
   assert failed (all (\(ps, _) -> case ps of [V2 x0 _, V2 x1 _] -> x1 - x0 > 0 && x1 - x0 < 0.01; _ -> False) dots)
+  -- Dashes too short to move off a point at its float precision do not
+  -- repeat forever: the segment is solid, from a dash or a gap.
+  forM_ [0, 0.007] $ \off -> assertEq failed [[V2 131072 0, V2 131082 0]] (map fst (dashed [0.006, 0.004] off (P.polyline [V2 131072 0, V2 131082 0])))
   -- An invalid or too fine pattern draws a solid line.
   forM_ [[-1, 2], [0, 0], [0.001]] $ \pattern -> assertEq failed [[V2 0 0, V2 100 0]] (map fst (dashed pattern 0 line))
   -- A transform scales the pattern with the line.

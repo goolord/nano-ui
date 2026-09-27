@@ -1491,6 +1491,7 @@ dashes dots pattern0 offset closed pts
     entries = primArrayFromListN plen pattern
     entry k = indexPrimArray entries (k `mod` plen)
     period = sum pattern
+    widest = maximum pattern
     m = sizeofPrimArray pts `div` 2
     path = [pointAt pts i | i <- [0 .. m - 1]] ++ [pointAt pts 0 | closed]
     total = sum (zipWith dist path (drop 1 path))
@@ -1517,14 +1518,17 @@ dashes dots pattern0 offset closed pts
         | otherwise -> []
       q : rest
         | len <= left -> walk k (left - len) (if even k then q : cur else cur) dir' q rest
-        | otherwise ->
-            let u = left / len
-                mid = (fst p + u * (fst q - fst p), snd p + u * (snd q - snd p))
-             in if even k
-                  then dash dir' (mid : cur) : walk (k + 1) (entry (k + 1)) [] dir' mid qs
-                  else walk (k + 1) (entry (k + 1)) [mid] dir' mid qs
+        -- Not even the longest entry moves off @p@ at this precision, so
+        -- the pattern would repeat here forever: the rest of the segment is
+        -- solid.
+        | mid == p && along (widest / len) == p ->
+            if even k then walk k len cur dir' p qs else walk (k + 1) len [p] dir' p qs
+        | even k -> dash dir' (mid : cur) : walk (k + 1) (entry (k + 1)) [] dir' mid qs
+        | otherwise -> walk (k + 1) (entry (k + 1)) [mid] dir' mid qs
         where
           len = dist p q
+          along u = (fst p + u * (fst q - fst p), snd p + u * (snd q - snd p))
+          mid = along (left / len)
           dir' = if len > 0 then ((fst q - fst p) / len, (snd q - snd p) / len) else dir
     -- A dash's points in order without repeats. A lone point gets a second
     -- one a hair further along the line, or with no @dots@ is dropped.
