@@ -1,9 +1,12 @@
 module Cases.Window (tests) where
 
 import Spec
+import Control.Exception (evaluate)
+import System.Mem.StableName (makeStableName)
 import Data.IntMap.Strict qualified as IM
 import Data.Text qualified as T
 import NanoUI.Internal.Context (Context (..))
+import NanoUI.Internal.Layout.Arena (LayoutCache (..), arenaCount, getNodeRect, getNodeType, getNodeValue, getScrollContentW, isScrollNode)
 
 tests :: [Spec]
 tests =
@@ -16,6 +19,7 @@ tests =
   , spec "overlay-panel-live" runOverlayPanelLiveTest
   , spec "window-drag" runWindowDragTest
   , spec "window-layout-reuse" runWindowLayoutReuseTest
+  , spec "window-custom-measure-placement" runWindowCustomMeasurePlacementTest
   , spec "window-close-damage" runWindowCloseDamageTest
   , spec "page-window-scroll" runPageWindowScrollTest
   , spec "window-scroll-only-damage" runWindowScrollOnlyDamageTest
@@ -233,34 +237,100 @@ runWindowDragTest ctx failed = do
   assert failed (x1 < x0 - 10)
   assert failed (y1 > y0 + 10)
 
--- | With a window open the solve is reused and only the floating panels are
--- placed again, still or mid-drag. Each such frame lays out every node where
--- the same frame solved from scratch does.
+-- | With floating panels open the solve is reused, and over a reused solve
+-- each panel gets back what placing it left while it goes where it went, or
+-- is placed again when it moves. Each such frame lays out every node and
+-- every scroll extent where the same frame solved and placed from scratch
+-- does: still, with a popup in the window following a point, mid-drag,
+-- after a resize, at another window size and with a modal open.
 runWindowLayoutReuseTest :: Context -> IORef Int -> IO ()
 runWindowLayoutReuseTest ctx failed = do
   let inp0 = withInput 640 400
-      ui = do
+      ui modalOpen anchor = do
         column $ forM_ [1 .. 20 :: Int] $ \i -> void (button (T.pack ("row " <> show i)))
-        fmap fst (window True "Tools" (column (label "Body" >> void (button "ok"))))
-      rects = arenaRects ctx
-      -- The frame as it ran, then the same frame with nothing to reuse.
-      sameAsFresh frameInp = do
-        (win, _, _, _) <- runFrame ctx frameInp ui
-        reused <- rects
+        win <- fmap fst $ window True "Tools" $ columnWith (maxW 260) $ do
+          forM_ [1 .. 12 :: Int] $ \i -> labelWith fillW (T.replicate i "wrapping words ")
+          void (button "ok")
+          void (popup True (defaultPopupConfig (AnchorPoint anchor)) {cfgDismissable = False} (label "tip"))
+        -- A modal over it all, its note wrapped to the modal's width.
+        void (modal modalOpen "Note" (label (T.replicate 12 "a note that wraps ")))
+        pure win
+      layout = do
+        let na = ctxNodeArena ctx
+            scrollOf i = getNodeType na i >>= \nt ->
+              if isScrollNode nt then Just <$> ((,) <$> getNodeValue na i <*> getScrollContentW na i) else pure Nothing
+        n <- arenaCount na
+        forM [0 .. n - 1] $ \i -> (,) <$> getNodeRect na i <*> scrollOf i
+      -- A frame after one that kept what it placed, then the same frame
+      -- with nothing to reuse.
+      sameAfter beforeInp before frameInp u = do
+        _ <- runFrame ctx beforeInp before
+        (win, _, _, _) <- runFrame ctx frameInp u
+        reused <- layout
         writeIORef (ctxLayoutCache ctx) Nothing
-        _ <- runFrame ctx frameInp ui
-        assertEq failed reused =<< rects
+        _ <- runFrame ctx frameInp u
+        assertEq failed reused =<< layout
         pure (respRect win)
-  win0 <- warmup2 ctx inp0 ui
+      sameAsFresh frameInp u = sameAfter frameInp u frameInp u
+      still = ui False (V2 100 100)
+  win0 <- warmup2 ctx inp0 still
+  -- The window and the popup in it are both kept for the next frame.
+  _ <- runFrame ctx inp0 still
+  cache <- readIORef (ctxLayoutCache ctx)
+  placed <- maybe (pure IM.empty) (\(c, _, _) -> readIORef (lcPlaced c)) cache
+  assertEq failed 2 (IM.size placed)
+  _ <- sameAsFresh inp0 still
+  -- The window is given back and the popup in it placed again.
+  forM_ [1 .. 3 :: Int] $ \k -> do
+    let at d = ui False (V2 (100 + 7 * fromIntegral k + d) 120)
+    sameAfter inp0 (at 0) inp0 (at 3)
   let r0 = respRect win0
       V2 gx gy = windowTitleGrab r0
-  _ <- sameAsFresh inp0
-  _ <- runFrame ctx (pressAt inp0 (V2 gx gy)) ui
+  _ <- runFrame ctx (pressAt inp0 (V2 gx gy)) still
   forM_ [1 .. 4 :: Int] $ \k -> do
     let step = inp0 {inputMousePos = V2 (gx - 20 * fromIntegral k) (gy + 10 * fromIntegral k), inputButtonsHeld = buttonsFromList [MouseLeft]}
-    void (sameAsFresh step)
-  Rect x1 y1 _ _ <- sameAsFresh (applyMouseButton MouseLeft False inp0 {inputMousePos = V2 (gx - 80) (gy + 40)})
-  assert failed (x1 < rectX r0 - 40 && y1 > rectY r0 + 20)
+    void (sameAsFresh step still)
+  r1@(Rect x1 y1 _ _) <- sameAsFresh (applyMouseButton MouseLeft False inp0 {inputMousePos = V2 (gx - 80) (gy + 40)}) still
+  assert failed (x1 < rectX r0 - 40 && y1 > rectY r0)
+  let edgeX = rectX r1 + rectW r1 + 4
+      edgeY = rectY r1 + rectH r1 / 2
+  assertJustM failed (dragWindowEdge ctx inp0 still (V2 edgeX edgeY) (V2 (edgeX + 30) edgeY)) $ \r2 ->
+    assertGt failed (rectW r2) (rectW r1 + 20)
+  _ <- sameAsFresh inp0 still
+  _ <- sameAsFresh inp0 still
+  let small = withInput 520 360
+  _ <- runFrame ctx small still
+  _ <- sameAsFresh small still
+  _ <- runFrame ctx small (ui True (V2 100 100))
+  _ <- sameAsFresh small (ui True (V2 100 100))
+  void (sameAsFresh small (ui True (V2 100 100)))
+
+-- | A custom widget in a window is asked for its height at the width the
+-- window gives it. A measure whose answer there changes while its answer at
+-- the solve's offered width does not keeps the solve, but the window is
+-- placed again rather than given back what placing it left.
+runWindowCustomMeasurePlacementTest :: Context -> IORef Int -> IO ()
+runWindowCustomMeasurePlacementTest ctx failed = do
+  let inp = withInput 640 400
+      ui h = column $ fmap snd $ window True "Tools" $ column $ do
+        spacer (Fixed 240) (Fixed 1)
+        fst <$> customWidget defaultCustomWidgetSpec
+          { widgetMeasure = Just (\_ (w, _) -> if w >= 1e8 then (100, 20) else (w, h))
+          , widgetLayout = fillW defaultLayout
+          }
+      heightOf = maybe 0 (rectH . respRect)
+  short <- warmup2 ctx inp (ui 30)
+  assertEq failed 30 (heightOf short)
+  cache <- readIORef (ctxLayoutCache ctx) >>= evaluate >>= makeStableName
+  _ <- runFrame ctx inp (ui 60)
+  cache' <- readIORef (ctxLayoutCache ctx) >>= evaluate >>= makeStableName
+  assert failed (cache == cache')
+  tall <- evalUi ctx inp (ui 60)
+  assertEq failed 60 (heightOf tall)
+  reused <- arenaRects ctx
+  fresh <- newContext
+  void $ warmup2 fresh inp (ui 60)
+  assertEq failed reused =<< arenaRects fresh
 
 -- Wheeling over a window's body scrolls the window, not the page, whether the
 -- window is declared inside a page scroll area or beside one.

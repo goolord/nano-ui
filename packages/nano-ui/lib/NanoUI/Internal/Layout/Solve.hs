@@ -14,11 +14,11 @@ module NanoUI.Internal.Layout.Solve
   ) where
 
 import Control.Monad (filterM, foldM, foldM_, forM_, guard, mfilter, unless, when, zipWithM_)
-import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
+import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IM
 import Data.List (sortOn)
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, isJust)
 import Data.Ord (Down (..))
 import Data.Primitive.PrimArray
   ( copyMutablePrimArray
@@ -1743,6 +1743,13 @@ childBaseline env@SolveEnv {seArena = na, seArrays = a} ci h = do
 -- measured size near the top-right corner. A popup goes where its registered
 -- anchor, side and gap put it ('computePopupPosition'), by default at the
 -- origin with automatic placement.
+--
+-- With @placed@, what placing each node over the arena's current solve left
+-- ('PlacedFloat'), a node that goes to the rect it went to then gets that
+-- back instead of being laid out again, and a node laid out is recorded
+-- there. Nodes go in arena order, so a node inside another floating node is
+-- placed or put back after the outer one, whose record holds the inner
+-- subtree as the solve left it.
 placeFloatingNodes ::
   NodeArena ->
   Measurers ->
@@ -1751,44 +1758,84 @@ placeFloatingNodes ::
   (WidgetId -> IO (Maybe (Float, Float))) ->
   (WidgetId -> IO (Maybe (Float, Float))) ->
   (WidgetId -> IO (Maybe (PopupAnchor, PopupPlacement, Float))) ->
+  Maybe (IORef (IntMap PlacedFloat)) ->
   IO ()
-placeFloatingNodes na ms winW winH lookupPos lookupSize lookupAnchor = do
+placeFloatingNodes na ms winW winH lookupPos lookupSize lookupAnchor mPlaced = do
   env <- solveEnv na ms Nothing
-  forClassNodes_ na FloatingNodes $ \idx -> do
-    nt <- getNodeType na idx
-    wid <- getWidgetId na idx
-    Rect _ _ iw ih <- getNodeRect na idx
-    case nt of
-      NodeModal -> do
-        let w = min iw (max 0 (winW - 2 * windowMargin))
-            h = min ih (max 0 (winH - 2 * windowMargin))
-        positionNodeA env 0 idx (Rect (max 0 ((winW - w) / 2)) (max 0 ((winH - h) / 2)) w h)
-      NodeWindow -> do
-        (w0, h0) <- fromMaybe (min iw winW, min ih winH) <$> lookupSize wid
-        mpos <- lookupPos wid
-        placeWindowNode na ms winW winH idx w0 h0 $ \w -> fromMaybe (winW - w - windowMargin, windowMargin) mpos
-      _ -> do
-        mcfg <- lookupAnchor wid
-        let (anchor, placement, offset) = fromMaybe (AnchorPoint (V2 0 0), PlacementAuto, 4) mcfg
-            (x, y) = computePopupPosition winW winH windowMargin iw ih anchor placement offset
-        positionNodeA env 0 idx (Rect x y iw ih)
+  let place placed idx = do
+        rect <- floatingRect idx
+        case IM.lookup idx placed of
+          Just p | pfRect p == rect -> placed <$ restorePlaced na idx p
+          _ -> do
+            positionFloating env idx rect
+            maybe (IM.delete idx placed) (\p -> IM.insert idx p placed) <$> recordPlaced env idx rect
+  case mPlaced of
+    Nothing -> forClassNodes_ na FloatingNodes $ \idx -> positionFloating env idx =<< floatingRect idx
+    Just placedRef -> writeIORef placedRef =<< foldClassNodesM na FloatingNodes place =<< readIORef placedRef
+  where
+    floatingRect idx = do
+      nt <- getNodeType na idx
+      wid <- getWidgetId na idx
+      Rect _ _ iw ih <- getNodeRect na idx
+      case nt of
+        NodeModal -> do
+          let w = min iw (max 0 (winW - 2 * windowMargin))
+              h = min ih (max 0 (winH - 2 * windowMargin))
+          pure (Rect (max 0 ((winW - w) / 2)) (max 0 ((winH - h) / 2)) w h)
+        NodeWindow -> do
+          (w0, h0) <- fromMaybe (min iw winW, min ih winH) <$> lookupSize wid
+          mpos <- lookupPos wid
+          windowRect na winW winH idx w0 h0 $ \w -> fromMaybe (winW - w - windowMargin, windowMargin) mpos
+        _ -> do
+          mcfg <- lookupAnchor wid
+          let (anchor, placement, offset) = fromMaybe (AnchorPoint (V2 0 0), PlacementAuto, 4) mcfg
+              (x, y) = computePopupPosition winW winH windowMargin iw ih anchor placement offset
+          pure (Rect x y iw ih)
 
--- | Lay out window @idx@ at size @w0 h0@, clamped to its min and max size and
--- the screen, with its origin, given that size, clamped on screen. Fit sizing
--- caps at intrinsic size; floating windows use an explicit frame size.
+-- | Lay out floating node @idx@ and its subtree at @rect@: a window at
+-- exactly that rect, a modal or popup as the solve places a node offered it.
+positionFloating :: SolveEnv -> NodeIdx -> Rect -> IO ()
+positionFloating env@SolveEnv {seArena = na} idx rect@(Rect x y w h) = do
+  nt <- getNodeType na idx
+  if nt == NodeWindow
+    then do
+      setRect na idx x y w h
+      (pad, gap, dir) <- containerFlow (seArrays env) idx
+      positionChildren env 0 idx dir gap pad rect
+    else positionNodeA env 0 idx rect
+
+-- | What placing floating node @idx@ at @rect@ left ('snapshotPlaced'), or
+-- 'Nothing' when its subtree is not one index range or holds a drawing with
+-- a custom measure: placement asks that measure for its height at the placed
+-- width, which the layout cache does not check again.
+recordPlaced :: SolveEnv -> NodeIdx -> Rect -> IO (Maybe PlacedFloat)
+recordPlaced SolveEnv {seArena = na, seMs = ms} idx rect =
+  subtreeSpan na idx >>= \case
+    Nothing -> pure Nothing
+    Just n -> do
+      let measured i = do
+            nt <- getNodeType na i
+            if nt == NodeDrawing then isJust <$> (msLookupMeasure ms =<< getWidgetId na i) else pure False
+      anyMeasured <- foldUpTo n (\acc i -> if acc then pure True else measured (idx + i)) False
+      if anyMeasured then pure Nothing else Just <$> snapshotPlaced na idx n rect
+
+-- | Lay out window @idx@ at size @w0 h0@ ('windowRect').
 placeWindowNode :: NodeArena -> Measurers -> Float -> Float -> NodeIdx -> Float -> Float -> (Float -> (Float, Float)) -> IO ()
 placeWindowNode na ms winW winH idx w0 h0 originFor = do
+  env <- solveEnv na ms Nothing
+  positionFloating env idx =<< windowRect na winW winH idx w0 h0 originFor
+
+-- | Window @idx@'s rect at size @w0 h0@, clamped to its min and max size and
+-- the screen, with its origin, given that size, clamped on screen. Fit sizing
+-- caps at intrinsic size; floating windows use an explicit frame size.
+windowRect :: NodeArena -> Float -> Float -> NodeIdx -> Float -> Float -> (Float -> (Float, Float)) -> IO Rect
+windowRect na winW winH idx w0 h0 originFor = do
   AxisSizing _ _ minW maxW <- getWidthSizing na idx
   AxisSizing _ _ minH maxH <- getHeightSizing na idx
   let w = clamp minW (min maxW winW) w0
       h = clamp minH (min maxH winH) h0
       (x0, y0) = originFor w
-      x = clamp 0 (max 0 (winW - w)) x0
-      y = clamp 0 (max 0 (winH - h)) y0
-  setRect na idx x y w h
-  env <- solveEnv na ms Nothing
-  (pad, gap, dir) <- containerFlow (seArrays env) idx
-  positionChildren env 0 idx dir gap pad (Rect x y w h)
+  pure (Rect (clamp 0 (max 0 (winW - w)) x0) (clamp 0 (max 0 (winH - h)) y0) w h)
 
 -- | Horizontal placement for a widget-anchored popup. Aligns the popup's left
 -- edge with the anchor even when the anchor sits inside the window margin (a

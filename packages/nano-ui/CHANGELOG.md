@@ -232,11 +232,14 @@
   and `pinnedSide` the side test it turns on.
 - An open window, modal, popup or tooltip no longer turns off the reuse of
   the last frame's layout. The layout is cached as solved, before the floating
-  panels are placed, and a frame that reuses it places them again. A window
-  dragged or resized places the panels again over the frame's solve instead of
-  solving the whole layout a second time. Over 5000 rows, a frame with a window
-  open went from 15.8 to 11.1 ms and one dragging it from 20 to 11.2 ms, where
-  the page alone takes 10.6.
+  panels are placed, and a frame that reuses it gives each panel back what
+  placing it there left, laying out again only a panel that moved: dragged,
+  resized, or following its anchor. A window dragged or resized places the
+  panels again over the frame's solve instead of solving the whole layout a
+  second time. Over 5000 rows, a frame with a window open went from 15.8 to
+  11.1 ms and one dragging it from 20 to 11.2 ms, where the page alone takes
+  10.6. A still frame with a 300-row window open takes about 0.53 ms
+  instead of 0.7 and allocates 475 KB instead of 732 KB.
 - Damage in places far apart repaints as up to four disjoint pieces instead
   of their bounding box. Two labels changing in opposite corners no longer
   repaint the whole window: paint skips nodes that meet no piece, each piece
