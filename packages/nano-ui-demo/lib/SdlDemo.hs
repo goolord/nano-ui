@@ -707,7 +707,18 @@ demoUi = do
               captioned "Drawing" (diagram (fillW . maxH 200) . drawingSample =<< uiPlotStyle)
               -- NanoUI.Path paths on a plain canvas, without diagrams:
               -- transforms, fill rules, a gradient, joins, caps and dashes.
-              captioned "Canvas paths" (canvas (fixedWH 360 120) . pathSample =<< uiTheme)
+              -- The drawing reads only the series colours (yellow, orange
+              -- and accent among them) and its rect, so it is keyed by them:
+              -- the paths are flattened and triangulated once, not on every
+              -- frame, and a move only translates them.
+              captioned "Canvas paths" $ do
+                theme <- uiTheme
+                canvasConfigured
+                  defaultCanvasConfig
+                    { canvasLayout = fixedWH 360 120 defaultLayout
+                    , canvasContent = contentKeyOf (map (keyPart . colorToWord32) (themeSeries theme))
+                    }
+                  (pathSample theme)
 
             ------------------------------------------- Diagnostics ---------
             Diagnostics -> do
