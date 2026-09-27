@@ -99,7 +99,8 @@ runCursorShapeIdsLayoutTest ctx failed = do
 runCursorShapeFloatingTest :: Context -> IORef Int -> IO ()
 runCursorShapeFloatingTest ctx failed = do
   let tools = fst <$> window True "Tools" (label "Body")
-      over = (,) <$> tools <*> withCursorShape UiCursorMove (plainArea 620 380)
+      -- One page root: the frame lays out and paints only the first.
+      over = column ((,) <$> tools <*> withCursorShape UiCursorMove (plainArea 620 380))
       within = withCursorShape UiCursorMove (tools >> plainArea 620 380)
   (w, d) <- warmup2 ctx inp over
   assertJustM failed (getPrevRect ctx (respId w)) $ \wr -> do

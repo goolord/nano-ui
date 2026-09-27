@@ -67,6 +67,8 @@ module NanoUI.Internal.Monad
   , explainingLayout
   , explainedNode
   , explainScope
+  , withArenaRange
+  , inArenaRange
   , getScrollMetricsUi
   , setScrollOffsetUi
   , scrollToUi
@@ -678,15 +680,26 @@ explainScope body = do
   on <- liftIO (getExplainLayout ctx)
   if not on
     then body
-    else do
-      let count = liftIO (arenaCount (ctxNodeArena ctx))
-      from <- count
-      a <- body
-      below <- count
-      -- A subtree follows its root in the arena, so this range covers
-      -- everything the body added.
-      liftIO (modifyIORef' (ctxExplain ctx) (\es -> es {esScopes = (from, below) : esScopes es}))
-      pure a
+    else withArenaRange (\from below -> modifyIORef' (ctxExplain ctx) (\es -> es {esScopes = (from, below) : esScopes es})) body
+
+-- | Run @body@, then pass @record@ the range of arena indices it added,
+-- @from@ up to but not including @below@. The arena appends nodes in
+-- declaration order and a subtree follows its root, so the range covers
+-- exactly the nodes the body declared and their descendants.
+withArenaRange :: (Int -> Int -> IO ()) -> NanoUI a -> NanoUI a
+withArenaRange record body = do
+  ctx <- askContext
+  let count = liftIO (arenaCount (ctxNodeArena ctx))
+  !from <- count
+  a <- body
+  !below <- count
+  liftIO (record from below)
+  pure a
+
+-- | Whether arena index @idx@ is in a range 'withArenaRange' recorded.
+{-# INLINE inArenaRange #-}
+inArenaRange :: Int -> Int -> Int -> Bool
+inArenaRange from below idx = from <= idx && idx < below
 
 -- | The scroller's geometry as its last layout left it (its viewport, range
 -- and offset), or 'Nothing' before it has been laid out. The id is the one a

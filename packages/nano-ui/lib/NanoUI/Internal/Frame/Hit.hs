@@ -11,6 +11,7 @@ module NanoUI.Internal.Frame.Hit
   , topmostOverlayAtMouse
   , topmostFloating
   , widgetOverlayAllowed
+  , widgetInModal
   , nodeOwnsPointer
   , nodePointVisible
   , nodeClippedHit
@@ -22,6 +23,7 @@ module NanoUI.Internal.Frame.Hit
   , reachedHit
   , innermostHit
   , topmostHit
+  , innermostNodeAt
   )
 where
 
@@ -128,7 +130,12 @@ nodeOwnsPointer ctx@Context {ctxNodeArena = na} idx =
 widgetOverlayAllowed :: Context -> WidgetId -> IO Bool
 widgetOverlayAllowed ctx wid = do
   top <- topModalNode (ctxNodeArena ctx)
-  maybe (pure True) (\modal -> widgetIdInSubtree ctx modal wid) top
+  widgetInModal ctx top wid
+
+-- | 'widgetOverlayAllowed' with the top modal ('topModalNode') supplied by
+-- the caller, which looks it up once when it tests many widgets.
+widgetInModal :: Context -> Maybe NodeIdx -> WidgetId -> IO Bool
+widgetInModal ctx top wid = maybe (pure True) (\modal -> widgetIdInSubtree ctx modal wid) top
 
 -- | Whether @mouse@ is on the visible part of node @idx@: inside its non-empty
 -- rect, and inside its clip rect when it has one. An empty clip (a viewport
@@ -281,3 +288,35 @@ topmostHit Context {ctxNodeArena = na} hits first = do
   over top i
     | i <= first = pure top
     | otherwise = ifM (hits i <&&> drawnOver na i top) (pure i) (pure top)
+
+-- | The node drawn on top at a point: the last node in paint order that
+-- @step@ reports hit. Paint draws children over their parent, in
+-- 'forChildrenInPaintOrder_' order, and each floating panel as a layer of its
+-- own over the page: windows, then modals, then popups, each kind in arena
+-- order. The search covers the floating panel @top@ and the panels declared
+-- inside it, or with 'Nothing' the page: node 0, the one root the frame lays
+-- out and paints, unless the view has no page and node 0 is a panel.
+--
+-- @step s idx@ tests node @idx@, reached with state @s@ (a layer's root with
+-- @s0@): whether it is hit, and the state to search its children with, or
+-- 'Nothing' when none of them can be hit. The result carries the state the
+-- node was reached with.
+innermostNodeAt :: Context -> Maybe NodeIdx -> (s -> NodeIdx -> IO (Bool, Maybe s)) -> s -> IO (Maybe (NodeIdx, s))
+innermostNodeAt ctx@Context {ctxNodeArena = na} top step s0 = do
+  roots <- case top of
+    Nothing -> do
+      count <- arenaCount na
+      page <- if count > 0 then not . isFloatingNode <$> getNodeType na 0 else pure False
+      pure [0 | page]
+    Just panel -> do
+      -- Newest first, so each kind's panels come out topmost first.
+      inside <- foldClassNodesM na FloatingNodes (\acc i -> ifM (pure (i >= panel) <&&> nodeInSubtree ctx i panel) ((: acc) . (,i) <$> getNodeType na i) (pure acc)) []
+      pure [i | nt <- [NodePopup, NodeModal, NodeWindow], (t, i) <- inside, t == nt]
+  foldr (\root rest -> search s0 root >>= maybe rest (pure . Just)) (pure Nothing) roots
+ where
+  -- The topmost child first ('firstChildOnTopJustM'), so the first hit
+  -- found in a subtree is the one drawn last.
+  search s idx = do
+    (hit, inner) <- step s idx
+    deeper <- maybe (pure Nothing) (\s' -> firstChildOnTopJustM na idx (search s')) inner
+    pure (deeper <|> if hit then Just (idx, s) else Nothing)

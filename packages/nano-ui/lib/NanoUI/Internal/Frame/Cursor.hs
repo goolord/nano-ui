@@ -7,10 +7,10 @@ module NanoUI.Internal.Frame.Cursor
   )
 where
 
-import Control.Monad (forM, forM_, unless, when)
+import Control.Monad (forM)
 import Control.Monad.Trans.Maybe (MaybeT (..))
 import Data.Foldable (asum, find)
-import Data.IORef (newIORef, readIORef, writeIORef)
+import Data.IORef (readIORef)
 import Data.Maybe (fromMaybe, isJust)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Font (sliderHitBounds)
@@ -24,7 +24,7 @@ import NanoUI.Internal.Frame.Window (windowResizeCursorKind)
 import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena
-import NanoUI.Internal.Monad (ifM, whenM, (<&&>))
+import NanoUI.Internal.Monad (ifM, inArenaRange, (<&&>))
 import NanoUI.Internal.Types (Rect (..), V2 (..), rectContains)
 import NanoUI.Internal.WidgetText (hasFlag, numericStepperRects, textInputFlagNumeric)
 import NanoUI.Internal.Widgets.Custom (mkCustomDrawContext)
@@ -190,7 +190,7 @@ cursorRegionKind ctx inp =
           mIdx <- nodeOnTopAt ctx top mouse
           -- Outer scopes are listed first, so the last match is innermost.
           pure $ mIdx >>= \idx ->
-            foldl' (\found (from, to, kind) -> if from <= idx && idx < to then Just kind else found) Nothing regions
+            foldl' (\found (from, to, kind) -> if inArenaRange from to idx then Just kind else found) Nothing regions
 
 -- | Whether @mouse@ is on the visible part of any node in the scopes' ranges.
 anyScopeNodeAt :: Context -> V2 -> [(Int, Int, UiCursorKind)] -> IO Bool
@@ -203,39 +203,17 @@ anyScopeNodeAt ctx mouse = go
           | i >= to = go rest
           | otherwise = ifM (nodePointVisible ctx i mouse) (pure True) (scan (i + 1))
 
--- | The last-painted node whose visible part contains @mouse@, searching the
--- floating panel @top@ if the pointer is confined to one, else the page.
--- Mirrors paint order: children over parents via 'forChildrenInPaintOrder_'
--- (later layered children and pinned children on top), and floating panels
--- as separate layers over the page (windows, then modals, then popups).
--- Non-container nodes clip their children, so a miss skips the subtree.
+-- | The node drawn on top whose visible part contains @mouse@
+-- ('innermostNodeAt'), searching the floating panel @top@ if the pointer is
+-- confined to one, else the page. Non-container nodes clip their children,
+-- so a miss skips the subtree.
 nodeOnTopAt :: Context -> Maybe NodeIdx -> V2 -> IO (Maybe NodeIdx)
-nodeOnTopAt ctx@Context {ctxNodeArena = na} top mouse = do
-  found <- newIORef Nothing
-  let visit i = do
-        hit <- nodePointVisible ctx i mouse
-        when hit (writeIORef found (Just i))
-        nt <- getNodeType na i
-        when (hit || nt == NodeContainer) $
-          forChildrenInPaintOrder_ na i visitLayer
-      -- Floating panels are separate layers, not part of their parent's.
-      visitLayer i = do
-        floating <- isFloatingNode <$> getNodeType na i
-        unless floating (visit i)
-  case top of
-    Just panel -> do
-      visit panel
-      -- Panels declared inside it (a menu in a modal) paint over it in panel
-      -- order. Only modals confine the pointer, so this is usually empty.
-      forM_ [NodeWindow, NodeModal, NodePopup] $ \nt ->
-        forFloatingNodes_ na nt $ \i ->
-          when (i > panel) $ whenM (nodeInSubtree ctx i panel) (visit i)
-    Nothing -> do
-      count <- arenaCount na
-      forM_ [0 .. count - 1] $ \i -> do
-        parent <- getParent na i
-        when (parent < 0) (visitLayer i)
-  readIORef found
+nodeOnTopAt ctx top mouse = fmap fst <$> innermostNodeAt ctx top visit ()
+  where
+    visit () i = do
+      hit <- nodePointVisible ctx i mouse
+      nt <- getNodeType (ctxNodeArena ctx) i
+      pure (hit, if hit || nt == NodeContainer then Just () else Nothing)
 
 -- | Whether 'uiCursorKind' requests the link/button pointer cursor.
 pointerCursorWanted :: Context -> Input -> IO Bool

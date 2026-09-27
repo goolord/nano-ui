@@ -18,10 +18,11 @@ import Data.Maybe (mapMaybe)
 import Data.Text qualified as T
 import NanoUI.Internal.Context
 import NanoUI.Internal.Draw (DrawArena, Layer (..), beginLayer, pushRect)
-import NanoUI.Internal.Frame.Hit (topmostFloating)
+import NanoUI.Internal.Frame.Hit (innermostNodeAt, topmostFloating)
 import NanoUI.Internal.Frame.Node (childPaintClip)
 import NanoUI.Internal.Input (Input (..))
 import NanoUI.Internal.Layout.Arena
+import NanoUI.Internal.Monad (inArenaRange)
 import NanoUI.Internal.Id (hashWidgetId)
 import NanoUI.Internal.Style (Direction (..), Flow (..), Padding (..), Theme, fadeAlpha, themeSeries)
 import NanoUI.Internal.Types (Color, Rect (..), Size (..), V2 (..), rectContains, rectHit, rectIntersect)
@@ -38,7 +39,7 @@ explainFrame ctx@Context {ctxNodeArena = na} inp = do
       Size w h = inputWindowSize inp
       window = Rect 0 0 w h
       -- Whether the overlay shows node @idx@: it is in a scope, or there are none.
-      inScope idx = null scopes || any (\(from, below) -> idx >= from && idx < below) scopes
+      inScope idx = null scopes || any (\(from, below) -> inArenaRange from below idx) scopes
       -- Outlines of node @idx@ and its descendants in declaration order,
       -- prepended to @rest@. Children, pinned ones included, are visited in
       -- reverse so the result comes out in order.
@@ -49,21 +50,14 @@ explainFrame ctx@Context {ctxNodeArena = na} inp = do
           Nothing -> pure rest
           Just c -> foldPlacedChildrenM na idx (\acc ci -> outlines (depth + 1) c ci acc) rest
         pure (if inScope idx then (rect, clip, depth) : below else below)
-      -- The innermost node under the pointer from @idx@ down: search the
-      -- topmost child first ('firstChildOnTopJustM': earlier siblings over
-      -- later ones, but later layers over earlier ones, and pinned children
-      -- over the rest), else @idx@ itself. A child can paint outside its row
-      -- or column, so every child is searched.
-      nodeAt !depth clip idx = do
+      -- Node @idx@, at @depth@ in its layer and painted in @clip@, for
+      -- 'innermostNodeAt': whether the overlay shows it under the pointer,
+      -- and its children's depth and clip. A child can paint outside its row
+      -- or column, so every child whose clip is not empty is searched.
+      atPointer (!depth, clip) idx = do
         rect <- getNodeRect na idx
         inner <- childClip ctx idx clip rect
-        deeper <- maybe (pure Nothing) (firstChildOnTopJustM na idx . nodeAt (depth + 1)) inner
-        case deeper of
-          Just _ -> pure deeper
-          Nothing
-            | inScope idx && rectHit rect mouse && rectContains clip mouse ->
-                Just . (,clip) <$> describeNode na depth idx
-            | otherwise -> pure Nothing
+        pure (inScope idx && rectHit rect mouse && rectContains clip mouse, (depth + 1,) <$> inner)
   count <- arenaCount na
   -- Layers in paint order: the page, then windows, modals and popups, each
   -- kind in arena order. The page root is node 0, unless the view has no
@@ -78,8 +72,10 @@ explainFrame ctx@Context {ctxNodeArena = na} inp = do
   route <- getsInteraction ctx isPointerRoute
   hover <- case route of
     RouteLayer _ | count > 0 -> do
-      let panelAt nt rest = topmostFloating ctx (== nt) (`rectHit` mouse) >>= maybe rest pure
-      nodeAt (0 :: Int) window =<< foldr panelAt (pure 0) [NodePopup, NodeModal, NodeWindow]
+      let panelAt nt rest = topmostFloating ctx (== nt) (`rectHit` mouse) >>= maybe rest (pure . Just)
+      top <- foldr panelAt (pure Nothing) [NodePopup, NodeModal, NodeWindow]
+      found <- innermostNodeAt ctx top atPointer (0 :: Int, window)
+      traverse (\(idx, (depth, clip)) -> (,clip) <$> describeNode na depth idx) found
     -- Any other route means a dropdown or the text-edit menu has the pointer.
     _ -> pure Nothing
   ExplainState {esLayers = prevLayers, esHover = prevHover} <- readIORef (ctxExplain ctx)

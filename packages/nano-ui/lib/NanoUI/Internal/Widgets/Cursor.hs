@@ -8,8 +8,7 @@ import Control.Monad (when)
 import Data.IORef (modifyIORef')
 import NanoUI.Internal.Context (Context (..))
 import NanoUI.Internal.Input (UiCursorKind)
-import NanoUI.Internal.Layout.Arena (arenaCount)
-import NanoUI.Internal.Monad (NanoUI, askContext, liftIO)
+import NanoUI.Internal.Monad (NanoUI, askContext, withArenaRange)
 
 -- | Show @shape@ while the pointer is over the widgets and containers declared
 -- inside. Gaps in the enclosing container keep their own cursor.
@@ -32,13 +31,6 @@ import NanoUI.Internal.Monad (NanoUI, askContext, liftIO)
 withCursorShape :: UiCursorKind -> NanoUI a -> NanoUI a
 withCursorShape !shape body = do
   ctx <- askContext
-  let na = ctxNodeArena ctx
-  -- The arena appends nodes in declaration order, so the scope covers exactly
-  -- the nodes added while the body runs.
-  !start <- liftIO (arenaCount na)
-  result <- body
-  liftIO $ do
-    !end <- arenaCount na
-    when (end > start) $
-      modifyIORef' (ctxCursorRegions ctx) ((start, end, shape) :)
-  pure result
+  withArenaRange
+    (\start end -> when (end > start) $ modifyIORef' (ctxCursorRegions ctx) ((start, end, shape) :))
+    body

@@ -83,8 +83,7 @@ tabStops ctx = do
   -- The modal's root is looked up once for the whole list. Each widget then
   -- costs one walk up its ancestors.
   top <- topModalNode (ctxNodeArena ctx)
-  let inModal w = maybe (pure True) (\modal -> widgetIdInSubtree ctx modal w) top
-  filterM inModal . filter (/= WidgetId 0) =<< getFocusables ctx
+  filterM (widgetInModal ctx top) . filter (/= WidgetId 0) =<< getFocusables ctx
 
 -- | Whether @w@ is one of the 'tabStops', without building them: one scan
 -- of the registered ids and one walk up @w@'s ancestors.
