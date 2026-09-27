@@ -805,6 +805,12 @@
   font's metrics, as their tones.
 - `runCanvas` is deprecated: it flattens curves for a guessed display
   scale. Use `runCanvasFor` with the widget's draw context, or `canvas`.
+- A wrapped label, and text in a drawing or rich text, draws only the lines
+  near its clip, so a label or paragraph taller than its scroller costs the
+  lines in view. One label of 1000 lines in a scroll area paints in 0.03 ms
+  instead of 1.3 ms (2000 lines: 0.03 ms instead of 42 ms, which also
+  overflowed the SDL text caches), and a 2000-sentence rich text in 2.4 ms
+  instead of 48 ms.
 
 ### Fixed
 

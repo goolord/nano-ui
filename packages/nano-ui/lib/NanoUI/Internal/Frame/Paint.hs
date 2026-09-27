@@ -30,7 +30,7 @@ import qualified Data.Text as T
 import Data.Word (Word32)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Draw
-import NanoUI.Internal.Font (ScrollBarSlot (..))
+import NanoUI.Internal.Font (ScrollBarSlot (..), fmLineHeight)
 import NanoUI.Internal.Frame.Chrome
 import NanoUI.Internal.Frame.Node (nodeFontNative, readScrollNode, resolveTextFont)
 import NanoUI.Internal.Frame.Paint.Widgets (PaintEnv (..), buildPaintEnv, paintTextAreaNode, paintTextInputNode, paintWidget)
@@ -298,11 +298,23 @@ paintTextNode env@PaintEnv {peNodeArena = arena, peDrawArena = da} idx rect@(Rec
         draw (Rect tx ty _ _, line, spanFg, _) prepared =
           unless (T.null line) $
             pushPreparedTextStyled da prepared weight style deco tx ty line spanFg
-        -- 'placeSpanLines' makes one span per line, in order.
-        wrapped (s : ss) ((_, prepared) : lns) = draw s prepared >> wrapped ss lns
-        wrapped _ _ = pure ()
     case sceLines e of
-      SpanWrapped lns -> wrapped (sceSpans e) lns
+      SpanWrapped lns -> do
+        -- Only the lines that reach the clip draw, so a label taller than
+        -- its viewport costs the lines it shows. 'placeSpanLines' makes one
+        -- span per line, top down: skip the lines wholly above the clip and
+        -- stop at the first one below it. The slack is the one the glyph
+        -- walks allow for ink outside the line box.
+        Rect _ clipY _ clipH <- currentClip da
+        let !slack = glyphSlackLines * fmLineHeight (sceFont e)
+            !top = clipY - slack
+            !bottom = clipY + clipH + slack
+            wrapped (s@(Rect _ ty _ th, _, _, _) : ss) ((_, prepared) : rest)
+              | ty > bottom = pure ()
+              | ty + th < top = wrapped ss rest
+              | otherwise = draw s prepared >> wrapped ss rest
+            wrapped _ _ = pure ()
+        wrapped (sceSpans e) lns
       SpanSingle _ prepared -> mapM_ (`draw` prepared) (sceSpans e)
 
 paintSeparatorNode :: PaintEnv -> Rect -> IO ()

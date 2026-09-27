@@ -37,6 +37,7 @@ tests =
   , spec "scroll-lockstep-probe" runScrollLockstepProbeTest
   , spec "scroll-2d-grow-min-width" runScroll2DGrowMinWidthTest
   , spec "page-scroll-backdrop-coverage" runPageScrollBackdropCoverageTest
+  , spec "scroll-tall-label-cull" runTallLabelCullTest
   , pixelSpec "scroll-2d-pad-fill-overflow" run2DPadFillOverflowTest
   , pixelSpec "scroll-2d-pad-overflow-scrolls" run2DPadOverflowScrollsTest
   , pixelSpec "scroll-step" runScrollStepTest
@@ -228,6 +229,29 @@ runPageScrollBackdropCoverageTest ctx failed = do
                 && abs (qy + qh - (ry + rh)) <= 0.6)
             quads
     assert failed covered
+
+-- A label far taller than its scroller draws only the lines near the
+-- viewport: its quads stay few however long the text is, and every row of
+-- the viewport inside its padding still shows a glyph, wherever the scroller
+-- is. Monospace glyphs are boxes a line tall, so the rows they cover are the
+-- lines drawn.
+runTallLabelCullTest :: Context -> IORef Int -> IO ()
+runTallLabelCullTest ctx failed = do
+  let inp0 = withInputOff 300 220
+      txt = T.intercalate "\n" [T.pack ("line " <> show i) | i <- [1 .. 1000 :: Int]]
+      ui = fmap fst $ scrollArea (fillW . fixedH 100) (labelWith fillW txt)
+  sid <- warmup2 ctx inp0 ui
+  forM_ [0, 3333, 1000000] $ \off -> do
+    setScrollOffset ctx sid off
+    _ <- runFrame ctx inp0 ui
+    (_, _, draw, _) <- runFrame ctx inp0 ui
+    assertJustM failed (getPrevRect ctx sid) $ \(Rect rx ry rw rh) -> do
+      quads <- drawQuads draw
+      -- Glyph boxes, not the scroller's backdrop, border or bar.
+      let glyphs = [r | (r@(Rect qx _ qw qh), _) <- quads, qw < 40, qh < 40, qx < rx + rw / 2]
+          shown y = any (\(Rect _ gy _ gh) -> gy <= y && y < gy + gh) glyphs
+      assert failed (length quads < 400)
+      assert failed (all shown [ry + fromIntegral k | k <- [12, 17 .. floor rh - 12 :: Int]])
 
 runScrollTopClipTest :: Context -> IORef Int -> IO ()
 runScrollTopClipTest ctx failed = do
