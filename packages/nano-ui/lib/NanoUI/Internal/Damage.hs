@@ -11,17 +11,22 @@ module NanoUI.Internal.Damage
 
 import Control.Applicative ((<|>))
 import Control.Exception (evaluate)
-import Control.Monad (filterM, forM_, unless, when, (<$!>), (>=>))
-import Data.Bits (xor)
+import Control.Monad (filterM, forM_, unless, when, (>=>))
+import Data.Bits (xor, (.&.), (.|.))
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
 import Data.IntSet qualified as IS
 import Data.List (partition, tails)
 import Data.Maybe (fromMaybe, isJust, isNothing)
 import Data.Hashable (hashWithSalt)
-import Data.Primitive.Array (newArray, readArray, sizeofMutableArray, writeArray)
-import Data.Primitive.PrimArray (newPrimArray, writePrimArray)
+import Data.Primitive.Array (MutableArray, newArray, readArray, sizeofMutableArray, writeArray)
+import Data.Primitive.PrimArray (MutablePrimArray, newPrimArray, readPrimArray, writePrimArray)
+import Data.Primitive.PrimVar (readPrimVar, writePrimVar)
+import Data.Text (Text)
+import Data.Text qualified as T
+import GHC.Exts (RealWorld)
 import NanoUI.Internal.Context
+import NanoUI.Internal.Context.Types (newPrevWalk, noImagePaint)
 import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Internal.Input
 import NanoUI.Internal.Store (diffKeys, eqByPtr, mirrorStoresChanged, ptrEq, slotChangedKeys)
@@ -148,51 +153,69 @@ updatePrevRects ctx@Context {ctxNodeArena = na} size@(Size winW winH) = do
       -- ('getIdSuperseded'). Counting each would mask a key that went away,
       -- and writing each would rewrite the maps every frame. Each node also
       -- records its key and rect by index ('ctxPrevByIdx').
+      --
+      -- A node with the key and kinds of entries the last walk saw at its
+      -- index ('PrevWalk') already has its entries in the maps: it is
+      -- compared with that record instead of looked up, and writes only the
+      -- entries that changed.
       PrevByIdx idxKeys idxRects idxCount <- prevByIdxRoom ctx count
+      (walk, known) <- prevWalkFor ctx count oldRects
       let go !i !m !cm !tm !lm !foundOld !dropped
             | i >= count =
                 if dropped || foundOld /= IM.size oldRects || foundOuter /= IM.size oldOuters
                   then setPrev emptyPrevFrame >> updatePrevRects ctx size
                   else do
                     unless (idxCount == count) $ writeIORef (ctxPrevByIdx ctx) $! PrevByIdx idxKeys idxRects count
+                    writeIORef (pwFor walk) m
+                    writePrimVar (pwValid walk) count
                     unless (ptrEq m oldRects && ptrEq cm oldClips && ptrEq om oldOuters && ptrEq tm oldTexts && ptrEq lm oldImages) $
                       setPrev (PrevFrame m cm om tm lm)
             | otherwise = do
                 wid <- getWidgetId na i
                 superseded <- if hashWidgetId wid == 0 then pure True else getIdSuperseded na i
                 if superseded
-                  then writePrimArray idxKeys i 0 >> go (i + 1) m cm tm lm foundOld dropped
+                  then writePrimArray idxKeys i 0 >> forgetAt walk i >> go (i + 1) m cm tm lm foundOld dropped
                   else do
                     let !k = intKey wid
-                        isOld = IM.member k oldRects
-                    mRect <- getNonzeroRect na i
-                    case mRect of
-                      Nothing -> do
+                    r <- getNodeRect na i
+                    if not (rectNonEmpty r)
+                      then do
                         writePrimArray idxKeys i 0
+                        forgetAt walk i
+                        let !isOld = IM.member k oldRects
                         go (i + 1) (if isOld then IM.delete k m else m) (dropKey k cm) (dropKey k tm) (dropKey k lm) foundOld (dropped || isOld)
-                      Just r -> do
+                      else do
                         mClip <- getClipBounds na i
                         nt <- getNodeType na i
-                        tm' <-
-                          if nt == NodeText
-                            then (\txt -> putNew k txt tm) <$!> getText na i
-                            else pure $! dropKey k tm
+                        let hasText = nt == NodeText
+                            isImage = nt == NodeImage
+                        txt <- if hasText then getText na i else pure T.empty
                         -- Switching an image, or how it is drawn, repaints
                         -- it like new text.
-                        lm' <-
-                          if nt == NodeImage
-                            then do
-                              tid <- getImageId na i
-                              node <- getImageNode na i
-                              pure $! putImage k lm tid node
-                            else pure $! dropKey k lm
+                        tid <- if isImage then getImageId na i else pure 0
+                        node <- if isImage then getImageNode na i else pure Nothing
+                        changed <- recordAt walk known i k r mClip hasText txt isImage tid node
+                        img <- if isImage then readArray (pwImages walk) i else pure noImagePaint
                         -- By index too. An unchanged rect keeps the object
                         -- already stored, so a still frame allocates nothing;
                         -- a new one is read back so it is boxed only here.
                         writePrimArray idxKeys i k
                         was <- readArray idxRects i
                         now <- if was == r then pure was else writeArray idxRects i r >> readArray idxRects i
-                        go (i + 1) (putNew k now m) (maybe (dropKey k cm) (\c -> putNew k c cm) mClip) tm' lm' (foundOld + if isOld then 1 else 0) dropped
+                        if changed < 0
+                          then do
+                            let !isOld = IM.member k oldRects
+                            go (i + 1) (putNew k now m) (maybe (dropKey k cm) (\c -> putNew k c cm) mClip)
+                              (if hasText then putNew k txt tm else dropKey k tm)
+                              (if isImage then putNew k img lm else dropKey k lm)
+                              (foundOld + if isOld then 1 else 0) dropped
+                          else do
+                            let put :: Int -> a -> IM.IntMap a -> IM.IntMap a
+                                put bit v mp = if changed .&. bit == 0 then mp else IM.insert k v mp
+                            go (i + 1) (put changedRect now m) (maybe cm (\c -> put changedClip c cm) mClip)
+                              (if hasText then put changedText txt tm else tm)
+                              (if isImage then put changedImage img lm else lm)
+                              (foundOld + 1) dropped
       go 0 m0 oldClips oldTexts oldImages foundContainers droppedContainer
 
 -- | 'ctxPrevByIdx' with room for @n@ nodes. Growing empties it until
@@ -207,22 +230,105 @@ prevByIdxRoom ctx n = do
       grown <- PrevByIdx <$> newPrimArray cap <*> newArray cap (Rect 0 0 0 0) <*> pure 0
       grown <$ writeIORef (ctxPrevByIdx ctx) grown
 
+-- | The last walk's record, with room for @count@ nodes, and how many of its
+-- indices describe @oldRects@. It reads as empty until this walk completes,
+-- so a walk that restarts or throws leaves nothing stale behind.
+{-# INLINE prevWalkFor #-}
+prevWalkFor :: Context -> Int -> IM.IntMap Rect -> IO (PrevWalk, Int)
+prevWalkFor ctx count oldRects = do
+  lastWalk <- readIORef (ctxPrevWalk ctx)
+  valid <- readPrimVar (pwValid lastWalk)
+  for <- readIORef (pwFor lastWalk)
+  if sizeofMutableArray (pwTexts lastWalk) >= count
+    then do
+      writePrimVar (pwValid lastWalk) 0
+      pure (lastWalk, if ptrEq for oldRects then valid else 0)
+    else do
+      walk <- newPrevWalk (max 64 (2 * count))
+      writeIORef (ctxPrevWalk ctx) walk
+      pure (walk, 0)
+
+-- | Record that the walk made no entries for node @i@.
+{-# INLINE forgetAt #-}
+forgetAt :: PrevWalk -> Int -> IO ()
+forgetAt walk i = writePrimArray (pwKeys walk) i 0
+
+-- | Bits of the entries 'recordAt' finds changed.
+changedRect, changedClip, changedText, changedImage :: Int
+changedRect = 1
+changedClip = 2
+changedText = 4
+changedImage = 8
+
+-- | Record node @i@ of this walk: key @k@, its rect, and the clip, text and
+-- image (@tid@ and @node@) it has. Returns the entries that changed since
+-- the last walk ('changedRect' ...), or -1 when that walk saw another key
+-- there, a node with other kinds of entries, or nothing (at or past
+-- @known@).
+recordAt :: PrevWalk -> Int -> Int -> Int -> Rect -> Maybe Rect -> Bool -> Text -> Bool -> Int -> Maybe ImageNode -> IO Int
+recordAt walk known i k (Rect x y w h) mClip hasText txt isImage tid node = do
+  let !tag = maybe 0 (const changedClip) mClip .|. (if hasText then changedText else 0) .|. (if isImage then changedImage else 0)
+  same <-
+    if i >= known
+      then pure False
+      else (\k0 t0 -> k0 == k && t0 == tag) <$> readPrimArray (pwKeys walk) i <*> readPrimArray (pwTags walk) i
+  unless same $ do
+    writePrimArray (pwKeys walk) i k
+    writePrimArray (pwTags walk) i tag
+  rect <- swapRect (pwGeom walk) (8 * i) x y w h
+  clip <- maybe (pure False) (\(Rect cx cy cw ch) -> swapRect (pwGeom walk) (8 * i + 4) cx cy cw ch) mClip
+  text <- swapBoxed (pwTexts walk) i eqByPtr txt
+  imaged <- swapImage (pwImages walk) i tid node
+  let bit b on = if on then b else 0
+  pure $
+    if same
+      then bit changedRect rect .|. bit changedClip clip .|. bit changedText text .|. bit changedImage imaged
+      else -1
+
+-- | Write a rect at offset @o@ if it changed, and say whether it did.
+{-# INLINE swapRect #-}
+swapRect :: MutablePrimArray RealWorld Float -> Int -> Float -> Float -> Float -> Float -> IO Bool
+swapRect geom o x y w h = do
+  x0 <- readPrimArray geom o
+  y0 <- readPrimArray geom (o + 1)
+  w0 <- readPrimArray geom (o + 2)
+  h0 <- readPrimArray geom (o + 3)
+  if x0 == x && y0 == y && w0 == w && h0 == h
+    then pure False
+    else do
+      writePrimArray geom o x
+      writePrimArray geom (o + 1) y
+      writePrimArray geom (o + 2) w
+      writePrimArray geom (o + 3) h
+      pure True
+
+-- | Write @v@ at @i@ unless it equals what is there, and say whether it did.
+{-# INLINE swapBoxed #-}
+swapBoxed :: MutableArray RealWorld a -> Int -> (a -> a -> Bool) -> a -> IO Bool
+swapBoxed arr i eq v = do
+  old <- readArray arr i
+  if eq old v then pure False else True <$ writeArray arr i v
+
+-- | Write what an image node draws at @i@ unless it is what is there, and
+-- say whether it was not. Compared before an entry is built, so an unchanged
+-- image allocates nothing. A node that is no image passes id 0 and no look.
+{-# INLINE swapImage #-}
+swapImage :: MutableArray RealWorld ImagePaint -> Int -> Int -> Maybe ImageNode -> IO Bool
+swapImage arr i tid node = do
+  ImagePaint t look <- readArray arr i
+  if t == tid && sameLook look node
+    then pure False
+    else True <$ writeArray arr i (ImagePaint tid (maybe Nothing (\n -> Just $! inLook n) node))
+  where
+    sameLook (Just l) (Just n) = l == inLook n
+    sameLook Nothing Nothing = True
+    sameLook _ _ = False
+
 -- | Insert, returning @m@ itself when @k@ already maps to @v@, so pointer
 -- equality survives an unchanged frame.
 {-# INLINE putNew #-}
 putNew :: Eq a => Int -> a -> IM.IntMap a -> IM.IntMap a
 putNew k v m = if IM.lookup k m == Just v then m else IM.insert k v m
-
--- | 'putNew' for what an image node draws, comparing before it builds the
--- entry, so an unchanged image allocates nothing.
-putImage :: Int -> IM.IntMap ImagePaint -> Int -> Maybe ImageNode -> IM.IntMap ImagePaint
-putImage k m tid node = case IM.lookup k m of
-  Just (ImagePaint t look) | t == tid && sameLook look node -> m
-  _ -> IM.insert k (ImagePaint tid (inLook <$> node)) m
-  where
-    sameLook (Just look) (Just n) = look == inLook n
-    sameLook Nothing Nothing = True
-    sameLook _ _ = False
 
 -- | Delete, returning @m@ itself when @k@ is absent.
 {-# INLINE dropKey #-}
@@ -327,50 +433,55 @@ writeDamage ctx inp snap = do
   windowLive <- getsInteraction ctx (\s -> isJust (isWindowDrag s) || isJust (isWindowResize s))
   requests <- getsDamage ctx dsRequests
   redrawn <- refreshCustomDrawings ctx
+  wanted <- readIORef (ctxDamageWanted ctx)
   let oldStore = fsStore snap
       newFloatingRects = IM.fromList panels
-  (settledMoved, churn) <- rectDeltas (map snd panels) (fsPrev snap) new
-  let scrollChanged = not (eqByPtr (storeFloat oldStore) (storeFloat newStore))
-      pointsChanged = not (eqByPtr (storePoint oldStore) (storePoint newStore))
-  let delta =
-        FrameDelta
-          { fdWinSize = inputWindowSize inp
-          , fdStore = newStore
-          , fdPrev = new
-          , fdFloatingRects = newFloatingRects
-          , fdModalFlip = modalFlip
-          , fdLiveAnims = liveAnims
-          , fdWindowLive = windowLive
-          , fdRequests = requests
-          , fdAnimLive = not (IM.null liveAnims) || settled
-          , fdFloatingChanged = fsFloatingRects snap /= newFloatingRects
-          , fdScrollChanged = scrollChanged
-          , fdPointsChanged = pointsChanged
-          , fdScrollOnly =
-              scrollChanged
-                && not pointsChanged
-                && storeMirrorGen oldStore == storeMirrorGen newStore
-                && storeOpenSelect oldStore == storeOpenSelect newStore
-                && null (slotChangedKeys oldStore newStore)
-          , fdSettledMoved = settledMoved
-          , fdChurn = churn
-          , fdRedrawn = redrawn
-          }
-  -- The store diff runs only once the cheap checks would clip: a frame
-  -- already repainting whole needs no per-key damage.
-  (dmg, pieces) <-
-    if needsFullDamage snap delta
-      then pure (DamageFull, [])
-      else do
-        (misses, owners) <- storeKeyChanges ctx oldStore newStore
-        -- A changed key that resolves to no node (a local hook's key, or a
-        -- widget-internal key nothing in the arena carries) may have changed
-        -- paint state no diff describes, so nothing narrower than the window
-        -- is known to cover it. Key 0 names no widget and is damaged by
-        -- nothing, so its writes cannot escalate a frame.
-        if any (\k -> k /= 0 && IM.notMember k owners) misses
+      floatingChanged = fsFloatingRects snap /= newFloatingRects
+      changes = do
+        (settledMoved, churn) <- rectDeltas (map snd panels) (fsPrev snap) new
+        let scrollChanged = not (eqByPtr (storeFloat oldStore) (storeFloat newStore))
+            pointsChanged = not (eqByPtr (storePoint oldStore) (storePoint newStore))
+        let delta =
+              FrameDelta
+                { fdWinSize = inputWindowSize inp
+                , fdStore = newStore
+                , fdPrev = new
+                , fdFloatingRects = newFloatingRects
+                , fdModalFlip = modalFlip
+                , fdLiveAnims = liveAnims
+                , fdWindowLive = windowLive
+                , fdRequests = requests
+                , fdAnimLive = not (IM.null liveAnims) || settled
+                , fdFloatingChanged = floatingChanged
+                , fdScrollChanged = scrollChanged
+                , fdPointsChanged = pointsChanged
+                , fdScrollOnly =
+                    scrollChanged
+                      && not pointsChanged
+                      && storeMirrorGen oldStore == storeMirrorGen newStore
+                      && storeOpenSelect oldStore == storeOpenSelect newStore
+                      && null (slotChangedKeys oldStore newStore)
+                , fdSettledMoved = settledMoved
+                , fdChurn = churn
+                , fdRedrawn = redrawn
+                }
+        -- The store diff runs only once the cheap checks would clip: a frame
+        -- already repainting whole needs no per-key damage.
+        if needsFullDamage snap delta
           then pure (DamageFull, [])
-          else clipDamage ctx snap delta owners
+          else do
+            (misses, owners) <- storeKeyChanges ctx oldStore newStore
+            -- A changed key that resolves to no node (a local hook's key, or a
+            -- widget-internal key nothing in the arena carries) may have changed
+            -- paint state no diff describes, so nothing narrower than the window
+            -- is known to cover it. Key 0 names no widget and is damaged by
+            -- nothing, so its writes cannot escalate a frame.
+            if any (\k -> k /= 0 && IM.notMember k owners) misses
+              then pure (DamageFull, [])
+              else clipDamage ctx snap delta owners
+  -- A host repainting the whole window whatever changed does not read the
+  -- damage, so nothing is diffed ('ctxDamageWanted').
+  (dmg, pieces) <- if wanted then changes else pure (DamageFull, [])
   modifyDamage ctx $ \ds ->
     ds
       { dsDamage = dmg
@@ -387,7 +498,7 @@ writeDamage ctx inp snap = do
   -- floating change each made this frame repaint whole already, so their
   -- pixels are not waiting on the next frame.
   when modalFlip (markDirtyCovered ctx)
-  when (fdFloatingChanged delta && not (IM.null (fsFloatingRects snap) && not (IM.null newFloatingRects))) $
+  when (floatingChanged && not (IM.null (fsFloatingRects snap) && not (IM.null newFloatingRects))) $
     markDirtyCovered ctx
 
 -- | Settle every drawing's ops for this frame and return the keys of those
@@ -557,16 +668,17 @@ clipDamage ctx snap d owners = do
   -- keysChanged predicate already forces full damage. updatePrevRects keeps
   -- last frame's map when no text changed.
   let addText k = mapM_ (addRect acc) (IM.lookup k (pfRects new))
-  unless (ptrEq (pfTexts new) (pfTexts old)) $
+      !newTexts = pfTexts new
+      !oldTexts = pfTexts old
+      !newImages = pfImages new
+      !oldImages = pfImages old
+  unless (ptrEq newTexts oldTexts) $
     IM.foldrWithKey (\k _ rest -> addText k >> rest) (pure ()) $
-      IM.differenceWith
-        (\n o -> if n /= o then Just n else Nothing)
-        (pfTexts new)
-        (pfTexts old)
+      IM.differenceWith (\n o -> if n /= o then Just n else Nothing) newTexts oldTexts
   -- An image switched or drawn another way repaints like a text change.
-  unless (ptrEq (pfImages new) (pfImages old)) $
-    forM_ (IM.keys (IM.union (pfImages new) (pfImages old))) $ \k ->
-      unless (IM.lookup k (pfImages new) == IM.lookup k (pfImages old)) (addText k)
+  unless (ptrEq newImages oldImages) $
+    forM_ (IM.keys (IM.union newImages oldImages)) $ \k ->
+      unless (IM.lookup k newImages == IM.lookup k oldImages) (addText k)
   -- Drawings redrawn in place repaint their own rects, like a text change
   -- that keeps its rect.
   forM_ (fdRedrawn d) $ \k ->
@@ -706,8 +818,9 @@ rectDeltas panelRects oldP newP
         (IM.mergeWithKey (\_ a b -> if a /= b then Just (rectUnion a b) else Nothing) id id old new)
       (,) <$> (group <$> readIORef settled) <*> (group <$> readIORef churn)
   where
-    old = pfRects oldP
-    new = pfRects newP
+    -- Forced, so an unchanged frame's maps compare by pointer ('ptrEq').
+    !old = pfRects oldP
+    !new = pfRects newP
     emptyGroup = RectGroup False False (Rect 0 0 0 0)
     unionNonEmpty a b
       | not (rectNonEmpty a) = b

@@ -755,6 +755,12 @@
   On the headless profiler, 3000 frames of a button grid with a pointer
   moving over it and a floating window allocate 1.46 GB instead of 1.64 GB,
   or 1.38 GB instead of 1.48 GB with a modal.
+- Each frame's damage bookkeeping compares a widget with what the last
+  frame recorded at the same node instead of looking it up in five maps,
+  and no longer diffs maps and stores the frame left unchanged. A frame of
+  3000 rows under the pointer takes about 9 ms instead of 16 ms and
+  allocates 6.0 MB instead of 6.5 MB; a scrolled one about 20 ms instead
+  of 27 ms.
 - The node index by widget id is an unboxed table, so indexing and looking
   up a widget allocate nothing, and `nano-ui` no longer depends on
   `hashtables`.

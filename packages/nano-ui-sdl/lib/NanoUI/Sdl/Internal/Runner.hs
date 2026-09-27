@@ -16,6 +16,7 @@ import GHC.Clock (getMonotonicTime)
 import NanoUI
 import NanoUI.Backend (answerScreenshots)
 import NanoUI.Testing
+import NanoUI.Internal.Context (Context (ctxDamageWanted))
 import NanoUI.Internal.Debug (CoreDebugSnapshot (..), noteDebugPresent, noteDebugSkip, refreshDebugSnapshot)
 import NanoUI.Sdl.Internal.Debug
 import NanoUI.Sdl.Internal.Display (outPair, pushRefreshEvent, queryMouseWindowPos, queryWindowLogicalSize)
@@ -95,9 +96,13 @@ drawFrameWith ctx env inp forceFull evaluateUi = do
       -- translucent window colour.
       transparent = isJust (sdlTransparent env)
   writeIORef (ctxPaintFull ctx) (presentFull || transparent)
+  -- A full present ignores the frame's damage (below), so the frame need not
+  -- work it out. Frames run outside a draw still do.
+  writeIORef (ctxDamageWanted ctx) (not presentFull)
   t0 <- getMonotonicTime
   (drawData, dirtyAfterUi) <- evaluateUi
   t1 <- getMonotonicTime
+  writeIORef (ctxDamageWanted ctx) True
   -- Sync SDL text input with the focus and caret every frame. A skipped
   -- frame would look like a focus change mid-composition and drop it.
   zoom <- windowZoom env

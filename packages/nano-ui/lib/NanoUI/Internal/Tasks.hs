@@ -20,29 +20,32 @@ where
 
 import Control.Concurrent (forkIO, killThread)
 import Control.Exception (SomeAsyncException, SomeException, evaluate, fromException, throwIO, try)
-import Control.Monad (unless, void)
+import Control.Monad (filterM, unless, void, when)
 import Data.Dynamic (Dynamic, fromDynamic, toDyn)
 import Data.IORef (IORef, atomicModifyIORef', atomicWriteIORef, newIORef, readIORef, writeIORef)
 import Data.IntMap.Strict (IntMap)
 import Data.IntMap.Strict qualified as IM
-import Data.IntSet (IntSet)
 import Data.IntSet qualified as IS
-import Data.Maybe (isJust)
-import Data.Typeable (Typeable, cast)
+import Data.Maybe (isJust, isNothing)
+import Data.Primitive.PrimVar (PrimVar, modifyPrimVar, newPrimVar, readPrimVar, writePrimVar)
+import Data.Type.Equality ((:~:) (Refl))
+import Data.Typeable (Typeable, cast, eqT)
 import Effectful (Eff, type (:>))
 import GHC.Conc (labelThread)
+import GHC.Exts (RealWorld)
 import NanoUI.Internal.Context (Context, askHostIO, hostOrInit, intKey, wakeFromThread)
 import NanoUI.Internal.Monad (Ui, askContext, freshWidget, uiIO)
 
--- | Per-context hook resources, stored as a host value ('hostOrInit').
-newtype Held = Held (IORef HeldTable)
+-- | Per-context hook resources, stored as a host value ('hostOrInit'): the
+-- resources by widget store key; the frame the view is running, which each
+-- hook stamps its entry with; how many entries are stamped this frame (in
+-- any view pass); and how many there are. A frame whose hooks all ran ends
+-- without looking at any entry.
+data Held = Held !(IORef (IntMap Holding)) !(PrimVar RealWorld Int) !(PrimVar RealWorld Int) !(PrimVar RealWorld Int)
 
--- | Resources by widget store key, plus the keys whose hook ran this frame
--- (in any view pass).
-data HeldTable = HeldTable !(IntMap Holding) !IntSet
-
--- | A hook's key (compared by value), its resource, and the release action.
-data Holding = forall k. (Eq k, Typeable k) => Holding !k !Dynamic !(IO ())
+-- | A hook's key (compared by value), its resource, the release action, and
+-- the last frame its hook ran.
+data Holding = forall k. (Eq k, Typeable k) => Holding !k !Dynamic !(IO ()) !(PrimVar RealWorld Int)
 
 -- | Hold a resource for key @k@ at this hook's widget id. While the key is
 -- unchanged the cached value is returned. Otherwise the old resource is
@@ -52,26 +55,42 @@ data Holding = forall k. (Eq k, Typeable k) => Holding !k !Dynamic !(IO ())
 -- when the session ends ('cancelTasks'). Holds job threads and
 -- 'NanoUI.useImageRgba' images.
 useHeld :: (Eq k, Typeable k, Typeable a, Ui :> es) => k -> (Context -> Maybe a -> IO (a, IO ())) -> Eff es a
-useHeld k acquire = do
+useHeld k acquire = useHeldBy k Just (\ctx old -> (\(v, release) -> (v, v, release)) <$> acquire ctx old)
+
+-- | 'useHeld' keeping an @s@ and returning what @view@ finds in it. An entry
+-- @view@ finds nothing in is replaced, as one of another type is.
+{-# INLINE useHeldBy #-}
+useHeldBy :: (Eq k, Typeable k, Typeable s, Ui :> es) => k -> (s -> Maybe b) -> (Context -> Maybe b -> IO (s, b, IO ())) -> Eff es b
+useHeldBy k view acquire = do
   (wid, ctx) <- freshWidget
   uiIO $ do
-    Held ref <- hostOrInit ctx (Held <$> newIORef (HeldTable IM.empty IS.empty))
-    HeldTable held called <- readIORef ref
+    Held ref frameVar stampedVar countVar <- hostOrInit ctx newHeld
+    held <- readIORef ref
+    frame <- readPrimVar frameVar
     let key = intKey wid
         entry = IM.lookup key held
-        valueOf (Holding _ v _) = fromDynamic v
+        valueOf (Holding _ v _ _) = view =<< fromDynamic v
+        stamp = modifyPrimVar stampedVar (+ 1)
     case entry of
-      Just h@(Holding k0 _ _) | cast k0 == Just k, Just v <- valueOf h -> do
-        unless (IS.member key called) $ writeIORef ref $! HeldTable held (IS.insert key called)
+      Just h@(Holding k0 _ _ seen) | cast k0 == Just k, Just v <- valueOf h -> do
+        s <- readPrimVar seen
+        unless (s == frame) $ writePrimVar seen frame >> stamp
         pure v
       _ -> do
-        mapM_ letGo entry
-        (v, release) <- acquire ctx (valueOf =<< entry)
-        writeIORef ref $! HeldTable (IM.insert key (Holding k (toDyn v) release) held) (IS.insert key called)
+        -- A replaced entry stamped earlier this frame stays counted.
+        counted <- maybe (pure False) (\old -> letGo old >> (== frame) <$> seenIn old) entry
+        (stored, v, release) <- acquire ctx (valueOf =<< entry)
+        seen <- newPrimVar frame
+        writeIORef ref $! IM.insert key (Holding k (toDyn stored) release seen) held
+        unless counted stamp
+        when (isNothing entry) $ modifyPrimVar countVar (+ 1)
         pure v
+  where
+    newHeld = Held <$> newIORef IM.empty <*> newPrimVar 0 <*> newPrimVar 0 <*> newPrimVar 0
+    seenIn (Holding _ _ _ seen) = readPrimVar seen
 
 letGo :: Holding -> IO ()
-letGo (Holding _ _ release) = release
+letGo (Holding _ _ release _) = release
 
 -- | State of a 'useTaskStatus' job. The 'Maybe' is the latest result from an
 -- earlier key, so the view can keep showing it instead of flickering.
@@ -88,16 +107,26 @@ data TaskStatus a
 -- allocates.
 data Outcome a = Outcome !(TaskStatus a) !(Maybe a)
 
--- | 'useHeld' for a job. @start@ builds the result box (given the old box
--- when the types match) and the action to fork.
-useJob :: (Eq k, Typeable k, Typeable b, Ui :> es) => k -> (Context -> Maybe b -> IO (b, IO ())) -> Eff es b
-useJob k start = useHeld k $ \ctx old -> do
-  (box, run) <- start ctx old
+-- | A job's result box as its hook keeps it. The type of the box itself is
+-- known here, so finding it costs a fingerprint compare; a 'Dynamic' of the
+-- box would build that type from the caller's result type on every call.
+data TaskBox = forall a. Typeable a => TaskBox !(IORef (Outcome a))
+
+-- | The box, if its job returns an @a@.
+taskRef :: forall a. Typeable a => TaskBox -> Maybe (IORef (Outcome a))
+taskRef (TaskBox (ref :: IORef (Outcome b))) = (\Refl -> ref) <$> eqT @a @b
+
+-- | 'useHeldBy' for a job. @start@ builds what the hook keeps, the result
+-- box (given the old box when @view@ finds one) and the action to fork.
+{-# INLINE useJob #-}
+useJob :: (Eq k, Typeable k, Typeable s, Ui :> es) => k -> (s -> Maybe b) -> (Context -> Maybe b -> IO (s, b, IO ())) -> Eff es b
+useJob k view start = useHeldBy k view $ \ctx old -> do
+  (stored, box, run) <- start ctx old
   tid <- forkIO run
   labelThread tid "nano-ui task"
   -- Kill from a separate thread: 'killThread' blocks until the job receives
   -- the exception, which masking or a foreign call can delay.
-  pure (box, void (forkIO (killThread tid)))
+  pure (stored, box, void (forkIO (killThread tid)))
 
 -- | Run an action on a worker thread and report its status: running, done,
 -- or failed with the exception it threw.
@@ -151,12 +180,13 @@ useTask k run = (\(Outcome _ latest) -> latest) <$> useOutcome k run
 -- carrying the replaced job's latest result.
 useOutcome :: (Eq k, Typeable k, Typeable a, Ui :> es) => k -> IO a -> Eff es (Outcome a)
 useOutcome k run = do
-  box <- useJob k $ \ctx old -> do
+  box <- useJob k taskRef $ \ctx old -> do
     prev <- maybe (pure Nothing) (fmap (\(Outcome _ latest) -> latest) . readIORef) old
     box <- newIORef (Outcome (TaskRunning prev) prev)
     let finish = (>> wakeFromThread ctx) . atomicWriteIORef box
     pure
-      ( box
+      ( TaskBox box
+      , box
       , try (run >>= evaluate) >>= \case
           Right a -> finish (Outcome (TaskDone a) (Just a))
           Left e
@@ -187,9 +217,9 @@ useOutcome k run = do
 -- inside to show it in the state.
 useStream :: (Eq k, Typeable k, Typeable s, Ui :> es) => k -> s -> (((s -> s) -> IO ()) -> IO ()) -> Eff es s
 useStream k initial produce = do
-  box <- useJob k $ \ctx _ -> do
+  box <- useJob k Just $ \ctx _ -> do
     box <- newIORef initial
-    pure (box, produce (\f -> atomicModifyIORef' box (\s -> (f s, ())) >> wakeFromThread ctx))
+    pure (box, box, produce (\f -> atomicModifyIORef' box (\s -> (f s, ())) >> wakeFromThread ctx))
   uiIO (readIORef box)
 
 -- | An action any thread can call to rerun the view after changing something
@@ -203,16 +233,23 @@ askWake :: Ui :> es => Eff es (IO ())
 askWake = wakeFromThread <$> askContext
 
 -- | End-of-frame sweep: release resources whose hook did not run this frame.
--- Two view passes in one frame count as one.
+-- Two view passes in one frame count as one. When every hook ran, it touches
+-- no entry.
 sweepHeld :: Context -> IO ()
-sweepHeld ctx = askHostIO ctx >>= mapM_ (\(Held ref) -> sweep ref)
+sweepHeld ctx = askHostIO ctx >>= mapM_ sweep
   where
-    sweep ref = do
-      HeldTable held called <- readIORef ref
-      unless (IM.null held && IS.null called) $ do
-        let (kept, gone) = IM.partitionWithKey (\k _ -> IS.member k called) held
-        writeIORef ref $! HeldTable kept IS.empty
-        mapM_ letGo gone
+    sweep (Held ref frameVar stampedVar countVar) = do
+      frame <- readPrimVar frameVar
+      stamped <- readPrimVar stampedVar
+      count <- readPrimVar countVar
+      writePrimVar frameVar (frame + 1)
+      writePrimVar stampedVar 0
+      unless (stamped == count) $ do
+        held <- readIORef ref
+        gone <- filterM (\(_, Holding _ _ _ seen) -> (/= frame) <$> readPrimVar seen) (IM.toAscList held)
+        writeIORef ref $! IM.withoutKeys held (IS.fromDistinctAscList (map fst gone))
+        writePrimVar countVar (count - length gone)
+        mapM_ (letGo . snd) gone
 
 -- | Kill every job on the context and release images held by
 -- 'NanoUI.useImageRgba', at session end. 'NanoUI.Runner.runSessionLoop' calls
@@ -220,7 +257,9 @@ sweepHeld ctx = askHostIO ctx >>= mapM_ (\(Held ref) -> sweep ref)
 cancelTasks :: Context -> IO ()
 cancelTasks ctx = askHostIO ctx >>= mapM_ cancelAll
   where
-    cancelAll (Held ref) = do
-      HeldTable held _ <- readIORef ref
-      writeIORef ref $! HeldTable IM.empty IS.empty
+    cancelAll (Held ref _ stampedVar countVar) = do
+      held <- readIORef ref
+      writeIORef ref IM.empty
+      writePrimVar stampedVar 0
+      writePrimVar countVar 0
       mapM_ letGo held

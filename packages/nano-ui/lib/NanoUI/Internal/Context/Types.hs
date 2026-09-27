@@ -21,9 +21,12 @@ module NanoUI.Internal.Context.Types
   , initialDamageState
   , PrevFrame (..)
   , ImagePaint (..)
+  , noImagePaint
   , emptyPrevFrame
   , PrevByIdx (..)
   , newPrevByIdx
+  , PrevWalk (..)
+  , newPrevWalk
   , OverlayState (..)
   , initialOverlayState
   , ExplainState (..)
@@ -75,14 +78,15 @@ import Data.Dynamic (Dynamic)
 import Data.HashMap.Strict (HashMap)
 import Data.HashMap.Strict qualified as HashMap
 import Data.Hashable (Hashable)
-import Data.IORef (IORef, modifyIORef', readIORef, writeIORef)
+import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.IntMap.Strict (IntMap)
 import Data.IntMap.Strict qualified as IM
 import Data.IntSet (IntSet)
 import Data.IntSet qualified as IS
 import Data.Map.Strict (Map)
 import Data.Primitive.Array (MutableArray, newArray)
-import Data.Primitive.PrimArray (MutablePrimArray, newPrimArray)
+import Data.Primitive.PrimArray (MutablePrimArray, newPrimArray, setPrimArray)
+import Data.Primitive.PrimVar (PrimVar, newPrimVar)
 import Data.Primitive.SmallArray (SmallArray, SmallMutableArray)
 import Data.Word (Word64)
 import Data.Text (Text)
@@ -298,7 +302,11 @@ data PrevFrame = PrevFrame
 -- | What an image node draws: its image id, and its look ('Nothing' for a
 -- plain image).
 data ImagePaint = ImagePaint !Int !(Maybe ImageLook)
-  deriving (Eq)
+  deriving (Eq, Show)
+
+-- | What a node that is no image draws: id 0 and no look.
+noImagePaint :: ImagePaint
+noImagePaint = ImagePaint 0 Nothing
 
 emptyPrevFrame :: PrevFrame
 emptyPrevFrame = PrevFrame IM.empty IM.empty IM.empty IM.empty IM.empty
@@ -315,6 +323,37 @@ data PrevByIdx = PrevByIdx
 -- | Empty 'PrevByIdx'.
 newPrevByIdx :: IO PrevByIdx
 newPrevByIdx = PrevByIdx <$> newPrimArray 0 <*> newArray 0 (Rect 0 0 0 0) <*> pure 0
+-- | What the last completed 'NanoUI.Internal.Damage.updatePrevRects' walk
+-- saw at each arena index, so a node that has not changed since skips the
+-- 'PrevFrame' maps: they already hold its entries. Valid only while
+-- 'dsPrev' still holds the rects that walk built ('pwFor'). Updated in
+-- place, so a frame allocates none of it.
+data PrevWalk = PrevWalk
+  { pwKeys :: !(MutablePrimArray RealWorld Int)
+  -- ^ The node's key, or 0 where the walk made no entries.
+  , pwTags :: !(MutablePrimArray RealWorld Int)
+  -- ^ Which of a clip, text and image the node has.
+  , pwGeom :: !(MutablePrimArray RealWorld Float)
+  -- ^ Eight per index: the rect, then the clip.
+  , pwTexts :: !(MutableArray RealWorld Text)
+  , pwImages :: !(MutableArray RealWorld ImagePaint)
+  , pwValid :: !(PrimVar RealWorld Int)
+  -- ^ How many indices hold entries: none while a walk is under way.
+  , pwFor :: !(IORef (IntMap Rect))
+  }
+
+-- | Room for @n@ nodes, with no entries.
+newPrevWalk :: Int -> IO PrevWalk
+newPrevWalk n = do
+  keys <- newPrimArray n
+  setPrimArray keys 0 n 0
+  tags <- newPrimArray n
+  setPrimArray tags 0 n 0
+  geom <- newPrimArray (8 * n)
+  setPrimArray geom 0 (8 * n) 0
+  texts <- newArray n mempty
+  images <- newArray n noImagePaint
+  PrevWalk keys tags geom texts images <$> newPrimVar 0 <*> newIORef IM.empty
 
 -- | Require a first frame and full repaint, with no previous geometry.
 initialDamageState :: DamageState
@@ -853,6 +892,7 @@ data Context = Context
   , ctxStore :: IORef WidgetStore
   , ctxDamageState :: IORef DamageState
   , ctxPrevByIdx :: !(IORef PrevByIdx)
+  , ctxPrevWalk :: !(IORef PrevWalk)
   , ctxOverlayState :: IORef OverlayState
   , ctxAnimationState :: IORef AnimationState
   , ctxScrollState :: !(IORef ScrollState)
@@ -892,6 +932,11 @@ data Context = Context
   -- page scroller's backdrop that would only repeat that clear.
   , ctxPaintFull :: !(IORef Bool)
   , ctxDrawReuse :: !(IORef DrawReuse)
+  -- | Whether the host reads this frame's damage
+  -- ('NanoUI.Internal.Context.Core.takeDamage'). A host that repaints the
+  -- whole window whatever changed (a continuous session) clears it, and the
+  -- frame reports 'DamageFull' without diffing anything. True by default.
+  , ctxDamageWanted :: !(IORef Bool)
   -- | Layout overlay state.
   , ctxExplain :: !(IORef ExplainState)
   , ctxTheme :: !(IORef Theme)
