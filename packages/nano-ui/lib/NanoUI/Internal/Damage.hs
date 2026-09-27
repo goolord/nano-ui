@@ -520,16 +520,17 @@ clipDamage ctx snap d owners = do
   -- keysChanged predicate already forces full damage. updatePrevRects keeps
   -- last frame's map when no text changed.
   let addText k = mapM_ (addRect acc) (IM.lookup k (pfRects new))
-  unless (ptrEq (pfTexts new) (pfTexts old)) $
+      !newTexts = pfTexts new
+      !oldTexts = pfTexts old
+      !newLooks = pfLooks new
+      !oldLooks = pfLooks old
+  unless (ptrEq newTexts oldTexts) $
     IM.foldrWithKey (\k _ rest -> addText k >> rest) (pure ()) $
-      IM.differenceWith
-        (\n o -> if n /= o then Just n else Nothing)
-        (pfTexts new)
-        (pfTexts old)
+      IM.differenceWith (\n o -> if n /= o then Just n else Nothing) newTexts oldTexts
   -- An image whose look changed repaints like a text change.
-  unless (ptrEq (pfLooks new) (pfLooks old)) $
-    forM_ (IM.keys (IM.union (pfLooks new) (pfLooks old))) $ \k ->
-      unless (IM.lookup k (pfLooks new) == IM.lookup k (pfLooks old)) (addText k)
+  unless (ptrEq newLooks oldLooks) $
+    forM_ (IM.keys (IM.union newLooks oldLooks)) $ \k ->
+      unless (IM.lookup k newLooks == IM.lookup k oldLooks) (addText k)
   -- Drawings redrawn in place repaint their own rects, like a text change
   -- that keeps its rect.
   forM_ (fdRedrawn d) $ \k ->
@@ -669,8 +670,9 @@ rectDeltas panelRects oldP newP
         (IM.mergeWithKey (\_ a b -> if a /= b then Just (rectUnion a b) else Nothing) id id old new)
       (,) <$> (group <$> readIORef settled) <*> (group <$> readIORef churn)
   where
-    old = pfRects oldP
-    new = pfRects newP
+    -- Forced, so an unchanged frame's maps compare by pointer ('ptrEq').
+    !old = pfRects oldP
+    !new = pfRects newP
     emptyGroup = RectGroup False False (Rect 0 0 0 0)
     unionNonEmpty a b
       | not (rectNonEmpty a) = b
