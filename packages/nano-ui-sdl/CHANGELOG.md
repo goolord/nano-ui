@@ -133,6 +133,12 @@
   again on every paint. Glyphs outside the clip emit no quads. Repainting a
   text area that holds a 20,000-character line went from 6.1 ms and 8 MB
   allocated a frame to 0.12 ms and 15 KB in `nano-ui-sdl-profile`.
+- A font's caches of prepared and drawn texts hold twice what the last frame
+  looked up in them, and 1024 at least, where they held 1024. A frame that
+  drew more distinct texts in one font rotated each out before the next
+  frame drew it, and shaped and placed every one again: one label of 2000
+  lines went from 57 ms and 83 MB allocated a frame to 5.9 ms and 8.2 MB,
+  and a grid of 2400 labels from 16.7 ms to 4.0 ms.
 - `NanoUI.Sdl.Input` and `NanoUI.Sdl.NanoUIFont` are now
   `NanoUI.Sdl.Internal.Input` and `NanoUI.Sdl.Internal.NanoUIFont`.
   `NanoUIFont` is still exported from `NanoUI.Backend.Sdl`.
