@@ -32,6 +32,7 @@ import NanoUI.Internal.Layout.Arena (NodeIdx, NodeType (..), addNodeFromLayout)
 import NanoUI.Internal.Monad
 import NanoUI.Internal.Store (deleteSlot, fieldQuiet, findSlot, insertSlot)
 import NanoUI.Internal.Style
+import NanoUI.Internal.Tasks (useHeld)
 import NanoUI.Internal.Types
 import NanoUI.Internal.Widgets.Behavior (useDismissable)
 import NanoUI.Internal.Widgets.Layout (label)
@@ -186,21 +187,30 @@ tooltipWidgetConfigured cfg target child = do
   -- pointer-following tooltip lags one frame behind the pointer.
   onTip <- liftIO ((== RouteLayer (intKey wid)) <$> getsInteraction ctx isPointerRoute)
   let hovered = onTarget || (onTip && rectHit rect mouse)
-  open <- liftIO (tooltipTimer ctx cfg (intKey wid) hovered frame)
+  (open, armed) <- liftIO (tooltipTimer ctx cfg (intKey wid) hovered frame)
   -- Request a frame when the pointer enters or leaves the target, even a
   -- label or container, and on every move while a following tooltip is open.
   liftIO (registerHoverZone ctx (open && follow) rect)
   let (anchor, placement)
         | follow = (AnchorRect (Rect mx my 0 pointerClearance), PlacementBelow)
         | otherwise = (AnchorRect rect, tooltipPlacement cfg)
-  snd <$> popup open ((defaultPopupConfig anchor) {cfgPlacement = placement, cfgDismissable = False, cfgOffset = tooltipGap cfg}) child
+  result <- snd <$> popup open ((defaultPopupConfig anchor) {cfgPlacement = placement, cfgDismissable = False, cfgOffset = tooltipGap cfg}) child
+  -- A tooltip the view stops declaring while it waits or shows forgets its
+  -- time: the frame that skips it lets go of this hook ('useHeld'). Coming
+  -- back, it waits out its delay again rather than opening at once or
+  -- ending other tooltips' delays. The hook takes one id either way.
+  if armed
+    then scope (useHeld () (\_ _ -> pure ((), modifyStore ctx (deleteSlot fieldQuiet (slotKey SlotTooltipShow (intKey wid))))))
+    else burstNextIds 1
+  pure result
 
 -- | Offset below the pointer's hot spot for a following tooltip, before the
 -- gap: roughly an arrow cursor's height, so the cursor does not cover it.
 pointerClearance :: Float
 pointerClearance = 16
 
--- | Whether the tooltip with store key @k@ is open this frame. The delay
+-- | Whether the tooltip with store key @k@ is open this frame, and whether it
+-- keeps a time (waits or shows) for the next frame. The delay
 -- starts when the target becomes @hovered@ and ends after 'tooltipDelay', or
 -- at once within 'tooltipGrace' of the last tooltip closing. A held button
 -- keeps the tooltip shut and restarts the delay on release; a wheel turn
@@ -209,7 +219,7 @@ pointerClearance = 16
 -- The times live in quiet store slots, which neither damage nor wake.
 -- Opening and closing repaint as a floating panel, and the opening frame is
 -- scheduled with 'requestWakeAt', so an idle app draws nothing while waiting.
-tooltipTimer :: Context -> TooltipConfig -> Int -> Bool -> Input -> IO Bool
+tooltipTimer :: Context -> TooltipConfig -> Int -> Bool -> Input -> IO (Bool, Bool)
 tooltipTimer ctx cfg k hovered inp = do
   store <- getStore ctx
   let showK = slotKey SlotTooltipShow k
@@ -220,7 +230,7 @@ tooltipTimer ctx cfg k hovered inp = do
       interrupted = anyButtonPressed inp || inputScroll inp /= V2 0 0
   -- Fast path: most targets are not near the pointer.
   if not hovered && showAt0 == 0 && (lastUp0 == 0 || not interrupted)
-    then pure False
+    then pure (False, False)
     else do
       now <- getMonotonicTime
       let micros t = round (t * 1e6) :: Int
@@ -254,7 +264,7 @@ tooltipTimer ctx cfg k hovered inp = do
         modifyStore ctx (set showK showAt . set lastK lastUp)
       when (showAt > 0 && not open) $
         requestWakeAt ctx (fromIntegral showAt / 1e6)
-      pure open
+      pure (open, showAt > 0)
 
 -- | Attach a rich tooltip widget to an inner UI computation.
 withTooltip ::

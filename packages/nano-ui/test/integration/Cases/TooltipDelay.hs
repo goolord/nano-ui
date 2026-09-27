@@ -11,6 +11,7 @@ tests =
   [ spec "tooltip-delay-wait" runTooltipDelayWaitTest
   , spec "tooltip-delay-open" runTooltipDelayOpenTest
   , spec "tooltip-delay-reset" runTooltipDelayResetTest
+  , spec "tooltip-undeclared" runTooltipUndeclaredTest
   , spec "tooltip-grace" runTooltipGraceTest
   , spec "tooltip-grace-after-rest" runTooltipGraceAfterRestTest
   , spec "tooltip-target-not-widget" runTooltipTargetNotWidgetTest
@@ -90,6 +91,25 @@ runTooltipDelayOpenTest ctx failed = do
   assertEq failed 0 =<< getWakeAt ctx
   settles
   assert failed . hasText "Tip text" =<< collectOverlayTextSpans ctx hover
+
+-- | A tooltip the view stops declaring while it waits forgets the wait:
+-- declared again with the pointer still on its target, it waits out its
+-- delay again instead of opening at once.
+runTooltipUndeclaredTest :: Context -> IORef Int -> IO ()
+runTooltipUndeclaredTest ctx failed = do
+  let cfg = defaultTooltipConfig {tooltipDelay = 0.05, tooltipGrace = 0}
+      ui shown = column $ do
+        target <- button' "Tip Target"
+        target <$ when shown (tooltipConfigured cfg target "Tip text")
+      tip yes shown i = assertEq failed ["Tip text" | yes] =<< tipsAfter ctx (ui shown) i
+      settle = threadDelay 100000
+  target <- warmup2 ctx inp0 (ui True)
+  let hover = inp0 {inputMousePos = centerOf target}
+  tip False True hover
+  tip False False hover
+  settle
+  tip False True hover
+  settle >> tip True True hover
 
 -- | Leaving the target closes and repaints the tooltip; returning waits
 -- again. A press closes it with no wake while held, and so does a wheel turn.
