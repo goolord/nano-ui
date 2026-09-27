@@ -22,6 +22,8 @@ module NanoUI.Internal.Draw.Arena
   , finishDraw
   , withVerts
   , withVertsRaw
+  , reserveRaw
+  , commitRaw
   , withVertsReserve
   , pushQuad
   , snapRectOrigin
@@ -176,17 +178,23 @@ growBuffers da vCount iCount needV needI = do
         writeIORef fptrRef newFPtr
         writeIORef capRef newCap
 
-{-# INLINE ensureAndAlloc #-}
-ensureAndAlloc :: DrawArena -> Int -> Int -> IO (Ptr Word8, Ptr Word8, Int, Int)
-ensureAndAlloc da needV needI = do
+-- | Reserve room for @needV@ vertices and @needI@ indices: the vertex and
+-- index buffers and the first free vertex and index. Commit what was
+-- written with 'commitRaw'. A primitive with a long body calls these
+-- directly rather than passing it to 'withVertsRaw' as a closure, which it
+-- would allocate on every call.
+{-# INLINE reserveRaw #-}
+reserveRaw :: DrawArena -> Int -> Int -> IO (Ptr Word8, Ptr Word8, Int, Int)
+reserveRaw da needV needI = do
   vCount <- getCount da vertexCountSlot
   iCount <- getCount da indexCountSlot
   vCap <- readIORef (daVertexCap da)
   iCap <- readIORef (daIndexCap da)
   unless (vCount + needV <= vCap && iCount + needI <= iCap) $
     growBuffers da vCount iCount needV needI
-  vp <- unsafeForeignPtrToPtr <$> readIORef (daVertexFPtr da)
-  ip <- unsafeForeignPtrToPtr <$> readIORef (daIndexFPtr da)
+  -- Strict, so a caller that hands the pointers on allocates no thunks.
+  !vp <- unsafeForeignPtrToPtr <$> readIORef (daVertexFPtr da)
+  !ip <- unsafeForeignPtrToPtr <$> readIORef (daIndexFPtr da)
   pure (vp, ip, vCount, iCount)
 
 -- | Close the pending index run as a command. A run that continues the last
@@ -421,10 +429,16 @@ withVertsReserve ::
   (Ptr Word8 -> Ptr Word8 -> Int -> Int -> (Int -> Int -> IO ()) -> IO ()) ->
   IO ()
 withVertsReserve da maxV maxI f = do
-  (vp, ip, base, baseIdx) <- ensureAndAlloc da maxV maxI
-  f vp ip base baseIdx $ \nv ni -> do
-    setCount da vertexCountSlot (base + nv)
-    setCount da indexCountSlot (baseIdx + ni)
+  (vp, ip, base, baseIdx) <- reserveRaw da maxV maxI
+  f vp ip base baseIdx (commitRaw da base baseIdx)
+
+-- | Record @nv@ vertices and @ni@ indices written from a 'reserveRaw' at
+-- @base@ and @baseIdx@.
+{-# INLINE commitRaw #-}
+commitRaw :: DrawArena -> Int -> Int -> Int -> Int -> IO ()
+commitRaw da base baseIdx nv ni = do
+  setCount da vertexCountSlot (base + nv)
+  setCount da indexCountSlot (baseIdx + ni)
 
 {-# INLINE pushQuad #-}
 pushQuad :: DrawArena -> Rect -> Float -> Float -> Float -> Float -> Color -> IO ()

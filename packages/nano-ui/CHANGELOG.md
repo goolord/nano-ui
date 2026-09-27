@@ -811,6 +811,12 @@
   instead of 1.3 ms (2000 lines: 0.03 ms instead of 42 ms, which also
   overflowed the SDL text caches), and a 2000-sentence rich text in 2.4 ms
   instead of 48 ms.
+- Rounded fills and borders allocate about 450 bytes less per bordered
+  widget and frame, with the same geometry: their corner loops are workers
+  of their own instead of closures. The headless profiler's button grid
+  allocates 415 MB instead of 578 MB over 3000 frames, and the SDL demo's
+  frame 140 KB instead of 157 KB. `NanoUI.Internal.Draw.Arena` exports
+  `reserveRaw` and `commitRaw` for such emitters.
 
 ### Fixed
 
