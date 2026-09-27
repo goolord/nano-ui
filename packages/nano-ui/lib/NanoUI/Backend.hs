@@ -230,7 +230,8 @@ module NanoUI.Backend
     -- @runSessionLoop@ in "NanoUI.Runner" handles closing: a close request
     -- either ends the session or, per the settings, is passed to the view,
     -- and 'NanoUI.quitUi' ends it. A backend's own loop does the same with
-    -- 'requestWindowClose', 'clearWindowClose' and 'quitRequested'.
+    -- 'requestWindowClose' and 'quitRequested'; the next frame to run the
+    -- view clears the request ('clearWindowClose').
   , WindowHost (..)
   , defaultWindowHost
   , installWindowHost

@@ -243,6 +243,7 @@ textAreaContentMetrics ctx idx = do
   wid <- getWidgetId (ctxNodeArena ctx) idx
   size <- getNodeFontSize (ctxNodeArena ctx) idx
   store <- getStore ctx
+  gen <- readIORef (ctxMetricGen ctx)
   let key = intKey wid
       widthsKey = slotKey SlotTextAreaWidths key
       buf = TA.textAreaBuffer store key
@@ -250,11 +251,10 @@ textAreaContentMetrics ctx idx = do
       (seenHead, seenTail) = TB.changedLines buf
       cached = lookupDyn widthsKey store
   case cached of
-    Just (LineWidths font _ _ _ widestW contentH)
-      | font == size && seenHead >= Seq.length lns -> pure (widestW, contentH)
+    Just (LineWidths font fontGen _ _ widestW contentH)
+      | font == size && fontGen == gen && seenHead >= Seq.length lns -> pure (widestW, contentH)
     _ -> do
       fm <- resolveTextAreaFont ctx idx
-      gen <- readIORef (ctxMetricGen ctx)
       let contentH = fromIntegral (max 1 (Seq.length lns)) * textAreaLineHeight fm
           LineWidths _ _ measured widest widestW _ = case cached of
             Just lw@(LineWidths font fontGen _ _ _ _) | font == size && fontGen == gen -> lw

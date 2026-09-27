@@ -162,6 +162,7 @@ spec = do
     adds "end an entity" "x &amp" ";"
     adds "make a web address" "see" " www.example.com"
     adds "end a web address's www" "www" "."
+    adds "make a hyphenated web address" "Visit" " www-example.com"
     adds "follow an HTML comment" "foo<!-- c -->  " "bar"
     adds "follow a space from an entity" "foo&#32;" " "
     adds "join a letter the parse normalizes" "\28010" "\63786"

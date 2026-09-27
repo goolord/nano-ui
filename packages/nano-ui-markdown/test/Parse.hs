@@ -41,6 +41,8 @@ spec = do
       "<div>\n*hi*\n</div>" `parsesTo` para "<div>\n*hi*\n</div>"
       "a <b>bold</b>" `inlineOf` [Str "a <b>bold</b>"]
       "<div>\n<!-- note -->\n</div>" `parsesTo` para "<div>\n\n</div>"
+      "<div>\n<!-->\nkept\n</div>" `parsesTo` para "<div>\n\nkept\n</div>"
+      "<div>\n<!--->\nkept\n</div>" `parsesTo` para "<div>\n\nkept\n</div>"
       "a <!-- note --> b" `inlineOf` [Str "a  b"]
       parseMarkdownBlocks "<!-- note -->\n<!--\nlonger\n-->\n\nshown" `shouldBe` [para "shown"]
 

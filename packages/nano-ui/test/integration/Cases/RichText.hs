@@ -15,6 +15,7 @@ tests =
   [ spec "rich-text-wrap" runRichTextWrapTest
   , spec "rich-text-link" runRichTextLinkTest
   , spec "rich-text-align" runRichTextAlignTest
+  , spec "rich-text-align-overlong" runRichTextAlignOverlongTest
   , spec "rich-text-many" runRichTextManyTest
   , spec "rich-text-background" runRichTextBackgroundTest
   , spec "rich-text-scroll-cull" runRichTextScrollCullTest
@@ -103,6 +104,21 @@ runRichTextAlignTest ctx failed = do
       assertEq failed (round (rx + at * rw) :: Int) (round (x0 + at * (x1 - x0)))
     assertEq failed full fitted
 
+-- | A word wider than its box starts at the box's left edge whatever the
+-- alignment, rather than before it.
+runRichTextAlignOverlongTest :: Context -> IORef Int -> IO ()
+runRichTextAlignOverlongTest ctx failed = do
+  let inp = withInput 400 400
+      fm = ctxFontMetrics ctx
+  forM_ [alignEnd, alignCenter] $ \align -> do
+    resp <- warmup2 ctx inp (columnWith (fixedW 40) (fst <$> richTextWith' (fillW . align) ["supercalifragilistic", " short"]))
+    let r@(Rect rx _ _ _) = respRect resp
+    Just entry <- lookupCustomDrawing ctx (respId resp)
+    cdc <- mkCustomDrawContext ctx fm (respId resp)
+    let xs = [x | DrawTextStyled x _ _ _ _ <- toList (cdrBuild entry cdc r)]
+    assert failed (not (null xs))
+    forM_ xs $ \x -> assert failed (x >= rx - 0.5)
+
 -- | A view with more paragraphs than the cache bound still keeps them all:
 -- an unchanged frame measures nothing.
 runRichTextManyTest :: Context -> IORef Int -> IO ()
@@ -123,8 +139,8 @@ runRichTextManyTest base failed = do
   assertEq failed 0 =<< readIORef measured
 
 -- | A piece's background is painted under its words, spanning inner spaces
--- but not leading or trailing ones, once per line. Changing the colour
--- counts as a new paragraph.
+-- but not leading or trailing ones, once per line, the full height of the
+-- line box. Changing the colour counts as a new paragraph.
 runRichTextBackgroundTest :: Context -> IORef Int -> IO ()
 runRichTextBackgroundTest ctx failed = do
   let inp = withInput 400 400
@@ -136,14 +152,15 @@ runRichTextBackgroundTest ctx failed = do
         Just entry <- lookupCustomDrawing ctx (respId resp)
         cdc <- mkCustomDrawContext ctx fm (respId resp)
         pure (respRect resp, toList (cdrBuild entry cdc (respRect resp)))
-  (Rect rx _ _ _, ops) <- opsOf tint
+  (Rect rx ry _ rh, ops) <- opsOf tint
   prefixW <- sum <$> mapM (lineWidthIO fm) ["Run", " ", " "]
   codeW <- sum <$> mapM (lineWidthIO fm) ["cabal", " ", "build"]
   let fills = [r | FillRect r c <- ops, c == tint]
       firstText = length (takeWhile (\case DrawTextStyled {} -> False; _ -> True) ops)
   assertEq failed 1 (length fills)
-  forM_ fills $ \(Rect x _ w h) ->
-    assert failed (abs (x - (rx + prefixW)) < 0.5 && abs (w - codeW) < 0.5 && h > 0)
+  -- One line, so its box is the paragraph's.
+  forM_ fills $ \(Rect x y w h) ->
+    assert failed (abs (x - (rx + prefixW)) < 0.5 && abs (w - codeW) < 0.5 && abs (y - ry) < 0.5 && abs (h - rh) < 0.5)
   -- Under the words: the fill comes before the first text op.
   assert failed (firstText >= 1)
   (_, plain) <- opsOf (colorRGBA 9 9 9 255)

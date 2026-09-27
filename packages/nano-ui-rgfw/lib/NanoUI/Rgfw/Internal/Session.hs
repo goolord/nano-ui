@@ -553,7 +553,8 @@ decodeRgfwEvents scale = mapMaybe $ \case
   R.EventScaleUpdate _ _ -> Just RgfwEvResize
   R.EventMouseMotion x y -> Just (RgfwEvMotion (fromIntegral x / scale) (fromIntegral y / scale))
   R.EventMouseButton btn down -> Just (RgfwEvButton btn down)
-  R.EventMouseScroll dx dy -> Just (RgfwEvScroll dx dy)
+  -- RGFW's wheel is positive up and left; the input's is down and right.
+  R.EventMouseScroll dx dy -> Just (RgfwEvScroll (negate dx) (negate dy))
   R.EventOther t
     | t == R.rgfw_mouseLeave -> Just RgfwEvLeave
     | t == R.rgfw_windowFocusOut -> Just RgfwEvFocusLost

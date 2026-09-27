@@ -8,6 +8,9 @@
   messages are drawn in, rather than its red.
 - `NanoUI.Form.Backend` is now `NanoUI.Form.Internal.Backend`. `NanoUI.Form`
   still exports `FormInput`, `FormUI` and `liftNanoUI`.
+- `nanoFormSubmit` submits on Enter only when nothing or a single-line field
+  is focused: not from a text area, an input method commit, another focused
+  control, or behind a modal. Holding Enter submits once.
 - `inputWidget` adapts custom controlled widgets to named or positional fields,
   with explicit decoding, encoding, and response policy.
 - `NanoUI.Form.Input` replaces the parallel `Named` and `Unnamed` modules.

@@ -276,6 +276,7 @@ testRgfwTyping = do
       && keys [EventKeyPress R.rgfw_keyPadReturn 0] == [KeyEnter]
 
 -- | Wheel events queued in one batch add up rather than keeping the last.
+-- RGFW's wheel is positive up and left, the input's down and right.
 -- The middle button holds and clicks like the others. Misc 1 and 2 are back
 -- and forward; later misc buttons map to the extra buttons. Leaving the
 -- window moves the pointer off every widget.
@@ -285,7 +286,8 @@ testRgfwPointer = do
       middleUp = applied [EventMouseButton R.rgfw_mouseMiddle True, EventMouseButton R.rgfw_mouseMiddle False]
       pressedBy b = buttonsToList (inputButtonsPressed (applied [EventMouseButton b True]))
       gone = applied [EventMouseMotion 30 40, EventOther R.rgfw_mouseLeave]
-  assert "RGFW scroll: a batch of wheel events accumulates" (inputScroll (applied [EventMouseScroll 0 1, EventMouseScroll 0.5 2]) == V2 0.5 3)
+  assert "RGFW scroll: a batch of wheel events accumulates" (inputScroll (applied [EventMouseScroll 0 1, EventMouseScroll 0.5 2]) == V2 (-0.5) (-3))
+  assert "RGFW scroll: the wheel turned down and right scrolls down and right" (inputScroll (applied [EventMouseScroll (-1) (-1)]) == V2 1 1)
   assert "RGFW buttons: the middle button goes down" (heldIn MouseMiddle middle && pressedIn MouseMiddle middle)
   assert "RGFW buttons: the middle button comes up" (not (heldIn MouseMiddle middleUp) && releasedIn MouseMiddle middleUp)
   assert "RGFW buttons: the middle button is not the left" (inputButtonsHeld middle == buttonsFromList [MouseMiddle])

@@ -34,6 +34,7 @@ keyboardTranslation = do
       letGo = foldl' applyEvent emptyInput [EvKey (KeyChar 's') True ctrl, EvKey (KeyChar 's') False ctrl, EvModifiers noModifiers]
       enterHeld = foldl' applyEvent emptyInput [EvKey KeyEnter True noModifiers, EvKey KeyEnter True noModifiers]
       blurred = applyEvent chord EvFocusLost
+      typed = foldl' applyEvent emptyInput [EvKey (KeyChar 'x') True noModifiers, EvText "x"]
   check "a chord is a key with its modifiers and types nothing" $
     toList (inputKeys chord) == [KeyChar 's'] && inputModifiers chord == ctrl && inputChars chord == ""
   check "a pressed key is held" (toList (inputKeysHeld chord) == [KeyChar 's'])
@@ -43,4 +44,6 @@ keyboardTranslation = do
     toList (inputKeys enterHeld) == [KeyEnter, KeyEnter] && toList (inputKeysNew enterHeld) == [KeyEnter]
   check "losing the keyboard lets go of the keys and modifiers held" $
     null (inputKeysHeld blurred) && toList (inputKeysReleased blurred) == [KeyChar 's'] && inputModifiers blurred == noModifiers
+  check "typed text keeps the modifiers of the key that typed it" $
+    inputChars typed == "x" && inputModifiers typed == noModifiers
   putStrLn "SDL keyboard translation: ok"

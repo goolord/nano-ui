@@ -329,13 +329,14 @@ listBlock env ty isTight items = do
       lineH = fmLineHeight fm
       side = checkboxBoxSize fm
       spacing = if isTight then 2 else 10
-      number i = case ty of
-        Ordered start delim -> T.pack (show (start + i)) <> T.singleton delim
-        Bullet _ -> ""
+      -- Each item's number, built once for both measuring and drawing.
+      numbers = case ty of
+        Ordered start delim -> [T.pack (show n) <> T.singleton delim | n <- [start ..]]
+        Bullet _ -> repeat ""
   -- Measure every number: in a proportional font an earlier one can be
   -- widest ("10." vs "11.").
   numberWs <- case ty of
-    Ordered _ _ -> mapM (lineWidthUi fm . number) [0 .. length items - 1]
+    Ordered _ _ -> mapM (lineWidthUi fm) (take (length items) numbers)
     Bullet _ -> pure []
   let markerW = maximum (lineH : [side | any (isJust . itemTask) items] ++ numberWs)
       ink = fromMaybe (styleFg (themePanel theme)) (layoutFontColor (envText env defaultLayout))
@@ -356,16 +357,16 @@ listBlock env ty isTight items = do
         drawCheckbox boxTheme (Rect (x + (markerW - side) / 2) (y + (boxH - side) / 2) side side) done
   columnWith (tight . fillW . gap spacing) $
     asum <$> zipWithM
-      ( \i (ListItem task bs) -> withKey i $
+      ( \(i, num) (ListItem task bs) -> withKey i $
           rowWith (tight . fillW . gap 6) $ do
             case (task, ty) of
               (Just done, _) -> checkBox done
-              (Nothing, Ordered _ _) -> labelWith (tight . fixedW markerW . alignEnd . envText env) (number i)
+              (Nothing, Ordered _ _) -> labelWith (tight . fixedW markerW . alignEnd . envText env) num
               (Nothing, Bullet _) -> bullet
             columnWith (tight . fillW . gap spacing) $
               blocks env {envDepth = envDepth env + 1} bs
       )
-      [0 :: Int ..]
+      (zip [0 :: Int ..] numbers)
       items
 
 -- | A list marker's canvas content key: a hash of what the drawing depends on

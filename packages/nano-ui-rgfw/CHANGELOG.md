@@ -68,6 +68,8 @@
 
 - Wheel events that arrive in one batch add up instead of keeping only the
   last.
+- The mouse wheel scrolls the way it turns. RGFW counts up and left as
+  positive, and both axes were reversed.
 - Animations run at the display rate: a per-frame sleep on top of the core
   loop's pacing halved it.
 - A frame the opening frame asks for is drawn at once. The session cleared

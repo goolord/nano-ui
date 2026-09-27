@@ -10,12 +10,13 @@ module NanoUI.Widgets.Combo
   )
 where
 
-import Control.Monad (foldM, when, (<$!>))
+import Control.Monad (foldM, mfilter, when, (<$!>))
 import Data.Foldable (toList)
 import Data.IORef (writeIORef)
-import Data.Maybe (fromMaybe, isJust, listToMaybe)
+import Data.Maybe (fromMaybe, isJust, isNothing, listToMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
+import GHC.Float (castFloatToWord32, castWord32ToFloat)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Font (menuItemRowH)
 import NanoUI.Internal.Frame.Hit (findNodeByWidgetId)
@@ -24,7 +25,7 @@ import NanoUI.Internal.Id (WidgetId (..))
 import NanoUI.Internal.Input (Input, Key (..), MouseButton (..), Pressable (..), inputMousePos, inputScroll)
 import NanoUI.Internal.Layout.Arena (setOptions)
 import NanoUI.Internal.Monad (NanoUI, askContext, liftIO)
-import NanoUI.Internal.Store (boolInt, ptrEq, fieldFloat, fieldInt, fieldText, findSlot, flagSlot, insertSlot, setFieldSelection)
+import NanoUI.Internal.Store (boolInt, ptrEq, deleteSlot, fieldFloat, fieldInt, fieldQuiet, fieldText, findSlot, flagSlot, insertSlot, lookupSlot, setFieldSelection)
 import NanoUI.Internal.Types (Rect (..), V2 (..), clamp, rectContains, rectNonEmpty, v2X, v2Y)
 import NanoUI.Internal.WidgetText (textInputFlagSearch)
 import NanoUI.Internal.Widgets.Behavior (keyboardFocused)
@@ -85,6 +86,10 @@ data ComboState = ComboState
   , csLive :: !Text
     -- ^ Field text the combo last produced.
   , csFocused :: !Bool
+  , csNavPointer :: !(Maybe V2)
+    -- ^ Where the pointer rested when Up/Down last moved the highlight,
+    -- while it has not moved since. Hover leaves the highlight alone until
+    -- the pointer moves or the wheel turns.
   }
   deriving (Eq, Show)
 
@@ -124,7 +129,8 @@ data ComboStep = ComboStep
 -- changes on Enter (which commits the highlighted row only), on a row click
 -- (a field text the combo did not produce), or when the field loses focus.
 -- Escape reverts the live text to the last committed value. Hover
--- highlights a row and makes it the Enter target; Up/Down move the highlight.
+-- highlights a row and makes it the Enter target; Up/Down move the highlight,
+-- and a pointer resting on the list takes it back only once it moves.
 comboStep :: ComboInput -> ComboState -> ComboStep
 comboStep ci cs0 =
   ComboStep
@@ -139,6 +145,7 @@ comboStep ci cs0 =
           , csCommitted = fromMaybe committed0 commitText
           , csLive = finalText
           , csFocused = isFocus
+          , csNavPointer = navPointer
           }
     , stepCommit = if commitPulse then commitText else Nothing
     , stepPicked = picked
@@ -188,9 +195,15 @@ comboStep ci cs0 =
     itemH = menuItemRowH
     -- Hover highlights the row under the pointer (and makes it the Enter
     -- target); it never commits by itself. Rows on screen belong to the
-    -- previous frame's window, so the hit test maps through storedWin.
+    -- previous frame's window, so the hit test maps through storedWin. After
+    -- Up/Down, a pointer that stays where it was does not take the highlight
+    -- back, or it would undo every key press.
+    navPointer
+      | nav /= 0 = Just mouse
+      | wheelDelta /= 0 = Nothing
+      | otherwise = mfilter (== mouse) (csNavPointer cs0)
     hoverIdx
-      | overDrop = (storedWin +) <$> comboDropPickIndex dropRect itemH (min vis n) (v2Y mouse)
+      | overDrop && isNothing navPointer = (storedWin +) <$> comboDropPickIndex dropRect itemH (min vis n) (v2Y mouse)
       | otherwise = Nothing
     hiRaw = fromMaybe hi hoverIdx
     -- A hover mapped through a stale window can point past a shrunken list:
@@ -295,7 +308,13 @@ comboBox' placeholder options value = do
           , csCommitted = findSlot fieldText value (slotKey SlotComboCommitted key) store
           , csLive = findSlot fieldText text (slotKey SlotComboLive key) store
           , csFocused = flagSlot (slotKey SlotComboFocus key) store
+          , csNavPointer = V2 <$> quietFloat SlotComboHighlight <*> quietFloat SlotComboScroll
           }
+      -- The resting pointer is bookkeeping no paint reads, so it lives in
+      -- quiet slots (as float bits), which neither damage nor wake.
+      quietFloat slot = castWord32ToFloat . fromIntegral <$> lookupSlot fieldQuiet (slotKey slot key) store
+      navPointerAt slot coord =
+        maybe (deleteSlot fieldQuiet (slotKey slot key)) (insertSlot fieldQuiet (slotKey slot key) . fromIntegral . castFloatToWord32 . coord)
   contentW <- liftIO $
     case cachedW of
       Just w | isFocus -> pure w
@@ -327,6 +346,8 @@ comboBox' placeholder options value = do
       modifyStore ctx $
         caretToEnd
           . insertSlot fieldInt (slotKey SlotComboHighlight key) (csHighlight cs1)
+          . navPointerAt SlotComboHighlight v2X (csNavPointer cs1)
+          . navPointerAt SlotComboScroll v2Y (csNavPointer cs1)
           . insertSlot fieldInt (slotKey SlotComboScroll key) (csWindow cs1)
           . insertSlot fieldInt (slotKey SlotComboCount key) (length matches)
           . insertSlot fieldInt (slotKey SlotComboFocus key) (boolInt (csFocused cs1))

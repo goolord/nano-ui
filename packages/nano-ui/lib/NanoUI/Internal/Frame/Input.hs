@@ -49,7 +49,7 @@ import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Monad (ifM, unlessM, whenM, (<&&>))
 import NanoUI.Internal.Types (DamageBounds (..), Rect (..), V2 (..), defaultDamageSlop, rectContains)
-import NanoUI.Internal.WidgetText (hasFlag, buttonFlagClose, buttonFlagMenuBar, buttonFlagMenu, buttonFlagRow)
+import NanoUI.Internal.WidgetText (hasFlag, buttonFlagClose, buttonFlagMenuBar, buttonFlagMenu, buttonFlagRow, textInputFlagSelectable)
 
 -- | On Tab (Shift+Tab goes backwards), move keyboard focus to 'tabTarget'
 -- and show the focus ring. A Tab consumed by the focused widget
@@ -91,9 +91,7 @@ tabStops ctx = do
 isTabStop :: Context -> WidgetId -> IO Bool
 isTabStop ctx w
   | w == WidgetId 0 = pure False
-  | otherwise =
-      isFocusable ctx w
-        <&&> (maybe (pure True) (\modal -> widgetIdInSubtree ctx modal w) =<< topModalNode (ctxNodeArena ctx))
+  | otherwise = isFocusable ctx w <&&> widgetOverlayAllowed ctx w
 
 -- | Whether @wid@ is a menu row or a menu-bar title. Their hover highlight
 -- switches on and off at once, so 'refreshHover' runs no animation for them.
@@ -164,7 +162,8 @@ pressTargets ctx inp
 -- every target is found. Each is the first match in arena order, which is
 -- declaration order. The painter draws siblings from the last declared to the
 -- first, so where two overlap the earlier one is on top, unless a stack or
--- pinned child draws a later match over it ('topmostHit'). A widget drawn
+-- pinned child draws a later match over it ('topmostHit', which then takes
+-- one more pass per target). A widget drawn
 -- inside the interactive one, such as a control among its adornments, is on
 -- top of it and takes the press ('innermostHit'). When a stack or pinned
 -- node could draw a 'PointerBlock' node on top, a first pass checks whether
@@ -326,6 +325,9 @@ inUiClickHit ctx wid mouse = do
 -- its edit menu. Menu/dropdown presses are removed from the supplied layer
 -- input, preserving the owning field's focus until the pick is processed.
 -- A press on a control drawn inside a text field keeps the focus as it was.
+-- A press on a menu row or menu-bar title keeps the field's selection, so a
+-- menu command such as Cut ('NanoUI.Widgets.TextField.runTextCommand'),
+-- which focuses the field again, acts on it.
 finalizeTextInputFocus :: Context -> Input -> PressTargets -> IO ()
 finalizeTextInputFocus ctx inp targets =
   when (pressedIn MouseLeft inp) $ do
@@ -337,7 +339,8 @@ finalizeTextInputFocus ctx inp targets =
     case mFocused of
       Nothing -> do
         when (prevFocus /= WidgetId 0) $ markDirty ctx
-        collapseTextFieldSelection ctx prevFocus
+        onMenu <- maybe (pure False) (isMenuButtonWidget ctx) (ptInteractive targets)
+        unless onMenu $ collapseTextFieldSelection ctx prevFocus
         writeIORef (ctxFocusId ctx) (WidgetId 0)
         modifyInteraction ctx (\s -> s {isTextInputMenu = Nothing})
       Just wid -> focusWidget ctx wid
@@ -436,7 +439,7 @@ recordFocusKind ctx ime = do
       | otherwise -> withWidgetNode ctx focus FocusNone $ \idx -> do
           let si = getStyleIdx (ctxNodeArena ctx) idx
           getNodeType (ctxNodeArena ctx) idx >>= \case
-            NodeTextInput -> pure FocusTextLine
+            NodeTextInput -> si <&> \s -> if hasFlag textInputFlagSelectable s then FocusTextSelectable else FocusTextLine
             NodeTextArea -> pure (FocusControl KeysType)
             -- A tree row moves with the arrows; any other button activates.
             NodeButton -> si <&> \s -> FocusControl (if hasFlag buttonFlagRow s then KeysNavigate else KeysActivate)
@@ -561,7 +564,7 @@ recordCoveredWidgets :: Context -> PointerRoute -> Input -> IO ()
 recordCoveredWidgets ctx@Context {ctxNodeArena = na} route inp = do
   layered <- layeredNodeCount na
   reach <- case route of
-    RouteLayer _ | layered > 0 -> traverse (idsUpFrom IS.empty) =<< reachedAt ctx mouse
+    RouteLayer _ | layered > 0 -> traverse reachIds =<< reachedAt ctx mouse
     _ -> pure Nothing
   -- Most frames have nothing covered before or after, and write nothing.
   old <- readIORef (ctxPointerReach ctx)
@@ -569,6 +572,21 @@ recordCoveredWidgets ctx@Context {ctxNodeArena = na} route inp = do
     writeIORef (ctxPointerReach ctx) $! reach
  where
   mouse = inputMousePos inp
+  -- A node reached with no widget of its own under the pointer (a
+  -- 'PointerBlock' container) covers nothing it contains there: the tagged
+  -- containers under the pointer inside it (a mouse area, a drop target) are
+  -- reached too.
+  reachIds i = do
+    up <- idsUpFrom IS.empty i
+    nt <- getNodeType na i
+    if isWidgetNode nt then pure up else idsDownFrom up i
+  idsDownFrom !acc i = foldPlacedChildrenM na i step acc
+   where
+    step a d =
+      ifM
+        (nodePointVisible ctx d mouse)
+        (getWidgetId na d >>= \wid -> idsDownFrom (if hashWidgetId wid == 0 then a else IS.insert (intKey wid) a) d)
+        (pure a)
   -- Ids of node @i@ and its ancestors. A node sharing one of these ids is
   -- not covered either.
   idsUpFrom !acc i

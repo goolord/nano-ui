@@ -184,6 +184,13 @@ spec = do
       TE.historyDepth (TE.editorHistory (TE.runCommand TE.singleLineMode (TE.ReplaceAll "c") retyped))
         `shouldBe` TE.historyDepth (TE.editorHistory retyped)
 
+    it "collapses the selection when typing over it with the same text" $ do
+      let
+        selected = TE.runCommand TE.singleLineMode (TE.Select (TB.Cursor 0 0) (TB.Cursor 0 1)) (typeText TE.singleLineMode "abc" single)
+        retyped = typeText TE.singleLineMode "ab" selected
+      text retyped `shouldBe` "abbc"
+      TE.hasSelection retyped `shouldBe` False
+
     it "keeps line breaks out of single-line fields and bounds history depth" $ do
       text (TE.runCommand TE.singleLineMode (TE.InsertText "a\nb") single) `shouldBe` "ab"
       text (TE.runCommand TE.multiLineMode (TE.InsertText "a\r\nb") single) `shouldBe` "a\nb"

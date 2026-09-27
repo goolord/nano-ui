@@ -75,6 +75,7 @@ data Event
   | EventMouseButton !Word8 !Bool -- Button, Pressed
   | EventMouseMotion !Int !Int
   | EventMouseScroll !Float !Float
+  -- ^ Wheel steps on x and y: positive is left and up.
   | EventWindowResize !Int !Int
   | EventScaleUpdate !Float !Float
   | EventWindowClose
@@ -183,8 +184,9 @@ pollEvent (Window win) evPtr = do
               pure (EventOther t)
 
 -- | Map a physical key code to its code in the current keyboard layout: on
--- AZERTY, the key in QWERTY's Q position gives 'rgfw_keyA'. 'Nothing' when
--- RGFW has no code for the result. Needs an open window.
+-- AZERTY, the key in QWERTY's Q position gives 'rgfw_keyA'. The key is read
+-- with no modifiers held, so a press and its release map alike. 'Nothing'
+-- when RGFW has no code for the result. Needs an open window.
 physicalToMappedKey :: Word32 -> IO (Maybe Word32)
 physicalToMappedKey key
   | key > 0xFF = pure Nothing
@@ -250,7 +252,14 @@ setWindowMinSize (Window win) w h = c_RGFW_window_setMinSize win (fromIntegral w
 -- | Maximum size the user can resize to, in native pixels; 0 on an axis
 -- means no limit.
 setWindowMaxSize :: Window -> Int -> Int -> IO ()
-setWindowMaxSize (Window win) w h = c_RGFW_window_setMaxSize win (fromIntegral w) (fromIntegral h)
+setWindowMaxSize (Window win) w h
+  | w <= 0 && h <= 0 = c_RGFW_window_setMaxSize win 0 0
+  | otherwise = c_RGFW_window_setMaxSize win (axis w) (axis h)
+  where
+    -- RGFW takes only (0, 0) as no limit; a zero axis beside a limit would
+    -- be a maximum of 0 (X11, Windows, macOS). So an open axis gets a size no
+    -- window reaches.
+    axis v = if v <= 0 then 32767 else fromIntegral v
 
 -- | Move the window's top-left corner to a desktop position in pixels.
 moveWindow :: Window -> Int -> Int -> IO ()

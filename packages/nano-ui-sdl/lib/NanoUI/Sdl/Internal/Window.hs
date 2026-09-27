@@ -337,8 +337,13 @@ syncDisplay ctx env inp = do
         (Size 0 0, Size 0 0) -> wsSize defaultWindowSettings
         (Size 0 0, s) -> s
         (Size sw sh, _) -> Size (sw / zoom) (sh / zoom)
-  V2 mx my <- queryMouseWindowPos
-  let mouse = V2 (mx / zoom) (my / zoom)
+  -- Off the window, SDL keeps the last position inside it: the input's
+  -- own, moved off every widget when the pointer left, stays.
+  inWindow <- pointerInWindow (sdlWindow env)
+  mouse <-
+    if inWindow /= 0
+      then (\(V2 mx my) -> V2 (mx / zoom) (my / zoom)) <$> queryMouseWindowPos
+      else pure (inputMousePos inp)
   ctxMeasured <- readIORef (sdlCachedCtx env)
   pure (ctxMeasured, inp {inputWindowSize = winSize, inputMousePos = mouse})
 

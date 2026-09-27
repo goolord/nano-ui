@@ -213,8 +213,13 @@ runCommand mode cmd ed@(Editor buf anchor hist) =
     replayed (StoredEdit at removed inserted) = TextEdit at (TS.toText removed) (TS.toText inserted)
     singleLine = (if modeMultiLine mode then id else T.filter (/= '\n')) . TB.insertableText
     replaceSelection kind txt = edit kind (TB.replaceEdit txt anchor cursor buf)
+    -- An edit that changes nothing records no step, but typing over a
+    -- selection with the same text still leaves the caret after it.
     edit kind e
-      | editRemoved e == editInserted e = ed
+      | editRemoved e == editInserted e =
+          if T.null (editInserted e)
+            then ed
+            else let end = TB.getCursor (TB.applyEdit e buf) in Editor (TB.withCursor end buf) end hist
       | otherwise =
       let buf' = TB.applyEdit e buf
           end = TB.getCursor buf'

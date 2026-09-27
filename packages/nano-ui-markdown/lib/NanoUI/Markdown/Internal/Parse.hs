@@ -170,12 +170,17 @@ wrap f = one . f . spans
 chomp :: Text -> Text
 chomp t = fromMaybe t (T.stripSuffix "\n" t)
 
--- | Strip HTML comments, as a browser hides them. An unterminated comment
--- runs to the end.
+-- | Strip HTML comments, as a browser hides them. @<!-->@ and @<!--->@ are
+-- empty comments. An unterminated comment runs to the end.
 uncomment :: Text -> Text
 uncomment t = case T.breakOn "<!--" t of
   (before, "") -> before
-  (before, comment) -> before <> uncomment (T.drop 3 (snd (T.breakOn "-->" (T.drop 4 comment))))
+  (before, comment) -> before <> uncomment (afterComment (T.drop 4 comment))
+  where
+    afterComment body
+      | Just rest <- T.stripPrefix ">" body = rest
+      | Just rest <- T.stripPrefix "->" body = rest
+      | otherwise = T.drop 3 (snd (T.breakOn "-->" body))
 
 -- | A list whose items may carry task check boxes.
 listOf :: C.ListType -> C.ListSpacing -> [(Maybe Bool, Blocks)] -> Blocks

@@ -122,7 +122,10 @@ data SdlEvent
   | EvModifiers Modifiers
   -- ^ A key with no nano-ui 'Key' (such as a modifier) went down or up.
   -- Only the resulting modifier state is kept.
-  | EvText Text Modifiers
+  | EvText Text
+  -- ^ Typed text. It keeps the modifiers of the key event before it: SDL's
+  -- text events carry none, and the state when the batch is read may have
+  -- a modifier pressed after the key that typed it.
   | EvMouseMotion V2 Modifiers
   | EvMouseButton MouseButton Bool V2 Modifiers
   -- ^ A button went down ('True') or up at a point.
@@ -276,9 +279,8 @@ keypadKeys =
 textInput :: Ptr SDL_Event -> IO (Maybe SdlEvent)
 textInput p = do
   te <- peek p.text
-  mods <- peekModifiers
   txt <- peekText (getField @"text" te)
-  pure ((`EvText` mods) <$> mfilter (not . T.null) txt)
+  pure (EvText <$> mfilter (not . T.null) txt)
 
 -- | The input method's composition. The session sets
 -- @SDL_HINT_IME_IMPLEMENTED_UI@ to @composition@, so SDL sends it to us
@@ -329,8 +331,7 @@ applyEvent inp ev =
   case ev of
     EvKey k down mods -> (applyKey k down inp) {inputModifiers = mods}
     EvModifiers mods -> inp {inputModifiers = mods}
-    EvText txt mods ->
-      inp {inputChars = inputChars inp <> txt, inputModifiers = mods}
+    EvText txt -> inp {inputChars = inputChars inp <> txt}
     EvMouseMotion pos mods ->
       inp {inputMousePos = pos, inputModifiers = mods}
     EvMouseButton btn down pos mods ->

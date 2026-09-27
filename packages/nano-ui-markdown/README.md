@@ -58,10 +58,12 @@ onTokens tokens m = m {reply = appendMarkdown (T.concat tokens) (reply m)}
 but it keeps the blocks that `b` cannot change and parses again only the rest
 of the text: the last top-level block, or, when the text ends inside a list, a
 table, fenced code or a block quote, only its last item, row, line or block. So
-a token costs about as much at the end of a long reply as of a short one,
-unless the reply ends in one long block that is not split this way, which is
-parsed whole: a paragraph, a list or code block inside a list item or a block
-quote, indented code, or an HTML block. Every append parses that rest again, so
+a token's parse costs about as much at the end of a long reply as of a short
+one, unless the reply ends in one long block that is not split this way, which
+is parsed whole: a paragraph, a list or code block inside a list item or a block
+quote, indented code, or an HTML block. (Joining the parsed part onto a long
+list, table, code block or quote still copies or walks what came before, which
+is quick next to parsing it but grows with the block.) Every append parses that rest again, so
 on the UI thread, appending the tokens of a frame one at a time costs more for
 nothing. The exception is plain words (letters, digits, spaces and common
 punctuation) added to a paragraph that ends the reply, after a space or to a

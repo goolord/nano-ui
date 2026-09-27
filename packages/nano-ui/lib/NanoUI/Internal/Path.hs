@@ -64,7 +64,8 @@ module NanoUI.Internal.Path
 
 import Control.Monad (forM_, unless, when)
 import Control.Monad.ST (ST, runST)
-import Data.List (sortBy, sortOn)
+import Data.Fixed (mod')
+import Data.List (sortBy, sortOn, unsnoc)
 import Data.Ord (comparing)
 import Data.Primitive.PrimArray
   ( PrimArray
@@ -1163,10 +1164,12 @@ strokePathOps tol t st path paint
     ring (pts, closed)
       | n < 2 = []
       | not (null (strokeDash st))
-      , Just pieces <- dashes (map (* k) (strokeDash st)) (strokeDashOffset st * k) (closed && n > 2) pts =
+      , Just pieces <- dashes (strokeCap st /= ButtCap) (map (* k) (strokeDash st)) (strokeDashOffset st * k) (closed && n > 2) pts =
           map (line False (strokeCap st)) pieces
-      -- A closed subpath of two points is a line with no caps.
-      | closed && n == 2 = [line False ButtCap pts]
+      -- A closed subpath of two points is a line that turns back on itself
+      -- at each end: a round join rounds the ends, and a miter (past any
+      -- limit) or bevel at a half turn is flat.
+      | closed && n == 2 = [line False (if strokeJoin st == RoundJoin then RoundCap else ButtCap) pts]
       | otherwise = [line closed (strokeCap st) pts]
       where
         n = sizeofPrimArray pts `div` 2
@@ -1197,14 +1200,22 @@ ringStarts rs = primArrayFromList (scanl (+) 0 [sizeofPrimArray r `div` 2 | r <-
 -- ring's orientation, and the rule decides which regions fill. A filled
 -- ring with no filled parent is an outline. An unfilled ring directly inside
 -- it, or inside filled rings within it, is one of its holes. Crossing rings
--- are not nested, so each fills on its own.
+-- are not nested, so each fills on its own. Copies of one loop, in either
+-- direction, nest in turn like rings a hair apart, and an outline whose
+-- hole is its own copy encloses nothing, so it draws nothing.
 --
 -- A ring's parent is the smallest larger ring holding all its points. The
 -- rings whose boxes hold its box are found through a grid of the boxes and
 -- tried smallest first, so mostly only the parent is tested point by point.
 fillComponents :: FillRule -> [PrimArray Float] -> [(PrimArray Float, [PrimArray Float])]
 fillComponents _ [r] = [(r, [])]
-fillComponents rule rs = [(orient True i, map (orient False) (holesOf i)) | i <- ids, outline i]
+fillComponents rule rs =
+  [ (orient True i, map (orient False) hs)
+  | i <- ids
+  , outline i
+  , let hs = holesOf i
+  , not (any (sameLoop (ring i) . ring) hs)
+  ]
   where
     count = length rs
     ids = [0 .. count - 1]
@@ -1220,12 +1231,19 @@ fillComponents rule rs = [(orient True i, map (orient False) (holesOf i)) | i <-
     -- order), and a grid of their boxes in that order, so each cell lists its
     -- rings smallest first.
     bySize = primArrayFromListN count (sortBy (comparing size) ids)
+    -- Each ring's place in 'bySize'.
+    rank = indexPrimArray $ runPrimArray $ do
+      out <- newPrimArray count
+      forM_ [0 .. count - 1] $ \k -> writePrimArray out (indexPrimArray bySize k) k
+      pure out
     grid =
       let (x0, y0, x1, y1) = foldl' union (1 / 0, 1 / 0, -1 / 0, -1 / 0) boxes
           union (!a, !b, !c, !d) (bx0, by0, bx1, by1) = (min a bx0, min b by0, max c bx1, max d by1)
        in gridOf count x0 y0 x1 y1 count (boxOf . indexPrimArray bySize)
     -- The smallest ring enclosing ring @i@. A box holding @i@'s box holds
-    -- its corner, so the corner's cell lists every candidate.
+    -- its corner, so the corner's cell lists every candidate. A copy of
+    -- @i@'s loop later in 'bySize' encloses it too, so copies chain and the
+    -- rings inside them find the first copy.
     parents = generatePrimArray count parentOf
     parentOf i = candidate (indexPrimArray (gridStarts grid) cell)
       where
@@ -1235,6 +1253,7 @@ fillComponents rule rs = [(orient True i, map (orient False) (holesOf i)) | i <-
         candidate !k
           | k >= end = -1
           | size j > size i && boxInside box (boxOf j) && encloses (ring j) (ring i) = j
+          | rank j > rank i && sameLoop (ring j) (ring i) = j
           | otherwise = candidate (k + 1)
           where
             j = indexPrimArray bySize (indexPrimArray (gridItems grid) k)
@@ -1279,6 +1298,14 @@ encloses r q = every 0
                   !by = indexPrimArray r (2 * k' + 1)
                   crosses = (ay > py) /= (by > py) && px < ax + (py - ay) * (bx - ax) / (by - ay)
                in walk (k + 1) (if crosses then not odd' else odd')
+
+-- | Whether two rings list the same points around the same loop, from any
+-- start and in either direction.
+sameLoop :: PrimArray Float -> PrimArray Float -> Bool
+sameLoop r q = sizeofPrimArray r == sizeofPrimArray q && m > 0 && any from [s | s <- [0 .. m - 1], pointAt r s == pointAt q 0]
+  where
+    m = sizeofPrimArray r `div` 2
+    from s = all (\k -> pointAt r ((s + k) `mod` m) == pointAt q k) [1 .. m - 1] || all (\k -> pointAt r ((s - k) `mod` m) == pointAt q k) [1 .. m - 1]
 
 -- | A ring's points in reverse order.
 reversePoints :: PrimArray Float -> PrimArray Float
@@ -1331,10 +1358,16 @@ rampAt :: Ramp -> Float -> Float -> Float
 rampAt (Ramp gx gy g0 _) x y = gx * x + gy * y + g0
 
 -- | The gradient values where the colour changes slope: its distinct stop
--- offsets.
+-- offsets, ascending. A hard edge (stops at one offset in different
+-- colours) splits half a pixel either side of it instead, so the pieces
+-- beside it keep their own colours and only the pixel across it blends.
 rampSplits :: Ramp -> [Float]
-rampSplits (Ramp _ _ _ stops) = dedupe (map fst stops)
+rampSplits (Ramp gx gy _ stops) = dedupe (sortOn id (concatMap around (dedupe (map fst stops))))
   where
+    half = 0.5 * sqrt (gx * gx + gy * gy)
+    around v = case [c | (o, c) <- stops, o == v] of
+      c0 : rest | any (/= c0) rest -> [v - half, v + half]
+      _ -> [v]
     dedupe (v : w : rest) | v == w = dedupe (w : rest)
     dedupe (v : rest) = v : dedupe rest
     dedupe [] = []
@@ -1424,20 +1457,22 @@ splitTriangles g vs pts tris = (primArrayFromList (primArrayToList pts ++ concat
 --------------------------------------------------------------------------------
 
 -- | Split a polyline into dashes for a pattern and start offset. Each dash
--- is an open polyline; a zero-length dash gets a hair of length so its caps
--- have a direction. 'Nothing' means draw solid: an empty pattern, one with a
--- negative or infinite length or all zeros, a non-finite offset, or more
--- than 'maxDashes' dashes.
+-- is an open polyline. With @dots@, a zero-length dash gets a hair of length
+-- so its caps have a direction; without, it is left out, as butt caps draw
+-- nothing there. On a closed polyline, a dash through the start point is one
+-- dash: the last one runs on into the first. 'Nothing' means draw solid: an
+-- empty pattern, one with a negative or infinite length or all zeros, a
+-- non-finite offset, or more than 'maxDashes' dashes.
 --
 -- NOINLINE: inlined, its bindings are allocated for every stroke, dashed or
 -- not.
 {-# NOINLINE dashes #-}
-dashes :: [Float] -> Float -> Bool -> PrimArray Float -> Maybe [PrimArray Float]
-dashes pattern0 offset closed pts
+dashes :: Bool -> [Float] -> Float -> Bool -> PrimArray Float -> Maybe [PrimArray Float]
+dashes dots pattern0 offset closed pts
   | null pattern0 || any (\v -> not (v >= 0) || isInfinite v) pattern0 || not (period > 0) || isInfinite period = Nothing
   | not (finite offset) || fromIntegral (length pattern `div` 2) * (total / period + 1) > (fromIntegral maxDashes :: Float) = Nothing
   | otherwise = case path of
-      p0 : rest -> Just [primArrayFromList (concat [[x, y] | (x, y) <- d]) | d <- walk k0 left0 [p0 | even k0] (0, 0) p0 rest]
+      p0 : rest -> Just [primArrayFromList (concat [[x, y] | (x, y) <- d]) | d <- seam (filter (not . null) (walk k0 left0 [p0 | even k0] (0, 0) p0 rest))]
       [] -> Nothing
   where
     pattern = if odd (length pattern0) then pattern0 ++ pattern0 else pattern0
@@ -1450,8 +1485,12 @@ dashes pattern0 offset closed pts
     total = sum (zipWith dist path (drop 1 path))
     dist (ax, ay) (bx, by) = sqrt ((bx - ax) * (bx - ax) + (by - ay) * (by - ay))
     -- The pattern entry the line starts in and how much of it remains. A
-    -- zero-length dash at the very start is kept as a dot.
-    (k0, left0) = skip 0 (offset - period * fromIntegral (floor (offset / period) :: Int))
+    -- zero-length dash at the very start is kept as a dot. The offset is
+    -- taken modulo the period in double precision, and kept within it, so
+    -- a large offset cannot start past the entry it lands in.
+    (k0, left0) =
+      let o = realToFrac (realToFrac offset `mod'` (realToFrac period :: Double)) :: Float
+       in skip 0 (if o >= 0 && o < period then o else 0)
     skip k o
       | k < 2 * plen && o >= entry k && (entry k > 0 || o > 0) = skip (k + 1) (o - entry k)
       | otherwise = (k, entry k - o)
@@ -1477,10 +1516,22 @@ dashes pattern0 offset closed pts
           len = dist p q
           dir' = if len > 0 then ((fst q - fst p) / len, (snd q - snd p) / len) else dir
     -- A dash's points in order without repeats. A lone point gets a second
-    -- one a hair further along the line.
+    -- one a hair further along the line, or with no @dots@ is dropped.
     dash (dx, dy) ds = case dropRepeats (reverse ds) of
-      [(x, y)] -> [(x, y), (x + 1e-3 * dx, y + 1e-3 * dy)]
+      [(x, y)]
+        | dots -> [(x, y), (x + 1e-3 * dx, y + 1e-3 * dy)]
+        | otherwise -> []
       kept -> kept
+    -- On a closed polyline, a last dash ending at the start runs on into a
+    -- first dash beginning there, rather than meeting it cap to cap.
+    seam ds = case ds of
+      first@(start : _) : more
+        | closed
+        , Just (middle, final) <- unsnoc more
+        , Just (_, end) <- unsnoc final
+        , dist start end < 1e-4 ->
+            middle ++ [final ++ drop 1 first]
+      _ -> ds
     dropRepeats (a : b : rest)
       | dist a b < 1e-4 = dropRepeats (a : rest)
       | otherwise = a : dropRepeats (b : rest)
@@ -1503,9 +1554,10 @@ maxDashes = 4096
 -- 'averageStretch'.
 --
 -- A quad gradient under an axis-aligned transform fills the transformed
--- rect, each corner taking the colour of the nearest transformed corner.
--- Otherwise it becomes a polygon with per-corner colours, triangulated as
--- the untransformed quad is.
+-- rect, each corner taking the colour of the nearest transformed corner,
+-- when that keeps the diagonal it splits along or its colours blend the
+-- same over either diagonal. Otherwise it becomes a polygon with per-corner
+-- colours, triangulated as the untransformed quad is.
 --
 -- An unrotated image stays a rect under a transform without rotation or
 -- skew, flipping its UVs for a flip. Otherwise it is rotated: its centre
@@ -1555,24 +1607,37 @@ transformOp tol t@(Transform a b c d _ _) op
       FillPolygon pts rings tris sh -> [FillPolygon (points pts) rings tris sh]
       StrokePolyline pts w closed cap join limit sh -> [StrokePolyline (points pts) (w * k) closed cap join limit sh]
       FillQuadGradient r tl tr br bl
-        | not keepsRects ->
+        -- A quad blends over two triangles split from its top left to its
+        -- bottom right. When the old top left lands on another corner that
+        -- diagonal changes, which changes the blend unless the corner
+        -- colours lie on a plane.
+        | keepsRects && (even (nearest (bx, by)) || planar) ->
+            [ FillQuadGradient
+                (Rect bx by bw bh)
+                (colourNear (bx, by))
+                (colourNear (bx + bw, by))
+                (colourNear (bx + bw, by + bh))
+                (colourNear (bx, by + bh))
+            ]
+        | otherwise ->
             -- The transformed corners, with the same order and two
             -- triangles the untransformed quad uses.
             let quad = primArrayFromList (concat [[x, y] | (x, y) <- corners r])
              in [ FillPolygon quad (primArrayFromListN 2 [0, 4]) (primArrayFromListN 6 [0, 1, 2, 0, 2, 3]) (Shaded (primArrayFromListN 4 [w | Color w <- [tl, tr, br, bl]]))
                 | abs (a * d - b * c) > 0
                 ]
-        | otherwise ->
-            let Rect bx by bw bh = box r
-                from = zip (corners r) [tl, tr, br, bl]
-                nearest (px, py) = snd (minimumOn (\((qx, qy), _) -> (qx - px) * (qx - px) + (qy - py) * (qy - py)) from)
-             in [ FillQuadGradient
-                    (Rect bx by bw bh)
-                    (nearest (bx, by))
-                    (nearest (bx + bw, by))
-                    (nearest (bx + bw, by + bh))
-                    (nearest (bx, by + bh))
-                ]
+        where
+          Rect bx by bw bh = box r
+          -- The index of the old corner, clockwise from the top left,
+          -- nearest a point.
+          nearest (px, py) = snd (minimumOn (\((qx, qy), _) -> (qx - px) * (qx - px) + (qy - py) * (qy - py)) (zip (corners r) [0 :: Int ..]))
+          colourNear p = case nearest p of
+            0 -> tl
+            1 -> tr
+            2 -> br
+            _ -> bl
+          planar = all (\sh -> channel sh tl + channel sh br == channel sh tr + channel sh bl) [1, 256, 65536, 16777216]
+          channel sh (Color w) = fromIntegral (w `div` sh `mod` 256) :: Int
       DrawImage r angle tex u0 v0 u1 v1 col
         | angle == 0 && levelAxes ->
             let (u0', u1') = if a < 0 then (u1, u0) else (u0, u1)

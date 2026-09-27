@@ -11,10 +11,12 @@
 -- inside a top-level block, a list item after the first, a table row, a line
 -- of fenced code (reparsed after the table header or the fence), or a block
 -- quote's block after the first that is not directly under a paragraph. So an
--- append costs the new text plus the last list item, table row, code line or
--- quote block, or otherwise the last block. Plain words added to a
--- paragraph that ends the text join its last line without a parse (see
--- 'plainAppend').
+-- append parses the new text plus the last list item, table row, code line or
+-- quote block, or otherwise the last block. Joining that onto the block's
+-- earlier part still copies the code, or walks the items, rows or quote
+-- blocks, before it: quick next to a parse, but it grows with the block.
+-- Plain words added to a paragraph that ends the text join its last line
+-- without a parse (see 'plainAppend').
 --
 -- The rest is parsed with the link reference definitions before it. If the
 -- rest's new definitions differ from those the closed blocks were parsed
@@ -46,6 +48,7 @@ import Data.Text qualified as T
 import Data.Text.Normalize (NormalizationMode (NFC), normalize)
 import Data.Text.Lazy qualified as TL
 import GHC.Generics (Generic)
+import NanoUI.Internal.Store (ptrEq)
 import NanoUI.Markdown.Internal.Parse
 import NanoUI.Markdown.Syntax
 
@@ -74,7 +77,15 @@ data MarkdownDoc = MarkdownDoc
   }
 
 instance Eq MarkdownDoc where
-  a == b = docLength a == docLength b && TL.fromChunks (pieces a) == TL.fromChunks (pieces b)
+  a == b =
+    docLength a == docLength b
+      && (samePieces || TL.fromChunks (pieces a) == TL.fromChunks (pieces b))
+    where
+      -- A document kept in a model is compared with itself on every update,
+      -- so its pieces are the same objects.
+      samePieces = case (a, b) of
+        (MarkdownDoc {docDone = doneA, docRest = restA}, MarkdownDoc {docDone = doneB, docRest = restB}) ->
+          ptrEq doneA doneB && ptrEq restA restB
 
 instance Show MarkdownDoc where
   showsPrec d doc = showParen (d > 10) (showString "parseMarkdown " . showsPrec 11 (markdownSource doc))
@@ -161,11 +172,11 @@ markdownImages = nubOrd . concatMap blockImages . markdownBlocks
 parseMarkdownBlocks :: Text -> [Block]
 parseMarkdownBlocks = markdownBlocks . parseMarkdown
 
--- | Append text to a document. This costs the new text plus the rest after
+-- | Append text to a document. This parses the new text plus the rest after
 -- the closed blocks (see "NanoUI.Markdown.Document"), or the whole text when
--- the rest changes a link reference definition, but only the new text for
--- plain words added to a paragraph. Append a frame's tokens in one call
--- rather than one at a time.
+-- the rest changes a link reference definition, but nothing for plain words
+-- added to a paragraph. Append a frame's tokens in one call rather than one
+-- at a time.
 appendMarkdown :: Text -> MarkdownDoc -> MarkdownDoc
 appendMarkdown new doc
   | T.null new = doc
@@ -227,7 +238,8 @@ tailOf input nodes = case unsnoc nodes of
 -- | Add plain words to the paragraph that ends the rest without parsing,
 -- when the parse would only make the paragraph's last 'Str' longer by them.
 -- That holds when the words have no character Markdown gives a meaning to
--- and no @www.@, which starts a web address; the paragraph's last line
+-- (such as the @\@@ of an email address or the @/@ of a URL) and no @www@,
+-- which starts a web address (@www.@ or @www-@); the paragraph's last line
 -- starts with a letter, or on its first line also a digit, so the words
 -- cannot turn it into the start of a block; and the words follow a space, or
 -- are letters with closing punctuation after a letter, so they cannot close
@@ -236,7 +248,7 @@ tailOf input nodes = case unsnoc nodes of
 plainAppend :: Text -> MarkdownDoc -> Maybe MarkdownDoc
 plainAppend new doc = do
   TailPara oneLine <- Just (docTail doc)
-  guard (T.all plain new && not ("www." `T.isInfixOf` T.toLower new))
+  guard (T.all plain new && not ("www" `T.isInfixOf` T.toLower new))
   -- The parse puts its text in NFC. Words in NFC that start with an ASCII
   -- character, which nothing before it composes with, join the text before
   -- them unchanged.

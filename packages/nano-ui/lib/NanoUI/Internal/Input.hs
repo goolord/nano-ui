@@ -421,10 +421,11 @@ clearEphemeral :: Input -> Input
 clearEphemeral inp = (stripInteractionInput inp) {inputMouseClicks = 1, inputWindowRedraw = False}
 
 -- | Whether Ctrl+C was pressed (the C key, or a typed @c@ or ETX), which
--- requests an unconditional quit.
+-- requests an unconditional quit. Ctrl alone: Ctrl+Alt is AltGr on many
+-- layouts, and Ctrl+Shift+C is a shortcut of its own.
 isHardQuitInput :: Input -> Bool
 isHardQuitInput inp =
-  modCtrl (inputModifiers inp)
+  inputModifiers inp == noModifiers {modCtrl = True}
     && ( pressedIn (KeyChar 'c') inp
           || T.elem 'c' (inputChars inp)
           || T.elem '\ETX' (inputChars inp)
@@ -434,12 +435,12 @@ isHardQuitInput inp =
 -- Returns the input, the events taken, and the rest.
 --
 -- A frame ends after an edge (@isEdge@, a mouse press or release), so each
--- edge gets its own frame. It also ends after a command key ('isCommandKey')
--- when text, another key or a modifier change follows. A frame loses the
--- order of its text, keys and modifiers, so its text must come before its
--- one command key, and its modifiers must be those the key was pressed
--- with. Auto-repeats stay in the key's frame, so only mixed bursts cost
--- extra frames.
+-- edge gets its own frame. It also ends when the modifiers change once it
+-- holds keys or text, and after a command key ('isCommandKey') when text or
+-- another key follows. A frame loses the order of its text, keys and
+-- modifiers, so its text must come before its one command key, and its
+-- modifiers must be those its keys and text came with. Auto-repeats stay in
+-- the key's frame, so only mixed bursts cost extra frames.
 takeFrame :: (Input -> e -> Input) -> (e -> Bool) -> Input -> [e] -> (Input, [e], [e])
 takeFrame apply isEdge = go []
   where
@@ -453,14 +454,16 @@ takeFrame apply isEdge = go []
           next = apply inp e
 
 -- | Whether the event that turned @cur@ into @next@ must wait for the next
--- frame: @cur@ ends in a command key, and the event typed text, pressed a
--- different key or changed the modifiers.
+-- frame: it changed the modifiers after @cur@ took keys or text, or @cur@
+-- ends in a command key and the event typed text or pressed a different
+-- key. A plain key's text read with a modifier pressed after it would turn
+-- it into a chord, as typing @x@ then holding Ctrl would cut.
 commandEnds :: Input -> Input -> Bool
 commandEnds cur next
+  | inputModifiers next /= mods = n > 0 || not (T.null (inputChars cur))
   | n == 0 || not (isCommandKey mods k) = False
   | otherwise =
-      inputModifiers next /= mods
-        || inputChars next /= inputChars cur
+      inputChars next /= inputChars cur
         || (sizeofSmallArray (inputKeys next) > n && indexSmallArray (inputKeys next) n /= k)
   where
     n = sizeofSmallArray (inputKeys cur)

@@ -42,6 +42,25 @@ int nano_ui_window_refresh_rate(SDL_Window *window)
     return best;
 }
 
+/* Whether the pointer is over the window, by SDL's mouse focus. After the
+ * pointer leaves, SDL_GetMouseState keeps answering the last position inside
+ * the window. */
+bool nano_ui_pointer_in_window(SDL_Window *window)
+{
+    return window && SDL_GetMouseFocus() == window;
+}
+
+/* The window's position as the desktop reports it; false when it does not.
+ * On Wayland SDL answers a position the compositor never told it. */
+bool nano_ui_window_position(SDL_Window *window, int *x, int *y)
+{
+    const char *driver = SDL_GetCurrentVideoDriver();
+    if (driver && SDL_strcmp(driver, "wayland") == 0) {
+        return false;
+    }
+    return SDL_GetWindowPosition(window, x, y);
+}
+
 typedef void (*nano_ui_resize_cb)(void);
 
 static nano_ui_resize_cb g_resize_cb = NULL;

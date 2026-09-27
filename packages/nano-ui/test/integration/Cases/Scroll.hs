@@ -49,6 +49,7 @@ tests =
   , spec "scroll-disjoint-viewport-layers" runDisjointViewportLayersTest
   , spec "scroll-wheel-paint-order" runWheelPaintOrderTest
   , spec "scroll-wheel-cross-inside" runWheelCrossInsideTest
+  , spec "scroll-wheel-root-overflow" runWheelRootOverflowTest
   ]
 
 runScrollThumbCursorTest :: Context -> IORef Int -> IO ()
@@ -921,3 +922,19 @@ runWheelPaintOrderTest ctx failed = do
   warmup ctx inp0 {inputMousePos = onCard} inside
   _ <- runFrame ctx inp0 {inputMousePos = onCard, inputScroll = V2 0 1} inside
   assert failed . (> 0) =<< getScrollOffset ctx sid
+
+-- | A scroller drawn in the overflow of a root shorter than the window takes
+-- the wheel there: the root clips to the window, as in paint, not to itself.
+runWheelRootOverflowTest :: Context -> IORef Int -> IO ()
+runWheelRootOverflowTest ctx failed = do
+  let inp0 = withInputOff 400 300
+      ui = columnWith (tight . fixedH 100) $ do
+        box (fixedWH 10 150) (colorRGBA 90 90 90 255)
+        fst <$> scrollArea (fixedWH 300 100) (column (replicateM_ 30 (label "row")))
+  sid <- warmup2 ctx inp0 ui
+  assertJustM failed (getPrevRect ctx sid) $ \r@(Rect _ y _ _) -> do
+    assertGt failed y 100
+    let over = inp0 {inputMousePos = spanCenter r}
+    warmup ctx over ui
+    _ <- runFrame ctx over {inputScroll = V2 0 1} ui
+    assert failed . (> 0) =<< getScrollOffset ctx sid

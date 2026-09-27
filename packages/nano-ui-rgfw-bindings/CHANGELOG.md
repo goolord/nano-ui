@@ -35,6 +35,12 @@
   `String`.
 - Non-blocking event and window accessors are `unsafe` foreign calls.
 
+### Fixed
+
+- On X11 a `waitForEvent` with a timeout returns once it has passed. Each
+  wakeup without an event took the whole time waited so far off what was
+  left, and after a few the wait never ended.
+
 ## 0.1.0.0
 
 First release.

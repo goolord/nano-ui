@@ -118,7 +118,7 @@ updateScrollWheel ctx inp = do
   -- A wheel over an open dropdown or the text-edit menu never gets here: the
   -- combo widget scrolls its own list, and the scroller under it stays put.
   when (wheelY /= 0 || wheelX /= 0) $ do
-    mNode <- findScrollNodeUnderMouse ctx (inputMousePos inp)
+    mNode <- findScrollNodeUnderMouse ctx (inputWindowSize inp) (inputMousePos inp)
     forM_ mNode $ \idx -> do
       wid <- getWidgetId (ctxNodeArena ctx) idx
       applyScrollWheelDelta ctx wid scroll
@@ -189,8 +189,8 @@ applyScrollWheelDelta ctx@Context {ctxNodeArena = na} wid (V2 wheelX wheelY) = d
     unless (next == base && next == cur) $
       applyScrollTarget ctx wid axes next ScrollSmooth
 
-findScrollNodeUnderMouse :: Context -> V2 -> IO (Maybe NodeIdx)
-findScrollNodeUnderMouse ctx mouse = do
+findScrollNodeUnderMouse :: Context -> Size -> V2 -> IO (Maybe NodeIdx)
+findScrollNodeUnderMouse ctx (Size w h) mouse = do
   count <- arenaCount (ctxNodeArena ctx)
   if count <= 0
     then pure Nothing
@@ -200,10 +200,12 @@ findScrollNodeUnderMouse ctx mouse = do
         runMaybeT $
           MaybeT (topmostFloating ctx (== NodeModal) (`rectHit` mouse))
             <|> MaybeT (topmostOverlayAtMouse ctx mouse)
-      let start = fromMaybe 0 top
-      rect <- getNodeRect (ctxNodeArena ctx) start
+      -- The page root clips to the window, as 'applyScrollOffsets' clips it,
+      -- so a scroller in the root's overflow takes the wheel where it is
+      -- drawn; a floating panel clips to itself.
+      rect <- maybe (pure (Rect 0 0 w h)) (getNodeRect (ctxNodeArena ctx)) top
       layered <- (> 0) <$> layeredNodeCount (ctxNodeArena ctx)
-      queryScrollTarget ctx layered mouse rect start <&> \case
+      queryScrollTarget ctx layered mouse rect (fromMaybe 0 top) <&> \case
         WheelTo idx -> Just idx
         _ -> Nothing
 
@@ -334,7 +336,7 @@ tryStartScrollDrag :: Context -> Input -> IO ()
 tryStartScrollDrag ctx inp = do
   let
     mouse = inputMousePos inp
-  mIdx <- findScrollNodeUnderMouse ctx mouse
+  mIdx <- findScrollNodeUnderMouse ctx (inputWindowSize inp) mouse
   forM_ mIdx $ \hitIdx -> do
     wid <- getWidgetId (ctxNodeArena ctx) hitIdx
     bars <- grabbableBars ctx wid

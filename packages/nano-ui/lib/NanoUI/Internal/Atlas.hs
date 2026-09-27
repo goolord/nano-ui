@@ -31,9 +31,14 @@ import Foreign.Ptr (Ptr, plusPtr)
 import NanoUI.Internal.Store (ptrEq)
 import NanoUI.Internal.Types (ImageId (..))
 
--- | GPU texture id shared by every packed image so draw cmds batch.
+-- | GPU texture id shared by every packed image so draw cmds batch. It is
+-- reserved, like the glyph atlas pages' ids below it
+-- ('NanoUI.Internal.Draw.Types.glyphAtlasTextureId'), rather than a small
+-- number: a drawing's image op names a registered 'ImageId' or a raw
+-- texture, and 'freshImageId' starts at 1, so an unregistered image id must
+-- not also name the atlas.
 atlasTextureId :: Int
-atlasTextureId = 1
+atlasTextureId = 0x7ffffff9
 
 atlasPad :: Int
 atlasPad = 1

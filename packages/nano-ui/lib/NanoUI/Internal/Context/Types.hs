@@ -789,6 +789,8 @@ data FocusKind
     FocusControl !KeyClaim
   | -- | A single-line text field: 'KeysType' plus Enter.
     FocusTextLine
+  | -- | A read-only selectable text: caret motion, select-all and copy.
+    FocusTextSelectable
   | -- | A text field with an active IME composition or commit this frame.
     -- The keys belong to the IME, so it claims every key and its typed
     -- text regardless of modifiers.

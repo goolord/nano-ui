@@ -22,6 +22,12 @@ import NanoUI
   , liftIO
   , whenM
   )
+import NanoUI.Internal.Context
+  ( FocusKind (..)
+  , InteractionState (isFocusKind)
+  , getsInteraction
+  , pointerBlockedByModal
+  )
 import NanoUI.Internal.Monad (askContext, withContext)
 import NanoUI.Monad (askInput)
 import NanoUI.Form.Internal.Backend
@@ -70,9 +76,11 @@ nanoFormLive prefix form = do
     FormInvalid _ -> Nothing
 
 -- | Run a form with an integrated submit button. Arguments are stable form
--- prefix, button label, and form. Enter in the routed input also submits,
--- regardless of which field has focus; avoid treating multiple visible forms
--- as independent Enter targets.
+-- prefix, button label, and form. Enter also submits when nothing is focused
+-- or a single-line field is, but not while a text area (a newline), an input
+-- method, or another control (which Enter activates) has the key, nor behind
+-- a modal. Enter is not tied to one form, so avoid treating multiple visible
+-- forms as independent Enter targets.
 -- Validation errors are only displayed after the first submission attempt.
 -- Returns @Just a@ only on a valid submission.
 nanoFormSubmit :: Text -> Text -> Form Text a -> NanoUI (Maybe a)
@@ -84,8 +92,14 @@ nanoFormSubmit prefix submitLabel form = do
     btnClicked <- column $ do
       renderResult submittedBefore view' res
       button submitLabel
-    let enterPressed = pressedOnceIn KeyEnter inp
-        clickedSubmit = btnClicked || enterPressed
+    enterPressed <-
+      if pressedOnceIn KeyEnter inp
+        then liftIO $ do
+          blocked <- pointerBlockedByModal ctx
+          kind <- getsInteraction ctx isFocusKind
+          pure (not blocked && (kind `elem` [FocusNone, FocusTextLine, FocusTextSelectable]))
+        else pure False
+    let clickedSubmit = btnClicked || enterPressed
     when clickedSubmit $
       liftIO (markFormSubmitted ctx prefix True)
     pure $ case (clickedSubmit, res) of

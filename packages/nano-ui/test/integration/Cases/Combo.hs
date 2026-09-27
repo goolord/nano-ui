@@ -12,6 +12,7 @@ tests =
   , spec "combo-blur-commit" runComboBlurCommitTest
   , spec "combo-escape-revert" runComboEscapeRevertTest
   , spec "combo-hover-highlight" runComboHoverHighlightTest
+  , spec "combo-keys-over-still-pointer" runComboKeysOverStillPointerTest
   , spec "combo-scrollbar-drag" runComboScrollbarDragTest
   , spec "combo-wheel-scroll" runComboWheelScrollTest
   ]
@@ -102,6 +103,26 @@ runComboHoverHighlightTest ctx failed = do
     ((r1, t1), _, _, _) <- runFrame ctx (keyInp KeyEnter hover) ui
     assert failed (respChanged r1)
     assertEq failed t1 "Delta Round"
+
+-- Up/Down move the highlight while the pointer rests on a row: a pointer
+-- that has not moved does not pull the highlight back to its row, and Enter
+-- commits the row the keys reached.
+runComboKeysOverStillPointerTest :: Context -> IORef Int -> IO ()
+runComboKeysOverStillPointerTest ctx failed = do
+  let inp0 = withInput 320 200
+      ui = comboBox' "Font" comboOpts ""
+  warmupFocused ctx inp0 ui
+  _ <- runFrame ctx inp0 ui
+  overlays <- collectOverlayTextSpans ctx inp0
+  assertJust failed (spanRect "Beta Serif" overlays) $ \rowRect -> do
+    let hover = inp0 {inputMousePos = spanCenter rowRect}
+    _ <- runFrame ctx hover ui
+    _ <- runFrame ctx hover ui
+    _ <- runFrame ctx (keyInp KeyDown hover) ui
+    _ <- runFrame ctx hover ui
+    ((r, t), _, _, _) <- runFrame ctx (keyInp KeyEnter hover) ui
+    assert failed (respChanged r)
+    assertEq failed t "Gamma Mono"
 
 -- Dragging the vertical scrollbar thumb scrolls the list, and releasing the
 -- drag over a row must not commit it.

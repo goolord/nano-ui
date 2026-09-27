@@ -5,7 +5,7 @@ import Data.Either (isRight)
 import Data.Foldable (toList)
 import Data.Text qualified as T
 import NanoUI.Internal.Context (Context (..))
-import NanoUI.Internal.Input (isHardQuitInput)
+import NanoUI.Internal.Input (isHardQuitInput, takeFrame)
 import NanoUI.Shortcut
 import System.Info (os)
 
@@ -25,6 +25,7 @@ tests =
   , spec "key-repeats-widgets" runKeyRepeatsWidgetsTest
   , spec "key-pressable" runKeyPressableTest
   , spec "key-hard-quit" runKeyHardQuitTest
+  , spec "key-frame-modifiers" runKeyFrameModifiersTest
   , spec "shortcut-focused-text-area" runShortcutFocusedTextAreaTest
   , spec "shortcut-focus-from-code" runShortcutFocusFromCodeTest
   ]
@@ -292,20 +293,38 @@ runKeyPressableTest _ failed = do
   let blurred = releaseAllKeys (clearEphemeral (chordInp (ctrl <> key 's') inp0))
   assertEq failed ([], [KeyChar 's'], noModifiers) (toList (inputKeysHeld blurred), toList (inputKeysReleased blurred), inputModifiers blurred)
 
--- | Ctrl+C is a hard quit when it arrives as a key, not just as text.
+-- | Ctrl+C is a hard quit when it arrives as a key, not just as text. Only
+-- with Ctrl alone: Ctrl+Alt is AltGr, and Ctrl+Shift+C is a shortcut.
 runKeyHardQuitTest :: Context -> IORef Int -> IO ()
 runKeyHardQuitTest _ failed =
-  assertEq failed [True, False, False] [isHardQuitInput (chordInp c inp0) | c <- [ctrl <> key 'c', key 'c', ctrl <> shift <> key 'x']]
+  assertEq failed [True, False, False, False, False] [isHardQuitInput (chordInp c inp0) | c <- [ctrl <> key 'c', key 'c', ctrl <> shift <> key 'x', ctrl <> alt <> key 'c', ctrl <> shift <> key 'c']]
 
--- | A focused text area keeps Enter and Shift+Enter; Ctrl+Enter and Alt+Enter go to shortcuts.
+-- | A modifier change ends a frame that holds keys or text, so typing x and
+-- then pressing Ctrl+S does not read the x as Ctrl+X.
+runKeyFrameModifiersTest :: Context -> IORef Int -> IO ()
+runKeyFrameModifiersTest _ failed = do
+  let events =
+        [ applyKey (KeyChar 'x') True
+        , \i -> i {inputChars = inputChars i <> "x"}
+        , \i -> i {inputModifiers = ctrlHeld}
+        , applyKey (KeyChar 's') True
+        ]
+      frame inp = takeFrame (flip ($)) (const False) inp
+      (typed, _, rest) = frame inp0 events
+      (chord, _, rest') = frame (clearEphemeral typed) rest
+  assertEq failed ("x", [KeyChar 'x'], noModifiers, 2) (inputChars typed, toList (inputKeys typed), inputModifiers typed, length rest)
+  assertEq failed ("", [KeyChar 's'], ctrlHeld, 0) (inputChars chord, toList (inputKeys chord), inputModifiers chord, length rest')
+
+-- | A focused text area keeps Enter, Shift+Enter and the vertical arrows;
+-- Ctrl or Alt with them go to shortcuts.
 runShortcutFocusedTextAreaTest :: Context -> IORef Int -> IO ()
 runShortcutFocusedTextAreaTest ctx failed = do
   textRef <- newIORef "hi"
   (ui, press) <- noting ctx $ \note ->
-    column (binds note [key KeyEnter, shift <> key KeyEnter, ctrl <> key KeyEnter, alt <> key KeyEnter] >> held textRef textArea')
+    column (binds note [key KeyEnter, shift <> key KeyEnter, ctrl <> key KeyEnter, alt <> key KeyEnter, key KeyUp, ctrl <> key KeyUp, alt <> key KeyDown] >> held textRef textArea')
   warmupFocused ctx inp0 ui
-  fires failed press False [key KeyEnter, shift <> key KeyEnter]
-  fires failed press True [ctrl <> key KeyEnter, alt <> key KeyEnter]
+  fires failed press False [key KeyEnter, shift <> key KeyEnter, key KeyUp]
+  fires failed press True [ctrl <> key KeyEnter, alt <> key KeyEnter, ctrl <> key KeyUp, alt <> key KeyDown]
   assertEq failed 2 . T.count "\n" =<< readIORef textRef
 
 -- | Ctrl+F focuses a search box from code. The next frame's typing goes there

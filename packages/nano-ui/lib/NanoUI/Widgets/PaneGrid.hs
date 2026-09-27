@@ -24,6 +24,7 @@ module NanoUI.Widgets.PaneGrid
   ) where
 
 import Control.Monad (forM_, unless, void, when)
+import Data.Foldable (toList)
 import Data.Hashable (hash)
 import Data.List (find)
 import Data.Map.Strict (Map)
@@ -372,13 +373,20 @@ paneGrid cfg = do
   focusedNow <- focusedWidget
   when (pgFocusable cfg && focusedNow == wid) $ do
     nav <- useKeyNav wid
-    let plain c = pressedOnceIn (KeyChar c) inp && inputModifiers inp == noModifiers
+    -- An unmodified letter press, taken like a 'shortcut' takes it: a
+    -- shortcut declared earlier for the same key keeps it from the grid, and
+    -- the grid keeps it from one declared later.
+    let plain c
+          | pressedOnceIn (KeyChar c) inp && inputModifiers inp == noModifiers =
+              liftIO . fmap or . mapM (takeKeyPress ctx) $
+                [ix | (ix, pressed) <- zip [0 ..] (toList (inputKeys inp)), pressed == KeyChar c]
+          | otherwise = pure False
     forM_ [(knLeft, (-1, 0)), (knRight, (1, 0)), (knUp, (0, -1)), (knDown, (0, 1))] $
       \(k, dir) -> when (k nav) (moveFocus env focused dir)
     when (knLeft nav || knRight nav || knUp nav || knDown nav) $
       damageWidgetNow wid (DamageInflated 0)
-    when (plain 'm') $ maximizePane env focused
-    when (plain 'x') $ closePane env focused
+    plain 'm' >>= \hit -> when hit (maximizePane env focused)
+    plain 'x' >>= \hit -> when hit (closePane env focused)
     when (pressedOnceIn KeyEscape inp) $ do
       taken <- liftIO (overlayConsumesQuit ctx inp)
       unless taken $ do

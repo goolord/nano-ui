@@ -17,7 +17,7 @@ import Data.Text.Foreign qualified as TextForeign
 import Foreign.Ptr (Ptr, castPtr, nullPtr)
 import NanoUI (RgbaPixels, Size (..), WindowMode (..), rgbaBytes, rgbaHeight, rgbaWidth)
 import NanoUI.Backend (WindowHost (..), WindowState (..), defaultWindowState)
-import NanoUI.Sdl.Internal.Display (outPair, sendWaylandSizeLimits, windowPosCentered)
+import NanoUI.Sdl.Internal.Display (outPair, queryWindowPosition, sendWaylandSizeLimits, windowPosCentered)
 import NanoUI.Sdl.Internal.Frame (nativeFrameOutset)
 import SDL3.Sys.Bindgen.Pixels qualified as Pixels
 import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
@@ -37,8 +37,8 @@ windowHostFor win zoom limits =
   WindowHost
     { hostSetTitle = \t -> TextForeign.withCString t (void . SDL.setWindowTitleSafe win . PtrConst.unsafeFromPtr)
     , hostSetIcon = setIcon win
-    , hostSetMinSize = sizeLimit SDL.setWindowMinimumSizeSafe (\(w, h) (_, _, xw, xh) -> (w, h, xw, xh))
-    , hostSetMaxSize = sizeLimit SDL.setWindowMaximumSizeSafe (\(w, h) (nw, nh, _, _) -> (nw, nh, w, h))
+    , hostSetMinSize = sizeLimit SDL.setWindowMinimumSizeSafe (\(w, h) (_, _, xw, xh) -> (w, h, raiseMax w xw, raiseMax h xh))
+    , hostSetMaxSize = sizeLimit SDL.setWindowMaximumSizeSafe (\(w, h) (nw, nh, _, _) -> (lowerMin nw w, lowerMin nh h, w, h))
     , hostSetOpacity = void . SDL.setWindowOpacitySafe win
     , hostSetMode = \case
         Windowed -> void (SDL.setWindowFullscreenSafe win False) >> void (SDL.showWindowSafe win)
@@ -52,6 +52,11 @@ windowHostFor win zoom limits =
     , hostRestore = void (SDL.restoreWindowSafe win)
     }
   where
+    -- On a Wayland toplevel the new limit wins over the other one on an axis
+    -- where the minimum would pass the maximum: the compositor disconnects a
+    -- client that sends such a pair. A zero is no limit.
+    raiseMax lo hi = if hi > 0 && lo > hi then lo else hi
+    lowerMin lo hi = if hi > 0 && lo > hi then hi else lo
     -- A view size in window coordinates at the current zoom, plus the
     -- desktop frame on a 'NanoUI.Sdl.Internal.Frame.DecorationsFrame' window
     -- (as at open). A zero axis stays zero, meaning no limit.
@@ -97,12 +102,12 @@ setIcon win px =
 queryWindowState :: Ptr SDL_Window -> Float -> IO WindowState
 queryWindowState win scale = do
   flags <- SDL.getWindowFlags win
-  (ok, x, y) <- outPair (SDL.getWindowPosition win)
+  (ok, x, y) <- outPair (queryWindowPosition win)
   let has bit = flags .&. bit /= zeroBits
   pure
     defaultWindowState
       { winScale = scale
-      , winPosition = if ok then Just (fromIntegral x, fromIntegral y) else Nothing
+      , winPosition = if ok /= 0 then Just (fromIntegral x, fromIntegral y) else Nothing
       , winFocused = has SDL.SDL_WINDOW_INPUT_FOCUS
       , winMaximized = has SDL.SDL_WINDOW_MAXIMIZED
       , winMinimized = has SDL.SDL_WINDOW_MINIMIZED

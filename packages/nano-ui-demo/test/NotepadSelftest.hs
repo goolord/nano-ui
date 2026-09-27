@@ -63,15 +63,26 @@ selftest = do
       when (hasText "abc" spansReplaced) $
         fail "selftest: typed text was not replaced"
 
+      -- Edit > Cut takes only the selection, not the whole text.
+      drawFrame base {inputChars = "12"}
+      drawFrame base
+      chord (shift <> key KeyLeft)
+      clickOn "Edit" =<< collectTextSpans ctx
+      click =<< requireSpan "selftest: Cut item" . findRightmost "Cut" =<< overlay
+      spansCut <- collectTextSpans ctx
+      expectText "selftest: Edit > Cut removed more than the selection" "Z1" spansCut
+      when (hasText "Z12" spansCut) $
+        fail "selftest: Edit > Cut did not cut the selection"
+
       -- Ctrl+= / Ctrl+- zoom the editor font only; the status bar tracks it.
       chord (ctrl <> key '=')
       expectText "selftest: Ctrl+= did not zoom in" "Zoom: 110%" =<< collectTextSpans ctx
       chord (ctrl <> key '-')
       expectText "selftest: Ctrl+- did not zoom out" "Zoom: 100%" =<< collectTextSpans ctx
 
-      -- The File menu offers Exit; activating it terminates the process (via
-      -- 'exitSuccess'), so the selftest only checks the item is present and
-      -- closes the menu again.
+      -- The File menu offers Exit; activating it ends the session (via
+      -- 'quitUi', after confirming unsaved changes), so the selftest only
+      -- checks the item is present and closes the menu again.
       clickOn "File" =<< collectTextSpans ctx
       expectText "selftest: File menu missing Exit item" "Exit" =<< overlay
       click (V2 500 300) -- dismiss the menu without activating Exit

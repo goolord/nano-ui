@@ -52,6 +52,7 @@ runScopeTests = do
   testPrefixRestoration
   testFormInvalidation
   testSubmitPulse
+  testSubmitSkipsTextArea
   testResetWidgets
   testResetTextArea
 
@@ -177,6 +178,23 @@ testSubmitPulse = do
   check "valid submission did not return its value" (submitted == Just 42)
   idle <- warmup2 ctx input ui
   check "a submitted form kept emitting values on idle frames" (idle == Nothing)
+
+-- | Enter in a focused text area inserts a newline; it does not submit.
+testSubmitSkipsTextArea :: IO ()
+testSubmitSkipsTextArea = do
+  ctx <- newPixelContext
+  let
+    ui = nanoFormSubmit "submit-notes" "Save" (inputTextArea "notes" "")
+  _ <- warmup2 ctx input ui
+  controls <- controlsOf NodeTextArea ctx
+  case controls of
+    [(wid, _)] -> do
+      writeIORef (ctxFocusId ctx) wid
+      _ <- warmup2 ctx input ui
+      (submitted, _, _, _) <-
+        runFrame ctx (keyInp KeyEnter input) ui
+      check "Enter in a focused text area submitted the form" (submitted == Nothing)
+    _ -> fail "expected one submit-test text area"
 
 testResetWidgets :: IO ()
 testResetWidgets = do

@@ -499,6 +499,10 @@
 
 ### Changed
 
+- `ComboState` gains `csNavPointer`, where the pointer was when Up or Down
+  last moved the highlight.
+- `atlasTextureId` is `0x7ffffff9`, next to the glyph page ids. As 1 it
+  matched the first image's `ImageId`, so a stale image id drew the atlas.
 - `NanoUI` is a newtype over `Eff '[Ui, IOE]` with `MonadIO`,
   `MonadUnliftIO`, `MonadFix`, `MonadThrow`, `MonadCatch`, `MonadMask`,
   `MonadBase IO`, `MonadBaseControl IO`, and `Semigroup` and `Monoid` for
@@ -910,6 +914,25 @@
 
 ### Fixed
 
+- Up and Down move a combo's highlight while the pointer rests on its
+  dropdown. The hovered row took the highlight back every frame.
+- An app's Edit > Cut or Copy acts on the text field's selection. The press
+  on the menu collapsed it first, so Cut removed the whole text.
+- A double-click drag across lines of a text area selects from the first
+  word to the last. It mixed columns from the two lines.
+- Typing or pasting over a selection the same text collapses the selection,
+  so the next key no longer replaces it.
+- A key typed just before Ctrl in one batch of events stays typed text. It
+  was read as a Ctrl chord, so typing "x" then Ctrl could cut the text.
+- Ctrl+C quits only without Alt or Shift, so AltGr+C (Ctrl+Alt on Windows)
+  types its character.
+- A focused `selectableText` claims only caret motion, select-all and copy,
+  so shortcuts on letters, Space and Delete keep working.
+- Ctrl or Alt with Up or Down reaches shortcuts from a focused text area.
+- A text area measures its lines again after a font or scale change.
+- A pane grid's M and X keys leave a key an app shortcut took.
+- A mouse area, drop target or context-menu area inside a pointer-blocking
+  container gets hover and clicks over its own text.
 - The wheel goes to the scroller drawn on top at the pointer: a scroller
   pinned over another takes it even when declared before the one beneath.
 - A text field focused by Tab no longer has its whole text selected after a

@@ -304,11 +304,18 @@ runTransformOpsTest _ failed = do
     , [FillQuadGradient (Rect 0 (-10) 10 10) blue blue red red] == under (P.scale 1 (-1)) (drawLinearGradientV (Rect 0 0 10 10) red blue)
     , [DrawImageRect (Rect (-10) 0 10 10) 7 1 0 0 1 red] == under (P.scale (-1) 1) (drawImage (Rect 0 0 10 10) (ImageId 7) red)
     ]
-  -- A quarter turn keeps rects as rects and rotates a gradient's corner colours.
+  -- A quarter turn keeps rects as rects. A half turn rotates a gradient's
+  -- corner colours, and so does a quarter turn of a linear gradient.
   assertNear failed 1e-4 [V2 (-20) 0, V2 20 10] $
     concat [[V2 x y, V2 w h] | [FillRect (Rect x y w h) c] <- [under (P.rotate (pi / 2)) (drawRect (Rect 0 0 10 20) red)], c == red]
-  assertEq failed [[white, red, green, blue]] $
-    [[tl, tr, br, bl] | [FillQuadGradient _ tl tr br bl] <- [under (P.rotate (pi / 2)) (drawQuadGradient (Rect 0 0 10 10) red green blue white)]]
+  assertEq failed [[blue, white, red, green]] $
+    [[tl, tr, br, bl] | [FillQuadGradient _ tl tr br bl] <- [under (P.rotate pi) (drawQuadGradient (Rect 0 0 10 10) red green blue white)]]
+  assertEq failed [[red, red, blue, blue]] $
+    [[tl, tr, br, bl] | [FillQuadGradient _ tl tr br bl] <- [under (P.rotate (pi / 2)) (drawLinearGradientH (Rect 0 0 10 10) red blue)]]
+  -- A quarter turn would move the quad's diagonal, which changes a blend of
+  -- four colours, so that quad becomes a polygon with its corner colours.
+  assertEq failed [[red, green, blue, white]] $
+    [map Color (primArrayToList cs) | [FillPolygon _ _ _ (Shaded cs)] <- [under (P.rotate (pi / 2)) (drawQuadGradient (Rect 0 0 10 10) red green blue white)]]
   assertNear failed 1e-4 [V2 2 0, V2 2 20, V2 4 0] $
     concat [[V2 x0 y0, V2 x1 y1, V2 w 0] | [StrokeLineAA x0 y0 x1 y1 w c] <- [under (P.translate 2 0 <> P.rotate (pi / 2) <> P.scale 4 4) (drawStrokeAA (V2 0 0) (V2 5 0) 1 red)], c == red]
   -- A rect at any other angle becomes a polygon of the same area.
@@ -465,6 +472,14 @@ runFillHolesTest _ failed = do
   check "island non-zero" P.NonZero (square 0 0 100 <> squareBack 20 20 60 <> square 40 40 20) [6400, 400]
   -- Crossing subpaths fill separately.
   check "crossing" P.EvenOdd (square 0 0 60 <> square 40 40 60) [3600, 3600]
+  -- Copies of one loop nest: under even-odd two cancel and three fill
+  -- once, a loop and its reverse cancel under non-zero, and two the same
+  -- way fill once.
+  check "same loop twice" P.EvenOdd (square 0 0 50 <> square 0 0 50) []
+  check "same loop three times" P.EvenOdd (square 0 0 50 <> square 0 0 50 <> square 0 0 50) [2500]
+  check "loop and its reverse" P.NonZero (square 0 0 50 <> squareBack 0 0 50) []
+  check "same loop twice, non-zero" P.NonZero (square 0 0 50 <> square 0 0 50) [2500]
+  check "copies inside a square" P.EvenOdd (square 0 0 100 <> square 20 20 60 <> square 20 20 60) [6400, 3600]
   -- Concentric circles: an annulus, like a glyph with a curved counter.
   let ringArea = sum (map (maybe 0 id . coverage) (polygons P.EvenOdd (P.circle c 50 <> P.circle c 30)))
   assertLt failed (abs (ringArea - pi * (50 * 50 - 30 * 30))) (2 * pi * 80 * 0.25)
@@ -594,6 +609,11 @@ runGradientTest _ failed = do
     assertLt failed (abs (fst (covered pts tris) - 1000)) 1e-2
     assert failed (and [c == (if x <= 25 then red else if x >= 75 then blue else c) | (V2 x _, c) <- zip pts cols])
     assert failed (and [c == green | (V2 x _, c) <- zip pts cols, abs (x - 50) < 1e-3])
+  -- Two stops at one offset are a hard edge: each side keeps its own
+  -- colour up to the pixel across the edge.
+  single failed (gradient (V2 0 0) (V2 100 0) [(0, red), (0.5, red), (0.5, blue), (1, blue)] bar) $ \(pts, _, cols) -> do
+    assert failed (any (\(V2 x _) -> abs (x - 49.5) < 1e-3) pts && any (\(V2 x _) -> abs (x - 50.5) < 1e-3) pts)
+    assert failed (and [c == (if x < 50 then red else blue) | (V2 x _, c) <- zip pts cols])
   -- Rotated with its shape, each point keeps its unrotated colour.
   let turn = P.rotateAround (V2 50 5) 0.7
   single failed (shaded (opsAt 1 (withTransform turn (drawPathWith P.NonZero bar (P.Linear (V2 0 0) (V2 100 0) [(0, red), (1, blue)]))))) $ \(pts, _, cols) ->

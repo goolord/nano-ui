@@ -33,6 +33,7 @@ import NanoUI.Internal.Input (Input (..), Key (..), MouseButton (..), Pressable 
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Layout.Solve (placeFloatingNodes, runCustomMeasure, solveLayout)
 import NanoUI.Internal.Monad (NanoUI (..), Ui, runUi, whenM)
+import NanoUI.Internal.NativeWindow (clearWindowClose)
 import NanoUI.Internal.Store (mirrorStoresChanged)
 import NanoUI.Internal.Style (Padding (..), Theme (..), themeOverlayDim, themeSeparator)
 import NanoUI.Internal.Tasks (sweepHeld)
@@ -148,6 +149,9 @@ runFrameEff unlift ctx rawInp ui = do
         resetUiBuild ctx False
         unlift (runUi ctx (stripInteractionInput frameInp) ui)
       else pure result0
+  -- A close request is the view's to see once ('NanoUI.winCloseRequested'),
+  -- and only a frame that ran the view has shown it.
+  clearWindowClose ctx
   -- The store this frame's arena was built from. A view run again after a
   -- local-hook write can write the same state again (a pane divider being
   -- dragged stores the tree on every run), which is not a change the arena
@@ -259,6 +263,9 @@ paintOrReuse ctx frameInp size explain reuse key = do
   case (key, drLast reuse) of
     (Just k, Just (lastKey, lastDraw)) | k == lastKey && damageIsEmpty damage -> pure lastDraw
     _ -> do
+      -- The kept draw borrows the draw arena's buffers, which paint
+      -- overwrites: drop it first, so a paint that throws leaves none behind.
+      when (isJust (drLast reuse)) $ writeIORef (ctxDrawReuse ctx) $! reuse {drLast = Nothing}
       drawData <- paintFrame ctx frameInp size explain paintFull
       -- Nothing to keep now or before: leave the state as it is.
       unless (isNothing key && isNothing (drLast reuse)) $

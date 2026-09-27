@@ -6111,6 +6111,10 @@ void RGFW_waitForEvent(i32 waitMS) {
 
 
 	u64 start = RGFW_unix_getTimeNS();
+	/* nano-ui: each pass waits for what is left of the whole timeout,
+	   counted in 64 bits. Subtracting the total elapsed time on every pass
+	   drove waitMS negative after a few wakeups, which polls forever. */
+	const i32 timeoutMS = waitMS;
 	if (RGFW_usingWayland()) {
 		#ifdef RGFW_WAYLAND
 		while (wl_display_dispatch_pending(_RGFW->wl_display) == 0) {
@@ -6122,8 +6126,9 @@ void RGFW_waitForEvent(i32 waitMS) {
 					return;
 			}
 
-			if (waitMS != RGFW_eventWaitNext) {
-				waitMS -= (i32)(RGFW_unix_getTimeNS() - start) / (i32)1e+6;
+			if (timeoutMS > 0) {
+				u64 elapsedMS = (RGFW_unix_getTimeNS() - start) / 1000000;
+				waitMS = elapsedMS >= (u64)timeoutMS ? 0 : (i32)((u64)timeoutMS - elapsedMS);
 			}
 		}
 
@@ -6140,8 +6145,9 @@ void RGFW_waitForEvent(i32 waitMS) {
 			if (poll(fds, 2, waitMS) <= 0 || fds[1].revents)
 				break;
 
-			if (waitMS != RGFW_eventWaitNext) {
-				waitMS -= (i32)(RGFW_unix_getTimeNS() - start) / (i32)1e+6;
+			if (timeoutMS > 0) {
+				u64 elapsedMS = (RGFW_unix_getTimeNS() - start) / 1000000;
+				waitMS = elapsedMS >= (u64)timeoutMS ? 0 : (i32)((u64)timeoutMS - elapsedMS);
 			}
 		}
 		#endif
@@ -7720,7 +7726,12 @@ void RGFW_FUNC(RGFW_window_setMaxSize) (RGFW_window* win, i32 w, i32 h) {
 
 	XGetWMNormalHints(_RGFW->display, win->src.window, &hints, &flags);
 
-	hints.flags |= PMaxSize;
+	/* nano-ui: (0, 0) is no limit, as on the other platforms; an X11 maximum
+	   of 0 would pin the window at its minimum. */
+	if (w == 0 && h == 0)
+		hints.flags &= ~PMaxSize;
+	else
+		hints.flags |= PMaxSize;
 
 	hints.max_width = (i32)w;
 	hints.max_height = (i32)h;
@@ -11952,16 +11963,18 @@ void RGFW_waitForEvent(i32 waitMS) {
 
 RGFW_key RGFW_physicalToMappedKey(RGFW_key key) {
     UINT vsc = RGFW_rgfwToApiKey(key);
+    /* nano-ui: map with no modifiers held, as on X11 and macOS, rather than
+       with the current keyboard state, so a key maps alike on press and
+       release whatever is held in between, and Ctrl gives no control code.
+       Flag 4 (Windows 10 1607 and later) leaves a pending dead key to the
+       text it composes. */
     BYTE keyboardState[256] = {0};
-
-    if (!GetKeyboardState(keyboardState))
-        return key;
 
     UINT vk = MapVirtualKeyW(vsc, MAPVK_VSC_TO_VK);
     HKL layout = GetKeyboardLayout(0);
 
     wchar_t charBuffer[4] = {0};
-    int result = ToUnicodeEx(vk, vsc, keyboardState, charBuffer, 1, 0, layout);
+    int result = ToUnicodeEx(vk, vsc, keyboardState, charBuffer, 1, 4, layout);
 
     if (result == 1 && charBuffer[0] < 256) {
         return (RGFW_key)charBuffer[0];

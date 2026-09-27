@@ -2,11 +2,12 @@ module Cases.Tasks (tests) where
 
 import Spec
 import Control.Concurrent (newEmptyMVar, putMVar, readMVar, takeMVar, threadDelay, tryPutMVar)
-import Control.Exception (displayException, finally, onException)
+import Control.Exception (AsyncException (StackOverflow), displayException, finally, onException, throwIO)
 import Data.List (isInfixOf)
 import Data.Function (fix)
 import Data.Maybe (isJust)
 import GHC.Conc (getUncaughtExceptionHandler, setUncaughtExceptionHandler)
+import NanoUI.Internal.Context (wakeFromThread)
 import System.Timeout (timeout)
 
 tests :: [Spec]
@@ -18,6 +19,7 @@ tests =
   , spec "task-lease-partial" runTaskPartialLeaseTest
   , spec "task-two-passes" runTaskTwoPassTest
   , spec "task-failure" runTaskFailureTest
+  , spec "task-async-failure" runTaskAsyncFailureTest
   , spec "task-status" runTaskStatusTest
   , spec "task-retry" runTaskRetryTest
   , spec "task-shutdown" runTaskShutdownTest
@@ -254,14 +256,35 @@ runTaskRetryTest ctx failed = do
   assertEq failed (Just (Just 2)) =<< frameUntil wait ctx ui (== Just 2)
   assertEq failed 2 =<< readIORef starts
 
--- | 'cancelTasks' (run at session end) kills jobs still running.
+-- | 'cancelTasks' (run at session end) kills jobs still running and returns
+-- once their cleanup has run. After it nothing wakes the loop.
 runTaskShutdownTest :: Context -> IORef Int -> IO ()
 runTaskShutdownTest ctx failed = do
   (sleep, started, killedIn) <- sleeper
-  _ <- runFrame ctx inp (useTask ("shutdown" :: String) sleep)
+  cleaned <- newIORef False
+  wakes <- newIORef 0
+  setWakeLoop ctx (tick wakes)
+  _ <- runFrame ctx inp (useTask ("shutdown" :: String) (sleep `finally` writeIORef cleaned True))
   started
   cancelTasks ctx
+  assert failed =<< readIORef cleaned
   assert failed =<< killedIn 2000000
+  before <- readIORef wakes
+  wakeFromThread ctx
+  assertEq failed before =<< readIORef wakes
+
+-- | An asynchronous exception other than the hook's kill, such as a stack
+-- overflow, fails the job and wakes the loop.
+runTaskAsyncFailureTest :: Context -> IORef Int -> IO ()
+runTaskAsyncFailureTest ctx failed = do
+  wait <- newWakeSignal ctx
+  let ui = useTaskStatus ("overflow" :: String) (throwIO StackOverflow :: IO Int)
+      isFailed = \case
+        TaskFailed _ _ -> True
+        _ -> False
+  _ <- wait 0
+  assert failed . isJust =<< frameUntil wait ctx ui isFailed
+  cancelTasks ctx
 
 -- | An app thread that streams values and wakes the loop with 'askWake'
 -- costs one frame for a burst faster than the frame rate, showing the last

@@ -65,8 +65,8 @@ keyFree ctx mods k = do
 --   button keeps Enter and Space; a slider or list also keeps the arrows
 --   (each alone or with Shift). A text field keeps typing, cursor and delete
 --   keys and its own shortcuts such as Ctrl+A and Ctrl+Z; a multi-line field
---   leaves Ctrl+Enter and Alt+Enter free. During input method composition,
---   and on the frame it commits, the field keeps every key. A custom widget
+--   leaves Ctrl or Alt with Enter, Up or Down free. During input method
+--   composition, and on the frame it commits, the field keeps every key. A custom widget
 --   keeps the keys its 'NanoUI.Widgets.Custom.widgetKeys' names;
 -- * for Escape, when 'NanoUI.takeEscape' fails. Otherwise the shortcut
 --   consumes the Escape.
@@ -120,10 +120,13 @@ chordShortcut once (Shortcut (Just pressedKey) mods) = do
 -- Down ('KeysNavigate'). A custom widget takes what its
 -- 'NanoUI.Widgets.Custom.widgetKeys' names.
 --
--- A text field takes the arrows, Home and End with any modifiers, Enter if
--- single-line, typing keys ('isCommandKey'), and its editing keys and
--- shortcuts ('NanoUI.Widgets.TextEditor.keyCommand'). A multi-line field
--- leaves Ctrl+Enter and Alt+Enter free, for example to submit. During input
+-- A text field takes Left, Right, Home and End with any modifiers, typing
+-- keys ('isCommandKey'), and its editing keys and shortcuts
+-- ('NanoUI.Widgets.TextEditor.keyCommand'). A single-line field also takes
+-- Enter, and Up and Down with any modifiers, which step a numeric field or a
+-- combo's list. A multi-line field leaves Ctrl or Alt with Enter, Up or Down
+-- free, for example to submit. A read-only selectable text takes only Left,
+-- Right, Home and End, and select-all and copy. During input
 -- method composition, and on the frame it commits, the field takes every
 -- key, so a chord that ends a composition does not also run a shortcut.
 focusTakesChord :: FocusKind -> Modifiers -> Key -> Bool
@@ -135,12 +138,15 @@ focusTakesChord kind mods k =
     FocusControl KeysType -> fieldTakes True
     FocusControl KeysAll -> True
     FocusTextLine -> fieldTakes False
+    FocusTextSelectable ->
+      k `elem` [KeyLeft, KeyRight, KeyHome, KeyEnd]
+        || (modPrimary mods && not (modAlt mods) && k `elem` [KeyChar 'a', KeyChar 'c'])
     FocusComposing -> True
   where
     activates = shiftAtMost mods && (k == KeyEnter || k == KeySpace)
     moves = shiftAtMost mods && k `elem` [KeyLeft, KeyRight, KeyUp, KeyDown, KeyHome, KeyEnd, KeyPageUp, KeyPageDown]
     fieldTakes multi =
-      k `elem` [KeyLeft, KeyRight, KeyUp, KeyDown, KeyHome, KeyEnd]
-        || (k == KeyEnter && not multi)
+      k `elem` [KeyLeft, KeyRight, KeyHome, KeyEnd]
+        || (not multi && k `elem` [KeyEnter, KeyUp, KeyDown])
         || not (isCommandKey mods k)
         || isJust (keyCommand (if multi then multiLineMode else singleLineMode) mods k)

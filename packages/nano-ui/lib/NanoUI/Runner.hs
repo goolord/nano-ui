@@ -32,7 +32,7 @@ import NanoUI.Internal.Context
 import NanoUI.Internal.Debug
 import NanoUI.Internal.Frame.Input (needsRedraw)
 import NanoUI.Internal.Input
-import NanoUI.Internal.NativeWindow (clearWindowClose, quitRequested, requestWindowClose)
+import NanoUI.Internal.NativeWindow (quitRequested, requestWindowClose)
 import NanoUI.Internal.Tasks (cancelTasks)
 import NanoUI.Internal.Types (V2 (..))
 
@@ -111,9 +111,13 @@ shouldRedrawFrame ctx prevInp curInp wasAnim continuous refreshDue = do
       -- so an animation that just ended is the only animation case left: it
       -- needs one final frame.
       need <- needsRedraw ctx prevInp curInp
+      -- A 'NanoUI.Internal.Context.wakeFromThread' not yet taken by a frame:
+      -- a background job has published something the view reads. The frame
+      -- takes it ('takeThreadWake'), so only peek here.
+      woken <- readIORef (ctxWoken ctx)
       let pointerEdge = anyButtonPressed curInp || anyButtonReleased curInp
           scrollEdge = inputScroll curInp /= V2 0 0
-      pure (need || wasAnim || pointerEdge || scrollEdge)
+      pure (need || woken || wasAnim || pointerEdge || scrollEdge)
 
 -- | What a backend provides to 'runSessionLoop'.
 data SessionDriver ev = SessionDriver
@@ -303,7 +307,6 @@ runSessionLoop drv ctx0 inp0 = do
             then sdDraw drv ctx' inpSynced (wasAnim && not animNow)
             else pendingDirty <$ noteDebugSkip (sdDebug drv)
           sdOnCursor drv ctx' inpSynced
-          when closing (clearWindowClose ctx')
           animAfter <- anyAnimating ctx'
           traceLoopPass trace (length group) shouldDraw $
             (if pendingDirty then "D" else "")
@@ -319,4 +322,7 @@ runSessionLoop drv ctx0 inp0 = do
           unless (quit || (sdShouldQuit drv inpSynced && not overlayQuit)) $
             loop ctx' inpSynced rest now dirtyOut animNow
 
-  loop ctx0 inp0 [] startT False False `finally` cancelTasks ctx0
+  -- An opening frame the backend drew before the loop may have called
+  -- 'NanoUI.quitUi' already; waiting first could block for good.
+  (quitRequested ctx0 >>= \quit -> unless quit (loop ctx0 inp0 [] startT False False))
+    `finally` cancelTasks ctx0

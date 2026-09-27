@@ -53,21 +53,26 @@ visibleRows expanded items = smallArrayFromList (go 0 0 items (const []))
               then go (idx + 1) (depth + 1) kids (\next -> go next depth rest k)
               else go (idx + subtreeSize item) depth rest k
 
--- | Visible rows derived from an item list and expansion set.
-data TreeRows = TreeRows ![TreeItem] !IS.IntSet !(SmallArray TreeRow)
+-- | The item count and visible rows derived from an item container and
+-- expansion set.
+data TreeRows = forall f. TreeRows !(f TreeItem) !IS.IntSet !Int !(SmallArray TreeRow)
 
--- | The visible rows, from the cache while the items are the same list and
--- the expansion set is equal. The items are compared evaluated: an argument
--- that is a top-level constant is a thunk until forced.
-cachedRows :: Context -> Int -> [TreeItem] -> IS.IntSet -> IO (SmallArray TreeRow)
+-- | The item count and visible rows, from the cache while the items are the
+-- same container and the expansion set is equal. The caller's container is
+-- compared, not a list made from it, so a vector or sequence hits too. The
+-- items are compared evaluated: an argument that is a top-level constant is
+-- a thunk until forced.
+cachedRows :: Foldable f => Context -> Int -> f TreeItem -> IS.IntSet -> IO (Int, SmallArray TreeRow)
 cachedRows ctx key !items !expanded = do
   cached <- readDerived ctx key
   case cached of
-    Just (TreeRows items' expanded' rows)
-      | isTrue# (reallyUnsafePtrEquality# items' items) && expanded' == expanded -> pure rows
+    Just (TreeRows items' expanded' total rows)
+      | isTrue# (reallyUnsafePtrEquality# items' items) && expanded' == expanded -> pure (total, rows)
     _ -> do
-      let !rows = visibleRows (`IS.member` expanded) items
-      rows <$ writeDerived ctx key (TreeRows items expanded rows)
+      let list = toList items
+          !total = forestSize list
+          !rows = visibleRows (`IS.member` expanded) list
+      (total, rows) <$ writeDerived ctx key (TreeRows items expanded total rows)
 
 treeKeyNav ::
   KeyNav ->
@@ -140,15 +145,13 @@ tree' :: Foldable f => Text -> f TreeItem -> Int -> NanoUI (Response, Int)
 tree' key inputItems index =
   withKey ("tree:" <> key) $ do
     (groupId, ctx) <- freshWidget
-    let items = toList inputItems
-        groupKey = intKey groupId
-        total = forestSize items
-        clamped = if total <= 0 then 0 else clamp 0 (total - 1) index
+    let groupKey = intKey groupId
         -- Every parent starts expanded.
-        allParents = IS.fromList [i | (i, _, True, _) <- toList (visibleRows (const True) items)]
-    selected <- liftIO $ adoptSlot fieldInt ctx groupId clamped
+        allParents = IS.fromList [i | (i, _, True, _) <- toList (visibleRows (const True) (toList inputItems))]
     expandedSet <- fromMaybe allParents . lookupSlot fieldIntSet groupKey <$> liftIO (getStore ctx)
-    rows <- liftIO (cachedRows ctx groupKey items expandedSet)
+    (total, rows) <- liftIO (cachedRows ctx groupKey inputItems expandedSet)
+    let clamped = if total <= 0 then 0 else clamp 0 (total - 1) index
+    selected <- liftIO $ adoptSlot fieldInt ctx groupId clamped
     columnWith (tight . gap 0 . fillW) $ do
       tagContainer groupId
       results <-

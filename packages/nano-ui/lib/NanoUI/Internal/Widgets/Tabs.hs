@@ -174,12 +174,18 @@ scrollableHeaders ctx groupId barGap cur headers = do
     page = max 1 (viewW * 0.9)
     -- The range this frame's layout leaves: the headers' right edge past the
     -- start of what shows them, less its width. The first overflow frame has
-    -- no scroller rect yet, and keeps the range it has.
+    -- no scroller rect yet, and keeps the range it has. Headers that would
+    -- fit the whole bar without the arrows leave no range, so the arrows go
+    -- once the bar is wide enough, however narrow the scroller between them.
     measure = do
       mView <- getPrevRect ctx (if overflow then scrollWid else groupId)
+      mBarNow <- if overflow then getPrevRect ctx groupId else pure Nothing
       rights <- mapM (fmap (maybe 0 (\r -> rectX r + rectW r)) . getPrevRect ctx . respId . snd) hdrs
       o <- getScrollOffset ctx scrollWid
-      let range (Rect vx _ vw _) = scrollAxisRange (maximum (0 : rights) - vx + (if overflow then o else 0)) vw 0
+      let extent vx = maximum (0 : rights) - vx + (if overflow then o else 0)
+          range (Rect vx _ vw _)
+            | Just bar <- mBarNow, scrollAxisRange (extent vx) (rectW bar) 0 == 0 = 0
+            | otherwise = scrollAxisRange (extent vx) vw 0
       pure (maybe maxOff range mView, o)
   -- After layout the strip measures itself for the next frame, which it only
   -- asks for when the overflow or an arrow flips: a width change that keeps

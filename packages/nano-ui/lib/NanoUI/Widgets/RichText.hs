@@ -214,7 +214,7 @@ richTextWith' f pieces = do
       draw _cdc (Rect x0 y0 w _) =
         smallArrayFromList $
           concat
-            [ [FillRect (Rect (x0 + x1) (lineY line run) (x2 - x1) (runLineHeight run)) bg | (run, _, x1, x2) <- spans, Just bg <- [runBackground run]]
+            [ [FillRect (Rect (x0 + x1) (y0 + lineTop line) (x2 - x1) (lineHeight line)) bg | (run, _, x1, x2) <- spans, Just bg <- [runBackground run]]
                 ++ [ DrawTextStyled (x0 + x) (lineY line run) ((runFont run) {textFontDecoration = DecorationNone}) txt (runColor run)
                    | (x, Token txt runIdx Word _) <- lineTokens line
                    , let run = indexSmallArray runs runIdx
@@ -366,10 +366,12 @@ layoutLines runs (emptyH, emptyAscent) align width = go 0 [] 0 [] True
                    in go top placed'' x'' [] False rest'
     place (acc, x) tok = ((x, tok) : acc, x + tokenWidth tok)
     finish top placed x =
+      -- An overlong word's line starts at the left edge, as with
+      -- 'AlignStart', rather than before it.
       let shift = case align of
             AlignStart -> 0
-            AlignCenter -> (width - x) / 2
-            AlignEnd -> width - x
+            AlignCenter -> max 0 ((width - x) / 2)
+            AlignEnd -> max 0 (width - x)
           toks = reverse (if shift == 0 then placed else [(tx + shift, tok) | (tx, tok) <- placed])
           metrics = [indexSmallArray runs (tokenRun tok) | (_, tok) <- toks]
           (h, ascent) = case metrics of

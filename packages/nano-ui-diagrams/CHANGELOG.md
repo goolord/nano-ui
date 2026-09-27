@@ -55,7 +55,7 @@
 
 - `chartXDomain` and `chartYDomain` from `NanoUI.Plot.Chrome` (use
   `seriesDomains`), `diagramPointAtWithExtents` from `NanoUI.Plot.Hit`, and
-  the `NanoUI.Diagrams.Tessellation` module.
+  the `NanoUI.Diagrams.Internal.Tessellation` module.
 
 ## 0.1.0.0
 

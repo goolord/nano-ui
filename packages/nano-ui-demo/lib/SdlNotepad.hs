@@ -36,7 +36,6 @@ main =
       { -- A close request goes to the view, which may ask about unsaved changes.
         sdlWindowSettings = defaultWindowSettings {wsTitle = "nano-ui Notepad", wsSize = Size 1000 720, wsExitOnCloseRequest = False}
       , sdlAppTheme = Just tomorrowNightMinDarkTheme
-      , sdlAppShouldQuit = pressedOnceIn KeyEscape
       }
     notepadUi
 

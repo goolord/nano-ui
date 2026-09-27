@@ -16,6 +16,7 @@ tests =
   , spec "tabs-closable" runTabsClosableTest
   , pixelSpec "tabs-disabled" runTabsDisabledTest
   , spec "tabs-scroll" runTabsScrollTest
+  , spec "tabs-scroll-widen" runTabsScrollWidenTest
   , spec "tabs-state-persistence" runTabsStatePersistenceTest
   , spec "tabs-bodies-apart" runTabsBodiesApartTest
   , spec "tabs-damage" runTabsDamageTest
@@ -107,6 +108,39 @@ runTabsClosableTest ctx failed = do
     tResp <- runClick ctx inp0 (ui TabA) (spanCenter r)
     assertEq failed (tabClosed tResp) (Just TabA)
     assertEq failed (tabActive tResp) TabA
+
+-- A strip that overflowed drops its arrows once the window grows wide enough
+-- for every header in the bar, though the scroller between the arrows would
+-- still be too narrow for them.
+runTabsScrollWidenTest :: Context -> IORef Int -> IO ()
+runTabsScrollWidenTest _ failed = do
+  let labels = ["Controls", "Graphics", "Typography", "Diagnostics", "LongestTabName"]
+      mkTabs = tabBar (0 :: Int) [tab i l () | (i, l) <- zip [0 ..] labels]
+      nodeRect ctx l = do
+        let na = ctxNodeArena ctx
+        found <- findNodeM na (fmap (== l) . getText na)
+        traverse (getNodeRect na) found
+      hasArrows ctx = do
+        spans <- collectTextSpans ctx
+        pure (T.any (`elem` ['\8250', '\8249']) (T.concat [t | (_, t, _, _, _) <- spans]))
+  wide <- newContext
+  _ <- warmup2 wide (withInput 900 120) mkTabs
+  mFirst <- nodeRect wide "Controls"
+  mLast <- nodeRect wide "LongestTabName"
+  case (mFirst, mLast) of
+    (Just (Rect x0 _ _ _), Just (Rect lx _ lw _)) -> do
+      -- The headers' extent plus the window's padding on both sides, and
+      -- less spare room than the two arrows take.
+      let fitW = lx + lw + x0 + 10
+      ctx <- newContext
+      _ <- warmup2 ctx (withInput 240 120) mkTabs
+      _ <- runFrame ctx (withInput 240 120) mkTabs
+      assert failed =<< hasArrows ctx
+      replicateM_ 3 (runFrame ctx (withInput fitW 120) mkTabs)
+      spans <- collectTextSpans ctx
+      forM_ labels $ \l -> assert failed (hasText l spans)
+      assert failed . not =<< hasArrows ctx
+    _ -> assert failed False
 
 findCloseButtonRect :: Context -> IO (Maybe Rect)
 findCloseButtonRect ctx = do

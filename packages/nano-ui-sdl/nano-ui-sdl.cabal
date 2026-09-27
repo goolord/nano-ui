@@ -99,7 +99,7 @@ library
         record-hasfield ^>=1.0,
         resourcet ^>=1.3,
         sdl3-bindgen-sys ^>=0.0.0.2,
-        text ^>=2.1
+        text >=2.1.2 && <2.2
     hs-source-dirs:   lib
     -- The frame and drop shadow under a window with no title bar are DWM's;
     -- see "NanoUI.Sdl.Internal.Frame".

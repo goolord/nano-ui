@@ -61,7 +61,9 @@ containerPaints na i nt = case nt of
 -- | Damage key for a painting container with no widget id: its nearest keyed
 -- ancestor's key mixed with its arena offset from that ancestor. It is stable
 -- while nothing before it in that ancestor is added or removed. Otherwise it
--- changes, and damage sees one container leave and another arrive.
+-- changes, and damage sees one container leave and another arrive. An
+-- ancestor whose key a later node reuses ('getIdSuperseded') is passed over,
+-- or a container in each would take the same key.
 containerKey :: NodeArena -> NodeIdx -> IO Int
 containerKey na idx = go idx
   where
@@ -71,7 +73,8 @@ containerKey na idx = go idx
         then pure (mix 0 idx)
         else do
           w <- getWidgetId na p
-          if hashWidgetId w /= 0 then pure (mix (intKey w) (idx - p)) else go p
+          keyed <- if hashWidgetId w == 0 then pure False else not <$> getIdSuperseded na p
+          if keyed then pure (mix (intKey w) (idx - p)) else go p
     -- Key 0 means no widget.
     mix k off = let h = hashWithSalt k off `xor` 0x3C6EF372FE94F82A in if h == 0 then 1 else h
 
@@ -714,8 +717,8 @@ clipDamage ctx snap d owners = do
       IM.differenceWith (\n o -> if n /= o then Just n else Nothing) newTexts oldTexts
   -- An image switched or drawn another way repaints like a text change.
   unless (ptrEq newImages oldImages) $
-    forM_ (IM.keys (IM.union newImages oldImages)) $ \k ->
-      unless (IM.lookup k newImages == IM.lookup k oldImages) (addText k)
+    IM.foldrWithKey (\k _ rest -> addText k >> rest) (pure ()) $
+      IM.mergeWithKey (\_ n o -> if n /= o then Just n else Nothing) id id newImages oldImages
   -- Drawings redrawn in place repaint their own rects, like a text change
   -- that keeps its rect.
   forM_ (fdRedrawn d) $ \k ->

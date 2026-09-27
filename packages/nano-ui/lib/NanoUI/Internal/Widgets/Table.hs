@@ -46,7 +46,7 @@ import NanoUI.Internal.Font (ScrollBarSlot (..), scrollBarGutter, tableCellInset
 import NanoUI.Internal.Input (Input (..), MouseButton (..), Pressable (..), UiCursorKind (..))
 import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Monad (NanoUI, askInput, freshWidget, lastRect, nextId, liftIO, withKey)
-import NanoUI.Internal.Store (Slot (..), SlotWrites (..), fieldFloat, fieldInt, fieldIntSet, findSlot, insertDyn, lookupDyn, slotKey, slotWrite)
+import NanoUI.Internal.Store (Slot (..), SlotWrites (..), eqByPtr, fieldFloat, fieldInt, fieldIntSet, findSlot, insertDyn, lookupDyn, slotKey, slotWrite)
 import NanoUI.Internal.Style (AlignX (..), AlignY (..), Direction (..), FontVariant (..), Layout (..), Sizing (..), defaultLayout, fillH, fillW, minW, tight)
 import Data.Bits ((.|.), shiftL)
 import GHC.Exts (isTrue#, reallyUnsafePtrEquality#)
@@ -215,13 +215,8 @@ firstDiff a b = go 0
     k = min (V.length a) (V.length b)
     go !j
       | j >= k = if V.length a == V.length b then -1 else j
-      | sameText (V.unsafeIndex a j) (V.unsafeIndex b j) = go (j + 1)
+      | eqByPtr (V.unsafeIndex a j) (V.unsafeIndex b j) = go (j + 1)
       | otherwise = j
-
--- | Equal text, checked by pointer first: a cell kept from the same object
--- is often the very same text.
-sameText :: Text -> Text -> Bool
-sameText !a !b = isTrue# (reallyUnsafePtrEquality# a b) || a == b
 
 -- | Derive from @rows@, reusing @old@ (derived under the same headers):
 -- each row that is the same object under the same columns keeps its text,
@@ -279,7 +274,7 @@ rederive Context {ctxFontMetrics = fm, ctxMonoFontMetrics = mono} cols rows sort
           oldCell r i = indexSmallArray oldEnc r V.! i
           -- Whether cell i of changed row r, first changed at cell f, is
           -- kept: cells before f are, f is not, later ones are compared.
-          keptCell !r !f !i = r < oldN && (i < f || (i > f && sameText (oldCell r i) (cell r i)))
+          keptCell !r !f !i = r < oldN && (i < f || (i > f && eqByPtr (oldCell r i) (cell r i)))
           -- The first changed row r, first changed at f, with p r f; or -1.
           {-# INLINE findChanged #-}
           findChanged p = go 0
@@ -339,7 +334,7 @@ rederive Context {ctxFontMetrics = fm, ctxMonoFontMetrics = mono} cols rows sort
       let keysKept d =
             let key = sortKey (tdSort d)
                 s = sortColIndex (tdSort d)
-                keyChanged r f = s == f || (s > f && not (sameText (key (indexSmallArray oldEnc r)) (key (indexSmallArray encoded r))))
+                keyChanged r f = s == f || (s > f && not (eqByPtr (key (indexSmallArray oldEnc r)) (key (indexSmallArray encoded r))))
              in n == oldN && findChanged keyChanged < 0
           (sort', order) = case old of
             Just d | keysKept d -> (tdSort d, tdOrder d)

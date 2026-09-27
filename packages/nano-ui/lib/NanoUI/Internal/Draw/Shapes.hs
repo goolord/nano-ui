@@ -23,7 +23,6 @@ module NanoUI.Internal.Draw.Shapes
 
 import Control.Monad (when)
 import Data.IORef (readIORef)
-import Data.Maybe (isJust)
 import Data.Primitive.PrimArray (PrimArray, indexPrimArray, newPrimArray, primArrayFromListN, runPrimArray, sizeofPrimArray, writePrimArray)
 import Data.Word (Word32, Word8)
 import Foreign.Ptr (Ptr)
@@ -794,45 +793,37 @@ pushPolylineAA da pts w closed cap join limit shade
                   (v', k') <- fan (v + 4) k (v + 2) (v + 2) (v + 3) (v + 1) v x y (atan2 ny nx) (negate dir * pi) halfTurn col
                   pure (v, v, v', k')
                 else pure (v, v, v + 4, k)
-            -- Corner between segments with normals @a@ and @b@.
-            joinAt i v k ax0 ay0 bx0 by0 = do
-              let (!ax, !ay) = if ax0 == 0 && ay0 == 0 then (bx0, by0) else (ax0, ay0)
-                  (!bx, !by) = if bx0 == 0 && by0 == 0 then (ax, ay) else (bx0, by0)
-                  !mx = (ax + bx) * 0.5
-                  !my = (ay + by) * 0.5
-                  !d2 = mx * mx + my * my
-                  !col = colourAt i
+            -- Corner between segments with normals @a@ and @b@. Only corners
+            -- 'evenJoin' rejects come here, so both normals are nonzero and
+            -- the corner needs more than one even section.
+            joinAt i v k ax ay bx by = do
+              let !col = colourAt i
                   !x = px i
                   !y = py i
                   -- Inner corner offset, cut back if very sharp.
                   (!ix, !iy) = miterOf ax ay bx by
                   miter = if join == MiterJoin then miterOffset limit ax ay bx by else Nothing
-              if d2 >= straightD2 || (d2 >= 0.25 && isJust miter)
-                then do
-                  evenSection v x y ix iy col
-                  pure (v, v, v + 4, k)
-                else do
                   -- The outside is the side the next segment turns away from.
-                  let !turnsPositive = by * ax - bx * ay > 0
-                      !outSign = if turnsPositive then -1 else 1
-                  case miter of
-                    Just (fx, fy) -> do
-                      -- Miter within limit: outside runs to the full point.
-                      if turnsPositive then section v x y fx fy ix iy col else section v x y ix iy fx fy col
-                      pure (v, v, v + 4, k)
-                    Nothing -> do
-                      let (!centre, !cIn, !oIn, !cOut, !oOut)
-                            | turnsPositive = (v + 2, v + 1, v, v + 5, v + 4)
-                            | otherwise = (v + 1, v + 2, v + 3, v + 6, v + 7)
-                          !ux = outSign * ax
-                          !uy = outSign * ay
-                          !sweep = atan2 (ux * outSign * by - uy * outSign * bx) (ux * outSign * bx + uy * outSign * by)
-                          !chords = if join == RoundJoin then arcChords s outer (abs sweep) else 1
-                      if turnsPositive
-                        then section v x y ax ay ix iy col >> section (v + 4) x y bx by ix iy col
-                        else section v x y ix iy ax ay col >> section (v + 4) x y ix iy bx by col
-                      (v', k') <- fan (v + 8) k centre cIn oIn cOut oOut x y (atan2 uy ux) sweep chords col
-                      pure (v, v + 4, v', k')
+                  !turnsPositive = by * ax - bx * ay > 0
+                  !outSign = if turnsPositive then -1 else 1
+              case miter of
+                Just (fx, fy) -> do
+                  -- Miter within limit: outside runs to the full point.
+                  if turnsPositive then section v x y fx fy ix iy col else section v x y ix iy fx fy col
+                  pure (v, v, v + 4, k)
+                Nothing -> do
+                  let (!centre, !cIn, !oIn, !cOut, !oOut)
+                        | turnsPositive = (v + 2, v + 1, v, v + 5, v + 4)
+                        | otherwise = (v + 1, v + 2, v + 3, v + 6, v + 7)
+                      !ux = outSign * ax
+                      !uy = outSign * ay
+                      !sweep = atan2 (ux * outSign * by - uy * outSign * bx) (ux * outSign * bx + uy * outSign * by)
+                      !chords = if join == RoundJoin then arcChords s outer (abs sweep) else 1
+                  if turnsPositive
+                    then section v x y ax ay ix iy col >> section (v + 4) x y bx by ix iy col
+                    else section v x y ix iy ax ay col >> section (v + 4) x y ix iy bx by col
+                  (v', k') <- fan (v + 8) k centre cIn oIn cOut oOut x y (atan2 uy ux) sweep chords col
+                  pure (v, v + 4, v', k')
             pointAt i v k
               | not closed && i == 0 = let (nx, ny) = normalAt 0 in capAt i v k nx ny (-1)
               | not closed && i == n - 1 = let (nx, ny) = normalAt (n - 2) in capAt i v k nx ny 1

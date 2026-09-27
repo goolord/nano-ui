@@ -295,14 +295,17 @@ selectWithMouse ctx inp wid box chromePress atMouse
 
 -- | The selection a drag from @anchor@ to @pos@ makes after @clicks@ clicks:
 -- characters, whole words, or the whole document. A click is a drag that has
--- not moved.
+-- not moved. Words run from the start of the earlier word to the end of the
+-- later one, which may be on different rows.
 dragSelection :: TB.TextBuffer -> TB.Cursor -> TB.Cursor -> Int -> (TB.Cursor, TB.Cursor)
 dragSelection buf anchor@(TB.Cursor ar ac) pos@(TB.Cursor r c) clicks
   | clicks >= 3 = (TB.Cursor 0 0, TB.documentEnd buf)
   | clicks == 2 =
       let (a0, a1) = textWordBounds (TB.lineAt ar buf) ac
           (c0, c1) = textWordBounds (TB.lineAt r buf) c
-       in (TB.Cursor ar (min a0 c0), TB.Cursor r (max a1 c1))
+       in if pos < anchor
+            then (TB.Cursor ar a1, TB.Cursor r c0)
+            else (TB.Cursor ar a0, TB.Cursor r c1)
   | otherwise = (anchor, pos)
 
 -- | Mouse selection in single-line field @wid@ at @idx@ ('selectWithMouse'),

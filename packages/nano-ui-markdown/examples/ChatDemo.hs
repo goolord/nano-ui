@@ -59,7 +59,8 @@ chatDemoUi = do
   (arrived, doc) <- useStream replays (0 :: Int, emptyMarkdown) $ \update ->
     forM_ tokens $ \token -> do
       threadDelay (1000000 `div` tokensPerSecond)
-      update (\(n, d) -> (n + 1, appendMarkdown token d))
+      -- Force the document here, so the parse runs on this thread.
+      update (\(n, d) -> let !n' = n + 1; !d' = appendMarkdown token d in (n', d'))
   let streaming = arrived < length tokens
   -- Token count shown last frame, used to detect growth.
   (shown, setShown) <- useInt 0

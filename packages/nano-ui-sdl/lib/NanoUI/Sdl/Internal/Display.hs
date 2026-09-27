@@ -6,6 +6,8 @@ module NanoUI.Sdl.Internal.Display
   , queryWindowRefreshHz
   , queryWindowLogicalSize
   , queryMouseWindowPos
+  , pointerInWindow
+  , queryWindowPosition
   , outPair
   , zoomWindow
   , windowPosCentered
@@ -142,6 +144,17 @@ pushRefreshEvent = do
 -- | The loop took the queued refresh event, so the next wake queues another.
 takeRefreshEvent :: IO ()
 takeRefreshEvent = void (atomicSwapIORef refreshPending False)
+
+-- | Whether the pointer is over the window (SDL's mouse focus). Once it has
+-- left, 'queryMouseWindowPos' still answers the last position inside.
+foreign import ccall unsafe "nano_ui_pointer_in_window"
+  pointerInWindow :: Ptr SDL_Window -> IO CBool
+
+-- | The window's top-left corner in desktop coordinates, through two out
+-- pointers, and whether the desktop reports it: Wayland does not, though
+-- SDL answers a position there too.
+foreign import ccall unsafe "nano_ui_window_position"
+  queryWindowPosition :: Ptr SDL_Window -> Ptr CInt -> Ptr CInt -> IO CBool
 
 -- | Vertical refresh rate of the window's current display mode, in Hz
 -- (0 when unavailable).

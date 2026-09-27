@@ -18,22 +18,22 @@ module NanoUI.Internal.Tasks
   )
 where
 
-import Control.Concurrent (forkIO, killThread)
-import Control.Exception (SomeAsyncException, SomeException, evaluate, fromException, throwIO, try)
-import Control.Monad (filterM, unless, void, when)
+import Control.Concurrent (forkIO, forkIOWithUnmask, killThread, newEmptyMVar, putMVar, readMVar)
+import Control.Exception (AsyncException (ThreadKilled), SomeException, evaluate, finally, fromException, mask_, throwIO, try)
+import Control.Monad (filterM, forM_, unless, void, when)
 import Data.Dynamic (Dynamic, fromDynamic, toDyn)
-import Data.IORef (IORef, atomicModifyIORef', atomicWriteIORef, newIORef, readIORef, writeIORef)
+import Data.IORef (IORef, atomicModifyIORef', atomicWriteIORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.IntMap.Strict (IntMap)
 import Data.IntMap.Strict qualified as IM
 import Data.IntSet qualified as IS
-import Data.Maybe (isJust, isNothing)
 import Data.Primitive.PrimVar (PrimVar, modifyPrimVar, newPrimVar, readPrimVar, writePrimVar)
 import Data.Type.Equality ((:~:) (Refl))
 import Data.Typeable (Typeable, cast, eqT)
 import GHC.Conc (labelThread)
 import GHC.Exts (RealWorld)
-import NanoUI.Internal.Context (Context, askHostIO, hostOrInit, intKey, wakeFromThread)
+import NanoUI.Internal.Context (Context (ctxWakeLoop), askHostIO, hostOrInit, intKey, wakeFromThread)
 import NanoUI.Internal.Monad (NanoUI, askContext, freshWidget, liftIO)
+import System.Timeout (timeout)
 
 -- | Per-context hook resources, stored as a host value ('hostOrInit'): the
 -- resources by widget store key; the frame the view is running, which each
@@ -43,8 +43,9 @@ import NanoUI.Internal.Monad (NanoUI, askContext, freshWidget, liftIO)
 data Held = Held !(IORef (IntMap Holding)) !(PrimVar RealWorld Int) !(PrimVar RealWorld Int) !(PrimVar RealWorld Int)
 
 -- | A hook's key (compared by value), its resource, the release action, and
--- the last frame its hook ran.
-data Holding = forall k. (Eq k, Typeable k) => Holding !k !Dynamic !(IO ()) !(PrimVar RealWorld Int)
+-- the last frame its hook ran. The release returns an action that waits until
+-- the release has finished, which only the session's end ('cancelTasks') runs.
+data Holding = forall k. (Eq k, Typeable k) => Holding !k !Dynamic !(IO (IO ())) !(PrimVar RealWorld Int)
 
 -- | Hold a resource for key @k@ at this hook's widget id. While the key is
 -- unchanged the cached value is returned. Otherwise the old resource is
@@ -54,12 +55,12 @@ data Holding = forall k. (Eq k, Typeable k) => Holding !k !Dynamic !(IO ()) !(Pr
 -- when the session ends ('cancelTasks'). Holds job threads and
 -- 'NanoUI.useImageRgba' images.
 useHeld :: (Eq k, Typeable k, Typeable a) => k -> (Context -> Maybe a -> IO (a, IO ())) -> NanoUI a
-useHeld k acquire = useHeldBy k Just (\ctx old -> (\(v, release) -> (v, v, release)) <$> acquire ctx old)
+useHeld k acquire = useHeldBy k Just (\ctx old -> (\(v, release) -> (v, v, pure () <$ release)) <$> acquire ctx old)
 
 -- | 'useHeld' keeping an @s@ and returning what @view@ finds in it. An entry
 -- @view@ finds nothing in is replaced, as one of another type is.
 {-# INLINE useHeldBy #-}
-useHeldBy :: (Eq k, Typeable k, Typeable s) => k -> (s -> Maybe b) -> (Context -> Maybe b -> IO (s, b, IO ())) -> NanoUI b
+useHeldBy :: (Eq k, Typeable k, Typeable s) => k -> (s -> Maybe b) -> (Context -> Maybe b -> IO (s, b, IO (IO ()))) -> NanoUI b
 useHeldBy k view acquire = do
   (wid, ctx) <- freshWidget
   liftIO $ do
@@ -76,19 +77,27 @@ useHeldBy k view acquire = do
         unless (s == frame) $ writePrimVar seen frame >> stamp
         pure v
       _ -> do
-        -- A replaced entry stamped earlier this frame stays counted.
-        counted <- maybe (pure False) (\old -> letGo old >> (== frame) <$> seenIn old) entry
+        -- The replaced entry leaves the map, and the counts, before its
+        -- release, so an @acquire@ that throws leaves nothing released
+        -- behind for a later frame to release again.
+        forM_ entry $ \old -> do
+          writeIORef ref $! IM.delete key held
+          modifyPrimVar countVar (subtract 1)
+          s <- seenIn old
+          when (s == frame) $ modifyPrimVar stampedVar (subtract 1)
+          void (letGo old)
         (stored, v, release) <- acquire ctx (valueOf =<< entry)
         seen <- newPrimVar frame
-        writeIORef ref $! IM.insert key (Holding k (toDyn stored) release seen) held
-        unless counted stamp
-        when (isNothing entry) $ modifyPrimVar countVar (+ 1)
+        modifyIORef' ref (IM.insert key (Holding k (toDyn stored) release seen))
+        stamp
+        modifyPrimVar countVar (+ 1)
         pure v
   where
     newHeld = Held <$> newIORef IM.empty <*> newPrimVar 0 <*> newPrimVar 0 <*> newPrimVar 0
     seenIn (Holding _ _ _ seen) = readPrimVar seen
 
-letGo :: Holding -> IO ()
+-- | Start releasing a resource; the result waits until it is released.
+letGo :: Holding -> IO (IO ())
 letGo (Holding _ _ release _) = release
 
 -- | State of a 'useTaskStatus' job. The 'Maybe' is the latest result from an
@@ -121,11 +130,15 @@ taskRef (TaskBox (ref :: IORef (Outcome b))) = (\Refl -> ref) <$> eqT @a @b
 useJob :: (Eq k, Typeable k, Typeable s) => k -> (s -> Maybe b) -> (Context -> Maybe b -> IO (s, b, IO ())) -> NanoUI b
 useJob k view start = useHeldBy k view $ \ctx old -> do
   (stored, box, run) <- start ctx old
-  tid <- forkIO run
+  done <- newEmptyMVar
+  -- Masked until the handler is in place, so a job killed before it first
+  -- runs still reports that it has ended.
+  tid <- mask_ (forkIOWithUnmask (\unmask -> unmask run `finally` putMVar done ()))
   labelThread tid "nano-ui task"
   -- Kill from a separate thread: 'killThread' blocks until the job receives
-  -- the exception, which masking or a foreign call can delay.
-  pure (stored, box, void (forkIO (killThread tid)))
+  -- the exception, which masking or a foreign call can delay. Only the
+  -- session's end waits for the job to end ('cancelTasks').
+  pure (stored, box, readMVar done <$ forkIO (killThread tid))
 
 -- | Run an action on a worker thread and report its status: running, done,
 -- or failed with the exception it threw.
@@ -155,13 +168,15 @@ useJob k view start = useHeldBy k view $ \ctx old -> do
 -- wait. An old job may run briefly alongside its replacement, until it next
 -- allocates or returns from a foreign call. Use 'Control.Exception.bracket'
 -- in jobs that write files or hold resources. Jobs still running when the
--- session ends are killed.
+-- session ends are killed, and the session waits up to a second for them to
+-- finish unwinding.
 --
 -- The result is forced to weak head normal form on the worker thread; force
 -- deeper structure inside the action, or the view will pay for it.
--- Synchronous exceptions from the action or from forcing the result become
--- 'TaskFailed'; asynchronous ones end the job. Build with @-threaded@ so jobs
--- run while the loop sleeps.
+-- Exceptions from the action or from forcing the result become 'TaskFailed',
+-- asynchronous ones such as a stack overflow included; only the hook's own
+-- kill ends the job without one. Build with @-threaded@ so jobs run while the
+-- loop sleeps.
 useTaskStatus :: (Eq k, Typeable k, Typeable a) => k -> IO a -> NanoUI (TaskStatus a)
 useTaskStatus k run = (\(Outcome status _) -> status) <$> useOutcome k run
 
@@ -189,7 +204,7 @@ useOutcome k run = do
       , try (run >>= evaluate) >>= \case
           Right a -> finish (Outcome (TaskDone a) (Just a))
           Left e
-            | isJust (fromException e :: Maybe SomeAsyncException) -> throwIO e
+            | Just ThreadKilled <- fromException e -> throwIO e
             | otherwise -> finish (Outcome (TaskFailed e prev) prev)
       )
   liftIO (readIORef box)
@@ -253,12 +268,20 @@ sweepHeld ctx = askHostIO ctx >>= mapM_ sweep
 -- | Kill every job on the context and release images held by
 -- 'NanoUI.useImageRgba', at session end. 'NanoUI.Runner.runSessionLoop' calls
 -- this when its loop returns; hosts that run frames themselves should too.
+-- It removes the wake action ('NanoUI.Backend.setWakeLoop'), so nothing wakes
+-- a loop that is gone, and waits up to a second for the killed jobs to finish
+-- unwinding, so their 'Control.Exception.bracket' and
+-- 'Control.Exception.finally' cleanups run before the session's resources go.
 cancelTasks :: Context -> IO ()
-cancelTasks ctx = askHostIO ctx >>= mapM_ cancelAll
+cancelTasks ctx = do
+  writeIORef (ctxWakeLoop ctx) Nothing
+  askHostIO ctx >>= mapM_ cancelAll
   where
     cancelAll (Held ref _ stampedVar countVar) = do
       held <- readIORef ref
       writeIORef ref IM.empty
       writePrimVar stampedVar 0
       writePrimVar countVar 0
-      mapM_ letGo held
+      -- Every kill is sent before the wait, so the jobs unwind together.
+      waits <- mapM letGo held
+      void (timeout 1000000 (sequence_ waits))

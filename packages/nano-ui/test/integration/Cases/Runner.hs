@@ -10,6 +10,7 @@ import Control.Exception
   , throwIO
   , try
   )
+import NanoUI.Internal.Context (wakeFromThread)
 import NanoUI.Internal.Debug (DebugSamplerRef, newDebugSampler)
 import NanoUI.Runner
 
@@ -22,6 +23,9 @@ tests =
   , spec "session-loop-close-request" runSessionLoopCloseTest
   , spec "session-loop-close-asks-the-view" runSessionLoopCloseAskTest
   , spec "session-loop-clicks" runSessionLoopClicksTest
+  , spec "session-loop-thread-wake" runSessionLoopThreadWakeTest
+  , spec "session-loop-quit-before-loop" runSessionLoopQuitFirstTest
+  , spec "session-loop-close-skipped-pass" runSessionLoopCloseSkipTest
   , spec "drawing-lock" runDrawingLockTest
   ]
 
@@ -197,8 +201,9 @@ runSessionLoopHardQuitTest ctx failed = do
   assertEq failed 1 =<< draws [[4, 2]]
 
 -- | A batch keeps its text, keys and modifiers in order. A frame ends after
--- a command key followed by text, another key or a modifier change, so its
--- text precedes its one command key and that key sees its own modifiers.
+-- a command key followed by text, another key or a modifier change, and on
+-- any modifier change once it holds keys or text, so its text precedes its
+-- one command key and every key sees its own modifiers.
 -- Repeats and typing share a frame. Events: 1 types "l" with its key, 2
 -- presses Enter, 3 types "x", 4 holds Ctrl, 5 presses S, 6 releases S, 7
 -- releases Ctrl.
@@ -231,7 +236,7 @@ runSessionLoopKeyOrderTest ctx failed = do
           ctx
           emptyInput
         readIORef frames
-  assertEq failed [("ll", [KeyChar 'l', KeyChar 'l', KeyEnter, KeyEnter], False), ("x", [KeyChar 's'], True), ("", [], False)]
+  assertEq failed [("ll", [KeyChar 'l', KeyChar 'l', KeyEnter, KeyEnter], False), ("x", [], False), ("", [KeyChar 's'], True), ("", [], False)]
     =<< run [[1, 1, 2, 2, 3, 4, 5, 6, 7]]
   -- One event per batch, as in steady typing, adds no frames.
   assertEq failed 7 . length =<< run (map pure [1, 2, 3, 4, 5, 6, 7])
@@ -285,6 +290,74 @@ runSessionLoopCloseAskTest ctx failed = do
     ctx
     emptyInput
   assertEq failed [True, False, True] =<< readIORef seen
+
+-- | A driver that decides with 'shouldRedrawFrame' alone, as a backend
+-- following "NanoUI.Backend" does, draws the frame a background thread's
+-- wake asks for.
+runSessionLoopThreadWakeTest :: Context -> IORef Int -> IO ()
+runSessionLoopThreadWakeTest ctx failed = do
+  debug <- newDebugSampler
+  waits <- batchedWaits [[], [3]]
+  drawn <- newIORef (0 :: Int)
+  clearDirty ctx
+  runSessionLoop
+    (quietDriver debug)
+      { sdWaitEvents = \t -> do
+          events <- waits t
+          -- A job finishing ends the wait with no event of its own.
+          when (null events) (wakeFromThread ctx)
+          pure events
+      , sdShouldDraw = \c prev cur wasAnim due -> shouldRedrawFrame c prev cur wasAnim False due
+      , sdDraw = \_ _ _ -> False <$ modifyIORef' drawn (+ 1)
+      }
+    ctx
+    emptyInput
+  assertEq failed 1 =<< readIORef drawn
+
+-- | A view that called 'quitUi' in an opening frame the backend drew before
+-- the loop ends the session without a wait.
+runSessionLoopQuitFirstTest :: Context -> IORef Int -> IO ()
+runSessionLoopQuitFirstTest ctx failed = do
+  debug <- newDebugSampler
+  installWindowHost ctx defaultWindowSettings defaultWindowHost
+  evalUi ctx emptyInput quitUi
+  clearDirty ctx
+  waits <- batchedWaits []
+  drawn <- newIORef (0 :: Int)
+  runSessionLoop
+    (quietDriver debug)
+      { sdWaitEvents = waits
+      , sdShouldDraw = \_ _ _ _ _ -> pure True
+      , sdDraw = \_ _ _ -> False <$ modifyIORef' drawn (+ 1)
+      }
+    ctx
+    emptyInput
+  assertEq failed 0 =<< readIORef drawn
+
+-- | With 'wsExitOnCloseRequest' off, a close request outlives a pass that
+-- runs no frame, so the next frame's view still sees it.
+runSessionLoopCloseSkipTest :: Context -> IORef Int -> IO ()
+runSessionLoopCloseSkipTest ctx failed = do
+  debug <- newDebugSampler
+  installWindowHost ctx defaultWindowSettings {wsExitOnCloseRequest = False} defaultWindowHost
+  waits <- batchedWaits [[3], [], [3]]
+  decisions <- newIORef (0 :: Int)
+  seen <- newIORef []
+  let view = do
+        closing <- winCloseRequested <$> askWindow
+        liftIO (modifyIORef' seen (<> [closing]))
+        when closing quitUi
+  clearDirty ctx
+  runSessionLoop
+    (quietDriver debug)
+      { sdWaitEvents = waits
+        -- The first pass, the close request's, draws nothing.
+      , sdShouldDraw = \_ _ _ _ _ -> atomicModifyIORef' decisions (\n -> (n + 1, n > 0))
+      , sdDraw = \c inp _ -> False <$ evalUi c inp view
+      }
+    ctx
+    emptyInput
+  assertEq failed [True] =<< readIORef seen
 
 runDrawingLockTest :: Context -> IORef Int -> IO ()
 runDrawingLockTest _ failed = do

@@ -82,10 +82,11 @@ readDerived :: Typeable a => Context -> Int -> IO (Maybe a)
 readDerived ctx key = (IM.lookup key >=> fromDynamic) <$> readIORef (ctxDerivedCache ctx)
 
 -- | Cache a value derived by widget @key@. Entries of widgets no longer
--- built are never removed one by one, so a full cache is cleared instead.
+-- built are never removed one by one, so a full cache is cleared instead,
+-- when a new key would grow it; replacing a key's entry never clears it.
 writeDerived :: Typeable a => Context -> Int -> a -> IO ()
 writeDerived ctx key v = modifyIORef' (ctxDerivedCache ctx) $ \cache ->
-  IM.insert key (toDyn v) (if IM.size cache >= 64 then IM.empty else cache)
+  IM.insert key (toDyn v) (if IM.size cache >= 64 && IM.notMember key cache then IM.empty else cache)
 
 -- | Run an index-based picker over every value of a bounded enum. Indices
 -- are offset by @fromEnum minBound@, so enums that do not start at 0 map
