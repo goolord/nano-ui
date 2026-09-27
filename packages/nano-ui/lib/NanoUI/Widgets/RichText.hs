@@ -368,10 +368,7 @@ layoutLines runs (emptyH, emptyAscent) align width = go 0 [] 0 [] True
     finish top placed x =
       -- An overlong word's line starts at the left edge, as with
       -- 'AlignStart', rather than before it.
-      let shift = case align of
-            AlignStart -> 0
-            AlignCenter -> max 0 ((width - x) / 2)
-            AlignEnd -> max 0 (width - x)
+      let shift = max 0 (width - x) * alignXFraction align
           toks = reverse (if shift == 0 then placed else [(tx + shift, tok) | (tx, tok) <- placed])
           metrics = [indexSmallArray runs (tokenRun tok) | (_, tok) <- toks]
           (h, ascent) = case metrics of
