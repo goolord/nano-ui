@@ -235,6 +235,7 @@ test-suite nano-ui-test
         Cases.HostDraw
         Cases.Keyboard
         Cases.Cache
+        Cases.LayoutReuse
         Cases.Runner
         Cases.RichText
         Cases.SIMD
