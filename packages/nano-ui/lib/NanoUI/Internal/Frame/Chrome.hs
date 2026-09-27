@@ -14,7 +14,6 @@ module NanoUI.Internal.Frame.Chrome
   , menuPanelBounds
   , paintMenuAccent
   , paintScrollBars
-  , imageIdFromText
   , paintTabHeader
   , paintTableHeader
   ) where
@@ -24,7 +23,6 @@ import Data.IORef (readIORef)
 import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
-import qualified Data.Text.Read as TR
 import NanoUI.Internal.Context
 import NanoUI.Internal.Draw (DrawArena, pushRect, pushRoundedRect, pushRoundedStroke)
 import NanoUI.Internal.Frame.Scroll.Geometry (ScrollBarLayout (..))
@@ -337,8 +335,3 @@ paintScrollBarLayout da trackCol thumbCol layout = do
   where
     pill r@(Rect _ _ rw rh) = pushRoundedRect da r (min 4 (min rw rh / 2))
 
-imageIdFromText :: Text -> Int
-imageIdFromText txt =
-  case TR.decimal txt of
-    Right (n, rest) | T.null rest, n > 0 -> n
-    _ -> 0

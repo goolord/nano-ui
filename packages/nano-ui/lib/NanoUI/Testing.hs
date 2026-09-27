@@ -41,6 +41,7 @@ module NanoUI.Testing
   , newPixelContext
   , ctxTheme
   , ctxPaintFull
+  , setDrawReuse
   , ctxFontMetrics
   , setHost
   , askHost

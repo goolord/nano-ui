@@ -11,9 +11,10 @@ where
 import Control.Monad (unless, when)
 import Data.IORef (modifyIORef', readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
-import Data.Maybe (isJust)
+import Data.Maybe (isJust, isNothing)
 import Data.Typeable (Typeable)
 import Effectful (Eff, IOE, runEff, type (:>))
+import NanoUI.Internal.Atlas (atlasToken)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Damage (FrameSnapshot (..), captureFrameSnapshot, updatePrevRects, writeDamage)
 import NanoUI.Internal.Draw
@@ -35,7 +36,7 @@ import NanoUI.Internal.Monad (NanoUI, Ui, runUi, whenM)
 import NanoUI.Internal.Store (mirrorStoresChanged)
 import NanoUI.Internal.Style (Padding (..), Theme (..), themeOverlayDim, themeSeparator)
 import NanoUI.Internal.Tasks (sweepHeld)
-import NanoUI.Internal.Types (Damage (..), Rect (..), Size (..), rectInflate, rectNonEmpty)
+import NanoUI.Internal.Types (Damage (..), Rect (..), Size (..), damageIsEmpty, rectInflate, rectNonEmpty)
 import NanoUI.Internal.Widgets.Overlay (windowChromeSepH, windowTitleBarH)
 import NanoUI.Internal.Widgets.Sensor (beginSensors, updateSensors)
 
@@ -129,7 +130,6 @@ runFrameEff unlift ctx rawInp ui = do
   updateScrollDrag ctx layerInp
   -- Read from the last frame's nodes, before the build resets them.
   recordFocusKind ctx imeKeys
-  resetDrawArena (ctxDrawArena ctx)
   resetUiBuild ctx True
   beginFrameModal ctx
   -- An Escape the IME consumed must not also quit the app.
@@ -220,28 +220,85 @@ runFrameEff unlift ctx rawInp ui = do
   explain <- getExplainLayout ctx
   when explain (explainFrame ctx frameInp)
   writeDamage ctx frameInp snap
-  -- Clip frames repaint the damaged region of the retained texture, which
-  -- preserves the other pixels ('paintDamageClip'). Full-present frames
-  -- (fresh retain, forced full, continuous) paint everything.
+  drawData <- paintOrReuse ctx frameInp size explain
+  msgs <- drainMessages ctx
+  dirtyAfterUi <- isDirty ctx
+  pure (result, msgs, drawData, dirtyAfterUi)
+
+-- | The frame's draw data. A full frame with no damage whose 'DrawReuseKey'
+-- matches the last full frame's hands paint what that frame did, so it takes
+-- that frame's draw data instead of painting again: an idle continuous frame
+-- paints nothing. Other frames paint, and a full frame keeps what it painted
+-- for the next. Paint that reads state nano-ui does not track must call
+-- 'damageFull' when that state changes.
+paintOrReuse :: Context -> Input -> Size -> Bool -> IO DrawData
+paintOrReuse ctx frameInp size explain = do
   paintFull <- readIORef (ctxPaintFull ctx)
-  beginLayer (ctxDrawArena ctx) LayerBackground
+  reuse <- readIORef (ctxDrawReuse ctx)
+  key <-
+    if drOn reuse && paintFull && not explain
+      then drawReuseKey ctx size
+      else pure Nothing
+  damage <- getsDamage ctx dsDamage
+  case (key, drLast reuse) of
+    (Just k, Just (lastKey, lastDraw)) | k == lastKey && damageIsEmpty damage -> pure lastDraw
+    _ -> do
+      drawData <- paintFrame ctx frameInp size explain paintFull
+      -- Nothing to keep now or before: leave the state as it is.
+      unless (isNothing key && isNothing (drLast reuse)) $
+        writeIORef (ctxDrawReuse ctx) reuse {drLast = (,drawData) <$> key}
+      pure drawData
+
+-- | What a full frame's draw follows besides its damage ('DrawReuseKey'), or
+-- 'Nothing' when it cannot be reused: paint builds a custom drawing on a
+-- node that is not a drawing (a pane grid's focus ring) afresh, and no
+-- damage says when it changes.
+drawReuseKey :: Context -> Size -> IO (Maybe DrawReuseKey)
+drawReuseKey ctx@Context {ctxNodeArena = na, ctxDrawArena = da} size = do
+  customs <- dcsCustomDrawings <$> readIORef (ctxDrawingCache ctx)
+  let onDrawing k rest =
+        lookupNodeByKey na k >>= \case
+          Just idx -> getNodeType na idx >>= \nt -> if nt == NodeDrawing then rest else pure False
+          Nothing -> rest
+  reusable <- IM.foldrWithKey (\k _ rest -> onDrawing k rest) (pure True) customs
+  if not reusable
+    then pure Nothing
+    else
+      fmap Just $
+        DrawReuseKey size
+          <$> getDrawSnapScale da
+          <*> readIORef (daSquareGeometry da)
+          <*> readIORef (daExternalText da)
+          <*> readIORef (ctxMetricGen ctx)
+          <*> readIORef (ctxFocusId ctx)
+          <*> readIORef (ctxFocusVisible ctx)
+          <*> readIORef (ctxHotId ctx)
+          <*> readIORef (ctxActiveId ctx)
+          <*> getPaintSignature na
+          <*> atlasToken (ctxImageAtlas ctx)
+
+-- | Paint the frame. Clip frames repaint the damaged region of the retained
+-- texture, which preserves the other pixels ('paintDamageClip'). Full-present
+-- frames (fresh retain, forced full, continuous) paint everything.
+paintFrame :: Context -> Input -> Size -> Bool -> Bool -> IO DrawData
+paintFrame ctx frameInp size explain paintFull = do
+  let da = ctxDrawArena ctx
+  resetDrawArena da
+  beginLayer da LayerBackground
   unless paintFull $ do
     damage <- takeDamage ctx
     paintDamageClip ctx damage =<< takeDamagePieces ctx
   lowerShapes ctx
   -- Page outlines go above the page's scrollbars and below floating panels.
   when explain $ do
-    beginLayer (ctxDrawArena ctx) LayerContent
+    beginLayer da LayerContent
     paintExplainPage ctx
-  beginLayer (ctxDrawArena ctx) LayerOverlay
+  beginLayer da LayerOverlay
   drawFloatingPanels ctx size explain
   drawSelectOverlays ctx frameInp
   drawTextEditMenuOverlays ctx frameInp
   when explain (paintExplainHover ctx)
-  drawData <- finishDraw (ctxDrawArena ctx)
-  msgs <- drainMessages ctx
-  dirtyAfterUi <- isDirty ctx
-  pure (result, msgs, drawData, dirtyAfterUi)
+  finishDraw da
 
 -- | Reset what a view run builds: the node arena, sensors, input method
 -- request, and the container, id, focus, hover, cursor-zone, drawing and

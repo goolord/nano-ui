@@ -30,6 +30,7 @@ module NanoUI.Internal.Draw
   , withClip
   , finishDraw
   , drawCmdCount
+  , drawnVertexCount
   , drawCmdNull
   , forDrawCmdsInLayer_
   , drawCmdElems
@@ -54,6 +55,7 @@ module NanoUI.Internal.Draw
   , pushPolylineAA
   , points3
   , drawTextBox
+  , glyphSlackLines
   , pushText
   , pushPreparedTextStyled
   , emitDrawOps
@@ -83,13 +85,14 @@ import NanoUI.Internal.Types (Color (..), Rect (..), onGrid, rectInflate, rectIn
 drawTextBox :: FontMetrics -> Float -> Float -> Float -> Float -> T.Text -> Rect
 drawTextBox fm x y ax ay t =
   let tw = lineWidth fm t
-      th = fmLineHeight fm
       px = x - tw * max 0 ax
-      py =
-        if ay < 0
-          then y - fmAscent fm
-          else y - th * (1 - ay)
-   in Rect px py tw th
+   in Rect px (textBoxTop fm y ay) tw (fmLineHeight fm)
+
+-- | Top of a 'drawTextBox' line box anchored at @y@ by @ay@.
+textBoxTop :: FontMetrics -> Float -> Float -> Float
+textBoxTop fm y ay
+  | ay < 0 = y - fmAscent fm
+  | otherwise = y - fmLineHeight fm * (1 - ay)
 
 {-# INLINE pushText #-}
 pushText :: DrawArena -> FontMetrics -> Float -> Float -> T.Text -> Color -> IO ()
@@ -350,29 +353,41 @@ emitDrawOps da fm size resolve imageUv ops = go 0 []
             [] -> go (i + 1) []
           op -> emitOne op >> go (i + 1) saved
     emitOne op@DrawImage {} = pushImageOp da imageUv op
-    emitOne (DrawText x y ax ay t c) = do
-      prepared <- prepareFontMetrics fm t
-      let Rect px py _ _ = drawTextBox prepared x y ax ay t
-      -- Drawing text has no collected text span, so it keeps its quads even
-      -- when the host rasterizes widget text externally.
-      pushPreparedTextQuads da prepared px py t c
+    emitOne (DrawText x y ax ay t c) =
+      unlessOffClip fm (textBoxTop fm y ay) $ do
+        prepared <- prepareFontMetrics fm t
+        let Rect px py _ _ = drawTextBox prepared x y ax ay t
+        -- Drawing text has no collected text span, so it keeps its quads even
+        -- when the host rasterizes widget text externally.
+        pushPreparedTextQuads da prepared px py t c
     emitOne (DrawTextStyled x y font t c) = styled x y font t c
     emitOne (DrawTextAligned x y ax ay k font t c) = do
       let font'
             | k == 1 = font
             | otherwise = font {textFontSize = k * (if textFontSize font > 0 then textFontSize font else size)}
       (styledFm, _) <- resolve font'
-      prepared <- prepareFontMetrics styledFm t
-      let Rect px py _ _ = drawTextBox prepared x y ax ay t
-      styled px py font' t c
+      unlessOffClip styledFm (textBoxTop styledFm y ay) $ do
+        prepared <- prepareFontMetrics styledFm t
+        let Rect px py _ _ = drawTextBox prepared x y ax ay t
+        styled px py font' t c
     emitOne op = pushShapeOp da op
     -- Styled text with its line box's top-left corner at (x, y).
     styled x y font t c = do
       (styledFm, native) <- resolve font
       let weight = if native then WeightNormal else textFontWeight font
           fstyle = if native then FontStyleNormal else textFontStyle font
-      prepared <- prepareFontMetrics styledFm t
-      pushPreparedTextStyledQuads da prepared weight fstyle (textFontDecoration font) x y t c
+      unlessOffClip styledFm y $ do
+        prepared <- prepareFontMetrics styledFm t
+        pushPreparedTextStyledQuads da prepared weight fstyle (textFontDecoration font) x y t c
+    -- Text whose line box, from @top@, lies wholly above or below the clip
+    -- by more than the glyph slack draws nothing ('pushShapedQuads' culls
+    -- only across), so it is skipped before it is shaped: a long paragraph
+    -- or code block costs the lines in view.
+    unlessOffClip lineFm top act = do
+      Rect _ cy _ ch <- currentClip da
+      let !lh = fmLineHeight lineFm
+          !slack = glyphSlackLines * lh
+      unless (top + lh + slack < cy || top - slack > cy + ch) act
 
 -- | Paint a 'DrawImage' op; other ops paint nothing. @imageUv@ is as for
 -- 'emitDrawOps', and the op's UVs span 0 to 1 over the image. Unrotated

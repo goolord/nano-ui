@@ -9,6 +9,9 @@ module NanoUI.Internal.Atlas
   , freshImageId
   , lookupImageUv
   , lookupImageSize
+  , withImageSlot
+  , AtlasToken
+  , atlasToken
   , atlasSnapshot
   , AtlasUpload (..)
   , atlasChanges
@@ -25,6 +28,7 @@ import Data.Word (Word8)
 import Foreign.ForeignPtr (ForeignPtr, mallocForeignPtrBytes, withForeignPtr)
 import Foreign.Marshal.Utils (copyBytes, fillBytes)
 import Foreign.Ptr (Ptr, plusPtr)
+import NanoUI.Internal.Store (ptrEq)
 import NanoUI.Internal.Types (ImageId (..))
 
 -- | GPU texture id shared by every packed image so draw cmds batch.
@@ -71,6 +75,17 @@ data AtlasState = AtlasState
   }
 
 newtype ImageAtlas = ImageAtlas (IORef AtlasState)
+
+-- | The atlas as it is at one moment. Two tokens are equal only while no
+-- image was registered or released between them: each write installs a new
+-- state.
+newtype AtlasToken = AtlasToken AtlasState
+
+instance Eq AtlasToken where
+  AtlasToken a == AtlasToken b = ptrEq a b
+
+atlasToken :: ImageAtlas -> IO AtlasToken
+atlasToken (ImageAtlas ref) = AtlasToken <$> readIORef ref
 
 newImageAtlas :: IO ImageAtlas
 newImageAtlas = do
@@ -173,26 +188,28 @@ freshImageId (ImageAtlas ref) = do
 
 lookupImageUv ::
   ImageAtlas -> ImageId -> IO (Maybe (Float, Float, Float, Float))
-lookupImageUv (ImageAtlas ref) (ImageId tid) = do
+lookupImageUv atlas iid = withImageSlot atlas iid (pure Nothing) $ \_ _ u0 v0 u1 v1 -> pure (Just (u0, v0, u1, v1))
+
+-- | A registered image's pixel size and atlas UV bounds, from one lookup,
+-- passed to @k@; @none@ when the image is not registered.
+{-# INLINE withImageSlot #-}
+withImageSlot :: ImageAtlas -> ImageId -> IO r -> (Int -> Int -> Float -> Float -> Float -> Float -> IO r) -> IO r
+withImageSlot (ImageAtlas ref) (ImageId tid) none k = do
   st <- readIORef ref
-  let fw = fromIntegral (asW st)
-      fh = fromIntegral (asH st)
-  pure $! case IM.lookup tid (asSlots st) of
-    Nothing -> Nothing
-    Just (AtlasSlot x y w h) ->
-      let !u0 = fromIntegral x / fw
+  case IM.lookup tid (asSlots st) of
+    Nothing -> none
+    Just (AtlasSlot x y w h) -> do
+      let !fw = fromIntegral (asW st) :: Float
+          !fh = fromIntegral (asH st) :: Float
+          !u0 = fromIntegral x / fw
           !v0 = fromIntegral y / fh
           !u1 = fromIntegral (x + w) / fw
           !v1 = fromIntegral (y + h) / fh
-       in Just (u0, v0, u1, v1)
+      k w h u0 v0 u1 v1
 
 -- | Pixel width and height of a registered image.
 lookupImageSize :: ImageAtlas -> ImageId -> IO (Maybe (Int, Int))
-lookupImageSize (ImageAtlas ref) (ImageId tid) = do
-  st <- readIORef ref
-  pure $! case IM.lookup tid (asSlots st) of
-    Nothing -> Nothing
-    Just (AtlasSlot _ _ w h) -> Just (w, h)
+lookupImageSize atlas iid = withImageSlot atlas iid (pure Nothing) $ \w h _ _ _ _ -> pure (Just (w, h))
 
 -- | Writes 'asWrites' keeps: enough for a few frames of a few changing
 -- images between two uploads.

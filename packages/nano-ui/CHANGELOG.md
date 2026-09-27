@@ -814,6 +814,46 @@
   font's metrics, as their tones.
 - `runCanvas` is deprecated: it flattens curves for a guessed display
   scale. Use `runCanvasFor` with the widget's draw context, or `canvas`.
+- A wrapped label, and text in a drawing or rich text, draws only the lines
+  near its clip, so a label or paragraph taller than its scroller costs the
+  lines in view. One label of 1000 lines in a scroll area paints in 0.03 ms
+  instead of 1.3 ms (2000 lines: 0.03 ms instead of 42 ms, which also
+  overflowed the SDL text caches), and a 2000-sentence rich text in 2.4 ms
+  instead of 48 ms.
+- Rounded fills and borders allocate about 450 bytes less per bordered
+  widget and frame, with the same geometry: their corner loops are workers
+  of their own instead of closures. The headless profiler's button grid
+  allocates 415 MB instead of 578 MB over 3000 frames, and the SDL demo's
+  frame 140 KB instead of 157 KB. `NanoUI.Internal.Draw.Arena` exports
+  `reserveRaw` and `commitRaw` for such emitters.
+- An image node keeps its image id as a number (`setImageId`,
+  `getImageId` in `NanoUI.Internal.Layout.Arena`) instead of as its text
+  in decimal, which the view formatted and paint parsed back every frame.
+  Paint finds an image's size and place in the atlas with one lookup, and
+  draws an unrotated look without building a draw record; damage compares
+  the id and look (`ImagePaint`, in `pfImages` in place of `pfLooks`). A
+  frame of 600 images allocates 256 KB instead of 692 KB, or 842 KB instead
+  of 1.8 MB with a look, taking 0.55 ms instead of 0.9 ms.
+- A full frame no longer draws a page scroller's window-coloured backdrop
+  over the runner's clear to the same colour, one blended fill of the whole
+  window each continuous frame (1 Mpx at 1280x800, 4 Mpx at 2x). Clip
+  frames still draw it, and so does a full frame where something is drawn
+  under the scroller, a scope gives it another window colour, or the colour
+  is translucent. A backend that sets `ctxPaintFull` clears the target to
+  the frame's `themeWindow` first, as the SDL and RGFW runners do. Under
+  software GL the SDL demo presents 100 frames a second instead of 77.
+- A full frame (every continuous frame) with no damage, whose view put the
+  same into the arena as the last, returns the last frame's draw data
+  instead of painting again. The arena keeps a signature of the paint state
+  its layout signature leaves out, mixed as it is written: node values, font
+  colours, box, image and drawing style indices, and image ids and looks
+  (`getPaintSignature`). Widget state, hover, focus, scrolling, animations
+  and themes repaint through damage, as they do on retained frames. An idle
+  full frame of the SDL demo's Controls tab runs in 0.11 ms instead of
+  0.29 ms and allocates 64 KB instead of 129 KB. `setDrawReuse` (in
+  `NanoUI.Testing`) turns it off, as the headless and SDL profilers and
+  `nano-ui-sdl-bench` do to keep timing paint. The node value the solver
+  computes is set with `setSolvedValue`.
 
 ### Fixed
 

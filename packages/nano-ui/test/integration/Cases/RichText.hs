@@ -15,6 +15,7 @@ tests =
   , spec "rich-text-align" runRichTextAlignTest
   , spec "rich-text-many" runRichTextManyTest
   , spec "rich-text-background" runRichTextBackgroundTest
+  , spec "rich-text-scroll-cull" runRichTextScrollCullTest
   ]
 
 -- | A paragraph wraps at its column's width, taking a line's height per line,
@@ -143,3 +144,24 @@ runRichTextBackgroundTest ctx failed = do
   assert failed (firstText >= 1)
   (_, plain) <- opsOf (colorRGBA 9 9 9 255)
   assertEq failed [] [r | FillRect r c <- plain, c == tint]
+
+-- | A paragraph far taller than its scroller draws only the words near the
+-- viewport, and every row of the viewport inside its padding still shows
+-- one, wherever the scroller is. Monospace glyphs are boxes a line tall.
+runRichTextScrollCullTest :: Context -> IORef Int -> IO ()
+runRichTextScrollCullTest ctx failed = do
+  let inp0 = withInputOff 300 220
+      paragraph = [inlineText (T.pack ("word" <> show i <> " ")) | i <- [1 .. 2000 :: Int]]
+      ui = fmap fst $ scrollArea (fillW . fixedH 100) (richTextWith fillW paragraph)
+  sid <- warmup2 ctx inp0 ui
+  forM_ [0, 3333, 1000000] $ \off -> do
+    setScrollOffset ctx sid off
+    _ <- runFrame ctx inp0 ui
+    (_, _, draw, _) <- runFrame ctx inp0 ui
+    assertJustM failed (getPrevRect ctx sid) $ \(Rect rx ry rw rh) -> do
+      quads <- drawQuads draw
+      -- Glyph boxes, not the scroller's backdrop, border or bar.
+      let glyphs = [r | (r@(Rect qx _ qw qh), _) <- quads, qw < 40, qh < 40, qx < rx + rw / 2]
+          shown y = any (\(Rect _ gy _ gh) -> gy <= y && y < gy + gh) glyphs
+      assert failed (length quads < 1000)
+      assert failed (all shown [ry + fromIntegral k | k <- [12, 17 .. floor rh - 12 :: Int]])

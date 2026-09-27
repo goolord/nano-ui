@@ -6,11 +6,13 @@ import Data.ByteString qualified as BS
 import Foreign.ForeignPtr (withForeignPtr)
 import Foreign.Ptr (castPtr)
 import Data.Text qualified as T
-import NanoUI.Internal.Context (Context (..))
+import Data.Primitive.SmallArray (smallArrayFromList)
+import NanoUI.Internal.Context (Context (..), registerCustomDrawing)
 import NanoUI.Internal.Layout.Arena
   ( NodeType (..), addNodeFromLayout, getNodeRect, setNodeText
   , setNodeValue, setStyleIdx, setWidgetId
   )
+import NanoUI.Internal.Store (ptrEq)
 import System.Mem.StableName (makeStableName)
 
 tests :: [Spec]
@@ -18,6 +20,7 @@ tests =
   [ spec "metric-cache-invalidation" runMetricCacheInvalidationTest
   , spec "widget-placement-cache" runWidgetPlacementCacheTest
   , spec "layout-cache-paint-state" runLayoutPaintStateTest
+  , spec "draw-reuse" runDrawReuseTest
   , spec "partial-measure-ancestor-width" runPartialMeasureAncestorTest
   , spec "wrap-width-bounds" runWrapBoundsTest
   , spec "wrap-keeps-spaces" runWrapKeepsSpacesTest
@@ -178,6 +181,65 @@ runLayoutPaintStateTest ctx failed = do
   writeIORef (ctxLayoutCache ctx) Nothing
   (_, _, coldDraw, _) <- runFrame ctx inp (ui 0.8 blue)
   assertEq failed changed =<< snapshotDraw coldDraw
+
+-- | A full frame with no damage, built from the same view output as the
+-- last, returns the last frame's draw data itself, unpainted. A change to
+-- paint state alone (a box's colour, a slider's value, a font colour, an
+-- image or its look, a custom drawing on a container) paints again and
+-- draws the change, as does every frame with reuse off, the layout overlay
+-- on, or a clip.
+runDrawReuseTest :: Context -> IORef Int -> IO ()
+runDrawReuseTest ctx failed = do
+  let px = BS.replicate (4 * 4 * 4) 200
+  okA <- registerImage ctx (ImageId 1) 4 4 px
+  okB <- registerImage ctx (ImageId 2) 4 4 px
+  assert failed (okA && okB)
+  let inp = withInputOff 400 300
+      red = colorRGBA 255 0 0 255
+      blue = colorRGBA 0 0 255 255
+      ui (boxColor, value, fontCol, iid, opacity, stray) = column $ do
+        box (fixedWH 30 30) boxColor
+        void (slider 0 1 value)
+        void (labelWith (fontColor fontCol) "paint only")
+        imageConfigured defaultImageConfig {icLayout = fixedWH 20 20, icOpacity = opacity} (ImageId iid)
+        -- A custom drawing on a container, which paint builds afresh.
+        uiIO $ do
+          let na = ctxNodeArena ctx
+          i <- addNodeFromLayout na NodeContainer 0 (fixedWH 40 40 defaultLayout)
+          setWidgetId na i (WidgetId 777)
+          when (stray > 0) $
+            registerCustomDrawing ctx (WidgetId 777) 0 $ \_ r ->
+              smallArrayFromList [FillRect r (colorRGBA stray 0 0 255)]
+      base = (red, 0.2, red, 1, 1, 0)
+      frame s = (\(_, _, dd, _) -> dd) <$> runFrame ctx inp (ui s)
+      -- Two frames of @s@ after @from@: the first paints @s@, and the second
+      -- returns the first's draw data when @reused@.
+      check from s reused = do
+        before <- frame from >>= snapshotDraw
+        d1 <- frame s
+        d2 <- frame s
+        assertEq failed reused (ptrEq d1 d2)
+        now <- snapshotDraw d2
+        assert failed (s == from || now /= before)
+  replicateM_ 2 (frame base)
+  check base base True
+  check base (blue, 0.2, red, 1, 1, 0) True
+  check base (red, 0.8, red, 1, 1, 0) True
+  check base (red, 0.2, blue, 1, 1, 0) True
+  check base (red, 0.2, red, 2, 1, 0) True
+  check base (red, 0.2, red, 1, 0.5, 0) True
+  check base (red, 0.2, red, 1, 1, 100) False
+  check (red, 0.2, red, 1, 1, 100) (red, 0.2, red, 1, 1, 200) False
+  setDrawReuse ctx False
+  check base base False
+  setDrawReuse ctx True
+  setExplainLayout ctx True
+  check base base False
+  setExplainLayout ctx False
+  writeIORef (ctxPaintFull ctx) False
+  check base base False
+  writeIORef (ctxPaintFull ctx) True
+  check base base True
 
 -- A label wraps at its container's width. A frame that changes only the
 -- container's width must measure the label again, not restore the size it

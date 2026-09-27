@@ -14,6 +14,7 @@ module NanoUI.Internal.Frame.Paint
 
 import Control.Monad (forM_, unless, when)
 import Data.Bits ((.&.))
+import Data.IORef (readIORef)
 import Data.Maybe (fromMaybe, isJust)
 import Data.Primitive.PrimArray
   ( PrimArray
@@ -30,14 +31,14 @@ import qualified Data.Text as T
 import Data.Word (Word32)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Draw
-import NanoUI.Internal.Font (ScrollBarSlot (..))
+import NanoUI.Internal.Font (ScrollBarSlot (..), fmLineHeight)
 import NanoUI.Internal.Frame.Chrome
 import NanoUI.Internal.Frame.Node (nodeFontNative, readScrollNode, resolveTextFont)
 import NanoUI.Internal.Frame.Paint.Widgets (PaintEnv (..), buildPaintEnv, paintTextAreaNode, paintTextInputNode, paintWidget)
 import NanoUI.Internal.Frame.Scroll.Geometry (ScrollNode (..), borderContentClip, scrollBare, scrollNodeBars, scrollNodeViewport)
 import NanoUI.Internal.Frame.Spans (textNodeSpanEntry)
 import NanoUI.Internal.Id (hashWidgetId)
-import NanoUI.Internal.Image (ImageDraw (..), fadeBy, imageDrawOp, lookDraw)
+import NanoUI.Internal.Image (fadeBy, imageDrawOp, lookDraw, lookQuad, lookTurned)
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Style hiding (fontSize)
 import NanoUI.Internal.Types (Color (..), ImageId (..), Rect (..), V2 (..), colorA, colorRGBA, rectInflate)
@@ -256,7 +257,24 @@ paintScrollContainerNode env idx rect@(Rect x y w h) = do
     wTag <- axTag <$> getWidthSizing arena idx
     hTag <- axTag <$> getHeightSizing arena idx
     if wTag == SizingGrow && hTag == SizingGrow
-      then pushRect da rect (if inFloating then styleBg (themeFloatingWindow tm) else themeWindow tm)
+      then do
+        let bg = if inFloating then styleBg (themeFloatingWindow tm) else themeWindow tm
+        -- A full frame starts from the runner's clear to the base theme's
+        -- window colour ('ctxPaintFull'). Drawn first, in that same opaque
+        -- colour, the backdrop would only fill the cleared pixels again: a
+        -- whole-window blend on every continuous frame. Anything drawn
+        -- before it (a panel, a card, a layer below), a scope's other
+        -- window colour or a translucent one still needs it, as clip
+        -- frames do.
+        redundant <-
+          if inFloating || colorA bg /= 255
+            then pure False
+            else do
+              full <- readIORef (ctxPaintFull ctx)
+              drawn <- drawnVertexCount da
+              base <- readIORef (ctxTheme ctx)
+              pure (full && drawn == 0 && bg == themeWindow base)
+        unless redundant $ pushRect da rect bg
       else do
         let well = (if inFloating then themeFloatingWindow tm else themeInput tm) {styleCornerRadius = 0}
         paintStyledRect da well rect
@@ -298,11 +316,23 @@ paintTextNode env@PaintEnv {peNodeArena = arena, peDrawArena = da} idx rect@(Rec
         draw (Rect tx ty _ _, line, spanFg, _) prepared =
           unless (T.null line) $
             pushPreparedTextStyled da prepared weight style deco tx ty line spanFg
-        -- 'placeSpanLines' makes one span per line, in order.
-        wrapped (s : ss) ((_, prepared) : lns) = draw s prepared >> wrapped ss lns
-        wrapped _ _ = pure ()
     case sceLines e of
-      SpanWrapped lns -> wrapped (sceSpans e) lns
+      SpanWrapped lns -> do
+        -- Only the lines that reach the clip draw, so a label taller than
+        -- its viewport costs the lines it shows. 'placeSpanLines' makes one
+        -- span per line, top down: skip the lines wholly above the clip and
+        -- stop at the first one below it. The slack is the one the glyph
+        -- walks allow for ink outside the line box.
+        Rect _ clipY _ clipH <- currentClip da
+        let !slack = glyphSlackLines * fmLineHeight (sceFont e)
+            !top = clipY - slack
+            !bottom = clipY + clipH + slack
+            wrapped (s@(Rect _ ty _ th, _, _, _) : ss) ((_, prepared) : rest)
+              | ty > bottom = pure ()
+              | ty + th < top = wrapped ss rest
+              | otherwise = draw s prepared >> wrapped ss rest
+            wrapped _ _ = pure ()
+        wrapped (sceSpans e) lns
       SpanSingle _ prepared -> mapM_ (`draw` prepared) (sceSpans e)
 
 paintSeparatorNode :: PaintEnv -> Rect -> IO ()
@@ -323,27 +353,27 @@ paintBoxNode env idx rect = do
 -- its font colour. With a look ('getImageNode') it is fitted, cropped,
 -- zoomed, faded and rotated ('lookDraw'), and clipped to its rect when
 -- rotated. Disabled images fade like disabled widget colours; unregistered
--- ones paint the accent.
+-- ones paint the accent. The image's size and UVs come from one atlas
+-- lookup, and an unrotated look ('lookQuad') builds no draw record.
 paintImageNode :: PaintEnv -> NodeIdx -> Rect -> IO ()
 paintImageNode env@PaintEnv {peDrawArena = da} idx rect = do
   let na = peNodeArena env
       fade = if peScope env .&. 1 /= 0 then 1 - themeDisabledFade (peTheme env) else 1
-      iid = ImageId . imageIdFromText
-  tex <- iid <$> getText na idx
+  tid <- getImageId na idx
   node <- getImageNode na idx
-  case node of
-    Nothing ->
-      lookupImageUv (peContext env) tex >>= \case
-        Just (u0, v0, u1, v1) -> do
-          base <- fromMaybe (colorRGBA 255 255 255 255) <$> getNodeFontColor na idx
-          pushImage da rect atlasTextureId u0 v0 u1 v1 (fadeBy fade base)
-        Nothing -> accent
-    Just ImageNode {inLook = look} ->
-      lookupImageSize (peContext env) tex >>= \case
-        Just size -> forM_ (lookDraw look size tex fade rect) $ \d ->
-          (if imageAngle d /= 0 then withClip da rect else id) $
-            forM_ (imageDrawOp d) (pushImageOp da (atlasImageUv (peContext env)))
-        Nothing -> accent
+  withImageSlot (peContext env) (ImageId tid) accent $ \iw ih a0 b0 a1 b1 -> do
+    let slot _ = pure (Just (atlasTextureId, (a0, b0, a1, b1)))
+    case node of
+      Nothing -> do
+        base <- fromMaybe (colorRGBA 255 255 255 255) <$> getNodeFontColor na idx
+        pushImage da rect atlasTextureId a0 b0 a1 b1 (fadeBy fade base)
+      Just ImageNode {inLook = look}
+        | lookTurned look ->
+            forM_ (lookDraw look (iw, ih) (ImageId tid) fade rect) $ \d ->
+              withClip da rect $ forM_ (imageDrawOp d) (pushImageOp da slot)
+        | otherwise ->
+            lookQuad look (iw, ih) fade rect $ \r u0 v0 u1 v1 c ->
+              pushImageOp da slot (DrawImage r 0 tid u0 v0 u1 v1 c)
   where
     accent = pushRect da rect (themeAccent (peTheme env))
 

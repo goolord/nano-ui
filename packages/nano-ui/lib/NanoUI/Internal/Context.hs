@@ -18,6 +18,7 @@ module NanoUI.Internal.Context
   , WindowResizeDrag (..)
   , DamageState (..)
   , PrevFrame (..)
+  , ImagePaint (..)
   , emptyPrevFrame
   , OverlayState (..)
   , DrawingCacheState (..)
@@ -45,6 +46,7 @@ module NanoUI.Internal.Context
   , registerImages
   , lookupImageUv
   , lookupImageSize
+  , withImageSlot
   , atlasSnapshot
   , atlasChanges
   , AtlasUpload (..)
@@ -61,8 +63,11 @@ module NanoUI.Internal.Context
   , setTheme
   , getTheme
   , ExplainState (..)
+  , DrawReuse (..)
+  , DrawReuseKey (..)
   , ExplainedNode (..)
   , setExplainLayout
+  , setDrawReuse
   , getExplainLayout
   , getExplainedNode
   , followSystemTheme
@@ -195,6 +200,12 @@ lookupImageUv ctx = Atlas.lookupImageUv (ctxImageAtlas ctx)
 {-# INLINE lookupImageSize #-}
 lookupImageSize :: Context -> ImageId -> IO (Maybe (Int, Int))
 lookupImageSize ctx = Atlas.lookupImageSize (ctxImageAtlas ctx)
+
+-- | A registered image's size in pixels and atlas UV bounds, passed to @k@,
+-- or @none@ if unknown ('Atlas.withImageSlot').
+{-# INLINE withImageSlot #-}
+withImageSlot :: Context -> ImageId -> IO r -> (Int -> Int -> Float -> Float -> Float -> Float -> IO r) -> IO r
+withImageSlot ctx = Atlas.withImageSlot (ctxImageAtlas ctx)
 
 -- | What a texture of the image atlas uploaded at generation @since@ (0 for
 -- none) needs, with the atlas's size, pixels and generation.
@@ -425,6 +436,13 @@ settleViewTheme ctx before = do
 getTheme :: Context -> IO Theme
 getTheme ctx = readIORef (ctxTheme ctx)
 
+-- | Whether a full frame with no damage, built from the same view output
+-- as the last, takes the last frame's draw data instead of painting again
+-- (on by default). A benchmark that times paint on a still scene turns it
+-- off.
+setDrawReuse :: Context -> Bool -> IO ()
+setDrawReuse ctx on = writeIORef (ctxDrawReuse ctx) (DrawReuse on Nothing)
+
 -- | Toggle the layout overlay ("NanoUI.Internal.Frame.Explain"): a one-pixel
 -- outline inside every layout node, coloured by depth, and a tint on the
 -- hovered node. A change repaints the window and wakes the loop.
@@ -593,6 +611,7 @@ newContext = do
   ctxWrapCache <- newIORef (WrapCache 0 emptyGenCache)
   ctxLastMetricSource <- newIORef Nothing
   ctxPaintFull <- newIORef True
+  ctxDrawReuse <- newIORef (DrawReuse True Nothing)
   ctxExplain <- newIORef initialExplainState
   -- References above use their field names; font-dependent defaults stay
   -- explicit, including the resolvers that close over this context.

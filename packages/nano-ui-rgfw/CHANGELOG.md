@@ -58,6 +58,9 @@
   size on every monitor. `wsPosition` is `WindowPositionDefault` (centred,
   as `optCenter` was), `WindowPositionCentered`, or `WindowPositionAt` a
   point on the desktop. The default window is 1280x800, titled "nano-ui".
+- A full frame clears to the window colour of the theme the frame was
+  painted in, as SDL does, rather than the model's: the two differ when a
+  view sets its own theme (`setUiTheme`).
 
 ### Fixed
 

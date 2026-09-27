@@ -95,7 +95,7 @@ getNonzeroRect arena i = do
 
 updatePrevRects :: Context -> Size -> IO ()
 updatePrevRects ctx@Context {ctxNodeArena = na} size@(Size winW winH) = do
-  PrevFrame oldRects oldClips oldOuters oldTexts oldLooks <- getsDamage ctx dsPrev
+  PrevFrame oldRects oldClips oldOuters oldTexts oldImages <- getsDamage ctx dsPrev
   count <- arenaCount na
   let setPrev p = modifyDamage ctx (\ds -> ds {dsPrev = p})
   if count <= 0
@@ -150,7 +150,7 @@ updatePrevRects ctx@Context {ctxNodeArena = na} size@(Size winW winH) = do
                 if dropped || foundOld /= IM.size oldRects || foundOuter /= IM.size oldOuters
                   then setPrev emptyPrevFrame >> updatePrevRects ctx size
                   else
-                    unless (ptrEq m oldRects && ptrEq cm oldClips && ptrEq om oldOuters && ptrEq tm oldTexts && ptrEq lm oldLooks) $
+                    unless (ptrEq m oldRects && ptrEq cm oldClips && ptrEq om oldOuters && ptrEq tm oldTexts && ptrEq lm oldImages) $
                       setPrev (PrevFrame m cm om tm lm)
             | otherwise = do
                 wid <- getWidgetId na i
@@ -167,25 +167,38 @@ updatePrevRects ctx@Context {ctxNodeArena = na} size@(Size winW winH) = do
                       Just r -> do
                         mClip <- getClipBounds na i
                         nt <- getNodeType na i
-                        -- Text nodes, and images, whose text is their image
-                        -- id: switching an image, or how it is drawn,
-                        -- repaints it like new text.
                         tm' <-
-                          if nt == NodeText || nt == NodeImage
+                          if nt == NodeText
                             then (\txt -> putNew k txt tm) <$!> getText na i
                             else pure $! dropKey k tm
+                        -- Switching an image, or how it is drawn, repaints
+                        -- it like new text.
                         lm' <-
                           if nt == NodeImage
-                            then maybe (dropKey k lm) (\n -> putNew k (inLook n) lm) <$!> getImageNode na i
+                            then do
+                              tid <- getImageId na i
+                              node <- getImageNode na i
+                              pure $! putImage k lm tid node
                             else pure $! dropKey k lm
                         go (i + 1) (putNew k r m) (maybe (dropKey k cm) (\c -> putNew k c cm) mClip) tm' lm' (foundOld + if isOld then 1 else 0) dropped
-      go 0 m0 oldClips oldTexts oldLooks foundContainers droppedContainer
+      go 0 m0 oldClips oldTexts oldImages foundContainers droppedContainer
 
 -- | Insert, returning @m@ itself when @k@ already maps to @v@, so pointer
 -- equality survives an unchanged frame.
 {-# INLINE putNew #-}
 putNew :: Eq a => Int -> a -> IM.IntMap a -> IM.IntMap a
 putNew k v m = if IM.lookup k m == Just v then m else IM.insert k v m
+
+-- | 'putNew' for what an image node draws, comparing before it builds the
+-- entry, so an unchanged image allocates nothing.
+putImage :: Int -> IM.IntMap ImagePaint -> Int -> Maybe ImageNode -> IM.IntMap ImagePaint
+putImage k m tid node = case IM.lookup k m of
+  Just (ImagePaint t look) | t == tid && sameLook look node -> m
+  _ -> IM.insert k (ImagePaint tid (inLook <$> node)) m
+  where
+    sameLook (Just look) (Just n) = look == inLook n
+    sameLook Nothing Nothing = True
+    sameLook _ _ = False
 
 -- | Delete, returning @m@ itself when @k@ is absent.
 {-# INLINE dropKey #-}
@@ -526,10 +539,10 @@ clipDamage ctx snap d owners = do
         (\n o -> if n /= o then Just n else Nothing)
         (pfTexts new)
         (pfTexts old)
-  -- An image whose look changed repaints like a text change.
-  unless (ptrEq (pfLooks new) (pfLooks old)) $
-    forM_ (IM.keys (IM.union (pfLooks new) (pfLooks old))) $ \k ->
-      unless (IM.lookup k (pfLooks new) == IM.lookup k (pfLooks old)) (addText k)
+  -- An image switched or drawn another way repaints like a text change.
+  unless (ptrEq (pfImages new) (pfImages old)) $
+    forM_ (IM.keys (IM.union (pfImages new) (pfImages old))) $ \k ->
+      unless (IM.lookup k (pfImages new) == IM.lookup k (pfImages old)) (addText k)
   -- Drawings redrawn in place repaint their own rects, like a text change
   -- that keeps its rect.
   forM_ (fdRedrawn d) $ \k ->

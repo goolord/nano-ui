@@ -20,10 +20,13 @@ module NanoUI.Internal.Context.Types
   , DamageState (..)
   , initialDamageState
   , PrevFrame (..)
+  , ImagePaint (..)
   , emptyPrevFrame
   , OverlayState (..)
   , initialOverlayState
   , ExplainState (..)
+  , DrawReuse (..)
+  , DrawReuseKey (..)
   , initialExplainState
   , ExplainedNode (..)
   , AnimationState (..)
@@ -84,8 +87,8 @@ import Data.Typeable (TypeRep, Typeable, cast)
 import GHC.Exts (RealWorld)
 
 import NanoUI.Internal.Animation (Animation)
-import NanoUI.Internal.Atlas (ImageAtlas)
-import NanoUI.Internal.Draw.Types (DrawArena, DrawOp, DrawingBuild)
+import NanoUI.Internal.Atlas (AtlasToken, ImageAtlas)
+import NanoUI.Internal.Draw.Types (DrawArena, DrawData, DrawOp, DrawingBuild)
 import NanoUI.Internal.Font (CustomMeasureFn, FontMetrics, WrapResult)
 import NanoUI.Internal.Frame.SpanArena (SpanArena)
 import NanoUI.Internal.Id (IdContext, WidgetId, hashWidgetId)
@@ -284,10 +287,15 @@ data PrevFrame = PrevFrame
   -- ^ Scroll containers and panels: the enclosing clip they paint in.
   -- 'pfClips' holds the inner clip they give their content.
   , pfTexts :: !(IntMap Text)
-  -- ^ Text of text and image nodes.
-  , pfLooks :: !(IntMap ImageLook)
-  -- ^ Paint look of image nodes that have one.
+  -- ^ Text of text nodes.
+  , pfImages :: !(IntMap ImagePaint)
+  -- ^ What image nodes draw.
   }
+
+-- | What an image node draws: its image id, and its look ('Nothing' for a
+-- plain image).
+data ImagePaint = ImagePaint !Int !(Maybe ImageLook)
+  deriving (Eq)
 
 emptyPrevFrame :: PrevFrame
 emptyPrevFrame = PrevFrame IM.empty IM.empty IM.empty IM.empty IM.empty
@@ -334,6 +342,34 @@ initialOverlayState = OverlayState
   , osPrevFloatingOrder = []
   , osPrevMenuRects = []
   }
+
+-- | The last full frame's draw data and what it was drawn from, for a full
+-- frame that would draw the same to take instead of painting again
+-- ('NanoUI.Internal.Frame.runFrameEff').
+data DrawReuse = DrawReuse
+  { drOn :: !Bool
+  -- ^ Whether frames may reuse a draw at all ('setDrawReuse').
+  , drLast :: !(Maybe (DrawReuseKey, DrawData))
+  -- ^ The last frame's draw, while that frame painted in full and may be
+  -- reused.
+  }
+
+-- | What a full frame's draw follows besides what its damage covers.
+data DrawReuseKey = DrawReuseKey
+  { drkSize :: !Size
+  , drkSnapScale :: !Float
+  , drkSquareGeometry :: !Bool
+  , drkExternalText :: !Bool
+  , drkMetricGen :: !Int
+  , drkFocus :: !WidgetId
+  , drkFocusVisible :: !Bool
+  , drkHot :: !WidgetId
+  , drkActive :: !WidgetId
+  , drkArena :: !Word64
+  -- ^ 'NanoUI.Internal.Layout.Arena.getPaintSignature'.
+  , drkAtlas :: !AtlasToken
+  }
+  deriving (Eq)
 
 -- | Layout overlay state ('NanoUI.Internal.Frame.Explain'): whether it is on,
 -- and what the last frame drew, for the next frame to diff against.
@@ -832,8 +868,13 @@ data Context = Context
   , ctxLastMetricSource :: !(IORef (Maybe MetricSource))
   -- | True when the next present must repaint the whole window (fresh retain
   -- texture, forced full, continuous present, or window expose). When False,
-  -- a DamageClip frame culls the paint pass to the damaged region.
+  -- a DamageClip frame culls the paint pass to the damaged region. A backend
+  -- that sets it clears the target to the
+  -- 'NanoUI.Internal.Style.themeWindow' of 'ctxTheme', as
+  -- it is after the frame, before it draws the frame: paint leaves out a
+  -- page scroller's backdrop that would only repeat that clear.
   , ctxPaintFull :: !(IORef Bool)
+  , ctxDrawReuse :: !(IORef DrawReuse)
   -- | Layout overlay state.
   , ctxExplain :: !(IORef ExplainState)
   , ctxTheme :: !(IORef Theme)

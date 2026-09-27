@@ -256,68 +256,78 @@ pushRoundedRectRaw da (Rect x y w h) radius col
               !cornerI = segs * 9
               !needV = quadCount * 4 + 4 * cornerV
               !needI = quadCount * 6 + 4 * cornerI
-          withVertsRaw da needV needI $ \vp ip base baseIdx -> do
-            let !(cr, cg, cb, ca) = unpackColorF col
-                !u = whitePixel
-                pokeQuadAt !vi !ii !qx !qy !qw !qh =
-                  pokeQuadSIMD
-                    vp
-                    ((base + vi) * vertexSize)
-                    ip
-                    ((baseIdx + ii) * indexSize)
-                    qx
-                    qy
-                    qw
-                    qh
-                    u
-                    u
-                    u
-                    u
-                    cr
-                    cg
-                    cb
-                    ca
-                    (fromIntegral (base + vi))
-                pokeCorner !vi !ii !ccx !ccy !q = do
-                  let !vBase = (base + vi) * vertexSize
-                      !centerIdx = fromIntegral (base + vi) :: Word32
-                      !inRad = max 0 (rad - 1.0)
-                  pokeVertexSIMD vp vBase ccx ccy cr cg cb ca u u
-                  forUpTo_ (segs + 1) $ \i -> do
-                    let !(ct, st) = cornerCosSin q i
-                        !rimI = base + vi + 1 + i
-                        !outI = base + vi + 1 + ring + i
-                    pokeVertexSIMD vp (rimI * vertexSize) (ccx + inRad * ct) (ccy + inRad * st) cr cg cb ca u u
-                    pokeVertexSIMD vp (outI * vertexSize) (ccx + rad * ct) (ccy + rad * st) cr cg cb 0 u u
-                    when (i > 0) $ do
-                      let !k = i - 1
-                          !rim0 = fromIntegral (base + vi + i) :: Word32
-                          !rim1 = fromIntegral (base + vi + 1 + i) :: Word32
-                          !out0 = fromIntegral (base + vi + 1 + ring + k) :: Word32
-                          !out1 = fromIntegral (base + vi + 1 + ring + i) :: Word32
-                          !fillOff = (baseIdx + ii + k * 3) * indexSize
-                          !fringeOff = (baseIdx + ii + segs * 3 + k * 6) * indexSize
-                      pokeByteOff ip fillOff centerIdx
-                      pokeByteOff ip (fillOff + 4) rim0
-                      pokeByteOff ip (fillOff + 8) rim1
-                      pokeQuadIndices ip fringeOff rim0 out0 out1 rim1
-                !vi1 = if hasCenter then 4 else 0
-                !ii1 = if hasCenter then 6 else 0
-                !vi2 = vi1 + (if hasTB then 8 else 0)
-                !ii2 = ii1 + (if hasTB then 12 else 0)
-                !vi3 = vi2 + (if hasLR then 8 else 0)
-                !ii3 = ii2 + (if hasLR then 12 else 0)
-            when hasCenter $ pokeQuadAt 0 0 (x + rad) (y + rad) midW midH
-            when hasTB $ do
-              pokeQuadAt vi1 ii1 (x + rad) y midW rad
-              pokeQuadAt (vi1 + 4) (ii1 + 6) (x + rad) (y + h - rad) midW rad
-            when hasLR $ do
-              pokeQuadAt vi2 ii2 x (y + rad) rad midH
-              pokeQuadAt (vi2 + 4) (ii2 + 6) (x + w - rad) (y + rad) rad midH
-            pokeCorner vi3 ii3 (x + rad) (y + rad) 0
-            pokeCorner (vi3 + cornerV) (ii3 + cornerI) (x + w - rad) (y + rad) 1
-            pokeCorner (vi3 + 2 * cornerV) (ii3 + 2 * cornerI) (x + w - rad) (y + h - rad) 2
-            pokeCorner (vi3 + 3 * cornerV) (ii3 + 3 * cornerI) (x + rad) (y + h - rad) 3
+          (!vp, !ip, !base, !baseIdx) <- reserveRaw da needV needI
+          let !(cr, cg, cb, ca) = unpackColorF col
+              !u = whitePixel
+              pokeQuadAt !vi !ii !qx !qy !qw !qh =
+                pokeQuadSIMD
+                  vp
+                  ((base + vi) * vertexSize)
+                  ip
+                  ((baseIdx + ii) * indexSize)
+                  qx
+                  qy
+                  qw
+                  qh
+                  u
+                  u
+                  u
+                  u
+                  cr
+                  cg
+                  cb
+                  ca
+                  (fromIntegral (base + vi))
+              !vi1 = if hasCenter then 4 else 0
+              !ii1 = if hasCenter then 6 else 0
+              !vi2 = vi1 + (if hasTB then 8 else 0)
+              !ii2 = ii1 + (if hasTB then 12 else 0)
+              !vi3 = vi2 + (if hasLR then 8 else 0)
+              !ii3 = ii2 + (if hasLR then 12 else 0)
+          when hasCenter $ pokeQuadAt 0 0 (x + rad) (y + rad) midW midH
+          when hasTB $ do
+            pokeQuadAt vi1 ii1 (x + rad) y midW rad
+            pokeQuadAt (vi1 + 4) (ii1 + 6) (x + rad) (y + h - rad) midW rad
+          when hasLR $ do
+            pokeQuadAt vi2 ii2 x (y + rad) rad midH
+            pokeQuadAt (vi2 + 4) (ii2 + 6) (x + w - rad) (y + rad) rad midH
+          pokeCornerTop vp ip base baseIdx rad cr cg cb ca vi3 ii3 (x + rad) (y + rad) 0
+          pokeCornerTop vp ip base baseIdx rad cr cg cb ca (vi3 + cornerV) (ii3 + cornerI) (x + w - rad) (y + rad) 1
+          pokeCornerTop vp ip base baseIdx rad cr cg cb ca (vi3 + 2 * cornerV) (ii3 + 2 * cornerI) (x + w - rad) (y + h - rad) 2
+          pokeCornerTop vp ip base baseIdx rad cr cg cb ca (vi3 + 3 * cornerV) (ii3 + 3 * cornerI) (x + rad) (y + h - rad) 3
+          commitRaw da base baseIdx needV needI
+
+-- | One corner of a rounded fill: a fan from the corner centre to the rim
+-- and a feathered fringe outside it, as a top-level worker so the fill
+-- allocates no closure for it.
+{-# NOINLINE pokeCornerTop #-}
+pokeCornerTop :: Ptr Word8 -> Ptr Word8 -> Int -> Int -> Float -> Float -> Float -> Float -> Float -> Int -> Int -> Float -> Float -> Int -> IO ()
+pokeCornerTop !vp !ip !base !baseIdx !rad !cr !cg !cb !ca !vi !ii !ccx !ccy !q = do
+  let !segs = cornerSegments
+      !ring = segs + 1
+      !u = whitePixel
+      !vBase = (base + vi) * vertexSize
+      !centerIdx = fromIntegral (base + vi) :: Word32
+      !inRad = max 0 (rad - 1.0)
+  pokeVertexSIMD vp vBase ccx ccy cr cg cb ca u u
+  forUpTo_ (segs + 1) $ \i -> do
+    let !(ct, st) = cornerCosSin q i
+        !rimI = base + vi + 1 + i
+        !outI = base + vi + 1 + ring + i
+    pokeVertexSIMD vp (rimI * vertexSize) (ccx + inRad * ct) (ccy + inRad * st) cr cg cb ca u u
+    pokeVertexSIMD vp (outI * vertexSize) (ccx + rad * ct) (ccy + rad * st) cr cg cb 0 u u
+    when (i > 0) $ do
+      let !k = i - 1
+          !rim0 = fromIntegral (base + vi + i) :: Word32
+          !rim1 = fromIntegral (base + vi + 1 + i) :: Word32
+          !out0 = fromIntegral (base + vi + 1 + ring + k) :: Word32
+          !out1 = fromIntegral (base + vi + 1 + ring + i) :: Word32
+          !fillOff = (baseIdx + ii + k * 3) * indexSize
+          !fringeOff = (baseIdx + ii + segs * 3 + k * 6) * indexSize
+      pokeByteOff ip fillOff centerIdx
+      pokeByteOff ip (fillOff + 4) rim0
+      pokeByteOff ip (fillOff + 8) rim1
+      pokeQuadIndices ip fringeOff rim0 out0 out1 rim1
 
 -- | A filled circle. The centre snaps to the device pixel grid, not the
 -- bounding box's origin: snapping the origin rounds @cx - radius@, so two
@@ -386,35 +396,41 @@ pushRoundedStrokeRaw da (Rect px py w h) radius bw col
               !arcI = n * arcIndices
               !needV = stripCount * 8 + (if corners then 4 * arcV else 0)
               !needI = stripCount * 18 + (if corners then 4 * arcI else 0)
-          withVertsRaw da needV needI $ \vp ip base baseIdx -> do
-            let !(r, g, b, a) = unpackColorF col
-                pokeArc !vi !ii !ccx !ccy !q = do
-                  let !inner = max 0 (cr - core)
-                      !outerR = cr + core
-                      !innerAA = max 0 (inner - arcFeather)
-                      !outerAA = outerR + arcFeather
-                  forUpTo_ (n + 1) $ \i -> do
-                    let !(ct, st) = cornerCosSin q i
-                    pokeBandVerts vp ((base + vi + i * arcStride) * vertexSize) hasCore r g b a $
-                      concentricOffsetsSIMD ccx ccy ct st innerAA inner outerR outerAA
-                  forUpTo_ n $ \i -> do
-                    let !va = fromIntegral (base + vi + i * arcStride) :: Word32
-                    pokeBandIndices ip ((baseIdx + ii + i * arcIndices) * indexSize) hasCore va (va + fromIntegral arcStride)
-                !viLR = if doTB then 16 else 0
-                !iiLR = if doTB then 36 else 0
-                !viC = stripCount * 8
-                !iiC = stripCount * 18
-            when doTB $ do
-              pokeStripAt vp ip base baseIdx 0 0 x0 topY (x0 + midW) topY ibw r g b a
-              pokeStripAt vp ip base baseIdx 8 18 x0 botY (x0 + midW) botY ibw r g b a
-            when doLR $ do
-              pokeStripAt vp ip base baseIdx viLR iiLR leftX y0 leftX (y0 + midH) ibw r g b a
-              pokeStripAt vp ip base baseIdx (viLR + 8) (iiLR + 18) rightX y0 rightX (y0 + midH) ibw r g b a
-            when corners $ do
-              pokeArc viC iiC (px + rad) (py + rad) 0
-              pokeArc (viC + arcV) (iiC + arcI) (px + w - rad) (py + rad) 1
-              pokeArc (viC + 2 * arcV) (iiC + 2 * arcI) (px + w - rad) (py + h - rad) 2
-              pokeArc (viC + 3 * arcV) (iiC + 3 * arcI) (px + rad) (py + h - rad) 3
+          (!vp, !ip, !base, !baseIdx) <- reserveRaw da needV needI
+          let !(r, g, b, a) = unpackColorF col
+              !viLR = if doTB then 16 else 0
+              !iiLR = if doTB then 36 else 0
+              !viC = stripCount * 8
+              !iiC = stripCount * 18
+              !inner = max 0 (cr - core)
+              !outerR = cr + core
+              !innerAA = max 0 (inner - arcFeather)
+              !outerAA = outerR + arcFeather
+          when doTB $ do
+            pokeStripAt vp ip base baseIdx 0 0 x0 topY (x0 + midW) topY ibw r g b a
+            pokeStripAt vp ip base baseIdx 8 18 x0 botY (x0 + midW) botY ibw r g b a
+          when doLR $ do
+            pokeStripAt vp ip base baseIdx viLR iiLR leftX y0 leftX (y0 + midH) ibw r g b a
+            pokeStripAt vp ip base baseIdx (viLR + 8) (iiLR + 18) rightX y0 rightX (y0 + midH) ibw r g b a
+          when corners $ do
+            pokeArcTop vp ip base baseIdx hasCore arcStride arcIndices n innerAA inner outerR outerAA r g b a viC iiC (px + rad) (py + rad) 0
+            pokeArcTop vp ip base baseIdx hasCore arcStride arcIndices n innerAA inner outerR outerAA r g b a (viC + arcV) (iiC + arcI) (px + w - rad) (py + rad) 1
+            pokeArcTop vp ip base baseIdx hasCore arcStride arcIndices n innerAA inner outerR outerAA r g b a (viC + 2 * arcV) (iiC + 2 * arcI) (px + w - rad) (py + h - rad) 2
+            pokeArcTop vp ip base baseIdx hasCore arcStride arcIndices n innerAA inner outerR outerAA r g b a (viC + 3 * arcV) (iiC + 3 * arcI) (px + rad) (py + h - rad) 3
+          commitRaw da base baseIdx needV needI
+
+-- | One corner arc of a rounded stroke, as a top-level worker so the stroke
+-- allocates no closure for it.
+{-# NOINLINE pokeArcTop #-}
+pokeArcTop :: Ptr Word8 -> Ptr Word8 -> Int -> Int -> Bool -> Int -> Int -> Int -> Float -> Float -> Float -> Float -> Float -> Float -> Float -> Float -> Int -> Int -> Float -> Float -> Int -> IO ()
+pokeArcTop !vp !ip !base !baseIdx !hasCore !arcStride !arcIndices !n !innerAA !inner !outerR !outerAA !r !g !b !a !vi !ii !ccx !ccy !q = do
+  forUpTo_ (n + 1) $ \i -> do
+    let !(ct, st) = cornerCosSin q i
+    pokeBandVerts vp ((base + vi + i * arcStride) * vertexSize) hasCore r g b a $
+      concentricOffsetsSIMD ccx ccy ct st innerAA inner outerR outerAA
+  forUpTo_ n $ \i -> do
+    let !va = fromIntegral (base + vi + i * arcStride) :: Word32
+    pokeBandIndices ip ((baseIdx + ii + i * arcIndices) * indexSize) hasCore va (va + fromIntegral arcStride)
 
 -- | Border of four flat rects inside @(x, y, w, h)@, @t@ thick. The origin is
 -- already snapped by the caller; the texture is already selected.
