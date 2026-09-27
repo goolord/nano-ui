@@ -1539,35 +1539,41 @@ distributeScratch na n avail gapSum horizontal = do
       -- Shrink children by factor to make up the shortfall, none below its
       -- minimum ('shrinkScratch'). 'fsGrow' holds the factors.
       forUpTo_ n $ \i -> sizingAt i >>= writePrimArray gfArr i . shrinkFactor
-      shrinkScratch out gfArr (fmap axMin . sizingAt) n (negate slack)
+      let minCol = if horizontal then StyleMinW else StyleMinH
+      shrinkScratch out gfArr (\i -> readPrimArray idxArr i >>= \ci -> readStyle a ci minCol) n (negate slack)
 
 -- | Take @need@ from the first @n@ sizes in @mainArr@ in proportion to their
 -- factors in @factorArr@ (0 keeps a size). A child that would drop below its
 -- minimum (@minAt@) stops there with its factor cleared, and the others
--- share what it could not give.
+-- share what it could not give. Inlined, so @minAt@ is a known function and
+-- the passes run unboxed.
+{-# INLINE shrinkScratch #-}
 shrinkScratch :: IOArr Float -> IOArr Float -> (Int -> IO Float) -> Int -> Float -> IO ()
-shrinkScratch mainArr factorArr minAt n !need = do
-  total <- foldUpTo n (\acc i -> (acc +) <$> readPrimArray factorArr i) 0
-  when (total > 0) $ do
-    let stop (!given, !stopped) i = do
-          f <- readPrimArray factorArr i
-          if f <= 0
-            then pure (given, stopped)
-            else do
-              lo <- minAt i
-              main <- readPrimArray mainArr i
-              if main - need * f / total < lo
-                then do
-                  writePrimArray mainArr i lo
-                  writePrimArray factorArr i 0
-                  pure (given + main - lo, stopped + 1)
-                else pure (given, stopped)
-    (given, stopped) <- foldUpTo n stop (0, 0 :: Int)
-    if stopped > 0
-      then shrinkScratch mainArr factorArr minAt n (need - given)
-      else forUpTo_ n $ \i -> do
-        f <- readPrimArray factorArr i
-        when (f > 0) $ readPrimArray mainArr i >>= \main -> writePrimArray mainArr i (main - need * f / total)
+shrinkScratch mainArr factorArr minAt n = pass
+  where
+    pass !need = do
+      total <- foldUpTo n (\acc i -> (acc +) <$> readPrimArray factorArr i) 0
+      when (total > 0) $ do
+        let stop !i !given !stopped
+              | i >= n = if stopped > (0 :: Int) then pass (need - given) else apply 0
+              | otherwise = do
+                  f <- readPrimArray factorArr i
+                  if f <= 0
+                    then stop (i + 1) given stopped
+                    else do
+                      lo <- minAt i
+                      main <- readPrimArray mainArr i
+                      if main - need * f / total < lo
+                        then do
+                          writePrimArray mainArr i lo
+                          writePrimArray factorArr i 0
+                          stop (i + 1) (given + main - lo) (stopped + 1)
+                        else stop (i + 1) given stopped
+            apply !i = when (i < n) $ do
+              f <- readPrimArray factorArr i
+              when (f > 0) $ readPrimArray mainArr i >>= \main -> writePrimArray mainArr i (main - need * f / total)
+              apply (i + 1)
+        stop 0 0 0
 
 {-# INLINE shrinkFactor #-}
 shrinkFactor :: AxisSizing -> Float
