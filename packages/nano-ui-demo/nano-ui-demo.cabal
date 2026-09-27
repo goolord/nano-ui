@@ -147,11 +147,14 @@ test-suite nano-ui-demo-test
         DemoSelftest
         LogsSelftest
         NotepadSelftest
+        ImeSelftest
     build-depends:
+        bytestring ^>=0.12,
         nano-ui ^>=0.1,
         nano-ui-demo:demo-common,
         nano-ui-sdl ^>=0.1,
         primitive ^>=0.9,
+        sdl3-bindgen-sys ^>=0.0.0.2,
         text ^>=2.1
 
 test-suite nano-ui-terminal-test
@@ -162,6 +165,7 @@ test-suite nano-ui-terminal-test
     hs-source-dirs:   test
     build-depends:
         bytestring ^>=0.12,
+        nano-ui ^>=0.1,
         nano-ui-demo:demo-common,
         streaming ^>=0.2,
         text ^>=2.1,

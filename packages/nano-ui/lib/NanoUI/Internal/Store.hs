@@ -13,6 +13,7 @@ module NanoUI.Internal.Store
   , fieldText
   , fieldIntSet
   , fieldDyn
+  , fieldQuiet
   , overField
   , lookupSlot
   , findSlot
@@ -60,6 +61,11 @@ import NanoUI.Internal.Id (mix64)
 -- | Physical-equality shortcut. Pointer equality implies value equality for
 -- immutable values, so callers may use 'True' to skip a structural comparison
 -- of a field the caller never rebuilt. 'False' only means \"compare properly\".
+--
+-- It compares the closures as passed and forces neither: force a selector
+-- application or other thunk first, or the check always fails. It stays lazy
+-- so a literal passed straight in keeps its identity
+-- ('NanoUI.Internal.Layout.Arena.setNodeText').
 {-# INLINE ptrEq #-}
 ptrEq :: a -> a -> Bool
 ptrEq a b = isTrue# (reallyUnsafePtrEquality# a b)
@@ -69,12 +75,12 @@ ptrEq a b = isTrue# (reallyUnsafePtrEquality# a b)
 -- cheap when only one map was rebuilt.
 {-# INLINE eqByPtr #-}
 eqByPtr :: Eq a => a -> a -> Bool
-eqByPtr a b = ptrEq a b || a == b
+eqByPtr !a !b = ptrEq a b || a == b
 
 -- | Keys whose values differ between two maps, a key that left or joined
 -- included.
 diffKeysBy :: (a -> a -> Bool) -> IntMap a -> IntMap a -> [Int]
-diffKeysBy eq old new
+diffKeysBy eq !old !new
   -- Unchanged maps keep their identity through a record update; skip the
   -- whole merge when the caller only rebuilt a different field.
   | ptrEq old new = []
@@ -320,8 +326,6 @@ data Slot
   | SlotWinSize
   | SlotMenuOpen
   | SlotMenuPos
-  | SlotScrollCfg
-  | SlotScrollOff
   | SlotScrollCross
   | SlotScrollLinkX
   | SlotScrollLinkY
@@ -396,6 +400,10 @@ data Slot
   | -- | When a numeric field's held stepper arrow next repeats, in monotonic
     -- seconds.
     SlotNumericRepeat
+  | -- | When a tooltip opens, in monotonic microseconds ('storeQuiet', keyed
+    -- by tooltip id); absent while its target is not hovered. Key 0 holds
+    -- when any tooltip was last open, for the grace period.
+    SlotTooltipShow
   deriving (Enum)
 
 -- | Tag for a built-in slot: the constructor index mixed with a salt, so tags

@@ -84,6 +84,7 @@ library
         NanoUI.Sdl.Internal.Image
         NanoUI.Sdl.Internal.Render
         NanoUI.Sdl.Internal.Window
+        NanoUI.Sdl.Internal.WindowOptions
     build-depends:
         base >=4.20 && <4.23,
         bytestring ^>=0.12,
@@ -121,7 +122,7 @@ test-suite nano-ui-render-test
     type:             exitcode-stdio-1.0
     main-is:          Rendering.hs
     hs-source-dirs:   test, lib
-    other-modules:    NanoUI.Sdl.Internal.Render, NanoUI.Sdl.Internal.Image
+    other-modules:    NanoUI.Sdl.Internal.Render, NanoUI.Sdl.Internal.Image, NanoUI.Sdl.Internal.Cursor, Keyboard, WindowChecks
     if os(windows)
         ghc-options: -optl-mconsole
     build-depends:
@@ -159,6 +160,19 @@ test-suite nano-ui-font-effects-test
         nano-ui-sdl,
         primitive ^>=0.9,
         text ^>=2.1
+    if !flag(sdl)
+        buildable: False
+
+test-suite nano-ui-sdl-pointer-test
+    import:           extensions, warnings, rts-options
+    type:             exitcode-stdio-1.0
+    main-is:          Pointer.hs
+    hs-source-dirs:   test
+    build-depends:
+        base >=4.20 && <4.23,
+        nano-ui,
+        nano-ui-sdl,
+        sdl3-bindgen-sys ^>=0.0.0.2
     if !flag(sdl)
         buildable: False
 

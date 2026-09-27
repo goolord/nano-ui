@@ -146,7 +146,7 @@ runConcentricCirclesTest ctx failed = do
   let inp = withInput 200 100
       ui = void $ customWidget defaultCustomWidgetSpec
         { widgetLayout = fixedWH 120 60 defaultLayout
-        , widgetDraw = \_ r -> runCanvas $ do
+        , widgetDraw = \cdc r -> runCanvasFor cdc $ do
             let fill = V2 (rectX r + 20.3) (rectY r + 20.3)
                 ring = V2 (rectX r + 60.7) (rectY r + 20.2)
             drawCircle fill 6 (colorRGBA 255 0 0 255)

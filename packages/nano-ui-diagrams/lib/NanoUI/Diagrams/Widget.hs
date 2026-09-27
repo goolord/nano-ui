@@ -329,10 +329,7 @@ diagram f d = do
   wid <- currentId
   fm <- uiFontMetrics
   theme <- uiTheme
-  let content = themePlotKey theme
-  mEnv <- uiIO (lookupDrawFitEnvelope ctx wid (fmLineHeight fm) content (f defaultLayout))
+  mEnv <- uiIO (lookupDrawFitEnvelope ctx wid (fmLineHeight fm) (themePlotKey theme) (f defaultLayout))
   case mEnv of
     Just (dw, dh) -> diagramWithEnvelope dw dh f d
-    Nothing ->
-      let V2 dw dh = size d
-       in diagramWithEnvelope dw dh f d
+    Nothing -> let V2 dw dh = size d in diagramWithEnvelope dw dh f d

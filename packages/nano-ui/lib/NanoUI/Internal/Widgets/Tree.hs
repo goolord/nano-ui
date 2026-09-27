@@ -9,6 +9,7 @@ import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Primitive.SmallArray (SmallArray, indexSmallArray, sizeofSmallArray, smallArrayFromList)
 import Effectful (Eff, type (:>))
+import GHC.Exts (isTrue#, reallyUnsafePtrEquality#)
 import qualified Data.IntSet as IS
 import NanoUI.Internal.Context (Context (..), adoptSlot, getPrevRect, getStore, intKey, registerFocusable, writeSlots)
 import NanoUI.Internal.Font (treeChevronRect)
@@ -21,7 +22,7 @@ import NanoUI.Internal.Style (defaultLayout, fillW, gap, tight)
 import NanoUI.Internal.Types (Rect (..), clamp, rectContains)
 import NanoUI.Internal.WidgetText (treeEncodeStyle)
 import NanoUI.Internal.Widgets.Behavior (KeyNav (..), useKeyNav)
-import NanoUI.Internal.Widgets.Combinators (finishInput)
+import NanoUI.Internal.Widgets.Combinators (finishInput, readDerived, writeDerived)
 import NanoUI.Internal.Widgets.Layout (columnWith)
 import NanoUI.Internal.Widgets.Node (Response (..), addWidgetStyled, moveSelection, tagContainer)
 
@@ -52,6 +53,22 @@ visibleRows expanded items = smallArrayFromList (go 0 0 items (const []))
             : if hasKids && expanded idx
               then go (idx + 1) (depth + 1) kids (\next -> go next depth rest k)
               else go (idx + subtreeSize item) depth rest k
+
+-- | Visible rows derived from an item list and expansion set.
+data TreeRows = TreeRows ![TreeItem] !IS.IntSet !(SmallArray TreeRow)
+
+-- | The visible rows, from the cache while the items are the same list and
+-- the expansion set is equal. The items are compared evaluated: an argument
+-- that is a top-level constant is a thunk until forced.
+cachedRows :: Context -> Int -> [TreeItem] -> IS.IntSet -> IO (SmallArray TreeRow)
+cachedRows ctx key !items !expanded = do
+  cached <- readDerived ctx key
+  case cached of
+    Just (TreeRows items' expanded' rows)
+      | isTrue# (reallyUnsafePtrEquality# items' items) && expanded' == expanded -> pure rows
+    _ -> do
+      let !rows = visibleRows (`IS.member` expanded) items
+      rows <$ writeDerived ctx key (TreeRows items expanded rows)
 
 treeKeyNav ::
   KeyNav ->
@@ -132,7 +149,7 @@ tree' key inputItems index =
         allParents = IS.fromList [i | (i, _, True, _) <- toList (visibleRows (const True) items)]
     selected <- uiIO $ adoptSlot fieldInt ctx groupId clamped
     expandedSet <- fromMaybe allParents . lookupSlot fieldIntSet groupKey <$> uiIO (getStore ctx)
-    let rows = visibleRows (`IS.member` expandedSet) items
+    rows <- uiIO (cachedRows ctx groupKey items expandedSet)
     columnWith (tight . gap 0 . fillW) $ do
       tagContainer groupId
       results <-

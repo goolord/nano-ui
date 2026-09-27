@@ -7,7 +7,8 @@ import Control.Exception (bracket)
 import Control.Monad (forM_, unless, void, when)
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Maybe (fromMaybe, isNothing)
-import NanoUI.Backend (Input (..), clearEphemeral, emptyInput)
+import NanoUI (WindowSettings (..), followSystemTheme)
+import NanoUI.Backend (Input (..), clearEphemeral, emptyInput, setExplainLayout)
 import NanoUI.Runner
 import NanoUI.Testing (Context, newPixelContext, registerImage, withTheme)
 import NanoUI.Sdl.Internal.Cursor (syncPointerCursor)
@@ -25,10 +26,12 @@ runSdlSession :: SdlOptions -> (Context -> SdlEnv -> Input -> Bool -> IO Bool) -
 runSdlSession options drawFn = do
   base <- newPixelContext
   ctx <- maybe (pure base) (withTheme base) (sdlAppTheme options)
+  forM_ (sdlAppThemeFor options) (followSystemTheme ctx)
+  setExplainLayout ctx (sdlExplainLayout options)
   forM_ (sdlAppImages options) $ \(RgbaImage image w h pixels) ->
     registerImage ctx image w h pixels >>= (`unless` fail "registerImage failed")
   withSdl options ctx $ \ctx0 env -> do
-    void $ setRenderDrawBlendModeSafe (sdlRenderer env) (fromIntegral sDL_BLENDMODE_BLEND)
+    void $ setRenderDrawBlendModeSafe (sdlRenderer env) (maybe (fromIntegral sDL_BLENDMODE_BLEND) fst (sdlTransparent env))
     prev <- newIORef emptyInput
     drawing <- newDrawingLock
     -- The resize watch presents with vsync off: Windows' modal size loop
@@ -75,7 +78,7 @@ runSdlSession options drawFn = do
     let startupFrame c inp = do
           writeIORef wakeRef False
           void (drawFn c env inp True)
-    (ctx1, inp0) <- settle ctx0 emptyInput {inputWindowSize = sdlWindowSize options}
+    (ctx1, inp0) <- settle ctx0 emptyInput {inputWindowSize = wsSize (sdlWindowSettings options)}
     scale0 <- readIORef (sdlScaleRef env)
     startupFrame ctx1 inp0
     -- First present can apply DPI. Prev rects are empty on that frame.

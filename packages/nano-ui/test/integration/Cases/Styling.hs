@@ -28,27 +28,22 @@ runDisabledPointerTest _ failed = do
         let ui = column (disabledWhen True (held ref widget))
         (resp, _) <- warmup2 ctx inp ui
         let V2 cx cy = centerOf resp
-            (press, release) = clickPair inp (V2 cx cy)
-            dragged = press {inputMousePressed = False, inputMousePos = V2 (cx + 60) cy}
-        mapM_ (\i -> runFrame ctx i ui) [press, dragged, release {inputMousePos = V2 (cx + 60) cy}]
+            press = pressAt inp (V2 cx cy)
+            dragged = holdAt press (V2 (cx + 60) cy)
+        mapM_ (\i -> runFrame ctx i ui) [press, dragged, releaseAt dragged]
         _ <- runFrame ctx inp {inputMousePos = V2 cx cy, inputChars = "x"} ui
-        (after, _, _, _) <- runFrame ctx inp ui
+        (after, _) <- evalUi ctx inp ui
         value <- readIORef ref
         focus <- readIORef (ctxFocusId ctx)
-        assertEqNamed name value initial
-        assert failed (not (respClicked (fst after)) && not (respHovered (fst after)))
-        if focus /= respId resp then pure () else putStrLn ("  disabled " <> name <> ": took focus")
+        when (value /= initial || focus == respId resp) $ putStrLn ("  disabled " <> name <> " changed or took focus")
+        assertEq failed value initial
+        assert failed (not (respClicked after) && not (respHovered after))
         assert failed (focus /= respId resp)
-      assertEqNamed :: (Eq b, Show b) => String -> b -> b -> IO ()
-      assertEqNamed name a b =
-        if a == b then pure () else do
-          putStrLn ("  disabled " <> name <> ": " <> show a <> " /= " <> show b)
-          assertEq failed a b
   check "button" False (\_ -> (\r -> (r, respClicked r)) <$> button' "Go")
   check "checkbox" False (checkbox' "Check")
-  check "toggle" False toggleSwitch'
+  check "toggle" False (toggleSwitchWith' id)
   check "slider" (50 :: Float) (slider' 0 100)
-  check "knob" (50 :: Float) (knob' 0 100)
+  check "knob" (50 :: Float) (knobWith' id 36 0 100)
   check "radio" (0 :: Int) (radio' ["One", "Two"])
   check "select" (0 :: Int) (select' ["One", "Two"])
   check "text input" ("initial" :: Text) textInput'
@@ -66,8 +61,7 @@ runDisabledFocusOrderTest ctx failed = do
   (a, c) <- warmup2 ctx inp ui
   writeIORef (ctxFocusId ctx) (respId a)
   _ <- runFrame ctx (tabInp inp) ui
-  focus <- readIORef (ctxFocusId ctx)
-  assertEq failed focus (respId c)
+  assertEq failed (respId c) =<< readIORef (ctxFocusId ctx)
 
 -- | A disabled button paints its fill faded toward the window colour.
 runDisabledLookTest :: Context -> IORef Int -> IO ()
@@ -132,8 +126,7 @@ runStyledDamageTest ctx failed = do
   _ <- takeDamage ctx
   forM_ [green, blue] $ \c -> do
     (_, _, draw, _) <- runFrame ctx inp (ui c)
-    dmg <- takeDamage ctx
-    assertEq failed dmg DamageFull
+    assertEq failed DamageFull =<< takeDamage ctx
     quads <- drawQuads draw
     assert failed (any ((== c) . snd) quads)
 

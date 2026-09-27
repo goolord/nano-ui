@@ -84,7 +84,7 @@ pulse periodSec = do
 -- frame the widget is shown: the loop goes back to sleep on the first frame
 -- that leaves it out.
 --
--- > bar <- progressBar' =<< pulse 6
+-- > bar <- progressBarWith' id 12 =<< pulse 6
 -- > keepAnimating bar
 keepAnimating :: (HasResponse r, Ui :> es) => r -> Eff es ()
 keepAnimating resp = withContext (\ctx -> keepAnimationAlive ctx (respId resp))

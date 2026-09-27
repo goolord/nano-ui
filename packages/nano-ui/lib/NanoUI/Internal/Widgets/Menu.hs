@@ -21,7 +21,7 @@ import Data.Text (Text)
 import Effectful (Eff, type (:>))
 import NanoUI.Internal.Context (Context (..), getStore, intKey, modifyStore)
 import NanoUI.Internal.Font (menuItemPadX, menuItemRowH, menuMinW, menuOuterPad, menuSepH, widgetContentInset)
-import NanoUI.Internal.Input (inputMousePos, inputMouseReleased)
+import NanoUI.Internal.Input (MouseButton (..), Pressable (..), inputMousePos)
 import NanoUI.Internal.Monad (Ui, askContext, askDefaultLayout, askInput, freshWidget, uiIO)
 import NanoUI.Internal.Store (Slot (..), fieldPoint, findSlot, flagSlot, insertSlot, setFlagSlot, slotKey)
 import NanoUI.Internal.Style (Layout (..), Padding (..), defaultLayout, fillW, fixedH, fontMuted, gap, minW, padXY, tight)
@@ -32,6 +32,8 @@ import NanoUI.Internal.Widgets.Layout (columnWith, labelEx, rowWith, separator)
 import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Widgets.Node (HasResponse, Response (..), containerResponse, inertResponse, respClicked, respHovered, respRightClicked)
 import NanoUI.Internal.Widgets.Popup (PopupConfig (..), defaultPopupConfig, popup)
+import NanoUI.Internal.Widgets.Shortcut (shortcut)
+import NanoUI.Internal.Shortcut (Shortcut, shortcutLabel)
 
 -- | A context menu for any widget response, opened by right-clicking it.
 -- Returns the menu body's result while the menu is open.
@@ -75,7 +77,7 @@ runContextMenu (isOpen0, pos0, openAt, close) rightClick child = do
   -- A release the menu itself sees, which is one on a row, picks.
   (popupResp, mBody) <-
     popup (isOpen0 || rightClick) cfg $
-      (,) . inputMouseReleased <$> askInput <*> columnWith (tight . gap 0) (child pos)
+      (,) . releasedIn MouseLeft <$> askInput <*> columnWith (tight . gap 0) (child pos)
   let picked = respHovered popupResp && maybe False fst mBody
   when (respClicked popupResp || picked) close
   pure (snd <$> mBody)
@@ -96,14 +98,9 @@ useContextMenu = do
       close = uiIO (modifyStore ctx (setFlagSlot openK False))
   pure (flagSlot openK store, V2 px py, openAt, close)
 
--- | Render a menu row, with an optional shortcut hint after the label,
--- returning its full 'Response'. A disabled row is a muted label, not a
--- disabled button: hover tracking does not know a button's enabled flag and
--- would still highlight it. Text nodes ignore padding, so the
--- label sits in a container that reproduces an enabled row's geometry: the
--- 'menuItemRowH' height and 'menuMinW' width, the label inset 'menuItemPadX'
--- plus the button's content inset, and the same total horizontal gutter the
--- solver reserves for menu buttons. Its response never reports interaction.
+-- | A menu row with an optional shortcut hint after the label. A disabled
+-- row is a muted label, not a button (hover would still light a disabled
+-- button), padded to match an enabled row. It reports no interaction.
 menuItemWith :: Ui :> es => Text -> Maybe Text -> Bool -> Eff es Response
 menuItemWith lbl hint enabled
   | enabled = buttonStyledEx True text 0 menuRowLayout buttonFlagMenu
@@ -132,20 +129,23 @@ menuItem txt = respClicked <$> menuItem' txt
 menuItem' :: Ui :> es => Text -> Eff es Response
 menuItem' txt = menuItemWith txt Nothing True
 
--- | Menu row with a shortcut hint after the label. The hint is only text;
--- handle the key itself elsewhere.
+-- | Menu row bound to a shortcut, showing the chord's 'shortcutLabel' after
+-- the label. 'True' on the frame it is clicked, or when its chord is pressed
+-- while the menu is open ('shortcut'). For the chord to work while the menu
+-- is closed, also bind it with 'shortcut' outside the menu.
 --
--- > whenM (menuItemShortcut "Save" "Ctrl+S") saveFile
-menuItemShortcut :: Ui :> es => Text -> Text -> Eff es Bool
-menuItemShortcut txt hint = respClicked <$> menuItemWith txt (Just hint) True
+-- > whenM (menuItemShortcut "Save" (ctrl <> key 's')) saveFile
+menuItemShortcut :: Ui :> es => Text -> Shortcut -> Eff es Bool
+menuItemShortcut txt chord = do
+  clicked <- respClicked <$> menuItemWith txt (Just (shortcutLabel chord)) True
+  pressed <- shortcut chord
+  pure (clicked || pressed)
 
 -- | Dimmed menu row that cannot be clicked.
 menuItemDisabled :: Ui :> es => Text -> Eff es ()
 menuItemDisabled txt = void (menuItemWith txt Nothing False)
 
--- | Row layout shared by menu items, matching the text-field context menu:
--- 28px rows and a 148px minimum menu width (@menuItemRowH@ and @menuMinW@ in
--- @NanoUI.Internal.Font@).
+-- | Row layout shared by menu items, matching the text-field context menu.
 menuRowLayout :: Layout
 menuRowLayout = minW menuMinW . fixedH menuItemRowH . tight . fillW $ defaultLayout
 
@@ -172,13 +172,8 @@ menuButtonWith' f txt open =
   buttonStyledEx True txt (if open then 1 else 0) (f (tight defaultLayout)) buttonFlagMenuBar
 
 -- | Separator line inside a context menu, matching the text-field context
--- menu painter exactly: a 1px rule inset 'menuItemPadX' from the panel edge
--- (the popup already contributes 'menuOuterPad', the row adds the remainder)
--- centered in a 'menuSepH' band (@lineY = bandY + h\/2@ via 4.5px vertical
--- padding around a zero-height content box). The rule sits in a 'tight'
--- column so it stays horizontal ('separator' adapts to its parent's
--- direction and would grow vertically inside the padded row) and so the
--- default 3px container padding does not inset or stretch it.
+-- menu: a 1px rule inset 'menuItemPadX' from the panel edge, centred in a
+-- 'menuSepH' band. The tight column keeps the rule horizontal.
 menuSeparator :: Ui :> es => Eff es ()
 menuSeparator = do
   rowWith (fixedH menuSepH . padXY (menuItemPadX - menuOuterPad) 4.5 . fillW) $

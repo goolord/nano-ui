@@ -20,6 +20,8 @@ module NanoUI.Internal.Widgets.Display
   , svgIcon
   , svgIconWith
   , svgIconWith'
+  , svgIconConfigured
+  , svgIconConfigured'
   , loadSvg
   , box
   )
@@ -44,9 +46,9 @@ import NanoUI.Svg (Svg, parseSvg, rasterizeSvg, svgKey, svgMonochrome, svgSize)
 import NanoUI.Internal.Style
 import Data.Word (Word32)
 import NanoUI.Internal.Types (Color (..), ImageId (..), colorRGBA, colorToWord32)
-import NanoUI.Internal.WidgetText (intValueText)
 import NanoUI.Internal.Widgets.Layout (labelEx, labelWith, panelWith, row', rowWith)
-import NanoUI.Internal.Widgets.Node (Response, addWidget, addWidgetStyled)
+import NanoUI.Internal.Widgets.Image (ImageConfig (..), defaultImageConfig, imageConfigured', imageNode)
+import NanoUI.Internal.Widgets.Node (Response, addWidgetStyled)
 
 -- | Medium-weight label without padding. Uses the current font size.
 heading :: Ui :> es => Text -> Eff es ()
@@ -110,16 +112,17 @@ card = panelWith (minW 300 . padXY 12 10 . gap 8 . fillW)
 toolbar :: Ui :> es => Eff es a -> Eff es a
 toolbar = rowWith (tight . gap 8 . alignMid . fillW)
 
--- | An image registered with the host, sized by the layout modifier.
+-- | An image registered with the host, stretched to the rect the layout
+-- modifier gives it; an unsized axis is 32 pixels. 'NanoUI.imageConfigured'
+-- instead uses the image's own size and can fit, align, crop, fade and
+-- rotate it.
 image :: Ui :> es => (Layout -> Layout) -> ImageId -> Eff es ()
 image f iid = void (image' f iid)
 
 -- | 'image' with its 'Response', for example to 'NanoUI.keepAnimating' an
 -- image whose id changes over time.
 image' :: Ui :> es => (Layout -> Layout) -> ImageId -> Eff es Response
-image' f (ImageId tid) = do
-  wid <- nextId
-  addWidget wid NodeImage (if tid <= 0 then T.empty else intValueText tid) 0 (f defaultLayout)
+image' f iid = nextId >>= \wid -> imageNode wid Nothing (f defaultLayout) iid
 
 -- | An image id that no registered image uses and no earlier call returned.
 -- Take one for each image registered while the app runs.
@@ -156,10 +159,23 @@ svgIconWith f doc = void (svgIconWith' f doc)
 -- | The document is rasterized once per pixel size and colour, at the
 -- display's scale, and kept in the image atlas for as long as the app runs.
 svgIconWith' :: Ui :> es => (Layout -> Layout) -> Svg -> Eff es Response
-svgIconWith' f doc = do
+svgIconWith' f = svgIconConfigured' defaultImageConfig {icLayout = f}
+
+-- | An SVG document drawn like 'NanoUI.imageConfigured' draws an image:
+-- faded, rotated, fitted and aligned in its rect. The rect is sized as in
+-- 'svgIconWith': a fixed width and height from 'icLayout', or else the
+-- document's own size.
+--
+-- > svgIconConfigured defaultImageConfig {icLayout = fixedWH 24 24, icRotation = RotateFloating turn} spinnerIcon
+svgIconConfigured :: Ui :> es => ImageConfig -> Svg -> Eff es ()
+svgIconConfigured cfg doc = void (svgIconConfigured' cfg doc)
+
+-- | 'svgIconConfigured' with its 'Response'.
+svgIconConfigured' :: Ui :> es => ImageConfig -> Svg -> Eff es Response
+svgIconConfigured' cfg doc = do
   ctx <- askContext
   theme <- uiTheme
-  let lay0 = f defaultLayout
+  let lay0 = icLayout cfg defaultLayout
       (docW, docH) = svgSize doc
       fixedOr sizing dflt = case sizing of
         Fixed n -> n
@@ -187,7 +203,7 @@ svgIconWith' f doc = do
         ok <- registerImage ctx iid pw ph (rasterizeSvg pw ph rasterColor doc)
         when ok $ modifyIORef' cache (Map.insert key iid)
         pure (if ok then iid else ImageId 0)
-  image' (const lay) iid
+  imageConfigured' cfg {icLayout = const lay} iid
 
 -- | Rasterized SVG documents by document, pixel size and colour.
 newtype SvgRasters = SvgRasters (IORef (Map.Map (Int, Int, Int, Word32) ImageId))

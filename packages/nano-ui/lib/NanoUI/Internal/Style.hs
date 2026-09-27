@@ -1,3 +1,4 @@
+{-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE StrictData #-}
 
 -- | Layout options, text styling, and theme palettes. Modifiers compose with
@@ -5,6 +6,7 @@
 module NanoUI.Internal.Style
   ( Sizing (..)
   , Direction (..)
+  , Flow (..)
   , AlignX (..)
   , AlignY (..)
   , Padding (..)
@@ -14,6 +16,17 @@ module NanoUI.Internal.Style
   , fieldIconColor
   , Theme (..)
   , defaultTheme
+  , defaultLightTheme
+  , Appearance (..)
+  , lightDark
+  , defaultThemeFor
+  , themeAppearance
+  , Tone (..)
+  , toneColor
+  , tone
+  , textToneColor
+  , variantFace
+  , variantTone
   , tomorrowNightMinDarkTheme
   , tomorrowMinLightTheme
   , tomorrowMidnightMinDarkTheme
@@ -49,6 +62,7 @@ module NanoUI.Internal.Style
   , primary
   , destructive
   , success
+  , warning
   , subtle
   , readableOn
   , disabledTheme
@@ -84,6 +98,7 @@ module NanoUI.Internal.Style
   , gridMinColW
   , fixedAspectW
   , fixedAspectH
+  , aspect
   , gridCols
   , FontVariant (..)
   , FontWeight (..)
@@ -95,6 +110,7 @@ module NanoUI.Internal.Style
   , fontMuted
   , fontMono
   , fontDanger
+  , fontTone
   , fontSize
   , fontSizeScale
   , fontColor
@@ -117,11 +133,23 @@ module NanoUI.Internal.Style
   , alignTop
   , alignBottom
   , alignBaseline
+  , wrap
+  , layered
+  , lineGap
+  , lineAlign
+  , LineAlign (LinesStart, LinesCenter, LinesEnd)
+  , lineAlignFraction
+  , pinAt
+  , PointerMode (PointerAuto, PointerBlock, PointerPass)
+  , pointer
   ) where
 
+import Control.Applicative ((<|>))
 import Data.Bits ((.&.), (.|.))
+import Data.List (find)
+import Data.Maybe (fromMaybe)
 import Data.Word (Word8)
-import NanoUI.Internal.Types (Color (..), colorA, colorLuminance, colorRGBA, contrastRatio, lerpColor)
+import NanoUI.Internal.Types (Color (..), V2 (..), colorA, colorLuminance, colorRGBA, contrastRatio, lerpColor)
 
 -- | Size along one axis. Fixed sizes use logical pixels; grow/shrink values
 -- are relative weights, and percentages use 100 for the full available size.
@@ -133,8 +161,22 @@ data Sizing
   | Percent Float
   deriving (Eq, Show)
 
--- | Main axis for laying out a container's children.
+-- | Main axis for laying out a container's children: left to right, or top
+-- to bottom. 'Flow' decides whether they stay in one line, wrap, or layer.
 data Direction = Row | Column
+  deriving (Eq, Show, Enum, Bounded)
+
+-- | How a container places its children ('layoutFlow'). Scroll containers
+-- and grids ignore it; put a wrapping or layered column inside them instead.
+data Flow
+  = -- | A single row or column along the 'Direction'. The default.
+    Line
+  | -- | Starts a new line where the next child would overflow the main axis
+    -- ('wrap').
+    Wrap
+  | -- | Every child covers the content box, placed by its own alignment and
+    -- drawn over earlier siblings ('layered'). 'Direction' is ignored.
+    Layered
   deriving (Eq, Show, Enum, Bounded)
 
 -- | Horizontal alignment: left, centre, or right.
@@ -166,14 +208,31 @@ windowPad = Padding 10 10 0 10
 windowMargin :: Float
 windowMargin = 14
 
--- | Semantic font choice. The backend selects a face and the theme supplies
--- colours for heading, muted, and danger text.
+-- | Semantic font choice. The backend selects a face; headings use the
+-- theme's accent colour. 'FontMuted' and 'FontDanger' are the regular face in
+-- the 'Muted' and 'Danger' tones. The 'fontMuted' and 'fontDanger' modifiers
+-- set a tone ('fontTone') instead, so they combine with any face.
 data FontVariant
   = FontRegular
   | FontHeading
   | FontMuted
   | FontMono
   | FontDanger
+  deriving (Eq, Show, Enum, Bounded, Ord)
+
+-- | A semantic theme colour ('toneColor') for text ('fontTone') and buttons
+-- ('tone').
+data Tone
+  = Accent
+  -- ^ The view's main action ('primary').
+  | Muted
+  -- ^ Secondary text.
+  | Success
+  -- ^ 'themeSuccess'.
+  | Warning
+  -- ^ 'themeWarning': needs care.
+  | Danger
+  -- ^ 'themeDanger': failed or irreversible.
   deriving (Eq, Show, Enum, Bounded, Ord)
 
 -- | Requested font weight. Available faces and synthetic weights depend on the backend.
@@ -208,13 +267,20 @@ type LayoutModifier = Layout -> Layout
 
 -- | Layout and text options for a node. Lengths use logical pixels. Font size
 -- 0 selects the backend default; 'Nothing' for font colour uses the theme.
--- Grid column count 0 leaves the count to grid sizing.
+-- Grid column count 0 leaves the count to grid sizing. A negative
+-- 'layoutLineGap' means 'layoutGap'. 'layoutAspect' 0 means no ratio
+-- ('aspect'). A node with 'layoutPin' is placed at that offset instead of in
+-- its parent's flow ('pinAt').
 data Layout = Layout
   { layoutDirection :: !Direction
   , layoutWidth :: !Sizing
   , layoutHeight :: !Sizing
   , layoutPadding :: !Padding
   , layoutGap :: {-# UNPACK #-} !Float
+  , layoutPointer :: {-# UNPACK #-} !PointerMode
+  -- ^ Placed next to 'layoutGap' so both share one word.
+  , layoutLineAlign :: {-# UNPACK #-} !LineAlign
+  -- ^ Also in the 'layoutGap' word.
   , layoutAlignX :: !AlignX
   , layoutAlignY :: !AlignY
   , layoutMinW :: {-# UNPACK #-} !Float
@@ -225,10 +291,17 @@ data Layout = Layout
   , layoutGridCols :: {-# UNPACK #-} !Int
   , layoutGridMinColW :: {-# UNPACK #-} !Float
   , layoutFontSize :: {-# UNPACK #-} !Float
+  , layoutLineGap :: {-# UNPACK #-} !Float
+  , layoutAspect :: {-# UNPACK #-} !Float
   , layoutFontColor :: !(Maybe Color)
+  , layoutFontTone :: !(Maybe Tone)
+  -- ^ Text colour tone, overridden by 'layoutFontColor' ('fontTone'). Does
+  -- not change the face.
   , layoutFontWeight :: !FontWeight
   , layoutFontStyle :: !FontStyle
   , layoutTextDecoration :: !TextDecoration
+  , layoutFlow :: !Flow
+  , layoutPin :: !(Maybe V2)
   }
   deriving (Eq, Show)
 
@@ -253,9 +326,16 @@ defaultLayout =
     , layoutGridMinColW = 0
     , layoutFontSize = 0
     , layoutFontColor = Nothing
+    , layoutFontTone = Nothing
     , layoutFontWeight = WeightNormal
     , layoutFontStyle = FontStyleNormal
     , layoutTextDecoration = DecorationNone
+    , layoutFlow = Line
+    , layoutLineGap = -1
+    , layoutLineAlign = LinesStart
+    , layoutAspect = 0
+    , layoutPin = Nothing
+    , layoutPointer = PointerAuto
     }
 
 -- | Set all four padding edges in logical pixels.
@@ -349,13 +429,28 @@ percent p l = l {layoutWidth = Percent p}
 gridMinColW :: Float -> Layout -> Layout
 gridMinColW w l = l {layoutGridMinColW = max 0 w}
 
--- | Fixed width and width/height ratio. The ratio must be positive.
+-- | Fixed width and width/height ratio; the height is derived. The ratio
+-- must be positive. Use 'aspect' to keep a ratio at a layout-given width.
 fixedAspectW :: Float -> Float -> Layout -> Layout
 fixedAspectW w ratio = fixedWH w (w / ratio)
 
--- | Fixed height and width/height ratio. The ratio must be positive.
+-- | Fixed height and width/height ratio; the width is derived. The ratio
+-- must be positive.
 fixedAspectH :: Float -> Float -> Layout -> Layout
 fixedAspectH h ratio = fixedWH (h * ratio) h
+
+-- | Keep width / height at @ratio@. A 'Fit' height becomes the given width
+-- divided by the ratio (within height limits), so a full-width picture keeps
+-- its shape:
+--
+-- > panelWith (fillW . aspect (16 / 9)) video
+--
+-- With a fixed height, a 'Fit' width becomes height times ratio. The ratio
+-- ignores content, so children can overflow as with 'fixedH'. A non-positive
+-- ratio turns it off. 'NanoUI.imageConfigured' uses the image's own ratio
+-- unless the layout sets one.
+aspect :: Float -> Layout -> Layout
+aspect ratio l = l {layoutAspect = if ratio > 0 && not (isInfinite ratio) then ratio else 0}
 
 -- | Set the grid column count, clamping negative counts to zero.
 gridCols :: Int -> Layout -> Layout
@@ -369,24 +464,34 @@ fontRegular l = l {layoutFontVariant = FontRegular}
 fontHeading :: Layout -> Layout
 fontHeading l = l {layoutFontVariant = FontHeading}
 
--- | Select regular text in the theme's muted colour.
+-- | Text in the theme's muted colour: 'fontTone' 'Muted'.
 fontMuted :: Layout -> Layout
-fontMuted l = l {layoutFontVariant = FontMuted}
+fontMuted = fontTone Muted
 
 -- | Select the backend's monospace font variant.
 fontMono :: Layout -> Layout
 fontMono l = l {layoutFontVariant = FontMono}
 
--- | Select text in the theme's danger colour.
+-- | Text in the theme's danger colour: 'fontTone' 'Danger'.
 fontDanger :: Layout -> Layout
-fontDanger l = l {layoutFontVariant = FontDanger}
+fontDanger = fontTone Danger
+
+-- | Colour text with a tone. The face is unchanged, so it combines with other
+-- font modifiers:
+--
+-- > labelWith (fontMono . fontTone Warning) "unsaved"
+--
+-- 'fontColor' takes precedence. Text metrics are unaffected.
+fontTone :: Tone -> Layout -> Layout
+fontTone t l = l {layoutFontTone = Just t}
 
 -- | Set logical font size. Non-positive values select the backend default.
 fontSize :: Float -> Layout -> Layout
 fontSize sz l = l {layoutFontSize = max 0 sz}
 
 -- | Multiply an explicit font size, or 16 when none is set, by a scale factor.
--- This uses 16 rather than querying the backend's default size.
+-- It does not query the backend default; to scale that, apply 'fontSize'
+-- with 'NanoUI.Internal.Monad.uiFontSize' first.
 fontSizeScale :: Float -> Layout -> Layout
 fontSizeScale s l = fontSize ((if layoutFontSize l > 0 then layoutFontSize l else 16) * s) l
 
@@ -475,6 +580,154 @@ alignBottom l = l {layoutAlignY = AlignBottom}
 alignBaseline :: Layout -> Layout
 alignBaseline l = l {layoutAlignY = AlignBaseline}
 
+-- | Start a new line when the next child would overflow the main axis, as
+-- for tags or chips ('Wrap'). Rows wrap downward, columns wrap to the right.
+-- A child longer than a line gets its own line. Lines are 'lineGap' apart and
+-- placed by 'lineAlign'. Grow children share the space left on their line,
+-- and cross-axis alignment places a child within its line. A column only
+-- wraps with a bounded height ('fixedH', 'maxH'). Grids and scroll containers
+-- ignore it.
+wrap :: Layout -> Layout
+wrap l = l {layoutFlow = Wrap}
+
+-- | Stack children in the content box instead of a line ('Layered'). Each is
+-- placed by its own alignment and drawn over earlier siblings. 'NanoUI.layers'
+-- is a plain container with this set; use 'layered' on a panel or card:
+--
+-- > panelWith (layered . fixedWH 240 160) $ do
+-- >   image grow cover
+-- >   labelWith (alignEnd . alignBottom) caption
+--
+-- A grow child fills the box on that axis. Grids and scroll containers
+-- ignore it; layer a column inside them instead.
+layered :: Layout -> Layout
+layered l = l {layoutFlow = Layered}
+
+-- | Space between a wrapping container's lines, in logical pixels. Defaults
+-- to the 'gap'.
+lineGap :: Float -> Layout -> Layout
+lineGap n l = l {layoutLineGap = max 0 n}
+
+-- | Position of a wrapping container's short lines along the main axis:
+-- start (the default), centre, or end.
+--
+-- > rowWith (wrap . lineAlign LinesCenter . fillW) (mapM_ chip tags)
+--
+-- Lines with a grow child already fill the axis and are unaffected.
+lineAlign :: LineAlign -> Layout -> Layout
+lineAlign a l = l {layoutLineAlign = a}
+
+-- | Line position for 'lineAlign': 'LinesStart', 'LinesCenter' or
+-- 'LinesEnd'.
+--
+-- A byte so it packs into the 'layoutGap' word of 'Layout'.
+newtype LineAlign = LineAlign Word8
+  deriving newtype (Eq, Enum)
+
+-- | Left of a row, top of a column.
+pattern LinesStart :: LineAlign
+pattern LinesStart = LineAlign 0
+
+-- | Centred on the main axis.
+pattern LinesCenter :: LineAlign
+pattern LinesCenter = LineAlign 1
+
+-- | Right of a row, bottom of a column.
+pattern LinesEnd :: LineAlign
+pattern LinesEnd = LineAlign 2
+
+{-# COMPLETE LinesStart, LinesCenter, LinesEnd #-}
+
+instance Show LineAlign where
+  show = \case
+    LinesStart -> "LinesStart"
+    LinesCenter -> "LinesCenter"
+    _ -> "LinesEnd"
+
+instance Bounded LineAlign where
+  minBound = LinesStart
+  maxBound = LinesEnd
+
+-- | Fraction of a line's free space placed before it: 0, 0.5 or 1.
+lineAlignFraction :: LineAlign -> Float
+lineAlignFraction = \case
+  LinesStart -> 0
+  LinesCenter -> 0.5
+  _ -> 1
+
+-- | Take the node out of its parent's flow and draw it over its siblings in
+-- the parent's content box. Its alignment picks the anchor corner, then it
+-- moves @x@ right and @y@ down:
+--
+-- > buttonWith (pinAt (-16) (-16) . alignEnd . alignBottom) "+"   -- 16 in from the bottom-right corner
+-- > box (pinAt 6 (-6) . alignEnd . alignTop . fixedWH 12 12) red   -- overhanging the top-right corner
+--
+-- Siblings lay out as if it were absent and it does not size the parent,
+-- but it is clipped and scrolled with them. Fixed and content sizes apply as
+-- usual, even past the parent's edge. A grow size fills from the offset to
+-- the opposite edge; a percentage is of the content box. Windows, modals and
+-- popups ignore it.
+--
+-- @pinAt 0 0 . grow@ covers the whole content box without sizing the parent,
+-- for a scrim or a veil over a saving form. Inside 'NanoUI.layers' a large
+-- overlay would instead stretch the box it covers:
+--
+-- > columnWith (padAll 12) $ do
+-- >   form
+-- >   when saving $ box (pinAt 0 0 . grow . pointer PointerBlock) veil
+--
+-- A pinned control takes the pointer from siblings beneath it; a pinned
+-- panel, label or image passes it through unless given
+-- @'pointer' 'PointerBlock'@.
+pinAt :: Float -> Float -> Layout -> Layout
+pinAt x y l = l {layoutPin = Just (V2 x y)}
+
+-- | Pointer handling where a node overlaps others, through layers or
+-- 'pinAt' ('pointer'). A node never takes the pointer from its ancestors.
+-- Values are 'PointerAuto', 'PointerBlock' and 'PointerPass'.
+--
+-- A byte so it packs into the 'layoutGap' word of 'Layout'.
+newtype PointerMode = PointerMode Word8
+  deriving newtype (Eq, Enum)
+
+-- | The default. Controls (buttons, sliders, text fields, drawings) take the
+-- pointer from what they cover; containers, labels, images and boxes pass it
+-- to controls beneath. Nodes under a control get no hover there.
+pattern PointerAuto :: PointerMode
+pattern PointerAuto = PointerMode 0
+
+-- | The node's box blocks presses, wheel and hover from reaching anything
+-- beneath. Controls inside it work as usual. For cards, panels or scrims
+-- over other controls.
+pattern PointerBlock :: PointerMode
+pattern PointerBlock = PointerMode 1
+
+-- | The node and its descendants ignore the pointer entirely, for
+-- decorative drawings or images laid over controls.
+pattern PointerPass :: PointerMode
+pattern PointerPass = PointerMode 2
+
+{-# COMPLETE PointerAuto, PointerBlock, PointerPass #-}
+
+instance Show PointerMode where
+  show = \case
+    PointerAuto -> "PointerAuto"
+    PointerBlock -> "PointerBlock"
+    _ -> "PointerPass"
+
+instance Bounded PointerMode where
+  minBound = PointerAuto
+  maxBound = PointerPass
+
+-- | Set how the node handles the pointer where it overlaps others:
+--
+-- > layers $ do
+-- >   list
+-- >   panelWith (pointer PointerBlock . alignEnd . fixedW 240) details
+-- >   drawing (pointer PointerPass . fillW . fillH) glow
+pointer :: PointerMode -> Layout -> Layout
+pointer m l = l {layoutPointer = m}
+
 -- | Surface colours and border geometry. Border width and corner radius use
 -- logical pixels and affect painting, not layout size.
 data Style = Style
@@ -504,6 +757,13 @@ data Theme = Theme
   , themeYellow :: {-# UNPACK #-} !Color
   , themeGreen :: {-# UNPACK #-} !Color
   , themePurple :: {-# UNPACK #-} !Color
+  , themeSuccess :: {-# UNPACK #-} !Color
+  -- ^ 'Success' tone: a green readable on 'themeWindow'.
+  , themeWarning :: {-# UNPACK #-} !Color
+  -- ^ 'Warning' tone: an amber readable on 'themeWindow'.
+  , themeDanger :: {-# UNPACK #-} !Color
+  -- ^ 'Danger' tone: a red readable on 'themeWindow', used by 'danger',
+  -- 'fontDanger' and 'destructive'.
   , themeOverlayDim :: {-# UNPACK #-} !Color
   , themeOnAccent :: {-# UNPACK #-} !Color
   -- ^ Text and marks drawn on an accent fill: a checked box, an active tab,
@@ -520,6 +780,77 @@ data Theme = Theme
   -- 0 (not at all) to 1 (invisible).
   }
   deriving (Eq, Show)
+
+-- | The system's light or dark preference. See @systemAppearance@ and
+-- @followSystemTheme@ in "NanoUI".
+data Appearance
+  = AppearanceLight
+  | AppearanceDark
+  deriving (Eq, Show, Enum, Bounded, Ord)
+
+-- | Pick the light theme for 'AppearanceLight', otherwise the dark one
+-- (including 'Nothing', since nano-ui defaults to dark). Pass it to
+-- @followSystemTheme@ or call it each frame:
+--
+-- > setUiTheme . lightDark defaultLightTheme defaultTheme =<< systemAppearance
+lightDark :: Theme -> Theme -> Maybe Appearance -> Theme
+lightDark light _ (Just AppearanceLight) = light
+lightDark _ dark _ = dark
+
+-- | 'defaultLightTheme' for a light appearance, 'defaultTheme' otherwise.
+defaultThemeFor :: Maybe Appearance -> Theme
+defaultThemeFor = lightDark defaultLightTheme defaultTheme
+
+-- | Classify a theme by its window colour: dark if white text reads better
+-- on it than black.
+themeAppearance :: Theme -> Appearance
+themeAppearance t = if darkColor (themeWindow t) then AppearanceDark else AppearanceLight
+
+-- | Whether white reads better on a colour than black.
+darkColor :: Color -> Bool
+darkColor c = colorLuminance c < 0.179
+
+-- | Blend a colour toward white (dark window) or black (light window) in 5%
+-- steps until it reaches 4.5:1 contrast with the window.
+readableTone :: Color -> Color -> Color
+readableTone window c0 =
+  fromMaybe (lerpColor c0 toward 0.95) $
+    find (\c -> contrastRatio c window >= 4.5) [lerpColor c0 toward (fromIntegral i * 0.05) | i <- [0 .. 18 :: Int]]
+  where
+    toward = if darkColor window then colorRGBA 255 255 255 255 else colorRGBA 0 0 0 255
+
+-- | A tone's colour in a theme.
+toneColor :: Theme -> Tone -> Color
+toneColor t = \case
+  Accent -> themeAccent t
+  Muted -> themeMuted t
+  Success -> themeSuccess t
+  Warning -> themeWarning t
+  Danger -> themeDanger t
+
+-- | Text colour when no 'fontColor' is set: the 'fontTone', else the tone
+-- implied by 'FontMuted' or 'FontDanger', else the accent for headings, else
+-- the panel foreground.
+textToneColor :: Theme -> FontVariant -> Maybe Tone -> Color
+textToneColor theme variant t = case t <|> variantTone variant of
+  Just t' -> toneColor theme t'
+  Nothing
+    | variant == FontHeading -> themeAccent theme
+    | otherwise -> styleFg (themePanel theme)
+
+-- | The face a variant draws in. Colour-only variants use the regular face.
+variantFace :: FontVariant -> FontVariant
+variantFace = \case
+  FontMuted -> FontRegular
+  FontDanger -> FontRegular
+  v -> v
+
+-- | The tone implied by a colour-only variant.
+variantTone :: FontVariant -> Maybe Tone
+variantTone = \case
+  FontMuted -> Just Muted
+  FontDanger -> Just Danger
+  _ -> Nothing
 
 -- -----------------------------------------------------------------------------
 -- Style and theme modifiers
@@ -636,17 +967,28 @@ tinted pick t =
         )
         t
 
--- | Buttons in the accent colour, for the action a view is for.
+-- | Fill buttons with a tone's colour and pick a readable label colour:
+--
+-- > styled (tone Danger) (button "Delete")
+tone :: Tone -> Theme -> Theme
+tone t = tinted (`toneColor` t)
+
+-- | Buttons in the accent colour, for a view's main action: 'tone' 'Accent'.
 primary :: Theme -> Theme
-primary = tinted themeAccent
+primary = tone Accent
 
--- | Buttons in the theme's red, for destructive actions.
+-- | Buttons in the danger colour, for destructive actions: 'tone' 'Danger'.
 destructive :: Theme -> Theme
-destructive = tinted themeRed
+destructive = tone Danger
 
--- | Fill buttons with the theme's green and choose a readable label colour.
+-- | Buttons in the success colour: 'tone' 'Success'.
 success :: Theme -> Theme
-success = tinted themeGreen
+success = tone Success
+
+-- | Buttons in the warning colour, for risky but non-destructive actions:
+-- 'tone' 'Warning'.
+warning :: Theme -> Theme
+warning = tone Warning
 
 -- | Buttons without a fill or border until hovered, for toolbars and
 -- secondary actions.
@@ -694,6 +1036,9 @@ disabledTheme t =
         , themeYellow = fade (themeYellow t)
         , themeGreen = fade (themeGreen t)
         , themePurple = fade (themePurple t)
+        , themeSuccess = fade (themeSuccess t)
+        , themeWarning = fade (themeWarning t)
+        , themeDanger = fade (themeDanger t)
         , themeOnAccent = fade (themeOnAccent t)
         , themeFocusRing = fade (themeFocusRing t)
         , themeLink = fade (themeLink t)
@@ -750,12 +1095,63 @@ defaultTheme =
         , themeYellow = colorRGBA 212 176 88 255
         , themeGreen = colorRGBA 104 168 124 255
         , themePurple = colorRGBA 176 140 220 255
+        , themeSuccess = readableTone (colorRGBA 24 24 27 255) (colorRGBA 104 168 124 255)
+        , themeWarning = colorRGBA 242 180 76 255
+        , themeDanger = readableTone (colorRGBA 24 24 27 255) (colorRGBA 252 165 165 255)
         , themeOverlayDim = colorRGBA 8 8 10 176
         , themeOnAccent = colorRGBA 255 255 255 255
         , themeSelection = fadeAlpha (colorRGBA 88 156 246 255) 115
         , themeFocusRing = colorRGBA 88 156 246 255
         , themeLink = colorRGBA 124 178 250 255
         , themeShadow = colorRGBA 0 0 0 72
+        , themeDisabledFade = 0.55
+        }
+
+-- | Light counterpart of 'defaultTheme', for use with @followSystemTheme@.
+defaultLightTheme :: Theme
+defaultLightTheme =
+  let panelSurface =
+        flatStyle
+          (colorRGBA 252 252 251 255)
+          (colorRGBA 36 36 40 255)
+          (colorRGBA 220 220 216 255)
+          (colorRGBA 252 252 251 255)
+          (colorRGBA 240 240 238 255)
+   in Theme
+        { themeWindow = colorRGBA 244 244 242 255
+        , themePanel = panelSurface
+        , themeFloatingWindow = panelSurface
+        , themeButton =
+            flatStyle
+              (colorRGBA 234 234 231 255)
+              (colorRGBA 24 24 27 255)
+              (colorRGBA 196 196 192 255)
+              (colorRGBA 222 222 218 255)
+              (colorRGBA 210 210 206 255)
+        , themeInput =
+            flatStyle
+              (colorRGBA 255 255 255 255)
+              (colorRGBA 36 36 40 255)
+              (colorRGBA 190 190 186 255)
+              (colorRGBA 250 250 249 255)
+              (colorRGBA 255 255 255 255)
+        , themeSeparator = colorRGBA 214 214 210 255
+        , themeAccent = colorRGBA 37 99 235 255
+        , themeMuted = colorRGBA 108 105 100 255
+        , themeRed = colorRGBA 190 40 40 255
+        , themeOrange = colorRGBA 184 82 14 255
+        , themeYellow = colorRGBA 150 104 0 255
+        , themeGreen = colorRGBA 30 128 70 255
+        , themePurple = colorRGBA 128 70 190 255
+        , themeSuccess = readableTone (colorRGBA 244 244 242 255) (colorRGBA 30 128 70 255)
+        , themeWarning = colorRGBA 150 90 0 255
+        , themeDanger = readableTone (colorRGBA 244 244 242 255) (colorRGBA 190 40 40 255)
+        , themeOverlayDim = colorRGBA 20 20 24 90
+        , themeOnAccent = colorRGBA 255 255 255 255
+        , themeSelection = fadeAlpha (colorRGBA 37 99 235 255) 80
+        , themeFocusRing = colorRGBA 37 99 235 255
+        , themeLink = colorRGBA 29 78 216 255
+        , themeShadow = colorRGBA 0 0 0 40
         , themeDisabledFade = 0.55
         }
 
@@ -806,7 +1202,7 @@ tomorrowNightMinDarkTheme =
           (colorRGBA 52 54 62 255)  -- #34363E
           (colorRGBA 26 27 29 255)  -- #1A1B1D
    in (accentColor accentCol defaultTheme)
-        { themeWindow = colorRGBA 23 24 26 255         -- #17181A (dark root window backdrop)
+        { themeWindow = windowCol
         , themePanel = panelSurface
         , themeFloatingWindow = panelSurface
         , themeButton =
@@ -830,10 +1226,14 @@ tomorrowNightMinDarkTheme =
         , themeYellow = colorRGBA 240 198 116 255      -- base.yellow #F0C674
         , themeGreen = colorRGBA 181 189 104 255       -- base.green #B5BD68
         , themePurple = colorRGBA 178 148 187 255      -- base.purple #B294BB
+        , themeSuccess = readableTone windowCol (colorRGBA 181 189 104 255)
+        , themeWarning = colorRGBA 240 198 116 255     -- base.yellow #F0C674
+        , themeDanger = readableTone windowCol (colorRGBA 204 102 102 255)
         , themeOverlayDim = colorRGBA 0 0 0 160
         , themeLink = accentCol
         }
   where
+  windowCol  = colorRGBA 23 24 26 255              -- #17181A (dark root window backdrop)
   edgeCol    = colorRGBA 77 80 87 255              -- window #4D5057 (touch brighter crisp border)
   accentCol    = colorRGBA 103 150 230 255           -- vscode.cornflower_blue #6796E6
 
@@ -872,6 +1272,9 @@ tomorrowMinLightTheme =
         , themeYellow = colorRGBA 231 197 71 255      -- Tomorrow Yellow #E7C547
         , themeGreen = colorRGBA 113 140 0 255        -- Tomorrow Green #718C00
         , themePurple = colorRGBA 137 91 144 255      -- Tomorrow Purple #895B90
+        , themeSuccess = readableTone (colorRGBA 255 255 255 255) (colorRGBA 113 140 0 255)
+        , themeWarning = colorRGBA 150 94 0 255       -- #965E00 (an amber dark enough to read on white)
+        , themeDanger = readableTone (colorRGBA 255 255 255 255) (colorRGBA 197 78 82 255)
         , themeOverlayDim = colorRGBA 0 0 0 100
         , themeSelection = fadeAlpha (colorRGBA 82 134 188 255) 80
         , themeLink = colorRGBA 66 113 174 255
@@ -913,6 +1316,9 @@ tomorrowMidnightMinDarkTheme =
         , themeYellow = colorRGBA 231 197 71 255       -- bright.yellow #E7C547
         , themeGreen = colorRGBA 185 202 74 255        -- bright.green #B9CA4A
         , themePurple = colorRGBA 195 151 216 255      -- bright.purple #C397D8
+        , themeSuccess = readableTone (colorRGBA 0 0 0 255) (colorRGBA 185 202 74 255)
+        , themeWarning = colorRGBA 231 197 71 255      -- bright.yellow #E7C547
+        , themeDanger = readableTone (colorRGBA 0 0 0 255) (colorRGBA 213 78 83 255)
         , themeOverlayDim = colorRGBA 0 0 0 160
         , themeLink = accentCol
         , themeShadow = colorRGBA 0 0 0 96
@@ -979,6 +1385,8 @@ themeFromBase16Mode dark b =
         edgeCol
         (pick (lerpColor panelBg (base02 b) 0.5) (lerpColor panelBg (base00 b) 0.4))
         (lerpColor panelBg (pick (base00 b) (base02 b)) 0.4)
+    -- Warning uses orange on light schemes, where yellow rarely reads.
+    readable = readableTone (base00 b)
    in
     (accentColor (base0D b) defaultTheme)
       { themeWindow = base00 b
@@ -1005,6 +1413,9 @@ themeFromBase16Mode dark b =
       , themeYellow = base0A b
       , themeGreen = base0B b
       , themePurple = base0E b
+      , themeSuccess = readable (base0B b)
+      , themeWarning = readable (pick (base0A b) (base09 b))
+      , themeDanger = readable (base08 b)
       , themeOverlayDim = colorRGBA 0 0 0 (pick 160 100)
       , themeOnAccent =
           if colorLuminance (base0D b) > 0.6

@@ -1,4 +1,5 @@
 {-# LANGUAGE DerivingVia #-}
+{-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE StrictData #-}
 {-# LANGUAGE TypeFamilies #-}
 
@@ -7,7 +8,10 @@
 -- the context types can name these without depending on the emitters.
 module NanoUI.Internal.Draw.Types
   ( Layer (..)
-  , DrawOp (..)
+  , DrawOp (.., DrawImageRect)
+  , LineCap (..)
+  , LineJoin (..)
+  , Shade (..)
   , TextFont (..)
   , defaultTextFont
   , DrawingBuild
@@ -49,6 +53,10 @@ data Layer = LayerBackground | LayerContent | LayerOverlay | LayerChrome
 -- | Vector drawing operations in logical pixels. Builders receive a solved
 -- window-space rectangle and should place operations within it. Circles use
 -- centre/radius; strokes use endpoints and width. Image UVs are normalised.
+--
+-- Build ops with the canvas ("NanoUI.Widgets.Custom"), which fills and
+-- strokes paths, clips, and draws through transforms. Constructors after
+-- 'DrawTextStyled' are the canvas's building blocks and may change.
 data DrawOp
   = FillRect !Rect !Color
   -- ^ Solid rectangle.
@@ -64,7 +72,7 @@ data DrawOp
       !Color
   -- ^ Three x/y pairs followed by the fill colour. The edges are
   -- anti-aliased, so a shape tessellated into triangles shows faint seams
-  -- along the shared edges; fill it with 'FillPolygon' instead.
+  -- along the shared edges; fill a path on a canvas instead.
   | FillCircle
       {-# UNPACK #-} !Float
       {-# UNPACK #-} !Float
@@ -78,16 +86,19 @@ data DrawOp
       {-# UNPACK #-} !Float
       {-# UNPACK #-} !Float
       !Color
-  -- ^ Endpoint x0/y0/x1/y1, width, and colour.
+  -- ^ Endpoint x0/y0/x1/y1, width, and colour. Not anti-aliased; see
+  -- 'StrokeLineAA'.
   | StrokeRoundedRect !Rect {-# UNPACK #-} !Float {-# UNPACK #-} !Float !Color
-  -- ^ Rectangle, corner radius, border width, and colour.
+  -- ^ Rectangle, corner radius, border width, and colour. The border lies
+  -- inside the rectangle.
   | StrokeCircle
       {-# UNPACK #-} !Float
       {-# UNPACK #-} !Float
       {-# UNPACK #-} !Float
       {-# UNPACK #-} !Float
       !Color
-  -- ^ Centre x/y, radius, border width, and colour.
+  -- ^ Centre x/y, radius, border width, and colour. The border lies inside
+  -- the circle.
   | StrokeLineAA
       {-# UNPACK #-} !Float
       {-# UNPACK #-} !Float
@@ -96,25 +107,22 @@ data DrawOp
       {-# UNPACK #-} !Float
       !Color
   -- ^ Anti-aliased line: endpoint x0/y0/x1/y1, width, and colour.
-  | FillPolygon !(PrimArray Float) !(PrimArray Int) !Color
-  -- ^ Simple polygon with anti-aliased edges: its outline as x/y pairs,
-  -- without repeating the first point; index triples into the outline's
-  -- points that cover it; and the fill colour.
-  | StrokePolyline !(PrimArray Float) {-# UNPACK #-} !Float !Bool !Color
-  -- ^ Anti-aliased polyline with mitered joins: its points as x/y pairs,
-  -- width, whether the last point joins back to the first (which is then not
-  -- repeated), and colour.
   | FillQuadGradient !Rect !Color !Color !Color !Color
   -- ^ Rectangle with colours at top-left, top-right, bottom-right, bottom-left.
-  | DrawImageRect
+  | DrawImage
       !Rect
+      {-# UNPACK #-} !Float
       {-# UNPACK #-} !Int
       {-# UNPACK #-} !Float
       {-# UNPACK #-} !Float
       {-# UNPACK #-} !Float
       {-# UNPACK #-} !Float
       !Color
-  -- ^ Destination rectangle, texture id, u0/v0/u1/v1, and tint colour.
+  -- ^ Destination rectangle, rotation about its centre in radians
+  -- (clockwise on screen), texture id, u0/v0/u1/v1, and tint colour. In a
+  -- drawing the texture id may be a registered 'NanoUI.ImageId', with UVs
+  -- from 0 to 1. An unrotated image snaps to the pixel grid; a rotated one
+  -- does not. Canvas code uses 'NanoUI.Widgets.Custom.drawImageWith'.
   | DrawText
       {-# UNPACK #-} !Float
       {-# UNPACK #-} !Float
@@ -132,7 +140,76 @@ data DrawOp
       !T.Text
       !Color
   -- ^ Text in a font of its own, its line box's top left corner at (x, y).
+  | FillPolygon !(PrimArray Float) !(PrimArray Int) !(PrimArray Int) !Shade
+  -- ^ A polygon with holes, anti-aliased along its outline only. Fields:
+  -- points as x/y pairs, ring after ring, then any interior points the
+  -- triangles need; each ring's start offset plus the last ring's end;
+  -- index triples into the points; and the shade. The first ring is the
+  -- outline; the rest are holes, wound the opposite way.
+  | StrokePolyline
+      !(PrimArray Float)
+      {-# UNPACK #-} !Float
+      !Bool
+      !LineCap
+      !LineJoin
+      {-# UNPACK #-} !Float
+      !Shade
+  -- ^ A polyline anti-aliased along its sides. Fields: points as x/y
+  -- pairs; width; whether it closes back to the first point (not
+  -- repeated); cap for open ends; corner join; miter limit as a multiple of
+  -- the width, beyond which a miter becomes a bevel; and the shade.
+  | DrawTextAligned
+      {-# UNPACK #-} !Float
+      {-# UNPACK #-} !Float
+      {-# UNPACK #-} !Float
+      {-# UNPACK #-} !Float
+      {-# UNPACK #-} !Float
+      !TextFont
+      !T.Text
+      !Color
+  -- ^ Text in its own font, anchored at (x, y) by ax/ay as in 'DrawText',
+  -- with the font size scaled. Fields: x, y, ax, ay, scale, font, text,
+  -- colour.
+  | PushClip !Rect
+  -- ^ Clip ops up to the matching 'PopClip' to this rectangle, intersected
+  -- with the current clip.
+  | PopClip
+  -- ^ End the innermost open 'PushClip'.
   deriving (Eq)
+
+-- | An unrotated 'DrawImage': destination rectangle, texture id,
+-- u0/v0/u1/v1, and tint colour. As a pattern it matches only angle 0.
+pattern DrawImageRect :: Rect -> Int -> Float -> Float -> Float -> Float -> Color -> DrawOp
+pattern DrawImageRect r tex u0 v0 u1 v1 c = DrawImage r 0 tex u0 v0 u1 v1 c
+
+-- | How a stroke ends an open subpath.
+data LineCap
+  = ButtCap
+  -- ^ Flat at the end point.
+  | SquareCap
+  -- ^ Flat, half the width past the end point.
+  | RoundCap
+  -- ^ A half disc past the end point.
+  deriving (Eq, Show, Enum, Bounded)
+
+-- | How a stroke turns a corner.
+data LineJoin
+  = MiterJoin
+  -- ^ Sides extend until they meet in a point, or bevel if that point is
+  -- beyond the miter limit.
+  | RoundJoin
+  -- ^ A circular arc around the corner.
+  | BevelJoin
+  -- ^ Corner cut straight across.
+  deriving (Eq, Show, Enum, Bounded)
+
+-- | Colour of a 'FillPolygon' or 'StrokePolyline': one for the whole shape,
+-- or one per point, blended across the triangles. A stroke uses each
+-- point's colour across the line's width there.
+data Shade
+  = Flat !Color
+  | Shaded !(PrimArray Word32)
+  deriving (Eq, Show)
 
 -- | The font a 'DrawTextStyled' draws with: the same choices a label's
 -- layout makes.
@@ -163,12 +240,15 @@ shiftDrawOp dx dy op =
     StrokeRoundedRect (Rect x y w h) r bw c -> StrokeRoundedRect (Rect (x + dx) (y + dy) w h) r bw c
     StrokeCircle cx cy r bw c -> StrokeCircle (cx + dx) (cy + dy) r bw c
     StrokeLineAA x0 y0 x1 y1 bw c -> StrokeLineAA (x0 + dx) (y0 + dy) (x1 + dx) (y1 + dy) bw c
-    FillPolygon pts tris c -> FillPolygon (shiftPoints dx dy pts) tris c
-    StrokePolyline pts w closed c -> StrokePolyline (shiftPoints dx dy pts) w closed c
+    FillPolygon pts rings tris c -> FillPolygon (shiftPoints dx dy pts) rings tris c
+    StrokePolyline pts w closed cap join limit c -> StrokePolyline (shiftPoints dx dy pts) w closed cap join limit c
     FillQuadGradient (Rect x y w h) c0 c1 c2 c3 -> FillQuadGradient (Rect (x + dx) (y + dy) w h) c0 c1 c2 c3
-    DrawImageRect (Rect x y w h) tex u0 v0 u1 v1 c -> DrawImageRect (Rect (x + dx) (y + dy) w h) tex u0 v0 u1 v1 c
+    DrawImage (Rect x y w h) angle tex u0 v0 u1 v1 c -> DrawImage (Rect (x + dx) (y + dy) w h) angle tex u0 v0 u1 v1 c
     DrawText x y ax ay t c -> DrawText (x + dx) (y + dy) ax ay t c
     DrawTextStyled x y font t c -> DrawTextStyled (x + dx) (y + dy) font t c
+    DrawTextAligned x y ax ay k font t c -> DrawTextAligned (x + dx) (y + dy) ax ay k font t c
+    PushClip (Rect x y w h) -> PushClip (Rect (x + dx) (y + dy) w h)
+    PopClip -> PopClip
 
 -- | Translate x/y pairs.
 shiftPoints :: Float -> Float -> PrimArray Float -> PrimArray Float

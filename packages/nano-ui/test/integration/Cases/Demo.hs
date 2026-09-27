@@ -4,6 +4,7 @@ import Spec
 import Data.Text qualified as T
 import NanoUI.Internal.Context (Context (..))
 import NanoUI.Internal.Layout.Arena (NodeType (..), arenaCount, getNodeRect, getNodeType)
+import NanoUI.Shortcut
 
 tests :: [Spec]
 tests =
@@ -52,10 +53,8 @@ runBoundedRadioTest ctx failed = do
   assertJust failed (spanRect "OffsetChoice 12" spans) $ \r -> do
     (_, selected) <- runClick ctx inp (ui (OffsetChoice 11)) (spanCenter r)
     assertEq failed selected (OffsetChoice 12)
-    ((_, retained), _, _, _) <- runFrame ctx inp (ui selected)
-    assertEq failed retained selected
-    ((_, reset), _, _, _) <- runFrame ctx inp (ui (OffsetChoice 10))
-    assertEq failed reset (OffsetChoice 10)
+    assertEq failed selected . snd =<< evalUi ctx inp (ui selected)
+    assertEq failed (OffsetChoice 10) . snd =<< evalUi ctx inp (ui (OffsetChoice 10))
 
 runControlsTabHeightTest :: Context -> IORef Int -> IO ()
 runControlsTabHeightTest ctx failed = do
@@ -161,30 +160,20 @@ runColorPickerCommitTest ctx failed = do
   let initial = colorRGBA 204 102 102 255
   colorRef <- newIORef initial
   let inp0 = withInput 400 420
-      packed c = colorToWord32 c
       ui = held colorRef colorPicker'
   (resp, _) <- warmup2 ctx inp0 ui
-  let wid = respId resp
-      sv = colorPickerSvSquare (respRect resp)
-      pt = V2 (rectX sv + rectW sv * 0.9) (rectY sv + 2)
-      press = pressAt inp0 pt
-      release = releaseAt press
+  let sv = colorPickerSvSquare (respRect resp)
+      press = pressAt inp0 (V2 (rectX sv + rectW sv * 0.9) (rectY sv + 2))
+      colors = (\st -> (widgetStoreBaseColor st (respId resp) initial, widgetStoreColor st (respId resp) initial)) <$> getStore ctx
   _ <- runFrame ctx press ui
-  storeDrag <- getStore ctx
-  assertEq failed (packed (widgetStoreBaseColor storeDrag wid initial)) (packed initial)
-  assert failed (packed (widgetStoreColor storeDrag wid initial) /= packed initial)
-  _ <- runFrame ctx press {inputMousePressed = False} ui
-  storeHold <- getStore ctx
-  assertEq
-    failed
-    (packed (widgetStoreColor storeHold wid initial))
-    (packed (widgetStoreColor storeDrag wid initial))
-  _ <- runFrame ctx release ui
-  storeDone <- getStore ctx
-  assertEq
-    failed
-    (packed (widgetStoreBaseColor storeDone wid initial))
-    (packed (widgetStoreColor storeDone wid initial))
+  (baseDrag, drag) <- colors
+  assertEq failed baseDrag initial
+  assert failed (drag /= initial)
+  _ <- runFrame ctx press {inputButtonsPressed = noButtons} ui
+  assertEq failed drag . snd =<< colors
+  _ <- runFrame ctx (releaseAt press) ui
+  (baseDone, done) <- colors
+  assertEq failed baseDone done
 
 -- Moving the colour with an arrow key on the focused field moves the markers
 -- on the hue and alpha bars and recolours the preview swatch, which are
@@ -195,20 +184,15 @@ runColorPickerPartDamageTest ctx failed = do
   colorRef <- newIORef (colorRGBA 204 102 102 255)
   let inp0 = withInput 400 1200
       ui = held colorRef colorPickerRGBA'
-      key k = inp0 {inputKeys = inputKeysFromList [k]}
   _ <- warmup2 ctx inp0 ui
-  _ <- runFrame ctx (key KeyTab) ui
+  _ <- runFrame ctx (tabInp inp0) ui
   _ <- runFrame ctx inp0 ui
   _ <- takeDamage ctx
-  _ <- runFrame ctx (key KeyRight) ui
+  _ <- runFrame ctx (keyInp KeyRight inp0) ui
   dmg <- takeDamage ctx
   let na = ctxNodeArena ctx
   n <- arenaCount na
-  parts <- fmap concat . forM [0 .. n - 1] $ \i -> do
-    nt <- getNodeType na i
-    if nt /= NodeColorPicker
-      then pure []
-      else pure <$> getNodeRect na i
+  parts <- mapM (getNodeRect na) =<< filterM (fmap (== NodeColorPicker) . getNodeType na) [0 .. n - 1]
   -- The field, hue bar, alpha bar and preview.
   assertEq failed (length parts) 4
   assert failed (all (clipCovers dmg) parts)
@@ -238,11 +222,7 @@ runColorPickerRgbaTest ctx failed = do
       ui = void (colorPickerRGBA (colorRGBA 204 102 102 128))
   _ <- warmup2 ctx inp0 ui
   spans <- collectTextSpans ctx
-  let has needle = any (\(_, t, _, _, _) -> needle `T.isInfixOf` t) spans
-  assert failed (has "#cc666680")
-  assert failed (has "128")
-  assert failed (has "Current")
-  assert failed (has "New")
+  forM_ ["#cc666680", "128", "Current", "New"] $ \needle -> assertSpansHas failed needle spans
 
 -- Typing in a channel field must recolour on the same frame (live edits). The
 -- fields are numeric: Up steps the focused one, and letters are dropped.
@@ -253,9 +233,7 @@ runColorPickerEditTest ctx failed = do
       ui = colorPicker' initial
   _ <- warmup2 ctx inp0 ui
   -- Tab past the field and the hue bar to the R field.
-  _ <- runFrame ctx (tabInp inp0) ui
-  _ <- runFrame ctx (tabInp inp0) ui
-  _ <- runFrame ctx (tabInp inp0) ui
+  replicateM_ 3 (runFrame ctx (tabInp inp0) ui)
   _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyBackspace, KeyBackspace, KeyBackspace]}) ui
   ((_, col), _, _, _) <- runFrame ctx (inp0 {inputChars = "10"}) ui
   assertEq failed (colorR col) 10
@@ -273,12 +251,9 @@ runColorPickerDragAfterFieldTest ctx failed = do
   colorRef <- newIORef initial
   let inp0 = withInput 400 460
       ui = held colorRef colorPicker'
-      tabKey = tabInp inp0
   (resp, _) <- warmup2 ctx inp0 ui
   -- Tab past the field and the hue bar to the R field.
-  _ <- runFrame ctx tabKey ui
-  _ <- runFrame ctx tabKey ui
-  _ <- runFrame ctx tabKey ui
+  replicateM_ 3 (runFrame ctx (tabInp inp0) ui)
   let sv = colorPickerSvSquare (respRect resp)
       press = pressAt inp0 (V2 (rectX sv + 2) (rectY sv + 2))
       drag = holdAt press (V2 (rectX sv + rectW sv * 0.9) (rectY sv + rectH sv * 0.9))
@@ -300,16 +275,12 @@ runColorPickerChangeOnceTest ctx failed = do
       changed inp = (\((resp, _), _, _, _) -> respChanged resp) <$> runFrame ctx inp ui
   (resp, _) <- warmup2 ctx inp0 ui
   _ <- runFrame ctx (tabInp inp0) ui
-  moved <- changed (keyInp KeyRight inp0)
-  assert failed moved
+  assert failed =<< changed (keyInp KeyRight inp0)
   store <- getStore ctx
-  let wid = respId resp
-      base = colorToWord32 (widgetStoreBaseColor store wid initial)
-      neu = colorToWord32 (widgetStoreColor store wid initial)
-  assert failed (neu /= colorToWord32 initial)
-  assertEq failed base neu
-  idle <- mapM changed [inp0, inp0]
-  assertEq failed idle [False, False]
+  let neu = widgetStoreColor store (respId resp) initial
+  assert failed (neu /= initial)
+  assertEq failed (widgetStoreBaseColor store (respId resp) initial) neu
+  assertEq failed [False, False] =<< mapM changed [inp0, inp0]
 
 -- The hue and alpha bars are focus stops after the field. An arrow moves a
 -- bar's handle the way it is drawn (down raises the hue, up lowers the alpha),
@@ -320,17 +291,17 @@ runColorPickerBarKeysTest ctx failed = do
   colorRef <- newIORef initial
   let inp0 = withInput 440 460
       ui = held colorRef colorPickerRGBA'
-      frame inp = (\((_, c), _, _, _) -> c) <$> runFrame ctx inp ui
-      key k = inp0 {inputKeys = inputKeysFromList [k]}
+      frame inp = snd <$> evalUi ctx inp ui
+      press k = keyInp k inp0
   _ <- warmup2 ctx inp0 ui
-  _ <- frame (key KeyTab)
-  _ <- frame (key KeyTab)
-  shifted <- frame ((key KeyDown) {inputModifiers = Modifiers True False False})
+  _ <- frame (press KeyTab)
+  _ <- frame (press KeyTab)
+  shifted <- frame (chordInp (shift <> key KeyDown) inp0)
   assert failed (colorG shifted > colorG initial + 10)
-  home <- frame (key KeyHome)
+  home <- frame (press KeyHome)
   assert failed (colorG home <= colorG initial + 1)
-  _ <- frame (key KeyTab)
-  opaque <- frame (key KeyEnd)
+  _ <- frame (press KeyTab)
+  opaque <- frame (press KeyEnd)
   assertEq failed (colorA opaque) 255
-  lowered <- frame (key KeyUp)
+  lowered <- frame (press KeyUp)
   assertEq failed (colorA lowered) 254

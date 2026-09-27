@@ -1,11 +1,17 @@
 -- | Shared helpers for integration tests: input gestures, spans, scroll checks.
 module NanoUI.Testing.Harness
   ( clickPair
+  , clickPairWith
   , rightClickPair
   , pressAt
+  , pressWith
   , holdAt
   , releaseAt
+  , releaseWith
   , keyInp
+  , keyRepeatInp
+  , chordInp
+  , keyUpInp
   , tabInp
   , withInputOff
   , withDelta
@@ -24,9 +30,11 @@ module NanoUI.Testing.Harness
   , spanRectOf
   , covers
   , clipCovers
+  , damageCovers
   , assertScrollGutterPad
   , assertWheelTitlePinned
   , findGrabHover
+  , cursorOver
   , dragWindowEdge
   , vertUv
   , checkLabelAlignEndInk
@@ -46,13 +54,15 @@ module NanoUI.Testing.Harness
   , clickTab
   , dragPos
   , drawQuads
+  , newWakeSignal
   ) where
 
 import Control.Applicative ((<|>))
+import Control.Concurrent.MVar (newEmptyMVar, takeMVar, tryPutMVar, tryTakeMVar)
 import Control.Monad (forM, forM_, unless, void, when)
 import Data.IORef (IORef, readIORef, writeIORef)
 import Data.List (maximumBy)
-import Data.Maybe (listToMaybe)
+import Data.Maybe (isJust, listToMaybe)
 import Data.Ord (comparing)
 import Data.Text qualified as T
 import Data.Typeable (Typeable)
@@ -64,8 +74,10 @@ import NanoUI
 import NanoUI.Backend
 import NanoUI.Internal.Font (alignedTextPen, textInkEnd)
 import NanoUI.Internal.Types (clamp)
+import NanoUI.Shortcut (Shortcut (..))
 import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, assertJustM, assertLt, bump, evalUi, run2Frames, withInput)
+import System.Timeout (timeout)
 
 -- | Text bounds, text, foreground, background, and clip in logical window coordinates.
 type DemoSpan = (Rect, T.Text, Color, Color, Rect)
@@ -182,32 +194,63 @@ dragPos drawFrame base from to = do
       hold = holdAt base to
   mapM_ drawFrame [press, hold, releaseAt hold, base, base]
 
--- | Left-button press and release at a point, retaining other base-input fields.
+-- | 'clickPairWith' 'MouseLeft'.
 clickPair :: Input -> V2 -> (Input, Input)
-clickPair inp pos = let press = pressAt inp pos in (press, releaseAt press)
+clickPair = clickPairWith MouseLeft
 
--- | Right-button press and release at a point. Supply event-free base input.
+-- | Press and release frames for the button at @pos@, keeping the base
+-- input's other fields.
+clickPairWith :: MouseButton -> Input -> V2 -> (Input, Input)
+clickPairWith b inp pos = let press = pressWith b inp pos in (press, releaseWith b press)
+
+-- | 'clickPairWith' 'MouseRight'.
 rightClickPair :: Input -> V2 -> (Input, Input)
-rightClickPair inp pos =
-  let press = applyMouseButton MouseRight True inp {inputMousePos = pos}
-   in (press, applyMouseButton MouseRight False press {inputMouseRightPressed = False})
+rightClickPair = clickPairWith MouseRight
 
--- | Set pointer position and left-button press/held flags, clearing its release flag.
+-- | 'pressWith' 'MouseLeft'.
 pressAt :: Input -> V2 -> Input
-pressAt inp pos =
-  (applyMouseButton MouseLeft True inp {inputMousePos = pos}) {inputMouseReleased = False}
+pressAt = pressWith MouseLeft
+
+-- | A frame where the button goes down at @pos@ and is not released.
+pressWith :: MouseButton -> Input -> V2 -> Input
+pressWith b inp pos =
+  applyMouseButton b True inp {inputMousePos = pos, inputButtonsReleased = buttonsDelete b (inputButtonsReleased inp)}
 
 -- | The button still down from an earlier 'pressAt', with the pointer at @pos@.
 holdAt :: Input -> V2 -> Input
-holdAt inp pos = (pressAt inp pos) {inputMousePressed = False}
+holdAt inp pos = unpress MouseLeft (pressAt inp pos)
 
--- | Release the left button at its current position, clearing its press/held flags.
+-- | 'releaseWith' 'MouseLeft'.
 releaseAt :: Input -> Input
-releaseAt press = applyMouseButton MouseLeft False press {inputMousePressed = False}
+releaseAt = releaseWith MouseLeft
 
--- | A single key-down frame.
+-- | A frame where the button comes up at the pointer, with no press.
+releaseWith :: MouseButton -> Input -> Input
+releaseWith b = applyMouseButton b False . unpress b
+
+-- | Remove the button from the frame's presses.
+unpress :: MouseButton -> Input -> Input
+unpress b inp = inp {inputButtonsPressed = buttonsDelete b (inputButtonsPressed inp)}
+
+-- | A frame where the key goes down (not an auto-repeat).
 keyInp :: Key -> Input -> Input
-keyInp k inp = inp {inputKeys = inputKeysFromList [k]}
+keyInp k inp = inp {inputKeys = ks, inputKeysNew = ks}
+  where
+    ks = inputKeysFromList [k]
+
+-- | A frame with one auto-repeat of a held key (pressed, but not new).
+keyRepeatInp :: Key -> Input -> Input
+keyRepeatInp k inp = inp {inputKeys = inputKeysFromList [k], inputKeysNew = mempty}
+
+-- | A frame pressing a chord such as @ctrl <> key 'a'@, with exactly the
+-- chord's modifiers held.
+chordInp :: Shortcut -> Input -> Input
+chordInp (Shortcut k mods) inp =
+  (maybe id (`applyKey` True) k inp {inputKeys = mempty, inputKeysNew = mempty}) {inputModifiers = mods}
+
+-- | A frame releasing a key, which drops it from the held keys.
+keyUpInp :: Key -> Input -> Input
+keyUpInp k inp = applyKey k False inp {inputKeys = mempty, inputKeysNew = mempty, inputKeysReleased = mempty}
 
 -- | Step the tab focus to the next focusable.
 tabInp :: Input -> Input
@@ -255,11 +298,7 @@ held ref widget = do
 -- | Run a press frame and a release frame at @pos@ ('clickPair'), returning
 -- the release frame's result.
 runClick :: Context -> Input -> NanoUI a -> V2 -> IO a
-runClick ctx inp0 ui pos =
-  let
-    (press, release) = clickPair inp0 pos
-   in
-    warmup ctx press ui >> evalUi ctx release ui
+runClick ctx inp0 ui pos = let (press, release) = clickPair inp0 pos in warmup ctx press ui >> evalUi ctx release ui
 
 -- | Run left press and release frames ('clickPair') through a reducer. Returns
 -- the final model, release-frame messages, and release-frame dirty flag.
@@ -299,6 +338,11 @@ covers (Rect cx cy cw ch) (Rect x y w h) =
 clipCovers :: Damage -> Rect -> Bool
 clipCovers (DamageClip clip) rect = covers clip rect
 clipCovers DamageFull _ = False
+
+-- | Whether a frame's damage covers @rect@, the whole window included.
+damageCovers :: Damage -> Rect -> Bool
+damageCovers DamageFull _ = True
+damageCovers dmg rect = clipCovers dmg rect
 
 -- | Y origins of spans whose unmodified text exactly matches the label.
 spanYOf :: T.Text -> [(Rect, T.Text, a, b, c)] -> [Float]
@@ -350,6 +394,13 @@ assertWheelTitlePinned failed ctx inp0 ui title line1 wheelAt = do
       forM_ (listToMaybe (spanYOf line1 spans1)) $ \b1 -> assertLt failed b1 b0
     _ -> assert failed False
 
+-- | Run a frame with the pointer at @pos@ and return the cursor it asks for.
+cursorOver :: Context -> Input -> NanoUI a -> V2 -> IO UiCursorKind
+cursorOver ctx inp ui pos = do
+  let hover = inp {inputMousePos = pos}
+  _ <- runFrame ctx hover ui
+  uiCursorKind ctx hover
+
 -- | Probe candidate y positions at a fixed x, running a frame for each, and
 -- return the first input that produces a grab cursor.
 findGrabHover ::
@@ -358,11 +409,8 @@ findGrabHover ctx ui inp0 thumbX = go
  where
   go [] = pure Nothing
   go (y : ys) = do
-    let
-      hover = inp0 {inputMousePos = V2 thumbX y}
-    _ <- runFrame ctx hover ui
-    kind <- uiCursorKind ctx hover
-    if kind == UiCursorGrab then pure (Just hover) else go ys
+    kind <- cursorOver ctx inp0 ui (V2 thumbX y)
+    if kind == UiCursorGrab then pure (Just inp0 {inputMousePos = V2 thumbX y}) else go ys
 
 -- | Press and move a resize handle, then run two button-up frames. Returns
 -- the window's recorded bounds, or 'Nothing' if its node is absent.
@@ -426,3 +474,17 @@ windowTitleGrab (Rect x0 y0 _ _) = V2 (x0 + 24) (y0 + padT windowPad + 19.5)
 runDragFrom :: Context -> Input -> NanoUI a -> V2 -> V2 -> IO ()
 runDragFrom ctx inp0 ui grab dest =
   forM_ [pressAt inp0 grab, holdAt inp0 dest] $ \inp -> runFrame ctx inp ui
+
+-- | Install a wake action on a headless context and return a wait for it.
+-- @wait us@ consumes a wake since the last wait, blocking up to @us@
+-- microseconds, and says whether one came. A frame that requests another
+-- also wakes the loop, so drain those with @wait 0@ before starting the
+-- background job the test waits on.
+newWakeSignal :: Context -> IO (Int -> IO Bool)
+newWakeSignal ctx = do
+  signal <- newEmptyMVar
+  setWakeLoop ctx (void (tryPutMVar signal ()))
+  pure $ \us ->
+    if us <= 0
+      then isJust <$> tryTakeMVar signal
+      else isJust <$> timeout us (takeMVar signal)

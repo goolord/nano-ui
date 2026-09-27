@@ -6,6 +6,7 @@ packages:
   packages/nano-ui-rgfw-bindings
   packages/nano-ui-rgfw
   packages/nano-ui-form
+  packages/nano-ui-markdown
 
 tests: True
 benchmarks: True
@@ -34,3 +35,7 @@ package nano-ui-diagrams
 
 package nano-ui-form
   flags: +sdl
+
+package nano-ui-markdown
+  flags: +sdl
+  ghc-options: -Werror

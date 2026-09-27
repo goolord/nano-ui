@@ -49,7 +49,6 @@ library
     exposed-modules:
         NanoUI.Diagrams
         NanoUI.Diagrams.Backend
-        NanoUI.Diagrams.Internal.Tessellation
         NanoUI.Diagrams.Widget
         NanoUI.Plot
         NanoUI.Plot.Types

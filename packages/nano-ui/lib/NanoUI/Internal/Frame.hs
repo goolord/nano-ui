@@ -8,32 +8,37 @@ module NanoUI.Internal.Frame
   )
 where
 
-import Control.Monad (unless, when)
+import Control.Monad (unless, when, (<$!>))
 import Data.IORef (modifyIORef', readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
-import Data.Maybe (isJust)
+import Data.Maybe (isJust, isNothing)
 import Data.Typeable (Typeable)
 import Effectful (Eff, IOE, runEff, type (:>))
+import NanoUI.Internal.Atlas (atlasToken)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Damage (FrameSnapshot (..), captureFrameSnapshot, updatePrevRects, writeDamage)
 import NanoUI.Internal.Draw
 import NanoUI.Internal.Frame.Input
 import NanoUI.Internal.Frame.Chrome (overlayMenuStyle, overlayWindowStyle, paintMenuPanel)
+import NanoUI.Internal.Frame.Explain (explainFrame, paintExplainHover, paintExplainLayer, paintExplainPage)
 import NanoUI.Internal.Frame.Paint (lowerShapes, walkChildren)
 import NanoUI.Internal.Frame.Scroll
 import NanoUI.Internal.Frame.Select
 import NanoUI.Internal.Frame.TextArea (finalizeTextFieldMouse)
 import NanoUI.Internal.Frame.TextEdit
+import NanoUI.Internal.Frame.TextInput (claimComposition, settleInputMethod)
 import NanoUI.Internal.Frame.Window
 import NanoUI.Internal.Id (WidgetId (..), initialIdContext)
-import NanoUI.Internal.Input (Input (..), inputMousePressed, stripInteractionInput, withoutPointer)
+import NanoUI.Internal.Input (Input (..), Key (..), MouseButton (..), Pressable (..), inputKeysNull, stripInteractionInput, withoutPointer)
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Layout.Solve (placeFloatingNodes, runCustomMeasure, solveLayout)
 import NanoUI.Internal.Monad (NanoUI, Ui, runUi, whenM)
 import NanoUI.Internal.Store (mirrorStoresChanged)
 import NanoUI.Internal.Style (Padding (..), Theme (..), themeOverlayDim, themeSeparator)
-import NanoUI.Internal.Types (Damage (..), Rect (..), Size (..), rectInflate, rectNonEmpty)
+import NanoUI.Internal.Tasks (sweepHeld)
+import NanoUI.Internal.Types (Damage (..), Rect (..), Size (..), damageIsEmpty, rectInflate, rectNonEmpty)
 import NanoUI.Internal.Widgets.Overlay (windowChromeSepH, windowTitleBarH)
+import NanoUI.Internal.Widgets.Sensor (beginSensors, updateSensors)
 
 -- | Build, lay out, resolve input, and paint one headless frame. Returns the
 -- view result, emitted messages, borrowed draw buffers, and whether state
@@ -84,12 +89,19 @@ runFrameEff ::
   -> Input
   -> Eff (Ui : es) a
   -> IO (a, [FrameMsg], DrawData, Bool)
-runFrameEff unlift ctx frameInp ui = do
+runFrameEff unlift ctx rawInp ui = do
   ensureMetricCaches ctx
   snap <- captureFrameSnapshot ctx
+  themeBefore <- readIORef (ctxTheme ctx)
   clearDirty ctx
   -- Timed wakes are re-requested by whatever is still built this frame.
   clearWakeAt ctx
+  -- A thread may have changed what the view reads before waking the loop,
+  -- so repaint in full.
+  takeThreadWake ctx
+  -- The focused field gets any IME composition, and while one shows, the IME
+  -- owns the keys.
+  (frameInp, imeKeys) <- claimComposition ctx rawInp
   -- Decide what the pointer belongs to before anything reads it, against the
   -- frame the user saw. The view gets its input routed layer by layer, and
   -- each step below gets the input of what it serves, with no pointer in it
@@ -100,6 +112,8 @@ runFrameEff unlift ctx frameInp ui = do
   -- to, is for what watches the whole window: a press anywhere else closing
   -- a menu, hover, and what the overlays paint.
   route <- routePointer ctx frameInp
+  -- A widget covered by another gets no pointer.
+  recordCoveredWidgets ctx route frameInp
   let routedIf mine = if mine then frameInp else withoutPointer frameInp
       layerInp = routedIf (case route of RouteLayer _ -> True; _ -> False)
       menuInp = routedIf (route == RouteTextMenu)
@@ -114,11 +128,16 @@ runFrameEff unlift ctx frameInp ui = do
   -- the offset this frame renders at is the one virtualization must see.
   stepScrollGlides ctx (inputDeltaTime frameInp)
   updateScrollDrag ctx layerInp
-  resetDrawArena (ctxDrawArena ctx)
+  -- Read from the last frame's nodes, before the build resets them.
+  recordFocusKind ctx imeKeys
   resetUiBuild ctx True
   beginFrameModal ctx
+  -- An Escape the IME consumed must not also quit the app.
+  when (inputKeysNull (inputKeys frameInp) && pressedIn KeyEscape rawInp) $
+    markEscapeConsumed ctx
   writeIORef (ctxReleaseClickedId ctx) (WidgetId 0)
   armPointerPress ctx frameInp
+  focusBefore <- readIORef (ctxFocusId ctx)
   result0 <- unlift (runUi ctx frameInp ui)
   -- Pending click is one-shot. Clear before a mirror rebuild so toggles do not fire twice.
   writeIORef (ctxClickedId ctx) (WidgetId 0)
@@ -139,6 +158,7 @@ runFrameEff unlift ctx frameInp ui = do
   whenM (themeScopesChanged ctx) $ do
     damageFull ctx
     modifyIORef' (ctxMetricGen ctx) (+ 1)
+  settleViewTheme ctx themeBefore
   let
     size@(Size w h) = inputWindowSize frameInp
   layoutArena ctx size True
@@ -149,10 +169,10 @@ runFrameEff unlift ctx frameInp ui = do
   when (movedResize || movedWindow) $
     layoutArena ctx size False
   persistWindowPositions ctx
-  applyScrollOffsets ctx
+  applyScrollOffsets ctx size
   -- A press on a menu or dropdown leaves nothing active, whatever a release
   -- that never arrived left behind.
-  when (inputMousePressed frameInp && not (inputMousePressed layerInp)) $
+  when (pressedIn MouseLeft frameInp && not (pressedIn MouseLeft layerInp)) $
     writeIORef (ctxActiveId ctx) (WidgetId 0)
   targets <- pressTargets ctx layerInp
   finalizePointerPress ctx targets
@@ -165,8 +185,10 @@ runFrameEff unlift ctx frameInp ui = do
   openTextEditMenu ctx layerInp
   finalizeTextEditMenuPick ctx menuInp
   closeTextEditMenuOnEscape ctx frameInp
+  finalizeFocusRequest ctx
   constrainFocusToModal ctx
   finalizeTabFocus ctx frameInp
+  settleInputMethod ctx focusBefore
   finalizeSelectKeyboard ctx frameInp
   finalizeSelectPick ctx dropInp
   closeSelectOnOutsideClick ctx frameInp
@@ -175,11 +197,14 @@ runFrameEff unlift ctx frameInp ui = do
   -- measure moved.
   when (mirrorStoresChanged storeBuilt storeAfter) $ do
     layoutArena ctx size True
-    applyScrollOffsets ctx
-  updatePrevRects ctx
+    applyScrollOffsets ctx size
+  -- Layout is final, so the sensors record what the next view reads.
+  updateSensors ctx size
+  updatePrevRects ctx size
   refreshHover ctx frameInp
   refreshScrollBarHover ctx layerInp
   tickAnimations ctx (inputDeltaTime frameInp)
+  sweepHeld ctx
   pruneDrawOpCache ctx
   -- Dropdowns and the text-edit menu are not in the arena, so nothing in the
   -- damage pass sees their rows change under the pointer, their filter or
@@ -190,31 +215,109 @@ runFrameEff unlift ctx frameInp ui = do
   unless (null menuRects && null prevMenuRects) $ do
     mapM_ (damageRect ctx) (menuRects ++ prevMenuRects)
     modifyOverlay ctx (\os -> os {osPrevMenuRects = menuRects})
-  writeDamage ctx frameInp snap
-  -- Clip frames repaint the damaged region of the retained texture, which
-  -- preserves the other pixels. The region starts from the window backdrop,
-  -- inflated by one
-  -- logical pixel to cover the runner's outward pixel snap. Full-present
-  -- frames (fresh retain, forced full, continuous) paint everything.
-  paintFull <- readIORef (ctxPaintFull ctx)
-  beginLayer (ctxDrawArena ctx) LayerBackground
-  unless paintFull $ do
-    damage <- takeDamage ctx
-    paintDamageClip ctx damage =<< takeDamagePieces ctx
-  lowerShapes ctx
-  beginLayer (ctxDrawArena ctx) LayerOverlay
-  drawFloatingPanels ctx size
-  drawSelectOverlays ctx frameInp
-  drawTextEditMenuOverlays ctx frameInp
-  drawData <- finishDraw (ctxDrawArena ctx)
+  -- The layout overlay damages its own outlines, since the rect diffs below
+  -- miss rows and columns that moved.
+  explain <- getExplainLayout ctx
+  when explain (explainFrame ctx frameInp)
+  -- The draw this frame may reuse is decided before its damage: a frame
+  -- that may reuse it needs its damage worked out even for a host that does
+  -- not read it ('ctxDamageWanted').
+  reuse <- readIORef (ctxDrawReuse ctx)
+  key <- reuseKeyFor ctx reuse size explain
+  let !mayReuse = case (key, drLast reuse) of
+        (Just k, Just (lastKey, _)) -> k == lastKey
+        _ -> False
+  writeDamage ctx frameInp snap mayReuse
+  drawData <- paintOrReuse ctx frameInp size explain reuse key
   msgs <- drainMessages ctx
   dirtyAfterUi <- isDirty ctx
   pure (result, msgs, drawData, dirtyAfterUi)
 
--- | Reset what a view run builds: the node arena, and the container, id,
--- focus, hover, cursor-zone and drawing scopes. A second run after a mirror
--- store write (@newFrame@ 'False') keeps the store, animations and prev rects,
--- and the theme scopes it compares against.
+-- | The key the frame's draw would be kept under ('drawReuseKey'), or
+-- 'Nothing' when it can be neither kept nor reused: reuse is off, the frame
+-- paints only a clip, or the layout overlay is on.
+reuseKeyFor :: Context -> DrawReuse -> Size -> Bool -> IO (Maybe DrawReuseKey)
+reuseKeyFor ctx reuse size explain = do
+  paintFull <- readIORef (ctxPaintFull ctx)
+  if drOn reuse && paintFull && not explain
+    then drawReuseKey ctx size
+    else pure Nothing
+
+-- | The frame's draw data. A full frame with no damage whose 'DrawReuseKey'
+-- (@key@) matches the last full frame's hands paint what that frame did, so
+-- it takes that frame's draw data instead of painting again: an idle
+-- continuous frame paints nothing. Other frames paint, and a full frame
+-- keeps what it painted for the next. Paint that reads state nano-ui does
+-- not track must call 'damageFull' when that state changes.
+paintOrReuse :: Context -> Input -> Size -> Bool -> DrawReuse -> Maybe DrawReuseKey -> IO DrawData
+paintOrReuse ctx frameInp size explain reuse key = do
+  paintFull <- readIORef (ctxPaintFull ctx)
+  damage <- getsDamage ctx dsDamage
+  case (key, drLast reuse) of
+    (Just k, Just (lastKey, lastDraw)) | k == lastKey && damageIsEmpty damage -> pure lastDraw
+    _ -> do
+      drawData <- paintFrame ctx frameInp size explain paintFull
+      -- Nothing to keep now or before: leave the state as it is.
+      unless (isNothing key && isNothing (drLast reuse)) $
+        writeIORef (ctxDrawReuse ctx) $! reuse {drLast = (\k -> (k, drawData)) <$!> key}
+      pure drawData
+
+-- | What a full frame's draw follows besides its damage ('DrawReuseKey'), or
+-- 'Nothing' when it cannot be reused: paint builds a custom drawing on a
+-- node that is not a drawing (a pane grid's focus ring) afresh, and no
+-- damage says when it changes.
+drawReuseKey :: Context -> Size -> IO (Maybe DrawReuseKey)
+drawReuseKey ctx@Context {ctxNodeArena = na, ctxDrawArena = da} size = do
+  customs <- dcsCustomDrawings <$> readIORef (ctxDrawingCache ctx)
+  let onDrawing k rest =
+        lookupNodeByKey na k >>= \case
+          Just idx -> getNodeType na idx >>= \nt -> if nt == NodeDrawing then rest else pure False
+          Nothing -> rest
+  reusable <- IM.foldrWithKey (\k _ rest -> onDrawing k rest) (pure True) customs
+  if not reusable
+    then pure Nothing
+    else
+      fmap Just $
+        DrawReuseKey size
+          <$> getDrawSnapScale da
+          <*> readIORef (daSquareGeometry da)
+          <*> readIORef (daExternalText da)
+          <*> readIORef (ctxMetricGen ctx)
+          <*> readIORef (ctxFocusId ctx)
+          <*> readIORef (ctxFocusVisible ctx)
+          <*> readIORef (ctxHotId ctx)
+          <*> readIORef (ctxActiveId ctx)
+          <*> getPaintSignature na
+          <*> atlasToken (ctxImageAtlas ctx)
+
+-- | Paint the frame. Clip frames repaint the damaged region of the retained
+-- texture, which preserves the other pixels ('paintDamageClip'). Full-present
+-- frames (fresh retain, forced full, continuous) paint everything.
+paintFrame :: Context -> Input -> Size -> Bool -> Bool -> IO DrawData
+paintFrame ctx frameInp size explain paintFull = do
+  let da = ctxDrawArena ctx
+  resetDrawArena da
+  beginLayer da LayerBackground
+  unless paintFull $ do
+    damage <- takeDamage ctx
+    paintDamageClip ctx damage =<< takeDamagePieces ctx
+  lowerShapes ctx
+  -- Page outlines go above the page's scrollbars and below floating panels.
+  when explain $ do
+    beginLayer da LayerContent
+    paintExplainPage ctx
+  beginLayer da LayerOverlay
+  drawFloatingPanels ctx size explain
+  drawSelectOverlays ctx frameInp
+  drawTextEditMenuOverlays ctx frameInp
+  when explain (paintExplainHover ctx)
+  finishDraw da
+
+-- | Reset what a view run builds: the node arena, sensors, input method
+-- request, and the container, id, focus, hover, cursor-zone, drawing and
+-- layout-overlay scopes. A second run after a mirror store write
+-- (@newFrame@ 'False') keeps the store, animations, prev rects, and the
+-- theme scopes it compares against.
 resetUiBuild :: Context -> Bool -> IO ()
 resetUiBuild ctx newFrame = do
   beginThemeScopes ctx newFrame
@@ -222,21 +325,30 @@ resetUiBuild ctx newFrame = do
   writeIORef (ctxContainerStack ctx) []
   writeIORef (ctxIdContext ctx) initialIdContext
   writeIORef (ctxFocusablesCount ctx) 0
+  -- The view re-requests the input method each run while a widget takes text.
+  readIORef (ctxInputMethod ctx) >>= mapM_ (\_ -> writeIORef (ctxInputMethod ctx) Nothing)
   writeIORef (ctxHotId ctx) (WidgetId 0)
   writeIORef (ctxCursorZones ctx) []
+  writeIORef (ctxCursorRegions ctx) []
   resetDrawingScopeCache ctx
+  -- The layout overlay's scopes are ranges of the arena just emptied.
+  explain <- readIORef (ctxExplain ctx)
+  unless (null (esScopes explain)) $ writeIORef (ctxExplain ctx) explain {esScopes = []}
+  beginSensors ctx
 
 -- | Paint the floating panels over the page: windows with their title-bar
 -- separator, the modal backdrop and the modals, then popups. Each is a
 -- menu-style panel in its node's theme with its subtree clipped inside.
-drawFloatingPanels :: Context -> Size -> IO ()
-drawFloatingPanels ctx@Context {ctxNodeArena = na, ctxDrawArena = da} (Size ww wh) = do
+-- With @explain@, the layout overlay's outlines are drawn over each.
+drawFloatingPanels :: Context -> Size -> Bool -> IO ()
+drawFloatingPanels ctx@Context {ctxNodeArena = na, ctxDrawArena = da} (Size ww wh) explain = do
   let panels nt style after = forFloatingNodes_ na nt $ \idx -> do
         rect <- getNodeRect na idx
         theme <- nodeTheme ctx idx
         paintMenuPanel da theme (style theme) rect
         withClip da rect (walkChildren ctx idx)
         after theme idx rect
+        when explain (paintExplainLayer ctx idx)
       plain _ _ _ = pure ()
   panels NodeWindow overlayWindowStyle $ \theme idx (Rect x y w _) -> do
     pad <- getPadding na idx
@@ -254,6 +366,7 @@ drawFloatingPanels ctx@Context {ctxNodeArena = na, ctxDrawArena = da} (Size ww w
 -- menu-bar title, draw nothing over the pixels they covered, so without the
 -- backdrop a hover that just ended would stay in the retain texture. Damage
 -- in pieces paints a backdrop over each, and every command is cut to them.
+-- Each is inflated by a logical pixel to cover the runner's outward snap.
 paintDamageClip :: Context -> Damage -> [Rect] -> IO ()
 paintDamageClip _ DamageFull _ = pure ()
 paintDamageClip ctx@Context {ctxDrawArena = da} (DamageClip r) pieces = do
@@ -274,7 +387,9 @@ paintDamageClip ctx@Context {ctxDrawArena = da} (DamageClip r) pieces = do
 -- keys are folded here, so frames that reuse the whole layout never compute
 -- them. A cache taken under other font metrics measured text differently, so
 -- none of it is restored. Floating panels depend on state outside the arena
--- (window positions, popup anchors), so they are placed every time.
+-- (window positions, popup anchors), so each is placed after the solve, or,
+-- over a reused solve, given back what placing it there left when it goes
+-- where it went then ('lcPlaced').
 layoutArena :: Context -> Size -> Bool -> IO ()
 layoutArena ctx@Context {ctxNodeArena = na} size@(Size w h) check = do
   let ms = contextMeasurers ctx
@@ -302,8 +417,12 @@ layoutArena ctx@Context {ctxNodeArena = na} size@(Size w h) check = do
         let c' = c {lcMeasures = measures, lcMeasureHooks = hooks}
         writeIORef (ctxLayoutCache ctx) (Just (c', size, gen))
   floating <- floatingNodeCount na
-  when (floating > 0) $
-    placeFloatingNodes na ms w h (lookupWindowPos ctx) (lookupWindowSize ctx) (lookupPopupConfig ctx)
+  when (floating > 0) $ do
+    -- Placing over a solve is kept once a frame reuses it: content that
+    -- changes every frame solves every frame, and would keep what no frame
+    -- puts back.
+    placed <- if reused then fmap (\(c, _, _) -> lcPlaced c) <$> readIORef (ctxLayoutCache ctx) else pure Nothing
+    placeFloatingNodes na ms w h (lookupWindowPos ctx) (lookupWindowSize ctx) (lookupPopupConfig ctx) placed
 
 -- | Layout reuse is sound when the frame's layout inputs hash to what the
 -- cache captured, the same widgets register custom measures, and every custom

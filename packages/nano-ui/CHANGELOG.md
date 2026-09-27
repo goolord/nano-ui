@@ -17,10 +17,13 @@
   resting thumb, so an `inputStyle` or `windowStyle` that restyles one
   restyles both.
 - A widget drawn inside another is on top of it for hover and presses.
-- `FillPolygon` and `StrokePolyline` draw ops: a simple polygon, given with
-  its triangulation, and a polyline with mitered joins, both anti-aliased
-  along their outline only. A shape cut into `FillTriangle`s would show
-  faint seams where the triangles meet.
+- `FillPolygon`, `StrokePolyline`, `DrawTextAligned`, `PushClip` and
+  `PopClip` draw ops, which the canvas builds its paths, text and clips
+  from: a polygon with holes, given with its triangulation, and a polyline
+  with caps and joins, both anti-aliased along their outline only and in one
+  colour or a colour a point (`Shade`), text in a font placed by alignment,
+  and a clip round the ops between a push and its pop. Draw them through the
+  canvas rather than by hand.
 - What a widget that works out its own input needs, without
   `NanoUI.Context`: `lastRect`, where a widget was laid out last frame, which
   is the rect a list that scrolls itself hit-tests this frame's pointer
@@ -81,6 +84,8 @@
 - `NanoUI` exports `UiCursorKind`, which `widgetCursor` on a custom widget
   returns, so choosing its pointer no longer needs `NanoUI.Testing`.
 
+- `inlineBackground`: a colour painted behind a rich-text piece, such as the
+  tint behind inline code.
 - `NanoUIEs`, the effect row behind `NanoUI`. A widget configuration carrying
   its caller's row, such as `PaneGridConfig`, can now be named from an
   ordinary view without depending on `effectful`.
@@ -147,8 +152,11 @@
   `hyperlink target label`, drawn in the theme's link colour, underlined
   while hovered, with the pointer cursor. `restyle` adds modifiers to a
   piece, and `richTextWith` sets the paragraph's default font. Mixed sizes
-  share a baseline. A paragraph keeps its measured words between frames
-  while its pieces, fonts and colours stay the same.
+  share a baseline. A paragraph keeps its measured words, its lines and the
+  size it was last measured at between frames while its pieces, fonts and
+  colours stay the same: an unchanged paragraph is not broken into lines
+  again, even under a maximum width it does not fill, and while its width
+  changes it is broken once a frame to measure and once to draw.
 - `DrawTextStyled` draws text in a `TextFont` (size, variant, weight, style
   and decoration) from custom widgets.
 - Mixed-direction lines: `NanoUI.Bidi` splits a line into left-to-right and
@@ -227,11 +235,14 @@
   and `pinnedSide` the side test it turns on.
 - An open window, modal, popup or tooltip no longer turns off the reuse of
   the last frame's layout. The layout is cached as solved, before the floating
-  panels are placed, and a frame that reuses it places them again. A window
-  dragged or resized places the panels again over the frame's solve instead of
-  solving the whole layout a second time. Over 5000 rows, a frame with a window
-  open went from 15.8 to 11.1 ms and one dragging it from 20 to 11.2 ms, where
-  the page alone takes 10.6.
+  panels are placed, and a frame that reuses it gives each panel back what
+  placing it there left, laying out again only a panel that moved: dragged,
+  resized, or following its anchor. A window dragged or resized places the
+  panels again over the frame's solve instead of solving the whole layout a
+  second time. Over 5000 rows, a frame with a window open went from 15.8 to
+  11.1 ms and one dragging it from 20 to 11.2 ms, where the page alone takes
+  10.6. A still frame with a 300-row window open takes about 0.53 ms
+  instead of 0.7 and allocates 475 KB instead of 732 KB.
 - Damage in places far apart repaints as up to four disjoint pieces instead
   of their bounding box. Two labels changing in opposite corners no longer
   repaint the whole window: paint skips nodes that meet no piece, each piece
@@ -240,9 +251,253 @@
   window. `DamageClip` is still the bounding box; `takeDamagePieces` in
   `NanoUI.Testing` gives the pieces, which a backend that draws text outside
   the draw commands must clip it to, and `damagePieces` is how they are made.
+- `NanoUI.Path`, for qualified import: paths of lines, curves, arcs and
+  shapes (`moveTo`, `cubicTo`, `arc`, `circle`, `roundedRectCorners` with a
+  radius per corner, and more), which a canvas fills with `drawPath` and
+  strokes with `drawStrokePath`. `arcTo` is SVG's `A` command, not HTML
+  canvas's `arcTo`.
+- Fills by a fill rule: `drawPathWith P.EvenOdd` or `P.NonZero` fills a path
+  whose subpaths nest, cutting a hole where the rule leaves one unfilled, so
+  a ring, a glyph's counter or a frame is one path instead of a shape and
+  its hole painted over in the background colour. Subpaths that cross each
+  other fill on their own, and a subpath that crosses itself may fill only
+  in part.
+- One stroke value: `drawStrokePathWith (P.stroke w) {..}` with a
+  `LineCap` (`ButtCap`, `SquareCap`, `RoundCap`), a `LineJoin`
+  (`MiterJoin`, `RoundJoin`, `BevelJoin`), a miter limit (4 by default, as
+  SVG's) past which a miter is beveled, and a dash pattern with an offset.
+  Each dash is capped, a zero-length dash with round caps is a dot, and a
+  pattern that would cut a subpath into more than 4096 dashes draws it
+  solid. Round caps and joins are part of the line, so a translucent line
+  is even all along.
+- Paints: `P.Solid` and `P.Linear`, a linear gradient with colour stops, for
+  fills and strokes. A gradient is exact to its stops (each point of the
+  fill carries its colour, and the fill is cut where the gradient bends),
+  and turns and scales with a transform; a stroke takes the colour along its
+  centre line.
+- `withTransform` draws a canvas block through a `Transform` (`translate`,
+  `rotate`, `scale`, `affine`, composed with `<>`, undone with `invert`),
+  and `runCanvasFor` runs a custom widget's canvas with its curves flattened
+  for its display. A four-corner gradient turns with its rect, and text
+  scales its font with the transform.
+- `withClip` clips a canvas block to a rect, inside the widget's own clip;
+  under a turn, to the box round the turned rect.
+- `drawTextWith` draws canvas text in a `TextFont` of its own, placed on a
+  point by alignment as `drawText` places it.
+- `canvasConfigured` and `CanvasConfig`: a canvas with a content key, a
+  cursor and pointer tracking, and `drawContext`, with which a canvas block
+  reads its widget's hover, press and focus state, theme and font.
+- `NanoUI.Internal.Canvas` holds the canvas's representation (`CanvasM`,
+  `CanvasEnv`, `emitOp`, `emitWith`, `runCanvasScaled`) for tools that build
+  ops of their own; `NanoUI.Widgets.Custom` exports the API.
+- `Flow`, a container's way of placing its children along its `Direction`
+  (`layoutFlow`): in one `Line`, in lines that `Wrap`, or `Layered` over one
+  another. `layers` and `layersWith` layer their children in one box, and the
+  `layered` modifier makes a panel or a card do so. The `wrap` modifier flows
+  a row onto new lines, or a column into new columns, `lineGap` apart, and
+  `lineAlign` places each line at the start, centre (`LinesCenter`) or end
+  (`LinesEnd`) of the main axis. `pinAt x y` places a node at an offset over
+  its siblings, from where its alignment puts it: `pinAt (-16) (-16) .
+  alignEnd . alignBottom` is a floating button 16 in from the bottom-right
+  corner, and `pinAt 0 0 . grow` an overlay that covers its parent without
+  sizing it.
+- `aspect r`: a fit height is the width the node is given over `r`, so
+  `fillW . aspect (16 / 9)` keeps 16:9 at any width. `fixedAspectW` and
+  `fixedAspectH` are its fixed cases.
+- `useDrag2DOn` and `useWheelDeltaOn`, the drag and wheel hooks of a custom
+  widget fed its `Response`: a drag starts with a press on the widget and a
+  wheel turns it while it is hovered, so neither acts through something drawn
+  over the widget, on the part a scroller clips off, or while it is disabled.
+  `knob` uses them. `useDrag2D` and `useWheelDelta`, which test a rect, are
+  deprecated.
+- `pointer`, a layout modifier for what a node drawn over others by layers
+  or a pin does with the pointer: by default (`PointerAuto`) a control on top
+  takes it and anything else lets it through to the controls beneath;
+  `PointerBlock` makes a node, such as a card or a scrim, take it over its
+  whole box, so nothing beneath is hovered, pressed, focused or scrolled, and
+  `PointerPass` makes a node and all inside it let it through. A label, an
+  image or a container with an id under a control on top is covered like a
+  control, taking no hover or tooltip there.
+- `imageConfigured` and `imageConfigured'` take an `ImageConfig`: a layout
+  modifier, a `ContentFit` like CSS's `object-fit`, an alignment, a crop to
+  part of the image in its pixels (`icCrop`), a zoom about the fitted
+  image's centre (`icScale`), an opacity and a `Rotation`. An axis the
+  layout leaves unsized takes the image's own size, and a fit height follows
+  the width in the image's shape (`aspect`). It is the same node as `image`,
+  drawn by paint, not a custom widget: a frame measures and hashes nothing
+  for it. `svgIconConfigured` draws an SVG icon with the same options, and
+  `fitRect` is the placement a fit makes, for a canvas.
+- `drawImageWith` draws an `ImageDraw` on a canvas: a rect, an image, the
+  part of it in UVs, a turn about the rect's centre, a tint and an opacity.
+  `drawImage` and `drawImageUV` draw through it. The `DrawImage` op draws
+  any image, turned or not; `DrawImageRect` is it unturned, as a pattern.
+- `useImageRgba` registers an image once per key and lets it go when the
+  view stops calling it, as `useTask` does a job; the image atlas gives the
+  room of an image let go to the next image that fits it.
+- Focus from code: `requestFocus` gives a widget the keyboard by its `respId`
+  as Tab would, or by `currentId` just before declaring it; `focusNext` and
+  `focusPrevious` move it on as Tab and Shift+Tab do; `clearFocus` takes it
+  away (as `requestFocus (WidgetId 0)` does), and `isFocused` says whether a
+  widget has it. Each moves the keyboard at the end of the frame, as Tab or
+  a click would, where `releaseFocus` takes it off one widget at once and
+  changes nothing else. A command run on a text field from code
+  (`runTextCommand`) focuses it the same way, so a disabled field or one
+  behind a modal refuses it, and the field shows the focus ring.
+- `tooltipConfigured` and `tooltipWidgetConfigured` take a `TooltipConfig`:
+  the hover delay (`tooltipDelay`), the grace after another tooltip
+  (`tooltipGrace`), the placement (`tooltipPlacement`) and the space between
+  the tooltip and its target (`tooltipGap`). `PlacementAtCursor` makes a
+  tooltip follow the pointer, and opens a popup or context menu at its
+  anchor point.
+- Visibility sensors, for loading what scrolls into view: `sensor`,
+  `sensorWith`, `sensorConfigured` and `useVisibility` report a `Visibility`
+  (`visVisible`, `visRect`, the part on screen, `visBounds`, the whole
+  widget, `becameVisible`, `becameHidden`). A `SensorConfig` gives an
+  anticipate margin (`sensorAnticipate`) and a delay (`sensorDelay`), the
+  time a widget must stay in view before it counts as visible, which the
+  sensor wakes the loop for rather than drawing frames meanwhile.
+- More cursor shapes from CSS's set, from `UiCursorNotAllowed` to the one-way
+  resize arrows, and `UiCursorHidden`, which the SDL and RGFW backends show
+  by hiding the pointer. `withCursorShape` shows a `UiCursorKind` over part of
+  a view where its widgets pick none; `UiCursorDefault` from a widget picks
+  nothing, and from a scope picks the arrow.
+- A layout overlay, like iced's `explain`: `explainLayout` outlines every
+  layout node and highlights the one under the pointer, which `explainedNode`
+  describes: its widget id, to match a `respId`, rect and padding, sizing
+  and limits, gap, direction, `Flow`, pin and `PointerMode`, as fields of
+  `ExplainedNode`. `explainingLayout` says whether it is on, and
+  `explainScope` narrows it to the nodes a part of the view adds.
+- Every key as a `Key`: `KeyF n`, paging, Insert, Space, the lock and menu
+  keys, and a `KeyChar` of what a typing key types unmodified. `modSuper`,
+  `modPrimary` for the platform's command key (Command on macOS, else Ctrl),
+  `modJump` for its word-motion key (Option on macOS, else Ctrl) and
+  `modMacCommand` for Command on macOS alone.
+  A view reads keys with `keyPressed`, `keyReleased` and `keyHeld`. Every key
+  auto-repeats while held, each repeat a press in `inputKeys`, and
+  `inputKeysNew` has the presses that are not repeats: holding Enter breaks
+  a text area's line again and again, while Enter and Space activate a
+  focused button, Enter submits a field and Escape closes only as they go
+  down. `keyPressedOnce` hears that press alone. Space activates by its key,
+  not by the space it types.
+- `pressedIn`, `pressedOnceIn`, `releasedIn` and `heldIn` (the `Pressable`
+  class) read a key or a mouse button in an `Input` alike, as `shortcutIn`
+  reads a chord: `sdlAppShouldQuit = pressedOnceIn KeyEscape`.
+- Shortcuts: `shortcut (ctrl <> key 's')` is `True` once on the frame the
+  chord is pressed, and again on each auto-repeat, unless a modal,
+  `disabledWhen` or the focused widget takes it; `shortcutOnce` is not
+  `True` on the repeats, for a chord that toggles. The key listeners hear
+  only the keys the focused widget leaves too, as iced's `keyboard::listen`
+  hears what no widget captured: `keyPressed KeyDelete` is `False` while a
+  focused field deletes with it. A focused control takes the keys it acts
+  on alone or with Shift, so a chord of them is a shortcut's: a button or
+  a checkbox Enter and Space, and a slider, select, radio group, tree or
+  pane grid the arrows, Home, End and the paging keys as well.
+  `widgetKeys` on a custom widget says which it takes (`KeyClaim`): those
+  of a control that navigates by default, a button's, a multi-line text
+  field's, or every key, for a terminal or an editor with chords of its
+  own. The new module `NanoUI.Shortcut` has chords: a `Shortcut` is
+  modifiers (`ctrl`, `shift`, `alt`, `super`, `cmdOrCtrl`) and a `key` put
+  together with `<>`, with `shortcutLabel` and `shortcutIn`, and
+  `parseShortcut` reads one written as xmonad's EZConfig writes it (`C-s`,
+  `M-S-p`, `A-<Enter>`, `<F5>`). `Modifiers` is a `Monoid`.
+- Input-method composition (`inputComposition`): the focused text field or
+  text area draws it at its caret until it is committed, and the frame drops
+  the keys meanwhile, so no shortcut fires. `useInputMethod`, iced's
+  `request_input_method`, lets a widget of the app's own do the same: called
+  every frame from the widget with the keyboard, with its caret and an
+  `InputPurpose` (`InputNormal`, `InputSecure`, `InputNumeric`), it answers
+  the composition to draw; the text fields ask this way too, a password
+  field for `InputSecure` and a numeric one for `InputNumeric`.
+  `textInputArea` says whether a widget takes text, where the input
+  method's candidate window goes and what the widget takes;
+  `NanoUI.Backend` exports it with `TextInputArea` and `getFocusId`.
+- Every mouse button: `MouseButton` has `MouseMiddle`, the side buttons
+  `MouseBack` and `MouseForward`, and `MouseOther n` for any other, which
+  the SDL and RGFW backends report by number (`mouseButtonNumber`). Each is
+  held, pressed and released like the left one. `respHeldWith b` and
+  `respClickedWith b` say whether button `b` went down on a widget and is
+  held, or clicked it (a middle click closes a closable tab), and
+  `mousePressed`, `mouseReleased` and `mouseHeld` hear a button anywhere on
+  the view's layer, quiet behind a modal and in `disabledWhen`, as
+  `keyPressed` is.
+- `mouseArea`, iced's `mouse_area`: a column around part of a view with a
+  `Response` of its own, hovered while the pointer is on it or anything in
+  it, and held or clicked with any button (`respHeldWith`,
+  `respClickedWith`), but for a click a widget inside takes. Nothing inside
+  it covers it, so what it shows while hovered stays shown.
+- The pointer leaving the window moves it off every widget
+  (`applyPointerLeave`, on SDL's window-leave and RGFW's mouse-leave
+  events), so nothing stays hovered.
+- Tones: `Tone` (`Accent`, `Muted`, `Success`, `Warning`, `Danger`) names a
+  status colour, `toneColor` gives a theme's, `fontTone` colours text in any
+  face (`fontMono . fontTone Warning`), and `tone` fills buttons with it.
+  `themeSuccess`, `themeWarning` and `themeDanger` are the theme's, each
+  taken toward white or black until it reads on the window at 4.5:1.
+  `fontMuted` and `fontDanger` set the tone rather than the face, and
+  `primary`, `destructive`, `success` and the new `warning` are `tone`, so a
+  `danger` label and a `destructive` button share the danger colour. Text in
+  a tone keeps the base font's metrics.
+- Following the system's light or dark setting: the theme is a function of
+  the `Appearance`, as `lightDark light dark` picks one, handed to
+  `followSystemTheme ctx`, or picked by a view every frame with
+  `setUiTheme . lightDark light dark =<< systemAppearance`.
+  `defaultLightTheme` pairs with `defaultTheme` (`defaultThemeFor`), and
+  `lightDark` picks the dark theme when the system cannot tell, as the
+  default theme is dark. `systemAppearance` reads the setting, and
+  `themeAppearance` says whether a theme is light or dark.
+- The native window, the same on every backend. `WindowSettings`
+  (`defaultWindowSettings`) is what a window opens with, sized in layout
+  units: its title, size, position, size limits, icon, whether it resizes,
+  its `WindowMode` (windowed, fullscreen or hidden), transparency, opacity,
+  and whether a close request ends the session (`wsExitOnCloseRequest`).
+  `askWindow` reads the `WindowState`: size, scale, position, focus,
+  maximized, minimized, fullscreen, and `winCloseRequested`, the close
+  request a window that does not close by itself hands its view. From a
+  view, setters that act only on a change (`setWindowTitleUi`,
+  `setWindowIconUi`, `setWindowMinSizeUi`, `setWindowMaxSizeUi`,
+  `setWindowOpacityUi`, `setWindowModeUi`), commands that act on every call
+  (`moveWindowUi`, `centerWindowUi`, `resizeWindowUi`, `minimizeWindowUi`,
+  `maximizeWindowUi`, `restoreWindowUi`, `toggleMaximizedUi`), and `quitUi`,
+  which ends the session once the frame is drawn. `requestScreenshot` hands
+  an action a `Screenshot`, the frame's `RgbaPixels` and its scale;
+  `askScreenshot` gives another thread an action that waits for one, and
+  `useScreenshot` takes one per key. `RgbaPixels` come from `rgbaPixels`,
+  which checks that the bytes fit the size.
+- Background work: `useTaskStatus` runs an action on its own thread and says
+  whether it is running, done, or failed with the exception it threw, which
+  wakes the loop too; while a new key's job runs it keeps the last key's
+  result. `useTask` returns the latest result, so a list of results does not
+  flicker empty as its key changes. `useStream` runs a producer that updates
+  the hook's own state and wakes the loop, for a stream that needs no
+  `IORef` of the app's. A job is killed once the view stops calling its
+  hook. `askWake` gives the view an action any thread may call to run it
+  again.
+- `NanoUI.Backend` has what a backend needs for the above: `applyKey`,
+  `releaseAllKeys`, which the SDL and RGFW backends call as their window
+  loses the keyboard, so no key stays held, `keypadKey`, `modifiersFromBits`,
+  `noModifiers`,
+  `applyComposition`, `cursorFallback`, `setExplainLayout`,
+  `setSystemAppearance`, `WindowHost` with `defaultWindowHost` (every field
+  a no-op, to build a host from by record update), `installWindowHost`,
+  which also applies the settings a window does not open with,
+  `reportWindowState`, `answerScreenshots`, `requestWindowClose`,
+  `clearWindowClose` and `quitRequested` for a loop of the backend's own,
+  `setWakeLoop` and `cancelTasks`. `runSessionLoop` ends the session when a
+  view calls `quitUi`, and hands a close request to the view when the
+  window's settings say to.
+- `NanoUI.Testing.Harness` has `chordInp`, `keyUpInp`, `keyRepeatInp`,
+  `clickPairWith`, `pressWith` and `releaseWith` for any mouse button, and
+  `newWakeSignal` for a test to wait on a job's wake.
+- `uiFontSize`, the size text takes when its layout sets none, and
+  `withFontSize` in `NanoUI.Testing`; the SDL backend reports its base size.
+  `drawCheckbox` and `checkboxBoxSize` draw nano-ui's checkbox on a canvas.
 
 ### Changed
 
+- `widgetCursor` takes the widget's rect and the pointer as well as its draw
+  context, so parts of a custom widget can show different shapes, and it is
+  asked through a drag that went down on the widget wherever the pointer
+  goes: a `knob` keeps its resize arrows while dragged off it.
 - Builds with GHC 9.10 through 9.14 (`base >=4.20 && <4.23`).
 - `comboBox` filters its options only when the options list or the field
   text changes, rather than on every frame, open or closed. It also measures
@@ -299,9 +554,15 @@
   and its children all came out their captured sizes, instead of wrapping
   its text again, so a frame that changed one label re-measures that label's
   branch only. Drawing widgets and scroll containers always measure fresh,
-  and a font-metric change restores nothing. Position and quantization run
-  over every node, so a partially measured solve computes exactly what a
-  full one would.
+  and a font-metric change restores nothing. The position pass then puts
+  back, instead of placing again, each such subtree without a drawing in it
+  that is offered the rect the captured solve offered it, so that frame
+  places the label's branch and its ancestors' direct children only;
+  quantization runs over every node, so the result is what a full solve
+  computes. The grow profile (a label that changes every frame over 60
+  rows of flex columns) allocates 5.0 MB a frame instead of 8.0 and takes
+  about 4.5 ms instead of 5.3; a frame where everything moves costs about
+  2% more.
 - Whole-layout reuse is validated by a hash over the frame's layout inputs
   instead of comparing every node's columns: the arena folds each node's
   constraints, links, text, options, widget id, style code, and grid fields
@@ -329,10 +590,12 @@
 - `NanoUI.Monad` and `NanoUI.Input` keep what a view or custom widget uses.
   `runUi`, `runNanoUI`, `askContext`, `withContext`, `withIdFrame`,
   `burstNextIds`, `FrameMsg`, `decodeMessages`, `reduceMessages`,
-  `reduceUpdates`, `stripInteractionInput`, `withoutPointer`,
-  `isHardQuitInput` and `splitFrame` moved to `NanoUI.Internal.Monad` and
+  `reduceUpdates`, `stripInteractionInput`, `withoutPointer` and
+  `isHardQuitInput` moved to `NanoUI.Internal.Monad` and
   `NanoUI.Internal.Input`; `NanoUI.Backend` and `NanoUI.Testing` still export
-  the ones they did.
+  the ones they did. `splitFrame` gave way to `NanoUI.Internal.Input`'s
+  `takeFrame`, which folds a batch of events into a frame as far as the
+  frame may take them.
 - `NanoUI.Widgets.Custom`, `.TextArea`, `.TextDocument`, `.TextEditor` and
   `.TextField` no longer export the helpers the frame uses
   (`mkCustomDrawContext`, `loadTextAreaState`, `loadTextAreaStateWithBuffer`,
@@ -349,9 +612,8 @@
   `sfc`.
 - `NanoUI` no longer exports the backend surface; import `NanoUI.Backend` for
   it. The names that moved are `runUi`, `runNanoUI`; `emptyInput`,
-  `appendInputKey`, `appendDropEvent`, `emptyDropEvents`, `emptyInputKeys`,
-  `inputKeysFromList`, `inputKeysNull`, `foldInputKeys`, `inputInteracted`,
-  `inputPointerHeld`; `FontBackend`, `prepareFontMetrics`,
+  `appendInputKey`, `appendDropEvent`, `inputKeysFromList`, `inputKeysNull`,
+  `foldInputKeys`, `inputInteracted`, `inputPointerHeld`; `FontBackend`, `prepareFontMetrics`,
   `prepareFontMetricsMany`, `scaleFontMetrics`, `monospaceMetrics`,
   `uiFontMetrics`, `measureTextIO`, `lineWidthIO`, `drawShaped`,
   `drawGlyph`, `drawTextBox`, `GlyphQuad`, `ShapedText`, `ShapedGlyphs`, and
@@ -485,10 +747,25 @@
   `takeDebugLive`.
 - Lines are drawn as one anti-aliased strip with round caps instead of a
   capsule per segment.
-- Tables encode each row once and sort row indices with a merge sort, combo
-  boxes filter their options only while focused, pane grid dividers and
-  overlays are keyed drawings, and unchanged animations are not rewritten
-  to the store, cutting per-frame work for those widgets.
+- Tables encode each row once and sort row indices with a merge sort that
+  copies runs already in order, combo boxes filter their options only while
+  focused, pane grid dividers and overlays are keyed drawings, and unchanged
+  animations are not rewritten to the store, cutting per-frame work for
+  those widgets.
+- A table given its rows again every frame, a few of them changed, encodes
+  only rows that are not last frame's objects, measures only cells whose
+  text changed, and sorts only when a sort key changed. With 2000 rows and
+  one changing each frame, a frame allocates 0.48 MB instead of 1.97 MB and
+  takes about 0.23 ms instead of 1.3 ms. With every row's age changing in
+  place, only those cells are measured: 1.15 ms instead of 1.49 ms. Rows
+  that are not last frame's objects are compared with the text last shown
+  at their index, which does not pay when nearly every index shows another
+  row, as in a window that moves by one row each frame: such a frame takes
+  about as long as before (1.19 ms against 1.21 ms with 2000 rows) and
+  allocates 1.19 MB instead of 1.79 MB.
+- A tree keeps its visible rows while it is given the same item list and
+  its expansion is unchanged, instead of listing them every frame: a
+  1000-row tree in a scroller allocates 783 KB a frame instead of 989 KB.
 - Damage is gathered into one running union instead of rect lists, paint
   keeps the opaque floating panels it culls against in a flat array built
   only when a frame has floating panels, and the node arena tracks the
@@ -496,9 +773,126 @@
   On the headless profiler, 3000 frames of a button grid with a pointer
   moving over it and a floating window allocate 1.46 GB instead of 1.64 GB,
   or 1.38 GB instead of 1.48 GB with a modal.
+- Each frame's damage bookkeeping compares a widget with what the last
+  frame recorded at the same node instead of looking it up in five maps,
+  and no longer diffs maps and stores the frame left unchanged. With the
+  by-index rects below, a frame of 3000 rows under the pointer takes about
+  7 ms instead of 15 ms and allocates 5.8 MB instead of 6.5 MB; a scrolled
+  one about 18 ms instead of 27 ms. A host that repaints the whole window every frame can clear
+  `ctxDamageWanted` (in `NanoUI.Internal.Context`), as the SDL runner does
+  for frames it presents in full, and the frame skips the damage diff,
+  unless it may reuse the last frame's draw data (below).
+- The node index by widget id is an unboxed table, so indexing and looking
+  up a widget allocate nothing, and `nano-ui` no longer depends on
+  `hashtables`.
+- Tooltips open once the pointer has rested on the target for half a second
+  (`defaultTooltipConfig`), or at once just after another, and shut while a
+  button is held. `tooltipAt PlacementAtCursor` follows the pointer. A
+  disabled widget has its tooltip too, where the pointer is on it with
+  nothing drawn over it, so it can say why it is off.
+- `menuItemShortcut` is also `True` when its chord is pressed while its menu
+  is open, and shows the chord as its `shortcutLabel`.
+- A frame keeps the order of what was typed. `runSessionLoop` ends a frame
+  after a command key (a named key but Space, or a chord, as
+  `NanoUI.Internal.Input.isCommandKey` says) when text, another key or a
+  change of modifiers comes next, so a frame's text comes before its one
+  command key and its modifiers are those the key went down with: "ls" and
+  Enter typed within one frame reach a text field or a terminal as "ls" and
+  then Enter, and Ctrl+S released within the frame still fires its
+  shortcut. A burst of typing takes a frame more for each such key, and
+  steady typing or a key's auto-repeats none. The Ctrl+C quit reads the
+  frame, with no checks of its own for a Ctrl let go later.
+- A key chord is a key, not typed text: Ctrl+C is `KeyChar 'c'` with `modCtrl`
+  in `inputKeys` and nothing in `inputChars`, so look for it with `shortcut`
+  or in `inputKeys`. Text fields edit with iced's bindings: the command key
+  (Command on macOS, else Ctrl) with A, C, X, V, Z and Y selects, copies,
+  cuts, pastes, undoes and redoes, and the word key (Option on macOS, else
+  Ctrl; no longer Alt as well) moves and deletes by word. On macOS, Command
+  moves and deletes to a line's ends, and Ctrl alone moves and deletes as in
+  Emacs (A, E, B, F, H, D, K and U); elsewhere Ctrl+Shift with Backspace or
+  Delete deletes to a line's ends, and Ctrl with K, U or E does nothing in a
+  text area, where it deleted or moved as on macOS.
+- `Key` is `Ord` and no longer `Enum`, and `Modifiers` is `Ord`.
+- `Input` holds the mouse buttons as sets, `inputButtonsHeld`,
+  `inputButtonsPressed` and `inputButtonsReleased` (`MouseButtons`, read with
+  `heldIn`, `pressedIn` and `releasedIn`), in place of a field
+  for each button and edge; an `Input` is 136 bytes rather than 208. Fold
+  events in with `applyMouseButton`. `inputMouseDown`, `inputMousePressed`,
+  `inputMouseReleased` and their `Right` forms remain as deprecated functions.
+  A `Response` keeps the buttons held on the widget and those that clicked it
+  the same way (`rawRespHeld`, `rawRespClickedWith`), 64 bytes rather than 96;
+  `respPressed`, `respRightPressed` and `respRightClicked` read them.
+- A right or middle button held is a widget's only when it went down on the
+  widget: dragged across others, it no longer reports each as pressed.
+- A double or triple click counts presses of one button: a left click
+  after a right one starts over.
+- `Input`, `Modifiers` (`modSuper`), `MouseButton`, `Response`, `Layout`,
+  `Theme`, `FontVariant`, `DrawOp` and `UiCursorKind` have new fields or
+  constructors, for the additions above.
+- `DrawImageRect` is a pattern for a `DrawImage` at angle 0: it builds an
+  image op and matches an unturned one as before, and a turned image
+  matches `DrawImage` only.
+- `setTheme` and `setUiTheme` set a fixed theme in place of one following
+  the system's appearance. A view's `setUiTheme` repaints once the view is
+  built, and only if the frame ends with another theme than it began with,
+  so a view that sets its theme every frame, even two themes a frame, does
+  not repaint the window every frame.
+- `FontMuted` and `FontDanger` draw in the regular face with the base
+  font's metrics, as their tones.
+- `runCanvas` is deprecated: it flattens curves for a guessed display
+  scale. Use `runCanvasFor` with the widget's draw context, or `canvas`.
+- A wrapped label, and text in a drawing or rich text, draws only the lines
+  near its clip, so a label or paragraph taller than its scroller costs the
+  lines in view. One label of 1000 lines in a scroll area paints in 0.03 ms
+  instead of 1.3 ms (2000 lines: 0.03 ms instead of 42 ms, which also
+  overflowed the SDL text caches), and a 2000-sentence rich text in 2.4 ms
+  instead of 48 ms.
+- Rounded fills and borders allocate about 450 bytes less per bordered
+  widget and frame, with the same geometry: their corner loops are workers
+  of their own instead of closures. The headless profiler's button grid
+  allocates 415 MB instead of 578 MB over 3000 frames, and the SDL demo's
+  frame 140 KB instead of 157 KB. `NanoUI.Internal.Draw.Arena` exports
+  `reserveRaw` and `commitRaw` for such emitters.
+- An image node keeps its image id as a number (`setImageId`,
+  `getImageId` in `NanoUI.Internal.Layout.Arena`) instead of as its text
+  in decimal, which the view formatted and paint parsed back every frame.
+  Paint finds an image's size and place in the atlas with one lookup, and
+  draws an unrotated look without building a draw record; damage compares
+  the id and look (`ImagePaint`, in `pfImages` in place of `pfLooks`). A
+  frame of 600 images allocates 256 KB instead of 692 KB, or 842 KB instead
+  of 1.8 MB with a look, taking 0.55 ms instead of 0.9 ms.
+- A full frame no longer draws a page scroller's window-coloured backdrop
+  over the runner's clear to the same colour, one blended fill of the whole
+  window each continuous frame (1 Mpx at 1280x800, 4 Mpx at 2x). Clip
+  frames still draw it, and so does a full frame where something is drawn
+  under the scroller, a scope gives it another window colour, or the colour
+  is translucent. A backend that sets `ctxPaintFull` clears the target to
+  the frame's `themeWindow` first, as the SDL and RGFW runners do. Under
+  software GL the SDL demo presents 100 frames a second instead of 77.
+- A full frame (every continuous frame) with no damage, whose view put the
+  same into the arena as the last, returns the last frame's draw data
+  instead of painting again. The arena keeps a signature of the paint state
+  its layout signature leaves out, mixed as it is written: node values, font
+  colours, box, image and drawing style indices, and image ids and looks
+  (`getPaintSignature`). Widget state, hover, focus, scrolling, animations
+  and themes repaint through damage, as they do on retained frames. A
+  frame whose host does not read damage (`ctxDamageWanted`) still works it
+  out when its key matches the last draw's and its recorded rects, texts
+  and images are unchanged, so continuous sessions reuse too; it skips the
+  diff otherwise. An idle full frame of the SDL demo's Controls tab runs
+  in 0.11 ms instead of 0.29 ms and allocates 64 KB instead of 129 KB. `setDrawReuse` (in
+  `NanoUI.Testing`) turns it off, as the headless and SDL profilers and
+  `nano-ui-sdl-bench` do to keep timing paint. The node value the solver
+  computes is set with `setSolvedValue`.
+- A widget declared where it was last frame reads last frame's rect by its
+  node index, from the damage pass's per-node record, instead of looking
+  its id up in a map, which missed the cache in large views. The API is
+  unchanged.
 
 ### Fixed
 
+- The wheel goes to the scroller drawn on top at the pointer: a scroller
+  pinned over another takes it even when declared before the one beneath.
 - A text field focused by Tab no longer has its whole text selected after a
   press elsewhere.
 - A text field with its own font size puts its caret, selection and
@@ -651,6 +1045,30 @@
   within 16 px of a corner it resizes both ways. Before, only the right
   padding and a 6 px bottom strip resized from inside. The window's controls
   and its body's scrollbar still take their own presses.
+- A widget that shrinks under the pointer repaints the strip it vacated, and
+  content overflowing the root takes the pointer where it is drawn.
+- A widget that goes away next to a table with frozen columns repaints where
+  it was.
+- Content of a scroller wholly outside the viewport around it, such as an
+  inner scroller below the fold, takes no pointer.
+- A panel or a scroller that changes size repaints where it was and where it
+  is.
+- A row or column too short for its children takes the room it lacks from
+  the others that shrink once one reaches its minimum, instead of overflowing.
+- A canvas's `drawImage` and `drawImageUV`, and a drawing's `DrawImageRect`,
+  draw the registered image rather than a rectangle in the tint colour.
+- A tooltip on a label or a container (`label'`, `withTooltip`) starts its
+  wait as the pointer comes onto the target and shuts as it leaves, rather
+  than at the next unrelated event.
+- A wrapped label keeps its indent and the runs of spaces inside its lines;
+  a line ends at a run of spaces, which it drops. A label wider than its box
+  used to have every run of spaces cut to one.
+- Text as wide as its content in a column, such as a right-aligned label, is
+  aligned at the width it wraps to there rather than its one-line width, which
+  could put it past the column's left edge. Rich text places each line as its
+  paragraph's horizontal alignment says.
+- Past 4096 paragraphs, rich text keeps the paragraphs drawn lately instead of
+  emptying its layout cache on every frame.
 
 ### Removed
 
@@ -687,6 +1105,13 @@
   `textAreaBarLanes` from `NanoUI.Frame.TextEdit` (which exports
   `textAreaBarLane` and `textAreaLineHeight`), and `resizeFromEdge` and `windowResizeEdgeAt`
   from `NanoUI.Frame.Window`.
+- `keyed`, an alias of `withKey`.
+- The `x'` and `xWith` forms of `knob`, `toggleSwitch`, `circularProgress`,
+  `spinner`, `progressBar` and `sparkline`. Each keeps `x`, at its default
+  size, and `xWith'`, which takes a layout modifier and a size and returns
+  the `Response` too.
+- `emptyInputKeys` and `emptyDropEvents` from `NanoUI.Backend` and
+  `NanoUI.Input`; use `mempty`.
 
 ## 0.1.0.0
 

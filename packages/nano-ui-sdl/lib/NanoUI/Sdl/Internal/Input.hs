@@ -1,33 +1,43 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE NoFieldSelectors #-}
 
--- | SDL3 event polling and waiting, and translation of SDL events into
--- 'NanoUI.Input.Input'.
+-- | SDL3 event polling and waiting, translation of SDL events into
+-- 'NanoUI.Input.Input', and syncing SDL's text input with the focused text
+-- field.
 module NanoUI.Sdl.Internal.Input
   ( SdlEvent (..)
   , pollEvents
   , waitEvent
   , applyEvent
   , isButtonEdge
+  , sdlKey
+  , TextInputSync
+  , newTextInputSync
+  , syncTextInput
   ) where
 
-import Control.Monad (mfilter)
+import Control.Monad (mfilter, void, when)
 import Data.Bits ((.&.))
+import Data.Char (chr, isPrint, toLower)
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.ByteString qualified as BS
 import qualified Data.Text as T
 import Data.Text (Text)
 import qualified Data.Text.Foreign as TF
 import Data.Word (Word32)
-import Foreign.C.Types (CFloat)
-import Data.Maybe (fromMaybe)
+import Foreign.C.Types (CChar, CFloat, CUInt)
+import Data.Foldable (for_)
+import Data.Int (Int32)
+import Data.Maybe (fromMaybe, isJust, isNothing)
 import Foreign.Marshal.Alloc (alloca)
-import Foreign.Marshal.Utils (maybePeek)
+import Foreign.Marshal.Utils (maybePeek, with)
 import Foreign.Ptr (Ptr)
 import Foreign.Storable (Storable (..))
 import GHC.Records.Compat (getField)
-import SDL3.Sys.Bindgen.Runtime.CBool qualified as CBool
 import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
-import NanoUI (V2 (..), v2Add)
+import NanoUI (Rect (..), V2 (..), WidgetId (..), v2Add)
 import NanoUI.Backend
+import NanoUI.Testing (Context)
 import NanoUI.Sdl.Internal.Display (refreshEventType, takeRefreshEvent)
 import SDL3.Sys.Bindgen.Events
   ( SDL_Event (..)
@@ -39,24 +49,63 @@ import SDL3.Sys.Events (pollEventSafe, waitEventSafe, waitEventTimeoutSafe)
 import SDL3.Sys.Bindgen.Keycode
   ( SDL_Keycode (..)
   , SDL_Keymod (..)
+  , sDLK_APPLICATION
   , sDLK_BACKSPACE
+  , sDLK_CAPSLOCK
   , sDLK_DELETE
   , sDLK_DOWN
   , sDLK_END
   , sDLK_ESCAPE
+  , sDLK_F1
+  , sDLK_F12
+  , sDLK_F13
+  , sDLK_F24
   , sDLK_HOME
+  , sDLK_INSERT
+  , sDLK_KP_0
+  , sDLK_KP_1
+  , sDLK_KP_2
+  , sDLK_KP_3
+  , sDLK_KP_4
+  , sDLK_KP_5
+  , sDLK_KP_6
+  , sDLK_KP_7
+  , sDLK_KP_8
+  , sDLK_KP_9
+  , sDLK_KP_DIVIDE
+  , sDLK_KP_ENTER
+  , sDLK_KP_EQUALS
+  , sDLK_KP_MINUS
+  , sDLK_KP_MULTIPLY
+  , sDLK_KP_PERIOD
+  , sDLK_KP_PLUS
   , sDLK_LEFT
+  , sDLK_MENU
+  , sDLK_NUMLOCKCLEAR
+  , sDLK_PAGEDOWN
+  , sDLK_PAGEUP
+  , sDLK_PAUSE
+  , sDLK_PRINTSCREEN
   , sDLK_RETURN
   , sDLK_RIGHT
+  , sDLK_SCANCODE_MASK
+  , sDLK_SCROLLLOCK
+  , sDLK_SPACE
   , sDLK_TAB
   , sDLK_UP
   , sDL_KMOD_ALT
   , sDL_KMOD_CTRL
+  , sDL_KMOD_GUI
+  , sDL_KMOD_NUM
   , sDL_KMOD_SHIFT
   )
-import SDL3.Sys.Bindgen.Mouse (sDL_BUTTON_LEFT, sDL_BUTTON_RIGHT)
+import SDL3.Sys.Bindgen.Rect (SDL_Rect (..))
 import SDL3.Sys.Bindgen.Stdinc (Uint32 (..))
-import SDL3.Sys.Keyboard (getModState)
+import SDL3.Sys.Bindgen.Video (SDL_Window)
+import SDL3.Sys.Bindgen.Keyboard (SDL_TextInputType (..), sDL_PROP_TEXTINPUT_TYPE_NUMBER)
+import SDL3.Sys.Bindgen.Keyboard qualified as Keyboard
+import SDL3.Sys.Keyboard (getModState, setTextInputAreaSafe, startTextInputWithPropertiesSafe, stopTextInputSafe)
+import SDL3.Sys.Properties (createPropertiesSafe, destroyPropertiesSafe, setNumberPropertySafe)
 
 -- | Copied SDL event data. Pointer positions use SDL window coordinates until
 -- display synchronisation converts them to nano-ui's logical coordinates.
@@ -65,15 +114,31 @@ data SdlEvent
   | EvWindowChanged
   -- ^ The window's size or pixel density changed; display synchronisation
   -- reads both again.
-  | EvKey Key Modifiers
+  | EvSystemThemeChanged
+  -- ^ The desktop switched between light and dark; display synchronisation
+  -- reads the new setting.
+  | EvKey Key Bool Modifiers
+  -- ^ A key went down ('True', auto-repeats included) or up.
+  | EvModifiers Modifiers
+  -- ^ A key with no nano-ui 'Key' (such as a modifier) went down or up.
+  -- Only the resulting modifier state is kept.
   | EvText Text Modifiers
   | EvMouseMotion V2 Modifiers
   | EvMouseButton MouseButton Bool V2 Modifiers
   -- ^ A button went down ('True') or up at a point.
+  | EvMouseLeave
+  -- ^ The pointer left the window.
   | EvScroll V2
   | EvDrop DropEvent
   | EvRefresh
   | EvWindowRedraw
+  | EvEditing Text Int Int
+  -- ^ The input method's composition changed: its text, then the start and
+  -- length of its caret or selection ('applyComposition'). Empty text ends
+  -- the composition.
+  | EvFocusLost
+  -- ^ The window lost keyboard focus. Held keys are released
+  -- ('releaseAllKeys') and the composition ends.
   deriving (Eq, Show)
 
 -- | Drain every pending event, oldest first.
@@ -110,18 +175,26 @@ decodeEvent refreshTy p = do
       Events.SDL_EVENT_WINDOW_RESIZED -> pure (Just EvWindowChanged)
       Events.SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED -> pure (Just EvWindowChanged)
       Events.SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED -> pure (Just EvWindowChanged)
+      Events.SDL_EVENT_SYSTEM_THEME_CHANGED -> pure (Just EvSystemThemeChanged)
       -- The window manager damaged our window surface (occlusion, compositor
       -- effects, restore). The backbuffer contents are gone; the next present
       -- must be full or stale regions flash.
       Events.SDL_EVENT_WINDOW_EXPOSED -> pure (Just EvWindowRedraw)
       Events.SDL_EVENT_WINDOW_RESTORED -> pure (Just EvWindowRedraw)
-      Events.SDL_EVENT_KEY_DOWN -> keyDown <$> peek p.key
+      Events.SDL_EVENT_KEY_DOWN -> Just . keyEvent True <$> peek p.key
+      Events.SDL_EVENT_KEY_UP -> Just . keyEvent False <$> peek p.key
       Events.SDL_EVENT_TEXT_INPUT -> textInput p
+      Events.SDL_EVENT_TEXT_EDITING -> textEditing p
+      -- SDL stops text input while the window is in the background, which
+      -- can drop the composition silently. End it here, or a field would
+      -- keep showing it and routing keys to it.
+      Events.SDL_EVENT_WINDOW_FOCUS_LOST -> pure (Just EvFocusLost)
       Events.SDL_EVENT_MOUSE_MOTION -> do
         me <- peek p.motion
         Just . EvMouseMotion (v2 (getField @"x" me) (getField @"y" me)) <$> peekModifiers
-      Events.SDL_EVENT_MOUSE_BUTTON_DOWN -> mouseButton p True
-      Events.SDL_EVENT_MOUSE_BUTTON_UP -> mouseButton p False
+      Events.SDL_EVENT_WINDOW_MOUSE_LEAVE -> pure (Just EvMouseLeave)
+      Events.SDL_EVENT_MOUSE_BUTTON_DOWN -> Just <$> mouseButton p True
+      Events.SDL_EVENT_MOUSE_BUTTON_UP -> Just <$> mouseButton p False
       Events.SDL_EVENT_MOUSE_WHEEL -> do
         we <- peek p.wheel
         pure (Just (EvScroll (v2 (getField @"x" we) (negate (getField @"y" we)))))
@@ -135,52 +208,96 @@ decodeEvent refreshTy p = do
 v2 :: CFloat -> CFloat -> V2
 v2 x y = V2 (realToFrac x) (realToFrac y)
 
-keyDown :: SDL_KeyboardEvent -> Maybe SdlEvent
-keyDown ke =
-  case lookup code specialKeys of
-    Just (k, repeatable)
-      | repeatable || not (CBool.toBool (getField @"repeat" ke)) -> Just (EvKey k mods)
-      | otherwise -> Nothing
-    Nothing
-      -- Ctrl chords produce no text-input event; report the printable key
-      -- symbol (SDL folds Shift into it, so Ctrl+Shift+= arrives as '+').
-      | modCtrl mods && code >= 32 && code <= 126 ->
-          Just (EvText (T.singleton (toEnum (fromIntegral code))) mods)
-      | otherwise -> Nothing
+-- | A key going down ('True') or up. Auto-repeats arrive as presses;
+-- 'applyKey' tells them apart because the key is already held.
+keyEvent :: Bool -> SDL_KeyboardEvent -> SdlEvent
+keyEvent down ke = maybe (EvModifiers mods) (\k -> EvKey k down mods) (sdlKey (keyCode ke) (keyMods ke))
   where
-    mods = modFromKeymod (getField @"mod" ke)
-    code = fromIntegral (getField @"key" ke :: SDL_Keycode) :: Word32
+    mods = modFromKeymod (keyMods ke)
 
--- | The keys the UI takes by name, and whether holding one down repeats it.
-specialKeys :: [(Word32, (Key, Bool))]
-specialKeys =
-  [ (word32 sDLK_ESCAPE, (KeyEscape, False))
-  , (word32 sDLK_RETURN, (KeyEnter, False))
-  , (word32 sDLK_TAB, (KeyTab, False))
-  , (word32 sDLK_BACKSPACE, (KeyBackspace, True))
-  , (word32 sDLK_DELETE, (KeyDelete, True))
-  , (word32 sDLK_LEFT, (KeyLeft, True))
-  , (word32 sDLK_RIGHT, (KeyRight, True))
-  , (word32 sDLK_UP, (KeyUp, True))
-  , (word32 sDLK_DOWN, (KeyDown, True))
-  , (word32 sDLK_HOME, (KeyHome, True))
-  , (word32 sDLK_END, (KeyEnd, True))
+keyCode :: SDL_KeyboardEvent -> CUInt
+keyCode ke = fromIntegral (getField @"key" ke :: SDL_Keycode)
+
+keyMods :: SDL_KeyboardEvent -> SDL_Keymod
+keyMods ke = getField @"mod" ke
+
+-- | The 'Key' for an SDL keycode and its modifier state. For character keys
+-- SDL reports the unmodified character in the current layout (Latin letters
+-- on a non-Latin layout), which becomes the 'KeyChar'.
+sdlKey :: CUInt -> SDL_Keymod -> Maybe Key
+sdlKey code km
+  | Just named <- lookup code namedKeys = Just named
+  | Just typed <- lookup code keypadKeys = keypadKey (word32 km .&. word32 sDL_KMOD_NUM /= 0) typed
+  | code >= sDLK_F1 && code <= sDLK_F12 = Just (KeyF (fromIntegral (code - sDLK_F1) + 1))
+  | code >= sDLK_F13 && code <= sDLK_F24 = Just (KeyF (fromIntegral (code - sDLK_F13) + 13))
+  | code .&. sDLK_SCANCODE_MASK == 0 && code <= 0x10FFFF, isPrint c = Just (KeyChar (toLower c))
+  | otherwise = Nothing
+  where
+    c = chr (fromIntegral code)
+
+namedKeys :: [(CUInt, Key)]
+namedKeys =
+  [ (sDLK_ESCAPE, KeyEscape)
+  , (sDLK_RETURN, KeyEnter)
+  , (sDLK_TAB, KeyTab)
+  , (sDLK_BACKSPACE, KeyBackspace)
+  , (sDLK_DELETE, KeyDelete)
+  , (sDLK_LEFT, KeyLeft)
+  , (sDLK_RIGHT, KeyRight)
+  , (sDLK_UP, KeyUp)
+  , (sDLK_DOWN, KeyDown)
+  , (sDLK_HOME, KeyHome)
+  , (sDLK_END, KeyEnd)
+  , (sDLK_PAGEUP, KeyPageUp)
+  , (sDLK_PAGEDOWN, KeyPageDown)
+  , (sDLK_INSERT, KeyInsert)
+  , (sDLK_SPACE, KeySpace)
+  , (sDLK_PRINTSCREEN, KeyPrintScreen)
+  , (sDLK_PAUSE, KeyPause)
+  , (sDLK_CAPSLOCK, KeyCapsLock)
+  , (sDLK_NUMLOCKCLEAR, KeyNumLock)
+  , (sDLK_SCROLLLOCK, KeyScrollLock)
+  , (sDLK_APPLICATION, KeyMenu)
+  , (sDLK_MENU, KeyMenu)
+  , (sDLK_KP_ENTER, KeyEnter)
+  , (sDLK_KP_DIVIDE, KeyChar '/')
+  , (sDLK_KP_MULTIPLY, KeyChar '*')
+  , (sDLK_KP_MINUS, KeyChar '-')
+  , (sDLK_KP_PLUS, KeyChar '+')
+  , (sDLK_KP_EQUALS, KeyChar '=')
   ]
+
+-- | Keypad digits and decimal point, with the character each types
+-- ('keypadKey').
+keypadKeys :: [(CUInt, Char)]
+keypadKeys =
+  zip [sDLK_KP_0, sDLK_KP_1, sDLK_KP_2, sDLK_KP_3, sDLK_KP_4, sDLK_KP_5, sDLK_KP_6, sDLK_KP_7, sDLK_KP_8, sDLK_KP_9, sDLK_KP_PERIOD] "0123456789."
 
 textInput :: Ptr SDL_Event -> IO (Maybe SdlEvent)
 textInput p = do
   te <- peek p.text
   mods <- peekModifiers
-  txt <- maybePeek TF.peekCString (PtrConst.unsafeToPtr (getField @"text" te))
+  txt <- peekText (getField @"text" te)
   pure ((`EvText` mods) <$> mfilter (not . T.null) txt)
 
-mouseButton :: Ptr SDL_Event -> Bool -> IO (Maybe SdlEvent)
+-- | The input method's composition. The session sets
+-- @SDL_HINT_IME_IMPLEMENTED_UI@ to @composition@, so SDL sends it to us
+-- instead of letting the input method draw it over the window.
+textEditing :: Ptr SDL_Event -> IO (Maybe SdlEvent)
+textEditing p = do
+  ee <- peek p.edit
+  txt <- fromMaybe "" <$> peekText (getField @"text" ee)
+  let int v = fromIntegral v :: Int
+  pure (Just (EvEditing txt (int (getField @"start" ee)) (int (getField @"length" ee))))
+
+-- | A button going down or up. SDL numbers buttons the same way as
+-- 'mouseButtonNumber': left, middle, right, X1, X2 from 1, then any extra
+-- buttons in order.
+mouseButton :: Ptr SDL_Event -> Bool -> IO SdlEvent
 mouseButton p down = do
   be <- peek p.button
-  mods <- peekModifiers
-  let btn = fromIntegral (getField @"button" be)
-      press b = EvMouseButton b down (v2 (getField @"x" be) (getField @"y" be)) mods
-  pure (press <$> lookup btn [(sDL_BUTTON_LEFT, MouseLeft), (sDL_BUTTON_RIGHT, MouseRight)])
+  let btn = mouseButtonNumber (fromIntegral (getField @"button" be))
+  EvMouseButton btn down (v2 (getField @"x" be) (getField @"y" be)) <$> peekModifiers
 
 dropEvent :: Ptr SDL_Event -> DropType -> IO (Maybe SdlEvent)
 dropEvent p ty = do
@@ -189,20 +306,18 @@ dropEvent p ty = do
       pos
         | ty == DropBegin || ty == DropComplete = Nothing
         | otherwise = Just (v2 (getField @"x" de) (getField @"y" de))
-  payload <- fromMaybe "" <$> maybePeek TF.peekCString (PtrConst.unsafeToPtr (getField @"data'" de))
+  payload <- fromMaybe "" <$> peekText (getField @"data'" de)
   pure (Just (EvDrop (DropEvent ty pos payload)))
+
+-- | Decode an event's UTF-8 string, or 'Nothing' for a null pointer.
+peekText :: PtrConst.PtrConst CChar -> IO (Maybe Text)
+peekText = maybePeek TF.peekCString . PtrConst.unsafeToPtr
 
 peekModifiers :: IO Modifiers
 peekModifiers = modFromKeymod <$> getModState
 
 modFromKeymod :: SDL_Keymod -> Modifiers
-modFromKeymod km =
-  let m = word32 km
-   in Modifiers
-        { modShift = m .&. word32 sDL_KMOD_SHIFT /= 0
-        , modCtrl = m .&. word32 sDL_KMOD_CTRL /= 0
-        , modAlt = m .&. word32 sDL_KMOD_ALT /= 0
-        }
+modFromKeymod km = modifiersFromBits (word32 km) (word32 sDL_KMOD_SHIFT) (word32 sDL_KMOD_CTRL) (word32 sDL_KMOD_ALT) (word32 sDL_KMOD_GUI)
 
 word32 :: Integral a => a -> Word32
 word32 = fromIntegral
@@ -212,24 +327,87 @@ word32 = fromIntegral
 applyEvent :: Input -> SdlEvent -> Input
 applyEvent inp ev =
   case ev of
-    EvKey k mods -> inp {inputKeys = appendInputKey k (inputKeys inp), inputModifiers = mods}
+    EvKey k down mods -> (applyKey k down inp) {inputModifiers = mods}
+    EvModifiers mods -> inp {inputModifiers = mods}
     EvText txt mods ->
       inp {inputChars = inputChars inp <> txt, inputModifiers = mods}
     EvMouseMotion pos mods ->
       inp {inputMousePos = pos, inputModifiers = mods}
     EvMouseButton btn down pos mods ->
       (applyMouseButton btn down inp) {inputMousePos = pos, inputModifiers = mods}
+    EvMouseLeave -> applyPointerLeave inp
     EvScroll delta -> inp {inputScroll = v2Add (inputScroll inp) delta}
     EvDrop dropEv -> inp {inputDrops = appendDropEvent dropEv (inputDrops inp)}
+    EvEditing txt start len -> applyComposition txt start len inp
+    EvFocusLost -> releaseAllKeys (applyComposition "" 0 0 inp)
     EvWindowRedraw -> inp {inputWindowRedraw = True}
     -- A wake asks for a frame, not a repaint: the session runs one, and its
     -- damage decides what is presented, if anything.
     EvRefresh -> inp
     EvQuit -> inp
     EvWindowChanged -> inp
+    EvSystemThemeChanged -> inp
 
 -- | Whether an event is a button press or release and should end an input batch.
 isButtonEdge :: SdlEvent -> Bool
 isButtonEdge = \case
   EvMouseButton {} -> True
   _ -> False
+
+-- | The text input state last sent to SDL: the focused widget, the running
+-- purpose ('Nothing' while stopped), and the text input area in window
+-- coordinates.
+newtype TextInputSync = TextInputSync (IORef (WidgetId, Maybe InputPurpose, Maybe (SDL_Rect, Int32)))
+
+-- | A fresh sync: nothing sent to SDL yet, text input stopped.
+newTextInputSync :: IO TextInputSync
+newTextInputSync = TextInputSync <$> newIORef (WidgetId 0, Nothing, Nothing)
+
+-- | Update SDL's text input after a frame drawn with @inp@ in window @win@,
+-- where one window coordinate is @zoom@ layout units. Call it on every drawn
+-- frame. Returns whether text input was started or restarted.
+--
+-- Text input runs only while a widget takes text ('textInputArea'), with
+-- that widget's 'InputPurpose'. Otherwise it is stopped, so no input method
+-- composes invisibly and no on-screen keyboard lingers. It restarts when the
+-- purpose changes, or when focus moves during a composition, so the
+-- composition is dropped instead of carried into the next widget. The input
+-- method gets the widget's area so its candidate window sits by the caret.
+syncTextInput :: TextInputSync -> Ptr SDL_Window -> Float -> Context -> Input -> IO Bool
+syncTextInput (TextInputSync ref) win zoom ctx inp = do
+  focus <- getFocusId ctx
+  area <- textInputArea ctx
+  (lastFocus, running, lastArea) <- readIORef ref
+  let purpose = textInputAreaPurpose <$> area
+      moved = focus /= lastFocus && isJust (inputComposition inp)
+      restart = isJust running && isJust purpose && (moved || purpose /= running)
+      started = isJust purpose && (isNothing running || restart)
+      native = toWindow <$> area
+  when (isJust running && (isNothing purpose || restart)) $ void (stopTextInputSafe win)
+  when started $ for_ purpose (startTextInput win)
+  for_ native $ \(r, cursor) ->
+    when (started || native /= lastArea) $
+      -- A safe FFI call: the input method may need a round trip to answer.
+      with r $ \rp -> void (setTextInputAreaSafe win (PtrConst.unsafeFromPtr rp) cursor)
+  writeIORef ref (focus, purpose, native)
+  pure started
+  where
+    toWindow TextInputArea {textInputAreaRect = Rect x y w h, textInputAreaCursor = cursor} =
+      let at :: Integral b => Float -> b
+          at v = round (v * zoom)
+       in (SDL_Rect (at x) (at y) (max 1 (at w)) (max 1 (at h)), at cursor)
+
+-- | Start text input for a purpose. It picks the on-screen keyboard: a
+-- password's input hides what is typed, and a number's keyboard has digits.
+startTextInput :: Ptr SDL_Window -> InputPurpose -> IO ()
+startTextInput win purpose = do
+  props <- createPropertiesSafe
+  _ <- BS.useAsCString sDL_PROP_TEXTINPUT_TYPE_NUMBER $ \name ->
+    setNumberPropertySafe props (PtrConst.unsafeFromPtr name) (fromIntegral textType)
+  _ <- startTextInputWithPropertiesSafe win props
+  destroyPropertiesSafe props
+  where
+    SDL_TextInputType textType = case purpose of
+      InputNormal -> Keyboard.SDL_TEXTINPUT_TYPE_TEXT
+      InputSecure -> Keyboard.SDL_TEXTINPUT_TYPE_TEXT_PASSWORD_HIDDEN
+      InputNumeric -> Keyboard.SDL_TEXTINPUT_TYPE_NUMBER

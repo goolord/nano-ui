@@ -9,6 +9,7 @@ module NanoUI.Diagrams.Backend
   )
 where
 
+import Control.Applicative ((<|>))
 import Control.Lens (Lens', (^.), (^?))
 import Data.Colour (AlphaColour, alphaChannel, black, over)
 import Data.Colour.SRGB (RGB (..), toSRGB)
@@ -18,8 +19,9 @@ import Data.Maybe (fromMaybe)
 import Data.Text qualified as T
 import Data.Tree (Tree (Node))
 import Data.Typeable (Typeable)
+import Data.Primitive.PrimArray (primArrayToList)
 import Data.Primitive.SmallArray (SmallArray, emptySmallArray, mapSmallArray', smallArrayFromList)
-import Diagrams.Attributes (_lineWidthU)
+import Diagrams.Attributes (Dashing (..), LineCap (..), LineJoin (..), _dashingU, _lineCap, _lineJoin, _lineMiterLimit, _lineWidthU)
 import Diagrams.Core
   ( Backend (..)
   , N
@@ -50,22 +52,20 @@ import Diagrams.Segment (FixedSegment (..))
 import Diagrams.Trail (fixTrail, isLoop)
 import Diagrams.TwoD.Adjust (adjustDia2D)
 import Diagrams.TwoD.Attributes (_AC, _fillTexture, _lineTexture)
+import Diagrams.TwoD.Path (FillRule (..), _fillRule)
 import Diagrams.TwoD.Size (mkHeight)
 import Diagrams.TwoD.Text (Text (..), TextAlignment (..))
 import NanoUI
   ( Color
   , DrawOp (..)
+  , Rect (..)
   , colorA
   , colorRGBA
   , defaultTheme
   , shiftDrawOp
   , themeMuted
   )
-import NanoUI.Diagrams.Internal.Tessellation
-  ( fillPolygon
-  , flattenCubic
-  , strokePolyline
-  )
+import NanoUI.Internal.Path qualified as P
 
 -- | Diagrams backend that emits nano-ui draw operations for paths and text.
 data NanoUIBackend = NanoUIBackend
@@ -112,7 +112,7 @@ instance (Typeable n, RealFloat n) => Renderable (Path V2 n) NanoUIBackend where
   render _ path = NRenderFull $ \textOnly sty ->
     if textOnly
       then DL.empty
-      else foldMap (DL.fromList . trailOps sty) (pathTrails path)
+      else DL.fromList (pathOps sty (pathTrails path))
 
 textOps ::
   (Typeable n, RealFloat n) => Text n -> DiaCore.Style V2 n -> DList DrawOp
@@ -126,69 +126,92 @@ textOps (Text tr align str) sty
           case align of
             BaselineText -> (0, -1)
             BoxAlignedText bx by -> (toF bx, toF by)
-        col =
-          case solidColour (sty ^? (_fillTexture . _AC)) of
-            Just c -> c
-            Nothing ->
-              fromMaybe
-                (themeMuted defaultTheme)
-                (solidColour (sty ^? (_lineTexture . _AC)))
+        col = fromMaybe (themeMuted defaultTheme) (fillColour sty <|> lineColour sty)
        in
         DL.singleton (DrawText (toF x) (toF y) ax ay (T.pack str) col)
 
 instance (Typeable n, RealFloat n) => Renderable (Text n) NanoUIBackend where
   render _ t = NRenderFull (const (textOps t))
 
-trailOps ::
+-- | A path's ops: all loops filled together under the style's fill rule (so
+-- an inner loop can be a hole), then every trail stroked with the style's
+-- caps, joins and dashes.
+pathOps ::
   (Typeable n, RealFloat n) =>
-  DiaCore.Style V2 n -> Located (Trail V2 n) -> [DrawOp]
-trailOps sty lt =
-  let
-    pts = trailSamples lt
-    lineW0 = sty ^. _lineWidthU
-    lineW =
-      case fmap toF lineW0 of
-        Nothing -> 1
-        Just w
-          | w <= 0 -> 0
-          | w < 1 -> 1
-          | otherwise -> w
-    fillC = solidColour (sty ^? (_fillTexture . _AC))
-    lineC = solidColour (sty ^? (_lineTexture . _AC))
-    closed = isLoop (unLoc lt)
-    fills =
-      case fillC of
-        Just c
-          | colorA c > 0 && closed && length pts >= 3 -> fillPolygon c pts
-        _ -> []
-    strokes =
-      case lineC of
-        Just c
-          | colorA c > 0 && lineW > 0 && length pts >= 2 ->
-              strokePolyline c lineW closed pts
-        _ -> []
-   in
-    fills ++ strokes
+  DiaCore.Style V2 n -> [Located (Trail V2 n)] -> [DrawOp]
+pathOps sty trails = fills ++ strokes
+  where
+    trailOf lt = let closed = isLoop (unLoc lt) in (closed, trailPath closed (fixTrail lt))
+    paths = map trailOf trails
+    loops = mconcat [path | (True, path) <- paths]
+    lineW = case toF <$> sty ^. _lineWidthU of
+      Nothing -> 1
+      Just w
+        | w <= 0 -> 0
+        | otherwise -> max 1 w
+    rule = case sty ^. _fillRule of
+      Winding -> P.NonZero
+      EvenOdd -> P.EvenOdd
+    lineStroke =
+      (P.stroke lineW)
+        { P.strokeCap = case sty ^. _lineCap of
+            LineCapButt -> P.ButtCap
+            LineCapRound -> P.RoundCap
+            LineCapSquare -> P.SquareCap
+        , P.strokeJoin = case sty ^. _lineJoin of
+            LineJoinMiter -> P.MiterJoin
+            LineJoinRound -> P.RoundJoin
+            LineJoinBevel -> P.BevelJoin
+        , P.strokeMiterLimit = toF (sty ^. _lineMiterLimit)
+        , P.strokeDash = maybe [] (\(Dashing ds _) -> map toF ds) (sty ^. _dashingU)
+        , P.strokeDashOffset = maybe 0 (\(Dashing _ o) -> toF o) (sty ^. _dashingU)
+        }
+    fills = case fillColour sty of
+      Just c | colorA c > 0 && any fst paths -> map rectOp (P.fillPathOps curveTol mempty rule loops (P.Solid c))
+      _ -> []
+    strokes = case lineColour sty of
+      Just c | colorA c > 0 && lineW > 0 -> P.strokePathOps curveTol mempty lineStroke (mconcat (map snd paths)) (P.Solid c)
+      _ -> []
 
-trailSamples :: RealFloat n => Located (Trail V2 n) -> [(Float, Float)]
-trailSamples lt =
-  case map sampleSeg (fixTrail lt) of
-    [] -> []
-    (firstSeg : rest) ->
-      let
-        pts = firstSeg ++ concatMap (drop 1) rest
-       in
-        if isLoop (unLoc lt) && not (null pts)
-          then pts ++ take 1 pts
-          else pts
+-- | Maximum distance of a flattened curve from the true one, in logical pixels.
+curveTol :: Float
+curveTol = 0.5
 
-sampleSeg :: RealFloat n => FixedSegment V2 n -> [(Float, Float)]
-sampleSeg (FLinear p0 p1) = [pointFloats p0, pointFloats p1]
-sampleSeg (FCubic p0 c1 c2 p1) =
-  flattenCubic (pointFloats p0) (pointFloats c1) (pointFloats c2) (pointFloats p1)
+-- | A trail as a canvas path, closed when it is a loop.
+trailPath :: Real n => Bool -> [FixedSegment V2 n] -> P.Path
+trailPath _ [] = mempty
+trailPath closed segs@(s0 : _) = P.Path (start s0 : map seg segs ++ [P.SegClose | closed])
+  where
+    start (FLinear p _) = at P.SegMove p
+    start (FCubic p _ _ _) = at P.SegMove p
+    seg (FLinear _ p) = at P.SegLine p
+    seg (FCubic _ c1 c2 p) =
+      let (ax, ay) = pointFloats c1
+          (bx, by) = pointFloats c2
+       in at (P.SegCubic ax ay bx by) p
+    at f p = uncurry f (pointFloats p)
+
+-- | Turn a flat-filled axis-aligned rectangle (a chart bar) into a rect op,
+-- which avoids the seams a polygon's triangles can show.
+rectOp :: DrawOp -> DrawOp
+rectOp op@(FillPolygon pts _ _ (P.Flat col)) = case primArrayToList pts of
+  [x0, y0, x1, y1, x2, y2, x3, y3]
+    | level x0 y0 x1 y1 x2 y2 x3 y3 || level y0 x0 y1 x1 y2 x2 y3 x3 ->
+        FillRect (Rect (min x0 x2) (min y0 y2) (abs (x2 - x0)) (abs (y2 - y0))) col
+  _ -> op
+  where
+    -- Edges alternate between the two axes.
+    level ax ay bx by cx cy dx dy = near ay by && near bx cx && near cy dy && near dx ax
+    near a b = abs (a - b) <= 1e-3
+rectOp op = op
 
 pointFloats :: Real n => P2 n -> (Float, Float)
 pointFloats p = let (x, y) = unp2 p in (toF x, toF y)
+
+-- | A style's solid fill and line colours, if they are visible.
+fillColour, lineColour :: (Typeable n, Floating n) => DiaCore.Style V2 n -> Maybe Color
+fillColour sty = solidColour (sty ^? (_fillTexture . _AC))
+lineColour sty = solidColour (sty ^? (_lineTexture . _AC))
 
 solidColour :: Maybe (AlphaColour Double) -> Maybe Color
 solidColour mc = do

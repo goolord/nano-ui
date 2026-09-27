@@ -1,9 +1,12 @@
 module Cases.Window (tests) where
 
 import Spec
+import Control.Exception (evaluate)
+import System.Mem.StableName (makeStableName)
 import Data.IntMap.Strict qualified as IM
 import Data.Text qualified as T
 import NanoUI.Internal.Context (Context (..))
+import NanoUI.Internal.Layout.Arena (LayoutCache (..), arenaCount, getNodeRect, getNodeType, getNodeValue, getScrollContentW, isScrollNode)
 
 tests :: [Spec]
 tests =
@@ -16,6 +19,7 @@ tests =
   , spec "overlay-panel-live" runOverlayPanelLiveTest
   , spec "window-drag" runWindowDragTest
   , spec "window-layout-reuse" runWindowLayoutReuseTest
+  , spec "window-custom-measure-placement" runWindowCustomMeasurePlacementTest
   , spec "window-close-damage" runWindowCloseDamageTest
   , spec "page-window-scroll" runPageWindowScrollTest
   , spec "window-scroll-only-damage" runWindowScrollOnlyDamageTest
@@ -53,10 +57,8 @@ runWindowCloseDamageTest ctx failed = do
       inp0 = withInput 640 400
   _ <- warmup2 ctx inp0 (ui True)
   _ <- runFrame ctx inp0 (ui False)
-  dmg <- takeDamage ctx
-  assertEq failed dmg DamageFull
-  need <- needsRedraw ctx inp0 (inp0 {inputDeltaTime = 1})
-  assert failed need
+  assertEq failed DamageFull =<< takeDamage ctx
+  assert failed =<< needsRedraw ctx inp0 (inp0 {inputDeltaTime = 1})
 
 runOverlayPanelLiveTest :: Context -> IORef Int -> IO ()
 runOverlayPanelLiveTest _ failed = do
@@ -73,11 +75,9 @@ runOverlayPanelLiveTest _ failed = do
         ctx <- newContext
         _ <- runFrame ctx inp ui
         markDirty ctx
-        need <- needsRedraw ctx inp inp
-        assert failed need
+        assert failed =<< needsRedraw ctx inp inp
         _ <- runFrame ctx inp ui
-        dmg <- takeDamage ctx
-        assertEq failed dmg DamageFull
+        assertEq failed DamageFull =<< takeDamage ctx
   checkStatic (void (window True "Debug" (label "fps 0")))
   checkStatic (void (modal True "About" (label "body")))
   checkDirtyWake (void (modal True "About" (label "body")))
@@ -95,10 +95,8 @@ runOverlaySiblingStateTest _ failed = do
   forM_ [modal, window] $ \overlay -> do
     ctx <- newContext
     _ <- runFrame ctx inp (ui overlay False True)
-    closed <- warmup2 ctx inp (ui overlay False False)
-    assertEq failed closed "edited"
-    opened <- warmup2 ctx inp (ui overlay True False)
-    assertEq failed opened "edited"
+    assertEq failed "edited" =<< warmup2 ctx inp (ui overlay False False)
+    assertEq failed "edited" =<< warmup2 ctx inp (ui overlay True False)
 
 runFitHeaderNoShrinkTest :: Context -> IORef Int -> IO ()
 runFitHeaderNoShrinkTest ctx failed = do
@@ -133,22 +131,18 @@ runWindowOverlayTest ctx failed = do
     assert failed (not (respClicked win))
     assert failed (case mBody of Nothing -> True; _ -> False)
     closedSpans <- collectOverlayTextSpans ctx inp0
-    assert failed (not (any (\(_, txt, _, _, _) -> "Debug" `T.isInfixOf` txt) closedSpans))
+    assert failed (not (hasText "Debug" closedSpans))
   (outside0, win0, mBody0) <- warmup2 ctx inp0 ui
   panels <- floatingPanelRects ctx
   overlays <- collectOverlayTextSpans ctx inp0
-  assert failed (any (\(_, txt, _, _, _) -> "Debug" `T.isInfixOf` txt) overlays)
-  assert failed (any (\(_, txt, _, _, _) -> "Body" `T.isInfixOf` txt) overlays)
+  assert failed (hasText "Debug" overlays && hasText "Body" overlays)
   assert failed (not (any (\(_, txt, _, _, _) -> T.strip txt == "X") overlays))
   let Rect wx wy ww wh = respRect win0
   assert failed (ww >= 100 && wh >= 20)
   assert failed (case mBody0 of Just _ -> True; _ -> False)
-  let (pressOut, releaseOut) = clickPair inp0 (V2 (rectX (respRect outside0) + 8) (rectY (respRect outside0) + 8))
-  _ <- runFrame ctx pressOut ui
-  ((outsideHit, _, _), _, _, _) <- runFrame ctx releaseOut ui
+  (outsideHit, _, _) <- runClick ctx inp0 ui (V2 (rectX (respRect outside0) + 8) (rectY (respRect outside0) + 8))
   assert failed (respClicked outsideHit)
-  let (clickWin, _) = clickPair inp0 (V2 (wx + ww / 2) (wy + wh * 0.7))
-  ((outsideMid, _, _), _, _, _) <- runFrame ctx clickWin ui
+  (outsideMid, _, _) <- evalUi ctx (pressAt inp0 (V2 (wx + ww / 2) (wy + wh * 0.7))) ui
   assert failed (not (respClicked outsideMid))
   let esc = keyInp KeyEscape inp0
   ((_, winEsc, _), _, _, _) <- runFrame ctx esc ui
@@ -158,9 +152,7 @@ runWindowOverlayTest ctx failed = do
           (r : _) -> r
           _ -> respRect win0
       closeAt = V2 (px + pw - padR windowPad - 12.5) (py + padT windowPad + 19.5)
-      (clickClose, releaseClose) = clickPair inp0 closeAt
-  _ <- runFrame ctx clickClose ui
-  ((_, winClose, _), _, _, _) <- runFrame ctx releaseClose ui
+  (_, winClose, _) <- runClick ctx inp0 ui closeAt
   assert failed (respClicked winClose)
 
 runOverlayClickThroughTest :: Context -> IORef Int -> IO ()
@@ -200,10 +192,7 @@ runOverlayClickThroughTest ctx failed = do
         case filter (\p -> inCover p && missesKids p) cands of
           (p : _) -> Just p
           [] -> Nothing
-    clickNone clicked u pos = do
-      let (press, release) = clickPair inp0 pos
-      _ <- runFrame ctx press u
-      runFrame ctx release u >>= \(hit, _, _, _) -> assert failed (not (clicked hit))
+    clickNone clicked u pos = runClick ctx inp0 u pos >>= \hit -> assert failed (not (clicked hit))
     runCovered u = do
       _ <- warmup2 ctx inp0 u
       ((_, cover0, mInside0), _, _, _) <- runFrame ctx inp0 u
@@ -212,16 +201,11 @@ runOverlayClickThroughTest ctx failed = do
       assertJust failed mInside0 $ \inside0 -> do
         let kids = [respRect inside0]
         assertJust failed (childSafePoint coverRect kids) $ \pos -> do
-          let (press, release) = clickPair inp0 pos
-          _ <- runFrame ctx press u
-          ((outsidesHit, _, _), _, _, _) <- runFrame ctx release u
+          (outsidesHit, _, _) <- runClick ctx inp0 u pos
           assert failed (not (any respClicked outsidesHit))
         let ir = respRect inside0
-            ip = spanCenter ir
         assert failed (rectW ir > 0 && rectH ir > 0)
-        let (ipress, irelease) = clickPair inp0 ip
-        _ <- runFrame ctx ipress u
-        ((_, _, mInsideHit), _, _, _) <- runFrame ctx irelease u
+        (_, _, mInsideHit) <- runClick ctx inp0 u (spanCenter ir)
         assert failed (maybe False respClicked mInsideHit)
     runStacked = do
       _ <- warmup2 ctx inp0 stackedUi
@@ -231,10 +215,7 @@ runOverlayClickThroughTest ctx failed = do
               kids = [respRect loBtn, respRect hiBtn]
           assert failed (rectW cover > 0 && rectH cover > 0)
           assertJust failed (childSafePoint cover kids) $ \pos -> clickNone (\(_, loHit, _, _) -> maybe False respClicked loHit) stackedUi pos
-          let hp = V2 (rectX (respRect hiBtn) + rectW (respRect hiBtn) / 2) (rectY (respRect hiBtn) + rectH (respRect hiBtn) / 2)
-              (hpress, hrelease) = clickPair inp0 hp
-          _ <- runFrame ctx hpress stackedUi
-          ((_, _, _, mHiHit), _, _, _) <- runFrame ctx hrelease stackedUi
+          (_, _, _, mHiHit) <- runClick ctx inp0 stackedUi (centerOf hiBtn)
           assert failed (maybe False respClicked mHiHit)
   runCovered windowUi
   runCovered modalUi
@@ -250,42 +231,106 @@ runWindowDragTest ctx failed = do
       y0 = rectY r0
       dest = V2 (x0 + 24 - 50) (y0 + 22 + 30)
   runDragFrom ctx inp0 ui (windowTitleGrab r0) dest
-  dmg <- takeDamage ctx
-  assertEq failed dmg DamageFull
+  assertEq failed DamageFull =<< takeDamage ctx
   (win1, _, _, _) <- runFrame ctx (inp0 {inputMousePos = dest}) ui
   let Rect x1 y1 _ _ = respRect win1
   assert failed (x1 < x0 - 10)
   assert failed (y1 > y0 + 10)
 
--- | With a window open the solve is reused and only the floating panels are
--- placed again, still or mid-drag. Each such frame lays out every node where
--- the same frame solved from scratch does.
+-- | With floating panels open the solve is reused, and over a reused solve
+-- each panel gets back what placing it left while it goes where it went, or
+-- is placed again when it moves. Each such frame lays out every node and
+-- every scroll extent where the same frame solved and placed from scratch
+-- does: still, with a popup in the window following a point, mid-drag,
+-- after a resize, at another window size and with a modal open.
 runWindowLayoutReuseTest :: Context -> IORef Int -> IO ()
 runWindowLayoutReuseTest ctx failed = do
   let inp0 = withInput 640 400
-      ui = do
+      ui modalOpen anchor = do
         column $ forM_ [1 .. 20 :: Int] $ \i -> void (button (T.pack ("row " <> show i)))
-        fmap fst (window True "Tools" (column (label "Body" >> void (button "ok"))))
-      rects = arenaRects ctx
-      -- The frame as it ran, then the same frame with nothing to reuse.
-      sameAsFresh frameInp = do
-        (win, _, _, _) <- runFrame ctx frameInp ui
-        reused <- rects
+        win <- fmap fst $ window True "Tools" $ columnWith (maxW 260) $ do
+          forM_ [1 .. 12 :: Int] $ \i -> labelWith fillW (T.replicate i "wrapping words ")
+          void (button "ok")
+          void (popup True (defaultPopupConfig (AnchorPoint anchor)) {cfgDismissable = False} (label "tip"))
+        -- A modal over it all, its note wrapped to the modal's width.
+        void (modal modalOpen "Note" (label (T.replicate 12 "a note that wraps ")))
+        pure win
+      layout = do
+        let na = ctxNodeArena ctx
+            scrollOf i = getNodeType na i >>= \nt ->
+              if isScrollNode nt then Just <$> ((,) <$> getNodeValue na i <*> getScrollContentW na i) else pure Nothing
+        n <- arenaCount na
+        forM [0 .. n - 1] $ \i -> (,) <$> getNodeRect na i <*> scrollOf i
+      -- A frame after one that kept what it placed, then the same frame
+      -- with nothing to reuse.
+      sameAfter beforeInp before frameInp u = do
+        _ <- runFrame ctx beforeInp before
+        (win, _, _, _) <- runFrame ctx frameInp u
+        reused <- layout
         writeIORef (ctxLayoutCache ctx) Nothing
-        _ <- runFrame ctx frameInp ui
-        fresh <- rects
-        assertEq failed reused fresh
+        _ <- runFrame ctx frameInp u
+        assertEq failed reused =<< layout
         pure (respRect win)
-  win0 <- warmup2 ctx inp0 ui
+      sameAsFresh frameInp u = sameAfter frameInp u frameInp u
+      still = ui False (V2 100 100)
+  win0 <- warmup2 ctx inp0 still
+  -- The window and the popup in it are both kept for the next frame.
+  _ <- runFrame ctx inp0 still
+  cache <- readIORef (ctxLayoutCache ctx)
+  placed <- maybe (pure IM.empty) (\(c, _, _) -> readIORef (lcPlaced c)) cache
+  assertEq failed 2 (IM.size placed)
+  _ <- sameAsFresh inp0 still
+  -- The window is given back and the popup in it placed again.
+  forM_ [1 .. 3 :: Int] $ \k -> do
+    let at d = ui False (V2 (100 + 7 * fromIntegral k + d) 120)
+    sameAfter inp0 (at 0) inp0 (at 3)
   let r0 = respRect win0
       V2 gx gy = windowTitleGrab r0
-  _ <- sameAsFresh inp0
-  _ <- runFrame ctx inp0 {inputMousePos = V2 gx gy, inputMouseDown = True, inputMousePressed = True} ui
+  _ <- runFrame ctx (pressAt inp0 (V2 gx gy)) still
   forM_ [1 .. 4 :: Int] $ \k -> do
-    let step = inp0 {inputMousePos = V2 (gx - 20 * fromIntegral k) (gy + 10 * fromIntegral k), inputMouseDown = True}
-    void (sameAsFresh step)
-  Rect x1 y1 _ _ <- sameAsFresh inp0 {inputMousePos = V2 (gx - 80) (gy + 40), inputMouseReleased = True}
-  assert failed (x1 < rectX r0 - 40 && y1 > rectY r0 + 20)
+    let step = inp0 {inputMousePos = V2 (gx - 20 * fromIntegral k) (gy + 10 * fromIntegral k), inputButtonsHeld = buttonsFromList [MouseLeft]}
+    void (sameAsFresh step still)
+  r1@(Rect x1 y1 _ _) <- sameAsFresh (applyMouseButton MouseLeft False inp0 {inputMousePos = V2 (gx - 80) (gy + 40)}) still
+  assert failed (x1 < rectX r0 - 40 && y1 > rectY r0)
+  let edgeX = rectX r1 + rectW r1 + 4
+      edgeY = rectY r1 + rectH r1 / 2
+  assertJustM failed (dragWindowEdge ctx inp0 still (V2 edgeX edgeY) (V2 (edgeX + 30) edgeY)) $ \r2 ->
+    assertGt failed (rectW r2) (rectW r1 + 20)
+  _ <- sameAsFresh inp0 still
+  _ <- sameAsFresh inp0 still
+  let small = withInput 520 360
+  _ <- runFrame ctx small still
+  _ <- sameAsFresh small still
+  _ <- runFrame ctx small (ui True (V2 100 100))
+  _ <- sameAsFresh small (ui True (V2 100 100))
+  void (sameAsFresh small (ui True (V2 100 100)))
+
+-- | A custom widget in a window is asked for its height at the width the
+-- window gives it. A measure whose answer there changes while its answer at
+-- the solve's offered width does not keeps the solve, but the window is
+-- placed again rather than given back what placing it left.
+runWindowCustomMeasurePlacementTest :: Context -> IORef Int -> IO ()
+runWindowCustomMeasurePlacementTest ctx failed = do
+  let inp = withInput 640 400
+      ui h = column $ fmap snd $ window True "Tools" $ column $ do
+        spacer (Fixed 240) (Fixed 1)
+        fst <$> customWidget defaultCustomWidgetSpec
+          { widgetMeasure = Just (\_ (w, _) -> if w >= 1e8 then (100, 20) else (w, h))
+          , widgetLayout = fillW defaultLayout
+          }
+      heightOf = maybe 0 (rectH . respRect)
+  short <- warmup2 ctx inp (ui 30)
+  assertEq failed 30 (heightOf short)
+  cache <- readIORef (ctxLayoutCache ctx) >>= evaluate >>= makeStableName
+  _ <- runFrame ctx inp (ui 60)
+  cache' <- readIORef (ctxLayoutCache ctx) >>= evaluate >>= makeStableName
+  assert failed (cache == cache')
+  tall <- evalUi ctx inp (ui 60)
+  assertEq failed 60 (heightOf tall)
+  reused <- arenaRects ctx
+  fresh <- newContext
+  void $ warmup2 fresh inp (ui 60)
+  assertEq failed reused =<< arenaRects fresh
 
 -- Wheeling over a window's body scrolls the window, not the page, whether the
 -- window is declared inside a page scroll area or beside one.
@@ -348,10 +393,7 @@ runWindowContentChurnTest ctx failed = do
           void $ label "static row"
           )
   _ <- warmup2 ctx inp0 (ui 0)
-  counter <- newIORef (1 :: Int)
-  allClip <- replicateM 30 $ do
-    k <- readIORef counter
-    writeIORef counter (k + 1)
+  allClip <- forM [1 .. 30] $ \k -> do
     _ <- runFrame ctx inp0 (ui k)
     dmg <- takeDamage ctx
     case dmg of
@@ -372,15 +414,10 @@ runScrolledDebugToggleTest ctx failed = do
         when open $ void (window True "Debug" (label "fps"))
         pure dbgBtn
   dbgBtn <- warmup2 ctx inp0 ui
-  let pos = centerOf dbgBtn
-  _ <- runClick ctx inp0 ui pos
-  spans <- collectOverlayTextSpans ctx inp0
-  let titles = [t | (_, t, _, _, _) <- spans, title `T.isInfixOf` t]
-  assert failed (not (null titles))
+  _ <- runClick ctx inp0 ui (centerOf dbgBtn)
+  assert failed . hasText title =<< collectOverlayTextSpans ctx inp0
   _ <- runFrame ctx inp0 ui
-  spansAfter <- collectOverlayTextSpans ctx inp0
-  let titlesAfter = [t | (_, t, _, _, _) <- spansAfter, title `T.isInfixOf` t]
-  assert failed (not (null titlesAfter))
+  assert failed . hasText title =<< collectOverlayTextSpans ctx inp0
 
 runWindowResizeTest :: Context -> IORef Int -> IO ()
 runWindowResizeTest ctx failed = do
@@ -391,8 +428,7 @@ runWindowResizeTest ctx failed = do
     assert failed (w0 > 0 && h0 > 0)
     let hoverAt p = inp0 {inputMousePos = p}
         expectCursor p kind = do
-          k <- uiCursorKind ctx (hoverAt p)
-          assertEq failed k kind
+          assertEq failed kind =<< uiCursorKind ctx (hoverAt p)
     expectCursor (V2 (x0 + w0 + 4) (y0 + h0 + 4)) UiCursorNwseResize
     expectCursor (V2 (x0 - 4) (y0 - 4)) UiCursorNwseResize
     expectCursor (V2 (x0 + w0 + 4) (y0 - 4)) UiCursorNeswResize
@@ -447,7 +483,7 @@ runWindowResizeHaloHitTest ctx failed = do
       destX = bx + bw + 4
       press = pressAt inp0 grab
   _ <- runFrame ctx press ui
-  let moved = press {inputMousePos = V2 (destX + 24) (y0 + 22), inputMousePressed = False}
+  let moved = press {inputMousePos = V2 (destX + 24) (y0 + 22), inputButtonsPressed = noButtons}
   _ <- runFrame ctx moved ui
   ((_, win1), _, _, _) <- runFrame ctx (inp0 {inputMousePos = V2 destX (y0 + 22)}) ui
   let Rect x1 y1 _ h1 = respRect win1
@@ -484,12 +520,12 @@ runHeadingMonoTruncateTest ctx failed = do
         heading "Draw"
         _ <- label "NormalLabel"
         kvMono "font" longPath)
+      fontSpans spans = [(r, t) | (r, t, _, _, _) <- spans, "JetBrainsMono" `T.isInfixOf` t || "..." `T.isInfixOf` t]
   win <- warmup2 ctx inp ui
   let Rect wx wy ww wh = respRect win
       contentRight = wx + ww - padR windowPad
   spans <- collectOverlayTextSpans ctx inp
-  let fontSpans = [(r, t) | (r, t, _, _, _) <- spans, "JetBrainsMono" `T.isInfixOf` t || "..." `T.isInfixOf` t]
-  case fontSpans of
+  case fontSpans spans of
     [(Rect fx _ fw _, t)] -> do
       assert failed ("..." `T.isSuffixOf` t)
       assert failed (abs (fx + fw - contentRight) < 2.0)
@@ -497,8 +533,7 @@ runHeadingMonoTruncateTest ctx failed = do
   assertJustM failed (dragWindowEdge ctx inp ui (V2 (wx - 4) (wy + wh / 2)) (V2 (wx - 1100) (wy + wh / 2))) $ \(Rect wxWide _ wwWide _) -> do
     assertGt failed wwWide (ww + 800)
     spansWide <- collectOverlayTextSpans ctx inp
-    let fontSpansWide = [(r, t) | (r, t, _, _, _) <- spansWide, "JetBrainsMono" `T.isInfixOf` t || "..." `T.isInfixOf` t]
-    case fontSpansWide of
+    case fontSpans spansWide of
       [(Rect fx2 _ fw2 _, t2)] -> do
         assert failed (t2 == longPath)
         assert failed (not ("..." `T.isSuffixOf` t2))

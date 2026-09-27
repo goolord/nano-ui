@@ -1,36 +1,68 @@
 -- | The per-frame 'Input' record backends fill in and views read: pointer
--- state, keys and modifiers, typed characters, scroll, window size, and file
--- drops, with the cursor kinds a widget can ask for.
+-- state, keys and modifiers, typed characters, scroll, window size, file
+-- drops and input-method composition, plus the cursor kinds a widget can
+-- request.
 module NanoUI.Input
   ( -- * Input
     Input (..)
+  , Pressable (..)
   , emptyInput
   , clearEphemeral
   , inputInteracted
   , inputPointerHeld
 
-    -- * Keys and buttons
+    -- * Mouse buttons
+  , MouseButton (..)
+  , mouseButtonNumber
+  , MouseButtons
+  , noButtons
+  , buttonsMember
+  , buttonsNull
+  , buttonsInsert
+  , buttonsDelete
+  , buttonsToList
+  , buttonsFromList
+  , anyButtonPressed
+  , anyButtonReleased
+  , applyMouseButton
+  , applyPointerLeave
+  , inputMouseDown
+  , inputMousePressed
+  , inputMouseReleased
+  , inputMouseRightDown
+  , inputMouseRightPressed
+  , inputMouseRightReleased
+
+    -- * Keys
   , Key (..)
   , Modifiers (..)
-  , MouseButton (..)
-  , applyMouseButton
   , appendInputKey
-  , emptyInputKeys
   , inputKeysFromList
   , inputKeysNull
   , inputKeysElem
   , foldInputKeys
+  , applyKey
+  , releaseAllKeys
+  , noModifiers
+  , modPrimary
+  , primaryModifiers
+  , modJump
+  , modMacCommand
 
     -- * File drops
   , DropType (..)
   , DropEvent (..)
-  , emptyDropEvents
   , appendDropEvent
 
     -- * Cursors
   , UiCursorKind (..)
   , grabHoverKind
   , grabDragKind
+
+    -- * Input methods
+  , Composition (..)
+  , applyComposition
+  , InputPurpose (..)
   ) where
 
 import NanoUI.Internal.Input

@@ -14,15 +14,17 @@ module NanoUI.Internal.Context.Overlay
   , endModal
   , beginFrameModal
   , modalDamageFlip
+  , takeKeyPress
   ) where
 
 import Data.IORef (readIORef)
 import Data.IntMap.Strict qualified as IM
+import Data.IntSet qualified as IS
 
 import NanoUI.Internal.Context.Core
 import NanoUI.Internal.Context.Types (Context (..), InteractionState (..), OverlayState (..), PointerRoute (..), intKey)
 import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
-import NanoUI.Internal.Input (Input, Key (KeyEscape), inputKeys, inputKeysElem, withoutPointer)
+import NanoUI.Internal.Input (Input, Key (KeyEscape), Pressable (..), withoutPointer)
 import NanoUI.Internal.Types (Rect, V2, rectHit, rectNonEmpty)
 
 -- | Whether any widget has keyboard focus or a text-edit menu is open.
@@ -41,7 +43,7 @@ modalActive ctx = getsOverlay ctx (\os -> osModalWasActive os || osModalActive o
 overlayConsumesQuit :: Context -> Input -> IO Bool
 overlayConsumesQuit ctx inp = do
   consumed <- getsOverlay ctx osEscapeConsumed
-  pure (inputKeysElem KeyEscape (inputKeys inp) && consumed)
+  pure (pressedOnceIn KeyEscape inp && consumed)
 
 -- | Mark Escape as handled so closing an overlay does not also quit the app.
 markEscapeConsumed :: Context -> IO ()
@@ -105,8 +107,8 @@ endModal :: Context -> IO ()
 endModal ctx =
   modifyOverlay ctx (\os -> os {osModalDepth = max 0 (osModalDepth os - 1)})
 
--- | Save the previous modal flag, then clear current depth and Escape and Tab
--- consumption.
+-- | Save the previous modal flag, then clear current depth and Escape, Tab
+-- and key consumption.
 beginFrameModal :: Context -> IO ()
 beginFrameModal ctx =
   modifyOverlay ctx $ \os ->
@@ -116,7 +118,17 @@ beginFrameModal ctx =
       , osModalDepth = 0
       , osEscapeConsumed = False
       , osTabConsumed = False
+      , osKeysTaken = IS.empty
       }
+
+-- | Claim the key press at index @i@ of this frame's keys for a shortcut.
+-- Returns 'False' if another shortcut already claimed it.
+takeKeyPress :: Context -> Int -> IO Bool
+takeKeyPress ctx i = do
+  taken <- getsOverlay ctx (IS.member i . osKeysTaken)
+  if taken
+    then pure False
+    else True <$ modifyOverlay ctx (\os -> os {osKeysTaken = IS.insert i (osKeysTaken os)})
 
 -- | Whether modal presence changed since the preceding frame.
 modalDamageFlip :: Context -> IO Bool

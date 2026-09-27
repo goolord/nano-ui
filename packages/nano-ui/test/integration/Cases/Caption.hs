@@ -53,7 +53,5 @@ runCaptionButtonsTest ctx failed = do
   -- The close button is the last of the three.
   let closeW = capButtonW defaultCaptionConfig
       close = Rect (rectX buttons + rectW buttons - closeW) (rectY buttons) closeW (rectH buttons)
-      (pressInp, releaseInp) = clickPair inp0 (spanCenter close)
-  _ <- runFrame ctx pressInp ui
-  ((action1, _), _, _, _) <- runFrame ctx releaseInp ui
+  (action1, _) <- runClick ctx inp0 ui (spanCenter close)
   assertEq failed action1 (Just CaptionClose)

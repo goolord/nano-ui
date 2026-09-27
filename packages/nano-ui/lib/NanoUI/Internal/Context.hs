@@ -6,12 +6,21 @@
 -- module; views normally only need "NanoUI".
 module NanoUI.Internal.Context
   ( Context (..)
+  , module NanoUI.Internal.Context.Core
+  , module NanoUI.Internal.Context.Scroll
+  , module NanoUI.Internal.Context.Animation
+  , module NanoUI.Internal.Context.Drawing
+  , module NanoUI.Internal.Context.Overlay
   , TextInputMenu (..)
   , TextInputDrag (..)
   , TextFieldClickCell (..)
   , WindowResizeEdge (..)
   , WindowResizeDrag (..)
   , DamageState (..)
+  , PrevFrame (..)
+  , ImagePaint (..)
+  , emptyPrevFrame
+  , PrevWalk (..)
   , OverlayState (..)
   , DrawingCacheState (..)
   , DrawingEntry (..)
@@ -21,117 +30,30 @@ module NanoUI.Internal.Context
   , WidgetTextPlacement (..)
   , InteractionState (..)
   , PointerRoute (..)
-  , getsInteraction
-  , modifyInteraction
-  , getsOverlay
-  , modifyOverlay
-  , getsDamage
-  , modifyDamage
-  , takeTextEditLastAction
-  , pointerHeldOffLayers
+  , FocusKind (..)
+  , KeyClaim (..)
+  , drawingKeyClaim
+  , InputMethodRequest (..)
+  , FocusRequest (..)
   , intKey
-  , markDirty
-  , markDirtyCovered
-  , clearDirty
-  , isDirty
-  , setWakeLoop
-  , requestWakeAt
-  , requestWakeAfter
-  , getWakeAt
-  , clearWakeAt
-  , takeDamage
-  , takeDamagePieces
   , DamageRequest (..)
-  , requestDamage
-  , damageWidget
-  , damageKey
-  , damageRect
-  , damagePeers
-  , damageFull
-  , registerPopupConfig
-  , lookupPopupConfig
-  , registerDrawing
-  , lookupDrawing
-  , cachedDrawingOps
-  , cachedWidgetLayout
-  , lookupDrawFitEnvelope
-  , pruneDrawOpCache
   , CustomMeasureFn
   , CustomDrawContext (..)
   , CustomDrawBuild
-  , registerCustomDrawing
-  , registerCustomEntry
-  , lookupCustomDrawing
-  , cachedCustomDrawingOps
-  , refreshCustomDrawingOps
-  , drawingOpsStale
   , CustomDrawingEntry (..)
-  , registerCustomMeasure
-  , lookupCustomMeasure
-  , customMeasureHooks
-  , lookupCustomDamageSlop
-  , resetDrawingScopeCache
-  , getStore
-  , setStore
-  , modifyStore
-  , writeSlots
-  , writeSlot
-  , adoptSlot
-  , recordSlot
-  , writeStoreBool
-  , isDisabled
-  , beginThemeScopes
-  , pushThemeScope
-  , themeScopesChanged
-  , scopeTheme
-  , scopeRawTheme
-  , currentTheme
-  , nodeTheme
-  , widgetTheme
-  , getScrollOffset
-  , setScrollOffset
-  , getScrollOffset2D
-  , setScrollOffset2D
-  , linkScrollAxes
-  , ScrollTuning (..)
-  , defaultScrollTuning
-  , getScrollTuning
-  , setScrollTuning
-  , getScrollStep
-  , setScrollStep
-  , resolveScrollStep
-  , ScrollAxes (..)
-  , ScrollMetrics (..)
-  , getScrollMetrics
-  , cacheScrollMetrics
-  , beginScrollMetrics
-  , getScrollOffsetIn
-  , setScrollOffsetIn
-  , ScrollBehavior (..)
-  , ScrollAlign (..)
-  , scrollTo
-  , scrollBy
-  , scrollPages
-  , scrollToStart
-  , scrollToEnd
-  , scrollIntoView
-  , scrollRectIntoView
-  , applyScrollTarget
-  , scrollTargetOffset
-  , scrollGliding
-  , clampScrollOffset
-  , stepScrollGlides
-  , getPrevRect
-  , getPrevClipRect
   , atlasTextureId
   , registerImage
+  , releaseImage
   , registerImages
   , lookupImageUv
+  , lookupImageSize
+  , withImageSlot
   , atlasSnapshot
   , atlasChanges
   , AtlasUpload (..)
   , withFontMetrics
   , withMonoFontMetrics
+  , withFontSize
   , withMeasureText
   , withFontResolver
   , wrapMeasureCache
@@ -141,6 +63,19 @@ module NanoUI.Internal.Context
   , withTheme
   , setTheme
   , getTheme
+  , ExplainState (..)
+  , DrawReuse (..)
+  , DrawReuseKey (..)
+  , ExplainedNode (..)
+  , setExplainLayout
+  , setDrawReuse
+  , getExplainLayout
+  , getExplainedNode
+  , followSystemTheme
+  , setThemeInView
+  , settleViewTheme
+  , setSystemAppearance
+  , getSystemAppearance
   , withClipboard
   , enableMeasureCache
   , setHost
@@ -160,36 +95,10 @@ module NanoUI.Internal.Context
   , getHotId
   , registerFocusable
   , getFocusables
-  -- Modal & Overlay
-  , textInputEditActive
-  , modalActive
-  , overlayConsumesQuit
-  , markEscapeConsumed
-  , markTabConsumed
-  , tabConsumed
-  , pointerBlockedByModal
-  , routedInput
-  , floatingLayerAt
-  , seedFloatingPanel
-  , beginModal
-  , endModal
-  , beginFrameModal
-  , modalDamageFlip
-  -- Animation
+  , isFocusable
+  , requestInputMethod
+  , fieldComposition
   , AnimationState (..)
-  , anyAnimating
-  , getLiveAnimations
-  , takeAnimSettled
-  , lookupAnimation
-  , startAnimation
-  , startAnimationEase
-  , startAnimationEaseDelay
-  , startSpring
-  , keepAnimationAlive
-  , repaintIfOrphan
-  , setAnimationValue
-  , tickAnimations
-  , getAnimationValue
   , FrameMsg (..)
   , decodeMessages
   , reduceMessages
@@ -251,11 +160,12 @@ import NanoUI.Internal.Draw (newDrawArena)
 import NanoUI.Internal.Draw qualified as Draw
 import NanoUI.Internal.Font (FontMetrics, WrapResult (..), fmLineHeight, measureTextIO, monospaceMetrics, scaleFontMetrics, wrapTextIO)
 import NanoUI.Internal.Frame.SpanArena (newSpanArena)
-import NanoUI.Internal.Id (WidgetId (..), initialIdContext)
+import NanoUI.Internal.Id (WidgetId (..), hashWidgetId, initialIdContext)
+import NanoUI.Internal.Input (Composition, InputPurpose)
 import NanoUI.Internal.Layout.Arena (getArenaScope, newNodeArena)
 import NanoUI.Internal.Store
-import NanoUI.Internal.Style (FontStyle, FontVariant (..), FontWeight, Theme, defaultTheme)
-import NanoUI.Internal.Types (ImageId)
+import NanoUI.Internal.Style (Appearance (..), FontStyle, FontVariant (..), FontWeight, Theme, defaultTheme)
+import NanoUI.Internal.Types (ImageId, Rect)
 
 -- | Register tightly packed RGBA8 pixels under an image id. Width and height
 -- are positive pixel counts. Returns 'False' for invalid data or atlas limits;
@@ -269,6 +179,13 @@ registerImage ctx iid w h px = do
   when ok (damageFull ctx >> markDirty ctx)
   pure ok
 
+-- | Remove an image from the atlas and free its space for later
+-- registrations. Anything still using the id draws the unknown-image
+-- placeholder.
+{-# INLINE releaseImage #-}
+releaseImage :: Context -> ImageId -> IO ()
+releaseImage ctx = Atlas.releaseImage (ctxImageAtlas ctx)
+
 -- | Register every image and return whether all succeeded. Successful earlier
 -- registrations remain in place if another image fails.
 registerImages :: Foldable f => Context -> f (ImageId, Int, Int, ByteString) -> IO Bool
@@ -280,6 +197,17 @@ registerImages ctx =
 {-# INLINE lookupImageUv #-}
 lookupImageUv :: Context -> ImageId -> IO (Maybe (Float, Float, Float, Float))
 lookupImageUv ctx = Atlas.lookupImageUv (ctxImageAtlas ctx)
+
+-- | A registered image's size in pixels, or 'Nothing' if unknown.
+{-# INLINE lookupImageSize #-}
+lookupImageSize :: Context -> ImageId -> IO (Maybe (Int, Int))
+lookupImageSize ctx = Atlas.lookupImageSize (ctxImageAtlas ctx)
+
+-- | A registered image's size in pixels and atlas UV bounds, passed to @k@,
+-- or @none@ if unknown ('Atlas.withImageSlot').
+{-# INLINE withImageSlot #-}
+withImageSlot :: Context -> ImageId -> IO r -> (Int -> Int -> Float -> Float -> Float -> Float -> IO r) -> IO r
+withImageSlot ctx = Atlas.withImageSlot (ctxImageAtlas ctx)
 
 -- | What a texture of the image atlas uploaded at generation @since@ (0 for
 -- none) needs, with the atlas's size, pixels and generation.
@@ -329,10 +257,17 @@ withFontResolver ::
 withFontResolver ctx rf rm = trackMetricSource ctx {ctxResolveFont = rf, ctxResolveMeasure = rm}
 
 -- | Replace base metrics and rebuild default measurement/resolution callbacks.
--- Returns a configured context sharing the original session state.
+-- Returns a configured context sharing the original session state. The
+-- default resolver treats a font size as a line height, so the default size
+-- becomes the metrics' line height ('withFontSize').
 withFontMetrics :: Context -> FontMetrics -> Context
 withFontMetrics ctx fm =
-  withDefaultResolvers ctx {ctxFontMetrics = fm, ctxMeasureText = measureTextIO fm}
+  withDefaultResolvers ctx {ctxFontMetrics = fm, ctxMeasureText = measureTextIO fm, ctxFontSize = fmLineHeight fm}
+
+-- | Set the default text size, in the font resolver's units. Backends whose
+-- base font size differs from its line height call this.
+withFontSize :: Context -> Float -> Context
+withFontSize ctx size = ctx {ctxFontSize = size}
 
 -- | Replace monospace metrics and rebuild default font-resolution callbacks.
 withMonoFontMetrics :: Context -> FontMetrics -> Context
@@ -461,20 +396,105 @@ clearMeasureCache ctx = do
 withTheme :: Context -> Theme -> IO Context
 withTheme ctx theme = ctx <$ setTheme ctx theme
 
--- | Change the base theme, invalidate text/layout caches, and request a full
--- repaint. An equal theme is a no-op.
+-- | Set a fixed base theme, invalidate text/layout caches, and request a
+-- full repaint. Setting the same theme is a no-op. Stops
+-- 'followSystemTheme'.
 setTheme :: Context -> Theme -> IO ()
 setTheme ctx th = do
+  writeIORef (ctxThemeFor ctx) Nothing
+  applyBaseTheme ctx th
+
+-- | 'setTheme' without leaving 'followSystemTheme'.
+applyBaseTheme :: Context -> Theme -> IO ()
+applyBaseTheme ctx th = do
   cur <- readIORef (ctxTheme ctx)
   when (cur /= th) $ do
     writeIORef (ctxTheme ctx) th
-    invalidateTextCaches ctx
-    damageFull ctx
-    markDirty ctx
+    repaintForTheme ctx
+
+-- | Drop text caches, repaint the whole window and request a frame.
+repaintForTheme :: Context -> IO ()
+repaintForTheme ctx = do
+  invalidateTextCaches ctx
+  damageFull ctx
+  markDirty ctx
+
+-- | 'setTheme' from a view. The new theme is visible immediately, but the
+-- repaint waits until the view is built ('settleViewTheme') and happens only
+-- if the frame ends on a different theme than it began with. A view can set
+-- the theme every frame, even twice, without repainting.
+setThemeInView :: Context -> Theme -> IO ()
+setThemeInView ctx th = do
+  writeIORef (ctxThemeFor ctx) Nothing
+  writeIORef (ctxTheme ctx) th
+
+-- | Repaint if a view changed the base theme ('setThemeInView') this frame.
+settleViewTheme :: Context -> Theme -> IO ()
+settleViewTheme ctx before = do
+  now <- readIORef (ctxTheme ctx)
+  when (now /= before) (repaintForTheme ctx)
 
 -- | Base session theme. Use 'currentTheme' to include the current paint scope.
 getTheme :: Context -> IO Theme
 getTheme ctx = readIORef (ctxTheme ctx)
+
+-- | Whether a full frame with no damage, built from the same view output
+-- as the last, takes the last frame's draw data instead of painting again
+-- (on by default). A benchmark that times paint on a still scene turns it
+-- off.
+setDrawReuse :: Context -> Bool -> IO ()
+setDrawReuse ctx on = writeIORef (ctxDrawReuse ctx) (DrawReuse on Nothing)
+
+-- | Toggle the layout overlay ("NanoUI.Internal.Frame.Explain"): a one-pixel
+-- outline inside every layout node, coloured by depth, and a tint on the
+-- hovered node. A change repaints the window and wakes the loop.
+setExplainLayout :: Context -> Bool -> IO ()
+setExplainLayout ctx on = do
+  cur <- getExplainLayout ctx
+  when (cur /= on) $ do
+    writeIORef (ctxExplain ctx) initialExplainState {esOn = on}
+    damageFull ctx
+    markDirtyCovered ctx
+
+-- | Whether the layout overlay is on ('setExplainLayout').
+{-# INLINE getExplainLayout #-}
+getExplainLayout :: Context -> IO Bool
+getExplainLayout ctx = esOn <$> readIORef (ctxExplain ctx)
+
+-- | The node under the pointer at the end of the last frame, while the layout
+-- overlay is on. 'Nothing' when it is off or no node is hovered.
+getExplainedNode :: Context -> IO (Maybe ExplainedNode)
+getExplainedNode ctx = fmap fst . esHover <$> readIORef (ctxExplain ctx)
+
+-- | Derive the base theme from the system appearance ('Nothing' when the
+-- backend cannot tell), e.g. with @'NanoUI.Internal.Style.lightDark' light
+-- dark@. Applies now and on every 'setSystemAppearance' change, until
+-- 'setTheme' sets a fixed theme. A view can instead pick the theme itself
+-- each frame:
+--
+-- > setUiTheme . lightDark defaultLightTheme defaultTheme =<< systemAppearance
+followSystemTheme :: Context -> (Maybe Appearance -> Theme) -> IO ()
+followSystemTheme ctx pick = do
+  writeIORef (ctxThemeFor ctx) (Just pick)
+  applyBaseTheme ctx . pick =<< readIORef (ctxSystemAppearance ctx)
+
+-- | Record the system's light or dark preference ('Nothing' if unknown).
+-- Backends call this on the UI thread; SDL reports at startup and on change,
+-- RGFW cannot ask. A change repaints the window, wakes the loop, and updates
+-- a theme set by 'followSystemTheme'. The same value again is a no-op.
+setSystemAppearance :: Context -> Maybe Appearance -> IO ()
+setSystemAppearance ctx appearance = do
+  cur <- readIORef (ctxSystemAppearance ctx)
+  when (cur /= appearance) $ do
+    writeIORef (ctxSystemAppearance ctx) appearance
+    readIORef (ctxThemeFor ctx) >>= mapM_ (\pick -> applyBaseTheme ctx (pick appearance))
+    -- Repaint even without followSystemTheme: views may read the appearance.
+    damageFull ctx
+    markDirty ctx
+
+-- | The system appearance the backend last reported.
+getSystemAppearance :: Context -> IO (Maybe Appearance)
+getSystemAppearance ctx = readIORef (ctxSystemAppearance ctx)
 
 -- | Install clipboard read/write callbacks. 'Nothing' means no text is
 -- available; a write returns 'False' when refused or unsupported.
@@ -551,15 +571,18 @@ newContext = do
   drawArena <- newDrawArena
   ctxHotId <- newIORef (WidgetId 0)
   ctxLastHotId <- newIORef (WidgetId 0)
+  ctxPointerReach <- newIORef Nothing
   ctxActiveId <- newIORef (WidgetId 0)
   ctxClickedId <- newIORef (WidgetId 0)
   ctxReleaseClickedId <- newIORef (WidgetId 0)
-  ctxPressPos <- newIORef Nothing
-  ctxRightPressPos <- newIORef Nothing
+  ctxPressPos <- newIORef Map.empty
   ctxFocusId <- newIORef (WidgetId 0)
   ctxFocusVisible <- newIORef False
+  ctxFocusRequest <- newIORef Nothing
+  ctxInputMethod <- newIORef Nothing
   ctxStore <- newIORef emptyWidgetStore
   ctxDamageState <- newIORef initialDamageState
+  ctxPrevWalk <- newIORef =<< newPrevWalk 0
   ctxOverlayState <- newIORef initialOverlayState
   ctxAnimationState <- newIORef initialAnimationState
   ctxScrollState <- newIORef initialScrollState
@@ -573,12 +596,16 @@ newContext = do
   ctxSpanOverlay <- newSpanArena
   ctxInteractionState <- newIORef initialInteractionState
   ctxCursorZones <- newIORef []
+  ctxCursorRegions <- newIORef []
   ctxImageAtlas <- Atlas.newImageAtlas
   ctxWakeLoop <- newIORef Nothing
+  ctxWoken <- newIORef False
   ctxWakeAt <- newIORef 0
   ctxHost <- newIORef Map.empty
   ctxTheme <- newIORef defaultTheme
   ctxThemeScopes <- newIORef =<< newThemeScopes
+  ctxSystemAppearance <- newIORef Nothing
+  ctxThemeFor <- newIORef Nothing
   ctxSpanCache <- newIORef IM.empty
   ctxWidgetTextCache <- newIORef IM.empty
   ctxDerivedCache <- newIORef IM.empty
@@ -587,6 +614,9 @@ newContext = do
   ctxWrapCache <- newIORef (WrapCache 0 emptyGenCache)
   ctxLastMetricSource <- newIORef Nothing
   ctxPaintFull <- newIORef True
+  ctxDrawReuse <- newIORef (DrawReuse True Nothing)
+  ctxDamageWanted <- newIORef True
+  ctxExplain <- newIORef initialExplainState
   -- References above use their field names; font-dependent defaults stay
   -- explicit, including the resolvers that close over this context.
   let fm0 = monospaceMetrics 12
@@ -595,6 +625,7 @@ newContext = do
         , ctxDrawArena = drawArena
         , ctxFontMetrics = fm0
         , ctxMonoFontMetrics = fm0
+        , ctxFontSize = fmLineHeight fm0
         , ctxMeasureText = measureTextIO fm0
         , ctxResolveFont = defaultResolveFont ctx
         , ctxResolveMeasure = defaultResolveMeasure ctx
@@ -652,6 +683,24 @@ registerFocusable ctx wid = do
     writePrimArray arr' idx wid
     writeIORef (ctxFocusablesCount ctx) (idx + 1)
 
+-- | Enable the input method this frame for the focused widget @wid@, with its
+-- caret in window coordinates ('Nothing' for a text field; the frame finds
+-- its caret) and the input purpose. Next frame @wid@ gets the composition
+-- ('fieldComposition'); backends read the text area from
+-- 'NanoUI.Internal.Frame.TextArea.textInputArea'. With no request the input
+-- method stays off; the last request of a build wins.
+requestInputMethod :: Context -> WidgetId -> Maybe Rect -> InputPurpose -> IO ()
+requestInputMethod ctx wid caret purpose = writeIORef (ctxInputMethod ctx) $! Just (InputMethodRequest wid caret purpose)
+
+-- | The frame's composition, if @wid@ has focus and owns it
+-- ('NanoUI.Internal.Frame.TextInput.claimComposition').
+fieldComposition :: Context -> WidgetId -> IO (Maybe Composition)
+fieldComposition ctx wid = do
+  focus <- readIORef (ctxFocusId ctx)
+  getsInteraction ctx $ \s -> case isComposition s of
+    Just (c, owner) | owner == wid && owner == focus && hashWidgetId owner /= 0 -> Just c
+    _ -> Nothing
+
 -- | Copy this frame's registered focus ids in declaration order. Modal
 -- filtering is applied separately when moving focus.
 {-# INLINE getFocusables #-}
@@ -660,3 +709,14 @@ getFocusables ctx = do
   count <- readIORef (ctxFocusablesCount ctx)
   arr <- readIORef (ctxFocusables ctx)
   forM [0 .. count - 1] (readPrimArray arr)
+
+-- | Whether @wid@ registered as focusable this frame ('registerFocusable'),
+-- without copying the list.
+isFocusable :: Context -> WidgetId -> IO Bool
+isFocusable ctx wid = do
+  count <- readIORef (ctxFocusablesCount ctx)
+  arr <- readIORef (ctxFocusables ctx)
+  let go i
+        | i >= count = pure False
+        | otherwise = readPrimArray arr i >>= \w -> if w == wid then pure True else go (i + 1)
+  go 0

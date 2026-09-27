@@ -152,7 +152,7 @@ victims = do
         (shown (slider' 0 100 50))
         (hotAt (\(Rect x y w h) -> V2 (x + w * 0.8) (y + h / 2)))
         noProbe
-    , Victim "knob" (shown (knob' 0 100 50)) (hotAt spanCenter) noProbe
+    , Victim "knob" (shown (knobWith' id 36 0 100 50)) (hotAt spanCenter) noProbe
     , Victim
         "color-picker"
         (shown (colorPicker' (colorRGBA 200 40 40 255)))
@@ -351,6 +351,7 @@ runPointerRoutingLintTest _ failed = do
       [ "NanoUI/Internal/Monad.hs" -- defines it
       , "NanoUI/Internal/Widgets/Node.hs" -- routes a floating panel's body and a dropdown's owner
       , "NanoUI/Internal/Widgets/Behavior.hs" -- useDismissable: a press anywhere else dismisses
+      , "NanoUI/Internal/Widgets/Popup.hs" -- tooltips: a press anywhere shuts one, and one covering its target stays
       ]
     complain msg = putStrLn ("  " <> msg) >> modifyIORef' failed (+ 1)
     haskellFiles dir = do
@@ -398,7 +399,7 @@ runPointerCaptureTest ctx failed = do
     assert failed (respHovered freed)
     -- A press is routed afresh even with the other button still down: with
     -- the right button held on the page, a left click in the window lands.
-    let rightHeld = win {inputMouseRightDown = True}
+    let rightHeld = win {inputButtonsHeld = buttonsFromList [MouseRight]}
         chord = pressAt rightHeld onButton
     _ <- frame (fst (rightClickPair win onTrack))
     _ <- frame chord

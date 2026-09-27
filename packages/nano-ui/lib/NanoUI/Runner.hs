@@ -16,7 +16,6 @@ module NanoUI.Runner
 import Control.Concurrent (threadDelay)
 import Control.Exception (finally, mask)
 import Control.Monad (forM_, unless, when)
-import Data.List (scanl')
 import Data.Maybe (isJust)
 import Numeric (showFFloat)
 import System.Environment (lookupEnv)
@@ -33,6 +32,8 @@ import NanoUI.Internal.Context
 import NanoUI.Internal.Debug
 import NanoUI.Internal.Frame.Input (needsRedraw)
 import NanoUI.Internal.Input
+import NanoUI.Internal.NativeWindow (clearWindowClose, quitRequested, requestWindowClose)
+import NanoUI.Internal.Tasks (cancelTasks)
 import NanoUI.Internal.Types (V2 (..))
 
 -- | Standard upper bound for single-frame delta-time (50ms).
@@ -61,19 +62,21 @@ alignFrameStart periodSec lastT = do
       now <- getMonotonicTime
       when (now < target) (fullSpin target)
 
--- | Stamp multi-click counts into an 'Input' record: presses within 5 pixels
--- and 0.4 seconds of the previous one count up to a triple click. The ref
--- holds the time, position and count of the previous press.
-stampClicks :: IORef (Double, V2, Int) -> Input -> IO Input
+-- | Stamp multi-click counts into an 'Input'. A press of the same buttons
+-- within 5 pixels and 0.4 seconds of the previous press counts up, to a
+-- triple click at most. The ref holds the previous press's time, position,
+-- buttons and count.
+stampClicks :: IORef (Double, V2, MouseButtons, Int) -> Input -> IO Input
 stampClicks ref inp
-  | not (inputMousePressed inp) = pure inp
+  | not (anyButtonPressed inp) = pure inp
   | otherwise = do
       now <- getMonotonicTime
-      (t, V2 px py, n) <- readIORef ref
+      (t, V2 px py, prevButtons, n) <- readIORef ref
       let pos@(V2 x y) = inputMousePos inp
+          buttons = inputButtonsPressed inp
           close = (x - px) * (x - px) + (y - py) * (y - py) <= 25
-          !n' = if close && now - t <= 0.4 then min 3 (n + 1) else 1
-      writeIORef ref (now, pos, n')
+          !n' = if close && buttons == prevButtons && now - t <= 0.4 then min 3 (n + 1) else 1
+      writeIORef ref (now, pos, buttons, n')
       pure (inp {inputMouseClicks = n'})
 
 -- | Concurrency lock for drawing vs async callbacks (e.g. resize watchers).
@@ -108,11 +111,7 @@ shouldRedrawFrame ctx prevInp curInp wasAnim continuous refreshDue = do
       -- so an animation that just ended is the only animation case left: it
       -- needs one final frame.
       need <- needsRedraw ctx prevInp curInp
-      let pointerEdge =
-            inputMousePressed curInp
-              || inputMouseReleased curInp
-              || inputMouseRightPressed curInp
-              || inputMouseRightReleased curInp
+      let pointerEdge = anyButtonPressed curInp || anyButtonReleased curInp
           scrollEdge = inputScroll curInp /= V2 0 0
       pure (need || wasAnim || pointerEdge || scrollEdge)
 
@@ -125,9 +124,13 @@ data SessionDriver ev = SessionDriver
   , sdApplyEvent    :: Input -> ev -> Input
     -- ^ Fold an event into the 'Input' state.
   , sdIsButtonEdge  :: ev -> Bool
-    -- ^ Predicate identifying click/press boundaries where the event stream should be split.
+    -- ^ Predicate identifying click/press boundaries where the event stream
+    -- should be split. 'NanoUI.Internal.Input.takeFrame' also splits after a
+    -- command key whose order relative to other input matters.
   , sdIsSessionQuit :: ev -> Bool
-    -- ^ Predicate for window close requests.
+    -- ^ Predicate for window close requests. A request ends the session
+    -- unless 'NanoUI.wsExitOnCloseRequest' is off, in which case the next
+    -- frame sees it through 'NanoUI.winCloseRequested'.
   , sdSyncDisplay   :: Context -> Input -> IO (Context, Input)
     -- ^ Backend-specific display synchronization (window dimensions, DPI scale).
   , sdDebug         :: DebugSamplerRef
@@ -205,14 +208,17 @@ wakePadMs = 2
 debugHudTimeout :: Int
 debugHudTimeout = round (debugRefreshSec * 1000)
 
--- | Run an event-driven session loop until a termination event or user quit condition.
+-- | Run an event-driven session loop until the window is closed, Ctrl+C is
+-- pressed outside a text field, a view calls 'NanoUI.quitUi', or
+-- 'sdShouldQuit' returns 'True'. Background tasks started by the view are
+-- cancelled on exit.
 runSessionLoop ::
   SessionDriver ev ->
   Context ->
   Input ->
   IO ()
 runSessionLoop drv ctx0 inp0 = do
-  clickTracker <- newIORef (0, V2 (-999) (-999), 0)
+  clickTracker <- newIORef (0, V2 (-999) (-999), noButtons, 0)
   startT <- getMonotonicTime
   trace <- newLoopTrace startT
 
@@ -272,20 +278,19 @@ runSessionLoop drv ctx0 inp0 = do
                 let hudDue = timeout == debugHudTimeout && debugActive && null events
                 pure (events, dueNow || wakeDue || hudDue)
 
-        let (group, rest) = splitFrame (sdIsButtonEdge drv) pending
         now <- getMonotonicTime
         let !dt = min maxFrameDt (realToFrac (now - lastT))
-            steps = scanl' (sdApplyEvent drv) (clearEphemeral inp {inputDeltaTime = dt}) group
-            -- Ctrl+C quits as the batch leaves it, and as each event typed it:
-            -- a later event in a busy batch may have released Ctrl.
-            quitChecks =
-              last steps : zipWith (\s -> sdApplyEvent drv s {inputChars = mempty}) steps group
+            (frameInp, group, rest) =
+              takeFrame (sdApplyEvent drv) (sdIsButtonEdge drv) (clearEphemeral inp {inputDeltaTime = dt}) pending
         -- Hard quit is ignored while a text editor is active.
         hardQuit <-
-          if any isHardQuitInput quitChecks then not <$> textInputEditActive ctx else pure False
-        unless (hardQuit || any (sdIsSessionQuit drv) group) $ do
+          if isHardQuitInput frameInp then not <$> textInputEditActive ctx else pure False
+        -- A close request ends the session, or is passed to the view.
+        let closing = any (sdIsSessionQuit drv) group
+        closeNow <- if closing && not hardQuit then requestWindowClose ctx else pure False
+        unless (hardQuit || closeNow) $ do
           noteDebugLoop (sdDebug drv) dt
-          inpStamped <- stampClicks clickTracker (last steps)
+          inpStamped <- stampClicks clickTracker frameInp
           (ctx', inpSynced) <- sdSyncDisplay drv ctx inpStamped
           shouldDraw <- if pendingDirty
             then pure True
@@ -298,6 +303,7 @@ runSessionLoop drv ctx0 inp0 = do
             then sdDraw drv ctx' inpSynced (wasAnim && not animNow)
             else pendingDirty <$ noteDebugSkip (sdDebug drv)
           sdOnCursor drv ctx' inpSynced
+          when closing (clearWindowClose ctx')
           animAfter <- anyAnimating ctx'
           traceLoopPass trace (length group) shouldDraw $
             (if pendingDirty then "D" else "")
@@ -306,10 +312,11 @@ runSessionLoop drv ctx0 inp0 = do
               ++ (if refreshDue then "T" else "")
           -- Open modals/overlays consume Escape/Quit before the app sees it.
           overlayQuit <- overlayConsumesQuit ctx' inpSynced
+          quit <- quitRequested ctx'
           -- The next pass was animating if this frame was, even when this
           -- frame's tick finished the animation: its view read the value
           -- before that tick, so one more (settle) frame draws the end value.
-          unless (sdShouldQuit drv inpSynced && not overlayQuit) $
+          unless (quit || (sdShouldQuit drv inpSynced && not overlayQuit)) $
             loop ctx' inpSynced rest now dirtyOut animNow
 
-  loop ctx0 inp0 [] startT False False
+  loop ctx0 inp0 [] startT False False `finally` cancelTasks ctx0

@@ -38,7 +38,7 @@ Fix order:
 
 Constraints:
 
-- The manual `sdl` flag on `nano-ui-sdl`, `nano-ui-demo` and `nano-ui-form` defaults to True, and `cabal.project` enables it, so `-fsdl` is never needed.
+- The manual `sdl` flag on `nano-ui-sdl`, `nano-ui-demo`, `nano-ui-form` and `nano-ui-markdown` defaults to True, and `cabal.project` enables it, so `-fsdl` is never needed.
 - `cabal run nano-ui-sdl-demo -O2` passes `-O2` to the exe, not GHC. For optimize: `cabal run nano-ui-sdl-demo --enable-optimization` or `--ghc-options=-O2`.
 - Keep SDL `pkgconfig-depends` inside `if flag(sdl)`.
 - No em dashes in repo docs or comments.

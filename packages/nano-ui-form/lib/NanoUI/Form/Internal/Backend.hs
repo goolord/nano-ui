@@ -190,9 +190,7 @@ markFormSubmitted ctx prefix isSubmitted =
 
 -- | Check if a form has been submitted.
 isFormSubmitted :: Context -> Text -> IO Bool
-isFormSubmitted ctx prefix = do
-  fss <- getFormStore ctx prefix
-  pure (fssSubmitted fss)
+isFormSubmitted ctx prefix = fssSubmitted <$> getFormStore ctx prefix
 
 -- | Reset values and renew widget identity so cached control state cannot
 -- repopulate the form with its old values on the next frame.

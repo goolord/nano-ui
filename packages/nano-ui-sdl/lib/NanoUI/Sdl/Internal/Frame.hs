@@ -59,7 +59,7 @@ data WindowDecorations
   -- drawn and takes nothing from the view: it lies outside the window you
   -- can see, it is what the desktop resizes the window by, and it carries
   -- the desktop's drop shadow. The window is made that much larger, so
-  -- 'NanoUI.Backend.Sdl.sdlWindowSize' is still the size of the view. A
+  -- 'NanoUI.wsSize' is still the size of the view. A
   -- window that cannot be resized, or is fullscreen, has no use for the
   -- edges and is given only the shadow. Elsewhere this is a borderless
   -- window, and the compositor decides about the shadow.

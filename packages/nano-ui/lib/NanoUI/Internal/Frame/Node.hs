@@ -1,23 +1,24 @@
 -- | Per-node queries shared by the paint, span, scroll and hit passes: the
--- font a node renders and measures in, a scroll node's fields, and the room
--- a widget's adornments take.
+-- font a node renders and measures in, a scroll node's fields, the clip for
+-- a node's children, and the room a widget's adornments take.
 module NanoUI.Internal.Frame.Node
   ( resolveFontFor
   , nodeFontNative
   , resolveTextFont
   , nodeFontMetrics
   , readScrollNode
+  , childPaintClip
   , nodeAdornmentInsets
   ) where
 
 import Data.Text (Text)
-import NanoUI.Internal.Context (Context (..))
+import NanoUI.Internal.Context (Context (..), nodeTheme)
 import NanoUI.Internal.Draw.Types (TextFont (..))
 import NanoUI.Internal.Font (FontMetrics, isDefaultNodeFont, measureTextIO)
 import NanoUI.Internal.Frame.Scroll.Geometry
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Layout.Solve (scrollBarSlotOf)
-import NanoUI.Internal.Style (FontVariant (..), TextDecoration (..))
+import NanoUI.Internal.Style (FontVariant (..), TextDecoration (..), themePanel, variantFace)
 import NanoUI.Internal.Types (Rect (..))
 import NanoUI.Internal.WidgetText (textNodeFontStyle, textNodeFontVariant, textNodeFontWeight)
 
@@ -62,10 +63,13 @@ packedTextFont size si =
 -- metrics; everything else defers to the host resolver.
 {-# INLINE resolveTextFont #-}
 resolveTextFont :: Context -> TextFont -> IO (FontMetrics, Bool)
-resolveTextFont ctx (TextFont size variant weight style _)
+resolveTextFont ctx (TextFont size variant0 weight style _)
   | isDefaultNodeFont size weight style variant =
       pure (if variant == FontMono then ctxMonoFontMetrics ctx else ctxFontMetrics ctx, False)
   | otherwise = ctxResolveFont ctx size weight style variant
+  where
+    -- A colour-only variant draws in the regular face.
+    variant = variantFace variant0
 
 -- | Metrics of the font node @idx@ is styled with.
 nodeFontMetrics :: Context -> NodeIdx -> IO FontMetrics
@@ -87,6 +91,17 @@ readScrollNode na idx = do
   contentW <- getScrollContentW na idx
   let cfg = decodeScrollConfig si
   pure $! ScrollNode slot cfg (si /= 0 && scrollConfigNative2D cfg) dir pad contentMain contentW
+
+-- | The clip for the children of node @idx@ (type @nt@, placed at @rect@),
+-- matching "NanoUI.Internal.Frame.Paint": a scroller's viewport, a panel's
+-- inside-border rect, or the node's own rect. Plain containers (row, column,
+-- grid) do not clip and return 'Nothing'.
+childPaintClip :: Context -> NodeIdx -> NodeType -> Rect -> IO (Maybe Rect)
+childPaintClip ctx idx nt rect@(Rect x y w h) = case nt of
+  NodeContainer -> pure Nothing
+  NodeScrollContainer -> (\sn -> Just (scrollNodeViewport sn x y w h)) <$> readScrollNode (ctxNodeArena ctx) idx
+  NodePanel -> (\theme -> Just (borderContentClip (themePanel theme) rect)) <$> nodeTheme ctx idx
+  _ -> pure (Just rect)
 
 -- | How far the adornment rows ('adornRows') of widget @idx@, whose left edge
 -- is at @x@ and which is @w@ wide, reach in from its left edge and from its

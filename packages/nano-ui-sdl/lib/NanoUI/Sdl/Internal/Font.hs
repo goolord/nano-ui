@@ -46,6 +46,8 @@ import Data.Primitive.SmallArray
   , smallArrayFromList
   )
 import Data.Primitive.PrimArray (PrimArray, indexPrimArray, newPrimArray, primArrayFromList, readPrimArray, setPrimArray, sizeofPrimArray, unsafeFreezePrimArray, writePrimArray)
+import Data.Primitive.PrimVar (PrimVar, newPrimVar, readPrimVar, writePrimVar)
+import Control.Monad.Primitive (RealWorld)
 import Data.Int (Int32)
 import Data.Maybe (fromMaybe, listToMaybe, mapMaybe)
 import Data.Text (Text)
@@ -63,7 +65,7 @@ import Data.Unique (hashUnique, newUnique)
 import qualified Data.ByteString as BS
 import NanoUI (FontVariant (..))
 import NanoUI.Backend
-import NanoUI.Internal.Context.Types (cachedGen, emptyGenCache)
+import NanoUI.Internal.Context.Types (GenCache, cachedGen, emptyGenCache)
 import NanoUI.Testing
 import SDL3.Sys.Bindgen.Render (SDL_Renderer, SDL_Texture)
 import SDL3.Sys.Surface (destroySurface)
@@ -119,6 +121,9 @@ data GlyphAtlas = GlyphAtlas
   , -- | Glyph slots by font id, then glyph index: what shaped text draws.
     -- Closing a font drops its inner map instead of scanning every glyph.
     gaIndexEntries :: !(IORef (IM.IntMap (IM.IntMap (Maybe GlyphSlot))))
+  , -- | Frames begun ('prepareGlyphAtlasForFrame'), by which the text caches
+    -- count what a frame looks up ('RunCache').
+    gaFrame :: !(IORef Int)
   }
 
 -- Backend effects are confined to the owning SDL thread. Retained snapshots
@@ -128,13 +133,51 @@ data GlyphAtlas = GlyphAtlas
 ensureAlive :: SdlFont -> IO ()
 ensureAlive sf = readIORef (sfAlive sf) >>= (`unless` fail "font backend used after closeFont")
 
--- | Entries per generation of each shaped-run cache on a 'FontMetrics'.
+-- | Entries per generation of the shaped-line cache on a 'FontMetrics', and
+-- the fewest a generation of its other text caches holds ('RunCache').
 -- Dynamic, ever-changing text (FPS counters, timers, percentages, mouse
 -- positions) generates unique strings over time, so the caches are bounded.
 -- Atlas exhaustion is recovered by the deferred reset in
 -- 'prepareGlyphAtlasForFrame', which also clears the quad cache.
 runCacheCap :: Int
 runCacheCap = 1024
+
+-- | A text cache whose generations hold 'runCacheCap', or twice the weight
+-- it looked up in the last frame it was used in when that is more. At a
+-- fixed size, a frame that drew more texts in a font than a generation holds
+-- rotated each out before the next frame drew it again, and shaped and
+-- placed every one again each frame. Text that changes still leaves after
+-- two generations, so a cache holds about four frames' lookups at most.
+data RunCache v = RunCache
+  { rcGens :: !(IORef (GenCache Text v))
+  , -- | The frame being counted ('gaFrame').
+    rcFrame :: !(PrimVar RealWorld Int)
+  , -- | The weight looked up in that frame so far.
+    rcLooked :: !(PrimVar RealWorld Int)
+  , -- | The weight a generation holds.
+    rcCap :: !(PrimVar RealWorld Int)
+  }
+
+newRunCache :: IO (RunCache v)
+newRunCache = RunCache <$> newIORef emptyGenCache <*> newPrimVar 0 <*> newPrimVar 0 <*> newPrimVar runCacheCap
+
+-- | The entry for a text, or what @make@ returns, which is kept. The counts
+-- are unboxed, so a hit still allocates nothing.
+{-# INLINE cachedRun #-}
+cachedRun :: GlyphAtlas -> RunCache v -> Text -> IO v -> IO v
+cachedRun ga RunCache {..} txt make = do
+  frame <- readIORef (gaFrame ga)
+  counted <- readPrimVar rcFrame
+  looked <- readPrimVar rcLooked
+  let !w = textWeight txt
+  if frame == counted
+    then writePrimVar rcLooked (looked + w)
+    else do
+      writePrimVar rcFrame frame
+      writePrimVar rcLooked w
+      writePrimVar rcCap (max runCacheCap (2 * looked))
+  cap <- readPrimVar rcCap
+  cachedGen cap textWeight rcGens txt make
 
 -- | Kerning pairs per generation of a font's pair cache.
 kernCacheCap :: Int
@@ -171,7 +214,7 @@ newGlyphAtlas :: Ptr SDL_Renderer -> IO GlyphAtlas
 newGlyphAtlas ren = do
   atlas <- textAtlasCreate ren
   when (atlas == nullPtr) $ fail "nano_ui_text_atlas_create failed (glyph)"
-  GlyphAtlas atlas <$> newIORef 0 <*> newIORef False <*> newIORef IM.empty
+  GlyphAtlas atlas <$> newIORef 0 <*> newIORef False <*> newIORef IM.empty <*> newIORef 0
 
 destroyGlyphAtlas :: GlyphAtlas -> IO ()
 destroyGlyphAtlas = textAtlasDestroy . gaAtlas
@@ -516,11 +559,14 @@ buildGlyphFontMetrics ga sf scale = do
   -- ligatures, contextual forms, fallback fonts and right-to-left runs. A
   -- line's layout is kept with its metric snapshot, which survives atlas
   -- resets; the glyph quads drawn from it hold atlas UVs, so their cache is
-  -- dropped with the atlas epoch. Each cache keeps two generations of
-  -- 'runCacheCap' entries.
-  preparedRef <- newIORef emptyGenCache
+  -- dropped with the atlas epoch. The prepared texts and the quads keep as
+  -- many as a frame looks up ('RunCache'). The shaped lines keep two
+  -- generations of 'runCacheCap': drawing texts already cached shapes
+  -- nothing, and a fixed size keeps the wrap probes that measuring shapes
+  -- from growing the cache.
+  preparedRun <- newRunCache
   shapedRef <- newIORef emptyGenCache
-  quadCacheRef <- newIORef emptyGenCache
+  quadRun <- newRunCache
   quadEpochRef <- newIORef =<< readIORef (gaEpoch ga)
 
   let
@@ -549,11 +595,11 @@ buildGlyphFontMetrics ga sf scale = do
           quadEp <- readIORef quadEpochRef
           when (quadEp /= ep) $ do
             writeIORef quadEpochRef ep
-            writeIORef quadCacheRef emptyGenCache
+            writeIORef (rcGens quadRun) emptyGenCache
           -- Entries are kept wrapped so a hit returns them without allocating.
           -- Placing glyphs never resets the atlas (a full one resets at the
           -- next frame start), so these quads belong to this epoch.
-          cachedGen runCacheCap textWeight quadCacheRef txt $
+          cachedRun ga quadRun txt $
             Just <$> (placeGlyphs =<< shapeOf txt)
 
     -- Put a shaped line's glyphs in the atlas. A glyph the atlas has no room
@@ -601,7 +647,7 @@ buildGlyphFontMetrics ga sf scale = do
 
     prepareText txt = do
       ensureAlive sf
-      cachedGen runCacheCap textWeight preparedRef txt $ do
+      cachedRun ga preparedRun txt $ do
         let insertChar m c = IM.insert (ord c) c m
             chars = T.foldl' insertChar (T.foldl' insertChar IM.empty " HxM") txt
         advances <- traverse advanceLookup chars
@@ -839,11 +885,12 @@ resetGlyphAtlas cache = do
   textAtlasReset (gaAtlas ga)
   warmBaseFonts cache
 
--- | Frame-start atlas maintenance: reset the atlas if an insertion failed
--- since the last reset. Must run before the frame's UI pass records any
--- quads.
+-- | Frame-start atlas maintenance: count the frame, and reset the atlas if an
+-- insertion failed since the last reset. Must run before the frame's UI pass
+-- records any quads.
 prepareGlyphAtlasForFrame :: SdlFontCache -> IO ()
-prepareGlyphAtlasForFrame cache =
+prepareGlyphAtlasForFrame cache = do
+  modifyIORef' (gaFrame (sfcGlyphAtlas cache)) (+ 1)
   glyphAtlasFull cache >>= (`when` resetGlyphAtlas cache)
 
 -- | The primary (sans) family's source, for the debug readout.
@@ -878,13 +925,13 @@ reloadSdlFontCache cache source = do
   resetGlyphAtlas cache
 
 -- | Install the cache's base fonts as the context's measurement and glyph
--- metrics, and its sizes and variants as the font resolver. Text measurement
--- uses the sans font's shaped lines.
+-- metrics and default size, and its sizes and variants as the font resolver.
+-- Text measurement uses the sans font's shaped lines.
 withSdlFontCache :: SdlFontCache -> Context -> IO Context
 withSdlFontCache cache ctx = do
   scale <- readIORef (sfcScaleRef cache)
   (sans, mono) <- readIORef (sfcBaseEntries cache)
-  let metrics = withMonoFontMetrics (withFontMetrics ctx (cfeFm sans)) (cfeFm mono)
+  let metrics = withFontSize (withMonoFontMetrics (withFontMetrics ctx (cfeFm sans)) (cfeFm mono)) (sfcBasePt cache)
   pure $
     withFontResolver
       (wrapMeasureCache scale metrics (cfeMeasure sans))

@@ -1,8 +1,7 @@
 -- | Widget labels, numeric/colour formatting, and packed node-style encodings
 -- shared by construction, layout, and painting.
 module NanoUI.Internal.WidgetText
-  ( intValueText
-  , treeEncodeStyle
+  ( treeEncodeStyle
   , treeDecodeStyle
   , treeDecodeStripe
   , textInputFieldText
@@ -46,6 +45,7 @@ module NanoUI.Internal.WidgetText
   , packTextNodeStyle
   , textNodeFontKey
   , textNodeFontVariant
+  , textNodeFontTone
   , textNodeFontWeight
   , textNodeFontStyle
   , textNodeTextDecoration
@@ -56,24 +56,19 @@ module NanoUI.Internal.WidgetText
   , tabEncodeStyle
   ) where
 
+import Control.Applicative ((<|>))
 import Data.Bits ((.&.), (.|.), complement, shiftL, shiftR)
 import Data.Char (digitToInt, isHexDigit)
 import Data.Maybe (fromMaybe)
 import Data.Primitive.SmallArray (SmallArray, indexSmallArray, smallArrayFromList)
 import Data.Text (Text)
-import qualified Data.Text.Lazy as TL
-import qualified Data.Text.Lazy.Builder as TB
-import qualified Data.Text.Lazy.Builder.Int as TB
 import Data.Word (Word8)
 import GHC.Float (castFloatToWord32)
 import Numeric (showHex)
 import NanoUI.Internal.Font (FontMetrics (..), fmLineHeight, widgetContentInset)
-import NanoUI.Internal.Style (FontStyle (..), FontVariant (..), FontWeight (..), Layout (..), TextDecoration (..), Theme (..), styleBg)
+import NanoUI.Internal.Style (FontStyle (..), FontVariant (..), FontWeight (..), Layout (..), TextDecoration (..), Theme (..), Tone (..), styleBg, variantFace, variantTone)
 import NanoUI.Internal.Types (Color (..), Rect (..), clamp, colorA, colorB, colorG, colorR, colorRGBA, lerpColor)
 import qualified Data.Text as T
-
-intValueText :: Int -> Text
-intValueText = TL.toStrict . TB.toLazyText . TB.decimal
 
 -- | A tree row's button style: 'buttonFlagRow', and its depth in bits 0-7,
 -- whether it has children in bit 8, is expanded in bit 9, and is an odd row
@@ -250,16 +245,20 @@ colorFromHex txt = do
   (r, g, b, ma) <- colorPickerParseHex txt
   pure (colorRGBA r g b (fromMaybe 255 ma))
 
--- | A text node's style index: the layout's font variant, weight, slant and
--- decoration, and a row stripe code (see 'stripeColor') in bits 4-7.
+-- | A text node's style index: the layout's font face, weight, slant and
+-- decoration, a row stripe code (see 'stripeColor') in bits 4-7, and the
+-- tone in bits 18-20 (the 'Tone' plus one, or 0 for none). A colour-only
+-- variant packs as the regular face plus its tone, so it is measured in the
+-- base font.
 {-# INLINE packTextNodeStyle #-}
 packTextNodeStyle :: Layout -> Int -> Int
 packTextNodeStyle l stripe =
   (stripe `shiftL` 4)
-    .|. (fromEnum (layoutFontVariant l) .&. 0x0F)
+    .|. (fromEnum (variantFace (layoutFontVariant l)) .&. 0x0F)
     .|. ((fromEnum (layoutFontWeight l) .&. 0x0F) `shiftL` 8)
     .|. ((fromEnum (layoutFontStyle l) .&. 0x03) `shiftL` 12)
     .|. ((fromEnum (layoutTextDecoration l) .&. 0x03) `shiftL` 14)
+    .|. (maybe 0 ((+ 1) . fromEnum) (layoutFontTone l <|> variantTone (layoutFontVariant l)) `shiftL` 18)
 
 -- | The enum packed in the style bits at @shift@ under @mask@, or @fallback@
 -- when they hold no constructor.
@@ -278,6 +277,13 @@ textNodeFontKey size si = fromIntegral (castFloatToWord32 size) `shiftL` 16 .|. 
 {-# INLINE textNodeFontVariant #-}
 textNodeFontVariant :: Int -> FontVariant
 textNodeFontVariant = decodeStyleEnum 0 0x0F FontRegular
+
+-- | The tone packed in a text node's style index, if any.
+{-# INLINE textNodeFontTone #-}
+textNodeFontTone :: Int -> Maybe Tone
+textNodeFontTone si = case (si `shiftR` 18) .&. 0x07 of
+  0 -> Nothing
+  v -> Just (decodeStyleEnum 0 0x07 Danger (v - 1))
 
 -- | Decode weight bits, falling back to normal for an invalid enum value.
 {-# INLINE textNodeFontWeight #-}

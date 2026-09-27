@@ -1,6 +1,7 @@
--- | Window management the toolkit does not need for itself: the title, the
--- size, and everything a window that draws its own title bar has to do in
--- its place.
+-- | Support for windows that draw their own title bar. Title, size, mode and
+-- maximizing work on any backend and live in the core
+-- ('NanoUI.setWindowTitleUi', 'NanoUI.resizeWindowUi',
+-- 'NanoUI.toggleMaximizedUi', ...).
 --
 -- A window without the desktop's title bar ('DecorationsFrame' or
 -- 'DecorationsNone') has no buttons and no title of its own. 'windowCaption'
@@ -16,17 +17,10 @@
 -- >     label "My App"
 -- >     flex
 -- >     closing <- windowCaption menus
--- >     when closing quit
+-- >     when closing quitUi
 module NanoUI.Sdl.Internal.Chrome
   ( -- * The window
-    setWindowTitle
-  , setWindowSize
-  , minimizeWindow
-  , maximizeWindow
-  , restoreWindow
-  , toggleMaximized
-  , windowMaximized
-  , windowResizable
+    windowResizable
   , WindowDecorations (..)
   , setWindowDecorations
   , setWindowShadow
@@ -43,11 +37,7 @@ module NanoUI.Sdl.Internal.Chrome
   , defaultCaptionOptions
   , windowCaption
   , windowCaptionWith
-  , setWindowTitleUi
   , setWindowChromeUi
-  , minimizeWindowUi
-  , toggleMaximizedUi
-  , windowMaximizedUi
   ) where
 
 import Control.Monad (void, when)
@@ -55,8 +45,6 @@ import Data.Bits (zeroBits, (.&.))
 import Data.Foldable (for_, traverse_)
 import Data.IORef (readIORef, writeIORef)
 import Data.Maybe (isNothing)
-import Data.Text (Text)
-import Data.Text.Foreign qualified as TextForeign
 import Effectful (Eff, type (:>))
 -- The constructor under 'SDL_HitTestResult', which the callback returns.
 import Foreign.C.Types (CUInt (..))
@@ -68,7 +56,6 @@ import NanoUI.Sdl.Internal.Chrome.Types
 import NanoUI.Sdl.Internal.Display (outPair)
 import NanoUI.Sdl.Internal.Frame
 import NanoUI.Sdl.Internal.Window (SdlEnv (..), windowZoom)
-import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
 import SDL3.Sys.Bindgen.Video (SDL_HitTest (..), SDL_HitTestResult (..), SDL_WindowFlags)
 import SDL3.Sys.Video qualified as SDL
 
@@ -77,54 +64,10 @@ import SDL3.Sys.Video qualified as SDL
 --------------------------------------------------------------------------------
 
 -- Everything here that makes Windows dispatch messages goes through the safe
--- binding rather than the unsafe one. Maximizing a window, resizing it or
--- putting it away all run the window's procedure before they return, and the
--- procedure reaches the hit test below; a callback into the runtime from
--- inside an unsafe call has nowhere to run and wedges the message pump.
-
--- | Set the window's title: what the taskbar and the window switcher show,
--- which a borderless window still has even with nowhere to write it.
-setWindowTitle :: SdlEnv -> Text -> IO ()
-setWindowTitle env title =
-  TextForeign.withCString title $
-    void . SDL.setWindowTitleSafe (sdlWindow env) . PtrConst.unsafeFromPtr
-
--- | Resize the view, in window coordinates. A window with the desktop's
--- frame ('DecorationsFrame') is made larger by the frame, as it was when it
--- opened, so the view is the size asked for.
-setWindowSize :: SdlEnv -> Size -> IO ()
-setWindowSize env (Size w h) = do
-  (across, down) <- nativeFrameOutset (sdlWindow env)
-  void $
-    SDL.setWindowSizeSafe
-      (sdlWindow env)
-      (round w + fromIntegral across)
-      (round h + fromIntegral down)
-
--- | Put the window away to the taskbar.
-minimizeWindow :: SdlEnv -> IO ()
-minimizeWindow env = void (SDL.minimizeWindowSafe (sdlWindow env))
-
--- | Fill the screen with the window.
-maximizeWindow :: SdlEnv -> IO ()
-maximizeWindow env = void (SDL.maximizeWindowSafe (sdlWindow env))
-
--- | Give the window back the size it had before it was maximized.
-restoreWindow :: SdlEnv -> IO ()
-restoreWindow env = void (SDL.restoreWindowSafe (sdlWindow env))
-
--- | Maximize a restored window, restore a maximized one: what the middle
--- caption button does. Which one it is is read off the window rather than
--- remembered, since the desktop maximizes a window by itself when its title
--- bar is double-clicked or dragged to the top of the screen.
-toggleMaximized :: SdlEnv -> IO ()
-toggleMaximized env = do
-  maxed <- windowMaximized env
-  if maxed then restoreWindow env else maximizeWindow env
-
--- | Whether the desktop has the window filling the screen.
-windowMaximized :: SdlEnv -> IO Bool
-windowMaximized env = hasFlag SDL.SDL_WINDOW_MAXIMIZED <$> windowFlagsOf env
+-- binding rather than the unsafe one, as in "NanoUI.Sdl.Internal.WindowOptions".
+-- Changing the decorations or the hit test runs the window procedure
+-- synchronously, which calls the hit test below. A callback into the runtime
+-- from inside an unsafe call cannot run and wedges the message pump.
 
 -- | Whether the window may be resized at all.
 windowResizable :: SdlEnv -> IO Bool
@@ -202,10 +145,6 @@ foreign import ccall "wrapper"
 -- the window rather than reaching whatever is drawn there. That is the
 -- bargain a window with its own chrome makes, and the reason
 -- 'NanoUI.captionBarHeight' leaves room for it.
---
--- What is draggable is the title bar as far as the desktop is concerned, so
--- a drag region also snaps the window to the sides of the screen, maximizes
--- it on a double click, and hangs the window menu off the right button.
 hitTest :: ChromeState -> HitTestCallback
 hitTest st win area _ = do
   x <- fromIntegral <$> peekElemOff area 0
@@ -273,17 +212,10 @@ data CaptionOptions = CaptionOptions
   -- ^ How the three buttons are drawn.
   , capResizeBorder :: !Float
   -- ^ How far in from the left, right and bottom edges takes hold of one to
-  -- resize the window. A window given the desktop's frame
-  -- ('DecorationsFrame') has the frame's width outside those three to take
-  -- hold of as well, so a reach as deep as the border the window draws is
-  -- enough; one without has only what is inside, and an edge that reaches no
-  -- further in than a hairline is an edge that has to be aimed at. Zero
-  -- leaves those three to the frame, if the window has one.
+  -- resize the window ('chromeResizeBorder'). Zero leaves those three to the
+  -- desktop's frame, if the window has one.
   , capResizeTop :: !Float
-  -- ^ How far in from the top edge does. The top is on its own: the frame
-  -- does not cover it, whether or not the window has one, so this is all the
-  -- top edge ever has. With this and 'capResizeBorder' both zero the window
-  -- has no edges at all, the frame's included.
+  -- ^ The same reach for the top edge ('chromeResizeTop').
   }
 
 -- | 'defaultCaptionConfig' buttons and 'defaultResizeBorder' edges.
@@ -310,7 +242,7 @@ windowCaptionWith opts taken = do
         | maxed || fullscreen = (capButtons opts) {capCornerRadius = 0}
         | otherwise = capButtons opts
   (action, buttons) <- captionButtonsConfigured cfg maxed
-  for_ menv $ \env -> uiIO $ do
+  for_ menv $ \env -> uiIO $
     when (hasFlag SDL.SDL_WINDOW_BORDERLESS flags) $
       setWindowChrome
         env
@@ -322,15 +254,11 @@ windowCaptionWith opts taken = do
           , chromeResizeBorder = if immovable then 0 else capResizeBorder opts
           , chromeResizeTop = if immovable then 0 else capResizeTop opts
           }
-    case action of
-      Just CaptionMinimize -> minimizeWindow env
-      Just CaptionToggleMaximize -> toggleMaximized env
-      _ -> pure ()
+  case action of
+    Just CaptionMinimize -> minimizeWindowUi
+    Just CaptionToggleMaximize -> toggleMaximizedUi
+    _ -> pure ()
   pure (action == Just CaptionClose)
-
--- | Set the window's title from within a view.
-setWindowTitleUi :: Ui :> es => Text -> Eff es ()
-setWindowTitleUi title = askHost >>= traverse_ (uiIO . (`setWindowTitle` title))
 
 -- | Hand the window's chrome regions over from within a view. 'windowCaption'
 -- does this for a view that draws the usual three buttons; this is for one
@@ -338,15 +266,3 @@ setWindowTitleUi title = askHost >>= traverse_ (uiIO . (`setWindowTitle` title))
 setWindowChromeUi :: Ui :> es => WindowChrome -> Eff es ()
 setWindowChromeUi chrome = askHost >>= traverse_ (uiIO . (`setWindowChrome` chrome))
 
--- | Put the window away from within a view.
-minimizeWindowUi :: Ui :> es => Eff es ()
-minimizeWindowUi = askHost >>= traverse_ (uiIO . minimizeWindow)
-
--- | Maximize or restore the window from within a view.
-toggleMaximizedUi :: Ui :> es => Eff es ()
-toggleMaximizedUi = askHost >>= traverse_ (uiIO . toggleMaximized)
-
--- | Whether the window fills the screen, from within a view. A view that is
--- not running on a window is answered 'False'.
-windowMaximizedUi :: Ui :> es => Eff es Bool
-windowMaximizedUi = askHost >>= maybe (pure False) (uiIO . windowMaximized)

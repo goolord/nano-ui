@@ -26,11 +26,11 @@ import NanoUI.Internal.Frame.Select (collectSelectDropdownSpans)
 import NanoUI.Internal.Frame.SpanArena (SpanArena, pushSpans, resetSpanArena, spanArenaToList)
 import NanoUI.Internal.Frame.TextArea (textAreaTextPlacements)
 import NanoUI.Internal.Frame.TextEdit (collectTextEditMenuSpans)
-import NanoUI.Internal.Frame.TextInput (nodeTextFieldGeom, syncTextInputScroll, tagTextInputClippedSpans)
+import NanoUI.Internal.Frame.TextInput (fieldEditLine, nodeTextFieldGeom, syncTextInputScroll, tagTextInputClippedSpans)
 import NanoUI.Internal.Input (Input)
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Layout.Solve (findAncestorMaxW, textWrapCap)
-import NanoUI.Internal.Style (AlignX (..), FontVariant (..), Style (..), Theme (..), themeAccent, themeMuted, themePanel)
+import NanoUI.Internal.Style (AlignX (..), Style (..), Theme (..), textToneColor)
 import NanoUI.Internal.Types (Color (..), Rect (..), lerpColor, onGrid, rectIntersect)
 import NanoUI.Internal.Widgets.ColorPicker (ColorPickerPart (..), colorPickerPartOf, colorPickerPartRect, colorPickerPreviewGeom)
 import NanoUI.Internal.WidgetText
@@ -71,7 +71,7 @@ collectClippedSpans :: Context -> NodeIdx -> Rect -> SpanArena -> IO ()
 collectClippedSpans ctx@Context {ctxFontMetrics = fm} idx clip arena = do
   nt <- getNodeType (ctxNodeArena ctx) idx
   unless (isFloatingNode nt) $ do
-    (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+    Rect x y w h <- getNodeRect (ctxNodeArena ctx) idx
     mClipChildren <-
       if isScrollNode nt
         then
@@ -150,12 +150,7 @@ textNodeSpanEntry ctx@Context {ctxNodeArena = arena} idx x y w h = do
       else findAncestorMaxW arena idx
   let rect = Rect x y w h
       mStripe = tableStripeColor theme si
-      variantFg = case textNodeFontVariant si of
-        FontHeading -> themeAccent theme
-        FontMuted -> themeMuted theme
-        FontDanger -> themeRed theme
-        _ -> styleFg (themePanel theme)
-      fg = fromMaybe variantFg mCustomCol
+      fg = fromMaybe (textToneColor theme (textNodeFontVariant si) (textNodeFontTone si)) mCustomCol
       bg = fromMaybe (styleBg (themePanel theme)) mStripe
       !ix = if isJust mStripe then tableCellInset else 0
       -- What the lines depend on: everything but where the node is and
@@ -382,7 +377,8 @@ plainFieldPen ::
   Context -> NodeIdx -> Int -> FontMetrics -> Float -> Float -> Float -> Float -> IO (T.Text, Float, Float, Rect)
 plainFieldPen ctx idx si fm x y w h = do
   ph <- if hasFlag textInputFlagNumeric si then pure "" else getText (ctxNodeArena ctx) idx
-  value <- textInputValue ctx idx
+  -- The value, including any input method composition in progress.
+  (value, _, _, _) <- fieldEditLine ctx idx
   focus <- textInputFocused ctx idx
   (Rect _ boxY _ boxH, clip@(Rect clipX _ _ _)) <- nodeTextFieldGeom ctx idx x y w h
   scrollX <- syncTextInputScroll ctx idx x y w h
@@ -424,6 +420,6 @@ computeWidgetTextPlacements ctx nt idx x y w h = do
 collectFloatingSpansInto :: Context -> NodeType -> SpanArena -> IO ()
 collectFloatingSpansInto ctx wanted arena =
   forFloatingNodes_ (ctxNodeArena ctx) wanted $ \idx -> do
-    (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+    Rect x y w h <- getNodeRect (ctxNodeArena ctx) idx
     clip <- padContentClip x y w h <$> getPadding (ctxNodeArena ctx) idx
     walkChildSpans ctx idx clip arena

@@ -14,7 +14,6 @@ module NanoUI.Monad
 
     -- * Widget ids
   , withKey
-  , keyed
   , keyedTag
   , scope
   , nextId
@@ -25,6 +24,9 @@ module NanoUI.Monad
   , askFrameInput
   , localInput
   , uiMousePos
+  , mousePressed
+  , mouseReleased
+  , mouseHeld
   , uiTime
   , windowSize
   , windowWidth
@@ -36,6 +38,7 @@ module NanoUI.Monad
   , askDefaultLayout
   , withDefaultLayout
   , uiFontMetrics
+  , uiFontSize
   , resolveFontUi
   , lineWidthUi
   , uiTheme
@@ -43,11 +46,17 @@ module NanoUI.Monad
   , styled
   , themed
   , disabledWhen
+  , systemAppearance
 
     -- * Focus and clipboard
   , holdFocus
   , releaseFocus
   , focusedWidget
+  , requestFocus
+  , focusNext
+  , focusPrevious
+  , clearFocus
+  , isFocused
   , getClipboard
   , setClipboard
 

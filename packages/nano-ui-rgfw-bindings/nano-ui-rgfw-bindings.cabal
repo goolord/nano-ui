@@ -59,6 +59,9 @@ test-suite nano-ui-rgfw-bindings-test
     hs-source-dirs: test
     main-is: Events.hs
     c-sources: test/Events.c
+    -- The cross-thread stop test needs the threaded RTS; otherwise the
+    -- blocking wait stalls the thread that sends the stop.
+    ghc-options: -threaded
     include-dirs: cbits
     build-depends: base >=4.20 && <4.23, nano-ui-rgfw-bindings
     if os(windows)

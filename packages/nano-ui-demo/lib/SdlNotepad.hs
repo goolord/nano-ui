@@ -24,7 +24,7 @@ import Data.Text.IO qualified as TIO
 import DemoApp (useFileDialog)
 import NanoUI
 import NanoUI.Backend.Sdl
-import System.Exit (exitSuccess)
+import NanoUI.Shortcut
 
 --------------------------------------------------------------------------------
 -- Application entry point
@@ -34,10 +34,10 @@ main :: IO ()
 main =
   runSdlApp
     defaultSdlOptions
-      { sdlWindowTitle = "nano-ui Notepad"
-      , sdlWindowSize = Size 1000 720
+      { -- A close request goes to the view, which may ask about unsaved changes.
+        sdlWindowSettings = defaultWindowSettings {wsTitle = "nano-ui Notepad", wsSize = Size 1000 720, wsExitOnCloseRequest = False}
       , sdlAppTheme = Just tomorrowNightMinDarkTheme
-      , sdlAppShouldQuit = \inp -> inputKeysElem KeyEscape (inputKeys inp)
+      , sdlAppShouldQuit = pressedOnceIn KeyEscape
       }
     notepadUi
 
@@ -56,23 +56,11 @@ notepadUi = do
   (statusMsg, setStatusMsg) <- useText "Ready"
   (showStatus, setShowStatus) <- useFlag True
   (aboutOpen, setAboutOpen) <- useFlag False
+  (confirmExit, setConfirmExit) <- useFlag False
   (editorId, setEditorId) <- useState (WidgetId 0)
   (openDlg, setOpenDlg) <- useState (Nothing :: Maybe FileDialogId)
   (saveDlg, setSaveDlg) <- useState (Nothing :: Maybe FileDialogId)
   (zoom, setZoom) <- useFloat 1.0
-
-  ---------------------------------------------------------------- zoom ---
-  inp <- askInput
-  let
-    ctrlDown = modCtrl (inputModifiers inp)
-    typed = inputChars inp
-  when
-    (ctrlDown && (T.any (== '+') typed || T.any (== '=') typed))
-    (setZoom (min 4.0 (zoom * 1.1)))
-  when
-    (ctrlDown && (T.any (== '-') typed || T.any (== '_') typed))
-    (setZoom (max 0.5 (zoom / 1.1)))
-  when (ctrlDown && T.any (== '0') typed) (setZoom 1.0)
 
   ----------------------------------------------------------- file dialogs ---
   useFileDialog openDlg setOpenDlg $ \chosenPaths ->
@@ -111,9 +99,7 @@ notepadUi = do
 
     saveDocument forceDialog =
       if forceDialog || T.null docPath
-        then do
-          mHandle <- askSaveFileDialog defaultFileDialogOptions
-          setSaveDlg mHandle
+        then setSaveDlg =<< askSaveFileDialog defaultFileDialogOptions
         else do
           saved <- writeDocument (T.unpack docPath) doc
           if saved
@@ -122,50 +108,73 @@ notepadUi = do
               setStatusMsg ("Saved " <> docPath)
             else setStatusMsg ("Could not save " <> docPath)
 
-    editAction cmd = do
-      setOpenMenu ""
-      runTextCommand editorId cmd
+    zoomIn = setZoom (min 4.0 (zoom * 1.1))
+    zoomOut = setZoom (max 0.5 (zoom / 1.1))
+
+    -- A menu row and its action; running it closes the menu.
+    item menuRow action = whenM menuRow (setOpenMenu "" >> action)
+    editItem name chord cmd = item (menuItemShortcut name chord) (runTextCommand editorId cmd)
+
+    -- Commands whose chords work with every menu closed. They are bound
+    -- below, and their rows show the chord.
+    newCmd = ("New", ctrl <> key 'n', newDocument)
+    openCmd = ("Open...", ctrl <> key 'o', setOpenDlg =<< askOpenFileDialog defaultFileDialogOptions)
+    saveCmd = ("Save", ctrl <> key 's', saveDocument False)
+    saveAsCmd = ("Save As...", ctrl <> shift <> key 's', saveDocument True)
+    -- Quit, or ask first when there are unsaved changes.
+    exitApp = if docDirty then setConfirmExit True else quitUi
+    exitCmd = ("Exit", ctrl <> key 'q', exitApp)
+    zoomInCmd = ("Zoom In", ctrl <> key '=', zoomIn)
+    zoomOutCmd = ("Zoom Out", ctrl <> key '-', zoomOut)
+    resetZoomCmd = ("Reset Zoom", ctrl <> key '0', setZoom 1.0)
+    commandItem (name, chord, action) = item (menuItemShortcut name chord) action
 
     fileMenu = do
-      whenM (menuItem "New") (setOpenMenu "" >> newDocument)
-      whenM (menuItem "Open...") $ do
-        setOpenMenu ""
-        askOpenFileDialog defaultFileDialogOptions >>= setOpenDlg
-      whenM (menuItem "Save") (setOpenMenu "" >> saveDocument False)
-      whenM (menuItemShortcut "Save As..." "Ctrl+Shift+S") (setOpenMenu "" >> saveDocument True)
+      commandItem newCmd
+      commandItem openCmd
+      commandItem saveCmd
+      commandItem saveAsCmd
       menuSeparator
-      whenM (menuItemShortcut "Exit" "Esc") (setOpenMenu "" >> liftIO exitSuccess)
+      commandItem exitCmd
 
     editMenu = do
       canUndo <- textCanUndo editorId
       canRedo <- textCanRedo editorId
-      if canUndo
-        then whenM (menuItemShortcut "Undo" "Ctrl+Z") (editAction Undo)
-        else menuItemDisabled "Undo"
-      if canRedo
-        then whenM (menuItemShortcut "Redo" "Ctrl+Shift+Z") (editAction Redo)
-        else menuItemDisabled "Redo"
+      if canUndo then editItem "Undo" (ctrl <> key 'z') Undo else menuItemDisabled "Undo"
+      if canRedo then editItem "Redo" (ctrl <> shift <> key 'z') Redo else menuItemDisabled "Redo"
       menuSeparator
-      whenM (menuItemShortcut "Cut" "Ctrl+X") (editAction Cut)
-      whenM (menuItemShortcut "Copy" "Ctrl+C") (editAction Copy)
-      whenM (menuItemShortcut "Paste" "Ctrl+V") (editAction Paste)
+      editItem "Cut" (ctrl <> key 'x') Cut
+      editItem "Copy" (ctrl <> key 'c') Copy
+      editItem "Paste" (ctrl <> key 'v') Paste
       menuSeparator
-      whenM (menuItemShortcut "Select All" "Ctrl+A") (editAction SelectAll)
+      editItem "Select All" (ctrl <> key 'a') SelectAll
 
     viewMenu = do
-      whenM
-        (menuItem (if showStatus then "Hide Status Bar" else "Show Status Bar"))
-        (setOpenMenu "" >> setShowStatus (not showStatus))
+      item (menuItem (if showStatus then "Hide Status Bar" else "Show Status Bar")) (setShowStatus (not showStatus))
       menuSeparator
-      whenM (menuItemShortcut "Zoom In" "Ctrl++") (setOpenMenu "" >> setZoom (min 4.0 (zoom * 1.1)))
-      whenM (menuItemShortcut "Zoom Out" "Ctrl+-") (setOpenMenu "" >> setZoom (max 0.5 (zoom / 1.1)))
-      whenM (menuItemShortcut "Reset Zoom" "Ctrl+0") (setOpenMenu "" >> setZoom 1.0)
+      commandItem zoomInCmd
+      commandItem zoomOutCmd
+      commandItem resetZoomCmd
       menuSeparator
-      whenM (menuItem "Document Statistics") (setOpenMenu "" >> setStatusMsg (documentStats (documentText doc)))
+      item (menuItem "Document Statistics") (setStatusMsg (documentStats (documentText doc)))
 
     helpMenu = do
-      whenM (menuItem "About nano-ui Notepad") (setOpenMenu "" >> setAboutOpen True)
+      item (menuItem "About nano-ui Notepad") (setAboutOpen True)
       menuItemDisabled "nano-ui on GitHub"
+
+  ------------------------------------------------------------- shortcuts ---
+  -- A menu row's chord works only while its menu is open, so the commands'
+  -- chords are also bound here, ahead of the rows. The editor handles its own
+  -- editing chords. Ctrl++ is Ctrl+Shift+= on a US layout, or keypad plus.
+  for_ [newCmd, openCmd, saveCmd, saveAsCmd, exitCmd, zoomInCmd, zoomOutCmd, resetZoomCmd] $
+    \(_, chord, action) -> whenM (shortcut chord) action
+  whenM (or <$> traverse shortcut [ctrl <> shift <> key '=', ctrl <> key '+']) zoomIn
+
+  -------------------------------------------------------------- the window ---
+  whenM (winCloseRequested <$> askWindow) exitApp
+  -- Cheap to set every frame: the window updates only when the title changes.
+  setWindowTitleUi $
+    (if T.null docPath then "Untitled" else docPath) <> (if docDirty then " *" else "") <> " - nano-ui Notepad"
 
   --------------------------------------------------------------- layout ---
   columnWith (grow . gap 0) $ do
@@ -180,7 +189,7 @@ notepadUi = do
     separator
 
     (editorResp, editorDoc) <-
-      keyed docGen $
+      withKey docGen $
         textAreaDocumentWith'
           (grow . minW 240 . minH 160 . fontSizeScale zoom)
           doc
@@ -205,6 +214,14 @@ notepadUi = do
         flex
         whenM (button "Close") (setAboutOpen False)
   when (respClicked aboutResp) (setAboutOpen False)
+  (confirmResp, _) <-
+    modal confirmExit "Unsaved changes" $ do
+      label "Discard the changes to this document and exit?"
+      rowWith fillW $ do
+        flex
+        whenM (button "Discard") quitUi
+        whenM (button "Cancel") (setConfirmExit False)
+  when (respClicked confirmResp) (setConfirmExit False)
 
 --------------------------------------------------------------------------------
 -- Local menu-bar widget
@@ -217,19 +234,11 @@ menuBar :: Text -> (Text -> NanoUI ()) -> [(Text, NanoUI ())] -> NanoUI ()
 menuBar openMenu setOpen entries = do
   rowWith (tight . fillW . fixedH 28) $ do
     for_ entries $ \(menuLabel, body) -> do
-      let
-        isOpen = openMenu == menuLabel
+      let isOpen = openMenu == menuLabel
       btn <- menuButton' menuLabel isOpen
-      let
-        cfg =
-          (defaultPopupConfig (AnchorRect (respRect btn)))
-            { cfgPlacement = PlacementBelow
-            , cfgOffset = 0
-            }
       when (respClicked btn) (setOpen (if isOpen then "" else menuLabel))
-      when
-        (not isOpen && not (T.null openMenu) && respHovered btn)
-        (setOpen menuLabel)
+      when (not isOpen && not (T.null openMenu) && respHovered btn) (setOpen menuLabel)
+      let cfg = (defaultPopupConfig (AnchorRect (respRect btn))) {cfgPlacement = PlacementBelow, cfgOffset = 0}
       (popupResp, _) <- popup isOpen cfg (columnWith (tight . gap 0) body)
       when (respClicked popupResp) (setOpen "")
     flex

@@ -1,21 +1,12 @@
--- Paint traversal for NanoUI. This module owns the node walk and the
--- structural painters; widget chrome painting lives in sibling
--- NanoUI.Internal.Frame.Paint.Widgets.
---
--- The module is shaped for GHC's optimizer: the recursive walker
---
---   paintNodeWithEnv -> lowerNodeVisible (explicit dispatch)
---         -> per-node painters (containers recurse via walkChildrenWithOccluders)
---
--- sits on top of {-# NOINLINE #-} seams, and the heavyweight painters (widget
--- chrome, text, scroll containers, drawings) stay out of line, so no single
--- binding carries the whole painting body inside the recursive loop. That
--- stops the simplifier / SpecConstr from seeing one monolithic binding in the
--- loop, which is what blew up compilation under -fspecialise-aggressively +
--- LLVM; hence the guard flags below.
+-- The recursive walk (paintNodeWithEnv -> lowerNodeVisible -> per-node
+-- painters -> walkChildrenWithOccluders) goes through NOINLINE seams, and
+-- heavy painters stay out of line, so no single binding holds the whole
+-- paint body inside the loop. That blew up compilation under
+-- -fspecialise-aggressively with LLVM; the flags below also guard against it.
 {-# OPTIONS_GHC -fasm -fno-specialise-aggressively #-}
 
--- | Walk solved nodes and emit geometry, respecting clips, layers, and paint scopes.
+-- | Walk solved nodes and emit geometry, respecting clips, layers, and paint
+-- scopes. Widget chrome is painted in "NanoUI.Internal.Frame.Paint.Widgets".
 module NanoUI.Internal.Frame.Paint
   ( lowerShapes
   , walkChildren
@@ -23,6 +14,7 @@ module NanoUI.Internal.Frame.Paint
 
 import Control.Monad (forM_, unless, when)
 import Data.Bits ((.&.))
+import Data.IORef (readIORef)
 import Data.Maybe (fromMaybe, isJust)
 import Data.Primitive.PrimArray
   ( PrimArray
@@ -39,13 +31,14 @@ import qualified Data.Text as T
 import Data.Word (Word32)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Draw
-import NanoUI.Internal.Font (ScrollBarSlot (..))
+import NanoUI.Internal.Font (ScrollBarSlot (..), fmLineHeight)
 import NanoUI.Internal.Frame.Chrome
 import NanoUI.Internal.Frame.Node (nodeFontNative, readScrollNode, resolveTextFont)
 import NanoUI.Internal.Frame.Paint.Widgets (PaintEnv (..), buildPaintEnv, paintTextAreaNode, paintTextInputNode, paintWidget)
 import NanoUI.Internal.Frame.Scroll.Geometry (ScrollNode (..), borderContentClip, scrollBare, scrollNodeBars, scrollNodeViewport)
 import NanoUI.Internal.Frame.Spans (textNodeSpanEntry)
 import NanoUI.Internal.Id (hashWidgetId)
+import NanoUI.Internal.Image (fadeBy, imageDrawOp, lookDraw, lookQuad, lookTurned)
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Style hiding (fontSize)
 import NanoUI.Internal.Types (Color (..), ImageId (..), Rect (..), V2 (..), colorA, colorRGBA, rectInflate)
@@ -85,7 +78,7 @@ collectFloatingOccluders ctx@Context {ctxNodeArena = na} = do
       if not opaque
         then pure n
         else do
-          (x, y, w, h) <- getRect na idx
+          Rect x y w h <- getNodeRect na idx
           if not (w > 6 && h > 6)
             then pure n
             else do
@@ -106,7 +99,7 @@ collectFloatingOccluders ctx@Context {ctxNodeArena = na} = do
 {-# NOINLINE paintNodeWithEnv #-}
 paintNodeWithEnv :: PaintEnv -> NodeIdx -> IO ()
 paintNodeWithEnv env idx = do
-  (x, y, w, h) <- getRect (peNodeArena env) idx
+  Rect x y w h <- getNodeRect (peNodeArena env) idx
   Rect cx cy cw ch <- currentClip (peDrawArena env)
   let !l = max (x - paintOverhang) cx
       !t = max (y - paintOverhang) cy
@@ -118,14 +111,27 @@ paintNodeWithEnv env idx = do
       missesPieces =
         sizeofPrimArray (pePieces env) > 0
           && not (anyRun (pePieces env) $ \x0 y0 x1 y1 -> l < x1 && t < y1 && r > x0 && b > y0)
-  unless (w <= 0 || h <= 0 || r <= l || b <= t || occluded || missesPieces) $ do
-    nt <- getNodeType (peNodeArena env) idx
-    scope <- getNodeScope (peNodeArena env) idx
-    if scope == peScope env
-      then lowerNodeVisible env idx nt (Rect x y w h)
-      else do
-        theme <- scopeTheme (peContext env) scope
-        lowerNodeVisible env {peTheme = theme, peScope = scope} idx nt (Rect x y w h)
+  if w <= 0 || h <= 0 || r <= l || b <= t || occluded || missesPieces
+    then paintPinnedBelow env idx
+    else do
+      nt <- getNodeType (peNodeArena env) idx
+      scope <- getNodeScope (peNodeArena env) idx
+      if scope == peScope env
+        then lowerNodeVisible env idx nt (Rect x y w h)
+        else do
+          theme <- scopeTheme (peContext env) scope
+          lowerNodeVisible env {peTheme = theme, peScope = scope} idx nt (Rect x y w h)
+
+-- | Paint a skipped plain container's children when a pinned node is below
+-- it. Plain containers draw nothing and do not clip, so a pinned node can
+-- show outside one, even one with no size. Other containers clip their
+-- children.
+{-# NOINLINE paintPinnedBelow #-}
+paintPinnedBelow :: PaintEnv -> NodeIdx -> IO ()
+paintPinnedBelow env idx = do
+  pinnedBelow <- hasPinnedBelow (peNodeArena env) idx
+  nt <- getNodeType (peNodeArena env) idx
+  when (pinnedBelow && nt == NodeContainer) $ walkChildrenWithOccluders env idx
 
 -- | Whether @p@ holds for any of the @x0, y0, x1, y1@ runs of @rects@.
 {-# INLINE anyRun #-}
@@ -204,10 +210,23 @@ paintContainerNode env@PaintEnv {peContext = ctx} idx rect = do
     cdc <- mkCustomDrawContext ctx (peFontMetrics env) wid
     emitDrawingOps env rect (build cdc rect)
 
--- | A drawing's ops clipped to its rect, in the env's default font.
+-- | A drawing's ops clipped to its rect, in the env's default font. Image
+-- ops naming a registered 'ImageId' draw from the atlas.
 emitDrawingOps :: PaintEnv -> Rect -> SmallArray DrawOp -> IO ()
-emitDrawingOps env@PaintEnv {peDrawArena = da} rect ops =
-  withClip da rect (emitDrawOps da (peFontMetrics env) (resolveTextFont (peContext env)) ops)
+emitDrawingOps env rect ops = withClip (peDrawArena env) rect (emitOps env ops)
+
+-- | Ops in the env's default font, unclipped. NOINLINE: inlined into its
+-- caller, the clip action would capture these arguments and allocate more
+-- per drawing.
+{-# NOINLINE emitOps #-}
+emitOps :: PaintEnv -> SmallArray DrawOp -> IO ()
+emitOps env@PaintEnv {peDrawArena = da} = emitDrawOps da (peFontMetrics env) (ctxFontSize ctx) (resolveTextFont ctx) (atlasImageUv ctx)
+  where
+    ctx = peContext env
+
+-- | The atlas texture and UV bounds of a registered image.
+atlasImageUv :: Context -> Int -> IO (Maybe (Int, (Float, Float, Float, Float)))
+atlasImageUv ctx tid = fmap (atlasTextureId,) <$> lookupImageUv ctx (ImageId tid)
 
 paintPanelNode :: PaintEnv -> NodeIdx -> Rect -> IO ()
 paintPanelNode env@PaintEnv {peDrawArena = da} idx rect = do
@@ -238,7 +257,24 @@ paintScrollContainerNode env idx rect@(Rect x y w h) = do
     wTag <- axTag <$> getWidthSizing arena idx
     hTag <- axTag <$> getHeightSizing arena idx
     if wTag == SizingGrow && hTag == SizingGrow
-      then pushRect da rect (if inFloating then styleBg (themeFloatingWindow tm) else themeWindow tm)
+      then do
+        let bg = if inFloating then styleBg (themeFloatingWindow tm) else themeWindow tm
+        -- A full frame starts from the runner's clear to the base theme's
+        -- window colour ('ctxPaintFull'). Drawn first, in that same opaque
+        -- colour, the backdrop would only fill the cleared pixels again: a
+        -- whole-window blend on every continuous frame. Anything drawn
+        -- before it (a panel, a card, a layer below), a scope's other
+        -- window colour or a translucent one still needs it, as clip
+        -- frames do.
+        redundant <-
+          if inFloating || colorA bg /= 255
+            then pure False
+            else do
+              full <- readIORef (ctxPaintFull ctx)
+              drawn <- drawnVertexCount da
+              base <- readIORef (ctxTheme ctx)
+              pure (full && drawn == 0 && bg == themeWindow base)
+        unless redundant $ pushRect da rect bg
       else do
         let well = (if inFloating then themeFloatingWindow tm else themeInput tm) {styleCornerRadius = 0}
         paintStyledRect da well rect
@@ -280,11 +316,23 @@ paintTextNode env@PaintEnv {peNodeArena = arena, peDrawArena = da} idx rect@(Rec
         draw (Rect tx ty _ _, line, spanFg, _) prepared =
           unless (T.null line) $
             pushPreparedTextStyled da prepared weight style deco tx ty line spanFg
-        -- 'placeSpanLines' makes one span per line, in order.
-        wrapped (s : ss) ((_, prepared) : lns) = draw s prepared >> wrapped ss lns
-        wrapped _ _ = pure ()
     case sceLines e of
-      SpanWrapped lns -> wrapped (sceSpans e) lns
+      SpanWrapped lns -> do
+        -- Only the lines that reach the clip draw, so a label taller than
+        -- its viewport costs the lines it shows. 'placeSpanLines' makes one
+        -- span per line, top down: skip the lines wholly above the clip and
+        -- stop at the first one below it. The slack is the one the glyph
+        -- walks allow for ink outside the line box.
+        Rect _ clipY _ clipH <- currentClip da
+        let !slack = glyphSlackLines * fmLineHeight (sceFont e)
+            !top = clipY - slack
+            !bottom = clipY + clipH + slack
+            wrapped (s@(Rect _ ty _ th, _, _, _) : ss) ((_, prepared) : rest)
+              | ty > bottom = pure ()
+              | ty + th < top = wrapped ss rest
+              | otherwise = draw s prepared >> wrapped ss rest
+            wrapped _ _ = pure ()
+        wrapped (sceSpans e) lns
       SpanSingle _ prepared -> mapM_ (`draw` prepared) (sceSpans e)
 
 paintSeparatorNode :: PaintEnv -> Rect -> IO ()
@@ -301,20 +349,33 @@ paintBoxNode env idx rect = do
   -- styleIdx holds RGBA Word32 bits; see `box` in NanoUI.Widgets.
   pushRect (peDrawArena env) rect (Color (fromIntegral si :: Word32))
 
+-- | An image node. Without a look it is stretched over its rect, tinted by
+-- its font colour. With a look ('getImageNode') it is fitted, cropped,
+-- zoomed, faded and rotated ('lookDraw'), and clipped to its rect when
+-- rotated. Disabled images fade like disabled widget colours; unregistered
+-- ones paint the accent. The image's size and UVs come from one atlas
+-- lookup, and an unrotated look ('lookQuad') builds no draw record.
 paintImageNode :: PaintEnv -> NodeIdx -> Rect -> IO ()
 paintImageNode env@PaintEnv {peDrawArena = da} idx rect = do
-  tex <- imageIdFromText <$> getText (peNodeArena env) idx
-  mUv <- lookupImageUv (peContext env) (ImageId tex)
-  case mUv of
-    Just (u0, v0, u1, v1) -> do
-      -- An image may carry a tint in its font colour (an SVG icon). A
-      -- disabled image fades the way disabled widget colours do.
-      base <- fromMaybe (colorRGBA 255 255 255 255) <$> getNodeFontColor (peNodeArena env) idx
-      let tint
-            | peScope env .&. 1 /= 0 = fadeAlpha base (round (fromIntegral (colorA base) * (1 - themeDisabledFade (peTheme env))))
-            | otherwise = base
-      pushImage da rect atlasTextureId u0 v0 u1 v1 tint
-    _ -> pushRect da rect (themeAccent (peTheme env))
+  let na = peNodeArena env
+      fade = if peScope env .&. 1 /= 0 then 1 - themeDisabledFade (peTheme env) else 1
+  tid <- getImageId na idx
+  node <- getImageNode na idx
+  withImageSlot (peContext env) (ImageId tid) accent $ \iw ih a0 b0 a1 b1 -> do
+    let slot _ = pure (Just (atlasTextureId, (a0, b0, a1, b1)))
+    case node of
+      Nothing -> do
+        base <- fromMaybe (colorRGBA 255 255 255 255) <$> getNodeFontColor na idx
+        pushImage da rect atlasTextureId a0 b0 a1 b1 (fadeBy fade base)
+      Just ImageNode {inLook = look}
+        | lookTurned look ->
+            forM_ (lookDraw look (iw, ih) (ImageId tid) fade rect) $ \d ->
+              withClip da rect $ forM_ (imageDrawOp d) (pushImageOp da slot)
+        | otherwise ->
+            lookQuad look (iw, ih) fade rect $ \r u0 v0 u1 v1 c ->
+              pushImageOp da slot (DrawImage r 0 tid u0 v0 u1 v1 c)
+  where
+    accent = pushRect da rect (themeAccent (peTheme env))
 
 {-# NOINLINE paintDrawingNode #-}
 paintDrawingNode :: PaintEnv -> NodeIdx -> Rect -> IO ()
@@ -331,13 +392,14 @@ paintDrawingNode env@PaintEnv {peContext = ctx} idx rect = do
         ops <- cachedDrawingOps ctx wid content rect build
         emitDrawingOps env rect ops
 
--- | Lower the children of @idx@ with the current paint env. NOINLINE keeps
--- this recursive call out of the simplifier's loop analysis, so the whole
--- walker stays a call to opaque seams rather than one inlined monster.
+-- | Lower the children of @idx@ with the current paint env, topmost last
+-- ('forChildrenInPaintOrder_'). NOINLINE keeps this recursive call out
+-- of the simplifier's loop analysis, so the whole walker stays a call to
+-- opaque seams rather than one inlined monster.
 {-# NOINLINE walkChildrenWithOccluders #-}
 walkChildrenWithOccluders :: PaintEnv -> NodeIdx -> IO ()
 walkChildrenWithOccluders env idx =
-  forChildNodes_ (peNodeArena env) idx (paintNodeWithEnv env)
+  forChildrenInPaintOrder_ (peNodeArena env) idx (paintNodeWithEnv env)
 
 -- | Children walk for callers painting a subtree inside their own clip
 -- (floating overlays); builds a fresh env without occluders.

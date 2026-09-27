@@ -6,11 +6,13 @@ import Data.ByteString qualified as BS
 import Foreign.ForeignPtr (withForeignPtr)
 import Foreign.Ptr (castPtr)
 import Data.Text qualified as T
-import NanoUI.Internal.Context (Context (..))
+import Data.Primitive.SmallArray (smallArrayFromList)
+import NanoUI.Internal.Context (Context (..), registerCustomDrawing)
 import NanoUI.Internal.Layout.Arena
-  ( NodeType (..), addNodeFromLayout, getRect, setNodeText
+  ( NodeType (..), addNodeFromLayout, getNodeRect, setNodeText
   , setNodeValue, setStyleIdx, setWidgetId
   )
+import NanoUI.Internal.Store (ptrEq)
 import System.Mem.StableName (makeStableName)
 
 tests :: [Spec]
@@ -18,9 +20,20 @@ tests =
   [ spec "metric-cache-invalidation" runMetricCacheInvalidationTest
   , spec "widget-placement-cache" runWidgetPlacementCacheTest
   , spec "layout-cache-paint-state" runLayoutPaintStateTest
+  , spec "draw-reuse" runDrawReuseTest
+  , spec "draw-reuse-continuous" runContinuousDrawReuseTest
   , spec "partial-measure-ancestor-width" runPartialMeasureAncestorTest
   , spec "wrap-width-bounds" runWrapBoundsTest
+  , spec "wrap-keeps-spaces" runWrapKeepsSpacesTest
   ]
+
+-- | Wrapping drops the run of spaces at a line break but keeps indentation
+-- and runs of spaces inside a line, which code needs.
+runWrapKeepsSpacesTest :: Context -> IORef Int -> IO ()
+runWrapKeepsSpacesTest _ failed = do
+  let lineW t = pure (fromIntegral (T.length t))
+  assertEq failed ["    let x  = 1", "in  x + 1"] =<< wrapTextLinesIO lineW "    let x  = 1   in  x + 1  " 14
+  assertEq failed ["    a", "b  c"] =<< wrapTextLinesIO lineW "    a  b  c" 6
 
 -- | A wrap holds for every width from its widest fitting line up to, not
 -- including, its break width: the wrap cache hands it out for all of them.
@@ -43,6 +56,7 @@ runWrapBoundsTest _ failed = do
         , "two\n\nparagraphs, the second with Wide Words mmm www"
         , "nospacesatalljustonelongrunoflettersWWWmmm"
         , "  leading and  double spaced  words  "
+        , "    indented    code  = aligned   -- and a comment"
         ]
   forM_ texts $ \txt -> forM_ [1, 3 .. 320 :: Float] $ \w -> do
     r <- wrapTextIO lineW txt w
@@ -68,7 +82,7 @@ runMetricCacheInvalidationTest ctx failed = do
   let inp = withInputOff 400 300
       width c = do
         void $ runFrame c inp (button "ABC")
-        (_, _, w, _) <- getRect (ctxNodeArena c) 0
+        Rect _ _ w _ <- getNodeRect (ctxNodeArena c) 0
         pure w
       a = withMeasureText ctx (\_ -> pure (200, 20))
       b = withMeasureText ctx (\_ -> pure (80, 12))
@@ -97,8 +111,7 @@ runMetricCacheInvalidationTest ctx failed = do
       spans <- collectTextSpans configured
       fresh <- configure <$> newContext
       (_, _, coldDraw, _) <- runFrame fresh inp ui
-      expected <- snapshotDraw coldDraw
-      assertEq failed actual expected
+      assertEq failed actual =<< snapshotDraw coldDraw
       assertEq failed spans =<< collectTextSpans fresh
 
 -- A table header's width and style stay fixed while alignment and its parent
@@ -169,6 +182,130 @@ runLayoutPaintStateTest ctx failed = do
   writeIORef (ctxLayoutCache ctx) Nothing
   (_, _, coldDraw, _) <- runFrame ctx inp (ui 0.8 blue)
   assertEq failed changed =<< snapshotDraw coldDraw
+
+-- | A full frame with no damage, built from the same view output as the
+-- last, returns the last frame's draw data itself, unpainted. A change to
+-- paint state alone (a box's colour, a slider's value, a font colour, an
+-- image or its look, a custom drawing on a container) paints again and
+-- draws the change, as does every frame with reuse off, the layout overlay
+-- on, or a clip.
+runDrawReuseTest :: Context -> IORef Int -> IO ()
+runDrawReuseTest ctx failed = do
+  let px = BS.replicate (4 * 4 * 4) 200
+  okA <- registerImage ctx (ImageId 1) 4 4 px
+  okB <- registerImage ctx (ImageId 2) 4 4 px
+  assert failed (okA && okB)
+  let inp = withInputOff 400 300
+      red = colorRGBA 255 0 0 255
+      blue = colorRGBA 0 0 255 255
+      ui (boxColor, value, fontCol, iid, opacity, stray) = column $ do
+        box (fixedWH 30 30) boxColor
+        void (slider 0 1 value)
+        void (labelWith (fontColor fontCol) "paint only")
+        imageConfigured defaultImageConfig {icLayout = fixedWH 20 20, icOpacity = opacity} (ImageId iid)
+        -- A custom drawing on a container, which paint builds afresh.
+        uiIO $ do
+          let na = ctxNodeArena ctx
+          i <- addNodeFromLayout na NodeContainer 0 (fixedWH 40 40 defaultLayout)
+          setWidgetId na i (WidgetId 777)
+          when (stray > 0) $
+            registerCustomDrawing ctx (WidgetId 777) 0 $ \_ r ->
+              smallArrayFromList [FillRect r (colorRGBA stray 0 0 255)]
+      base = (red, 0.2, red, 1, 1, 0)
+      frame s = (\(_, _, dd, _) -> dd) <$> runFrame ctx inp (ui s)
+      -- Two frames of @s@ after @from@: the first paints @s@, and the second
+      -- returns the first's draw data when @reused@.
+      check from s reused = do
+        before <- frame from >>= snapshotDraw
+        d1 <- frame s
+        d2 <- frame s
+        assertEq failed reused (ptrEq d1 d2)
+        now <- snapshotDraw d2
+        assert failed (s == from || now /= before)
+  replicateM_ 2 (frame base)
+  check base base True
+  check base (blue, 0.2, red, 1, 1, 0) True
+  check base (red, 0.8, red, 1, 1, 0) True
+  check base (red, 0.2, blue, 1, 1, 0) True
+  check base (red, 0.2, red, 2, 1, 0) True
+  check base (red, 0.2, red, 1, 0.5, 0) True
+  check base (red, 0.2, red, 1, 1, 100) False
+  check (red, 0.2, red, 1, 1, 100) (red, 0.2, red, 1, 1, 200) False
+  setDrawReuse ctx False
+  check base base False
+  setDrawReuse ctx True
+  setExplainLayout ctx True
+  check base base False
+  setExplainLayout ctx False
+  writeIORef (ctxPaintFull ctx) False
+  check base base False
+  writeIORef (ctxPaintFull ctx) True
+  check base base True
+
+-- | A continuous session: every frame paints in full and the host does not
+-- read damage ('ctxDamageWanted' off around each frame, as the SDL runner
+-- sets it). Every frame draws what a context that never reuses draws: a
+-- hover, a focus move, each step of an animation drawn by a drawing alone
+-- or moving a widget, and each wheel notch paint again and show the
+-- change. Idle frames,
+-- and the frames after each change once it settles, return the last frame's
+-- draw data.
+runContinuousDrawReuseTest :: Context -> IORef Int -> IO ()
+runContinuousDrawReuseTest ctx failed = do
+  ref <- newContext
+  setDrawReuse ref False
+  lastDraw <- newIORef Nothing
+  let off = (withInputOff 300 200) {inputDeltaTime = 0.016}
+      ui (barTo, gapTo) = column $ do
+        b <- buttonWith' (fixedWH 60 20) "a"
+        -- A drawing of an animated value: no node value or style holds it.
+        v <- withKey ("bar" :: String) (animateTo (Tween EaseLinear 0.2 0) barTo)
+        void (progressBarWith' (fixedW 100) 12 v)
+        -- An animated gap moves the widget below it.
+        g <- withKey ("gap" :: String) (animateTo (Tween EaseLinear 0.2 0) gapTo)
+        void (spacer (Fixed 4) (Fixed (4 + 30 * g)))
+        void (buttonWith' (fixedWH 40 20) "b")
+        void $ scrollWith (fixedWH 100 40) $ column $ forM_ [1 .. 10 :: Int] $ \i -> label (T.pack (show i))
+        pure b
+      frame c inp target = do
+        writeIORef (ctxDamageWanted c) False
+        (b, _, dd, _) <- runFrame c inp (ui target)
+        writeIORef (ctxDamageWanted c) True
+        pure (b, dd)
+      -- One frame on both contexts: its response, whether it reused the
+      -- last draw, and whether it draws something else.
+      step inp target = do
+        (b, dd) <- frame ctx inp target
+        now <- snapshotDraw dd
+        assertEq failed now . snd =<< (traverse snapshotDraw =<< frame ref inp target)
+        prev <- readIORef lastDraw
+        writeIORef lastDraw (Just (dd, now))
+        pure $ case prev of
+          Just (lastDd, lastNow) -> (b, ptrEq dd lastDd, now /= lastNow)
+          Nothing -> (b, False, True)
+      steps n inp target = replicateM n (step inp target)
+      reused (_, r, _) = r
+      repainted (_, r, changed) = not r && changed
+      -- The first frame after a change paints it, and the last has settled.
+      paintsThenSettles xs = case (xs, reverse xs) of
+        (first : _, final : _) -> repainted first && reused final
+        _ -> False
+      -- The frame that starts an animation still draws its start; each after
+      -- paints a step, and the settled value is reused.
+      animates inp target = do
+        moving <- steps 6 inp target
+        assert failed (not (any reused moving) && all repainted (drop 1 moving))
+        assert failed . all reused . drop 16 =<< steps 20 inp target
+  settle <- steps 4 off (0, 0)
+  let hover = off {inputMousePos = case reverse settle of (b, _, _) : _ -> centerOf b; [] -> V2 0 0}
+  assert failed . all reused =<< steps 3 off (0, 0)
+  assert failed . paintsThenSettles =<< steps 12 hover (0, 0)
+  assert failed . paintsThenSettles =<< ((:) <$> step (tabInp hover) (0, 0) <*> steps 12 hover (0, 0))
+  animates hover (1, 0)
+  animates hover (1, 1)
+  let wheel = off {inputMousePos = V2 30 120, inputScroll = V2 0 (-1)}
+  assert failed . all repainted =<< steps 3 wheel (1, 1)
+  assert failed . paintsThenSettles =<< steps 12 wheel {inputScroll = V2 0 0} (1, 1)
 
 -- A label wraps at its container's width. A frame that changes only the
 -- container's width must measure the label again, not restore the size it

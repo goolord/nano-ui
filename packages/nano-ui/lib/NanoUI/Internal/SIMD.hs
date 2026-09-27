@@ -6,6 +6,7 @@ module NanoUI.Internal.SIMD
   , pokeQuadGradientSIMD
   , pokeQuadIndices
   , concentricOffsetsSIMD
+  , pokeQuadCornersSIMD
   ) where
 
 import Foreign.Ptr (Ptr)
@@ -57,13 +58,43 @@ pokeQuadSIMD ::
   Float ->
   Word32 ->
   IO ()
-pokeQuadSIMD vertices vOffset indices iOffset x y w h u0 v0 u1 v1 r g b a baseIdx = do
+pokeQuadSIMD vertices vOffset indices iOffset x y w h =
   let x1 = x + w
       y1 = y + h
-  pokeVertexSIMD vertices vOffset x y r g b a u0 v0
-  pokeVertexSIMD vertices (vOffset + 32) x1 y r g b a u1 v0
-  pokeVertexSIMD vertices (vOffset + 64) x1 y1 r g b a u1 v1
-  pokeVertexSIMD vertices (vOffset + 96) x y1 r g b a u0 v1
+   in pokeQuadCornersSIMD vertices vOffset indices iOffset x y x1 y x1 y1 x y1
+
+-- | Quad with arbitrary corners, for non-axis-aligned quads: 4 vertices and
+-- 6 indices. The corners map to the texture's top-left, top-right,
+-- bottom-right and bottom-left, in that order.
+{-# INLINE pokeQuadCornersSIMD #-}
+pokeQuadCornersSIMD ::
+  Ptr Word8 ->
+  Int ->
+  Ptr Word8 ->
+  Int ->
+  Float ->
+  Float ->
+  Float ->
+  Float ->
+  Float ->
+  Float ->
+  Float ->
+  Float ->
+  Float ->
+  Float ->
+  Float ->
+  Float ->
+  Float ->
+  Float ->
+  Float ->
+  Float ->
+  Word32 ->
+  IO ()
+pokeQuadCornersSIMD vertices vOffset indices iOffset x0 y0 x1 y1 x2 y2 x3 y3 u0 v0 u1 v1 r g b a baseIdx = do
+  pokeVertexSIMD vertices vOffset x0 y0 r g b a u0 v0
+  pokeVertexSIMD vertices (vOffset + 32) x1 y1 r g b a u1 v0
+  pokeVertexSIMD vertices (vOffset + 64) x2 y2 r g b a u1 v1
+  pokeVertexSIMD vertices (vOffset + 96) x3 y3 r g b a u0 v1
   pokeQuadIndices indices iOffset baseIdx (baseIdx + 1) (baseIdx + 2) (baseIdx + 3)
 
 -- | Writes the six indices of quad @a b c d@ (corners in order) as the two

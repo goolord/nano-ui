@@ -2,6 +2,8 @@
 module NanoUI.Internal.Context.Drawing
   ( registerPopupConfig
   , lookupPopupConfig
+  , registerHoverZone
+  , hoverZoneCrossed
   , registerDrawing
   , lookupDrawing
   , cachedDrawingOps
@@ -33,7 +35,7 @@ import NanoUI.Internal.Context.Types
 import NanoUI.Internal.Draw (DrawOp, DrawingBuild, shiftDrawOp)
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Style (Layout)
-import NanoUI.Internal.Types (PopupAnchor, PopupPlacement, Rect (..), rectH, rectW)
+import NanoUI.Internal.Types (PopupAnchor, PopupPlacement, Rect (..), V2, rectH, rectHit, rectW)
 
 {-# INLINE lookupIn #-}
 lookupIn :: (DrawingCacheState -> IntMap a) -> Context -> WidgetId -> IO (Maybe a)
@@ -64,6 +66,22 @@ lookupPopupConfig :: Context -> WidgetId -> IO (Maybe (PopupAnchor, PopupPlaceme
 lookupPopupConfig ctx wid =
   fmap (\(PopupConfig anchor placement offset) -> (anchor, placement, offset))
     <$> lookupIn dcsPopupConfigs ctx wid
+
+-- | Request a frame when the pointer enters or leaves @rect@ this pass. Used
+-- for tooltip targets, which may be labels or containers the hover probe
+-- does not find. A @tracked@ rect also requests one on every move over it,
+-- for an open tooltip that follows the pointer.
+registerHoverZone :: Context -> Bool -> Rect -> IO ()
+registerHoverZone ctx tracked rect =
+  modifyIORef' (ctxDrawingCache ctx) $ \dc -> dc {dcsHoverZones = HoverZone rect tracked : dcsHoverZones dc}
+
+-- | Whether a pointer move from @from@ to @to@ enters or leaves a rect
+-- registered this pass, or moves over a tracked one ('registerHoverZone').
+hoverZoneCrossed :: Context -> V2 -> V2 -> IO Bool
+hoverZoneCrossed ctx from to =
+  any crossed . dcsHoverZones <$> readIORef (ctxDrawingCache ctx)
+  where
+    crossed (HoverZone r tracked) = let on = rectHit r from in on /= rectHit r to || (on && tracked)
 
 -- | Register a draw builder and content version. Change the version when
 -- captured content changes without a size change.
@@ -333,4 +351,5 @@ resetDrawingScopeCache ctx =
       , dcsPopupConfigs = IM.empty
       , dcsCustomMeasures = IM.empty
       , dcsCustomDrawings = IM.empty
+      , dcsHoverZones = []
       }

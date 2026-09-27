@@ -6,7 +6,7 @@ import GHC.Conc (getAllocationCounter)
 import NanoUI
 import NanoUI.Backend
 import NanoUI.Internal.Context (Context (..))
-import NanoUI.Testing (newPixelContext, runFrame)
+import NanoUI.Testing (newPixelContext, runFrame, setDrawReuse)
 import NanoUI.Backend.Sdl (SdlEnv (..), sdlDrawFrame, syncDisplay, withSdlBench)
 import System.Exit (exitFailure)
 import System.IO (hSetEncoding, stderr, stdout)
@@ -25,7 +25,7 @@ benchInput =
   emptyInput
     { inputWindowSize = benchWindowSize
     , inputMousePos = V2 400 300
-    , inputMouseDown = True
+    , inputButtonsHeld = buttonsFromList [MouseLeft]
     }
 
 smallUi, mediumUi, largeUi :: NanoUI ()
@@ -116,6 +116,8 @@ main :: IO ()
 main = do
   configureBenchIO
   ctx0 <- newPixelContext
+  -- The benchmarks repeat one scene: time their paint instead of reusing it.
+  setDrawReuse ctx0 False
   withSdlBench ctx0 $ \ctx sdlEnv -> do
     (ctx', inp) <- syncDisplay ctx sdlEnv benchInput
     warmup ctx' sdlEnv inp

@@ -27,7 +27,7 @@ import NanoUI.Internal.Context
 import NanoUI.Internal.Draw
 import NanoUI.Internal.Font
 import NanoUI.Internal.Id (WidgetId (..), mix64)
-import NanoUI.Internal.Input (Input (..), Key (..), inputKeys, inputKeysElem, inputModifiers, modShift)
+import NanoUI.Internal.Input (Input (..), Key (..), Pressable (..), inputModifiers, modShift, shiftAtMost)
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Monad (Ui, (<&&>), askContext, askInput, freshWidget, nextId, uiIO, withKey)
 import NanoUI.Internal.Store (fieldFloat, fieldInt, fieldPoint, findSlot, insertSlot, lookupSlot, slotWriteOr)
@@ -73,7 +73,7 @@ packColor = fromIntegral . colorToWord32
 
 storeColorAt :: WidgetStore -> Int -> Color -> Color
 storeColorAt store key fallback =
-  colorFromWord32 (fromIntegral (findSlot fieldInt (packColor fallback) key store))
+  Color (fromIntegral (findSlot fieldInt (packColor fallback) key store))
 
 -- | Picker's current stored colour, or the supplied fallback if absent.
 widgetStoreColor :: WidgetStore -> WidgetId -> Color -> Color
@@ -133,7 +133,7 @@ colorPickerPartRect na idx rect@(Rect x _ w _) = do
   case colorPickerPartOf si of
     PickerSv -> pure (colorPickerSvSquare rect)
     _ -> do
-      (sx, sy0, sw, sh) <- pickerSvNode na idx >>= getRect na
+      Rect sx sy0 sw sh <- pickerSvNode na idx >>= getNodeRect na
       let Rect _ sy _ side = colorPickerSvSquare (Rect sx sy0 sw sh)
       pure (Rect x sy w side)
 
@@ -387,12 +387,12 @@ colorPickerCanvas (wid, svResp) (hueWid, hueResp) alphaPart initial = do
     barHit resp =
       Rect (rectX (respRect resp) - 2) (rectY svSquare) (rectW (respRect resp) + 4) (rectH svSquare)
   -- An idle drag hands back the value it was given.
-  (s, sA, sHeld) <- withKey ("s" :: Text) (useDrag1D DragAxisX 0 1 s0 svSquare)
-  (v, vA, vHeld) <- withKey ("v" :: Text) (useDrag1D DragAxisY 1 0 v0 svSquare)
-  (h, hA, hHeld) <- withKey ("hue" :: Text) (useDrag1D DragAxisY 0 360 h0 (barHit hueResp))
+  (s, sA, sHeld) <- withKey ("s" :: Text) (useDrag1D DragAxisX wid 0 1 s0 svSquare)
+  (v, vA, vHeld) <- withKey ("v" :: Text) (useDrag1D DragAxisY wid 1 0 v0 svSquare)
+  (h, hA, hHeld) <- withKey ("hue" :: Text) (useDrag1D DragAxisY hueWid 0 360 h0 (barHit hueResp))
   (a, aA, aHeld) <-
     withKey ("alpha" :: Text) $
-      useDrag1D DragAxisY 0 255 (fromIntegral (colorA current0)) (maybe (Rect 0 0 0 0) (barHit . snd) alphaPart)
+      useDrag1D DragAxisY (maybe wid fst alphaPart) 0 255 (fromIntegral (colorA current0)) (maybe (Rect 0 0 0 0) (barHit . snd) alphaPart)
   let
     dragging = sA || vA || hA || aA
     alpha = fromIntegral (clamp 0 255 (round a :: Int))
@@ -458,8 +458,8 @@ applyColorPickerKeys :: Context -> WidgetId -> Color -> Input -> Bool -> Bool ->
 applyColorPickerKeys ctx wid fallback inp svFocus hueFocus = do
   store <- getStore ctx
   let
-    keys = inputKeys inp
-    down k = inputKeysElem k keys
+    -- Arrows with Ctrl, Alt or Super are left to shortcuts.
+    down k = shiftAtMost (inputModifiers inp) && pressedIn k inp
     step = if modShift (inputModifiers inp) then 10 else 1
     along neg pos = (if down pos then 1 else 0) - (if down neg then 1 else 0) :: Float
     dx = along KeyLeft KeyRight

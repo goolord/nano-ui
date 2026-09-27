@@ -25,7 +25,7 @@ import Data.IORef (readIORef)
 import Data.Maybe (catMaybes)
 import Data.Text (Text)
 import Effectful (Eff, type (:>))
-import NanoUI.Internal.Context (Context (..), getPrevRect, isDisabled)
+import NanoUI.Internal.Context (Context (..), getPrevRect, isDisabled, pointerCovered)
 import NanoUI.Internal.Font (FontMetrics (..))
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Input (inputMousePos)
@@ -105,7 +105,7 @@ affix = AdornText
 -- | Any view, for display, such as a spinner while a field's value is
 -- checked. A press on it is a press on the widget.
 --
--- > trailing (view (spinnerWith id 14))
+-- > trailing (view (void (spinnerWith' id 14)))
 view :: NanoUI () -> Adornment
 view = AdornView
 
@@ -178,7 +178,9 @@ holdsPointer ctx wid mouse ranges = do
       overControl i =
         (isWidgetNode <$> getNodeType na i) <&&> do
           w <- getWidgetId na i
-          (not <$> isDisabled ctx w) <&&> (maybe (pure False) (\r -> nodeInteractionHit ctx i r mouse) =<< getPrevRect ctx w)
+          (not <$> isDisabled ctx w)
+            <&&> (not <$> pointerCovered ctx w)
+            <&&> (maybe (pure False) (\r -> nodeInteractionHit ctx i r mouse) =<< getPrevRect ctx w)
   active <- readIORef (ctxActiveId ctx)
   pressedControl <- maybe False inRanges <$> lookupNodeByWidgetId na active
   if pressedControl || active == wid

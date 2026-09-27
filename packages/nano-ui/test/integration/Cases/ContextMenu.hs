@@ -39,9 +39,7 @@ runContextMenuOpenTest ctx failed = do
   assert failed (respRightClicked btnClicked)
   assert failed (case mInsideOpen of Just _ -> True; Nothing -> False)
   -- A left click outside dismisses the menu.
-  let (pressOut, releaseOut) = clickPair inp0 (V2 500 400)
-  _ <- runFrame ctx pressOut menuUi
-  ((_, mAfterClick), _, _, _) <- runFrame ctx releaseOut menuUi
+  (_, mAfterClick) <- runClick ctx inp0 menuUi (V2 500 400)
   assert failed (case mAfterClick of Nothing -> True; Just _ -> False)
   -- So does a right press outside.
   _ <- openMenu ctx failed inp0
@@ -95,13 +93,11 @@ runContextMenuScrollPosTest ctx failed = do
             pick = spanCenter r
         assert failed (abs (menuY - v2Y menuPos) <= 16)
         assert failed (abs (menuY - v2Y menuPos) < abs (menuY - layoutY))
-        let (press, release) = clickPair inp0 pick
-        _ <- runFrame ctx press ui
-        ((_, (_, picked)), _, _, _) <- runFrame ctx release ui
+        (_, (_, picked)) <- runClick ctx inp0 ui pick
         assert failed (picked == Just True)
         _ <- runFrame ctx inp0 ui
         spansAfter <- collectOverlayTextSpans ctx inp0
-        assert failed (not (any (\(_, txt, _, _, _) -> "Scroll Cut" `T.isInfixOf` txt) spansAfter))
+        assert failed (not (hasText "Scroll Cut" spansAfter))
 
 -- | A disabled row lines up with the enabled rows around it: its label starts
 -- at the same x and it takes the same row height.

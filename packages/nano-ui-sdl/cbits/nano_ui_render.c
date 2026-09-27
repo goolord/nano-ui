@@ -9,6 +9,9 @@ typedef struct {
     SDL_Texture *pending_texture;
     int pending_start;
     int pending_n;
+    /* The pending indices less the first vertex they use (see narrow). */
+    int *rebased;
+    int rebased_cap;
 } NanoUiBatch;
 
 NanoUiBatch *nano_ui_batch_create(SDL_Renderer *renderer)
@@ -23,12 +26,53 @@ NanoUiBatch *nano_ui_batch_create(SDL_Renderer *renderer)
     batch->renderer = renderer;
 #if SDL_VERSION_ATLEAST(3, 4, 0)
     /* Every UV the batches submit lies in [0, 1]. Left on AUTO, SDL scans all
-     * of a call's vertices (the whole frame's buffer here) on every textured
-     * call to choose between clamp and wrap, which comes to clamp anyway. */
+     * of a call's vertices on every textured call to choose between clamp
+     * and wrap, which comes to clamp anyway. SDL 3.2 has no setting for it,
+     * so there a call passes only the vertices it uses (see narrow). */
     SDL_SetRenderTextureAddressMode(renderer, SDL_TEXTURE_ADDRESS_CLAMP, SDL_TEXTURE_ADDRESS_CLAMP);
 #endif
     return batch;
 }
+
+#if !SDL_VERSION_ATLEAST(3, 4, 0)
+/* Narrow a batch's vertices to the range its indices use, rebasing the
+ * indices to its start. SDL 3.2 scans every vertex a textured call is given,
+ * and the batches all share the frame's buffer, so passing all of it made a
+ * frame cost draw calls times vertices. Indices out of the buffer are left
+ * for SDL to reject, and a batch whose indices cannot be copied passes the
+ * vertices up to the last it uses. */
+static void narrow(NanoUiBatch *batch, const SDL_Vertex **v, const int **idx, int *nv)
+{
+    const int *ix = *idx;
+    const int n = batch->pending_n;
+    int lo = ix[0], hi = ix[0];
+    for (int k = 1; k < n; k++) {
+        lo = ix[k] < lo ? ix[k] : lo;
+        hi = ix[k] > hi ? ix[k] : hi;
+    }
+    if (lo < 0 || hi >= *nv) {
+        return;
+    }
+    *nv = hi + 1;
+    if (lo == 0) {
+        return;
+    }
+    if (batch->rebased_cap < n) {
+        int *grown = (int *)realloc(batch->rebased, sizeof(int) * (size_t)n * 2);
+        if (!grown) {
+            return;
+        }
+        batch->rebased = grown;
+        batch->rebased_cap = n * 2;
+    }
+    for (int k = 0; k < n; k++) {
+        batch->rebased[k] = ix[k] - lo;
+    }
+    *idx = batch->rebased;
+    *v += lo;
+    *nv = hi - lo + 1;
+}
+#endif
 
 void nano_ui_batch_flush(NanoUiBatch *batch)
 {
@@ -44,11 +88,15 @@ void nano_ui_batch_flush(NanoUiBatch *batch)
      * untextured batch passes no UVs. */
     const SDL_Vertex *v = (const SDL_Vertex *)batch->verts;
     const int *idx = (const int *)batch->indices + batch->pending_start;
+    int nv = batch->vert_count;
+#if !SDL_VERSION_ATLEAST(3, 4, 0)
+    narrow(batch, &v, &idx, &nv);
+#endif
     const int stride = (int)sizeof(SDL_Vertex);
     SDL_RenderGeometryRaw(batch->renderer, batch->pending_texture,
                           &v->position.x, stride, &v->color, stride,
                           batch->pending_texture ? &v->tex_coord.x : NULL, stride,
-                          batch->vert_count, idx, batch->pending_n, (int)sizeof(int));
+                          nv, idx, batch->pending_n, (int)sizeof(int));
     batch->pending_n = 0;
     batch->pending_start = 0;
     batch->pending_texture = NULL;
@@ -58,6 +106,7 @@ void nano_ui_batch_destroy(NanoUiBatch *batch)
 {
     if (batch) {
         nano_ui_batch_flush(batch);
+        free(batch->rebased);
         free(batch);
     }
 }

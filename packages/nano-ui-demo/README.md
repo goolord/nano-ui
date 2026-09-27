@@ -14,7 +14,8 @@ the SDL backend.
 The terminal is kept small: 80 by 24 cells, UTF-8, the 16 ANSI colours with
 bold and inverse, basic cursor movement and erasing, and 2,000 lines of
 scrollback. It advertises `TERM=ansi` and has no wide-character layout or full
-VT100 support.
+VT100 support. It takes typed text through the input method, whose
+composition it shows at the cursor (`useInputMethod`).
 
 ## Running
 
@@ -28,8 +29,12 @@ cabal test nano-ui-demo-test
 cabal test nano-ui-terminal-test
 ```
 
-`nano-ui-demo-test` drives the demo, notepad, and log viewer in hidden windows
-and fails if a check does not hold.
+`nano-ui-sdl-demo --help` lists the demo's options; `--explain` starts it
+with the layout overlay on, which the Debug panel (F12) also toggles. Its
+Screenshot button saves `nano-ui-demo.png`.
+
+`nano-ui-demo-test` drives the demo, notepad, log viewer, and an input-method
+composition in hidden windows, and fails if a check does not hold.
 
 ## Requirements
 
@@ -44,8 +49,8 @@ which also covers the sibling ditto checkout used by the form package.
 ## Reading the examples
 
 - `lib/SdlDemo.hs` builds the widget tour; `lib/DemoData.hs` supplies its data.
-- `app/Notepad.hs` shows text-document state, menus, and asynchronous file dialogs.
-- `app/Logs.hs` shows a bounded log buffer and scroll-follow behaviour.
+- `lib/SdlNotepad.hs` shows text-document state, menus, and asynchronous file dialogs.
+- `lib/SdlLogs.hs` shows a bounded log buffer and scroll-follow behaviour.
 - `lib/SdlTerminal.hs` contains the terminal parser and PTY integration.
 
 The terminal executable and its test are not built on Windows. The other

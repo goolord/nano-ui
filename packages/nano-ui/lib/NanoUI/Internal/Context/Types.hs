@@ -19,8 +19,19 @@ module NanoUI.Internal.Context.Types
   , DamageRequest (..)
   , DamageState (..)
   , initialDamageState
+  , PrevFrame (..)
+  , ImagePaint (..)
+  , noImagePaint
+  , emptyPrevFrame
+  , PrevWalk (..)
+  , newPrevWalk
   , OverlayState (..)
   , initialOverlayState
+  , ExplainState (..)
+  , DrawReuse (..)
+  , DrawReuseKey (..)
+  , initialExplainState
+  , ExplainedNode (..)
   , AnimationState (..)
   , initialAnimationState
   , ScrollTuning (..)
@@ -33,6 +44,7 @@ module NanoUI.Internal.Context.Types
   , DrawingEntry (..)
   , DrawingCacheState (..)
   , PopupConfig (..)
+  , HoverZone (..)
   , DrawOpCacheEntry (..)
   , CustomDrawingEntry (..)
   , CustomDrawOpCacheEntry (..)
@@ -43,6 +55,11 @@ module NanoUI.Internal.Context.Types
   , initialDrawingCacheState
   , InteractionState (..)
   , PointerRoute (..)
+  , FocusKind (..)
+  , KeyClaim (..)
+  , drawingKeyClaim
+  , InputMethodRequest (..)
+  , FocusRequest (..)
   , initialInteractionState
   , CustomMeasureFn
   , CustomDrawContext (..)
@@ -59,13 +76,15 @@ import Data.Dynamic (Dynamic)
 import Data.HashMap.Strict (HashMap)
 import Data.HashMap.Strict qualified as HashMap
 import Data.Hashable (Hashable)
-import Data.IORef (IORef, modifyIORef', readIORef, writeIORef)
+import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.IntMap.Strict (IntMap)
 import Data.IntMap.Strict qualified as IM
 import Data.IntSet (IntSet)
 import Data.IntSet qualified as IS
 import Data.Map.Strict (Map)
-import Data.Primitive.PrimArray (MutablePrimArray)
+import Data.Primitive.Array (MutableArray, newArray)
+import Data.Primitive.PrimArray (MutablePrimArray, newPrimArray, setPrimArray)
+import Data.Primitive.PrimVar (PrimVar, newPrimVar)
 import Data.Primitive.SmallArray (SmallArray, SmallMutableArray)
 import Data.Word (Word64)
 import Data.Text (Text)
@@ -73,15 +92,16 @@ import Data.Typeable (TypeRep, Typeable, cast)
 import GHC.Exts (RealWorld)
 
 import NanoUI.Internal.Animation (Animation)
-import NanoUI.Internal.Atlas (ImageAtlas)
-import NanoUI.Internal.Draw.Types (DrawArena, DrawOp, DrawingBuild)
+import NanoUI.Internal.Atlas (AtlasToken, ImageAtlas)
+import NanoUI.Internal.Draw.Types (DrawArena, DrawData, DrawOp, DrawingBuild)
 import NanoUI.Internal.Font (CustomMeasureFn, FontMetrics, WrapResult)
 import NanoUI.Internal.Frame.SpanArena (SpanArena)
 import NanoUI.Internal.Id (IdContext, WidgetId, hashWidgetId)
-import NanoUI.Internal.Input (UiCursorKind)
+import NanoUI.Internal.Image (ImageLook)
+import NanoUI.Internal.Input (Composition, InputPurpose, MouseButton, UiCursorKind)
 import NanoUI.Internal.Layout.Arena (DirTag, LayoutCache, NodeArena)
 import NanoUI.Internal.Store (WidgetStore)
-import NanoUI.Internal.Style (FontStyle, FontVariant, FontWeight, Layout, Theme)
+import NanoUI.Internal.Style (Appearance, Direction, Flow, FontStyle, FontVariant, FontWeight, Layout, Padding, PointerMode, Sizing, Theme)
 import NanoUI.Widgets.TextBuffer (Cursor)
 import NanoUI.Widgets.TextCommand (TextCommand)
 import NanoUI.Internal.Types
@@ -259,10 +279,74 @@ data DamageState = DamageState
   -- and the clip is the one piece.
   , dsRequests :: ![DamageRequest]
   , dsLastWindowSize :: !Size
-  , dsPrevRects :: !(IntMap Rect)
-  , dsPrevClips :: !(IntMap Rect)
-  , dsPrevNodeTexts :: !(IntMap Text)
+  , dsPrev :: !PrevFrame
   }
+
+-- | The last finished frame's layout by widget key, for the next frame's
+-- damage to diff against ('NanoUI.Internal.Damage.updatePrevRects').
+data PrevFrame = PrevFrame
+  { pfRects :: !(IntMap Rect)
+  , pfClips :: !(IntMap Rect)
+  -- ^ Viewport clip, for keys that have one.
+  , pfOuterClips :: !(IntMap Rect)
+  -- ^ Scroll containers and panels: the enclosing clip they paint in.
+  -- 'pfClips' holds the inner clip they give their content.
+  , pfTexts :: !(IntMap Text)
+  -- ^ Text of text nodes.
+  , pfImages :: !(IntMap ImagePaint)
+  -- ^ What image nodes draw.
+  }
+
+-- | What an image node draws: its image id, and its look ('Nothing' for a
+-- plain image).
+data ImagePaint = ImagePaint !Int !(Maybe ImageLook)
+  deriving (Eq, Show)
+
+-- | What a node that is no image draws: id 0 and no look.
+noImagePaint :: ImagePaint
+noImagePaint = ImagePaint 0 Nothing
+
+emptyPrevFrame :: PrevFrame
+emptyPrevFrame = PrevFrame IM.empty IM.empty IM.empty IM.empty IM.empty
+
+-- | What the last completed 'NanoUI.Internal.Damage.updatePrevRects' walk
+-- recorded at each arena index: the key and the rect, clip, text and image
+-- it gave the 'PrevFrame' maps. A node that has not changed since skips the
+-- maps, which already hold its entries, and a widget declared where it was
+-- reads its last rect here ('NanoUI.Internal.Context.Core.getPrevRectAt').
+-- The first 'pwValid' indices hold the walk that built 'dsPrev' (its rects
+-- are 'pwFor'); none do while a walk is under way. Updated in place, so a
+-- frame allocates none of it.
+data PrevWalk = PrevWalk
+  { pwKeys :: !(MutablePrimArray RealWorld Int)
+  -- ^ The node's key, or 0 where the walk made no entries.
+  , pwTags :: !(MutablePrimArray RealWorld Int)
+  -- ^ Which of a clip, text and image the node has.
+  , pwRects :: !(MutableArray RealWorld Rect)
+  -- ^ The node's rect, the object its 'pfRects' entry holds unless the
+  -- entry was already equal.
+  , pwClips :: !(MutablePrimArray RealWorld Float)
+  -- ^ Four per index: the node's clip.
+  , pwTexts :: !(MutableArray RealWorld Text)
+  , pwImages :: !(MutableArray RealWorld ImagePaint)
+  , pwValid :: !(PrimVar RealWorld Int)
+  -- ^ How many indices hold the walk: none while a walk is under way.
+  , pwFor :: !(IORef (IntMap Rect))
+  }
+
+-- | Room for @n@ nodes, with no entries.
+newPrevWalk :: Int -> IO PrevWalk
+newPrevWalk n = do
+  keys <- newPrimArray n
+  setPrimArray keys 0 n 0
+  tags <- newPrimArray n
+  setPrimArray tags 0 n 0
+  rects <- newArray n (Rect 0 0 0 0)
+  clips <- newPrimArray (4 * n)
+  setPrimArray clips 0 (4 * n) 0
+  texts <- newArray n mempty
+  images <- newArray n noImagePaint
+  PrevWalk keys tags rects clips texts images <$> newPrimVar 0 <*> newIORef IM.empty
 
 -- | Require a first frame and full repaint, with no previous geometry.
 initialDamageState :: DamageState
@@ -273,9 +357,7 @@ initialDamageState = DamageState
   , dsDamagePieces = []
   , dsRequests = []
   , dsLastWindowSize = Size 0 0
-  , dsPrevRects = IM.empty
-  , dsPrevClips = IM.empty
-  , dsPrevNodeTexts = IM.empty
+  , dsPrev = emptyPrevFrame
   }
 
 -- | Current modal nesting and previous floating-panel bounds/order used for
@@ -286,13 +368,16 @@ data OverlayState = OverlayState
   , osModalDepth :: {-# UNPACK #-} !Int
   , osEscapeConsumed :: {-# UNPACK #-} !Bool
   , osTabConsumed :: {-# UNPACK #-} !Bool
+  -- | Indices into the frame's 'NanoUI.Internal.Input.inputKeys' already
+  -- taken by a shortcut, so no other shortcut acts on the same press.
+  , osKeysTaken :: !IntSet
   , osPrevFloatingRects :: !(IntMap Rect)
   , osPrevFloatingOrder :: ![Int]
   -- | Painted bounds of the open dropdowns and text-edit menu last frame.
   , osPrevMenuRects :: ![Rect]
   }
 
--- | No modals, floating panels, or consumed Escape or Tab event.
+-- | No modals, floating panels, or consumed key events.
 initialOverlayState :: OverlayState
 initialOverlayState = OverlayState
   { osModalWasActive = False
@@ -300,10 +385,94 @@ initialOverlayState = OverlayState
   , osModalDepth = 0
   , osEscapeConsumed = False
   , osTabConsumed = False
+  , osKeysTaken = IS.empty
   , osPrevFloatingRects = IM.empty
   , osPrevFloatingOrder = []
   , osPrevMenuRects = []
   }
+
+-- | The last full frame's draw data and what it was drawn from, for a full
+-- frame that would draw the same to take instead of painting again
+-- ('NanoUI.Internal.Frame.runFrameEff'). A reused frame hands the host the
+-- same 'DrawData' buffers again, so a host reads them and never writes them.
+data DrawReuse = DrawReuse
+  { drOn :: !Bool
+  -- ^ Whether frames may reuse a draw at all ('setDrawReuse').
+  , drLast :: !(Maybe (DrawReuseKey, DrawData))
+  -- ^ The last frame's draw, while that frame painted in full and may be
+  -- reused.
+  }
+
+-- | What a full frame's draw follows besides what its damage covers.
+data DrawReuseKey = DrawReuseKey
+  { drkSize :: !Size
+  , drkSnapScale :: !Float
+  , drkSquareGeometry :: !Bool
+  , drkExternalText :: !Bool
+  , drkMetricGen :: !Int
+  , drkFocus :: !WidgetId
+  , drkFocusVisible :: !Bool
+  , drkHot :: !WidgetId
+  , drkActive :: !WidgetId
+  , drkArena :: !Word64
+  -- ^ 'NanoUI.Internal.Layout.Arena.getPaintSignature'.
+  , drkAtlas :: !AtlasToken
+  }
+  deriving (Eq)
+
+-- | Layout overlay state ('NanoUI.Internal.Frame.Explain'): whether it is on,
+-- and what the last frame drew, for the next frame to diff against.
+data ExplainState = ExplainState
+  { esOn :: !Bool
+  , esLayers :: ![(Int, [(Rect, Rect, Int)])]
+  -- ^ Outlines per layer in paint order: the page (key -1) first, then
+  -- floating panels keyed by root node. Each outline is (rect, clip, depth).
+  , esHover :: !(Maybe (ExplainedNode, Rect))
+  -- ^ The node under the pointer and its highlight's clip.
+  , esScopes :: ![(Int, Int)]
+  -- ^ Arena index ranges [from, below) added by @explainScope@ this build.
+  -- When non-empty, only these nodes are outlined. Subtrees are contiguous
+  -- in the arena, so each range covers whole subtrees.
+  }
+
+-- | Overlay off.
+initialExplainState :: ExplainState
+initialExplainState = ExplainState {esOn = False, esLayers = [], esHover = Nothing, esScopes = []}
+
+-- | The innermost node under the pointer in the topmost layer, while the
+-- layout overlay is on. Holds the node's requested layout next to its
+-- result, so a debug panel can explain its size.
+data ExplainedNode = ExplainedNode
+  { explainedKind :: !Text
+  -- ^ Display name such as @Container@, @Text@ or @ScrollContainer@. A
+  -- container adds its flow after commas: @Container, row@,
+  -- @Container, layered@, @Container, row, wrap@.
+  , explainedWidget :: !(Maybe WidgetId)
+  -- ^ The owning widget ('NanoUI.respId'); 'Nothing' for id-less nodes such
+  -- as spacers.
+  , explainedDepth :: !Int
+  -- ^ Nesting depth from the layer root (0). Picks the outline colour.
+  , explainedRect :: !Rect
+  -- ^ Laid-out rect in logical window coordinates, after scrolling.
+  , explainedPadding :: !Padding
+  , explainedWidth :: !Sizing
+  , explainedHeight :: !Sizing
+  , explainedMin :: !V2
+  , explainedMax :: !V2
+  -- ^ 1e8 or more means unbounded.
+  , explainedGap :: !Float
+  , explainedDirection :: !Direction
+  -- ^ 'NanoUI.Column' for layered containers.
+  , explainedFlow :: !Flow
+  -- ^ 'NanoUI.Line' for non-containers, scroll containers and grids, which
+  -- place children their own way.
+  , explainedPin :: !(Maybe V2)
+  -- ^ Pin offset ('NanoUI.pinAt').
+  , explainedPointer :: !PointerMode
+  -- ^ Effective mode: 'NanoUI.PointerPass' when inside a node that passes
+  -- the pointer, otherwise the node's own.
+  }
+  deriving (Eq, Show)
 
 -- | Running animations, settled values with their leases, and per-frame
 -- keep-alive requests, keyed by widget or animation id.
@@ -486,7 +655,8 @@ type CustomDrawBuild = CustomDrawContext -> Rect -> SmallArray DrawOp
 data CustomDrawingEntry = CustomDrawingEntry
   { cdrContent :: {-# UNPACK #-} !Int
   , cdrBuild :: !CustomDrawBuild
-  , cdrCursor :: !(Maybe (CustomDrawContext -> UiCursorKind))
+  , cdrCursor :: !(Maybe (CustomDrawContext -> Rect -> V2 -> UiCursorKind))
+    -- ^ Cursor for a given widget rect and pointer position.
   , cdrDamageSlop :: {-# UNPACK #-} !Float
     -- ^ Repaint margin in logical pixels; anything but a positive value
     -- leaves the default margin in place.
@@ -512,7 +682,14 @@ data DrawingCacheState = DrawingCacheState
   , dcsDrawOpCache :: !(IntMap DrawOpCacheEntry)
   , dcsCustomDrawOpCache :: !(IntMap CustomDrawOpCacheEntry)
   , dcsDrawFitCache :: !(IntMap DrawFitCache)
+  , dcsHoverZones :: ![HoverZone]
+  -- ^ Tooltip targets: entering or leaving them needs a frame even when the
+  -- hover probe finds no widget there.
   }
+
+-- | A rect whose enter and exit need a frame. The flag is set when every
+-- move inside also needs one (an open tooltip that follows the pointer).
+data HoverZone = HoverZone {-# UNPACK #-} !Rect !Bool
 
 -- | Strict cache entry for a popup's anchor configuration.
 data PopupConfig = PopupConfig
@@ -553,6 +730,7 @@ initialDrawingCacheState = DrawingCacheState
   , dcsDrawOpCache = IM.empty
   , dcsCustomDrawOpCache = IM.empty
   , dcsDrawFitCache = IM.empty
+  , dcsHoverZones = []
   }
 
 -- | Where a frame's pointer events go: the press, the drag and release that
@@ -590,8 +768,66 @@ data InteractionState = InteractionState
   -- | A table header is resizing a column. Set by the table on the frames it
   -- does, cleared when the pointer is let go.
   , isColumnResize :: {-# UNPACK #-} !Bool
+  -- | Kind of the focused widget at frame start.
+  , isFocusKind :: !FocusKind
+  -- | This frame's IME composition and the text field showing it (widget id
+  -- 0 when unclaimed). See 'NanoUI.Internal.Frame.TextInput.claimComposition'.
+  , isComposition :: !(Maybe (Composition, WidgetId))
   }
   deriving (Eq, Show)
+
+-- | Kind of the focused widget, read from last frame's nodes before the view
+-- runs. Shortcuts skip the keys it claims ('NanoUI.Internal.Widgets.Shortcut').
+data FocusKind
+  = FocusNone
+  | -- | A control and the keys it claims. A text area claims 'KeysType'.
+    FocusControl !KeyClaim
+  | -- | A single-line text field: 'KeysType' plus Enter.
+    FocusTextLine
+  | -- | A text field with an active IME composition or commit this frame.
+    -- The keys belong to the IME, so it claims every key and its typed
+    -- text regardless of modifiers.
+    FocusComposing
+  deriving (Eq, Show)
+
+-- | A focus move requested by the view: a widget, the next or previous Tab
+-- stop, or no focus.
+data FocusRequest = FocusOn !WidgetId | FocusNext | FocusPrevious | FocusNowhere
+  deriving (Eq, Show)
+
+-- | A widget taking IME text this frame. The caret is in window coordinates;
+-- 'Nothing' for a text field, whose caret the frame derives from its node.
+data InputMethodRequest = InputMethodRequest
+  { imrWidget :: !WidgetId
+  , imrCaret :: !(Maybe Rect)
+  , imrPurpose :: !InputPurpose
+  }
+  deriving (Eq, Show)
+
+-- | Keys a focused control handles itself, which shortcuts and key listeners
+-- ('NanoUI.keyPressed') then skip. Enter, Space and arrows are claimed only
+-- bare or with Shift ('NanoUI.Internal.Input.shiftAtMost'); with Ctrl, Alt
+-- or Super they stay chords for shortcuts.
+data KeyClaim
+  = -- | Enter, Space, arrows, Home, End, Page Up, Page Down: a slider, list
+    -- or select.
+    KeysNavigate
+  | -- | Enter and Space: a button, checkbox or switch.
+    KeysActivate
+  | -- | Multi-line text field: typing keys plus editing keys and shortcuts,
+    -- under any modifiers.
+    KeysType
+  | -- | Every key: a terminal, or an editor with its own chords.
+    KeysAll
+  deriving (Eq, Show, Enum, Bounded)
+
+-- | Decode a drawing node's style index, which a custom widget sets to the
+-- claim's 'fromEnum'. Out-of-range values, including unset (a canvas),
+-- give 'KeysNavigate'.
+drawingKeyClaim :: Int -> KeyClaim
+drawingKeyClaim si
+  | si > 0 && si <= fromEnum (maxBound :: KeyClaim) = toEnum si
+  | otherwise = KeysNavigate
 
 -- | Pointer routed to the page, with no held gesture, menu, or pending edit command.
 initialInteractionState :: InteractionState
@@ -607,6 +843,8 @@ initialInteractionState = InteractionState
   , isWindowDrag = Nothing
   , isWindowResize = Nothing
   , isColumnResize = False
+  , isFocusKind = FocusNone
+  , isComposition = Nothing
   }
 
 -- | Mutable state for one UI session. Construct with @newContext@ and use it
@@ -617,21 +855,37 @@ data Context = Context
   , ctxDrawArena :: DrawArena
   , ctxHotId :: IORef WidgetId
   , ctxLastHotId :: IORef WidgetId
+  -- | 'intKey's of the topmost pointer-taking node under the pointer and its
+  -- ancestors, in the frame the user saw
+  -- ('NanoUI.Internal.Frame.Input.recordCoveredWidgets'). Other nodes under
+  -- the pointer are covered by layers or pins and get no pointer this view
+  -- ('NanoUI.Internal.Context.Core.pointerCovered'). 'Nothing' when nothing
+  -- is covered.
+  , ctxPointerReach :: !(IORef (Maybe IntSet))
   , ctxActiveId :: IORef WidgetId
   , ctxClickedId :: IORef WidgetId
   , ctxReleaseClickedId :: IORef WidgetId
-  -- | Where the held left and right buttons went down, cleared when they come
-  -- up. A click belongs to the widget the press landed on, so a widget
-  -- hit-tests this point as well as the release point. 'Nothing' (a release
-  -- with no press behind it) lets the release stand on its own.
-  , ctxPressPos :: IORef (Maybe V2)
-  , ctxRightPressPos :: IORef (Maybe V2)
+  -- | Press position of each held button, updated on press and release
+  -- ('NanoUI.Internal.Frame.Input.armPointerPress'). Clicks and holds belong
+  -- to the widget pressed, so widgets hit-test this as well as the pointer.
+  -- A button with no entry (release without a press) is judged alone.
+  , ctxPressPos :: IORef (Map MouseButton V2)
   , ctxFocusId :: IORef WidgetId
-  -- | Focus last moved by keyboard, so the focused widget shows its ring. A
-  -- pointer press hides it again.
+  -- | Focus last moved by keyboard or code, so the focused widget shows its
+  -- ring. A pointer press hides it.
   , ctxFocusVisible :: IORef Bool
+  -- | Focus move requested this frame ('NanoUI.Internal.Monad.requestFocus'),
+  -- applied after layout ('NanoUI.Internal.Frame.Input.finalizeFocusRequest').
+  , ctxFocusRequest :: IORef (Maybe FocusRequest)
+  -- | The focused widget's IME request from the last view run
+  -- ('NanoUI.Internal.Context.requestInputMethod'); reset each build. The
+  -- next frame routes the composition to it
+  -- ('NanoUI.Internal.Frame.TextInput.claimComposition'), and backends read
+  -- the text input area from it ('NanoUI.Internal.Frame.TextArea.textInputArea').
+  , ctxInputMethod :: !(IORef (Maybe InputMethodRequest))
   , ctxStore :: IORef WidgetStore
   , ctxDamageState :: IORef DamageState
+  , ctxPrevWalk :: !(IORef PrevWalk)
   , ctxOverlayState :: IORef OverlayState
   , ctxAnimationState :: IORef AnimationState
   , ctxScrollState :: !(IORef ScrollState)
@@ -640,6 +894,9 @@ data Context = Context
   , ctxFontMetrics :: FontMetrics
   -- ^ Base proportional-font metrics used by layout and drawing.
   , ctxMonoFontMetrics :: FontMetrics
+  , ctxFontSize :: !Float
+  -- ^ Backend default text size, used when a layout sets none. Same units
+  -- as 'NanoUI.Internal.Style.fontSize'.
   , ctxMeasureText :: Text -> IO (Float, Float)
   , ctxResolveFont :: !(Float -> FontWeight -> FontStyle -> FontVariant -> IO (FontMetrics, Bool))
   , ctxResolveMeasure :: !(Float -> FontWeight -> FontStyle -> FontVariant -> Text -> IO (Float, Float))
@@ -661,11 +918,34 @@ data Context = Context
   , ctxLastMetricSource :: !(IORef (Maybe MetricSource))
   -- | True when the next present must repaint the whole window (fresh retain
   -- texture, forced full, continuous present, or window expose). When False,
-  -- a DamageClip frame culls the paint pass to the damaged region.
+  -- a DamageClip frame culls the paint pass to the damaged region. A backend
+  -- that sets it clears the target to the
+  -- 'NanoUI.Internal.Style.themeWindow' of 'ctxTheme', as
+  -- it is after the frame, before it draws the frame: paint leaves out a
+  -- page scroller's backdrop that would only repeat that clear.
   , ctxPaintFull :: !(IORef Bool)
+  , ctxDrawReuse :: !(IORef DrawReuse)
+  -- | Whether the host reads this frame's damage
+  -- ('NanoUI.Internal.Context.Core.takeDamage'). A host that repaints the
+  -- whole window whatever changed (a continuous session) clears it, and the
+  -- frame reports 'DamageFull' without diffing anything, unless it may reuse
+  -- the last frame's draw ('ctxDrawReuse'), which needs to know that nothing
+  -- is damaged. A host that clears it while 'ctxPaintFull' is off gets
+  -- 'DamageFull' too, so its clip frames repaint the whole window. True by
+  -- default.
+  , ctxDamageWanted :: !(IORef Bool)
+  -- | Layout overlay state.
+  , ctxExplain :: !(IORef ExplainState)
   , ctxTheme :: !(IORef Theme)
   -- ^ Base theme; scoped themes live in 'ctxThemeScopes'.
   , ctxThemeScopes :: !(IORef ThemeScopes)
+  , ctxSystemAppearance :: !(IORef (Maybe Appearance))
+  -- ^ Last system light/dark preference reported by the backend; 'Nothing'
+  -- when unknown.
+  , ctxThemeFor :: !(IORef (Maybe (Maybe Appearance -> Theme)))
+  -- ^ Base theme per system appearance when following the system
+  -- ('NanoUI.Internal.Context.followSystemTheme'); 'Nothing' for a fixed
+  -- base theme.
   , ctxContainerStack :: IORef [Int]
   , ctxMessages :: IORef [FrameMsg]
   , ctxFocusables :: IORef (MutablePrimArray RealWorld WidgetId)
@@ -678,10 +958,18 @@ data Context = Context
   -- | Rects the view asked a cursor for this build, newest first: a table's
   -- column edges. Each build starts empty.
   , ctxCursorZones :: !(IORef [(Rect, UiCursorKind)])
+  -- | Node ranges [from, below) of this build's
+  -- 'NanoUI.Internal.Widgets.Cursor.withCursorShape' scopes, newest first.
+  -- Scopes are pushed when they end, so an outer scope precedes its inner
+  -- ones. Each build starts empty.
+  , ctxCursorRegions :: !(IORef [(Int, Int, UiCursorKind)])
   , ctxClipboardGet :: IO (Maybe Text)
   , ctxClipboardSet :: Text -> IO Bool
   , ctxImageAtlas :: ImageAtlas
   , ctxWakeLoop :: IORef (Maybe (IO ()))
+  , ctxWoken :: !(IORef Bool)
+  -- ^ Set from any thread by 'NanoUI.Internal.Context.Core.wakeFromThread'
+  -- when view inputs changed. The next frame repaints fully and clears it.
   , ctxWakeAt :: !(IORef Double)
   -- ^ Monotonic time ('GHC.Clock.getMonotonicTime') of the earliest frame
   -- anything asked for without input to cause it, or 0 for none. Each frame

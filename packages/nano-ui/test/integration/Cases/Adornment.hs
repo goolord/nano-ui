@@ -69,8 +69,7 @@ runAdornedFieldTest ctx failed = do
   assert failed (rectX unitSpan >= rectRight valueR && rectRight unitSpan <= rectRight field)
   -- A press on the icon focuses the field with the caret at the start.
   _ <- runClick ctx inp0 ui (spanCenter iconR)
-  ((_, typed), _, _, _) <- runFrame ctx (inp0 {inputChars = "3"}) ui
-  assertEq failed "312" typed
+  assertEq failed "312" . snd =<< evalUi ctx (inp0 {inputChars = "3"}) ui
 
 -- | A longer affix on a later frame moves the affix and narrows the text's
 -- room. The value overflows the field, so its span's clip is the whole room.
@@ -150,8 +149,7 @@ runAdornmentIdsTest ctx failed = do
           ""
       currentId
   plain <- warmup2 ctx inp0 (ui False)
-  adorned <- warmup2 ctx inp0 (ui True)
-  assertEq failed plain adorned
+  assertEq failed plain =<< warmup2 ctx inp0 (ui True)
 
 -- | The first press on a field, left of its text, puts the caret at the
 -- start: the cursor it writes is a change from the end, where a field that
@@ -164,8 +162,7 @@ runTextInputClickStartTest ctx failed = do
   (resp, _) <- warmup2 ctx inp0 ui
   let Rect x y _ h = respRect resp
   _ <- runClick ctx inp0 ui (V2 (x + 2) (y + h / 2))
-  ((_, typed), _, _, _) <- runFrame ctx (inp0 {inputChars = "3"}) ui
-  assertEq failed "312" typed
+  assertEq failed "312" . snd =<< evalUi ctx (inp0 {inputChars = "3"}) ui
 
 -- | Any view adorns either side: a spinner and a label after a field's value,
 -- an icon and an affix before it, in order and clear of the text; a view's
@@ -182,12 +179,12 @@ runAdornedViewsTest ctx failed = do
       defaultTextInputConfig
         { ticAdornments =
             A.leading (A.iconSized 16 doc) <> A.leading (A.affix "$")
-              <> A.trailing (A.view (spinnerWith id 14)) <> A.trailing (A.view (label "ok"))
+              <> A.trailing (A.view (void (spinnerWith' id 14))) <> A.trailing (A.view (label "ok"))
         , ticLayout = fixedW 260 (ticLayout defaultTextInputConfig)
         }
     ui = column $ do
       (field, _) <- textInputConfigured' cfg value
-      saving <- buttonConfigured' defaultButtonConfig {bcAdornments = A.leading (A.view (spinnerWith id 14))} "Saving"
+      saving <- buttonConfigured' defaultButtonConfig {bcAdornments = A.leading (A.view (void (spinnerWith' id 14)))} "Saving"
       pure (field, saving)
   (field, saving) <- warmup2 ctx inp0 ui
   spans <- collectTextSpans ctx
@@ -263,7 +260,7 @@ runAdornedButtonControlTest ctx failed = do
   spans <- collectTextSpans ctx
   Just xR <- pure (spanRectOf "x" spans)
   Just chipR <- pure (spanRectOf "Chip" spans)
-  (tapped, _, _, _) <- runFrame ctx (inp0 {inputMousePos = spanCenter xR, inputMousePressed = True, inputMouseReleased = True}) ui
+  (tapped, _, _, _) <- runFrame ctx (inp0 {inputMousePos = spanCenter xR, inputButtonsPressed = buttonsFromList [MouseLeft], inputButtonsReleased = buttonsFromList [MouseLeft]}) ui
   onControl <- runClick ctx inp0 ui (spanCenter xR)
   assert failed (not (respClicked tapped || respClicked onControl))
   readIORef removes >>= assertEq failed 2

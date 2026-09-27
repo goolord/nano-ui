@@ -23,7 +23,7 @@ import NanoUI.Internal.Context
 import NanoUI.Internal.Draw (pushRect, pushText)
 import NanoUI.Internal.Font
 import NanoUI.Internal.Frame.Chrome (overlayMenuStyle, paintMenuAccent, paintMenuPanel)
-import NanoUI.Internal.Frame.Hit (findNodeByWidgetId, innermostHit, nodeClippedHit, nodePointVisible, overlayHitAllowed, overlayHitRoot, widgetOverlayAllowed)
+import NanoUI.Internal.Frame.Hit (findNodeByWidgetId, nodeClippedHit, overlayHitAllowed, overlayHitRoot, reachedWidgetAt, widgetOverlayAllowed)
 import NanoUI.Internal.Frame.TextArea (isMouseOnTextAreaScrollBarAt)
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Input
@@ -40,7 +40,10 @@ import NanoUI.Widgets.TextEditor
 
 -- | Run a command on the field with this id and focus it: the command comes
 -- from a menu or button that may not be over the field, and the caret,
--- selection highlight and next keystroke belong to the field it edited. A
+-- selection highlight and next keystroke belong to the field it edited.
+-- Focus moves at the end of the frame, as with
+-- 'NanoUI.Internal.Monad.requestFocus', so a disabled field or one behind a
+-- modal refuses it. A
 -- change to the text pulses @respChanged@ on the field's next frame.
 applyTextFieldCommand :: Context -> WidgetId -> TextCommand -> IO ()
 applyTextFieldCommand ctx wid cmd =
@@ -53,7 +56,7 @@ applyTextFieldCommand ctx wid cmd =
     -- selection-only command (Select All) repaints this frame.
     damageWidget ctx wid DamageSelf
     markDirty ctx
-    writeIORef (ctxFocusId ctx) wid
+    writeIORef (ctxFocusRequest ctx) (Just (FocusOn wid))
     modifyInteraction ctx (\s -> s {isTextInputMenu = Nothing}))
 
 -- | The field with this id as a command from outside its frame sees it: how
@@ -121,7 +124,7 @@ textEditMenuRow ctx inp wid (Rect mx _ _ _) style row@(Rect _ ry _ rh) cmd lbl =
 -- a right press lands on, and focus that field.
 openTextEditMenu :: Context -> Input -> IO ()
 openTextEditMenu ctx inp =
-  when (inputMouseRightPressed inp) $ do
+  when (pressedIn MouseRight inp) $ do
     let mouse@(V2 mx my) = inputMousePos inp
     mWid <- textFieldWidgetAtMouse ctx mouse
     forM_ mWid $ \wid -> do
@@ -136,13 +139,12 @@ openTextEditMenu ctx inp =
       markDirty ctx
 
 -- | The enabled text field or text area the pointer at @mouse@ is on, which
--- takes the text cursor and the right-click menu. Not one whose control, drawn
--- inside it, has the pointer ('innermostHit').
+-- takes the text cursor and the right-click menu. Excludes a field covered
+-- there by a stack or pinned node ('topmostHit') and one whose inner
+-- control has the pointer ('innermostHit').
 textFieldWidgetAtMouse :: Context -> V2 -> IO (Maybe WidgetId)
 textFieldWidgetAtMouse ctx@Context {ctxNodeArena = na} mouse = do
   top <- overlayHitRoot ctx mouse
-  let under d = nodePointVisible ctx d mouse <&&> overlayHitAllowed ctx top d
-      ownsPointer idx = (== idx) <$> innermostHit ctx under idx
   mIdx <-
     findClassNodeRevM na PointerNodes $ \idx -> do
       nt <- getNodeType na idx
@@ -155,14 +157,15 @@ textFieldWidgetAtMouse ctx@Context {ctxNodeArena = na} mouse = do
           <&&> (if nt == NodeTextArea then not <$> isMouseOnTextAreaScrollBarAt ctx idx mouse else pure True)
   case mIdx of
     Nothing -> pure Nothing
-    Just idx -> ifM (ownsPointer idx) (Just <$> getWidgetId na idx) (pure Nothing)
+    -- Accept it only if hover would land on it too.
+    Just idx -> ifM ((== Just idx) <$> reachedWidgetAt ctx mouse) (Just <$> getWidgetId na idx) (pure Nothing)
 
 -- | A press on a command row runs it when it can run, recorded for the caller
 -- ('NanoUI.Internal.Context.takeTextEditLastAction'); a press elsewhere on the
 -- menu closes it.
 finalizeTextEditMenuPick :: Context -> Input -> IO ()
 finalizeTextEditMenuPick ctx inp =
-  when (inputMousePressed inp) $ do
+  when (pressedIn MouseLeft inp) $ do
     mMenu <- getsInteraction ctx isTextInputMenu
     case mMenu of
       Just (TextInputMenu wid menuRect)
@@ -185,13 +188,13 @@ finalizeTextEditMenuPick ctx inp =
 -- input: the press it waits for is by definition not the menu's own.
 closeTextEditMenuOnOutsideClick :: Context -> Input -> IO ()
 closeTextEditMenuOnOutsideClick ctx inp =
-  when (inputMousePressed inp || inputMouseRightPressed inp) $ do
+  when (anyButtonPressed inp) $ do
     route <- getsInteraction ctx isPointerRoute
     when (route /= RouteTextMenu) $ modifyInteraction ctx (\s -> s {isTextInputMenu = Nothing})
 
 closeTextEditMenuOnEscape :: Context -> Input -> IO ()
 closeTextEditMenuOnEscape ctx inp =
-  when (inputKeysElem KeyEscape (inputKeys inp)) $
+  when (pressedOnceIn KeyEscape inp) $
     whenM (isJust <$> getsInteraction ctx isTextInputMenu) $ do
       modifyInteraction ctx (\s -> s {isTextInputMenu = Nothing})
       markEscapeConsumed ctx

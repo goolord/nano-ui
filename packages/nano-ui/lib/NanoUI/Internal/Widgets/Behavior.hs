@@ -8,6 +8,7 @@ module NanoUI.Internal.Widgets.Behavior
   , useReorder
   , useKeyNav
   , keyboardFocused
+  , useInputMethod
   , keyActivated
   , KeyNav (..)
   , navStep
@@ -27,7 +28,6 @@ import NanoUI.Internal.Input
 import NanoUI.Internal.Monad (Ui, (<&&>), askContext, askFrameInput, askInput, focusedWidget, freshWidget, uiIO, withContext)
 import NanoUI.Internal.Store (fieldFloat, fieldInt, findSlot, insertSlot, quietFlag, setQuietFlag)
 import NanoUI.Internal.Types (Rect (..), clamp01, rectHit, v2X, v2Y)
-import qualified Data.Text as T
 
 -- | Pointer slop in pixels before a held press counts as a drag.
 dragThresholdPx :: Float
@@ -36,20 +36,22 @@ dragThresholdPx = 8
 data DragAxis = DragAxisX | DragAxisY
   deriving (Eq, Show)
 
--- | Clamped 1D drag. Maps pointer position on @track@ into [lo, hi]. The drag
--- starts with a press on the track and lasts until the button comes up; a
--- button held from elsewhere and moved onto the track drags nothing. Returns
--- the value, whether the drag is held, and whether it was held before this
--- frame.
+-- | Clamped 1D drag on a track of widget @owner@. Maps pointer position on
+-- @track@ into [lo, hi]. The drag starts with a press on the track and lasts
+-- until the button comes up. A button held from elsewhere and moved onto the
+-- track drags nothing, nor does a press where another widget covers the
+-- owner ('pointerCovered'). Returns the value, whether the drag is held, and
+-- whether it was held before this frame.
 useDrag1D ::
   (Ui :> es) =>
   DragAxis ->
+  WidgetId ->
   Float ->
   Float ->
   Float ->
   Rect ->
   Eff es (Float, Bool, Bool)
-useDrag1D axis lo hi current track = do
+useDrag1D axis owner lo hi current track = do
   (wid, ctx) <- freshWidget
   inp <- askInput
   let dragK = slotKey SlotDrag (intKey wid)
@@ -57,8 +59,8 @@ useDrag1D axis lo hi current track = do
         DragAxisX -> (rectX track, rectW track, v2X (inputMousePos inp))
         DragAxisY -> (rectY track, rectH track, v2Y (inputMousePos inp))
   active0 <- quietFlag dragK <$> uiIO (getStore ctx)
-  let started = inputMousePressed inp && rectHit track (inputMousePos inp)
-      active = inputMouseDown inp && (active0 || started)
+  started <- pure (pressedIn MouseLeft inp && rectHit track (inputMousePos inp)) <&&> (not <$> uiIO (pointerCovered ctx owner))
+  let active = heldIn MouseLeft inp && (active0 || started)
       frac = if trackLen <= 0 then 0 else clamp01 ((mouse - origin) / trackLen)
   when (active /= active0) $ uiIO (modifyStore ctx (setQuietFlag dragK active))
   pure (if active then lo + frac * (hi - lo) else current, active, active0)
@@ -84,14 +86,14 @@ useReorder order items = do
       dragK = slotKey SlotDrag key
       dragWK = slotKey SlotDragW key
       mouse = inputMousePos inp
-      press = inputMousePressed inp
-      release = inputMouseReleased inp
+      press = pressedIn MouseLeft inp
+      release = releasedIn MouseLeft inp
       hit = fst <$> find (\(_, r) -> rectHit r mouse) items
   store <- uiIO (getStore ctx)
   let from0 = findSlot fieldInt (-1) dragK store
       startX = findSlot fieldFloat 0 dragWK store
       dragging = if press then fromMaybe (-1) hit else from0
-      nextDrag = if release || not (inputMouseDown inp) then -1 else dragging
+      nextDrag = if release || not (heldIn MouseLeft inp) then -1 else dragging
       -- Resolve the drop using the held source before clearing it on release.
       moved = not press && dragging >= 0 && abs (v2X mouse - startX) > dragThresholdPx
       nextOrder = case hit of
@@ -135,25 +137,53 @@ keyboardFocused wid
         <&&> uiIO (not <$> isDisabled ctx wid)
         <&&> uiIO (not <$> pointerBlockedByModal ctx)
 
--- | Arrow / Enter / Space while @wid@ is focused and eligible for input.
+-- | Request input method (IME) text for widget @wid@, like iced's
+-- @request_input_method@. Call it every frame the widget accepts text,
+-- passing its caret in window coordinates and the input purpose; text fields
+-- do this themselves.
+--
+-- While the IME is composing, this returns the 'Composition' for the widget
+-- to draw at its caret, and the frame drops the IME's keys. Committed text
+-- arrives as 'inputChars'. The backend places the candidate window at the
+-- caret and enables text input only while some widget requests it, so a
+-- custom widget reading 'inputChars' (a terminal, say) must call this.
+-- Returns 'Nothing' and requests nothing when the widget is unfocused,
+-- disabled or behind a modal.
+--
+-- > wid <- nextId
+-- > Rect x y _ _ <- fromMaybe (Rect 0 0 0 0) <$> lastRect wid
+-- > preedit <- useInputMethod wid InputNormal (Rect (x + caretX) y 1 lineH)
+-- > customWidgetWithId wid spec {widgetFocusable = True, widgetKeys = KeysAll}
+useInputMethod :: Ui :> es => WidgetId -> InputPurpose -> Rect -> Eff es (Maybe Composition)
+useInputMethod wid purpose caret = do
+  focused <- keyboardFocused wid
+  if not focused
+    then pure Nothing
+    else withContext $ \ctx -> do
+      requestInputMethod ctx wid (Just caret) purpose
+      fieldComposition ctx wid
+
+-- | Arrow / Enter / Space while @wid@ is focused and eligible for input,
+-- bare or with Shift only ('shiftAtMost'); other modifiers leave them to
+-- shortcuts. Arrows repeat with key auto-repeat; Enter and Space count only
+-- on the initial press.
 useKeyNav :: (Ui :> es) => WidgetId -> Eff es KeyNav
 useKeyNav wid = do
   inp <- askInput
-  let keys = inputKeys inp
-      none = KeyNav False False False False False False
-  if hashWidgetId wid == 0 || (inputKeysNull keys && T.null (inputChars inp))
+  let none = KeyNav False False False False False False
+  if hashWidgetId wid == 0 || inputKeysNull (inputKeys inp) || not (shiftAtMost (inputModifiers inp))
     then pure none
     else do
       eligible <- keyboardFocused wid
       if not eligible
         then pure none
         else pure KeyNav
-          { knUp = inputKeysElem KeyUp keys
-          , knDown = inputKeysElem KeyDown keys
-          , knLeft = inputKeysElem KeyLeft keys
-          , knRight = inputKeysElem KeyRight keys
-          , knEnter = inputKeysElem KeyEnter keys
-          , knSpace = T.any (== ' ') (inputChars inp)
+          { knUp = pressedIn KeyUp inp
+          , knDown = pressedIn KeyDown inp
+          , knLeft = pressedIn KeyLeft inp
+          , knRight = pressedIn KeyRight inp
+          , knEnter = pressedOnceIn KeyEnter inp
+          , knSpace = pressedOnceIn KeySpace inp
           }
 
 -- | The step the arrow keys ask for along a control that grows rightwards and
@@ -187,7 +217,7 @@ useDismissable panel = do
     let onMenu = case route of
           RouteLayer _ -> False
           _ -> True
-        esc = inputKeysElem KeyEscape (inputKeys inp) && not taken && null menu && not dropdown
-        pressed = (inputMousePressed inp || inputMouseRightPressed inp) && not onMenu
+        esc = pressedOnceIn KeyEscape inp && not taken && null menu && not dropdown
+        pressed = anyButtonPressed inp && not onMenu
     when esc (markEscapeConsumed ctx)
     pure (esc || (pressed && not (rectHit panel (inputMousePos inp))))
