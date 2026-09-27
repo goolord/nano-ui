@@ -745,6 +745,9 @@
   text changed, and sorts only when a sort key changed. With 2000 rows and
   one changing each frame, a frame allocates 0.48 MB instead of 1.97 MB and
   takes about 0.24 ms instead of 1.3 ms.
+- A tree keeps its visible rows while it is given the same item list and
+  its expansion is unchanged, instead of listing them every frame: a
+  1000-row tree in a scroller allocates 783 KB a frame instead of 989 KB.
 - Damage is gathered into one running union instead of rect lists, paint
   keeps the opaque floating panels it culls against in a flat array built
   only when a frame has floating panels, and the node arena tracks the
