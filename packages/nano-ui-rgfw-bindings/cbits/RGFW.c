@@ -107,3 +107,16 @@ uint8_t rgfw_write_clipboard_text(const char* text, size_t len) {
     RGFW_dataTransfer data = { len > 0 ? text : "", len > 0 ? len : 1, RGFW_dataText };
     return (uint8_t)RGFW_writeClipboard(&data);
 }
+
+/* RGFW_window_restore without its last step, which moves and resizes the
+   window to the geometry RGFW saved when it last maximized, minimized or went
+   fullscreen itself. A window the desktop maximized has none saved (the
+   struct starts zeroed), so that step moved it to the origin and sized it
+   0x0; once the window has moved since, it restored a stale place. The
+   platform restore (on Windows, the show's SW_RESTORE) already returns the
+   window to the geometry the desktop kept for it. */
+void rgfw_window_restore(RGFW_window* win) {
+    RGFW_window_restorePlatform(win);
+    win->internal.flags &= ~(uint32_t)RGFW_windowMaximize;
+    RGFW_window_show(win);
+}

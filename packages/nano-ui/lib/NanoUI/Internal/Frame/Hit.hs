@@ -258,7 +258,9 @@ reachedHit ctx hits =
 
 -- | The widget a pointer hit on widget @idx@ lands on: its first enabled
 -- descendant widget that @hits@, painted over it, and so on inward, skipping
--- inert containers ('containerFlagInert').
+-- inert containers ('containerFlagInert'). A 'PointerBlock' descendant that
+-- @hits@ with no such widget inside it is itself the result, so nothing
+-- drawn beneath it is reached.
 innermostHit :: Context -> (NodeIdx -> IO Bool) -> NodeIdx -> IO NodeIdx
 innermostHit ctx@Context {ctxNodeArena = na} hits idx =
   maybe (pure idx) (innermostHit ctx hits) =<< firstHitIn idx
@@ -273,7 +275,8 @@ innermostHit ctx@Context {ctxNodeArena = na} hits idx =
         ifM
           (pure (isWidgetNode nt) <&&> hits d <&&> (not <$> (isDisabled ctx =<< getWidgetId na d)))
           (pure (Just d))
-          (firstHitIn d)
+          (firstHitIn d >>= maybe (blocking d) (pure . Just))
+  blocking d = ifM (((== PointerBlock) <$> getPointerMode na d) <&&> hits d) (pure (Just d)) (pure Nothing)
 
 -- | The topmost node among those that @hits@, given @first@, the first hit
 -- in arena order. Paint draws earlier siblings over later ones, so this is

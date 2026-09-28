@@ -11,8 +11,10 @@ tests =
   , spec "native-window-screenshot-requests" runScreenshotRequestsTest
   , spec "native-window-settings-at-install" runInstallTest
   , spec "native-window-setters" runSettersTest
+  , spec "native-window-size-limits-cross" runSizeLimitsCrossTest
   , spec "native-window-commands" runCommandsTest
   , spec "native-window-state" runStateTest
+  , spec "native-window-state-repaints" runStateRepaintTest
   , spec "native-window-screenshot-from-a-click" runScreenshotFromClickTest
   , spec "native-window-use-screenshot" runUseScreenshotTest
   ]
@@ -156,6 +158,23 @@ runSettersTest ctx failed = do
     ]
     $ \(v, expect) -> assertEq failed expect =<< asked ctx calls (view v)
 
+-- | A limit set past the other one on an axis moves the other one to it on
+-- that axis, and the host gets the moved one first, so it never sees a
+-- minimum above the maximum. A zero axis is unlimited and moves nothing.
+runSizeLimitsCrossTest :: Context -> IORef Int -> IO ()
+runSizeLimitsCrossTest ctx failed = do
+  calls <- recordingHost defaultWindowSettings ctx
+  let sz w h = "Just (Size {sizeW = " ++ show (w :: Float) ++ ", sizeH = " ++ show (h :: Float) ++ "})"
+  forM_
+    [ (setWindowMaxSizeUi (Just (Size 300 200)), ["max " ++ sz 300 200])
+    , (setWindowMinSizeUi (Just (Size 400 100)), ["max " ++ sz 400 200, "min " ++ sz 400 100])
+    , (setWindowMaxSizeUi (Just (Size 350 50)), ["min " ++ sz 350 50, "max " ++ sz 350 50])
+    , (setWindowMinSizeUi (Just (Size 0 80)), ["max " ++ sz 350 80, "min " ++ sz 0 80])
+    , (setWindowMaxSizeUi Nothing, ["max Nothing"])
+    , (setWindowMinSizeUi (Just (Size 500 500)), ["min " ++ sz 500 500])
+    ]
+    $ \(v, expect) -> assertEq failed expect =<< asked ctx calls v
+
 -- | Commands act on every call; toggling maximizes or restores based on the
 -- window state the backend last reported.
 runCommandsTest :: Context -> IORef Int -> IO ()
@@ -180,6 +199,23 @@ runStateTest ctx failed = do
   assertEq failed reported {winSize = Size 200 100} =<< evalUi ctx inp askWindow
   assertEq failed False =<< changed reported
   assertEq failed True =<< changed reported {winFocused = True}
+
+-- | A view that paints the window state (a box coloured by focus) is
+-- repainted when that state changes: no rect or text diff shows the change.
+runStateRepaintTest :: Context -> IORef Int -> IO ()
+runStateRepaintTest ctx failed = do
+  _ <- recordingHost defaultWindowSettings ctx
+  let ui = do
+        st <- askWindow
+        void (label "focus")
+        box (fixedWH 40 40) (if winFocused st then colorRGBA 0 255 0 255 else colorRGBA 128 128 128 255)
+  replicateM_ 3 (runFrame ctx inp ui)
+  assert failed . (/= DamageFull) =<< takeDamage ctx
+  clearDirty ctx
+  reportWindowState ctx defaultWindowState {winFocused = False}
+  assert failed =<< isDirty ctx
+  _ <- runFrame ctx inp ui
+  assertEq failed DamageFull =<< takeDamage ctx
 
 -- | A screenshot requested from a click is requested once, even though the
 -- click's hook write reruns the view.

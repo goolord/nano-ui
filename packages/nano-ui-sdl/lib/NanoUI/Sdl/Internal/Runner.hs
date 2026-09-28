@@ -188,10 +188,15 @@ drawFrameWith ctx env inp forceFull evaluateUi = do
       -- straight to it before presenting.
       when (tex == nullPtr) $ answerScreenshots ctx (captureFrame env tex)
       -- SDL replaced a Wayland toplevel's size limits with its own at every
-      -- configure; the present commits them with the frame.
+      -- configure; the present commits them with the frame. SDL's are none,
+      -- so no limits are sent only to clear the ones sent before.
       for_ (sdlSizeLimits env) $ \ref -> do
-        (nw, nh, xw, xh) <- readIORef ref
-        sendWaylandSizeLimits (sdlWindow env) nw nh xw xh
+        limits@(nw, nh, xw, xh) <- readIORef ref
+        sent <- readIORef (sdlSizeLimitsSent env)
+        let some = limits /= (0, 0, 0, 0)
+        when (some || sent) $ do
+          sendWaylandSizeLimits (sdlWindow env) nw nh xw xh
+          writeIORef (sdlSizeLimitsSent env) some
       void $ renderPresentSafe ren
       t3 <- getMonotonicTime
       let ms a b = (b - a) * 1000

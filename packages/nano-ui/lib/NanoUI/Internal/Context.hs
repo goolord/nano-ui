@@ -181,10 +181,14 @@ registerImage ctx iid w h px = do
 
 -- | Remove an image from the atlas and free its space for later
 -- registrations. Anything still using the id draws the unknown-image
--- placeholder.
+-- placeholder. Releasing a registered image requests a full repaint and
+-- wakes the loop, as registering one does.
 {-# INLINE releaseImage #-}
 releaseImage :: Context -> ImageId -> IO ()
-releaseImage ctx = Atlas.releaseImage (ctxImageAtlas ctx)
+releaseImage ctx iid = do
+  released <- Atlas.releaseImage (ctxImageAtlas ctx) iid
+  -- The id may still be on screen, drawn by a node whose rect is unchanged.
+  when released (damageFull ctx >> markDirty ctx)
 
 -- | Register every image and return whether all succeeded. Successful earlier
 -- registrations remain in place if another image fails.

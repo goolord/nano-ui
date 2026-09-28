@@ -90,7 +90,7 @@ explainFrame ctx@Context {ctxNodeArena = na} inp = do
     mapM_ (damageRect ctx) (prevHover >>= highlight)
     mapM_ (damageRect ctx) (hover >>= highlight)
     markDirtyCovered ctx
-  modifyIORef' (ctxExplain ctx) (\es -> es {esOn = True, esLayers = layers, esHover = hover})
+  modifyIORef' (ctxExplain ctx) (\es -> es {esLayers = layers, esHover = hover})
 
 -- | The 'esLayers' key for the page's outlines. It cannot be 0, since node 0
 -- can be a floating panel's root.

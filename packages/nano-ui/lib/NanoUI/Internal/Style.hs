@@ -1077,10 +1077,26 @@ flatStyle bg fg border hoverBg activeBg =
     , styleActiveBg = activeBg
     }
 
+-- | Set 'themeSuccess' and 'themeDanger' from the theme's green and red,
+-- toned to read on its window ('readableTone'). The built-in themes end with
+-- this, so the tones follow the colours they are made from.
+withReadableTones :: Theme -> Theme
+withReadableTones t =
+  t
+    { themeSuccess = readableTone (themeWindow t) (themeGreen t)
+    , themeDanger = readableTone (themeWindow t) (themeRed t)
+    }
+
+-- | What a theme built field by field holds where 'withReadableTones' fills
+-- in the colour.
+tonedLater :: Color
+tonedLater = colorRGBA 0 0 0 0
+
 -- | Neutral charcoal surfaces, warm text, and a blue selection accent.
 -- Keep structural edges quiet; interactive borders and focus carry contrast.
 defaultTheme :: Theme
 defaultTheme =
+  withReadableTones $
   let panelSurface =
         flatStyle
           (colorRGBA 34 34 38 255)
@@ -1114,9 +1130,9 @@ defaultTheme =
         , themeYellow = colorRGBA 212 176 88 255
         , themeGreen = colorRGBA 104 168 124 255
         , themePurple = colorRGBA 176 140 220 255
-        , themeSuccess = readableTone (colorRGBA 24 24 27 255) (colorRGBA 104 168 124 255)
+        , themeSuccess = tonedLater
         , themeWarning = colorRGBA 242 180 76 255
-        , themeDanger = readableTone (colorRGBA 24 24 27 255) (colorRGBA 252 165 165 255)
+        , themeDanger = tonedLater
         , themeOverlayDim = colorRGBA 8 8 10 176
         , themeOnAccent = colorRGBA 255 255 255 255
         , themeSelection = fadeAlpha (colorRGBA 88 156 246 255) 115
@@ -1129,6 +1145,7 @@ defaultTheme =
 -- | Light counterpart of 'defaultTheme', for use with @followSystemTheme@.
 defaultLightTheme :: Theme
 defaultLightTheme =
+  withReadableTones $
   let panelSurface =
         flatStyle
           (colorRGBA 252 252 251 255)
@@ -1162,9 +1179,9 @@ defaultLightTheme =
         , themeYellow = colorRGBA 150 104 0 255
         , themeGreen = colorRGBA 30 128 70 255
         , themePurple = colorRGBA 128 70 190 255
-        , themeSuccess = readableTone (colorRGBA 244 244 242 255) (colorRGBA 30 128 70 255)
+        , themeSuccess = tonedLater
         , themeWarning = colorRGBA 150 90 0 255
-        , themeDanger = readableTone (colorRGBA 244 244 242 255) (colorRGBA 190 40 40 255)
+        , themeDanger = tonedLater
         , themeOverlayDim = colorRGBA 20 20 24 90
         , themeOnAccent = colorRGBA 255 255 255 255
         , themeSelection = fadeAlpha (colorRGBA 37 99 235 255) 80
@@ -1213,6 +1230,7 @@ fadeAlpha (Color w) a = Color ((w .&. 0xFFFFFF00) .|. fromIntegral a)
 -- | Ported from "Tomorrow Night Min" in https://github.com/biaqat/tomorrow-min-theme-zed
 tomorrowNightMinDarkTheme :: Theme
 tomorrowNightMinDarkTheme =
+  withReadableTones $
   let panelSurface =
         flatStyle
           (colorRGBA 30 31 33 255)  -- base.bg #1E1F21 (elevated panel canvas)
@@ -1245,9 +1263,7 @@ tomorrowNightMinDarkTheme =
         , themeYellow = colorRGBA 240 198 116 255      -- base.yellow #F0C674
         , themeGreen = colorRGBA 181 189 104 255       -- base.green #B5BD68
         , themePurple = colorRGBA 178 148 187 255      -- base.purple #B294BB
-        , themeSuccess = readableTone windowCol (colorRGBA 181 189 104 255)
         , themeWarning = colorRGBA 240 198 116 255     -- base.yellow #F0C674
-        , themeDanger = readableTone windowCol (colorRGBA 204 102 102 255)
         , themeOverlayDim = colorRGBA 0 0 0 160
         , themeLink = accentCol
         }
@@ -1259,6 +1275,7 @@ tomorrowNightMinDarkTheme =
 -- | Ported from "Tomorrow Min" in https://github.com/biaqat/tomorrow-min-theme-zed
 tomorrowMinLightTheme :: Theme
 tomorrowMinLightTheme =
+  withReadableTones $
   let panelSurface =
         flatStyle
           (colorRGBA 242 242 242 255)  -- #F2F2F2
@@ -1291,9 +1308,7 @@ tomorrowMinLightTheme =
         , themeYellow = colorRGBA 231 197 71 255      -- Tomorrow Yellow #E7C547
         , themeGreen = colorRGBA 113 140 0 255        -- Tomorrow Green #718C00
         , themePurple = colorRGBA 137 91 144 255      -- Tomorrow Purple #895B90
-        , themeSuccess = readableTone (colorRGBA 255 255 255 255) (colorRGBA 113 140 0 255)
         , themeWarning = colorRGBA 150 94 0 255       -- #965E00 (an amber dark enough to read on white)
-        , themeDanger = readableTone (colorRGBA 255 255 255 255) (colorRGBA 197 78 82 255)
         , themeOverlayDim = colorRGBA 0 0 0 100
         , themeSelection = fadeAlpha (colorRGBA 82 134 188 255) 80
         , themeLink = colorRGBA 66 113 174 255
@@ -1303,6 +1318,7 @@ tomorrowMinLightTheme =
 -- | Ported from "Tomorrow at Midnight Min" in https://github.com/biaqat/tomorrow-min-theme-zed
 tomorrowMidnightMinDarkTheme :: Theme
 tomorrowMidnightMinDarkTheme =
+  withReadableTones $
   let panelSurface =
         flatStyle
           (colorRGBA 16 17 20 255)  -- #101114 (elevated panel canvas)
@@ -1335,9 +1351,7 @@ tomorrowMidnightMinDarkTheme =
         , themeYellow = colorRGBA 231 197 71 255       -- bright.yellow #E7C547
         , themeGreen = colorRGBA 185 202 74 255        -- bright.green #B9CA4A
         , themePurple = colorRGBA 195 151 216 255      -- bright.purple #C397D8
-        , themeSuccess = readableTone (colorRGBA 0 0 0 255) (colorRGBA 185 202 74 255)
         , themeWarning = colorRGBA 231 197 71 255      -- bright.yellow #E7C547
-        , themeDanger = readableTone (colorRGBA 0 0 0 255) (colorRGBA 213 78 83 255)
         , themeOverlayDim = colorRGBA 0 0 0 160
         , themeLink = accentCol
         , themeShadow = colorRGBA 0 0 0 96

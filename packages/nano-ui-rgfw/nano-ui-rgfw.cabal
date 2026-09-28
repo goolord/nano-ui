@@ -59,7 +59,7 @@ library
         bytestring ^>=0.12,
         file-embed ^>=0.0.16,
         nano-ui-rgfw-bindings ^>=0.1,
-        nano-ui ^>=0.1,
+        nano-ui ^>=0.2,
         primitive ^>=0.9,
         text ^>=2.1
     hs-source-dirs:   lib

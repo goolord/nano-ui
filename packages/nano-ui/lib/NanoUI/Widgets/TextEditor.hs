@@ -34,7 +34,7 @@ import Data.Char (isPrint, isSpace, toLower)
 import Data.Text qualified as T
 import Data.Text.Short qualified as TS
 import NanoUI.Internal.Context (Context (..))
-import NanoUI.Internal.Input (Input (..), Key (..), Modifiers (..), modJump, modMacCommand, modPrimary, noModifiers, onMac)
+import NanoUI.Internal.Input (Input (..), Key (..), Modifiers (..), chordModifiers, modJump, modMacCommand, modPrimary, noModifiers, onMac)
 import NanoUI.Widgets.TextBuffer (Cursor (..), TextBuffer, TextEdit (..))
 import NanoUI.Widgets.TextCommand (TextCommand (..), TextMotion (..))
 import NanoUI.Widgets.TextBuffer qualified as TB
@@ -318,11 +318,6 @@ inputTextCommands mode inp = T.foldr char keys (inputChars inp)
       | isPrint c && not (chordModifiers mods) = InsertText (T.singleton c) : rest
       | otherwise = rest
     keys = foldr (\k rest -> maybe rest (: rest) (keyCommand mode mods k)) [] (inputKeys inp)
-
--- | Whether a character key is a shortcut rather than typing: 'modPrimary'
--- (Command on macOS, Ctrl elsewhere) without Alt.
-chordModifiers :: Modifiers -> Bool
-chordModifiers mods = modPrimary mods && not (modAlt mods)
 
 chordCommand :: Modifiers -> Char -> Maybe TextCommand
 chordCommand mods c =

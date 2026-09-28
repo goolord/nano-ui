@@ -285,9 +285,10 @@ maximizeWindow (Window win) = c_RGFW_window_maximize win
 minimizeWindow :: Window -> IO ()
 minimizeWindow (Window win) = c_RGFW_window_minimize win
 
--- | Restore a maximized or minimized window.
+-- | Restore a maximized or minimized window to the size and place the
+-- desktop kept for it.
 restoreWindow :: Window -> IO ()
-restoreWindow (Window win) = c_RGFW_window_restore win
+restoreWindow (Window win) = c_rgfw_window_restore win
 
 -- | Make the window fullscreen, or windowed again.
 setWindowFullscreen :: Window -> Bool -> IO ()

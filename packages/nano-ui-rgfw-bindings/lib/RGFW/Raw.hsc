@@ -122,7 +122,7 @@ module RGFW.Raw
   , c_RGFW_window_resize
   , c_RGFW_window_maximize
   , c_RGFW_window_minimize
-  , c_RGFW_window_restore
+  , c_rgfw_window_restore
   , c_RGFW_window_setFullscreen
   , c_RGFW_window_show
   , c_RGFW_window_hide
@@ -439,8 +439,10 @@ foreign import ccall "RGFW_window_maximize"
   c_RGFW_window_maximize :: Ptr RGFW_window -> IO ()
 foreign import ccall "RGFW_window_minimize"
   c_RGFW_window_minimize :: Ptr RGFW_window -> IO ()
-foreign import ccall "RGFW_window_restore"
-  c_RGFW_window_restore :: Ptr RGFW_window -> IO ()
+-- The bundled wrapper restores as RGFW does, minus moving and resizing the
+-- window to the geometry RGFW saved, which a desktop maximize leaves unset.
+foreign import ccall "rgfw_window_restore"
+  c_rgfw_window_restore :: Ptr RGFW_window -> IO ()
 
 -- | Make the window fullscreen (non-zero) or windowed.
 foreign import ccall "RGFW_window_setFullscreen"

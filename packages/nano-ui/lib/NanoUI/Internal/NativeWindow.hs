@@ -68,7 +68,7 @@ import Data.IORef (IORef, atomicModifyIORef', modifyIORef', newIORef, readIORef,
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Typeable (Typeable)
-import NanoUI.Internal.Context (Context, askHostIO, markDirtyCovered, setHost, wakeFromThread)
+import NanoUI.Internal.Context (Context, askHostIO, markDirty, markDirtyCovered, setHost, wakeFromThread)
 import NanoUI.Internal.Monad (NanoUI, windowSize, withContext)
 import NanoUI.Internal.Tasks (useTask)
 import NanoUI.Internal.Types (Size (..))
@@ -346,7 +346,9 @@ reportWindowState ctx st =
     unless (new == old) $ do
       writeIORef (nwState nw) new
       read' <- readIORef (nwStateRead nw)
-      when read' (markDirtyCovered ctx)
+      -- The view may paint the state (a colour on focus) where no diff sees
+      -- it, so the frame repaints whole.
+      when read' (markDirty ctx)
 
 -- | For the session loop when the window is asked to close. Returns 'True'
 -- when the session should end ('wsExitOnCloseRequest' set, or no host).
@@ -385,9 +387,31 @@ setting get put apply nw v = do
   s <- readIORef (nwSettings nw)
   unless (get s == v) $ writeIORef (nwSettings nw) (put v s) >> apply (nwHost nw) v
 
+-- | Set one size limit. On an axis where the minimum would pass the maximum,
+-- the limit being set wins and the other moves to it, and goes to the host
+-- first, so the host never sees a crossed pair: most desktops reject one
+-- (SDL keeps the old limit) and a Wayland compositor disconnects the client.
 setMinSize, setMaxSize :: NativeWindow -> Maybe Size -> IO ()
-setMinSize = setting wsMinSize (\v s -> s {wsMinSize = v}) hostSetMinSize
-setMaxSize = setting wsMaxSize (\v s -> s {wsMaxSize = v}) hostSetMaxSize
+setMinSize nw v = do
+  other <- wsMaxSize <$> readIORef (nwSettings nw)
+  putMaxSize nw (yieldLimit (>) v other)
+  putMinSize nw v
+setMaxSize nw v = do
+  other <- wsMinSize <$> readIORef (nwSettings nw)
+  putMinSize nw (yieldLimit (<) v other)
+  putMaxSize nw v
+
+putMinSize, putMaxSize :: NativeWindow -> Maybe Size -> IO ()
+putMinSize = setting wsMinSize (\v s -> s {wsMinSize = v}) hostSetMinSize
+putMaxSize = setting wsMaxSize (\v s -> s {wsMaxSize = v}) hostSetMaxSize
+
+-- | @other@ with each axis that @crosses@ the limit @new@ sets moved to
+-- @new@'s. An axis of zero or less, or a missing limit, crosses nothing.
+yieldLimit :: (Float -> Float -> Bool) -> Maybe Size -> Maybe Size -> Maybe Size
+yieldLimit crosses (Just (Size nw nh)) (Just (Size ow oh)) = Just (Size (axis nw ow) (axis nh oh))
+  where
+    axis n o = if n > 0 && o > 0 && crosses n o then n else o
+yieldLimit _ _ other = other
 
 setIcon :: NativeWindow -> RgbaPixels -> IO ()
 setIcon nw = setting wsIcon (\v s -> s {wsIcon = v}) (traverse_ . hostSetIcon) nw . Just
@@ -409,7 +433,8 @@ setWindowIconUi icon = withNativeWindow (`setIcon` icon)
 -- | Set the smallest size, in layout units, the user can resize the window
 -- to, or remove the limit with 'Nothing'. A zero axis is unlimited. The size
 -- is converted at the UI scale when the limit is set, and not again if the
--- scale changes later.
+-- scale changes later. Where it passes the maximum size, the maximum is
+-- raised to it; 'setWindowMaxSizeUi' likewise lowers a minimum above it.
 setWindowMinSizeUi :: Maybe Size -> NanoUI ()
 setWindowMinSizeUi s = withNativeWindow (`setMinSize` s)
 
@@ -527,8 +552,9 @@ useScreenshot k = join <$> (useTask k =<< askScreenshot)
 -- backend calls this once a frame is presented, and not while it has no
 -- frame to capture. The scale is the last one given to 'reportWindowState'.
 --
--- Answers are view code that usually changes what a view reads, so
--- answering any requests a frame.
+-- Answers are view code that usually changes what a view reads, outside
+-- anything the damage pass diffs, so answering any requests a frame that
+-- repaints whole.
 answerScreenshots :: Context -> IO (Maybe RgbaPixels) -> IO ()
 answerScreenshots ctx capture =
   withHost ctx $ \nw -> do
@@ -537,4 +563,4 @@ answerScreenshots ctx capture =
       scale <- winScale <$> readIORef (nwState nw)
       shot <- fmap (`Screenshot` scale) <$> capture
       mapM_ ($ shot) (reverse waiting)
-      markDirtyCovered ctx
+      markDirty ctx

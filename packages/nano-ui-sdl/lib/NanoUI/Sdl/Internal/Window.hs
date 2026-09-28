@@ -42,7 +42,7 @@ import Foreign.Marshal.Utils (copyBytes, maybePeek, with)
 import Foreign.Storable (peek)
 import Foreign.Ptr (Ptr, castPtr, nullPtr, plusPtr)
 import NanoUI (Appearance, ImageId, Input (..), RgbaPixels, Screenshot (..), Size (..), Theme, V2 (..), WindowMode (..), WindowSettings (..), defaultWindowSettings, rgbaPixels)
-import NanoUI.Backend (cancelTasks, installWindowHost, reportWindowState, setSystemAppearance, setWakeLoop)
+import NanoUI.Backend (cancelTasks, installWindowHost, reportWindowState, setSystemAppearance, setWakeLoopChecked)
 import NanoUI.Internal.Context (Context (..), setDrawSnapScale)
 import NanoUI.Testing (clearMeasureCache, damageFull, markDirty, setHost, withClipboard)
 import NanoUI.Sdl.Internal.Display
@@ -262,6 +262,9 @@ data SdlEnv = SdlEnv
   -- height in window coordinates (zero for none), which nano-ui sends to the
   -- compositor before each present instead of giving them to SDL.
   -- 'Nothing' elsewhere, where SDL keeps them.
+  , sdlSizeLimitsSent :: !(IORef Bool)
+  -- ^ Whether the limits last sent from 'sdlSizeLimits' were any, so none
+  -- are sent again only to clear them.
   }
 
 -- | The retained framebuffer. The texture is allocated in blocks larger than
@@ -543,6 +546,7 @@ startSdlWindow bench opts ctx guessedDriver fontSource monoSource = do
   sdlSizeLimits <- liftIO $ do
     toplevel <- waylandToplevel sdlWindow
     if toplevel /= 0 then Just <$> newIORef (0, 0, 0, 0) else pure Nothing
+  sdlSizeLimitsSent <- liftIO $ newIORef False
   sdlBatch <- mkAcquire (newRenderBatch sdlRenderer) destroyRenderBatch
   let
     env = SdlEnv {..}
@@ -553,7 +557,7 @@ startSdlWindow bench opts ctx guessedDriver fontSource monoSource = do
   liftIO $ setHost ctx' env
   -- Background hook jobs are cancelled with the session, before SDL quits,
   -- including when a host drives frames itself inside 'withSdl'.
-  mkAcquire (setWakeLoop ctx' pushRefreshEvent) (const (cancelTasks ctx'))
+  mkAcquire (setWakeLoopChecked ctx' tryPushRefreshEvent) (const (cancelTasks ctx'))
   -- The remaining settings go through the host, as from a view. This runs
   -- after the decorations (size limits account for the frame) and after the
   -- zoom (which centres the enlarged window).

@@ -17,16 +17,19 @@ module NanoUI.Internal.Widgets.Behavior
   )
 where
 
-import Control.Monad (when)
+import Control.Monad (when, (>=>))
 import Data.IORef (readIORef, writeIORef)
+import Data.IntSet qualified as IS
 import Data.List (find)
 import Data.Maybe (fromMaybe)
 import NanoUI.Internal.Context
+import NanoUI.Internal.Frame.Hit (findNodeByWidgetId)
 import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Internal.Input
+import NanoUI.Internal.Layout.Arena (getParent, getWidgetId)
 import NanoUI.Internal.Monad (NanoUI, (<&&>), askContext, askFrameInput, askInput, focusedWidget, freshWidget, liftIO, withContext)
 import NanoUI.Internal.Store (fieldFloat, fieldInt, findSlot, insertSlot, quietFlag, setQuietFlag)
-import NanoUI.Internal.Types (Rect (..), clamp01, rectHit, v2X, v2Y)
+import NanoUI.Internal.Types (Rect (..), V2, clamp01, rectHit, v2X, v2Y)
 
 -- | Pointer slop in pixels before a held press counts as a drag.
 dragThresholdPx :: Float
@@ -39,7 +42,7 @@ data DragAxis = DragAxisX | DragAxisY
 -- @track@ into [lo, hi]. The drag starts with a press on the track and lasts
 -- until the button comes up. A button held from elsewhere and moved onto the
 -- track drags nothing, nor does a press where another widget covers the
--- owner ('pointerCovered'). Returns the value, whether the drag is held, and
+-- owner ('trackCovered'). Returns the value, whether the drag is held, and
 -- whether it was held before this frame.
 useDrag1D ::
   DragAxis ->
@@ -57,11 +60,34 @@ useDrag1D axis owner lo hi current track = do
         DragAxisX -> (rectX track, rectW track, v2X (inputMousePos inp))
         DragAxisY -> (rectY track, rectH track, v2Y (inputMousePos inp))
   active0 <- quietFlag dragK <$> liftIO (getStore ctx)
-  started <- pure (pressedIn MouseLeft inp && rectHit track (inputMousePos inp)) <&&> (not <$> liftIO (pointerCovered ctx owner))
+  started <- pure (pressedIn MouseLeft inp && rectHit track (inputMousePos inp)) <&&> (not <$> liftIO (trackCovered ctx owner (inputMousePos inp)))
   let active = heldIn MouseLeft inp && (active0 || started)
       frac = if trackLen <= 0 then 0 else clamp01 ((mouse - origin) / trackLen)
   when (active /= active0) $ liftIO (modifyStore ctx (setQuietFlag dragK active))
   pure (if active then lo + frac * (hi - lo) else current, active, active0)
+
+-- | Whether a press at @mouse@ on a track of widget @owner@ is covered
+-- ('pointerCovered'). A track wider than its owner (a colour picker's bar)
+-- takes presses beside the owner too, where the pointer reaches what holds
+-- the owner rather than the owner itself: there only a node that is none of
+-- the owner's ancestors covers it.
+trackCovered :: Context -> WidgetId -> V2 -> IO Bool
+trackCovered ctx owner mouse = do
+  covered <- pointerCovered ctx owner
+  inOwner <- maybe False (`rectHit` mouse) <$> getPrevRect ctx owner
+  if not covered || inOwner
+    then pure covered
+    else do
+      reach <- readIORef (ctxPointerReach ctx)
+      ancestors <- maybe (pure IS.empty) (getParent na >=> idsUp IS.empty) =<< findNodeByWidgetId ctx owner
+      pure (maybe False (not . (`IS.isSubsetOf` ancestors)) reach)
+  where
+    na = ctxNodeArena ctx
+    idsUp !acc i
+      | i < 0 = pure acc
+      | otherwise = do
+          wid <- getWidgetId na i
+          getParent na i >>= idsUp (if hashWidgetId wid == 0 then acc else IS.insert (intKey wid) acc)
 
 -- | Hold the active id for @wid@ while its drag lasts and let it go after, so
 -- the widget paints and takes the cursor as pressed wherever the pointer goes.

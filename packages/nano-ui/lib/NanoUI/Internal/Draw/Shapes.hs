@@ -817,16 +817,27 @@ pushPolylineAA da pts w closed cap join limit shade
                         | otherwise = (v + 1, v + 2, v + 3, v + 6, v + 7)
                       !ux = outSign * ax
                       !uy = outSign * ay
-                      !sweep = atan2 (ux * outSign * by - uy * outSign * bx) (ux * outSign * bx + uy * outSign * by)
-                      !chords = if join == RoundJoin then arcChords s outer (abs sweep) else 1
+                      -- Turning the way the corner turns: at a half turn
+                      -- the cross product is a signed zero, and atan2 would
+                      -- follow its sign back through the stroke instead.
+                      !turned = abs (atan2 (ux * outSign * by - uy * outSign * bx) (ux * outSign * bx + uy * outSign * by))
+                      !sweep = if turnsPositive then turned else negate turned
+                      !chords = if join == RoundJoin then arcChords s outer turned else 1
                   if turnsPositive
                     then section v x y ax ay ix iy col >> section (v + 4) x y bx by ix iy col
                     else section v x y ix iy ax ay col >> section (v + 4) x y ix iy bx by col
                   (v', k') <- fan (v + 8) k centre cIn oIn cOut oOut x y (atan2 uy ux) sweep chords col
                   pure (v, v + 4, v', k')
+            -- An end's cap faces along the nearest segment of nonzero
+            -- length, stepping by @step@ from segment @i@.
+            endNormal i step
+              | i >= 0 && i < n - 1
+              , (0, 0) <- normalAt i =
+                  endNormal (i + step) step
+              | otherwise = normalAt (max 0 (min (n - 2) i))
             pointAt i v k
-              | not closed && i == 0 = let (nx, ny) = normalAt 0 in capAt i v k nx ny (-1)
-              | not closed && i == n - 1 = let (nx, ny) = normalAt (n - 2) in capAt i v k nx ny 1
+              | not closed && i == 0 = let (nx, ny) = endNormal 0 1 in capAt i v k nx ny (-1)
+              | not closed && i == n - 1 = let (nx, ny) = endNormal (n - 2) (-1) in capAt i v k nx ny 1
               | otherwise =
                   let (ax, ay) = normalAt (if i == 0 then n - 1 else i - 1)
                       (bx, by) = normalAt i

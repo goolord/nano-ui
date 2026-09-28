@@ -13,7 +13,26 @@ tests =
   , spec "atlas-changes" runAtlasChangesTest
   , spec "atlas-fills-width" runAtlasFillsWidthTest
   , spec "atlas-release-reuse" runAtlasReleaseReuseTest
+  , spec "atlas-release-repaints" runAtlasReleaseRepaintTest
   ]
+
+-- | Releasing an image still on screen requests a frame that repaints it
+-- (as the placeholder), since its node's rect does not change. Releasing an
+-- unknown id requests nothing.
+runAtlasReleaseRepaintTest :: Context -> IORef Int -> IO ()
+runAtlasReleaseRepaintTest ctx failed = do
+  let inp = withInput 200 100
+      ui = image (fixedWH 20 20) (ImageId 1)
+  registerImage ctx (ImageId 1) 2 2 (BS.replicate 16 255) >>= assert failed
+  replicateM_ 3 (runFrame ctx inp ui)
+  assert failed . (/= DamageFull) =<< takeDamage ctx
+  clearDirty ctx
+  releaseImage ctx (ImageId 7)
+  assert failed . not =<< isDirty ctx
+  releaseImage ctx (ImageId 1)
+  assert failed =<< isDirty ctx
+  _ <- runFrame ctx inp ui
+  assertEq failed DamageFull =<< takeDamage ctx
 
 -- | A released image stops drawing and its slot is reused by the next image
 -- that fits, with the surrounding padding cleared and uploaded. Images that

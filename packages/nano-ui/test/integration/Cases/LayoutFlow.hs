@@ -21,11 +21,14 @@ tests =
   , spec "pin-outside-parent-paint" runPinOutsideParentPaintTest
   , spec "layer-hit-order" runLayerHitOrderTest
   , spec "layers-field-focus" runLayersFieldFocusTest
+  , spec "covered-field-select-focus" runCoveredFieldSelectFocusTest
+  , spec "pinned-field-text-cursor" runPinnedFieldTextCursorTest
   , spec "layout-flow-damage" runLayoutFlowDamageTest
   , spec "scroll-ignores-flow" runScrollIgnoresFlowTest
   , spec "arena-columns-fit-strides" runArenaColumnsFitStridesTest
   , spec "covered-widget-no-pointer" runCoveredWidgetNoPointerTest
   , spec "pointer-modes" runPointerModesTest
+  , spec "pointer-block-nested" runPointerBlockNestedTest
   , spec "pointer-covers-any-id" runPointerCoversAnyIdTest
   ]
 
@@ -296,6 +299,45 @@ runLayersFieldFocusTest ctx failed = do
   assert failed (not (respClicked under2))
   getFocusId ctx >>= assertEq failed (respId top0)
 
+-- | A button pinned over a text field declared after it takes the press and
+-- leaves focus as it was, as a button layered over one does. A button
+-- layered over a select takes the press without focusing the select.
+runCoveredFieldSelectFocusTest :: Context -> IORef Int -> IO ()
+runCoveredFieldSelectFocusTest ctx failed = do
+  let sized w = defaultTextInputConfig {ticLayout = fixedW w (ticLayout defaultTextInputConfig)}
+      ui = columnWith tight $ do
+        cover <- buttonWith' (pinAt 100 0 . fixedWH 60 20) "x"
+        f <- fst <$> textInputConfigured' (sized 200) "text"
+        (s, over) <- layersWith tight $ (,) <$> (fst <$> selectWith' (fixedW 200) ["Alpha", "Beta"] 0) <*> buttonWith' (alignEnd . fixedWH 40 20) "y"
+        pure (cover, f, s, over)
+  (cover0, field0, _, over0) <- warmup2 ctx input0 ui
+  let press p = runClick ctx input0 {inputMousePos = p} ui p
+      Rect fx fy _ fh = respRect field0
+      focusAfter p = press p >> getFocusId ctx
+  (cover1, _, _, _) <- press (centerOf cover0)
+  assert failed (respClicked cover1)
+  getFocusId ctx >>= assertEq failed (WidgetId 0)
+  focusAfter (V2 (fx + 20) (fy + fh / 2)) >>= assertEq failed (respId field0)
+  focusAfter (centerOf cover0) >>= assertEq failed (respId field0)
+  (_, _, _, over1) <- press (centerOf over0)
+  assert failed (respClicked over1)
+  getFocusId ctx >>= assertEq failed (WidgetId 0)
+
+-- | A text field pinned over a later one shows the text cursor and takes the
+-- right-click menu there.
+runPinnedFieldTextCursorTest :: Context -> IORef Int -> IO ()
+runPinnedFieldTextCursorTest ctx failed = do
+  let sized f = defaultTextInputConfig {ticLayout = f (ticLayout defaultTextInputConfig)}
+      ui = columnWith tight $ do
+        pinned <- fst <$> textInputConfigured' (sized (pinAt 50 0 . fixedW 100)) "pinned"
+        _ <- textInputConfigured' (sized (fixedW 300)) "under"
+        pure pinned
+  pinned0 <- warmup2 ctx input0 ui
+  let p = centerOf pinned0
+  cursorOver ctx input0 ui p >>= assertEq failed UiCursorText
+  _ <- evalUi ctx (fst (rightClickPair input0 p)) ui
+  getFocusId ctx >>= assertEq failed (respId pinned0)
+
 -- | Changing only a pin offset, a row's wrap flag, or its line gap relayouts
 -- the frame and repaints the moved children's old and new rects.
 runLayoutFlowDamageTest :: Context -> IORef Int -> IO ()
@@ -466,6 +508,28 @@ runPointerModesTest ctx failed = do
     assertEq failed (through, not through) (respHovered b1, respHovered d1)
     (b2, d2) <- clickAt (drawn mode) onDrawing
     assertEq failed (through, not through) (respClicked b2, respClicked d2)
+
+-- | A 'PointerBlock' veil pinned over a form inside a 'PointerBlock' card
+-- blocks the form: the button under the veil is not hovered, hot or clicked,
+-- while its uncovered part still works.
+runPointerBlockNestedTest :: Context -> IORef Int -> IO ()
+runPointerBlockNestedTest ctx failed = do
+  let ui = columnWith tight $ panelWith (pointer PointerBlock . fixedWH 300 200) $ do
+        b <- buttonWith' (fixedWH 200 100) "under"
+        box (pinAt 0 0 . fixedWH 150 80 . pointer PointerBlock) red
+        pure b
+      at p = input0 {inputMousePos = p}
+  Rect bx by _ _ <- respRect <$> warmup2 ctx input0 ui
+  let onVeil = V2 (bx + 20) (by + 20)
+  warmup ctx (at onVeil) ui
+  b1 <- evalUi ctx (at onVeil) ui
+  assert failed (not (respHovered b1))
+  getHotId ctx >>= assertEq failed (WidgetId 0)
+  b2 <- runClick ctx (at onVeil) ui onVeil
+  assert failed (not (respClicked b2))
+  let uncovered = V2 (bx + 190) (by + 90)
+  b3 <- runClick ctx (at uncovered) ui uncovered
+  assert failed (respClicked b3)
 
 -- | A control drawn over a non-control node with an id, such as a label,
 -- covers it too: no hover there, and its tooltip stays closed.

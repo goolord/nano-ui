@@ -7,7 +7,7 @@ import Data.List (isInfixOf)
 import Data.Function (fix)
 import Data.Maybe (isJust)
 import GHC.Conc (getUncaughtExceptionHandler, setUncaughtExceptionHandler)
-import NanoUI.Internal.Context (wakeFromThread)
+import NanoUI.Internal.Context (Context (ctxWakeLoop), wakeFromThread)
 import System.Timeout (timeout)
 
 tests :: [Spec]
@@ -24,6 +24,8 @@ tests =
   , spec "task-retry" runTaskRetryTest
   , spec "task-shutdown" runTaskShutdownTest
   , spec "wake-from-thread" runWakeFromThreadTest
+  , spec "wake-undelivered" runWakeUndeliveredTest
+  , spec "wake-signal-after-drain" runWakeSignalAfterDrainTest
   , spec "stream" runStreamTest
   , spec "stream-key-change" runStreamKeyChangeTest
   ]
@@ -272,6 +274,34 @@ runTaskShutdownTest ctx failed = do
   before <- readIORef wakes
   wakeFromThread ctx
   assertEq failed before =<< readIORef wakes
+
+-- | A wake the action could not deliver (a full event queue), or made with
+-- no action installed, does not leave the next wake waiting on it.
+runWakeUndeliveredTest :: Context -> IORef Int -> IO ()
+runWakeUndeliveredTest ctx failed = do
+  writeIORef (ctxWakeLoop ctx) Nothing
+  wakeFromThread ctx
+  runs <- newIORef (0 :: Int)
+  delivers <- newIORef False
+  setWakeLoopChecked ctx (tick runs >> readIORef delivers)
+  wakeFromThread ctx
+  wakeFromThread ctx
+  assertEq failed 2 =<< readIORef runs
+  -- Once one gets through, the rest wait for the loop to take it.
+  writeIORef delivers True
+  wakeFromThread ctx
+  wakeFromThread ctx
+  assertEq failed 3 =<< readIORef runs
+
+-- | A wake drained with @wait 0@ and no frame after it does not swallow the
+-- job's wake that follows.
+runWakeSignalAfterDrainTest :: Context -> IORef Int -> IO ()
+runWakeSignalAfterDrainTest ctx failed = do
+  wait <- newWakeSignal ctx
+  markDirty ctx
+  assert failed =<< wait 0
+  wakeFromThread ctx
+  assert failed =<< wait 0
 
 -- | An asynchronous exception other than the hook's kill, such as a stack
 -- overflow, fails the job and wakes the loop.

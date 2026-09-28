@@ -89,9 +89,9 @@ library demo-common
         diagrams-lib >=1.6 && <1.7,
         filepath ^>=1.5,
         JuicyPixels ^>=3.3,
-        nano-ui ^>=0.1,
-        nano-ui-diagrams ^>=0.1,
-        nano-ui-sdl ^>=0.1,
+        nano-ui ^>=0.2,
+        nano-ui-diagrams ^>=0.2,
+        nano-ui-sdl ^>=0.2,
         primitive ^>=0.9,
         text ^>=2.1,
         vector ^>=0.13
@@ -112,10 +112,10 @@ executable nano-ui-sdl-profile
     main-is:          Profile.hs
     build-depends:
         bytestring ^>=0.12,
-        nano-ui ^>=0.1,
+        nano-ui ^>=0.2,
         nano-ui-demo:demo-common,
-        nano-ui-diagrams ^>=0.1,
-        nano-ui-sdl ^>=0.1,
+        nano-ui-diagrams ^>=0.2,
+        nano-ui-sdl ^>=0.2,
         primitive ^>=0.9,
         text ^>=2.1
 
@@ -150,9 +150,9 @@ test-suite nano-ui-demo-test
         ImeSelftest
     build-depends:
         bytestring ^>=0.12,
-        nano-ui ^>=0.1,
+        nano-ui ^>=0.2,
         nano-ui-demo:demo-common,
-        nano-ui-sdl ^>=0.1,
+        nano-ui-sdl ^>=0.2,
         primitive ^>=0.9,
         sdl3-bindgen-sys ^>=0.0.0.2,
         text ^>=2.1
@@ -165,7 +165,7 @@ test-suite nano-ui-terminal-test
     hs-source-dirs:   test
     build-depends:
         bytestring ^>=0.12,
-        nano-ui ^>=0.1,
+        nano-ui ^>=0.2,
         nano-ui-demo:demo-common,
         streaming ^>=0.2,
         text ^>=2.1,

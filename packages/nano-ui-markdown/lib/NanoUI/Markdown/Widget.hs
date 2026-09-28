@@ -11,6 +11,8 @@ import Control.Monad (unless, void, when, zipWithM)
 import Data.Char (isSpace)
 import Data.Foldable (asum)
 import Data.Hashable (Hashable, hash)
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.IntMap.Strict qualified as IM
 import Data.Maybe (fromMaybe, isJust)
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -92,6 +94,9 @@ import NanoUI
   , whenM
   , withKey
   )
+import NanoUI.Internal.Context (hostOrInit, intKey)
+import NanoUI.Internal.Monad (freshWidget, liftIO)
+import NanoUI.Internal.Store (eqByPtr, ptrEq)
 import NanoUI.Markdown.Document (MarkdownDoc, markdownBlocks)
 import NanoUI.Markdown.Syntax
 
@@ -148,7 +153,7 @@ data MarkdownConfig = MarkdownConfig
 defaultMarkdownConfig :: MarkdownConfig
 defaultMarkdownConfig =
   MarkdownConfig
-    { mdLayout = tight . fillW . gap 10
+    { mdLayout = tight . fillW . gap 16
     , mdText = id
     , mdHeading = \level ->
         let scale = case level of
@@ -244,16 +249,16 @@ block env = \case
         resp <- image' (fixedWH w h) iid
         unless (T.null title) (tooltip resp title)
         pure (if respClicked resp then Just target else Nothing)
-    | otherwise -> richTextWith (tight . fillW . envText env) (inlines env xs)
+    | otherwise -> richTextWith (tight . fillW . envText env) =<< keptInlines env xs
   Heading level xs ->
-    let title = richTextWith (tight . fillW . mdHeading (envCfg env) level . envText env) (inlines env xs)
-     in if level <= 2 then columnWith (tight . fillW . gap 4) (title <* separator) else title
+    let title = richTextWith (tight . fillW . mdHeading (envCfg env) level . envText env) =<< keptInlines env xs
+     in if level <= 2 then columnWith (tight . fillW . gap 6) (title <* separator) else title
   ThematicBreak -> Nothing <$ separator
   CodeBlock info code -> Nothing <$ codeBlock env info code
   BlockQuote bs ->
     rowWith (tight . fillW . gap 10) $ do
       box (fixedW 3 . fillH) (themeSeparator (envTheme env))
-      columnWith (tight . fillW . gap 10) $
+      columnWith (tight . fillW . gap 16) $
         blocks env {envText = mdQuote (envCfg env) . fontColor (themeMuted (envTheme env)) . envText env} bs
   List ty isTight items -> listBlock env ty isTight items
   Table aligns header rows -> tableBlock env aligns header rows
@@ -268,6 +273,54 @@ soleImage cfg = \case
   _ -> Nothing
   where
     drawn target src title = (\(iid, size) -> (target, title, iid, size)) <$> mdImage cfg src
+
+-- | 'inlines' for spans drawn every frame, the same pieces as last frame's
+-- while the spans are the same list (as a closed block's are) and the theme
+-- and inline styles are unchanged. Rich text then reuses the paragraph's
+-- layout without hashing its text again, so a long document costs little a
+-- frame while a reply streams into its last block.
+keptInlines :: Env -> [Span] -> NanoUI [Inline]
+keptInlines env xs = do
+  (wid, ctx) <- freshWidget
+  liftIO $ do
+    Kept ref <- hostOrInit ctx (Kept <$> newIORef (KeptGens keptBound IM.empty IM.empty))
+    KeptGens bound cur old <- readIORef ref
+    let k = intKey wid
+        found = maybe (IM.lookup k old) Just (IM.lookup k cur)
+    case found of
+      Just e@(KeptEntry ys theme link codeBg code pieces)
+        | ptrEq xs ys
+        , eqByPtr (envTheme env) theme
+        , mdLinkColor cfg == link
+        , mdInlineCodeBackground cfg == codeBg
+        , ptrEq (mdInlineCode cfg) code -> do
+            -- Found only in the older generation: carry it into this one.
+            unless (IM.member k cur) (writeIORef ref (keep bound cur old k e))
+            pure pieces
+      _ -> do
+        let pieces = inlines env xs
+            e = KeptEntry xs (envTheme env) (mdLinkColor cfg) (mdInlineCodeBackground cfg) (mdInlineCode cfg) pieces
+        pieces <$ writeIORef ref (keep bound cur old k e)
+  where
+    cfg = envCfg env
+    -- Past the bound, the newer generation becomes the older one and the
+    -- bound grows to twice what it held, so what a frame draws stays while
+    -- blocks the view stopped drawing drop out.
+    keep bound cur old k e
+      | IM.size cur < bound = KeptGens bound (IM.insert k e cur) old
+      | otherwise = KeptGens (max keptBound (2 * IM.size cur)) (IM.singleton k e) cur
+
+-- | Pieces 'keptInlines' made, by widget key, in two generations.
+newtype Kept = Kept (IORef KeptGens)
+
+data KeptGens = KeptGens !Int !(IM.IntMap KeptEntry) !(IM.IntMap KeptEntry)
+
+-- | Spans, what styled them, and their pieces.
+data KeptEntry = KeptEntry [Span] !Theme !(Maybe Color) !(Maybe Color) (Layout -> Layout) [Inline]
+
+-- | Entries a generation holds before the older one is dropped.
+keptBound :: Int
+keptBound = 1024
 
 -- | Spans as rich-text pieces. Every piece inside a link targets its
 -- destination; an image's alt text targets its enclosing link, else its
@@ -328,7 +381,7 @@ listBlock env ty isTight items = do
       theme = envTheme env
       lineH = fmLineHeight fm
       side = checkboxBoxSize fm
-      spacing = if isTight then 2 else 10
+      spacing = if isTight then 6 else 16
       -- Each item's number, built once for both measuring and drawing.
       numbers = case ty of
         Ordered start delim -> [T.pack (show n) <> T.singleton delim | n <- [start ..]]
@@ -388,9 +441,8 @@ tableBlock env aligns header rows = do
       cell isHeader (align, spans) =
         styled (panelStyle (mdTableCell (envCfg env) isHeader . flat (if isHeader then headBg else bodyBg))) $
           panelWith (padXY 8 5 . fillW . fillH) $
-            richTextWith
-              (tight . alignOf align . (if isHeader then fontBold else id) . envText env)
-              (inlines env spans)
+            richTextWith (tight . alignOf align . (if isHeader then fontBold else id) . envText env)
+              =<< keptInlines env spans
       alignOf = \case
         CellCenter -> alignCenter
         CellRight -> alignEnd

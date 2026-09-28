@@ -290,8 +290,15 @@ runRgfwAppReduceCustom opts getThemeAndScale updateModel initialModel view = inB
               units v = fromIntegral (max 1 (round (fromIntegral v / scale) :: Int))
           (initTheme, initScaleChoice) = getThemeAndScale initialModel
           !initScale = resolveScale initScaleChoice initMonScale
-          initPhys = pixelSize initScale
-      when (initPhys /= pixelSize (resolveScale initScaleChoice 1)) $ uncurry (R.resizeWindow win) initPhys
+      -- A window opened fullscreen already covers its monitor, and resizing
+      -- it would shrink it on Windows.
+      initPhys <-
+        if wsMode settings == Fullscreen
+          then R.windowSize win
+          else do
+            let phys = pixelSize initScale
+            when (phys /= pixelSize (resolveScale initScaleChoice 1)) $ uncurry (R.resizeWindow win) phys
+            pure phys
 
       modelRef <- newIORef initialModel
       scaleRef <- newIORef initScale
@@ -325,7 +332,12 @@ runRgfwAppReduceCustom opts getThemeAndScale updateModel initialModel view = inB
           , hostSetMaxSize = limit R.setWindowMaxSize
             -- No 'hostSetOpacity': RGFW windows cannot fade.
           , hostSetMode = \case
-              Windowed -> R.setWindowFullscreen win False >> R.showWindow win
+              -- Leaving fullscreen restores the geometry saved on entering
+              -- it, which on Windows a windowed window has none of.
+              Windowed -> do
+                full <- (\f -> f .&. R.rgfw_windowFullscreen /= 0) <$> R.windowFlags win
+                when full (R.setWindowFullscreen win False)
+                R.showWindow win
               Fullscreen -> R.showWindow win >> R.setWindowFullscreen win True
               Hidden -> R.hideWindow win
           , hostMove = R.moveWindow win

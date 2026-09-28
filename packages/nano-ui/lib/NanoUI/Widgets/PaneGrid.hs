@@ -24,7 +24,6 @@ module NanoUI.Widgets.PaneGrid
   ) where
 
 import Control.Monad (forM_, unless, void, when)
-import Data.Foldable (toList)
 import Data.Hashable (hash)
 import Data.List (find)
 import Data.Map.Strict (Map)
@@ -35,9 +34,10 @@ import Data.Text qualified as T
 import Data.Word (Word64)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Input
-import NanoUI.Internal.Monad (NanoUI, (<&&>), askInput, damageWidgetNow, focusedWidget, freshWidget, lastRect, releaseFocus, requestFrame, liftIO, withIdFrame, withKey)
+import NanoUI.Internal.Monad (NanoUI, (<&&>), askInput, damageWidgetNow, focusedWidget, freshWidget, lastRect, releaseFocus, requestFrame, liftIO, takeEscape, whenM, withIdFrame, withKey)
 import NanoUI.Internal.Id (IdContext (..), WidgetId, hashWidgetId)
 import NanoUI.Internal.Frame.Hit (nodeInteractionHit)
+import NanoUI.Internal.Shortcut qualified as Shortcut
 import NanoUI.Internal.Store (insertDyn, lookupDyn)
 import NanoUI.Internal.Style
 import NanoUI.Internal.Types
@@ -46,6 +46,7 @@ import NanoUI.Widgets.Custom
 import NanoUI.Internal.Widgets.Layout (column', row')
 import NanoUI.Internal.Layout.Arena (NodeType (..), arenaCount, getNodeType, getWidgetId, isWidgetNode)
 import NanoUI.Internal.Widgets.Node
+import NanoUI.Internal.Widgets.Shortcut (shortcutOnce)
 import NanoUI.Internal.Widgets.SplitPane
 
 -- -----------------------------------------------------------------------------
@@ -369,29 +370,21 @@ paneGrid cfg = do
               runCanvasFor cdc (drawStrokeRoundedRect (rectInflate (-2) r) 2 1.5 (themeAccent (cdcTheme cdc)))
 
   -- Keys for the focused grid. Escape restores a maximized pane and is
-  -- consumed, unless something earlier (such as a popup in a pane) took it.
+  -- consumed, unless something earlier (such as a popup in a pane) took it
+  -- or it closes a menu or dropdown ('takeEscape').
   focusedNow <- focusedWidget
   when (pgFocusable cfg && focusedNow == wid) $ do
     nav <- useKeyNav wid
-    -- An unmodified letter press, taken like a 'shortcut' takes it: a
-    -- shortcut declared earlier for the same key keeps it from the grid, and
-    -- the grid keeps it from one declared later.
-    let plain c
-          | pressedOnceIn (KeyChar c) inp && inputModifiers inp == noModifiers =
-              liftIO . fmap or . mapM (takeKeyPress ctx) $
-                [ix | (ix, pressed) <- zip [0 ..] (toList (inputKeys inp)), pressed == KeyChar c]
-          | otherwise = pure False
     forM_ [(knLeft, (-1, 0)), (knRight, (1, 0)), (knUp, (0, -1)), (knDown, (0, 1))] $
       \(k, dir) -> when (k nav) (moveFocus env focused dir)
     when (knLeft nav || knRight nav || knUp nav || knDown nav) $
       damageWidgetNow wid (DamageInflated 0)
-    plain 'm' >>= \hit -> when hit (maximizePane env focused)
-    plain 'x' >>= \hit -> when hit (closePane env focused)
-    when (pressedOnceIn KeyEscape inp) $ do
-      taken <- liftIO (overlayConsumesQuit ctx inp)
-      unless taken $ do
-        restorePane env
-        liftIO (markEscapeConsumed ctx)
+    -- Unmodified letters, taken as a 'shortcutOnce': a shortcut declared
+    -- earlier for the same key keeps it from the grid, and the grid keeps it
+    -- from one declared later.
+    whenM (shortcutOnce (Shortcut.key 'm')) (maximizePane env focused)
+    whenM (shortcutOnce (Shortcut.key 'x')) (closePane env focused)
+    whenM takeEscape (restorePane env)
 
   end <- fromMaybe gs . lookupDyn key <$> liftIO (getStore ctx)
   let (maxEnd, focusEnd) = maybe (0, 0) (`paneFocus` end) (gsTree end)

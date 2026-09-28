@@ -209,21 +209,24 @@ roundedRect box radius = roundedRectCorners box radius radius radius radius
 -- | A rectangle with a radius per corner, in CSS @border-radius@ order: top
 -- left, top right, bottom right, bottom left. If two corners on a side would
 -- overlap, all radii shrink by the same factor, as in CSS. A negative radius
--- gives a square corner.
+-- gives a square corner. A rectangle with a negative width or height is
+-- the one it spans, with the radii on its corners as seen on screen.
 roundedRectCorners :: Rect -> Float -> Float -> Float -> Float -> Path
-roundedRectCorners box@(Rect x y w h) tl0 tr0 br0 bl0
+roundedRectCorners box@(Rect x0 y0 w h) tl0 tr0 br0 bl0
   | tl <= 0 && tr <= 0 && br <= 0 && bl <= 0 = rect box
   | otherwise =
       Path
         [ SegMove (x + tl) y
-        , corner (x + w - tr) (y + tr) tr (-pi / 2)
-        , corner (x + w - br) (y + h - br) br 0
-        , corner (x + bl) (y + h - bl) bl (pi / 2)
+        , corner (x + aw - tr) (y + tr) tr (-pi / 2)
+        , corner (x + aw - br) (y + ah - br) br 0
+        , corner (x + bl) (y + ah - bl) bl (pi / 2)
         , corner (x + tl) (y + tl) tl pi
         , SegClose
         ]
   where
     positive r = if r > 0 then r else 0
+    x = min x0 (x0 + w)
+    y = min y0 (y0 + h)
     aw = abs w
     ah = abs h
     -- The factor that fits a side's two radii within its length.
@@ -270,7 +273,8 @@ data Stroke = StrokeStyle
   -- ^ Line width. A transform scales it along with the path.
   , strokeCap :: !LineCap
   -- ^ Cap for the ends of open subpaths and of every dash (default
-  -- 'ButtCap').
+  -- 'ButtCap'). A subpath of zero length, such as a move and a line to the
+  -- same point, is a dot with 'RoundCap' or 'SquareCap'.
   , strokeJoin :: !LineJoin
   -- ^ Corner join (default 'MiterJoin').
   , strokeMiterLimit :: !Float
@@ -779,9 +783,10 @@ bridgeHoles vs outline holes = foldl' join outline (map snd (sortOn fst (map lef
                in if qx == hx then Just m else Just (snd (foldl' better (1 / 0, m) [0 .. n - 1]))
 
 -- | Twice a triangle's signed area, with earcut's sign: negative at a convex
--- corner of a ring with positive 'signedArea'.
+-- corner of a ring with positive 'signedArea'. The negated 'cross' of its
+-- edges, which 'isConvex' tests.
 turn :: (Float, Float) -> (Float, Float) -> (Float, Float) -> Float
-turn (px, py) (qx, qy) (rx, ry) = (qy - py) * (rx - qx) - (qx - px) * (ry - qy)
+turn p q r = negate (cross (diff p q) (diff q r))
 
 -- | Whether the ring is convex: every corner turns the same way (straight
 -- ones aside) and it winds once. Winding once is checked by the x and y
@@ -1085,7 +1090,8 @@ ringBox r = go 0 (1 / 0) (1 / 0) (-1 / 0) (-1 / 0)
 -- | Each ring's points with near-duplicates dropped, and whether it was
 -- closed. Rings with a NaN or infinite coordinate are skipped. A point
 -- within 1e-4 px of the previous one is a duplicate; with @closing@, or for
--- a closed ring, so is a last point on the first.
+-- a closed ring, so is a last point on the first. A lone move, one point
+-- that is not closed, is left out: it draws nothing, even with caps.
 cleanRings :: Bool -> Rings -> [(PrimArray Float, Bool)]
 cleanRings closing rings@(Rings pts starts tags) =
   [ (kept, closed)
@@ -1093,6 +1099,7 @@ cleanRings closing rings@(Rings pts starts tags) =
   , let from = indexPrimArray starts r
         to = indexPrimArray starts (r + 1)
         closed = indexPrimArray tags r /= 0
+  , closed || to - from > 1
   , all (\k -> finite (indexPrimArray pts k)) [2 * from .. 2 * to - 1]
   , let kept = dedupe (closing || closed) from to
   ]
@@ -1168,6 +1175,9 @@ strokePathOps tol t st path paint
     width = strokeWidth st * k
     shade = devicePaint t paint
     ring (pts, closed)
+      -- A subpath of zero length is a dot for round and square caps, a
+      -- square one aligned with the x axis, as in SVG.
+      | n == 1 = [line False (strokeCap st) (dot pts) | strokeCap st /= ButtCap]
       | n < 2 = []
       | not (null (strokeDash st))
       , Just pieces <- dashes (strokeCap st /= ButtCap) (map (* k) (strokeDash st)) (strokeDashOffset st * k) (closed && n > 2) pts =
@@ -1179,6 +1189,15 @@ strokePathOps tol t st path paint
       | otherwise = [line closed (strokeCap st) pts]
       where
         n = sizeofPrimArray pts `div` 2
+    -- The point and another a hair along the transformed x axis, so its
+    -- caps have a direction.
+    dot pts =
+      let x = indexPrimArray pts 0
+          y = indexPrimArray pts 1
+          Transform a b _ _ _ _ = t
+          len = sqrt (a * a + b * b)
+          (ux, uy) = if len > 0 && finite len then (a / len, b / len) else (1, 0)
+       in primArrayFromListN 4 [x, y, x + 1e-3 * ux, y + 1e-3 * uy]
     line closed cap pts = case shade of
       DeviceSolid col -> StrokePolyline pts width closed cap (strokeJoin st) (strokeMiterLimit st) (Flat col)
       DeviceRamp ramp ->
@@ -1491,6 +1510,7 @@ dashes dots pattern0 offset closed pts
     entries = primArrayFromListN plen pattern
     entry k = indexPrimArray entries (k `mod` plen)
     period = sum pattern
+    widest = maximum pattern
     m = sizeofPrimArray pts `div` 2
     path = [pointAt pts i | i <- [0 .. m - 1]] ++ [pointAt pts 0 | closed]
     total = sum (zipWith dist path (drop 1 path))
@@ -1517,14 +1537,17 @@ dashes dots pattern0 offset closed pts
         | otherwise -> []
       q : rest
         | len <= left -> walk k (left - len) (if even k then q : cur else cur) dir' q rest
-        | otherwise ->
-            let u = left / len
-                mid = (fst p + u * (fst q - fst p), snd p + u * (snd q - snd p))
-             in if even k
-                  then dash dir' (mid : cur) : walk (k + 1) (entry (k + 1)) [] dir' mid qs
-                  else walk (k + 1) (entry (k + 1)) [mid] dir' mid qs
+        -- Not even the longest entry moves off @p@ at this precision, so
+        -- the pattern would repeat here forever: the rest of the segment is
+        -- solid.
+        | mid == p && along (widest / len) == p ->
+            if even k then walk k len cur dir' p qs else walk (k + 1) len [p] dir' p qs
+        | even k -> dash dir' (mid : cur) : walk (k + 1) (entry (k + 1)) [] dir' mid qs
+        | otherwise -> walk (k + 1) (entry (k + 1)) [mid] dir' mid qs
         where
           len = dist p q
+          along u = (fst p + u * (fst q - fst p), snd p + u * (snd q - snd p))
+          mid = along (left / len)
           dir' = if len > 0 then ((fst q - fst p) / len, (snd q - snd p) / len) else dir
     -- A dash's points in order without repeats. A lone point gets a second
     -- one a hair further along the line, or with no @dots@ is dropped.

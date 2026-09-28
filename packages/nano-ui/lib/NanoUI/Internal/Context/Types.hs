@@ -974,7 +974,9 @@ data Context = Context
   , ctxClipboardGet :: IO (Maybe Text)
   , ctxClipboardSet :: Text -> IO Bool
   , ctxImageAtlas :: ImageAtlas
-  , ctxWakeLoop :: IORef (Maybe (IO ()))
+  , ctxWakeLoop :: IORef (Maybe (IO Bool))
+  -- ^ Ends the loop's wait for events, answering whether it did
+  -- ('NanoUI.Internal.Context.Core.setWakeLoopChecked').
   , ctxWoken :: !(IORef Bool)
   -- ^ Set from any thread by 'NanoUI.Internal.Context.Core.wakeFromThread'
   -- when view inputs changed. The next frame repaints fully and clears it.

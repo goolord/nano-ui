@@ -18,8 +18,8 @@ executable counter
   build-depends:
     base ^>=4.22,
     text ^>=2.1,
-    nano-ui ^>=0.1,
-    nano-ui-sdl ^>=0.1
+    nano-ui ^>=0.2,
+    nano-ui-sdl ^>=0.2
 ```
 
 Install SDL3 and SDL3_ttf 3.2 or later, with pkg-config metadata available.

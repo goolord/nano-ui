@@ -60,7 +60,7 @@ library
         containers >=0.7 && <0.9,
         deepseq >=1.4 && <1.7,
         hashable ^>=1.5,
-        nano-ui ^>=0.1,
+        nano-ui ^>=0.2,
         parsec ^>=3.1,
         text ^>=2.1,
         unicode-transforms ^>=0.4
@@ -79,12 +79,12 @@ executable nano-ui-markdown-example
     ghc-options:      -rtsopts -threaded "-with-rtsopts=-N1 -A64m -T -I0"
     build-depends:
         base >=4.20 && <4.23,
-        nano-ui ^>=0.1,
+        nano-ui ^>=0.2,
         nano-ui-markdown,
         text ^>=2.1
     if flag(sdl)
         build-depends:
-            nano-ui-sdl ^>=0.1
+            nano-ui-sdl ^>=0.2
     if os(windows)
         ghc-options: -optl-mconsole
     if !flag(sdl)

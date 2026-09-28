@@ -72,6 +72,7 @@ import Foreign.Storable (peekByteOff)
 import GHC.Stack (HasCallStack)
 import NanoUI
 import NanoUI.Backend
+import NanoUI.Internal.Context (takeWakes)
 import NanoUI.Internal.Font (alignedTextPen, textInkEnd)
 import NanoUI.Internal.Types (clamp)
 import NanoUI.Shortcut (Shortcut (..))
@@ -477,14 +478,19 @@ runDragFrom ctx inp0 ui grab dest =
 
 -- | Install a wake action on a headless context and return a wait for it.
 -- @wait us@ consumes a wake since the last wait, blocking up to @us@
--- microseconds, and says whether one came. A frame that requests another
--- also wakes the loop, so drain those with @wait 0@ before starting the
--- background job the test waits on.
+-- microseconds, and says whether one came. Consuming a wake takes the wakes
+-- so far ('takeWakes'), as a session loop does after its wait, so the next
+-- one signals again. A frame that requests another also wakes the loop, so
+-- drain those with @wait 0@ before starting the background job the test
+-- waits on.
 newWakeSignal :: Context -> IO (Int -> IO Bool)
 newWakeSignal ctx = do
   signal <- newEmptyMVar
   setWakeLoop ctx (void (tryPutMVar signal ()))
-  pure $ \us ->
-    if us <= 0
-      then isJust <$> tryTakeMVar signal
-      else isJust <$> timeout us (takeMVar signal)
+  pure $ \us -> do
+    woke <-
+      if us <= 0
+        then isJust <$> tryTakeMVar signal
+        else isJust <$> timeout us (takeMVar signal)
+    when woke (takeWakes ctx)
+    pure woke

@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0.0 -- Unreleased
 
 ### Added
 
@@ -271,10 +271,10 @@
   `LineCap` (`ButtCap`, `SquareCap`, `RoundCap`), a `LineJoin`
   (`MiterJoin`, `RoundJoin`, `BevelJoin`), a miter limit (4 by default, as
   SVG's) past which a miter is beveled, and a dash pattern with an offset.
-  Each dash is capped, a zero-length dash with round caps is a dot, and a
-  pattern that would cut a subpath into more than 4096 dashes draws it
-  solid. Round caps and joins are part of the line, so a translucent line
-  is even all along.
+  Each dash is capped, a zero-length dash or subpath with round caps is a
+  dot, and a pattern that would cut a subpath into more than 4096 dashes
+  draws it solid. Round caps and joins are part of the line, so a
+  translucent line is even all along.
 - Paints: `P.Solid` and `P.Linear`, a linear gradient with colour stops, for
   fills and strokes. A gradient is exact to its stops (each point of the
   fill carries its colour, and the fill is cut where the gradient bends),
@@ -500,6 +500,10 @@
   cursor kind only when it changes, hiding the pointer for `UiCursorHidden`,
   and a size limit in native units with a zero or missing axis unlimited.
   The SDL and RGFW backends use both.
+- `setWakeLoopChecked` in `NanoUI.Backend`: a wake action that answers
+  whether it reached the loop. After one that did not, the next wake runs it
+  again rather than waiting for the loop to take the lost one. The SDL
+  backend's push onto its event queue is one.
 
 ### Changed
 
@@ -877,6 +881,11 @@
   instead of 1.3 ms (2000 lines: 0.03 ms instead of 42 ms, which also
   overflowed the SDL text caches), and a 2000-sentence rich text in 2.4 ms
   instead of 48 ms.
+- Rich text given the same list of pieces as last frame, under an equal
+  paragraph layout and theme, reuses its laid-out paragraph without hashing
+  the pieces' text again. Keep a paragraph's pieces between frames (as the
+  Markdown widget does for a document's closed blocks) for a long text that
+  costs little a frame.
 - Rounded fills and borders allocate about 450 bytes less per bordered
   widget and frame, with the same geometry: their corner loops are workers
   of their own instead of closures. The headless profiler's button grid
@@ -922,6 +931,22 @@
 
 ### Fixed
 
+- A wake with no wake action installed no longer holds back the wakes after
+  it until other input arrives.
+- A view that paints the window state (`askWindow`), such as a colour on
+  focus, repaints when that state changes, and so does a frame that follows
+  a screenshot's answer. Their frames repainted only what moved or changed
+  text.
+- `releaseImage` repaints and requests a frame, as `registerImage` does, so
+  an image still shown draws the unknown-image placeholder.
+- A view that builds rows from `getScrollMetrics` gets another frame when
+  that frame's layout changes the metrics, as with `getScrollMetricsUi`, so
+  a virtualized list catches up with a resize without waiting for input.
+- A window size limit set past the other one on an axis moves the other one
+  to it, so the desktop never gets a minimum above the maximum. SDL dropped
+  such a limit outside Wayland.
+- `newWakeSignal`'s wait takes the wakes it consumes, so a job's wake after
+  one drained with no frame between still signals.
 - Up and Down move a combo's highlight while the pointer rests on its
   dropdown. The hovered row took the highlight back every frame.
 - An app's Edit > Cut or Copy acts on the text field's selection. The press

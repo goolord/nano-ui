@@ -67,7 +67,7 @@ finalizeTextFieldMouse ctx inp onControl = do
         NodeTextArea -> do
           _ <- textAreaContentMetrics ctx idx
           when (pressedIn MouseLeft inp || heldIn MouseLeft inp || releasedIn MouseLeft inp) $
-            textAreaMouse ctx inp focus idx
+            textAreaMouse ctx inp onControl focus idx
         _ -> pure ()
       -- A selection dragged past the field's edge scrolls a step a frame, as
       -- the caret follows the pointer. A pointer held still out there sends
@@ -477,13 +477,14 @@ textAreaTextPlacements ctx idx field@(Rect _ y _ h) = do
   pure (textClipBeside clip mV mH, placements)
 
 -- | Mouse selection in text area @wid@ at @idx@ ('selectWithMouse'). Presses
--- on its scrollbars are left to the scroller.
-textAreaMouse :: Context -> Input -> WidgetId -> NodeIdx -> IO ()
-textAreaMouse ctx inp wid idx = do
+-- on its scrollbars are left to the scroller, and a press on a control drawn
+-- inside it (@onControl@) to the control.
+textAreaMouse :: Context -> Input -> Bool -> WidgetId -> NodeIdx -> IO ()
+textAreaMouse ctx inp onControl wid idx = do
   field@(Rect _ fieldY _ _) <- getNodeRect (ctxNodeArena ctx) idx
   let mouse@(V2 mouseX mouseY) = inputMousePos inp
       key = intKey wid
-  selectWithMouse ctx inp wid field (isMouseOnTextAreaScrollBarAt ctx idx mouse) $ do
+  selectWithMouse ctx inp wid field (if onControl then pure True else isMouseOnTextAreaScrollBarAt ctx idx mouse) $ do
     fm <- resolveTextAreaFont ctx idx
     store <- getStore ctx
     -- The editor keeps the caret in view, so give it the viewport it has.

@@ -6,12 +6,13 @@ module Cases.Paths (tests) where
 import Spec
 import Data.Foldable (toList)
 import Data.IntMap.Strict qualified as IM
-import Data.Primitive.PrimArray (PrimArray, indexPrimArray, primArrayToList, sizeofPrimArray)
+import Data.Primitive.PrimArray (PrimArray, indexPrimArray, primArrayFromList, primArrayToList, sizeofPrimArray)
 import Foreign.ForeignPtr (withForeignPtr)
 import Foreign.Storable (peekByteOff)
 import NanoUI.Internal.Context (setDrawSnapScale)
 import GHC.Stack (HasCallStack)
 import NanoUI.Internal.Context (Context (..), DrawingCacheState (..))
+import NanoUI.Internal.Canvas (emitOp)
 import NanoUI.Internal.Path (fillPathOps)
 import NanoUI.Internal.Context.Types (CustomDrawOpCacheEntry (..))
 import NanoUI.Path qualified as P
@@ -365,6 +366,16 @@ runDegenerateTest _ failed = do
     , opsAt 1 (withTransform (P.scale nan 1) (drawPath (P.circle p 5) red >> drawRect (Rect 0 0 5 5) red >> drawCircle p 3 red))
     , opsAt 1 (withTransform (P.rotate inf) (drawPath (P.circle p 5) red))
     ]
+  -- A zero-length subpath is a dot with round or square caps, and a lone
+  -- move draws nothing.
+  let capped cap path = [(pairs pts, c) | StrokePolyline pts _ _ c _ _ _ <- opsAt 1 (drawStrokePathWith (P.stroke 2) {P.strokeCap = cap} path (P.Solid black))]
+  forM_ [P.RoundCap, P.SquareCap] $ \cap ->
+    forM_ [P.moveTo p <> P.lineTo p, P.moveTo p <> P.close, P.circle p 0] $ \path ->
+      single failed (capped cap path) $ \(ps, c) -> do
+        assertEq failed cap c
+        assert failed (case ps of [a, b] -> a == p && dist a b > 0 && dist a b < 0.01; _ -> False)
+  assertEq failed [] (capped P.ButtCap (P.moveTo p <> P.lineTo p))
+  assertEq failed [[V2 0 0, V2 10 0]] (map fst (capped P.RoundCap (P.moveTo p <> P.moveTo (V2 0 0) <> P.lineTo (V2 10 0) <> P.moveTo p)))
   -- Repeated points are dropped, and segments with NaN or infinity are skipped.
   assertEq failed [[V2 0 0, V2 10 0, V2 10 10]] (lines' (P.polyline [V2 0 0, V2 0 0, V2 10 0, V2 10 0, V2 10 10]))
   assertEq failed [[V2 0 0, V2 10 0]] (lines' (P.polyline [V2 0 0, V2 nan 3, V2 inf 0, V2 10 0]))
@@ -532,6 +543,9 @@ runDashTest _ failed = do
   let dots = dashed [0, 10] 0 line
   assertEq failed 11 (length dots)
   assert failed (all (\(ps, _) -> case ps of [V2 x0 _, V2 x1 _] -> x1 - x0 > 0 && x1 - x0 < 0.01; _ -> False) dots)
+  -- Dashes too short to move off a point at its float precision do not
+  -- repeat forever: the segment is solid, from a dash or a gap.
+  forM_ [0, 0.007] $ \off -> assertEq failed [[V2 131072 0, V2 131082 0]] (map fst (dashed [0.006, 0.004] off (P.polyline [V2 131072 0, V2 131082 0])))
   -- An invalid or too fine pattern draws a solid line.
   forM_ [[-1, 2], [0, 0], [0.001]] $ \pattern -> assertEq failed [[V2 0 0, V2 100 0]] (map fst (dashed pattern 0 line))
   -- A transform scales the pattern with the line.
@@ -572,6 +586,15 @@ runJoinGeometryTest ctx failed = do
   assert failed (roundJ > edge * 0.95 && roundJ < edge + 0.01)
   assertLt failed (abs (bevel - edge * sqrt 0.5)) 0.01
   assertLt failed (abs (limited - bevel)) 0.01
+  -- A round join where a line turns back on itself rounds the tip, the way
+  -- the line was heading, whichever way it points.
+  forM_ [V2 60 0, V2 60 80] $ \(V2 dx dy) -> do
+    let len = sqrt (dx * dx + dy * dy)
+        dir = V2 (dx / len) (dy / len)
+        tip = V2 (40 + dx) (100 + dy)
+    vs <- canvasVertices ctx (\(Rect x y _ _) -> drawStrokePathWith (P.stroke 10) {P.strokeJoin = P.RoundJoin} (P.polyline [V2 (x + 40) (y + 100), V2 (x + 40 + dx) (y + 100 + dy), V2 (x + 40) (y + 100)]) (P.Solid black))
+    let tipReach = maximum [v2Dot (v2Sub q tip) dir | (q, _) <- vs, v2Dist q tip < 30]
+    assert failed (tipReach > edge * 0.95 && tipReach < edge + 0.01)
   -- Each cap extends past the line end by its expected amount.
   let capReach cap = do
         vs <- canvasVertices ctx (\(Rect x y _ _) -> drawStrokePathWith (P.stroke 10) {P.strokeCap = cap} (P.polyline [V2 (x + 40) (y + 100), V2 (x + 100) (y + 100)]) (P.Solid black))
@@ -580,6 +603,14 @@ runJoinGeometryTest ctx failed = do
   sq <- capReach P.SquareCap
   roundC <- capReach P.RoundCap
   assertEq failed [True, True, True] [abs (butt - 0) < 0.01, abs (sq - edge + 0.5) < 0.01, abs (roundC - edge) < 0.01]
+  -- An end repeated in a polyline op still gets its cap.
+  vs <- canvasVertices ctx $ \(Rect x y _ _) ->
+    let a = [x + 40, y + 100]
+        b = [x + 100, y + 100]
+     in emitOp (StrokePolyline (primArrayFromList (a ++ a ++ b ++ b)) 10 False P.SquareCap P.MiterJoin 4 (Flat black))
+  let near100 = [q | (q@(V2 _ py), _) <- vs, abs (py - 100) < 20]
+  assertLt failed (abs (maximum [px - 100 | V2 px _ <- near100] - 5)) 0.01
+  assertLt failed (abs (maximum [40 - px | V2 px _ <- near100] - 5)) 0.01
   where
     v2Dot (V2 a b) (V2 c d) = a * c + b * d
     v2Dist a b = let V2 dx dy = v2Sub a b in sqrt (dx * dx + dy * dy)
@@ -666,6 +697,9 @@ runShapesAndInverseTest _ failed = do
   assertLt failed (abs (areaOf (P.roundedRectCorners (Rect 0 0 100 60) 60 60 0 0) - (6000 - 2 * quarterCut 50))) (2 * flat 50)
   assert failed (filled (P.roundedRectCorners (Rect 0 0 10 10) 0 0 (-3) 0) == filled (P.rect (Rect 0 0 10 10)))
   assert failed (filled (P.roundedRect (Rect 0 0 40 20) 6) == filled (P.roundedRectCorners (Rect 0 0 40 20) 6 6 6 6))
+  -- A negative width or height spans the same rectangle.
+  forM_ [Rect 50 0 (-50) 30, Rect 0 30 50 (-30), Rect 50 30 (-50) (-30)] $ \r ->
+    assert failed (filled (P.roundedRectCorners r 5 8 0 3) == filled (P.roundedRectCorners (Rect 0 0 50 30) 5 8 0 3))
   let t = P.translate 3 (-2) <> P.rotate 0.4 <> P.scale 2 (-0.5) <> P.affine 1 0.3 0 1 0 0
       pts = [V2 1 2, V2 (-40) 7, V2 0 0]
   case P.invert t of

@@ -8,6 +8,7 @@ module NanoUI.Internal.Input
   , noModifiers
   , modifiersFromBits
   , modPrimary
+  , chordModifiers
   , primaryModifiers
   , modJump
   , modMacCommand
@@ -74,7 +75,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Primitive.SmallArray (SmallArray, copySmallArray, indexSmallArray, newSmallArray, runSmallArray, sizeofSmallArray, smallArrayFromList)
 import Data.Word (Word32)
-import NanoUI.Internal.Types (Size (..), V2 (..))
+import NanoUI.Internal.Types (Size (..), V2 (..), clamp)
 import System.Info (os)
 
 -- | A key on the keyboard. A key that types a character is 'KeyChar' of the
@@ -147,6 +148,11 @@ modifiersFromBits m shift ctrl alt super = Modifiers (has shift) (has ctrl) (has
 -- macOS, Ctrl elsewhere. It is @M-@ in 'NanoUI.Shortcut.parseShortcut'.
 modPrimary :: Modifiers -> Bool
 modPrimary = if onMac then modSuper else modCtrl
+
+-- | Whether a character key is a shortcut rather than typing: 'modPrimary'
+-- (Command on macOS, Ctrl elsewhere) without Alt.
+chordModifiers :: Modifiers -> Bool
+chordModifiers mods = modPrimary mods && not (modAlt mods)
 
 -- | Only the platform's command modifier ('modPrimary').
 primaryModifiers :: Modifiers
@@ -754,9 +760,7 @@ applyComposition txt start len inp
   | otherwise =
       let n = T.length txt
           cursor = if start < 0 then n else min n start
-       in inp {inputComposition = Just (Composition txt cursor (clamp0 (n - cursor) len))}
-  where
-    clamp0 hi v = max 0 (min hi v)
+       in inp {inputComposition = Just (Composition txt cursor (clamp 0 (n - cursor) len))}
 
 -- | The kind of text a widget asks the IME for (iced's
 -- @input_method::Purpose@): normal text, a secret the IME should neither

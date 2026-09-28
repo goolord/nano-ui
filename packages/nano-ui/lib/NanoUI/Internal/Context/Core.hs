@@ -18,6 +18,7 @@ module NanoUI.Internal.Context.Core
   , clearDirty
   , isDirty
   , setWakeLoop
+  , setWakeLoopChecked
   , wakeFromThread
   , takeWakes
   , takeThreadWake
@@ -241,14 +242,25 @@ isDirty ctx = getsDamage ctx dsDirty
 -- not filter or coalesce calls itself.
 {-# INLINE setWakeLoop #-}
 setWakeLoop :: Context -> IO () -> IO ()
-setWakeLoop ctx wake = writeIORef (ctxWakeLoop ctx) (Just wake)
+setWakeLoop ctx wake = setWakeLoopChecked ctx (True <$ wake)
+
+-- | 'setWakeLoop' for an action that can fail to reach the loop, such as a
+-- push onto a full event queue. It returns whether it did; after a failure
+-- the next wake runs it again instead of taking the loop as woken.
+{-# INLINE setWakeLoopChecked #-}
+setWakeLoopChecked :: Context -> IO Bool -> IO ()
+setWakeLoopChecked ctx wake = writeIORef (ctxWakeLoop ctx) (Just wake)
 
 -- | Run the wake action, unless an earlier wake ran it and the loop has not
--- taken that one yet: the loop reads what both changed when it does.
+-- taken that one yet: the loop reads what both changed when it does. A wake
+-- the action did not deliver, or made with no action installed, leaves
+-- nothing pending, so a later wake is not swallowed waiting for it.
 wakeLoop :: Context -> IO ()
 wakeLoop ctx = do
   pending <- atomicModifyIORef' (ctxWakePending ctx) (True,)
-  unless pending $ readIORef (ctxWakeLoop ctx) >>= sequence_
+  unless pending $ do
+    delivered <- readIORef (ctxWakeLoop ctx) >>= fromMaybe (pure False)
+    unless delivered (takeWakes ctx)
 
 -- | 'wakeLoop' for a dirty mark. The thread running
 -- 'NanoUI.Runner.runSessionLoop' checks the dirty flag before it waits, so

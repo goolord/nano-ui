@@ -43,8 +43,7 @@ executables are behind this package's `sdl` flag, on by default.
 
 Use GHC 9.14. From an extracted source distribution, run `cabal build` and
 then the commands above. From the repository, follow the
-[development setup](https://github.com/goolord/nano-ui/blob/main/docs/development.md#setup),
-which also covers the sibling ditto checkout used by the form package.
+[development setup](https://github.com/goolord/nano-ui/blob/main/docs/development.md#setup).
 
 ## Reading the examples
 

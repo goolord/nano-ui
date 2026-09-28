@@ -1,6 +1,6 @@
 cabal-version:      3.4
 name:               nano-ui-form
-version:            0.1.0.0
+version:            0.2.0.0
 synopsis:           Validated forms for nano-ui, built on ditto
 description:
     Applicative forms whose inputs are nano-ui widgets, with validation errors
@@ -61,7 +61,7 @@ library
         containers >=0.7 && <0.9,
         ditto ^>=0.5.0,
         hashable ^>=1.5,
-        nano-ui ^>=0.1,
+        nano-ui ^>=0.2,
         text ^>=2.1
     hs-source-dirs:   lib
 
@@ -79,12 +79,12 @@ executable nano-ui-form-example
     build-depends:
         base >=4.20 && <4.23,
         ditto ^>=0.5.0,
-        nano-ui ^>=0.1,
+        nano-ui ^>=0.2,
         nano-ui-form,
         text ^>=2.1
     if flag(sdl)
         build-depends:
-            nano-ui-sdl ^>=0.1
+            nano-ui-sdl ^>=0.2
     if os(windows)
         ghc-options: -optl-mconsole
     if !flag(sdl)

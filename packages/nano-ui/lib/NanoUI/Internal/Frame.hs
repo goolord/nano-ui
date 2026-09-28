@@ -34,7 +34,7 @@ import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Layout.Solve (placeFloatingNodes, runCustomMeasure, solveLayout)
 import NanoUI.Internal.Monad (NanoUI (..), Ui, runUi, whenM)
 import NanoUI.Internal.NativeWindow (clearWindowClose)
-import NanoUI.Internal.Store (mirrorStoresChanged)
+import NanoUI.Internal.Store (mirrorStoresChanged, ptrEq)
 import NanoUI.Internal.Style (Padding (..), Theme (..), themeOverlayDim, themeSeparator)
 import NanoUI.Internal.Tasks (sweepHeld)
 import NanoUI.Internal.Types (Damage (..), Rect (..), Size (..), damageIsEmpty, rectInflate, rectNonEmpty)
@@ -206,8 +206,11 @@ runFrameEff unlift ctx rawInp ui = do
   updateSensors ctx size
   updatePrevRects ctx size
   -- With the layout recorded, what the view read of the last one is checked
-  -- against it.
+  -- against it. A check that publishes a float it measured (a tab strip's
+  -- range) marks the frame as a layout change, not a scroll, for its damage.
+  floatsBefore <- storeFloat <$> getStore ctx
   settleLayoutReads ctx
+  !layoutFloats <- not . ptrEq floatsBefore . storeFloat <$> getStore ctx
   refreshHover ctx frameInp
   refreshScrollBarHover ctx layerInp
   tickAnimations ctx (inputDeltaTime frameInp)
@@ -230,12 +233,13 @@ runFrameEff unlift ctx rawInp ui = do
   -- that may reuse it needs its damage worked out even for a host that does
   -- not read it ('ctxDamageWanted').
   reuse <- readIORef (ctxDrawReuse ctx)
-  key <- reuseKeyFor ctx reuse size explain
+  paintFull <- readIORef (ctxPaintFull ctx)
+  key <- reuseKeyFor ctx reuse paintFull size explain
   let !mayReuse = case (key, drLast reuse) of
         (Just k, Just (lastKey, _)) -> k == lastKey
         _ -> False
-  writeDamage ctx frameInp snap mayReuse
-  drawData <- paintOrReuse ctx frameInp size explain reuse key
+  writeDamage ctx frameInp snap mayReuse layoutFloats
+  drawData <- paintOrReuse ctx frameInp size explain paintFull reuse key mayReuse
   msgs <- drainMessages ctx
   dirtyAfterUi <- isDirty ctx
   pure (result, msgs, drawData, dirtyAfterUi)
@@ -243,25 +247,23 @@ runFrameEff unlift ctx rawInp ui = do
 -- | The key the frame's draw would be kept under ('drawReuseKey'), or
 -- 'Nothing' when it can be neither kept nor reused: reuse is off, the frame
 -- paints only a clip, or the layout overlay is on.
-reuseKeyFor :: Context -> DrawReuse -> Size -> Bool -> IO (Maybe DrawReuseKey)
-reuseKeyFor ctx reuse size explain = do
-  paintFull <- readIORef (ctxPaintFull ctx)
+reuseKeyFor :: Context -> DrawReuse -> Bool -> Size -> Bool -> IO (Maybe DrawReuseKey)
+reuseKeyFor ctx reuse paintFull size explain =
   if drOn reuse && paintFull && not explain
     then drawReuseKey ctx size
     else pure Nothing
 
 -- | The frame's draw data. A full frame with no damage whose 'DrawReuseKey'
--- (@key@) matches the last full frame's hands paint what that frame did, so
--- it takes that frame's draw data instead of painting again: an idle
--- continuous frame paints nothing. Other frames paint, and a full frame
--- keeps what it painted for the next. Paint that reads state nano-ui does
--- not track must call 'damageFull' when that state changes.
-paintOrReuse :: Context -> Input -> Size -> Bool -> DrawReuse -> Maybe DrawReuseKey -> IO DrawData
-paintOrReuse ctx frameInp size explain reuse key = do
-  paintFull <- readIORef (ctxPaintFull ctx)
+-- (@key@) matches the last full frame's (@mayReuse@) hands paint what that
+-- frame did, so it takes that frame's draw data instead of painting again:
+-- an idle continuous frame paints nothing. Other frames paint, and a full
+-- frame keeps what it painted for the next. Paint that reads state nano-ui
+-- does not track must call 'damageFull' when that state changes.
+paintOrReuse :: Context -> Input -> Size -> Bool -> Bool -> DrawReuse -> Maybe DrawReuseKey -> Bool -> IO DrawData
+paintOrReuse ctx frameInp size explain paintFull reuse key mayReuse = do
   damage <- getsDamage ctx dsDamage
-  case (key, drLast reuse) of
-    (Just k, Just (lastKey, lastDraw)) | k == lastKey && damageIsEmpty damage -> pure lastDraw
+  case drLast reuse of
+    Just (_, lastDraw) | mayReuse && damageIsEmpty damage -> pure lastDraw
     _ -> do
       -- The kept draw borrows the draw arena's buffers, which paint
       -- overwrites: drop it first, so a paint that throws leaves none behind.

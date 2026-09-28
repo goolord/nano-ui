@@ -1,6 +1,6 @@
 cabal-version:      3.4
 name:               nano-ui-diagrams
-version:            0.1.0.0
+version:            0.2.0.0
 synopsis:           Charts and diagrams-lib drawings for nano-ui
 description:
     Places diagrams-lib drawings in nano-ui layouts and builds line, bar,
@@ -68,7 +68,7 @@ library
         dlist ^>=1.0,
         hashable ^>=1.5,
         lens >=5.2 && <5.4,
-        nano-ui ^>=0.1,
+        nano-ui ^>=0.2,
         primitive ^>=0.9,
         text ^>=2.1,
         vector ^>=0.13

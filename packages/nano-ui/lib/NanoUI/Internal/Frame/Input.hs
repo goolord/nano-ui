@@ -140,7 +140,8 @@ disarmPointerPress ctx inp =
 -- | What a left press landed on, for the steps that act on it: the
 -- interactive widget, the text field or text area, and the select under the
 -- pointer, all 'Nothing' on a frame without a press; and whether the
--- interactive widget is a control drawn inside the text field.
+-- interactive widget is another one drawn inside the text field or over it.
+-- The select is set only when it is the interactive widget.
 data PressTargets = PressTargets
   { ptInteractive :: !(Maybe WidgetId)
   , ptTextField :: !(Maybe WidgetId)
@@ -190,7 +191,7 @@ pressTargetsAt ctx@Context {ctxNodeArena = na} under = do
   found <- newIORef none
   _ <- findClassNodeM na PointerNodes $ \idx -> do
     nt <- getNodeType na idx
-    PressTargets i t s onControl <- readIORef found
+    PressTargets i t s _ <- readIORef found
     let wantI = isNothing i && isWidgetNode nt
         wantT = isNothing t && (nt == NodeTextInput || nt == NodeTextArea)
         wantS = isNothing s && nt == NodeSelect
@@ -207,10 +208,14 @@ pressTargetsAt ctx@Context {ctxNodeArena = na} under = do
               (if wantI then Just inner else i)
               (pick wantT fieldWid t)
               (pick wantS selectWid s)
-              (onControl || (wantI && wantT && inner /= fieldWid))
+              False
       writeIORef found r
       pure (isJust (ptInteractive r) && isJust (ptTextField r) && isJust (ptSelect r))
-  readIORef found
+  -- Another widget under the press is drawn inside the field or select, or
+  -- over it. The field then takes the press only as the control's
+  -- ('ptFieldControl'), and the select takes none.
+  PressTargets i t s _ <- readIORef found
+  pure (PressTargets i t (mfilter (\w -> Just w == i) s) (isJust t && t /= i))
 
 none :: PressTargets
 none = PressTargets Nothing Nothing Nothing False
@@ -323,7 +328,8 @@ inUiClickHit ctx wid mouse = do
 -- A press elsewhere clears focus, collapses the prior selection, and closes
 -- its edit menu. Menu/dropdown presses are removed from the supplied layer
 -- input, preserving the owning field's focus until the pick is processed.
--- A press on a control drawn inside a text field keeps the focus as it was.
+-- A press on a control drawn inside a text field, or on a widget drawn over
+-- it, keeps the focus as it was.
 -- A press on a menu row or menu-bar title keeps the field's selection, so a
 -- menu command such as Cut ('NanoUI.Widgets.TextField.runTextCommand'),
 -- which focuses the field again, acts on it.

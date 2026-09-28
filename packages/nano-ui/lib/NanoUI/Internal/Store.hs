@@ -65,9 +65,10 @@ import NanoUI.Internal.Id (mix64)
 -- It compares the closures as passed and forces neither: force a selector
 -- application or other thunk first, or the check always fails. It stays lazy
 -- so a literal passed straight in keeps its identity
--- ('NanoUI.Internal.Layout.Arena.setNodeText').
+-- ('NanoUI.Internal.Layout.Arena.setNodeText'). The two may differ in type,
+-- as a cache compares a container it kept existentially with the caller's.
 {-# INLINE ptrEq #-}
-ptrEq :: a -> a -> Bool
+ptrEq :: a -> b -> Bool
 ptrEq a b = isTrue# (reallyUnsafePtrEquality# a b)
 
 -- | '==' with a physical-equality fast path. Unchanged fields of a
