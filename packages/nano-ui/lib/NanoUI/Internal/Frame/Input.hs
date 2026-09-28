@@ -16,6 +16,7 @@ module NanoUI.Internal.Frame.Input
   , finalizePointerRelease
   , finalizeTextInputFocus
   , finalizeSelectFocus
+  , finalizeDrawingFocus
   , finalizeFocusRequest
   , PressTargets (..)
   , targetsAt
@@ -357,6 +358,17 @@ finalizeTextInputFocus ctx inp targets =
 finalizeSelectFocus :: Context -> PressTargets -> IO ()
 finalizeSelectFocus ctx targets =
   enabledTarget ctx (ptSelect targets) >>= mapM_ (focusWidget ctx)
+
+-- | On a left press on an enabled custom widget that takes focus
+-- ('NanoUI.Widgets.Custom.widgetFocusable'), such as a knob or a focusable
+-- canvas, give it keyboard focus. The press hides the focus ring, as for a
+-- text field.
+finalizeDrawingFocus :: Context -> PressTargets -> IO ()
+finalizeDrawingFocus ctx targets =
+  enabledTarget ctx (ptInteractive targets) >>= mapM_ (\wid -> do
+    let na = ctxNodeArena ctx
+    drawing <- maybe (pure False) (fmap (== NodeDrawing) . getNodeType na) =<< lookupNodeByWidgetId na wid
+    whenM (pure drawing <&&> isFocusable ctx wid) (focusWidget ctx wid))
 
 -- | Apply the view's last focus request this frame
 -- ('NanoUI.Internal.Monad.requestFocus', 'NanoUI.Internal.Monad.focusNext',

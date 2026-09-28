@@ -184,6 +184,7 @@ runFrameEff unlift ctx rawInp ui = do
   disarmPointerPress ctx frameInp
   finalizeTextInputFocus ctx layerInp targets
   finalizeSelectFocus ctx targets
+  finalizeDrawingFocus ctx targets
   finalizeTextFieldMouse ctx layerInp (ptFieldControl targets)
   closeTextEditMenuOnOutsideClick ctx frameInp
   openTextEditMenu ctx layerInp

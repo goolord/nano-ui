@@ -359,22 +359,23 @@ paintStyledRect da style rect = do
   fillStyledRect da style rect
   strokeStyledRect da style rect
 
+-- | Popups, modals, dropdowns and menus: 'themePopup', with a row hover
+-- that shows on it and a pressed row tinted toward the accent.
 overlayMenuStyle :: Theme -> Style
 overlayMenuStyle theme =
-  let panel = themePanel theme
+  let popup = themePopup theme
       hover =
-        if styleHoverBg panel == styleBg panel
+        if styleHoverBg popup == styleBg popup
           then styleHoverBg (themeButton theme)
-          else styleHoverBg panel
-   in panel
-        { styleCornerRadius = 2
-        , styleBorderWidth = 1
-        , styleHoverBg = hover
-        , styleActiveBg = lerpColor (styleBg panel) (themeAccent theme) 0.22
+          else styleHoverBg popup
+   in popup
+        { styleHoverBg = hover
+        , styleActiveBg = lerpColor (styleBg popup) (themeAccent theme) 0.22
         }
 
+-- | Floating windows: 'themeFloatingWindow'.
 overlayWindowStyle :: Theme -> Style
-overlayWindowStyle theme = (themeFloatingWindow theme) {styleCornerRadius = 2, styleBorderWidth = 1}
+overlayWindowStyle = themeFloatingWindow
 
 -- | Panel behind menus, dropdowns and floating windows: the theme's offset
 -- shadow, then the styled fill and border.

@@ -92,6 +92,13 @@
   drawing that shows a label buttons would cut.
 - `colorRGB`, `withAlpha`, which sets a colour's alpha from 0 to 1, and
   `colorWhite`, `colorBlack` and `colorTransparent`.
+- `canvasFocusable` and `canvasKeys` on `CanvasConfig`, as on a custom
+  widget. `focusedKeyPressed` and `focusedKeyPressedOnce` read a key the
+  focused widget claims, and `useKeyNav`, `KeyNav`, `navStep` and
+  `keyActivated`, which the built-in controls read their keys with, are
+  exported.
+- `themePopup` on `Theme` and `popupStyle`: the surface of popups, modals,
+  dropdowns and menus, without the panels inside them.
 - `pgFocusable` on `PaneGridConfig`: off, the grid is no Tab stop and its
   arrow, `m`, `x` and Escape keys do nothing, for a grid whose panes own the
   keyboard.
@@ -531,6 +538,14 @@
 
 ### Changed
 
+- A press on a focusable custom widget, such as a knob, a toggle switch or
+  a canvas with `canvasFocusable`, focuses it, without the Tab ring. Only
+  text fields and selects took focus from a press.
+- Popups, modals, dropdowns and menus are drawn with `themePopup`, and
+  floating windows with `themeFloatingWindow`, as they are. They were drawn
+  with `themePanel` and `themeFloatingWindow` held to a corner radius of 2
+  and a border of 1, so a theme's radius never showed; `panelStyle` no
+  longer restyles them. The built-in themes look the same.
 - Tab strips are redrawn. `TabUnderline` headers sit on a rule, the
   selected one marked by an accent bar on it. `TabSegmented` headers sit in a
   rounded track, the selected one raised out of it. `TabContained` draws

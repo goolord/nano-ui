@@ -32,6 +32,7 @@ benchTheme =
         { themeWindow = formica
         , themePanel = plate
         , themeFloatingWindow = plate
+        , themePopup = plate
         , themeButton =
             Style
               { styleBg = colorRGBA 196 190 176 255

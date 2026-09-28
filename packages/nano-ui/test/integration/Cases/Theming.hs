@@ -8,7 +8,8 @@ import NanoUI.Internal.Layout.Arena (NodeType (NodeText), arenaCount, getNodeTyp
 
 tests :: [Spec]
 tests =
-  [ spec "warning-text" runWarningTextTest
+  [ spec "popup-style" runPopupStyleTest
+  , spec "warning-text" runWarningTextTest
   , spec "warning-button" runWarningButtonTest
   , spec "warning-rich-text" runWarningRichTextTest
   , spec "tone-contrast" runToneContrastTest
@@ -220,3 +221,17 @@ runFollowSystemRestylesWarningTest ctx failed = do
   setSystemAppearance ctx (Just AppearanceDark)
   quads <- frames 1 ctx ui >>= amberIn defaultTheme
   assert failed (themeWarning defaultLightTheme `notElem` map snd quads)
+
+-- | 'popupStyle' colours a modal's surface and not the panels inside it.
+runPopupStyleTest :: Context -> IORef Int -> IO ()
+runPopupStyleTest ctx failed = do
+  let sea = colorRGBA 12 60 90 255
+      ui = styled (popupStyle (background sea)) $ do
+        (_, inner) <- modal True "Dialog" (panelWith (fixedWH 120 40 . tight) (snd <$> mouseArea (fillW . fillH) (pure ())))
+        pure (respRect <$> inner)
+  (inner, draw) <- warmupDraw ctx inp ui
+  quads <- drawQuads draw
+  panelBg <- styleBg . themePanel <$> getTheme ctx
+  assert failed (sea `elem` map snd quads)
+  assertJust failed inner $ \r ->
+    assert failed (panelBg `elem` [c | (q, c) <- quads, rectIntersect q r /= Nothing])

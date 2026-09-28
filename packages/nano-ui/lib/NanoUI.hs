@@ -62,8 +62,10 @@ module NanoUI
 
     -- * Focus
 
-    -- | Tab moves focus between focusable widgets. Clicking a text field or
-    -- select focuses it; clicking anywhere else unfocuses the current field.
+    -- | Tab moves focus between focusable widgets. Clicking a text field, a
+    -- select or a focusable custom widget (a knob, a canvas with
+    -- 'canvasFocusable') focuses it; clicking anywhere else unfocuses the
+    -- current field.
     -- A view that routes typing itself (an editor that keeps the keyboard
     -- while its find bar is shut) calls 'holdFocus' on each frame it wants
     -- the keyboard, and receives that frame's Tab.
@@ -795,6 +797,7 @@ module NanoUI
   , inputStyle
   , panelStyle
   , windowStyle
+  , popupStyle
   , everyStyle
   , accentColor
   , textColor
@@ -972,6 +975,17 @@ module NanoUI
   , keyPressedOnce
   , keyReleased
   , keyHeld
+
+    -- | A focused custom widget reads the keys it claims, which the
+    -- listeners above leave out, with 'focusedKeyPressed', 'useKeyNav' for
+    -- the arrows, Enter and Space, and 'keyActivated' for Enter or Space as
+    -- a click.
+  , focusedKeyPressed
+  , focusedKeyPressedOnce
+  , useKeyNav
+  , KeyNav (..)
+  , navStep
+  , keyActivated
   , shortcut
   , shortcutOnce
   , noModifiers
@@ -1068,7 +1082,7 @@ import NanoUI.Svg
 import NanoUI.Internal.Types
 import NanoUI.Internal.WidgetText
 import NanoUI.Internal.Widgets.Animate
-import NanoUI.Internal.Widgets.Behavior (useInputMethod)
+import NanoUI.Internal.Widgets.Behavior (KeyNav (..), focusedKeyPressed, focusedKeyPressedOnce, keyActivated, navStep, useInputMethod, useKeyNav)
 import NanoUI.Internal.Widgets.Button
 import NanoUI.Internal.Widgets.Caption
 import NanoUI.Internal.Widgets.Checkbox

@@ -10,7 +10,8 @@ import NanoUI.Shortcut
 
 tests :: [Spec]
 tests =
-  [ spec "focus-request-types" runFocusRequestTypesTest
+  [ spec "canvas-focus-click" runCanvasFocusClickTest
+  , spec "focus-request-types" runFocusRequestTypesTest
   , spec "focus-request-kinds" runFocusRequestKindsTest
   , spec "focus-request-tab-order" runFocusRequestTabOrderTest
   , spec "focus-request-none" runFocusRequestNoneTest
@@ -309,3 +310,32 @@ runFocusTextCommandTest ctx failed = do
   writeIORef run True
   _ <- warmup ctx inp ui
   assertEq failed (WidgetId 0) =<< getFocusId ctx
+
+-- | A press on a focusable canvas focuses it without the Tab ring, and it
+-- then hears the keys it claims; a press on a plain canvas focuses nothing,
+-- and a focused canvas hears nothing once another press moves focus away.
+runCanvasFocusClickTest :: Context -> IORef Int -> IO ()
+runCanvasFocusClickTest ctx failed = do
+  heard <- newIORef False
+  let ui = column $ do
+        live <- canvasConfigured defaultCanvasConfig {canvasLayout = fixedWH 100 40 defaultLayout, canvasFocusable = True} (\_ -> pure ())
+        still <- canvasConfigured defaultCanvasConfig {canvasLayout = fixedWH 100 40 defaultLayout} (\_ -> pure ())
+        right <- focusedKeyPressed (respId live) KeyRight
+        liftIO (when right (writeIORef heard True))
+        focused <- focusedWidget
+        pure (live, still, focused)
+  (live, still, _) <- warmup2 ctx inp ui
+  let (press, release) = clickPair inp (centerOf live)
+  mapM_ (\i -> runFrame ctx i ui) [press, release]
+  (_, _, focused) <- evalUi ctx inp ui
+  assertEq failed (respId live) focused
+  assertEq failed False =<< getFocusVisible ctx
+  _ <- runFrame ctx (keyInp KeyRight inp) ui
+  assertEq failed True =<< readIORef heard
+  let (press2, release2) = clickPair inp (centerOf still)
+  mapM_ (\i -> runFrame ctx i ui) [press2, release2]
+  (_, _, after) <- evalUi ctx inp ui
+  assertEq failed (WidgetId 0) after
+  writeIORef heard False
+  _ <- runFrame ctx (keyInp KeyRight inp) ui
+  assertEq failed False =<< readIORef heard

@@ -10,6 +10,8 @@ module NanoUI.Internal.Widgets.Behavior
   , keyboardFocused
   , useInputMethod
   , keyActivated
+  , focusedKeyPressed
+  , focusedKeyPressedOnce
   , KeyNav (..)
   , navStep
   , useDismissable
@@ -214,6 +216,20 @@ useKeyNav wid = do
 {-# INLINE navStep #-}
 navStep :: KeyNav -> Int
 navStep nav = fromEnum (knRight nav || knUp nav) - fromEnum (knLeft nav || knDown nav)
+
+-- | Whether @key@ was pressed this frame, auto-repeats included, while
+-- @wid@ holds the keyboard: focused, enabled and not behind a modal. For a
+-- custom widget reading the keys it claims ('NanoUI.Widgets.Custom.widgetKeys'),
+-- which 'NanoUI.keyPressed' leaves out:
+--
+-- > (resp, ()) <- customWidget spec {widgetFocusable = True}
+-- > whenM (focusedKeyPressed (respId resp) KeyDelete) clearCell
+focusedKeyPressed :: WidgetId -> Key -> NanoUI Bool
+focusedKeyPressed wid k = keyboardFocused wid <&&> (pressedIn k <$> askInput)
+
+-- | 'focusedKeyPressed' without auto-repeats, so holding the key acts once.
+focusedKeyPressedOnce :: WidgetId -> Key -> NanoUI Bool
+focusedKeyPressedOnce wid k = keyboardFocused wid <&&> (pressedOnceIn k <$> askInput)
 
 -- | True when Enter or Space was pressed while @wid@ holds focus. Buttons,
 -- checkboxes, and toggle switches treat this as a click.

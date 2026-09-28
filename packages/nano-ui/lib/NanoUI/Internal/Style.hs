@@ -52,6 +52,7 @@ module NanoUI.Internal.Style
   , inputStyle
   , panelStyle
   , windowStyle
+  , popupStyle
   , everyStyle
   , accentColor
   , textColor
@@ -766,6 +767,9 @@ data Theme = Theme
   { themeWindow :: {-# UNPACK #-} !Color
   , themePanel :: !Style
   , themeFloatingWindow :: !Style
+  , themePopup :: !Style
+  -- ^ Popups, modals, dropdowns and menus: their fill, border, corner and
+  -- the hover of their rows. Panels inside them keep 'themePanel'.
   , themeButton :: !Style
   , themeInput :: !Style
   , themeSeparator :: {-# UNPACK #-} !Color
@@ -926,7 +930,7 @@ buttonStyle f t = t {themeButton = f (themeButton t)}
 inputStyle :: (Style -> Style) -> Theme -> Theme
 inputStyle f t = t {themeInput = f (themeInput t)}
 
--- | Panels, cards, menus, and label text.
+-- | Panels, cards, and label text.
 panelStyle :: (Style -> Style) -> Theme -> Theme
 panelStyle f t = t {themePanel = f (themePanel t)}
 
@@ -934,9 +938,14 @@ panelStyle f t = t {themePanel = f (themePanel t)}
 windowStyle :: (Style -> Style) -> Theme -> Theme
 windowStyle f t = t {themeFloatingWindow = f (themeFloatingWindow t)}
 
--- | Modify button, input, panel, and floating-window surfaces together.
+-- | Popups, modals, dropdowns and menus ('themePopup'), and nothing inside
+-- them.
+popupStyle :: (Style -> Style) -> Theme -> Theme
+popupStyle f t = t {themePopup = f (themePopup t)}
+
+-- | Modify button, input, panel, floating-window and popup surfaces together.
 everyStyle :: (Style -> Style) -> Theme -> Theme
-everyStyle f = buttonStyle f . inputStyle f . panelStyle f . windowStyle f
+everyStyle f = buttonStyle f . inputStyle f . panelStyle f . windowStyle f . popupStyle f
 
 -- | Set the accent and focus-ring colours, and recolour the selection
 -- highlight while preserving its alpha.
@@ -1045,6 +1054,7 @@ disabledTheme t =
    in t
         { themePanel = fadeStyle (themePanel t)
         , themeFloatingWindow = fadeStyle (themeFloatingWindow t)
+        , themePopup = fadeStyle (themePopup t)
         , themeButton = fadeStyle (themeButton t)
         , themeInput = fadeStyle (themeInput t)
         , themeSeparator = fade (themeSeparator t)
@@ -1108,6 +1118,7 @@ defaultTheme =
         { themeWindow = colorRGBA 24 24 27 255
         , themePanel = panelSurface
         , themeFloatingWindow = panelSurface
+        , themePopup = panelSurface
         , themeButton =
             flatStyle
               (colorRGBA 52 52 58 255)
@@ -1157,6 +1168,7 @@ defaultLightTheme =
         { themeWindow = colorRGBA 244 244 242 255
         , themePanel = panelSurface
         , themeFloatingWindow = panelSurface
+        , themePopup = panelSurface
         , themeButton =
             flatStyle
               (colorRGBA 234 234 231 255)
@@ -1242,6 +1254,7 @@ tomorrowNightMinDarkTheme =
         { themeWindow = windowCol
         , themePanel = panelSurface
         , themeFloatingWindow = panelSurface
+        , themePopup = panelSurface
         , themeButton =
             flatStyle
               (colorRGBA 44 46 51 255)  -- elevated button surface
@@ -1287,6 +1300,7 @@ tomorrowMinLightTheme =
         { themeWindow = colorRGBA 255 255 255 255     -- #FFFFFF
         , themePanel = panelSurface
         , themeFloatingWindow = panelSurface
+        , themePopup = panelSurface
         , themeButton =
             flatStyle
               (colorRGBA 232 232 232 255)  -- #E8E8E8 (step down from panel for zebra rows)
@@ -1330,6 +1344,7 @@ tomorrowMidnightMinDarkTheme =
         { themeWindow = colorRGBA 0 0 0 255           -- #000000 (pitch black root window backdrop)
         , themePanel = panelSurface
         , themeFloatingWindow = panelSurface
+        , themePopup = panelSurface
         , themeButton =
             flatStyle
               (colorRGBA 26 27 34 255)  -- #1A1B22
@@ -1425,6 +1440,7 @@ themeFromBase16Mode dark b =
       { themeWindow = base00 b
       , themePanel = panelSurface
       , themeFloatingWindow = panelSurface
+      , themePopup = panelSurface
       , themeButton =
           flatStyle
             (pick (base02 b) (base01 b))

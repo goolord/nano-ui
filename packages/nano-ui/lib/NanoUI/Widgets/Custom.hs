@@ -245,6 +245,12 @@ data CanvasConfig = CanvasConfig
     -- ^ As 'widgetTrackPointer' (default 'False').
   , canvasCursor :: !(Maybe (CustomDrawContext -> Rect -> V2 -> UiCursorKind))
     -- ^ As 'widgetCursor' (default 'Nothing').
+  , canvasFocusable :: !Bool
+    -- ^ As 'widgetFocusable' (default 'False'): a Tab stop, focused by a
+    -- press too, with the focus ring Tab draws. Read its keys with
+    -- 'NanoUI.focusedKeyPressed' or 'NanoUI.useKeyNav' on the response's id.
+  , canvasKeys :: !KeyClaim
+    -- ^ As 'widgetKeys' (default 'KeysNavigate').
   }
 
 -- | 'defaultLayout', with no content key, cursor or pointer tracking.
@@ -255,6 +261,8 @@ defaultCanvasConfig =
     , canvasContent = 0
     , canvasTrackPointer = False
     , canvasCursor = Nothing
+    , canvasFocusable = False
+    , canvasKeys = KeysNavigate
     }
 
 -- | 'canvas' with a 'CanvasConfig'. The drawing reads hover, press state and
@@ -270,6 +278,8 @@ canvasConfigured cfg drawAction =
     , widgetContent = canvasContent cfg
     , widgetTrackPointer = canvasTrackPointer cfg
     , widgetCursor = canvasCursor cfg
+    , widgetFocusable = canvasFocusable cfg
+    , widgetKeys = canvasKeys cfg
     , widgetDraw = \cdc rect -> runCanvasFor cdc (drawAction rect)
     }
 
