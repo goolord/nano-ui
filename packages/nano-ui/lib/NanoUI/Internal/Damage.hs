@@ -1,3 +1,5 @@
+{-# LANGUAGE DerivingVia #-}
+
 -- | Compare completed frames and explicit invalidations to choose repaint bounds.
 -- Damage is computed before painting so retained backends can redraw only a clip.
 module NanoUI.Internal.Damage
@@ -11,7 +13,9 @@ module NanoUI.Internal.Damage
 
 import Control.Applicative ((<|>))
 import Control.Exception (evaluate)
-import Control.Monad (filterM, forM_, unless, when, (>=>))
+import Control.Monad (filterM, forM_, unless, when)
+import Control.Monad.IO.Class (MonadIO (..))
+import Control.Monad.Trans.Reader (ReaderT (..))
 import Data.Bits (complement, xor, (.&.), (.|.))
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
@@ -637,6 +641,34 @@ needsFullDamage snap d =
         && not (fdScrollChanged d)
         && not (rgInPanels (fdSettledMoved d))
 
+-- | Monadic builder for collecting damage rects across frames.
+newtype DamageCollector a = DamageCollector (RectUnion -> IO a)
+  deriving (Functor, Applicative, Monad, MonadIO) via (ReaderT RectUnion IO)
+
+{-# INLINE collectDamage #-}
+collectDamage :: DamageCollector () -> IO [Rect]
+collectDamage (DamageCollector act) = do
+  ref <- newIORef []
+  act ref
+  readIORef ref
+
+{-# INLINE addDamageRect #-}
+addDamageRect :: Rect -> DamageCollector ()
+addDamageRect r = DamageCollector (`addRect` r)
+
+{-# INLINE addDamageKey #-}
+addDamageKey :: PrevFrame -> Int -> Rect -> Rect -> DamageCollector ()
+addDamageKey p k r d = DamageCollector $ \ref -> addKeyDamage ref p k r d
+
+{-# INLINE addDamageKeyGrow #-}
+addDamageKeyGrow :: PrevFrame -> Int -> (Rect -> Rect) -> DamageCollector ()
+addDamageKeyGrow p k grow =
+  forM_ (IM.lookup k (pfRects p)) $ \r -> addDamageKey p k r (grow r)
+
+{-# INLINE addDamageGroup #-}
+addDamageGroup :: RectGroup -> DamageCollector ()
+addDamageGroup g = when (rgAny g) $ addDamageRect (rgBounds g)
+
 -- | The clip covering everything that changed, with the pieces it splits
 -- into ('damagePieces'), or 'DamageFull' once the pieces cover over half the
 -- window.
@@ -647,38 +679,19 @@ clipDamage ctx snap d owners = do
       new = fdPrev d
       Size winW winH = fdWinSize d
       rectIn p wid = IM.lookup (intKey wid) (pfRects p)
-  acc <- newIORef []
-  -- Damage key @k@'s old and new rects, each grown by @grow@ and clipped in
-  -- its own frame ('addKeyDamage').
-  let damageKeyBy k grow = do
-        forM_ (IM.lookup k (pfRects old)) $ \r -> addKeyDamage acc old k r (grow r)
-        forM_ (IM.lookup k (pfRects new)) $ \r -> addKeyDamage acc new k r (grow r)
-      resolveKey k = damageKeyBy k . resolveDamageRect
+      damageBoth k grow = addDamageKeyGrow old k grow >> addDamageKeyGrow new k grow
+      resolveKey k = damageBoth k . resolveDamageRect
       resolveSlop k = resolveKey k (DamageInflated defaultDamageSlop)
-  forM_ (fdRequests d) $ \case
-    ReqFull -> pure ()
-    ReqRect r -> addRect acc r
-    ReqWidget wid bounds -> resolveKey (intKey wid) bounds
-    ReqKey k bounds -> resolveKey k bounds
-    ReqPeers wids bounds -> forM_ wids $ \wid -> resolveKey (intKey wid) bounds
-  -- Backdrop expansion covers interaction slop (hover/press halos) and
-  -- explicit damage requests. Animation keys must not expand to their panel
-  -- backdrop: an animated widget inside a large panel would damage the whole
-  -- panel every frame, and once that union crosses half the window the frame
-  -- degrades to DamageFull. The scissored replay redraws the backdrop fill
-  -- inside the anim's own rect+slop, so no stale pixels remain.
-  let addNodeBackdrop =
-        maybe (pure Nothing) (backdropRectFromNode ctx)
-          >=> mapM_ (addRect acc . clipRectToWindow winW winH)
-      addBackdrop k = unless (k == 0) $ addNodeBackdrop =<< lookupNodeByKey (ctxNodeArena ctx) k
-      -- A widget that held a role last frame repaints its old rect too.
+      addNodeBackdrop mbNode = forM_ mbNode $ \idx ->
+        liftIO (backdropRectFromNode ctx idx) >>= mapM_ (addDamageRect . clipRectToWindow winW winH)
+      addBackdrop k = unless (k == 0) $ addNodeBackdrop =<< liftIO (lookupNodeByKey (ctxNodeArena ctx) k)
       hadRole wid = wid == fsHot snap || wid == fsActive snap || wid == fsFocus snap
       addInteraction wid = unless (k == 0) $ do
-        slop <- fromMaybe defaultDamageSlop <$> lookupCustomDamageSlop ctx wid
-        let side p mr = forM_ mr $ \r -> addKeyDamage acc p k r (rectInflate slop r)
+        slop <- fromMaybe defaultDamageSlop <$> liftIO (lookupCustomDamageSlop ctx wid)
+        let side p mr = forM_ mr $ \r -> addDamageKey p k r (rectInflate slop r)
         side old (if hadRole wid then rectIn old wid else Nothing)
         side new (rectIn new wid)
-        addNodeBackdrop =<< lookupNodeByKey (ctxNodeArena ctx) k
+        addBackdrop k
         where
           k = intKey wid
       -- A parked pointer must not re-damage its hot widget every frame: only
@@ -687,59 +700,39 @@ clipDamage ctx snap d owners = do
       -- DamageFull whenever the hot widget sat inside a panel whose backdrop
       -- covered over half the window.
       role oldW newW = when (rectIn old oldW /= rectIn new newW) $ addInteraction oldW >> addInteraction newW
-  role (fsHot snap) =<< getHotId ctx
-  role (fsActive snap) =<< readIORef (ctxActiveId ctx)
-  role (fsFocus snap) =<< readIORef (ctxFocusId ctx)
-  forM_ (fdRequests d) $ \case
-    ReqKey k _ -> addBackdrop k
-    _ -> pure ()
-  when (fdScrollChanged d || fdPointsChanged d) $
-    scrollOffsetDamage ctx acc (fsStore snap) (fdStore d)
-  -- The changed store keys that are not widget keys, through the widgets
-  -- owning them ('storeKeyOwners'): each owner once, as a 'ReqWidget' with the
-  -- standard slop would.
-  forM_ (IS.toList (IS.fromList (IM.elems owners))) $ \idx ->
-    resolveSlop . intKey =<< getWidgetId (ctxNodeArena ctx) idx
-  let addAnim k = unless (k == 0) $ resolveSlop k
-  IS.foldr (\k rest -> addAnim k >> rest) (pure ()) (fsAnimKeys snap)
-  IM.foldrWithKey
-    (\k _ rest -> unless (IS.member k (fsAnimKeys snap)) (addAnim k) >> rest)
-    (pure ())
-    (fdLiveAnims d)
-  -- Same-key text changes that keep the rect (monospace counters, refreshed
-  -- readouts) still repaint: rect-delta damage alone would leave them stale.
-  -- New text keys inside floating panels also land here; outside panels the
-  -- keysChanged predicate already forces full damage. updatePrevRects keeps
-  -- last frame's map when no text changed.
-  let addText k = mapM_ (addRect acc) (IM.lookup k (pfRects new))
+      addText k = mapM_ addDamageRect (IM.lookup k (pfRects new))
       !newTexts = pfTexts new
       !oldTexts = pfTexts old
       !newImages = pfImages new
       !oldImages = pfImages old
-  unless (ptrEq newTexts oldTexts) $
-    IM.foldrWithKey (\k _ rest -> addText k >> rest) (pure ()) $
-      IM.differenceWith (\n o -> if n /= o then Just n else Nothing) newTexts oldTexts
-  -- An image switched or drawn another way repaints like a text change.
-  unless (ptrEq newImages oldImages) $
-    IM.foldrWithKey (\k _ rest -> addText k >> rest) (pure ()) $
-      IM.mergeWithKey (\_ n o -> if n /= o then Just n else Nothing) id id newImages oldImages
-  -- Drawings redrawn in place repaint their own rects, like a text change
-  -- that keeps its rect.
-  forM_ (fdRedrawn d) $ \k ->
-    forM_ (IM.lookup k (pfRects new)) $ \r -> addKeyDamage acc new k r r
-  unless (fdScrollOnly d) $ addGroup acc (fdSettledMoved d)
-  -- Keys that left repaint as the current backdrop over their old rects. Keys
-  -- that arrived must repaint inside their new rects too: the retain texture
-  -- has never shown that content, and nothing else covers it (mirror writes
-  -- escalate these frames to DamageFull, but layout-driven churn inside
-  -- floating panels does not).
-  addGroup acc (fdChurn d)
-  -- Floating panels that moved, opened or closed repaint where they were and
-  -- where they are.
-  let addFloating other k r rest = unless (IM.lookup k other == Just r) (addRect acc r) >> rest
-  IM.foldrWithKey (addFloating (fdFloatingRects d)) (pure ()) (fsFloatingRects snap)
-  IM.foldrWithKey (addFloating (fsFloatingRects snap)) (pure ()) (fdFloatingRects d)
-  added <- readIORef acc
+  added <- collectDamage $ do
+    forM_ (fdRequests d) $ \case
+      ReqFull -> pure ()
+      ReqRect r -> addDamageRect r
+      ReqWidget wid bounds -> resolveKey (intKey wid) bounds
+      ReqKey k bounds -> resolveKey k bounds >> addBackdrop k
+      ReqPeers wids bounds -> forM_ wids $ \wid -> resolveKey (intKey wid) bounds
+    role (fsHot snap) =<< liftIO (getHotId ctx)
+    role (fsActive snap) =<< liftIO (readIORef (ctxActiveId ctx))
+    role (fsFocus snap) =<< liftIO (readIORef (ctxFocusId ctx))
+    when (fdScrollChanged d || fdPointsChanged d) $
+      scrollOffsetDamage ctx (fsStore snap) (fdStore d)
+    forM_ (IS.toList (IS.fromList (IM.elems owners))) $ \idx ->
+      resolveSlop . intKey =<< liftIO (getWidgetId (ctxNodeArena ctx) idx)
+    let addAnim k = unless (k == 0) $ resolveSlop k
+    forM_ (IS.toList (fsAnimKeys snap)) addAnim
+    forM_ (IM.keys (fdLiveAnims d)) $ \k ->
+      unless (IS.member k (fsAnimKeys snap)) (addAnim k)
+    unless (ptrEq newTexts oldTexts) $
+      forM_ (IM.keys (IM.differenceWith (\n o -> if n /= o then Just n else Nothing) newTexts oldTexts)) addText
+    unless (ptrEq newImages oldImages) $
+      forM_ (IM.keys (IM.mergeWithKey (\_ n o -> if n /= o then Just n else Nothing) id id newImages oldImages)) addText
+    forM_ (fdRedrawn d) $ \k -> addDamageKeyGrow new k id
+    unless (fdScrollOnly d) $ addDamageGroup (fdSettledMoved d)
+    addDamageGroup (fdChurn d)
+    let addFloating a b = IM.foldrWithKey (\k r rest -> unless (IM.lookup k b == Just r) (addDamageRect r) >> rest) (pure ()) a
+    addFloating (fsFloatingRects snap) (fdFloatingRects d)
+    addFloating (fdFloatingRects d) (fsFloatingRects snap)
   let clip = clipRectToWindow winW winH (rectBounds added)
       winArea = winW * winH
       -- A frame with more rects than this repaints their bounds.
@@ -831,9 +824,6 @@ data RectGroup = RectGroup
   , rgBounds :: !Rect
   }
 
-addGroup :: RectUnion -> RectGroup -> IO ()
-addGroup acc g = when (rgAny g) $ addRect acc (rgBounds g)
-
 -- | One pass over keys whose rect changed, split into settled moves (each
 -- side clipped to its viewport in its own frame, kept above
 -- 'layoutSettleMinArea') and keys that left or joined the arena.
@@ -888,20 +878,20 @@ clipToViewport clip r = maybe r (fromMaybe (Rect 0 0 0 0) . rectIntersect r) cli
 clipRectToWindow :: Float -> Float -> Rect -> Rect
 clipRectToWindow winW winH = clipToViewport (Just (Rect 0 0 winW winH))
 
-scrollOffsetDamage :: Context -> RectUnion -> WidgetStore -> WidgetStore -> IO ()
-scrollOffsetDamage Context {ctxNodeArena = na} acc oldStore newStore =
+scrollOffsetDamage :: Context -> WidgetStore -> WidgetStore -> DamageCollector ()
+scrollOffsetDamage Context {ctxNodeArena = na} oldStore newStore =
   unless (null changedKeys) $ do
     -- Every store key that holds a scroll node's offset, mapped to the first
     -- such node, and every scroll range, mapped to each node with that id.
     -- Built once, only on frames where an offset or range changed.
-    owners <- foldClassNodeRevM na PointerNodes addOwner IM.empty
+    owners <- liftIO $ foldClassNodeRevM na PointerNodes addOwner IM.empty
     forM_ changedKeys $ \k ->
       forM_ (IM.findWithDefault [] k owners) $ \idx -> do
         -- The scroll node's rect covers the content viewport AND the
         -- scrollbar lane: offset changes move the thumb, which paints
         -- outside the content clip.
-        getNonzeroRect na idx >>= mapM_ (addRect acc)
-        walkFloatingAncestors na idx (\i _ -> getNonzeroRect na i) >>= mapM_ (addRect acc)
+        liftIO (getNonzeroRect na idx) >>= mapM_ addDamageRect
+        liftIO (walkFloatingAncestors na idx (\i _ -> getNonzeroRect na i)) >>= mapM_ addDamageRect
   where
     -- Floating-pane offsets live in storeFloat; wheel/keyboard offsets
     -- live under the SlotTextAreaScroll slot in storePoint. Both move the
