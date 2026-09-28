@@ -692,9 +692,8 @@ clipDamage ctx snap d owners = do
       hadRole wid = wid == fsHot snap || wid == fsActive snap || wid == fsFocus snap
       addInteraction wid = unless (k == 0) $ do
         slop <- fromMaybe defaultDamageSlop <$> liftIO (lookupCustomDamageSlop ctx wid)
-        let side p mr = forM_ mr $ \r -> addDamageKey p k r (rectInflate slop r)
-        side old (if hadRole wid then rectIn old wid else Nothing)
-        side new (rectIn new wid)
+        forM_ (if hadRole wid then rectIn old wid else Nothing) $ \r -> addDamageKey old k r (rectInflate slop r)
+        forM_ (rectIn new wid) $ \r -> addDamageKey new k r (rectInflate slop r)
         addBackdrop k
         where
           k = intKey wid
@@ -723,10 +722,8 @@ clipDamage ctx snap d owners = do
       scrollOffsetDamage ctx (fsStore snap) (fdStore d)
     forM_ (IS.toList (IS.fromList (IM.elems owners))) $ \idx ->
       resolveSlop . intKey =<< liftIO (getWidgetId (ctxNodeArena ctx) idx)
-    let addAnim k = unless (k == 0) $ resolveSlop k
-    forM_ (IS.toList (fsAnimKeys snap)) addAnim
-    forM_ (IM.keys (fdLiveAnims d)) $ \k ->
-      unless (IS.member k (fsAnimKeys snap)) (addAnim k)
+    forM_ (IS.toList (fsAnimKeys snap <> IM.keysSet (fdLiveAnims d))) $ \k ->
+      unless (k == 0) (resolveSlop k)
     unless (ptrEq newTexts oldTexts) $
       forM_ (IM.keys (IM.differenceWith (\n o -> if n /= o then Just n else Nothing) newTexts oldTexts)) addText
     unless (ptrEq newImages oldImages) $
@@ -834,27 +831,27 @@ data RectGroup = RectGroup
 rectDeltas :: [Rect] -> PrevFrame -> PrevFrame -> IO (RectGroup, RectGroup)
 rectDeltas panelRects oldP newP
   | ptrEq old new = pure (emptyGroup, emptyGroup)
-  | otherwise = do
-      settled <- newIORef []
-      churn <- newIORef []
-      IM.foldrWithKey
-        ( \k r rest -> do
-            when (rectNonEmpty r) $ do
-              when (IM.notMember k new || IM.notMember k old) $ addRect churn r
-              let oldClip = ownClip oldP k
-                  newClip = ownClip newP k
-                  side clip = maybe (Rect 0 0 0 0) (clipToViewport clip)
-                  -- Most moves keep their viewport (a scrolling list), so
-                  -- clipping the union once covers both sides.
-                  clipped
-                    | oldClip == newClip = clipToViewport newClip r
-                    | otherwise = unionNonEmpty (side oldClip (IM.lookup k old)) (side newClip (IM.lookup k new))
-              when (rectArea clipped >= layoutSettleMinArea) $ addRect settled clipped
-            rest
-        )
-        (pure ())
-        (IM.mergeWithKey (\_ a b -> if a /= b then Just (rectUnion a b) else Nothing) id id old new)
-      (,) <$> (group <$> readIORef settled) <*> (group <$> readIORef churn)
+  | otherwise =
+      pure $
+        let (settled, churn) =
+              IM.foldrWithKey
+                ( \k r (!accS, !accC) ->
+                    if rectNonEmpty r
+                      then
+                        let !accC' = if IM.notMember k new || IM.notMember k old then r : accC else accC
+                            oldClip = ownClip oldP k
+                            newClip = ownClip newP k
+                            side clip = maybe (Rect 0 0 0 0) (clipToViewport clip)
+                            clipped
+                              | oldClip == newClip = clipToViewport newClip r
+                              | otherwise = unionNonEmpty (side oldClip (IM.lookup k old)) (side newClip (IM.lookup k new))
+                            !accS' = if rectArea clipped >= layoutSettleMinArea then clipped : accS else accS
+                         in (accS', accC')
+                      else (accS, accC)
+                )
+                ([], [])
+                (IM.mergeWithKey (\_ a b -> if a /= b then Just (rectUnion a b) else Nothing) id id old new)
+         in (group settled, group churn)
   where
     -- Forced, so an unchanged frame's maps compare by pointer ('ptrEq').
     !old = pfRects oldP
