@@ -5,6 +5,7 @@ module NanoUI.Internal.Widgets.Behavior
   ( DragAxis (..)
   , useDrag1D
   , holdActiveWhile
+  , Reorder (..)
   , useReorder
   , useKeyNav
   , keyboardFocused
@@ -30,8 +31,8 @@ import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena (getParent, getWidgetId)
 import NanoUI.Internal.Monad (NanoUI, (<&&>), askContext, askFrameInput, askInput, focusedWidget, freshWidget, liftIO, withContext)
-import NanoUI.Internal.Store (fieldFloat, fieldInt, findSlot, insertSlot, quietFlag, setQuietFlag)
-import NanoUI.Internal.Types (Rect (..), V2, clamp01, rectHit, v2X, v2Y)
+import NanoUI.Internal.Store (deleteSlot, fieldInt, fieldPoint, findSlot, flagSlot, insertSlot, quietFlag, setFlagSlot, setQuietFlag)
+import NanoUI.Internal.Types (Rect (..), V2 (..), clamp01, rectHit, v2X, v2Y)
 
 -- | Pointer slop in pixels before a held press counts as a drag.
 dragThresholdPx :: Float
@@ -99,44 +100,85 @@ holdActiveWhile wid dragging = withContext $ \ctx -> do
   when (dragging /= (active == wid)) $
     writeIORef (ctxActiveId ctx) (if dragging then wid else WidgetId 0)
 
--- | Drag-and-drop reorder of a visible index list.
-useReorder ::
-  [Int] ->
-  [(Int, Rect)] ->
-  NanoUI ([Int], Maybe Int)
+-- | Where a drag-and-drop reorder stands after this frame ('useReorder').
+data Reorder = Reorder
+  { reorderOrder :: ![Int]
+    -- ^ The order after this frame: the one passed in, with the dragged
+    -- item moved on the frame it is dropped.
+  , reorderPreview :: ![Int]
+    -- ^ The order a drop would leave now, the one passed in while nothing
+    -- is being dragged. Draw from it to show the items making room.
+  , reorderDragging :: !(Maybe Int)
+    -- ^ The item held, from the press on it until the button comes up.
+  , reorderMoved :: !Bool
+    -- ^ The pointer has gone past the drag threshold since the press, so
+    -- the press is a drag and not a click. Still set on the release frame,
+    -- so a click on the item there can be ignored.
+  }
+  deriving (Eq, Show)
+
+-- | Drag-and-drop reorder of a list of item ids. Pass the order and each
+-- item's rect as drawn last frame ('respRect'), in the order drawn: the
+-- order passed, or 'reorderPreview' for a live preview. A press on an item
+-- starts a drag; once the pointer passes the drag threshold the item takes
+-- the place of the item nearest the pointer, so the list can wrap over
+-- several rows. Store 'reorderOrder'; releasing outside every item drops
+-- at the nearest one too.
+--
+-- > (order, setOrder) <- useState [0 .. 4]
+-- > rects <- liftIO (readIORef lastRects)
+-- > r <- useReorder order rects
+-- > drawn <- forM (reorderPreview r) $ \i -> (i,) . respRect <$> chip i
+-- > liftIO (writeIORef lastRects drawn)
+-- > setOrder (reorderOrder r)
+useReorder :: [Int] -> [(Int, Rect)] -> NanoUI Reorder
 useReorder order items = do
   (wid, ctx) <- freshWidget
   inp <- askInput
   let key = intKey wid
       dragK = slotKey SlotDrag key
-      dragWK = slotKey SlotDragW key
-      mouse = inputMousePos inp
+      startK = slotKey SlotDragW key
+      movedK = slotKey SlotDrop key
+      mouse@(V2 mx my) = inputMousePos inp
       press = pressedIn MouseLeft inp
-      release = releasedIn MouseLeft inp
       hit = fst <$> find (\(_, r) -> rectHit r mouse) items
   store <- liftIO (getStore ctx)
-  let from0 = findSlot fieldInt (-1) dragK store
-      startX = findSlot fieldFloat 0 dragWK store
-      dragging = if press then fromMaybe (-1) hit else from0
-      nextDrag = if release || not (heldIn MouseLeft inp) then -1 else dragging
-      -- Resolve the drop using the held source before clearing it on release.
-      moved = not press && dragging >= 0 && abs (v2X mouse - startX) > dragThresholdPx
-      nextOrder = case hit of
-        Just toCol | release, moved -> moveItem order dragging toCol
+  let dragging = if press then fromMaybe (-1) hit else findSlot fieldInt (-1) dragK store
+      (sx, sy) = if press then (mx, my) else findSlot fieldPoint (mx, my) startK store
+      moved =
+        dragging >= 0
+          && not press
+          && (flagSlot movedK store || (mx - sx) * (mx - sx) + (my - sy) * (my - sy) > dragThresholdPx * dragThresholdPx)
+      -- The slot nearest the pointer, by its distance from each rect.
+      distance (Rect x y w h) =
+        let dx = max 0 (max (x - mx) (mx - x - w))
+            dy = max 0 (max (y - my) (my - y - h))
+         in dx * dx + dy * dy
+      target = case zip [0 :: Int ..] items of
+        [] -> Nothing
+        slots -> Just (fst (minimumOn (distance . snd . snd) slots))
+      preview = case target of
+        Just t | moved, dragging `elem` order ->
+          let (before, after) = splitAt t (filter (/= dragging) order)
+           in before ++ dragging : after
         _ -> order
-  when (nextDrag /= from0 || (press && nextDrag >= 0)) $
+      released = releasedIn MouseLeft inp
+      ended = released || not (heldIn MouseLeft inp)
+      next = if ended then -1 else dragging
+  when (next /= findSlot fieldInt (-1) dragK store || press || moved /= flagSlot movedK store) $
     liftIO . modifyStore ctx $
-      insertSlot fieldInt dragK nextDrag
-        . insertSlot fieldFloat dragWK (if press then v2X mouse else startX)
-  pure (nextOrder, if nextDrag >= 0 then Just nextDrag else Nothing)
-
-moveItem :: [Int] -> Int -> Int -> [Int]
-moveItem xs from to
-  | from == to = xs
-  | otherwise =
-      let without = filter (/= from) xs
-          (pre, post) = break (== to) without
-       in pre ++ from : post
+      if next < 0
+        then deleteSlot fieldInt dragK . deleteSlot fieldPoint startK . setFlagSlot movedK False
+        else insertSlot fieldInt dragK next . insertSlot fieldPoint startK (sx, sy) . setFlagSlot movedK moved
+  pure
+    Reorder
+      { reorderOrder = if released && moved then preview else order
+      , reorderPreview = if ended then order else preview
+      , reorderDragging = if dragging >= 0 && not ended then Just dragging else Nothing
+      , reorderMoved = moved
+      }
+  where
+    minimumOn f = foldr1 (\a b -> if f a <= f b then a else b)
 
 data KeyNav = KeyNav
   { knUp :: !Bool

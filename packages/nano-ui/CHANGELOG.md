@@ -99,6 +99,19 @@
   exported.
 - `themePopup` on `Theme` and `popupStyle`: the surface of popups, modals,
   dropdowns and menus, without the panels inside them.
+- `useReorder` and `Reorder`: drag-and-drop reordering of a list of ids.
+  Past the drag threshold, the held item takes the place of the item
+  nearest the pointer, over rows that wrap too; `reorderPreview` is the
+  order a drop would leave, for a live preview, and `reorderMoved` tells a
+  drag from a click. Table headers reorder with it: a column dropped on
+  another takes its place, so one dropped on the last header goes last,
+  where it used to land before it.
+- `borderSides`, and `borderLeft`, `borderRight`, `borderTop` and
+  `borderBottom` for one side with its width and colour: a border drawn on
+  some sides only, from `styleBorderSides` on `Style`.
+- `rowWith'` and `columnWith'`, which return the container's `Response`:
+  where it was laid out last frame, for a row that drops controls it has no
+  room for.
 - `pgFocusable` on `PaneGridConfig`: off, the grid is no Tab stop and its
   arrow, `m`, `x` and Escape keys do nothing, for a grid whose panes own the
   keyboard.

@@ -7,9 +7,11 @@ module NanoUI.Internal.Widgets.Layout
   , calloutWith
   , row
   , rowWith
+  , rowWith'
   , row'
   , column
   , columnWith
+  , columnWith'
   , column'
   , layers
   , layersWith
@@ -95,6 +97,27 @@ row = rowWith id
 {-# INLINE rowWith #-}
 rowWith :: (Layout -> Layout) -> NanoUI a -> NanoUI a
 rowWith = (`withDefaultWith` row')
+
+-- | 'rowWith' returning its 'Response', whose 'respRect' is where the row
+-- was laid out last frame. A row that runs out of room can drop controls by
+-- comparing it with the widths they need:
+--
+-- > (_, bar) <- rowWith' fillW $ do
+-- >   label title
+-- >   flex
+-- >   when (rectW (respRect bar) >= 300) controls
+--
+-- Unlike 'rowWith', it takes an id, like a widget.
+rowWith' :: (Layout -> Layout) -> NanoUI a -> NanoUI (a, Response)
+rowWith' f body = do
+  base <- askDefaultLayout
+  containerResponse NodeContainer ((f base) {layoutDirection = Row}) body
+
+-- | 'columnWith' returning its 'Response', as 'rowWith''.
+columnWith' :: (Layout -> Layout) -> NanoUI a -> NanoUI (a, Response)
+columnWith' f body = do
+  base <- askDefaultLayout
+  containerResponse NodeContainer ((f base) {layoutDirection = Column}) body
 
 {-# INLINE row' #-}
 row' :: Layout -> NanoUI a -> NanoUI a

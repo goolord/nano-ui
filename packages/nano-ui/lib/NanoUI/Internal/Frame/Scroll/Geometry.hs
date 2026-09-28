@@ -35,7 +35,7 @@ import Data.Text (Text)
 import NanoUI.Internal.Font
 import NanoUI.Internal.Types (Color, Rect (..), V2 (..), clamp, rectContains, rectH, rectIntersect, rectW, rectX, rectY, v2X, v2Y)
 import NanoUI.Internal.Layout.Arena (DirTag (..))
-import NanoUI.Internal.Style (Direction (..), Padding (..), Style (..), styleBorderWidth, windowPad)
+import NanoUI.Internal.Style (Direction (..), Padding (..), Side (..), Style (..), styleBorderWidth, styleHasSide, windowPad)
 
 -- | Axis scrollbar visibility and interaction policy.
 data ScrollPolicy
@@ -336,4 +336,6 @@ borderContentClip style (Rect x y w h) =
     then Rect x y w h
     else
       let bw = max 1 (styleBorderWidth style)
-       in Rect (x + bw) (y + bw) (max 0 (w - 2 * bw)) (max 0 (h - 2 * bw))
+          inset side = if styleHasSide side style then bw else 0
+          (l, r, t, b) = (inset SideLeft, inset SideRight, inset SideTop, inset SideBottom)
+       in Rect (x + l) (y + t) (max 0 (w - l - r)) (max 0 (h - t - b))

@@ -15,6 +15,8 @@ module NanoUI.Internal.Style
   , Layout (..)
   , defaultLayout
   , Style (..)
+  , Side (..)
+  , styleHasSide
   , fieldIconColor
   , Theme (..)
   , defaultTheme
@@ -43,6 +45,11 @@ module NanoUI.Internal.Style
   , foreground
   , borderColor
   , borderWidth
+  , borderSides
+  , borderLeft
+  , borderRight
+  , borderTop
+  , borderBottom
   , cornerRadius
   , hoverBackground
   , pressBackground
@@ -148,7 +155,7 @@ module NanoUI.Internal.Style
   ) where
 
 import Control.Applicative ((<|>))
-import Data.Bits ((.&.), (.|.))
+import Data.Bits (setBit, testBit, (.&.), (.|.))
 import Data.List (find)
 import Data.Maybe (fromMaybe)
 import Data.Word (Word8)
@@ -758,8 +765,20 @@ data Style = Style
   , styleCornerRadius :: {-# UNPACK #-} !Float
   , styleHoverBg :: {-# UNPACK #-} !Color
   , styleActiveBg :: {-# UNPACK #-} !Color
+  , styleBorderSides :: {-# UNPACK #-} !Word8
+  -- ^ The sides the border is drawn on, one bit per 'Side' in its order
+  -- ('borderSides'); 15, all four, in the built-in styles.
   }
   deriving (Eq, Show)
+
+-- | A side of a rectangle, for 'borderSides'.
+data Side = SideLeft | SideRight | SideTop | SideBottom
+  deriving (Eq, Show, Enum, Bounded)
+
+-- | Whether the style's border is drawn on this side.
+{-# INLINE styleHasSide #-}
+styleHasSide :: Side -> Style -> Bool
+styleHasSide side s = testBit (styleBorderSides s) (fromEnum side)
 
 -- | Colours and surface styles used to paint a view. Use theme modifiers with
 -- @styled@ for a subtree or @setUiTheme@ to change the session's base theme.
@@ -894,6 +913,23 @@ borderColor c s = s {styleBorder = c}
 -- | Set border width in logical pixels, clamped to zero or greater.
 borderWidth :: Float -> Style -> Style
 borderWidth w s = s {styleBorderWidth = max 0 w}
+
+-- | Draw the border on these sides only, as straight bars that ignore the
+-- corner radius; the background keeps its corners. As with a full border, a
+-- panel clips its children inside the sides drawn but does not move them,
+-- so leave room with padding.
+--
+-- > panelStyle (background tint . borderSides [SideLeft] . borderWidth 3 . borderColor accent)
+borderSides :: [Side] -> Style -> Style
+borderSides sides s = s {styleBorderSides = foldl' (\m side -> setBit m (fromEnum side)) 0 sides}
+
+-- | A border of width @w@ and colour @c@ on one side only: 'borderSides'
+-- with 'borderWidth' and 'borderColor'.
+borderLeft, borderRight, borderTop, borderBottom :: Float -> Color -> Style -> Style
+borderLeft w c = borderSides [SideLeft] . borderWidth w . borderColor c
+borderRight w c = borderSides [SideRight] . borderWidth w . borderColor c
+borderTop w c = borderSides [SideTop] . borderWidth w . borderColor c
+borderBottom w c = borderSides [SideBottom] . borderWidth w . borderColor c
 
 -- | Set corner radius in logical pixels, clamped to zero or greater.
 cornerRadius :: Float -> Style -> Style
@@ -1085,6 +1121,7 @@ flatStyle bg fg border hoverBg activeBg =
     , styleCornerRadius = 2
     , styleHoverBg = hoverBg
     , styleActiveBg = activeBg
+    , styleBorderSides = 15
     }
 
 -- | Set 'themeSuccess' and 'themeDanger' from the theme's green and red,

@@ -137,8 +137,10 @@ module NanoUI
     -- * Containers
   , row
   , rowWith
+  , rowWith'
   , column
   , columnWith
+  , columnWith'
   , hstack
   , vstack
   , grid
@@ -493,6 +495,8 @@ module NanoUI
   , DropTarget (..)
   , useDrop
   , dropZone
+  , Reorder (..)
+  , useReorder
 
     -- * Local state
   , useState
@@ -787,6 +791,12 @@ module NanoUI
   , foreground
   , borderColor
   , borderWidth
+  , borderSides
+  , borderLeft
+  , borderRight
+  , borderTop
+  , borderBottom
+  , Side (..)
   , cornerRadius
   , hoverBackground
   , pressBackground
@@ -1082,7 +1092,7 @@ import NanoUI.Svg
 import NanoUI.Internal.Types
 import NanoUI.Internal.WidgetText
 import NanoUI.Internal.Widgets.Animate
-import NanoUI.Internal.Widgets.Behavior (KeyNav (..), focusedKeyPressed, focusedKeyPressedOnce, keyActivated, navStep, useInputMethod, useKeyNav)
+import NanoUI.Internal.Widgets.Behavior (KeyNav (..), Reorder (..), focusedKeyPressed, focusedKeyPressedOnce, keyActivated, navStep, useInputMethod, useKeyNav, useReorder)
 import NanoUI.Internal.Widgets.Button
 import NanoUI.Internal.Widgets.Caption
 import NanoUI.Internal.Widgets.Checkbox

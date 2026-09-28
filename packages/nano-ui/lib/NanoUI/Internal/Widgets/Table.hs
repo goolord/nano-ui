@@ -52,7 +52,7 @@ import Data.Bits ((.|.), shiftL)
 import GHC.Exts (isTrue#, reallyUnsafePtrEquality#)
 import NanoUI.Internal.Types (Rect (..), clamp, rectH, rectW, v2X, V2 (..), rectContains)
 import NanoUI.Internal.WidgetText (buttonFlagTable, tableHeaderLabel, tableSortReserve)
-import NanoUI.Internal.Widgets.Behavior (dragThresholdPx, useReorder)
+import NanoUI.Internal.Widgets.Behavior (Reorder (..), useReorder)
 import NanoUI.Internal.Widgets.Combinators (buttonStyledEx, readDerived, writeDerived)
 import NanoUI.Internal.Widgets.Layout (column', panel', row', scrollAreaIdConfigured, separator, spacer)
 import NanoUI.Internal.Frame.Scroll.Geometry (defaultScrollConfig, scrollHorizontalHidden, scrollVerticalAuto, scrollVerticalHidden)
@@ -631,10 +631,12 @@ tableConfigured cfg f key cols inputRows curSort =
       unless (null edgeZones) . liftIO $
         -- Strict in the spine and the rects, so no thunk waits in the IORef.
         modifyIORef' (ctxCursorZones ctx) (\zs -> foldl' (\acc (_, !r) -> (r, UiCursorEwResize) : acc) zs edgeZones)
-      (vis', mReorder) <-
+      reorder <-
         withKey ("reorder" :: Text) $
           useReorder vis (if resizing || isJust edgeCol then [] else headerRects)
-      let dragged = isReorder && abs (mx - dragX0) > dragThresholdPx
+      let vis' = reorderOrder reorder
+          mReorder = reorderDragging reorder
+          dragged = isReorder && reorderMoved reorder
           pressResize = pressedIn MouseLeft inp && isJust edgeCol
           pressReorder = pressedIn MouseLeft inp && edgeCol == Nothing && isJust hoverCol
           nextDrag

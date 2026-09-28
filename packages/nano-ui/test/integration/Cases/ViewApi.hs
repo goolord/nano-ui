@@ -20,6 +20,7 @@ tests =
   , spec "pointer-track" runPointerTrackTest
   , spec "content-key-of" runContentKeyOfTest
   , spec "checkbox-with" runCheckboxWithTest
+  , spec "row-with-response" runRowWithResponseTest
   , spec "pane-grid-initial" runPaneGridInitialTest
   , spec "pane-grid-initial-once" runPaneGridInitialOnceTest
   , spec "pane-grid-unfocusable" runPaneGridUnfocusableTest
@@ -380,3 +381,16 @@ runModalWithTest ctx failed = do
     assert failed (rectH r > 300 && rectH r <= 400)
     -- Centred in the window.
     assert failed (abs (rectX r + rectW r / 2 - 400) <= 12)
+
+-- | 'rowWith'' reports where the row was laid out, for a row that drops
+-- what does not fit, and lays its children out left to right.
+runRowWithResponseTest :: Context -> IORef Int -> IO ()
+runRowWithResponseTest ctx failed = do
+  let inp = withInput 400 300
+      ui = rowWith' (fillW . tight . gap 0) $ do
+        a <- buttonWith' (fixedWH 50 20) "A"
+        b <- buttonWith' (fixedWH 50 20) "B"
+        pure (respRect a, respRect b)
+  ((ra, rb), bar) <- warmup2 ctx inp ui
+  assertEq failed 400 (rectW (respRect bar))
+  assertEq failed (rectX ra + 50) (rectX rb)

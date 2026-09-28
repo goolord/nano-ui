@@ -14,6 +14,7 @@ tests =
   , spec "styled-nesting" runStyledNestingTest
   , spec "styled-damage" runStyledDamageTest
   , spec "font-size-label-fit" runFontSizeLabelFitTest
+  , spec "border-left" runBorderLeftTest
   ]
 
 -- | A pointer press, drag and typing on a disabled widget change nothing and
@@ -159,3 +160,16 @@ runFontSizeLabelFitTest base failed = do
       assert failed False
   assertEq failed (3 * 12 + 2 * 12) (rectW (respRect plain))
   assertEq failed (rectW (respRect big) + 16 + 8) (rectW (respRect adorned))
+
+-- | 'borderLeft' draws one bar down the left edge and no other side.
+runBorderLeftTest :: Context -> IORef Int -> IO ()
+runBorderLeftTest ctx failed = do
+  let inp = withInputOff 300 200
+      col = colorRGBA 220 40 90 255
+      ui =
+        styled (panelStyle (borderLeft 3 col . cornerRadius 0)) $
+          panelWith (fixedWH 120 40 . tight) (snd <$> mouseArea (fillW . fillH) (pure ()))
+  (inner, draw) <- warmupDraw ctx inp ui
+  quads <- drawQuads draw
+  let Rect x y _ h = respRect inner
+  assertEq failed [Rect x y 3 h] [q | (q, c) <- quads, c == col]

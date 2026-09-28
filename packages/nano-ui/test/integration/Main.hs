@@ -12,6 +12,7 @@ import Cases.Grid qualified
 import Cases.Caption qualified
 import Cases.PaneGrid qualified
 import Cases.Labels qualified
+import Cases.Reorder qualified
 import Cases.ViewApi qualified
 import Cases.HostDraw qualified
 import Cases.RichText qualified
@@ -70,6 +71,7 @@ main =
     , Cases.ViewApi.tests
     , Cases.PaneGrid.tests
     , Cases.Labels.tests
+    , Cases.Reorder.tests
     , Cases.HostDraw.tests
     , Cases.RichText.tests
     , Cases.Shaping.tests

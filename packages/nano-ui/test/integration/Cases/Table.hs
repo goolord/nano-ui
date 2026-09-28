@@ -129,13 +129,14 @@ runTableReorderTest ctx failed = do
   clickPos draw input first
   clicked <- warmup2 ctx input ui
   assertEq failed [0, 1, 2] (tableColOrder clicked)
+  -- Dropped on the last header, the column takes its place.
   dragPos draw input first third
   moved <- warmup2 ctx input ui
-  assertEq failed [1, 0, 2] (tableColOrder moved)
+  assertEq failed [1, 2, 0] (tableColOrder moved)
   -- The released drag must not stay latched on subsequent frames.
   draw input {inputMousePos = first}
   settled <- warmup2 ctx input ui
-  assertEq failed [1, 0, 2] (tableColOrder settled)
+  assertEq failed [1, 2, 0] (tableColOrder settled)
 
 -- Row label nearest the bottom edge of the body viewport.
 rowLabelIndex :: T.Text -> Maybe Int

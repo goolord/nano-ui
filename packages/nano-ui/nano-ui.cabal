@@ -265,6 +265,7 @@ test-suite nano-ui-test
         Cases.ViewApi
         Cases.PaneGrid
         Cases.Labels
+        Cases.Reorder
         Cases.Window
         Cases.WidgetIdIndex
         Cases.Paths

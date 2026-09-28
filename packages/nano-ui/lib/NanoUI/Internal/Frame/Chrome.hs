@@ -347,10 +347,20 @@ fillStyledRect da style rect =
 
 {-# INLINE strokeStyledRect #-}
 strokeStyledRect :: DrawArena -> Style -> Rect -> IO ()
-strokeStyledRect da style rect@(Rect _ _ w h) =
-  when (styleBorderWidth style > 0) $ do
-    let rr = clamp 0 (min (w / 2) (h / 2)) (styleCornerRadius style)
-    pushRoundedStroke da rect rr (max 1 (styleBorderWidth style)) (styleBorder style)
+strokeStyledRect da style rect@(Rect x y w h) =
+  when (styleBorderWidth style > 0) $
+    if styleBorderSides style == 15
+      then do
+        let rr = clamp 0 (min (w / 2) (h / 2)) (styleCornerRadius style)
+        pushRoundedStroke da rect rr bw (styleBorder style)
+      else do
+        let side s r = when (styleHasSide s style) (pushRect da r (styleBorder style))
+        side SideLeft (Rect x y bw h)
+        side SideRight (Rect (x + w - bw) y bw h)
+        side SideTop (Rect x y w bw)
+        side SideBottom (Rect x (y + h - bw) w bw)
+  where
+    bw = max 1 (styleBorderWidth style)
 
 -- | A style's fill, then its border.
 {-# INLINE paintStyledRect #-}

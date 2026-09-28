@@ -27,6 +27,7 @@ benchTheme =
           , styleCornerRadius = 1
           , styleHoverBg = colorRGBA 222 216 204 255
           , styleActiveBg = colorRGBA 196 190 178 255
+          , styleBorderSides = 15
           }
    in defaultTheme
         { themeWindow = formica
@@ -42,6 +43,7 @@ benchTheme =
               , styleCornerRadius = 1
               , styleHoverBg = colorRGBA 228 222 208 255
               , styleActiveBg = colorRGBA 168 162 148 255
+              , styleBorderSides = 15
               }
         , themeInput =
             Style
@@ -52,6 +54,7 @@ benchTheme =
               , styleCornerRadius = 1
               , styleHoverBg = colorRGBA 186 180 166 255
               , styleActiveBg = colorRGBA 158 152 138 255
+              , styleBorderSides = 15
               }
         , themeSeparator = colorRGBA 92 86 76 255
         , themeAccent = ruby
