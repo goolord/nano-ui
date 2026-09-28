@@ -78,7 +78,9 @@ collectClippedSpans ctx@Context {ctxFontMetrics = fm} idx clip arena = do
           getClipRect (ctxNodeArena ctx) idx >>= \case
             Just live -> pure (rectIntersect clip live)
             Nothing -> (\sn -> rectIntersect clip (scrollNodeViewport sn x y w h)) <$> readScrollNode (ctxNodeArena ctx) idx
-        else pure (if nt == NodePanel then rectIntersect clip (Rect x y w h) else Just clip)
+        else do
+          clips <- if nt == NodeContainer then hasFlag containerFlagClip <$> getStyleIdx (ctxNodeArena ctx) idx else pure (nt == NodePanel)
+          pure (if clips then rectIntersect clip (Rect x y w h) else Just clip)
     forM_ mClipChildren $ \clipHere -> do
       -- A text node's spans are cached per node until its inputs change.
       -- Placement uses glyph ink ('alignedTextPen'), not TTF_GetStringSize;

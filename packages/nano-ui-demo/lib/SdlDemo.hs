@@ -986,7 +986,6 @@ demoPaneView showHeader pid pctx = do
     PaneView
       { pvTitle = demoPaneTitle pid maximized
       , pvDraggable = True
-      , pvDragPick = Nothing
       }
 
 ------------------------------------------------------------------------------

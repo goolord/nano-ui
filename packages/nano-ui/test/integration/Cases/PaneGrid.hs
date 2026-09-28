@@ -14,6 +14,8 @@ tests =
   , spec "pane-grid-committed" runCommittedTest
   , spec "pane-grid-drag-handle" runDragHandleTest
   , spec "pane-grid-divider-color" runDividerColorTest
+  , spec "pane-grid-reset" runResetTest
+  , spec "pane-grid-clip" runClipTest
   ]
 
 -- | Two panes side by side in a 600 by 400 grid: a 16px gutter from 292 to
@@ -48,7 +50,7 @@ probeGrid f body = do
               liftIO (modifyIORef' told (IM.insert (fromIntegral pid) (pgcRect pctx)))
               (_, area) <- mouseArea (fillW . fillH) (body pid)
               liftIO (modifyIORef' laid (IM.insert (fromIntegral pid) (respRect area)))
-              pure (PaneView "P" False Nothing)
+              pure (PaneView "P" False)
           }
   pure (paneGrid cfg, laid, told)
 
@@ -149,7 +151,7 @@ runCommittedTest ctx failed = do
                 when (wanted && pid == 10) $ do
                   liftIO (writeIORef splitNow False)
                   void (pgcSplit pctx AxisH)
-                pure (PaneView "P" False Nothing)
+                pure (PaneView "P" False)
             }
       liftIO
         (modifyIORef' seen (\(c, k) -> (c || pgrChanged resp, k || pgrCommitted resp)))
@@ -174,7 +176,7 @@ runCommittedTest ctx failed = do
   assertEq failed (True, True) =<< frame inp
   assertEq failed (False, False) =<< frame inp
 
--- | A press on a pane's 'pgcDragHandle' drags the pane, onto the middle of
+-- | A press on a pane's 'paneDragHandle' drags the pane, onto the middle of
 -- the other one to swap them; a press on a button inside the handle does not.
 runDragHandleTest :: Context -> IORef Int -> IO ()
 runDragHandleTest ctx failed = do
@@ -187,10 +189,10 @@ runDragHandleTest ctx failed = do
           { pgLayout = fillW . fillH
           , pgTree = Just halves
           , pgViewPane = \_ pctx -> do
-              pgcDragHandle pctx (fillW . fixedH 40) $ do
+              paneDragHandle pctx (fillW . fixedH 40) $ do
                 flex
                 whenM (buttonWith (fixedWH 40 30) "x") (liftIO (modifyIORef' clicks (+ 1)))
-              pure (PaneView "P" False Nothing)
+              pure (PaneView "P" False)
           }
     panesAfter frames = do
       mapM_ (\i -> runFrame ctx i ui) (init frames)
@@ -233,3 +235,62 @@ runDividerColorTest ctx failed = do
   (_, dd) <- warmupDraw ctx inp ui
   quads <- drawQuads dd
   assert failed ((Rect 292 0 16 400, c) `elem` quads)
+
+-- | The reset the 'pgTree' documentation shows: the tree kept in state and
+-- passed back each frame, and set to the starting layout by a button.
+runResetTest :: Context -> IORef Int -> IO ()
+runResetTest ctx failed = do
+  resetNow <- newIORef False
+  let
+    inp = withInput 600 400
+    ui = do
+      (arrangement, setArrangement) <- useState (Just halves)
+      resp <-
+        paneGrid defaultPaneGridConfig {pgLayout = fillW . fillH, pgTree = arrangement}
+      setArrangement (pgrTree resp)
+      wanted <- liftIO (readIORef resetNow)
+      when wanted $ do
+        liftIO (writeIORef resetNow False)
+        setArrangement (Just halves)
+      pure resp
+    ratioAfter i = (\(r, _, _, _) -> rootRatio (pgrTree r)) <$> runFrame ctx i ui
+  _ <- warmup2 ctx inp ui
+  let
+    press = pressAt inp (V2 300 200)
+    moved = holdAt press (V2 400 200)
+  mapM_ (\i -> runFrame ctx i ui) [press, moved, releaseAt moved]
+  assertEq failed (Just (0.5 + 100 / 584)) =<< ratioAfter inp
+  writeIORef resetNow True
+  _ <- runFrame ctx inp ui
+  assertEq failed (Just 0.5) =<< ratioAfter inp
+
+-- | Content wider than its pane is clipped to it: a button pushed past the
+-- pane's right edge takes no click there.
+runClipTest :: Context -> IORef Int -> IO ()
+runClipTest ctx failed = do
+  clicks <- newIORef (0 :: Int)
+  hidden <- newIORef Nothing
+  let
+    inp = withInput 600 400
+    ui =
+      paneGrid
+        defaultPaneGridConfig
+          { pgLayout = fillW . fillH
+          , pgTree = Just halves
+          , pgViewPane = \pid _ -> do
+              when (pid == 10) . rowWith (tight . gap 0) $ do
+                box (fixedWH 400 30) (colorRGBA 200 0 0 255)
+                resp <- buttonWith' (fixedWH 60 30) "Hidden"
+                liftIO (writeIORef hidden (Just (respRect resp)))
+                when (respClicked resp) (liftIO (modifyIORef' clicks (+ 1)))
+              pure (PaneView "P" False)
+          }
+  _ <- warmup2 ctx inp ui
+  mr <- readIORef hidden
+  assertJust failed mr $ \r -> do
+    -- Laid out past the pane, which ends at 292.
+    assert failed (rectX r >= 292)
+    let
+      (press, release) = clickPair inp (spanCenter r)
+    mapM_ (\i -> runFrame ctx i ui) [press, release]
+    assertEq failed 0 =<< readIORef clicks

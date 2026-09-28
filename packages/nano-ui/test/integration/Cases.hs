@@ -711,7 +711,7 @@ runPaneGridMixedDragTest ctx failed = do
               close <- button' "x"
               liftIO (modifyIORef' closeRects (IM.insert (fromIntegral pid) (respRect close)))
               when (respClicked close) (pgcClose pctx)
-              pure (PaneView "P" True Nothing)
+              pure (PaneView "P" True)
           }
       ui = paneGrid cfg
   _ <- warmup2 ctx inp0 ui
@@ -813,7 +813,7 @@ runPaneGridDropPreviewTest ctx failed = do
               strip <- labelWith' (fixedH 20 . fillW . tight) "H"
               liftIO (modifyIORef' seen (IM.insert (fromIntegral pid) (pgcRect pctx, respRect strip)))
               seedMixedGrid seed pid pctx
-              pure (PaneView "P" True Nothing)
+              pure (PaneView "P" True)
           }
       ui = paneGrid cfg
       -- The layout as drawn once the given input has settled (the strip's
@@ -922,7 +922,7 @@ runPaneGridPinnedPaneTest ctx failed = do
               when (not done) $ do
                 _ <- pgcSplit pctx AxisV
                 liftIO (writeIORef split True)
-              pure (PaneView "P" False Nothing)
+              pure (PaneView "P" False)
           }
       ui pinned = paneGrid (cfg pinned)
       -- @n@ frames at @inp@, then one more to report what they solved:
@@ -1032,7 +1032,7 @@ runPaneGridClippedControlTest ctx failed = do
                 mapM_ (\_ -> void (label "Scroll content")) [1 .. 20 :: Int]
                 pure b
             liftIO (writeIORef geometry (Just (respId header, sid, respId target)))
-            pure (PaneView "Panel" True Nothing)
+            pure (PaneView "Panel" True)
         }
   _ <- warmup2 ctx inp0 ui
   assertJustM failed (readIORef geometry) $ \(headerId, sid, targetId) -> do

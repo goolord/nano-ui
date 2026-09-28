@@ -76,12 +76,14 @@
   `pgrTree`, the grid's tree after the frame, can replace the arrangement,
   such as to reset it. `GridNode` and `GridAxis` derive `Read`, so a tree
   saved with `show` reads back.
+- A pane grid clips each pane's content to the pane, for paint and the
+  pointer.
 - `pgrCommitted` on `PaneGridResponse`: the tree changed and nothing is being
   dragged, set once when a divider or pane is let go after moving and after
   a split or close. `pgrChanged` is also set on each step of a divider drag.
-- `pgcDragHandle` on `PaneGridCtx`: a row that drags its pane, such as a
-  title bar, with a grab cursor over it. Presses on controls inside it still
-  go to the controls. It replaces a `pvDragPick` rect placed by hand.
+- `paneDragHandle`: a row that drags its pane, such as a title bar, with a
+  grab cursor over it. Presses on controls inside it still go to the
+  controls.
 - `pgDividerColor` on `PaneGridConfig`: the colour of the gutters between
   panes, without restyling `themeSeparator` for everything inside the grid.
 - `toggleButton` and its variants: a button that stays pressed, filled in
@@ -1193,6 +1195,8 @@
 
 ### Removed
 
+- `pvDragPick` from `PaneView`, a drag region in screen coordinates placed
+  from last frame's `pgcRect`. Wrap the title bar in `paneDragHandle`.
 - `withExternalText` from `NanoUI.Testing`: nothing read the flag it set.
 - `Compact`, `compactHost` and `askCompact` from `NanoUI.Testing`;
   `NanoUI.Backend` exports them.

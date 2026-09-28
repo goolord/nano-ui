@@ -208,7 +208,9 @@ paintContainerNode env@PaintEnv {peContext = ctx} idx rect = do
   case tabChromeDecode si of
     (TabChromeNone, _, _) -> pure ()
     _ -> paintTabChrome (peDrawArena env) (peTheme env) si rect
-  walkChildrenWithOccluders env idx
+  if hasFlag containerFlagClip si
+    then paintClippedChildren env idx rect
+    else walkChildrenWithOccluders env idx
   wid <- getWidgetId (peNodeArena env) idx
   mBuild <- lookupCustomDrawing ctx wid
   forM_ mBuild $ \(CustomDrawingEntry _ build _ _ _) -> do

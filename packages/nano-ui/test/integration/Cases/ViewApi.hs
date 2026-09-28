@@ -214,7 +214,7 @@ runPaneGridInitialTest ctx failed = do
               when (wantSplit && pid == 20) $ do
                 liftIO (writeIORef splitIt False)
                 void (pgcSplit pctx AxisH)
-              pure (PaneView "P" False Nothing)
+              pure (PaneView "P" False)
           }
       ui = paneGrid cfg
       frames inp n = replicateM_ n (runFrame ctx inp ui)
@@ -258,7 +258,7 @@ runPaneGridInitialOnceTest ctx failed = do
           , pgViewPane = \_ pctx -> do
               close <- liftIO (readIORef closing)
               when close (pgcClose pctx)
-              pure (PaneView "P" False Nothing)
+              pure (PaneView "P" False)
           }
       inp = withInput 600 400
       ui = paneGrid cfg

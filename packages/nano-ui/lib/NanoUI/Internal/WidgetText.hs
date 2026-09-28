@@ -39,6 +39,7 @@ module NanoUI.Internal.WidgetText
   , buttonFlagChoice
   , buttonFlagRow
   , containerFlagInert
+  , containerFlagClip
   , hasFlag
   , tableSortReserve
   , tableStripeColor
@@ -407,10 +408,14 @@ buttonFlagMask =
 
 -- | Marks a @NodeContainer@ whose widgets are for display: the pointer passes
 -- through them to the widget they are drawn in
--- ('NanoUI.Internal.Frame.Hit.innermostHit'). Plain containers carry no
--- other style.
+-- ('NanoUI.Internal.Frame.Hit.innermostHit').
 containerFlagInert :: Int
 containerFlagInert = 1
+
+-- | Marks a @NodeContainer@ that clips its children to its rect, for paint,
+-- text spans and the pointer, as a panel does.
+containerFlagClip :: Int
+containerFlagClip = 2
 
 -- | Whether the packed style index @si@ carries @flag@.
 {-# INLINE hasFlag #-}

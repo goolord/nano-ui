@@ -24,6 +24,7 @@ module NanoUI.Internal.Widgets.Node
   , containerResponse
   , mouseArea
   , inertContainer
+  , clipContainer
   , withContainerNode
   , withWidgetChildren
   , floatingPanel
@@ -48,7 +49,7 @@ import NanoUI.Internal.Id (IdContext (..), WidgetId (..), enterScope, hashWidget
 import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Monad (NanoUI, (<&&>), askContext, askDefaultLayout, askFrameInput, askInput, localInput, nextId, liftIO, withContext, withIdFrame)
-import NanoUI.Internal.WidgetText (containerFlagInert, packTextNodeStyle)
+import NanoUI.Internal.WidgetText (containerFlagClip, containerFlagInert, packTextNodeStyle)
 import NanoUI.Internal.Style (Layout (..), tight)
 import NanoUI.Internal.Types (Rect (..), V2, rectContains, rectH, rectHit, rectUnion, rectW)
 import NanoUI.Internal.Frame.Hit (findNodeByWidgetId, nodeInteractionHit, passesPointer, withWidgetNode)
@@ -207,6 +208,19 @@ inertContainer layout child = do
     idx <- addNodeFromLayout (ctxNodeArena ctx) NodeContainer parent layout
     idx <$ setStyleIdx (ctxNodeArena ctx) idx containerFlagInert
   withContainerNode True idx (localInput (withoutPointer inp) child)
+
+-- | A plain container that clips its children to its rect, drawing none of
+-- its own. It takes a fresh id, so the pointer is clipped from the frame
+-- after it is laid out.
+clipContainer :: Layout -> NanoUI a -> NanoUI a
+clipContainer layout child = do
+  wid <- nextId
+  ctx <- askContext
+  idx <- liftIO $ do
+    parent <- currentParent ctx
+    idx <- addNodeFromLayout (ctxNodeArena ctx) NodeContainer parent layout
+    idx <$ setStyleIdx (ctxNodeArena ctx) idx containerFlagClip
+  withContainerNode True idx (tagContainer wid *> child)
 
 -- | A 'container' tagged with a fresh id, and its interaction under that id.
 containerResponse :: NodeType -> Layout -> NanoUI a -> NanoUI (a, Response)

@@ -20,7 +20,7 @@ import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Layout.Solve (scrollBarSlotOf)
 import NanoUI.Internal.Style (FontVariant (..), TextDecoration (..), themePanel, variantFace)
 import NanoUI.Internal.Types (Rect (..))
-import NanoUI.Internal.WidgetText (textNodeFontStyle, textNodeFontVariant, textNodeFontWeight)
+import NanoUI.Internal.WidgetText (containerFlagClip, hasFlag, textNodeFontStyle, textNodeFontVariant, textNodeFontWeight)
 
 -- | Font for a node of type @nt@ with an explicit size and packed style: the
 -- metrics, whether the host returned a native styled face (paint then skips
@@ -95,10 +95,10 @@ readScrollNode na idx = do
 -- | The clip for the children of node @idx@ (type @nt@, placed at @rect@),
 -- matching "NanoUI.Internal.Frame.Paint": a scroller's viewport, a panel's
 -- inside-border rect, or the node's own rect. Plain containers (row, column,
--- grid) do not clip and return 'Nothing'.
+-- grid) do not clip and return 'Nothing', unless marked 'containerFlagClip'.
 childPaintClip :: Context -> NodeIdx -> NodeType -> Rect -> IO (Maybe Rect)
 childPaintClip ctx idx nt rect@(Rect x y w h) = case nt of
-  NodeContainer -> pure Nothing
+  NodeContainer -> (\si -> if hasFlag containerFlagClip si then Just rect else Nothing) <$> getStyleIdx (ctxNodeArena ctx) idx
   NodeScrollContainer -> (\sn -> Just (scrollNodeViewport sn x y w h)) <$> readScrollNode (ctxNodeArena ctx) idx
   NodePanel -> (\theme -> Just (borderContentClip (themePanel theme) rect)) <$> nodeTheme ctx idx
   _ -> pure (Just rect)

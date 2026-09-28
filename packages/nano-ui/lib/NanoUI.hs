@@ -390,6 +390,7 @@ module NanoUI
   , GridAxis (..)
   , GridNode (..)
   , paneGrid
+  , paneDragHandle
 
     -- * Rich text
   , module NanoUI.Widgets.RichText

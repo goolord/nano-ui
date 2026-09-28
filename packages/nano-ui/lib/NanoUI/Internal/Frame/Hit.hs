@@ -37,7 +37,7 @@ import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Monad (ifM, (<&&>))
 import NanoUI.Internal.Style (PointerMode (..))
 import NanoUI.Internal.Types (Rect (..), V2 (..), rectContains, rectHit)
-import NanoUI.Internal.WidgetText (containerFlagInert, hasFlag)
+import NanoUI.Internal.WidgetText (containerFlagClip, containerFlagInert, hasFlag)
 
 -- | The node that carries widget id @wid@ in this frame's arena. 'Nothing' for
 -- @WidgetId 0@ and for a widget the view has not declared this frame. When
@@ -186,8 +186,8 @@ nodeInteractionHit ctx@Context {ctxNodeArena = na} idx rect mouse
   | otherwise = getParent na idx >>= inside
  where
   -- Whether the mouse is inside the recorded viewport of every scroll
-  -- container, and the previous rect of every widget, from node @i@ up to
-  -- the first floating panel.
+  -- container, and the previous rect of every widget and clipping container
+  -- ('containerFlagClip'), from node @i@ up to the first floating panel.
   inside i
     | i < 0 = pure True
     | otherwise = do
@@ -198,7 +198,12 @@ nodeInteractionHit ctx@Context {ctxNodeArena = na} idx rect mouse
             else
               if isWidgetNode nt
                 then getPrevRect ctx =<< getWidgetId na i
-                else pure Nothing
+                else
+                  if nt == NodeContainer
+                    then do
+                      clips <- hasFlag containerFlagClip <$> getStyleIdx na i
+                      if clips then getPrevRect ctx =<< getWidgetId na i else pure Nothing
+                    else pure Nothing
         case bounds of
           Just r | not (rectContains r mouse) -> pure False
           _ | isFloatingNode nt -> pure True
