@@ -135,20 +135,19 @@ updatePrevRects ctx@Context {ctxNodeArena = na} size@(Size winW winH) = do
                     k <- if keyless then containerKey na idx else pure (intKey wid)
                     let isOld = keyless && IM.member k oldRects
                     mRect <- getNonzeroRect na idx
-                    case mRect of
+                    (m', om', fOld', fOuter', drop') <- case mRect of
                       Nothing ->
-                        containers (j + 1)
-                          (if isOld then IM.delete k m else m)
-                          (dropKey k om)
-                          foundOld foundOuter (dropped || isOld)
+                        pure (if isOld then IM.delete k m else m, dropKey k om, foundOld, foundOuter, dropped || isOld)
                       Just r -> do
                         o <- outerClip na window idx
-                        containers (j + 1)
-                          (if keyless then putNew k r m else m)
-                          (putNew k o om)
-                          (foundOld + if isOld then 1 else 0)
-                          (foundOuter + if IM.member k oldOuters then 1 else 0)
-                          dropped
+                        pure
+                          ( if keyless then putNew k r m else m
+                          , putNew k o om
+                          , foundOld + if isOld then 1 else 0
+                          , foundOuter + if IM.member k oldOuters then 1 else 0
+                          , dropped
+                          )
+                    containers (j + 1) m' om' fOld' fOuter' drop'
       (m0, om, foundContainers, foundOuter, droppedContainer) <- containers 0 oldRects oldOuters 0 0 False
       -- Second pass, every node with a widget id. Seeded with last frame's
       -- maps and touching only changed entries, so frames with stable rects
@@ -218,20 +217,24 @@ updatePrevRects ctx@Context {ctxNodeArena = na} size@(Size winW winH) = do
                             else do
                               let !p = imagePaint tid node
                               p <$ writeArray (pwImages walk) i p
-                        if not same
-                          then do
-                            let !isOld = IM.member k oldRects
-                            go (i + 1) (putNew k now m) (maybe (dropKey k cm) (\c -> putNew k c cm) mClip)
-                              (if hasText then putNew k txt tm else dropKey k tm)
-                              (if isImage then putNew k img lm else dropKey k lm)
-                              (foundOld + if isOld then 1 else 0) dropped
-                          else do
-                            let put :: Bool -> a -> IM.IntMap a -> IM.IntMap a
-                                put changed v mp = if changed then IM.insert k v mp else mp
-                            go (i + 1) (put (not (ptrEq now was)) now m) (maybe cm (\c -> put clipMoved c cm) mClip)
-                              (if hasText then put textChanged txt tm else tm)
-                              (if isImage then put (not imageSame) img lm else lm)
-                              (foundOld + 1) dropped
+                        let put :: Bool -> a -> IM.IntMap a -> IM.IntMap a
+                            put changed v mp = if changed then IM.insert k v mp else mp
+                            (m', cm', tm', lm', fOld')
+                              | not same =
+                                  ( putNew k now m
+                                  , maybe (dropKey k cm) (\c -> putNew k c cm) mClip
+                                  , if hasText then putNew k txt tm else dropKey k tm
+                                  , if isImage then putNew k img lm else dropKey k lm
+                                  , foundOld + if IM.member k oldRects then 1 else 0
+                                  )
+                              | otherwise =
+                                  ( put (not (ptrEq now was)) now m
+                                  , maybe cm (\c -> put clipMoved c cm) mClip
+                                  , if hasText then put textChanged txt tm else tm
+                                  , if isImage then put (not imageSame) img lm else lm
+                                  , foundOld + 1
+                                  )
+                        go (i + 1) m' cm' tm' lm' fOld' dropped
       go 0 m0 oldClips oldTexts oldImages foundContainers droppedContainer
 
 -- | The last walk's record, with room for @count@ nodes, and how many of its
@@ -682,9 +685,10 @@ clipDamage ctx snap d owners = do
       damageBoth k grow = addDamageKeyGrow old k grow >> addDamageKeyGrow new k grow
       resolveKey k = damageBoth k . resolveDamageRect
       resolveSlop k = resolveKey k (DamageInflated defaultDamageSlop)
-      addNodeBackdrop mbNode = forM_ mbNode $ \idx ->
-        liftIO (backdropRectFromNode ctx idx) >>= mapM_ (addDamageRect . clipRectToWindow winW winH)
-      addBackdrop k = unless (k == 0) $ addNodeBackdrop =<< liftIO (lookupNodeByKey (ctxNodeArena ctx) k)
+      addBackdrop k = unless (k == 0) $ do
+        mbNode <- liftIO (lookupNodeByKey (ctxNodeArena ctx) k)
+        forM_ mbNode $ \idx ->
+          liftIO (backdropRectFromNode ctx idx) >>= mapM_ (addDamageRect . clipRectToWindow winW winH)
       hadRole wid = wid == fsHot snap || wid == fsActive snap || wid == fsFocus snap
       addInteraction wid = unless (k == 0) $ do
         slop <- fromMaybe defaultDamageSlop <$> liftIO (lookupCustomDamageSlop ctx wid)

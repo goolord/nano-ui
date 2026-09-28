@@ -1,6 +1,7 @@
 -- | Button, selection and cache helpers shared by the widget modules.
 module NanoUI.Internal.Widgets.Combinators
   ( buttonStyledEx
+  , choiceToggleWidget
   , withBoundedIndex
   , finishToggle
   , finishInput
@@ -43,6 +44,20 @@ buttonStyledEx enabled txt value layout styleIdx = do
       keyClick <- keyActivated wid
       pure (if keyClick then setClicked True resp else resp)
     else pure (inertResponse resp)
+
+-- | Controlled toggle widget: registers focus, adopts the boolean model value,
+-- lays out and styles the node, resolves toggle clicks and keyboard activation,
+-- and updates the node's visual value when toggled.
+{-# INLINE choiceToggleWidget #-}
+choiceToggleWidget :: Text -> Layout -> Int -> Bool -> NanoUI (Response, Bool)
+choiceToggleWidget txt lay flag on = do
+  (wid, ctx) <- freshWidget
+  liftIO $ registerFocusable ctx wid
+  current <- liftIO (intBool <$> adoptSlot fieldInt ctx wid (boolInt on))
+  resp <- addWidgetStyled wid NodeButton txt (if current then 1 else 0) lay flag
+  result@(_, value) <- finishToggle ctx wid current resp
+  when (value /= current) . liftIO $ setWidgetValue ctx wid (if value then 1 else 0)
+  pure result
 
 -- | Finish a boolean control after its node has registered focus eligibility.
 -- Keyboard activation changes the value without inventing a pointer click.
