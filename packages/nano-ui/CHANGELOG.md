@@ -69,10 +69,21 @@
   without the caller hashing it first.
 - `checkboxWith` and `checkboxWith'`, a checkbox with a layout modifier:
   `checkboxWith alignMid` centres it in a row taller than itself.
-- `pgInitial` on `PaneGridConfig`, the split tree a grid starts from, with
-  pane and split ids of the caller's choosing; `NanoUI` exports `GridNode` to
-  write it with. A grid that had to be seeded in the widget store before its
-  first frame, to start with a split at a given ratio, is now given one.
+- `pgTree` on `PaneGridConfig`, the split tree a grid shows, with pane and
+  split ids of the caller's choosing; `NanoUI` exports `GridNode` to write it
+  with. The grid starts from it and takes it again whenever it changes, so a
+  constant tree is a starting layout, and a caller that passes back
+  `pgrTree`, the grid's tree after the frame, can replace the arrangement,
+  such as to reset it. `GridNode` and `GridAxis` derive `Read`, so a tree
+  saved with `show` reads back.
+- `pgrCommitted` on `PaneGridResponse`: the tree changed and nothing is being
+  dragged, set once when a divider or pane is let go after moving and after
+  a split or close. `pgrChanged` is also set on each step of a divider drag.
+- `pgcDragHandle` on `PaneGridCtx`: a row that drags its pane, such as a
+  title bar, with a grab cursor over it. Presses on controls inside it still
+  go to the controls. It replaces a `pvDragPick` rect placed by hand.
+- `pgDividerColor` on `PaneGridConfig`: the colour of the gutters between
+  panes, without restyling `themeSeparator` for everything inside the grid.
 - `pgFocusable` on `PaneGridConfig`: off, the grid is no Tab stop and its
   arrow, `m`, `x` and Escape keys do nothing, for a grid whose panes own the
   keyboard.
@@ -949,6 +960,10 @@
 
 ### Fixed
 
+- Padding given to a pane grid through `pgLayout` insets its panes. The
+  grid laid its split out over its whole rect, so the rects it hit-tested,
+  drew drop zones in and handed panes as `pgcRect` were shifted and larger
+  than the panes.
 - A strip with `TabBottom` or `TabRight` is drawn below or right of the
   body it selects. It was drawn above or left of it, as `TabTop` and
   `TabLeft` are. The body comes first, so the headers show the key passed in

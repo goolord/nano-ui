@@ -188,7 +188,7 @@ runCheckboxWithTest ctx failed = do
   assert failed (rectH r < 60)
   assert failed (abs (mid - 30) <= 1)
 
--- | A grid given 'pgInitial' lays its split out from the first frame, asks
+-- | A grid given 'pgTree' lays its split out from the first frame, asks
 -- for the panes it names, gives a pane it makes later an id above all of
 -- them, and holds a pinned pane at the width the ratio first gave it.
 runPaneGridInitialTest :: Context -> IORef Int -> IO ()
@@ -203,7 +203,7 @@ runPaneGridInitialTest ctx failed = do
           , pgMinSize = 40
           , pgSpacing = 4
           , pgFixedPanes = (== 10)
-          , pgInitial = Just (Split 30 AxisV 0.25 (Pane 10) (Pane 20))
+          , pgTree = Just (Split 30 AxisV 0.25 (Pane 10) (Pane 20))
           , pgViewPane = \pid pctx -> do
               liftIO (modifyIORef' rects (IM.insert (fromIntegral pid) (pgcRect pctx)))
               body <- nextId
@@ -245,7 +245,7 @@ runPaneGridInitialTest ctx failed = do
   assertEq failed (length panes) 3
   assert failed (all (\p -> p `elem` [10, 20] || p > 30) panes)
 
--- | 'pgInitial' is where a grid starts, not where it goes back to: once its
+-- | 'pgTree' is where a grid starts, not where it goes back to: once its
 -- last pane is closed it starts again from one fresh pane, whose id no closed
 -- pane had.
 runPaneGridInitialOnceTest :: Context -> IORef Int -> IO ()
@@ -254,7 +254,7 @@ runPaneGridInitialOnceTest ctx failed = do
   let cfg =
         defaultPaneGridConfig
           { pgLayout = fillW . fillH
-          , pgInitial = Just (Split 30 AxisV 0.5 (Pane 10) (Pane 20))
+          , pgTree = Just (Split 30 AxisV 0.5 (Pane 10) (Pane 20))
           , pgViewPane = \_ pctx -> do
               close <- liftIO (readIORef closing)
               when close (pgcClose pctx)

@@ -4,10 +4,11 @@
 --
 -- 'pgViewPane' renders each pane and receives a 'PaneGridCtx' with actions
 -- to split, close, maximize or restore it. Drag a divider to resize. Drag a
--- pane by its pick rect onto another pane (center swaps, edge splits) or
--- onto the grid's outer edge (new top-level split). While the grid has
--- focus, arrow keys move between panes, @m@ maximizes, @x@ closes and
--- Escape restores.
+-- pane by its handle ('pgcDragHandle') onto another pane (center swaps,
+-- edge splits) or onto the grid's outer edge (new top-level split). While
+-- the grid has focus, arrow keys move between panes, @m@ maximizes, @x@
+-- closes and Escape restores. 'pgrTree' reads the tree back and 'pgTree'
+-- replaces it.
 --
 -- During a drag the grid is laid out as the drop would leave it, with the
 -- landing slot empty and highlighted. Releasing commits exactly that tree.
@@ -24,6 +25,7 @@ module NanoUI.Widgets.PaneGrid
   ) where
 
 import Control.Monad (forM_, unless, void, when)
+import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Hashable (hash)
 import Data.List (find)
 import Data.Map.Strict (Map)
@@ -34,7 +36,7 @@ import Data.Text qualified as T
 import Data.Word (Word64)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Input
-import NanoUI.Internal.Monad (NanoUI, (<&&>), askInput, damageWidgetNow, focusedWidget, freshWidget, lastRect, releaseFocus, requestFrame, liftIO, takeEscape, whenM, withIdFrame, withKey)
+import NanoUI.Internal.Monad (NanoUI, (<&&>), askDefaultLayout, askInput, damageWidgetNow, focusedWidget, freshWidget, lastRect, releaseFocus, requestFrame, liftIO, takeEscape, whenM, withIdFrame, withKey)
 import NanoUI.Internal.Id (IdContext (..), WidgetId, hashWidgetId)
 import NanoUI.Internal.Frame.Hit (nodeInteractionHit)
 import NanoUI.Internal.Shortcut qualified as Shortcut
@@ -42,6 +44,7 @@ import NanoUI.Internal.Store (insertDyn, lookupDyn)
 import NanoUI.Internal.Style
 import NanoUI.Internal.Types
 import NanoUI.Internal.Widgets.Behavior (KeyNav (..), dragThresholdPx, useKeyNav)
+import NanoUI.Internal.Widgets.Cursor (withCursorShape)
 import NanoUI.Widgets.Custom
 import NanoUI.Internal.Widgets.Layout (column', row')
 import NanoUI.Internal.Layout.Arena (NodeType (..), arenaCount, getNodeType, getWidgetId, isWidgetNode)
@@ -82,21 +85,33 @@ data PaneGridConfig = PaneGridConfig
     -- neighbour's minimum, and its divider can still be dragged. Only that one
     -- split is pinned: a pinned sidebar keeps its width, but its row's height
     -- still follows the grid.
-  , pgInitial :: !(Maybe GridNode)
-    -- ^ The split tree for the first frame (default 'Nothing': one pane).
-    -- When the last pane closes, the grid restarts with one fresh pane. Pane
-    -- and split ids are the caller's: unique within the tree, from 1 to below
-    -- @2^63@ (0 means "none"). Panes the grid creates later get higher ids.
-    -- Ratios apply from the first frame, and pinned panes keep the size their
-    -- ratio gives them:
+  , pgTree :: !(Maybe GridNode)
+    -- ^ The split tree to show (default 'Nothing': start with one pane). The
+    -- grid takes a tree on the first frame and whenever it differs from the
+    -- one passed the frame before; otherwise it keeps its own, which drags,
+    -- splits and closes change. So a constant tree is where the grid starts,
+    -- and a caller that passes back 'pgrTree' each frame can replace the
+    -- arrangement at any time, such as to reset it. When the last pane
+    -- closes, the grid restarts with one fresh pane.
     --
-    -- > pgInitial = Just (Split 3 AxisV 0.25 (Pane 1) (Pane 2))
+    -- Pane and split ids are the caller's: unique within the tree, from 1 to
+    -- below @2^63@ (0 means "none"). Panes the grid creates later get higher
+    -- ids. Ratios apply from the first frame, and pinned panes keep the size
+    -- their ratio gives them:
+    --
+    -- > pgTree = Just (Split 3 AxisV 0.25 (Pane 1) (Pane 2))
+  , pgDividerColor :: !(Maybe Color)
+    -- ^ The colour of the gutters between panes (default 'Nothing': a faint
+    -- tint of the panel colour with a line down the middle from
+    -- 'themeSeparator'). The hover and drag highlight is drawn over it.
   , pgFocusable :: !Bool
     -- ^ Whether the grid is a Tab stop whose arrow, @m@, @x@ and Escape keys
     -- act on its panes (default 'True'). Turn it off when pane content needs
     -- those keys.
   , pgViewPane :: !(Word64 -> PaneGridCtx -> NanoUI PaneView)
-    -- ^ Renders the content of one pane.
+    -- ^ Renders the content of one pane. The pane keeps the size the split
+    -- gives it whatever its content needs, but does not clip: put content
+    -- that can outgrow it in a panel or a scroll area.
   }
 
 -- | Default spacing and drag margins with empty pane bodies. Set 'pgViewPane'
@@ -111,7 +126,8 @@ defaultPaneGridConfig =
     , pgEdgeBand = 20
     , pgPreserveDragSize = False
     , pgFixedPanes = const False
-    , pgInitial = Nothing
+    , pgTree = Nothing
+    , pgDividerColor = Nothing
     , pgFocusable = True
     , pgViewPane = \_ _ -> pure (PaneView "" False Nothing)
     }
@@ -120,9 +136,9 @@ defaultPaneGridConfig =
 data PaneGridCtx = PaneGridCtx
   { pgcPaneId :: !Word64
   , pgcRect :: !Rect
-    -- ^ This pane's screen rect from the previous frame, for placing
-    -- 'pvDragPick' handles such as a title bar. Zero until laid out, the
-    -- grid's rect while maximized, and the previewed rect during a drop.
+    -- ^ This pane's screen rect from the previous frame. Zero until laid
+    -- out, the grid's content rect while maximized, and the previewed rect
+    -- during a drop.
   , pgcMaximized :: !Bool
     -- ^ True when this pane currently fills the whole grid.
   , pgcDragging :: !Bool
@@ -135,6 +151,15 @@ data PaneGridCtx = PaneGridCtx
   , pgcClose :: !(NanoUI ())
   , pgcMaximize :: !(NanoUI ())
   , pgcRestore :: !(NanoUI ())
+  , pgcDragHandle :: forall a. (Layout -> Layout) -> NanoUI a -> NanoUI a
+    -- ^ A row, laid out like 'rowWith', that drags the pane: a press on it
+    -- not taken by a control inside it starts a drag, and the pointer shows
+    -- a grab cursor over it. Wrap a title bar in it:
+    --
+    -- > pgcDragHandle pctx (fillW . alignMid) $ do
+    -- >   label title
+    -- >   flex
+    -- >   whenM (button "Close") (pgcClose pctx)
   }
 
 -- | How a pane can be dragged this frame. 'pgViewPane' draws all of the
@@ -146,9 +171,10 @@ data PaneView = PaneView
     -- ^ A press anywhere in the pane not taken by an interactive child starts
     -- a drag.
   , pvDragPick :: !(Maybe Rect)
-    -- ^ A region in screen coordinates, such as a title bar placed from
-    -- 'pgcRect', that also starts a drag. With this 'Nothing' and
-    -- 'pvDraggable' 'False', the pane cannot be moved.
+    -- ^ A region in screen coordinates that also starts a drag. Content
+    -- wrapped in 'pgcDragHandle' drags the pane without one. With this
+    -- 'Nothing', 'pvDraggable' 'False' and no handle, the pane cannot be
+    -- moved.
   }
   deriving (Eq, Show)
 
@@ -156,7 +182,16 @@ data PaneView = PaneView
 -- handled during it. The layout reflects them from the next frame.
 data PaneGridResponse = PaneGridResponse
   { pgrChanged :: !Bool
-    -- ^ Any structural or maximize change happened this frame.
+    -- ^ Any structural or maximize change happened this frame, including
+    -- each step of a divider drag.
+  , pgrCommitted :: !Bool
+    -- ^ The split tree changed and nothing is being dragged: a divider or a
+    -- pane was let go after moving, or a split or close ran. The time to
+    -- save 'pgrTree'. Not set for a maximize or restore, which leave the
+    -- tree as it is, nor for a tree the caller passed in 'pgTree'.
+  , pgrTree :: !(Maybe GridNode)
+    -- ^ The split tree, 'Nothing' once the last pane has been closed. Pass
+    -- it back in 'pgTree' to keep the grid controlled.
   , pgrPaneCount :: !Int
     -- ^ Number of panes (0 once the last pane has been closed).
   , pgrPanes :: ![Word64]
@@ -191,6 +226,11 @@ data GridState = GridState
     -- size reflows the splits of pinned panes ('pgFixedPanes'). Tracked even
     -- with nothing pinned, so a pin added later reflows from the right size.
   , gsGesture :: !Gesture
+  , gsGiven :: !(Maybe GridNode)
+    -- ^ The 'pgTree' the caller passed last frame.
+  , gsSettled :: !(Maybe GridNode)
+    -- ^ The tree when no gesture was last in progress, so the frame that
+    -- ends a gesture can tell whether it moved anything.
   }
   deriving (Eq)
 
@@ -212,6 +252,8 @@ data RenderedPane = RenderedPane
   { rpPaneId :: !Word64
   , rpView :: !PaneView
   , rpControlHit :: !Bool
+  , rpHandle :: !(Maybe Rect)
+    -- ^ Where the pane's 'pgcDragHandle' was laid out last frame.
   }
 
 -- | Per-frame shared environment.
@@ -233,7 +275,7 @@ data GridEnv = GridEnv
   , geLifted :: !Bool
     -- ^ The dragged pane is lifted out: not rendered, and its slot left
     -- empty in a drop preview.
-  , geMakeCtx :: Word64 -> Rect -> Bool -> PaneGridCtx
+  , geMakeCtx :: Word64 -> Rect -> Bool -> (forall a. (Layout -> Layout) -> NanoUI a -> NanoUI a) -> PaneGridCtx
   }
 
 -- -----------------------------------------------------------------------------
@@ -272,14 +314,26 @@ paneGrid cfg = do
       edgeBand = max 0 (pgEdgeBand cfg)
       gutter = spacing + 2 * leeway
   stored <- lookupDyn key <$> liftIO (getStore ctx)
-  baseRect <- fromMaybe (Rect 0 0 0 0) <$> lastRect wid
-  let (tree0, started) = case stored of
+  Rect ox oy ow oh <- fromMaybe (Rect 0 0 0 0) <$> lastRect wid
+  let lay = pgLayout cfg (paneLay minSize)
+      Padding pl pr pt pb = layoutPadding lay
+      -- The panes share the grid's content box, inside its padding.
+      baseRect = Rect (ox + pl) (oy + pt) (max 0 (ow - pl - pr)) (max 0 (oh - pt - pb))
+      fresh seed given = GridState (Just (Pane seed)) (seed + 1) 0 0 Nothing NoGesture given (Just (Pane seed))
+      -- After the last pane closes, restart with a fresh, never-used id.
+      resumed = case stored of
         Just st@GridState {gsTree = Just t} -> (t, st)
-        Nothing | Just t <- pgInitial cfg -> (t, GridState (Just t) (treeMaxId t + 1) 0 0 Nothing NoGesture)
-        -- After the last pane closes, restart with a fresh, never-used id.
         _ ->
           let seed = maybe 1 gsSeed stored
-           in (Pane seed, GridState (Just (Pane seed)) (seed + 1) 0 0 Nothing NoGesture)
+           in (Pane seed, fresh seed (gsGiven =<< stored))
+      (tree0, started) = case (pgTree cfg, resumed) of
+        (given, (t, st))
+          | given == gsGiven st -> (t, st)
+          -- A new tree from the caller replaces the grid's and cancels a
+          -- gesture on the old one, unless it is the tree already shown.
+          | Just new <- given, new /= t ->
+              (new, st {gsTree = Just new, gsSeed = max (gsSeed st) (treeMaxId new + 1), gsGesture = NoGesture, gsGiven = given, gsSettled = Just new})
+          | otherwise -> (t, st {gsGiven = given})
       curSpan = (rectW baseRect, rectH baseRect)
       -- On a size change, re-ratio pinned panes' splits before layout. A move
       -- or a first fit needs no reflow.
@@ -289,7 +343,12 @@ paneGrid cfg = do
           , any (pgFixedPanes cfg) (treePanes tree0) ->
               reflowFixed (pgFixedPanes cfg) minSize gutter (baseRect {rectW = pw, rectH = ph}) baseRect tree0
         _ -> tree0
-      gs = started {gsTree = Just tree, gsSpan = Just curSpan}
+      gs =
+        started
+          { gsTree = Just tree
+          , gsSpan = Just curSpan
+          , gsSettled = if gsGesture started == NoGesture then Just tree else gsSettled started
+          }
   when (Just gs /= stored) $ liftIO (modifyStore ctx (insertDyn key gs))
   let (maxPane, focused) = paneFocus tree gs
       mouse = inputMousePos inp
@@ -337,7 +396,7 @@ paneGrid cfg = do
           , geRegions = visibleRegions
           , geState = gs
           , geLifted = lifted
-          , geMakeCtx = \pid rect dragging ->
+          , geMakeCtx = \pid rect dragging handle ->
               PaneGridCtx
                 { pgcPaneId = pid
                 , pgcRect = rect
@@ -348,11 +407,12 @@ paneGrid cfg = do
                 , pgcClose = closePane env pid
                 , pgcMaximize = maximizePane env pid
                 , pgcRestore = restorePane env
+                , pgcDragHandle = handle
                 }
           }
 
   -- Tagged so next frame reads the grid's rect.
-  container NodeContainer (pgLayout cfg (paneLay minSize)) $ do
+  container NodeContainer lay $ do
     tagContainer wid
     if maxPane /= 0
       then void (renderPane env maxPane baseRect)
@@ -391,6 +451,8 @@ paneGrid cfg = do
   pure
     PaneGridResponse
       { pgrChanged = gsTree end /= gsTree gs || gsMax end /= gsMax gs
+      , pgrCommitted = gsGesture end == NoGesture && gsTree end /= gsSettled gs
+      , pgrTree = gsTree end
       , pgrPaneCount = maybe 0 treeSize (gsTree end)
       , pgrPanes = maybe [] treePanes (gsTree end)
       , pgrFocusedPane = focusEnd
@@ -438,7 +500,15 @@ renderPane env pid rect =
     let ctx = geCtx env
         arena = ctxNodeArena ctx
     start <- liftIO (arenaCount arena)
-    let ctxt = geMakeCtx env pid rect (draggingPane env pid)
+    handleRef <- liftIO (newIORef Nothing)
+    let handle :: (Layout -> Layout) -> NanoUI a -> NanoUI a
+        handle f body = do
+          (hid, _) <- freshWidget
+          liftIO (writeIORef handleRef (Just hid))
+          base <- askDefaultLayout
+          withCursorShape UiCursorGrab $
+            container NodeContainer ((f base) {layoutDirection = Row}) (tagContainer hid *> body)
+        ctxt = geMakeCtx env pid rect (draggingPane env pid) handle
     (view, _) <- containerResponse NodeContainer (paneLay (geMinSize env)) (pgViewPane (geCfg env) pid ctxt)
     -- Whether a press landed on a control in the pane, using last frame's
     -- rects, since the active id is only settled after the view runs.
@@ -457,7 +527,8 @@ renderPane env pid rect =
                       maybe (pure False) (\childRect -> nodeInteractionHit ctx idx childRect (inputMousePos inp)) r
                     if hit then pure True else hitFrom (idx + 1)
           hitFrom start
-    pure [RenderedPane pid view controlHit]
+    handleRect <- maybe (pure Nothing) lastRect =<< liftIO (readIORef handleRef)
+    pure [RenderedPane pid view controlHit handleRect]
 
 renderNode ::
   GridEnv ->
@@ -515,7 +586,7 @@ dividerWidget env axis =
     customWidget
       defaultCustomWidgetSpec
         { widgetLayout = axisLay axis (Fixed (geGutter env))
-        , widgetContent = contentKey [if axis == AxisV then 1 else 2, thickness, leeway]
+        , widgetContent = contentKeyOf [keyPart (axis == AxisV), keyPart thickness, keyPart leeway, keyPart (colorToWord32 <$> color)]
         , widgetDraw = \cdc rect -> runCanvasFor cdc $ do
             let theme = cdcTheme cdc
                 panel = themePanel theme
@@ -526,9 +597,12 @@ dividerWidget env axis =
                 -- Full accent while grabbed; a calmer tint while merely hovering.
                 line
                   | cdcPressed cdc = themeAccent theme
-                  | otherwise = lerpColor (themeAccent theme) (styleBg panel) 0.45
-            drawRect rect (lerpColor (styleBg panel) (themeSeparator theme) 0.12)
-            drawRect (alongAxis axis (Rect (x + leeway) y thickness h)) (scrollBarTrackColor panel theme)
+                  | otherwise = lerpColor (themeAccent theme) (fromMaybe (styleBg panel) color) 0.45
+            case color of
+              Just c -> drawRect rect c
+              Nothing -> do
+                drawRect rect (lerpColor (styleBg panel) (themeSeparator theme) 0.12)
+                drawRect (alongAxis axis (Rect (x + leeway) y thickness h)) (scrollBarTrackColor panel theme)
             when (cdcHovered cdc || cdcPressed cdc) $
               drawStroke (V2 lx ly) (V2 (lx + lw) (ly + lh)) 2 line
         , widgetCursor = Just (\_ _ _ -> if axis == AxisV then UiCursorEwResize else UiCursorNsResize)
@@ -536,6 +610,7 @@ dividerWidget env axis =
   where
     thickness = geThickness env
     leeway = geLeeway env
+    color = pgDividerColor (geCfg env)
 
 -- | The drag indicator and drop-zone highlight, drawn over the grid by its
 -- root container so they stay out of the layout. The indicator is small,
@@ -585,6 +660,7 @@ runGestures env dividers rendered moved zone = do
       pickHit = flip find rendered $ \pane ->
         let v = rpView pane
          in any (`rectHit` mouse) (pvDragPick v)
+              || any (`rectHit` mouse) (rpHandle pane)
               || (pvDraggable v && any (`rectHit` mouse) (M.lookup (rpPaneId pane) (geRegions env)))
   when (pressedIn MouseLeft inp && gsGesture (geState env) == NoGesture && not (any rpControlHit rendered)) $
     case (hitDiv, pickHit) of

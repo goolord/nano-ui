@@ -10,6 +10,7 @@ import Cases.Cache qualified
 import Cases.LayoutReuse qualified
 import Cases.Grid qualified
 import Cases.Caption qualified
+import Cases.PaneGrid qualified
 import Cases.ViewApi qualified
 import Cases.HostDraw qualified
 import Cases.RichText qualified
@@ -66,6 +67,7 @@ main =
     , Cases.Grid.tests
     , Cases.Caption.tests
     , Cases.ViewApi.tests
+    , Cases.PaneGrid.tests
     , Cases.HostDraw.tests
     , Cases.RichText.tests
     , Cases.Shaping.tests

@@ -41,7 +41,7 @@ import NanoUI.Internal.Types (Rect (..), V2 (..), clamp, clamp01, rectH, rectHit
 -- | Divider orientation. 'AxisV' draws a vertical divider (panes left/right),
 -- 'AxisH' draws a horizontal divider (panes stacked top/bottom).
 data GridAxis = AxisV | AxisH
-  deriving (Eq, Ord, Show, Enum, Bounded)
+  deriving (Eq, Ord, Show, Read, Enum, Bounded)
 
 -- | Binary split tree node. Pane and split ids share one monotonic counter.
 data GridNode
@@ -59,7 +59,7 @@ data GridNode
   | Pane
       !Word64
       -- ^ Pane id.
-  deriving (Eq, Show)
+  deriving (Eq, Show, Read)
 
 -- | Result of dropping a dragged pane on a target pane.
 data PaneDrop
