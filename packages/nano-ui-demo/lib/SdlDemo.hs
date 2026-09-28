@@ -33,6 +33,8 @@
 --   * Typography:   label / labelWith + the @font*@ style combinators
 --   * List:         tree, searchInput
 --   * Table:        tableWith (needs useTableSort)
+--   * Tabs:         tabsConfigured: styles, placements, badges, close
+--                   buttons, controls in a header, and a new-tab button
 --   * Panes:        paneGrid
 --   * Plots:        plot, barChart, areaChart, diagram, canvas paths
 --   * Diagnostics:  debug readouts from the SDL backend
@@ -168,6 +170,7 @@ data DemoTab
   | Typography
   | List
   | Table
+  | Tabs
   | Panes
   | Plots
   | Diagnostics
@@ -273,6 +276,13 @@ demoUi = do
   (treeSel, setTreeSel) <- useInt 0 -- tree selection index
   -- Table tab.
   (tableSortVal, setTableSort) <- useTableSort (SortCol 0 SortAsc)
+  -- Tabs tab: the strip's look and placement, the open documents, the
+  -- selected one, and those pinned open.
+  (tabLook, setTabLook) <- useEnum TabContained
+  (tabPlace, setTabPlace) <- useEnum TabTop
+  (docs, setDocs) <- useState [1, 2, 3 :: Int]
+  (activeDoc, setActiveDoc) <- useInt 1
+  (pinned, setPinned) <- useState [1 :: Int]
   -- Panes tab.
   (showPaneHeaders, setShowPaneHeaders) <- useFlag True -- pane headers on/off
   -- Typography tab.
@@ -289,6 +299,10 @@ demoUi = do
   let wideWorkspace = sizeW (inputWindowSize rawInp) >= 1000
       inspectorWidth = if wideWorkspace then fixedW 280 else fillW
       volText = T.pack (show (round vol :: Int))
+      -- The SVG icons, read from disk the first time a tab showing them does.
+      loadIcons = do
+        paths <- liftIO (mapM (\file -> getDataFileName ("data/icons/" <> file <> ".svg")) ["clock", "check", "star", "face"])
+        setIcons . Just =<< liftIO (mapM loadSvg paths)
   let rawDrop = T.intercalate " | " [T.pack (show (dropEventType ev)) <> " " <> dropEventData ev | ev <- toList (inputDrops rawInp)]
   unless (T.null rawDrop) (setDropRaw rawDrop)
 
@@ -518,9 +532,7 @@ demoUi = do
               -- one-colour icon takes the text colour (or a fontColor), and
               -- each size rasterizes once.
               case icons of
-                Nothing -> do
-                  paths <- liftIO (mapM (\file -> getDataFileName ("data/icons/" <> file <> ".svg")) ["clock", "check", "star", "face"])
-                  setIcons . Just =<< liftIO (mapM loadSvg paths)
+                Nothing -> loadIcons
                 Just loaded -> do
                   tint <- themeAccent <$> uiTheme
                   rowWith (tight . gap gapInline . alignMid) $
@@ -676,6 +688,60 @@ demoUi = do
               kv "Sorted by" (tableColumnLabel nextSort)
               kv "Order" (tableSortDirText nextSort)
               kv "Hidden" (tableHiddenLabel (tableHiddenIndices tableResp))
+
+            ----------------------------------------------------- Tabs ---------
+            -- Tabs are controlled: pass the selected key, store the one the
+            -- response returns, and remove a tab yourself when tabClosed
+            -- names it. Only the selected tab's body runs.
+            Tabs -> do
+              heading "Tabs"
+              muted "A middle click also closes a tab. Pinned documents have no close button."
+              -- Two header-only strips pick the look of the one below.
+              let picker current = tabBarConfigured defaultTabsConfig {tabsStyle = TabSegmented} current
+                  choices :: (Show a) => [a] -> [Tab a ()]
+                  choices xs = [tab x (T.drop 3 (T.pack (show x))) () | x <- xs]
+              responsiveRowCol 760 (tight . gap gapInline . fillW) $ do
+                setTabLook =<< demoField "Style" (picker tabLook (choices [minBound .. maxBound]))
+                setTabPlace =<< demoField "Placement" (picker tabPlace (choices [minBound .. maxBound]))
+              when (isNothing icons) loadIcons
+              let star = case icons of
+                    Just [_, _, Right s, _] -> Just s
+                    _ -> Nothing
+                  docName d = case d of
+                    1 -> "Main.hs"
+                    2 -> "Tabs.hs"
+                    3 -> "README.md"
+                    _ -> "Untitled-" <> T.pack (show d) <> ".hs"
+                  -- A control in a header takes its own presses: the star
+                  -- pins a document without selecting it.
+                  pin d = case star of
+                    Nothing -> mempty
+                    Just s -> A.trailing . A.control $ do
+                      theme <- uiTheme
+                      let isPinned = d `elem` pinned
+                          tint = if isPinned then themeAccent theme else themeMuted theme
+                      whenM (styled subtle (buttonContentWith (tight . fixedWH 20 20) (svgIconWith (fixedWH 12 12 . fontColor tint) s))) $
+                        setPinned (if isPinned then filter (/= d) pinned else d : pinned)
+                  docTab d =
+                    (closableTab d (docName d) (muted ("The body of " <> docName d <> ", which runs only while its tab is selected.")))
+                      { tabClosable = d `notElem` pinned
+                      , tabAdornments = pin d
+                      }
+                  problems = (tab 0 "Problems" (muted "Three problems.")) {tabBadge = Just "3"}
+                  -- Actions on the whole strip go after its headers.
+                  fresh = 1 + maximum (3 : docs)
+                  newDoc =
+                    whenM (styled subtle (buttonWith (tight . fixedWH 28 28) "+")) $ do
+                      setDocs (docs <> [fresh])
+                      setActiveDoc fresh
+              tabResp <- tabsConfigured' (TabsConfig tabLook tabPlace newDoc) activeDoc (problems : map docTab docs)
+              setActiveDoc (tabActive tabResp)
+              -- Closing the selected document selects the one before it.
+              for_ (tabClosed tabResp) $ \d -> do
+                let (before, after) = break (== d) docs
+                setDocs (before <> drop 1 after)
+                when (tabActive tabResp == d) $
+                  setActiveDoc (fromMaybe 0 (listToMaybe (reverse before)))
 
             ---------------------------------------------------- Panes ---------
             Panes -> do
