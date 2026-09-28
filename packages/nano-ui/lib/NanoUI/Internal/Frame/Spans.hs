@@ -348,22 +348,38 @@ computeWidgetLabel ctx nt txt si fontSizeVal ax w h
   | otherwise = do
       (source, _, measure) <- resolveFontFor ctx nt fontSizeVal si
       fm <- prepareFontMetrics source txt
-      (tw, th) <- measure txt
+      (tw0, th) <- measure txt
       let (ix, _) = widgetContentInset fm
-          (tx, used) = case nt of
+          plain = nt == NodeButton && not (any (`hasFlag` si) [buttonFlagChoice, buttonFlagRow, buttonFlagTable, buttonFlagMenu])
+          -- The room a plain button's or a select's label has: inside the
+          -- padding layout gave a centred label, all of the box beside
+          -- adornments, and short of a select's chevron.
+          room
+            | nt == NodeSelect = w - ix - selectChevronReserve
+            | ax /= AlignCenter = w
+            | hasFlag buttonFlagTab si = w - 2 * tabHeaderPadX
+            | otherwise = w - fst (buttonPadding fm)
+      -- A label longer than that ends in an ellipsis.
+      (label, tw) <-
+        if (plain || nt == NodeSelect) && tw0 > room + 0.5
+          then do
+            cut <- truncateTextIO (fmap fst . measure) room txt
+            (cut,) . fst <$> measure cut
+          else pure (txt, tw0)
+      let (tx, used) = case nt of
             NodeButton
               | hasFlag buttonFlagChoice si -> (checkboxLeading fm, tw)
               | hasFlag buttonFlagRow si ->
                   let (depth, _, _) = treeDecodeStyle si
                    in (treeRowLeading fm depth, tw)
-              | hasFlag buttonFlagTable si -> alignedTextPen ax 0 w tableCellInset fm txt
+              | hasFlag buttonFlagTable si -> alignedTextPen ax 0 w tableCellInset fm label
               | hasFlag buttonFlagMenu si ->
                   let inset = menuItemPadX + ix
                    in (inset, min tw (max 0 (w - inset - ix)))
-              | otherwise -> alignedTextPen ax 0 w 0 fm txt
+              | otherwise -> alignedTextPen ax 0 w 0 fm label
             -- A select, the other widget with a centred label.
             _ -> (ix, min tw (w - ix - selectChevronReserve))
-      let !placement = WidgetTextPlacement txt tx (centeredTextY fm 0 h th) used th
+      let !placement = WidgetTextPlacement label tx (centeredTextY fm 0 h th) used th
       pure (Just placement)
 
 -- | Pure geometry of selectable text: the pen origin, centered baseline box and

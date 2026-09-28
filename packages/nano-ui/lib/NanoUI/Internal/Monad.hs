@@ -36,6 +36,7 @@ module NanoUI.Internal.Monad
   , uiFontSize
   , resolveFontUi
   , lineWidthUi
+  , truncateTextUi
   , uiTime
   , uiTheme
   , setUiTheme
@@ -125,7 +126,7 @@ import Effectful.Dispatch.Static
 import GHC.Clock (getMonotonicTime)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Draw.Types (TextFont (..))
-import NanoUI.Internal.Font (FontMetrics, lineWidthIO)
+import NanoUI.Internal.Font (FontMetrics, lineWidthIO, truncateTextIO)
 import NanoUI.Internal.Frame.Node (resolveTextFont)
 import NanoUI.Internal.Id hiding (currentId)
 import NanoUI.Internal.Layout.Arena (arenaCount, getArenaScope, setArenaScope)
@@ -348,6 +349,17 @@ resolveFontUi size weight style variant =
 -- so it is right for metrics that have not drawn this text yet.
 lineWidthUi :: FontMetrics -> Text -> NanoUI Float
 lineWidthUi fm txt = liftIO (lineWidthIO fm txt)
+
+-- | One line of text cut to fit @maxW@ logical pixels in these metrics,
+-- ending in @...@ when it was cut; the text as it is when it fits. Too
+-- narrow for the dots, it is cut without them. Buttons and selects cut
+-- their labels this way themselves, and so does a single-line label with
+-- 'fillW' or 'maxW' in a row.
+--
+-- > fm <- uiFontMetrics
+-- > name <- truncateTextUi fm 120 (trackName t)
+truncateTextUi :: FontMetrics -> Float -> Text -> NanoUI Text
+truncateTextUi fm maxW txt = liftIO (truncateTextIO (lineWidthIO fm) maxW txt)
 
 {-# INLINE uiTime #-}
 -- | Monotonic seconds from an unspecified epoch. Subtract two readings to

@@ -40,6 +40,7 @@ module NanoUI.Monad
   , uiFontSize
   , resolveFontUi
   , lineWidthUi
+  , truncateTextUi
   , uiTheme
   , setUiTheme
   , styled

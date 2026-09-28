@@ -217,6 +217,10 @@ module NanoUI
   , checkbox'
   , checkboxWith
   , checkboxWith'
+  , toggleButton
+  , toggleButton'
+  , toggleButtonWith
+  , toggleButtonWith'
   , radio
   , radio'
   , boundedRadio
@@ -459,6 +463,7 @@ module NanoUI
   , FontMetrics (fmLineHeight, fmAscent)
   , lineWidth
   , lineWidthUi
+  , truncateTextUi
   , uiFontMetrics
   , uiFontSize
   , resolveFontUi
@@ -861,6 +866,11 @@ module NanoUI
   , Size (..)
   , Color (..)
   , colorRGBA
+  , colorRGB
+  , withAlpha
+  , colorWhite
+  , colorBlack
+  , colorTransparent
   , colorToWord32
   , colorLuminance
   , colorR

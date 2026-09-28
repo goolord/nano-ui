@@ -6,6 +6,11 @@ module NanoUI.Internal.Types
   , Size (..)
   , Color (..)
   , colorRGBA
+  , colorRGB
+  , withAlpha
+  , colorWhite
+  , colorBlack
+  , colorTransparent
   , colorToWord32
   , colorR
   , colorG
@@ -93,6 +98,25 @@ colorRGBA r g b a =
       .|. (fromIntegral g `shiftL` 16)
       .|. (fromIntegral b `shiftL` 8)
       .|. fromIntegral a
+
+-- | An opaque colour from red, green and blue channels.
+{-# INLINE colorRGB #-}
+colorRGB :: Word8 -> Word8 -> Word8 -> Color
+colorRGB r g b = colorRGBA r g b 255
+
+-- | The colour with its alpha set to @a@, from 0 (transparent) to 1
+-- (opaque); values outside that range are clamped.
+--
+-- > withAlpha (themeAccent theme) 0.25
+{-# INLINE withAlpha #-}
+withAlpha :: Color -> Float -> Color
+withAlpha (Color w) a = Color ((w .&. 0xFFFFFF00) .|. fromIntegral (round (255 * max 0 (min 1 a)) :: Int))
+
+-- | Opaque white, black, and fully transparent black.
+colorWhite, colorBlack, colorTransparent :: Color
+colorWhite = Color 0xFFFFFFFF
+colorBlack = Color 0x000000FF
+colorTransparent = Color 0
 
 -- | The packed @0xRRGGBBAA@ representation.
 {-# INLINE colorToWord32 #-}

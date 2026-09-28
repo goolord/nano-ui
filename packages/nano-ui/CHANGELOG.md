@@ -84,6 +84,12 @@
   go to the controls. It replaces a `pvDragPick` rect placed by hand.
 - `pgDividerColor` on `PaneGridConfig`: the colour of the gutters between
   panes, without restyling `themeSeparator` for everything inside the grid.
+- `toggleButton` and its variants: a button that stays pressed, filled in
+  a `Tone`'s colour while on, for mute and solo buttons and the like.
+- `truncateTextUi`: one line of text cut to a width, ending in `...`, for a
+  drawing that shows a label buttons would cut.
+- `colorRGB`, `withAlpha`, which sets a colour's alpha from 0 to 1, and
+  `colorWhite`, `colorBlack` and `colorTransparent`.
 - `pgFocusable` on `PaneGridConfig`: off, the grid is no Tab stop and its
   arrow, `m`, `x` and Escape keys do nothing, for a grid whose panes own the
   keyboard.
@@ -960,6 +966,9 @@
 
 ### Fixed
 
+- A button or select narrower than its label ends the label in `...`
+  inside its padding, and a select's label stops short of its chevron. The
+  label ran past the widget, and under a select's chevron.
 - Padding given to a pane grid through `pgLayout` insets its panes. The
   grid laid its split out over its whole rect, so the rects it hit-tested,
   drew drop zones in and handed panes as `pgcRect` were shifted and larger

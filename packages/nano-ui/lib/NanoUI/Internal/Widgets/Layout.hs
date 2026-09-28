@@ -183,6 +183,11 @@ label' :: Text -> NanoUI Response
 label' = labelWith' id
 
 -- | 'label' with a layout modifier, for example @labelWith fontMono@.
+--
+-- A label wider than its room wraps in a column. In a row, a single-line
+-- label with 'fillW' or 'maxW' instead ends in @...@ where it is cut, so
+-- @labelWith fillW name@ beside a row's buttons gives the name what they
+-- leave. 'truncateTextUi' cuts text the same way for a drawing.
 {-# INLINE labelWith #-}
 labelWith :: (Layout -> Layout) -> Text -> NanoUI ()
 labelWith f txt = void (labelWith' f txt)
