@@ -18,7 +18,7 @@ module NanoUI.Sdl.Internal.Window
   ) where
 
 import Control.Concurrent (rtsSupportsBoundThreads, runInBoundThread)
-import Control.Exception (IOException, catch)
+import Control.Exception (IOException, bracket, catch)
 import Control.Monad (mfilter, unless, void, when)
 import Control.Monad.IO.Class (liftIO)
 import Data.Acquire (Acquire, mkAcquire)
@@ -624,14 +624,13 @@ withSdlClipboard ctx = withClipboard ctx readClipboard writeClipboard
 -- its retained texture, since SDL leaves the window backbuffer undefined
 -- after a present; a direct-to-window session reads the backbuffer.
 saveScreenshot :: SdlEnv -> FilePath -> IO Bool
-saveScreenshot env path = do
-  surface <- readFrame env . retainTexture =<< readIORef (sdlRetain env)
-  if surface == nullPtr
-    then pure False
-    else withCString path $ \cpath -> do
-      ok <- saveBMP surface (PtrConst.unsafeFromPtr cpath)
-      destroySurface surface
-      pure ok
+saveScreenshot env path =
+  bracket
+    (readFrame env . retainTexture =<< readIORef (sdlRetain env))
+    destroySurface $ \surface ->
+    if surface == nullPtr
+      then pure False
+      else withCString path (saveBMP surface . PtrConst.unsafeFromPtr)
 
 -- | The last presented frame, as 'NanoUI.requestScreenshot' returns it:
 -- window pixels (logical size times display scale) with the drawn alpha,
@@ -649,25 +648,27 @@ captureScreenshot env = do
 -- | The frame's pixels from the retained texture, or from the window
 -- backbuffer when the target is null (valid only before presenting).
 captureFrame :: SdlEnv -> Ptr SDL_Texture -> IO (Maybe RgbaPixels)
-captureFrame env target = do
-  surface <- readFrame env target
-  if surface == nullPtr
+captureFrame env target = bracket converted destroySurface $ \rgba ->
+  if rgba == nullPtr
     then pure Nothing
     else do
-      rgba <- convertSurface surface Pixels.SDL_PIXELFORMAT_RGBA32
-      destroySurface surface
-      if rgba == nullPtr
-        then pure Nothing
-        else do
-          Surface.SDL_Surface _ _ sw sh pitch pixels _ _ <- peek rgba
-          let w = fromIntegral sw
-              h = fromIntegral sh
-              rowBytes = w * 4
-          bytes <- BSI.create (h * rowBytes) $ \dst ->
-            for_ [0 .. h - 1] $ \y ->
-              copyBytes (dst `plusPtr` (y * rowBytes)) (castPtr pixels `plusPtr` (y * fromIntegral pitch)) rowBytes
-          destroySurface rgba
-          pure (rgbaPixels w h bytes)
+      Surface.SDL_Surface _ _ sw sh pitch pixels _ _ <- peek rgba
+      let
+        w = fromIntegral sw
+        h = fromIntegral sh
+        rowBytes = w * 4
+      bytes <- BSI.create (h * rowBytes) $ \dst ->
+        for_ [0 .. h - 1] $ \y ->
+          copyBytes
+            (dst `plusPtr` (y * rowBytes))
+            (castPtr pixels `plusPtr` (y * fromIntegral pitch))
+            rowBytes
+      pure (rgbaPixels w h bytes)
+ where
+  converted = bracket (readFrame env target) destroySurface $ \surface ->
+    if surface == nullPtr
+      then pure nullPtr
+      else convertSurface surface Pixels.SDL_PIXELFORMAT_RGBA32
 
 -- | Read the used area of the retained texture, or the backbuffer for a null
 -- target, into a new surface. Null on failure.
