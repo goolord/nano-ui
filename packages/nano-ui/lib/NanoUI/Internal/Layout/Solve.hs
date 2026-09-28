@@ -782,17 +782,11 @@ measureScrollContainer env@SolveEnv {seArena = na, seArrays = a} idx = do
           _ -> contentH
       cfg = decodeScrollConfig si
       fitGutterW
-        | wTag == SizingGrow || wTag == SizingFixed = 0
-        | isScrollStyle2D si = 0
-        | otherwise =
-            case dir of
-              DirColumn -> scrollAxisGutter (scrollPolicyY cfg) slot (padR pad) contentH assignedInnerH
-              DirRow -> 0
+        | wTag == SizingGrow || wTag == SizingFixed || isScrollStyle2D si || dir == DirRow = 0
+        | otherwise = scrollAxisGutter (scrollPolicyY cfg) slot (padR pad) contentH assignedInnerH
   if isScrollStyle2D si
-    then do
-      setSolvedValue na idx contentH
-      setScrollContentW na idx contentW
-    else setSolvedValue na idx (case dir of DirColumn -> contentH; DirRow -> contentW)
+    then setSolvedValue na idx contentH >> setScrollContentW na idx contentW
+    else setSolvedValue na idx (if dir == DirColumn then contentH else contentW)
   setRect na idx 0 0 (sizeWithin wAx (contentW + padX + fitGutterW)) (sizeWithin hAx (contentH + padY))
 
 foldChildDimsFromParent :: SolveEnv -> NodeIdx -> DirTag -> Float -> IO (Float, Float)
@@ -1165,9 +1159,8 @@ positionNode env@SolveEnv {seArena = na, seArrays = a} !depth !idx (Rect x y ava
   if isContainerNode nt
     then do
       (pad, gap, dir) <- containerFlow a idx
-      if isScrollNode nt
-        then positionScrollChildren env depth idx dir gap pad (Rect x y w h)
-        else positionChildren env depth idx dir gap pad (Rect x y w h)
+      (if isScrollNode nt then positionScrollChildren else positionChildren)
+        env depth idx dir gap pad (Rect x y w h)
     else do
       kids <- readTree a idx TreeFirstChild
       when (kids >= 0) $ positionAdornments env depth idx nt (Rect x y w h)
@@ -1213,10 +1206,7 @@ positionScrollChildren env@SolveEnv {seArena = na} depth idx dir gap pad (Rect p
   si <- getStyleIdx na idx
   contentSize <- getNodeValue na idx
   slot <- scrollBarSlotOf na idx
-  let cx = px + padL pad
-      cy = py + padT pad
-      innerW = pw - padL pad - padR pad
-      innerH = ph - padT pad - padB pad
+  let Rect cx cy innerW innerH = padContentClip px py pw ph pad
       cfg = decodeScrollConfig si
   if isScrollStyle2D si
     then do
@@ -1324,20 +1314,17 @@ positionChildren env@SolveEnv {seArrays = a} depth idx dir gap pad (Rect px py p
   minColW <- readStyle a idx StyleGridMinColW
   flow <- readTagEnum a idx TagFlow
   let chrome = isChromeColumn nt dir
-      cx = px + padL pad
-      cy = py + padT pad
-      cw = pw - padL pad - padR pad
-      ch = ph - padT pad - padB pad
+      cbox = padContentClip px py pw ph pad
   if gCols > 0 || minColW > 0
-    then positionGrid env depth idx gCols minColW gap (Rect cx cy cw ch)
+    then positionGrid env depth idx gCols minColW gap cbox
     else case flow of
       -- Layered children are placed with the pinned ones, below.
       Layered -> pure ()
-      Wrap -> positionWrap env depth idx dir gap (Rect cx cy cw ch)
+      Wrap -> positionWrap env depth idx dir gap cbox
       Line -> case dir of
-        DirRow -> positionRowFromParent env depth idx gap (Rect cx cy cw ch)
-        DirColumn -> positionColumn env depth idx gap chrome Nothing px pw (Rect cx cy cw ch)
-  positionLayered env depth idx (flow == Layered) (Rect cx cy cw ch)
+        DirRow -> positionRowFromParent env depth idx gap cbox
+        DirColumn -> positionColumn env depth idx gap chrome Nothing px pw cbox
+  positionLayered env depth idx (flow == Layered) cbox
 
 childRowCrossSize :: NodeArena -> NodeIdx -> Float -> IO Float
 childRowCrossSize na ci availCross = do
