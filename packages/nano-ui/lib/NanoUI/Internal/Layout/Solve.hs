@@ -380,10 +380,7 @@ measureContent env@SolveEnv {seArena = na} idx = do
     NodeBox -> measureImage na idx Nothing
     NodeDrawing -> do
       wid <- getWidgetId na idx
-      mFn <- msLookupMeasure (seMs env) wid
-      case mFn of
-        Just fn -> measureCustomNode env fn idx
-        Nothing -> measureImage na idx Nothing
+      msLookupMeasure (seMs env) wid >>= maybe (measureImage na idx Nothing) (\fn -> measureCustomNode env fn idx)
     _
       | isContainerNode nt -> do
           measureContainer env idx
@@ -538,9 +535,7 @@ measureSpacer na idx = do
 measureSeparator :: NodeArena -> NodeIdx -> IO ()
 measureSeparator na idx = do
   dir <- getDirection na idx
-  case dir of
-    DirRow -> setRect na idx 0 0 1 20
-    DirColumn -> setRect na idx 0 0 20 1
+  setRect na idx 0 0 (if dir == DirRow then 1 else 20) (if dir == DirRow then 20 else 1)
 
 -- | A label beside a box or marker: the label, @leading@ and the padding
 -- @pad@ wide, and as tall as the label or the box, plus the padding.
@@ -1237,20 +1232,17 @@ positionScrollChildren env@SolveEnv {seArena = na} depth idx dir gap pad (Rect p
     else do
       let gutterCol = scrollAxisGutter (scrollPolicyY cfg) slot (padR pad) contentSize innerH
           gutterRow = scrollAxisGutter (scrollPolicyX cfg) slot (padB pad) contentSize innerW
-      case dir of
+      box <- case dir of
         DirRow -> do
           wTag <- axTag <$> getWidthSizing na idx
-          let rowMain =
-                if wTag == SizingGrow
-                  then max contentSize (innerW - gutterRow)
-                  else contentSize
-              box = Rect cx cy rowMain (innerH - gutterRow)
-          positionRowFromParent env depth idx gap box
-          positionLayered env depth idx False box
+          let rowMain = if wTag == SizingGrow then max contentSize (innerW - gutterRow) else contentSize
+              b = Rect cx cy rowMain (innerH - gutterRow)
+          b <$ positionRowFromParent env depth idx gap b
         DirColumn -> do
           let viewW = innerW - gutterCol
-          positionColumn env depth idx gap False (Just contentSize) cx viewW (Rect cx cy viewW innerH)
-          positionLayered env depth idx False (Rect cx cy viewW innerH)
+              b = Rect cx cy viewW innerH
+          b <$ positionColumn env depth idx gap False (Just contentSize) cx viewW b
+      positionLayered env depth idx False box
   fc <- getFirstChild na idx
   when (fc >= 0) $ do
     let step (FlowAcc count maxB maxR) ci = do
