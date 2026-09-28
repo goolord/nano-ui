@@ -22,6 +22,7 @@ tests =
   , spec "rich-text-resize" runRichTextResizeTest
   , spec "rich-text-capped" runRichTextCappedTest
   , spec "rich-text-same-pieces" runRichTextSamePiecesTest
+  , spec "rich-text-scroll-popup" runRichTextScrollPopupTest
   ]
 
 -- | A paragraph wraps at its column's width, taking a line's height per line,
@@ -259,3 +260,43 @@ runRichTextSamePiecesTest ctx failed = do
   dark <- colorsOf defaultTheme id
   light <- colorsOf defaultLightTheme id
   assert failed (length dark == 1 && dark /= light)
+
+-- | A scroll area in a fixed-width popup is as tall as its paragraphs wrap to
+-- at the popup's width, as a column with the same padding is: paragraphs well
+-- under the popup's height cap show whole, with nothing left to scroll to.
+-- The paragraphs sit in the scroll area directly and in a column inside it.
+-- Paragraphs that do not fit under the cap leave the scroll area inside the
+-- popup, scrolling the rest.
+runRichTextScrollPopupTest :: Context -> IORef Int -> IO ()
+runRichTextScrollPopupTest _ failed = do
+  let inp = withInput 800 800
+      cfg = (defaultPopupConfig (AnchorPoint (V2 20 20))) {cfgPlacement = PlacementBelow, cfgDismissable = False}
+      paragraph = [inlineText (T.replicate 60 "word ")]
+      body = do
+        one <- fst <$> richTextWith' (tight . fillW . fontMono) ["word"]
+        _ <- richTextWith' (tight . fillW . fontMono) paragraph
+        b <- fst <$> richTextWith' (tight . fillW) paragraph
+        pure (rectH (respRect one), respRect b)
+      -- The popup's rect and the body's result, laid out from the start.
+      inPopup inner = do
+        c <- newContext
+        (resp, r) <- warmup2 c inp (popupWith True cfg (fixedW 560 . maxH 420) inner)
+        pure (c, respRect resp, r)
+      bottom r = rectY r + rectH r
+  (_, columnPopup, Just (lineH, wrapped)) <- inPopup (columnWith fillW body)
+  -- Each paragraph wraps to several lines at the popup's width, and all of
+  -- them together stay under its cap.
+  assert failed (rectH wrapped >= 3 * lineH)
+  assert failed (rectH columnPopup < 400)
+  forM_ [id, columnWith (tight . fillW)] $ \holder -> do
+    (c, scrollPopup, Just (sid, (_, last'))) <- inPopup (scrollArea fillW (holder body))
+    assertEq failed (round (rectH columnPopup) :: Int) (round (rectH scrollPopup))
+    assertJustM failed (getPrevRect c sid) $ \view ->
+      assert failed (bottom last' <= bottom view + 0.5)
+  (c, cappedPopup, Just (sid, rects)) <- inPopup (scrollArea fillW (replicateM 4 body))
+  assertEq failed 420 (round (rectH cappedPopup) :: Int)
+  assertJustM failed (getPrevRect c sid) $ \view -> do
+    let last' = snd (last rects)
+    -- Inside the popup and its padding, with more below than it shows.
+    assert failed (rectH view > 0 && bottom view <= bottom cappedPopup - 6 + 0.5)
+    assert failed (bottom last' > bottom view)

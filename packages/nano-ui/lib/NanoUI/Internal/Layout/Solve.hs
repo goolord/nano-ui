@@ -765,9 +765,8 @@ measureScrollContainer env@SolveEnv {seArena = na, seArrays = a} idx = do
   let padX = padL pad + padR pad
       padY = padT pad + padB pad
   si <- getStyleIdx na idx
-  wAx@(AxisSizing wTag _ _ _) <- getWidthSizing na idx
-  hAx@(AxisSizing hTag hVal _ _) <- getHeightSizing na idx
-  (contentW, contentH) <- foldChildDimsFromParent env idx dir gap
+  wAx@(AxisSizing wTag wVal _ wMax) <- getWidthSizing na idx
+  hAx@(AxisSizing hTag hVal _ hMax) <- getHeightSizing na idx
   parent <- getParent na idx
   -- A modal's body scrolls like a window's: its bar sits just inside the
   -- panel's edge, out in the panel padding.
@@ -775,14 +774,52 @@ measureScrollContainer env@SolveEnv {seArena = na, seArrays = a} idx = do
     if parent < 0 then pure False else (`elem` [NodeWindow, NodeModal]) <$> getNodeType na parent
   inPanel <- hasPanelAncestor na parent
   let slot = classifyScrollBar isWin (wTag == SizingGrow && hTag == SizingGrow && not inPanel)
+      cfg = decodeScrollConfig si
+      vertical = not (isScrollStyle2D si) && dir == DirColumn
+      fitsContent = wTag == SizingFit || wTag == SizingShrink
   writeTagEnum a idx TagScrollBarSlot slot
+  -- A vertical scroller measures its children at the width it lays them out
+  -- at, so what wraps there counts at its wrapped height. A column refits its
+  -- children when it places them and grows to them; a scroller does not grow,
+  -- so its measured height has to hold them already. The width is its own,
+  -- or else the most its nearest bounded ancestor leaves it
+  -- ('findAncestorMaxW'), and no more than its content when it fits its
+  -- width to that. The bar's gutter comes off it when the content at its
+  -- full width overflows the scroller's own height cap. A child with a
+  -- percentage height keeps its measured height, since the scroller's height
+  -- is not known yet.
+  bound <-
+    if not vertical
+      then pure 1e9
+      else if wTag == SizingFixed
+        then pure wVal
+        else (\w -> min wMax (if wTag == SizingPercent then w * wVal / 100 else w)) <$> findAncestorMaxW na idx
+  (contentW, contentH) <-
+    if bound >= 1e8 && not (vertical && fitsContent)
+      then foldChildDimsFromParent env idx dir gap
+      else do
+        naturalW <- if fitsContent then fst <$> foldChildDimsFromParent env idx dir gap else pure 1e9
+        let viewAt gutter = min naturalW (max 0 (bound - padX - gutter))
+            stackAt viewW = do
+              let step (FlowAcc count maxW sumH) ci = do
+                    pct <- (== SizingPercent) . axTag <$> getHeightSizing na ci
+                    (w, h) <-
+                      if pct
+                        then (\(Rect _ _ mw mh) -> (mw, mh)) <$> getNodeRect na ci
+                        else flowChildSize env True viewW 0 ci
+                    pure (FlowAcc (count + 1) (max maxW w) (sumH + h))
+              FlowAcc count maxW sumH <- foldFlowChildrenM na idx step (FlowAcc 0 0 0)
+              pure (maxW, sumH + gap * fromIntegral (max 0 (count - 1)))
+        full@(_, fullH) <- stackAt (viewAt 0)
+        let capH = (if hTag == SizingFixed then hVal else hMax) - padY
+            narrowed = viewAt (scrollAxisGutter (scrollPolicyY cfg) slot (padR pad) fullH capH)
+        if narrowed /= viewAt 0 then stackAt narrowed else pure full
   let assignedInnerH =
         case hTag of
           SizingFixed -> max 0 (hVal - padY)
           _ -> contentH
-      cfg = decodeScrollConfig si
       fitGutterW
-        | wTag == SizingGrow || wTag == SizingFixed || isScrollStyle2D si || dir == DirRow = 0
+        | not vertical || wTag == SizingGrow || wTag == SizingFixed = 0
         | otherwise = scrollAxisGutter (scrollPolicyY cfg) slot (padR pad) contentH assignedInnerH
   if isScrollStyle2D si
     then setSolvedValue na idx contentH >> setScrollContentW na idx contentW
@@ -1623,8 +1660,22 @@ distributeScratch na n avail gapSum horizontal = do
           when (gf > 0) $ writePrimArray out i (max 0 (free * gf / gfSum))
     else when (slack < -0.001) $ do
       -- Shrink children by factor to make up the shortfall, none below its
-      -- minimum ('shrinkScratch'). 'fsGrow' holds the factors.
-      forUpTo_ n $ \i -> sizingAt i >>= writePrimArray gfArr i . shrinkFactor
+      -- minimum ('shrinkScratch'). 'fsGrow' holds the factors. A scroll
+      -- container that fits its content along the axis it scrolls gives
+      -- space back like a grow child, and scrolls the rest: a scroll area in
+      -- a popup capped by 'maxH' keeps within the cap.
+      forUpTo_ n $ \i -> do
+        ci <- readPrimArray idxArr i
+        ax <- readAxisSizing a ci horizontal
+        scrolls <-
+          if axTag ax /= SizingFit
+            then pure False
+            else do
+              nt <- readTagEnum a ci TagNodeType
+              si <- readTree a ci TreeStyleIdx
+              dir <- readTagEnum a ci TagDirection
+              pure (nt == NodeScrollContainer && (isScrollStyle2D si || (dir == DirRow) == horizontal))
+        writePrimArray gfArr i (if scrolls then 1 else shrinkFactor ax)
       let minCol = if horizontal then StyleMinW else StyleMinH
       shrinkScratch out gfArr (\i -> readPrimArray idxArr i >>= \ci -> readStyle a ci minCol) n (negate slack)
 
@@ -1674,7 +1725,8 @@ shrinkFactor (AxisSizing tag val _ _) =
     -- should height percent ever be sized that way.
     SizingPercent -> 1
     -- Fit stays content-sized. A pinned header must not squash when a Grow
-    -- sibling (page scroll) is taller than the window.
+    -- sibling (page scroll) is taller than the window. 'distributeScratch'
+    -- shrinks a fit scroll container along the axis it scrolls all the same.
     _ -> 0
 
 -- One sweep: sum content of non-grow + already-locked children (factor 0) and

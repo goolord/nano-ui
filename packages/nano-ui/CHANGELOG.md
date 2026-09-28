@@ -996,6 +996,15 @@
 
 ### Fixed
 
+- A vertical scroll area measures what it holds at the width it lays it out
+  at, its own or the most its nearest bounded ancestor leaves it. Rich text
+  that wraps there counted at its unwrapped height, so a scroll area in a
+  fixed-width popup came out short and scrolled the end of a wrapped
+  paragraph out of sight.
+- A scroll area that fits its content along the axis it scrolls gives space
+  back when its column or row is short of it, and scrolls the rest. In a
+  popup capped by `maxH` it kept its content's height and ran past the
+  popup's edge, where the end could not be scrolled to.
 - A button or select narrower than its label ends the label in `...`
   inside its padding, and a select's label stops short of its chevron. The
   label ran past the widget, and under a select's chevron.
