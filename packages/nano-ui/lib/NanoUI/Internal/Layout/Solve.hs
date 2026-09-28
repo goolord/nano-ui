@@ -613,6 +613,7 @@ measureWidget env@SolveEnv {seArena = na, seArrays = a, seMs = Measurers {msFm =
                 (padX, padY)
                   | nt /= NodeButton = widgetPadding fm
                   | hasFlag buttonFlagTable si = (2 * tableCellInset, 0)
+                  | hasFlag buttonFlagTab si = (2 * tabHeaderPadX, snd (buttonPadding fm))
                   -- Menu rows reserve the same gutter the text-field context
                   -- menu paints (outer pad + item pad on each side of the
                   -- label), so the generic popup panel sizes identically.
@@ -639,7 +640,9 @@ measureAdorned SolveEnv {seArena = na, seArrays = a} measurer@TextMeasurer {tmMe
        in pure (rawW + lw + tw + gap * sides, max rawH (rowH + rawH - fmLineHeight fm))
     _ -> do
       (labelW, groupW) <- adornedButtonGroup measurer txt gap rows
-      let (padX, padY) = buttonPadding fm
+      let (padX, padY)
+            | hasFlag buttonFlagTab si = (2 * tabHeaderPadX, snd (buttonPadding fm))
+            | otherwise = buttonPadding fm
           sidePad = if labelW > 0 || hasFlag buttonFlagContent si then padX else padY
       pure (groupW + sidePad, max rawH (rowH + padY))
 
@@ -667,7 +670,10 @@ positionAdornments env@SolveEnv {seArena = na, seArrays = a} depth idx nt (Rect 
       gap <- readStyle a idx StyleGap
       txt <- getText na idx
       (_, groupW) <- adornedButtonGroup measurer txt gap rows
-      let x0 = alignX AlignCenter x w groupW
+      si <- getStyleIdx na idx
+      let x0
+            | nt == NodeButton && tabLabelAtStart si = x + tabHeaderPadX
+            | otherwise = alignX AlignCenter x w groupW
       pure (x0, x0 + groupW)
   let place ci cx cw = when (ci >= 0) $ do
         ch <- readGeom a ci GeomH

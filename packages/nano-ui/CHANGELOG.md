@@ -16,6 +16,11 @@
   `leading` or `trailing` and combine with `<>`. Adornments move no other
   widget's id.
 - `buttonContent` and its variants: a button whose content is any view.
+- Tab headers take adornments (`tabAdornments`): icons, texts and views
+  beside the title, in the header's label colour, and controls such as a pin
+  button, whose presses neither select nor close the tab. `tabsTrailing` on
+  `TabsConfig` draws a view after the headers, such as a button that opens a
+  new tab.
 - A scrollbar's thumb brightens while the pointer is on the bar or dragging
   it, on scrollers, text areas and combo dropdowns. The colour,
   `scrollBarThumbHoverColor`, comes from the same surface style as the
@@ -507,6 +512,19 @@
 
 ### Changed
 
+- Tab strips are redrawn. `TabUnderline` headers sit on a rule, the
+  selected one marked by an accent bar on it. `TabSegmented` headers sit in a
+  rounded track, the selected one raised out of it. `TabContained` draws
+  folder tabs: the selected header opens onto a bordered body, which `tabs`
+  draws round the tab's content. Inactive labels are muted, and headers fill
+  faintly on hover. A header's close button and badge are drawn inside it,
+  the badge as a pill rather than a count in brackets, and a close button
+  fills round its cross on hover. The headers of a vertical strip share its
+  width and start their labels at their padding. Headers are 30 pixels tall
+  with 12 pixels either side of their content, a disabled tab is drawn
+  faded, and the paging arrows of a strip that overflows are subtle buttons.
+- `TabsConfig` has no `Eq` instance, as it holds a view, and `Tab` gains a
+  field before `tabBody`.
 - The wake action installed with `setWakeLoop` runs once for a run of wakes
   until the loop takes them, and not for dirty marks made on the thread
   running `runSessionLoop`, so a backend's action needs no coalescing or
@@ -931,6 +949,10 @@
 
 ### Fixed
 
+- A strip with `TabBottom` or `TabRight` is drawn below or right of the
+  body it selects. It was drawn above or left of it, as `TabTop` and
+  `TabLeft` are. The body comes first, so the headers show the key passed in
+  until the caller passes the new one.
 - A wake with no wake action installed no longer holds back the wakes after
   it until other input arrives.
 - A view that paints the window state (`askWindow`), such as a colour on

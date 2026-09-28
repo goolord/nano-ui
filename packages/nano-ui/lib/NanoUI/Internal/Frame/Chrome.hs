@@ -16,6 +16,8 @@ module NanoUI.Internal.Frame.Chrome
   , paintMenuAccent
   , paintScrollBars
   , paintTabHeader
+  , paintTabChrome
+  , tabHeaderVisualStyle
   , paintTableHeader
   ) where
 
@@ -25,13 +27,13 @@ import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import NanoUI.Internal.Context
-import NanoUI.Internal.Draw (DrawArena, pushRect, pushRoundedRect, pushRoundedStroke)
+import NanoUI.Internal.Draw (DrawArena, pushRect, pushRoundedRect, pushRoundedStroke, withClip)
 import NanoUI.Internal.Frame.Scroll.Geometry (ScrollBarLayout (..))
 import NanoUI.Internal.Id (WidgetId, hashWidgetId)
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Store (fieldInt, fieldText, findSlot)
 import NanoUI.Internal.Style
-import NanoUI.Internal.Types (Color (..), Rect (..), clamp, colorA, colorRGBA, lerpColor)
+import NanoUI.Internal.Types (Color (..), Rect (..), clamp, colorA, colorLuminance, colorRGBA, lerpColor)
 import NanoUI.Internal.WidgetText
 
 floatingAncestor :: Context -> NodeIdx -> IO (Maybe NodeType)
@@ -97,34 +99,50 @@ closeButtonStyle theme hotT =
       muted = lerpColor (styleFg btn) (styleBg (themePanel theme)) 0.42
    in (clearStyle btn) {styleFg = lerpColor muted (styleFg btn) hotT}
 
+-- | A tab header's surface for packed tab style @packed@ ('tabDecodeStyle').
+-- Fills are the label colour at a low alpha where they can, so a strip reads
+-- the same on a panel, a card or the window. The label is muted until the
+-- tab is selected.
 tabHeaderVisualStyle :: Theme -> Int -> Bool -> Style
-tabHeaderVisualStyle theme styleIdx isActive =
+tabHeaderVisualStyle theme packed isActive =
   let panel = themePanel theme
-      btn = themeButton theme
-      muted = themeMuted theme
+      fg = styleFg panel
+      idle = lerpColor (themeMuted theme) fg 0.35
+      clear = fadeAlpha fg 0
       accent = themeAccent theme
-      hoverLift = lerpColor (themeWindow theme) (styleHoverBg btn) 0.55
-      (cr, activeBg, activeFg, activeBw, inactFg) = case styleIdx of
-        1 -> (6, accent, themeOnAccent theme, 0, muted)
-        2 -> (8, styleBg panel, styleFg panel, 1, muted)
-        _ -> (6, styleBg panel, styleFg panel, 1, lerpColor muted (styleFg panel) 0.78)
-   in if isActive
-        then panel
-          { styleBg = activeBg
-          , styleHoverBg = activeBg
-          , styleFg = activeFg
-          , styleBorder = activeBg
-          , styleBorderWidth = activeBw
-          , styleCornerRadius = cr
-          }
-        else panel
-          { styleBg = transparentColor
-          , styleHoverBg = hoverLift
-          , styleFg = inactFg
-          , styleBorder = transparentColor
+      raised = tabRaisedColor theme
+      flat c = panel {styleBg = c, styleHoverBg = c, styleActiveBg = c, styleBorderWidth = 0, styleBorder = clear}
+      quiet tint =
+        panel
+          { styleBg = fadeAlpha fg tint
+          , styleHoverBg = fadeAlpha fg (tint + 16)
+          , styleActiveBg = fadeAlpha fg (tint + 28)
+          , styleFg = idle
+          , styleBorder = clear
           , styleBorderWidth = 0
-          , styleCornerRadius = cr
           }
+      radius s r = s {styleCornerRadius = r}
+   in case (fst (tabDecodeStyle packed), isActive) of
+        (1, True) -> radius ((flat accent) {styleFg = themeOnAccent theme}) tabPillRadius
+        (1, False) -> radius (quiet 0) tabPillRadius
+        (2, True) -> radius ((flat raised) {styleBorder = styleBorder (themeButton theme), styleBorderWidth = 1}) 6
+        (2, False) -> radius (quiet 0) 6
+        (3, True) -> radius ((flat (styleBg panel)) {styleBorder = styleBorder panel, styleBorderWidth = 1}) 7
+        (3, False) -> radius (quiet 12) 7
+        (_, True) -> radius ((quiet 0) {styleFg = fg}) 6
+        _ -> radius (quiet 0) 6
+
+-- | Large enough to round a pill header's ends fully; painters clamp it.
+tabPillRadius :: Float
+tabPillRadius = 100
+
+-- | A selected segment's fill: whichever of the button and panel colours is
+-- lighter, so it stands out of its track in light and dark themes alike.
+tabRaisedColor :: Theme -> Color
+tabRaisedColor theme =
+  let b = styleBg (themeButton theme)
+      p = styleBg (themePanel theme)
+   in if colorLuminance b >= colorLuminance p then b else p
 
 -- | Flat menu row / menu-bar entry. Transparent at rest, a hover highlight
 -- (matching the text-field context menu), and an accent-tinted fill while it
@@ -160,21 +178,83 @@ tableHeaderVisualStyle theme isSorted =
         , styleCornerRadius = 0
         }
 
-paintTabHeader :: DrawArena -> Theme -> Int -> Bool -> Style -> Float -> Float -> Float -> Float -> IO ()
-paintTabHeader da theme tabStyle isActive style x y w h = do
-  let rect = Rect x y w h
-      r = max 0 (styleCornerRadius style)
+-- | A tab header's fill, outline and selection mark. Underlined and
+-- contained headers meet the strip's rule on the side facing the body
+-- ('tabEdgeStrip'): an underlined header marks the selection with an accent bar
+-- there, and a contained one opens onto the body through it.
+paintTabHeader :: DrawArena -> Theme -> Int -> Bool -> Style -> Rect -> IO ()
+paintTabHeader da theme packed isActive style rect@(Rect x y w h) = do
+  let (tabStyle, orient) = tabDecodeStyle packed
       bg = styleBg style
-  if isActive
-    then do
-      pushRoundedRect da rect r bg
-      case tabStyle of
-        1 -> pure ()
-        2 -> strokeStyledRect da style rect
-        _ -> do
-          pushRoundedStroke da (Rect x y w (h + 1)) (min r (min (w / 2) (h / 2))) 1 (styleBorder (themePanel theme))
-          pushRect da (Rect x (y + h - 2) w 2) (themeAccent theme)
-    else when (bg /= transparentColor) $ pushRoundedRect da rect r bg
+      r = min (styleCornerRadius style) (min w h / 2)
+      hasBg = colorA bg > 0
+  case tabStyle of
+    1 -> when hasBg $ pushRoundedRect da rect r bg
+    2 -> do
+      -- A selected segment stands a pixel above its shadow, inside its rect.
+      let shadow = themeShadow theme
+          raised = if isActive && colorA shadow > 0 then Rect x y w (h - 1) else rect
+      when (raised /= rect) $
+        pushRoundedRect da rect r (fadeAlpha shadow (colorA shadow `div` 2))
+      when hasBg $ pushRoundedRect da raised r bg
+      when isActive $ strokeStyledRect da style raised
+    3 ->
+      -- Rounded on the outer corners only: the shape runs a radius past the
+      -- edge facing the body, and the header's rect clips that side off.
+      withClip da rect $ do
+        let open = tabEdgeGrow orient (r + 1) rect
+        when hasBg $ pushRoundedRect da open r bg
+        when isActive $ pushRoundedStroke da open r 1 (styleBorder style)
+    _ -> do
+      -- The hover fill stops short of the rule and the selection bar.
+      when hasBg $ pushRoundedRect da (tabEdgeGrow orient (-3) rect) r bg
+      when isActive $ pushRoundedRect da (tabEdgeStrip orient 2 rect) 1 (themeAccent theme)
+
+-- | What a tab strip's container paints under its headers or body
+-- ('tabChromeDecode'): the rule the headers sit on, the segmented track, or a
+-- contained body's fill and its border on the sides away from the headers.
+{-# NOINLINE paintTabChrome #-}
+paintTabChrome :: DrawArena -> Theme -> Int -> Rect -> IO ()
+paintTabChrome da theme si rect@(Rect _ _ w h) = do
+  let (part, tabStyle, orient) = tabChromeDecode si
+      panel = themePanel theme
+      fg = styleFg panel
+  case part of
+    TabChromeRule ->
+      pushRect da (tabEdgeStrip orient 1 rect) (if tabStyle == 3 then styleBorder panel else themeSeparator theme)
+    TabChromeTrack -> pushRoundedRect da rect (min 9 (min w h / 2)) (fadeAlpha fg 16)
+    TabChromeBody -> withClip da rect $ do
+      let open = tabEdgeGrow (tabEdgeOpposite orient) 9 rect
+      pushRoundedRect da open 8 (styleBg panel)
+      pushRoundedStroke da open 8 1 (styleBorder panel)
+    TabChromeNone -> pure ()
+
+-- | @rect@ grown by @d@ on the side facing the body of a strip with
+-- orientation @orient@ (0-3: top, bottom, left, right), or shrunk for a
+-- negative @d@.
+tabEdgeGrow :: Int -> Float -> Rect -> Rect
+tabEdgeGrow orient d (Rect x y w h) = case orient of
+  1 -> Rect x (y - d) w (h + d)
+  2 -> Rect x y (w + d) h
+  3 -> Rect (x - d) y (w + d) h
+  _ -> Rect x y w (h + d)
+
+-- | The @t@ thick strip of @rect@ along the side facing the body.
+tabEdgeStrip :: Int -> Float -> Rect -> Rect
+tabEdgeStrip orient t (Rect x y w h) = case orient of
+  1 -> Rect x y w t
+  2 -> Rect (x + w - t) y t h
+  3 -> Rect x y t h
+  _ -> Rect x (y + h - t) w t
+
+-- | The orientation whose body side is @orient@'s strip side: a body below
+-- its headers opens upward.
+tabEdgeOpposite :: Int -> Int
+tabEdgeOpposite orient = case orient of
+  0 -> 1
+  1 -> 0
+  2 -> 3
+  _ -> 2
 
 paintTableHeader :: DrawArena -> Theme -> Bool -> Style -> Float -> Float -> Float -> Float -> IO ()
 paintTableHeader da theme isSorted style x y w h = do

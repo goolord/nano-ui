@@ -203,6 +203,11 @@ paintFocusRing env idx nt rect = do
 
 paintContainerNode :: PaintEnv -> NodeIdx -> Rect -> IO ()
 paintContainerNode env@PaintEnv {peContext = ctx} idx rect = do
+  si <- getStyleIdx (peNodeArena env) idx
+  -- A tab strip's rule, track or contained body, under its children.
+  case tabChromeDecode si of
+    (TabChromeNone, _, _) -> pure ()
+    _ -> paintTabChrome (peDrawArena env) (peTheme env) si rect
   walkChildrenWithOccluders env idx
   wid <- getWidgetId (peNodeArena env) idx
   mBuild <- lookupCustomDrawing ctx wid

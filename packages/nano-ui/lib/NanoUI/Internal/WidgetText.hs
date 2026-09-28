@@ -30,6 +30,7 @@ module NanoUI.Internal.WidgetText
   , colorPickerParseHex
   , buttonFlagClose
   , buttonCloseTrailing
+  , buttonCloseTab
   , buttonFlagTab
   , buttonFlagTable
   , buttonFlagMenu
@@ -54,6 +55,12 @@ module NanoUI.Internal.WidgetText
   , tableSortMarkOf
   , buttonVisualStyle
   , tabEncodeStyle
+  , tabDecodeStyle
+  , tabLabelAtStart
+  , tabHeaderPadX
+  , TabChrome (..)
+  , tabChromeEncode
+  , tabChromeDecode
   ) where
 
 import Control.Applicative ((<|>))
@@ -354,6 +361,12 @@ buttonFlagClose = 0x20000000
 buttonCloseTrailing :: Int
 buttonCloseTrailing = 1
 
+-- | Visual style of a tab header's close button: its cross in the header's
+-- label colour ('NanoUI.Internal.Style.fontColor'), dimmed at rest, on a
+-- round fill while hovered.
+buttonCloseTab :: Int
+buttonCloseTab = 2
+
 buttonFlagTab :: Int
 buttonFlagTab = 0x40000000
 
@@ -408,8 +421,51 @@ hasFlag flag si = si .&. flag /= 0
 buttonVisualStyle :: Int -> Int
 buttonVisualStyle si = si .&. complement buttonFlagMask
 
--- | A tab header's packed button style: the strip's tab style (0-3) and
--- 'buttonFlagTab'.
+-- | A tab header's packed button style: the strip's tab style (0-3) in bits
+-- 0-1, its orientation (0-3) in bits 2-3, and 'buttonFlagTab'.
 {-# INLINE tabEncodeStyle #-}
-tabEncodeStyle :: Int -> Int
-tabEncodeStyle style = style .|. buttonFlagTab
+tabEncodeStyle :: Int -> Int -> Int
+tabEncodeStyle style orient = (style .&. 3) .|. ((orient .&. 3) `shiftL` 2) .|. buttonFlagTab
+
+-- | The tab style and orientation of a tab header's packed style.
+{-# INLINE tabDecodeStyle #-}
+tabDecodeStyle :: Int -> (Int, Int)
+tabDecodeStyle si = (si .&. 3, (si `shiftR` 2) .&. 3)
+
+-- | Space either side of a tab header's label and adornments.
+tabHeaderPadX :: Float
+tabHeaderPadX = 12
+
+-- | Whether a button's label and adornments start at its left padding
+-- ('tabHeaderPadX') rather than sit centred: a header of a vertical tab
+-- strip.
+{-# INLINE tabLabelAtStart #-}
+tabLabelAtStart :: Int -> Bool
+tabLabelAtStart si = hasFlag buttonFlagTab si && snd (tabDecodeStyle si) >= 2
+
+-- | What a tab strip's container paints under its children.
+data TabChrome
+  = TabChromeNone
+  | TabChromeRule
+  -- ^ A one-pixel rule along the side facing the body.
+  | TabChromeTrack
+  -- ^ A rounded track behind segmented headers.
+  | TabChromeBody
+  -- ^ A contained body's fill, and its border on the three sides away from
+  -- the headers.
+  deriving (Eq, Show, Enum, Bounded)
+
+-- | A @NodeContainer@'s style for 'TabChrome' @part@ of a strip with tab
+-- style @style@ and orientation @orient@: the part in bits 8-9, the style in
+-- bits 10-11 and the orientation in bits 12-13, clear of
+-- 'containerFlagInert'.
+{-# INLINE tabChromeEncode #-}
+tabChromeEncode :: TabChrome -> Int -> Int -> Int
+tabChromeEncode part style orient =
+  (fromEnum part `shiftL` 8) .|. ((style .&. 3) `shiftL` 10) .|. ((orient .&. 3) `shiftL` 12)
+
+-- | The chrome part, tab style and orientation a container's style packs.
+{-# INLINE tabChromeDecode #-}
+tabChromeDecode :: Int -> (TabChrome, Int, Int)
+tabChromeDecode si =
+  (decodeStyleEnum 8 3 TabChromeNone si, (si `shiftR` 10) .&. 3, (si `shiftR` 12) .&. 3)

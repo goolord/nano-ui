@@ -299,11 +299,17 @@ forWidgetTextPlacements_ ctx nt idx x y w h emit
 labelBox :: Context -> NodeType -> NodeIdx -> Float -> Float -> IO (Float, Float, AlignX)
 labelBox ctx nt idx x w
   | nt /= NodeButton = pure (x, w, AlignCenter)
-  | otherwise = beside <$> nodeAdornmentInsets (ctxNodeArena ctx) idx x w
+  | otherwise = do
+      insets <- nodeAdornmentInsets na idx x w
+      si <- getStyleIdx na idx
+      -- A vertical tab strip's header starts its label at its padding.
+      pure (beside (if tabLabelAtStart si then tabHeaderPadX else 0) insets)
   where
-    beside (lead, trail)
+    na = ctxNodeArena ctx
+    beside start (lead, trail)
       | lead > 0 = (x + lead, max 0 (w - lead - trail), AlignStart)
       | trail > 0 = (x, max 0 (w - trail), AlignEnd)
+      | start > 0 = (x + start, max 0 (w - start), AlignStart)
       | otherwise = (x, w, AlignCenter)
 
 -- | A widget's label placed across @w@, a button's aligned by @labelAlign@.

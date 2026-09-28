@@ -16,7 +16,7 @@ import Data.IORef (readIORef)
 import Data.Maybe (fromMaybe)
 import Data.Primitive.PrimArray (PrimArray)
 import qualified Data.Text as T
-import NanoUI.Internal.Context (Context (..), getStore)
+import NanoUI.Internal.Context (Context (..), getAnimationValue, getStore)
 import NanoUI.Internal.Draw
 import NanoUI.Internal.Font
 import NanoUI.Internal.Frame.Chrome
@@ -26,7 +26,7 @@ import NanoUI.Internal.Frame.TextArea (drawTextAreaContentWith, resolveTextAreaF
 import NanoUI.Internal.Frame.TextInput
 import NanoUI.Internal.Id (WidgetId (..))
 import NanoUI.Internal.Layout.Arena
-import NanoUI.Internal.Style (AlignX (..), Style, Theme, fieldIconColor, styleBg, styleBorder, styleFg, themeAccent, themeInput, themeOnAccent)
+import NanoUI.Internal.Style (AlignX (..), Style, Theme, fadeAlpha, fieldIconColor, styleBg, styleBorder, styleFg, themeAccent, themeButton, themeInput, themeOnAccent)
 import NanoUI.Internal.Types (Color (..), Rect (..), clamp, clamp01, colorA, lerpColor, onGrid, rectInflate, rectNonEmpty)
 import NanoUI.Internal.WidgetText
 import NanoUI.Internal.Widgets.ColorPicker (drawColorPickerPart)
@@ -196,7 +196,7 @@ paintWidgetBackground env idx nt style si menuRowRect value (Rect x y w h) = do
     -- metrics, so the two painters cannot drift.
     when (wid == hot) $ paintMenuAccent da theme menuRowRect
   when isTab $
-    paintTabHeader da theme (buttonVisualStyle si) (value > 0.5) style x y w h
+    paintTabHeader da theme (buttonVisualStyle si) (value > 0.5) style (Rect x y w h)
   when isTable $
     paintTableHeader da theme (value > 0.5) style x y w h
   when isChoice $
@@ -207,12 +207,33 @@ paintWidgetBackground env idx nt style si menuRowRect value (Rect x y w h) = do
       drawTreeChevron da fm x y h depth expanded (styleFg style)
   case nt of
     NodeSlider -> paintSliderBody env x y w h value
-    NodeButton -> when isClose $ drawCloseIcon da (buttonVisualStyle si == buttonCloseTrailing) x y w h (styleFg style)
+    NodeButton
+      | isClose, buttonVisualStyle si == buttonCloseTab -> paintTabClose env idx (Rect x y w h)
+      | isClose -> drawCloseIcon da (buttonVisualStyle si == buttonCloseTrailing) x y w h (styleFg style)
     NodeSelect -> drawSelectChevron da False x y w h (styleFg style)
     NodeColorPicker -> do
       store <- getStore ctx
       drawColorPickerPart (peNodeArena env) idx fm da store style (Rect x y w h)
     _ -> pure ()
+
+-- | A tab header's close button: its cross in the header's label colour
+-- ('NanoUI.Internal.Style.fontColor'), dimmed until the pointer is over it,
+-- on a round fill while it is.
+{-# NOINLINE paintTabClose #-}
+paintTabClose :: PaintEnv -> NodeIdx -> Rect -> IO ()
+paintTabClose env idx (Rect x y w h) = do
+  let ctx = peContext env
+      na = peNodeArena env
+      da = peDrawArena env
+  wid <- getWidgetId na idx
+  hot <- readIORef (ctxHotId ctx)
+  animT <- getAnimationValue ctx wid
+  label <- fromMaybe (styleFg (themeButton (peTheme env))) <$> getNodeFontColor na idx
+  let hotT = clamp01 (if wid == hot && not (animT > 0) then 1 else animT)
+      d = min w h
+  when (hotT > 0) $
+    pushRoundedRect da (Rect (x + (w - d) / 2) (y + (h - d) / 2) d d) (d / 2) (fadeAlpha label (round (36 * hotT)))
+  drawCloseIcon da False x y w h (lerpColor (fadeAlpha label 150) label hotT)
 
 {-# NOINLINE paintSliderBody #-}
 paintSliderBody :: PaintEnv -> Float -> Float -> Float -> Float -> Float -> IO ()

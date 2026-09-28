@@ -6,7 +6,7 @@ import Data.Text qualified as T
 import Data.Sequence qualified as Seq
 import NanoUI.Internal.Context (Context (..))
 import NanoUI.Emit qualified as Emit
-import NanoUI.Internal.Layout.Arena (arenaCount, findNodeM, getNodeRect, getText, getWidgetId)
+import NanoUI.Internal.Layout.Arena (arenaCount, findNodeM, getNodeRect, getParent, getText, getWidgetId)
 
 tests :: [Spec]
 tests =
@@ -23,6 +23,7 @@ tests =
   , spec "tabs-bodies-apart" runTabsBodiesApartTest
   , spec "tabs-damage" runTabsDamageTest
   , spec "tab-response-forwarding" runTabResponseForwardingTest
+  , spec "tabs-contained-body-damage" runTabsContainedBodyDamageTest
   ]
 
 data DummyTab = TabA | TabB | TabC
@@ -438,3 +439,29 @@ runTabsScrollTest _ failed = do
   mRightG <- arrowRect ctx '\8250'
   assert failed (not (null mRightG))
   assert failed (not (hasText "LongestTabName" spansG))
+
+-- A contained body paints its own surface and border: when its text wraps
+-- to fewer lines, the frame repaints where its bottom border was.
+runTabsContainedBodyDamageTest :: Context -> IORef Int -> IO ()
+runTabsContainedBodyDamageTest ctx failed = do
+  let inp0 = withInputOff 300 300
+      ui txt = tabsConfigured' defaultTabsConfig {tabsStyle = TabContained} TabA
+        [ tab TabA "Alpha" (labelWith fillW txt)
+        , tab TabB "Beta" (label "Body B")
+        ]
+      long = T.unwords (replicate 30 "body")
+      na = ctxNodeArena ctx
+      -- The body is the column round the tab's label.
+      bodyRect = do
+        found <- findNodeM na (fmap (`elem` [long, "body"]) . getText na)
+        traverse (getNodeRect na <=< getParent na) found
+  _ <- warmup2 ctx inp0 (ui long)
+  _ <- runFrame ctx inp0 (ui long)
+  _ <- takeDamage ctx
+  mTall <- bodyRect
+  _ <- runFrame ctx inp0 (ui "body")
+  dShrink <- takeDamage ctx
+  mShort <- bodyRect
+  assertJust failed ((,) <$> mTall <*> mShort) $ \(tall, short) -> do
+    assert failed (rectH short < rectH tall)
+    assert failed (damageCovers dShrink tall)
