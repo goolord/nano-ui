@@ -31,7 +31,7 @@ import Data.IORef (modifyIORef')
 import Data.IntSet (IntSet)
 import Data.IntSet qualified as IS
 import Data.List (find, sortOn)
-import Data.Maybe (fromMaybe, isJust, listToMaybe)
+import Data.Maybe (fromMaybe, isJust, isNothing, listToMaybe)
 import Data.Ord (Down (..))
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -369,20 +369,18 @@ useTableSort initial = do
   (packed, setPacked) <- useInt (packSort initial)
   pure (unpackSort packed, setPacked . packSort)
 
--- | Header pointer gesture on column @i@, stored as one Int in the drag slot:
--- 0 idle, @-(1000 + i)@ resizing, @-(2000 + i)@ dragging to reorder.
-data HeaderDrag = HeaderIdle | HeaderResize !Int | HeaderReorder !Int
+-- | Header resize gesture on column @i@, stored as one Int in the drag slot:
+-- 0 idle, @-(1000 + i)@ resizing. 'useReorder' keeps a reorder drag.
+data HeaderDrag = HeaderIdle | HeaderResize !Int
   deriving (Eq)
 
 packHeaderDrag :: HeaderDrag -> Int
 packHeaderDrag = \case
   HeaderIdle -> 0
   HeaderResize i -> -(1000 + i)
-  HeaderReorder i -> -(2000 + i)
 
 unpackHeaderDrag :: Int -> HeaderDrag
 unpackHeaderDrag n
-  | n <= -2000 = HeaderReorder (-2000 - n)
   | n <= -1000 = HeaderResize (-1000 - n)
   | otherwise = HeaderIdle
 
@@ -622,11 +620,7 @@ tableConfigured cfg f key cols inputRows curSort =
           edgeZones = headerEdgeZones 4 mBodyRect headerRects
           hitCol zones = fst <$> find (\(_, r) -> rectContains r mouse) zones
           edgeCol = hitCol edgeZones
-          hoverCol = hitCol headerRects
-          (isResize, isReorder) = case drag0 of
-            HeaderResize _ -> (True, False)
-            HeaderReorder _ -> (False, True)
-            HeaderIdle -> (False, False)
+          isResize = drag0 /= HeaderIdle
           resizing = isResize && heldIn MouseLeft inp
       unless (null edgeZones) . liftIO $
         -- Strict in the spine and the rects, so no thunk waits in the IORef.
@@ -636,16 +630,13 @@ tableConfigured cfg f key cols inputRows curSort =
           useReorder vis (if resizing || isJust edgeCol then [] else headerRects)
       let vis' = reorderOrder reorder
           mReorder = reorderDragging reorder
-          dragged = isReorder && reorderMoved reorder
           pressResize = pressedIn MouseLeft inp && isJust edgeCol
-          pressReorder = pressedIn MouseLeft inp && edgeCol == Nothing && isJust hoverCol
           nextDrag
-            | pressResize = maybe HeaderIdle HeaderResize edgeCol
-            | pressReorder = maybe HeaderIdle HeaderReorder hoverCol
+            | pressedIn MouseLeft inp = maybe HeaderIdle HeaderResize edgeCol
             | releasedIn MouseLeft inp || not (heldIn MouseLeft inp) = HeaderIdle
             | otherwise = drag0
           nextDragX
-            | pressResize || pressReorder = mx
+            | pressResize = mx
             | nextDrag == HeaderIdle = 0
             | otherwise = dragX0
           nextDragW
@@ -658,14 +649,14 @@ tableConfigured cfg f key cols inputRows curSort =
           nextOrder = if vis' /= vis then rebuildOrder hidden0 vis' order0 else order0
           -- respRightClicked, not a bare release: a right press that went down
           -- elsewhere and came up over a header must not hide that column.
-          hideClicked = [i | (i, r) <- headerPairs, respRightClicked r, drag0 == HeaderIdle]
+          hideClicked = [i | (i, r) <- headerPairs, respRightClicked r, drag0 == HeaderIdle, isNothing mReorder]
           nextHidden = case showAllResp of
             Just r | respClicked r -> IS.empty
             _ -> case hideClicked of
               (i : _) | IS.size hidden0 + 1 < n -> IS.insert i hidden0
               _ -> hidden0
           sortClick =
-            if dragged || isJust mReorder || vis' /= vis || isResize || (isJust edgeCol && (heldIn MouseLeft inp || releasedIn MouseLeft inp))
+            if reorderMoved reorder || isJust mReorder || isResize || (isJust edgeCol && (heldIn MouseLeft inp || releasedIn MouseLeft inp))
               then Nothing
               else listToMaybe [i | (i, r) <- headerPairs, respClicked r]
           nextSort = maybe sort0 (nextSortCol sort0) sortClick

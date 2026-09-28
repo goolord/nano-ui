@@ -109,15 +109,11 @@ rowWith = (`withDefaultWith` row')
 --
 -- Unlike 'rowWith', it takes an id, like a widget.
 rowWith' :: (Layout -> Layout) -> NanoUI a -> NanoUI (a, Response)
-rowWith' f body = do
-  base <- askDefaultLayout
-  containerResponse NodeContainer ((f base) {layoutDirection = Row}) body
+rowWith' f = withDefaultWith (\l -> (f l) {layoutDirection = Row}) (containerResponse NodeContainer)
 
 -- | 'columnWith' returning its 'Response', as 'rowWith''.
 columnWith' :: (Layout -> Layout) -> NanoUI a -> NanoUI (a, Response)
-columnWith' f body = do
-  base <- askDefaultLayout
-  containerResponse NodeContainer ((f base) {layoutDirection = Column}) body
+columnWith' f = withDefaultWith (\l -> (f l) {layoutDirection = Column}) (containerResponse NodeContainer)
 
 {-# INLINE row' #-}
 row' :: Layout -> NanoUI a -> NanoUI a

@@ -367,8 +367,8 @@ finalizeDrawingFocus :: Context -> PressTargets -> IO ()
 finalizeDrawingFocus ctx targets =
   enabledTarget ctx (ptInteractive targets) >>= mapM_ (\wid -> do
     let na = ctxNodeArena ctx
-    drawing <- maybe (pure False) (fmap (== NodeDrawing) . getNodeType na) =<< lookupNodeByWidgetId na wid
-    whenM (pure drawing <&&> isFocusable ctx wid) (focusWidget ctx wid))
+        drawing = maybe (pure False) (fmap (== NodeDrawing) . getNodeType na) =<< lookupNodeByWidgetId na wid
+    whenM (drawing <&&> isFocusable ctx wid) (focusWidget ctx wid))
 
 -- | Apply the view's last focus request this frame
 -- ('NanoUI.Internal.Monad.requestFocus', 'NanoUI.Internal.Monad.focusNext',

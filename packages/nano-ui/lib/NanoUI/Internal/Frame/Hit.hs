@@ -192,18 +192,11 @@ nodeInteractionHit ctx@Context {ctxNodeArena = na} idx rect mouse
     | i < 0 = pure True
     | otherwise = do
         nt <- getNodeType na i
-        bounds <-
-          if nt == NodeScrollContainer
-            then getPrevClipRect ctx =<< getWidgetId na i
-            else
-              if isWidgetNode nt
-                then getPrevRect ctx =<< getWidgetId na i
-                else
-                  if nt == NodeContainer
-                    then do
-                      clips <- hasFlag containerFlagClip <$> getStyleIdx na i
-                      if clips then getPrevRect ctx =<< getWidgetId na i else pure Nothing
-                    else pure Nothing
+        bounds <- case nt of
+          NodeScrollContainer -> getPrevClipRect ctx =<< getWidgetId na i
+          _ | isWidgetNode nt -> getPrevRect ctx =<< getWidgetId na i
+          NodeContainer -> ifM (hasFlag containerFlagClip <$> getStyleIdx na i) (getPrevRect ctx =<< getWidgetId na i) (pure Nothing)
+          _ -> pure Nothing
         case bounds of
           Just r | not (rectContains r mouse) -> pure False
           _ | isFloatingNode nt -> pure True

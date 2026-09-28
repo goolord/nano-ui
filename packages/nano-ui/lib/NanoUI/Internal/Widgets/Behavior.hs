@@ -23,7 +23,8 @@ where
 import Control.Monad (when, (>=>))
 import Data.IORef (readIORef, writeIORef)
 import Data.IntSet qualified as IS
-import Data.List (find)
+import Data.List (find, minimumBy)
+import Data.Ord (comparing)
 import Data.Maybe (fromMaybe)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Frame.Hit (findNodeByWidgetId)
@@ -154,9 +155,7 @@ useReorder order items = do
         let dx = max 0 (max (x - mx) (mx - x - w))
             dy = max 0 (max (y - my) (my - y - h))
          in dx * dx + dy * dy
-      target = case zip [0 :: Int ..] items of
-        [] -> Nothing
-        slots -> Just (fst (minimumOn (distance . snd . snd) slots))
+      target = if null items then Nothing else Just (fst (minimumBy (comparing (distance . snd . snd)) (zip [0 :: Int ..] items)))
       preview = case target of
         Just t | moved, dragging `elem` order ->
           let (before, after) = splitAt t (filter (/= dragging) order)
@@ -165,7 +164,7 @@ useReorder order items = do
       released = releasedIn MouseLeft inp
       ended = released || not (heldIn MouseLeft inp)
       next = if ended then -1 else dragging
-  when (next /= findSlot fieldInt (-1) dragK store || press || moved /= flagSlot movedK store) $
+  when (next /= findSlot fieldInt (-1) dragK store || (press && dragging >= 0) || moved /= flagSlot movedK store) $
     liftIO . modifyStore ctx $
       if next < 0
         then deleteSlot fieldInt dragK . deleteSlot fieldPoint startK . setFlagSlot movedK False
@@ -177,8 +176,6 @@ useReorder order items = do
       , reorderDragging = if dragging >= 0 && not ended then Just dragging else Nothing
       , reorderMoved = moved
       }
-  where
-    minimumOn f = foldr1 (\a b -> if f a <= f b then a else b)
 
 data KeyNav = KeyNav
   { knUp :: !Bool

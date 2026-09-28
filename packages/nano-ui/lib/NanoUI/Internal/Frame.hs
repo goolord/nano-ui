@@ -19,7 +19,7 @@ import NanoUI.Internal.Context
 import NanoUI.Internal.Damage (FrameSnapshot (..), captureFrameSnapshot, updatePrevRects, writeDamage)
 import NanoUI.Internal.Draw
 import NanoUI.Internal.Frame.Input
-import NanoUI.Internal.Frame.Chrome (overlayMenuStyle, overlayWindowStyle, paintMenuPanel)
+import NanoUI.Internal.Frame.Chrome (floatingSurface, paintMenuPanel)
 import NanoUI.Internal.Frame.Explain (explainFrame, paintExplainHover, paintExplainLayer, paintExplainPage)
 import NanoUI.Internal.Frame.Paint (lowerShapes, walkChildren)
 import NanoUI.Internal.Frame.Scroll
@@ -355,15 +355,15 @@ resetUiBuild ctx newFrame = do
 -- With @explain@, the layout overlay's outlines are drawn over each.
 drawFloatingPanels :: Context -> Size -> Bool -> IO ()
 drawFloatingPanels ctx@Context {ctxNodeArena = na, ctxDrawArena = da} (Size ww wh) explain = do
-  let panels nt style after = forFloatingNodes_ na nt $ \idx -> do
+  let panels nt after = forFloatingNodes_ na nt $ \idx -> do
         rect <- getNodeRect na idx
         theme <- nodeTheme ctx idx
-        paintMenuPanel da theme (style theme) rect
+        paintMenuPanel da theme (floatingSurface theme nt) rect
         withClip da rect (walkChildren ctx idx)
         after theme idx rect
         when explain (paintExplainLayer ctx idx)
       plain _ _ _ = pure ()
-  panels NodeWindow overlayWindowStyle $ \theme idx (Rect x y w _) -> do
+  panels NodeWindow $ \theme idx (Rect x y w _) -> do
     pad <- getPadding na idx
     let sepY = y + padT pad + windowTitleBarH - windowChromeSepH
         sepW = max 0 (w - padL pad - padR pad)
@@ -371,8 +371,8 @@ drawFloatingPanels ctx@Context {ctxNodeArena = na, ctxDrawArena = da} (Size ww w
   whenM (isJust <$> topModalNode na) $ do
     theme <- readIORef (ctxTheme ctx)
     pushRect da (Rect 0 0 ww wh) (themeOverlayDim theme)
-    panels NodeModal overlayMenuStyle plain
-  panels NodePopup overlayMenuStyle plain
+    panels NodeModal plain
+  panels NodePopup plain
 
 -- | Start a clip frame from the window backdrop, as a full frame starts from a
 -- window-coloured clear. Widgets with a transparent fill, such as an idle

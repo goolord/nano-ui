@@ -271,9 +271,9 @@ scrollHitSelf ctx@Context {ctxNodeArena = na} idx nt mouse clip
   takes = not <$> passesPointer na idx
 
 -- Same clip stack as the span walk: scroll viewport (plus its bar lanes),
--- then panel bounds.
+-- then the clip other containers give their children ('childPaintClip').
 scrollHitClip :: Context -> NodeIdx -> NodeType -> Rect -> IO (Maybe Rect)
-scrollHitClip Context {ctxNodeArena = na} idx nt parentClip
+scrollHitClip ctx@Context {ctxNodeArena = na} idx nt parentClip
   | isScrollNode nt = do
       Rect x y w h <- getNodeRect na idx
       sn <- readScrollNode na idx
@@ -284,9 +284,7 @@ scrollHitClip Context {ctxNodeArena = na} idx nt parentClip
           | sn2D sn = rectUnion viewport (rectUnion (lane DirColumn) (lane DirRow))
           | otherwise = rectUnion viewport (lane (snDir sn))
       pure (rectIntersect parentClip hit)
-  | nt == NodePanel = do
-      rect <- getNodeRect na idx
-      pure (rectIntersect parentClip rect)
+  | isContainerNode nt = maybe (Just parentClip) (rectIntersect parentClip) <$> (childPaintClip ctx idx nt =<< getNodeRect na idx)
   | otherwise = pure (Just parentClip)
 
 -- | Scrollbar layouts of the scroller at @idx@ (id @wid@), each paired with a

@@ -325,15 +325,13 @@ runCanvasFocusClickTest ctx failed = do
         focused <- focusedWidget
         pure (live, still, focused)
   (live, still, _) <- warmup2 ctx inp ui
-  let (press, release) = clickPair inp (centerOf live)
-  mapM_ (\i -> runFrame ctx i ui) [press, release]
+  _ <- runClick ctx inp ui (centerOf live)
   (_, _, focused) <- evalUi ctx inp ui
   assertEq failed (respId live) focused
   assertEq failed False =<< getFocusVisible ctx
   _ <- runFrame ctx (keyInp KeyRight inp) ui
   assertEq failed True =<< readIORef heard
-  let (press2, release2) = clickPair inp (centerOf still)
-  mapM_ (\i -> runFrame ctx i ui) [press2, release2]
+  _ <- runClick ctx inp ui (centerOf still)
   (_, _, after) <- evalUi ctx inp ui
   assertEq failed (WidgetId 0) after
   writeIORef heard False

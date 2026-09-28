@@ -335,7 +335,5 @@ borderContentClip style (Rect x y w h) =
   if styleBorderWidth style <= 0
     then Rect x y w h
     else
-      let bw = max 1 (styleBorderWidth style)
-          inset side = if styleHasSide side style then bw else 0
-          (l, r, t, b) = (inset SideLeft, inset SideRight, inset SideTop, inset SideBottom)
-       in Rect (x + l) (y + t) (max 0 (w - l - r)) (max 0 (h - t - b))
+      let inset side = if styleHasSide side style then max 1 (styleBorderWidth style) else 0
+       in padContentClip x y w h (Padding (inset SideLeft) (inset SideRight) (inset SideTop) (inset SideBottom))

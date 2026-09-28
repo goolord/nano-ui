@@ -83,17 +83,13 @@ runToggleButtonTest ctx failed = do
     inp = withInputOff 300 200
     ui = column (held ref (toggleButton' Warning "M"))
   (resp, _) <- warmup2 ctx inp ui
-  let
-    (press, release) = clickPair inp (centerOf resp)
-  mapM_ (\i -> runFrame ctx i ui) [press, release]
+  _ <- runClick ctx inp ui (centerOf resp)
   assertEq failed True =<< readIORef ref
   tint <- themeWarning <$> getTheme ctx
   (_, draw) <- warmupDraw ctx inp ui
   quads <- drawQuads draw
-  assert
-    failed
-    (tint `elem` [c | (q, c) <- quads, rectIntersect q (respRect resp) /= Nothing])
-  mapM_ (\i -> runFrame ctx i ui) [press, release]
+  assert failed (tint `elem` fillsIn (respRect resp) quads)
+  _ <- runClick ctx inp ui (centerOf resp)
   assertEq failed False =<< readIORef ref
 
 runColorHelpersTest :: Context -> IORef Int -> IO ()

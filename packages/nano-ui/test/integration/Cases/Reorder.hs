@@ -18,9 +18,7 @@ slotsInRow = [Rect (fromIntegral i * 50) 0 40 30 | i <- [0 .. 4 :: Int]]
 
 -- | Run @frames@ against a fixed order and rects, returning each result.
 drive :: Context -> [Int] -> [(Int, Rect)] -> [Input] -> IO [Reorder]
-drive ctx order items = mapM (\i -> evalFrame i)
- where
-  evalFrame i = (\(r, _, _, _) -> r) <$> runFrame ctx i (useReorder order items)
+drive ctx order items = mapM (\i -> evalUi ctx i (useReorder order items))
 
 runReorderDragTest :: Context -> IORef Int -> IO ()
 runReorderDragTest ctx failed = do
@@ -101,7 +99,7 @@ runReorderPreviewStableTest ctx failed = do
       pure r
     press = pressAt inp (V2 20 15)
     over = holdAt press (V2 170 15)
-    frame i = (\(r, _, _, _) -> reorderPreview r) <$> runFrame ctx i ui
+    frame i = reorderPreview <$> evalUi ctx i ui
   _ <- frame inp
   _ <- frame press
   previews <- mapM frame [over, over, over]

@@ -12,9 +12,9 @@ module NanoUI.Internal.Widgets.Checkbox
   ) where
 
 import Data.Text (Text)
-import NanoUI.Internal.Monad (NanoUI, styled)
-import NanoUI.Internal.Style (Layout, Theme (..), Tone, defaultLayout, readableOn, toneColor)
-import NanoUI.Internal.WidgetText (buttonFlagChoice)
+import NanoUI.Internal.Monad (NanoUI)
+import NanoUI.Internal.Style (Layout, Tone, defaultLayout)
+import NanoUI.Internal.WidgetText (buttonFlagChoice, buttonToneStyle)
 import NanoUI.Internal.Widgets.Combinators (choiceToggleWidget)
 import NanoUI.Internal.Widgets.Node (Response)
 
@@ -61,7 +61,4 @@ toggleButtonWith f t txt on = snd <$> toggleButtonWith' f t txt on
 
 -- | 'toggleButtonWith' returning @(response, on)@.
 toggleButtonWith' :: (Layout -> Layout) -> Tone -> Text -> Bool -> NanoUI (Response, Bool)
-toggleButtonWith' f t txt on =
-  -- A button drawn with a value fills in the accent; this one's is the tone.
-  styled (\th -> let c = toneColor th t in th {themeAccent = c, themeOnAccent = readableOn th c}) $
-    choiceToggleWidget txt (f defaultLayout) 0 on
+toggleButtonWith' f t txt on = choiceToggleWidget txt (f defaultLayout) (buttonToneStyle t) on

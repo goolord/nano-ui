@@ -5,6 +5,7 @@ module Spec
   , spec
   , pixelSpec
   , arenaRects
+  , fillsIn
   , buttonValues
   , widgetValue
   , withMonospaceFonts
@@ -46,6 +47,10 @@ withMonospaceFonts baseCell sizedCell base =
     (withFontMetrics base (monospaceMetrics baseCell))
     (\_ _ _ _ -> pure (monospaceMetrics sizedCell, False))
     (\_ _ _ _ txt -> pure (sizedCell * fromIntegral (T.length txt), sizedCell))
+
+-- | The colours of the quads that overlap @r@.
+fillsIn :: Rect -> [(Rect, Color)] -> [Color]
+fillsIn r quads = [c | (q, c) <- quads, rectIntersect q r /= Nothing]
 
 -- | Every node's laid-out rect, in arena order.
 arenaRects :: Context -> IO [Rect]

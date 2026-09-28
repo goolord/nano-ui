@@ -9,7 +9,7 @@ module NanoUI.Internal.Frame.Chrome
   , fillStyledRect
   , strokeStyledRect
   , paintStyledRect
-  , overlayWindowStyle
+  , floatingSurface
   , overlayMenuStyle
   , paintMenuPanel
   , menuPanelBounds
@@ -33,7 +33,7 @@ import NanoUI.Internal.Id (WidgetId, hashWidgetId)
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Store (fieldInt, fieldText, findSlot)
 import NanoUI.Internal.Style
-import NanoUI.Internal.Types (Color (..), Rect (..), clamp, colorA, colorLuminance, colorRGBA, lerpColor)
+import NanoUI.Internal.Types (Color (..), Rect (..), clamp, colorA, colorLuminance, colorTransparent, lerpColor)
 import NanoUI.Internal.WidgetText
 
 floatingAncestor :: Context -> NodeIdx -> IO (Maybe NodeType)
@@ -83,13 +83,9 @@ textInputFocused ctx idx = do
   focus <- readIORef (ctxFocusId ctx)
   pure (focus == wid)
 
--- | Fully transparent black.
-transparentColor :: Color
-transparentColor = colorRGBA 0 0 0 0
-
 -- | Transparent fills and no border.
 clearStyle :: Style -> Style
-clearStyle s = s {styleBg = transparentColor, styleHoverBg = transparentColor, styleActiveBg = transparentColor, styleBorderWidth = 0}
+clearStyle s = s {styleBg = colorTransparent, styleHoverBg = colorTransparent, styleActiveBg = colorTransparent, styleBorderWidth = 0}
 
 -- | Close button style; the cross goes from muted to full colour as @hotT@
 -- goes from 0 to 1.
@@ -154,10 +150,10 @@ menuItemVisualStyle theme val =
       openBg = lerpColor (styleBg menu) accent 0.3
       isOpen = val > 0.5
    in menu
-        { styleBg = if isOpen then openBg else transparentColor
+        { styleBg = if isOpen then openBg else colorTransparent
         , styleHoverBg = if isOpen then openBg else styleHoverBg menu
         , styleActiveBg = lerpColor (styleBg menu) accent 0.4
-        , styleBorder = transparentColor
+        , styleBorder = colorTransparent
         , styleBorderWidth = 0
         -- The text-field context menu fills hovered rows with a square
         -- pushRect; keep the generic menu identical.
@@ -315,11 +311,14 @@ widgetVisualStyle ctx nt idx = do
             | isTab -> tabHeaderVisualStyle theme (buttonVisualStyle styleIdx) (val > 0.5)
             | isTable -> tableHeaderVisualStyle theme (val > 0.5)
             | val > 0.5 ->
-                (themeButton theme)
-                  { styleBg = themeAccent theme
-                  , styleHoverBg = themeAccent theme
-                  , styleFg = themeOnAccent theme
-                  , styleBorder = themeAccent theme
+                let (fill, label) = case buttonToneOf styleIdx of
+                      Nothing -> (themeAccent theme, themeOnAccent theme)
+                      Just t -> let c = toneColor theme t in (c, readableOn theme c)
+                 in (themeButton theme)
+                  { styleBg = fill
+                  , styleHoverBg = fill
+                  , styleFg = label
+                  , styleBorder = fill
                   }
           _ -> themeButton theme
       widgetBase =
@@ -347,20 +346,24 @@ fillStyledRect da style rect =
 
 {-# INLINE strokeStyledRect #-}
 strokeStyledRect :: DrawArena -> Style -> Rect -> IO ()
-strokeStyledRect da style rect@(Rect x y w h) =
+strokeStyledRect da style rect@(Rect _ _ w h) =
   when (styleBorderWidth style > 0) $
     if styleBorderSides style == 15
       then do
         let rr = clamp 0 (min (w / 2) (h / 2)) (styleCornerRadius style)
-        pushRoundedStroke da rect rr bw (styleBorder style)
-      else do
-        let side s r = when (styleHasSide s style) (pushRect da r (styleBorder style))
-        side SideLeft (Rect x y bw h)
-        side SideRight (Rect (x + w - bw) y bw h)
-        side SideTop (Rect x y w bw)
-        side SideBottom (Rect x (y + h - bw) w bw)
-  where
-    bw = max 1 (styleBorderWidth style)
+        pushRoundedStroke da rect rr (max 1 (styleBorderWidth style)) (styleBorder style)
+      else strokeStyledSides da style rect
+
+-- | The border bars of a style drawn on some sides only ('borderSides').
+{-# NOINLINE strokeStyledSides #-}
+strokeStyledSides :: DrawArena -> Style -> Rect -> IO ()
+strokeStyledSides da style (Rect x y w h) = do
+  let bw = max 1 (styleBorderWidth style)
+      side s r = when (styleHasSide s style) (pushRect da r (styleBorder style))
+  side SideLeft (Rect x y bw h)
+  side SideRight (Rect (x + w - bw) y bw h)
+  side SideTop (Rect x y w bw)
+  side SideBottom (Rect x (y + h - bw) w bw)
 
 -- | A style's fill, then its border.
 {-# INLINE paintStyledRect #-}
@@ -383,9 +386,10 @@ overlayMenuStyle theme =
         , styleActiveBg = lerpColor (styleBg popup) (themeAccent theme) 0.22
         }
 
--- | Floating windows: 'themeFloatingWindow'.
-overlayWindowStyle :: Theme -> Style
-overlayWindowStyle = themeFloatingWindow
+-- | The surface a floating node is drawn on: a floating window's
+-- 'themeFloatingWindow', or a modal's or popup's 'overlayMenuStyle'.
+floatingSurface :: Theme -> NodeType -> Style
+floatingSurface theme nt = if nt == NodeWindow then themeFloatingWindow theme else overlayMenuStyle theme
 
 -- | Panel behind menus, dropdowns and floating windows: the theme's offset
 -- shadow, then the styled fill and border.

@@ -68,10 +68,7 @@ collectFloatingOccluders ctx@Context {ctxNodeArena = na} = do
       unsafeFreezePrimArray buf
   where
     isOpaque s = colorA (styleBg s) == 255
-    occludes theme = \case
-      NodeWindow -> isOpaque (overlayWindowStyle theme)
-      nt | nt == NodeModal || nt == NodePopup -> isOpaque (overlayMenuStyle theme)
-      _ -> False
+    occludes theme nt = (nt == NodeWindow || nt == NodeModal || nt == NodePopup) && isOpaque (floatingSurface theme nt)
     addOccluder buf !n idx = do
       nt <- getNodeType na idx
       opaque <- (`occludes` nt) <$> nodeTheme ctx idx
@@ -260,12 +257,13 @@ paintScrollContainerNode env idx rect@(Rect x y w h) = do
   -- invisible on a cleared backdrop, and clip replay then always
   -- repaints the whole viewport.
   unless (scrollBare (snConfig sn)) $ do
-    inFloating <- isJust <$> floatingAncestor ctx idx
+    surface <- fmap (floatingSurface tm) <$> floatingAncestor ctx idx
+    let inFloating = isJust surface
     wTag <- axTag <$> getWidthSizing arena idx
     hTag <- axTag <$> getHeightSizing arena idx
     if wTag == SizingGrow && hTag == SizingGrow
       then do
-        let bg = if inFloating then styleBg (themeFloatingWindow tm) else themeWindow tm
+        let bg = maybe (themeWindow tm) styleBg surface
         -- A full frame starts from the runner's clear to the base theme's
         -- window colour ('ctxPaintFull'). Drawn first, in that same opaque
         -- colour, the backdrop would only fill the cleared pixels again: a
@@ -283,7 +281,7 @@ paintScrollContainerNode env idx rect@(Rect x y w h) = do
               pure (full && drawn == 0 && bg == themeWindow base)
         unless redundant $ pushRect da rect bg
       else do
-        let well = (if inFloating then themeFloatingWindow tm else themeInput tm) {styleCornerRadius = 0}
+        let well = (fromMaybe (themeInput tm) surface) {styleCornerRadius = 0}
         paintStyledRect da well rect
   withClip da (scrollNodeViewport sn x y w h) $ walkChildrenWithOccluders env idx
   paintScrollChrome env idx sn rect

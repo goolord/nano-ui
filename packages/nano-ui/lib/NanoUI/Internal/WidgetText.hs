@@ -55,6 +55,8 @@ module NanoUI.Internal.WidgetText
   , tableHeaderDisplayText
   , tableSortMarkOf
   , buttonVisualStyle
+  , buttonToneStyle
+  , buttonToneOf
   , tabEncodeStyle
   , tabDecodeStyle
   , tabLabelAtStart
@@ -425,6 +427,19 @@ hasFlag flag si = si .&. flag /= 0
 {-# INLINE buttonVisualStyle #-}
 buttonVisualStyle :: Int -> Int
 buttonVisualStyle si = si .&. complement buttonFlagMask
+
+-- | A plain button's packed style carrying the 'Tone' it fills with while
+-- its value is on, in bits 20-22 (a toggle button's).
+{-# INLINE buttonToneStyle #-}
+buttonToneStyle :: Tone -> Int
+buttonToneStyle t = (fromEnum t + 1) `shiftL` 20
+
+-- | The tone 'buttonToneStyle' packed, 'Nothing' for the accent.
+{-# INLINE buttonToneOf #-}
+buttonToneOf :: Int -> Maybe Tone
+buttonToneOf si = case (si `shiftR` 20) .&. 7 of
+  0 -> Nothing
+  n -> Just (toEnum (n - 1))
 
 -- | A tab header's packed button style: the strip's tab style (0-3) in bits
 -- 0-1, its orientation (0-3) in bits 2-3, and 'buttonFlagTab'.

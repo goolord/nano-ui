@@ -8,6 +8,7 @@ module NanoUI.Internal.Types
   , colorRGBA
   , colorRGB
   , withAlpha
+  , fadeAlpha
   , colorWhite
   , colorBlack
   , colorTransparent
@@ -110,7 +111,11 @@ colorRGB r g b = colorRGBA r g b 255
 -- > withAlpha (themeAccent theme) 0.25
 {-# INLINE withAlpha #-}
 withAlpha :: Color -> Float -> Color
-withAlpha (Color w) a = Color ((w .&. 0xFFFFFF00) .|. fromIntegral (round (255 * max 0 (min 1 a)) :: Int))
+withAlpha c a = fadeAlpha c (round (255 * clamp01 a))
+
+-- | Replaces the alpha channel of a color.
+fadeAlpha :: Color -> Word8 -> Color
+fadeAlpha (Color w) a = Color ((w .&. 0xFFFFFF00) .|. fromIntegral a)
 
 -- | Opaque white, black, and fully transparent black.
 colorWhite, colorBlack, colorTransparent :: Color

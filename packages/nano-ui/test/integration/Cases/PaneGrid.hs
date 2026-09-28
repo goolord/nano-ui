@@ -45,7 +45,7 @@ probeGrid f body = do
           { pgLayout = fillW . fillH
           , pgSpacing = 4
           , pgLeeway = 6
-          , pgTree = Just (Split 30 AxisV 0.5 (Pane 10) (Pane 20))
+          , pgTree = Just halves
           , pgViewPane = \pid pctx -> do
               liftIO (modifyIORef' told (IM.insert (fromIntegral pid) (pgcRect pctx)))
               (_, area) <- mouseArea (fillW . fillH) (body pid)
@@ -97,10 +97,8 @@ runTreeTest ctx failed = do
   given <- newIORef (Just halves)
   let
     inp = withInput 600 400
-    ui = do
-      resp <-
-        paneGrid defaultPaneGridConfig {pgLayout = fillW . fillH, pgTree = Just halves}
-      pure resp
+    ui =
+      paneGrid defaultPaneGridConfig {pgLayout = fillW . fillH, pgTree = Just halves}
     controlled = do
       t <- liftIO (readIORef given)
       resp <- paneGrid defaultPaneGridConfig {pgLayout = fillW . fillH, pgTree = t}
@@ -115,8 +113,8 @@ runTreeTest ctx failed = do
     press = pressAt inp (V2 300 200)
   forM_ [press, holdAt press (V2 350 200), holdAt press (V2 400 200)] $ \i ->
     void (runFrame ctx i (withKey (1 :: Int) controlled))
-  (resp1, _, _, _) <-
-    runFrame
+  resp1 <-
+    evalUi
       ctx
       (releaseAt (holdAt press (V2 400 200)))
       (withKey (1 :: Int) controlled)
@@ -125,7 +123,7 @@ runTreeTest ctx failed = do
   let
     other = Split 5 AxisH 0.25 (Pane 1) (Pane 2)
   writeIORef given (Just other)
-  (resp2, _, _, _) <- runFrame ctx inp (withKey (1 :: Int) controlled)
+  resp2 <- evalUi ctx inp (withKey (1 :: Int) controlled)
   assertEq failed (pgrTree resp2) (Just other)
   assertEq failed (pgrPanes resp2) [1, 2]
 
@@ -196,8 +194,7 @@ runDragHandleTest ctx failed = do
           }
     panesAfter frames = do
       mapM_ (\i -> runFrame ctx i ui) (init frames)
-      (r, _, _, _) <- runFrame ctx (last frames) ui
-      pure (pgrPanes r)
+      pgrPanes <$> evalUi ctx (last frames) ui
     dragFrom from to =
       let
         press = pressAt inp from
@@ -216,6 +213,7 @@ runDragHandleTest ctx failed = do
   -- Below the handle is not a handle, and the button is not either.
   assertEq failed [20, 10] =<< panesAfter (dragFrom (V2 60 200) (V2 454 200))
   assertEq failed [20, 10] =<< panesAfter (dragFrom (V2 270 20) (V2 454 200))
+  assertEq failed 0 =<< readIORef clicks
   -- Grab cursor over the handle.
   assertEq failed UiCursorGrab =<< cursorOver ctx inp ui (V2 60 20)
 
@@ -253,7 +251,7 @@ runResetTest ctx failed = do
         liftIO (writeIORef resetNow False)
         setArrangement (Just halves)
       pure resp
-    ratioAfter i = (\(r, _, _, _) -> rootRatio (pgrTree r)) <$> runFrame ctx i ui
+    ratioAfter i = rootRatio . pgrTree <$> evalUi ctx i ui
   _ <- warmup2 ctx inp ui
   let
     press = pressAt inp (V2 300 200)
@@ -290,7 +288,5 @@ runClipTest ctx failed = do
   assertJust failed mr $ \r -> do
     -- Laid out past the pane, which ends at 292.
     assert failed (rectX r >= 292)
-    let
-      (press, release) = clickPair inp (spanCenter r)
-    mapM_ (\i -> runFrame ctx i ui) [press, release]
+    _ <- runClick ctx inp ui (spanCenter r)
     assertEq failed 0 =<< readIORef clicks

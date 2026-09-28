@@ -30,10 +30,6 @@ inp = withInput 400 300
 spanFg :: Text -> [(Rect, Text, Color, Color, Rect)] -> Maybe Color
 spanFg txt spans = lookup txt [(t, fg) | (_, t, fg, _, _) <- spans]
 
--- | The colours of the quads that overlap @r@.
-fillsIn :: Rect -> [(Rect, Color)] -> [Color]
-fillsIn r quads = [c | (q, c) <- quads, rectIntersect q r /= Nothing]
-
 -- | The last of @n@ frames of @ui@: its result, the quads drawn, and the text spans.
 frames :: Int -> Context -> NanoUI a -> IO (a, [(Rect, Color)], [DemoSpan])
 frames n ctx ui = do
@@ -234,4 +230,4 @@ runPopupStyleTest ctx failed = do
   panelBg <- styleBg . themePanel <$> getTheme ctx
   assert failed (sea `elem` map snd quads)
   assertJust failed inner $ \r ->
-    assert failed (panelBg `elem` [c | (q, c) <- quads, rectIntersect q r /= Nothing])
+    assert failed (panelBg `elem` fillsIn r quads)

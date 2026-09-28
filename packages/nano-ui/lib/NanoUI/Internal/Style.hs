@@ -155,11 +155,11 @@ module NanoUI.Internal.Style
   ) where
 
 import Control.Applicative ((<|>))
-import Data.Bits (setBit, testBit, (.&.), (.|.))
+import Data.Bits (setBit, testBit, (.|.))
 import Data.List (find)
 import Data.Maybe (fromMaybe)
 import Data.Word (Word8)
-import NanoUI.Internal.Types (Color (..), V2 (..), colorA, colorLuminance, colorRGBA, contrastRatio, lerpColor)
+import NanoUI.Internal.Types (Color (..), V2 (..), colorA, colorLuminance, colorRGBA, contrastRatio, fadeAlpha, lerpColor)
 
 -- | Size along one axis. Fixed sizes use logical pixels; grow/shrink values
 -- are relative weights, and percentages use 100 for the full available size.
@@ -1271,10 +1271,6 @@ scrollBarThumbHoverColor :: Style -> Theme -> Color
 scrollBarThumbHoverColor base theme =
   let solid = lerpColor (themeSeparator theme) (styleFg base) 0.72
    in fadeAlpha solid 180
-
--- | Replaces the alpha channel of a color.
-fadeAlpha :: Color -> Word8 -> Color
-fadeAlpha (Color w) a = Color ((w .&. 0xFFFFFF00) .|. fromIntegral a)
 
 -- | Ported from "Tomorrow Night Min" in https://github.com/biaqat/tomorrow-min-theme-zed
 tomorrowNightMinDarkTheme :: Theme
