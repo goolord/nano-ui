@@ -1,6 +1,6 @@
 {-# LANGUAGE StrictData #-}
 
--- | Operating-system drag and drop.
+-- | Local pointer drags and operating-system drag and drop.
 --
 -- 'useDrop' turns the frame's 'NanoUI.Internal.Input.DropEvent's into a 'DropTarget'
 -- for one rectangle. 'dropZone' wraps a panel and does the same for its rect.
@@ -11,19 +11,91 @@ module NanoUI.Internal.Widgets.Drop
   ( DropTarget (..)
   , useDrop
   , dropZone
+  , Drag (..)
+  , DragPhase (..)
+  , useDrag
+  , insertionIndex
   ) where
 
 import Control.Applicative ((<|>))
 import Control.Monad (when)
+import Data.List (find)
 import Data.Text (Text)
+import Data.Typeable (Typeable)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Input
 import NanoUI.Internal.Monad (NanoUI, askDefaultLayout, askInput, freshWidget, liftIO)
-import NanoUI.Internal.Store (deleteSlot, fieldPoint, flagSlot, insertSlot, lookupSlot, setFlagSlot)
+import NanoUI.Internal.Store (deleteSlot, fieldDyn, fieldPoint, flagSlot, insertDyn, insertSlot, lookupDyn, lookupSlot, setFlagSlot)
 import NanoUI.Internal.Style (Layout)
-import NanoUI.Internal.Types (Rect, V2 (..), rectContains)
+import NanoUI.Internal.Types (Rect (..), V2 (..), rectContains, rectHit)
 import NanoUI.Internal.Layout.Arena (NodeType (..))
-import NanoUI.Internal.Widgets.Node (Response, containerResponse, respRect)
+import NanoUI.Internal.Widgets.Node (Response, containerResponse, respRect, respPressed)
+import NanoUI.Internal.Widgets.Behavior (DragAxis (..), dragThresholdPx)
+
+-- | A thresholded pointer gesture. Terminal phases last one frame.
+data DragPhase = DragStarted | Dragging | DragReleased | DragCancelled
+  deriving (Eq, Show)
+
+-- | Application-owned payload and window coordinates. Map the payload to
+-- adapt one gesture to another target without restarting its lifecycle.
+data Drag a = Drag
+  { dragPayload :: !a
+  , dragAt :: !V2
+  -- ^ Where the pointer is.
+  , dragFrom :: !V2
+  -- ^ Where the press was.
+  , dragPhase :: !DragPhase
+  }
+  deriving (Eq, Show, Functor)
+
+data DragState a = DragState !a !V2 !Bool
+  deriving (Eq)
+
+-- | Track a drag across uniquely keyed responses. Call under a stable key
+-- every frame, including for an empty collection. Only owned presses start;
+-- payload identity survives reordering. Below the threshold, returns Nothing.
+-- Escape, lost hold or source removal cancels; only DragReleased may commit.
+useDrag :: forall a. (Eq a, Typeable a) => [(a, Response)] -> NanoUI (Maybe (Drag a))
+useDrag sources = do
+  (wid, ctx) <- freshWidget
+  inp <- askInput
+  let key = intKey wid
+      pos@(V2 x y) = inputMousePos inp
+  old <- lookupDyn key <$> liftIO (getStore ctx)
+  let armed = if pressedIn MouseLeft inp
+        then (\(a, _) -> DragState a pos False) <$> find (respPressed . snd) sources
+        else old
+      step (DragState a origin@(V2 sx sy) hot) =
+        let cancelled = pressedIn KeyEscape inp || all ((/= a) . fst) sources
+              || (not (heldIn MouseLeft inp) && not (releasedIn MouseLeft inp))
+            dx = x - sx
+            dy = y - sy
+            moved = hot || dx * dx + dy * dy > dragThresholdPx * dragThresholdPx
+            released = releasedIn MouseLeft inp
+            phase | cancelled = DragCancelled
+                  | released = DragReleased
+                  | not hot = DragStarted
+                  | otherwise = Dragging
+            emitted = if hot || (moved && not cancelled) then Just (Drag a pos origin phase) else Nothing
+            retained = if cancelled || released then Nothing else Just (DragState a origin moved)
+         in (retained, emitted)
+      (next, result) = maybe (Nothing, Nothing) step armed
+  when (next /= old) $
+    liftIO (modifyStore ctx (maybe (deleteSlot fieldDyn key) (insertDyn key) next))
+  pure result
+
+-- | Insertion slot in an ordered row or column, bounded by its visible
+-- viewport. Pass remaining items (omit the source for a same-list move).
+-- Empty targets accept slot zero. Rectangles may extend beyond the viewport
+-- when scrolled; their centers still determine the original list index.
+insertionIndex :: DragAxis -> Rect -> [Rect] -> V2 -> Maybe Int
+insertionIndex axis bounds items pos@(V2 x y)
+  | not (rectHit bounds pos) = Nothing
+  | otherwise = Just (length (takeWhile before items))
+  where
+    before (Rect rx ry rw rh) = case axis of
+      DragAxisX -> x > rx + rw / 2
+      DragAxisY -> y > ry + rh / 2
 
 -- | Per-frame drop state for a single rectangular drop target.
 data DropTarget = DropTarget

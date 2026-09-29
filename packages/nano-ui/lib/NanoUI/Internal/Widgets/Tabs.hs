@@ -1,4 +1,4 @@
--- | Controlled tab selection, header styles, close requests, and selected-body rendering.
+-- | Controlled tab selection, header styles, close requests, and header geometry.
 module NanoUI.Internal.Widgets.Tabs
   ( Tab (..), TabStyle (..), TabOrientation (..), TabResponse (..)
   , TabsConfig (..), defaultTabsConfig
@@ -25,7 +25,7 @@ import NanoUI.Internal.Layout.Arena (setStyleIdx, setWidgetId)
 import NanoUI.Internal.Monad (NanoUI, askContext, askInput, disabledWhen, freshWidget, nextId, requestFrame, liftIO, styled, uiTheme, withKey)
 import NanoUI.Internal.Store (fieldFloat, findSlot, slotWrite)
 import NanoUI.Internal.Style
-import NanoUI.Internal.Types (Color, Rect (..), clamp, rectContains, rectW, v2Y)
+import NanoUI.Internal.Types (Color, Rect (..), clamp, rectContains, rectIntersect, rectW, v2Y)
 import NanoUI.Internal.WidgetText (TabChrome (..), buttonCloseTab, buttonFlagClose, tabChromeEncode, tabEncodeStyle)
 import NanoUI.Internal.Widgets.Adornment (Adornments, adornWidget, control, trailing, view)
 import NanoUI.Internal.Widgets.Behavior (keyActivated)
@@ -88,12 +88,16 @@ data Tab a body = Tab
   , tabBody :: !body
   }
 
--- | Header response, optional close request, and selected key. Store 'tabActive'
--- and remove a tab yourself when 'tabClosed' names it.
+-- | Controlled selection and close requests, with geometry for optional
+-- drag sources and insertion targets.
 data TabResponse a = TabResponse
   { tabResponse :: !Response
   , tabClosed :: !(Maybe a)
   , tabActive :: !a
+  , tabHeaders :: ![(a, Response)]
+    -- ^ Ordered header responses, suitable for 'NanoUI.useDrag'.
+  , tabStripRect :: !Rect
+    -- ^ Visible header viewport, excluding paging buttons and trailing controls.
   }
   deriving (Eq, Show)
 
@@ -166,7 +170,7 @@ tabStrip (TabsConfig style orient trailingView) cur tabList mRenderBody = do
             if style == TabSegmented
               then tagTabChrome groupId TabChromeTrack style orient
               else tagTabChrome groupId edgeChrome style orient
-            tabResp <- fst <$> headers
+            tabResp <- headers
             trailingView
             pure tabResp
         | otherwise = row' (contained . onEdge . tight . fillW . gap 8 $ defaultLayout) $ do
@@ -178,7 +182,7 @@ tabStrip (TabsConfig style orient trailingView) cur tabList mRenderBody = do
       -- body's length.
       segmentedColumn = if style == TabSegmented then padAll 3 else fillH
       bodyGap = if style == TabContained then 0 else if vertical then 16 else 12
-  case mRenderBody of
+  result <- case mRenderBody of
     Nothing -> headerBar
     Just bodyRender ->
       (if vertical then rowWith (tight . fillW . grow . gap bodyGap) else columnWith (tight . fillW . gap bodyGap)) $
@@ -188,6 +192,10 @@ tabStrip (TabsConfig style orient trailingView) cur tabList mRenderBody = do
             tabResp <- headerBar
             bodyRender (tabActive tabResp)
             pure tabResp
+  clip <- liftIO (getPrevClipRect ctx groupId)
+  let bounds = tabStripRect result
+      visible = maybe bounds (fromMaybe (Rect 0 0 0 0) . rectIntersect bounds) clip
+  pure result {tabStripRect = visible}
 
 -- | Horizontal headers that page with chevron buttons when they overflow,
 -- in a row that takes the strip's width less its trailing view. Overflowing
@@ -200,7 +208,7 @@ scrollableHeaders ::
   TabStyle ->
   Float ->
   a ->
-  NanoUI (TabResponse a, [(a, Response)]) ->
+  NanoUI (TabResponse a) ->
   NanoUI (TabResponse a)
 scrollableHeaders ctx style barGap cur headers = withKey ("tab-headers" :: Text) $ do
   groupId <- nextId
@@ -239,7 +247,7 @@ scrollableHeaders ctx style barGap cur headers = withKey ("tab-headers" :: Text)
                 lay = (fixedWH 26 stripH . alignCenter . alignMid $ defaultLayout) {layoutFontColor = muted}
             respClicked <$> styled subtle (buttonStyledEx enabled glyph 0 lay 0)
         | otherwise = pure False
-  (leftClicked, (tabResp, hdrs), rightClicked) <-
+  (leftClicked, tabResp, rightClicked) <-
     row' (tight . grow . alignMid . fixedH stripH $ defaultLayout) $ do
       tagContainer groupId
       (,,)
@@ -255,7 +263,10 @@ scrollableHeaders ctx style barGap cur headers = withKey ("tab-headers" :: Text)
             )
         <*> arrow "tab-arrow-right" canRight "\8250"
   let
-    (viewX, viewW) = maybe (0, 0) (\r -> (rectX r, rectW r)) (if overflow then mScr else mBar)
+    hdrs = tabHeaders tabResp
+    viewport = fromMaybe (Rect 0 0 0 0) (if overflow then mScr else mBar)
+    viewX = rectX viewport
+    viewW = rectW viewport
     page = max 1 (viewW * 0.9)
     -- The range this frame's layout leaves: the headers' right edge past the
     -- start of what shows them, less its width. The first overflow frame has
@@ -301,7 +312,7 @@ scrollableHeaders ctx style barGap cur headers = withKey ("tab-headers" :: Text)
         | otherwise = pagedOff
   when (finalOff /= off) $
     liftIO (setScrollOffset ctx scrollWid finalOff)
-  pure tabResp
+  pure tabResp {tabStripRect = viewport}
 
 -- | The headers and the selection after this frame's clicks, with each
 -- header's key and response for the scrolling strip. With @follow@ the
@@ -315,7 +326,7 @@ renderHeaders ::
   Bool ->
   a ->
   [Tab a body] ->
-  NanoUI (TabResponse a, [(a, Response)])
+  NanoUI (TabResponse a)
 renderHeaders ctx style orient follow cur tabList = do
   hdrs <- zipWithM (\i t -> withKey i (renderHeader style orient cur t)) [0 :: Int ..] tabList
   let clickedKeys = [k | (k, r, False) <- hdrs, respClicked r]
@@ -326,7 +337,7 @@ renderHeaders ctx style orient follow cur tabList = do
       resp = setChanged hasChanged (setClicked (not (null clickedKeys)) (foldMap snd keyed))
   when (hasChanged || isJust closedKey) requestFrame
   when follow $ liftIO (moveSelection ctx cur nextTab keyed)
-  pure (TabResponse resp closedKey nextTab, keyed)
+  pure (TabResponse resp closedKey nextTab keyed (respRect resp))
 
 -- | One header: its key, its response, and whether it was closed (close
 -- button clicked, or header or close button middle-clicked, as in a

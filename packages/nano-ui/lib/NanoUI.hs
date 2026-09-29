@@ -391,6 +391,10 @@ module NanoUI
   , PaneGridCtx (..)
   , PaneView (..)
   , PaneGridResponse (..)
+  , PaneEdge (..)
+  , PaneDropLocation (..)
+  , PaneGridDrop, pgdLocation, pgdRect, pgdPane
+  , commitPaneDrop
   , GridAxis (..)
   , GridNode (..)
   , paneGrid
@@ -497,6 +501,11 @@ module NanoUI
   , dropZone
   , Reorder (..)
   , useReorder
+  , Drag (..)
+  , DragPhase (..)
+  , DragAxis (..)
+  , useDrag
+  , insertionIndex
 
     -- * Local state
   , useState
@@ -1092,7 +1101,7 @@ import NanoUI.Svg
 import NanoUI.Internal.Types
 import NanoUI.Internal.WidgetText
 import NanoUI.Internal.Widgets.Animate
-import NanoUI.Internal.Widgets.Behavior (KeyNav (..), Reorder (..), focusedKeyPressed, focusedKeyPressedOnce, keyActivated, navStep, useInputMethod, useKeyNav, useReorder)
+import NanoUI.Internal.Widgets.Behavior (DragAxis (..), KeyNav (..), Reorder (..), focusedKeyPressed, focusedKeyPressedOnce, keyActivated, navStep, useInputMethod, useKeyNav, useReorder)
 import NanoUI.Internal.Widgets.Button
 import NanoUI.Internal.Widgets.Caption
 import NanoUI.Internal.Widgets.Checkbox

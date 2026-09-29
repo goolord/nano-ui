@@ -10,11 +10,44 @@ tests =
   , spec "reorder-click" runReorderClickTest
   , spec "reorder-wrapped" runReorderWrappedTest
   , spec "reorder-preview-stable" runReorderPreviewStableTest
+  , spec "insertion-index-bounds" runInsertionIndexTest
+  , spec "drag-idle-and-abort" runDragIdleAndAbortTest
   ]
 
 -- | Five 40 by 30 slots in a row, 50 apart.
 slotsInRow :: [Rect]
 slotsInRow = [Rect (fromIntegral i * 50) 0 40 30 | i <- [0 .. 4 :: Int]]
+
+runDragIdleAndAbortTest :: Context -> IORef Int -> IO ()
+runDragIdleAndAbortTest ctx failed = do
+  let inp = withInput 400 200
+      ui = useDrag [(1 :: Int, mempty {rawRespHeld = buttonsFromList [MouseLeft]})]
+      press = pressAt inp (V2 10 10)
+      moved = holdAt press (V2 40 10)
+  _ <- evalUi ctx press ui
+  aborted <- evalUi ctx (inp {inputMousePos = V2 (-10000) (-10000)}) ui
+  assertEq failed Nothing aborted
+  _ <- evalUi ctx press ui
+  _ <- evalUi ctx moved ui
+  _ <- runFrame ctx moved ui
+  (drag, _, _, dirty) <- runFrame ctx moved ui
+  assertEq failed (Just Dragging) (dragPhase <$> drag)
+  assert failed (not dirty)
+
+runInsertionIndexTest :: Context -> IORef Int -> IO ()
+runInsertionIndexTest _ failed = do
+  let bounds = Rect 0 0 250 30
+      hit = insertionIndex DragAxisX bounds slotsInRow
+  assertEq failed (Just 0) (hit (V2 1 15))
+  assertEq failed (Just 2) (hit (V2 100 15))
+  assertEq failed (Just 5) (hit (V2 249 15))
+  forM_ [V2 (-1) 15, V2 251 15, V2 20 (-1), V2 20 31] $ \p ->
+    assertEq failed Nothing (hit p)
+  assertEq failed (Just 0) (insertionIndex DragAxisX bounds [] (V2 10 10))
+  assertEq failed (Just 1) (insertionIndex DragAxisY (Rect 0 0 30 100)
+    [Rect 0 0 30 40, Rect 0 50 30 40] (V2 15 55))
+  assertEq failed (Just 1) (insertionIndex DragAxisX (Rect 50 0 100 30)
+    slotsInRow (V2 51 15))
 
 -- | Run @frames@ against a fixed order and rects, returning each result.
 drive :: Context -> [Int] -> [(Int, Rect)] -> [Input] -> IO [Reorder]

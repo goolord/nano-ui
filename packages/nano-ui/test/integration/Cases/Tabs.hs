@@ -24,10 +24,132 @@ tests =
   , spec "tabs-damage" runTabsDamageTest
   , spec "tab-response-forwarding" runTabResponseForwardingTest
   , spec "tabs-contained-body-damage" runTabsContainedBodyDamageTest
+  , spec "tabs-drag-lifecycle" runTabDragLifecycleTest
+  , spec "tabs-drag-controls" runTabDragControlsTest
+  , spec "tabs-drag-reorder" runTabDragReorderTest
+  , spec "tabs-vertical-drop-bounds" runVerticalDropBoundsTest
+  , spec "tabs-clipped-drop-bounds" runClippedDropBoundsTest
   ]
 
 data DummyTab = TabA | TabB | TabC
   deriving (Eq, Show)
+
+runVerticalDropBoundsTest :: Context -> IORef Int -> IO ()
+runVerticalDropBoundsTest ctx failed = do
+  let ui = panelWith (padAll 40 . fillW . fillH) $
+        tabBarConfigured' (TabsConfig TabUnderline TabLeft (pure ())) TabA
+          [tab TabA "Alpha" (), tab TabB "Beta" ()]
+  r <- warmup2 ctx (withInput 400 200) ui
+  let bounds = tabStripRect r
+  assert failed (rectX bounds >= 40 && rectY bounds >= 40)
+  assertEq failed Nothing
+    (insertionIndex DragAxisY bounds (map (respRect . snd) (tabHeaders r)) (V2 10 10))
+
+runClippedDropBoundsTest :: Context -> IORef Int -> IO ()
+runClippedDropBoundsTest ctx failed = do
+  result <- newIORef (Rect 0 0 0 0)
+  let ui orientation = paneGrid defaultPaneGridConfig
+        { pgLayout = fixedWH 200 60
+        , pgViewPane = \_ _ -> do
+            r <- panelWith (fixedW 600) $
+              tabBarConfigured' (TabsConfig TabUnderline orientation (pure ())) TabA
+                [tab TabA "Alpha" (), tab TabB "Beta" (), tab TabC "Gamma" ()]
+            liftIO (writeIORef result (tabStripRect r))
+            pure (PaneView "Tabs" False)
+        }
+  forM_ [TabTop, TabLeft] $ \orientation -> do
+    void (warmup2 ctx (withInput 400 200) (ui orientation))
+    bounds <- readIORef result
+    assert failed (rectW bounds > 0 && rectW bounds <= 200)
+    assert failed (rectH bounds > 0 && rectH bounds <= 60)
+
+runTabDragLifecycleTest :: Context -> IORef Int -> IO ()
+runTabDragLifecycleTest ctx failed = do
+  let inp = withInput 400 200
+      ui order = do
+        r <- tabBar' TabA [tab k (T.pack (show k)) () | k <- order]
+        d <- useDrag (tabHeaders r)
+        pure (r, d)
+      keys = [TabA, TabB, TabC]
+  (r, _) <- warmup2 ctx inp (ui keys)
+  first <- maybe (fail "missing tab header") (pure . snd) (listToMaybe (tabHeaders r))
+  let start = spanCenter (respRect first)
+      V2 x y = start
+      press = pressAt inp start
+      moved = holdAt press (V2 (x + 20) y)
+  (_, armed) <- evalUi ctx press (ui keys)
+  assertEq failed Nothing armed
+  (_, small) <- evalUi ctx (holdAt press (V2 (x + 3) y)) (ui keys)
+  assertEq failed Nothing small
+  (_, begun) <- evalUi ctx moved (ui keys)
+  assertEq failed (Just (TabA, DragStarted)) ((\d -> (dragPayload d, dragPhase d)) <$> begun)
+  (_, reordered) <- evalUi ctx moved (ui [TabC, TabB, TabA])
+  assertEq failed (Just (TabA, Dragging)) ((\d -> (dragPayload d, dragPhase d)) <$> reordered)
+  (_, released) <- evalUi ctx (releaseAt moved) (ui keys)
+  assertEq failed (Just DragReleased) (dragPhase <$> released)
+  (_, after) <- evalUi ctx inp (ui keys)
+  assertEq failed Nothing after
+  forM_ [0 .. 2 :: Int] $ \reason -> do
+    _ <- evalUi ctx press (ui keys)
+    _ <- evalUi ctx moved (ui keys)
+    let cancelInput = case reason of
+          0 -> moved {inputKeys = inputKeysFromList [KeyEscape]}
+          1 -> inp
+          _ -> moved
+        remaining = if reason == 2 then [TabB, TabC] else keys
+    (_, cancelled) <- evalUi ctx cancelInput (ui remaining)
+    assertEq failed (Just DragCancelled) (dragPhase <$> cancelled)
+    (_, ended) <- evalUi ctx (releaseAt moved) (ui keys)
+    assertEq failed Nothing ended
+    void (warmup2 ctx inp (ui keys))
+
+runTabDragControlsTest :: Context -> IORef Int -> IO ()
+runTabDragControlsTest ctx failed = do
+  let inp = withInput 400 200
+      ui = do
+        r <- tabBar' TabA
+          [closableTab TabA "Alpha" (), (tab TabB "Disabled" ()) {tabDisabled = True}]
+        useDrag (tabHeaders r)
+  _ <- warmup2 ctx inp ui
+  spans <- collectTextSpans ctx
+  close <- findCloseButtonRect ctx
+  forM_ [close, spanRect "Disabled" spans] $ \target ->
+    assertJust failed target $ \r -> do
+      let pos@(V2 x y) = spanCenter r
+          press = pressAt inp pos
+          moved = holdAt press (V2 (x + 20) y)
+      _ <- evalUi ctx press ui
+      result <- evalUi ctx moved ui
+      assertEq failed Nothing result
+      void (evalUi ctx (releaseAt moved) ui)
+
+runTabDragReorderTest :: Context -> IORef Int -> IO ()
+runTabDragReorderTest ctx failed = do
+  orderRef <- newIORef [TabA, TabB, TabC]
+  let inp = withInput 400 200
+      ui = do
+        order <- liftIO (readIORef orderRef)
+        r <- tabBar' TabA [tab k (T.pack (show k)) () | k <- order]
+        gesture <- useDrag (tabHeaders r)
+        forM_ gesture $ \d -> when (dragPhase d == DragReleased) $ do
+          let rest = filter ((/= dragPayload d) . fst) (tabHeaders r)
+          forM_ (insertionIndex DragAxisX (tabStripRect r) (map (respRect . snd) rest) (dragAt d)) $ \i -> do
+            let (before, after) = splitAt i (map fst rest)
+            liftIO (writeIORef orderRef (before ++ dragPayload d : after))
+        pure r
+  r <- warmup2 ctx inp ui
+  first <- maybe (fail "missing first tab") pure (lookup TabA (tabHeaders r))
+  third <- maybe (fail "missing third tab") pure (lookup TabC (tabHeaders r))
+  let press = pressAt inp (spanCenter (respRect first))
+      Rect x y w h = respRect third
+      moved = holdAt press (V2 (x + w - 1) (y + h / 2))
+  _ <- evalUi ctx press ui
+  _ <- evalUi ctx moved ui
+  assertEq failed [TabA, TabB, TabC] =<< readIORef orderRef
+  _ <- evalUi ctx (releaseAt moved) ui
+  assertEq failed [TabB, TabC, TabA] =<< readIORef orderRef
+  settled <- evalUi ctx inp ui
+  assertEq failed [TabB, TabC, TabA] (map fst (tabHeaders settled))
 
 -- Content replacement inside a floating window must repaint every pixel of
 -- the new body: a clip that skipped any incoming row would leave the pane
@@ -94,7 +216,7 @@ runTabsEmitTest ctx failed = do
 runTabResponseForwardingTest :: Context -> IORef Int -> IO ()
 runTabResponseForwardingTest _ failed = do
   let inner = mempty {rawRespSubmitted = True, rawRespHeld = buttonsFromList [MouseRight], rawRespChanged = True}
-      tabResp = TabResponse inner Nothing TabA
+      tabResp = TabResponse inner Nothing TabA [] (Rect 0 0 0 0)
       tableResp = TableResponse inner (SortCol 0 SortAsc) [] mempty
   assert failed (respSubmitted tabResp && respRightPressed tabResp && respChanged tabResp)
   assert failed (respSubmitted tableResp && respRightPressed tableResp && respChanged tableResp)

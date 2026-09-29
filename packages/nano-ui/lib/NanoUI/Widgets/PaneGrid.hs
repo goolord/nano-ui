@@ -13,6 +13,10 @@
 -- During a drag the grid is laid out as the drop would leave it, with the
 -- landing slot empty and highlighted. Releasing commits exactly that tree.
 -- Releasing outside the grid cancels the drag.
+--
+-- For external sources, 'pgrDropTarget' reports a destination and preview
+-- rectangle. The application resolves target priority and calls
+-- 'commitPaneDrop' only when it chooses to create a pane.
 module NanoUI.Widgets.PaneGrid
   ( GridAxis (..)
   , GridNode (..)
@@ -21,6 +25,10 @@ module NanoUI.Widgets.PaneGrid
   , PaneGridCtx (pgcPaneId, pgcRect, pgcMaximized, pgcDragging, pgcDndActive, pgcSplit, pgcClose, pgcMaximize, pgcRestore)
   , PaneView (..)
   , PaneGridResponse (..)
+  , PaneEdge (..)
+  , PaneDropLocation (..)
+  , PaneGridDrop, pgdLocation, pgdRect, pgdPane
+  , commitPaneDrop
   , paneGrid
   , paneDragHandle
   ) where
@@ -37,7 +45,7 @@ import Data.Text qualified as T
 import Data.Word (Word64)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Input
-import NanoUI.Internal.Monad (NanoUI, (<&&>), askInput, damageWidgetNow, focusedWidget, freshWidget, lastRect, releaseFocus, requestFrame, liftIO, takeEscape, whenM, withIdFrame, withKey)
+import NanoUI.Internal.Monad (NanoUI, (<&&>), askContext, askInput, damageWidgetNow, focusedWidget, freshWidget, lastRect, releaseFocus, requestFrame, liftIO, takeEscape, whenM, withIdFrame, withKey)
 import NanoUI.Internal.Id (IdContext (..), WidgetId, hashWidgetId)
 import NanoUI.Internal.Frame.Hit (nodeInteractionHit)
 import NanoUI.Internal.Frame.Scroll.Geometry (padContentClip)
@@ -200,8 +208,56 @@ data PaneGridResponse = PaneGridResponse
     -- ^ Focused pane id, 0 when the grid has no panes.
   , pgrMaximizedPane :: !Word64
     -- ^ Maximized pane id, 0 when none.
+  , pgrDropTarget :: !(Maybe PaneGridDrop)
+    -- ^ Destination at the pointer, independent of any drag. Centers, gutters,
+    -- covered/clipped areas, maximization and internal gestures yield Nothing.
+    -- Resolve target priority before calling 'commitPaneDrop'.
   }
   deriving (Eq, Show)
+
+data PaneEdge = PaneLeft | PaneRight | PaneAbove | PaneBelow
+  deriving (Eq, Show)
+
+-- | Split beside one pane, or around the whole grid.
+data PaneDropLocation
+  = BesidePane !Word64 !PaneEdge
+  | OutsideGrid !PaneEdge
+  deriving (Eq, Show)
+
+-- | A destination and its proposed new pane rectangle. Querying it neither
+-- paints a preview nor changes the grid. Keep it within the current context;
+-- commits reject an already-used target or a changed grid snapshot.
+data PaneGridDrop = PaneGridDrop !PaneDropLocation Rect !Word64 !WidgetId !GridState GridNode
+  deriving (Eq, Show)
+
+pgdLocation :: PaneGridDrop -> PaneDropLocation
+pgdLocation (PaneGridDrop location _ _ _ _ _) = location
+
+-- | Preview rectangle in window coordinates, laid out only when read.
+pgdRect :: PaneGridDrop -> Rect
+pgdRect (PaneGridDrop _ rect _ _ _ _) = rect
+
+-- | Pane under the pointer, also at outer edges; use it to reject destinations.
+pgdPane :: PaneGridDrop -> Word64
+pgdPane (PaneGridDrop _ _ pane _ _ _) = pane
+
+-- | Insert and focus a fresh pane at an accepted destination. Returns its id
+-- and the committed tree, or Nothing if the grid changed since the target
+-- was obtained. The application decides when to call this (normally on
+-- DragReleased), assigns the content, and saves the returned tree if controlled.
+-- The earlier 'PaneGridResponse' remains a pre-commit snapshot.
+commitPaneDrop :: PaneGridDrop -> NanoUI (Maybe (Word64, GridNode))
+commitPaneDrop (PaneGridDrop _ _ _ wid expected tree) = do
+  ctx <- askContext
+  let key = intKey wid
+      pane = gsSeed expected + 1
+  current <- lookupDyn key <$> liftIO (getStore ctx)
+  if current /= Just expected
+    then pure Nothing
+    else do
+      liftIO . modifyStore ctx . insertDyn key $
+        expected {gsTree = Just tree, gsSeed = pane + 1, gsFocus = pane}
+      pure (Just (pane, tree))
 
 -- -----------------------------------------------------------------------------
 -- Internal state
@@ -229,7 +285,7 @@ data GridState = GridState
   , gsGiven :: !(Maybe GridNode)
     -- ^ The 'pgTree' the caller passed last frame.
   }
-  deriving (Eq)
+  deriving (Eq, Show)
 
 -- | The pointer gesture a press on the grid armed. It lasts until the button
 -- comes up.
@@ -243,7 +299,7 @@ data Gesture
     -- ^ A pane drag: the pane's id, the pointer at the press (for the drag
     -- threshold), whether the pointer has crossed the threshold since, and
     -- the pane's title for the drag indicator.
-  deriving (Eq)
+  deriving (Eq, Show)
 
 data RenderedPane = RenderedPane
   { rpPaneId :: !Word64
@@ -437,7 +493,30 @@ paneGrid cfg = do
     whenM takeEscape (restorePane env)
 
   end <- fromMaybe gs . lookupDyn key <$> liftIO (getStore ctx)
-  let (maxEnd, focusEnd) = maybe (0, 0) (`paneFocus` end) (gsTree end)
+  covered <- liftIO (pointerCovered ctx wid)
+  clip <- liftIO (getPrevClipRect ctx wid)
+  let dropTarget
+        | covered || not (maybe True (`rectHit` mouse) clip) = Nothing
+        | gsGesture gs /= NoGesture || gsGesture end /= NoGesture = Nothing
+        | maxPane /= 0 || gsMax end /= 0 || gsTree end /= gsTree gs = Nothing
+        | not (rectHit baseRect mouse) = Nothing
+        | otherwise = do
+            (q, r) <- find (\(_, r) -> rectHit r mouse) (M.toList regions)
+            let seed = gsSeed end
+                np = seed + 1
+                edge AxisV True = PaneLeft
+                edge AxisV False = PaneRight
+                edge AxisH True = PaneAbove
+                edge AxisH False = PaneBelow
+            (location, proposed) <- case fromMaybe (dropTargetForPane r mouse q) (topLevelDropTarget edgeBand baseRect mouse) of
+              DropSplit p ax onA -> Just (BesidePane p (edge ax onA), treeSplit p seed ax onA np tree)
+              DropTop ax onA -> Just (OutsideGrid (edge ax onA), if onA
+                then Split seed ax 0.5 (Pane np) tree
+                else Split seed ax 0.5 tree (Pane np))
+              DropSwap _ -> Nothing
+            let rect = M.findWithDefault (Rect 0 0 0 0) np (fst (layoutNode minSize gutter proposed baseRect))
+            pure (PaneGridDrop location rect q wid end proposed)
+      (maxEnd, focusEnd) = maybe (0, 0) (`paneFocus` end) (gsTree end)
       -- A divider drag moves the tree on the frames it is held, so the frame
       -- that lets it go compares with the ratio it was pressed at.
       resized = case gsGesture gs of
@@ -452,6 +531,7 @@ paneGrid cfg = do
       , pgrPanes = maybe [] treePanes (gsTree end)
       , pgrFocusedPane = focusEnd
       , pgrMaximizedPane = maxEnd
+      , pgrDropTarget = dropTarget
       }
 
 -- | A row, laid out like 'rowWith', that drags its pane: a press on it not
