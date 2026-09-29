@@ -69,6 +69,7 @@ import NanoUI
   , hyperlink
   , image'
   , inlineBackground
+  , inlineText
   , inlineWith
   , labelWith
   , lerpColor
@@ -80,7 +81,7 @@ import NanoUI
   , resolveFontUi
   , respClicked
   , restyle
-  , richTextWith
+  , selectableRichTextWith
   , rowWith
   , scope
   , separator
@@ -249,9 +250,9 @@ block env = \case
         resp <- image' (fixedWH w h) iid
         unless (T.null title) (tooltip resp title)
         pure (if respClicked resp then Just target else Nothing)
-    | otherwise -> richTextWith (tight . fillW . envText env) =<< keptInlines env xs
+    | otherwise -> selectableRichTextWith (tight . fillW . envText env) =<< keptInlines env xs
   Heading level xs ->
-    let title = richTextWith (tight . fillW . mdHeading (envCfg env) level . envText env) =<< keptInlines env xs
+    let title = selectableRichTextWith (tight . fillW . mdHeading (envCfg env) level . envText env) =<< keptInlines env xs
      in if level <= 2 then columnWith (tight . fillW . gap 6) (title <* separator) else title
   ThematicBreak -> Nothing <$ separator
   CodeBlock info code -> Nothing <$ codeBlock env info code
@@ -369,7 +370,10 @@ codeBlock env info code = do
           when (mdCopyCode cfg) $
             whenM (styled subtle (buttonWith (padXY 6 1 . fontSize (0.8 * envSize env)) "Copy")) $
               void (setClipboard code)
-      labelWith (tight . fillW . fontMono . fontColor (styleFg (themeInput theme)) . envText env) code
+      void $
+        selectableRichTextWith
+          (tight . fillW . fontMono . fontColor (styleFg (themeInput theme)) . envText env)
+          [inlineText code]
 
 -- | A list: each item's marker beside its blocks; tight lists have less
 -- spacing. Markers take the surrounding text colour. Bullets are a disc,
@@ -441,7 +445,7 @@ tableBlock env aligns header rows = do
       cell isHeader (align, spans) =
         styled (panelStyle (mdTableCell (envCfg env) isHeader . flat (if isHeader then headBg else bodyBg))) $
           panelWith (padXY 8 5 . fillW . fillH) $
-            richTextWith (tight . alignOf align . (if isHeader then fontBold else id) . envText env)
+            selectableRichTextWith (tight . alignOf align . (if isHeader then fontBold else id) . envText env)
               =<< keptInlines env spans
       alignOf = \case
         CellCenter -> alignCenter

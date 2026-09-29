@@ -19,16 +19,17 @@ import NanoUI
   , getScrollOffset, label, padAll, panel, rectIntersect, runCanvasFor, scrollArea, liftIO
   )
 import NanoUI.Backend (FontBackend (..), FontMetrics (..), monospaceMetrics)
-import NanoUI.Internal.Context (Context (..), CustomDrawingEntry (..), lookupCustomDrawing)
+import NanoUI.Internal.Context (Context (..), CustomDrawingEntry (..), getTheme, lookupCustomDrawing)
 import NanoUI.Internal.Layout.Arena (NodeType (..), arenaCount, getNodeRect, getNodeType, getWidgetId)
 import NanoUI.Internal.Widgets.Custom (mkCustomDrawContext)
 import NanoUI.Markdown
 import NanoUI.Testing
   ( Damage (..), DrawData (..), collectOverlayTextSpans, collectTextSpans, newContext, runFrame, takeDamage, withClipboard
-  , withFontMetrics
+  , lineWidth, withFontMetrics
   )
 import NanoUI.Testing.Assert (withInput)
-import NanoUI.Testing.Harness (covers, hasText, runClick, spanCenter, spanRect, spanRectOf, warmup, warmup2)
+import NanoUI.Testing.Harness (chordInp, hasText, holdAt, pressAt, releaseAt, runClick, spanCenter, spanRect, spanRectOf, warmup, warmup2)
+import NanoUI.Shortcut (ctrl, key)
 import Test.Hspec
 
 -- | A drawn rich-text word: widget, line box origin, font size, text and
@@ -141,10 +142,10 @@ spec = do
         \- one\n- [x] two\n\n1. first\n\n> quoted\n\n| h1 | h2 |\n|---|---|\n| c1 | c2 |\n\n\
         \```hs\ncode here\n```\n\n---\n\n![alt text](missing.png)"
     ws <- map wText <$> drawnWords ctx
-    mapM_ (\w -> ws `shouldContain` [w]) ["Title", "Hello", "world", "docs", "one", "two", "first", "quoted", "h1", "c2", "alt", "text"]
-    -- Code is a label, so it shows up in the text spans.
+    mapM_ (\w -> ws `shouldContain` [w]) ["Title", "Hello", "world", "docs", "one", "two", "first", "quoted", "h1", "c2", "alt", "text", "code here"]
+    -- The code language remains a normal text span.
     spans <- collectTextSpans ctx
-    map (`hasText` spans) ["code here", "hs"] `shouldBe` [True, True]
+    map (`hasText` spans) ["hs"] `shouldBe` [True]
 
   it "draws headings larger than body text" $ do
     ws <- drawnWords =<< drawn 600 400 (view (parseMarkdown "# Big\n\nsmall"))
@@ -167,6 +168,48 @@ spec = do
     clickWord ui "docs" `shouldReturn` Just "https://example.com/docs"
     clickWord ui "https://auto.link" `shouldReturn` Just "https://auto.link"
     clickWord ui "Read" `shouldReturn` Nothing
+
+  it "selects and copies styled Markdown text" $ do
+    let inp = withInput 600 400
+        ui = view (parseMarkdown "Select **these** words")
+    ctx0 <- drawn 600 400 ui
+    clipboard <- newIORef Nothing
+    let ctx = withClipboard ctx0 (readIORef clipboard) (\txt -> writeIORef clipboard (Just txt) >> pure True)
+    words' <- drawnWords ctx
+    Just firstWord <- pure (wordNamed "Select" words')
+    Just emphasized <- pure (wordNamed "these" words')
+    let V2 sx sy = wPos firstWord
+        V2 tx ty = wPos emphasized
+        lineH = fmLineHeight (ctxFontMetrics ctx)
+        start = V2 (sx + 1) (sy + lineH / 2)
+        finish = V2 (tx + lineWidth (ctxFontMetrics ctx) "these" - 1) (ty + lineH / 2)
+        press = pressAt inp start
+        drag = holdAt press finish
+    _ <- runFrame ctx press ui
+    _ <- runFrame ctx drag ui
+    _ <- runFrame ctx (releaseAt drag) ui
+    selectionColor <- themeSelection <$> getTheme ctx
+    fills <- drawnFills selectionColor ctx
+    fills `shouldNotBe` []
+    _ <- runFrame ctx (chordInp (ctrl <> key 'c') inp) ui
+    readIORef clipboard `shouldReturn` Just "Select these"
+    _ <- runFrame ctx (chordInp (ctrl <> key 'a') inp) ui
+    _ <- runFrame ctx (chordInp (ctrl <> key 'c') inp) ui
+    readIORef clipboard `shouldReturn` Just "Select these words"
+
+  it "selects and copies code blocks without losing whitespace" $ do
+    let inp = withInput 600 400
+        ui = view (parseMarkdown "```\n  let x = 1\n```")
+    ctx0 <- drawn 600 400 ui
+    clipboard <- newIORef Nothing
+    let ctx = withClipboard ctx0 (readIORef clipboard) (\txt -> writeIORef clipboard (Just txt) >> pure True)
+    [code] <- pure . filter ((== "  let x = 1") . wText) =<< drawnWords ctx
+    let V2 x y = wPos code
+        pos = V2 (x + 1) (y + fmLineHeight (ctxFontMetrics ctx) / 2)
+    _ <- runClick ctx inp ui pos
+    _ <- runFrame ctx (chordInp (ctrl <> key 'a') inp) ui
+    _ <- runFrame ctx (chordInp (ctrl <> key 'c') inp) ui
+    readIORef clipboard `shouldReturn` Just "  let x = 1"
 
   it "keeps earlier blocks' ids while text streams in" $
     -- The growing block keeps its id too.
@@ -226,21 +269,19 @@ spec = do
     let long = "a_long_identifier_much_wider_than_the_column_it_is_drawn_in"
     -- No fixed-width ancestor: the column fills the window.
     ctx <- drawn 400 400 (columnWith (fillW . padAll 10) (markdown (parseMarkdown ("```\nfirst\n" <> long <> "\nlast\n```"))))
-    spans <- collectTextSpans ctx
-    let code = [(r, t, clip) | (r, t, _, _, clip) <- spans, t /= "Copy"]
-        texts = [t | (_, t, _) <- code]
+    code <- drawnWords ctx
+    let texts = map wText code
         middle = takeWhile (/= "last") (drop 1 (dropWhile (/= "first") texts))
     mapM_ (\t -> texts `shouldContain` [t]) ["first", "last"]
     T.concat middle `shouldBe` long
     length middle `shouldSatisfy` (> 1)
-    -- Every line lies inside the window and inside the block's clip.
-    mapM_ (\(r@(Rect x _ w _), t, clip) -> (t, x + w <= 390, covers clip r) `shouldBe` (t, True, True)) code
+    -- Every wrapped line starts within the code block's available width.
+    mapM_ (\w -> let V2 x _ = wPos w in x < 390 `shouldBe` True) code
 
   it "keeps a wrapped code line's indent and the spaces inside it" $ do
     let line = "    x  =  alpha  beta  gamma  delta  epsilon  zeta  eta  theta"
     ctx <- drawn 300 400 (columnWith (fillW . padAll 10) (markdown (parseMarkdown ("```\n" <> line <> "\n```"))))
-    texts <- map (\(_, t, _, _, _) -> t) <$> collectTextSpans ctx
-    let code = filter (/= "Copy") texts
+    code <- map wText <$> drawnWords ctx
     length code `shouldSatisfy` (> 1)
     take 1 code `shouldSatisfy` all ("    x  =  " `T.isPrefixOf`)
     -- Each line is a substring of the source line, spaces included.
@@ -253,8 +294,9 @@ spec = do
         doc = parseMarkdown (paras 3 <> "```\ncode\n```\n\n" <> paras 30)
         ui = scrollArea (fillW . fixedH 280) (columnWith (fillW . padAll 10) (markdown doc))
     (sid, _) <- warmup2 ctx inp ui
-    Just r <- spanRect "code" <$> collectTextSpans ctx
-    let over = inp {inputMousePos = spanCenter r}
+    [code] <- pure . filter ((== "code") . wText) =<< drawnWords ctx
+    let V2 x y = wPos code
+        over = inp {inputMousePos = V2 x (y + fmLineHeight (ctxFontMetrics ctx) / 2)}
     void (runFrame ctx over {inputScroll = V2 0 3} ui)
     -- Let the glide settle.
     replicateM_ 30 (runFrame ctx over {inputDeltaTime = 0.05} ui)
@@ -387,10 +429,10 @@ spec = do
       drawn 600 600 . columnWith (fixedW 500) . markdownConfigured customCode . parseMarkdown $
         "```hs\ntop\n```\n\n> ```hs\n> quoted\n> ```\n\n- item\n\n  ```hs\n  listed\n  ```\n\n```py\nother\n```\n\nafter"
     spans <- collectTextSpans ctx
-    map (`hasText` spans) ["custom top", "custom quoted", "custom listed", "other", "py"] `shouldBe` replicate 5 True
+    map (`hasText` spans) ["custom top", "custom quoted", "custom listed", "py"] `shouldBe` replicate 4 True
+    map wText <$> drawnWords ctx `shouldReturn` ["item", "other", "after"]
     -- Only the Python block uses the default widget, with its copy button.
     length [() | (_, "Copy", _, _, _) <- spans] `shouldBe` 1
-    map wText <$> drawnWords ctx `shouldReturn` ["item", "after"]
 
   it "wraps the widget's own drawing in chrome of its own, where the block is, and returns its link" $ do
     let cfg :: MarkdownConfig

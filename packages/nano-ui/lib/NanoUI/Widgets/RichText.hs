@@ -13,9 +13,10 @@ module NanoUI.Widgets.RichText
   , richText'
   , richTextWith
   , richTextWith'
+  , selectableRichTextWith
   ) where
 
-import Control.Monad (unless)
+import Control.Monad (foldM, unless, when)
 import Data.Hashable (hashWithSalt)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
@@ -27,15 +28,21 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import NanoUI.Internal.Context
 import NanoUI.Internal.Draw (DrawOp (..), TextFont (..))
-import NanoUI.Internal.Font (FontMetrics (..), lineWidthIO)
+import NanoUI.Internal.Font (FontMetrics (..), prepareFontMetrics, selectionSpans, textIndexAtX)
+import NanoUI.Internal.Font qualified as Font
 import NanoUI.Internal.Frame.Node (resolveTextFont)
-import NanoUI.Internal.Input (Input (..), UiCursorKind (..))
+import NanoUI.Internal.Id (WidgetId)
+import NanoUI.Internal.Input (Input (..), MouseButton (MouseLeft), UiCursorKind (..), heldIn, inputMousePos, pressedIn, releasedIn)
 import NanoUI.Internal.Layout.Arena (NodeType (NodeDrawing))
 import NanoUI.Internal.Store (eqByPtr, ptrEq)
-import NanoUI.Internal.Monad (NanoUI, askDefaultLayout, askInput, freshWidget, liftIO, uiTheme)
+import NanoUI.Internal.Monad (NanoUI, askDefaultLayout, askInput, freshWidget, liftIO, requestFocus, uiTheme)
 import NanoUI.Internal.Style hiding (Flow (..))
 import NanoUI.Internal.Types (Color (..), Rect (..), V2 (..))
-import NanoUI.Internal.Widgets.Node (Response, addWidget, respClicked, respHovered, respRect)
+import NanoUI.Internal.Widgets.Node (Response, addWidget, addWidgetStyled, respClicked, respHovered, respRect)
+import NanoUI.Internal.Widgets.Behavior (keyboardFocused)
+import NanoUI.Internal.Widgets.TextInput (fieldTextCommands)
+import NanoUI.Widgets.TextBuffer qualified as TB
+import NanoUI.Widgets.TextEditor (Editor (..), EditorMode (..), editorSelection, emptyHistory, multiLineMode, runCommandIO)
 import System.IO.Unsafe (unsafeDupablePerformIO)
 
 -- | A piece of a paragraph: text in one style, with an optional hyperlink
@@ -92,7 +99,16 @@ richText = richTextWith id
 -- for every piece. Horizontal alignment applies per line: with 'alignEnd'
 -- every line ends at the right edge.
 richTextWith :: (Layout -> Layout) -> [Inline] -> NanoUI (Maybe Text)
-richTextWith f pieces = snd <$> richTextWith' f pieces
+richTextWith = richTextWithMode False
+
+-- | 'richTextWith' with read-only mouse selection and the standard text
+-- commands for selecting and copying text. Link clicks still return their
+-- destination.
+selectableRichTextWith :: (Layout -> Layout) -> [Inline] -> NanoUI (Maybe Text)
+selectableRichTextWith = richTextWithMode True
+
+richTextWithMode :: Bool -> (Layout -> Layout) -> [Inline] -> NanoUI (Maybe Text)
+richTextWithMode selectable f pieces = snd <$> richTextWithMode' selectable f pieces
 
 -- | 'richText' returning the paragraph response and a link target clicked
 -- this frame, or 'Nothing' when no link was activated.
@@ -109,21 +125,24 @@ data Run = Run
   , runBackground :: !(Maybe Color)
   }
 
-data TokenKind = Word | Space | Break
+data TokenKind = Word | Space | Break | Glyph | GlyphSpace
   deriving (Eq)
 
 -- A word, a run of spaces or a line break, with its width in its piece's font.
 data Token = Token
-  { _tokenText :: !Text
+  { tokenText :: !Text
   , tokenRun :: !Int
   , tokenKind :: !TokenKind
   , tokenWidth :: !Float
+  , tokenStart :: {-# UNPACK #-} !Int
+  , tokenMetrics :: !FontMetrics
   }
 
 -- A laid-out line: its top, height and baseline offset, and its tokens with
 -- their x positions.
 data Line = Line
-  { lineTop :: !Float
+  { lineStart :: {-# UNPACK #-} !Int
+  , lineTop :: !Float
   , lineHeight :: !Float
   , lineAscent :: !Float
   , lineWidth :: !Float
@@ -143,6 +162,7 @@ data Paragraph = Paragraph
   , paraWidth :: !Float
   , paraLines :: [Line]
   , paraMeasured :: !(IORef Measured)
+  , paraSelection :: !(Maybe (IORef RichSelection))
   }
 
 -- What a paragraph's key was last worked out from: the pieces, the
@@ -150,7 +170,10 @@ data Paragraph = Paragraph
 -- are the same list as last frame's under an equal layout and theme resolve
 -- to the same fonts and colours, so the key is reused without hashing their
 -- text.
-data Inputs = Inputs [Inline] !Layout !Theme !Int
+data Inputs = Inputs [Inline] !Layout !Theme !Int !Bool
+
+data RichSelection = RichSelection !Text !TB.Cursor !TB.Cursor !Bool !Bool
+  deriving (Eq)
 
 -- The width a paragraph was last measured at and its extent there
 -- ('measureAt').
@@ -164,18 +187,22 @@ newtype Paragraphs = Paragraphs (IORef ParagraphCache)
 
 -- | 'richTextWith' returning the paragraph response and optional clicked link target.
 richTextWith' :: (Layout -> Layout) -> [Inline] -> NanoUI (Response, Maybe Text)
-richTextWith' f pieces = do
+richTextWith' = richTextWithMode' False
+
+richTextWithMode' :: Bool -> (Layout -> Layout) -> [Inline] -> NanoUI (Response, Maybe Text)
+richTextWithMode' selectable f pieces = do
   (wid, ctx) <- freshWidget
   inp <- askInput
   base <- f <$> askDefaultLayout
   theme <- uiTheme
   let styled = [(piece, pieceFont l, pieceColor theme l target) | piece@(Inline _ style target _) <- pieces, let l = style base]
+      plain = T.concat [txt | (Inline txt _ _ _, _, _) <- styled]
       align = layoutAlignX base
   Paragraphs cacheRef <- liftIO $ hostOrInit ctx (Paragraphs <$> newIORef (ParagraphCache 0 paragraphBound IM.empty))
   gen <- liftIO (readIORef (ctxMetricGen ctx))
   let reused = \para -> do
-        Inputs pieces0 base0 theme0 gen0 <- readIORef (paraInputs para)
-        pure (ptrEq pieces pieces0 && gen == gen0 && eqByPtr base base0 && eqByPtr theme theme0)
+        Inputs pieces0 base0 theme0 gen0 selectable0 <- readIORef (paraInputs para)
+        pure (ptrEq pieces pieces0 && gen == gen0 && eqByPtr base base0 && eqByPtr theme theme0 && selectable == selectable0)
   cached <- liftIO ((\(ParagraphCache _ _ m) -> IM.lookup (intKey wid) m) <$> readIORef cacheRef)
   sameInputs <- liftIO (maybe (pure False) reused cached)
   let hashed =
@@ -185,16 +212,17 @@ richTextWith' f pieces = do
                 `hashWithSalt` fromEnum weight `hashWithSalt` fromEnum fstyle `hashWithSalt` fromEnum deco
                 `hashWithSalt` rgba `hashWithSalt` target `hashWithSalt` fmap (\(Color c) -> c) bg
           )
-          (gen `hashWithSalt` fromEnum align)
+          (gen `hashWithSalt` fromEnum align `hashWithSalt` selectable)
           styled
       key = case cached of
         Just para | sameInputs -> paraKey para
         _ -> hashed
-      inputs = Inputs pieces base theme gen
+      inputs = Inputs pieces base theme gen selectable
   para0 <- case cached of
     Just para | paraKey para == key -> liftIO (para <$ unless sameInputs (writeIORef (paraInputs para) inputs))
     _ -> liftIO $ do
-      resolved <- mapM (measurePiece ctx) (zip [0 ..] styled)
+      let starts = scanl (+) 0 [T.length txt | (Inline txt _ _ _, _, _) <- styled]
+      resolved <- mapM (measurePiece ctx) (zip3 [0 ..] starts styled)
       let runs = smallArrayFromList (map fst resolved)
           tokens = concatMap snd resolved
           emptyLine = case resolved of
@@ -202,8 +230,10 @@ richTextWith' f pieces = do
             [] -> (fmLineHeight (ctxFontMetrics ctx), fmAscent (ctxFontMetrics ctx))
       measured <- newIORef Unmeasured
       inputsRef <- newIORef inputs
-      pure (Paragraph key inputsRef runs tokens emptyLine (lineBoxes (layoutLines runs emptyLine AlignStart 1e9 tokens)) (-1) [] measured)
-  resp <- addWidget wid NodeDrawing T.empty 0 base
+      selection <- if selectable then Just <$> newIORef (RichSelection plain (TB.Cursor 0 0) (TB.Cursor 0 0) False False) else pure Nothing
+      pure (Paragraph key inputsRef runs tokens emptyLine (lineBoxes (layoutLines runs emptyLine AlignStart 1e9 tokens)) (-1) [] measured selection)
+  when (selectable && not (T.null plain)) (liftIO (registerFocusable ctx wid))
+  resp <- if selectable then addWidgetStyled wid NodeDrawing T.empty 0 base (fromEnum KeysType) else addWidget wid NodeDrawing T.empty 0 base
   let Rect rx ry rw _ = respRect resp
       runs = paraRuns para0
       layoutAt width = layoutLines runs (paraEmptyLine para0) align width (paraTokens para0)
@@ -213,6 +243,13 @@ richTextWith' f pieces = do
       linesAt width
         | width == paraWidth para = paraLines para
         | otherwise = layoutAt width
+  (selection, dragReleased) <- case paraSelection para of
+    Nothing -> pure (Nothing, False)
+    Just selectionRef -> do
+      (current, dragged) <- updateSelection ctx inp wid resp plain (paraLines para) selectionRef
+      pure (Just current, dragged)
+  focused <- if selectable then keyboardFocused wid else pure False
+  let
       V2 mx my = inputMousePos inp
       hoveredRun
         | not (respHovered resp) = Nothing
@@ -229,27 +266,38 @@ richTextWith' f pieces = do
       -- Words are drawn separately, so backgrounds and decorations are drawn
       -- once per piece per line, spanning the inner spaces. Backgrounds go
       -- underneath.
-      draw _cdc (Rect x0 y0 w _) =
+      draw _cdc (Rect x0 y0 w h) =
         smallArrayFromList $
-          concat
-            [ [FillRect (Rect (x0 + x1) (y0 + lineTop line) (x2 - x1) (lineHeight line)) bg | (run, _, x1, x2) <- spans, Just bg <- [runBackground run]]
-                ++ [ DrawTextStyled (x0 + x) (lineY line run) ((runFont run) {textFontDecoration = DecorationNone}) txt (runColor run)
-                   | (x, Token txt runIdx Word _) <- lineTokens line
-                   , let run = indexSmallArray runs runIdx
-                   ]
-                ++ [ FillRect (Rect (x0 + x1) (lineY line run + offset) (x2 - x1) thick) (runColor run)
-                   | (run, runIdx, x1, x2) <- spans
-                   , let deco = decorationOf runIdx
-                         thick = max 1 (0.06 * runLineHeight run)
-                   , deco /= DecorationNone
-                   , offset <- decorationOffsets deco run
-                   ]
-            | line <- linesAt w
-            , let spans = pieceSpans line
-            ]
+          concatMap lineOps (linesAt w)
+            ++ [StrokeRoundedRect (Rect x0 y0 w h) 2 1 (themeFocusRing theme) | focused]
         where
+          selected = selection >>= selectionOffsets
+          lineOps line =
+            let spans = pieceSpans line
+                highlights = maybe [] (\(lo, hi) -> selectionOps x0 y0 line lo hi (themeSelection theme)) selected
+             in [FillRect (Rect (x0 + x1) (y0 + lineTop line) (x2 - x1) (lineHeight line)) bg | (run, _, x1, x2) <- spans, Just bg <- [runBackground run]]
+                  ++ highlights
+                  ++ [ DrawTextStyled (x0 + x) (lineY line run) ((runFont run) {textFontDecoration = DecorationNone}) txt (runColor run)
+                     | (x, Token txt runIdx Word _ _ _) <- lineTokens line
+                     , let run = indexSmallArray runs runIdx
+                     ]
+                  ++ [ DrawTextStyled (x0 + x) (lineY line run) ((runFont run) {textFontDecoration = DecorationNone}) txt (runColor run)
+                      | group@((x, Token _ runIdx _ _ _ _) : _) <- glyphGroups line
+                     , let run = indexSmallArray runs runIdx
+                           txt = T.concat [tokenText tok | (_, tok) <- group]
+                     ]
+                  ++ [ FillRect (Rect (x0 + x1) (lineY line run + offset) (x2 - x1) thick) (runColor run)
+                     | (run, runIdx, x1, x2) <- spans
+                     , let deco = decorationOf runIdx
+                           thick = max 1 (0.06 * runLineHeight run)
+                     , deco /= DecorationNone
+                     , offset <- decorationOffsets deco run
+                     ]
           lineY line run = y0 + lineTop line + lineAscent line - runAscent run
-          isSpaceToken (_, tok) = tokenKind tok == Space
+          isSpaceToken (_, tok) = tokenKind tok == Space || tokenKind tok == GlyphSpace
+          glyphGroups line =
+            groupBy joinsGlyphs [(x, tok) | (x, tok) <- lineTokens line, tokenKind tok == Glyph || tokenKind tok == GlyphSpace]
+          joinsGlyphs (_, a) (_, b) = tokenRun a == tokenRun b
           -- Each piece's tokens on a line, trimmed of edge spaces: run, run
           -- index, start x and end x.
           pieceSpans line =
@@ -273,7 +321,7 @@ richTextWith' f pieces = do
               DecorationStrikethrough -> [strike]
               DecorationUnderlineStrike -> [under, strike]
               DecorationNone -> []
-      drawKey = key `hashWithSalt` fromMaybe (-1) hoveredRun
+      drawKey = key `hashWithSalt` fromMaybe (-1) hoveredRun `hashWithSalt` fmap selectionKey selection `hashWithSalt` focused
   liftIO $ do
     unless (paraWidth para0 == rw && fmap paraKey cached == Just key) $ do
       ParagraphCache n bound m <- readIORef cacheRef
@@ -297,15 +345,144 @@ richTextWith' f pieces = do
       CustomDrawingEntry
         (if drawKey == 0 then 1 else drawKey)
         draw
-        (Just (\_ _ _ -> if isJust hoveredRun then UiCursorPointer else UiCursorDefault))
+        (Just (\_ _ _ -> if isJust hoveredRun then UiCursorPointer else if selectable then UiCursorText else UiCursorDefault))
         0
         False
   let clicked
-        | respClicked resp = hoveredRun >>= runTarget . indexSmallArray runs
+        | respClicked resp && not dragReleased = hoveredRun >>= runTarget . indexSmallArray runs
         | otherwise = Nothing
   pure (resp, clicked)
   where
     lineBoxes lines' = (maximum (0 : map lineWidth lines'), sum (map lineHeight lines'))
+
+-- | Keep the paragraph's selection in document coordinates, so it survives
+-- rewrapping when the widget's width changes.
+updateSelection :: Context -> Input -> WidgetId -> Response -> Text -> [Line] -> IORef RichSelection -> NanoUI (RichSelection, Bool)
+updateSelection ctx inp wid resp plain lines' selectionRef = do
+  stored <- liftIO (readIORef selectionRef)
+  let synced = syncSelection plain stored
+      RichSelection _ _ _ dragging moved = synced
+      editor0 = selectionEditor plain synced
+  focused <- keyboardFocused wid
+  commands <- if focused then liftIO (fieldTextCommands ctx readOnlyMode inp) else pure []
+  editor <- liftIO (foldM (flip (runCommandIO ctx readOnlyMode)) editor0 commands)
+  let (keyAnchor, keyCursor) = editorSelection editor
+      afterKeys = RichSelection plain keyAnchor keyCursor dragging moved
+      mouse = inputMousePos inp
+      press = pressedIn MouseLeft inp && respHovered resp
+      held = heldIn MouseLeft inp
+      released = releasedIn MouseLeft inp
+  (next, dragReleased) <-
+    if press
+      then do
+        let pos = cursorAtPoint plain lines' (respRect resp) mouse
+        requestFocus wid
+        pure (RichSelection plain pos pos held False, False)
+      else case afterKeys of
+        RichSelection _ dragAnchor _ True wasMoved
+          | held || released -> do
+              let pos = cursorAtPoint plain lines' (respRect resp) mouse
+              let didMove = wasMoved || pos /= dragAnchor
+              pure
+                ( RichSelection plain dragAnchor pos held (didMove && held)
+                , released && didMove
+                )
+        RichSelection _ a c True _ -> pure (RichSelection plain a c False False, False)
+        RichSelection _ a c False _ -> pure (RichSelection plain a c False False, False)
+  liftIO (writeIORef selectionRef next)
+  pure (next, dragReleased)
+
+readOnlyMode :: EditorMode
+readOnlyMode = multiLineMode {modeEditable = False}
+
+syncSelection :: Text -> RichSelection -> RichSelection
+syncSelection plain previous@(RichSelection old a c _ _)
+  | old == plain = previous
+  | otherwise =
+      let buf = TB.fromText plain
+       in RichSelection plain (TB.clampCursor buf a) (TB.clampCursor buf c) False False
+
+selectionEditor :: Text -> RichSelection -> Editor
+selectionEditor plain (RichSelection _ anchor cursor _ _) =
+  let buf = TB.fromText plain
+      cursor' = TB.clampCursor buf cursor
+   in Editor (TB.withCursor cursor' buf) (TB.clampCursor buf anchor) emptyHistory
+
+selectionKey :: RichSelection -> (Int, Int)
+selectionKey (RichSelection txt anchor cursor _ _) =
+  let a = cursorOffset txt anchor
+      c = cursorOffset txt cursor
+   in (min a c, max a c)
+
+selectionOffsets :: RichSelection -> Maybe (Int, Int)
+selectionOffsets selection =
+  let (lo, hi) = selectionKey selection
+   in if lo == hi then Nothing else Just (lo, hi)
+
+-- | Draw the selected portions of each laid-out token with the theme's native
+-- selection colour, preserving the paragraph's per-run font shaping.
+selectionOps :: Float -> Float -> Line -> Int -> Int -> Color -> [DrawOp]
+selectionOps x0 y0 line lo hi color = concatMap drawToken (lineTokens line)
+  where
+    drawToken (x, tok) =
+      let Token txt _ _ _ start fm = tok
+          end = start + T.length txt
+          a = max lo start
+          b = min hi end
+       in if b <= a
+            then []
+            else
+              [ FillRect
+                  (Rect (x0 + x + sx) (y0 + lineTop line) (ex - sx) (lineHeight line))
+                  color
+              | (sx, ex) <- selectionSpans fm txt (a - start) (b - start)
+              ]
+
+cursorAtPoint :: Text -> [Line] -> Rect -> V2 -> TB.Cursor
+cursorAtPoint plain lines' (Rect rx ry _ _) (V2 px py) =
+  let line = lineAtY (py - ry) lines'
+      offset = tokenIndexAtX line (px - rx)
+   in cursorAtOffset plain offset
+
+lineAtY :: Float -> [Line] -> Line
+lineAtY y = go
+  where
+    go [] = Line 0 0 0 0 0 []
+    go [line] = line
+    go (line : rest)
+      | y < lineTop line + lineHeight line = line
+      | otherwise = go rest
+
+tokenIndexAtX :: Line -> Float -> Int
+tokenIndexAtX line x = go (lineTokens line)
+  where
+    go [] = lineStart line
+    go [(tokenX, tok)]
+      | x <= tokenX = tokenStart tok
+      | x >= tokenX + tokenWidth tok = tokenStart tok + T.length (tokenText tok)
+      | otherwise = indexWithin tokenX tok
+    go ((tokenX, tok) : rest)
+      | x <= tokenX = tokenStart tok
+      | x <= tokenX + tokenWidth tok = indexWithin tokenX tok
+      | otherwise = go rest
+    indexWithin tokenX tok =
+      let txt = tokenText tok
+       in tokenStart tok + textIndexAtX (tokenMetrics tok) txt (x - tokenX)
+
+cursorOffset :: Text -> TB.Cursor -> Int
+cursorOffset txt (TB.Cursor row col) =
+  let ls = T.splitOn "\n" txt
+      row' = max 0 (min row (length ls - 1))
+      before = sum (map T.length (take row' ls)) + row'
+      line = fromMaybe "" (listToMaybe (drop row' ls))
+   in before + max 0 (min col (T.length line))
+
+cursorAtOffset :: Text -> Int -> TB.Cursor
+cursorAtOffset txt offset =
+  let prefix = T.take (max 0 (min offset (T.length txt))) txt
+      row = T.count "\n" prefix
+      col = T.length (T.takeWhileEnd (/= '\n') prefix)
+   in TB.Cursor row col
 
 -- | @measureAt ref extentAt width@ is @extentAt width@, reused from @ref@
 -- when it holds the extent at that width, and otherwise computed and left
@@ -342,48 +519,76 @@ pieceColor theme l target =
    in fromMaybe (maybe toneCol (const (themeLink theme)) target) (layoutFontColor l)
 
 -- | A piece's line metrics and its tokens measured in its font.
-measurePiece :: Context -> (Int, (Inline, TextFont, Color)) -> IO (Run, [Token])
-measurePiece ctx (i, (Inline txt _ target bg, font, color)) = do
+measurePiece :: Context -> (Int, Int, (Inline, TextFont, Color)) -> IO (Run, [Token])
+measurePiece ctx (i, start, (Inline txt _ target bg, font, color)) = do
   (fm, _) <- resolveTextFont ctx font
-  tokens <- mapM (measure fm) (T.groupBy (\a b -> kindOf a == kindOf b && kindOf a /= Break) txt)
+  let mono = case font of TextFont _ FontMono _ _ _ -> True; _ -> False
+      parts
+        | mono = map T.singleton (T.unpack txt)
+        | otherwise = T.groupBy (\a b -> kindOf mono a == kindOf mono b && kindOf mono a /= Break) txt
+  monoMetrics <- if mono then prepareFontMetrics fm txt else pure fm
+  tokens <- reverse . snd <$> foldM (measure fm mono monoMetrics) (start, []) parts
   pure (Run font color (fmLineHeight fm) (fmAscent fm) target bg, tokens)
   where
-    kindOf c
+    kindOf mono c
       | c == '\n' = Break
+      | mono && (c == ' ' || c == '\t') = GlyphSpace
+      | mono = Glyph
       | c == ' ' || c == '\t' = Space
       | otherwise = Word
-    measure fm part = do
-      let kind = kindOf (T.head part)
-      w <- if kind == Break then pure 0 else lineWidthIO fm part
-      pure (Token part i kind w)
+    measure fm mono monoMetrics (at, acc) part = do
+      let kind = kindOf mono (T.head part)
+      prepared <- if mono then pure monoMetrics else prepareFontMetrics fm part
+      let w = if kind == Break then 0 else Font.lineWidth prepared part
+          token = Token part i kind w at prepared
+      pure (at + T.length part, token : acc)
 
 -- | Greedy line breaking at @width@, aligned by @align@. Breaks only at
 -- spaces or newlines, drops spaces at a wrap, and gives an overlong word its
 -- own line.
 layoutLines :: SmallArray Run -> (Float, Float) -> AlignX -> Float -> [Token] -> [Line]
-layoutLines runs (emptyH, emptyAscent) align width = go 0 [] 0 [] True
+layoutLines runs (emptyH, emptyAscent) align width = go 0 0 [] 0 [] True
   where
     -- @placed@ holds the line's tokens in reverse, @pending@ the spaces since
     -- its last word; @fresh@ whether the line starts after a wrap.
-    go top placed x pending fresh toks = case toks of
-      [] -> [finish top placed x]
+    go top start placed x pending fresh toks = case toks of
+      [] -> [finish start top placed x]
       tok : rest -> case tokenKind tok of
-        Break -> let line = finish top placed x in line : go (top + lineHeight line) [] 0 [] False rest
-        Space -> go top placed x (tok : pending) fresh rest
+        Break ->
+          let line = finish start top placed x
+              nextStart = tokenStart tok + T.length (tokenText tok)
+           in line : go (top + lineHeight line) nextStart [] 0 [] False rest
+        Space ->
+          let start' = if null placed && null pending && fresh then tokenStart tok else start
+           in go top start' placed x (tok : pending) fresh rest
+        Glyph -> placeGlyph top start placed x pending fresh tok rest
+        GlyphSpace -> placeGlyph top start placed x pending fresh tok rest
         Word ->
           let (word, rest') = span (\t -> tokenKind t == Word) toks
               wordW = sum (map tokenWidth word)
               spaceW = if null placed && fresh then 0 else sum (map tokenWidth pending)
            in if not (null placed) && x + spaceW + wordW > width
                 then
-                  let line = finish top placed x
-                   in line : go (top + lineHeight line) [] 0 [] True toks
+                  let line = finish start top placed x
+                   in line : go (top + lineHeight line) (tokenStart tok) [] 0 [] True toks
                 else
                   let (placed', x') = foldl' place (placed, x) (if null placed && fresh then [] else reverse pending)
                       (placed'', x'') = foldl' place (placed', x') word
-                   in go top placed'' x'' [] False rest'
+                      start' = if null placed && fresh then maybe start tokenStart (listToMaybe word) else start
+                   in go top start' placed'' x'' [] False rest'
+    placeGlyph top start placed x pending fresh tok rest
+      | not (null placed) && x + spaceW + tokenWidth tok > width =
+          let line = finish start top placed x
+           in line : go (top + lineHeight line) (tokenStart tok) [] 0 [] True (tok : rest)
+      | otherwise =
+          let (placed', x') = foldl' place (placed, x) (if null placed && fresh then [] else reverse pending)
+              (placed'', x'') = place (placed', x') tok
+              start' = if null placed && fresh then tokenStart tok else start
+           in go top start' placed'' x'' [] False rest
+      where
+        spaceW = if null placed && fresh then 0 else sum (map tokenWidth pending)
     place (acc, x) tok = ((x, tok) : acc, x + tokenWidth tok)
-    finish top placed x =
+    finish start top placed x =
       -- An overlong word's line starts at the left edge, as with
       -- 'AlignStart', rather than before it.
       let shift = max 0 (width - x) * alignXFraction align
@@ -395,4 +600,4 @@ layoutLines runs (emptyH, emptyAscent) align width = go 0 [] 0 [] True
               let ascent' = maximum (map runAscent metrics)
                   descent = maximum [runLineHeight r - runAscent r | r <- metrics]
                in (ascent' + descent, ascent')
-       in Line top h ascent x toks
+       in Line start top h ascent x toks

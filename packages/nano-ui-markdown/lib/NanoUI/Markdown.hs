@@ -27,6 +27,10 @@
 -- > onTokens :: [Text] -> MarkdownDoc -> MarkdownDoc
 -- > onTokens tokens = appendMarkdown (T.concat tokens)
 --
+-- The built-in renderer lets users select and copy text in paragraphs,
+-- headings, table cells and code blocks. Select All and Copy act on the
+-- focused text block.
+--
 -- Appending reparses only the last top-level block, or less when the text
 -- ends inside a list, table, fenced code or block quote.
 -- "NanoUI.Markdown.Document" describes when more is reparsed.

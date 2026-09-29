@@ -106,6 +106,10 @@ lists a document's image sources, to load them before they are drawn. Long
 code lines wrap, keeping their indentation, and headings scale the backend's
 default font size. Task items draw nano-ui's checkbox.
 
+Text in rendered paragraphs, headings, table cells and code blocks can be
+selected with the mouse. With a text block focused, Ctrl+A selects that block
+and Ctrl+C copies the selection (Command+A and Command+C on macOS).
+
 ```haskell
 markdownConfigured
   defaultMarkdownConfig
