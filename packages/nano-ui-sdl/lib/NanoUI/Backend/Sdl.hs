@@ -23,6 +23,8 @@ module NanoUI.Backend.Sdl
   , askSaveFileDialog
   , askOpenFolderDialog
   , pollFileDialogUi
+    -- * External URLs
+  , openUrl
     -- * The window
 
     -- | 'WindowSettings' and the view-side window functions come from the
@@ -73,6 +75,7 @@ import NanoUI.Sdl.Internal.Dialog
 import NanoUI.Sdl.Internal.Chrome
 import NanoUI.Sdl.Internal.NanoUIFont (NanoUIFont (..))
 import NanoUI.Sdl.Internal.Font.Search (listFontFamilies)
+import NanoUI.Sdl.Internal.Url (openUrl)
 import NanoUI.Testing (runFrameReduce)
 
 -- | Open an SDL window and run a view until close or the quit predicate fires.
