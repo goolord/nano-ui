@@ -962,13 +962,15 @@ measureGridScratch ::
   Float ->
   IO (Float, Float)
 measureGridScratch env idx gCols minColW innerMaxW innerAvailH gap = do
-  n <- loadChildrenScratch (seArena env) idx (flowChildSize env False innerMaxW innerAvailH)
+  let bounded = innerMaxW < 1e8
+      cols = gridColumnCount gCols minColW (if bounded then innerMaxW else 0) gap
+      colW = max 0 ((innerMaxW - gap * fromIntegral (cols - 1)) / fromIntegral cols)
+  n <- loadChildrenScratch (seArena env) idx (flowChildSize env bounded (if bounded then colW else innerMaxW) innerAvailH)
   if n <= 0
     then pure (0, 0)
     else do
       FlexScratch {fsW = wArr, fsH = hArr} <- readIORef (naScratch (seArena env))
-      let cols = gridColumnCount gCols minColW (if innerMaxW < 1e8 then innerMaxW else 0) gap
-          numRows = (n + cols - 1) `quot` cols
+      let numRows = (n + cols - 1) `quot` cols
       totalH <- foldUpTo numRows (\t r -> (t +) <$> gridRowHeight hArr n cols r) 0
       let contentH = totalH + gap * fromIntegral (max 0 (numRows - 1))
       contentW <-
@@ -1458,11 +1460,13 @@ positionGrid ::
   Rect ->
   IO ()
 positionGrid env@SolveEnv {seArena = na} depth parent gCols minColW gap (Rect cx cy cw ch) = do
-  n <- loadChildrenScratch (seArena env) parent (flowChildSize env False cw ch)
+  let cols = gridColumnCount gCols minColW cw gap
+      colW = max 0 ((cw - gap * fromIntegral (cols - 1)) / fromIntegral cols)
+  -- Refit at the column width before freezing row heights. The enclosing
+  -- column's height query uses the same per-node, per-width memo.
+  n <- loadChildrenScratch na parent (flowChildSize env True colW ch)
   when (n > 0) $ do
-    let cols = gridColumnCount gCols minColW cw gap
-        colW = max 0 ((cw - gap * fromIntegral (cols - 1)) / fromIntegral cols)
-        numRows = (n + cols - 1) `quot` cols
+    let numRows = (n + cols - 1) `quot` cols
     -- Freeze child indices and their measured cross sizes before recursing.
     -- Children reuse the working scratch while this grid iterates rows and
     -- columns, so the live arrays would be clobbered by the first child.

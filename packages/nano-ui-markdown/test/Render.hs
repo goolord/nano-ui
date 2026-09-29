@@ -2,7 +2,7 @@
 module Render (spec) where
 
 import Control.Concurrent (threadDelay)
-import Control.Monad (filterM, forM, replicateM_, void, when)
+import Control.Monad (filterM, forM, forM_, replicateM_, void, when)
 import Data.Foldable (toList)
 import Data.Function (on)
 import Data.IORef (modifyIORef', newIORef, readIORef, writeIORef)
@@ -312,6 +312,35 @@ spec = do
         ctx = withFontMetrics base fm
     _ <- warmup2 ctx (withInput 600 400) (view (parseMarkdown "10. ten\n11. eleven\n"))
     fmap (\(Rect _ _ w _) -> w) . spanRectOf "10." <$> collectTextSpans ctx `shouldReturn` Just 18
+
+  it "keeps wrapped table text inside its rows on the first frame and after resizing" $ do
+    let doc = parseMarkdown
+          "| Category | Keys |\n|---|---|\n\
+          \| Motions | `h j k l`, `w b e`, with counts and words that wrap across several lines |\n\
+          \| Operators | `d c y` with a motion, a text object, or doubled |\n\nAfter"
+        ui = columnWith fillW (markdown doc)
+        bottom (Rect _ y _ h) = y + h
+        rectTop (Rect _ y _ _) = y
+    ctx <- newContext
+    forM_ [400, 800, 280, 400, 400] $ \width -> do
+      _ <- runFrame ctx (withInput width 1200) ui
+      panels <- map snd <$> nodesOf NodePanel ctx
+      ws <- drawnWords ctx
+      case panels of
+        [table, h1, h2, m1, m2, o1, o2] -> do
+          let cells = [h1, h2, m1, m2, o1, o2]
+          forM_ ws $ \word -> do
+            let V2 x y = wPos word
+            if wText word == "After"
+              then y `shouldSatisfy` (>= bottom table)
+              else cells `shouldSatisfy` any (\(Rect cx cy cw ch) -> x >= cx && x < cx + cw && y >= cy && y + wSize word <= cy + ch)
+          bottom h1 `shouldSatisfy` (<= rectTop m1)
+          bottom m2 `shouldSatisfy` (<= rectTop o2)
+          bottom table `shouldSatisfy` (\b -> abs (b - bottom o1 - 1) < 0.1)
+          rectTop m1 `shouldBe` rectTop m2
+          bottom m1 `shouldBe` bottom m2
+          bottom o1 `shouldBe` bottom o2
+        _ -> expectationFailure ("expected a table and six cells, got " <> show panels)
 
   it "lines a table cell's wrapped lines up as its column is aligned" $ do
     let cellText = "words that wrap over a few lines of a narrow column"

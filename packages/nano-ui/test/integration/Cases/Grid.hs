@@ -15,7 +15,29 @@ tests =
   , pixelSpec "align-baseline" runAlignBaselineTest
   , spec "column-gap-grow" runColumnGapGrowTest
   , spec "grid-in-column-height" runGridInColumnHeightTest
+  , spec "grid-wrapped-row-height" runGridWrappedRowHeightTest
   ]
+
+runGridWrappedRowHeightTest :: Context -> IORef Int -> IO ()
+runGridWrappedRowHeightTest ctx failed = do
+  let text = "words that wrap across several lines in a narrow cell"
+      ui width = columnWith tight $ do
+        gridWith 2 (tight . fixedW width . gap 1) $ do
+          labelWith (tight . fillW) "short"
+          labelWith (tight . fillW) text
+          labelWith (tight . fillW) "next"
+        labelWith tight "after"
+  forM_ [240, 600, 180, 240, 240] $ \width -> do
+    _ <- runFrame ctx (withInput 800 1200) (ui width)
+    rs <- arenaRects ctx
+    case rs of
+      [_, gridRect, short, wrapped, next, after] -> do
+        assert failed (rectH wrapped > rectH after)
+        assertEq failed (rectY short) (rectY wrapped)
+        assert failed (rectY next >= rectY wrapped + rectH wrapped)
+        assert failed (rectY after >= rectY next + rectH next)
+        assertEq failed (rectY gridRect + rectH gridRect) (rectY next + rectH next)
+      _ -> assertEq failed (length rs) 6
 
 -- | A fill-width grid inside a column is as tall as its rows, not as all of
 -- its cells stacked: the column's refit at the offered width knows grids.
