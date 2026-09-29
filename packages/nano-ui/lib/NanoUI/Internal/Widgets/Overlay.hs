@@ -1,7 +1,9 @@
--- | Modal dialogs and floating in-app windows with title bars and scrolling bodies.
+-- | Modal dialogs and panels, and floating in-app windows.
 module NanoUI.Internal.Widgets.Overlay
   ( modal
   , modalWith
+  , modalPanel
+  , modalPanelWith
   , window
   , windowTitleBarH
   , windowChromeSepH
@@ -37,7 +39,7 @@ windowChromeSepH = 1
 -- content behind it. Returns a close-request response and the body's result;
 -- the result is 'Nothing' while closed. The caller owns the open flag.
 modal :: Bool -> Text -> NanoUI a -> NanoUI (Response, Maybe a)
-modal = overlay True id
+modal = overlay True True id
 
 -- | 'modal' with a layout modifier for its panel, which by default fits its
 -- body. The title bar, the rule under it and the padding are the panel's
@@ -53,18 +55,31 @@ modal = overlay True id
 -- A panel is never larger than the window, less the margin every floating
 -- panel keeps from its edge.
 modalWith :: (Layout -> Layout) -> Bool -> Text -> NanoUI a -> NanoUI (Response, Maybe a)
-modalWith = overlay True
+modalWith = overlay True True
+
+-- | A modal panel without a title bar, close button or surrounding padding.
+-- The panel surface and modal backdrop remain; Escape or a click outside
+-- reports a close request. The caller owns the open flag.
+modalPanel :: Bool -> NanoUI a -> NanoUI (Response, Maybe a)
+modalPanel = modalPanelWith id
+
+-- | 'modalPanel' with a layout modifier for its panel. A fixed-size panel's
+-- body fills the panel, so a body laid out with @fillW . fillH@ takes exactly
+-- the panel's inside. Use a small amount of padding only when the body should
+-- sit clear of the panel's border.
+modalPanelWith :: (Layout -> Layout) -> Bool -> NanoUI a -> NanoUI (Response, Maybe a)
+modalPanelWith shape open = overlay True False shape open ""
 
 -- | Show a draggable, resizable in-app window with a scrolling body. Like
 -- 'modal', the response reports a close request and the caller updates the
 -- open flag. Other windows and the page remain interactive outside its bounds.
 window :: Bool -> Text -> NanoUI a -> NanoUI (Response, Maybe a)
-window = overlay False id
+window = overlay False True id
 
 -- | A modal (@isModal@) or a window.
 overlay ::
-  Bool -> (Layout -> Layout) -> Bool -> Text -> NanoUI a -> NanoUI (Response, Maybe a)
-overlay isModal shape open title child = do
+  Bool -> Bool -> (Layout -> Layout) -> Bool -> Text -> NanoUI a -> NanoUI (Response, Maybe a)
+overlay isModal hasChrome shape open title child = do
   ctx <- askContext
   inp <- askInput
   let
@@ -72,15 +87,23 @@ overlay isModal shape open title child = do
     margin = windowMargin
     availW = max 1 (winW - 2 * margin)
     availH = max 1 (winH - 2 * margin)
-    -- Modals share the window's side padding. The body's scrollbar sits
-    -- out in it just inside the panel's edge, that padding from the
-    -- content.
-    padding = if isModal then windowPad {padB = 12} else windowPad
-    barH = if isModal then 40 else windowTitleBarH
-    -- Window body breathing room: one side-pad between the chrome and
-    -- the body, matching the window's left/right padding. Modals keep
-    -- their own larger gap.
-    bodyGap = if isModal then 8 else 10
+    -- Chrome-bearing modals share the window's side padding. The body's
+    -- scrollbar sits out in it just inside the panel's edge, that padding
+    -- from the content. A bare modal panel has no padding of its own.
+    padding
+      | not hasChrome = Padding 0 0 0 0
+      | isModal = windowPad {padB = 12}
+      | otherwise = windowPad
+    barH
+      | not hasChrome = 0
+      | isModal = 40
+      | otherwise = windowTitleBarH
+    -- Windows keep a side-pad between the chrome and the body. Standard
+    -- modals keep their larger gap; a bare modal panel has none.
+    bodyGap
+      | not hasChrome = 0
+      | isModal = 8
+      | otherwise = 10
     minWidth = clamp 1 availW (if isModal then 260 else 280)
     minHeight =
       if isModal
@@ -152,20 +175,25 @@ overlay isModal shape open title child = do
     titleLayout =
       (fixedH barH . alignMid . tight) defaultLayout {layoutMinH = barH, layoutMaxH = barH}
   floatingOverlay open isModal addOverlayNode enter $ do
-    close <-
-      row' (tight . gap 6 . alignMid . fixedH barH . fillW $ defaultLayout) $ do
-        unless (T.null title) $
-          (if isModal then id else withKey title) (void (labelEx titleLayout title))
-        flex
-        withKey ("close" :: Text) $
-          buttonStyledEx True "" 0 (tight . fixedWH 24 24 . alignMid $ defaultLayout) $
-            buttonFlagClose .|. buttonCloseTrailing
-    when (isModal && not (T.null title)) separator
-    -- A panel of a fixed height holds its body, which fills what the
-    -- title bar leaves; any other panel scrolls a body taller than the
-    -- window.
+    closed <-
+      if hasChrome
+        then do
+          close <-
+            row' (tight . gap 6 . alignMid . fixedH barH . fillW $ defaultLayout) $ do
+              unless (T.null title) $
+                (if isModal then id else withKey title) (void (labelEx titleLayout title))
+              flex
+              withKey ("close" :: Text) $
+                buttonStyledEx True "" 0 (tight . fixedWH 24 24 . alignMid $ defaultLayout) $
+                  buttonFlagClose .|. buttonCloseTrailing
+          when (isModal && not (T.null title)) separator
+          pure (respClicked close)
+        else pure False
+    -- A panel of a fixed height holds its body, which fills what the title
+    -- bar leaves when there is one; any other panel scrolls a body taller
+    -- than the window.
     r <- case panelH of
       Fixed _ -> columnWith (tight . grow . fillW) child
       _ -> scrollWith (tight . grow) child
     when isModal (liftIO (endModal ctx))
-    pure (respClicked close, r)
+    pure (closed, r)

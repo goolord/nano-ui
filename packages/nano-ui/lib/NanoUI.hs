@@ -343,6 +343,8 @@ module NanoUI
     -- * Overlays
   , modal
   , modalWith
+  , modalPanel
+  , modalPanelWith
   , window
   , PopupAnchor (..)
   , PopupPlacement (..)

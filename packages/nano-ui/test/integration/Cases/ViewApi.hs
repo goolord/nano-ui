@@ -28,6 +28,7 @@ tests =
   , spec "scroll-metrics-read-follows" runScrollMetricsReadTest
   , spec "take-escape" runTakeEscapeTest
   , spec "modal-with" runModalWithTest
+  , spec "modal-panel-with" runModalPanelWithTest
   , spec "font-size" runFontSizeTest
   ]
 
@@ -381,6 +382,24 @@ runModalWithTest ctx failed = do
     assert failed (rectH r > 300 && rectH r <= 400)
     -- Centred in the window.
     assert failed (abs (rectX r + rectW r / 2 - 400) <= 12)
+
+-- | 'modalPanelWith' leaves only the panel border around a body that fills it.
+runModalPanelWithTest :: Context -> IORef Int -> IO ()
+runModalPanelWithTest ctx failed = do
+  let inp = withInput 800 600
+      ui = modalPanelWith (fixedWH 500 400) True $ do
+        (resp, ()) <- customWidget defaultCustomWidgetSpec {widgetLayout = (fillW . fillH) defaultLayout}
+        pure (respRect resp)
+  _ <- warmup2 ctx inp ui
+  (_, inside) <- warmup2 ctx inp ui
+  assertJust failed inside $ \r -> do
+    assertEq failed (rectW r) 500
+    assertEq failed (rectH r) 400
+    -- Centred in the window, with no title-bar or body-padding offset.
+    assert failed (abs (rectX r + rectW r / 2 - 400) <= 1)
+    assert failed (abs (rectY r + rectH r / 2 - 300) <= 1)
+  ((dismiss, _), _, _, _) <- runFrame ctx (keyInp KeyEscape inp) ui
+  assert failed (respClicked dismiss)
 
 -- | 'rowWith'' reports where the row was laid out, for a row that drops
 -- what does not fit, and lays its children out left to right.
