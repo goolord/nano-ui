@@ -9,6 +9,8 @@ import Data.Text qualified as T
 import NanoUI.Internal.Context (Context (..), CustomDrawingEntry (..), DrawingCacheState (..), intKey, lookupCustomDrawing)
 import NanoUI.Internal.Context.Types (CustomDrawOpCacheEntry (..))
 import NanoUI.Internal.Widgets.Custom (mkCustomDrawContext)
+import NanoUI.Internal.Store (fieldRichSelection, lookupSlot, ptrEq)
+import NanoUI.Shortcut (cmdOrCtrl, key)
 
 tests :: [Spec]
 tests =
@@ -23,7 +25,39 @@ tests =
   , spec "rich-text-capped" runRichTextCappedTest
   , spec "rich-text-same-pieces" runRichTextSamePiecesTest
   , spec "rich-text-scroll-popup" runRichTextScrollPopupTest
+  , spec "rich-text-selection-persistence" runSelectionPersistenceTest
   ]
+
+-- | Selection is widget state; styling, streaming and cache eviction preserve it.
+runSelectionPersistenceTest :: Context -> IORef Int -> IO ()
+runSelectionPersistenceTest base failed = do
+  copied <- newIORef Nothing
+  let ctx = withClipboard base (readIORef copied) (\t -> True <$ writeIORef copied (Just t))
+      inp = withInputOff 500 300
+      pieces suffix = ["one ", strong "two\n", inlineText ("three" <> suffix)]
+      ui style suffix = selectableRichTextWith' (fixedW 240 . style) (pieces suffix)
+      copyFrom c view = do
+        writeIORef copied Nothing
+        _ <- evalUi c (chordInp (cmdOrCtrl <> key 'c') inp) view
+        assertEq failed (Just "one two\nthree") =<< readIORef copied
+  (r, _) <- warmup2 ctx inp (ui id "")
+  writeIORef (ctxFocusId ctx) (respId r)
+  _ <- evalUi ctx (chordInp (cmdOrCtrl <> key 'a') inp) (ui id "")
+  forM_ [fontColor (colorRGB 200 20 20), fontSize 24, alignEnd] $ \style -> do
+    _ <- evalUi ctx inp (ui style "")
+    copyFrom ctx (ui style "")
+  -- A stream appending text preserves the existing range rather than clearing it.
+  copyFrom ctx (ui id " appended")
+  -- Evict all measurement state, keeping widget identity and interaction state.
+  paragraphs <- newHost
+  let evicted = ctx {ctxParagraphs = paragraphs}
+  copyFrom evicted (ui id " appended")
+  before <- lookupSlot fieldRichSelection (intKey (respId r)) <$> getStore evicted
+  replicateM_ 3 (evalUi evicted inp (ui id " appended"))
+  after <- lookupSlot fieldRichSelection (intKey (respId r)) <$> getStore evicted
+  case (before, after) of
+    (Just a, Just b) -> assert failed (ptrEq a b)
+    _ -> assert failed False
 
 -- | A paragraph wraps at its column's width, taking a line's height per line,
 -- and mixed pieces share a line.

@@ -14,6 +14,9 @@ module NanoUI.Widgets.RichText
   , richTextWith
   , richTextWith'
   , selectableRichTextWith
+  , selectableRichText
+  , selectableRichText'
+  , selectableRichTextWith'
   ) where
 
 import Control.Monad (foldM, unless, when)
@@ -35,7 +38,7 @@ import NanoUI.Internal.Frame.Node (resolveTextFont)
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Input (Input (..), MouseButton (MouseLeft), UiCursorKind (..), heldIn, inputMousePos, pressedIn, releasedIn)
 import NanoUI.Internal.Layout.Arena (NodeType (NodeDrawing))
-import NanoUI.Internal.Store (eqByPtr, ptrEq)
+import NanoUI.Internal.Store (eqByPtr, ptrEq, fieldRichSelection, findSlot, insertSlot)
 import NanoUI.Internal.Monad (NanoUI, askDefaultLayout, askInput, freshWidget, liftIO, requestFocus, uiTheme)
 import NanoUI.Internal.Style hiding (Flow (..))
 import NanoUI.Internal.Types (Color (..), Rect (..), V2 (..))
@@ -97,6 +100,18 @@ richTextWith = richTextWithMode False
 selectableRichTextWith :: (Layout -> Layout) -> [Inline] -> NanoUI (Maybe Text)
 selectableRichTextWith = richTextWithMode True
 
+-- | A selectable paragraph at its default layout.
+selectableRichText :: [Inline] -> NanoUI (Maybe Text)
+selectableRichText = selectableRichTextWith id
+
+-- | 'selectableRichText' with its response, for focus and geometry.
+selectableRichText' :: [Inline] -> NanoUI (Response, Maybe Text)
+selectableRichText' = selectableRichTextWith' id
+
+-- | 'selectableRichTextWith' with its response.
+selectableRichTextWith' :: (Layout -> Layout) -> [Inline] -> NanoUI (Response, Maybe Text)
+selectableRichTextWith' = richTextWithMode' True
+
 richTextWithMode :: Bool -> (Layout -> Layout) -> [Inline] -> NanoUI (Maybe Text)
 richTextWithMode selectable f pieces = snd <$> richTextWithMode' selectable f pieces
 
@@ -116,7 +131,7 @@ richTextWithMode' selectable f pieces = do
   base <- f <$> askDefaultLayout
   theme <- uiTheme
   let styled = [(piece, pieceFont l, pieceColor theme l target) | piece@(Inline _ style target _) <- pieces, let l = style base]
-      plain = T.concat [txt | (Inline txt _ _ _, _, _) <- styled]
+      plainInput = T.concat [txt | (Inline txt _ _ _, _, _) <- styled]
       align = layoutAlignX base
   Paragraphs cacheRef <- liftIO $ Host.hostOrInit (ctxParagraphs ctx) (Paragraphs <$> newIORef (ParagraphCache 0 paragraphBound IM.empty))
   gen <- liftIO (readIORef (ctxMetricGen ctx))
@@ -150,8 +165,9 @@ richTextWithMode' selectable f pieces = do
             [] -> (fmLineHeight (ctxFontMetrics ctx), fmAscent (ctxFontMetrics ctx))
       measured <- newIORef Unmeasured
       inputsRef <- newIORef inputs
-      selection <- if selectable then Just <$> newIORef (RichSelection plain (TB.Cursor 0 0) (TB.Cursor 0 0) False False) else pure Nothing
-      pure (Paragraph key inputsRef runs tokens emptyLine (lineBoxes (layoutLines runs emptyLine AlignStart 1e9 tokens)) (-1) [] measured selection)
+      pure (Paragraph key inputsRef runs tokens emptyLine (lineBoxes (layoutLines runs emptyLine AlignStart 1e9 tokens)) (-1) [] measured plainInput (TB.fromText plainInput))
+  -- Forced, so selection sync compares this address rather than a selector thunk.
+  let !plain = paraText para0
   when (selectable && not (T.null plain)) (liftIO (registerFocusable ctx wid))
   resp <- addWidget wid NodeDrawing T.empty 0 base
   let Rect rx ry rw _ = respRect resp
@@ -163,11 +179,12 @@ richTextWithMode' selectable f pieces = do
       linesAt width
         | width == paraWidth para = paraLines para
         | otherwise = layoutAt width
-  (selection, dragReleased) <- case paraSelection para of
-    Nothing -> pure (Nothing, False)
-    Just selectionRef -> do
-      (current, dragged) <- updateSelection ctx inp wid resp plain (paraLines para) selectionRef
-      pure (Just current, dragged)
+  (selection, dragReleased) <-
+    if selectable
+      then do
+        (current, dragged) <- updateSelection ctx inp wid resp plain (paraBuffer para) (paraLines para)
+        pure (Just current, dragged)
+      else pure (Nothing, False)
   focused <- if selectable then keyboardFocused wid else pure False
   let
       V2 mx my = inputMousePos inp
@@ -278,18 +295,22 @@ richTextWithMode' selectable f pieces = do
 
 -- | Keep the paragraph's selection in document coordinates, so it survives
 -- rewrapping when the widget's width changes.
-updateSelection :: Context -> Input -> WidgetId -> Response -> Text -> [Line] -> IORef RichSelection -> NanoUI (RichSelection, Bool)
-updateSelection ctx inp wid resp plain lines' selectionRef = do
-  stored <- liftIO (readIORef selectionRef)
-  let synced = syncSelection plain stored
-      RichSelection _ _ _ dragging moved = synced
-      editor0 = selectionEditor plain synced
+updateSelection :: Context -> Input -> WidgetId -> Response -> Text -> TB.TextBuffer -> [Line] -> NanoUI (RichSelection, Bool)
+updateSelection ctx inp wid resp plain buffer lines' = do
+  let key = intKey wid
+      initial = RichSelection plain (TB.Cursor 0 0) (TB.Cursor 0 0) False False 0 0
+  !stored <- liftIO (findSlot fieldRichSelection initial key <$> getStore ctx)
+  let synced = syncSelection plain buffer stored
   focused <- keyboardFocused wid
   commands <- if focused then liftIO (fieldTextCommands ctx readOnlyMode inp) else pure []
-  editor <- liftIO (foldM (flip (runCommandIO ctx readOnlyMode)) editor0 commands)
-  let (keyAnchor, keyCursor) = editorSelection editor
-      afterKeys = RichSelection plain keyAnchor keyCursor dragging moved
-      mouse = inputMousePos inp
+  afterKeys <-
+    if null commands
+      then pure synced
+      else do
+        editor <- liftIO (foldM (flip (runCommandIO ctx readOnlyMode)) (selectionEditor buffer synced) commands)
+        let (a, c) = editorSelection editor
+        pure (selectionIn plain a c (selectionDragging synced) (selectionMoved synced))
+  let mouse = inputMousePos inp
       press = pressedIn MouseLeft inp && respHovered resp
       held = heldIn MouseLeft inp
       released = releasedIn MouseLeft inp
@@ -298,42 +319,50 @@ updateSelection ctx inp wid resp plain lines' selectionRef = do
       then do
         let pos = cursorAtPoint plain lines' (respRect resp) mouse
         requestFocus wid
-        pure (RichSelection plain pos pos held False, False)
-      else case afterKeys of
-        RichSelection _ dragAnchor _ True wasMoved
-          | held || released -> do
-              let pos = cursorAtPoint plain lines' (respRect resp) mouse
-              let didMove = wasMoved || pos /= dragAnchor
-              pure
-                ( RichSelection plain dragAnchor pos held (didMove && held)
-                , released && didMove
-                )
-        RichSelection _ a c True _ -> pure (RichSelection plain a c False False, False)
-        RichSelection _ a c False _ -> pure (RichSelection plain a c False False, False)
-  liftIO (writeIORef selectionRef next)
+        pure (selectionIn plain pos pos held False, False)
+      else
+        if selectionDragging afterKeys && (held || released)
+          then do
+            let pos = cursorAtPoint plain lines' (respRect resp) mouse
+                dragAnchor = selectionAnchor afterKeys
+                didMove = selectionMoved afterKeys || pos /= dragAnchor
+            pure
+              ( selectionIn plain dragAnchor pos held (didMove && held)
+              , released && didMove
+              )
+          else
+            -- A drag that ended elsewhere stops; an idle pass keeps the stored
+            -- selection object, so it writes nothing.
+            pure (if selectionDragging afterKeys then afterKeys {selectionDragging = False, selectionMoved = False} else afterKeys, False)
+  unless (ptrEq stored next) $
+    liftIO (modifyStore ctx (insertSlot fieldRichSelection key next))
   pure (next, dragReleased)
 
 readOnlyMode :: EditorMode
 readOnlyMode = multiLineMode {modeEditable = False}
 
-syncSelection :: Text -> RichSelection -> RichSelection
-syncSelection plain previous@(RichSelection old a c _ _)
-  | old == plain = previous
+syncSelection :: Text -> TB.TextBuffer -> RichSelection -> RichSelection
+syncSelection plain buffer previous
+  | ptrEq (selectionText previous) plain = previous
+  -- A rebuilt paragraph has equal text at a new address: adopt it once, so
+  -- later passes compare by pointer rather than by content.
+  | selectionText previous == plain = previous {selectionText = plain}
   | otherwise =
-      let buf = TB.fromText plain
-       in RichSelection plain (TB.clampCursor buf a) (TB.clampCursor buf c) False False
+      selectionIn plain (TB.clampCursor buffer (selectionAnchor previous)) (TB.clampCursor buffer (selectionCursor previous)) False False
 
-selectionEditor :: Text -> RichSelection -> Editor
-selectionEditor plain (RichSelection _ anchor cursor _ _) =
-  let buf = TB.fromText plain
-      cursor' = TB.clampCursor buf cursor
-   in Editor (TB.withCursor cursor' buf) (TB.clampCursor buf anchor) emptyHistory
+selectionEditor :: TB.TextBuffer -> RichSelection -> Editor
+selectionEditor buffer selection =
+  Editor (TB.withCursor (selectionCursor selection) buffer) (selectionAnchor selection) emptyHistory
 
-selectionKey :: RichSelection -> (Int, Int)
-selectionKey (RichSelection txt anchor cursor _ _) =
+-- Cache document offsets only when selection changes, not on every idle pass.
+selectionIn :: Text -> TB.Cursor -> TB.Cursor -> Bool -> Bool -> RichSelection
+selectionIn txt anchor cursor dragging moved =
   let a = cursorOffset txt anchor
       c = cursorOffset txt cursor
-   in (min a c, max a c)
+   in RichSelection txt anchor cursor dragging moved (min a c) (max a c)
+
+selectionKey :: RichSelection -> (Int, Int)
+selectionKey selection = (selectionStart selection, selectionEnd selection)
 
 selectionOffsets :: RichSelection -> Maybe (Int, Int)
 selectionOffsets selection =

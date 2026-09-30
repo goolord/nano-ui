@@ -25,7 +25,7 @@ import NanoUI.Internal.Draw.Types (TextFont)
 import NanoUI.Internal.Font (FontMetrics)
 import NanoUI.Internal.Style (Layout, Theme)
 import NanoUI.Internal.Types (Color)
-import NanoUI.Widgets.TextBuffer (Cursor)
+import NanoUI.Widgets.TextBuffer (Cursor, TextBuffer)
 
 -- | Text with a layout-style modifier, optional link target and background.
 data Inline = Inline !Text (Layout -> Layout) !(Maybe Text) !(Maybe Color)
@@ -66,7 +66,8 @@ data Line = Line
   , lineTokens :: ![(Float, Token)]
   }
 
--- | Measured pieces and layout at the last width, with live selection state.
+-- | Disposable text/measurement data. Selection belongs to the widget store,
+-- so changing presentation or evicting this cache cannot clear it.
 data Paragraph = Paragraph
   { paraKey :: !Int
   , paraInputs :: !(IORef Inputs)
@@ -77,12 +78,22 @@ data Paragraph = Paragraph
   , paraWidth :: !Float
   , paraLines :: [Line]
   , paraMeasured :: !(IORef Measured)
-  , paraSelection :: !(Maybe (IORef RichSelection))
+  , paraText :: !Text
+  , paraBuffer :: TextBuffer
+  -- ^ Built lazily, at most once per paragraph, when a text command needs it.
   }
 
 data Inputs = Inputs [Inline] !Layout !Theme !Int !Bool
 
-data RichSelection = RichSelection !Text !Cursor !Cursor !Bool !Bool
+data RichSelection = RichSelection
+  { selectionText :: !Text
+  , selectionAnchor :: !Cursor
+  , selectionCursor :: !Cursor
+  , selectionDragging :: !Bool
+  , selectionMoved :: !Bool
+  , selectionStart :: !Int
+  , selectionEnd :: !Int
+  }
   deriving Eq
 
 data Measured = Unmeasured | Measured !Float !Float !Float

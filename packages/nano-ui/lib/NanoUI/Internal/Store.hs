@@ -20,6 +20,7 @@ module NanoUI.Internal.Store
   , fieldLineWidths
   , fieldGrid
   , fieldTableColumns
+  , fieldRichSelection
   , fieldQuiet
   , overField
   , lookupSlot
@@ -62,6 +63,7 @@ import qualified Data.Text as T
 import NanoUI.Internal.Id (mix64)
 import NanoUI.Internal.Equality (eqByPtr, ptrEq)
 import NanoUI.Internal.Store.Types (GridState, LineWidths, TextHistory)
+import NanoUI.Internal.RichText.Types (RichSelection)
 import NanoUI.Internal.TextEditor.Types (EditorMode)
 import NanoUI.Internal.Widgets.TextDocument (TextDocument)
 import NanoUI.Widgets.TextBuffer (TextBuffer)
@@ -108,6 +110,7 @@ slotChangedKeys !old !new
         ++ diffKeysBy ptrEq (storeLineWidths old) (storeLineWidths new)
         ++ diffKeys (storeGrid old) (storeGrid new)
         ++ diffKeys (storeTableColumns old) (storeTableColumns new)
+        ++ diffKeys (storeRichSelection old) (storeRichSelection new)
 
 -- | Widget state for every widget, in maps by value type. Same-type fields
 -- that share a widget key use 'slotKey'.
@@ -128,6 +131,7 @@ data WidgetStore = WidgetStore
   , storeLineWidths :: !(IntMap LineWidths)
   , storeGrid :: !(IntMap GridState)
   , storeTableColumns :: !(IntMap ([Int], [Float]))
+  , storeRichSelection :: !(IntMap RichSelection)
   , storeQuiet :: !(IntMap Int)
   -- ^ Interaction bookkeeping no paint reads, such as whether a drag hook's
   -- press is still held. Writes to it neither damage nor wake the loop: the
@@ -187,6 +191,10 @@ fieldGrid = Field storeGrid (\m st -> st {storeGrid = m})
 
 fieldTableColumns :: Field ([Int], [Float])
 fieldTableColumns = Field storeTableColumns (\m st -> st {storeTableColumns = m})
+
+-- | Read-only paragraph selection, independent of its measurement cache.
+fieldRichSelection :: Field RichSelection
+fieldRichSelection = Field storeRichSelection (\m st -> st {storeRichSelection = m})
 
 -- | Integer bookkeeping slots that no paint reads ('storeQuiet'). The store
 -- diff that drives damage skips them.
@@ -290,6 +298,7 @@ emptyWidgetStore =
     , storeLineWidths = IM.empty
     , storeGrid = IM.empty
     , storeTableColumns = IM.empty
+    , storeRichSelection = IM.empty
     , storeQuiet = IM.empty
     }
 

@@ -21,6 +21,12 @@
 - Local drag cancellation uses Escape arbitration, so cancelling a drag does
   not also dismiss its enclosing modal or run a later Escape handler.
 
+- Selectable rich text keeps its selection in widget state rather than the
+  paragraph measurement cache. Font, colour, alignment and theme changes,
+  appended text and cache eviction no longer clear it, and idle passes reuse
+  the paragraph's plain text instead of rebuilding a text buffer. Added
+  `selectableRichText`, `selectableRichText'` and `selectableRichTextWith'`.
+
 - Middle, right and extra mouse-button gestures retain the pressed control's
   identity. A containing mouse area cannot also handle that control's click,
   and reordering another control under the press does not transfer ownership.
